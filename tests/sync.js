@@ -22,4 +22,17 @@ export async function runSyncTests({ eq, ok }) {
   eq(keyOf('rediscovery_prefs', { edition_id: 'ed1' }), 'ed1', 'keyOf rediscovery_prefs');
   eq(keyOf('settings', { key: 'ui_locale' }), 'ui_locale', 'keyOf settings');
   eq(keyOf('recipes', { id: 'rc1' }), 'rc1', 'keyOf recipes');
+
+  // --- Types de fichiers (spec § 3.6, § 5.4)
+  const { ALLOWED_MIME, resolveMime, isAllowed, safeDisplayType, extensionFor } = await import('../src/sync/mime.js');
+  eq(ALLOWED_MIME, ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf', 'application/epub+zip'], 'liste blanche fermée');
+  eq(resolveMime('image/jpeg', 'x.jpg'), { mime: 'image/jpeg', syncable: true }, 'type connu conservé');
+  eq(resolveMime('', 'IMG_0012.HEIC'), { mime: 'image/heic', syncable: true }, 'type vide résolu par l’extension, insensible à la casse');
+  eq(resolveMime('application/octet-stream', 'scan.pdf'), { mime: 'application/pdf', syncable: true }, 'octet-stream résolu par l’extension');
+  eq(resolveMime('', 'notes.txt'), { mime: 'application/octet-stream', syncable: false }, 'inconnu : conservé localement, non synchronisable');
+  eq(resolveMime('text/html', 'page.html'), { mime: 'application/octet-stream', syncable: false }, 'HTML : jamais un type affichable');
+  ok(isAllowed('image/png') && !isAllowed('image/svg+xml') && !isAllowed('text/html'), 'isAllowed');
+  eq(safeDisplayType('image/svg+xml'), null, 'SVG jamais affiché comme image');
+  eq(safeDisplayType('application/pdf'), 'application/pdf', 'PDF affichable');
+  eq(extensionFor('image/heic'), 'heic', 'extension de la liste');
 }
