@@ -17,6 +17,7 @@ import { parseIndexLines } from '../src/ui/import.js';
 import { summarizeMeal } from '../src/domain/pairing.js';
 import { compareBundles, proposeDishesForRecipe } from '../src/domain/dishes.js';
 import { runBackupTests } from './backup.js';
+import { runSyncTests } from './sync.js';
 
 const results = [];
 const eq = (a, b, msg) => { const ok = JSON.stringify(a) === JSON.stringify(b); results.push({ ok, msg, got: a, want: b }); };
@@ -157,6 +158,10 @@ ok(meal.conflicts.length === 1, 'conflit de four détecté');
 // --- Sauvegarde : bases IndexedDB temporaires, jamais la bibliothèque de l'utilisateur.
 try { await runBackupTests({ eq, ok }); }
 catch (error) { ok(false, `Suite sauvegarde interrompue : ${error?.message || String(error)}`); }
+
+// --- Synchronisation : constantes, tables, types, base, capture, connexion.
+try { await runSyncTests({ eq, ok }); }
+catch (error) { ok(false, `Suite synchronisation interrompue : ${error?.message || String(error)}`); }
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

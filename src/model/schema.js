@@ -43,6 +43,11 @@ export const ARCHIVE_DATA_STORES = Object.keys(STORES).filter((s) => s !== 'file
 // Réglages exclus de la sauvegarde : secrets d'accès (spec §31.1).
 export const SECRET_SETTING_KEYS = ['llm'];
 
+// Magasins internes du lot « compte et stockage distant » (spec § 5.1) : jamais archivés, jamais synchronisés.
+export const SYNC_INTERNAL_STORES = ['outbox', 'sync_state', 'sync_conflicts'];
+// Magasins miroirs d'une table serveur (spec § 3.1) : tout sauf les réglages et les internes.
+export const SYNC_STORES = Object.keys(STORES).filter((s) => s !== 'settings' && !SYNC_INTERNAL_STORES.includes(s));
+
 // Relations vérifiées avant restauration (magasin enfant, chemin, magasin parent).
 // Un champ absent ou nul est optionnel. « . » descend dans un objet ; « [] » parcourt un tableau.
 // Les instantanés historiques restent autonomes : ni *_snapshot, ni appareils supprimables,
