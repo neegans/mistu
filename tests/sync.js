@@ -35,4 +35,8 @@ export async function runSyncTests({ eq, ok }) {
   eq(safeDisplayType('image/svg+xml'), null, 'SVG jamais affiché comme image');
   eq(safeDisplayType('application/pdf'), 'application/pdf', 'PDF affichable');
   eq(extensionFor('image/heic'), 'heic', 'extension de la liste');
+  eq(resolveMime('', 'x.constructor'), { mime: 'application/octet-stream', syncable: false }, 'une extension homonyme d’une propriété native ne fuit rien');
+  eq(extensionFor('constructor'), 'bin', 'extensionFor : même garde');
+  eq(resolveMime('image/jpeg; charset=binary', 'a'), { mime: 'image/jpeg', syncable: true }, 'paramètre charset ignoré après le type déclaré');
+  eq(resolveMime('', 'archive.zip'), { mime: 'application/octet-stream', syncable: false }, 'extension inconnue (zip) non synchronisable');
 }

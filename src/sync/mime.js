@@ -11,11 +11,11 @@ export function resolveMime(type, filename = '') {
   const declared = String(type || '').toLowerCase().split(';')[0].trim();
   if (isAllowed(declared)) return { mime: declared, syncable: true };
   const ext = String(filename).toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
-  const byExt = ext ? EXT_TO_MIME[ext] : null;
+  const byExt = ext && Object.hasOwn(EXT_TO_MIME, ext) ? EXT_TO_MIME[ext] : null;
   if (byExt) return { mime: byExt, syncable: true };
   return { mime: UNKNOWN, syncable: false };
 }
 
 // À l'affichage : jamais un type hors liste (un blob text/html ou image/svg+xml exécuterait du script sur notre origine).
 export const safeDisplayType = (mime) => (isAllowed(mime) ? mime : null);
-export const extensionFor = (mime) => MIME_TO_EXT[mime] || 'bin';
+export const extensionFor = (mime) => (Object.hasOwn(MIME_TO_EXT, mime) ? MIME_TO_EXT[mime] : 'bin');
