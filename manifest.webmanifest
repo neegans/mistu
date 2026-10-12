@@ -1,0 +1,20 @@
+{
+  "name": "Cuisine OS",
+  "short_name": "Cuisine OS",
+  "description": "Une intelligence culinaire personnelle : mes livres, mes recettes, mes appareils, mon historique et mon inventaire.",
+  "lang": "fr",
+  "start_url": "./index.html#/",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f6f1e7",
+  "theme_color": "#1f4d3a",
+  "icons": [
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

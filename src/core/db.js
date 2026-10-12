@@ -1,0 +1,185 @@
+// Enveloppe IndexedDB à promesses. Un seul magasin d'objets par entité (spec §14 : « structures simples dans une seule base »).
+
+function req(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function done(tx) {
+  return new Promise((resolve, reject) => {
+    let requestError = null;
+    tx.oncomplete = () => resolve();
+    // L'événement error précède le rollback : attendre abort avant de rejeter.
+    tx.onerror = (event) => { requestError = event.target?.error || requestError; };
+    tx.onabort = () => reject(tx.error || requestError || new Error('Transaction annulée'));
+  });
+}
+
+function knownStoreNames(stores, names) {
+  if (!Array.isArray(names)) throw new TypeError('La liste des magasins doit être un tableau');
+  const unique = [...new Set(names)];
+  for (const name of unique) {
+    if (typeof name !== 'string' || !Object.prototype.hasOwnProperty.call(stores, name)) {
+      throw new Error('Magasin inconnu : ' + String(name));
+    }
+  }
+  return unique;
+}
+
+// enqueue reste synchrone : toutes les requêtes sont mises en file avant le premier await.
+async function runTransaction(tx, enqueue) {
+  const completion = done(tx);
+  let result;
+  try {
+    result = enqueue(tx);
+  } catch (error) {
+    // Une exception synchrone de put/delete n'annule pas les requêtes déjà en file.
+    try { tx.abort(); } catch (_) { /* transaction déjà terminée */ }
+    try { await completion; } catch (_) { /* rejet consommé ; conserver l'erreur initiale */ }
+    throw error;
+  }
+  await completion;
+  return result;
+}
+
+export class Database {
+  constructor(name, version, stores) {
+    this.name = name;
+    this.version = version;
+    this.stores = stores; // { storeName: { keyPath, indexes: [[name, keyPath, options?]] } }
+    this.idb = null;
+  }
+
+  async open() {
+    if (this.idb) return this.idb;
+    if (!('indexedDB' in globalThis)) throw new Error('IndexedDB indisponible dans ce navigateur');
+    const request = indexedDB.open(this.name, this.version);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      for (const [name, def] of Object.entries(this.stores)) {
+        let store;
+        if (!db.objectStoreNames.contains(name)) store = db.createObjectStore(name, { keyPath: def.keyPath || 'id' });
+        else store = request.transaction.objectStore(name);
+        for (const [idxName, keyPath, options] of def.indexes || []) {
+          if (!store.indexNames.contains(idxName)) store.createIndex(idxName, keyPath, options || {});
+        }
+      }
+    };
+    this.idb = await req(request);
+    this.idb.onversionchange = () => { this.idb.close(); this.idb = null; };
+    return this.idb;
+  }
+
+  async tx(names, mode = 'readonly') {
+    const selected = knownStoreNames(this.stores, names);
+    const db = await this.open();
+    return db.transaction(selected, mode);
+  }
+
+  // Photographie cohérente : lectures mises en file ensemble dans une transaction readonly.
+  async getSnapshot(names = Object.keys(this.stores)) {
+    const selected = knownStoreNames(this.stores, names);
+    const snapshot = {};
+    if (!selected.length) return snapshot;
+    const tx = await this.tx(selected, 'readonly');
+    return runTransaction(tx, () => {
+      for (const name of selected) {
+        const request = tx.objectStore(name).getAll();
+        request.onsuccess = () => { snapshot[name] = request.result; };
+      }
+      return snapshot;
+    });
+  }
+
+  async get(store, key) {
+    const tx = await this.tx([store]);
+    return req(tx.objectStore(store).get(key));
+  }
+
+  async getMany(store, keys) {
+    const tx = await this.tx([store]);
+    const os = tx.objectStore(store);
+    const results = await Promise.all(keys.map((k) => req(os.get(k))));
+    return results;
+  }
+
+  async getAll(store) {
+    const tx = await this.tx([store]);
+    return req(tx.objectStore(store).getAll());
+  }
+
+  async byIndex(store, index, value) {
+    const tx = await this.tx([store]);
+    return req(tx.objectStore(store).index(index).getAll(value));
+  }
+
+  async count(store) {
+    const tx = await this.tx([store]);
+    return req(tx.objectStore(store).count());
+  }
+
+  async put(store, value) {
+    await this.putBatch({ [store]: [value] });
+    return value;
+  }
+
+  async putMany(store, values) {
+    await this.putBatch({ [store]: values });
+    return values;
+  }
+
+  // Vidages et écritures multi-magasins dans une transaction : tout réussit ou tout est annulé.
+  async putBatch(batch, { clearStores = [] } = {}) {
+    if (!batch || typeof batch !== 'object' || Array.isArray(batch)) {
+      throw new TypeError('Le lot doit associer chaque magasin à un tableau');
+    }
+    const entries = Object.entries(batch);
+    for (const [name, rows] of entries) {
+      if (!Array.isArray(rows)) throw new TypeError('Les données de ' + name + ' doivent être un tableau');
+    }
+    const toClear = knownStoreNames(this.stores, clearStores);
+    const names = knownStoreNames(this.stores, [...toClear, ...entries.map(([name]) => name)]);
+    if (!names.length) return;
+    const tx = await this.tx(names, 'readwrite');
+    await runTransaction(tx, () => {
+      for (const name of toClear) tx.objectStore(name).clear();
+      for (const [name, rows] of entries) {
+        const os = tx.objectStore(name);
+        for (const row of rows) os.put(row);
+      }
+    });
+  }
+
+  async delete(store, key) {
+    await this.deleteMany(store, [key]);
+  }
+
+  async deleteMany(store, keys) {
+    if (!Array.isArray(keys)) throw new TypeError('Les clés à supprimer doivent être un tableau');
+    const names = knownStoreNames(this.stores, [store]);
+    if (!keys.length) return;
+    const tx = await this.tx(names, 'readwrite');
+    await runTransaction(tx, () => {
+      const os = tx.objectStore(store);
+      for (const key of keys) os.delete(key);
+    });
+  }
+
+  async clear(store) {
+    await this.putBatch({}, { clearStores: [store] });
+  }
+
+  async clearAll() {
+    await this.putBatch({}, { clearStores: Object.keys(this.stores) });
+  }
+
+  async isEmpty(ignore = []) {
+    for (const name of Object.keys(this.stores)) {
+      if (ignore.includes(name)) continue;
+      if ((await this.count(name)) > 0) return false;
+    }
+    return true;
+  }
+}

@@ -1,0 +1,165 @@
+// Tests du domaine, exécutables dans le navigateur (tests/index.html). Aucun outil externe requis.
+import { parseQuantity, scaleQuantity, formatQuantity, extractLeadingQuantity } from '../src/domain/quantity.js';
+import { matchUnit, convertValue, displayQuantity, normalizeText } from '../src/domain/units.js';
+import { parseIngredientLine, buildIngredientIndex, detectTimers, parseStepsBlock } from '../src/domain/lines.js';
+import { INGREDIENTS } from '../src/model/seed.js';
+import { scaleVersion } from '../src/domain/scaling.js';
+import { assessVersion } from '../src/domain/diet.js';
+import { buildShoppingList } from '../src/domain/grocery.js';
+import { parseQuery, buildLabelIndex, buildDocs, searchDocs } from '../src/domain/search.js';
+import { createZip, readZip, textOf, crc32 } from '../src/core/zip.js';
+import { sha256Hex } from '../src/core/hash.js';
+import { checkRelations } from '../src/domain/backup.js';
+import { pickSuggestion } from '../src/domain/rediscover.js';
+import { shortcutUrl, siriPhrase } from '../src/domain/timers.js';
+import { toPaprikaYaml, toJsonLd } from '../src/domain/exporters.js';
+import { parseIndexLines } from '../src/ui/import.js';
+import { summarizeMeal } from '../src/domain/pairing.js';
+import { compareBundles, proposeDishesForRecipe } from '../src/domain/dishes.js';
+import { runBackupTests } from './backup.js';
+
+const results = [];
+const eq = (a, b, msg) => { const ok = JSON.stringify(a) === JSON.stringify(b); results.push({ ok, msg, got: a, want: b }); };
+const ok = (v, msg) => results.push({ ok: !!v, msg, got: v });
+const close = (a, b, msg, eps = 0.01) => results.push({ ok: Math.abs(a - b) < eps, msg, got: a, want: b });
+
+buildIngredientIndex(INGREDIENTS);
+buildLabelIndex(INGREDIENTS);
+const ingById = new Map(INGREDIENTS.map((i) => [i.id, i]));
+
+// --- Quantités
+eq(parseQuantity('1½').value, 1.5, '1½ → 1,5');
+eq(parseQuantity('1½').fraction, { whole: 1, num: 1, den: 2 }, 'fraction conservée');
+eq(parseQuantity('1,5').value, 1.5, '1,5 → 1,5');
+eq(parseQuantity('1 1/2').value, 1.5, '1 1/2 → 1,5');
+eq([parseQuantity('2–3').min, parseQuantity('2–3').max], [2, 3], 'plage 2–3');
+ok(parseQuantity('au goût').qualitative, 'au goût qualitatif');
+eq(formatQuantity(scaleQuantity(parseQuantity('½'), 3)), '1½', '½ × 3 = 1½ à l’affichage');
+eq(formatQuantity(parseQuantity('2–3')), '2–3', 'plage affichée');
+eq(extractLeadingQuantity('2 oranges').rest, 'oranges', '« or » n’est pas pris pour une plage');
+
+// --- Unités et conventions
+eq(matchUnit('c. à soupe d’huile').unit_id, 'tbsp', 'c. à soupe → tbsp');
+eq(matchUnit('tasses de farine').unit_id, 'cup', 'tasses → cup');
+eq(matchUnit('oz de fromage').candidates, ['oz_mass', 'fl_oz'], 'oz ambigu conservé');
+eq(matchUnit('fl oz de lait').unit_id, 'fl_oz', 'fl oz → once liquide');
+eq(matchUnit('carottes').unit_id, null, 'carottes n’est pas une unité (c)');
+eq(convertValue(1, 'cup', 'ml', {}).reason, 'convention_required', 'tasse sans convention : suspendue');
+close(convertValue(1, 'cup', 'ml', { convention_id: 'us_customary' }).value, 236.588, 'tasse US → ml');
+close(convertValue(1, 'cup', 'ml', { convention_id: 'metric_ca' }).value, 250, 'tasse métrique CA → ml');
+close(convertValue(350, 'fahrenheit', 'celsius').value, 176.67, '350 °F → °C');
+eq(convertValue(1, 'cup', 'g', { convention_id: 'metric_ca', ingredient: ingById.get('ing_ap_flour') }).reason, 'equivalence_required', 'volume→masse sans équivalence : refusée');
+const flour = { ...ingById.get('ing_ap_flour'), equivalences: [{ volume_unit_id: 'cup', volume_value: 1, mass_g: 125, source: 'table du livre', convention_id: 'us_customary' }] };
+const conv = convertValue(2, 'cup', 'g', { convention_id: 'us_customary', ingredient: flour });
+close(conv.value, 250, '2 tasses de farine → 250 g via équivalence documentée'); ok(conv.estimate && conv.assumptions.length, 'estimation avec hypothèse visible');
+eq(convertValue(2, 'clove', 'g').reason, 'not_convertible', 'gousse non convertible');
+eq(displayQuantity({ value: 1, raw: '1' }, 'cup', { system: 'metric' }).blocked, 'convention_required', 'affichage métrique bloqué sans convention');
+eq(displayQuantity({ value: 250, raw: '250' }, 'g', { system: 'original' }).text, '250 g', 'original inchangé');
+ok(displayQuantity({ value: 250, raw: '250' }, 'g', { system: 'us' }).text.includes('oz'), 'g → oz en système US');
+
+// --- Lignes d'ingrédients FR/EN → même identité
+const l1 = parseIngredientLine('2 c. à soupe d’huile d’olive');
+eq([l1.quantity.value, l1.unit_id, l1.ingredient_id], [2, 'tbsp', 'ing_olive_oil'], 'ligne FR analysée');
+const l2 = parseIngredientLine('2 tbsp olive oil');
+eq(l2.ingredient_id, 'ing_olive_oil', 'ligne EN → même identité');
+eq(parseIngredientLine('1 boîte (400 g) de tomates italiennes').unit_id, 'can', 'boîte → can, parenthèse conservée');
+eq(parseIngredientLine('1 boîte (400 g) de tomates italiennes').preparation, '400 g', 'précision entre parenthèses');
+eq(parseIngredientLine('coriandre fraîche, hachée').ingredient_id, 'ing_coriander_leaves', 'coriandre fraîche → feuilles');
+eq(parseIngredientLine('1 c. à thé de graines de coriandre').ingredient_id, 'ing_coriander_seeds', 'graines de coriandre → identité distincte');
+eq(parseIngredientLine('1 bulbe de fenouil').ingredient_id, 'ing_fennel_bulb', 'fenouil → bulbe (pas les graines)');
+eq(parseIngredientLine('sel, au goût').quantity.qualitative, true, 'sel au goût');
+eq(parseIngredientLine('Persil (facultatif)').optional, true, 'facultatif détecté');
+eq(parseIngredientLine('1 tasse de mystère').ingredient_id, null, 'inconnu reste non identifié');
+eq(parseIngredientLine('4 oz de parmesan').unit_candidates, ['oz_mass', 'fl_oz'], 'oz ambigu sur la ligne');
+eq(detectTimers('Cuire 8 minutes puis laisser reposer 1 h 30').timers.map((t) => t.seconds), [480, 5400], 'durées détectées');
+eq(parseStepsBlock('1. Chauffer\n2. Cuire 10 min').length, 2, 'étapes numérotées');
+
+// --- Portions
+const version = { id: 'v1', recipe_id: 'r1', kind: 'extraction', servings: 4, prep_minutes: 10, cook_minutes: 20, ingredients: [parseIngredientLine('400 g de spaghetti'), parseIngredientLine('2 gousses d’ail'), parseIngredientLine('sel, au goût')], steps: parseStepsBlock('Cuire 10 min à 200 °C') };
+const scaled = scaleVersion(version, 8);
+eq(scaled.ingredients[0].quantity.value, 800, 'portions doublées → 800 g');
+ok(scaled.notes.some((n) => n.includes('Durées')), 'les durées ne sont pas multipliées');
+eq(scaleVersion({ ...version, servings: null }, 8).ok, false, 'portions inconnues : pas de recalcul');
+
+// --- Régimes
+eq(assessVersion(version, ingById, 'sans_gluten').state, 'incompatible', 'spaghetti → incompatible sans gluten');
+eq(assessVersion(version, ingById, 'vegetarien').state, 'compatible', 'végétarien compatible');
+const vUnknown = { ...version, ingredients: [parseIngredientLine('1 tasse de mystère')] };
+eq(assessVersion(vUnknown, ingById, 'sans_gluten').state, 'to_verify', 'inconnu → à vérifier, jamais compatible par défaut');
+const vOpt = { ...version, ingredients: [parseIngredientLine('parmesan (facultatif)')] };
+eq(assessVersion(vOpt, ingById, 'vegetalien').state, 'adaptation', 'ingrédient facultatif bloquant → adaptation');
+
+// --- Courses
+const v2 = { id: 'v2', recipe_id: 'r2', servings: 2, ingredients: [parseIngredientLine('200 g de spaghetti'), parseIngredientLine('1 gousse d’ail'), parseIngredientLine('250 ml de bouillon de poulet'), parseIngredientLine('250 ml d’eau')] };
+const list = buildShoppingList([{ version, servings: 4, title: 'A' }, { version: v2, servings: 2, title: 'B' }], ingById);
+const pasta = list.find((g) => g.ingredient_id === 'ing_wheat_pasta');
+eq(pasta.totals[0].text, '600 g', 'spaghetti consolidés 400 + 200');
+eq(list.find((g) => g.ingredient_id === 'ing_garlic').totals[0].text, '3 gousse', 'gousses additionnées (même unité)');
+ok(list.some((g) => g.ingredient_id === 'ing_chicken_stock') && list.some((g) => g.ingredient_id === 'ing_water'), 'bouillon et eau distincts');
+
+// --- Recherche
+const q = parseQuery('une salade avec du concombre, sans gluten, en 15 minutes');
+eq([q.filters.type, q.filters.diets, q.filters.include, q.filters.max_total_minutes], ['salade', ['sans_gluten'], ['ing_cucumber'], 15], 'langage naturel → filtres');
+eq(parseQuery('poulet sans coriandre').filters.exclude, ['ing_coriander_leaves'], 'exclusion d’ingrédient');
+const recipes = [
+  { id: 'r1', edition_id: 'e1', original_title: 'Pâtes puttanesca', availability: 'available', type: 'plat_principal', current_version_id: 'v1' },
+  { id: 'r3', edition_id: 'e1', original_title: 'Salade de concombre', availability: 'available', type: 'salade', current_version_id: 'v3' },
+  { id: 'r4', edition_id: 'e1', original_title: 'Cucumber salad', availability: 'reference_only', type: null, printed_page: 58 },
+];
+const v3 = { id: 'v3', recipe_id: 'r3', kind: 'extraction', servings: 2, total_minutes: 10, ingredients: [parseIngredientLine('1 cucumber'), parseIngredientLine('2 tbsp olive oil')], steps: [] };
+const docs = buildDocs({ recipes, versions: [version, v3], editions: [{ id: 'e1', book_id: 'b1' }], books: [{ id: 'b1', title: 'Livre', author: 'A' }], dishes: [], links: [] });
+const res = searchDocs(docs, parseQuery('salade de concombre'), { mode: 'all', ingredientsById: ingById });
+eq(res.admissible.map((h) => h.doc.recipe.id), ['r3'], 'FR « concombre » retrouve la recette EN « cucumber »');
+eq(res.references.map((h) => h.doc.recipe.id), ['r4'], 'référence d’index signalée à part');
+const resGf = searchDocs(docs, parseQuery('plat principal sans gluten'), { mode: 'all', ingredientsById: ingById });
+eq([resGf.admissible.length, resGf.incompatible], [0, 1], 'restriction jamais assouplie : puttanesca écartée');
+eq(searchDocs(docs, parseQuery('salade'), { mode: 'web' }).admissible.length, 0, 'mode Web sans source : aucun résultat inventé');
+
+// --- ZIP et empreintes
+const zip = createZip([{ path: 'a/é.txt', data: 'héllo' }, { path: 'b.bin', data: new Uint8Array([1, 2, 3]) }]);
+const back = readZip(zip);
+eq(textOf(back.get('a/é.txt')), 'héllo', 'ZIP aller-retour UTF-8');
+eq([...back.get('b.bin').data], [1, 2, 3], 'ZIP binaire'); ok(back.get('b.bin').crcOk, 'CRC valide');
+eq(crc32(new TextEncoder().encode('123456789')).toString(16), 'cbf43926', 'CRC-32 vecteur de test');
+const hashes = await sha256Hex('abc');
+eq(hashes, 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad', 'SHA-256(abc)');
+eq(checkRelations({ recipes: [{ id: 'r1', edition_id: 'eX' }], book_editions: [] }, new Set()).length, 1, 'relation cassée détectée');
+eq(checkRelations({ recipes: [{ id: 'r1', edition_id: null }] }, new Set()).length, 0, 'relation nulle acceptée');
+
+// --- Redécouvrir
+const now = new Date('2026-09-07T12:00:00Z');
+const s1 = pickSuggestion({ editions: [{ id: 'e1', book_id: 'b1' }], books: [{ id: 'b1', title: 'L' }], recipes: [recipes[0]], activity: [], prefs: [], now });
+eq(s1.mode, 'explore', 'sans historique : « À explorer », aucune durée inventée');
+const act = [{ edition_id: 'e1', event_type: 'open_book', occurred_at: '2026-01-01T00:00:00Z' }];
+eq(pickSuggestion({ editions: [{ id: 'e1', book_id: 'b1' }], books: [{ id: 'b1' }], recipes: [recipes[0]], activity: act, prefs: [], now }).months_since, 8, 'durée depuis la dernière consultation observée');
+eq(pickSuggestion({ editions: [{ id: 'e1', book_id: 'b1' }], books: [{ id: 'b1' }], recipes: [recipes[0]], activity: act, prefs: [{ edition_id: 'e1', hidden: true }], now }), null, 'livre masqué non proposé');
+
+// --- Minuterie
+eq(shortcutUrl(480), 'shortcuts://run-shortcut?name=CuisineOS-Minuterie&input=text&text=480', 'URL du raccourci');
+ok(siriPhrase(480).includes('8 minutes'), 'phrase Siri');
+
+// --- Exports
+const yaml = toPaprikaYaml([{ recipe: recipes[0], version, book: { title: 'Livre', author: 'A' }, edition: {} }]);
+ok(yaml.includes('- name: "Pâtes puttanesca"') && yaml.includes('ingredients: |') && yaml.includes('directions: |'), 'YAML Paprika : champs obligatoires');
+const ld = toJsonLd({ recipe: recipes[0], version, book: { title: 'Livre' }, edition: {} });
+eq([ld['@type'], ld.recipeYield, ld.totalTime], ['Recipe', '4', undefined], 'JSON-LD : durée totale inconnue omise');
+
+// --- Index et plats
+eq(parseIndexLines('Magret de canard — 132\nSalade, p. 58\n212 Puttanesca').map((e) => e.printed_page), [132, 58, 212], 'entrées d’index');
+const dish = { id: 'd1', labels: { fr: { label: 'Puttanesca', aliases: [] }, en: { label: 'Puttanesca', aliases: [] } } };
+ok(proposeDishesForRecipe(recipes[0], [dish], []).length === 1, 'rapprochement proposé par titre');
+eq(proposeDishesForRecipe(recipes[0], [dish], [{ recipe_id: 'r1', dish_id: 'd1', state: 'refused' }]).length, 0, 'refus mémorisé');
+const cmp = compareBundles([{ recipe: recipes[0], version, history: [] }, { recipe: recipes[1], version: v3, history: [] }], ingById);
+ok(cmp.only[0].some((x) => x.id === 'ing_wheat_pasta') && cmp.technique[1].prep === null, 'comparaison : différences et inconnues visibles');
+const meal = summarizeMeal([{ version: { ...version, steps: parseStepsBlock('Cuire à 200 °C') }, title: 'A' }, { version: { ...v3, steps: parseStepsBlock('Rôtir à 180 °C'), active_minutes: 10 }, title: 'B' }]);
+ok(meal.conflicts.length === 1, 'conflit de four détecté');
+
+// --- Sauvegarde : bases IndexedDB temporaires, jamais la bibliothèque de l'utilisateur.
+try { await runBackupTests({ eq, ok }); }
+catch (error) { ok(false, `Suite sauvegarde interrompue : ${error?.message || String(error)}`); }
+
+// --- Sortie
+const failed = results.filter((r) => !r.ok);
+const out = document.getElementById('out');
+out.innerHTML = `<h2>${failed.length ? '❌' : '✅'} ${results.length - failed.length}/${results.length} tests réussis</h2>` +
+  results.map((r) => `<div class="${r.ok ? 'ok' : 'ko'}">${r.ok ? '✓' : '✗'} ${r.msg}${r.ok ? '' : `<pre>obtenu : ${JSON.stringify(r.got)}\nattendu : ${JSON.stringify(r.want)}</pre>`}</div>`).join('');
