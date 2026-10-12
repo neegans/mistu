@@ -23,7 +23,7 @@
 - `src/ui/recipe-edit.js` : la vue la plus dense (analyse des lignes, IA facultative, sauvegarde de version); tester extraction, correction, adaptation et traduction.
 - `src/domain/backup.js` : gate V0 = restaurer dans une base vide avec mêmes identifiants et empreintes; `verifyRestored` doit rapporter zéro écart.
 - `src/domain/llm.js` : fournisseurs OpenAI-compatible et Anthropic écrits sans appel réel.
-- `manifest.webmanifest` : icône SVG seulement, pas d'`apple-touch-icon` PNG (fichier binaire à ajouter).
+- ~~`manifest.webmanifest` : icône SVG seulement, pas d'`apple-touch-icon` PNG (fichier binaire à ajouter).~~ Levé le 12 octobre : `icons/apple-touch-icon.png` (180 × 180, opaque) généré par `tools/make-apple-touch-icon.py` (Python standard, formes de `icons/apple-touch-icon.svg`, variante pleine sans coins arrondis), câblé dans `index.html`, le manifeste et `SHELL`. La vignette `qlmanage` avait été écartée : marge blanche visible.
 - Dictionnaire anglais partiel (`src/i18n/en.js`).
 
 **Décisions prises (ne pas rediscuter sans raison).** PWA sans build et local-first plutôt que Supabase pour V0; adaptations = `RecipeVersion` (pas de table à part); libellés FR/EN embarqués dans `dishes` et `ingredients`; `contains: null` = inconnu pour les régimes; conversions volume↔masse seulement par équivalence documentée par ingrédient; références d'index = `availability: reference_only` sans version; minuterie confiée au système, jamais à un compteur JS.
@@ -49,3 +49,13 @@
 Cas ancien repéré : supprimer un livre vide peut laisser une activité/préférence orpheline. Ce lot ne répare pas ces données automatiquement. L’export conserve une copie en signalant les relations incohérentes ; la restauration est refusée jusqu’à résolution. Les gros ZIP restent en mémoire et un quota réellement épuisé reste à vérifier sur appareil.
 
 Suite immédiate : révision utilisateur, exécution de tests/ dans le navigateur puis essai ZIP dans un autre navigateur à base vide, en conservant la bibliothèque source. Les défauts culinaires et les améliorations iPhone identifiés par l’audit restent dans les lots suivants.
+
+## Hébergement — 12 octobre 2026
+
+Objectif de Neegan : utiliser Cuisine OS comme application de capture installée sur l’écran d’accueil de l’iPhone (PWA), donc servie en HTTPS.
+
+- Premier commit du code : `d9ba34e` (57 fichiers), par Neegan via `!`. Dépôt **public** `neegans/mistu` créé avec `gh repo create --public --push` ; GitHub Pages activé sur `main` / racine ; site `https://neegans.github.io/mistu/`, statut `built` confirmé par `gh api`. Commits signés `neegan@oraquan.com` (adresse publique, choix assumé).
+- Ajouts : `.nojekyll`, `icons/apple-touch-icon.svg` + `.png`, `tools/make-apple-touch-icon.py` (générateur du PNG, hors `SHELL` : ce n'est pas un fichier de l'app), lien `apple-touch-icon`, entrée PNG dans le manifeste, `SHELL` et `VERSION` (`-3`) de `sw.js`.
+- Le site n’a pas de backend : les scans et recettes restent dans IndexedDB de l’appareil. `https://neegans.github.io` est une origine distincte de `localhost:8080` : bibliothèque vide au premier lancement, à remplir par restauration d’un ZIP (AirDrop depuis le Mac). Ce transfert constitue aussi le gate V0 sur un second appareil.
+- Mise à jour de l’app installée : `git push` sur `main`, puis relancer l’app (service worker réseau d’abord ; un `VERSION` incrémenté purge l’ancien cache).
+- `https://neegans.github.io/mistu/tests/` exécute la suite complète, y compris le lot sauvegarde ; aucun résultat reçu à la date de cette note.
