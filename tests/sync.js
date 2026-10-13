@@ -712,6 +712,59 @@ export async function runSyncTests({ eq, ok }) {
     setSyncState({ auth: null, user: null, guard: null, retour: null, enAttente: false }); // ne rien laisser derrière
   }
 
+  // --- R32 : un résultat tardif n'écrase jamais un état plus récent (spec § 4.1 ; amende R28)
+  // Le travail borné continue en arrière-plan. S'il aboutit APRÈS qu'un `auth.onChange` a posé un état (jeton
+  // rafraîchi, déconnexion, connexion depuis un autre onglet), son résultat est périmé : l'appliquer ferait
+  // réapparaître un compte parti, ou effacerait un compte arrivé. Un compteur de générations tranche.
+  const patienterEtat = async (predicat) => { for (let i = 0; i < 100 && !predicat(); i += 1) await new Promise((r) => setTimeout(r, 10)); return predicat(); };
+  {
+    let resoudreTardif = null;
+    const authTardif = {
+      available: true,
+      handleReturn: () => new Promise((r) => { resoudreTardif = r; }),
+      session: async () => null, // le travail tardif conclura « aucun compte »
+      guard: async () => ({ ok: true }),
+      onChange: () => () => {},
+    };
+    const journalTardif = []; const vraiLogTardif = console.error;
+    try {
+      console.error = (...a) => journalTardif.push(a);
+      const borne = await demarrerSync({ auth: authTardif, delaiMs: 20 });
+      eq(borne.enAttente, true, 'R32 : la borne est dépassée, l’app s’ouvre en attente');
+      // Un changement de session arrive AVANT que le travail tardif n'aboutisse : il est plus récent.
+      setSyncState({ user: { id: 'uid-onChange', email: 'c@exemple.test' }, guard: { ok: true }, retour: null, enAttente: false });
+      resoudreTardif({ error: null, codeSansSession: false, present: true });
+      await new Promise((r) => setTimeout(r, 60)); // le temps que la promesse tardive aboutisse et soit écartée
+      eq([getSyncState().user?.id, getSyncState().enAttente], ['uid-onChange', false],
+        'R32 : le résultat tardif (aucun compte) est ignoré — l’état posé par onChange reste');
+    } finally { console.error = vraiLogTardif; }
+  }
+  // Et si le travail tardif ÉCHOUE, l'attente est levée : sinon « Vérification du compte… » reste à l'écran sans
+  // aucun bouton, pour toujours (R30 n'offre rien tant que enAttente vaut vrai).
+  {
+    let rejeterTardif = null;
+    const authCasse = {
+      available: true,
+      handleReturn: () => new Promise((_, rejeter) => { rejeterTardif = rejeter; }),
+      session: async () => null, guard: async () => ({ ok: true }), onChange: () => () => {},
+    };
+    const journalCasse = []; const vraiLogCasse = console.error;
+    try {
+      console.error = (...a) => journalCasse.push(a);
+      const borne = await demarrerSync({ auth: authCasse, delaiMs: 20 });
+      eq(borne.enAttente, true, 'R32 : borne dépassée, travail tardif qui va échouer');
+      rejeterTardif(new Error('reseau coupe'));
+      ok(await patienterEtat(() => getSyncState().enAttente === false),
+        'R32 : un travail tardif qui échoue lève l’attente au lieu de la figer');
+      const texteCasse = JSON.stringify(journalCasse);
+      ok(texteCasse.includes('sync_boot_failed') && !texteCasse.includes('reseau coupe'),
+        'R32 : l’échec tardif est journalisé par son code seul');
+    } finally {
+      console.error = vraiLogCasse;
+      setSyncState({ auth: null, user: null, guard: null, retour: null, enAttente: false });
+    }
+  }
+
   // --- Clôture : SHELL complet (tâche 14)
   // Ce test LIT du source (sw.js et les modules) : c'est voulu ici, et seulement ici. Il ne vérifie pas un
   // comportement mais la COHÉRENCE D'UNE LISTE — le SHELL du service worker contre le graphe d'imports réel.

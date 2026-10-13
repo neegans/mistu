@@ -121,7 +121,9 @@ async function bootSync() {
       (async () => {
         const g = suivant?.id ? await auth.guard(suivant.id, suivant.email) : null;
         // Les lignes du retour parlaient du démarrage : une session qui change les périme, on ne les garde pas.
-        setSyncState({ user: g?.ok ? suivant : null, guard: g, retour: null });
+        // `enAttente: false` : un changement de session est un événement réel, le compte est connu — sans cela la
+        // section resterait sur « Vérification du compte… » (R30) si la borne du démarrage avait été dépassée.
+        setSyncState({ user: g?.ok ? suivant : null, guard: g, retour: null, enAttente: false });
         invalidate();
         if ((getSyncState().user?.id || null) !== avant) refresh(); // l'écran affiché parle du compte : il doit suivre
       })().catch((error) => logError('sync.etat', { error }));

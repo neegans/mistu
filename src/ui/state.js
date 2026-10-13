@@ -21,13 +21,20 @@ let sync = { auth: null, user: null, guard: null, retour: null, enAttente: false
 // perdue au retour). Écrite par Réglages, consommée une seule fois au démarrage.
 export const SYNC_ROUTE_KEY = 'cuisineos.route';
 
+// Compteur de générations (R32) : incrémenté à CHAQUE pose d'état, d'où qu'elle vienne (démarrage, auth.onChange,
+// déconnexion depuis Réglages). Un travail tardif compare la génération qu'il a quittée à celle du moment où il
+// aboutit : si quelqu'un a posé un état depuis, le sien est périmé et n'est pas appliqué.
+let syncGen = 0;
+
 export function setSyncState(next) {
   sync = { ...sync, ...next };
+  syncGen += 1;
   cache = null; // le contexte des vues porte une copie de cet état : il doit être reconstruit
   return sync;
 }
 
 export const getSyncState = () => sync;
+export const getSyncGeneration = () => syncGen;
 
 // Route à appliquer après un retour du fournisseur (R21, R23). Pure : elle décide, elle n'écrit rien.
 // La route mémorisée est restaurée à TOUT retour RÉEL — session obtenue, retour muet ou refus de l'adresse : le
@@ -71,13 +78,27 @@ export async function demarrerSync({ auth, delaiMs = 8000, surEtat = null } = {}
     return etat;
   }
   logError('sync_boot_timeout', {});
+  const etatAttente = setSyncState({ auth, user: null, guard: null, retour: null, enAttente: true });
+  // Génération quittée (R32) : tout ce qui est posé après cette ligne est PLUS RÉCENT que le travail tardif.
+  const generationQuittee = syncGen;
   travail.then((tardif) => {
+    // Un auth.onChange (jeton rafraîchi, déconnexion, connexion dans un autre onglet) a posé un état depuis le
+    // dépassement : il dit la session d'aujourd'hui, le résultat tardif celle d'il y a dix secondes. On l'ignore.
+    if (syncGen !== generationQuittee) return;
     setSyncState(tardif);
     if (surEtat) surEtat(tardif);
     invalidate();
     refresh(); // l'écran affiché parle du compte : il doit suivre
-  }).catch((error) => logError('sync.demarrage', { error }));
-  return setSyncState({ auth, user: null, guard: null, retour: null, enAttente: true });
+  }).catch(() => {
+    // Le travail tardif a échoué : l'attente doit être levée, sinon la section reste sur « Vérification du
+    // compte… » et n'offre plus aucun geste (R30), pour toujours. Journalisé par son code seul.
+    logError('sync_boot_failed', {});
+    if (syncGen !== generationQuittee) return;
+    setSyncState({ enAttente: false });
+    invalidate();
+    refresh();
+  });
+  return etatAttente;
 }
 
 // --- Réglages lus par la capture (spec § 5.2) ------------------------------
