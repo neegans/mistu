@@ -184,6 +184,24 @@ export async function oublierEnvois(store) {
   return seqs.length;
 }
 
+// --- Porte d'entrée (spec § 11, R34) -------------------------------------
+// Le choix « Continuer sans compte » vit EN BASE, dans sync_state, comme l'identité de l'appareil (R19/R20) :
+// localStorage est partagé par toutes les pages de l'origine et ne survit pas au même nettoyage. Origine 'device' :
+// la capture ne retient que 'local' — ce choix ne part jamais au serveur et n'entre jamais en file.
+// clearDevice() vide sync_state sauf device_id : après « Effacer les données de cet appareil », la porte revient.
+// C'est voulu : l'appareil est vierge.
+const PORTE_KEY = 'porte_entree';
+
+export async function lirePorteEntree() {
+  const row = await db.get('sync_state', PORTE_KEY);
+  return row?.value?.choix === 'sans_compte' ? 'sans_compte' : null;
+}
+
+export async function choisirSansCompte() {
+  await db.mutate({ puts: { sync_state: [{ key: PORTE_KEY, value: { choix: 'sans_compte', at: nowIso() } }] }, origin: 'device' });
+  return 'sans_compte';
+}
+
 export const all = (store) => db.getAll(store);
 export const get = (store, key) => db.get(store, key);
 export const byIndex = (store, index, value) => db.byIndex(store, index, value);

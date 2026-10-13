@@ -1,5 +1,5 @@
 // Point d'entrée : initialise la base, la langue de l'interface, la coquille et le routeur ; enregistre le service worker.
-import { el, replace } from './core/dom.js';
+import { el, replace, toast } from './core/dom.js';
 import { route, setNotFound, start, parseHash, refresh } from './core/router.js';
 import { setUiLocale, t } from './core/i18n.js';
 import * as repo from './model/repo.js';
@@ -20,9 +20,10 @@ import { renderCook } from './ui/cook.js';
 import { renderImport } from './ui/import.js';
 import { renderMeals, renderMeal } from './ui/meals.js';
 import { renderKitchen } from './ui/kitchen.js';
-import { renderSettings } from './ui/settings.js';
+import { renderSettings, demarrerConnexion } from './ui/settings.js';
 import { renderShoppingList } from './ui/grocery.js';
 import { renderAdd } from './ui/add.js';
+import { porteEntreeModel, renderPorteEntree } from './ui/porte-entree.js';
 
 const NAV = [
   { href: '/', label: 'Aujourd’hui', ico: '☀︎', match: (p) => p === '/' || p.startsWith('/search') },
@@ -134,6 +135,54 @@ async function bootSync() {
   }
 }
 
+// Porte d'entrée (spec § 11, R34) : évaluée au DÉMARRAGE seulement, à la place de la coquille (aucune navigation
+// derrière elle). Elle ATTEND un geste ; les trois sont nommés par PORTE_ACTIONS et câblés ici.
+// Rend quand il n'y a plus de porte à montrer — le démarrage reprend alors son cours (registerRoutes, start).
+async function porteDEntree() {
+  let choix = null;
+  try { choix = await repo.lirePorteEntree(); }
+  catch (error) { logError('porte.lecture', { error }); } // base muette : la porte s'affiche, l'app reste utilisable
+  const auth = getSyncState().auth;
+  // Une boucle, pas une récursion : « Essayer un autre compte » recalcule le modèle et réaffiche la même porte.
+  for (;;) {
+    const etat = getSyncState();
+    const model = porteEntreeModel({
+      available: !!auth?.available,
+      user: etat.user,
+      guard: etat.guard,
+      retour: etat.retour,
+      enAttente: etat.enAttente === true,
+      choixSansCompte: choix === 'sans_compte',
+    });
+    if (!model.afficher) return;
+    // Le geste de la personne est la seule chose qui fait avancer ce bloc : rien n'est décidé pour elle.
+    const geste = await new Promise((resolve) => {
+      replace(document.getElementById('app'), renderPorteEntree(model, {
+        signIn: () => resolve('signIn'),
+        signOut: () => resolve('signOut'),
+        sansCompte: () => resolve('sansCompte'),
+      }));
+    });
+    if (geste === 'sansCompte') {
+      // Le choix est écrit avant d'ouvrir l'app. S'il ne s'écrit pas, on ouvre quand même (invariant I4) : la porte
+      // reviendra au prochain lancement — rien n'est affirmé qui ne soit arrivé.
+      try { await repo.choisirSansCompte(); }
+      catch (error) { logError('porte.choix', { error }); }
+      choix = 'sans_compte';
+      continue;
+    }
+    if (geste === 'signIn') {
+      // Départ chez Google : la page est quittée. Si rien ne part, demarrerConnexion le dit (toast) et la porte reste.
+      await demarrerConnexion(auth, '#/');
+      continue;
+    }
+    // signOut : la session de cet appareil est fermée ; ni les données ni la file ne sont touchées (spec § 4.1).
+    const essai = await auth?.signOut();
+    if (essai?.error) { toast(t('La déconnexion n’a pas abouti.')); continue; }
+    setSyncState({ user: null, guard: null });
+  }
+}
+
 async function boot() {
   try {
     await repo.init();
@@ -145,12 +194,17 @@ async function boot() {
     // Capture posée avant toute écriture de l'application : une seule porte, la mutation de db.js (spec § 5.2).
     // L'historique de consultation n'entre en file que si le réglage le dit, à chaque écriture.
     installCapture(repo.db, { getUserId: () => getSyncState().user?.id || null, isActivitySynced });
-    await bootSync();
-    registerRoutes();
-    start(onRoute);
+    // Avant la porte (R34) : l'app doit être installable dès la première visite, même si la personne reste devant
+    // l'écran d'accueil sans rien toucher.
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
       navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('Service worker non enregistré', e));
     }
+    await bootSync();
+    // La porte attend un geste ; si elle casse, l'app s'ouvre quand même (invariant I4).
+    try { await porteDEntree(); }
+    catch (error) { logError('porte', { error }); }
+    registerRoutes();
+    start(onRoute);
   } catch (e) {
     logError('boot', { error: e });
     replace(document.getElementById('app'), el('div', { class: 'card danger', style: { margin: '1rem' } }, el('h2', null, 'Cuisine OS ne peut pas démarrer'), el('p', { class: 'muted' }, t('Code : {c}', { c: e?.name || 'Erreur' })), el('button', { class: 'btn', onClick: () => location.reload() }, t('Recharger'))));

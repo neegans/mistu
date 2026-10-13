@@ -111,6 +111,12 @@ export const EN = {
   "Ces données ne sont que sur cet appareil : fais une sauvegarde avant de les effacer.": "This data exists only on this device: back it up before erasing.",
   "Effacer les données de cet appareil ? Fais d’abord une sauvegarde.": "Erase this device’s data? Back it up first.",
   "Le stockage de session est inaccessible : ce geste n’est pas possible ici.": "Session storage is unavailable: this action is not possible here.",
+  // Porte d'entrée : écran d'accueil du premier lancement (spec § 11, R34).
+  "Kwe.": "Kwe.",
+  "Ta bibliothèque de recettes, sur tous tes appareils.": "Your recipe library, on all your devices.",
+  "Connexion avec Google": "Sign in with Google",
+  "Continuer sans compte": "Continue without an account",
+  "Essayer un autre compte": "Try another account",
   // Durcissement : aperçu PDF isolé (spec § 6.2).
   "Télécharger le fichier": "Download the file",
   "Si l’aperçu reste vide, télécharge le fichier.": "If the preview stays empty, download the file.",

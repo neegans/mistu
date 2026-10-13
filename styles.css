@@ -112,6 +112,27 @@ aside.sidenav { display: none; }
 .btn.block { width: 100%; justify-content: center; }
 .btn.active { outline: 2px solid var(--green); }
 
+.btn.link {
+  background: transparent; border-color: transparent; color: var(--green); text-decoration: underline;
+  justify-content: center; min-height: 40px;
+}
+.btn.link:hover { border-color: transparent; color: var(--green-2); }
+
+/* Porte d'entrée (spec § 11, R34) : écran d'accueil plein, à la place de la coquille. */
+.porte {
+  flex: 1; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: .4rem; text-align: center; background: var(--cream);
+  padding: calc(2rem + var(--safe-t)) 1.25rem calc(2rem + var(--safe-b));
+}
+.porte .porte-logo { width: 72px; height: 72px; }
+.porte .porte-nom { margin: 0; font-size: .85rem; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+.porte .porte-titre { margin: 0 0 .3rem; font-size: 2.6rem; color: var(--green); }
+.porte .porte-ligne { margin: 0; max-width: 24rem; color: var(--ink); }
+.porte .porte-actions { display: flex; flex-direction: column; gap: .5rem; width: 100%; max-width: 19rem; margin-top: 1.6rem; }
+.porte .porte-actions .btn { justify-content: center; }
+.porte .porte-google { min-height: 48px; font-size: 1rem; }
+.porte .porte-g { flex-shrink: 0; }
+
 .chip {
   display: inline-flex; align-items: center; gap: .3rem; padding: .25rem .6rem; border-radius: 999px;
   background: var(--sage-2); color: var(--green); font-size: .8rem; border: 1px solid transparent; cursor: default;
