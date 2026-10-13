@@ -190,4 +190,8 @@ export async function runSyncTests({ eq, ok }) {
     if (forbidden.test(await (await fetch('../' + file.slice(2))).text())) offenders.push(file);
   }
   eq(offenders, [], 'aucune écriture IndexedDB directe hors des portes autorisées');
+
+  // --- Dépendance embarquée (spec § 6.1)
+  ok(typeof globalThis.supabase?.createClient === 'function', 'supabase-js embarqué chargé par un script classique');
+  ok(/^var supabase=/.test(await (await fetch('../src/vendor/supabase-2.117.3.umd.js')).text()), 'bundle IIFE autonome');
 }

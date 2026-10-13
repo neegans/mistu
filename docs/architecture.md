@@ -20,6 +20,49 @@ src/ui/      state.js (cache), components.js, home, search, library, book, dish,
 tests/       tests.js + index.html : tests du domaine ; backup.js : régressions IndexedDB dans des bases temporaires
 ```
 
+## Dépendance embarquée
+
+`supabase-js` est embarqué en un seul fichier autonome, jamais installé par `npm` à l'exécution (spec § 6.1) :
+`src/vendor/supabase-2.117.3.umd.js` est une copie **octet pour octet** de `dist/umd/supabase.js` tiré du tarball
+npm officiel `@supabase/supabase-js@2.117.3` (bundle IIFE, `globalName` `supabase`, ~213 Ko). Il est chargé par un
+`<script src="./src/vendor/supabase-2.117.3.umd.js">` **classique** (jamais `type="module"`, un IIFE n'y
+exposerait rien), **avant** `src/app.js` dans `index.html` et avant `tests.js` dans `tests/index.html`. Le bundle
+`+esm` de jsDelivr est exclu : il importe huit modules du CDN à l'exécution, ce qui violerait la CSP
+`script-src 'self'` et la portée « aucune dépendance npm à l'exécution ».
+
+**Deux vérifications distinctes**, faites par `tools/verifier-vendor.mjs` (Node, zéro dépendance) :
+1. l'archive `.tgz` obtenue par `npm pack @supabase/supabase-js@2.117.3` (sans `npm install`) confrontée au
+   `dist.integrity` publié par le registre npm (sha512 en base64) ;
+2. le fichier `dist/umd/supabase.js` extrait de cette archive (`tar -xzf …tgz package/dist/umd/supabase.js`) haché
+   en sha256 et comparé octet pour octet au même fichier servi par unpkg
+   (`https://unpkg.com/@supabase/supabase-js@2.117.3/dist/umd/supabase.js`).
+
+Obtention (dans un dossier hors dépôt, jamais le `.tgz` commité) :
+
+```sh
+cd <dossier hors dépôt> && npm pack @supabase/supabase-js@2.117.3
+tar -xzf supabase-supabase-js-2.117.3.tgz package/dist/umd/supabase.js
+node tools/verifier-vendor.mjs 2.117.3 <chemin du .tgz> package/dist/umd/supabase.js
+```
+
+Sortie obtenue le 12 octobre 2026 (les deux vérifications réussies) :
+
+```json
+{
+  "version": "2.117.3",
+  "integrity_registre": "sha512-K+f8PimXDunPWQ63CKRXaF5pbVPJxmfw5ryAnh0s9S9PkwcuqBjiSpIaqpF7KLDljeYwXIL85ST8QxaO0+XuvA==",
+  "archive_ok": true,
+  "umd_sha256": "d6a5c4414a5d4ce646d9c1de223aa7067d3ff664c15394ffeb7fcffc763354a3",
+  "unpkg_sha256": "d6a5c4414a5d4ce646d9c1de223aa7067d3ff664c15394ffeb7fcffc763354a3",
+  "umd_ok": true
+}
+```
+
+Mise à jour : **manuelle**, jamais automatique. Pour une nouvelle version, refaire les deux vérifications
+ci-dessus (ou, pour revérifier seulement le fichier déjà commité sans ravoir l'archive :
+`node tools/verifier-vendor.mjs --local src/vendor/supabase-<version>.umd.js <version>`, qui ne fait que (2) et
+imprime le sha256), puis remplacer le fichier dans `src/vendor/` et les deux `<script>` qui le chargent.
+
 ## Modèle de données (magasins IndexedDB)
 
 `books`, `book_editions` (ISBN, langue, `unit_convention_id`), `source_documents` (fichier, sha256, type), `source_pages` (page imprimée, position),
