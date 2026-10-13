@@ -433,7 +433,7 @@ export async function runSyncL3Tests({ eq, ok }) {
   ok(/page scriptée/.test(messageForme) && !/filter/.test(messageForme), 'factice (R-L3-4) : une page scriptée d’une autre forme est refusée en nommant la page, pas par un « filter is not a function »');
 
   // --- Réception (spec § 5.5) : décision I7, tombale, curseur atomique, conflits, files sans octets, pointeur
-  const { decider, estAncetre, createPull } = await import('../src/sync/pull.js');
+  const { decider, estAncetre, identiques, createPull } = await import('../src/sync/pull.js');
   const L = (u, extra = {}) => ({ id: 'x', updated_at: u, ...extra });
   eq(decider({ locale: undefined, distante: { data: L('t2'), updated_at: 't2', deleted_at: null } }), 'ecrire', 'réception : absent localement → écrit');
   eq(decider({ locale: L('t1'), distante: { data: L('t2'), updated_at: 't2', deleted_at: null } }), 'ecrire', 'réception : distant plus récent → écrit');
@@ -447,8 +447,19 @@ export async function runSyncL3Tests({ eq, ok }) {
   eq(decider({ locale: { id: 'x', a: 1, b: 2, updated_at: 't2' }, distante: { data: { updated_at: 't2', b: 2, a: 1, id: 'x' }, updated_at: 't2', deleted_at: null } }), 'ignorer', 'réception : mêmes champs dans un autre ordre (jsonb réordonne) → identiques, rien');
   eq(decider({ locale: { id: 'x', updated_at: 't2', meta: { z: 1, liste: [{ q: 1, p: 2 }] } }, distante: { data: { meta: { liste: [{ p: 2, q: 1 }], z: 1 }, id: 'x', updated_at: 't2' }, updated_at: 't2', deleted_at: null } }), 'ignorer', 'réception : ordre des clés différent EN PROFONDEUR → identiques (tri récursif)');
   eq(decider({ locale: { id: 'x', updated_at: 't2', liste: [1, 2] }, distante: { data: { id: 'x', updated_at: 't2', liste: [2, 1] }, updated_at: 't2', deleted_at: null } }), 'conflit', 'réception : l’ordre d’un TABLEAU reste une différence (une liste d’étapes a un ordre)');
+  // R-L3-11 : PostgREST rend « +00:00 », et des microsecondes quand il y en a ; le local porte « .000Z ». Comparées
+  // comme des CHAÎNES, ces deux écritures du MÊME instant donnent `l > d` ('.' > '+', 'Z' > un chiffre) : l'écho de
+  // nos propres envois revenait en conflit à chaque réception. La comparaison porte donc sur des INSTANTS.
+  eq(decider({ locale: { id: 'x', titre: 'Pareil', updated_at: '2026-10-13T11:00:00.000Z' }, distante: { data: { id: 'x', titre: 'Pareil', updated_at: '2026-10-13T11:00:00+00:00' }, updated_at: '2026-10-13T11:00:00+00:00', deleted_at: null } }), 'ignorer', 'R-L3-11 : le même instant écrit « .000Z » ici et « +00:00 » là → identiques, rien');
+  eq(decider({ locale: { id: 'x', updated_at: '2026-10-13T11:00:00.123Z' }, distante: { data: { id: 'x', updated_at: '2026-10-13T11:00:00.123456+00:00' }, updated_at: '2026-10-13T11:00:00.123456+00:00', deleted_at: null } }), 'ignorer', 'R-L3-11 : les microsecondes du serveur ne font pas un conflit (égalité à la milliseconde)');
+  eq(decider({ locale: { id: 'x', updated_at: '2026-10-13T11:00:00.124Z' }, distante: { data: { id: 'x', updated_at: '2026-10-13T11:00:00.123456+00:00' }, updated_at: '2026-10-13T11:00:00.123456+00:00', deleted_at: null } }), 'conflit_renvoyer', 'R-L3-11 : une milliseconde de plus ici reste plus récent');
+  eq(decider({ locale: { id: 'x', updated_at: '2026-10-13T11:00:00Z' }, distante: { data: { id: 'x', updated_at: '2026-10-13T11:00:01+00:00' }, updated_at: '2026-10-13T11:00:01+00:00', deleted_at: null } }), 'ecrire', 'R-L3-11 : une seconde de plus là-bas → écrit');
+  eq(identiques({ id: 'x', updated_at: 'tA' }, { id: 'x', updated_at: 'tB' }), true, 'R-L3-11 : identiques ne compare PAS updated_at (l’égalité d’instant est déjà établie avant l’appel)');
+  eq([identiques({ a: 1, b: undefined }, { a: 1 }), identiques({ a: 1, b: null }, { a: 1 })], [true, false], 'R-L3-11 : identiques — un champ undefined équivaut à l’absence, un champ null non');
   const versions = [{ id: 'v1', parent_version_id: null }, { id: 'v2', parent_version_id: 'v1' }, { id: 'v3', parent_version_id: 'v2' }, { id: 'w1', parent_version_id: 'v1' }];
   eq([estAncetre(versions, 'v1', 'v3'), estAncetre(versions, 'v2', 'v3'), estAncetre(versions, 'w1', 'v3'), estAncetre(versions, 'v3', 'v3')], [true, true, false, true], 'réception : ancêtre de version (chaîne parent_version_id)');
+  const boucle = [{ id: 'c1', parent_version_id: 'c2' }, { id: 'c2', parent_version_id: 'c1' }];
+  eq([estAncetre(boucle, 'c1', 'c2'), estAncetre(boucle, 'zz', 'c2')], [true, false], 'réception : une chaîne de versions bouclée (fiche bricolée, archive) ne fait pas tourner estAncetre sans fin');
 
   await withRepo(async (repo, db) => {
     await repo.save('books', { id: 'p1', title: 'Ici plus récent', updated_at: '2026-10-13T12:00:00Z' });
@@ -496,7 +507,7 @@ export async function runSyncL3Tests({ eq, ok }) {
       const tf = creerTransportFactice({ lire: { books: [{ erreur: { type: 'reseau', status: 0, message: 'x' } }] } });
       const r = await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1' }).recevoir();
       eq([r.erreur.type, r.recues, await db.get('sync_state', 'cursor:books')], ['reseau', 0, undefined], 'réception : une erreur de transport arrête la passe, rien n’est écrit, le curseur reste');
-      eq(tf.journal.filter((a) => a.appel === 'lire').length, 1, 'réception : la table en erreur arrête la passe, les suivantes ne sont pas lues');
+      eq(tf.journal.filter((a) => a.appel === 'lire').map((a) => a.table), ['recipe_versions', 'books'], 'réception : la table en erreur arrête la passe, les suivantes ne sont pas lues (R-L3-12 : les versions passent d’abord)');
     });
   } finally { console.error = vraiConsoleReception; }
   eq(journalReception.length, 2, 'réception : un refus de forme et une erreur de transport, journalisés une fois chacun');
@@ -508,12 +519,68 @@ export async function runSyncL3Tests({ eq, ok }) {
     await repo.putFile(sha, new Blob(['x'], { type: 'image/jpeg' }), { original_filename: 'x.jpg' });
     const tf = creerTransportFactice({ lire: { files: [[{ id: sha, data: { sha256: sha, mime: 'image/jpeg', size: 1, updated_at: '2030-01-01T00:00:00Z' }, updated_at: '2030-01-01T00:00:00Z', deleted_at: null, server_seq: 3 }, { id: 'd'.repeat(64), data: { sha256: 'd'.repeat(64), mime: 'image/png', size: 2, updated_at: '2030-01-01T00:00:00Z' }, updated_at: '2030-01-01T00:00:00Z', deleted_at: null, server_seq: 4 }], []] } });
     await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1' }).recevoir();
-    ok((await db.get('files', sha)).blob instanceof Blob, 'réception : une ligne files reçue n’efface jamais le blob local');
+    const avecBlob = await db.get('files', sha);
+    ok(avecBlob.blob instanceof Blob, 'réception : une ligne files reçue n’efface jamais le blob local');
+    eq([avecBlob.original_filename, avecBlob.syncable, typeof avecBlob.created_at], ['x.jpg', true, 'string'], 'réception : les métadonnées locales d’une ligne files (nom d’origine, syncable, created_at) survivent à la réception');
     const sans = await db.get('files', 'd'.repeat(64));
     eq([sans.remote, 'blob' in sans], [true, false], 'réception : une ligne files inconnue arrive remote:true, sans octets (L4 les téléchargera)');
   });
   await withRepo(async (repo, db) => {
-    // Pointeur de version : la version locale pointée n’est pas un ancêtre de la version reçue → conflit « version ».
+    // R-L3-11 de bout en bout : l’écho de notre propre envoi (même instant, rendu « +00:00 » avec des microsecondes)
+    // n’est ni réécrit ni mis en conflit — et une page entièrement « ignorée » fait quand même avancer le curseur,
+    // sinon elle serait relue à chaque passe pour toujours.
+    await db.mutate({ puts: { books: [{ id: 's1', title: 'Pareil', updated_at: '2026-10-13T11:00:00.000Z' }] }, origin: 'device' });
+    const tf = creerTransportFactice({ lire: { books: [[{ id: 's1', data: { id: 's1', title: 'Pareil', updated_at: '2026-10-13T11:00:00.000123+00:00' }, updated_at: '2026-10-13T11:00:00.000123+00:00', deleted_at: null, server_seq: 7 }], []] } });
+    const r = await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1' }).recevoir();
+    eq([r.recues, r.conflits, await db.count('outbox'), await db.count('sync_conflicts')], [0, 0, 0, 0], 'R-L3-11 : l’écho de notre propre envoi (« +00:00 » et microsecondes) n’est ni réécrit ni mis en conflit');
+    eq((await db.get('books', 's1')).updated_at, '2026-10-13T11:00:00.000Z', 'R-L3-11 : rien n’étant réécrit, la fiche garde sa propre chaîne');
+    eq((await db.get('sync_state', 'cursor:books'))?.value, 7, 'réception : une page entièrement ignorée fait quand même avancer le curseur');
+  });
+  await withRepo(async (repo, db) => {
+    // R-L3-11 : quand la fiche EST écrite, la chaîne du serveur est stockée VERBATIM — microsecondes et décalage
+    // compris. Un renvoi doit être égal, côté serveur, à la microseconde.
+    const tf = creerTransportFactice({ lire: { books: [[{ id: 's2', data: { id: 's2', title: 'Neuf', updated_at: 'autre chose' }, updated_at: '2026-10-13T11:00:00.654321+00:00', deleted_at: null, server_seq: 8 }], []] } });
+    await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1' }).recevoir();
+    eq((await db.get('books', 's2')).updated_at, '2026-10-13T11:00:00.654321+00:00', 'R-L3-11 : la fiche écrite porte la chaîne du serveur VERBATIM (microsecondes comprises)');
+  });
+  await withRepo(async (repo, db) => {
+    // Le curseur ne RECULE jamais : une page dont les server_seq sont sous le curseur est écrite, mais le curseur
+    // garde sa valeur — sinon tout ce qui est déjà reçu repartirait en boucle.
+    await db.mutate({ puts: { sync_state: [{ key: 'cursor:books', value: 50 }] }, origin: 'device' });
+    let appels = 0;
+    const transport = { async lire(table) {
+      if (table !== 'books') return { lignes: [], erreur: null };
+      appels += 1;
+      return { lignes: appels === 1 ? [{ id: 'retard', data: { id: 'retard', title: 'En retard' }, updated_at: '2026-10-13T11:00:00Z', deleted_at: null, server_seq: 5 }] : [], erreur: null };
+    } };
+    const r = await createPull({ db, transport, isActivitySynced: () => false, getUserId: () => 'u1' }).recevoir();
+    eq([(await db.get('sync_state', 'cursor:books')).value, r.recues, appels], [50, 1, 1], 'réception : un server_seq sous le curseur ne le fait pas reculer, et la table s’arrête là');
+    eq((await db.get('books', 'retard')).title, 'En retard', 'réception : la ligne en retard est quand même écrite');
+  });
+  await withRepo(async (repo, db) => {
+    // R-L3-12 : une adaptation faite ailleurs crée une version FILLE de celle qu’on a ici. Les versions sont reçues
+    // AVANT les recettes, donc le pointeur reçu désigne une version déjà connue : aucun conflit. Sans cet ordre,
+    // chaque adaptation venue d’un autre appareil ressortait en faux conflit de pointeur.
+    await db.mutate({ puts: { recipes: [{ id: 'r2', current_version_id: 'w1', updated_at: '2026-10-13T10:00:00Z' }], recipe_versions: [{ id: 'v1', recipe_id: 'r2', parent_version_id: null, updated_at: 't' }, { id: 'w1', recipe_id: 'r2', parent_version_id: 'v1', updated_at: 't' }] }, origin: 'device' });
+    const tf = creerTransportFactice({ lire: {
+      recipe_versions: [[{ id: 'v2', data: { id: 'v2', recipe_id: 'r2', parent_version_id: 'w1', updated_at: '2026-10-13T11:00:00Z' }, updated_at: '2026-10-13T11:00:00Z', deleted_at: null, server_seq: 8 }], []],
+      recipes: [[{ id: 'r2', data: { id: 'r2', current_version_id: 'v2', updated_at: '2026-10-13T11:00:00Z' }, updated_at: '2026-10-13T11:00:00Z', deleted_at: null, server_seq: 9 }], []],
+    } });
+    const r = await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1' }).recevoir();
+    const ordre = tf.journal.filter((a) => a.appel === 'lire').map((a) => a.table);
+    eq([ordre[0], ordre.indexOf('recipe_versions') < ordre.indexOf('recipes')], ['recipe_versions', true], 'réception (R-L3-12) : les versions sont lues AVANT les recettes');
+    eq([r.conflits, (await db.get('recipes', 'r2')).current_version_id, await db.count('recipe_versions')], [0, 'v2', 3], 'réception (R-L3-12) : le pointeur avance vers une version FILLE déjà reçue → aucun conflit');
+  });
+  await withRepo(async (repo, db) => {
+    // R-L3-12 : la version pointée par la fiche reçue n’est pas encore arrivée ici → RIEN n’est signalé. Un conflit
+    // annoncé sur une chaîne qu’on ne connaît pas encore serait faux, et il masquerait le vrai quand il viendrait.
+    await db.mutate({ puts: { recipes: [{ id: 'r3', current_version_id: 'w1', updated_at: '2026-10-13T10:00:00Z' }], recipe_versions: [{ id: 'v1', recipe_id: 'r3', parent_version_id: null, updated_at: 't' }, { id: 'w1', recipe_id: 'r3', parent_version_id: 'v1', updated_at: 't' }] }, origin: 'device' });
+    const tf = creerTransportFactice({ lire: { recipes: [[{ id: 'r3', data: { id: 'r3', current_version_id: 'v9', updated_at: '2026-10-13T11:00:00Z' }, updated_at: '2026-10-13T11:00:00Z', deleted_at: null, server_seq: 9 }], []] } });
+    const r = await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1' }).recevoir();
+    eq([r.conflits, (await db.get('recipes', 'r3')).current_version_id, await db.get('sync_conflicts', 'recipes:r3')], [0, 'v9', undefined], 'réception (R-L3-12) : une version pointée encore inconnue ici n’est JAMAIS un conflit');
+  });
+  await withRepo(async (repo, db) => {
+    // Vraie divergence : les deux versions sont connues ici, et celle d’ici n’est PAS un ancêtre de celle qu’on reçoit.
     await db.mutate({ puts: { recipes: [{ id: 'r1', current_version_id: 'w1', updated_at: '2026-10-13T10:00:00Z' }], recipe_versions: [{ id: 'v1', recipe_id: 'r1', parent_version_id: null, updated_at: 't' }, { id: 'w1', recipe_id: 'r1', parent_version_id: 'v1', updated_at: 't' }, { id: 'v2', recipe_id: 'r1', parent_version_id: 'v1', updated_at: 't' }] }, origin: 'device' });
     const tf = creerTransportFactice({ lire: { recipes: [[{ id: 'r1', data: { id: 'r1', current_version_id: 'v2', updated_at: '2026-10-13T11:00:00Z' }, updated_at: '2026-10-13T11:00:00Z', deleted_at: null, server_seq: 9 }], []] } });
     const r = await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1' }).recevoir();
@@ -523,22 +590,17 @@ export async function runSyncL3Tests({ eq, ok }) {
     eq(await db.count('recipe_versions'), 3, 'réception : aucune version n’est masquée ni retirée par le conflit de pointeur');
     eq((await db.getAll('outbox')).length, 0, 'réception : un conflit de pointeur ne remet rien en file (la fiche reçue a gagné)');
   });
-  await withRepo(async (repo, db) => {
-    // Le pointeur qui AVANCE dans la même chaîne n’est pas un conflit : c’est l’adaptation faite ailleurs.
-    await db.mutate({ puts: { recipes: [{ id: 'r2', current_version_id: 'v1', updated_at: '2026-10-13T10:00:00Z' }], recipe_versions: [{ id: 'v1', recipe_id: 'r2', parent_version_id: null, updated_at: 't' }, { id: 'v2', recipe_id: 'r2', parent_version_id: 'v1', updated_at: 't' }] }, origin: 'device' });
-    const tf = creerTransportFactice({ lire: { recipes: [[{ id: 'r2', data: { id: 'r2', current_version_id: 'v2', updated_at: '2026-10-13T11:00:00Z' }, updated_at: '2026-10-13T11:00:00Z', deleted_at: null, server_seq: 9 }], []] } });
-    const r = await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1' }).recevoir();
-    eq([r.conflits, (await db.get('recipes', 'r2')).current_version_id], [0, 'v2'], 'réception : un pointeur qui avance dans la même chaîne n’est pas un conflit');
-  });
 
   // --- Conflits : gestes (spec § 5.5)
   const { garderIci, garderAilleurs, purgerAnciens } = await import('../src/sync/conflits.js');
   await withRepo(async (repo, db) => {
-    const conflit = { id: 'books:k1', store: 'books', record_id: 'k1', local: { id: 'k1', title: 'ici', updated_at: '2026-10-13T12:00:00Z' }, server: { data: { id: 'k1', title: 'ailleurs', updated_at: '2026-10-13T12:00:00Z' }, updated_at: '2026-10-13T12:00:00Z', deleted_at: null }, at: '2026-10-13T12:01:00Z', kind: 'donnees' };
+    // L’heure locale de la fiche est posée loin dans le passé : l’assertion « updated_at neuf » ne dépend alors ni
+    // de l’heure réelle du Mac ni du plancher laissé par le bloc « Horloge ».
+    const conflit = { id: 'books:k1', store: 'books', record_id: 'k1', local: { id: 'k1', title: 'ici', updated_at: '2020-01-01T00:00:00.000Z' }, server: { data: { id: 'k1', title: 'ailleurs', updated_at: '2020-01-01T00:00:00.000Z' }, updated_at: '2020-01-01T00:00:00.000Z', deleted_at: null }, at: '2026-10-13T12:01:00Z', kind: 'donnees' };
     await db.mutate({ puts: { sync_conflicts: [conflit], books: [conflit.server.data] }, origin: 'device' });
     await garderIci(db, conflit);
     const k = await db.get('books', 'k1');
-    ok(k.title === 'ici' && k.updated_at > '2026-10-13T12:00:00Z', 'conflits : « Garder celle d’ici » restaure la version locale avec un updated_at neuf');
+    ok(k.title === 'ici' && k.updated_at > conflit.local.updated_at, 'conflits : « Garder celle d’ici » restaure la version locale avec un updated_at neuf');
     eq((await db.getAll('outbox')).map((e) => e.id), ['k1'], 'conflits : … et la met en file');
     eq(await db.get('sync_conflicts', 'books:k1'), undefined, 'conflits : le conflit est effacé');
     await db.mutate({ puts: { sync_conflicts: [conflit] }, deletes: { outbox: (await db.getAll('outbox')).map((e) => e.seq) }, origin: 'device' });
@@ -555,7 +617,11 @@ export async function runSyncL3Tests({ eq, ok }) {
     const sansLocale = { ...conflit, id: 'books:k3', record_id: 'k3', local: null };
     await db.mutate({ puts: { sync_conflicts: [sansLocale] }, origin: 'device' });
     ok(await garderIci(db, sansLocale), 'conflits : « Garder celle d’ici » s’applique aussi quand la fiche a été supprimée ici');
-    eq([await db.get('books', 'k3'), (await db.getAll('outbox')).map((e) => [e.store, e.id, e.op]), await db.get('sync_conflicts', 'books:k3')], [undefined, [['books', 'k3', 'delete']], undefined], 'conflits : la suppression d’ici repart en file, et le conflit est effacé');
+    eq([await db.get('books', 'k3'), await db.get('sync_conflicts', 'books:k3')], [undefined, undefined], 'conflits : la fiche reste supprimée ici, et le conflit est effacé');
+    const entreeK3 = (await db.getAll('outbox'))[0];
+    // Sans updated_at, la tombale repartirait et le serveur la refuserait (motif « updated_at ») : quarantaine.
+    eq([entreeK3?.store, entreeK3?.id, entreeK3?.op, !!entreeK3?.updated_at, entreeK3?.payload?.id], ['books', 'k3', 'delete', true, 'k1'], 'conflits : la suppression d’ici repart en file AVEC un updated_at neuf et un payload (sinon le serveur la refuse)');
+    ok(entreeK3.updated_at > sansLocale.server.updated_at, 'conflits : l’updated_at de la suppression renvoyée est plus récent que la version du serveur');
     await db.mutate({ deletes: { outbox: (await db.getAll('outbox')).map((e) => e.seq) }, origin: 'device' });
     // Un conflit dont le serveur n’a pas joint sa version : rien n’est inventé, et le conflit reste à trancher.
     const sansServeur = { ...conflit, id: 'books:k4', record_id: 'k4', server: null };

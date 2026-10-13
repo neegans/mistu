@@ -8,12 +8,14 @@ import { syncNow } from './clock.js';
 // reste interne (sync_conflicts n'est pas un magasin synchronisé : la capture ne le regarde pas).
 export async function garderIci(db, conflit) {
   // Version locale nulle : la fiche a été supprimée ici pendant l'aller-retour. « Garder celle d'ici » veut alors
-  // dire garder la suppression — jamais écrire une fiche sans clé, que la base refuserait.
+  // dire garder la suppression — jamais écrire une fiche sans clé, que la base refuserait. Le payload porte un
+  // updated_at NEUF : sans lui, la capture mettrait en file une tombale sans heure, que le serveur refuserait
+  // (motif « updated_at ») et qui finirait en quarantaine. La version du serveur sert de corps à la tombale.
   if (!conflit.local || typeof conflit.local !== 'object') {
     await db.mutate({
       deletes: { [conflit.store]: [conflit.record_id], sync_conflicts: [conflit.id] },
       origin: 'local',
-      payloads: { [conflit.store]: { [conflit.record_id]: null } },
+      payloads: { [conflit.store]: { [conflit.record_id]: { ...(conflit.server?.data || {}), updated_at: syncNow() } } },
     });
     return true;
   }

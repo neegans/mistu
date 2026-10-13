@@ -4,8 +4,13 @@
 import { SYNC_STORES, STORES } from '../model/schema.js';
 import { logError } from '../core/log.js';
 
+// R-L3-12 : les versions AVANT les recettes. Le pointeur d'une recette reçue désigne presque toujours une version
+// créée par le même geste, sur l'autre appareil : lue après la recette, elle serait encore inconnue ici et chaque
+// adaptation venue d'ailleurs ressortirait en faux conflit de pointeur.
+const ORDRE_PRIORITAIRE = ['recipe_versions'];
+
 // jsonb RÉORDONNE les clés d'un objet : la copie du serveur revient presque toujours dans un autre ordre que la
-// fiche locale. Comparées par JSON brut, deux fiches identiques feraient un conflit à chaque égalité d'updated_at.
+// fiche locale. Comparées par JSON brut, deux fiches identiques feraient un conflit à chaque égalité d'instant.
 // Les clés sont donc triées récursivement ; l'ordre d'un TABLEAU, lui, est du contenu (une liste d'étapes a un ordre).
 function stable(valeur) {
   if (Array.isArray(valeur)) return valeur.map(stable);
@@ -17,18 +22,40 @@ function stable(valeur) {
   return valeur;
 }
 
-export const identiques = (a, b) => JSON.stringify(stable(a)) === JSON.stringify(stable(b));
+// Les deux fiches sont comparées SANS leur updated_at (R-L3-11) : l'égalité d'instant est déjà établie avant
+// l'appel, et les deux chaînes qui portent ce même instant ne s'écrivent pas pareil ('.000Z' ici, '+00:00' là).
+// Un champ `undefined` équivaut à son absence (JSON les confond) ; un champ `null`, non : c'est une valeur.
+export function identiques(a, b) {
+  const sansHeure = (fiche) => { const { updated_at: _heure, ...reste } = fiche || {}; return stable(reste); };
+  return JSON.stringify(sansHeure(a)) === JSON.stringify(sansHeure(b));
+}
+
+// R-L3-11 : PostgREST rend « 2026-10-13T11:00:00+00:00 », et des microsecondes quand il y en a ; le local porte
+// « …:00.000Z ». Comparées comme des CHAÎNES, ces deux écritures du MÊME instant donnent `l > d` ('.' > '+',
+// 'Z' > un chiffre) : l'écho de nos propres envois revenait en conflit à chaque réception. On compare des instants.
+const instant = (valeur) => {
+  const ms = Date.parse(valeur);
+  return Number.isFinite(ms) ? ms : null;
+};
 
 export function decider({ locale, distante }) {
   if (distante.deleted_at) return locale === undefined || locale === null ? 'ignorer' : 'supprimer';
   if (locale === undefined || locale === null) return 'ecrire';
-  const l = String(locale.updated_at || ''), d = String(distante.updated_at || '');
-  if (d > l) return 'ecrire';
-  if (l > d) return 'conflit_renvoyer';
+  const ici = instant(locale.updated_at), ailleurs = instant(distante.updated_at);
+  if (ici !== null && ailleurs !== null) {
+    if (ailleurs > ici) return 'ecrire';
+    if (ici > ailleurs) return 'conflit_renvoyer';
+  } else {
+    // Une heure illisible ne se compare pas comme un instant : repli sur la chaîne, pour rester déterministe.
+    const l = String(locale.updated_at || ''), d = String(distante.updated_at || '');
+    if (d > l) return 'ecrire';
+    if (l > d) return 'conflit_renvoyer';
+  }
   return identiques(locale, distante.data) ? 'ignorer' : 'conflit';
 }
 
 // Une version est l'ancêtre d'une autre si on la retrouve en remontant parent_version_id (elle-même comprise).
+// `vus` arrête une chaîne bouclée (fiche bricolée, archive incohérente) au lieu de tourner sans fin.
 export function estAncetre(versions, candidatId, cibleId) {
   const parId = new Map(versions.map((v) => [v.id, v]));
   let courant = cibleId;
@@ -55,7 +82,12 @@ function refusDeForme(table, ligne, clePrimaire) {
 }
 
 export function createPull({ db, transport, isActivitySynced = () => false, getUserId = () => null, surProgression = () => {}, limite = 1000 }) {
-  const tables = () => SYNC_STORES.filter((t) => t !== 'library_activity' || isActivitySynced());
+  // SYNC_STORES n'est pas modifié : seule la liste de réception est réordonnée (R-L3-12).
+  function tables() {
+    const retenues = SYNC_STORES.filter((t) => t !== 'library_activity' || isActivitySynced());
+    const prioritaires = ORDRE_PRIORITAIRE.filter((t) => retenues.includes(t));
+    return [...prioritaires, ...retenues.filter((t) => !prioritaires.includes(t))];
+  }
 
   // Pointeur de version (spec § 5.5) : si la version locale pointée n'est pas un ancêtre de celle qu'on reçoit, les
   // deux appareils ont adapté la recette en parallèle. La fiche reçue (plus récente) est écrite — l'original n'est
@@ -65,11 +97,26 @@ export function createPull({ db, transport, isActivitySynced = () => false, getU
     const ailleurs = ligne.data?.current_version_id;
     if (!ici || !ailleurs || ici === ailleurs) return null;
     const versions = (await db.getAll('recipe_versions')).filter((v) => v.recipe_id === ligne.id);
+    // R-L3-12 : la version pointée par la fiche reçue n'est pas encore arrivée ici (table retardée, page suivante,
+    // passe interrompue). Rien à comparer, donc rien à signaler : un conflit annoncé sur une chaîne qu'on ne
+    // connaît pas encore serait faux, et il masquerait le vrai quand elle arriverait.
+    if (!versions.some((v) => v.id === ailleurs)) return null;
     if (estAncetre(versions, ici, ailleurs)) return null;
     return { id: `recipes:${ligne.id}`, store: 'recipes', record_id: ligne.id, local: locale, server: { data: ligne.data, updated_at: ligne.updated_at, deleted_at: null }, at: new Date().toISOString(), kind: 'version' };
   }
 
-  async function appliquerPage(table, lignes, bilan) {
+  // Une ligne files n'apporte JAMAIS d'octets ici (L4 les téléchargera). Les métadonnées LOCALES (syncable,
+  // created_at, original_filename) survivent sous les champs du serveur ; le blob local est conservé s'il existe,
+  // sinon la ligne est marquée « remote » et reste sans octets. Jamais un blob effacé par une réception.
+  function ficheFichier(ligne, locale) {
+    const blob = locale?.blob instanceof Blob ? locale.blob : null;
+    const { blob: _octets, ...metaLocale } = locale || {};
+    const fiche = { ...metaLocale, ...ligne.data, updated_at: ligne.updated_at };
+    if (blob) { fiche.blob = blob; delete fiche.remote; } else fiche.remote = true;
+    return fiche;
+  }
+
+  async function appliquerPage(table, lignes, bilan, curseur) {
     const puts = {}; const deletes = {}; const conflits = []; const refile = [];
     const clePrimaire = STORES[table].keyPath;
     let supprimees = 0; let recues = 0;
@@ -81,12 +128,10 @@ export function createPull({ db, transport, isActivitySynced = () => false, getU
       if (decision === 'supprimer') { (deletes[table] ||= []).push(ligne.id); supprimees += 1; continue; }
       if (decision === 'ignorer') continue;
       if (decision === 'ecrire') {
-        // L'updated_at du serveur fait foi : il a pu être ajusté à l'écriture (R25, tombales figées).
-        let fiche = { ...ligne.data, updated_at: ligne.updated_at };
-        // Une ligne files n'apporte JAMAIS d'octets ici (L4 les téléchargera) : le blob local est conservé s'il
-        // existe, sinon la ligne est marquée « remote » et reste sans blob — jamais un blob effacé par une réception.
-        if (table === 'files') fiche = locale?.blob instanceof Blob ? { ...fiche, blob: locale.blob } : { ...fiche, remote: true };
-        (puts[table] ||= []).push(fiche); recues += 1;
+        // L'updated_at du serveur est stocké VERBATIM (R-L3-11) : microsecondes et décalage compris. Un renvoi doit
+        // être égal, côté serveur, à la microseconde — et le serveur a pu ajuster l'heure à l'écriture (R25).
+        (puts[table] ||= []).push(table === 'files' ? ficheFichier(ligne, locale) : { ...ligne.data, updated_at: ligne.updated_at });
+        recues += 1;
         if (table === 'recipes') {
           const pointeur = await conflitDePointeur(ligne, locale);
           if (pointeur) conflits.push(pointeur);
@@ -102,9 +147,11 @@ export function createPull({ db, transport, isActivitySynced = () => false, getU
     if (conflits.length) puts.sync_conflicts = conflits;
     if (refile.length) puts.outbox = refile;
     // Curseur atomique : il part dans la MÊME transaction que les écritures de sa page. Une page refusée plus haut
-    // n'arrive jamais ici, donc rien n'est écrit et le curseur ne bouge pas : la page sera relue telle quelle.
+    // n'arrive jamais ici, donc rien n'est écrit et le curseur ne bouge pas : la page sera relue telle quelle. Et il
+    // ne RECULE jamais — une page dont les server_seq sont sous le curseur est écrite, mais sans le ramener en
+    // arrière, sinon tout ce qui est déjà reçu repartirait en boucle.
     const dernier = Math.max(...lignes.map((l) => l.server_seq));
-    puts.sync_state = [{ key: `cursor:${table}`, value: dernier }];
+    puts.sync_state = [{ key: `cursor:${table}`, value: Math.max(curseur, dernier) }];
     await db.mutate({ puts, deletes, origin: 'remote' });
     bilan.recues += recues;
     bilan.supprimees += supprimees;
@@ -122,7 +169,7 @@ export function createPull({ db, transport, isActivitySynced = () => false, getU
         const { lignes, erreur } = await transport.lire(table, curseur, limite);
         if (erreur) { bilan.erreur = erreur; logError('sync.pull', { table, reason: erreur.type, status: erreur.status }); return bilan; }
         if (!lignes.length) break;
-        const r = await appliquerPage(table, lignes, bilan);
+        const r = await appliquerPage(table, lignes, bilan, curseur);
         if (r.erreur) { bilan.erreur = r.erreur; logError('sync.pull.forme', { table }); return bilan; }
         // Une page courte ne clôt PAS la table : la suivante est demandée, et c'est une page vide qui arrête. Et le
         // curseur doit avancer — un serveur qui renverrait la même page ferait tourner cette boucle sans fin.
