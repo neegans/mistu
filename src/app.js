@@ -5,7 +5,7 @@ import { setUiLocale, t } from './core/i18n.js';
 import * as repo from './model/repo.js';
 import { on } from './core/bus.js';
 import { logError } from './core/log.js';
-import { getData, invalidate, setSyncState, getSyncState, SYNC_ROUTE_KEY } from './ui/state.js';
+import { getData, invalidate, setSyncState, getSyncState, routeApresRetour, SYNC_ROUTE_KEY } from './ui/state.js';
 import { installCapture } from './sync/outbox.js';
 import { createAuth } from './sync/auth.js';
 
@@ -98,16 +98,15 @@ function registerRoutes() {
 let settingsCache = {};
 
 // Route d'avant la connexion : signIn() la mémorise, le retour du fournisseur arrive sans fragment.
-// La clé est consommée une seule fois ; elle ne s'applique jamais par-dessus une route déjà présente.
+// La clé est consommée une seule fois ; la décision elle-même est dans routeApresRetour (R21).
 function restoreRoute(retour) {
   let memo = null;
   try {
     memo = sessionStorage.getItem(SYNC_ROUTE_KEY);
     if (memo !== null) sessionStorage.removeItem(SYNC_ROUTE_KEY);
   } catch { return; } // stockage indisponible : la route par défaut s'applique
-  if (!memo || !(retour?.error === null || retour?.codeSansSession)) return;
-  if ((location.hash || '').replace(/^#/, '')) return;
-  location.hash = memo;
+  const route = routeApresRetour({ retour, memorisee: memo, hashActuel: location.hash });
+  if (route) location.hash = route;
 }
 
 async function boot() {

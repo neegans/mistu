@@ -367,4 +367,22 @@ export async function runSyncTests({ eq, ok }) {
   eq(syncSectionModel({ available: true, user: { id: 'uid-A', email: '' }, guard: { ok: true } }).lines,
     ['Connectée : ', 'À envoyer : 0'],
     'sans adresse connue : aucune valeur inventée, file à zéro');
+
+  // --- R21 : la route mémorisée avant signIn() est restaurée à TOUT retour du fournisseur
+  // Décision pure, hors du démarrage : elle rend la route à appliquer, ou null, et n'écrit jamais rien.
+  const { routeApresRetour } = await import('../src/ui/state.js');
+  eq(routeApresRetour({ retour: { error: 'Cette adresse n’est pas autorisée.', codeSansSession: false }, memorisee: '#/settings', hashActuel: '' }),
+    '#/settings', 'refus du fournisseur : la route est restaurée, là où le message s’affiche');
+  eq(routeApresRetour({ retour: { error: null, codeSansSession: true }, memorisee: '#/settings', hashActuel: '' }),
+    '#/settings', 'retour muet : restaurée aussi');
+  eq(routeApresRetour({ retour: { error: null, codeSansSession: false }, memorisee: '#/settings', hashActuel: '' }),
+    '#/settings', 'session obtenue : restaurée');
+  eq(routeApresRetour({ retour: { error: null, codeSansSession: false }, memorisee: '#/settings', hashActuel: '#/library' }),
+    null, 'fragment déjà porteur d’une route : jamais écrasé');
+  eq(routeApresRetour({ retour: { error: null, codeSansSession: false }, memorisee: '#/settings', hashActuel: '#' }),
+    '#/settings', 'fragment vide « # » : la route mémorisée s’applique');
+  eq(routeApresRetour({ retour: { error: null, codeSansSession: false }, memorisee: '', hashActuel: '' }),
+    null, 'aucune route mémorisée : rien à restaurer');
+  eq(routeApresRetour({ retour: null, memorisee: '#/settings', hashActuel: '' }),
+    null, 'aucun retour traité : rien à restaurer');
 }

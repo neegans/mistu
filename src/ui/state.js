@@ -26,6 +26,17 @@ export function setSyncState(next) {
 
 export const getSyncState = () => sync;
 
+// Route à appliquer après un retour du fournisseur (R21). Pure : elle décide, elle n'écrit rien.
+// La route mémorisée est restaurée à TOUT retour — session obtenue, retour muet ou refus de l'adresse : le bouton
+// « Activer la synchronisation » vit dans Réglages, et c'est là que les lignes du retour s'affichent.
+// Deux garde-fous gardés : la mémoire n'est lue qu'une fois (l'appelant la retire avant d'appeler ici), et une route
+// déjà portée par l'URL n'est jamais écrasée. Sans retour traité, rien n'est restauré.
+export function routeApresRetour({ retour = null, memorisee = null, hashActuel = '' } = {}) {
+  if (!retour || !memorisee) return null;
+  if (String(hashActuel || '').replace(/^#/, '')) return null;
+  return memorisee;
+}
+
 export async function getData(force = false) {
   if (cache && !force) return cache;
   const names = ['recipes', 'recipe_versions', 'book_editions', 'books', 'dishes', 'dish_recipe_links', 'ingredients', 'recipe_translations', 'cook_history', 'unit_definitions', 'unit_conventions', 'library_activity', 'rediscovery_prefs', 'meals', 'meal_feedback', 'inventory', 'appliances', 'cook_sessions', 'source_pages', 'source_documents', 'shopping_lists', 'scan_sessions', 'substitutions'];
