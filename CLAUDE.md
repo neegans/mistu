@@ -103,6 +103,13 @@ barrière reste la liste d'adresses). **Avant la première connexion réelle** :
 le CNAME. **Première connexion réelle réussie le 13 octobre à 15 h 33** (Mac, Chrome, site Pages) : « Connectée : <adresse autorisée> »,
 « À envoyer : 0 » (`supabase/proofs/RESULTATS-mitsu.md`, dernière section). Reste la mesure iOS (§ 4.1) sur l'iPhone.
 
+**Porte d'entrée livrée (13 octobre 2026, R34, branche `porte-entree`).** Au démarrage, tant qu'aucun compte n'est
+connecté et que « Continuer sans compte » n'a pas été choisi sur cet appareil, l'app s'ouvre sur un écran d'accueil
+plein (`src/ui/porte-entree.js` : « Kwe. », « Connexion avec Google », « Continuer sans compte ») à la place de la
+coquille ; le choix vit dans `sync_state` (clé `porte_entree`, origine `device`), donc la porte revient après
+« Effacer les données de cet appareil », et elle n'est évaluée qu'au démarrage. Spec § 11, ligne R34 ;
+suite 442/442 verte, 0 erreur console ; `sw.js` `VERSION = 'cuisine-os-v0.2.0-6'`.
+
 **Mesure iOS : à faire par Neegan, avant L3.** Spec § 4.1, dernier alinéa : une PWA installée a son propre conteneur
 de stockage. Installer Cuisine OS sur l'écran d'accueil de l'iPhone, lancer « Activer la synchronisation » et
 regarder **où atterrit le retour de Google** — dans l'app en plein écran, ou dans Safari. Consigner ici la version
