@@ -19,7 +19,7 @@ export async function renderShoppingList(params, query, ctx) {
   if (!rows.length) { root.append(emptyState('🛒', t('Aucun ingrédient structuré dans ces recettes.'))); return root; }
   const ul = el('ul', { class: 'list' });
   for (const r of rows) {
-    const cb = el('input', { type: 'checkbox', checked: !!list.checked[r.key], onChange: async (e) => { list.checked[r.key] = e.target.checked; await repo.db.put('shopping_lists', { ...list, updated_at: repo.nowIso() }); li.style.opacity = e.target.checked ? '.5' : '1'; } });
+    const cb = el('input', { type: 'checkbox', checked: !!list.checked[r.key], onChange: async (e) => { list.checked[r.key] = e.target.checked; await repo.save('shopping_lists', list); li.style.opacity = e.target.checked ? '.5' : '1'; } });
     const li = el('li', { style: { opacity: list.checked[r.key] ? '.5' : '1' } },
       el('label', { class: 'check', style: { alignItems: 'flex-start' } }, cb,
         el('div', null,

@@ -130,4 +130,49 @@ export async function runSyncTests({ eq, ok }) {
   ok(!rules.shouldCache({ url: origin + '/mistu/', method: 'POST' }, origin), 'POST : jamais');
   ok(rules.isSameOriginGet({ url: origin + '/mistu/?code=abc', method: 'GET' }, origin), 'isSameOriginGet : GET même origine avec paramètres');
   ok(!rules.isSameOriginGet({ url: 'https://autre.test/x.js', method: 'GET' }, origin), 'isSameOriginGet : autre origine');
+
+  // --- Capture (spec § 5.2) et repo (spec § 5.1)
+  const { installCapture, uninstallCapture } = await import('../src/sync/outbox.js');
+  await withDatabase(async (db) => {
+    installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false });
+    await db.mutate({ puts: { recipes: [{ id: 'r1', updated_at: '2026-10-12T10:00:00Z' }], settings: [{ key: 'k', value: 1 }], library_activity: [{ id: 'act1', edition_id: 'e', updated_at: '2026-10-12T10:00:00Z' }] } });
+    let out = await db.getAll('outbox');
+    eq(out.map((o) => [o.store, o.id, o.op, o.user_id]), [['recipes', 'r1', 'put', 'u1']], 'recipes capturé ; settings et library_activity (réglage off) non');
+    await db.mutate({ deletes: { recipes: ['r1'] }, payloads: { recipes: { r1: { id: 'r1', updated_at: '2026-10-12T10:00:00Z' } } } });
+    out = await db.getAll('outbox');
+    eq([out.at(-1).op, out.at(-1).payload?.id], ['delete', 'r1'], 'suppression capturée avec sa copie');
+    await db.mutate({ puts: { recipes: [{ id: 'r2', updated_at: '2026-10-12T10:00:00Z' }] }, origin: 'remote' });
+    eq((await db.getAll('outbox')).length, 2, 'réception : non capturée');
+    await db.mutate({ clearStores: ['recipes'], origin: 'device' });
+    eq((await db.getAll('outbox')).length, 2, 'vidage d’appareil : non capturé');
+    uninstallCapture(db);
+  });
+  const { withRepo } = await import('./sync-fixture.js'); // base temporaire v2, repo lié dessus
+  await withRepo(async (repo, db) => {
+    const row = await repo.putFile('b'.repeat(64), new Blob(['x'], { type: '' }), { original_filename: 'IMG.HEIC' });
+    ok(row.updated_at && row.mime === 'image/heic' && row.syncable === true, 'putFile : updated_at, type résolu, synchronisable');
+    const unknown = await repo.putFile('c'.repeat(64), new Blob(['y'], { type: '' }), { original_filename: 'notes.txt' });
+    ok(unknown.syncable === false && unknown.mime === 'application/octet-stream', 'type inconnu : gardé localement, non synchronisable');
+    await db.mutate({ puts: { files: [{ sha256: 'd'.repeat(64), mime: 'image/jpeg', size: 1, remote: true, updated_at: '2026-10-12T10:00:00Z' }] }, origin: 'remote' });
+    const filled = await repo.putFile('d'.repeat(64), new Blob(['z'], { type: 'image/jpeg' }), { origin: 'remote' });
+    ok(filled.blob instanceof Blob, 'putFile remote : le blob est écrit sur une ligne qui n’en avait pas');
+    await repo.recordActivity('ed1', 'open');
+    ok((await db.getAll('library_activity'))[0].updated_at, 'recordActivity : updated_at');
+    await repo.save('recipes', { id: 'r1' });
+    await repo.remove('recipes', 'r1');
+    const out = await db.getAll('outbox');
+    eq(out.map((o) => o.op), ['put', 'put', 'put', 'delete'].slice(-out.length), 'ordre des captures');
+    await repo.clearDevice({ signOut: async () => {} });
+    eq([(await db.getAll('recipes')).length, (await db.getAll('outbox')).length, (await db.getAll('sync_state')).map((s) => s.key)], [0, 0, ['device_id']], 'clearDevice : tout vidé sauf device_id');
+  });
+  // Test statique : aucune écriture directe hors repo.js, src/sync/ et backup.js (spec § 5.2)
+  const swText = await (await fetch('../sw.js')).text();
+  const shell = [...swText.matchAll(/'(\.\/src\/[^']+\.js)'/g)].map((m) => m[1]);
+  const forbidden = new RegExp('\\bdb\\.(' + MUTATING_METHODS.join('|') + ')\\s*\\(');
+  const offenders = [];
+  for (const file of shell) {
+    if (/src\/model\/repo\.js$|src\/sync\/|src\/domain\/backup\.js$|src\/core\/db\.js$/.test(file)) continue;
+    if (forbidden.test(await (await fetch('../' + file.slice(2))).text())) offenders.push(file);
+  }
+  eq(offenders, [], 'aucune écriture IndexedDB directe hors des portes autorisées');
 }

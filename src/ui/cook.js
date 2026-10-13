@@ -61,8 +61,7 @@ export async function renderCook(params, query, ctx) {
   async function persist() {
     progress.total_steps = items.reduce((n, it) => n + stepsOf(it).length, 0);
     session.progress = progress;
-    session.updated_at = repo.nowIso();
-    await repo.db.put('cook_sessions', session);
+    await repo.save('cook_sessions', session); // repo.save pose updated_at par l'horloge corrigée
   }
 
   function draw() {
@@ -116,10 +115,10 @@ export async function renderCook(params, query, ctx) {
     const stateEl = el('div', { class: 'muted', style: { fontSize: '.9rem' } });
     const mirror = el('div', { class: 'mirror', style: { display: 'none' } });
     let mirrorTimer = null;
-    const setState = async (state) => { if (!launch) return; launch.handoff_state = state; launch.updated_at = repo.nowIso(); await repo.db.put('timer_launches', launch); stateEl.textContent = `${label('timer_state', state)} — ${TIMER_STATE_HELP[state]}`; };
+    const setState = async (state) => { if (!launch) return; launch.handoff_state = state; launch = await repo.save('timer_launches', launch); stateEl.textContent = `${label('timer_state', state)} — ${TIMER_STATE_HELP[state]}`; };
     const request = async (channel) => {
       launch = createTimerLaunch({ cook_session_id: session.id, recipe_version_id: it.version.id, step_id: step.id, device_id: deviceId(), duration_seconds: seconds, channel });
-      await repo.db.put('timer_launches', launch);
+      launch = await repo.save('timer_launches', launch);
       if (channel === 'shortcut') { await setState('opening'); setTimeout(() => { if (launch.handoff_state === 'opening') setState('unconfirmed'); }, 2500); }
       else stateEl.textContent = `${label('timer_state', 'siri')} — ${TIMER_STATE_HELP.siri}`;
       startMirror();

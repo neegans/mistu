@@ -152,7 +152,7 @@ export async function renderSettings(params, query, ctx) {
         if (!(await confirmDialog(t('Effacer toutes les données locales ? Fais d’abord une sauvegarde.'), { danger: true, okLabel: t('Continuer') }))) return;
         const word = await promptDialog(t('Tape EFFACER pour confirmer'));
         if (word !== 'EFFACER') { toast(t('Annulé')); return; }
-        await repo.db.clearAll(); localStorage.removeItem('cuisineos.device'); toast(t('Données effacées')); location.hash = '#/'; location.reload();
+        await repo.clearDevice({ signOut: null }); toast(t('Données effacées')); location.hash = '#/'; location.reload();
       } }, t('Effacer toutes les données')))));
   return root;
 

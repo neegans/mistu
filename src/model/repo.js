@@ -4,11 +4,29 @@ import { DB_NAME, DB_VERSION, STORES } from './schema.js';
 import { UNIT_DEFINITIONS, UNIT_CONVENTIONS, INGREDIENTS } from './seed.js';
 import { newId, nowIso } from '../core/ids.js';
 import { emit } from '../core/bus.js';
+import { syncNow } from '../sync/clock.js';
+import { resolveMime } from '../sync/mime.js';
 
-export const db = new Database(DB_NAME, DB_VERSION, STORES);
+// Base de l'application. Liaison vivante : bindDatabase ne sert qu'aux tests, pour travailler sur une base jetable.
+export let db = new Database(DB_NAME, DB_VERSION, STORES);
+export function bindDatabase(database) { db = database; }
+
+const DEVICE_STORAGE_KEY = 'cuisineos.device';
+
+// L'identité de l'appareil quitte localStorage pour sync_state (spec § 5.1) : elle survit au vidage, pas à la désinstallation.
+async function migrateDeviceId() {
+  let stored = null;
+  try { stored = localStorage.getItem(DEVICE_STORAGE_KEY); } catch { return; }
+  if (!stored) return;
+  if (!(await db.get('sync_state', 'device_id'))) {
+    await db.mutate({ puts: { sync_state: [{ key: 'device_id', value: stored }] }, origin: 'device' });
+  }
+  try { localStorage.removeItem(DEVICE_STORAGE_KEY); } catch { /* stockage indisponible : la clé sera reprise au prochain démarrage */ }
+}
 
 export async function init() {
   await db.open();
+  await migrateDeviceId();
   // Références : ajoutées seulement si absentes (jamais écrasées, pour préserver les corrections de l'utilisateur).
   const [units, conventions, ingredients] = await Promise.all([
     db.getAll('unit_definitions'), db.getAll('unit_conventions'), db.getAll('ingredients'),
@@ -51,13 +69,14 @@ export async function setSetting(key, value) {
 }
 
 // --- Aides génériques ------------------------------------------------------
+// Les fiches synchronisées sont horodatées par l'horloge corrigée (spec § 5.3), jamais par l'heure brute de l'appareil.
 export function stamp(record) {
-  const now = nowIso();
+  const now = syncNow();
   return { created_at: now, updated_at: now, ...record };
 }
 
 export async function save(store, record) {
-  const r = { ...record, updated_at: nowIso() };
+  const r = { ...record, updated_at: syncNow() };
   if (!r.created_at) r.created_at = r.updated_at;
   await db.put(store, r);
   emit('change', { store, id: r.id ?? r.key ?? r.edition_id ?? r.sha256 });
@@ -65,7 +84,7 @@ export async function save(store, record) {
 }
 
 export async function saveBatch(batch) {
-  const now = nowIso();
+  const now = syncNow();
   const stamped = {};
   for (const [store, rows] of Object.entries(batch)) {
     stamped[store] = rows.map((r) => ({ ...r, created_at: r.created_at || now, updated_at: now }));
@@ -75,9 +94,30 @@ export async function saveBatch(batch) {
   return stamped;
 }
 
+// La fiche est relue avant sa suppression : la capture a besoin de sa copie pour l'envoyer (spec § 5.1).
 export async function remove(store, key) {
-  await db.delete(store, key);
+  const existing = await db.get(store, key);
+  await db.mutate({ deletes: { [store]: [key] }, payloads: { [store]: { [key]: existing || null } } });
   emit('change', { store, id: key });
+}
+
+// Même forme pour un lot : une seule transaction, toutes les copies lues avant.
+export async function removeMany(store, keys) {
+  if (!keys.length) return;
+  const existing = await db.getMany(store, keys);
+  const payloads = Object.create(null); // une clé homonyme d'une propriété native reste une clé, pas un héritage
+  keys.forEach((key, i) => { payloads[key] = existing[i] || null; });
+  await db.mutate({ deletes: { [store]: keys }, payloads: { [store]: payloads } });
+  emit('change', { store });
+}
+
+// Efface tout ce qui est à cet appareil sauf son identité ; jamais capturé (spec § 5.1).
+export async function clearDevice({ signOut } = {}) {
+  const device = await db.get('sync_state', 'device_id');
+  // mutate vide avant d'écrire : device_id est remis dans la même transaction.
+  await db.mutate({ clearStores: Object.keys(STORES), puts: device ? { sync_state: [device] } : {}, origin: 'device' });
+  if (signOut) await signOut();
+  emit('change', { store: '*' });
 }
 
 export const all = (store) => db.getAll(store);
@@ -101,11 +141,16 @@ export function groupBy(rows, key) {
 }
 
 // --- Fichiers (stockage d'objets local, dédupliqué par empreinte) --------
+// Une ligne reçue du serveur arrive sans octets : le blob est écrit même si la ligne existe déjà (spec § 5.4).
+// Aucun refus local : un type hors liste est gardé, visible, marqué non synchronisable.
 export async function putFile(sha256, blob, meta = {}) {
   const existing = await db.get('files', sha256);
-  if (existing) return existing;
-  const row = { sha256, blob, mime: blob.type || meta.mime || 'application/octet-stream', size: blob.size, created_at: nowIso(), ...meta };
-  await db.put('files', row);
+  if (existing && existing.blob instanceof Blob) return existing;
+  const { origin, ...rest } = meta;
+  const { mime, syncable } = resolveMime(blob.type || meta.mime, meta.original_filename || existing?.original_filename);
+  const now = syncNow();
+  const row = { ...(existing || {}), sha256, blob, mime, syncable, size: blob.size, created_at: existing?.created_at || now, updated_at: now, ...rest };
+  await db.mutate({ puts: { files: [row] }, origin: origin === 'remote' ? 'remote' : 'local' });
   return row;
 }
 
@@ -114,7 +159,8 @@ export const getFile = (sha256) => db.get('files', sha256);
 // --- Journal de consultation (spec §32) : seules les ouvertures volontaires comptent ------------
 export async function recordActivity(edition_id, event_type, extra = {}) {
   if (!edition_id) return;
-  await db.put('library_activity', { id: newId('act'), edition_id, event_type, occurred_at: nowIso(), ...extra });
+  const now = syncNow();
+  await db.mutate({ puts: { library_activity: [{ id: newId('act'), edition_id, event_type, occurred_at: now, updated_at: now, ...extra }] } });
   emit('change', { store: 'library_activity' });
 }
 

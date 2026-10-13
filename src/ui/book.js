@@ -102,7 +102,7 @@ export async function renderBook(params, query, ctx) {
           book_editions: [{ ...edition, isbn: meta.isbn.trim() || null, publisher: meta.publisher.trim() || null, year: meta.year ? parseInt(meta.year, 10) || null : null, language: meta.language, unit_convention_id: meta.convention || null, convention_evidence: meta.convention ? (edition.unit_convention_id === meta.convention ? edition.convention_evidence : 'confirmed_by_user') : null }] });
         toast(t('Enregistré')); refresh();
       } }, t('Enregistrer')),
-      pref?.hidden ? el('button', { class: 'btn', onClick: async () => { await repo.db.put('rediscovery_prefs', { ...pref, hidden: false }); toast(t('Livre de nouveau proposé dans Redécouvrir')); refresh(); } }, t('Réafficher dans Redécouvrir')) : null,
+      pref?.hidden ? el('button', { class: 'btn', onClick: async () => { await repo.save('rediscovery_prefs', { ...pref, hidden: false }); toast(t('Livre de nouveau proposé dans Redécouvrir')); refresh(); } }, t('Réafficher dans Redécouvrir')) : null,
       !recipes.length && !docs.length ? el('button', { class: 'btn danger', onClick: async () => {
         if (!(await confirmDialog(t('Supprimer ce livre ? Il n’a aucune recette ni page.'), { danger: true, okLabel: t('Supprimer') }))) return;
         await repo.remove('book_editions', edition.id);

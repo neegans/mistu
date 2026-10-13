@@ -165,7 +165,7 @@ function sessionView(session, ctx) {
     if (used.length) { toast(t('{n} page(s) déjà liée(s) à une recette : retire d’abord la recette.', { n: used.length })); return; }
     if (!(await confirmDialog(t('Retirer {n} page(s) de la séance ? Les fichiers restent dans la base tant qu’une autre référence existe.', { n: ids.length }), { danger: true, okLabel: t('Retirer') }))) return;
     session.page_ids = session.page_ids.filter((id) => !ids.includes(id));
-    await repo.db.deleteMany('source_pages', ids);
+    await repo.removeMany('source_pages', ids);
     await repo.save('scan_sessions', session);
     refresh();
   }

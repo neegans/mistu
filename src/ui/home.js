@@ -74,12 +74,12 @@ async function rediscoverCard(ctx, query) {
   if (!s) return el('div');
   const pref = ctx.rediscovery_prefs.find((p) => p.edition_id === s.edition.id) || { edition_id: s.edition.id };
   if (!pref.last_suggested_at || Date.now() - Date.parse(pref.last_suggested_at) > 86400000) {
-    await repo.db.put('rediscovery_prefs', { ...pref, last_suggested_at: new Date().toISOString() });
+    await repo.save('rediscovery_prefs', { ...pref, last_suggested_at: new Date().toISOString() });
   }
   const title = s.mode === 'rediscover'
     ? t('À redécouvrir : ce livre n’a pas été consulté dans Cuisine OS depuis {n} mois.', { n: s.months_since })
     : t('À explorer dans ta bibliothèque');
-  const savePref = async (patch) => { await repo.db.put('rediscovery_prefs', { ...pref, ...patch }); emit('change', { store: 'rediscovery_prefs' }); refresh(); };
+  const savePref = async (patch) => { await repo.save('rediscovery_prefs', { ...pref, ...patch }); emit('change', { store: 'rediscovery_prefs' }); refresh(); };
   return el('div', { class: 'card', style: { borderLeft: '4px solid var(--sage)' } },
     el('div', { class: 'muted', style: { fontSize: '.8rem', textTransform: 'uppercase', letterSpacing: '.04em' } }, t('Redécouvrir')),
     el('h2', null, title),
