@@ -204,7 +204,14 @@ export async function renderSettings(params, query, ctx) {
     const controls = el('div', { class: 'row' });
     const result = el('div', { class: 'stack', role: 'status' });
     let appliedOnce = false;
-    const apply = async (mode) => {
+    // Le geste : la décision (R31) vit dans restaurerArchive(), les effets dans appliquerArchive().
+    const apply = (mode) => restaurerArchive({
+      mode,
+      pending: () => repo.db.count('outbox'),
+      toast,
+      appliquer: () => appliquerArchive(mode),
+    });
+    const appliquerArchive = async (mode) => {
       if (appliedOnce || archiveOperation) return;
       setArchiveBusy(true);
       let committed = false;
@@ -259,6 +266,11 @@ const messageEnAttente = (n) => (n === 1
   ? t('1 élément n’est pas encore envoyé.')
   : t('{n} éléments ne sont pas encore envoyés.', { n }));
 
+// Remplacement d'archive refusé (R31) : deux chaînes, jamais un pluriel calculé sur une chaîne traduite.
+const messageRemplacementRefuse = (n) => (n === 1
+  ? t('1 élément est en attente d’envoi. Restaure en fusion, ou efface d’abord les données de cet appareil.')
+  : t('{n} éléments sont en attente d’envoi. Restaure en fusion, ou efface d’abord les données de cet appareil.', { n }));
+
 // Même règle pour la perte annoncée avant « Changer de compte » : zéro et un prennent le singulier en français.
 const messagePerte = (n) => (n > 1
   ? t('{n} envois en attente seront perdus — ils sont dans l’archive.', { n })
@@ -279,6 +291,22 @@ export async function effacerDonnees({ user = null, pending, confirm, demanderMo
   await clearDevice({ signOut });
   dire(t('Données effacées'));
   reload();
+  return true;
+}
+
+// Restauration d'une archive (spec § 5.2, R31) : décision seule, dépendances injectées — ni DOM ni base.
+// Le mode « remplacement » vide la bibliothèque : il est refusé dès qu'une entrée d'outbox existe, CONNECTÉ OU NON.
+// Sans ce refus, ce qui attendait d'être envoyé disparaîtrait avec les fiches qui le justifient, et l'appareil
+// repartirait avec une file qui ne correspond plus à rien. La fusion, elle, reste permise : elle écrit par-dessus.
+// La file est relue au moment du geste (elle a pu se remplir depuis le rendu de la page), comme pour effacerDonnees.
+// En L2 rien ne vide la file : le message renvoie donc vers les deux issues qui existent aujourd'hui — restaurer en
+// fusion, ou « Effacer les données de cet appareil » (qui purge la file). Un geste « vider la file » est L3.
+export async function restaurerArchive({ mode, pending, toast: dire, appliquer }) {
+  if (mode === 'replace') {
+    const enAttente = await pending();
+    if (enAttente > 0) { dire(messageRemplacementRefuse(enAttente)); return false; }
+  }
+  await appliquer();
   return true;
 }
 

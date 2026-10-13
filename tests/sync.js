@@ -600,6 +600,38 @@ export async function runSyncTests({ eq, ok }) {
       'effacer : avec un compte, l’effacement emporte la déconnexion, PUIS le rechargement');
   }
 
+  // --- R31 : le remplacement d'une archive est refusé dès qu'une entrée attend d'être envoyée (spec § 5.2)
+  // Le refus vaut CONNECTÉ OU NON : le remplacement vide la bibliothèque, et ce qui attendait de partir ne serait
+  // plus là pour être renvoyé. La fusion reste permise. La file est relue AU MOMENT du geste, pas au rendu.
+  const { restaurerArchive } = await import('../src/ui/settings.js');
+  const journalRestauration = () => {
+    const vus = [];
+    return { vus, toast: (m) => vus.push(['toast', m]), appliquer: async () => { vus.push(['appliquer']); } };
+  };
+  {
+    const r = journalRestauration(); let lectures = 0;
+    const applique = await restaurerArchive({ mode: 'replace', pending: async () => { lectures += 1; return 2; }, toast: r.toast, appliquer: r.appliquer });
+    eq([applique, r.vus, lectures],
+      [false, [['toast', '2 éléments sont en attente d’envoi. Restaure en fusion, ou efface d’abord les données de cet appareil.']], 1],
+      'R31 : remplacement refusé avec deux entrées en file, rien n’est appliqué, et la file est relue au geste');
+  }
+  {
+    const r = journalRestauration();
+    await restaurerArchive({ mode: 'replace', pending: async () => 1, toast: r.toast, appliquer: r.appliquer });
+    eq(r.vus, [['toast', '1 élément est en attente d’envoi. Restaure en fusion, ou efface d’abord les données de cet appareil.']],
+      'R31 : une seule entrée en file → la phrase est au singulier');
+  }
+  {
+    const r = journalRestauration();
+    eq([await restaurerArchive({ mode: 'replace', pending: async () => 0, toast: r.toast, appliquer: r.appliquer }), r.vus],
+      [true, [['appliquer']]], 'R31 : file vide → le remplacement est appliqué');
+  }
+  {
+    const r = journalRestauration();
+    eq([await restaurerArchive({ mode: 'merge', pending: async () => 5, toast: r.toast, appliquer: r.appliquer }), r.vus],
+      [true, [['appliquer']]], 'R31 : la fusion reste permise, même avec une file non vide');
+  }
+
   // R27 : retirer le consentement à l'historique retire AUSSI ce qui attendait de partir (spec § 4.2, D6).
   // Un retrait de consentement qui laisse partir la file n'est pas un retrait.
   await withRepo(async (repoTemp, db) => {
@@ -647,11 +679,16 @@ export async function runSyncTests({ eq, ok }) {
       onChange: () => () => {},
     };
     const patienter = async (predicat) => { for (let i = 0; i < 100 && !predicat(); i += 1) await new Promise((r) => setTimeout(r, 10)); return predicat(); };
-    const journalBorne = []; const vraiLogBorne = console.error; console.error = (...a) => journalBorne.push(a);
-    const debut = Date.now();
-    const etatBorne = await demarrerSync({ auth: authLent, delaiMs: 50 });
-    const duree = Date.now() - debut;
-    console.error = vraiLogBorne;
+    // Le stub de console.error est posé en try/finally : un échec en cours de bloc ne doit pas laisser la console
+    // détournée pour tout le reste de la suite (dette nommée dans CLAUDE.md, levée ici).
+    const journalBorne = []; const vraiLogBorne = console.error;
+    let etatBorne = null; let duree = 0;
+    try {
+      console.error = (...a) => journalBorne.push(a);
+      const debut = Date.now();
+      etatBorne = await demarrerSync({ auth: authLent, delaiMs: 50 });
+      duree = Date.now() - debut;
+    } finally { console.error = vraiLogBorne; }
     ok(duree < 1000, 'R28 : demarrerSync rend la main en moins d’une seconde quand le fournisseur ne répond pas (' + duree + ' ms)');
     eq([etatBorne.enAttente, etatBorne.user, etatBorne.guard, etatBorne.retour], [true, null, null, null],
       'R28 : au dépassement, l’app démarre sans compte et le dit « en attente »');
