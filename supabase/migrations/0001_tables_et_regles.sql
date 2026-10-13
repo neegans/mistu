@@ -55,10 +55,17 @@ create trigger enforce_allowed_user before insert on auth.users for each row exe
 -- les 25 tables. Sans cette pose inconditionnelle, un PATCH direct écrirait server_seq — le curseur de réception de
 -- TOUS les appareils (spec § 5.5) — et la réception s'arrêterait en silence. Une écriture qui ne change rien coûte
 -- donc un numéro de séquence : c'est le prix de la garantie, et sync_push n'écrit déjà rien sur un réessai identique.
+-- S2 (précise § 3.1 « posée par le serveur ») : la tombale deleted_at est FIGÉE de la même façon. Même raison — la
+-- règle *_update n'autorise que par ligne, jamais par colonne : un PATCH direct posant deleted_at = now() aurait
+-- fait disparaître la fiche de TOUS les appareils à la prochaine réception, sans passer par sync_push et sans qu'un
+-- client puisse distinguer cela d'une suppression voulue. Seule sync_push dégèle la colonne, par un drapeau local à
+-- sa transaction. Sous app.maintenance, rien n'est touché : ni la séquence (sinon purge_tombstones réémettrait tout),
+-- ni la tombale — et l'ancienne valeur de server_seq est reposée, pour que celle de l'appelant ne survive nulle part.
 create or replace function public.touch_server_seq() returns trigger language plpgsql set search_path = '' as $$
 begin
   if tg_op = 'INSERT' then new.server_seq := nextval('public.sync_seq'); return new; end if;
-  if current_setting('app.maintenance', true) = 'on' then return new; end if;
+  if current_setting('app.maintenance', true) = 'on' then new.server_seq := old.server_seq; return new; end if;
+  if current_setting('app.sync_push', true) <> 'on' then new.deleted_at := old.deleted_at; end if;
   new.server_seq := nextval('public.sync_seq');
   return new;
 end $$;
@@ -552,6 +559,10 @@ begin
   -- Autorisation vérifiée une fois, ici : une adresse retirée de private.allowed_users pendant la session doit
   -- donner un échec franc, pas 500 rejets « forme » que le client lirait comme « mes fiches sont mal formées ».
   if not public.is_allowed() then raise exception 'adresse non autorisée'; end if;
+  -- S2 : seule cette fonction a le droit d'écrire la tombale deleted_at (le déclencheur la fige partout ailleurs).
+  -- Drapeau LOCAL à la transaction ; via PostgREST, un appel de RPC est une transaction (voir la limite connue du
+  -- § 11 sur app.purge : la portée est la même, et elle vaut ici pour la même raison).
+  perform set_config('app.sync_push', 'on', true);
   for r in select * from jsonb_array_elements(rows) loop
     s := r->>'store'; i := r->>'id'; d := r->'data'; adj := false; bad := null;
     if s is null or not (s = any(stores)) then raise exception 'store inconnu'; end if;

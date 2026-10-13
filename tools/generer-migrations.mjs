@@ -2,6 +2,7 @@
 // Génère les migrations SQL du lot « compte et stockage distant » depuis src/sync/tables.js (spec § 3.1-3.7).
 // Usage : node tools/generer-migrations.mjs            → écrit supabase/migrations/0001_*.sql et 0002_*.sql
 //         node tools/generer-migrations.mjs --check    → code 1 si les fichiers commités diffèrent du généré
+//         … --dir <chemin>                             → autre répertoire (écriture ET --check) ; code 2 sans chemin
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -103,10 +104,17 @@ create trigger enforce_allowed_user before insert on auth.users for each row exe
 -- les 25 tables. Sans cette pose inconditionnelle, un PATCH direct écrirait server_seq — le curseur de réception de
 -- TOUS les appareils (spec § 5.5) — et la réception s'arrêterait en silence. Une écriture qui ne change rien coûte
 -- donc un numéro de séquence : c'est le prix de la garantie, et sync_push n'écrit déjà rien sur un réessai identique.
+-- S2 (précise § 3.1 « posée par le serveur ») : la tombale deleted_at est FIGÉE de la même façon. Même raison — la
+-- règle *_update n'autorise que par ligne, jamais par colonne : un PATCH direct posant deleted_at = now() aurait
+-- fait disparaître la fiche de TOUS les appareils à la prochaine réception, sans passer par sync_push et sans qu'un
+-- client puisse distinguer cela d'une suppression voulue. Seule sync_push dégèle la colonne, par un drapeau local à
+-- sa transaction. Sous app.maintenance, rien n'est touché : ni la séquence (sinon purge_tombstones réémettrait tout),
+-- ni la tombale — et l'ancienne valeur de server_seq est reposée, pour que celle de l'appelant ne survive nulle part.
 create or replace function public.touch_server_seq() returns trigger language plpgsql set search_path = '' as $$
 begin
   if tg_op = 'INSERT' then new.server_seq := nextval('public.sync_seq'); return new; end if;
-  if current_setting('app.maintenance', true) = 'on' then return new; end if;
+  if current_setting('app.maintenance', true) = 'on' then new.server_seq := old.server_seq; return new; end if;
+  if current_setting('app.sync_push', true) <> 'on' then new.deleted_at := old.deleted_at; end if;
   new.server_seq := nextval('public.sync_seq');
   return new;
 end $$;
@@ -135,6 +143,10 @@ begin
   -- Autorisation vérifiée une fois, ici : une adresse retirée de private.allowed_users pendant la session doit
   -- donner un échec franc, pas 500 rejets « forme » que le client lirait comme « mes fiches sont mal formées ».
   if not public.is_allowed() then raise exception 'adresse non autorisée'; end if;
+  -- S2 : seule cette fonction a le droit d'écrire la tombale deleted_at (le déclencheur la fige partout ailleurs).
+  -- Drapeau LOCAL à la transaction ; via PostgREST, un appel de RPC est une transaction (voir la limite connue du
+  -- § 11 sur app.purge : la portée est la même, et elle vaut ici pour la même raison).
+  perform set_config('app.sync_push', 'on', true);
   for r in select * from jsonb_array_elements(rows) loop
     s := r->>'store'; i := r->>'id'; d := r->'data'; adj := false; bad := null;
     if s is null or not (s = any(stores)) then raise exception 'store inconnu'; end if;
@@ -278,12 +290,27 @@ revoke all on private.storage_usage from anon, authenticated;
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const dir = path.join(here, '..', 'supabase', 'migrations');
+const DOSSIER_PAR_DEFAUT = path.join(here, '..', 'supabase', 'migrations');
+
+// --dir <chemin> : répertoire des migrations, pour --check COMME pour l'écriture (F1). Sans cette option, --check ne
+// pouvait être éprouvé que sur les fichiers du dépôt : aucun test ne pouvait vérifier qu'il sort bien en 1 sur un
+// fichier altéré, et la garde elle-même n'était gardée par rien. Rend null si l'option est là sans chemin.
+export function dossierDemande(args, defaut = DOSSIER_PAR_DEFAUT) {
+  const i = args.indexOf('--dir');
+  if (i === -1) return defaut;
+  const valeur = args[i + 1];
+  if (!valeur || valeur.startsWith('--')) return null;
+  return path.resolve(valeur);
+}
+
 // Exécution directe seulement : importé par le test, le module n'écrit rien.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  const dir = dossierDemande(args);
+  if (!dir) { console.error('--dir : chemin du répertoire des migrations manquant.'); process.exit(2); }
   const { tables, storage } = renderMigrations();
   const targets = [['0001_tables_et_regles.sql', tables], ['0002_stockage.sql', storage]];
-  if (process.argv.includes('--check')) {
+  if (args.includes('--check')) {
     let differ = false;
     for (const [name, content] of targets) {
       let current = null; try { current = readFileSync(path.join(dir, name), 'utf8'); } catch { /* absent */ }

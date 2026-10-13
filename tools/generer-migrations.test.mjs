@@ -68,12 +68,15 @@ test('R25 : touch_server_seq pose nextval a chaque insert ET update, sans jamais
   assert.match(p, /if tg_op = 'INSERT' then new\.server_seq := nextval\('public\.sync_seq'\); return new; end if;/);
   // Deux poses seulement : celle de l'insert et celle de l'update. Aucune troisieme branche, aucune condition.
   assert.equal((p.match(/new\.server_seq := nextval\('public\.sync_seq'\)/g) || []).length, 2);
-  // Plus aucune lecture de l'ancienne ou de la nouvelle valeur : ni « si null », ni comparaison de contenu.
+  // La valeur fournie par l'appelant n'est jamais lue : ni « si null », ni comparaison de contenu. Depuis S2, la
+  // SEULE mention de old.server_seq est la repose de l'ancienne valeur sous maintenance — jamais une lecture de
+  // new.server_seq pour decider quoi que ce soit.
   assert.doesNotMatch(p, /is distinct from/);
   assert.doesNotMatch(p, /server_seq is null/);
-  assert.doesNotMatch(p, /old\.server_seq/);
+  assert.equal((p.match(/old\.server_seq/g) || []).length, 1);
+  assert.match(p, /new\.server_seq := old\.server_seq;/);
   // Et la seule sortie sans pose est la maintenance, AVANT la pose de l'update (sinon purge_tombstones reemettrait).
-  const iMaintenance = p.indexOf("if current_setting('app.maintenance', true) = 'on' then return new; end if;");
+  const iMaintenance = p.indexOf("if current_setting('app.maintenance', true) = 'on' then new.server_seq := old.server_seq; return new; end if;");
   const iUpdate = p.lastIndexOf("new.server_seq := nextval('public.sync_seq');");
   assert.notEqual(iMaintenance, -1, 'sortie de maintenance presente');
   assert.ok(iUpdate > iMaintenance, 'la maintenance sort avant la pose de la valeur de lupdate');
@@ -190,8 +193,18 @@ test('aucune donnee personnelle, determinisme', () => {
 // Ces fichiers ne sont pas generes : ils sont ecrits a la main et relus contre le SQL genere ci-dessus. Les tests
 // qui suivent verifient ce qu'une relecture humaine laisse passer : un motif oublie, une adresse reelle, un
 // « rollback; » qui ne serait plus la derniere instruction, et le mode d'emploi qui cite 0001 de travers.
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, copyFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 const lire = (chemin) => readFileSync(new URL('../' + chemin, import.meta.url), 'utf8');
+// F1 : le script lui-même est lancé par spawnSync (modèle de tools/verifier-vendor.test.mjs), dans un répertoire
+// temporaire — jamais sur les fichiers du dépôt, qui doivent rester tels qu'ils sont commités.
+const RACINE_MIG = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const SCRIPT_MIG = path.join(RACINE_MIG, 'tools', 'generer-migrations.mjs');
+const MIGRATIONS = path.join(RACINE_MIG, 'supabase', 'migrations');
+const NOMS = ['0001_tables_et_regles.sql', '0002_stockage.sql'];
 const instructions = (texte) => texte.split('\n').map((l) => l.trim()).filter((l) => l !== '');
 
 test('preuve 0001 : les cinq motifs, les privileges, R12, rollback final, aucune adresse reelle', () => {
@@ -266,6 +279,81 @@ test('preuve 0001 : un update qui pose server_seq lui-meme est ignore (R25)', ()
   assert.ok(p.indexOf('(6.10') !== -1 || p.includes('select 6.10'), 'releve de reference numerote 6.10');
   assert.ok(p.indexOf('select 6.10') < p.indexOf("update public.books set server_seq = 1"), 'le releve precede lupdate');
 });
+// --- Vague des residus /verify : S2 (deleted_at appartient au serveur) et F1 (--dir, --check eprouve) -----------
+// S2 precise la section 3.1 « posee par le serveur » : la regle *_update n autorise que par LIGNE, jamais par
+// colonne, et authenticated a le privilege update sur les 25 tables. Un PATCH direct pouvait donc poser
+// deleted_at = now() sur n importe quelle fiche : la tombale aurait fait disparaitre la fiche de TOUS les
+// appareils, sans passer par sync_push et sans qu aucun client ne puisse distinguer cela d une vraie suppression.
+test('S2 : le declencheur fige deleted_at, sauf sous app.sync_push', () => {
+  const p = corps('touch_server_seq');
+  assert.match(p, /if current_setting\('app\.sync_push', true\) <> 'on' then new\.deleted_at := old\.deleted_at; end if;/);
+  // Le degel est examine APRES la sortie de maintenance et AVANT la pose de la sequence : sous maintenance, le
+  // declencheur ne touche a rien (purge_tombstones ne doit rien reemettre).
+  const iMaintenance = p.indexOf("if current_setting('app.maintenance', true) = 'on'");
+  const iGel = p.indexOf("if current_setting('app.sync_push', true) <> 'on'");
+  const iSeq = p.lastIndexOf("new.server_seq := nextval('public.sync_seq');");
+  assert.ok(iMaintenance < iGel && iGel < iSeq, 'ordre : maintenance, puis gel, puis sequence');
+  // Et sous maintenance, server_seq est repose a son ancienne valeur : la valeur de l appelant ne survit nulle part.
+  assert.match(p, /if current_setting\('app\.maintenance', true\) = 'on' then new\.server_seq := old\.server_seq; return new; end if;/);
+});
+test('S2 : sync_push est la seule a poser app.sync_push, apres is_allowed() et avant la boucle', () => {
+  const p = corps('sync_push');
+  assert.match(p, /perform set_config\('app\.sync_push', 'on', true\);/);
+  const iAllowed = p.indexOf('if not public.is_allowed() then raise exception');
+  const iFlag = p.indexOf("perform set_config('app.sync_push', 'on', true);");
+  const iBoucle = p.indexOf('for r in select * from jsonb_array_elements(rows) loop');
+  assert.ok(iAllowed !== -1 && iAllowed < iFlag, 'le drapeau est pose APRES le controle d autorisation');
+  assert.ok(iFlag < iBoucle, 'et avant la boucle');
+  // Une seule pose dans tout le fichier : aucune autre fonction ne degele deleted_at.
+  assert.equal((sql.match(/set_config\('app\.sync_push'/g) || []).length, 1);
+});
+test('preuve 0001 : deleted_at figee par un update direct, modifiable par sync_push (S2)', () => {
+  const p = lire('supabase/proofs/0001_tables_et_regles.sql');
+  const iDirect = p.indexOf("update public.books set deleted_at = now() where id = 'i1';");
+  assert.notEqual(iDirect, -1, 'lupdate direct est joue');
+  assert.ok(p.includes('deleted_at inchange'), 'un verdict attend deleted_at inchange');
+  const iDegel = p.indexOf("set_config('app.sync_push', 'on', true)");
+  assert.notEqual(iDegel, -1, 'le degel est joue dans la meme transaction');
+  assert.ok(iDirect < iDegel, 'le refus est prouve AVANT le degel (sinon il ne prouve rien)');
+  // Le drapeau est remis a vide apres la preuve : un sync_push plus haut dans la transaction ne doit pas
+  // degeler le verdict, et le degel ne doit pas fuir sur la suite de la preuve.
+  assert.ok(p.includes("set_config('app.sync_push', '', true)"), 'le drapeau est remis a vide');
+  assert.ok(p.indexOf("set_config('app.sync_push', '', true)") < iDirect, 'et il est vide AVANT lupdate direct');
+});
+
+test('F1 : --check --dir rend 0 sur une copie conforme, 1 des quun fichier est altere (avec son nom)', () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), 'cuisine-os-migrations-'));
+  try {
+    for (const nom of NOMS) copyFileSync(path.join(MIGRATIONS, nom), path.join(tmp, nom));
+    const vert = spawnSync(process.execPath, [SCRIPT_MIG, '--check', '--dir', tmp], { cwd: RACINE_MIG, encoding: 'utf8' });
+    assert.equal(vert.status, 0, 'copie conforme : ' + vert.stderr);
+    const cible = path.join(tmp, NOMS[0]);
+    const texte = readFileSync(cible, 'utf8');
+    const altere = texte.replace('create sequence if not exists public.sync_seq;', 'create sequence if not exists public.sync_seq_altere;');
+    assert.notEqual(altere, texte, 'laltration a bien mordu sur le fichier copie');
+    writeFileSync(cible, altere);
+    const rouge = spawnSync(process.execPath, [SCRIPT_MIG, '--check', '--dir', tmp], { cwd: RACINE_MIG, encoding: 'utf8' });
+    assert.equal(rouge.status, 1, 'fichier altere : code 1 attendu');
+    assert.match(rouge.stderr, /0001_tables_et_regles\.sql/);
+    assert.doesNotMatch(rouge.stderr, /0002_stockage\.sql/, 'seul le fichier altere est nomme');
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+test('F1 : --dir vaut aussi pour lecriture, et le depot nest pas touche', () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), 'cuisine-os-migrations-ecrit-'));
+  try {
+    const ecrit = spawnSync(process.execPath, [SCRIPT_MIG, '--dir', tmp], { cwd: RACINE_MIG, encoding: 'utf8' });
+    assert.equal(ecrit.status, 0, ecrit.stderr);
+    for (const nom of NOMS) assert.equal(readFileSync(path.join(tmp, nom), 'utf8'), readFileSync(path.join(MIGRATIONS, nom), 'utf8'), nom);
+    const verif = spawnSync(process.execPath, [SCRIPT_MIG, '--check', '--dir', tmp], { cwd: RACINE_MIG, encoding: 'utf8' });
+    assert.equal(verif.status, 0, verif.stderr);
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+test('F1 : --dir sans chemin est un usage incorrect (code 2), rien nest ecrit', () => {
+  const r = spawnSync(process.execPath, [SCRIPT_MIG, '--check', '--dir'], { cwd: RACINE_MIG, encoding: 'utf8' });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--dir/);
+});
+
 test('README : schema temporaire refuse, et colonnes not null de auth.users', () => {
   const r = lire('supabase/README.md');
   assert.ok(r.includes('pg_temp'), 'quoi faire si permission denied for schema pg_temp_...');

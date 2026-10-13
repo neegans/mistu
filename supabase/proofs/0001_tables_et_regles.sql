@@ -380,6 +380,36 @@ select 6.11, 'R25 : lupdate pose server_seq = 1 et la valeur est remplacee par u
   server_seq > (select obtenu from pg_temp.preuve where ordre = 6.10)::bigint
 from public.books where id = 'i1';
 
+-- S2 : la tombale `deleted_at` appartient elle aussi au SERVEUR. Un `update` direct qui la pose est accepté (la
+-- règle `books_update` n'autorise que par ligne) et pourtant la colonne ne bouge pas : le déclencheur la fige. Sans
+-- ce gel, un `PATCH` direct faisait disparaître la fiche de TOUS les appareils à la prochaine réception, sans passer
+-- par `sync_push` et sans qu'un client puisse distinguer cela d'une suppression voulue. `sync_push`, elle, pose
+-- `app.sync_push = 'on'` et écrit la tombale : c'est ce dégel qui est rejoué ici à la main.
+-- Le drapeau est remis à vide d'abord : les `sync_push` joués plus haut l'ont laissé à « on » pour toute CETTE
+-- transaction (set_config local = la transaction entière), et le verdict ne prouverait plus rien.
+select set_config('app.sync_push', '', true);
+insert into pg_temp.preuve
+select 6.12, 'S2 : deleted_at avant lupdate direct', 'valeur de reference', coalesce(deleted_at::text, 'null'), true
+from public.books where id = 'i1';
+update public.books set deleted_at = now() where id = 'i1';
+insert into pg_temp.preuve
+select 6.13, 'S2 : update direct set deleted_at = now() -> deleted_at inchange',
+  (select obtenu from pg_temp.preuve where ordre = 6.12), coalesce(deleted_at::text, 'null'),
+  coalesce(deleted_at::text, 'null') = (select obtenu from pg_temp.preuve where ordre = 6.12)
+from public.books where id = 'i1';
+select set_config('app.sync_push', 'on', true);
+update public.books set deleted_at = now() where id = 'i1';
+insert into pg_temp.preuve
+select 6.14, 'S2 : via set_config(app.sync_push, on, true) dans la meme transaction -> deleted_at change',
+  'non null, different de 6.12', coalesce(deleted_at::text, 'null'),
+      deleted_at is not null
+  and coalesce(deleted_at::text, 'null') <> (select obtenu from pg_temp.preuve where ordre = 6.12)
+from public.books where id = 'i1';
+-- La fiche est remise telle qu'elle était (le drapeau est encore à « on », donc cette remise à null passe) : les
+-- verdicts suivants ne doivent pas lire une tombale de passage.
+update public.books set deleted_at = null where id = 'i1';
+select set_config('app.sync_push', '', true);
+
 -- 7. public.files : JAMAIS d'octets en base, même par un `insert` direct (spec § 3.3).
 do $$
 declare v text;
