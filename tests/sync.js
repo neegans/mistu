@@ -350,9 +350,9 @@ export async function runSyncTests({ eq, ok }) {
     eq(calls.at(-1).signIn.provider, 'google', 'fournisseur Google');
     eq(await auth.handleReturn(), { error: null, codeSansSession: false, present: true }, 'retour normal : aucun refus, session obtenue, retour reconnu');
     eq(fakeHistory.at(-1), '/#/settings', 'code retiré, fragment conservé');
-    eq(auth.readError({ search: '?error=access_denied&error_description=x', hash: '' }), 'Cette adresse n’est pas autorisée.', 'refus : message fixe');
-    eq(auth.readError({ search: '', hash: '#error=server_error&error_code=unexpected_failure' }), 'Cette adresse n’est pas autorisée.', 'refus dans le fragment');
-    eq(auth.readError({ search: '', hash: '#/settings?error=x' }), 'Cette adresse n’est pas autorisée.', 'refus après le ? d’un fragment de route');
+    eq(auth.readError({ search: '?error=access_denied&error_description=x', hash: '' }), 'La connexion a été refusée ou annulée.', 'refus : message fixe');
+    eq(auth.readError({ search: '', hash: '#error=server_error&error_code=unexpected_failure' }), 'La connexion a été refusée ou annulée.', 'refus dans le fragment');
+    eq(auth.readError({ search: '', hash: '#/settings?error=x' }), 'La connexion a été refusée ou annulée.', 'refus après le ? d’un fragment de route');
     eq([auth.readError({ search: '', hash: '' }), auth.readError({ search: '?code=abc&state=s', hash: '#/settings' })], [null, null], 'aucun refus : null');
     eq(await auth.guard('uid-A', 'a@exemple.test'), { ok: true }, 'premier compte : accepté et mémorisé');
     eq((await db.get('sync_state', 'user_id')).value, 'uid-A', 'user_id écrit');
@@ -375,10 +375,10 @@ export async function runSyncTests({ eq, ok }) {
     off(); offBus();
     fakeWin.location.search = '?error=access_denied&error_description=texte+brut';
     const retour = await auth.handleReturn();
-    eq(retour, { error: 'Cette adresse n’est pas autorisée.', codeSansSession: false, present: true }, 'handleReturn : le refus lu est rendu, sans code à échanger');
+    eq(retour, { error: 'La connexion a été refusée ou annulée.', codeSansSession: false, present: true }, 'handleReturn : le refus lu est rendu, sans code à échanger');
     eq(fakeHistory.at(-1), '/#/settings', 'refus aussi retiré de l’historique');
     ok(!JSON.stringify(retour).includes('texte brut') && !JSON.stringify(retour).includes('access_denied'), 'le texte brut du refus n’est jamais rendu');
-    eq(auth.readError({ search: '?error_description=texte+brut', hash: '' }), 'Cette adresse n’est pas autorisée.', 'error_description seul : refus reconnu');
+    eq(auth.readError({ search: '?error_description=texte+brut', hash: '' }), 'La connexion a été refusée ou annulée.', 'error_description seul : refus reconnu');
     let ecritures = 0; const vraiMutate = db.mutate.bind(db);
     db.mutate = (arg) => { ecritures += 1; return vraiMutate(arg); };
     eq([await auth.guard('uid-A', 'a@exemple.test'), ecritures], [{ ok: true }, 0], 'même compte deux fois : accepté sans réécriture');
@@ -421,7 +421,7 @@ export async function runSyncTests({ eq, ok }) {
     // Mineur (b) : un refus porté par le fragment en sort aussi.
     const fragWin = { location: { origin: 'https://c.test', pathname: '/', hash: '#/settings?error=access_denied', search: '' }, history: { replaceState: (a, b, url) => fakeHistory.push(url) } };
     const frag = createAuth({ db, config: { url: 'https://x.supabase.co', anonKey: 'k' }, factory: muetFactory, win: fragWin });
-    eq((await frag.handleReturn()).error, 'Cette adresse n’est pas autorisée.', 'refus dans le fragment : reconnu sans requête');
+    eq((await frag.handleReturn()).error, 'La connexion a été refusée ou annulée.', 'refus dans le fragment : reconnu sans requête');
     eq(fakeHistory.at(-1), '/#/settings', 'refus retiré du fragment, route conservée');
     fragWin.location.hash = '#error=server_error&error_code=unexpected_failure';
     await frag.handleReturn();
@@ -490,8 +490,8 @@ export async function runSyncTests({ eq, ok }) {
   eq(syncSectionModel({ available: true, retour: { error: null, codeSansSession: true } }).lines,
     ['Tes données restent sur cet appareil.', 'La connexion n’a pas abouti.'],
     'retour muet : la connexion n’a pas abouti, dit sans deviner pourquoi');
-  eq(syncSectionModel({ available: true, retour: { error: 'Cette adresse n’est pas autorisée.', codeSansSession: false } }).lines,
-    ['Tes données restent sur cet appareil.', 'Cette adresse n’est pas autorisée.'],
+  eq(syncSectionModel({ available: true, retour: { error: 'La connexion a été refusée ou annulée.', codeSansSession: false } }).lines,
+    ['Tes données restent sur cet appareil.', 'La connexion a été refusée ou annulée.'],
     'refus du fournisseur : la phrase fixe, jamais son texte brut');
   eq(syncSectionModel({ available: true, user: { id: 'uid-A', email: '' }, guard: { ok: true } }).lines,
     ['Connectée : ', 'À envoyer : 0'],
@@ -509,7 +509,7 @@ export async function runSyncTests({ eq, ok }) {
   // --- R21 : la route mémorisée avant signIn() est restaurée à TOUT retour du fournisseur
   // Décision pure, hors du démarrage : elle rend la route à appliquer, ou null, et n'écrit jamais rien.
   const { routeApresRetour } = await import('../src/ui/state.js');
-  eq(routeApresRetour({ retour: { error: 'Cette adresse n’est pas autorisée.', codeSansSession: false, present: true }, memorisee: '#/settings', hashActuel: '' }),
+  eq(routeApresRetour({ retour: { error: 'La connexion a été refusée ou annulée.', codeSansSession: false, present: true }, memorisee: '#/settings', hashActuel: '' }),
     '#/settings', 'refus du fournisseur : la route est restaurée, là où le message s’affiche');
   eq(routeApresRetour({ retour: { error: null, codeSansSession: true, present: true }, memorisee: '#/settings', hashActuel: '' }),
     '#/settings', 'retour muet : restaurée aussi');
@@ -535,6 +535,19 @@ export async function runSyncTests({ eq, ok }) {
   await demarrerConnexion({ signIn: async () => null }, '#/settings');
   eq(sessionStorage.getItem(CLE_ROUTE), null, 'sans client : rien de mémorisé non plus');
   sessionStorage.removeItem(CLE_ROUTE);
+  // R35 : sans second argument — ce que la PORTE appelle — c'est la route COURANTE qui est mémorisée, jamais
+  // l'accueil : un lien profond ouvert au premier lancement survit au détour par le fournisseur.
+  {
+    const hashAvant = location.hash;
+    try {
+      location.hash = '#/library';
+      await demarrerConnexion({ signIn: async () => ({ error: null }) });
+      eq(sessionStorage.getItem(CLE_ROUTE), '#/library', 'R35 : sans route donnée, la route courante est mémorisée');
+    } finally {
+      sessionStorage.removeItem(CLE_ROUTE);
+      location.hash = hashAvant;
+    }
+  }
 
   // Chaque action du modèle doit avoir un geste câblé : la liste est la seule source, le rendu la filtre.
   eq([...SYNC_ACTIONS].sort(), ['changeAccount', 'signIn', 'signOut'], 'trois gestes nommés, pas un de plus');
@@ -803,7 +816,7 @@ export async function runSyncTests({ eq, ok }) {
   // Modèle pur : ce que la porte dit, et si elle doit même s'afficher. Aucun DOM, aucune base, aucun réseau.
   // Les quatre « non » d'abord : ils valent plus que l'écran lui-même — une porte qui s'affiche quand elle ne doit
   // pas enferme la personne dehors à chaque lancement.
-  const { porteEntreeModel, PORTE_ACTIONS } = await import('../src/ui/porte-entree.js');
+  const { porteEntreeModel, renderPorteEntree, PORTE_ACTIONS, ICONE_APP } = await import('../src/ui/porte-entree.js');
   const TITRE_PORTE = 'Kwe.';
   const ACCROCHE_PORTE = 'Ta bibliothèque de recettes, sur tous tes appareils.';
   eq(porteEntreeModel({ available: false }), { afficher: false, titre: TITRE_PORTE, lignes: [], boutons: [] },
@@ -826,10 +839,10 @@ export async function runSyncTests({ eq, ok }) {
     'R34 : garde refusée sans message → la phrase fixe, rien d’inventé');
   eq(porteEntreeModel({ available: true, retour: { codeSansSession: true } }).lignes, [ACCROCHE_PORTE, 'La connexion n’a pas abouti.'],
     'R34 : retour muet dit APRÈS l’accroche, sans deviner pourquoi');
-  eq(porteEntreeModel({ available: true, retour: { error: 'Cette adresse n’est pas autorisée.' } }).lignes, [ACCROCHE_PORTE, 'Cette adresse n’est pas autorisée.'],
+  eq(porteEntreeModel({ available: true, retour: { error: 'La connexion a été refusée ou annulée.' } }).lignes, [ACCROCHE_PORTE, 'La connexion a été refusée ou annulée.'],
     'R34 : la phrase fixe du refus, jamais le texte du fournisseur');
-  eq(porteEntreeModel({ available: true, guard: { ok: false, message: 'Cet appareil ne peut pas vérifier le compte.' }, retour: { codeSansSession: true, error: 'Cette adresse n’est pas autorisée.' } }).lignes,
-    ['Cet appareil ne peut pas vérifier le compte.', 'La connexion n’a pas abouti.', 'Cette adresse n’est pas autorisée.'],
+  eq(porteEntreeModel({ available: true, guard: { ok: false, message: 'Cet appareil ne peut pas vérifier le compte.' }, retour: { codeSansSession: true, error: 'La connexion a été refusée ou annulée.' } }).lignes,
+    ['Cet appareil ne peut pas vérifier le compte.', 'La connexion n’a pas abouti.', 'La connexion a été refusée ou annulée.'],
     'R34 : les lignes du retour s’ajoutent aussi quand la garde a refusé');
   // Chaque action nommée par le modèle doit avoir un geste câblé au démarrage : la liste est la seule source.
   const actionsPorte = new Set([
@@ -841,19 +854,59 @@ export async function runSyncTests({ eq, ok }) {
   eq([...actionsPorte].sort(), ['sansCompte', 'signIn', 'signOut'], 'R34 : la porte offre réellement ces trois actions');
   eq([...actionsPorte].filter((a) => !PORTE_ACTIONS.includes(a)), [], 'R34 : aucune action de la porte sans geste nommé');
 
-  // Le choix « Continuer sans compte » vit EN BASE (R19/R20), jamais dans localStorage, et n'entre jamais en file.
-  // La fixture pose la capture avant ce bloc : si l'origine n'était pas 'device', l'outbox le dirait.
+  // Rendu : seules les actions réellement câblées donnent un bouton. Le cas « aucun bouton » est celui que la garde
+  // du démarrage attrape (logError('porte.sans_geste') puis l'app s'ouvre) : sans elle, la porte attendrait pour
+  // toujours un geste impossible, et l'app ne s'ouvrirait jamais sur cet appareil.
+  const modelPorteNue = porteEntreeModel({ available: true });
+  const gestesPorte = { signIn: () => {}, signOut: () => {}, sansCompte: () => {} };
+  // L'icône est injectée : cette page vit dans tests/, et rendre le chemin de l'app y ferait un 404 dans la console
+  // de la suite (mesuré). Ce que l'app affiche, lui, est épinglé par l'assertion sur ICONE_APP juste en dessous.
+  const OPT_PORTE = { icone: '../icons/icon.svg' };
+  eq(ICONE_APP, './icons/icon.svg', 'R34 : l’icône de la porte reste le chemin relatif de l’app');
+  eq(renderPorteEntree(modelPorteNue, gestesPorte, OPT_PORTE).querySelectorAll('.porte-actions button').length, 2,
+    'R34 : les trois gestes câblés → les deux boutons du modèle « aucun compte »');
+  eq(renderPorteEntree(modelPorteNue, { connexion: () => {}, sansLeCompte: () => {} }, OPT_PORTE).querySelectorAll('.porte-actions button').length, 0,
+    'R34 : gestes renommés → aucun bouton rendu (le cas que la garde du démarrage attrape)');
+  // Le bouton primaire reçoit le focus : au clavier comme au lecteur d'écran, le geste principal est déjà sous la main.
+  {
+    const noeud = renderPorteEntree(modelPorteNue, gestesPorte, OPT_PORTE);
+    const focusables = [...noeud.querySelectorAll('button[autofocus]')];
+    eq(focusables.map((b) => b.textContent.trim()), ['Connexion avec Google'], 'R34 : le bouton primaire, et lui seul, porte le focus');
+  }
+  // Un seul geste compte : le premier clic ferme les deux boutons (double tape, ou « sans compte » pendant que la
+  // redirection de Google part déjà).
+  {
+    const appels = [];
+    const noeud = renderPorteEntree(modelPorteNue, {
+      signIn: () => appels.push('signIn'), signOut: () => appels.push('signOut'), sansCompte: () => appels.push('sansCompte'),
+    }, OPT_PORTE);
+    const boutons = [...noeud.querySelectorAll('.porte-actions button')];
+    boutons[1].click();
+    boutons[0].click(); // un bouton désactivé ne déclenche aucun clic
+    boutons[1].click();
+    eq(appels, ['sansCompte'], 'R34 : un seul geste compte, même sur trois clics');
+    eq(boutons.filter((b) => b.disabled).length, 2, 'R34 : les deux boutons passent disabled après le premier geste');
+  }
+
+  // Le choix « Continuer sans compte » vit EN BASE (R19/R20), jamais dans localStorage, et part en origine 'device'.
   await withRepo(async (repo, db) => {
     eq(await repo.lirePorteEntree(), null, 'R34 : appareil vierge → aucun choix enregistré');
     const clesAvant = (await db.getAll('sync_state')).map((s) => s.key);
-    await repo.choisirSansCompte();
+    // L'origine est MESURÉE sur l'appel réel, pas déduite d'une file vide : une file vide ne dit pas POURQUOI elle
+    // l'est. L'espion est posé en try/finally — un échec en cours de bloc ne doit pas laisser db.mutate détourné.
+    const vraiMutate = db.mutate;
+    const ecritures = [];
+    db.mutate = function (arg) { ecritures.push([Object.keys(arg?.puts || {}).join(','), arg?.origin]); return vraiMutate.call(this, arg); };
+    try { await repo.choisirSansCompte(); }
+    finally { delete db.mutate; }
+    eq(ecritures, [['sync_state', 'device']], 'R34 : le choix s’écrit par db.mutate, magasin sync_state, origine device');
+    ok(db.mutate === vraiMutate, 'R34 : l’espion de db.mutate est retiré');
     eq(await repo.lirePorteEntree(), 'sans_compte', 'R34 : le choix est relu depuis sync_state');
     const clesApres = (await db.getAll('sync_state')).map((s) => s.key);
     eq(clesApres.filter((k) => !clesAvant.includes(k)), ['porte_entree'], 'R34 : une seule ligne ajoutée, dans sync_state');
     const ligne = await db.get('sync_state', 'porte_entree');
     ok(ligne?.value?.choix === 'sans_compte' && typeof ligne?.value?.at === 'string' && !Number.isNaN(Date.parse(ligne.value.at)),
       'R34 : la ligne porte { choix: sans_compte, at: <ISO> }');
-    eq(await db.count('outbox'), 0, 'R34 : le choix n’entre jamais en file d’envoi (origine device)');
     await repo.clearDevice({ signOut: null });
     eq(await repo.lirePorteEntree(), null, 'R34 : après « Effacer les données de cet appareil », la porte revient');
   });

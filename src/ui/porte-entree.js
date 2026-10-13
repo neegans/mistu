@@ -72,22 +72,38 @@ function logoGoogle() {
 
 // Rendu : le modèle dit quoi écrire et quels gestes offrir ; les gestes sont câblés par l'appelant (src/app.js).
 // Une action que l'appelant ne câble pas n'apparaît pas : un bouton manquant se voit, un bouton muet trompe.
-export function renderPorteEntree(model, gestes = {}) {
-  const boutons = model.boutons
-    .filter((b) => Object.hasOwn(gestes, b.action))
-    .map((b) => bouton(b, gestes[b.action]));
+// Chemin de l'icône, relatif comme tout le reste de l'app (elle peut être servie depuis un sous-chemin :
+// `/mistu/` sur GitHub Pages). Il est injectable uniquement pour que la page de tests, qui vit dans `tests/`,
+// n'aille pas chercher une image un dossier trop bas — la valeur par défaut est ce que l'app affiche.
+export const ICONE_APP = './icons/icon.svg';
+
+export function renderPorteEntree(model, gestes = {}, { icone = ICONE_APP } = {}) {
+  const offerts = model.boutons.filter((b) => Object.hasOwn(gestes, b.action));
+  // Un seul geste compte : le premier clic ferme les deux boutons. Une double tape, ou « Continuer sans compte »
+  // tapé pendant que la redirection de Google part déjà, ne doit pas déclencher deux départs.
+  const noeuds = [];
+  const unSeulGeste = (geste) => () => {
+    for (const n of noeuds) n.disabled = true;
+    geste();
+  };
+  for (const b of offerts) noeuds.push(bouton(b, unSeulGeste(gestes[b.action])));
+  const boutons = noeuds;
   const lignes = model.lignes.map((ligne) => el('p', { class: 'porte-ligne' }, ligne));
-  const logo = el('img', { class: 'porte-logo', src: './icons/icon.svg', alt: '', width: '72', height: '72' });
+  const logo = el('img', { class: 'porte-logo', src: icone, alt: '', width: '72', height: '72' });
   const nom = el('p', { class: 'porte-nom' }, 'Cuisine OS');
   const titre = el('h1', { class: 'porte-titre' }, model.titre);
   const actions = el('div', { class: 'porte-actions' }, ...boutons);
   return el('div', { class: 'porte' }, logo, nom, titre, ...lignes, actions);
 }
 
+// `autofocus` sur le bouton primaire : au clavier comme au lecteur d'écran, le geste principal est déjà sous la
+// main. L'attribut seul ne suffit pas sur un nœud inséré après le chargement — app.js appelle focus() après la
+// pose ; l'attribut reste la marque que le rendu peut éprouver sans DOM vivant.
 function bouton(b, geste) {
   const google = b.action === 'signIn';
-  const classes = ['btn', b.tone === 'link' ? 'link' : 'primary'];
+  const primaire = b.tone !== 'link';
+  const classes = ['btn', primaire ? 'primary' : 'link'];
   if (google) classes.push('porte-google');
   const corps = [google ? logoGoogle() : null, el('span', null, b.label)];
-  return el('button', { type: 'button', class: classes.join(' '), onClick: geste }, ...corps);
+  return el('button', { type: 'button', class: classes.join(' '), autofocus: primaire, onClick: geste }, ...corps);
 }

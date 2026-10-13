@@ -155,13 +155,20 @@ async function porteDEntree() {
       choixSansCompte: choix === 'sans_compte',
     });
     if (!model.afficher) return;
+    const gestes = { signIn: null, signOut: null, sansCompte: null };
+    // Garde : la porte ATTEND un geste. Si aucun bouton du modèle n'est câblé ici (action renommée d'un côté
+    // seulement), personne ne pourrait plus jamais ouvrir l'app sur cet appareil. On journalise et on ouvre (I4).
+    if (!model.boutons.some((b) => Object.hasOwn(gestes, b.action))) { logError('porte.sans_geste', {}); return; }
     // Le geste de la personne est la seule chose qui fait avancer ce bloc : rien n'est décidé pour elle.
     const geste = await new Promise((resolve) => {
-      replace(document.getElementById('app'), renderPorteEntree(model, {
+      const racine = renderPorteEntree(model, {
         signIn: () => resolve('signIn'),
         signOut: () => resolve('signOut'),
         sansCompte: () => resolve('sansCompte'),
-      }));
+      });
+      replace(document.getElementById('app'), racine);
+      // `autofocus` ne prend pas sur un nœud inséré après le chargement : le focus est posé une fois en place.
+      racine.querySelector('button[autofocus]')?.focus();
     });
     if (geste === 'sansCompte') {
       // Le choix est écrit avant d'ouvrir l'app. S'il ne s'écrit pas, on ouvre quand même (invariant I4) : la porte
@@ -173,13 +180,16 @@ async function porteDEntree() {
     }
     if (geste === 'signIn') {
       // Départ chez Google : la page est quittée. Si rien ne part, demarrerConnexion le dit (toast) et la porte reste.
-      await demarrerConnexion(auth, '#/');
+      // R35 : la route COURANTE est mémorisée (le défaut de demarrerConnexion), pas l'accueil — un lien profond
+      // ouvert au premier lancement survit au détour par le fournisseur (routeApresRetour fait le reste).
+      await demarrerConnexion(auth);
       continue;
     }
     // signOut : la session de cet appareil est fermée ; ni les données ni la file ne sont touchées (spec § 4.1).
     const essai = await auth?.signOut();
     if (essai?.error) { toast(t('La déconnexion n’a pas abouti.')); continue; }
-    setSyncState({ user: null, guard: null });
+    // `retour: null` : les lignes du retour parlaient de la session qu'on vient de fermer — elles ne lui survivent pas.
+    setSyncState({ user: null, guard: null, retour: null });
   }
 }
 
