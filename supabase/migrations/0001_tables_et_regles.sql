@@ -50,7 +50,7 @@ drop trigger if exists enforce_allowed_user on auth.users;
 create trigger enforce_allowed_user before insert on auth.users for each row execute function public.enforce_allowed_user();
 
 -- Ordre de réception : une séquence globale, posée seulement quand le contenu change et hors maintenance (spec § 3.1).
-create or replace function public.touch_server_seq() returns trigger language plpgsql as $$
+create or replace function public.touch_server_seq() returns trigger language plpgsql set search_path = '' as $$
 begin
   if tg_op = 'INSERT' then new.server_seq := nextval('public.sync_seq'); return new; end if;
   if current_setting('app.maintenance', true) = 'on' then return new; end if;
@@ -527,6 +527,9 @@ create policy files_delete on public.files for delete to authenticated using (pu
 create trigger files_seq before insert or update on public.files for each row execute function public.touch_server_seq();
 
 revoke all on all tables in schema public from anon;
+-- Personne ne l'appelle directement : les 25 déclencheurs ci-dessus sont déjà créés, et PostgreSQL ne revérifie pas
+-- le droit d'exécution d'une fonction de déclencheur au moment où il se déclenche.
+revoke execute on function public.touch_server_seq() from public, anon, authenticated;
 
 -- Envoi (spec § 3.4) : sous RLS, par élément, idempotent, jamais d'exception pour une ligne.
 create or replace function public.sync_push(rows jsonb) returns jsonb
@@ -544,10 +547,14 @@ begin
   if jsonb_array_length(rows) > 500 then raise exception 'rows : 500 éléments au plus'; end if;
   if pg_column_size(rows) > 1048576 then raise exception 'rows : 1 Mo au plus'; end if;
   for r in select * from jsonb_array_elements(rows) loop
-    s := r->>'store'; i := r->>'id'; d := r->'data'; del := coalesce((r->>'deleted')::boolean, false); adj := false; bad := null;
+    s := r->>'store'; i := r->>'id'; d := r->'data'; adj := false; bad := null;
     if s is null or not (s = any(stores)) then raise exception 'store inconnu'; end if;
+    -- Clé absente : rejetée ici pour tous les éléments, tombale comprise (la colonne id est not null en base).
+    if i is null or i = '' then bad := 'cle'; end if;
+    -- « deleted » et « updated_at » sont analysés sous protection : un élément mal formé ne doit pas emporter le lot.
+    begin del := coalesce((r->>'deleted')::boolean, false); exception when others then del := false; if bad is null then bad := 'forme'; end if; end;
     begin u := (r->>'updated_at')::timestamptz; exception when others then u := null; end;
-    if u is null then bad := 'updated_at'; end if;
+    if bad is null and u is null then bad := 'updated_at'; end if;
     if bad is null and u > now_ts + interval '5 minutes' then u := now_ts; adj := true; end if;
     if bad is null then
       if d is null or jsonb_typeof(d) = 'null' then
@@ -558,7 +565,14 @@ begin
       else
         for f in select jsonb_array_elements_text(coalesce(required->s, '[]'::jsonb)) loop
           if d->>f is null then bad := 'forme'; end if;
+          exit when bad is not null;
         end loop;
+        -- Contraintes propres à public.files, vérifiées avant l'écriture pour que le motif soit clair.
+        if bad is null and s = 'files' then
+          if d ? 'blob' then bad := 'forme';
+          elsif d->>'size' is not null and d->>'size' !~ '^[0-9]+$' then bad := 'forme';
+          end if;
+        end if;
       end if;
     end if;
     if bad is not null then
@@ -566,18 +580,29 @@ begin
     end if;
     cur_updated := null; cur_data := null; cur_deleted := null;
     execute format('select updated_at, data, deleted_at from public.%I where owner_id = auth.uid() and id = $1', s) into cur_updated, cur_data, cur_deleted using i;
-    if cur_updated is null then
-      execute format('insert into public.%I (owner_id, id, data, updated_at, deleted_at) values (auth.uid(), $1, $2, $3, $4)', s)
-        using i, coalesce(d, '{}'::jsonb), u, case when del then now_ts end;
-    elsif u > cur_updated then
-      execute format('update public.%I set data = $2, updated_at = $3, deleted_at = $4 where owner_id = auth.uid() and id = $1', s)
-        using i, coalesce(d, cur_data), u, case when del then coalesce(cur_deleted, now_ts) end;
-    elsif u = cur_updated and ((del and cur_deleted is not null) or (not del and cur_deleted is null and d = cur_data)) then
-      null; -- réessai idempotent : rien n'est écrit, server_seq inchangé
-    else
+    -- Sous-bloc par élément (un point de reprise, 500 au plus) : une contrainte de table refuse l'élément, jamais le
+    -- lot. Le retour en arrière du sous-bloc annule l'écriture, pas les variables plpgsql : accepted, adjusted et
+    -- rejected déjà posés sont conservés. Aucun « continue » ici : il reste au niveau de la boucle externe.
+    begin
+      if cur_updated is null then
+        execute format('insert into public.%I (owner_id, id, data, updated_at, deleted_at) values (auth.uid(), $1, $2, $3, $4)', s)
+          using i, coalesce(d, '{}'::jsonb), u, case when del then now_ts end;
+      elsif u > cur_updated then
+        execute format('update public.%I set data = $2, updated_at = $3, deleted_at = $4 where owner_id = auth.uid() and id = $1', s)
+          using i, coalesce(d, cur_data), u, case when del then coalesce(cur_deleted, now_ts) end;
+      elsif u = cur_updated and ((del and cur_deleted is not null) or (not del and cur_deleted is null and d = cur_data)) then
+        null; -- réessai idempotent : rien n'est écrit, server_seq inchangé
+      else
+        bad := 'conflit';
+      end if;
+    exception when others then bad := 'forme';
+    end;
+    if bad = 'conflit' then
       rejected := rejected || jsonb_build_object('store', s, 'id', i, 'reason', 'conflit',
         'server', jsonb_build_object('data', cur_data, 'updated_at', cur_updated, 'deleted_at', cur_deleted));
       continue;
+    elsif bad is not null then
+      rejected := rejected || jsonb_build_object('store', s, 'id', i, 'reason', bad); continue;
     end if;
     if adj then adjusted := adjusted || jsonb_build_object('store', s, 'id', i, 'updated_at', u);
     else accepted := accepted || jsonb_build_object('store', s, 'id', i); end if;
@@ -587,20 +612,18 @@ end $$;
 revoke execute on function public.sync_push(jsonb) from public, anon;
 grant execute on function public.sync_push(jsonb) to authenticated;
 
--- Suppression réelle (spec § 3.5) : la règle delete n'est franchissable que sous app.purge, posé localement ici.
+-- Suppression réelle (spec § 3.5, amendée R12) : la règle delete n'est franchissable que sous app.purge, posé
+-- localement ici. Ces deux fonctions ne touchent QUE les lignes. Pour un fichier, l'app supprime d'abord l'objet par
+-- l'API de téléversement (règle pages_delete) puis appelle cette fonction : un delete SQL sur la table des objets
+-- laisserait les octets orphelins dans le seau.
 create or replace function public.sync_purge(store text, id text) returns integer
 language plpgsql security invoker set search_path = '' as $$
-declare n integer; objet text; stores constant text[] := array['books', 'book_editions', 'source_documents', 'source_pages', 'scan_sessions', 'dishes', 'dish_recipe_links', 'recipes', 'recipe_versions', 'recipe_translations', 'ingredients', 'unit_definitions', 'unit_conventions', 'substitutions', 'appliances', 'cook_history', 'cook_sessions', 'inventory', 'meals', 'meal_feedback', 'shopping_lists', 'library_activity', 'rediscovery_prefs', 'timer_launches', 'files'];
+declare n integer; stores constant text[] := array['books', 'book_editions', 'source_documents', 'source_pages', 'scan_sessions', 'dishes', 'dish_recipe_links', 'recipes', 'recipe_versions', 'recipe_translations', 'ingredients', 'unit_definitions', 'unit_conventions', 'substitutions', 'appliances', 'cook_history', 'cook_sessions', 'inventory', 'meals', 'meal_feedback', 'shopping_lists', 'library_activity', 'rediscovery_prefs', 'timer_launches', 'files'];
 begin
   if not (store = any(stores)) then raise exception 'store inconnu'; end if;
   perform set_config('app.purge', 'on', true);
   execute format('delete from public.%I where owner_id = auth.uid() and id = $1', store) using id;
   get diagnostics n = row_count;
-  if store = 'files' then
-    -- objet calculé hors requête : « id » seul y serait ambigu avec storage.objects.id.
-    objet := auth.uid()::text || '/' || id;
-    delete from storage.objects where bucket_id = 'pages' and name = objet;
-  end if;
   return n;
 end $$;
 revoke execute on function public.sync_purge(text, text) from public, anon;
@@ -615,7 +638,6 @@ begin
     execute format('delete from public.%I where owner_id = auth.uid()', s);
     get diagnostics k = row_count; n := n + k;
   end loop;
-  delete from storage.objects where bucket_id = 'pages' and (storage.foldername(name))[1] = auth.uid()::text;
   return n;
 end $$;
 revoke execute on function public.sync_purge_all() from public, anon;
