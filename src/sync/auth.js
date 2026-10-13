@@ -210,5 +210,7 @@ export function createAuth(options = {}) {
     }
   }
 
-  return { available: !!client, reason, signIn, signOut, session, onChange, handleReturn, readError, guard };
+  // getClient : seule sortie du client, vers transport.js, jamais vers l'interface. Rend null quand il manque
+  // (bibliothèque absente ou origine sans configuration) : le transport refuse alors en « auth » sans rien tenter.
+  return { available: !!client, reason, signIn, signOut, session, onChange, handleReturn, readError, guard, getClient: () => client };
 }

@@ -18,6 +18,7 @@ import { summarizeMeal } from '../src/domain/pairing.js';
 import { compareBundles, proposeDishesForRecipe } from '../src/domain/dishes.js';
 import { runBackupTests } from './backup.js';
 import { runSyncTests } from './sync.js';
+import { runSyncL3Tests } from './sync-l3.js';
 
 const results = [];
 const eq = (a, b, msg) => { const ok = JSON.stringify(a) === JSON.stringify(b); results.push({ ok, msg, got: a, want: b }); };
@@ -162,6 +163,10 @@ catch (error) { ok(false, `Suite sauvegarde interrompue : ${error?.message || St
 // --- Synchronisation : constantes, tables, types, base, capture, connexion.
 try { await runSyncTests({ eq, ok }); }
 catch (error) { ok(false, `Suite synchronisation interrompue : ${error?.message || String(error)}`); }
+
+// --- Synchronisation L3 : transport (envoi et réception), transport factice.
+try { await runSyncL3Tests({ eq, ok }); }
+catch (error) { ok(false, `Suite L3 interrompue : ${error?.message || String(error)}`); }
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);
