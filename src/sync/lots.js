@@ -1,8 +1,8 @@
 // Composition des lots d'envoi (spec § 5.3) : pur, sans base ni réseau. L'ordre est celui de la file (seq), chaque
 // (store, id) part une fois (la version la plus récente), un put est RELU au moment de l'envoi (la file ne garde
-// pas la fiche), une suppression part avec son payload. Bornes du serveur (§ 3.4, R14) appliquées ici pour que le
-// serveur n'ait jamais à refuser un lot entier pour sa taille.
-export const LIMITES = { elements: 500, lot: 1048576, element: 524288 };
+// pas la fiche), une suppression part avec son payload. Bornes du serveur appliquées avec une marge pour le lot ;
+// la dichotomie de l'envoi reste le filet.
+export const LIMITES = { elements: 500, lot: 921600, element: 524288 };
 const CONTROLE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g;
 const encodeur = new TextEncoder();
 
@@ -37,7 +37,7 @@ export function dedoublonner(entrees) {
 
 // Une entrée → un élément de sync_push, ou une retenue (ligne files : L4 confirme l'empreinte avant l'envoi).
 async function elementDe(entree, relire) {
-  if (entree.store === 'files') return { retenue: { seq: entree.seq, raison: 'fichier en attente' } };
+  if (entree.store === 'files') return { retenue: true };
   if (entree.op === 'delete') {
     const data = entree.payload ? nettoyerChaines(entree.payload) : null;
     return { element: { store: entree.store, id: entree.id, data, updated_at: data?.updated_at || entree.updated_at, deleted: true } };
@@ -59,7 +59,7 @@ export async function composerLots(entrees, relire) {
   const fermer = () => { if (courant.elements.length) lots.push({ elements: courant.elements, seqs: courant.seqs }); courant = { elements: [], seqs: [], octets: 2 }; };
   for (const { entree, seqs } of dedoublonner(entrees)) {
     const r = await elementDe(entree, relire);
-    if (r.retenue) { retenues.push(r.retenue); continue; }
+    if (r.retenue) { retenues.push({ seq: entree.seq, seqs, raison: 'fichier en attente' }); continue; }
     const taille = tailleJson(r.element) + 1;
     const seul = tailleJson(r.element.data ?? {}) > LIMITES.element;
     if (seul) { fermer(); lots.push({ elements: [r.element], seqs }); continue; }

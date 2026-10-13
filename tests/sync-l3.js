@@ -45,7 +45,7 @@ export async function runSyncL3Tests({ eq, ok }) {
   eq(nettoyerChaines({ a: 'x\u0000y', b: ['\u0007z', 1], c: { d: 't\u001f' } }), { a: 'xy', b: ['z', 1], c: { d: 't' } }, 'lots : les caractères de contrôle sont retirés partout');
   eq(nettoyerChaines('é\n'), 'é\n', 'lots : les sauts de ligne et les accents restent');
   eq(tailleJson({ a: 'é' }), 10, 'lots : taille en octets UTF-8 du JSON');
-  eq(LIMITES, { elements: 500, lot: 1048576, element: 524288 }, 'lots : bornes de la spec (§ 3.4, R14)');
+  eq(LIMITES, { elements: 500, lot: 921600, element: 524288 }, 'lots : bornes de la spec (§ 3.4, R14), le lot avec marge sous le seuil serveur (R-L3-6)');
 
   const entrees = [
     { seq: 1, store: 'books', id: 'b1', op: 'put', updated_at: '2026-10-13T10:00:00Z', tries: 0 },
@@ -65,8 +65,28 @@ export async function runSyncL3Tests({ eq, ok }) {
   eq(c.lots[0].elements[0].data.title, 'Un', 'lots : la fiche relue est nettoyée');
   eq(c.lots[0].elements[1].data.title, 'X', 'lots : le payload d’une suppression part avec elle');
   eq(c.lots[0].elements[2].data, null, 'lots : un put dont la fiche a disparu sans payload part comme tombale sans data');
+  eq(c.lots[0].elements[1].updated_at, '2026-10-13T10:01:00Z', 'lots : updated_at d’une suppression avec payload = celui du payload');
+  eq(c.lots[0].elements[2].updated_at, '2026-10-13T10:04:00Z', 'lots : updated_at d’un put disparu sans payload = celui de l’entrée de la file');
   eq(c.lots[0].seqs, [1, 3, 2, 5], 'lots : les seq de chaque clé suivent le lot');
-  eq(c.retenues, [{ seq: 4, raison: 'fichier en attente' }], 'lots : une ligne files est retenue tant que l’empreinte distante n’est pas confirmée (L4)');
+  eq(c.retenues, [{ seq: 4, seqs: [4], raison: 'fichier en attente' }], 'lots : une ligne files est retenue tant que l’empreinte distante n’est pas confirmée (L4), tous les seq du groupe (R-L3-5)');
+
+  const fichiersRepetes = [
+    { seq: 4, store: 'files', id: 'f'.repeat(64), op: 'put', updated_at: '2026-10-13T10:03:00Z', tries: 0 },
+    { seq: 6, store: 'files', id: 'f'.repeat(64), op: 'put', updated_at: '2026-10-13T10:05:00Z', tries: 0 },
+  ];
+  const cf = await composerLots(fichiersRepetes, async () => undefined);
+  eq(cf.lots, [], 'lots : deux put du même fichier ne produisent aucun lot');
+  eq(cf.retenues, [{ seq: 6, seqs: [4, 6], raison: 'fichier en attente' }], 'lots : deux put du même fichier dédoublonnés → une seule retenue, tous les seq (R-L3-5)');
+
+  const recreation = [
+    { seq: 10, store: 'books', id: 'bx', op: 'delete', updated_at: '2026-10-13T11:00:00Z', payload: { id: 'bx', title: 'Ancien', updated_at: '2026-10-13T11:00:00Z' }, tries: 0 },
+    { seq: 11, store: 'books', id: 'bx', op: 'put', updated_at: '2026-10-13T11:05:00Z', tries: 0 },
+  ];
+  const dr = dedoublonner(recreation);
+  eq(dr.map((x) => [x.cle, x.entree.seq, x.entree.op, x.seqs]), [['books:bx', 11, 'put', [10, 11]]], 'lots : suppression puis recréation de la même clé → le put (plus récent) gagne, les deux seq suivent');
+  const cr = await composerLots(recreation, async (s, id) => ({ id, title: 'Nouveau', updated_at: '2026-10-13T11:05:00Z' }));
+  eq(cr.lots[0].elements.map((e) => [e.id, e.deleted, e.data.title]), [['bx', false, 'Nouveau']], 'lots : la fiche recréée part comme put, pas comme suppression');
+  eq(cr.lots[0].seqs, [10, 11], 'lots : les deux seq de la clé recréée suivent le lot');
 
   const gros = Array.from({ length: 1200 }, (_, i) => ({ seq: i + 1, store: 'books', id: 'g' + i, op: 'put', updated_at: '2026-10-13T10:00:00Z', tries: 0 }));
   const cg = await composerLots(gros, async (s, id) => ({ id, updated_at: '2026-10-13T10:00:00Z' }));
