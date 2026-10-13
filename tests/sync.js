@@ -619,6 +619,50 @@ export async function runSyncTests({ eq, ok }) {
   });
   await relireReglages(); // la base de l'app reprend la main après la base jetable
 
+  // --- R28 : le démarrage de la connexion est borné dans le temps (spec § 4.1, invariant I4)
+  // `getSession()` rafraîchit le jeton par le réseau quand il est périmé : hors ligne, il ne rend rien avant le
+  // délai propre du navigateur, et pendant ce temps `#app` ne contient que le `<noscript>` — écran blanc. Un bloc
+  // qui PEND n'est pas un bloc qui CASSE, et seul le second est couvert par un try/catch : il faut une borne.
+  const { demarrerSync, getSyncState, setSyncState } = await import('../src/ui/state.js');
+  {
+    let resoudreRetour = null;
+    const retourQuiNeVientPas = new Promise((r) => { resoudreRetour = r; });
+    const authLent = {
+      available: true,
+      handleReturn: () => retourQuiNeVientPas,
+      session: async () => ({ user: { id: 'uid-tardif', email: 'tardif@exemple.test' } }),
+      guard: async () => ({ ok: true }),
+      onChange: () => () => {},
+    };
+    const patienter = async (predicat) => { for (let i = 0; i < 100 && !predicat(); i += 1) await new Promise((r) => setTimeout(r, 10)); return predicat(); };
+    const journalBorne = []; const vraiLogBorne = console.error; console.error = (...a) => journalBorne.push(a);
+    const debut = Date.now();
+    const etatBorne = await demarrerSync({ auth: authLent, delaiMs: 50 });
+    const duree = Date.now() - debut;
+    console.error = vraiLogBorne;
+    ok(duree < 1000, 'R28 : demarrerSync rend la main en moins d’une seconde quand le fournisseur ne répond pas (' + duree + ' ms)');
+    eq([etatBorne.enAttente, etatBorne.user, etatBorne.guard, etatBorne.retour], [true, null, null, null],
+      'R28 : au dépassement, l’app démarre sans compte et le dit « en attente »');
+    ok(JSON.stringify(journalBorne).includes('sync_boot_timeout'), 'R28 : le dépassement est journalisé par son code seul');
+    resoudreRetour({ error: null, codeSansSession: false, present: true });
+    ok(await patienter(() => getSyncState().user?.id === 'uid-tardif'), 'R28 : la promesse tardive est appliquée quand elle aboutit enfin');
+    eq([getSyncState().enAttente, getSyncState().guard], [false, { ok: true }], 'R28 : et l’état ne dit plus « en attente »');
+    // Sans dépassement, rien ne change : l'ordre handleReturn → session → guard est le même, et l'état est complet.
+    const ordre = [];
+    const authRapide = {
+      available: true,
+      handleReturn: async () => { ordre.push('handleReturn'); return { error: null, codeSansSession: false, present: true }; },
+      session: async () => { ordre.push('session'); return { user: { id: 'uid-A', email: 'a@exemple.test' } }; },
+      guard: async () => { ordre.push('guard'); return { ok: true }; },
+      onChange: () => () => {},
+    };
+    const vus = [];
+    const etatRapide = await demarrerSync({ auth: authRapide, delaiMs: 5000, surEtat: (e) => vus.push(e.retour?.present) });
+    eq([ordre, etatRapide.enAttente, etatRapide.user.id, vus], [['handleReturn', 'session', 'guard'], false, 'uid-A', [true]],
+      'R28 : dans les temps, l’ordre est inchangé et le retour est transmis à l’appelant');
+    setSyncState({ auth: null, user: null, guard: null, retour: null, enAttente: false }); // ne rien laisser derrière
+  }
+
   // --- Clôture : SHELL complet (tâche 14)
   // Ce test LIT du source (sw.js et les modules) : c'est voulu ici, et seulement ici. Il ne vérifie pas un
   // comportement mais la COHÉRENCE D'UNE LISTE — le SHELL du service worker contre le graphe d'imports réel.

@@ -5,7 +5,7 @@ import { setUiLocale, t } from './core/i18n.js';
 import * as repo from './model/repo.js';
 import { on } from './core/bus.js';
 import { logError } from './core/log.js';
-import { getData, invalidate, setSyncState, getSyncState, routeApresRetour, relireReglages, isActivitySynced, SYNC_ROUTE_KEY } from './ui/state.js';
+import { getData, invalidate, setSyncState, getSyncState, routeApresRetour, relireReglages, isActivitySynced, demarrerSync, SYNC_ROUTE_KEY } from './ui/state.js';
 import { installCapture } from './sync/outbox.js';
 import { createAuth } from './sync/auth.js';
 
@@ -106,21 +106,15 @@ function restoreRoute(retour) {
   if (cible) location.hash = cible;
 }
 
-// Connexion : isolée du démarrage. L'app doit s'ouvrir sans compte (invariant I4), même si ce bloc casse.
+// Connexion : isolée du démarrage. L'app doit s'ouvrir sans compte (invariant I4), même si ce bloc casse — et
+// même s'il PEND : demarrerSync borne le départ dans le temps (R28) et rattrape l'affichage s'il aboutit plus tard.
 async function bootSync() {
   try {
     const auth = createAuth({ db: repo.db });
-    // Retour du fournisseur AVANT le premier rendu : le code est échangé, puis retiré de l'historique.
-    const retour = await auth.handleReturn();
-    let user = null;
-    let guard = null;
-    if (auth.available) {
-      const s = await auth.session();
-      // La garde de compte décide : un autre compte que celui connu de l'appareil ne devient jamais « connecté ».
-      if (s?.user) { guard = await auth.guard(s.user.id, s.user.email); user = guard.ok ? s.user : null; }
-    }
-    setSyncState({ auth, user, guard, retour });
-    restoreRoute(retour);
+    // L'ordre handleReturn → session → guard vit dans demarrerSync. La route mémorisée est restaurée dès que le
+    // retour est réellement connu : au démarrage, ou plus tard si la borne a été dépassée (la clé n'est pas
+    // consommée entre-temps, donc aucune route n'est perdue).
+    await demarrerSync({ auth, surEtat: ({ retour }) => restoreRoute(retour) });
     // Changement de session (jeton rafraîchi, déconnexion) : la garde est refaite avant d'exposer l'utilisateur.
     auth.onChange(({ user: suivant }) => {
       const avant = getSyncState().user?.id || null;
@@ -134,7 +128,7 @@ async function bootSync() {
     });
   } catch (error) {
     logError('boot.sync', { error });
-    setSyncState({ auth: null, user: null, guard: null, retour: null });
+    setSyncState({ auth: null, user: null, guard: null, retour: null, enAttente: false });
   }
 }
 

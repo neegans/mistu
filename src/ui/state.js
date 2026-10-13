@@ -1,6 +1,7 @@
 // Cache de lecture : charge la bibliothèque en mémoire, construit les index de recherche ; invalidé à chaque écriture.
 import * as repo from '../model/repo.js';
 import { on } from '../core/bus.js';
+import { refresh } from '../core/router.js';
 import { logError } from '../core/log.js';
 import { buildDocs, buildLabelIndex } from '../domain/search.js';
 import { buildIngredientIndex } from '../domain/lines.js';
@@ -13,7 +14,8 @@ on('settings', () => { cache = null; });
 // --- État de la connexion (spec § 4.1) -------------------------------------
 // Une seule source : posée au démarrage par app.js, lue par les vues sous ctx.sync. Rien n'est gardé ailleurs.
 // « auth » est le module de connexion ; « user » vaut null tant que la garde de compte n'a pas accepté.
-let sync = { auth: null, user: null, guard: null, retour: null };
+// « enAttente » : le démarrage de la connexion a dépassé sa borne de temps et n'a pas encore abouti (R28).
+let sync = { auth: null, user: null, guard: null, retour: null, enAttente: false };
 
 // Clé de la route mémorisée avant un départ chez le fournisseur (redirectTo est sans fragment : la route serait
 // perdue au retour). Écrite par Réglages, consommée une seule fois au démarrage.
@@ -36,6 +38,46 @@ export function routeApresRetour({ retour = null, memorisee = null, hashActuel =
   if (!retour?.present || !memorisee) return null;
   if (String(hashActuel || '').replace(/^#/, '')) return null;
   return memorisee;
+}
+
+// --- Démarrage de la connexion, borné dans le temps (R28) ------------------
+// Le démarrage de l'app ne doit JAMAIS attendre le réseau : `getSession()` rafraîchit le jeton quand il est périmé,
+// et hors ligne il ne rend rien avant le délai propre du navigateur (dizaines de secondes) — pendant lequel l'écran
+// reste blanc. Un bloc qui PEND n'est pas un bloc qui CASSE, et le try/catch de l'appelant ne couvre que le second.
+// Au dépassement, l'app s'ouvre sans compte (invariant I4) ; quand le travail tardif aboutit, son résultat est
+// appliqué et un nouveau rendu est demandé, exactement comme un changement de session (auth.onChange).
+// L'ordre handleReturn → session → guard est inchangé ; `surEtat` reçoit l'état réel, tôt ou tard (route mémorisée).
+export async function demarrerSync({ auth, delaiMs = 8000, surEtat = null } = {}) {
+  const travail = (async () => {
+    // Retour du fournisseur d'abord : le code est échangé, puis retiré de l'historique.
+    const retour = await auth.handleReturn();
+    let user = null;
+    let guard = null;
+    if (auth.available) {
+      const s = await auth.session();
+      // La garde de compte décide : un autre compte que celui connu de l'appareil ne devient jamais « connecté ».
+      if (s?.user) { guard = await auth.guard(s.user.id, s.user.email); user = guard.ok ? s.user : null; }
+    }
+    return { auth, user, guard, retour, enAttente: false };
+  })();
+  const DEPASSE = Symbol('borne de demarrage depassee');
+  let minuteur = null;
+  const borne = new Promise((resolve) => { minuteur = setTimeout(() => resolve(DEPASSE), delaiMs); });
+  const issue = await Promise.race([travail, borne]);
+  if (issue !== DEPASSE) {
+    clearTimeout(minuteur);
+    const etat = setSyncState(issue);
+    if (surEtat) surEtat(issue);
+    return etat;
+  }
+  logError('sync_boot_timeout', {});
+  travail.then((tardif) => {
+    setSyncState(tardif);
+    if (surEtat) surEtat(tardif);
+    invalidate();
+    refresh(); // l'écran affiché parle du compte : il doit suivre
+  }).catch((error) => logError('sync.demarrage', { error }));
+  return setSyncState({ auth, user: null, guard: null, retour: null, enAttente: true });
 }
 
 // --- Réglages lus par la capture (spec § 5.2) ------------------------------
