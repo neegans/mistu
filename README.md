@@ -36,9 +36,13 @@ npx serve .
 | Sauvegarde ZIP complète, restauration validée en espace isolé puis vérifiée, réimport sans doublon; exports JSON-LD, YAML Paprika, copie HTML | Réglages |
 | Assistant IA optionnel (compatible OpenAI ou Anthropic) pour lire pages et index; sorties toujours « à vérifier » | Réglages |
 
+## Synchronisation entre appareils (en construction)
+
+Le serveur (Supabase), la connexion Google et la capture des écritures sont posés (lots L1-L2) ; l'envoi et la réception, eux, n'existent pas encore : tant que `src/sync/config.js` est vide, Réglages affiche « Synchronisation non configurée sur cette adresse. » et rien ne quitte l'appareil. Spécification du lot : `docs/spec-compte-et-stockage-distant.md` ; conception amont et choix d'hébergement : `docs/compte-et-stockage-distant.md` ; application du serveur et preuves : `supabase/README.md`.
+
 ## Ce qui n'est pas là (et le dit dans l'interface)
 
-Adaptations Rapide / On se gâte / Meal prep, moteur de salubrité, planificateur multi-repas, synthèse de recettes, reconnaissance vocale, synchronisation serveur, lecture d'EPUB. Voir `docs/architecture.md`.
+Adaptations Rapide / On se gâte / Meal prep, moteur de salubrité, planificateur multi-repas, synthèse de recettes, reconnaissance vocale, échange de données entre appareils (envoi, réception, conflits, fichiers distants : lots L3 à L5), lecture d'EPUB. Voir `docs/architecture.md`.
 
 ## Vérifications à faire sur les appareils réels
 

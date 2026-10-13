@@ -1,12 +1,16 @@
 // Service worker : coquille applicative en cache pour consultation hors connexion des recettes déjà chargées.
 // Les nouvelles demandes IA et les recherches de métadonnées ne fonctionnent pas hors connexion (spec §15).
 importScripts('./sw-rules.js');
-const VERSION = 'cuisine-os-v0.1.0-3';
+const VERSION = 'cuisine-os-v0.2.0-1';
 // Tous les modules de production sont inclus ; tests/ reste chargé à la demande.
+// La complétude de cette liste est vérifiée par tests/sync.js (graphe d'imports depuis src/app.js) : un chemin
+// manquant ferait répondre 404 à cache.addAll et l'installation entière échouerait.
 const SHELL = [
   './', './index.html', './styles.css', './manifest.webmanifest', './icons/icon.svg', './icons/apple-touch-icon.png', './sw-rules.js',
   './src/app.js',
-  './src/core/bus.js', './src/core/db.js', './src/core/dom.js', './src/core/hash.js', './src/core/i18n.js', './src/core/ids.js', './src/core/router.js', './src/core/zip.js',
+  './src/vendor/supabase-2.117.3.umd.js',
+  './src/core/bus.js', './src/core/db.js', './src/core/dom.js', './src/core/hash.js', './src/core/i18n.js', './src/core/ids.js', './src/core/log.js', './src/core/router.js', './src/core/zip.js',
+  './src/sync/auth.js', './src/sync/clock.js', './src/sync/config.js', './src/sync/mime.js', './src/sync/outbox.js', './src/sync/tables.js',
   './src/i18n/en.js',
   './src/model/repo.js', './src/model/schema.js', './src/model/seed.js',
   './src/domain/backup.js', './src/domain/diet.js', './src/domain/dishes.js', './src/domain/exporters.js', './src/domain/grocery.js', './src/domain/lines.js', './src/domain/llm.js',

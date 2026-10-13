@@ -9,7 +9,7 @@
 - Tests du domaine : `tests/index.html` (dans le navigateur). Ne pas affirmer qu'ils passent sans les avoir exécutés.
 - Ne pas committer, pousser ou déployer sans demande explicite.
 
-## État des travaux (mémoire de session, mise à jour le 8 septembre 2026)
+## État des travaux (mémoire de session, mise à jour le 8 septembre 2026, complétée le 13 octobre 2026)
 
 **Repères.** La spec `cuisine-os-spec-v3.md` n'est pas dans le dépôt : elle arrive en pièce jointe de la tâche VibeForge; la redemander si elle manque. Aucun AGENTS.md. L'historique des conversations précédentes n'est pas disponible : seule cette section fait foi.
 
@@ -32,8 +32,63 @@
 
 **Suite prévue.** 1) Terminer le parcours V0 ci-dessus et corriger ce qui casse. 2) Valider capture iPhone/iPad et raccourci minuterie. 3) Deux livres FR/EN + un PDF + dix recettes cuisinées (spec §20). 4) Ensuite seulement : V1 (adaptations Rapide / On se gâte / Meal prep via `LLMProvider`, moteur de salubrité, lots congelés liés aux cuissons).
 
-**Contexte de travail avec Neegan dans ce terminal.** Le shell est désactivé côté agent : Neegan exécute les commandes en les préfixant par `!` placé en tout premier caractère de la ligne. Donner des commandes sur une seule ligne, sans retour à la ligne, et **sans caractères non ASCII** (le commit `a7f323f` a un message aux accents déformés en « √¥ » : rédiger les messages de commit sans accents). Les adresses `http://…` s'ouvrent dans le navigateur, pas dans zsh : proposer `! open http://localhost:8080/`. L'agent ne voit pas l'écran : demander le texte des pages (Cmd-A, Cmd-C) ou des cartes rouges d'erreur. Serveur local lancé en arrière-plan depuis le dossier du projet : `cd ~/projects/mistu && nohup python3 -m http.server 8080 > /dev/null 2>&1 &`; contrôle `curl -sS http://localhost:8080/tests/ | head -5`; arrêt `pkill -f "http.server 8080"`.
+**Contexte de travail avec Neegan dans ce terminal.** Le shell est désactivé côté agent : Neegan exécute les commandes en les préfixant par `!` placé en tout premier caractère de la ligne. Donner des commandes sur une seule ligne, sans retour à la ligne, et **sans caractères non ASCII** (le commit `a7f323f` a un message aux accents déformés en « √¥ » : rédiger les messages de commit sans accents). Les adresses `http://…` s'ouvrent dans le navigateur, pas dans zsh : proposer `! open http://localhost:8080/`. L'agent ne voit pas l'écran : demander le texte des pages (Cmd-A, Cmd-C) ou des cartes rouges d'erreur. Serveur local lancé en arrière-plan depuis le dossier du projet : `cd ~/projects/mistu && nohup python3 -m http.server 8080 > /dev/null 2>&1 &`; contrôle `curl -sS http://localhost:8080/tests/ | head -5`; arrêt `pkill -f "http.server 8080"`. **Depuis le 12 octobre**, une session d'agent avec shell lance aussi la suite elle-même par Playwright MCP (`browser_navigate` vers `http://localhost:8081/tests/?v=…`, puis `browser_evaluate` sur `#out h2` et `browser_console_messages` niveau `error`) : **purger le cache du navigateur par CDP (`Network.clearBrowserCache`) avant chaque passage**, parce que le paramètre `?v=` de la page ne se propage pas aux modules importés et qu'un `304 Not Modified` sur `tests/sync.js` fait passer une version périmée pour le résultat du jour.
 
+### Compte et stockage distant — L1-L2 livrés (13 octobre 2026)
+
+**Où.** Branche `compte-et-stockage-distant`, worktree `~/projects/mistu-sync` (jamais `~/projects/mistu`, l'arbre
+principal servi sur 8080). Serveur de vérification : `python3 -m http.server 8081` depuis le worktree ; suite complète
+`http://localhost:8081/tests/`. Spec du lot : `docs/spec-compte-et-stockage-distant.md` (**§ 11** : ce que la
+construction a amendé — le brief disait § 10, déjà pris par « Traçabilité des revues »). Plan et journal : `.superpowers/sdd/2026-10-12-compte-et-stockage-l1-l2/` (`progress.md`, un rapport et une
+revue par tâche).
+
+**Livré — L1 (serveur, en fichiers).** `src/sync/tables.js` (schéma serveur dérivé du schéma local),
+`src/sync/mime.js` (liste blanche fermée), migrations **générées** `supabase/migrations/0001_tables_et_regles.sql` et
+`0002_stockage.sql` par `tools/generer-migrations.mjs` (`--check` garde la concordance), preuves SQL écrites
+(`supabase/proofs/0001_tables_et_regles.sql`, `0002_stockage.sql`, gabarits `0001_hook.md` et `0001_providers.md`),
+procédure d'application pas à pas dans `supabase/README.md`.
+
+**Livré — L2 (client).** `DB_VERSION 2` avec les trois magasins internes (`outbox`, `sync_state`, `sync_conflicts`),
+hors archive et hors puces ; `db.mutate` = porte unique d'écriture (`MUTATING_METHODS`, test statique) ;
+`repo.clearDevice()` ; capture des écritures active (`src/sync/outbox.js`) ; `src/sync/clock.js` ;
+`src/sync/config.js` ; `src/sync/auth.js` (connexion Google PKCE, retour sans `code` dans l'historique, garde de
+compte, « Changer de compte sur cet appareil ») ; Réglages → section « Synchronisation » (ensemble L2) ; durcissement
+(CSP + `referrer` sur `index.html` et `tests/index.html`, cadres `sandbox`, fin de `window.open`, blobs retypés,
+`logError` unique) ; `src/vendor/supabase-2.117.3.umd.js` vérifié deux fois ; service worker corrigé (aucune mise en
+cache d'une requête avec paramètres). `SHELL` complet et `VERSION = 'cuisine-os-v0.2.0-1'`, `APP_VERSION = '0.2.0'`.
+Suite complète : **365/365 verts**, 0 erreur console (13 octobre 2026, `http://localhost:8081/tests/?v=t14b`).
+
+**Preuves SQL : NON JOUÉES.** La tâche 5 du plan est **parquée** : elle demande un projet Supabase qui n'existe pas
+encore. Geste de Neegan : créer le projet de développement **`mistu-dev`** (D8, région Canada), puis suivre
+`supabase/README.md` étape par étape (coller `0001` sans sa dernière ligne, activer `pg_cron`, coller la ligne
+`cron.schedule`, taper les adresses autorisées, jouer la preuve `0001`, coller `0002`, jouer la preuve `0002`,
+brancher le crochet « Before User Created », fermer les autres fournisseurs) et **coller les sorties** dans
+`supabase/proofs/RESULTATS-mistu-dev.md` (à créer ; sans adresses, sans clés). Tant que ce fichier n'existe pas,
+aucune ligne de `0001`/`0002` n'a jamais été exécutée par personne : le serveur est écrit, pas éprouvé. Le projet
+réel `mistu` vient **après**, et seulement si `mistu-dev` est vert.
+
+**Mesure iOS : à faire par Neegan, avant L3.** Spec § 4.1, dernier alinéa : une PWA installée a son propre conteneur
+de stockage. Installer Cuisine OS sur l'écran d'accueil de l'iPhone, lancer « Activer la synchronisation » et
+regarder **où atterrit le retour de Google** — dans l'app en plein écran, ou dans Safari. Consigner ici la version
+d'iOS et le chemin constaté. Si le retour atterrit dans Safari, `signIn()` devra passer à `skipBrowserRedirect: true`
+et ouvrir l'URL obtenue **sur le geste de la personne**. Cette mesure conditionne L3.
+
+**`src/sync/config.js` : à remplir.** Les deux entrées (`prod`, `dev`) sont vides. Y mettre l'URL du projet et la clé
+**`anon`** — publiques par conception, commitées. **Jamais `service_role`**, nulle part. Tant qu'une entrée est vide,
+`currentConfig()` renvoie `null` et Réglages affiche « Synchronisation non configurée sur cette adresse. » :
+c'est exactement ce que l'app montre aujourd'hui, sur les deux origines.
+
+**Origine dédiée (D5) : pas faite.** Tous les sites GitHub Pages du compte partagent l'origine
+`neegans.github.io`, donc `localStorage`, IndexedDB et caches. Décision prise : un sous-domaine d'un domaine de
+Neegan, par CNAME vers GitHub Pages. **Reste à faire : nommer le sous-domaine** (Neegan), poser le fichier `CNAME`,
+forcer HTTPS, puis faire suivre `redirectTo`, Site URL et Redirect URLs de Supabase, les origines du client OAuth
+Google, `manifest.webmanifest` et `SHELL`, et réinstaller l'icône iPhone. **Aucune connexion réelle depuis
+`neegans.github.io`** tant que le CNAME n'est pas actif.
+
+**Dettes différées (assumées, à reprendre en L3).** Pluriel de « N envois en attente » ; pastille « N non envoyés »
+dans l'en-tête ; des chaînes `t()` du lot sans entrée dans `src/i18n/en.js` ; dans `tests/sync.js`, les stubs qui
+remplacent `console.error` ne sont pas posés en `try/finally` (un échec en cours de bloc laisserait le stub en place) ;
+le `catch` de `getSession` d'`auth.js` n'est pas testé.
 
 ## Premier lot de fiabilisation — 8 septembre 2026, à réviser
 

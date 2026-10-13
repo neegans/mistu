@@ -439,4 +439,44 @@ export async function runSyncTests({ eq, ok }) {
     ok(await attendre(() => isActivitySynced() === false), 'réglage retiré par une restauration : la capture se referme');
   });
   await relireReglages(); // la base de l'app reprend la main après la base jetable
+
+  // --- Clôture : SHELL complet (tâche 14)
+  // Ce test LIT du source (sw.js et les modules) : c'est voulu ici, et seulement ici. Il ne vérifie pas un
+  // comportement mais la COHÉRENCE D'UNE LISTE — le SHELL du service worker contre le graphe d'imports réel.
+  // Un module atteignable depuis app.js et absent de SHELL fait répondre 404 à cache.addAll : l'installation du
+  // service worker échoue en entier et il n'y a plus aucune consultation hors connexion. Rien de ce comportement
+  // n'est observable depuis la page de tests ; la liste, elle, se compare.
+  const sourceSw = await (await fetch('../sw.js', { cache: 'no-store' })).text();
+  const blocShell = sourceSw.match(/const SHELL = \[([\s\S]*?)\];/);
+  ok(!!blocShell, 'sw.js : le tableau SHELL est lisible');
+  const listeShell = [...(blocShell?.[1] || '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  // Résolution relative à la main : aucun bundler ici, les chemins du SHELL sont ceux que le réseau sert.
+  const resoudre = (depuis, specifier) => {
+    const parts = depuis.split('/').slice(0, -1);
+    for (const seg of specifier.split('/')) {
+      if (seg === '.' || seg === '') continue;
+      if (seg === '..') parts.pop();
+      else parts.push(seg);
+    }
+    return parts.join('/');
+  };
+  const atteints = new Set();
+  const aVisiter = ['src/app.js'];
+  while (aVisiter.length) {
+    const chemin = aVisiter.pop();
+    if (atteints.has(chemin)) continue;
+    atteints.add(chemin);
+    const source = await (await fetch('../' + chemin, { cache: 'no-store' })).text();
+    for (const m of source.matchAll(/(?:from\s+'([^']+)'|import\s+'([^']+)')/g)) {
+      const specifier = m[1] || m[2];
+      if (!specifier.startsWith('.')) continue; // aucune dépendance npm à l'exécution : rien d'autre à suivre
+      aVisiter.push(resoudre(chemin, specifier));
+    }
+  }
+  const absentsDuShell = [...atteints].map((c) => './' + c).filter((c) => !listeShell.includes(c)).sort();
+  eq(absentsDuShell, [], 'tout module atteignable depuis app.js est dans SHELL');
+  // Chargés hors du graphe d'imports : le bundle UMD par un <script> classique (index.html et tests/index.html),
+  // sw-rules.js par importScripts du service worker et par tests/index.html.
+  eq(['./src/vendor/supabase-2.117.3.umd.js', './sw-rules.js'].filter((c) => !listeShell.includes(c)), [],
+    'dépendance embarquée et règles du service worker dans SHELL');
 }

@@ -17,7 +17,10 @@ src/domain/  quantity.js (fractions, plages, qualitatif), units.js (conventions,
              diet.js, grocery.js, search.js (langage naturel → pastilles; groupes), dishes.js (rapprochement, comparaison), pairing.js (accompagnements, résumé de repas),
              rediscover.js, timers.js, backup.js (archive, inspection isolée, restauration, vérification), exporters.js (JSON-LD, YAML Paprika, HTML), llm.js
 src/ui/      state.js (cache), components.js, home, search, library, book, dish, recipe, recipe-edit, cook, import, meals, grocery, kitchen, settings, add
-tests/       tests.js + index.html : tests du domaine ; backup.js : régressions IndexedDB dans des bases temporaires
+src/sync/    tables.js, mime.js, clock.js, outbox.js, config.js, auth.js — voir « Synchronisation (L1-L2) »
+src/core/log.js            point d'entrée unique du journal d'erreurs (logError)
+src/vendor/  supabase-2.117.3.umd.js (dépendance embarquée, vérifiée deux fois)
+tests/       tests.js + index.html : tests du domaine ; backup.js : régressions IndexedDB dans des bases temporaires ; sync.js : lot « compte et stockage distant »
 ```
 
 ## Dépendance embarquée
@@ -63,6 +66,103 @@ ci-dessus (ou, pour revérifier seulement le fichier déjà commité sans ravoir
 `node tools/verifier-vendor.mjs --local src/vendor/supabase-<version>.umd.js <version>`, qui ne fait que (2) et
 imprime le sha256), puis remplacer le fichier dans `src/vendor/` et les deux `<script>` qui le chargent.
 
+## Synchronisation (L1-L2)
+
+Spec du lot : `docs/spec-compte-et-stockage-distant.md` (conception amont : `docs/compte-et-stockage-distant.md`).
+Livré ici : le serveur en migrations, la connexion, la capture des écritures. **Pas** l'échange de données.
+
+### Modules
+
+```text
+src/sync/tables.js    TABLES : par magasin synchronisable, la clé, les colonnes générées (index de STORES + size/mime
+                      pour files) et les champs de relation obligatoires. Source de vérité du générateur de migrations.
+                      keyOf(store, record) : la clé d'une fiche, fonction unique (outbox, envoi, réception).
+src/sync/mime.js      liste blanche fermée des six types synchronisables, resolveMime (type déclaré, sinon extension,
+                      sinon application/octet-stream + syncable:false), safeDisplayType, extensionFor, displayUrl.
+src/sync/clock.js     syncNow() : horloge corrigée du décalage serveur, strictement croissante (offset 0 avant L3).
+src/sync/outbox.js    installCapture(db, …) : pose db.onMutate ; ne fait que remplir la file.
+src/sync/config.js    SUPABASE.prod / SUPABASE.dev (url + anonKey, valeurs publiques), currentConfig(hostname).
+src/sync/auth.js      createAuth : client PKCE depuis globalThis.supabase, signIn/signOut, handleReturn (échange du
+                      code puis retrait de l'historique), garde de compte, readError (phrase fixe, jamais le texte brut).
+src/core/log.js       logError(code, details) : un code et une liste blanche d'identifiants ; jamais e.stack, jamais
+                      le corps d'une réponse. Seul console.error du dépôt (reste un console.warn dans app.js quand
+                      l'enregistrement du service worker échoue).
+```
+
+### Une seule porte d'écriture
+
+`db.mutate({ puts, deletes, clearStores, origin, payloads })` est la seule transaction d'écriture de `src/core/db.js` ;
+`put`, `putMany`, `putBatch`, `delete`, `deleteMany`, `clear`, `clearAll` en sont des enveloppes (`MUTATING_METHODS`).
+`installCapture` y branche `db.onMutate`, qui renvoie les lignes d'outbox **écrites dans la même transaction** que la
+donnée : une écriture annulée ne laisse aucune entrée de file.
+
+- Une suppression met en file son `payload` (copie de la fiche au moment de la suppression) ; un `put` sera relu à
+  l'envoi.
+- `origin: 'remote'` (réception, ajustement d'horloge) et `origin: 'device'` ne sont **jamais** capturés.
+- `settings` n'est pas synchronisable ; `library_activity` n'entre en file que si le réglage « Synchroniser mon
+  historique de consultation » est actif (lu par `src/ui/state.js`, relu à chaque événement qui peut le réécrire).
+- Une ligne `files` hors liste blanche (`syncable: false`, ou un `mime` absent de la liste) reste locale et n'entre
+  jamais en file.
+- Un test statique de `tests/sync.js` échoue si un fichier de `SHELL` autre que `src/model/repo.js`, `src/sync/*`,
+  `src/domain/backup.js` et `src/core/db.js` appelle une méthode mutante de `db` directement.
+
+### Magasins internes
+
+`SYNC_INTERNAL_STORES = ['outbox', 'sync_state', 'sync_conflicts']` (`DB_VERSION` 2). Ils sont **hors archive** :
+`ARCHIVE_DATA_STORES` les exclut, l'inspection et la vérification de restauration n'en voient aucune trace, les puces
+« Données sur cet appareil » ne les listent pas, et un remplacement par ZIP ne les vide pas. Seul `repo.clearDevice()`
+les vide — en une transaction sans capture, en gardant `sync_state.device_id`. L'identité d'appareil vit dans
+`sync_state.device_id` (plus aucun reflet dans `localStorage`) ; l'ancienne clé `cuisineos.device` est reprise une
+seule fois puis retirée.
+
+### Dépendance embarquée
+
+`src/vendor/supabase-2.117.3.umd.js`, chargé par un `<script>` classique avant `src/app.js` (détail et procédure :
+« Dépendance embarquée » ci-dessus). Deux empreintes, vérifiées par `tools/verifier-vendor.mjs` :
+
+- fichier servi (sha256) : `d6a5c4414a5d4ce646d9c1de223aa7067d3ff664c15394ffeb7fcffc763354a3` ;
+- tarball npm (`dist.integrity` du registre) : `sha512-K+f8PimXDunPWQ63CKRXaF5pbVPJxmfw5ryAnh0s9S9PkwcuqBjiSpIaqpF7KLDljeYwXIL85ST8QxaO0+XuvA==`.
+
+Si `globalThis.supabase?.createClient` est absent, `createAuth` reste indisponible avec le motif `bibliotheque` et
+l'interface le dit ; l'application démarre quand même (invariant I4 : utilisable sans compte).
+
+### Durcissement du client
+
+`index.html` **et** `tests/index.html` portent la même balise
+`Content-Security-Policy` — `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
+img-src 'self' blob: data:; frame-src 'self' blob:; connect-src 'self' https:; object-src 'none'; base-uri 'none';
+form-action 'none'` — et `<meta name="referrer" content="no-referrer">`. `script-src 'self'` n'est jamais élargi ;
+`frame-ancestors` n'est jamais ajouté (WebKit l'hérite dans un document `blob:` et refuse alors le cadre) ;
+`connect-src https:` reste large parce que la `base_url` d'un fournisseur d'IA est libre. Les PDF et EPUB s'affichent
+dans une `<iframe sandbox>` sans `allow-same-origin`, avec un bouton de téléchargement permanent ; aucun
+`window.open` sur un `blob:` ne subsiste.
+
+Service worker : `sw-rules.js` (partagé avec les tests par `importScripts`) ne met en cache que les GET de même
+origine **sans chaîne de requête** — un retour `?code=…` est servi par le réseau et jamais stocké.
+
+### Côté serveur
+
+`supabase/migrations/0001_tables_et_regles.sql` (séquence `sync_seq`, 25 tables, déclencheur `server_seq`, RLS avec
+`is_allowed()` sur chaque règle, règle `delete` gardée par `app.purge`, schéma `private`, fonction du crochet
+« Before User Created » + déclencheur de secours, `sync_push`, `sync_purge`, `sync_purge_all`, révocations, tâche
+`pg_cron` des tombales) et `supabase/migrations/0002_stockage.sql` (seau privé `pages`, ses quatre règles, vue
+`private.storage_usage`). Les deux fichiers sont **générés** par `tools/generer-migrations.mjs` depuis
+`src/sync/tables.js` et `src/sync/mime.js` : ne pas les éditer à la main ;
+`node tools/generer-migrations.mjs --check` sort en code 1 si les fichiers commités diffèrent du généré.
+Application et preuves : `supabase/README.md` (gestes manuels de Neegan dans l'éditeur SQL, preuves `supabase/proofs/`).
+
+### Ce qui est absent (L3 et après)
+
+- **Envoi** : il n'y a pas de `src/sync/push.js`. La file se remplit et ne se vide jamais ; rien n'est transmis au
+  serveur. `sync_push` existe en base, sans appelant côté client.
+- **Réception** : pas de `src/sync/pull.js`, pas de curseur consommé, pas d'envoi initial (`backfill`).
+- **Conflits** : `sync_conflicts` existe comme magasin ; rien ne l'écrit ni ne le présente.
+- **Fichiers distants** : pas de `src/sync/files.js` — aucun téléversement, aucun téléchargement, aucune ligne
+  `files` marquée `remote`, pas de qualité d'envoi, pas d'affichage de l'espace serveur (L4).
+- **Suppression réelle et tombales** : `sync_purge` / `sync_purge_all` existent en base, sans appelant côté client
+  (L5). La purge de l'objet de stockage passe par l'API Storage, pas par le SQL.
+- **Horloge** : `clock.js` garde un décalage de 0 — personne ne mesure encore `server_time`.
+
 ## Modèle de données (magasins IndexedDB)
 
 `books`, `book_editions` (ISBN, langue, `unit_convention_id`), `source_documents` (fichier, sha256, type), `source_pages` (page imprimée, position),
@@ -91,7 +191,8 @@ Le format reste v1 : les archives complètes produites précédemment restent li
 
 ## Limites connues de V0
 
-- Pas de synchronisation entre appareils : transférer par archive.
+- Pas d'échange de données entre appareils : transférer par archive. Le lot L1-L2 pose le serveur, la connexion et la
+  capture des écritures ; l'envoi et la réception arrivent en L3 (voir « Synchronisation (L1-L2) »).
 - Pas de reconnaissance vocale; minuterie confiée au système (Siri / raccourci).
 - EPUB conservé mais non rendu; PDF affiché via le lecteur du navigateur, pages référencées à la main.
 - Interface anglaise partielle (dictionnaire `src/i18n/en.js`).
