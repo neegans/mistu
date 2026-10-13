@@ -3,7 +3,7 @@
 export const EN = {
   'Aujourd’hui': 'Today', 'Mes livres': 'My books', 'Ma semaine': 'My week', 'Ma cuisine': 'My kitchen', 'Ajouter': 'Add', 'Réglages': 'Settings',
   'Recherche': 'Search', 'Qu’est-ce qu’on cuisine ?': 'What are we cooking?', 'Chercher': 'Search', 'Chargement…': 'Loading…', 'Page introuvable': 'Page not found', 'Retour à l’accueil': 'Back to home',
-  'Une erreur est survenue': 'Something went wrong', 'Reprendre ma recette': 'Resume my recipe', '{d}/{n} étapes': '{d}/{n} steps', 'Favoris': 'Favorites', 'Dernières cuissons': 'Recently cooked',
+  'Une erreur est survenue': 'Something went wrong', 'Code : {c}': 'Code: {c}', 'Recharger': 'Reload', 'Reprendre ma recette': 'Resume my recipe', '{d}/{n} étapes': '{d}/{n} steps', 'Favoris': 'Favorites', 'Dernières cuissons': 'Recently cooked',
   'Refaire comme la dernière fois': 'Make it like last time', 'à ne pas refaire': 'not again', 'À utiliser en priorité': 'Use first', 'à consommer avant le': 'use by', 'Voir l’inventaire': 'View inventory',
   'Bienvenue': 'Welcome', 'Ta bibliothèque est vide. Commence par ajouter un livre, puis photographie sa table des matières ou une recette.': 'Your library is empty. Start by adding a book, then photograph its table of contents or a recipe.',
   'Restaurer une sauvegarde': 'Restore a backup', 'Redécouvrir': 'Rediscover', 'À redécouvrir : ce livre n’a pas été consulté dans Cuisine OS depuis {n} mois.': 'Rediscover: this book has not been opened in Cuisine OS for {n} months.',

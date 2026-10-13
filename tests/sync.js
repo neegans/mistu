@@ -99,7 +99,10 @@ export async function runSyncTests({ eq, ok }) {
     const html = await (await fetch(page)).text();
     ok(/http-equiv="Content-Security-Policy"/.test(html) && /script-src 'self'/.test(html) && !/frame-ancestors/.test(html), page + ' : CSP présente, script-src self, sans frame-ancestors');
     ok(/name="referrer" content="no-referrer"/.test(html), page + ' : referrer no-referrer');
-    ok(!/<style>/.test(html) && !/<script>(?!<)/.test(html.replace(/<script type="module" src=[^>]+><\/script>/g, '')), page + ' : ni style ni script inline');
+    // Les balises qui portent un `src` sont retirées d'abord ; ce qui reste de `<script` est forcément inline.
+    // La forme précédente ne reconnaissait que `<script>` nu : un `<script defer>` ou `<script nonce=…>` inline
+    // passait sous le garde-fou (mineur m4 de la revue finale).
+    ok(!/<style>/.test(html) && !/<script/.test(html.replace(/<script[^>]*\ssrc="[^"]+"[^>]*><\/script>/g, '')), page + ' : ni style ni script inline (toute balise script porte un src)');
   }
   const { displayUrl } = await import('../src/sync/mime.js');
   eq(displayUrl({ mime: 'text/html', blob: new Blob(['<script>1</script>'], { type: 'text/html' }) }), null, 'HTML : jamais d’URL d’affichage');
@@ -696,6 +699,9 @@ export async function runSyncTests({ eq, ok }) {
       aVisiter.push(resoudre(chemin, specifier));
     }
   }
+  // Le parcours lui-même doit avoir trouvé quelque chose : si une regex d'import cessait de reconnaître sa forme,
+  // `atteints` se réduirait à `src/app.js` et la comparaison resterait verte sans rien prouver (mineur, tâche 14).
+  ok(atteints.size >= 40, 'le graphe d’imports a bien été parcouru (' + atteints.size + ' modules atteints)');
   const absentsDuShell = [...atteints].map((c) => './' + c).filter((c) => !listeShell.includes(c)).sort();
   eq(absentsDuShell, [], 'tout module atteignable depuis app.js est dans SHELL');
   // Chargés hors du graphe d'imports : le bundle UMD par un <script> classique (index.html et tests/index.html),

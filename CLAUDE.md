@@ -55,8 +55,19 @@ hors archive et hors puces ; `db.mutate` = porte unique d'écriture (`MUTATING_M
 compte, « Changer de compte sur cet appareil ») ; Réglages → section « Synchronisation » (ensemble L2) ; durcissement
 (CSP + `referrer` sur `index.html` et `tests/index.html`, cadres `sandbox`, fin de `window.open`, blobs retypés,
 `logError` unique) ; `src/vendor/supabase-2.117.3.umd.js` vérifié deux fois ; service worker corrigé (aucune mise en
-cache d'une requête avec paramètres). `SHELL` complet et `VERSION = 'cuisine-os-v0.2.0-1'`, `APP_VERSION = '0.2.0'`.
-Suite complète : **365/365 verts**, 0 erreur console (13 octobre 2026, `http://localhost:8081/tests/?v=t14b`).
+cache d'une requête avec paramètres). `SHELL` complet et `VERSION = 'cuisine-os-v0.2.0-2'`, `APP_VERSION = '0.2.0'`.
+
+**Vague finale de corrections (13 octobre 2026, après la revue de branche `final-review.md`).** Six constats
+Important corrigés, un tranché par Neegan : **R25** `server_seq` posée par le serveur à chaque écriture (la valeur
+d'un client est ignorée ; verdicts 6.10-6.11 de la preuve) · **R24** « Effacer les données de cet appareil » n'est
+plus refusé pour file non vide **sans compte** · **R26** amorçage horodaté + passe unique sur les fiches d'avant le
+lot (garde `sync_state.stamp_updated_at`) et **montée `DB_VERSION` 1 → 2 sur base peuplée réellement testée** ·
+**R27** décocher « Synchroniser mon historique » vide la file de ses entrées `library_activity` · **R28**
+`demarrerSync({ auth, delaiMs })` borne le démarrage et rattrape l'affichage si le résultat arrive tard · **R29**
+(décision de Neegan) I6 précisé en spec § 11 : aucune adresse ni clé dans le dépôt, prénom et domaine assumés
+publics, rien n'est retiré. Les deux gestes destructeurs (`changerDeCompte`, `effacerDonnees`) sont désormais des
+fonctions exportées à dépendances injectées, et testées.
+Suite complète : **403/403 verts**, 0 erreur console (13 octobre 2026, `http://localhost:8081/tests/?v=final-vert`).
 
 **Preuves SQL : NON JOUÉES.** La tâche 5 du plan est **parquée** : elle demande un projet Supabase qui n'existe pas
 encore. Geste de Neegan : créer le projet de développement **`mistu-dev`** (D8, région Canada), puis suivre
@@ -85,10 +96,12 @@ forcer HTTPS, puis faire suivre `redirectTo`, Site URL et Redirect URLs de Supab
 Google, `manifest.webmanifest` et `SHELL`, et réinstaller l'icône iPhone. **Aucune connexion réelle depuis
 `neegans.github.io`** tant que le CNAME n'est pas actif.
 
-**Dettes différées (assumées, à reprendre en L3).** Pluriel de « N envois en attente » ; pastille « N non envoyés »
-dans l'en-tête ; des chaînes `t()` du lot sans entrée dans `src/i18n/en.js` ; dans `tests/sync.js`, les stubs qui
-remplacent `console.error` ne sont pas posés en `try/finally` (un échec en cours de bloc laisserait le stub en place) ;
-le `catch` de `getSession` d'`auth.js` n'est pas testé.
+**Dettes différées (assumées, à reprendre en L3).** Pastille « N non envoyés » dans l'en-tête ; dans `tests/sync.js`,
+les stubs qui remplacent `console.error` ne sont pas posés en `try/finally` (un échec en cours de bloc laisserait le
+stub en place) ; le `catch` de `getSession` d'`auth.js` n'est pas testé. **Mesuré le 13 octobre** : les **411**
+chaînes `t()` de `src/ui` sans entrée dans `src/i18n/en.js` sont **toutes antérieures** au lot — les 29 chaînes
+ajoutées par le lot sont traduites ; les deux seules qui manquaient (`t('Code : {c}')` et `t('Recharger')`) sont
+posées. Le pluriel de « N envois en attente » est corrigé (R27/R24, vague finale).
 
 ## Premier lot de fiabilisation — 8 septembre 2026, à réviser
 
