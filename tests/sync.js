@@ -157,6 +157,10 @@ export async function runSyncTests({ eq, ok }) {
     eq((await db.getAll('outbox')).length, 2, 'vidage d’appareil : non capturé');
     await db.mutate({ puts: { files: [{ sha256: 'f'.repeat(64), mime: 'text/plain', size: 1 }] } });
     eq((await db.getAll('outbox')).length, 2, 'ligne files d’avant le lot (type hors liste, sans champ syncable) : non capturée');
+    // L'autre sens du consentement (R27) : le réglage activé, l'historique entre en file comme n'importe quoi d'autre.
+    installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => true });
+    await db.mutate({ puts: { library_activity: [{ id: 'act2', edition_id: 'e', updated_at: '2026-10-12T10:00:00Z' }] } });
+    eq((await db.getAll('outbox')).map((o) => [o.store, o.id]).at(-1), ['library_activity', 'act2'], 'réglage activé : l’historique entre en file');
     uninstallCapture(db);
   });
   const { withRepo } = await import('./sync-fixture.js'); // base temporaire v2, repo lié dessus
@@ -421,6 +425,108 @@ export async function runSyncTests({ eq, ok }) {
     ...syncSectionModel({ available: true, guard: { ok: false, message: 'x' } }).buttons,
   ].map((b) => b.action));
   eq([...actionsDuModele].filter((a) => !SYNC_ACTIONS.includes(a)), [], 'aucune action du modèle sans geste câblé');
+
+  // --- Les deux gestes les plus destructeurs (spec § 4.1, § 4.2) : I5b et I5c de la revue finale
+  // Extraits de leurs gestionnaires DOM avec leurs dépendances injectées : aucune boîte de dialogue, aucune base,
+  // aucun rechargement réel. Ce qui est éprouvé ici, c'est l'ORDRE des effets et chacun des refus — ce sont les
+  // seuls gestes du lot qui détruisent des données, et ils n'étaient couverts par aucun test.
+  const { changerDeCompte, effacerDonnees, reglerHistorique } = await import('../src/ui/settings.js');
+  // Journal des effets : clearDevice note s'il a reçu de quoi se déconnecter, reload note seulement son passage.
+  const journalGeste = () => {
+    const vus = [];
+    return { vus,
+      toast: (m) => vus.push(['toast', m]),
+      clearDevice: async (o) => { vus.push(['clearDevice', o?.signOut ? 'avec signOut' : 'sans signOut']); },
+      reload: () => vus.push(['reload']) };
+  };
+  // Confirmations servies dans l'ordre : le test sait combien de fois on a demandé, et avec quelle phrase.
+  const confirmations = (reponses) => {
+    const file = [...reponses]; const demandes = [];
+    return { demandes, confirm: async (message) => { demandes.push(message); return file.shift(); } };
+  };
+
+  {
+    const g = journalGeste();
+    await changerDeCompte({ confirm: async () => true, toast: g.toast, pending: async () => 0,
+      archiveCreated: () => null, clearDevice: g.clearDevice, reload: g.reload });
+    eq(g.vus, [['toast', 'Fais d’abord une archive sur cette page.']], 'changer de compte : sans archive, un toast et RIEN d’autre');
+  }
+  {
+    const g = journalGeste();
+    await changerDeCompte({ confirm: async () => true, toast: g.toast, pending: async () => 0,
+      archiveCreated: () => { throw new Error('stockage indisponible'); }, clearDevice: g.clearDevice, reload: g.reload });
+    eq(g.vus, [['toast', 'Le stockage de session est inaccessible : ce geste n’est pas possible ici.']],
+      'changer de compte : stockage de session illisible → échec fermé, rien d’effacé');
+  }
+  {
+    const g = journalGeste(); const c = confirmations([false]);
+    await changerDeCompte({ confirm: c.confirm, toast: g.toast, pending: async () => 3,
+      archiveCreated: () => '2026-10-13T00:00:00Z', clearDevice: g.clearDevice, reload: g.reload });
+    eq([g.vus, c.demandes.length], [[], 1], 'changer de compte : première confirmation refusée → aucun effet, aucune seconde question');
+  }
+  {
+    const g = journalGeste(); const c = confirmations([true, false]);
+    await changerDeCompte({ confirm: c.confirm, toast: g.toast, pending: async () => 3,
+      archiveCreated: () => '2026-10-13T00:00:00Z', clearDevice: g.clearDevice, reload: g.reload });
+    eq([g.vus, c.demandes.length], [[], 2], 'changer de compte : seconde confirmation refusée → aucun effet');
+    eq(c.demandes[1], '3 envois en attente seront perdus — ils sont dans l’archive.', 'la perte est chiffrée et nommée (pluriel)');
+  }
+  {
+    const g = journalGeste(); const c = confirmations([true, true]);
+    const signOut = async () => {};
+    await changerDeCompte({ confirm: c.confirm, toast: g.toast, pending: async () => 1,
+      archiveCreated: () => '2026-10-13T00:00:00Z', clearDevice: g.clearDevice, signOut, reload: g.reload });
+    eq(g.vus, [['clearDevice', 'avec signOut'], ['reload']], 'changer de compte : les deux confirmations → effacement avec déconnexion, PUIS rechargement');
+    eq(c.demandes[1], '1 envoi en attente sera perdu — il est dans l’archive.', 'un seul envoi : la phrase est au singulier');
+  }
+  {
+    const g = journalGeste(); const c = confirmations([true, true]);
+    await effacerDonnees({ user: { id: 'u' }, pending: async () => 2, confirm: c.confirm,
+      demanderMot: async () => 'EFFACER', toast: g.toast, clearDevice: g.clearDevice, signOut: async () => {}, reload: g.reload });
+    eq([g.vus, c.demandes.length], [[['toast', '2 éléments ne sont pas encore envoyés.']], 0],
+      'effacer : connecté avec une file non vide → refusé, et aucune confirmation n’est même demandée');
+  }
+  {
+    // R24 : sans compte, rien ne videra jamais la file (pas d'envoi en L2) — le refus rendrait le bouton mort.
+    const g = journalGeste(); const c = confirmations([true]);
+    await effacerDonnees({ user: null, pending: async () => 2, confirm: c.confirm,
+      demanderMot: async () => 'EFFACER', toast: g.toast, clearDevice: g.clearDevice, reload: g.reload });
+    eq([g.vus, c.demandes.length], [[['clearDevice', 'sans signOut'], ['toast', 'Données effacées'], ['reload']], 1],
+      'R24 : sans compte, une file non vide ne bloque plus — le double contrôle s’applique et efface');
+  }
+  {
+    const g = journalGeste(); const c = confirmations([false]);
+    await effacerDonnees({ user: null, pending: async () => 0, confirm: c.confirm,
+      demanderMot: async () => 'EFFACER', toast: g.toast, clearDevice: g.clearDevice, reload: g.reload });
+    eq(g.vus, [], 'effacer : confirmation refusée → aucun effet');
+  }
+  {
+    const g = journalGeste(); const c = confirmations([true]);
+    await effacerDonnees({ user: null, pending: async () => 0, confirm: c.confirm,
+      demanderMot: async () => 'effacer', toast: g.toast, clearDevice: g.clearDevice, reload: g.reload });
+    eq(g.vus, [['toast', 'Annulé']], 'effacer : mot de confirmation faux → annulé, rien d’effacé');
+  }
+  {
+    const g = journalGeste(); const c = confirmations([true]);
+    const signOut = async () => {};
+    await effacerDonnees({ user: { id: 'u' }, pending: async () => 0, confirm: c.confirm,
+      demanderMot: async () => 'EFFACER', toast: g.toast, clearDevice: g.clearDevice, signOut, reload: g.reload });
+    eq(g.vus, [['clearDevice', 'avec signOut'], ['toast', 'Données effacées'], ['reload']],
+      'effacer : avec un compte, l’effacement emporte la déconnexion, PUIS le rechargement');
+  }
+
+  // R27 : retirer le consentement à l'historique retire AUSSI ce qui attendait de partir (spec § 4.2, D6).
+  // Un retrait de consentement qui laisse partir la file n'est pas un retrait.
+  await withRepo(async (repoTemp, db) => {
+    const ligne = (store, id) => ({ user_id: 'u1', store, id, op: 'put', updated_at: '2026-10-12T10:00:00Z', tries: 0 });
+    await db.mutate({ puts: { outbox: [ligne('library_activity', 'a1'), ligne('library_activity', 'a2'), ligne('recipes', 'r1')] }, origin: 'device' });
+    const retires = await reglerHistorique(false);
+    eq([retires, (await db.getAll('outbox')).map((o) => [o.store, o.id])], [2, [['recipes', 'r1']]],
+      'R27 : décocher retire les deux entrées library_activity de la file, et seulement elles');
+    eq((await repoTemp.getSettings()).sync_activity, false, 'R27 : le réglage est écrit (la capture se referme) avant la purge');
+    eq(await reglerHistorique(true), 0, 'R27 : cocher n’enlève rien de la file');
+    eq((await repoTemp.getSettings()).sync_activity, true, 'R27 : et le consentement est bien réécrit');
+  });
 
   // I2 : les réglages lus par la capture suivent la base, même réécrite sans passer par setSetting
   // (restauration d'archive, écriture directe) — c'est une porte de confidentialité, pas un confort.

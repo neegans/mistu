@@ -173,14 +173,16 @@ export async function renderSettings(params, query, ctx) {
     el('div', { class: 'row', style: { marginTop: '.8rem' } },
       el('button', { class: 'btn danger', onClick: async () => {
         if (archiveOperation) { toast(t('Une opération d’archive est déjà en cours.')); return; }
-        // Rien n’est effacé tant qu’une écriture n’a pas été envoyée : la file est relue au moment du geste.
-        const enAttente = await repo.db.count('outbox');
-        if (enAttente > 0) { toast(messageEnAttente(enAttente)); return; }
-        if (!(await confirmDialog(t('Effacer les données de cet appareil ? Fais d’abord une sauvegarde.'), { danger: true, okLabel: t('Continuer') }))) return;
-        const word = await promptDialog(t('Tape EFFACER pour confirmer'));
-        if (word !== 'EFFACER') { toast(t('Annulé')); return; }
-        await repo.clearDevice({ signOut: auth?.signOut || null });
-        toast(t('Données effacées')); location.hash = '#/'; location.reload();
+        await effacerDonnees({
+          user: sync.user || null,
+          pending: () => repo.db.count('outbox'),
+          confirm: confirmDialog,
+          demanderMot: promptDialog,
+          toast,
+          clearDevice: repo.clearDevice,
+          signOut: auth?.signOut || null,
+          reload: () => { location.hash = '#/'; location.reload(); },
+        });
       } }, t('Effacer les données de cet appareil')))));
   return root;
 
@@ -256,6 +258,54 @@ const messageEnAttente = (n) => (n === 1
   ? t('1 élément n’est pas encore envoyé.')
   : t('{n} éléments ne sont pas encore envoyés.', { n }));
 
+// Même règle pour la perte annoncée avant « Changer de compte » : zéro et un prennent le singulier en français.
+const messagePerte = (n) => (n > 1
+  ? t('{n} envois en attente seront perdus — ils sont dans l’archive.', { n })
+  : t('{n} envoi en attente sera perdu — il est dans l’archive.', { n }));
+
+// « Effacer les données de cet appareil » (spec § 4.2) : décision et effets, sans DOM ni base — toutes les
+// dépendances sont injectées, pour que le geste le plus destructeur de l'app soit éprouvé plutôt que relu.
+// R24 : le refus pour file non vide ne vaut QUE s'il existe un compte. Sans compte, rien ne videra jamais la file
+// (il n'y a pas d'envoi en L2, et « Abandonner cet envoi » est L3) : le refus rendrait le bouton mort pour toujours,
+// dès la première écriture ordinaire. Sans compte, on passe donc au double contrôle, qui dit déjà la perte.
+export async function effacerDonnees({ user = null, pending, confirm, demanderMot, toast: dire, clearDevice, signOut = null, reload }) {
+  // La file est relue au moment du geste : elle a pu bouger depuis le rendu de la page.
+  const enAttente = await pending();
+  if (user && enAttente > 0) { dire(messageEnAttente(enAttente)); return false; }
+  if (!(await confirm(t('Effacer les données de cet appareil ? Fais d’abord une sauvegarde.'), { danger: true, okLabel: t('Continuer') }))) return false;
+  const mot = await demanderMot(t('Tape EFFACER pour confirmer'));
+  if (mot !== 'EFFACER') { dire(t('Annulé')); return false; }
+  await clearDevice({ signOut });
+  dire(t('Données effacées'));
+  reload();
+  return true;
+}
+
+// « Changer de compte sur cet appareil » (spec § 4.1) : l’archive est exigée, la perte est nommée, puis tout
+// ce qui est local est effacé. Aucune donnée n’est envoyée nulle part : la file en attente est perdue, dite perdue.
+// `archiveCreated` est une lecture, pas une valeur : si elle lève (stockage de session inaccessible), on refuse —
+// échec fermé, cohérent avec le reste du lot.
+export async function changerDeCompte({ confirm, toast: dire, pending, archiveCreated, clearDevice, signOut = null, reload }) {
+  let archive = null;
+  try { archive = archiveCreated(); }
+  catch { dire(t('Le stockage de session est inaccessible : ce geste n’est pas possible ici.')); return false; }
+  if (!archive) { dire(t('Fais d’abord une archive sur cette page.')); return false; }
+  if (!(await confirm(t('Changer de compte sur cet appareil ? Toutes les données de cet appareil seront effacées.'), { danger: true, okLabel: t('Continuer') }))) return false;
+  const enAttente = await pending(); // compté au moment du geste : la file a pu bouger depuis le rendu
+  if (!(await confirm(messagePerte(enAttente), { danger: true, okLabel: t('Changer de compte') }))) return false;
+  await clearDevice({ signOut });
+  reload();
+  return true;
+}
+
+// Consentement à l'historique de consultation (spec § 4.2, D6 ; R27). Le réglage est écrit D'ABORD — la capture le
+// relit et se referme — puis ce qui attendait de partir est retiré de la file : un retrait de consentement qui
+// laisse partir la file n'est pas un retrait. Rend le nombre d'entrées retirées.
+export async function reglerHistorique(actif, { setSetting = repo.setSetting, oublierEnvois = repo.oublierEnvois } = {}) {
+  await setSetting('sync_activity', actif === true);
+  return actif === true ? 0 : await oublierEnvois('library_activity');
+}
+
 // Les trois seuls gestes de la section. Le modèle ne peut nommer qu'eux, et le rendu ignore une action inconnue :
 // un renommage donne un bouton manquant (visible), jamais un bouton muet.
 export const SYNC_ACTIONS = ['signIn', 'signOut', 'changeAccount'];
@@ -293,25 +343,23 @@ function syncSection(state, auth, settings) {
       : null,
     field(t('Historique de consultation'),
       el('label', { class: 'check' },
-        el('input', { type: 'checkbox', checked: settings.sync_activity === true, onChange: async (e) => { await repo.setSetting('sync_activity', e.target.checked); refresh(); } }),
+        el('input', { type: 'checkbox', checked: settings.sync_activity === true, onChange: async (e) => { await reglerHistorique(e.target.checked); refresh(); } }),
         t('Synchroniser mon historique de consultation')),
-      t('Désactivé, ce que tu consultes reste sur cet appareil.')));
+      t('Désactivé, ce que tu consultes reste sur cet appareil. Le décocher retire aussi ce qui attendait d’être envoyé.')));
 }
 
-// « Changer de compte sur cet appareil » (spec § 4.1) : l’archive est exigée, la perte est nommée, puis tout
-// ce qui est local est effacé. Aucune donnée n’est envoyée nulle part : la file en attente est perdue, dite perdue.
+// Câblage du geste « Changer de compte sur cet appareil » : la décision et les effets vivent dans changerDeCompte().
 async function changeAccount(auth) {
   if (archiveOperation) { toast(t('Une opération d’archive est déjà en cours.')); return; }
-  let archive = null;
-  let lisible = true;
-  try { archive = sessionStorage.getItem(ARCHIVE_FLAG); } catch { lisible = false; } // illisible : on refuse (échec fermé)
-  if (!lisible) { toast(t('Le stockage de session est inaccessible : ce geste n’est pas possible ici.')); return; }
-  if (!archive) { toast(t('Fais d’abord une archive sur cette page.')); return; }
-  if (!(await confirmDialog(t('Changer de compte sur cet appareil ? Toutes les données de cet appareil seront effacées.'), { danger: true, okLabel: t('Continuer') }))) return;
-  const enAttente = await repo.db.count('outbox'); // compté au moment du geste : la file a pu bouger depuis le rendu
-  if (!(await confirmDialog(t('{n} envois en attente seront perdus — ils sont dans l’archive.', { n: enAttente }), { danger: true, okLabel: t('Changer de compte') }))) return;
-  await repo.clearDevice({ signOut: auth?.signOut || null });
-  location.reload();
+  await changerDeCompte({
+    confirm: confirmDialog,
+    toast,
+    pending: () => repo.db.count('outbox'),
+    archiveCreated: () => sessionStorage.getItem(ARCHIVE_FLAG), // peut lever : changerDeCompte refuse alors le geste
+    clearDevice: repo.clearDevice,
+    signOut: auth?.signOut || null,
+    reload: () => location.reload(),
+  });
 }
 
 // Modèle pur de la section « Synchronisation » (spec § 4.2, ensemble L2) : ce que la section dit et ce qu’elle offre.

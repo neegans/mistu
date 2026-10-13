@@ -136,8 +136,19 @@ export async function clearDevice({ signOut } = {}) {
   const device = await db.get('sync_state', 'device_id');
   // mutate vide avant d'écrire : device_id est remis dans la même transaction.
   await db.mutate({ clearStores: Object.keys(STORES), puts: device ? { sync_state: [device] } : {}, origin: 'device' });
-  if (signOut) await signOut();
+  // Les données sont déjà parties : un échec de déconnexion ne doit pas faire croire que l'effacement a échoué
+  // (l'appareil se retrouverait connecté sur une base vide, que la garde de compte ne peut plus détecter).
+  if (signOut) { try { await signOut(); } catch { /* session laissée ouverte : visible dans Réglages */ } }
   emit('change', { store: '*' });
+}
+
+// Retrait d'un consentement (spec § 4.2, R27) : ce qui attendait de partir pour ce magasin est retiré de la file.
+// L'outbox est interne et n'est dans aucun SYNC_STORES ; l'origine 'device' n'est de toute façon jamais capturée.
+export async function oublierEnvois(store) {
+  const seqs = (await db.getAll('outbox')).filter((r) => r?.store === store).map((r) => r.seq);
+  if (!seqs.length) return 0;
+  await db.mutate({ deletes: { outbox: seqs }, origin: 'device' });
+  return seqs.length;
 }
 
 export const all = (store) => db.getAll(store);
