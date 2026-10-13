@@ -638,4 +638,160 @@ export async function runSyncL3Tests({ eq, ok }) {
     try { restant = await purgerAnciens(db, Date.parse('2026-10-13T00:00:00Z')); } finally { db.mutate = vraiMutate; }
     eq([restant, transactions], [0, 0], 'conflits : une purge sans rien à retirer n’ouvre aucune transaction');
   });
+
+  // --- Moteur (spec § 5.3, § 5.5, § 4.2) : ordre envoi initial → envoi → réception, un seul vol, état, déclencheurs
+  const { createMoteur } = await import('../src/sync/moteur.js');
+  // Fenêtre et bus muets : le moteur s’abonne, et c’est le test qui tient les déclencheurs.
+  const fenetreMuette = () => ({ addEventListener() {}, removeEventListener() {}, document: { visibilityState: 'visible' } });
+  const busMuet = { on: () => () => {} };
+  // Toutes les tables marquées « fait » : la file ne porte alors QUE ce que le test vient d’écrire. L’envoi initial
+  // des références amorcées est couvert plus haut ; ici il ne ferait que brouiller les comptes d’appels.
+  const toutDejaEnvoye = (db) => db.mutate({ puts: { sync_state: SYNC_STORES.map((t) => ({ key: `backfill:${t}`, value: 'fait' })) }, origin: 'device' });
+  // Chaque réponse du factice applique une heure serveur : le décalage global est remis à 0 dans tous les cas.
+  try {
+    await withRepo(async (repo, db) => {
+      await db.mutate({ puts: { books: [{ id: 'm1', title: 'Avant', updated_at: '2026-10-01T00:00:00Z' }] }, origin: 'device' });
+      const tf = creerTransportFactice({ lire: { books: [[{ id: 'm9', data: { id: 'm9', title: 'Reçu', updated_at: '2026-10-13T00:00:00Z' }, updated_at: '2026-10-13T00:00:00Z', deleted_at: null, server_seq: 1 }], []] } });
+      const etats = [];
+      const ecouteurs = {};
+      const fenetre = { addEventListener: (ev, fn) => { ecouteurs[ev] = fn; }, removeEventListener: (ev) => { delete ecouteurs[ev]; }, document: { visibilityState: 'visible' } };
+      const abonnes = {};
+      const bus = { on: (ev, fn) => { abonnes[ev] = fn; return () => delete abonnes[ev]; } };
+      const moteur = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: tf, fenetre, bus, delaiRegroupementMs: 10 });
+      moteur.onEtat((e) => etats.push({ ...e }));
+      const e0 = moteur.etat();
+      eq([e0.enCours, e0.aEnvoyer, e0.dernierEchange], [false, 0, null], 'moteur : état initial');
+      const fin = await moteur.executer('test');
+      eq([fin.enCours, fin.phase, fin.aEnvoyer, fin.conflits, fin.attenteConnexion], [false, null, 0, 0, false], 'moteur : après une passe complète, plus rien à envoyer');
+      ok(fin.dernierEchange !== null, 'moteur : « Dernier échange » posé après un appel réussi');
+      eq((await db.get('sync_state', 'last_exchange_at'))?.value, fin.dernierEchange, 'moteur : dernier échange persisté');
+      ok(Object.isFrozen(fin), 'moteur : l’état sort figé — un abonné garde l’objet reçu sans le voir changer sous lui');
+      const ordre = tf.journal.map((a) => a.appel);
+      ok(ordre.indexOf('pousser') < ordre.indexOf('lire'), 'moteur : envoi (initial inclus) AVANT réception');
+      eq((await db.get('books', 'm9'))?.title, 'Reçu', 'moteur : la réception a écrit la fiche');
+      ok(etats.some((e) => e.phase === 'envoi_initial') && etats.some((e) => e.phase === 'reception'), 'moteur : les phases sont annoncées');
+      // Un seul vol : deux exécutions concurrentes → une passe, la seconde REJOINT la première (la même promesse).
+      const avant = tf.journal.length;
+      const p1 = moteur.executer('a');
+      const p2 = moteur.executer('b');
+      ok(p1 === p2, 'moteur : un appel pendant un vol rend la MÊME promesse (pas une seconde passe)');
+      await Promise.all([p1, p2]);
+      ok(tf.journal.length - avant <= 25, 'moteur : exécutions concurrentes → un seul vol (pas deux fois les appels)');
+      // Déclencheurs : écriture regroupée, online, premier plan.
+      moteur.demarrer();
+      ok(['online', 'visibilitychange'].every((ev) => ecouteurs[ev]) && abonnes.change, 'moteur : écoute online, visibilitychange et le bus « change »');
+      const n0 = tf.journal.length;
+      await repo.save('books', { id: 'm2', title: 'Nouveau' });
+      abonnes.change({ store: 'books' }); abonnes.change({ store: 'books' });
+      await new Promise((r) => setTimeout(r, 60));
+      ok(tf.journal.filter((a, i) => i >= n0 && a.appel === 'pousser').length === 1, 'moteur : deux écritures rapprochées → un seul envoi (regroupement)');
+      const fini = moteur.arreter();
+      eq(Object.keys(ecouteurs).length, 0, 'moteur : arrêt → plus d’écoute');
+      // L’arrêt rend la passe en vol : la base temporaire ne se referme pas sous une passe encore en cours.
+      await fini;
+    });
+
+    // Déclencheurs : seul un retour à « visible » relance une passe ; le retour du réseau en relance une.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const tf = creerTransportFactice({ lire: {} });
+      const ecouteurs = {};
+      const fenetre = { addEventListener: (ev, fn) => { ecouteurs[ev] = fn; }, removeEventListener: (ev) => { delete ecouteurs[ev]; }, document: { visibilityState: 'hidden' } };
+      const moteur = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: tf, fenetre, bus: busMuet });
+      await moteur.demarrer();
+      const n0 = tf.journal.length;
+      ok(n0 > 0, 'moteur : demarrer() charge l’état puis lance une première passe');
+      await ecouteurs.visibilitychange();
+      eq(tf.journal.length, n0, 'moteur : passer en arrière-plan ne déclenche aucune passe');
+      fenetre.document.visibilityState = 'visible';
+      await ecouteurs.visibilitychange();
+      ok(tf.journal.length > n0, 'moteur : revenir au premier plan déclenche une passe');
+      const n1 = tf.journal.length;
+      await ecouteurs.online();
+      ok(tf.journal.length > n1, 'moteur : le retour du réseau déclenche une passe');
+      await moteur.arreter();
+    });
+
+    // Sans compte, puis pause de quota (spec § 5.3) : rien ne part tant que la personne n’a pas dit « Envoyer maintenant ».
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await repo.save('books', { id: 'q1', title: 'x' });
+      const tfSans = creerTransportFactice({ lire: {} });
+      const sansCompte = createMoteur({ db, getUserId: () => null, isActivitySynced: () => false, transport: tfSans, fenetre: fenetreMuette(), bus: busMuet });
+      const eSans = await sansCompte.executer('t');
+      eq([tfSans.journal.length, eSans.aEnvoyer, eSans.enCours], [0, 1, false], 'moteur : sans compte, aucun appel réseau et la file reste comptée');
+      await db.mutate({ puts: { sync_state: [{ key: 'pause', value: { raison: 'quota', at: '2026-10-13T00:00:00Z' } }] }, origin: 'device' });
+      const tf = creerTransportFactice({ lire: {} });
+      const moteur = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: tf, fenetre: fenetreMuette(), bus: busMuet });
+      await moteur.demarrer();
+      eq([tf.journal.length, moteur.etat().pause?.raison, moteur.etat().aEnvoyer], [0, 'quota', 1], 'moteur : en pause, une passe ne fait AUCUN appel et la file reste comptée');
+      await moteur.envoyerMaintenant();
+      eq([await db.get('sync_state', 'pause'), moteur.etat().pause], [undefined, null], 'moteur : « Envoyer maintenant » retire la pause de sync_state');
+      ok(tf.journal.some((a) => a.appel === 'pousser'), 'moteur : … et la passe tourne alors pour de vrai');
+      await moteur.arreter();
+    });
+
+    // Un envoi en échec réseau : la réception n’est PAS tentée, la file reste entière, une reprise est programmée.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await repo.save('books', { id: 'n1', title: 'x' });
+      const tf = creerTransportFactice({ pousser: [{ erreur: { type: 'reseau', status: 0, message: 'x' } }], lire: {} });
+      const moteur = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: tf, fenetre: fenetreMuette(), bus: busMuet });
+      const vraiConsole = console.error;
+      console.error = () => {};
+      let e;
+      try { e = await moteur.executer('t'); } finally { console.error = vraiConsole; }
+      eq([e.derniereErreur?.type, e.attenteConnexion, e.aEnvoyer], ['reseau', false, 1], 'moteur : envoi en échec réseau → erreur portée, file entière, aucune attente de connexion');
+      ok(!tf.journal.some((a) => a.appel === 'lire'), 'moteur : un envoi en échec n’enchaîne JAMAIS sur la réception');
+      eq(e.dernierEchange, null, 'moteur : un appel en échec ne date aucun échange');
+      // La reprise programmée (2 s) est annulée par l’arrêt : rien ne tourne après la fermeture de la base.
+      await moteur.arreter();
+    });
+
+    // I5 : une passe qui n’aboutit à AUCUN appel réussi ne date aucun échange — même sans erreur à l’envoi.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      // File vide : l’envoi ne fait aucun appel. La réception échoue dès sa première table (recipe_versions, R-L3-12).
+      const tf = creerTransportFactice({ lire: { recipe_versions: [{ erreur: { type: 'reseau', status: 0, message: 'x' } }] } });
+      const moteur = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: tf, fenetre: fenetreMuette(), bus: busMuet });
+      const vraiConsole = console.error;
+      console.error = () => {};
+      let e;
+      try { e = await moteur.executer('t'); } finally { console.error = vraiConsole; }
+      eq([e.dernierEchange, await db.get('sync_state', 'last_exchange_at')], [null, undefined], 'moteur (I5) : aucun appel réussi → aucun « Dernier échange » daté');
+      eq(e.derniereErreur?.type, 'reseau', 'moteur : l’erreur classée de la réception est portée par l’état');
+      eq(tf.journal.map((a) => a.appel), ['lire'], 'moteur : file vide → aucun appel d’envoi, et la réception s’arrête à la première erreur');
+      await moteur.arreter();
+    });
+
+    // Horloge (spec § 5.3) : au-delà de 5 min, avertissement UNIQUE, décalage persistant, relu au démarrage.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await repo.save('books', { id: 'h1', title: 'x' });
+      // `maintenant()` est injecté dans le passé : le server_time scripté reste lui aussi dans le passé réel, donc le
+      // plancher de clock.js n’est jamais poussé dans le futur. L’écart mesuré vaut 11 min dans les deux passes.
+      const base = Date.parse('2026-10-13T00:00:00Z');
+      let ms = base;
+      const accuse = (t, id) => ({ reponse: { server_time: new Date(t + 11 * 60000).toISOString(), accepted: [{ store: 'books', id }], adjusted: [], rejected: [] } });
+      const tf = creerTransportFactice({ pousser: [accuse(base, 'h1'), accuse(base + 60000, 'h2')], lire: {} });
+      const moteur = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: tf, fenetre: fenetreMuette(), bus: busMuet, maintenant: () => ms });
+      const e = await moteur.executer('t');
+      eq(e.horloge?.minutes, 11, 'moteur : horloge fausse de 11 min → avertissement porté par l’état');
+      const marque = (await db.get('sync_state', 'clock_warned_at'))?.value;
+      eq(typeof marque, 'string', 'moteur : avertissement unique mémorisé');
+      eq((await db.get('sync_state', 'clock_offset_ms'))?.value, 11 * 60000, 'moteur : le décalage mesuré est persisté');
+      ms = base + 60000;
+      await repo.save('books', { id: 'h2', title: 'y' });
+      const e2 = await moteur.executer('t');
+      eq(e2.horloge?.minutes, 11, 'moteur : l’avertissement reste affiché, pas répété');
+      eq((await db.get('sync_state', 'clock_warned_at'))?.value, marque, 'moteur : … et il n’est pas réhorodaté à chaque passe');
+      // Au démarrage, le décalage mesuré est relu : l’horloge reste corrigée sans attendre un premier appel.
+      setClockOffset(0);
+      const m2 = createMoteur({ db, getUserId: () => null, isActivitySynced: () => false, transport: tf, fenetre: fenetreMuette(), bus: busMuet, maintenant: () => ms });
+      await m2.demarrer();
+      eq(getClockOffset(), 11 * 60000, 'moteur : charger() relit clock_offset_ms et réapplique le décalage');
+      eq(m2.etat().horloge?.minutes, 11, 'moteur : … et l’avertissement déjà donné reste affiché au démarrage');
+      await m2.arreter();
+    });
+  } finally { setClockOffset(0); }
 }
