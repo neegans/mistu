@@ -16,6 +16,8 @@
 -- l'éditeur annule tout et le message d'erreur est la seule sortie : corrige, puis recolle le fichier entier.
 --
 -- Les cinq motifs de rejet de `sync_push` sortent tous ici : 'updated_at', 'cle', 'forme', 'taille', 'conflit'.
+-- Le nombre de verdicts n'est écrit nulle part : le `BILAN` le compte lui-même (`count(*)` sur la table temporaire),
+-- donc l'ajout des verdicts 6.10 et 6.11 (R25 : un `update` qui pose `server_seq` lui-même est ignoré) le suit seul.
 
 begin;
 
@@ -361,6 +363,22 @@ insert into pg_temp.preuve
 select 6.09, 'ecriture sous maintenance bien effectuee (sinon 6.08 ne prouve rien)', 'true', (data ? 'maintenance')::text,
   data ? 'maintenance' from public.books where id = 'i1';
 select set_config('app.maintenance', '', true);
+
+-- R25 : `server_seq` appartient au SERVEUR. La règle `books_update` n'autorise que par LIGNE, jamais par colonne, et
+-- `authenticated` a le privilège `update` sur les 25 tables : l'instruction ci-dessous est donc bel et bien acceptée,
+-- et pourtant la valeur qu'elle pose est ignorée — le déclencheur la remplace par une valeur neuve de la séquence,
+-- donc strictement supérieure à tout ce qui a été distribué. Sans cela, un `PATCH` direct posant une valeur haute
+-- arrêterait la réception de TOUS les appareils en silence (spec § 5.5), et une valeur basse rendrait la fiche
+-- indélivrable. La référence est relevée AVANT l'écriture, sinon le verdict se comparerait à lui-même.
+insert into pg_temp.preuve
+select 6.10, 'R25 : plus grand server_seq distribue, releve avant lupdate pirate', 'valeur de reference',
+  max(server_seq)::text, max(server_seq) is not null from public.books;
+update public.books set server_seq = 1 where id = 'i1';
+insert into pg_temp.preuve
+select 6.11, 'R25 : lupdate pose server_seq = 1 et la valeur est remplacee par une valeur neuve, strictement superieure',
+  'plus grand que ' || (select obtenu from pg_temp.preuve where ordre = 6.10), server_seq::text,
+  server_seq > (select obtenu from pg_temp.preuve where ordre = 6.10)::bigint
+from public.books where id = 'i1';
 
 -- 7. public.files : JAMAIS d'octets en base, même par un `insert` direct (spec § 3.3).
 do $$

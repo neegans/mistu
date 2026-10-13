@@ -123,6 +123,10 @@ Ouvrir `migrations/0002_stockage.sql`, coller le tout, exécuter. Crée le seau 
 quatre règles et la vue de suivi. **Après `0001`, jamais seul** : il appelle `public.is_allowed()` et écrit dans le
 schéma `private`, tous deux nés en `0001`.
 
+> Si `create policy … on storage.objects` est refusé (« must be owner of table objects »), c'est que cette table
+> appartient à `supabase_storage_admin` sur ce projet : **tout `0002` est annulé** (même mode d'échec que l'étape 1),
+> les quatre règles doivent alors être posées depuis **Storage → Policies** du tableau de bord, et il faut le signaler.
+
 ### 7. Jouer la preuve `0002`
 
 Coller `proofs/0002_stockage.sql` (aucun jeton à remplacer, lecture seule). Même lecture : un tableau, une ligne

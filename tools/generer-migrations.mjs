@@ -97,14 +97,17 @@ grant execute on function public.enforce_allowed_user() to supabase_auth_admin;
 drop trigger if exists enforce_allowed_user on auth.users;
 create trigger enforce_allowed_user before insert on auth.users for each row execute function public.enforce_allowed_user();
 
--- Ordre de réception : une séquence globale, posée seulement quand le contenu change et hors maintenance (spec § 3.1).
+-- Ordre de réception (spec § 3.1, amendé R25) : une séquence globale, posée par le SERVEUR à chaque insert et à
+-- chaque update, hors maintenance. La valeur fournie par l'appelant n'est jamais lue, donc jamais conservée : la
+-- règle *_update n'autorise que par ligne, jamais par colonne, et le rôle authenticated a le privilège update sur
+-- les 25 tables. Sans cette pose inconditionnelle, un PATCH direct écrirait server_seq — le curseur de réception de
+-- TOUS les appareils (spec § 5.5) — et la réception s'arrêterait en silence. Une écriture qui ne change rien coûte
+-- donc un numéro de séquence : c'est le prix de la garantie, et sync_push n'écrit déjà rien sur un réessai identique.
 create or replace function public.touch_server_seq() returns trigger language plpgsql set search_path = '' as $$
 begin
   if tg_op = 'INSERT' then new.server_seq := nextval('public.sync_seq'); return new; end if;
   if current_setting('app.maintenance', true) = 'on' then return new; end if;
-  if new.data is distinct from old.data or new.updated_at is distinct from old.updated_at or new.deleted_at is distinct from old.deleted_at then
-    new.server_seq := nextval('public.sync_seq');
-  end if;
+  new.server_seq := nextval('public.sync_seq');
   return new;
 end $$;
 

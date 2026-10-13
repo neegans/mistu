@@ -54,10 +54,29 @@ test('files : pas de blob en base ; colonnes size et mime', () => {
   assert.match(sql, /check \(not \(data \? 'blob'\)\)/);
   assert.match(sql, /size\s+bigint generated always as \(\(data->>'size'\)::bigint\) stored/);
 });
-test('server_seq : sequence globale, declencheur conditionnel, maintenance', () => {
+test('server_seq : sequence globale, declencheur sur les 25 tables, maintenance', () => {
   assert.match(sql, /create sequence if not exists public\.sync_seq/);
   assert.match(sql, /current_setting\('app\.maintenance', true\) = 'on'/);
   assert.equal((sql.match(/execute function public\.touch_server_seq\(\)/g) || []).length, 25);
+});
+// R25 : server_seq appartient au serveur. L'assertion porte sur le SQL que le generateur vient de produire
+// (renderMigrations() en tete de ce fichier), jamais sur le fichier commite : un correctif oublie dans le generateur
+// ne peut pas etre masque par un SQL deja ecrit. La colonne est posee a CHAQUE insert et a CHAQUE update (hors
+// maintenance) : la valeur fournie par l'appelant n'est jamais lue, donc jamais conservee.
+test('R25 : touch_server_seq pose nextval a chaque insert ET update, sans jamais lire la valeur de lappelant', () => {
+  const p = corps('touch_server_seq');
+  assert.match(p, /if tg_op = 'INSERT' then new\.server_seq := nextval\('public\.sync_seq'\); return new; end if;/);
+  // Deux poses seulement : celle de l'insert et celle de l'update. Aucune troisieme branche, aucune condition.
+  assert.equal((p.match(/new\.server_seq := nextval\('public\.sync_seq'\)/g) || []).length, 2);
+  // Plus aucune lecture de l'ancienne ou de la nouvelle valeur : ni « si null », ni comparaison de contenu.
+  assert.doesNotMatch(p, /is distinct from/);
+  assert.doesNotMatch(p, /server_seq is null/);
+  assert.doesNotMatch(p, /old\.server_seq/);
+  // Et la seule sortie sans pose est la maintenance, AVANT la pose de l'update (sinon purge_tombstones reemettrait).
+  const iMaintenance = p.indexOf("if current_setting('app.maintenance', true) = 'on' then return new; end if;");
+  const iUpdate = p.lastIndexOf("new.server_seq := nextval('public.sync_seq');");
+  assert.notEqual(iMaintenance, -1, 'sortie de maintenance presente');
+  assert.ok(iUpdate > iMaintenance, 'la maintenance sort avant la pose de la valeur de lupdate');
 });
 test('barrieres : hook B1, declencheur secondaire, grants, revocations', () => {
   assert.match(sql, /function public\.before_user_created\(event jsonb\)/);
@@ -236,6 +255,16 @@ test('preuve 0001 : verdict taille, et grant dynamique sur le schema temporaire'
   assert.ok(p.includes("repeat('x', 600000)"), 'un element de plus de 512 Ko mais de moins de 1 Mo');
   assert.ok(p.includes('pg_my_temp_schema()'), 'le nom reel du schema temporaire');
   assert.match(p, /grant usage on schema %I to authenticated/, 'grant usage dynamique');
+});
+// --- Ronde finale : R25 (server_seq appartient au serveur), prouve aussi dans la preuve SQL ------------------------
+test('preuve 0001 : un update qui pose server_seq lui-meme est ignore (R25)', () => {
+  const p = lire('supabase/proofs/0001_tables_et_regles.sql');
+  assert.match(p, /update public\.books set server_seq = 1 where id = 'i1';/, 'lupdate pirate est joue');
+  assert.ok(p.includes('server_seq > (select obtenu from pg_temp.preuve where ordre = 6.10)::bigint'),
+    'le verdict compare a la valeur relevee AVANT lupdate, en strictement superieur');
+  // La valeur de reference est relevee avant l'update, sinon le verdict comparerait a lui-meme.
+  assert.ok(p.indexOf('(6.10') !== -1 || p.includes('select 6.10'), 'releve de reference numerote 6.10');
+  assert.ok(p.indexOf('select 6.10') < p.indexOf("update public.books set server_seq = 1"), 'le releve precede lupdate');
 });
 test('README : schema temporaire refuse, et colonnes not null de auth.users', () => {
   const r = lire('supabase/README.md');
