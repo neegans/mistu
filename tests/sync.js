@@ -113,4 +113,10 @@ export async function runSyncTests({ eq, ok }) {
   console.error = orig;
   eq(seen.length, 1, 'un seul appel console');
   ok(JSON.stringify(seen[0]).includes('books') && !JSON.stringify(seen[0]).includes('corps de réponse') && !JSON.stringify(seen[0]).includes('ne doit pas sortir'), 'console : code et identifiants seulement');
+
+  // Ronde 1 : le bouton de repli doit exister avant toute resolution du fichier (le refus L4 n'est pas detectable a l'avance, spec I5).
+  const { pdfFrame } = await import('../src/ui/components.js');
+  const frame = pdfFrame({ sha256: 'z'.repeat(64), filename: 'x.pdf' });
+  ok(frame.querySelector('iframe[sandbox]'), 'pdfFrame : iframe sandbox present avant resolution');
+  ok([...frame.querySelectorAll('button')].some((b) => b.textContent === 'Télécharger le fichier'), 'pdfFrame : bouton Télécharger le fichier toujours present');
 }

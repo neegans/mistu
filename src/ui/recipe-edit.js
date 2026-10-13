@@ -1,6 +1,6 @@
 // Éditeur de version : extraction (saisie ou IA), correction ciblée, adaptation personnelle, traduction (spec §3.3, §6, §16).
 // L'original n'est jamais réécrit : chaque enregistrement crée une nouvelle RecipeVersion liée à son parent.
-import { el, toast, promptDialog, confirmDialog, downloadBlob } from '../core/dom.js';
+import { el, toast, promptDialog, confirmDialog } from '../core/dom.js';
 import { t, label } from '../core/i18n.js';
 import { navigate } from '../core/router.js';
 import * as repo from '../model/repo.js';
@@ -10,7 +10,7 @@ import { currentVersion } from '../domain/search.js';
 import { getConvention } from '../domain/units.js';
 import { providerFrom, extractRecipeFromImages, blobToBase64 } from '../domain/llm.js';
 import { RECIPE_TYPES } from '../model/schema.js';
-import { pageHeader, field, select, aiNotice, section } from './components.js';
+import { pageHeader, field, select, aiNotice, section, pdfFrame } from './components.js';
 
 const SUBRECIPE_RE = /(?:voir|see|cf\.?)\s+(?:la\s+)?(?:page|p\.)\s*(\d{1,4})|\bp\.\s*(\d{1,4})\b/gi;
 
@@ -64,16 +64,7 @@ export async function renderRecipeEdit(params, query, ctx) {
       left.append(el('figure', { style: { margin: 0 } }, img, el('figcaption', { class: 'muted' }, p.printed_page ? `${t('p.')} ${p.printed_page}` : t('page non numérotée'))));
     }
   } else if (doc && doc.source_type === 'pdf') {
-    const frame = el('iframe', { class: 'pdf', title: doc.original_filename, sandbox: '' });
-    left.append(frame);
-    repo.getFile(doc.sha256).then((fl) => {
-      if (!fl) return;
-      frame.src = displayUrl(fl) || '';
-      left.append(el('div', { class: 'row' },
-        el('button', { class: 'btn', onClick: () => downloadBlob(fl.blob, doc.original_filename) }, t('Télécharger le fichier')),
-        el('small', { class: 'muted' }, t('Si l’aperçu reste vide, télécharge le fichier.'))));
-    });
-    left.append(el('small', { class: 'muted' }, t('Indique la page imprimée et, si utile, la position dans le fichier.')));
+    left.append(pdfFrame({ sha256: doc.sha256, filename: doc.original_filename }), el('small', { class: 'muted' }, t('Indique la page imprimée et, si utile, la position dans le fichier.')));
   } else left.append(el('div', { class: 'card flat muted' }, t('Aucune page source jointe. Tu peux saisir la recette et rattacher des pages plus tard.')));
 
   // Colonne droite : formulaire

@@ -1,6 +1,6 @@
 // Séance de scan continue (spec §16) : photos et fichiers conservés sur l'appareil, miniatures numérotées, regroupement,
 // remplacement d'une page, entrées d'index, états fondés sur des événements réels. Aucune page n'est annoncée « sur le serveur ».
-import { el, toast, pickFiles, confirmDialog, formatDate, downloadBlob } from '../core/dom.js';
+import { el, toast, pickFiles, confirmDialog, formatDate } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { navigate, buildQuery, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
@@ -8,7 +8,7 @@ import { displayUrl } from '../sync/mime.js';
 import { sha256Hex } from '../core/hash.js';
 import { normalizeText } from '../domain/units.js';
 import { providerFrom, extractIndexFromImages, blobToBase64 } from '../domain/llm.js';
-import { pageHeader, section, emptyState, select, field, aiNotice } from './components.js';
+import { pageHeader, section, emptyState, select, field, aiNotice, pdfFrame } from './components.js';
 
 const SMALL_IMAGE_BYTES = 80 * 1024;
 
@@ -133,15 +133,7 @@ function sessionView(session, ctx) {
           el('a', { class: 'btn primary', href: `#/recipes/new${buildQuery({ doc: d.id, edition: session.edition_id || '', session: session.id })}` }, t('Créer une recette depuis ce fichier')),
           el('button', { class: 'btn', onClick: () => { indexPanel.hidden = false; indexPanel.dataset.doc = d.id; indexPanel.scrollIntoView({ behavior: 'smooth' }); } }, t('Indexer le livre'))));
       if (d.source_type === 'pdf') {
-        const frame = el('iframe', { class: 'pdf', title: d.original_filename, sandbox: '' });
-        box.append(frame);
-        repo.getFile(d.sha256).then((f) => {
-          if (!f) return;
-          frame.src = displayUrl(f) || '';
-          box.append(el('div', { class: 'row' },
-            el('button', { class: 'btn', onClick: () => downloadBlob(f.blob, d.original_filename) }, t('Télécharger le fichier')),
-            el('small', { class: 'muted' }, t('Si l’aperçu reste vide, télécharge le fichier.'))));
-        });
+        box.append(pdfFrame({ sha256: d.sha256, filename: d.original_filename }));
       } else box.append(el('p', { class: 'muted' }, t('EPUB conservé. La lecture intégrée n’est pas encore disponible : indexe les recettes à la main ou exporte les pages en images.')));
       return box;
     })));

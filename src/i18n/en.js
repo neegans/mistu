@@ -79,4 +79,5 @@ export const EN = {
   // Durcissement : aperçu PDF isolé (spec § 6.2).
   "Télécharger le fichier": "Download the file",
   "Si l’aperçu reste vide, télécharge le fichier.": "If the preview stays empty, download the file.",
+  "Ce fichier n’est pas encore sur cet appareil.": "This file is not yet on this device.",
 };

@@ -1,9 +1,11 @@
 // Composants partagés : en-têtes, badges d'état, cartes, pastilles de filtres, quantités avec hypothèses, minuteries.
-import { el, formatMinutes } from '../core/dom.js';
+import { el, formatMinutes, downloadBlob, toast } from '../core/dom.js';
 import { t, label } from '../core/i18n.js';
 import { displayQuantity, REASON_LABELS } from '../domain/units.js';
 import { shortcutUrl, siriPhrase, describeDuration, isAppleTouchDevice } from '../domain/timers.js';
 import { navigate } from '../core/router.js';
+import { displayUrl } from '../sync/mime.js';
+import * as repo from '../model/repo.js';
 
 export function pageHeader(title, { subtitle = null, actions = [], back = null } = {}) {
   return el('header', { class: 'stack', style: { marginBottom: '1rem' } },
@@ -166,6 +168,17 @@ export function aiNotice(ctx) {
 export function linkButton(label, href, cls = 'btn') { return el('a', { class: cls, href: `#${href}` }, label); }
 
 export function goto(path) { navigate(path); }
+
+// Cadre PDF isolé : sandbox vide, bouton et phrase de repli toujours présents de façon synchrone — l'absence du blob
+// (ligne « files » reçue, octets pas encore téléchargés, cf. L4) n'est pas détectable à l'avance (spec I5, § 6.2).
+export function pdfFrame({ sha256, filename }) {
+  const frame = el('iframe', { class: 'pdf', title: filename, sandbox: '' });
+  repo.getFile(sha256).then((f) => { const u = displayUrl(f); if (u) frame.src = u; });
+  return el('div', { class: 'stack' }, frame,
+    el('div', { class: 'row' },
+      el('button', { class: 'btn', onClick: async () => { const f = await repo.getFile(sha256); if (f) downloadBlob(f.blob, filename); else toast(t('Ce fichier n’est pas encore sur cet appareil.')); } }, t('Télécharger le fichier')),
+      el('small', { class: 'muted' }, t('Si l’aperçu reste vide, télécharge le fichier.'))));
+}
 
 export function dietChip(assessment) {
   const cls = { compatible: 'ok', adaptation: 'warn', to_verify: 'warn', incompatible: 'danger' }[assessment.state] || 'neutral';
