@@ -17,7 +17,7 @@
 - **Après toute modification de fichiers de l'app** : mettre à jour la liste `SHELL` de `sw.js` et incrémenter `VERSION` (tâche 14 le fait une fois pour tout le lot ; ne pas le faire à chaque tâche).
 - **Espace de travail** : la construction se fait dans le worktree frère `~/projects/mistu-sync` (branche `compte-et-stockage-distant`), jamais dans `~/projects/mistu` (arbre principal, servi sur 8080 et connu de VibeForge). Toute commande du plan s'exécute depuis `~/projects/mistu-sync`.
 - **Tests du navigateur** : un serveur statique sert le worktree sur **8081** (`cd ~/projects/mistu-sync && nohup python3 -m http.server 8081 > /dev/null 2>&1 &`, lancé une fois par le contrôleur ; contrôle `curl -sS http://localhost:8081/tests/ | head -3`). Jouer `http://localhost:8081/tests/` avec Playwright : `mcp__plugin_playwright_playwright__browser_navigate` puis `mcp__plugin_playwright_playwright__browser_evaluate` avec `() => document.querySelector('#out h2')?.textContent` → attendu `✅ N/N tests réussis` (aucun `✗`) ; puis `browser_console_messages` niveau `error` → vide. Ne jamais affirmer qu'un test passe sans l'avoir joué.
-- **Tests d'outils** : `cd ~/projects/mistu && node --test tools/` (sortie `# fail 0`).
+- **Tests d'outils** : `cd ~/projects/mistu && node --test tools/*.test.mjs` (sortie `# fail 0`).
 - **Dépôt public** : aucune adresse courriel, aucun nom de personne, aucune clé secrète dans un fichier commité (la clé `anon` et l'URL du projet sont publiques par conception et vont dans `src/sync/config.js`). `service_role` : jamais, nulle part.
 - **Git** : branche `compte-et-stockage-distant` depuis `main` ; un commit par tâche, message français au présent, terminé par la ligne `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` ; **messages de commit sans accents** (le dépôt a déjà un commit aux accents cassés : écrire `e` pour `é`). Jamais `--amend`, `reset`, `rebase`, `stash`. Avant chaque commit : `grep -c $'\xe2\x80[\xa8\xa9]' <fichiers>` doit donner 0 (aucun U+2028/U+2029).
 - **Pas de modification** de `cuisine-os-spec-v3.md` (hors dépôt) ; `CLAUDE.md` du projet n'est mis à jour qu'à la tâche 14 (section « État des travaux »).
@@ -285,7 +285,7 @@ test('aucune donnee personnelle, determinisme', () => {
 });
 ```
 
-- [ ] **Étape 2 : rouge** — `node --test tools/` → échecs « module introuvable ».
+- [ ] **Étape 2 : rouge** — `node --test tools/*.test.mjs` → échecs « module introuvable ».
 
 - [ ] **Étape 3 : écrire `tools/generer-migrations.mjs`** — structure :
 
@@ -539,7 +539,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 
 Note : la ligne de la storage update est un seul `create policy` (dans le test, le compte « 4 occurrences de `foldername` » suppose une occurrence par règle : la règle `update` en a deux — **ajuster le test à 5** si c'est le cas, et le dire dans le commit). Retirer aussi la mention « date retirée » de l'en-tête si elle gêne : l'en-tête doit être **déterministe** (pas de date).
 
-- [ ] **Étape 4 : générer** — `node tools/generer-migrations.mjs` puis `node tools/generer-migrations.mjs --check` (code 0) ; `node --test tools/` → `# fail 0`. Lire les deux fichiers SQL **en entier** une fois : chaque `$$` fermé, chaque `format('%I')`, pas de `'` non doublé dans les chaînes SQL imbriquées (`purge_tombstones`).
+- [ ] **Étape 4 : générer** — `node tools/generer-migrations.mjs` puis `node tools/generer-migrations.mjs --check` (code 0) ; `node --test tools/*.test.mjs` → `# fail 0`. Lire les deux fichiers SQL **en entier** une fois : chaque `$$` fermé, chaque `format('%I')`, pas de `'` non doublé dans les chaînes SQL imbriquées (`purge_tombstones`).
 
 - [ ] **Étape 5 : commit** `git add tools/generer-migrations.mjs tools/generer-migrations.test.mjs supabase/migrations/` — `"Synchronisation : generateur de migrations, schema serveur 0001 et stockage 0002"`.
 
@@ -650,7 +650,7 @@ Remarque pour l'implémenteur : `\gset` est psql, pas l'éditeur Supabase — **
 
 - [ ] **Étape 4 : gabarits** — `0001_hook.md` : « Capture de la page Authentication → Hooks montrant *Before User Created* **activé** avec `public.before_user_created` ; date ; projet (`mistu-dev` / `mistu`). [capture à coller par Neegan] ». `0001_providers.md` : « Capture de Authentication → Providers : Google **activé**, Email **désactivé** (ni mot de passe ni magic link), Phone désactivé, Anonymous désactivé ; *Confirm email* activé ; *Linking* automatique désactivé. [capture à coller] ».
 
-- [ ] **Étape 5 : test** — ajouter à `tools/generer-migrations.test.mjs` un test qui lit `supabase/proofs/0001_tables_et_regles.sql` et vérifie la présence de chaque motif (`'cle'`, `'forme'`, `'taille'`, `conflit`, `has_function_privilege`, `set_config('app.maintenance'`, `rollback;` en dernière instruction) et l'absence de `@` suivi d'un domaine réel (regex du test 3, en tolérant `exemple.invalid` et `A_EMAIL`/`B_EMAIL`). `node --test tools/` vert.
+- [ ] **Étape 5 : test** — ajouter à `tools/generer-migrations.test.mjs` un test qui lit `supabase/proofs/0001_tables_et_regles.sql` et vérifie la présence de chaque motif (`'cle'`, `'forme'`, `'taille'`, `conflit`, `has_function_privilege`, `set_config('app.maintenance'`, `rollback;` en dernière instruction) et l'absence de `@` suivi d'un domaine réel (regex du test 3, en tolérant `exemple.invalid` et `A_EMAIL`/`B_EMAIL`). `node --test tools/*.test.mjs` vert.
 
 - [ ] **Étape 6 : commit** `git add supabase/ tools/generer-migrations.test.mjs` — `"Synchronisation : preuves SQL et gabarits de preuve pour L1"`.
 
@@ -1106,7 +1106,7 @@ export function currentConfig(hostname = globalThis.location?.hostname || '') {
 - [ ] `docs/architecture.md` : section « Synchronisation (L1-L2) » : carte des modules `src/sync/`, porte `db.mutate`, magasins internes, dépendance embarquée (les deux empreintes), CSP, ce qui est **absent** (envoi, réception : L3).
 - [ ] `CLAUDE.md` : section « État des travaux » : lot L1-L2 livré, preuves jouées / non jouées (tâche 5), mesure iOS **à faire par Neegan** (spec § 4.1), valeurs `config.js` à remplir, origine dédiée (D5) : état.
 - [ ] `README.md` : une phrase sur la synchronisation et le lien vers la spec.
-- [ ] Suite complète verte (Playwright), `node --test tools/` vert, `node tools/generer-migrations.mjs --check` code 0, `grep -rn "window.open\|\.stack" src` vide, scan secrets (`grep -rniE 'service_role|api_key|secret|token' src supabase tools | grep -v -E 'SECRET_SETTING_KEYS|anonKey|key|token' …` — relire à l'œil), octets invisibles 0.
+- [ ] Suite complète verte (Playwright), `node --test tools/*.test.mjs` vert, `node tools/generer-migrations.mjs --check` code 0, `grep -rn "window.open\|\.stack" src` vide, scan secrets (`grep -rniE 'service_role|api_key|secret|token' src supabase tools | grep -v -E 'SECRET_SETTING_KEYS|anonKey|key|token' …` — relire à l'œil), octets invisibles 0.
 - [ ] Commit — `"Lot L1-L2 : SHELL, version 0.2.0, architecture et etat des travaux"`.
 
 Puis : **`/verify`** par le contrôleur (revue adverse 3 lentilles, scan secrets, tests), et la **mesure iOS** par Neegan (spec § 4.1) avant tout L3.
