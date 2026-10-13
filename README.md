@@ -38,7 +38,7 @@ npx serve .
 
 ## Synchronisation entre appareils (en construction)
 
-Le serveur (Supabase), la connexion Google et la capture des écritures sont posés (lots L1-L2) ; l'envoi et la réception, eux, n'existent pas encore : tant que `src/sync/config.js` est vide, Réglages affiche « Synchronisation non configurée sur cette adresse. » et rien ne quitte l'appareil. Spécification du lot : `docs/spec-compte-et-stockage-distant.md` ; conception amont et choix d'hébergement : `docs/compte-et-stockage-distant.md` ; application du serveur et preuves : `supabase/README.md`.
+Le serveur (Supabase), la connexion Google et la capture des écritures sont posés (lots L1-L2) ; l'envoi et la réception, eux, n'existent pas encore : depuis le 13 octobre 2026, `src/sync/config.js` nomme le projet Supabase `mitsu` pour `neegans.github.io` et `localhost` : Réglages offre « Activer la synchronisation » (comptes Google de la liste autorisée seulement), mais aucune donnée ne quitte encore l'appareil — l'envoi et la réception sont le lot L3. Spécification du lot : `docs/spec-compte-et-stockage-distant.md` ; conception amont et choix d'hébergement : `docs/compte-et-stockage-distant.md` ; application du serveur et preuves : `supabase/README.md`.
 
 ## Ce qui n'est pas là (et le dit dans l'interface)
 

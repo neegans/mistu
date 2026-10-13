@@ -16,15 +16,15 @@ supabase/
   proofs/RESULTATS-<projet>.md           tes sorties, collées (à créer : un fichier par projet)
 ```
 
-## Deux projets, dans cet ordre
+## Un seul projet : `mitsu` (depuis le 13 octobre 2026, R33)
 
-1. **`mistu-dev`** — le projet de développement (D8). **Tout se joue ici d'abord** : c'est là que les preuves du
-   § 7.2 doivent être vertes. `http://localhost:8081` reste autorisé sur ce projet seulement.
-2. **`mistu`** — le projet réel, **après** la revue adverse de L1 et seulement si les preuves de `mistu-dev` sont
-   vertes. `localhost` y est retiré.
-
-La procédure ci-dessous est la même pour les deux. Sur `mistu`, elle est à refaire en entier (étapes 1 à 9) : les
-migrations sont des objets de base de données, elles ne « voyagent » pas d'un projet à l'autre.
+La spec prévoyait deux projets (D8 : `mistu-dev` puis `mistu`). Neegan a révoqué D8 le 13 octobre : un second projet
+coûte 10 $ par mois sur l'organisation Pro, pour un usage personnel. **Tout se joue sur `mitsu`**, le projet réel —
+d'où deux règles : la preuve `0001` se joue **avant la première connexion réelle** (elle insère deux comptes et les
+annule), et `localhost` reste autorisé (Redirect URLs, entrée `dev` de `config.js`) sur ce projet. Les neuf étapes
+ci-dessous ont été jouées le 13 octobre ; sorties dans `proofs/RESULTATS-mitsu.md`. Pour un projet neuf (changement
+d'hébergement, retour à deux projets), elles sont à refaire en entier : les migrations ne « voyagent » pas d'un
+projet à l'autre.
 
 ## Trois choses à savoir avant de coller
 
@@ -91,6 +91,12 @@ Ouvrir `proofs/0001_tables_et_regles.sql`, **remplacer les quatre jetons** (`A_U
 `B_EMAIL` — lire l'en-tête du fichier), coller le tout, exécuter. La sortie est **un seul tableau** : une ligne par
 preuve, plus une ligne `999 BILAN`. `ok = true` partout, et `BILAN` à `0 faux`, c'est vert.
 
+> **Dialogue « Potential issue detected » du tableau de bord.** La preuve crée une table temporaire sans RLS ; le
+> tableau de bord le détecte et propose « Run and enable RLS ». **Choisir « Run without RLS »** : l'autre bouton
+> ajoute `alter table preuve enable row level security` **après** le `rollback` final, la table n'existe plus, et
+> l'éditeur n'affiche que `42P01 relation "preuve" does not exist` alors que la preuve a tourné et s'est annulée
+> normalement (mesuré le 13 octobre ; vérifié : rien n'avait persisté). Même dialogue pour la preuve `0002`.
+
 - La preuve **n'écrit rien** : sa dernière instruction est `rollback;`. Elle est rejouable telle quelle.
 - Toute ligne `ok = false` renvoie à la **tâche 3** (le générateur de migrations), pas à un rafistolage à la main.
   La section 1 porte son propre remède en commentaire : c'est la seule à appliquer soi-même, et à signaler.
@@ -146,7 +152,7 @@ d'identités désactivée. Puis remplir `proofs/0001_providers.md` (capture + da
 
 ## Où coller les sorties
 
-Dans `supabase/proofs/RESULTATS-<projet>.md` — donc `RESULTATS-mistu-dev.md`, puis `RESULTATS-mistu.md`. Un fichier
+Dans `supabase/proofs/RESULTATS-<projet>.md` — donc `RESULTATS-mitsu.md` (un seul projet depuis le 13 octobre, R33). Un fichier
 par projet, avec la date, et pour chaque preuve le tableau tel que l'éditeur l'affiche.
 
 **Sans adresses.** Le dépôt est public : remettre les jetons `A_EMAIL` / `B_EMAIL` / `A_UUID` / `B_UUID` à la place

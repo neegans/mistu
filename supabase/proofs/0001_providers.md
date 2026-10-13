@@ -18,8 +18,7 @@ Page **Authentication → Providers** (ou **Sign In / Providers**) du projet, mo
 
 | Projet | Date | Google | Email | Phone | Anonymous | Confirm email | Linking auto | Capture |
 |---|---|---|---|---|---|---|---|---|
-| `mistu-dev` | | activé | désactivé | désactivé | désactivé | activé | désactivé | [capture à coller par Neegan] |
-| `mistu` | | activé | désactivé | désactivé | désactivé | activé | désactivé | [capture à coller par Neegan] |
+| `mitsu` (seul projet, D8 révoquée) | 13 octobre 2026, 15 h 11 | activé (client OAuth du projet Google Cloud `cuisine-os-neegan`, écran de consentement External en statut Testing, deux Test users) | désactivé | désactivé | désactivé | activé | désactivé (« Allow manual linking » éteint) | Captures sur le Mac de Neegan (`… 15.07.44.png` : User Signups ; `… 15.10.18.png` : panneau Google ; `… 15.11.29.png` : panneau Email éteint). **Contre-preuve par l'API publique** le même jour à 15 h 14 (`GET /auth/v1/settings` avec la clé publique) : `external` actifs = `["google"]` seulement ; `email: false`, `phone: false`, `anonymous: false`, `mailer_autoconfirm: false` (= Confirm email activé). |
 
 ## Pourquoi chaque ligne compte
 

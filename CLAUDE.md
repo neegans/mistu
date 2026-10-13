@@ -85,14 +85,22 @@ Suite complète : **422/422 verts**, 0 erreur console (13 octobre 2026, `http://
 outils `node --test tools/*.test.mjs` : **40/40**, `node tools/generer-migrations.mjs --check` : **0**.
 `sw.js` : `VERSION = 'cuisine-os-v0.2.0-3'` (aucun module neuf : `SHELL` inchangé).
 
-**Preuves SQL : NON JOUÉES.** La tâche 5 du plan est **parquée** : elle demande un projet Supabase qui n'existe pas
-encore. Geste de Neegan : créer le projet de développement **`mistu-dev`** (D8, région Canada), puis suivre
-`supabase/README.md` étape par étape (coller `0001` sans sa dernière ligne, activer `pg_cron`, coller la ligne
-`cron.schedule`, taper les adresses autorisées, jouer la preuve `0001`, coller `0002`, jouer la preuve `0002`,
-brancher le crochet « Before User Created », fermer les autres fournisseurs) et **coller les sorties** dans
-`supabase/proofs/RESULTATS-mistu-dev.md` (à créer ; sans adresses, sans clés). Tant que ce fichier n'existe pas,
-aucune ligne de `0001`/`0002` n'a jamais été exécutée par personne : le serveur est écrit, pas éprouvé. Le projet
-réel `mistu` vient **après**, et seulement si `mistu-dev` est vert.
+**Serveur APPLIQUÉ ET PROUVÉ — un seul projet, `mitsu` (13 octobre 2026, R33).** Neegan a révoqué D8 (un second
+projet coûte 10 $ par mois sur l'organisation Pro) : **`mitsu`** (`https://ybdooerfeziiabsbfxtb.supabase.co`, Canada
+Central) sert à la fois le site et le poste de travail. Collages joués par Neegan dans l'éditeur SQL entre 11 h 17 et
+11 h 29 : `0001` sans la ligne `cron.schedule`, puis `cron.schedule` (tâche 1), adresses autorisées, preuve `0001`
+(**76 verdicts, 0 faux**), `0002`, preuve `0002` (**11 verdicts, 0 faux**), retrait des deux adresses de preuve.
+Sorties dans `supabase/proofs/RESULTATS-mitsu.md` — avec le piège du dialogue « Run and enable RLS » du tableau de
+bord, qui ajoute un `alter table` **après** le `rollback` de la preuve : toujours « Run without RLS ». Crochet « Before
+User Created » **ENABLED** (`public.before_user_created`, 15 h 13, `proofs/0001_hook.md`) ; fournisseurs : **Google
+seul** (client OAuth du projet Google Cloud `cuisine-os-neegan`, écran de consentement External en statut Testing, deux
+Test users), Email/Phone/Anonymous éteints, Confirm email allumé, contre-preuve par `GET /auth/v1/settings`
+(`proofs/0001_providers.md`). `src/sync/config.js` : `prod` = `mitsu` pour l'hôte `neegans.github.io`, `dev` = `mitsu`
+pour `localhost`/`127.0.0.1` — `localhost` reste donc autorisé sur le projet réel (conséquence assumée de R33 ; la
+barrière reste la liste d'adresses). **Avant la première connexion réelle** : URL Configuration (Site URL
+`https://neegans.github.io/mistu/` ; Redirect URLs `https://neegans.github.io/mistu/**`, `http://localhost:8080/**`,
+`http://localhost:8081/**`), puis pousser. Le sous-domaine (D5) reste à faire : ajouter son hôte à `prod.hosts` avec
+le CNAME. Aucune connexion Google réelle n'a encore eu lieu à l'heure de cette note.
 
 **Mesure iOS : à faire par Neegan, avant L3.** Spec § 4.1, dernier alinéa : une PWA installée a son propre conteneur
 de stockage. Installer Cuisine OS sur l'écran d'accueil de l'iPhone, lancer « Activer la synchronisation » et
