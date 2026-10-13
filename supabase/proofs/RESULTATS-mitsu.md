@@ -132,4 +132,17 @@ sont passées sous `postgres`, pas de repli par Storage → Policies). Preuve jo
 
 ## Crochet « Before User Created » et fournisseurs
 
-_(à venir : `0001_hook.md`, `0001_providers.md`)_
+Remplis le 13 octobre : `0001_hook.md` (crochet ENABLED, 15 h 13) et `0001_providers.md` (Google seul, Email éteint,
+contre-preuve par l'API publique à 15 h 14).
+
+## Première connexion réelle — 13 octobre 2026, 15 h 33 (Mac, Chrome, `https://neegans.github.io/mistu/`)
+
+Après le commit `5fde3ed` (config `mitsu`, SW `v0.2.0-5`) et l'URL Configuration (Site URL Pages, trois Redirect
+URLs) : Réglages → « Activer la synchronisation » → écran Google (application en statut Testing, compte en Test user)
+→ retour dans Réglages. Texte de la section, copié par Neegan : **« Connectée : <une des deux adresses autorisées> »,
+« À envoyer : 0 », bouton « Se déconnecter »**. Ce que ça prouve d'un coup : B0 (écran de consentement Testing laisse
+passer le Test user), B1 (le crochet a laissé naître le compte, l'adresse étant dans `private.allowed_users`), la
+garde de compte côté app (`is_allowed()` vrai pour ce jeton), le retour OAuth PKCE sans `code` résiduel, et la liste
+blanche d'hôtes (`neegans.github.io` → entrée `prod`). « À envoyer : 0 » : bibliothèque neuve sur cette origine
+(64 ingrédients, 27 unités, 5 conventions = amorçage, hors capture). **Pas encore mesuré** : le retour OAuth depuis
+la PWA installée sur iPhone (spec § 4.1) — à faire par Neegan sur l'appareil.

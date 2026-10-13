@@ -100,7 +100,8 @@ pour `localhost`/`127.0.0.1` — `localhost` reste donc autorisé sur le projet 
 barrière reste la liste d'adresses). **Avant la première connexion réelle** : URL Configuration (Site URL
 `https://neegans.github.io/mistu/` ; Redirect URLs `https://neegans.github.io/mistu/**`, `http://localhost:8080/**`,
 `http://localhost:8081/**`), puis pousser. Le sous-domaine (D5) reste à faire : ajouter son hôte à `prod.hosts` avec
-le CNAME. Aucune connexion Google réelle n'a encore eu lieu à l'heure de cette note.
+le CNAME. **Première connexion réelle réussie le 13 octobre à 15 h 33** (Mac, Chrome, site Pages) : « Connectée : <adresse autorisée> »,
+« À envoyer : 0 » (`supabase/proofs/RESULTATS-mitsu.md`, dernière section). Reste la mesure iOS (§ 4.1) sur l'iPhone.
 
 **Mesure iOS : à faire par Neegan, avant L3.** Spec § 4.1, dernier alinéa : une PWA installée a son propre conteneur
 de stockage. Installer Cuisine OS sur l'écran d'accueil de l'iPhone, lancer « Activer la synchronisation » et
