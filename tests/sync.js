@@ -194,4 +194,68 @@ export async function runSyncTests({ eq, ok }) {
   // --- Dépendance embarquée (spec § 6.1)
   ok(typeof globalThis.supabase?.createClient === 'function', 'supabase-js embarqué chargé par un script classique');
   ok(/^var supabase=/.test(await (await fetch('../src/vendor/supabase-2.117.3.umd.js')).text()), 'bundle IIFE autonome');
+
+  // --- Connexion (spec § 4.1)
+  const { SUPABASE, currentConfig } = await import('../src/sync/config.js');
+  ok('url' in SUPABASE.prod && 'anonKey' in SUPABASE.prod && 'url' in SUPABASE.dev && 'anonKey' in SUPABASE.dev, 'config : deux entrées publiques déclarées');
+  eq(currentConfig('cuisine.exemple.test'), SUPABASE.prod.url && SUPABASE.prod.anonKey ? SUPABASE.prod : null, 'config : origine publique → prod, null si vide');
+  eq(currentConfig('localhost'), SUPABASE.dev.url && SUPABASE.dev.anonKey ? SUPABASE.dev : null, 'config : localhost → dev, null si vide');
+  const { createAuth } = await import('../src/sync/auth.js');
+  const fakeHistory = []; const fakeWin = { location: { origin: 'https://cuisine.exemple.test', pathname: '/', hash: '#/settings', search: '?code=abc&state=s', href: 'https://cuisine.exemple.test/?code=abc&state=s#/settings' }, history: { replaceState: (a, b, url) => fakeHistory.push(url) } };
+  const calls = []; let changeCb = null;
+  const factory = (url, key, options) => { calls.push({ url, key, options }); return { auth: {
+    signInWithOAuth: async (o) => { calls.push({ signIn: o }); return { data: {}, error: null }; },
+    signOut: async (o) => { calls.push({ signOut: o }); return { error: null }; },
+    getSession: async () => ({ data: { session: { user: { id: 'uid-A', email: 'A@EXEMPLE.test' } } } }),
+    onAuthStateChange: (cb) => { changeCb = cb; return { data: { subscription: { unsubscribe() {} } } }; },
+  } }; };
+  await withDatabase(async (db) => {
+    const sans = createAuth({ db, config: { url: 'https://x.supabase.co', anonKey: 'k' }, factory: undefined, win: fakeWin });
+    eq([sans.available, sans.reason], [false, 'bibliotheque'], 'sans supabase-js : indisponible avec motif');
+    eq([await sans.signIn(), await sans.signOut(), await sans.session(), typeof sans.onChange(() => {})], [null, null, null, 'function'], 'indisponible : les méthodes existent et ne lèvent pas');
+    const sansConfig = createAuth({ db, config: null, factory, win: fakeWin });
+    eq([sansConfig.available, sansConfig.reason, calls.length], [false, 'config', 0], 'config vide : indisponible, aucun client créé');
+    const auth = createAuth({ db, config: { url: 'https://x.supabase.co', anonKey: 'k' }, factory, win: fakeWin });
+    eq([auth.available, auth.reason, calls.length], [true, null, 1], 'client créé une seule fois');
+    eq([calls[0].url, calls[0].key], ['https://x.supabase.co', 'k'], 'URL et clé publiques passées au client');
+    eq(calls[0].options.auth, { flowType: 'pkce', persistSession: true, detectSessionInUrl: true }, 'options PKCE');
+    await auth.signIn();
+    eq(calls.at(-1).signIn.options.redirectTo, 'https://cuisine.exemple.test/', 'redirectTo sans fragment');
+    eq(calls.at(-1).signIn.provider, 'google', 'fournisseur Google');
+    auth.handleReturn();
+    eq(fakeHistory.at(-1), '/#/settings', 'code retiré, fragment conservé');
+    eq(auth.readError({ search: '?error=access_denied&error_description=x', hash: '' }), 'Cette adresse n’est pas autorisée.', 'refus : message fixe');
+    eq(auth.readError({ search: '', hash: '#error=server_error&error_code=unexpected_failure' }), 'Cette adresse n’est pas autorisée.', 'refus dans le fragment');
+    eq(auth.readError({ search: '', hash: '#/settings?error=x' }), 'Cette adresse n’est pas autorisée.', 'refus après le ? d’un fragment de route');
+    eq([auth.readError({ search: '', hash: '' }), auth.readError({ search: '?code=abc&state=s', hash: '#/settings' })], [null, null], 'aucun refus : null');
+    eq(await auth.guard('uid-A', 'a@exemple.test'), { ok: true }, 'premier compte : accepté et mémorisé');
+    eq((await db.get('sync_state', 'user_id')).value, 'uid-A', 'user_id écrit');
+    eq((await db.get('sync_state', 'user_email')).value, 'a@exemple.test', 'adresse gardée en base locale seulement');
+    const other = await auth.guard('uid-B', 'b@exemple.test');
+    eq(other.ok, false, 'autre compte : refusé');
+    ok(/synchronisé avec/.test(other.message) && other.message.includes('a@exemple.test'), 'message nomme l’adresse connue');
+    await auth.signOut();
+    eq(calls.at(-1).signOut, { scope: 'local' }, 'déconnexion locale seulement');
+    // Session, relais des changements, refus lu au retour et garde idempotente.
+    eq(await auth.session(), { user: { id: 'uid-A', email: 'A@EXEMPLE.test' } }, 'session : identité lue chez le client');
+    const { on } = await import('../src/core/bus.js');
+    const vus = []; const offBus = on('sync', (p) => vus.push(p));
+    const off = auth.onChange((state) => vus.push({ relais: state.user?.id || null }));
+    changeCb('SIGNED_IN', { user: { id: 'uid-A', email: 'a@exemple.test' } });
+    eq(vus, [{ relais: 'uid-A' }, { user: { id: 'uid-A', email: 'a@exemple.test' } }], 'onChange : relais à l’appelant puis événement sync');
+    changeCb('SIGNED_OUT', null);
+    eq(vus.at(-1), { user: null }, 'déconnexion relayée sans utilisateur');
+    eq(typeof off, 'function', 'onChange rend la fonction de désabonnement');
+    off(); offBus();
+    fakeWin.location.search = '?error=access_denied&error_description=texte+brut';
+    const msgRetour = auth.handleReturn();
+    eq(msgRetour, 'Cette adresse n’est pas autorisée.', 'handleReturn : le refus lu est rendu');
+    eq(fakeHistory.at(-1), '/#/settings', 'refus aussi retiré de l’historique');
+    ok(!String(msgRetour).includes('texte brut') && !String(msgRetour).includes('access_denied'), 'le texte brut du refus n’est jamais rendu');
+    let ecritures = 0; const vraiMutate = db.mutate.bind(db);
+    db.mutate = (arg) => { ecritures += 1; return vraiMutate(arg); };
+    eq([await auth.guard('uid-A', 'a@exemple.test'), ecritures], [{ ok: true }, 0], 'même compte deux fois : accepté sans réécriture');
+    eq([(await auth.guard('uid-B', 'b@exemple.test')).ok, ecritures], [false, 0], 'un refus n’écrit rien');
+    delete db.mutate;
+  });
 }

@@ -76,6 +76,9 @@ export const EN = {
   "Restaurer dans cette base vide": "Restore into this empty library",
   "Fusionner avec la bibliothèque actuelle": "Merge with the current library",
   "Remplacer toute la bibliothèque": "Replace the entire library",
+  // Connexion et garde de compte (spec § 4.1).
+  "Cette adresse n’est pas autorisée.": "This address is not allowed.",
+  "Cet appareil a été synchronisé avec {e}.": "This device was synced with {e}.",
   // Durcissement : aperçu PDF isolé (spec § 6.2).
   "Télécharger le fichier": "Download the file",
   "Si l’aperçu reste vide, télécharge le fichier.": "If the preview stays empty, download the file.",
