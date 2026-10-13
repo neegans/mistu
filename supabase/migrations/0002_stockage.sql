@@ -14,3 +14,7 @@ create policy pages_delete on storage.objects for delete to authenticated using 
 create or replace view private.storage_usage as
   select (storage.foldername(name))[1] as owner, count(*) as objets, sum((metadata->>'size')::bigint) as octets
   from storage.objects where bucket_id = 'pages' group by 1;
+-- R15 : le « revoke all on all tables in schema private » de 0001 est antérieur à cette vue, il ne peut donc pas la
+-- couvrir. Sans cette ligne, un projet dont les privilèges par défaut ne sont pas bornés au schéma public exposerait
+-- par l'API les uuid des propriétaires et leur consommation.
+revoke all on private.storage_usage from anon, authenticated;

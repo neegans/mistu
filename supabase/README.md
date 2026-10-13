@@ -105,6 +105,17 @@ première connexion, ou ajouter à `private.allowed_users` deux adresses dédié
 > Si l'insertion dans `auth.users` est refusée (« permission denied for table users »), c'est que `postgres` n'a pas
 > les privilèges sur le schéma `auth` de ce projet : le noter et le signaler, la preuve ne peut pas être jouée telle
 > quelle (le reste du § 7.2 demanderait alors deux comptes créés par le tableau de bord).
+>
+> Si elle est refusée pour une **colonne obligatoire** (« null value in column "…" violates not-null constraint ») :
+> certaines versions du schéma GoTrue ont des colonnes `not null` **sans valeur par défaut** — `encrypted_password`
+> en est le cas classique. Remède immédiat : ajouter la colonne nommée dans l'erreur à la liste des deux `insert
+> into auth.users`, avec une valeur factice (`''` pour du texte, `now()` pour une date), et **le signaler** : la
+> liste des colonnes de la preuve devra suivre la version du schéma.
+>
+> Si un verdict échoue sur « **permission denied for schema pg_temp_…** » : me le signaler. La preuve écrit ses
+> verdicts dans une table temporaire, et elle tente explicitement d'accorder `usage` sur ce schéma (verdict 0.01, qui
+> dit si le `grant` a été accordé ou refusé). Si ni le `grant` ni l'accès implicite ne passent, la preuve sera
+> réécrite avec un `reset role` avant chaque verdict.
 
 ### 6. Coller `0002_stockage.sql`
 

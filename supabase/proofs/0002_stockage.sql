@@ -63,11 +63,12 @@ from pg_policies where schemaname = 'storage' and tablename = 'objects' and poli
 insert into pg_temp.preuve
 select 3.01, 'la vue private.storage_usage existe', '1', count(*)::text, count(*) = 1
 from pg_views where schemaname = 'private' and viewname = 'storage_usage';
--- Si 3.02 est faux : `0002` crée la vue APRÈS le « revoke all on all tables in schema private » de `0001`, qui ne
--- peut donc pas la couvrir. Correctif à demander à la tâche 3 : ajouter en fin de `0002`
---   revoke all on private.storage_usage from anon, authenticated;
+-- R15 : la vue naît APRÈS le « revoke all on all tables in schema private » de `0001`, qui ne peut donc pas la
+-- couvrir ; `0002` porte depuis sa propre ligne `revoke all on private.storage_usage from anon, authenticated;`.
+-- C'est elle que 3.02 mesure : aucun privilège, ni pour `authenticated`, ni pour `anon`. Faux ici = la ligne de
+-- révocation manque ou a échoué, et la vue expose les uuid des propriétaires et leur consommation.
 insert into pg_temp.preuve
-select 3.02, 'la vue nest pas exposee a lAPI', 'false / false',
+select 3.02, 'la vue nest exposee ni a authenticated ni a anon (R15)', 'false / false',
   has_table_privilege('authenticated', 'private.storage_usage', 'select')::text || ' / ' || has_table_privilege('anon', 'private.storage_usage', 'select')::text,
       not has_table_privilege('authenticated', 'private.storage_usage', 'select')
   and not has_table_privilege('anon', 'private.storage_usage', 'select');

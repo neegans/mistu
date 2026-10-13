@@ -15,8 +15,7 @@
 -- `auth.users`, ni fiche, ni adresse retirée) et elle est rejouable telle quelle. Si une instruction échoue,
 -- l'éditeur annule tout et le message d'erreur est la seule sortie : corrige, puis recolle le fichier entier.
 --
--- Les cinq motifs de rejet de `sync_push` que cette preuve fait sortir : 'updated_at', 'cle', 'forme', 'conflit'
--- (et 'taille', voir la note de la section 5).
+-- Les cinq motifs de rejet de `sync_push` sortent tous ici : 'updated_at', 'cle', 'forme', 'taille', 'conflit'.
 
 begin;
 
@@ -35,6 +34,23 @@ end $$;
 -- Le `primary key` sur `ordre` interdit deux preuves au même numéro (une erreur de copie se verrait tout de suite).
 create temporary table preuve (ordre numeric primary key, etape text, attendu text, obtenu text, ok boolean);
 grant insert, select on table pg_temp.preuve to authenticated;
+-- Ceinture et bretelles sur l'accès au schéma temporaire. D'après le moteur, un rôle obtient USAGE d'office sur le
+-- schéma temporaire de SA session (les schémas `pg_temp_…` ont une ACL spéciale) ; personne ne l'a mesuré, donc on
+-- l'accorde aussi explicitement. Le nom `pg_temp` n'est pas acceptable dans un `grant` : il faut le nom réel, que
+-- seule l'exécution connaît. Et le `grant` lui-même peut être REFUSÉ, parce que le schéma temporaire appartient au
+-- superutilisateur initial du serveur et non à `postgres` : il est donc tenté sous protection, pour qu'un refus
+-- n'emporte pas la preuve entière. Le verdict 0.01 dit ce qui s'est passé.
+do $$
+declare v text := 'accorde explicitement';
+begin
+  begin
+    execute format('grant usage on schema %I to authenticated',
+      (select nspname from pg_namespace where oid = pg_my_temp_schema()));
+  exception when others then
+    v := 'grant refuse (' || sqlstate || ') : on compte sur lUSAGE implicite du schema temporaire';
+  end;
+  insert into pg_temp.preuve values (0.01, 'usage sur le schema temporaire pour authenticated', 'accorde ou implicite', v, true);
+end $$;
 
 -- 1. LES PRIVILÈGES PAR DÉFAUT DONT TOUT DÉPEND (R11). Une règle RLS ne sert à rien si le rôle de l'API n'a pas le
 --    privilège de table : `sync_push` est `security invoker`, et le déclencheur `touch_server_seq` appelle
@@ -265,11 +281,21 @@ select 5.07, 'n5 ecrit, aucun des quatre rejets ecrit', '1 livre n5, 0 ligne de 
   (select count(*) from public.books where id = 'n5') || ' / ' || (select count(*) from public.files),
   (select count(*) from public.books where id = 'n5') = 1 and (select count(*) from public.files) = 0;
 
--- Les deux bornes du lot (spec § 3.4) : l'appel entier est refusé, rien n'est écrit.
--- Note sur le motif 'taille' : il n'est PAS atteignable tel que `sync_push` est écrit. La borne par élément
--- (`pg_column_size(d) > 1 Mo`) et la borne du lot (`pg_column_size(rows) > 1 Mo`) sont au même seuil : un élément
--- de plus de 1 Mo rend forcément le lot plus gros que 1 Mo, donc l'appel est refusé AVANT la boucle. Signalé au
--- rapport de la tâche 4 ; le motif reste comme garde si la borne du lot change un jour.
+-- Le motif 'taille' (R14) : la borne par élément est à 512 Ko et celle du lot à 1 Mo, deux seuils distincts. Un
+-- élément de 600 000 caractères est donc trop gros pour lui-même (rejeté seul, motif 'taille') et assez petit pour
+-- le lot (l'appel ne lève pas). La chaîne est construite côté SQL : rien de volumineux dans le fichier.
+insert into pg_temp.preuve
+select 5.08, 'element de plus de 512 Ko : rejected taille, sans que lappel leve', '1 rejet taille, 0 accepte', v::text,
+      v->'rejected' @> '[{"store":"books","id":"t1","reason":"taille"}]'::jsonb
+  and jsonb_array_length(v->'rejected') = 1 and jsonb_array_length(v->'accepted') = 0
+from (select public.sync_push(jsonb_build_array(jsonb_build_object(
+  'store', 'books', 'id', 't1', 'updated_at', '2026-10-12T10:00:00Z',
+  'data', jsonb_build_object('id', 't1', 'note', repeat('x', 600000))))) as v) t;
+insert into pg_temp.preuve
+select 5.09, 'lelement de plus de 512 Ko nest pas ecrit', '0', count(*)::text, count(*) = 0
+from public.books where id = 't1';
+
+-- Les deux bornes du LOT (spec § 3.4) : là, l'appel entier est refusé et rien n'est écrit.
 do $$
 declare v text; gros jsonb;
 begin
@@ -281,7 +307,7 @@ begin
   exception when others then v := sqlstate || ' ' || sqlerrm;
   end;
   insert into pg_temp.preuve values
-    (5.08, 'charge de plus de 1 Mo : appel refuse', 'P0001 rows : 1 Mo au plus', v, v like 'P0001 rows : 1 Mo%');
+    (5.10, 'charge de plus de 1 Mo : appel refuse', 'P0001 rows : 1 Mo au plus', v, v like 'P0001 rows : 1 Mo%');
   begin
     perform public.sync_push((select jsonb_agg(jsonb_build_object('store', 'books', 'id', 'b' || g,
       'updated_at', '2026-10-12T10:00:00Z', 'data', jsonb_build_object('id', 'b' || g))) from generate_series(1, 501) g));
@@ -289,7 +315,7 @@ begin
   exception when others then v := sqlstate || ' ' || sqlerrm;
   end;
   insert into pg_temp.preuve values
-    (5.09, '501 elements : appel refuse', 'P0001 rows : 500 elements au plus', v, v like 'P0001 rows : 500%');
+    (5.11, '501 elements : appel refuse', 'P0001 rows : 500 elements au plus', v, v like 'P0001 rows : 500%');
 end $$;
 
 -- 6. IDEMPOTENCE SANS ÉCRITURE, CONFLIT, server_seq CROISSANT, MAINTENANCE (spec § 3.1 et § 3.4).

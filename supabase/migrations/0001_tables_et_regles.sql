@@ -559,12 +559,15 @@ begin
     begin u := (r->>'updated_at')::timestamptz; exception when others then u := null; end;
     if bad is null and u is null then bad := 'updated_at'; end if;
     if bad is null and u > now_ts + interval '5 minutes' then u := now_ts; adj := true; end if;
+    -- Deux seuils de taille, volontairement distincts (R14) : 512 Ko par élément, rejeté SEUL avec le motif
+    -- « taille » ; 1 Mo pour le lot entier, qui lève plus haut. Au même seuil, « taille » serait inatteignable —
+    -- un élément de plus de 1 Mo rend forcément le lot plus gros que 1 Mo, donc l'appel serait refusé avant la boucle.
     if bad is null then
       if d is null or jsonb_typeof(d) = 'null' then
         d := null; if not del then bad := 'forme'; end if;
       elsif jsonb_typeof(d) <> 'object' then bad := 'forme';
       elsif (d->>(keys->>s)) is distinct from i then bad := 'cle';
-      elsif pg_column_size(d) > 1048576 then bad := 'taille';
+      elsif pg_column_size(d) > 524288 then bad := 'taille';
       else
         for f in select jsonb_array_elements_text(coalesce(required->s, '[]'::jsonb)) loop
           if d->>f is null then bad := 'forme'; end if;

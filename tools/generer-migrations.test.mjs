@@ -216,3 +216,29 @@ test('README : cite mot pour mot la derniere instruction de 0001 (celle a coller
   for (const m of ['mistu-dev', 'pg_cron', 'RESULTATS-', 'allowed_users', '0002_stockage.sql']) assert.ok(readme.includes(m), m);
   assert.doesNotMatch(readme, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
 });
+
+// --- Ronde de correction 1 : R14 (borne par element), R15 (vue revoquee), blindage du schema temporaire ---------
+test('R14 : borne par element a 512 Ko, borne du lot a 1 Mo (le motif taille devient atteignable)', () => {
+  const p = corps('sync_push');
+  assert.match(p, /pg_column_size\(rows\) > 1048576 then raise exception 'rows : 1 Mo au plus'/);
+  assert.match(p, /pg_column_size\(d\) > 524288 then bad := 'taille'/);
+  // Au meme seuil que le lot, « taille » ne pourrait jamais etre pose : un element trop gros rend le lot trop gros.
+  assert.doesNotMatch(p, /pg_column_size\(d\) > 1048576/);
+});
+test('R15 : private.storage_usage est revoquee pour anon et authenticated, apres sa creation', () => {
+  assert.match(storage, /revoke all on private\.storage_usage from anon, authenticated;/);
+  assert.ok(storage.indexOf('revoke all on private.storage_usage')
+    > storage.indexOf('create or replace view private.storage_usage'), 'le revoke suit la creation');
+});
+test('preuve 0001 : verdict taille, et grant dynamique sur le schema temporaire', () => {
+  const p = lire('supabase/proofs/0001_tables_et_regles.sql');
+  assert.ok(p.includes('"reason":"taille"'), 'un verdict attend rejected{taille}');
+  assert.ok(p.includes("repeat('x', 600000)"), 'un element de plus de 512 Ko mais de moins de 1 Mo');
+  assert.ok(p.includes('pg_my_temp_schema()'), 'le nom reel du schema temporaire');
+  assert.match(p, /grant usage on schema %I to authenticated/, 'grant usage dynamique');
+});
+test('README : schema temporaire refuse, et colonnes not null de auth.users', () => {
+  const r = lire('supabase/README.md');
+  assert.ok(r.includes('pg_temp'), 'quoi faire si permission denied for schema pg_temp_...');
+  assert.ok(r.includes('encrypted_password'), 'colonnes not null sans defaut cote GoTrue');
+});

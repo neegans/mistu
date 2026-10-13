@@ -142,12 +142,15 @@ begin
     begin u := (r->>'updated_at')::timestamptz; exception when others then u := null; end;
     if bad is null and u is null then bad := 'updated_at'; end if;
     if bad is null and u > now_ts + interval '5 minutes' then u := now_ts; adj := true; end if;
+    -- Deux seuils de taille, volontairement distincts (R14) : 512 Ko par élément, rejeté SEUL avec le motif
+    -- « taille » ; 1 Mo pour le lot entier, qui lève plus haut. Au même seuil, « taille » serait inatteignable —
+    -- un élément de plus de 1 Mo rend forcément le lot plus gros que 1 Mo, donc l'appel serait refusé avant la boucle.
     if bad is null then
       if d is null or jsonb_typeof(d) = 'null' then
         d := null; if not del then bad := 'forme'; end if;
       elsif jsonb_typeof(d) <> 'object' then bad := 'forme';
       elsif (d->>(keys->>s)) is distinct from i then bad := 'cle';
-      elsif pg_column_size(d) > 1048576 then bad := 'taille';
+      elsif pg_column_size(d) > 524288 then bad := 'taille';
       else
         for f in select jsonb_array_elements_text(coalesce(required->s, '[]'::jsonb)) loop
           if d->>f is null then bad := 'forme'; end if;
@@ -263,6 +266,10 @@ create policy pages_delete on storage.objects for delete to authenticated using 
 create or replace view private.storage_usage as
   select (storage.foldername(name))[1] as owner, count(*) as objets, sum((metadata->>'size')::bigint) as octets
   from storage.objects where bucket_id = 'pages' group by 1;
+-- R15 : le « revoke all on all tables in schema private » de 0001 est antérieur à cette vue, il ne peut donc pas la
+-- couvrir. Sans cette ligne, un projet dont les privilèges par défaut ne sont pas bornés au schéma public exposerait
+-- par l'API les uuid des propriétaires et leur consommation.
+revoke all on private.storage_usage from anon, authenticated;
 `;
   return { tables, storage };
 }
