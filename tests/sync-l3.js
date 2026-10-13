@@ -119,6 +119,27 @@ export async function runSyncL3Tests({ eq, ok }) {
   const inconnu = appliquerReponse({ lot: { elements: [], seqs: [] }, reponse: { server_time: 't', accepted: [{ store: 'books', id: 'zz' }], adjusted: [], rejected: [] }, entreesParSeq: new Map(), fichesLocales: {} });
   eq(inconnu.retirer, [], 'réponses : un accusé pour une clé hors du lot ne retire rien');
 
+  // R-L3-8 : une clé que le serveur nomme sans qu'elle soit dans le lot n'est JAMAIS crue, dans aucune des trois
+  // listes — sinon un serveur bavard (ou compromis) ferait retirer, réécrire ou mettre en conflit n'importe quoi.
+  const horsLot = appliquerReponse({
+    lot: { elements: [{ store: 'books', id: 'a', data: { id: 'a', updated_at: 'ta' }, updated_at: 'ta', deleted: false }], seqs: [1] },
+    reponse: { server_time: 't', accepted: [{ store: 'books', id: 'zz' }], adjusted: [{ store: 'books', id: 'yy', updated_at: 'tz' }], rejected: [{ store: 'books', id: 'xx', reason: 'conflit', server: { data: { id: 'xx' }, updated_at: 'tz', deleted_at: null } }, { store: 'books', id: 'ww', reason: 'taille' }] },
+    entreesParSeq: new Map([[1, { seq: 1, store: 'books', id: 'a' }]]),
+    fichesLocales: {},
+  });
+  eq([horsLot.retirer, horsLot.reecrire, horsLot.conflits, horsLot.quarantaine], [[], {}, [], []], 'R-L3-8 : accepted, adjusted et rejected hors du lot → aucun effet');
+
+  // R-L3-7 : un ajustement ne réécrit la fiche que si elle n'a pas bougé ici pendant l'aller-retour.
+  const lotB = { elements: [{ store: 'books', id: 'b', data: { id: 'b', titre: 'envoye', updated_at: 'tb' }, updated_at: 'tb', deleted: false }], seqs: [2] };
+  const seqsB = new Map([[2, { seq: 2, store: 'books', id: 'b' }]]);
+  const reponseB = { server_time: 't', accepted: [], adjusted: [{ store: 'books', id: 'b', updated_at: 'tserveur' }], rejected: [] };
+  const ajusteIntacte = appliquerReponse({ lot: lotB, reponse: reponseB, entreesParSeq: seqsB, fichesLocales: { 'books:b': { id: 'b', titre: 'envoye', updated_at: 'tb' } } });
+  eq([ajusteIntacte.reecrire, ajusteIntacte.retirer], [{ books: [{ id: 'b', titre: 'envoye', updated_at: 'tserveur' }] }, [2]], 'R-L3-7 : fiche inchangée depuis l’envoi → réécrite avec le updated_at du serveur');
+  const ajusteBougee = appliquerReponse({ lot: lotB, reponse: reponseB, entreesParSeq: seqsB, fichesLocales: { 'books:b': { id: 'b', titre: 'change ici', updated_at: 'tb2' } } });
+  eq([ajusteBougee.reecrire, ajusteBougee.retirer], [{}, [2]], 'R-L3-7 : fiche modifiée ici pendant l’aller-retour → RIEN n’est réécrit (sa propre entrée de file repartira)');
+  const ajusteSupprimee = appliquerReponse({ lot: lotB, reponse: reponseB, entreesParSeq: seqsB, fichesLocales: { 'books:b': null } });
+  eq([ajusteSupprimee.reecrire, ajusteSupprimee.retirer], [{}, [2]], 'R-L3-7 : fiche supprimée ici → l’ajustement ne la ressuscite pas');
+
   // --- Horloge (spec § 5.3) : décalage mesuré à chaque réponse, plancher, avertissement unique au-delà de 5 min
   const { appliquerHeureServeur, getClockOffset, syncNow, setClockOffset } = await import('../src/sync/clock.js');
   try {
@@ -212,6 +233,66 @@ export async function runSyncL3Tests({ eq, ok }) {
       eq((await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer()).envoyes, 0, 'envoi : avant next_try_at, l’entrée n’est pas relue');
       eq(tf.journal.length, 0, 'envoi : aucune entrée prête → aucun appel réseau');
       eq((await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T21:00:00Z') }).envoyer()).envoyes, 1, 'envoi : à next_try_at, l’entrée repart');
+      // Un next_try_at illisible garerait l'entrée pour toujours : elle est éligible maintenant.
+      await repo.save('books', { id: 'bn', title: 'Illisible' });
+      const neuve = (await db.getAll('outbox')).find((e) => e.id === 'bn');
+      await db.mutate({ puts: { outbox: [{ ...neuve, next_try_at: 'pas une date', tries: 2 }] }, origin: 'remote' });
+      eq((await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer()).envoyes, 1, 'envoi : un next_try_at illisible n’immobilise pas l’entrée pour toujours');
+    });
+
+    // --- Envoi : R-L3-8 de bout en bout — un serveur qui nomme des clés hors du lot n'obtient rien
+    await withRepo(async (repo, db) => {
+      await repo.save('books', { id: 'br', title: 'Reste' });
+      const tf = creerTransportFactice({ pousser: [{ reponse: {
+        server_time: '2026-10-13T20:00:00Z',
+        accepted: [{ store: 'books', id: 'inconnu1' }],
+        adjusted: [{ store: 'books', id: 'inconnu2', updated_at: '2026-10-13T20:00:00+00:00' }],
+        rejected: [
+          { store: 'books', id: 'inconnu3', reason: 'conflit', server: { data: { id: 'inconnu3' }, updated_at: '2026-10-14T00:00:00Z', deleted_at: null } },
+          { store: 'books', id: 'inconnu4', reason: 'taille' },
+        ],
+      } }] });
+      const r = await createPush({ db, transport: tf }).envoyer();
+      eq([r.envoyes, r.ajustes, r.conflits, r.quarantaine, r.erreur], [0, 0, 0, 0, null], 'R-L3-8 : le bilan se compte depuis les effets, des clés hors du lot ne comptent pour rien');
+      eq([await db.count('outbox'), await db.count('sync_conflicts'), await db.count('books')], [1, 0, 1], 'R-L3-8 : rien n’est retiré, aucun conflit journalisé, aucune fiche inventée');
+    });
+
+    // --- Envoi : R-L3-7 de bout en bout — la fiche change ICI pendant l'aller-retour
+    await withRepo(async (repo, db) => {
+      await repo.save('books', { id: 'aj2', title: 'Envoye' });
+      const transport = { async pousser() {
+        // La personne modifie la fiche pendant que l'appel est en vol : nouvelle entrée de file, nouveau updated_at.
+        await repo.save('books', { id: 'aj2', title: 'Change pendant l’aller-retour' });
+        return { reponse: { server_time: '2026-10-13T20:00:00Z', accepted: [], adjusted: [{ store: 'books', id: 'aj2', updated_at: '2026-10-13T20:00:00+00:00' }], rejected: [] }, erreur: null };
+      } };
+      const r = await createPush({ db, transport, maintenant: () => Date.parse('2026-10-13T20:00:05Z') }).envoyer();
+      const fiche = await db.get('books', 'aj2');
+      eq([fiche.title, fiche.updated_at === '2026-10-13T20:00:00+00:00'], ['Change pendant l’aller-retour', false], 'R-L3-7 : l’ajustement du serveur n’écrase pas la modification locale');
+      eq([r.ajustes, (await db.getAll('outbox')).map((e) => e.id)], [0, ['aj2']], 'R-L3-7 : aucune fiche réécrite, et la version locale garde sa propre entrée de file');
+    });
+
+    // --- Envoi : une réponse vide sans erreur ne retire rien (I5), et une passe sur file vide n'écrit rien
+    await withRepo(async (repo, db) => {
+      await repo.save('books', { id: 'bv', title: 'Vide' });
+      const transport = { async pousser() { return { reponse: null, erreur: null }; } };
+      const vraiConsole = console.error;
+      let journalises = 0;
+      console.error = () => { journalises += 1; };
+      let r;
+      try { r = await createPush({ db, transport }).envoyer(); } finally { console.error = vraiConsole; }
+      eq([r.erreur.type, r.envoyes, journalises], ['inconnu', 0, 1], 'envoi : réponse vide sans erreur → inconnu, journalisé une fois');
+      eq(await db.count('outbox'), 1, 'envoi : réponse vide → la file est intacte (I5 : envoyé = accusé)');
+    });
+
+    await withRepo(async (repo, db) => {
+      eq(await db.count('outbox'), 0, 'envoi : la base temporaire démarre avec une file vide');
+      const origines = [];
+      const vraiMutate = db.mutate.bind(db);
+      db.mutate = (arg) => { origines.push(arg?.origin); return vraiMutate(arg); };
+      const tf = creerTransportFactice();
+      let r;
+      try { r = await createPush({ db, transport: tf }).envoyer(); } finally { db.mutate = vraiMutate; }
+      eq([r.envoyes, origines, tf.journal.length], [0, [], 0], 'envoi : une passe sur file vide n’ouvre aucune transaction et n’appelle rien');
     });
   } finally { setClockOffset(0); }
 }

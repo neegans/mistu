@@ -20,7 +20,8 @@ export function nettoyerChaines(valeur) {
 
 export const tailleJson = (valeur) => encodeur.encode(JSON.stringify(valeur)).length;
 
-const cleDe = (e) => `${e.store}:${e.id}`;
+// Une clé de synchronisation, nommée ici une fois pour toutes : reponses.js et push.js la reprennent telle quelle.
+export const cleDe = (e) => `${e.store}:${e.id}`;
 
 // Une clé par (store, id) : l'entrée la plus récente (seq le plus haut) représente la clé, tous les seq la suivent
 // pour être retirés ensemble à l'accusé. L'ordre des clés est celui de leur PREMIÈRE apparition dans la file.

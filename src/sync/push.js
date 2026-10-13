@@ -1,18 +1,37 @@
 // Envoi d'une passe (spec § 5.3) : la file est lue, dédoublonnée, relue, envoyée par lots ; chaque réponse est
 // appliquée en UNE transaction (retraits, réécritures non capturées, conflits, quarantaine). I5 : une fiche n'est
 // « envoyée » que par l'absence d'entrée la concernant.
-import { composerLots } from './lots.js';
+import { composerLots, cleDe } from './lots.js';
 import { appliquerReponse } from './reponses.js';
 import { appliquerHeureServeur } from './clock.js';
 import { logError } from '../core/log.js';
 
-const cle = (x) => `${x.store}:${x.id}`;
+// Le bilan se compte depuis les EFFETS, jamais depuis la réponse brute (R-L3-8) : ce que le serveur annonce pour
+// une clé hors du lot ne produit rien et ne compte donc pour rien. « envoyés » = clés réellement retirées de la
+// file, moins celles retirées pour une autre raison (conflit à trancher, doublon d'une clé mise en quarantaine) et
+// moins les fiches réécrites, comptées en « ajustés ».
+function compter(effets, entreesParSeq) {
+  const clesRetirees = new Set();
+  for (const s of effets.retirer) { const e = entreesParSeq.get(s); if (e) clesRetirees.add(cleDe(e)); }
+  const horsAccuse = new Set(effets.conflits.map((c) => c.id));
+  for (const { seq } of effets.quarantaine) { const e = entreesParSeq.get(seq); if (e) horsAccuse.add(cleDe(e)); }
+  const ajustes = Object.values(effets.reecrire).reduce((n, rows) => n + rows.length, 0);
+  const accusees = [...clesRetirees].filter((k) => !horsAccuse.has(k)).length;
+  return { envoyes: accusees - ajustes, ajustes };
+}
 
 export function createPush({ db, transport, maintenant = Date.now, surHeure = () => {} }) {
+  // Une heure de reprise illisible (fiche bricolée, restauration d'archive) immobiliserait l'entrée pour toujours :
+  // elle est prête maintenant. La quarantaine, elle, attend un geste de la personne.
+  function prete(e) {
+    if (!e.next_try_at) return true;
+    const t = Date.parse(e.next_try_at);
+    return !Number.isFinite(t) || t <= maintenant();
+  }
+
   async function lireFile() {
     const toutes = await db.getAll('outbox');
-    // Les entrées en quarantaine attendent un geste ; celles dont l'heure de reprise n'est pas venue attendent.
-    return toutes.filter((e) => !e.quarantined_at && (!e.next_try_at || Date.parse(e.next_try_at) <= maintenant())).sort((a, b) => a.seq - b.seq);
+    return toutes.filter((e) => !e.quarantined_at && prete(e)).sort((a, b) => a.seq - b.seq);
   }
 
   // R-L3-5 : une ligne retenue (files, tant que L4 n'a pas confirmé l'empreinte) n'est ni envoyée ni retirée —
@@ -30,9 +49,10 @@ export function createPush({ db, transport, maintenant = Date.now, surHeure = ()
   }
 
   async function appliquer(lot, reponse, entreesParSeq) {
-    // Lectures AVANT la transaction : la version locale d'un conflit est celle du moment de l'envoi.
+    // Lectures AVANT la transaction : la version locale d'un conflit est celle du moment où la réponse arrive, et
+    // c'est elle qui décide si un ajustement a le droit de réécrire la fiche (R-L3-7).
     const fichesLocales = {};
-    for (const e of lot.elements) fichesLocales[cle(e)] = (await db.get(e.store, e.id)) ?? null;
+    for (const e of lot.elements) fichesLocales[cleDe(e)] = (await db.get(e.store, e.id)) ?? null;
     const effets = appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales });
     const puts = { ...effets.reecrire };
     if (effets.conflits.length) puts.sync_conflicts = effets.conflits;
@@ -60,8 +80,9 @@ export function createPush({ db, transport, maintenant = Date.now, surHeure = ()
       if (!reponse) { bilan.erreur = { type: 'inconnu', status: null, message: '' }; logError('sync.push', { reason: 'reponse vide' }); break; }
       if (reponse.server_time) surHeure(appliquerHeureServeur(reponse.server_time, maintenant()));
       const effets = await appliquer(lot, reponse, entreesParSeq);
-      bilan.envoyes += (reponse.accepted || []).length;
-      bilan.ajustes += (reponse.adjusted || []).length;
+      const { envoyes, ajustes } = compter(effets, entreesParSeq);
+      bilan.envoyes += envoyes;
+      bilan.ajustes += ajustes;
       bilan.conflits += effets.conflits.length;
       bilan.quarantaine += effets.quarantaine.length;
     }
