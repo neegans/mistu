@@ -27,8 +27,8 @@ self.addEventListener('activate', (event) => {
 // Une requête avec chaîne de requête (ex. retour OAuth « ?code=… ») n'est jamais mise en cache (spec § 5.6, sw-rules.js).
 self.addEventListener('fetch', (event) => {
   if (!self.CuisineSwRules.shouldCache(event.request, self.location.origin)) {
-    if (event.request.method === 'GET' && new URL(event.request.url).origin === self.location.origin) {
-      event.respondWith(fetch(event.request).catch(() => caches.match('./index.html')));
+    if (self.CuisineSwRules.isSameOriginGet(event.request, self.location.origin)) {
+      event.respondWith(fetch(event.request).catch(() => (event.request.mode === 'navigate' ? caches.match('./index.html') : Response.error())));
     }
     return;
   }

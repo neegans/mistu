@@ -128,4 +128,6 @@ export async function runSyncTests({ eq, ok }) {
   ok(!rules.shouldCache({ url: origin + '/mistu/?code=abc', method: 'GET' }, origin), 'avec ?code= : jamais en cache');
   ok(!rules.shouldCache({ url: 'https://autre.test/x.js', method: 'GET' }, origin), 'autre origine : jamais');
   ok(!rules.shouldCache({ url: origin + '/mistu/', method: 'POST' }, origin), 'POST : jamais');
+  ok(rules.isSameOriginGet({ url: origin + '/mistu/?code=abc', method: 'GET' }, origin), 'isSameOriginGet : GET même origine avec paramètres');
+  ok(!rules.isSameOriginGet({ url: 'https://autre.test/x.js', method: 'GET' }, origin), 'isSameOriginGet : autre origine');
 }
