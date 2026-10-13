@@ -11,25 +11,32 @@ import { resolveMime } from '../sync/mime.js';
 export let db = new Database(DB_NAME, DB_VERSION, STORES);
 export function bindDatabase(database) { db = database; }
 
-// --- Identité de l'appareil (spec § 5.1) -----------------------------------
+// --- Identité de l'appareil (spec § 5.1, § 4.2) ----------------------------
 // Une seule identité, gardée dans sync_state : elle survit au vidage (clearDevice), jamais capturée, jamais envoyée.
-// Tant que src/ui/import.js lit encore la clé localStorage (bascule prévue en T13), la valeur y est **reflétée**
-// plutôt que retirée : sans ce reflet, deux identifiants différents cohabiteraient sur le même appareil.
-const DEVICE_STORAGE_KEY = 'cuisineos.device';
+// Migration unique : l'identité d'avant le lot vivait dans localStorage. Elle est reprise si la base n'en a pas,
+// et la clé est retirée dans tous les cas — plus aucune identité ne vit hors de la base (src/ui/import.js lit
+// maintenant deviceId()). C'est le seul endroit du code qui nomme encore l'ancienne clé.
+const LEGACY_DEVICE_KEY = 'cuisineos.device';
 let deviceIdValue = null;
 
-const readStoredDevice = () => { try { return localStorage.getItem(DEVICE_STORAGE_KEY); } catch { return null; } };
-const writeStoredDevice = (value) => { try { localStorage.setItem(DEVICE_STORAGE_KEY, value); } catch { /* stockage indisponible */ } };
+// Lit et retire l'ancienne clé d'un seul geste : rien ne doit rester à lire une seconde fois.
+function takeLegacyDevice() {
+  try {
+    const value = localStorage.getItem(LEGACY_DEVICE_KEY);
+    if (value !== null) localStorage.removeItem(LEGACY_DEVICE_KEY);
+    return value || null;
+  } catch { return null; } // stockage indisponible : aucune migration à faire
+}
 
 async function ensureDeviceId() {
   const row = await db.get('sync_state', 'device_id');
   let value = row?.value || null;
+  const ancienne = takeLegacyDevice();
   if (!value) {
-    value = readStoredDevice() || newId('dev'); // reprise de l'identité d'avant le lot, sinon une neuve
+    value = ancienne || newId('dev'); // reprise de l'identité d'avant le lot, sinon une neuve
     await db.mutate({ puts: { sync_state: [{ key: 'device_id', value }] }, origin: 'device' });
   }
   deviceIdValue = value;
-  writeStoredDevice(value);
   return value;
 }
 
@@ -58,6 +65,7 @@ const DEFAULT_SETTINGS = {
   reading_locale: 'original', // langue de lecture : original | fr | en
   units: 'original',          // unités souhaitées : original | metric | us
   rediscover_enabled: true,
+  sync_activity: false,       // historique de consultation envoyé au serveur : jamais sans ce geste (spec § 4.2)
   last_backup: null,          // { at, counts, files, bytes }
   device_name: '',
   llm: { provider: 'none' },  // exclu de la sauvegarde

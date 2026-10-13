@@ -163,7 +163,10 @@ export async function runSyncTests({ eq, ok }) {
   await withRepo(async (repo, db) => {
     const device = await db.get('sync_state', 'device_id');
     ok(device?.value && repo.deviceId() === device.value, 'init : device_id créé dans sync_state et rendu par deviceId()');
-    eq(localStorage.getItem('cuisineos.device'), device.value, 'init : identité reflétée dans localStorage tant que import.js la lit');
+    eq(localStorage.getItem('cuisineos.device'), null, 'init : aucune identité laissée dans localStorage');
+    const { deviceId: deviceIdDepuisImport } = await import('../src/ui/import.js');
+    eq(deviceIdDepuisImport(), device.value, 'import.js : deviceId() vient de repo, une seule identité sur l’appareil');
+    eq((await repo.getSettings()).sync_activity, false, 'réglage « historique de consultation » : désactivé par défaut');
     const row = await repo.putFile('b'.repeat(64), new Blob(['x'], { type: '' }), { original_filename: 'IMG.HEIC' });
     ok(row.updated_at && row.mime === 'image/heic' && row.syncable === true, 'putFile : updated_at, type résolu, synchronisable');
     const unknown = await repo.putFile('c'.repeat(64), new Blob(['y'], { type: '' }), { original_filename: 'notes.txt' });
@@ -180,16 +183,25 @@ export async function runSyncTests({ eq, ok }) {
     await repo.clearDevice({ signOut: async () => {} });
     eq([(await db.getAll('recipes')).length, (await db.getAll('outbox')).length, (await db.getAll('sync_state')).map((s) => s.key)], [0, 0, ['device_id']], 'clearDevice : tout vidé sauf device_id');
   });
+  // R20 : l'identité d'avant le lot est reprise UNE fois depuis l'ancienne clé, qui est ensuite retirée.
+  localStorage.setItem('cuisineos.device', 'dev-ancien');
+  await withRepo(async (repo) => {
+    eq([repo.deviceId(), localStorage.getItem('cuisineos.device')], ['dev-ancien', null], 'ancienne clé migrée puis retirée');
+  });
+  localStorage.removeItem('cuisineos.device'); // la fixture replante l'état d'origine : ne rien laisser derrière
   // Test statique : aucune écriture directe hors repo.js, src/sync/ et backup.js (spec § 5.2)
   const swText = await (await fetch('../sw.js')).text();
   const shell = [...swText.matchAll(/'(\.\/src\/[^']+\.js)'/g)].map((m) => m[1]);
   const forbidden = new RegExp('\\bdb\\.(' + [...MUTATING_METHODS].join('|') + ')\\s*\\(');
   const offenders = [];
+  const deviceKeyOffenders = []; // R20 : une seule identité d'appareil, et une seule migration qui nomme l'ancienne clé
   for (const file of shell) {
-    if (/src\/model\/repo\.js$|src\/sync\/|src\/domain\/backup\.js$|src\/core\/db\.js$/.test(file)) continue;
-    if (forbidden.test(await (await fetch('../' + file.slice(2))).text())) offenders.push(file);
+    const source = await (await fetch('../' + file.slice(2))).text();
+    if (!/src\/model\/repo\.js$|src\/sync\/|src\/domain\/backup\.js$|src\/core\/db\.js$/.test(file) && forbidden.test(source)) offenders.push(file);
+    if (!/src\/model\/repo\.js$/.test(file) && /cuisineos\.device/.test(source)) deviceKeyOffenders.push(file);
   }
   eq(offenders, [], 'aucune écriture IndexedDB directe hors des portes autorisées');
+  eq(deviceKeyOffenders, [], 'ancienne clé d’appareil nommée seulement par la migration de repo.js');
 
   // --- Dépendance embarquée (spec § 6.1)
   ok(typeof globalThis.supabase?.createClient === 'function', 'supabase-js embarqué chargé par un script classique');
@@ -327,4 +339,32 @@ export async function runSyncTests({ eq, ok }) {
     ok(texteJournal.includes('auth.signIn') && texteJournal.includes('400') && texteJournal.includes('"reason":"y"'), 'journal : code, statut et motif');
     ok(!texteJournal.includes('reseau coupe') && !texteJournal.includes('"x"'), 'journal : jamais le texte de l’erreur');
   });
+
+  // --- Réglages : section Synchronisation (spec § 4.2, L2)
+  // Modèle pur : ce que la section dit et offre, sans DOM. Le rendu le consomme tel quel.
+  const { syncSectionModel } = await import('../src/ui/settings.js');
+  eq(syncSectionModel({ available: false, reason: 'config' }),
+    { title: 'Synchronisation', lines: ['Synchronisation non configurée sur cette adresse.'], buttons: [] },
+    'config absente : la section le dit et n’offre rien');
+  eq(syncSectionModel({ available: false, reason: 'bibliotheque' }),
+    { title: 'Synchronisation', lines: ['La bibliothèque de synchronisation n’a pas été chargée.'], buttons: [] },
+    'bibliothèque non chargée : motif distinct');
+  eq(syncSectionModel({ available: true }),
+    { title: 'Synchronisation', lines: ['Tes données restent sur cet appareil.'], buttons: [{ action: 'signIn', label: 'Activer la synchronisation', tone: 'primary' }] },
+    'disponible sans session : un seul libellé, Activer la synchronisation');
+  eq(syncSectionModel({ available: true, user: { id: 'uid-A', email: 'a@exemple.test' }, guard: { ok: true }, pending: 3 }),
+    { title: 'Synchronisation', lines: ['Connectée : a@exemple.test', 'À envoyer : 3'], buttons: [{ action: 'signOut', label: 'Se déconnecter', tone: '' }] },
+    'session et garde ok : adresse, file d’envoi, déconnexion');
+  eq(syncSectionModel({ available: true, guard: { ok: false, message: 'Cet appareil a été synchronisé avec a@exemple.test.' }, pending: 2 }),
+    { title: 'Synchronisation', lines: ['Cet appareil a été synchronisé avec a@exemple.test.'], buttons: [{ action: 'changeAccount', label: 'Changer de compte sur cet appareil', tone: 'danger' }] },
+    'garde refusée : son message et le geste exécutable');
+  eq(syncSectionModel({ available: true, retour: { error: null, codeSansSession: true } }).lines,
+    ['Tes données restent sur cet appareil.', 'La connexion n’a pas abouti.'],
+    'retour muet : la connexion n’a pas abouti, dit sans deviner pourquoi');
+  eq(syncSectionModel({ available: true, retour: { error: 'Cette adresse n’est pas autorisée.', codeSansSession: false } }).lines,
+    ['Tes données restent sur cet appareil.', 'Cette adresse n’est pas autorisée.'],
+    'refus du fournisseur : la phrase fixe, jamais son texte brut');
+  eq(syncSectionModel({ available: true, user: { id: 'uid-A', email: '' }, guard: { ok: true } }).lines,
+    ['Connectée : ', 'À envoyer : 0'],
+    'sans adresse connue : aucune valeur inventée, file à zéro');
 }

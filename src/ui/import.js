@@ -40,11 +40,8 @@ export async function startScanSession(files, { edition_id = null, session_id = 
   return session;
 }
 
-export function deviceId() {
-  let id = localStorage.getItem('cuisineos.device');
-  if (!id) { id = repo.newId('dev'); localStorage.setItem('cuisineos.device', id); }
-  return id;
-}
+// Identité de l'appareil : une seule, celle de la base (spec § 4.2). Posée par repo.init() au démarrage.
+export function deviceId() { return repo.deviceId(); }
 
 export async function renderImport(params, query, ctx) {
   if (!query.session) return sessionsList(ctx);

@@ -9,6 +9,23 @@ let cache = null;
 on('change', () => { cache = null; });
 on('settings', () => { cache = null; });
 
+// --- État de la connexion (spec § 4.1) -------------------------------------
+// Une seule source : posée au démarrage par app.js, lue par les vues sous ctx.sync. Rien n'est gardé ailleurs.
+// « auth » est le module de connexion ; « user » vaut null tant que la garde de compte n'a pas accepté.
+let sync = { auth: null, user: null, guard: null, retour: null };
+
+// Clé de la route mémorisée avant un départ chez le fournisseur (redirectTo est sans fragment : la route serait
+// perdue au retour). Écrite par Réglages, consommée une seule fois au démarrage.
+export const SYNC_ROUTE_KEY = 'cuisineos.route';
+
+export function setSyncState(next) {
+  sync = { ...sync, ...next };
+  cache = null; // le contexte des vues porte une copie de cet état : il doit être reconstruit
+  return sync;
+}
+
+export const getSyncState = () => sync;
+
 export async function getData(force = false) {
   if (cache && !force) return cache;
   const names = ['recipes', 'recipe_versions', 'book_editions', 'books', 'dishes', 'dish_recipe_links', 'ingredients', 'recipe_translations', 'cook_history', 'unit_definitions', 'unit_conventions', 'library_activity', 'rediscovery_prefs', 'meals', 'meal_feedback', 'inventory', 'appliances', 'cook_sessions', 'source_pages', 'source_documents', 'shopping_lists', 'scan_sessions', 'substitutions'];
@@ -29,7 +46,7 @@ export async function getData(force = false) {
   const docs = buildDocs({ recipes: d.recipes, versions: d.recipe_versions, editions: d.book_editions, books: d.books, dishes: d.dishes, links: d.dish_recipe_links, translations: d.recipe_translations, history: d.cook_history });
   const docsByRecipe = new Map(docs.map((x) => [x.recipe.id, x]));
   cache = {
-    ...d, settings, ingredientsById, editionsById, booksById, dishesById, recipesById, versionsById, versionsByRecipe, pagesById, docs, docsByRecipe,
+    ...d, settings, sync, ingredientsById, editionsById, booksById, dishesById, recipesById, versionsById, versionsByRecipe, pagesById, docs, docsByRecipe,
     editionLabel(edition) {
       if (!edition) return '';
       const book = booksById.get(edition.book_id);
