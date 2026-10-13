@@ -180,6 +180,11 @@ export async function runSyncTests({ eq, ok }) {
     ok(filled.blob instanceof Blob && filled.mime === 'image/jpeg' && filled.syncable === true, 'putFile remote : le blob est écrit sur une ligne qui n’en avait pas, et le type connu du serveur est gardé');
     await repo.recordActivity('ed1', 'open');
     ok((await db.getAll('library_activity'))[0].updated_at, 'recordActivity : updated_at');
+    // R26 (a) : les 96 fiches de référence amorcées sont horodatées à l'insertion. Sans updated_at, elles seraient
+    // toutes rejetées par sync_push et mises en quarantaine au premier envoi initial (spec § 5.2, § 5.3).
+    // Qu'elles ne soient pas EN FILE est prouvé par l'assertion « ordre des captures » juste en dessous.
+    const amorcees = [...(await db.getAll('unit_definitions')), ...(await db.getAll('unit_conventions')), ...(await db.getAll('ingredients'))];
+    eq([amorcees.length, amorcees.filter((r) => r.updated_at).length], [96, 96], 'amorçage : les 96 fiches de référence portent un updated_at');
     await repo.save('recipes', { id: 'r1' });
     await repo.remove('recipes', 'r1');
     const out = await db.getAll('outbox');
@@ -193,6 +198,74 @@ export async function runSyncTests({ eq, ok }) {
     eq([repo.deviceId(), localStorage.getItem('cuisineos.device')], ['dev-ancien', null], 'ancienne clé migrée puis retirée');
   });
   localStorage.removeItem('cuisineos.device'); // la fixture replante l'état d'origine : ne rien laisser derrière
+
+  // --- Montée de version 1 → 2 sur une base peuplée (spec § 7.1)
+  // Le seul chemin du lot capable de rendre une bibliothèque existante ILLISIBLE : si onupgradeneeded lève,
+  // db.open() rejette, boot() tombe dans son catch et l'app entière ne s'ouvre plus. Il faut donc une base
+  // réellement ouverte EN VERSION 1 avec les 26 magasins d'avant le lot, puis rouverte par le chemin normal du
+  // démarrage (Database v2 + bindDatabase + repo.init()). Aucun test ne l'exerçait : withDatabase ouvrait toujours
+  // une base NEUVE directement en v2, ce qui ne touche ni la branche « magasin déjà là » de db.js:65, ni la
+  // création de l'index composé ['store','id'] au sein d'une transaction versionchange.
+  {
+    const repoModule = await import('../src/model/repo.js');
+    const baseOrigine = repoModule.db;
+    const ancienneCle = localStorage.getItem('cuisineos.device');
+    const V1_SEULEMENT = Object.fromEntries(Object.entries(STORES).filter(([n]) => !SYNC_INTERNAL_STORES.includes(n)));
+    const avant = {
+      recipes: { id: 'r_v1', original_title: 'Avant le lot', availability: 'available', type: 'salade', created_at: '2026-01-02T03:04:05Z' },
+      ingredients: { id: 'ing_corrige_a_la_main', labels: { fr: { label: 'sel fin', aliases: [] } } },
+      settings: { key: 'reading_locale', value: 'fr' },
+    };
+    const sansHorodatage = ({ updated_at, ...reste }) => reste;
+    try {
+      await withDatabase(async (v1) => {
+        await v1.mutate({ puts: { recipes: [avant.recipes], ingredients: [avant.ingredients], settings: [avant.settings] } });
+        eq([v1.idb.version, v1.idb.objectStoreNames.contains('outbox')], [1, false], 'montée : la base de départ est bien en v1, sans magasin interne');
+        v1.idb.close(); v1.idb = null; // la montée a besoin de la base libre
+        localStorage.setItem('cuisineos.device', 'dev-avant-le-lot');
+        const v2 = new Database(v1.name, schema.DB_VERSION, STORES);
+        repoModule.bindDatabase(v2);
+        try {
+          await repoModule.init(); // chemin normal du démarrage : montée, identité, amorçage, horodatage
+          eq(v2.idb.version, 2, 'montée : la base est passée en v2 sans rejet');
+          eq(SYNC_INTERNAL_STORES.filter((n) => !v2.idb.objectStoreNames.contains(n)), [], 'les trois magasins internes sont créés par la montée');
+          eq(await v2.byIndex('outbox', 'store_id', ['books', 'b1']), [], 'l’index composé store_id du magasin neuf est utilisable');
+          // Aucune fiche perdue, aucun champ perdu : les objets sont comparés en entier, pas comptés.
+          eq(sansHorodatage(await v2.get('recipes', 'r_v1')), avant.recipes, 'la recette d’avant le lot est intacte, champ pour champ');
+          eq(sansHorodatage(await v2.get('ingredients', 'ing_corrige_a_la_main')), avant.ingredients, 'la référence corrigée à la main n’est pas écrasée par l’amorçage');
+          eq(await v2.get('settings', 'reading_locale'), avant.settings, 'le réglage est intact et non horodaté (settings n’est pas synchronisé)');
+          // R26 : sans updated_at, sync_push rejette (rejected{updated_at}) et la spec § 5.3 met en quarantaine
+          // immédiate — une base d'avant le lot partirait donc entièrement en quarantaine au premier envoi initial.
+          const sansDate = [];
+          for (const store of SYNC_STORES) for (const row of await v2.getAll(store)) if (!row?.updated_at) sansDate.push(store + ':' + (row?.id ?? row?.key ?? row?.sha256 ?? row?.edition_id));
+          eq(sansDate, [], 'toute ligne synchronisable porte un updated_at après la montée');
+          eq((await v2.getAll('outbox')).length, 0, 'la montée ne met rien en file');
+          eq([repoModule.deviceId(), localStorage.getItem('cuisineos.device')], ['dev-avant-le-lot', null], 'device_id repris de l’ancienne clé, qui est retirée');
+          eq((await v2.get('sync_state', 'stamp_updated_at'))?.value, schema.DB_VERSION, 'la garde d’horodatage est posée à la version de la base');
+          // La garde : une seconde init() ne réhorodate rien. La capture est posée cette fois, donc une passe qui
+          // rejouerait laisserait une trace visible dans la file.
+          const datesAvant = (await v2.getAll('recipes')).map((r) => r.updated_at);
+          installCapture(v2, { getUserId: () => 'u1', isActivitySynced: () => false });
+          await repoModule.init();
+          uninstallCapture(v2);
+          eq([(await v2.getAll('recipes')).map((r) => r.updated_at), (await v2.getAll('outbox')).length], [datesAvant, 0], 'seconde init() : rien n’est réhorodaté, rien n’entre en file');
+          // Et la passe elle-même n'est pas capturable : garde retirée, une ligne sans date posée, capture en place.
+          installCapture(v2, { getUserId: () => 'u1', isActivitySynced: () => false });
+          await v2.mutate({ deletes: { sync_state: ['stamp_updated_at'] }, puts: { books: [{ id: 'b_sans_date', title: 'sans date' }] }, origin: 'device' });
+          await repoModule.init();
+          uninstallCapture(v2);
+          eq([!!(await v2.get('books', 'b_sans_date')).updated_at, (await v2.getAll('outbox')).length], [true, 0],
+            'la passe d’horodatage rattrape une ligne sans date par une origine que la capture ignore');
+        } finally {
+          repoModule.bindDatabase(baseOrigine);
+          if (v2.idb) { v2.idb.close(); v2.idb = null; }
+        }
+      }, V1_SEULEMENT, 1);
+    } finally {
+      if (ancienneCle === null) localStorage.removeItem('cuisineos.device');
+      else localStorage.setItem('cuisineos.device', ancienneCle);
+    }
+  }
   // Test statique : aucune écriture directe hors repo.js, src/sync/ et backup.js (spec § 5.2)
   const swText = await (await fetch('../sw.js')).text();
   const shell = [...swText.matchAll(/'(\.\/src\/[^']+\.js)'/g)].map((m) => m[1]);

@@ -11,10 +11,12 @@ const STORE_NAMES = Object.keys(STORES);
 const SECRET = 'cle-secrete-fictive-test-a-exclure';
 const enc = new TextEncoder();
 
-export async function withDatabase(test, stores = STORES) {
+// `version` sert au seul test de montée 1 → 2 (tests/sync.js) : partout ailleurs la base jetable naît directement
+// à DB_VERSION. Une base ouverte en v1 puis rouverte en v2 est le seul moyen d'exercer le vrai onupgradeneeded.
+export async function withDatabase(test, stores = STORES, version = DB_VERSION) {
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const name = `cuisine-os-backup-test-${suffix}`;
-  const db = new Database(name, DB_VERSION, stores);
+  const db = new Database(name, version, stores);
   try {
     await db.open();
     return await test(db);

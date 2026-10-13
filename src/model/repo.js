@@ -1,6 +1,6 @@
 // Accès aux données : base unique, amorçage des références, réglages et journal d'activité.
 import { Database } from '../core/db.js';
-import { DB_NAME, DB_VERSION, STORES } from './schema.js';
+import { DB_NAME, DB_VERSION, STORES, SYNC_STORES } from './schema.js';
 import { UNIT_DEFINITIONS, UNIT_CONVENTIONS, INGREDIENTS } from './seed.js';
 import { newId, nowIso } from '../core/ids.js';
 import { emit } from '../core/bus.js';
@@ -56,7 +56,35 @@ export async function init() {
     unit_conventions: UNIT_CONVENTIONS.filter((c) => !have(conventions).has(c.id)),
     ingredients: INGREDIENTS.filter((i) => !have(ingredients).has(i.id)),
   };
-  await db.putBatch(batch);
+  // Horodatées à l'insertion (R26) : ces trois magasins sont dans SYNC_STORES, et sync_push rejette une fiche sans
+  // updated_at — les 96 références seraient parties en quarantaine au premier envoi initial (spec § 5.2, § 5.3).
+  // Seuls les magasins qui ont réellement quelque chose à écrire sont touchés : rien à faire au démarrage ordinaire.
+  const aPoser = Object.fromEntries(Object.entries(batch).filter(([, rows]) => rows.length));
+  if (Object.keys(aPoser).length) await saveBatch(aPoser);
+  await horodaterAnciennesFiches();
+}
+
+// Rattrapage unique (R26) : les fiches écrites AVANT ce lot n'ont pas d'updated_at ; sans lui, chacune serait
+// rejetée par sync_push et mise en quarantaine immédiate (spec § 5.3). Elles sont horodatées une fois, à la montée.
+// Origine 'device' : la capture ne retient que 'local' (src/sync/outbox.js) — un rattrapage n'est pas une écriture
+// de la personne et n'a rien à envoyer. La garde évite de relire les 25 magasins à chaque démarrage.
+const STAMP_GUARD = 'stamp_updated_at';
+async function horodaterAnciennesFiches() {
+  const fait = await db.get('sync_state', STAMP_GUARD);
+  if (fait?.value === DB_VERSION) return 0;
+  const now = syncNow();
+  const puts = {};
+  let n = 0;
+  for (const store of SYNC_STORES) {
+    const rows = (await db.getAll(store)).filter((r) => r && !r.updated_at);
+    if (!rows.length) continue;
+    puts[store] = rows.map((r) => ({ ...r, updated_at: now }));
+    n += rows.length;
+  }
+  // La garde part dans la MÊME transaction que l'horodatage : une passe à moitié faite serait rejouée en entier.
+  puts.sync_state = [{ key: STAMP_GUARD, value: DB_VERSION }];
+  await db.mutate({ puts, origin: 'device' });
+  return n;
 }
 
 // --- Réglages -------------------------------------------------------------
