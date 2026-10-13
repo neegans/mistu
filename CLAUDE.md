@@ -67,7 +67,23 @@ lot (garde `sync_state.stamp_updated_at`) et **montée `DB_VERSION` 1 → 2 sur 
 (décision de Neegan) I6 précisé en spec § 11 : aucune adresse ni clé dans le dépôt, prénom et domaine assumés
 publics, rien n'est retiré. Les deux gestes destructeurs (`changerDeCompte`, `effacerDonnees`) sont désormais des
 fonctions exportées à dépendances injectées, et testées.
-Suite complète : **403/403 verts**, 0 erreur console (13 octobre 2026, `http://localhost:8081/tests/?v=final-vert`).
+
+**Vague des résidus `/verify` (13 octobre 2026).** Trois lentilles adverses indépendantes (correctness, sécurité,
+faux-vert) ont relu la branche après la revue finale ; leurs six constats sont corrigés : **R31** le remplacement
+d'une archive est refusé dès qu'une entrée d'outbox existe, connecté ou non, la file relue au moment du geste
+(`restaurerArchive`, spec § 5.2) · **R32** compteur de générations dans `state.js` : un résultat tardif du démarrage
+n'écrase jamais un état posé depuis par `auth.onChange`, et un travail tardif qui échoue lève l'attente
+(`sync_boot_failed`) au lieu de figer « Vérification du compte… » · **S1** `config.js` passe à une **liste blanche
+d'hôtes** (plus de repli silencieux sur `prod`) · **S2** la tombale `deleted_at` est **figée** par
+`touch_server_seq` hors `app.sync_push` (preuve 0001, verdicts 6.12-6.14) · **F1** `--dir <chemin>` au générateur,
+et `--check` enfin éprouvé par `spawnSync` sur une copie altérée · **F2/F3** le test des écritures directes vérifie
+qu'il a lu `SHELL` (51 modules), et la comparaison d'empreintes de `verifier-vendor.mjs` est une fonction pure
+exportée (`comparerEmpreintes`, 4 tests). Mineurs : horloge remise à 0 en `finally`, stub de `console.error` du test
+R28 en `try/finally`, amorçage des 96 références par une origine que la capture ignore. Registre des décisions :
+spec **§ 11** (R1 à R32, plus S1 et S2).
+Suite complète : **422/422 verts**, 0 erreur console (13 octobre 2026, `http://localhost:8081/tests/?v=vert-residus`) ;
+outils `node --test tools/*.test.mjs` : **40/40**, `node tools/generer-migrations.mjs --check` : **0**.
+`sw.js` : `VERSION = 'cuisine-os-v0.2.0-3'` (aucun module neuf : `SHELL` inchangé).
 
 **Preuves SQL : NON JOUÉES.** La tâche 5 du plan est **parquée** : elle demande un projet Supabase qui n'existe pas
 encore. Geste de Neegan : créer le projet de développement **`mistu-dev`** (D8, région Canada), puis suivre
@@ -84,8 +100,12 @@ regarder **où atterrit le retour de Google** — dans l'app en plein écran, ou
 d'iOS et le chemin constaté. Si le retour atterrit dans Safari, `signIn()` devra passer à `skipBrowserRedirect: true`
 et ouvrir l'URL obtenue **sur le geste de la personne**. Cette mesure conditionne L3.
 
-**`src/sync/config.js` : à remplir.** Les deux entrées (`prod`, `dev`) sont vides. Y mettre l'URL du projet et la clé
-**`anon`** — publiques par conception, commitées. **Jamais `service_role`**, nulle part. Tant qu'une entrée est vide,
+**`src/sync/config.js` : à remplir.** Trois champs par entrée : **`url`**, **`anonKey`** et **`hosts`**. `prod` est
+vide (`url: ''`, `anonKey: ''`, `hosts: []`) ; `dev` n'a que ses hôtes (`localhost`, `127.0.0.1`). Y mettre l'URL du
+projet et la clé **`anon`** — publiques par conception, commitées. **Jamais `service_role`**, nulle part. Depuis S1,
+`hosts` est une **liste blanche** : `currentConfig(hostname)` ne rend une entrée que si l'hôte y figure (comparaison
+exacte, en minuscules), donc **l'hôte du sous-domaine (D5) s'ajoute dans `prod.hosts` en même temps que l'URL et la
+clé** — sans quoi la synchronisation restera désactivée là-bas. Tant qu'une entrée est vide ou l'hôte inconnu,
 `currentConfig()` renvoie `null` et Réglages affiche « Synchronisation non configurée sur cette adresse. » :
 c'est exactement ce que l'app montre aujourd'hui, sur les deux origines.
 
@@ -97,11 +117,13 @@ Google, `manifest.webmanifest` et `SHELL`, et réinstaller l'icône iPhone. **Au
 `neegans.github.io`** tant que le CNAME n'est pas actif.
 
 **Dettes différées (assumées, à reprendre en L3).** Pastille « N non envoyés » dans l'en-tête ; dans `tests/sync.js`,
-les stubs qui remplacent `console.error` ne sont pas posés en `try/finally` (un échec en cours de bloc laisserait le
-stub en place) ; le `catch` de `getSession` d'`auth.js` n'est pas testé. **Mesuré le 13 octobre** : les **411**
-chaînes `t()` de `src/ui` sans entrée dans `src/i18n/en.js` sont **toutes antérieures** au lot — les 29 chaînes
+les stubs qui remplacent `console.error` **dans la section « Connexion »** ne sont toujours pas posés en
+`try/finally` (un échec en cours de bloc laisserait le stub en place) — ceux des blocs R28 et R32 le sont depuis la
+vague des résidus ; le `catch` de `getSession` d'`auth.js` n'est pas testé. **Mesuré le 13 octobre** : les **411**
+chaînes `t()` de `src/ui` sans entrée dans `src/i18n/en.js` sont **toutes antérieures** au lot — les 31 chaînes
 ajoutées par le lot sont traduites ; les deux seules qui manquaient (`t('Code : {c}')` et `t('Recharger')`) sont
-posées. Le pluriel de « N envois en attente » est corrigé (R27/R24, vague finale).
+posées. Le pluriel de « N envois en attente » est corrigé (R27/R24, vague finale), celui du refus de remplacement
+aussi (R31).
 
 ## Premier lot de fiabilisation — 8 septembre 2026, à réviser
 

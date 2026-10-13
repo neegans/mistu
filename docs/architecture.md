@@ -81,7 +81,9 @@ src/sync/mime.js      liste blanche fermée des six types synchronisables, resol
                       sinon application/octet-stream + syncable:false), safeDisplayType, extensionFor, displayUrl.
 src/sync/clock.js     syncNow() : horloge corrigée du décalage serveur, strictement croissante (offset 0 avant L3).
 src/sync/outbox.js    installCapture(db, …) : pose db.onMutate ; ne fait que remplir la file.
-src/sync/config.js    SUPABASE.prod / SUPABASE.dev (url + anonKey, valeurs publiques), currentConfig(hostname).
+src/sync/config.js    SUPABASE.prod / SUPABASE.dev (url + anonKey + hosts, valeurs publiques) ; currentConfig(hostname)
+                      rend l'entrée dont hosts contient l'hôte (liste blanche, minuscules) et null sinon : une
+                      origine non nommée n'a aucune configuration, elle ne retombe jamais sur prod (S1).
 src/sync/auth.js      createAuth : client PKCE depuis globalThis.supabase, signIn/signOut, handleReturn (échange du
                       code puis retrait de l'historique), garde de compte, readError (phrase fixe, jamais le texte brut).
 src/core/log.js       logError(code, details) : un code et une liste blanche d'identifiants ; jamais e.stack, jamais
@@ -142,13 +144,16 @@ origine **sans chaîne de requête** — un retour `?code=…` est servi par le 
 
 ### Côté serveur
 
-`supabase/migrations/0001_tables_et_regles.sql` (séquence `sync_seq`, 25 tables, déclencheur `server_seq`, RLS avec
-`is_allowed()` sur chaque règle, règle `delete` gardée par `app.purge`, schéma `private`, fonction du crochet
+`supabase/migrations/0001_tables_et_regles.sql` (séquence `sync_seq`, 25 tables, déclencheur `touch_server_seq` qui
+pose `server_seq` et **fige `deleted_at`** hors `app.sync_push` — les deux colonnes appartiennent au serveur, R25 et
+S2 —, RLS avec `is_allowed()` sur chaque règle, règle `delete` gardée par `app.purge`, schéma `private`, fonction du crochet
 « Before User Created » + déclencheur de secours, `sync_push`, `sync_purge`, `sync_purge_all`, révocations, tâche
 `pg_cron` des tombales) et `supabase/migrations/0002_stockage.sql` (seau privé `pages`, ses quatre règles, vue
 `private.storage_usage`). Les deux fichiers sont **générés** par `tools/generer-migrations.mjs` depuis
 `src/sync/tables.js` et `src/sync/mime.js` : ne pas les éditer à la main ;
-`node tools/generer-migrations.mjs --check` sort en code 1 si les fichiers commités diffèrent du généré.
+`node tools/generer-migrations.mjs --check` sort en code 1 si les fichiers commités diffèrent du généré
+(`--dir <chemin>` vise un autre répertoire, pour l'écriture comme pour la vérification : c'est ainsi que `--check`
+lui-même est éprouvé, sur une copie altérée dans un répertoire temporaire).
 Application et preuves : `supabase/README.md` (gestes manuels de Neegan dans l'éditeur SQL, preuves `supabase/proofs/`).
 
 ### Ce qui est absent (L3 et après)
