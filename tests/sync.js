@@ -288,10 +288,28 @@ export async function runSyncTests({ eq, ok }) {
   ok(/^var supabase=/.test(await (await fetch('../src/vendor/supabase-2.117.3.umd.js')).text()), 'bundle IIFE autonome');
 
   // --- Connexion (spec § 4.1)
+  // S1 : liste blanche d'hôtes. Une origine qui n'est pas nommée n'a AUCUNE configuration — elle ne retombe plus
+  // sur « prod » par défaut. Sans cela, le jour où prod sera rempli, n'importe quelle origine servant ces fichiers
+  // (un miroir, un sous-domaine oublié, un fichier recopié) créerait un client avec la clé du vrai projet.
   const { SUPABASE, currentConfig } = await import('../src/sync/config.js');
-  ok('url' in SUPABASE.prod && 'anonKey' in SUPABASE.prod && 'url' in SUPABASE.dev && 'anonKey' in SUPABASE.dev, 'config : deux entrées publiques déclarées');
-  eq(currentConfig('cuisine.exemple.test'), SUPABASE.prod.url && SUPABASE.prod.anonKey ? SUPABASE.prod : null, 'config : origine publique → prod, null si vide');
+  ok('url' in SUPABASE.prod && 'anonKey' in SUPABASE.prod && 'hosts' in SUPABASE.prod
+    && 'url' in SUPABASE.dev && 'anonKey' in SUPABASE.dev && 'hosts' in SUPABASE.dev, 'config : deux entrées publiques déclarées, avec leur liste d’hôtes');
+  eq(SUPABASE.dev.hosts, ['localhost', '127.0.0.1'], 'config : seules les deux adresses locales sont en dev');
+  eq(currentConfig('cuisine.exemple.test'), null, 'S1 : hôte inconnu → aucune configuration (plus de repli sur prod)');
   eq(currentConfig('localhost'), SUPABASE.dev.url && SUPABASE.dev.anonKey ? SUPABASE.dev : null, 'config : localhost → dev, null si vide');
+  eq(currentConfig('LOCALHOST'), currentConfig('localhost'), 'S1 : la comparaison est faite en minuscules');
+  eq(currentConfig(''), null, 'S1 : hôte vide → aucune configuration');
+  {
+    // Un hôte réellement listé en prod : posé le temps de l'assertion, l'entrée est remise ensuite telle quelle.
+    const prodOrigine = { ...SUPABASE.prod, hosts: [...SUPABASE.prod.hosts] };
+    try {
+      Object.assign(SUPABASE.prod, { url: 'https://x.supabase.co', anonKey: 'k', hosts: ['cuisine.exemple.test'] });
+      eq(currentConfig('cuisine.exemple.test'), SUPABASE.prod, 'S1 : un hôte listé en prod → l’entrée prod');
+      eq(currentConfig('autre.exemple.test'), null, 'S1 : un hôte voisin, non listé → null');
+      SUPABASE.prod.anonKey = '';
+      eq(currentConfig('cuisine.exemple.test'), null, 'S1 : hôte listé mais entrée incomplète → null');
+    } finally { Object.assign(SUPABASE.prod, prodOrigine); }
+  }
   const { createAuth } = await import('../src/sync/auth.js');
   const fakeHistory = []; const fakeWin = { location: { origin: 'https://cuisine.exemple.test', pathname: '/', hash: '#/settings', search: '?code=abc&state=s', href: 'https://cuisine.exemple.test/?code=abc&state=s#/settings' }, history: { replaceState: (a, b, url) => fakeHistory.push(url) } };
   const calls = []; let changeCb = null;
