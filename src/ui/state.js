@@ -1,6 +1,7 @@
 // Cache de lecture : charge la bibliothèque en mémoire, construit les index de recherche ; invalidé à chaque écriture.
 import * as repo from '../model/repo.js';
 import { on } from '../core/bus.js';
+import { logError } from '../core/log.js';
 import { buildDocs, buildLabelIndex } from '../domain/search.js';
 import { buildIngredientIndex } from '../domain/lines.js';
 import { loadUnits } from '../domain/units.js';
@@ -26,16 +27,36 @@ export function setSyncState(next) {
 
 export const getSyncState = () => sync;
 
-// Route à appliquer après un retour du fournisseur (R21). Pure : elle décide, elle n'écrit rien.
-// La route mémorisée est restaurée à TOUT retour — session obtenue, retour muet ou refus de l'adresse : le bouton
-// « Activer la synchronisation » vit dans Réglages, et c'est là que les lignes du retour s'affichent.
-// Deux garde-fous gardés : la mémoire n'est lue qu'une fois (l'appelant la retire avant d'appeler ici), et une route
-// déjà portée par l'URL n'est jamais écrasée. Sans retour traité, rien n'est restauré.
+// Route à appliquer après un retour du fournisseur (R21, R23). Pure : elle décide, elle n'écrit rien.
+// La route mémorisée est restaurée à TOUT retour RÉEL — session obtenue, retour muet ou refus de l'adresse : le
+// bouton « Activer la synchronisation » vit dans Réglages, et c'est là que les lignes du retour s'affichent.
+// Trois garde-fous : un retour réel (`present`, R23 — un chargement ordinaire ne restaure rien), la mémoire lue une
+// seule fois (l'appelant la retire avant d'appeler ici), et une route déjà portée par l'URL jamais écrasée.
 export function routeApresRetour({ retour = null, memorisee = null, hashActuel = '' } = {}) {
-  if (!retour || !memorisee) return null;
+  if (!retour?.present || !memorisee) return null;
   if (String(hashActuel || '').replace(/^#/, '')) return null;
   return memorisee;
 }
+
+// --- Réglages lus par la capture (spec § 5.2) ------------------------------
+// Copie en mémoire : la capture décide DANS la transaction d'écriture, elle ne peut pas attendre une lecture.
+// Elle est RELUE depuis la base à chaque fois que les réglages peuvent avoir changé — un réglage touché, une
+// restauration d'archive, un vidage d'appareil — et jamais corrigée à la main : « synchroniser mon historique »
+// est un consentement, une copie en retard le trahirait.
+let reglages = {};
+
+export async function relireReglages() {
+  try { reglages = await repo.getSettings(); }
+  catch (error) { logError('reglages', { error }); }
+  cache = null;
+  return reglages;
+}
+
+export const isActivitySynced = () => reglages.sync_activity === true;
+
+// Un réglage touché nomme sa clé ; une écriture annonce son magasin (`*` = tout). Dans les deux cas on relit.
+on('settings', () => { relireReglages(); });
+on('change', ({ store } = {}) => { if (!store || store === 'settings' || store === '*') relireReglages(); });
 
 export async function getData(force = false) {
   if (cache && !force) return cache;

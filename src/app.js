@@ -5,7 +5,7 @@ import { setUiLocale, t } from './core/i18n.js';
 import * as repo from './model/repo.js';
 import { on } from './core/bus.js';
 import { logError } from './core/log.js';
-import { getData, invalidate, setSyncState, getSyncState, routeApresRetour, SYNC_ROUTE_KEY } from './ui/state.js';
+import { getData, invalidate, setSyncState, getSyncState, routeApresRetour, relireReglages, isActivitySynced, SYNC_ROUTE_KEY } from './ui/state.js';
 import { installCapture } from './sync/outbox.js';
 import { createAuth } from './sync/auth.js';
 
@@ -94,37 +94,21 @@ function registerRoutes() {
   setNotFound(async () => el('div', { class: 'card' }, el('h2', null, t('Page introuvable')), el('a', { class: 'btn', href: '#/' }, t('Retour à l’accueil'))));
 }
 
-// Réglages gardés en mémoire : la capture des écritures les lit à chaque mutation, sans toucher la base (spec § 5.2).
-let settingsCache = {};
-
-// Route d'avant la connexion : signIn() la mémorise, le retour du fournisseur arrive sans fragment.
-// La clé est consommée une seule fois ; la décision elle-même est dans routeApresRetour (R21).
+// Route d'avant la connexion : demarrerConnexion() la mémorise, le retour du fournisseur arrive sans fragment.
+// La clé est consommée une seule fois ; la décision elle-même est dans routeApresRetour (R21, R23).
 function restoreRoute(retour) {
   let memo = null;
   try {
     memo = sessionStorage.getItem(SYNC_ROUTE_KEY);
     if (memo !== null) sessionStorage.removeItem(SYNC_ROUTE_KEY);
   } catch { return; } // stockage indisponible : la route par défaut s'applique
-  const route = routeApresRetour({ retour, memorisee: memo, hashActuel: location.hash });
-  if (route) location.hash = route;
+  const cible = routeApresRetour({ retour, memorisee: memo, hashActuel: location.hash });
+  if (cible) location.hash = cible;
 }
 
-async function boot() {
+// Connexion : isolée du démarrage. L'app doit s'ouvrir sans compte (invariant I4), même si ce bloc casse.
+async function bootSync() {
   try {
-    await repo.init();
-    const settings = await repo.getSettings();
-    settingsCache = settings;
-    setUiLocale(settings.ui_locale);
-    on('settings', ({ key, value }) => {
-      settingsCache = { ...settingsCache, [key]: value };
-      if (key === 'ui_locale') { setUiLocale(value); current = null; refresh(); }
-    });
-    // Capture posée avant toute écriture de l'application : une seule porte, la mutation de db.js (spec § 5.2).
-    // L'historique de consultation n'entre en file que si le réglage le dit, à chaque écriture.
-    installCapture(repo.db, {
-      getUserId: () => getSyncState().user?.id || null,
-      isActivitySynced: () => settingsCache.sync_activity === true,
-    });
     const auth = createAuth({ db: repo.db });
     // Retour du fournisseur AVANT le premier rendu : le code est échangé, puis retiré de l'historique.
     const retour = await auth.handleReturn();
@@ -142,11 +126,30 @@ async function boot() {
       const avant = getSyncState().user?.id || null;
       (async () => {
         const g = suivant?.id ? await auth.guard(suivant.id, suivant.email) : null;
-        setSyncState({ user: g?.ok ? suivant : null, guard: g });
+        // Les lignes du retour parlaient du démarrage : une session qui change les périme, on ne les garde pas.
+        setSyncState({ user: g?.ok ? suivant : null, guard: g, retour: null });
         invalidate();
         if ((getSyncState().user?.id || null) !== avant) refresh(); // l'écran affiché parle du compte : il doit suivre
       })().catch((error) => logError('sync.etat', { error }));
     });
+  } catch (error) {
+    logError('boot.sync', { error });
+    setSyncState({ auth: null, user: null, guard: null, retour: null });
+  }
+}
+
+async function boot() {
+  try {
+    await repo.init();
+    // Une seule lecture : state.js garde les réglages pour la capture et les relit à chaque événement qui
+    // peut les réécrire (réglage touché, restauration d'archive, vidage d'appareil).
+    const settings = await relireReglages();
+    setUiLocale(settings.ui_locale);
+    on('settings', ({ key, value }) => { if (key === 'ui_locale') { setUiLocale(value); current = null; refresh(); } });
+    // Capture posée avant toute écriture de l'application : une seule porte, la mutation de db.js (spec § 5.2).
+    // L'historique de consultation n'entre en file que si le réglage le dit, à chaque écriture.
+    installCapture(repo.db, { getUserId: () => getSyncState().user?.id || null, isActivitySynced });
+    await bootSync();
     registerRoutes();
     start(onRoute);
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {

@@ -234,7 +234,7 @@ export async function runSyncTests({ eq, ok }) {
     await auth.signIn();
     eq(calls.at(-1).signIn.options.redirectTo, 'https://cuisine.exemple.test/', 'redirectTo sans fragment');
     eq(calls.at(-1).signIn.provider, 'google', 'fournisseur Google');
-    eq(await auth.handleReturn(), { error: null, codeSansSession: false }, 'retour normal : aucun refus, session obtenue');
+    eq(await auth.handleReturn(), { error: null, codeSansSession: false, present: true }, 'retour normal : aucun refus, session obtenue, retour reconnu');
     eq(fakeHistory.at(-1), '/#/settings', 'code retiré, fragment conservé');
     eq(auth.readError({ search: '?error=access_denied&error_description=x', hash: '' }), 'Cette adresse n’est pas autorisée.', 'refus : message fixe');
     eq(auth.readError({ search: '', hash: '#error=server_error&error_code=unexpected_failure' }), 'Cette adresse n’est pas autorisée.', 'refus dans le fragment');
@@ -261,7 +261,7 @@ export async function runSyncTests({ eq, ok }) {
     off(); offBus();
     fakeWin.location.search = '?error=access_denied&error_description=texte+brut';
     const retour = await auth.handleReturn();
-    eq(retour, { error: 'Cette adresse n’est pas autorisée.', codeSansSession: false }, 'handleReturn : le refus lu est rendu, sans code à échanger');
+    eq(retour, { error: 'Cette adresse n’est pas autorisée.', codeSansSession: false, present: true }, 'handleReturn : le refus lu est rendu, sans code à échanger');
     eq(fakeHistory.at(-1), '/#/settings', 'refus aussi retiré de l’historique');
     ok(!JSON.stringify(retour).includes('texte brut') && !JSON.stringify(retour).includes('access_denied'), 'le texte brut du refus n’est jamais rendu');
     eq(auth.readError({ search: '?error_description=texte+brut', hash: '' }), 'Cette adresse n’est pas autorisée.', 'error_description seul : refus reconnu');
@@ -283,7 +283,7 @@ export async function runSyncTests({ eq, ok }) {
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
     } });
     const lent = createAuth({ db, config: { url: 'https://x.supabase.co', anonKey: 'k' }, factory: lentFactory, win: lentWin });
-    eq([await lent.handleReturn(), ordre], [{ error: null, codeSansSession: false }, ['apres-echange']], 'handleReturn attend l’échange avant de nettoyer l’URL');
+    eq([await lent.handleReturn(), ordre], [{ error: null, codeSansSession: false, present: true }, ['apres-echange']], 'handleReturn attend l’échange avant de nettoyer l’URL');
 
     // I2 : un code revenu sans session est signalé à l'appelant et journalisé, et l'URL est nettoyée quand même.
     const muetWin = { location: { origin: 'https://c.test', pathname: '/', hash: '#/settings', search: '?code=abc' }, history: { replaceState: (a, b, url) => fakeHistory.push(url) } };
@@ -296,12 +296,12 @@ export async function runSyncTests({ eq, ok }) {
     const journal = []; let vraiLog = console.error; console.error = (...a) => journal.push(a);
     const retourMuet = await muet.handleReturn();
     console.error = vraiLog;
-    eq(retourMuet, { error: null, codeSansSession: true }, 'code sans session : retour muet signalé');
+    eq(retourMuet, { error: null, codeSansSession: true, present: true }, 'code sans session : retour muet signalé');
     ok(JSON.stringify(journal).includes('auth.retour') && JSON.stringify(journal).includes('sans_session'), 'retour muet journalisé');
     eq(fakeHistory.at(-1), '/#/settings', 'et l’URL est nettoyée malgré l’échec');
     const sansWin = { location: { origin: 'https://c.test', pathname: '/mistu/', hash: '#/settings', search: '?code=abc' }, history: { replaceState: (a, b, url) => fakeHistory.push(url) } };
     const sansLib = createAuth({ db, config: { url: 'https://x.supabase.co', anonKey: 'k' }, factory: undefined, win: sansWin });
-    eq(await sansLib.handleReturn(), { error: null, codeSansSession: false }, 'sans client : rien n’a été tenté, donc aucun retour muet');
+    eq(await sansLib.handleReturn(), { error: null, codeSansSession: false, present: true }, 'sans client : rien n’a été tenté, donc aucun retour muet, mais le retour est reconnu');
     eq(fakeHistory.at(-1), '/mistu/#/settings', 'sans client : l’URL est nettoyée quand même');
 
     // Mineur (b) : un refus porté par le fragment en sort aussi.
@@ -312,6 +312,20 @@ export async function runSyncTests({ eq, ok }) {
     fragWin.location.hash = '#error=server_error&error_code=unexpected_failure';
     await frag.handleReturn();
     eq(fakeHistory.at(-1), '/', 'refus occupant tout le fragment : fragment vidé');
+
+    // R23 : handleReturn dit s'il y a VRAIMENT eu un retour (un code ou un refus), pour que personne ne
+    // confonde un chargement ordinaire avec le retour du fournisseur.
+    const winPresence = (search, hash) => ({ location: { origin: 'https://c.test', pathname: '/', hash, search }, history: { replaceState: () => {} } });
+    const presence = (search, hash) => createAuth({ db, config: { url: 'https://x.supabase.co', anonKey: 'k' }, factory: muetFactory, win: winPresence(search, hash) });
+    // Le cas « un code » passe par la fabrique muette : son retour muet est journalisé, on retient la console.
+    const journalPresence = []; vraiLog = console.error; console.error = (...a) => journalPresence.push(a);
+    const presents = [
+      (await presence('?code=abc&state=s', '#/settings').handleReturn()).present,
+      (await presence('?error=access_denied', '#/settings').handleReturn()).present,
+      (await presence('', '#/settings').handleReturn()).present,
+    ];
+    console.error = vraiLog;
+    eq(presents, [true, true, false], 'présence : un code et un refus sont des retours, un chargement ordinaire non');
 
     // I3 : la garde échoue fermé quand la base ne répond pas.
     const dbCasse = { get: async () => { throw new Error('base indisponible'); }, mutate: async () => { throw new Error('jamais atteint'); } };
@@ -355,9 +369,10 @@ export async function runSyncTests({ eq, ok }) {
   eq(syncSectionModel({ available: true, user: { id: 'uid-A', email: 'a@exemple.test' }, guard: { ok: true }, pending: 3 }),
     { title: 'Synchronisation', lines: ['Connectée : a@exemple.test', 'À envoyer : 3'], buttons: [{ action: 'signOut', label: 'Se déconnecter', tone: '' }] },
     'session et garde ok : adresse, file d’envoi, déconnexion');
+  // R22 : la garde refusée offre AUSSI la sortie douce — se déconnecter ne touche ni les données ni la file.
   eq(syncSectionModel({ available: true, guard: { ok: false, message: 'Cet appareil a été synchronisé avec a@exemple.test.' }, pending: 2 }),
-    { title: 'Synchronisation', lines: ['Cet appareil a été synchronisé avec a@exemple.test.'], buttons: [{ action: 'changeAccount', label: 'Changer de compte sur cet appareil', tone: 'danger' }] },
-    'garde refusée : son message et le geste exécutable');
+    { title: 'Synchronisation', lines: ['Cet appareil a été synchronisé avec a@exemple.test.'], buttons: [{ action: 'signOut', label: 'Se déconnecter', tone: '' }, { action: 'changeAccount', label: 'Changer de compte sur cet appareil', tone: 'danger' }] },
+    'garde refusée : la sortie douce avant le geste destructeur');
   eq(syncSectionModel({ available: true, retour: { error: null, codeSansSession: true } }).lines,
     ['Tes données restent sur cet appareil.', 'La connexion n’a pas abouti.'],
     'retour muet : la connexion n’a pas abouti, dit sans deviner pourquoi');
@@ -371,18 +386,57 @@ export async function runSyncTests({ eq, ok }) {
   // --- R21 : la route mémorisée avant signIn() est restaurée à TOUT retour du fournisseur
   // Décision pure, hors du démarrage : elle rend la route à appliquer, ou null, et n'écrit jamais rien.
   const { routeApresRetour } = await import('../src/ui/state.js');
-  eq(routeApresRetour({ retour: { error: 'Cette adresse n’est pas autorisée.', codeSansSession: false }, memorisee: '#/settings', hashActuel: '' }),
+  eq(routeApresRetour({ retour: { error: 'Cette adresse n’est pas autorisée.', codeSansSession: false, present: true }, memorisee: '#/settings', hashActuel: '' }),
     '#/settings', 'refus du fournisseur : la route est restaurée, là où le message s’affiche');
-  eq(routeApresRetour({ retour: { error: null, codeSansSession: true }, memorisee: '#/settings', hashActuel: '' }),
+  eq(routeApresRetour({ retour: { error: null, codeSansSession: true, present: true }, memorisee: '#/settings', hashActuel: '' }),
     '#/settings', 'retour muet : restaurée aussi');
-  eq(routeApresRetour({ retour: { error: null, codeSansSession: false }, memorisee: '#/settings', hashActuel: '' }),
+  eq(routeApresRetour({ retour: { error: null, codeSansSession: false, present: true }, memorisee: '#/settings', hashActuel: '' }),
     '#/settings', 'session obtenue : restaurée');
-  eq(routeApresRetour({ retour: { error: null, codeSansSession: false }, memorisee: '#/settings', hashActuel: '#/library' }),
+  eq(routeApresRetour({ retour: { error: null, codeSansSession: false, present: true }, memorisee: '#/settings', hashActuel: '#/library' }),
     null, 'fragment déjà porteur d’une route : jamais écrasé');
-  eq(routeApresRetour({ retour: { error: null, codeSansSession: false }, memorisee: '#/settings', hashActuel: '#' }),
+  eq(routeApresRetour({ retour: { error: null, codeSansSession: false, present: true }, memorisee: '#/settings', hashActuel: '#' }),
     '#/settings', 'fragment vide « # » : la route mémorisée s’applique');
-  eq(routeApresRetour({ retour: { error: null, codeSansSession: false }, memorisee: '', hashActuel: '' }),
+  eq(routeApresRetour({ retour: { error: null, codeSansSession: false, present: true }, memorisee: '', hashActuel: '' }),
     null, 'aucune route mémorisée : rien à restaurer');
-  eq(routeApresRetour({ retour: null, memorisee: '#/settings', hashActuel: '' }),
-    null, 'aucun retour traité : rien à restaurer');
+  eq(routeApresRetour({ retour: { error: null, codeSansSession: false, present: false }, memorisee: '#/settings', hashActuel: '' }),
+    null, 'aucun retour réel (chargement ordinaire) : rien à restaurer');
+
+  // R23 : une route mémorisée ne survit pas à un signIn qui ne part pas — sinon elle détourne le prochain démarrage.
+  const { demarrerConnexion, SYNC_ACTIONS } = await import('../src/ui/settings.js');
+  const { SYNC_ROUTE_KEY: CLE_ROUTE } = await import('../src/ui/state.js');
+  sessionStorage.removeItem(CLE_ROUTE);
+  await demarrerConnexion({ signIn: async () => ({ error: null }) }, '#/settings');
+  eq(sessionStorage.getItem(CLE_ROUTE), '#/settings', 'départ chez le fournisseur : la route est mémorisée');
+  await demarrerConnexion({ signIn: async () => ({ error: { status: 400, code: 'x' } }) }, '#/settings');
+  eq(sessionStorage.getItem(CLE_ROUTE), null, 'signIn en échec : aucune route fantôme ne survit');
+  await demarrerConnexion({ signIn: async () => null }, '#/settings');
+  eq(sessionStorage.getItem(CLE_ROUTE), null, 'sans client : rien de mémorisé non plus');
+  sessionStorage.removeItem(CLE_ROUTE);
+
+  // Chaque action du modèle doit avoir un geste câblé : la liste est la seule source, le rendu la filtre.
+  eq([...SYNC_ACTIONS].sort(), ['changeAccount', 'signIn', 'signOut'], 'trois gestes nommés, pas un de plus');
+  const actionsDuModele = new Set([
+    ...syncSectionModel({ available: true }).buttons,
+    ...syncSectionModel({ available: true, user: { id: 'u', email: 'a@exemple.test' }, guard: { ok: true } }).buttons,
+    ...syncSectionModel({ available: true, guard: { ok: false, message: 'x' } }).buttons,
+  ].map((b) => b.action));
+  eq([...actionsDuModele].filter((a) => !SYNC_ACTIONS.includes(a)), [], 'aucune action du modèle sans geste câblé');
+
+  // I2 : les réglages lus par la capture suivent la base, même réécrite sans passer par setSetting
+  // (restauration d'archive, écriture directe) — c'est une porte de confidentialité, pas un confort.
+  const { relireReglages, isActivitySynced } = await import('../src/ui/state.js');
+  const { emit } = await import('../src/core/bus.js');
+  const attendre = async (predicat) => { for (let i = 0; i < 60 && !predicat(); i += 1) await new Promise((r) => setTimeout(r, 10)); return predicat(); };
+  await withRepo(async (repo, db) => {
+    await relireReglages();
+    eq(isActivitySynced(), false, 'réglage absent : la capture n’envoie pas l’historique');
+    await db.mutate({ puts: { settings: [{ key: 'sync_activity', value: true }] }, origin: 'device' });
+    eq(isActivitySynced(), false, 'une écriture seule ne change rien tant que rien ne l’annonce');
+    emit('change', { store: 'settings' });
+    ok(await attendre(() => isActivitySynced() === true), 'magasin settings réécrit puis annoncé : la capture suit la base');
+    await db.mutate({ puts: { settings: [{ key: 'sync_activity', value: false }] }, origin: 'device' });
+    emit('change', { store: '*' });
+    ok(await attendre(() => isActivitySynced() === false), 'réglage retiré par une restauration : la capture se referme');
+  });
+  await relireReglages(); // la base de l'app reprend la main après la base jetable
 }

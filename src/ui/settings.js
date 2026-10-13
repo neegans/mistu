@@ -12,7 +12,7 @@ import { providerFrom } from '../domain/llm.js';
 import { shortcutUrl, SHORTCUT_NAME, isAppleTouchDevice } from '../domain/timers.js';
 import { STORES, SYNC_INTERNAL_STORES, APP_VERSION, ARCHIVE_FORMAT_VERSION } from '../model/schema.js';
 import { pageHeader, section, field, select, segmented } from './components.js';
-import { invalidate, setSyncState, SYNC_ROUTE_KEY } from './state.js';
+import { invalidate, setSyncState, relireReglages, SYNC_ROUTE_KEY } from './state.js';
 
 // Évite deux opérations d’archive concurrentes, même après un changement d’écran.
 let archiveOperation = false;
@@ -166,66 +166,23 @@ export async function renderSettings(params, query, ctx) {
   root.append(section(t('Données sur cet appareil'),
     el('p', { class: 'muted' }, `${t('Base locale')} « cuisine-os » v${repo.db.version} · ${t('format d’archive')} v${ARCHIVE_FORMAT_VERSION}`),
     el('div', { class: 'chips' }, ...counts.filter(([, c]) => c).map(([n, c]) => el('span', { class: 'chip neutral' }, `${n} : ${c}`))),
-    el('p', { class: 'muted' }, t('Cet appareil sera déconnecté ; ta bibliothèque reste sur le serveur.')),
+    // Promesse de serveur seulement s'il y a un serveur : sans session acceptée, ces données ne sont nulle part ailleurs.
+    el('p', { class: 'muted' }, sync.user
+      ? t('Cet appareil sera déconnecté ; ta bibliothèque reste sur le serveur.')
+      : t('Ces données ne sont que sur cet appareil : fais une sauvegarde avant de les effacer.')),
     el('div', { class: 'row', style: { marginTop: '.8rem' } },
       el('button', { class: 'btn danger', onClick: async () => {
         if (archiveOperation) { toast(t('Une opération d’archive est déjà en cours.')); return; }
         // Rien n’est effacé tant qu’une écriture n’a pas été envoyée : la file est relue au moment du geste.
         const enAttente = await repo.db.count('outbox');
-        if (enAttente > 0) { toast(t('{n} éléments ne sont pas encore envoyés.', { n: enAttente })); return; }
-        if (!(await confirmDialog(t('Effacer toutes les données locales ? Fais d’abord une sauvegarde.'), { danger: true, okLabel: t('Continuer') }))) return;
+        if (enAttente > 0) { toast(messageEnAttente(enAttente)); return; }
+        if (!(await confirmDialog(t('Effacer les données de cet appareil ? Fais d’abord une sauvegarde.'), { danger: true, okLabel: t('Continuer') }))) return;
         const word = await promptDialog(t('Tape EFFACER pour confirmer'));
         if (word !== 'EFFACER') { toast(t('Annulé')); return; }
-        await repo.clearDevice({ signOut: auth?.available ? auth.signOut : null });
+        await repo.clearDevice({ signOut: auth?.signOut || null });
         toast(t('Données effacées')); location.hash = '#/'; location.reload();
       } }, t('Effacer les données de cet appareil')))));
   return root;
-
-  // Rendu de la section : le modèle dit quoi écrire et quels gestes offrir ; les gestes sont câblés ici.
-  function syncSection(state, auth, settings) {
-    const model = syncSectionModel(state);
-    const gestes = {
-      signIn: async () => {
-        // La route est mémorisée : redirectTo part sans fragment, le retour atterrirait sur l’accueil.
-        try { sessionStorage.setItem(SYNC_ROUTE_KEY, location.hash || ''); } catch { /* stockage indisponible */ }
-        const essai = await auth?.signIn();
-        // signIn() rend l’erreur brute du fournisseur : jamais affichée, seulement une phrase fixe.
-        if (essai?.error) toast(t('La connexion n’a pas pu démarrer.'));
-      },
-      signOut: async () => {
-        const essai = await auth?.signOut();
-        if (essai?.error) { toast(t('La déconnexion n’a pas abouti.')); return; }
-        setSyncState({ user: null, guard: null }); // la file d’envoi et les données restent intactes (spec § 4.1)
-        invalidate();
-        refresh();
-      },
-      changeAccount: () => changeAccount(auth),
-    };
-    return section(model.title,
-      ...model.lines.map((line) => el('p', { class: 'muted' }, line)),
-      model.buttons.length
-        ? el('div', { class: 'row' }, ...model.buttons.map((b) => el('button', { class: 'btn' + (b.tone ? ' ' + b.tone : ''), onClick: gestes[b.action] }, b.label)))
-        : null,
-      field(t('Historique de consultation'),
-        el('label', { class: 'check' },
-          el('input', { type: 'checkbox', checked: settings.sync_activity === true, onChange: async (e) => { await repo.setSetting('sync_activity', e.target.checked); refresh(); } }),
-          t('Synchroniser mon historique de consultation')),
-        t('Désactivé, ce que tu consultes reste sur cet appareil.')));
-  }
-
-  // « Changer de compte sur cet appareil » (spec § 4.1) : l’archive est exigée, la perte est nommée, puis tout
-  // ce qui est local est effacé. Aucune donnée n’est envoyée nulle part : la file en attente est perdue, dite perdue.
-  async function changeAccount(auth) {
-    if (archiveOperation) { toast(t('Une opération d’archive est déjà en cours.')); return; }
-    let archive = null;
-    try { archive = sessionStorage.getItem(ARCHIVE_FLAG); } catch { archive = null; } // illisible : on refuse
-    if (!archive) { toast(t('Fais d’abord une archive sur cette page.')); return; }
-    if (!(await confirmDialog(t('Changer de compte sur cet appareil ? Toutes les données de cet appareil seront effacées.'), { danger: true, okLabel: t('Continuer') }))) return;
-    const enAttente = await repo.db.count('outbox'); // compté au moment du geste : la file a pu bouger depuis le rendu
-    if (!(await confirmDialog(t('{n} envois en attente seront perdus — ils sont dans l’archive.', { n: enAttente }), { danger: true, okLabel: t('Changer de compte') }))) return;
-    await repo.clearDevice({ signOut: auth?.signOut || null });
-    location.reload();
-  }
 
   async function restoreReport(insp) {
     const box = el('div', { class: 'card flat stack' });
@@ -258,6 +215,9 @@ export async function renderSettings(params, query, ctx) {
         committed = true;
         appliedOnce = true;
         controls.remove();
+        // L’archive réécrit le magasin « settings » sans passer par setSetting : la porte de confidentialité
+        // de la capture (« synchroniser mon historique ») doit suivre la base restaurée, tout de suite.
+        await relireReglages();
         invalidate();
         // La vérification peut durer : bloquer immédiatement les commandes fondées sur l’ancien contexte.
         for (const control of root.querySelectorAll('button, input, select, textarea')) control.disabled = true;
@@ -291,6 +251,69 @@ export async function renderSettings(params, query, ctx) {
   }
 }
 
+// Un élément en attente ou plusieurs : deux phrases, jamais un pluriel calculé sur une chaîne traduite.
+const messageEnAttente = (n) => (n === 1
+  ? t('1 élément n’est pas encore envoyé.')
+  : t('{n} éléments ne sont pas encore envoyés.', { n }));
+
+// Les trois seuls gestes de la section. Le modèle ne peut nommer qu'eux, et le rendu ignore une action inconnue :
+// un renommage donne un bouton manquant (visible), jamais un bouton muet.
+export const SYNC_ACTIONS = ['signIn', 'signOut', 'changeAccount'];
+
+// Départ chez le fournisseur. La route courante est mémorisée (redirectTo part sans fragment, le retour atterrirait
+// sur l’accueil) et RETIRÉE si rien ne part : une route fantôme détournerait le prochain démarrage de cet onglet.
+export async function demarrerConnexion(auth, hash = location.hash) {
+  try { sessionStorage.setItem(SYNC_ROUTE_KEY, hash || ''); } catch { /* stockage indisponible */ }
+  const essai = await auth?.signIn();
+  // signIn() rend l’erreur brute du fournisseur : jamais affichée, seulement une phrase fixe.
+  if (!essai || essai.error) {
+    try { sessionStorage.removeItem(SYNC_ROUTE_KEY); } catch { /* stockage indisponible */ }
+    toast(t('La connexion n’a pas pu démarrer.'));
+  }
+}
+
+// Rendu de la section : le modèle dit quoi écrire et quels gestes offrir ; les gestes sont câblés ici.
+function syncSection(state, auth, settings) {
+  const model = syncSectionModel(state);
+  const gestes = {
+    signIn: () => demarrerConnexion(auth),
+    signOut: async () => {
+      const essai = await auth?.signOut();
+      if (essai?.error) { toast(t('La déconnexion n’a pas abouti.')); return; }
+      setSyncState({ user: null, guard: null }); // la file d’envoi et les données restent intactes (spec § 4.1)
+      refresh();
+    },
+    changeAccount: () => changeAccount(auth),
+  };
+  const boutons = model.buttons.filter((b) => Object.hasOwn(gestes, b.action));
+  return section(model.title,
+    ...model.lines.map((line) => el('p', { class: 'muted' }, line)),
+    boutons.length
+      ? el('div', { class: 'row' }, ...boutons.map((b) => el('button', { class: 'btn' + (b.tone ? ' ' + b.tone : ''), onClick: gestes[b.action] }, b.label)))
+      : null,
+    field(t('Historique de consultation'),
+      el('label', { class: 'check' },
+        el('input', { type: 'checkbox', checked: settings.sync_activity === true, onChange: async (e) => { await repo.setSetting('sync_activity', e.target.checked); refresh(); } }),
+        t('Synchroniser mon historique de consultation')),
+      t('Désactivé, ce que tu consultes reste sur cet appareil.')));
+}
+
+// « Changer de compte sur cet appareil » (spec § 4.1) : l’archive est exigée, la perte est nommée, puis tout
+// ce qui est local est effacé. Aucune donnée n’est envoyée nulle part : la file en attente est perdue, dite perdue.
+async function changeAccount(auth) {
+  if (archiveOperation) { toast(t('Une opération d’archive est déjà en cours.')); return; }
+  let archive = null;
+  let lisible = true;
+  try { archive = sessionStorage.getItem(ARCHIVE_FLAG); } catch { lisible = false; } // illisible : on refuse (échec fermé)
+  if (!lisible) { toast(t('Le stockage de session est inaccessible : ce geste n’est pas possible ici.')); return; }
+  if (!archive) { toast(t('Fais d’abord une archive sur cette page.')); return; }
+  if (!(await confirmDialog(t('Changer de compte sur cet appareil ? Toutes les données de cet appareil seront effacées.'), { danger: true, okLabel: t('Continuer') }))) return;
+  const enAttente = await repo.db.count('outbox'); // compté au moment du geste : la file a pu bouger depuis le rendu
+  if (!(await confirmDialog(t('{n} envois en attente seront perdus — ils sont dans l’archive.', { n: enAttente }), { danger: true, okLabel: t('Changer de compte') }))) return;
+  await repo.clearDevice({ signOut: auth?.signOut || null });
+  location.reload();
+}
+
 // Modèle pur de la section « Synchronisation » (spec § 4.2, ensemble L2) : ce que la section dit et ce qu’elle offre.
 // Aucun DOM, aucun appel réseau, aucune lecture de base : testable tel quel, consommé par syncSection().
 // Rien n’est deviné : sans adresse connue la ligne reste vide, et un refus du fournisseur n’est jamais détaillé.
@@ -303,8 +326,10 @@ export function syncSectionModel({ available = false, reason = null, user = null
       ? t('La bibliothèque de synchronisation n’a pas été chargée.')
       : t('Synchronisation non configurée sur cette adresse.'));
   } else if (guard && guard.ok === false) {
-    // Garde de compte refusée : la synchronisation reste désactivée, avec un geste exécutable.
+    // Garde de compte refusée : la synchronisation reste désactivée, avec deux issues (R22). La douce d'abord :
+    // se déconnecter ne touche ni les données ni la file ; changer de compte efface l'appareil.
     lines.push(guard.message || t('Cet appareil ne peut pas vérifier le compte.'));
+    buttons.push({ action: 'signOut', label: t('Se déconnecter'), tone: '' });
     buttons.push({ action: 'changeAccount', label: t('Changer de compte sur cet appareil'), tone: 'danger' });
   } else if (user && guard?.ok) {
     lines.push(t('Connectée : {e}', { e: user.email || '' }));

@@ -79,10 +79,12 @@ export function createAuth(options = {}) {
   }
 
   // Retour du fournisseur, appelé une fois au démarrage (câblage en tâche 13). ASYNCHRONE à dessein.
-  // Contrat : rend { error, codeSansSession }.
+  // Contrat : rend { error, codeSansSession, present }.
   //   error            = la phrase fixe du refus, ou null (jamais le texte du fournisseur).
   //   codeSansSession  = vrai quand un code est revenu, que l'échange a été attendu et qu'aucune session n'en est
   //                      sortie (tâche 13 : « La connexion n'a pas abouti »). Faux sans client : rien n'a été tenté.
+  //   present          = vrai seulement si l'URL portait vraiment un retour (un code ou une clé de refus). Un
+  //                      chargement ordinaire rend faux : sans ce drapeau, rien ne distingue les deux (R23).
   // L'ordre compte : le code n'est retiré de l'URL qu'APRÈS l'échange. supabase-js lit l'URL à sa création et
   // getSession() attend la fin de cet échange ; nettoyer avant reviendrait à retirer le code sous ses pieds — ça ne
   // tient aujourd'hui que par la lecture synchrone du bundle 2.117.3, et ce n'est pas un contrat publié.
@@ -112,7 +114,7 @@ export function createAuth(options = {}) {
       try { win?.history?.replaceState?.(null, '', (loc.pathname || '/') + cleanHash(hash)); }
       catch (error) { logError('auth.retour', detailsOf(error)); }
     }
-    return { error: readError({ search, hash }), codeSansSession };
+    return { error: readError({ search, hash }), codeSansSession, present: aCode || refus };
   }
 
   async function signIn() {

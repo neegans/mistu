@@ -8,7 +8,9 @@ const DEVICE_KEY = 'cuisineos.device';
 
 export function withRepo(test) {
   const original = repo.db;
-  const storedDevice = localStorage.getItem(DEVICE_KEY); // init() reflète l'identité ici : état rendu intact ensuite
+  // Depuis R20, init() ne reflète plus rien : il RETIRE cette clé (migration). On la replante par hygiène,
+  // pour qu'un test de migration ne laisse pas la clé d'un autre derrière lui.
+  const storedDevice = localStorage.getItem(DEVICE_KEY);
   return withDatabase(async (tempDb) => {
     repo.bindDatabase(tempDb);
     try {
