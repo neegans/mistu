@@ -696,9 +696,12 @@ export async function runSyncL3Tests({ eq, ok }) {
       await toutDejaEnvoye(db);
       const tf = creerTransportFactice({ lire: {} });
       const ecouteurs = {};
-      const fenetre = { addEventListener: (ev, fn) => { ecouteurs[ev] = fn; }, removeEventListener: (ev) => { delete ecouteurs[ev]; }, document: { visibilityState: 'hidden' } };
+      let abonnements = 0;
+      const fenetre = { addEventListener: (ev, fn) => { abonnements += 1; ecouteurs[ev] = fn; }, removeEventListener: (ev) => { delete ecouteurs[ev]; }, document: { visibilityState: 'hidden' } };
       const moteur = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: tf, fenetre, bus: busMuet });
       await moteur.demarrer();
+      await moteur.demarrer();
+      eq(abonnements, 2, 'moteur : demarrer() deux fois → un seul jeu d’écouteurs (online + visibilitychange)');
       const n0 = tf.journal.length;
       ok(n0 > 0, 'moteur : demarrer() charge l’état puis lance une première passe');
       await ecouteurs.visibilitychange();
@@ -712,7 +715,7 @@ export async function runSyncL3Tests({ eq, ok }) {
       await moteur.arreter();
     });
 
-    // Sans compte, puis pause de quota (spec § 5.3) : rien ne part tant que la personne n’a pas dit « Envoyer maintenant ».
+    // Sans compte, puis pause de quota (spec § 5.3, R-L3-14, R-L3-15) : l’ENVOI est suspendu, la réception continue.
     await withRepo(async (repo, db) => {
       await toutDejaEnvoye(db);
       await repo.save('books', { id: 'q1', title: 'x' });
@@ -720,15 +723,44 @@ export async function runSyncL3Tests({ eq, ok }) {
       const sansCompte = createMoteur({ db, getUserId: () => null, isActivitySynced: () => false, transport: tfSans, fenetre: fenetreMuette(), bus: busMuet });
       const eSans = await sansCompte.executer('t');
       eq([tfSans.journal.length, eSans.aEnvoyer, eSans.enCours], [0, 1, false], 'moteur : sans compte, aucun appel réseau et la file reste comptée');
+      // R-L3-14 (a) : la pause est écrite DIRECTEMENT dans sync_state, et aucun charger() ne la lit — c’est le cas
+      // d’un autre onglet, d’un « online » arrivé pendant le chargement, ou d’un executer() sans demarrer().
       await db.mutate({ puts: { sync_state: [{ key: 'pause', value: { raison: 'quota', at: '2026-10-13T00:00:00Z' } }] }, origin: 'device' });
-      const tf = creerTransportFactice({ lire: {} });
+      const tf = creerTransportFactice({ lire: { books: [[{ id: 'qr', data: { id: 'qr', title: 'Reçu en pause', updated_at: '2026-10-13T00:00:00Z' }, updated_at: '2026-10-13T00:00:00Z', deleted_at: null, server_seq: 1 }], []] } });
       const moteur = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: tf, fenetre: fenetreMuette(), bus: busMuet });
-      await moteur.demarrer();
-      eq([tf.journal.length, moteur.etat().pause?.raison, moteur.etat().aEnvoyer], [0, 'quota', 1], 'moteur : en pause, une passe ne fait AUCUN appel et la file reste comptée');
+      const ePause = await moteur.executer('t');
+      ok(!tf.journal.some((a) => a.appel === 'pousser'), 'moteur (R-L3-14) : pause relue dans sync_state → aucun envoi, même sans charger()');
+      ok(tf.journal.some((a) => a.appel === 'lire'), 'moteur (R-L3-15) : en pause de quota, la réception continue — lire ne consomme pas d’espace');
+      eq([(await db.get('books', 'qr'))?.title, ePause.pause?.raison, ePause.aEnvoyer], ['Reçu en pause', 'quota', 1], 'moteur (R-L3-15) : ce qui vient des autres appareils est écrit, et la file reste entière et comptée');
+      ok(Object.isFrozen(ePause.pause), 'moteur : la pause rendue par l’état est figée elle aussi');
+      ok(ePause.dernierEchange !== null, 'moteur (R-L3-15) : une réception aboutie date l’échange, même en pause');
       await moteur.envoyerMaintenant();
       eq([await db.get('sync_state', 'pause'), moteur.etat().pause], [undefined, null], 'moteur : « Envoyer maintenant » retire la pause de sync_state');
-      ok(tf.journal.some((a) => a.appel === 'pousser'), 'moteur : … et la passe tourne alors pour de vrai');
+      ok(tf.journal.some((a) => a.appel === 'pousser'), 'moteur : … et l’envoi part alors pour de vrai');
+      // « Envoyer maintenant » pendant un vol DÉJÀ court-circuité par la pause : le rejoindre ne ferait rien partir,
+      // donc le geste attend ce vol et enchaîne une passe neuve, pause levée.
+      await db.mutate({ puts: { sync_state: [{ key: 'pause', value: { raison: 'quota', at: '2026-10-13T00:00:00Z' } }] }, origin: 'device' });
+      await repo.save('books', { id: 'q2', title: 'y' });
+      await Promise.all([moteur.executer('online'), moteur.envoyerMaintenant()]);
+      eq([await db.get('sync_state', 'pause'), await db.count('outbox')], [undefined, 0], 'moteur : « Envoyer maintenant » pendant un vol en pause → la pause tombe et la file part pour de vrai');
       await moteur.arreter();
+    });
+
+    // R-L3-14 (c) : un décalage mesuré SOUS le seuil est quand même gardé — c’est lui qui corrige syncNow() au
+    // prochain démarrage, avant le premier appel. Sans avertir la personne : 2 min ne se voient pas à l’usage.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await repo.save('books', { id: 'd1', title: 'x' });
+      const base = Date.parse('2026-10-13T00:00:00Z');
+      const tf = creerTransportFactice({ pousser: [{ reponse: { server_time: new Date(base + 2 * 60000).toISOString(), accepted: [{ store: 'books', id: 'd1' }], adjusted: [], rejected: [] } }], lire: {} });
+      const moteur = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: tf, fenetre: fenetreMuette(), bus: busMuet, maintenant: () => base });
+      const e = await moteur.executer('t');
+      eq([(await db.get('sync_state', 'clock_offset_ms'))?.value, await db.get('sync_state', 'clock_warned_at'), e.horloge], [120000, undefined, null], 'moteur (R-L3-14) : un décalage de 2 min est persisté, sans avertissement');
+      setClockOffset(0);
+      const m2 = createMoteur({ db, getUserId: () => null, isActivitySynced: () => false, transport: tf, fenetre: fenetreMuette(), bus: busMuet, maintenant: () => base });
+      await m2.demarrer();
+      eq([getClockOffset(), m2.etat().horloge], [120000, null], 'moteur (R-L3-14) : … et relu au démarrage, toujours sans avertissement');
+      await m2.arreter();
     });
 
     // Un envoi en échec réseau : la réception n’est PAS tentée, la file reste entière, une reprise est programmée.
@@ -792,6 +824,33 @@ export async function runSyncL3Tests({ eq, ok }) {
       eq(getClockOffset(), 11 * 60000, 'moteur : charger() relit clock_offset_ms et réapplique le décalage');
       eq(m2.etat().horloge?.minutes, 11, 'moteur : … et l’avertissement déjà donné reste affiché au démarrage');
       await m2.arreter();
+    });
+
+    // R-L3-14 (b) : executer() ne REJETTE jamais. Réglages et la pastille appellent sans filet ; une base devenue
+    // illisible doit rendre un état, pas une promesse rejetée (et surtout pas un rejet non traité au démarrage).
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await repo.save('books', { id: 'z1', title: 'x' });
+      const tf = creerTransportFactice({ lire: {} });
+      // Retour court (sans compte) : le compte de la file est lu HORS du try de la passe — c’est le chemin qui
+      // rejetait. Puis la même panne avec un compte : la passe va au bout et nomme l’incident.
+      const sansCompte = createMoteur({ db, getUserId: () => null, isActivitySynced: () => false, transport: tf, fenetre: fenetreMuette(), bus: busMuet });
+      const avecCompte = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: tf, fenetre: fenetreMuette(), bus: busMuet });
+      const vraiConsole = console.error;
+      let p1; let p2; let eCourt; let eLongue;
+      try {
+        db.getAll = () => { throw new Error('base illisible'); };
+        console.error = () => {};
+        p1 = sansCompte.executer('t');
+        p2 = sansCompte.executer('t');
+        eCourt = await p1;
+        await p2;
+        eLongue = await avecCompte.executer('t');
+      } finally { delete db.getAll; console.error = vraiConsole; }
+      ok(p1 === p2, 'moteur (R-L3-14) : le vol reste unique même quand la lecture jette');
+      eq([typeof eCourt, eCourt?.enCours], ['object', false], 'moteur (R-L3-14) : une lecture qui jette dans un retour court → executer() résout sur un état');
+      eq([eLongue.enCours, eLongue.derniereErreur?.type], [false, 'inconnu'], 'moteur (R-L3-14) : la même panne pendant la passe → erreur « inconnu » portée, passe terminée');
+      eq(tf.journal.length, 0, 'moteur (R-L3-14) : … et rien n’a été tenté sur le réseau');
     });
   } finally { setClockOffset(0); }
 }

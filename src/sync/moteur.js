@@ -24,6 +24,11 @@ const AU_REPOS = {
   derniereErreur: null,
 };
 
+// Le seuil au-delà duquel une horloge faussée se dit à la personne. Il est tenu par `appliquerHeureServeur`
+// (src/sync/clock.js, qui rend `avertir`) ; il est repris ici pour décider si un avertissement DÉJÀ donné a encore
+// lieu d'être affiché au démarrage — une horloge remise à l'heure ne doit plus rien afficher.
+const SEUIL_HORLOGE_MS = 5 * 60000;
+
 export function createMoteur({
   db,
   getUserId,
@@ -45,9 +50,16 @@ export function createMoteur({
   let appelsReussis = 0;
   const desabonner = [];
 
-  // L'état sort TOUJOURS en copie figée : un abonné (Réglages, pastille) garde l'objet reçu sans le voir changer
-  // sous lui, et personne ne peut écrire dans l'état du moteur depuis l'extérieur.
-  const instantane = () => Object.freeze({ ...etat });
+  // L'état sort TOUJOURS en copie figée, ses objets compris : un abonné (Réglages, pastille) garde l'objet reçu sans
+  // le voir changer sous lui, et personne ne peut écrire dans l'état du moteur depuis l'extérieur.
+  const fige = (valeur) => (valeur ? Object.freeze({ ...valeur }) : null);
+  const instantane = () => Object.freeze({
+    ...etat,
+    progression: fige(etat.progression),
+    pause: fige(etat.pause),
+    horloge: fige(etat.horloge),
+    derniereErreur: fige(etat.derniereErreur),
+  });
 
   function poser(partiel) {
     etat = { ...etat, ...partiel };
@@ -94,38 +106,42 @@ export function createMoteur({
     };
   }
 
+  const lirePause = async () => (await db.get('sync_state', 'pause'))?.value || null;
+
   async function toucherEchange() {
     const iso = new Date(maintenant()).toISOString();
     await db.mutate({ puts: { sync_state: [{ key: 'last_exchange_at', value: iso }] }, origin: 'device' });
     poser({ dernierEchange: iso });
   }
 
-  // Horloge faussée de plus de 5 minutes (spec § 5.3) : la personne est avertie UNE fois (clock_warned_at), et le
-  // décalage mesuré est gardé pour que l'horloge reste corrigée au prochain démarrage, avant le premier appel.
-  // Rien n'est réécrit si la marque est déjà posée et le décalage inchangé : une passe qui ne change rien n'écrit rien.
-  async function avertirHorloge(h) {
-    if (!h?.avertir) return;
-    const marque = await db.get('sync_state', 'clock_warned_at');
+  // Horloge (spec § 5.3, R-L3-14) : le décalage mesuré est gardé à CHAQUE mesure qui le change — c'est lui qui
+  // corrige syncNow() au prochain démarrage, avant le premier appel, même quand l'écart est petit. Au-delà du seuil,
+  // la personne est avertie UNE fois (clock_warned_at n'est jamais réhorodaté) et l'avertissement reste affiché
+  // tant que l'écart dure. Une mesure qui ne change rien n'écrit rien.
+  async function appliquerMesure(h) {
+    if (!h) return;
     const connu = await db.get('sync_state', 'clock_offset_ms');
+    const marque = h.avertir ? await db.get('sync_state', 'clock_warned_at') : null;
     const puts = [];
-    if (!marque) puts.push({ key: 'clock_warned_at', value: new Date(maintenant()).toISOString() });
     if (connu?.value !== h.decalageMs) puts.push({ key: 'clock_offset_ms', value: h.decalageMs });
+    if (h.avertir && !marque) puts.push({ key: 'clock_warned_at', value: new Date(maintenant()).toISOString() });
     if (puts.length) await db.mutate({ puts: { sync_state: puts }, origin: 'device' });
-    poser({ horloge: { minutes: h.minutes } });
+    poser({ horloge: h.avertir ? { minutes: h.minutes } : null });
   }
 
   // Ce que l'appareil sait déjà au démarrage, avant tout appel : la pause posée, le dernier échange, le décalage
   // d'horloge mesuré (réappliqué à l'horloge) et l'avertissement déjà donné, puis les comptes de la file.
   async function charger() {
-    const pause = (await db.get('sync_state', 'pause'))?.value || null;
+    const pause = await lirePause();
     const dernier = (await db.get('sync_state', 'last_exchange_at'))?.value || null;
     const decalage = (await db.get('sync_state', 'clock_offset_ms'))?.value;
     if (Number.isFinite(decalage)) setClockOffset(decalage);
     const marque = await db.get('sync_state', 'clock_warned_at');
+    const avertir = !!marque && Number.isFinite(decalage) && Math.abs(decalage) > SEUIL_HORLOGE_MS;
     poser({
       pause,
       dernierEchange: dernier,
-      horloge: marque && Number.isFinite(decalage) ? { minutes: Math.round(Math.abs(decalage) / 60000) } : null,
+      horloge: avertir ? { minutes: Math.round(Math.abs(decalage) / 60000) } : null,
       ...(await compter()),
     });
   }
@@ -133,36 +149,42 @@ export function createMoteur({
   async function passe(raison) {
     // Sans compte, rien ne part et rien n'est tenté : seuls les comptes de la file sont rafraîchis.
     if (!getUserId()) { poser({ ...(await compter()) }); return instantane(); }
-    // En pause (quota), AUCUN appel réseau : la file reste entière et comptée. Seul « Envoyer maintenant » lève la
-    // pause — c'est un geste de la personne, pas une reprise automatique qui retomberait sur le même mur.
-    if (etat.pause) { poser({ ...(await compter()) }); return instantane(); }
-    poser({ enCours: true, phase: 'envoi_initial', derniereErreur: null, attenteConnexion: false });
+    // R-L3-14 : la pause est RELUE dans sync_state à chaque passe, pas seulement au chargement — un autre onglet a
+    // pu la poser, un « online » a pu arriver pendant charger(), et executer() peut être appelé sans demarrer().
+    const pause = await lirePause();
+    // R-L3-15 : en pause de quota, seul l'ENVOI est suspendu. Lire ne consomme pas d'espace chez le fournisseur, et
+    // ce qui arrive des autres appareils n'a pas à attendre un geste de la personne : la réception continue.
+    poser({ pause, enCours: true, phase: pause ? 'reception' : 'envoi_initial', derniereErreur: null, attenteConnexion: false });
+    const avantPasse = appelsReussis;
     try {
-      await envoiInitial({
-        db,
-        getUserId,
-        isActivitySynced,
-        surProgression: (p) => poser({ progression: { table: p.table, n: p.n, total: p.total } }),
-      });
-      poser({ phase: 'envoi', progression: null });
-      heureVue = null;
-      const avantEnvoi = appelsReussis;
-      const r = await push.envoyer();
-      await avertirHorloge(heureVue);
-      if (r.pause) poser({ pause: (await db.get('sync_state', 'pause'))?.value || { raison: 'quota', at: new Date(maintenant()).toISOString() } });
-      if (r.attenteConnexion) poser({ attenteConnexion: true });
-      if (r.erreur) poser({ derniereErreur: { type: r.erreur.type } });
-      if (r.recul) programmerReprise(r.recul);
-      if (appelsReussis > avantEnvoi) await toucherEchange();
-      // La réception n'est tentée que si l'envoi a pu aboutir : une file en recul, une connexion à refaire ou une
-      // pause de quota ne doivent pas être suivies d'un second appel qui butera sur le même mur.
-      if (!r.erreur && !r.pause && !r.attenteConnexion) {
-        poser({ phase: 'reception' });
-        const avantReception = appelsReussis;
-        const p = await pull.recevoir();
-        if (p.erreur) poser({ derniereErreur: { type: p.erreur.type } });
-        if (appelsReussis > avantReception) await toucherEchange();
+      let bilanEnvoi = null;
+      if (!pause) {
+        await envoiInitial({
+          db,
+          getUserId,
+          isActivitySynced,
+          surProgression: (p) => poser({ progression: { table: p.table, n: p.n, total: p.total } }),
+        });
+        poser({ phase: 'envoi', progression: null });
+        heureVue = null;
+        bilanEnvoi = await push.envoyer();
+        await appliquerMesure(heureVue);
+        if (bilanEnvoi.pause) poser({ pause: (await lirePause()) || { raison: 'quota', at: new Date(maintenant()).toISOString() } });
+        if (bilanEnvoi.attenteConnexion) poser({ attenteConnexion: true });
+        if (bilanEnvoi.erreur) poser({ derniereErreur: { type: bilanEnvoi.erreur.type } });
+        if (bilanEnvoi.recul) programmerReprise(bilanEnvoi.recul);
       }
+      // La réception n'est tentée que si l'envoi a pu aboutir : une file en recul, une connexion à refaire ou un
+      // quota découvert à l'instant ne doivent pas être suivis d'un appel qui butera sur le même mur. La pause déjà
+      // posée AVANT la passe, elle, ne l'empêche pas (R-L3-15) — la prochaine passe relira la nouvelle.
+      const envoiBloque = !!bilanEnvoi && !!(bilanEnvoi.erreur || bilanEnvoi.pause || bilanEnvoi.attenteConnexion);
+      if (!envoiBloque) {
+        poser({ phase: 'reception' });
+        const bilanReception = await pull.recevoir();
+        if (bilanReception.erreur) poser({ derniereErreur: { type: bilanReception.erreur.type } });
+      }
+      // UN seul « Dernier échange » par passe, et seulement si un appel a RÉELLEMENT abouti (I5).
+      if (appelsReussis > avantPasse) await toucherEchange();
       await purgerAnciens(db, maintenant());
     } catch (error) {
       logError('sync.passe', { error, reason: raison });
@@ -184,9 +206,13 @@ export function createMoteur({
   }
 
   // Un seul vol : un appel pendant une passe rejoint la passe en cours (sa promesse), sans en lancer une seconde.
+  // R-L3-14 : ce vol ne REJETTE jamais. Réglages, la pastille et les déclencheurs appellent sans filet ; les deux
+  // retours courts de la passe lisent la file hors de son `try`, et une base devenue illisible doit rendre un état.
   function executer(raison = 'manuel') {
     if (vol) return vol;
-    vol = passe(raison).finally(() => { vol = null; });
+    vol = passe(raison)
+      .catch((error) => { logError('sync.passe', { error, reason: raison }); return instantane(); })
+      .finally(() => { vol = null; });
     return vol;
   }
 
@@ -202,12 +228,15 @@ export function createMoteur({
     }, delaiRegroupementMs);
   }
 
-  // Le geste « Envoyer maintenant » : la seule façon de lever une pause de quota, et elle est explicite.
+  // Le geste « Envoyer maintenant » : la seule façon de lever une pause de quota, et elle est explicite. La pause est
+  // relue dans sync_state (un autre onglet a pu la poser) et un vol en cours est ATTENDU, pas rejoint : il a pu être
+  // court-circuité par la pause, le rejoindre ne ferait donc rien partir.
   async function envoyerMaintenant() {
-    if (etat.pause) {
+    if (await lirePause()) {
       await db.mutate({ deletes: { sync_state: ['pause'] }, origin: 'device' });
       poser({ pause: null });
     }
+    if (vol) await vol;
     return executer('manuel');
   }
 
