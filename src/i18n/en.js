@@ -77,7 +77,7 @@ export const EN = {
   "Fusionner avec la bibliothèque actuelle": "Merge with the current library",
   "Remplacer toute la bibliothèque": "Replace the entire library",
   // Connexion et garde de compte (spec § 4.1).
-  "Cette adresse n’est pas autorisée.": "This address is not allowed.",
+  "La connexion a été refusée ou annulée.": "The sign-in was refused or cancelled.",
   "Cet appareil a été synchronisé avec {e}.": "This device was synced with {e}.",
   "Cet appareil ne peut pas vérifier le compte.": "This device cannot verify the account.",
   // Réglages → Synchronisation (spec § 4.2, ensemble L2).

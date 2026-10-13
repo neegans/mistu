@@ -74,8 +74,12 @@ export function createAuth(options = {}) {
   // readError, handleReturn et guard ne touchent pas au client : ils restent utiles même sans lui (nettoyer l'URL
   // du retour, nommer un refus, protéger les données locales). Les quatre méthodes qui parlent au serveur, elles,
   // ne font rien et rendent null tant que le client manque.
+  // R36 : la phrase est NEUTRE sur la cause. Les clés de refus ne la disent pas — une adresse hors liste, un écran
+  // de consentement annulé par la personne et une panne du fournisseur arrivent tous en « error=… ». Affirmer
+  // « Cette adresse n'est pas autorisée. » quand quelqu'un a simplement annulé serait un état sans événement réel
+  // (invariant I5). La valeur d'error_description n'est jamais lue : elle vient du fournisseur.
   function readError({ search = '', hash = '' } = {}) {
-    return carriesRefusal(search) || carriesRefusal(hash) ? t('Cette adresse n’est pas autorisée.') : null;
+    return carriesRefusal(search) || carriesRefusal(hash) ? t('La connexion a été refusée ou annulée.') : null;
   }
 
   // Retour du fournisseur, appelé une fois au démarrage (câblage en tâche 13). ASYNCHRONE à dessein.
