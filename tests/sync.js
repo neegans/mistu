@@ -550,11 +550,13 @@ export async function runSyncTests({ eq, ok }) {
   }
 
   // Chaque action du modèle doit avoir un geste câblé : la liste est la seule source, le rendu la filtre.
-  eq([...SYNC_ACTIONS].sort(), ['changeAccount', 'signIn', 'signOut'], 'trois gestes nommés, pas un de plus');
+  eq([...SYNC_ACTIONS].sort(), ['changeAccount', 'envoyerMaintenant', 'signIn', 'signOut'], 'quatre gestes nommés, pas un de plus');
   const actionsDuModele = new Set([
     ...syncSectionModel({ available: true }).buttons,
     ...syncSectionModel({ available: true, user: { id: 'u', email: 'a@exemple.test' }, guard: { ok: true } }).buttons,
     ...syncSectionModel({ available: true, guard: { ok: false, message: 'x' } }).buttons,
+    // L3 : l'état « connectée » avec un moteur offre un geste de plus, qui doit être câblé comme les autres.
+    ...syncSectionModel({ available: true, user: { id: 'u', email: 'a@exemple.test' }, guard: { ok: true }, moteur: { enCours: false, phase: null, progression: null, dernierEchange: null, enQuarantaine: 0, conflits: 0, pause: null, attenteConnexion: false, horloge: null } }).buttons,
   ].map((b) => b.action));
   eq([...actionsDuModele].filter((a) => !SYNC_ACTIONS.includes(a)), [], 'aucune action du modèle sans geste câblé');
 

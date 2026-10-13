@@ -853,4 +853,219 @@ export async function runSyncL3Tests({ eq, ok }) {
       eq(tf.journal.length, 0, 'moteur (R-L3-14) : … et rien n’a été tenté sur le réseau');
     });
   } finally { setClockOffset(0); }
+
+  // --- Réglages L3 (spec § 4.2) : dernier échange, quarantaine, conflits, Envoyer maintenant, progression, pause
+  // Le modèle reste pur : il reçoit l'état du moteur, les entrées en quarantaine et les conflits, et rend ce que la
+  // section dit et ce qu'elle offre. Rien de L3 n'apparaît hors de l'état « connectée + garde ok » — avant lui le
+  // moteur n'existe pas — et rien du tout sans moteur : c'est ce qui garde les tests L2 vrais mot pour mot.
+  const reglages = await import('../src/ui/settings.js');
+  const { syncSectionModel, syncSectionL3 } = reglages;
+  const base = { available: true, user: { id: 'u', email: 'x@exemple.invalid' }, guard: { ok: true }, pending: 3 };
+  const etatMoteur = (sur = {}) => ({ enCours: false, phase: null, progression: null, dernierEchange: null, aEnvoyer: 3, enQuarantaine: 0, conflits: 0, pause: null, attenteConnexion: false, horloge: null, derniereErreur: null, ...sur });
+  const fileQuarantaine = [
+    { seq: 4, store: 'books', id: 'b4', op: 'put', last_error: 'taille', quarantined_at: '2026-10-13T20:00:00Z' },
+    { seq: 5, store: 'recipes', id: 'r5', op: 'put', last_error: 'forme', quarantined_at: '2026-10-13T20:00:00Z' },
+  ];
+  const unConflit = { id: 'books:k1', store: 'books', record_id: 'k1', local: { title: 'Ici', updated_at: '2026-10-13T12:00:00Z' }, server: { data: { title: 'Ailleurs' }, updated_at: '2026-10-13T12:00:00Z' }, at: '2026-10-13T12:01:00Z', kind: 'donnees' };
+
+  const m1 = syncSectionModel({ ...base, moteur: etatMoteur({ dernierEchange: '2026-10-13T20:05:00Z', enQuarantaine: 2, conflits: 1 }), quarantaine: fileQuarantaine, conflits: [unConflit] });
+  ok(m1.lines.some((l) => l.startsWith('Dernier échange')), 'réglages L3 : « Dernier échange : <heure> »');
+  ok(m1.lines.includes('En quarantaine : 2') && m1.lines.includes('Conflits : 1'), 'réglages L3 : quarantaine et conflits comptés');
+  ok(m1.lines.includes('À envoyer : 3'), 'réglages L3 : « À envoyer » reste la file entière, jamais additionnée à la quarantaine');
+  ok(m1.buttons.some((b) => b.action === 'envoyerMaintenant'), 'réglages L3 : « Envoyer maintenant » offert quand connecté');
+  eq(m1.quarantaine.map((q) => [q.seq, q.motif]), [[4, 'Fiche trop grosse (plus de 512 Ko)'], [5, 'Fiche mal formée']], 'réglages L3 : chaque entrée en quarantaine, avec son motif en clair');
+  ok(m1.quarantaine[0].libelle.includes('b4') && m1.quarantaine[0].libelle.includes('books'), 'réglages L3 : la fiche est nommée');
+  eq(m1.conflits.length, 1, 'réglages L3 : chaque conflit listé');
+  ok(m1.conflits[0].libelle.includes('Ici'), 'réglages L3 : le conflit nomme la fiche');
+  ok(!!m1.conflits[0].dateIci && !!m1.conflits[0].dateAilleurs, 'réglages L3 : les deux versions du conflit sont datées');
+
+  // Vocabulaire des motifs (R9) : les jetons ASCII du serveur ne sortent jamais du modèle.
+  const jetons = ['taille', 'updated_at', 'cle', 'forme', 'refus', 'conflit'];
+  const motifs = syncSectionModel({ ...base, moteur: etatMoteur({ enQuarantaine: 6 }), quarantaine: jetons.map((code, i) => ({ seq: i, store: 'books', id: 'b' + i, last_error: code })) }).quarantaine.map((q) => q.motif);
+  eq(motifs, ['Fiche trop grosse (plus de 512 Ko)', 'Fiche sans date', 'Clé incohérente', 'Fiche mal formée', 'Refusée par le serveur', 'Envoi refusé'],
+    'réglages L3 : chaque jeton du serveur devient une phrase, et un jeton inattendu tombe sur « Envoi refusé »');
+  ok(!motifs.some((m) => jetons.includes(m)), 'réglages L3 : aucun jeton ASCII ne sort du modèle');
+  eq(syncSectionModel({ ...base, moteur: etatMoteur({ enQuarantaine: 1 }), quarantaine: [{ seq: 9, store: 'books', id: 'b9' }] }).quarantaine[0].motif,
+    'Envoi refusé', 'réglages L3 : une entrée sans motif enregistré est dite refusée, sans rien inventer');
+  eq(syncSectionModel({ ...base, moteur: etatMoteur({ enQuarantaine: 1 }), quarantaine: [{ seq: 1, store: 'files', id: 'f'.repeat(64), last_error: 'taille' }] }).quarantaine[0].libelle,
+    'files · ' + 'f'.repeat(12), 'réglages L3 : un identifiant long est tronqué à 12 caractères');
+
+  const m2 = syncSectionModel({ ...base, moteur: etatMoteur({ enCours: true, phase: 'envoi_initial', progression: { table: 'recipes', n: 8, total: 24 } }) });
+  eq(m2.progression, 'Envoi initial : recipes 8/24', 'réglages L3 : progression de l’envoi initial');
+  const m3 = syncSectionModel({ ...base, moteur: etatMoteur({ enCours: true, phase: 'reception', progression: { table: 'books', n: 1, total: 24 } }) });
+  eq(m3.progression, 'Réception : books 1/24', 'réglages L3 : progression de la réception');
+  eq(syncSectionModel({ ...base, moteur: etatMoteur({ enCours: false, phase: 'reception', progression: { table: 'books', n: 1, total: 24 } }) }).progression,
+    null, 'réglages L3 : une passe terminée n’affiche plus de progression');
+  const m4 = syncSectionModel({ ...base, moteur: etatMoteur({ pause: { raison: 'quota', at: 't' }, horloge: { minutes: 12 } }) });
+  ok(m4.pause && m4.pause.includes('1 Go'), 'réglages L3 : pause quota nommée (rien n’est perdu)');
+  ok(m4.lines.some((l) => l.includes('12')), 'réglages L3 : avertissement d’horloge avec les minutes');
+  eq(syncSectionModel({ ...base, moteur: etatMoteur({ pause: { raison: 'autre', at: 't' } }) }).pause, null, 'réglages L3 : seule la pause de quota a une phrase');
+  const m5 = syncSectionModel({ ...base, moteur: etatMoteur({ attenteConnexion: true }) });
+  ok(m5.lines.some((l) => l.includes('En attente de connexion')), 'réglages L3 : 401 → « En attente de connexion »');
+  eq(syncSectionModel({ ...base, moteur: etatMoteur() }).lines.filter((l) => l.includes('En attente de connexion')), [], 'réglages L3 : … et rien de tel sans l’événement');
+  ok(syncSectionModel({ ...base, moteur: etatMoteur() }).lines.includes('Aucun échange encore.'), 'réglages L3 : sans échange réel, aucune heure inventée');
+
+  // Dates du conflit : chacune porte la sienne, et la nature du conflit est conservée.
+  const mDates = syncSectionModel({ ...base, moteur: etatMoteur({ conflits: 1 }), conflits: [{ ...unConflit, kind: 'version', server: { data: { title: 'Ailleurs' }, updated_at: '2026-10-14T18:45:00Z' } }] });
+  ok(mDates.conflits[0].dateIci !== mDates.conflits[0].dateAilleurs, 'réglages L3 : chaque version est datée de SA date, jamais celle de l’autre');
+  eq(mDates.conflits[0].kind, 'version', 'réglages L3 : la nature du conflit est conservée');
+  eq(syncSectionModel({ ...base, moteur: etatMoteur({ conflits: 1 }), conflits: [{ id: 'books:k9', store: 'books', record_id: 'k9', local: null, server: { data: {}, updated_at: '2026-10-13T12:00:00Z' }, at: '2026-10-13T12:00:00Z', kind: 'donnees' }] }).conflits[0].libelle,
+    'books · k9', 'réglages L3 : sans version locale (fiche supprimée ici), le conflit se nomme par sa clé');
+
+  // Sans moteur, le modèle est EXACTEMENT celui de L2 : pas une clé de plus, sinon les tests L2 deviendraient faux.
+  const m6 = syncSectionModel({ ...base, moteur: null });
+  eq(m6, { title: 'Synchronisation', lines: ['Connectée : x@exemple.invalid', 'À envoyer : 3'], buttons: [{ action: 'signOut', label: 'Se déconnecter', tone: '' }] },
+    'réglages L3 : sans moteur (L2), le modèle est mot pour mot celui de L2');
+  ok(!m6.buttons.some((b) => b.action === 'envoyerMaintenant') && (m6.progression ?? null) === null, 'réglages L3 : sans moteur, ni « Envoyer maintenant » ni progression');
+  const m7 = syncSectionModel({ available: true, guard: { ok: false, message: 'Cet appareil ne peut pas vérifier le compte.' }, moteur: etatMoteur({ enQuarantaine: 2 }), quarantaine: fileQuarantaine, conflits: [unConflit] });
+  eq([m7.lines, m7.buttons.map((b) => b.action), m7.progression ?? null, m7.quarantaine ?? null],
+    [['Cet appareil ne peut pas vérifier le compte.'], ['signOut', 'changeAccount'], null, null],
+    'réglages L3 : garde refusée → aucun chiffre et aucune liste de L3, le compte n’est pas établi');
+  eq(syncSectionModel({ available: true, enAttente: true, moteur: etatMoteur({ enQuarantaine: 2 }) }).progression ?? null, null, 'réglages L3 : pendant la vérification du compte, rien de L3 non plus');
+
+  // --- Rendu de l'ensemble L3 : ce que la personne lit et touche. La suite tourne dans un navigateur, donc le
+  // rendu est éprouvé pour de vrai — sans cela un modèle juste pourrait n'être affiché nulle part.
+  {
+    const vus = [];
+    const boite = document.createElement('div');
+    for (const n of syncSectionL3(m1, { reessayer: (seq) => vus.push(['reessayer', seq]), abandonner: (seq) => vus.push(['abandonner', seq]), garderIci: (id) => vus.push(['garderIci', id]), garderAilleurs: (id) => vus.push(['garderAilleurs', id]) })) boite.append(n);
+    const texte = boite.textContent;
+    ok(texte.includes('books · b4') && texte.includes('Fiche trop grosse (plus de 512 Ko)'), 'rendu L3 : la quarantaine nomme la fiche et dit le motif en clair');
+    const mots = texte.split(/[^0-9A-Za-zÀ-ÿ_]+/);
+    ok(!jetons.some((j) => mots.includes(j)), 'rendu L3 : aucun jeton brut du serveur à l’écran');
+    const libelles = [...boite.querySelectorAll('button')].map((b) => b.textContent);
+    ok(libelles.includes('Réessayer') && libelles.includes('Abandonner cet envoi'), 'rendu L3 : les deux gestes de la quarantaine');
+    ok(libelles.some((l) => l.startsWith('Garder celle d’ici (')) && libelles.includes('Garder celle d’ailleurs'), 'rendu L3 : les deux issues du conflit, la date portée par celle d’ici');
+    ok(texte.includes('version d’ici du') && texte.includes('version d’ailleurs du'), 'rendu L3 : le conflit dit les deux dates en une phrase');
+    for (const b of boite.querySelectorAll('button')) b.click();
+    eq(vus, [['reessayer', 4], ['abandonner', 4], ['reessayer', 5], ['abandonner', 5], ['garderIci', 'books:k1'], ['garderAilleurs', 'books:k1']],
+      'rendu L3 : chaque bouton appelle son geste avec la bonne clé');
+  }
+  {
+    const boite = document.createElement('div');
+    for (const n of syncSectionL3(m4, {})) boite.append(n);
+    ok(boite.querySelector('.warn')?.textContent.includes('1 Go'), 'rendu L3 : la pause de quota est un avertissement visible');
+    const boite2 = document.createElement('div');
+    for (const n of syncSectionL3(m2, {})) boite2.append(n);
+    eq(boite2.textContent, 'Envoi initial : recipes 8/24', 'rendu L3 : la progression seule, sans liste vide ni titre orphelin');
+    eq(syncSectionL3(m6, {}).length, 0, 'rendu L3 : sans moteur (L2), la section n’a rien de plus');
+  }
+
+  // --- Les gestes de la file et des conflits (spec § 4.2, § 5.5) : extraits de leurs gestionnaires DOM, à
+  // dépendances injectées, éprouvés sur une base jetable. Ce sont des décisions, pas du rendu.
+  const { reessayerEnvoi, abandonnerEnvoi, garderVersionDIci, garderVersionDAilleurs, suivreMoteur } = reglages;
+  const { reglerHistorique: reglerHistoriqueL3, effacerDonnees: effacerDonneesL3 } = reglages;
+  await withRepo(async (repoTemp, db) => {
+    await db.mutate({ puts: { outbox: [{ user_id: 'u1', store: 'books', id: 'b1', op: 'put', updated_at: '2026-10-13T10:00:00Z', tries: 3, last_error: 'taille', quarantined_at: '2026-10-13T11:00:00Z', next_try_at: '2026-10-13T12:00:00Z' }] }, origin: 'device' });
+    const [entree] = await db.getAll('outbox');
+    const appels = [];
+    const moteurFactice = { executer: (r) => { appels.push(['executer', r]); return Promise.resolve(); }, planifier: () => appels.push(['planifier']) };
+    eq(await reessayerEnvoi({ db, seq: entree.seq, moteur: moteurFactice }), true, 'geste L3 : « Réessayer » s’applique sur une entrée existante');
+    const apres = await db.getAll('outbox');
+    eq(apres.length, 1, 'geste L3 : « Réessayer » ne duplique pas l’entrée (origine device, jamais capturée)');
+    eq([apres[0].seq, apres[0].quarantined_at, apres[0].last_error, apres[0].tries, apres[0].next_try_at], [entree.seq, null, null, 0, null],
+      'geste L3 : la quarantaine, le motif, les essais comptés et l’attente de recul sont effacés');
+    eq(appels, [['executer', 'reessai']], 'geste L3 : … et une passe est demandée tout de suite');
+    eq(await reessayerEnvoi({ db, seq: 99999, moteur: moteurFactice }), false, 'geste L3 : « Réessayer » sur une entrée disparue ne fait rien');
+
+    await repoTemp.save('books', { id: 'b1', title: 'Resté ici' });
+    const demandes = [];
+    eq(await abandonnerEnvoi({ db, seq: entree.seq, confirm: async (m) => { demandes.push(m); return false; } }), false, 'geste L3 : « Abandonner » refusé → rien');
+    eq((await db.getAll('outbox')).some((e) => e.seq === entree.seq), true, 'geste L3 : … l’entrée est toujours en file');
+    ok(demandes[0]?.includes('la fiche reste sur cet appareil'), 'geste L3 : la confirmation dit ce qui est abandonné et ce qui reste');
+    eq(await abandonnerEnvoi({ db, seq: entree.seq, confirm: async () => true }), true, 'geste L3 : « Abandonner » confirmé');
+    eq((await db.getAll('outbox')).some((e) => e.seq === entree.seq), false, 'geste L3 : … l’entrée quitte la file');
+    eq((await db.get('books', 'b1'))?.title, 'Resté ici', 'geste L3 : … et la fiche reste sur cet appareil');
+    eq(await abandonnerEnvoi({ db, seq: entree.seq, confirm: async () => { throw new Error('jamais demandé'); } }), false, 'geste L3 : une entrée déjà partie ne redemande rien');
+  });
+
+  await withRepo(async (repoTemp, db) => {
+    await repoTemp.save('books', { id: 'k1', title: 'Ici' });
+    const local = await db.get('books', 'k1');
+    await db.mutate({ puts: { sync_conflicts: [{ id: 'books:k1', store: 'books', record_id: 'k1', local, server: { data: { id: 'k1', title: 'Ailleurs' }, updated_at: '2026-10-13T12:00:00Z', deleted_at: null }, at: '2026-10-13T12:01:00Z', kind: 'donnees' }] }, origin: 'remote' });
+    const appels = [];
+    eq(await garderVersionDIci({ db, id: 'books:k1', moteur: { planifier: () => appels.push('planifier') } }), true, 'geste L3 : « Garder celle d’ici » s’applique');
+    eq([await db.count('sync_conflicts'), (await db.get('books', 'k1'))?.title, appels], [0, 'Ici', ['planifier']],
+      'geste L3 : le conflit disparaît, la version d’ici reste, et une passe est planifiée (elle doit repartir)');
+    eq(await garderVersionDIci({ db, id: 'books:k1' }), false, 'geste L3 : un conflit déjà tranché ne fait rien');
+  });
+
+  await withRepo(async (repoTemp, db) => {
+    await repoTemp.save('books', { id: 'k2', title: 'Ici' });
+    await db.mutate({ puts: { sync_conflicts: [{ id: 'books:k2', store: 'books', record_id: 'k2', local: { id: 'k2', title: 'Ici' }, server: { data: { id: 'k2', title: 'Ailleurs' }, updated_at: '2026-10-13T12:00:00Z', deleted_at: null }, at: '2026-10-13T12:01:00Z', kind: 'donnees' }] }, origin: 'remote' });
+    eq(await garderVersionDAilleurs({ db, id: 'books:k2' }), true, 'geste L3 : « Garder celle d’ailleurs » s’applique');
+    eq([await db.count('sync_conflicts'), (await db.get('books', 'k2'))?.title], [0, 'Ailleurs'], 'geste L3 : … la version d’ailleurs est écrite et le conflit disparaît');
+    await db.mutate({ puts: { sync_conflicts: [{ id: 'books:k3', store: 'books', record_id: 'k3', local: null, server: null, at: '2026-10-13T12:01:00Z', kind: 'donnees' }] }, origin: 'remote' });
+    eq([await garderVersionDAilleurs({ db, id: 'books:k3' }), await db.count('sync_conflicts')], [false, 1],
+      'geste L3 : sans version du serveur, le geste échoue et le conflit RESTE — jamais une perte muette');
+  });
+
+  // « Synchroniser mon historique » : à l'activation, le marqueur d'envoi initial est retiré (rattrapage).
+  await withRepo(async (repoTemp, db) => {
+    await db.mutate({ puts: { sync_state: [{ key: 'backfill:library_activity', value: 'fait' }] }, origin: 'device' });
+    const appels = [];
+    eq(await reglerHistoriqueL3(true, { db, moteur: { planifier: () => appels.push('planifier') } }), 0, 'réglages L3 : activer l’historique n’enlève rien de la file');
+    eq(await db.get('sync_state', 'backfill:library_activity'), undefined, 'réglages L3 : activer l’historique retire son marqueur (rattrapage)');
+    eq(appels, ['planifier'], 'réglages L3 : … et le rattrapage est demandé au moteur');
+    eq((await repoTemp.getSettings()).sync_activity, true, 'réglages L3 : le consentement est écrit');
+    await db.mutate({ puts: { sync_state: [{ key: 'backfill:library_activity', value: 'fait' }] }, origin: 'device' });
+    await reglerHistoriqueL3(false, { db });
+    eq((await db.get('sync_state', 'backfill:library_activity'))?.value, 'fait', 'réglages L3 : décocher (R27) ne touche pas au marqueur');
+  });
+
+  // « Effacer les données de cet appareil » : la quarantaine ne se videra pas d'elle-même, donc elle est nommée
+  // avec sa sortie. Sans quarantaine, les phrases de L2 sont inchangées.
+  {
+    const journal = () => { const vus = []; return { vus, toast: (m) => vus.push(m), clearDevice: async () => vus.push('EFFACÉ'), reload: () => vus.push('reload') }; };
+    const g1 = journal();
+    await effacerDonneesL3({ user: { id: 'u' }, pending: async () => 5, enQuarantaine: async () => 2, confirm: async () => true, demanderMot: async () => 'EFFACER', toast: g1.toast, clearDevice: g1.clearDevice, reload: g1.reload });
+    eq(g1.vus, ['5 éléments ne sont pas encore envoyés (dont 2 en quarantaine : « Abandonner » d’abord).'], 'effacer L3 : la quarantaine est nommée avec sa sortie, et rien n’est effacé');
+    const g2 = journal();
+    await effacerDonneesL3({ user: { id: 'u' }, pending: async () => 1, enQuarantaine: async () => 1, confirm: async () => true, demanderMot: async () => 'EFFACER', toast: g2.toast, clearDevice: g2.clearDevice, reload: g2.reload });
+    eq(g2.vus, ['1 élément n’est pas encore envoyé, et il est en quarantaine : « Abandonner » d’abord.'], 'effacer L3 : un seul élément, en quarantaine → la phrase au singulier');
+    const g3 = journal();
+    await effacerDonneesL3({ user: { id: 'u' }, pending: async () => 3, enQuarantaine: async () => 0, confirm: async () => true, demanderMot: async () => 'EFFACER', toast: g3.toast, clearDevice: g3.clearDevice, reload: g3.reload });
+    eq(g3.vus, ['3 éléments ne sont pas encore envoyés.'], 'effacer L3 : sans quarantaine, la phrase de L2 est inchangée');
+  }
+
+  // --- L'abonnement à l'état du moteur : regroupé, et surtout RETIRÉ dès que la vue affichée n'est plus Réglages.
+  // Le routeur ne démonte pas les vues : sans ce retrait, chaque navigation laisserait un abonné de plus, et
+  // chaque passe rafraîchirait un écran qui ne parle pas de synchronisation.
+  {
+    const fauxMoteur = () => { const fns = new Set(); return { fns, onEtat: (fn) => { fns.add(fn); return () => fns.delete(fn); }, emettre: () => { for (const fn of [...fns]) fn(); } }; };
+    const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+    const a = fauxMoteur();
+    let rendus = 0;
+    const arreter = suivreMoteur({ moteur: a, surReglages: () => true, rafraichir: () => { rendus += 1; }, delaiMs: 10 });
+    a.emettre(); a.emettre(); a.emettre();
+    eq(rendus, 0, 'abonnement L3 : rien n’est rendu dans l’instant (regroupement)');
+    await pause(40);
+    eq(rendus, 1, 'abonnement L3 : trois changements rapprochés → un seul rendu');
+    a.emettre();
+    await pause(40);
+    eq(rendus, 2, 'abonnement L3 : un changement plus tard → un autre rendu');
+    arreter();
+    eq(a.fns.size, 0, 'abonnement L3 : l’arrêt retire l’abonné');
+    a.emettre();
+    await pause(40);
+    eq(rendus, 2, 'abonnement L3 : … et plus rien n’est rendu ensuite');
+
+    const b = fauxMoteur();
+    let rendusB = 0;
+    let surReglages = true;
+    suivreMoteur({ moteur: b, surReglages: () => surReglages, rafraichir: () => { rendusB += 1; }, delaiMs: 10 });
+    surReglages = false;
+    b.emettre();
+    await pause(40);
+    eq([rendusB, b.fns.size], [0, 0], 'abonnement L3 : la vue a changé → l’abonné se retire lui-même, aucun rendu volé');
+
+    const c = fauxMoteur();
+    let rendusC = 0;
+    const arreterC = suivreMoteur({ moteur: c, surReglages: () => true, rafraichir: () => { rendusC += 1; }, delaiMs: 10 });
+    c.emettre();
+    arreterC();
+    await pause(40);
+    eq(rendusC, 0, 'abonnement L3 : l’arrêt annule aussi le rendu déjà regroupé');
+    eq(suivreMoteur({ moteur: null, surReglages: () => true, rafraichir: () => {} }), null, 'abonnement L3 : sans moteur, aucun abonnement');
+  }
 }

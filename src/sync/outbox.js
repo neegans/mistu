@@ -42,3 +42,19 @@ export function installCapture(db, { getUserId = () => null, isActivitySynced = 
 }
 
 export const uninstallCapture = (db) => { db.onMutate = null; };
+
+// --- Les deux gestes de la personne sur la file (spec § 4.2) -----------------
+// Appelés par Réglages sur une entrée mise en quarantaine. Ils n'écrivent que dans « outbox » et portent l'origine
+// 'device' : la fiche elle-même n'est jamais touchée, et rien de ceci ne repart au serveur.
+
+// « Réessayer » remet l'entrée dans l'état qu'elle avait avant son premier échec : plus de quarantaine, plus de
+// motif, plus d'essais comptés, plus d'attente de recul — sans quoi le recul exponentiel la retiendrait encore.
+export async function reprendreEnvoi(db, entree) {
+  await db.mutate({ puts: { outbox: [{ ...entree, quarantined_at: null, last_error: null, tries: 0, next_try_at: null }] }, origin: 'device' });
+}
+
+// « Abandonner cet envoi » retire l'entrée et RIEN d'autre : la fiche reste sur cet appareil, simplement elle n'ira
+// pas au serveur. Une écriture ultérieure de cette fiche la remettra en file, comme n'importe quelle écriture.
+export async function retirerEnvoi(db, seq) {
+  await db.mutate({ deletes: { outbox: [seq] }, origin: 'device' });
+}

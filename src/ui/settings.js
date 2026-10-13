@@ -2,8 +2,11 @@
 // exports d'échange, assistant IA, minuterie système, données locales (spec §29.1, §31, §33).
 import { el, toast, confirmDialog, promptDialog, pickFiles, downloadBlob, formatDate } from '../core/dom.js';
 import { t } from '../core/i18n.js';
-import { refresh } from '../core/router.js';
+import { refresh, currentPath } from '../core/router.js';
 import * as repo from '../model/repo.js';
+import { reprendreEnvoi, retirerEnvoi } from '../sync/outbox.js';
+import { garderIci, garderAilleurs } from '../sync/conflits.js';
+import { retirerMarqueur } from '../sync/backfill.js';
 import { createArchive, inspectArchive, applyArchive, verifyRestored } from '../domain/backup.js';
 import { toJsonLd, toPaprikaYaml, toReadableSite } from '../domain/exporters.js';
 import { createZip } from '../core/zip.js';
@@ -12,7 +15,7 @@ import { providerFrom } from '../domain/llm.js';
 import { shortcutUrl, SHORTCUT_NAME, isAppleTouchDevice } from '../domain/timers.js';
 import { STORES, SYNC_INTERNAL_STORES, APP_VERSION, ARCHIVE_FORMAT_VERSION } from '../model/schema.js';
 import { pageHeader, section, field, select, segmented } from './components.js';
-import { invalidate, setSyncState, relireReglages, SYNC_ROUTE_KEY } from './state.js';
+import { invalidate, setSyncState, getSyncState, relireReglages, SYNC_ROUTE_KEY } from './state.js';
 
 // Évite deux opérations d’archive concurrentes, même après un changement d’écran.
 let archiveOperation = false;
@@ -34,18 +37,27 @@ export async function renderSettings(params, query, ctx) {
       field(t('Redécouvrir'), el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: s.rediscover_enabled, onChange: async (e) => { await repo.setSetting('rediscover_enabled', e.target.checked); refresh(); } }), t('Proposer occasionnellement un livre peu consulté (aucune notification, aucun quota).'))),
       field(t('Nom de cet appareil'), el('input', { type: 'text', value: s.device_name || '', placeholder: 'iPhone de Neegan', onChange: (e) => repo.setSetting('device_name', e.target.value.trim()) })))));
 
-  // Synchronisation (spec § 4.2, ensemble L2) : avant « Sauvegarde », car une synchronisation ne la remplace pas.
+  // Synchronisation (spec § 4.2, ensembles L2 et L3) : avant « Sauvegarde », car une synchronisation ne la remplace
+  // pas. La file est lue UNE fois : son compte et ses entrées en quarantaine viennent de la même lecture.
   const sync = ctx.sync || {};
   const auth = sync.auth || null;
-  const pending = await repo.db.count('outbox');
+  const file = await repo.db.getAll('outbox');
+  const quarantaine = file.filter((e) => e.quarantined_at);
+  const conflits = await repo.db.getAll('sync_conflicts');
+  // Le moteur est posé par le démarrage (L3, tâche 9) : tant qu'il n'est pas là, rien de L3 n'est affiché.
+  const moteur = getSyncState().moteur || null;
+  suivreMoteurDeLaPage(moteur);
   root.append(syncSection({
     available: !!auth?.available,
     reason: auth ? auth.reason : 'config',
     user: sync.user || null,
     guard: sync.guard || null,
     retour: sync.retour || null,
-    pending,
+    pending: file.length,
     enAttente: sync.enAttente === true, // R28 : le démarrage n’a pas abouti dans sa borne de temps
+    moteur: moteur?.etat() || null,
+    quarantaine,
+    conflits,
   }, auth, s));
 
   // Le navigateur ne confirme pas que le téléchargement a été enregistré dans Fichiers.
@@ -177,6 +189,7 @@ export async function renderSettings(params, query, ctx) {
         await effacerDonnees({
           user: sync.user || null,
           pending: () => repo.db.count('outbox'),
+          enQuarantaine: async () => (await repo.db.getAll('outbox')).filter((e) => e.quarantined_at).length,
           confirm: confirmDialog,
           demanderMot: promptDialog,
           toast,
@@ -262,9 +275,18 @@ export async function renderSettings(params, query, ctx) {
 }
 
 // Un élément en attente ou plusieurs : deux phrases, jamais un pluriel calculé sur une chaîne traduite.
-const messageEnAttente = (n) => (n === 1
-  ? t('1 élément n’est pas encore envoyé.')
-  : t('{n} éléments ne sont pas encore envoyés.', { n }));
+// L3 : s'il y a de la quarantaine, le refus doit dire POURQUOI la file ne se videra pas d'elle-même et où est la
+// sortie — « Envoyer maintenant » ne débloquera jamais une entrée refusée, seul « Abandonner cet envoi » le fait.
+const messageEnAttente = (n, m = 0) => {
+  if (m > 0) {
+    return n === 1
+      ? t('1 élément n’est pas encore envoyé, et il est en quarantaine : « Abandonner » d’abord.')
+      : t('{n} éléments ne sont pas encore envoyés (dont {m} en quarantaine : « Abandonner » d’abord).', { n, m });
+  }
+  return n === 1
+    ? t('1 élément n’est pas encore envoyé.')
+    : t('{n} éléments ne sont pas encore envoyés.', { n });
+};
 
 // Remplacement d'archive refusé (R31) : deux chaînes, jamais un pluriel calculé sur une chaîne traduite.
 const messageRemplacementRefuse = (n) => (n === 1
@@ -278,13 +300,16 @@ const messagePerte = (n) => (n > 1
 
 // « Effacer les données de cet appareil » (spec § 4.2) : décision et effets, sans DOM ni base — toutes les
 // dépendances sont injectées, pour que le geste le plus destructeur de l'app soit éprouvé plutôt que relu.
-// R24 : le refus pour file non vide ne vaut QUE s'il existe un compte. Sans compte, rien ne videra jamais la file
-// (il n'y a pas d'envoi en L2, et « Abandonner cet envoi » est L3) : le refus rendrait le bouton mort pour toujours,
-// dès la première écriture ordinaire. Sans compte, on passe donc au double contrôle, qui dit déjà la perte.
-export async function effacerDonnees({ user = null, pending, confirm, demanderMot, toast: dire, clearDevice, signOut = null, reload }) {
+// R24 : le refus pour file non vide ne vaut QUE s'il existe un compte. Sans compte rien n'envoie, donc rien ne
+// videra jamais la file : le refus rendrait le bouton mort pour toujours, dès la première écriture ordinaire. Sans
+// compte, on passe donc au double contrôle, qui dit déjà la perte.
+// L3 : avec un compte, le refus doit nommer la quarantaine quand il y en a. Une entrée en quarantaine ne partira
+// par aucun envoi — seul « Abandonner cet envoi » la retire — et sans cette phrase le bouton resterait refusé sans
+// jamais dire par où sortir.
+export async function effacerDonnees({ user = null, pending, enQuarantaine = async () => 0, confirm, demanderMot, toast: dire, clearDevice, signOut = null, reload }) {
   // La file est relue au moment du geste : elle a pu bouger depuis le rendu de la page.
   const enAttente = await pending();
-  if (user && enAttente > 0) { dire(messageEnAttente(enAttente)); return false; }
+  if (user && enAttente > 0) { dire(messageEnAttente(enAttente, await enQuarantaine())); return false; }
   if (!(await confirm(t('Effacer les données de cet appareil ? Fais d’abord une sauvegarde.'), { danger: true, okLabel: t('Continuer') }))) return false;
   const mot = await demanderMot(t('Tape EFFACER pour confirmer'));
   if (mot !== 'EFFACER') { dire(t('Annulé')); return false; }
@@ -330,14 +355,103 @@ export async function changerDeCompte({ confirm, toast: dire, pending, archiveCr
 // Consentement à l'historique de consultation (spec § 4.2, D6 ; R27). Le réglage est écrit D'ABORD — la capture le
 // relit et se referme — puis ce qui attendait de partir est retiré de la file : un retrait de consentement qui
 // laisse partir la file n'est pas un retrait. Rend le nombre d'entrées retirées.
-export async function reglerHistorique(actif, { setSetting = repo.setSetting, oublierEnvois = repo.oublierEnvois } = {}) {
+// L3 : à l'ACTIVATION, l'historique déjà sur cet appareil n'a jamais été mis en file — la capture était fermée
+// quand il s'est écrit. Retirer son marqueur d'envoi initial le fait rattraper à la prochaine passe ; sans cela,
+// seules les consultations à venir partiraient, et le consentement dirait moins que ce qu'il promet. Le marqueur
+// n'est PAS reposé au retrait (R27) : décocher vide la file, et un nouveau « oui » doit rattraper de nouveau.
+export async function reglerHistorique(actif, {
+  setSetting = repo.setSetting,
+  oublierEnvois = repo.oublierEnvois,
+  db = repo.db,
+  retirerMarqueur: retirer = retirerMarqueur,
+  moteur = getSyncState().moteur,
+} = {}) {
   await setSetting('sync_activity', actif === true);
-  return actif === true ? 0 : await oublierEnvois('library_activity');
+  if (actif !== true) return await oublierEnvois('library_activity');
+  await retirer(db, 'library_activity');
+  moteur?.planifier();
+  return 0;
 }
 
-// Les trois seuls gestes de la section. Le modèle ne peut nommer qu'eux, et le rendu ignore une action inconnue :
-// un renommage donne un bouton manquant (visible), jamais un bouton muet.
-export const SYNC_ACTIONS = ['signIn', 'signOut', 'changeAccount'];
+// « Réessayer » sur une entrée en quarantaine (spec § 4.2) : l'entrée est RELUE au moment du geste (la passe en
+// cours a pu la retirer), remise à zéro, puis une passe est demandée tout de suite — un geste de la personne qui
+// n'est suivi d'aucune tentative serait un bouton muet. Rend `true` si quelque chose a été fait.
+export async function reessayerEnvoi({ db, seq, moteur = null, reprendre = reprendreEnvoi }) {
+  const entree = await db.get('outbox', seq);
+  if (!entree) return false;
+  await reprendre(db, entree);
+  moteur?.executer('reessai');
+  return true;
+}
+
+// « Abandonner cet envoi » : la seule façon de vider une entrée que le serveur refuse. La confirmation dit les deux
+// moitiés de la vérité — l'envoi est abandonné, la fiche reste ici. L'entrée est relue d'abord : rien n'est demandé
+// pour une entrée déjà partie.
+export async function abandonnerEnvoi({ db, seq, confirm, retirer = retirerEnvoi }) {
+  const entree = await db.get('outbox', seq);
+  if (!entree) return false;
+  const message = t('L’envoi de cette fiche sera abandonné ; la fiche reste sur cet appareil.');
+  if (!(await confirm(message, { danger: true, okLabel: t('Abandonner cet envoi') }))) return false;
+  await retirer(db, seq);
+  return true;
+}
+
+// Trancher un conflit (spec § 5.5) : le conflit est RELU au moment du geste — l'autre bouton, un autre onglet ou la
+// purge des vieux conflits ont pu le faire disparaître. « Garder celle d'ici » remet la fiche en file : une passe
+// est planifiée, sinon le choix attendrait le prochain déclencheur. « Garder celle d'ailleurs » ne remet rien en
+// file — le serveur a déjà cette version — et rend `false` quand il n'y a rien à appliquer : le conflit reste.
+export async function garderVersionDIci({ db, id, moteur = null, appliquer = garderIci }) {
+  const conflit = await db.get('sync_conflicts', id);
+  if (!conflit) return false;
+  const applique = await appliquer(db, conflit);
+  if (applique) moteur?.planifier();
+  return applique;
+}
+
+export async function garderVersionDAilleurs({ db, id, appliquer = garderAilleurs }) {
+  const conflit = await db.get('sync_conflicts', id);
+  if (!conflit) return false;
+  return await appliquer(db, conflit);
+}
+
+// Abonnement à l'état du moteur : plusieurs changements rapprochés ne font qu'UN rendu, et l'abonné se retire de
+// lui-même dès que la vue affichée n'est plus Réglages. Le routeur ne démonte pas les vues (aucun crochet de
+// nettoyage) : sans ce retrait, chaque navigation laisserait un abonné de plus, et chaque passe rafraîchirait un
+// écran qui ne parle pas de synchronisation. Rend de quoi arrêter, ou null s'il n'y a rien à suivre.
+export function suivreMoteur({ moteur, surReglages, rafraichir, delaiMs = 300 }) {
+  if (typeof moteur?.onEtat !== 'function') return null;
+  let minuterie = null;
+  let retirer = null;
+  const arreter = () => {
+    if (minuterie) { clearTimeout(minuterie); minuterie = null; }
+    const r = retirer;
+    retirer = null;
+    r?.();
+  };
+  retirer = moteur.onEtat(() => {
+    if (!surReglages()) { arreter(); return; }
+    if (minuterie) return; // regroupement : le premier changement fixe l'heure du rendu
+    minuterie = setTimeout(() => {
+      minuterie = null;
+      if (surReglages()) rafraichir();
+    }, delaiMs);
+  });
+  return arreter;
+}
+
+// Un seul abonné pour toute l'application, remplacé à chaque rendu de Réglages : il vit au niveau du module, pas
+// dans le nœud rendu, parce que c'est le seul endroit qui survit au remplacement de la vue.
+let abonnementMoteur = null;
+
+function suivreMoteurDeLaPage(moteur) {
+  abonnementMoteur?.();
+  abonnementMoteur = suivreMoteur({ moteur, surReglages: () => currentPath() === '/settings', rafraichir: refresh });
+}
+
+// Les quatre seuls gestes nommés par le modèle. Le rendu ignore une action inconnue : un renommage donne un bouton
+// manquant (visible), jamais un bouton muet. Les gestes des listes (quarantaine, conflits) ne passent pas par là :
+// ils portent une clé, et le rendu les câble directement.
+export const SYNC_ACTIONS = ['signIn', 'signOut', 'changeAccount', 'envoyerMaintenant'];
 
 // Départ chez le fournisseur. La route courante est mémorisée (redirectTo part sans fragment, le retour atterrirait
 // sur l’accueil) et RETIRÉE si rien ne part : une route fantôme détournerait le prochain démarrage de cet onglet.
@@ -363,6 +477,21 @@ function syncSection(state, auth, settings) {
       refresh();
     },
     changeAccount: () => changeAccount(auth),
+    envoyerMaintenant: async () => { await getSyncState().moteur?.envoyerMaintenant(); refresh(); },
+  };
+  // Gestes des listes : chacun relit sa cible avant d'agir, puis la page est rendue de nouveau.
+  const gestesL3 = {
+    reessayer: async (seq) => { await reessayerEnvoi({ db: repo.db, seq, moteur: getSyncState().moteur }); refresh(); },
+    abandonner: async (seq) => { await abandonnerEnvoi({ db: repo.db, seq, confirm: confirmDialog }); refresh(); },
+    garderIci: async (id) => { await garderVersionDIci({ db: repo.db, id, moteur: getSyncState().moteur }); refresh(); },
+    garderAilleurs: async (id) => {
+      // Un conflit dont le serveur n'a pas joint sa version ne peut pas être appliqué : il RESTE, et on le dit —
+      // mieux vaut un conflit qui attend qu'une fiche écrasée par rien. Un conflit déjà tranché ailleurs ne dit
+      // rien du tout : il est relu pour ne pas annoncer un conflit qui n'existe plus.
+      const applique = await garderVersionDAilleurs({ db: repo.db, id });
+      if (!applique && await repo.db.get('sync_conflicts', id)) toast(t('Cette version n’a pas été reçue en entier : le conflit reste.'));
+      refresh();
+    },
   };
   const boutons = model.buttons.filter((b) => Object.hasOwn(gestes, b.action));
   return section(model.title,
@@ -370,11 +499,49 @@ function syncSection(state, auth, settings) {
     boutons.length
       ? el('div', { class: 'row' }, ...boutons.map((b) => el('button', { class: 'btn' + (b.tone ? ' ' + b.tone : ''), onClick: gestes[b.action] }, b.label)))
       : null,
+    ...syncSectionL3(model, gestesL3),
     field(t('Historique de consultation'),
       el('label', { class: 'check' },
         el('input', { type: 'checkbox', checked: settings.sync_activity === true, onChange: async (e) => { await reglerHistorique(e.target.checked); refresh(); } }),
         t('Synchroniser mon historique de consultation')),
-      t('Désactivé, ce que tu consultes reste sur cet appareil. Le décocher retire aussi ce qui attendait d’être envoyé.')));
+      // Le cocher ne vaut pas seulement pour la suite : il fait aussi partir l'historique DÉJÀ sur cet appareil
+      // (le marqueur d'envoi initial est retiré). C'est une porte de confidentialité : elle se dit avant le geste.
+      t('Désactivé, ce que tu consultes reste sur cet appareil. Le décocher retire aussi ce qui attendait d’être envoyé ; le cocher envoie aussi l’historique déjà sur cet appareil.')));
+}
+
+// Rendu de l'ensemble L3 (spec § 4.2) : progression, pause, liste de quarantaine, liste de conflits. Rend un
+// tableau de nœuds (vide quand le modèle n'a rien de L3), exporté pour être éprouvé tel quel : une liste juste dans
+// le modèle mais affichée nulle part serait un faux vert. Aucune lecture de base, aucun état : seulement le modèle
+// et les gestes reçus. Un geste absent ne casse rien — le bouton existe et ne fait rien de visible.
+export function syncSectionL3(model, gestes = {}) {
+  const noeuds = [];
+  if (model.progression) noeuds.push(el('p', { class: 'muted' }, model.progression));
+  if (model.pause) noeuds.push(el('div', { class: 'card warn' }, model.pause));
+  const quarantaine = model.quarantaine || [];
+  if (quarantaine.length) {
+    noeuds.push(el('h3', null, t('En quarantaine')),
+      el('p', { class: 'muted' }, t('Ces fiches restent sur cet appareil ; elles n’iront pas au serveur tant que ce n’est pas réglé.')));
+    for (const q of quarantaine) {
+      noeuds.push(el('div', { class: 'status warn', dataset: { quarantaine: String(q.seq) } },
+        el('p', null, `${q.libelle} — ${q.motif}`),
+        el('div', { class: 'row' },
+          el('button', { class: 'btn', onClick: () => gestes.reessayer?.(q.seq) }, t('Réessayer')),
+          el('button', { class: 'btn danger', onClick: () => gestes.abandonner?.(q.seq) }, t('Abandonner cet envoi')))));
+    }
+  }
+  const conflits = model.conflits || [];
+  if (conflits.length) {
+    noeuds.push(el('h3', null, t('Conflits à trancher')),
+      el('p', { class: 'muted' }, t('Deux versions portent la même heure. Choisis celle qui compte ; rien n’est fusionné.')));
+    for (const c of conflits) {
+      noeuds.push(el('div', { class: 'status warn', dataset: { conflit: String(c.id) } },
+        el('p', null, t('{l} — version d’ici du {a}, version d’ailleurs du {b}', { l: c.libelle, a: c.dateIci, b: c.dateAilleurs })),
+        el('div', { class: 'row' },
+          el('button', { class: 'btn', onClick: () => gestes.garderIci?.(c.id) }, t('Garder celle d’ici ({d})', { d: c.dateIci })),
+          el('button', { class: 'btn', onClick: () => gestes.garderAilleurs?.(c.id) }, t('Garder celle d’ailleurs')))));
+    }
+  }
+  return noeuds;
 }
 
 // Câblage du geste « Changer de compte sur cet appareil » : la décision et les effets vivent dans changerDeCompte().
@@ -394,9 +561,14 @@ async function changeAccount(auth) {
 // Modèle pur de la section « Synchronisation » (spec § 4.2, ensemble L2) : ce que la section dit et ce qu’elle offre.
 // Aucun DOM, aucun appel réseau, aucune lecture de base : testable tel quel, consommé par syncSection().
 // Rien n’est deviné : sans adresse connue la ligne reste vide, et un refus du fournisseur n’est jamais détaillé.
-export function syncSectionModel({ available = false, reason = null, user = null, pending = 0, guard = null, retour = null, enAttente = false } = {}) {
+// L3 : le modèle reçoit en plus l'état du moteur (null tant qu'il n'existe pas), les entrées en quarantaine et les
+// conflits. Rien de L3 n'apparaît hors de l'état « connectée + garde ok » — avant lui le compte n'est pas établi —
+// et SANS moteur le modèle est exactement celui de L2, pas même une clé de plus : la section de L2 reste intacte
+// tant que le moteur n'est pas branché.
+export function syncSectionModel({ available = false, reason = null, user = null, pending = 0, guard = null, retour = null, enAttente = false, moteur = null, quarantaine: enQuarantaine = [], conflits: aTrancher = [] } = {}) {
   const lines = [];
   const buttons = [];
+  let connectee = false;
   if (!available) {
     // Deux indisponibilités distinctes, nommées : elles n’appellent pas la même suite.
     lines.push(reason === 'bibliotheque'
@@ -416,8 +588,21 @@ export function syncSectionModel({ available = false, reason = null, user = null
     buttons.push({ action: 'changeAccount', label: t('Changer de compte sur cet appareil'), tone: 'danger' });
   } else if (user && guard?.ok) {
     lines.push(t('Connectée : {e}', { e: user.email || '' }));
+    // « À envoyer » est la file ENTIÈRE, quarantaine comprise : additionner les deux compterait deux fois.
     lines.push(t('À envoyer : {n}', { n: pending }));
+    if (moteur) {
+      // I5 : chaque ligne vient d'un fait du moteur (un appel abouti, une entrée refusée, une mesure d'horloge).
+      lines.push(moteur.dernierEchange
+        ? t('Dernier échange : {h}', { h: formatDate(moteur.dernierEchange, { withTime: true }) })
+        : t('Aucun échange encore.'));
+      lines.push(t('En quarantaine : {n}', { n: moteur.enQuarantaine }));
+      lines.push(t('Conflits : {n}', { n: moteur.conflits }));
+      if (moteur.attenteConnexion) lines.push(t('En attente de connexion — l’envoi reprendra après la prochaine connexion.'));
+      if (moteur.horloge) lines.push(t('L’heure de cet appareil semble fausse (± {m} min).', { m: moteur.horloge.minutes }));
+      buttons.push({ action: 'envoyerMaintenant', label: t('Envoyer maintenant'), tone: '' });
+    }
     buttons.push({ action: 'signOut', label: t('Se déconnecter'), tone: '' });
+    connectee = true;
   } else {
     lines.push(t('Tes données restent sur cet appareil.'));
     buttons.push({ action: 'signIn', label: t('Activer la synchronisation'), tone: 'primary' });
@@ -425,8 +610,50 @@ export function syncSectionModel({ available = false, reason = null, user = null
   // Retour du fournisseur : dit après l’état, sans jamais prétendre en connaître la cause.
   if (retour?.codeSansSession) lines.push(t('La connexion n’a pas abouti.'));
   if (retour?.error) lines.push(retour.error);
-  return { title: t('Synchronisation'), lines, buttons };
+  const title = t('Synchronisation');
+  if (!connectee || !moteur) return { title, lines, buttons };
+  return {
+    title,
+    lines,
+    buttons,
+    // Le libellé ne lit rien en base : le magasin et l'identifiant tronqué suffisent à reconnaître la fiche, et le
+    // motif est une phrase — le jeton ASCII du serveur ne se montre jamais (R9).
+    quarantaine: enQuarantaine.map((e) => ({
+      seq: e.seq,
+      libelle: `${e.store} · ${String(e.id).slice(0, 12)}`,
+      motif: motifEnvoi(e.last_error),
+    })),
+    conflits: aTrancher.map((c) => ({
+      id: c.id,
+      libelle: `${c.store} · ${c.local?.title || c.local?.name || c.record_id}`,
+      dateIci: formatDate(c.local?.updated_at || c.at, { withTime: true }),
+      dateAilleurs: formatDate(c.server?.updated_at || c.at, { withTime: true }),
+      kind: c.kind,
+    })),
+    // Une progression ne s'affiche que pendant une passe : une passe terminée laisserait un compteur figé.
+    progression: moteur.enCours && moteur.progression
+      ? (moteur.phase === 'reception'
+        ? t('Réception : {t} {n}/{total}', { t: moteur.progression.table, n: moteur.progression.n, total: moteur.progression.total })
+        : t('Envoi initial : {t} {n}/{total}', { t: moteur.progression.table, n: moteur.progression.n, total: moteur.progression.total }))
+      : null,
+    pause: moteur.pause?.raison === 'quota'
+      ? t('Espace serveur plein (1 Go au palier gratuit) — rien n’est perdu, tout reste sur cet appareil.')
+      : null,
+  };
 }
+
+// Vocabulaire des motifs de rejet (spec § 5.3, R9) : le serveur renvoie des jetons ASCII, la personne lit une
+// phrase qui dit QUOI regarder. Un jeton inattendu (serveur plus récent que cette version de l'app) tombe sur la
+// phrase la plus générale — jamais sur le jeton brut, et jamais sur une cause inventée.
+const MOTIFS_ENVOI = {
+  taille: 'Fiche trop grosse (plus de 512 Ko)',
+  updated_at: 'Fiche sans date',
+  cle: 'Clé incohérente',
+  forme: 'Fiche mal formée',
+  refus: 'Refusée par le serveur',
+};
+
+export const motifEnvoi = (code) => t(Object.hasOwn(MOTIFS_ENVOI, code) ? MOTIFS_ENVOI[code] : 'Envoi refusé');
 
 function exportBundles(ctx, { includeReferences = false } = {}) {
   return ctx.docs.filter((d) => includeReferences || d.version).map((d) => ({ recipe: d.recipe, version: d.version, book: d.book, edition: d.edition }));
