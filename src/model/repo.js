@@ -11,22 +11,34 @@ import { resolveMime } from '../sync/mime.js';
 export let db = new Database(DB_NAME, DB_VERSION, STORES);
 export function bindDatabase(database) { db = database; }
 
+// --- Identité de l'appareil (spec § 5.1) -----------------------------------
+// Une seule identité, gardée dans sync_state : elle survit au vidage (clearDevice), jamais capturée, jamais envoyée.
+// Tant que src/ui/import.js lit encore la clé localStorage (bascule prévue en T13), la valeur y est **reflétée**
+// plutôt que retirée : sans ce reflet, deux identifiants différents cohabiteraient sur le même appareil.
 const DEVICE_STORAGE_KEY = 'cuisineos.device';
+let deviceIdValue = null;
 
-// L'identité de l'appareil quitte localStorage pour sync_state (spec § 5.1) : elle survit au vidage, pas à la désinstallation.
-async function migrateDeviceId() {
-  let stored = null;
-  try { stored = localStorage.getItem(DEVICE_STORAGE_KEY); } catch { return; }
-  if (!stored) return;
-  if (!(await db.get('sync_state', 'device_id'))) {
-    await db.mutate({ puts: { sync_state: [{ key: 'device_id', value: stored }] }, origin: 'device' });
+const readStoredDevice = () => { try { return localStorage.getItem(DEVICE_STORAGE_KEY); } catch { return null; } };
+const writeStoredDevice = (value) => { try { localStorage.setItem(DEVICE_STORAGE_KEY, value); } catch { /* stockage indisponible */ } };
+
+async function ensureDeviceId() {
+  const row = await db.get('sync_state', 'device_id');
+  let value = row?.value || null;
+  if (!value) {
+    value = readStoredDevice() || newId('dev'); // reprise de l'identité d'avant le lot, sinon une neuve
+    await db.mutate({ puts: { sync_state: [{ key: 'device_id', value }] }, origin: 'device' });
   }
-  try { localStorage.removeItem(DEVICE_STORAGE_KEY); } catch { /* stockage indisponible : la clé sera reprise au prochain démarrage */ }
+  deviceIdValue = value;
+  writeStoredDevice(value);
+  return value;
 }
+
+// Synchrone : utilisable au moment de créer une fiche. Vaut null avant init().
+export function deviceId() { return deviceIdValue; }
 
 export async function init() {
   await db.open();
-  await migrateDeviceId();
+  await ensureDeviceId();
   // Références : ajoutées seulement si absentes (jamais écrasées, pour préserver les corrections de l'utilisateur).
   const [units, conventions, ingredients] = await Promise.all([
     db.getAll('unit_definitions'), db.getAll('unit_conventions'), db.getAll('ingredients'),
@@ -147,9 +159,11 @@ export async function putFile(sha256, blob, meta = {}) {
   const existing = await db.get('files', sha256);
   if (existing && existing.blob instanceof Blob) return existing;
   const { origin, ...rest } = meta;
-  const { mime, syncable } = resolveMime(blob.type || meta.mime, meta.original_filename || existing?.original_filename);
+  // Le type connu de la ligne existante compte aussi : une ligne reçue du serveur porte son mime sans octets.
+  const { mime, syncable } = resolveMime(blob.type || meta.mime || existing?.mime, meta.original_filename || existing?.original_filename);
   const now = syncNow();
-  const row = { ...(existing || {}), sha256, blob, mime, syncable, size: blob.size, created_at: existing?.created_at || now, updated_at: now, ...rest };
+  // Les champs calculés passent après meta : ni le type résolu ni la taille réelle ne se font écraser.
+  const row = { ...(existing || {}), ...rest, sha256, blob, mime, syncable, size: blob.size, created_at: existing?.created_at || now, updated_at: now };
   await db.mutate({ puts: { files: [row] }, origin: origin === 'remote' ? 'remote' : 'local' });
   return row;
 }

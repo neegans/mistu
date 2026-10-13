@@ -44,7 +44,7 @@ export async function runSyncTests({ eq, ok }) {
   const { Database, MUTATING_METHODS } = await import('../src/core/db.js');
   const { withDatabase } = await import('./backup.js');
   const TEST_STORES = { a: { keyPath: 'id', indexes: [] }, b: { keyPath: 'id', indexes: [] }, journal: { keyPath: 'seq', autoIncrement: true, indexes: [] } };
-  eq(MUTATING_METHODS.sort(), ['clear', 'clearAll', 'delete', 'deleteMany', 'mutate', 'put', 'putBatch', 'putMany'], 'liste des méthodes mutantes exportée');
+  eq([...MUTATING_METHODS].sort(), ['clear', 'clearAll', 'delete', 'deleteMany', 'mutate', 'put', 'putBatch', 'putMany'], 'liste des méthodes mutantes exportée');
   await withDatabase(async (db) => {
     await db.mutate({ puts: { a: [{ id: 'a1' }], journal: [{ note: 'x' }, { note: 'y' }] } });
     const rows = await db.getAll('journal');
@@ -131,6 +131,16 @@ export async function runSyncTests({ eq, ok }) {
   ok(rules.isSameOriginGet({ url: origin + '/mistu/?code=abc', method: 'GET' }, origin), 'isSameOriginGet : GET même origine avec paramètres');
   ok(!rules.isSameOriginGet({ url: 'https://autre.test/x.js', method: 'GET' }, origin), 'isSameOriginGet : autre origine');
 
+  // --- Horloge corrigée (spec § 5.3) : monotone, strictement croissante, décalage mémorisé
+  const { syncNow, setClockOffset, getClockOffset } = await import('../src/sync/clock.js');
+  const t0 = syncNow();
+  setClockOffset(-7200000); // horloge locale qui recule de 2 h
+  const t1 = syncNow(); const t2 = syncNow();
+  ok(t1 > t0 && t2 > t1, 'syncNow : jamais en arrière, jamais deux fois la même valeur sous une horloge reculée');
+  eq(getClockOffset(), -7200000, 'décalage mémorisé');
+  setClockOffset(undefined);
+  eq(getClockOffset(), 0, 'décalage non finie : ramené à 0');
+
   // --- Capture (spec § 5.2) et repo (spec § 5.1)
   const { installCapture, uninstallCapture } = await import('../src/sync/outbox.js');
   await withDatabase(async (db) => {
@@ -145,30 +155,35 @@ export async function runSyncTests({ eq, ok }) {
     eq((await db.getAll('outbox')).length, 2, 'réception : non capturée');
     await db.mutate({ clearStores: ['recipes'], origin: 'device' });
     eq((await db.getAll('outbox')).length, 2, 'vidage d’appareil : non capturé');
+    await db.mutate({ puts: { files: [{ sha256: 'f'.repeat(64), mime: 'text/plain', size: 1 }] } });
+    eq((await db.getAll('outbox')).length, 2, 'ligne files d’avant le lot (type hors liste, sans champ syncable) : non capturée');
     uninstallCapture(db);
   });
   const { withRepo } = await import('./sync-fixture.js'); // base temporaire v2, repo lié dessus
   await withRepo(async (repo, db) => {
+    const device = await db.get('sync_state', 'device_id');
+    ok(device?.value && repo.deviceId() === device.value, 'init : device_id créé dans sync_state et rendu par deviceId()');
+    eq(localStorage.getItem('cuisineos.device'), device.value, 'init : identité reflétée dans localStorage tant que import.js la lit');
     const row = await repo.putFile('b'.repeat(64), new Blob(['x'], { type: '' }), { original_filename: 'IMG.HEIC' });
     ok(row.updated_at && row.mime === 'image/heic' && row.syncable === true, 'putFile : updated_at, type résolu, synchronisable');
     const unknown = await repo.putFile('c'.repeat(64), new Blob(['y'], { type: '' }), { original_filename: 'notes.txt' });
     ok(unknown.syncable === false && unknown.mime === 'application/octet-stream', 'type inconnu : gardé localement, non synchronisable');
     await db.mutate({ puts: { files: [{ sha256: 'd'.repeat(64), mime: 'image/jpeg', size: 1, remote: true, updated_at: '2026-10-12T10:00:00Z' }] }, origin: 'remote' });
-    const filled = await repo.putFile('d'.repeat(64), new Blob(['z'], { type: 'image/jpeg' }), { origin: 'remote' });
-    ok(filled.blob instanceof Blob, 'putFile remote : le blob est écrit sur une ligne qui n’en avait pas');
+    const filled = await repo.putFile('d'.repeat(64), new Blob(['z']), { origin: 'remote' });
+    ok(filled.blob instanceof Blob && filled.mime === 'image/jpeg' && filled.syncable === true, 'putFile remote : le blob est écrit sur une ligne qui n’en avait pas, et le type connu du serveur est gardé');
     await repo.recordActivity('ed1', 'open');
     ok((await db.getAll('library_activity'))[0].updated_at, 'recordActivity : updated_at');
     await repo.save('recipes', { id: 'r1' });
     await repo.remove('recipes', 'r1');
     const out = await db.getAll('outbox');
-    eq(out.map((o) => o.op), ['put', 'put', 'put', 'delete'].slice(-out.length), 'ordre des captures');
+    eq(out.map((o) => [o.store, o.id, o.op]), [['files', 'b'.repeat(64), 'put'], ['recipes', 'r1', 'put'], ['recipes', 'r1', 'delete']], 'ordre des captures : rien de plus, rien de moins');
     await repo.clearDevice({ signOut: async () => {} });
     eq([(await db.getAll('recipes')).length, (await db.getAll('outbox')).length, (await db.getAll('sync_state')).map((s) => s.key)], [0, 0, ['device_id']], 'clearDevice : tout vidé sauf device_id');
   });
   // Test statique : aucune écriture directe hors repo.js, src/sync/ et backup.js (spec § 5.2)
   const swText = await (await fetch('../sw.js')).text();
   const shell = [...swText.matchAll(/'(\.\/src\/[^']+\.js)'/g)].map((m) => m[1]);
-  const forbidden = new RegExp('\\bdb\\.(' + MUTATING_METHODS.join('|') + ')\\s*\\(');
+  const forbidden = new RegExp('\\bdb\\.(' + [...MUTATING_METHODS].join('|') + ')\\s*\\(');
   const offenders = [];
   for (const file of shell) {
     if (/src\/model\/repo\.js$|src\/sync\/|src\/domain\/backup\.js$|src\/core\/db\.js$/.test(file)) continue;

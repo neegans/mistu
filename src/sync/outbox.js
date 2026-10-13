@@ -1,10 +1,13 @@
 // Capture des écritures dans la même transaction que la donnée (spec § 5.2) : une seule porte, db.mutate.
 // Aucun envoi ici : la file est seulement remplie ; la vider est le travail de L3 (src/sync/push.js).
 import { SYNC_STORES } from '../model/schema.js';
+import { isAllowed } from './mime.js';
 import { keyOf } from './tables.js';
 
 // Une ligne « files » non synchronisable reste locale et n'entre jamais en file (spec § 5.3, § 5.4).
-const syncableRow = (store, row) => store !== 'files' || row?.syncable !== false;
+// Le type est vérifié en plus du drapeau : les lignes d'avant ce lot et celles d'une restauration n'ont pas de
+// champ « syncable », et seule la liste blanche part vers le serveur.
+const syncableRow = (store, row) => store !== 'files' || (row?.syncable !== false && isAllowed(row?.mime));
 
 // Copie de la fiche au moment de la suppression, sans laisser une clé héritée du prototype passer pour un payload.
 function payloadFor(payloads, store, key) {

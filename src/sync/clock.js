@@ -6,8 +6,10 @@ let floorIso = '';
 export const setClockOffset = (ms) => { offsetMs = Number.isFinite(ms) ? ms : 0; };
 export const getClockOffset = () => offsetMs;
 
-// Jamais une valeur inférieure à la dernière rendue (un plancher, pas un compteur).
+// Jamais une valeur inférieure à la dernière rendue, et jamais deux fois la même : sous une horloge reculée,
+// le plancher avance d'une milliseconde, sinon deux écritures successives porteraient le même updated_at.
 export function syncNow() {
   const iso = new Date(Date.now() + offsetMs).toISOString();
-  return iso > floorIso ? (floorIso = iso) : floorIso;
+  if (iso > floorIso) return (floorIso = iso);
+  return (floorIso = new Date(Date.parse(floorIso) + 1).toISOString());
 }
