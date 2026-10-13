@@ -166,3 +166,53 @@ test('aucune donnee personnelle, determinisme', () => {
   const again = renderMigrations();
   assert.equal(again.tables, sql); assert.equal(again.storage, storage);
 });
+
+// --- Tache 4 : preuves SQL, gabarits de preuve et mode d'emploi -------------------------------------------------
+// Ces fichiers ne sont pas generes : ils sont ecrits a la main et relus contre le SQL genere ci-dessus. Les tests
+// qui suivent verifient ce qu'une relecture humaine laisse passer : un motif oublie, une adresse reelle, un
+// « rollback; » qui ne serait plus la derniere instruction, et le mode d'emploi qui cite 0001 de travers.
+import { readFileSync } from 'node:fs';
+const lire = (chemin) => readFileSync(new URL('../' + chemin, import.meta.url), 'utf8');
+const instructions = (texte) => texte.split('\n').map((l) => l.trim()).filter((l) => l !== '');
+
+test('preuve 0001 : les cinq motifs, les privileges, R12, rollback final, aucune adresse reelle', () => {
+  const p = lire('supabase/proofs/0001_tables_et_regles.sql');
+  for (const m of ["'cle'", "'forme'", "'taille'", "'updated_at'", 'conflit', 'updated_at']) assert.ok(p.includes(m), m);
+  for (const m of ['has_table_privilege', 'has_sequence_privilege', 'has_function_privilege',
+    "set_config('app.maintenance'", 'before_user_created(', 'sync_purge(', 'sync_purge_all(']) assert.ok(p.includes(m), m);
+  // R12 : la preuve de 0001 ne parle jamais de la table des objets du stockage (l app supprime l objet par l API).
+  assert.ok(!p.includes('storage.objects'), 'storage.objects absent de la preuve 0001');
+  // La preuve ne laisse rien : derniere instruction non vide = rollback;
+  const l = instructions(p);
+  assert.equal(l[l.length - 1], 'rollback;');
+  // Aucune adresse reelle : seuls les jetons et le domaine reserve exemple.invalid sont toleres.
+  const sansJetons = p.replace(/[A-Za-z0-9._%+-]+@exemple\.invalid/g, '').replace(/A_EMAIL|B_EMAIL/g, '');
+  assert.doesNotMatch(sansJetons, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+  // Les quatre jetons sont bien presents (sinon il n y a rien a remplacer).
+  for (const j of ['A_UUID', 'A_EMAIL', 'B_UUID', 'B_EMAIL']) assert.ok(p.includes(j), j);
+});
+test('preuve 0002 et gabarits : seau, regles pages_*, vue, renvoi a L4, captures', () => {
+  const p = lire('supabase/proofs/0002_stockage.sql');
+  assert.ok(p.includes("from storage.buckets"), 'lecture du seau');
+  assert.ok(p.includes('52428800'), 'limite de 50 Mo');
+  for (const m of ALLOWED_MIME) assert.ok(p.includes(m), m);
+  assert.ok(p.includes("policyname like 'pages_%'"), 'les quatre regles pages_*');
+  assert.ok(p.includes('private.storage_usage'), 'la vue');
+  assert.match(p, /L4/, 'les refus reels sont renvoyes au lot L4');
+  assert.doesNotMatch(p, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+  const hook = lire('supabase/proofs/0001_hook.md');
+  assert.ok(hook.includes('public.before_user_created') && /Before User Created/.test(hook));
+  const providers = lire('supabase/proofs/0001_providers.md');
+  for (const m of ['Google', 'Email', 'Phone', 'Anonymous']) assert.ok(providers.includes(m), m);
+});
+test('README : cite mot pour mot la derniere instruction de 0001 (celle a coller a part)', () => {
+  const surDisque = instructions(lire('supabase/migrations/0001_tables_et_regles.sql'));
+  const derniere = surDisque[surDisque.length - 1];
+  assert.match(derniere, /^select cron\.schedule\(/, 'la derniere instruction de 0001 est bien le cron');
+  const generees = instructions(sql);
+  assert.equal(generees[generees.length - 1], derniere, 'le fichier sur disque est bien celui du generateur');
+  const readme = lire('supabase/README.md');
+  assert.ok(readme.includes(derniere), 'le README cite la derniere instruction mot pour mot');
+  for (const m of ['mistu-dev', 'pg_cron', 'RESULTATS-', 'allowed_users', '0002_stockage.sql']) assert.ok(readme.includes(m), m);
+  assert.doesNotMatch(readme, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+});
