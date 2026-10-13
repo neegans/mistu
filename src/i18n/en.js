@@ -76,4 +76,7 @@ export const EN = {
   "Restaurer dans cette base vide": "Restore into this empty library",
   "Fusionner avec la bibliothèque actuelle": "Merge with the current library",
   "Remplacer toute la bibliothèque": "Replace the entire library",
+  // Durcissement : aperçu PDF isolé (spec § 6.2).
+  "Télécharger le fichier": "Download the file",
+  "Si l’aperçu reste vide, télécharge le fichier.": "If the preview stays empty, download the file.",
 };

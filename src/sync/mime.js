@@ -19,3 +19,10 @@ export function resolveMime(type, filename = '') {
 // À l'affichage : jamais un type hors liste (un blob text/html ou image/svg+xml exécuterait du script sur notre origine).
 export const safeDisplayType = (mime) => (isAllowed(mime) ? mime : null);
 export const extensionFor = (mime) => (Object.hasOwn(MIME_TO_EXT, mime) ? MIME_TO_EXT[mime] : 'bin');
+
+// URL d'affichage d'une ligne files : le blob est retypé avec un type de la liste blanche, ou rien n'est affiché.
+export function displayUrl(fileRow) {
+  const type = safeDisplayType(fileRow?.mime);
+  if (!type || !(fileRow.blob instanceof Blob)) return null;
+  return URL.createObjectURL(fileRow.blob.type === type ? fileRow.blob : new Blob([fileRow.blob], { type }));
+}

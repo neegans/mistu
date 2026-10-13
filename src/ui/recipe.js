@@ -4,6 +4,7 @@ import { el, toast, chooseDialog, promptDialog, confirmDialog, formatDate, downl
 import { t, label } from '../core/i18n.js';
 import { navigate, buildQuery, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
+import { displayUrl } from '../sync/mime.js';
 import { currentVersion } from '../domain/search.js';
 import { scaleVersion } from '../domain/scaling.js';
 import { assessVersion } from '../domain/diet.js';
@@ -78,7 +79,7 @@ export async function renderRecipe(params, query, ctx) {
 
   // Pages originales
   if (pages.length) root.append(section(t('Original'), el('p', { class: 'muted' }, t('Pages du livre telles que photographiées. Une adaptation n’est jamais présentée comme le texte original.')),
-    el('div', { class: 'thumbs' }, ...pages.map((p) => { const img = el('img', { alt: t('Page originale'), loading: 'lazy', class: 'clickable', onClick: () => window.open(img.src, '_blank') }); repo.getFile(p.sha256).then((f) => { if (f) img.src = URL.createObjectURL(f.blob); }); return el('figure', null, img, el('figcaption', null, p.printed_page ? `${t('p.')} ${p.printed_page}` : '')); }))));
+    el('div', { class: 'thumbs' }, ...pages.map((p) => { const img = el('img', { alt: t('Page originale'), loading: 'lazy' }); repo.getFile(p.sha256).then((f) => { const u = displayUrl(f); if (u) img.src = u; }); return el('figure', null, img, el('figcaption', null, p.printed_page ? `${t('p.')} ${p.printed_page}` : '')); }))));
   else if (recipe.printed_page) root.append(el('p', { class: 'muted' }, t('Original : page {p} du livre (pages non photographiées).', { p: recipe.printed_page })));
 
   // Versions
@@ -199,7 +200,7 @@ export async function renderRecipe(params, query, ctx) {
           el('a', { class: 'btn primary', href: `#/add?edition=${recipe.edition_id || ''}`, onClick: () => sessionStorage.setItem('cuisineos.pending_recipe', recipe.id) }, t('Scanner cette recette')),
           el('a', { class: 'btn', href: `#/recipes/${recipe.id}/edit?kind=extraction` }, t('Saisir à la main')),
           dish ? el('a', { class: 'btn', href: `#/dishes/${dish.id}` }, t('Autres recettes de ce plat')) : el('button', { class: 'btn', onClick: attachDish }, t('Rattacher à un plat')))),
-      pages.length ? section(t('Pages d’index'), el('div', { class: 'thumbs' }, ...pages.map((p) => { const img = el('img', { loading: 'lazy' }); repo.getFile(p.sha256).then((f) => { if (f) img.src = URL.createObjectURL(f.blob); }); return el('figure', null, img); }))) : null);
+      pages.length ? section(t('Pages d’index'), el('div', { class: 'thumbs' }, ...pages.map((p) => { const img = el('img', { loading: 'lazy' }); repo.getFile(p.sha256).then((f) => { const u = displayUrl(f); if (u) img.src = u; }); return el('figure', null, img); }))) : null);
   }
 }
 

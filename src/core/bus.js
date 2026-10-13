@@ -1,4 +1,6 @@
 // Bus d'événements minimal pour rafraîchir les vues après une écriture.
+import { logError } from './log.js';
+
 const listeners = new Map();
 
 export function on(event, fn) {
@@ -9,9 +11,9 @@ export function on(event, fn) {
 
 export function emit(event, payload) {
   for (const fn of listeners.get(event) || []) {
-    try { fn(payload); } catch (e) { console.error(e); }
+    try { fn(payload); } catch (e) { logError('bus', { error: e }); }
   }
   for (const fn of listeners.get('*') || []) {
-    try { fn(event, payload); } catch (e) { console.error(e); }
+    try { fn(event, payload); } catch (e) { logError('bus', { error: e }); }
   }
 }

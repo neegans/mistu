@@ -3,6 +3,7 @@ import { el, toast, pickFiles, confirmDialog, promptDialog } from '../core/dom.j
 import { t } from '../core/i18n.js';
 import { navigate, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
+import { displayUrl } from '../sync/mime.js';
 import { listConventions } from '../domain/units.js';
 import { pageHeader, section, field, select, recipeCard, emptyState } from './components.js';
 import { startScanSession, indexEntriesPanel } from './import.js';
@@ -77,7 +78,7 @@ export async function renderBook(params, query, ctx) {
     const thumbs = el('div', { class: 'thumbs' });
     for (const p of [...pages].sort((a, b) => (a.printed_page ?? 9999) - (b.printed_page ?? 9999))) {
       const img = el('img', { alt: t('Page'), loading: 'lazy' });
-      repo.getFile(p.sha256).then((f) => { if (f) img.src = URL.createObjectURL(f.blob); });
+      repo.getFile(p.sha256).then((f) => { const u = displayUrl(f); if (u) img.src = u; });
       thumbs.append(el('figure', null, img, el('figcaption', null, p.printed_page ? `${t('p.')} ${p.printed_page}` : t('page non numérotée'), p.kind ? ` · ${p.kind === 'index' ? t('index') : t('recette')}` : '')));
     }
     root.append(section(t('Pages et fichiers sources'),

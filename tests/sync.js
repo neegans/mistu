@@ -93,4 +93,24 @@ export async function runSyncTests({ eq, ok }) {
     eq(archive.missingFiles, 1, 'archive : une page non téléchargée comptée');
     eq(archive.manifest.files.length, 0, 'et absente de l’archive');
   });
+
+  // --- Durcissement (spec § 6.2, § 5.4, § 6.4)
+  for (const page of ['../index.html', './index.html']) {
+    const html = await (await fetch(page)).text();
+    ok(/http-equiv="Content-Security-Policy"/.test(html) && /script-src 'self'/.test(html) && !/frame-ancestors/.test(html), page + ' : CSP présente, script-src self, sans frame-ancestors');
+    ok(/name="referrer" content="no-referrer"/.test(html), page + ' : referrer no-referrer');
+    ok(!/<style>/.test(html) && !/<script>(?!<)/.test(html.replace(/<script type="module" src=[^>]+><\/script>/g, '')), page + ' : ni style ni script inline');
+  }
+  const { displayUrl } = await import('../src/sync/mime.js');
+  eq(displayUrl({ mime: 'text/html', blob: new Blob(['<script>1</script>'], { type: 'text/html' }) }), null, 'HTML : jamais d’URL d’affichage');
+  const url = displayUrl({ mime: 'image/svg+xml', blob: new Blob(['<svg/>'], { type: 'image/svg+xml' }) });
+  eq(url, null, 'SVG : jamais');
+  const jpg = displayUrl({ mime: 'image/jpeg', blob: new Blob([1], { type: 'text/html' }) });
+  ok(typeof jpg === 'string' && jpg.startsWith('blob:'), 'JPEG : URL d’un blob retypé image/jpeg');
+  const { logError } = await import('../src/core/log.js');
+  const seen = []; const orig = console.error; console.error = (...a) => seen.push(a);
+  logError('sync.push', { store: 'books', id: 'b1', secret: 'ne doit pas sortir', error: new Error('corps de réponse') });
+  console.error = orig;
+  eq(seen.length, 1, 'un seul appel console');
+  ok(JSON.stringify(seen[0]).includes('books') && !JSON.stringify(seen[0]).includes('corps de réponse') && !JSON.stringify(seen[0]).includes('ne doit pas sortir'), 'console : code et identifiants seulement');
 }

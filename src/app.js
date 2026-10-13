@@ -4,6 +4,7 @@ import { route, setNotFound, start, parseHash, refresh } from './core/router.js'
 import { setUiLocale, t } from './core/i18n.js';
 import * as repo from './model/repo.js';
 import { on } from './core/bus.js';
+import { logError } from './core/log.js';
 import { getData } from './ui/state.js';
 
 import { renderHome } from './ui/home.js';
@@ -65,9 +66,9 @@ async function onRoute({ handler, params, query, path }) {
     replace(current.main, node);
     window.scrollTo(0, 0);
   } catch (e) {
-    console.error(e);
+    logError('route', { error: e });
     if (seq !== renderSeq) return;
-    replace(current.main, el('div', { class: 'card danger' }, el('h2', null, t('Une erreur est survenue')), el('pre', null, String(e && e.stack || e))));
+    replace(current.main, el('div', { class: 'card danger' }, el('h2', null, t('Une erreur est survenue')), el('p', { class: 'muted' }, t('Code : {c}', { c: e?.name || 'Erreur' })), el('button', { class: 'btn', onClick: () => location.reload() }, t('Recharger'))));
   }
 }
 
@@ -103,8 +104,8 @@ async function boot() {
       navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('Service worker non enregistré', e));
     }
   } catch (e) {
-    console.error(e);
-    replace(document.getElementById('app'), el('div', { class: 'card danger', style: { margin: '1rem' } }, el('h2', null, 'Cuisine OS ne peut pas démarrer'), el('pre', null, String(e && e.stack || e))));
+    logError('boot', { error: e });
+    replace(document.getElementById('app'), el('div', { class: 'card danger', style: { margin: '1rem' } }, el('h2', null, 'Cuisine OS ne peut pas démarrer'), el('p', { class: 'muted' }, t('Code : {c}', { c: e?.name || 'Erreur' })), el('button', { class: 'btn', onClick: () => location.reload() }, t('Recharger'))));
   }
 }
 

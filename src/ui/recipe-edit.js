@@ -1,9 +1,10 @@
 // Éditeur de version : extraction (saisie ou IA), correction ciblée, adaptation personnelle, traduction (spec §3.3, §6, §16).
 // L'original n'est jamais réécrit : chaque enregistrement crée une nouvelle RecipeVersion liée à son parent.
-import { el, toast, promptDialog, confirmDialog } from '../core/dom.js';
+import { el, toast, promptDialog, confirmDialog, downloadBlob } from '../core/dom.js';
 import { t, label } from '../core/i18n.js';
 import { navigate } from '../core/router.js';
 import * as repo from '../model/repo.js';
+import { displayUrl } from '../sync/mime.js';
 import { parseIngredientBlock, parseIngredientLine, parseStepsBlock } from '../domain/lines.js';
 import { currentVersion } from '../domain/search.js';
 import { getConvention } from '../domain/units.js';
@@ -59,13 +60,20 @@ export async function renderRecipeEdit(params, query, ctx) {
   if (pages.length) {
     for (const p of pages) {
       const img = el('img', { class: 'page-view', alt: t('Page originale'), loading: 'lazy' });
-      repo.getFile(p.sha256).then((fl) => { if (fl) img.src = URL.createObjectURL(fl.blob); });
+      repo.getFile(p.sha256).then((fl) => { const u = displayUrl(fl); if (u) img.src = u; });
       left.append(el('figure', { style: { margin: 0 } }, img, el('figcaption', { class: 'muted' }, p.printed_page ? `${t('p.')} ${p.printed_page}` : t('page non numérotée'))));
     }
   } else if (doc && doc.source_type === 'pdf') {
-    const frame = el('iframe', { class: 'pdf', title: doc.original_filename });
-    repo.getFile(doc.sha256).then((fl) => { if (fl) frame.src = URL.createObjectURL(fl.blob); });
-    left.append(frame, el('small', { class: 'muted' }, t('Indique la page imprimée et, si utile, la position dans le fichier.')));
+    const frame = el('iframe', { class: 'pdf', title: doc.original_filename, sandbox: '' });
+    left.append(frame);
+    repo.getFile(doc.sha256).then((fl) => {
+      if (!fl) return;
+      frame.src = displayUrl(fl) || '';
+      left.append(el('div', { class: 'row' },
+        el('button', { class: 'btn', onClick: () => downloadBlob(fl.blob, doc.original_filename) }, t('Télécharger le fichier')),
+        el('small', { class: 'muted' }, t('Si l’aperçu reste vide, télécharge le fichier.'))));
+    });
+    left.append(el('small', { class: 'muted' }, t('Indique la page imprimée et, si utile, la position dans le fichier.')));
   } else left.append(el('div', { class: 'card flat muted' }, t('Aucune page source jointe. Tu peux saisir la recette et rattacher des pages plus tard.')));
 
   // Colonne droite : formulaire

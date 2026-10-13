@@ -1,9 +1,10 @@
 // Séance de scan continue (spec §16) : photos et fichiers conservés sur l'appareil, miniatures numérotées, regroupement,
 // remplacement d'une page, entrées d'index, états fondés sur des événements réels. Aucune page n'est annoncée « sur le serveur ».
-import { el, toast, pickFiles, confirmDialog, formatDate } from '../core/dom.js';
+import { el, toast, pickFiles, confirmDialog, formatDate, downloadBlob } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { navigate, buildQuery, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
+import { displayUrl } from '../sync/mime.js';
 import { sha256Hex } from '../core/hash.js';
 import { normalizeText } from '../domain/units.js';
 import { providerFrom, extractIndexFromImages, blobToBase64 } from '../domain/llm.js';
@@ -113,7 +114,7 @@ function sessionView(session, ctx) {
   };
   for (const p of pages) {
     const img = el('img', { alt: `${t('Page')} ${p.position}`, loading: 'lazy' });
-    repo.getFile(p.sha256).then((f) => { if (f) img.src = URL.createObjectURL(f.blob); });
+    repo.getFile(p.sha256).then((f) => { const u = displayUrl(f); if (u) img.src = u; });
     const check = el('input', { type: 'checkbox', onChange: (e) => { if (e.target.checked) selected.add(p.id); else selected.delete(p.id); drawActions(); } });
     const pageInput = el('input', { type: 'number', placeholder: t('p. imprimée'), value: p.printed_page ?? '', style: { minHeight: '30px', padding: '.2rem .4rem', fontSize: '.8rem' }, onChange: async (e) => { p.printed_page = e.target.value ? parseInt(e.target.value, 10) : null; await repo.save('source_pages', p); } });
     thumbs.append(el('figure', null, el('span', { class: 'num' }, String(p.position)), img,
@@ -132,9 +133,15 @@ function sessionView(session, ctx) {
           el('a', { class: 'btn primary', href: `#/recipes/new${buildQuery({ doc: d.id, edition: session.edition_id || '', session: session.id })}` }, t('Créer une recette depuis ce fichier')),
           el('button', { class: 'btn', onClick: () => { indexPanel.hidden = false; indexPanel.dataset.doc = d.id; indexPanel.scrollIntoView({ behavior: 'smooth' }); } }, t('Indexer le livre'))));
       if (d.source_type === 'pdf') {
-        const frame = el('iframe', { class: 'pdf', title: d.original_filename });
-        repo.getFile(d.sha256).then((f) => { if (f) frame.src = URL.createObjectURL(f.blob); });
+        const frame = el('iframe', { class: 'pdf', title: d.original_filename, sandbox: '' });
         box.append(frame);
+        repo.getFile(d.sha256).then((f) => {
+          if (!f) return;
+          frame.src = displayUrl(f) || '';
+          box.append(el('div', { class: 'row' },
+            el('button', { class: 'btn', onClick: () => downloadBlob(f.blob, d.original_filename) }, t('Télécharger le fichier')),
+            el('small', { class: 'muted' }, t('Si l’aperçu reste vide, télécharge le fichier.'))));
+        });
       } else box.append(el('p', { class: 'muted' }, t('EPUB conservé. La lecture intégrée n’est pas encore disponible : indexe les recettes à la main ou exporte les pages en images.')));
       return box;
     })));
