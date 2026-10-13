@@ -50,6 +50,7 @@ export class Database {
     this.version = version;
     this.stores = stores; // { storeName: { keyPath, indexes: [[name, keyPath, options?]] } }
     this.idb = null;
+    this.onMutate = null;
   }
 
   async open() {
@@ -60,7 +61,7 @@ export class Database {
       const db = request.result;
       for (const [name, def] of Object.entries(this.stores)) {
         let store;
-        if (!db.objectStoreNames.contains(name)) store = db.createObjectStore(name, { keyPath: def.keyPath || 'id' });
+        if (!db.objectStoreNames.contains(name)) store = db.createObjectStore(name, { keyPath: def.keyPath || 'id', autoIncrement: !!def.autoIncrement });
         else store = request.transaction.objectStore(name);
         for (const [idxName, keyPath, options] of def.indexes || []) {
           if (!store.indexNames.contains(idxName)) store.createIndex(idxName, keyPath, options || {});
@@ -135,21 +136,10 @@ export class Database {
     if (!batch || typeof batch !== 'object' || Array.isArray(batch)) {
       throw new TypeError('Le lot doit associer chaque magasin à un tableau');
     }
-    const entries = Object.entries(batch);
-    for (const [name, rows] of entries) {
+    for (const [name, rows] of Object.entries(batch)) {
       if (!Array.isArray(rows)) throw new TypeError('Les données de ' + name + ' doivent être un tableau');
     }
-    const toClear = knownStoreNames(this.stores, clearStores);
-    const names = knownStoreNames(this.stores, [...toClear, ...entries.map(([name]) => name)]);
-    if (!names.length) return;
-    const tx = await this.tx(names, 'readwrite');
-    await runTransaction(tx, () => {
-      for (const name of toClear) tx.objectStore(name).clear();
-      for (const [name, rows] of entries) {
-        const os = tx.objectStore(name);
-        for (const row of rows) os.put(row);
-      }
-    });
+    return this.mutate({ puts: batch, clearStores });
   }
 
   async delete(store, key) {
@@ -158,21 +148,34 @@ export class Database {
 
   async deleteMany(store, keys) {
     if (!Array.isArray(keys)) throw new TypeError('Les clés à supprimer doivent être un tableau');
-    const names = knownStoreNames(this.stores, [store]);
-    if (!keys.length) return;
-    const tx = await this.tx(names, 'readwrite');
-    await runTransaction(tx, () => {
-      const os = tx.objectStore(store);
-      for (const key of keys) os.delete(key);
-    });
+    return this.mutate({ deletes: { [store]: keys } });
   }
 
   async clear(store) {
-    await this.putBatch({}, { clearStores: [store] });
+    await this.mutate({ clearStores: [store] });
   }
 
   async clearAll() {
-    await this.putBatch({}, { clearStores: Object.keys(this.stores) });
+    await this.mutate({ clearStores: Object.keys(this.stores) });
+  }
+
+  // Porte unique d'écriture (spec § 5.1) : puts, deletes et vidages dans UNE transaction ; le crochet onMutate peut
+  // ajouter des lignes (capture d'outbox) écrites dans la même transaction. origin : 'local' | 'remote' | 'device'.
+  async mutate({ puts = {}, deletes = {}, clearStores = [], origin = 'local', payloads = {} } = {}) {
+    for (const [name, rows] of Object.entries(puts)) if (!Array.isArray(rows)) throw new TypeError('Les données de ' + name + ' doivent être un tableau');
+    for (const [name, keys] of Object.entries(deletes)) if (!Array.isArray(keys)) throw new TypeError('Les clés de ' + name + ' doivent être un tableau');
+    const extra = this.onMutate ? (this.onMutate({ puts, deletes, clearStores, origin, payloads }) || {}) : {};
+    const allPuts = { ...puts };
+    for (const [name, rows] of Object.entries(extra)) allPuts[name] = [...(allPuts[name] || []), ...rows];
+    const toClear = knownStoreNames(this.stores, clearStores);
+    const names = knownStoreNames(this.stores, [...toClear, ...Object.keys(allPuts), ...Object.keys(deletes)]);
+    if (!names.length) return;
+    const tx = await this.tx(names, 'readwrite');
+    await runTransaction(tx, () => {
+      for (const name of toClear) tx.objectStore(name).clear();
+      for (const [name, rows] of Object.entries(allPuts)) { const os = tx.objectStore(name); for (const row of rows) os.put(row); }
+      for (const [name, keys] of Object.entries(deletes)) { const os = tx.objectStore(name); for (const key of keys) os.delete(key); }
+    });
   }
 
   async isEmpty(ignore = []) {
@@ -183,3 +186,6 @@ export class Database {
     return true;
   }
 }
+
+// Méthodes qui écrivent dans la base, toutes rabattues sur mutate() : la porte unique d'écriture.
+export const MUTATING_METHODS = ['put', 'putMany', 'putBatch', 'delete', 'deleteMany', 'clear', 'clearAll', 'mutate'];

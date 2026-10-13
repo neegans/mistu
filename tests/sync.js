@@ -39,4 +39,28 @@ export async function runSyncTests({ eq, ok }) {
   eq(extensionFor('constructor'), 'bin', 'extensionFor : même garde');
   eq(resolveMime('image/jpeg; charset=binary', 'a'), { mime: 'image/jpeg', syncable: true }, 'paramètre charset ignoré après le type déclaré');
   eq(resolveMime('', 'archive.zip'), { mime: 'application/octet-stream', syncable: false }, 'extension inconnue (zip) non synchronisable');
+
+  // --- db.mutate : une transaction, crochet de capture, autoIncrement (spec § 5.1, § 5.2)
+  const { Database, MUTATING_METHODS } = await import('../src/core/db.js');
+  const { withDatabase } = await import('./backup.js');
+  const TEST_STORES = { a: { keyPath: 'id', indexes: [] }, b: { keyPath: 'id', indexes: [] }, journal: { keyPath: 'seq', autoIncrement: true, indexes: [] } };
+  eq(MUTATING_METHODS.sort(), ['clear', 'clearAll', 'delete', 'deleteMany', 'mutate', 'put', 'putBatch', 'putMany'], 'liste des méthodes mutantes exportée');
+  await withDatabase(async (db) => {
+    await db.mutate({ puts: { a: [{ id: 'a1' }], journal: [{ note: 'x' }, { note: 'y' }] } });
+    const rows = await db.getAll('journal');
+    eq(rows.map((r) => r.seq), [1, 2], 'autoIncrement : clés 1, 2');
+    db.onMutate = ({ puts, deletes, origin }) => origin === 'local' ? { journal: [{ note: 'capture:' + Object.keys(puts).join(',') + '|' + Object.keys(deletes).join(',') }] } : null;
+    await db.mutate({ puts: { b: [{ id: 'b1' }] } });
+    eq((await db.getAll('journal')).at(-1).note, 'capture:b|', 'le crochet écrit dans la même transaction');
+    await db.mutate({ puts: { a: [{ id: 'a2' }] }, origin: 'remote' });
+    eq((await db.getAll('journal')).length, 3, 'origin remote : aucune capture');
+    let threw = false;
+    try { await db.mutate({ puts: { a: [{ pas_de_cle: true }] }, deletes: { b: ['b1'] } }); } catch { threw = true; }
+    ok(threw, 'une écriture sans clé lève');
+    eq((await db.get('b', 'b1'))?.id, 'b1', 'et la suppression du même lot est annulée');
+    eq((await db.getAll('journal')).length, 3, 'et aucune capture n’est restée');
+    await db.mutate({ deletes: { b: ['b1'] } });
+    eq(await db.get('b', 'b1'), undefined, 'suppression par mutate');
+    eq((await db.getAll('journal')).at(-1).note, 'capture:|b', 'la suppression est capturée avec son magasin');
+  }, TEST_STORES);
 }

@@ -11,7 +11,7 @@ const STORE_NAMES = Object.keys(STORES);
 const SECRET = 'cle-secrete-fictive-test-a-exclure';
 const enc = new TextEncoder();
 
-async function withDatabase(test, stores = STORES) {
+export async function withDatabase(test, stores = STORES) {
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const name = `cuisine-os-backup-test-${suffix}`;
   const db = new Database(name, DB_VERSION, stores);
