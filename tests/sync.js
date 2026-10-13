@@ -222,7 +222,7 @@ export async function runSyncTests({ eq, ok }) {
     await auth.signIn();
     eq(calls.at(-1).signIn.options.redirectTo, 'https://cuisine.exemple.test/', 'redirectTo sans fragment');
     eq(calls.at(-1).signIn.provider, 'google', 'fournisseur Google');
-    auth.handleReturn();
+    eq(await auth.handleReturn(), { error: null, codeSansSession: false }, 'retour normal : aucun refus, session obtenue');
     eq(fakeHistory.at(-1), '/#/settings', 'code retiré, fragment conservé');
     eq(auth.readError({ search: '?error=access_denied&error_description=x', hash: '' }), 'Cette adresse n’est pas autorisée.', 'refus : message fixe');
     eq(auth.readError({ search: '', hash: '#error=server_error&error_code=unexpected_failure' }), 'Cette adresse n’est pas autorisée.', 'refus dans le fragment');
@@ -248,14 +248,83 @@ export async function runSyncTests({ eq, ok }) {
     eq(typeof off, 'function', 'onChange rend la fonction de désabonnement');
     off(); offBus();
     fakeWin.location.search = '?error=access_denied&error_description=texte+brut';
-    const msgRetour = auth.handleReturn();
-    eq(msgRetour, 'Cette adresse n’est pas autorisée.', 'handleReturn : le refus lu est rendu');
+    const retour = await auth.handleReturn();
+    eq(retour, { error: 'Cette adresse n’est pas autorisée.', codeSansSession: false }, 'handleReturn : le refus lu est rendu, sans code à échanger');
     eq(fakeHistory.at(-1), '/#/settings', 'refus aussi retiré de l’historique');
-    ok(!String(msgRetour).includes('texte brut') && !String(msgRetour).includes('access_denied'), 'le texte brut du refus n’est jamais rendu');
+    ok(!JSON.stringify(retour).includes('texte brut') && !JSON.stringify(retour).includes('access_denied'), 'le texte brut du refus n’est jamais rendu');
+    eq(auth.readError({ search: '?error_description=texte+brut', hash: '' }), 'Cette adresse n’est pas autorisée.', 'error_description seul : refus reconnu');
     let ecritures = 0; const vraiMutate = db.mutate.bind(db);
     db.mutate = (arg) => { ecritures += 1; return vraiMutate(arg); };
     eq([await auth.guard('uid-A', 'a@exemple.test'), ecritures], [{ ok: true }, 0], 'même compte deux fois : accepté sans réécriture');
     eq([(await auth.guard('uid-B', 'b@exemple.test')).ok, ecritures], [false, 0], 'un refus n’écrit rien');
+    eq([await auth.guard('uid-A', 'neuve@exemple.test'), ecritures], [{ ok: true }, 1], 'adresse réellement changée : rafraîchie une fois');
+    eq((await db.get('sync_state', 'user_email')).value, 'neuve@exemple.test', 'adresse connue mise à jour');
+    eq([await auth.guard('uid-A', ''), ecritures], [{ ok: true }, 1], 'adresse vide : l’adresse connue n’est jamais effacée');
     delete db.mutate;
+
+    // Ronde 1 — I1 : l'échange du code est attendu AVANT le nettoyage de l'URL.
+    let echange = false; const ordre = [];
+    const lentWin = { location: { origin: 'https://c.test', pathname: '/', hash: '#/settings', search: '?code=abc&state=s' }, history: { replaceState: () => ordre.push(echange ? 'apres-echange' : 'avant-echange') } };
+    const lentFactory = () => ({ auth: {
+      getSession: () => new Promise((resolve) => setTimeout(() => { echange = true; resolve({ data: { session: { user: { id: 'uid-A', email: 'a@exemple.test' } } } }); }, 20)),
+      signInWithOAuth: async () => ({ error: null }), signOut: async () => ({ error: null }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
+    } });
+    const lent = createAuth({ db, config: { url: 'https://x.supabase.co', anonKey: 'k' }, factory: lentFactory, win: lentWin });
+    eq([await lent.handleReturn(), ordre], [{ error: null, codeSansSession: false }, ['apres-echange']], 'handleReturn attend l’échange avant de nettoyer l’URL');
+
+    // I2 : un code revenu sans session est signalé à l'appelant et journalisé, et l'URL est nettoyée quand même.
+    const muetWin = { location: { origin: 'https://c.test', pathname: '/', hash: '#/settings', search: '?code=abc' }, history: { replaceState: (a, b, url) => fakeHistory.push(url) } };
+    const muetFactory = () => ({ auth: {
+      getSession: async () => ({ data: { session: null } }),
+      signInWithOAuth: async () => ({ error: null }), signOut: async () => ({ error: null }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
+    } });
+    const muet = createAuth({ db, config: { url: 'https://x.supabase.co', anonKey: 'k' }, factory: muetFactory, win: muetWin });
+    const journal = []; let vraiLog = console.error; console.error = (...a) => journal.push(a);
+    const retourMuet = await muet.handleReturn();
+    console.error = vraiLog;
+    eq(retourMuet, { error: null, codeSansSession: true }, 'code sans session : retour muet signalé');
+    ok(JSON.stringify(journal).includes('auth.retour') && JSON.stringify(journal).includes('sans_session'), 'retour muet journalisé');
+    eq(fakeHistory.at(-1), '/#/settings', 'et l’URL est nettoyée malgré l’échec');
+    const sansWin = { location: { origin: 'https://c.test', pathname: '/mistu/', hash: '#/settings', search: '?code=abc' }, history: { replaceState: (a, b, url) => fakeHistory.push(url) } };
+    const sansLib = createAuth({ db, config: { url: 'https://x.supabase.co', anonKey: 'k' }, factory: undefined, win: sansWin });
+    eq(await sansLib.handleReturn(), { error: null, codeSansSession: false }, 'sans client : rien n’a été tenté, donc aucun retour muet');
+    eq(fakeHistory.at(-1), '/mistu/#/settings', 'sans client : l’URL est nettoyée quand même');
+
+    // Mineur (b) : un refus porté par le fragment en sort aussi.
+    const fragWin = { location: { origin: 'https://c.test', pathname: '/', hash: '#/settings?error=access_denied', search: '' }, history: { replaceState: (a, b, url) => fakeHistory.push(url) } };
+    const frag = createAuth({ db, config: { url: 'https://x.supabase.co', anonKey: 'k' }, factory: muetFactory, win: fragWin });
+    eq((await frag.handleReturn()).error, 'Cette adresse n’est pas autorisée.', 'refus dans le fragment : reconnu sans requête');
+    eq(fakeHistory.at(-1), '/#/settings', 'refus retiré du fragment, route conservée');
+    fragWin.location.hash = '#error=server_error&error_code=unexpected_failure';
+    await frag.handleReturn();
+    eq(fakeHistory.at(-1), '/', 'refus occupant tout le fragment : fragment vidé');
+
+    // I3 : la garde échoue fermé quand la base ne répond pas.
+    const dbCasse = { get: async () => { throw new Error('base indisponible'); }, mutate: async () => { throw new Error('jamais atteint'); } };
+    const authCasse = createAuth({ db: dbCasse, config: { url: 'https://x.supabase.co', anonKey: 'k' }, factory: muetFactory, win: fakeWin });
+    const journalGarde = []; vraiLog = console.error; console.error = (...a) => journalGarde.push(a);
+    const garde = await authCasse.guard('uid-A', 'a@exemple.test');
+    console.error = vraiLog;
+    eq(garde, { ok: false, message: 'Cet appareil ne peut pas vérifier le compte.' }, 'garde : échoue fermé, sans rejet');
+    ok(JSON.stringify(journalGarde).includes('auth.garde') && !JSON.stringify(journalGarde).includes('base indisponible'), 'garde : journalisée par son code seul');
+
+    // Mineurs (c) et (e) : erreur rendue sans lever, statut journalisé, session illisible → null.
+    const fragileFactory = () => ({ auth: {
+      signInWithOAuth: async () => ({ error: { message: 'x', status: 400, code: 'y' } }),
+      signOut: async () => ({ error: null }),
+      getSession: async () => { throw new Error('reseau coupe'); },
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
+    } });
+    const fragile = createAuth({ db, config: { url: 'https://x.supabase.co', anonKey: 'k' }, factory: fragileFactory, win: fakeWin });
+    const journalFragile = []; vraiLog = console.error; console.error = (...a) => journalFragile.push(a);
+    const essai = await fragile.signIn();
+    const sessionKo = await fragile.session();
+    console.error = vraiLog;
+    eq([essai.error.status, essai.error.code, sessionKo], [400, 'y', null], 'erreur du client rendue sans lever ; session illisible → null');
+    const texteJournal = JSON.stringify(journalFragile);
+    ok(texteJournal.includes('auth.signIn') && texteJournal.includes('400') && texteJournal.includes('"reason":"y"'), 'journal : code, statut et motif');
+    ok(!texteJournal.includes('reseau coupe') && !texteJournal.includes('"x"'), 'journal : jamais le texte de l’erreur');
   });
 }

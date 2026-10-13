@@ -10,8 +10,9 @@ import { logError } from '../core/log.js';
 // supabase-js, échange automatique au retour. L'ordre des clés est celui de la spec.
 const AUTH_OPTIONS = { flowType: 'pkce', persistSession: true, detectSessionInUrl: true };
 
-// Un refus du fournisseur se reconnaît à ces clés ; leur valeur (error_description) n'est jamais montrée.
-const REFUS_KEYS = ['error', 'error_code'];
+// Un refus du fournisseur se reconnaît à la seule PRÉSENCE d'une de ces clés (spec § 4.1) ; leur valeur
+// (error_description surtout) n'est jamais lue, ni journalisée, ni montrée.
+const REFUS_KEYS = ['error', 'error_code', 'error_description'];
 
 // Lit une requête ou un fragment. Un fragment peut porter une route (« #/settings ») et, derrière elle, les
 // paramètres du fournisseur (« #/settings?error=… ») : la partie après le premier « ? » est examinée aussi.
@@ -26,6 +27,21 @@ function carriesRefusal(chunk) {
     return REFUS_KEYS.some((key) => params.has(key));
   });
 }
+
+// Fragment à écrire dans l'historique : un refus porté par le fragment en sort aussi.
+// « #/route?error=… » → « #/route » (la route est gardée) ; « #error=… » → fragment vide (rien à garder).
+// Sans refus, le fragment est rendu tel quel : la route de l'utilisateur n'est jamais touchée.
+function cleanHash(hash) {
+  const raw = String(hash || '').replace(/^#/, '');
+  if (!carriesRefusal(raw)) return hash || '';
+  const mark = raw.indexOf('?');
+  if (mark < 0) return '';
+  const route = raw.slice(0, mark);
+  return route ? '#' + route : '';
+}
+
+// Détails joints au journal : un code et un statut, jamais le texte de l'erreur (la liste blanche de log.js filtre).
+const detailsOf = (error) => ({ error, status: error?.status, reason: error?.code });
 
 // Forme rendue à l'interface : jamais l'objet session du client, seulement l'identifiant et l'adresse.
 const stateOf = (session) => (session?.user ? { user: { id: session.user.id, email: session.user.email || '' } } : null);
@@ -62,17 +78,41 @@ export function createAuth(options = {}) {
     return carriesRefusal(search) || carriesRefusal(hash) ? t('Cette adresse n’est pas autorisée.') : null;
   }
 
-  function handleReturn() {
+  // Retour du fournisseur, appelé une fois au démarrage (câblage en tâche 13). ASYNCHRONE à dessein.
+  // Contrat : rend { error, codeSansSession }.
+  //   error            = la phrase fixe du refus, ou null (jamais le texte du fournisseur).
+  //   codeSansSession  = vrai quand un code est revenu, que l'échange a été attendu et qu'aucune session n'en est
+  //                      sortie (tâche 13 : « La connexion n'a pas abouti »). Faux sans client : rien n'a été tenté.
+  // L'ordre compte : le code n'est retiré de l'URL qu'APRÈS l'échange. supabase-js lit l'URL à sa création et
+  // getSession() attend la fin de cet échange ; nettoyer avant reviendrait à retirer le code sous ses pieds — ça ne
+  // tient aujourd'hui que par la lecture synchrone du bundle 2.117.3, et ce n'est pas un contrat publié.
+  async function handleReturn() {
     const loc = win?.location || {};
     const search = loc.search || '';
     const hash = loc.hash || '';
     const params = new URLSearchParams(search.replace(/^\?/, ''));
-    // Le code d'autorisation ne doit pas rester dans l'historique ; le fragment de route, lui, est conservé.
-    if (params.has('code') || carriesRefusal(search)) {
-      try { win?.history?.replaceState?.(null, '', (loc.pathname || '/') + hash); }
-      catch (error) { logError('auth.retour', { error }); }
+    const aCode = params.has('code');
+    const refus = carriesRefusal(search) || carriesRefusal(hash);
+    let codeSansSession = false;
+    if (aCode && client) {
+      let etat = null;
+      try {
+        const { data, error } = await client.auth.getSession();
+        if (error) logError('auth.retour', detailsOf(error));
+        else etat = stateOf(data?.session);
+      } catch (error) {
+        logError('auth.retour', detailsOf(error));
+      }
+      // Retour muet : un code est bien revenu mais l'échange n'a donné aucune session. Jamais silencieux.
+      if (!etat) { codeSansSession = true; logError('auth.retour', { reason: 'sans_session' }); }
     }
-    return readError({ search, hash });
+    // Le code et les paramètres de refus ne restent pas dans l'historique ; la route du fragment est conservée.
+    // Sans client, il n'y a rien à échanger mais l'URL est nettoyée quand même.
+    if (aCode || refus) {
+      try { win?.history?.replaceState?.(null, '', (loc.pathname || '/') + cleanHash(hash)); }
+      catch (error) { logError('auth.retour', detailsOf(error)); }
+    }
+    return { error: readError({ search, hash }), codeSansSession };
   }
 
   async function signIn() {
@@ -81,10 +121,10 @@ export function createAuth(options = {}) {
       // redirectTo sans fragment : avec un « # », GoTrue colle la requête derrière et le code n'est jamais lu.
       const redirectTo = (win?.location?.origin || '') + (win?.location?.pathname || '/');
       const { error } = await client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } });
-      if (error) logError('auth.signIn', { error });
+      if (error) logError('auth.signIn', detailsOf(error));
       return { error: error || null };
     } catch (error) {
-      logError('auth.signIn', { error });
+      logError('auth.signIn', detailsOf(error));
       return { error };
     }
   }
@@ -94,10 +134,10 @@ export function createAuth(options = {}) {
     if (!client) return null;
     try {
       const { error } = await client.auth.signOut({ scope: 'local' });
-      if (error) logError('auth.signOut', { error });
+      if (error) logError('auth.signOut', detailsOf(error));
       return { error: error || null };
     } catch (error) {
-      logError('auth.signOut', { error });
+      logError('auth.signOut', detailsOf(error));
       return { error };
     }
   }
@@ -106,10 +146,10 @@ export function createAuth(options = {}) {
     if (!client) return null;
     try {
       const { data, error } = await client.auth.getSession();
-      if (error) { logError('auth.session', { error }); return null; }
+      if (error) { logError('auth.session', detailsOf(error)); return null; }
       return stateOf(data?.session);
     } catch (error) {
-      logError('auth.session', { error });
+      logError('auth.session', detailsOf(error));
       return null;
     }
   }
@@ -121,33 +161,47 @@ export function createAuth(options = {}) {
       const { data } = client.auth.onAuthStateChange((event, current) => {
         const state = stateOf(current);
         const payload = { user: state?.user || null };
-        try { fn?.(payload); } catch (error) { logError('auth.change', { error }); }
+        try { fn?.(payload); } catch (error) { logError('auth.change', detailsOf(error)); }
         emit('sync', payload);
       });
       handle = data?.subscription || null;
     } catch (error) {
-      logError('auth.change', { error });
+      logError('auth.change', detailsOf(error));
     }
-    return () => { try { handle?.unsubscribe?.(); } catch (error) { logError('auth.change', { error }); } };
+    return () => { try { handle?.unsubscribe?.(); } catch (error) { logError('auth.change', detailsOf(error)); } };
   }
 
   // Garde de compte (spec § 4.1) : un appareil ne sert qu'un compte. L'adresse connue est lue en base locale et
   // ne la quitte jamais ; un compte différent est refusé sans rien écrire (le geste « Changer de compte sur cet
   // appareil » est à l'interface, tâche 13, et passe par repo.clearDevice).
+  // Échoue FERMÉ : si la base ne répond pas, la garde refuse au lieu de laisser passer. Une base muette ne doit
+  // jamais devenir une autorisation.
   async function guard(uid, email) {
-    const [idRow, emailRow] = await Promise.all([db.get('sync_state', 'user_id'), db.get('sync_state', 'user_email')]);
-    const connu = idRow?.value || null;
-    if (!connu) {
-      await db.mutate({
-        puts: { sync_state: [{ key: 'user_id', value: uid }, { key: 'user_email', value: email || '' }] },
-        origin: 'device', // identité de l'appareil : jamais capturée, jamais envoyée
-      });
-      return { ok: true };
+    try {
+      const [idRow, emailRow] = await Promise.all([db.get('sync_state', 'user_id'), db.get('sync_state', 'user_email')]);
+      const connu = idRow?.value || null;
+      if (!connu) {
+        await db.mutate({
+          puts: { sync_state: [{ key: 'user_id', value: uid }, { key: 'user_email', value: email || '' }] },
+          origin: 'device', // identité de l'appareil : jamais capturée, jamais envoyée
+        });
+        return { ok: true };
+      }
+      if (connu === uid) {
+        // Même compte : rien à réécrire, sauf si l'adresse du compte a réellement changé (jamais effacée par un vide).
+        const adresse = email || '';
+        if (adresse && emailRow?.value !== adresse) {
+          await db.mutate({ puts: { sync_state: [{ key: 'user_email', value: adresse }] }, origin: 'device' });
+        }
+        return { ok: true };
+      }
+      // Les deux clés sont écrites ensemble ; si l'adresse manque malgré tout, l'identifiant connu sert de repère.
+      const adresse = emailRow?.value || connu;
+      return { ok: false, message: t('Cet appareil a été synchronisé avec {e}.', { e: adresse }) };
+    } catch (error) {
+      logError('auth.garde', detailsOf(error));
+      return { ok: false, message: t('Cet appareil ne peut pas vérifier le compte.') };
     }
-    if (connu === uid) return { ok: true };
-    // Les deux clés sont écrites ensemble ; si l'adresse manque malgré tout, l'identifiant connu sert de repère.
-    const adresse = emailRow?.value || connu;
-    return { ok: false, message: t('Cet appareil a été synchronisé avec {e}.', { e: adresse }) };
   }
 
   return { available: !!client, reason, signIn, signOut, session, onChange, handleReturn, readError, guard };

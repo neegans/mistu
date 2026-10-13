@@ -79,6 +79,7 @@ export const EN = {
   // Connexion et garde de compte (spec § 4.1).
   "Cette adresse n’est pas autorisée.": "This address is not allowed.",
   "Cet appareil a été synchronisé avec {e}.": "This device was synced with {e}.",
+  "Cet appareil ne peut pas vérifier le compte.": "This device cannot verify the account.",
   // Durcissement : aperçu PDF isolé (spec § 6.2).
   "Télécharger le fichier": "Download the file",
   "Si l’aperçu reste vide, télécharge le fichier.": "If the preview stays empty, download the file.",
