@@ -132,14 +132,14 @@ export class Database {
   }
 
   // Vidages et écritures multi-magasins dans une transaction : tout réussit ou tout est annulé.
-  async putBatch(batch, { clearStores = [] } = {}) {
+  async putBatch(batch, { clearStores = [], origin = 'local' } = {}) {
     if (!batch || typeof batch !== 'object' || Array.isArray(batch)) {
       throw new TypeError('Le lot doit associer chaque magasin à un tableau');
     }
     for (const [name, rows] of Object.entries(batch)) {
       if (!Array.isArray(rows)) throw new TypeError('Les données de ' + name + ' doivent être un tableau');
     }
-    return this.mutate({ puts: batch, clearStores });
+    return this.mutate({ puts: batch, clearStores, origin });
   }
 
   async delete(store, key) {

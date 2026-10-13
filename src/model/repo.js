@@ -59,8 +59,11 @@ export async function init() {
   // Horodatées à l'insertion (R26) : ces trois magasins sont dans SYNC_STORES, et sync_push rejette une fiche sans
   // updated_at — les 96 références seraient parties en quarantaine au premier envoi initial (spec § 5.2, § 5.3).
   // Seuls les magasins qui ont réellement quelque chose à écrire sont touchés : rien à faire au démarrage ordinaire.
+  // Origine 'device' : comme la passe d'horodatage, l'amorçage n'est pas une écriture de la personne et n'a rien à
+  // envoyer. init() précède installCapture au démarrage, mais un rappel d'init() sur une base amputée d'une
+  // référence (restauration partielle, référence corrigée puis supprimée) mettrait sinon jusqu'à 96 fiches en file.
   const aPoser = Object.fromEntries(Object.entries(batch).filter(([, rows]) => rows.length));
-  if (Object.keys(aPoser).length) await saveBatch(aPoser);
+  if (Object.keys(aPoser).length) await saveBatch(aPoser, { origin: 'device' });
   await horodaterAnciennesFiches();
 }
 
@@ -131,13 +134,15 @@ export async function save(store, record) {
   return r;
 }
 
-export async function saveBatch(batch) {
+// `origin` : 'local' par défaut (écriture de la personne, donc capturée) ; 'device' pour ce qui ne part jamais au
+// serveur (amorçage des références, rattrapages) — c'est la capture qui tranche, d'après l'origine (src/sync/outbox.js).
+export async function saveBatch(batch, { origin = 'local' } = {}) {
   const now = syncNow();
   const stamped = {};
   for (const [store, rows] of Object.entries(batch)) {
     stamped[store] = rows.map((r) => ({ ...r, created_at: r.created_at || now, updated_at: now }));
   }
-  await db.putBatch(stamped);
+  await db.putBatch(stamped, { origin });
   for (const store of Object.keys(stamped)) emit('change', { store });
   return stamped;
 }

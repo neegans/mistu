@@ -135,14 +135,18 @@ export async function runSyncTests({ eq, ok }) {
   ok(!rules.isSameOriginGet({ url: 'https://autre.test/x.js', method: 'GET' }, origin), 'isSameOriginGet : autre origine');
 
   // --- Horloge corrigée (spec § 5.3) : monotone, strictement croissante, décalage mémorisé
+  // Le décalage est un état de module, partagé avec tout ce qui horodate (repo.js) : il est remis à 0 en finally,
+  // sinon un échec en cours de bloc laisserait l'horloge reculée de 2 h pour toute la suite des tests.
   const { syncNow, setClockOffset, getClockOffset } = await import('../src/sync/clock.js');
-  const t0 = syncNow();
-  setClockOffset(-7200000); // horloge locale qui recule de 2 h
-  const t1 = syncNow(); const t2 = syncNow();
-  ok(t1 > t0 && t2 > t1, 'syncNow : jamais en arrière, jamais deux fois la même valeur sous une horloge reculée');
-  eq(getClockOffset(), -7200000, 'décalage mémorisé');
-  setClockOffset(undefined);
-  eq(getClockOffset(), 0, 'décalage non finie : ramené à 0');
+  try {
+    const t0 = syncNow();
+    setClockOffset(-7200000); // horloge locale qui recule de 2 h
+    const t1 = syncNow(); const t2 = syncNow();
+    ok(t1 > t0 && t2 > t1, 'syncNow : jamais en arrière, jamais deux fois la même valeur sous une horloge reculée');
+    eq(getClockOffset(), -7200000, 'décalage mémorisé');
+    setClockOffset(undefined);
+    eq(getClockOffset(), 0, 'décalage non finie : ramené à 0');
+  } finally { setClockOffset(0); }
 
   // --- Capture (spec § 5.2) et repo (spec § 5.1)
   const { installCapture, uninstallCapture } = await import('../src/sync/outbox.js');
@@ -259,6 +263,15 @@ export async function runSyncTests({ eq, ok }) {
           uninstallCapture(v2);
           eq([!!(await v2.get('books', 'b_sans_date')).updated_at, (await v2.getAll('outbox')).length], [true, 0],
             'la passe d’horodatage rattrape une ligne sans date par une origine que la capture ignore');
+          // L'amorçage lui-même n'est pas capturable : init() précède installCapture au démarrage, mais un rappel
+          // d'init() sur une base amputée d'une référence (restauration partielle, correction à la main) mettrait
+          // sinon jusqu'à 96 fiches de référence en file d'envoi.
+          installCapture(v2, { getUserId: () => 'u1', isActivitySynced: () => false });
+          await v2.mutate({ deletes: { ingredients: ['ing_olive_oil'] }, origin: 'device' });
+          await repoModule.init();
+          uninstallCapture(v2);
+          eq([!!(await v2.get('ingredients', 'ing_olive_oil')), (await v2.getAll('outbox')).length], [true, 0],
+            'amorçage : la référence manquante est réécrite par une origine que la capture ignore');
         } finally {
           repoModule.bindDatabase(baseOrigine);
           if (v2.idb) { v2.idb.close(); v2.idb = null; }
@@ -273,6 +286,9 @@ export async function runSyncTests({ eq, ok }) {
   const swText = await (await fetch('../sw.js')).text();
   const shell = [...swText.matchAll(/'(\.\/src\/[^']+\.js)'/g)].map((m) => m[1]);
   const forbidden = new RegExp('\\bdb\\.(' + [...MUTATING_METHODS].join('|') + ')\\s*\\(');
+  // Garde du garde (F2) : si SHELL devenait illisible (regex, renommage, sw.js servi depuis le cache), la boucle
+  // ci-dessous ne parcourrait rien et les deux listes resteraient vides — vertes sans rien avoir vérifié.
+  ok(shell.length > 30, 'SHELL lu : ' + shell.length + ' modules à relire avant de conclure');
   const offenders = [];
   const deviceKeyOffenders = []; // R20 : une seule identité d'appareil, et une seule migration qui nomme l'ancienne clé
   for (const file of shell) {

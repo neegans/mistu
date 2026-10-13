@@ -32,3 +32,31 @@ test('mode complet sans argument : code 2', () => {
   assert.equal(r.status, 2);
   assert.ok(r.stderr.includes('version'), 'stderr doit mentionner la version manquante');
 });
+
+// F3 : la comparaison elle-meme est une fonction pure, exportee, et c'est elle que le script utilise. Avant cela,
+// « verifie » n'etait qu'une expression booleenne au milieu d'une fonction qui faisait du reseau : aucun test ne
+// pouvait dire ce que le script conclut, ni POURQUOI il conclut non. Le reseau reste hors test.
+import { comparerEmpreintes } from './verifier-vendor.mjs';
+
+test('F3 : tout concorde -> ok, aucune raison', () => {
+  assert.deepEqual(comparerEmpreintes({
+    localSha256: 'a'.repeat(64), unpkgSha256: 'a'.repeat(64),
+    integriteRegistre: 'sha512-xyz', integriteAttendue: 'sha512-xyz',
+  }), { ok: true, raisons: [] });
+});
+test('F3 : une empreinte sha256 differente -> la raison est nommee', () => {
+  const r = comparerEmpreintes({ localSha256: 'a'.repeat(64), unpkgSha256: 'b'.repeat(64) });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.raisons, ['umd']);
+});
+test('F3 : une integrite d archive differente -> la raison est nommee', () => {
+  const r = comparerEmpreintes({
+    localSha256: 'a'.repeat(64), unpkgSha256: 'a'.repeat(64),
+    integriteRegistre: 'sha512-du-registre', integriteAttendue: 'sha512-de-larchive-locale',
+  });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.raisons, ['archive']);
+});
+test('F3 : une empreinte absente n est jamais prise pour une concordance', () => {
+  assert.deepEqual(comparerEmpreintes({ localSha256: '', unpkgSha256: '' }), { ok: false, raisons: ['umd'] });
+});
