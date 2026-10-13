@@ -2,7 +2,7 @@
 // Chaque magasin correspond à une entité ; les libellés FR/EN des plats et ingrédients sont embarqués dans leur document.
 
 export const DB_NAME = 'cuisine-os';
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 export const APP_VERSION = '0.1.0';
 
 export const ARCHIVE_FORMAT = 'cuisine-os-archive';
@@ -36,15 +36,19 @@ export const STORES = {
   timer_launches:      { keyPath: 'id', indexes: [['cook_session_id', 'cook_session_id']] },
   files:               { keyPath: 'sha256', indexes: [] },
   settings:            { keyPath: 'key', indexes: [] },
+  // Magasins internes de la synchronisation (spec § 5.1) — jamais archivés.
+  outbox:              { keyPath: 'seq', autoIncrement: true, indexes: [['store_id', ['store', 'id']]] },
+  sync_state:          { keyPath: 'key', indexes: [] },
+  sync_conflicts:      { keyPath: 'id', indexes: [] },
 };
-
-// Magasins de données inclus dans l'archive complète. « files » est exporté sous forme de fichiers (files/<sha256>).
-export const ARCHIVE_DATA_STORES = Object.keys(STORES).filter((s) => s !== 'files' && s !== 'settings');
-// Réglages exclus de la sauvegarde : secrets d'accès (spec §31.1).
-export const SECRET_SETTING_KEYS = ['llm'];
 
 // Magasins internes du lot « compte et stockage distant » (spec § 5.1) : jamais archivés, jamais synchronisés.
 export const SYNC_INTERNAL_STORES = ['outbox', 'sync_state', 'sync_conflicts'];
+// Magasins de données inclus dans l'archive complète. « files » est exporté sous forme de fichiers (files/<sha256>).
+export const ARCHIVE_DATA_STORES = Object.keys(STORES).filter((s) => s !== 'files' && s !== 'settings' && !SYNC_INTERNAL_STORES.includes(s));
+// Réglages exclus de la sauvegarde : secrets d'accès (spec §31.1).
+export const SECRET_SETTING_KEYS = ['llm'];
+
 // Magasins miroirs d'une table serveur (spec § 3.1) : tout sauf les réglages et les internes.
 export const SYNC_STORES = Object.keys(STORES).filter((s) => s !== 'settings' && !SYNC_INTERNAL_STORES.includes(s));
 

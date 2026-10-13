@@ -63,4 +63,34 @@ export async function runSyncTests({ eq, ok }) {
     eq(await db.get('b', 'b1'), undefined, 'suppression par mutate');
     eq((await db.getAll('journal')).at(-1).note, 'capture:|b', 'la suppression est capturée avec son magasin');
   }, TEST_STORES);
+
+  // --- Schéma v2 et archive (spec § 5.1, I3)
+  const schema = await import('../src/model/schema.js');
+  const { createArchive, inspectArchive, applyArchive, verifyRestored } = await import('../src/domain/backup.js');
+  eq(schema.DB_VERSION, 2, 'DB_VERSION 2');
+  eq(schema.STORES.outbox, { keyPath: 'seq', autoIncrement: true, indexes: [['store_id', ['store', 'id']]] }, 'outbox autoIncrement');
+  ok(schema.STORES.sync_state.keyPath === 'key' && schema.STORES.sync_conflicts.keyPath === 'id', 'sync_state et sync_conflicts');
+  ok(schema.SYNC_INTERNAL_STORES.every((s) => !schema.ARCHIVE_DATA_STORES.includes(s)), 'internes hors archive');
+  // Archive v1 d'avant le lot : produite par une base v1 (sans magasins internes), restaurée dans une base v2.
+  const V1_STORES = Object.fromEntries(Object.entries(schema.STORES).filter(([n]) => !schema.SYNC_INTERNAL_STORES.includes(n)));
+  const archiveV1 = await withDatabase(async (db) => {
+    await db.putBatch({ books: [{ id: 'b1', title: 'V1' }], unit_definitions: [{ id: 'g' }], unit_conventions: [{ id: 'uc' }], ingredients: [{ id: 'ing' }] });
+    return (await createArchive(db)).blob.arrayBuffer();
+  }, V1_STORES);
+  await withDatabase(async (db) => {
+    const insp = await inspectArchive(await archiveV1);
+    ok(insp.ok, 'archive v1 acceptée par la v2 : ' + insp.errors.join(' · '));
+    await db.mutate({ puts: { outbox: [{ store: 'books', id: 'b9', op: 'put' }], sync_state: [{ key: 'user_id', value: 'u' }] } });
+    await applyArchive(db, insp, { mode: 'replace' });
+    eq((await db.getAll('outbox')).length, 1, 'remplacement : outbox intacte');
+    eq((await db.getAll('sync_state')).length, 1, 'remplacement : sync_state intact');
+    ok((await verifyRestored(db, insp, { mode: 'replace' })).ok, 'vérification verte');
+  });
+  // Une ligne files reçue sans octets n'empêche ni l'archive ni la vérification (spec § 5.4).
+  await withDatabase(async (db) => {
+    await db.putBatch({ files: [{ sha256: 'a'.repeat(64), mime: 'image/jpeg', size: 3, remote: true, updated_at: '2026-10-12T10:00:00Z' }], unit_definitions: [{ id: 'g' }], unit_conventions: [{ id: 'uc' }], ingredients: [{ id: 'ing' }] });
+    const archive = await createArchive(db);
+    eq(archive.missingFiles, 1, 'archive : une page non téléchargée comptée');
+    eq(archive.manifest.files.length, 0, 'et absente de l’archive');
+  });
 }

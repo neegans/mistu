@@ -2,7 +2,7 @@
 // fichiers sources avec empreinte SHA-256. Validation en mémoire avant toute écriture ; réimport idempotent (upsert par identifiant).
 import { createZip, readZip, textOf } from '../core/zip.js';
 import { sha256Hex } from '../core/hash.js';
-import { ARCHIVE_FORMAT, ARCHIVE_FORMAT_VERSION, SUPPORTED_ARCHIVE_VERSIONS, ARCHIVE_DATA_STORES, SECRET_SETTING_KEYS, RELATIONS, STORES, APP_VERSION } from '../model/schema.js';
+import { ARCHIVE_FORMAT, ARCHIVE_FORMAT_VERSION, SUPPORTED_ARCHIVE_VERSIONS, ARCHIVE_DATA_STORES, SECRET_SETTING_KEYS, RELATIONS, STORES, APP_VERSION, SYNC_INTERNAL_STORES } from '../model/schema.js';
 
 const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf', 'application/epub+zip': 'epub', 'text/plain': 'txt' };
 export const extFor = (mime) => MIME_EXT[mime] || 'bin';
@@ -95,7 +95,8 @@ export function checkRelations(stores, fileHashes) {
 
 // Une seule lecture IndexedDB cohérente ; le hachage et le ZIP se font après la transaction.
 export async function createArchive(db, { deviceName = '' } = {}) {
-  const snapshot = await db.getSnapshot(Object.keys(STORES));
+  // Les magasins internes (spec § 5.1) n'existent pas forcément sur une base plus ancienne : lire ceux de la base, pas du schéma courant.
+  const snapshot = await db.getSnapshot(Object.keys(db.stores));
   const stores = Object.fromEntries(DATA_STORES.map((name) => [
     name, JSON.parse(JSON.stringify(name === 'settings' ? publicSettings(snapshot[name]) : snapshot[name])),
   ]));
@@ -114,9 +115,14 @@ export async function createArchive(db, { deviceName = '' } = {}) {
     entries.push({ path, data });
     dataFiles.push({ path, store: name, count: counts[name], sha256: await sha256Hex(data) });
   }
-  let bytesTotal = 0;
+  let bytesTotal = 0, missingFiles = 0;
   for (const file of snapshot.files) {
-    if (!HASH.test(file.sha256) || !(file.blob instanceof Blob)) throw new Error('Fichier source invalide : ' + file.sha256);
+    if (!HASH.test(file.sha256)) throw new Error('Fichier source invalide : ' + file.sha256);
+    if (!(file.blob instanceof Blob)) {
+      // Page référencée mais pas encore téléchargée (spec § 5.4) : comptée, absente de l'archive.
+      if (file.remote) { missingFiles++; continue; }
+      throw new Error('Fichier source invalide : ' + file.sha256);
+    }
     const data = new Uint8Array(await file.blob.arrayBuffer());
     if (await sha256Hex(data) !== file.sha256) throw new Error('Fichier source endommagé : ' + file.sha256);
     const mime = file.mime || file.blob.type || 'application/octet-stream';
@@ -133,7 +139,7 @@ export async function createArchive(db, { deviceName = '' } = {}) {
   entries.unshift({ path: 'manifest.json', data: JSON.stringify(manifest, null, 2) });
   entries.push({ path: 'README.txt', data: README_TXT });
   const zip = createZip(entries);
-  return { blob: new Blob([zip], { type: 'application/zip' }), manifest, bytes: zip.length, filesBytes: bytesTotal, warnings };
+  return { blob: new Blob([zip], { type: 'application/zip' }), manifest, bytes: zip.length, filesBytes: bytesTotal, warnings, missingFiles };
 }
 
 // Inspection isolée : aucune écriture. Les archives v1 complètes existantes restent acceptées.
@@ -235,7 +241,7 @@ export async function applyArchive(db, inspection, { mode = 'merge' } = {}) {
     const existing = existingFiles.get(file.sha256);
     batch.files.push({ ...existing, sha256: file.sha256, blob, mime: file.mime, size: file.size, created_at: existing?.created_at || new Date().toISOString() });
   }
-  await db.putBatch(batch, { clearStores: mode === 'replace' ? Object.keys(STORES) : [] });
+  await db.putBatch(batch, { clearStores: mode === 'replace' ? Object.keys(STORES).filter((s) => !SYNC_INTERNAL_STORES.includes(s)) : [] });
   return Object.fromEntries(Object.entries(batch).map(([name, rows]) => [name, rows.length]));
 }
 
@@ -267,7 +273,9 @@ export async function verifyRestored(db, inspection, { mode = 'merge' } = {}) {
     }
   }
   const filesBySha = new Map(snapshot.files.map((row) => [row.sha256, row]));
-  if (mode === 'replace' && snapshot.files.length !== inspection.payload.files.length) diffs.push('files : décompte différent après restauration');
+  // Une page référencée sans octets (remote, jamais téléchargée) n'entre pas dans le décompte (spec § 5.4).
+  const comparableFiles = snapshot.files.filter((row) => row.blob instanceof Blob || !row.remote);
+  if (mode === 'replace' && comparableFiles.length !== inspection.payload.files.length) diffs.push('files : décompte différent après restauration');
   for (const file of inspection.payload.files) {
     const row = filesBySha.get(file.sha256);
     if (!row) { diffs.push('Fichier absent : ' + file.sha256); continue; }
