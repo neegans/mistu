@@ -275,13 +275,17 @@ export async function runSyncL3Tests({ eq, ok }) {
     await withRepo(async (repo, db) => {
       await repo.save('books', { id: 'bv', title: 'Vide' });
       const transport = { async pousser() { return { reponse: null, erreur: null }; } };
+      const t = Date.parse('2026-10-13T20:00:00Z');
       const vraiConsole = console.error;
       let journalises = 0;
       console.error = () => { journalises += 1; };
       let r;
-      try { r = await createPush({ db, transport }).envoyer(); } finally { console.error = vraiConsole; }
+      try { r = await createPush({ db, transport, maintenant: () => t }).envoyer(); } finally { console.error = vraiConsole; }
       eq([r.erreur.type, r.envoyes, journalises], ['inconnu', 0, 1], 'envoi : réponse vide sans erreur → inconnu, journalisé une fois');
       eq(await db.count('outbox'), 1, 'envoi : réponse vide → la file est intacte (I5 : envoyé = accusé)');
+      // R-L3-9 : une réponse qu'on n'a pas comprise RECULE, elle ne parque rien.
+      const e = (await db.getAll('outbox'))[0];
+      eq([r.recul, r.quarantaine, e.tries, e.next_try_at, !!e.quarantined_at], [2000, 0, 1, new Date(t + 2000).toISOString(), false], 'R-L3-9 : réponse vide → recul de 2 s, essai compté, aucune quarantaine');
     });
 
     await withRepo(async (repo, db) => {
@@ -301,8 +305,8 @@ export async function runSyncL3Tests({ eq, ok }) {
     // Chaque échec passe par logError, donc par console.error : le stub est posé en try/finally (la page reste à
     // zéro erreur console) et il COMPTE les appels — un échec est journalisé, jamais montré.
     const vraiConsoleErreur = console.error;
-    let journalisesErreurs = 0;
-    console.error = () => { journalisesErreurs += 1; };
+    const journalErreurs = [];
+    console.error = (...args) => { journalErreurs.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')); };
     try {
       await withRepo(async (repo, db) => {
         await repo.save('books', { id: 'r1', title: 'Un' });
@@ -322,6 +326,18 @@ export async function runSyncL3Tests({ eq, ok }) {
         eq(await db.count('outbox'), 1, 'envoi : un échec réseau ne perd rien (I5)');
       });
       await withRepo(async (repo, db) => {
+        // R-L3-9 : un 404 ou un cache de schéma PostgREST périmé (PGRST202) arrive en « inconnu ». Il RECULE comme
+        // une panne passagère ; le parquer en quarantaine enterrerait toute la file pour un déploiement en retard.
+        await repo.save('books', { id: 'i1', title: 'Un' });
+        const tf = creerTransportFactice({ pousser: [{ erreur: { type: 'inconnu', status: 404, message: 'x' } }] });
+        const t = Date.parse('2026-10-13T20:00:00Z');
+        const r = await createPush({ db, transport: tf, maintenant: () => t }).envoyer();
+        eq([r.erreur?.type, r.recul, r.quarantaine], ['inconnu', 2000, 0], 'R-L3-9 : un type « inconnu » recule, il ne parque rien');
+        const e = (await db.getAll('outbox'))[0];
+        eq([e.tries, e.next_try_at, e.last_error, !!e.quarantined_at], [1, new Date(t + 2000).toISOString(), 'inconnu', false], 'R-L3-9 : l’entrée compte l’essai et son heure de reprise, jamais de quarantaine');
+        eq(await db.count('outbox'), 1, 'R-L3-9 : rien n’est perdu sur un « inconnu »');
+      });
+      await withRepo(async (repo, db) => {
         await repo.save('books', { id: 'a1', title: 'Un' });
         const tf = creerTransportFactice({ pousser: [{ erreur: { type: 'auth', status: 401, message: 'x' } }] });
         const r = await createPush({ db, transport: tf }).envoyer();
@@ -338,14 +354,17 @@ export async function runSyncL3Tests({ eq, ok }) {
       });
       await withRepo(async (repo, db) => {
         for (const id of ['d1', 'd2', 'd3', 'd4']) await repo.save('books', { id, title: id });
+        // d3 enregistrée deux fois : DEUX entrées de file pour la même clé. L’isolement doit emporter le doublon.
+        await repo.save('books', { id: 'd3', title: 'd3 deux fois' });
+        eq(await db.count('outbox'), 5, 'envoi : cinq entrées de file pour quatre clés (d3 enregistrée deux fois)');
         // Le serveur refuse tout lot contenant d3 (règle simulée) ; la dichotomie doit l’isoler et envoyer les autres.
-        const refus = { erreur: { type: 'refus', status: 400, message: 'regle simulee' } };
-        const tf = { journal: [], async pousser(rows) { tf.journal.push(rows.map((r) => r.id)); if (rows.some((r) => r.id === 'd3')) return { reponse: null, erreur: refus.erreur }; return { reponse: { server_time: '2026-10-13T20:00:00Z', accepted: rows.map(({ store, id }) => ({ store, id })), adjusted: [], rejected: [] }, erreur: null }; }, async lire() { return { lignes: [], erreur: null }; } };
-        const r = await createPush({ db, transport: tf }).envoyer();
+        const tf = { journal: [], async pousser(rows) { tf.journal.push({ appel: 'pousser', rows: rows.map(({ store, id }) => ({ store, id })) }); if (rows.some((r) => r.id === 'd3')) return { reponse: null, erreur: { type: 'refus', status: 400, message: 'regle simulee' } }; return { reponse: { server_time: '2026-10-13T20:00:00Z', accepted: rows.map(({ store, id }) => ({ store, id })), adjusted: [], rejected: [] }, erreur: null }; }, async lire() { return { lignes: [], erreur: null }; } };
+        const r = await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer();
         eq([r.envoyes, r.quarantaine], [3, 1], 'envoi : dichotomie → trois envoyées, une en quarantaine');
+        eq(tf.journal.map((a) => a.rows.map((x) => x.id)), [['d1', 'd2', 'd3', 'd4'], ['d1', 'd2'], ['d3', 'd4'], ['d3'], ['d4']], 'envoi : le lot entier d’abord, puis des moitiés, jusqu’à isoler la fiche fautive');
         const reste = await db.getAll('outbox');
-        eq(reste.map((e) => [e.id, e.last_error, !!e.quarantined_at]), [['d3', 'refus', true]], 'envoi : l’entrée fautive est en quarantaine avec le motif « refus »');
-        ok(tf.journal.length >= 3 && tf.journal[0].length === 4, 'envoi : le lot entier d’abord, puis des moitiés');
+        eq(reste.map((e) => [e.seq, e.id, e.last_error, e.quarantined_at]), [[5, 'd3', 'refus', '2026-10-13T20:00:00.000Z']], 'envoi : seul le seq le plus haut de la clé isolée reste, en quarantaine, motif et heure posés');
+        eq(await db.count('outbox'), 1, 'envoi : le doublon plus ancien de la clé isolée est retiré avec elle');
         // La quarantaine est permanente : la passe suivante ne retente rien et n’appelle plus le serveur.
         const appels = tf.journal.length;
         eq([(await createPush({ db, transport: tf }).envoyer()).envoyes, tf.journal.length], [0, appels], 'envoi : après la dichotomie, l’entrée isolée n’est plus jamais tentée');
@@ -353,10 +372,10 @@ export async function runSyncL3Tests({ eq, ok }) {
       await withRepo(async (repo, db) => {
         // Un échec réseau au milieu d’une dichotomie arrête tout : rien n’est mis en quarantaine par accident.
         for (const id of ['x1', 'x2']) await repo.save('books', { id, title: id });
-        const tf = { journal: [], async pousser(rows) { tf.journal.push(rows.map((r) => r.id)); return { reponse: null, erreur: rows.length > 1 ? { type: 'refus', status: 400, message: 'x' } : { type: 'reseau', status: 0, message: 'x' } }; } };
+        const tf = { journal: [], async pousser(rows) { tf.journal.push({ appel: 'pousser', rows: rows.map(({ store, id }) => ({ store, id })) }); return { reponse: null, erreur: rows.length > 1 ? { type: 'refus', status: 400, message: 'x' } : { type: 'reseau', status: 0, message: 'x' } }; } };
         const r = await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer();
         eq([r.erreur.type, r.quarantaine, r.recul], ['reseau', 0, 2000], 'envoi : un échec réseau pendant la dichotomie arrête la passe, sans quarantaine');
-        eq([tf.journal.length, await db.count('outbox')], [2, 2], 'envoi : la moitié droite n’est pas tentée, la file est intacte');
+        eq([tf.journal.map((a) => a.rows.map((x) => x.id)), await db.count('outbox')], [[['x1', 'x2'], ['x1']], 2], 'envoi : la moitié droite n’est pas tentée, la file est intacte');
       });
       await withRepo(async (repo, db) => {
         await repo.save('books', { id: 'n1', title: 'Un' });
@@ -366,6 +385,7 @@ export async function runSyncL3Tests({ eq, ok }) {
         eq([(await db.getAll('outbox'))[0].tries, await db.count('outbox')], [0, 1], 'envoi : un refus d’adresse ne compte aucun essai et ne perd rien');
       });
     } finally { console.error = vraiConsoleErreur; }
-    eq(journalisesErreurs, 10, 'envoi : chaque échec est journalisé une fois (un code et un statut, jamais le message du fournisseur)');
+    eq(journalErreurs.length, 11, 'envoi : chaque échec est journalisé une fois, par un code');
+    ok(!journalErreurs.some((t) => t.includes('"x"') || t.includes('regle simulee') || t.includes('adresse non autoris')), 'envoi : aucun texte venu du fournisseur n’entre dans le journal (seulement un code et un statut)');
   } finally { setClockOffset(0); }
 }

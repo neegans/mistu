@@ -7,8 +7,8 @@ const COLONNES = 'id,data,updated_at,deleted_at,server_seq';
 //   reseau  : réessai avec recul (échec réseau, 5xx, 429)
 //   auth    : attente de connexion, garde à refaire (401, 403, « adresse non autorisée »)
 //   quota   : pause (413, 507, message « exceeded ») — rien n'est perdu
-//   refus   : lot entier refusé par une règle du serveur (4xx autre) — dichotomie
-//   inconnu : journalisé, traité comme refus (prudence)
+//   refus   : lot entier refusé par une règle du serveur (4xx autre) — dichotomie, seul chemin qui parque une fiche
+//   inconnu : journalisé, traité comme un échec passager — recul (R-L3-9), jamais de quarantaine
 export function classerErreur({ status = null, code = null, message = '' } = {}) {
   const s = Number.isFinite(status) ? status : null;
   const m = String(message || '');

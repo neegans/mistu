@@ -88,13 +88,16 @@ export function createPush({ db, transport, maintenant = Date.now, surHeure = ()
     return lot.seqs.filter((s) => { const e = entreesParSeq.get(s); return e && cles.has(cleDe(e)); });
   }
 
-  // Un lot → le serveur. Rend `true` si la passe peut continuer, `false` s'il faut l'arrêter (réseau, connexion à
-  // refaire, pause de quota, réponse vide). Un refus du lot ENTIER n'arrête pas la passe : il se dichotomise.
+  // Un lot → le serveur. Rend `true` si la passe peut continuer, `false` s'il faut l'arrêter (réseau, « inconnu »,
+  // connexion à refaire, pause de quota). SEUL un `refus` dichotomise, et il n'arrête pas la passe.
   async function envoyerLot(lot, entreesParSeq, bilan) {
-    const { reponse, erreur } = await transport.pousser(lot.elements);
+    const appel = await transport.pousser(lot.elements);
+    const reponse = appel.reponse;
+    // Pas d'erreur et pas de réponse : le serveur n'a rien accusé, donc rien n'est retiré (I5). Traité comme un
+    // « inconnu » — donc en recul (R-L3-9), jamais en quarantaine : on ne parque pas pour un silence.
+    const vide = !appel.erreur && !reponse;
+    const erreur = appel.erreur || (vide ? { type: 'inconnu', status: null, message: '' } : null);
     if (!erreur) {
-      // Pas d'erreur et pas de réponse : le serveur n'a rien accusé, donc rien n'est retiré (I5).
-      if (!reponse) { bilan.erreur = { type: 'inconnu', status: null, message: '' }; logError('sync.push', { reason: 'reponse vide' }); return false; }
       if (reponse.server_time) surHeure(appliquerHeureServeur(reponse.server_time, maintenant()));
       const effets = await appliquer(lot, reponse, entreesParSeq);
       const { envoyes, ajustes } = compter(effets, entreesParSeq);
@@ -104,14 +107,7 @@ export function createPush({ db, transport, maintenant = Date.now, surHeure = ()
       bilan.quarantaine += effets.quarantaine.length;
       return true;
     }
-    logError('sync.push', { reason: erreur.type, status: erreur.status });
-    if (erreur.type === 'reseau') {
-      await reporter(lot.seqs, entreesParSeq, erreur);
-      bilan.erreur = erreur;
-      // Annoncé à l'interface : l'attente que les entrées viennent de se donner (tries d'avant l'incrément).
-      bilan.recul = reculMs(Math.max(0, ...lot.seqs.map((s) => entreesParSeq.get(s)?.tries || 0)));
-      return false;
-    }
+    logError('sync.push', { reason: vide ? 'reponse vide' : erreur.type, status: erreur.status });
     // 401, 403, « adresse non autorisée » : aucun essai n'est compté — c'est la garde de compte qui doit rejouer,
     // pas la file qui doit reculer. Rien n'est perdu, rien n'est marqué.
     if (erreur.type === 'auth') { bilan.erreur = erreur; bilan.attenteConnexion = true; return false; }
@@ -120,12 +116,23 @@ export function createPush({ db, transport, maintenant = Date.now, surHeure = ()
       await db.mutate({ puts: { sync_state: [{ key: 'pause', value: { raison: 'quota', at: new Date(maintenant()).toISOString() } }] }, origin: 'remote' });
       bilan.erreur = erreur; bilan.pause = true; return false;
     }
-    // refus (ou inconnu, par prudence) : le serveur refuse le lot ENTIER, sans nommer le fautif. Dichotomie jusqu'à
-    // l'isoler : une seule fiche finit en quarantaine (nommée, la personne décide), les autres passent.
+    // R-L3-9 : tout ce qui n'est pas un `refus` nommé RECULE — réseau, 5xx, 429, et « inconnu » (un 404, un cache
+    // de schéma PostgREST périmé, une réponse vide). Parquer la file pour un déploiement en retard l'enterrerait ;
+    // seule une règle du serveur qui refuse une fiche justifie une quarantaine.
+    if (erreur.type !== 'refus') {
+      await reporter(lot.seqs, entreesParSeq, erreur);
+      bilan.erreur = erreur;
+      // Annoncé à l'interface : l'attente que les entrées viennent de se donner (tries d'avant l'incrément).
+      bilan.recul = reculMs(Math.max(0, ...lot.seqs.map((s) => entreesParSeq.get(s)?.tries || 0)));
+      return false;
+    }
+    // refus : le serveur refuse le lot ENTIER, sans nommer le fautif. Dichotomie jusqu'à l'isoler : une seule fiche
+    // finit en quarantaine (nommée, la personne décide), les autres passent.
     if (lot.elements.length <= 1) {
-      const seq = Math.max(...lot.seqs);
-      const entree = entreesParSeq.get(seq);
-      if (!entree) return true;
+      const seq = lot.seqs.length ? Math.max(...lot.seqs) : null;
+      const entree = seq === null ? null : entreesParSeq.get(seq);
+      // Un lot sans seq lisible ne peut désigner personne : rien n'est parqué, et c'est journalisé.
+      if (!entree) { logError('sync.push', { reason: 'refus sans entree' }); return true; }
       await db.mutate({
         puts: { outbox: [{ ...entree, quarantined_at: new Date(maintenant()).toISOString(), last_error: 'refus' }] },
         deletes: { outbox: lot.seqs.filter((s) => s !== seq) },
