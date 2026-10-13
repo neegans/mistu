@@ -6,7 +6,7 @@
 // Neegan ajoute l'hôte du sous-domaine (D5) dans `prod.hosts` en même temps que l'URL et la clé.
 export const SUPABASE = {
   prod: { url: '', anonKey: '', hosts: [] },
-  dev:  { url: '', anonKey: '', hosts: ['localhost', '127.0.0.1'] },
+  dev:  { url: 'https://fhncuqslabiinwubfxss.supabase.co', anonKey: 'sb_publishable_u7dnwUS6lM3m8u222o_bhA_VhJYEXs8', hosts: ['localhost', '127.0.0.1'] },
 };
 
 // Rend l'entrée dont `hosts` contient l'hôte (comparaison exacte, en minuscules), ou null : hôte inconnu, hôte vide,
