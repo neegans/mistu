@@ -799,6 +799,65 @@ export async function runSyncTests({ eq, ok }) {
     }
   }
 
+  // --- Porte d'entrée (R34) : l'écran d'accueil du premier lancement (spec § 11)
+  // Modèle pur : ce que la porte dit, et si elle doit même s'afficher. Aucun DOM, aucune base, aucun réseau.
+  // Les quatre « non » d'abord : ils valent plus que l'écran lui-même — une porte qui s'affiche quand elle ne doit
+  // pas enferme la personne dehors à chaque lancement.
+  const { porteEntreeModel, PORTE_ACTIONS } = await import('../src/ui/porte-entree.js');
+  const TITRE_PORTE = 'Kwe.';
+  const ACCROCHE_PORTE = 'Ta bibliothèque de recettes, sur tous tes appareils.';
+  eq(porteEntreeModel({ available: false }), { afficher: false, titre: TITRE_PORTE, lignes: [], boutons: [] },
+    'R34 : rien où se connecter (hôte non listé, bibliothèque absente) → aucune porte');
+  eq(porteEntreeModel({ available: true, enAttente: true }).afficher, false,
+    'R34 : démarrage borné (R28) non abouti → l’app s’ouvre, Réglages dit « Vérification du compte… »');
+  eq(porteEntreeModel({ available: true, user: { id: 'uid-A', email: 'a@exemple.test' }, guard: { ok: true } }).afficher, false,
+    'R34 : compte connecté et garde ok → aucune porte');
+  eq(porteEntreeModel({ available: true, choixSansCompte: true }).afficher, false,
+    'R34 : « Continuer sans compte » tranché sur cet appareil → aucune porte, même sans compte');
+  eq(porteEntreeModel({ available: true, choixSansCompte: true, guard: { ok: false, message: 'x' } }).afficher, false,
+    'R34 : le choix de la personne prime, même sur une garde refusée');
+  eq(porteEntreeModel({ available: true }),
+    { afficher: true, titre: TITRE_PORTE, lignes: [ACCROCHE_PORTE], boutons: [{ action: 'signIn', label: 'Connexion avec Google', tone: 'primary' }, { action: 'sansCompte', label: 'Continuer sans compte', tone: 'link' }] },
+    'R34 : aucun compte → la porte, Google seul, et la sortie sans compte');
+  eq(porteEntreeModel({ available: true, guard: { ok: false, message: 'Cet appareil a été synchronisé avec a@exemple.test.' } }),
+    { afficher: true, titre: TITRE_PORTE, lignes: ['Cet appareil a été synchronisé avec a@exemple.test.'], boutons: [{ action: 'signOut', label: 'Essayer un autre compte', tone: 'primary' }, { action: 'sansCompte', label: 'Continuer sans compte', tone: 'link' }] },
+    'R34 : garde refusée → le message de la garde, essayer un autre compte, ou sans compte');
+  eq(porteEntreeModel({ available: true, guard: { ok: false } }).lignes, ['Cet appareil ne peut pas vérifier le compte.'],
+    'R34 : garde refusée sans message → la phrase fixe, rien d’inventé');
+  eq(porteEntreeModel({ available: true, retour: { codeSansSession: true } }).lignes, [ACCROCHE_PORTE, 'La connexion n’a pas abouti.'],
+    'R34 : retour muet dit APRÈS l’accroche, sans deviner pourquoi');
+  eq(porteEntreeModel({ available: true, retour: { error: 'Cette adresse n’est pas autorisée.' } }).lignes, [ACCROCHE_PORTE, 'Cette adresse n’est pas autorisée.'],
+    'R34 : la phrase fixe du refus, jamais le texte du fournisseur');
+  eq(porteEntreeModel({ available: true, guard: { ok: false, message: 'Cet appareil ne peut pas vérifier le compte.' }, retour: { codeSansSession: true, error: 'Cette adresse n’est pas autorisée.' } }).lignes,
+    ['Cet appareil ne peut pas vérifier le compte.', 'La connexion n’a pas abouti.', 'Cette adresse n’est pas autorisée.'],
+    'R34 : les lignes du retour s’ajoutent aussi quand la garde a refusé');
+  // Chaque action nommée par le modèle doit avoir un geste câblé au démarrage : la liste est la seule source.
+  const actionsPorte = new Set([
+    ...porteEntreeModel({ available: true }).boutons,
+    ...porteEntreeModel({ available: true, guard: { ok: false, message: 'm' } }).boutons,
+  ].map((b) => b.action));
+  eq([...PORTE_ACTIONS].sort(), ['sansCompte', 'signIn', 'signOut'], 'R34 : trois gestes nommés, pas un de plus');
+  // Garde du garde : sans cette ligne, un modèle qui n'offrirait AUCUN bouton laisserait la suivante verte.
+  eq([...actionsPorte].sort(), ['sansCompte', 'signIn', 'signOut'], 'R34 : la porte offre réellement ces trois actions');
+  eq([...actionsPorte].filter((a) => !PORTE_ACTIONS.includes(a)), [], 'R34 : aucune action de la porte sans geste nommé');
+
+  // Le choix « Continuer sans compte » vit EN BASE (R19/R20), jamais dans localStorage, et n'entre jamais en file.
+  // La fixture pose la capture avant ce bloc : si l'origine n'était pas 'device', l'outbox le dirait.
+  await withRepo(async (repo, db) => {
+    eq(await repo.lirePorteEntree(), null, 'R34 : appareil vierge → aucun choix enregistré');
+    const clesAvant = (await db.getAll('sync_state')).map((s) => s.key);
+    await repo.choisirSansCompte();
+    eq(await repo.lirePorteEntree(), 'sans_compte', 'R34 : le choix est relu depuis sync_state');
+    const clesApres = (await db.getAll('sync_state')).map((s) => s.key);
+    eq(clesApres.filter((k) => !clesAvant.includes(k)), ['porte_entree'], 'R34 : une seule ligne ajoutée, dans sync_state');
+    const ligne = await db.get('sync_state', 'porte_entree');
+    ok(ligne?.value?.choix === 'sans_compte' && typeof ligne?.value?.at === 'string' && !Number.isNaN(Date.parse(ligne.value.at)),
+      'R34 : la ligne porte { choix: sans_compte, at: <ISO> }');
+    eq(await db.count('outbox'), 0, 'R34 : le choix n’entre jamais en file d’envoi (origine device)');
+    await repo.clearDevice({ signOut: null });
+    eq(await repo.lirePorteEntree(), null, 'R34 : après « Effacer les données de cet appareil », la porte revient');
+  });
+
   // --- Clôture : SHELL complet (tâche 14)
   // Ce test LIT du source (sw.js et les modules) : c'est voulu ici, et seulement ici. Il ne vérifie pas un
   // comportement mais la COHÉRENCE D'UNE LISTE — le SHELL du service worker contre le graphe d'imports réel.
