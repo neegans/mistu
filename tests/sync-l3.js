@@ -388,4 +388,34 @@ export async function runSyncL3Tests({ eq, ok }) {
     eq(journalErreurs.length, 11, 'envoi : chaque échec est journalisé une fois, par un code');
     ok(!journalErreurs.some((t) => t.includes('"x"') || t.includes('regle simulee') || t.includes('adresse non autoris')), 'envoi : aucun texte venu du fournisseur n’entre dans le journal (seulement un code et un statut)');
   } finally { setClockOffset(0); }
+
+  // --- Envoi initial par marqueurs (spec § 5.2) : complet, reprenable, déclenché sur un appareil déjà connecté
+  const { tablesAEnvoyer, envoiInitial, retirerMarqueur } = await import('../src/sync/backfill.js');
+  const { SYNC_STORES } = await import('../src/model/schema.js');
+  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false }).length, 24, 'envoi initial : 24 tables sans l’historique');
+  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true }).length, 25, 'envoi initial : 25 tables avec l’historique');
+  eq(tablesAEnvoyer({ marqueurs: { 'backfill:books': 'fait' }, isActivitySynced: () => false }).includes('books'), false, 'envoi initial : une table marquée « fait » ne repart pas');
+  await withRepo(async (repo, db) => {
+    // Bibliothèque d’AVANT la connexion : écrite sans capture (comme en L1, ou restaurée), puis compte connecté.
+    await db.mutate({ puts: { books: [{ id: 'v1', title: 'Vieux', updated_at: '2026-10-01T00:00:00Z' }, { id: 'v2', title: 'Vieux 2', updated_at: '2026-10-01T00:00:00Z' }], files: [{ sha256: 'a'.repeat(64), mime: 'image/jpeg', size: 1, updated_at: '2026-10-01T00:00:00Z', syncable: true }, { sha256: 'b'.repeat(64), mime: 'application/octet-stream', size: 1, updated_at: '2026-10-01T00:00:00Z', syncable: false }] }, origin: 'device' });
+    eq(await db.count('outbox'), 0, 'envoi initial : rien en file avant');
+    const progression = [];
+    const r = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false, surProgression: (p) => progression.push(p), tailleMorceau: 1 });
+    eq(r.tables.length, 24, 'envoi initial : les 24 tables sont parcourues');
+    const file = await db.getAll('outbox');
+    const refs = (await db.count('ingredients')) + (await db.count('unit_definitions')) + (await db.count('unit_conventions')); // amorçage mesuré : ingredients, unit_definitions, unit_conventions
+    eq(file.length, refs + 2 + 1, 'envoi initial : références amorcées + 2 livres + 1 fichier synchronisable en file');
+    ok(file.every((e) => e.op === 'put' && e.user_id === 'u1'), 'envoi initial : des put, au nom du compte');
+    ok(!file.some((e) => e.store === 'files' && e.id === 'b'.repeat(64)), 'envoi initial : une ligne files syncable:false n’est jamais mise en file');
+    eq((await db.get('sync_state', 'backfill:books'))?.value, 'fait', 'envoi initial : marqueur posé après la table');
+    ok(progression.some((p) => p.table === 'books' && p.n >= 1 && p.total === 24), 'envoi initial : progression « table n/24 »');
+    // Une table vide (aucune ligne) reçoit quand même son marqueur, sans aucune entrée en file pour elle.
+    eq((await db.get('sync_state', 'backfill:dishes'))?.value, 'fait', 'envoi initial : une table vide est marquée « fait »');
+    ok(!file.some((e) => e.store === 'dishes'), 'envoi initial : une table vide ne met jamais rien en file');
+    const r2 = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false });
+    eq([r2.mises, await db.count('outbox')], [0, refs + 3], 'envoi initial : rejoué → rien de plus (marqueurs)');
+    await retirerMarqueur(db, 'books');
+    const r3 = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false });
+    eq(r3.tables, ['books'], 'envoi initial : marqueur retiré → seule cette table repart (rattrapage, R27)');
+  });
 }
