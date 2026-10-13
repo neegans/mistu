@@ -13,3 +13,16 @@ export function syncNow() {
   if (iso > floorIso) return (floorIso = iso);
   return (floorIso = new Date(Date.parse(floorIso) + 1).toISOString());
 }
+
+// Décalage mesuré à chaque réponse du serveur (spec § 5.3) : syncNow() = local + décalage, et jamais sous la
+// dernière heure serveur vue. Au-delà de 5 minutes, l'appelant avertit UNE fois (clock_warned_at, moteur).
+export function appliquerHeureServeur(serverIso, localMs = Date.now()) {
+  const serverMs = Date.parse(serverIso);
+  // Heure illisible : rien n'est mesuré, rien n'est avancé, et rien n'est signalé à tort.
+  if (!Number.isFinite(serverMs)) return { decalageMs: offsetMs, avertir: false, minutes: 0 };
+  offsetMs = serverMs - localMs;
+  const normalisee = new Date(serverMs).toISOString();
+  if (normalisee > floorIso) floorIso = normalisee;
+  const minutes = Math.round(Math.abs(offsetMs) / 60000);
+  return { decalageMs: offsetMs, avertir: Math.abs(offsetMs) > 5 * 60000, minutes };
+}

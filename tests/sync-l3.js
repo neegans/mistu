@@ -2,6 +2,7 @@
 import { classerErreur, createTransport } from '../src/sync/transport.js';
 import { createAuth } from '../src/sync/auth.js';
 import { creerTransportFactice } from './transport-factice.js';
+import { withRepo } from './sync-fixture.js';
 
 export async function runSyncL3Tests({ eq, ok }) {
   // --- Transport (spec § 5.3) : classification des erreurs, un seul chemin réseau
@@ -98,4 +99,119 @@ export async function runSyncL3Tests({ eq, ok }) {
   const cm = await composerLots(moyens, async (s, id) => ({ id, updated_at: '2026-10-13T10:00:00Z', texte: 'x'.repeat(450000) }));
   eq(cm.lots.map((l) => l.elements.length), [2, 1], 'lots : la borne de 1 Mo par lot coupe avant 500 éléments');
   eq(cl.lots[0].elements[0].updated_at, '2026-10-13T10:00:00Z', 'lots : updated_at de l’élément = celui de la fiche relue');
+
+  // --- Réponses (spec § 5.3) : accepted → retrait ; adjusted → retrait + réécriture non capturée ; rejected par motif
+  const { appliquerReponse } = await import('../src/sync/reponses.js');
+  const lot = { elements: [
+    { store: 'books', id: 'a', data: { id: 'a', updated_at: 'ta' }, updated_at: 'ta', deleted: false },
+    { store: 'books', id: 'b', data: { id: 'b', updated_at: 'tb' }, updated_at: 'tb', deleted: false },
+    { store: 'books', id: 'c', data: { id: 'c', updated_at: 'tc' }, updated_at: 'tc', deleted: false },
+    { store: 'books', id: 'd', data: { id: 'd', updated_at: 'td' }, updated_at: 'td', deleted: false },
+    { store: 'books', id: 'e', data: { id: 'e', updated_at: 'te' }, updated_at: 'te', deleted: true },
+  ], seqs: [1, 2, 3, 4, 5] };
+  const entreesParSeq = new Map([[1, { seq: 1, store: 'books', id: 'a' }], [2, { seq: 2, store: 'books', id: 'b' }], [3, { seq: 3, store: 'books', id: 'c' }], [4, { seq: 4, store: 'books', id: 'd' }], [5, { seq: 5, store: 'books', id: 'e', op: 'delete', payload: { id: 'e' } }]]);
+  const reponse = { server_time: '2026-10-13T20:00:00Z', accepted: [{ store: 'books', id: 'a' }, { store: 'books', id: 'e' }], adjusted: [{ store: 'books', id: 'b', updated_at: '2026-10-13T20:00:00+00:00' }], rejected: [{ store: 'books', id: 'c', reason: 'conflit', server: { data: { id: 'c', titre: 'serveur' }, updated_at: '2026-10-14T00:00:00Z', deleted_at: null } }, { store: 'books', id: 'd', reason: 'taille' }] };
+  const effets = appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales: { 'books:c': { id: 'c', titre: 'ici', updated_at: 'tc' } } });
+  eq(effets.retirer.sort(), [1, 2, 3, 5], 'réponses : accepted, adjusted et conflit retirés de la file ; la quarantaine reste');
+  eq(effets.reecrire, { books: [{ id: 'b', updated_at: '2026-10-13T20:00:00+00:00' }] }, 'réponses : adjusted → fiche réécrite avec EXACTEMENT le updated_at renvoyé');
+  eq(effets.conflits.map((c2) => [c2.id, c2.store, c2.record_id, c2.local.titre, c2.server.data.titre, c2.kind]), [['books:c', 'books', 'c', 'ici', 'serveur', 'donnees']], 'réponses : rejected{conflit} → conflit journalisé avec les deux versions');
+  eq(effets.quarantaine, [{ seq: 4, motif: 'taille' }], 'réponses : rejected{taille} → quarantaine immédiate avec motif');
+  const inconnu = appliquerReponse({ lot: { elements: [], seqs: [] }, reponse: { server_time: 't', accepted: [{ store: 'books', id: 'zz' }], adjusted: [], rejected: [] }, entreesParSeq: new Map(), fichesLocales: {} });
+  eq(inconnu.retirer, [], 'réponses : un accusé pour une clé hors du lot ne retire rien');
+
+  // --- Horloge (spec § 5.3) : décalage mesuré à chaque réponse, plancher, avertissement unique au-delà de 5 min
+  const { appliquerHeureServeur, getClockOffset, syncNow, setClockOffset } = await import('../src/sync/clock.js');
+  try {
+    const h1 = appliquerHeureServeur('2026-10-13T20:00:00Z', Date.parse('2026-10-13T19:50:00Z'));
+    eq([h1.decalageMs, h1.avertir, h1.minutes], [600000, true, 10], 'horloge : décalage de 10 min mesuré, avertissement');
+    eq(getClockOffset(), 600000, 'horloge : le décalage est appliqué à syncNow');
+    const h2 = appliquerHeureServeur('2026-10-13T20:00:01Z', Date.parse('2026-10-13T19:59:59Z'));
+    eq([h2.decalageMs, h2.avertir], [2000, false], 'horloge : 2 s de décalage, pas d’avertissement');
+    ok(syncNow() >= '2026-10-13T20:00:01.000Z', 'horloge : syncNow ne descend jamais sous le dernier server_time vu');
+    eq(appliquerHeureServeur('pas une date', Date.parse('2026-10-13T19:59:59Z')).avertir, false, 'horloge : une heure illisible ne change rien et n’avertit pas');
+    eq(getClockOffset(), 2000, 'horloge : une heure illisible laisse le décalage mesuré en place');
+  } finally { setClockOffset(0); }
+
+  // --- Envoi : une passe (spec § 5.3) — chemin heureux sur une base temporaire
+  // Chaque réponse du factice applique une heure serveur : le décalage global est remis à 0 dans tous les cas.
+  const { createPush } = await import('../src/sync/push.js');
+  try {
+    await withRepo(async (repo, db) => {
+      await repo.save('books', { id: 'b1', title: 'Un' });
+      await repo.save('books', { id: 'b2', title: 'Deux' });
+      await repo.remove('books', 'b2');
+      eq(await db.count('outbox'), 3, 'envoi : trois entrées capturées (put, put, delete)');
+      const tf = creerTransportFactice();
+      const heures = [];
+      const push = createPush({ db, transport: tf, surHeure: (h) => heures.push(h) });
+      const r = await push.envoyer();
+      eq([r.envoyes, r.conflits, r.quarantaine, r.erreur], [2, 0, 0, null], 'envoi : deux clés envoyées (b1 put, b2 delete), aucun conflit');
+      eq(await db.count('outbox'), 0, 'envoi : la file est vide après l’accusé (I5 : envoyé = accusé)');
+      eq(tf.journal[0].rows.map((e) => [e.store, e.id, e.deleted]), [['books', 'b1', false], ['books', 'b2', true]], 'envoi : le lot envoyé est dédoublonné et ordonné');
+      ok(heures.length === 1 && typeof heures[0].decalageMs === 'number', 'envoi : l’heure du serveur est appliquée à chaque réponse');
+      eq((await push.envoyer()).envoyes, 0, 'envoi : file vide → aucun appel');
+      eq(tf.journal.length, 1, 'envoi : file vide → aucun appel réseau');
+    });
+
+    // --- Envoi : effets d'une réponse mêlée, en UNE transaction d'origine 'remote' (spec § 5.3)
+    await withRepo(async (repo, db) => {
+      await repo.save('books', { id: 'ok1', title: 'Accepte' });
+      await repo.save('books', { id: 'aj1', title: 'Ajuste' });
+      await repo.save('books', { id: 'cf1', title: 'Ici' });
+      await repo.save('books', { id: 'qt1', title: 'Trop gros' });
+      const tf = creerTransportFactice({ pousser: [{ reponse: {
+        server_time: '2026-10-13T20:00:00Z',
+        accepted: [{ store: 'books', id: 'ok1' }],
+        adjusted: [{ store: 'books', id: 'aj1', updated_at: '2026-10-13T20:00:00+00:00' }],
+        rejected: [
+          { store: 'books', id: 'cf1', reason: 'conflit', server: { data: { id: 'cf1', title: 'Serveur' }, updated_at: '2026-10-14T00:00:00Z', deleted_at: null } },
+          { store: 'books', id: 'qt1', reason: 'taille' },
+        ],
+      } }] });
+      const origines = [];
+      const vraiMutate = db.mutate.bind(db);
+      db.mutate = (arg) => { origines.push(arg?.origin); return vraiMutate(arg); };
+      let r;
+      try { r = await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T20:00:05Z') }).envoyer(); }
+      finally { db.mutate = vraiMutate; }
+      eq([r.envoyes, r.ajustes, r.conflits, r.quarantaine, r.erreur], [1, 1, 1, 1, null], 'envoi : le bilan compte accusés, ajustements, conflits et quarantaines');
+      eq(origines, ['remote'], 'envoi : UNE seule transaction pour tous les effets d’un lot, origine remote (jamais capturée)');
+      eq((await db.get('books', 'aj1')).updated_at, '2026-10-13T20:00:00+00:00', 'envoi : la fiche ajustée porte le updated_at du serveur');
+      eq(await db.count('outbox'), 1, 'envoi : seule la quarantaine reste en file (accusé, ajusté et conflit retirés)');
+      const restante = (await db.getAll('outbox'))[0];
+      eq([restante.store, restante.id, restante.last_error, restante.quarantined_at], ['books', 'qt1', 'taille', '2026-10-13T20:00:05.000Z'], 'envoi : l’entrée en quarantaine est nommée, motif et heure posés');
+      const conflit = (await db.getAll('sync_conflicts'))[0];
+      eq([conflit.id, conflit.store, conflit.record_id, conflit.local.title, conflit.server.data.title, conflit.kind, conflit.at], ['books:cf1', 'books', 'cf1', 'Ici', 'Serveur', 'donnees', '2026-10-13T20:00:00Z'], 'envoi : le conflit garde les deux versions, la locale lue avant la transaction');
+      // Une quarantaine n'est pas relue à la passe suivante : elle attend un geste de la personne (Réglages).
+      eq([(await createPush({ db, transport: tf }).envoyer()).envoyes, tf.journal.length], [0, 1], 'envoi : une entrée en quarantaine n’est plus jamais tentée');
+    });
+
+    // --- Envoi : lignes files retenues (R-L3-5) — marquées, jamais retirées, jamais envoyées
+    await withRepo(async (repo, db) => {
+      await repo.save('books', { id: 'b9', title: 'Neuf' });
+      const sha = 'a'.repeat(64);
+      await repo.putFile(sha, new Blob(['x'], { type: 'image/jpeg' }), { original_filename: 'x.jpg' });
+      eq((await db.getAll('outbox')).map((e) => e.store), ['books', 'files'], 'retenues : la ligne files est bien en file au départ');
+      const tf = creerTransportFactice();
+      const r = await createPush({ db, transport: tf }).envoyer();
+      eq([r.envoyes, r.retenues, r.erreur], [1, 1, null], 'retenues : la ligne files est comptée retenue, le livre part quand même');
+      eq(tf.journal[0].rows.map((e) => e.store), ['books'], 'retenues : aucun appel réseau ne contient la ligne files (R-L3-5)');
+      const file = await db.getAll('outbox');
+      eq(file.map((e) => [e.store, e.id, e.last_error, e.quarantined_at]), [['files', sha, 'fichier en attente', undefined]], 'retenues : l’entrée reste en file, marquée « fichier en attente », pas en quarantaine (R-L3-5)');
+      // Marquée sans être retirée : la passe suivante la retient encore, et ne l'envoie toujours pas.
+      const r2 = await createPush({ db, transport: tf }).envoyer();
+      eq([r2.envoyes, r2.retenues, tf.journal.length], [0, 1, 1], 'retenues : une passe où tout est retenu ne fait aucun appel réseau');
+    });
+
+    // --- Envoi : une entrée dont l'heure de reprise n'est pas venue attend (next_try_at, spec § 5.3)
+    await withRepo(async (repo, db) => {
+      await repo.save('books', { id: 'ba', title: 'Attend' });
+      const entree = (await db.getAll('outbox'))[0];
+      await db.mutate({ puts: { outbox: [{ ...entree, next_try_at: '2026-10-13T21:00:00Z', tries: 1, last_error: 'reseau' }] }, origin: 'remote' });
+      const tf = creerTransportFactice();
+      eq((await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer()).envoyes, 0, 'envoi : avant next_try_at, l’entrée n’est pas relue');
+      eq(tf.journal.length, 0, 'envoi : aucune entrée prête → aucun appel réseau');
+      eq((await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T21:00:00Z') }).envoyer()).envoyes, 1, 'envoi : à next_try_at, l’entrée repart');
+    });
+  } finally { setClockOffset(0); }
 }
