@@ -294,5 +294,78 @@ export async function runSyncL3Tests({ eq, ok }) {
       try { r = await createPush({ db, transport: tf }).envoyer(); } finally { db.mutate = vraiMutate; }
       eq([r.envoyes, origines, tf.journal.length], [0, [], 0], 'envoi : une passe sur file vide n’ouvre aucune transaction et n’appelle rien');
     });
+
+    // --- Envoi : erreurs (spec § 5.3) — recul, 401, quota, dichotomie, refus d’adresse
+    const { reculMs } = await import('../src/sync/push.js');
+    eq([reculMs(0), reculMs(1), reculMs(2), reculMs(10)], [2000, 4000, 8000, 300000], 'envoi : recul 2 s, 4 s, 8 s … plafond 5 min');
+    // Chaque échec passe par logError, donc par console.error : le stub est posé en try/finally (la page reste à
+    // zéro erreur console) et il COMPTE les appels — un échec est journalisé, jamais montré.
+    const vraiConsoleErreur = console.error;
+    let journalisesErreurs = 0;
+    console.error = () => { journalisesErreurs += 1; };
+    try {
+      await withRepo(async (repo, db) => {
+        await repo.save('books', { id: 'r1', title: 'Un' });
+        const tf = creerTransportFactice({ pousser: [{ erreur: { type: 'reseau', status: 503, message: 'x' } }, { erreur: { type: 'reseau', status: 0, message: 'x' } }] });
+        let t = Date.parse('2026-10-13T20:00:00Z');
+        const push = createPush({ db, transport: tf, maintenant: () => t });
+        const r1 = await push.envoyer();
+        eq([r1.erreur.type, r1.recul], ['reseau', 2000], 'envoi : échec réseau → recul de 2 s annoncé');
+        const e1 = (await db.getAll('outbox'))[0];
+        eq([e1.tries, e1.next_try_at, e1.last_error], [1, new Date(t + 2000).toISOString(), 'reseau'], 'envoi : l’entrée compte l’essai, son heure de reprise et le motif');
+        eq((await push.envoyer()).erreur, null, 'envoi : avant l’heure de reprise, rien n’est tenté');
+        eq(tf.journal.length, 1, 'envoi : aucun appel avant l’heure de reprise');
+        t += 2000;
+        const r2 = await push.envoyer();
+        eq([r2.erreur.type, r2.recul], ['reseau', 4000], 'envoi : deuxième échec → recul doublé');
+        eq((await db.getAll('outbox'))[0].tries, 2, 'envoi : deux essais comptés');
+        eq(await db.count('outbox'), 1, 'envoi : un échec réseau ne perd rien (I5)');
+      });
+      await withRepo(async (repo, db) => {
+        await repo.save('books', { id: 'a1', title: 'Un' });
+        const tf = creerTransportFactice({ pousser: [{ erreur: { type: 'auth', status: 401, message: 'x' } }] });
+        const r = await createPush({ db, transport: tf }).envoyer();
+        eq([r.attenteConnexion, r.erreur.type, (await db.getAll('outbox'))[0].tries], [true, 'auth', 0], 'envoi : 401 → en attente de connexion, sans compter d’essai');
+      });
+      await withRepo(async (repo, db) => {
+        await repo.save('books', { id: 'q1', title: 'Un' });
+        const tf = creerTransportFactice({ pousser: [{ erreur: { type: 'quota', status: 507, message: 'x' } }] });
+        const r = await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer();
+        eq(r.pause, true, 'envoi : refus de quota → pause');
+        eq((await db.get('sync_state', 'pause'))?.value?.raison, 'quota', 'envoi : la pause est écrite dans sync_state');
+        eq((await db.get('sync_state', 'pause'))?.value?.at, '2026-10-13T20:00:00.000Z', 'envoi : la pause est horodatée');
+        eq(await db.count('outbox'), 1, 'envoi : rien n’est perdu en pause');
+      });
+      await withRepo(async (repo, db) => {
+        for (const id of ['d1', 'd2', 'd3', 'd4']) await repo.save('books', { id, title: id });
+        // Le serveur refuse tout lot contenant d3 (règle simulée) ; la dichotomie doit l’isoler et envoyer les autres.
+        const refus = { erreur: { type: 'refus', status: 400, message: 'regle simulee' } };
+        const tf = { journal: [], async pousser(rows) { tf.journal.push(rows.map((r) => r.id)); if (rows.some((r) => r.id === 'd3')) return { reponse: null, erreur: refus.erreur }; return { reponse: { server_time: '2026-10-13T20:00:00Z', accepted: rows.map(({ store, id }) => ({ store, id })), adjusted: [], rejected: [] }, erreur: null }; }, async lire() { return { lignes: [], erreur: null }; } };
+        const r = await createPush({ db, transport: tf }).envoyer();
+        eq([r.envoyes, r.quarantaine], [3, 1], 'envoi : dichotomie → trois envoyées, une en quarantaine');
+        const reste = await db.getAll('outbox');
+        eq(reste.map((e) => [e.id, e.last_error, !!e.quarantined_at]), [['d3', 'refus', true]], 'envoi : l’entrée fautive est en quarantaine avec le motif « refus »');
+        ok(tf.journal.length >= 3 && tf.journal[0].length === 4, 'envoi : le lot entier d’abord, puis des moitiés');
+        // La quarantaine est permanente : la passe suivante ne retente rien et n’appelle plus le serveur.
+        const appels = tf.journal.length;
+        eq([(await createPush({ db, transport: tf }).envoyer()).envoyes, tf.journal.length], [0, appels], 'envoi : après la dichotomie, l’entrée isolée n’est plus jamais tentée');
+      });
+      await withRepo(async (repo, db) => {
+        // Un échec réseau au milieu d’une dichotomie arrête tout : rien n’est mis en quarantaine par accident.
+        for (const id of ['x1', 'x2']) await repo.save('books', { id, title: id });
+        const tf = { journal: [], async pousser(rows) { tf.journal.push(rows.map((r) => r.id)); return { reponse: null, erreur: rows.length > 1 ? { type: 'refus', status: 400, message: 'x' } : { type: 'reseau', status: 0, message: 'x' } }; } };
+        const r = await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer();
+        eq([r.erreur.type, r.quarantaine, r.recul], ['reseau', 0, 2000], 'envoi : un échec réseau pendant la dichotomie arrête la passe, sans quarantaine');
+        eq([tf.journal.length, await db.count('outbox')], [2, 2], 'envoi : la moitié droite n’est pas tentée, la file est intacte');
+      });
+      await withRepo(async (repo, db) => {
+        await repo.save('books', { id: 'n1', title: 'Un' });
+        const tf = creerTransportFactice({ pousser: [{ erreur: { type: 'auth', status: 400, message: 'adresse non autorisée' } }] });
+        const r = await createPush({ db, transport: tf }).envoyer();
+        eq(r.attenteConnexion, true, 'envoi : « adresse non autorisée » → attente (la garde est refaite par le moteur), rien n’est perdu');
+        eq([(await db.getAll('outbox'))[0].tries, await db.count('outbox')], [0, 1], 'envoi : un refus d’adresse ne compte aucun essai et ne perd rien');
+      });
+    } finally { console.error = vraiConsoleErreur; }
+    eq(journalisesErreurs, 10, 'envoi : chaque échec est journalisé une fois (un code et un statut, jamais le message du fournisseur)');
   } finally { setClockOffset(0); }
 }

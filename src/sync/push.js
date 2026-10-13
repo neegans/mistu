@@ -6,6 +6,10 @@ import { appliquerReponse } from './reponses.js';
 import { appliquerHeureServeur } from './clock.js';
 import { logError } from '../core/log.js';
 
+// Recul exponentiel (spec § 5.3) : 2 s, 4 s, 8 s … plafonné à 5 min. `tries` = essais DÉJÀ comptés, donc le premier
+// échec (tries = 0) attend 2 s. Le plafond borne l'attente : un serveur longtemps absent n'enterre pas la file.
+export const reculMs = (tries) => Math.min(2000 * 2 ** Math.max(0, tries), 300000);
+
 // Le bilan se compte depuis les EFFETS, jamais depuis la réponse brute (R-L3-8) : ce que le serveur annonce pour
 // une clé hors du lot ne produit rien et ne compte donc pour rien. « envoyés » = clés réellement retirées de la
 // file, moins celles retirées pour une autre raison (conflit à trancher, doublon d'une clé mise en quarantaine) et
@@ -64,20 +68,33 @@ export function createPush({ db, transport, maintenant = Date.now, surHeure = ()
     return effets;
   }
 
-  async function envoyer() {
-    const bilan = { envoyes: 0, ajustes: 0, conflits: 0, quarantaine: 0, retenues: 0, erreur: null, pause: false, attenteConnexion: false };
-    const file = await lireFile();
-    if (!file.length) return bilan;
-    const entreesParSeq = new Map(file.map((e) => [e.seq, e]));
-    const { lots, retenues } = await composerLots(file, (store, id) => db.get(store, id));
-    bilan.retenues = retenues.length;
-    await marquerRetenues(retenues, entreesParSeq);
-    for (const lot of lots) {
-      const { reponse, erreur } = await transport.pousser(lot.elements);
-      if (erreur) { bilan.erreur = erreur; logError('sync.push', { reason: erreur.type, status: erreur.status }); break; }
-      // Pas d'erreur et pas de réponse : le serveur n'a rien accusé, donc rien n'est retiré (I5). Le traitement
-      // complet des échecs (recul, dichotomie, pause) vient avec le moteur.
-      if (!reponse) { bilan.erreur = { type: 'inconnu', status: null, message: '' }; logError('sync.push', { reason: 'reponse vide' }); break; }
+  // Un échec passager (réseau, 5xx, 429) : chaque entrée du lot compte l'essai et porte son heure de reprise.
+  // `tries` AVANT incrément gouverne l'attente, donc le premier échec rend la main dans 2 s. Origine 'remote' :
+  // ce marquage n'est pas un geste de la personne et ne repart jamais vers le serveur.
+  async function reporter(seqs, entreesParSeq, erreur) {
+    const puts = [];
+    for (const s of seqs) {
+      const e = entreesParSeq.get(s);
+      if (!e) continue;
+      const avant = e.tries || 0;
+      puts.push({ ...e, tries: avant + 1, next_try_at: new Date(maintenant() + reculMs(avant)).toISOString(), last_error: erreur.type });
+    }
+    if (puts.length) await db.mutate({ puts: { outbox: puts }, origin: 'remote' });
+  }
+
+  // Les seq de la file qui correspondent aux éléments d'une moitié de lot (une clé peut en porter plusieurs).
+  function seqsDe(lot, elements, entreesParSeq) {
+    const cles = new Set(elements.map(cleDe));
+    return lot.seqs.filter((s) => { const e = entreesParSeq.get(s); return e && cles.has(cleDe(e)); });
+  }
+
+  // Un lot → le serveur. Rend `true` si la passe peut continuer, `false` s'il faut l'arrêter (réseau, connexion à
+  // refaire, pause de quota, réponse vide). Un refus du lot ENTIER n'arrête pas la passe : il se dichotomise.
+  async function envoyerLot(lot, entreesParSeq, bilan) {
+    const { reponse, erreur } = await transport.pousser(lot.elements);
+    if (!erreur) {
+      // Pas d'erreur et pas de réponse : le serveur n'a rien accusé, donc rien n'est retiré (I5).
+      if (!reponse) { bilan.erreur = { type: 'inconnu', status: null, message: '' }; logError('sync.push', { reason: 'reponse vide' }); return false; }
       if (reponse.server_time) surHeure(appliquerHeureServeur(reponse.server_time, maintenant()));
       const effets = await appliquer(lot, reponse, entreesParSeq);
       const { envoyes, ajustes } = compter(effets, entreesParSeq);
@@ -85,6 +102,59 @@ export function createPush({ db, transport, maintenant = Date.now, surHeure = ()
       bilan.ajustes += ajustes;
       bilan.conflits += effets.conflits.length;
       bilan.quarantaine += effets.quarantaine.length;
+      return true;
+    }
+    logError('sync.push', { reason: erreur.type, status: erreur.status });
+    if (erreur.type === 'reseau') {
+      await reporter(lot.seqs, entreesParSeq, erreur);
+      bilan.erreur = erreur;
+      // Annoncé à l'interface : l'attente que les entrées viennent de se donner (tries d'avant l'incrément).
+      bilan.recul = reculMs(Math.max(0, ...lot.seqs.map((s) => entreesParSeq.get(s)?.tries || 0)));
+      return false;
+    }
+    // 401, 403, « adresse non autorisée » : aucun essai n'est compté — c'est la garde de compte qui doit rejouer,
+    // pas la file qui doit reculer. Rien n'est perdu, rien n'est marqué.
+    if (erreur.type === 'auth') { bilan.erreur = erreur; bilan.attenteConnexion = true; return false; }
+    // 413, 507, « exceeded » : la place manque. On s'arrête et on le dit ; la file reste entière (I5).
+    if (erreur.type === 'quota') {
+      await db.mutate({ puts: { sync_state: [{ key: 'pause', value: { raison: 'quota', at: new Date(maintenant()).toISOString() } }] }, origin: 'remote' });
+      bilan.erreur = erreur; bilan.pause = true; return false;
+    }
+    // refus (ou inconnu, par prudence) : le serveur refuse le lot ENTIER, sans nommer le fautif. Dichotomie jusqu'à
+    // l'isoler : une seule fiche finit en quarantaine (nommée, la personne décide), les autres passent.
+    if (lot.elements.length <= 1) {
+      const seq = Math.max(...lot.seqs);
+      const entree = entreesParSeq.get(seq);
+      if (!entree) return true;
+      await db.mutate({
+        puts: { outbox: [{ ...entree, quarantined_at: new Date(maintenant()).toISOString(), last_error: 'refus' }] },
+        deletes: { outbox: lot.seqs.filter((s) => s !== seq) },
+        origin: 'remote',
+      });
+      bilan.quarantaine += 1;
+      return true;
+    }
+    const milieu = Math.ceil(lot.elements.length / 2);
+    const gauche = lot.elements.slice(0, milieu);
+    const droite = lot.elements.slice(milieu);
+    const okG = await envoyerLot({ elements: gauche, seqs: seqsDe(lot, gauche, entreesParSeq) }, entreesParSeq, bilan);
+    // Une moitié qui rend `false` a rencontré un arrêt (réseau, connexion, pause, réponse vide) : la seconde moitié
+    // n'est pas tentée, et rien n'est mis en quarantaine par accident.
+    if (!okG) return false;
+    return envoyerLot({ elements: droite, seqs: seqsDe(lot, droite, entreesParSeq) }, entreesParSeq, bilan);
+  }
+
+  async function envoyer() {
+    const bilan = { envoyes: 0, ajustes: 0, conflits: 0, quarantaine: 0, retenues: 0, recul: null, erreur: null, pause: false, attenteConnexion: false };
+    const file = await lireFile();
+    if (!file.length) return bilan;
+    const entreesParSeq = new Map(file.map((e) => [e.seq, e]));
+    const { lots, retenues } = await composerLots(file, (store, id) => db.get(store, id));
+    bilan.retenues = retenues.length;
+    await marquerRetenues(retenues, entreesParSeq);
+    for (const lot of lots) {
+      const continuer = await envoyerLot(lot, entreesParSeq, bilan);
+      if (!continuer) break;
     }
     return bilan;
   }
