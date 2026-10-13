@@ -1,9 +1,10 @@
 // Service worker : coquille applicative en cache pour consultation hors connexion des recettes déjà chargées.
 // Les nouvelles demandes IA et les recherches de métadonnées ne fonctionnent pas hors connexion (spec §15).
+importScripts('./sw-rules.js');
 const VERSION = 'cuisine-os-v0.1.0-3';
 // Tous les modules de production sont inclus ; tests/ reste chargé à la demande.
 const SHELL = [
-  './', './index.html', './styles.css', './manifest.webmanifest', './icons/icon.svg', './icons/apple-touch-icon.png',
+  './', './index.html', './styles.css', './manifest.webmanifest', './icons/icon.svg', './icons/apple-touch-icon.png', './sw-rules.js',
   './src/app.js',
   './src/core/bus.js', './src/core/db.js', './src/core/dom.js', './src/core/hash.js', './src/core/i18n.js', './src/core/ids.js', './src/core/router.js', './src/core/zip.js',
   './src/i18n/en.js',
@@ -23,9 +24,14 @@ self.addEventListener('activate', (event) => {
 });
 
 // Coquille : réseau d'abord quand disponible (pour recevoir les mises à jour), cache en repli. Tout le reste passe au réseau.
+// Une requête avec chaîne de requête (ex. retour OAuth « ?code=… ») n'est jamais mise en cache (spec § 5.6, sw-rules.js).
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
-  if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  if (!self.CuisineSwRules.shouldCache(event.request, self.location.origin)) {
+    if (event.request.method === 'GET' && new URL(event.request.url).origin === self.location.origin) {
+      event.respondWith(fetch(event.request).catch(() => caches.match('./index.html')));
+    }
+    return;
+  }
   event.respondWith(
     fetch(event.request).then((res) => {
       if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(event.request, copy)); }

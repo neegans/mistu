@@ -119,4 +119,13 @@ export async function runSyncTests({ eq, ok }) {
   const frame = pdfFrame({ sha256: 'z'.repeat(64), filename: 'x.pdf' });
   ok(frame.querySelector('iframe[sandbox]'), 'pdfFrame : iframe sandbox present avant resolution');
   ok([...frame.querySelectorAll('button')].some((b) => b.textContent === 'Télécharger le fichier'), 'pdfFrame : bouton Télécharger le fichier toujours present');
+
+  // --- Service worker (spec § 5.6)
+  const rules = globalThis.CuisineSwRules;
+  ok(rules && typeof rules.shouldCache === 'function', 'sw-rules.js chargé');
+  const origin = 'https://exemple.test';
+  ok(rules.shouldCache({ url: origin + '/mistu/', method: 'GET' }, origin), 'navigation sans paramètres : cache');
+  ok(!rules.shouldCache({ url: origin + '/mistu/?code=abc', method: 'GET' }, origin), 'avec ?code= : jamais en cache');
+  ok(!rules.shouldCache({ url: 'https://autre.test/x.js', method: 'GET' }, origin), 'autre origine : jamais');
+  ok(!rules.shouldCache({ url: origin + '/mistu/', method: 'POST' }, origin), 'POST : jamais');
 }
