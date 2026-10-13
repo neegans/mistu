@@ -92,6 +92,7 @@ export const EN = {
   "Connectée : {e}": "Connected: {e}",
   "À envoyer : {n}": "To send: {n}",
   "Se déconnecter": "Sign out",
+  "Vérification du compte…": "Checking the account…",
   "Historique de consultation": "Reading history",
   "Synchroniser mon historique de consultation": "Sync my reading history",
   "Désactivé, ce que tu consultes reste sur cet appareil. Le décocher retire aussi ce qui attendait d’être envoyé.": "When off, what you open stays on this device. Unchecking it also drops what was waiting to be sent.",

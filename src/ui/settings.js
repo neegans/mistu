@@ -45,6 +45,7 @@ export async function renderSettings(params, query, ctx) {
     guard: sync.guard || null,
     retour: sync.retour || null,
     pending,
+    enAttente: sync.enAttente === true, // R28 : le démarrage n’a pas abouti dans sa borne de temps
   }, auth, s));
 
   // Le navigateur ne confirme pas que le téléchargement a été enregistré dans Fichiers.
@@ -365,7 +366,7 @@ async function changeAccount(auth) {
 // Modèle pur de la section « Synchronisation » (spec § 4.2, ensemble L2) : ce que la section dit et ce qu’elle offre.
 // Aucun DOM, aucun appel réseau, aucune lecture de base : testable tel quel, consommé par syncSection().
 // Rien n’est deviné : sans adresse connue la ligne reste vide, et un refus du fournisseur n’est jamais détaillé.
-export function syncSectionModel({ available = false, reason = null, user = null, pending = 0, guard = null, retour = null } = {}) {
+export function syncSectionModel({ available = false, reason = null, user = null, pending = 0, guard = null, retour = null, enAttente = false } = {}) {
   const lines = [];
   const buttons = [];
   if (!available) {
@@ -373,6 +374,12 @@ export function syncSectionModel({ available = false, reason = null, user = null
     lines.push(reason === 'bibliotheque'
       ? t('La bibliothèque de synchronisation n’a pas été chargée.')
       : t('Synchronisation non configurée sur cette adresse.'));
+  } else if (enAttente) {
+    // R30 : le démarrage borné (R28) n’a pas encore abouti — le compte n’est pas CONNU. Dire « Tes données restent
+    // sur cet appareil. » et offrir « Activer la synchronisation » serait un état sans événement réel (spec I5).
+    // Aucun geste n’est offert : il porterait sur un état qui n’est pas encore établi. Le résultat tardif
+    // redemande un rendu (state.js), et la section redevient alors celle de tous les jours.
+    lines.push(t('Vérification du compte…'));
   } else if (guard && guard.ok === false) {
     // Garde de compte refusée : la synchronisation reste désactivée, avec deux issues (R22). La douce d'abord :
     // se déconnecter ne touche ni les données ni la file ; changer de compte efface l'appareil.

@@ -462,6 +462,15 @@ export async function runSyncTests({ eq, ok }) {
   eq(syncSectionModel({ available: true, user: { id: 'uid-A', email: '' }, guard: { ok: true } }).lines,
     ['Connectée : ', 'À envoyer : 0'],
     'sans adresse connue : aucune valeur inventée, file à zéro');
+  // R30 : tant que le démarrage borné (R28) n'a pas abouti, le compte n'est pas CONNU. « Tes données restent sur
+  // cet appareil. » et « Activer la synchronisation » seraient un état sans événement réel (spec I5) : la section
+  // dit ce qu'elle fait et n'offre rien, le temps que le résultat tardif arrive.
+  eq(syncSectionModel({ available: true, enAttente: true, pending: 3 }),
+    { title: 'Synchronisation', lines: ['Vérification du compte…'], buttons: [] },
+    'R30 : démarrage encore en cours → une seule ligne, aucun bouton, aucun chiffre');
+  eq(syncSectionModel({ available: true, enAttente: true, user: { id: 'uid-A', email: 'a@exemple.test' }, guard: { ok: true } }),
+    { title: 'Synchronisation', lines: ['Vérification du compte…'], buttons: [] },
+    'R30 : l’attente prime sur tout état partiel qui traînerait');
 
   // --- R21 : la route mémorisée avant signIn() est restaurée à TOUT retour du fournisseur
   // Décision pure, hors du démarrage : elle rend la route à appliquer, ou null, et n'écrit jamais rien.
