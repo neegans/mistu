@@ -129,6 +129,9 @@ begin
   if rows is null or jsonb_typeof(rows) <> 'array' then raise exception 'rows : tableau attendu'; end if;
   if jsonb_array_length(rows) > 500 then raise exception 'rows : 500 éléments au plus'; end if;
   if pg_column_size(rows) > 1048576 then raise exception 'rows : 1 Mo au plus'; end if;
+  -- Autorisation vérifiée une fois, ici : une adresse retirée de private.allowed_users pendant la session doit
+  -- donner un échec franc, pas 500 rejets « forme » que le client lirait comme « mes fiches sont mal formées ».
+  if not public.is_allowed() then raise exception 'adresse non autorisée'; end if;
   for r in select * from jsonb_array_elements(rows) loop
     s := r->>'store'; i := r->>'id'; d := r->'data'; adj := false; bad := null;
     if s is null or not (s = any(stores)) then raise exception 'store inconnu'; end if;
@@ -178,7 +181,11 @@ begin
       else
         bad := 'conflit';
       end if;
-    exception when others then bad := 'forme';
+    exception when others then
+      -- Refus d'une règle (42501), sérialisation ou verrou mortel (40001, 40P01), ressource épuisée (53100, 53200,
+      -- 57P03) : rien de tout cela n'est imputable à l'élément. Ces échecs remontent ; le reste devient un rejet.
+      if sqlstate in ('42501','40001','40P01','53100','53200','57P03') then raise; end if;
+      bad := 'forme';
     end;
     if bad = 'conflit' then
       rejected := rejected || jsonb_build_object('store', s, 'id', i, 'reason', 'conflit',

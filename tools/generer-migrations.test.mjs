@@ -9,8 +9,9 @@ const { tables: sql, storage } = renderMigrations();
 
 // Corps d'une fonction, borne au premier « $$; » qui suit sa declaration : une assertion portant sur UNE fonction ne
 // peut pas etre satisfaite par le texte d'une autre.
+// La parenthese ouvrante est indispensable : « sync_purge » est un prefixe de « sync_purge_all ».
 function corps(nom) {
-  const debut = sql.indexOf(`create or replace function public.${nom}`);
+  const debut = sql.indexOf(`create or replace function public.${nom}(`);
   assert.notEqual(debut, -1, 'declaration de ' + nom);
   const fin = sql.indexOf('$$;', debut);
   assert.notEqual(fin, -1, 'fin du corps de ' + nom);
@@ -131,16 +132,34 @@ test('sync_push : aucun element ne peut faire echouer le lot (spec § 3.4)', () 
   // (c) contraintes de table : sous-bloc autour de l'ecriture + controles explicites pour files.
   assert.match(p, /if d \? 'blob' then bad := 'forme';/);
   assert.match(p, /d->>'size' is not null and d->>'size' !~ '\^\[0-9\]\+\$'/);
-  assert.match(p, /exception when others then bad := 'forme';/);
   assert.match(p, /bad := 'conflit';/);
   assert.match(p, /exit when bad is not null;/);
   // Le « continue » ne doit jamais etre dans le sous-bloc d'ecriture : il reste au niveau de la boucle externe.
   const ouvre = p.indexOf('if cur_updated is null then');
-  const ferme = p.indexOf("exception when others then bad := 'forme';");
+  const ferme = p.lastIndexOf('exception when others then'); // le gestionnaire du sous-bloc est le dernier du corps
   assert.ok(ouvre !== -1 && ferme > ouvre, 'sous-bloc d ecriture localise');
   assert.doesNotMatch(p.slice(ouvre, ferme), /continue;/);
-  // Un rejet pose avant le sous-bloc sort par le haut, sans passer par l'ecriture.
-  assert.match(p, /if bad is not null then\n\s*rejected := rejected \|\| jsonb_build_object\('store', s, 'id', i, 'reason', bad\); continue;/);
+  // N2 : ancre sur le debut de ligne, sinon « elsif bad is not null » suffirait a satisfaire le test ; et verifie la
+  // position, pour que la suppression du rejet d'avant le sous-bloc ne passe pas inapercue.
+  const rejetAvant = "\n    if bad is not null then\n      rejected := rejected || jsonb_build_object('store', s, 'id', i, 'reason', bad); continue;";
+  const iRejetAvant = p.indexOf(rejetAvant);
+  assert.notEqual(iRejetAvant, -1, 'rejet avant le sous-bloc, en debut de ligne');
+  assert.ok(iRejetAvant < p.indexOf('cur_updated := null;'), 'ce rejet precede la lecture de la ligne courante');
+});
+test('N1 : un echec non imputable a l element remonte au lieu de devenir un rejet', () => {
+  const p = corps('sync_push');
+  // (1) autorisation verifiee une fois, avant la boucle : une adresse retiree de la liste donne un echec franc.
+  const iAllowed = p.indexOf("if not public.is_allowed() then raise exception");
+  const iBoucle = p.indexOf('for r in select * from jsonb_array_elements(rows) loop');
+  assert.notEqual(iAllowed, -1, 'controle public.is_allowed() en tete de sync_push');
+  assert.ok(iBoucle > iAllowed, 'le controle precede la boucle');
+  // (2) le gestionnaire du sous-bloc releve les classes qui ne concernent pas l'element, AVANT de poser « forme ».
+  const gestionnaire = p.slice(p.lastIndexOf('exception when others then'));
+  const liste = "if sqlstate in ('42501','40001','40P01','53100','53200','57P03') then raise; end if;";
+  const iListe = gestionnaire.indexOf(liste);
+  const iForme = gestionnaire.indexOf("bad := 'forme';");
+  assert.notEqual(iListe, -1, 'liste exacte des sqlstate qui remontent');
+  assert.ok(iForme > iListe, 'les classes remontent avant que « forme » ne soit pose');
 });
 test('aucune donnee personnelle, determinisme', () => {
   assert.doesNotMatch(sql + storage, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
