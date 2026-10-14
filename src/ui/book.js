@@ -1,31 +1,61 @@
 // Fiche d'un livre (édition possédée) : métadonnées, convention d'unités, recettes repérées et disponibles, pages sources.
 import { el, toast, pickFiles, confirmDialog, promptDialog } from '../core/dom.js';
 import { t } from '../core/i18n.js';
-import { navigate, refresh } from '../core/router.js';
+import { navigate, refresh, remplacerAdresse } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { displayUrl } from '../sync/mime.js';
 import { listConventions } from '../domain/units.js';
 import { pageHeader, section, field, select, recipeCard, emptyState } from './components.js';
 import { startScanSession, indexEntriesPanel } from './import.js';
+import { accueilLivreModel, renderAccueilLivre } from './accueil-livre.js';
+import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
+import { ACCEPT_PHOTOS, ACCEPT_FICHIERS } from './add.js';
+
+export const seancesOuvertes = (ctx, editionId) => (ctx.scan_sessions || []).filter((s) => s.status === 'open' && s.edition_id === editionId);
+
+// « + Pages d'index » / « + Recette » : un <details> dont le résumé est le bouton, les sources dessous (spec § 9).
+function menuSource(libelle, ...boutons) {
+  return el('details', { class: 'menu-source' }, el('summary', { class: 'btn primary' }, libelle), el('div', { class: 'row', style: { marginTop: '.5rem' } }, ...boutons));
+}
 
 export async function renderBook(params, query, ctx) {
   const edition = ctx.editionsById.get(params.id);
   if (!edition) return el('div', { class: 'card' }, t('Livre introuvable.'));
   const book = ctx.booksById.get(edition.book_id) || { title: t('Sans titre') };
-  await repo.recordActivity(edition.id, 'open_book');
+  if (query.nouveau === undefined) await repo.recordActivity(edition.id, 'open_book'); // S16 : l'arrivée après création n'est pas une ouverture volontaire
   const recipes = ctx.recipes.filter((r) => r.edition_id === edition.id);
   const docs = ctx.source_documents.filter((d) => d.edition_id === edition.id);
   const pages = ctx.source_pages.filter((p) => p.edition_id === edition.id);
   const pref = ctx.rediscovery_prefs.find((p) => p.edition_id === edition.id);
   const root = el('div', null);
+  // I-F : un scan parti d'ici porte le livre ET l'intention (index ou recette) ; le menu ne décide que de la SOURCE.
+  const lancer = (intention) => async (accept, capture) => {
+    const f = await pickFiles({ accept, multiple: true, capture });
+    if (f.length) startScanSession(f, { edition_id: edition.id, intention });
+  };
   root.append(pageHeader(book.title, {
     subtitle: [book.author, edition.publisher, edition.year, edition.isbn ? `ISBN ${edition.isbn}` : null, edition.language ? edition.language.toUpperCase() : null].filter(Boolean).join(' · '),
     back: { href: '/library', label: t('Mes livres') },
     actions: [
-      el('button', { class: 'btn primary', onClick: async () => { const f = await pickFiles({ accept: 'image/*', capture: 'environment' }); if (f.length) startScanSession(f, { edition_id: edition.id }); } }, t('Photographier des pages')),
-      el('a', { class: 'btn', href: `#/recipes/new?edition=${edition.id}` }, t('Saisir une recette')),
+      menuSource(t('+ Pages d’index'),
+        el('button', { type: 'button', class: 'btn', onClick: () => lancer('index')(ACCEPT_PHOTOS, 'environment') }, t('Photographier')),
+        el('button', { type: 'button', class: 'btn', onClick: () => lancer('index')(ACCEPT_FICHIERS, null) }, t('Choisir des photos ou un PDF'))),
+      menuSource(t('+ Recette'),
+        el('button', { type: 'button', class: 'btn', onClick: () => lancer('recette')(ACCEPT_PHOTOS, 'environment') }, t('Photographier')),
+        el('button', { type: 'button', class: 'btn', onClick: () => lancer('recette')(ACCEPT_FICHIERS, null) }, t('Choisir des photos ou un PDF')),
+        el('a', { class: 'btn', href: `#/recipes/new?edition=${edition.id}` }, t('Saisir à la main'))),
     ],
   }));
+  root.append(renderAccueilLivre(accueilLivreModel({ nouveau: query.nouveau }), {
+    photographier: (intention) => lancer(intention)(ACCEPT_PHOTOS, 'environment'),
+    choisir: (intention) => lancer(intention)(ACCEPT_FICHIERS, null),
+    plusTard: () => navigate('/library'),
+    fermer: () => remplacerAdresse(`#/books/${edition.id}`),
+  }));
+  const ouvertes = seancesOuvertes(ctx, edition.id);
+  if (ouvertes.length) root.append(el('div', { class: 'card flat row between' },
+    el('span', null, t('Séance en cours : {n} page(s)', { n: ouvertes[0].page_ids.length })),
+    el('a', { class: 'btn small', href: `#/import?session=${ouvertes[0].id}` }, t('Reprendre'))));
 
   const usesCups = ctx.recipe_versions.some((v) => recipes.some((r) => r.id === v.recipe_id) && (v.ingredients || []).some((i) => ['cup', 'tbsp', 'tsp', 'fl_oz'].includes(i.unit_id)));
   if (!edition.unit_convention_id && usesCups) {
@@ -88,17 +118,27 @@ export async function renderBook(params, query, ctx) {
   }
 
   // Métadonnées
-  const meta = { title: book.title, author: book.author || '', isbn: edition.isbn || '', publisher: edition.publisher || '', year: edition.year || '', language: edition.language || 'fr', convention: edition.unit_convention_id || '', cuisines: (book.cuisines || []).join(', ') };
+  const meta = { title: book.title, author: book.author || '', isbn: edition.isbn || '', publisher: edition.publisher || '', year: edition.year || '', language: edition.language || 'fr', convention: edition.unit_convention_id || '', cuisines: [...(book.cuisines || [])] };
   const inp = (k, type = 'text') => el('input', { type, value: meta[k], onInput: (e) => { meta[k] = e.target.value; } });
   root.append(el('details', { class: 'card' }, el('summary', null, el('strong', null, t('Métadonnées et convention'))),
     el('div', { class: 'two-col', style: { marginTop: '.8rem' } },
       field(t('Titre'), inp('title')), field(t('Auteur / chef'), inp('author')), field(t('ISBN'), inp('isbn')), field(t('Éditeur'), inp('publisher')), field(t('Année'), inp('year', 'number')),
       field(t('Langue'), select([{ value: 'fr', label: 'Français' }, { value: 'en', label: 'English' }, { value: 'other', label: t('Autre') }], meta.language, (v) => { meta.language = v; })),
-      field(t('Cuisines'), inp('cuisines')),
+      // R-UX-8 : les puces ne vont JAMAIS dans un label — field() rend un <label>, et un clic sur « Cuisines »
+      // activerait alors la première puce. Même habillage (.field), sans l'enveloppe qui vole le clic.
+      el('div', { class: 'field' }, el('span', null, t('Cuisines')), (() => {
+        const box = el('div', null);
+        const dessiner = () => box.replaceChildren(renderPuces(pucesModel({ choisies: meta.cuisines, existantes: cuisinesExistantes(ctx) }), {
+          basculer: (v) => { meta.cuisines = basculerPuce(meta.cuisines, v); dessiner(); },
+          ajouter: (v) => { const a = ajouterPuce(meta.cuisines, v); if (a !== meta.cuisines) { meta.cuisines = a; dessiner(); } },
+        }));
+        dessiner();
+        return box;
+      })()),
       field(t('Convention de mesure'), select([{ value: '', label: t('Non confirmée') }, ...listConventions().map((c) => ({ value: c.id, label: c.labels.fr }))], meta.convention, (v) => { meta.convention = v; }), t('Ordre de décision : équivalences imprimées → convention décrite dans le livre → convention confirmée ici.'))),
     el('div', { class: 'row', style: { marginTop: '.8rem' } },
       el('button', { class: 'btn primary', onClick: async () => {
-        await repo.saveBatch({ books: [{ ...book, title: meta.title.trim() || book.title, author: meta.author.trim(), cuisines: meta.cuisines.split(',').map((s) => s.trim()).filter(Boolean) }],
+        await repo.saveBatch({ books: [{ ...book, title: meta.title.trim() || book.title, author: meta.author.trim(), cuisines: [...meta.cuisines] }],
           book_editions: [{ ...edition, isbn: meta.isbn.trim() || null, publisher: meta.publisher.trim() || null, year: meta.year ? parseInt(meta.year, 10) || null : null, language: meta.language, unit_convention_id: meta.convention || null, convention_evidence: meta.convention ? (edition.unit_convention_id === meta.convention ? edition.convention_evidence : 'confirmed_by_user') : null }] });
         toast(t('Enregistré')); refresh();
       } }, t('Enregistrer')),

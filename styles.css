@@ -93,6 +93,11 @@ aside.sidenav { display: none; }
 .card.carte .carte-ico { font-size: 1.6rem; }
 .card.carte p { margin: 0; font-size: .9rem; }
 .card h2, .card h3 { margin-top: 0; }
+/* Accueil d'un livre qui vient d'être créé (spec § 8) : un panneau au-dessus de la fiche, pas une modale. */
+.accueil-livre { border: 1px solid var(--sage); }
+/* « + Pages d'index » / « + Recette » (§ 9) : le résumé EST le bouton, le marqueur du <details> est retiré. */
+.menu-source summary { list-style: none; display: inline-flex; }
+.menu-source summary::-webkit-details-marker { display: none; }
 .row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
 .row.between { justify-content: space-between; }
 .row.top { align-items: flex-start; }
@@ -162,8 +167,10 @@ aside.sidenav { display: none; }
 .badge.original { background: var(--sage-2); color: var(--green); }
 .badge.personal { background: #e4ecf7; color: #2c4f7c; }
 
-label.field { display: flex; flex-direction: column; gap: .25rem; font-size: .9rem; color: var(--muted); }
-label.field > span { font-weight: 600; color: var(--ink); }
+/* Un champ est le plus souvent un <label>, mais pas quand il contient un groupe de boutons (puces « Cuisines ») :
+   un <label> enveloppant volerait le clic vers la première puce (R-UX-8). Le sélecteur vise donc la classe. */
+.field { display: flex; flex-direction: column; gap: .25rem; font-size: .9rem; color: var(--muted); }
+.field > span { font-weight: 600; color: var(--ink); }
 input[type=text], input[type=number], input[type=search], input[type=date], input[type=datetime-local], select, textarea {
   font: inherit; font-size: 1rem; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 10px;
   background: #fff; color: var(--ink); width: 100%; min-height: 42px;

@@ -252,11 +252,105 @@ export async function runAjouterTests({ eq, ok }) {
     eq([...racine.querySelectorAll('span.muted')].filter((s) => s.textContent.startsWith('ISBN')).map((s) => s.textContent), ['ISBN 9782761950001'], 'route livre : l’ISBN tapé est nettoyé et rappelé au pas 2');
     // Le défaut de R-UX-9, vu du côté de la personne : taper le titre réveille le bouton.
     const titre = [...racine.querySelectorAll('input[type="text"]')].find((i) => i.name !== 'isbn');
-    ok(racine.querySelector('[data-role="enregistrer"]').disabled, 'route livre : pas 2 à champs vides → « Ajouter ce livre » fermé');
+    const boutonAvant = racine.querySelector('[data-role="enregistrer"]');
+    ok(boutonAvant.disabled, 'route livre : pas 2 à champs vides → « Ajouter ce livre » fermé');
     titre.value = 'Un titre'; titre.dispatchEvent(new Event('input', { bubbles: true }));
     ok(!racine.querySelector('[data-role="enregistrer"]').disabled, 'route livre : le titre tapé ouvre « Ajouter ce livre » (R-UX-9, le défaut corrigé)');
+    ok(racine.querySelector('[data-role="enregistrer"]') === boutonAvant, 'route livre : c’est le MÊME nœud bouton après la frappe — rien n’a été redessiné (l’identité, pas seulement « encore au pas 2 »)');
     eq(racine.querySelector('input[name="isbn"]'), null, 'route livre : on est bien resté au pas 2 (aucun redessin qui ferait sauter le curseur)');
     bouton('← Changer d’ISBN').click();
     eq(racine.querySelector('input[name="isbn"]').value, '9782761950001', 'route livre : le retour au pas 1 garde l’ISBN nettoyé');
+  }
+
+  // --- § 8 Accueil du livre, § 9 fiche livre
+  const { accueilLivreModel, ACCUEIL_ACTIONS, renderAccueilLivre } = await import('../src/ui/accueil-livre.js');
+  const { seancesOuvertes } = await import('../src/ui/book.js');
+  eq(ACCUEIL_ACTIONS, ['index', 'recette', 'plusTard'], 'accueil : trois gestes');
+  eq(accueilLivreModel({ nouveau: undefined }).afficher, false, 'accueil : sans ?nouveau, rien');
+  eq(accueilLivreModel({ nouveau: '' }).afficher, false, 'accueil : « ?nouveau » sans valeur (ce que rend URLSearchParams) n’affiche rien non plus');
+  {
+    const m = accueilLivreModel({ nouveau: '1' });
+    eq([m.afficher, m.titre], [true, 'Le livre est dans ta bibliothèque. Et maintenant ?'], 'accueil : la première ligne dit où on est et pose la question');
+    eq(m.cartes.map((c) => c.action), ACCUEIL_ACTIONS, 'accueil : les trois cartes dans l’ordre');
+    eq(m.cartes[0].titre, 'Photographier l’index ou la table des matières', 'accueil : carte index');
+    const appels = [];
+    const noeud = renderAccueilLivre(m, { photographier: (i) => appels.push(['photo', i]), choisir: (i) => appels.push(['choisir', i]), plusTard: () => appels.push(['plusTard']), fermer: () => appels.push(['fermer']) });
+    const cartes = [...noeud.querySelectorAll('button.carte')];
+    eq(cartes.length, 3, 'accueil : trois cartes rendues');
+    cartes[0].click();
+    const sources = [...noeud.querySelectorAll('.sources button')].map((b) => b.textContent);
+    eq(sources, ['Photographier', 'Choisir des photos ou un PDF'], 'accueil : toucher « index » dévoile les deux sources');
+    [...noeud.querySelectorAll('.sources button')][1].click();
+    cartes[1].click();
+    [...noeud.querySelectorAll('.sources button')][0].click();
+    cartes[2].click();
+    noeud.querySelector('button.fermer').click();
+    eq(appels, [['choisir', 'index'], ['photo', 'recette'], ['plusTard'], ['fermer']], 'accueil : l’intention suit la carte touchée, « Plus tard » et « × » appellent leurs gestes');
+    ok(!noeud.querySelector('.accueil-livre'), 'accueil : le « × » retire vraiment le panneau du DOM (pas seulement un geste appelé)');
+    ok(!renderAccueilLivre(accueilLivreModel({}), {}).hasChildNodes(), 'accueil : modèle fermé → nœud vide');
+    // Un geste absent ne doit pas faire planter une carte touchée (même garde que la grille et la porte d'entrée).
+    let leve = null;
+    try { const nu = renderAccueilLivre(accueilLivreModel({ nouveau: '1' }), {}); [...nu.querySelectorAll('button.carte')].forEach((b) => b.click()); nu.querySelector('button.fermer').click(); } catch (e) { leve = String(e); }
+    eq(leve, null, 'accueil : sans aucun geste câblé, toucher les cartes et le « × » ne lève pas');
+  }
+  eq(seancesOuvertes({ scan_sessions: [{ id: 's1', status: 'open', edition_id: 'e1', page_ids: ['a'] }, { id: 's2', status: 'done', edition_id: 'e1', page_ids: [] }, { id: 's3', status: 'open', edition_id: 'e2', page_ids: [] }] }, 'e1').map((s) => s.id), ['s1'], 'fiche : séances ouvertes de CETTE édition seulement');
+  eq(seancesOuvertes({}, 'e1'), [], 'fiche : un contexte sans scan_sessions ne lève pas');
+
+  // La fiche livre elle-même, rendue sur une base JETABLE (withRepo) : ses deux menus de source, le panneau
+  // d'accueil, la séance en cours, les puces « Cuisines ». Aucun scan n'est déclenché — pickFiles ouvrirait un
+  // vrai sélecteur de fichiers — et le « × » du panneau n'est pas touché ici : son geste réel appelle
+  // remplacerAdresse (history.replaceState), interdit dans la suite.
+  {
+    const { withRepo } = await import('./sync-fixture.js');
+    const { renderBook } = await import('../src/ui/book.js');
+    const edition = { id: 'e1', book_id: 'b1', year: 2019 };
+    const book = { id: 'b1', title: 'Mon livre', author: 'A. B.', cuisines: ['italienne'] };
+    const ctxDe = (extra = {}) => ({
+      editionsById: new Map([['e1', edition]]), booksById: new Map([['b1', book]]), books: [book],
+      recipes: [], recipe_versions: [], source_documents: [], source_pages: [], rediscovery_prefs: [],
+      book_editions: [edition], docsByRecipe: new Map(), scan_sessions: [], settings: {}, ...extra,
+    });
+    await withRepo(async (repo, db) => {
+      const compterActivites = async () => (await db.getAll('library_activity')).length;
+      const avant = await compterActivites();
+      const fiche = await renderBook({ id: 'e1' }, {}, ctxDe());
+      eq((await compterActivites()) - avant, 1, 'fiche : une ouverture volontaire reste journalisée (open_book)');
+      const menus = [...fiche.querySelectorAll('details.menu-source')];
+      eq(menus.map((d) => d.querySelector('summary').textContent), ['+ Pages d’index', '+ Recette'], 'fiche : deux gestes nommés en en-tête (§ 9), le verbe avant l’outil');
+      eq([...menus[0].querySelectorAll('button, a')].map((b) => b.textContent), ['Photographier', 'Choisir des photos ou un PDF'], 'fiche : « + Pages d’index » dévoile les deux sources');
+      eq([...menus[1].querySelectorAll('button, a')].map((b) => b.textContent), ['Photographier', 'Choisir des photos ou un PDF', 'Saisir à la main'], 'fiche : « + Recette » offre aussi la saisie à la main');
+      eq(menus[1].querySelector('a').getAttribute('href'), '#/recipes/new?edition=e1', 'fiche : la saisie à la main partie d’ici porte le livre (I-F)');
+      ok(![...fiche.querySelectorAll('button')].some((b) => b.textContent === 'Photographier des pages'), 'fiche : l’ancien bouton unique « Photographier des pages » a disparu');
+      eq(fiche.querySelector('.accueil-livre'), null, 'fiche : sans ?nouveau, aucun panneau d’accueil');
+      eq([...fiche.querySelectorAll('a')].filter((a) => a.textContent === 'Reprendre').length, 0, 'fiche : sans séance ouverte, rien à reprendre');
+
+      const apres = await compterActivites();
+      const nouvelle = await renderBook({ id: 'e1' }, { nouveau: '1' }, ctxDe());
+      eq((await compterActivites()) - apres, 0, 'fiche : l’arrivée après création n’est pas une ouverture volontaire — rien n’est journalisé (S16)');
+      const panneau = nouvelle.querySelector('.accueil-livre');
+      ok(panneau, 'fiche : ?nouveau=1 pose le panneau d’accueil au-dessus de la fiche (pas une modale)');
+      eq(panneau.querySelector('h2').textContent, 'Le livre est dans ta bibliothèque. Et maintenant ?', 'fiche : la première ligne du panneau dit où on est');
+      eq([...panneau.querySelectorAll('button.carte h3')].map((h) => h.textContent), ['Photographier l’index ou la table des matières', 'Photographier ou importer des pages de recettes', 'Plus tard'], 'fiche : les trois cartes de la spec § 8');
+
+      const avecSeance = await renderBook({ id: 'e1' }, {}, ctxDe({ scan_sessions: [
+        { id: 's1', status: 'open', edition_id: 'e1', page_ids: ['p1', 'p2'] },
+        { id: 's2', status: 'open', edition_id: 'autre', page_ids: ['p3'] },
+        { id: 's3', status: 'done', edition_id: 'e1', page_ids: ['p4'] }] }));
+      ok(avecSeance.textContent.includes('Séance en cours : 2 page(s)'), 'fiche : une séance ouverte de CE livre est rappelée avec son compte de pages');
+      eq([...avecSeance.querySelectorAll('a')].filter((a) => a.textContent === 'Reprendre').map((a) => a.getAttribute('href')), ['#/import?session=s1'], 'fiche : « Reprendre » mène à la séance de CE livre, et à elle seule');
+
+      // R-UX-8 : le champ « Cuisines » n'est pas un <label> — sinon un clic sur le mot « Cuisines » activerait
+      // la première puce. Et un clic sur une puce ne doit re-rendre QUE le conteneur des puces.
+      const champ = [...avecSeance.querySelectorAll('.field')].find((f) => f.querySelector('span')?.textContent === 'Cuisines');
+      ok(champ, 'fiche : le champ « Cuisines » garde l’habillage .field');
+      eq(champ.tagName, 'DIV', 'fiche : « Cuisines » est un <div class="field">, jamais un <label> (R-UX-8)');
+      eq(champ.querySelectorAll('input[type="text"]').length, 1, 'fiche : plus de liste séparée par des virgules — seul le champ « Autre… » des puces reste');
+      const italienne = () => [...champ.querySelectorAll('button.puce')].find((b) => b.textContent === 'Italienne');
+      eq(italienne().getAttribute('aria-pressed'), 'true', 'fiche : la cuisine déjà enregistrée du livre arrive cochée');
+      const enregistrer = [...avecSeance.querySelectorAll('button')].find((b) => b.textContent === 'Enregistrer');
+      italienne().click();
+      eq(italienne().getAttribute('aria-pressed'), 'false', 'fiche : un clic décoche la puce');
+      ok([...avecSeance.querySelectorAll('button')].find((b) => b.textContent === 'Enregistrer') === enregistrer, 'fiche : le clic ne redessine que les puces — « Enregistrer » est le MÊME nœud');
+    });
   }
 }
