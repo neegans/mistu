@@ -370,3 +370,27 @@ indépendantes (opus) : sécurité (S1-S16) et faisabilité/cohérence (F1-F25).
 | F23 Langue / ISBN ambigus | Langue visible ; ISBN par « Changer d'ISBN » seulement (§ 5) |
 | F24 `DB_VERSION`/`--check` | confirmé (§ 6, § 12) |
 | F25 taille du lot | trois tranches livrables, couverture en dernier (§ 2) |
+
+### 15.2 Ce que la construction a amendé
+
+Une ligne par écart réel entre ce plan et le code livré, décidé par le contrôleur pendant les dix tâches
+(registre complet : `.superpowers/sdd/2026-10-14-ajouter-et-livres-ux/progress.md`).
+
+| Ruling | Décision |
+|---|---|
+| R-UX-1 | La forme d'une entrée d'outbox (nom du champ) n'était pas fixée au plan ; l'assertion de test est adaptée au champ réel. |
+| R-UX-2 | `parseQuery('thaïe')` traite le mot comme du texte, pas comme un filtre ; la cuisine de test (T7) est restée inchangée. |
+| R-UX-3 | Un module neuf entre dans `SHELL` dès la tâche qui l'importe, jamais avant. |
+| R-UX-4 | Répartition des modèles d'implémentation (sonnet/opus) par tâche, décidée au pré-vol, sans incidence sur le code livré. |
+| R-UX-5 | `APP_VERSION` passe à `'0.4.0'` dès la tâche 1 (pin structurel `v0.4.0-\d+`), et non en tâche 10 comme prévu au brief. |
+| R-UX-6 | Le chemin « édition imposée » non testé (`dessinerImpose`) est supprimé ; `?edition` connu ouvre directement le sélecteur avec le livre fixé. |
+| R-UX-7 | `parametresDeScan` extrait en fonction pure exportée, pour que l'écran et la séance de scan lisent exactement le même modèle. |
+| R-UX-8 | Les puces (et tout groupe de boutons) ne vont jamais dans un `<label>` — `div.field > span + contenu` —, porté aux tâches 5 et 6 et au champ « Cuisines / régions » de `recipe-edit.js`. |
+| R-UX-9 | `majBoutonEnregistrer` + `data-role="enregistrer"` évitent un redessin à chaque frappe ; `enCours` dans le modèle garde contre le double clic. |
+| R-UX-10 | `?nouveau` sans valeur laisse le MODÈLE décider d'afficher l'accueil, pour ne jamais journaliser une visite sautée. |
+| R-UX-11 | `lienSignet` déplacé dans `src/core/lien.js` (sous `components.js` et `signet.js`, sans cycle) ; l'hôte affiché est recalculé depuis `source_url`, jamais lu dans `source_label` stocké. |
+| R-UX-12 | Le corps d'une réponse de couverture est lu **en flux**, annulé dès 5 Mo cumulés (Open Library n'annonce pas `content-length`). |
+| R-UX-13 | La couverture reçue est remise à vide par `identifier` et `retourIsbn` ; une réponse distante tardive n'appartient qu'à SA demande d'ISBN (`isbnDemande`, `touchee`). |
+| R-UX-14 | `alt = book.title` sur l'image de couverture, pour qu'un lien vers l'image porte toujours un nom accessible. |
+
+Compte final (tâche 10, clôture) : **1260/1260** tests verts, suite complète, 0 erreur et 0 avertissement console.

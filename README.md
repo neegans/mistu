@@ -19,6 +19,11 @@ npx serve .
 
 ## Ce qui est construit (V0, avec des morceaux de V0.5)
 
+« Ajouter » ouvre une grille de cinq cartes (un livre, des pages, une recette tapée, un lien web, un lot au
+congélateur). Un livre se crée en deux pas : ISBN scanné ou tapé (Open Library, puis Google Books en repli), sinon
+saisie directe, puis une fiche à vérifier avant d'ajouter. Un lien web se garde comme référence dans la
+bibliothèque — l'app ne le lit pas, elle se contente de le retrouver plus tard.
+
 | Parcours | Où |
 | --- | --- |
 | Ajouter un livre (ISBN → Open Library / Google Books → confirmer, ou saisie manuelle), convention de mesure par édition | Ajouter |

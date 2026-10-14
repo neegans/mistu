@@ -229,6 +229,58 @@ en nommant la base) ; et la relecture venue du bus est différée d'un tour de b
 aucune base n'est ouverte** — en production les réglages sont toujours relus sur `settings` comme sur `change`
 (`relectureEnCours()` rend la chaîne, pour qu'un test attende au lieu de deviner un délai).
 
+### Page « Ajouter » et flux des livres livrés (14 octobre 2026)
+
+**Où.** Branche `ajouter-livres-ux`, arbre `~/projects/mistu` (serveur `http://localhost:8080/`). Plan et registre :
+`.superpowers/sdd/2026-10-14-ajouter-et-livres-ux/` (`progress.md`, un brief, un rapport et une revue par tâche ;
+dix tâches, chacune avec au plus deux rondes de corrections). Spec :
+`docs/superpowers/specs/2026-10-13-ajouter-et-livres-ux-design.md` (rév. 2 ; § 15.2 « Ce que la construction a
+amendé » : une ligne par ruling R-UX-1 à R-UX-14). `APP_VERSION = '0.4.0'` (posée dès la tâche 1, R-UX-5, pin
+structurel `v0.4.0-\d+`), `sw.js VERSION = 'cuisine-os-v0.4.0-11'`, sept modules neufs dans `SHELL` (`puces.js`,
+`livre-ajout.js`, `accueil-livre.js`, `signet.js`, `image.js`, `blob-urls.js`, `lien.js`) et `add.js` réécrit.
+
+**Ce qui marche** (éprouvé par la suite, bases jetables, aucun réseau, gestes injectés) : la **grille** de cinq
+cartes (Ajouter un livre, Photographier/importer des pages, Saisir une recette, Garder un lien web, Ajouter un lot
+au congélateur — une carte sans geste câblé ne se rend pas) ; un **livre en deux pas** (ISBN scanné ou tapé → Open
+Library puis Google Books en repli → fiche « à vérifier », ou saisie à la main directement) ; les **puces
+« Cuisines »** partagées entre le livre et la fiche recette (choisies d'abord, puis existantes par fréquence, puis
+la graine fermée de quinze cuisines, « Autre… » en texte libre, jamais dans un `<label>` depuis R-UX-8) ;
+l'**accueil d'un livre ajouté** (photographier l'index ou une recette, aller à Mes livres) ; les **gestes de la
+fiche** (+ Pages d'index, + Recette, reprendre une séance en cours) ; le **sélecteur avant scan** (« Ces pages vont
+où ? », un livre imposé par `?edition` saute l'étape, R-UX-6) ; le **signet** (garder un lien web avec titre et
+livre facultatif, adresse revalidée au rendu, hôte recalculé — jamais le `source_label` stocké, S7/R-UX-11) ; la
+**couverture** (reçue par ISBN depuis Open Library, photographiée sinon, bornée avant décodage, re-encodée en
+JPEG, pointeur souple `cover_sha256` sans relation d'archive, URL `blob:` révoquées, une réponse tardive appartient
+à SA demande d'ISBN et ne peut plus écraser une couverture photographiée entre-temps — R-UX-12, R-UX-13, R-UX-14).
+
+**Ce qui n'est PAS prouvé.** Aucun scan réel n'a été joué par la suite (bases jetables et gestes injectés
+seulement) ; aucune photo de couverture réelle, aucun code-barres lu, aucune écriture dans la base de Neegan. La
+couverture par ISBN est mesurée par `fetch` depuis GitHub Pages et depuis `localhost` (résultats ci-dessous),
+jamais par un vrai scan. **Parcours réel à faire par Neegan** : ajouter un vrai livre par ISBN sur le Mac,
+photographier son index depuis l'accueil, puis sur l'iPhone poser une couverture par photo et garder un lien web.
+
+**Mesures réelles (tâches 9 et 10).** Open Library : 200 depuis `localhost` avec de vraies fiches (ISBN
+`9780385533225` → « The Particular Sadness of Lemon Cake », ~500 ms). Couvertures `covers.openlibrary.org` : CORS
+ouvert depuis Pages ET `localhost` (200, `image/jpeg`, 17 917 o) **mais sans `content-length`** — d'où la lecture
+du corps **en flux**, coupée à 5 Mo (R-UX-12). `?default=false` ne garantit pas un 404 pour un ISBN absurde
+(`0000000000000` → une image 192 × 262, inoffensive : la couverture n'est demandée qu'après identification Open
+Library). Google Books : **429** sans clé — repli de métadonnées seulement, jamais de couverture.
+
+**Dettes (assumées, nommées dans le registre).** Orphelins `files` jamais effacés (L4, aucun blob supprimé par ce
+lot) ; `source_pages.sha256` reste une relation **latente**, jamais vérifiée à la restauration (même nature que
+`cover_sha256`, pointeur souple assumé) ; les octets d'une couverture ne voyagent pas avant L4 (seule la ligne
+`files` est reçue) ; D2 (pages scannées envoyées au serveur) reste ouvert ; `AbortSignal.timeout` exige Safari 16+
+(repli non éprouvé) ; `meals.js` et `exporters.js` affichent encore `source_label` **brut** — S7 n'est fermé que sur
+`recipe.js`/`components.js` (R-UX-11), pas sur ces deux surfaces ; `displayUrl` (vignettes, PDF) crée encore des URL
+`blob:` non suivies par `blob-urls.js` (pré-existant, hors lot).
+
+Suite complète : **1260/1260 verts**, 0 erreur et 0 avertissement console (hors `apple-mobile-web-app-capable`,
+pré-existant et hors lot) ; `node --test tools/*.test.mjs` 40/40 ; `node tools/generer-migrations.mjs --check` : 0.
+Vérifié dans l'app réelle le 14 octobre (service worker `cuisine-os-v0.4.0-11` actif après deux rechargements) :
+`#/add`, `#/add/livre`, `#/add/signet`, `#/library` sans erreur console ni réponse ≥ 400 ; la bibliothèque de ce
+navigateur partagé est encore **vide** (aucune fiche livre à ouvrir pour l'instant — le parcours réel ci-dessus
+reste à faire).
+
 ## Premier lot de fiabilisation — 8 septembre 2026, à réviser
 
 À la suite d’un audit statique, l’utilisateur a autorisé le premier lot consacré à la sauvegarde/restauration. Modifications effectuées uniquement via MCP vibeforge_files, avec écritures conditionnées au SHA-256 ; aucun shell, réseau, build, test exécuté, commit ou déploiement.

@@ -808,4 +808,53 @@ export async function runAjouterTests({ eq, ok }) {
       BU.revoquerUrlsDeBlob();
     });
   }
+
+  // --- § 12 CSP épinglée, § 13.10 statique (tâche 10, clôture)
+  const lire = async (chemin) => (await fetch(chemin + '?v=' + Date.now(), { cache: 'no-store' })).text();
+  const { SUPABASE } = await import('../src/sync/config.js');
+  const hotes = [...new Set(Object.values(SUPABASE).map((c) => c.url).filter(Boolean))];
+  const attenduConnect = `connect-src 'self' ${hotes.join(' ')} https://openlibrary.org https://www.googleapis.com https://covers.openlibrary.org`;
+  for (const page of ['../index.html', './index.html']) {
+    const html = await lire(page);
+    const csp = html.match(/Content-Security-Policy" content="([^"]+)"/)?.[1] || '';
+    ok(csp.includes(attenduConnect), `CSP ${page} : connect-src = liste fermée (S10) — lu : ${csp.match(/connect-src [^;]+/)?.[0]}`);
+    ok(!/connect-src[^;]*\shttps:(\s|;|$)/.test(csp), `CSP ${page} : plus de https: ouvert`);
+  }
+  // MODULES_NEUFS : les sept modules créés par le lot (R-UX-11 en ajoute un huitième, lien.js) + add.js réécrit.
+  const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/ui/add.js'];
+  // CHAINES_NEUVES_AILLEURS reconstituée depuis le code réel (git diff main...HEAD, ensemble main vs HEAD des clés t(),
+  // pas seulement les lignes ajoutées : une ligne réécrite pour une autre raison peut porter une chaîne déjà sur main —
+  // book.js:'Cuisines', recipe-edit.js:'Cuisines / régions' et import.js:'— Aucun livre (à associer plus tard) —'
+  // existaient déjà mot pour mot sur main, donc ÉCARTÉES d'ici malgré une ligne « + » dans le diff).
+  const CHAINES_NEUVES_AILLEURS = {
+    '../src/ui/book.js': ['+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier'],
+    '../src/ui/recipe.js': ['Lien web gardé.', 'L’app n’a pas lu la page : ouvre-la pour cuisiner.', 'Ouvrir le lien', 'Adresse non reconnue : '],
+    '../src/ui/components.js': ['Lien web', 'Adresse non reconnue'],
+  };
+  {
+    const { EN } = await import('../src/i18n/en.js');
+    const manquantes = [];
+    for (const m of MODULES_NEUFS) {
+      const src = await lire(m);
+      for (const [, cle] of src.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)) if (!(cle in EN)) manquantes.push(`${m}: ${cle}`);
+      ok(!/\bhtml:\s/.test(src) && !/innerHTML\s*=/.test(src) && !/window\.open\(/.test(src), `statique ${m} : ni html:, ni innerHTML, ni window.open (S14)`);
+    }
+    for (const [m, cles] of Object.entries(CHAINES_NEUVES_AILLEURS)) for (const cle of cles) if (!(cle in EN)) manquantes.push(`${m}: ${cle}`);
+    eq(manquantes, [], 'i18n : chaque t() des modules neufs a son entrée en.js (F13)');
+  }
+  {
+    // Rendu hostile : une chaîne <img onerror> reste du texte dans les rendus neufs.
+    const hostile = '<img src=x onerror="window.__x=1">';
+    const n1 = renderGrille({ cartes: [{ action: 'pages', ico: 'x', titre: hostile, sousTitre: hostile }] }, { pages: () => {} });
+    const n2 = renderPuces(pucesModel({ choisies: [hostile] }), {});
+    const n3 = S.renderSignet({ ...S.signetModel({ adresse: 'https://a.test/', titre: hostile }), livres: [] }, {});
+    eq([n1.querySelectorAll('img').length, n2.querySelectorAll('img').length, n3.querySelectorAll('img').length, window.__x], [0, 0, 0, undefined], 'statique : une chaîne hostile reste du texte (S14)');
+  }
+  {
+    const sw = await lire('../sw.js');
+    for (const m of ['./src/ui/puces.js', './src/ui/livre-ajout.js', './src/ui/accueil-livre.js', './src/ui/signet.js', './src/core/image.js', './src/core/blob-urls.js', './src/core/lien.js']) ok(sw.includes(`'${m}'`), `SHELL : ${m}`);
+    ok(/VERSION = 'cuisine-os-v0\.4\.0-\d+'/.test(sw), 'sw.js : VERSION 0.4.0');
+    const { APP_VERSION } = await import('../src/model/schema.js');
+    eq(APP_VERSION, '0.4.0', 'APP_VERSION 0.4.0');
+  }
 }

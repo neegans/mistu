@@ -244,6 +244,66 @@ recapturées. `syncNow()` (horloge corrigée du décalage mesuré) horodate tout
   est éprouvé par la suite (transport factice, bases temporaires), pas par deux appareils qui s'échangent une
   recette ; le parcours § 7.3 reste à faire par Neegan.
 
+## Page « Ajouter » et flux des livres
+
+Spec : `docs/superpowers/specs/2026-10-13-ajouter-et-livres-ux-design.md` (§ 15.2 : ce que la construction a
+amendé). Livré ici : la grille de cinq cartes, un livre créé en deux pas (ISBN ou saisie), les puces « Cuisines »
+partagées entre le livre et la fiche recette, l'accueil d'un livre ajouté, le signet (lien web gardé comme
+référence), et la couverture (reçue par ISBN ou photographiée).
+
+### Modules neufs (sept, un rôle chacun)
+
+```text
+src/ui/puces.js          pucesModel/renderPuces/basculerPuce/ajouterPuce/cuisinesExistantes : un geste de pastilles
+                         partagé par le livre (add.js) et la fiche recette (recipe-edit.js) ; graine fermée de
+                         quinze cuisines, normalisation (minuscules, accents retirés) pour le doublon, affichage
+                         capitalisé ; jamais dans un <label> (R-UX-8 : un clic sur le texte voisin activerait la
+                         première puce).
+src/ui/livre-ajout.js    lookupIsbn (Open Library puis Google Books en repli), fusionnerFiche, fabriquerLivre,
+                         enregistrerLivre, renderLivreAjout/renderLivreAjoutRoute : le formulaire « Ajouter un
+                         livre » en deux pas ; la couverture reçue appartient à SA demande d'ISBN, jamais à une
+                         autre (R-UX-13).
+src/ui/accueil-livre.js  accueilLivreModel/ACCUEIL_ACTIONS/renderAccueilLivre : l'écran après l'ajout d'un livre
+                         (photographier l'index ou une recette, aller à Mes livres) ; `?nouveau` sans valeur ne
+                         journalise rien (R-UX-10 : le modèle décide, pas la route).
+src/ui/signet.js         lienSignet (ré-exporté de core/lien.js), signetModel, fabriquerSignet, enregistrerSignet,
+                         renderSignet/renderSignetRoute : garder un lien web comme référence, avec titre et livre
+                         facultatif.
+src/core/image.js        dimensionsImage, reduireImage, ErreurImage, LIMITES_COUVERTURE, COVER_INPUT_MIME :
+                         dimensions lues dans l'en-tête AVANT décodage (bombe de décompression), re-encodage JPEG
+                         systématique (HEIC et formats exotiques inclus), bornes 25 Mo / 50 Mpx.
+src/core/blob-urls.js    urlDeBlob/revoquerUrlsDeBlob : chaque URL blob: créée pour afficher une couverture ou un
+                         aperçu est suivie dans un registre partagé, révoquée à la route suivante (S15/F4). Dette
+                         assumée : `displayUrl` (vignettes, PDF) crée encore des URL blob: hors de ce registre
+                         (pré-existant, hors lot).
+src/core/lien.js         lienSignet(sourceUrl) : fonction pure sans dépendance, pour que tout écran affichant un
+                         lien puisse revalider l'adresse AU RENDU (seuls http:/https: s'ouvrent, hôte rendu en
+                         punycode) sans jamais faire confiance à un `source_label` stocké, qu'une archive ou le
+                         serveur peuvent avoir rempli avec n'importe quoi (S7). Sous `components.js` ET
+                         `signet.js` (qui importe `components.js`), pour éviter un cycle.
+```
+
+`src/ui/add.js` est réécrit (grille de cinq cartes `renderGrille`, sélecteur avant scan `renderSelecteurScan`,
+`parametresDeScan` pur, R-UX-7) mais reste le même fichier, déjà dans `SHELL` depuis le lot d'hébergement.
+
+### « Intention dans l'adresse »
+
+Une séance de scan ne sait pas, à l'ouverture, si elle vient de « + Pages d'index » ou de « + Recette ». Plutôt
+qu'un état posé en base ou en mémoire — qu'un rafraîchissement réappliquerait indéfiniment (F6) —, l'intention
+voyage dans l'URL (`adresseSeance(sessionId, intention)` → `/import?session=…&intention=index`), est consommée au
+premier rendu (`appliquerIntention` : présélection des pages, panneau d'index ouvert ou non), puis retirée de
+l'adresse par un geste `historique.remplacer` injecté (jamais un vrai `history.replaceState` dans un test, I-H) :
+un `refresh()` ultérieur ne la réapplique donc pas.
+
+### `cover_sha256` : pointeur souple
+
+`book_editions.cover_sha256` pointe une ligne `files` par son empreinte, **sans** entrée dans `RELATIONS`
+(`schema.js`) et sans relation d'archive : une fiche dont la couverture n'est pas (encore, ou plus) sur cet
+appareil reste restaurable et affichable — la fiche le dit (« La couverture n'est pas sur cet appareil. ») plutôt
+que d'échouer. Choix voulu (S1/F2) : une relation stricte aurait rendu une archive irrestaurable dès qu'une
+couverture manque, par exemple après une réception L3 (qui reçoit la ligne `files` sans ses octets — L4). Dette
+nommée : `source_pages.sha256` reste la même sorte de relation latente, jamais vérifiée nulle part.
+
 ## Modèle de données (magasins IndexedDB)
 
 `books`, `book_editions` (ISBN, langue, `unit_convention_id`), `source_documents` (fichier, sha256, type), `source_pages` (page imprimée, position),
