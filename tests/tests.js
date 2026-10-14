@@ -19,6 +19,7 @@ import { compareBundles, proposeDishesForRecipe } from '../src/domain/dishes.js'
 import { runBackupTests } from './backup.js';
 import { runSyncTests } from './sync.js';
 import { runSyncL3Tests } from './sync-l3.js';
+import { runAjouterTests } from './ajouter.js';
 
 const results = [];
 const eq = (a, b, msg) => { const ok = JSON.stringify(a) === JSON.stringify(b); results.push({ ok, msg, got: a, want: b }); };
@@ -167,6 +168,10 @@ catch (error) { ok(false, `Suite synchronisation interrompue : ${error?.message 
 // --- Synchronisation L3 : transport (envoi et réception), transport factice.
 try { await runSyncL3Tests({ eq, ok }); }
 catch (error) { ok(false, `Suite L3 interrompue : ${error?.message || String(error)}`); }
+
+// --- Page Ajouter et flux des livres : modèles purs et rendus DOM à gestes injectés.
+try { await runAjouterTests({ eq, ok }); }
+catch (error) { ok(false, `Suite Ajouter interrompue : ${error?.message || String(error)}`); }
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

@@ -1861,13 +1861,16 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(liste.length > 30, 'SHELL lu : ' + liste.length + ' entrées à relire avant de conclure');
     eq(['./src/sync/transport.js', './src/sync/lots.js', './src/sync/reponses.js', './src/sync/push.js', './src/sync/pull.js', './src/sync/conflits.js', './src/sync/backfill.js', './src/sync/moteur.js']
       .filter((c) => !liste.includes(c)), [], 'SHELL : les modules d’envoi et de réception, désormais atteignables depuis app.js, sont servis hors connexion');
-    ok(/VERSION = 'cuisine-os-v0\.3\.0-6'/.test(source), 'sw.js : VERSION incrémentée pour la vague finale — l’ancien cache est purgé à l’activation');
+    ok(/VERSION = 'cuisine-os-v0\.4\.0-1'/.test(source), 'sw.js : VERSION incrémentée pour la tâche 1 du lot « Ajouter et livres » — l’ancien cache est purgé à l’activation');
     // Le nom du cache et la version affichée dans Réglages doivent dire la MÊME chose : deux versions qui se
     // contredisent rendent impossible de savoir ce qui est servi (un cache « 0.2.0 » pour une app qui s'annonce
-    // « 0.3.0 » est exactement le genre de doute qu'un marqueur de version existe pour lever).
+    // « 0.3.0 » est exactement le genre de doute qu'un marqueur de version existe pour lever). Pendant ce lot,
+    // VERSION avance à chaque tâche qui touche un fichier servi alors qu’APP_VERSION ne rattrape qu’à la tâche 10
+    // (global-constraints.md du lot) : les deux valeurs attendues ci-dessous reflètent cet écart assumé, pas une
+    // régression — à mettre à jour de nouveau quand APP_VERSION rattrapera.
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq([source.match(/VERSION = 'cuisine-os-v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+'/)?.[1], APP_VERSION], ['0.3.0', '0.3.0'],
-      'sw.js et APP_VERSION disent la même version de l’application');
+    eq([source.match(/VERSION = 'cuisine-os-v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+'/)?.[1], APP_VERSION], ['0.4.0', '0.3.0'],
+      'sw.js et APP_VERSION disent la version attendue pendant ce lot (APP_VERSION rattrape en tâche 10)');
   }
 
   // --- Ronde 1 du câblage --------------------------------------------------

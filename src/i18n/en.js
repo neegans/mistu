@@ -26,6 +26,8 @@ export const EN = {
   'Photographier des pages': 'Photograph pages', 'Choisir des photos ou un PDF': 'Choose photos or a PDF', 'Saisir une recette': 'Type a recipe', 'Ajouter un lot au congélateur': 'Add a freezer batch',
   'Titre *': 'Title *', 'Auteur / chef': 'Author / chef', 'Éditeur': 'Publisher', 'Année': 'Year', 'Langue du livre': 'Book language', 'Convention de mesure (tasses, cuillères)': 'Measurement convention (cups, spoons)',
   'Ajouter ce livre': 'Add this book', 'Identifier': 'Identify', 'Scanner': 'Scan', 'Livre ajouté': 'Book added', 'Le titre est requis': 'Title is required',
+  'Autre…': 'Other…', 'Autre cuisine': 'Other cuisine',
+  'québécoise': 'Quebecois', 'autochtone': 'Indigenous', 'française': 'French', 'italienne': 'Italian', 'levantine': 'Levantine', 'marocaine': 'Moroccan', 'mexicaine': 'Mexican', 'indienne': 'Indian', 'chinoise': 'Chinese', 'japonaise': 'Japanese', 'thaïe': 'Thai', 'vietnamienne': 'Vietnamese', 'grecque': 'Greek', 'espagnole': 'Spanish', 'américaine': 'American',
   'Commencer à cuisiner': 'Start cooking', 'Liste d’épicerie': 'Grocery list', 'Autres recettes de ce plat': 'Other recipes for this dish', 'Rattacher à un plat': 'Attach to a dish', 'Créer ma version': 'Create my version', 'Corriger': 'Fix',
   'Portions': 'Servings', 'Unités': 'Units', 'Métrique': 'Metric', 'Langue de lecture': 'Reading language', 'Rapide': 'Quick', 'On se gâte': 'Treat', 'Meal prep': 'Meal prep',
   'Ingrédients': 'Ingredients', 'Préparation': 'Method', 'Versions': 'Versions', 'Mémoire culinaire': 'Cooking memory', 'Remplacer': 'Replace', 'Afficher': 'Show', 'affichée': 'shown', 'Marquer testée': 'Mark as tested',
