@@ -1,5 +1,7 @@
 // Liste blanche des types de fichiers synchronisés (spec § 3.6) et résolution locale sans refus (spec § 5.4).
 export const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf', 'application/epub+zip'];
+// Couvertures reçues du réseau (recherche ISBN, spec § 6) : liste fermée, plus stricte que ALLOWED_MIME (pas de HEIC/PDF/EPUB).
+export const COVER_INPUT_MIME = ['image/jpeg', 'image/png', 'image/webp'];
 export const EXT_TO_MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic', pdf: 'application/pdf', epub: 'application/epub+zip' };
 const MIME_TO_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'application/pdf': 'pdf', 'application/epub+zip': 'epub' };
 export const UNKNOWN = 'application/octet-stream';
