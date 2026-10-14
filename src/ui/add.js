@@ -36,6 +36,15 @@ export function selecteurScanModel({ livres = [], editionImposee = null, livreCh
   return { options, livreChoisi: choisi, livreImpose: !!connu, genre: indexDisponible && genre === 'index' ? 'index' : 'recette', indexDisponible, messageIndex: indexDisponible ? null : t('Un index appartient à un livre : choisis-le d’abord.') };
 }
 
+// Ce qui part vraiment à la séance de scan, décidé par le MÊME modèle que l'écran (R-UX-7). L'état brut de la page
+// peut porter un genre « index » devenu impossible depuis — le livre a été remis à « sans livre », l'écran affiche
+// déjà « recette » — et une édition imposée n'a jamais transité par cet état. Sans ce détour, la séance recevrait
+// une intention que personne n'a vue cochée.
+export function parametresDeScan(etat) {
+  const m = selecteurScanModel(etat);
+  return { edition_id: m.livreChoisi || null, intention: m.genre };
+}
+
 export function renderSelecteurScan(model, gestes = {}) {
   const radio = (valeur, libelle, disabled) => el('label', { class: 'check' },
     el('input', { type: 'radio', name: 'genre', value: valeur, checked: model.genre === valeur, disabled, onChange: () => gestes.changerGenre && gestes.changerGenre(valeur) }), ' ', libelle);
@@ -64,7 +73,7 @@ export async function renderAdd(params, query, ctx) {
   const etat = { livreChoisi: editionImposee || '', genre: 'recette' };
   const lancer = async (accept, capture) => {
     const files = await pickFiles({ accept, multiple: true, capture });
-    if (files.length) await startScanSession(files, { edition_id: etat.livreChoisi || null, intention: etat.genre });
+    if (files.length) await startScanSession(files, parametresDeScan({ livres, editionImposee, livreChoisi: etat.livreChoisi, genre: etat.genre }));
   };
   const gestesScan = {
     changerLivre: (v) => { etat.livreChoisi = v; dessinerSelecteur(); },
