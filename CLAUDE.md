@@ -153,8 +153,8 @@ aussi (R31). La pastille, elle, est **livrée en L3** (voir la sous-section suiv
 **Où.** Branche `synchro-l3`, arbre `~/projects/mistu` (serveur `http://localhost:8080/`). Plan et registre :
 `.superpowers/sdd/2026-10-13-synchronisation-l3-envoi-reception/` (`progress.md`, un brief, un rapport et une revue
 par tâche ; dix tâches, chacune avec une ronde de corrections au plus). Décisions consignées en **spec § 11,
-lignes R37 à R62** (dans le registre, elles s'appellent R-L3-1 à R-L3-26). `APP_VERSION = '0.3.0'`,
-`sw.js VERSION = 'cuisine-os-v0.3.0-3'`, `SHELL` complet (67 entrées, huit modules de `src/sync/` de plus).
+lignes R37 à R64** (dans le registre, elles s'appellent R-L3-1 à R-L3-29). `APP_VERSION = '0.3.0'`,
+`sw.js VERSION = 'cuisine-os-v0.3.0-4'`, `SHELL` complet (67 entrées, huit modules de `src/sync/` de plus).
 
 **Vague finale de corrections (13 octobre 2026, après `final-review.md` — rapport : `final-fix-report.md`).** Le
 Critical et les cinq Important de la revue de branche sont corrigés, plus quatre mineurs : **R57** une suppression
@@ -176,8 +176,14 @@ vol » est épinglée sur un compte exact d'appels. **Deux compléments après r
 restauration *promet* d'écrire, sinon le bilan d'une vieille archive passait au rouge ; et **R-L3-27** ferme les
 deux dernières portes de la boucle — « Garder celle d'ici » nettoie la fiche restaurée, et `repo.init()` fait une
 **passe unique** de nettoyage des fiches d'avant la vague (garde `sync_state.nettoyage_chaines`, `updated_at`
-conservé, origine `device` : rien n'entre en file). Suite complète : **942/942 verts**, 0 erreur et 0 avertissement
-console, 0 réponse ≥ 400 ; `tests/backup.js` vert ; `node --test tools` 40/40 ; `--check` 0.
+conservé, origine `device` : rien n'entre en file). **Deux derniers constats de la lentille correctness** :
+**R63** un `put` dont la fiche n'existe plus ici est **retiré de la file sans aucun envoi** — en tombale, il
+**écrivait au serveur** une ligne supprimée pour une fiche qu'il ne connaissait peut-être même pas (une suppression
+locale explicite, elle, part toujours : R57 inchangé) ; et **R64** un conflit dont la version d'ici **repart** porte
+`renvoye: true`, n'offre que « Ignorer », et se **range tout seul** dès que le serveur accuse cette clé — lui offrir
+« Garder celle d'ailleurs » revenait à écraser ce qu'on vient d'envoyer par la version qui a perdu. Suite complète :
+**971/971 verts** (deux passages), 0 erreur et 0 avertissement console, 0 réponse ≥ 400 ; `tests/backup.js` vert ;
+`node --test tools` 40/40 ; `--check` 0.
 
 **Ce qui marche** (éprouvé par la suite : **875 assertions vertes**, transport factice, bases temporaires, aucun
 réseau) : l'**envoi** (file lue, dédoublonnée, relue, envoyée par lots de 500 / 900 Kio ; recul exponentiel,

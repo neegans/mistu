@@ -6,7 +6,7 @@ import { refresh, currentPath } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { logError } from '../core/log.js';
 import { reprendreEnvoi, retirerEnvoi, fileDe } from '../sync/outbox.js';
-import { garderIci, garderAilleurs } from '../sync/conflits.js';
+import { garderIci, garderAilleurs, ignorerRenvoye } from '../sync/conflits.js';
 import { retirerMarqueur } from '../sync/backfill.js';
 import { createArchive, inspectArchive, applyArchive, verifyRestored, compterFichesSynchronisees } from '../domain/backup.js';
 import { syncNow } from '../sync/clock.js';
@@ -477,6 +477,16 @@ export async function garderVersionDIci({ db, id, moteur = null, appliquer = gar
   return applique;
 }
 
+// R-L3-29 : « Ignorer » sur un conflit DÉJÀ RENVOYÉ. Comme ses deux voisins, le conflit est RELU au moment du
+// geste (un autre onglet, un accusé du serveur ou la purge des vieux conflits ont pu le faire disparaître) et
+// l'effet vit dans `src/sync/conflits.js` — aucune vue n'écrit en base (spec § 5.2, test statique). Rien à
+// invalider : le cache de lecture ne porte pas les conflits (Réglages les lit en base à chaque rendu).
+export async function rangerConflitRenvoye({ db, id, appliquer = ignorerRenvoye }) {
+  const conflit = await db.get('sync_conflicts', id);
+  if (!conflit) return false;
+  return appliquer(db, conflit);
+}
+
 export async function garderVersionDAilleurs({ db, id, appliquer = garderAilleurs, invalider = invalidate }) {
   const conflit = await db.get('sync_conflicts', id);
   if (!conflit) return false;
@@ -518,6 +528,8 @@ export function gestesL3Pour({
       if (!applique && await db.get('sync_conflicts', id)) dire(t('Cette version n’a pas été reçue en entier : le conflit reste.'));
       rafraichir();
     }),
+    // R-L3-29 : ranger l'entrée de journal d'un conflit déjà renvoyé. Rien à invalider — aucune fiche n'est touchée.
+    ignorerConflit: protege('ignorer_conflit', async (id) => { await rangerConflitRenvoye({ db, id }); rafraichir(); }),
   };
 }
 
@@ -568,7 +580,7 @@ function suivreMoteurDeLaPage(moteur) {
 // Les quatre seuls gestes nommés par le modèle, et les cinq gestes de l'ensemble L3. Le rendu ne câble que ce qu'il
 // trouve dans l'objet de gestes : un renommage donne un bouton manquant (visible), jamais un bouton muet.
 export const SYNC_ACTIONS = ['signIn', 'signOut', 'changeAccount', 'envoyerMaintenant'];
-export const SYNC_L3_ACTIONS = ['envoyerMaintenant', 'reessayer', 'abandonner', 'garderIci', 'garderAilleurs'];
+export const SYNC_L3_ACTIONS = ['envoyerMaintenant', 'reessayer', 'abandonner', 'garderIci', 'garderAilleurs', 'ignorerConflit'];
 
 // Départ chez le fournisseur. La route courante est mémorisée (redirectTo part sans fragment, le retour atterrirait
 // sur l’accueil) et RETIRÉE si rien ne part : une route fantôme détournerait le prochain démarrage de cet onglet.
@@ -657,11 +669,17 @@ export function syncSectionL3(model, gestes = {}) {
       el('p', { class: 'muted' }, t('Choisis celle qui compte ; rien n’est fusionné.')));
     for (const c of conflits) {
       noeuds.push(el('div', { class: 'status warn', dataset: { conflit: String(c.id) } },
-        // La nature du conflit d'abord : « même heure, contenus différents » et « une autre version a été créée
-        // ailleurs » ne demandent pas la même décision, et rien ne permet de deviner l'une depuis l'autre.
-        el('p', null, phraseConflit(c.kind)),
+        // R-L3-29 : un conflit DÉJÀ RENVOYÉ dit ce qui s'est passé, pas une question — la version d'ici est partie
+        // et le serveur l'acceptera (elle est plus récente). « Garder celle d'ici » la réhorodaterait et la
+        // renverrait encore ; « Garder celle d'ailleurs » écraserait ce qu'on vient d'envoyer par la version qui a
+        // perdu. Le seul geste est donc de ranger l'entrée de journal — et l'accusé du serveur le fait tout seul.
+        // Sinon, la nature du conflit d'abord : « même heure, contenus différents » et « une autre version a été
+        // créée ailleurs » ne demandent pas la même décision, et rien ne permet de deviner l'une depuis l'autre.
+        el('p', null, c.renvoye ? t('Version d’ici renvoyée au serveur') : phraseConflit(c.kind)),
         el('p', null, t('{l} — version d’ici du {a}, version d’ailleurs du {b}', { l: c.libelle, a: c.dateIci, b: c.dateAilleurs })),
-        rangee(bouton('garderIci', t('Garder celle d’ici ({d})', { d: c.dateIci }), c.id), bouton('garderAilleurs', t('Garder celle d’ailleurs'), c.id))));
+        c.renvoye
+          ? rangee(bouton('ignorerConflit', t('Ignorer'), c.id))
+          : rangee(bouton('garderIci', t('Garder celle d’ici ({d})', { d: c.dateIci }), c.id), bouton('garderAilleurs', t('Garder celle d’ailleurs'), c.id))));
     }
   }
   return noeuds;
@@ -770,6 +788,9 @@ export function syncSectionModel({ available = false, reason = null, user = null
         dateIci: formatDate(c.local?.updated_at || c.at, { withTime: true }),
         dateAilleurs: formatDate(c.server?.updated_at || c.at, { withTime: true }),
         kind: c.kind,
+        // R-L3-29 : la version d'ici est DÉJÀ repartie — ce n'est pas une question posée à la personne. Jamais
+        // deviné : seule la réception pose ce drapeau, et faux veut dire « il y a vraiment un choix à faire ».
+        renvoye: c.renvoye === true,
       };
     }),
     progression: avancement

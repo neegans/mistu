@@ -150,7 +150,10 @@ export function createPull({ db, transport, isActivitySynced = () => false, getU
       const versionServeur = ligne.deleted_at
         ? { data: null, updated_at: ligne.updated_at, deleted_at: ligne.deleted_at }
         : { data: ligne.data, updated_at: ligne.updated_at, deleted_at: null };
-      conflits.push({ id: `${table}:${ligne.id}`, store: table, record_id: ligne.id, local: locale, server: versionServeur, at: new Date().toISOString(), kind: 'donnees' });
+      // R-L3-29 : un conflit dont la version d'ici REPART est marqué comme tel. Il n'y a rien à trancher — le
+      // serveur acceptera cette version, elle est plus récente — et l'entrée de journal n'est là que pour que la
+      // personne le sache. Réglages ne lui offre donc que « Ignorer », et l'accusé du serveur la range tout seul.
+      conflits.push({ id: `${table}:${ligne.id}`, store: table, record_id: ligne.id, local: locale, server: versionServeur, at: new Date().toISOString(), kind: 'donnees', ...(decision === 'conflit_renvoyer' ? { renvoye: true } : {}) });
       // conflit_renvoyer : la fiche d'ici est plus récente, elle est conservée ET remise en file — le serveur
       // l'acceptera. L'entrée est écrite EXPLICITEMENT : l'origine 'remote' de la transaction fait que la capture
       // ne la verrait pas (c'est voulu : rien d'autre dans cette page ne doit repartir).

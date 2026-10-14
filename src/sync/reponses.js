@@ -4,7 +4,7 @@
 // ni réécriture, ni conflit, ni quarantaine.
 import { cleDe } from './lots.js';
 
-export function appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales = {} }) {
+export function appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales = {}, conflitsRenvoyes = new Set() }) {
   const seqsParCle = new Map();
   for (const seq of lot.seqs) {
     const e = entreesParSeq.get(seq);
@@ -17,17 +17,26 @@ export function appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales = 
   const reecrire = {};
   const conflits = [];
   const quarantaine = [];
+  // R-L3-29 : les conflits à RANGER. Un conflit journalisé « renvoyé » (la version d'ici est repartie, § 5.5) n'a
+  // plus de raison d'être dès que le serveur accuse cette clé : la version d'ici est arrivée, il n'y a plus rien à
+  // trancher. Sans cela l'entrée de journal restait affichée dans Réglages jusqu'à la purge des 30 jours, et le
+  // seul moyen de s'en défaire était un geste — sur un conflit qui n'existait déjà plus.
+  const retirerConflits = [];
+  const rangerSiRenvoye = (cle) => { if (conflitsRenvoyes.has(cle)) retirerConflits.push(cle); };
   const at = reponse.server_time || new Date().toISOString();
   for (const a of reponse.accepted || []) {
-    const seqs = seqsParCle.get(cleDe(a)) || [];
+    const k = cleDe(a);
+    const seqs = seqsParCle.get(k) || [];
     if (!seqs.length) continue; // R-L3-8 : clé hors du lot
     for (const s of seqs) retirer.push(s);
+    rangerSiRenvoye(k);
   }
   for (const a of reponse.adjusted || []) {
     const k = cleDe(a);
     const seqs = seqsParCle.get(k) || [];
     if (!seqs.length) continue; // R-L3-8
     for (const s of seqs) retirer.push(s);
+    rangerSiRenvoye(k); // le serveur a bien pris cette version, seule son heure a changé
     const element = lot.elements.find((e) => cleDe(e) === k);
     if (!element || !element.data || element.deleted) continue;
     // R-L3-7 : l'ajustement ne réécrit la fiche que si elle n'a pas bougé ICI pendant l'aller-retour. Si la personne
@@ -51,5 +60,8 @@ export function appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales = 
       for (const s of seqs) if (s !== seq) retirer.push(s); // les doublons plus anciens de la même clé partent
     }
   }
-  return { retirer, reecrire, conflits, quarantaine };
+  // Un conflit que cette même réponse vient de journaliser n'est jamais rangé du même geste : la transaction
+  // porterait un put et un delete pour la même clé, et la personne perdrait le conflit sans l'avoir vu.
+  const nouveaux = new Set(conflits.map((c) => c.id));
+  return { retirer, reecrire, conflits, quarantaine, retirerConflits: retirerConflits.filter((k) => !nouveaux.has(k)) };
 }

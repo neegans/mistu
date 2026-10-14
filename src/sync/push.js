@@ -70,14 +70,20 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     // c'est elle qui décide si un ajustement a le droit de réécrire la fiche (R-L3-7).
     const fichesLocales = {};
     for (const e of lot.elements) fichesLocales[cleDe(e)] = (await db.get(e.store, e.id)) ?? null;
-    const effets = appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales });
+    // R-L3-29 : les clés dont le conflit est « renvoyé » (§ 5.5). Le journal est lu EN UNE fois : les conflits sont
+    // peu nombreux par conception (purgés à 30 jours), et une lecture par élément en ferait 500 de plus par lot.
+    const conflitsRenvoyes = new Set((await db.getAll('sync_conflicts')).filter((c) => c?.renvoye).map((c) => c.id));
+    const effets = appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales, conflitsRenvoyes });
     const puts = { ...effets.reecrire };
     if (effets.conflits.length) puts.sync_conflicts = effets.conflits;
     if (effets.quarantaine.length) {
       puts.outbox = effets.quarantaine.map(({ seq, motif }) => ({ ...entreesParSeq.get(seq), quarantined_at: new Date(maintenant()).toISOString(), last_error: motif }));
     }
     // origin 'remote' : rien de ceci ne repart vers le serveur (réécriture d'un ajustement, journal, quarantaine).
-    await db.mutate({ puts, deletes: effets.retirer.length ? { outbox: effets.retirer } : {}, origin: 'remote' });
+    const deletes = {};
+    if (effets.retirer.length) deletes.outbox = effets.retirer;
+    if (effets.retirerConflits.length) deletes.sync_conflicts = effets.retirerConflits; // R-L3-29, même transaction
+    await db.mutate({ puts, deletes, origin: 'remote' });
     return effets;
   }
 

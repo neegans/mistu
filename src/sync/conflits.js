@@ -46,6 +46,17 @@ export async function garderAilleurs(db, conflit) {
   return true;
 }
 
+// R-L3-29 : « Ignorer » un conflit DÉJÀ RENVOYÉ (la version d'ici est repartie, § 5.5). Il retire l'entrée de
+// journal et RIEN d'autre : le serveur acceptera cette version (elle est plus récente), et il n'y a aucune
+// décision à prendre. Le drapeau est REVÉRIFIÉ ici — défense en profondeur : même appelé par erreur sur un conflit
+// ordinaire, ce geste refuse, parce que celui-là attend vraiment une décision de la personne. Origine 'remote' :
+// un retrait de journal n'est pas un geste sur les données et ne repart jamais au serveur.
+export async function ignorerRenvoye(db, conflit) {
+  if (conflit?.renvoye !== true) return false;
+  await db.mutate({ deletes: { sync_conflicts: [conflit.id] }, origin: 'remote' });
+  return true;
+}
+
 export async function purgerAnciens(db, maintenantMs = Date.now(), joursMax = 30) {
   const limite = maintenantMs - joursMax * 86400000;
   // Un `at` illisible ne se date pas : le conflit reste plutôt que d'être retiré par accident (la personne le voit

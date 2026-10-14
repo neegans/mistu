@@ -161,6 +161,18 @@ export async function runSyncL3Tests({ eq, ok }) {
   const ajusteSupprimee = appliquerReponse({ lot: lotB, reponse: reponseB, entreesParSeq: seqsB, fichesLocales: { 'books:b': null } });
   eq([ajusteSupprimee.reecrire, ajusteSupprimee.retirer], [{}, [2]], 'R-L3-7 : fiche supprimée ici → l’ajustement ne la ressuscite pas');
 
+  // R-L3-29 : un accusé pour une clé dont le conflit est RENVOYÉ range ce conflit — la version d'ici est arrivée,
+  // il n'y a plus rien à trancher. Un conflit ORDINAIRE, lui, attend la personne : un accusé ne le range pas.
+  const accuseB = { server_time: 't', accepted: [{ store: 'books', id: 'b' }], adjusted: [], rejected: [] };
+  eq(appliquerReponse({ lot: lotB, reponse: accuseB, entreesParSeq: seqsB, fichesLocales: {}, conflitsRenvoyes: new Set(['books:b']) }).retirerConflits,
+    ['books:b'], 'R-L3-29 : accepted sur une clé au conflit renvoyé → le conflit est rangé');
+  eq(appliquerReponse({ lot: lotB, reponse: reponseB, entreesParSeq: seqsB, fichesLocales: {}, conflitsRenvoyes: new Set(['books:b']) }).retirerConflits,
+    ['books:b'], 'R-L3-29 : … un adjusted le range aussi (le serveur a bien pris cette version)');
+  eq(appliquerReponse({ lot: lotB, reponse: accuseB, entreesParSeq: seqsB, fichesLocales: {}, conflitsRenvoyes: new Set() }).retirerConflits,
+    [], 'R-L3-29 : … et un conflit ordinaire n’est JAMAIS rangé par un accusé (il attend la personne)');
+  eq(appliquerReponse({ lot: lotB, reponse: accuseB, entreesParSeq: seqsB, fichesLocales: {} }).retirerConflits,
+    [], 'R-L3-29 : sans contexte de conflits (appel unitaire), rien n’est rangé');
+
   // --- Horloge (spec § 5.3) : décalage mesuré à chaque réponse, plancher, avertissement unique au-delà de 5 min
   const { appliquerHeureServeur, getClockOffset, syncNow, setClockOffset } = await import('../src/sync/clock.js');
   try {
@@ -623,6 +635,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     eq(file.map((e) => [e.user_id, e.updated_at]), [['u1', (await db.get('books', 'p1')).updated_at]], 'réception : l’entrée remise en file est au nom du compte, avec le updated_at local');
     const conflit = await db.get('sync_conflicts', 'books:p1');
     eq([conflit.local.title, conflit.server.data.title, conflit.kind], ['Ici plus récent', 'Ailleurs plus vieux', 'donnees'], 'réception : conflit journalisé avec les deux versions');
+    eq(conflit.renvoye, true, 'R-L3-29 : … et marqué RENVOYÉ (la version d’ici est repartie : il n’y a plus rien à trancher)');
     const appels = tf.journal.filter((a) => a.appel === 'lire' && a.table === 'books').map((a) => a.apres);
     eq(appels, [0, 11, 12], 'réception : paginée par le curseur avancé après chaque page écrite');
     ok(!tf.journal.some((a) => a.appel === 'lire' && a.table === 'library_activity'), 'réception : l’historique n’est pas lu sans le réglage');
@@ -841,6 +854,28 @@ export async function runSyncL3Tests({ eq, ok }) {
     db.mutate = (arg) => { transactions += 1; return vraiMutate(arg); };
     try { await repo.init(); } finally { db.mutate = vraiMutate; }
     eq([(await db.get('books', 'apres')).title, transactions], ['c\u0007d', 0], 'R-L3-27 : la passe ne se rejoue pas (garde), et un démarrage ordinaire n’ouvre aucune transaction');
+  });
+
+  // --- R-L3-29 de bout en bout : un conflit renvoyé se range tout seul quand le serveur accuse
+  await withRepo(async (repo, db) => {
+    await db.mutate({ puts: { books: [{ id: 'rv', title: 'Ici plus récent', updated_at: '2026-10-13T12:00:00Z' }] }, origin: 'device' });
+    const page = [{ id: 'rv', data: { id: 'rv', title: 'Ailleurs', updated_at: '2026-10-13T11:00:00Z' }, updated_at: '2026-10-13T11:00:00Z', deleted_at: null, server_seq: 40 }];
+    const tf = creerTransportFactice({ lire: { books: [page, []] } });
+    eq((await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1' }).recevoir()).conflits, 1, 'R-L3-29 : le local plus récent fait un conflit…');
+    const c = await db.get('sync_conflicts', 'books:rv');
+    eq([c.renvoye, (await db.getAll('outbox')).map((e) => [e.id, e.op])], [true, [['rv', 'put']]], 'R-L3-29 : … journalisé RENVOYÉ, avec son entrée de file');
+    // L'envoi part et le serveur accepte (la version d'ici est plus récente) : le conflit n'a plus de raison d'être.
+    const tfServeur = creerTransportFactice({ serveur: true });
+    const envoi = await createPush({ db, transport: tfServeur, getUserId: () => 'u1' }).envoyer();
+    eq([envoi.envoyes, await db.count('sync_conflicts'), await db.count('outbox')], [1, 0, 0], 'R-L3-29 : l’accusé du serveur RANGE le conflit renvoyé — plus rien à trancher, sans geste de la personne');
+    // Un conflit ORDINAIRE (instants égaux, contenus différents) n'est PAS rangé par un accusé : il attend la personne.
+    await db.mutate({ puts: {
+      books: [{ id: 'ord', title: 'Ici', updated_at: '2026-10-13T13:00:00Z' }],
+      sync_conflicts: [{ id: 'books:ord', store: 'books', record_id: 'ord', local: { id: 'ord', title: 'Ici' }, server: { data: { id: 'ord', title: 'Ailleurs' }, updated_at: '2026-10-13T13:00:00Z', deleted_at: null }, at: '2026-10-13T13:01:00Z', kind: 'donnees' }],
+      outbox: [{ user_id: 'u1', store: 'books', id: 'ord', op: 'put', updated_at: '2026-10-13T13:00:00Z', tries: 0 }],
+    }, origin: 'device' });
+    const envoi2 = await createPush({ db, transport: tfServeur, getUserId: () => 'u1' }).envoyer();
+    eq([envoi2.envoyes, (await db.getAll('sync_conflicts')).map((x) => x.id)], [1, ['books:ord']], 'R-L3-29 : un conflit ORDINAIRE survit à l’accusé — il attend la personne');
   });
 
   // --- Cycle complet entre deux appareils, arbitré comme le serveur (R-L3-21)
@@ -1211,6 +1246,14 @@ export async function runSyncL3Tests({ eq, ok }) {
   eq(syncSectionModel({ ...base, moteur: etatMoteur({ conflits: 1 }), conflits: [{ id: 'books:k9', store: 'books', record_id: 'k9', local: null, server: { data: {}, updated_at: '2026-10-13T12:00:00Z' }, at: '2026-10-13T12:00:00Z', kind: 'donnees' }] }).conflits[0].libelle,
     'books · k9', 'réglages L3 : sans version locale (fiche supprimée ici), le conflit se nomme par sa clé');
 
+  // R-L3-29 : un conflit DÉJÀ RENVOYÉ n'est pas à trancher — la version d'ici est partie, le serveur l'acceptera.
+  // Lui offrir « Garder celle d'ici » (qui réhorodate et renvoie encore) ou « Garder celle d'ailleurs » (qui écrase
+  // la version qu'on vient d'envoyer par celle, plus ancienne, qui a perdu) n'a aucun sens : le seul geste est de
+  // ranger l'entrée de journal. La ligne dit donc CE QUI S'EST PASSÉ, pas une question.
+  const mRenvoye = syncSectionModel({ ...base, moteur: etatMoteur({ conflits: 1 }), conflits: [{ ...unConflit, renvoye: true }] });
+  eq(mRenvoye.conflits[0].renvoye, true, 'R-L3-29 : le modèle porte « renvoyé » tel que la réception l’a journalisé');
+  eq(syncSectionModel({ ...base, moteur: etatMoteur({ conflits: 1 }), conflits: [unConflit] }).conflits[0].renvoye, false, 'R-L3-29 : … et faux pour un conflit ordinaire (jamais deviné)');
+
   // Sans moteur, le modèle est EXACTEMENT celui de L2 : pas une clé de plus, sinon les tests L2 deviendraient faux.
   const m6 = syncSectionModel({ ...base, moteur: null });
   eq(m6, { title: 'Synchronisation', lines: ['Connectée : x@exemple.invalid', 'À envoyer : 3'], buttons: [{ action: 'signOut', label: 'Se déconnecter', tone: '' }] },
@@ -1240,6 +1283,24 @@ export async function runSyncL3Tests({ eq, ok }) {
     eq(vus, [['reessayer', 4], ['abandonner', 4], ['reessayer', 5], ['abandonner', 5], ['garderIci', 'books:k1'], ['garderAilleurs', 'books:k1']],
       'rendu L3 : chaque bouton appelle son geste avec la bonne clé');
   }
+  // R-L3-29, rendu : un conflit renvoyé dit ce qui s'est passé et n'offre QUE « Ignorer ».
+  {
+    const vus = [];
+    const boite = document.createElement('div');
+    const gestes = { garderIci: (id) => vus.push(['garderIci', id]), garderAilleurs: (id) => vus.push(['garderAilleurs', id]), ignorerConflit: (id) => vus.push(['ignorerConflit', id]) };
+    for (const n of syncSectionL3(mRenvoye, gestes)) boite.append(n);
+    const libelles = [...boite.querySelectorAll('button')].map((b) => b.textContent);
+    eq(libelles, ['Ignorer'], 'R-L3-29 : un conflit renvoyé n’offre QUE « Ignorer » — ni « Garder celle d’ici », ni « Garder celle d’ailleurs »');
+    ok(boite.textContent.includes('Version d’ici renvoyée au serveur'), 'R-L3-29 : … et la ligne dit ce qui s’est passé, pas une question');
+    for (const b of boite.querySelectorAll('button')) b.click();
+    eq(vus, [['ignorerConflit', 'books:k1']], 'R-L3-29 : « Ignorer » appelle son geste avec la clé du conflit');
+    // Et un conflit ordinaire garde ses deux issues, sans « Ignorer ».
+    const ordinaire = document.createElement('div');
+    for (const n of syncSectionL3(syncSectionModel({ ...base, moteur: etatMoteur({ conflits: 1 }), conflits: [unConflit] }), gestes)) ordinaire.append(n);
+    const libellesOrdinaires = [...ordinaire.querySelectorAll('button')].map((b) => b.textContent);
+    ok(libellesOrdinaires.some((l) => l.startsWith('Garder celle d’ici (')) && libellesOrdinaires.includes('Garder celle d’ailleurs') && !libellesOrdinaires.includes('Ignorer'),
+      'R-L3-29 : un conflit ordinaire garde ses deux issues, et n’offre PAS « Ignorer »');
+  }
   {
     const boite = document.createElement('div');
     for (const n of syncSectionL3(m4, {})) boite.append(n);
@@ -1252,7 +1313,7 @@ export async function runSyncL3Tests({ eq, ok }) {
 
   // --- Les gestes de la file et des conflits (spec § 4.2, § 5.5) : extraits de leurs gestionnaires DOM, à
   // dépendances injectées, éprouvés sur une base jetable. Ce sont des décisions, pas du rendu.
-  const { reessayerEnvoi, abandonnerEnvoi, garderVersionDIci, garderVersionDAilleurs, suivreMoteur } = reglages;
+  const { reessayerEnvoi, abandonnerEnvoi, garderVersionDIci, garderVersionDAilleurs, rangerConflitRenvoye, suivreMoteur } = reglages;
   const { reglerHistorique: reglerHistoriqueL3, effacerDonnees: effacerDonneesL3 } = reglages;
   await withRepo(async (repoTemp, db) => {
     await db.mutate({ puts: { outbox: [{ user_id: 'u1', store: 'books', id: 'b1', op: 'put', updated_at: '2026-10-13T10:00:00Z', tries: 3, last_error: 'taille', quarantined_at: '2026-10-13T11:00:00Z', next_try_at: '2026-10-13T12:00:00Z' }] }, origin: 'device' });
@@ -1287,6 +1348,22 @@ export async function runSyncL3Tests({ eq, ok }) {
     eq([await db.count('sync_conflicts'), (await db.get('books', 'k1'))?.title, appels], [0, 'Ici', ['planifier']],
       'geste L3 : le conflit disparaît, la version d’ici reste, et une passe est planifiée (elle doit repartir)');
     eq(await garderVersionDIci({ db, id: 'books:k1' }), false, 'geste L3 : un conflit déjà tranché ne fait rien');
+  });
+
+  // R-L3-29 : « Ignorer » ne touche RIEN d'autre que l'entrée de journal, et refuse un conflit non renvoyé.
+  await withRepo(async (repoTemp, db) => {
+    await repoTemp.save('books', { id: 'ig', title: 'Ici' });
+    const avant = await db.get('books', 'ig');
+    const modele = (id, renvoye) => ({ id, store: 'books', record_id: 'ig', local: avant, server: { data: { id: 'ig', title: 'Ailleurs' }, updated_at: '2026-10-13T12:00:00Z', deleted_at: null }, at: '2026-10-13T12:01:00Z', kind: 'donnees', ...(renvoye ? { renvoye: true } : {}) });
+    await db.mutate({ puts: { sync_conflicts: [modele('books:ig', true)] }, origin: 'remote' });
+    const filesAvant = (await db.getAll('outbox')).length;
+    eq(await rangerConflitRenvoye({ db, id: 'books:ig' }), true, 'R-L3-29 : « Ignorer » s’applique à un conflit renvoyé');
+    eq([await db.count('sync_conflicts'), (await db.get('books', 'ig'))?.title, (await db.getAll('outbox')).length], [0, 'Ici', filesAvant],
+      'R-L3-29 : … il retire l’entrée de journal et RIEN d’autre (ni la fiche, ni la file)');
+    // Défense en profondeur : même appelé sur un conflit ordinaire, il refuse — ce conflit attend une décision.
+    await db.mutate({ puts: { sync_conflicts: [modele('books:ig2', false)] }, origin: 'remote' });
+    eq([await rangerConflitRenvoye({ db, id: 'books:ig2' }), await db.count('sync_conflicts')], [false, 1], 'R-L3-29 : … et il REFUSE un conflit ordinaire (il attend la personne)');
+    eq(await rangerConflitRenvoye({ db, id: 'books:disparu' }), false, 'R-L3-29 : … et un conflit déjà rangé ne fait rien');
   });
 
   await withRepo(async (repoTemp, db) => {
@@ -1458,7 +1535,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     const { SYNC_L3_ACTIONS, gestesL3Pour } = reglages;
     const muet = { db: null, obtenirMoteur: () => null, confirm: async () => false, dire: () => {}, rafraichir: () => {}, invalider: () => {}, journaliser: () => {} };
     const cables = gestesL3Pour(muet);
-    eq([...SYNC_L3_ACTIONS].sort(), ['abandonner', 'envoyerMaintenant', 'garderAilleurs', 'garderIci', 'reessayer'], 'ronde 1 : cinq gestes L3 nommés');
+    eq([...SYNC_L3_ACTIONS].sort(), ['abandonner', 'envoyerMaintenant', 'garderAilleurs', 'garderIci', 'ignorerConflit', 'reessayer'], 'ronde 1 : six gestes L3 nommés (R-L3-29 ajoute « Ignorer »)');
     eq(Object.keys(cables).sort(), [...SYNC_L3_ACTIONS].sort(), 'ronde 1 : le câblage réel expose exactement les gestes nommés, pas un de plus');
     ok(SYNC_L3_ACTIONS.every((a) => typeof cables[a] === 'function'), 'ronde 1 : … et chacun est bien une fonction');
 
@@ -1713,7 +1790,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(liste.length > 30, 'SHELL lu : ' + liste.length + ' entrées à relire avant de conclure');
     eq(['./src/sync/transport.js', './src/sync/lots.js', './src/sync/reponses.js', './src/sync/push.js', './src/sync/pull.js', './src/sync/conflits.js', './src/sync/backfill.js', './src/sync/moteur.js']
       .filter((c) => !liste.includes(c)), [], 'SHELL : les modules d’envoi et de réception, désormais atteignables depuis app.js, sont servis hors connexion');
-    ok(/VERSION = 'cuisine-os-v0\.3\.0-3'/.test(source), 'sw.js : VERSION incrémentée pour la vague finale — l’ancien cache est purgé à l’activation');
+    ok(/VERSION = 'cuisine-os-v0\.3\.0-4'/.test(source), 'sw.js : VERSION incrémentée pour la vague finale — l’ancien cache est purgé à l’activation');
     // Le nom du cache et la version affichée dans Réglages doivent dire la MÊME chose : deux versions qui se
     // contredisent rendent impossible de savoir ce qui est servi (un cache « 0.2.0 » pour une app qui s'annonce
     // « 0.3.0 » est exactement le genre de doute qu'un marqueur de version existe pour lever).
