@@ -215,21 +215,40 @@ export async function runSyncL3Tests({ eq, ok }) {
       eq([(await createPush({ db, transport: tf }).envoyer()).envoyes, tf.journal.length], [0, 1], 'envoi : une entrée en quarantaine n’est plus jamais tentée');
     });
 
-    // --- Envoi : lignes files retenues (R-L3-5) — marquées, jamais retirées, jamais envoyées
+    // --- Envoi : R-L3-22 — une ligne files n'entre PLUS en file en L3 (ses octets sont L4)
+    // Avant R-L3-22, chaque photo capturée laissait une entrée que rien ne pouvait envoyer avant L4 : « À envoyer »
+    // et la pastille affichaient en permanence un nombre qui ne redescendait jamais, et le motif « fichier en
+    // attente » n'était affiché nulle part. La retenue de `lots.js` reste comme garde-fou (éprouvée sur
+    // `composerLots`, plus haut) ; elle n'est simplement plus atteignable depuis la capture.
     await withRepo(async (repo, db) => {
       await repo.save('books', { id: 'b9', title: 'Neuf' });
       const sha = 'a'.repeat(64);
       await repo.putFile(sha, new Blob(['x'], { type: 'image/jpeg' }), { original_filename: 'x.jpg' });
-      eq((await db.getAll('outbox')).map((e) => e.store), ['books', 'files'], 'retenues : la ligne files est bien en file au départ');
+      eq((await db.getAll('outbox')).map((e) => e.store), ['books'], 'R-L3-22 : une photo capturée n’entre PAS en file (« À envoyer » ne compte pas les fichiers avant L4)');
+      ok((await db.get('files', sha))?.blob instanceof Blob, 'R-L3-22 : … et la photo est bel et bien gardée sur cet appareil');
       const tf = creerTransportFactice();
       const r = await createPush({ db, transport: tf }).envoyer();
-      eq([r.envoyes, r.retenues, r.erreur], [1, 1, null], 'retenues : la ligne files est comptée retenue, le livre part quand même');
-      eq(tf.journal[0].rows.map((e) => e.store), ['books'], 'retenues : aucun appel réseau ne contient la ligne files (R-L3-5)');
-      const file = await db.getAll('outbox');
-      eq(file.map((e) => [e.store, e.id, e.last_error, e.quarantined_at]), [['files', sha, 'fichier en attente', undefined]], 'retenues : l’entrée reste en file, marquée « fichier en attente », pas en quarantaine (R-L3-5)');
-      // Marquée sans être retirée : la passe suivante la retient encore, et ne l'envoie toujours pas.
-      const r2 = await createPush({ db, transport: tf }).envoyer();
-      eq([r2.envoyes, r2.retenues, tf.journal.length], [0, 1, 1], 'retenues : une passe où tout est retenu ne fait aucun appel réseau');
+      eq([r.envoyes, r.retenues, r.erreur], [1, 0, null], 'R-L3-22 : le livre part, et il n’y a plus aucune retenue à compter');
+      eq(tf.journal[0].rows.map((e) => e.store), ['books'], 'R-L3-22 : aucun appel réseau ne contient de ligne files');
+      eq(await db.count('outbox'), 0, 'R-L3-22 : la file se vide ENTIÈREMENT — le compteur « À envoyer » redescend à zéro');
+    });
+
+    // --- R-L3-22 : les entrées files DÉJÀ en file (capturées par L2) sont retirées UNE fois, à l'init
+    await withRepo(async (repo, db) => {
+      // La fixture a déjà joué init() : la garde est posée. On la retire pour rejouer la migration.
+      await db.mutate({ deletes: { sync_state: ['purge_files_outbox'] }, origin: 'device' });
+      await db.mutate({ puts: { outbox: [
+        { user_id: 'u1', store: 'files', id: 'a'.repeat(64), op: 'put', updated_at: '2026-10-12T10:00:00Z', tries: 0 },
+        { user_id: 'u1', store: 'files', id: 'b'.repeat(64), op: 'put', updated_at: '2026-10-12T10:00:00Z', last_error: 'fichier en attente', tries: 0 },
+        { user_id: 'u1', store: 'books', id: 'garde', op: 'put', updated_at: '2026-10-12T10:00:00Z', tries: 0 },
+      ] }, origin: 'device' });
+      await repo.init();
+      eq((await db.getAll('outbox')).map((e) => [e.store, e.id]), [['books', 'garde']], 'R-L3-22 : init() retire les entrées files d’avant ce lot, et rien d’autre');
+      eq((await db.get('sync_state', 'purge_files_outbox'))?.value, 1, 'R-L3-22 : la garde de la purge est posée');
+      // La garde tient : une entrée files replacée à la main n'est pas re-purgée au prochain démarrage.
+      await db.mutate({ puts: { outbox: [{ user_id: 'u1', store: 'files', id: 'c'.repeat(64), op: 'put', updated_at: '2026-10-12T10:00:00Z', tries: 0 }] }, origin: 'device' });
+      await repo.init();
+      eq((await db.getAll('outbox')).map((e) => e.store), ['books', 'files'], 'R-L3-22 : la purge ne se rejoue pas (garde), et aucune transaction inutile au démarrage');
     });
 
     // --- Envoi : une entrée dont l'heure de reprise n'est pas venue attend (next_try_at, spec § 5.3)
@@ -400,8 +419,11 @@ export async function runSyncL3Tests({ eq, ok }) {
   // --- Envoi initial par marqueurs (spec § 5.2) : complet, reprenable, déclenché sur un appareil déjà connecté
   const { tablesAEnvoyer, envoiInitial, retirerMarqueur } = await import('../src/sync/backfill.js');
   const { SYNC_STORES } = await import('../src/model/schema.js');
-  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false }).length, 24, 'envoi initial : 24 tables sans l’historique');
-  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true }).length, 25, 'envoi initial : 25 tables avec l’historique');
+  // R-L3-22 : `files` n'est PAS de l'envoi initial en L3 (les octets sont L4), et son marqueur n'est pas posé —
+  // L4 trouvera donc la table entière à envoyer, sans rattrapage à faire.
+  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false }).length, 23, 'envoi initial : 23 tables sans l’historique ni les fichiers (R-L3-22)');
+  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true }).length, 24, 'envoi initial : 24 tables avec l’historique');
+  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true }).includes('files'), false, 'R-L3-22 : « files » n’est jamais de l’envoi initial en L3');
   eq(tablesAEnvoyer({ marqueurs: { 'backfill:books': 'fait' }, isActivitySynced: () => false }).includes('books'), false, 'envoi initial : une table marquée « fait » ne repart pas');
   await withRepo(async (repo, db) => {
     // Bibliothèque d’AVANT la connexion : écrite sans capture (comme en L1, ou restaurée), puis compte connecté.
@@ -409,19 +431,20 @@ export async function runSyncL3Tests({ eq, ok }) {
     eq(await db.count('outbox'), 0, 'envoi initial : rien en file avant');
     const progression = [];
     const r = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false, surProgression: (p) => progression.push(p), tailleMorceau: 1 });
-    eq(r.tables.length, 24, 'envoi initial : les 24 tables sont parcourues');
+    eq(r.tables.length, 23, 'envoi initial : les 23 tables sont parcourues (ni l’historique, ni les fichiers)');
     const file = await db.getAll('outbox');
     const refs = (await db.count('ingredients')) + (await db.count('unit_definitions')) + (await db.count('unit_conventions')); // amorçage mesuré : ingredients, unit_definitions, unit_conventions
-    eq(file.length, refs + 2 + 1, 'envoi initial : références amorcées + 2 livres + 1 fichier synchronisable en file');
+    eq(file.length, refs + 2, 'envoi initial : références amorcées + 2 livres en file (R-L3-22 : aucun fichier)');
     ok(file.every((e) => e.op === 'put' && e.user_id === 'u1'), 'envoi initial : des put, au nom du compte');
-    ok(!file.some((e) => e.store === 'files' && e.id === 'b'.repeat(64)), 'envoi initial : une ligne files syncable:false n’est jamais mise en file');
+    ok(!file.some((e) => e.store === 'files'), 'R-L3-22 : aucune ligne files n’est mise en file par l’envoi initial, synchronisable ou non');
+    eq(await db.get('sync_state', 'backfill:files'), undefined, 'R-L3-22 : le marqueur « backfill:files » n’est PAS posé — L4 trouvera la table entière à envoyer');
     eq((await db.get('sync_state', 'backfill:books'))?.value, 'fait', 'envoi initial : marqueur posé après la table');
-    ok(progression.some((p) => p.table === 'books' && p.n >= 1 && p.total === 24), 'envoi initial : progression « table n/24 »');
+    ok(progression.some((p) => p.table === 'books' && p.n >= 1 && p.total === 23), 'envoi initial : progression « table n/23 »');
     // Une table vide (aucune ligne) reçoit quand même son marqueur, sans aucune entrée en file pour elle.
     eq((await db.get('sync_state', 'backfill:dishes'))?.value, 'fait', 'envoi initial : une table vide est marquée « fait »');
     ok(!file.some((e) => e.store === 'dishes'), 'envoi initial : une table vide ne met jamais rien en file');
     const r2 = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false });
-    eq([r2.mises, await db.count('outbox')], [0, refs + 3], 'envoi initial : rejoué → rien de plus (marqueurs)');
+    eq([r2.mises, await db.count('outbox')], [0, refs + 2], 'envoi initial : rejoué → rien de plus (marqueurs)');
     await retirerMarqueur(db, 'books');
     const r3 = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false });
     eq(r3.tables, ['books'], 'envoi initial : marqueur retiré → seule cette table repart (rattrapage, R27)');
@@ -1421,7 +1444,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(liste.length > 30, 'SHELL lu : ' + liste.length + ' entrées à relire avant de conclure');
     eq(['./src/sync/transport.js', './src/sync/lots.js', './src/sync/reponses.js', './src/sync/push.js', './src/sync/pull.js', './src/sync/conflits.js', './src/sync/backfill.js', './src/sync/moteur.js']
       .filter((c) => !liste.includes(c)), [], 'SHELL : les modules d’envoi et de réception, désormais atteignables depuis app.js, sont servis hors connexion');
-    ok(/VERSION = 'cuisine-os-v0\.3\.0-1'/.test(source), 'sw.js : VERSION incrémentée — l’ancien cache est purgé à l’activation');
+    ok(/VERSION = 'cuisine-os-v0\.3\.0-2'/.test(source), 'sw.js : VERSION incrémentée pour la vague finale — l’ancien cache est purgé à l’activation');
     // Le nom du cache et la version affichée dans Réglages doivent dire la MÊME chose : deux versions qui se
     // contredisent rendent impossible de savoir ce qui est servi (un cache « 0.2.0 » pour une app qui s'annonce
     // « 0.3.0 » est exactement le genre de doute qu'un marqueur de version existe pour lever).

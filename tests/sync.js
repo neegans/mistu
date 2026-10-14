@@ -162,8 +162,13 @@ export async function runSyncTests({ eq, ok }) {
     eq((await db.getAll('outbox')).length, 2, 'réception : non capturée');
     await db.mutate({ clearStores: ['recipes'], origin: 'device' });
     eq((await db.getAll('outbox')).length, 2, 'vidage d’appareil : non capturé');
+    // R-L3-22 : AUCUNE ligne files n'est capturée en L3 — ni un type hors liste, ni une image parfaitement
+    // synchronisable. Leurs octets sont L4, et une entrée que rien ne peut envoyer avant L4 faisait mentir le
+    // compteur « À envoyer » en permanence.
     await db.mutate({ puts: { files: [{ sha256: 'f'.repeat(64), mime: 'text/plain', size: 1 }] } });
-    eq((await db.getAll('outbox')).length, 2, 'ligne files d’avant le lot (type hors liste, sans champ syncable) : non capturée');
+    eq((await db.getAll('outbox')).length, 2, 'R-L3-22 : une ligne files d’un type hors liste n’est pas capturée');
+    await db.mutate({ puts: { files: [{ sha256: 'e'.repeat(64), mime: 'image/jpeg', size: 1, syncable: true, updated_at: '2026-10-12T10:00:00Z' }] } });
+    eq((await db.getAll('outbox')).length, 2, 'R-L3-22 : une ligne files parfaitement synchronisable n’est pas capturée non plus (ses octets sont L4)');
     // L'autre sens du consentement (R27) : le réglage activé, l'historique entre en file comme n'importe quoi d'autre.
     installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => true });
     await db.mutate({ puts: { library_activity: [{ id: 'act2', edition_id: 'e', updated_at: '2026-10-12T10:00:00Z' }] } });
@@ -195,7 +200,8 @@ export async function runSyncTests({ eq, ok }) {
     await repo.save('recipes', { id: 'r1' });
     await repo.remove('recipes', 'r1');
     const out = await db.getAll('outbox');
-    eq(out.map((o) => [o.store, o.id, o.op]), [['files', 'b'.repeat(64), 'put'], ['recipes', 'r1', 'put'], ['recipes', 'r1', 'delete']], 'ordre des captures : rien de plus, rien de moins');
+    // R-L3-22 : les trois putFile ci-dessus ne laissent AUCUNE entrée — seuls les gestes sur une fiche en laissent.
+    eq(out.map((o) => [o.store, o.id, o.op]), [['recipes', 'r1', 'put'], ['recipes', 'r1', 'delete']], 'ordre des captures : rien de plus, rien de moins (R-L3-22 : aucune ligne files)');
     await repo.clearDevice({ signOut: async () => {} });
     eq([(await db.getAll('recipes')).length, (await db.getAll('outbox')).length, (await db.getAll('sync_state')).map((s) => s.key)], [0, 0, ['device_id']], 'clearDevice : tout vidé sauf device_id');
   });

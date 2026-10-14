@@ -3,15 +3,20 @@
 // l'envoi absorbe les doublons) ; le marqueur part dans la MÊME transaction que le dernier morceau.
 import { SYNC_STORES } from '../model/schema.js';
 import { keyOf } from './tables.js';
-import { isAllowed } from './mime.js';
 
 const MARQUEUR = (table) => `backfill:${table}`;
 
-export function tablesAEnvoyer({ marqueurs = {}, isActivitySynced = () => false }) {
-  return SYNC_STORES.filter((t) => (t !== 'library_activity' || isActivitySynced()) && marqueurs[MARQUEUR(t)] !== 'fait');
+// R-L3-22 : `files` est écartée de l'envoi initial en L3 — ses octets sont L4 (R55), et mettre une bibliothèque
+// entière de photos en file aurait figé « À envoyer : N » sur un nombre que rien ne pouvait faire redescendre.
+// Son marqueur `backfill:files` n'est donc PAS posé : L4 trouvera la table entière à envoyer, sans rattrapage.
+// Les tables candidates sont nommées une fois, et c'est aussi elles que compte la progression affichée.
+export function tablesCandidates({ isActivitySynced = () => false } = {}) {
+  return SYNC_STORES.filter((t) => t !== 'files' && (t !== 'library_activity' || isActivitySynced()));
 }
 
-const synchronisable = (table, row) => table !== 'files' || (row?.syncable !== false && isAllowed(row?.mime));
+export function tablesAEnvoyer({ marqueurs = {}, isActivitySynced = () => false }) {
+  return tablesCandidates({ isActivitySynced }).filter((t) => marqueurs[MARQUEUR(t)] !== 'fait');
+}
 
 export async function lireMarqueurs(db) {
   const lignes = await db.getAll('sync_state');
@@ -24,12 +29,12 @@ export async function retirerMarqueur(db, table) {
 
 export async function envoiInitial({ db, getUserId, isActivitySynced = () => false, surProgression = () => {}, tailleMorceau = 500 }) {
   const tables = tablesAEnvoyer({ marqueurs: await lireMarqueurs(db), isActivitySynced });
-  const total = SYNC_STORES.length - (isActivitySynced() ? 0 : 1);
+  const total = tablesCandidates({ isActivitySynced }).length;
   let mises = 0;
   const user_id = getUserId();
   for (const [i, table] of tables.entries()) {
     surProgression({ phase: 'envoi_initial', table, n: i + 1, total });
-    const lignes = (await db.getAll(table)).filter((r) => synchronisable(table, r));
+    const lignes = await db.getAll(table);
     for (let debut = 0; debut < Math.max(lignes.length, 1); debut += tailleMorceau) {
       const morceau = lignes.slice(debut, debut + tailleMorceau);
       const dernier = debut + tailleMorceau >= lignes.length;

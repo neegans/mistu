@@ -65,6 +65,26 @@ export async function init() {
   const aPoser = Object.fromEntries(Object.entries(batch).filter(([, rows]) => rows.length));
   if (Object.keys(aPoser).length) await saveBatch(aPoser, { origin: 'device' });
   await horodaterAnciennesFiches();
+  await purgerFilesEnFile();
+}
+
+// Migration unique (R-L3-22) : L2 capturait les lignes « files », et rien ne peut les envoyer avant L4 (leurs
+// octets sont L4, R55). Les entrées déjà en file sur un appareil qui a tourné sous L2 y resteraient donc pour
+// toujours, et « À envoyer : N » ne redescendrait jamais à zéro — exactement le compteur que le parcours § 7.3
+// demande de regarder. Elles sont retirées UNE fois, à la montée ; les fichiers eux-mêmes ne sont pas touchés.
+// Origine 'device' : ce n'est pas un geste de la personne, et un retrait de file ne part jamais au serveur.
+const PURGE_FILES_GUARD = 'purge_files_outbox';
+async function purgerFilesEnFile() {
+  const fait = await db.get('sync_state', PURGE_FILES_GUARD);
+  if (fait?.value === 1) return 0;
+  const seqs = (await db.getAll('outbox')).filter((e) => e?.store === 'files').map((e) => e.seq);
+  // La garde part dans la MÊME transaction que le retrait : une purge à moitié faite serait rejouée en entier.
+  await db.mutate({
+    deletes: seqs.length ? { outbox: seqs } : {},
+    puts: { sync_state: [{ key: PURGE_FILES_GUARD, value: 1 }] },
+    origin: 'device',
+  });
+  return seqs.length;
 }
 
 // Rattrapage unique (R26) : les fiches écrites AVANT ce lot n'ont pas d'updated_at ; sans lui, chacune serait

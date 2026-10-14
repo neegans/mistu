@@ -1,14 +1,18 @@
 // Capture des écritures dans la même transaction que la donnée (spec § 5.2) : une seule porte, db.mutate.
 // Aucun envoi ici : la file est seulement remplie ; la vider est le travail de L3 (src/sync/push.js).
 import { SYNC_STORES } from '../model/schema.js';
-import { isAllowed } from './mime.js';
 import { keyOf } from './tables.js';
 import { syncNow } from './clock.js';
 
-// Une ligne « files » non synchronisable reste locale et n'entre jamais en file (spec § 5.3, § 5.4).
-// Le type est vérifié en plus du drapeau : les lignes d'avant ce lot et celles d'une restauration n'ont pas de
-// champ « syncable », et seule la liste blanche part vers le serveur.
-const syncableRow = (store, row) => store !== 'files' || (row?.syncable !== false && isAllowed(row?.mime));
+// R-L3-22 : en L3, AUCUNE ligne « files » n'entre en file — ni une image parfaitement synchronisable, ni un type
+// hors liste. Les octets des fichiers sont L4 (R55), donc rien ne pouvait envoyer ces entrées avant L4 : dès la
+// première photo, « À envoyer : N » et la pastille affichaient en permanence un nombre qui ne redescendait plus, et
+// le motif « fichier en attente » posé par `push.js` n'était affiché nulle part. C'est exactement l'attente que
+// personne ne tient que R52 a voulu éviter — et c'est le compteur que le parcours § 7.3 n° 1 demande de regarder.
+// L4 remettra `files` en file, avec son envoi initial (dont le marqueur n'est volontairement pas posé ici) et la
+// liste blanche de types de `src/sync/mime.js`, qui décide ce qui part vers le serveur.
+// Les entrées `files` DÉJÀ en file, capturées par L2, sont retirées une fois par `repo.init()` (même ruling).
+const SYNCHRONISEES = SYNC_STORES.filter((store) => store !== 'files');
 
 // Copie de la fiche au moment de la suppression, sans laisser une clé héritée du prototype passer pour un payload.
 function payloadFor(payloads, store, key) {
@@ -22,11 +26,10 @@ export function installCapture(db, { getUserId = () => null, isActivitySynced = 
     if (origin !== 'local') return null;
     const rows = [];
     const user_id = getUserId();
-    const wanted = (store) => SYNC_STORES.includes(store) && (store !== 'library_activity' || isActivitySynced());
+    const wanted = (store) => SYNCHRONISEES.includes(store) && (store !== 'library_activity' || isActivitySynced());
     for (const [store, list] of Object.entries(puts)) {
       if (!wanted(store)) continue;
       for (const r of list) {
-        if (!syncableRow(store, r)) continue;
         rows.push({ user_id, store, id: keyOf(store, r), op: 'put', updated_at: r.updated_at || null, tries: 0 });
       }
     }
@@ -34,7 +37,6 @@ export function installCapture(db, { getUserId = () => null, isActivitySynced = 
       if (!wanted(store)) continue;
       for (const k of keys) {
         const payload = payloadFor(payloads, store, k);
-        if (!syncableRow(store, payload)) continue;
         // R-L3-21 : une suppression est un ÉVÉNEMENT, et sa tombale porte l'instant de SON GESTE — jamais l'heure de
         // la dernière écriture de la fiche, que le serveur possède déjà. Avec celle du payload, `sync_push` voyait
         // `u = cur_updated` et `cur_deleted is null` : aucune de ses deux branches d'écriture ne s'appliquait, la
