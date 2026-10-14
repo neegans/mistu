@@ -834,12 +834,16 @@ export async function runSyncL3Tests({ eq, ok }) {
       eq((await db.get('books', 'm9'))?.title, 'Reçu', 'moteur : la réception a écrit la fiche');
       ok(etats.some((e) => e.phase === 'envoi_initial') && etats.some((e) => e.phase === 'reception'), 'moteur : les phases sont annoncées');
       // Un seul vol : deux exécutions concurrentes → une passe, la seconde REJOINT la première (la même promesse).
+      // m5 : l'assertion est ÉPINGLÉE sur le nombre exact d'appels — une borne molle (« au plus 25 ») tiendrait
+      // encore avec deux passes courtes, donc elle ne prouvait pas ce qu'elle annonçait.
       const avant = tf.journal.length;
       const p1 = moteur.executer('a');
       const p2 = moteur.executer('b');
       ok(p1 === p2, 'moteur : un appel pendant un vol rend la MÊME promesse (pas une seconde passe)');
       await Promise.all([p1, p2]);
-      ok(tf.journal.length - avant <= 25, 'moteur : exécutions concurrentes → un seul vol (pas deux fois les appels)');
+      const depuis = tf.journal.slice(avant);
+      eq(depuis.filter((a) => a.appel === 'lire' && a.table === 'books').length, 1, 'm5 : exécutions concurrentes → UN seul vol (la table books est lue exactement une fois, pas deux)');
+      eq(depuis.filter((a) => a.appel === 'pousser').length, 0, 'm5 : … et la file étant vide, aucun envoi n’est tenté');
       // Déclencheurs : écriture regroupée, online, premier plan.
       moteur.demarrer();
       ok(['online', 'visibilitychange'].every((ev) => ecouteurs[ev]) && abonnes.change, 'moteur : écoute online, visibilitychange et le bus « change »');
@@ -864,6 +868,38 @@ export async function runSyncL3Tests({ eq, ok }) {
       const fin = await moteur.executer('test');
       eq([fin.aEnvoyer, fin.enQuarantaine, await db.count('outbox')], [0, 0, 1], 'R-L3-24 : le moteur ne compte pas l’entrée d’un autre compte (elle reste en file, intacte)');
       await moteur.arreter();
+    });
+
+    // m2 : une reprise programmée par une passe encore EN VOL ne doit pas survivre à `arreter()`. L'arrêt annule
+    // bien la minuterie existante à cet instant — mais `passe()` pose la sienne APRÈS, quand l'envoi annonce son
+    // recul, et plus personne ne l'annulait. Après « Effacer les données de cet appareil » (arrêt → clearDevice),
+    // cet `executer('reprise')` tardif lançait une passe sur une base vidée : réception complète d'une
+    // bibliothèque sur un appareil qu'on vient d'effacer, si la déconnexion avait échoué.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await repo.save('books', { id: 'rep', title: 'x' });
+      let lacher = null;
+      const enVol = new Promise((resolve) => { lacher = resolve; });
+      const transport = {
+        async pousser() { await enVol; return { reponse: null, erreur: { type: 'reseau', status: 0, message: 'x' } }; },
+        async lire() { return { lignes: [], erreur: null }; },
+      };
+      const moteur = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport, fenetre: fenetreMuette(), bus: busMuet });
+      const vol = moteur.executer('t');
+      const arret = moteur.arreter(); // l'arrêt tombe PENDANT le vol
+      const vraiSetTimeout = globalThis.setTimeout;
+      const vraiConsoleM2 = console.error;
+      const minuteries = [];
+      globalThis.setTimeout = (fn, ms) => { minuteries.push(ms); return vraiSetTimeout(fn, ms); };
+      console.error = () => {}; // l'échec réseau est journalisé par un code : la page reste à zéro erreur
+      try {
+        lacher();
+        await vol;
+        await arret;
+      } finally { globalThis.setTimeout = vraiSetTimeout; console.error = vraiConsoleM2; }
+      // Seules les minuteries d'au moins une seconde sont des reculs ; les `setTimeout(…, 0)` sont les relectures
+      // de réglages demandées par le bus (R-L3-17), qui n'ont rien à voir avec une reprise.
+      eq(minuteries.filter((ms) => ms >= 1000), [], 'm2 : une passe encore en vol ne programme plus de reprise après arreter() (plus de passe sur une base vidée)');
     });
 
     // Déclencheurs : seul un retour à « visible » relance une passe ; le retour du réseau en relance une.
@@ -1493,10 +1529,27 @@ export async function runSyncL3Tests({ eq, ok }) {
     const journal = [];
     const faux = { arreter: async () => { journal.push('arrete'); return null; } };
     let pose = null;
-    eq(await arreterMoteur({ obtenir: () => faux, poser: (p) => { pose = p; journal.push('pose'); } }), true, 'déconnexion : le moteur est arrêté');
-    eq([journal, pose], [['arrete', 'pose'], { moteur: null }], 'déconnexion : … arrêté PUIS retiré de l’état, dans cet ordre');
-    eq(await arreterMoteur({ obtenir: () => null, poser: () => journal.push('pose') }), false, 'déconnexion : sans moteur, rien n’est posé');
-    eq(journal.length, 2, 'déconnexion : … et l’état n’est pas touché pour rien');
+    const pastilles = [];
+    const pastille = (etat) => { pastilles.push(etat); journal.push('pastille'); };
+    eq(await arreterMoteur({ obtenir: () => faux, poser: (p) => { pose = p; journal.push('pose'); }, pastille }), true, 'déconnexion : le moteur est arrêté');
+    eq([journal, pose], [['arrete', 'pose', 'pastille'], { moteur: null }], 'déconnexion : … arrêté PUIS retiré de l’état PUIS la pastille redessinée, dans cet ordre');
+    // m1 : sans cette redessine, « Se déconnecter » laissait « N non envoyés » dans la barre du haut SANS compte,
+    // jusqu'au prochain rechargement — contraire à R52.
+    eq(pastilles, [null], 'm1 : la pastille est remise à muette à l’arrêt du moteur (plus de compteur sans compte)');
+    eq(await arreterMoteur({ obtenir: () => null, poser: () => journal.push('pose'), pastille }), false, 'déconnexion : sans moteur, rien n’est posé');
+    eq(journal.length, 3, 'déconnexion : … et ni l’état ni la pastille ne sont touchés pour rien');
+    // Et le mécanisme lui-même : majPastille(null) cache et vide le nœud (jamais un « 0 » affiché).
+    {
+      const { pastille: fabriquer, majPastille } = await import('../src/ui/components.js');
+      const noeud = fabriquer();
+      document.body.append(noeud);
+      try {
+        eq(majPastille({ aEnvoyer: 3 }, true), '3 non envoyés', 'm1 : avec un compte, la pastille dit ce qui attend');
+        ok(!noeud.hidden && noeud.textContent === '3 non envoyés', 'm1 : … et son nœud est visible');
+        eq(majPastille(null), null, 'm1 : majPastille(null) — ce que pose l’arrêt du moteur — ne dit rien');
+        ok(noeud.hidden && noeud.textContent === '', 'm1 : … et le nœud est caché ET vidé');
+      } finally { noeud.remove(); }
+    }
 
     const { changerDeCompte } = reglages;
     const ordre = [];

@@ -1,6 +1,7 @@
-// Une réponse de sync_push → des effets, sans toucher à la base (spec § 5.3). Le moteur applique les effets en
-// UNE transaction. Clés par (store, id) ; une clé que le serveur nomme hors du lot envoyé n'a AUCUN effet
-// (R-L3-8) : ni retrait, ni réécriture, ni conflit, ni quarantaine.
+// Une réponse de sync_push → des effets, sans toucher à la base (spec § 5.3). Rend exactement quatre clés —
+// `{ retirer, reecrire, conflits, quarantaine }` — et `src/sync/push.js` les applique en UNE transaction.
+// Clés par (store, id) ; une clé que le serveur nomme hors du lot envoyé n'a AUCUN effet (R-L3-8) : ni retrait,
+// ni réécriture, ni conflit, ni quarantaine.
 import { cleDe } from './lots.js';
 
 export function appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales = {} }) {

@@ -153,8 +153,26 @@ aussi (R31). La pastille, elle, est **livrée en L3** (voir la sous-section suiv
 **Où.** Branche `synchro-l3`, arbre `~/projects/mistu` (serveur `http://localhost:8080/`). Plan et registre :
 `.superpowers/sdd/2026-10-13-synchronisation-l3-envoi-reception/` (`progress.md`, un brief, un rapport et une revue
 par tâche ; dix tâches, chacune avec une ronde de corrections au plus). Décisions consignées en **spec § 11,
-lignes R37 à R56** (dans le registre, elles s'appellent R-L3-1 à R-L3-20). `APP_VERSION = '0.3.0'`,
-`sw.js VERSION = 'cuisine-os-v0.3.0-1'`, `SHELL` complet (67 entrées, huit modules de `src/sync/` de plus).
+lignes R37 à R62** (dans le registre, elles s'appellent R-L3-1 à R-L3-26). `APP_VERSION = '0.3.0'`,
+`sw.js VERSION = 'cuisine-os-v0.3.0-2'`, `SHELL` complet (67 entrées, huit modules de `src/sync/` de plus).
+
+**Vague finale de corrections (13 octobre 2026, après `final-review.md` — rapport : `final-fix-report.md`).** Le
+Critical et les cinq Important de la revue de branche sont corrigés, plus quatre mineurs : **R57** une suppression
+est un **événement** — sa tombale porte `syncNow()` à l'instant du geste, jamais l'heure que le serveur possède
+déjà (sans quoi `sync_push` la refusait en « conflit » et la suppression ne quittait **jamais** l'appareil), et le
+**transport factice gagne un mode `serveur`** qui arbitre comme `app.sync_push` — c'est lui qui aurait attrapé ce
+défaut tout seul · **R58** les lignes `files` **ne comptent plus** dans « À envoyer » ni dans la pastille : elles
+n'entrent plus en file, l'envoi initial les écarte sans poser `backfill:files`, et `repo.init()` purge une fois
+celles de L2 (**leurs octets sont L4** : le compteur que le parcours § 7.3 demande de regarder ne mentira plus) ·
+**R59** `poserMoteur` ne fait plus avancer la génération de R32 (un démarrage hors ligne pouvait figer Réglages sur
+« Vérification du compte… ») · **R60** `fileDe(db, userId)` : la file est filtrée par compte à l'envoi **et** dans
+les compteurs (les gardes des gestes destructeurs comptent la file entière, et c'est dit sur place) · **R61** les
+caractères de contrôle sont retirés **à l'écriture locale** (ils faisaient un conflit perpétuel) · **R62** une
+tombale reçue obéit à I7 : plus ancienne que la fiche locale, elle ne l'efface plus en silence. Mineurs : la
+pastille redevient muette à l'arrêt du moteur, une passe encore en vol ne repose plus de minuterie derrière
+`arreter()`, l'en-tête de `reponses.js` et `docs/architecture.md` nomment les vraies clés, et l'assertion « un seul
+vol » est épinglée sur un compte exact d'appels. Suite complète : **927/927 verts** (trois passages), 0 erreur
+console, 0 réponse ≥ 400.
 
 **Ce qui marche** (éprouvé par la suite : **875 assertions vertes**, transport factice, bases temporaires, aucun
 réseau) : l'**envoi** (file lue, dédoublonnée, relue, envoyée par lots de 500 / 900 Kio ; recul exponentiel,

@@ -50,6 +50,7 @@ export function createMoteur({
   let minuterie = null; // regroupement des écritures
   let reprise = null; // reprise après un recul annoncé par l'envoi
   let actif = false; // entre demarrer() et arreter()
+  let arrete = false; // arreter() a été appelé : plus aucune minuterie n'est reposée (m2)
   let demarrage = null; // la promesse du démarrage (chargement puis première passe)
   let heureVue = null; // dernière mesure d'horloge rapportée par l'envoi
   let appelsReussis = 0;
@@ -220,8 +221,16 @@ export function createMoteur({
   }
 
   // Une seule minuterie de reprise à la fois : un recul annoncé remplace l'attente précédente, il ne s'empile pas.
+  // m2 : et AUCUNE après un arrêt. `arreter()` annule bien la minuterie existante à cet instant, mais `passe()`
+  // pose la sienne plus tard — quand l'envoi annonce son recul —, donc une passe encore en vol au moment de
+  // l'arrêt en reposait une que plus personne n'annulait. Après « Effacer les données de cet appareil »
+  // (arrêt → clearDevice), cet `executer('reprise')` tardif lançait une passe sur une base vidée : au mieux du
+  // journal, au pire la réception complète d'une bibliothèque sur un appareil qu'on vient d'effacer, si la
+  // déconnexion avait échoué. La garde est posée ici plutôt qu'en tête d'`executer()` : Réglages, la pastille et
+  // les tests appellent `executer()` sans jamais `demarrer()`, et un refus là leur rendrait un moteur muet.
   function programmerReprise(ms) {
     if (reprise) clearTimeout(reprise);
+    if (arrete) return;
     reprise = setTimeout(() => { reprise = null; executer('reprise'); }, ms);
   }
 
@@ -241,6 +250,9 @@ export function createMoteur({
   // écriture, qui attendrait alors le prochain déclencheur — parfois très loin.
   function planifier() {
     if (minuterie) clearTimeout(minuterie);
+    // m2, même garde : la branche « une passe est en vol, on repousse » se rejoue DANS la minuterie, donc après un
+    // arrêt elle se reposait indéfiniment. Un arrêt met fin au regroupement comme au recul.
+    if (arrete) return;
     minuterie = setTimeout(() => {
       minuterie = null;
       if (vol) planifier();
@@ -263,6 +275,7 @@ export function createMoteur({
   function demarrer() {
     if (actif) return demarrage;
     actif = true;
+    arrete = false; // une reprise de la synchronisation (déconnexion refusée) repose ses minuteries
     const surOnline = () => executer('online');
     const surVisibilite = () => (fenetre.document?.visibilityState === 'visible' ? executer('premier_plan') : undefined);
     fenetre.addEventListener('online', surOnline);
@@ -280,6 +293,7 @@ export function createMoteur({
   // qu'elle soit terminée avant de fermer la base.
   function arreter() {
     actif = false;
+    arrete = true; // m2 : ce qui est encore en vol ne reposera plus de minuterie derrière l'arrêt
     for (const d of desabonner.splice(0)) d();
     if (minuterie) { clearTimeout(minuterie); minuterie = null; }
     if (reprise) { clearTimeout(reprise); reprise = null; }

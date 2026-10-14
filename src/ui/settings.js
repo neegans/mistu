@@ -16,7 +16,7 @@ import { extFor } from '../domain/backup.js';
 import { providerFrom } from '../domain/llm.js';
 import { shortcutUrl, SHORTCUT_NAME, isAppleTouchDevice } from '../domain/timers.js';
 import { STORES, SYNC_INTERNAL_STORES, APP_VERSION, ARCHIVE_FORMAT_VERSION } from '../model/schema.js';
-import { pageHeader, section, field, select, segmented } from './components.js';
+import { pageHeader, section, field, select, segmented, majPastille } from './components.js';
 import { invalidate, setSyncState, getSyncState, relireReglages, SYNC_ROUTE_KEY } from './state.js';
 
 // Évite deux opérations d’archive concurrentes, même après un changement d’écran.
@@ -339,11 +339,17 @@ export const messageRemplacementServeur = (connecte) => (connecte ? t('Les fiche
 // déclencheurs — retour du réseau, retour au premier plan, écriture — continueraient d’appeler le serveur avec un
 // jeton qui n’existe plus, et l’appareil se retrouverait avec un moteur sans compte. Il est arrêté PUIS retiré de
 // l’état : la passe en vol est attendue avant que la base puisse être vidée. Dépendances injectées pour être éprouvé.
-export async function arreterMoteur({ obtenir = () => getSyncState().moteur, poser = setSyncState } = {}) {
+// m1 : la pastille est REDESSINÉE muette dans le même geste. Sans cela, « Se déconnecter » laissait « N non
+// envoyés » dans la barre du haut, sans compte, jusqu'au prochain rechargement — contraire à R52, qui cache la
+// pastille sans compte précisément pour ne pas annoncer une attente que personne ne tient. Les deux autres gestes
+// qui arrêtent le moteur (« Effacer les données de cet appareil », « Changer de compte ») rechargent la page, mais
+// ils passent par ici aussi : un seul endroit décide, et c'est celui qui sait que plus rien ne tourne.
+export async function arreterMoteur({ obtenir = () => getSyncState().moteur, poser = setSyncState, pastille = majPastille } = {}) {
   const moteur = obtenir();
   if (!moteur) return false;
   await moteur.arreter();
   poser({ moteur: null });
+  pastille(null);
   return true;
 }
 

@@ -177,7 +177,7 @@ src/sync/transport.js  le SEUL module qui parle au serveur : pousser(elements) �
 src/sync/lots.js       pur : dédoublonnage par (store, id) — la version la plus récente —, ordre des seq, bornes
                        LIMITES { elements: 500, lot: 921600, element: 524288 } (R39), nettoyage des caractères de
                        contrôle, cleDe(). Rend { lots: [{ elements, seqs }], retenues: [{ seq, seqs, raison }] }.
-src/sync/reponses.js   pur : une réponse de sync_push → des EFFETS ({ retraits, reecritures, conflits, quarantaine }).
+src/sync/reponses.js   pur : une réponse de sync_push → des EFFETS ({ retirer, reecrire, conflits, quarantaine }).
                        Une clé nommée hors du lot envoyé n'a aucun effet (R41).
 src/sync/push.js       une passe d'envoi : lecture de la file, relecture des fiches (un put est relu, une suppression
                        part avec son payload), envoi par lots, application des effets en UNE transaction. Erreurs :
