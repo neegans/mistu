@@ -95,6 +95,8 @@ aside.sidenav { display: none; }
 .card h2, .card h3 { margin-top: 0; }
 /* Accueil d'un livre qui vient d'être créé (spec § 8) : un panneau au-dessus de la fiche, pas une modale. */
 .accueil-livre { border: 1px solid var(--sage); }
+/* Tant qu'aucune carte n'est touchee, la zone des sources ne laisse pas d'espace mort sous les cartes. */
+.accueil-livre .sources:empty { display: none; }
 /* « + Pages d'index » / « + Recette » (§ 9) : le résumé EST le bouton, le marqueur du <details> est retiré. */
 .menu-source summary { list-style: none; display: inline-flex; }
 .menu-source summary::-webkit-details-marker { display: none; }

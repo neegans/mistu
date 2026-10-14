@@ -22,7 +22,10 @@ export async function renderBook(params, query, ctx) {
   const edition = ctx.editionsById.get(params.id);
   if (!edition) return el('div', { class: 'card' }, t('Livre introuvable.'));
   const book = ctx.booksById.get(edition.book_id) || { title: t('Sans titre') };
-  if (query.nouveau === undefined) await repo.recordActivity(edition.id, 'open_book'); // S16 : l'arrivée après création n'est pas une ouverture volontaire
+  // R-UX-10 : un seul fait (« on arrive après création »), donc une seule condition — le MODÈLE décide, et la même
+  // décision sert à poser le panneau plus bas. S16 : une arrivée après création n'est pas une ouverture volontaire.
+  const accueil = accueilLivreModel({ nouveau: query.nouveau });
+  if (!accueil.afficher) await repo.recordActivity(edition.id, 'open_book');
   const recipes = ctx.recipes.filter((r) => r.edition_id === edition.id);
   const docs = ctx.source_documents.filter((d) => d.edition_id === edition.id);
   const pages = ctx.source_pages.filter((p) => p.edition_id === edition.id);
@@ -46,7 +49,7 @@ export async function renderBook(params, query, ctx) {
         el('a', { class: 'btn', href: `#/recipes/new?edition=${edition.id}` }, t('Saisir à la main'))),
     ],
   }));
-  root.append(renderAccueilLivre(accueilLivreModel({ nouveau: query.nouveau }), {
+  root.append(renderAccueilLivre(accueil, {
     photographier: (intention) => lancer(intention)(ACCEPT_PHOTOS, 'environment'),
     choisir: (intention) => lancer(intention)(ACCEPT_FICHIERS, null),
     plusTard: () => navigate('/library'),
@@ -54,7 +57,7 @@ export async function renderBook(params, query, ctx) {
   }));
   const ouvertes = seancesOuvertes(ctx, edition.id);
   if (ouvertes.length) root.append(el('div', { class: 'card flat row between' },
-    el('span', null, t('Séance en cours : {n} page(s)', { n: ouvertes[0].page_ids.length })),
+    el('span', null, t('Séance en cours : {n} page(s)', { n: (ouvertes[0].page_ids || []).length })),
     el('a', { class: 'btn small', href: `#/import?session=${ouvertes[0].id}` }, t('Reprendre'))));
 
   const usesCups = ctx.recipe_versions.some((v) => recipes.some((r) => r.id === v.recipe_id) && (v.ingredients || []).some((i) => ['cup', 'tbsp', 'tsp', 'fl_oz'].includes(i.unit_id)));

@@ -332,12 +332,23 @@ export async function runAjouterTests({ eq, ok }) {
       eq(panneau.querySelector('h2').textContent, 'Le livre est dans ta bibliothèque. Et maintenant ?', 'fiche : la première ligne du panneau dit où on est');
       eq([...panneau.querySelectorAll('button.carte h3')].map((h) => h.textContent), ['Photographier l’index ou la table des matières', 'Photographier ou importer des pages de recettes', 'Plus tard'], 'fiche : les trois cartes de la spec § 8');
 
+      // R-UX-10 : un seul fait, une seule condition — c'est le MODÈLE qui décide. « ?nouveau » sans valeur
+      // n'affiche pas le panneau : l'arrivée est donc une ouverture ordinaire, et elle se journalise comme telle.
+      const avantVide = await compterActivites();
+      const vide = await renderBook({ id: 'e1' }, { nouveau: '' }, ctxDe());
+      eq((await compterActivites()) - avantVide, 1, 'fiche : « ?nouveau » sans valeur n’est pas une arrivée après création — l’ouverture se journalise comme les autres (R-UX-10)');
+      eq(vide.querySelector('.accueil-livre'), null, 'fiche : … et aucun panneau n’est posé — une seule décision pour les deux');
+
       const avecSeance = await renderBook({ id: 'e1' }, {}, ctxDe({ scan_sessions: [
         { id: 's1', status: 'open', edition_id: 'e1', page_ids: ['p1', 'p2'] },
         { id: 's2', status: 'open', edition_id: 'autre', page_ids: ['p3'] },
         { id: 's3', status: 'done', edition_id: 'e1', page_ids: ['p4'] }] }));
       ok(avecSeance.textContent.includes('Séance en cours : 2 page(s)'), 'fiche : une séance ouverte de CE livre est rappelée avec son compte de pages');
       eq([...avecSeance.querySelectorAll('a')].filter((a) => a.textContent === 'Reprendre').map((a) => a.getAttribute('href')), ['#/import?session=s1'], 'fiche : « Reprendre » mène à la séance de CE livre, et à elle seule');
+      // Une ligne scan_sessions venue d'ailleurs peut arriver sans page_ids (I-G : le distant est borné, pas
+      // supposé bien formé) : la fiche entière ne doit pas blanchir pour autant.
+      const sansPages = await renderBook({ id: 'e1' }, {}, ctxDe({ scan_sessions: [{ id: 's9', status: 'open', edition_id: 'e1' }] }));
+      ok(sansPages.textContent.includes('Séance en cours : 0 page(s)'), 'fiche : une séance sans page_ids compte 0 page au lieu de faire tomber tout le rendu');
 
       // R-UX-8 : le champ « Cuisines » n'est pas un <label> — sinon un clic sur le mot « Cuisines » activerait
       // la première puce. Et un clic sur une puce ne doit re-rendre QUE le conteneur des puces.
