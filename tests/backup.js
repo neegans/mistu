@@ -31,35 +31,42 @@ export async function withDatabase(test, stores = STORES, version = DB_VERSION) 
   }
 }
 
+// Chaque fiche d'un magasin synchronisé porte un `updated_at`, comme toute fiche réellement écrite par
+// repo.save() : sans lui, la restauration lui en poserait un (complétude R-L3-10) et les comparaisons strictes
+// ci-dessous opposeraient une fiche horodatée à une fiche qui ne l'était pas. Les réglages n'en portent pas :
+// « settings » n'est pas un magasin synchronisé.
+const DATE_FIXTURE = '2026-09-01T00:00:00.000Z';
+
 async function fixture() {
   const data = Object.fromEntries(STORE_NAMES.map((name) => [name, []]));
   const bytes = new Uint8Array([0, 255, 1, 128, 13, 10, 42, 0]);
   const text = enc.encode('Page originale : crème, café et œufs.\n');
   for (const [value, mime] of [[bytes, 'application/octet-stream'], [text, 'text/plain']]) {
-    data.files.push({ sha256: await sha256Hex(value), mime, size: value.length, blob: new Blob([value], { type: mime }) });
+    data.files.push({ sha256: await sha256Hex(value), mime, size: value.length, blob: new Blob([value], { type: mime }), updated_at: DATE_FIXTURE });
   }
-  data.books = [{ id: 'b_test', title: 'Cuisine été — original', author: 'Auteur test' }];
-  data.unit_definitions = [{ id: 'g', dimension: 'mass', factor: 1 }];
-  data.unit_conventions = [{ id: 'uc_test', revision: 1, values: { cup_ml: 250 } }];
-  data.ingredients = [{ id: 'ing_test', labels: { fr: { label: 'carotte', aliases: [] }, en: { label: 'carrot', aliases: [] } }, contains: null }];
-  data.book_editions = [{ id: 'ed_test', book_id: 'b_test', language: 'fr', unit_convention_id: 'uc_test' }];
-  data.scan_sessions = [{ id: 'ss_test', edition_id: 'ed_test', status: 'done', page_ids: ['pg_test'], document_ids: ['doc_test', 'doc_text'], recipe_ids: ['rc_test'] }];
+  data.books = [{ id: 'b_test', title: 'Cuisine été — original', author: 'Auteur test', updated_at: DATE_FIXTURE }];
+  data.unit_definitions = [{ id: 'g', dimension: 'mass', factor: 1, updated_at: DATE_FIXTURE }];
+  data.unit_conventions = [{ id: 'uc_test', revision: 1, values: { cup_ml: 250 }, updated_at: DATE_FIXTURE }];
+  data.ingredients = [{ id: 'ing_test', labels: { fr: { label: 'carotte', aliases: [] }, en: { label: 'carrot', aliases: [] } }, contains: null, updated_at: DATE_FIXTURE }];
+  data.book_editions = [{ id: 'ed_test', book_id: 'b_test', language: 'fr', unit_convention_id: 'uc_test', updated_at: DATE_FIXTURE }];
+  data.scan_sessions = [{ id: 'ss_test', edition_id: 'ed_test', status: 'done', page_ids: ['pg_test'], document_ids: ['doc_test', 'doc_text'], recipe_ids: ['rc_test'], updated_at: DATE_FIXTURE }];
   data.source_documents = data.files.map((f, i) => ({
     id: i ? 'doc_text' : 'doc_test', edition_id: 'ed_test', scan_session_id: 'ss_test',
-    source_type: 'photo', sha256: f.sha256, blob_path: `files/${f.sha256}`, size: f.size, mime: f.mime,
+    source_type: 'photo', sha256: f.sha256, blob_path: `files/${f.sha256}`, size: f.size, mime: f.mime, updated_at: DATE_FIXTURE,
   }));
-  data.source_pages = [{ id: 'pg_test', document_id: 'doc_test', edition_id: 'ed_test', sha256: data.files[0].sha256, printed_page: 12, position: 1 }];
+  data.source_pages = [{ id: 'pg_test', document_id: 'doc_test', edition_id: 'ed_test', sha256: data.files[0].sha256, printed_page: 12, position: 1, updated_at: DATE_FIXTURE }];
   data.recipes = [{
     id: 'rc_test', edition_id: 'ed_test', original_title: 'Carottes', availability: 'available',
-    current_version_id: 'rv_test', source_page_ids: ['pg_test'], ingredient_ids: ['ing_test'],
+    current_version_id: 'rv_test', source_page_ids: ['pg_test'], ingredient_ids: ['ing_test'], updated_at: DATE_FIXTURE,
   }];
   data.recipe_versions = [{
     id: 'rv_test', recipe_id: 'rc_test', parent_version_id: null, kind: 'extraction', servings: 2,
     ingredients: [{ id: 'ri_test', ingredient_id: 'ing_test', unit_id: 'g', source_text: '125 g de carottes', quantity: { value: 125, raw: '125' } }],
     steps: [{ id: 'st_test', position: 1, text: 'Couper les carottes.' }],
     provenance: { source_page_ids: ['pg_test'], source_document_id: 'doc_test', edition_id: 'ed_test', generated_by: 'manual' },
+    updated_at: DATE_FIXTURE,
   }];
-  data.rediscovery_prefs = [{ edition_id: 'ed_test', hidden: false }];
+  data.rediscovery_prefs = [{ edition_id: 'ed_test', hidden: false, updated_at: DATE_FIXTURE }];
   data.settings = [{ key: 'ui_locale', value: 'fr' }, { key: 'llm', value: { api_key: SECRET, provider: 'none' } }];
   return data;
 }

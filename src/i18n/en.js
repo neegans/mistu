@@ -145,6 +145,13 @@ export const EN = {
   "Cette version n’a pas été reçue en entier : le conflit reste.": "This version was not received in full: the conflict stays.",
   "{n} éléments ne sont pas encore envoyés (dont {m} en quarantaine : « Abandonner » d’abord).": "{n} items have not been sent yet ({m} of them in quarantine: give up on those first).",
   "1 élément n’est pas encore envoyé, et il est en quarantaine : « Abandonner » d’abord.": "1 item has not been sent yet, and it is in quarantine: give up on it first.",
+  // Câblage L3 : pastille de la barre du haut, conflit de version dans la vue recette, bilan de restauration.
+  "1 non envoyé": "1 not sent",
+  "{n} non envoyés": "{n} not sent",
+  "Une autre version a été créée ailleurs — les deux versions sont conservées.": "Another version was created elsewhere — both versions are kept.",
+  "Trancher dans Réglages": "Settle it in Settings",
+  "1 fiche sera renvoyée au serveur.": "1 record will be sent to the server again.",
+  "{n} fiches seront renvoyées au serveur.": "{n} records will be sent to the server again.",
   // Porte d'entrée : écran d'accueil du premier lancement (spec § 11, R34).
   "Kwe.": "Kwe.",
   "Ta bibliothèque de recettes, sur tous tes appareils.": "Your recipe library, on all your devices.",

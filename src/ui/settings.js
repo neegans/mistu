@@ -8,7 +8,8 @@ import { logError } from '../core/log.js';
 import { reprendreEnvoi, retirerEnvoi } from '../sync/outbox.js';
 import { garderIci, garderAilleurs } from '../sync/conflits.js';
 import { retirerMarqueur } from '../sync/backfill.js';
-import { createArchive, inspectArchive, applyArchive, verifyRestored } from '../domain/backup.js';
+import { createArchive, inspectArchive, applyArchive, verifyRestored, compterFichesSynchronisees } from '../domain/backup.js';
+import { syncNow } from '../sync/clock.js';
 import { toJsonLd, toPaprikaYaml, toReadableSite } from '../domain/exporters.js';
 import { createZip } from '../core/zip.js';
 import { extFor } from '../domain/backup.js';
@@ -20,6 +21,11 @@ import { invalidate, setSyncState, getSyncState, relireReglages, SYNC_ROUTE_KEY 
 
 // Évite deux opérations d’archive concurrentes, même après un changement d’écran.
 let archiveOperation = false;
+
+// Lu par la coquille (app.js) : une opération d’archive porte un état qui ne vit QUE dans le DOM — contrôles
+// désactivés, bilan de restauration, bouton « Recharger l’application ». Un rendu demandé par le moteur au milieu
+// reconstruirait la page et emporterait tout cela, pendant que l’archive écrit (R-L3-16).
+export const archiveEnCours = () => archiveOperation;
 
 // Archive créée pendant cette session de navigation : seule preuve acceptée avant de changer de compte (spec § 4.1).
 // Posée par le bouton d’archive de cette page, jamais déduite d’un réglage ni d’une date.
@@ -214,6 +220,10 @@ export async function renderSettings(params, query, ctx) {
     if (insp.summary) box.append(el('div', { class: 'chips' },
       ...Object.entries(insp.summary.counts).filter(([, count]) => count).map(([name, count]) => el('span', { class: 'chip neutral' }, name + ' : ' + count)),
       el('span', { class: 'chip neutral' }, t('fichiers vérifiés') + ' : ' + insp.summary.files_ok)));
+    // Avec un compte, une restauration n’est pas seulement locale : tout ce qu’elle écrit repart au serveur, donc
+    // sur les autres appareils. La personne doit le savoir AVANT le geste, et avec un nombre, pas une allusion.
+    const renvoi = getSyncState().user ? messageRenvoi(compterFichesSynchronisees(insp)) : null;
+    if (renvoi) box.append(el('div', { class: 'status info' }, renvoi));
     for (const warning of insp.warnings) box.append(el('div', { class: 'status warn' }, warning));
     if (!insp.ok) {
       box.append(el('div', { class: 'status danger' }, t('Archive refusée : rien n’a été modifié. Aucune réparation automatique.')),
@@ -240,7 +250,10 @@ export async function renderSettings(params, query, ctx) {
           : t('Fusionner l’archive par identifiants (aucun doublon, les fiches existantes sont écrasées par celles de l’archive) ?');
         if (!(await confirmDialog(message, { danger: mode === 'replace', okLabel: t('Restaurer') }))) return;
         result.replaceChildren(el('p', { class: 'muted' }, t('Restauration…')));
-        await applyArchive(repo.db, insp, { mode });
+        // Renvoi voulu (spec § 5.2) : connectée, une fusion réhorodate ce qu’elle écrit, sinon le serveur garderait
+        // sa version (I7). Le compte est relu AU MOMENT du geste — la session a pu changer depuis le rendu.
+        const reHorodatage = mode === 'merge' && !!getSyncState().user;
+        await applyArchive(repo.db, insp, { mode, horodater: reHorodatage ? syncNow : null });
         committed = true;
         appliedOnce = true;
         controls.remove();
@@ -251,7 +264,7 @@ export async function renderSettings(params, query, ctx) {
         // La vérification peut durer : bloquer immédiatement les commandes fondées sur l’ancien contexte.
         for (const control of root.querySelectorAll('button, input, select, textarea')) control.disabled = true;
         result.replaceChildren(el('p', { class: 'muted' }, t('Données restaurées. Vérification en cours…')));
-        const check = await verifyRestored(repo.db, insp, { mode });
+        const check = await verifyRestored(repo.db, insp, { mode, horodate: reHorodatage });
         result.replaceChildren(check.ok
           ? el('div', { class: 'status ok' }, t('Restauration vérifiée : contenu des fiches, relations et fichiers contrôlés.'))
           : el('div', { class: 'status danger' }, t('La restauration a été écrite, mais des écarts subsistent. Conserve l’archive et ce bilan.')));
@@ -299,6 +312,25 @@ const messageRemplacementRefuse = (n) => (n === 1
   ? t('1 élément est en attente d’envoi. Restaure en fusion, ou efface d’abord les données de cet appareil.')
   : t('{n} éléments sont en attente d’envoi. Restaure en fusion, ou efface d’abord les données de cet appareil.', { n }));
 
+// Ce qu’une restauration va renvoyer au serveur (spec § 5.2) : deux chaînes, jamais un pluriel calculé sur une
+// chaîne traduite. Rien du tout à zéro — une archive sans fiche synchronisée ne promet aucun envoi.
+export const messageRenvoi = (n) => {
+  if (!(n > 0)) return null;
+  return n === 1 ? t('1 fiche sera renvoyée au serveur.') : t('{n} fiches seront renvoyées au serveur.', { n });
+};
+
+// Arrêt du moteur de synchronisation, avant les deux gestes qui ferment la session (spec § 4.1). Sans cela, ses
+// déclencheurs — retour du réseau, retour au premier plan, écriture — continueraient d’appeler le serveur avec un
+// jeton qui n’existe plus, et l’appareil se retrouverait avec un moteur sans compte. Il est arrêté PUIS retiré de
+// l’état : la passe en vol est attendue avant que la base puisse être vidée. Dépendances injectées pour être éprouvé.
+export async function arreterMoteur({ obtenir = () => getSyncState().moteur, poser = setSyncState } = {}) {
+  const moteur = obtenir();
+  if (!moteur) return false;
+  await moteur.arreter();
+  poser({ moteur: null });
+  return true;
+}
+
 // Même règle pour la perte annoncée avant « Changer de compte » : zéro et un prennent le singulier en français.
 const messagePerte = (n) => (n > 1
   ? t('{n} envois en attente seront perdus — ils sont dans l’archive.', { n })
@@ -345,7 +377,9 @@ export async function restaurerArchive({ mode, pending, toast: dire, appliquer }
 // ce qui est local est effacé. Aucune donnée n’est envoyée nulle part : la file en attente est perdue, dite perdue.
 // `archiveCreated` est une lecture, pas une valeur : si elle lève (stockage de session inaccessible), on refuse —
 // échec fermé, cohérent avec le reste du lot.
-export async function changerDeCompte({ confirm, toast: dire, pending, archiveCreated, clearDevice, signOut = null, reload }) {
+// `arreterSync` est appelé juste AVANT l’effacement, et seulement si le geste est allé au bout : un refus (archive
+// manquante, confirmation annulée) ne doit pas laisser la synchronisation arrêtée sur un appareil qui reste en place.
+export async function changerDeCompte({ confirm, toast: dire, pending, archiveCreated, clearDevice, signOut = null, reload, arreterSync = arreterMoteur }) {
   let archive = null;
   try { archive = archiveCreated(); }
   catch { dire(t('Le stockage de session est inaccessible : ce geste n’est pas possible ici.')); return false; }
@@ -353,6 +387,7 @@ export async function changerDeCompte({ confirm, toast: dire, pending, archiveCr
   if (!(await confirm(t('Changer de compte sur cet appareil ? Toutes les données de cet appareil seront effacées.'), { danger: true, okLabel: t('Continuer') }))) return false;
   const enAttente = await pending(); // compté au moment du geste : la file a pu bouger depuis le rendu
   if (!(await confirm(messagePerte(enAttente), { danger: true, okLabel: t('Changer de compte') }))) return false;
+  await arreterSync();
   await clearDevice({ signOut });
   reload();
   return true;
@@ -529,6 +564,10 @@ function syncSection(state, auth, settings) {
   const gestes = {
     signIn: () => demarrerConnexion(auth),
     signOut: async () => {
+      // Le moteur est arrêté AVANT de fermer la session : un déclencheur qui partirait entre les deux appellerait
+      // le serveur avec un jeton qui n’existe plus. Si la déconnexion échoue, il reste arrêté jusqu’au prochain
+      // changement de session ou au prochain lancement — rien n’est affirmé de faux, et rien n’est tenté à l’aveugle.
+      await arreterMoteur();
       const essai = await auth?.signOut();
       if (essai?.error) { toast(t('La déconnexion n’a pas abouti.')); return; }
       setSyncState({ user: null, guard: null }); // la file d’envoi et les données restent intactes (spec § 4.1)

@@ -2,7 +2,8 @@
 // fichiers sources avec empreinte SHA-256. Validation en mémoire avant toute écriture ; réimport idempotent (upsert par identifiant).
 import { createZip, readZip, textOf } from '../core/zip.js';
 import { sha256Hex } from '../core/hash.js';
-import { ARCHIVE_FORMAT, ARCHIVE_FORMAT_VERSION, SUPPORTED_ARCHIVE_VERSIONS, ARCHIVE_DATA_STORES, SECRET_SETTING_KEYS, RELATIONS, STORES, APP_VERSION, SYNC_INTERNAL_STORES } from '../model/schema.js';
+import { ARCHIVE_FORMAT, ARCHIVE_FORMAT_VERSION, SUPPORTED_ARCHIVE_VERSIONS, ARCHIVE_DATA_STORES, SECRET_SETTING_KEYS, RELATIONS, STORES, APP_VERSION, SYNC_INTERNAL_STORES, SYNC_STORES } from '../model/schema.js';
+import { syncNow } from '../sync/clock.js';
 
 const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf', 'application/epub+zip': 'epub', 'text/plain': 'txt' };
 export const extFor = (mime) => MIME_EXT[mime] || 'bin';
@@ -229,8 +230,46 @@ function restoredStores(inspection) {
   ]));
 }
 
+// Fiches d'une archive qui relèvent de la synchronisation (spec § 5.2) : celles-là repartiront au serveur après
+// une restauration, et c'est ce nombre que le bilan annonce avant le geste. Les réglages n'en sont pas ; les
+// fichiers sources comptent pour une fiche chacun (ils voyagent dans le manifeste, pas dans data/*.json).
+// Pure : aucune lecture de base, aucun DOM.
+export function compterFichesSynchronisees(inspection) {
+  const stores = inspection?.payload?.stores;
+  if (!stores) return 0;
+  let total = 0;
+  for (const name of SYNC_STORES) {
+    if (name === 'files') total += inspection.payload.files?.length || 0;
+    else total += stores[name]?.length || 0;
+  }
+  return total;
+}
+
+// Horodatage des fiches restaurées (spec § 5.2, § 5.3) — deux règles distinctes, sur les magasins synchronisés :
+//  1. COMPLÉTUDE (R-L3-10), dans tous les modes, avec ou sans compte : une fiche sans `updated_at` en reçoit un.
+//     Les fiches d'avant ce lot et toutes les lignes « files » (dont les métadonnées sont reconstruites ici) en
+//     sont dépourvues ; sync_push les rejetterait pour le motif « updated_at » et elles partiraient en quarantaine.
+//  2. RENVOI VOULU : en fusion avec un compte connecté, `horodater` est fourni et TOUTES les fiches en reçoivent un
+//     neuf. Sans cela le serveur garderait sa version (I7 : updated_at strictement supérieur gagne) et la
+//     restauration ne se verrait sur aucun autre appareil.
+// Rend le nombre de fiches réellement réhorodatées (hors complétude), pour le bilan.
+function horodaterFiches(batch, { mode, horodater }) {
+  const renvoi = mode === 'merge' && typeof horodater === 'function';
+  let n = 0;
+  for (const name of SYNC_STORES) {
+    const rows = batch[name];
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows) {
+      if (!record(row)) continue;
+      if (renvoi) { row.updated_at = horodater(); n += 1; }
+      else if (!row.updated_at) row.updated_at = syncNow();
+    }
+  }
+  return n;
+}
+
 // Tout préparer AVANT la transaction. Effacement et écritures sont validés ou annulés ensemble.
-export async function applyArchive(db, inspection, { mode = 'merge' } = {}) {
+export async function applyArchive(db, inspection, { mode = 'merge', horodater = null } = {}) {
   requireInspection(inspection, mode);
   const batch = structuredClone(restoredStores(inspection));
   const existingFiles = mode === 'merge' ? new Map((await db.getSnapshot(['files'])).files.map((row) => [row.sha256, row])) : new Map();
@@ -241,6 +280,7 @@ export async function applyArchive(db, inspection, { mode = 'merge' } = {}) {
     const existing = existingFiles.get(file.sha256);
     batch.files.push({ ...existing, sha256: file.sha256, blob, mime: file.mime, size: file.size, created_at: existing?.created_at || new Date().toISOString() });
   }
+  horodaterFiches(batch, { mode, horodater });
   await db.putBatch(batch, { clearStores: mode === 'replace' ? Object.keys(STORES).filter((s) => !SYNC_INTERNAL_STORES.includes(s)) : [] });
   return Object.fromEntries(Object.entries(batch).map(([name, rows]) => [name, rows.length]));
 }
@@ -252,10 +292,21 @@ function canonical(value) {
   return JSON.stringify(value);
 }
 
+// Comparaison sans l’heure de modification : une fiche réhorodatée par la restauration elle-même n’est pas une
+// fiche différente. Tout le reste du contenu est comparé strictement (quantités, étapes, relations).
+function canonicalSansHeure(value) {
+  const { updated_at: _heure, ...reste } = value;
+  return canonical(reste);
+}
+
 // Vérifie un instantané cohérent après écriture : contenu complet, clés, relations et fichiers.
 // En fusion, les autres fiches sont conservées ; en remplacement, aucun surplus n’est attendu.
-export async function verifyRestored(db, inspection, { mode = 'merge' } = {}) {
+// `horodate` : la restauration a réhorodaté les magasins synchronisés (fusion avec un compte, cf. applyArchive).
+// La SEULE différence tolérée est alors l’heure de modification, et seulement sur un magasin synchronisé — sans
+// cette tolérance, chaque restauration d’un compte connecté serait annoncée comme une restauration en écart.
+export async function verifyRestored(db, inspection, { mode = 'merge', horodate = false } = {}) {
   requireInspection(inspection, mode);
+  const synchronises = new Set(SYNC_STORES);
   const diffs = [];
   const snapshot = await db.getSnapshot(Object.keys(STORES));
   const expected = restoredStores(inspection);
@@ -268,8 +319,13 @@ export async function verifyRestored(db, inspection, { mode = 'merge' } = {}) {
     if (mode === 'replace' && rows.length !== expected[name].length) diffs.push(name + ' : décompte différent après restauration');
     for (const row of expected[name]) {
       const current = byId.get(row[key]);
-      if (!current) diffs.push(name + ' : ' + row[key] + ' absent après restauration');
-      else if (canonical(current) !== canonical(row)) diffs.push(name + ' : contenu différent pour ' + row[key]);
+      if (!current) { diffs.push(name + ' : ' + row[key] + ' absent après restauration'); continue; }
+      if (canonical(current) === canonical(row)) continue;
+      // Une heure posée par la restauration (renvoi voulu, ou complétude d’une fiche d’avant le lot) est la seule
+      // différence admise, et seulement là où elle a pu être posée : un magasin synchronisé, une heure présente.
+      const heurePosee = synchronises.has(name) && (horodate || !row.updated_at) && !!current.updated_at;
+      if (heurePosee && canonicalSansHeure(current) === canonicalSansHeure(row)) continue;
+      diffs.push(name + ' : contenu différent pour ' + row[key]);
     }
   }
   const filesBySha = new Map(snapshot.files.map((row) => [row.sha256, row]));
