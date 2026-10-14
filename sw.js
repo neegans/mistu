@@ -1,7 +1,7 @@
 // Service worker : coquille applicative en cache pour consultation hors connexion des recettes déjà chargées.
 // Les nouvelles demandes IA et les recherches de métadonnées ne fonctionnent pas hors connexion (spec §15).
 importScripts('./sw-rules.js');
-const VERSION = 'cuisine-os-v0.4.0-3';
+const VERSION = 'cuisine-os-v0.4.0-4';
 // Tous les modules de production sont inclus ; tests/ reste chargé à la demande.
 // La complétude de cette liste est vérifiée par tests/sync.js (graphe d'imports depuis src/app.js) : un chemin
 // manquant ferait répondre 404 à cache.addAll et l'installation entière échouerait.
@@ -17,7 +17,7 @@ const SHELL = [
   './src/domain/backup.js', './src/domain/diet.js', './src/domain/dishes.js', './src/domain/exporters.js', './src/domain/grocery.js', './src/domain/lines.js', './src/domain/llm.js',
   './src/domain/pairing.js', './src/domain/quantity.js', './src/domain/rediscover.js', './src/domain/scaling.js', './src/domain/search.js', './src/domain/timers.js', './src/domain/units.js',
   './src/ui/add.js', './src/ui/book.js', './src/ui/components.js', './src/ui/cook.js', './src/ui/dish.js', './src/ui/grocery.js', './src/ui/home.js', './src/ui/import.js', './src/ui/kitchen.js',
-  './src/ui/library.js', './src/ui/meals.js', './src/ui/porte-entree.js', './src/ui/puces.js', './src/ui/recipe-edit.js', './src/ui/recipe.js', './src/ui/search.js', './src/ui/settings.js', './src/ui/state.js',
+  './src/ui/library.js', './src/ui/livre-ajout.js', './src/ui/meals.js', './src/ui/porte-entree.js', './src/ui/puces.js', './src/ui/recipe-edit.js', './src/ui/recipe.js', './src/ui/search.js', './src/ui/settings.js', './src/ui/state.js',
 ];
 
 self.addEventListener('install', (event) => {

@@ -26,6 +26,7 @@ import { renderKitchen } from './ui/kitchen.js';
 import { renderSettings, demarrerConnexion, archiveEnCours } from './ui/settings.js';
 import { renderShoppingList } from './ui/grocery.js';
 import { renderAdd } from './ui/add.js';
+import { renderLivreAjoutRoute } from './ui/livre-ajout.js';
 import { porteEntreeModel, renderPorteEntree } from './ui/porte-entree.js';
 
 const NAV = [
@@ -98,6 +99,7 @@ function registerRoutes() {
   route('/kitchen', renderKitchen);
   route('/settings', renderSettings);
   route('/lists/:id', renderShoppingList);
+  route('/add/livre', renderLivreAjoutRoute);
   route('/add', renderAdd);
   setNotFound(async () => el('div', { class: 'card' }, el('h2', null, t('Page introuvable')), el('a', { class: 'btn', href: '#/' }, t('Retour à l’accueil'))));
 }
