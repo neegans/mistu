@@ -22,13 +22,32 @@ export async function withDatabase(test, stores = STORES, version = DB_VERSION) 
     return await test(db);
   } finally {
     if (db.idb) { db.idb.close(); db.idb = null; }
-    await new Promise((resolve, reject) => {
-      const request = indexedDB.deleteDatabase(name);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-      request.onblocked = () => reject(new Error(`Nettoyage de la base temporaire bloqué : ${name}`));
-    });
+    await supprimerBase(name);
   }
+}
+
+// Borne d'attente du nettoyage. Généreuse : une connexion gênante se ferme en quelques millisecondes dès qu'elle
+// reçoit `versionchange` ; dix secondes ne se dépassent que si quelque chose garde VRAIMENT la base ouverte.
+const DELAI_NETTOYAGE_MS = 10000;
+
+// R-L3-17 : `onblocked` d'un `deleteDatabase` est INFORMATIF, jamais terminal — la requête reste en attente et
+// aboutit dès que la dernière connexion gênante se ferme (ce même `deleteDatabase` leur envoie `versionchange`, et
+// `src/core/db.js` referme la sienne sur cet événement). Le traiter comme un échec faisait échouer la suite au
+// hasard, toujours loin de son vrai coupable : une lecture flottante (un `relireReglages()` lancé par le bus, par
+// exemple) rouvre la base dès que `idb` est nul, et la connexion qu'elle crée bloque le nettoyage le temps de sa
+// transaction. On attend donc `onsuccess`, et on ne rejette qu'au dépassement de la borne — le signal reste, nommé,
+// et il dit cette fois qu'une connexion ne s'est jamais fermée.
+export function supprimerBase(name, delaiMs = DELAI_NETTOYAGE_MS) {
+  return new Promise((resolve, reject) => {
+    let bloque = false;
+    const request = indexedDB.deleteDatabase(name);
+    const minuterie = setTimeout(() => {
+      reject(new Error(`Nettoyage de la base temporaire ${bloque ? 'bloqué' : 'sans réponse'} après ${delaiMs} ms : ${name}`));
+    }, delaiMs);
+    request.onsuccess = () => { clearTimeout(minuterie); resolve(); };
+    request.onerror = () => { clearTimeout(minuterie); reject(request.error || new Error(`Nettoyage de la base temporaire refusé : ${name}`)); };
+    request.onblocked = () => { bloque = true; }; // informatif : une connexion est encore ouverte, elle va se fermer
+  });
 }
 
 // Chaque fiche d'un magasin synchronisé porte un `updated_at`, comme toute fiche réellement écrite par

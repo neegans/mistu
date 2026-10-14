@@ -1466,4 +1466,78 @@ export async function runSyncL3Tests({ eq, ok }) {
     });
     eq(refuse, [], 'ronde 1 : un effacement refusé (file non vide avec un compte) n’arrête pas le moteur');
   }
+
+  // --- R-L3-17 : le faux rouge intermittent du montage de tests ------------
+  // Diagnostiqué à la tâche 8 : « Nettoyage de la base temporaire bloqué : cuisine-os-backup-test-… », vu 3 fois
+  // en ~15 passages, toujours AVANT la section qui le subissait. Deux causes, les deux corrigées ici.
+  // 1) `withDatabase` traitait `deleteDatabase().onblocked` comme TERMINAL. En IndexedDB cet événement est
+  //    informatif : la requête reste en attente et aboutit dès que la dernière connexion gênante se ferme.
+  // 2) Une relecture de réglages lancée par le bus et que PERSONNE n'attend rouvrait la base jetable juste après
+  //    sa fermeture (`Database.open()` rouvre dès que `idb` est nul) — connexion gênante, nettoyage bloqué.
+  {
+    const { withDatabase } = await import('./backup.js');
+    const repoModule = await import('../src/model/repo.js');
+    const { emit } = await import('../src/core/bus.js');
+
+    // 1) Un blocage RÉEL, provoqué sans détour : une seconde connexion à la base jetable qui ne se ferme qu'après
+    //    la demande de suppression. `onblocked` arrive, puis `onsuccess` : le nettoyage doit aboutir, pas rejeter.
+    let nom = null;
+    let erreur = null;
+    try {
+      await withDatabase(async (temp) => {
+        nom = temp.name;
+        const genante = await new Promise((resolve, reject) => {
+          const r = indexedDB.open(temp.name, temp.version);
+          r.onsuccess = () => resolve(r.result);
+          r.onerror = () => reject(r.error);
+        });
+        // Exactement ce que fait `src/core/db.js` sur une connexion qu'il possède, mais retardé : c'est ce délai
+        // qui rendait le faux rouge intermittent.
+        genante.onversionchange = () => setTimeout(() => genante.close(), 150);
+      });
+    } catch (e) { erreur = e?.message || String(e); }
+    eq(erreur, null, 'R-L3-17 : une connexion gênante qui se ferme tard ne fait plus échouer le nettoyage (onblocked est informatif)');
+    ok(nom && !(await indexedDB.databases()).some((d) => d.name === nom), 'R-L3-17 : … et la base jetable est bel et bien supprimée');
+
+    // 2) La relecture lancée par le bus ne lit QUE si une base est ouverte. Base fictive : aucune vraie base n'est
+    //    touchée, et la règle se mesure sur l'appel lui-même.
+    const etat = await import('../src/ui/state.js');
+    ok(typeof etat.relectureEnCours === 'function', 'R-L3-17 : la relecture lancée par le bus est observable (relectureEnCours)');
+    const origine = repoModule.db;
+    try {
+      const appels = [];
+      const base = (ouverte) => ({ idb: ouverte ? {} : null, getAll: async (store) => { appels.push(store); return []; } });
+      repoModule.bindDatabase(base(false));
+      emit('settings', { key: 'device_name', value: 'base fermée' });
+      await etat.relectureEnCours();
+      eq(appels, [], 'R-L3-17 : aucune base ouverte → le bus ne lit rien (une lecture rouvrirait la base)');
+      repoModule.bindDatabase(base(true));
+      emit('settings', { key: 'device_name', value: 'base ouverte' });
+      await etat.relectureEnCours();
+      eq(appels, ['settings'], 'R-L3-17 : base ouverte → les réglages sont relus, comme en production');
+      emit('change', { store: 'settings' });
+      await etat.relectureEnCours();
+      eq(appels, ['settings', 'settings'], 'R-L3-17 : … et une écriture annoncée sur le magasin settings les relit aussi');
+      emit('change', { store: 'books' });
+      await etat.relectureEnCours();
+      eq(appels, ['settings', 'settings'], 'R-L3-17 : une écriture qui ne touche pas les réglages ne les relit pas');
+    } finally { repoModule.bindDatabase(origine); }
+
+    // 3) Le scénario réel du faux rouge, de bout en bout : une écriture de réglages annoncée juste avant le
+    //    nettoyage, personne n'attend la relecture. Ni blocage, ni base fantôme ressuscitée après la suppression.
+    let nomReel = null;
+    let erreurReelle = null;
+    const avant = repoModule.db;
+    try {
+      await withDatabase(async (temp) => {
+        nomReel = temp.name;
+        repoModule.bindDatabase(temp);
+        await temp.mutate({ puts: { settings: [{ key: 'device_name', value: 'base jetable' }] }, origin: 'device' });
+        emit('settings', { key: 'device_name', value: 'base jetable' }); // relecture flottante : rien ne l'attend
+      });
+    } catch (e) { erreurReelle = e?.message || String(e); } finally { repoModule.bindDatabase(avant); }
+    eq(erreurReelle, null, 'R-L3-17 : une écriture de réglages annoncée juste avant le nettoyage ne le bloque plus');
+    await etat.relectureEnCours();
+    ok(nomReel && !(await indexedDB.databases()).some((d) => d.name === nomReel), 'R-L3-17 : … et la base jetable n’est pas ressuscitée après sa suppression');
+  }
 }

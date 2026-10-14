@@ -186,9 +186,26 @@ export async function relireReglages() {
 
 export const isActivitySynced = () => reglages.sync_activity === true;
 
+// Relecture demandée par le BUS (par opposition aux appels explicites, que leur appelant attend) : différée d'un
+// tour de boucle, puis abandonnée si plus aucune base n'est ouverte. Raison (R-L3-17) : `Database.open()` rouvre
+// dès que `idb` est nul, et une relecture que personne n'attend rouvrait la base jetable d'un test juste après sa
+// fermeture — la connexion ainsi créée bloquait le nettoyage, et la suite échouait au hasard, toujours loin de son
+// vrai coupable. En production la base de l'app est ouverte au démarrage et ne se referme pas : les réglages sont
+// bel et bien relus sur `settings` comme sur `change`, un tour de boucle plus tard.
+// Les relectures sont enchaînées (jamais deux lectures concurrentes) et la chaîne est observable : un test attend
+// `relectureEnCours()` au lieu de deviner un délai.
+let relecture = Promise.resolve();
+export const relectureEnCours = () => relecture;
+
+function demanderRelecture() {
+  relecture = relecture
+    .then(() => new Promise((resolve) => setTimeout(resolve, 0)))
+    .then(() => (repo.db?.idb ? relireReglages() : undefined));
+}
+
 // Un réglage touché nomme sa clé ; une écriture annonce son magasin (`*` = tout). Dans les deux cas on relit.
-on('settings', () => { relireReglages(); });
-on('change', ({ store } = {}) => { if (!store || store === 'settings' || store === '*') relireReglages(); });
+on('settings', () => { demanderRelecture(); });
+on('change', ({ store } = {}) => { if (!store || store === 'settings' || store === '*') demanderRelecture(); });
 
 export async function getData(force = false) {
   if (cache && !force) return cache;
