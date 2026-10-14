@@ -26,11 +26,13 @@ export function renderGrille(model, gestes = {}) {
     ...model.cartes.filter((c) => typeof gestes[c.action] === 'function').map((c) => carte(c.ico, c.titre, c.sousTitre, () => gestes[c.action]())));
 }
 
-// livres : [{ edition, book, activite }] ; editionImposee : id connu (I-F) ou null ; genre : 'recette' | 'index'.
+// livres : [{ edition, book, recence }] ; editionImposee : id connu (I-F) ou null ; genre : 'recette' | 'index'.
+// `recence` (C8) = l'instant de la DERNIÈRE activité du livre, pas un nombre d'ouvertures : compter rangeait en tête
+// un livre consulté dix fois l'an dernier, devant celui d'hier — or on scanne la suite de ce qu'on vient d'ouvrir.
 export function selecteurScanModel({ livres = [], editionImposee = null, livreChoisi = '', genre = 'recette' } = {}) {
   const connu = editionImposee && livres.some((l) => l.edition.id === editionImposee) ? editionImposee : null; // S9
   const choisi = connu || livreChoisi || '';
-  const tries = [...livres].sort((a, b) => (b.activite || 0) - (a.activite || 0) || libelleLivre(a.edition, a.book).localeCompare(libelleLivre(b.edition, b.book)));
+  const tries = [...livres].sort((a, b) => (b.recence || 0) - (a.recence || 0) || libelleLivre(a.edition, a.book).localeCompare(libelleLivre(b.edition, b.book)));
   const options = [{ value: '', label: t('Recette indépendante (sans livre)') }, ...tries.map((l) => ({ value: l.edition.id, label: libelleLivre(l.edition, l.book) }))];
   const indexDisponible = !!choisi;
   return { options, livreChoisi: choisi, livreImpose: !!connu, genre: indexDisponible && genre === 'index' ? 'index' : 'recette', indexDisponible, messageIndex: indexDisponible ? null : t('Un index appartient à un livre : choisis-le d’abord.') };
@@ -66,9 +68,15 @@ export async function renderAdd(params, query, ctx) {
   const root = el('div', null, pageHeader(t('Ajouter')));
   const zone = el('div', null);
   root.append(zone);
-  const activite = new Map();
-  for (const a of ctx.library_activity || []) activite.set(a.edition_id, (activite.get(a.edition_id) || 0) + 1);
-  const livres = ctx.book_editions.map((edition) => ({ edition, book: ctx.booksById.get(edition.book_id), activite: activite.get(edition.id) || 0 }));
+  // C8 : la RÉCENCE, pas le nombre — l'instant de la dernière activité de chaque livre. Une date illisible (fiche
+  // venue d'ailleurs, I-G) ne compte pas plutôt que de valoir « 1970 ».
+  const recence = new Map();
+  for (const a of ctx.library_activity || []) {
+    const quand = Date.parse(a.occurred_at || '');
+    if (!Number.isFinite(quand)) continue;
+    if (quand > (recence.get(a.edition_id) || 0)) recence.set(a.edition_id, quand);
+  }
+  const livres = ctx.book_editions.map((edition) => ({ edition, book: ctx.booksById.get(edition.book_id), recence: recence.get(edition.id) || 0 }));
   const editionImposee = query.edition && ctx.editionsById.has(query.edition) ? query.edition : null; // S9
   const etat = { livreChoisi: editionImposee || '', genre: 'recette' };
   const lancer = async (accept, capture) => {
@@ -82,17 +90,17 @@ export async function renderAdd(params, query, ctx) {
     choisir: () => lancer(ACCEPT_FICHIERS, null),
     retour: () => dessinerGrille(),
   };
-  // ?edition connu (« Scanner cette recette ») : le MÊME sélecteur, le livre déjà fixé (select désactivé, genre
-  // « recette ») — « Photographier » est à une tape, sans écran de plus. Un seul chemin, donc aucune branche
-  // morte à côté de celle que les tests éprouvent (F14, R-UX-6).
   const dessinerSelecteur = () => zone.replaceChildren(renderSelecteurScan(selecteurScanModel({ livres, editionImposee, livreChoisi: etat.livreChoisi, genre: etat.genre }), gestesScan));
   const dessinerGrille = () => zone.replaceChildren(renderGrille(grilleModel(), {
     ajouterLivre: () => navigate('/add/livre'),
     pages: () => dessinerSelecteur(),
-    saisir: () => navigate('/recipes/new' + (editionImposee ? `?edition=${editionImposee}` : '')),
+    saisir: () => navigate('/recipes/new' + (editionImposee ? `?edition=${encodeURIComponent(editionImposee)}` : '')), // S9
     signet: () => navigate('/add/signet'),
     congelateur: () => navigate('/kitchen?tab=inventory&add=1'),
   }));
-  dessinerGrille();
+  // C5 / R-UX-16 : un ?edition connu arrive de « Scanner cette recette » — le livre est DÉJÀ décidé. L'écran ouvre
+  // donc directement le MÊME sélecteur, livre fixé (select désactivé, genre « recette ») : « Photographier » est à
+  // une tape, sans grille à traverser. « ← Retour » ramène à la grille, pour qui voulait autre chose.
+  if (editionImposee) dessinerSelecteur(); else dessinerGrille();
   return root;
 }
