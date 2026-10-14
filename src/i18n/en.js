@@ -42,7 +42,7 @@ export const EN = {
   'Index ou table des matières': 'Index or table of contents',
   'Photographier': 'Take photos',
   '← Retour': '← Back',
-  'Ajouter des pages à « {l} »': 'Add pages to “{l}”',
+  'Portions, date, recette source et méthode de réchauffage.': 'Portions, date, source recipe and reheating method.',
   'québécoise': 'Quebecois', 'autochtone': 'Indigenous', 'française': 'French', 'italienne': 'Italian', 'levantine': 'Levantine', 'marocaine': 'Moroccan', 'mexicaine': 'Mexican', 'indienne': 'Indian', 'chinoise': 'Chinese', 'japonaise': 'Japanese', 'thaïe': 'Thai', 'vietnamienne': 'Vietnamese', 'grecque': 'Greek', 'espagnole': 'Spanish', 'américaine': 'American',
   'Commencer à cuisiner': 'Start cooking', 'Liste d’épicerie': 'Grocery list', 'Autres recettes de ce plat': 'Other recipes for this dish', 'Rattacher à un plat': 'Attach to a dish', 'Créer ma version': 'Create my version', 'Corriger': 'Fix',
   'Portions': 'Servings', 'Unités': 'Units', 'Métrique': 'Metric', 'Langue de lecture': 'Reading language', 'Rapide': 'Quick', 'On se gâte': 'Treat', 'Meal prep': 'Meal prep',

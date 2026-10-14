@@ -2,7 +2,7 @@
 // où ? ». Le formulaire « Ajouter un livre » vit dans livre-ajout.js (#/add/livre), le signet dans signet.js (#/add/signet).
 import { el, pickFiles } from '../core/dom.js';
 import { t } from '../core/i18n.js';
-import { navigate, refresh } from '../core/router.js';
+import { navigate } from '../core/router.js';
 import { pageHeader, carte, libelleLivre, field, select } from './components.js';
 import { startScanSession } from './import.js';
 
@@ -73,17 +73,13 @@ export async function renderAdd(params, query, ctx) {
     choisir: () => lancer(ACCEPT_FICHIERS, null),
     retour: () => dessinerGrille(),
   };
+  // ?edition connu (« Scanner cette recette ») : le MÊME sélecteur, le livre déjà fixé (select désactivé, genre
+  // « recette ») — « Photographier » est à une tape, sans écran de plus. Un seul chemin, donc aucune branche
+  // morte à côté de celle que les tests éprouvent (F14, R-UX-6).
   const dessinerSelecteur = () => zone.replaceChildren(renderSelecteurScan(selecteurScanModel({ livres, editionImposee, livreChoisi: etat.livreChoisi, genre: etat.genre }), gestesScan));
-  // ?edition connu (« Scanner cette recette ») : la question est déjà répondue — les deux sources, directement (F14).
-  const dessinerImpose = () => zone.replaceChildren(el('section', { class: 'card stack' },
-    el('h2', null, t('Ajouter des pages à « {l} »', { l: libelleLivre(ctx.editionsById.get(editionImposee), ctx.booksById.get(ctx.editionsById.get(editionImposee)?.book_id)) })),
-    el('div', { class: 'row' },
-      el('button', { type: 'button', class: 'btn primary', onClick: gestesScan.photographier }, t('Photographier')),
-      el('button', { type: 'button', class: 'btn', onClick: gestesScan.choisir }, t('Choisir des photos ou un PDF')),
-      el('button', { type: 'button', class: 'btn link', onClick: () => dessinerGrille() }, t('← Retour')))));
   const dessinerGrille = () => zone.replaceChildren(renderGrille(grilleModel(), {
     ajouterLivre: () => navigate('/add/livre'),
-    pages: () => (editionImposee ? dessinerImpose() : dessinerSelecteur()),
+    pages: () => dessinerSelecteur(),
     saisir: () => navigate('/recipes/new' + (editionImposee ? `?edition=${editionImposee}` : '')),
     signet: () => navigate('/add/signet'),
     congelateur: () => navigate('/kitchen?tab=inventory&add=1'),
@@ -91,5 +87,3 @@ export async function renderAdd(params, query, ctx) {
   dessinerGrille();
   return root;
 }
-
-export { refresh };

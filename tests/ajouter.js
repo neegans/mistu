@@ -90,7 +90,9 @@ export async function runAjouterTests({ eq, ok }) {
     [...noeud.querySelectorAll('button.btn')].find((b) => b.textContent === 'Photographier').click();
     eq(appels, [['livre', 'e1'], ['photo']], 'sélecteur : les gestes reçoivent la valeur choisie');
     const impose = renderSelecteurScan(m3, { changerLivre: () => {}, changerGenre: () => {}, photographier: () => {}, choisir: () => {}, retour: () => {} });
-    ok(impose.querySelector('select').disabled, 'sélecteur : livre imposé → select désactivé');
+    const selImpose = impose.querySelector('select');
+    eq([selImpose.disabled, selImpose.value, [...impose.querySelectorAll('button.btn')].some((b) => b.textContent === 'Photographier')], [true, 'e2', true],
+      'sélecteur : un ?edition connu ouvre le MÊME sélecteur, livre fixé — select désactivé sur « e2 » et « Photographier » à une tape (F14, R-UX-6)');
   }
   eq([ACCEPT_PHOTOS, ACCEPT_FICHIERS], ['image/*', 'image/*,application/pdf,application/epub+zip'], 'sélecteur : les accept actuels sont conservés');
 }
