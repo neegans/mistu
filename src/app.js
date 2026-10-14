@@ -5,9 +5,12 @@ import { setUiLocale, t } from './core/i18n.js';
 import * as repo from './model/repo.js';
 import { on } from './core/bus.js';
 import { logError } from './core/log.js';
-import { getData, invalidate, setSyncState, getSyncState, routeApresRetour, relireReglages, isActivitySynced, demarrerSync, SYNC_ROUTE_KEY } from './ui/state.js';
+import { getData, invalidate, setSyncState, getSyncState, routeApresRetour, relireReglages, isActivitySynced, demarrerSync, doitRendreApresPasse, SYNC_ROUTE_KEY } from './ui/state.js';
 import { installCapture } from './sync/outbox.js';
 import { createAuth } from './sync/auth.js';
+import { createMoteur } from './sync/moteur.js';
+import { createTransport } from './sync/transport.js';
+import { pastille, majPastille } from './ui/components.js';
 
 import { renderHome } from './ui/home.js';
 import { renderSearch } from './ui/search.js';
@@ -20,7 +23,7 @@ import { renderCook } from './ui/cook.js';
 import { renderImport } from './ui/import.js';
 import { renderMeals, renderMeal } from './ui/meals.js';
 import { renderKitchen } from './ui/kitchen.js';
-import { renderSettings, demarrerConnexion } from './ui/settings.js';
+import { renderSettings, demarrerConnexion, archiveEnCours } from './ui/settings.js';
 import { renderShoppingList } from './ui/grocery.js';
 import { renderAdd } from './ui/add.js';
 import { porteEntreeModel, renderPorteEntree } from './ui/porte-entree.js';
@@ -45,6 +48,8 @@ function shell() {
   const top = el('div', { class: 'topbar' },
     el('a', { class: 'brand', href: '#/' }, 'Cuisine OS'),
     el('span', { class: 'spacer' }),
+    // Pastille « N non envoyés » (spec § 4.2) : cachée tant que la file est vide — rien n'est affiché sans fait.
+    pastille(),
     el('a', { class: 'btn small', href: '#/search', title: t('Recherche') }, '⌕ ', el('span', { class: 'nowrap' }, t('Qu’est-ce qu’on cuisine ?'))),
     el('a', { class: 'btn small', href: '#/settings', title: t('Réglages'), 'aria-label': t('Réglages') }, '⚙︎'));
   return { root: el('div', null, top, el('div', { class: 'frame' }, side, main), tabs), main, side, tabs };
@@ -54,7 +59,9 @@ let current = null;
 let renderSeq = 0;
 
 async function onRoute({ handler, params, query, path }) {
-  if (!current) { current = shell(); replace(document.getElementById('app'), current.root); }
+  // La coquille est reconstruite au premier rendu et après un changement de langue : la pastille neuve est remise
+  // à l'état RÉEL du moteur tout de suite, sinon elle resterait vide jusqu'à la prochaine passe.
+  if (!current) { current = shell(); replace(document.getElementById('app'), current.root); majPastille(getSyncState().moteur?.etat()); }
   for (const a of [...current.side.querySelectorAll('a'), ...current.tabs.querySelectorAll('a')]) {
     const href = a.getAttribute('href').slice(1);
     const nav = NAV.find((n) => n.href === href);
@@ -127,12 +134,62 @@ async function bootSync() {
         setSyncState({ user: g?.ok ? suivant : null, guard: g, retour: null, enAttente: false });
         invalidate();
         if ((getSyncState().user?.id || null) !== avant) refresh(); // l'écran affiché parle du compte : il doit suivre
+        // Différé d'un tour : l'état ci-dessus doit être POSÉ avant que le moteur lise getSyncState().user — et un
+        // appel au moteur depuis l'intérieur d'un événement de session n'a pas à retarder la suite de cet événement.
+        setTimeout(suivreSession, 0);
       })().catch((error) => logError('sync.etat', { error }));
     });
   } catch (error) {
     logError('boot.sync', { error });
     setSyncState({ auth: null, user: null, guard: null, retour: null, enAttente: false });
   }
+}
+
+// --- Moteur de synchronisation (spec § 5.3, § 5.5, § 4.2) -----------------
+// Lancé après la porte d'entrée, et seulement quand un client existe (origine configurée, bibliothèque chargée) :
+// sans client, rien ne serait tenté et un moteur posé dans l'état ferait croire à Réglages qu'il y a de quoi
+// synchroniser. Il vit dans l'état de connexion : Réglages et la pastille le lisent là, et nulle part ailleurs.
+let passeEnCours = false;
+
+function surEtatMoteur(etat) {
+  majPastille(etat);
+  const avant = passeEnCours;
+  passeEnCours = etat.enCours === true;
+  // R-L3-16 : l'écran affiché doit montrer ce qui vient d'arriver de l'autre appareil. La règle est dans state.js.
+  if (!doitRendreApresPasse({ avant, etat, archive: archiveEnCours() })) return;
+  invalidate();
+  refresh();
+}
+
+function demarrerMoteur() {
+  const { auth } = getSyncState();
+  const client = auth?.getClient?.() || null;
+  if (!client) return null;
+  const moteur = createMoteur({
+    db: repo.db,
+    transport: createTransport(client),
+    getUserId: () => getSyncState().user?.id || null,
+    isActivitySynced,
+    fenetre: window,
+    bus: { on },
+  });
+  setSyncState({ moteur });
+  moteur.onEtat(surEtatMoteur);
+  // `demarrer()` n'est pas attendu : il lit la base puis appelle le réseau, et le démarrage de l'app ne doit jamais
+  // attendre le réseau (R28). Il ne rejette pas (le moteur attrape et rend un état).
+  moteur.demarrer();
+  return moteur;
+}
+
+// Un changement de session (connexion dans un autre onglet, jeton rafraîchi, déconnexion) : le moteur suit. Un
+// compte qui arrive alors qu'il n'y a pas de moteur le démarre — c'est le cas d'une première connexion, et celui
+// d'un moteur arrêté par « Se déconnecter ». Un compte déjà servi reçoit une passe : la session a changé, ce que
+// l'autre appareil a écrit entre-temps doit arriver sans attendre un autre déclencheur.
+function suivreSession() {
+  const { user, moteur } = getSyncState();
+  if (!user) return; // sans compte accepté par la garde, il n'y a rien à lancer ni à relancer
+  if (!moteur) { demarrerMoteur(); return; }
+  moteur.executer('session');
 }
 
 // Porte d'entrée (spec § 11, R34) : évaluée au DÉMARRAGE seulement, à la place de la coquille (aucune navigation
@@ -213,6 +270,9 @@ async function boot() {
     // La porte attend un geste ; si elle casse, l'app s'ouvre quand même (invariant I4).
     try { await porteDEntree(); }
     catch (error) { logError('porte', { error }); }
+    // Après la porte, avant les routes : la synchronisation ne doit jamais empêcher l'app de s'ouvrir (I4).
+    try { demarrerMoteur(); }
+    catch (error) { logError('sync.moteur', { error }); }
     registerRoutes();
     start(onRoute);
   } catch (e) {

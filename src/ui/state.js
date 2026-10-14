@@ -3,6 +3,7 @@ import * as repo from '../model/repo.js';
 import { on } from '../core/bus.js';
 import { refresh } from '../core/router.js';
 import { logError } from '../core/log.js';
+import { t } from '../core/i18n.js';
 import { buildDocs, buildLabelIndex } from '../domain/search.js';
 import { buildIngredientIndex } from '../domain/lines.js';
 import { loadUnits } from '../domain/units.js';
@@ -15,7 +16,9 @@ on('settings', () => { cache = null; });
 // Une seule source : posée au démarrage par app.js, lue par les vues sous ctx.sync. Rien n'est gardé ailleurs.
 // « auth » est le module de connexion ; « user » vaut null tant que la garde de compte n'a pas accepté.
 // « enAttente » : le démarrage de la connexion a dépassé sa borne de temps et n'a pas encore abouti (R28).
-let sync = { auth: null, user: null, guard: null, retour: null, enAttente: false };
+// « moteur » : l'instance du moteur de synchronisation, posée par le démarrage de app.js quand un client existe
+// (L3, tâche 9) et retirée par « Se déconnecter » / « Changer de compte ». Null = rien ne tourne.
+let sync = { auth: null, user: null, guard: null, retour: null, enAttente: false, moteur: null };
 
 // Clé de la route mémorisée avant un départ chez le fournisseur (redirectTo est sans fragment : la route serait
 // perdue au retour). Écrite par Réglages, consommée une seule fois au démarrage.
@@ -45,6 +48,29 @@ export function routeApresRetour({ retour = null, memorisee = null, hashActuel =
   if (!retour?.present || !memorisee) return null;
   if (String(hashActuel || '').replace(/^#/, '')) return null;
   return memorisee;
+}
+
+// --- Pastille « N non envoyés » de la barre du haut (spec § 4.2) -----------
+// Modèle pur, ici plutôt que dans app.js : app.js lance boot() à l'import et ne peut pas être chargé par un test.
+// Rien n'est affiché sans file réelle (I5) : zéro, un nombre illisible ou négatif ne disent rien du tout. Le
+// singulier est une chaîne à part — jamais un pluriel calculé sur une chaîne traduite.
+export function pastilleModel({ aEnvoyer = 0 } = {}) {
+  if (!(aEnvoyer > 0)) return null;
+  return aEnvoyer === 1 ? t('1 non envoyé') : t('{n} non envoyés', { n: aEnvoyer });
+}
+
+// R-L3-16 : l'écran affiché doit montrer ce qui vient d'arriver de l'autre appareil. Un rendu est donc demandé à la
+// FIN d'une passe du moteur, et seulement si elle a ÉCRIT quelque chose — une passe qui ne trouve rien ne doit
+// voler aucun rendu (un écran reconstruit perd le focus, la position de défilement et tout état de formulaire).
+// `avant` = la valeur de `enCours` au changement d'état précédent ; `archive` = une opération d'archive travaille,
+// et son écran porte un état qui ne vit QUE dans le DOM (contrôles désactivés, bilan, bouton « Recharger »).
+// Pure : elle décide, app.js rend.
+export function doitRendreApresPasse({ avant = false, etat = null, archive = false } = {}) {
+  if (!avant || etat?.enCours === true) return false; // seule la fin d'une passe compte
+  if (archive) return false;
+  const effets = etat?.derniersEffets;
+  if (!effets) return false;
+  return (effets.recues > 0) || (effets.supprimees > 0) || (effets.ajustes > 0) || (effets.conflits > 0);
 }
 
 // --- Démarrage de la connexion, borné dans le temps (R28) ------------------

@@ -51,6 +51,8 @@ pre { background: var(--cream-2); padding: .6rem .8rem; border-radius: 8px; over
 .topbar .spacer { flex: 1; }
 .topbar .btn { background: rgba(255,255,255,.14); color: var(--cream); border-color: transparent; }
 .topbar .btn.primary { background: var(--sage); color: var(--green); }
+/* Pastille « N non envoyés » : présente seulement quand la file d'envoi n'est pas vide (spec § 4.2). */
+.pastille { background: var(--warn-bg); color: var(--warn); border-radius: 999px; padding: .15rem .55rem; font-size: .78rem; font-weight: 600; white-space: nowrap; }
 .frame { display: flex; flex: 1; min-height: 0; }
 main.content { flex: 1; padding: 1rem 1rem calc(var(--nav-h) + var(--safe-b) + 1rem); max-width: 1100px; width: 100%; margin: 0 auto; }
 nav.tabs {

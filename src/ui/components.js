@@ -6,6 +6,7 @@ import { shortcutUrl, siriPhrase, describeDuration, isAppleTouchDevice } from '.
 import { navigate } from '../core/router.js';
 import { displayUrl } from '../sync/mime.js';
 import * as repo from '../model/repo.js';
+import { pastilleModel } from './state.js';
 
 export function pageHeader(title, { subtitle = null, actions = [], back = null } = {}) {
   return el('header', { class: 'stack', style: { marginBottom: '1rem' } },
@@ -163,6 +164,26 @@ export function aiNotice(ctx) {
   if (configured) return null;
   return el('div', { class: 'status warn' }, t('Assistant IA non configuré : saisie et corrections manuelles. Réglages → Assistant IA.'),
     el('a', { class: 'btn small', href: '#/settings' }, t('Réglages')));
+}
+
+// --- Pastille « N non envoyés » de la barre du haut (spec § 4.2) ----------
+// Un seul nœud dans toute l'application, posé par la coquille (app.js) et mis à jour par le moteur. La mise à jour
+// le RETROUVE par son identifiant à chaque appel : la coquille entière est reconstruite au changement de langue, et
+// une référence gardée en variable désignerait alors un nœud détaché — la pastille ne bougerait plus jamais.
+// Le texte vient de pastilleModel (src/ui/state.js) : null = rien à dire, donc nœud caché (jamais « 0 »).
+export const PASTILLE_ID = 'pastille';
+
+export function pastille() {
+  return el('span', { class: 'pastille', id: PASTILLE_ID, hidden: true });
+}
+
+export function majPastille(etat) {
+  const noeud = document.getElementById(PASTILLE_ID);
+  if (!noeud) return null;
+  const texte = pastilleModel({ aEnvoyer: etat?.aEnvoyer || 0 });
+  noeud.textContent = texte || '';
+  noeud.hidden = texte === null;
+  return texte;
 }
 
 export function linkButton(label, href, cls = 'btn') { return el('a', { class: cls, href: `#${href}` }, label); }

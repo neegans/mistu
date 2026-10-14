@@ -22,6 +22,10 @@ const AU_REPOS = {
   attenteConnexion: false,
   horloge: null,
   derniereErreur: null,
+  // R-L3-16 : ce que la DERNIÈRE passe a réellement écrit. Posé en fin de passe, c'est lui qui permet à la coquille
+  // de redemander un rendu quand (et seulement quand) quelque chose est arrivé de l'autre appareil. Null au repos :
+  // aucune passe n'a encore eu lieu, donc rien n'est affirmé.
+  derniersEffets: null,
 };
 
 // Le seuil au-delà duquel une horloge faussée se dit à la personne. Il est tenu par `appliquerHeureServeur`
@@ -59,6 +63,7 @@ export function createMoteur({
     pause: fige(etat.pause),
     horloge: fige(etat.horloge),
     derniereErreur: fige(etat.derniereErreur),
+    derniersEffets: fige(etat.derniersEffets),
   });
 
   function poser(partiel) {
@@ -147,17 +152,20 @@ export function createMoteur({
   }
 
   async function passe(raison) {
-    // Sans compte, rien ne part et rien n'est tenté : seuls les comptes de la file sont rafraîchis.
-    if (!getUserId()) { poser({ ...(await compter()) }); return instantane(); }
+    // Sans compte, rien ne part et rien n'est tenté : seuls les comptes de la file sont rafraîchis. Aucune passe
+    // n'a eu lieu, donc aucun effet à annoncer — et `enCours` n'est jamais passé à vrai : personne ne rendra.
+    if (!getUserId()) { poser({ derniersEffets: null, ...(await compter()) }); return instantane(); }
     // R-L3-14 : la pause est RELUE dans sync_state à chaque passe, pas seulement au chargement — un autre onglet a
     // pu la poser, un « online » a pu arriver pendant charger(), et executer() peut être appelé sans demarrer().
     const pause = await lirePause();
     // R-L3-15 : en pause de quota, seul l'ENVOI est suspendu. Lire ne consomme pas d'espace chez le fournisseur, et
     // ce qui arrive des autres appareils n'a pas à attendre un geste de la personne : la réception continue.
-    poser({ pause, enCours: true, phase: pause ? 'reception' : 'envoi_initial', derniereErreur: null, attenteConnexion: false });
+    poser({ pause, enCours: true, phase: pause ? 'reception' : 'envoi_initial', derniereErreur: null, attenteConnexion: false, derniersEffets: null });
     const avantPasse = appelsReussis;
+    // Déclarés hors du `try` : le `finally` les lit pour annoncer ce que la passe a écrit, même quand elle a jeté.
+    let bilanEnvoi = null;
+    let bilanReception = null;
     try {
-      let bilanEnvoi = null;
       if (!pause) {
         await envoiInitial({
           db,
@@ -180,7 +188,7 @@ export function createMoteur({
       const envoiBloque = !!bilanEnvoi && !!(bilanEnvoi.erreur || bilanEnvoi.pause || bilanEnvoi.attenteConnexion);
       if (!envoiBloque) {
         poser({ phase: 'reception' });
-        const bilanReception = await pull.recevoir();
+        bilanReception = await pull.recevoir();
         if (bilanReception.erreur) poser({ derniereErreur: { type: bilanReception.erreur.type } });
       }
       // UN seul « Dernier échange » par passe, et seulement si un appel a RÉELLEMENT abouti (I5).
@@ -194,7 +202,15 @@ export function createMoteur({
       // transformer la fin d'une passe en rejet silencieux.
       let fin = {};
       try { fin = await compter(); } catch (error) { logError('sync.passe', { error, reason: 'file illisible' }); }
-      poser({ enCours: false, phase: null, progression: null, ...fin });
+      // R-L3-16 : ce que la passe a écrit, compté depuis les bilans de l'envoi et de la réception — jamais depuis
+      // une réponse brute. Une passe interrompue annonce ce qu'elle avait écrit avant de s'arrêter, pas zéro.
+      const derniersEffets = {
+        recues: bilanReception?.recues || 0,
+        supprimees: bilanReception?.supprimees || 0,
+        ajustes: bilanEnvoi?.ajustes || 0,
+        conflits: (bilanEnvoi?.conflits || 0) + (bilanReception?.conflits || 0),
+      };
+      poser({ enCours: false, phase: null, progression: null, derniersEffets, ...fin });
     }
     return instantane();
   }
