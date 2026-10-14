@@ -274,7 +274,7 @@ lot) ; `source_pages.sha256` reste une relation **latente**, jamais vérifiée �
 `recipe.js`/`components.js` (R-UX-11), pas sur ces deux surfaces ; `displayUrl` (vignettes, PDF) crée encore des URL
 `blob:` non suivies par `blob-urls.js` (pré-existant, hors lot).
 
-Suite complète : **1260/1260 verts**, 0 erreur et 0 avertissement console (hors `apple-mobile-web-app-capable`,
+Suite complète : **1264/1264 verts**, 0 erreur et 0 avertissement console (hors `apple-mobile-web-app-capable`,
 pré-existant et hors lot) ; `node --test tools/*.test.mjs` 40/40 ; `node tools/generer-migrations.mjs --check` : 0.
 Vérifié dans l'app réelle le 14 octobre (service worker `cuisine-os-v0.4.0-11` actif après deux rechargements) :
 `#/add`, `#/add/livre`, `#/add/signet`, `#/library` sans erreur console ni réponse ≥ 400 ; la bibliothèque de ce

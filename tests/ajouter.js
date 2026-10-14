@@ -809,16 +809,19 @@ export async function runAjouterTests({ eq, ok }) {
     });
   }
 
-  // --- § 12 CSP épinglée, § 13.10 statique (tâche 10, clôture)
+  // --- § 12 CSP, § 13.10 statique (tâche 10, clôture). S10 RETIRÉE par R-UX-15 : l'assistant IA (src/domain/llm.js)
+  // accepte une URL de base LIBRE (compatible OpenAI, configurée dans Réglages) — aucune liste fermée ne peut la
+  // couvrir sans casser cette fonctionnalité antérieure au lot. connect-src reste donc `'self' https:` (dos-d'âne
+  // assumé, pas un mur) ; les vrais murs sont script-src 'self', img-src fermé (aucune image externe : les
+  // couvertures passent par blob: après ré-encodage) et object-src 'none'.
   const lire = async (chemin) => (await fetch(chemin + '?v=' + Date.now(), { cache: 'no-store' })).text();
-  const { SUPABASE } = await import('../src/sync/config.js');
-  const hotes = [...new Set(Object.values(SUPABASE).map((c) => c.url).filter(Boolean))];
-  const attenduConnect = `connect-src 'self' ${hotes.join(' ')} https://openlibrary.org https://www.googleapis.com https://covers.openlibrary.org`;
   for (const page of ['../index.html', './index.html']) {
     const html = await lire(page);
     const csp = html.match(/Content-Security-Policy" content="([^"]+)"/)?.[1] || '';
-    ok(csp.includes(attenduConnect), `CSP ${page} : connect-src = liste fermée (S10) — lu : ${csp.match(/connect-src [^;]+/)?.[0]}`);
-    ok(!/connect-src[^;]*\shttps:(\s|;|$)/.test(csp), `CSP ${page} : plus de https: ouvert`);
+    eq(csp.match(/connect-src ([^;]+)/)?.[1], "'self' https:", `CSP ${page} : connect-src inchangée (S10 retirée, R-UX-15)`);
+    eq(csp.match(/img-src ([^;]+)/)?.[1], "'self' blob: data:", `CSP ${page} : img-src fermé (aucune image externe)`);
+    eq(csp.match(/script-src ([^;]+)/)?.[1], "'self'", `CSP ${page} : script-src 'self'`);
+    eq(csp.match(/object-src ([^;]+)/)?.[1], "'none'", `CSP ${page} : object-src 'none'`);
   }
   // MODULES_NEUFS : les sept modules créés par le lot (R-UX-11 en ajoute un huitième, lien.js) + add.js réécrit.
   const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/ui/add.js'];

@@ -266,7 +266,7 @@ Nouveau module `src/ui/signet.js`. Écran :
 | `scan_sessions` | **inchangé** (intention dans l'adresse) | — | — |
 | `DB_VERSION` | **inchangée** | — | — |
 | `--check` | DOIT rester 0 | — | — |
-| CSP `connect-src` (S10) | `'self' https:` → **liste fermée** : l'hôte Supabase de `config.js`, `https://openlibrary.org`, `https://www.googleapis.com`, `https://covers.openlibrary.org` | — | `tests/index.html` suit |
+| CSP `connect-src` | **inchangée** : `'self' https:` — S10 retirée par R-UX-15 (l'assistant IA, `src/domain/llm.js`, accepte une URL de base **libre**, aucune liste fermée ne peut la couvrir) ; murs réels = `script-src 'self'`, `img-src` fermé, `object-src 'none'` | — | `tests/index.html` suit |
 
 Tout passe par `repo.save`/`saveBatch` origine `local` ; livres, éditions, recettes et séances continuent de partir au
 serveur comme aujourd'hui. Une couverture **ne voyage pas** avant L4 (§ 6, `CLAUDE.md`).
@@ -320,7 +320,8 @@ injecté — F19).
   la couverture.
 - **`createImageBitmap` + `imageOrientation`** : repli sans l'option si rejetée (image possiblement tournée : la personne
   la voit et peut en reprendre une).
-- **CSP épinglée** : un hôte futur devra être ajouté explicitement — c'est voulu (dos-d'âne → mur).
+- **CSP non épinglable** : dos-d'âne assumé (`connect-src 'self' https:` reste large, l'URL de base de l'assistant
+  IA est libre, R-UX-15) ; mur = `script-src 'self'` + `img-src` fermé.
 - **Orphelins `files`** : assumés jusqu'à L4 ; coût borné (~400 Ko par essai abandonné).
 - **`recipe-edit.js`** : changement limité au champ « Cuisines ».
 
@@ -343,7 +344,7 @@ indépendantes (opus) : sécurité (S1-S16) et faisabilité/cohérence (F1-F25).
 | S7 hôte affiché mensonger | hôte recalculé depuis `source_url` au rendu (§ 11) |
 | S8/S11 course orphelins, fuite | aucun effacement de blob dans ce lot ; L4 (§ 2, § 6) |
 | S9 `?edition` non vérifié | confronté à `editionsById`, inconnu = absent (§ 4) |
-| S10 `connect-src https:` | liste fermée de quatre hôtes (§ 12) |
+| S10 `connect-src https:` | **retirée** (R-UX-15) : URL de base libre de l'assistant IA, aucune liste fermée possible (§ 12) |
 | S12 tiers non nommés, options `fetch` | phrase à l'écran ; `credentials/cache/referrerPolicy` explicites (§ 5) |
 | S13 borne 2 048 non située | modèle **et** écriture (§ 11) |
 | S14 test statique court | `html:` interdit, rendu hostile (§ 13.10) |
@@ -380,7 +381,7 @@ Une ligne par écart réel entre ce plan et le code livré, décidé par le cont
 |---|---|
 | R-UX-1 | La forme d'une entrée d'outbox (nom du champ) n'était pas fixée au plan ; l'assertion de test est adaptée au champ réel. |
 | R-UX-2 | `parseQuery('thaïe')` traite le mot comme du texte, pas comme un filtre ; la cuisine de test (T7) est restée inchangée. |
-| R-UX-3 | Un module neuf entre dans `SHELL` dès la tâche qui l'importe, jamais avant. |
+| R-UX-3 | Un module neuf entre dans `SHELL` dès la tâche qui le **crée**, avant tout import (le test de complétude ne vérifie que « atteignable ⊆ `SHELL` »). |
 | R-UX-4 | Répartition des modèles d'implémentation (sonnet/opus) par tâche, décidée au pré-vol, sans incidence sur le code livré. |
 | R-UX-5 | `APP_VERSION` passe à `'0.4.0'` dès la tâche 1 (pin structurel `v0.4.0-\d+`), et non en tâche 10 comme prévu au brief. |
 | R-UX-6 | Le chemin « édition imposée » non testé (`dessinerImpose`) est supprimé ; `?edition` connu ouvre directement le sélecteur avec le livre fixé. |
@@ -392,5 +393,7 @@ Une ligne par écart réel entre ce plan et le code livré, décidé par le cont
 | R-UX-12 | Le corps d'une réponse de couverture est lu **en flux**, annulé dès 5 Mo cumulés (Open Library n'annonce pas `content-length`). |
 | R-UX-13 | La couverture reçue est remise à vide par `identifier` et `retourIsbn` ; une réponse distante tardive n'appartient qu'à SA demande d'ISBN (`isbnDemande`, `touchee`). |
 | R-UX-14 | `alt = book.title` sur l'image de couverture, pour qu'un lien vers l'image porte toujours un nom accessible. |
+| R-UX-15 | **S10 retirée** : `connect-src` reste `'self' https:` sur les deux pages (l'assistant IA, `src/domain/llm.js`, accepte une URL de base libre — aucune liste fermée ne peut la couvrir sans casser cette fonctionnalité antérieure au lot). Le test statique affirme à la place `connect-src`/`img-src`/`script-src`/`object-src` exacts sur les deux pages. |
 
-Compte final (tâche 10, clôture) : **1260/1260** tests verts, suite complète, 0 erreur et 0 avertissement console.
+Compte final (tâche 10, clôture, après la revue de tâche ronde 1) : **1264/1264** tests verts, suite complète, 0
+erreur et 0 avertissement console.

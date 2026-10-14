@@ -271,7 +271,9 @@ src/ui/signet.js         lienSignet (ré-exporté de core/lien.js), signetModel,
                          facultatif.
 src/core/image.js        dimensionsImage, reduireImage, ErreurImage, LIMITES_COUVERTURE, COVER_INPUT_MIME :
                          dimensions lues dans l'en-tête AVANT décodage (bombe de décompression), re-encodage JPEG
-                         systématique (HEIC et formats exotiques inclus), bornes 25 Mo / 50 Mpx.
+                         systématique (HEIC et formats exotiques inclus), bornes 25 Mo / 50 Mpx (fichier local) et
+                         5 Mo (corps d'une réponse distante, lu en flux et coupé — Open Library n'annonce pas
+                         `content-length`, R-UX-12).
 src/core/blob-urls.js    urlDeBlob/revoquerUrlsDeBlob : chaque URL blob: créée pour afficher une couverture ou un
                          aperçu est suivie dans un registre partagé, révoquée à la route suivante (S15/F4). Dette
                          assumée : `displayUrl` (vignettes, PDF) crée encore des URL blob: hors de ce registre
