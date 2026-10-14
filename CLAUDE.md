@@ -305,10 +305,13 @@ enfin mesurée (RF-I1). Rapport : `.superpowers/sdd/2026-10-14-ajouter-et-livres
 Suite complète après la vague finale : **1376/1376 verts** (total épinglé dans `tests/tests.js` — F2), 0 erreur et
 0 avertissement console (hors `apple-mobile-web-app-capable`, pré-existant et hors lot) ; `node --test
 tools/*.test.mjs` 40/40 ; `node tools/generer-migrations.mjs --check` : 0. (Clôture de la tâche 10 : 1270/1270.)
-Vérifié dans l'app réelle le 14 octobre (service worker `cuisine-os-v0.4.0-11` actif après deux rechargements) :
-`#/add`, `#/add/livre`, `#/add/signet`, `#/library` sans erreur console ni réponse ≥ 400 ; la bibliothèque de ce
-navigateur partagé est encore **vide** (aucune fiche livre à ouvrir pour l'instant — le parcours réel ci-dessus
-reste à faire).
+Vérifié dans l'app réelle le 14 octobre, deux fois : à la clôture de la tâche 10 (service worker
+`cuisine-os-v0.4.0-11`) puis **après la vague finale** (service worker `cuisine-os-v0.4.0-12` actif) —
+`#/add` (les cinq cartes), `#/add/livre` (pas 1, champ ISBN ouvert, trois boutons), `#/add/signet` et `#/library`
+s'affichent sans **aucune erreur de console** ni réponse ≥ 400 ; seul l'avertissement pré-existant
+`apple-mobile-web-app-capable` subsiste (hors lot). Lecture seule : aucun clic de scan, aucune écriture dans la
+base `cuisine-os`. La bibliothèque de ce navigateur partagé est encore **vide** (aucune fiche livre à ouvrir pour
+l'instant — le parcours réel ci-dessus reste à faire).
 
 ## Premier lot de fiabilisation — 8 septembre 2026, à réviser
 
