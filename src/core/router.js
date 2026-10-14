@@ -26,6 +26,10 @@ export function navigate(path, { replace = false } = {}) {
   else location.hash = target;
 }
 
+// Retire ou pose un paramètre d'adresse SANS re-rendu : history.replaceState ne déclenche pas hashchange. Injecté dans les
+// vues qui s'en servent (geste `historique.remplacer`), donc espionnable dans la suite.
+export function remplacerAdresse(hash) { history.replaceState(null, '', hash.startsWith('#') ? hash : '#' + hash); }
+
 export function currentPath() { return parseHash().path; }
 
 export function buildQuery(obj) {

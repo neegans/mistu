@@ -2,17 +2,25 @@
 // remplacement d'une page, entrées d'index, états fondés sur des événements réels. Aucune page n'est annoncée « sur le serveur ».
 import { el, toast, pickFiles, confirmDialog, formatDate } from '../core/dom.js';
 import { t } from '../core/i18n.js';
-import { navigate, buildQuery, refresh } from '../core/router.js';
+import { navigate, buildQuery, refresh, remplacerAdresse } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { displayUrl } from '../sync/mime.js';
 import { sha256Hex } from '../core/hash.js';
 import { normalizeText } from '../domain/units.js';
 import { providerFrom, extractIndexFromImages, blobToBase64 } from '../domain/llm.js';
-import { pageHeader, section, emptyState, select, field, aiNotice, pdfFrame } from './components.js';
+import { pageHeader, section, emptyState, select, field, aiNotice, pdfFrame, libelleLivre } from './components.js';
 
 const SMALL_IMAGE_BYTES = 80 * 1024;
 
-export async function startScanSession(files, { edition_id = null, session_id = null } = {}) {
+const INTENTIONS = ['index', 'recette'];
+// L'intention (spec § 10) voyage dans l'adresse, pas dans la base : consommée au premier rendu, puis retirée.
+export const adresseSeance = (sessionId, intention) => `/import?session=${sessionId}${INTENTIONS.includes(intention) ? `&intention=${intention}` : ''}`;
+export function appliquerIntention({ intention, pageIds = [] } = {}) {
+  if (!INTENTIONS.includes(intention)) return { selection: [], ouvrirIndex: false, consommee: false };
+  return { selection: [...pageIds], ouvrirIndex: intention === 'index', consommee: true };
+}
+
+export async function startScanSession(files, { edition_id = null, session_id = null, intention = null } = {}) {
   let session = session_id ? await repo.get('scan_sessions', session_id) : null;
   if (!session) session = { id: repo.newId('ss'), status: 'open', edition_id, started_at: repo.nowIso(), page_ids: [], document_ids: [], device_id: deviceId() };
   const docs = [], pages = [];
@@ -36,7 +44,7 @@ export async function startScanSession(files, { edition_id = null, session_id = 
   session.status = 'open';
   await repo.saveBatch({ source_documents: docs, source_pages: pages, scan_sessions: [session] });
   toast(t('{n} fichier(s) conservé(s) sur cet appareil', { n: files.length }));
-  navigate(`/import?session=${session.id}`);
+  navigate(adresseSeance(session.id, intention));
   return session;
 }
 
@@ -47,7 +55,7 @@ export async function renderImport(params, query, ctx) {
   if (!query.session) return sessionsList(ctx);
   const session = ctx.scan_sessions.find((s) => s.id === query.session);
   if (!session) return el('div', { class: 'card' }, t('Séance introuvable.'));
-  return sessionView(session, ctx);
+  return sessionView(session, ctx, query);
 }
 
 function sessionsList(ctx) {
@@ -63,11 +71,13 @@ function sessionsList(ctx) {
   return root;
 }
 
-function sessionView(session, ctx) {
+function sessionView(session, ctx, query = {}, { historique = { remplacer: remplacerAdresse } } = {}) {
   const pages = session.page_ids.map((id) => ctx.pagesById.get(id)).filter(Boolean);
   const docs = session.document_ids.map((id) => ctx.source_documents.find((d) => d.id === id)).filter(Boolean);
   const fileDocs = docs.filter((d) => d.source_type !== 'photo');
-  const selected = new Set();
+  // L'intention (spec § 10, F6) voyage dans l'adresse : présélection des pages, panneau d'index ouvert ou non.
+  const applique = appliquerIntention({ intention: query.intention, pageIds: session.page_ids });
+  const selected = new Set(applique.selection);
   const edition = session.edition_id ? ctx.editionsById.get(session.edition_id) : null;
   const root = el('div', null);
   root.append(pageHeader(t('Séance de scan'), { subtitle: `${t('Débutée le')} ${formatDate(session.started_at, { withTime: true })}`, back: { href: '/import', label: t('Séances') } }));
@@ -79,7 +89,7 @@ function sessionView(session, ctx) {
     el('span', { class: 'status info' }, t('Aucune synchronisation serveur configurée : sauvegarde via Réglages'))));
 
   // Livre associé
-  const editionOptions = [{ value: '', label: t('— Aucun livre (à associer plus tard) —') }, ...ctx.book_editions.map((e) => ({ value: e.id, label: ctx.editionLabel(e) }))];
+  const editionOptions = [{ value: '', label: t('— Aucun livre (à associer plus tard) —') }, ...ctx.book_editions.map((e) => ({ value: e.id, label: libelleLivre(e, ctx.booksById.get(e.book_id)) }))];
   root.append(el('div', { class: 'card flat row between' },
     field(t('Livre de cette séance'), select(editionOptions, session.edition_id || '', async (v) => {
       session.edition_id = v || null;
@@ -112,7 +122,7 @@ function sessionView(session, ctx) {
   for (const p of pages) {
     const img = el('img', { alt: `${t('Page')} ${p.position}`, loading: 'lazy' });
     repo.getFile(p.sha256).then((f) => { const u = displayUrl(f); if (u) img.src = u; });
-    const check = el('input', { type: 'checkbox', onChange: (e) => { if (e.target.checked) selected.add(p.id); else selected.delete(p.id); drawActions(); } });
+    const check = el('input', { type: 'checkbox', checked: selected.has(p.id), onChange: (e) => { if (e.target.checked) selected.add(p.id); else selected.delete(p.id); drawActions(); } });
     const pageInput = el('input', { type: 'number', placeholder: t('p. imprimée'), value: p.printed_page ?? '', style: { minHeight: '30px', padding: '.2rem .4rem', fontSize: '.8rem' }, onChange: async (e) => { p.printed_page = e.target.value ? parseInt(e.target.value, 10) : null; await repo.save('source_pages', p); } });
     thumbs.append(el('figure', null, el('span', { class: 'num' }, String(p.position)), img,
       el('figcaption', null, el('label', { class: 'check' }, check, p.kind ? t(p.kind === 'index' ? 'Index' : 'Recette') : t('Sélectionner')), pageInput,
@@ -140,6 +150,10 @@ function sessionView(session, ctx) {
   const indexPanel = indexEntriesPanel(session, ctx, () => [...selected]);
   indexPanel.hidden = true;
   root.append(indexPanel);
+  if (applique.consommee) {
+    if (applique.ouvrirIndex) indexPanel.hidden = false;
+    historique.remplacer(adresseSeance(session.id, null)); // consommée : un refresh() ne la réappliquera pas
+  }
 
   root.append(el('div', { class: 'row', style: { marginTop: '1rem' } },
     el('button', { class: 'btn', onClick: async () => { session.status = 'done'; await repo.save('scan_sessions', session); toast(t('Séance terminée')); navigate(session.edition_id ? `/books/${session.edition_id}` : '/library'); } }, t('Terminer la séance')),
