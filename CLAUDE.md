@@ -154,7 +154,7 @@ aussi (R31). La pastille, elle, est **livrée en L3** (voir la sous-section suiv
 `.superpowers/sdd/2026-10-13-synchronisation-l3-envoi-reception/` (`progress.md`, un brief, un rapport et une revue
 par tâche ; dix tâches, chacune avec une ronde de corrections au plus). Décisions consignées en **spec § 11,
 lignes R37 à R62** (dans le registre, elles s'appellent R-L3-1 à R-L3-26). `APP_VERSION = '0.3.0'`,
-`sw.js VERSION = 'cuisine-os-v0.3.0-2'`, `SHELL` complet (67 entrées, huit modules de `src/sync/` de plus).
+`sw.js VERSION = 'cuisine-os-v0.3.0-3'`, `SHELL` complet (67 entrées, huit modules de `src/sync/` de plus).
 
 **Vague finale de corrections (13 octobre 2026, après `final-review.md` — rapport : `final-fix-report.md`).** Le
 Critical et les cinq Important de la revue de branche sont corrigés, plus quatre mineurs : **R57** une suppression
@@ -171,8 +171,13 @@ caractères de contrôle sont retirés **à l'écriture locale** (ils faisaient 
 tombale reçue obéit à I7 : plus ancienne que la fiche locale, elle ne l'efface plus en silence. Mineurs : la
 pastille redevient muette à l'arrêt du moteur, une passe encore en vol ne repose plus de minuterie derrière
 `arreter()`, l'en-tête de `reponses.js` et `docs/architecture.md` nomment les vraies clés, et l'assertion « un seul
-vol » est épinglée sur un compte exact d'appels. Suite complète : **927/927 verts** (trois passages), 0 erreur
-console, 0 réponse ≥ 400.
+vol » est épinglée sur un compte exact d'appels. **Deux compléments après re-revue** : la **restauration**
+(`applyArchive`) nettoie elle aussi les caractères de contrôle — et `verifyRestored` compare la base à ce que la
+restauration *promet* d'écrire, sinon le bilan d'une vieille archive passait au rouge ; et **R-L3-27** ferme les
+deux dernières portes de la boucle — « Garder celle d'ici » nettoie la fiche restaurée, et `repo.init()` fait une
+**passe unique** de nettoyage des fiches d'avant la vague (garde `sync_state.nettoyage_chaines`, `updated_at`
+conservé, origine `device` : rien n'entre en file). Suite complète : **942/942 verts**, 0 erreur et 0 avertissement
+console, 0 réponse ≥ 400 ; `tests/backup.js` vert ; `node --test tools` 40/40 ; `--check` 0.
 
 **Ce qui marche** (éprouvé par la suite : **875 assertions vertes**, transport factice, bases temporaires, aucun
 réseau) : l'**envoi** (file lue, dédoublonnée, relue, envoyée par lots de 500 / 900 Kio ; recul exponentiel,

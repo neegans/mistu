@@ -18,6 +18,17 @@ export function nettoyerChaines(valeur) {
   return valeur;
 }
 
+// R-L3-27 : « est-ce que nettoyer changerait quelque chose ? » — la question posée par la passe unique de
+// `repo.init()`, qui ne réécrit une fiche QUE si la réponse est oui. La classe de caractères n'est pas redéfinie
+// ici : la question est posée à `nettoyerChaines` lui-même, donc il n'y a toujours qu'une seule définition de ce
+// qu'est un caractère de contrôle. Un `Blob` n'est jamais parcouru (ses octets ne sont pas du texte).
+export function porteDesCaracteresDeControle(valeur) {
+  if (typeof valeur === 'string') return nettoyerChaines(valeur) !== valeur;
+  if (Array.isArray(valeur)) return valeur.some(porteDesCaracteresDeControle);
+  if (valeur && typeof valeur === 'object' && !(valeur instanceof Blob)) return Object.values(valeur).some(porteDesCaracteresDeControle);
+  return false;
+}
+
 export const tailleJson = (valeur) => encodeur.encode(JSON.stringify(valeur)).length;
 
 // Une clé de synchronisation, nommée ici une fois pour toutes : reponses.js et push.js la reprennent telle quelle.

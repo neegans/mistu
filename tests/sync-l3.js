@@ -759,6 +759,51 @@ export async function runSyncL3Tests({ eq, ok }) {
     eq([await db.get('books', 'tb'), await db.count('outbox'), await db.get('sync_conflicts', 'books:tb')], [undefined, 0, undefined], 'R-L3-26 : … la fiche est supprimée ici, sans remise en file, conflit effacé');
   });
 
+  // --- R-L3-27 : fermer la boucle I4 là où une fiche SALE est déjà en base
+  // R61 nettoie à l'écriture (`repo.save`/`saveBatch`) et à la restauration (`applyArchive`), mais une fiche écrite
+  // AVANT cette vague est encore sale en base. Son écho propre (le serveur reçoit ce que `lots.js` nettoie) fait un
+  // conflit à instants égaux, et « Garder celle d'ici » renvoyait la version SALE : le serveur la renettoyait, le
+  // conflit revenait, indéfiniment. Deux portes à fermer : le geste, et une passe unique au démarrage.
+  await withRepo(async (repo, db) => {
+    // Posée par `db.mutate` d'origine 'device' : hors `repo.save`, donc non nettoyée — et après l'`init()` de la
+    // fixture, donc la passe unique est déjà passée. C'est exactement l'état d'un appareil d'avant la vague dont une
+    // fiche a échappé à la passe (écrite par un autre chemin, ou restaurée d'une archive plus ancienne).
+    await db.mutate({ puts: { books: [{ id: 'bcl', title: 'a\u0000b', updated_at: '2026-10-13T11:00:00Z' }] }, origin: 'device' });
+    const page = [{ id: 'bcl', data: { id: 'bcl', title: 'ab', updated_at: '2026-10-13T11:00:00Z' }, updated_at: '2026-10-13T11:00:00Z', deleted_at: null, server_seq: 30 }];
+    const tf = creerTransportFactice({ lire: { books: [page, []] } });
+    const r = await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1' }).recevoir();
+    eq([r.conflits, r.recues, r.supprimees], [1, 0, 0], 'R-L3-27 : à instant égal, la fiche locale sale et la copie propre du serveur font bien un conflit');
+    const conflit = await db.get('sync_conflicts', 'books:bcl');
+    await db.mutate({ deletes: { outbox: (await db.getAll('outbox')).map((e) => e.seq) }, origin: 'device' });
+    ok(await garderIci(db, conflit), 'R-L3-27 : « Garder celle d’ici » s’applique');
+    const relue = await db.get('books', 'bcl');
+    eq(relue.title, 'ab', 'R-L3-27 : … et elle écrit une fiche NETTOYÉE (sinon le serveur la renettoie et le conflit revient)');
+    const lot = await composerLots(await db.getAll('outbox'), (s, id) => db.get(s, id));
+    const element = lot.lots[0].elements.find((e) => e.id === 'bcl');
+    eq(element.data, relue, 'R-L3-27 : … donc l’élément renvoyé est IDENTIQUE à la fiche locale — la boucle est fermée');
+  });
+
+  // --- R-L3-27 (b) : la passe unique de nettoyage au démarrage
+  await withRepo(async (repo, db) => {
+    // La fixture a déjà joué init() : la garde est posée. On la retire pour rejouer la migration.
+    await db.mutate({ deletes: { sync_state: ['nettoyage_chaines'] }, origin: 'device' });
+    await db.mutate({ puts: { books: [{ id: 'vieille', title: 'a\u0000b', notes: ['x\u000by', { z: 't\u001f' }], garde: 'é\n\tÀ', updated_at: '2026-10-01T00:00:00Z' }] }, origin: 'device' });
+    await db.mutate({ deletes: { outbox: (await db.getAll('outbox')).map((e) => e.seq) }, origin: 'device' });
+    await repo.init();
+    const relue = await db.get('books', 'vieille');
+    eq([relue.title, relue.notes, relue.garde], ['ab', ['xy', { z: 't' }], 'é\n\tÀ'], 'R-L3-27 : init() nettoie en profondeur les fiches d’avant la vague, accents et sauts de ligne gardés');
+    eq(relue.updated_at, '2026-10-01T00:00:00Z', 'R-L3-27 : … SANS toucher à leur updated_at (ce n’est pas une modification : rien ne doit gagner contre le serveur)');
+    eq(await db.count('outbox'), 0, 'R-L3-27 : … et rien n’entre en file (origine device : jamais capturée)');
+    eq((await db.get('sync_state', 'nettoyage_chaines'))?.value, 1, 'R-L3-27 : la garde de la passe est posée');
+    // La garde tient : une fiche sale reposée à la main n'est pas renettoyée, et un démarrage ordinaire n'écrit rien.
+    await db.mutate({ puts: { books: [{ id: 'apres', title: 'c\u0007d', updated_at: '2026-10-01T00:00:00Z' }] }, origin: 'device' });
+    const vraiMutate = db.mutate.bind(db);
+    let transactions = 0;
+    db.mutate = (arg) => { transactions += 1; return vraiMutate(arg); };
+    try { await repo.init(); } finally { db.mutate = vraiMutate; }
+    eq([(await db.get('books', 'apres')).title, transactions], ['c\u0007d', 0], 'R-L3-27 : la passe ne se rejoue pas (garde), et un démarrage ordinaire n’ouvre aucune transaction');
+  });
+
   // --- Cycle complet entre deux appareils, arbitré comme le serveur (R-L3-21)
   // Le factice en mode `serveur` applique les règles de `app.sync_push` : c'est le seul moyen d'éprouver le contrat
   // client ↔ serveur avant la première passe réelle. Appareil A = la base de `withRepo` (repo + capture) ;
@@ -1629,7 +1674,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(liste.length > 30, 'SHELL lu : ' + liste.length + ' entrées à relire avant de conclure');
     eq(['./src/sync/transport.js', './src/sync/lots.js', './src/sync/reponses.js', './src/sync/push.js', './src/sync/pull.js', './src/sync/conflits.js', './src/sync/backfill.js', './src/sync/moteur.js']
       .filter((c) => !liste.includes(c)), [], 'SHELL : les modules d’envoi et de réception, désormais atteignables depuis app.js, sont servis hors connexion');
-    ok(/VERSION = 'cuisine-os-v0\.3\.0-2'/.test(source), 'sw.js : VERSION incrémentée pour la vague finale — l’ancien cache est purgé à l’activation');
+    ok(/VERSION = 'cuisine-os-v0\.3\.0-3'/.test(source), 'sw.js : VERSION incrémentée pour la vague finale — l’ancien cache est purgé à l’activation');
     // Le nom du cache et la version affichée dans Réglages doivent dire la MÊME chose : deux versions qui se
     // contredisent rendent impossible de savoir ce qui est servi (un cache « 0.2.0 » pour une app qui s'annonce
     // « 0.3.0 » est exactement le genre de doute qu'un marqueur de version existe pour lever).

@@ -2,6 +2,7 @@
 // NEUF et mise en file (le serveur l'acceptera : plus récente). « Garder celle d'ailleurs » : la version du serveur
 // est écrite sans remise en file. Dans les deux cas le conflit disparaît. Plus de 30 jours : retiré.
 import { syncNow } from './clock.js';
+import { nettoyerChaines } from './lots.js';
 
 // Rend `true` si le geste a été appliqué. `garderIci` écrit avec origin 'local' EXPRÈS : c'est la capture qui remet
 // la fiche en file, et c'est précisément le renvoi voulu. Le retrait du conflit voyage dans la même transaction et
@@ -15,11 +16,17 @@ export async function garderIci(db, conflit) {
     await db.mutate({
       deletes: { [conflit.store]: [conflit.record_id], sync_conflicts: [conflit.id] },
       origin: 'local',
-      payloads: { [conflit.store]: { [conflit.record_id]: { ...(conflit.server?.data || {}), updated_at: syncNow() } } },
+      payloads: { [conflit.store]: { [conflit.record_id]: nettoyerChaines({ ...(conflit.server?.data || {}), updated_at: syncNow() }) } },
     });
     return true;
   }
-  const fiche = { ...conflit.local, updated_at: syncNow() };
+  // R-L3-27 : la fiche restaurée est NETTOYÉE avant d'être écrite. Un conflit ne porte que des magasins
+  // synchronisés, donc la question ne se pose pas ailleurs. Raison : R61 nettoie à l'écriture et à la restauration,
+  // mais une fiche écrite AVANT cette vague est encore sale en base ; son écho propre (le serveur reçoit ce que
+  // `lots.js` nettoie) fait un conflit à instants égaux, et renvoyer la version sale faisait renettoyer le serveur,
+  // revenir le conflit, indéfiniment — la boucle I4, ici même, dans le geste censé la clore. Un `Blob` traverse
+  // intact : les octets d'une photo ne sont pas du texte.
+  const fiche = nettoyerChaines({ ...conflit.local, updated_at: syncNow() });
   await db.mutate({ puts: { [conflit.store]: [fiche] }, deletes: { sync_conflicts: [conflit.id] }, origin: 'local' });
   return true;
 }

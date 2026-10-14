@@ -5,7 +5,7 @@ import { UNIT_DEFINITIONS, UNIT_CONVENTIONS, INGREDIENTS } from './seed.js';
 import { newId, nowIso } from '../core/ids.js';
 import { emit } from '../core/bus.js';
 import { syncNow } from '../sync/clock.js';
-import { nettoyerChaines } from '../sync/lots.js';
+import { nettoyerChaines, porteDesCaracteresDeControle } from '../sync/lots.js';
 import { resolveMime } from '../sync/mime.js';
 
 // Base de l'application. Liaison vivante : bindDatabase ne sert qu'aux tests, pour travailler sur une base jetable.
@@ -66,7 +66,34 @@ export async function init() {
   const aPoser = Object.fromEntries(Object.entries(batch).filter(([, rows]) => rows.length));
   if (Object.keys(aPoser).length) await saveBatch(aPoser, { origin: 'device' });
   await horodaterAnciennesFiches();
+  await nettoyerAnciennesFiches();
   await purgerFilesEnFile();
+}
+
+// Passe unique (R-L3-27) : les fiches écrites AVANT cette vague portent peut-être des caractères de contrôle —
+// R61 ne nettoie que ce qui s'écrit depuis (`save`, `saveBatch`, `applyArchive`). Laissées telles quelles, elles
+// font un conflit à instants égaux au premier écho (le serveur reçoit ce que `lots.js` nettoie), et le conflit
+// revient à chaque passe. Elles sont donc nettoyées une fois, à la montée.
+// Trois précautions : une fiche n'est RÉÉCRITE que si le nettoyage la change (une bibliothèque saine n'écrit rien) ;
+// son `updated_at` est CONSERVÉ — ce n'est pas une modification de la personne, et une heure neuve la ferait gagner
+// contre le serveur alors que personne n'a rien demandé ; et l'origine est 'device', donc rien n'entre en file (la
+// fiche repartira à sa prochaine écriture, ou par son écho). Les `Blob` ne sont jamais parcourus.
+const NETTOYAGE_GUARD = 'nettoyage_chaines';
+async function nettoyerAnciennesFiches() {
+  const fait = await db.get('sync_state', NETTOYAGE_GUARD);
+  if (fait?.value === 1) return 0;
+  const puts = {};
+  let n = 0;
+  for (const store of SYNC_STORES) {
+    const sales = (await db.getAll(store)).filter((r) => r && porteDesCaracteresDeControle(r));
+    if (!sales.length) continue;
+    puts[store] = sales.map((r) => nettoyerChaines(r));
+    n += sales.length;
+  }
+  // La garde part dans la MÊME transaction que le nettoyage : une passe à moitié faite serait rejouée en entier.
+  puts.sync_state = [{ key: NETTOYAGE_GUARD, value: 1 }];
+  await db.mutate({ puts, origin: 'device' });
+  return n;
 }
 
 // Migration unique (R-L3-22) : L2 capturait les lignes « files », et rien ne peut les envoyer avant L4 (leurs
