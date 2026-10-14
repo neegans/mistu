@@ -15,7 +15,7 @@ npx serve .
 - Le service worker et le hachage WebCrypto exigent `https://` ou `localhost`. Sur le réseau local en `http://`, l'app fonctionne (repli SHA-256 en JavaScript) mais sans cache hors connexion : pour installer la PWA sur iPhone/iPad, servir en HTTPS (tunnel ou certificat local).
 - Version hébergée : `https://neegans.github.io/mistu/` (GitHub Pages, branche `main`, dépôt public `neegans/mistu`). Chaque `git push` sur `main` la met à jour en une minute environ. Les données restent dans IndexedDB de chaque appareil ; rien n'est envoyé à GitHub.
 - Sur iOS, ajouter à l'écran d'accueil depuis Safari. L'icône d'écran d'accueil est `icons/apple-touch-icon.png` (180 × 180, opaque, pleine) ; elle se régénère avec `python3 -I tools/make-apple-touch-icon.py icons/apple-touch-icon.png` (formes identiques à `icons/apple-touch-icon.svg`, aucune dépendance).
-- Tests du domaine et de sauvegarde : ouvrir `http://localhost:8080/tests/`. La suite de sauvegarde utilise uniquement des bases IndexedDB temporaires `cuisine-os-backup-test-*`, nettoyées en fin de scénario. Ces nouveaux tests n'ont **pas** été exécutés pendant cette modification (shell et réseau désactivés).
+- Tests du domaine et de sauvegarde : ouvrir `http://localhost:8080/tests/`. La suite de sauvegarde utilise uniquement des bases IndexedDB temporaires `cuisine-os-backup-test-*`, nettoyées en fin de scénario. La suite complète (domaine, sauvegarde, synchronisation, page « Ajouter ») est **exécutée à chaque lot** : le dernier compte vert est noté dans `CLAUDE.md`. Elle n'écrit jamais dans la bibliothèque du navigateur.
 
 ## Ce qui est construit (V0, avec des morceaux de V0.5)
 

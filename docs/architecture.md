@@ -269,20 +269,33 @@ src/ui/accueil-livre.js  accueilLivreModel/ACCUEIL_ACTIONS/renderAccueilLivre : 
 src/ui/signet.js         lienSignet (ré-exporté de core/lien.js), signetModel, fabriquerSignet, enregistrerSignet,
                          renderSignet/renderSignetRoute : garder un lien web comme référence, avec titre et livre
                          facultatif.
-src/core/image.js        dimensionsImage, reduireImage, ErreurImage, LIMITES_COUVERTURE, COVER_INPUT_MIME :
-                         dimensions lues dans l'en-tête AVANT décodage (bombe de décompression), re-encodage JPEG
-                         systématique (HEIC et formats exotiques inclus), bornes 25 Mo / 50 Mpx (fichier local) et
-                         5 Mo (corps d'une réponse distante, lu en flux et coupé — Open Library n'annonce pas
-                         `content-length`, R-UX-12).
-src/core/blob-urls.js    urlDeBlob/revoquerUrlsDeBlob : chaque URL blob: créée pour afficher une couverture ou un
-                         aperçu est suivie dans un registre partagé, révoquée à la route suivante (S15/F4). Dette
+src/core/image.js        dimensionsImage, reduireImage, ErreurImage, LIMITES_COUVERTURE (COVER_INPUT_MIME, lui,
+                         est exporté par src/sync/mime.js — RF-m3) : dimensions lues dans l'en-tête AVANT tout
+                         décodage (bombe de décompression), ré-encodage JPEG systématique (HEIC et formats
+                         exotiques inclus), bornes 25 Mo / 16 Mpx (fichier local) et 5 Mo / 16 Mpx (corps d'une
+                         réponse distante, lu EN FLUX et coupé — Open Library n'annonce pas `content-length`,
+                         R-UX-12). Le mur de pixels vaut pour les DEUX sources depuis S2 : une image choisie ici
+                         est mesurée par `poserCouverture` (chemin local) avant `reduireImage`, et seuls les
+                         conteneurs que `dimensionsImage` sait lire (JPEG, PNG, WebP) y passent — un en-tête
+                         illisible (HEIC) traverse, et c'est le ré-encodage qui tranche. Le corps JSON des
+                         métadonnées est lu par la MÊME fonction bornée que les octets d'une couverture
+                         (`lireBornee` de livre-ajout.js, coupée à 256 Ko — S1).
+src/core/blob-urls.js    urlDeBlob/revoquerUrlDeBlob/revoquerUrlsDeBlob : chaque URL blob: créée pour afficher une
+                         couverture ou un aperçu est suivie dans un registre partagé, révoquée à la route suivante
+                         (S15/F4) ; `revoquerUrlDeBlob(u)` révoque UNE URL connue, ce dont `library.js` a besoin
+                         pour ne lâcher que la génération précédente — et APRÈS avoir remplacé les nœuds (D-T9 :
+                         révoquer avant laisse un <img> sur une URL morte, erreur de console). Dette
                          assumée : `displayUrl` (vignettes, PDF) crée encore des URL blob: hors de ce registre
                          (pré-existant, hors lot).
-src/core/lien.js         lienSignet(sourceUrl) : fonction pure sans dépendance, pour que tout écran affichant un
+src/core/lien.js         lienSignet(sourceUrl) et libelleSource(recipe) : fonctions pures sans dépendance, pour
+                         que tout écran affichant un
                          lien puisse revalider l'adresse AU RENDU (seuls http:/https: s'ouvrent, hôte rendu en
                          punycode) sans jamais faire confiance à un `source_label` stocké, qu'une archive ou le
                          serveur peuvent avoir rempli avec n'importe quoi (S7). Sous `components.js` ET
-                         `signet.js` (qui importe `components.js`), pour éviter un cycle.
+                         `signet.js` (qui importe `components.js`), pour éviter un cycle. `lienSignet` RETIRE
+                         `username`/`password` de l'href rendu (D-T7 : un mot de passe collé dans une adresse ne
+                         se stocke ni ne se renvoie) ; `libelleSource` sert les surfaces qui n'affichent qu'un
+                         texte (`meals.js`, `exporters.js` — S8).
 ```
 
 `src/ui/add.js` est réécrit (grille de cinq cartes `renderGrille`, sélecteur avant scan `renderSelecteurScan`,

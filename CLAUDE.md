@@ -235,8 +235,10 @@ aucune base n'est ouverte** — en production les réglages sont toujours relus 
 `.superpowers/sdd/2026-10-14-ajouter-et-livres-ux/` (`progress.md`, un brief, un rapport et une revue par tâche ;
 dix tâches, chacune avec au plus deux rondes de corrections). Spec :
 `docs/superpowers/specs/2026-10-13-ajouter-et-livres-ux-design.md` (rév. 2 ; § 15.2 « Ce que la construction a
-amendé » : une ligne par ruling R-UX-1 à R-UX-15). `APP_VERSION = '0.4.0'` (posée dès la tâche 1, R-UX-5, pin
-structurel `v0.4.0-\d+`), `sw.js VERSION = 'cuisine-os-v0.4.0-11'`, sept modules neufs dans `SHELL` (`puces.js`,
+amendé » : une ligne par ruling R-UX-1 à R-UX-16, puis la section « Vague finale de corrections » du 14 octobre —
+C1-C10, S1-S13, F1-F13, T7/T9/T10, RF-I1 à RF-I4 — et les écarts assumés qui restent). `APP_VERSION = '0.4.0'`
+(posée dès la tâche 1, R-UX-5, pin structurel `v0.4.0-\d+`), `sw.js VERSION = 'cuisine-os-v0.4.0-12'` (vague
+finale), sept modules neufs dans `SHELL` (`puces.js`,
 `livre-ajout.js`, `accueil-livre.js`, `signet.js`, `image.js`, `blob-urls.js`, `lien.js`) et `add.js` réécrit.
 
 **Ce qui marche** (éprouvé par la suite, bases jetables, aucun réseau, gestes injectés) : la **grille** de cinq
@@ -267,15 +269,42 @@ du corps **en flux**, coupée à 5 Mo (R-UX-12). `?default=false` ne garantit pa
 Library). Google Books : **429** sans clé — repli de métadonnées seulement, jamais de couverture.
 
 **Dettes (assumées, nommées dans le registre).** Orphelins `files` jamais effacés (L4, aucun blob supprimé par ce
-lot) ; `source_pages.sha256` reste une relation **latente**, jamais vérifiée à la restauration (même nature que
+lot) — et **S13** : ce n'est pas rare, **toute identification Open Library qui aboutit écrit une ligne `files`**
+(la couverture est ré-encodée et posée avant que la personne ait rien décidé), y compris quand un geste la rend
+caduque pendant le ré-encodage (C1 laisse alors la ligne derrière lui, exprès) ; **RF-m13** : les fonctions de
+couverture (`poserCouverture`, `recupererCouvertureParIsbn`, `renderZoneCouverture`, `messageErreurImage`) vivent
+dans le module de ROUTE `livre-ajout.js` et sont importées par `book.js` — dette nommée, aucun déplacement dans la
+vague finale ; **`app.js` reste hors test** par décision (il lance l'application à l'import) : la révocation des
+URL `blob:` est désormais éprouvée au point d'appel de `renderLibrary` (RF-I2), jamais dans `app.js` ; `source_pages.sha256` reste une relation **latente**, jamais vérifiée à la restauration (même nature que
 `cover_sha256`, pointeur souple assumé) ; les octets d'une couverture ne voyagent pas avant L4 (seule la ligne
 `files` est reçue) ; D2 (pages scannées envoyées au serveur) reste ouvert ; `AbortSignal.timeout` exige Safari 16+
-(repli non éprouvé) ; `meals.js` et `exporters.js` affichent encore `source_label` **brut** — S7 n'est fermé que sur
-`recipe.js`/`components.js` (R-UX-11), pas sur ces deux surfaces ; `displayUrl` (vignettes, PDF) crée encore des URL
-`blob:` non suivies par `blob-urls.js` (pré-existant, hors lot).
+(repli non éprouvé) ; `displayUrl` (vignettes, PDF) crée encore des URL
+`blob:` non suivies par `blob-urls.js` (pré-existant, hors lot). **Fermé le 14 octobre** : `meals.js` et
+`exporters.js` recalculent l'hôte (S8, par `libelleSource` de `core/lien.js`) — S7 ne laissait plus que ces deux
+surfaces ouvertes.
 
-Suite complète : **1270/1270 verts**, 0 erreur et 0 avertissement console (hors `apple-mobile-web-app-capable`,
-pré-existant et hors lot) ; `node --test tools/*.test.mjs` 40/40 ; `node tools/generer-migrations.mjs --check` : 0.
+**Vague finale de corrections (14 octobre 2026).** Une seule vague, trois lentilles adverses plus la revue de
+branche. Les dix constats de correctness (C1-C10), les onze de sécurité (S1-S13) et les faux-verts (F1-F13) sont
+corrigés, avec les mineurs différés des tâches (T7, T9, T10) et la revue finale (RF-I1 à RF-I4). Les quatre
+défauts qui changeaient ce que la personne OBTIENT : **C1** la garde d'une couverture distante n'était évaluée
+qu'une fois, avant le ré-encodage — mesuré sur le code de `808aff8` : « ← Changer d'ISBN » puis « Saisir à la
+main » pendant le ré-encodage laissaient quand même la couverture s'afficher sur la fiche saisie à la main ; un
+compteur de génération, relu après chaque `await`, ferme la fenêtre (et « Saisir à la main » pendant
+« Recherche… » n'hérite plus des champs de la réponse en vol) · **C3** deux identifications de suite affichaient
+« Livre 1112 » sous « ISBN 2223 » · **C4** sur la fiche livre, « Enregistrer » les métadonnées effaçait la
+couverture posée entre-temps (et réciproquement) : chaque geste relit l'édition · **C2** un livre anglais
+identifié par Google Books était écrit `fr`. Côté sécurité : **S1** le corps JSON distant est lu en flux et coupé
+à 256 Ko (`lireBornee`, la même fonction que pour les octets d'une couverture) · **S2/S6** le mur de pixels, abaissé
+à **16 Mpx**, garde aussi le chemin LOCAL (une image de 400 Mpx choisie ici atteignait `createImageBitmap`) ·
+**S3** `bookCover` n'affiche que des types image de la liste blanche · **D-T7** un mot de passe collé dans une
+adresse n'est plus stocké (`username`/`password` retirés de l'href). Les tests attendent désormais un FAIT
+(`etatRoute()` de la route) et plus un délai (F3/F4), le total d'assertions est **épinglé** (F2), et les deux
+routes prennent un sac `{ repo, navigate, toast }` injecté — la charnière « Ajouter ce livre » → `?nouveau=1` est
+enfin mesurée (RF-I1). Rapport : `.superpowers/sdd/2026-10-14-ajouter-et-livres-ux/final-fix-report.md`.
+
+Suite complète après la vague finale : **1376/1376 verts** (total épinglé dans `tests/tests.js` — F2), 0 erreur et
+0 avertissement console (hors `apple-mobile-web-app-capable`, pré-existant et hors lot) ; `node --test
+tools/*.test.mjs` 40/40 ; `node tools/generer-migrations.mjs --check` : 0. (Clôture de la tâche 10 : 1270/1270.)
 Vérifié dans l'app réelle le 14 octobre (service worker `cuisine-os-v0.4.0-11` actif après deux rechargements) :
 `#/add`, `#/add/livre`, `#/add/signet`, `#/library` sans erreur console ni réponse ≥ 400 ; la bibliothèque de ce
 navigateur partagé est encore **vide** (aucune fiche livre à ouvrir pour l'instant — le parcours réel ci-dessus

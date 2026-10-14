@@ -129,14 +129,19 @@ la lit, et l'archive ne la conserverait pas (F9). **Pas de nouvel index → `DB_
    200 `image/jpeg` 17,9 Ko pour un ISBN connu, 404 sans couverture (`default=false` tient). À refaire depuis `localhost`
    au plan. Bornes **avant** décodage (S4) : `Content-Length` **et** `blob.size` ≤ **5 Mo**, type annoncé dans
    `COVER_INPUT_MIME` (exporté de `mime.js` : `image/jpeg`, `image/png`, `image/webp` — F20), **dimensions lues dans
-   l'en-tête du fichier** (`dimensionsImage(blob)` : SOF JPEG / IHDR PNG / VP8·VP8L·VP8X WebP) ≤ **50 Mpx** ; hors bornes ou
+   l'en-tête du fichier** (`dimensionsImage(blob)` : SOF JPEG / IHDR PNG / VP8·VP8L·VP8X WebP) ≤ **16 Mpx** (S6 : 4 000 ×
+   4 000 ; 50 Mpx au plan, abaissé parce qu'aucune couverture de livre n'en demande autant) ; hors bornes ou
    en-tête illisible → rejet silencieux. Tout échec → « Aucune couverture reçue. Tu peux la photographier. » — jamais une
    carte rouge.
 2. **Photographiée** : `pickFiles({ accept: 'image/*', multiple: false, capture: 'environment' })`.
 3. **Choisie** : `pickFiles({ accept: 'image/*', multiple: false })`.
-   Pour 2 et 3 : octets ≤ **25 Mo**, type dans `ALLOWED_MIME` image (HEIC admis en entrée : Safari le décode) ; une image
-   que `createImageBitmap` **ne décode pas** (HEIC sur Chrome, fichier corrompu) → « Cette image ne peut pas être lue ici.
-   Essaie une autre photo. » (F11).
+   Pour 2 et 3 : octets ≤ **25 Mo**, type dans `ALLOWED_MIME` image (HEIC admis en entrée : Safari le décode), **et le
+   même mur de 16 Mpx lu dans l'en-tête, avant `reduireImage`** (S2 : il ne gardait que la source distante, de sorte
+   qu'une image choisie ici — 20 000 × 20 000, 1,6 Go décompressés — allait droit à `createImageBitmap`) → « Cette image
+   est trop grande. ». Un en-tête que `dimensionsImage` ne sait pas lire (HEIC) traverse : c'est le ré-encodage qui
+   tranche. Une image que `createImageBitmap` **ne décode pas** (HEIC sur Chrome, fichier corrompu) → « Cette image ne
+   peut pas être lue ici. Essaie une autre photo. » (F11) ; une couverture **reçue** puis refusée au ré-encodage dit
+   « La couverture reçue n'a pas pu être lue. » — pas « Aucune couverture reçue » : ce n'est pas le même fait (S12).
 
 **Ré-encodage systématique (S5/F11).** `src/core/image.js` : `reduireImage(blob, { maxCote = 1200, qualite = 0.85 })` →
 `createImageBitmap(blob, { imageOrientation: 'from-image' })` (repli sans l'option si rejetée) → `canvas` → **toujours** un
@@ -145,9 +150,12 @@ métadonnées (dont la position GPS d'une photo) **disparaissent**, HEIC devient
 `repo.putFile(sha256, blob, { mime: 'image/jpeg' })` — idempotent : une empreinte déjà connue rend la ligne existante
 inchangée, et rien ne dépend de sa méta (F10). La capture de synchronisation ne met pas cette ligne en file (R58).
 
-**Orphelins (S8/S11).** Si la personne quitte le pas 2 sans enregistrer, ou retire une couverture, la ligne `files` **reste** :
-ce lot **n'efface aucun blob** (une suppression hors transaction unique court contre une séance de scan qui peut partager
-l'empreinte). Coût : quelques centaines de Ko par essai abandonné ; balayage par comptage de références = L4.
+**Orphelins (S8/S11/S13).** Si la personne quitte le pas 2 sans enregistrer, ou retire une couverture, la ligne `files`
+**reste** : ce lot **n'efface aucun blob** (une suppression hors transaction unique court contre une séance de scan qui peut
+partager l'empreinte). Et ce n'est pas un cas rare : **toute identification Open Library qui aboutit écrit une ligne
+`files`** (la couverture est ré-encodée et posée avant que la personne ait décidé quoi que ce soit), y compris quand un
+geste la rend aussitôt caduque pendant le ré-encodage (C1). Coût : quelques centaines de Ko par essai abandonné ;
+balayage par comptage de références = **L4**.
 
 **Affichage.** `bookCover(edition, book, { href, fichier })` : `fichier?.blob` → `<img class="cover-img" alt="">` ; sinon la
 vignette texte. **Propriétaire des URL `blob:`** (F4/S15) : `src/core/blob-urls.js` — `urlDeBlob(blob)` enregistre l'URL ;
@@ -395,8 +403,44 @@ Une ligne par écart réel entre ce plan et le code livré, décidé par le cont
 | R-UX-12 | Le corps d'une réponse de couverture est lu **en flux**, annulé dès 5 Mo cumulés (Open Library n'annonce pas `content-length`). |
 | R-UX-13 | La couverture reçue est remise à vide par `identifier` et `retourIsbn` ; une réponse distante tardive n'appartient qu'à SA demande d'ISBN (`isbnDemande`, `touchee`). |
 | R-UX-14 | `alt = book.title` sur l'image de couverture, pour qu'un lien vers l'image porte toujours un nom accessible. |
-| R-UX-15 | **S10 retirée** : `connect-src` reste `'self' https:` sur les deux pages (l'assistant IA, `src/domain/llm.js`, accepte une URL de base libre — aucune liste fermée ne peut la couvrir sans casser cette fonctionnalité antérieure au lot). Le test statique affirme à la place, sur les deux pages, une égalité stricte sur `connect-src`, `img-src`,
-`script-src`, `object-src`, `default-src`, `base-uri` et `form-action` (toute la CSP, pas seulement `connect-src`). |
+| R-UX-15 | **S10 retirée** : `connect-src` reste `'self' https:` sur les deux pages (l'assistant IA, `src/domain/llm.js`, accepte une URL de base libre — aucune liste fermée ne peut la couvrir sans casser cette fonctionnalité antérieure au lot). Le test statique affirme à la place, sur les deux pages, une égalité stricte sur les **neuf** directives (`default-src`, `script-src`, `style-src`, `img-src`, `frame-src`, `connect-src`, `object-src`, `base-uri`, `form-action`) **plus la liste exacte des directives présentes** : toute la CSP, et aucune ne peut être ajoutée ni retirée sans qu'un test tombe (D-T10). |
+| R-UX-16 | Un `?edition` **connu** ouvre directement le sélecteur avant scan (livre fixé, `select` désactivé), sans passer par la grille : c'était déjà l'intention de R-UX-6, mais `renderAdd` dessinait quand même la grille d'abord. « ← Retour » ramène à la grille. |
 
-Compte final (tâche 10, clôture, après la revue de tâche ronde 2) : **1270/1270** tests verts, suite complète, 0
-erreur et 0 avertissement console.
+### Vague finale de corrections (14 octobre 2026, après la revue de branche)
+
+Trois lentilles adverses (correctness C1-C10, sécurité S1-S13, faux-vert F1-F13), les mineurs différés des tâches
+(T7, T9, T10) et la revue finale de branche (RF-I1 à RF-I4, mineurs RF-m3 à RF-m15) ont été repris en une vague.
+Corrigés : **C1** compteur de génération — un geste pendant le ré-encodage (ou pendant « Recherche… ») gagne, la
+garde est relue après chaque `await` · **C2** `language` fusionné depuis la fiche distante tant que la personne n'a
+pas touché au menu · **C3** les champs du PREMIER ISBN sont rendus avant la seconde identification (plus de titre A
+avec ISBN B) ; sa correction à elle reste · **C4** fiche livre : chaque geste RELIT l'édition et n'écrit que son
+champ (couverture et métadonnées ne s'effacent plus l'une l'autre) · **C5/R-UX-16** · **C6** présélection sur les
+pages résolues · **C7** l'intention n'est retirée de l'adresse que si l'adresse est encore celle de la séance ·
+**C8** séances et livres rangés par récence · **C9** repli si `AbortSignal.timeout` manque · **C10** un signet
+rattaché à un livre montre le livre ET son hôte · **S1** le corps JSON distant est lu en flux et coupé à 256 Ko
+(même fonction que les octets d'une couverture) · **S2** mur de pixels sur le chemin local, 16 Mpx (**S6**) ·
+**S3** `bookCover` n'affiche que des types image de la liste blanche · **S7** adresse refusée bornée à 200
+caractères · **S8** hôte recalculé dans `meals.js` et `exporters.js` · **S9** identifiants encodés dans les
+adresses · **S10** valeur de puce bornée (60 caractères, 50 puces) et traduite seulement si elle vient de la graine
+· **S12** « La couverture reçue n'a pas pu être lue. » · **D-T7** `enCours` dans le modèle du signet, et
+`username`/`password` retirés de l'adresse gardée · **D-T9** `aria-label` sur la vignette, révocation APRÈS le
+remplacement des nœuds · **RF-I1** les deux routes prennent un sac `{ repo, navigate, toast }` injecté (vrais par
+défaut) et la charnière § 5 → § 8 est mesurée · **RF-I2** révocation éprouvée au point d'appel · **RF-I3/F5**
+l'éditeur de recette est RENDU, plus cherché au grep · **F2** total d'assertions épinglé · **F3/F4** les tests
+attendent un FAIT (`etatRoute()`), plus un délai · **F6, F8, F9, F10, F12, F13, S4, D-T10** et les mineurs
+RF-m3 à RF-m15.
+
+Écarts restants, assumés et nommés ici : **I-H partiel** — les deux routes du lot prennent leurs gestes par un sac
+à valeurs par défaut (RF-I1), les autres vues du lot (fiche livre, `renderAdd`) écrivent encore par le module
+`repo` importé ; **§ 13.2 « délai 10 s injectable » non implémenté** — seuls `LIMITES_ISBN.delaiMs`, la
+transmission du signal et le repli `signalDelai` sont testés, aucune horloge n'est injectée ; **§ 13.8
+`sessionView` non exercée** — seules ses trois fonctions pures le sont (`adresseSeance`, `appliquerIntention`,
+`peutRetirerIntention`), donc C6 et C7 sont posés mais pas joués ; **message « La couverture n'est pas sur cet
+appareil. »** sur la fiche seulement — la grille de Mes livres reste muette (écart voulu, § 6) ; **« Séance en
+cours » est rendue SOUS l'en-tête**, alors que § 9 la plaçait au-dessus des gestes ; **RF-m13** les fonctions de
+couverture (`poserCouverture`, `recupererCouvertureParIsbn`, `renderZoneCouverture`, `messageErreurImage`) vivent
+dans le module de route `livre-ajout.js` et sont importées par `book.js` — dette nommée, aucun déplacement dans
+cette vague ; **`app.js` reste hors test** par décision (il lance l'application à l'import).
+
+Compte final (tâche 10, clôture) : **1270/1270**. Après la vague finale : **1376/1376** tests verts, suite
+complète, 0 erreur et 0 avertissement console.
