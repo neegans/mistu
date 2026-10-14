@@ -3,6 +3,7 @@ import { classerErreur, createTransport } from '../src/sync/transport.js';
 import { createAuth } from '../src/sync/auth.js';
 import { creerTransportFactice } from './transport-factice.js';
 import { withRepo } from './sync-fixture.js';
+import { withDatabase } from './backup.js';
 
 export async function runSyncL3Tests({ eq, ok }) {
   // --- Transport (spec § 5.3) : classification des erreurs, un seul chemin réseau
@@ -48,9 +49,11 @@ export async function runSyncL3Tests({ eq, ok }) {
   eq(tailleJson({ a: 'é' }), 10, 'lots : taille en octets UTF-8 du JSON');
   eq(LIMITES, { elements: 500, lot: 921600, element: 524288 }, 'lots : bornes de la spec (§ 3.4, R14), le lot avec marge sous le seuil serveur (R-L3-6)');
 
+  // R-L3-21 : l'entrée d'une suppression porte l'instant DU GESTE, le payload garde l'heure de la dernière écriture
+  // de la fiche. Les deux sont donc volontairement différentes ici — c'est ce qui permet de voir laquelle part.
   const entrees = [
     { seq: 1, store: 'books', id: 'b1', op: 'put', updated_at: '2026-10-13T10:00:00Z', tries: 0 },
-    { seq: 2, store: 'books', id: 'b2', op: 'delete', updated_at: '2026-10-13T10:01:00Z', payload: { id: 'b2', title: 'X', updated_at: '2026-10-13T10:01:00Z' }, tries: 0 },
+    { seq: 2, store: 'books', id: 'b2', op: 'delete', updated_at: '2026-10-13T10:01:00Z', payload: { id: 'b2', title: 'X', updated_at: '2026-10-13T09:00:00Z' }, tries: 0 },
     { seq: 3, store: 'books', id: 'b1', op: 'put', updated_at: '2026-10-13T10:02:00Z', tries: 0 },
     { seq: 4, store: 'files', id: 'f'.repeat(64), op: 'put', updated_at: '2026-10-13T10:03:00Z', tries: 0 },
     { seq: 5, store: 'books', id: 'b3', op: 'put', updated_at: '2026-10-13T10:04:00Z', tries: 0 },
@@ -66,7 +69,12 @@ export async function runSyncL3Tests({ eq, ok }) {
   eq(c.lots[0].elements[0].data.title, 'Un', 'lots : la fiche relue est nettoyée');
   eq(c.lots[0].elements[1].data.title, 'X', 'lots : le payload d’une suppression part avec elle');
   eq(c.lots[0].elements[2].data, null, 'lots : un put dont la fiche a disparu sans payload part comme tombale sans data');
-  eq(c.lots[0].elements[1].updated_at, '2026-10-13T10:01:00Z', 'lots : updated_at d’une suppression avec payload = celui du payload');
+  // R-L3-21 (ancien test retourné) : l'heure de l'ENTRÉE gagne, jamais celle du payload. Avec l'heure du payload, la
+  // tombale partait avec l'instant que le serveur possède DÉJÀ — `u = cur_updated`, `cur_deleted is null` : aucune
+  // branche de `sync_push` ne s'applique, la réponse est `rejected{conflit}` et la suppression ne quitte jamais
+  // l'appareil. Une suppression est un ÉVÉNEMENT : elle porte l'instant de son geste.
+  eq(c.lots[0].elements[1].updated_at, '2026-10-13T10:01:00Z', 'R-L3-21 : updated_at d’une suppression = celui de l’ENTRÉE (le geste), jamais celui du payload');
+  eq(c.lots[0].elements[1].data.updated_at, '2026-10-13T09:00:00Z', 'R-L3-21 : … et le payload envoyé garde sa propre heure (la fiche au moment de la suppression)');
   eq(c.lots[0].elements[2].updated_at, '2026-10-13T10:04:00Z', 'lots : updated_at d’un put disparu sans payload = celui de l’entrée de la file');
   eq(c.lots[0].seqs, [1, 3, 2, 5], 'lots : les seq de chaque clé suivent le lot');
   eq(c.retenues, [{ seq: 4, seqs: [4], raison: 'fichier en attente' }], 'lots : une ligne files est retenue tant que l’empreinte distante n’est pas confirmée (L4), tous les seq du groupe (R-L3-5)');
@@ -638,6 +646,49 @@ export async function runSyncL3Tests({ eq, ok }) {
     try { restant = await purgerAnciens(db, Date.parse('2026-10-13T00:00:00Z')); } finally { db.mutate = vraiMutate; }
     eq([restant, transactions], [0, 0], 'conflits : une purge sans rien à retirer n’ouvre aucune transaction');
   });
+
+  // --- Cycle complet entre deux appareils, arbitré comme le serveur (R-L3-21)
+  // Le factice en mode `serveur` applique les règles de `app.sync_push` : c'est le seul moyen d'éprouver le contrat
+  // client ↔ serveur avant la première passe réelle. Appareil A = la base de `withRepo` (repo + capture) ;
+  // appareil B = une seconde base temporaire, qui ne fait que recevoir.
+  try {
+    await withRepo(async (repo, db) => {
+      const tf = creerTransportFactice({ serveur: true });
+      const pousser = () => createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer();
+      await withDatabase(async (dbB) => {
+        const recevoirB = () => createPull({ db: dbB, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1' }).recevoir();
+
+        // 1. Une fiche écrite sur A arrive sur B.
+        await repo.save('books', { id: 'cyc1', title: 'Un' });
+        eq([(await pousser()).envoyes, await db.count('outbox')], [1, 0], 'cycle : la fiche neuve est acceptée par le serveur, la file se vide');
+        eq((await recevoirB()).recues, 1, 'cycle : B reçoit la fiche');
+        eq((await dbB.get('books', 'cyc1'))?.title, 'Un', 'cycle : B porte la fiche');
+
+        // 2. Le miroir : A MODIFIE une fiche déjà synchronisée → acceptée (son instant est plus récent), pas conflit.
+        await repo.save('books', { id: 'cyc1', title: 'Deux' });
+        const rModif = await pousser();
+        eq([rModif.envoyes, rModif.conflits, rModif.quarantaine], [1, 0, 0], 'cycle : une modification d’une fiche synchronisée est ACCEPTÉE (jamais un conflit)');
+        eq([(await recevoirB()).recues, (await dbB.get('books', 'cyc1'))?.title], [1, 'Deux'], 'cycle : B reçoit la modification');
+
+        // 3. C1 : A SUPPRIME une fiche déjà synchronisée → la tombale doit être acceptée et se propager.
+        await repo.remove('books', 'cyc1');
+        const rSupp = await pousser();
+        eq([rSupp.envoyes, rSupp.conflits, rSupp.quarantaine], [1, 0, 0], 'C1 : la tombale d’une fiche déjà synchronisée est ACCEPTÉE (aucun conflit, aucune quarantaine)');
+        eq([await db.count('outbox'), await db.count('sync_conflicts')], [0, 0], 'C1 : la file est vide et aucun conflit n’est journalisé');
+        ok(tf.ligne('books', 'cyc1')?.deleted_at, 'C1 : le serveur porte bien la tombale (deleted_at posé)');
+        const rB = await recevoirB();
+        eq([rB.supprimees, rB.conflits, rB.erreur], [1, 0, null], 'C1 : B applique la suppression, sans conflit');
+        eq(await dbB.get('books', 'cyc1'), undefined, 'C1 : la fiche est partie de B — la suppression s’est propagée');
+
+        // 4. Rejouer la même tombale ne change rien (réessai idempotent : même instant, déjà supprimée).
+        const entree = { user_id: 'u1', store: 'books', id: 'cyc1', op: 'delete', updated_at: tf.ligne('books', 'cyc1').updated_at, payload: { id: 'cyc1', title: 'Deux' }, tries: 0 };
+        await db.mutate({ puts: { outbox: [entree] }, origin: 'device' });
+        const seqServeur = tf.ligne('books', 'cyc1').server_seq;
+        const rRejeu = await pousser();
+        eq([rRejeu.envoyes, rRejeu.conflits, tf.ligne('books', 'cyc1').server_seq], [1, 0, seqServeur], 'C1 : la même tombale rejouée est acceptée sans rien réécrire (server_seq inchangé)');
+      });
+    });
+  } finally { setClockOffset(0); }
 
   // --- Moteur (spec § 5.3, § 5.5, § 4.2) : ordre envoi initial → envoi → réception, un seul vol, état, déclencheurs
   const { createMoteur } = await import('../src/sync/moteur.js');

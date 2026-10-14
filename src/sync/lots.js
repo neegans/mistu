@@ -37,17 +37,30 @@ export function dedoublonner(entrees) {
 }
 
 // Une entrée → un élément de sync_push, ou une retenue (ligne files : L4 confirme l'empreinte avant l'envoi).
+// R-L3-21 : pour une TOMBALE, l'heure envoyée est celle de l'ENTRÉE (l'instant du geste, posé par la capture), et
+// jamais celle du payload — qui est l'heure de la dernière écriture de la fiche, donc exactement celle que le
+// serveur possède déjà. Le payload part quand même avec son heure : il est la copie de la fiche (spec § 5.1).
+const tombaleDe = (entree) => ({
+  element: {
+    store: entree.store,
+    id: entree.id,
+    data: entree.payload ? nettoyerChaines(entree.payload) : null,
+    updated_at: entree.updated_at,
+    deleted: true,
+  },
+});
+
 async function elementDe(entree, relire) {
+  // Garde-fou désormais INATTEIGNABLE depuis la capture (R-L3-22 : les lignes `files` n'entrent plus en file en L3,
+  // et celles déjà présentes sont retirées une fois par `repo.init()`). Il reste : c'est la seule barrière si une
+  // entrée `files` revient par un chemin qu'on n'a pas prévu, et L4 lui donnera son vrai travail (confirmer
+  // l'empreinte distante avant d'envoyer la ligne). Sa retenue reste donc testée sur `composerLots`, pas sur la file.
   if (entree.store === 'files') return { retenue: true };
-  if (entree.op === 'delete') {
-    const data = entree.payload ? nettoyerChaines(entree.payload) : null;
-    return { element: { store: entree.store, id: entree.id, data, updated_at: data?.updated_at || entree.updated_at, deleted: true } };
-  }
+  if (entree.op === 'delete') return tombaleDe(entree);
   const fiche = await relire(entree.store, entree.id);
   if (fiche === undefined || fiche === null) {
     // Disparue entre la capture et l'envoi : elle est partie, on le dit au serveur avec ce qu'on sait.
-    const data = entree.payload ? nettoyerChaines(entree.payload) : null;
-    return { element: { store: entree.store, id: entree.id, data, updated_at: data?.updated_at || entree.updated_at, deleted: true } };
+    return tombaleDe(entree);
   }
   const data = nettoyerChaines(fiche);
   return { element: { store: entree.store, id: entree.id, data, updated_at: data.updated_at || entree.updated_at, deleted: false } };

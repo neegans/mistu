@@ -3,6 +3,7 @@
 import { SYNC_STORES } from '../model/schema.js';
 import { isAllowed } from './mime.js';
 import { keyOf } from './tables.js';
+import { syncNow } from './clock.js';
 
 // Une ligne « files » non synchronisable reste locale et n'entre jamais en file (spec § 5.3, § 5.4).
 // Le type est vérifié en plus du drapeau : les lignes d'avant ce lot et celles d'une restauration n'ont pas de
@@ -34,7 +35,15 @@ export function installCapture(db, { getUserId = () => null, isActivitySynced = 
       for (const k of keys) {
         const payload = payloadFor(payloads, store, k);
         if (!syncableRow(store, payload)) continue;
-        rows.push({ user_id, store, id: k, op: 'delete', updated_at: payload?.updated_at || null, payload, tries: 0 });
+        // R-L3-21 : une suppression est un ÉVÉNEMENT, et sa tombale porte l'instant de SON GESTE — jamais l'heure de
+        // la dernière écriture de la fiche, que le serveur possède déjà. Avec celle du payload, `sync_push` voyait
+        // `u = cur_updated` et `cur_deleted is null` : aucune de ses deux branches d'écriture ne s'appliquait, la
+        // réponse était `rejected{conflit}` et la suppression ne quittait jamais l'appareil (toutes les autres
+        // copies gardaient la fiche, sans que rien ne l'annonce). Le `payload`, lui, garde sa propre heure : c'est
+        // la copie de la fiche au moment de la suppression (spec § 5.1), pas l'heure de l'événement.
+        // Conséquence voulue : supprimer une fiche déjà absente (payload nul) ne produit plus une entrée sans heure,
+        // que le serveur refusait avec le motif « updated_at » et qui finissait en quarantaine pour rien.
+        rows.push({ user_id, store, id: k, op: 'delete', updated_at: syncNow(), payload, tries: 0 });
       }
     }
     return rows.length ? { outbox: rows } : null;
