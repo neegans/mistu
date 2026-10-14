@@ -560,6 +560,29 @@ export async function runAjouterTests({ eq, ok }) {
     eq([apresRefus, lectures], [0, 1], 'couverture : le corps d’une réponse trop lourde n’est JAMAIS lu, celui d’une réponse bornée l’est');
   }
   {
+    // R-UX-12 : Open Library n’envoie PAS de Content-Length (mesuré le 14 octobre, [200, image/jpeg], en-tête absent).
+    // Sans en-tête, la borne « avant lecture » n’existe pas : le corps doit être lu EN FLUX et la lecture COUPÉE dès
+    // le dépassement. Aucun blob() ici — y tomber ferait échouer les deux cas (le stub lève).
+    const enFlux = (body) => ({ ok: true, status: 200, headers: new Headers({ 'content-type': 'image/png' }), body, blob: async () => { throw new Error('blob() ne doit pas etre appele quand il y a un flux'); } });
+    // Corps sans fin, 1 Mo par morceau. Garde-fou à 64 morceaux : sans coupure le test ÉCHOUE au lieu de boucler.
+    const espion = { octetsEmis: 0, morceaux: 0, annule: false };
+    const sansFin = new ReadableStream({
+      pull(c) {
+        if (espion.morceaux >= 64) { c.close(); return; }
+        espion.morceaux += 1; espion.octetsEmis += 1024 * 1024;
+        c.enqueue(new Uint8Array(1024 * 1024));
+      },
+      cancel() { espion.annule = true; },
+    });
+    eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => enFlux(sansFin) }), null, 'couverture : sans Content-Length, un corps au-delà de 5 Mo → null (R-UX-12)');
+    eq([espion.annule, espion.octetsEmis <= 7 * 1024 * 1024, espion.octetsEmis >= 5 * 1024 * 1024], [true, true, true], 'couverture : la lecture est ANNULÉE dès le dépassement — au plus 7 Mo tirés d’un corps sans fin, jamais les 64 (R-UX-12)');
+    // Un vrai PNG découpé en trois morceaux : rassemblé tel quel, et ses dimensions restent lisibles dans l’en-tête.
+    const octets = new Uint8Array(await png(400, 600).arrayBuffer());
+    const tiers = new ReadableStream({ start(c) { c.enqueue(octets.slice(0, 10)); c.enqueue(octets.slice(10, 20)); c.enqueue(octets.slice(20)); c.close(); } });
+    const recu = await LA.recupererCouvertureParIsbn('978', { fetch: async () => enFlux(tiers) });
+    eq([recu instanceof Blob, recu?.size, recu?.type], [true, octets.length, 'image/png'], 'couverture : un corps en flux est rassemblé octet pour octet, type posé (R-UX-12)');
+  }
+  {
     const { withRepo } = await import('./sync-fixture.js');
     await withRepo(async (repo, db) => {
       const canvas = document.createElement('canvas'); canvas.width = 1600; canvas.height = 2000;

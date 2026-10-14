@@ -53,9 +53,35 @@ export function fusionnerFiche(champs, fiche) {
 
 export const URL_COUVERTURE_OL = (isbn) => `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg?default=false`;
 
+// R-UX-12 : Open Library n'envoie PAS de Content-Length (mesuré le 14 octobre 2026 : [200, 'image/jpeg'], en-tête
+// absent). Sans cet en-tête, un contrôle « avant lecture » n'existe pas : le corps est donc lu EN FLUX et la lecture
+// est COUPÉE (reader.cancel()) dès que le cumul dépasse la borne — rien de ce qui a été lu n'est conservé, et le
+// reste du corps n'est jamais tiré. Sans flux (réponse sans `body` : vieux navigateur, réponse factice d'un test),
+// repli sur r.blob() et contrôle de la taille réelle.
+async function corpsBorne(r, type) {
+  const borne = LIMITES_COUVERTURE.octetsDistants;
+  if (!r.body || typeof r.body.getReader !== 'function') {
+    const blob = await r.blob();
+    if (blob.size > borne) return null;
+    return blob.type === type ? blob : new Blob([blob], { type });
+  }
+  const lecteur = r.body.getReader();
+  const morceaux = [];
+  let octets = 0;
+  for (;;) {
+    const { done, value } = await lecteur.read();
+    if (done) break;
+    octets += value?.byteLength || 0;
+    if (octets > borne) { await lecteur.cancel(); return null; } // le morceau fautif n'est même pas gardé
+    morceaux.push(value);
+  }
+  return new Blob(morceaux, { type });
+}
+
 // Couverture reçue par ISBN (spec § 6) : Open Library seulement ; bornes AVANT décodage (S4) ; tout échec → null.
-// L'ordre compte : type annoncé, puis taille annoncée (le corps n'est pas lu), puis taille réelle, puis dimensions
-// lues dans l'en-tête — createImageBitmap n'est atteint qu'après, dans poserCouverture.
+// L'ordre compte : type annoncé, puis taille annoncée quand elle existe (le corps n'est pas ouvert), puis la taille
+// RÉELLE pendant la lecture, puis les dimensions lues dans l'en-tête — createImageBitmap n'est atteint qu'après,
+// dans poserCouverture.
 export async function recupererCouvertureParIsbn(isbn, { fetch = globalThis.fetch, signal } = {}) {
   try {
     const r = await fetch(URL_COUVERTURE_OL(isbn), { ...OPTIONS_FETCH, signal });
@@ -64,11 +90,11 @@ export async function recupererCouvertureParIsbn(isbn, { fetch = globalThis.fetc
     if (!COVER_INPUT_MIME.includes(type)) return null;
     const annonce = parseInt(r.headers.get('content-length') || '0', 10);
     if (annonce > LIMITES_COUVERTURE.octetsDistants) return null;
-    const blob = await r.blob();
-    if (blob.size > LIMITES_COUVERTURE.octetsDistants) return null;
+    const blob = await corpsBorne(r, type);
+    if (!blob) return null;
     const dims = await dimensionsImage(blob);
     if (!dims || dims.largeur * dims.hauteur > LIMITES_COUVERTURE.pixels) return null;
-    return blob.type === type ? blob : new Blob([blob], { type });
+    return blob;
   } catch { return null; }
 }
 
