@@ -302,7 +302,7 @@ adresse n'est plus stocké (`username`/`password` retirés de l'href). Les tests
 routes prennent un sac `{ repo, navigate, toast }` injecté — la charnière « Ajouter ce livre » → `?nouveau=1` est
 enfin mesurée (RF-I1). Rapport : `.superpowers/sdd/2026-10-14-ajouter-et-livres-ux/final-fix-report.md`.
 
-Suite complète après la vague finale : **1376/1376 verts** (total épinglé dans `tests/tests.js` — F2), 0 erreur et
+Suite complète après la vague finale (et son micro-correctif C3 bis) : **1378/1378 verts** (total épinglé dans `tests/tests.js` — F2), 0 erreur et
 0 avertissement console (hors `apple-mobile-web-app-capable`, pré-existant et hors lot) ; `node --test
 tools/*.test.mjs` 40/40 ; `node tools/generer-migrations.mjs --check` : 0. (Clôture de la tâche 10 : 1270/1270.)
 Vérifié dans l'app réelle le 14 octobre, deux fois : à la clôture de la tâche 10 (service worker

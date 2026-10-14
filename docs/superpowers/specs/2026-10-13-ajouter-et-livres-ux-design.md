@@ -159,10 +159,12 @@ balayage par comptage de références = **L4**.
 
 **Affichage.** `bookCover(edition, book, { href, fichier })` : `fichier?.blob` → `<img class="cover-img" alt="">` ; sinon la
 vignette texte. **Propriétaire des URL `blob:`** (F4/S15) : `src/core/blob-urls.js` — `urlDeBlob(blob)` enregistre l'URL ;
-`revoquerUrlsDeBlob()` révoque tout ; `app.js` l'appelle **à chaque changement de route** et `library.js` **en tête de chaque
-`draw()`**. `renderLibrary` devient asynchrone : il lit en **une** transaction les lignes `files` des éditions qui portent un
-`cover_sha256` (`repo.getFiles(sha256s)`, neuf, sur `db.getMany`) et les passe à `booksTab(ctx, fichiers)` (signature
-changée ; l'option `href` survit — F5). `ctx` ne porte pas les fichiers (F17).
+`revoquerUrlsDeBlob()` révoque tout, `revoquerUrlDeBlob(u)` une seule URL connue ; `app.js` appelle le premier **à chaque
+changement de route**, et `library.js` révoque la **génération précédente APRÈS `replaceChildren`** (D-T9 : révoquer avant
+laisse un `<img>` encore dans le document sur une URL morte, et « tout révoquer » ici emporterait les vignettes qu'on vient
+de créer — le filtre redessine à chaque touche). `renderLibrary` devient asynchrone : il lit en **une** transaction les lignes `files` des éditions qui portent un
+`cover_sha256` (`repo.getFiles(sha256s)`, neuf, sur `db.getMany`) ; à la construction, `booksTab(ctx)` fait lui-même cette
+lecture (l'option `href` de `bookCover` survit — F5). `ctx` ne porte pas les fichiers (F17).
 
 **Fiche livre (F15).** La couverture s'affiche **dans l'en-tête** de la fiche (à gauche du titre) ; un bloc visible
 « Couverture » (hors du `<details>` replié « Métadonnées et convention ») offre « Photographier », « Choisir une image »,
@@ -362,7 +364,7 @@ indépendantes (opus) : sécurité (S1-S16) et faisabilité/cohérence (F1-F25).
 | S16 activité écrite à l'arrivée `?nouveau` | `recordActivity` sauté (§ 8) |
 | F1 espions impossibles | I-H gestes injectés (§ 3, § 13) |
 | F3 `lookupIsbn` contradictoire | signature neuve `{ fetch, signal }`, deux `try` (§ 5) |
-| F5 `booksTab` synchrone, `getFiles` absent | `renderLibrary` asynchrone, `repo.getFiles`, `booksTab(ctx, fichiers)` (§ 6) |
+| F5 `booksTab` synchrone, `getFiles` absent | `renderLibrary` asynchrone, `repo.getFiles` lu par `booksTab(ctx)` (§ 6) |
 | F6 intention persistée réappliquée | intention dans l'adresse, consommée puis retirée (§ 10) |
 | F7 recherche des signets | `cuisines` dans `titleTokens` des références (§ 11) |
 | F8 écran de référence mensonger | texte et pastille propres au signet, sans « Scanner » (§ 11) |
@@ -442,5 +444,6 @@ couverture (`poserCouverture`, `recupererCouvertureParIsbn`, `renderZoneCouvertu
 dans le module de route `livre-ajout.js` et sont importées par `book.js` — dette nommée, aucun déplacement dans
 cette vague ; **`app.js` reste hors test** par décision (il lance l'application à l'import).
 
-Compte final (tâche 10, clôture) : **1270/1270**. Après la vague finale : **1376/1376** tests verts, suite
-complète, 0 erreur et 0 avertissement console.
+Compte final (tâche 10, clôture) : **1270/1270**. Après la vague finale et son micro-correctif (C3 bis : seuls les
+champs réellement repris d'une fiche distante sont « distants ») : **1378/1378** tests verts, suite complète, 0
+erreur et 0 avertissement console.

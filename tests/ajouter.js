@@ -975,9 +975,8 @@ export async function runAjouterTests({ eq, ok }) {
         const couvertures = new Map(); // isbn → fonction qui rend la réponse (le test maîtrise le moment)
         const fichesLentes = new Map(); // isbn → promesse à libérer AVANT la réponse d'identification
         const sansFicheOl = new Set();
-        let corpsLus = 0;
         const r404 = { ok: false, status: 404, headers: new Headers(), text: async () => '', blob: async () => new Blob([]) };
-        const reponseImage = (png) => ({ ok: true, status: 200, headers: new Headers({ 'content-type': 'image/png', 'content-length': String(png.size) }), blob: async () => { corpsLus += 1; return png; } });
+        const reponseImage = (png) => ({ ok: true, status: 200, headers: new Headers({ 'content-type': 'image/png', 'content-length': String(png.size) }), blob: async () => png });
         globalThis.fetch = async (url) => {
           const u = String(url);
           urls.push(u);
@@ -1157,6 +1156,21 @@ export async function runAjouterTests({ eq, ok }) {
         taper(r9, '4445'); cliquer(r9, 'Identifier');
         await attendre(() => r9.etatRoute().pas === 2, 'le pas 2 du quatrième ISBN');
         eq(r9.etatRoute().champs.title, 'Mon titre à moi', 'route : un titre corrigé à la main survit au changement d’ISBN — c’est sa saisie, pas celle d’un service (C3)');
+        // C3 bis : un titre tapé AVANT toute identification. `fusionnerFiche` le garde (il n'est pas vide), mais
+        // `champsDistants` enregistrait l'état d'APRÈS fusion : ce titre-là passait pour distant, et
+        // l'identification SUIVANTE le vidait. Seules les clés que la fusion a réellement reprises comptent.
+        const r9b = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
+        cliquer(r9b, 'Saisir à la main');
+        saisirTitre(r9b, 'Mon livre à moi');
+        cliquer(r9b, '← Changer d’ISBN');
+        taper(r9b, '1230'); cliquer(r9b, 'Identifier');
+        await attendre(() => r9b.etatRoute().pas === 2, 'le pas 2 du premier ISBN après une saisie à la main');
+        eq([r9b.etatRoute().champs.title, r9b.etatRoute().champs.year], ['Mon livre à moi', '2020'], 'route : la fiche distante ne touche pas au titre déjà tapé, mais remplit l’année vide');
+        cliquer(r9b, '← Changer d’ISBN');
+        taper(r9b, '2340'); cliquer(r9b, 'Identifier');
+        await attendre(() => r9b.etatRoute().pas === 2, 'le pas 2 du second ISBN');
+        eq(r9b.etatRoute().champs.title, 'Mon livre à moi', 'route : un titre tapé AVANT la première identification survit à la seconde — il n’a jamais été « distant » (C3)');
+        await attendreImages(r9b);
         await attendreImages(r9);
 
         // 10. C2 vue de la route : un livre anglais identifié par Google Books n’est plus écrit « fr ».

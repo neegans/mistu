@@ -293,8 +293,15 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
       // couverture qu'elle aurait demandée. La génération le dit, la garde d'avant ne le voyait pas.
       if (etat.generation !== generation) return;
       etat.isbn = isbn;
+      const avantFusion = { ...etat.champs };
       etat.champs = fusionnerFiche(etat.champs, fiche, { langueTouchee: etat.langueTouchee });
-      etat.champsDistants = fiche ? Object.fromEntries(CHAMPS_DISTANTS.map((k) => [k, etat.champs[k]])) : null;
+      // C3 : ne sont « distants » que les champs que la fusion a RÉELLEMENT repris de la fiche — mesurés avant et
+      // après. Mémoriser l'état d'après fusion faisait passer pour distant un titre tapé AVANT la première
+      // identification (`fusionnerFiche` le garde parce qu'il n'est pas vide), et l'identification suivante le
+      // vidait. Une valeur identique à ce que la personne avait déjà tapé n'est pas reprise non plus : c'est aussi
+      // la sienne.
+      const reprises = CHAMPS_DISTANTS.filter((k) => String(avantFusion[k] ?? '') !== String(etat.champs[k] ?? ''));
+      etat.champsDistants = reprises.length ? Object.fromEntries(reprises.map((k) => [k, etat.champs[k]])) : null;
       etat.provenance = source || 'aucune'; etat.pas = 2;
       // La couverture suit l'identification, sans la retenir : la fiche s'affiche tout de suite, l'image arrive après
       // (ou pas). Open Library seulement — Google Books n'a pas donné cette fiche, et une image d'ailleurs ne serait
