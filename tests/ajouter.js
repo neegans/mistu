@@ -364,4 +364,15 @@ export async function runAjouterTests({ eq, ok }) {
       ok([...avecSeance.querySelectorAll('button')].find((b) => b.textContent === 'Enregistrer') === enregistrer, 'fiche : le clic ne redessine que les puces — « Enregistrer » est le MÊME nœud');
     });
   }
+
+  // --- § 7 Éditeur de recette : même geste pour les cuisines
+  const { cuisinesDepuis } = await import('../src/ui/recipe-edit.js');
+  eq(cuisinesDepuis({ cuisines: ['italienne', 'thaïe'] }), ['italienne', 'thaïe'], 'éditeur : un tableau est repris tel quel');
+  eq(cuisinesDepuis({ cuisines: ' italienne , Thaïe ,' }), ['italienne', 'thaïe'], 'éditeur : une ancienne chaîne CSV est découpée, en minuscules');
+  eq(cuisinesDepuis({}), [], 'éditeur : rien → tableau vide');
+  {
+    const src = await (await fetch('../src/ui/recipe-edit.js?v=' + Date.now(), { cache: 'no-store' })).text();
+    ok(!/Cuisines \/ régions'\), el\('input'/.test(src), 'éditeur : le champ texte « Cuisines / régions » a disparu');
+    ok(/renderPuces\(/.test(src), 'éditeur : les puces sont rendues');
+  }
 }

@@ -11,8 +11,13 @@ import { getConvention } from '../domain/units.js';
 import { providerFrom, extractRecipeFromImages, blobToBase64 } from '../domain/llm.js';
 import { RECIPE_TYPES } from '../model/schema.js';
 import { pageHeader, field, select, aiNotice, section, pdfFrame } from './components.js';
+import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
 
 const SUBRECIPE_RE = /(?:voir|see|cf\.?)\s+(?:la\s+)?(?:page|p\.)\s*(\d{1,4})|\bp\.\s*(\d{1,4})\b/gi;
+
+// § 7 : même geste que le livre pour les cuisines (puces.js). Pure : un tableau est repris tel quel, une ancienne
+// chaîne CSV (avant ce lot) est découpée — pour que save() n'ait qu'un seul chemin de lecture.
+export const cuisinesDepuis = (f) => Array.isArray(f?.cuisines) ? [...f.cuisines] : String(f?.cuisines || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
 
 export async function renderRecipeEdit(params, query, ctx) {
   const recipe = params.id ? ctx.recipesById.get(params.id) : null;
@@ -35,7 +40,7 @@ export async function renderRecipeEdit(params, query, ctx) {
   let attachToPending = !!pendingRef;
 
   const f = {
-    title: recipe?.original_title || '', language: recipe?.original_language || edition?.language || 'fr', type: recipe?.type || '', cuisines: (recipe?.cuisines || []).join(', '),
+    title: recipe?.original_title || '', language: recipe?.original_language || edition?.language || 'fr', type: recipe?.type || '', cuisines: [...(recipe?.cuisines || [])],
     printed_page: recipe?.printed_page ?? pages.find((p) => p.printed_page)?.printed_page ?? '', source_label: recipe?.source_label || '',
     servings: base?.servings ?? '', prep: base?.prep_minutes ?? '', cook: base?.cook_minutes ?? '', active: base?.active_minutes ?? '', total: base?.total_minutes ?? '',
     ingredientsText: (base?.ingredients || []).map((i) => i.source_text).join('\n'), stepsText: (base?.steps || []).map((s) => s.text).join('\n'),
@@ -164,7 +169,17 @@ export async function renderRecipeEdit(params, query, ctx) {
       field(t('Langue du texte'), select([{ value: 'fr', label: 'Français' }, { value: 'en', label: 'English' }], f.language, (v) => { f.language = v; })),
       field(t('Type'), select([{ value: '', label: t('— à préciser —') }, ...RECIPE_TYPES.map((v) => ({ value: v, label: label('recipe_type', v) }))], f.type, (v) => { f.type = v; })),
       field(t('Page imprimée'), numInputs.printed_page),
-      field(t('Cuisines / régions'), el('input', { type: 'text', value: f.cuisines, placeholder: 'italienne, campanienne', onInput: (e) => { f.cuisines = e.target.value; } })),
+      // R-UX-8 : les puces ne vont JAMAIS dans un label — field() rend un <label>, et un clic sur « Cuisines »
+      // activerait alors la première puce. Même habillage (.field), sans l'enveloppe qui vole le clic.
+      el('div', { class: 'field' }, el('span', null, t('Cuisines / régions')), (() => {
+        const box = el('div', null);
+        const dessiner = () => box.replaceChildren(renderPuces(pucesModel({ choisies: f.cuisines, existantes: cuisinesExistantes(ctx) }), {
+          basculer: (v) => { f.cuisines = basculerPuce(f.cuisines, v); dessiner(); },
+          ajouter: (v) => { const a = ajouterPuce(f.cuisines, v); if (a !== f.cuisines) { f.cuisines = a; dessiner(); } },
+        }));
+        dessiner();
+        return box;
+      })()),
       !edition ? field(t('Source (si pas un livre)'), el('input', { type: 'text', value: f.source_label, placeholder: t('Recette de famille, site web…'), onInput: (e) => { f.source_label = e.target.value; } })) : null),
     el('div', { class: 'grid', style: { gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))' } },
       field(t('Portions'), numInputs.servings), field(t('Préparation (min)'), numInputs.prep), field(t('Cuisson (min)'), numInputs.cook), field(t('Actif (min)'), numInputs.active), field(t('Total (min)'), numInputs.total)),
@@ -207,7 +222,7 @@ export async function renderRecipeEdit(params, query, ctx) {
     };
     const rec = targetRecipe ? { ...targetRecipe } : { id: recipeId, edition_id: editionId, favorite: false, tags: [], source_page_ids: [], ingredient_ids: [] };
     Object.assign(rec, {
-      original_title: f.title.trim(), original_language: f.language, type: f.type || null, cuisines: f.cuisines.split(',').map((s) => s.trim()).filter(Boolean),
+      original_title: f.title.trim(), original_language: f.language, type: f.type || null, cuisines: cuisinesDepuis(f),
       printed_page: n(f.printed_page), source_label: f.source_label.trim() || rec.source_label || null,
       source_page_ids: [...new Set([...(rec.source_page_ids || []), ...pageIds])],
     });
