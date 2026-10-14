@@ -56,6 +56,15 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     if (rows.length) await db.mutate({ puts: { outbox: rows }, origin: 'remote' });
   }
 
+  // R-L3-28 : les entrées dont la fiche n'existe plus ici sont RETIRÉES, avant tout envoi, et sans appel réseau.
+  // Origine 'remote' : ce retrait n'est pas un geste de la personne et ne repart jamais vers le serveur. Rien
+  // n'est journalisé : ce n'est pas un incident, c'est l'ordre normal des choses quand une suppression arrive
+  // d'ailleurs (origine 'remote', jamais capturée) ou qu'on vide l'appareil.
+  async function retirerAbandonnees(abandonnees) {
+    const seqs = abandonnees.flatMap((a) => a.seqs);
+    if (seqs.length) await db.mutate({ deletes: { outbox: seqs }, origin: 'remote' });
+  }
+
   async function appliquer(lot, reponse, entreesParSeq) {
     // Lectures AVANT la transaction : la version locale d'un conflit est celle du moment où la réponse arrive, et
     // c'est elle qui décide si un ajustement a le droit de réécrire la fiche (R-L3-7).
@@ -156,13 +165,15 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
   }
 
   async function envoyer() {
-    const bilan = { envoyes: 0, ajustes: 0, conflits: 0, quarantaine: 0, retenues: 0, recul: null, erreur: null, pause: false, attenteConnexion: false };
+    const bilan = { envoyes: 0, ajustes: 0, conflits: 0, quarantaine: 0, retenues: 0, abandonnees: 0, recul: null, erreur: null, pause: false, attenteConnexion: false };
     const file = await lireFile();
     if (!file.length) return bilan;
     const entreesParSeq = new Map(file.map((e) => [e.seq, e]));
-    const { lots, retenues } = await composerLots(file, (store, id) => db.get(store, id));
+    const { lots, retenues, abandonnees } = await composerLots(file, (store, id) => db.get(store, id));
     bilan.retenues = retenues.length;
+    bilan.abandonnees = abandonnees.length;
     await marquerRetenues(retenues, entreesParSeq);
+    await retirerAbandonnees(abandonnees);
     for (const lot of lots) {
       const continuer = await envoyerLot(lot, entreesParSeq, bilan);
       if (!continuer) break;

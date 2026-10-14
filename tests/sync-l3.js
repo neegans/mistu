@@ -47,10 +47,13 @@ export async function runSyncL3Tests({ eq, ok }) {
   eq(nettoyerChaines({ a: 'x\u0000y', b: ['\u0007z', 1], c: { d: 't\u001f' } }), { a: 'xy', b: ['z', 1], c: { d: 't' } }, 'lots : les caractères de contrôle sont retirés partout');
   eq(nettoyerChaines('é\n'), 'é\n', 'lots : les sauts de ligne et les accents restent');
   // R-L3-25 : un Blob traverse sans être touché — ses octets ne sont pas du texte, et il n'est jamais parcouru.
+  // Une Date non plus : parcourue comme un objet nu, elle ressortait en `{}` — une perte muette de donnée.
   {
     const octets = new Blob(['\u0000x'], { type: 'image/jpeg' });
-    const nettoye = nettoyerChaines({ blob: octets, mime: 'image/jpeg\u0000' });
+    const quand = new Date('2026-10-13T11:00:00.000Z');
+    const nettoye = nettoyerChaines({ blob: octets, quand, mime: 'image/jpeg\u0000' });
     eq([nettoye.blob === octets, nettoye.mime], [true, 'image/jpeg'], 'R-L3-25 : un Blob traverse nettoyerChaines intact (ses octets ne sont pas du texte)');
+    ok(nettoye.quand instanceof Date && nettoye.quand.getTime() === quand.getTime(), 'nettoyerChaines : une Date traverse intacte (parcourue comme un objet nu, elle ressortait en {})');
   }
   eq(tailleJson({ a: 'é' }), 10, 'lots : taille en octets UTF-8 du JSON');
   eq(LIMITES, { elements: 500, lot: 921600, element: 524288 }, 'lots : bornes de la spec (§ 3.4, R14), le lot avec marge sous le seuil serveur (R-L3-6)');
@@ -70,19 +73,23 @@ export async function runSyncL3Tests({ eq, ok }) {
   const fiches = { 'books:b1': { id: 'b1', title: 'Un\u0000', updated_at: '2026-10-13T10:02:00Z' } };
   const relire = async (store, id) => fiches[store + ':' + id];
   const c = await composerLots(entrees, relire);
-  eq(c.lots.length, 1, 'lots : un seul lot pour quatre éléments');
-  eq(c.lots[0].elements.map((e) => [e.store, e.id, e.deleted]), [['books', 'b1', false], ['books', 'b2', true], ['books', 'b3', true]], 'lots : put relu, delete avec payload, put disparu → delete');
+  eq(c.lots.length, 1, 'lots : un seul lot');
+  eq(c.lots[0].elements.map((e) => [e.store, e.id, e.deleted]), [['books', 'b1', false], ['books', 'b2', true]], 'lots : put relu, delete avec payload — et R-L3-28 : le put dont la fiche a disparu n’est PAS envoyé');
   eq(c.lots[0].elements[0].data.title, 'Un', 'lots : la fiche relue est nettoyée');
   eq(c.lots[0].elements[1].data.title, 'X', 'lots : le payload d’une suppression part avec elle');
-  eq(c.lots[0].elements[2].data, null, 'lots : un put dont la fiche a disparu sans payload part comme tombale sans data');
   // R-L3-21 (ancien test retourné) : l'heure de l'ENTRÉE gagne, jamais celle du payload. Avec l'heure du payload, la
   // tombale partait avec l'instant que le serveur possède DÉJÀ — `u = cur_updated`, `cur_deleted is null` : aucune
   // branche de `sync_push` ne s'applique, la réponse est `rejected{conflit}` et la suppression ne quitte jamais
   // l'appareil. Une suppression est un ÉVÉNEMENT : elle porte l'instant de son geste.
   eq(c.lots[0].elements[1].updated_at, '2026-10-13T10:01:00Z', 'R-L3-21 : updated_at d’une suppression = celui de l’ENTRÉE (le geste), jamais celui du payload');
   eq(c.lots[0].elements[1].data.updated_at, '2026-10-13T09:00:00Z', 'R-L3-21 : … et le payload envoyé garde sa propre heure (la fiche au moment de la suppression)');
-  eq(c.lots[0].elements[2].updated_at, '2026-10-13T10:04:00Z', 'lots : updated_at d’un put disparu sans payload = celui de l’entrée de la file');
-  eq(c.lots[0].seqs, [1, 3, 2, 5], 'lots : les seq de chaque clé suivent le lot');
+  // R-L3-28 : un `put` dont la fiche n'existe plus ICI est ABANDONNÉ, pas transformé en tombale. Elle a disparu
+  // soit par une réception (origine 'remote', jamais capturée — le serveur connaît déjà cette suppression), soit
+  // par un vidage d'appareil. L'envoyer en tombale avec l'heure de la dernière écriture ÉCRIVAIT une ligne
+  // supprimée au serveur pour une fiche qu'il ne connaissait peut-être même pas. Une suppression LOCALE explicite,
+  // elle, a sa propre entrée `delete` : elle gagne au dédoublonnage et part avec l'heure de son geste (R57).
+  eq(c.abandonnees, [{ seq: 5, seqs: [5], raison: 'fiche disparue' }], 'R-L3-28 : un put dont la fiche a disparu est abandonné, avec tous les seq de sa clé');
+  eq(c.lots[0].seqs, [1, 3, 2], 'lots : les seq de chaque clé suivent le lot (celle de la fiche disparue n’y est plus)');
   eq(c.retenues, [{ seq: 4, seqs: [4], raison: 'fichier en attente' }], 'lots : une ligne files est retenue tant que l’empreinte distante n’est pas confirmée (L4), tous les seq du groupe (R-L3-5)');
 
   const fichiersRepetes = [
@@ -90,7 +97,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     { seq: 6, store: 'files', id: 'f'.repeat(64), op: 'put', updated_at: '2026-10-13T10:05:00Z', tries: 0 },
   ];
   const cf = await composerLots(fichiersRepetes, async () => undefined);
-  eq(cf.lots, [], 'lots : deux put du même fichier ne produisent aucun lot');
+  eq([cf.lots, cf.abandonnees], [[], []], 'lots : deux put du même fichier ne produisent aucun lot — et la retenue passe AVANT la relecture (une ligne files n’est pas « disparue »)');
   eq(cf.retenues, [{ seq: 6, seqs: [4, 6], raison: 'fichier en attente' }], 'lots : deux put du même fichier dédoublonnés → une seule retenue, tous les seq (R-L3-5)');
 
   const recreation = [
@@ -240,6 +247,38 @@ export async function runSyncL3Tests({ eq, ok }) {
       // Un magasin HORS SYNC_STORES n'est pas touché : les réglages et l'archive ne vont pas au serveur.
       await repo.save('settings', { key: 'essai_ctrl', value: 'g\u0000h' });
       eq((await db.get('settings', 'essai_ctrl'))?.value, 'g\u0000h', 'R-L3-25 : un magasin hors SYNC_STORES n’est pas nettoyé (rien n’en part)');
+    });
+
+    // --- Envoi : R-L3-28 — un put dont la fiche a disparu d'ici est RETIRÉ de la file, sans aucun envoi
+    // Elle a disparu par une RÉCEPTION (origine 'remote', jamais capturée : aucune entrée `delete` n'existe) ou
+    // par un vidage d'appareil. L'envoyer en tombale avec l'heure de sa dernière écriture écrivait au serveur une
+    // ligne supprimée pour une fiche qu'il ne connaissait peut-être même pas — et, si une autre copie l'avait
+    // modifiée depuis, cette tombale plus ancienne revenait en conflit à trancher pour rien.
+    await withRepo(async (repo, db) => {
+      await repo.save('books', { id: 'parti', title: 'Reçu, puis supprimé ailleurs' });
+      eq((await db.getAll('outbox')).map((e) => [e.id, e.op]), [['parti', 'put']], 'R-L3-28 : le put est bien en file au départ');
+      // La suppression vient d'ailleurs : origine 'remote', donc rien n'est capturé.
+      await db.mutate({ deletes: { books: ['parti'] }, origin: 'remote' });
+      const tf = creerTransportFactice({ serveur: true });
+      const r = await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer();
+      eq([r.envoyes, r.conflits, r.quarantaine, r.abandonnees, r.erreur], [0, 0, 0, 1, null], 'R-L3-28 : l’entrée est abandonnée — rien d’envoyé, rien en conflit, rien en quarantaine');
+      eq(tf.journal.length, 0, 'R-L3-28 : AUCUN appel réseau — le serveur connaît déjà cette suppression (ou n’a jamais eu la fiche)');
+      eq([await db.count('outbox'), await db.count('sync_conflicts')], [0, 0], 'R-L3-28 : la file se vide de cette entrée, et aucun conflit n’est journalisé');
+      ok(!tf.ligne('books', 'parti'), 'R-L3-28 : … et rien n’a été écrit au serveur');
+    });
+
+    // --- Envoi : R-L3-28 (b) — une suppression LOCALE explicite part toujours, avec l'heure de son geste (R57)
+    await withRepo(async (repo, db) => {
+      await repo.save('books', { id: 'supp', title: 'Supprimée ici' });
+      await repo.remove('books', 'supp');
+      const enFile = await db.getAll('outbox');
+      eq(enFile.map((e) => e.op), ['put', 'delete'], 'R-L3-28 (b) : le put et le delete de la clé sont tous deux en file');
+      const tf = creerTransportFactice({ serveur: true });
+      const r = await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer();
+      eq([r.envoyes, r.abandonnees, r.erreur], [1, 0, null], 'R-L3-28 (b) : une suppression locale explicite part bien — son entrée delete gagne au dédoublonnage');
+      eq(tf.journal[0].rows.map((e) => [e.id, e.deleted]), [['supp', true]], 'R-L3-28 (b) : … comme une tombale');
+      eq(tf.journal[0].rows[0].updated_at, enFile.find((e) => e.op === 'delete').updated_at, 'R-L3-28 (b) : … avec l’heure de son GESTE (R57 inchangé)');
+      eq(await db.count('outbox'), 0, 'R-L3-28 (b) : les deux entrées de la clé quittent la file ensemble');
     });
 
     // --- Envoi : R-L3-24 — la file est filtrée par user_id (DOIT de la spec § 4.1)

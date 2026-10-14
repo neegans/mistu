@@ -10,7 +10,9 @@ const encodeur = new TextEncoder();
 export function nettoyerChaines(valeur) {
   if (typeof valeur === 'string') return valeur.replace(CONTROLE, '');
   if (Array.isArray(valeur)) return valeur.map(nettoyerChaines);
-  if (valeur && typeof valeur === 'object' && !(valeur instanceof Blob)) {
+  // Un `Blob` et une `Date` ne sont pas des objets nus : parcourus comme tels, ils ressortaient en `{}` — les
+  // octets d'une photo perdus, une date devenue vide. Ce ne sont pas des chaînes : ils traversent intacts.
+  if (valeur && typeof valeur === 'object' && !(valeur instanceof Blob) && !(valeur instanceof Date)) {
     const sortie = {};
     for (const [k, v] of Object.entries(valeur)) sortie[k] = nettoyerChaines(v);
     return sortie;
@@ -25,7 +27,7 @@ export function nettoyerChaines(valeur) {
 export function porteDesCaracteresDeControle(valeur) {
   if (typeof valeur === 'string') return nettoyerChaines(valeur) !== valeur;
   if (Array.isArray(valeur)) return valeur.some(porteDesCaracteresDeControle);
-  if (valeur && typeof valeur === 'object' && !(valeur instanceof Blob)) return Object.values(valeur).some(porteDesCaracteresDeControle);
+  if (valeur && typeof valeur === 'object' && !(valeur instanceof Blob) && !(valeur instanceof Date)) return Object.values(valeur).some(porteDesCaracteresDeControle);
   return false;
 }
 
@@ -70,8 +72,13 @@ async function elementDe(entree, relire) {
   if (entree.op === 'delete') return tombaleDe(entree);
   const fiche = await relire(entree.store, entree.id);
   if (fiche === undefined || fiche === null) {
-    // Disparue entre la capture et l'envoi : elle est partie, on le dit au serveur avec ce qu'on sait.
-    return tombaleDe(entree);
+    // R-L3-28 : la fiche n'existe plus ICI, et AUCUNE entrée `delete` ne la concerne (sinon celle-là aurait gagné
+    // au dédoublonnage, étant plus récente). Elle a donc disparu par un chemin que la capture ignore : une
+    // RÉCEPTION (origine 'remote' — le serveur a déjà cette suppression) ou un vidage d'appareil. L'entrée est
+    // ABANDONNÉE, sans aucun envoi. L'envoyer en tombale avec l'heure de sa dernière écriture écrivait au serveur
+    // une ligne supprimée pour une fiche qu'il ne connaissait peut-être même pas — et si une autre copie l'avait
+    // modifiée depuis, cette tombale plus ancienne revenait en conflit à trancher pour rien.
+    return { abandonnee: true };
   }
   const data = nettoyerChaines(fiche);
   return { element: { store: entree.store, id: entree.id, data, updated_at: data.updated_at || entree.updated_at, deleted: false } };
@@ -80,11 +87,13 @@ async function elementDe(entree, relire) {
 export async function composerLots(entrees, relire) {
   const lots = [];
   const retenues = [];
+  const abandonnees = []; // R-L3-28 : rien à envoyer pour ces clés, et leurs entrées sont à retirer
   let courant = { elements: [], seqs: [], octets: 2 }; // « [] »
   const fermer = () => { if (courant.elements.length) lots.push({ elements: courant.elements, seqs: courant.seqs }); courant = { elements: [], seqs: [], octets: 2 }; };
   for (const { entree, seqs } of dedoublonner(entrees)) {
     const r = await elementDe(entree, relire);
     if (r.retenue) { retenues.push({ seq: entree.seq, seqs, raison: 'fichier en attente' }); continue; }
+    if (r.abandonnee) { abandonnees.push({ seq: entree.seq, seqs, raison: 'fiche disparue' }); continue; }
     const taille = tailleJson(r.element) + 1;
     const seul = tailleJson(r.element.data ?? {}) > LIMITES.element;
     if (seul) { fermer(); lots.push({ elements: [r.element], seqs }); continue; }
@@ -92,5 +101,5 @@ export async function composerLots(entrees, relire) {
     courant.elements.push(r.element); courant.seqs.push(...seqs); courant.octets += taille;
   }
   fermer();
-  return { lots, retenues };
+  return { lots, retenues, abandonnees };
 }
