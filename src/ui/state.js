@@ -54,23 +54,66 @@ export function routeApresRetour({ retour = null, memorisee = null, hashActuel =
 // Modèle pur, ici plutôt que dans app.js : app.js lance boot() à l'import et ne peut pas être chargé par un test.
 // Rien n'est affiché sans file réelle (I5) : zéro, un nombre illisible ou négatif ne disent rien du tout. Le
 // singulier est une chaîne à part — jamais un pluriel calculé sur une chaîne traduite.
-export function pastilleModel({ aEnvoyer = 0 } = {}) {
+// R-L3-20 : et rien du tout SANS COMPTE. Sans compte la file ne part jamais — elle se remplit à chaque écriture,
+// par conception (spec § 5.2) — et « 3 non envoyés » annoncerait une attente que personne ne tient, en permanence,
+// sur un appareil qui fonctionne exactement comme prévu.
+export function pastilleModel({ aEnvoyer = 0, connecte = false } = {}) {
+  if (!connecte) return null;
   if (!(aEnvoyer > 0)) return null;
   return aEnvoyer === 1 ? t('1 non envoyé') : t('{n} non envoyés', { n: aEnvoyer });
 }
 
-// R-L3-16 : l'écran affiché doit montrer ce qui vient d'arriver de l'autre appareil. Un rendu est donc demandé à la
-// FIN d'une passe du moteur, et seulement si elle a ÉCRIT quelque chose — une passe qui ne trouve rien ne doit
-// voler aucun rendu (un écran reconstruit perd le focus, la position de défilement et tout état de formulaire).
-// `avant` = la valeur de `enCours` au changement d'état précédent ; `archive` = une opération d'archive travaille,
-// et son écran porte un état qui ne vit QUE dans le DOM (contrôles désactivés, bilan, bouton « Recharger »).
-// Pure : elle décide, app.js rend.
-export function doitRendreApresPasse({ avant = false, etat = null, archive = false } = {}) {
+// --- Rendu après une passe du moteur (R-L3-16, R-L3-19) -------------------
+// Écrans où la personne SAISIT : leur état ne vit que dans le DOM — texte tapé, lignes analysées pas encore
+// enregistrées, étape de cuisson en cours, fichiers choisis. Un rendu demandé par le moteur les reconstruirait et
+// emporterait tout cela, sans que personne l'ait demandé. Nommés une fois, ici ; `*` vaut UN segment.
+export const ROUTES_DE_SAISIE = ['/recipes/new', '/recipes/*/edit', '/import', '/cook/*', '/add'];
+
+export function estRouteDeSaisie(path) {
+  const segments = String(path || '').split('/').filter(Boolean);
+  if (!segments.length) return false;
+  return ROUTES_DE_SAISIE.some((motif) => {
+    const attendus = motif.split('/').filter(Boolean);
+    return attendus.length === segments.length && attendus.every((a, i) => a === '*' || a === segments[i]);
+  });
+}
+
+// La passe vient-elle de se terminer en ayant ÉCRIT quelque chose ? Question à part, et volontairement séparée de
+// celle du rendu : le cache de lecture doit être invalidé DÈS qu'il est périmé, même quand aucun rendu ne suit —
+// sinon le prochain rendu, quel qu'il soit, relirait un cache d'avant la passe.
+// `avant` = la valeur de `enCours` au changement d'état précédent.
+export function passeAEcrit({ avant = false, etat = null } = {}) {
   if (!avant || etat?.enCours === true) return false; // seule la fin d'une passe compte
-  if (archive) return false;
   const effets = etat?.derniersEffets;
   if (!effets) return false;
   return (effets.recues > 0) || (effets.supprimees > 0) || (effets.ajustes > 0) || (effets.conflits > 0);
+}
+
+// R-L3-16 : l'écran affiché doit montrer ce qui vient d'arriver de l'autre appareil — sauf s'il est de ceux qu'un
+// rendu abîmerait. Trois refus, pour trois raisons distinctes :
+//   `archive` : une opération d'archive travaille, et son écran porte un état qui ne vit QUE dans le DOM
+//               (contrôles désactivés, bilan de restauration, bouton « Recharger l'application ») ;
+//   `route` de saisie (R-L3-19) : la personne est en train d'écrire, et rien ne justifie de lui prendre sa saisie ;
+//   `route` = /settings : la section se rafraîchit déjà par son propre abonnement (suivreMoteur), avec son
+//               regroupement et sa garde d'archive — deux rendus pour une passe n'en valent pas mieux qu'un.
+// Pure : elle décide, app.js rend. Le cache, lui, est invalidé par passeAEcrit, quoi que celle-ci réponde.
+export function doitRendreApresPasse({ avant = false, etat = null, archive = false, route = '' } = {}) {
+  if (!passeAEcrit({ avant, etat })) return false;
+  if (archive) return false;
+  if (estRouteDeSaisie(route)) return false;
+  return route !== '/settings';
+}
+
+// Un seul moteur par appareil : la fabrique n'est appelée QUE s'il n'y en a pas encore. Sans cette garde, un compte
+// qui arrive pendant la porte d'entrée en démarre un (auth.onChange → suivreSession), puis le démarrage en pose un
+// second : deux jeux d'écouteurs, deux passes concurrentes, deux fois les appels au serveur. La garde vit ici, et
+// pas dans app.js, pour être éprouvée — app.js lance boot() à l'import.
+export function poserMoteur(fabrique) {
+  if (sync.moteur) return sync.moteur;
+  const moteur = fabrique();
+  if (!moteur) return null;
+  setSyncState({ moteur });
+  return moteur;
 }
 
 // --- Démarrage de la connexion, borné dans le temps (R28) ------------------

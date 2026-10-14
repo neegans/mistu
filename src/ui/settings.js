@@ -250,9 +250,10 @@ export async function renderSettings(params, query, ctx) {
           : t('Fusionner l’archive par identifiants (aucun doublon, les fiches existantes sont écrasées par celles de l’archive) ?');
         if (!(await confirmDialog(message, { danger: mode === 'replace', okLabel: t('Restaurer') }))) return;
         result.replaceChildren(el('p', { class: 'muted' }, t('Restauration…')));
-        // Renvoi voulu (spec § 5.2) : connectée, une fusion réhorodate ce qu’elle écrit, sinon le serveur garderait
-        // sa version (I7). Le compte est relu AU MOMENT du geste — la session a pu changer depuis le rendu.
-        const reHorodatage = mode === 'merge' && !!getSyncState().user;
+        // Renvoi voulu (spec § 5.2, R-L3-18) : connectée, une restauration réhorodate ce qu’elle écrit — en fusion
+        // comme en remplacement — sinon le serveur garderait sa version (I7) et rien ne se verrait ailleurs.
+        // Le compte est relu AU MOMENT du geste : la session a pu changer depuis le rendu de la page.
+        const reHorodatage = !!getSyncState().user;
         await applyArchive(repo.db, insp, { mode, horodater: reHorodatage ? syncNow : null });
         committed = true;
         appliedOnce = true;
@@ -288,7 +289,13 @@ export async function renderSettings(params, query, ctx) {
     controls.append(
       el('button', { class: 'btn primary', onClick: () => apply('merge') }, empty ? t('Restaurer dans cette base vide') : t('Fusionner avec la bibliothèque actuelle')),
       empty ? null : el('button', { class: 'btn danger', onClick: () => apply('replace') }, t('Remplacer toute la bibliothèque')));
-    box.append(controls, result);
+    box.append(controls);
+    // Ce qu’un remplacement ne fait PAS (R-L3-18) : il vide cet appareil, pas le serveur. Aucune tombale n’est
+    // envoyée pour ce qui manque à l’archive, donc ces fiches reviendront à la prochaine réception. Dit à côté du
+    // bouton qui en décide, et pas dans le bilan — celui-ci est commun aux deux modes.
+    const horsArchive = empty ? null : messageRemplacementServeur(!!getSyncState().user);
+    if (horsArchive) box.append(el('small', { class: 'muted' }, horsArchive));
+    box.append(result);
     return box;
   }
 }
@@ -319,6 +326,9 @@ export const messageRenvoi = (n) => {
   return n === 1 ? t('1 fiche sera renvoyée au serveur.') : t('{n} fiches seront renvoyées au serveur.', { n });
 };
 
+// Ce qu’un remplacement ne fait pas (R-L3-18) : il vide cet appareil, jamais le serveur. Rien à dire sans compte.
+export const messageRemplacementServeur = (connecte) => (connecte ? t('Les fiches absentes de l’archive restent sur le serveur.') : null);
+
 // Arrêt du moteur de synchronisation, avant les deux gestes qui ferment la session (spec § 4.1). Sans cela, ses
 // déclencheurs — retour du réseau, retour au premier plan, écriture — continueraient d’appeler le serveur avec un
 // jeton qui n’existe plus, et l’appareil se retrouverait avec un moteur sans compte. Il est arrêté PUIS retiré de
@@ -344,13 +354,16 @@ const messagePerte = (n) => (n > 1
 // L3 : avec un compte, le refus doit nommer la quarantaine quand il y en a. Une entrée en quarantaine ne partira
 // par aucun envoi — seul « Abandonner cet envoi » la retire — et sans cette phrase le bouton resterait refusé sans
 // jamais dire par où sortir.
-export async function effacerDonnees({ user = null, pending, enQuarantaine = async () => 0, confirm, demanderMot, toast: dire, clearDevice, signOut = null, reload }) {
+// `arreterSync` est appelé juste AVANT l’effacement, et seulement si le geste va au bout : une passe déclenchée
+// entre le vidage et le rechargement écrirait dans une base qu’on vient d’effacer, ou enverrait ce qui n’existe plus.
+export async function effacerDonnees({ user = null, pending, enQuarantaine = async () => 0, confirm, demanderMot, toast: dire, clearDevice, signOut = null, reload, arreterSync = arreterMoteur }) {
   // La file est relue au moment du geste : elle a pu bouger depuis le rendu de la page.
   const enAttente = await pending();
   if (user && enAttente > 0) { dire(messageEnAttente(enAttente, await enQuarantaine())); return false; }
   if (!(await confirm(t('Effacer les données de cet appareil ? Fais d’abord une sauvegarde.'), { danger: true, okLabel: t('Continuer') }))) return false;
   const mot = await demanderMot(t('Tape EFFACER pour confirmer'));
   if (mot !== 'EFFACER') { dire(t('Annulé')); return false; }
+  await arreterSync();
   await clearDevice({ signOut });
   dire(t('Données effacées'));
   reload();
@@ -565,11 +578,17 @@ function syncSection(state, auth, settings) {
     signIn: () => demarrerConnexion(auth),
     signOut: async () => {
       // Le moteur est arrêté AVANT de fermer la session : un déclencheur qui partirait entre les deux appellerait
-      // le serveur avec un jeton qui n’existe plus. Si la déconnexion échoue, il reste arrêté jusqu’au prochain
-      // changement de session ou au prochain lancement — rien n’est affirmé de faux, et rien n’est tenté à l’aveugle.
+      // le serveur avec un jeton qui n’existe plus.
+      const moteur = getSyncState().moteur;
       await arreterMoteur();
       const essai = await auth?.signOut();
-      if (essai?.error) { toast(t('La déconnexion n’a pas abouti.')); return; }
+      if (essai?.error) {
+        toast(t('La déconnexion n’a pas abouti.'));
+        // La session est toujours là : la synchronisation REPREND, sinon elle resterait arrêtée jusqu’au prochain
+        // lancement sans que rien ne le dise. `demarrer()` est rejouable (il réinstalle ses écouteurs et recharge).
+        if (moteur) { setSyncState({ moteur }); moteur.demarrer(); }
+        return;
+      }
       setSyncState({ user: null, guard: null }); // la file d’envoi et les données restent intactes (spec § 4.1)
       refresh();
     },

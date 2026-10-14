@@ -5,7 +5,7 @@ import { setUiLocale, t } from './core/i18n.js';
 import * as repo from './model/repo.js';
 import { on } from './core/bus.js';
 import { logError } from './core/log.js';
-import { getData, invalidate, setSyncState, getSyncState, routeApresRetour, relireReglages, isActivitySynced, demarrerSync, doitRendreApresPasse, SYNC_ROUTE_KEY } from './ui/state.js';
+import { getData, invalidate, getSyncState, routeApresRetour, relireReglages, isActivitySynced, demarrerSync, setSyncState, poserMoteur, passeAEcrit, doitRendreApresPasse, SYNC_ROUTE_KEY } from './ui/state.js';
 import { installCapture } from './sync/outbox.js';
 import { createAuth } from './sync/auth.js';
 import { createMoteur } from './sync/moteur.js';
@@ -61,7 +61,7 @@ let renderSeq = 0;
 async function onRoute({ handler, params, query, path }) {
   // La coquille est reconstruite au premier rendu et après un changement de langue : la pastille neuve est remise
   // à l'état RÉEL du moteur tout de suite, sinon elle resterait vide jusqu'à la prochaine passe.
-  if (!current) { current = shell(); replace(document.getElementById('app'), current.root); majPastille(getSyncState().moteur?.etat()); }
+  if (!current) { current = shell(); replace(document.getElementById('app'), current.root); majPastille(getSyncState().moteur?.etat(), !!getSyncState().user); }
   for (const a of [...current.side.querySelectorAll('a'), ...current.tabs.querySelectorAll('a')]) {
     const href = a.getAttribute('href').slice(1);
     const nav = NAV.find((n) => n.href === href);
@@ -152,28 +152,32 @@ async function bootSync() {
 let passeEnCours = false;
 
 function surEtatMoteur(etat) {
-  majPastille(etat);
+  majPastille(etat, !!getSyncState().user); // R-L3-20 : la pastille n'existe qu'avec un compte
   const avant = passeEnCours;
   passeEnCours = etat.enCours === true;
-  // R-L3-16 : l'écran affiché doit montrer ce qui vient d'arriver de l'autre appareil. La règle est dans state.js.
-  if (!doitRendreApresPasse({ avant, etat, archive: archiveEnCours() })) return;
-  invalidate();
-  refresh();
+  // Le cache de lecture est périmé dès que la passe a ÉCRIT, qu'un rendu suive ou non : une archive en cours ou une
+  // saisie en cours empêchent le RENDU, pas la péremption — le prochain rendu doit lire la base, pas le cache.
+  if (passeAEcrit({ avant, etat })) invalidate();
+  // R-L3-16 et R-L3-19 : la règle du rendu (archive, écran de saisie, Réglages) vit dans state.js.
+  if (doitRendreApresPasse({ avant, etat, archive: archiveEnCours(), route: parseHash().path })) refresh();
 }
 
+// Idempotent : un compte arrivé pendant la porte d'entrée a pu en démarrer un (auth.onChange → suivreSession), et
+// un second jeu d'écouteurs ferait deux passes concurrentes. La garde vit dans state.js (poserMoteur), éprouvée.
 function demarrerMoteur() {
   const { auth } = getSyncState();
   const client = auth?.getClient?.() || null;
   if (!client) return null;
-  const moteur = createMoteur({
+  const existant = getSyncState().moteur;
+  const moteur = poserMoteur(() => createMoteur({
     db: repo.db,
     transport: createTransport(client),
     getUserId: () => getSyncState().user?.id || null,
     isActivitySynced,
     fenetre: window,
     bus: { on },
-  });
-  setSyncState({ moteur });
+  }));
+  if (!moteur || moteur === existant) return moteur; // déjà posé et démarré : ni réabonnement ni seconde passe
   moteur.onEtat(surEtatMoteur);
   // `demarrer()` n'est pas attendu : il lit la base puis appelle le réseau, et le démarrage de l'app ne doit jamais
   // attendre le réseau (R28). Il ne rejette pas (le moteur attrape et rend un état).

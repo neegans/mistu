@@ -249,23 +249,21 @@ export function compterFichesSynchronisees(inspection) {
 //  1. COMPLÉTUDE (R-L3-10), dans tous les modes, avec ou sans compte : une fiche sans `updated_at` en reçoit un.
 //     Les fiches d'avant ce lot et toutes les lignes « files » (dont les métadonnées sont reconstruites ici) en
 //     sont dépourvues ; sync_push les rejetterait pour le motif « updated_at » et elles partiraient en quarantaine.
-//  2. RENVOI VOULU : en fusion avec un compte connecté, `horodater` est fourni et TOUTES les fiches en reçoivent un
-//     neuf. Sans cela le serveur garderait sa version (I7 : updated_at strictement supérieur gagne) et la
-//     restauration ne se verrait sur aucun autre appareil.
-// Rend le nombre de fiches réellement réhorodatées (hors complétude), pour le bilan.
-function horodaterFiches(batch, { mode, horodater }) {
-  const renvoi = mode === 'merge' && typeof horodater === 'function';
-  let n = 0;
+//  2. RENVOI VOULU (R-L3-18) : avec un compte connecté, `horodater` est fourni et TOUTES les fiches en reçoivent
+//     un neuf — en fusion comme en remplacement. Sans cela le serveur garderait sa version (I7 : updated_at
+//     strictement supérieur gagne) et la restauration ne se verrait sur aucun autre appareil. Un remplacement ne
+//     supprime rien chez le fournisseur pour autant : ce qui n'est pas dans l'archive y reste (dit par Réglages).
+function horodaterFiches(batch, { horodater }) {
+  const renvoi = typeof horodater === 'function';
   for (const name of SYNC_STORES) {
     const rows = batch[name];
     if (!Array.isArray(rows)) continue;
     for (const row of rows) {
       if (!record(row)) continue;
-      if (renvoi) { row.updated_at = horodater(); n += 1; }
+      if (renvoi) row.updated_at = horodater();
       else if (!row.updated_at) row.updated_at = syncNow();
     }
   }
-  return n;
 }
 
 // Tout préparer AVANT la transaction. Effacement et écritures sont validés ou annulés ensemble.
@@ -280,7 +278,7 @@ export async function applyArchive(db, inspection, { mode = 'merge', horodater =
     const existing = existingFiles.get(file.sha256);
     batch.files.push({ ...existing, sha256: file.sha256, blob, mime: file.mime, size: file.size, created_at: existing?.created_at || new Date().toISOString() });
   }
-  horodaterFiches(batch, { mode, horodater });
+  horodaterFiches(batch, { horodater });
   await db.putBatch(batch, { clearStores: mode === 'replace' ? Object.keys(STORES).filter((s) => !SYNC_INTERNAL_STORES.includes(s)) : [] });
   return Object.fromEntries(Object.entries(batch).map(([name, rows]) => [name, rows.length]));
 }
@@ -301,7 +299,7 @@ function canonicalSansHeure(value) {
 
 // Vérifie un instantané cohérent après écriture : contenu complet, clés, relations et fichiers.
 // En fusion, les autres fiches sont conservées ; en remplacement, aucun surplus n’est attendu.
-// `horodate` : la restauration a réhorodaté les magasins synchronisés (fusion avec un compte, cf. applyArchive).
+// `horodate` : la restauration a réhorodaté les magasins synchronisés (compte connecté, cf. applyArchive).
 // La SEULE différence tolérée est alors l’heure de modification, et seulement sur un magasin synchronisé — sans
 // cette tolérance, chaque restauration d’un compte connecté serait annoncée comme une restauration en écart.
 export async function verifyRestored(db, inspection, { mode = 'merge', horodate = false } = {}) {

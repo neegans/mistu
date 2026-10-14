@@ -152,6 +152,7 @@ export const EN = {
   "Trancher dans Réglages": "Settle it in Settings",
   "1 fiche sera renvoyée au serveur.": "1 record will be sent to the server again.",
   "{n} fiches seront renvoyées au serveur.": "{n} records will be sent to the server again.",
+  "Les fiches absentes de l’archive restent sur le serveur.": "Records that are not in the archive stay on the server.",
   // Porte d'entrée : écran d'accueil du premier lancement (spec § 11, R34).
   "Kwe.": "Kwe.",
   "Ta bibliothèque de recettes, sur tous tes appareils.": "Your recipe library, on all your devices.",

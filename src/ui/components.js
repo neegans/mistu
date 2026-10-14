@@ -177,10 +177,10 @@ export function pastille() {
   return el('span', { class: 'pastille', id: PASTILLE_ID, hidden: true });
 }
 
-export function majPastille(etat) {
+export function majPastille(etat, connecte = false) {
   const noeud = document.getElementById(PASTILLE_ID);
   if (!noeud) return null;
-  const texte = pastilleModel({ aEnvoyer: etat?.aEnvoyer || 0 });
+  const texte = pastilleModel({ aEnvoyer: etat?.aEnvoyer || 0, connecte });
   noeud.textContent = texte || '';
   noeud.hidden = texte === null;
   return texte;

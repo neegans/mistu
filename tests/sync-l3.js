@@ -1195,8 +1195,9 @@ export async function runSyncL3Tests({ eq, ok }) {
   // (son nœud et sa mise à jour), la règle du rendu après une passe dans state.js. app.js ne garde que le fil.
   const etatUi = await import('../src/ui/state.js');
   const { pastilleModel: pm, doitRendreApresPasse, getSyncState: lireEtatSync } = etatUi;
-  eq([pm({ aEnvoyer: 0 }), pm({ aEnvoyer: 1 }), pm({ aEnvoyer: 12 })], [null, '1 non envoyé', '12 non envoyés'], 'pastille : « N non envoyés » seulement si N > 0 (singulier à part)');
-  eq([pm(), pm({ aEnvoyer: null }), pm({ aEnvoyer: -1 })], [null, null, null], 'pastille : rien n’est affiché sans un nombre lisible et positif');
+  const connecte = true;
+  eq([pm({ aEnvoyer: 0, connecte }), pm({ aEnvoyer: 1, connecte }), pm({ aEnvoyer: 12, connecte })], [null, '1 non envoyé', '12 non envoyés'], 'pastille : « N non envoyés » seulement si N > 0 (singulier à part)');
+  eq([pm(), pm({ aEnvoyer: null, connecte }), pm({ aEnvoyer: -1, connecte })], [null, null, null], 'pastille : rien n’est affiché sans un nombre lisible et positif');
   ok(Object.hasOwn(lireEtatSync(), 'moteur'), 'câblage : l’état de connexion porte le moteur (null tant que le démarrage ne l’a pas posé)');
 
   // Le nœud de la pastille et sa mise à jour : elle RETROUVE son nœud par id à chaque appel, parce que la coquille
@@ -1209,14 +1210,16 @@ export async function runSyncL3Tests({ eq, ok }) {
       hote.append(pastille());
       const vu = () => { const n = document.getElementById(PASTILLE_ID); return [n.hidden, n.textContent]; };
       eq(vu(), [true, ''], 'pastille : au repos le nœud existe et reste caché — rien n’est affirmé sans file');
-      majPastille({ aEnvoyer: 3 });
+      majPastille({ aEnvoyer: 3 }, true);
       eq(vu(), [false, '3 non envoyés'], 'pastille : trois en attente → la pastille se montre dans la barre du haut');
-      majPastille({ aEnvoyer: 0 });
+      majPastille({ aEnvoyer: 0 }, true);
       eq(vu(), [true, ''], 'pastille : file vidée → la pastille se recache');
       hote.replaceChildren(pastille()); // changement de langue : la coquille entière est refaite
-      majPastille({ aEnvoyer: 1 });
+      majPastille({ aEnvoyer: 1 }, true);
       eq(vu(), [false, '1 non envoyé'], 'pastille : après une reconstruction de la coquille, le nœud NEUF est retrouvé par id');
-      majPastille(null);
+      majPastille({ aEnvoyer: 3 }, false);
+      eq(vu(), [true, ''], 'R-L3-20 : sans compte, la pastille ne dit rien — la file ne partira pas, elle n’attend personne');
+      majPastille(null, true);
       eq(vu(), [true, ''], 'pastille : un état illisible ne montre rien');
     } finally { hote.remove(); }
   }
@@ -1367,6 +1370,100 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(liste.length > 30, 'SHELL lu : ' + liste.length + ' entrées à relire avant de conclure');
     eq(['./src/sync/transport.js', './src/sync/lots.js', './src/sync/reponses.js', './src/sync/push.js', './src/sync/pull.js', './src/sync/conflits.js', './src/sync/backfill.js', './src/sync/moteur.js']
       .filter((c) => !liste.includes(c)), [], 'SHELL : les modules d’envoi et de réception, désormais atteignables depuis app.js, sont servis hors connexion');
-    ok(/VERSION = 'cuisine-os-v0\.2\.0-10'/.test(source), 'sw.js : VERSION incrémentée — l’ancien cache est purgé à l’activation');
+    ok(/VERSION = 'cuisine-os-v0\.2\.0-11'/.test(source), 'sw.js : VERSION incrémentée — l’ancien cache est purgé à l’activation');
+  }
+
+  // --- Ronde 1 du câblage --------------------------------------------------
+  // 1. Critical (R-L3-19) : une passe du moteur ne vole JAMAIS une saisie. Les écrans d'édition portent un état
+  // qui ne vit que dans le DOM — texte tapé, lignes analysées, étape de cuisson en cours, photos choisies — et un
+  // rendu demandé par le moteur au milieu le remplacerait sans que personne l'ait demandé.
+  {
+    const { ROUTES_DE_SAISIE, estRouteDeSaisie, passeAEcrit } = etatUi;
+    eq(ROUTES_DE_SAISIE, ['/recipes/new', '/recipes/*/edit', '/import', '/cook/*', '/add'], 'R-L3-19 : les routes de saisie sont nommées une fois, en un seul endroit');
+    eq(['/recipes/new', '/recipes/rc1/edit', '/import', '/cook/cs1', '/add'].filter((p) => !estRouteDeSaisie(p)), [], 'R-L3-19 : les cinq écrans de saisie sont reconnus');
+    eq(['/', '/library', '/recipes/rc1', '/settings', '/meals', '/kitchen', '/cook', '/add/livre', '/recipes'].filter((p) => estRouteDeSaisie(p)), [],
+      'R-L3-19 : … et rien d’autre — le motif « * » vaut UN segment, jamais une arborescence');
+    eq([estRouteDeSaisie(''), estRouteDeSaisie(null), estRouteDeSaisie(undefined)], [false, false, false], 'R-L3-19 : une route absente n’est pas une saisie');
+
+    const effets = (sur = {}) => ({ recues: 0, supprimees: 0, ajustes: 0, conflits: 0, ...sur });
+    const fin = (sur = {}) => ({ enCours: false, derniersEffets: effets(sur) });
+    ok(!doitRendreApresPasse({ avant: true, etat: fin({ recues: 1 }), route: '/recipes/rc1/edit' }), 'R-L3-19 : sur un écran d’édition, aucun rendu n’est volé à la saisie');
+    ok(!doitRendreApresPasse({ avant: true, etat: fin({ recues: 3 }), route: '/cook/cs1' }), 'R-L3-19 : … ni pendant une cuisson en cours');
+    ok(doitRendreApresPasse({ avant: true, etat: fin({ recues: 1 }), route: '/library' }), 'R-L3-19 : sur la bibliothèque, une passe qui a écrit demande bien un rendu');
+    ok(!doitRendreApresPasse({ avant: true, etat: fin({ recues: 1 }), route: '/settings' }), 'ronde 1 : sur Réglages, le rendu est laissé à l’abonnement de la section — pas deux rendus pour une passe');
+
+    // 2. Important : le cache de lecture est périmé dès que la passe a ÉCRIT, qu'un rendu suive ou non. Sinon le
+    // prochain rendu — une navigation, un geste — relirait un cache d’avant la passe et montrerait l’état d’hier.
+    ok(passeAEcrit({ avant: true, etat: fin({ recues: 1 }) }), 'ronde 1 : « la passe a écrit » est une question à part, indépendante de l’écran affiché');
+    ok(passeAEcrit({ avant: true, etat: fin({ conflits: 1 }) }), 'ronde 1 : … un conflit neuf compte comme une écriture');
+    eq([passeAEcrit({ avant: true, etat: fin() }), passeAEcrit({ avant: false, etat: fin({ recues: 1 }) }), passeAEcrit({ avant: true, etat: { enCours: true, derniersEffets: effets({ recues: 1 }) } }), passeAEcrit()],
+      [false, false, false, false], 'ronde 1 : … et elle reste fausse sans écriture, hors fin de passe, ou à vide');
+  }
+
+  // 3. Important : un seul moteur par appareil. Un compte qui arrive pendant la porte d’entrée en démarre un
+  // (auth.onChange), puis le démarrage en démarrerait un second : deux jeux d’écouteurs, deux passes, deux fois
+  // les appels. La garde vit dans state.js, pour être éprouvée — app.js ne peut pas être importé par un test.
+  {
+    const { poserMoteur, setSyncState: poserEtat, getSyncState: lire } = etatUi;
+    const avant = lire().moteur;
+    try {
+      poserEtat({ moteur: null });
+      let fabriques = 0;
+      const premier = poserMoteur(() => { fabriques += 1; return { nom: 'premier' }; });
+      const second = poserMoteur(() => { fabriques += 1; return { nom: 'second' }; });
+      eq([fabriques, premier.nom, second === premier], [1, 'premier', true], 'ronde 1 : poserMoteur ne fabrique que s’il n’y a pas de moteur — le second appel rend le premier');
+      eq(lire().moteur, premier, 'ronde 1 : … et c’est celui-là qui vit dans l’état');
+      poserEtat({ moteur: null });
+      eq([poserMoteur(() => null), lire().moteur], [null, null], 'ronde 1 : une fabrique qui ne rend rien (aucun client) ne pose rien dans l’état');
+    } finally { poserEtat({ moteur: avant }); }
+  }
+
+  // 4. Important (R-L3-20) : la pastille n’apparaît qu’avec un compte. Sans compte rien ne part jamais — « 3 non
+  // envoyés » serait une attente que personne ne tient, sur un appareil qui fonctionne exactement comme prévu.
+  eq([pm({ aEnvoyer: 3 }), pm({ aEnvoyer: 3, connecte: false }), pm({ aEnvoyer: 3, connecte: true })], [null, null, '3 non envoyés'],
+    'R-L3-20 : la pastille ne se montre qu’avec un compte — sans compte, la file n’attend personne');
+  eq(pm({ aEnvoyer: 1, connecte: true }), '1 non envoyé', 'R-L3-20 : … et le singulier reste une chaîne à part');
+
+  // 5. Important (R-L3-18) : en mode « remplacement » aussi, une bibliothèque restaurée avec un compte doit
+  // repartir. Sans heure neuve, le serveur garderait ses versions (I7) et le remplacement ne se verrait nulle part.
+  await withRepo(async (repoTemp, db) => {
+    await db.mutate({ puts: { books: [{ id: 'y1', title: 'Remplacé', updated_at: '2026-10-01T00:00:00Z' }, { id: 'y2', title: 'Sans date' }] }, origin: 'device' });
+    const insp = await inspectArchive(await (await createArchive(db)).blob.arrayBuffer());
+    ok(insp.ok, 'R-L3-18 : la copie est acceptée à l’inspection');
+    await applyArchive(db, insp, { mode: 'replace', horodater: () => '2031-01-01T00:00:00.000Z' });
+    eq((await db.get('books', 'y1')).updated_at, '2031-01-01T00:00:00.000Z', 'R-L3-18 : en remplacement avec un compte, chaque fiche reçoit une heure neuve');
+    ok((await db.getAll('outbox')).some((e) => e.store === 'books' && e.id === 'y1'), 'R-L3-18 : … et part en file');
+    ok((await verifyRestored(db, insp, { mode: 'replace', horodate: true })).ok, 'R-L3-18 : le bilan du remplacement horodaté reste vérifié');
+    // Complétude en remplacement, sans compte : la fiche sans date en reçoit une quand même (R-L3-10).
+    await applyArchive(db, insp, { mode: 'replace' });
+    ok(typeof (await db.get('books', 'y2')).updated_at === 'string', 'R-L3-10 : en remplacement sans compte aussi, une fiche sans date reçoit un updated_at');
+    eq((await db.get('books', 'y1')).updated_at, '2026-10-01T00:00:00Z', 'R-L3-10 : … et les heures de l’archive sont conservées telles quelles');
+    ok((await verifyRestored(db, insp, { mode: 'replace' })).ok, 'R-L3-10 : le bilan d’un remplacement sans compte reste vérifié');
+  });
+
+  // Ce qu’un remplacement ne fait PAS : il ne supprime rien chez le fournisseur. Dit à côté du bouton qui décide.
+  {
+    const { messageRemplacementServeur } = reglages;
+    eq([messageRemplacementServeur(true), messageRemplacementServeur(false)], ['Les fiches absentes de l’archive restent sur le serveur.', null],
+      'R-L3-18 : le remplacement dit qu’il ne supprime rien sur le serveur — et seulement quand il y a un serveur');
+  }
+
+  // 6. Mineur : « Effacer les données de cet appareil » arrête le moteur avant de vider la base — sinon une passe
+  // déclenchée entre les deux écrirait dans une base qu’on vient d’effacer, ou enverrait ce qui n’existe plus.
+  {
+    const ordre = [];
+    const fait = await effacerDonneesL3({
+      user: null, pending: async () => 2, confirm: async () => true, demanderMot: async () => 'EFFACER', toast: () => {},
+      arreterSync: async () => ordre.push('moteur arrete'),
+      clearDevice: async () => ordre.push('appareil vide'),
+      reload: () => ordre.push('recharge'),
+    });
+    eq([fait, ordre], [true, ['moteur arrete', 'appareil vide', 'recharge']], 'ronde 1 : « Effacer » arrête le moteur AVANT de vider la base');
+    const refuse = [];
+    await effacerDonneesL3({
+      user: { id: 'u' }, pending: async () => 1, enQuarantaine: async () => 0, confirm: async () => true, demanderMot: async () => 'EFFACER', toast: () => {},
+      arreterSync: async () => refuse.push('moteur arrete'), clearDevice: async () => refuse.push('vide'), reload: () => {},
+    });
+    eq(refuse, [], 'ronde 1 : un effacement refusé (file non vide avec un compte) n’arrête pas le moteur');
   }
 }
