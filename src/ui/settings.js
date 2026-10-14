@@ -669,13 +669,17 @@ export function syncSectionL3(model, gestes = {}) {
       el('p', { class: 'muted' }, t('Choisis celle qui compte ; rien n’est fusionné.')));
     for (const c of conflits) {
       noeuds.push(el('div', { class: 'status warn', dataset: { conflit: String(c.id) } },
-        // R-L3-29 : un conflit DÉJÀ RENVOYÉ dit ce qui s'est passé, pas une question — la version d'ici est partie
-        // et le serveur l'acceptera (elle est plus récente). « Garder celle d'ici » la réhorodaterait et la
-        // renverrait encore ; « Garder celle d'ailleurs » écraserait ce qu'on vient d'envoyer par la version qui a
-        // perdu. Le seul geste est donc de ranger l'entrée de journal — et l'accusé du serveur le fait tout seul.
+        // R-L3-29 : un conflit DÉJÀ RENVOYÉ n'est pas une question — la version d'ici est repartie et le serveur
+        // l'acceptera (elle est plus récente). « Garder celle d'ici » la réhorodaterait et la renverrait encore ;
+        // « Garder celle d'ailleurs » écraserait ce qu'on vient d'envoyer par la version qui a perdu. Le seul geste
+        // est donc de ranger l'entrée de journal — et l'accusé du serveur le fait tout seul.
+        // I5 : la phrase dit « EN COURS de renvoi », pas « renvoyée ». Ce qui est établi, c'est l'entrée en file ;
+        // l'accusé, personne ne l'a encore vu — et si l'envoi tombe en quarantaine, il n'y en aura pas (la
+        // quarantaine nomme alors la fiche juste à côté, avec ses propres gestes). La ligne disparaît d'elle-même
+        // à l'accusé : aucun état affiché sans un événement réel.
         // Sinon, la nature du conflit d'abord : « même heure, contenus différents » et « une autre version a été
         // créée ailleurs » ne demandent pas la même décision, et rien ne permet de deviner l'une depuis l'autre.
-        el('p', null, c.renvoye ? t('Version d’ici renvoyée au serveur') : phraseConflit(c.kind)),
+        el('p', null, c.renvoye ? t('Version d’ici en cours de renvoi au serveur.') : phraseConflit(c.kind)),
         el('p', null, t('{l} — version d’ici du {a}, version d’ailleurs du {b}', { l: c.libelle, a: c.dateIci, b: c.dateAilleurs })),
         c.renvoye
           ? rangee(bouton('ignorerConflit', t('Ignorer'), c.id))

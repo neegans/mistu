@@ -154,7 +154,7 @@ aussi (R31). La pastille, elle, est **livrée en L3** (voir la sous-section suiv
 `.superpowers/sdd/2026-10-13-synchronisation-l3-envoi-reception/` (`progress.md`, un brief, un rapport et une revue
 par tâche ; dix tâches, chacune avec une ronde de corrections au plus). Décisions consignées en **spec § 11,
 lignes R37 à R64** (dans le registre, elles s'appellent R-L3-1 à R-L3-29). `APP_VERSION = '0.3.0'`,
-`sw.js VERSION = 'cuisine-os-v0.3.0-4'`, `SHELL` complet (67 entrées, huit modules de `src/sync/` de plus).
+`sw.js VERSION = 'cuisine-os-v0.3.0-5'`, `SHELL` complet (67 entrées, huit modules de `src/sync/` de plus).
 
 **Vague finale de corrections (13 octobre 2026, après `final-review.md` — rapport : `final-fix-report.md`).** Le
 Critical et les cinq Important de la revue de branche sont corrigés, plus quatre mineurs : **R57** une suppression
@@ -180,9 +180,10 @@ conservé, origine `device` : rien n'entre en file). **Deux derniers constats de
 **R63** un `put` dont la fiche n'existe plus ici est **retiré de la file sans aucun envoi** — en tombale, il
 **écrivait au serveur** une ligne supprimée pour une fiche qu'il ne connaissait peut-être même pas (une suppression
 locale explicite, elle, part toujours : R57 inchangé) ; et **R64** un conflit dont la version d'ici **repart** porte
-`renvoye: true`, n'offre que « Ignorer », et se **range tout seul** dès que le serveur accuse cette clé — lui offrir
-« Garder celle d'ailleurs » revenait à écraser ce qu'on vient d'envoyer par la version qui a perdu. Suite complète :
-**971/971 verts** (deux passages), 0 erreur et 0 avertissement console, 0 réponse ≥ 400 ; `tests/backup.js` vert ;
+`renvoye: true`, dit « **Version d'ici en cours de renvoi au serveur.** » (l'état réel : l'entrée est en file,
+l'accusé personne ne l'a vu — I5), n'offre que « Ignorer », et se **range tout seul** dès que le serveur accuse
+cette clé — lui offrir « Garder celle d'ailleurs » revenait à écraser ce qu'on vient d'envoyer par la version qui a
+perdu. Suite complète : **972/972 verts**, 0 erreur et 0 avertissement console, 0 réponse ≥ 400 ; `tests/backup.js` vert ;
 `node --test tools` 40/40 ; `--check` 0.
 
 **Ce qui marche** (éprouvé par la suite : **875 assertions vertes**, transport factice, bases temporaires, aucun

@@ -1291,7 +1291,11 @@ export async function runSyncL3Tests({ eq, ok }) {
     for (const n of syncSectionL3(mRenvoye, gestes)) boite.append(n);
     const libelles = [...boite.querySelectorAll('button')].map((b) => b.textContent);
     eq(libelles, ['Ignorer'], 'R-L3-29 : un conflit renvoyé n’offre QUE « Ignorer » — ni « Garder celle d’ici », ni « Garder celle d’ailleurs »');
-    ok(boite.textContent.includes('Version d’ici renvoyée au serveur'), 'R-L3-29 : … et la ligne dit ce qui s’est passé, pas une question');
+    // I5 : la ligne ne dit pas plus que ce qui s'est produit. « renvoyée » affirmait un accusé que personne n'a
+    // encore vu — et si l'envoi tombe en quarantaine, il n'y aura pas d'accusé du tout (la quarantaine nomme la
+    // fiche à côté, avec ses propres gestes). « en cours de renvoi » est exactement l'état : l'entrée est en file.
+    ok(boite.textContent.includes('Version d’ici en cours de renvoi au serveur.'), 'R-L3-29 (I5) : la ligne dit l’état réel — un renvoi EN COURS, jamais un accusé que personne n’a vu');
+    ok(!boite.textContent.includes('renvoyée au serveur'), 'R-L3-29 (I5) : … et elle n’affirme plus un envoi abouti');
     for (const b of boite.querySelectorAll('button')) b.click();
     eq(vus, [['ignorerConflit', 'books:k1']], 'R-L3-29 : « Ignorer » appelle son geste avec la clé du conflit');
     // Et un conflit ordinaire garde ses deux issues, sans « Ignorer ».
@@ -1790,7 +1794,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(liste.length > 30, 'SHELL lu : ' + liste.length + ' entrées à relire avant de conclure');
     eq(['./src/sync/transport.js', './src/sync/lots.js', './src/sync/reponses.js', './src/sync/push.js', './src/sync/pull.js', './src/sync/conflits.js', './src/sync/backfill.js', './src/sync/moteur.js']
       .filter((c) => !liste.includes(c)), [], 'SHELL : les modules d’envoi et de réception, désormais atteignables depuis app.js, sont servis hors connexion');
-    ok(/VERSION = 'cuisine-os-v0\.3\.0-4'/.test(source), 'sw.js : VERSION incrémentée pour la vague finale — l’ancien cache est purgé à l’activation');
+    ok(/VERSION = 'cuisine-os-v0\.3\.0-5'/.test(source), 'sw.js : VERSION incrémentée pour la vague finale — l’ancien cache est purgé à l’activation');
     // Le nom du cache et la version affichée dans Réglages doivent dire la MÊME chose : deux versions qui se
     // contredisent rendent impossible de savoir ce qui est servi (un cache « 0.2.0 » pour une app qui s'annonce
     // « 0.3.0 » est exactement le genre de doute qu'un marqueur de version existe pour lever).
