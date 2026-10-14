@@ -4,7 +4,7 @@ import { t } from '../core/i18n.js';
 import { navigate, buildQuery, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { pageHeader, bookCover, segmented, emptyState, section } from './components.js';
-import { revoquerUrlsDeBlob } from '../core/blob-urls.js';
+import { revoquerUrlDeBlob } from '../core/blob-urls.js';
 import { proposeDishesForRecipe } from '../domain/dishes.js';
 
 export async function renderLibrary(params, query, ctx) {
@@ -26,11 +26,9 @@ async function booksTab(ctx) {
   const filter = el('input', { type: 'search', placeholder: t('Filtrer par titre, auteur, cuisine…') });
   const grid = el('div', { class: 'grid' });
   const draw = () => {
-    // Chaque passage recrée les URL blob: des vignettes affichées : les précédentes n'ont plus de lecteur (F4/S15).
-    revoquerUrlsDeBlob();
     const q = filter.value.trim().toLowerCase();
-    grid.replaceChildren();
     const eds = [...ctx.book_editions].sort((a, b) => (ctx.editionLabel(a) || '').localeCompare(ctx.editionLabel(b) || ''));
+    const noeuds = [];
     for (const ed of eds) {
       const book = ctx.booksById.get(ed.book_id);
       const hay = `${book?.title || ''} ${book?.author || ''} ${(book?.cuisines || []).join(' ')} ${(book?.tags || []).join(' ')}`.toLowerCase();
@@ -38,11 +36,18 @@ async function booksTab(ctx) {
       const list = recipesByEdition.get(ed.id) || [];
       const available = list.filter((r) => r.availability !== 'reference_only').length;
       const refs = list.length - available;
-      grid.append(el('div', null, bookCover(ed, book, { fichier: ed.cover_sha256 ? fichiers.get(ed.cover_sha256) : null }),
+      noeuds.push(el('div', null, bookCover(ed, book, { fichier: ed.cover_sha256 ? fichiers.get(ed.cover_sha256) : null }),
         el('div', { class: 'muted', style: { fontSize: '.78rem', marginTop: '.3rem' } },
           list.length ? `${available ? t('{n} disponible(s)', { n: available }) : ''}${available && refs ? ' · ' : ''}${refs ? t('{n} repérée(s)', { n: refs }) : ''}` : t('Aucune recette indexée'))));
     }
-    if (!grid.children.length) grid.append(el('p', { class: 'muted' }, t('Aucun livre ne correspond.')));
+    if (!noeuds.length) noeuds.push(el('p', { class: 'muted' }, t('Aucun livre ne correspond.')));
+    // D-T9 : les URL blob: de la génération précédente sont révoquées APRÈS le remplacement des nœuds — avant, un
+    // <img> encore dans le document pointait sur une URL morte (erreur de console). Et seules les anciennes sont
+    // révoquées : « tout révoquer » ici emporterait les vignettes qu'on vient de créer (le filtre redessine à
+    // chaque touche).
+    const anciennes = [...grid.querySelectorAll('img.cover-img')].map((i) => i.src);
+    grid.replaceChildren(...noeuds);
+    for (const u of anciennes) revoquerUrlDeBlob(u);
   };
   filter.addEventListener('input', draw);
   draw();
