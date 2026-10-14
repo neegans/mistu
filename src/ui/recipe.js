@@ -14,7 +14,7 @@ import { pageHeader, section, availabilityBadge, versionBadge, timeText, provena
 import { addToMealFlow } from './meals.js';
 import { deviceId } from './import.js';
 import { createTimerLaunch } from '../domain/timers.js';
-import { lienSignet } from './signet.js';
+import { lienSignet } from '../core/lien.js';
 
 export async function renderRecipe(params, query, ctx) {
   const recipe = ctx.recipesById.get(params.id);

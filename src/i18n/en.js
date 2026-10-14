@@ -239,5 +239,6 @@ export const EN = {
   "L’app n’a pas lu la page : ouvre-la pour cuisiner.": "The app has not read the page: open it to cook.",
   "Ouvrir le lien": "Open the link",
   "Adresse non reconnue : ": "Address not recognized: ",
+  "Adresse non reconnue": "Address not recognized",
   "Lien web": "Web link",
 };

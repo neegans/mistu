@@ -457,9 +457,17 @@ export async function runAjouterTests({ eq, ok }) {
   }
   {
     // Vue recette : pastille et branche « Lien web gardé » (F8, S6, S7)
-    const { availabilityBadge } = await import('../src/ui/components.js');
+    const { availabilityBadge, provenanceText } = await import('../src/ui/components.js');
     eq(availabilityBadge({ availability: 'reference_only', source_url: 'https://a.test/' }).textContent, 'Lien web', 'pastille : un signet n’est pas « Repérée dans ton livre »');
     eq(availabilityBadge({ availability: 'reference_only', printed_page: 12 }).textContent, 'Repérée dans ton livre — page 12', 'pastille : les références d’index inchangées');
+    // R-UX-11 (S7) : dans les CARTES DE LISTE aussi, l'hôte vient de l'adresse — jamais du libellé stocké, qu'une
+    // archive ou le serveur peut avoir rempli avec n'importe quoi. La vue recette le faisait déjà, pas les listes.
+    eq(provenanceText({ source_url: 'https://a.test/x', source_label: 'ment.test' }, null, null), 'a.test', 'provenance : un signet montre l’hôte recalculé depuis l’adresse (S7)');
+    const faux = provenanceText({ source_url: 'javascript:alert(1)', source_label: 'ment.test' }, null, null);
+    eq([faux, faux.includes('ment.test')], ['Adresse non reconnue', false], 'provenance : une adresse hostile ne laisse pas le libellé stocké prendre sa place');
+    eq(provenanceText({ source_label: 'Recette de famille' }, null, null), 'Recette de famille', 'provenance : sans source_url, le libellé libre d’une recette saisie à la main est intact');
+    eq(provenanceText({ source_url: 'https://a.test/x', source_label: 'ment.test', printed_page: 12 }, { title: 'B', author: 'A' }, null), 'B — A · page 12', 'provenance : un signet rattaché à un livre garde la provenance du livre (F22)');
+    eq(provenanceText({}, null, null), 'Source personnelle', 'provenance : rien du tout → source personnelle');
     const { blocSignet } = await import('../src/ui/recipe.js');
     const sain = blocSignet({ source_url: 'https://a.test/x', source_label: 'ment.test' });
     const a = sain.querySelector('a');

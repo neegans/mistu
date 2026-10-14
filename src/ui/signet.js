@@ -4,6 +4,7 @@
 // lienSignet (S6), parce qu'une fiche venue d'une archive ou du serveur peut porter n'importe quoi (I-G).
 import { el, toast } from '../core/dom.js';
 import { t, getUiLocale } from '../core/i18n.js';
+import { lienSignet } from '../core/lien.js';
 import { logError } from '../core/log.js';
 import { navigate } from '../core/router.js';
 import * as repo from '../model/repo.js';
@@ -12,15 +13,10 @@ import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes 
 
 export const LIMITES_SIGNET = { adresse: 2048, titre: 300 };
 
-// Seuls http: et https: s'ouvrent. L'hôte rendu est RECALCULÉ depuis l'adresse (jamais source_label, S7) et reste en
-// punycode : un nom internationalisé ne doit pas pouvoir se déguiser en un autre à l'écran.
-export function lienSignet(sourceUrl) {
-  try {
-    const u = new URL(String(sourceUrl ?? ''));
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, href: null, hote: null };
-    return { ok: true, href: u.href, hote: u.host };
-  } catch { return { ok: false, href: null, hote: null }; }
-}
+// La lecture d'une adresse vit dans core/lien.js (R-UX-11) : components.js en a besoin pour les cartes de liste, et
+// ce module importe components.js — la fonction ne peut pas vivre ici sans créer un cycle. Ré-exportée pour que
+// l'API du signet reste d'un seul tenant.
+export { lienSignet } from '../core/lien.js';
 
 export function signetModel({ adresse = '', titre = '', editionId = '', cuisines = [] } = {}) {
   const erreurs = {};

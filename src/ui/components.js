@@ -1,6 +1,7 @@
 // Composants partagés : en-têtes, badges d'état, cartes, pastilles de filtres, quantités avec hypothèses, minuteries.
 import { el, formatMinutes, downloadBlob, toast } from '../core/dom.js';
 import { t, label } from '../core/i18n.js';
+import { lienSignet } from '../core/lien.js';
 import { displayQuantity, REASON_LABELS } from '../domain/units.js';
 import { shortcutUrl, siriPhrase, describeDuration, isAppleTouchDevice } from '../domain/timers.js';
 import { navigate } from '../core/router.js';
@@ -52,6 +53,10 @@ export function timeText(version) {
 
 export function provenanceText(recipe, book, edition) {
   if (book) return `${book.title}${book.author ? ` — ${book.author}` : ''}${recipe.printed_page ? ` · ${t('page')} ${recipe.printed_page}` : ''}`;
+  // Signet web (R-UX-11, S7) : l'hôte est RECALCULÉ depuis l'adresse, ici comme dans la vue recette — source_label
+  // peut venir d'une archive ou du serveur et nommer n'importe quoi. Une adresse illisible le dit, et n'emprunte
+  // pas le libellé stocké pour se faire passer pour un site.
+  if (recipe.source_url) { const lien = lienSignet(recipe.source_url); return lien.ok ? lien.hote : t('Adresse non reconnue'); }
   if (recipe.source_label) return recipe.source_label;
   return t('Source personnelle');
 }
