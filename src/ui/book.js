@@ -7,13 +7,17 @@ import { displayUrl } from '../sync/mime.js';
 import { listConventions } from '../domain/units.js';
 import { pageHeader, section, field, select, recipeCard, emptyState, bookCover } from './components.js';
 import { urlDeBlob } from '../core/blob-urls.js';
-import { poserCouverture, renderZoneCouverture } from './livre-ajout.js';
+import { poserCouverture, renderZoneCouverture, messageErreurImage } from './livre-ajout.js';
 import { startScanSession, indexEntriesPanel } from './import.js';
 import { accueilLivreModel, renderAccueilLivre } from './accueil-livre.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
 import { ACCEPT_PHOTOS, ACCEPT_FICHIERS } from './add.js';
 
-export const seancesOuvertes = (ctx, editionId) => (ctx.scan_sessions || []).filter((s) => s.status === 'open' && s.edition_id === editionId);
+// C8 : la plus RÉCENTE d'abord. La fiche ne rappelle qu'UNE séance et « Reprendre » doit mener à celle qu'on vient
+// de laisser, pas à la plus vieille restée ouverte (l'ordre de la base est celui des clés, pas du temps).
+export const seancesOuvertes = (ctx, editionId) => (ctx.scan_sessions || [])
+  .filter((s) => s.status === 'open' && s.edition_id === editionId)
+  .sort((a, b) => String(b.started_at || '').localeCompare(String(a.started_at || '')));
 
 // « + Pages d'index » / « + Recette » : un <details> dont le résumé est le bouton, les sources dessous (spec § 9).
 function menuSource(libelle, ...boutons) {
@@ -51,7 +55,7 @@ export async function renderBook(params, query, ctx) {
       menuSource(t('+ Recette'),
         el('button', { type: 'button', class: 'btn', onClick: () => lancer('recette')(ACCEPT_PHOTOS, 'environment') }, t('Photographier')),
         el('button', { type: 'button', class: 'btn', onClick: () => lancer('recette')(ACCEPT_FICHIERS, null) }, t('Choisir des photos ou un PDF')),
-        el('a', { class: 'btn', href: `#/recipes/new?edition=${edition.id}` }, t('Saisir à la main'))),
+        el('a', { class: 'btn', href: `#/recipes/new?edition=${encodeURIComponent(edition.id)}` }, t('Saisir à la main'))),
     ],
   });
   // La couverture est à GAUCHE du titre (F15) : c'est le livre qu'on reconnaît, avant de lire son nom.
@@ -62,12 +66,12 @@ export async function renderBook(params, query, ctx) {
     photographier: (intention) => lancer(intention)(ACCEPT_PHOTOS, 'environment'),
     choisir: (intention) => lancer(intention)(ACCEPT_FICHIERS, null),
     plusTard: () => navigate('/library'),
-    fermer: () => remplacerAdresse(`#/books/${edition.id}`),
+    fermer: () => remplacerAdresse(`#/books/${encodeURIComponent(edition.id)}`),
   }));
   const ouvertes = seancesOuvertes(ctx, edition.id);
   if (ouvertes.length) root.append(el('div', { class: 'card flat row between' },
     el('span', null, t('Séance en cours : {n} page(s)', { n: (ouvertes[0].page_ids || []).length })),
-    el('a', { class: 'btn small', href: `#/import?session=${ouvertes[0].id}` }, t('Reprendre'))));
+    el('a', { class: 'btn small', href: `#/import?session=${encodeURIComponent(ouvertes[0].id)}` }, t('Reprendre'))));
 
   const usesCups = ctx.recipe_versions.some((v) => recipes.some((r) => r.id === v.recipe_id) && (v.ingredients || []).some((i) => ['cup', 'tbsp', 'tsp', 'fl_oz'].includes(i.unit_id)));
   if (!edition.unit_convention_id && usesCups) {
@@ -98,7 +102,7 @@ export async function renderBook(params, query, ctx) {
       const doc = ctx.docsByRecipe.get(r.id);
       const extra = r.availability === 'reference_only' ? el('div', { class: 'row', style: { marginTop: '.4rem' } },
         el('button', { class: 'btn small', onClick: async (e) => { e.preventDefault(); const f = await pickFiles({ accept: 'image/*', capture: 'environment' }); if (f.length) { const s = await startScanSession(f, { edition_id: edition.id }); sessionStorage.setItem('cuisineos.pending_recipe', r.id); } } }, t('Scanner cette recette')),
-        el('a', { class: 'btn small', href: `#/recipes/${r.id}/edit?kind=extraction`, onClick: (e) => e.stopPropagation() }, t('Saisir à la main'))) : null;
+        el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(r.id)}/edit?kind=extraction`, onClick: (e) => e.stopPropagation() }, t('Saisir à la main'))) : null;
       list.append(recipeCard(doc || { recipe: r, version: null, book, edition }, { extra }));
     }
   };
@@ -116,20 +120,38 @@ export async function renderBook(params, query, ctx) {
   // et l'état réel est redessiné sur place. En cas de succès, refresh() rend la fiche entière.
   const zoneCouv = el('div', null);
   const dessinerCouv = () => zoneCouv.replaceChildren(renderZoneCouverture(etatCouv, gestesCouv));
+  // C4 : chaque geste RELIT l'édition et n'écrit que SON champ. Réécrire `{ ...edition }` — l'édition lue au RENDU —
+  // effaçait ce que l'autre geste de la même fiche venait d'écrire : enregistrer les métadonnées remettait le
+  // `cover_sha256` d'avant (couverture perdue), et poser une couverture remettait les métadonnées d'avant.
+  const ecrirePointeur = async (sha256) => {
+    try {
+      const courante = (await repo.get('book_editions', edition.id)) || edition;
+      await repo.save('book_editions', { ...courante, cover_sha256: sha256 });
+      return true;
+    } catch { return false; }
+  };
   const poser = async (capture) => {
     const files = await pickFiles({ accept: 'image/*', multiple: false, capture });
     if (!files.length) return;
     etatCouv.enCours = true; dessinerCouv();
-    try { const { sha256 } = await poserCouverture(files[0], { origine: 'locale' }); await repo.save('book_editions', { ...edition, cover_sha256: sha256 }); toast(t('Couverture enregistrée.')); refresh(); }
-    catch (e) {
-      etatCouv.enCours = false; dessinerCouv();
-      toast(e?.code === 'trop_lourde' ? t('Cette image est trop lourde (25 Mo au plus).') : t('Cette image ne peut pas être lue ici. Essaie une autre photo.'));
-    }
+    let empreinte;
+    // Deux phases, deux phrases : une image refusée n'est pas une écriture refusée (I-B).
+    try { empreinte = (await poserCouverture(files[0], { origine: 'locale' })).sha256; }
+    catch (e) { etatCouv.enCours = false; dessinerCouv(); toast(messageErreurImage(e)); return; }
+    if (!(await ecrirePointeur(empreinte))) { etatCouv.enCours = false; dessinerCouv(); toast(t('La couverture n’a pas pu être changée. Réessaie.')); return; }
+    toast(t('Couverture enregistrée.')); refresh();
   };
   const gestesCouv = {
     photographier: () => poser('environment'),
     choisir: () => poser(null),
-    retirer: async () => { await repo.save('book_editions', { ...edition, cover_sha256: null }); toast(t('Couverture retirée.')); refresh(); },
+    // RF-m4 : « Retirer » écrit aussi — il se ferme donc pendant, comme les deux autres (deux tapes pressées ne
+    // font pas deux écritures), et il relit l'édition avant d'écrire (C4).
+    retirer: async () => {
+      if (etatCouv.enCours) return;
+      etatCouv.enCours = true; dessinerCouv();
+      if (!(await ecrirePointeur(null))) { etatCouv.enCours = false; dessinerCouv(); toast(t('La couverture n’a pas pu être changée. Réessaie.')); return; }
+      toast(t('Couverture retirée.')); refresh();
+    },
   };
   dessinerCouv();
   root.append(section(t('Couverture'), zoneCouv));
@@ -150,7 +172,7 @@ export async function renderBook(params, query, ctx) {
     root.append(section(t('Pages et fichiers sources'),
       el('p', { class: 'muted' }, t('{n} document(s). Les originaux restent consultables depuis chaque recette.', { n: docs.length })),
       thumbs,
-      ...docs.filter((d) => d.source_type !== 'photo').map((d) => el('div', { class: 'row between card flat' }, el('span', null, `${d.original_filename} (${d.source_type.toUpperCase()})`), el('a', { class: 'btn small', href: `#/recipes/new?doc=${d.id}&edition=${edition.id}` }, t('Créer une recette depuis ce fichier'))))));
+      ...docs.filter((d) => d.source_type !== 'photo').map((d) => el('div', { class: 'row between card flat' }, el('span', null, `${d.original_filename} (${d.source_type.toUpperCase()})`), el('a', { class: 'btn small', href: `#/recipes/new?doc=${encodeURIComponent(d.id)}&edition=${encodeURIComponent(edition.id)}` }, t('Créer une recette depuis ce fichier'))))));
   }
 
   // Métadonnées
@@ -174,8 +196,12 @@ export async function renderBook(params, query, ctx) {
       field(t('Convention de mesure'), select([{ value: '', label: t('Non confirmée') }, ...listConventions().map((c) => ({ value: c.id, label: c.labels.fr }))], meta.convention, (v) => { meta.convention = v; }), t('Ordre de décision : équivalences imprimées → convention décrite dans le livre → convention confirmée ici.'))),
     el('div', { class: 'row', style: { marginTop: '.8rem' } },
       el('button', { class: 'btn primary', onClick: async () => {
-        await repo.saveBatch({ books: [{ ...book, title: meta.title.trim() || book.title, author: meta.author.trim(), cuisines: [...meta.cuisines] }],
-          book_editions: [{ ...edition, isbn: meta.isbn.trim() || null, publisher: meta.publisher.trim() || null, year: meta.year ? parseInt(meta.year, 10) || null : null, language: meta.language, unit_convention_id: meta.convention || null, convention_evidence: meta.convention ? (edition.unit_convention_id === meta.convention ? edition.convention_evidence : 'confirmed_by_user') : null }] });
+        // C4 : livre et édition RELUS juste avant l'écriture, et seuls les champs de CE formulaire sont écrits —
+        // le `cover_sha256` posé entre le rendu et ce clic survit (il n'est pas dans ce formulaire).
+        const courantLivre = (await repo.get('books', book.id)) || book;
+        const courante = (await repo.get('book_editions', edition.id)) || edition;
+        await repo.saveBatch({ books: [{ ...courantLivre, title: meta.title.trim() || courantLivre.title, author: meta.author.trim(), cuisines: [...meta.cuisines] }],
+          book_editions: [{ ...courante, isbn: meta.isbn.trim() || null, publisher: meta.publisher.trim() || null, year: meta.year ? parseInt(meta.year, 10) || null : null, language: meta.language, unit_convention_id: meta.convention || null, convention_evidence: meta.convention ? (courante.unit_convention_id === meta.convention ? courante.convention_evidence : 'confirmed_by_user') : null }] });
         toast(t('Enregistré')); refresh();
       } }, t('Enregistrer')),
       pref?.hidden ? el('button', { class: 'btn', onClick: async () => { await repo.save('rediscovery_prefs', { ...pref, hidden: false }); toast(t('Livre de nouveau proposé dans Redécouvrir')); refresh(); } }, t('Réafficher dans Redécouvrir')) : null,
