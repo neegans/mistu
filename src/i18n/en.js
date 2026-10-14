@@ -249,5 +249,8 @@ export const EN = {
   "Couverture retirée.": "Cover removed.",
   "Cette image est trop lourde (25 Mo au plus).": "This image is too heavy (25 MB at most).",
   "Cette image ne peut pas être lue ici. Essaie une autre photo.": "This image cannot be read here. Try another photo.",
+  "Cette image est trop grande.": "This image is too large.",
+  "La couverture reçue n’a pas pu être lue.": "The cover that arrived could not be read.",
+  "La couverture n’a pas pu être changée. Réessaie.": "The cover could not be changed. Try again.",
   "La couverture n’est pas sur cet appareil.": "The cover is not on this device.",
 };

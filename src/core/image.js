@@ -1,7 +1,12 @@
 // Images de couverture (spec UX § 6, I-G) : les dimensions sont lues dans l'EN-TÊTE du fichier avant tout décodage (une
 // image hostile de 20 000 × 20 000 ne doit jamais atteindre createImageBitmap), puis TOUTE couverture est ré-encodée par
 // canvas en JPEG : le type est prouvé par le décodage, les métadonnées (dont la position GPS d'une photo) disparaissent.
-export const LIMITES_COUVERTURE = { octetsDistants: 5 * 1024 * 1024, octetsLocaux: 25 * 1024 * 1024, pixels: 50_000_000, maxCote: 1200, qualite: 0.85 };
+// Le mur de pixels vaut pour les DEUX sources : une couverture reçue (recupererCouvertureParIsbn) et une image choisie
+// ici (poserCouverture, chemin local — S2). Il ne s'applique qu'aux conteneurs que `dimensionsImage` sait lire (JPEG,
+// PNG, WebP) : un en-tête illisible (HEIC, que Safari décode) passe, et c'est le ré-encodage qui tranche.
+// 16 Mpx (S6) = 4 000 × 4 000 : au-delà, aucune couverture de livre n'a de raison d'être, et le canvas d'un téléphone
+// renonce bien avant (une photo de 48 Mpx est un cas réel, pas une couverture).
+export const LIMITES_COUVERTURE = { octetsDistants: 5 * 1024 * 1024, octetsLocaux: 25 * 1024 * 1024, pixels: 16_000_000, maxCote: 1200, qualite: 0.85 };
 
 export class ErreurImage extends Error {
   constructor(code) { super(code); this.name = 'ErreurImage'; this.code = code; }
