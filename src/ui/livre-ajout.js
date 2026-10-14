@@ -2,6 +2,7 @@
 // Ce qui vient d'Open Library / Google Books est ÉTIQUETÉ et borné (I-A, I-G) ; l'écriture passe par repo.saveBatch (I-D).
 import { el, toast, pickFiles } from '../core/dom.js';
 import { t } from '../core/i18n.js';
+import { logError } from '../core/log.js';
 import { navigate } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { listConventions } from '../domain/units.js';
@@ -140,9 +141,17 @@ export async function renderLivreAjoutRoute(params, query, ctx) {
     basculerCuisine: (v) => { etat.champs.cuisines = basculerPuce(etat.champs.cuisines, v); dessiner(); },
     ajouterCuisine: (v) => { const apres = ajouterPuce(etat.champs.cuisines, v); if (apres !== etat.champs.cuisines) { etat.champs.cuisines = apres; dessiner(); } },
     retourIsbn: () => { etat.pas = 1; dessiner(); },
+    // Une écriture refusée ne s'annonce pas (I-B) : on reste au pas 2, la saisie est intacte, et c'est dit.
     enregistrer: async () => {
       if (!livreAjoutModel(etat).peutEnregistrer) return;
-      const edition = await enregistrerLivre({ champs: etat.champs, isbn: etat.isbn, coverSha256: etat.couverture?.sha256 || null }, { repo });
+      let edition;
+      try {
+        edition = await enregistrerLivre({ champs: etat.champs, isbn: etat.isbn, coverSha256: etat.couverture?.sha256 || null }, { repo });
+      } catch (e) {
+        logError('livre.enregistrer', { error: e });
+        toast(t('Le livre n’a pas pu être enregistré. Réessaie.'));
+        return;
+      }
       toast(t('Livre ajouté'));
       navigate(`/books/${edition.id}?nouveau=1`);
     },

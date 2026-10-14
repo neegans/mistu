@@ -188,6 +188,7 @@ export const EN = {
   // « Ajouter un livre » en deux pas (spec UX § 5). « Saisir à la main », « Autre », « Éditeur », « Année »,
   // « Auteur / chef », « Ajouter un livre » et « Ajouter » sont déjà au dictionnaire : pas de doublon.
   "Scanne le code-barres, tape l’ISBN, ou saisis le livre à la main.": "Scan the barcode, type the ISBN, or enter the book by hand.",
+  "ISBN": "ISBN",
   "Scanner le code-barres": "Scan the barcode",
   "Identifier": "Identify",
   "Le lecteur de code-barres n’est pas offert dans ce navigateur.": "The barcode reader is not available in this browser.",
@@ -207,6 +208,7 @@ export const EN = {
   "La langue du livre ne suffit pas à choisir une convention. Sans convention, les tasses restent affichées telles quelles.": "The book language is not enough to choose a convention. Without a convention, cups stay shown as printed.",
   "Ajouter ce livre": "Add this book",
   "Livre ajouté": "Book added",
+  "Le livre n’a pas pu être enregistré. Réessaie.": "The book could not be saved. Try again.",
   "Saisis un ISBN d’abord.": "Enter an ISBN first.",
   "Aucun ISBN lu sur cette photo.": "No ISBN read on this photo.",
   "Lecture du code-barres impossible.": "Could not read the barcode.",
