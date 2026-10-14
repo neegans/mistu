@@ -78,6 +78,17 @@ export function bookCover(edition, book, { href = null } = {}) {
       el('div', { class: 'author' }, [book?.author, edition.year].filter(Boolean).join(' · '))));
 }
 
+// Carte d'action de la page « Ajouter » (spec § 4) et de l'accueil d'un livre (§ 8).
+export function carte(ico, titre, sousTitre, onClick) {
+  return el('button', { type: 'button', class: 'card carte', onClick },
+    el('div', { class: 'carte-ico', 'aria-hidden': 'true' }, ico), el('h3', null, titre), sousTitre ? el('p', { class: 'muted' }, sousTitre) : null);
+}
+
+// Un seul libellé pour désigner un livre dans une liste (spec § 10, F18) : titre · auteur · année.
+export function libelleLivre(edition, book) {
+  return [book?.title || t('Sans titre'), book?.author, edition?.year].filter(Boolean).join(' · ');
+}
+
 export function chipLabel(chip, ingredientsById) {
   const ingName = (id) => ingredientsById?.get(id)?.labels?.fr?.label || id;
   switch (chip.kind) {

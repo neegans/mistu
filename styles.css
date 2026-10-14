@@ -89,6 +89,9 @@ aside.sidenav { display: none; }
 .card.sage { background: var(--sage-2); }
 .card.warn { background: var(--warn-bg); border: 1px solid #ead9b3; }
 .card.danger { background: var(--danger-bg); border: 1px solid #e9bfb6; }
+.card.carte { text-align: left; cursor: pointer; border: 0; font: inherit; width: 100%; }
+.card.carte .carte-ico { font-size: 1.6rem; }
+.card.carte p { margin: 0; font-size: .9rem; }
 .card h2, .card h3 { margin-top: 0; }
 .row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
 .row.between { justify-content: space-between; }
