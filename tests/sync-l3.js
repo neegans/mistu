@@ -1417,6 +1417,24 @@ export async function runSyncL3Tests({ eq, ok }) {
     eq(await garderIci(db, tombaleRenvoyee), false, 'R-L3-30 : « Garder celle d’ici » reste refusé sur une tombale renvoyée (la fiche part déjà)');
     eq([await garderAilleurs(db, tombaleRenvoyee), await db.get('books', 'tomb'), await db.get('sync_conflicts', 'books:tomb')],
       [true, undefined, undefined], 'R-L3-30 (exception) : « Garder celle d’ailleurs » ACCEPTE la suppression venue d’ailleurs — l’issue de R-L3-26 vit encore');
+
+    // R-L3-30 ↔ R-L3-28 : ce que devient l'entrée de file laissée derrière. « Garder celle d'ailleurs » supprime la
+    // fiche par une origine 'remote' (donc sans capturer de tombale), mais le `put` que `pull.js` avait remis en
+    // file pour cette clé est TOUJOURS là. Sans R-L3-28, la passe suivante l'enverrait en tombale — et le serveur
+    // écrirait une ligne pour la fiche qu'on vient d'accepter de supprimer : une résurrection par le chemin même
+    // du geste qui l'a supprimée. L'entrée doit donc être abandonnée sans aucun appel réseau.
+    const autres = (await db.getAll('outbox')).filter((e) => e.id !== 'tomb').map((e) => e.seq);
+    if (autres.length) await db.mutate({ deletes: { outbox: autres }, origin: 'device' });
+    eq((await db.getAll('outbox')).map((e) => [e.store, e.id, e.op]), [['books', 'tomb', 'put']], 'R-L3-30 ↔ R-L3-28 : le put de la clé supprimée est bien resté en file');
+    const { fileDe: fileDeBoucle } = await import('../src/sync/outbox.js'); // la même définition que l'envoi relit
+    const tfBoucle = creerTransportFactice({ serveur: true });
+    let bilanBoucle;
+    try {
+      bilanBoucle = await createPush({ db, transport: tfBoucle, getUserId: () => 'u1' }).envoyer();
+    } finally { setClockOffset(0); }
+    eq([tfBoucle.journal.length, bilanBoucle.envoyes, bilanBoucle.abandonnees], [0, 0, 1], 'R-L3-30 ↔ R-L3-28 : AUCUN appel réseau — l’entrée est abandonnée, pas envoyée en tombale');
+    eq([await db.count('outbox'), (await fileDeBoucle(db, 'u1')).length], [0, 0], 'R-L3-30 ↔ R-L3-28 : … la file est vidée de cette entrée');
+    eq([await db.get('books', 'tomb'), tfBoucle.ligne('books', 'tomb')], [undefined, null], 'R-L3-30 ↔ R-L3-28 : … la fiche reste absente ICI, et rien n’a été écrit au serveur (aucune résurrection)');
   });
 
   await withRepo(async (repoTemp, db) => {
