@@ -822,6 +822,9 @@ export async function runAjouterTests({ eq, ok }) {
     eq(csp.match(/img-src ([^;]+)/)?.[1], "'self' blob: data:", `CSP ${page} : img-src fermé (aucune image externe)`);
     eq(csp.match(/script-src ([^;]+)/)?.[1], "'self'", `CSP ${page} : script-src 'self'`);
     eq(csp.match(/object-src ([^;]+)/)?.[1], "'none'", `CSP ${page} : object-src 'none'`);
+    eq(csp.match(/default-src ([^;]+)/)?.[1], "'self'", `CSP ${page} : default-src 'self' (repli qui couvre tout ce qui n'est pas listé)`);
+    eq(csp.match(/base-uri ([^;]+)/)?.[1], "'none'", `CSP ${page} : base-uri 'none'`);
+    eq(csp.match(/form-action ([^;]+)/)?.[1], "'none'", `CSP ${page} : form-action 'none'`);
   }
   // MODULES_NEUFS : les sept modules créés par le lot (R-UX-11 en ajoute un huitième, lien.js) + add.js réécrit.
   const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/ui/add.js'];

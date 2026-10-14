@@ -235,7 +235,7 @@ aucune base n'est ouverte** — en production les réglages sont toujours relus 
 `.superpowers/sdd/2026-10-14-ajouter-et-livres-ux/` (`progress.md`, un brief, un rapport et une revue par tâche ;
 dix tâches, chacune avec au plus deux rondes de corrections). Spec :
 `docs/superpowers/specs/2026-10-13-ajouter-et-livres-ux-design.md` (rév. 2 ; § 15.2 « Ce que la construction a
-amendé » : une ligne par ruling R-UX-1 à R-UX-14). `APP_VERSION = '0.4.0'` (posée dès la tâche 1, R-UX-5, pin
+amendé » : une ligne par ruling R-UX-1 à R-UX-15). `APP_VERSION = '0.4.0'` (posée dès la tâche 1, R-UX-5, pin
 structurel `v0.4.0-\d+`), `sw.js VERSION = 'cuisine-os-v0.4.0-11'`, sept modules neufs dans `SHELL` (`puces.js`,
 `livre-ajout.js`, `accueil-livre.js`, `signet.js`, `image.js`, `blob-urls.js`, `lien.js`) et `add.js` réécrit.
 
@@ -274,7 +274,7 @@ lot) ; `source_pages.sha256` reste une relation **latente**, jamais vérifiée �
 `recipe.js`/`components.js` (R-UX-11), pas sur ces deux surfaces ; `displayUrl` (vignettes, PDF) crée encore des URL
 `blob:` non suivies par `blob-urls.js` (pré-existant, hors lot).
 
-Suite complète : **1264/1264 verts**, 0 erreur et 0 avertissement console (hors `apple-mobile-web-app-capable`,
+Suite complète : **1270/1270 verts**, 0 erreur et 0 avertissement console (hors `apple-mobile-web-app-capable`,
 pré-existant et hors lot) ; `node --test tools/*.test.mjs` 40/40 ; `node tools/generer-migrations.mjs --check` : 0.
 Vérifié dans l'app réelle le 14 octobre (service worker `cuisine-os-v0.4.0-11` actif après deux rechargements) :
 `#/add`, `#/add/livre`, `#/add/signet`, `#/library` sans erreur console ni réponse ≥ 400 ; la bibliothèque de ce

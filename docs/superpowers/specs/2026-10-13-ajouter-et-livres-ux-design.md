@@ -310,7 +310,9 @@ injecté — F19).
     (`livre-ajout.js`, `signet.js`, `puces.js`, `image.js`, `blob-urls.js`, et les chaînes neuves d'`add.js`, `book.js`,
     `import.js`, `recipe.js`, `library.js`) dont **chaque** `t('…')` littéral a son entrée dans `en.js` (F13) ; aucun
     `html:`, `innerHTML`, `window.open` dans ces modules (S14) ; un rendu avec une chaîne hostile (`<img onerror>`) reste du
-    texte ; U+2028/2029 = 0 ; `connect-src` d'`index.html` et de `tests/index.html` = la liste fermée de § 12.
+    texte ; U+2028/2029 = 0 ; la CSP des deux pages est **inchangée et affirmée telle quelle**
+    (`connect-src 'self' https:`, `img-src 'self' blob: data:`, `script-src 'self'`, `object-src 'none'`,
+    `default-src 'self'`, `base-uri 'none'`, `form-action 'none'`) — R-UX-15.
 
 ## 14. Risques et décisions ouvertes
 
@@ -393,7 +395,8 @@ Une ligne par écart réel entre ce plan et le code livré, décidé par le cont
 | R-UX-12 | Le corps d'une réponse de couverture est lu **en flux**, annulé dès 5 Mo cumulés (Open Library n'annonce pas `content-length`). |
 | R-UX-13 | La couverture reçue est remise à vide par `identifier` et `retourIsbn` ; une réponse distante tardive n'appartient qu'à SA demande d'ISBN (`isbnDemande`, `touchee`). |
 | R-UX-14 | `alt = book.title` sur l'image de couverture, pour qu'un lien vers l'image porte toujours un nom accessible. |
-| R-UX-15 | **S10 retirée** : `connect-src` reste `'self' https:` sur les deux pages (l'assistant IA, `src/domain/llm.js`, accepte une URL de base libre — aucune liste fermée ne peut la couvrir sans casser cette fonctionnalité antérieure au lot). Le test statique affirme à la place `connect-src`/`img-src`/`script-src`/`object-src` exacts sur les deux pages. |
+| R-UX-15 | **S10 retirée** : `connect-src` reste `'self' https:` sur les deux pages (l'assistant IA, `src/domain/llm.js`, accepte une URL de base libre — aucune liste fermée ne peut la couvrir sans casser cette fonctionnalité antérieure au lot). Le test statique affirme à la place, sur les deux pages, une égalité stricte sur `connect-src`, `img-src`,
+`script-src`, `object-src`, `default-src`, `base-uri` et `form-action` (toute la CSP, pas seulement `connect-src`). |
 
-Compte final (tâche 10, clôture, après la revue de tâche ronde 1) : **1264/1264** tests verts, suite complète, 0
+Compte final (tâche 10, clôture, après la revue de tâche ronde 2) : **1270/1270** tests verts, suite complète, 0
 erreur et 0 avertissement console.
