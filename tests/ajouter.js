@@ -635,19 +635,31 @@ export async function runAjouterTests({ eq, ok }) {
       for (let i = 0; i < 300; i += 1) { if (condition()) return true; await new Promise((r) => setTimeout(r, 10)); }
       throw new Error(`attente dépassée (3 s) : ${quoi}`);
     };
+    // Attendre une FUITE (ce qui apparaîtrait si la garde cédait), bornée et sans échec : la garde promet que rien
+    // n'arrive, et on ne peut pas attendre « rien ». Le rouge mesuré prouve que la fenêtre suffit — c'est dans
+    // cette même fenêtre que le défaut s'est montré. Rend la dernière valeur de la condition.
+    const attendreFuite = async (condition) => {
+      for (let i = 0; i < 40; i += 1) { if (await condition()) return true; await new Promise((r) => setTimeout(r, 10)); }
+      return false;
+    };
     const attendreImages = (n) => Promise.all([...n.querySelectorAll('img')].map((i) => (i.complete ? null : new Promise((r) => { i.onload = r; i.onerror = r; }))));
     try {
-      await withRepo(async () => {
-        // Une VRAIE image : poserCouverture décode par createImageBitmap, un en-tête fabriqué échouerait (F11).
-        const toile = document.createElement('canvas'); toile.width = 120; toile.height = 160;
-        toile.getContext('2d').fillRect(0, 0, 120, 160);
-        const vraiePng = await new Promise((r) => toile.toBlob(r, 'image/png'));
+      await withRepo(async (repo, db) => {
+        // De VRAIES images : poserCouverture décode par createImageBitmap, un en-tête fabriqué échouerait (F11).
+        // Une taille DIFFÉRENTE par ISBN : les empreintes diffèrent, donc « aucune ligne files écrite » est un fait
+        // mesurable (avec la même image partout, putFile serait idempotent et le compte ne bougerait jamais).
+        const imageDe = async (w, h) => {
+          const toile = document.createElement('canvas'); toile.width = w; toile.height = h;
+          toile.getContext('2d').fillRect(0, 0, w, h);
+          return new Promise((r) => toile.toBlob(r, 'image/png'));
+        };
+        const [img111, img333, img555a, img555b, img777] = await Promise.all([imageDe(120, 160), imageDe(130, 170), imageDe(140, 180), imageDe(150, 190), imageDe(160, 200)]);
         const urls = [];
         const couvertures = new Map(); // isbn → fonction qui rend la réponse (le test maîtrise le moment)
         const sansFicheOl = new Set();
         let corpsLus = 0;
         const r404 = { ok: false, status: 404, headers: new Headers(), text: async () => '', blob: async () => new Blob([]) };
-        const reponseImage = () => ({ ok: true, status: 200, headers: new Headers({ 'content-type': 'image/png', 'content-length': String(vraiePng.size) }), blob: async () => { corpsLus += 1; return vraiePng; } });
+        const reponseImage = (png) => ({ ok: true, status: 200, headers: new Headers({ 'content-type': 'image/png', 'content-length': String(png.size) }), blob: async () => { corpsLus += 1; return png; } });
         globalThis.fetch = async (url) => {
           const u = String(url);
           urls.push(u);
@@ -674,7 +686,7 @@ export async function runAjouterTests({ eq, ok }) {
         const RIEN = 'Aucune couverture reçue. Tu peux la photographier.';
 
         // 1. Une couverture reçue ne survit pas à l’ISBN qui l’a produite.
-        couvertures.set('111', async () => reponseImage());
+        couvertures.set('111', async () => reponseImage(img111));
         const r1 = await LA.renderLivreAjoutRoute({}, {}, {});
         taper(r1, '111'); cliquer(r1, 'Identifier');
         await attendre(() => image(r1), 'la couverture de 111 est affichée');
@@ -687,7 +699,7 @@ export async function runAjouterTests({ eq, ok }) {
 
         // 2. Une réponse tardive appartient à SA demande : celle d’un ISBN abandonné est ignorée.
         let libererA = null;
-        couvertures.set('333', async () => { await new Promise((r) => { libererA = r; }); return reponseImage(); });
+        couvertures.set('333', async () => { await new Promise((r) => { libererA = r; }); return reponseImage(img333); });
         const r2 = await LA.renderLivreAjoutRoute({}, {}, {});
         taper(r2, '333'); cliquer(r2, 'Identifier');
         await attendre(() => zone(r2) && libererA, 'la demande de couverture de 333 est en vol');
@@ -695,16 +707,18 @@ export async function runAjouterTests({ eq, ok }) {
         taper(r2, '444'); cliquer(r2, 'Identifier');
         await attendre(() => message(r2) === RIEN, 'la réponse pour 444 (aucune couverture)');
         const lusAvant = corpsLus;
+        const files333 = (await db.getAll('files')).length;
         libererA();
         await attendre(() => corpsLus > lusAvant, 'le corps de la réponse tardive de 333 est lu');
-        await new Promise((r) => setTimeout(r, 200)); // large : le chemin complet de 111 a tenu dans la même attente
-        eq([image(r2), message(r2)], [false, RIEN], 'route : la réponse tardive d’un ISBN abandonné n’écrit RIEN à l’écran (R-UX-13)');
+        await attendreFuite(() => image(r2)); // l'ecran est le DERNIER maillon : si la garde cedait, l'image y arriverait
+        eq([image(r2), message(r2), (await db.getAll('files')).length], [false, RIEN, files333],
+          'route : la réponse tardive d’un ISBN abandonné n’écrit RIEN — ni à l’écran, ni une ligne files (R-UX-13)');
         await attendreImages(r2);
 
         // 3. « Retirer » tient devant une réponse tardive du MÊME ISBN (touchee) : ici l’ISBN ne peut rien trancher.
         let libererB = null;
         let tours = 0;
-        couvertures.set('555', async () => { tours += 1; if (tours === 1) await new Promise((r) => { libererB = r; }); return reponseImage(); });
+        couvertures.set('555', async () => { tours += 1; if (tours === 1) { await new Promise((r) => { libererB = r; }); return reponseImage(img555a); } return reponseImage(img555b); });
         const r3 = await LA.renderLivreAjoutRoute({}, {}, {});
         taper(r3, '555'); cliquer(r3, 'Identifier');
         await attendre(() => zone(r3) && libererB, 'la 1re demande de couverture de 555 est en vol');
@@ -714,11 +728,33 @@ export async function runAjouterTests({ eq, ok }) {
         cliquer(r3, 'Retirer');
         eq([image(r3), message(r3)], [false, null], 'route : « Retirer » vide la zone sur-le-champ');
         const lus2 = corpsLus;
+        const files555 = (await db.getAll('files')).length;
         libererB();
         await attendre(() => corpsLus > lus2, 'le corps de la réponse tardive de la 1re demande est lu');
-        await new Promise((r) => setTimeout(r, 200));
-        eq(image(r3), false, 'route : une réponse tardive ne remet pas une couverture que la personne vient de retirer (R-UX-13)');
+        await attendreFuite(() => image(r3));
+        eq([image(r3), (await db.getAll('files')).length], [false, files555],
+          'route : une réponse tardive ne remet pas une couverture que la personne vient de retirer, et n’écrit aucune ligne files (R-UX-13)');
         await attendreImages(r3);
+
+        // 5. Dernière porte : revenir changer l’ISBN SANS le changer, laisser la réponse de l’ancien arriver
+        // (invisible au pas 1), puis « Saisir à la main » — une fiche saisie à la main n’a jamais de couverture reçue.
+        let libererC = null;
+        couvertures.set('777', async () => { await new Promise((r) => { libererC = r; }); return reponseImage(img777); });
+        const r5 = await LA.renderLivreAjoutRoute({}, {}, {});
+        taper(r5, '777'); cliquer(r5, 'Identifier');
+        await attendre(() => zone(r5) && libererC, 'la demande de couverture de 777 est en vol');
+        cliquer(r5, '← Changer d’ISBN');
+        const lus3 = corpsLus;
+        const files777 = (await db.getAll('files')).length;
+        libererC();
+        await attendre(() => corpsLus > lus3, 'le corps de la réponse tardive de 777 est lu');
+        // La personne enchaîne : le pas 2 s'ouvre, et c'est LÀ qu'on guette la fuite (écran ou base) — sinon on
+        // mesurerait l'écran avant que la réponse tardive ait eu le temps d'y écrire.
+        cliquer(r5, 'Saisir à la main');
+        await attendreFuite(() => image(r5));
+        eq([image(r5), message(r5), (await db.getAll('files')).length], [false, null, files777],
+          'route : une fiche saisie à la main ne porte jamais la couverture reçue pour l’ISBN abandonné (R-UX-13)');
+        await attendreImages(r5);
 
         // 4. La couverture n’est demandée QUE si Open Library a identifié le livre (I-A : provenance étiquetée).
         sansFicheOl.add('666');

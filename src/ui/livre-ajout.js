@@ -269,12 +269,16 @@ export async function renderLivreAjoutRoute(params, query, ctx) {
         etat.isbn = code.rawValue; await identifier();
       } catch { toast(t('Lecture du code-barres impossible.')); }
     },
-    saisirMain: () => { etat.isbn = nettoyerIsbn(etat.isbn); etat.provenance = null; etat.pas = 2; dessiner(); },
+    // R-UX-13 : une fiche saisie à la main n'a JAMAIS de couverture reçue — `touchee` ferme la porte à une réponse
+    // encore en vol pour cet ISBN (le pas 1 ne montre pas la zone : elle s'y reposerait sans que personne le voie).
+    saisirMain: () => { etat.isbn = nettoyerIsbn(etat.isbn); etat.provenance = null; etat.couverture = { ...COUVERTURE_VIDE(), touchee: true }; etat.pas = 2; dessiner(); },
     changerChamp: (k, v) => { etat.champs[k] = v; majBoutonEnregistrer(zone, livreAjoutModel(etat)); },
     basculerCuisine: (v) => { etat.champs.cuisines = basculerPuce(etat.champs.cuisines, v); dessiner(); },
     ajouterCuisine: (v) => { const apres = ajouterPuce(etat.champs.cuisines, v); if (apres !== etat.champs.cuisines) { etat.champs.cuisines = apres; dessiner(); } },
-    // R-UX-13 : revenir changer l'ISBN abandonne aussi la couverture reçue pour l'ancien.
-    retourIsbn: () => { etat.pas = 1; etat.provenance = null; etat.couverture = COUVERTURE_VIDE(); dessiner(); },
+    // R-UX-13 : revenir changer l'ISBN abandonne la couverture de l'ancien — et `touchee` empêche la réponse encore
+    // en vol de la reposer en coulisse (le pas 1 ne montre pas la zone). L'`identifier` suivant repart d'un
+    // COUVERTURE_VIDE() neuf, donc `touchee` retombe et la couverture du nouvel ISBN est bien demandée.
+    retourIsbn: () => { etat.pas = 1; etat.provenance = null; etat.couverture = { ...COUVERTURE_VIDE(), touchee: true }; dessiner(); },
     // Une écriture refusée ne s'annonce pas (I-B) : on reste au pas 2, la saisie est intacte, et c'est dit.
     // `enCours` ferme le bouton pendant l'écriture : deux tapes pressées ne font pas deux livres.
     enregistrer: async () => {
