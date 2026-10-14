@@ -27,6 +27,7 @@ import { renderSettings, demarrerConnexion, archiveEnCours } from './ui/settings
 import { renderShoppingList } from './ui/grocery.js';
 import { renderAdd } from './ui/add.js';
 import { renderLivreAjoutRoute } from './ui/livre-ajout.js';
+import { renderSignetRoute } from './ui/signet.js';
 import { porteEntreeModel, renderPorteEntree } from './ui/porte-entree.js';
 
 const NAV = [
@@ -100,6 +101,7 @@ function registerRoutes() {
   route('/settings', renderSettings);
   route('/lists/:id', renderShoppingList);
   route('/add/livre', renderLivreAjoutRoute);
+  route('/add/signet', renderSignetRoute);
   route('/add', renderAdd);
   setNotFound(async () => el('div', { class: 'card' }, el('h2', null, t('Page introuvable')), el('a', { class: 'btn', href: '#/' }, t('Retour à l’accueil'))));
 }

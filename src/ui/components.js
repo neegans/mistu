@@ -25,6 +25,8 @@ export function emptyState(icon, text, action = null) {
 }
 
 export function availabilityBadge(recipe) {
+  // Un signet web n'est pas « Repérée dans ton livre » : il n'y a pas de page de livre, il y a un lien (spec § 11, F8).
+  if (recipe.availability === 'reference_only' && recipe.source_url) return el('span', { class: 'badge reference' }, t('Lien web'));
   const cls = recipe.availability === 'available' ? 'available' : recipe.availability === 'partial' ? 'partial' : 'reference';
   const text = recipe.availability === 'reference_only' && recipe.printed_page ? t('Repérée dans ton livre — page {p}', { p: recipe.printed_page }) : label('availability', recipe.availability);
   return el('span', { class: `badge ${cls}` }, text);

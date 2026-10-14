@@ -122,7 +122,9 @@ export function buildDocs({ recipes, versions, editions, books, dishes, links, t
     const ingredientIds = new Set((version?.ingredients || []).map((i) => i.ingredient_id).filter(Boolean));
     for (const ri of version?.ingredients || []) textParts.push(ri.name_text || ri.source_text);
     const tokens = new Set(textParts.filter(Boolean).flatMap((s) => tokenize(String(s))));
-    const titleTokens = new Set(tokenize(`${recipe.original_title || ''} ${recipe.display_title || ''} ${tr?.translated_content?.title || ''}`));
+    // Les cuisines comptent comme des mots du titre pour une recette-référence SEULEMENT : c'est tout ce qu'un signet
+    // web possède pour se faire retrouver (spec § 11, F7). Une référence d'index a cuisines: [] — rien ne change pour elle.
+    const titleTokens = new Set(tokenize(`${recipe.original_title || ''} ${recipe.display_title || ''} ${tr?.translated_content?.title || ''} ${recipe.availability === 'reference_only' ? (recipe.cuisines || []).join(' ') : ''}`));
     return { recipe, version, edition, book, dish, tokens, titleTokens, ingredientIds, cooked: cooked.get(recipe.id) || 0, translation: tr };
   });
 }

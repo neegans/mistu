@@ -375,4 +375,109 @@ export async function runAjouterTests({ eq, ok }) {
     ok(!/Cuisines \/ régions'\), el\('input'/.test(src), 'éditeur : le champ texte « Cuisines / régions » a disparu');
     ok(/renderPuces\(/.test(src), 'éditeur : les puces sont rendues');
   }
+
+  // --- § 11 Signet web
+  const S = await import('../src/ui/signet.js');
+  eq(S.LIMITES_SIGNET, { adresse: 2048, titre: 300 }, 'signet : bornes (S13)');
+  eq(S.lienSignet('https://ricardocuisine.com/recettes/1'), { ok: true, href: 'https://ricardocuisine.com/recettes/1', hote: 'ricardocuisine.com' }, 'signet : lien https accepté, hôte recalculé');
+  eq(S.lienSignet('http://user:pw@exemple.test/x'), { ok: true, href: 'http://user:pw@exemple.test/x', hote: 'exemple.test' }, 'signet : userinfo hors de l’hôte affiché');
+  for (const mauvais of ['javascript:alert(1)', 'data:text/html,x', 'blob:https://x/y', 'ftp://x.test/f', 'file:///etc/passwd', 'ricardocuisine.com/recettes', '', null])
+    eq(S.lienSignet(mauvais).ok, false, `signet : refusé au rendu — ${JSON.stringify(mauvais)}`);
+  eq(S.lienSignet('https://xn--caf-dma.test/').hote, 'xn--caf-dma.test', 'signet : hôte IDN en punycode (jamais trompeur)');
+  {
+    const bon = S.signetModel({ adresse: ' https://exemple.test/r?x=1 ', titre: ' Pâtes ', editionId: '', cuisines: ['italienne'] });
+    eq([bon.valide, bon.href, bon.hote, bon.titre, bon.erreurs], [true, 'https://exemple.test/r?x=1', 'exemple.test', 'Pâtes', {}], 'signet : modèle valide, adresse normalisée par URL, titre taillé');
+    eq(S.signetModel({ adresse: 'javascript:x', titre: 'T' }).erreurs.adresse, 'Adresse non reconnue.', 'signet : schéma refusé à la saisie');
+    eq(S.signetModel({ adresse: 'https://a.test/' + 'x'.repeat(2048), titre: 'T' }).erreurs.adresse, 'Adresse trop longue.', 'signet : > 2 048 refusé dans le modèle');
+    eq(S.signetModel({ adresse: 'https://a.test/', titre: '  ' }).erreurs.titre, 'Donne un titre au lien.', 'signet : titre requis');
+    eq(S.signetModel({ adresse: 'https://a.test/', titre: 'x'.repeat(301) }).erreurs.titre, 'Titre trop long.', 'signet : titre > 300 refusé');
+    eq(S.signetModel({ adresse: 'https://a.test/', titre: 'T' }).valide, true, 'signet : adresse + titre suffisent');
+  }
+  {
+    const rec = S.fabriquerSignet(S.signetModel({ adresse: 'https://a.test/p', titre: 'T', editionId: 'e1', cuisines: ['thaïe'] }), { newId: () => 'rc-1', langue: 'fr' });
+    eq(rec, { id: 'rc-1', edition_id: 'e1', original_title: 'T', original_language: 'fr', availability: 'reference_only', verification_state: 'unverified', printed_page: null, section: null, type: null, tags: [], cuisines: ['thaïe'], favorite: false, source_page_ids: [], current_version_id: null, ingredient_ids: [], source_url: 'https://a.test/p', source_label: 'a.test' }, 'signet : une recette-référence, aucune version (I-E)');
+    const { withRepo } = await import('./sync-fixture.js');
+    await withRepo(async (repo, db) => {
+      const avant = await db.count('recipe_versions');
+      const r = await S.enregistrerSignet({ adresse: 'https://a.test/p', titre: 'T', editionId: '', cuisines: [] }, { repo, langue: 'fr' });
+      eq([(await db.get('recipes', r.id))?.source_url, await db.count('recipe_versions')], ['https://a.test/p', avant], 'signet : écrit par repo.save, aucune version créée');
+      let refuse = false;
+      try { await S.enregistrerSignet({ adresse: 'javascript:alert(1)', titre: 'T' }, { repo, langue: 'fr' }); } catch (e) { refuse = e.message === 'signet_invalide'; }
+      eq([refuse, (await db.getAll('recipes')).filter((x) => String(x.source_url || '').startsWith('javascript')).length], [true, 0], 'signet : une adresse hostile est refusée à l’ÉCRITURE aussi (S13), rien n’est écrit');
+      let refuseLong = false;
+      try { await S.enregistrerSignet({ adresse: 'https://a.test/' + 'x'.repeat(2048), titre: 'T' }, { repo, langue: 'fr' }); } catch (e) { refuseLong = e.message === 'signet_invalide'; }
+      eq([refuseLong, (await db.getAll('recipes')).filter((x) => String(x.source_url || '').length > 2048).length], [true, 0], 'signet : la BORNE de 2 048 tient aussi à l’écriture (S13), rien n’est écrit');
+    });
+  }
+  {
+    const appels = [];
+    const m = S.signetModel({ adresse: 'https://a.test/', titre: 'T', editionId: '', cuisines: [] });
+    const noeud = S.renderSignet({ ...m, livres: [{ value: '', label: 'Aucun — recette indépendante' }, { value: 'e1', label: 'B · x' }] }, { changerAdresse: (v) => appels.push(['adresse', v]), changerTitre: (v) => appels.push(['titre', v]), changerLivre: (v) => appels.push(['livre', v]), basculerCuisine: () => {}, ajouterCuisine: () => {}, enregistrer: () => appels.push(['enregistrer']) });
+    ok(noeud.textContent.includes('L’app n’ouvre pas la page : donne-lui le titre.'), 'signet : l’écran dit qu’aucune page n’est lue');
+    const bouton = [...noeud.querySelectorAll('button')].find((b) => b.textContent === 'Garder le lien');
+    eq(bouton.disabled, false, 'signet : modèle valide → bouton actif');
+    bouton.click();
+    eq(appels, [['enregistrer']], 'signet : le geste d’enregistrement');
+    const invalide = S.renderSignet({ ...S.signetModel({ adresse: 'x', titre: '' }), livres: [] }, {});
+    ok([...invalide.querySelectorAll('button')].find((b) => b.textContent === 'Garder le lien').disabled, 'signet : modèle invalide → bouton désactivé');
+    ok(invalide.textContent.includes('Adresse non reconnue.'), 'signet : l’erreur est affichée');
+    // R-UX-8 : les puces ne vivent pas dans un <label> — un clic sur le mot « Cuisines » cocherait la première puce.
+    const champCuisines = [...noeud.querySelectorAll('.field')].find((f) => f.querySelector('span')?.textContent === 'Cuisines');
+    eq([champCuisines?.tagName, !!champCuisines?.querySelector('button.puce')], ['DIV', true], 'signet : « Cuisines » est un <div class="field"> qui porte bien les puces (R-UX-8)');
+    eq([...noeud.querySelectorAll('label.field > span')].map((s) => s.textContent), ['Adresse *', 'Titre *', 'Livre (facultatif)'], 'signet : seuls les champs texte et le menu restent des <label>');
+    // Taper une adresse invalide doit DIRE pourquoi au lieu de juste éteindre le bouton : l'écran ne contredit
+    // jamais l'état réel (une erreur affichée sous un bouton actif, ou l'inverse, serait un mensonge).
+    const zone = document.createElement('div');
+    zone.append(noeud);
+    const boutonMaj = S.majSignet(zone, S.signetModel({ adresse: 'pas une adresse', titre: 'T' }));
+    eq([boutonMaj === bouton, bouton.disabled, zone.querySelector('[data-erreur="adresse"]').textContent, zone.querySelector('[data-erreur="adresse"]').hidden], [true, true, 'Adresse non reconnue.', false], 'signet : la frappe met à jour l’erreur ET le bouton, sur place');
+    S.majSignet(zone, S.signetModel({ adresse: 'https://b.test/', titre: 'T' }));
+    eq([bouton.disabled, zone.querySelector('[data-erreur="adresse"]').textContent, zone.querySelector('[data-erreur="adresse"]').hidden], [false, '', true], 'signet : une adresse redevenue bonne efface l’erreur et rallume le bouton');
+  }
+  {
+    // La route entière, rendue sur un ctx de papier : rien n'est écrit tant que « Garder le lien » n'est pas touché.
+    const ctx = { book_editions: [{ id: 'e1', book_id: 'b1', year: 2020 }], booksById: new Map([['b1', { title: 'B', author: 'A' }]]), books: [{ cuisines: ['italienne'] }], recipes: [] };
+    const root = await S.renderSignetRoute({}, {}, ctx);
+    ok(root.textContent.includes('Garder un lien web') && root.textContent.includes('Une recette ou une page que tu veux retrouver dans ta bibliothèque.'), 'signet : la route dit d’abord à quoi l’écran sert');
+    eq([...root.querySelectorAll('select option')].map((o) => o.textContent), ['Aucun — recette indépendante', 'B · A · 2020'], 'signet : le menu offre « aucun livre » puis les éditions, libellées comme ailleurs');
+    ok([...root.querySelectorAll('button.puce')].some((b) => b.textContent === 'Italienne'), 'signet : les cuisines déjà dans la bibliothèque sont offertes en puces');
+    const petit = (cle) => root.querySelector(`[data-erreur="${cle}"]`);
+    const garder = () => root.querySelector('[data-role="enregistrer"]');
+    eq([petit('adresse').textContent, petit('adresse').hidden, petit('titre').textContent, petit('titre').hidden, garder().disabled], ['', true, '', true, true], 'signet : un formulaire vierge n’accuse personne — bouton éteint, aucune erreur affichée');
+    const saisir = (libelle, valeur) => {
+      const champ = [...root.querySelectorAll('label.field')].find((f) => f.querySelector('span')?.textContent === libelle).querySelector('input');
+      champ.value = valeur;
+      champ.dispatchEvent(new Event('input'));
+    };
+    saisir('Adresse *', 'pas une adresse');
+    eq([petit('adresse').textContent, petit('adresse').hidden, garder().disabled], ['Adresse non reconnue.', false, true], 'signet : une adresse tapée et illisible le dit tout de suite, le bouton reste éteint');
+    saisir('Adresse *', 'https://a.test/x');
+    saisir('Titre *', 'Pad');
+    eq([petit('adresse').textContent, petit('adresse').hidden, garder().disabled], ['', true, false], 'signet : l’adresse corrigée efface l’erreur et le bouton s’allume — l’écran ne contredit jamais l’état');
+  }
+  {
+    // Vue recette : pastille et branche « Lien web gardé » (F8, S6, S7)
+    const { availabilityBadge } = await import('../src/ui/components.js');
+    eq(availabilityBadge({ availability: 'reference_only', source_url: 'https://a.test/' }).textContent, 'Lien web', 'pastille : un signet n’est pas « Repérée dans ton livre »');
+    eq(availabilityBadge({ availability: 'reference_only', printed_page: 12 }).textContent, 'Repérée dans ton livre — page 12', 'pastille : les références d’index inchangées');
+    const { blocSignet } = await import('../src/ui/recipe.js');
+    const sain = blocSignet({ source_url: 'https://a.test/x', source_label: 'ment.test' });
+    const a = sain.querySelector('a');
+    eq([a.getAttribute('href'), a.getAttribute('target'), a.getAttribute('rel'), a.textContent], ['https://a.test/x', '_blank', 'noopener noreferrer', 'Ouvrir le lien'], 'signet : lien revalidé au rendu, noopener noreferrer');
+    ok(sain.textContent.includes('a.test') && !sain.textContent.includes('ment.test'), 'signet : l’hôte affiché vient de l’adresse, jamais du libellé stocké (S7)');
+    ok(sain.textContent.includes('Lien web gardé.') && !sain.textContent.includes('Scanner cette recette'), 'signet : texte propre, aucun geste de scan');
+    const hostile = blocSignet({ source_url: 'javascript:alert(1)' });
+    eq([hostile.querySelectorAll('a').length, hostile.textContent.includes('javascript:alert(1)')], [0, true], 'signet : adresse hostile en base → aucun <a>, texte inerte (S6)');
+  }
+  {
+    const { buildDocs, searchDocs, parseQuery } = await import('../src/domain/search.js');
+    // R-UX-2, mesuré ici : « thaïe » n'est ni un type, ni un régime, ni un ingrédient — il reste du TEXTE.
+    const p = parseQuery('thaïe');
+    eq([p.terms, p.filters.type, p.filters.diets, p.filters.include], [['thaie'], null, [], []], 'recherche : « thaïe » reste du texte, aucun filtre (R-UX-2)');
+    const docs = buildDocs({ recipes: [{ id: 'r1', original_title: 'Pad', availability: 'reference_only', cuisines: ['thaïe'], source_url: 'https://a.test/' }], versions: [], editions: [], books: [], dishes: [], links: [], translations: [], history: [] });
+    eq(searchDocs(docs, parseQuery('thaïe'), { mode: 'all' }).references.map((r) => r.doc.recipe.id), ['r1'], 'recherche : un signet se trouve par une cuisine (F7)');
+    // Une référence d'index n'a pas de cuisines : la ligne touchée ne doit rien changer pour elle.
+    const idx = buildDocs({ recipes: [{ id: 'r2', original_title: 'Pad', availability: 'reference_only', printed_page: 12, cuisines: [] }], versions: [], editions: [], books: [], dishes: [], links: [], translations: [], history: [] });
+    eq(searchDocs(idx, parseQuery('thaïe'), { mode: 'all' }).references.length, 0, 'recherche : une référence d’index sans cuisine ne remonte pas par une cuisine');
+  }
 }

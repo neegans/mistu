@@ -1,0 +1,144 @@
+// Garder un lien web (spec UX § 11) : une adresse et un titre suffisent pour retrouver une page dans ta bibliothèque.
+// L'app n'ouvre pas la page et n'en lit rien — c'est la personne qui la nomme : aucun réseau, aucune version créée (I-E).
+// L'adresse est validée dans le modèle ET à l'écriture (S13) ; la vue recette la revalide encore au rendu par
+// lienSignet (S6), parce qu'une fiche venue d'une archive ou du serveur peut porter n'importe quoi (I-G).
+import { el, toast } from '../core/dom.js';
+import { t, getUiLocale } from '../core/i18n.js';
+import { logError } from '../core/log.js';
+import { navigate } from '../core/router.js';
+import * as repo from '../model/repo.js';
+import { pageHeader, field, select, libelleLivre } from './components.js';
+import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
+
+export const LIMITES_SIGNET = { adresse: 2048, titre: 300 };
+
+// Seuls http: et https: s'ouvrent. L'hôte rendu est RECALCULÉ depuis l'adresse (jamais source_label, S7) et reste en
+// punycode : un nom internationalisé ne doit pas pouvoir se déguiser en un autre à l'écran.
+export function lienSignet(sourceUrl) {
+  try {
+    const u = new URL(String(sourceUrl ?? ''));
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, href: null, hote: null };
+    return { ok: true, href: u.href, hote: u.host };
+  } catch { return { ok: false, href: null, hote: null }; }
+}
+
+export function signetModel({ adresse = '', titre = '', editionId = '', cuisines = [] } = {}) {
+  const erreurs = {};
+  const lien = lienSignet(String(adresse ?? '').trim());
+  if (!lien.ok) erreurs.adresse = t('Adresse non reconnue.');
+  else if (lien.href.length > LIMITES_SIGNET.adresse) erreurs.adresse = t('Adresse trop longue.');
+  const titreNet = String(titre ?? '').trim();
+  if (!titreNet) erreurs.titre = t('Donne un titre au lien.');
+  else if (titreNet.length > LIMITES_SIGNET.titre) erreurs.titre = t('Titre trop long.');
+  return {
+    valide: Object.keys(erreurs).length === 0, erreurs,
+    href: erreurs.adresse ? null : lien.href, hote: erreurs.adresse ? null : lien.hote,
+    titre: titreNet, editionId: editionId || '', cuisines: Array.isArray(cuisines) ? [...cuisines] : [],
+  };
+}
+
+// Une recette-référence et rien d'autre : pas de version, pas d'ingrédient, pas de durée — l'app n'a rien lu (I-E).
+// source_label garde l'hôte pour les listes, mais aucun affichage ne lui fait confiance : tout est recalculé (S7).
+export function fabriquerSignet(m, { newId, langue }) {
+  return {
+    id: newId('rc'), edition_id: m.editionId || null, original_title: m.titre, original_language: langue,
+    availability: 'reference_only', verification_state: 'unverified', printed_page: null, section: null, type: null,
+    tags: [], cuisines: [...m.cuisines], favorite: false, source_page_ids: [], current_version_id: null,
+    ingredient_ids: [], source_url: m.href, source_label: m.hote,
+  };
+}
+
+// Deuxième porte de la borne S13 : une adresse hostile ou trop longue qui arriverait d'ailleurs que de l'écran
+// (un état bricolé, un appel direct) est refusée ICI, avant toute écriture.
+export async function enregistrerSignet(etat, { repo: r = repo, langue = getUiLocale() } = {}) {
+  const m = signetModel(etat);
+  if (!m.valide) throw new Error('signet_invalide');
+  return r.save('recipes', fabriquerSignet(m, { newId: r.newId, langue }));
+}
+
+// Un champ texte reste un <label> (field() en rend un) : correct autour d'un input. Son erreur vit dans un <small>
+// stable et nommé, pour que la frappe la mette à jour SUR PLACE (majSignet) sans redessiner le champ ni voler le curseur.
+function champTexte(libelle, cle, model, input) {
+  const f = field(libelle, input);
+  f.append(el('small', { dataset: { erreur: cle }, hidden: !model.erreurs[cle] }, model.erreurs[cle] || ''));
+  return f;
+}
+
+export function renderSignet(model, gestes = {}) {
+  const g = (nom) => (...a) => (typeof gestes[nom] === 'function' ? gestes[nom](...a) : undefined);
+  const livres = model.livres?.length ? model.livres : [{ value: '', label: t('Aucun — recette indépendante') }];
+  return el('section', { class: 'card stack signet' },
+    el('p', null, t('Une recette ou une page que tu veux retrouver dans ta bibliothèque.')),
+    el('small', { class: 'muted' }, t('L’app n’ouvre pas la page : donne-lui le titre.')),
+    champTexte(t('Adresse *'), 'adresse', model, el('input', { type: 'url', inputmode: 'url', value: model.adresse ?? model.href ?? '', onInput: (e) => g('changerAdresse')(e.target.value) })),
+    champTexte(t('Titre *'), 'titre', model, el('input', { type: 'text', value: model.titre, onInput: (e) => g('changerTitre')(e.target.value) })),
+    field(t('Livre (facultatif)'), select(livres, model.editionId, (v) => g('changerLivre')(v))),
+    // R-UX-8 : les puces ne vont JAMAIS dans un <label> — field() en rend un, et un clic sur le mot « Cuisines »
+    // cocherait alors la première puce. Même habillage .field, sans l'enveloppe qui vole le clic.
+    el('div', { class: 'field' }, el('span', null, t('Cuisines')),
+      renderPuces(pucesModel({ choisies: model.cuisines, existantes: model.existantes || [] }), { basculer: g('basculerCuisine'), ajouter: g('ajouterCuisine') })),
+    el('div', { class: 'row' },
+      el('button', { type: 'button', class: 'btn primary', dataset: { role: 'enregistrer' }, disabled: !model.valide, onClick: g('enregistrer') }, t('Garder le lien'))));
+}
+
+// Mise à jour sur place pendant la frappe : l'écran ne doit jamais contredire l'état réel — une erreur affichée
+// sous un bouton actif, ou un bouton éteint sans rien qui le dise, serait un mensonge. Rend le bouton, comme
+// majBoutonEnregistrer de livre-ajout.js, pour que l'appelant puisse le fermer le temps d'une écriture.
+export function majSignet(zone, model) {
+  for (const cle of ['adresse', 'titre']) {
+    const noeud = zone?.querySelector?.(`[data-erreur="${cle}"]`);
+    if (!noeud) continue;
+    noeud.textContent = model.erreurs[cle] || '';
+    noeud.hidden = !model.erreurs[cle];
+  }
+  const bouton = zone?.querySelector?.('[data-role="enregistrer"]');
+  if (bouton) bouton.disabled = !model.valide;
+  return bouton || null;
+}
+
+export async function renderSignetRoute(params, query, ctx) {
+  const etat = { adresse: '', titre: '', editionId: '', cuisines: [] };
+  const livres = [{ value: '', label: t('Aucun — recette indépendante') },
+    ...(ctx?.book_editions || []).map((e) => ({ value: e.id, label: libelleLivre(e, ctx?.booksById?.get(e.book_id)) }))];
+  const existantes = cuisinesExistantes(ctx);
+  const root = el('div', null, pageHeader(t('Garder un lien web'), { back: { href: '/add', label: t('Ajouter') } }));
+  const zone = el('div', null);
+  root.append(zone);
+  // Une erreur ne s'affiche pas sur un champ encore vide : l'étoile du libellé et le bouton éteint disent déjà
+  // qu'il manque quelque chose. « Adresse non reconnue. » sur un champ vide accuserait une saisie qui n'existe pas.
+  const modelVu = () => {
+    const m = signetModel(etat);
+    const erreurs = {};
+    for (const cle of ['adresse', 'titre']) if (String(etat[cle] ?? '').trim() && m.erreurs[cle]) erreurs[cle] = m.erreurs[cle];
+    return { ...m, erreurs, adresse: etat.adresse, livres, existantes };
+  };
+  const dessiner = () => zone.replaceChildren(renderSignet(modelVu(), gestes));
+  const gestes = {
+    changerAdresse: (v) => { etat.adresse = v; majSignet(zone, modelVu()); },
+    changerTitre: (v) => { etat.titre = v; majSignet(zone, modelVu()); },
+    changerLivre: (v) => { etat.editionId = v; },
+    basculerCuisine: (v) => { etat.cuisines = basculerPuce(etat.cuisines, v); dessiner(); },
+    ajouterCuisine: (v) => { const apres = ajouterPuce(etat.cuisines, v); if (apres !== etat.cuisines) { etat.cuisines = apres; dessiner(); } },
+    // Rien n'est annoncé avant l'écriture (I-B). Le bouton se ferme pendant : deux tapes pressées ne font pas deux
+    // signets ; il se rouvre si l'écriture échoue, et la saisie reste intacte.
+    enregistrer: async () => {
+      const m = signetModel(etat);
+      if (!m.valide) { dessiner(); return; }
+      const bouton = majSignet(zone, m);
+      if (bouton) bouton.disabled = true;
+      let rec;
+      try {
+        rec = await enregistrerSignet(etat, { repo });
+      } catch (e) {
+        if (bouton) bouton.disabled = false;
+        logError('signet.enregistrer', { error: e });
+        toast(t('Le lien n’a pas pu être gardé. Réessaie.'));
+        return;
+      }
+      toast(t('Lien gardé'));
+      navigate(`/recipes/${rec.id}`);
+    },
+  };
+  dessiner();
+  return root;
+}

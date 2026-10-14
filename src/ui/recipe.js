@@ -14,6 +14,7 @@ import { pageHeader, section, availabilityBadge, versionBadge, timeText, provena
 import { addToMealFlow } from './meals.js';
 import { deviceId } from './import.js';
 import { createTimerLaunch } from '../domain/timers.js';
+import { lienSignet } from './signet.js';
 
 export async function renderRecipe(params, query, ctx) {
   const recipe = ctx.recipesById.get(params.id);
@@ -202,6 +203,8 @@ export async function renderRecipe(params, query, ctx) {
   }
 
   function referenceOnly() {
+    // Un signet web n'est pas une référence d'index : il n'y a pas de page de livre à ouvrir, il y a un lien (F8).
+    if (recipe.source_url) return el('div', null, blocSignet(recipe));
     return el('div', null,
       el('div', { class: 'card warn stack' },
         el('h2', null, recipe.printed_page ? t('Repérée dans ton livre — page {p}', { p: recipe.printed_page }) : t('Repérée dans l’index de ton livre')),
@@ -212,6 +215,18 @@ export async function renderRecipe(params, query, ctx) {
           dish ? el('a', { class: 'btn', href: `#/dishes/${dish.id}` }, t('Autres recettes de ce plat')) : el('button', { class: 'btn', onClick: attachDish }, t('Rattacher à un plat')))),
       pages.length ? section(t('Pages d’index'), el('div', { class: 'thumbs' }, ...pages.map((p) => { const img = el('img', { loading: 'lazy' }); repo.getFile(p.sha256).then((f) => { const u = displayUrl(f); if (u) img.src = u; }); return el('figure', null, img); }))) : null);
   }
+}
+
+// Signet web (spec § 11) : revalidé AU RENDU — une fiche venue d'une archive peut porter n'importe quoi (S6) ; l'hôte
+// affiché vient de l'adresse, jamais de source_label (S7). Aucun geste de scan : ce n'est pas une référence d'index (F8).
+export function blocSignet(recipe) {
+  const lien = lienSignet(recipe.source_url);
+  return el('div', { class: 'card warn stack' },
+    el('h2', null, t('Lien web gardé.')),
+    el('p', null, t('L’app n’a pas lu la page : ouvre-la pour cuisiner.')),
+    lien.ok
+      ? el('div', { class: 'row' }, el('a', { class: 'btn primary', href: lien.href, target: '_blank', rel: 'noopener noreferrer' }, t('Ouvrir le lien')), el('span', { class: 'muted' }, lien.hote))
+      : el('p', { class: 'muted' }, t('Adresse non reconnue : '), String(recipe.source_url ?? '')));
 }
 
 function slug(s) { return (s || 'recette').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60); }
