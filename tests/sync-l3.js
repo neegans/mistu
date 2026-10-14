@@ -1370,7 +1370,13 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(liste.length > 30, 'SHELL lu : ' + liste.length + ' entrées à relire avant de conclure');
     eq(['./src/sync/transport.js', './src/sync/lots.js', './src/sync/reponses.js', './src/sync/push.js', './src/sync/pull.js', './src/sync/conflits.js', './src/sync/backfill.js', './src/sync/moteur.js']
       .filter((c) => !liste.includes(c)), [], 'SHELL : les modules d’envoi et de réception, désormais atteignables depuis app.js, sont servis hors connexion');
-    ok(/VERSION = 'cuisine-os-v0\.2\.0-11'/.test(source), 'sw.js : VERSION incrémentée — l’ancien cache est purgé à l’activation');
+    ok(/VERSION = 'cuisine-os-v0\.3\.0-1'/.test(source), 'sw.js : VERSION incrémentée — l’ancien cache est purgé à l’activation');
+    // Le nom du cache et la version affichée dans Réglages doivent dire la MÊME chose : deux versions qui se
+    // contredisent rendent impossible de savoir ce qui est servi (un cache « 0.2.0 » pour une app qui s'annonce
+    // « 0.3.0 » est exactement le genre de doute qu'un marqueur de version existe pour lever).
+    const { APP_VERSION } = await import('../src/model/schema.js');
+    eq([source.match(/VERSION = 'cuisine-os-v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+'/)?.[1], APP_VERSION], ['0.3.0', '0.3.0'],
+      'sw.js et APP_VERSION disent la même version de l’application');
   }
 
   // --- Ronde 1 du câblage --------------------------------------------------

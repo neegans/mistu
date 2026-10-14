@@ -35,16 +35,21 @@ npx serve .
 | Appareils par capacités, inventaire de lots (date limite saisie, pas calculée) | Ma cuisine |
 | Sauvegarde ZIP complète, restauration validée en espace isolé puis vérifiée, réimport sans doublon; exports JSON-LD, YAML Paprika, copie HTML | Réglages |
 | Assistant IA optionnel (compatible OpenAI ou Anthropic) pour lire pages et index; sorties toujours « à vérifier » | Réglages |
+| Synchronisation des fiches entre appareils (compte Google) : file d'envoi, réception, conflits à trancher, quarantaine, « Envoyer maintenant », pastille « N non envoyés »; les photos restent locales (L4) | Réglages, en-tête |
 
-## Synchronisation entre appareils (en construction)
+## Synchronisation entre appareils
 
 Au premier lancement, **si la synchronisation est configurée sur cette adresse** et qu'aucun compte n'est connecté, l'app accueille avec « Kwe. », **un bouton « Connexion avec Google »** et, dessous, **un lien « Continuer sans compte »** ; ce lien ouvre la bibliothèque locale et ne redemande plus rien sur cet appareil (l'écran revient après « Effacer les données de cet appareil »). Ailleurs — adresse sans configuration — l'app s'ouvre directement sur la bibliothèque.
 
-Le serveur (Supabase), la connexion Google et la capture des écritures sont posés (lots L1-L2) ; l'envoi et la réception, eux, n'existent pas encore : depuis le 13 octobre 2026, `src/sync/config.js` nomme le projet Supabase `mitsu` pour `neegans.github.io` et `localhost` : Réglages offre « Activer la synchronisation » (comptes Google de la liste autorisée seulement), mais aucune donnée ne quitte encore l'appareil — l'envoi et la réception sont le lot L3. Spécification du lot : `docs/spec-compte-et-stockage-distant.md` ; conception amont et choix d'hébergement : `docs/compte-et-stockage-distant.md` ; application du serveur et preuves : `supabase/README.md`.
+Avec un compte connecté (comptes Google de la liste autorisée seulement), **les fiches — livres, recettes, versions, repas, courses… — voyagent entre tes appareils dès que tu es connecté ; les photos elles-mêmes, pas encore (lot L4)**. Ce qui est écrit hors ligne attend dans une file et part au retour du réseau ; ce qui arrive d'un autre appareil est écrit ici ; quand la même fiche a changé des deux côtés à la même heure, Réglages te demande laquelle garder — rien n'est fusionné en cachette. Pour les photos et les PDF, et pour un appareil sans compte, le transfert reste l'archive ZIP.
+
+Sans compte, rien ne change : « Continuer sans compte » ouvre la bibliothèque locale et aucune donnée ne quitte l'appareil. Le serveur est le projet Supabase `mitsu` (Canada), nommé dans `src/sync/config.js` pour `neegans.github.io` et `localhost`. Spécification du lot : `docs/spec-compte-et-stockage-distant.md` ; conception amont et choix d'hébergement : `docs/compte-et-stockage-distant.md` ; application du serveur et preuves : `supabase/README.md` ; carte des modules : `docs/architecture.md`, section « Synchronisation (L3) ».
+
+**Pas encore mesuré sur deux appareils** : la synchronisation est éprouvée par la suite de tests (transport simulé, aucun réseau), pas par un aller-retour réel entre l'iPhone et le Mac. Ce parcours est la prochaine vérification (voir « Vérifications à faire sur les appareils réels »).
 
 ## Ce qui n'est pas là (et le dit dans l'interface)
 
-Adaptations Rapide / On se gâte / Meal prep, moteur de salubrité, planificateur multi-repas, synthèse de recettes, reconnaissance vocale, échange de données entre appareils (envoi, réception, conflits, fichiers distants : lots L3 à L5), lecture d'EPUB. Voir `docs/architecture.md`.
+Adaptations Rapide / On se gâte / Meal prep, moteur de salubrité, planificateur multi-repas, synthèse de recettes, reconnaissance vocale, lecture d'EPUB ; côté synchronisation : les octets des photos et des PDF (lot L4), la purge du serveur et « Supprimer ma bibliothèque du serveur » (lot L5). Voir `docs/architecture.md`.
 
 ## Vérifications à faire sur les appareils réels
 
@@ -53,6 +58,7 @@ Adaptations Rapide / On se gâte / Meal prep, moteur de salubrité, planificateu
 3. Générer un ZIP, vérifier sa présence dans Téléchargements/Fichiers, puis le restaurer dans un autre navigateur avec une base vide. Conserver la bibliothèque d’origine pendant cette validation.
 4. Import du YAML dans Paprika et lecture du JSON-LD dans l'application cible.
 5. Appels IA avec une clé réelle (code écrit sans avoir pu l'exercer).
+6. **Synchronisation, aller-retour réel entre deux appareils** (spec § 7.3) : iPhone hors ligne → écrire une recette → voir le compteur « non envoyés » → remettre le réseau → la recette arrive sur le Mac ; la bibliothèque du Mac arrive entièrement sur l'iPhone ; une suppression se propage ; un conflit volontaire (la même fiche modifiée des deux côtés hors ligne) se tranche par « Garder celle d'ici ».
 
 
 ## Lot sauvegarde/restauration — à réviser et valider

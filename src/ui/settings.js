@@ -585,7 +585,9 @@ function syncSection(state, auth, settings) {
       if (essai?.error) {
         toast(t('La déconnexion n’a pas abouti.'));
         // La session est toujours là : la synchronisation REPREND, sinon elle resterait arrêtée jusqu’au prochain
-        // lancement sans que rien ne le dise. `demarrer()` est rejouable (il réinstalle ses écouteurs et recharge).
+        // lancement sans que rien ne le dise. `arreter()` ne retire que les écouteurs de fenêtre et du bus ; les
+        // abonnés `onEtat` restent, donc `demarrer()` reprend sans réabonnement (il réinstalle ses écouteurs,
+        // recharge ce que l’appareil sait déjà et relance une passe).
         if (moteur) { setSyncState({ moteur }); moteur.demarrer(); }
         return;
       }

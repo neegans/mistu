@@ -3,7 +3,7 @@
 ## Choix
 
 - **PWA sans étape de build** : modules ES natifs, aucune dépendance npm. Un serveur statique suffit. Choix guidé par « éviter la surarchitecture » (spec §15) et par la possibilité de tout vérifier en ouvrant l'app.
-- **Local-first** : IndexedDB comme base unique (un magasin par entité), blobs (photos, PDF) stockés dédupliqués par SHA-256 dans le magasin `files`. La sauvegarde complète (ZIP) est le mécanisme de durabilité et de transfert entre appareils. Un backend Supabase/Postgres pourra reprendre le même modèle plus tard; aucune synchronisation serveur n'est prétendue.
+- **Local-first** : IndexedDB comme base unique (un magasin par entité), blobs (photos, PDF) stockés dédupliqués par SHA-256 dans le magasin `files`. La sauvegarde complète (ZIP) reste un mécanisme de durabilité et de transfert entre appareils, utilisable sans compte. Depuis le lot L3, **les fiches** peuvent aussi voyager par un serveur Supabase quand un compte est connecté (voir « Synchronisation (L3) ») ; les **octets des fichiers**, eux, ne partent pas encore (L4). L'app reste utilisable sans compte, sur un appareil seul.
 - **Déterministe avant IA** : unités, portions, courses, régimes, sauvegarde et recherche sont du code sans LLM. L'IA est une abstraction `LLMProvider` (aucun, compatible OpenAI, Anthropic) branchée uniquement sur l'extraction de pages et d'index; ses résultats sont toujours « à vérifier ».
 
 ## Carte des modules
@@ -18,9 +18,11 @@ src/domain/  quantity.js (fractions, plages, qualitatif), units.js (conventions,
              rediscover.js, timers.js, backup.js (archive, inspection isolée, restauration, vérification), exporters.js (JSON-LD, YAML Paprika, HTML), llm.js
 src/ui/      state.js (cache), components.js, home, search, library, book, dish, recipe, recipe-edit, cook, import, meals, grocery, kitchen, settings, add
 src/sync/    tables.js, mime.js, clock.js, outbox.js, config.js, auth.js — voir « Synchronisation (L1-L2) »
+             transport.js, lots.js, reponses.js, push.js, backfill.js, pull.js, conflits.js, moteur.js — voir « Synchronisation (L3) »
 src/core/log.js            point d'entrée unique du journal d'erreurs (logError)
 src/vendor/  supabase-2.117.3.umd.js (dépendance embarquée, vérifiée deux fois)
-tests/       tests.js + index.html : tests du domaine ; backup.js : régressions IndexedDB dans des bases temporaires ; sync.js : lot « compte et stockage distant »
+tests/       tests.js + index.html : tests du domaine ; backup.js : régressions IndexedDB dans des bases temporaires ; sync.js : lot « compte et stockage distant » (L1-L2) ;
+             sync-l3.js + transport-factice.js + sync-fixture.js : lot « envoi et réception » (L3), transport simulé, aucun réseau
 ```
 
 ## Dépendance embarquée
@@ -69,7 +71,8 @@ imprime le sha256), puis remplacer le fichier dans `src/vendor/` et les deux `<s
 ## Synchronisation (L1-L2)
 
 Spec du lot : `docs/spec-compte-et-stockage-distant.md` (conception amont : `docs/compte-et-stockage-distant.md`).
-Livré ici : le serveur en migrations, la connexion, la capture des écritures. **Pas** l'échange de données.
+Livré ici : le serveur en migrations, la connexion, la capture des écritures. L'échange de données lui-même est le
+lot L3, décrit dans « Synchronisation (L3) » juste après.
 
 ### Modules
 
@@ -156,17 +159,90 @@ S2 —, RLS avec `is_allowed()` sur chaque règle, règle `delete` gardée par `
 lui-même est éprouvé, sur une copie altérée dans un répertoire temporaire).
 Application et preuves : `supabase/README.md` (gestes manuels de Neegan dans l'éditeur SQL, preuves `supabase/proofs/`).
 
-### Ce qui est absent (L3 et après)
+## Synchronisation (L3)
 
-- **Envoi** : il n'y a pas de `src/sync/push.js`. La file se remplit et ne se vide jamais ; rien n'est transmis au
-  serveur. `sync_push` existe en base, sans appelant côté client.
-- **Réception** : pas de `src/sync/pull.js`, pas de curseur consommé, pas d'envoi initial (`backfill`).
-- **Conflits** : `sync_conflicts` existe comme magasin ; rien ne l'écrit ni ne le présente.
-- **Fichiers distants** : pas de `src/sync/files.js` — aucun téléversement, aucun téléchargement, aucune ligne
-  `files` marquée `remote`, pas de qualité d'envoi, pas d'affichage de l'espace serveur (L4).
-- **Suppression réelle et tombales** : `sync_purge` / `sync_purge_all` existent en base, sans appelant côté client
-  (L5). La purge de l'objet de stockage passe par l'API Storage, pas par le SQL.
-- **Horloge** : `clock.js` garde un décalage de 0 — personne ne mesure encore `server_time`.
+Spec : `docs/spec-compte-et-stockage-distant.md` § 5.3 (envoi), § 5.5 (réception et conflits), § 5.2 (envoi
+initial), § 4.2 (interface), § 11 (amendements R37 à R56). Livré ici : **les fiches** voyagent entre les appareils
+d'un même compte — envoi, envoi initial, réception, conflits, quarantaine, pause, et un moteur qui décide quand.
+Pas les **octets** des fichiers (L4), pas la purge du serveur (L5).
+
+### Modules (huit, un rôle chacun)
+
+```text
+src/sync/transport.js  le SEUL module qui parle au serveur : pousser(elements) → sync_push (RPC), lire(table, apres,
+                       limite) → lecture par server_seq croissant. classerErreur() range toute erreur en cinq types :
+                       reseau (0, 5xx, 429), auth (401, 403, P0001 « adresse non autorisée »), quota (413, 507,
+                       « exceeded »), refus (autre 4xx : une règle du serveur) et inconnu. Le client vient de
+                       auth.getClient() (R53) ; dans les tests, tests/transport-factice.js le remplace.
+src/sync/lots.js       pur : dédoublonnage par (store, id) — la version la plus récente —, ordre des seq, bornes
+                       LIMITES { elements: 500, lot: 921600, element: 524288 } (R39), nettoyage des caractères de
+                       contrôle, cleDe(). Rend { lots: [{ elements, seqs }], retenues: [{ seq, seqs, raison }] }.
+src/sync/reponses.js   pur : une réponse de sync_push → des EFFETS ({ retraits, reecritures, conflits, quarantaine }).
+                       Une clé nommée hors du lot envoyé n'a aucun effet (R41).
+src/sync/push.js       une passe d'envoi : lecture de la file, relecture des fiches (un put est relu, une suppression
+                       part avec son payload), envoi par lots, application des effets en UNE transaction. Erreurs :
+                       recul exponentiel 2 s → 5 min (tries, next_try_at), attente de connexion sur auth, pause sur
+                       quota, dichotomie sur refus jusqu'à nommer la fiche fautive (quarantined_at + last_error).
+src/sync/backfill.js   envoi initial : ce qui existait AVANT la connexion est mis en file table par table, commandé
+                       par des marqueurs sync_state (backfill:<table> = 'fait'), reprenable, par morceaux de 500.
+src/sync/pull.js       réception : par table, pages par server_seq croissant ; la page et le curseur
+                       (sync_state cursor:<table>) sont écrits dans la MÊME transaction, et le curseur ne recule
+                       jamais (R46). Décision I7, conflits, ordre recipe_versions avant recipes (R45).
+src/sync/conflits.js   les deux gestes : garderIci (version locale réécrite avec un updated_at neuf, donc renvoyée)
+                       et garderAilleurs (version du serveur écrite, sans renvoi) ; purgerAnciens (30 jours).
+src/sync/moteur.js     quand : déclencheurs (démarrage, online, retour au premier plan, écriture regroupée à 2 s,
+                       « Envoyer maintenant », reprise après un recul), UNE passe à la fois, état observable.
+```
+
+### Ordre d'une passe
+
+Sans compte, aucune passe n'a lieu : seuls les compteurs de la file sont rafraîchis. Avec un compte :
+
+1. **pause relue** dans `sync_state` (R47) — un autre onglet a pu la poser ;
+2. **envoi initial** (`backfill`) tant qu'une table n'a pas son marqueur — sauté si la pause tient ;
+3. **envoi** (`push`) : lots, réponses, effets ; la mesure d'horloge rapportée par `server_time` est appliquée ;
+4. **réception** (`pull`) — tentée seulement si l'envoi n'a pas buté (erreur, quota découvert, connexion à refaire),
+   mais **non** empêchée par une pause de quota déjà posée (R48 : lire ne consomme pas d'espace) ;
+5. **« Dernier échange »** horodaté une seule fois, et seulement si un appel a réellement abouti (I5) ;
+6. **purge des conflits** de plus de 30 jours ;
+7. `finally` : comptes de la file relus et `derniersEffets` publié — ce que la passe a **écrit**
+   (`recues`, `supprimees`, `ajustes`, `conflits`), d'où le rafraîchissement des vues (R49, R51).
+
+### État du moteur (ce que Réglages et la pastille lisent)
+
+`{ enCours, phase, progression, dernierEchange, aEnvoyer, enQuarantaine, conflits, pause, attenteConnexion,
+horloge, derniereErreur, derniersEffets }`, rendu en copie **figée** (`Object.freeze`), posé seulement par un fait
+(I5) : `phase` vaut `envoi_initial`, `envoi` ou `reception` ; `progression` = `{ table, n, total }` ; `pause` =
+`{ raison: 'quota', at }` et n'est levée que par « Envoyer maintenant » ; `attenteConnexion` vient d'un 401 ou d'un
+refus d'adresse ; `horloge` = `{ minutes }` au-delà de 5 minutes d'écart ; `derniereErreur` ne porte qu'un **type**,
+jamais le message du fournisseur. Les abonnés passent par `onEtat(fn)` ; `arreter()` retire les écouteurs de fenêtre
+et du bus, pas les abonnés.
+
+### Règle I7, une seule fois
+
+`updated_at` strictement supérieur gagne ; égal + contenu identique = rien ; égal + contenu différent = **conflit**
+à trancher par la personne ; aucune fusion silencieuse de champs. Deux précisions mesurées (R44) : les heures se
+**comparent par instant** (`Date.parse`) et se **stockent verbatim** (la chaîne du serveur, microsecondes
+comprises, pour qu'un renvoi soit égal côté serveur) ; la comparaison de contenu ignore `updated_at` et trie les
+clés d'objet récursivement (un `jsonb` revient dans un autre ordre), mais **jamais** l'ordre d'un tableau — une
+liste d'étapes a un ordre, c'est du contenu. Les écritures de la réception portent `origin: 'remote'` : jamais
+recapturées. `syncNow()` (horloge corrigée du décalage mesuré) horodate tout ce qui doit repartir.
+
+### Ce qui est absent (L4 et L5)
+
+- **Octets des fichiers** (L4) : pas de `src/sync/files.js`, aucun téléversement ni téléchargement, aucune qualité
+  d'envoi, aucun affichage de l'espace serveur. Les **lignes** `files` sont bien reçues, sans leurs octets
+  (`remote: true`, blob local conservé — R55), et `identiques` doit encore y comparer la liste blanche des champs
+  du serveur (R56, ouvert). Une archive produite sur un appareil qui a reçu de telles lignes exigera
+  `missing_files` dans son manifeste (R18).
+- **Purge du serveur et tombales lisibles** (L5) : `sync_purge` / `sync_purge_all` existent en base, toujours sans
+  appelant côté client ; la tâche `pg_cron` des tombales tourne, mais rien ne l'explique dans l'interface. Un
+  remplacement par archive ne supprime donc rien chez le fournisseur (R50, O3 ouvert).
+- **« Supprimer ma bibliothèque du serveur »** : ce geste n'existe pas (L5). Aujourd'hui, « Effacer les données de
+  cet appareil » vide **l'appareil**, pas le serveur — et la phrase de l'écran le dit.
+- **Preuve sur appareils** : aucune passe réelle contre le projet `mitsu` n'a encore eu lieu. Tout ce qui précède
+  est éprouvé par la suite (transport factice, bases temporaires), pas par deux appareils qui s'échangent une
+  recette ; le parcours § 7.3 reste à faire par Neegan.
 
 ## Modèle de données (magasins IndexedDB)
 
@@ -196,8 +272,10 @@ Le format reste v1 : les archives complètes produites précédemment restent li
 
 ## Limites connues de V0
 
-- Pas d'échange de données entre appareils : transférer par archive. Le lot L1-L2 pose le serveur, la connexion et la
-  capture des écritures ; l'envoi et la réception arrivent en L3 (voir « Synchronisation (L1-L2) »).
+- Échange de données entre appareils : **les fiches** voyagent depuis le lot L3, avec un compte connecté (voir
+  « Synchronisation (L3) ») ; les **octets des fichiers** (photos, PDF) ne partent pas encore — pour eux, et pour
+  tout appareil sans compte, le transfert reste l'archive ZIP. Aucune passe réelle n'a encore été mesurée sur deux
+  appareils.
 - Pas de reconnaissance vocale; minuterie confiée au système (Siri / raccourci).
 - EPUB conservé mais non rendu; PDF affiché via le lecteur du navigateur, pages référencées à la main.
 - Interface anglaise partielle (dictionnaire `src/i18n/en.js`).

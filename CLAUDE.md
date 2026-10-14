@@ -119,7 +119,9 @@ console ; `sw.js` `VERSION = 'cuisine-os-v0.2.0-7'`.
 de stockage. Installer Cuisine OS sur l'écran d'accueil de l'iPhone, lancer « Activer la synchronisation » et
 regarder **où atterrit le retour de Google** — dans l'app en plein écran, ou dans Safari. Consigner ici la version
 d'iOS et le chemin constaté. Si le retour atterrit dans Safari, `signIn()` devra passer à `skipBrowserRedirect: true`
-et ouvrir l'URL obtenue **sur le geste de la personne**. Cette mesure conditionne L3.
+et ouvrir l'URL obtenue **sur le geste de la personne**. L3 a été construit **sans** cette mesure (elle ne touche
+que le chemin du retour OAuth sur iOS, pas l'échange de données) : elle reste à faire **avant la première passe
+réelle depuis l'iPhone**.
 
 **`src/sync/config.js` : à remplir.** Trois champs par entrée : **`url`**, **`anonKey`** et **`hosts`**. `prod` est
 vide (`url: ''`, `anonKey: ''`, `hosts: []`) ; `dev` n'a que ses hôtes (`localhost`, `127.0.0.1`). Y mettre l'URL du
@@ -144,7 +146,56 @@ vague des résidus ; le `catch` de `getSession` d'`auth.js` n'est pas testé. **
 chaînes `t()` de `src/ui` sans entrée dans `src/i18n/en.js` sont **toutes antérieures** au lot — les 31 chaînes
 ajoutées par le lot sont traduites ; les deux seules qui manquaient (`t('Code : {c}')` et `t('Recharger')`) sont
 posées. Le pluriel de « N envois en attente » est corrigé (R27/R24, vague finale), celui du refus de remplacement
-aussi (R31).
+aussi (R31). La pastille, elle, est **livrée en L3** (voir la sous-section suivante).
+
+### Synchronisation L3 livrée (13 octobre 2026)
+
+**Où.** Branche `synchro-l3`, arbre `~/projects/mistu` (serveur `http://localhost:8080/`). Plan et registre :
+`.superpowers/sdd/2026-10-13-synchronisation-l3-envoi-reception/` (`progress.md`, un brief, un rapport et une revue
+par tâche ; dix tâches, chacune avec une ronde de corrections au plus). Décisions consignées en **spec § 11,
+lignes R37 à R56** (dans le registre, elles s'appellent R-L3-1 à R-L3-20). `APP_VERSION = '0.3.0'`,
+`sw.js VERSION = 'cuisine-os-v0.3.0-1'`, `SHELL` complet (67 entrées, huit modules de `src/sync/` de plus).
+
+**Ce qui marche** (éprouvé par la suite : **875 assertions vertes**, transport factice, bases temporaires, aucun
+réseau) : l'**envoi** (file lue, dédoublonnée, relue, envoyée par lots de 500 / 900 Kio ; recul exponentiel,
+dichotomie jusqu'à nommer la fiche fautive, quarantaine avec motif) · l'**envoi initial** de ce qui existait avant
+la connexion (par marqueurs, reprenable) · la **réception** (pages par `server_seq`, curseur écrit dans la même
+transaction, jamais reculé) · les **conflits** (I7 : plus récent gagne, égal + identique = rien, égal + différent =
+à trancher ; « Garder celle d'ici » / « Garder celle d'ailleurs », purge à 30 jours) · la **pause de quota**
+(l'envoi s'arrête, la réception continue ; seule « Envoyer maintenant » la lève) · le **moteur** (une passe à la
+fois, déclencheurs, état figé observable) · **Réglages → Synchronisation** en entier (dernier échange, quarantaine,
+conflits, progression, pause, horloge faussée, « Envoyer maintenant ») · la **pastille « N non envoyés »** dans
+l'en-tête (avec un compte seulement) · la **vue recette** qui dit qu'une autre version a été créée ailleurs, sans
+masquer aucune version · la **restauration d'archive horodatée** (fusion et remplacement) pour qu'une bibliothèque
+restaurée reparte au serveur.
+
+**Ce qui n'est PAS prouvé.** **Aucune passe réelle n'a été jouée contre `mitsu` avec un compte connecté.** Tout est
+mesuré avec un transport factice : le vrai `sync_push`, la vraie lecture par `server_seq`, le vrai jeton et la vraie
+latence n'ont jamais tourné. La **preuve sur appareils (spec § 7.3) reste à faire par Neegan**, dans cet ordre :
+1) iPhone hors ligne → écrire une recette → voir le compteur « non envoyés » → remettre le réseau → la recette
+arrive sur le Mac ; 2) la bibliothèque du Mac arrive **entièrement** sur l'iPhone ; 3) une suppression se propage ;
+4) un conflit volontaire (la même fiche modifiée des deux côtés hors ligne) se tranche par « Garder celle d'ici ».
+Tant que ce parcours n'est pas fait, « la synchronisation fonctionne » n'est pas une affirmation tenable.
+
+**Dettes différées (assumées, nommées dans le registre).** Lectures **hors transaction** dans `appliquerPage`
+(une édition faite pendant la page reçue est écrasée sans conflit — fenêtre entre deux `await` ; le remède exige un
+`db.mutate` conditionnel, donc un lot à part) · `garderIci` tranche sur l'**instantané** du conflit, pas sur une
+relecture · **500 `db.get` par lot** à la relecture des `put` (une lecture groupée serait mieux) · **bruit de
+journal** quand la dichotomie découpe un gros lot · le **fil de `app.js`** (démarrage du moteur, pose de l'état)
+reste hors test — jamais importé dans la suite, par décision : `app.js` lance l'application à l'import · la
+**ré-entrance** d'un abonné de `onEtat` n'est pas gardée · `identiques` sur `files` doit comparer la liste blanche
+des champs du serveur (**L4**, spec R56) · les **octets des fichiers** restent **L4**, la purge du serveur et
+« Supprimer ma bibliothèque du serveur » **L5**.
+
+**Faux rouge du montage de tests : corrigé (R-L3-17).** « Nettoyage de la base temporaire bloqué :
+cuisine-os-backup-test-… » faisait échouer la suite au hasard, toujours loin de son vrai coupable. Deux causes :
+`withDatabase` (`tests/backup.js`) traitait `deleteDatabase().onblocked` comme **terminal** alors qu'il est
+informatif (la requête aboutit dès que la dernière connexion gênante se ferme) ; et une relecture de réglages
+lancée par le bus que **personne n'attendait** rouvrait la base jetable juste après sa fermeture
+(`Database.open()` rouvre dès que `idb` est nul). Désormais : attente de `onsuccess` bornée à 10 s (rejet au-delà,
+en nommant la base) ; et la relecture venue du bus est différée d'un tour de boucle puis **abandonnée si plus
+aucune base n'est ouverte** — en production les réglages sont toujours relus sur `settings` comme sur `change`
+(`relectureEnCours()` rend la chaîne, pour qu'un test attende au lieu de deviner un délai).
 
 ## Premier lot de fiabilisation — 8 septembre 2026, à réviser
 
