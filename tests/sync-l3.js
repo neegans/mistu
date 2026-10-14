@@ -1188,4 +1188,185 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(dits.every((m) => m === 'Ce geste n’a pas abouti.'), 'ronde 1 : … dit par une phrase fixe, jamais le message du fournisseur');
     ok(codes.length === 5 && codes.every((c) => /^sync\.geste\./.test(c)), 'ronde 1 : … et journalisé par un code, jamais avec du contenu de fiche');
   }
+
+  // --- Câblage (spec § 4.2, § 5.2, § 5.5) : pastille, fusion horodatée, conflit de version dans la vue recette
+  // JAMAIS importer src/app.js dans les tests : il lance boot() à l'import (remplace #app, enregistre le SW).
+  // Tout ce que le câblage DÉCIDE vit donc hors de app.js — la pastille dans state.js (le modèle) et components.js
+  // (son nœud et sa mise à jour), la règle du rendu après une passe dans state.js. app.js ne garde que le fil.
+  const etatUi = await import('../src/ui/state.js');
+  const { pastilleModel: pm, doitRendreApresPasse, getSyncState: lireEtatSync } = etatUi;
+  eq([pm({ aEnvoyer: 0 }), pm({ aEnvoyer: 1 }), pm({ aEnvoyer: 12 })], [null, '1 non envoyé', '12 non envoyés'], 'pastille : « N non envoyés » seulement si N > 0 (singulier à part)');
+  eq([pm(), pm({ aEnvoyer: null }), pm({ aEnvoyer: -1 })], [null, null, null], 'pastille : rien n’est affiché sans un nombre lisible et positif');
+  ok(Object.hasOwn(lireEtatSync(), 'moteur'), 'câblage : l’état de connexion porte le moteur (null tant que le démarrage ne l’a pas posé)');
+
+  // Le nœud de la pastille et sa mise à jour : elle RETROUVE son nœud par id à chaque appel, parce que la coquille
+  // est reconstruite au changement de langue (app.js remet `current = null`) — une référence gardée serait orpheline.
+  {
+    const { pastille, majPastille, PASTILLE_ID } = await import('../src/ui/components.js');
+    const hote = document.createElement('div');
+    document.body.append(hote);
+    try {
+      hote.append(pastille());
+      const vu = () => { const n = document.getElementById(PASTILLE_ID); return [n.hidden, n.textContent]; };
+      eq(vu(), [true, ''], 'pastille : au repos le nœud existe et reste caché — rien n’est affirmé sans file');
+      majPastille({ aEnvoyer: 3 });
+      eq(vu(), [false, '3 non envoyés'], 'pastille : trois en attente → la pastille se montre dans la barre du haut');
+      majPastille({ aEnvoyer: 0 });
+      eq(vu(), [true, ''], 'pastille : file vidée → la pastille se recache');
+      hote.replaceChildren(pastille()); // changement de langue : la coquille entière est refaite
+      majPastille({ aEnvoyer: 1 });
+      eq(vu(), [false, '1 non envoyé'], 'pastille : après une reconstruction de la coquille, le nœud NEUF est retrouvé par id');
+      majPastille(null);
+      eq(vu(), [true, ''], 'pastille : un état illisible ne montre rien');
+    } finally { hote.remove(); }
+  }
+
+  // R-L3-16 : l'écran affiché doit montrer ce qui vient d'arriver de l'autre appareil — donc un rendu à la FIN
+  // d'une passe qui a écrit, et seulement là. Une opération d'archive l'interdit : son écran porte un état qui ne
+  // vit que dans le DOM (contrôles désactivés, bilan, bouton « Recharger »), qu'un rendu emporterait.
+  {
+    const effets = (sur = {}) => ({ recues: 0, supprimees: 0, ajustes: 0, conflits: 0, ...sur });
+    const fin = (sur = {}) => ({ enCours: false, derniersEffets: effets(sur) });
+    ok(doitRendreApresPasse({ avant: true, etat: fin({ recues: 1 }) }), 'R-L3-16 : une passe terminée qui a reçu une fiche demande un rendu');
+    ok(doitRendreApresPasse({ avant: true, etat: fin({ supprimees: 1 }) }), 'R-L3-16 : … une suppression venue d’ailleurs aussi');
+    ok(doitRendreApresPasse({ avant: true, etat: fin({ ajustes: 1 }) }), 'R-L3-16 : … une fiche réécrite par un ajustement du serveur aussi');
+    ok(doitRendreApresPasse({ avant: true, etat: fin({ conflits: 1 }) }), 'R-L3-16 : … et un conflit neuf aussi (la vue recette le dit)');
+    ok(!doitRendreApresPasse({ avant: true, etat: fin() }), 'R-L3-16 : une passe qui n’a RIEN écrit ne vole aucun rendu');
+    ok(!doitRendreApresPasse({ avant: false, etat: fin({ recues: 1 }) }), 'R-L3-16 : seule la FIN d’une passe déclenche un rendu, pas un état de plus');
+    ok(!doitRendreApresPasse({ avant: true, etat: { enCours: true, derniersEffets: effets({ recues: 1 }) } }), 'R-L3-16 : une passe encore en cours n’en déclenche pas');
+    ok(!doitRendreApresPasse({ avant: true, etat: fin({ recues: 1 }), archive: true }), 'R-L3-16 : pendant une opération d’archive, aucun rendu n’est volé à l’écran de restauration');
+    ok(!doitRendreApresPasse({ avant: true, etat: { enCours: false, derniersEffets: null } }), 'R-L3-16 : sans bilan d’effets, rien n’est supposé');
+    ok(!doitRendreApresPasse(), 'R-L3-16 : appelée à vide, la règle ne demande aucun rendu');
+  }
+
+  // Le moteur doit DIRE ce qu'une passe a écrit : sans ce bilan, personne ne peut distinguer une passe qui a reçu
+  // une fiche d'une passe qui n'a rien trouvé, et l'écran afficherait l'état d'avant.
+  await withRepo(async (repoTemp, db) => {
+    await toutDejaEnvoye(db);
+    const recue = { id: 'c9', data: { id: 'c9', title: 'Venue d’ailleurs', updated_at: '2026-10-13T00:00:00Z' }, updated_at: '2026-10-13T00:00:00Z', deleted_at: null, server_seq: 1 };
+    const tf = creerTransportFactice({ lire: { books: [[recue], []] } });
+    const moteur = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: tf, fenetre: fenetreMuette(), bus: busMuet });
+    const e = await moteur.executer('t');
+    eq(e.derniersEffets, { recues: 1, supprimees: 0, ajustes: 0, conflits: 0 }, 'moteur (R-L3-16) : la fin d’une passe dit ce qu’elle a écrit');
+    ok(Object.isFrozen(e.derniersEffets), 'moteur (R-L3-16) : … et ce bilan sort figé comme le reste de l’état');
+    await moteur.arreter();
+    const vide = creerTransportFactice({ lire: {} });
+    const m2 = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: vide, fenetre: fenetreMuette(), bus: busMuet });
+    eq((await m2.executer('t')).derniersEffets, { recues: 0, supprimees: 0, ajustes: 0, conflits: 0 }, 'moteur (R-L3-16) : une passe qui n’écrit rien le dit aussi — zéro partout');
+    await m2.arreter();
+  });
+
+  // --- Restauration d'archive et synchronisation (spec § 5.2) --------------
+  const sauvegarde = await import('../src/domain/backup.js');
+  const { applyArchive, inspectArchive, createArchive, verifyRestored, compterFichesSynchronisees } = sauvegarde;
+  eq(compterFichesSynchronisees({ payload: { stores: { books: [{ id: 'a' }, { id: 'b' }], settings: [{ key: 'ui_locale' }] }, files: [{ sha256: 'x' }] } }), 3,
+    'bilan : deux livres et un fichier font trois fiches à renvoyer — les réglages ne sont pas synchronisés');
+  eq([compterFichesSynchronisees(null), compterFichesSynchronisees({ payload: { stores: {}, files: [] } })], [0, 0], 'bilan : sans fiche synchronisée, rien à annoncer');
+
+  await withRepo(async (repoTemp, db) => {
+    await db.mutate({
+      puts: {
+        books: [{ id: 'z1', title: 'Archivé', updated_at: '2026-10-01T00:00:00Z' }, { id: 'z2', title: 'Sans date' }],
+        settings: [{ key: 'device_name', value: 'Poste de test' }], // sans updated_at : « settings » n’est pas synchronisé
+      },
+      origin: 'device',
+    });
+    const archive = await createArchive(db);
+    const insp = await inspectArchive(await archive.blob.arrayBuffer());
+    ok(insp.ok, 'archive : la copie de la base de test est acceptée à l’inspection');
+    eq((insp.payload.stores.books.find((b) => b.id === 'z2') || {}).updated_at, undefined, 'archive : une fiche d’avant le lot voyage sans updated_at');
+    await db.mutate({ deletes: { outbox: (await db.getAll('outbox')).map((e) => e.seq) }, origin: 'device' });
+
+    // R-L3-10 (complétude) : sans compte et sans horodatage demandé, une fiche sans date en reçoit quand même une —
+    // sinon sync_push la rejetterait (jeton « updated_at ») et elle partirait droit en quarantaine.
+    await applyArchive(db, insp, { mode: 'merge' });
+    ok(typeof (await db.get('books', 'z2')).updated_at === 'string', 'R-L3-10 : restaurée sans compte, une fiche sans date reçoit un updated_at (jamais rejetée pour ça)');
+    eq((await db.get('books', 'z1')).updated_at, '2026-10-01T00:00:00Z', 'fusion sans compte : l’updated_at de l’archive est conservé (comportement d’avant)');
+
+    // Avec un compte, la fusion est un RENVOI voulu : chaque fiche repart avec une heure neuve, sinon le serveur
+    // garderait sa version (I7 : updated_at strictement supérieur gagne) et la restauration ne se verrait nulle part.
+    await applyArchive(db, insp, { mode: 'merge', horodater: () => '2030-01-01T00:00:00.000Z' });
+    eq((await db.get('books', 'z1')).updated_at, '2030-01-01T00:00:00.000Z', 'fusion horodatée : chaque fiche fusionnée reçoit un updated_at neuf');
+    ok((await db.getAll('outbox')).some((e) => e.store === 'books' && e.id === 'z1'), 'fusion horodatée : … et part en file (capturée, origin local)');
+    eq((await db.get('settings', 'device_name')).updated_at, undefined, 'fusion horodatée : les réglages ne sont pas horodatés — ils ne sont pas synchronisés');
+
+    // Le bilan de restauration doit rester VRAI après ce renvoi : sans cette tolérance étroite, chaque fiche
+    // réhorodatée serait annoncée comme un écart et toute restauration d’un compte connecté finirait en rouge.
+    ok((await verifyRestored(db, insp, { mode: 'merge', horodate: true })).ok, 'fusion horodatée : le bilan de restauration reste vérifié (seul l’updated_at diffère)');
+    const strict = await verifyRestored(db, insp, { mode: 'merge' });
+    ok(!strict.ok && strict.diffs.length > 0, 'fusion horodatée : … et la tolérance reste étroite — sans elle l’écart d’heure est bien signalé');
+    eq(compterFichesSynchronisees(insp) > 90, true, 'bilan : les références amorcées comptent parmi les fiches renvoyées (' + compterFichesSynchronisees(insp) + ')');
+  });
+
+  // La phrase du bilan : deux chaînes, jamais un pluriel calculé sur une chaîne traduite, et rien du tout à zéro.
+  {
+    const { messageRenvoi } = reglages;
+    eq([messageRenvoi(0), messageRenvoi(1), messageRenvoi(4)], [null, '1 fiche sera renvoyée au serveur.', '4 fiches seront renvoyées au serveur.'],
+      'bilan : « N fiches seront renvoyées au serveur. » — singulier à part, rien à zéro');
+  }
+
+  // --- Arrêt du moteur sur les deux gestes qui ferment la session (spec § 4.1)
+  {
+    const { arreterMoteur } = reglages;
+    const journal = [];
+    const faux = { arreter: async () => { journal.push('arrete'); return null; } };
+    let pose = null;
+    eq(await arreterMoteur({ obtenir: () => faux, poser: (p) => { pose = p; journal.push('pose'); } }), true, 'déconnexion : le moteur est arrêté');
+    eq([journal, pose], [['arrete', 'pose'], { moteur: null }], 'déconnexion : … arrêté PUIS retiré de l’état, dans cet ordre');
+    eq(await arreterMoteur({ obtenir: () => null, poser: () => journal.push('pose') }), false, 'déconnexion : sans moteur, rien n’est posé');
+    eq(journal.length, 2, 'déconnexion : … et l’état n’est pas touché pour rien');
+
+    const { changerDeCompte } = reglages;
+    const ordre = [];
+    const fait = await changerDeCompte({
+      confirm: async () => true, toast: () => {}, pending: async () => 0,
+      archiveCreated: () => '2026-10-13T00:00:00Z',
+      arreterSync: async () => ordre.push('moteur arrete'),
+      clearDevice: async () => ordre.push('appareil vide'),
+      reload: () => ordre.push('recharge'),
+    });
+    eq([fait, ordre], [true, ['moteur arrete', 'appareil vide', 'recharge']], 'changer de compte : le moteur est arrêté AVANT que l’appareil soit effacé');
+    const refuse = [];
+    await changerDeCompte({
+      confirm: async () => false, toast: () => {}, pending: async () => 0, archiveCreated: () => 't',
+      arreterSync: async () => refuse.push('moteur arrete'), clearDevice: async () => refuse.push('vide'), reload: () => {},
+    });
+    eq(refuse, [], 'changer de compte : un geste refusé n’arrête pas le moteur');
+  }
+
+  // --- Vue recette (spec § 5.5) : une autre version a été créée ailleurs ---
+  // Aucune version n'est masquée : la liste reste entière, seule une ligne le dit, et la décision vit dans Réglages.
+  {
+    const { renderRecipe } = await import('../src/ui/recipe.js');
+    await withRepo(async (repoTemp, db) => {
+      const recette = { id: 'rc9', edition_id: null, original_title: 'Tarte aux pommes', availability: 'reference_only', printed_page: 58, source_page_ids: [] };
+      const ctx = {
+        recipesById: new Map([['rc9', recette]]), versionsByRecipe: new Map(), versionsById: new Map(),
+        editionsById: new Map(), booksById: new Map(), pagesById: new Map(), dishesById: new Map(),
+        cook_history: [], dish_recipe_links: [], recipe_translations: [], ingredients: [], ingredientsById: new Map(), dishes: [],
+        settings: { units: 'original', reading_locale: 'original' }, conventionFor: () => null,
+      };
+      const PHRASE = 'Une autre version a été créée ailleurs — les deux versions sont conservées.';
+      const conflitPour = (kind) => ({ id: 'recipes:rc9', store: 'recipes', record_id: 'rc9', local: recette, server: { data: recette, updated_at: '2026-10-14T00:00:00Z', deleted_at: null }, at: '2026-10-14T00:01:00Z', kind });
+      ok(!(await renderRecipe({ id: 'rc9' }, {}, ctx)).textContent.includes(PHRASE), 'vue recette : sans conflit, aucune ligne n’est affichée');
+      await db.mutate({ puts: { sync_conflicts: [conflitPour('donnees')] }, origin: 'remote' });
+      ok(!(await renderRecipe({ id: 'rc9' }, {}, ctx)).textContent.includes(PHRASE), 'vue recette : un conflit de données ne parle pas d’une version créée ailleurs');
+      await db.mutate({ puts: { sync_conflicts: [conflitPour('version')] }, origin: 'remote' });
+      const avec = await renderRecipe({ id: 'rc9' }, {}, ctx);
+      ok(avec.textContent.includes(PHRASE), 'vue recette : conflit de version → la ligne le dit, sans masquer aucune version');
+      eq([...avec.querySelectorAll('a')].filter((a) => a.getAttribute('href') === '#/settings').length, 1, 'vue recette : … avec un seul lien vers Réglages pour trancher');
+    });
+  }
+
+  // --- Service worker : les modules du câblage deviennent atteignables depuis app.js --------
+  // Un module atteignable et absent de SHELL fait répondre 404 à cache.addAll : l'installation du service worker
+  // échoue EN ENTIER et il n'y a plus aucune consultation hors connexion.
+  {
+    const source = await (await fetch('../sw.js', { cache: 'no-store' })).text();
+    const liste = [...(source.match(/const SHELL = \[([\s\S]*?)\];/)?.[1] || '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    ok(liste.length > 30, 'SHELL lu : ' + liste.length + ' entrées à relire avant de conclure');
+    eq(['./src/sync/transport.js', './src/sync/lots.js', './src/sync/reponses.js', './src/sync/push.js', './src/sync/pull.js', './src/sync/conflits.js', './src/sync/backfill.js', './src/sync/moteur.js']
+      .filter((c) => !liste.includes(c)), [], 'SHELL : les modules d’envoi et de réception, désormais atteignables depuis app.js, sont servis hors connexion');
+    ok(/VERSION = 'cuisine-os-v0\.2\.0-10'/.test(source), 'sw.js : VERSION incrémentée — l’ancien cache est purgé à l’activation');
+  }
 }
