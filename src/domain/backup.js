@@ -3,6 +3,7 @@
 import { createZip, readZip, textOf } from '../core/zip.js';
 import { sha256Hex } from '../core/hash.js';
 import { ARCHIVE_FORMAT, ARCHIVE_FORMAT_VERSION, SUPPORTED_ARCHIVE_VERSIONS, ARCHIVE_DATA_STORES, SECRET_SETTING_KEYS, RELATIONS, STORES, APP_VERSION, SYNC_INTERNAL_STORES, SYNC_STORES } from '../model/schema.js';
+import { nettoyerChaines } from '../sync/lots.js';
 import { syncNow } from '../sync/clock.js';
 
 const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf', 'application/epub+zip': 'epub', 'text/plain': 'txt' };
@@ -245,23 +246,37 @@ export function compterFichesSynchronisees(inspection) {
   return total;
 }
 
-// Horodatage des fiches restaurées (spec § 5.2, § 5.3) — deux règles distinctes, sur les magasins synchronisés :
-//  1. COMPLÉTUDE (R-L3-10), dans tous les modes, avec ou sans compte : une fiche sans `updated_at` en reçoit un.
+// R61 (complément) : ce qu'une fiche restaurée doit devenir, pour un magasin synchronisé. Nommé une fois, et relu
+// par `verifyRestored` : le bilan de restauration doit comparer la base à ce que la restauration PROMET d'écrire,
+// sinon un nettoyage voulu serait annoncé comme un écart et toute restauration d'une vieille archive finirait en
+// rouge. Raison du nettoyage : R61 retire les caractères de contrôle à l'écriture (`repo.save`/`saveBatch`), mais
+// `applyArchive` écrit par `db.putBatch` sans passer par `repo` — une archive d'avant cette vague ramenait donc des
+// fiches sales, et la fiche locale (sale) différait de la copie du serveur (que `lots.js` nettoie à l'envoi) à
+// instants ÉGAUX : le conflit perpétuel revenait par la porte de l'archive. Un `Blob` traverse intact.
+const ficheRestauree = (name, row) => (SYNC_STORES.includes(name) && record(row) ? nettoyerChaines(row) : row);
+
+// Normalisation des fiches restaurées (spec § 5.2, § 5.3) — trois règles, sur les magasins synchronisés, dans la
+// même boucle :
+//  1. NETTOYAGE (R61), dans tous les modes, avec ou sans compte : les caractères de contrôle sont retirés, pour que
+//     la fiche écrite ici soit identique, octet pour octet, à celle que le serveur recevra.
+//  2. COMPLÉTUDE (R-L3-10), dans tous les modes, avec ou sans compte : une fiche sans `updated_at` en reçoit un.
 //     Les fiches d'avant ce lot et toutes les lignes « files » (dont les métadonnées sont reconstruites ici) en
 //     sont dépourvues ; sync_push les rejetterait pour le motif « updated_at » et elles partiraient en quarantaine.
-//  2. RENVOI VOULU (R-L3-18) : avec un compte connecté, `horodater` est fourni et TOUTES les fiches en reçoivent
+//  3. RENVOI VOULU (R-L3-18) : avec un compte connecté, `horodater` est fourni et TOUTES les fiches en reçoivent
 //     un neuf — en fusion comme en remplacement. Sans cela le serveur garderait sa version (I7 : updated_at
 //     strictement supérieur gagne) et la restauration ne se verrait sur aucun autre appareil. Un remplacement ne
 //     supprime rien chez le fournisseur pour autant : ce qui n'est pas dans l'archive y reste (dit par Réglages).
-function horodaterFiches(batch, { horodater }) {
+function normaliserFiches(batch, { horodater }) {
   const renvoi = typeof horodater === 'function';
   for (const name of SYNC_STORES) {
     const rows = batch[name];
     if (!Array.isArray(rows)) continue;
-    for (const row of rows) {
+    for (const [i, row] of rows.entries()) {
       if (!record(row)) continue;
-      if (renvoi) row.updated_at = horodater();
-      else if (!row.updated_at) row.updated_at = syncNow();
+      const fiche = ficheRestauree(name, row);
+      if (renvoi) fiche.updated_at = horodater();
+      else if (!fiche.updated_at) fiche.updated_at = syncNow();
+      rows[i] = fiche;
     }
   }
 }
@@ -278,7 +293,7 @@ export async function applyArchive(db, inspection, { mode = 'merge', horodater =
     const existing = existingFiles.get(file.sha256);
     batch.files.push({ ...existing, sha256: file.sha256, blob, mime: file.mime, size: file.size, created_at: existing?.created_at || new Date().toISOString() });
   }
-  horodaterFiches(batch, { horodater });
+  normaliserFiches(batch, { horodater });
   await db.putBatch(batch, { clearStores: mode === 'replace' ? Object.keys(STORES).filter((s) => !SYNC_INTERNAL_STORES.includes(s)) : [] });
   return Object.fromEntries(Object.entries(batch).map(([name, rows]) => [name, rows.length]));
 }
@@ -315,7 +330,11 @@ export async function verifyRestored(db, inspection, { mode = 'merge', horodate 
     const rows = snapshot[name];
     const byId = new Map(rows.map((row) => [row[key], row]));
     if (mode === 'replace' && rows.length !== expected[name].length) diffs.push(name + ' : décompte différent après restauration');
-    for (const row of expected[name]) {
+    for (const brute of expected[name]) {
+      // R61 : la fiche attendue est celle que la restauration a PROMIS d'écrire — nettoyée pour un magasin
+      // synchronisé. Comparer la fiche brute de l'archive annoncerait un écart pour chaque caractère de contrôle
+      // délibérément retiré, et toute restauration d'une vieille archive finirait en rouge.
+      const row = ficheRestauree(name, brute);
       const current = byId.get(row[key]);
       if (!current) { diffs.push(name + ' : ' + row[key] + ' absent après restauration'); continue; }
       if (canonical(current) === canonical(row)) continue;

@@ -1516,6 +1516,33 @@ export async function runSyncL3Tests({ eq, ok }) {
     eq(compterFichesSynchronisees(insp) > 90, true, 'bilan : les références amorcées comptent parmi les fiches renvoyées (' + compterFichesSynchronisees(insp) + ')');
   });
 
+  // --- R61 (complément) : la RESTAURATION nettoie aussi les caractères de contrôle
+  // R61 les retire à l'écriture (`repo.save` / `repo.saveBatch`), mais `applyArchive` écrit par `db.putBatch` sans
+  // passer par `repo` : une archive d'AVANT cette vague ramenait donc des fiches sales. Restaurées telles quelles,
+  // la fiche locale (sale) et la copie du serveur (que `lots.js` nettoie à l'envoi) diffèrent à instants ÉGAUX —
+  // le conflit perpétuel que R61 vient de supprimer sur le chemin ordinaire, revenu par la porte de l'archive.
+  await withRepo(async (repoTemp, db) => {
+    // Écrite par `db.mutate` d'origine 'device' : elle ne passe pas par `repo.save`, donc elle entre SALE dans la
+    // base — c'est exactement une fiche d'avant cette vague, telle qu'une vieille archive en porte.
+    await db.mutate({ puts: { books: [{ id: 'sale', title: 'a\u0000b', notes: ['x\u000by', { z: 't\u001f' }], garde: 'é\n\tÀ', updated_at: '2026-10-01T00:00:00Z' }] }, origin: 'device' });
+    const insp = await inspectArchive(await (await createArchive(db)).blob.arrayBuffer());
+    ok(insp.ok, 'R61 archive : la copie d’une base portant un caractère de contrôle est acceptée à l’inspection');
+    eq(insp.payload.stores.books.find((b) => b.id === 'sale')?.title, 'a\u0000b', 'R61 archive : l’archive porte bien le caractère de contrôle (rien n’est réécrit à l’export)');
+    // La fiche sale est retirée de la base AVANT la restauration : ce qui sera relu ne peut venir que d'elle.
+    await db.mutate({ clearStores: ['books'], origin: 'device' });
+    await db.mutate({ deletes: { outbox: (await db.getAll('outbox')).map((e) => e.seq) }, origin: 'device' });
+    await applyArchive(db, insp, { mode: 'merge' });
+    const relue = await db.get('books', 'sale');
+    eq([relue.title, relue.notes, relue.garde], ['ab', ['xy', { z: 't' }], 'é\n\tÀ'], 'R61 archive : la restauration nettoie les caractères de contrôle, en profondeur, et garde accents et sauts de ligne');
+    ok((await verifyRestored(db, insp, { mode: 'merge' })).ok, 'R61 archive : … et le bilan de restauration reste VÉRIFIÉ — un nettoyage voulu n’est pas un écart à signaler');
+    // Avec un compte, la fiche repart — et ce qui part est identique à ce qui est écrit ici.
+    await applyArchive(db, insp, { mode: 'merge', horodater: () => '2032-01-01T00:00:00.000Z' });
+    ok((await verifyRestored(db, insp, { mode: 'merge', horodate: true })).ok, 'R61 archive : le bilan d’une restauration horodatée reste vérifié lui aussi');
+    const lot = await composerLots(await db.getAll('outbox'), (s, id) => db.get(s, id));
+    const element = lot.lots[0].elements.find((e) => e.id === 'sale');
+    eq(element.data, await db.get('books', 'sale'), 'R61 archive : l’élément envoyé est IDENTIQUE à la fiche restaurée (plus de conflit perpétuel)');
+  });
+
   // La phrase du bilan : deux chaînes, jamais un pluriel calculé sur une chaîne traduite, et rien du tout à zéro.
   {
     const { messageRenvoi } = reglages;
