@@ -745,7 +745,7 @@ export async function runSyncL3Tests({ eq, ok }) {
   });
 
   // --- Conflits : gestes (spec § 5.5)
-  const { garderIci, garderAilleurs, purgerAnciens } = await import('../src/sync/conflits.js');
+  const { garderIci, garderAilleurs, ignorerRenvoye, purgerAnciens } = await import('../src/sync/conflits.js');
   await withRepo(async (repo, db) => {
     // L’heure locale de la fiche est posée loin dans le passé : l’assertion « updated_at neuf » ne dépend alors ni
     // de l’heure réelle du Mac ni du plancher laissé par le bloc « Horloge ».
@@ -1298,6 +1298,18 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(!boite.textContent.includes('renvoyée au serveur'), 'R-L3-29 (I5) : … et elle n’affirme plus un envoi abouti');
     for (const b of boite.querySelectorAll('button')) b.click();
     eq(vus, [['ignorerConflit', 'books:k1']], 'R-L3-29 : « Ignorer » appelle son geste avec la clé du conflit');
+    // R-L3-30 : renvoyé ET supprimé ailleurs — l'issue de R-L3-26 doit EXISTER dans l'interface, sinon la décision
+    // qu'on a donnée à la personne n'est nulle part et « Ignorer » annule la suppression sans un mot.
+    const tombale = document.createElement('div');
+    const mTombale = syncSectionModel({ ...base, moteur: etatMoteur({ conflits: 1 }), conflits: [{ ...unConflit, renvoye: true, server: { data: null, updated_at: '2026-10-13T11:00:00Z', deleted_at: '2026-10-13T11:00:00Z' } }] });
+    eq([mTombale.conflits[0].renvoye, mTombale.conflits[0].suppressionAilleurs], [true, true], 'R-L3-30 : le modèle dit que la version d’ailleurs est une tombale');
+    eq(syncSectionModel({ ...base, moteur: etatMoteur({ conflits: 1 }), conflits: [{ ...unConflit, renvoye: true }] }).conflits[0].suppressionAilleurs, false, 'R-L3-30 : … et faux quand elle n’en est pas une');
+    for (const n of syncSectionL3(mTombale, gestes)) tombale.append(n);
+    eq([...tombale.querySelectorAll('button')].map((b) => b.textContent), ['Supprimer ici aussi', 'Ignorer'], 'R-L3-30 : une tombale renvoyée garde son issue — « Supprimer ici aussi », plus « Ignorer »');
+    ok(tombale.textContent.includes('Supprimée ailleurs'), 'R-L3-30 : … et la ligne dit que la fiche a été supprimée ailleurs');
+    tombale.querySelector('button').click();
+    eq(vus.at(-1), ['garderAilleurs', 'books:k1'], 'R-L3-30 : « Supprimer ici aussi » appelle bien le geste qui applique la suppression');
+
     // Et un conflit ordinaire garde ses deux issues, sans « Ignorer ».
     const ordinaire = document.createElement('div');
     for (const n of syncSectionL3(syncSectionModel({ ...base, moteur: etatMoteur({ conflits: 1 }), conflits: [unConflit] }), gestes)) ordinaire.append(n);
@@ -1368,6 +1380,43 @@ export async function runSyncL3Tests({ eq, ok }) {
     await db.mutate({ puts: { sync_conflicts: [modele('books:ig2', false)] }, origin: 'remote' });
     eq([await rangerConflitRenvoye({ db, id: 'books:ig2' }), await db.count('sync_conflicts')], [false, 1], 'R-L3-29 : … et il REFUSE un conflit ordinaire (il attend la personne)');
     eq(await rangerConflitRenvoye({ db, id: 'books:disparu' }), false, 'R-L3-29 : … et un conflit déjà rangé ne fait rien');
+  });
+
+  // R-L3-30 : les deux gestes « Garder… » REFUSENT un conflit renvoyé, et le drapeau est relu À L'EXÉCUTION.
+  // Course réelle : un conflit ordinaire est affiché avec ses deux boutons ; avant le clic, une passe de réception
+  // upgrade ce MÊME id en `renvoye: true` (la version d'ici vient d'être remise en file) ; le geste relit le conflit
+  // et « Garder celle d'ailleurs » écrivait alors la version du serveur — celle qui a PERDU l'arbitrage I7 — par
+  // dessus la version d'ici qui part. Exactement ce que R64 interdit, par un chemin que R64 n'avait pas fermé.
+  await withRepo(async (repoTemp, db) => {
+    await repoTemp.save('books', { id: 'course', title: 'Ici' });
+    const locale = await db.get('books', 'course');
+    const renvoye = { id: 'books:course', store: 'books', record_id: 'course', local: locale, server: { data: { id: 'course', title: 'Ailleurs' }, updated_at: '2026-10-13T12:00:00Z', deleted_at: null }, at: '2026-10-13T12:01:00Z', kind: 'donnees', renvoye: true };
+    await db.mutate({ puts: { sync_conflicts: [renvoye] }, origin: 'remote' });
+    const filesAvant = (await db.getAll('outbox')).length;
+    const vraiMutate = db.mutate.bind(db);
+    let transactions = 0;
+    db.mutate = (arg) => { transactions += 1; return vraiMutate(arg); };
+    let dAilleurs;
+    let dIci;
+    try {
+      dAilleurs = await garderAilleurs(db, renvoye);
+      dIci = await garderIci(db, renvoye);
+    } finally { db.mutate = vraiMutate; }
+    eq([dAilleurs, dIci, transactions], [false, false, 0], 'R-L3-30 : les deux gestes « Garder… » refusent un conflit renvoyé — et n’ouvrent pas même une transaction');
+    eq([(await db.get('books', 'course')).title, (await db.getAll('outbox')).length, !!(await db.get('sync_conflicts', 'books:course'))],
+      ['Ici', filesAvant, true], 'R-L3-30 : … la fiche locale est INTACTE, la file inchangée, et le conflit reste');
+    // La porte n'est pas fermée pour tout le monde : « Ignorer », lui, s'applique.
+    eq([await ignorerRenvoye(db, renvoye), await db.count('sync_conflicts')], [true, 0], 'R-L3-30 : … seul « Ignorer » touche un conflit renvoyé');
+
+    // R-L3-30, l'exception : une TOMBALE venue d'ailleurs reste acceptable, même sur un conflit renvoyé. C'est la
+    // seule décision que R-L3-26 ait laissée à la personne quand une tombale plus ancienne que la fiche locale
+    // arrive ; la lui retirer annulerait la suppression venue d'ailleurs sans un mot.
+    await repoTemp.save('books', { id: 'tomb', title: 'Ici plus récent' });
+    const tombaleRenvoyee = { id: 'books:tomb', store: 'books', record_id: 'tomb', local: await db.get('books', 'tomb'), server: { data: null, updated_at: '2026-10-13T11:00:00Z', deleted_at: '2026-10-13T11:00:00Z' }, at: '2026-10-13T12:01:00Z', kind: 'donnees', renvoye: true };
+    await db.mutate({ puts: { sync_conflicts: [tombaleRenvoyee] }, origin: 'remote' });
+    eq(await garderIci(db, tombaleRenvoyee), false, 'R-L3-30 : « Garder celle d’ici » reste refusé sur une tombale renvoyée (la fiche part déjà)');
+    eq([await garderAilleurs(db, tombaleRenvoyee), await db.get('books', 'tomb'), await db.get('sync_conflicts', 'books:tomb')],
+      [true, undefined, undefined], 'R-L3-30 (exception) : « Garder celle d’ailleurs » ACCEPTE la suppression venue d’ailleurs — l’issue de R-L3-26 vit encore');
   });
 
   await withRepo(async (repoTemp, db) => {
@@ -1794,7 +1843,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(liste.length > 30, 'SHELL lu : ' + liste.length + ' entrées à relire avant de conclure');
     eq(['./src/sync/transport.js', './src/sync/lots.js', './src/sync/reponses.js', './src/sync/push.js', './src/sync/pull.js', './src/sync/conflits.js', './src/sync/backfill.js', './src/sync/moteur.js']
       .filter((c) => !liste.includes(c)), [], 'SHELL : les modules d’envoi et de réception, désormais atteignables depuis app.js, sont servis hors connexion');
-    ok(/VERSION = 'cuisine-os-v0\.3\.0-5'/.test(source), 'sw.js : VERSION incrémentée pour la vague finale — l’ancien cache est purgé à l’activation');
+    ok(/VERSION = 'cuisine-os-v0\.3\.0-6'/.test(source), 'sw.js : VERSION incrémentée pour la vague finale — l’ancien cache est purgé à l’activation');
     // Le nom du cache et la version affichée dans Réglages doivent dire la MÊME chose : deux versions qui se
     // contredisent rendent impossible de savoir ce qui est servi (un cache « 0.2.0 » pour une app qui s'annonce
     // « 0.3.0 » est exactement le genre de doute qu'un marqueur de version existe pour lever).

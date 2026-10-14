@@ -1,6 +1,11 @@
 // Gestes sur un conflit (spec § 5.5). « Garder celle d'ici » : la version locale est restaurée avec un updated_at
 // NEUF et mise en file (le serveur l'acceptera : plus récente). « Garder celle d'ailleurs » : la version du serveur
 // est écrite sans remise en file. Dans les deux cas le conflit disparaît. Plus de 30 jours : retiré.
+// R-L3-30 : sur un conflit `renvoye` (R64), les deux gestes « Garder… » REFUSENT — à une exception, nommée dans
+// `garderAilleurs` : une tombale venue d'ailleurs reste acceptable, parce que c'est la seule décision que R-L3-26
+// ait laissée à la personne. Le drapeau est relu ici, À L'EXÉCUTION, parce que c'est là que la course se joue : le
+// rendu peut avoir montré un conflit ordinaire, puis une passe de réception l'upgrader en « renvoyé » avant le
+// clic — et « Garder celle d'ailleurs » écrirait alors la version qui vient de PERDRE l'arbitrage I7.
 import { syncNow } from './clock.js';
 import { nettoyerChaines } from './lots.js';
 
@@ -8,6 +13,7 @@ import { nettoyerChaines } from './lots.js';
 // la fiche en file, et c'est précisément le renvoi voulu. Le retrait du conflit voyage dans la même transaction et
 // reste interne (sync_conflicts n'est pas un magasin synchronisé : la capture ne le regarde pas).
 export async function garderIci(db, conflit) {
+  if (conflit?.renvoye === true) return false; // R-L3-30 : la version d'ici part déjà, rien à trancher ici
   // Version locale nulle : la fiche a été supprimée ici pendant l'aller-retour. « Garder celle d'ici » veut alors
   // dire garder la suppression — jamais écrire une fiche sans clé, que la base refuserait. Le payload porte un
   // updated_at NEUF : sans lui, la capture mettrait en file une tombale sans heure, que le serveur refuserait
@@ -33,6 +39,13 @@ export async function garderIci(db, conflit) {
 
 export async function garderAilleurs(db, conflit) {
   const serveur = conflit.server;
+  // R-L3-30 : refusé sur un conflit renvoyé — c'est ce geste-là qui écrasait la version d'ici par celle qui a
+  // perdu l'arbitrage. SAUF quand la version d'ailleurs est une TOMBALE : là, le choix n'est pas « une version plus
+  // vieille des données », c'est « est-ce que j'accepte la suppression ? » — la seule décision que R-L3-26 ait
+  // laissée à la personne quand une tombale plus ancienne que la fiche locale arrive. La lui retirer ferait
+  // disparaître l'entrée de journal pendant que la fiche locale repart : la suppression venue d'ailleurs serait
+  // annulée sans un mot, le miroir exact de la perte muette que R-L3-26 a supprimée.
+  if (conflit?.renvoye === true && !serveur?.deleted_at) return false;
   // Un conflit dont le serveur n'a pas joint sa version (clé nommée sans contenu) : il n'y a rien à appliquer. Aucune
   // fiche n'est inventée et le conflit RESTE — mieux vaut un conflit qui attend qu'une perte muette.
   if (!serveur || (!serveur.deleted_at && (!serveur.data || typeof serveur.data !== 'object'))) return false;

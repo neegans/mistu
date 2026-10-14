@@ -143,6 +143,8 @@ export const EN = {
   "Garder celle d’ici ({d})": "Keep the one from here ({d})",
   "Garder celle d’ailleurs": "Keep the one from elsewhere",
   "Version d’ici en cours de renvoi au serveur.": "Local version being sent to the server.",
+  "Supprimée ailleurs ; la version d’ici est en cours de renvoi au serveur.": "Deleted elsewhere; the local version is being sent to the server.",
+  "Supprimer ici aussi": "Delete here too",
   "Ignorer": "Dismiss",
   "Cette version n’a pas été reçue en entier : le conflit reste.": "This version was not received in full: the conflict stays.",
   "{n} éléments ne sont pas encore envoyés (dont {m} en quarantaine : « Abandonner » d’abord).": "{n} items have not been sent yet ({m} of them in quarantine: give up on those first).",

@@ -679,11 +679,19 @@ export function syncSectionL3(model, gestes = {}) {
         // à l'accusé : aucun état affiché sans un événement réel.
         // Sinon, la nature du conflit d'abord : « même heure, contenus différents » et « une autre version a été
         // créée ailleurs » ne demandent pas la même décision, et rien ne permet de deviner l'une depuis l'autre.
-        el('p', null, c.renvoye ? t('Version d’ici en cours de renvoi au serveur.') : phraseConflit(c.kind)),
+        // R-L3-30 : renvoyé ET supprimé ailleurs garde une vraie question — accepter la suppression, ou non. Sans
+        // ce cas, l'issue que R-L3-26 a donnée à la personne n'existerait nulle part dans l'interface, et
+        // « Ignorer » ferait disparaître le journal pendant que la fiche locale repart : la suppression venue
+        // d'ailleurs annulée sans un mot.
+        el('p', null, c.renvoye && c.suppressionAilleurs
+          ? t('Supprimée ailleurs ; la version d’ici est en cours de renvoi au serveur.')
+          : (c.renvoye ? t('Version d’ici en cours de renvoi au serveur.') : phraseConflit(c.kind))),
         el('p', null, t('{l} — version d’ici du {a}, version d’ailleurs du {b}', { l: c.libelle, a: c.dateIci, b: c.dateAilleurs })),
-        c.renvoye
-          ? rangee(bouton('ignorerConflit', t('Ignorer'), c.id))
-          : rangee(bouton('garderIci', t('Garder celle d’ici ({d})', { d: c.dateIci }), c.id), bouton('garderAilleurs', t('Garder celle d’ailleurs'), c.id))));
+        c.renvoye && c.suppressionAilleurs
+          ? rangee(bouton('garderAilleurs', t('Supprimer ici aussi'), c.id, 'btn danger'), bouton('ignorerConflit', t('Ignorer'), c.id))
+          : (c.renvoye
+            ? rangee(bouton('ignorerConflit', t('Ignorer'), c.id))
+            : rangee(bouton('garderIci', t('Garder celle d’ici ({d})', { d: c.dateIci }), c.id), bouton('garderAilleurs', t('Garder celle d’ailleurs'), c.id)))));
     }
   }
   return noeuds;
@@ -795,6 +803,9 @@ export function syncSectionModel({ available = false, reason = null, user = null
         // R-L3-29 : la version d'ici est DÉJÀ repartie — ce n'est pas une question posée à la personne. Jamais
         // deviné : seule la réception pose ce drapeau, et faux veut dire « il y a vraiment un choix à faire ».
         renvoye: c.renvoye === true,
+        // R-L3-30 : la version d'ailleurs est une TOMBALE. Même renvoyé, ce conflit garde alors une vraie question —
+        // « est-ce que j'accepte la suppression ? » — et c'est la seule que R-L3-26 ait laissée à la personne.
+        suppressionAilleurs: !!c.server?.deleted_at,
       };
     }),
     progression: avancement
