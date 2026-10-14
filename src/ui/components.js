@@ -2,6 +2,7 @@
 import { el, formatMinutes, downloadBlob, toast } from '../core/dom.js';
 import { t, label } from '../core/i18n.js';
 import { lienSignet } from '../core/lien.js';
+import { urlDeBlob } from '../core/blob-urls.js';
 import { displayQuantity, REASON_LABELS } from '../domain/units.js';
 import { shortcutUrl, siriPhrase, describeDuration, isAppleTouchDevice } from '../domain/timers.js';
 import { navigate } from '../core/router.js';
@@ -78,9 +79,13 @@ export function recipeCard(doc, { extra = null, href = null, reasons = null } = 
     extra);
 }
 
-export function bookCover(edition, book, { href = null } = {}) {
+// La vignette d'un livre (spec § 6) : l'image si la LIGNE files est là, sinon le titre sur le fond — et rien de plus.
+// Un pointeur cover_sha256 sans octets (fiche reçue d'un autre appareil, avant L4) n'est pas un manque à signaler ici :
+// une grille de livres n'est pas l'endroit pour dire ce qui n'est pas arrivé (la fiche du livre, elle, le dit).
+export function bookCover(edition, book, { href = null, fichier = null } = {}) {
+  const image = fichier?.blob instanceof Blob ? el('img', { class: 'cover-img', alt: '', src: urlDeBlob(fichier.blob) }) : null;
   return el('a', { class: 'cover-wrap', href: href || `#/books/${edition.id}` },
-    el('div', { class: 'cover' },
+    el('div', { class: `cover${image ? ' with-img' : ''}` }, image,
       el('div', { class: 'title' }, book?.title || t('Sans titre')),
       el('div', { class: 'author' }, [book?.author, edition.year].filter(Boolean).join(' · '))));
 }

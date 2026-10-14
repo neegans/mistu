@@ -194,10 +194,13 @@ label.check { display: inline-flex; gap: .45rem; align-items: center; font-size:
 .item-link:hover h3 { text-decoration: underline; }
 
 .cover { aspect-ratio: 3 / 4; background: linear-gradient(160deg, var(--green), var(--green-2)); color: var(--cream); border-radius: 10px; padding: .7rem; display: flex; flex-direction: column; justify-content: flex-end; text-decoration: none; overflow: hidden; }
-.cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.cover img, .cover-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .cover .title { font-weight: 700; font-size: .95rem; line-height: 1.2; }
 .cover .author { font-size: .78rem; opacity: .85; }
+/* Une vraie couverture se lit seule : le titre de secours s'efface au lieu de se superposer à l'image (spec § 6). */
+.cover.with-img .title, .cover.with-img .author { display: none; }
 .cover-wrap { position: relative; display: block; text-decoration: none; }
+.zone-couverture img { max-width: 120px; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 8px; }
 .thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; background: var(--cream-2); flex-shrink: 0; }
 .thumb.large { width: 100%; height: 220px; }
 .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: .6rem; }

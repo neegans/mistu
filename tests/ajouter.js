@@ -521,4 +521,82 @@ export async function runAjouterTests({ eq, ok }) {
     try { await IM.reduireImage(new Blob(['pas une image'], { type: 'image/png' })); } catch (e) { code = e.code; }
     eq(code, 'indecodable', 'image : un blob indécodable lève ErreurImage(indecodable)');
   }
+  // --- § 6 Couverture : réception bornée, ré-encodage, pointeur souple, affichage, URL blob révoquées
+  const BU = await import('../src/core/blob-urls.js');
+  {
+    const revoques = [];
+    const orig = URL.revokeObjectURL;
+    URL.revokeObjectURL = (u) => { revoques.push(u); return orig.call(URL, u); };
+    try {
+      const u1 = BU.urlDeBlob(new Blob(['a'])), u2 = BU.urlDeBlob(new Blob(['b']));
+      ok(u1.startsWith('blob:') && u2.startsWith('blob:'), 'blob-urls : des URL d’objet');
+      eq([BU.revoquerUrlsDeBlob(), revoques.sort(), BU.revoquerUrlsDeBlob()], [2, [u1, u2].sort(), 0], 'blob-urls : tout révoqué une fois, puis plus rien (F4/S15)');
+    } finally { URL.revokeObjectURL = orig; }
+  }
+  {
+    const { withRepo } = await import('./sync-fixture.js');
+    await withRepo(async (repo) => {
+      await repo.putFile('aaa', new Blob(['x'], { type: 'image/jpeg' }), { mime: 'image/jpeg' });
+      const m = await repo.getFiles(['aaa', 'absent']);
+      eq([m.size, m.get('aaa')?.mime, m.has('absent')], [1, 'image/jpeg', false], 'repo.getFiles : une transaction, les absents ne figurent pas');
+    });
+  }
+  eq(LA.URL_COUVERTURE_OL('9782761950001'), 'https://covers.openlibrary.org/b/isbn/9782761950001-L.jpg?default=false', 'couverture : adresse Open Library avec default=false');
+  {
+    const reponseBlob = (status, blob, ct = blob.type, longueur = blob.size) => ({ ok: status < 400, status, headers: new Headers({ 'content-type': ct, 'content-length': String(longueur) }), blob: async () => blob });
+    const bonPng = png(400, 600);
+    ok((await LA.recupererCouvertureParIsbn('978', { fetch: async (u, o) => { eq(o.credentials, 'omit', 'couverture : options S12'); return reponseBlob(200, bonPng); } })) instanceof Blob, 'couverture : 200 image/png → blob');
+    eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => reponseBlob(404, new Blob([''], { type: 'image/jpeg' })) }), null, 'couverture : 404 → null');
+    eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => reponseBlob(200, new Blob(['<html>'], { type: 'text/html' })) }), null, 'couverture : type hors liste → null');
+    eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => reponseBlob(200, bonPng, 'image/png', 6 * 1024 * 1024) }), null, 'couverture : Content-Length 6 Mo → null AVANT de lire le corps');
+    eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => reponseBlob(200, png(20000, 20000)) }), null, 'couverture : 400 Mpx annoncés par l’en-tête → null, jamais décodé');
+    eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => { throw new Error('cors'); } }), null, 'couverture : rejet (CORS/réseau) → null, aucune exception');
+    // « AVANT de lire le corps » est une affirmation : elle se mesure par un espion sur blob(), pas par le résultat.
+    let lectures = 0;
+    const espion = (longueur) => ({ ok: true, status: 200, headers: new Headers({ 'content-type': 'image/png', 'content-length': String(longueur) }), blob: async () => { lectures += 1; return bonPng; } });
+    await LA.recupererCouvertureParIsbn('978', { fetch: async () => espion(6 * 1024 * 1024) });
+    const apresRefus = lectures;
+    await LA.recupererCouvertureParIsbn('978', { fetch: async () => espion(bonPng.size) });
+    eq([apresRefus, lectures], [0, 1], 'couverture : le corps d’une réponse trop lourde n’est JAMAIS lu, celui d’une réponse bornée l’est');
+  }
+  {
+    const { withRepo } = await import('./sync-fixture.js');
+    await withRepo(async (repo, db) => {
+      const canvas = document.createElement('canvas'); canvas.width = 1600; canvas.height = 2000;
+      canvas.getContext('2d').fillRect(0, 0, 1600, 2000);
+      const photo = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+      const { sha256 } = await LA.poserCouverture(photo, { origine: 'locale', repo });
+      const ligne = await db.get('files', sha256);
+      eq([ligne.mime, ligne.blob.type, (await IM.dimensionsImage(ligne.blob)).hauteur], ['image/jpeg', 'image/jpeg', 1200], 'couverture : stockée ré-encodée en JPEG 1 200 px, ligne files locale');
+      eq((await db.getAll('outbox')).filter((o) => o.store === 'files').length, 0, 'couverture : la ligne files n’entre pas en file (R58)');
+      const encore = await LA.poserCouverture(photo, { origine: 'locale', repo });
+      eq(encore.sha256, sha256, 'couverture : putFile idempotent (F10)');
+      let code = null;
+      try { await LA.poserCouverture(new Blob(['x'], { type: 'image/png' }), { origine: 'locale', repo }); } catch (e) { code = e.code; }
+      eq(code, 'indecodable', 'couverture : indécodable → refus nommé (F11)');
+      // bookCover avec et sans fichier
+      const { bookCover } = await import('../src/ui/components.js');
+      const avec = bookCover({ id: 'e1', cover_sha256: sha256 }, { title: 'T' }, { fichier: ligne });
+      ok(avec.querySelector('img.cover-img') && avec.querySelector('.cover').classList.contains('with-img'), 'bookCover : fichier présent → <img>');
+      // Poser un src lance le chargement même hors document : révoquer avant la fin donnerait une erreur console
+      // (net::ERR_FILE_NOT_FOUND). On attend donc la fin réelle du chargement avant de rendre les URL.
+      await new Promise((r) => { const img = avec.querySelector('img.cover-img'); if (img.complete) r(); else { img.onload = r; img.onerror = r; } });
+      const sans = bookCover({ id: 'e1', cover_sha256: sha256 }, { title: 'T' }, {});
+      eq([sans.querySelector('img'), sans.querySelector('.title').textContent], [null, 'T'], 'bookCover : pointeur sans fichier (autre appareil avant L4) → vignette texte, sans message');
+      BU.revoquerUrlsDeBlob();
+    });
+  }
+  {
+    const appels = [];
+    const zone = LA.renderZoneCouverture({ sha256: null, apercu: null, message: 'Aucune couverture reçue. Tu peux la photographier.', enCours: false }, { photographier: () => appels.push('photo'), choisir: () => appels.push('choisir'), retirer: () => appels.push('retirer') });
+    ok(zone.classList.contains('zone-couverture') && zone.textContent.includes('Aucune couverture reçue.'), 'couverture : la zone dit l’état réel (I-B)');
+    eq([...zone.querySelectorAll('button')].map((b) => b.textContent), ['Photographier', 'Choisir une image'], 'couverture : sans image, pas de « Retirer »');
+    // Un aperçu factice doit être une image que le navigateur sait charger : « blob:fake » ferait une erreur console
+    // (« Not allowed to load local resource »), et la suite exige 0 erreur. GIF 1 × 1 transparent, autorisé par la CSP.
+    const APERCU = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    const avecImg = LA.renderZoneCouverture({ sha256: 'x', apercu: APERCU, message: null, enCours: false }, { photographier: () => {}, choisir: () => {}, retirer: () => appels.push('retirer') });
+    eq(avecImg.querySelector('img')?.getAttribute('src'), APERCU, 'couverture : avec une image, l’aperçu est affiché tel qu’il est donné');
+    [...avecImg.querySelectorAll('button')].find((b) => b.textContent === 'Retirer').click();
+    eq(appels, ['retirer'], 'couverture : « Retirer » n’efface que le pointeur (le geste), jamais la ligne files');
+  }
 }

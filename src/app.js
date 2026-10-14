@@ -5,6 +5,7 @@ import { setUiLocale, t } from './core/i18n.js';
 import * as repo from './model/repo.js';
 import { on } from './core/bus.js';
 import { logError } from './core/log.js';
+import { revoquerUrlsDeBlob } from './core/blob-urls.js';
 import { getData, invalidate, getSyncState, routeApresRetour, relireReglages, isActivitySynced, demarrerSync, setSyncState, poserMoteur, passeAEcrit, doitRendreApresPasse, SYNC_ROUTE_KEY } from './ui/state.js';
 import { installCapture } from './sync/outbox.js';
 import { createAuth } from './sync/auth.js';
@@ -70,6 +71,10 @@ async function onRoute({ handler, params, query, path }) {
     a.classList.toggle('active', nav ? nav.match(path) : path.startsWith(href));
   }
   const seq = ++renderSeq;
+  // Les URL blob: de la vue qu'on quitte n'ont plus de lecteur (spec § 6, F4/S15) : elles sont révoquées ICI, au
+  // seul endroit qui voit tous les changements de vue. Sans cela, chaque couverture affichée retiendrait ses octets
+  // en mémoire jusqu'au rechargement de la page.
+  revoquerUrlsDeBlob();
   replace(current.main, el('p', { class: 'muted' }, t('Chargement…')));
   try {
     const ctx = await getData();

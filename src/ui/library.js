@@ -4,6 +4,7 @@ import { t } from '../core/i18n.js';
 import { navigate, buildQuery, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { pageHeader, bookCover, segmented, emptyState, section } from './components.js';
+import { revoquerUrlsDeBlob } from '../core/blob-urls.js';
 import { proposeDishesForRecipe } from '../domain/dishes.js';
 
 export async function renderLibrary(params, query, ctx) {
@@ -12,16 +13,21 @@ export async function renderLibrary(params, query, ctx) {
     pageHeader(t('Mes livres'), { actions: [el('a', { class: 'btn primary', href: '#/add' }, t('Ajouter'))] }),
     el('div', { style: { marginBottom: '1rem' } }, segmented([{ value: 'books', label: t('Livres') }, { value: 'dishes', label: t('Plats') }], tab, (v) => navigate('/library' + buildQuery({ tab: v })))));
   if (tab === 'dishes') root.append(await dishesTab(ctx));
-  else root.append(booksTab(ctx));
+  else root.append(await booksTab(ctx));
   return root;
 }
 
-function booksTab(ctx) {
+async function booksTab(ctx) {
   if (!ctx.book_editions.length) return emptyState('📚', t('Aucun livre pour l’instant.'), el('a', { class: 'btn primary', href: '#/add' }, t('Ajouter un livre')));
   const recipesByEdition = repo.groupBy(ctx.recipes.filter((r) => r.edition_id), 'edition_id');
+  // Les octets des couvertures sont lus UNE fois, en une transaction : la grille se redessine à chaque touche du
+  // filtre et ne peut pas aller en base à chaque fois. Une empreinte sans ligne ici = couverture pas sur l'appareil.
+  const fichiers = await repo.getFiles(ctx.book_editions.map((e) => e.cover_sha256).filter(Boolean));
   const filter = el('input', { type: 'search', placeholder: t('Filtrer par titre, auteur, cuisine…') });
   const grid = el('div', { class: 'grid' });
   const draw = () => {
+    // Chaque passage recrée les URL blob: des vignettes affichées : les précédentes n'ont plus de lecteur (F4/S15).
+    revoquerUrlsDeBlob();
     const q = filter.value.trim().toLowerCase();
     grid.replaceChildren();
     const eds = [...ctx.book_editions].sort((a, b) => (ctx.editionLabel(a) || '').localeCompare(ctx.editionLabel(b) || ''));
@@ -32,7 +38,7 @@ function booksTab(ctx) {
       const list = recipesByEdition.get(ed.id) || [];
       const available = list.filter((r) => r.availability !== 'reference_only').length;
       const refs = list.length - available;
-      grid.append(el('div', null, bookCover(ed, book),
+      grid.append(el('div', null, bookCover(ed, book, { fichier: ed.cover_sha256 ? fichiers.get(ed.cover_sha256) : null }),
         el('div', { class: 'muted', style: { fontSize: '.78rem', marginTop: '.3rem' } },
           list.length ? `${available ? t('{n} disponible(s)', { n: available }) : ''}${available && refs ? ' · ' : ''}${refs ? t('{n} repérée(s)', { n: refs }) : ''}` : t('Aucune recette indexée'))));
     }

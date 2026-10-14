@@ -5,6 +5,10 @@ import { t } from '../core/i18n.js';
 import { logError } from '../core/log.js';
 import { navigate } from '../core/router.js';
 import * as repo from '../model/repo.js';
+import { sha256Hex } from '../core/hash.js';
+import { COVER_INPUT_MIME, ALLOWED_MIME } from '../sync/mime.js';
+import { LIMITES_COUVERTURE, dimensionsImage, reduireImage, ErreurImage } from '../core/image.js';
+import { urlDeBlob } from '../core/blob-urls.js';
 import { listConventions } from '../domain/units.js';
 import { pageHeader, field, select } from './components.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
@@ -45,6 +49,53 @@ export function fusionnerFiche(champs, fiche) {
   for (const k of ['title', 'author', 'publisher', 'language']) if (fiche?.[k] && !out[k]) out[k] = fiche[k];
   if (fiche?.year && !out.year) out.year = String(fiche.year);
   return out;
+}
+
+export const URL_COUVERTURE_OL = (isbn) => `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg?default=false`;
+
+// Couverture reçue par ISBN (spec § 6) : Open Library seulement ; bornes AVANT décodage (S4) ; tout échec → null.
+// L'ordre compte : type annoncé, puis taille annoncée (le corps n'est pas lu), puis taille réelle, puis dimensions
+// lues dans l'en-tête — createImageBitmap n'est atteint qu'après, dans poserCouverture.
+export async function recupererCouvertureParIsbn(isbn, { fetch = globalThis.fetch, signal } = {}) {
+  try {
+    const r = await fetch(URL_COUVERTURE_OL(isbn), { ...OPTIONS_FETCH, signal });
+    if (!r.ok) return null;
+    const type = String(r.headers.get('content-type') || '').split(';')[0].trim();
+    if (!COVER_INPUT_MIME.includes(type)) return null;
+    const annonce = parseInt(r.headers.get('content-length') || '0', 10);
+    if (annonce > LIMITES_COUVERTURE.octetsDistants) return null;
+    const blob = await r.blob();
+    if (blob.size > LIMITES_COUVERTURE.octetsDistants) return null;
+    const dims = await dimensionsImage(blob);
+    if (!dims || dims.largeur * dims.hauteur > LIMITES_COUVERTURE.pixels) return null;
+    return blob.type === type ? blob : new Blob([blob], { type });
+  } catch { return null; }
+}
+
+// Toute couverture est ré-encodée (S5/F11) puis écrite par putFile (idempotent, hors file : R58).
+export async function poserCouverture(blob, { origine = 'locale', repo: r = repo, sha256 = sha256Hex } = {}) {
+  const borne = origine === 'distante' ? LIMITES_COUVERTURE.octetsDistants : LIMITES_COUVERTURE.octetsLocaux;
+  if (blob.size > borne) throw new ErreurImage('trop_lourde');
+  if (origine === 'locale' && blob.type && !ALLOWED_MIME.includes(blob.type)) throw new ErreurImage('type');
+  const jpeg = await reduireImage(blob);
+  const empreinte = await sha256(jpeg);
+  await r.putFile(empreinte, jpeg, { mime: 'image/jpeg' });
+  return { sha256: empreinte, taille: jpeg.size };
+}
+
+// R-UX-8 : aucun groupe de boutons dans un <label> — un clic sur le mot « Couverture » déclencherait « Photographier ».
+// L'état est dit tel qu'il est (I-B) : le message vient d'un fait (reçue, enregistrée, refusée), jamais d'une attente.
+export function renderZoneCouverture(etat, gestes = {}) {
+  const g = (nom) => () => (typeof gestes[nom] === 'function' ? gestes[nom]() : undefined);
+  return el('div', { class: 'field zone-couverture' }, el('span', null, t('Couverture')),
+    el('div', { class: 'row' },
+      etat.apercu ? el('img', { src: etat.apercu, alt: '' }) : null,
+      el('div', { class: 'stack' },
+        etat.message ? el('small', { class: 'muted' }, etat.message) : null,
+        el('div', { class: 'row' },
+          el('button', { type: 'button', class: 'btn', disabled: !!etat.enCours, onClick: g('photographier') }, t('Photographier')),
+          el('button', { type: 'button', class: 'btn', disabled: !!etat.enCours, onClick: g('choisir') }, t('Choisir une image')),
+          etat.sha256 ? el('button', { type: 'button', class: 'btn link', onClick: g('retirer') }, t('Retirer')) : null))));
 }
 
 export function livreAjoutModel({ pas = 1, isbn = '', champs = {}, provenance = null, recherche = false, lecteurDisponible = true, enCours = false } = {}) {
@@ -117,7 +168,8 @@ export function majBoutonEnregistrer(zone, model) {
 
 // La route : état + gestes réels, re-rendu complet à chaque changement (le formulaire est petit).
 export async function renderLivreAjoutRoute(params, query, ctx) {
-  const etat = { pas: 1, isbn: '', champs: CHAMPS_VIDES(), provenance: null, recherche: false, enCours: false, lecteurDisponible: 'BarcodeDetector' in window, existantes: cuisinesExistantes(ctx), couverture: null };
+  const COUVERTURE_VIDE = () => ({ sha256: null, apercu: null, message: null, enCours: false });
+  const etat = { pas: 1, isbn: '', champs: CHAMPS_VIDES(), provenance: null, recherche: false, enCours: false, lecteurDisponible: 'BarcodeDetector' in window, existantes: cuisinesExistantes(ctx), couverture: COUVERTURE_VIDE() };
   const root = el('div', null, pageHeader(t('Ajouter un livre'), { back: { href: '/add', label: t('Ajouter') } }));
   const zone = el('div', null);
   root.append(zone);
@@ -133,9 +185,35 @@ export async function renderLivreAjoutRoute(params, query, ctx) {
     try {
       const { fiche, source } = await lookupIsbn(isbn, { signal: ctl.signal });
       etat.isbn = isbn; etat.champs = fusionnerFiche(etat.champs, fiche); etat.provenance = source || 'aucune'; etat.pas = 2;
+      // La couverture suit l'identification, sans la retenir : la fiche s'affiche tout de suite, l'image arrive après
+      // (ou pas). Open Library seulement — Google Books n'a pas donné cette fiche, et une image d'ailleurs ne serait
+      // pas étiquetable (I-A). Même fenêtre de 10 s que l'identification.
+      if (source === 'openlibrary') recupererCouvertureParIsbn(isbn, { signal: AbortSignal.timeout(LIMITES_ISBN.delaiMs) }).then(async (blob) => {
+        // La personne a pu photographier la couverture pendant ces 10 s : une réponse tardive ne touche pas la sienne.
+        if (etat.couverture.sha256) return;
+        if (!blob) { etat.couverture.message = t('Aucune couverture reçue. Tu peux la photographier.'); dessiner(); return; }
+        try { const { sha256 } = await poserCouverture(blob, { origine: 'distante' }); etat.couverture = { sha256, apercu: urlDeBlob(await reduireImage(blob)), message: t('Couverture reçue d’Open Library.'), enCours: false }; }
+        catch { etat.couverture.message = t('Aucune couverture reçue. Tu peux la photographier.'); }
+        dessiner();
+      });
     } finally { clearTimeout(chrono); etat.recherche = false; dessiner(); }
   };
+  // Couverture choisie ici : bornée et ré-encodée par poserCouverture, et l'état ne dit « enregistrée » qu'APRÈS
+  // l'écriture réelle (I-B). Aucun blob n'est effacé (§ 2) : une image remplacée laisse sa ligne files derrière elle.
+  const depuisFichier = async (capture) => {
+    const files = await pickFiles({ accept: 'image/*', multiple: false, capture });
+    if (!files.length) return;
+    etat.couverture.enCours = true; dessiner();
+    try { const { sha256 } = await poserCouverture(files[0], { origine: 'locale' }); const ligne = await repo.getFile(sha256); etat.couverture = { sha256, apercu: urlDeBlob(ligne.blob), message: t('Couverture enregistrée.'), enCours: false }; }
+    catch (e) { etat.couverture = { sha256: null, apercu: null, message: e?.code === 'trop_lourde' ? t('Cette image est trop lourde (25 Mo au plus).') : t('Cette image ne peut pas être lue ici. Essaie une autre photo.'), enCours: false }; }
+    dessiner();
+  };
   const gestes = {
+    couverture: () => renderZoneCouverture(etat.couverture, {
+      photographier: () => depuisFichier('environment'),
+      choisir: () => depuisFichier(null),
+      retirer: () => { etat.couverture = COUVERTURE_VIDE(); dessiner(); },
+    }),
     changerIsbn: (v) => { etat.isbn = v; },
     identifier,
     scanner: async () => {

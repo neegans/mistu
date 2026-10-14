@@ -5,7 +5,9 @@ import { navigate, refresh, remplacerAdresse } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { displayUrl } from '../sync/mime.js';
 import { listConventions } from '../domain/units.js';
-import { pageHeader, section, field, select, recipeCard, emptyState } from './components.js';
+import { pageHeader, section, field, select, recipeCard, emptyState, bookCover } from './components.js';
+import { urlDeBlob } from '../core/blob-urls.js';
+import { poserCouverture, renderZoneCouverture } from './livre-ajout.js';
 import { startScanSession, indexEntriesPanel } from './import.js';
 import { accueilLivreModel, renderAccueilLivre } from './accueil-livre.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
@@ -30,13 +32,16 @@ export async function renderBook(params, query, ctx) {
   const docs = ctx.source_documents.filter((d) => d.edition_id === edition.id);
   const pages = ctx.source_pages.filter((p) => p.edition_id === edition.id);
   const pref = ctx.rediscovery_prefs.find((p) => p.edition_id === edition.id);
+  // Une empreinte de couverture sans ligne files est un état NORMAL (fiche reçue d'un autre appareil, octets en L4) :
+  // ici ça se dit, parce que la personne peut agir ; dans la grille de Mes livres, la vignette reste muette (§ 6).
+  const fichierCouverture = edition.cover_sha256 ? await repo.getFile(edition.cover_sha256) : null;
   const root = el('div', null);
   // I-F : un scan parti d'ici porte le livre ET l'intention (index ou recette) ; le menu ne décide que de la SOURCE.
   const lancer = (intention) => async (accept, capture) => {
     const f = await pickFiles({ accept, multiple: true, capture });
     if (f.length) startScanSession(f, { edition_id: edition.id, intention });
   };
-  root.append(pageHeader(book.title, {
+  const enTete = pageHeader(book.title, {
     subtitle: [book.author, edition.publisher, edition.year, edition.isbn ? `ISBN ${edition.isbn}` : null, edition.language ? edition.language.toUpperCase() : null].filter(Boolean).join(' · '),
     back: { href: '/library', label: t('Mes livres') },
     actions: [
@@ -48,7 +53,11 @@ export async function renderBook(params, query, ctx) {
         el('button', { type: 'button', class: 'btn', onClick: () => lancer('recette')(ACCEPT_FICHIERS, null) }, t('Choisir des photos ou un PDF')),
         el('a', { class: 'btn', href: `#/recipes/new?edition=${edition.id}` }, t('Saisir à la main'))),
     ],
-  }));
+  });
+  // La couverture est à GAUCHE du titre (F15) : c'est le livre qu'on reconnaît, avant de lire son nom.
+  root.append(el('div', { class: 'row top' },
+    el('div', { style: { width: '96px', flex: '0 0 auto' } }, bookCover(edition, book, { fichier: fichierCouverture })),
+    enTete));
   root.append(renderAccueilLivre(accueil, {
     photographier: (intention) => lancer(intention)(ACCEPT_PHOTOS, 'environment'),
     choisir: (intention) => lancer(intention)(ACCEPT_FICHIERS, null),
@@ -100,6 +109,16 @@ export async function renderBook(params, query, ctx) {
       q),
     list));
   drawList();
+
+  // Couverture (spec § 6) : visible, hors du <details> replié ; « Retirer » ne touche que le pointeur.
+  const etatCouv = { sha256: edition.cover_sha256 || null, apercu: fichierCouverture?.blob ? urlDeBlob(fichierCouverture.blob) : null, message: edition.cover_sha256 && !fichierCouverture ? t('La couverture n’est pas sur cet appareil.') : null, enCours: false };
+  const poser = async (capture) => {
+    const files = await pickFiles({ accept: 'image/*', multiple: false, capture });
+    if (!files.length) return;
+    try { const { sha256 } = await poserCouverture(files[0], { origine: 'locale' }); await repo.save('book_editions', { ...edition, cover_sha256: sha256 }); toast(t('Couverture enregistrée.')); refresh(); }
+    catch { toast(t('Cette image ne peut pas être lue ici. Essaie une autre photo.')); }
+  };
+  root.append(section(t('Couverture'), renderZoneCouverture(etatCouv, { photographier: () => poser('environment'), choisir: () => poser(null), retirer: async () => { await repo.save('book_editions', { ...edition, cover_sha256: null }); toast(t('Couverture retirée.')); refresh(); } })));
 
   // Index : ajouter des entrées directement depuis la fiche du livre
   const indexPanel = indexEntriesPanel(null, ctx, () => [], { editionId: edition.id });

@@ -241,4 +241,13 @@ export const EN = {
   "Adresse non reconnue : ": "Address not recognized: ",
   "Adresse non reconnue": "Address not recognized",
   "Lien web": "Web link",
+  "Couverture": "Cover",
+  "Choisir une image": "Choose an image",
+  "Aucune couverture reçue. Tu peux la photographier.": "No cover received. You can photograph it.",
+  "Couverture reçue d’Open Library.": "Cover received from Open Library.",
+  "Couverture enregistrée.": "Cover saved.",
+  "Couverture retirée.": "Cover removed.",
+  "Cette image est trop lourde (25 Mo au plus).": "This image is too heavy (25 MB at most).",
+  "Cette image ne peut pas être lue ici. Essaie une autre photo.": "This image cannot be read here. Try another photo.",
+  "La couverture n’est pas sur cet appareil.": "The cover is not on this device.",
 };

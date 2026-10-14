@@ -299,6 +299,13 @@ export async function putFile(sha256, blob, meta = {}) {
 
 export const getFile = (sha256) => db.get('files', sha256);
 
+// Lecture groupée (une transaction) des lignes files d'une liste d'empreintes ; les absentes ne figurent pas.
+// db.getMany rend un tableau ALIGNÉ sur les clés, avec `undefined` pour les absentes : le filter(Boolean) suffit.
+export async function getFiles(sha256s) {
+  const rows = await db.getMany('files', [...new Set(sha256s.filter(Boolean))]);
+  return new Map(rows.filter(Boolean).map((r) => [r.sha256, r]));
+}
+
 // --- Journal de consultation (spec §32) : seules les ouvertures volontaires comptent ------------
 export async function recordActivity(edition_id, event_type, extra = {}) {
   if (!edition_id) return;
