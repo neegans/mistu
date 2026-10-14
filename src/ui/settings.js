@@ -5,7 +5,7 @@ import { t } from '../core/i18n.js';
 import { refresh, currentPath } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { logError } from '../core/log.js';
-import { reprendreEnvoi, retirerEnvoi } from '../sync/outbox.js';
+import { reprendreEnvoi, retirerEnvoi, fileDe } from '../sync/outbox.js';
 import { garderIci, garderAilleurs } from '../sync/conflits.js';
 import { retirerMarqueur } from '../sync/backfill.js';
 import { createArchive, inspectArchive, applyArchive, verifyRestored, compterFichesSynchronisees } from '../domain/backup.js';
@@ -48,7 +48,11 @@ export async function renderSettings(params, query, ctx) {
   // pas. La file est lue UNE fois : son compte et ses entrées en quarantaine viennent de la même lecture.
   const sync = ctx.sync || {};
   const auth = sync.auth || null;
-  const file = await repo.db.getAll('outbox');
+  // R-L3-24 : « À envoyer » et la liste de quarantaine portent sur la file de CE compte (`fileDe`, une seule
+  // définition, celle que l'envoi relit). Une entrée d'un autre compte ne partira jamais d'ici : l'annoncer serait
+  // une attente que personne ne tient. Les gardes des gestes destructeurs, elles, comptent la file ENTIÈRE — voir
+  // plus bas : ce qu'elles protègent, c'est tout ce qui attend encore sur cet appareil, à qui qu'il appartienne.
+  const file = await fileDe(repo.db, sync.user?.id || null);
   const quarantaine = file.filter((e) => e.quarantined_at);
   const conflits = await repo.db.getAll('sync_conflicts');
   // Le moteur est posé par le démarrage (L3, tâche 9) : tant qu'il n'est pas là, rien de L3 n'est affiché.
@@ -196,6 +200,8 @@ export async function renderSettings(params, query, ctx) {
         // La file est relue AU MOMENT du geste (elle a pu bouger depuis le rendu) et une seule fois : les deux
         // nombres doivent venir du même instant, sinon le refus pourrait annoncer une quarantaine qui n'est plus
         // dans le total qu'il chiffre.
+        // R-L3-24 ne s'applique PAS ici, et c'est voulu : ce geste efface la base, donc tout ce qui attend sur cet
+        // appareil — à qui qu'il appartienne. Un filtre par compte affaiblirait la garde au lieu de la préciser.
         let fileDuGeste = null;
         const lireFile = async () => (fileDuGeste ??= await repo.db.getAll('outbox'));
         await effacerDonnees({

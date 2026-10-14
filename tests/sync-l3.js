@@ -172,7 +172,7 @@ export async function runSyncL3Tests({ eq, ok }) {
       eq(await db.count('outbox'), 3, 'envoi : trois entrées capturées (put, put, delete)');
       const tf = creerTransportFactice();
       const heures = [];
-      const push = createPush({ db, transport: tf, surHeure: (h) => heures.push(h) });
+      const push = createPush({ db, transport: tf, getUserId: () => 'u1', surHeure: (h) => heures.push(h) });
       const r = await push.envoyer();
       eq([r.envoyes, r.conflits, r.quarantaine, r.erreur], [2, 0, 0, null], 'envoi : deux clés envoyées (b1 put, b2 delete), aucun conflit');
       eq(await db.count('outbox'), 0, 'envoi : la file est vide après l’accusé (I5 : envoyé = accusé)');
@@ -201,7 +201,7 @@ export async function runSyncL3Tests({ eq, ok }) {
       const vraiMutate = db.mutate.bind(db);
       db.mutate = (arg) => { origines.push(arg?.origin); return vraiMutate(arg); };
       let r;
-      try { r = await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T20:00:05Z') }).envoyer(); }
+      try { r = await createPush({ db, transport: tf, getUserId: () => 'u1', maintenant: () => Date.parse('2026-10-13T20:00:05Z') }).envoyer(); }
       finally { db.mutate = vraiMutate; }
       eq([r.envoyes, r.ajustes, r.conflits, r.quarantaine, r.erreur], [1, 1, 1, 1, null], 'envoi : le bilan compte accusés, ajustements, conflits et quarantaines');
       eq(origines, ['remote'], 'envoi : UNE seule transaction pour tous les effets d’un lot, origine remote (jamais capturée)');
@@ -212,7 +212,29 @@ export async function runSyncL3Tests({ eq, ok }) {
       const conflit = (await db.getAll('sync_conflicts'))[0];
       eq([conflit.id, conflit.store, conflit.record_id, conflit.local.title, conflit.server.data.title, conflit.kind, conflit.at], ['books:cf1', 'books', 'cf1', 'Ici', 'Serveur', 'donnees', '2026-10-13T20:00:00Z'], 'envoi : le conflit garde les deux versions, la locale lue avant la transaction');
       // Une quarantaine n'est pas relue à la passe suivante : elle attend un geste de la personne (Réglages).
-      eq([(await createPush({ db, transport: tf }).envoyer()).envoyes, tf.journal.length], [0, 1], 'envoi : une entrée en quarantaine n’est plus jamais tentée');
+      eq([(await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer()).envoyes, tf.journal.length], [0, 1], 'envoi : une entrée en quarantaine n’est plus jamais tentée');
+    });
+
+    // --- Envoi : R-L3-24 — la file est filtrée par user_id (DOIT de la spec § 4.1)
+    // « Chaque entrée d'outbox porte `user_id` et n'est jamais envoyée sous un autre compte. » Le user_id était bien
+    // écrit, mais personne ne le relisait : la seule barrière était la garde de compte, AILLEURS. La pire
+    // conséquence imaginable du lot (les données d'une personne écrites sous un autre compte) ne tenait qu'à une
+    // comparaison lointaine. `user_id` nul = écrit avant la connexion, c'est l'envoi initial voulu.
+    await withRepo(async (repo, db) => {
+      await repo.save('books', { id: 'mien', title: 'À moi' });
+      await db.mutate({ puts: { outbox: [
+        { user_id: 'autre', store: 'books', id: 'sien', op: 'put', updated_at: '2026-10-12T10:00:00Z', tries: 0 },
+        { user_id: null, store: 'books', id: 'avant', op: 'put', updated_at: '2026-10-12T10:00:00Z', tries: 0 },
+      ] }, origin: 'device' });
+      await db.mutate({ puts: { books: [{ id: 'sien', title: 'À l’autre', updated_at: '2026-10-12T10:00:00Z' }, { id: 'avant', title: 'Avant la connexion', updated_at: '2026-10-12T10:00:00Z' }] }, origin: 'device' });
+      const tf = creerTransportFactice();
+      const r = await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer();
+      eq(tf.journal[0].rows.map((e) => e.id).sort(), ['avant', 'mien'], 'R-L3-24 : l’entrée d’un AUTRE compte n’est jamais envoyée ; celle d’avant la connexion (user_id nul) part');
+      eq([r.envoyes, (await db.getAll('outbox')).map((e) => e.id)], [2, ['sien']], 'R-L3-24 : … et elle reste en file, intacte');
+      // Comptée nulle part non plus : le moteur et « À envoyer » doivent dire ce qui va partir, pas plus.
+      const { fileDe } = await import('../src/sync/outbox.js');
+      eq((await fileDe(db, 'u1')).map((e) => e.id), [], 'R-L3-24 : fileDe() ne rend aucune entrée d’un autre compte');
+      eq((await fileDe(db, 'autre')).map((e) => e.id), ['sien'], 'R-L3-24 : … et elle est bien rendue sous SON compte');
     });
 
     // --- Envoi : R-L3-22 — une ligne files n'entre PLUS en file en L3 (ses octets sont L4)
@@ -227,7 +249,7 @@ export async function runSyncL3Tests({ eq, ok }) {
       eq((await db.getAll('outbox')).map((e) => e.store), ['books'], 'R-L3-22 : une photo capturée n’entre PAS en file (« À envoyer » ne compte pas les fichiers avant L4)');
       ok((await db.get('files', sha))?.blob instanceof Blob, 'R-L3-22 : … et la photo est bel et bien gardée sur cet appareil');
       const tf = creerTransportFactice();
-      const r = await createPush({ db, transport: tf }).envoyer();
+      const r = await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer();
       eq([r.envoyes, r.retenues, r.erreur], [1, 0, null], 'R-L3-22 : le livre part, et il n’y a plus aucune retenue à compter');
       eq(tf.journal[0].rows.map((e) => e.store), ['books'], 'R-L3-22 : aucun appel réseau ne contient de ligne files');
       eq(await db.count('outbox'), 0, 'R-L3-22 : la file se vide ENTIÈREMENT — le compteur « À envoyer » redescend à zéro');
@@ -257,14 +279,14 @@ export async function runSyncL3Tests({ eq, ok }) {
       const entree = (await db.getAll('outbox'))[0];
       await db.mutate({ puts: { outbox: [{ ...entree, next_try_at: '2026-10-13T21:00:00Z', tries: 1, last_error: 'reseau' }] }, origin: 'remote' });
       const tf = creerTransportFactice();
-      eq((await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer()).envoyes, 0, 'envoi : avant next_try_at, l’entrée n’est pas relue');
+      eq((await createPush({ db, transport: tf, getUserId: () => 'u1', maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer()).envoyes, 0, 'envoi : avant next_try_at, l’entrée n’est pas relue');
       eq(tf.journal.length, 0, 'envoi : aucune entrée prête → aucun appel réseau');
-      eq((await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T21:00:00Z') }).envoyer()).envoyes, 1, 'envoi : à next_try_at, l’entrée repart');
+      eq((await createPush({ db, transport: tf, getUserId: () => 'u1', maintenant: () => Date.parse('2026-10-13T21:00:00Z') }).envoyer()).envoyes, 1, 'envoi : à next_try_at, l’entrée repart');
       // Un next_try_at illisible garerait l'entrée pour toujours : elle est éligible maintenant.
       await repo.save('books', { id: 'bn', title: 'Illisible' });
       const neuve = (await db.getAll('outbox')).find((e) => e.id === 'bn');
       await db.mutate({ puts: { outbox: [{ ...neuve, next_try_at: 'pas une date', tries: 2 }] }, origin: 'remote' });
-      eq((await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer()).envoyes, 1, 'envoi : un next_try_at illisible n’immobilise pas l’entrée pour toujours');
+      eq((await createPush({ db, transport: tf, getUserId: () => 'u1', maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer()).envoyes, 1, 'envoi : un next_try_at illisible n’immobilise pas l’entrée pour toujours');
     });
 
     // --- Envoi : R-L3-8 de bout en bout — un serveur qui nomme des clés hors du lot n'obtient rien
@@ -279,7 +301,7 @@ export async function runSyncL3Tests({ eq, ok }) {
           { store: 'books', id: 'inconnu4', reason: 'taille' },
         ],
       } }] });
-      const r = await createPush({ db, transport: tf }).envoyer();
+      const r = await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer();
       eq([r.envoyes, r.ajustes, r.conflits, r.quarantaine, r.erreur], [0, 0, 0, 0, null], 'R-L3-8 : le bilan se compte depuis les effets, des clés hors du lot ne comptent pour rien');
       eq([await db.count('outbox'), await db.count('sync_conflicts'), await db.count('books')], [1, 0, 1], 'R-L3-8 : rien n’est retiré, aucun conflit journalisé, aucune fiche inventée');
     });
@@ -292,7 +314,7 @@ export async function runSyncL3Tests({ eq, ok }) {
         await repo.save('books', { id: 'aj2', title: 'Change pendant l’aller-retour' });
         return { reponse: { server_time: '2026-10-13T20:00:00Z', accepted: [], adjusted: [{ store: 'books', id: 'aj2', updated_at: '2026-10-13T20:00:00+00:00' }], rejected: [] }, erreur: null };
       } };
-      const r = await createPush({ db, transport, maintenant: () => Date.parse('2026-10-13T20:00:05Z') }).envoyer();
+      const r = await createPush({ db, transport, getUserId: () => 'u1', maintenant: () => Date.parse('2026-10-13T20:00:05Z') }).envoyer();
       const fiche = await db.get('books', 'aj2');
       eq([fiche.title, fiche.updated_at === '2026-10-13T20:00:00+00:00'], ['Change pendant l’aller-retour', false], 'R-L3-7 : l’ajustement du serveur n’écrase pas la modification locale');
       eq([r.ajustes, (await db.getAll('outbox')).map((e) => e.id)], [0, ['aj2']], 'R-L3-7 : aucune fiche réécrite, et la version locale garde sa propre entrée de file');
@@ -307,7 +329,7 @@ export async function runSyncL3Tests({ eq, ok }) {
       let journalises = 0;
       console.error = () => { journalises += 1; };
       let r;
-      try { r = await createPush({ db, transport, maintenant: () => t }).envoyer(); } finally { console.error = vraiConsole; }
+      try { r = await createPush({ db, transport, getUserId: () => 'u1', maintenant: () => t }).envoyer(); } finally { console.error = vraiConsole; }
       eq([r.erreur.type, r.envoyes, journalises], ['inconnu', 0, 1], 'envoi : réponse vide sans erreur → inconnu, journalisé une fois');
       eq(await db.count('outbox'), 1, 'envoi : réponse vide → la file est intacte (I5 : envoyé = accusé)');
       // R-L3-9 : une réponse qu'on n'a pas comprise RECULE, elle ne parque rien.
@@ -322,7 +344,7 @@ export async function runSyncL3Tests({ eq, ok }) {
       db.mutate = (arg) => { origines.push(arg?.origin); return vraiMutate(arg); };
       const tf = creerTransportFactice();
       let r;
-      try { r = await createPush({ db, transport: tf }).envoyer(); } finally { db.mutate = vraiMutate; }
+      try { r = await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer(); } finally { db.mutate = vraiMutate; }
       eq([r.envoyes, origines, tf.journal.length], [0, [], 0], 'envoi : une passe sur file vide n’ouvre aucune transaction et n’appelle rien');
     });
 
@@ -339,7 +361,7 @@ export async function runSyncL3Tests({ eq, ok }) {
         await repo.save('books', { id: 'r1', title: 'Un' });
         const tf = creerTransportFactice({ pousser: [{ erreur: { type: 'reseau', status: 503, message: 'x' } }, { erreur: { type: 'reseau', status: 0, message: 'x' } }] });
         let t = Date.parse('2026-10-13T20:00:00Z');
-        const push = createPush({ db, transport: tf, maintenant: () => t });
+        const push = createPush({ db, transport: tf, getUserId: () => 'u1', maintenant: () => t });
         const r1 = await push.envoyer();
         eq([r1.erreur.type, r1.recul], ['reseau', 2000], 'envoi : échec réseau → recul de 2 s annoncé');
         const e1 = (await db.getAll('outbox'))[0];
@@ -358,7 +380,7 @@ export async function runSyncL3Tests({ eq, ok }) {
         await repo.save('books', { id: 'i1', title: 'Un' });
         const tf = creerTransportFactice({ pousser: [{ erreur: { type: 'inconnu', status: 404, message: 'x' } }] });
         const t = Date.parse('2026-10-13T20:00:00Z');
-        const r = await createPush({ db, transport: tf, maintenant: () => t }).envoyer();
+        const r = await createPush({ db, transport: tf, getUserId: () => 'u1', maintenant: () => t }).envoyer();
         eq([r.erreur?.type, r.recul, r.quarantaine], ['inconnu', 2000, 0], 'R-L3-9 : un type « inconnu » recule, il ne parque rien');
         const e = (await db.getAll('outbox'))[0];
         eq([e.tries, e.next_try_at, e.last_error, !!e.quarantined_at], [1, new Date(t + 2000).toISOString(), 'inconnu', false], 'R-L3-9 : l’entrée compte l’essai et son heure de reprise, jamais de quarantaine');
@@ -367,13 +389,13 @@ export async function runSyncL3Tests({ eq, ok }) {
       await withRepo(async (repo, db) => {
         await repo.save('books', { id: 'a1', title: 'Un' });
         const tf = creerTransportFactice({ pousser: [{ erreur: { type: 'auth', status: 401, message: 'x' } }] });
-        const r = await createPush({ db, transport: tf }).envoyer();
+        const r = await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer();
         eq([r.attenteConnexion, r.erreur.type, (await db.getAll('outbox'))[0].tries], [true, 'auth', 0], 'envoi : 401 → en attente de connexion, sans compter d’essai');
       });
       await withRepo(async (repo, db) => {
         await repo.save('books', { id: 'q1', title: 'Un' });
         const tf = creerTransportFactice({ pousser: [{ erreur: { type: 'quota', status: 507, message: 'x' } }] });
-        const r = await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer();
+        const r = await createPush({ db, transport: tf, getUserId: () => 'u1', maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer();
         eq(r.pause, true, 'envoi : refus de quota → pause');
         eq((await db.get('sync_state', 'pause'))?.value?.raison, 'quota', 'envoi : la pause est écrite dans sync_state');
         eq((await db.get('sync_state', 'pause'))?.value?.at, '2026-10-13T20:00:00.000Z', 'envoi : la pause est horodatée');
@@ -386,7 +408,7 @@ export async function runSyncL3Tests({ eq, ok }) {
         eq(await db.count('outbox'), 5, 'envoi : cinq entrées de file pour quatre clés (d3 enregistrée deux fois)');
         // Le serveur refuse tout lot contenant d3 (règle simulée) ; la dichotomie doit l’isoler et envoyer les autres.
         const tf = { journal: [], async pousser(rows) { tf.journal.push({ appel: 'pousser', rows: rows.map(({ store, id }) => ({ store, id })) }); if (rows.some((r) => r.id === 'd3')) return { reponse: null, erreur: { type: 'refus', status: 400, message: 'regle simulee' } }; return { reponse: { server_time: '2026-10-13T20:00:00Z', accepted: rows.map(({ store, id }) => ({ store, id })), adjusted: [], rejected: [] }, erreur: null }; }, async lire() { return { lignes: [], erreur: null }; } };
-        const r = await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer();
+        const r = await createPush({ db, transport: tf, getUserId: () => 'u1', maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer();
         eq([r.envoyes, r.quarantaine], [3, 1], 'envoi : dichotomie → trois envoyées, une en quarantaine');
         eq(tf.journal.map((a) => a.rows.map((x) => x.id)), [['d1', 'd2', 'd3', 'd4'], ['d1', 'd2'], ['d3', 'd4'], ['d3'], ['d4']], 'envoi : le lot entier d’abord, puis des moitiés, jusqu’à isoler la fiche fautive');
         const reste = await db.getAll('outbox');
@@ -394,20 +416,20 @@ export async function runSyncL3Tests({ eq, ok }) {
         eq(await db.count('outbox'), 1, 'envoi : le doublon plus ancien de la clé isolée est retiré avec elle');
         // La quarantaine est permanente : la passe suivante ne retente rien et n’appelle plus le serveur.
         const appels = tf.journal.length;
-        eq([(await createPush({ db, transport: tf }).envoyer()).envoyes, tf.journal.length], [0, appels], 'envoi : après la dichotomie, l’entrée isolée n’est plus jamais tentée');
+        eq([(await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer()).envoyes, tf.journal.length], [0, appels], 'envoi : après la dichotomie, l’entrée isolée n’est plus jamais tentée');
       });
       await withRepo(async (repo, db) => {
         // Un échec réseau au milieu d’une dichotomie arrête tout : rien n’est mis en quarantaine par accident.
         for (const id of ['x1', 'x2']) await repo.save('books', { id, title: id });
         const tf = { journal: [], async pousser(rows) { tf.journal.push({ appel: 'pousser', rows: rows.map(({ store, id }) => ({ store, id })) }); return { reponse: null, erreur: rows.length > 1 ? { type: 'refus', status: 400, message: 'x' } : { type: 'reseau', status: 0, message: 'x' } }; } };
-        const r = await createPush({ db, transport: tf, maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer();
+        const r = await createPush({ db, transport: tf, getUserId: () => 'u1', maintenant: () => Date.parse('2026-10-13T20:00:00Z') }).envoyer();
         eq([r.erreur.type, r.quarantaine, r.recul], ['reseau', 0, 2000], 'envoi : un échec réseau pendant la dichotomie arrête la passe, sans quarantaine');
         eq([tf.journal.map((a) => a.rows.map((x) => x.id)), await db.count('outbox')], [[['x1', 'x2'], ['x1']], 2], 'envoi : la moitié droite n’est pas tentée, la file est intacte');
       });
       await withRepo(async (repo, db) => {
         await repo.save('books', { id: 'n1', title: 'Un' });
         const tf = creerTransportFactice({ pousser: [{ erreur: { type: 'auth', status: 400, message: 'adresse non autorisée' } }] });
-        const r = await createPush({ db, transport: tf }).envoyer();
+        const r = await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer();
         eq(r.attenteConnexion, true, 'envoi : « adresse non autorisée » → attente (la garde est refaite par le moteur), rien n’est perdu');
         eq([(await db.getAll('outbox'))[0].tries, await db.count('outbox')], [0, 1], 'envoi : un refus d’adresse ne compte aucun essai et ne perd rien');
       });
@@ -765,6 +787,18 @@ export async function runSyncL3Tests({ eq, ok }) {
       await fini;
     });
 
+    // R-L3-24 : les compteurs du moteur comptent le MÊME sous-ensemble que l'envoi — ce qui va partir, pas plus.
+    // Une entrée d'un autre compte afficherait « À envoyer : 1 » et une pastille pour un envoi qui n'aura jamais lieu.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await db.mutate({ puts: { outbox: [{ user_id: 'autre', store: 'books', id: 'sien', op: 'put', updated_at: '2026-10-12T10:00:00Z', tries: 0 }] }, origin: 'device' });
+      const tf = creerTransportFactice({ lire: {} });
+      const moteur = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: tf, fenetre: fenetreMuette(), bus: busMuet });
+      const fin = await moteur.executer('test');
+      eq([fin.aEnvoyer, fin.enQuarantaine, await db.count('outbox')], [0, 0, 1], 'R-L3-24 : le moteur ne compte pas l’entrée d’un autre compte (elle reste en file, intacte)');
+      await moteur.arreter();
+    });
+
     // Déclencheurs : seul un retour à « visible » relance une passe ; le retour du réseau en relance une.
     await withRepo(async (repo, db) => {
       await toutDejaEnvoye(db);
@@ -793,6 +827,10 @@ export async function runSyncL3Tests({ eq, ok }) {
     await withRepo(async (repo, db) => {
       await toutDejaEnvoye(db);
       await repo.save('books', { id: 'q1', title: 'x' });
+      // R-L3-24 : une écriture faite SANS compte porte `user_id: null` (c'est ce que rend la capture) — la fixture,
+      // elle, capture toujours sous « u1 ». L'entrée est remise au nom qu'elle aurait vraiment, sans quoi ce bloc
+      // éprouverait un arrangement qui n'existe nulle part : une file au nom d'un compte et un moteur sans compte.
+      await db.mutate({ puts: { outbox: (await db.getAll('outbox')).map((e) => ({ ...e, user_id: null })) }, origin: 'device' });
       const tfSans = creerTransportFactice({ lire: {} });
       const sansCompte = createMoteur({ db, getUserId: () => null, isActivitySynced: () => false, transport: tfSans, fenetre: fenetreMuette(), bus: busMuet });
       const eSans = await sansCompte.executer('t');
@@ -1495,7 +1533,21 @@ export async function runSyncL3Tests({ eq, ok }) {
       eq(lire().moteur, premier, 'ronde 1 : … et c’est celui-là qui vit dans l’état');
       poserEtat({ moteur: null });
       eq([poserMoteur(() => null), lire().moteur], [null, null], 'ronde 1 : une fabrique qui ne rend rien (aucun client) ne pose rien dans l’état');
-    } finally { poserEtat({ moteur: avant }); }
+      // R-L3-23 : poser le moteur ne fait PAS avancer le compteur de générations de R32. Au démarrage hors ligne,
+      // la borne de 8 s (R28) est dépassée, le démarrage retient `generationQuittee`, puis `demarrerMoteur()`
+      // appelle `poserMoteur` : avec `setSyncState`, la génération avançait et le résultat tardif de `getSession()`
+      // était JETÉ — « Vérification du compte… » restait figé, sans aucun geste (l'impasse que R32 a supprimée).
+      poserEtat({ moteur: null });
+      const generationAvant = etatUi.getSyncGeneration();
+      const pose = poserMoteur(() => ({ nom: 'sans generation' }));
+      eq([etatUi.getSyncGeneration(), lire().moteur === pose], [generationAvant, true],
+        'R-L3-23 : poserMoteur écrit le moteur dans l’état SANS faire avancer la génération (R32)');
+      // Et le travail tardif du démarrage est bel et bien appliqué après une pose de moteur.
+      const tardif = { auth: null, user: { id: 'u-tardif', email: 'x' }, guard: { ok: true }, retour: null, enAttente: false };
+      if (etatUi.getSyncGeneration() === generationAvant) poserEtat(tardif);
+      eq([lire().enAttente, lire().user?.id, lire().moteur === pose], [false, 'u-tardif', true],
+        'R-L3-23 : … donc le résultat tardif du démarrage s’applique encore, et il ne perd pas le moteur');
+    } finally { poserEtat({ moteur: avant, user: null, guard: null, enAttente: false }); }
   }
 
   // 4. Important (R-L3-20) : la pastille n’apparaît qu’avec un compte. Sans compte rien ne part jamais — « 3 non

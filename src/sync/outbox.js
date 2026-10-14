@@ -54,6 +54,19 @@ export function installCapture(db, { getUserId = () => null, isActivitySynced = 
 
 export const uninstallCapture = (db) => { db.onMutate = null; };
 
+// --- La file d'un compte (spec § 4.1, R-L3-24) -------------------------------
+// « Chaque entrée d'outbox porte `user_id` et n'est jamais envoyée sous un autre compte. » Le `user_id` était bien
+// écrit (capture, envoi initial, remise en file de la réception), mais personne ne le relisait : la seule barrière
+// était la garde de compte, ailleurs — la pire conséquence imaginable du lot (les données d'une personne écrites
+// sous un autre compte) ne tenait qu'à une comparaison lointaine. Une seule définition, ici, pour les trois
+// lecteurs : l'envoi (`push.js`), les compteurs du moteur et « À envoyer » de Réglages. Un `user_id` nul = écrit
+// avant la connexion : c'est l'envoi initial voulu, il part sous le compte qui vient d'arriver.
+export const estDeCeCompte = (entree, userId = null) => entree?.user_id == null || entree.user_id === userId;
+
+export async function fileDe(db, userId = null) {
+  return (await db.getAll('outbox')).filter((e) => estDeCeCompte(e, userId));
+}
+
 // --- Les deux gestes de la personne sur la file (spec § 4.2) -----------------
 // Appelés par Réglages sur une entrée mise en quarantaine. Ils n'écrivent que dans « outbox » et portent l'origine
 // 'device' : la fiche elle-même n'est jamais touchée, et rien de ceci ne repart au serveur.

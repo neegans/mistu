@@ -2,6 +2,7 @@
 // appliquée en UNE transaction (retraits, réécritures non capturées, conflits, quarantaine). I5 : une fiche n'est
 // « envoyée » que par l'absence d'entrée la concernant.
 import { composerLots, cleDe } from './lots.js';
+import { fileDe } from './outbox.js';
 import { appliquerReponse } from './reponses.js';
 import { appliquerHeureServeur } from './clock.js';
 import { logError } from '../core/log.js';
@@ -24,7 +25,7 @@ function compter(effets, entreesParSeq) {
   return { envoyes: accusees - ajustes, ajustes };
 }
 
-export function createPush({ db, transport, maintenant = Date.now, surHeure = () => {} }) {
+export function createPush({ db, transport, getUserId = () => null, maintenant = Date.now, surHeure = () => {} }) {
   // Une heure de reprise illisible (fiche bricolée, restauration d'archive) immobiliserait l'entrée pour toujours :
   // elle est prête maintenant. La quarantaine, elle, attend un geste de la personne.
   function prete(e) {
@@ -33,9 +34,12 @@ export function createPush({ db, transport, maintenant = Date.now, surHeure = ()
     return !Number.isFinite(t) || t <= maintenant();
   }
 
+  // R-L3-24 : la file de CE compte, et rien d'autre (`fileDe`, src/sync/outbox.js — une seule définition, partagée
+  // avec les compteurs du moteur et « À envoyer » de Réglages). Puis les deux retenues de l'envoi : la quarantaine
+  // attend un geste de la personne, une heure de reprise pas encore venue attend son heure.
   async function lireFile() {
-    const toutes = await db.getAll('outbox');
-    return toutes.filter((e) => !e.quarantined_at && prete(e)).sort((a, b) => a.seq - b.seq);
+    const miennes = await fileDe(db, getUserId());
+    return miennes.filter((e) => !e.quarantined_at && prete(e)).sort((a, b) => a.seq - b.seq);
   }
 
   // R-L3-5 : une ligne retenue (files, tant que L4 n'a pas confirmé l'empreinte) n'est ni envoyée ni retirée —

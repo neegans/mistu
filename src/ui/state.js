@@ -24,9 +24,9 @@ let sync = { auth: null, user: null, guard: null, retour: null, enAttente: false
 // perdue au retour). Écrite par Réglages, consommée une seule fois au démarrage.
 export const SYNC_ROUTE_KEY = 'cuisineos.route';
 
-// Compteur de générations (R32) : incrémenté à CHAQUE pose d'état, d'où qu'elle vienne (démarrage, auth.onChange,
-// déconnexion depuis Réglages). Un travail tardif compare la génération qu'il a quittée à celle du moment où il
-// aboutit : si quelqu'un a posé un état depuis, le sien est périmé et n'est pas appliqué.
+// Compteur de générations (R32) : incrémenté à CHAQUE pose d'état de SESSION, d'où qu'elle vienne (démarrage,
+// auth.onChange, déconnexion depuis Réglages). Un travail tardif compare la génération qu'il a quittée à celle du
+// moment où il aboutit : si quelqu'un a posé un état depuis, le sien est périmé et n'est pas appliqué.
 let syncGen = 0;
 
 export function setSyncState(next) {
@@ -108,11 +108,20 @@ export function doitRendreApresPasse({ avant = false, etat = null, archive = fal
 // qui arrive pendant la porte d'entrée en démarre un (auth.onChange → suivreSession), puis le démarrage en pose un
 // second : deux jeux d'écouteurs, deux passes concurrentes, deux fois les appels au serveur. La garde vit ici, et
 // pas dans app.js, pour être éprouvée — app.js lance boot() à l'import.
+// R-L3-23 : poser le moteur n'est PAS un changement de session, et ne fait donc pas avancer la génération de R32.
+// Avec `setSyncState`, la séquence suivante figeait Réglages : au démarrage hors ligne, la borne de 8 s (R28) est
+// dépassée, le démarrage s'ouvre « en attente » et retient `generationQuittee` ; la porte d'entrée se referme, puis
+// `demarrerMoteur()` appelle `poserMoteur` → `syncGen += 1` ; quand `getSession()` aboutit enfin, sa génération ne
+// correspond plus et son résultat est JETÉ — « Vérification du compte… » reste affiché, sans aucun geste (R30),
+// jusqu'au prochain rechargement. L'impasse était rattrapée en pratique par `INITIAL_SESSION` de supabase-js :
+// l'invariant tenait par un événement d'une bibliothèque tierce, pas par le code. L'écriture reste volontairement
+// directe (et invalide le cache des vues) : la génération ne compte que les clés de session.
 export function poserMoteur(fabrique) {
   if (sync.moteur) return sync.moteur;
   const moteur = fabrique();
   if (!moteur) return null;
-  setSyncState({ moteur });
+  sync = { ...sync, moteur };
+  cache = null; // le contexte des vues porte une copie de cet état : il doit être reconstruit
   return moteur;
 }
 

@@ -2,6 +2,7 @@
 // réception — jamais deux en même temps (un vol en cours est rejoint, pas doublé). L'état est observable par
 // Réglages et par la pastille ; ce qu'il affiche vient toujours d'un fait (accusé, lignes reçues, erreur classée).
 import { envoiInitial } from './backfill.js';
+import { fileDe } from './outbox.js';
 import { createPush } from './push.js';
 import { createPull } from './pull.js';
 import { purgerAnciens } from './conflits.js';
@@ -93,7 +94,7 @@ export function createMoteur({
     },
   };
 
-  const push = createPush({ db, transport: compte, maintenant, surHeure: (h) => { heureVue = h; } });
+  const push = createPush({ db, transport: compte, getUserId, maintenant, surHeure: (h) => { heureVue = h; } });
   const pull = createPull({
     db,
     transport: compte,
@@ -102,8 +103,11 @@ export function createMoteur({
     surProgression: (p) => poser({ phase: p.phase, progression: { table: p.table, n: p.n, total: p.total } }),
   });
 
+  // R-L3-24 : les comptes affichés portent sur le MÊME sous-ensemble que l'envoi — la file de ce compte (`fileDe`).
+  // Une entrée d'un autre compte ne partira jamais d'ici : l'annoncer en « À envoyer » ou dans la pastille serait
+  // une attente que personne ne tient.
   async function compter() {
-    const file = await db.getAll('outbox');
+    const file = await fileDe(db, getUserId());
     return {
       aEnvoyer: file.length,
       enQuarantaine: file.filter((e) => e.quarantined_at).length,
