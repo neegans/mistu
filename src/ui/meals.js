@@ -8,6 +8,7 @@ import { summarizeMeal } from '../domain/pairing.js';
 import { assessMeal } from '../domain/diet.js';
 import { MEAL_ROLES, DIET_TAGS, RECIPE_TYPES } from '../model/schema.js';
 import { pageHeader, section, emptyState, select, field, dietChip, versionBadge } from './components.js';
+import { libelleSource } from '../core/lien.js';
 import { deviceId } from './import.js';
 
 export async function renderMeals(params, query, ctx) {
@@ -80,7 +81,9 @@ export async function renderMeal(params, query, ctx) {
     const card = el('div', { class: 'card flat stack' },
       el('div', { class: 'row between top' },
         el('div', null, el('a', { href: `#/recipes/${it.recipe.id}?v=${it.recipe_version_id || ''}` }, el('strong', null, it.recipe.display_title || it.recipe.original_title)), ' ', versionBadge(it.version),
-          el('div', { class: 'muted', style: { fontSize: '.85rem' } }, ctx.editionLabel(ctx.editionsById.get(it.recipe.edition_id)) || it.recipe.source_label || '')),
+          // S8 : l'hôte d'un signet est RECALCULÉ depuis l'adresse, ici comme ailleurs — `source_label` stocké peut
+          // venir d'une archive ou du serveur et nommer n'importe quel site (S7).
+          el('div', { class: 'muted', style: { fontSize: '.85rem' } }, ctx.editionLabel(ctx.editionsById.get(it.recipe.edition_id)) || libelleSource(it.recipe))),
         el('div', { class: 'row' },
           select(MEAL_ROLES.map((r) => ({ value: r, label: label('meal_role', r) })), it.role, (v) => { meal.items.find((x) => x.id === it.id).role = v; save(); }),
           el('input', { type: 'number', min: 1, value: it.servings || meal.servings, style: { width: '80px' }, title: t('Portions de cet élément'), onChange: (e) => { const x = meal.items.find((y) => y.id === it.id); x.servings = Number(e.target.value) || meal.servings; x.servings_custom = true; save(); } }),

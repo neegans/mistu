@@ -18,7 +18,7 @@ export const LIMITES_SIGNET = { adresse: 2048, titre: 300 };
 // l'API du signet reste d'un seul tenant.
 export { lienSignet } from '../core/lien.js';
 
-export function signetModel({ adresse = '', titre = '', editionId = '', cuisines = [] } = {}) {
+export function signetModel({ adresse = '', titre = '', editionId = '', cuisines = [], enCours = false } = {}) {
   const erreurs = {};
   const lien = lienSignet(String(adresse ?? '').trim());
   if (!lien.ok) erreurs.adresse = t('Adresse non reconnue.');
@@ -26,8 +26,12 @@ export function signetModel({ adresse = '', titre = '', editionId = '', cuisines
   const titreNet = String(titre ?? '').trim();
   if (!titreNet) erreurs.titre = t('Donne un titre au lien.');
   else if (titreNet.length > LIMITES_SIGNET.titre) erreurs.titre = t('Titre trop long.');
+  const valide = Object.keys(erreurs).length === 0;
+  // D-T7 : `enCours` vit DANS l'état, comme dans livre-ajout.js — le bouton se ferme parce que le MODÈLE le dit,
+  // pas parce qu'un geste a touché un nœud au passage. `valide` reste la validité de la SAISIE (ce que l'écriture
+  // revérifie, S13) ; `peutEnregistrer` est ce que le bouton suit.
   return {
-    valide: Object.keys(erreurs).length === 0, erreurs,
+    valide, erreurs, enCours: !!enCours, peutEnregistrer: valide && !enCours,
     href: erreurs.adresse ? null : lien.href, hote: erreurs.adresse ? null : lien.hote,
     titre: titreNet, editionId: editionId || '', cuisines: Array.isArray(cuisines) ? [...cuisines] : [],
   };
@@ -74,7 +78,7 @@ export function renderSignet(model, gestes = {}) {
     el('div', { class: 'field' }, el('span', null, t('Cuisines')),
       renderPuces(pucesModel({ choisies: model.cuisines, existantes: model.existantes || [] }), { basculer: g('basculerCuisine'), ajouter: g('ajouterCuisine') })),
     el('div', { class: 'row' },
-      el('button', { type: 'button', class: 'btn primary', dataset: { role: 'enregistrer' }, disabled: !model.valide, onClick: g('enregistrer') }, t('Garder le lien'))));
+      el('button', { type: 'button', class: 'btn primary', dataset: { role: 'enregistrer' }, disabled: !model.peutEnregistrer, onClick: g('enregistrer') }, t('Garder le lien'))));
 }
 
 // Mise à jour sur place pendant la frappe : l'écran ne doit jamais contredire l'état réel — une erreur affichée
@@ -88,12 +92,14 @@ export function majSignet(zone, model) {
     noeud.hidden = !model.erreurs[cle];
   }
   const bouton = zone?.querySelector?.('[data-role="enregistrer"]');
-  if (bouton) bouton.disabled = !model.valide;
+  if (bouton) bouton.disabled = !model.peutEnregistrer;
   return bouton || null;
 }
 
-export async function renderSignetRoute(params, query, ctx) {
-  const etat = { adresse: '', titre: '', editionId: '', cuisines: [] };
+// I-H : les trois gestes du monde extérieur sont injectables, avec les vrais par défaut — « Garder le lien » mène
+// à la fiche de la recette créée, et c'est mesurable sans toucher à l'adresse.
+export async function renderSignetRoute(params, query, ctx, { repo: r = repo, navigate: nav = navigate, toast: dire = toast } = {}) {
+  const etat = { adresse: '', titre: '', editionId: '', cuisines: [], enCours: false };
   const livres = [{ value: '', label: t('Aucun — recette indépendante') },
     ...(ctx?.book_editions || []).map((e) => ({ value: e.id, label: libelleLivre(e, ctx?.booksById?.get(e.book_id)) }))];
   const existantes = cuisinesExistantes(ctx);
@@ -119,20 +125,21 @@ export async function renderSignetRoute(params, query, ctx) {
     // signets ; il se rouvre si l'écriture échoue, et la saisie reste intacte.
     enregistrer: async () => {
       const m = signetModel(etat);
-      if (!m.valide) { dessiner(); return; }
-      const bouton = majSignet(zone, m);
-      if (bouton) bouton.disabled = true;
+      if (!m.peutEnregistrer) { dessiner(); return; }
+      etat.enCours = true;
+      majSignet(zone, modelVu());
       let rec;
       try {
-        rec = await enregistrerSignet(etat, { repo });
+        rec = await enregistrerSignet({ ...etat, enCours: false }, { repo: r });
       } catch (e) {
-        if (bouton) bouton.disabled = false;
+        etat.enCours = false;
+        majSignet(zone, modelVu());
         logError('signet.enregistrer', { error: e });
-        toast(t('Le lien n’a pas pu être gardé. Réessaie.'));
+        dire(t('Le lien n’a pas pu être gardé. Réessaie.'));
         return;
       }
-      toast(t('Lien gardé'));
-      navigate(`/recipes/${rec.id}`);
+      dire(t('Lien gardé'));
+      nav(`/recipes/${encodeURIComponent(rec.id)}`);
     },
   };
   dessiner();

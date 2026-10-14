@@ -6,7 +6,7 @@ import { urlDeBlob } from '../core/blob-urls.js';
 import { displayQuantity, REASON_LABELS } from '../domain/units.js';
 import { shortcutUrl, siriPhrase, describeDuration, isAppleTouchDevice } from '../domain/timers.js';
 import { navigate } from '../core/router.js';
-import { displayUrl } from '../sync/mime.js';
+import { displayUrl, safeDisplayType } from '../sync/mime.js';
 import * as repo from '../model/repo.js';
 import { pastilleModel } from './state.js';
 
@@ -53,11 +53,17 @@ export function timeText(version) {
 }
 
 export function provenanceText(recipe, book, edition) {
-  if (book) return `${book.title}${book.author ? ` — ${book.author}` : ''}${recipe.printed_page ? ` · ${t('page')} ${recipe.printed_page}` : ''}`;
   // Signet web (R-UX-11, S7) : l'hôte est RECALCULÉ depuis l'adresse, ici comme dans la vue recette — source_label
   // peut venir d'une archive ou du serveur et nommer n'importe quoi. Une adresse illisible le dit, et n'emprunte
   // pas le libellé stocké pour se faire passer pour un site.
-  if (recipe.source_url) { const lien = lienSignet(recipe.source_url); return lien.ok ? lien.hote : t('Adresse non reconnue'); }
+  const lien = recipe.source_url ? lienSignet(recipe.source_url) : null;
+  // C10 : un signet rattaché à un livre portait le livre et PERDAIT son hôte (alors que la spec, F22, demande les
+  // deux : c'est une page web rangée dans un livre, pas une page du livre). Les deux s'affichent, dans cet ordre.
+  if (book) {
+    const duLivre = `${book.title}${book.author ? ` — ${book.author}` : ''}${recipe.printed_page ? ` · ${t('page')} ${recipe.printed_page}` : ''}`;
+    return lien ? `${duLivre} · ${lien.ok ? lien.hote : t('Adresse non reconnue')}` : duLivre;
+  }
+  if (lien) return lien.ok ? lien.hote : t('Adresse non reconnue');
   if (recipe.source_label) return recipe.source_label;
   return t('Source personnelle');
 }
@@ -86,8 +92,17 @@ export function recipeCard(doc, { extra = null, href = null, reasons = null } = 
 // le nom, sinon le lien n'a plus de nom du tout pour qui ne voit pas la couverture. Sans titre connu : alt vide
 // (décorative), jamais un nom inventé.
 export function bookCover(edition, book, { href = null, fichier = null } = {}) {
-  const image = fichier?.blob instanceof Blob ? el('img', { class: 'cover-img', alt: book?.title || '', src: urlDeBlob(fichier.blob) }) : null;
-  return el('a', { class: 'cover-wrap', href: href || `#/books/${edition.id}` },
+  // S3 : une ligne `files` peut venir d'une archive ou du serveur et porter n'importe quel `mime` sur n'importe quel
+  // blob. Le type d'affichage passe par la liste blanche et DOIT être une image ; le blob est retypé avec lui (un
+  // blob text/html dans un <img> ne s'afficherait pas, mais l'URL existerait quand même). Hors liste : vignette texte.
+  const type = safeDisplayType(fichier?.mime);
+  const affichable = fichier?.blob instanceof Blob && !!type && type.startsWith('image/');
+  const image = affichable
+    ? el('img', { class: 'cover-img', alt: book?.title || '', src: urlDeBlob(fichier.blob.type === type ? fichier.blob : new Blob([fichier.blob], { type })) })
+    : null;
+  // D-T9 : sans titre connu, l'image reste décorative (alt vide, jamais un nom inventé) — mais le texte passe en
+  // display:none quand l'image est là, et le lien n'aurait alors plus aucun nom. L'ancre le porte donc toujours.
+  return el('a', { class: 'cover-wrap', href: href || `#/books/${encodeURIComponent(edition.id)}`, 'aria-label': book?.title || t('Sans titre') },
     el('div', { class: `cover${image ? ' with-img' : ''}` }, image,
       el('div', { class: 'title' }, book?.title || t('Sans titre')),
       el('div', { class: 'author' }, [book?.author, edition.year].filter(Boolean).join(' · '))));

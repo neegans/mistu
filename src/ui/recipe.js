@@ -15,6 +15,11 @@ import { addToMealFlow } from './meals.js';
 import { deviceId } from './import.js';
 import { createTimerLaunch } from '../domain/timers.js';
 import { lienSignet } from '../core/lien.js';
+import { capitaliser } from './puces.js';
+
+// S7 : une adresse refusée s'affiche INERTE (jamais un <a>), et BORNÉE — une fiche venue d'une archive ou du
+// serveur peut en porter 100 000 caractères, qui pousseraient la fiche entière hors de l'écran.
+export const adresseInerte = (u) => { const s = String(u ?? ''); return s.length > 200 ? s.slice(0, 200) + '…' : s; };
 
 export async function renderRecipe(params, query, ctx) {
   const recipe = ctx.recipesById.get(params.id);
@@ -50,7 +55,7 @@ export async function renderRecipe(params, query, ctx) {
       el('p', null, t('Une autre version a été créée ailleurs — les deux versions sont conservées.')),
       el('a', { class: 'btn', href: '#/settings' }, t('Trancher dans Réglages'))));
   }
-  root.append(el('div', { class: 'row', style: { marginBottom: '.8rem' } }, availabilityBadge(recipe), versionBadge(version), recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, c))));
+  root.append(el('div', { class: 'row', style: { marginBottom: '.8rem' } }, availabilityBadge(recipe), versionBadge(version), recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, capitaliser(c)))));
 
   if (!version) { root.append(referenceOnly()); return root; }
 
@@ -226,7 +231,7 @@ export function blocSignet(recipe) {
     el('p', null, t('L’app n’a pas lu la page : ouvre-la pour cuisiner.')),
     lien.ok
       ? el('div', { class: 'row' }, el('a', { class: 'btn primary', href: lien.href, target: '_blank', rel: 'noopener noreferrer' }, t('Ouvrir le lien')), el('span', { class: 'muted' }, lien.hote))
-      : el('p', { class: 'muted' }, t('Adresse non reconnue : '), String(recipe.source_url ?? '')));
+      : el('p', { class: 'muted' }, t('Adresse non reconnue : '), adresseInerte(recipe.source_url)));
 }
 
 function slug(s) { return (s || 'recette').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60); }

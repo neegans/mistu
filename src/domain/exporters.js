@@ -3,6 +3,7 @@
 import { formatQuantity } from './quantity.js';
 import { unitLabel } from './units.js';
 import { extFor } from './backup.js';
+import { libelleSource } from '../core/lien.js';
 
 function ingredientLine(ri, locale) {
   if (ri.source_text) return ri.source_text;
@@ -51,7 +52,9 @@ export function toPaprikaYaml(bundles, { locale = 'fr' } = {}) {
     const title = recipe.display_title || recipe.original_title;
     const lines = [`- name: ${yamlStr(title)}`];
     if (version?.servings) lines.push(`  servings: ${yamlStr(`${version.servings} portions`)}`);
-    const source = book ? `${book.title}${book.author ? ` — ${book.author}` : ''}${recipe.printed_page ? `, p. ${recipe.printed_page}` : ''}` : (recipe.source_label || '');
+    // S8 : hors livre, la source est l'hôte RECALCULÉ depuis l'adresse — jamais `source_label` stocké, qu'une
+    // archive ou le serveur peut avoir rempli avec n'importe quoi (S7). Un export est lu par un autre logiciel.
+    const source = book ? `${book.title}${book.author ? ` — ${book.author}` : ''}${recipe.printed_page ? `, p. ${recipe.printed_page}` : ''}` : libelleSource(recipe);
     if (source) lines.push(`  source: ${yamlStr(source)}`);
     if (recipe.source_url) lines.push(`  source_url: ${yamlStr(recipe.source_url)}`);
     if (version?.prep_minutes != null) lines.push(`  prep_time: ${yamlStr(`${version.prep_minutes} minutes`)}`);
@@ -94,7 +97,7 @@ export function toReadableSite(bundles, filesBySha, { locale = 'fr' } = {}) {
     const body = `<!doctype html><html lang="${esc(recipe.original_language || locale)}"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${HTML_CSS}</style></head><body>
 <p><a href="../index.html">← Index</a></p>
 <h1>${esc(title)}</h1>
-<p class="meta">${book ? esc(`${book.title}${book.author ? ` — ${book.author}` : ''}`) : esc(recipe.source_label || 'Source personnelle')}${recipe.printed_page ? `, page ${recipe.printed_page}` : ''}
+<p class="meta">${book ? esc(`${book.title}${book.author ? ` — ${book.author}` : ''}`) : esc(libelleSource(recipe) || 'Source personnelle')}${recipe.printed_page ? `, page ${recipe.printed_page}` : ''}
 ${version?.kind === 'adaptation' ? ' · <span class="badge">Adaptation personnelle</span>' : version ? ' · <span class="badge">Original</span>' : ''}</p>
 ${version?.servings ? `<p class="meta">${esc(`${version.servings} portions`)}${version.prep_minutes != null ? ` · préparation ${version.prep_minutes} min` : ''}${version.cook_minutes != null ? ` · cuisson ${version.cook_minutes} min` : ''}</p>` : ''}
 ${version ? `<h2>Ingrédients</h2><ul>${(version.ingredients || []).map((ri) => `<li>${esc(ingredientLine(ri, locale))}</li>`).join('')}</ul>
