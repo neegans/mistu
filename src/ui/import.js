@@ -2,7 +2,7 @@
 // remplacement d'une page, entrées d'index, états fondés sur des événements réels. Aucune page n'est annoncée « sur le serveur ».
 import { el, toast, pickFiles, confirmDialog, formatDate } from '../core/dom.js';
 import { t } from '../core/i18n.js';
-import { navigate, buildQuery, refresh, remplacerAdresse } from '../core/router.js';
+import { navigate, buildQuery, refresh, remplacerAdresse, parseHash } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { displayUrl } from '../sync/mime.js';
 import { sha256Hex } from '../core/hash.js';
@@ -14,11 +14,18 @@ const SMALL_IMAGE_BYTES = 80 * 1024;
 
 const INTENTIONS = ['index', 'recette'];
 // L'intention (spec § 10) voyage dans l'adresse, pas dans la base : consommée au premier rendu, puis retirée.
-export const adresseSeance = (sessionId, intention) => `/import?session=${sessionId}${INTENTIONS.includes(intention) ? `&intention=${intention}` : ''}`;
+// S9 : l'identifiant est encodé — il entre dans une adresse, et rien ne garantit qu'une fiche venue d'ailleurs
+// (archive, serveur) en porte un sans « & » ni « = ».
+export const adresseSeance = (sessionId, intention) => `/import?session=${encodeURIComponent(sessionId)}${INTENTIONS.includes(intention) ? `&intention=${intention}` : ''}`;
 export function appliquerIntention({ intention, pageIds = [] } = {}) {
   if (!INTENTIONS.includes(intention)) return { selection: [], ouvrirIndex: false, consommee: false };
   return { selection: [...pageIds], ouvrirIndex: intention === 'index', consommee: true };
 }
+
+// C7 : l'intention n'est retirée de l'adresse que si l'adresse AFFICHÉE est encore celle de cette séance. Un
+// `refresh()` arrivé pendant une navigation rend encore cette vue alors que l'adresse a déjà changé : réécrire
+// l'adresse à ce moment-là remplacerait celle de l'écran SUIVANT par celle d'une séance qu'on vient de quitter.
+export const peutRetirerIntention = (applique, sessionId, queryCourante) => !!applique?.consommee && queryCourante?.session === sessionId;
 
 export async function startScanSession(files, { edition_id = null, session_id = null, intention = null } = {}) {
   let session = session_id ? await repo.get('scan_sessions', session_id) : null;
@@ -76,7 +83,10 @@ function sessionView(session, ctx, query = {}, { historique = { remplacer: rempl
   const docs = session.document_ids.map((id) => ctx.source_documents.find((d) => d.id === id)).filter(Boolean);
   const fileDocs = docs.filter((d) => d.source_type !== 'photo');
   // L'intention (spec § 10, F6) voyage dans l'adresse : présélection des pages, panneau d'index ouvert ou non.
-  const applique = appliquerIntention({ intention: query.intention, pageIds: session.page_ids });
+  // C6 : la présélection porte sur les pages RÉSOLUES — `session.page_ids` peut nommer une page que cette base n'a
+  // pas (fiche reçue d'ailleurs, page retirée depuis). Cocher un identifiant sans page créait une sélection qui ne
+  // correspondait à aucune miniature, et « Regrouper en recette » l'emportait dans son adresse.
+  const applique = appliquerIntention({ intention: query.intention, pageIds: pages.map((p) => p.id) });
   const selected = new Set(applique.selection);
   const edition = session.edition_id ? ctx.editionsById.get(session.edition_id) : null;
   const root = el('div', null);
@@ -152,7 +162,8 @@ function sessionView(session, ctx, query = {}, { historique = { remplacer: rempl
   root.append(indexPanel);
   if (applique.consommee) {
     if (applique.ouvrirIndex) indexPanel.hidden = false;
-    historique.remplacer(adresseSeance(session.id, null)); // consommée : un refresh() ne la réappliquera pas
+    // consommée : un refresh() ne la réappliquera pas — mais seulement si l'adresse est encore celle-ci (C7).
+    if (peutRetirerIntention(applique, session.id, parseHash().query)) historique.remplacer(adresseSeance(session.id, null));
   }
 
   root.append(el('div', { class: 'row', style: { marginTop: '1rem' } },
