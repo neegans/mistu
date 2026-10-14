@@ -46,6 +46,8 @@ export const uninstallCapture = (db) => { db.onMutate = null; };
 // --- Les deux gestes de la personne sur la file (spec § 4.2) -----------------
 // Appelés par Réglages sur une entrée mise en quarantaine. Ils n'écrivent que dans « outbox » et portent l'origine
 // 'device' : la fiche elle-même n'est jamais touchée, et rien de ceci ne repart au serveur.
+// Les deux signatures ne se ressemblent pas, et c'est voulu : reprendre RÉÉCRIT la ligne entière, il faut donc la
+// ligne telle que l'appelant l'a lue (`entree`) ; retirer n'a besoin que de sa clé (`seq`).
 
 // « Réessayer » remet l'entrée dans l'état qu'elle avait avant son premier échec : plus de quarantaine, plus de
 // motif, plus d'essais comptés, plus d'attente de recul — sans quoi le recul exponentiel la retiendrait encore.

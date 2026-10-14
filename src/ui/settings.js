@@ -4,6 +4,7 @@ import { el, toast, confirmDialog, promptDialog, pickFiles, downloadBlob, format
 import { t } from '../core/i18n.js';
 import { refresh, currentPath } from '../core/router.js';
 import * as repo from '../model/repo.js';
+import { logError } from '../core/log.js';
 import { reprendreEnvoi, retirerEnvoi } from '../sync/outbox.js';
 import { garderIci, garderAilleurs } from '../sync/conflits.js';
 import { retirerMarqueur } from '../sync/backfill.js';
@@ -186,10 +187,15 @@ export async function renderSettings(params, query, ctx) {
     el('div', { class: 'row', style: { marginTop: '.8rem' } },
       el('button', { class: 'btn danger', onClick: async () => {
         if (archiveOperation) { toast(t('Une opération d’archive est déjà en cours.')); return; }
+        // La file est relue AU MOMENT du geste (elle a pu bouger depuis le rendu) et une seule fois : les deux
+        // nombres doivent venir du même instant, sinon le refus pourrait annoncer une quarantaine qui n'est plus
+        // dans le total qu'il chiffre.
+        let fileDuGeste = null;
+        const lireFile = async () => (fileDuGeste ??= await repo.db.getAll('outbox'));
         await effacerDonnees({
           user: sync.user || null,
-          pending: () => repo.db.count('outbox'),
-          enQuarantaine: async () => (await repo.db.getAll('outbox')).filter((e) => e.quarantined_at).length,
+          pending: async () => (await lireFile()).length,
+          enQuarantaine: async () => (await lireFile()).filter((e) => e.quarantined_at).length,
           confirm: confirmDialog,
           demanderMot: promptDialog,
           toast,
@@ -400,25 +406,70 @@ export async function abandonnerEnvoi({ db, seq, confirm, retirer = retirerEnvoi
 // purge des vieux conflits ont pu le faire disparaître. « Garder celle d'ici » remet la fiche en file : une passe
 // est planifiée, sinon le choix attendrait le prochain déclencheur. « Garder celle d'ailleurs » ne remet rien en
 // file — le serveur a déjà cette version — et rend `false` quand il n'y a rien à appliquer : le conflit reste.
-export async function garderVersionDIci({ db, id, moteur = null, appliquer = garderIci }) {
+// Les deux issues ÉCRIVENT une fiche de la bibliothèque, et elles l'écrivent par la porte d'écriture de la base,
+// qui ne passe par aucun bus : le cache de lecture de state.js garderait la version que la personne vient
+// justement d'écarter. Il est donc invalidé, et seulement quand quelque chose a été écrit.
+export async function garderVersionDIci({ db, id, moteur = null, appliquer = garderIci, invalider = invalidate }) {
   const conflit = await db.get('sync_conflicts', id);
   if (!conflit) return false;
   const applique = await appliquer(db, conflit);
-  if (applique) moteur?.planifier();
+  if (applique) { invalider(); moteur?.planifier(); }
   return applique;
 }
 
-export async function garderVersionDAilleurs({ db, id, appliquer = garderAilleurs }) {
+export async function garderVersionDAilleurs({ db, id, appliquer = garderAilleurs, invalider = invalidate }) {
   const conflit = await db.get('sync_conflicts', id);
   if (!conflit) return false;
-  return await appliquer(db, conflit);
+  const applique = await appliquer(db, conflit);
+  if (applique) invalider();
+  return applique;
+}
+
+// Le câblage des gestes L3 (spec § 4.2) : une fonction par geste NOMMÉ, toutes les dépendances injectées — c'est
+// cet objet que le rendu reçoit, et c'est lui que le test éprouve (sans quoi le fil entre les décisions et les
+// boutons ne serait vérifié par personne). `obtenirMoteur` est une fonction : le moteur est posé par le démarrage,
+// parfois après ce rendu, et un geste doit parler au moteur de l'instant du clic, pas à celui du rendu.
+// Chaque geste est PROTÉGÉ : un gestionnaire d'onClick qui rejette ne serait vu de personne (rejet non traité) et
+// la personne resterait devant un bouton qui n'a rien fait sans le dire. Le code est journalisé, la phrase est fixe.
+// Ni « Réessayer » ni « Abandonner » ne touchent une fiche (seulement la file) : rien à invalider pour eux.
+export function gestesL3Pour({
+  db = repo.db,
+  obtenirMoteur = () => getSyncState().moteur,
+  confirm = confirmDialog,
+  dire = toast,
+  rafraichir = refresh,
+  invalider = invalidate,
+  journaliser = logError,
+} = {}) {
+  const protege = (nom, fn) => async (cle) => {
+    try { await fn(cle); }
+    catch (error) { journaliser('sync.geste.' + nom, { error }); dire(t('Ce geste n’a pas abouti.')); }
+  };
+  return {
+    envoyerMaintenant: protege('envoyer_maintenant', async () => { await obtenirMoteur()?.envoyerMaintenant(); rafraichir(); }),
+    reessayer: protege('reessayer', async (seq) => { await reessayerEnvoi({ db, seq, moteur: obtenirMoteur() }); rafraichir(); }),
+    abandonner: protege('abandonner', async (seq) => { await abandonnerEnvoi({ db, seq, confirm }); rafraichir(); }),
+    garderIci: protege('garder_ici', async (id) => { await garderVersionDIci({ db, id, moteur: obtenirMoteur(), invalider }); rafraichir(); }),
+    garderAilleurs: protege('garder_ailleurs', async (id) => {
+      // Un conflit dont le serveur n'a pas joint sa version ne peut pas être appliqué : il RESTE, et on le dit —
+      // mieux vaut un conflit qui attend qu'une fiche écrasée par rien. Un conflit déjà tranché ailleurs ne dit
+      // rien du tout : il est relu pour ne pas annoncer un conflit qui n'existe plus.
+      const applique = await garderVersionDAilleurs({ db, id, invalider });
+      if (!applique && await db.get('sync_conflicts', id)) dire(t('Cette version n’a pas été reçue en entier : le conflit reste.'));
+      rafraichir();
+    }),
+  };
 }
 
 // Abonnement à l'état du moteur : plusieurs changements rapprochés ne font qu'UN rendu, et l'abonné se retire de
 // lui-même dès que la vue affichée n'est plus Réglages. Le routeur ne démonte pas les vues (aucun crochet de
 // nettoyage) : sans ce retrait, chaque navigation laisserait un abonné de plus, et chaque passe rafraîchirait un
 // écran qui ne parle pas de synchronisation. Rend de quoi arrêter, ou null s'il n'y a rien à suivre.
-export function suivreMoteur({ moteur, surReglages, rafraichir, delaiMs = 300 }) {
+// `occupe` est le garde-fou le plus important : une opération d'archive dure, et son écran porte un état qui ne
+// vit QUE dans le DOM — contrôles désactivés, bilan de restauration, bouton « Recharger l'application ». Un rendu
+// demandé par le moteur au milieu reconstruirait la page et emporterait tout cela, pendant que l'archive écrit.
+// Le rendu est alors abandonné, pas mis en attente : la prochaine passe du moteur en redemandera un.
+export function suivreMoteur({ moteur, surReglages, rafraichir, occupe = () => false, delaiMs = 300 }) {
   if (typeof moteur?.onEtat !== 'function') return null;
   let minuterie = null;
   let retirer = null;
@@ -433,7 +484,8 @@ export function suivreMoteur({ moteur, surReglages, rafraichir, delaiMs = 300 })
     if (minuterie) return; // regroupement : le premier changement fixe l'heure du rendu
     minuterie = setTimeout(() => {
       minuterie = null;
-      if (surReglages()) rafraichir();
+      // Relus à l'instant du rendu, pas à celui du changement : l'archive a pu commencer entre les deux.
+      if (surReglages() && !occupe()) rafraichir();
     }, delaiMs);
   });
   return arreter;
@@ -445,13 +497,18 @@ let abonnementMoteur = null;
 
 function suivreMoteurDeLaPage(moteur) {
   abonnementMoteur?.();
-  abonnementMoteur = suivreMoteur({ moteur, surReglages: () => currentPath() === '/settings', rafraichir: refresh });
+  abonnementMoteur = suivreMoteur({
+    moteur,
+    surReglages: () => currentPath() === '/settings',
+    rafraichir: refresh,
+    occupe: () => archiveOperation,
+  });
 }
 
-// Les quatre seuls gestes nommés par le modèle. Le rendu ignore une action inconnue : un renommage donne un bouton
-// manquant (visible), jamais un bouton muet. Les gestes des listes (quarantaine, conflits) ne passent pas par là :
-// ils portent une clé, et le rendu les câble directement.
+// Les quatre seuls gestes nommés par le modèle, et les cinq gestes de l'ensemble L3. Le rendu ne câble que ce qu'il
+// trouve dans l'objet de gestes : un renommage donne un bouton manquant (visible), jamais un bouton muet.
 export const SYNC_ACTIONS = ['signIn', 'signOut', 'changeAccount', 'envoyerMaintenant'];
+export const SYNC_L3_ACTIONS = ['envoyerMaintenant', 'reessayer', 'abandonner', 'garderIci', 'garderAilleurs'];
 
 // Départ chez le fournisseur. La route courante est mémorisée (redirectTo part sans fragment, le retour atterrirait
 // sur l’accueil) et RETIRÉE si rien ne part : une route fantôme détournerait le prochain démarrage de cet onglet.
@@ -468,6 +525,7 @@ export async function demarrerConnexion(auth, hash = location.hash) {
 // Rendu de la section : le modèle dit quoi écrire et quels gestes offrir ; les gestes sont câblés ici.
 function syncSection(state, auth, settings) {
   const model = syncSectionModel(state);
+  const gestesL3 = gestesL3Pour();
   const gestes = {
     signIn: () => demarrerConnexion(auth),
     signOut: async () => {
@@ -477,21 +535,9 @@ function syncSection(state, auth, settings) {
       refresh();
     },
     changeAccount: () => changeAccount(auth),
-    envoyerMaintenant: async () => { await getSyncState().moteur?.envoyerMaintenant(); refresh(); },
-  };
-  // Gestes des listes : chacun relit sa cible avant d'agir, puis la page est rendue de nouveau.
-  const gestesL3 = {
-    reessayer: async (seq) => { await reessayerEnvoi({ db: repo.db, seq, moteur: getSyncState().moteur }); refresh(); },
-    abandonner: async (seq) => { await abandonnerEnvoi({ db: repo.db, seq, confirm: confirmDialog }); refresh(); },
-    garderIci: async (id) => { await garderVersionDIci({ db: repo.db, id, moteur: getSyncState().moteur }); refresh(); },
-    garderAilleurs: async (id) => {
-      // Un conflit dont le serveur n'a pas joint sa version ne peut pas être appliqué : il RESTE, et on le dit —
-      // mieux vaut un conflit qui attend qu'une fiche écrasée par rien. Un conflit déjà tranché ailleurs ne dit
-      // rien du tout : il est relu pour ne pas annoncer un conflit qui n'existe plus.
-      const applique = await garderVersionDAilleurs({ db: repo.db, id });
-      if (!applique && await repo.db.get('sync_conflicts', id)) toast(t('Cette version n’a pas été reçue en entier : le conflit reste.'));
-      refresh();
-    },
+    // Le même geste que la liste, pris dans le câblage éprouvé : un seul endroit décide ce que « Envoyer
+    // maintenant » fait, qu'on y arrive par le bouton du modèle ou par un bouton de liste.
+    envoyerMaintenant: gestesL3.envoyerMaintenant,
   };
   const boutons = model.buttons.filter((b) => Object.hasOwn(gestes, b.action));
   return section(model.title,
@@ -515,6 +561,12 @@ function syncSection(state, auth, settings) {
 // et les gestes reçus. Un geste absent ne casse rien — le bouton existe et ne fait rien de visible.
 export function syncSectionL3(model, gestes = {}) {
   const noeuds = [];
+  // Un bouton n'existe que si son geste a été câblé : jamais de `gestes.x?.()`, qui donnerait un bouton qui a l'air
+  // d'agir et ne fait rien. Un geste manquant se voit — c'est la même règle que pour les boutons du modèle.
+  const bouton = (action, libelle, cle, classe = 'btn') => (Object.hasOwn(gestes, action)
+    ? el('button', { class: classe, onClick: () => gestes[action](cle) }, libelle)
+    : null);
+  const rangee = (...boutons) => { const vus = boutons.filter(Boolean); return vus.length ? el('div', { class: 'row' }, ...vus) : null; };
   if (model.progression) noeuds.push(el('p', { class: 'muted' }, model.progression));
   if (model.pause) noeuds.push(el('div', { class: 'card warn' }, model.pause));
   const quarantaine = model.quarantaine || [];
@@ -524,25 +576,33 @@ export function syncSectionL3(model, gestes = {}) {
     for (const q of quarantaine) {
       noeuds.push(el('div', { class: 'status warn', dataset: { quarantaine: String(q.seq) } },
         el('p', null, `${q.libelle} — ${q.motif}`),
-        el('div', { class: 'row' },
-          el('button', { class: 'btn', onClick: () => gestes.reessayer?.(q.seq) }, t('Réessayer')),
-          el('button', { class: 'btn danger', onClick: () => gestes.abandonner?.(q.seq) }, t('Abandonner cet envoi')))));
+        rangee(bouton('reessayer', t('Réessayer'), q.seq), bouton('abandonner', t('Abandonner cet envoi'), q.seq, 'btn danger'))));
     }
   }
   const conflits = model.conflits || [];
   if (conflits.length) {
     noeuds.push(el('h3', null, t('Conflits à trancher')),
-      el('p', { class: 'muted' }, t('Deux versions portent la même heure. Choisis celle qui compte ; rien n’est fusionné.')));
+      el('p', { class: 'muted' }, t('Choisis celle qui compte ; rien n’est fusionné.')));
     for (const c of conflits) {
       noeuds.push(el('div', { class: 'status warn', dataset: { conflit: String(c.id) } },
+        // La nature du conflit d'abord : « même heure, contenus différents » et « une autre version a été créée
+        // ailleurs » ne demandent pas la même décision, et rien ne permet de deviner l'une depuis l'autre.
+        el('p', null, phraseConflit(c.kind)),
         el('p', null, t('{l} — version d’ici du {a}, version d’ailleurs du {b}', { l: c.libelle, a: c.dateIci, b: c.dateAilleurs })),
-        el('div', { class: 'row' },
-          el('button', { class: 'btn', onClick: () => gestes.garderIci?.(c.id) }, t('Garder celle d’ici ({d})', { d: c.dateIci })),
-          el('button', { class: 'btn', onClick: () => gestes.garderAilleurs?.(c.id) }, t('Garder celle d’ailleurs')))));
+        rangee(bouton('garderIci', t('Garder celle d’ici ({d})', { d: c.dateIci }), c.id), bouton('garderAilleurs', t('Garder celle d’ailleurs'), c.id))));
     }
   }
   return noeuds;
 }
+
+// Ce que dit un conflit selon sa nature (spec § 5.5). Un `kind` inattendu reçoit la phrase la plus générale :
+// jamais celle d'un autre cas, jamais une cause devinée.
+const PHRASES_CONFLIT = {
+  donnees: 'Deux versions portent la même heure.',
+  version: 'Une autre version de cette recette a été créée ailleurs.',
+};
+
+const phraseConflit = (kind) => t(Object.hasOwn(PHRASES_CONFLIT, kind) ? PHRASES_CONFLIT[kind] : 'Deux versions existent pour cette fiche.');
 
 // Câblage du geste « Changer de compte sur cet appareil » : la décision et les effets vivent dans changerDeCompte().
 async function changeAccount(auth) {
@@ -595,8 +655,10 @@ export function syncSectionModel({ available = false, reason = null, user = null
       lines.push(moteur.dernierEchange
         ? t('Dernier échange : {h}', { h: formatDate(moteur.dernierEchange, { withTime: true }) })
         : t('Aucun échange encore.'));
-      lines.push(t('En quarantaine : {n}', { n: moteur.enQuarantaine }));
-      lines.push(t('Conflits : {n}', { n: moteur.conflits }));
+      // Les deux comptes viennent des LISTES affichées, pas de l'instantané du moteur : c'est la liste que la
+      // personne peut compter, et un instantané pris à un autre instant contredirait ce qu'elle a sous les yeux.
+      lines.push(t('En quarantaine : {n}', { n: enQuarantaine.length }));
+      lines.push(t('Conflits : {n}', { n: aTrancher.length }));
       if (moteur.attenteConnexion) lines.push(t('En attente de connexion — l’envoi reprendra après la prochaine connexion.'));
       if (moteur.horloge) lines.push(t('L’heure de cet appareil semble fausse (± {m} min).', { m: moteur.horloge.minutes }));
       buttons.push({ action: 'envoyerMaintenant', label: t('Envoyer maintenant'), tone: '' });
@@ -612,35 +674,46 @@ export function syncSectionModel({ available = false, reason = null, user = null
   if (retour?.error) lines.push(retour.error);
   const title = t('Synchronisation');
   if (!connectee || !moteur) return { title, lines, buttons };
+  // Une progression ne s'affiche que PENDANT une passe : une passe terminée laisserait un compteur figé. Les trois
+  // valeurs sont nommées une fois, pour les deux phrases qui peuvent les porter.
+  const avancement = moteur.enCours && moteur.progression
+    ? { t: moteur.progression.table, n: moteur.progression.n, total: moteur.progression.total }
+    : null;
   return {
     title,
     lines,
     buttons,
-    // Le libellé ne lit rien en base : le magasin et l'identifiant tronqué suffisent à reconnaître la fiche, et le
+    // Le libellé ne lit rien en base : le magasin et l'identifiant borné suffisent à reconnaître la fiche, et le
     // motif est une phrase — le jeton ASCII du serveur ne se montre jamais (R9).
     quarantaine: enQuarantaine.map((e) => ({
       seq: e.seq,
-      libelle: `${e.store} · ${String(e.id).slice(0, 12)}`,
+      libelle: `${e.store} · ${tronquer(e.id, CLE_MAX)}`,
       motif: motifEnvoi(e.last_error),
     })),
-    conflits: aTrancher.map((c) => ({
-      id: c.id,
-      libelle: `${c.store} · ${c.local?.title || c.local?.name || c.record_id}`,
-      dateIci: formatDate(c.local?.updated_at || c.at, { withTime: true }),
-      dateAilleurs: formatDate(c.server?.updated_at || c.at, { withTime: true }),
-      kind: c.kind,
-    })),
-    // Une progression ne s'affiche que pendant une passe : une passe terminée laisserait un compteur figé.
-    progression: moteur.enCours && moteur.progression
-      ? (moteur.phase === 'reception'
-        ? t('Réception : {t} {n}/{total}', { t: moteur.progression.table, n: moteur.progression.n, total: moteur.progression.total })
-        : t('Envoi initial : {t} {n}/{total}', { t: moteur.progression.table, n: moteur.progression.n, total: moteur.progression.total }))
+    conflits: aTrancher.map((c) => {
+      const nom = c.local?.title || c.local?.name || null;
+      return {
+        id: c.id,
+        libelle: `${c.store} · ${nom ? tronquer(nom, NOM_MAX) : tronquer(c.record_id, CLE_MAX)}`,
+        dateIci: formatDate(c.local?.updated_at || c.at, { withTime: true }),
+        dateAilleurs: formatDate(c.server?.updated_at || c.at, { withTime: true }),
+        kind: c.kind,
+      };
+    }),
+    progression: avancement
+      ? (moteur.phase === 'reception' ? t('Réception : {t} {n}/{total}', avancement) : t('Envoi initial : {t} {n}/{total}', avancement))
       : null,
     pause: moteur.pause?.raison === 'quota'
       ? t('Espace serveur plein (1 Go au palier gratuit) — rien n’est perdu, tout reste sur cet appareil.')
       : null,
   };
 }
+
+// Un libellé vient des données : il est BORNÉ, et la coupe se voit — un nom tronqué ne doit pas passer pour le nom
+// entier. Une clé opaque se reconnaît en 12 caractères ; un titre est fait pour être lu, on lui en laisse 40.
+const CLE_MAX = 12;
+const NOM_MAX = 40;
+const tronquer = (valeur, max) => { const s = String(valeur ?? ''); return s.length > max ? s.slice(0, max) + '…' : s; };
 
 // Vocabulaire des motifs de rejet (spec § 5.3, R9) : le serveur renvoie des jetons ASCII, la personne lit une
 // phrase qui dit QUOI regarder. Un jeton inattendu (serveur plus récent que cette version de l'app) tombe sur la

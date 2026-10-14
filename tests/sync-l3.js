@@ -888,7 +888,7 @@ export async function runSyncL3Tests({ eq, ok }) {
   eq(syncSectionModel({ ...base, moteur: etatMoteur({ enQuarantaine: 1 }), quarantaine: [{ seq: 9, store: 'books', id: 'b9' }] }).quarantaine[0].motif,
     'Envoi refusé', 'réglages L3 : une entrée sans motif enregistré est dite refusée, sans rien inventer');
   eq(syncSectionModel({ ...base, moteur: etatMoteur({ enQuarantaine: 1 }), quarantaine: [{ seq: 1, store: 'files', id: 'f'.repeat(64), last_error: 'taille' }] }).quarantaine[0].libelle,
-    'files · ' + 'f'.repeat(12), 'réglages L3 : un identifiant long est tronqué à 12 caractères');
+    'files · ' + 'f'.repeat(12) + '…', 'réglages L3 : un identifiant long est tronqué à 12 caractères, et la coupe se voit');
 
   const m2 = syncSectionModel({ ...base, moteur: etatMoteur({ enCours: true, phase: 'envoi_initial', progression: { table: 'recipes', n: 8, total: 24 } }) });
   eq(m2.progression, 'Envoi initial : recipes 8/24', 'réglages L3 : progression de l’envoi initial');
@@ -1067,5 +1067,125 @@ export async function runSyncL3Tests({ eq, ok }) {
     await pause(40);
     eq(rendusC, 0, 'abonnement L3 : l’arrêt annule aussi le rendu déjà regroupé');
     eq(suivreMoteur({ moteur: null, surReglages: () => true, rafraichir: () => {} }), null, 'abonnement L3 : sans moteur, aucun abonnement');
+  }
+
+  // --- Ronde 1 (R-L3-16) ---------------------------------------------------
+  // 1. Critical : une opération d'archive est longue, et son écran porte un état qui ne vit que dans le DOM
+  // (contrôles désactivés, bilan de restauration, bouton « Recharger »). Un rendu demandé par l'état du moteur au
+  // milieu reconstruirait la page et emporterait tout cela. L'abonnement se tait donc tant que l'archive travaille.
+  {
+    const fns = new Set();
+    const faux = { onEtat: (fn) => { fns.add(fn); return () => fns.delete(fn); } };
+    const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+    let rendus = 0;
+    let occupe = true;
+    suivreMoteur({ moteur: faux, surReglages: () => true, occupe: () => occupe, rafraichir: () => { rendus += 1; }, delaiMs: 10 });
+    for (const fn of [...fns]) fn();
+    await pause(40);
+    eq(rendus, 0, 'ronde 1 : pendant une opération d’archive (archiveOperation), aucun rendu n’est volé à la page');
+    occupe = false;
+    for (const fn of [...fns]) fn();
+    await pause(40);
+    eq(rendus, 1, 'ronde 1 : … et le rendu reprend dès que l’archive est terminée');
+  }
+
+  // 2. Le conflit dit SA nature : « même heure, contenus différents » et « une autre version a été créée ailleurs »
+  // ne demandent pas la même décision. La phrase vient du kind, jamais d'une cause devinée.
+  {
+    const texteDe = (kind) => {
+      const d = document.createElement('div');
+      for (const n of syncSectionL3(syncSectionModel({ ...base, moteur: etatMoteur(), conflits: [{ ...unConflit, kind }] }), {})) d.append(n);
+      return d.textContent;
+    };
+    const donnees = texteDe('donnees');
+    const version = texteDe('version');
+    ok(donnees.includes('Deux versions portent la même heure.') && !donnees.includes('créée ailleurs'), 'ronde 1 : conflit « donnees » → « Deux versions portent la même heure. »');
+    ok(version.includes('Une autre version de cette recette a été créée ailleurs.') && !version.includes('la même heure'), 'ronde 1 : conflit « version » → sa propre phrase, pas celle des données');
+    ok(texteDe('inattendu').includes('Deux versions existent pour cette fiche.'), 'ronde 1 : un kind inattendu reçoit une phrase neutre, jamais une cause inventée');
+  }
+
+  // 3. Les deux comptes viennent des LISTES affichées : un instantané pris à un autre instant contredirait la liste
+  // juste en dessous, et c'est la liste que la personne peut compter.
+  {
+    const incoherent = syncSectionModel({ ...base, moteur: etatMoteur({ enQuarantaine: 99, conflits: 42 }), quarantaine: [fileQuarantaine[0]], conflits: [unConflit] });
+    ok(incoherent.lines.includes('En quarantaine : 1') && incoherent.lines.includes('Conflits : 1'), 'ronde 1 : les deux comptes viennent des listes AFFICHÉES, pas de l’instantané du moteur');
+    eq([incoherent.quarantaine.length, incoherent.conflits.length], [1, 1], 'ronde 1 : … et chaque ligne dit exactement ce que sa liste montre');
+    const vide = syncSectionModel({ ...base, moteur: etatMoteur({ enQuarantaine: 7, conflits: 7 }) });
+    ok(vide.lines.includes('En quarantaine : 0') && vide.lines.includes('Conflits : 0'), 'ronde 1 : listes vides → zéro, même si l’instantané prétend le contraire');
+  }
+
+  // 6. Le libellé d'un conflit est borné lui aussi : une clé opaque comme celle de la quarantaine, un titre d'un peu
+  // plus long (il est fait pour être lu). Dans les deux cas la coupe se voit.
+  {
+    const conflitNomme = (local, record_id = 'k1') => syncSectionModel({ ...base, moteur: etatMoteur(), conflits: [{ ...unConflit, record_id, local }] }).conflits[0].libelle;
+    eq(conflitNomme(null, 'r'.repeat(40)), 'books · ' + 'r'.repeat(12) + '…', 'ronde 1 : sans titre, la clé du conflit est tronquée comme celle de la quarantaine');
+    eq(conflitNomme({ title: 'T'.repeat(80), updated_at: '2026-10-13T12:00:00Z' }), 'books · ' + 'T'.repeat(40) + '…', 'ronde 1 : un titre très long est borné sans être rendu illisible');
+    eq(conflitNomme({ title: 'Tarte aux pommes', updated_at: '2026-10-13T12:00:00Z' }), 'books · Tarte aux pommes', 'ronde 1 : un titre ordinaire n’est pas coupé');
+  }
+
+  // 4. Le cache de lecture de state.js ne sait RIEN des écritures faites par db.mutate (aucun bus) : sans
+  // invalidation, les vues garderaient la version que la personne vient justement d'écarter.
+  await withRepo(async (repoTemp, db) => {
+    const conflitPour = (record) => ({ id: 'books:' + record, store: 'books', record_id: record, local: { id: record, title: 'Ici' }, server: { data: { id: record, title: 'Ailleurs' }, updated_at: '2026-10-13T12:00:00Z', deleted_at: null }, at: '2026-10-13T12:01:00Z', kind: 'donnees' });
+    await repoTemp.save('books', { id: 'k4', title: 'Ici' });
+    await repoTemp.save('books', { id: 'k5', title: 'Ici' });
+    await db.mutate({ puts: { sync_conflicts: [conflitPour('k4'), conflitPour('k5')] }, origin: 'remote' });
+    const vus = [];
+    await garderVersionDAilleurs({ db, id: 'books:k4', invalider: () => vus.push('ailleurs') });
+    await garderVersionDIci({ db, id: 'books:k5', invalider: () => vus.push('ici') });
+    eq(vus, ['ailleurs', 'ici'], 'ronde 1 : les deux issues d’un conflit invalident le cache de lecture (l’écriture ne passe par aucun bus)');
+    const rien = [];
+    await garderVersionDAilleurs({ db, id: 'books:disparu', invalider: () => rien.push('ailleurs') });
+    await garderVersionDIci({ db, id: 'books:disparu', invalider: () => rien.push('ici') });
+    eq(rien, [], 'ronde 1 : … et rien n’est invalidé quand il n’y avait rien à appliquer');
+  });
+
+  // 6. La file n'est lue qu'UNE fois par rendu : le compte affiché et la liste de quarantaine doivent venir du même
+  // instant, sinon la ligne et la liste peuvent se contredire sous les yeux de la personne.
+  await withRepo(async (repoTemp, db) => {
+    const { renderSettings } = reglages;
+    const vraiGetAll = db.getAll;
+    const lectures = [];
+    db.getAll = function (store) { lectures.push(store); return vraiGetAll.call(this, store); };
+    try { await renderSettings({}, {}, { settings: await repoTemp.getSettings(), sync: {} }); }
+    finally { delete db.getAll; }
+    eq(lectures.filter((s) => s === 'outbox').length, 1, 'ronde 1 : un rendu de Réglages lit la file d’envoi exactement une fois');
+    eq(lectures.filter((s) => s === 'sync_conflicts').length, 1, 'ronde 1 : … et les conflits exactement une fois');
+  });
+
+  // 5. Les gestes L3 sont nommés et le câblage réel n'expose qu'eux. Le rendu ne câble que ce qu'il a reçu : un
+  // geste absent donne un bouton ABSENT (visible), jamais un bouton muet. Et aucun ne laisse échapper un rejet.
+  {
+    const { SYNC_L3_ACTIONS, gestesL3Pour } = reglages;
+    const muet = { db: null, obtenirMoteur: () => null, confirm: async () => false, dire: () => {}, rafraichir: () => {}, invalider: () => {}, journaliser: () => {} };
+    const cables = gestesL3Pour(muet);
+    eq([...SYNC_L3_ACTIONS].sort(), ['abandonner', 'envoyerMaintenant', 'garderAilleurs', 'garderIci', 'reessayer'], 'ronde 1 : cinq gestes L3 nommés');
+    eq(Object.keys(cables).sort(), [...SYNC_L3_ACTIONS].sort(), 'ronde 1 : le câblage réel expose exactement les gestes nommés, pas un de plus');
+    ok(SYNC_L3_ACTIONS.every((a) => typeof cables[a] === 'function'), 'ronde 1 : … et chacun est bien une fonction');
+
+    const sansGeste = document.createElement('div');
+    for (const n of syncSectionL3(m1, {})) sansGeste.append(n);
+    eq(sansGeste.querySelectorAll('button').length, 0, 'ronde 1 : sans geste câblé, aucun bouton muet n’est rendu');
+    const partiel = document.createElement('div');
+    for (const n of syncSectionL3(m1, { reessayer: () => {} })) partiel.append(n);
+    eq([...partiel.querySelectorAll('button')].map((b) => b.textContent), ['Réessayer', 'Réessayer'], 'ronde 1 : seuls les gestes reçus deviennent des boutons');
+
+    const journal = [];
+    const bon = gestesL3Pour({ ...muet, obtenirMoteur: () => ({ envoyerMaintenant: async () => journal.push('envoye') }), rafraichir: () => journal.push('rendu') });
+    await bon.envoyerMaintenant();
+    eq(journal, ['envoye', 'rendu'], 'ronde 1 : « Envoyer maintenant » envoie PUIS rend la page');
+
+    const dits = [];
+    const codes = [];
+    const casse = gestesL3Pour({ ...muet, db: { get: async () => { throw new Error('base illisible'); } }, confirm: async () => true, dire: (m) => dits.push(m), journaliser: (code) => codes.push(code) });
+    await casse.reessayer(1);
+    await casse.abandonner(1);
+    await casse.garderIci('x');
+    await casse.garderAilleurs('x');
+    const casseEnvoi = gestesL3Pour({ ...muet, obtenirMoteur: () => ({ envoyerMaintenant: async () => { throw new Error('refus'); } }), dire: (m) => dits.push(m), journaliser: (code) => codes.push(code) });
+    await casseEnvoi.envoyerMaintenant();
+    eq(dits.length, 5, 'ronde 1 : chacun des cinq gestes attrape son échec — aucun rejet non traité dans un onClick');
+    ok(dits.every((m) => m === 'Ce geste n’a pas abouti.'), 'ronde 1 : … dit par une phrase fixe, jamais le message du fournisseur');
+    ok(codes.length === 5 && codes.every((c) => /^sync\.geste\./.test(c)), 'ronde 1 : … et journalisé par un code, jamais avec du contenu de fiche');
   }
 }
