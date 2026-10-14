@@ -145,7 +145,8 @@ export async function runAjouterTests({ eq, ok }) {
     eq(r.source, 'openlibrary', 'livre : Open Library d’abord');
     eq([r.fiche.title.length, r.fiche.author, r.fiche.publisher, r.fiche.year, r.fiche.language], [300, 'A, B', 'P', 2019, null], 'livre : champs tronqués à 300, année entière, langue inconnue → null');
     eq(appels.length, 1, 'livre : Google Books pas appelé quand Open Library répond');
-    eq(appels[0][1].credentials, 'omit', 'livre : les options S12 sont passées au fetch');
+    // Les QUATRE champs, pas seulement credentials : une option S12 perdue en route ne se verrait pas autrement.
+    eq(appels[0][1], { ...LA.OPTIONS_FETCH, signal: undefined }, 'livre : les options S12 sont passées au fetch, toutes les quatre');
     // Open Library vide → Google Books ; les deux appels dans un try
     const fetchG = async (url) => url.includes('openlibrary') ? reponse(200, '{}') : reponse(200, JSON.stringify({ items: [{ volumeInfo: { title: 'G', authors: ['X'], publisher: 'Q', publishedDate: '2001-02', language: 'fr' } }] }));
     const g = await LA.lookupIsbn('9782761950001', { fetch: fetchG });
@@ -170,6 +171,7 @@ export async function runAjouterTests({ eq, ok }) {
     eq(LA.livreAjoutModel({ pas: 2, champs: { title: 'X' }, provenance: null }).messages.provenance, null, 'livre : saisie à la main → aucune provenance');
     eq(LA.livreAjoutModel({ pas: 2, champs: { title: '   ' } }).peutEnregistrer, false, 'livre : sans titre, pas d’enregistrement');
     eq(LA.livreAjoutModel({ pas: 1, recherche: true }).messages.recherche, 'Recherche…', 'livre : pendant l’appel');
+    eq(LA.livreAjoutModel({ pas: 2, champs: { title: 'X' }, enCours: true }).peutEnregistrer, false, 'livre : pendant l’enregistrement, on ne peut pas enregistrer une seconde fois (double clic)');
   }
   {
     let n = 0;
@@ -218,5 +220,43 @@ export async function runAjouterTests({ eq, ok }) {
     ok(![...p2SansIsbn.querySelectorAll('span.muted')].some((s) => s.textContent.startsWith('ISBN')), 'livre : sans ISBN, le pas 2 n’affiche pas une mention « ISBN » vide');
     [...p2SansIsbn.querySelectorAll('button')].find((b) => b.textContent === '← Changer d’ISBN').click();
     eq(appels, [['main'], ['enregistrer'], ['retour']], 'livre : sans ISBN, « ← Changer d’ISBN » est bien là et son geste part');
+  }
+  {
+    // R-UX-9. Le chemin le plus fréquent (saisie à la main, ou identification sans fiche) ouvre le pas 2 à champs
+    // vides : « Ajouter ce livre » est alors désactivé, et `disabled` n'est posé qu'UNE fois, à la construction.
+    // Taper le titre doit le réveiller — sans redessiner la page, sinon le curseur sauterait à chaque frappe.
+    const noeud = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 2, isbn: '978', champs: { title: '' }, provenance: null }), {});
+    const bouton = noeud.querySelector('[data-role="enregistrer"]');
+    ok(bouton && bouton.textContent === 'Ajouter ce livre' && bouton.disabled, 'livre : au pas 2 sans titre, « Ajouter ce livre » est désactivé et se retrouve par son data-role');
+    LA.majBoutonEnregistrer(noeud, LA.livreAjoutModel({ pas: 2, champs: { title: 'X' } }));
+    ok(!bouton.disabled, 'livre : le titre tapé réveille le bouton, sur le nœud DÉJÀ rendu (R-UX-9)');
+    LA.majBoutonEnregistrer(noeud, LA.livreAjoutModel({ pas: 2, champs: { title: '  ' } }));
+    ok(bouton.disabled, 'livre : un titre effacé le redésactive');
+    LA.majBoutonEnregistrer(noeud, LA.livreAjoutModel({ pas: 2, champs: { title: 'X' }, enCours: true }));
+    ok(bouton.disabled, 'livre : pendant l’enregistrement le bouton reste fermé (pas de second envoi)');
+    // Le pas 1 n'a pas ce bouton : le helper y passe sans lever (la route l'appelle à chaque frappe, pas 1 compris).
+    let leve = null;
+    try { LA.majBoutonEnregistrer(LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1 }), {}), LA.livreAjoutModel({ pas: 2, champs: { title: 'X' } })); } catch (e) { leve = String(e); }
+    eq(leve, null, 'livre : sur une zone sans ce bouton, le helper ne lève pas');
+  }
+  {
+    // La ROUTE elle-même, sans réseau et sans écriture : ses gestes sont câblés, et une saisie à la main
+    // n'étiquette RIEN (I-B — aucune provenance à annoncer, personne n'a interrogé personne).
+    const racine = await LA.renderLivreAjoutRoute({}, {}, { books: [{ cuisines: ['italienne'] }], recipes: [] });
+    const bouton = (nom) => [...racine.querySelectorAll('button')].find((b) => b.textContent === nom);
+    const champ = racine.querySelector('input[name="isbn"]');
+    champ.value = ' 978-2-7619-5000-1 ';
+    champ.dispatchEvent(new Event('input', { bubbles: true }));
+    bouton('Saisir à la main').click();
+    eq(racine.querySelector('.status.info'), null, 'route livre : une saisie à la main n’étiquette aucune provenance (I-B)');
+    eq([...racine.querySelectorAll('span.muted')].filter((s) => s.textContent.startsWith('ISBN')).map((s) => s.textContent), ['ISBN 9782761950001'], 'route livre : l’ISBN tapé est nettoyé et rappelé au pas 2');
+    // Le défaut de R-UX-9, vu du côté de la personne : taper le titre réveille le bouton.
+    const titre = [...racine.querySelectorAll('input[type="text"]')].find((i) => i.name !== 'isbn');
+    ok(racine.querySelector('[data-role="enregistrer"]').disabled, 'route livre : pas 2 à champs vides → « Ajouter ce livre » fermé');
+    titre.value = 'Un titre'; titre.dispatchEvent(new Event('input', { bubbles: true }));
+    ok(!racine.querySelector('[data-role="enregistrer"]').disabled, 'route livre : le titre tapé ouvre « Ajouter ce livre » (R-UX-9, le défaut corrigé)');
+    eq(racine.querySelector('input[name="isbn"]'), null, 'route livre : on est bien resté au pas 2 (aucun redessin qui ferait sauter le curseur)');
+    bouton('← Changer d’ISBN').click();
+    eq(racine.querySelector('input[name="isbn"]').value, '9782761950001', 'route livre : le retour au pas 1 garde l’ISBN nettoyé');
   }
 }

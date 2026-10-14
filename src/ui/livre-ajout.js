@@ -47,12 +47,12 @@ export function fusionnerFiche(champs, fiche) {
   return out;
 }
 
-export function livreAjoutModel({ pas = 1, isbn = '', champs = {}, provenance = null, recherche = false, lecteurDisponible = true } = {}) {
+export function livreAjoutModel({ pas = 1, isbn = '', champs = {}, provenance = null, recherche = false, lecteurDisponible = true, enCours = false } = {}) {
   const c = { ...CHAMPS_VIDES(), ...champs };
   const provenanceMessage = provenance === 'openlibrary' ? t('Renseigné par Open Library — vérifie et corrige.')
     : provenance === 'googlebooks' ? t('Renseigné par Google Books — vérifie et corrige.')
     : provenance === 'aucune' ? t('Aucune fiche trouvée pour cet ISBN. Complète à la main.') : null;
-  return { pas, isbn, champs: c, provenance, recherche, lecteurDisponible, peutEnregistrer: pas === 2 && !!c.title.trim() && !recherche,
+  return { pas, isbn, champs: c, provenance, recherche, lecteurDisponible, enCours, peutEnregistrer: pas === 2 && !!c.title.trim() && !recherche && !enCours,
     messages: { provenance: provenanceMessage, recherche: recherche ? t('Recherche…') : null, lecteur: lecteurDisponible ? null : t('Le lecteur de code-barres n’est pas offert dans ce navigateur.') } };
 }
 
@@ -90,23 +90,34 @@ export function renderLivreAjout(model, gestes = {}) {
   return el('section', { class: 'card stack livre-ajout' },
     el('p', null, t('Vérifie la fiche, puis ajoute le livre.')),
     model.messages.provenance ? el('div', { class: 'status info' }, model.messages.provenance) : null,
-    model.isbn ? el('div', { class: 'row' }, el('span', { class: 'muted' }, `ISBN ${model.isbn}`), el('button', { type: 'button', class: 'btn link', onClick: g('retourIsbn') }, t('← Changer d’ISBN'))) : el('button', { type: 'button', class: 'btn link', onClick: g('retourIsbn') }, t('← Changer d’ISBN')),
+    model.isbn ? el('div', { class: 'row' }, el('span', { class: 'muted' }, `${t('ISBN')} ${model.isbn}`), el('button', { type: 'button', class: 'btn link', onClick: g('retourIsbn') }, t('← Changer d’ISBN'))) : el('button', { type: 'button', class: 'btn link', onClick: g('retourIsbn') }, t('← Changer d’ISBN')),
     field(t('Titre *'), inp('title')),
     field(t('Auteur / chef'), inp('author')),
     field(t('Langue du livre'), select([{ value: 'fr', label: 'Français' }, { value: 'en', label: 'English' }, { value: 'other', label: t('Autre') }], c.language, (v) => g('changerChamp')('language', v))),
-    field(t('Cuisines'), puces),
+    // R-UX-8 : les puces ne vont JAMAIS dans un label — field() rend un <label>, et un clic sur « Cuisines »
+    // cocherait alors la première puce. Même habillage, sans l'enveloppe qui vole le clic.
+    el('div', { class: 'field' }, el('span', null, t('Cuisines')), puces),
     typeof gestes.couverture === 'function' ? gestes.couverture() : null,
     el('details', null, el('summary', { class: 'btn' }, t('Plus de détails')),
       el('div', { class: 'two-col', style: { marginTop: '.8rem' } },
         field(t('Éditeur'), inp('publisher')), field(t('Année'), inp('year', 'number')),
         field(t('Convention de mesure (tasses, cuillères)'), select([{ value: '', label: t('Non confirmée — à préciser plus tard') }, ...listConventions().map((x) => ({ value: x.id, label: x.labels.fr }))], c.convention, (v) => g('changerChamp')('convention', v)),
           t('La langue du livre ne suffit pas à choisir une convention. Sans convention, les tasses restent affichées telles quelles.')))),
-    el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn primary', disabled: !model.peutEnregistrer, onClick: g('enregistrer') }, t('Ajouter ce livre'))));
+    el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn primary', dataset: { role: 'enregistrer' }, disabled: !model.peutEnregistrer, onClick: g('enregistrer') }, t('Ajouter ce livre'))));
+}
+
+// R-UX-9 : `disabled` n'est posé qu'une fois, à la construction — or le pas 2 s'ouvre souvent à champs vides et le
+// titre arrive FRAPPE PAR FRAPPE. Redessiner à chaque touche ferait sauter le curseur ; on ne touche donc que le
+// bouton, retrouvé par son rôle. Pur et tolérant : au pas 1 ce bouton n'existe pas, et ce n'est pas une erreur.
+export function majBoutonEnregistrer(zone, model) {
+  const bouton = zone?.querySelector?.('[data-role="enregistrer"]');
+  if (bouton) bouton.disabled = !model.peutEnregistrer;
+  return bouton || null;
 }
 
 // La route : état + gestes réels, re-rendu complet à chaque changement (le formulaire est petit).
 export async function renderLivreAjoutRoute(params, query, ctx) {
-  const etat = { pas: 1, isbn: '', champs: CHAMPS_VIDES(), provenance: null, recherche: false, lecteurDisponible: 'BarcodeDetector' in window, existantes: cuisinesExistantes(ctx), couverture: null };
+  const etat = { pas: 1, isbn: '', champs: CHAMPS_VIDES(), provenance: null, recherche: false, enCours: false, lecteurDisponible: 'BarcodeDetector' in window, existantes: cuisinesExistantes(ctx), couverture: null };
   const root = el('div', null, pageHeader(t('Ajouter un livre'), { back: { href: '/add', label: t('Ajouter') } }));
   const zone = el('div', null);
   root.append(zone);
@@ -114,6 +125,8 @@ export async function renderLivreAjoutRoute(params, query, ctx) {
   const identifier = async () => {
     const isbn = nettoyerIsbn(etat.isbn);
     if (!isbn) { toast(t('Saisis un ISBN d’abord.')); return; }
+    // Une provenance ne survit pas à l'ISBN qui l'a produite (I-B) : la précédente tombe avant le nouvel appel.
+    etat.provenance = null;
     etat.recherche = true; dessiner();
     const ctl = new AbortController();
     const chrono = setTimeout(() => ctl.abort(), LIMITES_ISBN.delaiMs);
@@ -137,17 +150,22 @@ export async function renderLivreAjoutRoute(params, query, ctx) {
       } catch { toast(t('Lecture du code-barres impossible.')); }
     },
     saisirMain: () => { etat.isbn = nettoyerIsbn(etat.isbn); etat.provenance = null; etat.pas = 2; dessiner(); },
-    changerChamp: (k, v) => { etat.champs[k] = v; },
+    changerChamp: (k, v) => { etat.champs[k] = v; majBoutonEnregistrer(zone, livreAjoutModel(etat)); },
     basculerCuisine: (v) => { etat.champs.cuisines = basculerPuce(etat.champs.cuisines, v); dessiner(); },
     ajouterCuisine: (v) => { const apres = ajouterPuce(etat.champs.cuisines, v); if (apres !== etat.champs.cuisines) { etat.champs.cuisines = apres; dessiner(); } },
-    retourIsbn: () => { etat.pas = 1; dessiner(); },
+    retourIsbn: () => { etat.pas = 1; etat.provenance = null; dessiner(); },
     // Une écriture refusée ne s'annonce pas (I-B) : on reste au pas 2, la saisie est intacte, et c'est dit.
+    // `enCours` ferme le bouton pendant l'écriture : deux tapes pressées ne font pas deux livres.
     enregistrer: async () => {
       if (!livreAjoutModel(etat).peutEnregistrer) return;
+      etat.enCours = true;
+      majBoutonEnregistrer(zone, livreAjoutModel(etat));
       let edition;
       try {
         edition = await enregistrerLivre({ champs: etat.champs, isbn: etat.isbn, coverSha256: etat.couverture?.sha256 || null }, { repo });
       } catch (e) {
+        etat.enCours = false;
+        majBoutonEnregistrer(zone, livreAjoutModel(etat));
         logError('livre.enregistrer', { error: e });
         toast(t('Le livre n’a pas pu être enregistré. Réessaie.'));
         return;
