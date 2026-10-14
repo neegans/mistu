@@ -522,6 +522,20 @@ export async function runSyncL3Tests({ eq, ok }) {
   eq(decider({ locale: L('t2', { a: 1 }), distante: { data: L('t2', { a: 2 }), updated_at: 't2', deleted_at: null } }), 'conflit', 'réception : égalité différente → conflit sans remise en file');
   eq(decider({ locale: L('t1'), distante: { data: {}, updated_at: 't2', deleted_at: 't2' } }), 'supprimer', 'réception : tombale → suppression');
   eq(decider({ locale: undefined, distante: { data: {}, updated_at: 't2', deleted_at: 't2' } }), 'ignorer', 'réception : tombale d’une fiche inconnue → rien');
+  // R-L3-26 (amende § 5.5) : une tombale reçue obéit à I7 comme tout le reste. La lettre de § 5.5 disait « ligne
+  // reçue avec deleted_at → suppression locale », sans comparer les instants : une tombale du 10 octobre effaçait
+  // une version locale du 12, sans conflit et sans trace. L'ordre du moteur (envoi puis réception, réception sautée
+  // si l'envoi a buté) masquait le cas général — sauf que `lireFile` écarte les entrées EN QUARANTAINE sans
+  // produire d'erreur : l'envoi « réussit », la réception se poursuit, et la tombale venue d'ailleurs effaçait la
+  // fiche locale plus récente dont l'envoi était justement bloqué (une fiche grossie au-delà de 512 Ko, motif
+  // « taille »). I7 est l'invariant, donc c'est § 5.5 qui cède.
+  const T = (u) => ({ data: null, updated_at: u, deleted_at: u });
+  eq(decider({ locale: L('2026-10-12T10:00:00Z'), distante: T('2026-10-10T10:00:00Z') }), 'conflit_renvoyer', 'R-L3-26 : une tombale PLUS ANCIENNE que la fiche locale ne supprime pas — la personne tranche');
+  eq(decider({ locale: L('2026-10-10T10:00:00Z'), distante: T('2026-10-10T10:00:00Z') }), 'supprimer', 'R-L3-26 : à instant ÉGAL la tombale gagne (une suppression est le dernier mot sur cette heure)');
+  eq(decider({ locale: L('2026-10-10T10:00:00.000Z'), distante: T('2026-10-10T10:00:00+00:00') }), 'supprimer', 'R-L3-26 : … et les deux écritures du même instant ne font pas un faux conflit (R-L3-11)');
+  eq(decider({ locale: L('2026-10-10T10:00:00Z'), distante: T('2026-10-12T10:00:00Z') }), 'supprimer', 'R-L3-26 : une tombale plus récente supprime, comme avant');
+  eq(decider({ locale: L('t3'), distante: T('t2') }), 'conflit_renvoyer', 'R-L3-26 : heures illisibles → repli sur la chaîne, pour rester déterministe');
+  eq(decider({ locale: undefined, distante: T('2026-10-10T10:00:00Z') }), 'ignorer', 'R-L3-26 : une tombale d’une fiche inconnue ne dit toujours rien');
   // jsonb RÉORDONNE les clés : la copie du serveur revient presque toujours dans un autre ordre que la fiche locale.
   // Comparées par JSON brut, deux fiches identiques feraient un conflit à chaque égalité d'updated_at.
   eq(decider({ locale: { id: 'x', a: 1, b: 2, updated_at: 't2' }, distante: { data: { updated_at: 't2', b: 2, a: 1, id: 'x' }, updated_at: 't2', deleted_at: null } }), 'ignorer', 'réception : mêmes champs dans un autre ordre (jsonb réordonne) → identiques, rien');
@@ -542,9 +556,16 @@ export async function runSyncL3Tests({ eq, ok }) {
   eq([estAncetre(boucle, 'c1', 'c2'), estAncetre(boucle, 'zz', 'c2')], [true, false], 'réception : une chaîne de versions bouclée (fiche bricolée, archive) ne fait pas tourner estAncetre sans fin');
 
   await withRepo(async (repo, db) => {
-    await repo.save('books', { id: 'p1', title: 'Ici plus récent', updated_at: '2026-10-13T12:00:00Z' });
-    await repo.save('books', { id: 'p3', title: 'À supprimer', updated_at: '2026-10-13T10:00:00Z' });
-    await db.mutate({ deletes: { outbox: (await db.getAll('outbox')).map((e) => e.seq) }, origin: 'device' });
+    // Les deux fiches sont écrites par `db.mutate` d'origine 'device', et c'est voulu : `repo.save` REMPLACE
+    // l'`updated_at` reçu par `syncNow()`, donc les deux dates ci-dessous n'étaient pas celles que la base portait
+    // — p3 était en réalité datée de maintenant, et la tombale du 13 octobre n'était plus la plus récente. Le
+    // décalage ne se voyait pas tant qu'une tombale gagnait sans comparer les instants ; R-L3-26 le révèle. Écrites
+    // ainsi, les dates du test sont celles de la base, et l'origine 'device' n'est de toute façon pas capturée.
+    await db.mutate({ puts: { books: [
+      { id: 'p1', title: 'Ici plus récent', updated_at: '2026-10-13T12:00:00Z' },
+      { id: 'p3', title: 'À supprimer', updated_at: '2026-10-13T10:00:00Z' },
+    ] }, origin: 'device' });
+    eq(await db.count('outbox'), 0, 'réception : la file est vide avant la page (les écritures d’origine « device » ne sont pas capturées)');
     const page1 = [
       { id: 'p1', data: { id: 'p1', title: 'Ailleurs plus vieux', updated_at: '2026-10-13T11:00:00Z' }, updated_at: '2026-10-13T11:00:00Z', deleted_at: null, server_seq: 10 },
       { id: 'p2', data: { id: 'p2', title: 'Nouveau', updated_at: '2026-10-13T11:30:00Z' }, updated_at: '2026-10-13T11:30:00Z', deleted_at: null, server_seq: 11 },
@@ -717,6 +738,25 @@ export async function runSyncL3Tests({ eq, ok }) {
     let restant;
     try { restant = await purgerAnciens(db, Date.parse('2026-10-13T00:00:00Z')); } finally { db.mutate = vraiMutate; }
     eq([restant, transactions], [0, 0], 'conflits : une purge sans rien à retirer n’ouvre aucune transaction');
+  });
+
+  // --- R-L3-26 de bout en bout : une tombale plus ancienne que la fiche locale ne l'efface pas en silence
+  await withRepo(async (repo, db) => {
+    // Écrite sans capture : la file doit ne porter QUE ce que la réception y remet.
+    await db.mutate({ puts: { books: [{ id: 'tb', title: 'Plus récent ici', updated_at: '2026-10-13T12:00:00Z' }] }, origin: 'device' });
+    const page = [{ id: 'tb', data: { id: 'tb', title: 'Ailleurs' }, updated_at: '2026-10-13T11:00:00Z', deleted_at: '2026-10-13T11:00:00Z', server_seq: 20 }];
+    const tf = creerTransportFactice({ lire: { books: [page, []] } });
+    const r = await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1' }).recevoir();
+    eq([r.recues, r.supprimees, r.conflits, r.erreur], [0, 0, 1, null], 'R-L3-26 : la tombale plus ancienne n’efface rien et journalise un conflit');
+    eq((await db.get('books', 'tb'))?.title, 'Plus récent ici', 'R-L3-26 : la fiche locale, plus récente, est conservée');
+    const c = await db.get('sync_conflicts', 'books:tb');
+    eq([c.server.data, c.server.updated_at, c.server.deleted_at, c.kind], [null, '2026-10-13T11:00:00Z', '2026-10-13T11:00:00Z', 'donnees'], 'R-L3-26 : le conflit porte server = { data: null, updated_at, deleted_at } — jamais une fiche que le serveur n’a plus');
+    eq((await db.getAll('outbox')).map((e) => [e.store, e.id, e.op, e.updated_at]), [['books', 'tb', 'put', '2026-10-13T12:00:00Z']], 'R-L3-26 : … et la fiche locale repart en file (le serveur l’acceptera, elle est plus récente)');
+    eq((await db.get('sync_state', 'cursor:books'))?.value, 20, 'R-L3-26 : le curseur avance quand même — la page a bien été traitée');
+    // Le geste de la personne : « Garder celle d'ailleurs » sur ce conflit applique la suppression ici.
+    await db.mutate({ deletes: { outbox: (await db.getAll('outbox')).map((e) => e.seq) }, origin: 'device' });
+    ok(await garderAilleurs(db, c), 'R-L3-26 : « Garder celle d’ailleurs » s’applique à un conflit de tombale');
+    eq([await db.get('books', 'tb'), await db.count('outbox'), await db.get('sync_conflicts', 'books:tb')], [undefined, 0, undefined], 'R-L3-26 : … la fiche est supprimée ici, sans remise en file, conflit effacé');
   });
 
   // --- Cycle complet entre deux appareils, arbitré comme le serveur (R-L3-21)

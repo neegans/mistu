@@ -39,18 +39,24 @@ const instant = (valeur) => {
 };
 
 export function decider({ locale, distante }) {
-  if (distante.deleted_at) return locale === undefined || locale === null ? 'ignorer' : 'supprimer';
-  if (locale === undefined || locale === null) return 'ecrire';
+  if (locale === undefined || locale === null) return distante.deleted_at ? 'ignorer' : 'ecrire';
+  // Les deux heures, comparées comme des INSTANTS ; repli sur la chaîne si l'une est illisible, pour rester
+  // déterministe. C'est la seule question que I7 pose — et elle se pose aussi à une tombale.
   const ici = instant(locale.updated_at), ailleurs = instant(distante.updated_at);
-  if (ici !== null && ailleurs !== null) {
-    if (ailleurs > ici) return 'ecrire';
-    if (ici > ailleurs) return 'conflit_renvoyer';
-  } else {
-    // Une heure illisible ne se compare pas comme un instant : repli sur la chaîne, pour rester déterministe.
-    const l = String(locale.updated_at || ''), d = String(distante.updated_at || '');
-    if (d > l) return 'ecrire';
-    if (l > d) return 'conflit_renvoyer';
-  }
+  const lisibles = ici !== null && ailleurs !== null;
+  const l = String(locale.updated_at || ''), d = String(distante.updated_at || '');
+  const plusRecentIci = lisibles ? ici > ailleurs : l > d;
+  const plusRecentAilleurs = lisibles ? ailleurs > ici : d > l;
+  // R-L3-26 (amende § 5.5) : une tombale aussi obéit à I7. La lettre de § 5.5 (« ligne reçue avec deleted_at →
+  // suppression locale ») faisait gagner une tombale du 10 octobre contre une version locale du 12, sans conflit et
+  // sans trace — une perte muette, et atteignable : `lireFile` écarte les entrées en quarantaine SANS produire
+  // d'erreur, donc l'envoi « réussit », la réception se poursuit, et la tombale efface la fiche locale plus récente
+  // dont l'envoi était justement bloqué (une fiche grossie au-delà de 512 Ko, par exemple). À instant ÉGAL la
+  // tombale gagne : une suppression est le dernier mot sur cette heure. Plus ancienne, c'est la personne qui
+  // tranche (« Garder celle d'ailleurs » applique alors la suppression) — jamais une suppression silencieuse.
+  if (distante.deleted_at) return plusRecentIci ? 'conflit_renvoyer' : 'supprimer';
+  if (plusRecentAilleurs) return 'ecrire';
+  if (plusRecentIci) return 'conflit_renvoyer';
   return identiques(locale, distante.data) ? 'ignorer' : 'conflit';
 }
 
@@ -138,7 +144,13 @@ export function createPull({ db, transport, isActivitySynced = () => false, getU
         }
         continue;
       }
-      conflits.push({ id: `${table}:${ligne.id}`, store: table, record_id: ligne.id, local: locale, server: { data: ligne.data, updated_at: ligne.updated_at, deleted_at: null }, at: new Date().toISOString(), kind: 'donnees' });
+      // R-L3-26 : la version du serveur, telle qu'il la porte VRAIMENT. Pour une tombale, `data` est nul — le
+      // serveur garde bien le corps de la ligne supprimée, mais le journal ne doit pas offrir à la personne une
+      // fiche qui n'existe plus là-bas, et c'est `deleted_at` qui dit à `garderAilleurs` d'appliquer la suppression.
+      const versionServeur = ligne.deleted_at
+        ? { data: null, updated_at: ligne.updated_at, deleted_at: ligne.deleted_at }
+        : { data: ligne.data, updated_at: ligne.updated_at, deleted_at: null };
+      conflits.push({ id: `${table}:${ligne.id}`, store: table, record_id: ligne.id, local: locale, server: versionServeur, at: new Date().toISOString(), kind: 'donnees' });
       // conflit_renvoyer : la fiche d'ici est plus récente, elle est conservée ET remise en file — le serveur
       // l'acceptera. L'entrée est écrite EXPLICITEMENT : l'origine 'remote' de la transaction fait que la capture
       // ne la verrait pas (c'est voulu : rien d'autre dans cette page ne doit repartir).
