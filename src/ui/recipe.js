@@ -39,6 +39,16 @@ export async function renderRecipe(params, query, ctx) {
     subtitle: provenanceText(recipe, book, edition), back: edition ? { href: `/books/${edition.id}`, label: book?.title || t('Livre') } : { href: '/library', label: t('Mes livres') },
     actions: [favBtn],
   }));
+
+  // Conflit de version (spec § 5.5) : les deux appareils ont adapté cette recette en parallèle. AUCUNE version
+  // n'est masquée — la liste des versions plus bas reste entière, et l'original n'est jamais réécrit ; seule une
+  // ligne le dit, ici, là où la personne regarde la recette. La décision se prend dans Réglages, nulle part ailleurs.
+  const conflit = await repo.get('sync_conflicts', 'recipes:' + params.id);
+  if (conflit?.kind === 'version') {
+    root.append(el('div', { class: 'card warn stack' },
+      el('p', null, t('Une autre version a été créée ailleurs — les deux versions sont conservées.')),
+      el('a', { class: 'btn', href: '#/settings' }, t('Trancher dans Réglages'))));
+  }
   root.append(el('div', { class: 'row', style: { marginBottom: '.8rem' } }, availabilityBadge(recipe), versionBadge(version), recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, c))));
 
   if (!version) { root.append(referenceOnly()); return root; }
