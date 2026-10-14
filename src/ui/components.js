@@ -82,8 +82,11 @@ export function recipeCard(doc, { extra = null, href = null, reasons = null } = 
 // La vignette d'un livre (spec § 6) : l'image si la LIGNE files est là, sinon le titre sur le fond — et rien de plus.
 // Un pointeur cover_sha256 sans octets (fiche reçue d'un autre appareil, avant L4) n'est pas un manque à signaler ici :
 // une grille de livres n'est pas l'endroit pour dire ce qui n'est pas arrivé (la fiche du livre, elle, le dit).
+// R-UX-14 : quand l'image est là, le titre et l'auteur passent en display:none — c'est l'IMAGE qui doit alors porter
+// le nom, sinon le lien n'a plus de nom du tout pour qui ne voit pas la couverture. Sans titre connu : alt vide
+// (décorative), jamais un nom inventé.
 export function bookCover(edition, book, { href = null, fichier = null } = {}) {
-  const image = fichier?.blob instanceof Blob ? el('img', { class: 'cover-img', alt: '', src: urlDeBlob(fichier.blob) }) : null;
+  const image = fichier?.blob instanceof Blob ? el('img', { class: 'cover-img', alt: book?.title || '', src: urlDeBlob(fichier.blob) }) : null;
   return el('a', { class: 'cover-wrap', href: href || `#/books/${edition.id}` },
     el('div', { class: `cover${image ? ' with-img' : ''}` }, image,
       el('div', { class: 'title' }, book?.title || t('Sans titre')),

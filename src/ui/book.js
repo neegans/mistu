@@ -112,13 +112,27 @@ export async function renderBook(params, query, ctx) {
 
   // Couverture (spec § 6) : visible, hors du <details> replié ; « Retirer » ne touche que le pointeur.
   const etatCouv = { sha256: edition.cover_sha256 || null, apercu: fichierCouverture?.blob ? urlDeBlob(fichierCouverture.blob) : null, message: edition.cover_sha256 && !fichierCouverture ? t('La couverture n’est pas sur cet appareil.') : null, enCours: false };
+  // Le ré-encodage d'une photo de téléphone prend un instant : les boutons se ferment pendant (aucune double pose),
+  // et l'état réel est redessiné sur place. En cas de succès, refresh() rend la fiche entière.
+  const zoneCouv = el('div', null);
+  const dessinerCouv = () => zoneCouv.replaceChildren(renderZoneCouverture(etatCouv, gestesCouv));
   const poser = async (capture) => {
     const files = await pickFiles({ accept: 'image/*', multiple: false, capture });
     if (!files.length) return;
+    etatCouv.enCours = true; dessinerCouv();
     try { const { sha256 } = await poserCouverture(files[0], { origine: 'locale' }); await repo.save('book_editions', { ...edition, cover_sha256: sha256 }); toast(t('Couverture enregistrée.')); refresh(); }
-    catch { toast(t('Cette image ne peut pas être lue ici. Essaie une autre photo.')); }
+    catch (e) {
+      etatCouv.enCours = false; dessinerCouv();
+      toast(e?.code === 'trop_lourde' ? t('Cette image est trop lourde (25 Mo au plus).') : t('Cette image ne peut pas être lue ici. Essaie une autre photo.'));
+    }
   };
-  root.append(section(t('Couverture'), renderZoneCouverture(etatCouv, { photographier: () => poser('environment'), choisir: () => poser(null), retirer: async () => { await repo.save('book_editions', { ...edition, cover_sha256: null }); toast(t('Couverture retirée.')); refresh(); } })));
+  const gestesCouv = {
+    photographier: () => poser('environment'),
+    choisir: () => poser(null),
+    retirer: async () => { await repo.save('book_editions', { ...edition, cover_sha256: null }); toast(t('Couverture retirée.')); refresh(); },
+  };
+  dessinerCouv();
+  root.append(section(t('Couverture'), zoneCouv));
 
   // Index : ajouter des entrées directement depuis la fiche du livre
   const indexPanel = indexEntriesPanel(null, ctx, () => [], { editionId: edition.id });

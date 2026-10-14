@@ -551,6 +551,7 @@ export async function runAjouterTests({ eq, ok }) {
     eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => reponseBlob(200, bonPng, 'image/png', 6 * 1024 * 1024) }), null, 'couverture : Content-Length 6 Mo → null AVANT de lire le corps');
     eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => reponseBlob(200, png(20000, 20000)) }), null, 'couverture : 400 Mpx annoncés par l’en-tête → null, jamais décodé');
     eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => { throw new Error('cors'); } }), null, 'couverture : rejet (CORS/réseau) → null, aucune exception');
+    eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => reponseBlob(200, png(400, 600), 'image/webp') }), null, 'couverture : le type ANNONCÉ doit être celui du conteneur réel, sinon null');
     // « AVANT de lire le corps » est une affirmation : elle se mesure par un espion sur blob(), pas par le résultat.
     let lectures = 0;
     const espion = (longueur) => ({ ok: true, status: 200, headers: new Headers({ 'content-type': 'image/png', 'content-length': String(longueur) }), blob: async () => { lectures += 1; return bonPng; } });
@@ -601,6 +602,8 @@ export async function runAjouterTests({ eq, ok }) {
       const { bookCover } = await import('../src/ui/components.js');
       const avec = bookCover({ id: 'e1', cover_sha256: sha256 }, { title: 'T' }, { fichier: ligne });
       ok(avec.querySelector('img.cover-img') && avec.querySelector('.cover').classList.contains('with-img'), 'bookCover : fichier présent → <img>');
+      eq(avec.querySelector('img.cover-img').getAttribute('alt'), 'T', 'bookCover : l’image PORTE le nom du livre — le texte est caché, le lien doit rester nommé (R-UX-14)');
+      eq(bookCover({ id: 'e2' }, null, { fichier: ligne }).querySelector('img').getAttribute('alt'), '', 'bookCover : sans titre connu, l’image reste décorative (alt vide), jamais un nom inventé');
       // Poser un src lance le chargement même hors document : révoquer avant la fin donnerait une erreur console
       // (net::ERR_FILE_NOT_FOUND). On attend donc la fin réelle du chargement avant de rendre les URL.
       await new Promise((r) => { const img = avec.querySelector('img.cover-img'); if (img.complete) r(); else { img.onload = r; img.onerror = r; } });
@@ -621,5 +624,152 @@ export async function runAjouterTests({ eq, ok }) {
     eq(avecImg.querySelector('img')?.getAttribute('src'), APERCU, 'couverture : avec une image, l’aperçu est affiché tel qu’il est donné');
     [...avecImg.querySelectorAll('button')].find((b) => b.textContent === 'Retirer').click();
     eq(appels, ['retirer'], 'couverture : « Retirer » n’efface que le pointeur (le geste), jamais la ligne files');
+  }
+  // --- § 6 Couverture, la ROUTE : une couverture appartient à l’ISBN qui l’a demandée (R-UX-13)
+  {
+    const { withRepo } = await import('./sync-fixture.js');
+    const vraiFetch = globalThis.fetch;
+    // La route lit globalThis.fetch (elle ne prend pas de fetch injecté) : il est stubbé ici, restauré en finally.
+    // Aucun réseau : chaque adresse attendue a sa réponse factice, et toute autre répond 404.
+    const attendre = async (condition, quoi) => {
+      for (let i = 0; i < 300; i += 1) { if (condition()) return true; await new Promise((r) => setTimeout(r, 10)); }
+      throw new Error(`attente dépassée (3 s) : ${quoi}`);
+    };
+    const attendreImages = (n) => Promise.all([...n.querySelectorAll('img')].map((i) => (i.complete ? null : new Promise((r) => { i.onload = r; i.onerror = r; }))));
+    try {
+      await withRepo(async () => {
+        // Une VRAIE image : poserCouverture décode par createImageBitmap, un en-tête fabriqué échouerait (F11).
+        const toile = document.createElement('canvas'); toile.width = 120; toile.height = 160;
+        toile.getContext('2d').fillRect(0, 0, 120, 160);
+        const vraiePng = await new Promise((r) => toile.toBlob(r, 'image/png'));
+        const urls = [];
+        const couvertures = new Map(); // isbn → fonction qui rend la réponse (le test maîtrise le moment)
+        const sansFicheOl = new Set();
+        let corpsLus = 0;
+        const r404 = { ok: false, status: 404, headers: new Headers(), text: async () => '', blob: async () => new Blob([]) };
+        const reponseImage = () => ({ ok: true, status: 200, headers: new Headers({ 'content-type': 'image/png', 'content-length': String(vraiePng.size) }), blob: async () => { corpsLus += 1; return vraiePng; } });
+        globalThis.fetch = async (url) => {
+          const u = String(url);
+          urls.push(u);
+          if (u.startsWith('https://covers.openlibrary.org/')) {
+            const isbn = u.slice(u.indexOf('/b/isbn/') + 8).split('-L')[0];
+            const donner = couvertures.get(isbn);
+            return donner ? await donner() : r404;
+          }
+          if (u.startsWith('https://openlibrary.org/api/books')) {
+            const isbn = u.split('ISBN:')[1].split('&')[0];
+            if (sansFicheOl.has(isbn)) return r404;
+            return { ok: true, status: 200, headers: new Headers(), text: async () => JSON.stringify({ [`ISBN:${isbn}`]: { title: `Livre ${isbn}`, authors: [], publishers: [], publish_date: '2020' } }) };
+          }
+          if (u.startsWith('https://www.googleapis.com/books/')) {
+            return { ok: true, status: 200, headers: new Headers(), text: async () => JSON.stringify({ items: [{ volumeInfo: { title: 'Livre de Google', authors: [], publishedDate: '2019' } }] }) };
+          }
+          return r404;
+        };
+        const zone = (root) => root.querySelector('.zone-couverture');
+        const image = (root) => !!zone(root)?.querySelector('img');
+        const message = (root) => zone(root)?.querySelector('small')?.textContent || null;
+        const taper = (root, isbn) => { const i = root.querySelector('input[name="isbn"]'); i.value = isbn; i.dispatchEvent(new Event('input')); };
+        const cliquer = (root, texte) => { const b = [...root.querySelectorAll('button')].find((x) => x.textContent === texte); if (!b) throw new Error(`bouton absent : ${texte}`); b.click(); return b; };
+        const RIEN = 'Aucune couverture reçue. Tu peux la photographier.';
+
+        // 1. Une couverture reçue ne survit pas à l’ISBN qui l’a produite.
+        couvertures.set('111', async () => reponseImage());
+        const r1 = await LA.renderLivreAjoutRoute({}, {}, {});
+        taper(r1, '111'); cliquer(r1, 'Identifier');
+        await attendre(() => image(r1), 'la couverture de 111 est affichée');
+        eq(message(r1), 'Couverture reçue d’Open Library.', 'route : la couverture reçue d’Open Library est annoncée, image à l’appui (I-B)');
+        cliquer(r1, '← Changer d’ISBN');
+        taper(r1, '222'); cliquer(r1, 'Identifier');
+        await attendre(() => message(r1) === RIEN, 'la réponse pour 222 (aucune couverture)');
+        eq(image(r1), false, 'route : la couverture de l’ISBN précédent ne survit pas à une nouvelle identification (R-UX-13)');
+        await attendreImages(r1);
+
+        // 2. Une réponse tardive appartient à SA demande : celle d’un ISBN abandonné est ignorée.
+        let libererA = null;
+        couvertures.set('333', async () => { await new Promise((r) => { libererA = r; }); return reponseImage(); });
+        const r2 = await LA.renderLivreAjoutRoute({}, {}, {});
+        taper(r2, '333'); cliquer(r2, 'Identifier');
+        await attendre(() => zone(r2) && libererA, 'la demande de couverture de 333 est en vol');
+        cliquer(r2, '← Changer d’ISBN');
+        taper(r2, '444'); cliquer(r2, 'Identifier');
+        await attendre(() => message(r2) === RIEN, 'la réponse pour 444 (aucune couverture)');
+        const lusAvant = corpsLus;
+        libererA();
+        await attendre(() => corpsLus > lusAvant, 'le corps de la réponse tardive de 333 est lu');
+        await new Promise((r) => setTimeout(r, 200)); // large : le chemin complet de 111 a tenu dans la même attente
+        eq([image(r2), message(r2)], [false, RIEN], 'route : la réponse tardive d’un ISBN abandonné n’écrit RIEN à l’écran (R-UX-13)');
+        await attendreImages(r2);
+
+        // 3. « Retirer » tient devant une réponse tardive du MÊME ISBN (touchee) : ici l’ISBN ne peut rien trancher.
+        let libererB = null;
+        let tours = 0;
+        couvertures.set('555', async () => { tours += 1; if (tours === 1) await new Promise((r) => { libererB = r; }); return reponseImage(); });
+        const r3 = await LA.renderLivreAjoutRoute({}, {}, {});
+        taper(r3, '555'); cliquer(r3, 'Identifier');
+        await attendre(() => zone(r3) && libererB, 'la 1re demande de couverture de 555 est en vol');
+        cliquer(r3, '← Changer d’ISBN');
+        taper(r3, '555'); cliquer(r3, 'Identifier');
+        await attendre(() => image(r3), 'la 2e demande de 555 a posé la couverture');
+        cliquer(r3, 'Retirer');
+        eq([image(r3), message(r3)], [false, null], 'route : « Retirer » vide la zone sur-le-champ');
+        const lus2 = corpsLus;
+        libererB();
+        await attendre(() => corpsLus > lus2, 'le corps de la réponse tardive de la 1re demande est lu');
+        await new Promise((r) => setTimeout(r, 200));
+        eq(image(r3), false, 'route : une réponse tardive ne remet pas une couverture que la personne vient de retirer (R-UX-13)');
+        await attendreImages(r3);
+
+        // 4. La couverture n’est demandée QUE si Open Library a identifié le livre (I-A : provenance étiquetée).
+        sansFicheOl.add('666');
+        const avant = urls.length;
+        const r4 = await LA.renderLivreAjoutRoute({}, {}, {});
+        taper(r4, '666'); cliquer(r4, 'Identifier');
+        await attendre(() => zone(r4), 'le pas 2 pour 666');
+        await new Promise((r) => setTimeout(r, 200));
+        const depuis = urls.slice(avant);
+        eq([depuis.some((u) => u.startsWith('https://covers.openlibrary.org/')), depuis.some((u) => u.startsWith('https://www.googleapis.com/books/')), r4.textContent.includes('Renseigné par Google Books')],
+          [false, true, true], 'route : une fiche venue de Google Books ne demande AUCUNE couverture à Open Library (I-A)');
+        eq(message(r4), null, 'route : sans demande de couverture, la zone ne raconte rien (I-B)');
+        BU.revoquerUrlsDeBlob();
+      });
+    } finally { globalThis.fetch = vraiFetch; }
+  }
+  // --- § 6 Couverture : ce que la fiche livre et Mes livres MONTRENT, sur une base jetable
+  {
+    const { withRepo } = await import('./sync-fixture.js');
+    const { renderBook } = await import('../src/ui/book.js');
+    const { renderLibrary } = await import('../src/ui/library.js');
+    await withRepo(async (repo) => {
+      const toile = document.createElement('canvas'); toile.width = 600; toile.height = 800;
+      toile.getContext('2d').fillRect(0, 0, 600, 800);
+      const photo = await new Promise((r) => toile.toBlob(r, 'image/png'));
+      const { sha256 } = await LA.poserCouverture(photo, { origine: 'locale', repo });
+      const avecOctets = { id: 'eC', book_id: 'bC', year: 2020, cover_sha256: sha256 };
+      const sansOctets = { id: 'eD', book_id: 'bD', year: 2021, cover_sha256: 'empreinte-jamais-recue' };
+      const livreC = { id: 'bC', title: 'Avec sa couverture', author: 'A. Autrice', cuisines: [] };
+      const livreD = { id: 'bD', title: 'Pointeur seul', author: 'B. Auteur', cuisines: [] };
+      const ctx = {
+        book_editions: [avecOctets, sansOctets], recipes: [], recipe_versions: [], source_documents: [], source_pages: [],
+        rediscovery_prefs: [], dishes: [], dish_recipe_links: [], recipesById: new Map(), docsByRecipe: new Map(),
+        scan_sessions: [], settings: {}, books: [livreC, livreD],
+        booksById: new Map([['bC', livreC], ['bD', livreD]]),
+        editionsById: new Map([['eC', avecOctets], ['eD', sansOctets]]),
+        editionLabel: (e) => (e.book_id === 'bC' ? livreC.title : livreD.title),
+      };
+      const blocCouverture = (n) => [...n.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Couverture');
+      const fichePointeur = await renderBook({ id: 'eD' }, {}, ctx);
+      eq([blocCouverture(fichePointeur)?.querySelector('small')?.textContent, fichePointeur.querySelectorAll('img.cover-img').length],
+        ['La couverture n’est pas sur cet appareil.', 0], 'fiche : un pointeur sans ligne files le DIT, et n’affiche aucune image (§ 6)');
+      const ficheAvec = await renderBook({ id: 'eC' }, {}, ctx);
+      const enTete = [...ficheAvec.querySelectorAll('.row.top')].find((r) => r.querySelector('header'));
+      eq([!!enTete?.querySelector('img.cover-img'), !!blocCouverture(ficheAvec), blocCouverture(ficheAvec)?.querySelector('small')],
+        [true, true, null], 'fiche : la couverture est dans l’en-tête, le bloc « Couverture » est visible, et rien n’est signalé (§ 6)');
+      const biblio = await renderLibrary({}, {}, ctx);
+      eq([biblio.querySelectorAll('img.cover-img').length, biblio.textContent.includes('pas sur cet appareil')],
+        [1, false], 'Mes livres : une image pour l’édition dont les octets sont là, et la grille reste muette pour l’autre (§ 6)');
+      await Promise.all([...[fichePointeur, ficheAvec, biblio].flatMap((n) => [...n.querySelectorAll('img')])].map((i) => (i.complete ? null : new Promise((r) => { i.onload = r; i.onerror = r; }))));
+      BU.revoquerUrlsDeBlob();
+    });
   }
 }

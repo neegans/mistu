@@ -93,7 +93,8 @@ export async function recupererCouvertureParIsbn(isbn, { fetch = globalThis.fetc
     const blob = await corpsBorne(r, type);
     if (!blob) return null;
     const dims = await dimensionsImage(blob);
-    if (!dims || dims.largeur * dims.hauteur > LIMITES_COUVERTURE.pixels) return null;
+    if (!dims || dims.type !== type) return null; // le type annoncé doit être celui du conteneur réellement reçu
+    if (dims.largeur * dims.hauteur > LIMITES_COUVERTURE.pixels) return null;
     return blob;
   } catch { return null; }
 }
@@ -194,7 +195,9 @@ export function majBoutonEnregistrer(zone, model) {
 
 // La route : état + gestes réels, re-rendu complet à chaque changement (le formulaire est petit).
 export async function renderLivreAjoutRoute(params, query, ctx) {
-  const COUVERTURE_VIDE = () => ({ sha256: null, apercu: null, message: null, enCours: false });
+  // `touchee` (R-UX-13) : la personne a agi sur la couverture (choisi une image, ou retiré). Une réponse distante
+  // tardive ne défait jamais un geste — même si l'ISBN, lui, n'a pas changé.
+  const COUVERTURE_VIDE = () => ({ sha256: null, apercu: null, message: null, enCours: false, touchee: false });
   const etat = { pas: 1, isbn: '', champs: CHAMPS_VIDES(), provenance: null, recherche: false, enCours: false, lecteurDisponible: 'BarcodeDetector' in window, existantes: cuisinesExistantes(ctx), couverture: COUVERTURE_VIDE() };
   const root = el('div', null, pageHeader(t('Ajouter un livre'), { back: { href: '/add', label: t('Ajouter') } }));
   const zone = el('div', null);
@@ -204,7 +207,9 @@ export async function renderLivreAjoutRoute(params, query, ctx) {
     const isbn = nettoyerIsbn(etat.isbn);
     if (!isbn) { toast(t('Saisis un ISBN d’abord.')); return; }
     // Une provenance ne survit pas à l'ISBN qui l'a produite (I-B) : la précédente tombe avant le nouvel appel.
+    // R-UX-13 : la COUVERTURE non plus — c'est l'image d'un autre livre. Elle tombe ici, pas quand la réponse arrive.
     etat.provenance = null;
+    etat.couverture = COUVERTURE_VIDE();
     etat.recherche = true; dessiner();
     const ctl = new AbortController();
     const chrono = setTimeout(() => ctl.abort(), LIMITES_ISBN.delaiMs);
@@ -214,14 +219,23 @@ export async function renderLivreAjoutRoute(params, query, ctx) {
       // La couverture suit l'identification, sans la retenir : la fiche s'affiche tout de suite, l'image arrive après
       // (ou pas). Open Library seulement — Google Books n'a pas donné cette fiche, et une image d'ailleurs ne serait
       // pas étiquetable (I-A). Même fenêtre de 10 s que l'identification.
-      if (source === 'openlibrary') recupererCouvertureParIsbn(isbn, { signal: AbortSignal.timeout(LIMITES_ISBN.delaiMs) }).then(async (blob) => {
-        // La personne a pu photographier la couverture pendant ces 10 s : une réponse tardive ne touche pas la sienne.
-        if (etat.couverture.sha256) return;
-        if (!blob) { etat.couverture.message = t('Aucune couverture reçue. Tu peux la photographier.'); dessiner(); return; }
-        try { const { sha256 } = await poserCouverture(blob, { origine: 'distante' }); etat.couverture = { sha256, apercu: urlDeBlob(await reduireImage(blob)), message: t('Couverture reçue d’Open Library.'), enCours: false }; }
-        catch { etat.couverture.message = t('Aucune couverture reçue. Tu peux la photographier.'); }
-        dessiner();
-      });
+      if (source === 'openlibrary') {
+        const isbnDemande = isbn;
+        recupererCouvertureParIsbn(isbn, { signal: AbortSignal.timeout(LIMITES_ISBN.delaiMs) }).then(async (blob) => {
+          // R-UX-13 : cette réponse appartient à SA demande. Elle n'écrit rien si l'ISBN affiché a changé depuis
+          // (c'est un autre livre), si une couverture est déjà posée, ou si la personne a agi entre-temps.
+          if (etat.isbn !== isbnDemande || etat.couverture.sha256 || etat.couverture.touchee) return;
+          if (!blob) { etat.couverture.message = t('Aucune couverture reçue. Tu peux la photographier.'); dessiner(); return; }
+          // La ligne écrite est relue pour l'aperçu : c'est la MÊME image que celle qui est gardée, et elle n'est
+          // ré-encodée qu'une fois.
+          try {
+            const { sha256 } = await poserCouverture(blob, { origine: 'distante' });
+            const ligne = await repo.getFile(sha256);
+            etat.couverture = { ...etat.couverture, sha256, apercu: urlDeBlob(ligne.blob), message: t('Couverture reçue d’Open Library.'), enCours: false };
+          } catch { etat.couverture.message = t('Aucune couverture reçue. Tu peux la photographier.'); }
+          dessiner();
+        }).catch(() => { /* une couverture n'est jamais essentielle : aucun rejet non traité, aucune carte rouge */ });
+      }
     } finally { clearTimeout(chrono); etat.recherche = false; dessiner(); }
   };
   // Couverture choisie ici : bornée et ré-encodée par poserCouverture, et l'état ne dit « enregistrée » qu'APRÈS
@@ -229,16 +243,18 @@ export async function renderLivreAjoutRoute(params, query, ctx) {
   const depuisFichier = async (capture) => {
     const files = await pickFiles({ accept: 'image/*', multiple: false, capture });
     if (!files.length) return;
-    etat.couverture.enCours = true; dessiner();
-    try { const { sha256 } = await poserCouverture(files[0], { origine: 'locale' }); const ligne = await repo.getFile(sha256); etat.couverture = { sha256, apercu: urlDeBlob(ligne.blob), message: t('Couverture enregistrée.'), enCours: false }; }
-    catch (e) { etat.couverture = { sha256: null, apercu: null, message: e?.code === 'trop_lourde' ? t('Cette image est trop lourde (25 Mo au plus).') : t('Cette image ne peut pas être lue ici. Essaie une autre photo.'), enCours: false }; }
+    // R-UX-13 : dès que la personne a choisi une image, une réponse distante tardive n'a plus rien à dire ici.
+    etat.couverture = { ...etat.couverture, touchee: true, enCours: true }; dessiner();
+    try { const { sha256 } = await poserCouverture(files[0], { origine: 'locale' }); const ligne = await repo.getFile(sha256); etat.couverture = { sha256, apercu: urlDeBlob(ligne.blob), message: t('Couverture enregistrée.'), enCours: false, touchee: true }; }
+    // Un refus ne RETIRE pas la couverture déjà posée : seul le message change (l'écran ne perd rien de vrai).
+    catch (e) { etat.couverture = { ...etat.couverture, enCours: false, message: e?.code === 'trop_lourde' ? t('Cette image est trop lourde (25 Mo au plus).') : t('Cette image ne peut pas être lue ici. Essaie une autre photo.') }; }
     dessiner();
   };
   const gestes = {
     couverture: () => renderZoneCouverture(etat.couverture, {
       photographier: () => depuisFichier('environment'),
       choisir: () => depuisFichier(null),
-      retirer: () => { etat.couverture = COUVERTURE_VIDE(); dessiner(); },
+      retirer: () => { etat.couverture = { ...COUVERTURE_VIDE(), touchee: true }; dessiner(); },
     }),
     changerIsbn: (v) => { etat.isbn = v; },
     identifier,
@@ -257,7 +273,8 @@ export async function renderLivreAjoutRoute(params, query, ctx) {
     changerChamp: (k, v) => { etat.champs[k] = v; majBoutonEnregistrer(zone, livreAjoutModel(etat)); },
     basculerCuisine: (v) => { etat.champs.cuisines = basculerPuce(etat.champs.cuisines, v); dessiner(); },
     ajouterCuisine: (v) => { const apres = ajouterPuce(etat.champs.cuisines, v); if (apres !== etat.champs.cuisines) { etat.champs.cuisines = apres; dessiner(); } },
-    retourIsbn: () => { etat.pas = 1; etat.provenance = null; dessiner(); },
+    // R-UX-13 : revenir changer l'ISBN abandonne aussi la couverture reçue pour l'ancien.
+    retourIsbn: () => { etat.pas = 1; etat.provenance = null; etat.couverture = COUVERTURE_VIDE(); dessiner(); },
     // Une écriture refusée ne s'annonce pas (I-B) : on reste au pas 2, la saisie est intacte, et c'est dit.
     // `enCours` ferme le bouton pendant l'écriture : deux tapes pressées ne font pas deux livres.
     enregistrer: async () => {
