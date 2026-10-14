@@ -73,7 +73,7 @@ qui échoue au contrôle est traité comme un ISBN tapé faux (message § 6), pa
 
 ## 5. `lookupIsbn` — trois issues, trois sources au plus
 
-**Signature.** `lookupIsbn(isbn13, { fetch = globalThis.fetch, signal, cle = GOOGLE_BOOKS.key, attendre = attenteReelle } = {})`
+**Signature.** `lookupIsbn(isbn13, { fetch = globalThis.fetch, signal, cle = GOOGLE_BOOKS.key, attendre = attenteReelle, surReprise = null } = {})`
 → `{ statut, fiche, source, motif, appels }` :
 
 - `statut ∈ { 'trouve', 'introuvable', 'indisponible' }` ;
