@@ -392,7 +392,7 @@ public. Le chemin Google avec clé n'est mesuré **qu'au geste de Neegan** (§ 7
 | F1 bloc R-UX-13 condamné | **Bloquant** | § 9 : bloc réécrit (ISBN valides, stub `search.json`, cas Google par `deps.cle`) |
 | F3 aucun canal d'injection | **Bloquant** | § 6 : `deps` (4e paramètre), une seule convention |
 | F5 langue morte à l'écran | Important | § 6 étape 4 : fusion sur `language: ''`, repli `'fr'` ; test |
-| F7 « Changer d'ISBN » après `indisponible` | Important | § 6 : `saisirMain`/`retourIsbn` remettent `resultat`/`validation` ; test réécrit |
+| F7 « Changer d’ISBN » après `indisponible` | Important | § 6 : `saisirMain`/`retourIsbn` remettent `resultat`/`validation` ; test réécrit |
 | F8 `scanner` non testable | Important | § 4 `codeBarresVersIsbn` pur ; chemin `pickFiles` hors lot |
 | F10 deux pins, ordre de fusion | Important | § 8 |
 | F11 inventaire des rouges attendus | Important | § 9 en tête |
