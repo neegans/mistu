@@ -5,6 +5,7 @@ import { UNIT_DEFINITIONS, UNIT_CONVENTIONS, INGREDIENTS } from './seed.js';
 import { newId, nowIso } from '../core/ids.js';
 import { emit } from '../core/bus.js';
 import { syncNow } from '../sync/clock.js';
+import { nettoyerChaines } from '../sync/lots.js';
 import { resolveMime } from '../sync/mime.js';
 
 // Base de l'application. Liaison vivante : bindDatabase ne sert qu'aux tests, pour travailler sur une base jetable.
@@ -146,8 +147,18 @@ export function stamp(record) {
   return { created_at: now, updated_at: now, ...record };
 }
 
+// R-L3-25 : les caractères de contrôle (fréquents dans du texte collé d'un PDF ou d'une sortie d'OCR) sont retirés
+// À L'ÉCRITURE, pour les magasins qui vont au serveur. Nettoyés seulement dans la copie envoyée (`lots.js`), ils
+// faisaient un conflit PERPÉTUEL : au prochain écho les instants sont égaux, `identiques` voit deux contenus
+// différents → conflit ; « Garder celle d'ici » renvoyait la version sale, que le serveur renettoyait, et le
+// conflit revenait à chaque passe — seule « Garder celle d'ailleurs » en sortait. Nettoyer ici rend la fiche locale
+// et la copie du serveur identiques octet pour octet, et il n'y a plus rien à trancher. Un `Blob` traverse intact
+// (`nettoyerChaines` ne le parcourt jamais : ses octets ne sont pas du texte), et les magasins hors `SYNC_STORES`
+// ne sont pas touchés — rien n'en part, donc rien n'y fait conflit.
+const propre = (store, record) => (SYNC_STORES.includes(store) ? nettoyerChaines(record) : record);
+
 export async function save(store, record) {
-  const r = { ...record, updated_at: syncNow() };
+  const r = { ...propre(store, record), updated_at: syncNow() };
   if (!r.created_at) r.created_at = r.updated_at;
   await db.put(store, r);
   emit('change', { store, id: r.id ?? r.key ?? r.edition_id ?? r.sha256 });
@@ -160,7 +171,8 @@ export async function saveBatch(batch, { origin = 'local' } = {}) {
   const now = syncNow();
   const stamped = {};
   for (const [store, rows] of Object.entries(batch)) {
-    stamped[store] = rows.map((r) => ({ ...r, created_at: r.created_at || now, updated_at: now }));
+    // R-L3-25 : nettoyé à l'écriture, comme save() — même raison, et un seul endroit qui en décide (`propre`).
+    stamped[store] = rows.map((r) => ({ ...propre(store, r), created_at: r.created_at || now, updated_at: now }));
   }
   await db.putBatch(stamped, { origin });
   for (const store of Object.keys(stamped)) emit('change', { store });

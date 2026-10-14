@@ -46,6 +46,12 @@ export async function runSyncL3Tests({ eq, ok }) {
   const { nettoyerChaines, tailleJson, dedoublonner, composerLots, LIMITES } = await import('../src/sync/lots.js');
   eq(nettoyerChaines({ a: 'x\u0000y', b: ['\u0007z', 1], c: { d: 't\u001f' } }), { a: 'xy', b: ['z', 1], c: { d: 't' } }, 'lots : les caractères de contrôle sont retirés partout');
   eq(nettoyerChaines('é\n'), 'é\n', 'lots : les sauts de ligne et les accents restent');
+  // R-L3-25 : un Blob traverse sans être touché — ses octets ne sont pas du texte, et il n'est jamais parcouru.
+  {
+    const octets = new Blob(['\u0000x'], { type: 'image/jpeg' });
+    const nettoye = nettoyerChaines({ blob: octets, mime: 'image/jpeg\u0000' });
+    eq([nettoye.blob === octets, nettoye.mime], [true, 'image/jpeg'], 'R-L3-25 : un Blob traverse nettoyerChaines intact (ses octets ne sont pas du texte)');
+  }
   eq(tailleJson({ a: 'é' }), 10, 'lots : taille en octets UTF-8 du JSON');
   eq(LIMITES, { elements: 500, lot: 921600, element: 524288 }, 'lots : bornes de la spec (§ 3.4, R14), le lot avec marge sous le seuil serveur (R-L3-6)');
 
@@ -213,6 +219,27 @@ export async function runSyncL3Tests({ eq, ok }) {
       eq([conflit.id, conflit.store, conflit.record_id, conflit.local.title, conflit.server.data.title, conflit.kind, conflit.at], ['books:cf1', 'books', 'cf1', 'Ici', 'Serveur', 'donnees', '2026-10-13T20:00:00Z'], 'envoi : le conflit garde les deux versions, la locale lue avant la transaction');
       // Une quarantaine n'est pas relue à la passe suivante : elle attend un geste de la personne (Réglages).
       eq([(await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer()).envoyes, tf.journal.length], [0, 1], 'envoi : une entrée en quarantaine n’est plus jamais tentée');
+    });
+
+    // --- R-L3-25 : les caractères de contrôle sont retirés À L'ÉCRITURE locale, pas seulement à l'envoi
+    // Nettoyés seulement dans la copie envoyée, ils faisaient un conflit PERPÉTUEL : au prochain écho les instants
+    // sont égaux, `identiques` voit deux contenus différents → conflit ; et « Garder celle d'ici » renvoyait la
+    // version sale, que le serveur renettoyait — le conflit revenait à chaque passe. Nettoyer à l'écriture rend la
+    // fiche locale et la copie du serveur identiques, et il n'y a plus rien à trancher.
+    await withRepo(async (repo, db) => {
+      const ecrite = await repo.save('books', { id: 'ctrl', title: 'a\u0000b', notes: ['x\u000by', { z: 't\u001f' }], garde: 'é\n\tÀ' });
+      const relue = await db.get('books', 'ctrl');
+      eq([relue.title, relue.notes], ['ab', ['xy', { z: 't' }]], 'R-L3-25 : repo.save nettoie les caractères de contrôle de la fiche LOCALE, partout en profondeur');
+      eq([ecrite.title, relue.garde], ['ab', 'é\n\tÀ'], 'R-L3-25 : … la fiche rendue par save est celle qui est écrite, et accents, sauts de ligne et tabulations restent');
+      const lot = await composerLots(await db.getAll('outbox'), (s, id) => db.get(s, id));
+      const element = lot.lots[0].elements.find((e) => e.id === 'ctrl');
+      eq(element.data, relue, 'R-L3-25 : … donc l’élément envoyé est IDENTIQUE à la fiche locale (plus de conflit perpétuel à heure égale)');
+      // L'écriture ne passe pas que par save : saveBatch écrit par lots (import d'un index, amorçage, rattrapages).
+      await repo.saveBatch({ books: [{ id: 'ctrl2', title: 'c\u0007d' }] });
+      eq((await db.get('books', 'ctrl2')).title, 'cd', 'R-L3-25 : saveBatch nettoie aussi');
+      // Un magasin HORS SYNC_STORES n'est pas touché : les réglages et l'archive ne vont pas au serveur.
+      await repo.save('settings', { key: 'essai_ctrl', value: 'g\u0000h' });
+      eq((await db.get('settings', 'essai_ctrl'))?.value, 'g\u0000h', 'R-L3-25 : un magasin hors SYNC_STORES n’est pas nettoyé (rien n’en part)');
     });
 
     // --- Envoi : R-L3-24 — la file est filtrée par user_id (DOIT de la spec § 4.1)
