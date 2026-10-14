@@ -19,6 +19,12 @@ export async function runAjouterTests({ eq, ok }) {
   eq(ajouterPuce(['italienne'], ' Italienne '), ['italienne'], 'puces : un doublon par normalisation est refusé (même tableau)');
   eq(ajouterPuce(['italienne'], 'Thaïe'), ['italienne', 'thaïe'], 'puces : « Autre… » ajoute en minuscules, accents conservés');
   eq(ajouterPuce(['italienne'], '   '), ['italienne'], 'puces : le vide est ignoré');
+  {
+    const base = ['italienne'];
+    ok(ajouterPuce(base, ' Italienne ') === base, 'puces : un refus par doublon rend le MÊME tableau (identité, pas copie)');
+    ok(ajouterPuce(base, '  ') === base, 'puces : un refus par texte vide rend le MÊME tableau (identité, pas copie)');
+    ok(ajouterPuce(base, 'thaïe') !== base, 'puces : un ajout accepté rend un tableau NEUF (jamais le même, pour que l’appelant re-rende)');
+  }
   eq(cuisinesExistantes({ books: [{ cuisines: ['a', 'b'] }, {}], recipes: [{ cuisines: ['b'] }] }), ['a', 'b', 'b'], 'puces : existantes = toutes les occurrences des livres et des recettes (la fréquence compte)');
   {
     const appels = [];
@@ -32,6 +38,11 @@ export async function runAjouterTests({ eq, ok }) {
     champ.value = 'Levantine';
     champ.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     eq(appels, [['basculer', 'grecque'], ['ajouter', 'Levantine']], 'puces : un clic bascule la VALEUR stockée, Entrée ajoute le texte tapé');
-    ok(!noeud.innerHTML.includes('<script'), 'puces : rendu par el(), aucun HTML injecté');
+  }
+  {
+    const hostile = renderPuces(pucesModel({ choisies: ['<img src=x onerror="window.__p=1">'] }), {});
+    eq(hostile.querySelectorAll('img').length, 0, 'puces : une valeur hostile ne crée aucun élément <img>');
+    eq(window.__p, undefined, 'puces : aucun gestionnaire injecté ne s’exécute');
+    ok([...hostile.querySelectorAll('button.puce')].some((b) => b.textContent.includes('<img')), 'puces : la valeur hostile reste du TEXTE affiché, pas du balisage');
   }
 }
