@@ -1102,8 +1102,7 @@ export async function runAjouterTests({ eq, ok }) {
   // --- § 6 Couverture, la ROUTE : une couverture appartient à l’ISBN qui l’a demandée (R-UX-13)
   {
     const { withRepo } = await import('./sync-fixture.js');
-    const vraiFetch = globalThis.fetch;
-    // La route lit globalThis.fetch (elle ne prend pas de fetch injecté) : il est stubbé ici, restauré en finally.
+    // La route reçoit son `fetch` par ses dépendances (F3) : le stub est INJECTÉ (depsRoute), le fetch global n'est jamais remplacé.
     // Aucun réseau : chaque adresse attendue a sa réponse factice, et toute autre répond 404.
     // F4 : on n'attend plus un DÉLAI, on attend un FAIT. `etatRoute()` (posé par la route pour les tests) compte
     // les passages du rappel de couverture : le rappel ENTRÉ est le dernier moment où la garde peut encore céder,
@@ -1113,7 +1112,7 @@ export async function runAjouterTests({ eq, ok }) {
       throw new Error(`attente dépassée (3 s) : ${quoi}`);
     };
     const attendreImages = (n) => Promise.all([...n.querySelectorAll('img')].map((i) => (i.complete ? null : new Promise((r) => { i.onload = r; i.onerror = r; }))));
-    try {
+    {
       await withRepo(async (repo, db) => {
         // De VRAIES images : poserCouverture décode par createImageBitmap, un en-tête fabriqué échouerait (F11).
         // Une taille DIFFÉRENTE par ISBN : les empreintes diffèrent, donc « aucune ligne files écrite » est un fait
@@ -1131,7 +1130,7 @@ export async function runAjouterTests({ eq, ok }) {
         const languesOl = new Map(); // isbn → langues rendues par search.json (C2)
         const r404 = { ok: false, status: 404, headers: new Headers(), text: async () => '', blob: async () => new Blob([]) };
         const reponseImage = (png) => ({ ok: true, status: 200, headers: new Headers({ 'content-type': 'image/png', 'content-length': String(png.size) }), blob: async () => png });
-        globalThis.fetch = async (url) => {
+        const fetchFactice = async (url) => {
           const u = String(url);
           urls.push(u);
           if (u.startsWith('https://covers.openlibrary.org/')) {
@@ -1156,6 +1155,7 @@ export async function runAjouterTests({ eq, ok }) {
           }
           return r404;
         };
+        const depsRoute = { repo, fetch: fetchFactice, attendre: async () => {}, tentativeMs: 50 };
         const zone = (root) => root.querySelector('.zone-couverture');
         const image = (root) => !!zone(root)?.querySelector('img');
         const message = (root) => zone(root)?.querySelector('small')?.textContent || null;
@@ -1169,7 +1169,7 @@ export async function runAjouterTests({ eq, ok }) {
 
         // 1. Une couverture reçue ne survit pas à l’ISBN qui l’a produite.
         couvertures.set('9780000001115', async () => reponseImage(img111));
-        const r1 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
+        const r1 = await LA.renderLivreAjoutRoute({}, {}, {}, depsRoute);
         taper(r1, '9780000001115'); cliquer(r1, 'Identifier');
         await attendre(() => image(r1), 'la couverture de 111 est affichée');
         eq(message(r1), 'Couverture reçue d’Open Library.', 'route : la couverture reçue d’Open Library est annoncée, image à l’appui (I-B)');
@@ -1182,7 +1182,7 @@ export async function runAjouterTests({ eq, ok }) {
         // 2. Une réponse tardive appartient à SA demande : celle d’un ISBN abandonné est ignorée.
         let libererA = null;
         couvertures.set('9780000003331', async () => { await new Promise((r) => { libererA = r; }); return reponseImage(img333); });
-        const r2 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
+        const r2 = await LA.renderLivreAjoutRoute({}, {}, {}, depsRoute);
         taper(r2, '9780000003331'); cliquer(r2, 'Identifier');
         await attendre(() => zone(r2) && libererA, 'la demande de couverture de 333 est en vol');
         cliquer(r2, '← Changer d’ISBN');
@@ -1200,7 +1200,7 @@ export async function runAjouterTests({ eq, ok }) {
         let libererB = null;
         let tours = 0;
         couvertures.set('9780000005557', async () => { tours += 1; if (tours === 1) { await new Promise((r) => { libererB = r; }); return reponseImage(img555a); } return reponseImage(img555b); });
-        const r3 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
+        const r3 = await LA.renderLivreAjoutRoute({}, {}, {}, depsRoute);
         taper(r3, '9780000005557'); cliquer(r3, 'Identifier');
         await attendre(() => zone(r3) && libererB, 'la 1re demande de couverture de 555 est en vol');
         cliquer(r3, '← Changer d’ISBN');
@@ -1219,7 +1219,7 @@ export async function runAjouterTests({ eq, ok }) {
         // (invisible au pas 1), puis « Saisir à la main » — une fiche saisie à la main n’a jamais de couverture reçue.
         let libererC = null;
         couvertures.set('9780000007773', async () => { await new Promise((r) => { libererC = r; }); return reponseImage(img777); });
-        const r5 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
+        const r5 = await LA.renderLivreAjoutRoute({}, {}, {}, depsRoute);
         taper(r5, '9780000007773'); cliquer(r5, 'Identifier');
         await attendre(() => zone(r5) && libererC, 'la demande de couverture de 777 est en vol');
         cliquer(r5, '← Changer d’ISBN');
@@ -1235,12 +1235,12 @@ export async function runAjouterTests({ eq, ok }) {
         // Le fait attendu est la zone de couverture : elle n’apparaît qu’au pas 2, donc après la fin de lookupIsbn.
         sansFicheOl.add('9780000006660');
         const avant = urls.length;
-        const r4 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
+        const r4 = await LA.renderLivreAjoutRoute({}, {}, {}, { ...depsRoute, cle: 'k' });
         taper(r4, '9780000006660'); cliquer(r4, 'Identifier');
         await attendre(() => zone(r4), 'le pas 2 pour 666');
         const depuis = urls.slice(avant);
-        eq([depuis.some((u) => u.startsWith('https://covers.openlibrary.org/')), depuis.some((u) => u.startsWith('https://www.googleapis.com/books/')), r4.textContent.includes('Aucune fiche')],
-          [false, false, true], 'route : sans clé, un « rien » d’Open Library ne demande ni couverture ni Google Books (I-A, § 5)');
+        eq([depuis.some((u) => u.startsWith('https://covers.openlibrary.org/')), depuis.some((u) => u.startsWith('https://www.googleapis.com/books/')), r4.textContent.includes('Renseigné par Google Books')],
+          [false, true, true], 'route : une fiche venue de Google Books (clé injectée) ne demande AUCUNE couverture à Open Library (I-A)');
         eq([message(r4), passages(r4)], [null, 0], 'route : sans demande de couverture, la zone ne raconte rien et aucun rappel n’est entré (I-B)');
 
         // 6. F3 : « Saisir à la main » PENDANT « Recherche… ». La réponse d’identification est encore en vol et
@@ -1248,7 +1248,7 @@ export async function runAjouterTests({ eq, ok }) {
         let libererFiche = null;
         fichesLentes.set('9780000008886', new Promise((r) => { libererFiche = r; }));
         couvertures.set('9780000008886', async () => reponseImage(img111));
-        const r6 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
+        const r6 = await LA.renderLivreAjoutRoute({}, {}, {}, depsRoute);
         taper(r6, '9780000008886'); cliquer(r6, 'Identifier');
         await attendre(() => r6.etatRoute().recherche, 'la recherche de 888 est annoncée');
         cliquer(r6, 'Saisir à la main');
@@ -1266,7 +1266,7 @@ export async function runAjouterTests({ eq, ok }) {
         // ISBN abandonné se posait sur une fiche saisie à la main. Le ré-encodage est tenu par un stub de
         // createImageBitmap, rendu dans le finally.
         couvertures.set('9780000009999', async () => reponseImage(img999));
-        const r7 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
+        const r7 = await LA.renderLivreAjoutRoute({}, {}, {}, depsRoute);
         const vraiBitmap = globalThis.createImageBitmap;
         let ouvrirPorte = null;
         const porte = new Promise((r) => { ouvrirPorte = r; });
@@ -1290,14 +1290,14 @@ export async function runAjouterTests({ eq, ok }) {
         // 8. S12 : une couverture REÇUE puis refusée au ré-encodage ne se raconte pas « aucune couverture reçue » —
         // ce n’est pas le même fait, et la personne n’a pas la même chose à faire.
         couvertures.set('9780000010100', async () => reponseImage(png(400, 600))); // en-tête valide, aucun pixel : indécodable
-        const r8 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
+        const r8 = await LA.renderLivreAjoutRoute({}, {}, {}, depsRoute);
         taper(r8, '9780000010100'); cliquer(r8, 'Identifier');
         await attendre(() => message(r8) !== null, 'le message de la couverture de 1010');
         eq([message(r8), image(r8)], [ILLISIBLE, false], 'route : une couverture reçue mais illisible le DIT (S12), sans image');
         await attendreImages(r8);
 
         // 9. C3 : une seconde identification ne fusionne plus par-dessus les champs du PREMIER ISBN (titre A + ISBN B).
-        const r9 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
+        const r9 = await LA.renderLivreAjoutRoute({}, {}, {}, depsRoute);
         taper(r9, '9780000011121'); cliquer(r9, 'Identifier');
         await attendre(() => r9.etatRoute().pas === 2, 'le pas 2 du premier ISBN');
         eq([r9.etatRoute().champs.title, r9.etatRoute().isbn], ['Livre 9780000011121', '9780000011121'], 'route : le titre du premier ISBN est posé');
@@ -1317,7 +1317,7 @@ export async function runAjouterTests({ eq, ok }) {
         // C3 bis : un titre tapé AVANT toute identification. `fusionnerFiche` le garde (il n'est pas vide), mais
         // `champsDistants` enregistrait l'état d'APRÈS fusion : ce titre-là passait pour distant, et
         // l'identification SUIVANTE le vidait. Seules les clés que la fusion a réellement reprises comptent.
-        const r9b = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
+        const r9b = await LA.renderLivreAjoutRoute({}, {}, {}, depsRoute);
         cliquer(r9b, 'Saisir à la main');
         saisirTitre(r9b, 'Mon livre à moi');
         cliquer(r9b, '← Changer d’ISBN');
@@ -1333,7 +1333,7 @@ export async function runAjouterTests({ eq, ok }) {
 
         // 10. C2 vue de la route : un livre anglais identifié via search.json n’est plus écrit « fr ».
         languesOl.set('9780000055569', ['eng']); languesOl.set('9780000066671', ['eng']);
-        const r10 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
+        const r10 = await LA.renderLivreAjoutRoute({}, {}, {}, depsRoute);
         taper(r10, '9780000055569'); cliquer(r10, 'Identifier');
         await attendre(() => r10.etatRoute().pas === 2, 'le pas 2 pour 5556');
         eq([r10.etatRoute().champs.language, r10.querySelector('select').value], ['en', 'en'], 'route : la langue de la fiche (via search.json) est reprise, et le menu Langue le montre (C2)');
@@ -1350,7 +1350,7 @@ export async function runAjouterTests({ eq, ok }) {
         // `navigate` et un `toast` injectés : aucune adresse touchée.
         const navs = []; const dits = [];
         couvertures.set('9780000012340', async () => reponseImage(img1234));
-        const r11 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo, navigate: (p) => navs.push(p), toast: (m) => dits.push(m) });
+        const r11 = await LA.renderLivreAjoutRoute({}, {}, {}, { ...depsRoute, navigate: (p) => navs.push(p), toast: (m) => dits.push(m) });
         taper(r11, '9780000012340'); cliquer(r11, 'Identifier');
         await attendre(() => r11.etatRoute().couverture.sha256, 'la couverture de 1234 est posée');
         saisirTitre(r11, 'Le grand livre');
@@ -1367,7 +1367,7 @@ export async function runAjouterTests({ eq, ok }) {
         // rouvre, la saisie reste. console.error est remplacé (logError) et rendu dans le finally.
         const navsR = []; const ditsR = [];
         const repoRefus = { newId: repo.newId, putFile: repo.putFile, getFile: repo.getFile, saveBatch: async () => { throw new Error('quota'); } };
-        const r12 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo: repoRefus, navigate: (p) => navsR.push(p), toast: (m) => ditsR.push(m) });
+        const r12 = await LA.renderLivreAjoutRoute({}, {}, {}, { ...depsRoute, repo: repoRefus, navigate: (p) => navsR.push(p), toast: (m) => ditsR.push(m) });
         cliquer(r12, 'Saisir à la main');
         saisirTitre(r12, 'Refusé');
         const vraiErreur = console.error;
@@ -1382,7 +1382,83 @@ export async function runAjouterTests({ eq, ok }) {
           'route : un saveBatch refusé ne navigue pas, le dit, journalise, rouvre le bouton et garde la saisie (RF-I1)');
         BU.revoquerUrlsDeBlob();
       });
-    } finally { globalThis.fetch = vraiFetch; }
+    }
+  }
+  // --- La ROUTE, partie A : validation, trois issues, une identification à la fois, suggestions
+  {
+    // La route avec deps étendues (F3) : validation, hors ligne, indisponible → Réessayer, Entrée, une seule
+    // identification (I-G), langue reçue (C2), sorties après un échec (F7), suggestions (§ 12). Aucun réseau, base jetable.
+    const { withRepo } = await import('./sync-fixture.js');
+    const reponseJson = (o, status = 200) => ({ ok: status < 300, status, headers: new Headers(), text: async () => JSON.stringify(o) });
+    const r404 = { ok: false, status: 404, headers: new Headers(), text: async () => '', blob: async () => new Blob([]) };
+    const attendre = async (condition, quoi) => { for (let i = 0; i < 300; i += 1) { if (await condition()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error(`attente dépassée (3 s) : ${quoi}`); };
+    const taper = (root, isbn) => { const i = root.querySelector('input[name="isbn"]'); i.value = isbn; i.dispatchEvent(new Event('input')); };
+    const cliquer = (root, texte) => { const b = [...root.querySelectorAll('button')].find((x) => x.textContent === texte); if (!b) throw new Error(`bouton absent : ${texte}`); b.click(); };
+    const entree = (root) => root.querySelector('input[name="isbn"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    const titreDe = (root) => [...root.querySelectorAll('input[type="text"]')].find((i) => i.name !== 'isbn');
+    const rappel = (root) => [...root.querySelectorAll('span.muted')].find((s) => s.textContent.startsWith('ISBN'))?.textContent ?? null;
+    await withRepo(async (repo) => {
+      const urls = [];
+      const recherches = () => urls.filter((u) => u.includes('/search.json')).length; // la couverture passe aussi par fetch
+      let search = () => reponseJson({ docs: [{ title: 'Livre', language: ['eng'], subject: ['Barbecuing', 'Charcoal'] }] });
+      const fetch = async (u) => { const s = String(u); urls.push(s); if (s.startsWith('https://openlibrary.org/search.json')) return search(); return r404; };
+      const deps = { repo, fetch, enLigne: () => true, attendre: async () => {}, tentativeMs: 50, navigate: () => {} };
+      // 1. ISBN faux : aucun appel, la saisie reste.
+      const rA = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
+      taper(rA, '9781785035280'); cliquer(rA, 'Identifier');
+      eq([urls.length, rA.querySelector('[data-role="validation"]')?.textContent, rA.querySelector('input[name="isbn"]')?.value], [0, 'Cet ISBN n’est pas valide, vérifie les chiffres.', '9781785035280'], 'route : un ISBN faux est refusé sans appel, la saisie reste (§ 4)');
+      taper(rA, '5901234123457'); entree(rA);
+      eq([urls.length, rA.querySelector('[data-role="validation"]')?.textContent], [0, 'Ce code-barres n’est pas un ISBN.'], 'route : un EAN qui n’est pas un livre est refusé sans appel');
+      // 2. Hors ligne : aucun appel ; Réessayer force (S13) ; langue reçue (C2) ; suggestions posées (§ 12).
+      const rB = await LA.renderLivreAjoutRoute({}, {}, {}, { ...deps, enLigne: () => false });
+      taper(rB, '9781785035289'); cliquer(rB, 'Identifier');
+      eq([urls.length, rB.querySelector('[data-role="indisponible"]')?.textContent.includes('Tu es hors ligne.'), !!rB.querySelector('[data-role="reessayer"]')], [0, true, true], 'route : hors ligne → aucun appel, dit, Réessayer offert');
+      cliquer(rB, 'Réessayer');
+      await attendre(() => rB.querySelector('.status.info'), 'pas 2 après Réessayer');
+      eq([recherches(), rB.querySelector('select').value, titreDe(rB).value, [...rB.querySelectorAll('button.puce.suggestion')].map((b) => b.textContent)], [1, 'en', 'Livre', ['Barbecuing', 'Charcoal']], 'route : Réessayer force l’appel malgré onLine (S13) ; langue au sélecteur (C2) ; suggestions affichées (§ 12)');
+      // 3. 429 → pas 1, message vrai, Réessayer ; deux clics = un appel ; puis 200 → pas 2.
+      urls.length = 0; search = () => reponseJson({}, 429);
+      const rC = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
+      taper(rC, '9782890772816'); entree(rC);
+      await attendre(() => rC.querySelector('[data-role="reessayer"]'), 'indisponible après 429');
+      eq([recherches(), rC.querySelector('[data-role="indisponible"]')?.textContent.includes('trop de demandes'), !!rC.querySelector('input[name="isbn"]'), [...rC.querySelectorAll('button')].filter((b) => b.textContent === 'Saisir à la main').length, rC.etatRoute().resultat?.motif], [1, true, true, 1, 'limite'], 'route : Entrée identifie ; 429 → pas 1, message vrai, Réessayer, un seul « Saisir à la main » (F17)');
+      search = () => reponseJson({ docs: [{ title: 'Carnet', language: ['fre'] }] });
+      // Le premier clic redessine (le bouton quitte l’écran pendant « Recherche… ») : le second clic vise le MÊME nœud,
+      // détaché — son écouteur part quand même, et c’est la garde I-G de la route qui doit le refuser.
+      { const b = [...rC.querySelectorAll('button')].find((x) => x.textContent === 'Réessayer'); b.click(); b.click(); }
+      await attendre(() => rC.querySelector('.status.info'), 'pas 2 après Réessayer');
+      eq([recherches(), rC.querySelector('.status.info').textContent, titreDe(rC).value, rC.querySelector('select').value, rappel(rC), rC.querySelector('.suggestions')], [2, 'Renseigné par Open Library — vérifie et corrige.', 'Carnet', 'fr', 'ISBN 9782890772816', null], 'route : deux clics sur Réessayer = un appel ; il relance et remplit ; sans subject, aucune suggestion');
+      // 4. F7 : après un échec, « Saisir à la main » et « ← Changer d’ISBN » effacent le message.
+      urls.length = 0; search = () => reponseJson({}, 503);
+      const rD = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
+      taper(rD, '0306406152'); cliquer(rD, 'Identifier');
+      await attendre(() => rD.querySelector('[data-role="reessayer"]'), 'indisponible après 503');
+      ok(rD.querySelector('[data-role="indisponible"]').textContent.includes('en panne'), 'route : 503 = « en panne »');
+      cliquer(rD, 'Saisir à la main');
+      eq([rD.querySelector('[data-role="indisponible"]'), rD.querySelector('.status.info'), rappel(rD)], [null, null, 'ISBN 9780306406157'], 'route : « Saisir à la main » après un échec → pas 2 muet, ISBN normalisé en 13 (F7, F22)');
+      cliquer(rD, '← Changer d’ISBN');
+      eq([rD.querySelector('[data-role="indisponible"]'), rD.querySelector('input[name="isbn"]').value, rD.querySelector('input[name="isbn"]').disabled], [null, '9780306406157', false], 'route : retour au pas 1 sans message, champ ouvert (F7)');
+      // 5. I-G : une identification à la fois ; champ fermé pendant la recherche.
+      urls.length = 0; let liberer = null; search = () => new Promise((r) => { liberer = () => r(reponseJson({ docs: [{ title: 'Lent' }] })); });
+      const rE = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
+      taper(rE, '9780306406157'); entree(rE);
+      await attendre(() => liberer, 'premier appel en vol');
+      eq([rE.querySelector('input[name="isbn"]').disabled, rE.textContent.includes('Recherche…')], [true, true], 'route : champ fermé et « Recherche… » pendant l’appel (RF-m8)');
+      entree(rE); cliquer(rE, 'Identifier');
+      liberer();
+      await attendre(() => rE.querySelector('.status.info'), 'pas 2');
+      eq(recherches(), 1, 'route : Entrée et clic pendant la recherche ne partent pas (I-G)');
+      // 6. « Nouvel essai… » visible pendant la reprise (S11/F26).
+      urls.length = 0; let n = 0; let libererReprise = null;
+      search = () => { n += 1; if (n === 1) throw new Error('reseau'); return new Promise((r) => { libererReprise = () => r(reponseJson({ docs: [{ title: 'Repris' }] })); }); };
+      const rF = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
+      taper(rF, '9780306406157'); cliquer(rF, 'Identifier');
+      await attendre(() => libererReprise, 'seconde tentative en vol');
+      ok(rF.textContent.includes('Nouvel essai…') && rF.etatRoute().reprise === true, 'route : la reprise est dite pendant qu’elle a lieu (S11)');
+      libererReprise();
+      await attendre(() => rF.querySelector('.status.info'), 'pas 2 après reprise');
+      eq([recherches(), titreDe(rF).value, rF.etatRoute().reprise], [2, 'Repris', false], 'route : la reprise a trouvé, et reprise retombe');
+    });
   }
   // --- § 6 Couverture : ce que la fiche livre et Mes livres MONTRENT, sur une base jetable
   {

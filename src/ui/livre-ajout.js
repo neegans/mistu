@@ -376,11 +376,11 @@ export function majBoutonEnregistrer(zone, model) {
 // la charnière § 5 → § 8 (« Ajouter ce livre » → /books/<id>?nouveau=1) devient mesurable sans toucher à l'adresse.
 // Le nœud rendu porte `etatRoute()` : les tests attendent un FAIT observable (un rappel de couverture entré, une
 // couverture appliquée) au lieu d'un délai (F3/F4).
-export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo, navigate: nav = navigate, toast: dire = toast } = {}) {
+export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo, navigate: nav = navigate, toast: dire = toast, fetch = globalThis.fetch, enLigne = () => navigator.onLine !== false, attendre = attenteReelle, cle = GOOGLE_BOOKS.key, tentativeMs = LIMITES_ISBN.tentativeMs, repriseMs = LIMITES_ISBN.repriseMs } = {}) {
   // `touchee` (R-UX-13) : la personne a agi sur la couverture (choisi une image, ou retiré). Une réponse distante
   // tardive ne défait jamais un geste — même si l'ISBN, lui, n'a pas changé.
   const COUVERTURE_VIDE = () => ({ sha256: null, apercu: null, message: null, enCours: false, touchee: false });
-  const etat = { pas: 1, isbn: '', champs: CHAMPS_VIDES(), champsDistants: null, langueTouchee: false, provenance: null, recherche: false, enCours: false, lecteurDisponible: 'BarcodeDetector' in window, existantes: cuisinesExistantes(ctx), couverture: COUVERTURE_VIDE(), generation: 0, passagesCouverture: 0, couverturesAppliquees: 0 };
+  const etat = { pas: 1, isbn: '', champs: CHAMPS_VIDES(), champsDistants: null, langueTouchee: false, provenance: null, recherche: false, enCours: false, lecteurDisponible: 'BarcodeDetector' in window, existantes: cuisinesExistantes(ctx), couverture: COUVERTURE_VIDE(), generation: 0, passagesCouverture: 0, couverturesAppliquees: 0, reprise: false, validation: null, resultat: null, suggestions: null, existantesMotsCles: motsClesExistants(ctx) };
   const root = el('div', null, pageHeader(t('Ajouter un livre'), { back: { href: '/add', label: t('Ajouter') } }));
   const zone = el('div', null);
   root.append(zone);
@@ -388,7 +388,10 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
   // capture la sienne au départ et la revérifie après chaque `await` : « ← Changer d'ISBN » puis « Saisir à la
   // main » pendant le ré-encodage ne pouvaient pas être vus par la garde d'avant (évaluée une seule fois).
   const avancer = () => { etat.generation += 1; };
-  const dessiner = () => zone.replaceChildren(renderLivreAjout({ ...livreAjoutModel(etat), existantes: etat.existantes }, gestes));
+  // Le modèle de la route : la phrase des sources suit la clé RÉELLEMENT passée (cleGoogle), et les puces lisent
+  // les cuisines et mots-clés déjà employés. Toute lecture du modèle passe par ici (jamais le modèle nu de l'état).
+  const modele = () => ({ ...livreAjoutModel({ ...etat, cleGoogle: !!cle }), existantes: etat.existantes, existantesMotsCles: etat.existantesMotsCles });
+  const dessiner = () => zone.replaceChildren(renderLivreAjout(modele(), gestes));
   // C3 : une seconde identification ne doit pas fusionner par-dessus les champs du PREMIER ISBN (titre A + ISBN B).
   // Tout champ encore ÉGAL à ce que le distant y avait mis est rendu : la personne ne l'a pas touché, il n'est pas
   // à elle. Ce qu'elle a corrigé reste (c'est sa saisie). `retourIsbn` ne vide rien (F23).
@@ -404,63 +407,81 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
       etat.champs[k] = vides[k];
     }
   };
-  const identifier = async () => {
-    const isbn = nettoyerIsbn(etat.isbn);
-    if (!isbn) { dire(t('Saisis un ISBN d’abord.')); return; }
+  // I-G : tout geste qui change l'ISBN ou le pas ferme la porte aux réponses en vol (avancer, C1) ET libère la recherche.
+  const nouvelleGeneration = () => { avancer(); etat.recherche = false; etat.reprise = false; etat.validation = null; etat.resultat = null; etat.suggestions = null; };
+  const identifier = async ({ forcer = false } = {}) => {
+    if (etat.recherche) return; // I-G : une identification à la fois (Entrée, Réessayer et le clic passent tous ici)
+    const v = validerIsbn(etat.isbn);
+    if (!v.ok) {
+      if (v.motif === 'vide') { dire(t('Saisis un ISBN d’abord.')); return; }
+      etat.validation = v.motif; dessiner(); return; // aucun appel (R-ISBN-2)
+    }
+    etat.validation = null; etat.isbn = v.isbn13;
+    if (!forcer && !enLigne()) { etat.resultat = { statut: 'indisponible', motif: 'horsligne', google: 'non_appele' }; dessiner(); return; } // S13 : Réessayer force
     // Une provenance ne survit pas à l'ISBN qui l'a produite (I-B) : la précédente tombe avant le nouvel appel.
     // R-UX-13 : la COUVERTURE non plus — c'est l'image d'un autre livre. Elle tombe ici, pas quand la réponse arrive.
-    etat.provenance = null;
-    etat.couverture = COUVERTURE_VIDE();
+    // C3 (oublierDistants) avant C1 (avancer).
+    etat.provenance = null; etat.couverture = COUVERTURE_VIDE(); etat.suggestions = null;
     oublierDistants();
     avancer();
     const generation = etat.generation;
-    etat.recherche = true; dessiner();
+    etat.recherche = true; etat.reprise = false; etat.resultat = null;
+    dessiner();
     const ctl = new AbortController();
-    const chrono = setTimeout(() => ctl.abort(), LIMITES_ISBN.delaiMs);
+    const chrono = setTimeout(() => ctl.abort(), LIMITES_ISBN.totalMs);
     try {
-      const { fiche, source } = await lookupIsbn(isbn, { signal: ctl.signal });
+      const res = await lookupIsbn(v.isbn13, { fetch, signal: ctl.signal, cle, attendre, tentativeMs, repriseMs, surReprise: () => { if (etat.generation === generation) { etat.reprise = true; dessiner(); } } });
       // C1/F3 : « Saisir à la main » n'est PAS fermé pendant « Recherche… » (c'est la sortie de secours). Si la
       // personne l'a prise, cette réponse n'appartient plus à l'écran : ni ses champs, ni son étiquette, ni la
-      // couverture qu'elle aurait demandée. La génération le dit, la garde d'avant ne le voyait pas.
+      // couverture qu'elle aurait demandée. La génération le dit (I-G).
       if (etat.generation !== generation) return;
-      etat.isbn = isbn;
-      const avantFusion = { ...etat.champs };
-      etat.champs = fusionnerFiche(etat.champs, fiche, { langueTouchee: etat.langueTouchee });
-      // C3 : ne sont « distants » que les champs que la fusion a RÉELLEMENT repris de la fiche — mesurés avant et
-      // après. Mémoriser l'état d'après fusion faisait passer pour distant un titre tapé AVANT la première
-      // identification (`fusionnerFiche` le garde parce qu'il n'est pas vide), et l'identification suivante le
-      // vidait. Une valeur identique à ce que la personne avait déjà tapé n'est pas reprise non plus : c'est aussi
-      // la sienne.
-      const reprises = CHAMPS_DISTANTS.filter((k) => String(avantFusion[k] ?? '') !== String(etat.champs[k] ?? ''));
-      etat.champsDistants = reprises.length ? Object.fromEntries(reprises.map((k) => [k, etat.champs[k]])) : null;
-      etat.provenance = source || 'aucune'; etat.pas = 2;
-      // La couverture suit l'identification, sans la retenir : la fiche s'affiche tout de suite, l'image arrive après
-      // (ou pas). Open Library seulement — Google Books n'a pas donné cette fiche, et une image d'ailleurs ne serait
-      // pas étiquetable (I-A). Même fenêtre de 10 s que l'identification (C9 : délai avec repli, jamais fatal).
-      if (source === 'openlibrary') {
-        const isbnDemande = isbn;
-        // R-UX-13 + C1 : cette réponse appartient à SA demande. Elle n'écrit rien si la génération a avancé depuis
-        // (un geste a eu lieu), si l'ISBN affiché a changé, si une couverture est déjà posée, ou si la personne a
-        // agi sur la zone. Relue APRÈS chaque `await` : le ré-encodage dure, et un geste peut tomber pendant.
-        const pertinent = () => etat.generation === generation && etat.isbn === isbnDemande && !etat.couverture.sha256 && !etat.couverture.touchee;
-        recupererCouvertureParIsbn(isbn, { signal: signalDelai(LIMITES_ISBN.delaiMs) }).then(async (blob) => {
-          etat.passagesCouverture += 1; // F4 : le FAIT que les tests attendent, posé avant toute garde
-          if (!pertinent()) return;
-          if (!blob) { etat.couverture.message = t('Aucune couverture reçue. Tu peux la photographier.'); dessiner(); return; }
-          // La ligne écrite est relue pour l'aperçu : c'est la MÊME image que celle qui est gardée, et elle n'est
-          // ré-encodée qu'une fois. S12 : une couverture REÇUE puis refusée ne se dit pas « aucune couverture ».
-          try {
-            const { sha256 } = await poserCouverture(blob, { origine: 'distante', repo: r });
-            if (!pertinent()) return; // C1 : un geste pendant le ré-encodage gagne (la ligne files reste, dette S13)
-            const ligne = await r.getFile(sha256);
+      if (res.statut === 'trouve') {
+        const avantFusion = { ...etat.champs };
+        etat.champs = fusionnerFiche(etat.champs, res.fiche, { langueTouchee: etat.langueTouchee });
+        // C3 : ne sont « distants » que les champs que la fusion a RÉELLEMENT repris de la fiche — mesurés avant et
+        // après. Mémoriser l'état d'après fusion faisait passer pour distant un titre tapé AVANT la première
+        // identification (`fusionnerFiche` le garde parce qu'il n'est pas vide), et l'identification suivante le
+        // vidait. Une valeur identique à ce que la personne avait déjà tapé n'est pas reprise non plus : c'est aussi
+        // la sienne.
+        const reprises = CHAMPS_DISTANTS.filter((k) => String(avantFusion[k] ?? '') !== String(etat.champs[k] ?? ''));
+        etat.champsDistants = reprises.length ? Object.fromEntries(reprises.map((k) => [k, etat.champs[k]])) : null;
+        etat.provenance = res.source; etat.pas = 2;
+        etat.suggestions = res.fiche.motsCles?.length ? { source: res.source, valeurs: res.fiche.motsCles } : null; // § 12.2 : propositions, jamais posées
+        const isbn = v.isbn13;
+        const source = res.source;
+        // La couverture suit l'identification, sans la retenir : la fiche s'affiche tout de suite, l'image arrive après
+        // (ou pas). Open Library seulement — Google Books n'a pas donné cette fiche, et une image d'ailleurs ne serait
+        // pas étiquetable (I-A). Même fenêtre de 10 s que l'identification (C9 : délai avec repli, jamais fatal).
+        if (source === 'openlibrary') {
+          const isbnDemande = isbn;
+          // R-UX-13 + C1 : cette réponse appartient à SA demande. Elle n'écrit rien si la génération a avancé depuis
+          // (un geste a eu lieu), si l'ISBN affiché a changé, si une couverture est déjà posée, ou si la personne a
+          // agi sur la zone. Relue APRÈS chaque `await` : le ré-encodage dure, et un geste peut tomber pendant.
+          const pertinent = () => etat.generation === generation && etat.isbn === isbnDemande && !etat.couverture.sha256 && !etat.couverture.touchee;
+          recupererCouvertureParIsbn(v.isbn13, { fetch, signal: signalDelai(LIMITES_ISBN.delaiMs) }).then(async (blob) => {
+            etat.passagesCouverture += 1; // F4 : le FAIT que les tests attendent, posé avant toute garde
             if (!pertinent()) return;
-            etat.couverture = { ...etat.couverture, sha256, apercu: urlDeBlob(ligne.blob), message: t('Couverture reçue d’Open Library.'), enCours: false };
-            etat.couverturesAppliquees += 1;
-          } catch { if (!pertinent()) return; etat.couverture.message = t('La couverture reçue n’a pas pu être lue.'); }
-          dessiner();
-        }).catch(() => { /* une couverture n'est jamais essentielle : aucun rejet non traité, aucune carte rouge */ });
-      }
-    } finally { clearTimeout(chrono); etat.recherche = false; dessiner(); }
+            if (!blob) { etat.couverture.message = t('Aucune couverture reçue. Tu peux la photographier.'); dessiner(); return; }
+            // La ligne écrite est relue pour l'aperçu : c'est la MÊME image que celle qui est gardée, et elle n'est
+            // ré-encodée qu'une fois. S12 : une couverture REÇUE puis refusée ne se dit pas « aucune couverture ».
+            try {
+              const { sha256 } = await poserCouverture(blob, { origine: 'distante', repo: r });
+              if (!pertinent()) return; // C1 : un geste pendant le ré-encodage gagne (la ligne files reste, dette S13)
+              const ligne = await r.getFile(sha256);
+              if (!pertinent()) return;
+              etat.couverture = { ...etat.couverture, sha256, apercu: urlDeBlob(ligne.blob), message: t('Couverture reçue d’Open Library.'), enCours: false };
+              etat.couverturesAppliquees += 1;
+            } catch { if (!pertinent()) return; etat.couverture.message = t('La couverture reçue n’a pas pu être lue.'); }
+            dessiner();
+          }).catch(() => { /* une couverture n'est jamais essentielle : aucun rejet non traité, aucune carte rouge */ });
+        }
+      } else if (res.statut === 'introuvable') { etat.provenance = 'aucune'; etat.resultat = res; etat.pas = 2; }
+      else { etat.resultat = res; } // indisponible : on reste au pas 1, ISBN conservé, Réessayer offert
+    } finally {
+      clearTimeout(chrono);
+      // Une génération plus récente a sa propre recherche : seule la génération courante la libère et redessine.
+      if (etat.generation === generation) { etat.recherche = false; etat.reprise = false; dessiner(); }
+    }
   };
   // Couverture choisie ici : bornée et ré-encodée par poserCouverture, et l'état ne dit « enregistrée » qu'APRÈS
   // l'écriture réelle (I-B). Aucun blob n'est effacé (§ 2) : une image remplacée laisse sa ligne files derrière elle.
@@ -482,40 +503,48 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
       retirer: () => { avancer(); etat.couverture = { ...COUVERTURE_VIDE(), touchee: true }; dessiner(); },
     }),
     changerIsbn: (v) => { etat.isbn = v; },
-    identifier,
+    identifier: () => identifier(),
+    reessayer: () => identifier({ forcer: true }),
     scanner: async () => {
       const files = await pickFiles({ accept: 'image/*', multiple: false, capture: 'environment' });
       if (!files.length) return;
       try {
         const detector = new window.BarcodeDetector({ formats: ['ean_13'] });
         const bmp = await createImageBitmap(files[0]);
-        const code = (await detector.detect(bmp)).find((x) => /^97[89]\d{10}$/.test(x.rawValue));
+        const code = codeBarresVersIsbn(await detector.detect(bmp));
         if (!code) { dire(t('Aucun ISBN lu sur cette photo.')); return; }
-        etat.isbn = code.rawValue; await identifier();
+        etat.isbn = code; await identifier();
       } catch { dire(t('Lecture du code-barres impossible.')); }
     },
     // R-UX-13 : une fiche saisie à la main n'a JAMAIS de couverture reçue — `touchee` ferme la porte à une réponse
     // encore en vol pour cet ISBN (le pas 1 ne montre pas la zone : elle s'y reposerait sans que personne le voie).
-    saisirMain: () => { avancer(); etat.isbn = nettoyerIsbn(etat.isbn); etat.provenance = null; etat.couverture = { ...COUVERTURE_VIDE(), touchee: true }; etat.pas = 2; dessiner(); },
-    changerChamp: (k, v) => { etat.champs[k] = v; if (k === 'language') etat.langueTouchee = true; majBoutonEnregistrer(zone, livreAjoutModel(etat)); },
+    saisirMain: () => {
+      nouvelleGeneration();
+      const v = validerIsbn(etat.isbn);
+      etat.isbn = v.ok ? v.isbn13 : nettoyerIsbn(etat.isbn).slice(0, 20); // affiché = enregistré quand valide ; borné sinon (S8/F22)
+      etat.provenance = null; etat.couverture = { ...COUVERTURE_VIDE(), touchee: true }; etat.pas = 2; dessiner();
+    },
+    changerChamp: (k, v) => { etat.champs[k] = v; if (k === 'language') etat.langueTouchee = true; majBoutonEnregistrer(zone, modele()); },
     basculerCuisine: (v) => { etat.champs.cuisines = basculerPuce(etat.champs.cuisines, v); dessiner(); },
     ajouterCuisine: (v) => { const apres = ajouterPuce(etat.champs.cuisines, v); if (apres !== etat.champs.cuisines) { etat.champs.cuisines = apres; dessiner(); } },
     // R-UX-13 : revenir changer l'ISBN abandonne la couverture de l'ancien — et `touchee` empêche la réponse encore
     // en vol de la reposer en coulisse (le pas 1 ne montre pas la zone). L'`identifier` suivant repart d'un
     // COUVERTURE_VIDE() neuf, donc `touchee` retombe et la couverture du nouvel ISBN est bien demandée.
-    retourIsbn: () => { avancer(); etat.pas = 1; etat.provenance = null; etat.couverture = { ...COUVERTURE_VIDE(), touchee: true }; dessiner(); },
+    retourIsbn: () => { nouvelleGeneration(); etat.pas = 1; etat.provenance = null; etat.couverture = { ...COUVERTURE_VIDE(), touchee: true }; dessiner(); },
+    basculerMotCle: (v) => { etat.champs.tags = basculerPuce(etat.champs.tags, v); dessiner(); },
+    ajouterMotCle: (v) => { const apres = ajouterPuce(etat.champs.tags, v); if (apres !== etat.champs.tags) { etat.champs.tags = apres; dessiner(); } },
     // Une écriture refusée ne s'annonce pas (I-B) : on reste au pas 2, la saisie est intacte, et c'est dit.
     // `enCours` ferme le bouton pendant l'écriture : deux tapes pressées ne font pas deux livres.
     enregistrer: async () => {
-      if (!livreAjoutModel(etat).peutEnregistrer) return;
+      if (!modele().peutEnregistrer) return;
       etat.enCours = true;
-      majBoutonEnregistrer(zone, livreAjoutModel(etat));
+      majBoutonEnregistrer(zone, modele());
       let edition;
       try {
         edition = await enregistrerLivre({ champs: etat.champs, isbn: etat.isbn, coverSha256: etat.couverture?.sha256 || null }, { repo: r });
       } catch (e) {
         etat.enCours = false;
-        majBoutonEnregistrer(zone, livreAjoutModel(etat));
+        majBoutonEnregistrer(zone, modele());
         logError('livre.enregistrer', { error: e });
         dire(t('Le livre n’a pas pu être enregistré. Réessaie.'));
         return;
