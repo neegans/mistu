@@ -1,55 +1,70 @@
-# Identifier un livre, fiable — plan d'implémentation
+# Identifier un livre, fiable — plan d'implémentation (rév. 2, base `main dccafe4`)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Quand Neegan tape ou scanne un ISBN, l'app remplit la fiche, ou dit la vraie raison (introuvable / service indisponible, motif nommé) et offre « Réessayer » ; un ISBN mal tapé est refusé avant tout appel ; une seule identification à la fois.
+**Goal:** Quand Neegan tape ou scanne un ISBN, l'app remplit la fiche (titre, auteur, langue, **mots-clés proposés**), ou dit la vraie raison (introuvable / service indisponible, motif nommé) et offre « Réessayer » ; un ISBN mal tapé est refusé avant tout appel ; une seule identification à la fois ; les mots-clés du livre servent la recherche de toutes ses recettes.
 
-**Architecture:** Un module pur `src/core/isbn.js` (validation, conversion 10↔13, filtre du code-barres). Dans `src/ui/livre-ajout.js` : `lookupIsbn` rend un **statut** (`trouve` / `introuvable` / `indisponible` + motif) après Open Library `search.json` (API actuelle, une reprise sur échec muet), Open Library legacy en filet sur un « rien », Google Books seulement avec une clé ; chaque tentative a son budget (`AbortController`) relié au signal extérieur. La route reçoit ses dépendances par un 4ᵉ paramètre `deps` et protège l'écran par une **génération** (une réponse tardive n'écrit rien). Le modèle pur `livreAjoutModel` porte les messages ; le rendu ajoute « Réessayer », Entrée = Identifier, champ en lecture seule pendant la recherche.
+**Architecture:** Un module pur `src/core/isbn.js` (validation, conversion 10↔13, filtre du code-barres). Dans `src/ui/livre-ajout.js` : `lookupIsbn` rend un **statut** (`trouve` / `introuvable` / `indisponible` + motif) après Open Library `search.json` (API actuelle, une reprise sur échec muet), Open Library legacy en filet sur un « rien », Google Books seulement avec une clé ; chaque tentative a son budget (`AbortController`) relié au signal extérieur ; la fiche porte `motsCles` (propositions). La route étend les dépendances injectées de `main` (`{ repo, navigate, toast }`) et s'appuie sur sa **génération** (C1) pour qu'une réponse tardive n'écrive rien. `puces.js` gagne les suggestions ; `book.js` et `search.js` lisent `books.tags`.
 
-**Tech Stack:** PWA sans build, modules ES natifs, pas de npm ; tests dans le navigateur (`tests/index.html` → `tests/ajouter.js`, `eq`/`ok`), bases jetables `withRepo` ; `fetch` injecté partout ; service worker `sw.js` (`SHELL`, `VERSION`).
+**Tech Stack:** PWA sans build, modules ES natifs, pas de npm ; tests dans le navigateur (`tests/index.html` → `tests/ajouter.js`, `eq`/`ok`), bases jetables `withRepo` ; `fetch` injecté partout ; service worker `sw.js` (`SHELL`, `VERSION`) ; total d'assertions épinglé dans `tests/tests.js`.
 
-**Spec:** `docs/superpowers/specs/2026-10-14-identifier-un-livre-fiable-design.md` (rév. 2). Lis-la **en entier** avant ta tâche : le plan en découle, et le registre SDD (`.superpowers/sdd/2026-10-14-identifier-un-livre-fiable/progress.md`) consigne les rulings R-ISBN-n pris en construction.
+**Spec:** `docs/superpowers/specs/2026-10-14-identifier-un-livre-fiable-design.md` (rév. 3 : § 1-11 le cœur, **§ 12 mots-clés**, **§ 13 ce que `main` a déjà réglé**). Lis-la **en entier** avant ta tâche. Registre SDD : `.superpowers/sdd/2026-10-14-identifier-un-livre-fiable/progress.md` (rulings R-ISBN-n).
 
 ## Global Constraints
 
-- **Arbre de travail : `~/projects/mistu-isbn` (branche `isbn-fiable`), servi sur `http://localhost:8082/`.** Ne touche JAMAIS `~/projects/mistu` (un autre lot y vit). Si le serveur 8082 ne répond pas : `cd ~/projects/mistu-isbn && nohup python3 -m http.server 8082 > /dev/null 2>&1 &`.
-- **Lancer la suite** (sans fenêtre, cache purgé) : `node ~/projects/mistu-isbn/.superpowers/sdd/2026-10-14-identifier-un-livre-fiable/suite.cjs 8082` → imprime `BILAN : ✅ N/N tests réussis` ou `❌` + la liste des échecs (`.ko`) + la console. **Base de départ : 1270/1270**, une seule erreur console préexistante (`Failed to load resource … 404`), à ignorer. **Rouge d'abord** : chaque tâche écrit ses tests, lance la suite, lit le rouge attendu, puis implémente.
-- **Aucun réseau dans la suite** : `fetch`, `attendre`, `enLigne`, délais, `cle`, `naviguer` injectés. Un test qui parle à `openlibrary.org` est un défaut.
-- **Français, chaînes par `t('…')` avec l'apostrophe typographique ’ (U+2019)**, jamais `'` dans une clé `t()` ; chaque chaîne neuve a son entrée dans `src/i18n/en.js` (clé = chaîne française exacte).
-- **`sw.js`** : tout module neuf entre dans `SHELL` ; `VERSION` = `cuisine-os-v0.4.1-N`, **N = numéro de la tâche** (tâche 1 → `-1`, tâche 2 → `-2`, …) dès qu'un fichier servi change (pas pour un commit qui ne touche que `tests/` ou `docs/`). `APP_VERSION = '0.4.1'` dès la tâche 1 ; deux pins à tenir : `tests/ajouter.js` (bloc statique de fin) et `tests/sync-l3.js` (≈ ligne 1864).
-- **Commits** : messages **en ASCII sans accents** (le terminal de Neegan déforme l'UTF-8), un commit par tâche au moins, **toujours par fichiers nommés** (`git add <fichiers>`, jamais `git add -A` ni `git add .` : `.superpowers/` est non suivi et doit le rester). Terminer chaque message par `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`. Pas de `push`, pas de fusion.
-- **Pas de `html:`, `innerHTML`, `window.open`** dans `isbn.js` ni `livre-ajout.js` ; tout texte passe par `textContent` via `el()` (`src/core/dom.js`).
-- **Invariants de la spec § 3** : I-B (un état d'écran = un événement réel), I-R (reprise seulement sur délai/réseau), I-G (une identification à la fois, génération).
-- Le bloc route R-UX-13 de `tests/ajouter.js` (≈ 631-775) est **retouché deux fois** (tâche 2 : ISBN valides + stub `search.json` ; tâche 6 : `deps` à la place de `globalThis.fetch`). Ne le réécris pas davantage que ce que la tâche demande.
+- **Arbre de travail : `~/projects/mistu-isbn` (branche `isbn-fiable`, rebasée sur `main dccafe4` + `606fdd9`), servi sur `http://localhost:8082/`.** Ne touche JAMAIS `~/projects/mistu`. Si 8082 ne répond pas : `cd ~/projects/mistu-isbn && nohup python3 -m http.server 8082 > /dev/null 2>&1 &`.
+- **Lancer la suite** (sans fenêtre, cache purgé) : `node ~/projects/mistu-isbn/.superpowers/sdd/2026-10-14-identifier-un-livre-fiable/suite.cjs 8082` → `BILAN : ✅ N/N tests réussis` ou `❌` + échecs (`.ko`) + console. **Base : 1378/1378**, une seule erreur console préexistante (`Failed to load resource … 404`), à ignorer. **Rouge d'abord** à chaque tâche.
+- **Total épinglé (F2 du lot UX).** `tests/tests.js` ≈ ligne 180 : `eq(results.length, 1377, 'compte d’assertions : …')` — N = nombre d'assertions **avant** cette assertion même. **À chaque tâche** : après le vert des autres assertions, lire dans le `.ko` du total « obtenu : X », poser X dans `tests/tests.js`, relancer → tout vert. Ne jamais poser un nombre deviné.
+- **Aucun réseau dans la suite** : `fetch`, `attendre`, `enLigne`, délais, `cle` injectés. Deux blocs de route de `main` (≈ 390-416 et 671-706) stubbent `globalThis.fetch` pour **refuser** tout réseau : ils restent tels quels.
+- **Français, chaînes `t('…')` avec l'apostrophe typographique ’ (U+2019)** ; chaque chaîne neuve a son entrée dans `src/i18n/en.js` (clé = chaîne française exacte, la mécanique F13 du bloc statique la vérifie).
+- **`sw.js`** : `SHELL` gagne `./src/core/isbn.js` (tâche 1, seul module neuf) ; `VERSION = 'cuisine-os-v0.4.1-N'`, **N = numéro de la tâche** dès qu'un fichier servi change. `APP_VERSION = '0.4.1'` dès la tâche 1 ; pins : `tests/ajouter.js` ≈ 1353-1355 et `tests/sync-l3.js` ≈ 1864. `main` est à `cuisine-os-v0.4.0-12`.
+- **Commits** : messages **ASCII sans accents**, un par tâche au moins, **par fichiers nommés** (jamais `git add -A`/`.` : `.superpowers/` est non suivi), terminés par `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`. Pas de `push`, pas de fusion.
+- **Pas de `html:`, `innerHTML`, `window.open`** dans les modules touchés ; texte par `textContent` via `el()`.
+- **Invariants § 3** : I-B (un état d'écran = un événement réel), I-R (reprise seulement sur délai/réseau), I-G (une identification à la fois, génération = `avancer()` de `main`).
+- **Noms déjà pris par `main`, à réutiliser tels quels** : `avancer()`, `oublierDistants()`, `champsDistants`, `langueTouchee`, `lireBornee(r, maxOctets)`, `signalDelai(ms)`, `fusionnerFiche(champs, fiche, { langueTouchee })`, deps `{ repo: r, navigate: nav, toast: dire }`, `root.etatRoute()`, `passagesCouverture`, `couverturesAppliquees`.
+- **Table des fixtures du bloc R-UX-13 (`tests/ajouter.js` ≈ 952-1227)** — la garde S9 refuse un ISBN qui n'est pas un ISBN-13 ; chaque fixture courte est remplacée **partout** dans le bloc (`taper`, `couvertures.set`, `fichesLentes.set`, `sansFicheOl.add`, `Livre <isbn>` attendus, `etatRoute().isbn` attendus, `e.isbn === '…'`) par son ISBN-13 valide :
+
+  | courte | ISBN-13 | courte | ISBN-13 |
+  |---|---|---|---|
+  | `'111'` | `'9780000001115'` | `'2223'` | `'9780000022233'` |
+  | `'222'` | `'9780000002228'` | `'3334'` | `'9780000033345'` |
+  | `'333'` | `'9780000003331'` | `'4445'` | `'9780000044457'` |
+  | `'444'` | `'9780000004444'` | `'1230'` | `'9780000012302'` |
+  | `'555'` | `'9780000005557'` | `'2340'` | `'9780000023407'` |
+  | `'666'` | `'9780000006660'` | `'5556'` | `'9780000055569'` |
+  | `'777'` | `'9780000007773'` | `'6667'` | `'9780000066671'` |
+  | `'888'` | `'9780000008886'` | `'1234'` | `'9780000012340'` |
+  | `'999'` | `'9780000009999'` | `'1010'` | `'9780000010100'` |
+  | `'1112'` | `'9780000011121'` | | |
+
+  Fais-le par un script (`node -e` ou `python3`) qui remplace les occurrences **entre apostrophes** et les deux `Livre 1112`/`Livre 2223` ; relis le diff.
 
 ## Review Focus
 
-Cinq entrées que la spec implique sans qu'une tâche les ait d'abord nommées ; chacune a maintenant son test dans la tâche qui possède le code :
+Entrées que la spec implique sans les nommer d'abord ; chacune a son test dans la tâche qui possède le code :
 
-1. **Open Library répond 200 avec une page HTML** (maintenance derrière un 200) → `JSON.parse` échoue → doit donner `indisponible / serveur`, jamais une exception ni « aucune fiche ». → tâche 2, test « corps non JSON ».
-2. **`attenteReelle` face à un signal déjà abandonné ou abandonné en cours** → doit rendre tout de suite, sans minuterie qui traîne. → tâche 2, test `attenteReelle`.
-3. **Double clic sur « Réessayer »** → un seul appel (la garde `recherche`). → tâche 6, test « deux Réessayer ».
-4. **`first_publish_year` reçu en chaîne (`'2018'`) ou absent** → `year` 2018 ou `null`, jamais `NaN`. → tâche 2, test « année en chaîne ».
-5. **Le rappel « ISBN {i} — … » avec placeholder** : la clé `t()` à placeholder doit être dans `en.js` telle quelle (la mécanique F13 extrait le littéral). → tâche 4, entrée `en.js` + test statique existant.
+1. **Open Library répond 200 avec une page HTML** (maintenance derrière un 200) → `indisponible / serveur`, jamais une exception. → tâche 2.
+2. **`attenteReelle` face à un signal déjà abandonné ou abandonné en cours** → rend tout de suite. → tâche 2.
+3. **Double clic sur « Réessayer »** → un seul appel. → tâche 7.
+4. **`first_publish_year` reçu en chaîne ou absent** → année ou `null`, jamais `NaN`. → tâche 2.
+5. **Une suggestion qui ne diffère d'un mot-clé choisi que par l'accent ou la casse** (« BBQ » choisi, « bbq » proposé) → absente des suggestions. → tâche 6.
+6. **`subject` absent de la réponse** → `motsCles: []`, aucun bloc de suggestions. → tâche 2 et 6.
+7. **La clé `t()` à placeholder (« ISBN {i} — … »)** doit être dans `en.js` telle quelle (F13 extrait le littéral). → tâche 4.
 
 ---
 
-### Task 1 : `src/core/isbn.js`, version 0.4.1, pins
+### Task 1 : `src/core/isbn.js`, version 0.4.1, pins et total
 
 **Files:**
 - Create: `src/core/isbn.js`
-- Modify: `src/ui/livre-ajout.js` (lignes 20 : `nettoyerIsbn` local → import + ré-export)
-- Modify: `sw.js` (ligne 4 `VERSION`, liste `SHELL`)
-- Modify: `src/model/schema.js` (ligne 6 `APP_VERSION`)
-- Modify: `tests/ajouter.js` (bloc « § 5 » ≈ ligne 137 : ajouter les tests ISBN après `const LA = …` ; `MODULES_NEUFS` ≈ 830 ; bloc statique ≈ 861-864)
-- Modify: `tests/sync-l3.js` (≈ 1864)
+- Modify: `src/ui/livre-ajout.js` (≈ 23 : `nettoyerIsbn` local → import + ré-export ; ligne d'import)
+- Modify: `sw.js` (ligne 4 `VERSION`, liste `SHELL`), `src/model/schema.js` (ligne 6)
+- Modify: `tests/ajouter.js` (après ≈ 211 `const LA = …` ; `MODULES_NEUFS` ≈ 1313 ; bloc statique ≈ 1352-1355), `tests/sync-l3.js` (≈ 1864), `tests/tests.js` (≈ 180)
 
 **Interfaces:**
-- Produces: `nettoyerIsbn(s) → string` (chiffres et X majuscule seulement) ; `validerIsbn(texte) → { ok: true, isbn13, isbn10 } | { ok: false, motif: 'vide'|'longueur'|'controle'|'pas_isbn' }` ; `codeBarresVersIsbn(codes) → string | null`. `livre-ajout.js` ré-exporte `nettoyerIsbn`.
+- Produces: `nettoyerIsbn(s) → string` (chiffres et X **majuscule**) ; `validerIsbn(texte) → { ok: true, isbn13, isbn10 } | { ok: false, motif: 'vide'|'longueur'|'controle'|'pas_isbn' }` ; `codeBarresVersIsbn(codes) → string | null`. `livre-ajout.js` ré-exporte `nettoyerIsbn` et importe `validerIsbn`, `codeBarresVersIsbn` (tâches 4 et 7).
 
-- [ ] **Step 1 : Écrire les tests (rouge)**
-
-Dans `tests/ajouter.js`, juste après la ligne `const LA = await import('../src/ui/livre-ajout.js');` (≈ 137), insérer :
+- [ ] **Step 1 : Tests (rouge)** — insérer après `const LA = await import('../src/ui/livre-ajout.js');` :
 
 ```js
   // --- § 4 ISBN (spec 2026-10-14-identifier-un-livre-fiable)
@@ -73,14 +88,13 @@ Dans `tests/ajouter.js`, juste après la ligne `const LA = await import('../src/
   eq(ISBN.codeBarresVersIsbn(null), null, 'isbn : entrée absente → null');
 ```
 
-Dans le bloc statique de fin (≈ 861-864) : ajouter `'./src/core/isbn.js'` à la liste `SHELL` testée ; remplacer `v0\.4\.0-\d+` par `v0\.4\.1-\d+` et `'0.4.0'` par `'0.4.1'` (deux assertions, libellés mis à jour en « 0.4.1 »). Dans `MODULES_NEUFS` (≈ 830) : ajouter `'../src/core/isbn.js'`. Dans `tests/sync-l3.js` (≈ 1864) : `v0\.4\.0-\d+` → `v0\.4\.1-\d+`.
+Bloc statique (≈ 1352-1355) : ajouter `'./src/core/isbn.js'` à la liste `SHELL` testée ; `v0\.4\.0-\d+` → `v0\.4\.1-\d+`, `'0.4.0'` → `'0.4.1'` (libellés « 0.4.1 »). `MODULES_NEUFS` (≈ 1313) : ajouter `'../src/core/isbn.js'`. `tests/sync-l3.js` ≈ 1864 : `v0\.4\.0` → `v0\.4\.1`.
 
-- [ ] **Step 2 : Lancer la suite, lire le rouge**
+- [ ] **Step 2 : Suite → rouge** — Expected : « Suite Ajouter interrompue : … isbn.js » (404), pins rouges, total rouge.
 
-Run: `node ~/projects/mistu-isbn/.superpowers/sdd/2026-10-14-identifier-un-livre-fiable/suite.cjs 8082`
-Expected: `❌` — « Suite Ajouter interrompue : … isbn.js » (l'import échoue, 404) et les pins `0.4.1` rouges dans `sync-l3`.
+- [ ] **Step 3 : Implémenter**
 
-- [ ] **Step 3 : Écrire `src/core/isbn.js`**
+`src/core/isbn.js` :
 
 ```js
 // ISBN : nettoyage, validation par chiffre de contrôle, conversion 10 ↔ 13, filtre d'un code-barres lu
@@ -115,72 +129,74 @@ export function validerIsbn(texte) {
 export const codeBarresVersIsbn = (codes) => (Array.isArray(codes) ? codes : []).map((c) => String(c?.rawValue ?? '')).find((v) => /^97[89]\d{10}$/.test(v)) || null;
 ```
 
-Dans `src/ui/livre-ajout.js` : supprimer la ligne `export const nettoyerIsbn = …` (≈ 20) et ajouter en tête des imports `import { nettoyerIsbn, validerIsbn, codeBarresVersIsbn } from '../core/isbn.js';` puis, juste après les imports, `export { nettoyerIsbn };` (les tâches 4 et 6 utilisent `validerIsbn` et `codeBarresVersIsbn`). Dans `sw.js` : ajouter `'./src/core/isbn.js'` à `SHELL` (à côté de `'./src/core/lien.js'`) et `VERSION = 'cuisine-os-v0.4.1-1'`. Dans `src/model/schema.js` : `APP_VERSION = '0.4.1'`.
+`src/ui/livre-ajout.js` : supprimer `export const nettoyerIsbn = …` (≈ 23) ; ajouter `import { nettoyerIsbn, validerIsbn, codeBarresVersIsbn } from '../core/isbn.js';` après les imports existants, puis `export { nettoyerIsbn };`. `sw.js` : `SHELL` += `'./src/core/isbn.js'` (à côté de `'./src/core/lien.js'`), `VERSION = 'cuisine-os-v0.4.1-1'`. `src/model/schema.js` : `APP_VERSION = '0.4.1'`.
 
-- [ ] **Step 4 : Lancer la suite, vert**
-
-Run: la même commande. Expected: `✅ 1289/1289` (1270 + 17 assertions ISBN + libellés des pins ; le nombre exact importe moins que **zéro `.ko`**).
+- [ ] **Step 4 : Suite → vert sauf le total ; poser le total ; vert.**
 
 - [ ] **Step 5 : Commit**
 
 ```bash
-git add src/core/isbn.js src/ui/livre-ajout.js sw.js src/model/schema.js tests/ajouter.js tests/sync-l3.js
+git add src/core/isbn.js src/ui/livre-ajout.js sw.js src/model/schema.js tests/ajouter.js tests/sync-l3.js tests/tests.js
 git commit -m "ISBN : module pur de validation (controle, 10<->13, code-barres), version 0.4.1" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 2 : `lookupIsbn` — tentative à budget, classement, Open Library actuelle puis legacy, reprise
+### Task 2 : `lookupIsbn` — tentative à budget, classement, Open Library actuelle puis legacy, reprise, mots-clés proposés
 
 **Files:**
-- Modify: `src/ui/livre-ajout.js` (`LIMITES_ISBN` ≈ 16 ; `borner` ≈ 21 ; `lireJson` + `lookupIsbn` ≈ 24-45 remplacés ; `corpsBorne` ≈ 61 : troisième paramètre)
-- Modify: `tests/ajouter.js` (bloc `lookupIsbn` ≈ 138-161 remplacé ; bloc route R-UX-13 ≈ 631-775 : ISBN valides + stub `search.json`)
+- Modify: `src/ui/livre-ajout.js` (`LIMITES_ISBN` ≈ 16 ; `borner`/`annee` ≈ 24-25 ; `lireJson` + `lookupIsbn` ≈ 54-77 **supprimés** ; code neuf après `signalDelai` ; import de `puces.js` : + `normaliser, LIMITES_PUCES`)
+- Modify: `tests/ajouter.js` (bloc ≈ 212-277 remplacé ; bloc R-UX-13 ≈ 952-1227 : fixtures + stub)
 
 **Interfaces:**
-- Consumes: `corpsBorne(r, type, borne)` (existant, paramètre ajouté ici).
-- Produces: `lookupIsbn(isbn13, { fetch, signal, cle = '', attendre = attenteReelle, surReprise = null, tentativeMs, repriseMs }) → { statut, fiche, source, motif, google, appels }` ; `attenteReelle(ms, signal) → Promise<void>` (exportée) ; `LIMITES_ISBN = { champ: 300, corps: 262144, delaiMs: 10000, tentativeMs: 8000, repriseMs: 1500, totalMs: 20000 }`. `cle` est acceptée mais **ignorée jusqu'à la tâche 3** (`google` vaut toujours `'non_appele'`).
+- Consumes: `lireBornee(r, maxOctets)` (main), `normaliser`, `LIMITES_PUCES` (`puces.js`).
+- Produces: `lookupIsbn(isbn13, { fetch, signal, cle = '', attendre = attenteReelle, surReprise = null, tentativeMs, repriseMs }) → { statut, fiche, source, motif, google, appels }` avec `fiche = { title, author, publisher, year, language, motsCles }` ; `attenteReelle(ms, signal)` exportée ; `MOTS_CLES_MAX = 10` exporté ; `LIMITES_ISBN = { champ: 300, corps: 262144, delaiMs: 10000, tentativeMs: 8000, repriseMs: 1500, totalMs: 20000 }`. `cle` acceptée mais **ignorée jusqu'à la tâche 3** (`google` = `'non_appele'`).
 
-- [ ] **Step 1 : Écrire les tests (rouge)**
+- [ ] **Step 1 : Tests (rouge)**
 
-Remplacer dans `tests/ajouter.js` le bloc qui commence à `eq(LA.LIMITES_ISBN, …` (≈ 138) et finit à la fermeture du bloc `{ … }` qui contient `'livre : le signal d’abandon est transmis au fetch'` (≈ 161) par :
+Remplacer, dans `tests/ajouter.js`, de `eq(LA.LIMITES_ISBN, …` (≈ 212) jusqu'à la fermeture du bloc `{ … }` qui contient `'livre : un 429 porteur d’une fiche valide reste un échec'` (≈ 277) par :
 
 ```js
   eq(LA.LIMITES_ISBN, { champ: 300, corps: 262144, delaiMs: 10000, tentativeMs: 8000, repriseMs: 1500, totalMs: 20000 }, 'livre : bornes S3 + délais du lot ISBN (F24 : delaiMs de la couverture intact)');
   eq(LA.OPTIONS_FETCH, { mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' }, 'livre : options de fetch explicites (S12)');
+  eq(LA.nettoyerIsbn(' 978-2-7619-5000-1 '), '9782761950001', 'livre : ISBN sans tirets ni espaces');
   {
-    // lookupIsbn : fetch injecté, attente injectée (aucune vraie attente), délais injectés. Chaque réponse factice
-    // expose blob() comme une vraie Response sans body (corpsBorne retombe sur blob()).
-    const reponse = (status, corps) => ({ ok: status >= 200 && status < 300, status, headers: new Headers(), blob: async () => new Blob([typeof corps === 'string' ? corps : JSON.stringify(corps)], { type: 'application/json' }) });
-    const SEARCH = 'https://openlibrary.org/search.json?isbn=9781785035289&fields=title,author_name,publisher,first_publish_year,language&limit=1';
+    // lookupIsbn : fetch, attente et délais injectés (aucune vraie attente). Une réponse factice sans body : lireBornee
+    // rend false et le corps est lu par text(), comme sur main.
+    const reponse = (status, corps) => ({ ok: status >= 200 && status < 300, status, headers: new Headers(), text: async () => (typeof corps === 'string' ? corps : JSON.stringify(corps)) });
+    const SEARCH = 'https://openlibrary.org/search.json?isbn=9781785035289&fields=title,author_name,publisher,first_publish_year,language,subject&limit=1';
     const LEGACY = 'https://openlibrary.org/api/books?bibkeys=ISBN:9781785035289&format=json&jscmd=data';
     const jamais = async () => { throw new Error('attendre ne doit pas être appelée'); };
     const sansAttente = async () => {};
     const chercher = (fetch, options = {}) => LA.lookupIsbn('9781785035289', { fetch, attendre: sansAttente, tentativeMs: 50, ...options });
+    const VIDE = { title: 'T', author: '', publisher: '', year: null, language: null, motsCles: [] };
     // Garde S9 : une entrée qui n'est pas un ISBN-13 ne part jamais sur le réseau.
     let erreur = null; let appelsGarde = 0;
     try { await LA.lookupIsbn('9781&x=1', { fetch: async () => { appelsGarde += 1; return reponse(200, {}); } }); } catch (e) { erreur = e; }
     eq([erreur instanceof TypeError, appelsGarde], [true, 0], 'lookup : une entrée qui n’est pas un ISBN-13 lève avant tout appel (S9)');
-    // Trouvé par search.json en un appel, fiche typée.
+    // Trouvé par search.json en un appel, fiche typée, mots-clés proposés (§ 12.2).
     const urls = [];
-    const r1 = await chercher(async (u, o) => { urls.push([u, o]); return reponse(200, { numFound: 1, docs: [{ title: 'Berber and Q', author_name: ['Josh Katz'], publisher: ['Ebury Publishing', 'Penguin Random House'], first_publish_year: 2018, language: ['eng', 'fre'] }] }); }, { attendre: jamais });
+    const sujets = ['Barbecuing', 'barbecuing', 12, 'x'.repeat(80), 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'];
+    const r1 = await chercher(async (u, o) => { urls.push([u, o]); return reponse(200, { numFound: 1, docs: [{ title: 'Berber and Q', author_name: ['Josh Katz'], publisher: ['Ebury Publishing', 'Penguin Random House'], first_publish_year: 2018, language: ['eng', 'fre'], subject: sujets }] }); }, { attendre: jamais });
     eq([r1.statut, r1.source, r1.appels, r1.motif, r1.google], ['trouve', 'openlibrary', 1, null, 'non_appele'], 'lookup : search.json répond → trouvé en un appel');
-    eq(r1.fiche, { title: 'Berber and Q', author: 'Josh Katz', publisher: 'Ebury Publishing', year: 2018, language: 'fr' }, 'lookup : fiche typée, premier éditeur, le français d’abord');
-    eq(urls[0][0], SEARCH, 'lookup : adresse de l’API actuelle, sans isbn dans fields (F13)');
+    eq([r1.fiche.title, r1.fiche.author, r1.fiche.publisher, r1.fiche.year, r1.fiche.language], ['Berber and Q', 'Josh Katz', 'Ebury Publishing', 2018, 'fr'], 'lookup : fiche typée, premier éditeur, le français d’abord');
+    eq([r1.fiche.motsCles.length, r1.fiche.motsCles[0], r1.fiche.motsCles[1].length, r1.fiche.motsCles.includes('barbecuing'), LA.MOTS_CLES_MAX], [10, 'Barbecuing', 60, false, 10], 'lookup : mots-clés proposés — 10 au plus, tronqués à 60, dédoublonnés par normaliser, chaînes seulement (§ 12.2)');
+    eq(urls[0][0], SEARCH, 'lookup : adresse de l’API actuelle, fields avec subject, sans isbn (F13, § 12.2)');
     ok(urls[0][1].signal instanceof AbortSignal && urls[0][1].mode === 'cors' && urls[0][1].credentials === 'omit' && urls[0][1].cache === 'no-store' && urls[0][1].referrerPolicy === 'no-referrer', 'lookup : options S12 + un signal par tentative');
-    // « Rien » sans numFound → legacy en filet, champs typés.
-    const r2 = await chercher(async (u) => (u === SEARCH ? reponse(200, { docs: [] }) : reponse(200, { 'ISBN:9781785035289': { title: 'Legacy', authors: [{ name: 'A' }, { nom: 'x' }], publishers: [{ name: 'P' }], publish_date: 'March 2018' } })), { attendre: jamais });
-    eq([r2.statut, r2.source, r2.appels, r2.fiche], ['trouve', 'openlibrary', 2, { title: 'Legacy', author: 'A', publisher: 'P', year: 2018, language: null }], 'lookup : « rien » (sans numFound) → legacy en filet, champs typés');
+    // « Rien » sans numFound → legacy en filet, champs typés, sujets legacy.
+    const r2 = await chercher(async (u) => (u === SEARCH ? reponse(200, { docs: [] }) : reponse(200, { 'ISBN:9781785035289': { title: 'Legacy', authors: [{ name: 'A' }, { nom: 'x' }], publishers: [{ name: 'P' }], publish_date: 'March 2018', subjects: [{ name: 'Grill' }, { nom: 'x' }] } })), { attendre: jamais });
+    eq([r2.statut, r2.source, r2.appels, r2.fiche], ['trouve', 'openlibrary', 2, { title: 'Legacy', author: 'A', publisher: 'P', year: 2018, language: null, motsCles: ['Grill'] }], 'lookup : « rien » (sans numFound) → legacy en filet, champs et sujets typés');
     const r3 = await chercher(async (u) => reponse(200, u === SEARCH ? { numFound: 0, docs: [] } : {}), { attendre: jamais });
     eq([r3.statut, r3.appels, r3.motif, r3.google, r3.fiche, r3.source], ['introuvable', 2, null, 'non_appele', null, null], 'lookup : deux « rien » → introuvable');
     const r4 = await chercher(async (u) => { if (u === SEARCH) return reponse(200, { docs: [] }); throw new Error('reseau'); }, { attendre: jamais });
     eq([r4.statut, r4.appels], ['introuvable', 2], 'lookup : le legacy qui tombe ne change pas le statut (search a répondu)');
-    // Reprise (I-R) : échec muet → une seconde tentative après attendre(repriseMs, signal), surReprise une fois.
+    // Reprise (I-R).
     const attentes = []; let surReprises = 0;
     const r5 = await chercher(async () => { throw new Error('reseau'); }, { attendre: async (ms, s) => { attentes.push([ms, s === undefined || s instanceof AbortSignal]); }, repriseMs: 1500, surReprise: () => { surReprises += 1; } });
     eq([r5.statut, r5.motif, r5.appels, attentes, surReprises], ['indisponible', 'reseau', 2, [[1500, true]], 1], 'lookup : échec muet → une reprise, attendre(repriseMs, signal), surReprise une fois (I-R)');
     let n6 = 0;
     const r6 = await chercher(async () => { n6 += 1; if (n6 === 1) throw new Error('reseau'); return reponse(200, { docs: [{ title: 'T' }] }); });
-    eq([r6.statut, r6.appels], ['trouve', 2], 'lookup : la reprise peut trouver');
+    eq([r6.statut, r6.appels, r6.fiche], ['trouve', 2, VIDE], 'lookup : la reprise peut trouver ; sans subject, motsCles vide');
     const r7 = await chercher(async () => reponse(429, {}), { attendre: jamais });
     eq([r7.statut, r7.motif, r7.appels], ['indisponible', 'limite', 1], 'lookup : 429 = limite, jamais réessayé par la machine (I-R)');
     const r8 = await chercher(async () => reponse(503, {}), { attendre: jamais });
@@ -205,11 +221,12 @@ Remplacer dans `tests/ajouter.js` le bloc qui commence à `eq(LA.LIMITES_ISBN, �
     const r13 = await chercher(async (u) => reponse(200, u === SEARCH ? { docs: [{ author_name: ['A'] }] } : {}), { attendre: jamais });
     eq([r13.statut, r13.appels], ['introuvable', 2], 'lookup : docs[0] sans titre = « rien », le legacy est consulté');
     eq((await chercher(async (u) => reponse(200, u === SEARCH ? { docs: [{ title: 12 }] } : {}), { attendre: jamais })).statut, 'introuvable', 'lookup : un titre qui n’est pas une chaîne n’est pas une fiche');
-    const r14 = await chercher(async () => reponse(200, { docs: [{ title: 'T\u202E\u2028x', author_name: 'x', publisher: [{}], language: 'french', first_publish_year: { a: 1 } }] }), { attendre: jamais });
-    eq(r14.fiche, { title: 'Tx', author: '', publisher: '', year: null, language: null }, 'lookup : champs typés, Cc/Cf/U+2028 retirés (S6)');
+    const bidi = String.fromCodePoint(0x202e), sepLigne = String.fromCodePoint(0x2028);
+    const r14 = await chercher(async () => reponse(200, { docs: [{ title: `T${bidi}${sepLigne}x`, author_name: 'x', publisher: [{}], language: 'french', first_publish_year: { a: 1 }, subject: 'x' }] }), { attendre: jamais });
+    eq(r14.fiche, { title: 'Tx', author: '', publisher: '', year: null, language: null, motsCles: [] }, 'lookup : champs typés, Cc/Cf/U+2028 retirés, subject non tableau → [] (S6)');
     eq((await chercher(async () => reponse(200, { docs: [{ title: 'T', first_publish_year: '2018' }] }), { attendre: jamais })).fiche.year, 2018, 'lookup : une année reçue en chaîne reste une année');
     eq((await chercher(async () => reponse(200, { docs: [{ title: 'T'.repeat(400) }] }), { attendre: jamais })).fiche.title.length, 300, 'lookup : titre tronqué à 300 (S3)');
-    // Corps en flux > 256 Kio : coupé par cancel(), jamais gardé (S7, R-UX-12).
+    // Corps en flux > 256 Kio : coupé par cancel(), jamais gardé (S7, via lireBornee).
     let annule = false;
     const flux = () => ({ ok: true, status: 200, headers: new Headers(), body: { getReader: () => ({ read: async () => ({ done: false, value: new Uint8Array(100 * 1024) }), cancel: async () => { annule = true; } }) } });
     const r15 = await chercher(async () => flux(), { attendre: jamais });
@@ -226,44 +243,62 @@ Remplacer dans `tests/ajouter.js` le bloc qui commence à `eq(LA.LIMITES_ISBN, �
   }
 ```
 
-Dans le bloc route R-UX-13 (≈ 631-775), **sans toucher à sa logique** : (a) remplacer les ISBN de fixture partout (`taper`, `couvertures.set`, `sansFicheOl.add`, libellés) : `'111'` → `'9780306406157'`, `'222'` → `'9780804429573'`, `'333'` → `'9782890772816'`, `'444'` → `'9781785035289'`, `'555'` → `'9791234567896'`, `'666'` → `'9782890775367'`, `'777'` → `'9782891291392'` ; (b) dans le stub `globalThis.fetch`, ajouter **avant** la branche `api/books` :
+Bloc R-UX-13 (≈ 952-1227), **sans toucher à sa logique** : (a) appliquer la **table des fixtures** (Global Constraints) ; (b) dans le stub `globalThis.fetch`, ajouter **avant** la branche `api/books` une branche `search.json` qui porte la porte `fichesLentes` (déplacée de la branche legacy) et une table `languesOl` :
 
 ```js
           if (u.startsWith('https://openlibrary.org/search.json')) {
             const isbn = new URL(u).searchParams.get('isbn');
-            const corps = sansFicheOl.has(isbn) ? { numFound: 0, docs: [] } : { numFound: 1, docs: [{ title: `Livre ${isbn}`, author_name: [], publisher: [], first_publish_year: 2020, language: ['fre'] }] };
-            return { ok: true, status: 200, headers: new Headers(), blob: async () => new Blob([JSON.stringify(corps)], { type: 'application/json' }) };
+            const lente = fichesLentes.get(isbn);
+            if (lente) await lente;
+            const corps = sansFicheOl.has(isbn) ? { numFound: 0, docs: [] } : { numFound: 1, docs: [{ title: `Livre ${isbn}`, author_name: [], publisher: [], first_publish_year: 2020, language: languesOl.get(isbn) || ['fre'] }] };
+            return { ok: true, status: 200, headers: new Headers(), text: async () => JSON.stringify(corps) };
           }
 ```
 
-et donner `blob` aux réponses `api/books` (`blob: async () => new Blob([JSON.stringify(…)])` à la place de `text`) ; (c) le cas 4 (`'666'`, ≈ 757-767) devient « sans clé, un « rien » d'Open Library ne demande ni couverture ni Google » :
+(déclarer `const languesOl = new Map();` à côté de `fichesLentes`) ; (c) cas 4 (`'666'` → `'9780000006660'`) devient « sans clé, un « rien » d'Open Library ne demande ni couverture ni Google » :
 
 ```js
         eq([depuis.some((u) => u.startsWith('https://covers.openlibrary.org/')), depuis.some((u) => u.startsWith('https://www.googleapis.com/books/')), r4.textContent.includes('Aucune fiche')],
           [false, false, true], 'route : sans clé, un « rien » d’Open Library ne demande ni couverture ni Google Books (I-A, § 5)');
 ```
 
-- [ ] **Step 2 : Lancer la suite, lire le rouge**
+(d) cas 10 (C2, `'5556'`/`'6667'`) : remplacer `sansFicheOl.add('…'); sansFicheOl.add('…');` par `languesOl.set('9780000055569', ['eng']); languesOl.set('9780000066671', ['eng']);` — la langue vient maintenant de `search.json` (C2 inchangé, libellés « via search.json »). Les cas 1-3, 5-9, 11-12 ne changent que par leurs fixtures.
 
-Expected: `❌` — « Suite Ajouter interrompue » ou une série de `lookup : …` rouges (`statut` absent, `LIMITES_ISBN` sans `tentativeMs`, `attenteReelle` indéfinie).
+- [ ] **Step 2 : Suite → rouge** — « Suite Ajouter interrompue » ou `lookup : …` rouges (`statut` absent, `attenteReelle` indéfinie), R-UX-13 rouge (garde S9 sur `'111'` tant que la table n'est pas appliquée).
 
 - [ ] **Step 3 : Implémenter dans `src/ui/livre-ajout.js`**
 
-Remplacer `LIMITES_ISBN`, `borner`, `lireJson` et `lookupIsbn` (≈ 16-45) par :
+Import : `import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes, normaliser, LIMITES_PUCES } from './puces.js';`. Remplacer `LIMITES_ISBN` (≈ 16) et les deux lignes `borner`/`annee` (≈ 24-25) ; **supprimer** `lireJson` et l'ancien `lookupIsbn` (≈ 54-77) ; insérer après `signalDelai` :
 
 ```js
 export const LIMITES_ISBN = { champ: 300, corps: 256 * 1024, delaiMs: 10000, tentativeMs: 8000, repriseMs: 1500, totalMs: 20000 };
-export const OPTIONS_FETCH = { mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' };
-const CHAMPS_VIDES = () => ({ title: '', author: '', publisher: '', year: '', language: 'fr', convention: '', cuisines: [] });
+```
 
-// S3/S6 : une chaîne seulement, sans caractères de contrôle (Cc), de format (Cf : bidi…) ni séparateurs de ligne
-// U+2028/2029 (catégories Zl/Zp, nommés à part), tronquée à 300. Tout ce qui n'est pas une chaîne vaut ''.
-const borner = (s) => (typeof s === 'string' ? s.replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, '').slice(0, LIMITES_ISBN.champ) : '');
+```js
+// S3/S6 : une chaîne seulement, sans caractères de contrôle (Cc) ni de format (Cf : bidi…), ni les séparateurs de
+// ligne U+2028/U+2029 (catégories Zl/Zp, nommés à part — R-ISBN-1), tronquée à 300. Tout ce qui n'est pas une
+// chaîne vaut ''.
+const borner = (s) => (typeof s === 'string' ? s.replace(/[\p{Cc}\p{Cf}\u{2028}\u{2029}]/gu, '').slice(0, LIMITES_ISBN.champ) : '');
 const chaines = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
 const annee = (s) => { const m = String(s ?? '').match(/\b(\d{4})\b/); return m ? parseInt(m[1], 10) : null; };
 const langueDe = (liste) => (!Array.isArray(liste) ? null : liste.includes('fre') ? 'fr' : liste.includes('eng') ? 'en' : null);
 const ficheOk = (f) => (f && f.title ? f : null);
+// § 12.2 : des PROPOSITIONS de mots-clés — 10 au plus, tronquées à la borne des puces, dédoublonnées par normaliser.
+// Jamais posées sans la tape de la personne : fusionnerFiche ne les lit pas.
+export const MOTS_CLES_MAX = 10;
+const motsClesDe = (liste) => {
+  const vus = new Map();
+  for (const v of chaines(liste)) {
+    const valeur = borner(v).trim().slice(0, LIMITES_PUCES.longueur);
+    const cle = normaliser(valeur);
+    if (cle && !vus.has(cle)) vus.set(cle, valeur);
+    if (vus.size >= MOTS_CLES_MAX) break;
+  }
+  return [...vus.values()];
+};
+```
 
+```js
 // Attente abandonnable : rend tout de suite si le signal est déjà abandonné, et dès qu'il l'est.
 export const attenteReelle = (ms, signal) => new Promise((resolve) => {
   if (signal?.aborted) { resolve(); return; }
@@ -272,13 +307,13 @@ export const attenteReelle = (ms, signal) => new Promise((resolve) => {
   signal?.addEventListener('abort', fin, { once: true });
 });
 
-const URL_OL_SEARCH = (isbn) => `https://openlibrary.org/search.json?isbn=${isbn}&fields=title,author_name,publisher,first_publish_year,language&limit=1`;
-const URL_OL_LEGACY = (isbn) => `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`;
+const URL_OL_SEARCH = (isbn) => `https://openlibrary.org/search.json?isbn=${encodeURIComponent(isbn)}&fields=title,author_name,publisher,first_publish_year,language,subject&limit=1`;
+const URL_OL_LEGACY = (isbn) => `https://openlibrary.org/api/books?bibkeys=ISBN:${encodeURIComponent(isbn)}&format=json&jscmd=data`;
 
 // Une tentative = un budget (S4) : son AbortController couvre le fetch ET la lecture du corps ; il est relié au signal
 // extérieur par un écouteur retiré en finally. Rend { ok: true, json } ou { ok: false, motif }. Ordre du classement
 // (F14) : signal de la tentative abandonné → delai ; rejet → reseau ; 429 → limite ; autre non-2xx → serveur ;
-// corps trop gros, non JSON → serveur.
+// corps trop gros (lireBornee, S1) ou non JSON → serveur.
 async function tentative(fetchFn, url, options, { tentativeMs, signal }) {
   const ctl = new AbortController();
   const chrono = setTimeout(() => ctl.abort(), tentativeMs);
@@ -290,10 +325,14 @@ async function tentative(fetchFn, url, options, { tentativeMs, signal }) {
     try { r = await fetchFn(url, { ...options, signal: ctl.signal }); } catch { return echec(); }
     if (r.status === 429) return { ok: false, motif: 'limite' };
     if (!r.ok) return { ok: false, motif: 'serveur' };
-    let blob;
-    try { blob = await corpsBorne(r, 'application/json', LIMITES_ISBN.corps); } catch { return echec(); }
-    if (!blob) return { ok: false, motif: 'serveur' };
-    try { return { ok: true, json: JSON.parse(await blob.text()) }; } catch { return { ok: false, motif: 'serveur' }; }
+    let texte;
+    try {
+      const morceaux = await lireBornee(r, LIMITES_ISBN.corps);
+      if (morceaux === null) return { ok: false, motif: 'serveur' };
+      texte = morceaux === false ? await r.text() : await new Blob(morceaux).text();
+    } catch { return echec(); }
+    if (typeof texte !== 'string' || texte.length > LIMITES_ISBN.corps) return { ok: false, motif: 'serveur' };
+    try { return { ok: true, json: JSON.parse(texte) }; } catch { return { ok: false, motif: 'serveur' }; }
   } finally { clearTimeout(chrono); signal?.removeEventListener('abort', relais); }
 }
 
@@ -303,26 +342,26 @@ function lireSearch(json) {
   if (!Array.isArray(docs)) return { repondu: false };
   const d = docs[0];
   if (!d || typeof d !== 'object') return { repondu: true, fiche: null };
-  return { repondu: true, fiche: ficheOk({ title: borner(d.title).trim(), author: borner(chaines(d.author_name).join(', ')), publisher: borner(chaines(d.publisher)[0]), year: annee(d.first_publish_year), language: langueDe(d.language) }) };
+  return { repondu: true, fiche: ficheOk({ title: borner(d.title).trim(), author: borner(chaines(d.author_name).join(', ')), publisher: borner(chaines(d.publisher)[0]), year: annee(d.first_publish_year), language: langueDe(d.language), motsCles: motsClesDe(d.subject) }) };
 }
+const noms = (liste) => (Array.isArray(liste) ? liste.map((x) => (typeof x?.name === 'string' ? x.name : '')).filter(Boolean) : []);
 function lireLegacy(json, isbn) {
   if (!json || typeof json !== 'object') return { repondu: false };
   const b = json[`ISBN:${isbn}`];
   if (!b || typeof b !== 'object') return { repondu: true, fiche: null };
-  const noms = (liste) => (Array.isArray(liste) ? liste.map((x) => (typeof x?.name === 'string' ? x.name : '')).filter(Boolean) : []);
-  return { repondu: true, fiche: ficheOk({ title: borner(b.title).trim(), author: borner(noms(b.authors).join(', ')), publisher: borner(noms(b.publishers).join(', ')), year: annee(b.publish_date), language: null }) };
+  return { repondu: true, fiche: ficheOk({ title: borner(b.title).trim(), author: borner(noms(b.authors).join(', ')), publisher: borner(noms(b.publishers).join(', ')), year: annee(b.publish_date), language: null, motsCles: motsClesDe(noms(b.subjects)) }) };
 }
 
 // Trois issues (spec § 5) : trouve / introuvable (Open Library a répondu « rien ») / indisponible (motif). Étape 1 :
 // search.json, une reprise sur échec muet (I-R). Étape 2 : legacy api/books, seulement après un « rien ». Étape 3
-// (tâche 3) : Google Books, seulement avec une clé et après un « rien ». Jamais d'exception pour un échec de source.
+// (tâche 3) : Google Books, seulement avec une clé et après un « rien ». Jamais d'exception pour un échec de source ;
+// une TypeError seulement pour un appelant qui ne passe pas un ISBN-13 (S9).
 export async function lookupIsbn(isbn13, { fetch = globalThis.fetch, signal, cle = '', attendre = attenteReelle, surReprise = null, tentativeMs = LIMITES_ISBN.tentativeMs, repriseMs = LIMITES_ISBN.repriseMs } = {}) {
-  if (!/^97[89]\d{10}$/.test(String(isbn13))) throw new TypeError('lookupIsbn : ISBN-13 attendu'); // S9 : l'erreur d'un appelant, pas d'une source
+  if (!/^97[89]\d{10}$/.test(String(isbn13))) throw new TypeError('lookupIsbn : ISBN-13 attendu');
   const bilan = { statut: 'indisponible', fiche: null, source: null, motif: null, google: 'non_appele', appels: 0 };
   const appel = async (url, options) => { bilan.appels += 1; return tentative(fetch, url, options, { tentativeMs, signal }); };
   const trouve = (fiche, source) => ({ ...bilan, statut: 'trouve', fiche, source });
   const abandonne = () => ({ ...bilan, motif: 'delai' });
-  // Étape 1.
   let r1 = null;
   for (let essai = 0; essai < 2; essai += 1) {
     if (signal?.aborted) return abandonne();
@@ -340,7 +379,7 @@ export async function lookupIsbn(isbn13, { fetch = globalThis.fetch, signal, cle
   const lu1 = lireSearch(r1.json);
   if (!lu1.repondu) return { ...bilan, motif: 'serveur' };
   if (lu1.fiche) return trouve(lu1.fiche, 'openlibrary');
-  // Étape 2 : Open Library a répondu « rien » → le statut est acquis (introuvable) ; le legacy ne peut que trouver.
+  // Étape 2 : Open Library a répondu « rien » → le statut est acquis ; le legacy ne peut que trouver.
   if (signal?.aborted) return { ...bilan, statut: 'introuvable' };
   const r2 = await appel(URL_OL_LEGACY(isbn13), OPTIONS_FETCH);
   const lu2 = r2.ok ? lireLegacy(r2.json, isbn13) : null;
@@ -349,35 +388,30 @@ export async function lookupIsbn(isbn13, { fetch = globalThis.fetch, signal, cle
 }
 ```
 
-Puis `corpsBorne` (≈ 61) : signature `async function corpsBorne(r, type, borne = LIMITES_COUVERTURE.octetsDistants)` et supprimer la ligne `const borne = LIMITES_COUVERTURE.octetsDistants;`. Tout le reste de la couverture est inchangé (`recupererCouvertureParIsbn` appelle `corpsBorne(r, type)` : défaut intact). Réécrire le commentaire d'en-tête de `lookupIsbn` comme ci-dessus (F27). Dans `sw.js` : `VERSION = 'cuisine-os-v0.4.1-2'`.
+La route de `main` lit encore `{ fiche, source }` : elle continue de marcher (le statut est ignoré jusqu'à la tâche 7 ; `fiche.motsCles` est ignoré par `fusionnerFiche`). `sw.js` : `VERSION = 'cuisine-os-v0.4.1-2'`.
 
-- [ ] **Step 4 : Lancer la suite, vert**
-
-Expected: `✅`, zéro `.ko`. Si le bloc R-UX-13 reste rouge : vérifier que les sept ISBN sont remplacés **partout** (y compris dans `couvertures.set` et les libellés) et que le stub rend `blob`.
+- [ ] **Step 4 : Suite → vert ; poser le total ; vert.** Si R-UX-13 reste rouge : vérifier la table appliquée **partout** (dont `Livre 1112`/`Livre 2223`, `e.isbn === '…'`), la porte `fichesLentes` dans la branche `search.json`.
 
 - [ ] **Step 5 : Commit**
 
 ```bash
-git add src/ui/livre-ajout.js sw.js tests/ajouter.js
-git commit -m "lookupIsbn : trois issues, tentative a budget, Open Library search.json puis legacy, une reprise sur echec muet" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git add src/ui/livre-ajout.js sw.js tests/ajouter.js tests/tests.js
+git commit -m "lookupIsbn : trois issues, tentative a budget sur lireBornee, search.json puis legacy, une reprise sur echec muet, mots-cles proposes" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 3 : Google Books avec clé, `GOOGLE_BOOKS` dans la config, `strict-origin`
+### Task 3 : Google Books avec clé, `GOOGLE_BOOKS`, `strict-origin`, catégories
 
 **Files:**
 - Modify: `src/sync/config.js` (export `GOOGLE_BOOKS` après `SUPABASE`)
-- Modify: `src/ui/livre-ajout.js` (`lookupIsbn` : étape 3 ; `URL_GOOGLE` ; `lireGoogle`)
-- Modify: `tests/ajouter.js` (suite du bloc `lookupIsbn` de la tâche 2 ; bloc statique de fin : test de forme de la clé)
+- Modify: `src/ui/livre-ajout.js` (`lookupIsbn` étape 3 ; `URL_GOOGLE` ; `OPTIONS_GOOGLE` ; `lireGoogle` ; import `GOOGLE_BOOKS`)
+- Modify: `tests/ajouter.js` (fin du bloc `lookupIsbn` ; bloc statique : test de forme de la clé), `tests/tests.js` (total)
 
 **Interfaces:**
-- Consumes: `lookupIsbn` (tâche 2), `tentative`, `borner`, `chaines`, `annee`, `ficheOk`.
-- Produces: `GOOGLE_BOOKS = { key: '' }` (export de `src/sync/config.js`) ; `lookupIsbn(…, { cle })` : avec `cle` non vide, troisième appel `https://www.googleapis.com/books/v1/volumes?q=isbn:<13>&maxResults=1&key=<encodeURIComponent(cle)>` avec `referrerPolicy: 'strict-origin'` ; `google ∈ { 'non_appele', 'rien', 'echec' }`.
+- Produces: `GOOGLE_BOOKS = { key: '' }` ; avec `cle` non vide, troisième appel `https://www.googleapis.com/books/v1/volumes?q=isbn:<13>&maxResults=1&key=<encodeURIComponent(cle)>` avec `referrerPolicy: 'strict-origin'` ; `google ∈ { 'non_appele', 'rien', 'echec' }` ; `fiche.motsCles` ← `volumeInfo.categories`.
 
-- [ ] **Step 1 : Écrire les tests (rouge)**
-
-À la fin du bloc `lookupIsbn` de la tâche 2 (avant son `}` fermant), ajouter :
+- [ ] **Step 1 : Tests (rouge)** — à la fin du bloc `lookupIsbn` (avant son `}`) :
 
 ```js
     // Google Books : jamais sans clé ; avec clé, troisième appel, strict-origin, clé encodée ; jamais après un échec OL.
@@ -386,8 +420,8 @@ git commit -m "lookupIsbn : trois issues, tentative a budget, Open Library searc
     eq([g0.appels, urls3.some(([u]) => u.includes('googleapis'))], [2, false], 'lookup : sans clé, Google Books n’est jamais appelé');
     const stubGoogle = (reponseGoogle, search = { docs: [] }) => async (u, o) => { urls3.push([u, o]); if (u === SEARCH) return reponse(200, search); if (u === LEGACY) return reponse(200, {}); return reponseGoogle(u, o); };
     urls3.length = 0;
-    const g1 = await chercher(stubGoogle(async () => reponse(200, { items: [{ volumeInfo: { title: 'G', authors: ['X', 3], publisher: 'Q', publishedDate: '2001-02', language: 'fr' } }] })), { cle: 'k&x', attendre: jamais });
-    eq([g1.statut, g1.source, g1.appels, g1.fiche], ['trouve', 'googlebooks', 3, { title: 'G', author: 'X', publisher: 'Q', year: 2001, language: 'fr' }], 'lookup : avec clé, Google Books est le troisième appel, champs typés');
+    const g1 = await chercher(stubGoogle(async () => reponse(200, { items: [{ volumeInfo: { title: 'G', authors: ['X', 3], publisher: 'Q', publishedDate: '2001-02', language: 'fr', categories: ['Cooking / BBQ', 'cooking / bbq'] } }] })), { cle: 'k&x', attendre: jamais });
+    eq([g1.statut, g1.source, g1.appels, g1.fiche], ['trouve', 'googlebooks', 3, { title: 'G', author: 'X', publisher: 'Q', year: 2001, language: 'fr', motsCles: ['Cooking / BBQ'] }], 'lookup : avec clé, Google Books est le troisième appel, champs et catégories typés');
     const [uG, oG] = urls3[2];
     eq(uG, 'https://www.googleapis.com/books/v1/volumes?q=isbn:9781785035289&maxResults=1&key=k%26x', 'lookup : adresse Google, clé encodée (S9)');
     eq([oG.referrerPolicy, urls3[0][1].referrerPolicy, urls3[1][1].referrerPolicy, oG.mode, oG.credentials, oG.cache, oG.signal instanceof AbortSignal], ['strict-origin', 'no-referrer', 'no-referrer', 'cors', 'omit', 'no-store', true], 'lookup : strict-origin pour Google seul (§ 7), no-referrer ailleurs');
@@ -400,23 +434,20 @@ git commit -m "lookupIsbn : trois issues, tentative a budget, Open Library searc
     urls3.length = 0;
     const g4 = await chercher(async (u) => { urls3.push([u]); return reponse(503, {}); }, { cle: 'k', attendre: jamais });
     eq([g4.statut, g4.motif, g4.appels, urls3.some(([u]) => u.includes('googleapis'))], ['indisponible', 'serveur', 1, false], 'lookup : Open Library muette → Google jamais appelé, « Réessayer » plutôt qu’un mensonge (S5/F6)');
-    // Signal abandonné entre le legacy et Google : Google ne part pas, le statut reste introuvable (search a répondu).
     const ctl6 = new AbortController();
     urls3.length = 0;
     const g5 = await chercher(async (u, o) => { urls3.push([u, o]); if (u === SEARCH) return reponse(200, { docs: [] }); ctl6.abort(); return reponse(200, {}); }, { cle: 'k', signal: ctl6.signal, attendre: jamais });
     eq([g5.statut, g5.appels, g5.google], ['introuvable', 2, 'echec'], 'lookup : abandon après le legacy → Google jamais appelé, introuvable avec google = echec (S4c)');
 ```
 
-Dans le bloc statique de fin (près des pins) :
+Bloc statique (près des pins) :
 
 ```js
     const { GOOGLE_BOOKS } = await import('../src/sync/config.js');
     ok(typeof GOOGLE_BOOKS?.key === 'string' && (GOOGLE_BOOKS.key === '' || /^AIza[0-9A-Za-z_-]{35}$/.test(GOOGLE_BOOKS.key)), 'config : la clé Google Books est vide ou au format d’une clé d’API publique — un test de forme, jamais de valeur (S2/F2)');
 ```
 
-- [ ] **Step 2 : Lancer la suite, lire le rouge**
-
-Expected: `❌` — `GOOGLE_BOOKS` indéfini ; `g1.appels` = 2 au lieu de 3 ; `g2.google` = `'non_appele'`.
+- [ ] **Step 2 : Suite → rouge** — `GOOGLE_BOOKS` indéfini ; `g1.appels` 2 ; `g2.google` `'non_appele'`.
 
 - [ ] **Step 3 : Implémenter**
 
@@ -430,10 +461,10 @@ Expected: `❌` — `GOOGLE_BOOKS` indéfini ; `g1.appels` = 2 au lieu de 3 ; `g
 export const GOOGLE_BOOKS = { key: '' };
 ```
 
-`src/ui/livre-ajout.js` : import `import { GOOGLE_BOOKS } from '../sync/config.js';` (servira à la route, tâche 6 ; ici pour `URL_GOOGLE`, rien à lire). Ajouter après `URL_OL_LEGACY` :
+`src/ui/livre-ajout.js` : `import { GOOGLE_BOOKS } from '../sync/config.js';` ; après `URL_OL_LEGACY` :
 
 ```js
-const URL_GOOGLE = (isbn, cle) => `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1&key=${encodeURIComponent(cle)}`;
+const URL_GOOGLE = (isbn, cle) => `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}&maxResults=1&key=${encodeURIComponent(cle)}`;
 // § 7 : une clé restreinte par référent exige un Referer ; strict-origin envoie l'ORIGINE seule (jamais le chemin ni
 // le #), et rien sur un déclassement HTTPS → HTTP. Google Books est le seul appel qui s'écarte de no-referrer (S12).
 const OPTIONS_GOOGLE = { ...OPTIONS_FETCH, referrerPolicy: 'strict-origin' };
@@ -442,7 +473,7 @@ function lireGoogle(json) {
   const items = json.items;
   const v = Array.isArray(items) && items[0] && typeof items[0] === 'object' ? items[0].volumeInfo : null;
   if (!v || typeof v !== 'object') return { repondu: true, fiche: null };
-  return { repondu: true, fiche: ficheOk({ title: borner(v.title).trim(), author: borner(chaines(v.authors).join(', ')), publisher: borner(v.publisher), year: annee(v.publishedDate), language: v.language === 'fr' || v.language === 'en' ? v.language : null }) };
+  return { repondu: true, fiche: ficheOk({ title: borner(v.title).trim(), author: borner(chaines(v.authors).join(', ')), publisher: borner(v.publisher), year: annee(v.publishedDate), language: v.language === 'fr' || v.language === 'en' ? v.language : null, motsCles: motsClesDe(v.categories) }) };
 }
 ```
 
@@ -458,33 +489,30 @@ Dans `lookupIsbn`, remplacer la dernière ligne `return { ...bilan, statut: 'int
   return { ...bilan, statut: 'introuvable', google: lu3?.repondu ? 'rien' : 'echec' };
 ```
 
-Mettre à jour le commentaire d'en-tête de `lookupIsbn` (« Étape 3 (tâche 3) » → « Étape 3 : Google Books… »). `sw.js` : `VERSION = 'cuisine-os-v0.4.1-3'`.
+Commentaire d'en-tête : « Étape 3 : Google Books… ». `sw.js` : `VERSION = 'cuisine-os-v0.4.1-3'`.
 
-- [ ] **Step 4 : Lancer la suite, vert** — Expected: `✅`, zéro `.ko`.
+- [ ] **Step 4 : Suite → vert ; total ; vert.**
 
 - [ ] **Step 5 : Commit**
 
 ```bash
-git add src/sync/config.js src/ui/livre-ajout.js sw.js tests/ajouter.js
-git commit -m "lookupIsbn : Google Books seulement avec cle (GOOGLE_BOOKS vide), strict-origin, jamais apres un echec Open Library" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git add src/sync/config.js src/ui/livre-ajout.js sw.js tests/ajouter.js tests/tests.js
+git commit -m "lookupIsbn : Google Books seulement avec cle (GOOGLE_BOOKS vide), strict-origin, categories en mots-cles, jamais apres un echec Open Library" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 4 : `fabriquerLivre` (ISBN-13 ou `null`), modèle `livreAjoutModel`, dictionnaire
+### Task 4 : `fabriquerLivre` (ISBN-13 ou `null`, `tags`), modèle `livreAjoutModel`, dictionnaire
 
 **Files:**
-- Modify: `src/ui/livre-ajout.js` (`livreAjoutModel` ≈ 128-135 ; `fabriquerLivre` ≈ 137-142)
-- Modify: `src/i18n/en.js` (≈ 195-199 : entrées neuves, une retirée)
-- Modify: `tests/ajouter.js` (bloc modèle ≈ 165-174 ; bloc `fabriquerLivre` ≈ 176-183)
+- Modify: `src/ui/livre-ajout.js` (`CHAMPS_VIDES` ≈ 20 ; `livreAjoutModel` ≈ 173-180 ; `fabriquerLivre` ≈ 182-187)
+- Modify: `src/i18n/en.js` (≈ 195-199), `tests/ajouter.js` (bloc modèle ≈ 301-310 ; bloc `fabriquerLivre` ≈ 312-316), `tests/tests.js`
 
 **Interfaces:**
 - Consumes: `validerIsbn` (tâche 1).
-- Produces: `livreAjoutModel({ pas, isbn, champs, provenance, recherche, reprise, validation, resultat, cleGoogle, lecteurDisponible, enCours })` → `{ …, reprise, validation, resultat, cleGoogle, isbnValide, peutReessayer, messages: { provenance, recherche, lecteur, validation, indisponible, sources, rappelIsbn } }` ; `fabriquerLivre` écrit `edition.isbn = isbn13 | null`.
+- Produces: `livreAjoutModel({ pas, isbn, champs, provenance, recherche, reprise, validation, resultat, suggestions, cleGoogle, lecteurDisponible, enCours })` → `{ …, reprise, validation, resultat, suggestions, cleGoogle, isbnValide, peutReessayer, messages: { provenance, recherche, lecteur, validation, indisponible, sources, rappelIsbn } }` ; `CHAMPS_VIDES().tags = []` ; `fabriquerLivre` écrit `edition.isbn = isbn13 | null` et `book.tags = [...c.tags]`.
 
-- [ ] **Step 1 : Écrire les tests (rouge)**
-
-Remplacer le bloc modèle (de `const m = LA.livreAjoutModel({ pas: 1, isbn: '', …` à la fin de son `{ … }`, ≈ 165-174) par :
+- [ ] **Step 1 : Tests (rouge)** — remplacer le bloc modèle (≈ 301-310, de `const m = LA.livreAjoutModel({ pas: 1, isbn: '', …` à la fin de son `{ … }`) par :
 
 ```js
   {
@@ -514,26 +542,31 @@ Remplacer le bloc modèle (de `const m = LA.livreAjoutModel({ pas: 1, isbn: '', 
     eq([LA.livreAjoutModel({ pas: 1 }).messages.sources, LA.livreAjoutModel({ pas: 1, cleGoogle: true }).messages.sources], ['L’ISBN est envoyé à Open Library.', 'L’ISBN est envoyé à Open Library, puis à Google Books si besoin.'], 'livre : la phrase des sources dit ce qui est vrai (F12)');
     eq([LA.livreAjoutModel({ pas: 2, isbn: '9782890772816' }).isbnValide, LA.livreAjoutModel({ pas: 2, isbn: '12345' }).isbnValide, LA.livreAjoutModel({ pas: 2, isbn: '' }).isbnValide], [true, false, true], 'livre : isbnValide');
     eq([LA.livreAjoutModel({ pas: 2, isbn: '9782890772816' }).messages.rappelIsbn, LA.livreAjoutModel({ pas: 2, isbn: '12345' }).messages.rappelIsbn, LA.livreAjoutModel({ pas: 2, isbn: '' }).messages.rappelIsbn], ['ISBN 9782890772816', 'ISBN 12345 — non valide, ne sera pas enregistré', null], 'livre : rappel de l’ISBN au pas 2 (S8)');
+    eq(LA.livreAjoutModel({ pas: 2, suggestions: { source: 'openlibrary', valeurs: ['bbq'] } }).suggestions, { source: 'openlibrary', valeurs: ['bbq'] }, 'livre : les suggestions passent telles quelles au rendu (§ 12.3)');
+    eq(LA.livreAjoutModel({ pas: 2 }).champs.tags, [], 'livre : les champs vides portent tags: [] (§ 12.1)');
   }
 ```
 
-Dans le bloc `fabriquerLivre` existant (≈ 176-183) : remplacer `'9782761950001'` par `'9782890772816'` dans l'appel **et** dans l'`edition` attendue (la fixture d'avant a un contrôle faux — F22) ; puis ajouter avant la fermeture du bloc :
+Bloc `fabriquerLivre` (≈ 312-316) : remplacer `'9782761950001'` par `'9782890772816'` dans l'appel **et** l'édition attendue, puis ajouter avant la fermeture du bloc :
 
 ```js
     eq(LA.fabriquerLivre({ champs: { title: 'T' }, isbn: '0306406152' }, { newId: (p) => p }).edition.isbn, '9780306406157', 'livre : un ISBN-10 valide est enregistré en 13');
     eq(LA.fabriquerLivre({ champs: { title: 'T' }, isbn: '12345' }, { newId: (p) => p }).edition.isbn, null, 'livre : un ISBN invalide n’est pas enregistré (S8)');
     eq(LA.fabriquerLivre({ champs: { title: 'T' }, isbn: '9'.repeat(10000) }, { newId: (p) => p }).edition.isbn, null, 'livre : une suite libre de chiffres n’atteint jamais la base ni son index (S8)');
     eq(LA.fabriquerLivre({ champs: { title: 'T' }, isbn: '' }, { newId: (p) => p }).edition.isbn, null, 'livre : sans ISBN, null');
+    eq(LA.fabriquerLivre({ champs: { title: 'T', tags: ['bbq', 'charbon'] }, isbn: '' }, { newId: (p) => p }).book.tags, ['bbq', 'charbon'], 'livre : les mots-clés choisis sont écrits dans books.tags (§ 12.1)');
 ```
 
-- [ ] **Step 2 : Lancer la suite, lire le rouge** — Expected: `❌` — messages `validation`/`indisponible`/`sources`/`rappelIsbn` indéfinis, texte « Aucune fiche trouvée… » ancien, `isbn` '12345' enregistré.
+- [ ] **Step 2 : Suite → rouge.**
 
 - [ ] **Step 3 : Implémenter**
+
+`CHAMPS_VIDES` : `({ title: '', author: '', publisher: '', year: '', language: 'fr', convention: '', cuisines: [], tags: [] })`.
 
 `livreAjoutModel` :
 
 ```js
-export function livreAjoutModel({ pas = 1, isbn = '', champs = {}, provenance = null, recherche = false, reprise = false, validation = null, resultat = null, cleGoogle = false, lecteurDisponible = true, enCours = false } = {}) {
+export function livreAjoutModel({ pas = 1, isbn = '', champs = {}, provenance = null, recherche = false, reprise = false, validation = null, resultat = null, suggestions = null, cleGoogle = false, lecteurDisponible = true, enCours = false } = {}) {
   const c = { ...CHAMPS_VIDES(), ...champs };
   const google = resultat?.google || 'non_appele';
   const provenanceMessage = provenance === 'openlibrary' ? t('Renseigné par Open Library — vérifie et corrige.')
@@ -547,7 +580,7 @@ export function livreAjoutModel({ pas = 1, isbn = '', champs = {}, provenance = 
   const lire = (table, cle, repli) => (typeof cle === 'string' && Object.hasOwn(table, cle) ? table[cle] : repli);
   const isbnValide = !isbn || validerIsbn(isbn).ok;
   const indisponible = resultat?.statut === 'indisponible' && !recherche;
-  return { pas, isbn, champs: c, provenance, recherche, reprise, validation, resultat, cleGoogle, lecteurDisponible, enCours, isbnValide,
+  return { pas, isbn, champs: c, provenance, recherche, reprise, validation, resultat, suggestions, cleGoogle, lecteurDisponible, enCours, isbnValide,
     peutEnregistrer: pas === 2 && !!c.title.trim() && !recherche && !enCours,
     peutReessayer: indisponible,
     messages: {
@@ -562,9 +595,9 @@ export function livreAjoutModel({ pas = 1, isbn = '', champs = {}, provenance = 
 }
 ```
 
-`fabriquerLivre` : remplacer `isbn: nettoyerIsbn(isbn) || null` par `isbn: validerIsbn(isbn).ok ? validerIsbn(isbn).isbn13 : null` (ou `const v = validerIsbn(isbn);` en tête et `isbn: v.ok ? v.isbn13 : null`).
+`fabriquerLivre` : `const v = validerIsbn(isbn);` en tête ; `book` reçoit `tags: [...c.tags]` à la place de `tags: []` ; `edition.isbn: v.ok ? v.isbn13 : null`.
 
-`src/i18n/en.js` (près de la ligne 199) : **retirer** l'entrée `"Aucune fiche trouvée pour cet ISBN. Complète à la main."` et ajouter :
+`src/i18n/en.js` : **retirer** `'Aucune fiche trouvée pour cet ISBN. Complète à la main.'` ; ajouter (vérifier d'abord par `grep` qu'aucune n'existe déjà) :
 
 ```js
   'Aucune fiche chez Open Library pour cet ISBN. Complète à la main.': 'No record at Open Library for this ISBN. Fill it in by hand.',
@@ -583,58 +616,57 @@ export function livreAjoutModel({ pas = 1, isbn = '', champs = {}, provenance = 
   'Réessayer': 'Try again',
 ```
 
-(La clé `'Réessayer'` sert à la tâche 5.) Vérifier qu'aucune de ces clés n'existe déjà (`grep -n "Réessayer\|Tu es hors ligne" src/i18n/en.js`) ; si `'Réessayer'` existe, ne pas la doubler. Pas de fichier servi modifié hors `livre-ajout.js` et `en.js` : `sw.js` → `VERSION = 'cuisine-os-v0.4.1-4'`.
+`sw.js` : `VERSION = 'cuisine-os-v0.4.1-4'`.
 
-- [ ] **Step 4 : Lancer la suite, vert** — Expected: `✅`. Le test i18n F13 (bloc de fin) reste vert : chaque `t('…')` neuf a son entrée.
+- [ ] **Step 4 : Suite → vert ; total ; vert** (le test F13 reste vert : chaque `t()` neuf a son entrée).
 
 - [ ] **Step 5 : Commit**
 
 ```bash
-git add src/ui/livre-ajout.js src/i18n/en.js sw.js tests/ajouter.js
-git commit -m "Modele du livre : trois issues dites vrai, ISBN valide ou null a l enregistrement, phrase des sources selon la cle" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git add src/ui/livre-ajout.js src/i18n/en.js sw.js tests/ajouter.js tests/tests.js
+git commit -m "Modele du livre : trois issues dites vrai, ISBN valide ou null et tags a l enregistrement, phrase des sources selon la cle" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 5 : Rendu du pas 1 (validation, « Réessayer », Entrée, lecture seule) et rappel du pas 2
+### Task 5 : Rendu du pas 1 (validation, « Réessayer », Entrée, phrase des sources) et rappel du pas 2
 
 **Files:**
-- Modify: `src/ui/livre-ajout.js` (`renderLivreAjout` ≈ 148-166 pas 1 ; ≈ 171 ligne de rappel du pas 2)
-- Modify: `tests/ajouter.js` (bloc rendu ≈ 200-223 : assertion « tiers nommés » ; fixture route ≈ 249-262 ; bloc neuf)
+- Modify: `src/ui/livre-ajout.js` (`renderLivreAjout` pas 1 ≈ 196-212 ; pas 2 ligne « ISBN » ≈ 218)
+- Modify: `tests/ajouter.js` (≈ 342 phrase ; fixture ≈ 399-413 ; bloc neuf), `tests/tests.js`
 
 **Interfaces:**
-- Consumes: `livreAjoutModel` (tâche 4).
-- Produces: pas 1 : `input[name=isbn]` avec `maxlength="20"`, `readOnly` = `model.recherche`, `keydown` Entrée → `gestes.identifier()` (ignoré si `repeat`/`isComposing`) ; `small[data-role=validation]` ; `div[data-role=indisponible]` + `button[data-role=reessayer]` (`gestes.reessayer`) ; phrase `messages.sources`. Pas 2 : `span.muted` = `messages.rappelIsbn`.
+- Produces: pas 1 : `input[name=isbn]` avec `maxlength="20"`, `disabled` pendant la recherche (inchangé), `keydown` Entrée → `gestes.identifier()` (ignoré si `repeat`/`isComposing`) ; `small[data-role=validation]` ; `div[data-role=indisponible]` + `button[data-role=reessayer]` (`gestes.reessayer`) ; `messages.sources`. Pas 2 : `span.muted` = `messages.rappelIsbn`.
 
-- [ ] **Step 1 : Écrire les tests (rouge)**
+- [ ] **Step 1 : Tests (rouge)**
 
-Dans le bloc rendu existant (≈ 203-205) remplacer `ok(p1.textContent.includes('L’ISBN est envoyé à Open Library, puis à Google Books si besoin.'), …)` par :
+≈ 342 : remplacer `ok(p1.textContent.includes('L’ISBN est envoyé à Open Library, puis à Google Books si besoin.'), …)` par :
 
 ```js
     ok(p1.textContent.includes('L’ISBN est envoyé à Open Library.') && !p1.textContent.includes('Google Books'), 'livre : sans clé, la phrase ne promet pas Google Books (F12)');
     ok(LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1, cleGoogle: true }), {}).textContent.includes('puis à Google Books si besoin.'), 'livre : avec clé, les deux tiers sont nommés (S12)');
 ```
 
-Dans le bloc route existant (≈ 249-262) : `' 978-2-7619-5000-1 '` → `' 978-2-8907-7281-6 '`, `['ISBN 9782761950001']` → `['ISBN 9782890772816']`, `.value, '9782761950001'` → `'9782890772816'`.
+Bloc route ≈ 399-413 : `' 978-2-7619-5000-1 '` → `' 978-2-8907-7281-6 '`, `['ISBN 9782761950001']` → `['ISBN 9782890772816']`, `.value, '9782761950001'` → `'9782890772816'`.
 
-Ajouter un bloc neuf juste après le bloc R-UX-9 (`majBoutonEnregistrer`, ≈ 224-240) :
+Bloc neuf, après le bloc R-UX-9 (`majBoutonEnregistrer`) :
 
 ```js
   {
-    // Rendu du pas 1 : refus sous le champ, Réessayer, Entrée, lecture seule pendant la recherche (spec § 6).
+    // Rendu du pas 1 : refus sous le champ, Réessayer, Entrée, champ fermé pendant la recherche (spec § 6, RF-m8).
     const appels = [];
     const gestes = { identifier: () => appels.push('identifier'), reessayer: () => appels.push('reessayer'), changerIsbn: () => {}, scanner: () => {}, saisirMain: () => {} };
     const p1 = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1, isbn: '' }), gestes);
     const champ = p1.querySelector('input[name="isbn"]');
-    eq([champ.getAttribute('maxlength'), champ.readOnly], ['20', false], 'livre : champ borné à 20, modifiable hors recherche (S8)');
+    eq([champ.getAttribute('maxlength'), champ.disabled], ['20', false], 'livre : champ borné à 20, ouvert hors recherche (S8)');
     champ.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     champ.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', repeat: true, bubbles: true, cancelable: true }));
     champ.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true }));
     champ.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true }));
     eq(appels, ['identifier'], 'livre : Entrée identifie une fois ; répétition, composition et autres touches non (S3)');
     const pr = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1, isbn: '9781785035289', recherche: true, resultat: { statut: 'indisponible', motif: 'limite' } }), gestes);
-    eq([pr.querySelector('input[name="isbn"]').readOnly, [...pr.querySelectorAll('button')].find((b) => b.textContent === 'Identifier').disabled, pr.querySelector('[data-role="reessayer"]'), pr.querySelector('[data-role="indisponible"]'), pr.textContent.includes('Recherche…')],
-      [true, true, null, null, true], 'livre : pendant la recherche — champ en lecture seule, Identifier fermé, ni Réessayer ni message, « Recherche… » (F17)');
+    eq([pr.querySelector('input[name="isbn"]').disabled, [...pr.querySelectorAll('button')].find((b) => b.textContent === 'Identifier').disabled, pr.querySelector('[data-role="reessayer"]'), pr.querySelector('[data-role="indisponible"]'), pr.textContent.includes('Recherche…')],
+      [true, true, null, null, true], 'livre : pendant la recherche — champ fermé, Identifier fermé, ni Réessayer ni message, « Recherche… » (F17)');
     const pi = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1, isbn: '9781785035289', resultat: { statut: 'indisponible', motif: 'limite' } }), gestes);
     eq([pi.querySelector('[data-role="indisponible"]')?.textContent.includes('trop de demandes'), [...pi.querySelectorAll('button')].filter((b) => b.textContent === 'Saisir à la main').length, pi.querySelectorAll('input[name="isbn"]').length, pi.querySelector('[data-role="reessayer"]')?.textContent],
       [true, 1, 1, 'Réessayer'], 'livre : indisponible → message + un seul « Saisir à la main » + Réessayer, toujours au pas 1');
@@ -642,19 +674,17 @@ Ajouter un bloc neuf juste après le bloc R-UX-9 (`majBoutonEnregistrer`, ≈ 22
     eq(appels, ['identifier', 'reessayer'], 'livre : « Réessayer » part par son geste');
     const pv = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1, validation: 'controle' }), gestes);
     eq([pv.querySelector('[data-role="validation"]')?.textContent, pv.querySelector('.status.error, .error')], ['Cet ISBN n’est pas valide, vérifie les chiffres.', null], 'livre : le refus est sous le champ, sans carte rouge');
-    const ph = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1, resultat: { statut: 'indisponible', motif: '<img src=x onerror="window.__y=1">' } }), gestes);
-    eq([ph.querySelectorAll('img').length, window.__y], [0, undefined], 'livre : un motif hostile reste du texte (S12)');
+    const ph = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1, resultat: { statut: 'indisponible', motif: '<img src=x onerror="void 0">' } }), gestes);
+    eq([ph.querySelectorAll('img').length, ph.querySelector('[data-role="indisponible"]')?.textContent], [0, 'Open Library est en panne pour le moment.'], 'livre : un motif hostile ne crée aucun élément et retombe sur le texte sûr (S12)');
     const p2 = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 2, isbn: '12345', champs: { title: 'T' } }), gestes);
     ok([...p2.querySelectorAll('span.muted')].some((s) => s.textContent === 'ISBN 12345 — non valide, ne sera pas enregistré'), 'livre : au pas 2, un ISBN invalide est annoncé comme non enregistré (S8)');
     eq(LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1 }), gestes).querySelector('[data-role="indisponible"], [data-role="validation"]'), null, 'livre : sans rien à dire, rien n’est affiché');
   }
 ```
 
-- [ ] **Step 2 : Lancer la suite, lire le rouge** — Expected: `❌` — `maxlength` null, Entrée muette, pas de `data-role="reessayer"`, rappel « ISBN 12345 » sans mention.
+- [ ] **Step 2 : Suite → rouge.**
 
-- [ ] **Step 3 : Implémenter**
-
-Pas 1 de `renderLivreAjout` :
+- [ ] **Step 3 : Implémenter** — pas 1 de `renderLivreAjout` :
 
 ```js
   if (model.pas === 1) {
@@ -663,7 +693,9 @@ Pas 1 de `renderLivreAjout` :
     const surTouche = (e) => { if (e.key !== 'Enter') return; e.preventDefault(); if (!e.repeat && !e.isComposing) g('identifier')(); };
     return el('section', { class: 'card stack livre-ajout' },
       el('p', null, t('Scanne le code-barres, tape l’ISBN, ou saisis le livre à la main.')),
-      field(t('ISBN'), el('input', { type: 'text', name: 'isbn', inputmode: 'numeric', maxlength: '20', placeholder: '978…', value: model.isbn, readOnly: !!model.recherche, onInput: (e) => g('changerIsbn')(e.target.value), onKeydown: surTouche })),
+      // RF-m8 : pendant « Recherche… », le champ est fermé comme les boutons — taper un autre ISBN dans un champ
+      // actif pendant qu'un appel est en vol ferait croire que la réponse qui arrive est celle du nouvel ISBN.
+      field(t('ISBN'), el('input', { type: 'text', name: 'isbn', inputmode: 'numeric', maxlength: '20', placeholder: '978…', value: model.isbn, disabled: !!model.recherche, onInput: (e) => g('changerIsbn')(e.target.value), onKeydown: surTouche })),
       model.messages.validation ? el('small', { class: 'muted', dataset: { role: 'validation' } }, model.messages.validation) : null,
       el('div', { class: 'row' },
         el('button', { type: 'button', class: 'btn primary', disabled: !model.lecteurDisponible || model.recherche, onClick: g('scanner') }, t('Scanner le code-barres')),
@@ -679,84 +711,197 @@ Pas 1 de `renderLivreAjout` :
   }
 ```
 
-(La ligne `model.messages.provenance ? …` du pas 1 disparaît : la provenance ne se dit qu'au pas 2.) Au pas 2, remplacer `` `${t('ISBN')} ${model.isbn}` `` par `model.messages.rappelIsbn`. `sw.js` : `VERSION = 'cuisine-os-v0.4.1-5'`.
+(la ligne `model.messages.provenance ? …` du pas 1 disparaît.) Pas 2 : `` `${t('ISBN')} ${model.isbn}` `` → `model.messages.rappelIsbn`. `sw.js` : `VERSION = 'cuisine-os-v0.4.1-5'`.
 
-- [ ] **Step 4 : Lancer la suite, vert** — Expected: `✅`.
+- [ ] **Step 4 : Suite → vert ; total ; vert.**
 
 - [ ] **Step 5 : Commit**
 
 ```bash
-git add src/ui/livre-ajout.js sw.js tests/ajouter.js
-git commit -m "Pas 1 : refus sous le champ, Reessayer, Entree identifie, champ en lecture seule pendant la recherche" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git add src/ui/livre-ajout.js sw.js tests/ajouter.js tests/tests.js
+git commit -m "Pas 1 : refus sous le champ, Reessayer, Entree identifie, phrase des sources vraie" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 6 : Route — `deps`, génération (I-G), identifier à trois issues, langue reçue, R-UX-13 sur `deps`
+### Task 6 : Mots-clés au pas 2 — suggestions (`puces.js`) et bloc « Mots-clés »
 
 **Files:**
-- Modify: `src/ui/livre-ajout.js` (`renderLivreAjoutRoute` ≈ 197-304 : signature, `etat`, `identifier`, gestes `reessayer`/`saisirMain`/`retourIsbn`/`changerChamp`/`scanner`/`enregistrer`, couverture via `fetch` injecté)
-- Modify: `tests/ajouter.js` (bloc R-UX-13 ≈ 631-775 : `deps` ; bloc neuf « route, partie A »)
+- Modify: `src/ui/puces.js` (`motsClesExistants`, `suggestionsModel`, `renderSuggestions`, `renderPuces` 3ᵉ paramètre)
+- Modify: `src/ui/livre-ajout.js` (`renderLivreAjout` pas 2 : bloc « Mots-clés » après « Cuisines »)
+- Modify: `src/i18n/en.js`, `tests/ajouter.js` (bloc neuf après celui de la tâche 5), `tests/tests.js`
 
 **Interfaces:**
-- Consumes: `lookupIsbn` (tâches 2-3), `livreAjoutModel` (4), rendu (5), `validerIsbn`/`codeBarresVersIsbn` (1), `GOOGLE_BOOKS` (3), `attenteReelle` (2).
-- Produces: `renderLivreAjoutRoute(params, query, ctx, deps = {})` avec `deps = { fetch, enLigne, attendre, cle, naviguer, tentativeMs, repriseMs }` (défauts = production). Le routeur (`app.js:81`) ne passe pas `deps`.
+- Consumes: `normaliser`, `capitaliser`, `pucesModel`, `renderPuces` (existants) ; `livreAjoutModel().suggestions` (tâche 4).
+- Produces: `motsClesExistants(ctx) → string[]` ; `suggestionsModel({ proposees = [], source = null, choisies = [] }) → { source, libelle, puces: [{ valeur, cle }] } | null` ; `renderSuggestions(model, { ajouter }) → Element` (`div.suggestions`, `small.muted` libellé, `button.puce.suggestion`) ; `renderPuces(model, gestes, { libelleAutre = t('Autre cuisine') } = {})`. Le rendu du pas 2 lit `model.existantesMotsCles` (posé par la route, tâche 7) et `model.suggestions` ; gestes `basculerMotCle`, `ajouterMotCle`.
 
-- [ ] **Step 1 : Écrire les tests (rouge)**
+- [ ] **Step 1 : Tests (rouge)**
 
-(a) Bloc R-UX-13 (≈ 631-775) : remplacer `globalThis.fetch = async (url) => {` par `const fetchFactice = async (url) => {` ; supprimer `const vraiFetch = globalThis.fetch;` et le `finally { globalThis.fetch = vraiFetch; }` (garder `try { … } finally { }` vide ou retirer le try) ; définir après le stub `const deps = { fetch: fetchFactice, attendre: async () => {}, tentativeMs: 50, naviguer: () => {} };` et passer `deps` en 4ᵉ argument à **chaque** `LA.renderLivreAjoutRoute({}, {}, {})` du bloc. Le cas 4 redevient le cas Google **avec clé** : `const r4 = await LA.renderLivreAjoutRoute({}, {}, {}, { ...deps, cle: 'k' });` et
+```js
+  {
+    // § 12.3 : suggestions de mots-clés — propositions étiquetées, jamais posées sans geste.
+    const P = await import('../src/ui/puces.js');
+    eq(P.motsClesExistants({ books: [{ tags: ['a', 'b'] }, { tags: ['b'] }, {}], recipes: [{ tags: ['z'] }] }), ['a', 'b', 'b'], 'mots-clés : existants = toutes les occurrences des tags des LIVRES (la fréquence fait l’ordre)');
+    const s1 = P.suggestionsModel({ proposees: ['Barbecuing', 'BBQ', 'bbq', 'Charbon', '', 'Arabe'], source: 'openlibrary', choisies: ['BBQ'] });
+    eq([s1.libelle, s1.puces.map((p) => p.valeur)], ['Proposé par Open Library', ['Barbecuing', 'Charbon', 'Arabe']], 'mots-clés : une suggestion déjà choisie (à la casse près) disparaît, les doublons aussi, le vide aussi');
+    eq(P.suggestionsModel({ proposees: ['Bbq'], source: 'openlibrary', choisies: ['bbq'] }), null, 'mots-clés : plus rien à proposer → null, aucun bloc');
+    eq(P.suggestionsModel({ proposees: ['Épice'], source: 'openlibrary', choisies: ['epice'] }), null, 'mots-clés : l’accent ne fait pas une proposition nouvelle (normaliser)');
+    eq(P.suggestionsModel({ proposees: Array.from({ length: 14 }, (_, i) => `s${i}`), source: 'googlebooks' }).puces.length, 10, 'mots-clés : 10 suggestions au plus');
+    eq(P.suggestionsModel({ proposees: ['x'], source: 'googlebooks' }).libelle, 'Proposé par Google Books', 'mots-clés : la source est nommée (I-A)');
+    eq(P.suggestionsModel({ proposees: [], source: null }), null, 'mots-clés : sans proposition, null');
+    const ajoutes = [];
+    const n = P.renderSuggestions(s1, { ajouter: (v) => ajoutes.push(v) });
+    eq([n.className, n.querySelector('small').textContent, [...n.querySelectorAll('button.puce.suggestion')].map((b) => b.textContent)], ['suggestions', 'Proposé par Open Library', ['Barbecuing', 'Charbon', 'Arabe']], 'mots-clés : rendu = libellé + une puce par proposition, affichée capitalisée');
+    n.querySelectorAll('button')[1].click();
+    eq(ajoutes, ['Charbon'], 'mots-clés : un clic propose la valeur au geste ajouter — rien n’est écrit ici');
+    eq(n.querySelector('label'), null, 'mots-clés : jamais dans un label (R-UX-8)');
+    eq(P.renderPuces(P.pucesModel({ choisies: [] }), {}, { libelleAutre: 'Autre mot-clé' }).querySelector('input').getAttribute('aria-label'), 'Autre mot-clé', 'mots-clés : le champ libre est nommé pour les mots-clés');
+    eq(P.renderPuces(P.pucesModel({ choisies: [] }), {}).querySelector('input').getAttribute('aria-label'), 'Autre cuisine', 'mots-clés : sans option, le champ libre reste « Autre cuisine »');
+    // Pas 2 : le bloc « Mots-clés » avec ses gestes.
+    const gestes = { basculerMotCle: (v) => ajoutes.push(['bascule', v]), ajouterMotCle: (v) => ajoutes.push(['ajout', v]) };
+    const m = { ...LA.livreAjoutModel({ pas: 2, isbn: '9781785035289', champs: { title: 'T', tags: ['bbq'] }, provenance: 'openlibrary', suggestions: { source: 'openlibrary', valeurs: ['Barbecuing', 'bbq'] } }), existantes: ['italienne'], existantesMotsCles: ['charbon', 'charbon', 'arabe'] };
+    const p2 = LA.renderLivreAjout(m, gestes);
+    const bloc = p2.querySelector('[data-role="mots-cles"]');
+    ok(bloc && bloc.querySelector('span').textContent === 'Mots-clés' && !bloc.closest('label'), 'livre : bloc « Mots-clés » au pas 2, hors label (R-UX-8)');
+    eq([...bloc.querySelectorAll('button.puce:not(.suggestion)')].map((b) => [b.textContent, b.getAttribute('aria-pressed')]), [['Bbq', 'true'], ['Charbon', 'false'], ['Arabe', 'false']], 'livre : mots-clés = choisis puis existants par fréquence, AUCUNE cuisine de graine (graine vide)');
+    eq([...bloc.querySelectorAll('button.puce.suggestion')].map((b) => b.textContent), ['Barbecuing'], 'livre : les suggestions excluent ce qui est déjà choisi');
+    eq(bloc.querySelector('input').getAttribute('aria-label'), 'Autre mot-clé', 'livre : champ libre des mots-clés nommé');
+    bloc.querySelector('button.puce.suggestion').click();
+    [...bloc.querySelectorAll('button.puce:not(.suggestion)')][1].click();
+    eq(ajoutes.slice(-2), [['ajout', 'Barbecuing'], ['bascule', 'charbon']], 'livre : suggestion → ajouterMotCle, puce → basculerMotCle');
+    const sans = LA.renderLivreAjout({ ...LA.livreAjoutModel({ pas: 2, champs: { title: 'T' } }), existantes: [], existantesMotsCles: [] }, {});
+    eq([!!sans.querySelector('[data-role="mots-cles"]'), sans.querySelector('.suggestions')], [true, null], 'livre : sans suggestion, le bloc existe (saisie libre) mais pas de ligne « Proposé par … »');
+  }
+```
+
+- [ ] **Step 2 : Suite → rouge.**
+
+- [ ] **Step 3 : Implémenter**
+
+`src/ui/puces.js` (après `cuisinesExistantes`) :
+
+```js
+// § 12 : les mots-clés des LIVRES seulement (les tags de recette sont un autre écran). Même rôle que cuisinesExistantes.
+export function motsClesExistants(ctx) {
+  return [...(ctx?.books || [])].flatMap((b) => b?.tags || []);
+}
+
+// Propositions reçues d'une source (Open Library, Google Books) : étiquetées, dédoublonnées, sans ce qui est déjà
+// choisi (à la casse et à l'accent près), 10 au plus ; null quand il n'y a rien à montrer. Rien n'est écrit ici.
+export const SUGGESTIONS_MAX = 10;
+export function suggestionsModel({ proposees = [], source = null, choisies = [] } = {}) {
+  const prises = new Set(choisies.map(normaliser));
+  const vues = new Map();
+  for (const v of proposees) {
+    const valeur = String(v ?? '').trim();
+    const cle = normaliser(valeur);
+    if (!cle || prises.has(cle) || vues.has(cle)) continue;
+    vues.set(cle, { valeur, cle });
+    if (vues.size >= SUGGESTIONS_MAX) break;
+  }
+  if (!vues.size) return null;
+  const libelle = source === 'googlebooks' ? t('Proposé par Google Books') : t('Proposé par Open Library');
+  return { source, libelle, puces: [...vues.values()] };
+}
+
+// S10 : une valeur proposée n'est pas une clé de traduction — affichée telle quelle, capitalisée. Jamais dans un label.
+export function renderSuggestions(model, { ajouter } = {}) {
+  return el('div', { class: 'suggestions' },
+    el('small', { class: 'muted' }, model.libelle),
+    el('div', { class: 'puces', role: 'group' },
+      ...model.puces.map((p) => el('button', { type: 'button', class: 'puce suggestion', 'aria-pressed': 'false', onClick: () => ajouter && ajouter(p.valeur) }, capitaliser(p.valeur)))));
+}
+```
+
+`renderPuces` : signature `export function renderPuces(model, { basculer, ajouter } = {}, { libelleAutre = t('Autre cuisine') } = {})` et `'aria-label': libelleAutre` sur le champ.
+
+`src/ui/livre-ajout.js`, pas 2 : importer `motsClesExistants, suggestionsModel, renderSuggestions` depuis `./puces.js` ; après la ligne `el('div', { class: 'field' }, el('span', null, t('Cuisines')), puces),` :
+
+```js
+    // § 12 : mots-clés du livre — mêmes puces que les cuisines, graine vide, puis les propositions reçues (étiquetées).
+    el('div', { class: 'field', dataset: { role: 'mots-cles' } }, el('span', null, t('Mots-clés')),
+      renderPuces(pucesModel({ choisies: c.tags, existantes: model.existantesMotsCles || [], graine: [] }), { basculer: g('basculerMotCle'), ajouter: g('ajouterMotCle') }, { libelleAutre: t('Autre mot-clé') }),
+      (() => { const s = suggestionsModel({ proposees: model.suggestions?.valeurs || [], source: model.suggestions?.source || null, choisies: c.tags }); return s ? renderSuggestions(s, { ajouter: g('ajouterMotCle') }) : null; })()),
+```
+
+`en.js` : `'Mots-clés': 'Keywords', 'Autre mot-clé': 'Other keyword', 'Proposé par Open Library': 'Suggested by Open Library', 'Proposé par Google Books': 'Suggested by Google Books'` (vérifier par `grep` l'absence de doublon). `sw.js` : `VERSION = 'cuisine-os-v0.4.1-6'`.
+
+- [ ] **Step 4 : Suite → vert ; total ; vert.** (Les appelants existants de `renderPuces` passent deux arguments : le troisième a un défaut.)
+
+- [ ] **Step 5 : Commit**
+
+```bash
+git add src/ui/puces.js src/ui/livre-ajout.js src/i18n/en.js sw.js tests/ajouter.js tests/tests.js
+git commit -m "Mots-cles au pas 2 : puces a graine vide, suggestions etiquetees par source, jamais posees sans geste" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 7 : Route — dépendances étendues, garde I-G, trois issues à l'écran, mots-clés, R-UX-13 sur `deps`
+
+**Files:**
+- Modify: `src/ui/livre-ajout.js` (`renderLivreAjoutRoute` ≈ 252-398 : signature, `etat`, `dessiner`/`modele`, `identifier`, gestes)
+- Modify: `tests/ajouter.js` (bloc R-UX-13 ≈ 952-1227 : `deps` ; bloc neuf « route, partie A »), `tests/tests.js`
+
+**Interfaces:**
+- Consumes: tout ce qui précède ; de `main` : `avancer()`, `oublierDistants()`, `fusionnerFiche(…, { langueTouchee })`, `signalDelai`, `etatRoute()`.
+- Produces: `renderLivreAjoutRoute(params, query, ctx, { repo: r = repo, navigate: nav = navigate, toast: dire = toast, fetch = globalThis.fetch, enLigne = () => navigator.onLine !== false, attendre = attenteReelle, cle = GOOGLE_BOOKS.key, tentativeMs = LIMITES_ISBN.tentativeMs, repriseMs = LIMITES_ISBN.repriseMs } = {})`. `etatRoute()` expose en plus `resultat`, `validation`, `suggestions`, `reprise`.
+
+- [ ] **Step 1 : Tests (rouge)**
+
+(a) Bloc R-UX-13 : remplacer `globalThis.fetch = async (url) => {` par `const fetchFactice = async (url) => {` ; supprimer `const vraiFetch = globalThis.fetch;` et le `finally { globalThis.fetch = vraiFetch; }` de ce bloc seulement ; après le stub : `const depsRoute = { repo, fetch: fetchFactice, attendre: async () => {}, tentativeMs: 50 };` ; remplacer chaque `{ repo }` passé à `renderLivreAjoutRoute` par `depsRoute`, `{ repo, navigate: …, toast: … }` par `{ ...depsRoute, navigate: …, toast: … }`, `{ repo: repoRefus, … }` par `{ ...depsRoute, repo: repoRefus, … }`. Cas 4 : `const r4 = await LA.renderLivreAjoutRoute({}, {}, {}, { ...depsRoute, cle: 'k' });` et l'attendu redevient Google :
 
 ```js
         eq([depuis.some((u) => u.startsWith('https://covers.openlibrary.org/')), depuis.some((u) => u.startsWith('https://www.googleapis.com/books/')), r4.textContent.includes('Renseigné par Google Books')],
           [false, true, true], 'route : une fiche venue de Google Books (clé injectée) ne demande AUCUNE couverture à Open Library (I-A)');
 ```
 
-(le stub `googleapis` du bloc rend déjà un volume ; lui donner `blob` comme aux autres).
+(le stub `googleapis` rend un volume `language: 'en'` : cas 10 reste sur `search.json`, inchangé depuis la tâche 2).
 
-(b) Bloc neuf, après le bloc R-UX-13 :
+(b) Bloc neuf après R-UX-13 :
 
 ```js
   {
-    // La route avec deps injectées (F3) : validation, hors ligne, indisponible → Réessayer, Entrée, une seule
-    // identification (I-G), langue reçue (F5), sorties après un échec (F7). Aucun réseau, base jetable.
+    // La route avec deps étendues (F3) : validation, hors ligne, indisponible → Réessayer, Entrée, une seule
+    // identification (I-G), langue reçue (C2), sorties après un échec (F7), suggestions (§ 12). Aucun réseau, base jetable.
     const { withRepo } = await import('./sync-fixture.js');
-    const reponseJson = (o, status = 200) => ({ ok: status < 300, status, headers: new Headers(), blob: async () => new Blob([JSON.stringify(o)], { type: 'application/json' }) });
-    const r404 = { ok: false, status: 404, headers: new Headers(), blob: async () => new Blob([]) };
-    const attendre = async (condition, quoi) => { for (let i = 0; i < 300; i += 1) { if (condition()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error(`attente dépassée (3 s) : ${quoi}`); };
+    const reponseJson = (o, status = 200) => ({ ok: status < 300, status, headers: new Headers(), text: async () => JSON.stringify(o) });
+    const r404 = { ok: false, status: 404, headers: new Headers(), text: async () => '', blob: async () => new Blob([]) };
+    const attendre = async (condition, quoi) => { for (let i = 0; i < 300; i += 1) { if (await condition()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error(`attente dépassée (3 s) : ${quoi}`); };
     const taper = (root, isbn) => { const i = root.querySelector('input[name="isbn"]'); i.value = isbn; i.dispatchEvent(new Event('input')); };
     const cliquer = (root, texte) => { const b = [...root.querySelectorAll('button')].find((x) => x.textContent === texte); if (!b) throw new Error(`bouton absent : ${texte}`); b.click(); };
     const entree = (root) => root.querySelector('input[name="isbn"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     const titreDe = (root) => [...root.querySelectorAll('input[type="text"]')].find((i) => i.name !== 'isbn');
     const rappel = (root) => [...root.querySelectorAll('span.muted')].find((s) => s.textContent.startsWith('ISBN'))?.textContent ?? null;
-    await withRepo(async () => {
+    await withRepo(async (repo) => {
       const urls = [];
       const recherches = () => urls.filter((u) => u.includes('/search.json')).length; // la couverture passe aussi par fetch
-      let search = () => reponseJson({ docs: [{ title: 'Livre', language: ['eng'] }] });
+      let search = () => reponseJson({ docs: [{ title: 'Livre', language: ['eng'], subject: ['Barbecuing', 'Charcoal'] }] });
       const fetch = async (u) => { const s = String(u); urls.push(s); if (s.startsWith('https://openlibrary.org/search.json')) return search(); return r404; };
-      const deps = { fetch, enLigne: () => true, attendre: async () => {}, tentativeMs: 50, naviguer: () => {} };
+      const deps = { repo, fetch, enLigne: () => true, attendre: async () => {}, tentativeMs: 50, navigate: () => {} };
       // 1. ISBN faux : aucun appel, la saisie reste.
       const rA = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
       taper(rA, '9781785035280'); cliquer(rA, 'Identifier');
       eq([urls.length, rA.querySelector('[data-role="validation"]')?.textContent, rA.querySelector('input[name="isbn"]')?.value], [0, 'Cet ISBN n’est pas valide, vérifie les chiffres.', '9781785035280'], 'route : un ISBN faux est refusé sans appel, la saisie reste (§ 4)');
       taper(rA, '5901234123457'); entree(rA);
       eq([urls.length, rA.querySelector('[data-role="validation"]')?.textContent], [0, 'Ce code-barres n’est pas un ISBN.'], 'route : un EAN qui n’est pas un livre est refusé sans appel');
-      // 2. Hors ligne : aucun appel, dit ; Réessayer force l'appel (S13) ; la langue reçue arrive au sélecteur (F5).
+      // 2. Hors ligne : aucun appel ; Réessayer force (S13) ; langue reçue (C2) ; suggestions posées (§ 12).
       const rB = await LA.renderLivreAjoutRoute({}, {}, {}, { ...deps, enLigne: () => false });
       taper(rB, '9781785035289'); cliquer(rB, 'Identifier');
       eq([urls.length, rB.querySelector('[data-role="indisponible"]')?.textContent.includes('Tu es hors ligne.'), !!rB.querySelector('[data-role="reessayer"]')], [0, true, true], 'route : hors ligne → aucun appel, dit, Réessayer offert');
       cliquer(rB, 'Réessayer');
       await attendre(() => rB.querySelector('.status.info'), 'pas 2 après Réessayer');
-      eq([recherches(), rB.querySelector('select').value, titreDe(rB).value], [1, 'en', 'Livre'], 'route : Réessayer force l’appel malgré onLine (S13) ; la langue reçue arrive au sélecteur (F5)');
-      // 3. 429 → pas 1, message vrai, Réessayer ; puis 200 → pas 2.
+      eq([recherches(), rB.querySelector('select').value, titreDe(rB).value, [...rB.querySelectorAll('button.puce.suggestion')].map((b) => b.textContent)], [1, 'en', 'Livre', ['Barbecuing', 'Charcoal']], 'route : Réessayer force l’appel malgré onLine (S13) ; langue au sélecteur (C2) ; suggestions affichées (§ 12)');
+      // 3. 429 → pas 1, message vrai, Réessayer ; deux clics = un appel ; puis 200 → pas 2.
       urls.length = 0; search = () => reponseJson({}, 429);
       const rC = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
       taper(rC, '9782890772816'); entree(rC);
       await attendre(() => rC.querySelector('[data-role="reessayer"]'), 'indisponible après 429');
-      eq([recherches(), rC.querySelector('[data-role="indisponible"]')?.textContent.includes('trop de demandes'), !!rC.querySelector('input[name="isbn"]'), [...rC.querySelectorAll('button')].filter((b) => b.textContent === 'Saisir à la main').length], [1, true, true, 1], 'route : Entrée identifie ; 429 → pas 1, message vrai, Réessayer, un seul « Saisir à la main » (F17)');
+      eq([recherches(), rC.querySelector('[data-role="indisponible"]')?.textContent.includes('trop de demandes'), !!rC.querySelector('input[name="isbn"]'), [...rC.querySelectorAll('button')].filter((b) => b.textContent === 'Saisir à la main').length, rC.etatRoute().resultat?.motif], [1, true, true, 1, 'limite'], 'route : Entrée identifie ; 429 → pas 1, message vrai, Réessayer, un seul « Saisir à la main » (F17)');
       search = () => reponseJson({ docs: [{ title: 'Carnet', language: ['fre'] }] });
       cliquer(rC, 'Réessayer'); cliquer(rC, 'Réessayer');
       await attendre(() => rC.querySelector('.status.info'), 'pas 2 après Réessayer');
-      eq([recherches(), rC.querySelector('.status.info').textContent, titreDe(rC).value, rC.querySelector('select').value, rappel(rC)], [2, 'Renseigné par Open Library — vérifie et corrige.', 'Carnet', 'fr', 'ISBN 9782890772816'], 'route : deux clics sur Réessayer = un appel ; il relance et remplit');
+      eq([recherches(), rC.querySelector('.status.info').textContent, titreDe(rC).value, rC.querySelector('select').value, rappel(rC), rC.querySelector('.suggestions')], [2, 'Renseigné par Open Library — vérifie et corrige.', 'Carnet', 'fr', 'ISBN 9782890772816', null], 'route : deux clics sur Réessayer = un appel ; il relance et remplit ; sans subject, aucune suggestion');
       // 4. F7 : après un échec, « Saisir à la main » et « ← Changer d’ISBN » effacent le message.
       urls.length = 0; search = () => reponseJson({}, 503);
       const rD = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
@@ -766,107 +911,91 @@ git commit -m "Pas 1 : refus sous le champ, Reessayer, Entree identifie, champ e
       cliquer(rD, 'Saisir à la main');
       eq([rD.querySelector('[data-role="indisponible"]'), rD.querySelector('.status.info'), rappel(rD)], [null, null, 'ISBN 9780306406157'], 'route : « Saisir à la main » après un échec → pas 2 muet, ISBN normalisé en 13 (F7, F22)');
       cliquer(rD, '← Changer d’ISBN');
-      eq([rD.querySelector('[data-role="indisponible"]'), rD.querySelector('input[name="isbn"]').value, rD.querySelector('input[name="isbn"]').readOnly], [null, '9780306406157', false], 'route : retour au pas 1 sans message, champ modifiable (F7)');
-      // 5. I-G : une identification à la fois ; lecture seule pendant la recherche.
+      eq([rD.querySelector('[data-role="indisponible"]'), rD.querySelector('input[name="isbn"]').value, rD.querySelector('input[name="isbn"]').disabled], [null, '9780306406157', false], 'route : retour au pas 1 sans message, champ ouvert (F7)');
+      // 5. I-G : une identification à la fois ; champ fermé pendant la recherche.
       urls.length = 0; let liberer = null; search = () => new Promise((r) => { liberer = () => r(reponseJson({ docs: [{ title: 'Lent' }] })); });
       const rE = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
       taper(rE, '9780306406157'); entree(rE);
       await attendre(() => liberer, 'premier appel en vol');
-      eq([rE.querySelector('input[name="isbn"]').readOnly, rE.textContent.includes('Recherche…')], [true, true], 'route : champ en lecture seule et « Recherche… » pendant l’appel (S3)');
+      eq([rE.querySelector('input[name="isbn"]').disabled, rE.textContent.includes('Recherche…')], [true, true], 'route : champ fermé et « Recherche… » pendant l’appel (RF-m8)');
       entree(rE); cliquer(rE, 'Identifier');
       liberer();
       await attendre(() => rE.querySelector('.status.info'), 'pas 2');
       eq(recherches(), 1, 'route : Entrée et clic pendant la recherche ne partent pas (I-G)');
-      // 6. « Nouvel essai… » visible pendant la reprise (surReprise → redessin, F26).
+      // 6. « Nouvel essai… » visible pendant la reprise (S11/F26).
       urls.length = 0; let n = 0; let libererReprise = null;
       search = () => { n += 1; if (n === 1) throw new Error('reseau'); return new Promise((r) => { libererReprise = () => r(reponseJson({ docs: [{ title: 'Repris' }] })); }); };
       const rF = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
       taper(rF, '9780306406157'); cliquer(rF, 'Identifier');
       await attendre(() => libererReprise, 'seconde tentative en vol');
-      ok(rF.textContent.includes('Nouvel essai…'), 'route : la reprise est dite pendant qu’elle a lieu (S11)');
+      ok(rF.textContent.includes('Nouvel essai…') && rF.etatRoute().reprise === true, 'route : la reprise est dite pendant qu’elle a lieu (S11)');
       libererReprise();
       await attendre(() => rF.querySelector('.status.info'), 'pas 2 après reprise');
-      eq([recherches(), titreDe(rF).value], [2, 'Repris'], 'route : la reprise a trouvé');
+      eq([recherches(), titreDe(rF).value, rF.etatRoute().reprise], [2, 'Repris', false], 'route : la reprise a trouvé, et reprise retombe');
     });
   }
 ```
 
-- [ ] **Step 2 : Lancer la suite, lire le rouge** — Expected: `❌` — le bloc R-UX-13 part sur le vrai réseau ou échoue (`deps` ignorées), `urls.length` ≠ 0 sur l'ISBN faux, pas 2 ouvert sur un 429.
+- [ ] **Step 2 : Suite → rouge** — R-UX-13 (deps ignorées → stub `fetchFactice` jamais appelé), pas 2 ouvert sur un 429, suggestions absentes.
 
-- [ ] **Step 3 : Implémenter la route**
+- [ ] **Step 3 : Implémenter la route** (en gardant tout ce que `main` y a mis : C1, C3, `pertinent()`, `etatRoute()`, `passagesCouverture`, `couverturesAppliquees`, `messageErreurImage`…)
 
-Remplacer `renderLivreAjoutRoute` de sa signature jusqu'à la fin de `identifier` (≈ 197-240) :
+Signature et état :
 
 ```js
-// La route : état + gestes réels, re-rendu complet à chaque changement (le formulaire est petit). Dépendances par
-// `deps` (F3) : les défauts sont la production ; le routeur n'en passe aucune. I-G : `generation` avance à chaque
-// identification, « Saisir à la main » et « ← Changer d'ISBN » — une réponse d'une génération passée n'écrit rien.
-export async function renderLivreAjoutRoute(params, query, ctx, deps = {}) {
-  const { fetch = globalThis.fetch, enLigne = () => navigator.onLine !== false, attendre = attenteReelle, cle = GOOGLE_BOOKS.key, naviguer = navigate, tentativeMs = LIMITES_ISBN.tentativeMs, repriseMs = LIMITES_ISBN.repriseMs } = deps;
-  // `touchee` (R-UX-13) : la personne a agi sur la couverture (choisi une image, ou retiré). Une réponse distante
-  // tardive ne défait jamais un geste — même si l'ISBN, lui, n'a pas changé.
-  const COUVERTURE_VIDE = () => ({ sha256: null, apercu: null, message: null, enCours: false, touchee: false });
-  const etat = { pas: 1, isbn: '', champs: CHAMPS_VIDES(), langueChoisie: false, provenance: null, recherche: false, reprise: false, validation: null, resultat: null, generation: 0, enCours: false, lecteurDisponible: 'BarcodeDetector' in window, existantes: cuisinesExistantes(ctx), couverture: COUVERTURE_VIDE() };
-  const root = el('div', null, pageHeader(t('Ajouter un livre'), { back: { href: '/add', label: t('Ajouter') } }));
-  const zone = el('div', null);
-  root.append(zone);
-  const modele = () => ({ ...livreAjoutModel({ ...etat, cleGoogle: !!cle }), existantes: etat.existantes });
-  const dessiner = () => zone.replaceChildren(renderLivreAjout(modele(), gestes));
-  // Tout geste qui change l'ISBN ou le pas ferme la porte aux réponses en vol (I-G) et libère la recherche.
-  const nouvelleGeneration = () => { etat.generation += 1; etat.recherche = false; etat.reprise = false; etat.validation = null; etat.resultat = null; };
+export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo, navigate: nav = navigate, toast: dire = toast, fetch = globalThis.fetch, enLigne = () => navigator.onLine !== false, attendre = attenteReelle, cle = GOOGLE_BOOKS.key, tentativeMs = LIMITES_ISBN.tentativeMs, repriseMs = LIMITES_ISBN.repriseMs } = {}) {
+```
+
+`etat` gagne `reprise: false, validation: null, resultat: null, suggestions: null, existantesMotsCles: motsClesExistants(ctx)` ; `const modele = () => ({ ...livreAjoutModel({ ...etat, cleGoogle: !!cle }), existantes: etat.existantes, existantesMotsCles: etat.existantesMotsCles });` et `dessiner` l'utilise ; chaque `livreAjoutModel(etat)` de la route (gestes `changerChamp`, `enregistrer`) devient `modele()`.
+
+`identifier` :
+
+```js
+  // I-G : tout geste qui change l'ISBN ou le pas ferme la porte aux réponses en vol (avancer, C1) ET libère la recherche.
+  const nouvelleGeneration = () => { avancer(); etat.recherche = false; etat.reprise = false; etat.validation = null; etat.resultat = null; etat.suggestions = null; };
   const identifier = async ({ forcer = false } = {}) => {
     if (etat.recherche) return; // I-G : une identification à la fois (Entrée, Réessayer et le clic passent tous ici)
     const v = validerIsbn(etat.isbn);
     if (!v.ok) {
-      if (v.motif === 'vide') { toast(t('Saisis un ISBN d’abord.')); return; }
+      if (v.motif === 'vide') { dire(t('Saisis un ISBN d’abord.')); return; }
       etat.validation = v.motif; dessiner(); return; // aucun appel
     }
     etat.validation = null; etat.isbn = v.isbn13;
     if (!forcer && !enLigne()) { etat.resultat = { statut: 'indisponible', motif: 'horsligne', google: 'non_appele' }; dessiner(); return; } // S13 : Réessayer force
-    etat.generation += 1;
-    const gen = etat.generation;
+    // Une provenance ne survit pas à l'ISBN qui l'a produite (I-B) ; la COUVERTURE non plus (R-UX-13) ; C3 avant C1.
+    etat.provenance = null; etat.couverture = COUVERTURE_VIDE(); etat.suggestions = null;
+    oublierDistants();
+    avancer();
+    const generation = etat.generation;
     etat.recherche = true; etat.reprise = false; etat.resultat = null;
-    // Une provenance ne survit pas à l'ISBN qui l'a produite (I-B) ; la COUVERTURE non plus (R-UX-13).
-    etat.provenance = null; etat.couverture = COUVERTURE_VIDE();
     dessiner();
     const ctl = new AbortController();
     const chrono = setTimeout(() => ctl.abort(), LIMITES_ISBN.totalMs);
     try {
-      const res = await lookupIsbn(v.isbn13, { fetch, signal: ctl.signal, cle, attendre, tentativeMs, repriseMs, surReprise: () => { if (gen === etat.generation) { etat.reprise = true; dessiner(); } } });
-      if (gen !== etat.generation) return; // la réponse d'une autre génération n'écrit rien (I-G)
+      const res = await lookupIsbn(v.isbn13, { fetch, signal: ctl.signal, cle, attendre, tentativeMs, repriseMs, surReprise: () => { if (etat.generation === generation) { etat.reprise = true; dessiner(); } } });
+      if (etat.generation !== generation) return; // C1/F3 : la réponse d'une autre génération n'écrit rien (I-G)
       if (res.statut === 'trouve') {
-        // F5 : la langue reçue arrive au sélecteur — sauf si la personne l'a choisie elle-même ; repli « fr ».
-        etat.champs = fusionnerFiche({ ...etat.champs, language: etat.langueChoisie ? etat.champs.language : '' }, res.fiche);
-        if (!etat.champs.language) etat.champs.language = 'fr';
+        const avantFusion = { ...etat.champs };
+        etat.champs = fusionnerFiche(etat.champs, res.fiche, { langueTouchee: etat.langueTouchee });
+        const reprises = CHAMPS_DISTANTS.filter((k) => String(avantFusion[k] ?? '') !== String(etat.champs[k] ?? ''));
+        etat.champsDistants = reprises.length ? Object.fromEntries(reprises.map((k) => [k, etat.champs[k]])) : null;
         etat.provenance = res.source; etat.pas = 2;
+        etat.suggestions = res.fiche.motsCles?.length ? { source: res.source, valeurs: res.fiche.motsCles } : null; // § 12.2 : propositions, jamais posées
         if (res.source === 'openlibrary') {
-          const isbnDemande = v.isbn13;
-          recupererCouvertureParIsbn(isbnDemande, { fetch, signal: AbortSignal.timeout(LIMITES_ISBN.delaiMs) }).then(async (blob) => {
-            // R-UX-13 + I-G : cette réponse appartient à SA demande et à SA génération.
-            if (gen !== etat.generation || etat.isbn !== isbnDemande || etat.couverture.sha256 || etat.couverture.touchee) return;
-            if (!blob) { etat.couverture = { ...etat.couverture, message: t('Aucune couverture reçue. Tu peux la photographier.') }; dessiner(); return; }
-            etat.couverture = { ...etat.couverture, enCours: true }; dessiner();
-            try {
-              const { sha256 } = await poserCouverture(blob, { origine: 'distante' });
-              if (gen !== etat.generation || etat.isbn !== isbnDemande || etat.couverture.touchee) return;
-              const ligne = await repo.getFile(sha256);
-              etat.couverture = { sha256, apercu: urlDeBlob(ligne.blob), message: t('Couverture reçue d’Open Library.'), enCours: false, touchee: false };
-            } catch { etat.couverture = { ...etat.couverture, enCours: false, message: t('Aucune couverture reçue. Tu peux la photographier.') }; }
-            dessiner();
-          }).catch(() => { /* une couverture n'est jamais essentielle : aucun rejet non traité, aucune carte rouge */ });
+          /* bloc couverture de main, INCHANGÉ, sauf : recupererCouvertureParIsbn(v.isbn13, { fetch, signal: signalDelai(LIMITES_ISBN.delaiMs) }) */
         }
       } else if (res.statut === 'introuvable') { etat.provenance = 'aucune'; etat.resultat = res; etat.pas = 2; }
       else { etat.resultat = res; } // indisponible : on reste au pas 1, ISBN conservé, Réessayer offert
     } finally {
       clearTimeout(chrono);
-      if (gen === etat.generation) { etat.recherche = false; etat.reprise = false; dessiner(); }
+      if (etat.generation === generation) { etat.recherche = false; etat.reprise = false; dessiner(); }
     }
   };
 ```
 
-**Attention** : la branche couverture ci-dessus doit reproduire **exactement** la logique existante (≈ 222-238 : messages, `poserCouverture`, `repo.getFile`, `urlDeBlob`, gardes) en y ajoutant seulement `gen !== etat.generation ||` aux deux gardes et `fetch` injecté — relis le code actuel et garde ses textes (`t('Aucune couverture reçue. Tu peux la photographier.')`, `t('Couverture reçue d’Open Library.')`) tels quels ; si l'existant diffère du bloc ci-dessus, l'existant gagne.
+(Recopie le bloc couverture **tel qu'il est sur `main`** — `isbnDemande`, `pertinent()`, `passagesCouverture`, `poserCouverture(…, { repo: r })`, `couverturesAppliquees`, `ILLISIBLE` — en changeant seulement l'appel à `recupererCouvertureParIsbn` pour passer `fetch`.) Dans `finally`, la condition sur la génération est **nouvelle** : `saisirMain`/`retourIsbn` libèrent déjà la recherche par `nouvelleGeneration()`, et une identification plus récente a sa propre `recherche`.
 
-Puis dans `gestes` :
+Gestes :
 
 ```js
     reessayer: () => identifier({ forcer: true }),
@@ -877,9 +1006,9 @@ Puis dans `gestes` :
         const detector = new window.BarcodeDetector({ formats: ['ean_13'] });
         const bmp = await createImageBitmap(files[0]);
         const code = codeBarresVersIsbn(await detector.detect(bmp));
-        if (!code) { toast(t('Aucun ISBN lu sur cette photo.')); return; }
+        if (!code) { dire(t('Aucun ISBN lu sur cette photo.')); return; }
         etat.isbn = code; await identifier();
-      } catch { toast(t('Lecture du code-barres impossible.')); }
+      } catch { dire(t('Lecture du code-barres impossible.')); }
     },
     saisirMain: () => {
       nouvelleGeneration();
@@ -887,62 +1016,59 @@ Puis dans `gestes` :
       etat.isbn = v.ok ? v.isbn13 : nettoyerIsbn(etat.isbn).slice(0, 20); // affiché = enregistré quand valide ; borné sinon (S8/F22)
       etat.provenance = null; etat.couverture = { ...COUVERTURE_VIDE(), touchee: true }; etat.pas = 2; dessiner();
     },
-    changerChamp: (k, v) => { if (k === 'language') etat.langueChoisie = true; etat.champs[k] = v; majBoutonEnregistrer(zone, modele()); },
     retourIsbn: () => { nouvelleGeneration(); etat.pas = 1; etat.provenance = null; etat.couverture = { ...COUVERTURE_VIDE(), touchee: true }; dessiner(); },
+    basculerMotCle: (v) => { etat.champs.tags = basculerPuce(etat.champs.tags, v); dessiner(); },
+    ajouterMotCle: (v) => { const apres = ajouterPuce(etat.champs.tags, v); if (apres !== etat.champs.tags) { etat.champs.tags = apres; dessiner(); } },
 ```
 
-(`changerIsbn`, `basculerCuisine`, `ajouterCuisine`, `couverture` inchangés ; dans `enregistrer`, remplacer `navigate(` par `naviguer(` et `livreAjoutModel(etat)` par `modele()`.) Vérifier que plus aucun `livreAjoutModel(etat)` nu ne reste dans la route (le `cleGoogle` passe par `modele()`). `sw.js` : `VERSION = 'cuisine-os-v0.4.1-6'`.
+(`changerIsbn`, `changerChamp` (avec `langueTouchee`), `basculerCuisine`, `ajouterCuisine`, `couverture`, `enregistrer` restent ceux de `main`, `livreAjoutModel(etat)` → `modele()`.) `sw.js` : `VERSION = 'cuisine-os-v0.4.1-7'`.
 
-- [ ] **Step 4 : Lancer la suite, vert** — Expected: `✅`, zéro `.ko`, **zéro requête réseau sortante** (le lanceur affiche une ligne `HTTP 4xx` ou une erreur console si la route a touché `openlibrary.org` — ce serait un défaut d'injection).
+- [ ] **Step 4 : Suite → vert ; total ; vert.** Le lanceur ne doit montrer **aucune** requête `HTTP` vers `openlibrary.org` : si une apparaît, une dépendance n'est pas passée (couverture ?).
 
 - [ ] **Step 5 : Commit**
 
 ```bash
-git add src/ui/livre-ajout.js sw.js tests/ajouter.js
-git commit -m "Route livre : deps injectees, generation (une identification a la fois), trois issues a l ecran, langue recue au selecteur" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git add src/ui/livre-ajout.js sw.js tests/ajouter.js tests/tests.js
+git commit -m "Route livre : deps etendues, garde d une identification a la fois, trois issues a l ecran, suggestions de mots-cles" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 7 : Preuves de concurrence et d'écriture (I-G, S3, S8, F15)
+### Task 8 : Preuves de concurrence, d'écriture et de mots-clés (I-G, S3, S8, F15, § 12)
 
 **Files:**
-- Modify: `tests/ajouter.js` (bloc neuf après celui de la tâche 6)
-- Modify (si un rouge le demande) : `src/ui/livre-ajout.js`
+- Modify: `tests/ajouter.js` (bloc neuf après celui de la tâche 7), `tests/tests.js`
+- Modify (si un rouge le demande) : `src/ui/livre-ajout.js` (+ `VERSION -8`)
 
-**Interfaces:**
-- Consumes: la route de la tâche 6 (`deps.naviguer`, `withRepo`).
-- Produces: rien de neuf ; des preuves. Si un test ici est rouge, c'est un défaut de la tâche 6 à corriger **dans cette tâche**, en nommant le ruling R-ISBN-n au registre.
-
-- [ ] **Step 1 : Écrire les tests**
+- [ ] **Step 1 : Tests**
 
 ```js
   {
-    // Réponses tardives et croisées (S3/I-G), écriture de l'édition (F15), ISBN libre (S8). Base jetable, aucun réseau.
+    // Réponses tardives et croisées (S3/I-G), écriture de l'édition et des mots-clés (F15, § 12), ISBN libre (S8).
     const { withRepo } = await import('./sync-fixture.js');
-    const reponseJson = (o) => ({ ok: true, status: 200, headers: new Headers(), blob: async () => new Blob([JSON.stringify(o)], { type: 'application/json' }) });
-    const r404 = { ok: false, status: 404, headers: new Headers(), blob: async () => new Blob([]) };
-    const attendre = async (condition, quoi) => { for (let i = 0; i < 300; i += 1) { if (condition()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error(`attente dépassée (3 s) : ${quoi}`); };
+    const reponseJson = (o) => ({ ok: true, status: 200, headers: new Headers(), text: async () => JSON.stringify(o) });
+    const r404 = { ok: false, status: 404, headers: new Headers(), text: async () => '', blob: async () => new Blob([]) };
+    const attendre = async (condition, quoi) => { for (let i = 0; i < 300; i += 1) { if (await condition()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error(`attente dépassée (3 s) : ${quoi}`); };
     const taper = (root, isbn) => { const i = root.querySelector('input[name="isbn"]'); i.value = isbn; i.dispatchEvent(new Event('input')); };
     const cliquer = (root, texte) => { const b = [...root.querySelectorAll('button')].find((x) => x.textContent === texte); if (!b) throw new Error(`bouton absent : ${texte}`); b.click(); };
     const titreDe = (root) => [...root.querySelectorAll('input[type="text"]')].find((i) => i.name !== 'isbn');
     const rappel = (root) => [...root.querySelectorAll('span.muted')].find((s) => s.textContent.startsWith('ISBN'))?.textContent ?? null;
     await withRepo(async (repo, db) => {
       const urls = []; const enVol = new Map(); // isbn → fonction qui libère la réponse search.json
-      const fetch = async (u) => { const s = String(u); urls.push(s); if (s.startsWith('https://openlibrary.org/search.json')) { const isbn = new URL(s).searchParams.get('isbn'); return new Promise((r) => { enVol.set(isbn, () => r(reponseJson({ docs: [{ title: `Livre ${isbn}` }] }))); }); } return r404; };
+      const fetch = async (u) => { const s = String(u); urls.push(s); if (s.startsWith('https://openlibrary.org/search.json')) { const isbn = new URL(s).searchParams.get('isbn'); return new Promise((r) => { enVol.set(isbn, () => r(reponseJson({ docs: [{ title: `Livre ${isbn}`, subject: ['Barbecuing', 'Charcoal'] }] }))); }); } return r404; };
       const liberer = (isbn) => { const f = enVol.get(isbn); enVol.delete(isbn); f(); };
       const navigations = [];
-      const deps = { fetch, enLigne: () => true, attendre: async () => {}, tentativeMs: 5000, naviguer: (p) => navigations.push(p) };
+      const deps = { repo, fetch, enLigne: () => true, attendre: async () => {}, tentativeMs: 5000, navigate: (p) => navigations.push(p) };
       const A = '9780306406157', B = '9782890772816';
-      // 1. « Saisir à la main » pendant la recherche : la réponse tardive n'écrit rien (I-G).
+      // 1. « Saisir à la main » pendant la recherche : la réponse tardive n'écrit rien (I-G), pas même une suggestion.
       const r1 = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
       taper(r1, A); cliquer(r1, 'Identifier');
       await attendre(() => enVol.has(A), 'A en vol');
       cliquer(r1, 'Saisir à la main');
       liberer(A);
       await new Promise((r) => setTimeout(r, 50));
-      eq([titreDe(r1).value, r1.querySelector('.status.info'), rappel(r1)], ['', null, `ISBN ${A}`], 'route : la réponse d’une identification abandonnée par « Saisir à la main » n’écrit rien (I-G)');
-      // 2. Croisement A puis B : seule B écrit ; la couverture n'est demandée qu'une fois (pour B).
+      eq([titreDe(r1).value, r1.querySelector('.status.info'), rappel(r1), r1.querySelector('.suggestions'), r1.etatRoute().recherche], ['', null, `ISBN ${A}`, null, false], 'route : la réponse d’une identification abandonnée par « Saisir à la main » n’écrit rien, et la recherche est libérée (I-G)');
+      // 2. Croisement A puis B : seule B écrit ; une seule couverture demandée (B).
       const r2 = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
       taper(r2, A); cliquer(r2, 'Identifier');
       await attendre(() => enVol.has(A), 'A en vol (2)');
@@ -954,13 +1080,16 @@ git commit -m "Route livre : deps injectees, generation (une identification a la
       eq([r2.querySelector('.status.info'), !!r2.querySelector('input[name="isbn"]')], [null, true], 'route : la réponse de A, arrivée pendant B, n’écrit rien et ne quitte pas le pas 1 (S3)');
       liberer(B);
       await attendre(() => r2.querySelector('.status.info'), 'B remplie');
-      eq([titreDe(r2).value, rappel(r2), urls.filter((u) => u.startsWith('https://covers.openlibrary.org/')).length], [`Livre ${B}`, `ISBN ${B}`, 1], 'route : les champs sont ceux de B seulement ; une seule couverture demandée, celle de B (S3, § 5)');
-      // 3. « Ajouter ce livre » : ISBN-13 en base, navigation injectée (F15).
+      eq([titreDe(r2).value, rappel(r2), urls.filter((u) => u.startsWith('https://covers.openlibrary.org/')).length, [...r2.querySelectorAll('button.puce.suggestion')].map((b) => b.textContent)], [`Livre ${B}`, `ISBN ${B}`, 1, ['Barbecuing', 'Charcoal']], 'route : les champs et suggestions sont ceux de B seulement ; une seule couverture demandée (S3, § 5, § 12)');
+      // 3. Une suggestion cliquée devient un mot-clé choisi ; « Ajouter ce livre » écrit isbn13 et tags (F15, § 12).
+      r2.querySelector('button.puce.suggestion').click();
+      eq([r2.etatRoute().champs.tags, [...r2.querySelectorAll('button.puce.suggestion')].map((b) => b.textContent)], [['barbecuing'], ['Charcoal']], 'route : la suggestion cliquée devient une puce choisie (minuscules, comme ajouterPuce) et quitte les suggestions');
       cliquer(r2, 'Ajouter ce livre');
       await attendre(() => navigations.length === 1, 'navigation après enregistrement');
       const editions = await db.getAll('book_editions');
-      eq([editions.length, editions[0].isbn, navigations[0] === `/books/${editions[0].id}?nouveau=1`], [1, B, true], 'route : l’édition porte l’ISBN-13, la navigation part vers la fiche (F15)');
-      // 4. Saisie à la main invalide → édition sans ISBN ; 10 000 chiffres → rappel borné à 20, rien en base (S8).
+      const livre = await db.get('books', editions[0].book_id);
+      eq([editions.length, editions[0].isbn, livre.tags, navigations[0] === `/books/${editions[0].id}?nouveau=1`], [1, B, ['barbecuing'], true], 'route : l’édition porte l’ISBN-13, le livre ses mots-clés, la navigation part vers la fiche (F15, § 12.1)');
+      // 4. Saisie à la main invalide → édition sans ISBN ; 10 000 chiffres → rappel borné, rien en base (S8).
       const r3 = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
       taper(r3, '12345'); cliquer(r3, 'Saisir à la main');
       eq(rappel(r3), 'ISBN 12345 — non valide, ne sera pas enregistré', 'route : rappel « non valide » (S8)');
@@ -976,57 +1105,133 @@ git commit -m "Route livre : deps injectees, generation (une identification a la
       await attendre(() => navigations.length === 3, 'navigation 3');
       eq((await db.getAll('book_editions')).filter((e) => e.isbn === null).length, 2, 'route : la suite démesurée n’atteint pas la base (S8)');
       ok(!urls.some((u) => u.includes('googleapis')), 'route : sans clé, Google Books jamais appelé');
+      // 5. « ← Changer d’ISBN » vide les suggestions (elles appartiennent à l'ISBN qui les a produites, § 12.2).
+      const r5 = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
+      taper(r5, A); cliquer(r5, 'Identifier');
+      await attendre(() => enVol.has(A), 'A en vol (5)'); liberer(A);
+      await attendre(() => r5.querySelector('.suggestions'), 'suggestions de A');
+      cliquer(r5, '← Changer d’ISBN');
+      eq([r5.etatRoute().suggestions, r5.querySelector('.suggestions')], [null, null], 'route : revenir changer l’ISBN abandonne les suggestions de l’ancien (§ 12.2)');
     });
   }
 ```
 
-- [ ] **Step 2 : Lancer la suite** — Expected: `✅` si la tâche 6 est juste ; sinon lire le rouge, corriger **le code** (pas le test, sauf erreur manifeste du test, consignée), relancer.
+- [ ] **Step 2 : Suite → vert ; total ; vert.** Un rouge ici = un défaut de la tâche 7 : corriger **le code**, nommer le ruling R-ISBN-n au registre (jamais plier le test, sauf erreur manifeste du test, consignée).
 
 - [ ] **Step 3 : Commit**
 
 ```bash
-git add tests/ajouter.js
-git commit -m "Tests route : reponses tardives et croisees muettes (I-G), edition en ISBN-13 ou null, navigation injectee" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git add tests/ajouter.js tests/tests.js
+git commit -m "Tests route : reponses tardives et croisees muettes (I-G), edition en ISBN-13 ou null, mots-cles ecrits, suggestions liees a l ISBN" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
-(Si `src/ui/livre-ajout.js` a changé : l'ajouter au commit et incrémenter `VERSION` → `-7`.)
+(Si `src/ui/livre-ajout.js` a changé : l'ajouter, `VERSION` → `-8`.)
 
 ---
 
-### Task 8 : Clôture — statique, docs, mesures réelles, spec § 11.2
+### Task 9 : Fiche livre (« Mots-clés ») et recherche (`books.tags` pour toutes les recettes du livre)
 
 **Files:**
-- Modify: `tests/ajouter.js` (bloc statique : rendus neufs sans `html:`/`innerHTML` — déjà couvert par `MODULES_NEUFS` pour `livre-ajout.js` et `isbn.js` ; vérifier)
-- Modify: `docs/architecture.md` (≈ 262), `CLAUDE.md` (nouvelle sous-section après « Page « Ajouter » et flux des livres livrés »), `docs/superpowers/specs/2026-10-14-identifier-un-livre-fiable-design.md` (§ 11.2)
-- Create: `docs/google-books.md`
-- Modify: `sw.js` (`VERSION` finale)
+- Modify: `src/ui/book.js` (≈ 179 `meta` ; bloc `.field` « Mots-clés » après « Cuisines » ≈ 187-195 ; `saveBatch` ≈ 203)
+- Modify: `src/domain/search.js` (`buildDocs` ≈ 121 et 127)
+- Modify: `tests/ajouter.js` (bloc fiche ≈ 538-560 : un cas de plus ; bloc recherche ≈ 747-757 : cas de plus), `tests/tests.js`
 
-- [ ] **Step 1 : Statique**
+**Interfaces:**
+- Consumes: `motsClesExistants`, `pucesModel`, `renderPuces` 3ᵉ paramètre (tâche 6).
+- Produces: la fiche écrit `tags: [...meta.tags]` ; `buildDocs` : `tokens` de chaque recette d'un livre contiennent ses `tags` ; `titleTokens` des `reference_only` aussi.
 
-Vérifier dans `tests/ajouter.js` que `MODULES_NEUFS` contient `'../src/core/isbn.js'` et `'../src/ui/livre-ajout.js'` (le test S14 et F13 couvrent les deux) ; que le test de forme de la clé (tâche 3) et les deux pins `0.4.1` sont présents. Lancer la suite : `✅`. Lancer aussi `cd ~/projects/mistu-isbn && node --test tools/*.test.mjs` (40/40 attendu) et `node tools/generer-migrations.mjs --check` (0 attendu : aucun schéma touché).
+- [ ] **Step 1 : Tests (rouge)**
 
-- [ ] **Step 2 : Mesures réelles (réseau réel, hors suite)**
+Dans le bloc fiche (après l'assertion « GARDE la couverture posée entre-temps », ≈ 553) :
 
-Écrire `.superpowers/sdd/2026-10-14-identifier-un-livre-fiable/mesure.cjs` (Playwright local, `channel: 'chrome'`, headless ; modèle : `suite.cjs`) qui ouvre `http://localhost:8082/#/add/livre`, clique « Continuer sans compte » si présent, puis : (1) tape `9781785035289`, Entrée → attend « Renseigné par Open Library », imprime titre/auteur/éditeur/année/langue et le **nombre** de requêtes vers `openlibrary.org/search.json` (attendu 1) ; (2) « ← Changer d'ISBN », tape `9782890772816`, « Identifier » → idem (langue attendue `fr`) ; (3) tape `9781785035280`, « Identifier » → message « pas valide », **zéro** requête nouvelle ; (4) `context.setOffline(true)`, tape `9780306406157`, « Identifier » → « Tu es hors ligne. » + bouton « Réessayer », zéro requête ; (5) `setOffline(false)`, « Réessayer » → trouvé. Coller la sortie dans le rapport de tâche et dans `CLAUDE.md` (sous-section ci-dessous). Si Open Library est en panne au moment de la mesure : le dire, et montrer que l'écran dit « en panne »/« n'a pas répondu » avec « Réessayer » (c'est aussi une preuve).
+```js
+      // § 12.4 : « Mots-clés » dans la fiche, écrits par « Enregistrer », sans toucher au reste.
+      const fiche3 = await renderBook({ id: 'eZ' }, {}, ctxDeux(await db.get('book_editions', 'eZ')));
+      const blocMots = [...fiche3.querySelectorAll('div.field')].find((f) => f.querySelector('span')?.textContent === 'Mots-clés');
+      ok(blocMots && !blocMots.closest('label') && blocMots.querySelector('input').getAttribute('aria-label') === 'Autre mot-clé', 'fiche : bloc « Mots-clés » hors label, champ libre nommé (§ 12.4)');
+      ok(![...blocMots.querySelectorAll('button.puce')].some((b) => b.textContent === 'Italienne'), 'fiche : aucune cuisine de graine parmi les mots-clés');
+      const champLibre = blocMots.querySelector('input'); champLibre.value = 'BBQ';
+      [...blocMots.querySelectorAll('button')].find((b) => b.textContent === 'Ajouter').click();
+      eq([...blocMots.querySelectorAll('button.puce')].map((b) => [b.textContent, b.getAttribute('aria-pressed')]), [['Bbq', 'true']], 'fiche : « Ajouter » pose la puce choisie (minuscules)');
+      await repo.save('book_editions', { ...(await db.get('book_editions', 'eZ')), cover_sha256: 'encore-posee' });
+      [...fiche3.querySelectorAll('button')].find((b) => b.textContent === 'Enregistrer').click();
+      eq(await attendreFait(async () => (await db.get('books', 'bZ'))?.tags?.length === 1), true, 'fiche : « Enregistrer » écrit les mots-clés');
+      eq([(await db.get('books', 'bZ')).tags, (await db.get('book_editions', 'eZ')).cover_sha256], [['bbq'], 'encore-posee'], 'fiche : tags écrits, couverture relue intacte (C4, § 12.4)');
+```
 
-- [ ] **Step 3 : Docs**
+(`livre` du bloc est `{ id: 'bZ', … }` : vérifier son identifiant en tête du bloc et l'utiliser.) Dans le bloc recherche (après « une référence d’index sans cuisine ne remonte pas par une cuisine ») :
 
-`docs/architecture.md` ≈ 262 : remplacer « lookupIsbn (Open Library puis Google Books en repli) » par « lookupIsbn (trois issues : trouvé / introuvable / indisponible avec motif ; Open Library `search.json` puis legacy en filet, Google Books seulement avec `GOOGLE_BOOKS.key` ; une tentative = un budget, une reprise sur échec muet) » et ajouter une ligne `src/core/isbn.js  nettoyerIsbn/validerIsbn/codeBarresVersIsbn : contrôle, conversion 10↔13, filtre du code-barres ; pur.`
+```js
+    // § 12.5 : les mots-clés du livre comptent pour toutes ses recettes ; titleTokens pour les références seulement.
+    const livreBbq = { id: 'bB', title: 'Berber and Q', author: 'Katz', cuisines: [], tags: ['bbq', 'charbon'] };
+    const edBbq = { id: 'eB', book_id: 'bB' };
+    const docsBbq = buildDocs({ recipes: [
+      { id: 'c1', original_title: 'Agneau', edition_id: 'eB', availability: 'full' },
+      { id: 'c2', original_title: 'Agneau', edition_id: 'eB', availability: 'reference_only', printed_page: 12, cuisines: [] },
+      { id: 'c3', original_title: 'Agneau', edition_id: 'eB', availability: 'reference_only', source_url: 'https://a.test/', cuisines: [] },
+      { id: 'c4', original_title: 'Agneau', availability: 'full' },
+    ], versions: [], editions: [edBbq], books: [livreBbq], dishes: [], links: [], translations: [], history: [] });
+    const par = (id) => docsBbq.find((d) => d.recipe.id === id);
+    eq([par('c1').tokens.has('bbq'), par('c1').titleTokens.has('bbq'), par('c2').tokens.has('charbon'), par('c2').titleTokens.has('bbq'), par('c3').titleTokens.has('bbq'), par('c4').tokens.has('bbq')], [true, false, true, true, true, false], 'recherche : les tags du livre entrent dans les tokens de chaque recette, et dans les titleTokens des références seulement (§ 12.5)');
+    const res = searchDocs(docsBbq, parseQuery('bbq'), { mode: 'all' });
+    ok(res.references.some((x) => x.doc.recipe.id === 'c2') && res.references.some((x) => x.doc.recipe.id === 'c3'), 'recherche : une référence d’index et un signet d’un livre tagué « bbq » remontent sur « bbq »');
+```
 
-`docs/google-books.md` (une page) : pourquoi la clé est publique ; les **murs** (projet Google Cloud dédié **sans facturation**, restriction d'API « Books API » seule, quota abaissé dans IAM → Quotas, restriction par référent `https://neegans.github.io/*` + `http://localhost:8082/*` + le sous-domaine D5 le jour venu) ; les étapes dans la console ; coller dans `src/sync/config.js` → `GOOGLE_BOOKS.key` ; incrémenter `VERSION` ; si la protection de push de GitHub refuse la chaîne `AIza…` : passer par l'écran de contournement (« utilisé en public par conception ») ; **mesure à faire avec la clé** : un ISBN absent d'Open Library (p. ex. un livre très récent) → « Renseigné par Google Books », et vérifier dans la console réseau que la requête porte `Referer: https://neegans.github.io/` (strict-origin) et que Google l'accepte — sur Chrome **et** Safari.
+(Vérifie dans `searchDocs` ≈ 140-175 le nom du groupe des recettes pleines — `recipes` — et ajoute `ok(res.recipes?.some((x) => x.doc.recipe.id === 'c1'), …)` si le mode `all` les renvoie par `tokens`.)
 
-`CLAUDE.md` : sous-section « ### Identifier un livre, fiable (14 octobre 2026) » : où (branche, worktree, port, spec, plan, registre), ce qui marche (éprouvé par la suite : liste courte), ce qui n'est PAS prouvé (Safari/iPhone ; chemin Google avec clé ; référent `strict-origin` accepté par Google), dettes (S4d : quitter la route n'abandonne pas la requête ; chemin `pickFiles` du lecteur hors suite), versions (`APP_VERSION 0.4.1`, `VERSION` finale), bilan de la suite et des mesures réelles. Rappeler : fusion **après** le lot UX ; rebaser `isbn-fiable` si `ajouter-livres-ux` a bougé.
+- [ ] **Step 2 : Suite → rouge.**
 
-Spec § 11.2 : une ligne par ruling R-ISBN-n consigné au registre pendant la construction (au moins : « U+2028/2029 sont Zl/Zp, nommés explicitement dans `borner` » ; `langueChoisie` ; `nouvelleGeneration()` libère aussi `recherche`).
+- [ ] **Step 3 : Implémenter**
 
-`sw.js` : `VERSION = 'cuisine-os-v0.4.1-8'` (ou le suffixe libre suivant).
+`src/ui/book.js` : import `motsClesExistants` depuis `./puces.js` ; `meta` gagne `tags: [...(book.tags || [])]` ; après le bloc « Cuisines » (même IIFE) :
 
-- [ ] **Step 4 : Suite finale** — `✅`, zéro `.ko` ; `tools` 40/40 ; `--check` 0 ; aucun U+2028/2029 dans les fichiers touchés (`python3 -c` ou `grep -P '\x{2028}|\x{2029}'`).
+```js
+      el('div', { class: 'field' }, el('span', null, t('Mots-clés')), (() => {
+        const box = el('div', null);
+        const dessiner = () => box.replaceChildren(renderPuces(pucesModel({ choisies: meta.tags, existantes: motsClesExistants(ctx), graine: [] }), {
+          basculer: (v) => { meta.tags = basculerPuce(meta.tags, v); dessiner(); },
+          ajouter: (v) => { const a = ajouterPuce(meta.tags, v); if (a !== meta.tags) { meta.tags = a; dessiner(); } },
+        }, { libelleAutre: t('Autre mot-clé') }));
+        dessiner();
+        return box;
+      })()),
+```
+
+et dans le `saveBatch` : `books: [{ ...courantLivre, title: …, author: …, cuisines: [...meta.cuisines], tags: [...meta.tags] }]`.
+
+`src/domain/search.js` : ligne ≈ 121 `textParts` : ajouter `...(book?.tags || [])` ; ligne ≈ 127 `titleTokens` : la partie `reference_only` devient `${recipe.availability === 'reference_only' ? [...(recipe.cuisines || []), ...(book?.tags || [])].join(' ') : ''}` ; mettre à jour le commentaire F7 (« … et les mots-clés du livre, § 12.5 du lot ISBN »).
+
+`sw.js` : `VERSION = 'cuisine-os-v0.4.1-9'`.
+
+- [ ] **Step 4 : Suite → vert ; total ; vert.**
 
 - [ ] **Step 5 : Commit**
 
 ```bash
-git add docs/architecture.md docs/google-books.md CLAUDE.md docs/superpowers/specs/2026-10-14-identifier-un-livre-fiable-design.md sw.js tests/ajouter.js
+git add src/ui/book.js src/domain/search.js sw.js tests/ajouter.js tests/tests.js
+git commit -m "Mots-cles : edition dans la fiche livre, et les tags du livre servent la recherche de toutes ses recettes" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 10 : Clôture — statique, docs, mesures réelles, spec § 11.2
+
+**Files:**
+- Modify: `docs/architecture.md` (≈ 262), `CLAUDE.md` (sous-section après « Page « Ajouter » et flux des livres livrés »), spec § 11.2, `sw.js`, `tests/tests.js`
+- Create: `docs/google-books.md`
+
+- [ ] **Step 1 : Statique.** Suite `✅` ; `cd ~/projects/mistu-isbn && node --test tools/*.test.mjs` (40/40) ; `node tools/generer-migrations.mjs --check` (0) ; aucun U+2028/U+2029/U+202E ni caractère de contrôle dans les fichiers touchés (`python3 -c` : lire les octets, chercher ` ` etc. — pas de `grep -P` sur macOS) ; `grep -rn "AIza" src/` vide.
+
+- [ ] **Step 2 : Mesures réelles (réseau réel, hors suite).** Écrire `.superpowers/sdd/2026-10-14-identifier-un-livre-fiable/mesure.cjs` (Playwright local, `channel: 'chrome'`, headless ; modèle : `suite.cjs`) : `http://localhost:8082/#/add/livre`, « Continuer sans compte » si présent, puis (1) `9781785035289` + Entrée → « Renseigné par Open Library », titre/auteur/éditeur/année/langue, **suggestions** affichées (attendu « Barbecuing »), nombre de requêtes `search.json` (1) ; (2) « ← Changer d'ISBN », `9782890772816` → idem, langue `fr` ; (3) `9781785035280` → « pas valide », zéro requête ; (4) `context.setOffline(true)`, `9780306406157` → « Tu es hors ligne. » + « Réessayer », zéro requête ; (5) `setOffline(false)`, « Réessayer » → trouvé. Coller la sortie dans le rapport et dans `CLAUDE.md`. Si Open Library est en panne : le dire, montrer l'écran « en panne »/« n'a pas répondu » + « Réessayer » (preuve aussi).
+
+- [ ] **Step 3 : Docs.** `docs/architecture.md` ≈ 262 : « lookupIsbn (trois issues : trouvé / introuvable / indisponible avec motif ; Open Library `search.json` puis legacy en filet, Google Books seulement avec `GOOGLE_BOOKS.key` ; une tentative = un budget, une reprise sur échec muet ; `fiche.motsCles` = propositions) » + ligne `src/core/isbn.js` + ligne `puces.js` (suggestions) + `search.js` (tags du livre). `docs/google-books.md` (une page) : pourquoi public ; les **murs** (projet Google Cloud dédié **sans facturation**, API Books seule, quota abaissé, référents `https://neegans.github.io/*`, `http://localhost:8082/*`, sous-domaine D5) ; étapes console ; coller dans `GOOGLE_BOOKS.key` ; `VERSION` ; contournement de la protection de push GitHub ; **mesure à faire avec la clé** : un ISBN absent d'Open Library → « Renseigné par Google Books », `Referer: https://neegans.github.io/` accepté (Chrome **et** Safari). `CLAUDE.md` : « ### Identifier un livre, fiable (14 octobre 2026) » — où, ce qui marche (suite), ce qui n'est PAS prouvé (Safari/iPhone ; Google avec clé ; référent accepté), dettes (S4d ; `pickFiles` hors suite ; suggestions distantes hors fiche), versions, bilan suite + mesures ; fusion : rebaser si `main` a bougé. Spec § 11.2 : une ligne par ruling R-ISBN-n (au moins : R-ISBN-1 U+2028/2029 nommés dans `borner` ; `nouvelleGeneration()` libère la recherche ; cas 10 R-UX-13 sur `search.json`).
+
+- [ ] **Step 4 : Suite finale `✅`, total posé, `tools` 40/40, `--check` 0.** `sw.js` : `VERSION = 'cuisine-os-v0.4.1-10'`.
+
+- [ ] **Step 5 : Commit**
+
+```bash
+git add docs/architecture.md docs/google-books.md CLAUDE.md docs/superpowers/specs/2026-10-14-identifier-un-livre-fiable-design.md sw.js tests/tests.js
 git commit -m "Cloture du lot Identifier un livre fiable : docs, procedure cle Google, mesures reelles, spec 11.2" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
@@ -1034,4 +1239,4 @@ git commit -m "Cloture du lot Identifier un livre fiable : docs, procedure cle G
 
 ## Après le plan (hors tâches, par le chef d'orchestre)
 
-Revue finale de branche (modèle le plus capable) + une vague de corrections ; `/verify` (revue adverse + suite + scan secrets : aucun `AIza…`, aucune adresse personnelle) ; copier `.superpowers/sdd/2026-10-14-identifier-un-livre-fiable/` dans `~/projects/mistu/.superpowers/sdd/` **avant** tout `git worktree remove` ; Neegan fusionne (`!`) après le lot UX, puis `git push` ; preuve sur le site public : les deux ISBN.
+Revue finale de branche (modèle le plus capable) + une vague de corrections ; `/verify` (revue adverse + suite + scan secrets : aucun `AIza…`, aucune adresse personnelle) ; copier `.superpowers/sdd/2026-10-14-identifier-un-livre-fiable/` dans `~/projects/mistu/.superpowers/sdd/` **avant** tout `git worktree remove` ; si `main` a bougé, rebaser ; Neegan fusionne (`!`) puis `git push` ; preuve sur le site public : les deux ISBN, les suggestions, la recherche « bbq ».
