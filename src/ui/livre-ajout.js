@@ -12,6 +12,7 @@ import { urlDeBlob } from '../core/blob-urls.js';
 import { listConventions } from '../domain/units.js';
 import { pageHeader, field, select } from './components.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes, normaliser, LIMITES_PUCES } from './puces.js';
+import { GOOGLE_BOOKS } from '../sync/config.js';
 import { nettoyerIsbn, validerIsbn, codeBarresVersIsbn } from '../core/isbn.js';
 
 export const LIMITES_ISBN = { champ: 300, corps: 256 * 1024, delaiMs: 10000, tentativeMs: 8000, repriseMs: 1500, totalMs: 20000 };
@@ -83,6 +84,17 @@ export const attenteReelle = (ms, signal) => new Promise((resolve) => {
 
 const URL_OL_SEARCH = (isbn) => `https://openlibrary.org/search.json?isbn=${encodeURIComponent(isbn)}&fields=title,author_name,publisher,first_publish_year,language,subject&limit=1`;
 const URL_OL_LEGACY = (isbn) => `https://openlibrary.org/api/books?bibkeys=ISBN:${encodeURIComponent(isbn)}&format=json&jscmd=data`;
+const URL_GOOGLE = (isbn, cle) => `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}&maxResults=1&key=${encodeURIComponent(cle)}`;
+// § 7 : une clé restreinte par référent exige un Referer ; strict-origin envoie l'ORIGINE seule (jamais le chemin ni
+// le #), et rien sur un déclassement HTTPS → HTTP. Google Books est le seul appel qui s'écarte de no-referrer (S12).
+const OPTIONS_GOOGLE = { ...OPTIONS_FETCH, referrerPolicy: 'strict-origin' };
+function lireGoogle(json) {
+  if (!json || typeof json !== 'object') return { repondu: false };
+  const items = json.items;
+  const v = Array.isArray(items) && items[0] && typeof items[0] === 'object' ? items[0].volumeInfo : null;
+  if (!v || typeof v !== 'object') return { repondu: true, fiche: null };
+  return { repondu: true, fiche: ficheOk({ title: borner(v.title).trim(), author: borner(chaines(v.authors).join(', ')), publisher: borner(v.publisher), year: annee(v.publishedDate), language: v.language === 'fr' || v.language === 'en' ? v.language : null, motsCles: motsClesDe(v.categories) }) };
+}
 
 // Une tentative = un budget (S4) : son AbortController couvre le fetch ET la lecture du corps ; il est relié au signal
 // extérieur par un écouteur retiré en finally. Rend { ok: true, json } ou { ok: false, motif }. Ordre du classement
@@ -158,7 +170,13 @@ export async function lookupIsbn(isbn13, { fetch = globalThis.fetch, signal, cle
   const r2 = await appel(URL_OL_LEGACY(isbn13), OPTIONS_FETCH);
   const lu2 = r2.ok ? lireLegacy(r2.json, isbn13) : null;
   if (lu2?.fiche) return trouve(lu2.fiche, 'openlibrary');
-  return { ...bilan, statut: 'introuvable' };
+  // Étape 3 : Google Books, avec clé seulement, et seulement après un « rien » d'Open Library (jamais après un échec).
+  if (!cle) return { ...bilan, statut: 'introuvable' };
+  if (signal?.aborted) return { ...bilan, statut: 'introuvable', google: 'echec' };
+  const r3 = await appel(URL_GOOGLE(isbn13, cle), OPTIONS_GOOGLE);
+  const lu3 = r3.ok ? lireGoogle(r3.json) : null;
+  if (lu3?.fiche) return trouve(lu3.fiche, 'googlebooks');
+  return { ...bilan, statut: 'introuvable', google: lu3?.repondu ? 'rien' : 'echec' };
 }
 
 // C2 : `language` a un défaut NON VIDE ('fr'), donc la règle « ne remplir que ce qui est vide » ne l'atteignait
