@@ -12,6 +12,7 @@ import { urlDeBlob } from '../core/blob-urls.js';
 import { listConventions } from '../domain/units.js';
 import { pageHeader, field, select } from './components.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
+import { nettoyerIsbn, validerIsbn, codeBarresVersIsbn } from '../core/isbn.js';
 
 export const LIMITES_ISBN = { champ: 300, corps: 256 * 1024, delaiMs: 10000 };
 export const OPTIONS_FETCH = { mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' };
@@ -19,7 +20,7 @@ export const OPTIONS_FETCH = { mode: 'cors', credentials: 'omit', cache: 'no-sto
 export const CHAMPS_DISTANTS = ['title', 'author', 'publisher', 'year', 'language'];
 const CHAMPS_VIDES = () => ({ title: '', author: '', publisher: '', year: '', language: 'fr', convention: '', cuisines: [] });
 
-export const nettoyerIsbn = (s) => String(s || '').replace(/[^0-9Xx]/g, '');
+export { nettoyerIsbn };
 const borner = (s) => (s == null ? '' : String(s).slice(0, LIMITES_ISBN.champ));
 const annee = (s) => { const m = String(s || '').match(/\b(\d{4})\b/); return m ? parseInt(m[1], 10) : null; };
 
