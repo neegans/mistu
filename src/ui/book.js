@@ -10,7 +10,7 @@ import { urlDeBlob } from '../core/blob-urls.js';
 import { poserCouverture, renderZoneCouverture, messageErreurImage } from './livre-ajout.js';
 import { startScanSession, indexEntriesPanel } from './import.js';
 import { accueilLivreModel, renderAccueilLivre } from './accueil-livre.js';
-import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
+import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes, motsClesExistants } from './puces.js';
 import { ACCEPT_PHOTOS, ACCEPT_FICHIERS } from './add.js';
 
 // C8 : la plus RÉCENTE d'abord. La fiche ne rappelle qu'UNE séance et « Reprendre » doit mener à celle qu'on vient
@@ -176,7 +176,7 @@ export async function renderBook(params, query, ctx) {
   }
 
   // Métadonnées
-  const meta = { title: book.title, author: book.author || '', isbn: edition.isbn || '', publisher: edition.publisher || '', year: edition.year || '', language: edition.language || 'fr', convention: edition.unit_convention_id || '', cuisines: [...(book.cuisines || [])] };
+  const meta = { title: book.title, author: book.author || '', isbn: edition.isbn || '', publisher: edition.publisher || '', year: edition.year || '', language: edition.language || 'fr', convention: edition.unit_convention_id || '', cuisines: [...(book.cuisines || [])], tags: [...(book.tags || [])] };
   const inp = (k, type = 'text') => el('input', { type, value: meta[k], onInput: (e) => { meta[k] = e.target.value; } });
   root.append(el('details', { class: 'card' }, el('summary', null, el('strong', null, t('Métadonnées et convention'))),
     el('div', { class: 'two-col', style: { marginTop: '.8rem' } },
@@ -193,6 +193,15 @@ export async function renderBook(params, query, ctx) {
         dessiner();
         return box;
       })()),
+      el('div', { class: 'field' }, el('span', null, t('Mots-clés')), (() => {
+        const box = el('div', null);
+        const dessiner = () => box.replaceChildren(renderPuces(pucesModel({ choisies: meta.tags, existantes: motsClesExistants(ctx), graine: [] }), {
+          basculer: (v) => { meta.tags = basculerPuce(meta.tags, v); dessiner(); },
+          ajouter: (v) => { const a = ajouterPuce(meta.tags, v); if (a !== meta.tags) { meta.tags = a; dessiner(); } },
+        }, { libelleAutre: t('Autre mot-clé') }));
+        dessiner();
+        return box;
+      })()),
       field(t('Convention de mesure'), select([{ value: '', label: t('Non confirmée') }, ...listConventions().map((c) => ({ value: c.id, label: c.labels.fr }))], meta.convention, (v) => { meta.convention = v; }), t('Ordre de décision : équivalences imprimées → convention décrite dans le livre → convention confirmée ici.'))),
     el('div', { class: 'row', style: { marginTop: '.8rem' } },
       el('button', { class: 'btn primary', onClick: async () => {
@@ -200,7 +209,7 @@ export async function renderBook(params, query, ctx) {
         // le `cover_sha256` posé entre le rendu et ce clic survit (il n'est pas dans ce formulaire).
         const courantLivre = (await repo.get('books', book.id)) || book;
         const courante = (await repo.get('book_editions', edition.id)) || edition;
-        await repo.saveBatch({ books: [{ ...courantLivre, title: meta.title.trim() || courantLivre.title, author: meta.author.trim(), cuisines: [...meta.cuisines] }],
+        await repo.saveBatch({ books: [{ ...courantLivre, title: meta.title.trim() || courantLivre.title, author: meta.author.trim(), cuisines: [...meta.cuisines], tags: [...meta.tags] }],
           book_editions: [{ ...courante, isbn: meta.isbn.trim() || null, publisher: meta.publisher.trim() || null, year: meta.year ? parseInt(meta.year, 10) || null : null, language: meta.language, unit_convention_id: meta.convention || null, convention_evidence: meta.convention ? (courante.unit_convention_id === meta.convention ? courante.convention_evidence : 'confirmed_by_user') : null }] });
         toast(t('Enregistré')); refresh();
       } }, t('Enregistrer')),

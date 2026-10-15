@@ -715,6 +715,18 @@ export async function runAjouterTests({ eq, ok }) {
       const apres2 = await db.get('book_editions', 'eZ');
       eq([apres2.cover_sha256, apres2.publisher], [null, 'Encore après'],
         'fiche : « Retirer » la couverture GARDE les métadonnées écrites entre-temps — même relecture (C4)');
+      // § 12.4 : « Mots-clés » dans la fiche, écrits par « Enregistrer », sans toucher au reste.
+      const fiche3 = await renderBook({ id: 'eZ' }, {}, ctxDeux(await db.get('book_editions', 'eZ')));
+      const blocMots = [...fiche3.querySelectorAll('div.field')].find((f) => f.querySelector('span')?.textContent === 'Mots-clés');
+      ok(blocMots && !blocMots.closest('label') && blocMots.querySelector('input').getAttribute('aria-label') === 'Autre mot-clé', 'fiche : bloc « Mots-clés » hors label, champ libre nommé (§ 12.4)');
+      ok(![...blocMots.querySelectorAll('button.puce')].some((b) => b.textContent === 'Italienne'), 'fiche : aucune cuisine de graine parmi les mots-clés');
+      const champLibre = blocMots.querySelector('input'); champLibre.value = 'BBQ';
+      [...blocMots.querySelectorAll('button')].find((b) => b.textContent === 'Ajouter').click();
+      eq([...blocMots.querySelectorAll('button.puce')].map((b) => [b.textContent, b.getAttribute('aria-pressed')]), [['Bbq', 'true']], 'fiche : « Ajouter » pose la puce choisie (minuscules)');
+      await repo.save('book_editions', { ...(await db.get('book_editions', 'eZ')), cover_sha256: 'encore-posee' });
+      [...fiche3.querySelectorAll('button')].find((b) => b.textContent === 'Enregistrer').click();
+      eq(await attendreFait(async () => (await db.get('books', 'bZ'))?.tags?.length === 1), true, 'fiche : « Enregistrer » écrit les mots-clés');
+      eq([(await db.get('books', 'bZ')).tags, (await db.get('book_editions', 'eZ')).cover_sha256], [['bbq'], 'encore-posee'], 'fiche : tags écrits, couverture relue intacte (C4, § 12.4)');
     });
   }
 
@@ -907,6 +919,19 @@ export async function runAjouterTests({ eq, ok }) {
     // Une référence d'index n'a pas de cuisines : la ligne touchée ne doit rien changer pour elle.
     const idx = buildDocs({ recipes: [{ id: 'r2', original_title: 'Pad', availability: 'reference_only', printed_page: 12, cuisines: [] }], versions: [], editions: [], books: [], dishes: [], links: [], translations: [], history: [] });
     eq(searchDocs(idx, parseQuery('thaïe'), { mode: 'all' }).references.length, 0, 'recherche : une référence d’index sans cuisine ne remonte pas par une cuisine');
+    // § 12.5 : les mots-clés du livre comptent pour toutes ses recettes ; titleTokens pour les références seulement.
+    const livreBbq = { id: 'bB', title: 'Berber and Q', author: 'Katz', cuisines: [], tags: ['bbq', 'charbon'] };
+    const edBbq = { id: 'eB', book_id: 'bB' };
+    const docsBbq = buildDocs({ recipes: [
+      { id: 'c1', original_title: 'Agneau', edition_id: 'eB', availability: 'full' },
+      { id: 'c2', original_title: 'Agneau', edition_id: 'eB', availability: 'reference_only', printed_page: 12, cuisines: [] },
+      { id: 'c3', original_title: 'Agneau', edition_id: 'eB', availability: 'reference_only', source_url: 'https://a.test/', cuisines: [] },
+      { id: 'c4', original_title: 'Agneau', availability: 'full' },
+    ], versions: [], editions: [edBbq], books: [livreBbq], dishes: [], links: [], translations: [], history: [] });
+    const par = (id) => docsBbq.find((d) => d.recipe.id === id);
+    eq([par('c1').tokens.has('bbq'), par('c1').titleTokens.has('bbq'), par('c2').tokens.has('charbon'), par('c2').titleTokens.has('bbq'), par('c3').titleTokens.has('bbq'), par('c4').tokens.has('bbq')], [true, false, true, true, true, false], 'recherche : les tags du livre entrent dans les tokens de chaque recette, et dans les titleTokens des références seulement (§ 12.5)');
+    const res = searchDocs(docsBbq, parseQuery('bbq'), { mode: 'all' });
+    ok(res.references.some((x) => x.doc.recipe.id === 'c2') && res.references.some((x) => x.doc.recipe.id === 'c3'), 'recherche : une référence d’index et un signet d’un livre tagué « bbq » remontent sur « bbq »');
   }
   // --- § 6 Images : en-têtes lus avant tout décodage, ré-encodage systématique (S4, S5, F11)
   const IM = await import('../src/core/image.js');
@@ -1636,7 +1661,7 @@ export async function runAjouterTests({ eq, ok }) {
   // book.js:'Cuisines', recipe-edit.js:'Cuisines / régions' et import.js:'— Aucun livre (à associer plus tard) —'
   // existaient déjà mot pour mot sur main, donc ÉCARTÉES d'ici malgré une ligne « + » dans le diff).
   const CHAINES_NEUVES_AILLEURS = {
-    '../src/ui/book.js': ['+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier'],
+    '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', '+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier'],
     '../src/ui/recipe.js': ['Lien web gardé.', 'L’app n’a pas lu la page : ouvre-la pour cuisiner.', 'Ouvrir le lien', 'Adresse non reconnue : '],
     '../src/ui/components.js': ['Lien web', 'Adresse non reconnue'],
   };
