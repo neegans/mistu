@@ -6,7 +6,7 @@ décisions prises en chat : **Google Books = case à clé, vide par défaut**. L
 `~/projects/mistu-isbn` (serveur `http://localhost:8082/`), base `ajouter-livres-ux` @ `808aff8`. Le lot rejoint `main`
 **après** le lot UX « Ajouter et livres » ; le site public ne change qu'à la fusion et au `git push` de Neegan.
 **Rév. 2** : réécrite après deux revues adverses (sécurité S1-S13, faisabilité F1-F27 — § 11.1) ; ce qui a changé est
-marqué « (S·/F·) ». **Rév. 3 (14 octobre, soir)** : branche **rebasée sur `main` `dccafe4`** (lot UX fusionné, suite
+marqué « (S·/F·) ». **Rév. 3 (14 octobre, soir)**, relue par une troisième revue adverse (delta D1-D14, § 11.1) : branche **rebasée sur `main` `dccafe4`** (lot UX fusionné, suite
 1378/1378, total épinglé) — § 13 dit ce que `main` a déjà réglé et ce que le lot étend ; **§ 12 « Mots-clés du livre »**
 ajouté au lot d'après le brief `docs/idees/2026-10-14-mots-cles-livre.md` (décision de Neegan).
 
@@ -91,7 +91,7 @@ traité comme un ISBN tapé faux (message § 6), pas comme « aucun ISBN lu ». 
 **Ce qui est enregistré (S8/F22).** `fabriquerLivre` écrit `isbn13` quand la validation passe ; sinon **`null`** — jamais
 une suite libre de chiffres (elle finirait dans la colonne générée `isbn` et son index btree, `0001_tables_et_regles.sql`
 99-103). `saisirMain` **normalise** l'ISBN en `isbn13` quand il est valide (affiché = enregistré) ; invalide et non vide,
-il est gardé **borné à 20 caractères** pour l'affichage du pas 2 seulement (« ISBN 12345 — non valide, ne sera pas
+il est **nettoyé par `nettoyerIsbn` puis borné à 20 caractères** (D3) pour l'affichage du pas 2 seulement (« ISBN 12345 — non valide, ne sera pas
 enregistré »). Le champ ISBN porte `maxlength="20"`. Les éditions existantes à dix chiffres ne bougent pas.
 
 ## 5. `lookupIsbn` — trois issues, trois sources au plus
@@ -108,7 +108,8 @@ sinon `TypeError` **avant tout appel** — l'erreur est celle d'un appelant, pas
 - `motif` : `null` sauf `indisponible` → `'delai' | 'reseau' | 'limite' | 'serveur'` (le motif `'horsligne'` est posé par
   la route, § 6, sans appel) ;
 - `google ∈ { 'non_appele', 'rien', 'echec' }` (S5 : le message d'« introuvable » ne nomme que ce qui a répondu) ;
-- `fiche` : `{ title, author, publisher, year, language }`, `null` sinon ;
+- `fiche` : `{ title, author, publisher, year, language, motsCles }` (`motsCles` : § 12.2, `[]` quand rien), `null` sinon — les
+  `eq` d'objets entiers de § 9 incluent `motsCles` (D4) ;
 - `appels` : nombre de `fetch` faits (preuve des reprises et des sources non appelées).
 
 **Bornes (S3 héritées, S6/S7 durcies).** `borner(s)` tronque à 300 caractères **et retire les catégories Cc et Cf**
@@ -169,10 +170,11 @@ Google Books — vérifie et corrige. », la couverture (demandée après `sourc
 **Dépendances de la route (F3).** `main` injecte déjà `{ repo, navigate, toast }` (I-H) : le lot **étend ce même
 objet** — `renderLivreAjoutRoute(params, query, ctx, { repo, navigate, toast, fetch = globalThis.fetch, enLigne = () =>
 navigator.onLine !== false, attendre = attenteReelle, cle = GOOGLE_BOOKS.key, tentativeMs, repriseMs } = {})`. Le routeur
-(`app.js:81`) passe trois arguments : les défauts sont la production. `fetch` sert aussi à la couverture
+(`src/app.js:108`, `route('/add/livre', renderLivreAjoutRoute)`) passe trois arguments : les défauts sont la production. `fetch` sert aussi à la couverture
 (`recupererCouvertureParIsbn(isbn, { fetch, signal })`). **Le bloc R-UX-13 ne stubbe plus `globalThis.fetch`** : il passe
 `fetch` par `deps` (F1/F3) ; les deux blocs de route qui stubbent `globalThis.fetch` pour **refuser** tout réseau
-(« aucun reseau attendu ici ») restent tels quels — ils prouvent l'absence d'appel.
+(« aucun reseau attendu ici ») restent tels quels — celui du livre (≈ 390-416) prouve l'absence d'appel ; celui de 671-706 est
+le signet, hors lot (D11).
 
 **Modèle** `livreAjoutModel(etat)` gagne : `validation` (motif § 4 ou `null`), `resultat` (`{ statut, motif, google }` ou
 `null`), `reprise` (booléen), `cleGoogle` (**paramètre**, défaut `false` ; la route le pose à `!!deps.cle` — F12),
@@ -191,7 +193,7 @@ navigator.onLine !== false, attendre = attenteReelle, cle = GOOGLE_BOOKS.key, te
    `reprise = false`, `resultat = null`, `suggestions = null` (§ 12), provenance et couverture remises à zéro (R-UX-13
    inchangé), redessin (le champ ISBN est **`disabled`** pendant la recherche — RF-m8 déjà sur `main`, S3). `AbortController` **extérieur** armé à `LIMITES_ISBN.totalMs` = **20 000 ms**, puis
    `lookupIsbn(isbn13, { fetch, signal, cle, attendre, tentativeMs, repriseMs, surReprise })` ; `surReprise` pose
-   `reprise = true` et redessine (F26 : ce redessin remplace le champ, qui est `readOnly` à ce moment — rien à perdre).
+   `reprise = true` et redessine (F26 : ce redessin remplace le champ, qui est `disabled` à ce moment — rien à perdre).
 4. **À la réponse, si `gen !== etat.generation` : rien n'est écrit** (I-G). Sinon : `trouve` → pas 2,
    `fusionnerFiche(etat.champs, fiche, { langueTouchee })` et `champsDistants` recalculés **comme sur `main`** (C2 : la
    langue reçue gagne tant que le menu n'a pas été touché — F5 est réglé là ; C3), provenance = source, suggestions de
@@ -297,10 +299,12 @@ R-UX-13 (≈ 631-775) **réécrit** — F1 ; `deps` injectées ; `attendre` fact
 pour les délais ; `withRepo` pour les écritures).
 
 **Tests existants qui passent au rouge, et c'est attendu (F11, lignes de `main dccafe4`).** `ajouter.js` ≈ 212
-(`LIMITES_ISBN` : trois clés de plus), 216-237 (réponses factices de forme legacy servies à `search.json` → `serveur` ;
-`signal: undefined` ; `eq` sur l'objet entier : `statut`/`motif`/`google`/`appels` neufs), ≈ 305 (texte « Aucune fiche
+(`LIMITES_ISBN` : trois clés de plus), **216-277** (réponses factices de forme legacy servies à `search.json` → `serveur` ;
+`signal: undefined` ; `eq` sur l'objet entier : `statut`/`motif`/`google`/`appels` neufs ; le bloc RF-m6 238-243 et le bloc
+S1 245-277 appellent `lookupIsbn('978', …)` → `TypeError` par la garde S9 : ils sont **réécrits** avec un vrai ISBN-13 et le
+statut `serveur`, jamais en affaiblissant la garde — D2), ≈ 305 (texte « Aucune fiche
 trouvée… » retiré), ≈ 313-315 (`fabriquerLivre` avec `9782761950001`, contrôle faux → `null` désormais), ≈ 342 (phrase
-« sources » sans clé), ≈ 403 et 413 (fixture `978-2-7619-5000-1` → rappel « non valide »), ≈ 952-1227 (bloc R-UX-13 :
+« sources » sans clé), ≈ 403 (fixture `978-2-7619-5000-1` → rappel « non valide » ; 413 reste vert : l'ISBN invalide est nettoyé puis borné, D3), ≈ 952-1227 (bloc R-UX-13 :
 ISBN de fixture à trois chiffres, stub sans `search.json`, cas Google sans clé), ≈ 1353-1355 et `sync-l3.js` ≈ 1864
 (pins), `tests/tests.js` ≈ 180 (total épinglé). La fixture `9782761950001` (contrôle faux) est remplacée par de vrais
 ISBN-13 (F22). Le test RF-m8 (≈ 344-347, champ `disabled` pendant la recherche) reste **vert tel quel**.
@@ -339,7 +343,7 @@ ISBN-13 (F22). Le test RF-m8 (≈ 344-347, champ `disabled` pendant la recherche
    main » **une seule fois** dans la page (F17) ; puis le stub passe à 200 et « Réessayer » → pas 2, provenance Open
    Library, `select[name=language]` = `en` pour `['eng']` (F5) ; après un `indisponible`, « Saisir à la main » → pas 2
    sans message, « ← Changer d’ISBN » → pas 1 sans message (F7) ; **Entrée** (`keydown`, `key: 'Enter'`) → l'appel part ;
-   **deux Entrée** (le second pendant la recherche) → **un** appel, et `input.readOnly` vrai pendant la recherche (S3/F9)
+   **deux Entrée** (le second pendant la recherche) → **un** appel, et `input.disabled` vrai **sur le nœud re-rendu** (le redessin remplace l'input : le test le re-requiert) — un `keydown` synthétique tire même sur un contrôle `disabled`, c'est la **garde `recherche`** qui prouve l'unicité (S3/F9, D1)
    ; Entrée avec `repeat: true` → aucun appel ; **réponse tardive** : A identifié, réponse retenue ; « Saisir à la main »
    ; la réponse de A arrive → pas 2 **vide**, aucune provenance, `generation` a bougé (I-G) ; **croisement** : A
    identifié (réponse retenue), « ← Changer d’ISBN », B identifié, réponse de A libérée puis celle de B → champs = B
@@ -362,6 +366,8 @@ public. Le chemin Google avec clé n'est mesuré **qu'au geste de Neegan** (§ 7
 
 ## 10. Risques et décisions ouvertes
 
+- **Langue de l'œuvre, pas de l'édition** (D6, § 12.6) : une édition anglaise d'une œuvre traduite sort « fr ». Mesure
+  bilingue à faire ; correction éventuelle (lire `/isbn/<isbn>.json` → `languages` de l'édition) = lot suivant.
 - **Qualité des champs de `search.json`** : données au niveau de l'**œuvre** (premier éditeur de la liste, première année
   de parution), pas de l'édition tenue en main. Accepté : la fiche est « à vérifier », et le legacy ne sert plus qu'en
   filet. Si le legacy disparaît, on perd ce filet sur les éditions fraîches — rien d'autre.
@@ -374,7 +380,7 @@ public. Le chemin Google avec clé n'est mesuré **qu'au geste de Neegan** (§ 7
   alors `introuvable` (search a répondu) avec `google 'echec'` — vrai. Choix assumé.
 - **Clé Google publique** : dos-d'âne (référent) + murs (projet dédié sans facturation, API seule, quota abaissé) ;
   l'abus coûte le repli Google, rien d'autre.
-- **Safari / iPhone** non mesurés (pas de WebKit ici) : `AbortController`, `keydown`, `navigator.onLine`, `readOnly` sont
+- **Safari / iPhone** non mesurés (pas de WebKit ici) : `AbortController`, `keydown`, `navigator.onLine`, `disabled` sont
   standard ; la preuve sur appareil reste un geste de Neegan, comme pour le lot UX.
 - **Quitter la route pendant une recherche** : la requête en vol n'est pas abandonnée (au plus `totalMs`), sa réponse
   est muette (génération). Nommé, pas construit (S4d).
@@ -419,7 +425,23 @@ public. Le chemin Google avec clé n'est mesuré **qu'au geste de Neegan** (§ 7
 | F26 `surReprise` redessine | Mineur | § 6 étape 3 : nommé |
 | F27 charge docs | Mineur | § 8 |
 
-Constats **non retenus** : aucun. Constat **hors lot** : S4d (abandon au départ de la route), § 2.
+| D1 `readOnly` résiduel vs `disabled` de main ; test Entrée sur nœud re-rendu | Important | § 6, § 9.6, § 10 corrigés ; la garde `recherche` prouve l'unicité |
+| D2 rouges 238-277 hors liste (RF-m6, S1) | Important | § 9 : réécrits avec un ISBN-13 et `serveur`, garde S9 intacte |
+| D3 ISBN invalide : nettoyé ou brut ? | Important | § 4 : nettoyé puis borné à 20 ; 413 reste vert |
+| D4 `fiche` sans `motsCles` en § 5 | Mineur | § 5 corrigé |
+| D5 collision `cle` | Mineur | § 13 : l'ancien `lookupIsbn` disparaît |
+| D6 langue : legacy sans `languages`, langue de l'œuvre | Mineur | § 12.6 et § 10 nommés ; mesure bilingue au plan |
+| D7 fixture du plafond 10 | Mineur | § 12.8.1 : fixture exacte, première forme gardée |
+| D8 suggestion cliquée vs C3 ; refus d'`ajouterPuce` | Mineur | § 12.2 : une suggestion cliquée est une saisie |
+| D9 trois noms | Mineur | `existantesMotsCles` partout |
+| D10 chaînes de `book.js` hors F13 | Mineur | § 12.4 : `CHAINES_NEUVES_AILLEURS` |
+| D11 repères 671-706 et `app.js:81` | Mineur | § 6, § 13 corrigés |
+| D12 commentaire F7 | Mineur | § 12.5 : réécrit, test F7 vert |
+| D13 rendu hostile des suggestions | Mineur | § 12.8.3 |
+| D14 fixture `['bbq']` | Mineur | § 12.8.4 : `'barbecuing'` |
+
+Constats **non retenus** : aucun. Constat **hors lot** : S4d (abandon au départ de la route), § 2 ; correction de la langue
+d'édition (D6) = lot suivant.
 
 ### 11.2 Ce que la construction a amendé
 
@@ -443,6 +465,9 @@ pris dans l'ordre : `search.json` → champ `subject` (**`fields` gagne `subject
 Books → `volumeInfo.categories`. **Ce ne sont que des propositions** : `fusionnerFiche` ne les touche pas, rien n'entre
 dans `tags` sans la tape de la personne (I-A/I-B). Elles appartiennent à l'ISBN qui les a produites : la route les pose
 dans `etat.suggestions = { source, valeurs }` sur `trouve`, et les vide à chaque `identifier`, `saisirMain`, `retourIsbn`.
+**Une suggestion cliquée est une saisie** (D8) : elle entre dans `tags` par `ajouterPuce` et n'est pas « distante » — C3
+(`oublierDistants`) ne la reprend pas à l'ISBN suivant, comme une cuisine. Un refus d'`ajouterPuce` (51ᵉ, > 60) laisse la
+suggestion cliquable et muette : c'est le comportement des puces (S10, « refus = même tableau »).
 
 **12.3 Modèle et rendu (`src/ui/puces.js`, partagé — aucun module neuf).**
 - `motsClesExistants(ctx)` : toutes les occurrences de `tags` des livres (la fréquence fait l'ordre, comme
@@ -457,7 +482,7 @@ dans `etat.suggestions = { source, valeurs }` sur `trouve`, et les vide à chaqu
   paramètre (« Autre mot-clé » pour les mots-clés) ; `placeholder` « Autre… » inchangé.
 
 **Pas 2 d'« Ajouter un livre »** : après « Cuisines », un bloc `.field` **« Mots-clés »** = `renderPuces(pucesModel({
-choisies: c.tags, existantes: existantsMotsCles, graine: [] }), …, { libelleAutre: t('Autre mot-clé') })` puis, s'il y a
+choisies: c.tags, existantes: model.existantesMotsCles, graine: [] }), …, { libelleAutre: t('Autre mot-clé') })` puis, s'il y a
 des suggestions, `renderSuggestions(...)`. Gestes de la route : `basculerMotCle`, `ajouterMotCle` (= `ajouterPuce` sur
 `etat.champs.tags`, redessin si le tableau change), les suggestions appellent `ajouterMotCle`. `livreAjoutModel` gagne
 `suggestions` (entrée, `{ source, valeurs } | null`) et le rend tel quel ; `existantesMotsCles` est posé par la route comme
@@ -467,36 +492,44 @@ des suggestions, `renderSuggestions(...)`. Gestes de la route : `basculerMotCle`
 `.field` « Mots-clés » (même IIFE : `pucesModel({ choisies: meta.tags, existantes: motsClesExistants(ctx), graine: [] })`,
 `libelleAutre: t('Autre mot-clé')`) ; `meta.tags = [...(book.tags || [])]` ; « Enregistrer » écrit `tags: [...meta.tags]`
 dans le `saveBatch` des `books` (relecture C4 inchangée ; `cover_sha256` et le reste survivent). Pas de suggestions
-distantes ici (les sujets reçus ne sont pas stockés — § 12.7).
+distantes ici (les sujets reçus ne sont pas stockés — § 12.7). `book.js` n'est pas dans `MODULES_NEUFS` : ses deux chaînes
+neuves (« Mots-clés », « Autre mot-clé ») s'ajoutent à `CHAINES_NEUVES_AILLEURS` (D10).
 
 **12.5 Recherche (`src/domain/search.js`, `buildDocs`).** Les mots-clés du livre comptent pour **toutes ses recettes** :
 `textParts` reçoit `...(book?.tags || [])` (→ `tokens`) ; et pour une recette `reference_only` (référence d'index ou signet
 rattaché à un livre), `titleTokens` reçoit aussi les `tags` du livre, comme les cuisines depuis F7 — une référence de
 « Berber and Q » remonte sur « bbq » même si son titre ne le dit pas. « Mes livres » filtre déjà sur `tags` (`hay`). Une
-recette sans édition ne reçoit rien.
+recette sans édition ne reçoit rien. Le commentaire F7 de `search.js` (« une référence d'index a `cuisines: []` — rien ne
+change pour elle ») est **réécrit** : avec les tags du livre, une référence d'index d'un livre tagué remonte désormais —
+c'est l'intention du brief (D12) ; le test F7 existant reste vert (`books: []`).
 
 **12.6 Langue.** Le brief propose `jscmd=details` ; **non retenu** : `search.json` (§ 5, déjà appelé) rend `language`
 (`['eng']` mesuré sur `9781785035289`), `details` est un point d'entrée legacy que la doc dit « moins stable », et ce serait
 une requête de plus contre la limite 1 req/s. La règle C2 (`langueTouchee`) de `main` fait le reste : menu « English »
-proposé, menu touché par la personne → inchangé.
+proposé, menu touché par la personne → inchangé. **Deux limites nommées (D6)** : le chemin legacy (`jscmd=data`, étape 2)
+n'a pas de `languages` → `language: null`, menu laissé à « Français » (chemin rare : index en retard) ; et `search.json`
+rend la langue de l'**œuvre** (union des éditions : `['eng','fre']` pour une édition anglaise d'une œuvre aussi traduite) →
+« français d'abord » → `fr`. Pas pire qu'aujourd'hui ; à mesurer au plan sur une édition bilingue si un tel ISBN est connu.
 
 **12.7 Hors lot (nommé).** Suggestions distantes dans la **fiche** livre (exigerait de stocker les sujets reçus) ·
 mots-clés des **recettes** (`recipe.tags` existe, autre écran) · traduction des mots-clés (S10 : valeurs libres, jamais
 `t()`) · Google `categories` mesurées **seulement** avec une clé (§ 7).
 
 **12.8 Ce que la suite doit prouver (rouge d'abord).**
-1. `lookupIsbn` : search avec `subject: ['Barbecuing', 'barbecuing', 12, 'x'.repeat(80), …12 entrées]` → `motsCles` =
-   10 chaînes, dédoublonnées par `normaliser`, la longue tronquée à 60 ; search sans `subject` → `[]` ; legacy
+1. `lookupIsbn` : search avec `subject: ['Barbecuing', 'barbecuing', 12, 'x'.repeat(80), 'a', 'b', 'c', 'd', 'e', 'f', 'g',
+   'h', 'i']` (1 doublon + 1 non-chaîne + 1 longue + 11 formes distinctes valides) → `motsCles` = **10** chaînes, la
+   **première forme** gardée (« Barbecuing », pas « barbecuing »), la longue tronquée à 60 (D7) ; search sans `subject` → `[]` ; legacy
    `subjects: [{ name: 'Grill' }, { nom: 'x' }]` → `['Grill']` ; Google `categories: ['Cooking / BBQ']` → idem ; `fields`
    de l'adresse search contient `subject`.
 2. `suggestionsModel` : exclut les choisies (`['BBQ']` choisi exclut `'bbq'`), 10 au plus, libellé par source, `null`
    quand vide ; `motsClesExistants({ books: [{ tags: ['a', 'b'] }, { tags: ['b'] }] })` → `['a', 'b', 'b']`.
 3. Rendu : pas 2 avec `suggestions` → `small` « Proposé par Open Library », boutons `.puce.suggestion` ; un clic →
    geste `ajouterMotCle('bbq')` ; `pucesModel({ graine: [] })` ne montre aucune cuisine de graine dans le bloc
-   « Mots-clés » ; `aria-label` « Autre mot-clé » ; sans suggestions, pas de bloc `.suggestions`.
-4. Route : `trouve` par search avec `subject` → suggestions affichées ; clic sur une suggestion → puce choisie,
-   suggestion disparue ; « ← Changer d'ISBN » → suggestions vides ; « Ajouter ce livre » → `books[0].tags` =
-   `['bbq']` (base jetable) ; rien dans `tags` sans clic.
+   « Mots-clés » ; `aria-label` « Autre mot-clé » ; sans suggestions, pas de bloc `.suggestions` ; une proposition `<img onerror>` reste du
+   texte dans `.puce.suggestion` (S14, D13 — seule surface neuve qui affiche une chaîne distante).
+4. Route : `trouve` par search avec `subject: ['Barbecuing', 'Charcoal']` → suggestions affichées ; clic sur « Barbecuing »
+   → puce choisie **`'barbecuing'`** (minuscules : `ajouterPuce`, D14), suggestion disparue ; « ← Changer d'ISBN » →
+   suggestions vides ; « Ajouter ce livre » → `books[0].tags = ['barbecuing']` (base jetable) ; rien dans `tags` sans clic.
 5. Fiche livre (`renderBook` sur base jetable) : bloc « Mots-clés » présent ; « Enregistrer » écrit `tags` et laisse
    `cover_sha256` intact.
 6. Recherche : `buildDocs` avec un livre `tags: ['bbq']`, son édition, une recette ordinaire « Agneau » et une référence
@@ -516,10 +549,10 @@ Ce que la vague finale du lot UX a déjà mis sur `main` et comment le lot s'y p
 | C4 relecture livre/édition avant écriture dans la fiche | conservé ; § 12.4 y ajoute `tags` |
 | S1 `lireBornee(r, maxOctets)` (flux coupé, `false` sans flux) | S7 : `tentative` l'utilise avec `LIMITES_ISBN.corps` |
 | C9 `signalDelai(ms)` (repli sans `AbortSignal.timeout`) | couverture inchangée ; les tentatives ont leur propre `AbortController` |
-| RF-m6 `encodeURIComponent(isbn)` dans les adresses | S9 : la garde `/^97[89]\d{10}$/` rend l'encodage inutile mais il reste (défense en profondeur) |
+| RF-m6 `encodeURIComponent(isbn)` dans les adresses (et une constante locale `cle` dans l'ancien `lookupIsbn`) | S9 : la garde `/^97[89]\d{10}$/` rend l'encodage inutile mais il reste (défense en profondeur) ; l'ancien `lookupIsbn` est **remplacé**, sa constante `cle` disparaît — l'option `cle` (clé Google) n'a plus d'homonyme (D5) |
 | RF-m8 champ ISBN `disabled` pendant la recherche | S3 : conservé (pas de `readOnly`) ; Entrée passe par la garde `recherche` de toute façon |
 | I-H `deps = { repo, navigate, toast }` | F3 : **étendu** (`fetch`, `enLigne`, `attendre`, `cle`, `tentativeMs`, `repriseMs`), mêmes noms pour les trois existants |
 | F4 `etatRoute()` sur le nœud (`passagesCouverture`, `couverturesAppliquees`) | conservé ; les tests du lot y lisent les faits plutôt que des délais quand c'est possible |
 | F2 total épinglé `eq(results.length, N)` dans `tests/tests.js` | mis à jour à chaque tâche (N = assertions avant lui) |
 | `VERSION = 'cuisine-os-v0.4.0-12'`, `APP_VERSION '0.4.0'`, pins ≈ `ajouter.js` 1353-1355 et `sync-l3.js` 1864 | `0.4.1-N`, `'0.4.1'`, pins mis à jour en tâche 1 |
-| Blocs de route qui stubbent `globalThis.fetch` pour **refuser** tout réseau (≈ 390-416, 671-706) | inchangés : ils prouvent l'absence d'appel (le défaut `fetch = globalThis.fetch` les sert) |
+| Bloc de route qui stubbe `globalThis.fetch` pour **refuser** tout réseau (≈ 390-416 ; 671-706 est celui du signet) | inchangé : il prouve l'absence d'appel (le défaut `fetch = globalThis.fetch` les sert) ; D11 |
