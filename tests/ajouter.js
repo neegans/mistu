@@ -227,6 +227,13 @@ export async function runAjouterTests({ eq, ok }) {
   eq(ISBN.validerIsbn(' 978-1-78503-528-9 '), { ok: true, isbn13: '9781785035289', isbn10: '1785035282' }, 'isbn : tirets et espaces nettoyés');
   eq(ISBN.validerIsbn(''), { ok: false, motif: 'vide' }, 'isbn : vide');
   eq(ISBN.validerIsbn('12345678X9'), { ok: false, motif: 'longueur' }, 'isbn : X hors dernière position');
+  // C3 (vague /verify) : une étiquette collée (« ISBN-13: … ») est retirée AVANT de garder les chiffres — sinon le 13 de
+  // l’étiquette devient le début de l’ISBN. Le 13 ou le 10 d’une étiquette n’est mangé que s’il n’est pas suivi d’un chiffre.
+  eq(ISBN.validerIsbn('ISBN-13: 9781785035289'), { ok: true, isbn13: '9781785035289', isbn10: '1785035282' }, 'isbn : « ISBN-13: … » collé est accepté (C3)');
+  eq(ISBN.validerIsbn('ISBN-10 : 080442957X'), { ok: true, isbn13: '9780804429573', isbn10: '080442957X' }, 'isbn : « ISBN-10 : … » collé est accepté (C3)');
+  eq(ISBN.nettoyerIsbn('ISBN 978-2-89077-281-6'), '9782890772816', 'isbn : « ISBN » suivi d’un espace est retiré (C3)');
+  eq(ISBN.nettoyerIsbn('isbn:0306406152'), '0306406152', 'isbn : l’étiquette est lue sans égard à la casse (C3)');
+  eq(ISBN.nettoyerIsbn('ISBN 1302345678'), '1302345678', 'isbn : le 13 d’un ISBN-10 qui commence par 13 n’est pas pris pour une étiquette (C3)');
   eq(ISBN.codeBarresVersIsbn([{ rawValue: '5901234123457' }, { rawValue: '9781785035289' }]), '9781785035289', 'isbn : le premier code au motif 978/979 est retenu');
   eq(ISBN.codeBarresVersIsbn([]), null, 'isbn : aucun code → null');
   eq(ISBN.codeBarresVersIsbn(null), null, 'isbn : entrée absente → null');
@@ -314,6 +321,30 @@ export async function runAjouterTests({ eq, ok }) {
     eq(r14.fiche, { title: 'Tx', author: '', publisher: '', year: null, language: null, motsCles: [] }, 'lookup : champs typés, Cc/Cf/U+2028 retirés, subject non tableau → [] (S6)');
     eq((await chercher(async () => reponse(200, { docs: [{ title: 'T', first_publish_year: '2018' }] }), { attendre: jamais })).fiche.year, 2018, 'lookup : une année reçue en chaîne reste une année');
     eq((await chercher(async () => reponse(200, { docs: [{ title: 'T'.repeat(400) }] }), { attendre: jamais })).fiche.title.length, 300, 'lookup : titre tronqué à 300 (S3)');
+    // S1 (vague /verify) : un objet au toString hostile (JSON reçu tel quel) ne fait jamais lever lookupIsbn ; une année
+    // est un entier de quatre chiffres ou se lit dans une chaîne, rien d’autre.
+    const sansException = async (f) => { try { const r = await f(); return [r.statut, r.fiche?.year ?? null]; } catch (e) { return ['exception', String(e?.message)]; } };
+    eq(await sansException(() => chercher(async () => reponse(200, { docs: [{ title: 'T', first_publish_year: { toString: 1 } }] }), { attendre: jamais })), ['trouve', null], 'lookup : first_publish_year au toString hostile → year null, aucune exception (S1)');
+    eq(await sansException(() => chercher(async (u) => (u === SEARCH ? reponse(200, { docs: [] }) : u === LEGACY ? reponse(200, { 'ISBN:9781785035289': { title: 'L', publish_date: { toString: 1 } } }) : reponse(404, '')), { attendre: jamais })), ['trouve', null], 'lookup : publish_date legacy au toString hostile → year null, aucune exception (S1)');
+    eq(await sansException(() => chercher(async () => reponse(200, { docs: [{ title: 'T', first_publish_year: 2018.5 }] }), { attendre: jamais })), ['trouve', null], 'lookup : une année non entière n’est pas une année (S1)');
+    eq(await sansException(() => chercher(async () => reponse(200, { docs: [{ title: 'T', first_publish_year: 2018 }] }), { attendre: jamais })), ['trouve', 2018], 'lookup : une année entière reste une année (S1)');
+    // V1 : le chemin de PRODUCTION — une vraie Response, corps en flux, lue par lireBornee puis Blob.text() (text() n’est
+    // jamais appelée) ; les accents multi-octets restent intacts.
+    const vraie = new Response(JSON.stringify({ docs: [{ title: 'Éé', subject: ['Cuisine'] }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    Object.defineProperty(vraie, 'text', { value: async () => { throw new Error('text() ne doit pas être appelée quand il y a un flux'); } });
+    const rV1 = await chercher(async () => vraie, { attendre: jamais });
+    eq([rV1.statut, rV1.fiche?.title, rV1.fiche?.motsCles], ['trouve', 'Éé', ['Cuisine']], 'lookup : une vraie Response est lue en flux, accents intacts (V1)');
+    // V2 : la borne de 256 Kio est EXACTE — un flux fini de 262 144 octets passe, 262 145 non ; un 429 porteur d’une fiche reste « limite ».
+    const fluxJson = (total) => {
+      const tete = '{"docs":[{"title":"', queue = '"}]}';
+      const octets = new TextEncoder().encode(tete + 'x'.repeat(total - tete.length - queue.length) + queue);
+      let i = 0;
+      return { taille: octets.length, ok: true, status: 200, headers: new Headers(), body: { getReader: () => ({ read: async () => { if (i >= octets.length) return { done: true, value: undefined }; const v = octets.slice(i, i + 65536); i += 65536; return { done: false, value: v }; }, cancel: async () => {} }) } };
+    };
+    const fTrop = fluxJson(262145), fJuste = fluxJson(262144);
+    eq([fTrop.taille, (await chercher(async () => fTrop, { attendre: jamais })).motif, fJuste.taille, (await chercher(async () => fJuste, { attendre: jamais })).statut], [262145, 'serveur', 262144, 'trouve'], 'lookup : 262 145 octets → serveur, 262 144 → trouvé (borne exacte, V2)');
+    const r429 = await chercher(async () => reponse(429, { docs: [{ title: 'T' }] }), { attendre: jamais });
+    eq([r429.statut, r429.motif, r429.fiche], ['indisponible', 'limite', null], 'lookup : un 429 porteur d’une fiche reste « limite », la fiche est ignorée (V2)');
     // Corps en flux > 256 Kio : coupé par cancel(), jamais gardé (S7, via lireBornee).
     let annule = false;
     const flux = () => ({ ok: true, status: 200, headers: new Headers(), body: { getReader: () => ({ read: async () => ({ done: false, value: new Uint8Array(100 * 1024) }), cancel: async () => { annule = true; } }) } });
@@ -334,7 +365,7 @@ export async function runAjouterTests({ eq, ok }) {
     const stubGoogle = (reponseGoogle, search = { docs: [] }) => async (u, o) => { urls3.push([u, o]); if (u === SEARCH) return reponse(200, search); if (u === LEGACY) return reponse(200, {}); return reponseGoogle(u, o); };
     urls3.length = 0;
     const g1 = await chercher(stubGoogle(async () => reponse(200, { items: [{ volumeInfo: { title: 'G', authors: ['X', 3], publisher: 'Q', publishedDate: '2001-02', language: 'fr', categories: ['Cooking / BBQ', 'cooking / bbq'] } }] })), { cle: 'k&x', attendre: jamais });
-    eq([g1.statut, g1.source, g1.appels, g1.fiche], ['trouve', 'googlebooks', 3, { title: 'G', author: 'X', publisher: 'Q', year: 2001, language: 'fr', motsCles: ['Cooking / BBQ'] }], 'lookup : avec clé, Google Books est le troisième appel, champs et catégories typés');
+    eq([g1.statut, g1.source, g1.appels, g1.google, g1.fiche], ['trouve', 'googlebooks', 3, 'trouve', { title: 'G', author: 'X', publisher: 'Q', year: 2001, language: 'fr', motsCles: ['Cooking / BBQ'] }], 'lookup : avec clé, Google Books est le troisième appel, champs et catégories typés');
     const [uG, oG] = urls3[2];
     eq(uG, 'https://www.googleapis.com/books/v1/volumes?q=isbn:9781785035289&maxResults=1&key=k%26x', 'lookup : adresse Google, clé encodée (S9)');
     eq([oG.referrerPolicy, urls3[0][1].referrerPolicy, urls3[1][1].referrerPolicy, oG.mode, oG.credentials, oG.cache, oG.signal instanceof AbortSignal], ['strict-origin', 'no-referrer', 'no-referrer', 'cors', 'omit', 'no-store', true], 'lookup : strict-origin pour Google seul (§ 7), no-referrer ailleurs');
@@ -342,6 +373,8 @@ export async function runAjouterTests({ eq, ok }) {
     eq([g2.statut, g2.google, g2.appels, g2.motif], ['introuvable', 'echec', 3, null], 'lookup : Google qui tombe après deux « rien » → introuvable, google = echec (S5)');
     const g3 = await chercher(stubGoogle(async () => reponse(200, { totalItems: 0 })), { cle: 'k', attendre: jamais });
     eq([g3.statut, g3.google], ['introuvable', 'rien'], 'lookup : Google « rien » (sans items) → google = rien');
+    eq(await sansException(() => chercher(stubGoogle(async () => reponse(200, { items: [{ volumeInfo: { title: 'G', publishedDate: { valueOf: 1 } } }] })), { cle: 'k', attendre: jamais })), ['trouve', null], 'lookup : publishedDate Google au valueOf hostile → year null (S1)');
+    eq(await sansException(() => chercher(stubGoogle(async () => reponse(200, { items: [{ volumeInfo: { title: 'G', publishedDate: { toString: 1 } } }] })), { cle: 'k', attendre: jamais })), ['trouve', null], 'lookup : publishedDate Google au toString hostile → year null, aucune exception (S1)');
     eq((await chercher(stubGoogle(async () => reponse(200, { items: [{ volumeInfo: { title: '' } }] })), { cle: 'k', attendre: jamais })).google, 'rien', 'lookup : un volume sans titre n’est pas une fiche');
     eq((await chercher(stubGoogle(async () => reponse(200, { items: [{ volumeInfo: { title: 'G', language: 'de' } }] })), { cle: 'k', attendre: jamais })).fiche.language, null, 'lookup : langue Google hors fr/en → null');
     urls3.length = 0;
@@ -388,7 +421,7 @@ export async function runAjouterTests({ eq, ok }) {
     eq(LA.livreAjoutModel({ pas: 1, recherche: true, reprise: true }).messages.recherche, 'Nouvel essai…', 'livre : la reprise est dite (S11)');
     eq(LA.livreAjoutModel({ pas: 2, champs: { title: 'X' }, enCours: true }).peutEnregistrer, false, 'livre : pendant l’enregistrement, on ne peut pas enregistrer une seconde fois (double clic)');
     eq([LA.livreAjoutModel({ pas: 1, validation: 'controle' }).messages.validation, LA.livreAjoutModel({ pas: 1, validation: 'longueur' }).messages.validation, LA.livreAjoutModel({ pas: 1, validation: 'pas_isbn' }).messages.validation, LA.livreAjoutModel({ pas: 1 }).messages.validation],
-      ['Cet ISBN n’est pas valide, vérifie les chiffres.', 'Cet ISBN n’est pas valide, vérifie les chiffres.', 'Ce code-barres n’est pas un ISBN.', null], 'livre : un ISBN refusé est dit sous le champ (§ 4)');
+      ['Cet ISBN n’est pas valide, vérifie les chiffres.', 'Cet ISBN n’est pas valide, vérifie les chiffres.', 'Ce numéro n’est pas un ISBN : il doit commencer par 978 ou 979.', null], 'livre : un ISBN refusé est dit sous le champ (§ 4)');
     const TEXTES = { delai: 'Open Library n’a pas répondu à temps.', reseau: 'Impossible de joindre Open Library. Vérifie ta connexion.', limite: 'Open Library reçoit trop de demandes en ce moment. Attends quelques secondes.', serveur: 'Open Library est en panne pour le moment.', horsligne: 'Tu es hors ligne.' };
     for (const [motif, texte] of Object.entries(TEXTES)) {
       const mi = LA.livreAjoutModel({ pas: 1, resultat: { statut: 'indisponible', motif } });
@@ -489,7 +522,7 @@ export async function runAjouterTests({ eq, ok }) {
     const gestes = { identifier: () => appels.push('identifier'), reessayer: () => appels.push('reessayer'), changerIsbn: () => {}, scanner: () => {}, saisirMain: () => {} };
     const p1 = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1, isbn: '' }), gestes);
     const champ = p1.querySelector('input[name="isbn"]');
-    eq([champ.getAttribute('maxlength'), champ.disabled], ['20', false], 'livre : champ borné à 20, ouvert hors recherche (S8)');
+    eq([champ.getAttribute('maxlength'), champ.disabled], ['32', false], 'livre : champ borné à 32 (un « ISBN-13: … » collé tient entier, C3), ouvert hors recherche (S8)');
     eq(champ.getAttribute('inputmode'), null, 'livre : pas de clavier numérique forcé — le X d’un ISBN-10 doit rester tapable sur iPhone (R-ISBN-7)');
     champ.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     champ.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', repeat: true, bubbles: true, cancelable: true }));
@@ -516,6 +549,7 @@ export async function runAjouterTests({ eq, ok }) {
     // § 12.3 : suggestions de mots-clés — propositions étiquetées, jamais posées sans geste.
     const P = await import('../src/ui/puces.js');
     eq(P.motsClesExistants({ books: [{ tags: ['a', 'b'] }, { tags: ['b'] }, {}], recipes: [{ tags: ['z'] }] }), ['a', 'b', 'b'], 'mots-clés : existants = toutes les occurrences des tags des LIVRES (la fréquence fait l’ordre)');
+    eq(P.motsClesExistants({ books: [{ tags: 'x' }, { tags: ['a', 3] }] }), ['a'], 'mots-clés : des tags qui ne sont pas un tableau de chaînes (archive, ligne reçue) ne font rien tomber (S2)');
     const s1 = P.suggestionsModel({ proposees: ['Barbecuing', 'BBQ', 'bbq', 'Charbon', '', 'Arabe'], source: 'openlibrary', choisies: ['BBQ'] });
     eq([s1.libelle, s1.puces.map((p) => p.valeur)], ['Proposé par Open Library', ['Barbecuing', 'Charbon', 'Arabe']], 'mots-clés : une suggestion déjà choisie (à la casse près) disparaît, les doublons aussi, le vide aussi');
     eq(P.suggestionsModel({ proposees: ['Bbq'], source: 'openlibrary', choisies: ['bbq'] }), null, 'mots-clés : plus rien à proposer → null, aucun bloc');
@@ -947,6 +981,15 @@ export async function runAjouterTests({ eq, ok }) {
     eq([par('c1').tokens.has('bbq'), par('c1').titleTokens.has('bbq'), par('c2').tokens.has('charbon'), par('c2').titleTokens.has('bbq'), par('c3').titleTokens.has('bbq'), par('c4').tokens.has('bbq')], [true, false, true, true, true, false], 'recherche : les tags du livre entrent dans les tokens de chaque recette, et dans les titleTokens des références seulement (§ 12.5)');
     const res = searchDocs(docsBbq, parseQuery('bbq'), { mode: 'all' });
     ok(res.references.some((x) => x.doc.recipe.id === 'c2') && res.references.some((x) => x.doc.recipe.id === 'c3'), 'recherche : une référence d’index et un signet d’un livre tagué « bbq » remontent sur « bbq »');
+    // S2 (vague /verify) : des tags qui ne sont pas un tableau (archive restaurée, ligne reçue) ne font pas tomber la recherche.
+    let docsS2 = null, erreurS2 = null;
+    try {
+      docsS2 = buildDocs({ recipes: [
+        { id: 's1', original_title: 'Un', edition_id: 'e1', availability: 'reference_only', printed_page: 3, cuisines: [] },
+        { id: 's2', original_title: 'Deux', edition_id: 'e2', availability: 'reference_only', printed_page: 4, cuisines: [] },
+      ], versions: [], editions: [{ id: 'e1', book_id: 'b1' }, { id: 'e2', book_id: 'b2' }], books: [{ id: 'b1', title: 'L1', tags: 1 }, { id: 'b2', title: 'L2', tags: ['bbq', 7] }], dishes: [], links: [], translations: [], history: [] });
+    } catch (e) { erreurS2 = String(e?.message); }
+    eq([erreurS2, docsS2?.find((d) => d.recipe.id === 's2')?.tokens.has('bbq') ?? null, docsS2?.find((d) => d.recipe.id === 's2')?.titleTokens.has('bbq') ?? null], [null, true, true], 'recherche : tags 1 et [\'bbq\', 7] → aucune exception, « bbq » compte (S2)');
   }
   // --- § 6 Images : en-têtes lus avant tout décodage, ré-encodage systématique (S4, S5, F11)
   const IM = await import('../src/core/image.js');
@@ -1019,20 +1062,23 @@ export async function runAjouterTests({ eq, ok }) {
   {
     const reponseBlob = (status, blob, ct = blob.type, longueur = blob.size) => ({ ok: status < 400, status, headers: new Headers({ 'content-type': ct, 'content-length': String(longueur) }), blob: async () => blob });
     const bonPng = png(400, 600);
-    ok((await LA.recupererCouvertureParIsbn('978', { fetch: async (u, o) => { eq(o.credentials, 'omit', 'couverture : options S12'); return reponseBlob(200, bonPng); } })) instanceof Blob, 'couverture : 200 image/png → blob');
-    eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => reponseBlob(404, new Blob([''], { type: 'image/jpeg' })) }), null, 'couverture : 404 → null');
-    eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => reponseBlob(200, new Blob(['<html>'], { type: 'text/html' })) }), null, 'couverture : type hors liste → null');
-    eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => reponseBlob(200, bonPng, 'image/png', 6 * 1024 * 1024) }), null, 'couverture : Content-Length 6 Mo → null AVANT de lire le corps');
-    eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => reponseBlob(200, png(20000, 20000)) }), null, 'couverture : 400 Mpx annoncés par l’en-tête → null, jamais décodé');
-    eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => { throw new Error('cors'); } }), null, 'couverture : rejet (CORS/réseau) → null, aucune exception');
-    eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => reponseBlob(200, png(400, 600), 'image/webp') }), null, 'couverture : le type ANNONCÉ doit être celui du conteneur réel, sinon null');
+    ok((await LA.recupererCouvertureParIsbn('9782761950001', { fetch: async (u, o) => { eq(o.credentials, 'omit', 'couverture : options S12'); return reponseBlob(200, bonPng); } })) instanceof Blob, 'couverture : 200 image/png → blob');
+    eq(await LA.recupererCouvertureParIsbn('9782761950001', { fetch: async () => reponseBlob(404, new Blob([''], { type: 'image/jpeg' })) }), null, 'couverture : 404 → null');
+    eq(await LA.recupererCouvertureParIsbn('9782761950001', { fetch: async () => reponseBlob(200, new Blob(['<html>'], { type: 'text/html' })) }), null, 'couverture : type hors liste → null');
+    eq(await LA.recupererCouvertureParIsbn('9782761950001', { fetch: async () => reponseBlob(200, bonPng, 'image/png', 6 * 1024 * 1024) }), null, 'couverture : Content-Length 6 Mo → null AVANT de lire le corps');
+    eq(await LA.recupererCouvertureParIsbn('9782761950001', { fetch: async () => reponseBlob(200, png(20000, 20000)) }), null, 'couverture : 400 Mpx annoncés par l’en-tête → null, jamais décodé');
+    eq(await LA.recupererCouvertureParIsbn('9782761950001', { fetch: async () => { throw new Error('cors'); } }), null, 'couverture : rejet (CORS/réseau) → null, aucune exception');
+    eq(await LA.recupererCouvertureParIsbn('9782761950001', { fetch: async () => reponseBlob(200, png(400, 600), 'image/webp') }), null, 'couverture : le type ANNONCÉ doit être celui du conteneur réel, sinon null');
     // « AVANT de lire le corps » est une affirmation : elle se mesure par un espion sur blob(), pas par le résultat.
     let lectures = 0;
     const espion = (longueur) => ({ ok: true, status: 200, headers: new Headers({ 'content-type': 'image/png', 'content-length': String(longueur) }), blob: async () => { lectures += 1; return bonPng; } });
-    await LA.recupererCouvertureParIsbn('978', { fetch: async () => espion(6 * 1024 * 1024) });
+    await LA.recupererCouvertureParIsbn('9782761950001', { fetch: async () => espion(6 * 1024 * 1024) });
     const apresRefus = lectures;
-    await LA.recupererCouvertureParIsbn('978', { fetch: async () => espion(bonPng.size) });
+    await LA.recupererCouvertureParIsbn('9782761950001', { fetch: async () => espion(bonPng.size) });
     eq([apresRefus, lectures], [0, 1], 'couverture : le corps d’une réponse trop lourde n’est JAMAIS lu, celui d’une réponse bornée l’est');
+    // S5 (vague /verify) : une entrée qui n’est pas un ISBN-13 ne part jamais sur le réseau.
+    let appelsS5 = 0;
+    eq([await LA.recupererCouvertureParIsbn('abc', { fetch: async () => { appelsS5 += 1; return reponseBlob(200, bonPng); } }), appelsS5], [null, 0], 'couverture : une entrée qui n’est pas un ISBN-13 → null, aucun appel (S5)');
   }
   {
     // R-UX-12 : Open Library n’envoie PAS de Content-Length (mesuré le 14 octobre, [200, image/jpeg], en-tête absent).
@@ -1049,12 +1095,12 @@ export async function runAjouterTests({ eq, ok }) {
       },
       cancel() { espion.annule = true; },
     });
-    eq(await LA.recupererCouvertureParIsbn('978', { fetch: async () => enFlux(sansFin) }), null, 'couverture : sans Content-Length, un corps au-delà de 5 Mo → null (R-UX-12)');
+    eq(await LA.recupererCouvertureParIsbn('9782761950001', { fetch: async () => enFlux(sansFin) }), null, 'couverture : sans Content-Length, un corps au-delà de 5 Mo → null (R-UX-12)');
     eq([espion.annule, espion.octetsEmis <= 7 * 1024 * 1024, espion.octetsEmis >= 5 * 1024 * 1024], [true, true, true], 'couverture : la lecture est ANNULÉE dès le dépassement — au plus 7 Mo tirés d’un corps sans fin, jamais les 64 (R-UX-12)');
     // Un vrai PNG découpé en trois morceaux : rassemblé tel quel, et ses dimensions restent lisibles dans l’en-tête.
     const octets = new Uint8Array(await png(400, 600).arrayBuffer());
     const tiers = new ReadableStream({ start(c) { c.enqueue(octets.slice(0, 10)); c.enqueue(octets.slice(10, 20)); c.enqueue(octets.slice(20)); c.close(); } });
-    const recu = await LA.recupererCouvertureParIsbn('978', { fetch: async () => enFlux(tiers) });
+    const recu = await LA.recupererCouvertureParIsbn('9782761950001', { fetch: async () => enFlux(tiers) });
     eq([recu instanceof Blob, recu?.size, recu?.type], [true, octets.length, 'image/png'], 'couverture : un corps en flux est rassemblé octet pour octet, type posé (R-UX-12)');
   }
   {
@@ -1448,7 +1494,7 @@ export async function runAjouterTests({ eq, ok }) {
       taper(rA, '9781785035280'); cliquer(rA, 'Identifier');
       eq([urls.length, rA.querySelector('[data-role="validation"]')?.textContent, rA.querySelector('input[name="isbn"]')?.value], [0, 'Cet ISBN n’est pas valide, vérifie les chiffres.', '9781785035280'], 'route : un ISBN faux est refusé sans appel, la saisie reste (§ 4)');
       taper(rA, '5901234123457'); entree(rA);
-      eq([urls.length, rA.querySelector('[data-role="validation"]')?.textContent], [0, 'Ce code-barres n’est pas un ISBN.'], 'route : un EAN qui n’est pas un livre est refusé sans appel');
+      eq([urls.length, rA.querySelector('[data-role="validation"]')?.textContent], [0, 'Ce numéro n’est pas un ISBN : il doit commencer par 978 ou 979.'], 'route : un EAN qui n’est pas un livre est refusé sans appel, le texte dit la règle (C2)');
       // 2. Hors ligne : aucun appel ; Réessayer force (S13) ; langue reçue (C2) ; suggestions posées (§ 12).
       const rB = await LA.renderLivreAjoutRoute({}, {}, {}, { ...deps, enLigne: () => false });
       taper(rB, '9781785035289'); cliquer(rB, 'Identifier');
@@ -1544,7 +1590,7 @@ export async function runAjouterTests({ eq, ok }) {
       eq([r2.querySelector('.status.info'), !!r2.querySelector('input[name="isbn"]')], [null, true], 'route : la réponse de A, arrivée pendant B, n’écrit rien et ne quitte pas le pas 1 (S3)');
       liberer(B);
       await attendre(() => r2.querySelector('.status.info'), 'B remplie');
-      eq([titreDe(r2).value, rappel(r2), urls.filter((u) => u.startsWith('https://covers.openlibrary.org/')).length, [...r2.querySelectorAll('button.puce.suggestion')].map((b) => b.textContent)], [`Livre ${B}`, `ISBN ${B}`, 1, ['Barbecuing', 'Charcoal']], 'route : les champs et suggestions sont ceux de B seulement ; une seule couverture demandée (S3, § 5, § 12)');
+      eq([titreDe(r2).value, rappel(r2), urls.some((u) => u.includes('/b/isbn/' + B + '-L')) && !urls.some((u) => u.includes('/b/isbn/' + A)), [...r2.querySelectorAll('button.puce.suggestion')].map((b) => b.textContent)], [`Livre ${B}`, `ISBN ${B}`, true, ['Barbecuing', 'Charcoal']], 'route : les champs et suggestions sont ceux de B seulement ; la couverture demandée est celle de B, jamais celle de A (S3, § 5, § 12, V3)');
       // 3. Une suggestion cliquée devient un mot-clé choisi ; « Ajouter ce livre » écrit isbn13 et tags (F15, § 12).
       r2.querySelector('button.puce.suggestion').click();
       eq([r2.etatRoute().champs.tags, [...r2.querySelectorAll('button.puce.suggestion')].map((b) => b.textContent)], [['barbecuing'], ['Charcoal']], 'route : la suggestion cliquée devient une puce choisie (minuscules, comme ajouterPuce) et quitte les suggestions');
@@ -1599,6 +1645,32 @@ export async function runAjouterTests({ eq, ok }) {
       eq([urls7.filter((u) => u.includes('/search.json')).map((u) => new URL(u).searchParams.get('isbn')), signaux.get(B).aborted, rX.etatRoute().recherche], [[A, B], false, true], 'route : après l’abandon, une seule recherche B part, aucune reprise de A (R-ISBN-8)');
       cliquer(rX, 'Saisir à la main'); // libère B : rien ne reste en vol après le test
       await attendre(() => rX.etatRoute().reponsesRecues === 2, 'réponse abandonnée de B');
+      // 8. C1 (vague /verify) : « ← Changer d’ISBN » garde les champs (F23) ; « Saisir à la main » sous un AUTRE ISBN (ou un
+      // ISBN invalide) ne doit pas montrer les champs reçus pour le premier, ni sans étiquette ni avec. Même ISBN : les
+      // champs sont encore ceux d’Open Library, l’étiquette reste.
+      const fetch8 = async (u) => { const s = String(u); if (s.startsWith('https://openlibrary.org/search.json')) { const isbn = new URL(s).searchParams.get('isbn'); return reponseJson({ docs: [{ title: `Livre ${isbn}`, author_name: [`Auteur ${isbn}`] }] }); } return r404; };
+      const d8 = { ...deps, fetch: fetch8 };
+      const auteurDe = (root) => [...root.querySelectorAll('input[type="text"]')].filter((i) => i.name !== 'isbn')[1];
+      const trouverA = async (root, quoi) => { taper(root, A); cliquer(root, 'Identifier'); await attendre(() => root.querySelector('.status.info'), quoi); };
+      const r8a = await LA.renderLivreAjoutRoute({}, {}, {}, d8);
+      await trouverA(r8a, 'A trouvé (8a)');
+      cliquer(r8a, '← Changer d’ISBN'); taper(r8a, B); cliquer(r8a, 'Saisir à la main');
+      eq([titreDe(r8a).value, auteurDe(r8a).value, r8a.querySelector('.status.info'), rappel(r8a)], ['', '', null, `ISBN ${B}`], 'route : A trouvé → « ← Changer d’ISBN » → B → « Saisir à la main » : rien de A sous l’ISBN B (C1)');
+      const r8i = await LA.renderLivreAjoutRoute({}, {}, {}, d8);
+      await trouverA(r8i, 'A trouvé (8i)');
+      cliquer(r8i, '← Changer d’ISBN'); taper(r8i, '12345'); cliquer(r8i, 'Saisir à la main');
+      eq([titreDe(r8i).value, r8i.querySelector('.status.info'), rappel(r8i)], ['', null, 'ISBN 12345 — non valide, ne sera pas enregistré'], 'route : … et sous un ISBN invalide non plus (C1)');
+      const r8b = await LA.renderLivreAjoutRoute({}, {}, {}, d8);
+      await trouverA(r8b, 'A trouvé (8b)');
+      cliquer(r8b, '← Changer d’ISBN'); cliquer(r8b, 'Saisir à la main');
+      eq([titreDe(r8b).value, auteurDe(r8b).value, r8b.querySelector('.status.info')?.textContent ?? null, rappel(r8b)], [`Livre ${A}`, `Auteur ${A}`, 'Renseigné par Open Library — vérifie et corrige.', `ISBN ${A}`], 'route : même ISBN → les champs reçus restent, ET leur étiquette (C1)');
+      const r8c = await LA.renderLivreAjoutRoute({}, {}, {}, d8);
+      await trouverA(r8c, 'A trouvé (8c)');
+      cliquer(r8c, '← Changer d’ISBN'); taper(r8c, B); cliquer(r8c, 'Saisir à la main');
+      titreDe(r8c).value = 'Mon titre'; titreDe(r8c).dispatchEvent(new Event('input', { bubbles: true }));
+      cliquer(r8c, '← Changer d’ISBN'); taper(r8c, A); cliquer(r8c, 'Identifier');
+      await attendre(() => r8c.etatRoute().reponsesRecues === 2 && r8c.querySelector('.status.info'), 'A retrouvé (8c)');
+      eq([titreDe(r8c).value, auteurDe(r8c).value], ['Mon titre', `Auteur ${A}`], 'route : un titre tapé à la main survit à la réidentification de A ; le champ vide est rempli (C1, C3)');
     });
   }
   // --- § 6 Couverture : ce que la fiche livre et Mes livres MONTRENT, sur une base jetable

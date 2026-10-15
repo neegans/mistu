@@ -92,7 +92,9 @@ traité comme un ISBN tapé faux (message § 6), pas comme « aucun ISBN lu ». 
 une suite libre de chiffres (elle finirait dans la colonne générée `isbn` et son index btree, `0001_tables_et_regles.sql`
 99-103). `saisirMain` **normalise** l'ISBN en `isbn13` quand il est valide (affiché = enregistré) ; invalide et non vide,
 il est **nettoyé par `nettoyerIsbn` puis borné à 20 caractères** (D3) pour l'affichage du pas 2 seulement (« ISBN 12345 — non valide, ne sera pas
-enregistré »). Le champ ISBN porte `maxlength="20"`. Les éditions existantes à dix chiffres ne bougent pas.
+enregistré »). Le champ ISBN porte `maxlength="32"` (vague /verify, C3 : un « ISBN-13: 978-… » collé tient entier ; ce qui
+est gardé reste borné à 20) ; `nettoyerIsbn` retire d'abord une étiquette « ISBN », « ISBN-10 », « ISBN-13 » suivie ou non
+de deux-points. Les éditions existantes à dix chiffres ne bougent pas.
 
 ## 5. `lookupIsbn` — trois issues, trois sources au plus
 
@@ -107,7 +109,8 @@ sinon `TypeError` **avant tout appel** — l'erreur est celle d'un appelant, pas
   provenance affichée et la couverture ne distinguent pas l'API) ;
 - `motif` : `null` sauf `indisponible` → `'delai' | 'reseau' | 'limite' | 'serveur'` (le motif `'horsligne'` est posé par
   la route, § 6, sans appel) ;
-- `google ∈ { 'non_appele', 'rien', 'echec' }` (S5 : le message d'« introuvable » ne nomme que ce qui a répondu) ;
+- `google ∈ { 'non_appele', 'rien', 'echec', 'trouve' }` (S5 : le message d'« introuvable » ne nomme que ce qui a
+  répondu ; `'trouve'` quand la fiche vient de Google Books — vague /verify, C4) ;
 - `fiche` : `{ title, author, publisher, year, language, motsCles }` (`motsCles` : § 12.2, `[]` quand rien), `null` sinon — les
   `eq` d'objets entiers de § 9 incluent `motsCles` (D4) ;
 - `appels` : nombre de `fetch` faits (preuve des reprises et des sources non appelées).
@@ -213,7 +216,7 @@ e.isComposing`** (S3) ; pas de `<form>` (un `submit` natif ferait naviguer le `#
 | Quand | Texte |
 |---|---|
 | `validation = longueur` ou `controle` | « Cet ISBN n’est pas valide, vérifie les chiffres. » |
-| `validation = pas_isbn` | « Ce code-barres n’est pas un ISBN. » |
+| `validation = pas_isbn` | « Ce numéro n’est pas un ISBN : il doit commencer par 978 ou 979. » (vague /verify, C2 : seul le clavier produit ce motif) |
 | `indisponible / delai` | « Open Library n’a pas répondu à temps. » |
 | `indisponible / reseau` | « Impossible de joindre Open Library. Vérifie ta connexion. » |
 | `indisponible / limite` | « Open Library reçoit trop de demandes en ce moment. Attends quelques secondes. » |
@@ -228,7 +231,7 @@ e.isComposing`** (S3) ; pas de `<form>` (un `submit` natif ferait naviguer le `#
 | rappel au pas 2, ISBN invalide | « ISBN {i} — non valide, ne sera pas enregistré » |
 | bouton | « Réessayer » |
 
-Mise en page du pas 1 : première ligne et champ inchangés (`maxlength="20"`, `disabled` pendant la recherche — RF-m8) ;
+Mise en page du pas 1 : première ligne et champ inchangés (`maxlength="32"` depuis la vague /verify, `disabled` pendant la recherche — RF-m8) ;
 `messages.validation` sous le champ (`.muted`, pas de carte rouge) ; la rangée de boutons inchangée (« Scanner le
 code-barres », « Identifier », « Saisir à la main ») ; **sous la rangée**, quand `resultat` est `indisponible` et que la
 recherche est finie : le message, puis **un seul** bouton `.btn.primary` **« Réessayer »** (`data-role="reessayer"`) —
@@ -466,6 +469,9 @@ Registre complet : `.superpowers/sdd/2026-10-14-identifier-un-livre-fiable/progr
 | R-ISBN-8 (vague finale) | `nouvelleGeneration()` abandonne l'`AbortController` de l'identification en vol (`etat.ctl`) : réponse muette **et** réseau libéré ; le `finally` d'`identifier` ne remet `etat.ctl` à `null` que pour sa propre génération. S4d (quitter la route) reste hors lot. Le lecteur de code-barres ne détourne plus une recherche en vol (garde `recherche`, I-G). |
 | R-ISBN-9 (**parqué, lot suivant**) | Sur la fiche livre, `book.js` « Enregistrer » écrit l'ISBN tapé sans validation ni borne — contourne S8. Chemin préexistant, hors spec ; à traiter avec un message « non valide » et un test propre. |
 | R-ISBN-10 (vague finale) | Étiquettes d'Open Library **sans** deux-points (« Accessible book »…) : non vues sur les 6 livres mesurés → pas de liste noire ; le filtre `[:=]` suffit pour l'instant. |
+| R-ISBN-11 (**parqué**) | `motsClesDe` coupe à 60 points de code, `ajouterPuce` refuse au-delà de 60 unités UTF-16 : une suggestion de plus de 60 caractères avec un caractère hors plan de base s'affiche mais un tap ne fait rien. Rare ; correctif d'une ligne au lot suivant. |
+| R-ISBN-12 (vague /verify) | Trois lentilles adverses, une vague : **C1** « Saisir à la main » après « ← Changer d’ISBN » sous un AUTRE ISBN (ou un invalide) rend les champs reçus pour le premier (`oublierDistants`, provenance `null`) ; sous le MÊME ISBN, champs ET étiquette restent (`isbnDistant`/`sourceDistante` mémorisés à la fusion) · **S1** `annee()` ne passe plus une valeur reçue à `String()` (un `{"toString":1}` levait) ; un nombre doit être un entier de quatre chiffres ; `identifier` a un `catch` filet (indisponible / serveur + `logError`) · **S2** `tagsDe` (dans `src/domain/search.js`, pur) : un `tags` non tableau ne fait plus tomber la recherche, ni `motsClesExistants`, ni la fiche livre · **C3** étiquette « ISBN-13: » retirée avant le nettoyage (le 10/13 n'est une étiquette que s'il n'est pas suivi d'un chiffre), `maxlength` 32 · **C5** le lecteur de code-barres relit génération, pas et recherche après `detect` · **S5** `recupererCouvertureParIsbn` sans ISBN-13 → `null` sans appel · **V1** vraie `Response` en flux · **V2** borne exacte 262 144 / 262 145 octets, 429 porteur d'une fiche · **V3** couverture comptée par ISBN. Parqués (lot suivant) : S3 (couverture non abandonnée au changement de génération), S4 (mot-clé tapé non nettoyé Cc/Cf), C6 (redessin à l'arrivée de la couverture perd une saisie en cours), C7 (`refTerms` reprend les mots d'une exclusion), V4-V9, R-ISBN-11. |
+| R-ISBN-13 (vague /verify) | Texte `pas_isbn` : « Ce numéro n’est pas un ISBN : il doit commencer par 978 ou 979. » (le lecteur filtre déjà 978/979 : « Ce code-barres… » n'était jamais vu) ; `google: 'trouve'` quand Google Books donne la fiche (§ 5). |
 
 ## 12. Mots-clés du livre (ajouté au lot le 14 octobre au soir)
 

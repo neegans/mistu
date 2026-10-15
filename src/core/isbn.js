@@ -1,6 +1,10 @@
 // ISBN : nettoyage, validation par chiffre de contrôle, conversion 10 ↔ 13, filtre d'un code-barres lu
 // (spec « Identifier un livre, fiable » § 4). Module PUR : aucune dépendance, aucun DOM, aucune chaîne t().
-export const nettoyerIsbn = (s) => String(s || '').replace(/[^0-9Xx]/g, '').toUpperCase();
+// C3 (vague /verify) : une étiquette collée (« ISBN », « ISBN-13: », « isbn 10 : ») est retirée AVANT de garder les
+// chiffres — sinon le 13 de l'étiquette devient le début de l'ISBN. Le 10/13 n'est pris pour une étiquette que s'il
+// n'est pas suivi d'un chiffre (« ISBN 1302345678 » est un ISBN-10 qui commence par 13).
+const ETIQUETTE = /^\s*ISBN(?:[-\s]?1[03](?!\d))?\s*:?\s*/i;
+export const nettoyerIsbn = (s) => String(s || '').replace(ETIQUETTE, '').replace(/[^0-9Xx]/g, '').toUpperCase();
 
 // ISBN-10 : somme pondérée 10→1 ≡ 0 (mod 11), X = 10 en dernière position.
 const controle10Ok = (s) => { let t = 0; for (let i = 0; i < 10; i += 1) t += (10 - i) * (s[i] === 'X' ? 10 : Number(s[i])); return t % 11 === 0; };

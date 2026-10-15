@@ -321,10 +321,14 @@ ci-dessus.
 src/core/isbn.js         nettoyerIsbn, validerIsbn (ISBN-10/13, chiffre de contrôle, préfixe 978/979 → isbn13 +
                          isbn10, ou un motif : vide, longueur, controle, pas_isbn), codeBarresVersIsbn : module
                          pur, appelé AVANT tout réseau (un ISBN mal tapé est refusé tout de suite, zéro requête).
+                         Vague /verify (C3) : une étiquette collée (« ISBN-13: … ») est retirée avant le nettoyage.
 src/domain/search.js     buildDocs : les `tags` d'un livre (ses mots-clés) entrent dans les `tokens` de TOUTES ses
                          recettes, et dans les `titleTokens` de ses références (`reference_only` : index, signet
                          rattaché) — une référence de « Berber and Q » remonte sur « bbq » même si son titre ne le
-                         dit pas. Une recette sans édition ne reçoit rien.
+                         dit pas. Une recette sans édition ne reçoit rien. Vague /verify (S2) : `tagsDe` (pur,
+                         exporté ici) rend les `tags` d'un livre en tableau de chaînes — un `tags` d'archive ou de
+                         ligne reçue qui n'en est pas un ne fait plus tomber la recherche ; puces.js et book.js
+                         l'importent d'ici (aucune dépendance domaine → ui, aucun module neuf).
 src/ui/book.js           fiche livre : bloc « Mots-clés » à côté de « Cuisines » ; « Enregistrer » écrit `tags`
                          (relecture C4 inchangée, `cover_sha256` intact). Pas de suggestions distantes ici.
 ```

@@ -28,7 +28,14 @@ export { nettoyerIsbn };
 // jsonb refuse (quarantaine de synchro).
 const borner = (s) => (typeof s === 'string' ? Array.from(s.replace(/[\p{Cc}\p{Cf}\u{2028}\u{2029}]/gu, '')).slice(0, LIMITES_ISBN.champ).join('') : '');
 const chaines = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
-const annee = (s) => { const m = String(s ?? '').match(/\b(\d{4})\b/); return m ? parseInt(m[1], 10) : null; };
+// S1 (vague /verify) : jamais String() sur une valeur reçue — un objet au toString hostile ({"toString":1}) lève
+// « Cannot convert object to primitive value ». Un nombre doit être un entier de quatre chiffres ; une chaîne est lue.
+const annee = (s) => {
+  if (typeof s === 'number') return Number.isInteger(s) && s >= 1000 && s <= 9999 ? s : null;
+  if (typeof s !== 'string') return null;
+  const m = s.match(/\b(\d{4})\b/);
+  return m ? parseInt(m[1], 10) : null;
+};
 const langueDe = (liste) => (!Array.isArray(liste) ? null : liste.includes('fre') ? 'fr' : liste.includes('eng') ? 'en' : null);
 const ficheOk = (f) => (f && f.title ? f : null);
 // § 12.2 : des PROPOSITIONS de mots-clés — 10 au plus, tronquées à la borne des puces, dédoublonnées par normaliser.
@@ -179,7 +186,7 @@ export async function lookupIsbn(isbn13, { fetch = globalThis.fetch, signal, cle
   if (signal?.aborted) return { ...bilan, statut: 'introuvable', google: 'echec' };
   const r3 = await appel(URL_GOOGLE(isbn13, cle), OPTIONS_GOOGLE);
   const lu3 = r3.ok ? lireGoogle(r3.json) : null;
-  if (lu3?.fiche) return trouve(lu3.fiche, 'googlebooks');
+  if (lu3?.fiche) return { ...trouve(lu3.fiche, 'googlebooks'), google: 'trouve' }; // C4 : Google a donné la fiche
   return { ...bilan, statut: 'introuvable', google: lu3?.repondu ? 'rien' : 'echec' };
 }
 
@@ -216,6 +223,7 @@ async function corpsBorne(r, type) {
 // RÉELLE pendant la lecture, puis les dimensions lues dans l'en-tête — createImageBitmap n'est atteint qu'après,
 // dans poserCouverture.
 export async function recupererCouvertureParIsbn(isbn, { fetch = globalThis.fetch, signal } = {}) {
+  if (!/^97[89]\d{10}$/.test(String(isbn))) return null; // S5 : comme lookupIsbn (S9), rien ne part sans un ISBN-13
   try {
     const r = await fetch(URL_COUVERTURE_OL(isbn), { ...OPTIONS_FETCH, signal });
     if (!r.ok) return null;
@@ -284,7 +292,7 @@ export function livreAjoutModel({ pas = 1, isbn = '', champs = {}, provenance = 
       : t('Aucune fiche chez Open Library pour cet ISBN. Complète à la main.')) : null;
   // Tables fermées, lues par hasOwn : un motif inconnu (ou hostile, « __proto__ ») retombe sur un texte sûr (S12).
   const INDISPONIBLE = { delai: t('Open Library n’a pas répondu à temps.'), reseau: t('Impossible de joindre Open Library. Vérifie ta connexion.'), limite: t('Open Library reçoit trop de demandes en ce moment. Attends quelques secondes.'), serveur: t('Open Library est en panne pour le moment.'), horsligne: t('Tu es hors ligne.') };
-  const VALIDATION = { longueur: t('Cet ISBN n’est pas valide, vérifie les chiffres.'), controle: t('Cet ISBN n’est pas valide, vérifie les chiffres.'), pas_isbn: t('Ce code-barres n’est pas un ISBN.') };
+  const VALIDATION = { longueur: t('Cet ISBN n’est pas valide, vérifie les chiffres.'), controle: t('Cet ISBN n’est pas valide, vérifie les chiffres.'), pas_isbn: t('Ce numéro n’est pas un ISBN : il doit commencer par 978 ou 979.') }; // C2 : seul le clavier produit ce motif
   const lire = (table, cle, repli) => (typeof cle === 'string' && Object.hasOwn(table, cle) ? table[cle] : repli);
   const isbnValide = !isbn || validerIsbn(isbn).ok;
   const indisponible = resultat?.statut === 'indisponible' && !recherche;
@@ -327,7 +335,8 @@ export function renderLivreAjout(model, gestes = {}) {
       // RF-m8 : pendant « Recherche… », le champ est fermé comme les boutons — taper un autre ISBN dans un champ
       // actif pendant qu'un appel est en vol ferait croire que la réponse qui arrive est celle du nouvel ISBN.
       // R-ISBN-7 : pas d'inputmode numérique — un ISBN-10 sur onze finit par X, introuvable sur le pavé de l'iPhone.
-      field(t('ISBN'), el('input', { type: 'text', name: 'isbn', maxlength: '20', placeholder: '978…', value: model.isbn, disabled: !!model.recherche, onInput: (e) => g('changerIsbn')(e.target.value), onKeydown: surTouche })),
+      // C3 : maxlength 32 laisse tenir un « ISBN-13: 978-… » collé ; ce qui est GARDÉ reste borné (validerIsbn, saisirMain : 20).
+      field(t('ISBN'), el('input', { type: 'text', name: 'isbn', maxlength: '32', placeholder: '978…', value: model.isbn, disabled: !!model.recherche, onInput: (e) => g('changerIsbn')(e.target.value), onKeydown: surTouche })),
       model.messages.validation ? el('small', { class: 'muted', dataset: { role: 'validation' } }, model.messages.validation) : null,
       el('div', { class: 'row' },
         el('button', { type: 'button', class: 'btn primary', disabled: !model.lecteurDisponible || model.recherche, onClick: g('scanner') }, t('Scanner le code-barres')),
@@ -385,7 +394,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
   // `touchee` (R-UX-13) : la personne a agi sur la couverture (choisi une image, ou retiré). Une réponse distante
   // tardive ne défait jamais un geste — même si l'ISBN, lui, n'a pas changé.
   const COUVERTURE_VIDE = () => ({ sha256: null, apercu: null, message: null, enCours: false, touchee: false });
-  const etat = { pas: 1, isbn: '', champs: CHAMPS_VIDES(), champsDistants: null, langueTouchee: false, provenance: null, recherche: false, enCours: false, lecteurDisponible: 'BarcodeDetector' in window, existantes: cuisinesExistantes(ctx), couverture: COUVERTURE_VIDE(), generation: 0, passagesCouverture: 0, couverturesAppliquees: 0, reprise: false, validation: null, resultat: null, suggestions: null, existantesMotsCles: motsClesExistants(ctx), reponsesRecues: 0, ctl: null };
+  const etat = { pas: 1, isbn: '', champs: CHAMPS_VIDES(), champsDistants: null, isbnDistant: null, sourceDistante: null, langueTouchee: false, provenance: null, recherche: false, enCours: false, lecteurDisponible: 'BarcodeDetector' in window, existantes: cuisinesExistantes(ctx), couverture: COUVERTURE_VIDE(), generation: 0, passagesCouverture: 0, couverturesAppliquees: 0, reprise: false, validation: null, resultat: null, suggestions: null, existantesMotsCles: motsClesExistants(ctx), reponsesRecues: 0, ctl: null };
   const root = el('div', null, pageHeader(t('Ajouter un livre'), { back: { href: '/add', label: t('Ajouter') } }));
   const zone = el('div', null);
   root.append(zone);
@@ -402,7 +411,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
   // à elle. Ce qu'elle a corrigé reste (c'est sa saisie). `retourIsbn` ne vide rien (F23).
   const oublierDistants = () => {
     const d = etat.champsDistants;
-    etat.champsDistants = null;
+    etat.champsDistants = null; etat.isbnDistant = null; etat.sourceDistante = null;
     if (!d) return;
     const vides = CHAMPS_VIDES();
     for (const k of CHAMPS_DISTANTS) {
@@ -455,6 +464,8 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
         // la sienne.
         const reprises = CHAMPS_DISTANTS.filter((k) => String(avantFusion[k] ?? '') !== String(etat.champs[k] ?? ''));
         etat.champsDistants = reprises.length ? Object.fromEntries(reprises.map((k) => [k, etat.champs[k]])) : null;
+        // C1 (vague /verify) : l'ISBN et la source de ces champs, pour que « Saisir à la main » sache s'ils lui appartiennent encore.
+        etat.isbnDistant = etat.champsDistants ? v.isbn13 : null; etat.sourceDistante = etat.champsDistants ? res.source : null;
         etat.provenance = res.source; etat.pas = 2;
         etat.suggestions = res.fiche.motsCles?.length ? { source: res.source, valeurs: res.fiche.motsCles } : null; // § 12.2 : propositions, jamais posées
         const isbn = v.isbn13;
@@ -487,6 +498,9 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
         }
       } else if (res.statut === 'introuvable') { etat.provenance = 'aucune'; etat.resultat = res; etat.pas = 2; }
       else { etat.resultat = res; } // indisponible : on reste au pas 1, ISBN conservé, Réessayer offert
+    } catch (e) {
+      // S1 (vague /verify) : filet — lookupIsbn ne doit jamais lever, mais si elle le fait l'écran ne reste pas muet.
+      if (etat.generation === generation) { etat.resultat = { statut: 'indisponible', motif: 'serveur', google: 'non_appele' }; logError('livre.identifier', { error: e }); }
     } finally {
       clearTimeout(chrono);
       // Une génération plus récente a sa propre recherche : seule la génération courante la libère et redessine.
@@ -516,24 +530,33 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     identifier: () => identifier(),
     reessayer: () => identifier({ forcer: true }),
     scanner: async () => {
+      // C5 (vague /verify) : la photo et la lecture prennent du temps ; un geste pendant ce temps (« Saisir à la main »,
+      // « ← Changer d'ISBN », une identification tapée) l'emporte sur le code lu après coup (I-G).
+      const gen = etat.generation, pas = etat.pas;
       const files = await pickFiles({ accept: 'image/*', multiple: false, capture: 'environment' });
       if (!files.length) return;
       try {
         const detector = new window.BarcodeDetector({ formats: ['ean_13'] });
         const bmp = await createImageBitmap(files[0]);
         const code = codeBarresVersIsbn(await detector.detect(bmp));
+        if (etat.generation !== gen || etat.pas !== pas || etat.recherche) return; // I-G : génération, pas et recherche relus après detect
         if (!code) { dire(t('Aucun ISBN lu sur cette photo.')); return; }
-        if (etat.recherche) return; // I-G : une recherche en vol n'est pas détournée par un code lu après coup
         etat.isbn = code; await identifier();
       } catch { dire(t('Lecture du code-barres impossible.')); }
     },
     // R-UX-13 : une fiche saisie à la main n'a JAMAIS de couverture reçue — `touchee` ferme la porte à une réponse
     // encore en vol pour cet ISBN (le pas 1 ne montre pas la zone : elle s'y reposerait sans que personne le voie).
+    // C1 (vague /verify) : « ← Changer d'ISBN » garde les champs reçus (F23). S'ils ont été reçus pour CET ISBN, ils sont
+    // encore ceux d'Open Library / Google Books : les champs ET leur étiquette restent. Sous un autre ISBN (ou un ISBN
+    // invalide), ils appartiennent à un autre livre : oublierDistants() rend ce qui n'a pas été touché, et rien n'est étiqueté.
     saisirMain: () => {
       nouvelleGeneration();
       const v = validerIsbn(etat.isbn);
+      const memeIsbn = !!etat.champsDistants && v.ok && v.isbn13 === etat.isbnDistant;
+      if (memeIsbn) etat.provenance = etat.sourceDistante;
+      else { oublierDistants(); etat.provenance = null; }
       etat.isbn = v.ok ? v.isbn13 : nettoyerIsbn(etat.isbn).slice(0, 20); // affiché = enregistré quand valide ; borné sinon (S8/F22)
-      etat.provenance = null; etat.couverture = { ...COUVERTURE_VIDE(), touchee: true }; etat.pas = 2; dessiner();
+      etat.couverture = { ...COUVERTURE_VIDE(), touchee: true }; etat.pas = 2; dessiner();
     },
     changerChamp: (k, v) => { etat.champs[k] = v; if (k === 'language') etat.langueTouchee = true; majBoutonEnregistrer(zone, modele()); },
     basculerCuisine: (v) => { etat.champs.cuisines = basculerPuce(etat.champs.cuisines, v); dessiner(); },

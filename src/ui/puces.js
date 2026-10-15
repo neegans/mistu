@@ -2,6 +2,7 @@
 // chaîne en minuscules sans espaces de bord (comme add.js et recipe-edit.js l'écrivaient déjà) ; l'affichage capitalise.
 import { el } from '../core/dom.js';
 import { t } from '../core/i18n.js';
+import { tagsDe } from '../domain/search.js';
 
 export const GRAINE_CUISINES = ['québécoise', 'autochtone', 'française', 'italienne', 'levantine', 'marocaine', 'mexicaine', 'indienne', 'chinoise', 'japonaise', 'thaïe', 'vietnamienne', 'grecque', 'espagnole', 'américaine'];
 
@@ -20,7 +21,7 @@ export function cuisinesExistantes(ctx) {
 
 // § 12 : les mots-clés des LIVRES seulement (les tags de recette sont un autre écran). Même rôle que cuisinesExistantes.
 export function motsClesExistants(ctx) {
-  return [...(ctx?.books || [])].flatMap((b) => b?.tags || []);
+  return [...(ctx?.books || [])].flatMap((b) => tagsDe(b?.tags)); // S2 : un `tags` qui n'est pas un tableau de chaînes ne fait rien tomber
 }
 
 // Propositions reçues d'une source (Open Library, Google Books) : étiquetées, dédoublonnées, sans ce qui est déjà

@@ -397,7 +397,7 @@ quelques assertions encore faibles (`.some` au lieu d'un décompte, Entrée sans
 `progress.md`.
 
 **Versions.** `APP_VERSION = '0.4.1'` (pins `v0\.4\.1-\d+` dans `tests/ajouter.js` et `tests/sync-l3.js`),
-`sw.js VERSION = 'cuisine-os-v0.4.1-11'` (vague finale), `SHELL` + `./src/core/isbn.js` (seul module neuf), `GOOGLE_BOOKS = { key: '' }`
+`sw.js VERSION = 'cuisine-os-v0.4.1-12'` (vague /verify), `SHELL` + `./src/core/isbn.js` (seul module neuf), `GOOGLE_BOOKS = { key: '' }`
 dans `src/sync/config.js`. Aucun schéma touché, `DB_VERSION` inchangée.
 
 **Bilan (clôture, tâche 10).** Suite complète **1506/1506 verts** (total épinglé **1505** dans `tests/tests.js`), une
@@ -413,6 +413,22 @@ retiré : le X d'un ISBN-10 reste tapable sur iPhone), R-ISBN-8 (« Saisir à la
 abandonnent la requête en vol), garde `recherche` du lecteur de code-barres, deux ISBN-10 au contrôle faux testés ;
 R-ISBN-9 et R-ISBN-10 consignés (spec § 11.2). Suite **1516/1516 verts** (total épinglé **1515**), même 404 de
 `/favicon.ico` seul en console ; `tools` 40/40 ; `--check` 0.
+
+**Vague /verify (15 octobre 2026 — rapport `verify-fix-report.md`, spec § 11.2 R-ISBN-12/13).** Trois lentilles
+adverses (correctness, sécurité, faux-vert), une vague, chaque changement de comportement rouge d'abord : **C1**
+« Saisir à la main » après « ← Changer d’ISBN » sous un autre ISBN (ou un invalide) ne montre plus les champs reçus
+pour le premier livre ; sous le même ISBN, champs **et** étiquette « Renseigné par … » restent · **S1** une année reçue
+au `toString` hostile ne fait plus lever `lookupIsbn` (et `identifier` a un `catch` filet : jamais d'écran muet) ·
+**S2** un `tags` de livre qui n'est pas un tableau (archive, ligne reçue) ne fait plus tomber la recherche
+(`tagsDe`, pur, dans `src/domain/search.js`) · **C3** « ISBN-13: 9781785035289 » collé est accepté (`maxlength` 32) ·
+**C2** texte `pas_isbn` : « Ce numéro n’est pas un ISBN : il doit commencer par 978 ou 979. » · **C4** `google:
+'trouve'` sur une fiche de Google Books · **C5** le lecteur de code-barres relit génération, pas et recherche après la
+lecture · **S5** la couverture n'est jamais demandée sans ISBN-13 · **V1-V3** tests du chemin de production (vraie
+`Response` en flux), de la borne exacte de 256 Kio et de la couverture comptée par ISBN. Suite **1537/1537 verts**
+(total épinglé **1536**), même 404 de `/favicon.ico` seul en console ; `tools` 40/40 ; `--check` 0. **Parqués (lot
+suivant)** : S3 (la couverture en vol n'est pas abandonnée au changement de génération), S4 (un mot-clé tapé n'est
+pas nettoyé des Cc/Cf), C6 (le redessin à l'arrivée de la couverture perd une saisie en cours), C7 (`refTerms` reprend
+les mots d'une exclusion), R-ISBN-11 (suggestion > 60 caractères hors plan de base muette au tap).
 
 **Fusion.** Revue finale de branche puis `/verify` par le chef d'orchestre ; copier
 `.superpowers/sdd/2026-10-14-identifier-un-livre-fiable/` dans `~/projects/mistu/.superpowers/sdd/` **avant** tout

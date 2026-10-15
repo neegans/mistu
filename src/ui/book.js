@@ -11,6 +11,7 @@ import { poserCouverture, renderZoneCouverture, messageErreurImage } from './liv
 import { startScanSession, indexEntriesPanel } from './import.js';
 import { accueilLivreModel, renderAccueilLivre } from './accueil-livre.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes, motsClesExistants } from './puces.js';
+import { tagsDe } from '../domain/search.js';
 import { ACCEPT_PHOTOS, ACCEPT_FICHIERS } from './add.js';
 
 // C8 : la plus RÉCENTE d'abord. La fiche ne rappelle qu'UNE séance et « Reprendre » doit mener à celle qu'on vient
@@ -176,7 +177,7 @@ export async function renderBook(params, query, ctx) {
   }
 
   // Métadonnées
-  const meta = { title: book.title, author: book.author || '', isbn: edition.isbn || '', publisher: edition.publisher || '', year: edition.year || '', language: edition.language || 'fr', convention: edition.unit_convention_id || '', cuisines: [...(book.cuisines || [])], tags: [...(book.tags || [])] };
+  const meta = { title: book.title, author: book.author || '', isbn: edition.isbn || '', publisher: edition.publisher || '', year: edition.year || '', language: edition.language || 'fr', convention: edition.unit_convention_id || '', cuisines: [...(book.cuisines || [])], tags: tagsDe(book.tags) }; // S2 : tagsDe rend toujours un tableau neuf
   const inp = (k, type = 'text') => el('input', { type, value: meta[k], onInput: (e) => { meta[k] = e.target.value; } });
   root.append(el('details', { class: 'card' }, el('summary', null, el('strong', null, t('Métadonnées et convention'))),
     el('div', { class: 'two-col', style: { marginTop: '.8rem' } },

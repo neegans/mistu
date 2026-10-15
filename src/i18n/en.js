@@ -205,7 +205,7 @@ export const EN = {
   "Open Library est en panne pour le moment.": "Open Library is down for now.",
   "Tu es hors ligne.": "You are offline.",
   "Cet ISBN n’est pas valide, vérifie les chiffres.": "This ISBN is not valid, check the digits.",
-  "Ce code-barres n’est pas un ISBN.": "This barcode is not an ISBN.",
+  "Ce numéro n’est pas un ISBN : il doit commencer par 978 ou 979.": "This number is not an ISBN: it must start with 978 or 979.",
   "L’ISBN est envoyé à Open Library.": "The ISBN is sent to Open Library.",
   "Nouvel essai…": "Trying again…",
   "ISBN {i} — non valide, ne sera pas enregistré": "ISBN {i} — not valid, will not be saved",
