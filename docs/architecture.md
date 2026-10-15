@@ -270,7 +270,8 @@ src/ui/livre-ajout.js    lookupIsbn — trois issues : trouvé / introuvable / i
                          seulement après un « rien » d'Open Library ; une tentative = un budget (AbortController
                          par tentative, 8 s, corps lu en flux et coupé à 256 Ko), une seule reprise sur un échec
                          MUET (délai, réseau), jamais sur un refus parlé (429, 5xx) ; `fiche.motsCles` = des
-                         propositions. Puis fusionnerFiche, fabriquerLivre (ISBN-13 ou null, jamais une suite
+                         propositions, sujets techniques filtrés (toute valeur à `:` ou `=` écartée avant le
+                         plafond de dix, R-ISBN-6). Puis fusionnerFiche, fabriquerLivre (ISBN-13 ou null, jamais une suite
                          libre de chiffres), enregistrerLivre, renderLivreAjout/renderLivreAjoutRoute : le
                          formulaire « Ajouter un livre » en deux pas (Entrée = Identifier, une identification à
                          la fois, « Réessayer » quand Open Library n'a pas répondu) ; la couverture reçue
@@ -310,7 +311,7 @@ src/core/lien.js         lienSignet(sourceUrl) et libelleSource(recipe) : foncti
                          texte (`meals.js`, `exporters.js` — S8).
 ```
 
-### Identifier un livre, fiable (lot suivant, 14-15 octobre 2026)
+### Identifier un livre, fiable (lot courant, 14-15 octobre 2026)
 
 Spec : `docs/superpowers/specs/2026-10-14-identifier-un-livre-fiable-design.md` (§ 11.2 : ce que la construction a
 amendé). Un seul module neuf ; les autres changements sont décrits sur les lignes de `puces.js` et `livre-ajout.js`

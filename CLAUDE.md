@@ -337,7 +337,8 @@ de la source étiquetées « Proposé par Open Library », puces au pas 2 et sur
 servent la recherche de toutes ses recettes (une référence de « Berber and Q » remonte sur « bbq »).
 
 **Mesures réelles (15 octobre 2026, 04 h 29 UTC, `mesure.cjs`, Chrome sans tête, contexte neuf, réseau réel).** Open
-Library a répondu à tout (aucune panne). Sortie lue ; extraits, lignes et champs coupés marqués « ... » :
+Library a répondu à tout (aucune panne). Sortie lue ; extraits : des lignes entières sont omises sans marqueur, les
+champs coupés à l'intérieur d'une ligne sont marqués « ... » :
 
 ```text
 === (1) 9781785035289 + Entree
@@ -371,9 +372,10 @@ Lecture : les deux ISBN du signalement sont trouvés en **une** requête `search
 (`en` / `fr`) et la suggestion « Barbecuing » ; l'ISBN faux et le mode hors ligne ne font **aucune** requête ;
 « Réessayer » remis en ligne trouve le livre. Les durées (≈ 200-510 ms) comptent un plancher de 200 ms du script.
 **D6 confirmé** : une édition anglaise d'une œuvre traduite peut sortir `fr` (Harry Potter) avec l'éditeur d'une
-autre édition (« Alma Littera ») — données de l'œuvre, la fiche reste « à vérifier » ; correction = lot suivant. Les
+autre édition (« Alma Littera ») — vraisemblablement les données de l'œuvre (inférence, non vérifiée chez Open
+Library), la fiche reste « à vérifier » ; correction = lot suivant. Les
 sujets d'Open Library contiennent aussi des étiquettes techniques (« Series:Harry_Potter », « Nyt:hardcover_fiction=… »)
-proposées telles quelles (rien n'est écrit sans tape). La couverture de `9781785035289` répond 404 chez Open Library
+filtrées depuis la vague finale (R-ISBN-6 : toute valeur à `:` ou `=` est écartée). La couverture de `9781785035289` répond 404 chez Open Library
 (curl, `?default=false`) : pas de couverture, chemin attendu.
 
 **Ce qui n'est PAS prouvé.** **Safari et l'iPhone** (aucun WebKit ici) ; **Google Books avec une clé** (case vide :
@@ -383,23 +385,34 @@ traduite (D6 ci-dessus : la langue de l'œuvre gagne, « français d'abord ») ;
 (après fusion et `push`).
 
 **Dettes (assumées, nommées dans le registre).** **S4d** : quitter la route pendant une recherche n'abandonne pas la
-requête en vol (au plus 20 s ; sa réponse est muette par la génération) · le chemin réel du lecteur de code-barres
+requête en vol (au plus 20 s ; sa réponse est muette par la génération — « Saisir à la main » et « ← Changer
+d'ISBN », eux, l'abandonnent depuis R-ISBN-8) · **R-ISBN-9** : sur la fiche livre, `book.js` « Enregistrer » écrit
+l'ISBN tapé sans validation ni borne (contourne S8, chemin préexistant, lot suivant) · les messages du pas 1
+(« Recherche… », indisponible, validation) n'ont pas d'`aria-live` (accessibilité, hors spec) · le chemin réel du lecteur de code-barres
 (`pickFiles` + `createImageBitmap`) reste hors suite (seul `codeBarresVersIsbn` est testé) · pas de suggestions
 distantes sur la **fiche** livre (les sujets reçus ne sont pas stockés) · mineurs différés des revues de tâche, en une
-ligne : `motsClesDe` coupe après `trim`, tables de messages reconstruites à chaque appel du modèle, imports
+ligne : tables de messages reconstruites à chaque appel du modèle, imports
 temporairement inutilisés résorbés, duplication `identifier`/`nouvelleGeneration` et des deux IIFE de `book.js`,
 quelques assertions encore faibles (`.some` au lieu d'un décompte, Entrée sans `defaultPrevented`) — liste exacte dans
 `progress.md`.
 
 **Versions.** `APP_VERSION = '0.4.1'` (pins `v0\.4\.1-\d+` dans `tests/ajouter.js` et `tests/sync-l3.js`),
-`sw.js VERSION = 'cuisine-os-v0.4.1-10'`, `SHELL` + `./src/core/isbn.js` (seul module neuf), `GOOGLE_BOOKS = { key: '' }`
+`sw.js VERSION = 'cuisine-os-v0.4.1-11'` (vague finale), `SHELL` + `./src/core/isbn.js` (seul module neuf), `GOOGLE_BOOKS = { key: '' }`
 dans `src/sync/config.js`. Aucun schéma touché, `DB_VERSION` inchangée.
 
 **Bilan (clôture, tâche 10).** Suite complète **1506/1506 verts** (total épinglé **1505** dans `tests/tests.js`), une
-seule erreur de console : un 404 pré-existant, très probablement `/favicon.ico` (`tests/index.html` n'a pas de lien
-`icon` ; jamais remonté comme réponse de page) ; `node --test tools/*.test.mjs` **40/40** ; `node
+seule erreur de console : un 404 de `/favicon.ico` (mesuré par le contrôleur sur la base avant le lot ;
+`tests/index.html` n'a pas de favicon). « 1506/1506 pour un total épinglé 1505 » n'est pas une coquille : l'assertion
+du total compte les assertions qui la précèdent, et s'ajoute elle-même au bilan affiché ; `node --test tools/*.test.mjs` **40/40** ; `node
 tools/generer-migrations.mjs --check` : **0** ; aucun U+2028/2029/202E ni caractère de contrôle dans les fichiers du
 lot ; `grep -rn "AIza" src/` vide.
+
+**Vague finale de corrections (15 octobre 2026, après la revue de branche — rapport `final-fix-report.md`).**
+R-ISBN-6 (sujets techniques filtrés avant le plafond, troncatures par points de code), R-ISBN-7 (`inputmode`
+retiré : le X d'un ISBN-10 reste tapable sur iPhone), R-ISBN-8 (« Saisir à la main » / « ← Changer d'ISBN »
+abandonnent la requête en vol), garde `recherche` du lecteur de code-barres, deux ISBN-10 au contrôle faux testés ;
+R-ISBN-9 et R-ISBN-10 consignés (spec § 11.2). Suite **1516/1516 verts** (total épinglé **1515**), même 404 de
+`/favicon.ico` seul en console ; `tools` 40/40 ; `--check` 0.
 
 **Fusion.** Revue finale de branche puis `/verify` par le chef d'orchestre ; copier
 `.superpowers/sdd/2026-10-14-identifier-un-livre-fiable/` dans `~/projects/mistu/.superpowers/sdd/` **avant** tout
