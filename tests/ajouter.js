@@ -426,7 +426,8 @@ export async function runAjouterTests({ eq, ok }) {
     const gestes = { changerIsbn: (v) => appels.push(['isbn', v]), scanner: () => appels.push(['scanner']), identifier: () => appels.push(['identifier']), saisirMain: () => appels.push(['main']), changerChamp: (k, v) => appels.push(['champ', k, v]), basculerCuisine: (v) => appels.push(['cuisine', v]), ajouterCuisine: (v) => appels.push(['ajout', v]), retourIsbn: () => appels.push(['retour']), enregistrer: () => appels.push(['enregistrer']) };
     const p1 = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1, isbn: '', champs: {}, lecteurDisponible: false }), gestes);
     eq(p1.querySelector('p').textContent, 'Scanne le code-barres, tape l’ISBN, ou saisis le livre à la main.', 'livre : première ligne du pas 1 = le but');
-    ok(p1.textContent.includes('L’ISBN est envoyé à Open Library, puis à Google Books si besoin.'), 'livre : les tiers sont nommés (S12)');
+    ok(p1.textContent.includes('L’ISBN est envoyé à Open Library.') && !p1.textContent.includes('Google Books'), 'livre : sans clé, la phrase ne promet pas Google Books (F12)');
+    ok(LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1, cleGoogle: true }), {}).textContent.includes('puis à Google Books si besoin.'), 'livre : avec clé, les deux tiers sont nommés (S12)');
     ok([...p1.querySelectorAll('button')].find((b) => b.textContent === 'Scanner le code-barres').disabled, 'livre : lecteur absent → bouton désactivé');
     // RF-m8 : pendant « Recherche… », taper un autre ISBN dans un champ resté actif ferait croire que la réponse
     // qui arrive est celle du nouvel ISBN. Le champ se ferme avec les boutons.
@@ -469,6 +470,34 @@ export async function runAjouterTests({ eq, ok }) {
     eq(leve, null, 'livre : sur une zone sans ce bouton, le helper ne lève pas');
   }
   {
+    // Rendu du pas 1 : refus sous le champ, Réessayer, Entrée, champ fermé pendant la recherche (spec § 6, RF-m8).
+    const appels = [];
+    const gestes = { identifier: () => appels.push('identifier'), reessayer: () => appels.push('reessayer'), changerIsbn: () => {}, scanner: () => {}, saisirMain: () => {} };
+    const p1 = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1, isbn: '' }), gestes);
+    const champ = p1.querySelector('input[name="isbn"]');
+    eq([champ.getAttribute('maxlength'), champ.disabled], ['20', false], 'livre : champ borné à 20, ouvert hors recherche (S8)');
+    champ.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    champ.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', repeat: true, bubbles: true, cancelable: true }));
+    champ.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true }));
+    champ.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true }));
+    eq(appels, ['identifier'], 'livre : Entrée identifie une fois ; répétition, composition et autres touches non (S3)');
+    const pr = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1, isbn: '9781785035289', recherche: true, resultat: { statut: 'indisponible', motif: 'limite' } }), gestes);
+    eq([pr.querySelector('input[name="isbn"]').disabled, [...pr.querySelectorAll('button')].find((b) => b.textContent === 'Identifier').disabled, pr.querySelector('[data-role="reessayer"]'), pr.querySelector('[data-role="indisponible"]'), pr.textContent.includes('Recherche…')],
+      [true, true, null, null, true], 'livre : pendant la recherche — champ fermé, Identifier fermé, ni Réessayer ni message, « Recherche… » (F17)');
+    const pi = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1, isbn: '9781785035289', resultat: { statut: 'indisponible', motif: 'limite' } }), gestes);
+    eq([pi.querySelector('[data-role="indisponible"]')?.textContent.includes('trop de demandes'), [...pi.querySelectorAll('button')].filter((b) => b.textContent === 'Saisir à la main').length, pi.querySelectorAll('input[name="isbn"]').length, pi.querySelector('[data-role="reessayer"]')?.textContent],
+      [true, 1, 1, 'Réessayer'], 'livre : indisponible → message + un seul « Saisir à la main » + Réessayer, toujours au pas 1');
+    pi.querySelector('[data-role="reessayer"]').click();
+    eq(appels, ['identifier', 'reessayer'], 'livre : « Réessayer » part par son geste');
+    const pv = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1, validation: 'controle' }), gestes);
+    eq([pv.querySelector('[data-role="validation"]')?.textContent, pv.querySelector('.status.error, .error')], ['Cet ISBN n’est pas valide, vérifie les chiffres.', null], 'livre : le refus est sous le champ, sans carte rouge');
+    const ph = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1, resultat: { statut: 'indisponible', motif: '<img src=x onerror="void 0">' } }), gestes);
+    eq([ph.querySelectorAll('img').length, ph.querySelector('[data-role="indisponible"] > div')?.textContent], [0, 'Open Library est en panne pour le moment.'], 'livre : un motif hostile ne crée aucun élément et retombe sur le texte sûr (S12)');
+    const p2 = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 2, isbn: '12345', champs: { title: 'T' } }), gestes);
+    ok([...p2.querySelectorAll('span.muted')].some((s) => s.textContent === 'ISBN 12345 — non valide, ne sera pas enregistré'), 'livre : au pas 2, un ISBN invalide est annoncé comme non enregistré (S8)');
+    eq(LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1 }), gestes).querySelector('[data-role="indisponible"], [data-role="validation"]'), null, 'livre : sans rien à dire, rien n’est affiché');
+  }
+  {
     // La ROUTE elle-même, sans réseau et sans écriture : ses gestes sont câblés, et une saisie à la main
     // n'étiquette RIEN (I-B — aucune provenance à annoncer, personne n'a interrogé personne).
     // F12 : base JETABLE et `fetch` remplacé par un refus — « sans réseau et sans écriture » est ainsi une garantie
@@ -483,11 +512,11 @@ export async function runAjouterTests({ eq, ok }) {
     const ecrituresAvant = (await db.getAll('files')).length + (await db.getAll('books')).length;
     const bouton = (nom) => [...racine.querySelectorAll('button')].find((b) => b.textContent === nom);
     const champ = racine.querySelector('input[name="isbn"]');
-    champ.value = ' 978-2-7619-5000-1 ';
+    champ.value = ' 978-2-8907-7281-6 ';
     champ.dispatchEvent(new Event('input', { bubbles: true }));
     bouton('Saisir à la main').click();
     eq(racine.querySelector('.status.info'), null, 'route livre : une saisie à la main n’étiquette aucune provenance (I-B)');
-    eq([...racine.querySelectorAll('span.muted')].filter((s) => s.textContent.startsWith('ISBN')).map((s) => s.textContent), ['ISBN 9782761950001'], 'route livre : l’ISBN tapé est nettoyé et rappelé au pas 2');
+    eq([...racine.querySelectorAll('span.muted')].filter((s) => s.textContent.startsWith('ISBN')).map((s) => s.textContent), ['ISBN 9782890772816'], 'route livre : l’ISBN tapé est nettoyé et rappelé au pas 2');
     // Le défaut de R-UX-9, vu du côté de la personne : taper le titre réveille le bouton.
     const titre = [...racine.querySelectorAll('input[type="text"]')].find((i) => i.name !== 'isbn');
     const boutonAvant = racine.querySelector('[data-role="enregistrer"]');
@@ -497,7 +526,7 @@ export async function runAjouterTests({ eq, ok }) {
     ok(racine.querySelector('[data-role="enregistrer"]') === boutonAvant, 'route livre : c’est le MÊME nœud bouton après la frappe — rien n’a été redessiné (l’identité, pas seulement « encore au pas 2 »)');
     eq(racine.querySelector('input[name="isbn"]'), null, 'route livre : on est bien resté au pas 2 (aucun redessin qui ferait sauter le curseur)');
     bouton('← Changer d’ISBN').click();
-    eq(racine.querySelector('input[name="isbn"]').value, '9782761950001', 'route livre : le retour au pas 1 garde l’ISBN nettoyé');
+    eq(racine.querySelector('input[name="isbn"]').value, '9782890772816', 'route livre : le retour au pas 1 garde l’ISBN nettoyé');
     eq([appelsReseau, (await db.getAll('files')).length + (await db.getAll('books')).length - ecrituresAvant], [0, 0], 'route livre : ce parcours n’appelle AUCUN réseau et n’écrit rien (F12, mesuré sur base jetable)');
       });
     } finally { globalThis.fetch = vraiFetch; }

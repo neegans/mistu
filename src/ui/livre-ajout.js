@@ -315,19 +315,26 @@ export async function enregistrerLivre(args, { repo: r = repo } = {}) {
 export function renderLivreAjout(model, gestes = {}) {
   const g = (nom) => (...a) => (typeof gestes[nom] === 'function' ? gestes[nom](...a) : undefined);
   if (model.pas === 1) {
+    // Entrée = Identifier (pas de <form> : un submit natif ferait naviguer le #). Répétition de touche et composition
+    // IME ne déclenchent pas (S3) ; la garde d'une seule identification vit dans la route (I-G).
+    const surTouche = (e) => { if (e.key !== 'Enter') return; e.preventDefault(); if (!e.repeat && !e.isComposing) g('identifier')(); };
     return el('section', { class: 'card stack livre-ajout' },
       el('p', null, t('Scanne le code-barres, tape l’ISBN, ou saisis le livre à la main.')),
       // RF-m8 : pendant « Recherche… », le champ est fermé comme les boutons — taper un autre ISBN dans un champ
       // actif pendant qu'un appel est en vol ferait croire que la réponse qui arrive est celle du nouvel ISBN.
-      field(t('ISBN'), el('input', { type: 'text', name: 'isbn', inputmode: 'numeric', placeholder: '978…', value: model.isbn, disabled: !!model.recherche, onInput: (e) => g('changerIsbn')(e.target.value) })),
+      field(t('ISBN'), el('input', { type: 'text', name: 'isbn', inputmode: 'numeric', maxlength: '20', placeholder: '978…', value: model.isbn, disabled: !!model.recherche, onInput: (e) => g('changerIsbn')(e.target.value), onKeydown: surTouche })),
+      model.messages.validation ? el('small', { class: 'muted', dataset: { role: 'validation' } }, model.messages.validation) : null,
       el('div', { class: 'row' },
         el('button', { type: 'button', class: 'btn primary', disabled: !model.lecteurDisponible || model.recherche, onClick: g('scanner') }, t('Scanner le code-barres')),
         el('button', { type: 'button', class: 'btn primary', disabled: model.recherche, onClick: g('identifier') }, t('Identifier')),
         el('button', { type: 'button', class: 'btn link', onClick: g('saisirMain') }, t('Saisir à la main'))),
       model.messages.lecteur ? el('small', { class: 'muted' }, model.messages.lecteur) : null,
       model.messages.recherche ? el('div', { class: 'muted' }, model.messages.recherche) : null,
-      model.messages.provenance ? el('div', { class: 'muted' }, model.messages.provenance) : null,
-      el('small', { class: 'muted' }, t('L’ISBN est envoyé à Open Library, puis à Google Books si besoin.')));
+      // Indisponible : le message vrai, puis UN bouton Réessayer (F17 : pas de second « Saisir à la main »).
+      model.messages.indisponible ? el('div', { class: 'stack', dataset: { role: 'indisponible' } },
+        el('div', { class: 'muted' }, model.messages.indisponible),
+        model.peutReessayer ? el('button', { type: 'button', class: 'btn primary', dataset: { role: 'reessayer' }, onClick: g('reessayer') }, t('Réessayer')) : null) : null,
+      el('small', { class: 'muted' }, model.messages.sources));
   }
   const c = model.champs;
   const inp = (k, type = 'text') => el('input', { type, value: c[k], onInput: (e) => g('changerChamp')(k, e.target.value) });
@@ -335,7 +342,7 @@ export function renderLivreAjout(model, gestes = {}) {
   return el('section', { class: 'card stack livre-ajout' },
     el('p', null, t('Vérifie la fiche, puis ajoute le livre.')),
     model.messages.provenance ? el('div', { class: 'status info' }, model.messages.provenance) : null,
-    model.isbn ? el('div', { class: 'row' }, el('span', { class: 'muted' }, `${t('ISBN')} ${model.isbn}`), el('button', { type: 'button', class: 'btn link', onClick: g('retourIsbn') }, t('← Changer d’ISBN'))) : el('button', { type: 'button', class: 'btn link', onClick: g('retourIsbn') }, t('← Changer d’ISBN')),
+    model.isbn ? el('div', { class: 'row' }, el('span', { class: 'muted' }, model.messages.rappelIsbn), el('button', { type: 'button', class: 'btn link', onClick: g('retourIsbn') }, t('← Changer d’ISBN'))) : el('button', { type: 'button', class: 'btn link', onClick: g('retourIsbn') }, t('← Changer d’ISBN')),
     field(t('Titre *'), inp('title')),
     field(t('Auteur / chef'), inp('author')),
     field(t('Langue du livre'), select([{ value: 'fr', label: 'Français' }, { value: 'en', label: 'English' }, { value: 'other', label: t('Autre') }], c.language, (v) => g('changerChamp')('language', v))),
