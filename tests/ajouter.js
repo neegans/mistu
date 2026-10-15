@@ -255,7 +255,9 @@ export async function runAjouterTests({ eq, ok }) {
     eq(urls[0][0], SEARCH, 'lookup : adresse de l’API actuelle, fields avec subject, sans isbn (F13, § 12.2)');
     ok(urls[0][1].signal instanceof AbortSignal && urls[0][1].mode === 'cors' && urls[0][1].credentials === 'omit' && urls[0][1].cache === 'no-store' && urls[0][1].referrerPolicy === 'no-referrer', 'lookup : options S12 + un signal par tentative');
     // « Rien » sans numFound → legacy en filet, champs typés, sujets legacy.
-    const r2 = await chercher(async (u) => (u === SEARCH ? reponse(200, { docs: [] }) : reponse(200, { 'ISBN:9781785035289': { title: 'Legacy', authors: [{ name: 'A' }, { nom: 'x' }], publishers: [{ name: 'P' }], publish_date: 'March 2018', subjects: [{ name: 'Grill' }, { nom: 'x' }] } })), { attendre: jamais });
+    const urlsR2 = [];
+    const r2 = await chercher(async (u) => { urlsR2.push(u); return u === SEARCH ? reponse(200, { docs: [] }) : u === LEGACY ? reponse(200, { 'ISBN:9781785035289': { title: 'Legacy', authors: [{ name: 'A' }, { nom: 'x' }], publishers: [{ name: 'P' }], publish_date: 'March 2018', subjects: [{ name: 'Grill' }, { nom: 'x' }] } }) : reponse(404, ''); }, { attendre: jamais });
+    eq(urlsR2[1], LEGACY, 'lookup : adresse legacy exacte (jscmd=data, ISBN encodé)');
     eq([r2.statut, r2.source, r2.appels, r2.fiche], ['trouve', 'openlibrary', 2, { title: 'Legacy', author: 'A', publisher: 'P', year: 2018, language: null, motsCles: ['Grill'] }], 'lookup : « rien » (sans numFound) → legacy en filet, champs et sujets typés');
     const r3 = await chercher(async (u) => reponse(200, u === SEARCH ? { numFound: 0, docs: [] } : {}), { attendre: jamais });
     eq([r3.statut, r3.appels, r3.motif, r3.google, r3.fiche, r3.source], ['introuvable', 2, null, 'non_appele', null, null], 'lookup : deux « rien » → introuvable');
@@ -263,8 +265,9 @@ export async function runAjouterTests({ eq, ok }) {
     eq([r4.statut, r4.appels], ['introuvable', 2], 'lookup : le legacy qui tombe ne change pas le statut (search a répondu)');
     // Reprise (I-R).
     const attentes = []; let surReprises = 0;
-    const r5 = await chercher(async () => { throw new Error('reseau'); }, { attendre: async (ms, s) => { attentes.push([ms, s === undefined || s instanceof AbortSignal]); }, repriseMs: 1500, surReprise: () => { surReprises += 1; } });
-    eq([r5.statut, r5.motif, r5.appels, attentes, surReprises], ['indisponible', 'reseau', 2, [[1500, true]], 1], 'lookup : échec muet → une reprise, attendre(repriseMs, signal), surReprise une fois (I-R)');
+    const ctl5b = new AbortController();
+    const r5 = await chercher(async () => { throw new Error('reseau'); }, { signal: ctl5b.signal, attendre: async (ms, s) => { attentes.push([ms, s === ctl5b.signal]); }, repriseMs: 1500, surReprise: () => { surReprises += 1; } });
+    eq([r5.statut, r5.motif, r5.appels, attentes, surReprises], ['indisponible', 'reseau', 2, [[1500, true]], 1], 'lookup : échec muet → une reprise, attendre(repriseMs, LE signal extérieur), surReprise une fois (I-R)');
     let n6 = 0;
     const r6 = await chercher(async () => { n6 += 1; if (n6 === 1) throw new Error('reseau'); return reponse(200, { docs: [{ title: 'T' }] }); });
     eq([r6.statut, r6.appels, r6.fiche], ['trouve', 2, VIDE], 'lookup : la reprise peut trouver ; sans subject, motsCles vide');
@@ -1115,7 +1118,7 @@ export async function runAjouterTests({ eq, ok }) {
         await attendreImages(r5);
 
         // 4. La couverture n’est demandée QUE si Open Library a identifié le livre (I-A : provenance étiquetée).
-        // RF-m9 : le fait attendu est l’adresse Google Books APPARUE dans les appels — pas 200 ms au hasard.
+        // Le fait attendu est la zone de couverture : elle n’apparaît qu’au pas 2, donc après la fin de lookupIsbn.
         sansFicheOl.add('9780000006660');
         const avant = urls.length;
         const r4 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
@@ -1214,18 +1217,18 @@ export async function runAjouterTests({ eq, ok }) {
         await attendreImages(r9b);
         await attendreImages(r9);
 
-        // 10. C2 vue de la route : un livre anglais identifié par Google Books n’est plus écrit « fr ».
+        // 10. C2 vue de la route : un livre anglais identifié via search.json n’est plus écrit « fr ».
         languesOl.set('9780000055569', ['eng']); languesOl.set('9780000066671', ['eng']);
         const r10 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
         taper(r10, '9780000055569'); cliquer(r10, 'Identifier');
         await attendre(() => r10.etatRoute().pas === 2, 'le pas 2 pour 5556');
-        eq([r10.etatRoute().champs.language, r10.querySelector('select').value], ['en', 'en'], 'route : la langue de la fiche Google Books est reprise, et le menu Langue le montre (C2)');
+        eq([r10.etatRoute().champs.language, r10.querySelector('select').value], ['en', 'en'], 'route : la langue de la fiche (via search.json) est reprise, et le menu Langue le montre (C2)');
         const choisirLangue = (root, v) => { const s = root.querySelector('select'); s.value = v; s.dispatchEvent(new Event('change')); };
         choisirLangue(r10, 'fr');
         cliquer(r10, '← Changer d’ISBN');
         taper(r10, '9780000066671'); cliquer(r10, 'Identifier');
         await attendre(() => r10.etatRoute().pas === 2, 'le pas 2 pour 6667');
-        eq(r10.etatRoute().champs.language, 'fr', 'route : la langue choisie par la personne n’est plus écrasée par la fiche suivante (C2)');
+        eq(r10.etatRoute().champs.language, 'fr', 'route : la langue choisie par la personne n’est plus écrasée par la fiche suivante, via search.json (C2)');
         await attendreImages(r10);
 
         // 11. RF-I1 : la charnière § 5 → § 8, jamais exercée. « Ajouter ce livre » écrit le livre ET son édition
