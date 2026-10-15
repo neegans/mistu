@@ -363,19 +363,43 @@ export async function runAjouterTests({ eq, ok }) {
   {
     const m = LA.livreAjoutModel({ pas: 1, isbn: '', champs: { title: '' }, provenance: null, recherche: false, lecteurDisponible: false });
     eq([m.pas, m.peutEnregistrer, m.messages.lecteur], [1, false, 'Le lecteur de code-barres n’est pas offert dans ce navigateur.'], 'livre : pas 1, lecteur absent nommé');
-    const m2 = LA.livreAjoutModel({ pas: 2, isbn: '978', champs: { title: 'X' }, provenance: 'openlibrary', recherche: false, lecteurDisponible: true });
+    const m2 = LA.livreAjoutModel({ pas: 2, isbn: '9781785035289', champs: { title: 'X' }, provenance: 'openlibrary', recherche: false, lecteurDisponible: true });
     eq([m2.peutEnregistrer, m2.messages.provenance], [true, 'Renseigné par Open Library — vérifie et corrige.'], 'livre : pas 2, provenance étiquetée (I-A)');
-    eq(LA.livreAjoutModel({ pas: 2, champs: { title: 'X' }, provenance: 'aucune' }).messages.provenance, 'Aucune fiche trouvée pour cet ISBN. Complète à la main.', 'livre : échec dit après la réponse (I-B)');
+    eq(LA.livreAjoutModel({ pas: 2, champs: { title: 'X' }, provenance: 'aucune' }).messages.provenance, 'Aucune fiche chez Open Library pour cet ISBN. Complète à la main.', 'livre : « rien » dit après la réponse d’Open Library seule (I-B)');
+    eq(LA.livreAjoutModel({ pas: 2, provenance: 'aucune', resultat: { statut: 'introuvable', motif: null, google: 'rien' } }).messages.provenance, 'Aucune fiche chez Open Library ni Google Books pour cet ISBN. Complète à la main.', 'livre : les deux sources ont répondu « rien »');
+    eq(LA.livreAjoutModel({ pas: 2, provenance: 'aucune', resultat: { statut: 'introuvable', motif: null, google: 'echec' } }).messages.provenance, 'Aucune fiche chez Open Library pour cet ISBN (Google Books n’a pas répondu). Complète à la main.', 'livre : Google muet n’est pas cité comme ayant répondu (S5)');
     eq(LA.livreAjoutModel({ pas: 2, champs: { title: 'X' }, provenance: null }).messages.provenance, null, 'livre : saisie à la main → aucune provenance');
     eq(LA.livreAjoutModel({ pas: 2, champs: { title: '   ' } }).peutEnregistrer, false, 'livre : sans titre, pas d’enregistrement');
     eq(LA.livreAjoutModel({ pas: 1, recherche: true }).messages.recherche, 'Recherche…', 'livre : pendant l’appel');
+    eq(LA.livreAjoutModel({ pas: 1, recherche: true, reprise: true }).messages.recherche, 'Nouvel essai…', 'livre : la reprise est dite (S11)');
     eq(LA.livreAjoutModel({ pas: 2, champs: { title: 'X' }, enCours: true }).peutEnregistrer, false, 'livre : pendant l’enregistrement, on ne peut pas enregistrer une seconde fois (double clic)');
+    eq([LA.livreAjoutModel({ pas: 1, validation: 'controle' }).messages.validation, LA.livreAjoutModel({ pas: 1, validation: 'longueur' }).messages.validation, LA.livreAjoutModel({ pas: 1, validation: 'pas_isbn' }).messages.validation, LA.livreAjoutModel({ pas: 1 }).messages.validation],
+      ['Cet ISBN n’est pas valide, vérifie les chiffres.', 'Cet ISBN n’est pas valide, vérifie les chiffres.', 'Ce code-barres n’est pas un ISBN.', null], 'livre : un ISBN refusé est dit sous le champ (§ 4)');
+    const TEXTES = { delai: 'Open Library n’a pas répondu à temps.', reseau: 'Impossible de joindre Open Library. Vérifie ta connexion.', limite: 'Open Library reçoit trop de demandes en ce moment. Attends quelques secondes.', serveur: 'Open Library est en panne pour le moment.', horsligne: 'Tu es hors ligne.' };
+    for (const [motif, texte] of Object.entries(TEXTES)) {
+      const mi = LA.livreAjoutModel({ pas: 1, resultat: { statut: 'indisponible', motif } });
+      eq([mi.messages.indisponible, mi.peutReessayer], [texte, true], `livre : indisponible/${motif} dit vrai et offre Réessayer`);
+    }
+    const mr = LA.livreAjoutModel({ pas: 1, recherche: true, resultat: { statut: 'indisponible', motif: 'limite' } });
+    eq([mr.messages.indisponible, mr.peutReessayer], [null, false], 'livre : pendant la recherche, ni message indisponible ni Réessayer (F17)');
+    eq(LA.livreAjoutModel({ pas: 1, resultat: { statut: 'indisponible', motif: '__proto__' } }).messages.indisponible, 'Open Library est en panne pour le moment.', 'livre : un motif inconnu ou hostile retombe sur « panne » (S12)');
+    eq(LA.livreAjoutModel({ pas: 1, resultat: { statut: 'introuvable', motif: null, google: 'non_appele' } }).peutReessayer, false, 'livre : introuvable n’offre pas Réessayer');
+    eq([LA.livreAjoutModel({ pas: 1 }).messages.sources, LA.livreAjoutModel({ pas: 1, cleGoogle: true }).messages.sources], ['L’ISBN est envoyé à Open Library.', 'L’ISBN est envoyé à Open Library, puis à Google Books si besoin.'], 'livre : la phrase des sources dit ce qui est vrai (F12)');
+    eq([LA.livreAjoutModel({ pas: 2, isbn: '9782890772816' }).isbnValide, LA.livreAjoutModel({ pas: 2, isbn: '12345' }).isbnValide, LA.livreAjoutModel({ pas: 2, isbn: '' }).isbnValide], [true, false, true], 'livre : isbnValide');
+    eq([LA.livreAjoutModel({ pas: 2, isbn: '9782890772816' }).messages.rappelIsbn, LA.livreAjoutModel({ pas: 2, isbn: '12345' }).messages.rappelIsbn, LA.livreAjoutModel({ pas: 2, isbn: '' }).messages.rappelIsbn], ['ISBN 9782890772816', 'ISBN 12345 — non valide, ne sera pas enregistré', null], 'livre : rappel de l’ISBN au pas 2 (S8)');
+    eq(LA.livreAjoutModel({ pas: 2, suggestions: { source: 'openlibrary', valeurs: ['bbq'] } }).suggestions, { source: 'openlibrary', valeurs: ['bbq'] }, 'livre : les suggestions passent telles quelles au rendu (§ 12.3)');
+    eq(LA.livreAjoutModel({ pas: 2 }).champs.tags, [], 'livre : les champs vides portent tags: [] (§ 12.1)');
   }
   {
     let n = 0;
-    const { book, edition } = LA.fabriquerLivre({ champs: { title: ' Titre ', author: 'A', publisher: '', year: '2019', language: 'fr', convention: 'metric_ca', cuisines: ['italienne'] }, isbn: '9782761950001', coverSha256: null }, { newId: (p) => `${p}-${++n}` });
+    const { book, edition } = LA.fabriquerLivre({ champs: { title: ' Titre ', author: 'A', publisher: '', year: '2019', language: 'fr', convention: 'metric_ca', cuisines: ['italienne'] }, isbn: '9782890772816', coverSha256: null }, { newId: (p) => `${p}-${++n}` });
     eq(book, { id: 'bk-1', title: 'Titre', author: 'A', cuisines: ['italienne'], tags: [] }, 'livre : book comme avant, cuisines en tableau');
-    eq(edition, { id: 'ed-2', book_id: 'bk-1', isbn: '9782761950001', publisher: null, year: 2019, language: 'fr', unit_convention_id: 'metric_ca', convention_evidence: 'confirmed_by_user', owned: true, cover_sha256: null }, 'livre : edition comme avant + cover_sha256 (pointeur souple)');
+    eq(edition, { id: 'ed-2', book_id: 'bk-1', isbn: '9782890772816', publisher: null, year: 2019, language: 'fr', unit_convention_id: 'metric_ca', convention_evidence: 'confirmed_by_user', owned: true, cover_sha256: null }, 'livre : edition comme avant + cover_sha256 (pointeur souple)');
+    eq(LA.fabriquerLivre({ champs: { title: 'T' }, isbn: '0306406152' }, { newId: (p) => p }).edition.isbn, '9780306406157', 'livre : un ISBN-10 valide est enregistré en 13');
+    eq(LA.fabriquerLivre({ champs: { title: 'T' }, isbn: '12345' }, { newId: (p) => p }).edition.isbn, null, 'livre : un ISBN invalide n’est pas enregistré (S8)');
+    eq(LA.fabriquerLivre({ champs: { title: 'T' }, isbn: '9'.repeat(10000) }, { newId: (p) => p }).edition.isbn, null, 'livre : une suite libre de chiffres n’atteint jamais la base ni son index (S8)');
+    eq(LA.fabriquerLivre({ champs: { title: 'T' }, isbn: '' }, { newId: (p) => p }).edition.isbn, null, 'livre : sans ISBN, null');
+    eq(LA.fabriquerLivre({ champs: { title: 'T', tags: ['bbq', 'charbon'] }, isbn: '' }, { newId: (p) => p }).book.tags, ['bbq', 'charbon'], 'livre : les mots-clés choisis sont écrits dans books.tags (§ 12.1)');
   }
   {
     const { withRepo } = await import('./sync-fixture.js');

@@ -19,7 +19,7 @@ export const LIMITES_ISBN = { champ: 300, corps: 256 * 1024, delaiMs: 10000, ten
 export const OPTIONS_FETCH = { mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' };
 // Les champs qu'une fiche distante peut remplir : ce qu'`identifier` doit pouvoir REPRENDRE à l'ISBN suivant (C3).
 export const CHAMPS_DISTANTS = ['title', 'author', 'publisher', 'year', 'language'];
-const CHAMPS_VIDES = () => ({ title: '', author: '', publisher: '', year: '', language: 'fr', convention: '', cuisines: [] });
+const CHAMPS_VIDES = () => ({ title: '', author: '', publisher: '', year: '', language: 'fr', convention: '', cuisines: [], tags: [] });
 
 export { nettoyerIsbn };
 // S3/S6 : une chaîne seulement, sans caractères de contrôle (Cc) ni de format (Cf : bidi…), ni les séparateurs de
@@ -270,19 +270,39 @@ export function renderZoneCouverture(etat, gestes = {}) {
           etat.sha256 ? el('button', { type: 'button', class: 'btn link', disabled: !!etat.enCours, onClick: g('retirer') }, t('Retirer')) : null))));
 }
 
-export function livreAjoutModel({ pas = 1, isbn = '', champs = {}, provenance = null, recherche = false, lecteurDisponible = true, enCours = false } = {}) {
+export function livreAjoutModel({ pas = 1, isbn = '', champs = {}, provenance = null, recherche = false, reprise = false, validation = null, resultat = null, suggestions = null, cleGoogle = false, lecteurDisponible = true, enCours = false } = {}) {
   const c = { ...CHAMPS_VIDES(), ...champs };
+  const google = resultat?.google || 'non_appele';
   const provenanceMessage = provenance === 'openlibrary' ? t('Renseigné par Open Library — vérifie et corrige.')
     : provenance === 'googlebooks' ? t('Renseigné par Google Books — vérifie et corrige.')
-    : provenance === 'aucune' ? t('Aucune fiche trouvée pour cet ISBN. Complète à la main.') : null;
-  return { pas, isbn, champs: c, provenance, recherche, lecteurDisponible, enCours, peutEnregistrer: pas === 2 && !!c.title.trim() && !recherche && !enCours,
-    messages: { provenance: provenanceMessage, recherche: recherche ? t('Recherche…') : null, lecteur: lecteurDisponible ? null : t('Le lecteur de code-barres n’est pas offert dans ce navigateur.') } };
+    : provenance === 'aucune' ? (google === 'rien' ? t('Aucune fiche chez Open Library ni Google Books pour cet ISBN. Complète à la main.')
+      : google === 'echec' ? t('Aucune fiche chez Open Library pour cet ISBN (Google Books n’a pas répondu). Complète à la main.')
+      : t('Aucune fiche chez Open Library pour cet ISBN. Complète à la main.')) : null;
+  // Tables fermées, lues par hasOwn : un motif inconnu (ou hostile, « __proto__ ») retombe sur un texte sûr (S12).
+  const INDISPONIBLE = { delai: t('Open Library n’a pas répondu à temps.'), reseau: t('Impossible de joindre Open Library. Vérifie ta connexion.'), limite: t('Open Library reçoit trop de demandes en ce moment. Attends quelques secondes.'), serveur: t('Open Library est en panne pour le moment.'), horsligne: t('Tu es hors ligne.') };
+  const VALIDATION = { longueur: t('Cet ISBN n’est pas valide, vérifie les chiffres.'), controle: t('Cet ISBN n’est pas valide, vérifie les chiffres.'), pas_isbn: t('Ce code-barres n’est pas un ISBN.') };
+  const lire = (table, cle, repli) => (typeof cle === 'string' && Object.hasOwn(table, cle) ? table[cle] : repli);
+  const isbnValide = !isbn || validerIsbn(isbn).ok;
+  const indisponible = resultat?.statut === 'indisponible' && !recherche;
+  return { pas, isbn, champs: c, provenance, recherche, reprise, validation, resultat, suggestions, cleGoogle, lecteurDisponible, enCours, isbnValide,
+    peutEnregistrer: pas === 2 && !!c.title.trim() && !recherche && !enCours,
+    peutReessayer: indisponible,
+    messages: {
+      provenance: provenanceMessage,
+      recherche: recherche ? (reprise ? t('Nouvel essai…') : t('Recherche…')) : null,
+      lecteur: lecteurDisponible ? null : t('Le lecteur de code-barres n’est pas offert dans ce navigateur.'),
+      validation: validation ? lire(VALIDATION, validation, VALIDATION.longueur) : null,
+      indisponible: indisponible ? lire(INDISPONIBLE, resultat.motif, INDISPONIBLE.serveur) : null,
+      sources: cleGoogle ? t('L’ISBN est envoyé à Open Library, puis à Google Books si besoin.') : t('L’ISBN est envoyé à Open Library.'),
+      rappelIsbn: isbn ? (isbnValide ? `${t('ISBN')} ${isbn}` : t('ISBN {i} — non valide, ne sera pas enregistré', { i: isbn })) : null,
+    } };
 }
 
 export function fabriquerLivre({ champs, isbn, coverSha256 = null }, { newId }) {
+  const v = validerIsbn(isbn);
   const c = { ...CHAMPS_VIDES(), ...champs };
-  const book = { id: newId('bk'), title: c.title.trim(), author: c.author.trim(), cuisines: [...c.cuisines], tags: [] };
-  const edition = { id: newId('ed'), book_id: book.id, isbn: nettoyerIsbn(isbn) || null, publisher: c.publisher.trim() || null, year: c.year ? parseInt(c.year, 10) || null : null, language: c.language || null, unit_convention_id: c.convention || null, convention_evidence: c.convention ? 'confirmed_by_user' : null, owned: true, cover_sha256: coverSha256 || null };
+  const book = { id: newId('bk'), title: c.title.trim(), author: c.author.trim(), cuisines: [...c.cuisines], tags: [...c.tags] };
+  const edition = { id: newId('ed'), book_id: book.id, isbn: v.ok ? v.isbn13 : null, publisher: c.publisher.trim() || null, year: c.year ? parseInt(c.year, 10) || null : null, language: c.language || null, unit_convention_id: c.convention || null, convention_evidence: c.convention ? 'confirmed_by_user' : null, owned: true, cover_sha256: coverSha256 || null };
   return { book, edition };
 }
 
