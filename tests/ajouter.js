@@ -1476,8 +1476,8 @@ export async function runAjouterTests({ eq, ok }) {
     const titreDe = (root) => [...root.querySelectorAll('input[type="text"]')].find((i) => i.name !== 'isbn');
     const rappel = (root) => [...root.querySelectorAll('span.muted')].find((s) => s.textContent.startsWith('ISBN'))?.textContent ?? null;
     await withRepo(async (repo, db) => {
-      const urls = []; const enVol = new Map(); // isbn → fonction qui libère la réponse search.json
-      const fetch = async (u) => { const s = String(u); urls.push(s); if (s.startsWith('https://openlibrary.org/search.json')) { const isbn = new URL(s).searchParams.get('isbn'); return new Promise((r) => { enVol.set(isbn, () => r(reponseJson({ docs: [{ title: `Livre ${isbn}`, subject: ['Barbecuing', 'Charcoal'] }] }))); }); } return r404; };
+      const urls = []; const rienPour = new Set(); const enVol = new Map(); // isbn → fonction qui libère la réponse search.json
+      const fetch = async (u) => { const s = String(u); urls.push(s); if (s.startsWith('https://openlibrary.org/search.json')) { const isbn = new URL(s).searchParams.get('isbn'); if (rienPour.has(isbn)) return reponseJson({ numFound: 0, docs: [] }); return new Promise((r) => { enVol.set(isbn, () => r(reponseJson({ docs: [{ title: `Livre ${isbn}`, subject: ['Barbecuing', 'Charcoal'] }] }))); }); } return r404; };
       const liberer = (isbn) => { const f = enVol.get(isbn); enVol.delete(isbn); f(); };
       const navigations = [];
       const deps = { repo, fetch, enLigne: () => true, attendre: async () => {}, tentativeMs: 5000, navigate: (p) => navigations.push(p) };
@@ -1496,7 +1496,7 @@ export async function runAjouterTests({ eq, ok }) {
       taper(r2, A); cliquer(r2, 'Identifier');
       await attendre(() => enVol.has(A), 'A en vol (2)');
       cliquer(r2, 'Saisir à la main'); cliquer(r2, '← Changer d’ISBN');
-      taper(r2, B); cliquer(r2, 'Identifier');
+      taper(r2, '2890772810'); cliquer(r2, 'Identifier');
       await attendre(() => enVol.has(B), 'B en vol');
       liberer(A);
       await attendre(() => r2.etatRoute().reponsesRecues === 1, 'réponse tardive de A reçue (2)');
@@ -1512,7 +1512,7 @@ export async function runAjouterTests({ eq, ok }) {
       await attendre(() => navigations.length === 1, 'navigation après enregistrement');
       const editions = await db.getAll('book_editions');
       const livre = await db.get('books', editions[0].book_id);
-      eq([editions.length, editions[0].isbn, livre.tags, navigations[0] === `/books/${editions[0].id}?nouveau=1`], [1, B, ['barbecuing'], true], 'route : l’édition porte l’ISBN-13, le livre ses mots-clés, la navigation part vers la fiche (F15, § 12.1)');
+      eq([editions.length, editions[0].isbn, livre.tags, navigations[0] === `/books/${editions[0].id}?nouveau=1`], [1, B, ['barbecuing'], true], 'route : l’édition porte l’ISBN-13 (saisi en ISBN-10), le livre ses mots-clés, la navigation part vers la fiche (F15, § 12.1)');
       // 4. Saisie à la main invalide → édition sans ISBN ; 10 000 chiffres → rappel borné, rien en base (S8).
       const r3 = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
       taper(r3, '12345'); cliquer(r3, 'Saisir à la main');
@@ -1528,14 +1528,22 @@ export async function runAjouterTests({ eq, ok }) {
       cliquer(r4, 'Ajouter ce livre');
       await attendre(() => navigations.length === 3, 'navigation 3');
       eq((await db.getAll('book_editions')).filter((e) => e.isbn === null).length, 2, 'route : la suite démesurée n’atteint pas la base (S8)');
-      ok(!urls.some((u) => u.includes('googleapis')), 'route : sans clé, Google Books jamais appelé');
+      // 6. Open Library répond « rien » : le repli legacy est tenté, et sans clé Google Books ne l'est jamais.
+      rienPour.add('9780000055569');
+      const r6 = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
+      taper(r6, '9780000055569'); cliquer(r6, 'Identifier');
+      await attendre(() => r6.etatRoute().reponsesRecues === 1, 'réponse « rien » reçue');
+      await new Promise((r) => setTimeout(r, 0));
+      ok((r6.querySelector('.status.info')?.textContent ?? '').includes('Aucune fiche chez Open Library pour cet ISBN'), 'route : un « rien » d’Open Library est dit introuvable');
+      eq(urls.filter((u) => u.includes('/api/books')).length, 1, 'route : le repli legacy a bien été tenté');
+      ok(!urls.some((u) => u.includes('googleapis')), 'route : sans clé, un « rien » d’Open Library ne tente jamais Google Books');
       // 5. « ← Changer d’ISBN » vide les suggestions (elles appartiennent à l'ISBN qui les a produites, § 12.2).
       const r5 = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
       taper(r5, A); cliquer(r5, 'Identifier');
       await attendre(() => enVol.has(A), 'A en vol (5)'); liberer(A);
       await attendre(() => r5.querySelector('.suggestions'), 'suggestions de A');
-      cliquer(r5, '← Changer d’ISBN');
-      eq([r5.etatRoute().suggestions, r5.querySelector('.suggestions')], [null, null], 'route : revenir changer l’ISBN abandonne les suggestions de l’ancien (§ 12.2)');
+      cliquer(r5, '← Changer d’ISBN'); cliquer(r5, 'Saisir à la main');
+      eq([r5.etatRoute().suggestions, r5.querySelector('.suggestions'), !!r5.querySelector('[data-role="mots-cles"]')], [null, null, true], 'route : revenir changer l’ISBN abandonne les suggestions de l’ancien — état ET écran, au pas 2 (§ 12.2)');
     });
   }
   // --- § 6 Couverture : ce que la fiche livre et Mes livres MONTRENT, sur une base jetable
