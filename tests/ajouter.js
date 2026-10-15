@@ -228,71 +228,88 @@ export async function runAjouterTests({ eq, ok }) {
   eq(ISBN.codeBarresVersIsbn([{ rawValue: '5901234123457' }, { rawValue: '9781785035289' }]), '9781785035289', 'isbn : le premier code au motif 978/979 est retenu');
   eq(ISBN.codeBarresVersIsbn([]), null, 'isbn : aucun code → null');
   eq(ISBN.codeBarresVersIsbn(null), null, 'isbn : entrée absente → null');
-  eq(LA.LIMITES_ISBN, { champ: 300, corps: 262144, delaiMs: 10000 }, 'livre : bornes S3');
+  eq(LA.LIMITES_ISBN, { champ: 300, corps: 262144, delaiMs: 10000, tentativeMs: 8000, repriseMs: 1500, totalMs: 20000 }, 'livre : bornes S3 + délais du lot ISBN (F24 : delaiMs de la couverture intact)');
   eq(LA.OPTIONS_FETCH, { mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' }, 'livre : options de fetch explicites (S12)');
   eq(LA.nettoyerIsbn(' 978-2-7619-5000-1 '), '9782761950001', 'livre : ISBN sans tirets ni espaces');
   {
-    // fetch injecté : Open Library répond, Google jamais appelé
-    const appels = [];
-    const reponse = (status, corps) => ({ ok: status < 400, status, text: async () => corps });
-    const fetchOL = async (url, options) => { appels.push([url, options]); return reponse(200, JSON.stringify({ 'ISBN:9782761950001': { title: 'T'.repeat(400), authors: [{ name: 'A' }, { name: 'B' }], publishers: [{ name: 'P' }], publish_date: 'March 2019' } })); };
-    const r = await LA.lookupIsbn('9782761950001', { fetch: fetchOL });
-    eq(r.source, 'openlibrary', 'livre : Open Library d’abord');
-    eq([r.fiche.title.length, r.fiche.author, r.fiche.publisher, r.fiche.year, r.fiche.language], [300, 'A, B', 'P', 2019, null], 'livre : champs tronqués à 300, année entière, langue inconnue → null');
-    eq(appels.length, 1, 'livre : Google Books pas appelé quand Open Library répond');
-    // Les QUATRE champs, pas seulement credentials : une option S12 perdue en route ne se verrait pas autrement.
-    eq(appels[0][1], { ...LA.OPTIONS_FETCH, signal: undefined }, 'livre : les options S12 sont passées au fetch, toutes les quatre');
-    // Open Library vide → Google Books ; les deux appels dans un try
-    const fetchG = async (url) => url.includes('openlibrary') ? reponse(200, '{}') : reponse(200, JSON.stringify({ items: [{ volumeInfo: { title: 'G', authors: ['X'], publisher: 'Q', publishedDate: '2001-02', language: 'fr' } }] }));
-    const g = await LA.lookupIsbn('9782761950001', { fetch: fetchG });
-    eq([g.source, g.fiche.title, g.fiche.language, g.fiche.year], ['googlebooks', 'G', 'fr', 2001], 'livre : repli Google Books');
-    eq(await LA.lookupIsbn('9782761950001', { fetch: async () => { throw new Error('reseau'); } }), { fiche: null, source: null }, 'livre : un fetch qui rejette → aucune fiche, aucune exception');
-    eq(await LA.lookupIsbn('9782761950001', { fetch: async (u) => u.includes('openlibrary') ? reponse(200, '{}') : reponse(429, '{}') }), { fiche: null, source: null }, 'livre : 429 Google Books = échec ordinaire');
-    eq(await LA.lookupIsbn('9782761950001', { fetch: async () => reponse(200, 'x'.repeat(262145)) }), { fiche: null, source: null }, 'livre : corps > 256 Ko abandonné avant JSON.parse');
-    eq((await LA.lookupIsbn('9782761950001', { fetch: async () => reponse(200, JSON.stringify({ 'ISBN:9782761950001': { title: 'T', publish_date: 'vers 19' } })) })).fiche.year, null, 'livre : une année qui n’est pas quatre chiffres → vide');
-    // délai : le signal fourni est transmis
+    // lookupIsbn : fetch, attente et délais injectés (aucune vraie attente). Une réponse factice sans body : lireBornee
+    // rend false et le corps est lu par text(), comme sur main.
+    const reponse = (status, corps) => ({ ok: status >= 200 && status < 300, status, headers: new Headers(), text: async () => (typeof corps === 'string' ? corps : JSON.stringify(corps)) });
+    const SEARCH = 'https://openlibrary.org/search.json?isbn=9781785035289&fields=title,author_name,publisher,first_publish_year,language,subject&limit=1';
+    const LEGACY = 'https://openlibrary.org/api/books?bibkeys=ISBN:9781785035289&format=json&jscmd=data';
+    const jamais = async () => { throw new Error('attendre ne doit pas être appelée'); };
+    const sansAttente = async () => {};
+    const chercher = (fetch, options = {}) => LA.lookupIsbn('9781785035289', { fetch, attendre: sansAttente, tentativeMs: 50, ...options });
+    const VIDE = { title: 'T', author: '', publisher: '', year: null, language: null, motsCles: [] };
+    // Garde S9 : une entrée qui n'est pas un ISBN-13 ne part jamais sur le réseau.
+    let erreur = null; let appelsGarde = 0;
+    try { await LA.lookupIsbn('9781&x=1', { fetch: async () => { appelsGarde += 1; return reponse(200, {}); } }); } catch (e) { erreur = e; }
+    eq([erreur instanceof TypeError, appelsGarde], [true, 0], 'lookup : une entrée qui n’est pas un ISBN-13 lève avant tout appel (S9)');
+    // Trouvé par search.json en un appel, fiche typée, mots-clés proposés (§ 12.2).
+    const urls = [];
+    const sujets = ['Barbecuing', 'barbecuing', 12, 'x'.repeat(80), 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'];
+    const r1 = await chercher(async (u, o) => { urls.push([u, o]); return reponse(200, { numFound: 1, docs: [{ title: 'Berber and Q', author_name: ['Josh Katz'], publisher: ['Ebury Publishing', 'Penguin Random House'], first_publish_year: 2018, language: ['eng', 'fre'], subject: sujets }] }); }, { attendre: jamais });
+    eq([r1.statut, r1.source, r1.appels, r1.motif, r1.google], ['trouve', 'openlibrary', 1, null, 'non_appele'], 'lookup : search.json répond → trouvé en un appel');
+    eq([r1.fiche.title, r1.fiche.author, r1.fiche.publisher, r1.fiche.year, r1.fiche.language], ['Berber and Q', 'Josh Katz', 'Ebury Publishing', 2018, 'fr'], 'lookup : fiche typée, premier éditeur, le français d’abord');
+    eq([r1.fiche.motsCles.length, r1.fiche.motsCles[0], r1.fiche.motsCles[1].length, r1.fiche.motsCles.includes('barbecuing'), LA.MOTS_CLES_MAX], [10, 'Barbecuing', 60, false, 10], 'lookup : mots-clés proposés — 10 au plus, tronqués à 60, dédoublonnés par normaliser, chaînes seulement (§ 12.2)');
+    eq(urls[0][0], SEARCH, 'lookup : adresse de l’API actuelle, fields avec subject, sans isbn (F13, § 12.2)');
+    ok(urls[0][1].signal instanceof AbortSignal && urls[0][1].mode === 'cors' && urls[0][1].credentials === 'omit' && urls[0][1].cache === 'no-store' && urls[0][1].referrerPolicy === 'no-referrer', 'lookup : options S12 + un signal par tentative');
+    // « Rien » sans numFound → legacy en filet, champs typés, sujets legacy.
+    const r2 = await chercher(async (u) => (u === SEARCH ? reponse(200, { docs: [] }) : reponse(200, { 'ISBN:9781785035289': { title: 'Legacy', authors: [{ name: 'A' }, { nom: 'x' }], publishers: [{ name: 'P' }], publish_date: 'March 2018', subjects: [{ name: 'Grill' }, { nom: 'x' }] } })), { attendre: jamais });
+    eq([r2.statut, r2.source, r2.appels, r2.fiche], ['trouve', 'openlibrary', 2, { title: 'Legacy', author: 'A', publisher: 'P', year: 2018, language: null, motsCles: ['Grill'] }], 'lookup : « rien » (sans numFound) → legacy en filet, champs et sujets typés');
+    const r3 = await chercher(async (u) => reponse(200, u === SEARCH ? { numFound: 0, docs: [] } : {}), { attendre: jamais });
+    eq([r3.statut, r3.appels, r3.motif, r3.google, r3.fiche, r3.source], ['introuvable', 2, null, 'non_appele', null, null], 'lookup : deux « rien » → introuvable');
+    const r4 = await chercher(async (u) => { if (u === SEARCH) return reponse(200, { docs: [] }); throw new Error('reseau'); }, { attendre: jamais });
+    eq([r4.statut, r4.appels], ['introuvable', 2], 'lookup : le legacy qui tombe ne change pas le statut (search a répondu)');
+    // Reprise (I-R).
+    const attentes = []; let surReprises = 0;
+    const r5 = await chercher(async () => { throw new Error('reseau'); }, { attendre: async (ms, s) => { attentes.push([ms, s === undefined || s instanceof AbortSignal]); }, repriseMs: 1500, surReprise: () => { surReprises += 1; } });
+    eq([r5.statut, r5.motif, r5.appels, attentes, surReprises], ['indisponible', 'reseau', 2, [[1500, true]], 1], 'lookup : échec muet → une reprise, attendre(repriseMs, signal), surReprise une fois (I-R)');
+    let n6 = 0;
+    const r6 = await chercher(async () => { n6 += 1; if (n6 === 1) throw new Error('reseau'); return reponse(200, { docs: [{ title: 'T' }] }); });
+    eq([r6.statut, r6.appels, r6.fiche], ['trouve', 2, VIDE], 'lookup : la reprise peut trouver ; sans subject, motsCles vide');
+    const r7 = await chercher(async () => reponse(429, {}), { attendre: jamais });
+    eq([r7.statut, r7.motif, r7.appels], ['indisponible', 'limite', 1], 'lookup : 429 = limite, jamais réessayé par la machine (I-R)');
+    const r8 = await chercher(async () => reponse(503, {}), { attendre: jamais });
+    eq([r8.statut, r8.motif, r8.appels], ['indisponible', 'serveur', 1], 'lookup : 5xx = serveur, pas de reprise');
+    eq((await chercher(async () => reponse(200, '<html>maintenance</html>'), { attendre: jamais })).motif, 'serveur', 'lookup : un 200 qui n’est pas du JSON = serveur, jamais une exception');
+    // Délai : un fetch qui ne finit qu'à l'abandon de SON signal.
+    const pendu = (u, o) => new Promise((resolve, reject) => o.signal.addEventListener('abort', () => reject(new DOMException('abandon', 'AbortError')), { once: true }));
     let signalVu = null;
-    await LA.lookupIsbn('9782761950001', { fetch: async (u, o) => { signalVu = o.signal; return reponse(200, '{}'); }, signal: new AbortController().signal });
-    ok(signalVu instanceof AbortSignal, 'livre : le signal d’abandon est transmis au fetch');
-    // RF-m6 : nettoyerIsbn ne laisse passer que chiffres et X, mais l'ISBN entre dans trois adresses — il y est
-    // encodé, pour qu'aucun appelant futur ne puisse y glisser un « & » ou un « / ».
-    const vus = [];
-    await LA.lookupIsbn('97/8 x', { fetch: async (u) => { vus.push(u); return reponse(404, ''); } });
-    eq([vus.length, vus[0].includes('ISBN:97%2F8%20x'), vus[1].includes('q=isbn:97%2F8%20x'), vus.some((u) => u.includes('97/8'))], [2, true, true, false], 'livre : l’ISBN est encodé dans les deux adresses de métadonnées (RF-m6)');
-    eq(LA.URL_COUVERTURE_OL('97/8 x'), 'https://covers.openlibrary.org/b/isbn/97%2F8%20x-L.jpg?default=false', 'couverture : l’ISBN est encodé dans l’adresse de la couverture (RF-m6)');
-  }
-  {
-    // S1/F1 : le corps des métadonnées est lu EN FLUX et coupé à 256 Ko, comme celui d'une couverture (R-UX-12).
-    // Sans cela, `await r.text()` tirait TOUT le corps avant de regarder sa taille : un serveur qui répond sans fin
-    // remplissait la mémoire de l'appareil, et le contrôle d'après ne servait à rien.
-    const espion = { emis: 0, annule: 0 };
-    const sansFin = () => new ReadableStream({
-      pull(c) {
-        if (espion.emis >= 64 * 16 * 1024) { c.close(); return; } // garde-fou : sans coupure le test échoue, il ne boucle pas
-        espion.emis += 16 * 1024;
-        c.enqueue(new Uint8Array(16 * 1024));
-      },
-      cancel() { espion.annule += 1; },
-    });
-    const sansTexte = (body) => ({ ok: true, status: 200, body, text: async () => { throw new Error('text() ne doit pas etre appele quand il y a un flux'); } });
-    eq(await LA.lookupIsbn('978', { fetch: async () => sansTexte(sansFin()) }), { fiche: null, source: null }, 'livre : un corps de métadonnées sans fin → aucune fiche (S1)');
-    eq([espion.annule, espion.emis <= 2 * 300 * 1024], [2, true], 'livre : la lecture est ANNULÉE dès 256 Ko, sur les deux appels — jamais les 1 Mo du corps sans fin (S1)');
-    // Un corps VALIDE mais trop gros : refusé par la BORNE, pas par le catch de JSON.parse (la preuve : il parse).
-    // 1 Mo, pas 300 Ko : un corps à peine au-delà de la borne se termine dans le morceau même qui la dépasse, donc
-    // le flux se ferme de lui-même et « la lecture a été coupée » ne se mesure plus (cancel() sur un flux déjà
-    // clos ne touche pas la source).
-    const gros = JSON.stringify({ 'ISBN:978': { title: 'T'.repeat(1000000) } });
-    ok(JSON.parse(gros)['ISBN:978'].title.length === 1000000, 'livre : le corps de 1 Mo du test est bien du JSON valide');
-    const octetsGros = new TextEncoder().encode(gros);
-    const grosEspion = { emis: 0, annule: 0 };
-    const fluxGros = () => { let reste = octetsGros; return new ReadableStream({ pull(c) { if (!reste.length) { c.close(); return; } const m = reste.slice(0, 64 * 1024); reste = reste.slice(64 * 1024); grosEspion.emis += m.length; c.enqueue(m); }, cancel() { grosEspion.annule += 1; } }); };
-    eq(await LA.lookupIsbn('978', { fetch: async () => sansTexte(fluxGros()) }), { fiche: null, source: null }, 'livre : un corps JSON VALIDE de 1 Mo est refusé par la borne, pas par une erreur d’analyse (S1)');
-    // Les DEUX appels ensemble ont tiré moins d'octets qu'UN seul corps entier : la lecture est bien coupée (un
-    // flux tire un morceau d'avance, d'où une marge au lieu d'un compte exact).
-    eq([grosEspion.annule, grosEspion.emis < octetsGros.length, grosEspion.emis > 0], [2, true, true], 'livre : le corps trop gros est coupé — les deux appels ensemble tirent moins qu’UN corps entier, et la source est annulée deux fois (S1)');
-    // Et un 429 PORTEUR d'une fiche parfaitement valide reste un échec : c'est `!r.ok` qui tranche, pas le contenu.
-    const corpsValide = JSON.stringify({ 'ISBN:978': { title: 'Vrai titre', authors: [{ name: 'A' }], publishers: [], publish_date: '2020' } });
-    eq(await LA.lookupIsbn('978', { fetch: async () => ({ ok: false, status: 429, text: async () => corpsValide }) }), { fiche: null, source: null }, 'livre : un 429 porteur d’une fiche valide reste un échec — `!r.ok` est lu avant le corps (S1)');
+    const r9 = await chercher(async (u, o) => { signalVu = signalVu || o.signal; return pendu(u, o); }, { tentativeMs: 1 });
+    eq([r9.statut, r9.motif, r9.appels, signalVu.aborted], ['indisponible', 'delai', 2, true], 'lookup : chrono de tentative → delai, signal de la tentative abandonné, puis une reprise');
+    const ctl1 = new AbortController();
+    const r10 = await chercher(async (u, o) => { setTimeout(() => ctl1.abort(), 0); return pendu(u, o); }, { signal: ctl1.signal, tentativeMs: 5000, attendre: jamais });
+    eq([r10.statut, r10.motif, r10.appels], ['indisponible', 'delai', 1], 'lookup : abandon extérieur pendant la tentative → delai, aucune reprise (S4)');
+    const ctl2 = new AbortController();
+    const r11 = await chercher(async () => { throw new Error('reseau'); }, { signal: ctl2.signal, attendre: async () => { ctl2.abort(); } });
+    eq([r11.appels, r11.statut, r11.motif], [1, 'indisponible', 'delai'], 'lookup : abandon pendant l’attente → la seconde tentative ne part pas (S4a)');
+    const ctl3 = new AbortController(); ctl3.abort();
+    const r12 = await chercher(async () => reponse(200, { docs: [{ title: 'T' }] }), { signal: ctl3.signal });
+    eq([r12.appels, r12.statut, r12.motif], [0, 'indisponible', 'delai'], 'lookup : signal déjà abandonné → zéro appel (S4b)');
+    // Formes hostiles ou dégradées (S6/F13).
+    eq((await chercher(async () => reponse(200, {}), { attendre: jamais })).motif, 'serveur', 'lookup : search sans docs = forme inattendue → serveur');
+    const r13 = await chercher(async (u) => reponse(200, u === SEARCH ? { docs: [{ author_name: ['A'] }] } : {}), { attendre: jamais });
+    eq([r13.statut, r13.appels], ['introuvable', 2], 'lookup : docs[0] sans titre = « rien », le legacy est consulté');
+    eq((await chercher(async (u) => reponse(200, u === SEARCH ? { docs: [{ title: 12 }] } : {}), { attendre: jamais })).statut, 'introuvable', 'lookup : un titre qui n’est pas une chaîne n’est pas une fiche');
+    const bidi = String.fromCodePoint(0x202e), sepLigne = String.fromCodePoint(0x2028);
+    const r14 = await chercher(async () => reponse(200, { docs: [{ title: `T${bidi}${sepLigne}x`, author_name: 'x', publisher: [{}], language: 'french', first_publish_year: { a: 1 }, subject: 'x' }] }), { attendre: jamais });
+    eq(r14.fiche, { title: 'Tx', author: '', publisher: '', year: null, language: null, motsCles: [] }, 'lookup : champs typés, Cc/Cf/U+2028 retirés, subject non tableau → [] (S6)');
+    eq((await chercher(async () => reponse(200, { docs: [{ title: 'T', first_publish_year: '2018' }] }), { attendre: jamais })).fiche.year, 2018, 'lookup : une année reçue en chaîne reste une année');
+    eq((await chercher(async () => reponse(200, { docs: [{ title: 'T'.repeat(400) }] }), { attendre: jamais })).fiche.title.length, 300, 'lookup : titre tronqué à 300 (S3)');
+    // Corps en flux > 256 Kio : coupé par cancel(), jamais gardé (S7, via lireBornee).
+    let annule = false;
+    const flux = () => ({ ok: true, status: 200, headers: new Headers(), body: { getReader: () => ({ read: async () => ({ done: false, value: new Uint8Array(100 * 1024) }), cancel: async () => { annule = true; } }) } });
+    const r15 = await chercher(async () => flux(), { attendre: jamais });
+    eq([r15.motif, annule], ['serveur', true], 'lookup : un corps sans fin est coupé à 256 Kio (S7)');
+    // attenteReelle : abandonnable, rend tout de suite si déjà abandonné.
+    const ctl4 = new AbortController(); ctl4.abort();
+    const t0 = performance.now(); await LA.attenteReelle(5000, ctl4.signal);
+    ok(performance.now() - t0 < 100, 'lookup : attenteReelle rend tout de suite sur un signal déjà abandonné');
+    const ctl5 = new AbortController(); setTimeout(() => ctl5.abort(), 5);
+    const t1 = performance.now(); await LA.attenteReelle(5000, ctl5.signal);
+    ok(performance.now() - t1 < 1000, 'lookup : attenteReelle est coupée par l’abandon');
+    const t2 = performance.now(); await LA.attenteReelle(20); ok(performance.now() - t2 >= 15, 'lookup : attenteReelle sans signal rend après le délai');
   }
   {
     // C2 : `language` a un défaut NON VIDE — « ne remplir que ce qui est vide » ne l'atteignait jamais, et un livre
@@ -994,6 +1011,7 @@ export async function runAjouterTests({ eq, ok }) {
         const couvertures = new Map(); // isbn → fonction qui rend la réponse (le test maîtrise le moment)
         const fichesLentes = new Map(); // isbn → promesse à libérer AVANT la réponse d'identification
         const sansFicheOl = new Set();
+        const languesOl = new Map(); // isbn → langues rendues par search.json (C2)
         const r404 = { ok: false, status: 404, headers: new Headers(), text: async () => '', blob: async () => new Blob([]) };
         const reponseImage = (png) => ({ ok: true, status: 200, headers: new Headers({ 'content-type': 'image/png', 'content-length': String(png.size) }), blob: async () => png });
         globalThis.fetch = async (url) => {
@@ -1004,10 +1022,15 @@ export async function runAjouterTests({ eq, ok }) {
             const donner = couvertures.get(isbn);
             return donner ? await donner() : r404;
           }
-          if (u.startsWith('https://openlibrary.org/api/books')) {
-            const isbn = u.split('ISBN:')[1].split('&')[0];
+          if (u.startsWith('https://openlibrary.org/search.json')) {
+            const isbn = new URL(u).searchParams.get('isbn');
             const lente = fichesLentes.get(isbn);
             if (lente) await lente;
+            const corps = sansFicheOl.has(isbn) ? { numFound: 0, docs: [] } : { numFound: 1, docs: [{ title: `Livre ${isbn}`, author_name: [], publisher: [], first_publish_year: 2020, language: languesOl.get(isbn) || ['fre'] }] };
+            return { ok: true, status: 200, headers: new Headers(), text: async () => JSON.stringify(corps) };
+          }
+          if (u.startsWith('https://openlibrary.org/api/books')) {
+            const isbn = u.split('ISBN:')[1].split('&')[0];
             if (sansFicheOl.has(isbn)) return r404;
             return { ok: true, status: 200, headers: new Headers(), text: async () => JSON.stringify({ [`ISBN:${isbn}`]: { title: `Livre ${isbn}`, authors: [], publishers: [], publish_date: '2020' } }) };
           }
@@ -1028,25 +1051,25 @@ export async function runAjouterTests({ eq, ok }) {
         const ILLISIBLE = 'La couverture reçue n’a pas pu être lue.';
 
         // 1. Une couverture reçue ne survit pas à l’ISBN qui l’a produite.
-        couvertures.set('111', async () => reponseImage(img111));
+        couvertures.set('9780000001115', async () => reponseImage(img111));
         const r1 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
-        taper(r1, '111'); cliquer(r1, 'Identifier');
+        taper(r1, '9780000001115'); cliquer(r1, 'Identifier');
         await attendre(() => image(r1), 'la couverture de 111 est affichée');
         eq(message(r1), 'Couverture reçue d’Open Library.', 'route : la couverture reçue d’Open Library est annoncée, image à l’appui (I-B)');
         cliquer(r1, '← Changer d’ISBN');
-        taper(r1, '222'); cliquer(r1, 'Identifier');
+        taper(r1, '9780000002228'); cliquer(r1, 'Identifier');
         await attendre(() => message(r1) === RIEN, 'la réponse pour 222 (aucune couverture)');
         eq(image(r1), false, 'route : la couverture de l’ISBN précédent ne survit pas à une nouvelle identification (R-UX-13)');
         await attendreImages(r1);
 
         // 2. Une réponse tardive appartient à SA demande : celle d’un ISBN abandonné est ignorée.
         let libererA = null;
-        couvertures.set('333', async () => { await new Promise((r) => { libererA = r; }); return reponseImage(img333); });
+        couvertures.set('9780000003331', async () => { await new Promise((r) => { libererA = r; }); return reponseImage(img333); });
         const r2 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
-        taper(r2, '333'); cliquer(r2, 'Identifier');
+        taper(r2, '9780000003331'); cliquer(r2, 'Identifier');
         await attendre(() => zone(r2) && libererA, 'la demande de couverture de 333 est en vol');
         cliquer(r2, '← Changer d’ISBN');
-        taper(r2, '444'); cliquer(r2, 'Identifier');
+        taper(r2, '9780000004444'); cliquer(r2, 'Identifier');
         await attendre(() => message(r2) === RIEN, 'la réponse pour 444 (aucune couverture)');
         const files333 = await compterFiles();
         libererA();
@@ -1059,12 +1082,12 @@ export async function runAjouterTests({ eq, ok }) {
         // 3. « Retirer » tient devant une réponse tardive du MÊME ISBN (touchee) : ici l’ISBN ne peut rien trancher.
         let libererB = null;
         let tours = 0;
-        couvertures.set('555', async () => { tours += 1; if (tours === 1) { await new Promise((r) => { libererB = r; }); return reponseImage(img555a); } return reponseImage(img555b); });
+        couvertures.set('9780000005557', async () => { tours += 1; if (tours === 1) { await new Promise((r) => { libererB = r; }); return reponseImage(img555a); } return reponseImage(img555b); });
         const r3 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
-        taper(r3, '555'); cliquer(r3, 'Identifier');
+        taper(r3, '9780000005557'); cliquer(r3, 'Identifier');
         await attendre(() => zone(r3) && libererB, 'la 1re demande de couverture de 555 est en vol');
         cliquer(r3, '← Changer d’ISBN');
-        taper(r3, '555'); cliquer(r3, 'Identifier');
+        taper(r3, '9780000005557'); cliquer(r3, 'Identifier');
         await attendre(() => image(r3), 'la 2e demande de 555 a posé la couverture');
         cliquer(r3, 'Retirer');
         eq([image(r3), message(r3)], [false, null], 'route : « Retirer » vide la zone sur-le-champ');
@@ -1078,9 +1101,9 @@ export async function runAjouterTests({ eq, ok }) {
         // 5. Dernière porte : revenir changer l’ISBN SANS le changer, laisser la réponse de l’ancien arriver
         // (invisible au pas 1), puis « Saisir à la main » — une fiche saisie à la main n’a jamais de couverture reçue.
         let libererC = null;
-        couvertures.set('777', async () => { await new Promise((r) => { libererC = r; }); return reponseImage(img777); });
+        couvertures.set('9780000007773', async () => { await new Promise((r) => { libererC = r; }); return reponseImage(img777); });
         const r5 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
-        taper(r5, '777'); cliquer(r5, 'Identifier');
+        taper(r5, '9780000007773'); cliquer(r5, 'Identifier');
         await attendre(() => zone(r5) && libererC, 'la demande de couverture de 777 est en vol');
         cliquer(r5, '← Changer d’ISBN');
         const files777 = await compterFiles();
@@ -1093,24 +1116,23 @@ export async function runAjouterTests({ eq, ok }) {
 
         // 4. La couverture n’est demandée QUE si Open Library a identifié le livre (I-A : provenance étiquetée).
         // RF-m9 : le fait attendu est l’adresse Google Books APPARUE dans les appels — pas 200 ms au hasard.
-        sansFicheOl.add('666');
+        sansFicheOl.add('9780000006660');
         const avant = urls.length;
         const r4 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
-        taper(r4, '666'); cliquer(r4, 'Identifier');
-        await attendre(() => urls.slice(avant).some((u) => u.startsWith('https://www.googleapis.com/books/')), 'l’appel de repli à Google Books');
+        taper(r4, '9780000006660'); cliquer(r4, 'Identifier');
         await attendre(() => zone(r4), 'le pas 2 pour 666');
         const depuis = urls.slice(avant);
-        eq([depuis.some((u) => u.startsWith('https://covers.openlibrary.org/')), depuis.some((u) => u.startsWith('https://www.googleapis.com/books/')), r4.textContent.includes('Renseigné par Google Books')],
-          [false, true, true], 'route : une fiche venue de Google Books ne demande AUCUNE couverture à Open Library (I-A)');
+        eq([depuis.some((u) => u.startsWith('https://covers.openlibrary.org/')), depuis.some((u) => u.startsWith('https://www.googleapis.com/books/')), r4.textContent.includes('Aucune fiche')],
+          [false, false, true], 'route : sans clé, un « rien » d’Open Library ne demande ni couverture ni Google Books (I-A, § 5)');
         eq([message(r4), passages(r4)], [null, 0], 'route : sans demande de couverture, la zone ne raconte rien et aucun rappel n’est entré (I-B)');
 
         // 6. F3 : « Saisir à la main » PENDANT « Recherche… ». La réponse d’identification est encore en vol et
         // n’appartient plus à cet écran : ni ses champs, ni son étiquette, ni la couverture qu’elle aurait demandée.
         let libererFiche = null;
-        fichesLentes.set('888', new Promise((r) => { libererFiche = r; }));
-        couvertures.set('888', async () => reponseImage(img111));
+        fichesLentes.set('9780000008886', new Promise((r) => { libererFiche = r; }));
+        couvertures.set('9780000008886', async () => reponseImage(img111));
         const r6 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
-        taper(r6, '888'); cliquer(r6, 'Identifier');
+        taper(r6, '9780000008886'); cliquer(r6, 'Identifier');
         await attendre(() => r6.etatRoute().recherche, 'la recherche de 888 est annoncée');
         cliquer(r6, 'Saisir à la main');
         eq([r6.etatRoute().pas, !!zone(r6)], [2, true], 'route : « Saisir à la main » pendant la recherche ouvre le pas 2 tout de suite');
@@ -1126,7 +1148,7 @@ export async function runAjouterTests({ eq, ok }) {
         // (qui dure : createImageBitmap, canvas, JPEG, SHA-256) arrivaient donc trop tard, et la couverture d’un
         // ISBN abandonné se posait sur une fiche saisie à la main. Le ré-encodage est tenu par un stub de
         // createImageBitmap, rendu dans le finally.
-        couvertures.set('999', async () => reponseImage(img999));
+        couvertures.set('9780000009999', async () => reponseImage(img999));
         const r7 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
         const vraiBitmap = globalThis.createImageBitmap;
         let ouvrirPorte = null;
@@ -1135,7 +1157,7 @@ export async function runAjouterTests({ eq, ok }) {
         const files999 = await compterFiles();
         try {
           globalThis.createImageBitmap = async (...a) => { encodages += 1; await porte; return vraiBitmap.call(globalThis, ...a); };
-          taper(r7, '999'); cliquer(r7, 'Identifier');
+          taper(r7, '9780000009999'); cliquer(r7, 'Identifier');
           await attendre(() => encodages > 0, 'le ré-encodage de la couverture de 999 a commencé');
           cliquer(r7, '← Changer d’ISBN');
           cliquer(r7, 'Saisir à la main');
@@ -1150,29 +1172,29 @@ export async function runAjouterTests({ eq, ok }) {
 
         // 8. S12 : une couverture REÇUE puis refusée au ré-encodage ne se raconte pas « aucune couverture reçue » —
         // ce n’est pas le même fait, et la personne n’a pas la même chose à faire.
-        couvertures.set('1010', async () => reponseImage(png(400, 600))); // en-tête valide, aucun pixel : indécodable
+        couvertures.set('9780000010100', async () => reponseImage(png(400, 600))); // en-tête valide, aucun pixel : indécodable
         const r8 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
-        taper(r8, '1010'); cliquer(r8, 'Identifier');
+        taper(r8, '9780000010100'); cliquer(r8, 'Identifier');
         await attendre(() => message(r8) !== null, 'le message de la couverture de 1010');
         eq([message(r8), image(r8)], [ILLISIBLE, false], 'route : une couverture reçue mais illisible le DIT (S12), sans image');
         await attendreImages(r8);
 
         // 9. C3 : une seconde identification ne fusionne plus par-dessus les champs du PREMIER ISBN (titre A + ISBN B).
         const r9 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
-        taper(r9, '1112'); cliquer(r9, 'Identifier');
+        taper(r9, '9780000011121'); cliquer(r9, 'Identifier');
         await attendre(() => r9.etatRoute().pas === 2, 'le pas 2 du premier ISBN');
-        eq([r9.etatRoute().champs.title, r9.etatRoute().isbn], ['Livre 1112', '1112'], 'route : le titre du premier ISBN est posé');
+        eq([r9.etatRoute().champs.title, r9.etatRoute().isbn], ['Livre 9780000011121', '9780000011121'], 'route : le titre du premier ISBN est posé');
         cliquer(r9, '← Changer d’ISBN');
-        taper(r9, '2223'); cliquer(r9, 'Identifier');
+        taper(r9, '9780000022233'); cliquer(r9, 'Identifier');
         await attendre(() => r9.etatRoute().pas === 2, 'le pas 2 du second ISBN'); // `isbn` est posé par la FRAPPE : attendre dessus ne prouverait rien
-        eq([r9.etatRoute().champs.title, r9.etatRoute().isbn], ['Livre 2223', '2223'], 'route : le titre suit le NOUVEL ISBN — plus de titre A affiché avec l’ISBN B (C3)');
+        eq([r9.etatRoute().champs.title, r9.etatRoute().isbn], ['Livre 9780000022233', '9780000022233'], 'route : le titre suit le NOUVEL ISBN — plus de titre A affiché avec l’ISBN B (C3)');
         // Variante : ce que la personne a corrigé reste à elle.
         cliquer(r9, '← Changer d’ISBN');
-        taper(r9, '3334'); cliquer(r9, 'Identifier');
+        taper(r9, '9780000033345'); cliquer(r9, 'Identifier');
         await attendre(() => r9.etatRoute().pas === 2, 'le pas 2 du troisième ISBN');
         saisirTitre(r9, 'Mon titre à moi');
         cliquer(r9, '← Changer d’ISBN');
-        taper(r9, '4445'); cliquer(r9, 'Identifier');
+        taper(r9, '9780000044457'); cliquer(r9, 'Identifier');
         await attendre(() => r9.etatRoute().pas === 2, 'le pas 2 du quatrième ISBN');
         eq(r9.etatRoute().champs.title, 'Mon titre à moi', 'route : un titre corrigé à la main survit au changement d’ISBN — c’est sa saisie, pas celle d’un service (C3)');
         // C3 bis : un titre tapé AVANT toute identification. `fusionnerFiche` le garde (il n'est pas vide), mais
@@ -1182,26 +1204,26 @@ export async function runAjouterTests({ eq, ok }) {
         cliquer(r9b, 'Saisir à la main');
         saisirTitre(r9b, 'Mon livre à moi');
         cliquer(r9b, '← Changer d’ISBN');
-        taper(r9b, '1230'); cliquer(r9b, 'Identifier');
+        taper(r9b, '9780000012302'); cliquer(r9b, 'Identifier');
         await attendre(() => r9b.etatRoute().pas === 2, 'le pas 2 du premier ISBN après une saisie à la main');
         eq([r9b.etatRoute().champs.title, r9b.etatRoute().champs.year], ['Mon livre à moi', '2020'], 'route : la fiche distante ne touche pas au titre déjà tapé, mais remplit l’année vide');
         cliquer(r9b, '← Changer d’ISBN');
-        taper(r9b, '2340'); cliquer(r9b, 'Identifier');
+        taper(r9b, '9780000023407'); cliquer(r9b, 'Identifier');
         await attendre(() => r9b.etatRoute().pas === 2, 'le pas 2 du second ISBN');
         eq(r9b.etatRoute().champs.title, 'Mon livre à moi', 'route : un titre tapé AVANT la première identification survit à la seconde — il n’a jamais été « distant » (C3)');
         await attendreImages(r9b);
         await attendreImages(r9);
 
         // 10. C2 vue de la route : un livre anglais identifié par Google Books n’est plus écrit « fr ».
-        sansFicheOl.add('5556'); sansFicheOl.add('6667');
+        languesOl.set('9780000055569', ['eng']); languesOl.set('9780000066671', ['eng']);
         const r10 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo });
-        taper(r10, '5556'); cliquer(r10, 'Identifier');
+        taper(r10, '9780000055569'); cliquer(r10, 'Identifier');
         await attendre(() => r10.etatRoute().pas === 2, 'le pas 2 pour 5556');
         eq([r10.etatRoute().champs.language, r10.querySelector('select').value], ['en', 'en'], 'route : la langue de la fiche Google Books est reprise, et le menu Langue le montre (C2)');
         const choisirLangue = (root, v) => { const s = root.querySelector('select'); s.value = v; s.dispatchEvent(new Event('change')); };
         choisirLangue(r10, 'fr');
         cliquer(r10, '← Changer d’ISBN');
-        taper(r10, '6667'); cliquer(r10, 'Identifier');
+        taper(r10, '9780000066671'); cliquer(r10, 'Identifier');
         await attendre(() => r10.etatRoute().pas === 2, 'le pas 2 pour 6667');
         eq(r10.etatRoute().champs.language, 'fr', 'route : la langue choisie par la personne n’est plus écrasée par la fiche suivante (C2)');
         await attendreImages(r10);
@@ -1210,15 +1232,15 @@ export async function runAjouterTests({ eq, ok }) {
         // (pointeur de couverture compris), dit ce qui s’est passé, puis mène à l’accueil du livre. Mesuré par un
         // `navigate` et un `toast` injectés : aucune adresse touchée.
         const navs = []; const dits = [];
-        couvertures.set('1234', async () => reponseImage(img1234));
+        couvertures.set('9780000012340', async () => reponseImage(img1234));
         const r11 = await LA.renderLivreAjoutRoute({}, {}, {}, { repo, navigate: (p) => navs.push(p), toast: (m) => dits.push(m) });
-        taper(r11, '1234'); cliquer(r11, 'Identifier');
+        taper(r11, '9780000012340'); cliquer(r11, 'Identifier');
         await attendre(() => r11.etatRoute().couverture.sha256, 'la couverture de 1234 est posée');
         saisirTitre(r11, 'Le grand livre');
         const empreinteCouv = r11.etatRoute().couverture.sha256;
         cliquer(r11, 'Ajouter ce livre');
         await attendre(() => navs.length > 0, 'la navigation après l’écriture');
-        const edEcrite = (await db.getAll('book_editions')).find((e) => e.isbn === '1234');
+        const edEcrite = (await db.getAll('book_editions')).find((e) => e.isbn === '9780000012340');
         const bkEcrit = edEcrite ? await db.get('books', edEcrite.book_id) : null;
         eq([bkEcrit?.title, edEcrite?.cover_sha256 === empreinteCouv, navs, dits], ['Le grand livre', true, [`/books/${edEcrite?.id}?nouveau=1`], ['Livre ajouté']],
           'route : « Ajouter ce livre » écrit books + book_editions avec le pointeur de couverture, le dit, et mène à /books/<id>?nouveau=1 (RF-I1)');

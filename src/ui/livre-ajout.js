@@ -11,18 +11,37 @@ import { LIMITES_COUVERTURE, dimensionsImage, reduireImage, ErreurImage } from '
 import { urlDeBlob } from '../core/blob-urls.js';
 import { listConventions } from '../domain/units.js';
 import { pageHeader, field, select } from './components.js';
-import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
+import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes, normaliser, LIMITES_PUCES } from './puces.js';
 import { nettoyerIsbn, validerIsbn, codeBarresVersIsbn } from '../core/isbn.js';
 
-export const LIMITES_ISBN = { champ: 300, corps: 256 * 1024, delaiMs: 10000 };
+export const LIMITES_ISBN = { champ: 300, corps: 256 * 1024, delaiMs: 10000, tentativeMs: 8000, repriseMs: 1500, totalMs: 20000 };
 export const OPTIONS_FETCH = { mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' };
 // Les champs qu'une fiche distante peut remplir : ce qu'`identifier` doit pouvoir REPRENDRE à l'ISBN suivant (C3).
 export const CHAMPS_DISTANTS = ['title', 'author', 'publisher', 'year', 'language'];
 const CHAMPS_VIDES = () => ({ title: '', author: '', publisher: '', year: '', language: 'fr', convention: '', cuisines: [] });
 
 export { nettoyerIsbn };
-const borner = (s) => (s == null ? '' : String(s).slice(0, LIMITES_ISBN.champ));
-const annee = (s) => { const m = String(s || '').match(/\b(\d{4})\b/); return m ? parseInt(m[1], 10) : null; };
+// S3/S6 : une chaîne seulement, sans caractères de contrôle (Cc) ni de format (Cf : bidi…), ni les séparateurs de
+// ligne U+2028/U+2029 (catégories Zl/Zp, nommés à part — R-ISBN-1), tronquée à 300. Tout ce qui n'est pas une
+// chaîne vaut ''.
+const borner = (s) => (typeof s === 'string' ? s.replace(/[\p{Cc}\p{Cf}\u{2028}\u{2029}]/gu, '').slice(0, LIMITES_ISBN.champ) : '');
+const chaines = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
+const annee = (s) => { const m = String(s ?? '').match(/\b(\d{4})\b/); return m ? parseInt(m[1], 10) : null; };
+const langueDe = (liste) => (!Array.isArray(liste) ? null : liste.includes('fre') ? 'fr' : liste.includes('eng') ? 'en' : null);
+const ficheOk = (f) => (f && f.title ? f : null);
+// § 12.2 : des PROPOSITIONS de mots-clés — 10 au plus, tronquées à la borne des puces, dédoublonnées par normaliser.
+// Jamais posées sans la tape de la personne : fusionnerFiche ne les lit pas.
+export const MOTS_CLES_MAX = 10;
+const motsClesDe = (liste) => {
+  const vus = new Map();
+  for (const v of chaines(liste)) {
+    const valeur = borner(v).trim().slice(0, LIMITES_PUCES.longueur);
+    const cle = normaliser(valeur);
+    if (cle && !vus.has(cle)) vus.set(cle, valeur);
+    if (vus.size >= MOTS_CLES_MAX) break;
+  }
+  return [...vus.values()];
+};
 
 // S1 : un corps distant est lu EN FLUX et la lecture est COUPÉE (reader.cancel()) dès que le cumul dépasse la borne —
 // rien de ce qui a été lu n'est conservé, et le reste du corps n'est jamais tiré. Une réponse sans `body` (vieux
@@ -54,30 +73,92 @@ export function signalDelai(ms) {
   return ctl.signal;
 }
 
-async function lireJson(fetchFn, url, signal) {
-  const r = await fetchFn(url, { ...OPTIONS_FETCH, signal });
-  if (!r.ok) return null;
-  const morceaux = await lireBornee(r, LIMITES_ISBN.corps);
-  if (morceaux === null) return null; // S1 : borne dépassée, corps abandonné AVANT JSON.parse
-  const texte = morceaux === false ? await r.text() : await new Blob(morceaux).text();
-  if (texte.length > LIMITES_ISBN.corps) return null;
-  return JSON.parse(texte);
+// Attente abandonnable : rend tout de suite si le signal est déjà abandonné, et dès qu'il l'est.
+export const attenteReelle = (ms, signal) => new Promise((resolve) => {
+  if (signal?.aborted) { resolve(); return; }
+  const fin = () => { clearTimeout(id); signal?.removeEventListener('abort', fin); resolve(); };
+  const id = setTimeout(fin, ms);
+  signal?.addEventListener('abort', fin, { once: true });
+});
+
+const URL_OL_SEARCH = (isbn) => `https://openlibrary.org/search.json?isbn=${encodeURIComponent(isbn)}&fields=title,author_name,publisher,first_publish_year,language,subject&limit=1`;
+const URL_OL_LEGACY = (isbn) => `https://openlibrary.org/api/books?bibkeys=ISBN:${encodeURIComponent(isbn)}&format=json&jscmd=data`;
+
+// Une tentative = un budget (S4) : son AbortController couvre le fetch ET la lecture du corps ; il est relié au signal
+// extérieur par un écouteur retiré en finally. Rend { ok: true, json } ou { ok: false, motif }. Ordre du classement
+// (F14) : signal de la tentative abandonné → delai ; rejet → reseau ; 429 → limite ; autre non-2xx → serveur ;
+// corps trop gros (lireBornee, S1) ou non JSON → serveur.
+async function tentative(fetchFn, url, options, { tentativeMs, signal }) {
+  const ctl = new AbortController();
+  const chrono = setTimeout(() => ctl.abort(), tentativeMs);
+  const relais = () => ctl.abort();
+  if (signal) { if (signal.aborted) ctl.abort(); else signal.addEventListener('abort', relais, { once: true }); }
+  const echec = () => ({ ok: false, motif: ctl.signal.aborted ? 'delai' : 'reseau' });
+  try {
+    let r;
+    try { r = await fetchFn(url, { ...options, signal: ctl.signal }); } catch { return echec(); }
+    if (r.status === 429) return { ok: false, motif: 'limite' };
+    if (!r.ok) return { ok: false, motif: 'serveur' };
+    let texte;
+    try {
+      const morceaux = await lireBornee(r, LIMITES_ISBN.corps);
+      if (morceaux === null) return { ok: false, motif: 'serveur' };
+      texte = morceaux === false ? await r.text() : await new Blob(morceaux).text();
+    } catch { return echec(); }
+    if (typeof texte !== 'string' || texte.length > LIMITES_ISBN.corps) return { ok: false, motif: 'serveur' };
+    try { return { ok: true, json: JSON.parse(texte) }; } catch { return { ok: false, motif: 'serveur' }; }
+  } finally { clearTimeout(chrono); signal?.removeEventListener('abort', relais); }
 }
 
-// Les deux appels sont dans un try : un échec réseau, un 404, un 429 ou le délai donnent { fiche: null, source: null }.
-export async function lookupIsbn(isbn, { fetch = globalThis.fetch, signal } = {}) {
-  const cle = encodeURIComponent(isbn); // RF-m6 : défense en profondeur (nettoyerIsbn ne laisse que chiffres et X)
-  try {
-    const data = await lireJson(fetch, `https://openlibrary.org/api/books?bibkeys=ISBN:${cle}&format=json&jscmd=data`, signal);
-    const b = data?.[`ISBN:${isbn}`];
-    if (b) return { source: 'openlibrary', fiche: { title: borner(b.title), author: borner((b.authors || []).map((a) => a.name).join(', ')), publisher: borner((b.publishers || []).map((p) => p.name).join(', ')), year: annee(b.publish_date), language: null } };
-  } catch { /* continuer */ }
-  try {
-    const gd = await lireJson(fetch, `https://www.googleapis.com/books/v1/volumes?q=isbn:${cle}`, signal);
-    const v = gd?.items?.[0]?.volumeInfo;
-    if (v) return { source: 'googlebooks', fiche: { title: borner(v.title), author: borner((v.authors || []).join(', ')), publisher: borner(v.publisher), year: annee(v.publishedDate), language: v.language === 'fr' || v.language === 'en' ? v.language : null } };
-  } catch { /* continuer */ }
-  return { fiche: null, source: null };
+// Lecteurs : { repondu: true, fiche | null } si la forme est celle attendue, { repondu: false } sinon (→ serveur).
+function lireSearch(json) {
+  const docs = json?.docs;
+  if (!Array.isArray(docs)) return { repondu: false };
+  const d = docs[0];
+  if (!d || typeof d !== 'object') return { repondu: true, fiche: null };
+  return { repondu: true, fiche: ficheOk({ title: borner(d.title).trim(), author: borner(chaines(d.author_name).join(', ')), publisher: borner(chaines(d.publisher)[0]), year: annee(d.first_publish_year), language: langueDe(d.language), motsCles: motsClesDe(d.subject) }) };
+}
+const noms = (liste) => (Array.isArray(liste) ? liste.map((x) => (typeof x?.name === 'string' ? x.name : '')).filter(Boolean) : []);
+function lireLegacy(json, isbn) {
+  if (!json || typeof json !== 'object') return { repondu: false };
+  const b = json[`ISBN:${isbn}`];
+  if (!b || typeof b !== 'object') return { repondu: true, fiche: null };
+  return { repondu: true, fiche: ficheOk({ title: borner(b.title).trim(), author: borner(noms(b.authors).join(', ')), publisher: borner(noms(b.publishers).join(', ')), year: annee(b.publish_date), language: null, motsCles: motsClesDe(noms(b.subjects)) }) };
+}
+
+// Trois issues (spec § 5) : trouve / introuvable (Open Library a répondu « rien ») / indisponible (motif). Étape 1 :
+// search.json, une reprise sur échec muet (I-R). Étape 2 : legacy api/books, seulement après un « rien ». Étape 3
+// (tâche 3) : Google Books, seulement avec une clé et après un « rien ». Jamais d'exception pour un échec de source ;
+// une TypeError seulement pour un appelant qui ne passe pas un ISBN-13 (S9).
+export async function lookupIsbn(isbn13, { fetch = globalThis.fetch, signal, cle = '', attendre = attenteReelle, surReprise = null, tentativeMs = LIMITES_ISBN.tentativeMs, repriseMs = LIMITES_ISBN.repriseMs } = {}) {
+  if (!/^97[89]\d{10}$/.test(String(isbn13))) throw new TypeError('lookupIsbn : ISBN-13 attendu');
+  const bilan = { statut: 'indisponible', fiche: null, source: null, motif: null, google: 'non_appele', appels: 0 };
+  const appel = async (url, options) => { bilan.appels += 1; return tentative(fetch, url, options, { tentativeMs, signal }); };
+  const trouve = (fiche, source) => ({ ...bilan, statut: 'trouve', fiche, source });
+  const abandonne = () => ({ ...bilan, motif: 'delai' });
+  let r1 = null;
+  for (let essai = 0; essai < 2; essai += 1) {
+    if (signal?.aborted) return abandonne();
+    if (essai === 1) {
+      if (typeof surReprise === 'function') surReprise();
+      await attendre(repriseMs, signal);
+      if (signal?.aborted) return abandonne();
+    }
+    r1 = await appel(URL_OL_SEARCH(isbn13), OPTIONS_FETCH);
+    if (r1.ok) break;
+    const muet = (r1.motif === 'reseau' || r1.motif === 'delai') && !signal?.aborted;
+    if (!muet) break;
+  }
+  if (!r1.ok) return { ...bilan, motif: r1.motif };
+  const lu1 = lireSearch(r1.json);
+  if (!lu1.repondu) return { ...bilan, motif: 'serveur' };
+  if (lu1.fiche) return trouve(lu1.fiche, 'openlibrary');
+  // Étape 2 : Open Library a répondu « rien » → le statut est acquis ; le legacy ne peut que trouver.
+  if (signal?.aborted) return { ...bilan, statut: 'introuvable' };
+  const r2 = await appel(URL_OL_LEGACY(isbn13), OPTIONS_FETCH);
+  const lu2 = r2.ok ? lireLegacy(r2.json, isbn13) : null;
+  if (lu2?.fiche) return trouve(lu2.fiche, 'openlibrary');
+  return { ...bilan, statut: 'introuvable' };
 }
 
 // C2 : `language` a un défaut NON VIDE ('fr'), donc la règle « ne remplir que ce qui est vide » ne l'atteignait
