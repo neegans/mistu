@@ -1155,7 +1155,7 @@ export async function runAjouterTests({ eq, ok }) {
           }
           return r404;
         };
-        const depsRoute = { repo, fetch: fetchFactice, attendre: async () => {}, tentativeMs: 50 };
+        const depsRoute = { repo, fetch: fetchFactice, enLigne: () => true, attendre: async () => {}, tentativeMs: 50 };
         const zone = (root) => root.querySelector('.zone-couverture');
         const image = (root) => !!zone(root)?.querySelector('img');
         const message = (root) => zone(root)?.querySelector('small')?.textContent || null;
@@ -1255,7 +1255,7 @@ export async function runAjouterTests({ eq, ok }) {
         eq([r6.etatRoute().pas, !!zone(r6)], [2, true], 'route : « Saisir à la main » pendant la recherche ouvre le pas 2 tout de suite');
         const files888 = await compterFiles();
         libererFiche();
-        await attendre(() => r6.etatRoute().recherche === false, 'la réponse de 888 est traitée');
+        await attendre(() => r6.etatRoute().reponsesRecues === 1, 'la réponse de 888 est arrivée');
         eq([r6.etatRoute().champs.title, r6.etatRoute().provenance, r6.querySelector('.status.info'), passages(r6), await compterFiles()],
           ['', null, null, 0, files888],
           'route : la fiche arrivée après « Saisir à la main » n’écrit RIEN — aucun champ, aucune étiquette, aucune couverture demandée (F3, C1)');
@@ -1434,6 +1434,11 @@ export async function runAjouterTests({ eq, ok }) {
       taper(rD, '0306406152'); cliquer(rD, 'Identifier');
       await attendre(() => rD.querySelector('[data-role="reessayer"]'), 'indisponible après 503');
       ok(rD.querySelector('[data-role="indisponible"]').textContent.includes('en panne'), 'route : 503 = « en panne »');
+      // Un ISBN faux tapé après l'échec : le message « indisponible » d'avant ne reste pas à côté du refus (aucun appel).
+      const appelsAvantFaux = urls.length;
+      taper(rD, '9781785035280'); cliquer(rD, 'Identifier');
+      eq([rD.querySelector('[data-role="indisponible"]'), !!rD.querySelector('[data-role="validation"]'), urls.length - appelsAvantFaux], [null, true, 0], 'route : un ISBN faux après un échec efface « indisponible » et dit le refus, sans appel');
+      taper(rD, '0306406152');
       cliquer(rD, 'Saisir à la main');
       eq([rD.querySelector('[data-role="indisponible"]'), rD.querySelector('.status.info'), rappel(rD)], [null, null, 'ISBN 9780306406157'], 'route : « Saisir à la main » après un échec → pas 2 muet, ISBN normalisé en 13 (F7, F22)');
       cliquer(rD, '← Changer d’ISBN');

@@ -380,7 +380,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
   // `touchee` (R-UX-13) : la personne a agi sur la couverture (choisi une image, ou retiré). Une réponse distante
   // tardive ne défait jamais un geste — même si l'ISBN, lui, n'a pas changé.
   const COUVERTURE_VIDE = () => ({ sha256: null, apercu: null, message: null, enCours: false, touchee: false });
-  const etat = { pas: 1, isbn: '', champs: CHAMPS_VIDES(), champsDistants: null, langueTouchee: false, provenance: null, recherche: false, enCours: false, lecteurDisponible: 'BarcodeDetector' in window, existantes: cuisinesExistantes(ctx), couverture: COUVERTURE_VIDE(), generation: 0, passagesCouverture: 0, couverturesAppliquees: 0, reprise: false, validation: null, resultat: null, suggestions: null, existantesMotsCles: motsClesExistants(ctx) };
+  const etat = { pas: 1, isbn: '', champs: CHAMPS_VIDES(), champsDistants: null, langueTouchee: false, provenance: null, recherche: false, enCours: false, lecteurDisponible: 'BarcodeDetector' in window, existantes: cuisinesExistantes(ctx), couverture: COUVERTURE_VIDE(), generation: 0, passagesCouverture: 0, couverturesAppliquees: 0, reprise: false, validation: null, resultat: null, suggestions: null, existantesMotsCles: motsClesExistants(ctx), reponsesRecues: 0 };
   const root = el('div', null, pageHeader(t('Ajouter un livre'), { back: { href: '/add', label: t('Ajouter') } }));
   const zone = el('div', null);
   root.append(zone);
@@ -407,6 +407,8 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
       etat.champs[k] = vides[k];
     }
   };
+  // `depuisFichier` et `retirer` appellent avancer() seul et ne touchent pas `recherche` : la zone de couverture
+  // n'existe qu'au pas 2, et `recherche` n'est vraie qu'au pas 1.
   // I-G : tout geste qui change l'ISBN ou le pas ferme la porte aux réponses en vol (avancer, C1) ET libère la recherche.
   const nouvelleGeneration = () => { avancer(); etat.recherche = false; etat.reprise = false; etat.validation = null; etat.resultat = null; etat.suggestions = null; };
   const identifier = async ({ forcer = false } = {}) => {
@@ -414,7 +416,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     const v = validerIsbn(etat.isbn);
     if (!v.ok) {
       if (v.motif === 'vide') { dire(t('Saisis un ISBN d’abord.')); return; }
-      etat.validation = v.motif; dessiner(); return; // aucun appel (R-ISBN-2)
+      etat.validation = v.motif; etat.resultat = null; dessiner(); return; // aucun appel (R-ISBN-2) ; un « indisponible » d'avant ne reste pas affiché
     }
     etat.validation = null; etat.isbn = v.isbn13;
     if (!forcer && !enLigne()) { etat.resultat = { statut: 'indisponible', motif: 'horsligne', google: 'non_appele' }; dessiner(); return; } // S13 : Réessayer force
@@ -431,6 +433,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     const chrono = setTimeout(() => ctl.abort(), LIMITES_ISBN.totalMs);
     try {
       const res = await lookupIsbn(v.isbn13, { fetch, signal: ctl.signal, cle, attendre, tentativeMs, repriseMs, surReprise: () => { if (etat.generation === generation) { etat.reprise = true; dessiner(); } } });
+      etat.reponsesRecues += 1; // le FAIT que les tests attendent (une réponse est arrivée), posé avant la garde de génération
       // C1/F3 : « Saisir à la main » n'est PAS fermé pendant « Recherche… » (c'est la sortie de secours). Si la
       // personne l'a prise, cette réponse n'appartient plus à l'écran : ni ses champs, ni son étiquette, ni la
       // couverture qu'elle aurait demandée. La génération le dit (I-G).
