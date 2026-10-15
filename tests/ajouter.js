@@ -1465,6 +1465,79 @@ export async function runAjouterTests({ eq, ok }) {
       eq([recherches(), titreDe(rF).value, rF.etatRoute().reprise], [2, 'Repris', false], 'route : la reprise a trouvé, et reprise retombe');
     });
   }
+  {
+    // Réponses tardives et croisées (S3/I-G), écriture de l'édition et des mots-clés (F15, § 12), ISBN libre (S8).
+    const { withRepo } = await import('./sync-fixture.js');
+    const reponseJson = (o) => ({ ok: true, status: 200, headers: new Headers(), text: async () => JSON.stringify(o) });
+    const r404 = { ok: false, status: 404, headers: new Headers(), text: async () => '', blob: async () => new Blob([]) };
+    const attendre = async (condition, quoi) => { for (let i = 0; i < 300; i += 1) { if (await condition()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error(`attente dépassée (3 s) : ${quoi}`); };
+    const taper = (root, isbn) => { const i = root.querySelector('input[name="isbn"]'); i.value = isbn; i.dispatchEvent(new Event('input')); };
+    const cliquer = (root, texte) => { const b = [...root.querySelectorAll('button')].find((x) => x.textContent === texte); if (!b) throw new Error(`bouton absent : ${texte}`); b.click(); };
+    const titreDe = (root) => [...root.querySelectorAll('input[type="text"]')].find((i) => i.name !== 'isbn');
+    const rappel = (root) => [...root.querySelectorAll('span.muted')].find((s) => s.textContent.startsWith('ISBN'))?.textContent ?? null;
+    await withRepo(async (repo, db) => {
+      const urls = []; const enVol = new Map(); // isbn → fonction qui libère la réponse search.json
+      const fetch = async (u) => { const s = String(u); urls.push(s); if (s.startsWith('https://openlibrary.org/search.json')) { const isbn = new URL(s).searchParams.get('isbn'); return new Promise((r) => { enVol.set(isbn, () => r(reponseJson({ docs: [{ title: `Livre ${isbn}`, subject: ['Barbecuing', 'Charcoal'] }] }))); }); } return r404; };
+      const liberer = (isbn) => { const f = enVol.get(isbn); enVol.delete(isbn); f(); };
+      const navigations = [];
+      const deps = { repo, fetch, enLigne: () => true, attendre: async () => {}, tentativeMs: 5000, navigate: (p) => navigations.push(p) };
+      const A = '9780306406157', B = '9782890772816';
+      // 1. « Saisir à la main » pendant la recherche : la réponse tardive n'écrit rien (I-G), pas même une suggestion.
+      const r1 = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
+      taper(r1, A); cliquer(r1, 'Identifier');
+      await attendre(() => enVol.has(A), 'A en vol');
+      cliquer(r1, 'Saisir à la main');
+      liberer(A);
+      await attendre(() => r1.etatRoute().reponsesRecues === 1, 'réponse tardive de A reçue (1)');
+      await new Promise((r) => setTimeout(r, 0));
+      eq([titreDe(r1).value, r1.querySelector('.status.info'), rappel(r1), r1.querySelector('.suggestions'), r1.etatRoute().recherche], ['', null, `ISBN ${A}`, null, false], 'route : la réponse d’une identification abandonnée par « Saisir à la main » n’écrit rien, et la recherche est libérée (I-G)');
+      // 2. Croisement A puis B : seule B écrit ; une seule couverture demandée (B).
+      const r2 = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
+      taper(r2, A); cliquer(r2, 'Identifier');
+      await attendre(() => enVol.has(A), 'A en vol (2)');
+      cliquer(r2, 'Saisir à la main'); cliquer(r2, '← Changer d’ISBN');
+      taper(r2, B); cliquer(r2, 'Identifier');
+      await attendre(() => enVol.has(B), 'B en vol');
+      liberer(A);
+      await attendre(() => r2.etatRoute().reponsesRecues === 1, 'réponse tardive de A reçue (2)');
+      await new Promise((r) => setTimeout(r, 0));
+      eq([r2.querySelector('.status.info'), !!r2.querySelector('input[name="isbn"]')], [null, true], 'route : la réponse de A, arrivée pendant B, n’écrit rien et ne quitte pas le pas 1 (S3)');
+      liberer(B);
+      await attendre(() => r2.querySelector('.status.info'), 'B remplie');
+      eq([titreDe(r2).value, rappel(r2), urls.filter((u) => u.startsWith('https://covers.openlibrary.org/')).length, [...r2.querySelectorAll('button.puce.suggestion')].map((b) => b.textContent)], [`Livre ${B}`, `ISBN ${B}`, 1, ['Barbecuing', 'Charcoal']], 'route : les champs et suggestions sont ceux de B seulement ; une seule couverture demandée (S3, § 5, § 12)');
+      // 3. Une suggestion cliquée devient un mot-clé choisi ; « Ajouter ce livre » écrit isbn13 et tags (F15, § 12).
+      r2.querySelector('button.puce.suggestion').click();
+      eq([r2.etatRoute().champs.tags, [...r2.querySelectorAll('button.puce.suggestion')].map((b) => b.textContent)], [['barbecuing'], ['Charcoal']], 'route : la suggestion cliquée devient une puce choisie (minuscules, comme ajouterPuce) et quitte les suggestions');
+      cliquer(r2, 'Ajouter ce livre');
+      await attendre(() => navigations.length === 1, 'navigation après enregistrement');
+      const editions = await db.getAll('book_editions');
+      const livre = await db.get('books', editions[0].book_id);
+      eq([editions.length, editions[0].isbn, livre.tags, navigations[0] === `/books/${editions[0].id}?nouveau=1`], [1, B, ['barbecuing'], true], 'route : l’édition porte l’ISBN-13, le livre ses mots-clés, la navigation part vers la fiche (F15, § 12.1)');
+      // 4. Saisie à la main invalide → édition sans ISBN ; 10 000 chiffres → rappel borné, rien en base (S8).
+      const r3 = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
+      taper(r3, '12345'); cliquer(r3, 'Saisir à la main');
+      eq(rappel(r3), 'ISBN 12345 — non valide, ne sera pas enregistré', 'route : rappel « non valide » (S8)');
+      titreDe(r3).value = 'Sans ISBN'; titreDe(r3).dispatchEvent(new Event('input', { bubbles: true }));
+      cliquer(r3, 'Ajouter ce livre');
+      await attendre(() => navigations.length === 2, 'navigation 2');
+      ok((await db.getAll('book_editions')).some((e) => e.isbn === null), 'route : un ISBN invalide est enregistré null (S8)');
+      const r4 = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
+      taper(r4, '9'.repeat(10000)); cliquer(r4, 'Saisir à la main');
+      eq(rappel(r4), `ISBN ${'9'.repeat(20)} — non valide, ne sera pas enregistré`, 'route : une saisie démesurée est bornée à l’affichage (S8)');
+      titreDe(r4).value = 'Long'; titreDe(r4).dispatchEvent(new Event('input', { bubbles: true }));
+      cliquer(r4, 'Ajouter ce livre');
+      await attendre(() => navigations.length === 3, 'navigation 3');
+      eq((await db.getAll('book_editions')).filter((e) => e.isbn === null).length, 2, 'route : la suite démesurée n’atteint pas la base (S8)');
+      ok(!urls.some((u) => u.includes('googleapis')), 'route : sans clé, Google Books jamais appelé');
+      // 5. « ← Changer d’ISBN » vide les suggestions (elles appartiennent à l'ISBN qui les a produites, § 12.2).
+      const r5 = await LA.renderLivreAjoutRoute({}, {}, {}, deps);
+      taper(r5, A); cliquer(r5, 'Identifier');
+      await attendre(() => enVol.has(A), 'A en vol (5)'); liberer(A);
+      await attendre(() => r5.querySelector('.suggestions'), 'suggestions de A');
+      cliquer(r5, '← Changer d’ISBN');
+      eq([r5.etatRoute().suggestions, r5.querySelector('.suggestions')], [null, null], 'route : revenir changer l’ISBN abandonne les suggestions de l’ancien (§ 12.2)');
+    });
+  }
   // --- § 6 Couverture : ce que la fiche livre et Mes livres MONTRENT, sur une base jetable
   {
     const { withRepo } = await import('./sync-fixture.js');
