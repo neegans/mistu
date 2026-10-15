@@ -219,6 +219,8 @@ export async function runAjouterTests({ eq, ok }) {
   eq(ISBN.validerIsbn('9782890772816'), { ok: true, isbn13: '9782890772816', isbn10: '2890772810' }, 'isbn : 13 → 10 (978)');
   eq(ISBN.validerIsbn('9791234567896'), { ok: true, isbn13: '9791234567896', isbn10: null }, 'isbn : 979 n’a pas de forme à dix chiffres');
   eq(ISBN.validerIsbn('9781785035280'), { ok: false, motif: 'controle' }, 'isbn : chiffre de contrôle faux');
+  eq(ISBN.validerIsbn('0306406153'), { ok: false, motif: 'controle' }, 'isbn : ISBN-10 au contrôle faux (une mutation controle10Ok → true tombe ici)');
+  eq(ISBN.validerIsbn('2890772811'), { ok: false, motif: 'controle' }, 'isbn : ISBN-10 québécois au contrôle faux');
   eq(ISBN.validerIsbn('5901234123457'), { ok: false, motif: 'pas_isbn' }, 'isbn : EAN valide hors 978/979 = pas un ISBN (préfixe lu avant le contrôle)');
   eq(ISBN.validerIsbn('978X785035289'), { ok: false, motif: 'longueur' }, 'isbn : un X dans un 13 → longueur');
   eq(ISBN.validerIsbn('978178503528'), { ok: false, motif: 'longueur' }, 'isbn : douze chiffres');
@@ -259,6 +261,18 @@ export async function runAjouterTests({ eq, ok }) {
     const r2 = await chercher(async (u) => { urlsR2.push(u); return u === SEARCH ? reponse(200, { docs: [] }) : u === LEGACY ? reponse(200, { 'ISBN:9781785035289': { title: 'Legacy', authors: [{ name: 'A' }, { nom: 'x' }], publishers: [{ name: 'P' }], publish_date: 'March 2018', subjects: [{ name: 'Grill' }, { nom: 'x' }] } }) : reponse(404, ''); }, { attendre: jamais });
     eq(urlsR2[1], LEGACY, 'lookup : adresse legacy exacte (jscmd=data, ISBN encodé)');
     eq([r2.statut, r2.source, r2.appels, r2.fiche], ['trouve', 'openlibrary', 2, { title: 'Legacy', author: 'A', publisher: 'P', year: 2018, language: null, motsCles: ['Grill'] }], 'lookup : « rien » (sans numFound) → legacy en filet, champs et sujets typés');
+    // R-ISBN-6 : les sujets techniques d'Open Library (« clé:valeur », « clé=valeur ») ne sont pas proposés — et le
+    // filtre passe AVANT le plafond de dix. Troncatures par points de code : jamais de demi-paire de substitution.
+    const sujetsDe = async (sujets) => (await chercher(async () => reponse(200, { docs: [{ title: 'S', subject: sujets }] }), { attendre: jamais })).fiche;
+    eq((await sujetsDe(['Barbecuing', 'Nyt:hardcover_fiction=2018-01-01', 'Series:Harry_Potter', 'cle=valeur', 'Cooking'])).motsCles, ['Barbecuing', 'Cooking'], 'lookup : les sujets techniques (deux-points ou égal) ne sont pas proposés (R-ISBN-6)');
+    eq((await sujetsDe([...Array.from({ length: 10 }, (_, i) => `t${i}:a`), 'Grill'])).motsCles, ['Grill'], 'lookup : dix étiquettes techniques ne mangent pas le plafond — le filtre passe avant (R-ISBN-6)');
+    const rLegacyTech = await chercher(async (u) => (u === SEARCH ? reponse(200, { docs: [] }) : u === LEGACY ? reponse(200, { 'ISBN:9781785035289': { title: 'L', subjects: [{ name: 'nyt:x' }, { name: 'Grill' }] } }) : reponse(404, '')), { attendre: jamais });
+    eq(rLegacyTech.fiche.motsCles, ['Grill'], 'lookup : le filtre vaut aussi pour les sujets legacy (R-ISBN-6)');
+    const emoji = String.fromCodePoint(0x1F600);
+    const motCoupe = (await sujetsDe(['x'.repeat(59) + emoji + 'y'])).motsCles[0];
+    eq([Array.from(motCoupe).length, /\p{Cs}/u.test(motCoupe)], [60, false], 'lookup : un mot-clé est tronqué à 60 points de code, sans demi-paire de substitution (R-ISBN-6)');
+    const titreLong = (await chercher(async () => reponse(200, { docs: [{ title: 'é'.repeat(299) + emoji + 'z' }] }), { attendre: jamais })).fiche.title;
+    eq([Array.from(titreLong).length, /\p{Cs}/u.test(titreLong)], [300, false], 'lookup : un champ est borné à 300 points de code, sans demi-paire de substitution (borner)');
     const r3 = await chercher(async (u) => reponse(200, u === SEARCH ? { numFound: 0, docs: [] } : {}), { attendre: jamais });
     eq([r3.statut, r3.appels, r3.motif, r3.google, r3.fiche, r3.source], ['introuvable', 2, null, 'non_appele', null, null], 'lookup : deux « rien » → introuvable');
     const r4 = await chercher(async (u) => { if (u === SEARCH) return reponse(200, { docs: [] }); throw new Error('reseau'); }, { attendre: jamais });
@@ -476,6 +490,7 @@ export async function runAjouterTests({ eq, ok }) {
     const p1 = LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1, isbn: '' }), gestes);
     const champ = p1.querySelector('input[name="isbn"]');
     eq([champ.getAttribute('maxlength'), champ.disabled], ['20', false], 'livre : champ borné à 20, ouvert hors recherche (S8)');
+    eq(champ.getAttribute('inputmode'), null, 'livre : pas de clavier numérique forcé — le X d’un ISBN-10 doit rester tapable sur iPhone (R-ISBN-7)');
     champ.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     champ.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', repeat: true, bubbles: true, cancelable: true }));
     champ.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true }));
@@ -1569,6 +1584,21 @@ export async function runAjouterTests({ eq, ok }) {
       await attendre(() => r5.querySelector('.suggestions'), 'suggestions de A');
       cliquer(r5, '← Changer d’ISBN'); cliquer(r5, 'Saisir à la main');
       eq([r5.etatRoute().suggestions, r5.querySelector('.suggestions'), !!r5.querySelector('[data-role="mots-cles"]')], [null, null, true], 'route : revenir changer l’ISBN abandonne les suggestions de l’ancien — état ET écran, au pas 2 (§ 12.2)');
+      // 7. R-ISBN-8 : « Saisir à la main » ABANDONNE la requête en vol (le fetch honore le signal, comme un vrai) —
+      // la réponse est muette ET le réseau est libéré ; l'identification suivante part seule, sans reprise de A.
+      const urls7 = []; const signaux = new Map();
+      const fetch7 = (u, o) => { const s = String(u); urls7.push(s); if (s.startsWith('https://openlibrary.org/search.json')) signaux.set(new URL(s).searchParams.get('isbn'), o.signal); return new Promise((_, reject) => o.signal.addEventListener('abort', () => reject(new DOMException('abandon', 'AbortError')), { once: true })); };
+      const rX = await LA.renderLivreAjoutRoute({}, {}, {}, { ...deps, fetch: fetch7 });
+      taper(rX, A); cliquer(rX, 'Identifier');
+      await attendre(() => signaux.has(A), 'signal de A vu');
+      cliquer(rX, 'Saisir à la main');
+      eq([signaux.get(A).aborted, await attendre(() => rX.etatRoute().reponsesRecues === 1, 'réponse abandonnée de A')], [true, true], 'route : « Saisir à la main » abandonne la requête en vol — réponse muette ET réseau libéré (R-ISBN-8)');
+      cliquer(rX, '← Changer d’ISBN');
+      taper(rX, B); cliquer(rX, 'Identifier');
+      await attendre(() => signaux.has(B), 'signal de B vu');
+      eq([urls7.filter((u) => u.includes('/search.json')).map((u) => new URL(u).searchParams.get('isbn')), signaux.get(B).aborted, rX.etatRoute().recherche], [[A, B], false, true], 'route : après l’abandon, une seule recherche B part, aucune reprise de A (R-ISBN-8)');
+      cliquer(rX, 'Saisir à la main'); // libère B : rien ne reste en vol après le test
+      await attendre(() => rX.etatRoute().reponsesRecues === 2, 'réponse abandonnée de B');
     });
   }
   // --- § 6 Couverture : ce que la fiche livre et Mes livres MONTRENT, sur une base jetable
@@ -1654,7 +1684,7 @@ export async function runAjouterTests({ eq, ok }) {
     eq(csp.split(';').map((d) => d.trim().split(' ')[0]).filter(Boolean).sort(), ['base-uri', 'connect-src', 'default-src', 'form-action', 'frame-src', 'img-src', 'object-src', 'script-src', 'style-src'],
       `CSP ${page} : la liste des directives est épinglée — aucune ne peut être ajoutée ou retirée sans qu’un test tombe (D-T10)`);
   }
-  // MODULES_NEUFS : les sept modules créés par le lot (R-UX-11 en ajoute un huitième, lien.js) + add.js réécrit.
+  // MODULES_NEUFS : les neuf modules créés par les lots (lien.js de R-UX-11 et isbn.js inclus) + add.js réécrit.
   const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js'];
   // CHAINES_NEUVES_AILLEURS reconstituée depuis le code réel (git diff main...HEAD, ensemble main vs HEAD des clés t(),
   // pas seulement les lignes ajoutées : une ligne réécrite pour une autre raison peut porter une chaîne déjà sur main —

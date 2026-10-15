@@ -24,8 +24,9 @@ const CHAMPS_VIDES = () => ({ title: '', author: '', publisher: '', year: '', la
 export { nettoyerIsbn };
 // S3/S6 : une chaîne seulement, sans caractères de contrôle (Cc) ni de format (Cf : bidi…), ni les séparateurs de
 // ligne U+2028/U+2029 (catégories Zl/Zp, nommés à part — R-ISBN-1), tronquée à 300. Tout ce qui n'est pas une
-// chaîne vaut ''.
-const borner = (s) => (typeof s === 'string' ? s.replace(/[\p{Cc}\p{Cf}\u{2028}\u{2029}]/gu, '').slice(0, LIMITES_ISBN.champ) : '');
+// chaîne vaut ''. Troncature par POINTS DE CODE : une paire de substitution coupée laisserait une demi-paire que le
+// jsonb refuse (quarantaine de synchro).
+const borner = (s) => (typeof s === 'string' ? Array.from(s.replace(/[\p{Cc}\p{Cf}\u{2028}\u{2029}]/gu, '')).slice(0, LIMITES_ISBN.champ).join('') : '');
 const chaines = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
 const annee = (s) => { const m = String(s ?? '').match(/\b(\d{4})\b/); return m ? parseInt(m[1], 10) : null; };
 const langueDe = (liste) => (!Array.isArray(liste) ? null : liste.includes('fre') ? 'fr' : liste.includes('eng') ? 'en' : null);
@@ -36,7 +37,10 @@ export const MOTS_CLES_MAX = 10;
 const motsClesDe = (liste) => {
   const vus = new Map();
   for (const v of chaines(liste)) {
-    const valeur = borner(v).trim().slice(0, LIMITES_PUCES.longueur);
+    // R-ISBN-6 : les sujets techniques d'Open Library (« series:Harry_Potter », « nyt:hardcover_nonfiction=… »)
+    // ne sont pas des mots-clés — écartés AVANT le plafond, pour ne pas manger les dix places.
+    if (/[:=]/.test(borner(v).trim())) continue;
+    const valeur = Array.from(borner(v)).slice(0, LIMITES_PUCES.longueur).join('').trim();
     const cle = normaliser(valeur);
     if (cle && !vus.has(cle)) vus.set(cle, valeur);
     if (vus.size >= MOTS_CLES_MAX) break;
@@ -322,7 +326,8 @@ export function renderLivreAjout(model, gestes = {}) {
       el('p', null, t('Scanne le code-barres, tape l’ISBN, ou saisis le livre à la main.')),
       // RF-m8 : pendant « Recherche… », le champ est fermé comme les boutons — taper un autre ISBN dans un champ
       // actif pendant qu'un appel est en vol ferait croire que la réponse qui arrive est celle du nouvel ISBN.
-      field(t('ISBN'), el('input', { type: 'text', name: 'isbn', inputmode: 'numeric', maxlength: '20', placeholder: '978…', value: model.isbn, disabled: !!model.recherche, onInput: (e) => g('changerIsbn')(e.target.value), onKeydown: surTouche })),
+      // R-ISBN-7 : pas d'inputmode numérique — un ISBN-10 sur onze finit par X, introuvable sur le pavé de l'iPhone.
+      field(t('ISBN'), el('input', { type: 'text', name: 'isbn', maxlength: '20', placeholder: '978…', value: model.isbn, disabled: !!model.recherche, onInput: (e) => g('changerIsbn')(e.target.value), onKeydown: surTouche })),
       model.messages.validation ? el('small', { class: 'muted', dataset: { role: 'validation' } }, model.messages.validation) : null,
       el('div', { class: 'row' },
         el('button', { type: 'button', class: 'btn primary', disabled: !model.lecteurDisponible || model.recherche, onClick: g('scanner') }, t('Scanner le code-barres')),
@@ -380,7 +385,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
   // `touchee` (R-UX-13) : la personne a agi sur la couverture (choisi une image, ou retiré). Une réponse distante
   // tardive ne défait jamais un geste — même si l'ISBN, lui, n'a pas changé.
   const COUVERTURE_VIDE = () => ({ sha256: null, apercu: null, message: null, enCours: false, touchee: false });
-  const etat = { pas: 1, isbn: '', champs: CHAMPS_VIDES(), champsDistants: null, langueTouchee: false, provenance: null, recherche: false, enCours: false, lecteurDisponible: 'BarcodeDetector' in window, existantes: cuisinesExistantes(ctx), couverture: COUVERTURE_VIDE(), generation: 0, passagesCouverture: 0, couverturesAppliquees: 0, reprise: false, validation: null, resultat: null, suggestions: null, existantesMotsCles: motsClesExistants(ctx), reponsesRecues: 0 };
+  const etat = { pas: 1, isbn: '', champs: CHAMPS_VIDES(), champsDistants: null, langueTouchee: false, provenance: null, recherche: false, enCours: false, lecteurDisponible: 'BarcodeDetector' in window, existantes: cuisinesExistantes(ctx), couverture: COUVERTURE_VIDE(), generation: 0, passagesCouverture: 0, couverturesAppliquees: 0, reprise: false, validation: null, resultat: null, suggestions: null, existantesMotsCles: motsClesExistants(ctx), reponsesRecues: 0, ctl: null };
   const root = el('div', null, pageHeader(t('Ajouter un livre'), { back: { href: '/add', label: t('Ajouter') } }));
   const zone = el('div', null);
   root.append(zone);
@@ -407,10 +412,11 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
       etat.champs[k] = vides[k];
     }
   };
+  // I-G : tout geste qui change l'ISBN ou le pas ferme la porte aux réponses en vol (avancer, C1) ET libère la recherche.
+  // R-ISBN-8 : la requête en vol est aussi ABANDONNÉE (le réseau est libéré, pas seulement la réponse rendue muette).
   // `depuisFichier` et `retirer` appellent avancer() seul et ne touchent pas `recherche` : la zone de couverture
   // n'existe qu'au pas 2, et `recherche` n'est vraie qu'au pas 1.
-  // I-G : tout geste qui change l'ISBN ou le pas ferme la porte aux réponses en vol (avancer, C1) ET libère la recherche.
-  const nouvelleGeneration = () => { avancer(); etat.recherche = false; etat.reprise = false; etat.validation = null; etat.resultat = null; etat.suggestions = null; };
+  const nouvelleGeneration = () => { etat.ctl?.abort(); etat.ctl = null; avancer(); etat.recherche = false; etat.reprise = false; etat.validation = null; etat.resultat = null; etat.suggestions = null; };
   const identifier = async ({ forcer = false } = {}) => {
     if (etat.recherche) return; // I-G : une identification à la fois (Entrée, Réessayer et le clic passent tous ici)
     const v = validerIsbn(etat.isbn);
@@ -430,6 +436,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     etat.recherche = true; etat.reprise = false; etat.resultat = null;
     dessiner();
     const ctl = new AbortController();
+    etat.ctl = ctl; // R-ISBN-8 : nouvelleGeneration() l'abandonne
     const chrono = setTimeout(() => ctl.abort(), LIMITES_ISBN.totalMs);
     try {
       const res = await lookupIsbn(v.isbn13, { fetch, signal: ctl.signal, cle, attendre, tentativeMs, repriseMs, surReprise: () => { if (etat.generation === generation) { etat.reprise = true; dessiner(); } } });
@@ -483,7 +490,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     } finally {
       clearTimeout(chrono);
       // Une génération plus récente a sa propre recherche : seule la génération courante la libère et redessine.
-      if (etat.generation === generation) { etat.recherche = false; etat.reprise = false; dessiner(); }
+      if (etat.generation === generation) { etat.ctl = null; etat.recherche = false; etat.reprise = false; dessiner(); }
     }
   };
   // Couverture choisie ici : bornée et ré-encodée par poserCouverture, et l'état ne dit « enregistrée » qu'APRÈS
@@ -516,6 +523,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
         const bmp = await createImageBitmap(files[0]);
         const code = codeBarresVersIsbn(await detector.detect(bmp));
         if (!code) { dire(t('Aucun ISBN lu sur cette photo.')); return; }
+        if (etat.recherche) return; // I-G : une recherche en vol n'est pas détournée par un code lu après coup
         etat.isbn = code; await identifier();
       } catch { dire(t('Lecture du code-barres impossible.')); }
     },
