@@ -258,11 +258,23 @@ src/ui/puces.js          pucesModel/renderPuces/basculerPuce/ajouterPuce/cuisine
                          partagé par le livre (add.js) et la fiche recette (recipe-edit.js) ; graine fermée de
                          quinze cuisines, normalisation (minuscules, accents retirés) pour le doublon, affichage
                          capitalisé ; jamais dans un <label> (R-UX-8 : un clic sur le texte voisin activerait la
-                         première puce).
-src/ui/livre-ajout.js    lookupIsbn (Open Library puis Google Books en repli), fusionnerFiche, fabriquerLivre,
-                         enregistrerLivre, renderLivreAjout/renderLivreAjoutRoute : le formulaire « Ajouter un
-                         livre » en deux pas ; la couverture reçue appartient à SA demande d'ISBN, jamais à une
-                         autre (R-UX-13).
+                         première puce). Depuis « Identifier un livre, fiable » : motsClesExistants (les `tags`
+                         des livres, la fréquence fait l'ordre), suggestionsModel/renderSuggestions (les mots-clés
+                         PROPOSÉS par la source, étiquetés « Proposé par Open Library / Google Books », 10 au
+                         plus, jamais écrits sans une tape — une suggestion cliquée est une saisie) et un 3ᵉ
+                         paramètre `libelleAutre` de renderPuces (« Autre mot-clé »).
+src/ui/livre-ajout.js    lookupIsbn — trois issues : trouvé / introuvable / indisponible avec motif (délai, réseau,
+                         limite, serveur ; « hors ligne » est posé par la route sans appel). Open Library
+                         `search.json` d'abord, l'ancien `api/books` en filet sur un « rien » seulement, Google
+                         Books seulement avec `GOOGLE_BOOKS.key` (src/sync/config.js, vide par défaut) et
+                         seulement après un « rien » d'Open Library ; une tentative = un budget (AbortController
+                         par tentative, 8 s, corps lu en flux et coupé à 256 Ko), une seule reprise sur un échec
+                         MUET (délai, réseau), jamais sur un refus parlé (429, 5xx) ; `fiche.motsCles` = des
+                         propositions. Puis fusionnerFiche, fabriquerLivre (ISBN-13 ou null, jamais une suite
+                         libre de chiffres), enregistrerLivre, renderLivreAjout/renderLivreAjoutRoute : le
+                         formulaire « Ajouter un livre » en deux pas (Entrée = Identifier, une identification à
+                         la fois, « Réessayer » quand Open Library n'a pas répondu) ; la couverture reçue
+                         appartient à SA demande d'ISBN, jamais à une autre (R-UX-13).
 src/ui/accueil-livre.js  accueilLivreModel/ACCUEIL_ACTIONS/renderAccueilLivre : l'écran après l'ajout d'un livre
                          (photographier l'index ou une recette, aller à Mes livres) ; `?nouveau` sans valeur ne
                          journalise rien (R-UX-10 : le modèle décide, pas la route).
@@ -297,6 +309,26 @@ src/core/lien.js         lienSignet(sourceUrl) et libelleSource(recipe) : foncti
                          se stocke ni ne se renvoie) ; `libelleSource` sert les surfaces qui n'affichent qu'un
                          texte (`meals.js`, `exporters.js` — S8).
 ```
+
+### Identifier un livre, fiable (lot suivant, 14-15 octobre 2026)
+
+Spec : `docs/superpowers/specs/2026-10-14-identifier-un-livre-fiable-design.md` (§ 11.2 : ce que la construction a
+amendé). Un seul module neuf ; les autres changements sont décrits sur les lignes de `puces.js` et `livre-ajout.js`
+ci-dessus.
+
+```text
+src/core/isbn.js         nettoyerIsbn, validerIsbn (ISBN-10/13, chiffre de contrôle, préfixe 978/979 → isbn13 +
+                         isbn10, ou un motif : vide, longueur, controle, pas_isbn), codeBarresVersIsbn : module
+                         pur, appelé AVANT tout réseau (un ISBN mal tapé est refusé tout de suite, zéro requête).
+src/domain/search.js     buildDocs : les `tags` d'un livre (ses mots-clés) entrent dans les `tokens` de TOUTES ses
+                         recettes, et dans les `titleTokens` de ses références (`reference_only` : index, signet
+                         rattaché) — une référence de « Berber and Q » remonte sur « bbq » même si son titre ne le
+                         dit pas. Une recette sans édition ne reçoit rien.
+src/ui/book.js           fiche livre : bloc « Mots-clés » à côté de « Cuisines » ; « Enregistrer » écrit `tags`
+                         (relecture C4 inchangée, `cover_sha256` intact). Pas de suggestions distantes ici.
+```
+
+Clé Google Books : procédure et murs dans `docs/google-books.md` (publique par conception, vide par défaut).
 
 `src/ui/add.js` est réécrit (grille de cinq cartes `renderGrille`, sélecteur avant scan `renderSelecteurScan`,
 `parametresDeScan` pur, R-UX-7) mais reste le même fichier, déjà dans `SHELL` depuis le lot d'hébergement.

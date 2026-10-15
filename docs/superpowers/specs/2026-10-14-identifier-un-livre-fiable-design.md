@@ -445,7 +445,22 @@ d'édition (D6) = lot suivant.
 
 ### 11.2 Ce que la construction a amendé
 
-(À remplir pendant la construction : une ligne par ruling R-ISBN-n.)
+Registre complet : `.superpowers/sdd/2026-10-14-identifier-un-livre-fiable/progress.md` (journal des tâches 1-10).
+
+| Ruling | Ce qui a changé par rapport au plan ou à la spec |
+|---|---|
+| P1 (pré-vol) | L'assertion `ok(true, …)` du plan (« `attenteReelle` sans signal rend après le délai ») n'affirmait rien : remplacée par une mesure de durée (`performance.now()` avant/après `attenteReelle(20)`, ≥ 15 ms). |
+| P2 (pré-vol) | Les échappements du plan sont écrits `\u{XXXX}` ou `String.fromCodePoint` : un `\uXXXX` nu dans un appel d'outil est décodé en caractère réel (mesuré deux fois) ; contrôle des octets (lecture binaire) avant chaque commit. |
+| P3 (pré-vol) | Le total épinglé de `tests/tests.js` n'est jamais deviné : lu dans « obtenu : X » une fois les autres assertions vertes, puis posé. |
+| R-ISBN-1 | U+2028 et U+2029 sont des catégories Zl/Zp, pas Cf : `\p{Cf}` ne les retire pas ; ils sont nommés explicitement dans la regex de `borner` (§ 5 disait « Cc et Cf (… U+2028/2029) »). |
+| R-ISBN-2 | Régression transitoire acceptée entre les tâches 2 et 7 : `identifier` passait un ISBN non validé à `lookupIsbn` (→ `TypeError` de la garde S9 pour un ISBN-10 ou une coquille). Fermée en tâche 7 par la validation avant tout appel (test « ISBN faux → aucun appel ») ; la branche n'a jamais été servie entre-temps. |
+| R-ISBN-3 | Test « motif hostile » du pas 1 : le sélecteur devient `[data-role="indisponible"] > div` — le bloc contient aussi le bouton « Réessayer », dont le texte polluait `textContent`. Le test était faux, pas le code. |
+| R-ISBN-4 | Test « deux Réessayer = un appel » : deux clics sur le MÊME nœud (le premier redessine et retire le bouton, une seconde recherche par texte ne le trouvait plus) ; la garde `recherche` refuse le second ; mutation de la garde vérifiée. |
+| R-ISBN-5 | `changerIsbn` n'efface pas le message de validation pendant la frappe (R-UX-9 : aucun redessin par touche) ; `validation` et `resultat` tombent au prochain `identifier`. Conforme à § 6, aucun changement. |
+| Tâche 7, ronde 1 | Compteur `reponsesRecues` (incrémenté après `await lookupIsbn`, AVANT la garde de génération, exposé par `etatRoute()`) = ancre de FAIT des tests de réponses tardives ; le cas 6 de R-UX-13, devenu creux, y est réancré (mutation de la garde vérifiée). Un ISBN invalide efface aussi `resultat` (sinon le message d'un 429 précédent restait affiché). `nouvelleGeneration()` libère `recherche` (`saisirMain`/`retourIsbn` pendant « Recherche… »). |
+| Tâche 2 | Le cas 10 de R-UX-13 (C2, langue reçue) passe par `search.json` (`language` d'Open Library) et non plus par Google ; les fixtures du bloc R-UX-13 deviennent de vrais ISBN-13 valides (table de correspondance dans le brief de la tâche 2). |
+| Tâche 8, ronde 1 | Le scénario 6 « rien » d'Open Library (search vide, legacy tenté) prouve que Google n'est jamais tenté sans clé ; un ISBN-10 saisi est écrit en ISBN-13 dans l'édition (normalisation prouvée à l'écriture). |
+| Mesure D6 (tâche 10) | Mesuré sur le réseau le 15 octobre : l'édition anglaise `9780747532699` (Harry Potter, Bloomsbury) sort `language fr` et l'éditeur « Alma Littera » (données de l'œuvre) ; `9780385533225` sort `en`. Confirme § 10 / § 12.6 — correction (langue de l'édition) = lot suivant. Les sujets reçus contiennent aussi des étiquettes techniques (« Series:Harry_Potter », « Nyt:hardcover_fiction=… ») proposées telles quelles : propositions seulement, rien n'est écrit sans tape. |
 
 ## 12. Mots-clés du livre (ajouté au lot le 14 octobre au soir)
 

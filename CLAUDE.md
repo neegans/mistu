@@ -313,6 +313,100 @@ s'affichent sans **aucune erreur de console** ni réponse ≥ 400 ; seul l'avert
 base `cuisine-os`. La bibliothèque de ce navigateur partagé est encore **vide** (aucune fiche livre à ouvrir pour
 l'instant — le parcours réel ci-dessus reste à faire).
 
+### Identifier un livre, fiable (14-15 octobre 2026)
+
+**Où.** Branche `isbn-fiable`, worktree `~/projects/mistu-isbn` (jamais `~/projects/mistu`), serveur de vérification
+`http://localhost:8082/` (suite : `http://localhost:8082/tests/`). Spec :
+`docs/superpowers/specs/2026-10-14-identifier-un-livre-fiable-design.md` (rév. 3 ; **§ 11.2** « Ce que la construction
+a amendé » : P1-P3, R-ISBN-1 à R-ISBN-5, rondes de correction des tâches 2, 7 et 8, mesure D6). Plan :
+`docs/superpowers/plans/2026-10-14-identifier-un-livre-fiable.md`. Registre :
+`.superpowers/sdd/2026-10-14-identifier-un-livre-fiable/` (`progress.md`, un brief, un rapport et une revue par tâche ;
+lanceurs `suite.cjs` et `mesure.cjs`). Base : `main` `606fdd9` (lot UX fusionné, 1378/1378). Procédure de la clé
+Google : `docs/google-books.md`.
+
+**Ce qui marche** (éprouvé par la suite, `fetch`/attente/état en ligne/délais/clé injectés, aucun réseau) : un ISBN
+mal tapé est refusé **avant** tout appel (`src/core/isbn.js` : contrôle ISBN-10/13, préfixe 978/979) ; `lookupIsbn` à
+trois issues (trouvé / introuvable / indisponible avec motif délai, réseau, limite, serveur, et « hors ligne » posé
+par la route) ; Open Library `search.json` d'abord, l'ancien `api/books` en filet sur un « rien », Google Books
+**seulement avec une clé** et seulement après un « rien » ; une seule reprise sur un échec muet, jamais sur un 429 ou
+un 5xx ; corps lu en flux et coupé à 256 Ko ; formes hostiles typées (titre chaîne non vide, contrôles et bidi
+retirés) ; écran du pas 1 qui dit la vraie raison et offre **« Réessayer »** ; **Entrée = Identifier** ; une
+identification à la fois (garde `recherche` + génération : une réponse tardive ou croisée n'écrit rien) ; l'édition
+est écrite en ISBN-13 ou `null`, jamais une suite libre de chiffres ; **mots-clés du livre** (§ 12) : propositions
+de la source étiquetées « Proposé par Open Library », puces au pas 2 et sur la fiche livre, les `tags` du livre
+servent la recherche de toutes ses recettes (une référence de « Berber and Q » remonte sur « bbq »).
+
+**Mesures réelles (15 octobre 2026, 04 h 29 UTC, `mesure.cjs`, Chrome sans tête, contexte neuf, réseau réel).** Open
+Library a répondu à tout (aucune panne). Sortie lue ; extraits, lignes et champs coupés marqués « ... » :
+
+```text
+=== (1) 9781785035289 + Entree
+  duree 513 ms ; pas 2 ; isbn 9781785035289 ; resultat null ; validation null
+  champs : titre « Berber and Q » ; auteur « Josh Katz » ; editeur « Ebury Publishing » ; annee 2018 ; langue en (menu en)
+  ecran : provenance "Renseigné par Open Library — vérifie et corrige." ; ...
+  suggestions : "Proposé par Open Library" ["Barbecuing"]
+  requetes : search.json 1 ; api/books 0 ; covers 1 ; googleapis 0 ; echecs 0
+=== (2) « ← Changer d’ISBN », 9782890772816 + Identifier
+  champs : titre « À la di Stasio » ; auteur « Josée Di Stasio » ; editeur « Flammarion Québec » ; annee 2004 ; langue fr (menu fr)
+  suggestions : "Proposé par Open Library" ["Cooking","Cuisine"]
+  requetes : search.json 1 ; api/books 0 ; covers 1 ; googleapis 0 ; echecs 0
+=== (3) 9781785035280 (controle faux) + Identifier
+  ecran : provenance null ; validation "Cet ISBN n’est pas valide, vérifie les chiffres." ; indisponible null ; bouton Reessayer false
+  requetes : search.json 0 ; api/books 0 ; covers 0 ; googleapis 0 ; echecs 0
+=== (4) hors ligne, 9780306406157 + Identifier
+  resultat {"statut":"indisponible","motif":"horsligne","google":"non_appele"}
+  ecran : ... indisponible "Tu es hors ligne." ; bouton Reessayer true
+  requetes : search.json 0 ; api/books 0 ; covers 0 ; googleapis 0 ; echecs 0
+=== (5) en ligne, « Reessayer »
+  duree 511 ms ; pas 2 ; isbn 9780306406157
+  champs : titre « Error-correction coding for digital communications » ; ... langue en (menu en)
+  requetes : search.json 1 ; api/books 0 ; covers 1 ; googleapis 0 ; echecs 0
+=== (6) edition anglaise 9780747532699 (Harry Potter and the Philosopher’s Stone, Bloomsbury 1997)
+  champs : titre « Harry Potter and the Philosopher's Stone » ; auteur « J. K. Rowling » ; editeur « Alma Littera » ; annee 1997 ; langue fr (menu fr)
+=== (6) edition anglaise 9780385533225 (The Particular Sadness of Lemon Cake, Doubleday 2010)
+  champs : titre « The Particular Sadness of Lemon Cake » ; ... langue en (menu en)
+```
+
+Lecture : les deux ISBN du signalement sont trouvés en **une** requête `search.json` chacun, avec la langue juste
+(`en` / `fr`) et la suggestion « Barbecuing » ; l'ISBN faux et le mode hors ligne ne font **aucune** requête ;
+« Réessayer » remis en ligne trouve le livre. Les durées (≈ 200-510 ms) comptent un plancher de 200 ms du script.
+**D6 confirmé** : une édition anglaise d'une œuvre traduite peut sortir `fr` (Harry Potter) avec l'éditeur d'une
+autre édition (« Alma Littera ») — données de l'œuvre, la fiche reste « à vérifier » ; correction = lot suivant. Les
+sujets d'Open Library contiennent aussi des étiquettes techniques (« Series:Harry_Potter », « Nyt:hardcover_fiction=… »)
+proposées telles quelles (rien n'est écrit sans tape). La couverture de `9781785035289` répond 404 chez Open Library
+(curl, `?default=false`) : pas de couverture, chemin attendu.
+
+**Ce qui n'est PAS prouvé.** **Safari et l'iPhone** (aucun WebKit ici) ; **Google Books avec une clé** (case vide :
+le chemin n'est éprouvé que par la suite) ; que Google **accepte un référent réduit à l'origine** (`strict-origin`)
+et que Safari l'envoie — mesure décrite dans `docs/google-books.md` ; la **langue d'une édition bilingue** ou
+traduite (D6 ci-dessus : la langue de l'œuvre gagne, « français d'abord ») ; les deux ISBN depuis le **site public**
+(après fusion et `push`).
+
+**Dettes (assumées, nommées dans le registre).** **S4d** : quitter la route pendant une recherche n'abandonne pas la
+requête en vol (au plus 20 s ; sa réponse est muette par la génération) · le chemin réel du lecteur de code-barres
+(`pickFiles` + `createImageBitmap`) reste hors suite (seul `codeBarresVersIsbn` est testé) · pas de suggestions
+distantes sur la **fiche** livre (les sujets reçus ne sont pas stockés) · mineurs différés des revues de tâche, en une
+ligne : `motsClesDe` coupe après `trim`, tables de messages reconstruites à chaque appel du modèle, imports
+temporairement inutilisés résorbés, duplication `identifier`/`nouvelleGeneration` et des deux IIFE de `book.js`,
+quelques assertions encore faibles (`.some` au lieu d'un décompte, Entrée sans `defaultPrevented`) — liste exacte dans
+`progress.md`.
+
+**Versions.** `APP_VERSION = '0.4.1'` (pins `v0\.4\.1-\d+` dans `tests/ajouter.js` et `tests/sync-l3.js`),
+`sw.js VERSION = 'cuisine-os-v0.4.1-10'`, `SHELL` + `./src/core/isbn.js` (seul module neuf), `GOOGLE_BOOKS = { key: '' }`
+dans `src/sync/config.js`. Aucun schéma touché, `DB_VERSION` inchangée.
+
+**Bilan (clôture, tâche 10).** Suite complète **1506/1506 verts** (total épinglé **1505** dans `tests/tests.js`), une
+seule erreur de console : un 404 pré-existant, très probablement `/favicon.ico` (`tests/index.html` n'a pas de lien
+`icon` ; jamais remonté comme réponse de page) ; `node --test tools/*.test.mjs` **40/40** ; `node
+tools/generer-migrations.mjs --check` : **0** ; aucun U+2028/2029/202E ni caractère de contrôle dans les fichiers du
+lot ; `grep -rn "AIza" src/` vide.
+
+**Fusion.** Revue finale de branche puis `/verify` par le chef d'orchestre ; copier
+`.superpowers/sdd/2026-10-14-identifier-un-livre-fiable/` dans `~/projects/mistu/.superpowers/sdd/` **avant** tout
+`git worktree remove`. Si `main` a bougé depuis `606fdd9` : rebaser (les lignes de version et le total épinglé se
+résolvent en faveur d'`isbn-fiable`). **Neegan fusionne par `!`** puis `git push` ; preuve sur le site public : les
+deux ISBN, les suggestions, la recherche « bbq ».
+
 ## Premier lot de fiabilisation — 8 septembre 2026, à réviser
 
 À la suite d’un audit statique, l’utilisateur a autorisé le premier lot consacré à la sauvegarde/restauration. Modifications effectuées uniquement via MCP vibeforge_files, avec écritures conditionnées au SHA-256 ; aucun shell, réseau, build, test exécuté, commit ou déploiement.
