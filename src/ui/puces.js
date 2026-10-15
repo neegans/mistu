@@ -18,6 +18,37 @@ export function cuisinesExistantes(ctx) {
   return [...(ctx?.books || []), ...(ctx?.recipes || [])].flatMap((r) => r?.cuisines || []);
 }
 
+// § 12 : les mots-clés des LIVRES seulement (les tags de recette sont un autre écran). Même rôle que cuisinesExistantes.
+export function motsClesExistants(ctx) {
+  return [...(ctx?.books || [])].flatMap((b) => b?.tags || []);
+}
+
+// Propositions reçues d'une source (Open Library, Google Books) : étiquetées, dédoublonnées, sans ce qui est déjà
+// choisi (à la casse et à l'accent près), 10 au plus ; null quand il n'y a rien à montrer. Rien n'est écrit ici.
+export const SUGGESTIONS_MAX = 10;
+export function suggestionsModel({ proposees = [], source = null, choisies = [] } = {}) {
+  const prises = new Set(choisies.map(normaliser));
+  const vues = new Map();
+  for (const v of proposees) {
+    const valeur = String(v ?? '').trim();
+    const cle = normaliser(valeur);
+    if (!cle || prises.has(cle) || vues.has(cle)) continue;
+    vues.set(cle, { valeur, cle });
+    if (vues.size >= SUGGESTIONS_MAX) break;
+  }
+  if (!vues.size) return null;
+  const libelle = source === 'googlebooks' ? t('Proposé par Google Books') : t('Proposé par Open Library');
+  return { source, libelle, puces: [...vues.values()] };
+}
+
+// S10 : une valeur proposée n'est pas une clé de traduction — affichée telle quelle, capitalisée. Jamais dans un label.
+export function renderSuggestions(model, { ajouter } = {}) {
+  return el('div', { class: 'suggestions' },
+    el('small', { class: 'muted' }, model.libelle),
+    el('div', { class: 'puces', role: 'group' },
+      ...model.puces.map((p) => el('button', { type: 'button', class: 'puce suggestion', 'aria-pressed': 'false', onClick: () => ajouter && ajouter(p.valeur) }, capitaliser(p.valeur)))));
+}
+
 export function pucesModel({ choisies = [], existantes = [], graine = GRAINE_CUISINES } = {}) {
   const vues = new Map(); // cle → { cle, valeur, libelle, choisie }
   // S10 : seule la GRAINE est traduisible — elle est fermée et ses quinze clés vivent dans en.js. Une valeur libre
@@ -56,10 +87,10 @@ export function ajouterPuce(choisies, texte) {
   return [...choisies, valeur];
 }
 
-export function renderPuces(model, { basculer, ajouter } = {}) {
+export function renderPuces(model, { basculer, ajouter } = {}, { libelleAutre = t('Autre cuisine') } = {}) {
   const liste = el('div', { class: 'puces', role: 'group' },
     ...model.puces.map((p) => el('button', { type: 'button', class: 'puce', 'aria-pressed': p.choisie ? 'true' : 'false', onClick: () => basculer && basculer(p.valeur) }, p.libelle)));
-  const champ = el('input', { type: 'text', placeholder: t('Autre…'), 'aria-label': t('Autre cuisine') });
+  const champ = el('input', { type: 'text', placeholder: t('Autre…'), 'aria-label': libelleAutre });
   const envoyer = () => { const v = champ.value; if (!v.trim()) return; ajouter && ajouter(v); champ.value = ''; };
   champ.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); envoyer(); } });
   return el('div', { class: 'stack' }, liste,

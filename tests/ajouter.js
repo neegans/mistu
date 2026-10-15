@@ -498,6 +498,43 @@ export async function runAjouterTests({ eq, ok }) {
     eq(LA.renderLivreAjout(LA.livreAjoutModel({ pas: 1 }), gestes).querySelector('[data-role="indisponible"], [data-role="validation"]'), null, 'livre : sans rien à dire, rien n’est affiché');
   }
   {
+    // § 12.3 : suggestions de mots-clés — propositions étiquetées, jamais posées sans geste.
+    const P = await import('../src/ui/puces.js');
+    eq(P.motsClesExistants({ books: [{ tags: ['a', 'b'] }, { tags: ['b'] }, {}], recipes: [{ tags: ['z'] }] }), ['a', 'b', 'b'], 'mots-clés : existants = toutes les occurrences des tags des LIVRES (la fréquence fait l’ordre)');
+    const s1 = P.suggestionsModel({ proposees: ['Barbecuing', 'BBQ', 'bbq', 'Charbon', '', 'Arabe'], source: 'openlibrary', choisies: ['BBQ'] });
+    eq([s1.libelle, s1.puces.map((p) => p.valeur)], ['Proposé par Open Library', ['Barbecuing', 'Charbon', 'Arabe']], 'mots-clés : une suggestion déjà choisie (à la casse près) disparaît, les doublons aussi, le vide aussi');
+    eq(P.suggestionsModel({ proposees: ['Bbq'], source: 'openlibrary', choisies: ['bbq'] }), null, 'mots-clés : plus rien à proposer → null, aucun bloc');
+    eq(P.suggestionsModel({ proposees: ['Épice'], source: 'openlibrary', choisies: ['epice'] }), null, 'mots-clés : l’accent ne fait pas une proposition nouvelle (normaliser)');
+    eq(P.suggestionsModel({ proposees: Array.from({ length: 14 }, (_, i) => `s${i}`), source: 'googlebooks' }).puces.length, 10, 'mots-clés : 10 suggestions au plus');
+    eq(P.suggestionsModel({ proposees: ['x'], source: 'googlebooks' }).libelle, 'Proposé par Google Books', 'mots-clés : la source est nommée (I-A)');
+    eq(P.suggestionsModel({ proposees: [], source: null }), null, 'mots-clés : sans proposition, null');
+    const ajoutes = [];
+    const n = P.renderSuggestions(s1, { ajouter: (v) => ajoutes.push(v) });
+    eq([n.className, n.querySelector('small').textContent, [...n.querySelectorAll('button.puce.suggestion')].map((b) => b.textContent)], ['suggestions', 'Proposé par Open Library', ['Barbecuing', 'Charbon', 'Arabe']], 'mots-clés : rendu = libellé + une puce par proposition, affichée capitalisée');
+    n.querySelectorAll('button')[1].click();
+    eq(ajoutes, ['Charbon'], 'mots-clés : un clic propose la valeur au geste ajouter — rien n’est écrit ici');
+    eq(n.querySelector('label'), null, 'mots-clés : jamais dans un label (R-UX-8)');
+    eq(P.renderPuces(P.pucesModel({ choisies: [] }), {}, { libelleAutre: 'Autre mot-clé' }).querySelector('input').getAttribute('aria-label'), 'Autre mot-clé', 'mots-clés : le champ libre est nommé pour les mots-clés');
+    eq(P.renderPuces(P.pucesModel({ choisies: [] }), {}).querySelector('input').getAttribute('aria-label'), 'Autre cuisine', 'mots-clés : sans option, le champ libre reste « Autre cuisine »');
+    // Pas 2 : le bloc « Mots-clés » avec ses gestes.
+    const gestes = { basculerMotCle: (v) => ajoutes.push(['bascule', v]), ajouterMotCle: (v) => ajoutes.push(['ajout', v]) };
+    const m = { ...LA.livreAjoutModel({ pas: 2, isbn: '9781785035289', champs: { title: 'T', tags: ['bbq'] }, provenance: 'openlibrary', suggestions: { source: 'openlibrary', valeurs: ['Barbecuing', 'bbq'] } }), existantes: ['italienne'], existantesMotsCles: ['charbon', 'charbon', 'arabe'] };
+    const p2 = LA.renderLivreAjout(m, gestes);
+    const bloc = p2.querySelector('[data-role="mots-cles"]');
+    ok(bloc && bloc.querySelector('span').textContent === 'Mots-clés' && !bloc.closest('label'), 'livre : bloc « Mots-clés » au pas 2, hors label (R-UX-8)');
+    eq([...bloc.querySelectorAll('button.puce:not(.suggestion)')].map((b) => [b.textContent, b.getAttribute('aria-pressed')]), [['Bbq', 'true'], ['Charbon', 'false'], ['Arabe', 'false']], 'livre : mots-clés = choisis puis existants par fréquence, AUCUNE cuisine de graine (graine vide)');
+    eq([...bloc.querySelectorAll('button.puce.suggestion')].map((b) => b.textContent), ['Barbecuing'], 'livre : les suggestions excluent ce qui est déjà choisi');
+    eq(bloc.querySelector('input').getAttribute('aria-label'), 'Autre mot-clé', 'livre : champ libre des mots-clés nommé');
+    bloc.querySelector('button.puce.suggestion').click();
+    [...bloc.querySelectorAll('button.puce:not(.suggestion)')][1].click();
+    eq(ajoutes.slice(-2), [['ajout', 'Barbecuing'], ['bascule', 'charbon']], 'livre : suggestion → ajouterMotCle, puce → basculerMotCle');
+    const sans = LA.renderLivreAjout({ ...LA.livreAjoutModel({ pas: 2, champs: { title: 'T' } }), existantes: [], existantesMotsCles: [] }, {});
+    eq([!!sans.querySelector('[data-role="mots-cles"]'), sans.querySelector('.suggestions')], [true, null], 'livre : sans suggestion, le bloc existe (saisie libre) mais pas de ligne « Proposé par … »');
+    const hostileSugg = '<img src=x onerror="void 0">';
+    const nh = P.renderSuggestions(P.suggestionsModel({ proposees: [hostileSugg], source: 'openlibrary' }), {});
+    eq([nh.querySelectorAll('img').length, nh.querySelector('button.puce.suggestion').textContent.includes('<img src=x')], [0, true], 'mots-clés : une proposition hostile reste du texte (S14) — seule surface neuve qui affiche une chaîne distante');
+  }
+  {
     // La ROUTE elle-même, sans réseau et sans écriture : ses gestes sont câblés, et une saisie à la main
     // n'étiquette RIEN (I-B — aucune provenance à annoncer, personne n'a interrogé personne).
     // F12 : base JETABLE et `fetch` remplacé par un refus — « sans réseau et sans écriture » est ainsi une garantie

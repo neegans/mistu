@@ -265,4 +265,8 @@ export const EN = {
   "La couverture reçue n’a pas pu être lue.": "The cover that arrived could not be read.",
   "La couverture n’a pas pu être changée. Réessaie.": "The cover could not be changed. Try again.",
   "La couverture n’est pas sur cet appareil.": "The cover is not on this device.",
+  "Mots-clés": "Keywords",
+  "Autre mot-clé": "Other keyword",
+  "Proposé par Open Library": "Suggested by Open Library",
+  "Proposé par Google Books": "Suggested by Google Books",
 };

@@ -11,7 +11,7 @@ import { LIMITES_COUVERTURE, dimensionsImage, reduireImage, ErreurImage } from '
 import { urlDeBlob } from '../core/blob-urls.js';
 import { listConventions } from '../domain/units.js';
 import { pageHeader, field, select } from './components.js';
-import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes, normaliser, LIMITES_PUCES } from './puces.js';
+import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes, motsClesExistants, suggestionsModel, renderSuggestions, normaliser, LIMITES_PUCES } from './puces.js';
 import { GOOGLE_BOOKS } from '../sync/config.js';
 import { nettoyerIsbn, validerIsbn, codeBarresVersIsbn } from '../core/isbn.js';
 
@@ -349,6 +349,10 @@ export function renderLivreAjout(model, gestes = {}) {
     // R-UX-8 : les puces ne vont JAMAIS dans un label — field() rend un <label>, et un clic sur « Cuisines »
     // cocherait alors la première puce. Même habillage, sans l'enveloppe qui vole le clic.
     el('div', { class: 'field' }, el('span', null, t('Cuisines')), puces),
+    // § 12 : mots-clés du livre — mêmes puces que les cuisines, graine vide, puis les propositions reçues (étiquetées).
+    el('div', { class: 'field', dataset: { role: 'mots-cles' } }, el('span', null, t('Mots-clés')),
+      renderPuces(pucesModel({ choisies: c.tags, existantes: model.existantesMotsCles || [], graine: [] }), { basculer: g('basculerMotCle'), ajouter: g('ajouterMotCle') }, { libelleAutre: t('Autre mot-clé') }),
+      (() => { const s = suggestionsModel({ proposees: model.suggestions?.valeurs || [], source: model.suggestions?.source || null, choisies: c.tags }); return s ? renderSuggestions(s, { ajouter: g('ajouterMotCle') }) : null; })()),
     typeof gestes.couverture === 'function' ? gestes.couverture() : null,
     el('details', null, el('summary', { class: 'btn' }, t('Plus de détails')),
       el('div', { class: 'two-col', style: { marginTop: '.8rem' } },
