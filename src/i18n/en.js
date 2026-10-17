@@ -291,4 +291,5 @@ export const EN = {
   "L’assistant n’a pas répondu. Réessaie.": "The assistant did not answer. Try again.",
   "La demande a changé depuis cette recherche.": "The request has changed since this search.",
   "Autres pages trouvées ({n})": "Other pages found ({n})",
+  "Liens web gardés": "Saved web links",
 };

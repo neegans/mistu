@@ -3,7 +3,7 @@ import { el, promptDialog, toast } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { navigate, buildQuery, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
-import { pageHeader, bookCover, segmented, emptyState, section } from './components.js';
+import { pageHeader, bookCover, segmented, emptyState, section, recipeCard } from './components.js';
 import { revoquerUrlDeBlob } from '../core/blob-urls.js';
 import { proposeDishesForRecipe } from '../domain/dishes.js';
 
@@ -13,8 +13,26 @@ export async function renderLibrary(params, query, ctx) {
     pageHeader(t('Mes livres'), { actions: [el('a', { class: 'btn primary', href: '#/add' }, t('Ajouter'))] }),
     el('div', { style: { marginBottom: '1rem' } }, segmented([{ value: 'books', label: t('Livres') }, { value: 'dishes', label: t('Plats') }], tab, (v) => navigate('/library' + buildQuery({ tab: v })))));
   if (tab === 'dishes') root.append(await dishesTab(ctx));
-  else root.append(await booksTab(ctx));
+  else {
+    root.append(await booksTab(ctx));
+    // APRÈS booksTab, y compris quand il rend l'état vide : un signet sans livre n'a pas d'autre place, et le bouton
+    // « ← Mes livres » de sa fiche y ramène (confort après preuve, 17 octobre).
+    const liens = liensWebGardes(ctx);
+    if (liens) root.append(liens);
+  }
   return root;
+}
+
+// Les signets sans livre (edition_id nul, source_url posé), le plus récent d'abord. Aucun : rien n'est rendu.
+function liensWebGardes(ctx) {
+  const quand = (r) => String(r.updated_at || r.created_at || '');
+  const signets = (ctx.recipes || []).filter((r) => !r.edition_id && typeof r.source_url === 'string' && r.source_url)
+    .sort((a, b) => (quand(a) < quand(b) ? 1 : quand(a) > quand(b) ? -1 : 0));
+  if (!signets.length) return null;
+  return section(t('Liens web gardés'), ...signets.map((r) => {
+    const doc = ctx.docsByRecipe?.get(r.id);
+    return doc ? recipeCard(doc) : el('a', { class: 'btn', href: `#/recipes/${r.id}` }, r.display_title || r.original_title || t('Sans titre'));
+  }));
 }
 
 async function booksTab(ctx) {

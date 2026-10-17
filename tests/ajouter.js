@@ -1734,6 +1734,62 @@ export async function runAjouterTests({ eq, ok }) {
     });
   }
 
+  // --- Confort après preuve (17 octobre, item 1) : « Liens web gardés » dans Mes livres. Un signet sans livre
+  // (edition_id nul, source_url posé) n'apparaissait nulle part, et « ← Mes livres » de sa fiche ramenait à une liste vide.
+  {
+    const { renderLibrary } = await import('../src/ui/library.js');
+    const { buildDocs } = await import('../src/domain/search.js');
+    const { EN } = await import('../src/i18n/en.js');
+    const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
+    const { withRepo } = await import('./sync-fixture.js');
+    const localeAvant = getUiLocale();
+    setUiLocale('fr'); // ce bloc affirme des textes français (rendue dans le finally)
+    try {
+      const signet = (id, titre, quand = {}) => ({ id, original_title: titre, availability: 'reference_only', source_url: `https://a.test/${id}`, edition_id: null, ...quand });
+      // Les docs sont ceux de buildDocs (la forme que recipeCard attend) ; `sansDoc` retire un doc pour le chemin de repli.
+      const ctxDe = (recipes, { editions = [], books = [], sansDoc = [] } = {}) => {
+        const docs = buildDocs({ recipes, versions: [], editions, books, dishes: [], links: [] });
+        return {
+          book_editions: editions, recipes, recipe_versions: [], source_documents: [], source_pages: [],
+          rediscovery_prefs: [], dishes: [], dish_recipe_links: [], recipesById: new Map(recipes.map((r) => [r.id, r])),
+          docsByRecipe: new Map(docs.filter((d) => !sansDoc.includes(d.recipe.id)).map((d) => [d.recipe.id, d])),
+          scan_sessions: [], settings: {}, books, booksById: new Map(books.map((b) => [b.id, b])),
+          editionsById: new Map(editions.map((e) => [e.id, e])), editionLabel: (e) => books.find((b) => b.id === e.book_id)?.title || '',
+        };
+      };
+      const bloc = (n) => [...n.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Liens web gardés') || null;
+      const titres = (n) => [...(bloc(n)?.children || [])].filter((c) => c.tagName !== 'H2').map((c) => c.querySelector('h3')?.textContent ?? c.textContent);
+      const apres = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+      // (a) aucun livre + un signet : l'état vide reste, ET la section suit, avec la carte du signet
+      const seul = signet('rS', 'Saumon au fenouil', { created_at: '2026-10-17T10:00:00.000Z' });
+      let n = await renderLibrary({}, {}, ctxDe([seul]));
+      eq([n.textContent.includes('Aucun livre pour l’instant.'), !!bloc(n), titres(n), bloc(n)?.querySelector('a.item-link.card')?.getAttribute('href'), apres(n.querySelector('.empty'), bloc(n))],
+        [true, true, ['Saumon au fenouil'], '#/recipes/rS', true], 'Mes livres sans livre : l’état vide ET la section « Liens web gardés » après lui, une carte au titre du signet vers sa fiche (confort, item 1)');
+      // (b) aucun signet : ni une recette tapée sans livre, ni un signet rangé dans un livre, ni une adresse vide ne font une section
+      n = await renderLibrary({}, {}, ctxDe([{ id: 'rT', original_title: 'Tapée', availability: 'available', edition_id: null }, signet('rL', 'Rangé', { edition_id: 'eX' }), signet('rV', 'Vide', { source_url: '' })]));
+      eq([n.textContent.includes('Aucun livre pour l’instant.'), n.textContent.includes('Liens web gardés')], [true, false], 'Mes livres sans signet : aucune section « Liens web gardés » (rien n’est rendu)');
+      // (c) le plus récent d'abord : updated_at, sinon created_at
+      const ancien = signet('r1', 'Ancien', { created_at: '2026-10-01T10:00:00.000Z' });
+      const recent = signet('r2', 'Récent', { created_at: '2026-10-15T10:00:00.000Z' });
+      eq(titres(await renderLibrary({}, {}, ctxDe([ancien, recent]))), ['Récent', 'Ancien'], 'Liens web gardés : le plus récent d’abord (created_at)');
+      eq(titres(await renderLibrary({}, {}, ctxDe([recent, { ...ancien, updated_at: '2026-10-16T10:00:00.000Z' }]))), ['Ancien', 'Récent'], 'Liens web gardés : updated_at prime sur created_at');
+      // (d) l'onglet Plats n'a pas la section
+      n = await renderLibrary({}, { tab: 'dishes' }, ctxDe([seul]));
+      eq(n.textContent.includes('Liens web gardés'), false, 'Mes livres, onglet Plats : pas de section « Liens web gardés »');
+      // Repli : un signet sans doc ne lève pas — un lien vers sa fiche, au titre du signet
+      n = await renderLibrary({}, {}, ctxDe([seul], { sansDoc: ['rS'] }));
+      { const a = bloc(n)?.querySelector('a.btn'); eq([titres(n), a?.getAttribute('href'), a?.textContent], [['Saumon au fenouil'], '#/recipes/rS', 'Saumon au fenouil'], 'Liens web gardés : sans doc, un lien a.btn vers la fiche, jamais une levée'); }
+      // Avec des livres (grille sur une base jetable) : la section suit la grille, et le signet rangé dans un livre n'y est pas
+      await withRepo(async () => {
+        const ed = { id: 'eG', book_id: 'bG', year: 2020, cover_sha256: null };
+        const livre = { id: 'bG', title: 'Grille', author: 'G.', cuisines: [] };
+        const m = await renderLibrary({}, {}, ctxDe([seul, signet('rL', 'Rangé', { edition_id: 'eG' })], { editions: [ed], books: [livre] }));
+        eq([m.textContent.includes('Aucun livre pour l’instant.'), titres(m), apres(m.querySelector('.grid'), bloc(m))], [false, ['Saumon au fenouil'], true], 'Mes livres avec un livre : la section suit la grille, le signet rangé dans un livre n’y est pas');
+      });
+      eq(EN['Liens web gardés'], 'Saved web links', 'en.js : « Liens web gardés »');
+    } finally { setUiLocale(localeAvant); }
+  }
+
   // --- § 12 CSP, § 13.10 statique (tâche 10, clôture). S10 RETIRÉE par R-UX-15 : l'assistant IA (src/domain/llm.js)
   // accepte une URL de base LIBRE (compatible OpenAI, configurée dans Réglages) — aucune liste fermée ne peut la
   // couvrir sans casser cette fonctionnalité antérieure au lot. connect-src reste donc `'self' https:` (dos-d'âne
@@ -1797,9 +1853,9 @@ export async function runAjouterTests({ eq, ok }) {
     const sw = await lire('../sw.js');
     ok(sw.length > 300 && sw.includes('SHELL'), `statique sw.js : le source est bien lu (${sw.length} caractères, SHELL présent) — sans quoi les inclusions ci-dessous ne prouveraient rien (S4)`);
     for (const m of ['./src/ui/puces.js', './src/ui/livre-ajout.js', './src/ui/accueil-livre.js', './src/ui/signet.js', './src/core/image.js', './src/core/blob-urls.js', './src/core/lien.js', './src/core/isbn.js']) ok(sw.includes(`'${m}'`), `SHELL : ${m}`);
-    ok(/VERSION = 'cuisine-os-v0\.5\.0-\d+'/.test(sw), 'sw.js : VERSION 0.5.0');
+    ok(/VERSION = 'cuisine-os-v0\.5\.1-\d+'/.test(sw), 'sw.js : VERSION 0.5.1');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.5.0', 'APP_VERSION 0.5.0');
+    eq(APP_VERSION, '0.5.1', 'APP_VERSION 0.5.1');
     const { GOOGLE_BOOKS } = await import('../src/sync/config.js');
     ok(typeof GOOGLE_BOOKS?.key === 'string' && (GOOGLE_BOOKS.key === '' || /^AIza[0-9A-Za-z_-]{35}$/.test(GOOGLE_BOOKS.key)), 'config : la clé Google Books est vide ou au format d’une clé d’API publique — un test de forme, jamais de valeur (S2/F2)');
   }
