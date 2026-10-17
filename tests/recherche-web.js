@@ -274,4 +274,104 @@ export async function runRechercheWebTests({ eq, ok }) {
     const rendu = C.filterChips(chips, ing, () => {});
     eq([...rendu.querySelectorAll('.chip')].map((n) => n.textContent), textes, 'puces : filterChips rend EXACTEMENT les textes de libellePuce (une seule définition)');
   }
+
+  // --- § 5.1-5.4 écran du mode Web : état de module, garde, tape, vol, annulation, filet
+  {
+    const { setUiLocale } = await import('../src/core/i18n.js');
+    setUiLocale('fr'); // une suite antérieure bascule 'en' ; ce bloc affirme langue === 'fr'
+    const S = await import('../src/ui/search.js');
+    const vraiFetch = globalThis.fetch;
+    let appelsReseau = 0;
+    globalThis.fetch = async (u) => { appelsReseau += 1; throw new Error(`aucun reseau attendu ici : ${u}`); };
+    const scene = document.createElement('div'); scene.hidden = true; document.body.append(scene);
+    try {
+      const ctxDe = (llm) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: new Map(), meal_feedback: [], settings: { llm } });
+      const ANTH = { provider: 'anthropic', api_key: 'k', model: 'm' };
+      const pilote = () => { const p = {}; p.promesse = new Promise((res) => { p.resoudre = res; }); return p; };
+      const tick = () => new Promise((r) => setTimeout(r, 0)); // un tour de boucle : les .then de lancer() ont tourné
+      const monter = async (query, ctx, deps) => { const root = await S.renderSearch({}, { mode: 'web', ...query }, ctx, deps); scene.append(root); return root; };
+      const texte = (root) => root.textContent;
+      const bouton = (root, nom) => [...root.querySelectorAll('button')].find((b) => b.textContent === nom);
+      const champ = (root) => root.querySelector('input[type="search"]');
+      const taper = (root, v) => { champ(root).value = v; champ(root).dispatchEvent(new Event('input', { bubbles: true })); };
+      const issueTrouve = { etat: 'trouve', raison: null, liens: [{ href: 'https://a.test/r', hote: 'a.test', titre: 'A', date: null, pourquoi: null }], repli: false, recherches: 1, modele: 'm' };
+
+      // Garde du fournisseur (§ 5.2) : une seule source de vérité
+      S.reinitialiserWeb();
+      for (const [nom, llm, attendu] of [['none', { provider: 'none' }, 'Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'], ['anthropic sans clé', { provider: 'anthropic', api_key: '', model: 'm' }, 'Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'], ['openai', { provider: 'openai_compatible', api_key: 'k', model: 'm' }, 'Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.']]) {
+        let appels = 0;
+        const root = await monter({ q: 'saumon' }, ctxDe(llm), { chercher: async () => { appels += 1; return issueTrouve; } });
+        ok(texte(root).includes(attendu), `garde : ${nom} → « ${attendu.slice(0, 30)}… »`);
+        ok(!!root.querySelector('a[href="#/settings"]'), `garde : ${nom} → lien Réglages`);
+        eq([appels, !!bouton(root, 'Chercher sur le web avec l’assistant')], [0, false], `garde : ${nom} → aucun appel, pas de bouton`);
+        root.remove();
+      }
+      // Écran du bouton (§ 5.3) et frappe sans Entrée (Review Focus 1)
+      {
+        let appels = []; const p = pilote();
+        const root = await monter({}, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return p.promesse; }, navigate: () => {} });
+        const b = bouton(root, 'Chercher sur le web avec l’assistant');
+        eq([b.disabled, texte(root).includes('Écris d’abord ce que tu cherches.'), texte(root).includes('Une recherche = un appel à ton compte Anthropic.'), appels.length], [true, true, true, 0], 'bouton : champ vide → éteint, deux lignes, aucun appel au rendu (I-B)');
+        taper(root, 'saumon fenouil');
+        eq(b.disabled, false, 'bouton : la frappe ouvre le bouton sans Entrée ni redessin');
+        taper(root, '\u{200B}');
+        eq(b.disabled, true, 'bouton : une saisie faite de Cf laisse le bouton éteint (même règle que construireDemande)');
+        taper(root, 'saumon fenouil sans gluten');
+        b.click();
+        await tick();
+        eq(appels.length, 1, 'tape : un appel');
+        eq([appels[0].a.q, appels[0].a.filtres, appels[0].a.langue, appels[0].a.cfg], ['saumon fenouil sans gluten', ['Sans gluten', 'avec ing_fennel_bulb', 'avec ing_salmon'], 'fr', ANTH], 'tape : la demande est le CHAMP relu tel quel (q brut), les puces comprises en TEXTE (« Sans gluten » et les ingrédients du lexique, par leur id faute de table), la langue, la cfg (I-J)');
+        ok(appels[0].d.signal instanceof AbortSignal && typeof appels[0].d.enLigne === 'undefined', 'tape : un signal est passé ; enLigne n’est pas forcé à la tape');
+        const e = S.etatWeb();
+        eq([e.enCours, typeof e.cle, e.memoire], [true, 'string', null], 'tape : etatWeb dit un vol en cours, rien en mémoire');
+        const statut = root.querySelector('[role="status"]');
+        ok(statut && statut.textContent.includes('L’assistant cherche sur le web…'), 'vol : écran « en cours » avec role=status (F20)');
+        ok(bouton(root, 'Chercher sur le web avec l’assistant')?.disabled === true && !!bouton(root, 'Annuler'), 'vol : bouton éteint, « Annuler » présent');
+        // Annuler (§ 5.4.6)
+        bouton(root, 'Annuler').click();
+        eq([appels[0].d.signal.aborted, S.etatWeb().enCours, S.etatWeb().memoire, !!bouton(root, 'Chercher sur le web avec l’assistant')], [true, false, null, true], 'annuler : signal abandonné, plus de vol, mémoire intacte, écran du bouton');
+        p.resoudre({ ...issueTrouve, raison: 'annule', etat: 'indisponible', liens: [] });
+        await tick();
+        eq(S.etatWeb().memoire, null, 'annuler : la résolution tardive d’un vol annulé n’écrit rien');
+        root.remove();
+      }
+      // Nouvelle instance pendant un vol (F2/F3) : le premier vol est abandonné, sa réponse tardive est muette
+      {
+        S.reinitialiserWeb();
+        const appels = []; const p1 = pilote(); const p2 = pilote();
+        const chercher = async (a, d) => { appels.push(d.signal); return appels.length === 1 ? p1.promesse : p2.promesse; };
+        const ctx = ctxDe(ANTH);
+        const r1 = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
+        bouton(r1, 'Chercher sur le web avec l’assistant').click();
+        await tick();
+        const r2 = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });   // la ré-instanciation de production
+        ok(!!r2.querySelector('[role="status"]') && !!bouton(r2, 'Annuler'), 'instance 2 : retrouve le vol par sa clé et montre « en cours »');
+        r1.remove();
+        taper(r2, 'saumon fenouil');
+        // le bouton de r2 est éteint pendant le vol : la seconde tape passe par « Annuler » puis le bouton
+        bouton(r2, 'Annuler').click();
+        bouton(r2, 'Chercher sur le web avec l’assistant').click();
+        await tick();
+        eq([appels.length, appels[0].aborted, appels[1].aborted], [2, true, false], 'instance 2 : deux appels, le premier abandonné (I-I)');
+        p1.resoudre({ ...issueTrouve, liens: [{ ...issueTrouve.liens[0], titre: 'TARDIF' }] });
+        await tick();
+        eq(S.etatWeb().memoire, null, 'instance 2 : la réponse tardive du vol 1 n’écrit rien');
+        p2.resoudre(issueTrouve);
+        await tick();
+        eq([S.etatWeb().enCours, S.etatWeb().memoire?.etat], [false, 'trouve'], 'instance 2 : la réponse du vol 2 est en mémoire');
+        ok(!texte(r2).includes('TARDIF'), 'instance 2 : l’écran ne montre rien du vol 1');
+        r2.remove();
+      }
+      // Filet (§ 5.4.5, F12)
+      {
+        S.reinitialiserWeb();
+        const root = await monter({ q: 'saumon' }, ctxDe(ANTH), { chercher: async () => { throw new TypeError('bogue'); }, navigate: () => {} });
+        bouton(root, 'Chercher sur le web avec l’assistant').click();
+        await new Promise((r) => setTimeout(r, 0));
+        eq([S.etatWeb().enCours, S.etatWeb().memoire?.etat], [false, 'indisponible'], 'filet : un chercher qui lève → indisponible en mémoire, plus de vol (jamais d’écran figé)');
+        root.remove();
+      }
+      eq(appelsReseau, 0, 'écran web : aucun appel réseau réel pendant ces tests');
+    } finally { globalThis.fetch = vraiFetch; scene.remove(); S.reinitialiserWeb(); }
+  }
 }

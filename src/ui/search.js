@@ -1,17 +1,34 @@
 // Recherche universelle et accompagnements (spec §4, §26) : source active visible, pastilles modifiables, groupes distincts.
 import { el } from '../core/dom.js';
-import { t, label } from '../core/i18n.js';
+import { t, label, getUiLocale } from '../core/i18n.js';
 import { navigate, buildQuery } from '../core/router.js';
+import { borner } from '../core/bornes.js';
+import { lienSignet } from '../core/lien.js';
 import { parseQuery, searchDocs, chipsFor } from '../domain/search.js';
 import { findAccompaniments } from '../domain/pairing.js';
+import { providerFrom } from '../domain/llm.js';
+import { chercherRecettesWeb, construireDemande } from '../domain/recherche-web.js';
 import { RECIPE_TYPES, DIET_TAGS } from '../model/schema.js';
-import { recipeCard, filterChips, segmented, emptyState, section, availabilityBadge, provenanceText, select } from './components.js';
+import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select } from './components.js';
 import { addToMealFlow } from './meals.js';
 
 const MODES = [['recipes', 'Mes recettes'], ['books', 'Mes livres'], ['web', 'Web'], ['all', 'Tout']];
 
-export async function renderSearch(params, query, ctx) {
+// --- Recherche web : état AU NIVEAU DU MODULE (spec Web § 5.1). run() navigue en `replace`, donc chaque Entrée,
+// changement de mode ou de case ré-instancie la route : un état d'instance ne survit pas. Ici vivent la dernière issue
+// (mémoire VIVE, jamais en base — I-G), sous la clé exacte de la demande qui l'a produite, et l'UNIQUE appel en vol de
+// l'app (I-I). Les instances sont des vues : elles s'abonnent, et sont oubliées dès que leur racine quitte le document.
+let memoire = null; // { cle, issue, q, filtres }
+let vol = null;     // { cle, controller, promesse }
+const vues = new Set(); // { root, redessiner }
+export function etatWeb() { return { cle: vol?.cle ?? null, enCours: !!vol, memoire: memoire ? { cle: memoire.cle, etat: memoire.issue.etat } : null }; }
+export function reinitialiserWeb() { vol?.controller.abort(); vol = null; memoire = null; vues.clear(); } // tests seulement
+function notifier() { for (const v of [...vues]) { if (!v.root.isConnected) { vues.delete(v); continue; } v.redessiner(); } }
+const ISSUE_INTERNE = { etat: 'indisponible', raison: 'interne', liens: [], autres: [], repli: false, recherches: null, modele: null };
+
+export async function renderSearch(params, query, ctx, deps = {}) {
   const root = el('div', null);
+  const { chercher = chercherRecettesWeb, enLigne, navigate: nav = navigate } = deps;
   const state = { q: query.q || '', mode: query.mode || 'all', favorites: query.fav === '1', cooked: query.cooked === '1', requireAll: query.any !== '1', parsed: parseQuery(query.q || '') };
   const forRecipe = query.for ? ctx.docsByRecipe.get(query.for) : null; // Avec quoi on mange ça ?
   const role = query.role || (forRecipe ? 'salade' : null);
@@ -20,6 +37,7 @@ export async function renderSearch(params, query, ctx) {
   const input = el('input', { type: 'search', value: state.q, placeholder: forRecipe ? t('Préciser : concombre, sans gluten, 15 minutes…') : t('Ex. : une salade avec du concombre, sans gluten, en quinze minutes'), enterkeyhint: 'search' });
   const run = () => { state.q = input.value.trim(); state.parsed = parseQuery(state.q); if (forRecipe && role) state.parsed.filters.type = role; navigate('/search' + buildQuery({ q: state.q, mode: state.mode, fav: state.favorites ? 1 : '', cooked: state.cooked ? 1 : '', any: state.requireAll ? '' : 1, for: query.for || '', role: role || '' }), { replace: true }); render(); };
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+  input.addEventListener('input', () => { const b = root.querySelector('[data-role="chercher-web"]'); if (b) b.disabled = !borner(input.value, 500).trim(); });
 
   const results = el('div', null);
   const header = el('div', { class: 'card sage stack' },
@@ -56,10 +74,7 @@ export async function renderSearch(params, query, ctx) {
       el('div', { class: 'row between' }, el('span', { class: 'muted' }, `${t('Source active')} : ${t(MODES.find((m) => m[0] === state.mode)[1])}`), addFilter),
       chips.length ? filterChips(chips, ctx.ingredientsById, removeChip) : el('small', { class: 'muted' }, t('Aucun filtre compris : recherche sur les titres, ingrédients et livres.'))));
 
-    if (state.mode === 'web') {
-      results.append(el('div', { class: 'status warn' }, t('Le Web n’est pas activé : aucune source externe n’est configurée. Aucune recherche extérieure n’a été faite.')));
-      return;
-    }
+    if (state.mode === 'web') { results.append(renderWeb()); return; }
     const opts = { mode: state.mode, ingredientsById: ctx.ingredientsById, favoritesOnly: state.favorites, cookedOnly: state.cooked, requireAll: state.requireAll };
     const groups = forRecipe
       ? findAccompaniments({ mainDoc: forRecipe, docs: ctx.docs, type: role, parsed, ingredientsById: ctx.ingredientsById, mode: state.mode, feedback: ctx.meal_feedback })
@@ -92,6 +107,64 @@ export async function renderSearch(params, query, ctx) {
     } else if (groups.incompatible || groups.excluded_by_time) {
       results.append(el('p', { class: 'muted' }, [groups.incompatible ? t('{n} recette(s) écartée(s) par une restriction alimentaire.', { n: groups.incompatible }) : '', groups.excluded_by_time ? t('{n} écartée(s) par la durée.', { n: groups.excluded_by_time }) : ''].filter(Boolean).join(' ')));
     }
+  }
+  // --- Recherche web (spec Web § 5)
+  const textesDesPuces = () => chipsFor(state.parsed.filters).map((c) => libellePuce(c, ctx.ingredientsById));
+  const demandeCourante = () => construireDemande({ q: state.q, filtres: textesDesPuces(), langue: getUiLocale() });
+  const requeteRoute = () => '/search' + buildQuery({ q: state.q, mode: state.mode, fav: state.favorites ? 1 : '', cooked: state.cooked ? 1 : '', any: state.requireAll ? '' : 1, for: query.for || '', role: role || '' });
+  // § 5.4 : le champ est RELU s'il a changé depuis la dernière analyse (I-J) — s'il n'a pas changé, les puces ajoutées
+  // par les listes « + type » / « + restriction » ou retirées à la main RESTENT ce qu'elles sont à l'écran (R-WEB-2 : une
+  // relecture inconditionnelle les écrasait). Puis le vol précédent est abandonné (I-I), le nouveau posé au module, et la
+  // route rejouée en replace (elle se ré-instancie et retrouve le vol par sa clé). « Réessayer » passe { enLigne: () => true }.
+  const lancer = (depsForces = {}) => {
+    const champ = input.value.trim();
+    if (champ !== state.q) { state.q = champ; state.parsed = parseQuery(champ); if (forRecipe && role) state.parsed.filters.type = role; }
+    const demande = demandeCourante();
+    if (!demande.cle) { render(); return; }
+    vol?.controller.abort();
+    const controller = new AbortController();
+    const cle = demande.cle; const q = demande.q; const filtres = demande.filtres; // nettoyés : ce qui part (R-WEB-1)
+    const promesse = Promise.resolve()
+      .then(() => chercher({ q, filtres, langue: getUiLocale(), cfg: ctx.settings?.llm }, { enLigne, signal: controller.signal, ...depsForces }))
+      .catch(() => ISSUE_INTERNE)
+      .then((issue) => {
+        if (vol?.promesse !== promesse) return;           // abandonné ou remplacé : muet
+        vol = null;
+        if (issue?.raison !== 'annule') memoire = { cle, issue: issue && typeof issue === 'object' ? issue : ISSUE_INTERNE, q, filtres };
+        notifier();
+      });
+    vol = { cle, controller, promesse };
+    nav(requeteRoute(), { replace: true });
+    render();
+  };
+  const annuler = () => { vol?.controller.abort(); vol = null; render(); };
+  function renderWeb() {
+    for (const v of [...vues]) if (!v.root.isConnected) vues.delete(v); // borné en permanence, pas seulement à la résolution d'un vol
+    if (![...vues].some((v) => v.root === root)) vues.add({ root, redessiner: render });
+    const fournisseur = providerFrom(ctx.settings);
+    const reglages = () => el('a', { class: 'btn small', href: '#/settings' }, t('Réglages'));
+    if (!fournisseur.configured) return el('div', { class: 'status warn' }, t('Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'), ' ', reglages());
+    if (!fournisseur.supportsWebSearch) return el('div', { class: 'status warn' }, t('Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.'), ' ', reglages());
+    const cle = demandeCourante().cle;
+    const boutonChercher = (eteint) => el('button', { class: 'btn primary', dataset: { role: 'chercher-web' }, disabled: eteint, onClick: () => lancer() }, t('Chercher sur le web avec l’assistant')); // data-role : rouvert par la frappe (§ 5.3)
+    if (vol && vol.cle === cle) {
+      return el('div', { class: 'card flat stack' },
+        el('div', { class: 'status', role: 'status' }, t('L’assistant cherche sur le web…')),
+        // Sans data-role : l'écouteur de frappe ne doit PAS rouvrir ce bouton pendant le vol.
+        el('div', { class: 'row' }, el('button', { class: 'btn primary', disabled: true }, t('Chercher sur le web avec l’assistant')), el('button', { class: 'btn', onClick: annuler }, t('Annuler'))));
+    }
+    if (memoire) return renderIssue(memoire.issue, reglages, { demandeDiffere: memoire.cle !== cle }); // K1 : les liens restent ; la différence est dite
+    const demandeVide = !borner(input.value, 500).trim();
+    return el('div', { class: 'card flat stack' },
+      boutonChercher(demandeVide),
+      el('small', { class: 'muted' }, t('Une recherche = un appel à ton compte Anthropic.')),
+      demandeVide ? el('small', { class: 'muted' }, t('Écris d’abord ce que tu cherches.')) : null);
+  }
+  // Provisoire (tâche 6) : la tâche 7 remplace ce corps par le rendu des issues (§ 5.5-5.6).
+  function renderIssue(issue, reglages, { demandeDiffere = false } = {}) {
+    if (issue.etat === 'non_configure') return el('div', { class: 'status warn' }, t('Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'), ' ', reglages());
+    if (issue.etat === 'non_pris_en_charge') return el('div', { class: 'status warn' }, t('Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.'), ' ', reglages());
+    return el('div', { class: 'status' }, 'Résultat reçu.');
   }
   render();
   return root;
