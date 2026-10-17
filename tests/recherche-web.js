@@ -118,6 +118,10 @@ export async function runRechercheWebTests({ eq, ok }) {
       const dl = typeof W.dateLisible === 'function' ? W.dateLisible : () => 'absente';
       eq([dl('April 30, 2025', 'fr'), dl('April 30, 2025', 'en')], ['30 avril 2025', 'April 30, 2025'], 'dateLisible : une date lisible est mise en forme dans la langue demandée (fr-CA, en-CA) (confort, item 3)');
       eq([dl('654 days ago', 'fr'), dl('', 'fr'), dl(null, 'fr'), dl(42, 'fr')], [null, null, null, null], 'dateLisible : une date relative, vide ou qui n’est pas une chaîne → null (masquée) (confort, item 3)');
+      // Ronde 1 : liste blanche (« rien d'inventé ») — « mois jour, année » et la date ISO seule, lue en UTC ; tout le reste → null.
+      eq([dl('2025-04-30', 'fr'), dl('2025-04-30', 'en'), dl('Apr 30, 2025', 'fr')], ['30 avril 2025', 'April 30, 2025', '30 avril 2025'], 'dateLisible : une date ISO seule est rendue telle quelle (UTC), jamais la veille ; « Apr 30, 2025 » aussi (confort, ronde 1)');
+      { const refusees = ['April 2025', '2025', '1', '12/04/2025', 'Feb 30, 2025', 'Thu, 01 May 2025 00:00:00 GMT', '2025-13-40', '2025-02-30'];
+        eq(refusees.map((x) => dl(x, 'fr')), refusees.map(() => null), 'dateLisible : jour absent, année seule, nombre, date à barres, jour qui déborde, RFC 1123, ISO hors bornes ou qui déborde → null (rien d’inventé, ronde 1)'); }
     }
     eq([lu.resultats[2].titre.length, lu.resultats[2].titre.includes('\u{202E}')], [300, false], 'lecture : un titre de 351 dont le U+202E est AVANT la coupe est nettoyé puis borné à 300 points de code (S2)');
     eq(lu.resultats[2].hote, 'c.test', 'lecture : l’hôte est recalculé');

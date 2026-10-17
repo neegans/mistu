@@ -23,9 +23,10 @@ export async function renderLibrary(params, query, ctx) {
   return root;
 }
 
-// Les signets sans livre (edition_id nul, source_url posé), le plus récent d'abord. Aucun : rien n'est rendu.
+// Les signets sans livre (edition_id nul, source_url posé), le dernier GARDÉ d'abord : created_at, updated_at en repli
+// (un favori touché ne réordonne pas la liste — ronde 1) ; sans horodatage, en dernier. Aucun : rien n'est rendu.
 function liensWebGardes(ctx) {
-  const quand = (r) => String(r.updated_at || r.created_at || '');
+  const quand = (r) => String(r.created_at || r.updated_at || '');
   const signets = (ctx.recipes || []).filter((r) => !r.edition_id && typeof r.source_url === 'string' && r.source_url)
     .sort((a, b) => (quand(a) < quand(b) ? 1 : quand(a) > quand(b) ? -1 : 0));
   if (!signets.length) return null;

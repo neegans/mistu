@@ -1772,7 +1772,9 @@ export async function runAjouterTests({ eq, ok }) {
       const ancien = signet('r1', 'Ancien', { created_at: '2026-10-01T10:00:00.000Z' });
       const recent = signet('r2', 'Récent', { created_at: '2026-10-15T10:00:00.000Z' });
       eq(titres(await renderLibrary({}, {}, ctxDe([ancien, recent]))), ['Récent', 'Ancien'], 'Liens web gardés : le plus récent d’abord (created_at)');
-      eq(titres(await renderLibrary({}, {}, ctxDe([recent, { ...ancien, updated_at: '2026-10-16T10:00:00.000Z' }]))), ['Ancien', 'Récent'], 'Liens web gardés : updated_at prime sur created_at');
+      eq(titres(await renderLibrary({}, {}, ctxDe([{ ...ancien, updated_at: '2026-10-16T10:00:00.000Z' }, recent]))), ['Récent', 'Ancien'], 'Liens web gardés : created_at prime — « dernier gardé », un favori touché (updated_at) ne réordonne pas la liste (ronde 1)');
+      eq(titres(await renderLibrary({}, {}, ctxDe([signet('r0', 'Sans date'), signet('r3', 'Modifié seulement', { updated_at: '2026-10-10T10:00:00.000Z' }), ancien, recent]))), ['Récent', 'Modifié seulement', 'Ancien', 'Sans date'],
+        'Liens web gardés : sans created_at, updated_at sert de repli ; sans aucun horodatage, aucune levée et en dernier (ronde 1)');
       // (d) l'onglet Plats n'a pas la section
       n = await renderLibrary({}, { tab: 'dishes' }, ctxDe([seul]));
       eq(n.textContent.includes('Liens web gardés'), false, 'Mes livres, onglet Plats : pas de section « Liens web gardés »');

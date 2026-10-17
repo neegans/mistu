@@ -85,13 +85,30 @@ export function lireReponse(json) {
 }
 
 // Confort après preuve (17 octobre) : `page_age` arrive brut (« 654 days ago », parfois « April 30, 2025 ») et lireReponse
-// le garde tel quel, borné. L'écran ne le montre que s'il se lit comme une date, mis en forme dans la langue demandée ;
-// sinon (relatif, vide, pas une chaîne) → null, et la date est masquée. Pure, ne lève pas.
+// le garde tel quel, borné. L'écran ne le montre que sous une forme de LISTE BLANCHE (ronde 1, « rien d'inventé ») :
+// « Mois jour, année » (« April 30, 2025 », « Apr 30, 2025 ») lu par Date.parse, refusé si le jour déborde (« Feb 30 ») ;
+// ou la date ISO seule « 2025-04-30 », construite et rendue en UTC (jamais la veille). Tout le reste — relatif, jour
+// absent, année seule, nombre, barres, RFC 1123, pas une chaîne — → null, et la date est masquée. Pure, ne lève pas.
 export function dateLisible(texte, langue) {
-  if (typeof texte !== 'string' || !texte) return null;
-  const ms = Date.parse(texte);
-  if (!Number.isFinite(ms)) return null;
-  return new Intl.DateTimeFormat(langue === 'en' ? 'en-CA' : 'fr-CA', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(ms));
+  if (typeof texte !== 'string') return null;
+  const s = texte.trim();
+  const options = { year: 'numeric', month: 'long', day: 'numeric' };
+  const locale = langue === 'en' ? 'en-CA' : 'fr-CA';
+  const mja = /^[A-Za-z]{3,9}\.? (\d{1,2}), \d{4}$/.exec(s);
+  if (mja) {
+    const ms = Date.parse(s);
+    if (!Number.isFinite(ms) || new Date(ms).getDate() !== Number(mja[1])) return null;
+    return new Intl.DateTimeFormat(locale, options).format(new Date(ms));
+  }
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (iso) {
+    const [a, m, j] = iso.slice(1).map(Number);
+    if (m < 1 || m > 12 || j < 1 || j > 31) return null;
+    const d = new Date(Date.UTC(a, m - 1, j));
+    if (d.getUTCFullYear() !== a || d.getUTCMonth() !== m - 1 || d.getUTCDate() !== j) return null; // débord ou année < 100
+    return new Intl.DateTimeFormat(locale, { ...options, timeZone: 'UTC' }).format(d);
+  }
+  return null;
 }
 
 // § 4.4 : les choix de l'assistant ne SURVIVENT que s'ils désignent exactement un résultat (I-A) ; titre, hôte et

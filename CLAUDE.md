@@ -476,9 +476,12 @@ de code, Cc/Cf retirés) arrivent à l'écran. Les rulings, une ligne chacun (d�
 - **R-WEB-9** la tape met l'adresse à jour sans re-rendu (`remplacerAdresse`) : l'instance garde ses puces et son vol (sa réunion des restrictions est remplacée par R-WEB-10).
 - **R-WEB-10** champ changé sans Entrée : la tape le relit ; seules survivent les puces des listes « + type » / « + restriction » (affichées moins l'analyse de l'ancien texte) ; exclusions, ingrédients et durées viennent du nouveau texte. Entrée, mode ou case (`run()`) réanalysent sans rien garder.
 
-**Ce qui n'est PAS prouvé.** **Aucun appel réel avec la clé de Neegan** : statut et corps exacts d'un compte sans
-recherche web (400 ou 403, texte du message), forme réelle de `page_age`, de `web_search_requests`, de `pause_turn` et
-de `refusal`, taille réelle du corps, durée d'une recherche, coût réel ; **Safari et l'iPhone** (aucun WebKit ici) ;
+**Mesuré en réel (17 octobre 2026, site public).** Un appel réel avec la clé de Neegan, demande « puttanesca » : **un**
+POST vers l'API Messages → 200, 2 recherches, 5 liens choisis + 13 autres pages, ≈ 20 s ; `page_age` vu en « 654 days
+ago » et parfois « April 30, 2025 » (d'où le lot « Confort après preuve » ci-dessous).
+
+**Ce qui n'est PAS prouvé.** Statut et corps exacts d'un compte sans recherche web (400 ou 403, texte du message), forme
+réelle de `pause_turn` et de `refusal`, taille réelle du corps, coût réel ; **Safari et l'iPhone** (aucun WebKit ici) ;
 `target="_blank"` et `navigator.onLine` depuis une PWA installée ; `AbortSignal.timeout` compte le temps **actif** : sur
 une PWA iOS en arrière-plan, 45 s ne sont pas 45 s réelles.
 
@@ -552,8 +555,9 @@ public** (`neegans.github.io`) **tant que D5** (sous-domaine dédié) **n'est pa
 lit la même IndexedDB. 3) Après la revue finale et `/verify` : d'abord écarter le `STATE.md` non suivi de l'arbre principal (ce lot ajoute un
 `STATE.md` suivi, et `git merge` refuserait d'écraser un fichier non suivi) : `! mv ~/projects/mistu/STATE.md ~/projects/mistu/STATE.avant-web.md` (le
 nouveau le remplace ; l'ancien peut être effacé après lecture) ; puis fusionner par `!` (`cd ~/projects/mistu && git merge
---ff-only recherche-web`, ou rebaser si `main` a bougé depuis `e4e841b`), puis `! git -C ~/projects/mistu push origin main` (le dossier courant peut être un worktree). 4) **Preuve réelle**, sur le
-Mac d'abord, puis sur l'iPhone (qui n'a que le site public : après D5) : « saumon fenouil » → des liens, « Garder ce
+--ff-only recherche-web`, ou rebaser si `main` a bougé depuis `e4e841b`), puis `! git -C ~/projects/mistu push origin main` (le dossier courant peut être un worktree). 4) **Preuve réelle** : faite
+le 17 octobre sur le site public (« puttanesca », voir « Mesuré en réel ») ; reste l'iPhone (qui n'a que le site public :
+après D5) : « saumon fenouil » → des liens, « Garder ce
 lien » → signet prérempli ; noter la durée, le nombre de recherches affiché et, si observable, la forme du refus d'un
 compte sans recherche web.
 
@@ -565,9 +569,9 @@ Web → « Pour chercher sur le web, configure l’assistant IA … » sur un na
 
 #### Confort après preuve (17 octobre, soir)
 
-**Quoi** (branche `confort-web`, worktree `~/projects/mistu-web`, base `main` `dc7444a`, registre `.superpowers/sdd/2026-10-17-confort-web/`, trois frictions vues par Neegan sur le lot web LIVE) : 1) Mes livres porte une section « Liens web gardés » (signets sans livre, le plus récent d'abord, même quand il n'y a aucun livre : « ← Mes livres » d'un signet ne ramène plus à une liste vide) ; 2) « Chercher à nouveau » est aussi sur la ligne de la mention K1 « La demande a changé depuis cette recherche. », avant les liens (le bouton du bas reste) ; 3) la date d'une page n'est montrée que lisible, mise en forme dans la langue de l'interface (`dateLisible`, pure, dans `recherche-web.js` : « April 30, 2025 » → « 30 avril 2025 »), sinon masquée (« 654 days ago »).
-**Versions.** `APP_VERSION = '0.5.1'`, `sw.js VERSION = 'cuisine-os-v0.5.1-3'` (`SHELL` inchangé, aucun module neuf), pins `v0\.5\.1-\d+` / `'0.5.1'` dans `tests/ajouter.js`, `tests/sync-l3.js` et `tests/recherche-web.js` ; suite **1793/1793** (total épinglé **1792**), seul le 404 de `/favicon.ico` en console ; `tools` 40/40 ; `--check` 0.
-**Non prouvé.** Rien de nouveau côté réseau (aucun appel ni requête de plus) ; la forme réelle de `page_age` reste celle à mesurer au premier appel réel (lot web, ci-dessus).
+**Quoi** (branche `confort-web`, worktree `~/projects/mistu-web`, base `main` `dc7444a`, registre `.superpowers/sdd/2026-10-17-confort-web/`, trois frictions vues par Neegan sur le lot web LIVE) : 1) Mes livres porte une section « Liens web gardés » (signets sans livre, le dernier gardé d'abord — `created_at`, `updated_at` en repli, sans horodatage en dernier —, même quand il n'y a aucun livre : « ← Mes livres » d'un signet ne ramène plus à une liste vide) ; 2) « Chercher à nouveau » est aussi sur la ligne de la mention K1 « La demande a changé depuis cette recherche. », avant les liens (le bouton du bas reste) ; 3) la date d'une page n'est montrée que sous une forme de liste blanche, mise en forme dans la langue de l'interface (`dateLisible`, pure, dans `recherche-web.js`) : « Mois jour, année » (« April 30, 2025 » → « 30 avril 2025 », refusée si le jour déborde, « Feb 30 ») ou ISO seule rendue en UTC (« 2025-04-30 » → « 30 avril 2025 », jamais la veille) ; tout le reste est masqué (« 654 days ago », « April 2025 », « 1 », « 12/04/2025 », RFC 1123 — ronde 1, « rien d'inventé »).
+**Versions.** `APP_VERSION = '0.5.1'`, `sw.js VERSION = 'cuisine-os-v0.5.1-4'` (ronde 1 de revue ; `SHELL` inchangé, aucun module neuf), pins `v0\.5\.1-\d+` / `'0.5.1'` dans `tests/ajouter.js`, `tests/sync-l3.js` et `tests/recherche-web.js` ; suite **1796/1796** (total épinglé **1795**), seul le 404 de `/favicon.ico` en console ; `tools` 40/40 ; `--check` 0.
+**Non prouvé.** Rien de nouveau côté réseau (aucun appel ni requête de plus). Les deux formes de `page_age` vues en réel le 17 octobre (« 654 days ago », « April 30, 2025 ») sont couvertes par la suite ; **Safari et l'iPhone** restent non prouvés (`Date.parse` d'une forme non ISO dépend du moteur : la vérification du jour refuse un débord, pas une lecture différente).
 
 ## Premier lot de fiabilisation — 8 septembre 2026, à réviser
 
