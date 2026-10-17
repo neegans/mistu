@@ -260,4 +260,18 @@ export async function runRechercheWebTests({ eq, ok }) {
       ok(!JSON.stringify(vus).includes(CLE) && !JSON.stringify(vus).includes('model'), 'filet : le journal ne contient ni la clé ni le modèle (S10/F12)');
     }
   }
+
+  // --- § 7.3 libellePuce : la même définition pour la puce affichée et pour la demande envoyée (I-J, F1)
+  {
+    const C = await import('../src/ui/components.js');
+    const { chipsFor, parseQuery } = await import('../src/domain/search.js');
+    const ing = new Map([['ing_cucumber', { labels: { fr: { label: 'concombre' } } }]]);
+    const chips = chipsFor(parseQuery('une salade avec du concombre, sans gluten, en 15 minutes').filters);
+    const textes = chips.map((c) => C.libellePuce(c, ing));
+    ok(textes.includes('Salade') && textes.includes('Sans gluten') && textes.includes('avec concombre') && textes.some((x) => x.includes('15 min')), 'puces : libellePuce rend type, restriction, ingrédient (libellé fr) et durée comme la puce affichée');
+    eq(C.libellePuce({ kind: 'include', value: 'ing_inconnu' }, ing), 'avec ing_inconnu', 'puces : un ingrédient sans libellé rend son id');
+    eq(C.libellePuce({ kind: 'exclude_text', value: 'noix' }, ing), 'sans « noix »', 'puces : exclude_text tel quel');
+    const rendu = C.filterChips(chips, ing, () => {});
+    eq([...rendu.querySelectorAll('.chip')].map((n) => n.textContent), textes, 'puces : filterChips rend EXACTEMENT les textes de libellePuce (une seule définition)');
+  }
 }

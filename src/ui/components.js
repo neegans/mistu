@@ -119,7 +119,7 @@ export function libelleLivre(edition, book) {
   return [book?.title || t('Sans titre'), book?.author, edition?.year].filter(Boolean).join(' · ');
 }
 
-export function chipLabel(chip, ingredientsById) {
+export function libellePuce(chip, ingredientsById) {
   const ingName = (id) => ingredientsById?.get(id)?.labels?.fr?.label || id;
   switch (chip.kind) {
     case 'type': return label('recipe_type', chip.value);
@@ -135,7 +135,7 @@ export function chipLabel(chip, ingredientsById) {
 
 export function filterChips(chips, ingredientsById, onRemove) {
   if (!chips.length) return null;
-  return el('div', { class: 'chips' }, ...chips.map((c) => el('span', { class: `chip ${onRemove ? 'removable' : ''} ${c.kind === 'diet' || c.kind === 'exclude' ? 'warn' : ''}`, onClick: onRemove ? () => onRemove(c) : null, title: onRemove ? t('Retirer ce filtre') : '' }, chipLabel(c, ingredientsById))));
+  return el('div', { class: 'chips' }, ...chips.map((c) => el('span', { class: `chip ${onRemove ? 'removable' : ''} ${c.kind === 'diet' || c.kind === 'exclude' ? 'warn' : ''}`, onClick: onRemove ? () => onRemove(c) : null, title: onRemove ? t('Retirer ce filtre') : '' }, libellePuce(c, ingredientsById))));
 }
 
 export function field(labelText, input, hint = null) {
