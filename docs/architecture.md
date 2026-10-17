@@ -359,7 +359,7 @@ que d'échouer. Choix voulu (S1/F2) : une relation stricte aurait rendu une arch
 couverture manque, par exemple après une réception L3 (qui reçoit la ligne `files` sans ses octets — L4). Dette
 nommée : `source_pages.sha256` reste la même sorte de relation latente, jamais vérifiée nulle part.
 
-### Chercher sur le web avec l'assistant (lot du 17 octobre 2026)
+## Chercher sur le web avec l'assistant (17 octobre 2026)
 
 Spec : `docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md` (rév. 2.1 ; § 11.2 : ce que la construction a
 amendé, R-WEB-1 à R-WEB-8). Livré ici : l'onglet « Web » de la recherche lance, sur une tape et sur elle seule, **un**
@@ -417,7 +417,9 @@ ni les restrictions : relis la page avant de cuisiner. » est toujours sous les 
 automatique : les pages non choisies sont repliées sous « Autres pages trouvées ({n}) » (K2).
 
 **Issues.** `chercherRecettesWeb` rend toujours `{ etat, raison, liens, autres, repli, recherches, modele }`, sans la clé
-ni aucun texte de l'API (I-C). `non_configure` et `non_pris_en_charge` : aucun appel. `indisponible`, avec une raison :
+ni aucun texte d'un corps d'**erreur** (I-C : il sert au classement, pas à l'écran) ; d'une réponse réussie, seuls les
+titres et dates des résultats (bornés, nettoyés) et le « pourquoi » de chaque lien (200 points de code, Cc/Cf retirés)
+arrivent à l'écran. `non_configure` et `non_pris_en_charge` : aucun appel. `indisponible`, avec une raison :
 `requete` (demande vide, ou un 4xx sans autre sens), `hors_ligne`, `annule` (jamais rendue), `delai` (45 s), `reseau`,
 `cle_refusee` (401 ; 403 ; clé hors `[\x21-\x7e]`, refusée avant tout appel — R-WEB-5), `recherche_desactivee` (400 ou
 403 dont l'`error.message`, lu en flux et borné à 64 Kio, dit « web search … not enabled / disabled » — R-WEB-6),

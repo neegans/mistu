@@ -6,8 +6,9 @@ l'assistant », branche `recherche-web`, worktree `~/projects/mistu-web` (serveu
 `main` `e4e841b`. Neuf tâches (une ronde de corrections au plus chacune). Clôture (tâche 9) : suite **1753/1753**
 (total épinglé **1752** dans `tests/tests.js`), une seule erreur de console (404 `/favicon.ico`, pré-existant),
 `node --test tools/*.test.mjs` 40/40, `node tools/generer-migrations.mjs --check` 0. `APP_VERSION 0.5.0`, `sw.js`
-`cuisine-os-v0.5.0-9`, `SHELL` + `./src/core/bornes.js` et `./src/domain/recherche-web.js`. `main` est toujours
-`e4e841b` (lot ISBN) : le site public ne change qu'à la fusion et au `git push` de Neegan.
+`cuisine-os-v0.5.0-9`, `SHELL` + `./src/core/bornes.js` et `./src/domain/recherche-web.js`. `main` était
+`e4e841b` (lot ISBN) au départ du lot ; vérifier avant la fusion. Le site public ne change qu'à la fusion et au
+`git push` de Neegan.
 Ce que fait le lot : l'onglet « Web » de la recherche lance, sur une tape, **un** appel à l'API Anthropic avec l'outil de
 recherche web ; au plus 5 liens, tous pris dans les résultats bruts du serveur (rien d'inventé) ; « Garder ce lien » →
 signet prérempli ; issues distinctes ; mémoire vive par demande ; un seul appel en vol dans l'app.
@@ -26,16 +27,25 @@ construction a amendé), plan `docs/superpowers/plans/2026-10-17-chercher-sur-le
 ## Reste à faire
 1. Chef d'orchestre : revue finale de branche (lecture seule), puis `/verify` (correctness, sécurité, faux-vert) ; une
    vague de corrections, rouge d'abord ; compléter la spec § 11.2.
-2. Copier `~/projects/mistu-web/.superpowers/sdd/2026-10-17-chercher-sur-le-web/` dans `~/projects/mistu/.superpowers/sdd/`
-   **avant** tout `git worktree remove`.
+2. **À faire, pas encore fait pour ce lot** : copier `~/projects/mistu-web/.superpowers/sdd/2026-10-17-chercher-sur-le-web/`
+   dans `~/projects/mistu/.superpowers/sdd/`. Règle : les registres SDD sont copiés dans `~/projects/mistu/.superpowers/sdd/`
+   **avant** tout `git worktree remove` (le registre vit à la racine du worktree et meurt avec lui).
 3. **Gestes de Neegan** (spec § 10 R2) : clé d'un **workspace Anthropic dédié à Cuisine OS avec plafond de dépense
-   mensuel** ; **pas de clé sur le site public avant D5** (sous-domaine dédié) ; fusion par `!`
-   (`cd ~/projects/mistu && git merge --ff-only recherche-web`, ou rebase si `main` a bougé) puis `! git push` ; preuve
+   mensuel** ; **pas de clé sur le site public avant D5** (sous-domaine dédié) ; **avant la fusion**,
+   écarter le `STATE.md` non suivi de l'arbre principal (ce lot ajoute un `STATE.md` suivi : sans ce geste, `git merge`
+   s'arrête sur « untracked working tree files would be overwritten: STATE.md ») :
+   `! mv ~/projects/mistu/STATE.md ~/projects/mistu/STATE.avant-web.md` (le nouveau le remplace ; l'ancien peut être effacé après lecture) ;
+   puis fusion par `!` (`cd ~/projects/mistu && git merge --ff-only recherche-web`, ou rebase si `main` a bougé) et
+   `! git push` ; preuve
    sur le site public (service worker `cuisine-os-v0.5.0-N` servi, onglet Web → « configure l’assistant » sans clé,
    0 requête) ; **preuve réelle** sur le Mac puis sur l'iPhone (après D5) : « saumon fenouil » → liens, « Garder ce
    lien » → signet prérempli ; noter durée, nombre de recherches, forme du refus d'un compte sans recherche web.
 4. Gestes restants des lots précédents : parcours iPhone/Safari du lot ISBN, clé Google Books (`docs/google-books.md`),
-   « clean » des worktrees `mistu-isbn` et `mistu-sync`.
+   « clean » des worktrees `mistu-isbn` et `mistu-sync` — **mais d'abord compléter leurs registres** dans
+   `~/projects/mistu/.superpowers/sdd/` (constaté le 17 octobre, lecture seule : la copie de
+   `2026-10-14-identifier-un-livre-fiable` y est partielle — `progress.md` diffère, 17 diffs de revue manquent — et
+   `2026-10-12-compte-et-stockage-l1-l2`, 61 fichiers dans `~/projects/mistu-sync`, n'y est pas du tout). Deux worktrees
+   VibeForge : ne pas toucher.
 
 ## Lots suivants (décisions du 17 octobre, spec § 10 R11)
 - Mistu reste **personnel** : pas de passerelle serveur ni de clé commune ; le mur est la clé sur l'appareil et le
@@ -52,6 +62,7 @@ curl -sS -o /dev/null -w "8083 http=%{http_code}\n" http://localhost:8083/tests/
 node ~/projects/mistu-web/.superpowers/sdd/2026-10-17-chercher-sur-le-web/suite.cjs 8083   # attendu : 1753/1753 (+ 1 x 404 favicon)
 node --test tools/*.test.mjs && node tools/generer-migrations.mjs --check
 ```
+Avant la fusion (geste de Neegan, arbre principal) : `mv ~/projects/mistu/STATE.md ~/projects/mistu/STATE.avant-web.md`, puis § « Reste à faire », point 3.
 
 ## Pièges connus
 `\uXXXX` nu dans un appel d'outil = caractère réel écrit (écrire `\u{XXXX}`, vérifier les octets) ; le total épinglé de

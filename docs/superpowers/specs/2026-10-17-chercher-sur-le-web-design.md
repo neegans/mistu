@@ -172,7 +172,7 @@ d'interface. **Aucune fonction de ce module ne lève** vers l'appelant : `cherch
 - Toute forme hostile (`content` absent ou non tableau, bloc sans `type`, champs du mauvais type, entrée `null`) est
   ignorée, jamais levée.
 
-### 4.4 `choisirLiens(lu, { max = 5 } = {})` → `{ liens, repli }` (pure)
+### 4.4 `choisirLiens(lu, { max = 5 } = {})` → `{ liens, autres, repli }` (pure)
 
 1. Tente `parseJsonLoose(lu.texte)` ; `choix` doit être un tableau ; une entrée non-objet ou sans `url` chaîne est
    ignorée (S13). Pour chaque entrée : `href = lienSignet(url).href` ; gardée **seulement si** un résultat de
@@ -465,7 +465,7 @@ appellent `reinitialiserWeb()` avant chaque cas et lisent `etatWeb()` comme **fa
   parseQuery('salade'), { mode: 'web' })` → `admissible.length === 0` et `notice === undefined` ; `tests/backup.js` sur le
   secret `llm` reste vert.
 - **9.8 Statiques.** `sw.js` : `SHELL` contient les deux modules neufs (garde existante) et `VERSION ===
-  'cuisine-os-v0.5.0-1'` ; `APP_VERSION === '0.5.0'` ; chaque texte « » des § 5 et 6 a sa clé dans `en.js` ; les sources de
+  'cuisine-os-v0.5.0-9'` ; `APP_VERSION === '0.5.0'` ; chaque texte « » des § 5 et 6 a sa clé dans `en.js` ; les sources de
   `src/ui/search.js` et `src/domain/search.js` ne contiennent plus « Le Web n’est pas activé » ; `supportsWebSearch` vaut
   `false` pour `none` et `openai_compatible`, `true` pour `anthropic` ; `anthropicHeaders('k')` rend exactement les quatre
   en-têtes ; `src/domain/recherche-web.js` et `src/core/bornes.js` n'importent rien de `src/ui/`.
@@ -581,7 +581,7 @@ Une ligne par écart entre cette spec et ce qui a été construit (tâches 1 à 
   `query.adresse.trim() !== ''` ; la bannière est volontairement statique (« reçue » = l'adresse telle qu'arrivée).
   Coût si faux : aucun.
 - **K1-K3, G1-G2** (kit, rév. 2.1) : déjà au § 11.1. K2 : `choisirLiens` rend `{ liens, autres, repli }` (l'en-tête du
-  § 4.4 dit encore `{ liens, repli }` ; son point 4 fait foi).
+  § 4.4 disait `{ liens, repli }` ; aligné sur son point 4 à la clôture).
 - **État de l'écran** (T6-T7) : `vues` est un ensemble de `{ root, redessiner }`, purgé à **chaque rendu** du mode Web
   (pas seulement au moment de notifier, § 5.1) et dédoublonné par racine ; « Résultat reçu. », rendu provisoire de la
   tâche 6, est remplacé par les écrans des § 5.5-5.6 en tâche 7. Coût si faux : aucun.
@@ -591,8 +591,8 @@ Une ligne par écart entre cette spec et ce qui a été construit (tâches 1 à 
   lu dans le DOM, filtres comparés aux `.chip` du DOM, aide « Écris d’abord ce que tu cherches. » basculée à la frappe
   avec `data-role="aide-web"`, `Object.freeze(ISSUE_INTERNE)` — ces deux derniers avec deux lignes de code) ; T7
   (« Demande envoyée » exacte, `href` avec identifiants revalidé au rendu, « Réessayer » discriminé par
-  `enLigne: false`, constantes au niveau du module, `Object.hasOwn`). Coût si faux : aucun sur le produit, des
-  assertions de plus.
+  `enLigne: false`, constantes au niveau du module, `Object.hasOwn`). Coût si faux : une ligne d'aide qui clignote pour
+  l'aide basculée à la frappe ; aucun pour le reste.
 - **Fixtures du plan corrigées** : pré-vol, le test R-WEB-1 attend la `q` nettoyée passée au module, et les blocs d'écran
   forcent `setUiLocale('fr')` en tête ; T5 « en quinze minutes » → « en 15 minutes » (l'analyseur ne lit que les
   chiffres) ; T6 « saumon » et « fenouil » sont des ingrédients du lexique → puces `avec …` (textes des puces lus dans
@@ -605,5 +605,5 @@ Une ligne par écart entre cette spec et ce qui a été construit (tâches 1 à 
   la tâche 8 (le contrôle F13 de `tests/ajouter.js` couvre `signet.js`) ; « Annuler » existait déjà : la tâche 9 ajoute
   22 clés, aucune en double, et retire la clé morte. Le contrôle du § 9.8 passe par une liste explicite de 28 clés (les
   textes `indisponible` passent par `t(cle)` avec une variable : aucune lecture du source ne les voit). `VERSION` est
-  épinglée par le motif `v0\.5\.0-\d+` dans trois suites, pas par la valeur exacte du § 9.8 ; la valeur réelle est au
-  § 8. Total épinglé à la clôture : **1752** (`tests/tests.js`), suite 1753/1753. Coût si faux : aucun.
+  épinglée par le motif `v0\.5\.0-\d+` dans trois suites, pas par une valeur exacte ; la valeur réelle de clôture est
+  aux § 8 et § 9.8. Total épinglé à la clôture : **1752** (`tests/tests.js`), suite 1753/1753. Coût si faux : aucun.

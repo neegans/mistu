@@ -462,8 +462,9 @@ distinctes (trouvé, rien, indisponible avec sa raison, « Code : {c} » sous le
 second appel ; une puce touchée garde les liens et dit « La demande a changé depuis cette recherche. ») ; **« Garder ce
 lien »** ouvre le signet prérempli (adresse telle quelle, jamais tronquée ; titre borné ; bannière « Adresse reçue :
 vérifie-la avant d’enregistrer. » avec l'hôte que le formulaire enregistrera ; rien n'est écrit sans « Enregistrer ») ;
-l'issue ne contient jamais la clé ni un extrait du corps de la réponse. Les rulings, une ligne chacun (détail en spec
-§ 11.2) :
+l'issue ne contient jamais la clé ni aucun texte d'un corps d'**erreur** (il sert au classement, pas à l'écran) ; d'une
+réponse réussie, seuls les titres et dates des résultats (bornés, nettoyés) et le « pourquoi » de chaque lien (200 points
+de code, Cc/Cf retirés) arrivent à l'écran. Les rulings, une ligne chacun (détail en spec § 11.2) :
 - **R-WEB-1** `construireDemande` rend `q` et `filtres` nettoyés ; l'écran rappelle ce qui est parti, jamais la saisie brute.
 - **R-WEB-2** la tape ne réanalyse le champ que s'il a changé : les filtres des listes et les puces retirées survivent.
 - **R-WEB-3** un « trouvé » sans carte survivante à la revalidation du rendu se rend comme « rien ».
@@ -483,7 +484,8 @@ une PWA iOS en arrière-plan, 45 s ne sont pas 45 s réelles.
 400/403 « recherche web non activée » par le texte de `error.message` (R10 : un libellé changé retombe en `requete` ou
 `cle_refusee`) ; `vues` purgées par `isConnected` : « pas encore monté » et « démonté » confondus (inatteignable
 aujourd'hui) ; timers de `signalDelai` non annulables (inoffensif) ; `requeteRoute` duplique le `buildQuery` de `run()` ;
-textes de garde dupliqués entre `renderWeb` et `renderIssue` ; `src/ui/search.js` passe de 100 à 231 lignes (l'écran web
+textes de garde dupliqués entre `renderWeb` et `renderIssue` ; une levée dans un redessin interrompt `notifier()` (rejet
+non géré) ; `src/ui/search.js` passe de 100 à 231 lignes (l'écran web
 pourra avoir son propre module) ; `issue()` relit `cfg.model` dans le `catch` externe (un getter qui lève à chaque accès
 ferait lever ; `cfg` est du JSON simple) ; un `trouve` sans carte survivante (rendu `rien`) suit encore K1. Tests : défauts
 (fuseau, `enLigne`, 45 s, 2 Mio, 64 Kio) non épinglés ; en-têtes avant le `try` et `ctl.abort()` en `finally` sans test
@@ -505,7 +507,9 @@ la tâche 9.
 **Gestes de Neegan** (spec § 10 R2, hors code). 1) Créer la clé dans un **workspace Anthropic dédié à Cuisine OS, avec
 un plafond de dépense mensuel**, puis l'entrer dans Réglages → Assistant IA. 2) **Ne pas entrer cette clé sur le site
 public** (`neegans.github.io`) **tant que D5** (sous-domaine dédié) **n'est pas fait** : toute autre page Pages du compte
-lit la même IndexedDB. 3) Après la revue finale et `/verify` : fusionner par `!` (`cd ~/projects/mistu && git merge
+lit la même IndexedDB. 3) Après la revue finale et `/verify` : d'abord écarter le `STATE.md` non suivi de l'arbre principal (ce lot ajoute un
+`STATE.md` suivi, et `git merge` refuserait d'écraser un fichier non suivi) : `! mv ~/projects/mistu/STATE.md ~/projects/mistu/STATE.avant-web.md` (le
+nouveau le remplace ; l'ancien peut être effacé après lecture) ; puis fusionner par `!` (`cd ~/projects/mistu && git merge
 --ff-only recherche-web`, ou rebaser si `main` a bougé depuis `e4e841b`), puis `! git push`. 4) **Preuve réelle**, sur le
 Mac d'abord, puis sur l'iPhone (qui n'a que le site public : après D5) : « saumon fenouil » → des liens, « Garder ce
 lien » → signet prérempli ; noter la durée, le nombre de recherches affiché et, si observable, la forme du refus d'un
@@ -513,7 +517,8 @@ compte sans recherche web.
 
 **Fusion.** Revue finale de branche puis `/verify` par le chef d'orchestre ; copier
 `.superpowers/sdd/2026-10-17-chercher-sur-le-web/` dans `~/projects/mistu/.superpowers/sdd/` **avant** tout
-`git worktree remove`. Preuve sur le site public après le `push` : service worker `cuisine-os-v0.5.0-N` servi, onglet
+`git worktree remove`. Avant la fusion, geste de Neegan dans l'arbre principal : `mv ~/projects/mistu/STATE.md ~/projects/mistu/STATE.avant-web.md`
+(sinon « untracked working tree files would be overwritten: STATE.md »). Preuve sur le site public après le `push` : service worker `cuisine-os-v0.5.0-N` servi, onglet
 Web → « Pour chercher sur le web, configure l’assistant IA … » sur un navigateur sans clé (0 requête).
 
 ## Premier lot de fiabilisation — 8 septembre 2026, à réviser

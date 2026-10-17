@@ -17,7 +17,7 @@ import { nettoyerIsbn, validerIsbn, codeBarresVersIsbn } from '../core/isbn.js';
 
 export const LIMITES_ISBN = { champ: 300, corps: 256 * 1024, delaiMs: 10000, tentativeMs: 8000, repriseMs: 1500, totalMs: 20000 };
 import { borner as bornerCore, lireBornee, signalDelai, OPTIONS_FETCH } from '../core/bornes.js';
-export { lireBornee, signalDelai, OPTIONS_FETCH }; // ré-exportés : tests/ajouter.js et book.js les lisent ici
+export { lireBornee, signalDelai, OPTIONS_FETCH }; // ré-exportés : tests/ajouter.js les lit ici
 // Les champs qu'une fiche distante peut remplir : ce qu'`identifier` doit pouvoir REPRENDRE à l'ISBN suivant (C3).
 export const CHAMPS_DISTANTS = ['title', 'author', 'publisher', 'year', 'language'];
 const CHAMPS_VIDES = () => ({ title: '', author: '', publisher: '', year: '', language: 'fr', convention: '', cuisines: [], tags: [] });
