@@ -1036,7 +1036,17 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
       eq(root.querySelectorAll('b').length, 0, 'trouve : aucun élément créé par un titre hostile');
       ok(texte(root).includes('a.test · May 1, 2026') && texte(root).includes('Fenouil et saumon.'), 'trouve : hôte, date, pourquoi');
       ok(texte(root).includes('Trouvé sur le web') && texte(root).includes('Demande envoyée : saumon fenouil'), 'trouve : titre de section et demande envoyée (I-J)');
-      ok(!texte(root).includes('\u{200B}'), 'trouve : la demande rappelée est celle qui est PARTIE, nettoyée (R-WEB-1) — voir la saisie hostile du test suivant');
+      // R-WEB-1 : une saisie avec un caractère de format (U+200B) est nettoyée AVANT l'envoi ; l'écran rappelle la demande partie
+      {
+        const r0 = await monter({ q: 'saumon\u{200B} fenouil' }, ctx, { chercher, navigate: () => {} });
+        const n = appels.n;
+        bouton(r0, 'Chercher sur le web avec l’assistant').click(); await tick();
+        eq(appels.args[appels.args.length - 1].q, 'saumon\u{200B} fenouil', 'tape : q brut passé au module (le module nettoie)');
+        appels.rendre(trouve); await tick();
+        ok(texte(r0).includes('Demande envoyée : saumon fenouil') && !texte(r0).includes('\u{200B}'), 'trouve : la demande rappelée est celle qui est PARTIE, nettoyée (R-WEB-1)');
+        eq(appels.n, n + 1, 'tape : un seul appel pour cette saisie');
+        r0.remove();
+      }
       ok(texte(root).includes('L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.'), 'trouve : l’avertissement fixe est TOUJOURS là (I-K, S1)');
       ok(texte(root).includes('Recherches faites par l’assistant : 2') && !texte(root).includes('Liens tels que trouvés'), 'trouve : compte des recherches ; pas de ligne repli');
       [...root.querySelectorAll('button')].find((b) => b.textContent === 'Garder ce lien').click();
