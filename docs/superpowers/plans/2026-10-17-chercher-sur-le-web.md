@@ -8,7 +8,7 @@
 
 **Tech Stack:** PWA sans build, modules ES natifs, pas de npm ; tests dans le navigateur (`tests/index.html` → `tests/tests.js`, `eq`/`ok`, total épinglé) ; `fetch` injecté partout ; service worker `sw.js` (`SHELL`, `VERSION`) ; API Anthropic Messages avec l'outil `web_search_20250305`, appel direct depuis le navigateur.
 
-**Spec:** `docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md` (rév. 2 ; § 3 invariants I-A…I-K, § 4 module, § 5 écran, § 6 signet, § 7 fournisseur et aides, § 9 tests, § 11.1 constats des revues). Lis-la **en entier** avant ta tâche. Registre SDD : `~/projects/mistu-web/.superpowers/sdd/2026-10-17-chercher-sur-le-web/` (`progress.md`, un brief, un rapport et une revue par tâche ; lanceur `suite.cjs`).
+**Spec:** `docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md` (rév. 2.1 — K1-K3 du kit intégrés ; § 3 invariants I-A…I-K, § 4 module, § 5 écran, § 6 signet, § 7 fournisseur et aides, § 9 tests, § 11.1 constats des revues). Lis-la **en entier** avant ta tâche. Registre SDD : `~/projects/mistu-web/.superpowers/sdd/2026-10-17-chercher-sur-le-web/` (`progress.md`, un brief, un rapport et une revue par tâche ; lanceur `suite.cjs`).
 
 ## Global Constraints
 
@@ -28,7 +28,7 @@
 Entrées que la spec implique sans les nommer d'abord ; chacune a son test dans la tâche qui possède le code :
 
 1. **Phrase tapée sans Entrée, puis tape** : la demande envoyée est le champ, pas l'ancienne `state.q` ; et le bouton s'ouvre pendant la frappe sans redessin → tâche 6.
-2. **Puce retirée après des résultats** : les liens disparaissent sans appel, et reviennent sans appel quand la puce est remise → tâche 7.
+2. **Puce touchée après des résultats** : les liens restent, la mention « La demande a changé depuis cette recherche. » apparaît puis disparaît, sans aucun appel (K1) → tâche 7.
 3. **Titre de page portant du balisage** (`<b>x</b>`) ou un U+202E : rendu littéral et nettoyé, jusque dans le paramètre du signet → tâches 3 et 7.
 4. **Réponse à blocs incomplets** (`text` sans `text`, `usage` sans `server_tool_use`, `content` d'un bloc outil à `null`) : lecture sans plantage → tâche 3.
 5. **Réglage effacé pendant le vol** (Anthropic → aucun) : l'issue `non_configure` qui revient se rend avec le texte de la garde, pas un écran muet → tâche 7.
@@ -302,7 +302,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `borner` (`core/bornes.js`), `lienSignet` (`core/lien.js`), `parseJsonLoose` (`domain/llm.js`).
-- Produces: `LIMITES_WEB`, `OUTIL_RECHERCHE`, `construireDemande({ q, filtres, langue }) → { system, user, cle, q, filtres }` (`q` et `filtres` **nettoyés**, ce qui part vraiment — amende la spec § 4.1, à consigner en § 11.2 comme R-WEB-1 : l'écran rappelle la demande partie, jamais la saisie brute), `corpsRequete({ cfg, demande, fuseau }) → objet`, `lireReponse(json) → { resultats: [{ href, hote, titre, date }], erreursOutil: string[], aCherche, texte, stopReason, recherches }`, `choisirLiens(lu, { max }) → { liens: [{ href, hote, titre, date, pourquoi }], repli }`. La tâche 4 ajoute `chercherRecettesWeb` au même fichier.
+- Produces: `LIMITES_WEB`, `OUTIL_RECHERCHE`, `construireDemande({ q, filtres, langue }) → { system, user, cle, q, filtres }` (`q` et `filtres` **nettoyés**, ce qui part vraiment — amende la spec § 4.1, à consigner en § 11.2 comme R-WEB-1 : l'écran rappelle la demande partie, jamais la saisie brute), `corpsRequete({ cfg, demande, fuseau }) → objet`, `lireReponse(json) → { resultats: [{ href, hote, titre, date }], erreursOutil: string[], aCherche, texte, stopReason, recherches }`, `choisirLiens(lu, { max }) → { liens: [{ href, hote, titre, date, pourquoi }], autres: [même forme], repli }` (K2 : `liens` = choix survivants seulement, `autres` = le reste des résultats). La tâche 4 ajoute `chercherRecettesWeb` au même fichier.
 
 - [ ] **Step 1 : Écrire les tests rouges (§ 9.1-9.3)**
 
@@ -362,16 +362,17 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
     // 4.4 choisirLiens
     const ch = W.choisirLiens(lu);
-    eq(ch.liens.map((l) => l.href), ['https://c.test/r3', 'https://a.test/r1', 'https://b.test/r2', 'https://d.test/r4'], 'choix : les choix survivants d’abord (ordre des choix), puis les résultats restants (ordre du serveur) ; l’adresse inventée est écartée (I-A)');
-    eq([ch.liens[0].pourquoi, ch.liens[0].titre.length, ch.liens[2].pourquoi, ch.repli], ['Court.', 300, null, false], 'choix : pourquoi des choix, titre DU RÉSULTAT, pourquoi null pour le complément, pas de repli');
+    eq(ch.liens.map((l) => l.href), ['https://c.test/r3', 'https://a.test/r1'], 'choix : seuls les choix survivants, dans l’ordre des choix ; l’adresse inventée est écartée (I-A) ; pas de complément (K2)');
+    eq(ch.autres.map((l) => l.href), ['https://b.test/r2', 'https://d.test/r4'], 'choix : les autres pages trouvées, dans l’ordre du serveur, à part (K2)');
+    eq([ch.liens[0].pourquoi, ch.liens[0].titre.length, ch.autres[0].pourquoi, ch.repli], ['Court.', 300, null, false], 'choix : pourquoi des choix, titre DU RÉSULTAT, pourquoi null pour les autres, pas de repli');
     eq([ch.liens[1].pourquoi.length, ch.liens[1].pourquoi.includes('\u{200B}')], [200, false], 'choix : pourquoi borné à 200 points de code sans Cf (I-J)');
-    eq(W.choisirLiens({ ...lu, texte: 'pas du json' }), { liens: lu.resultats.map((r) => ({ ...r, pourquoi: null })), repli: true }, 'choix : JSON illisible → repli, les résultats tels quels');
+    eq(W.choisirLiens({ ...lu, texte: 'pas du json' }), { liens: lu.resultats.map((r) => ({ ...r, pourquoi: null })), autres: [], repli: true }, 'choix : JSON illisible → repli, les résultats tels quels, rien dans autres');
     eq(W.choisirLiens({ ...lu, texte: '{"choix":[]}' }).repli, true, 'choix : choix vide → repli');
     eq(W.choisirLiens({ ...lu, texte: '{"choix":[null,3,{},{"url":5}]}' }).repli, true, 'choix : entrées hostiles ignorées sans lever (S13)');
     eq(W.choisirLiens({ ...lu, texte: '{x} puis {"choix":[{"url":"https://a.test/r1"}]}' }).repli, true, 'choix : une accolade parasite dans la prose rend le JSON illisible → repli (même avec une adresse valide dedans)');
     {
       const sept = { resultats: Array.from({ length: 7 }, (_, i) => ({ href: `https://s${i}.test/`, hote: `s${i}.test`, titre: `S${i}`, date: null })), texte: '{"choix":' + JSON.stringify(Array.from({ length: 7 }, (_, i) => ({ url: `https://s${i}.test/`, pourquoi: 'p' }))) + '}' };
-      eq(W.choisirLiens(sept).liens.length, 5, 'choix : cinq liens au plus');
+      eq([W.choisirLiens(sept).liens.length, W.choisirLiens(sept).autres.length], [5, 2], 'choix : cinq liens au plus, les deux autres à part (K2)');
       eq(W.choisirLiens({ ...sept, texte: '{"choix":[{"url":"https://s1.test/"},{"url":"https://s1.test/"}]}' }).liens.filter((l) => l.href === 'https://s1.test/').length, 1, 'choix : un doublon de choix ne rend qu’un lien');
       eq(W.choisirLiens({ resultats: [{ href: 'https://s.test/', hote: 's.test', titre: '', date: null }], texte: '' }).liens[0].titre, 's.test', 'choix : titre vide → l’hôte');
     }
@@ -472,7 +473,8 @@ export function lireReponse(json) {
 }
 
 // § 4.4 : les choix de l'assistant ne SURVIVENT que s'ils désignent exactement un résultat (I-A) ; titre, hôte et
-// date viennent du résultat ; puis complément par les résultats restants ; repli = aucun choix n'a survécu.
+// date viennent du résultat. PAS de complément automatique (K2) : les résultats non choisis vont dans `autres`, que
+// l'écran replie. repli = aucun choix n'a survécu : `liens` = les premiers résultats tels quels.
 export function choisirLiens(lu, { max = LIMITES_WEB.liens } = {}) {
   const resultats = Array.isArray(lu?.resultats) ? lu.resultats : [];
   const parHref = new Map(resultats.map((r) => [r.href, r]));
@@ -489,8 +491,10 @@ export function choisirLiens(lu, { max = LIMITES_WEB.liens } = {}) {
     liens.push({ ...parHref.get(lien.href), pourquoi: pourquoi || null });
   }
   const repli = liens.length === 0;
-  for (const r of resultats) { if (liens.length >= max) break; if (pris.has(r.href)) continue; pris.add(r.href); liens.push({ ...r, pourquoi: null }); }
-  return { liens: liens.map((l) => ({ ...l, titre: l.titre || l.hote })), repli };
+  if (repli) for (const r of resultats) { if (liens.length >= max) break; pris.add(r.href); liens.push({ ...r, pourquoi: null }); }
+  const autres = resultats.filter((r) => !pris.has(r.href)).map((r) => ({ ...r, pourquoi: null }));
+  const nommer = (l) => ({ ...l, titre: l.titre || l.hote });
+  return { liens: liens.map(nommer), autres: autres.map(nommer), repli };
 }
 ```
 
@@ -518,7 +522,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: tout de la tâche 3 ; `anthropicHeaders`, `ANTHROPIC_MESSAGES_URL` (tâche 2) ; `lireBornee`, `signalDelai`, `OPTIONS_FETCH` (tâche 1).
-- Produces: `chercherRecettesWeb({ q, filtres, langue, cfg }, deps = { fetch, enLigne, tentativeMs, corpsMax, corpsErreurMax, fuseau, signal }) → Promise<{ etat: 'non_configure'|'non_pris_en_charge'|'indisponible'|'rien'|'trouve', raison: null|'requete'|'hors_ligne'|'annule'|'delai'|'reseau'|'cle_refusee'|'recherche_desactivee'|'trop_de_demandes'|'serveur'|'reponse_illisible'|'refus'|'outil'|'interrompu'|'pas_cherche'|'interne', liens, repli, recherches, modele }>` — **ne lève jamais**.
+- Produces: `chercherRecettesWeb({ q, filtres, langue, cfg }, deps = { fetch, enLigne, tentativeMs, corpsMax, corpsErreurMax, fuseau, signal }) → Promise<{ autres, etat: 'non_configure'|'non_pris_en_charge'|'indisponible'|'rien'|'trouve', raison: null|'requete'|'hors_ligne'|'annule'|'delai'|'reseau'|'cle_refusee'|'recherche_desactivee'|'trop_de_demandes'|'serveur'|'reponse_illisible'|'refus'|'outil'|'interrompu'|'pas_cherche'|'interne', liens, repli, recherches, modele }>` — **ne lève jamais**.
 
 - [ ] **Step 1 : Écrire les tests rouges (§ 9.4)**
 
@@ -541,7 +545,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
     // Forme de l'appel
     const ok1 = await lancer();
-    eq([ok1.etat, ok1.liens.map((l) => l.href), ok1.liens[0].pourquoi, ok1.recherches, ok1.modele, ok1.repli], ['trouve', ['https://b.test/2', 'https://a.test/1'], 'Fenouil.', 2, 'modele-test', false], 'appel : cas nominal → trouve, choix puis complément, recherches, modèle');
+    eq([ok1.etat, ok1.liens.map((l) => l.href), ok1.autres.map((l) => l.href), ok1.liens[0].pourquoi, ok1.recherches, ok1.modele, ok1.repli], ['trouve', ['https://b.test/2'], ['https://a.test/1'], 'Fenouil.', 2, 'modele-test', false], 'appel : cas nominal → trouve, le choix seul dans liens, l’autre page à part (K2), recherches, modèle');
     eq(appels.length, 1, 'appel : un seul fetch');
     eq(appels[0].self, undefined, 'appel : fetch est appelé comme fonction libre, sans this (F11)');
     eq(appels[0].url, 'https://api.anthropic.com/v1/messages', 'appel : l’URL Messages, sans la clé');
@@ -623,7 +627,7 @@ async function rechercheDesactivee(r, max) {
 // § 4.5 : UN appel, délai et abandon extérieur combinés, classement dans l'ordre du tableau de la spec. Ne lève jamais :
 // toute exception inattendue devient `interne` (journal sans aucun champ de cfg — S10/F12).
 export async function chercherRecettesWeb({ q, filtres, langue, cfg } = {}, deps = {}) {
-  const issue = (etat, raison = null, extra = {}) => ({ etat, raison, liens: [], repli: false, recherches: null, modele: typeof cfg?.model === 'string' ? cfg.model : null, ...extra });
+  const issue = (etat, raison = null, extra = {}) => ({ etat, raison, liens: [], autres: [], repli: false, recherches: null, modele: typeof cfg?.model === 'string' ? cfg.model : null, ...extra });
   try {
     if (!cfg || typeof cfg !== 'object' || !cfg.provider || cfg.provider === 'none' || !cfg.api_key || !cfg.model) return issue('non_configure');
     if (cfg.provider !== 'anthropic') return issue('non_pris_en_charge');
@@ -675,8 +679,8 @@ export async function chercherRecettesWeb({ q, filtres, langue, cfg } = {}, deps
         if (!lu.aCherche) return issue('indisponible', 'pas_cherche', avec);
         return issue('rien', null, avec);
       }
-      const { liens, repli } = choisirLiens(lu);
-      return issue('trouve', null, { ...avec, liens, repli });
+      const { liens, autres, repli } = choisirLiens(lu);
+      return issue('trouve', null, { ...avec, liens, autres, repli });
     } finally {
       delai.removeEventListener('abort', relaisDelai);
       deps.signal?.removeEventListener('abort', relaisExterne);
@@ -889,7 +893,7 @@ const vues = new Set(); // { root, redessiner }
 export function etatWeb() { return { cle: vol?.cle ?? null, enCours: !!vol, memoire: memoire ? { cle: memoire.cle, etat: memoire.issue.etat } : null }; }
 export function reinitialiserWeb() { vol?.controller.abort(); vol = null; memoire = null; vues.clear(); } // tests seulement
 function notifier() { for (const v of [...vues]) { if (!v.root.isConnected) { vues.delete(v); continue; } v.redessiner(); } }
-const ISSUE_INTERNE = { etat: 'indisponible', raison: 'interne', liens: [], repli: false, recherches: null, modele: null };
+const ISSUE_INTERNE = { etat: 'indisponible', raison: 'interne', liens: [], autres: [], repli: false, recherches: null, modele: null };
 ```
 
 Signature : `export async function renderSearch(params, query, ctx, deps = {}) {` et, juste après `const root = el('div', null);` :
@@ -958,7 +962,7 @@ Avant `render();` (l. 96), ajouter les fonctions de la recherche web (closures s
         // Sans data-role : l'écouteur de frappe ne doit PAS rouvrir ce bouton pendant le vol.
         el('div', { class: 'row' }, el('button', { class: 'btn primary', disabled: true }, t('Chercher sur le web avec l’assistant')), el('button', { class: 'btn', onClick: annuler }, t('Annuler'))));
     }
-    if (memoire && memoire.cle === cle) return renderIssue(memoire.issue, reglages);
+    if (memoire) return renderIssue(memoire.issue, reglages, { demandeDiffere: memoire.cle !== cle }); // K1 : les liens restent ; la différence est dite
     const demandeVide = !borner(input.value, 500).trim();
     return el('div', { class: 'card flat stack' },
       boutonChercher(demandeVide),
@@ -966,7 +970,7 @@ Avant `render();` (l. 96), ajouter les fonctions de la recherche web (closures s
       demandeVide ? el('small', { class: 'muted' }, t('Écris d’abord ce que tu cherches.')) : null);
   }
   // Provisoire (tâche 6) : la tâche 7 remplace ce corps par le rendu des issues (§ 5.5-5.6).
-  function renderIssue(issue, reglages) {
+  function renderIssue(issue, reglages, { demandeDiffere = false } = {}) {
     if (issue.etat === 'non_configure') return el('div', { class: 'status warn' }, t('Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'), ' ', reglages());
     if (issue.etat === 'non_pris_en_charge') return el('div', { class: 'status warn' }, t('Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.'), ' ', reglages());
     return el('div', { class: 'status' }, 'Résultat reçu.');
@@ -1022,7 +1026,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
       // Tape, laisse lancer() appeler chercher (qui pose appels.rendre), résout l'issue, laisse la mémoire et le redessin se poser.
       const tapeEtAttend = async (root, issue) => { bouton(root, 'Chercher sur le web avec l’assistant').click(); await tick(); appels.rendre(issue); await tick(); };
       const liens = [{ href: 'https://a.test/r?x=1', hote: 'a.test', titre: '<b>Saumon</b> au fenouil', date: 'May 1, 2026', pourquoi: 'Fenouil et saumon.' }, { href: 'https://b.test/', hote: 'b.test', titre: 'b.test', date: null, pourquoi: null }];
-      const trouve = { etat: 'trouve', raison: null, liens, repli: false, recherches: 2, modele: 'm' };
+      const trouve = { etat: 'trouve', raison: null, liens, autres: [], repli: false, recherches: 2, modele: 'm' };
       const appels = { n: 0, deps: [], args: [], rendre: null };
       const chercher = async (a, d) => { appels.n += 1; appels.deps.push(d); appels.args.push(a); return new Promise((r) => { appels.rendre = r; }); };
       const navs = [];
@@ -1066,17 +1070,22 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
       const selects = root.querySelectorAll('select');
       const restriction = [...selects].find((s) => [...s.options].some((o) => o.textContent === '+ restriction'));
       restriction.value = 'sans_gluten'; restriction.dispatchEvent(new Event('change'));
-      eq([root.querySelectorAll('a[target="_blank"]').length, S.etatWeb().memoire?.etat, appels.n], [0, 'trouve', nAvant], 'puce : ajoutée → les liens disparaissent, la mémoire reste, aucun appel');
+      eq([root.querySelectorAll('a[target="_blank"]').length, texte(root).includes('La demande a changé depuis cette recherche.'), appels.n], [2, true, nAvant], 'puce : ajoutée → les liens RESTENT, la mention « la demande a changé » apparaît, aucun appel (K1)');
       [...root.querySelectorAll('.chip.removable')].find((c) => c.textContent === 'Sans gluten').click();
-      eq([root.querySelectorAll('a[target="_blank"]').length, appels.n], [2, nAvant], 'puce : retirée → les liens reviennent sans appel');
+      eq([root.querySelectorAll('a[target="_blank"]').length, texte(root).includes('La demande a changé depuis cette recherche.'), appels.n], [2, false, nAvant], 'puce : retirée → la mention disparaît, aucun appel');
       // R-WEB-2 : un filtre ajouté par la liste, champ inchangé, PART avec la tape (il n'est pas écrasé par une relecture du champ)
       restriction.value = 'sans_gluten'; restriction.dispatchEvent(new Event('change'));
-      { const n = appels.n; bouton(root, 'Chercher sur le web avec l’assistant').click(); await tick(); const dernier = appels.args[appels.args.length - 1]; eq([appels.n, dernier.q, dernier.filtres], [n + 1, 'saumon fenouil', ['Sans gluten']], 'tape : le filtre ajouté par la liste part avec la demande, le champ inchangé n’est pas réanalysé (R-WEB-2)'); appels.rendre(trouve); await tick(); }
+      { const n = appels.n; bouton(root, 'Chercher à nouveau').click(); await tick(); const dernier = appels.args[appels.args.length - 1]; eq([appels.n, dernier.q, dernier.filtres], [n + 1, 'saumon fenouil', ['Sans gluten']], 'tape : le filtre ajouté par la liste part avec la demande, le champ inchangé n’est pas réanalysé (R-WEB-2)'); appels.rendre(trouve); await tick(); }
       // R-WEB-3 : un « trouvé » dont aucune adresse ne survit à la revalidation au rendu replie sur l'écran « rien »
       root.remove(); S.reinitialiserWeb();
       root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
       await tapeEtAttend(root, { ...trouve, liens: [{ ...liens[0], href: 'javascript:alert(1)' }] });
       ok(!texte(root).includes('Trouvé sur le web') && texte(root).includes('Aucune page trouvée pour cette demande.'), 'trouve sans carte : pas de titre vide, écran « rien » (R-WEB-3)');
+      // K2 : les autres pages trouvées, repliées, jamais mêlées aux choix
+      root.remove(); S.reinitialiserWeb();
+      root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
+      await tapeEtAttend(root, { ...trouve, autres: [{ href: 'https://c.test/x', hote: 'c.test', titre: 'C', date: null, pourquoi: null }] });
+      { const d = root.querySelector('details'); eq([d?.querySelector('summary')?.textContent, d?.open, d?.querySelectorAll('a[target="_blank"]').length, root.querySelectorAll('a[target="_blank"]').length], ['Autres pages trouvées (1)', false, 1, 3], 'autres : repliées sous « Autres pages trouvées (1) », avec leur lien (K2)'); }
       // mode all : aucun lien web
       root.remove();
       root = await monter({ q: 'saumon fenouil', mode: 'all' }, ctx, { chercher, navigate: () => {} });
@@ -1096,13 +1105,13 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
       { const n = appels.n; bouton(root, 'Réessayer').click(); await tick(); eq([appels.n, appels.deps[appels.deps.length - 1].enLigne()], [n + 1, true], 'réessayer : rappelle chercher avec enLigne forcé à vrai (S9)'); appels.rendre(trouve); await tick(); }
       root.remove();
       // indisponible × 8
-      const CAS = [['hors_ligne', 'Tu es hors ligne.', true, false], ['cle_refusee', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.', false, true], ['recherche_desactivee', 'La recherche web n’est pas activée sur ton compte Anthropic.', false, true], ['trop_de_demandes', 'Trop de demandes pour l’instant. Réessaie dans une minute.', true, false], ['refus', 'L’assistant a refusé cette demande.', false, false], ['pas_cherche', 'L’assistant n’a pas cherché sur le web. Réessaie.', true, false], ['delai', 'L’assistant n’a pas répondu. Réessaie.', true, false], ['interne', 'L’assistant n’a pas répondu. Réessaie.', true, false]];
-      for (const [raison, attendu, reessai, reglages] of CAS) {
+      const CAS = [['hors_ligne', 'Tu es hors ligne.', true, false, false], ['cle_refusee', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.', false, true, false], ['recherche_desactivee', 'La recherche web n’est pas activée sur ton compte Anthropic.', false, true, false], ['trop_de_demandes', 'Trop de demandes pour l’instant. Réessaie dans une minute.', true, false, false], ['refus', 'L’assistant a refusé cette demande.', false, false, false], ['pas_cherche', 'L’assistant n’a pas cherché sur le web. Réessaie.', true, false, false], ['delai', 'L’assistant n’a pas répondu. Réessaie.', true, false, true], ['interne', 'L’assistant n’a pas répondu. Réessaie.', true, false, true]];
+      for (const [raison, attendu, reessai, reglages, code] of CAS) {
         S.reinitialiserWeb();
         root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
         await tapeEtAttend(root, { etat: 'indisponible', raison, liens: [], repli: false, recherches: null, modele: 'm' });
         const statut = root.querySelector('.status.warn[role="status"]');
-        eq([statut?.textContent.includes(attendu), !!bouton(root, 'Réessayer'), !!root.querySelector('a[href="#/settings"]')], [true, reessai, reglages], `indisponible/${raison} : texte, Réessayer=${reessai}, Réglages=${reglages}`);
+        eq([statut?.textContent.includes(attendu), !!bouton(root, 'Réessayer'), !!root.querySelector('a[href="#/settings"]'), texte(root).includes('Code : ' + raison)], [true, reessai, reglages, code], `indisponible/${raison} : texte, Réessayer=${reessai}, Réglages=${reglages}, code=${code} (K3)`);
         root.remove();
       }
       // Réglage changé pendant le vol (Review Focus 5) : l'issue non_configure se rend avec le texte de la garde
@@ -1133,19 +1142,22 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
   const AVEC_REGLAGES = ['cle_refusee', 'recherche_desactivee'];
   // § 5.5-5.6 : chaque issue a son écran ; les liens sont revalidés AU RENDU par lienSignet (I-H) ; l'avertissement
   // I-K accompagne toujours les liens ; aucun texte de l'API n'est rendu hors « pourquoi » (borné en amont).
-  function renderIssue(issue, reglages) {
+  function renderIssue(issue, reglages, { demandeDiffere = false } = {}) {
     const reessayer = () => el('button', { class: 'btn', onClick: () => lancer({ enLigne: () => true }) }, t('Réessayer'));
     if (issue.etat === 'non_configure') return el('div', { class: 'status warn' }, t('Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'), ' ', reglages());
     if (issue.etat === 'non_pris_en_charge') return el('div', { class: 'status warn' }, t('Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.'), ' ', reglages());
     if (issue.etat === 'rien') return el('div', { class: 'card flat stack' }, el('div', { class: 'status', role: 'status' }, t('Aucune page trouvée pour cette demande. Reformule ou cherche autrement.')), reessayer());
     if (issue.etat === 'indisponible') {
-      const cle = issue.raison === 'requete' && !state.q ? 'Écris d’abord ce que tu cherches.' : (TEXTES_INDISPONIBLE[issue.raison] || 'L’assistant n’a pas répondu. Réessaie.');
+      const demandeVide = issue.raison === 'requete' && !state.q;
+      const cle = demandeVide ? 'Écris d’abord ce que tu cherches.' : (TEXTES_INDISPONIBLE[issue.raison] || 'L’assistant n’a pas répondu. Réessaie.');
+      const generique = !demandeVide && !TEXTES_INDISPONIBLE[issue.raison]; // K3 : le code reste lisible sous le texte générique
       return el('div', { class: 'card flat stack' },
         el('div', { class: 'status warn', role: 'status' }, t(cle), AVEC_REGLAGES.includes(issue.raison) ? [' ', reglages()] : null),
+        generique ? el('small', { class: 'muted' }, t('Code : {c}', { c: String(issue.raison || 'inconnu') })) : null,
         SANS_REESSAI.includes(issue.raison) ? null : reessayer());
     }
     // trouve
-    const cartes = (Array.isArray(issue.liens) ? issue.liens : []).map((lien) => {
+    const carte = (lien) => {
       const l = lienSignet(lien.href);
       if (!l.ok) return null; // revalidé AU RENDU (I-H) : une adresse refusée ici n'a pas de carte
       const titre = lien.titre || l.hote;
@@ -1154,13 +1166,17 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
         el('div', { class: 'muted', style: { fontSize: '.85rem' } }, lien.date ? `${l.hote} · ${lien.date}` : l.hote),
         lien.pourquoi ? el('div', null, lien.pourquoi) : null,
         el('button', { class: 'btn small', onClick: () => nav('/add/signet' + buildQuery({ adresse: l.href, titre })) }, t('Garder ce lien')));
-    }).filter(Boolean);
+    };
+    const cartes = (Array.isArray(issue.liens) ? issue.liens : []).map(carte).filter(Boolean);
+    const autres = (Array.isArray(issue.autres) ? issue.autres : []).map(carte).filter(Boolean); // K2 : repliées, jamais mêlées aux choix
     // R-WEB-3 : un « trouvé » dont aucune carte ne survit à la revalidation ne montre pas un titre sans rien dessous.
     if (!cartes.length) return renderIssue({ ...issue, etat: 'rien' }, reglages);
     const demande = memoire?.filtres?.length ? `${memoire.q} · ${memoire.filtres.join(' ; ')}` : (memoire?.q ?? state.q);
     return section(t('Trouvé sur le web'),
       el('div', { class: 'muted' }, t('Demande envoyée : {q}', { q: demande })),
+      demandeDiffere ? el('div', { class: 'status' }, t('La demande a changé depuis cette recherche.')) : null, // K1
       ...cartes,
+      autres.length ? el('details', null, el('summary', { class: 'btn' }, t('Autres pages trouvées ({n})', { n: autres.length })), ...autres) : null, // K2
       el('div', { class: 'status' }, t('L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.')),
       issue.recherches != null ? el('small', { class: 'muted' }, t('Recherches faites par l’assistant : {n}', { n: issue.recherches })) : null,
       issue.repli ? el('small', { class: 'muted' }, t('Liens tels que trouvés, sans tri de l’assistant.')) : null,
@@ -1272,7 +1288,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
   // --- § 8 / § 9.8 dictionnaire et statiques
   {
     const { EN } = await import('../src/i18n/en.js');
-    const CLES = ['Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.', 'Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.', 'Chercher sur le web avec l’assistant', 'Une recherche = un appel à ton compte Anthropic.', 'Écris d’abord ce que tu cherches.', 'L’assistant cherche sur le web…', 'Annuler', 'Trouvé sur le web', 'Demande envoyée : {q}', 'Garder ce lien', 'L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.', 'Recherches faites par l’assistant : {n}', 'Liens tels que trouvés, sans tri de l’assistant.', 'Chercher à nouveau', 'Aucune page trouvée pour cette demande. Reformule ou cherche autrement.', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.', 'La recherche web n’est pas activée sur ton compte Anthropic.', 'Trop de demandes pour l’instant. Réessaie dans une minute.', 'L’assistant a refusé cette demande.', 'L’assistant n’a pas cherché sur le web. Réessaie.', 'L’assistant n’a pas répondu. Réessaie.', 'Adresse reçue : vérifie-la avant d’enregistrer.', 'Réessayer', 'Réglages', 'Tu es hors ligne.'];
+    const CLES = ['Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.', 'Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.', 'Chercher sur le web avec l’assistant', 'Une recherche = un appel à ton compte Anthropic.', 'Écris d’abord ce que tu cherches.', 'L’assistant cherche sur le web…', 'Annuler', 'Trouvé sur le web', 'Demande envoyée : {q}', 'Garder ce lien', 'L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.', 'Recherches faites par l’assistant : {n}', 'Liens tels que trouvés, sans tri de l’assistant.', 'Chercher à nouveau', 'Aucune page trouvée pour cette demande. Reformule ou cherche autrement.', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.', 'La recherche web n’est pas activée sur ton compte Anthropic.', 'Trop de demandes pour l’instant. Réessaie dans une minute.', 'L’assistant a refusé cette demande.', 'L’assistant n’a pas cherché sur le web. Réessaie.', 'L’assistant n’a pas répondu. Réessaie.', 'Adresse reçue : vérifie-la avant d’enregistrer.', 'La demande a changé depuis cette recherche.', 'Autres pages trouvées ({n})', 'Réessayer', 'Réglages', 'Tu es hors ligne.', 'Code : {c}'];
     eq(CLES.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'en.js : chaque texte du lot a sa traduction');
     ok(!('Le Web n’est pas activé : aucune source externe n’est configurée. Aucune recherche extérieure n’a été faite.' in EN), 'en.js : la clé morte du mode Web est retirée');
     const lire = async (chemin) => (await fetch(chemin + '?v=' + Date.now(), { cache: 'no-store' })).text();
@@ -1308,16 +1324,18 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
   "L’assistant n’a pas cherché sur le web. Réessaie.": "The assistant did not search the web. Try again.",
   "L’assistant n’a pas répondu. Réessaie.": "The assistant did not answer. Try again.",
   "Adresse reçue : vérifie-la avant d’enregistrer.": "Address received: check it before saving.",
+  "La demande a changé depuis cette recherche.": "The request has changed since this search.",
+  "Autres pages trouvées ({n})": "Other pages found ({n})",
 ```
 
-**Avant d'ajouter** : `grep -n "Annuler\|Réessayer\|'Réglages'\|Tu es hors ligne" src/i18n/en.js` — « Réessayer » (l. 151), « Réglages » (l. 4) et « Tu es hors ligne. » (l. 206) existent déjà ; si « Annuler » existe aussi, ne pas la dupliquer. Le test du step 1 vérifie 25 clés : 22 neuves (dont « Annuler » si elle manquait) + 3 existantes.
+**Avant d'ajouter** : `grep -n "Annuler\|Réessayer\|'Réglages'\|Tu es hors ligne" src/i18n/en.js` — « Réessayer » (l. 151), « Réglages » (l. 4) et « Tu es hors ligne. » (l. 206) existent déjà ; si « Annuler » existe aussi, ne pas la dupliquer. Le test du step 1 vérifie 28 clés : 24 neuves (dont « Annuler » si elle manquait) + 4 existantes (« Réessayer », « Réglages », « Tu es hors ligne. », « Code : {c} »).
 
 - [ ] **Step 4 : `sw.js` → `cuisine-os-v0.5.0-9`. Suite complète verte ; poser le total ; relancer ; `node --test tools/*.test.mjs` 40/40 ; `--check` 0.**
 
 - [ ] **Step 5 : Docs**
   - `docs/architecture.md` : dans la carte des modules, ajouter `bornes.js` à `src/core/` et `recherche-web.js` à `src/domain/` ; étendre la ligne « Déterministe avant IA » (l. 7) : « … et sur la recherche web, où le texte de l'assistant ne peut qu'étiqueter des pages que le serveur a réellement rapportées » ; ajouter une section « ### Chercher sur le web avec l'assistant (lot du 17 octobre 2026) » après « Identifier un livre, fiable » : état de module de `search.js` (`memoire`, `vol`, `vues`), mur I-A, issues, `core/bornes.js` reçu du lot ISBN, ce qui n'est pas prouvé (appel réel, Safari).
   - `CLAUDE.md` : section « ### Chercher sur le web avec l'assistant (17 octobre 2026) » sur le modèle de « Identifier un livre, fiable » : où (branche, worktree, 8083, spec, plan, registre), ce qui marche (éprouvé par la suite, aucun réseau), ce qui n'est PAS prouvé (aucun appel réel avec la clé de Neegan ; forme réelle de la réponse ; durée ; coût ; Safari/iPhone), dettes (pays `CA` fixe, 45 s, classement du 400 par texte, `vues` purgées par `isConnected`), versions (`APP_VERSION 0.5.0`, `VERSION` réelle, deux modules dans `SHELL`), **gestes de Neegan** (workspace Anthropic dédié à plafond ; pas de clé sur le site public avant D5 ; preuve réelle Mac puis iPhone ; `! git push` après fusion).
-  - Spec § 8 : remplacer `cuisine-os-v0.5.0-1` par la `VERSION` réelle ; § 11.2 : une ligne par écart entre la spec et la construction (R-WEB-n, avec son coût si faux) — au moins : **R-WEB-1** `construireDemande` rend aussi `q` et `filtres` nettoyés et l'écran rappelle ceux-là ; **R-WEB-2** la tape ne réanalyse le champ que s'il a changé (les filtres des listes et les puces retirées survivent) ; **R-WEB-3** un « trouvé » sans carte survivante replie sur « rien » ; `libellePuce` = l'ancien `chipLabel` exporté ; `vues` purgées à chaque rendu et dédoublonnées par racine ; « Résultat reçu. » provisoire remplacé en tâche 7 ; tout ce que les tâches ont amendé.
+  - Spec § 8 : remplacer `cuisine-os-v0.5.0-1` par la `VERSION` réelle ; § 11.2 : une ligne par écart entre la spec et la construction (R-WEB-n, avec son coût si faux) — au moins : **K1-K3** du kit (liens conservés + mention, `autres` repliés, code de la raison) ; **R-WEB-1** `construireDemande` rend aussi `q` et `filtres` nettoyés et l'écran rappelle ceux-là ; **R-WEB-2** la tape ne réanalyse le champ que s'il a changé (les filtres des listes et les puces retirées survivent) ; **R-WEB-3** un « trouvé » sans carte survivante replie sur « rien » ; `libellePuce` = l'ancien `chipLabel` exporté ; `vues` purgées à chaque rendu et dédoublonnées par racine ; « Résultat reçu. » provisoire remplacé en tâche 7 ; tout ce que les tâches ont amendé.
   - `STATE.md` (racine) : réécrire pour l'état de fin de lot (fini, non prouvé, reprendre, gestes de Neegan).
 
 - [ ] **Step 6 : Commit**
