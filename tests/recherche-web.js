@@ -614,7 +614,13 @@ export async function runRechercheWebTests({ eq, ok }) {
         eq([champ(root, 'Adresse *').value, root.querySelector('[data-erreur="adresse"]').textContent, banniere(root)?.querySelector('strong')?.textContent, garder(root).disabled], ['javascript:alert(1)', 'Adresse non reconnue.', '', true], 'signet prérempli : adresse refusée → montrée, erreur dite, hôte vide, bouton fermé');
         const longue = 'https://exemple.test/' + 'a'.repeat(3000);
         root = await S.renderSignetRoute({}, { adresse: longue, titre: 'X' }, ctx, deps);
-        eq([champ(root, 'Adresse *').value.length, root.querySelector('[data-erreur="adresse"]').textContent, garder(root).disabled], [longue.length, 'Adresse trop longue.', true], 'signet prérempli : une adresse trop longue n’est JAMAIS tronquée — refusée (I-A, F9)');
+        eq([champ(root, 'Adresse *').value.length, root.querySelector('[data-erreur="adresse"]').textContent, garder(root).disabled, banniere(root)?.querySelector('strong')?.textContent], [longue.length, 'Adresse trop longue.', true, ''], 'signet prérempli : une adresse trop longue n’est JAMAIS tronquée — refusée, et la bannière ne montre aucun hôte (I-A, F9, R-WEB-8)');
+        // R-WEB-8 : la bannière suit la MÊME décision que l'enregistrement (signetModel, adresse rognée par trim()) — un NBSP
+        // en tête n'est pas retiré par l'analyseur d'URL mais l'est par trim() : le formulaire accepte et enregistrerait cette adresse.
+        root = await S.renderSignetRoute({}, { adresse: '\u{00A0}https://exemple.test/r', titre: 'X' }, ctx, deps);
+        eq([banniere(root)?.querySelector('strong')?.textContent, garder(root).disabled], ['exemple.test', false], 'signet prérempli : adresse à NBSP en tête → la bannière montre l’hôte que le formulaire enregistrera (R-WEB-8)');
+        root = await S.renderSignetRoute({}, { adresse: '   ', titre: 'X' }, ctx, deps);
+        eq([banniere(root), champ(root, 'Adresse *').value], [null, ''], 'signet prérempli : une adresse d’espaces n’est pas « reçue » — aucune bannière, champ vide (R-WEB-8)');
         root = await S.renderSignetRoute({}, { adresse: 'https://exemple.test/r', titre: 't'.repeat(400) + '\u{202E}' }, ctx, deps);
         eq([champ(root, 'Titre *').value.length, champ(root, 'Titre *').value.includes('\u{202E}')], [300, false], 'signet prérempli : titre borné à 300 points de code sans bidi (S2)');
         root = await S.renderSignetRoute({}, {}, ctx, deps);

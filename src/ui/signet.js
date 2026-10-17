@@ -103,15 +103,19 @@ export async function renderSignetRoute(params, query, ctx, { repo: r = repo, na
   // § 6 : préremplissage par la query (depuis « Garder ce lien » de la recherche web — ou un lien profond venu de
   // l'extérieur, S4). L'adresse arrive TELLE QUELLE (jamais tronquée : trop longue, signetModel la refuse — I-A/F9) ;
   // le titre est borné par points de code, Cc/Cf retirés (S2). Rien n'est écrit avant « Enregistrer ».
-  const recue = typeof query?.adresse === 'string' && query.adresse !== '';
+  const recue = typeof query?.adresse === 'string' && query.adresse.trim() !== '';
   const etat = { adresse: recue ? query.adresse : '', titre: borner(typeof query?.titre === 'string' ? query.titre : '', LIMITES_SIGNET.titre), editionId: '', cuisines: [], enCours: false };
   const livres = [{ value: '', label: t('Aucun — recette indépendante') },
     ...(ctx?.book_editions || []).map((e) => ({ value: e.id, label: libelleLivre(e, ctx?.booksById?.get(e.book_id)) }))];
   const existantes = cuisinesExistantes(ctx);
   const root = el('div', null, pageHeader(t('Garder un lien web'), { back: { href: '/add', label: t('Ajouter') } }));
   if (recue) {
-    const lien = lienSignet(etat.adresse);
-    root.append(el('div', { class: 'status', dataset: { role: 'adresse-recue' } }, t('Adresse reçue : vérifie-la avant d’enregistrer.'), ' ', el('strong', null, lien.ok ? lien.hote : '')));
+    // R-WEB-8 : l'hôte vient de la MÊME décision que l'enregistrement (signetModel rogne par trim(), que l'analyseur d'URL ne
+    // fait pas pour NBSP/U+FEFF/U+2028 ; il refuse aussi une adresse trop longue) — `hote` y vaut null pour toute adresse
+    // refusée. La bannière est volontairement STATIQUE : « reçue » = l'adresse telle qu'elle est arrivée, la modifier dans
+    // le champ ne la met pas à jour.
+    const m = signetModel(etat);
+    root.append(el('div', { class: 'status', dataset: { role: 'adresse-recue' } }, t('Adresse reçue : vérifie-la avant d’enregistrer.'), ' ', el('strong', null, m.hote || '')));
   }
   const zone = el('div', null);
   root.append(zone);
