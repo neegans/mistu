@@ -402,8 +402,9 @@ l'app — I-I) ; `vues` (un ensemble de `{ root, redessiner }` : les instances v
 racine, purgées à chaque rendu et à chaque notification dès que leur racine a quitté le document). `etatWeb()` et
 `reinitialiserWeb()` exposent et remettent cet état pour les tests, qui attendent un fait et jamais un délai. Une tape
 (`lancer`) relit le champ seulement s'il a changé depuis la dernière analyse (R-WEB-2) — et y réunit alors les
-restrictions affichées, jamais assouplies par la frappe (R-WEB-9) —, abandonne le vol précédent, pose
-le nouveau, puis rejoue la route ; au retour, une promesse qui n'est plus celle du vol n'écrit rien ; une exception
+restrictions affichées (R-WEB-9 : les restrictions affichées survivent à la TAPE ; Entrée, changement de mode ou de case (`run()`, préexistant) réanalysent encore le champ) —, abandonne le vol précédent,
+pose le nouveau, puis met l'adresse à jour sans re-rendu (`remplacerAdresse`) : l'instance courante garde ses puces et
+son vol ; au retour, une promesse qui n'est plus celle du vol n'écrit rien ; une exception
 devient l'issue gelée `interne` (filet de l'écran : jamais d'écran figé). « Annuler » abandonne sans rien lancer, et la
 mémoire reste ce qu'elle était.
 

@@ -292,7 +292,8 @@ export async function runRechercheWebTests({ eq, ok }) {
       const ANTH = { provider: 'anthropic', api_key: 'k', model: 'm' };
       const pilote = () => { const p = {}; p.promesse = new Promise((res) => { p.resoudre = res; }); return p; };
       const tick = () => new Promise((r) => setTimeout(r, 0)); // un tour de boucle : les .then de lancer() ont tourné
-      const monter = async (query, ctx, deps) => { const root = await S.renderSearch({}, { mode: 'web', ...query }, ctx, deps); scene.append(root); return root; };
+      // remplacerAdresse factice par défaut : la tape (lancer) met l'adresse à jour par history.replaceState, pas celle de la page de tests.
+      const monter = async (query, ctx, deps) => { const root = await S.renderSearch({}, { mode: 'web', ...query }, ctx, { remplacerAdresse: () => {}, ...deps }); scene.append(root); return root; };
       const texte = (root) => root.textContent;
       const bouton = (root, nom) => [...root.querySelectorAll('button')].find((b) => b.textContent === nom);
       const champ = (root) => root.querySelector('input[type="search"]');
@@ -425,17 +426,17 @@ export async function runRechercheWebTests({ eq, ok }) {
         eq(apres, ['Sans gluten', 'avec saumon'], 'R-WEB-9 : après la tape, la puce « Sans gluten » est toujours affichée, à côté de celle du champ relu');
         root.remove();
       }
-      // R-WEB-9 : type et exclusions affichés survivent eux aussi à un champ changé (jamais assouplis par la frappe)
+      // R-WEB-9 : type, exclusions et durées affichés survivent eux aussi à un champ changé, à la tape
       {
         S.reinitialiserWeb();
         const appels = [];
-        const root = await monter({ q: 'salade sans xyzzy' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        const root = await monter({ q: 'salade sans xyzzy en 20 minutes' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
         const avant = puces(root);
         taper(root, 'saumon');
         bouton(root, 'Chercher sur le web avec l’assistant').click();
         await tick();
         const apres = puces(root);
-        eq([avant.length, avant.every((c) => apres.includes(c)), apres.includes('avec saumon'), appels[0]?.a.filtres], [2, true, true, apres], 'R-WEB-9 : le type et l’exclusion en texte affichés avant la tape restent affichés et partent avec la demande relue');
+        eq([avant.length, avant.every((c) => apres.includes(c)), apres.includes('avec saumon'), appels[0]?.a.filtres], [3, true, true, apres], 'R-WEB-9 : le type, l’exclusion en texte et la durée affichés avant la tape restent affichés et partent avec la demande relue');
         root.remove();
       }
       // R-WEB-9 : l'union ne contredit pas une exclusion — un ingrédient exclu n'est pas aussi « avec » (même règle que parseQuery)
@@ -449,6 +450,65 @@ export async function runRechercheWebTests({ eq, ok }) {
         await tick();
         eq([avant, puces(root), appels[0]?.a.filtres], [['sans fenouil'], ['avec saumon', 'sans fenouil'], ['avec saumon', 'sans fenouil']], 'R-WEB-9 : « sans fenouil » gardée, et « fenouil » retapé ne devient pas « avec fenouil » (aucune demande contradictoire)');
         root.remove();
+      }
+      // R-WEB-9 : la durée « actives » affichée survit aussi à la tape (même règle que le type)
+      {
+        S.reinitialiserWeb();
+        const appels = [];
+        const root = await monter({ q: '10 min actives' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        const avant = puces(root);
+        taper(root, 'saumon');
+        bouton(root, 'Chercher sur le web avec l’assistant').click();
+        await tick();
+        eq([avant.length, avant.every((c) => puces(root).includes(c)), puces(root).includes('avec saumon'), appels[0]?.a.filtres], [1, true, true, puces(root)], 'R-WEB-9 : « ≤ 10 min actives » reste affichée et part avec la demande relue');
+        root.remove();
+      }
+      // R-WEB-9 de bout en bout : la tape ne ré-instancie PAS la route. Le faux `navigate` fait ce que fait app.js sur
+      // hashchange (une NOUVELLE instance montée depuis l'adresse) ; la tape doit passer par remplacerAdresse, sans re-rendu.
+      {
+        S.reinitialiserWeb();
+        const { parseHash } = await import('../src/core/router.js');
+        const appels = []; const p = pilote(); const adresses = []; let reinstanciations = 0;
+        const ctx = ctxDe(ANTH);
+        let vue = null;
+        const deps = {
+          chercher: async (a, d) => { appels.push({ a, d }); return p.promesse; },
+          remplacerAdresse: (h) => { adresses.push(h); },
+          // hashchange arrive dans une tâche LATER : la nouvelle instance est montée après le tour de lancer(), comme en production.
+          navigate: (chemin) => { reinstanciations += 1; setTimeout(async () => { const r = await S.renderSearch({}, parseHash('#' + chemin).query, ctx, deps); vue.replaceWith(r); vue = r; }, 0); },
+        };
+        const root = await monter({ q: '' }, ctx, deps);
+        vue = root;
+        taper(root, 'saumon');
+        const liste = [...root.querySelectorAll('select')].find((s) => s.options[0]?.textContent === '+ restriction');
+        liste.value = 'sans_gluten'; liste.dispatchEvent(new Event('change'));
+        bouton(root, 'Chercher sur le web avec l’assistant').click();
+        await tick(); await tick(); // la tâche du faux hashchange a tourné
+        eq([reinstanciations, vue === root, adresses, puces(vue).includes('Sans gluten'), S.etatWeb().enCours, !!vue.querySelector('[role="status"]') && texte(vue).includes('L’assistant cherche sur le web…'), !!bouton(vue, 'Annuler'), !!vue.querySelector('[data-role="chercher-web"]'), appels.length, appels[0]?.a.filtres.includes('Sans gluten')], [0, true, ['/search?q=saumon&mode=web'], true, true, true, true, false, 1, true], 'R-WEB-9 : la tape met l’adresse à jour SANS re-rendu (remplacerAdresse, navigate jamais appelé) : la MÊME instance garde « Sans gluten » et montre le vol en cours avec « Annuler », aucun bouton rallumé');
+        p.resoudre(issueTrouve);
+        await tick();
+        eq([vue === root, texte(vue).includes('Trouvé sur le web'), texte(vue).includes('La demande a changé depuis cette recherche.'), puces(vue).includes('Sans gluten')], [true, true, false, true], 'R-WEB-9 : à la réponse, les liens s’affichent dans cette instance SANS la mention K1 (la demande affichée est celle qui est partie)');
+        root.remove();
+      }
+      // R-WEB-9, dépendance par défaut : sans remplacerAdresse injecté, la tape pose l'adresse par history.replaceState (aucun
+      // hashchange, donc aucun re-rendu) et l'instance garde son vol ; l'adresse de la page de tests est rendue au finally.
+      {
+        S.reinitialiserWeb();
+        const adresseAvant = location.href;
+        let hashchanges = 0; const compter = () => { hashchanges += 1; };
+        window.addEventListener('hashchange', compter);
+        try {
+          const p = pilote(); let navs = 0;
+          const root = await S.renderSearch({}, { mode: 'web', q: 'saumon' }, ctxDe(ANTH), { chercher: async () => p.promesse, navigate: () => { navs += 1; } });
+          scene.append(root);
+          bouton(root, 'Chercher sur le web avec l’assistant').click();
+          await tick();
+          const apres = location.href;
+          eq([apres.includes('#/search?q=saumon'), hashchanges, navs, S.etatWeb().enCours, !!root.querySelector('[role="status"]') && !!bouton(root, 'Annuler')], [true, 0, 0, true, true], 'R-WEB-9 : par défaut, la tape pose #/search?q=… par replaceState (aucun hashchange, aucun navigate) et l’instance montre son vol (vol.cle === sa clé)');
+          p.resoudre(issueTrouve);
+          await tick();
+          root.remove();
+        } finally { window.removeEventListener('hashchange', compter); if (location.href !== adresseAvant) history.replaceState(null, '', adresseAvant); }
       }
       // run() passe par requeteRoute et le `navigate` injecté : Entrée dans le champ navigue par le faux, sans appeler l'assistant (I-B)
       {
@@ -503,7 +563,8 @@ export async function runRechercheWebTests({ eq, ok }) {
       const ING = new Map([['ing_salmon', { labels: { fr: { label: 'saumon' } } }], ['ing_fennel_bulb', { labels: { fr: { label: 'fenouil' } } }]]);
       const ctxDe = (llm) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING, meal_feedback: [], settings: { llm } });
       const ANTH = { provider: 'anthropic', api_key: 'k', model: 'm' };
-      const monter = async (query, ctx, deps) => { const root = await S.renderSearch({}, { mode: 'web', ...query }, ctx, deps); scene.append(root); return root; };
+      // remplacerAdresse factice par défaut : la tape (lancer) met l'adresse à jour par history.replaceState, pas celle de la page de tests.
+      const monter = async (query, ctx, deps) => { const root = await S.renderSearch({}, { mode: 'web', ...query }, ctx, { remplacerAdresse: () => {}, ...deps }); scene.append(root); return root; };
       const texte = (root) => root.textContent;
       const bouton = (root, nom) => [...root.querySelectorAll('button')].find((b) => b.textContent === nom);
       const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -541,7 +602,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       }
       ok(texte(root).includes('L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.'), 'trouve : l’avertissement fixe est TOUJOURS là (I-K, S1)');
       ok(texte(root).includes('Recherches faites par l’assistant : 2') && !texte(root).includes('Liens tels que trouvés'), 'trouve : compte des recherches ; pas de ligne repli');
-      // lancer() a déjà navigué une fois (replace vers /search?…) : on compte les navigations vers le signet, pas le total.
+      // lancer() ne navigue pas (R-WEB-9 : remplacerAdresse, sans re-rendu) : seules les navigations vers le signet comptent.
       const avantGarder = navs.filter((p) => p.startsWith('/add/signet')).length;
       [...root.querySelectorAll('button')].find((b) => b.textContent === 'Garder ce lien').click();
       const versSignet = navs.filter((p) => p.startsWith('/add/signet'));

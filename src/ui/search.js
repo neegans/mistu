@@ -1,7 +1,7 @@
 // Recherche universelle et accompagnements (spec §4, §26) : source active visible, pastilles modifiables, groupes distincts.
 import { el } from '../core/dom.js';
 import { t, label, getUiLocale } from '../core/i18n.js';
-import { navigate, buildQuery } from '../core/router.js';
+import { navigate, buildQuery, remplacerAdresse } from '../core/router.js';
 import { borner } from '../core/bornes.js';
 import { lienSignet } from '../core/lien.js';
 import { parseQuery, searchDocs, chipsFor } from '../domain/search.js';
@@ -15,7 +15,8 @@ import { addToMealFlow } from './meals.js';
 const MODES = [['recipes', 'Mes recettes'], ['books', 'Mes livres'], ['web', 'Web'], ['all', 'Tout']];
 
 // --- Recherche web : état AU NIVEAU DU MODULE (spec Web § 5.1). run() navigue en `replace`, donc chaque Entrée,
-// changement de mode ou de case ré-instancie la route : un état d'instance ne survit pas. Ici vivent la dernière issue
+// changement de mode ou de case ré-instancie la route : un état d'instance ne survit pas (la tape web, elle, ne fait que
+// remplacer l'adresse sans re-rendu — R-WEB-9). Ici vivent la dernière issue
 // (mémoire VIVE, jamais en base — I-G), sous la clé exacte de la demande qui l'a produite, et l'UNIQUE appel en vol de
 // l'app (I-I). Les instances sont des vues : elles s'abonnent, et sont oubliées dès que leur racine quitte le document.
 let memoire = null; // { cle, issue, q, filtres }
@@ -36,9 +37,10 @@ const TEXTES_INDISPONIBLE = {
 };
 const SANS_REESSAI = ['cle_refusee', 'recherche_desactivee', 'refus'];
 const AVEC_REGLAGES = ['cle_refusee', 'recherche_desactivee'];
-// R-WEB-9 (amende § 5.4.1) : un champ CHANGÉ est relu, mais les restrictions déjà affichées — type, régimes, exclusions —
-// sont réunies à la nouvelle analyse (les anciennes d'abord, puis les nouvelles absentes) : la frappe n'assouplit jamais
-// une restriction, seule la croix d'une puce la retire. Un ingrédient exclu ne reste pas « avec » (même règle que parseQuery).
+// R-WEB-9 (amende § 5.4.1) : à la TAPE, un champ changé est relu, mais les restrictions déjà affichées — type, régimes,
+// exclusions, durées — sont réunies à la nouvelle analyse (les anciennes d'abord, puis les nouvelles absentes) : elles
+// survivent à la tape. Entrée, changement de mode ou de case (run(), préexistant) réanalysent encore le champ. Un
+// ingrédient exclu ne reste pas « avec » (même règle que parseQuery).
 function reunirRestrictions(avant, analyse) {
   const unir = (a, b) => [...new Set([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])])];
   const f = analyse.filters;
@@ -47,13 +49,15 @@ function reunirRestrictions(avant, analyse) {
   const textes = unir(avant?.exclude_text, f.exclude_text);
   if (textes.length) f.exclude_text = textes;
   if (f.type == null && avant?.type) f.type = avant.type;
+  if (f.max_total_minutes == null && avant?.max_total_minutes) f.max_total_minutes = avant.max_total_minutes;
+  if (f.max_active_minutes == null && avant?.max_active_minutes) f.max_active_minutes = avant.max_active_minutes;
   f.include = f.include.filter((id) => !f.exclude.includes(id));
   return analyse;
 }
 
 export async function renderSearch(params, query, ctx, deps = {}) {
   const root = el('div', null);
-  const { chercher = chercherRecettesWeb, enLigne, navigate: nav = navigate } = deps;
+  const { chercher = chercherRecettesWeb, enLigne, navigate: nav = navigate, remplacerAdresse: remplacer = remplacerAdresse } = deps;
   const state = { q: query.q || '', mode: query.mode || 'all', favorites: query.fav === '1', cooked: query.cooked === '1', requireAll: query.any !== '1', parsed: parseQuery(query.q || '') };
   const forRecipe = query.for ? ctx.docsByRecipe.get(query.for) : null; // Avec quoi on mange ça ?
   const role = query.role || (forRecipe ? 'salade' : null);
@@ -147,8 +151,9 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   // par les listes « + type » / « + restriction » ou retirées à la main RESTENT ce qu'elles sont à l'écran (R-WEB-2 : une
   // relecture inconditionnelle les écrasait) ; s'il a changé, les restrictions affichées sont réunies à la nouvelle
   // analyse (R-WEB-9 : la frappe sans Entrée effaçait la restriction choisie). Puis le vol précédent est abandonné
-  // (I-I), le nouveau posé au module, et la route rejouée en replace (elle se ré-instancie et retrouve le vol par sa
-  // clé). « Réessayer » passe { enLigne: () => true }.
+  // (I-I), le nouveau posé au module, et l'adresse mise à jour SANS re-rendu (remplacerAdresse, aucun hashchange) :
+  // l'instance courante garde ses puces et son vol — une ré-instanciation repartirait de l'adresse, qui ne porte ni les
+  // puces des listes ni les restrictions réunies, et perdrait le vol (autre clé). « Réessayer » passe { enLigne: () => true }.
   const lancer = (depsForces = {}) => {
     const champ = input.value.trim();
     if (champ !== state.q) { const avant = state.parsed.filters; state.q = champ; state.parsed = reunirRestrictions(avant, parseQuery(champ)); if (forRecipe && role) state.parsed.filters.type = role; }
@@ -167,7 +172,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
         notifier();
       });
     vol = { cle, controller, promesse };
-    nav(requeteRoute(), { replace: true });
+    remplacer(requeteRoute());
     render();
   };
   const annuler = () => { vol?.controller.abort(); vol = null; render(); };

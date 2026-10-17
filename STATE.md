@@ -5,7 +5,8 @@
 fusionné, PAS poussé** : lot « Chercher sur le web avec
 l'assistant », branche `recherche-web`, worktree `~/projects/mistu-web` (serveur `python3 -m http.server 8083`), base
 `main` `e4e841b`. Neuf tâches (une ronde de corrections au plus chacune), puis la vague finale de la revue de branche
-(R-WEB-9 et quatre mineurs). Après la vague : suite **1761/1761** (total épinglé **1760** dans `tests/tests.js`), une
+(R-WEB-9 et quatre mineurs), puis sa vague 2 (la tape met l'adresse à jour sans re-rendu). Après la vague 2 : suite
+**1765/1765** (total épinglé **1764** dans `tests/tests.js`), une
 seule erreur de console (404 `/favicon.ico`, pré-existant), `node --test tools/*.test.mjs` 40/40,
 `node tools/generer-migrations.mjs --check` 0. `APP_VERSION 0.5.0`, `sw.js`
 `cuisine-os-v0.5.0-10`, `SHELL` + `./src/core/bornes.js` et `./src/domain/recherche-web.js`. `main` était
@@ -62,7 +63,7 @@ construction a amendé), plan `docs/superpowers/plans/2026-10-17-chercher-sur-le
 ```
 cd ~/projects/mistu-web && git status --short && git log --oneline -3
 curl -sS -o /dev/null -w "8083 http=%{http_code}\n" http://localhost:8083/tests/ || (nohup python3 -m http.server 8083 > /dev/null 2>&1 &)
-node ~/projects/mistu-web/.superpowers/sdd/2026-10-17-chercher-sur-le-web/suite.cjs 8083   # attendu : 1761/1761 (+ 1 x 404 favicon)
+node ~/projects/mistu-web/.superpowers/sdd/2026-10-17-chercher-sur-le-web/suite.cjs 8083   # attendu : 1765/1765 (+ 1 x 404 favicon)
 node --test tools/*.test.mjs && node tools/generer-migrations.mjs --check
 ```
 Avant la fusion (geste de Neegan, arbre principal) : `mv ~/projects/mistu/STATE.md ~/projects/mistu/STATE.avant-web.md`, puis § « Reste à faire », point 3.

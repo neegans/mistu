@@ -580,13 +580,19 @@ Une ligne par écart entre cette spec et ce qui a été construit (tâches 1 à 
   `signetModel(etat).hote || ''` (même décision que l'enregistrement : rognage, longueur) ; la garde `recue` exige
   `query.adresse.trim() !== ''` ; la bannière est volontairement statique (« reçue » = l'adresse telle qu'arrivée).
   Coût si faux : aucun.
-- **R-WEB-9** (revue de branche, vague finale ; amende § 5.4.1 et R-WEB-2) quand le champ a changé depuis la dernière
-  analyse, `lancer` le relit puis y **réunit** les restrictions affichées juste avant la tape : `diets`, `exclude`,
-  `exclude_text` (sans doublon, les anciennes d'abord, puis les nouvelles absentes) et le `type` précédent si la
-  nouvelle analyse n'en a pas ; un ingrédient exclu ne reste pas « avec » (même règle que `parseQuery`). La frappe
-  n'assouplit jamais une restriction : seule la croix d'une puce la retire. Défaut corrigé : « saumon » tapé sans
+- **R-WEB-9** (revue de branche, vague finale puis vague 2 ; amende § 5.4.1, § 5.4.3 et R-WEB-2) quand le champ a
+  changé depuis la dernière analyse, `lancer` le relit puis y **réunit** les restrictions affichées juste avant la
+  tape : `diets`, `exclude`, `exclude_text` (sans doublon, les anciennes d'abord, puis les nouvelles absentes), et le
+  `type`, `max_total_minutes` et `max_active_minutes` précédents si la nouvelle analyse n'en a pas ; un ingrédient exclu
+  ne reste pas « avec » (même règle que `parseQuery`). § 5.4.3 : la tape met l'adresse à jour **sans re-rendu**
+  (`remplacerAdresse`, `history.replaceState`, aucun `hashchange`) au lieu de `navigate(…, { replace: true })` ;
+  l'instance courante garde ses puces et son vol. Portée : les restrictions affichées survivent à la TAPE ; Entrée, changement de mode ou de case (`run()`, préexistant) réanalysent encore le champ. Défaut corrigé : « saumon » tapé sans
   Entrée, puis « + restriction : Sans gluten », puis la tape → la demande payante partait SANS « Sans gluten » et la
-  puce disparaissait. Coût si faux : une puce de trop dans une demande.
+  puce disparaissait. Vague 2 (re-revue) : la première correction réunissait bien la DEMANDE, mais la navigation de la
+  tape ré-instanciait la route depuis l'adresse (sans les puces réunies) : la puce disparaissait encore, l'écran du vol
+  et « Annuler » laissaient place à un bouton rallumé pendant l'appel payant (une seconde tape l'abandonnait et
+  repayait sans la restriction), et une issue autre que `trouve` restait cachée (R-WEB-7). Coût si faux : une puce de
+  trop dans une demande.
 - **Alignement `signetModel`** (revue de branche, vague finale) : le titre est compté en **points de code**, comme
   `borner` qui préremplit le champ (151 emoji et plus passaient la borne de 300 du préremplissage puis étaient refusés
   « Titre trop long. ») ; l'adresse reste comptée par `href.length` (ASCII après `new URL`). Même vague : `run()` passe
@@ -619,4 +625,4 @@ Une ligne par écart entre cette spec et ce qui a été construit (tâches 1 à 
   textes `indisponible` passent par `t(cle)` avec une variable : aucune lecture du source ne les voit). `VERSION` est
   épinglée par le motif `v0\.5\.0-\d+` dans trois suites, pas par une valeur exacte ; la valeur réelle de clôture est
   aux § 8 et § 9.8. Total épinglé à la clôture : **1752** (`tests/tests.js`), suite 1753/1753 ; après la vague finale :
-  **1760**, suite 1761/1761. Coût si faux : aucun.
+  **1760**, suite 1761/1761 ; après la vague 2 : **1764**, suite 1765/1765. Coût si faux : aucun.

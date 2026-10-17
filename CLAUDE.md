@@ -473,7 +473,7 @@ de code, Cc/Cf retirés) arrivent à l'écran. Les rulings, une ligne chacun (d�
 - **R-WEB-6** un 403 est lu comme le 400 : « web search … not enabled / disabled » → `recherche_desactivee`, sinon `cle_refusee`.
 - **R-WEB-7** K1 pour `trouve` seulement ; les écrans sans « Réessayer » offrent « Chercher à nouveau » (pas d'impasse après une clé corrigée).
 - **R-WEB-8** l'hôte de la bannière « Adresse reçue » vient de `signetModel` (même décision que l'enregistrement) ; une adresse d'espaces n'est pas « reçue ».
-- **R-WEB-9** champ changé sans Entrée : la tape le relit et y **réunit** les restrictions affichées (type, régimes, exclusions) — la frappe n'assouplit jamais une restriction.
+- **R-WEB-9** champ changé sans Entrée : la tape le relit et y **réunit** les restrictions affichées (type, régimes, exclusions, durées), puis met l'adresse à jour sans re-rendu (`remplacerAdresse`) : l'instance garde ses puces et son vol. Portée : les restrictions affichées survivent à la TAPE ; Entrée, changement de mode ou de case (`run()`, préexistant) réanalysent encore le champ.
 
 **Ce qui n'est PAS prouvé.** **Aucun appel réel avec la clé de Neegan** : statut et corps exacts d'un compte sans
 recherche web (400 ou 403, texte du message), forme réelle de `page_age`, de `web_search_requests`, de `pause_turn` et
@@ -511,8 +511,11 @@ choisie par « + restriction » quand le champ avait été tapé sans Entrée, e
 compte le titre en **points de code**, comme `borner` (200 emoji préremplis n'étaient plus « trop longs ») · `run()`
 passe par `requeteRoute` et le `navigate` injecté (une seule définition de l'adresse de recherche ; la dette nommée
 ci-dessus est fermée) · `construireDemande(null)` ne lève plus · en-tête de `recherche-web.js` : le « pourquoi » borné
-est I-H. Suite complète **1761/1761 verts** (total épinglé **1760**), même 404 de `/favicon.ico` seul en console ;
-`tools` 40/40 ; `--check` 0 ; `sw.js` `cuisine-os-v0.5.0-10`.
+est I-H. **Vague 2** (re-revue, même jour) : la tape ré-instanciait encore la route par `navigate` — puces réunies
+perdues à l'écran, vol masqué par un bouton rallumé (double facturation possible) ; elle passe désormais par
+`remplacerAdresse` (sans re-rendu, testé avec un faux routeur qui ré-instancie comme `app.js`), et la réunion porte
+aussi les durées. Suite complète **1765/1765 verts** (total épinglé **1764**), même 404 de `/favicon.ico` seul en
+console ; `tools` 40/40 ; `--check` 0 ; `sw.js` `cuisine-os-v0.5.0-10`.
 
 **Gestes de Neegan** (spec § 10 R2, hors code). 1) Créer la clé dans un **workspace Anthropic dédié à Cuisine OS, avec
 un plafond de dépense mensuel**, puis l'entrer dans Réglages → Assistant IA. 2) **Ne pas entrer cette clé sur le site
