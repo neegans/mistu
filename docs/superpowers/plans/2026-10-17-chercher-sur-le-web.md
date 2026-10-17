@@ -302,7 +302,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `borner` (`core/bornes.js`), `lienSignet` (`core/lien.js`), `parseJsonLoose` (`domain/llm.js`).
-- Produces: `LIMITES_WEB`, `OUTIL_RECHERCHE`, `construireDemande({ q, filtres, langue }) → { system, user, cle }`, `corpsRequete({ cfg, demande, fuseau }) → objet`, `lireReponse(json) → { resultats: [{ href, hote, titre, date }], erreursOutil: string[], aCherche, texte, stopReason, recherches }`, `choisirLiens(lu, { max }) → { liens: [{ href, hote, titre, date, pourquoi }], repli }`. La tâche 4 ajoute `chercherRecettesWeb` au même fichier.
+- Produces: `LIMITES_WEB`, `OUTIL_RECHERCHE`, `construireDemande({ q, filtres, langue }) → { system, user, cle, q, filtres }` (`q` et `filtres` **nettoyés**, ce qui part vraiment — amende la spec § 4.1, à consigner en § 11.2 comme R-WEB-1 : l'écran rappelle la demande partie, jamais la saisie brute), `corpsRequete({ cfg, demande, fuseau }) → objet`, `lireReponse(json) → { resultats: [{ href, hote, titre, date }], erreursOutil: string[], aCherche, texte, stopReason, recherches }`, `choisirLiens(lu, { max }) → { liens: [{ href, hote, titre, date, pourquoi }], repli }`. La tâche 4 ajoute `chercherRecettesWeb` au même fichier.
 
 - [ ] **Step 1 : Écrire les tests rouges (§ 9.1-9.3)**
 
@@ -322,7 +322,9 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
     eq(W.construireDemande({ q: 'saumon fenouil', filtres: ['Sans gluten', 'x'], langue: 'fr' }).cle, d.cle, 'demande : même entrée, même clé');
     ok(W.construireDemande({ q: 'saumon fenouil', filtres: ['Sans gluten'], langue: 'fr' }).cle !== d.cle, 'demande : un filtre de moins change la clé');
     eq(W.construireDemande({ q: 'x'.repeat(600), filtres: [], langue: 'fr' }).user.length, 500, 'demande : q bornée à 500 points de code');
-    eq(W.construireDemande({ q: '\u{200B}\u{200B}', filtres: [], langue: 'fr' }), { system: null, user: null, cle: null }, 'demande : une demande faite de Cf est vide → aucune clé');
+    eq(W.construireDemande({ q: '\u{200B}\u{200B}', filtres: [], langue: 'fr' }), { system: null, user: null, cle: null, q: '', filtres: [] }, 'demande : une demande faite de Cf est vide → aucune clé');
+    eq([d.q, d.filtres], ['saumon fenouil', ['Sans gluten', 'x']], 'demande : q et filtres NETTOYÉS sont rendus (c’est eux que l’écran rappelle — R-WEB-1)');
+    eq(W.construireDemande({ q: 'x'.repeat(600) + '\u{202E}', filtres: [], langue: 'fr' }).q.length, 500, 'demande : le q rendu est borné et sans bidi');
     ok(/recipe/i.test(W.construireDemande({ q: 'salmon', filtres: [], langue: 'en' }).system) && !/recette/i.test(W.construireDemande({ q: 'salmon', filtres: [], langue: 'en' }).system), 'demande : system anglais quand la langue n’est pas fr');
     ok(/restriction/i.test(d.system) && /JSON/.test(d.system) && /choix/.test(d.system), 'demande : le system interdit d’affirmer une restriction et exige le JSON choix (I-K)');
     eq(W.construireDemande({ q: 'a', filtres: Array.from({ length: 20 }, (_, i) => `f${i}`), langue: 'fr' }).user.split(' ; ').length, 12, 'demande : douze filtres au plus');
@@ -366,7 +368,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
     eq(W.choisirLiens({ ...lu, texte: 'pas du json' }), { liens: lu.resultats.map((r) => ({ ...r, pourquoi: null })), repli: true }, 'choix : JSON illisible → repli, les résultats tels quels');
     eq(W.choisirLiens({ ...lu, texte: '{"choix":[]}' }).repli, true, 'choix : choix vide → repli');
     eq(W.choisirLiens({ ...lu, texte: '{"choix":[null,3,{},{"url":5}]}' }).repli, true, 'choix : entrées hostiles ignorées sans lever (S13)');
-    eq(W.choisirLiens({ ...lu, texte: '{x} puis {"choix":[{"url":"https://zz.test/x"}]}' }).liens.some((l) => l.href.includes('zz.test')), false, 'choix : prose avant le JSON → jamais une adresse hors résultats');
+    eq(W.choisirLiens({ ...lu, texte: '{x} puis {"choix":[{"url":"https://a.test/r1"}]}' }).repli, true, 'choix : une accolade parasite dans la prose rend le JSON illisible → repli (même avec une adresse valide dedans)');
     {
       const sept = { resultats: Array.from({ length: 7 }, (_, i) => ({ href: `https://s${i}.test/`, hote: `s${i}.test`, titre: `S${i}`, date: null })), texte: '{"choix":' + JSON.stringify(Array.from({ length: 7 }, (_, i) => ({ url: `https://s${i}.test/`, pourquoi: 'p' }))) + '}' };
       eq(W.choisirLiens(sept).liens.length, 5, 'choix : cinq liens au plus');
@@ -422,9 +424,10 @@ export function construireDemande({ q, filtres, langue } = {}) {
   const demande = borner(q, LIMITES_WEB.demande).trim();
   const propres = (Array.isArray(filtres) ? filtres : []).map((f) => borner(f, LIMITES_WEB.filtre).trim()).filter(Boolean).slice(0, LIMITES_WEB.filtres);
   const lang = langue === 'fr' ? 'fr' : 'en';
-  if (!demande) return { system: null, user: null, cle: null };
+  if (!demande) return { system: null, user: null, cle: null, q: '', filtres: [] };
   const user = propres.length ? `${demande}\n${lang === 'fr' ? 'Contraintes' : 'Constraints'} : ${propres.join(' ; ')}` : demande;
-  return { system: SYSTEM[lang], user, cle: JSON.stringify([demande, propres, lang]) };
+  // q et filtres rendus = NETTOYÉS : l'écran rappelle ce qui est parti, jamais la saisie brute (I-J, R-WEB-1).
+  return { system: SYSTEM[lang], user, cle: JSON.stringify([demande, propres, lang]), q: demande, filtres: propres };
 }
 
 export function corpsRequete({ cfg, demande, fuseau } = {}) {
@@ -913,15 +916,18 @@ Avant `render();` (l. 96), ajouter les fonctions de la recherche web (closures s
   const textesDesPuces = () => chipsFor(state.parsed.filters).map((c) => libellePuce(c, ctx.ingredientsById));
   const demandeCourante = () => construireDemande({ q: state.q, filtres: textesDesPuces(), langue: getUiLocale() });
   const requeteRoute = () => '/search' + buildQuery({ q: state.q, mode: state.mode, fav: state.favorites ? 1 : '', cooked: state.cooked ? 1 : '', any: state.requireAll ? '' : 1, for: query.for || '', role: role || '' });
-  // § 5.4 : le champ est RELU (I-J), le vol précédent abandonné (I-I), le nouveau posé au module, puis la route rejouée
-  // en replace (elle se ré-instancie et retrouve le vol par sa clé). « Réessayer » passe depsForces = { enLigne: () => true }.
+  // § 5.4 : le champ est RELU s'il a changé depuis la dernière analyse (I-J) — s'il n'a pas changé, les puces ajoutées
+  // par les listes « + type » / « + restriction » ou retirées à la main RESTENT ce qu'elles sont à l'écran (R-WEB-2 : une
+  // relecture inconditionnelle les écrasait). Puis le vol précédent est abandonné (I-I), le nouveau posé au module, et la
+  // route rejouée en replace (elle se ré-instancie et retrouve le vol par sa clé). « Réessayer » passe { enLigne: () => true }.
   const lancer = (depsForces = {}) => {
-    state.q = input.value.trim(); state.parsed = parseQuery(state.q); if (forRecipe && role) state.parsed.filters.type = role;
+    const champ = input.value.trim();
+    if (champ !== state.q) { state.q = champ; state.parsed = parseQuery(champ); if (forRecipe && role) state.parsed.filters.type = role; }
     const demande = demandeCourante();
     if (!demande.cle) { render(); return; }
     vol?.controller.abort();
     const controller = new AbortController();
-    const cle = demande.cle; const q = state.q; const filtres = textesDesPuces();
+    const cle = demande.cle; const q = demande.q; const filtres = demande.filtres; // nettoyés : ce qui part (R-WEB-1)
     const promesse = Promise.resolve()
       .then(() => chercher({ q, filtres, langue: getUiLocale(), cfg: ctx.settings?.llm }, { enLigne, signal: controller.signal, ...depsForces }))
       .catch(() => ISSUE_INTERNE)
@@ -937,6 +943,7 @@ Avant `render();` (l. 96), ajouter les fonctions de la recherche web (closures s
   };
   const annuler = () => { vol?.controller.abort(); vol = null; render(); };
   function renderWeb() {
+    for (const v of [...vues]) if (!v.root.isConnected) vues.delete(v); // borné en permanence, pas seulement à la résolution d'un vol
     vues.add({ root, redessiner: render });
     const fournisseur = providerFrom(ctx.settings);
     const reglages = () => el('a', { class: 'btn small', href: '#/settings' }, t('Réglages'));
@@ -1015,8 +1022,8 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
       const tapeEtAttend = async (root, issue) => { bouton(root, 'Chercher sur le web avec l’assistant').click(); await tick(); appels.rendre(issue); await tick(); };
       const liens = [{ href: 'https://a.test/r?x=1', hote: 'a.test', titre: '<b>Saumon</b> au fenouil', date: 'May 1, 2026', pourquoi: 'Fenouil et saumon.' }, { href: 'https://b.test/', hote: 'b.test', titre: 'b.test', date: null, pourquoi: null }];
       const trouve = { etat: 'trouve', raison: null, liens, repli: false, recherches: 2, modele: 'm' };
-      const appels = { n: 0, deps: [], rendre: null };
-      const chercher = async (a, d) => { appels.n += 1; appels.deps.push(d); return new Promise((r) => { appels.rendre = r; }); };
+      const appels = { n: 0, deps: [], args: [], rendre: null };
+      const chercher = async (a, d) => { appels.n += 1; appels.deps.push(d); appels.args.push(a); return new Promise((r) => { appels.rendre = r; }); };
       const navs = [];
       const ctx = ctxDe(ANTH);
 
@@ -1029,6 +1036,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
       eq(root.querySelectorAll('b').length, 0, 'trouve : aucun élément créé par un titre hostile');
       ok(texte(root).includes('a.test · May 1, 2026') && texte(root).includes('Fenouil et saumon.'), 'trouve : hôte, date, pourquoi');
       ok(texte(root).includes('Trouvé sur le web') && texte(root).includes('Demande envoyée : saumon fenouil'), 'trouve : titre de section et demande envoyée (I-J)');
+      ok(!texte(root).includes('\u{200B}'), 'trouve : la demande rappelée est celle qui est PARTIE, nettoyée (R-WEB-1) — voir la saisie hostile du test suivant');
       ok(texte(root).includes('L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.'), 'trouve : l’avertissement fixe est TOUJOURS là (I-K, S1)');
       ok(texte(root).includes('Recherches faites par l’assistant : 2') && !texte(root).includes('Liens tels que trouvés'), 'trouve : compte des recherches ; pas de ligne repli');
       [...root.querySelectorAll('button')].find((b) => b.textContent === 'Garder ce lien').click();
@@ -1047,6 +1055,14 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
       eq([root.querySelectorAll('a[target="_blank"]').length, S.etatWeb().memoire?.etat, appels.n], [0, 'trouve', nAvant], 'puce : ajoutée → les liens disparaissent, la mémoire reste, aucun appel');
       [...root.querySelectorAll('.chip.removable')].find((c) => c.textContent === 'Sans gluten').click();
       eq([root.querySelectorAll('a[target="_blank"]').length, appels.n], [2, nAvant], 'puce : retirée → les liens reviennent sans appel');
+      // R-WEB-2 : un filtre ajouté par la liste, champ inchangé, PART avec la tape (il n'est pas écrasé par une relecture du champ)
+      restriction.value = 'sans_gluten'; restriction.dispatchEvent(new Event('change'));
+      { const n = appels.n; bouton(root, 'Chercher sur le web avec l’assistant').click(); await tick(); const dernier = appels.args[appels.args.length - 1]; eq([appels.n, dernier.q, dernier.filtres], [n + 1, 'saumon fenouil', ['Sans gluten']], 'tape : le filtre ajouté par la liste part avec la demande, le champ inchangé n’est pas réanalysé (R-WEB-2)'); appels.rendre(trouve); await tick(); }
+      // R-WEB-3 : un « trouvé » dont aucune adresse ne survit à la revalidation au rendu replie sur l'écran « rien »
+      root.remove(); S.reinitialiserWeb();
+      root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
+      await tapeEtAttend(root, { ...trouve, liens: [{ ...liens[0], href: 'javascript:alert(1)' }] });
+      ok(!texte(root).includes('Trouvé sur le web') && texte(root).includes('Aucune page trouvée pour cette demande.'), 'trouve sans carte : pas de titre vide, écran « rien » (R-WEB-3)');
       // mode all : aucun lien web
       root.remove();
       root = await monter({ q: 'saumon fenouil', mode: 'all' }, ctx, { chercher, navigate: () => {} });
@@ -1117,14 +1133,16 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
     // trouve
     const cartes = (Array.isArray(issue.liens) ? issue.liens : []).map((lien) => {
       const l = lienSignet(lien.href);
-      if (!l.ok) return null;
+      if (!l.ok) return null; // revalidé AU RENDU (I-H) : une adresse refusée ici n'a pas de carte
       const titre = lien.titre || l.hote;
       return el('div', { class: 'card flat stack' },
         el('a', { class: 'btn', href: l.href, target: '_blank', rel: 'noopener noreferrer' }, titre),
         el('div', { class: 'muted', style: { fontSize: '.85rem' } }, lien.date ? `${l.hote} · ${lien.date}` : l.hote),
         lien.pourquoi ? el('div', null, lien.pourquoi) : null,
         el('button', { class: 'btn small', onClick: () => nav('/add/signet' + buildQuery({ adresse: l.href, titre })) }, t('Garder ce lien')));
-    });
+    }).filter(Boolean);
+    // R-WEB-3 : un « trouvé » dont aucune carte ne survit à la revalidation ne montre pas un titre sans rien dessous.
+    if (!cartes.length) return renderIssue({ ...issue, etat: 'rien' }, reglages);
     const demande = memoire?.filtres?.length ? `${memoire.q} · ${memoire.filtres.join(' ; ')}` : (memoire?.q ?? state.q);
     return section(t('Trouvé sur le web'),
       el('div', { class: 'muted' }, t('Demande envoyée : {q}', { q: demande })),
@@ -1278,14 +1296,14 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
   "Adresse reçue : vérifie-la avant d’enregistrer.": "Address received: check it before saving.",
 ```
 
-Si « Annuler » existe déjà dans `EN` (grep), ne pas la dupliquer.
+**Avant d'ajouter** : `grep -n "Annuler\|Réessayer\|'Réglages'\|Tu es hors ligne" src/i18n/en.js` — « Réessayer » (l. 151), « Réglages » (l. 4) et « Tu es hors ligne. » (l. 206) existent déjà ; si « Annuler » existe aussi, ne pas la dupliquer. Le test du step 1 vérifie 25 clés : 22 neuves (dont « Annuler » si elle manquait) + 3 existantes.
 
 - [ ] **Step 4 : `sw.js` → `cuisine-os-v0.5.0-9`. Suite complète verte ; poser le total ; relancer ; `node --test tools/*.test.mjs` 40/40 ; `--check` 0.**
 
 - [ ] **Step 5 : Docs**
   - `docs/architecture.md` : dans la carte des modules, ajouter `bornes.js` à `src/core/` et `recherche-web.js` à `src/domain/` ; étendre la ligne « Déterministe avant IA » (l. 7) : « … et sur la recherche web, où le texte de l'assistant ne peut qu'étiqueter des pages que le serveur a réellement rapportées » ; ajouter une section « ### Chercher sur le web avec l'assistant (lot du 17 octobre 2026) » après « Identifier un livre, fiable » : état de module de `search.js` (`memoire`, `vol`, `vues`), mur I-A, issues, `core/bornes.js` reçu du lot ISBN, ce qui n'est pas prouvé (appel réel, Safari).
   - `CLAUDE.md` : section « ### Chercher sur le web avec l'assistant (17 octobre 2026) » sur le modèle de « Identifier un livre, fiable » : où (branche, worktree, 8083, spec, plan, registre), ce qui marche (éprouvé par la suite, aucun réseau), ce qui n'est PAS prouvé (aucun appel réel avec la clé de Neegan ; forme réelle de la réponse ; durée ; coût ; Safari/iPhone), dettes (pays `CA` fixe, 45 s, classement du 400 par texte, `vues` purgées par `isConnected`), versions (`APP_VERSION 0.5.0`, `VERSION` réelle, deux modules dans `SHELL`), **gestes de Neegan** (workspace Anthropic dédié à plafond ; pas de clé sur le site public avant D5 ; preuve réelle Mac puis iPhone ; `! git push` après fusion).
-  - Spec § 8 : remplacer `cuisine-os-v0.5.0-1` par la `VERSION` réelle ; § 11.2 : une ligne par écart entre la spec et la construction (R-WEB-n, avec son coût si faux) — au moins : `libellePuce` = l'ancien `chipLabel` exporté ; `vues` dédoublonnées par racine ; « Résultat reçu. » provisoire remplacé en tâche 7 ; tout ce que les tâches ont amendé.
+  - Spec § 8 : remplacer `cuisine-os-v0.5.0-1` par la `VERSION` réelle ; § 11.2 : une ligne par écart entre la spec et la construction (R-WEB-n, avec son coût si faux) — au moins : **R-WEB-1** `construireDemande` rend aussi `q` et `filtres` nettoyés et l'écran rappelle ceux-là ; **R-WEB-2** la tape ne réanalyse le champ que s'il a changé (les filtres des listes et les puces retirées survivent) ; **R-WEB-3** un « trouvé » sans carte survivante replie sur « rien » ; `libellePuce` = l'ancien `chipLabel` exporté ; `vues` purgées à chaque rendu et dédoublonnées par racine ; « Résultat reçu. » provisoire remplacé en tâche 7 ; tout ce que les tâches ont amendé.
   - `STATE.md` (racine) : réécrire pour l'état de fin de lot (fini, non prouvé, reprendre, gestes de Neegan).
 
 - [ ] **Step 6 : Commit**
