@@ -16,7 +16,8 @@ import { GOOGLE_BOOKS } from '../sync/config.js';
 import { nettoyerIsbn, validerIsbn, codeBarresVersIsbn } from '../core/isbn.js';
 
 export const LIMITES_ISBN = { champ: 300, corps: 256 * 1024, delaiMs: 10000, tentativeMs: 8000, repriseMs: 1500, totalMs: 20000 };
-export const OPTIONS_FETCH = { mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' };
+import { borner as bornerCore, lireBornee, signalDelai, OPTIONS_FETCH } from '../core/bornes.js';
+export { lireBornee, signalDelai, OPTIONS_FETCH }; // ré-exportés : tests/ajouter.js et book.js les lisent ici
 // Les champs qu'une fiche distante peut remplir : ce qu'`identifier` doit pouvoir REPRENDRE à l'ISBN suivant (C3).
 export const CHAMPS_DISTANTS = ['title', 'author', 'publisher', 'year', 'language'];
 const CHAMPS_VIDES = () => ({ title: '', author: '', publisher: '', year: '', language: 'fr', convention: '', cuisines: [], tags: [] });
@@ -26,7 +27,7 @@ export { nettoyerIsbn };
 // ligne U+2028/U+2029 (catégories Zl/Zp, nommés à part — R-ISBN-1), tronquée à 300. Tout ce qui n'est pas une
 // chaîne vaut ''. Troncature par POINTS DE CODE : une paire de substitution coupée laisserait une demi-paire que le
 // jsonb refuse (quarantaine de synchro).
-const borner = (s) => (typeof s === 'string' ? Array.from(s.replace(/[\p{Cc}\p{Cf}\u{2028}\u{2029}]/gu, '')).slice(0, LIMITES_ISBN.champ).join('') : '');
+const borner = (s) => bornerCore(s, LIMITES_ISBN.champ);
 const chaines = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
 // S1 (vague /verify) : jamais String() sur une valeur reçue — un objet au toString hostile ({"toString":1}) lève
 // « Cannot convert object to primitive value ». Un nombre doit être un entier de quatre chiffres ; une chaîne est lue.
@@ -54,36 +55,6 @@ const motsClesDe = (liste) => {
   }
   return [...vus.values()];
 };
-
-// S1 : un corps distant est lu EN FLUX et la lecture est COUPÉE (reader.cancel()) dès que le cumul dépasse la borne —
-// rien de ce qui a été lu n'est conservé, et le reste du corps n'est jamais tiré. Une réponse sans `body` (vieux
-// navigateur, réponse factice d'un test) rend `false` : l'appelant replie alors sur r.text() / r.blob() et contrôle
-// la taille réelle. Une seule fonction pour les deux corps distants du lot (métadonnées JSON et octets d'image).
-export async function lireBornee(r, maxOctets) {
-  if (!r?.body || typeof r.body.getReader !== 'function') return false;
-  const lecteur = r.body.getReader();
-  const morceaux = [];
-  let octets = 0;
-  for (;;) {
-    const { done, value } = await lecteur.read();
-    if (done) break;
-    octets += value?.byteLength || 0;
-    if (octets > maxOctets) { await lecteur.cancel(); return null; } // le morceau fautif n'est même pas gardé
-    morceaux.push(value);
-  }
-  return morceaux;
-}
-
-// Délai borné (C9/S11) : AbortSignal.timeout n'existe pas partout (Safari < 16) et peut lever. Son absence ne doit
-// pas emporter l'identification : repli sur un AbortController + setTimeout, qui abandonne à la même seconde.
-export function signalDelai(ms) {
-  try {
-    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms);
-  } catch { /* repli ci-dessous */ }
-  const ctl = new AbortController();
-  setTimeout(() => ctl.abort(), ms);
-  return ctl.signal;
-}
 
 // Attente abandonnable : rend tout de suite si le signal est déjà abandonné, et dès qu'il l'est.
 export const attenteReelle = (ms, signal) => new Promise((resolve) => {

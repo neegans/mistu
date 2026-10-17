@@ -146,7 +146,7 @@ export function currentVersion(recipe, versions) {
 export function searchDocs(docs, parsed, { mode = 'all', ingredientsById, favoritesOnly = false, cookedOnly = false, editionId = null, requireAll = true } = {}) {
   const { terms, filters } = parsed;
   const groups = { admissible: [], to_verify: [], adaptation: [], references: [], incompatible: 0, time_unknown: [], excluded_by_time: 0 };
-  if (mode === 'web') return { ...groups, notice: 'Le Web n’est pas activé : aucune source externe configurée. Les résultats ci-dessous viennent de ta bibliothèque uniquement.' };
+  if (mode === 'web') return groups;
   // Mots utiles pour retrouver une référence d'index par son titre : mots de la demande, libellés FR/EN des ingrédients demandés, mots du type.
   const refTerms = new Set(tokenize(parsed.text || ''));
   for (const id of filters.include) {

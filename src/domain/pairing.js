@@ -41,7 +41,7 @@ export function findAccompaniments({ mainDoc, docs, type, parsed, ingredientsByI
     return { ...hit, rank: s, why };
   };
   const ranked = (list) => diversify(list.map(rank).sort((a, b) => b.rank - a.rank));
-  return { admissible: ranked(groups.admissible), to_verify: ranked(groups.to_verify), adaptation: ranked(groups.adaptation), time_unknown: ranked(groups.time_unknown), references: groups.references, incompatible: groups.incompatible, excluded_by_time: groups.excluded_by_time, notice: groups.notice };
+  return { admissible: ranked(groups.admissible), to_verify: ranked(groups.to_verify), adaptation: ranked(groups.adaptation), time_unknown: ranked(groups.time_unknown), references: groups.references, incompatible: groups.incompatible, excluded_by_time: groups.excluded_by_time };
 }
 
 // Évite trois propositions quasi identiques (même ingrédient dominant) dans le trio de tête.

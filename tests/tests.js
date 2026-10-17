@@ -20,6 +20,7 @@ import { runBackupTests } from './backup.js';
 import { runSyncTests } from './sync.js';
 import { runSyncL3Tests } from './sync-l3.js';
 import { runAjouterTests } from './ajouter.js';
+import { runRechercheWebTests } from './recherche-web.js';
 
 const results = [];
 const eq = (a, b, msg) => { const ok = JSON.stringify(a) === JSON.stringify(b); results.push({ ok, msg, got: a, want: b }); };
@@ -173,11 +174,15 @@ catch (error) { ok(false, `Suite L3 interrompue : ${error?.message || String(err
 try { await runAjouterTests({ eq, ok }); }
 catch (error) { ok(false, `Suite Ajouter interrompue : ${error?.message || String(error)}`); }
 
+// --- Chercher sur le web : bornes communes, lecture de la réponse, issues, écran à gestes injectés.
+try { await runRechercheWebTests({ eq, ok }); }
+catch (error) { ok(false, `Suite recherche web interrompue : ${error?.message || String(error)}`); }
+
 // --- Compte total épinglé (F2). Une assertion qui DISPARAÎT — un bloc supprimé, une boucle qui ne tourne plus, une
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 1536, 'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 1553, 'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);
