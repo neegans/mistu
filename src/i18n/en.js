@@ -269,4 +269,5 @@ export const EN = {
   "Autre mot-clé": "Other keyword",
   "Proposé par Open Library": "Suggested by Open Library",
   "Proposé par Google Books": "Suggested by Google Books",
+  "Adresse reçue : vérifie-la avant d’enregistrer.": "Address received: check it before saving.",
 };

@@ -2,6 +2,7 @@
 // L'app n'ouvre pas la page et n'en lit rien — c'est la personne qui la nomme : aucun réseau, aucune version créée (I-E).
 // L'adresse est validée dans le modèle ET à l'écriture (S13) ; la vue recette la revalide encore au rendu par
 // lienSignet (S6), parce qu'une fiche venue d'une archive ou du serveur peut porter n'importe quoi (I-G).
+import { borner } from '../core/bornes.js';
 import { el, toast } from '../core/dom.js';
 import { t, getUiLocale } from '../core/i18n.js';
 import { lienSignet } from '../core/lien.js';
@@ -99,11 +100,19 @@ export function majSignet(zone, model) {
 // I-H : les trois gestes du monde extérieur sont injectables, avec les vrais par défaut — « Garder le lien » mène
 // à la fiche de la recette créée, et c'est mesurable sans toucher à l'adresse.
 export async function renderSignetRoute(params, query, ctx, { repo: r = repo, navigate: nav = navigate, toast: dire = toast } = {}) {
-  const etat = { adresse: '', titre: '', editionId: '', cuisines: [], enCours: false };
+  // § 6 : préremplissage par la query (depuis « Garder ce lien » de la recherche web — ou un lien profond venu de
+  // l'extérieur, S4). L'adresse arrive TELLE QUELLE (jamais tronquée : trop longue, signetModel la refuse — I-A/F9) ;
+  // le titre est borné par points de code, Cc/Cf retirés (S2). Rien n'est écrit avant « Enregistrer ».
+  const recue = typeof query?.adresse === 'string' && query.adresse !== '';
+  const etat = { adresse: recue ? query.adresse : '', titre: borner(typeof query?.titre === 'string' ? query.titre : '', LIMITES_SIGNET.titre), editionId: '', cuisines: [], enCours: false };
   const livres = [{ value: '', label: t('Aucun — recette indépendante') },
     ...(ctx?.book_editions || []).map((e) => ({ value: e.id, label: libelleLivre(e, ctx?.booksById?.get(e.book_id)) }))];
   const existantes = cuisinesExistantes(ctx);
   const root = el('div', null, pageHeader(t('Garder un lien web'), { back: { href: '/add', label: t('Ajouter') } }));
+  if (recue) {
+    const lien = lienSignet(etat.adresse);
+    root.append(el('div', { class: 'status', dataset: { role: 'adresse-recue' } }, t('Adresse reçue : vérifie-la avant d’enregistrer.'), ' ', el('strong', null, lien.ok ? lien.hote : '')));
+  }
   const zone = el('div', null);
   root.append(zone);
   // Une erreur ne s'affiche pas sur un champ encore vide : l'étoile du libellé et le bouton éteint disent déjà

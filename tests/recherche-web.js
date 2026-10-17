@@ -592,4 +592,34 @@ export async function runRechercheWebTests({ eq, ok }) {
       }
     } finally { globalThis.fetch = vraiFetch; scene.remove(); S.reinitialiserWeb(); setUiLocale(localeAvant); }
   }
+  // --- § 6 signet prérempli : adresse telle quelle, titre borné, bannière + hôte, aucune écriture
+  {
+    const S = await import('../src/ui/signet.js');
+    const { withRepo } = await import('./sync-fixture.js');
+    const vraiFetch = globalThis.fetch;
+    globalThis.fetch = async (u) => { throw new Error(`aucun reseau attendu ici : ${u}`); };
+    try {
+      await withRepo(async (repo, db) => {
+        const ctx = { book_editions: [], booksById: new Map(), books: [], recipes: [] };
+        const deps = { repo, navigate: () => {}, toast: () => {} };
+        const champ = (root, libelle) => [...root.querySelectorAll('label.field')].find((f) => f.querySelector('span')?.textContent === libelle).querySelector('input');
+        const garder = (root) => root.querySelector('[data-role="enregistrer"]');
+        const banniere = (root) => root.querySelector('[data-role="adresse-recue"]');
+        const avant = (await db.getAll('recipes')).length;
+        let root = await S.renderSignetRoute({}, { adresse: 'https://exemple.test/r', titre: 'Saumon' }, ctx, deps);
+        eq([champ(root, 'Adresse *').value, champ(root, 'Titre *').value, garder(root).disabled], ['https://exemple.test/r', 'Saumon', false], 'signet prérempli : les deux champs, bouton ouvert');
+        ok(banniere(root)?.textContent.includes('Adresse reçue : vérifie-la avant d’enregistrer.') && banniere(root)?.querySelector('strong')?.textContent === 'exemple.test', 'signet prérempli : bannière + hôte recalculé en gras (S4)');
+        eq((await db.getAll('recipes')).length, avant, 'signet prérempli : aucune écriture avant Enregistrer');
+        root = await S.renderSignetRoute({}, { adresse: 'javascript:alert(1)', titre: 'X' }, ctx, deps);
+        eq([champ(root, 'Adresse *').value, root.querySelector('[data-erreur="adresse"]').textContent, banniere(root)?.querySelector('strong')?.textContent, garder(root).disabled], ['javascript:alert(1)', 'Adresse non reconnue.', '', true], 'signet prérempli : adresse refusée → montrée, erreur dite, hôte vide, bouton fermé');
+        const longue = 'https://exemple.test/' + 'a'.repeat(3000);
+        root = await S.renderSignetRoute({}, { adresse: longue, titre: 'X' }, ctx, deps);
+        eq([champ(root, 'Adresse *').value.length, root.querySelector('[data-erreur="adresse"]').textContent, garder(root).disabled], [longue.length, 'Adresse trop longue.', true], 'signet prérempli : une adresse trop longue n’est JAMAIS tronquée — refusée (I-A, F9)');
+        root = await S.renderSignetRoute({}, { adresse: 'https://exemple.test/r', titre: 't'.repeat(400) + '\u{202E}' }, ctx, deps);
+        eq([champ(root, 'Titre *').value.length, champ(root, 'Titre *').value.includes('\u{202E}')], [300, false], 'signet prérempli : titre borné à 300 points de code sans bidi (S2)');
+        root = await S.renderSignetRoute({}, {}, ctx, deps);
+        eq([banniere(root), champ(root, 'Adresse *').value], [null, ''], 'signet sans query : aucune bannière, champ vide (comportement inchangé)');
+      });
+    } finally { globalThis.fetch = vraiFetch; }
+  }
 }
