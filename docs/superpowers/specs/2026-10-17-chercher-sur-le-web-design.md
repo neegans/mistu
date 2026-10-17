@@ -1,4 +1,4 @@
-# Chercher sur le web — design (rév. 2, 17 octobre 2026)
+# Chercher sur le web — design (rév. 2.1, 17 octobre 2026)
 
 Source : brainstorm des 16 et 17 octobre. Le 16, l'onglet « Web » de la recherche a été mesuré : coquille « Le Web n’est pas
 activé », aucune requête ne sort de l'app, « saumon fenouil » est compris (filtres saumon + fenouil) mais ne cherche que la
@@ -12,6 +12,12 @@ total épinglé 1536). Le site public ne change qu'à la fusion et au `git push`
 « (S·/F·) ». Les trois changements de fond : l'état de la recherche web vit **au niveau du module** (un seul appel en vol
 dans toute l'app, mémoire vive par demande — F2/F3/F13/F20) ; **ce qui part est ce qui est affiché** (textes des puces,
 champ relu à la tape — F1/F14/S6) ; **l'assistant ne garantit rien** sur les restrictions (avertissement fixe — S1).
+**Rév. 2.1 (17 octobre, après-midi)** : Neegan a reçu un kit de contre-proposition (`~/Downloads/mistu-claude-code-kit`, produit par un
+autre outil à partir du plan rév. 1) et a tranché : **Mistu reste personnel** (pas de passerelle serveur, clé sur l'appareil + plafond
+sur le compte — § 10 R2) ; **« Créer avec l'IA » en option = lot 2** ; **refonte visuelle = lot 3** ; un lot à la fois. Trois
+correctifs du kit entrent dans ce lot (K1-K3, § 11.1) : résultats **conservés** quand la demande change, avec mention ; **pas de
+complément automatique** à cinq liens ; **code de la raison** affiché sous le texte générique. Deux autres étaient déjà pris (R-WEB-1,
+R-WEB-2) ; le kit a aussi relevé un test de navigation faux dans le plan (corrigé) et inspiré `redirect: 'error'` sur l'appel.
 
 **Convention d'écriture.** Les textes d'interface cités entre « » sont les clés `t()` **exactes**, avec l'apostrophe
 typographique (U+2019) comme tout `en.js` ; la prose de cette spec garde l'apostrophe droite. Les messages de commit
@@ -67,7 +73,9 @@ stockage durable ou historique des résultats · recherche automatique sans tape
 (`stream`) · reprise d'un `pause_turn` (un seul appel, on lit ce qu'il a rendu) · résultats web dans le mode « Tout » ·
 filtres de domaines réglables · pays réglable (R3) · changement du modèle ou de la clé (Réglages existants) · plafond de
 dépense côté app (le mur est côté compte : § 10 R2) · Safari/iPhone (aucun WebKit ici ; preuve par Neegan) · D5
-(sous-domaine), nommé en § 10 comme préalable à la clé sur le site public (S7).
+(sous-domaine), nommé en § 10 comme préalable à la clé sur le site public (S7) · **passerelle serveur à clé commune** (Mistu reste
+personnel, décision du 17 octobre) · **mode « Créer avec l'IA »** (lot 2, en option, sur les versions de recette existantes) ·
+**refonte visuelle** ivoire/tomate du kit (lot 3) · **images des sites sources** (relais à défendre contre les requêtes internes).
 
 ## 3. Invariants
 
@@ -91,9 +99,11 @@ dépense côté app (le mur est côté compte : § 10 R2) · Safari/iPhone (aucu
 - **I-F Issues distinctes.** « Rien trouvé » n'est dit que si **une recherche a eu lieu** et n'a rapporté aucune page
   (F10). Tout le reste est « indisponible », avec la raison la plus précise connue — y compris « l'assistant n'a pas
   cherché ».
-- **I-G Mémoire vive seulement.** Les issues vivent dans la mémoire du module `search.js`, **jamais** en base, ni dans
-  une archive, ni au serveur. Elles meurent au rechargement. Une issue n'est montrée que sous **la demande exacte** qui
-  l'a produite (clé § 5.1) : changer la demande ou une puce la cache (F13/S5).
+- **I-G Mémoire vive seulement.** La dernière issue vit dans la mémoire du module `search.js`, **jamais** en base, ni dans
+  une archive, ni au serveur ; elle meurt au rechargement. Elle reste **affichée tant qu'une nouvelle recherche n'a pas
+  abouti**, toujours avec la demande qui l'a produite (« Demande envoyée : … ») ; si la demande courante (texte ou puces)
+  diffère, l'écran le dit : « La demande a changé depuis cette recherche. » (K1 : le kit a convaincu que cacher les liens à
+  chaque puce touchée est plus brutal qu'utile ; S5 reste couvert par la mention et par la ligne de la demande).
 - **I-H Rendu sûr.** Tout texte passe par `el()` (nœuds texte, jamais `innerHTML`). Chaque adresse est revalidée **au
   rendu** par `lienSignet`. **Titre et date d'un résultat sont bornés** (300 et 40 points de code, Cc/Cf et U+2028/2029
   retirés — F8/S2) ; « pourquoi » à 200.
@@ -168,11 +178,12 @@ d'interface. **Aucune fonction de ce module ne lève** vers l'appelant : `cherch
    ignorée (S13). Pour chaque entrée : `href = lienSignet(url).href` ; gardée **seulement si** un résultat de
    `lu.resultats` a exactement ce `href`. Titre, hôte et date viennent **du résultat**. `pourquoi = borner(pourquoi, 200)`
    ou `null`. Dédoublonnage par `href`, ordre des choix.
-2. **Complément** (F21) : après les choix survivants, les résultats restants dans l'ordre du serveur, `pourquoi: null`,
-   jusqu'à `max`. Ainsi l'écran montre toujours jusqu'à 5 pages quand le serveur en a rapporté 5.
+2. **Pas de complément automatique** (K1 du kit, remplace F21) : `liens` = les choix survivants seulement, `max` au plus.
+   Les résultats restants, dans l'ordre du serveur et `pourquoi: null`, vont dans **`autres`** : l'écran les offre repliés
+   (« Autres pages trouvées ({n}) »). Remplir une sélection de deux pages avec trois moins pertinentes la diluait.
 3. `repli = true` seulement si **aucun** choix n'a survécu (JSON illisible, `choix` absent ou vide, aucune adresse
-   retrouvée) : la liste est alors purement celle du serveur.
-4. Chaque lien rendu : `{ href, hote, titre, date, pourquoi }`. Titre vide → `hote`.
+   retrouvée) : `liens` = les `max` premiers résultats tels quels, `autres` = le reste.
+4. Retour `{ liens, autres, repli }`. Chaque lien rendu : `{ href, hote, titre, date, pourquoi }`. Titre vide → `hote`.
 
 ### 4.5 `chercherRecettesWeb({ q, filtres, langue, cfg }, deps = {})` → issue (ne lève jamais)
 
@@ -181,7 +192,8 @@ f(url, options)` — F11), `enLigne` (défaut `() => navigator.onLine !== false`
 trois recherches côté serveur prennent couramment 10 à 30 s — R6), `corpsMax` (défaut 2 Mio : `encrypted_content` est
 volumineux), `corpsErreurMax` (défaut 64 Kio), `fuseau` (§ 4.2), `signal` (un `AbortSignal` **extérieur**, posé par
 l'écran — I-I ; combiné au délai : `signalDelai(tentativeMs)` et `signal` abandonnent tous deux la requête). Options
-réseau : `{ ...OPTIONS_FETCH, method: 'POST', headers: anthropicHeaders(cfg.api_key), body, signal }`.
+réseau : `{ ...OPTIONS_FETCH, method: 'POST', redirect: 'error', headers: anthropicHeaders(cfg.api_key), body, signal }` (G2 :
+la clé ne suit jamais une redirection).
 
 Issues, dans cet ordre de décision (la première condition vraie gagne) :
 
@@ -206,10 +218,10 @@ Issues, dans cet ordre de décision (la première condition vraie gagne) :
 | `indisponible` | `interrompu` | aucun résultat et `stopReason` ∈ {`pause_turn`, `max_tokens`} (F10). |
 | `indisponible` | `pas_cherche` | aucun résultat et `aCherche` faux (l'assistant a répondu de mémoire — R4, F10). |
 | `rien` | — | `aCherche` vrai, aucun résultat (listes vides). |
-| `trouve` | — | au moins un résultat → `liens` par § 4.4. Une erreur d'outil ou un `pause_turn` **après** des résultats est ignoré. |
+| `trouve` | — | au moins un résultat → `liens` et `autres` par § 4.4. Une erreur d'outil ou un `pause_turn` **après** des résultats est ignoré. |
 | `indisponible` | `interne` | toute exception inattendue (filet `try/catch` autour de tout) ; `logError('web_recherche', { raison })` **sans aucun champ de `cfg`** (S10/F12). |
 
-Retour : `{ etat, raison, liens, repli, recherches, modele: cfg?.model ?? null }`. `liens` est `[]` hors `trouve`.
+Retour : `{ etat, raison, liens, autres, repli, recherches, modele: cfg?.model ?? null }`. `liens` et `autres` sont `[]` hors `trouve`.
 **Aucun texte de l'API n'est recopié dans l'issue** (I-C) : les corps d'erreur servent au classement, pas à l'écran.
 
 ## 5. Écran — mode Web de `src/ui/search.js`
@@ -231,9 +243,10 @@ export function reinitialiserWeb() { vol?.controller.abort(); vol = null; memoir
 - La **clé courante** d'une instance = `construireDemande({ q: state.q, filtres: textesDesPuces(), langue }).cle`,
   recalculée à chaque redessin du mode Web. `textesDesPuces()` = `chipsFor(state.parsed.filters).map((c) =>
   libellePuce(c, ctx.ingredientsById))`, **la même fonction** que celle qui dessine les puces (§ 7.3, I-J).
-- Au redessin : si `vol && vol.cle === cle` → écran « en cours » (§ 5.4) ; sinon si `memoire && memoire.cle === cle` →
-  écran de l'issue (§ 5.5-5.7) ; sinon → écran du bouton (§ 5.3). Une puce retirée ou ajoutée change la clé : l'issue
-  disparaît de l'écran sans être perdue (revenir à la même demande la remontre sans appel — F20).
+- Au redessin : si `vol && vol.cle === cle` → écran « en cours » (§ 5.4) ; sinon si `memoire` existe → écran de l'issue
+  (§ 5.5-5.7), avec la mention « La demande a changé depuis cette recherche. » quand `memoire.cle !== cle` (K1) ; sinon →
+  écran du bouton (§ 5.3). Une puce touchée ou un mot ajouté ne fait donc pas disparaître les liens : il le dit, et
+  « Chercher à nouveau » repart avec la demande courante.
 - Chaque instance pose son callback dans `vues` au rendu et le retire quand son nœud racine n'est plus connecté
   (vérifié au moment de notifier : `root.isConnected`).
 
@@ -275,12 +288,15 @@ règle que § 4.1), sous-ligne `muted` « Une recherche = un appel à ton compte
 ### 5.5 Issue `trouve`
 
 Section « Trouvé sur le web » : ligne `muted` « Demande envoyée : {q} » (+ « · » + filtres joints par « ; » s'il y en a —
-I-J) ; puis une carte par lien : `a` (`class btn`, `href = lien.href`, `target="_blank"`, `rel="noopener noreferrer"`)
-avec le titre ; ligne `muted` hôte (+ « · » + date si connue) ; `pourquoi` si présent ; bouton « Garder ce lien » →
-`deps.navigate('/add/signet' + buildQuery({ adresse: lien.href, titre: lien.titre }))` (F4). Sous la liste, **toujours** :
-`status` « L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner. » (S1/I-K) ;
-« Recherches faites par l’assistant : {n} » si `recherches` connu ; « Liens tels que trouvés, sans tri de l’assistant. »
-si `repli`. Puis le bouton « Chercher à nouveau » (= tape, § 5.4).
+I-J) ; si `memoire.cle !== cle` : `status` « La demande a changé depuis cette recherche. » (K1) ; puis une carte par lien de
+`liens` : `a` (`class btn`, `href = lien.href`, `target="_blank"`, `rel="noopener noreferrer"`) avec le titre ; ligne `muted`
+hôte (+ « · » + date si connue) ; `pourquoi` si présent ; bouton « Garder ce lien » → `deps.navigate('/add/signet' +
+buildQuery({ adresse: lien.href, titre: lien.titre }))` (F4). Si `autres` n'est pas vide : `details` dont le `summary` dit
+« Autres pages trouvées ({n}) », une ligne par page (même `a`, hôte, « Garder ce lien »), repliées par défaut (K2). Sous la
+liste, **toujours** : `status` « L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de
+cuisiner. » (S1/I-K) ; « Recherches faites par l’assistant : {n} » si `recherches` connu ; « Liens tels que trouvés, sans
+tri de l’assistant. » si `repli`. Puis le bouton « Chercher à nouveau » (= tape, § 5.4). Un « trouvé » dont aucune carte ne
+survit à la revalidation au rendu se rend comme `rien` (R-WEB-3).
 
 ### 5.6 Issue `rien` et issue `indisponible`
 
@@ -291,7 +307,9 @@ si `repli`. Puis le bouton « Chercher à nouveau » (= tape, § 5.4).
   « Réglages » ; `trop_de_demandes` : « Trop de demandes pour l’instant. Réessaie dans une minute. » ; `refus` :
   « L’assistant a refusé cette demande. » ; `pas_cherche` : « L’assistant n’a pas cherché sur le web. Réessaie. » ;
   `requete` quand la demande est vide : « Écris d’abord ce que tu cherches. » ; toute autre raison (`delai`, `reseau`,
-  `requete`, `serveur`, `reponse_illisible`, `outil`, `interrompu`, `interne`) : « L’assistant n’a pas répondu. Réessaie. ».
+  `requete`, `serveur`, `reponse_illisible`, `outil`, `interrompu`, `interne`) : « L’assistant n’a pas répondu. Réessaie. »,
+  suivi d'une ligne `small.muted` « Code : {c} » (clé existante) portant la `raison` (K3 : des causes distinctes restent
+  distinguables pour les rapports de Neegan, sans recopier le fournisseur).
 - « Réessayer » accompagne toutes les raisons sauf `cle_refusee`, `recherche_desactivee` et `refus`. Il refait § 5.4 avec
   `depsForces = { enLigne: () => true }`.
 - `annule` n'est jamais rendue (§ 5.4.4).
@@ -361,8 +379,8 @@ puce dit.
   n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA. » · « La recherche web n’est pas activée sur ton compte
   Anthropic. » · « Trop de demandes pour l’instant. Réessaie dans une minute. » · « L’assistant a refusé cette
   demande. » · « L’assistant n’a pas cherché sur le web. Réessaie. » · « L’assistant n’a pas répondu. Réessaie. » ·
-  « Adresse reçue : vérifie-la avant d’enregistrer. ». Existantes (vérifiées) : « Réessayer », « Réglages », « Tu es hors
-  ligne. ». **Retirée** de `src/ui/search.js` l. 60 et de `en.js` l. 17 : « Le Web n’est pas activé : aucune source
+  « Adresse reçue : vérifie-la avant d’enregistrer. » · « La demande a changé depuis cette recherche. » · « Autres pages
+  trouvées ({n}) ». Existantes (vérifiées) : « Réessayer », « Réglages », « Tu es hors ligne. », « Code : {c} ». **Retirée** de `src/ui/search.js` l. 60 et de `en.js` l. 17 : « Le Web n’est pas activé : aucune source
   externe n’est configurée. Aucune recherche extérieure n’a été faite. » (aucun test ne la cite — vérifié).
 - CSP : inchangée (I-D). `index.html` n'est pas touché.
 - Docs : `docs/architecture.md` (modules `recherche-web.js` et `bornes.js`, rulings W-1…W-8, « déterministe avant IA »
@@ -381,12 +399,12 @@ appellent `reinitialiserWeb()` avant chaque cas et lisent `etatWeb()` comme **fa
   `erreursOutil`, `aCherche` vrai ; liste vide → 0 résultat, `aCherche` vrai ; aucun bloc outil → `aCherche` faux ;
   `usage` absent → `recherches: null` ; deux blocs `text` « {"choix":[{"url":"ht » + « tps://…"}]} » → `texte` recollé
   sans saut de ligne (F7) ; `content` racine non tableau → résultats vides sans lever ; entrée `null` ignorée.
-- **9.2 `choisirLiens`.** 3 choix dont un `url` hors résultats, sur 5 résultats → **5** liens : les 2 choix survivants
-  d'abord (titres **des résultats**, `pourquoi` posé), puis les 3 résultats restants dans l'ordre du serveur
-  (`pourquoi: null`), `repli: false` (F21) ; choix avec `user:pass@` → `href` sans identifiants et retrouvé ; `pourquoi`
-  de 300 points de code avec un U+200B → 200, sans Cc/Cf ; JSON illisible → `repli: true` et 5 premiers résultats ;
-  `choix: []` → repli ; `choix: [null, 3, {}]` → repli sans lever (S13) ; 7 choix valides → 5 ; doublon de choix → 1 ;
-  prose « {x} puis {json} » → repli ou choix lus, **jamais** une adresse hors résultats.
+- **9.2 `choisirLiens`.** 3 choix dont un `url` hors résultats, sur 4 résultats → `liens` = les 2 choix survivants dans
+  l'ordre des choix (titres **des résultats**, `pourquoi` posé), `autres` = les 2 résultats restants dans l'ordre du serveur
+  (`pourquoi: null`), `repli: false` (K2) ; choix avec `user:pass@` → `href` sans identifiants et retrouvé ; `pourquoi`
+  de 300 points de code avec un U+200B → 200, sans Cc/Cf ; JSON illisible → `repli: true`, `liens` = 5 premiers résultats,
+  `autres` = le reste ; `choix: []` → repli ; `choix: [null, 3, {}]` → repli sans lever (S13) ; 7 choix valides → `liens` 5,
+  `autres` 2 ; doublon de choix → 1 ; prose « {x} puis {json} » → repli.
 - **9.3 `construireDemande` et `corpsRequete`.** `q` de 600 points de code → 500 ; `filtres` ['Sans gluten', '', 'x'] →
   `user` contient « Contraintes : Sans gluten ; x » ; `q` fait de U+200B → `cle: null` ; `langue: 'en'` → `system`
   anglais (F18) ; `cle` identique pour deux appels aux mêmes arguments, différente si un filtre change ;
@@ -425,9 +443,10 @@ appellent `reinitialiserWeb()` avant chaque cas et lisent `etatWeb()` comme **fa
   `/add/signet?adresse=…&titre=…` encodés ; `repli` → ligne « Liens tels que trouvés… » ; `rien` → texte + « Réessayer »
   qui rappelle `chercher` avec `enLigne()` vrai (S9) ; `indisponible` × 8 raisons → le bon texte, « Réessayer » absent
   pour `cle_refusee`/`recherche_desactivee`/`refus`, lien Réglages présent pour les deux premières ; `chercher` qui
-  **lève** → `indisponible`/`interne`, « L’assistant n’a pas répondu. Réessaie. », `enCours` faux (F12) ; **puce retirée**
-  après `trouve` → les liens disparaissent, la mémoire reste (F13/S5) ; puce remise → les liens réapparaissent **sans
-  appel** (F20) ; **nouvelle instance** rendue avec la même `ctx` et la même `q` → les liens de la mémoire, 0 appel
+  **lève** → `indisponible`/`interne`, « L’assistant n’a pas répondu. Réessaie. », `enCours` faux (F12) ; **puce ajoutée**
+  après `trouve` → les liens RESTENT, la mention « La demande a changé depuis cette recherche. » apparaît, aucun appel (K1) ;
+  puce retirée → la mention disparaît, aucun appel ; `autres` non vide → `details` « Autres pages trouvées ({n}) » replié avec
+  ses liens (K2) ; raison `delai` → « Code : delai » sous le texte générique (K3) ; **nouvelle instance** rendue avec la même `ctx` et la même `q` → les liens de la mémoire, 0 appel
   (F3) ; mode `all` avec la même `q` → aucun lien web ; **aucun `innerHTML`** (un titre `<b>x</b>` rendu littéralement).
   `run()` n'est pas invoqué par ces tests (il appelle `location.replace` sur la page de tests) : la ré-instanciation est
   simulée en appelant `renderSearch` une seconde fois (F3).
@@ -481,13 +500,16 @@ appellent `reinitialiserWeb()` avant chaque cas et lisent `etatWeb()` comme **fa
   lecture de l'hôte par la personne.
 - **R10 Classement des erreurs par texte (S12).** Le 400 « not enabled » est reconnu par `error.message` ; un libellé
   changé le fait retomber dans `requete` (texte générique, pas faux). Un 403 est dit « refusée, ou n’a pas ce droit ».
+- **R11 Décisions du 17 octobre (kit).** Mistu reste **personnel** : pas de passerelle serveur ni de clé commune ; la clé sur
+  l'appareil et le plafond de dépense du compte restent le mur. « Créer avec l'IA » (en option, sur les versions de recette
+  existantes et leur provenance) = **lot 2** ; refonte visuelle (références du kit) = **lot 3**. Un lot à la fois.
 - **Non prouvé par la construction** : un appel réel avec la clé de Neegan (statut et corps exacts d'un compte sans
   recherche web ; forme réelle de `page_age`, `web_search_requests`, `pause_turn`, `refusal` ; taille réelle du corps ;
   durée ; coût) ; `target=_blank` et `navigator.onLine` depuis une PWA installée sur iPhone ; Safari.
 
 ## 11. Traçabilité des revues
 
-### 11.1 Constats et réponses (rév. 1 → rév. 2)
+### 11.1 Constats et réponses (rév. 1 → rév. 2, puis kit → rév. 2.1)
 
 | Constat | Sévérité | Réponse |
 |---|---|---|
@@ -519,6 +541,11 @@ appellent `reinitialiserWeb()` avant chaque cas et lisent `etatWeb()` comme **fa
 | F20 pas d'`aria-live`, pas d'annulation, retour arrière repaie | Mineur | § 5.4.6 `role="status"` + « Annuler » ; mémoire par demande (F20) |
 | F21 dédoublonnage et « un seul choix survit » | Mineur | § 4.3 égalité exacte voulue ; § 4.4 complément par les résultats restants |
 | F22 ordre des tâches, imports, `q`, `refus` avec résultats | Mineur | plan séparé (writing-plans) ; § 5.4 définit `q` ; § 4.5 `refus` avant `trouve` |
+| K1 (kit) cacher les liens à chaque puce touchée est brutal | Important | I-G, § 5.1, § 5.5 : liens conservés + « La demande a changé depuis cette recherche. » |
+| K2 (kit) compléter à cinq dilue la sélection | Important | § 4.4 `autres` repliés « Autres pages trouvées ({n}) », plus de complément |
+| K3 (kit) causes distinctes écrasées par un texte générique | Mineur | § 5.6 « Code : {c} » sous le texte générique |
+| G1 (kit) test de navigation du plan comptait la navigation de `lancer()` | Mineur | plan T7 : navigations vers `/add/signet` comptées à part |
+| G2 (kit) la clé pouvait suivre une redirection | Mineur | § 4.5 / plan T4 : `redirect: 'error'` sur l'appel Anthropic |
 
 ### 11.2 Ce que la construction a amendé
 
