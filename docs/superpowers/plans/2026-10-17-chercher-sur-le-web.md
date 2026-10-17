@@ -1046,7 +1046,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
         const r0 = await monter({ q: 'saumon\u{200B} fenouil' }, ctx, { chercher, navigate: () => {} });
         const n = appels.n;
         bouton(r0, 'Chercher sur le web avec l’assistant').click(); await tick();
-        eq(appels.args[appels.args.length - 1].q, 'saumon\u{200B} fenouil', 'tape : q brut passé au module (le module nettoie)');
+        eq(appels.args[appels.args.length - 1].q, 'saumon fenouil', 'tape : le q NETTOYÉ (construireDemande) est passé au module — ce qui part est ce qui sera rappelé (R-WEB-1)');
         appels.rendre(trouve); await tick();
         ok(texte(r0).includes('Demande envoyée : saumon fenouil') && !texte(r0).includes('\u{200B}'), 'trouve : la demande rappelée est celle qui est PARTIE, nettoyée (R-WEB-1)');
         eq(appels.n, n + 1, 'tape : un seul appel pour cette saisie');
