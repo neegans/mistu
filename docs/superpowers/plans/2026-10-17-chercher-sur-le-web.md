@@ -546,7 +546,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
     eq(appels[0].self, undefined, 'appel : fetch est appelé comme fonction libre, sans this (F11)');
     eq(appels[0].url, 'https://api.anthropic.com/v1/messages', 'appel : l’URL Messages, sans la clé');
     ok(!appels[0].url.includes(CLE), 'appel : la clé n’est pas dans l’adresse');
-    eq([appels[0].options.method, appels[0].options.headers['x-api-key'], appels[0].options.headers['anthropic-dangerous-direct-browser-access'], appels[0].options.credentials, appels[0].options.cache, appels[0].options.referrerPolicy, appels[0].options.mode], ['POST', CLE, 'true', 'omit', 'no-store', 'no-referrer', 'cors'], 'appel : en-têtes et options réseau du lot ISBN');
+    eq([appels[0].options.method, appels[0].options.headers['x-api-key'], appels[0].options.headers['anthropic-dangerous-direct-browser-access'], appels[0].options.credentials, appels[0].options.cache, appels[0].options.referrerPolicy, appels[0].options.mode, appels[0].options.redirect], ['POST', CLE, 'true', 'omit', 'no-store', 'no-referrer', 'cors', 'error'], 'appel : en-têtes et options réseau du lot ISBN, et redirect error (la clé ne suit jamais une redirection)');
     ok(appels[0].options.signal instanceof AbortSignal, 'appel : un signal d’abandon est posé');
     {
       const corps = JSON.parse(appels[0].options.body);
@@ -646,7 +646,8 @@ export async function chercherRecettesWeb({ q, filtres, langue, cfg } = {}, deps
     try {
       let r;
       try {
-        r = await f(ANTHROPIC_MESSAGES_URL, { ...OPTIONS_FETCH, method: 'POST', headers: anthropicHeaders(cfg.api_key), body: JSON.stringify(corpsRequete({ cfg, demande, fuseau })), signal: ctl.signal });
+        // redirect: 'error' — l'en-tête x-api-key ne doit JAMAIS suivre une redirection vers un autre hôte (I-C).
+        r = await f(ANTHROPIC_MESSAGES_URL, { ...OPTIONS_FETCH, method: 'POST', redirect: 'error', headers: anthropicHeaders(cfg.api_key), body: JSON.stringify(corpsRequete({ cfg, demande, fuseau })), signal: ctl.signal });
       } catch { return issue('indisponible', ctl.signal.aborted ? motifAbandon() : 'reseau'); }
       if (!r || typeof r.status !== 'number') return issue('indisponible', 'interne');
       if (r.status === 401 || r.status === 403) return issue('indisponible', 'cle_refusee');
@@ -1049,9 +1050,12 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
       }
       ok(texte(root).includes('L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.'), 'trouve : l’avertissement fixe est TOUJOURS là (I-K, S1)');
       ok(texte(root).includes('Recherches faites par l’assistant : 2') && !texte(root).includes('Liens tels que trouvés'), 'trouve : compte des recherches ; pas de ligne repli');
+      // lancer() a déjà navigué une fois (replace vers /search?…) : on compte les navigations vers le signet, pas le total.
+      const avantGarder = navs.filter((p) => p.startsWith('/add/signet')).length;
       [...root.querySelectorAll('button')].find((b) => b.textContent === 'Garder ce lien').click();
-      eq(navs.length, 1, 'garder : navigate appelé une fois');
-      { const [chemin, qs] = navs[0].split('?'); const p = new URLSearchParams(qs); eq([chemin, p.get('adresse'), p.get('titre')], ['/add/signet', 'https://a.test/r?x=1', '<b>Saumon</b> au fenouil'], 'garder : route signet préremplie, adresse et titre encodés'); }
+      const versSignet = navs.filter((p) => p.startsWith('/add/signet'));
+      eq([avantGarder, versSignet.length], [0, 1], 'garder : une seule navigation vers le signet, après le clic seulement');
+      { const [chemin, qs] = versSignet[0].split('?'); const p = new URLSearchParams(qs); eq([chemin, p.get('adresse'), p.get('titre')], ['/add/signet', 'https://a.test/r?x=1', '<b>Saumon</b> au fenouil'], 'garder : route signet préremplie, adresse et titre encodés'); }
       ok(!!bouton(root, 'Chercher à nouveau'), 'trouve : « Chercher à nouveau » présent');
       // Mémoire par clé (F13/S5/F20) : une nouvelle instance avec la même demande montre les liens SANS appel
       root.remove();
