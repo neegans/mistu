@@ -122,6 +122,12 @@ export async function runRechercheWebTests({ eq, ok }) {
       eq([dl('2025-04-30', 'fr'), dl('2025-04-30', 'en'), dl('Apr 30, 2025', 'fr')], ['30 avril 2025', 'April 30, 2025', '30 avril 2025'], 'dateLisible : une date ISO seule est rendue telle quelle (UTC), jamais la veille ; « Apr 30, 2025 » aussi (confort, ronde 1)');
       { const refusees = ['April 2025', '2025', '1', '12/04/2025', 'Feb 30, 2025', 'Thu, 01 May 2025 00:00:00 GMT', '2025-13-40', '2025-02-30'];
         eq(refusees.map((x) => dl(x, 'fr')), refusees.map(() => null), 'dateLisible : jour absent, année seule, nombre, date à barres, jour qui déborde, RFC 1123, ISO hors bornes ou qui déborde → null (rien d’inventé, ronde 1)'); }
+      // Ronde 2 : sans Date.parse — liste FERMÉE des mois anglais (noms, abréviations de 3 lettres, « Sept »), casse libre,
+      // point facultatif, année à 4 chiffres commençant par 1 ou 2 ; date construite en UTC, refusée si elle déborde.
+      eq([dl('Sept. 5, 2025', 'fr'), dl('Sep 5, 2025', 'fr'), dl('Feb 29, 2024', 'fr'), dl('april 30, 2025', 'fr')], ['5 septembre 2025', '5 septembre 2025', '29 février 2024', '30 avril 2025'],
+        'dateLisible : « Sept. », « Sep », le 29 février d’une année bissextile et la casse libre sont lus (confort, ronde 2)');
+      { const refusees = ['Mayhem 5, 2025', 'April 30, 0025', 'Feb 29, 2025', 'Avril 30, 2025'];
+        eq(refusees.map((x) => dl(x, 'fr')), refusees.map(() => null), 'dateLisible : un mot qui commence comme un mois, une année hors 1000-2999, un 29 février non bissextile ou un mois français → null (rien d’inventé, ronde 2)'); }
     }
     eq([lu.resultats[2].titre.length, lu.resultats[2].titre.includes('\u{202E}')], [300, false], 'lecture : un titre de 351 dont le U+202E est AVANT la coupe est nettoyé puis borné à 300 points de code (S2)');
     eq(lu.resultats[2].hote, 'c.test', 'lecture : l’hôte est recalculé');

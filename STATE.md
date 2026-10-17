@@ -6,8 +6,8 @@
 `.superpowers/sdd/2026-10-17-confort-web/`. Trois frictions vues par Neegan sur le lot web LIVE : section « Liens web
 gardés » dans Mes livres (signets sans livre, le dernier gardé d'abord, même sans aucun livre) ; « Chercher à nouveau »
 aussi sur la ligne de la mention K1, avant les liens ; date de page en liste blanche (« April 30, 2025 » ou « 2025-04-30 » → « 30 avril 2025 »), tout le reste
-masqué (« 654 days ago »). Ronde 1 de revue faite. Suite **1796/1796** (total épinglé **1795**), seul le 404 `/favicon.ico` en console, `node --test
-tools/*.test.mjs` 40/40, `--check` 0. `APP_VERSION 0.5.1`, `sw.js` `cuisine-os-v0.5.1-4`, `SHELL` inchangé. Section
+masqué (« 654 days ago »). Rondes 1 et 2 de revue faites. Suite **1798/1798** (total épinglé **1797**), seul le 404 `/favicon.ico` en console, `node --test
+tools/*.test.mjs` 40/40, `--check` 0. `APP_VERSION 0.5.1`, `sw.js` `cuisine-os-v0.5.1-5`, `SHELL` inchangé. Section
 « Confort après preuve » dans `CLAUDE.md`.
 
 **Lot « Chercher sur le web avec l'assistant » : LIVE** (fusionné et poussé : `main` = `origin/main` = `dc7444a`) :
@@ -41,7 +41,7 @@ construction a amendé), plan `docs/superpowers/plans/2026-10-17-chercher-sur-le
 ## Reste à faire
 1. **Lot confort** : revue du chef d'orchestre ; puis fusion par Neegan (`! cd ~/projects/mistu && git merge --ff-only
    confort-web`, ou rebase si `main` a bougé depuis `dc7444a`) et `! git -C ~/projects/mistu push origin main` ; preuve
-   sur le site public : service worker `cuisine-os-v0.5.1-4` servi, Mes livres → « Liens web gardés » avec un signet,
+   sur le site public : service worker `cuisine-os-v0.5.1-5` servi, Mes livres → « Liens web gardés » avec un signet,
    une recherche web → dates en français ou masquées, « Chercher à nouveau » à côté de « La demande a changé ».
 2. **À faire** : copier `~/projects/mistu-web/.superpowers/sdd/2026-10-17-chercher-sur-le-web/` (copie non vérifiée
    depuis ce worktree) et `2026-10-17-confort-web/` dans `~/projects/mistu/.superpowers/sdd/`. Règle : les registres SDD
@@ -70,7 +70,7 @@ construction a amendé), plan `docs/superpowers/plans/2026-10-17-chercher-sur-le
 ```
 cd ~/projects/mistu-web && git status --short && git log --oneline -3
 curl -sS -o /dev/null -w "8083 http=%{http_code}\n" http://localhost:8083/tests/ || (nohup python3 -m http.server 8083 > /dev/null 2>&1 &)
-node ~/projects/mistu-web/.superpowers/sdd/2026-10-17-confort-web/suite.cjs 8083   # attendu : 1796/1796 (+ 1 x 404 favicon)
+node ~/projects/mistu-web/.superpowers/sdd/2026-10-17-confort-web/suite.cjs 8083   # attendu : 1798/1798 (+ 1 x 404 favicon)
 node --test tools/*.test.mjs && node tools/generer-migrations.mjs --check
 ```
 Fusion du lot confort : § « Reste à faire », point 1.

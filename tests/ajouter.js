@@ -1768,7 +1768,7 @@ export async function runAjouterTests({ eq, ok }) {
       // (b) aucun signet : ni une recette tapée sans livre, ni un signet rangé dans un livre, ni une adresse vide ne font une section
       n = await renderLibrary({}, {}, ctxDe([{ id: 'rT', original_title: 'Tapée', availability: 'available', edition_id: null }, signet('rL', 'Rangé', { edition_id: 'eX' }), signet('rV', 'Vide', { source_url: '' })]));
       eq([n.textContent.includes('Aucun livre pour l’instant.'), n.textContent.includes('Liens web gardés')], [true, false], 'Mes livres sans signet : aucune section « Liens web gardés » (rien n’est rendu)');
-      // (c) le plus récent d'abord : updated_at, sinon created_at
+      // (c) le plus récent d'abord : created_at, sinon updated_at
       const ancien = signet('r1', 'Ancien', { created_at: '2026-10-01T10:00:00.000Z' });
       const recent = signet('r2', 'Récent', { created_at: '2026-10-15T10:00:00.000Z' });
       eq(titres(await renderLibrary({}, {}, ctxDe([ancien, recent]))), ['Récent', 'Ancien'], 'Liens web gardés : le plus récent d’abord (created_at)');

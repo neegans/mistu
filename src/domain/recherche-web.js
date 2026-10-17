@@ -85,29 +85,33 @@ export function lireReponse(json) {
 }
 
 // Confort après preuve (17 octobre) : `page_age` arrive brut (« 654 days ago », parfois « April 30, 2025 ») et lireReponse
-// le garde tel quel, borné. L'écran ne le montre que sous une forme de LISTE BLANCHE (ronde 1, « rien d'inventé ») :
-// « Mois jour, année » (« April 30, 2025 », « Apr 30, 2025 ») lu par Date.parse, refusé si le jour déborde (« Feb 30 ») ;
-// ou la date ISO seule « 2025-04-30 », construite et rendue en UTC (jamais la veille). Tout le reste — relatif, jour
-// absent, année seule, nombre, barres, RFC 1123, pas une chaîne — → null, et la date est masquée. Pure, ne lève pas.
+// le garde tel quel, borné. L'écran ne le montre que sous une forme de LISTE BLANCHE (« rien d'inventé », rondes 1-2),
+// SANS Date.parse (sa lecture des formes non ISO dépend du moteur et accepte « Mayhem 5, 2025 ») :
+// « Mois jour, année » avec un mois de la liste FERMÉE ci-dessous (casse libre, point facultatif, année 1000-2999), ou la
+// date ISO seule « 2025-04-30 ». La date est construite en UTC et refusée si elle déborde (« Feb 30 », « Feb 29, 2025 »),
+// puis rendue en UTC (jamais la veille). Tout le reste — relatif, jour absent, année seule, nombre, barres, RFC 1123,
+// mois français, pas une chaîne — → null, et la date est masquée. Pure, ne lève pas.
+const MOIS_ANGLAIS = new Map([
+  ['january', 0], ['jan', 0], ['february', 1], ['feb', 1], ['march', 2], ['mar', 2], ['april', 3], ['apr', 3], ['may', 4],
+  ['june', 5], ['jun', 5], ['july', 6], ['jul', 6], ['august', 7], ['aug', 7], ['september', 8], ['sep', 8], ['sept', 8],
+  ['october', 9], ['oct', 9], ['november', 10], ['nov', 10], ['december', 11], ['dec', 11],
+]);
+function dateUtcLisible(annee, mois, jour, langue) { // mois : 0-11
+  if (mois < 0 || mois > 11 || jour < 1 || jour > 31) return null;
+  const d = new Date(Date.UTC(annee, mois, jour));
+  if (d.getUTCFullYear() !== annee || d.getUTCMonth() !== mois || d.getUTCDate() !== jour) return null; // débord, ou année < 100 décalée en 19xx
+  return new Intl.DateTimeFormat(langue === 'en' ? 'en-CA' : 'fr-CA', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' }).format(d);
+}
 export function dateLisible(texte, langue) {
   if (typeof texte !== 'string') return null;
   const s = texte.trim();
-  const options = { year: 'numeric', month: 'long', day: 'numeric' };
-  const locale = langue === 'en' ? 'en-CA' : 'fr-CA';
-  const mja = /^[A-Za-z]{3,9}\.? (\d{1,2}), \d{4}$/.exec(s);
+  const mja = /^([a-z]+)\.? (\d{1,2}), ([12]\d{3})$/i.exec(s);
   if (mja) {
-    const ms = Date.parse(s);
-    if (!Number.isFinite(ms) || new Date(ms).getDate() !== Number(mja[1])) return null;
-    return new Intl.DateTimeFormat(locale, options).format(new Date(ms));
+    const mois = MOIS_ANGLAIS.get(mja[1].toLowerCase());
+    return mois === undefined ? null : dateUtcLisible(Number(mja[3]), mois, Number(mja[2]), langue);
   }
   const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  if (iso) {
-    const [a, m, j] = iso.slice(1).map(Number);
-    if (m < 1 || m > 12 || j < 1 || j > 31) return null;
-    const d = new Date(Date.UTC(a, m - 1, j));
-    if (d.getUTCFullYear() !== a || d.getUTCMonth() !== m - 1 || d.getUTCDate() !== j) return null; // débord ou année < 100
-    return new Intl.DateTimeFormat(locale, { ...options, timeZone: 'UTC' }).format(d);
-  }
+  if (iso) return dateUtcLisible(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]), langue);
   return null;
 }
 

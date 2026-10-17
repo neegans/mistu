@@ -438,9 +438,12 @@ s'affiche que pour sa demande (R-WEB-7) ; « Réessayer » force `enLigne` à vr
 (`cle_refusee`, `recherche_desactivee`, `refus`, `non_configure`, `non_pris_en_charge`) offrent « Chercher à nouveau » ;
 une raison sans texte propre dit « L’assistant n’a pas répondu. Réessaie. » avec « Code : {raison} » dessous (K3).
 
-**Ce qui n'est pas prouvé.** Tout ce qui précède est éprouvé par la suite, avec un `fetch` factice et des réponses
-fixes. Aucun appel réel n'a été fait à l'API Anthropic : statut et corps exacts d'un compte sans recherche web, forme
-réelle de `page_age`, `web_search_requests`, `pause_turn` et `refusal`, taille du corps, durée, coût. Ni Safari ni
+**Mesuré en réel (17 octobre 2026, site public).** Un appel réel à l'API Anthropic, demande « puttanesca » : **un** POST
+vers l'API Messages → 200, 2 recherches, 5 liens choisis + 13 autres pages, ≈ 20 s ; `page_age` vu en « 654 days ago »
+et parfois « April 30, 2025 ».
+
+**Ce qui n'est pas prouvé.** Tout le reste est éprouvé par la suite, avec un `fetch` factice et des réponses fixes :
+statut et corps exacts d'un compte sans recherche web, `pause_turn` et `refusal`, taille du corps, coût. Ni Safari ni
 l'iPhone (aucun WebKit ici), ni `target="_blank"` et `navigator.onLine` depuis une PWA installée. Et
 `AbortSignal.timeout` compte le temps **actif** : sur une PWA iOS en arrière-plan, 45 s ne sont pas 45 s réelles.
 
