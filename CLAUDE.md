@@ -493,6 +493,7 @@ ferait lever ; `cfg` est du JSON simple) ; un `trouve` sans carte survivante (re
 dédié ; branches `exclude`/`max_active` de `libellePuce` non épinglées ; chemin `filtres` de `borner` sans fixture Cf ;
 pins de `VERSION` répétés dans trois suites ; `!includes('notice')` sur tout `pairing.js` fragile — liste exacte dans
 `progress.md`.
+**Reconstruction de l'écran pendant un vol** : une passe de synchronisation qui écrit (`cuisineos:refresh`, `doitRendreApresPasse` vaut vrai pour `/search`) ou un retour arrière dans l'historique reconstruit la route depuis l'adresse ; les puces ajoutées par les listes et les restrictions réunies (R-WEB-9) n'y sont pas, l'écran du vol disparaît et une nouvelle tape repartirait sans elles (préexistant depuis R-WEB-2, plus rare que la tape, jusqu'à 45 s d'exposition) — remède = porter les puces de liste dans l'adresse (lot ultérieur).
 
 **Versions.** `APP_VERSION = '0.5.0'` (pins `v0\.5\.0-\d+` dans `tests/ajouter.js`, `tests/sync-l3.js` et
 `tests/recherche-web.js`), `sw.js VERSION = 'cuisine-os-v0.5.0-10'` (vague finale ; `-9` à la clôture de la tâche 9), `SHELL` + `./src/core/bornes.js`

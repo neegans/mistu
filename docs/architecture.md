@@ -347,7 +347,7 @@ Une séance de scan ne sait pas, à l'ouverture, si elle vient de « + Pages d'i
 qu'un état posé en base ou en mémoire — qu'un rafraîchissement réappliquerait indéfiniment (F6) —, l'intention
 voyage dans l'URL (`adresseSeance(sessionId, intention)` → `/import?session=…&intention=index`), est consommée au
 premier rendu (`appliquerIntention` : présélection des pages, panneau d'index ouvert ou non), puis retirée de
-l'adresse par un geste `historique.remplacer` injecté (jamais un vrai `history.replaceState` dans un test, I-H) :
+l'adresse par un geste `historique.remplacer` injecté (jamais un vrai `history.replaceState` dans un test, I-H — une exception nommée : le test de la dépendance par défaut de la recherche web, restauré en `finally`) :
 un `refresh()` ultérieur ne la réapplique donc pas.
 
 ### `cover_sha256` : pointeur souple

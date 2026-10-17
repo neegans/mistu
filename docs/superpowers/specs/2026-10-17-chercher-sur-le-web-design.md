@@ -593,6 +593,11 @@ Une ligne par écart entre cette spec et ce qui a été construit (tâches 1 à 
   et « Annuler » laissaient place à un bouton rallumé pendant l'appel payant (une seconde tape l'abandonnait et
   repayait sans la restriction), et une issue autre que `trouve` restait cachée (R-WEB-7). Coût si faux : une puce de
   trop dans une demande.
+- **Résidu de R-WEB-9 (nommé, non corrigé)** : une reconstruction de la route PENDANT un vol par `cuisineos:refresh` (passe de
+  synchronisation qui écrit) ou par l'historique perd les puces de liste et la réunion (elles ne sont pas dans l'adresse) ; l'écran du
+  vol disparaît et une nouvelle tape repartirait sans elles. Préexistant depuis R-WEB-2, plus rare que la tape. Remède : porter les
+  puces de liste dans l'adresse (lot ultérieur). Note : le test de la dépendance par défaut de la vague 2 appelle un vrai
+  `history.replaceState` sur la page de tests, restauré en `finally` — exception à la convention « jamais dans un test » du lot UX.
 - **Alignement `signetModel`** (revue de branche, vague finale) : le titre est compté en **points de code**, comme
   `borner` qui préremplit le champ (151 emoji et plus passaient la borne de 300 du préremplissage puis étaient refusés
   « Titre trop long. ») ; l'adresse reste comptée par `href.length` (ASCII après `new URL`). Même vague : `run()` passe
