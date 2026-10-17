@@ -417,8 +417,8 @@ appellent `reinitialiserWeb()` avant chaque cas et lisent `etatWeb()` comme **fa
   tape → **1** appel dont `q === 'saumon fenouil'` (F14) et `filtres` = textes des puces à l'écran (puce `sans_gluten` →
   'Sans gluten' — F1) ; `etatWeb().enCours` vrai, bouton éteint, `[role="status"]` « L’assistant cherche sur le web… »,
   « Annuler » présent ; **Annuler** → `enCours` faux, `signal.aborted` vrai, écran du bouton, mémoire inchangée ;
-  **seconde tape pendant un vol** (par « Chercher à nouveau » après résolution ? non : par une **nouvelle instance**
-  rendue avec la même `ctx` pendant le vol, puis tape) → le premier `signal` est abandonné, 2 appels au total, la
+  **seconde tape pendant un vol** (une **nouvelle instance** rendue avec la même `ctx` pendant le vol, puis tape :
+  c'est ce que fait la ré-instanciation de production) → le premier `signal` est abandonné, 2 appels au total, la
   résolution tardive du premier n'écrit **rien** (`memoire.cle` = celle du second) (F2/F3) ; résolution `trouve` → une
   `a[target="_blank"][rel="noopener noreferrer"]` par lien, `href` égal à `lien.href`, texte = titre, hôte affiché,
   « Demande envoyée : saumon fenouil », avertissement § 5.5 présent, « Garder ce lien » → `deps.navigate` reçoit
