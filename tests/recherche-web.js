@@ -112,6 +112,13 @@ export async function runRechercheWebTests({ eq, ok }) {
     const lu = W.lireReponse(json);
     eq(lu.resultats.map((r) => r.href), ['https://a.test/r1', 'https://b.test/r2', 'https://c.test/r3', 'https://d.test/r4'], 'lecture : 4 résultats dans l’ordre, doublon et ftp écartés, identifiants retirés');
     eq([lu.resultats[0].titre, lu.resultats[0].date, lu.resultats[1].date, lu.resultats[2].date], ['A', 'October 1, 2026', null, null], 'lecture : titre et date typés ; page_age absent ou vide → null');
+    // Confort après preuve (item 3) : dateLisible, PURE — lireReponse garde la date brute bornée (ci-dessus), l'écran la met
+    // en forme ou la masque.
+    {
+      const dl = typeof W.dateLisible === 'function' ? W.dateLisible : () => 'absente';
+      eq([dl('April 30, 2025', 'fr'), dl('April 30, 2025', 'en')], ['30 avril 2025', 'April 30, 2025'], 'dateLisible : une date lisible est mise en forme dans la langue demandée (fr-CA, en-CA) (confort, item 3)');
+      eq([dl('654 days ago', 'fr'), dl('', 'fr'), dl(null, 'fr'), dl(42, 'fr')], [null, null, null, null], 'dateLisible : une date relative, vide ou qui n’est pas une chaîne → null (masquée) (confort, item 3)');
+    }
     eq([lu.resultats[2].titre.length, lu.resultats[2].titre.includes('\u{202E}')], [300, false], 'lecture : un titre de 351 dont le U+202E est AVANT la coupe est nettoyé puis borné à 300 points de code (S2)');
     eq(lu.resultats[2].hote, 'c.test', 'lecture : l’hôte est recalculé');
     eq([lu.aCherche, lu.recherches, lu.stopReason, lu.erreursOutil], [true, 2, 'end_turn', []], 'lecture : aCherche, recherches, stopReason');
@@ -676,7 +683,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       const a = root.querySelectorAll('a[target="_blank"][rel="noopener noreferrer"]');
       eq([...a].map((n) => [n.getAttribute('href'), n.textContent]), [['https://a.test/r?x=1', '<b>Saumon</b> au fenouil'], ['https://b.test/', 'b.test'], ['https://a.test/x', 'a.test']], 'trouve : un lien par résultat, href exact (identifiants retirés AU RENDU), titre en TEXTE littéral, titre vide → hôte (I-H, Review Focus 3)');
       eq(root.querySelectorAll('b').length, 0, 'trouve : aucun élément créé par un titre hostile');
-      ok(texte(root).includes('a.test · May 1, 2026') && texte(root).includes('Fenouil et saumon.'), 'trouve : hôte, date, pourquoi');
+      ok(texte(root).includes('a.test · 1 mai 2026') && texte(root).includes('Fenouil et saumon.'), 'trouve : hôte, date mise en forme (confort, item 3), pourquoi');
       ok(texte(root).includes('Trouvé sur le web') && texte(root).includes('Demande envoyée : saumon fenouil'), 'trouve : titre de section et demande envoyée (I-J)');
       eq([appels.args[0]?.cfg?.api_key === CLE_ECRAN, JSON.stringify(S.etatWeb()).includes(CLE_ECRAN), texte(root).includes(CLE_ECRAN)], [true, false, false], 'I-C écran : après un trouvé, la clé n’est ni dans etatWeb() ni dans le texte rendu — elle a bien atteint chercher() (V-F2)');
       // R-WEB-1 : une saisie avec un caractère de format (U+200B) est nettoyée AVANT l'envoi ; l'écran rappelle la demande partie
@@ -767,6 +774,19 @@ export async function runRechercheWebTests({ eq, ok }) {
       root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
       await tapeEtAttend(root, { ...trouve, autres: [{ href: 'https://c.test/x', hote: 'c.test', titre: 'C', date: null, pourquoi: null }] });
       { const d = root.querySelector('details'); eq([d?.querySelector('summary')?.textContent, d?.open, d?.querySelectorAll('a[target="_blank"]').length, root.querySelectorAll('a[target="_blank"]').length], ['Autres pages trouvées (1)', false, 1, 4], 'autres : repliées sous « Autres pages trouvées (1) », avec leur lien (K2)'); }
+      // Confort après preuve (item 3) : la date d'une page n'est montrée que lisible, dans la langue de l'interface ;
+      // une date relative (« 654 days ago ») est masquée — la ligne vaut exactement l'hôte, sans « · ».
+      root.remove(); S.reinitialiserWeb();
+      root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
+      await tapeEtAttend(root, { ...trouve, liens: [liens[0], { ...liens[1], date: '654 days ago' }] });
+      {
+        const lignesDate = (r) => [...r.querySelectorAll('a[target="_blank"]')].map((a) => a.parentElement.querySelector('.muted')?.textContent);
+        eq(lignesDate(root), ['a.test · 1 mai 2026', 'b.test'], 'date de page : « May 1, 2026 » → « 1 mai 2026 » ; « 654 days ago » masquée, la ligne vaut l’hôte seul (confort, item 3)');
+        setUiLocale('en');
+        const enAnglais = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} }); // même issue en mémoire (K1), aucun appel
+        eq(lignesDate(enAnglais), ['a.test · May 1, 2026', 'b.test'], 'date de page : interface anglaise → « May 1, 2026 » (la langue vient de getUiLocale)');
+        setUiLocale('fr'); enAnglais.remove();
+      }
       // mode all : aucun lien web
       root.remove();
       root = await monter({ q: 'saumon fenouil', mode: 'all' }, ctx, { chercher, navigate: () => {} });

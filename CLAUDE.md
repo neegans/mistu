@@ -563,6 +563,12 @@ compte sans recherche web.
 (sinon « untracked working tree files would be overwritten: STATE.md »). Preuve sur le site public après le `push` : service worker `cuisine-os-v0.5.0-N` servi, onglet
 Web → « Pour chercher sur le web, configure l’assistant IA … » sur un navigateur sans clé (0 requête).
 
+#### Confort après preuve (17 octobre, soir)
+
+**Quoi** (branche `confort-web`, worktree `~/projects/mistu-web`, base `main` `dc7444a`, registre `.superpowers/sdd/2026-10-17-confort-web/`, trois frictions vues par Neegan sur le lot web LIVE) : 1) Mes livres porte une section « Liens web gardés » (signets sans livre, le plus récent d'abord, même quand il n'y a aucun livre : « ← Mes livres » d'un signet ne ramène plus à une liste vide) ; 2) « Chercher à nouveau » est aussi sur la ligne de la mention K1 « La demande a changé depuis cette recherche. », avant les liens (le bouton du bas reste) ; 3) la date d'une page n'est montrée que lisible, mise en forme dans la langue de l'interface (`dateLisible`, pure, dans `recherche-web.js` : « April 30, 2025 » → « 30 avril 2025 »), sinon masquée (« 654 days ago »).
+**Versions.** `APP_VERSION = '0.5.1'`, `sw.js VERSION = 'cuisine-os-v0.5.1-3'` (`SHELL` inchangé, aucun module neuf), pins `v0\.5\.1-\d+` / `'0.5.1'` dans `tests/ajouter.js`, `tests/sync-l3.js` et `tests/recherche-web.js` ; suite **1793/1793** (total épinglé **1792**), seul le 404 de `/favicon.ico` en console ; `tools` 40/40 ; `--check` 0.
+**Non prouvé.** Rien de nouveau côté réseau (aucun appel ni requête de plus) ; la forme réelle de `page_age` reste celle à mesurer au premier appel réel (lot web, ci-dessus).
+
 ## Premier lot de fiabilisation — 8 septembre 2026, à réviser
 
 À la suite d’un audit statique, l’utilisateur a autorisé le premier lot consacré à la sauvegarde/restauration. Modifications effectuées uniquement via MCP vibeforge_files, avec écritures conditionnées au SHA-256 ; aucun shell, réseau, build, test exécuté, commit ou déploiement.

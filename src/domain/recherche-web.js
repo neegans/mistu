@@ -84,6 +84,16 @@ export function lireReponse(json) {
   return { resultats, erreursOutil, aCherche, texte, stopReason: typeof json.stop_reason === 'string' ? json.stop_reason : null, recherches: Number.isInteger(n) && n >= 0 ? n : null };
 }
 
+// Confort après preuve (17 octobre) : `page_age` arrive brut (« 654 days ago », parfois « April 30, 2025 ») et lireReponse
+// le garde tel quel, borné. L'écran ne le montre que s'il se lit comme une date, mis en forme dans la langue demandée ;
+// sinon (relatif, vide, pas une chaîne) → null, et la date est masquée. Pure, ne lève pas.
+export function dateLisible(texte, langue) {
+  if (typeof texte !== 'string' || !texte) return null;
+  const ms = Date.parse(texte);
+  if (!Number.isFinite(ms)) return null;
+  return new Intl.DateTimeFormat(langue === 'en' ? 'en-CA' : 'fr-CA', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(ms));
+}
+
 // § 4.4 : les choix de l'assistant ne SURVIVENT que s'ils désignent exactement un résultat (I-A) ; titre, hôte et
 // date viennent du résultat. PAS de complément automatique (K2) : les résultats non choisis vont dans `autres`, que
 // l'écran replie. repli = aucun choix n'a survécu : `liens` = les premiers résultats tels quels.

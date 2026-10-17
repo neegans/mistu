@@ -7,7 +7,7 @@ import { lienSignet } from '../core/lien.js';
 import { parseQuery, searchDocs, chipsFor } from '../domain/search.js';
 import { findAccompaniments } from '../domain/pairing.js';
 import { providerFrom } from '../domain/llm.js';
-import { chercherRecettesWeb, construireDemande } from '../domain/recherche-web.js';
+import { chercherRecettesWeb, construireDemande, dateLisible } from '../domain/recherche-web.js';
 import { RECIPE_TYPES, DIET_TAGS } from '../model/schema.js';
 import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select } from './components.js';
 import { addToMealFlow } from './meals.js';
@@ -225,9 +225,10 @@ export async function renderSearch(params, query, ctx, deps = {}) {
       const l = lienSignet(lien.href);
       if (!l.ok) return null; // revalidé AU RENDU (I-H) : une adresse refusée ici n'a pas de carte
       const titre = lien.titre || l.hote;
+      const date = dateLisible(lien.date, getUiLocale()); // lisible et mise en forme, sinon masquée (confort après preuve)
       return el('div', { class: 'card flat stack' },
         el('a', { class: 'btn', href: l.href, target: '_blank', rel: 'noopener noreferrer' }, titre),
-        el('div', { class: 'muted', style: { fontSize: '.85rem' } }, lien.date ? `${l.hote} · ${lien.date}` : l.hote),
+        el('div', { class: 'muted', style: { fontSize: '.85rem' } }, date ? `${l.hote} · ${date}` : l.hote),
         lien.pourquoi ? el('div', null, lien.pourquoi) : null,
         el('button', { class: 'btn small', onClick: () => nav('/add/signet' + buildQuery({ adresse: l.href, titre })) }, t('Garder ce lien')));
     };
