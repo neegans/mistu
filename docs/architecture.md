@@ -4,18 +4,20 @@
 
 - **PWA sans étape de build** : modules ES natifs, aucune dépendance npm. Un serveur statique suffit. Choix guidé par « éviter la surarchitecture » (spec §15) et par la possibilité de tout vérifier en ouvrant l'app.
 - **Local-first** : IndexedDB comme base unique (un magasin par entité), blobs (photos, PDF) stockés dédupliqués par SHA-256 dans le magasin `files`. La sauvegarde complète (ZIP) reste un mécanisme de durabilité et de transfert entre appareils, utilisable sans compte. Depuis le lot L3, **les fiches** peuvent aussi voyager par un serveur Supabase quand un compte est connecté (voir « Synchronisation (L3) ») ; les **octets des fichiers**, eux, ne partent pas encore (L4). L'app reste utilisable sans compte, sur un appareil seul.
-- **Déterministe avant IA** : unités, portions, courses, régimes, sauvegarde et recherche sont du code sans LLM. L'IA est une abstraction `LLMProvider` (aucun, compatible OpenAI, Anthropic) branchée uniquement sur l'extraction de pages et d'index; ses résultats sont toujours « à vérifier ».
+- **Déterministe avant IA** : unités, portions, courses, régimes, sauvegarde et recherche sont du code sans LLM. L'IA est une abstraction `LLMProvider` (aucun, compatible OpenAI, Anthropic) branchée sur l'extraction de pages et d'index, et sur la recherche web (Anthropic seulement), où le texte de l'assistant ne peut qu'étiqueter des pages que le serveur a réellement rapportées ; la lecture de la réponse et le choix des liens sont du code sans LLM. Ses résultats sont toujours « à vérifier ».
 
 ## Carte des modules
 
 ```text
 index.html, styles.css, manifest.webmanifest, sw.js
 src/app.js                 coquille, navigation, routes
-src/core/    db.js (IndexedDB), router.js (#/…), dom.js (el, dialogues), i18n.js (FR clé, EN dictionnaire), hash.js (SHA-256 + repli), zip.js (ZIP stored), ids.js, bus.js
+src/core/    db.js (IndexedDB), router.js (#/…), dom.js (el, dialogues), i18n.js (FR clé, EN dictionnaire), hash.js (SHA-256 + repli), zip.js (ZIP stored), ids.js, bus.js,
+             bornes.js (borner, lireBornee, signalDelai, OPTIONS_FETCH : bornes des appels distants, pur, sans import)
 src/model/   schema.js (magasins, relations, vocabulaires), seed.js (unités, conventions, ingrédients FR/EN, presets d'appareils), repo.js (accès, réglages, activité, fichiers)
 src/domain/  quantity.js (fractions, plages, qualitatif), units.js (conventions, conversions, affichage), lines.js (analyse d'une ligne d'ingrédient), scaling.js,
              diet.js, grocery.js, search.js (langage naturel → pastilles; groupes), dishes.js (rapprochement, comparaison), pairing.js (accompagnements, résumé de repas),
-             rediscover.js, timers.js, backup.js (archive, inspection isolée, restauration, vérification), exporters.js (JSON-LD, YAML Paprika, HTML), llm.js
+             rediscover.js, timers.js, backup.js (archive, inspection isolée, restauration, vérification), exporters.js (JSON-LD, YAML Paprika, HTML), llm.js,
+             recherche-web.js (demande, corps, lecture de la réponse et choix des liens de la recherche web ; un appel, ne lève jamais)
 src/ui/      state.js (cache), components.js, home, search, library, book, dish, recipe, recipe-edit, cook, import, meals, grocery, kitchen, settings, add
 src/sync/    tables.js, mime.js, clock.js, outbox.js, config.js, auth.js — voir « Synchronisation (L1-L2) »
              transport.js, lots.js, reponses.js, push.js, backfill.js, pull.js, conflits.js, moteur.js — voir « Synchronisation (L3) »
@@ -292,7 +294,8 @@ src/core/image.js        dimensionsImage, reduireImage, ErreurImage, LIMITES_COU
                          conteneurs que `dimensionsImage` sait lire (JPEG, PNG, WebP) y passent — un en-tête
                          illisible (HEIC) traverse, et c'est le ré-encodage qui tranche. Le corps JSON des
                          métadonnées est lu par la MÊME fonction bornée que les octets d'une couverture
-                         (`lireBornee` de livre-ajout.js, coupée à 256 Ko — S1).
+                         (`lireBornee`, coupée à 256 Ko — S1 ; définie depuis le 17 octobre dans `core/bornes.js`, ré-exportée par
+                         livre-ajout.js).
 src/core/blob-urls.js    urlDeBlob/revoquerUrlDeBlob/revoquerUrlsDeBlob : chaque URL blob: créée pour afficher une
                          couverture ou un aperçu est suivie dans un registre partagé, révoquée à la route suivante
                          (S15/F4) ; `revoquerUrlDeBlob(u)` révoque UNE URL connue, ce dont `library.js` a besoin
@@ -311,7 +314,7 @@ src/core/lien.js         lienSignet(sourceUrl) et libelleSource(recipe) : foncti
                          texte (`meals.js`, `exporters.js` — S8).
 ```
 
-### Identifier un livre, fiable (lot courant, 14-15 octobre 2026)
+### Identifier un livre, fiable (lot du 14-15 octobre 2026)
 
 Spec : `docs/superpowers/specs/2026-10-14-identifier-un-livre-fiable-design.md` (§ 11.2 : ce que la construction a
 amendé). Un seul module neuf ; les autres changements sont décrits sur les lignes de `puces.js` et `livre-ajout.js`
@@ -355,6 +358,85 @@ appareil reste restaurable et affichable — la fiche le dit (« La couverture n
 que d'échouer. Choix voulu (S1/F2) : une relation stricte aurait rendu une archive irrestaurable dès qu'une
 couverture manque, par exemple après une réception L3 (qui reçoit la ligne `files` sans ses octets — L4). Dette
 nommée : `source_pages.sha256` reste la même sorte de relation latente, jamais vérifiée nulle part.
+
+### Chercher sur le web avec l'assistant (lot du 17 octobre 2026)
+
+Spec : `docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md` (rév. 2.1 ; § 11.2 : ce que la construction a
+amendé, R-WEB-1 à R-WEB-8). Livré ici : l'onglet « Web » de la recherche lance, sur une tape et sur elle seule, **un**
+appel à l'API Anthropic avec l'outil de recherche web côté serveur (`web_search_20250305`), affiche au plus cinq liens
+pris dans les résultats bruts du serveur, et « Garder ce lien » ouvre le signet prérempli. Deux modules neufs ; les
+autres changements tiennent en quelques lignes chacun.
+
+```text
+src/core/bornes.js          REÇU du lot ISBN (spec § 7.2) : borner(s, max), lireBornee(r, maxOctets), signalDelai(ms),
+                            OPTIONS_FETCH, déplacés depuis livre-ajout.js sans changer leur corps (seul borner reçoit sa
+                            borne en paramètre). Module pur, sans import : le domaine le lit comme l'interface.
+                            livre-ajout.js les importe et ré-exporte lireBornee, signalDelai et OPTIONS_FETCH
+                            (tests/ajouter.js les lit toujours par le module de route).
+src/domain/recherche-web.js construireDemande (q borné à 500 points de code, filtres = textes des puces bornés à 80, 12 au
+                            plus ; rend aussi q et filtres NETTOYÉS et la clé de mémoire), corpsRequete (max_uses 3, pays
+                            CA, fuseau injecté ; ni thinking, ni stream, ni output_config), lireReponse (résultats bruts
+                            dédoublonnés par href exact, erreurs d'outil, aCherche, texte recollé sans séparateur),
+                            choisirLiens ({ liens, autres, repli }), chercherRecettesWeb (un appel, ne lève jamais, rend
+                            une issue). N'importe rien de src/ui/.
+src/domain/llm.js           supportsWebSearch (vrai pour Anthropic seulement) ; ANTHROPIC_MESSAGES_URL et
+                            anthropicHeaders(apiKey) exportés et utilisés par AnthropicProvider.complete (comportement
+                            inchangé, verrouillé par un test écrit avant le refactor).
+src/ui/components.js        libellePuce(c, ingredientsById) : l'ancien chipLabel (déjà exporté), renommé — une seule
+                            définition de ce qu'une puce dit, pour l'écran et pour la demande (I-J).
+src/ui/search.js            le mode Web : garde du fournisseur, bouton, vol, issues (ci-dessous).
+src/ui/signet.js            renderSignetRoute lit query.adresse (telle quelle) et query.titre (borné à 300) ; bannière
+                            « Adresse reçue » dont l'hôte vient de signetModel, la même décision que l'enregistrement
+                            (R-WEB-8).
+src/domain/search.js        searchDocs(…, { mode: 'web' }) rend des groupes vides sans notice : le texte mort « Le Web
+                            n'est pas activé » est retiré du domaine, de l'écran et de en.js ; pairing.js ne le propage
+                            plus.
+```
+
+**État au niveau du module (`src/ui/search.js`).** `run()` navigue en `replace`, donc chaque Entrée, changement de mode
+ou de case ré-instancie la route : un état d'instance ne survivrait pas. Trois variables de module portent la recherche
+web : `memoire` (`{ cle, issue, q, filtres }` — la dernière issue, sous la clé exacte de la demande qui l'a produite,
+avec la `q` et les filtres nettoyés qui sont partis ; mémoire **vive** : jamais en base, ni dans une archive, ni au
+serveur, elle meurt au rechargement — I-G) ; `vol` (`{ cle, controller, promesse }` — l'unique appel en vol de toute
+l'app — I-I) ; `vues` (un ensemble de `{ root, redessiner }` : les instances vivantes du mode Web, dédoublonnées par
+racine, purgées à chaque rendu et à chaque notification dès que leur racine a quitté le document). `etatWeb()` et
+`reinitialiserWeb()` exposent et remettent cet état pour les tests, qui attendent un fait et jamais un délai. Une tape
+(`lancer`) relit le champ seulement s'il a changé depuis la dernière analyse (R-WEB-2), abandonne le vol précédent, pose
+le nouveau, puis rejoue la route ; au retour, une promesse qui n'est plus celle du vol n'écrit rien ; une exception
+devient l'issue gelée `interne` (filet de l'écran : jamais d'écran figé). « Annuler » abandonne sans rien lancer, et la
+mémoire reste ce qu'elle était.
+
+**Le mur I-A : rien d'inventé.** Un lien ne s'affiche que si son adresse, normalisée par `lienSignet`, est **égale** au
+`href` d'un bloc `web_search_result` de la réponse. Le texte de l'assistant ne fait qu'étiqueter : il choisit parmi ces
+pages et dit « pourquoi » (borné à 200) ; titre (300), hôte et date (40) viennent du résultat, bornés et nettoyés des
+Cc/Cf. Un choix qui désigne une adresse absente des résultats est ignoré ; si aucun choix ne survit, `repli` : les cinq
+premiers résultats tels quels, avec « Liens tels que trouvés, sans tri de l’assistant. ». Une adresse n'est jamais
+tronquée. Au rendu, chaque `href` est revalidé par `lienSignet` (une adresse refusée n'a pas de carte ; un « trouvé »
+sans carte survivante se rend comme « rien », R-WEB-3), et l'avertissement « L’assistant ne vérifie ni les ingrédients
+ni les restrictions : relis la page avant de cuisiner. » est toujours sous les liens (I-K). Pas de complément
+automatique : les pages non choisies sont repliées sous « Autres pages trouvées ({n}) » (K2).
+
+**Issues.** `chercherRecettesWeb` rend toujours `{ etat, raison, liens, autres, repli, recherches, modele }`, sans la clé
+ni aucun texte de l'API (I-C). `non_configure` et `non_pris_en_charge` : aucun appel. `indisponible`, avec une raison :
+`requete` (demande vide, ou un 4xx sans autre sens), `hors_ligne`, `annule` (jamais rendue), `delai` (45 s), `reseau`,
+`cle_refusee` (401 ; 403 ; clé hors `[\x21-\x7e]`, refusée avant tout appel — R-WEB-5), `recherche_desactivee` (400 ou
+403 dont l'`error.message`, lu en flux et borné à 64 Kio, dit « web search … not enabled / disabled » — R-WEB-6),
+`trop_de_demandes` (429, ou erreur d'outil `too_many_requests` sans résultat), `serveur` (5xx), `reponse_illisible`
+(corps au-delà de 2 Mio, JSON invalide, `content` qui n'est pas un tableau), `refus` (`stop_reason: 'refusal'`, même
+avec des résultats), `outil`, `interrompu` (`pause_turn` ou `max_tokens` sans résultat), `pas_cherche` (l'assistant a
+répondu sans chercher), `interne` (filet ; journal sans aucun champ de `cfg`). Puis `rien` (une recherche a eu lieu,
+aucune page) et `trouve`. Le corps et les en-têtes sont construits avant le `try` du réseau (R-WEB-4) ; l'appel porte
+`redirect: 'error'` (la clé ne suit jamais une redirection). À l'écran : K1 ne vaut que pour `trouve` (les liens
+restent quand la demande change, et « La demande a changé depuis cette recherche. » le dit) ; toute autre issue ne
+s'affiche que pour sa demande (R-WEB-7) ; « Réessayer » force `enLigne` à vrai ; les écrans sans « Réessayer »
+(`cle_refusee`, `recherche_desactivee`, `refus`, `non_configure`, `non_pris_en_charge`) offrent « Chercher à nouveau » ;
+une raison sans texte propre dit « L’assistant n’a pas répondu. Réessaie. » avec « Code : {raison} » dessous (K3).
+
+**Ce qui n'est pas prouvé.** Tout ce qui précède est éprouvé par la suite, avec un `fetch` factice et des réponses
+fixes. Aucun appel réel n'a été fait à l'API Anthropic : statut et corps exacts d'un compte sans recherche web, forme
+réelle de `page_age`, `web_search_requests`, `pause_turn` et `refusal`, taille du corps, durée, coût. Ni Safari ni
+l'iPhone (aucun WebKit ici), ni `target="_blank"` et `navigator.onLine` depuis une PWA installée. Et
+`AbortSignal.timeout` compte le temps **actif** : sur une PWA iOS en arrière-plan, 45 s ne sont pas 45 s réelles.
 
 ## Modèle de données (magasins IndexedDB)
 

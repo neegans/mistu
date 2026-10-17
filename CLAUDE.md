@@ -396,7 +396,8 @@ temporairement inutilisés résorbés, duplication `identifier`/`nouvelleGenerat
 quelques assertions encore faibles (`.some` au lieu d'un décompte, Entrée sans `defaultPrevented`) — liste exacte dans
 `progress.md`.
 
-**Versions.** `APP_VERSION = '0.4.1'` (pins `v0\.4\.1-\d+` dans `tests/ajouter.js` et `tests/sync-l3.js`),
+**Versions** (à la clôture du lot ISBN ; depuis le 17 octobre, voir « Chercher sur le web avec l'assistant » ci-dessous).
+`APP_VERSION = '0.4.1'` (pins `v0\.4\.1-\d+` dans `tests/ajouter.js` et `tests/sync-l3.js`),
 `sw.js VERSION = 'cuisine-os-v0.4.1-12'` (vague /verify), `SHELL` + `./src/core/isbn.js` (seul module neuf), `GOOGLE_BOOKS = { key: '' }`
 dans `src/sync/config.js`. Aucun schéma touché, `DB_VERSION` inchangée.
 
@@ -435,6 +436,85 @@ les mots d'une exclusion), R-ISBN-11 (suggestion > 60 caractères hors plan de b
 `git worktree remove`. Si `main` a bougé depuis `606fdd9` : rebaser (les lignes de version et le total épinglé se
 résolvent en faveur d'`isbn-fiable`). **Neegan fusionne par `!`** puis `git push` ; preuve sur le site public : les
 deux ISBN, les suggestions, la recherche « bbq ».
+
+### Chercher sur le web avec l'assistant (17 octobre 2026)
+
+**Où.** Branche `recherche-web`, worktree `~/projects/mistu-web` (jamais `~/projects/mistu`), serveur de vérification
+`http://localhost:8083/` (suite : `http://localhost:8083/tests/`). Spec :
+`docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md` (rév. 2.1 ; **§ 11.2** « Ce que la construction a
+amendé » : R-WEB-1 à R-WEB-8, tests durcis, fixtures corrigées, notes de couche). Plan :
+`docs/superpowers/plans/2026-10-17-chercher-sur-le-web.md`. Registre : `.superpowers/sdd/2026-10-17-chercher-sur-le-web/`
+(`progress.md`, un brief et un rapport par tâche, les diffs revus ; lanceur `suite.cjs`). Base : `main` `e4e841b` (lot
+ISBN fusionné, 1537/1537, total épinglé 1536). Neuf tâches, chacune avec au plus une ronde de corrections. Le site public
+ne change qu'à la fusion et au `git push` de Neegan.
+
+**Ce qui marche** (éprouvé par la suite : `fetch`, état en ligne, délais, fuseau et navigation injectés, réponses d'API
+fixes, aucun réseau) : l'onglet « Web » de la recherche lance, **sur une tape seulement**, **un** appel à l'API Anthropic
+avec l'outil de recherche web côté serveur (`web_search_20250305`, 3 recherches au plus, pays `CA`) ; sans assistant
+configuré, ou avec un autre fournisseur qu'Anthropic, l'écran le dit avec « Réglages » et n'appelle rien ; **un seul vol
+dans toute l'app** (une nouvelle tape abandonne la précédente, « Annuler » abandonne sans relancer, une réponse tardive
+n'écrit rien) ; **rien d'inventé** : un lien ne s'affiche que si son adresse est égale à celle d'un résultat brut du
+serveur, titre, hôte et date viennent du résultat, le texte de l'assistant ne donne que « pourquoi » (borné à 200) ;
+5 liens au plus, les autres pages repliées sous « Autres pages trouvées ({n}) » ; l'avertissement « L’assistant ne
+vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner. » toujours sous les liens ; des issues
+distinctes (trouvé, rien, indisponible avec sa raison, « Code : {c} » sous le texte générique, « Réessayer » ou
+« Chercher à nouveau ») ; une mémoire **vive** par demande (une nouvelle instance de la route retrouve les liens sans
+second appel ; une puce touchée garde les liens et dit « La demande a changé depuis cette recherche. ») ; **« Garder ce
+lien »** ouvre le signet prérempli (adresse telle quelle, jamais tronquée ; titre borné ; bannière « Adresse reçue :
+vérifie-la avant d’enregistrer. » avec l'hôte que le formulaire enregistrera ; rien n'est écrit sans « Enregistrer ») ;
+l'issue ne contient jamais la clé ni un extrait du corps de la réponse. Les rulings, une ligne chacun (détail en spec
+§ 11.2) :
+- **R-WEB-1** `construireDemande` rend `q` et `filtres` nettoyés ; l'écran rappelle ce qui est parti, jamais la saisie brute.
+- **R-WEB-2** la tape ne réanalyse le champ que s'il a changé : les filtres des listes et les puces retirées survivent.
+- **R-WEB-3** un « trouvé » sans carte survivante à la revalidation du rendu se rend comme « rien ».
+- **R-WEB-4** corps et en-têtes construits avant le `try` du réseau : une exception y est `interne`, jamais `reseau`.
+- **R-WEB-5** clé hors `[\x21-\x7e]` → `cle_refusee` sans appel ; `chercherRecettesWeb(null)` ne lève pas ; abandon après un corps d'erreur → `annule`.
+- **R-WEB-6** un 403 est lu comme le 400 : « web search … not enabled / disabled » → `recherche_desactivee`, sinon `cle_refusee`.
+- **R-WEB-7** K1 pour `trouve` seulement ; les écrans sans « Réessayer » offrent « Chercher à nouveau » (pas d'impasse après une clé corrigée).
+- **R-WEB-8** l'hôte de la bannière « Adresse reçue » vient de `signetModel` (même décision que l'enregistrement) ; une adresse d'espaces n'est pas « reçue ».
+
+**Ce qui n'est PAS prouvé.** **Aucun appel réel avec la clé de Neegan** : statut et corps exacts d'un compte sans
+recherche web (400 ou 403, texte du message), forme réelle de `page_age`, de `web_search_requests`, de `pause_turn` et
+de `refusal`, taille réelle du corps, durée d'une recherche, coût réel ; **Safari et l'iPhone** (aucun WebKit ici) ;
+`target="_blank"` et `navigator.onLine` depuis une PWA installée ; `AbortSignal.timeout` compte le temps **actif** : sur
+une PWA iOS en arrière-plan, 45 s ne sont pas 45 s réelles.
+
+**Dettes (assumées, nommées dans le registre).** Pays fixé à `CA` (spec R3) ; délai de 45 s (R6) ; classement du
+400/403 « recherche web non activée » par le texte de `error.message` (R10 : un libellé changé retombe en `requete` ou
+`cle_refusee`) ; `vues` purgées par `isConnected` : « pas encore monté » et « démonté » confondus (inatteignable
+aujourd'hui) ; timers de `signalDelai` non annulables (inoffensif) ; `requeteRoute` duplique le `buildQuery` de `run()` ;
+textes de garde dupliqués entre `renderWeb` et `renderIssue` ; `src/ui/search.js` passe de 100 à 231 lignes (l'écran web
+pourra avoir son propre module) ; `issue()` relit `cfg.model` dans le `catch` externe (un getter qui lève à chaque accès
+ferait lever ; `cfg` est du JSON simple) ; un `trouve` sans carte survivante (rendu `rien`) suit encore K1. Tests : défauts
+(fuseau, `enLigne`, 45 s, 2 Mio, 64 Kio) non épinglés ; en-têtes avant le `try` et `ctl.abort()` en `finally` sans test
+dédié ; branches `exclude`/`max_active` de `libellePuce` non épinglées ; chemin `filtres` de `borner` sans fixture Cf ;
+pins de `VERSION` répétés dans trois suites ; `!includes('notice')` sur tout `pairing.js` fragile — liste exacte dans
+`progress.md`.
+
+**Versions.** `APP_VERSION = '0.5.0'` (pins `v0\.5\.0-\d+` dans `tests/ajouter.js`, `tests/sync-l3.js` et
+`tests/recherche-web.js`), `sw.js VERSION = 'cuisine-os-v0.5.0-9'` (clôture, tâche 9), `SHELL` + `./src/core/bornes.js`
+et `./src/domain/recherche-web.js` (deux modules neufs). Aucun schéma touché, aucune migration, aucun réglage neuf,
+`DB_VERSION` inchangée ; CSP inchangée (`connect-src https:` couvre déjà `api.anthropic.com`).
+
+**Bilan (clôture, tâche 9).** Suite complète **1753/1753 verts** (total épinglé **1752** dans `tests/tests.js` :
+l'assertion du total s'ajoute elle-même au bilan affiché), une seule erreur de console : le 404 de `/favicon.ico`
+(pré-existant, `tests/index.html` n'a pas de favicon) ; `node --test tools/*.test.mjs` **40/40** ; `node
+tools/generer-migrations.mjs --check` : **0** ; aucun U+200B-200F, U+2028/2029 ni U+202E dans les fichiers touchés par
+la tâche 9.
+
+**Gestes de Neegan** (spec § 10 R2, hors code). 1) Créer la clé dans un **workspace Anthropic dédié à Cuisine OS, avec
+un plafond de dépense mensuel**, puis l'entrer dans Réglages → Assistant IA. 2) **Ne pas entrer cette clé sur le site
+public** (`neegans.github.io`) **tant que D5** (sous-domaine dédié) **n'est pas fait** : toute autre page Pages du compte
+lit la même IndexedDB. 3) Après la revue finale et `/verify` : fusionner par `!` (`cd ~/projects/mistu && git merge
+--ff-only recherche-web`, ou rebaser si `main` a bougé depuis `e4e841b`), puis `! git push`. 4) **Preuve réelle**, sur le
+Mac d'abord, puis sur l'iPhone (qui n'a que le site public : après D5) : « saumon fenouil » → des liens, « Garder ce
+lien » → signet prérempli ; noter la durée, le nombre de recherches affiché et, si observable, la forme du refus d'un
+compte sans recherche web.
+
+**Fusion.** Revue finale de branche puis `/verify` par le chef d'orchestre ; copier
+`.superpowers/sdd/2026-10-17-chercher-sur-le-web/` dans `~/projects/mistu/.superpowers/sdd/` **avant** tout
+`git worktree remove`. Preuve sur le site public après le `push` : service worker `cuisine-os-v0.5.0-N` servi, onglet
+Web → « Pour chercher sur le web, configure l’assistant IA … » sur un navigateur sans clé (0 requête).
 
 ## Premier lot de fiabilisation — 8 septembre 2026, à réviser
 

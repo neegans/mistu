@@ -363,8 +363,9 @@ puce dit.
 ## 8. Données, versions, dictionnaire, CSP, docs
 
 - **Aucun** changement de schéma, aucune migration, aucun réglage neuf. `tools/generer-migrations.mjs --check` reste 0.
-- `src/model/schema.js` : `APP_VERSION = '0.5.0'`. `sw.js` : `VERSION = 'cuisine-os-v0.5.0-1'`, `SHELL` +=
-  `'./src/domain/recherche-web.js'` et `'./src/core/bornes.js'` (le test « SHELL complet » de `tests/sync.js` rougit sinon).
+- `src/model/schema.js` : `APP_VERSION = '0.5.0'`. `sw.js` : `VERSION = 'cuisine-os-v0.5.0-9'` (valeur réelle à la
+  clôture, tâche 9), `SHELL` += `'./src/domain/recherche-web.js'` et `'./src/core/bornes.js'` (le test « SHELL complet »
+  de `tests/sync.js` rougit sinon).
 - **Tests existants qui passent au rouge et sont mis à jour** (F15) : `tests/ajouter.js` l. 1800 (`v0\.4\.1-\d+` →
   `v0\.5\.0-\d+`) et l. 1802 (`'0.4.1'` → `'0.5.0'`) ; `tests/sync-l3.js` l. 1864 (`v0\.4\.1-\d+` → `v0\.5\.0-\d+`). Le § 9.6
   **remplace** ces pins, il ne les double pas.
@@ -549,4 +550,60 @@ appellent `reinitialiserWeb()` avant chaque cas et lisent `etatWeb()` comme **fa
 
 ### 11.2 Ce que la construction a amendé
 
-À remplir pendant le SDD (rulings R-WEB-n, chaque ligne avec son coût si faux).
+Une ligne par écart entre cette spec et ce qui a été construit (tâches 1 à 9, registre
+`.superpowers/sdd/2026-10-17-chercher-sur-le-web/progress.md`), avec son coût si le ruling était faux.
+
+- **R-WEB-1** (T3/T6) `construireDemande` rend aussi `q` et `filtres` **nettoyés** ; `lancer` envoie et mémorise
+  ceux-là (`memoire` = `{ cle, issue, q, filtres }`, pas seulement `{ cle, issue }` du § 5.1) ; l'écran rappelle la
+  demande partie (« Demande envoyée : … »), jamais la saisie brute. Coût si faux : aucun.
+- **R-WEB-2** (T6) `lancer` ne réanalyse le champ que s'il a changé depuis la dernière analyse
+  (`input.value.trim() !== state.q`, amende § 5.4.1) : les filtres ajoutés par les listes « + type » / « + restriction »
+  et les puces retirées à la main survivent à la tape. Coût si faux : un filtre perdu.
+- **R-WEB-3** (T7) un `trouve` dont aucune carte ne survit à la revalidation au rendu se rend comme `rien`. Coût si
+  faux : un titre vide.
+- **R-WEB-4** (T4, ruling corps-avant-try) le corps **et** les en-têtes de la requête sont construits avant le `try` du
+  réseau : une exception y devient `interne` (filet), jamais `reseau`. Coût si faux : un classement d'erreur.
+- **R-WEB-5** (T4 ronde 1) garde de forme de la clé `/^[\x21-\x7e]+$/` → `cle_refusee` avant tout appel (une clé
+  collée avec un caractère invisible faisait un `TypeError` de `fetch` classé `reseau`) ; `chercherRecettesWeb(null)`
+  ne lève pas (destructuration dans le `try`) ; après la lecture d'un corps d'erreur, un abandon extérieur → `annule` ;
+  `ctl.abort()` en `finally`. Coût si faux : quelques lignes dans une fonction, un classement de plus.
+- **R-WEB-6** (T4 ronde 1, amende le tableau du § 4.5) un **403** passe par la même lecture bornée que le 400 :
+  `error.message` « web search … not enabled / disabled » → `recherche_desactivee`, sinon `cle_refusee` ; 401 →
+  `cle_refusee`. Coût si faux : un classement de plus.
+- **R-WEB-7** (T7 ronde 1, amende § 5.1 et § 5.6) K1 ne vaut que pour `trouve` (garder des **liens** visibles quand la
+  demande change) ; toute autre issue en mémoire ne s'affiche que si `memoire.cle === cle`, sinon écran du bouton ; les
+  écrans sans « Réessayer » (`cle_refusee`, `recherche_desactivee`, `refus`, `non_configure`, `non_pris_en_charge`)
+  offrent « Chercher à nouveau » (= `lancer()`, sans forcer `enLigne`) — sans quoi une clé corrigée dans Réglages
+  laissait l'écran « clé refusée » sans issue jusqu'au rechargement. Coût si faux : un bouton de plus. Résidu nommé : un
+  `trouve` sans carte survivante (rendu `rien`, R-WEB-3) suit encore K1.
+- **R-WEB-8** (T8 ronde 1, amende le code du § 6) l'hôte de la bannière « Adresse reçue » vient de
+  `signetModel(etat).hote || ''` (même décision que l'enregistrement : rognage, longueur) ; la garde `recue` exige
+  `query.adresse.trim() !== ''` ; la bannière est volontairement statique (« reçue » = l'adresse telle qu'arrivée).
+  Coût si faux : aucun.
+- **K1-K3, G1-G2** (kit, rév. 2.1) : déjà au § 11.1. K2 : `choisirLiens` rend `{ liens, autres, repli }` (l'en-tête du
+  § 4.4 dit encore `{ liens, repli }` ; son point 4 fait foi).
+- **État de l'écran** (T6-T7) : `vues` est un ensemble de `{ root, redessiner }`, purgé à **chaque rendu** du mode Web
+  (pas seulement au moment de notifier, § 5.1) et dédoublonné par racine ; « Résultat reçu. », rendu provisoire de la
+  tâche 6, est remplacé par les écrans des § 5.5-5.6 en tâche 7. Coût si faux : aucun.
+- **Tests durcis par les revues** : T3 (adresse inventée sur un hôte réel, Cf/bidi placés **avant** la coupe,
+  `u:p@` côté choix, repli à 7 résultats) ; T4 (filet et ruling corps-avant-try testés par un getter piégé et un stub de
+  `console.error` ; vraie `Response` en flux sous la borne) ; T6 (I-I prouvé sans « Annuler », redessin à la résolution
+  lu dans le DOM, filtres comparés aux `.chip` du DOM, aide « Écris d’abord ce que tu cherches. » basculée à la frappe
+  avec `data-role="aide-web"`, `Object.freeze(ISSUE_INTERNE)` — ces deux derniers avec deux lignes de code) ; T7
+  (« Demande envoyée » exacte, `href` avec identifiants revalidé au rendu, « Réessayer » discriminé par
+  `enLigne: false`, constantes au niveau du module, `Object.hasOwn`). Coût si faux : aucun sur le produit, des
+  assertions de plus.
+- **Fixtures du plan corrigées** : pré-vol, le test R-WEB-1 attend la `q` nettoyée passée au module, et les blocs d'écran
+  forcent `setUiLocale('fr')` en tête ; T5 « en quinze minutes » → « en 15 minutes » (l'analyseur ne lit que les
+  chiffres) ; T6 « saumon » et « fenouil » sont des ingrédients du lexique → puces `avec …` (textes des puces lus dans
+  le DOM) ; T7 le test R-WEB-1 clique « Chercher à nouveau » (K1), et la vérification sans `innerHTML` passe par
+  `vraiFetch` (le bloc piège `fetch`). Coût si faux : aucun (entrées de test, attendus et code inchangés).
+- **Notes de couche** : `libellePuce` est l'ancien `chipLabel` (déjà exporté), renommé ; `lireBornee`, `signalDelai`,
+  `OPTIONS_FETCH` et `borner` sont déplacés dans `src/core/bornes.js` et ré-exportés par `livre-ajout.js` (`borner` y
+  est appelée avec `LIMITES_ISBN.champ`).
+- **Dictionnaire et versions** (T8-T9) : « Adresse reçue : vérifie-la avant d’enregistrer. » est entrée dans `en.js` dès
+  la tâche 8 (le contrôle F13 de `tests/ajouter.js` couvre `signet.js`) ; « Annuler » existait déjà : la tâche 9 ajoute
+  22 clés, aucune en double, et retire la clé morte. Le contrôle du § 9.8 passe par une liste explicite de 28 clés (les
+  textes `indisponible` passent par `t(cle)` avec une variable : aucune lecture du source ne les voit). `VERSION` est
+  épinglée par le motif `v0\.5\.0-\d+` dans trois suites, pas par la valeur exacte du § 9.8 ; la valeur réelle est au
+  § 8. Total épinglé à la clôture : **1752** (`tests/tests.js`), suite 1753/1753. Coût si faux : aucun.

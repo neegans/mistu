@@ -628,4 +628,13 @@ export async function runRechercheWebTests({ eq, ok }) {
       });
     } finally { globalThis.fetch = vraiFetch; }
   }
+  // --- § 8 / § 9.8 dictionnaire et statiques
+  {
+    const { EN } = await import('../src/i18n/en.js');
+    const CLES = ['Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.', 'Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.', 'Chercher sur le web avec l’assistant', 'Une recherche = un appel à ton compte Anthropic.', 'Écris d’abord ce que tu cherches.', 'L’assistant cherche sur le web…', 'Annuler', 'Trouvé sur le web', 'Demande envoyée : {q}', 'Garder ce lien', 'L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.', 'Recherches faites par l’assistant : {n}', 'Liens tels que trouvés, sans tri de l’assistant.', 'Chercher à nouveau', 'Aucune page trouvée pour cette demande. Reformule ou cherche autrement.', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.', 'La recherche web n’est pas activée sur ton compte Anthropic.', 'Trop de demandes pour l’instant. Réessaie dans une minute.', 'L’assistant a refusé cette demande.', 'L’assistant n’a pas cherché sur le web. Réessaie.', 'L’assistant n’a pas répondu. Réessaie.', 'Adresse reçue : vérifie-la avant d’enregistrer.', 'La demande a changé depuis cette recherche.', 'Autres pages trouvées ({n})', 'Réessayer', 'Réglages', 'Tu es hors ligne.', 'Code : {c}'];
+    eq(CLES.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'en.js : chaque texte du lot a sa traduction');
+    ok(!('Le Web n’est pas activé : aucune source externe n’est configurée. Aucune recherche extérieure n’a été faite.' in EN), 'en.js : la clé morte du mode Web est retirée');
+    ok(!(await lire('../src/ui/search.js')).includes('Le Web n’est pas activé'), 'search.js : la coquille est retirée');
+    ok(!/from '\.\.\/ui\//.test(await lire('../src/core/bornes.js')) && !/from '\.\.\/ui\//.test(await lire('../src/domain/recherche-web.js')), 'couches : bornes.js et recherche-web.js n’importent rien de src/ui/');
+  }
 }
