@@ -763,6 +763,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
       const ctxDe = (llm) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: new Map(), meal_feedback: [], settings: { llm } });
       const ANTH = { provider: 'anthropic', api_key: 'k', model: 'm' };
       const pilote = () => { const p = {}; p.promesse = new Promise((res) => { p.resoudre = res; }); return p; };
+      const tick = () => new Promise((r) => setTimeout(r, 0)); // un tour de boucle : les .then de lancer() ont tourné
       const monter = async (query, ctx, deps) => { const root = await S.renderSearch({}, { mode: 'web', ...query }, ctx, deps); scene.append(root); return root; };
       const texte = (root) => root.textContent;
       const bouton = (root, nom) => [...root.querySelectorAll('button')].find((b) => b.textContent === nom);
@@ -792,9 +793,9 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
         eq(b.disabled, true, 'bouton : une saisie faite de Cf laisse le bouton éteint (même règle que construireDemande)');
         taper(root, 'saumon fenouil sans gluten');
         b.click();
-        await Promise.resolve();
+        await tick();
         eq(appels.length, 1, 'tape : un appel');
-        eq([appels[0].a.q, appels[0].a.filtres, appels[0].a.langue, appels[0].a.cfg], ['saumon fenouil', ['Sans gluten'], 'fr', ANTH], 'tape : la demande est le CHAMP relu (q sans « sans gluten », puce texte « Sans gluten »), la langue, la cfg (I-J)');
+        eq([appels[0].a.q, appels[0].a.filtres, appels[0].a.langue, appels[0].a.cfg], ['saumon fenouil sans gluten', ['Sans gluten'], 'fr', ANTH], 'tape : la demande est le CHAMP relu tel quel (q brut), la puce comprise en TEXTE « Sans gluten », la langue, la cfg (I-J)');
         ok(appels[0].d.signal instanceof AbortSignal && typeof appels[0].d.enLigne === 'undefined', 'tape : un signal est passé ; enLigne n’est pas forcé à la tape');
         const e = S.etatWeb();
         eq([e.enCours, typeof e.cle, e.memoire], [true, 'string', null], 'tape : etatWeb dit un vol en cours, rien en mémoire');
@@ -805,7 +806,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
         bouton(root, 'Annuler').click();
         eq([appels[0].d.signal.aborted, S.etatWeb().enCours, S.etatWeb().memoire, !!bouton(root, 'Chercher sur le web avec l’assistant')], [true, false, null, true], 'annuler : signal abandonné, plus de vol, mémoire intacte, écran du bouton');
         p.resoudre({ ...issueTrouve, raison: 'annule', etat: 'indisponible', liens: [] });
-        await Promise.resolve(); await Promise.resolve();
+        await tick();
         eq(S.etatWeb().memoire, null, 'annuler : la résolution tardive d’un vol annulé n’écrit rien');
         root.remove();
       }
@@ -817,7 +818,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
         const ctx = ctxDe(ANTH);
         const r1 = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
         bouton(r1, 'Chercher sur le web avec l’assistant').click();
-        await Promise.resolve();
+        await tick();
         const r2 = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });   // la ré-instanciation de production
         ok(!!r2.querySelector('[role="status"]') && !!bouton(r2, 'Annuler'), 'instance 2 : retrouve le vol par sa clé et montre « en cours »');
         r1.remove();
@@ -825,13 +826,13 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
         // le bouton de r2 est éteint pendant le vol : la seconde tape passe par « Annuler » puis le bouton
         bouton(r2, 'Annuler').click();
         bouton(r2, 'Chercher sur le web avec l’assistant').click();
-        await Promise.resolve();
+        await tick();
         eq([appels.length, appels[0].aborted, appels[1].aborted], [2, true, false], 'instance 2 : deux appels, le premier abandonné (I-I)');
         p1.resoudre({ ...issueTrouve, liens: [{ ...issueTrouve.liens[0], titre: 'TARDIF' }] });
-        await Promise.resolve(); await Promise.resolve();
+        await tick();
         eq(S.etatWeb().memoire, null, 'instance 2 : la réponse tardive du vol 1 n’écrit rien');
         p2.resoudre(issueTrouve);
-        await Promise.resolve(); await Promise.resolve();
+        await tick();
         eq([S.etatWeb().enCours, S.etatWeb().memoire?.etat], [false, 'trouve'], 'instance 2 : la réponse du vol 2 est en mémoire');
         ok(!texte(r2).includes('TARDIF'), 'instance 2 : l’écran ne montre rien du vol 1');
         r2.remove();
@@ -942,11 +943,12 @@ Avant `render();` (l. 96), ajouter les fonctions de la recherche web (closures s
     if (!fournisseur.configured) return el('div', { class: 'status warn' }, t('Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'), ' ', reglages());
     if (!fournisseur.supportsWebSearch) return el('div', { class: 'status warn' }, t('Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.'), ' ', reglages());
     const cle = demandeCourante().cle;
-    const boutonChercher = (eteint) => el('button', { class: 'btn primary', dataset: { role: 'chercher-web' }, disabled: eteint, onClick: () => lancer() }, t('Chercher sur le web avec l’assistant'));
+    const boutonChercher = (eteint) => el('button', { class: 'btn primary', dataset: { role: 'chercher-web' }, disabled: eteint, onClick: () => lancer() }, t('Chercher sur le web avec l’assistant')); // data-role : rouvert par la frappe (§ 5.3)
     if (vol && vol.cle === cle) {
       return el('div', { class: 'card flat stack' },
         el('div', { class: 'status', role: 'status' }, t('L’assistant cherche sur le web…')),
-        el('div', { class: 'row' }, boutonChercher(true), el('button', { class: 'btn', onClick: annuler }, t('Annuler'))));
+        // Sans data-role : l'écouteur de frappe ne doit PAS rouvrir ce bouton pendant le vol.
+        el('div', { class: 'row' }, el('button', { class: 'btn primary', disabled: true }, t('Chercher sur le web avec l’assistant')), el('button', { class: 'btn', onClick: annuler }, t('Annuler'))));
     }
     if (memoire && memoire.cle === cle) return renderIssue(memoire.issue, reglages);
     const demandeVide = !borner(input.value, 500).trim();
@@ -1008,7 +1010,9 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
       const monter = async (query, ctx, deps) => { const root = await S.renderSearch({}, { mode: 'web', ...query }, ctx, deps); scene.append(root); return root; };
       const texte = (root) => root.textContent;
       const bouton = (root, nom) => [...root.querySelectorAll('button')].find((b) => b.textContent === nom);
-      const tapeEtAttend = async (root, issue, appels) => { const p = new Promise((r) => { appels.rendre = r; }); bouton(root, 'Chercher sur le web avec l’assistant').click(); await Promise.resolve(); appels.rendre(issue); await new Promise((r) => setTimeout(r, 0)); };
+      const tick = () => new Promise((r) => setTimeout(r, 0));
+      // Tape, laisse lancer() appeler chercher (qui pose appels.rendre), résout l'issue, laisse la mémoire et le redessin se poser.
+      const tapeEtAttend = async (root, issue) => { bouton(root, 'Chercher sur le web avec l’assistant').click(); await tick(); appels.rendre(issue); await tick(); };
       const liens = [{ href: 'https://a.test/r?x=1', hote: 'a.test', titre: '<b>Saumon</b> au fenouil', date: 'May 1, 2026', pourquoi: 'Fenouil et saumon.' }, { href: 'https://b.test/', hote: 'b.test', titre: 'b.test', date: null, pourquoi: null }];
       const trouve = { etat: 'trouve', raison: null, liens, repli: false, recherches: 2, modele: 'm' };
       const appels = { n: 0, deps: [], rendre: null };
@@ -1019,7 +1023,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
       // trouve
       S.reinitialiserWeb();
       let root = await monter({ q: 'saumon fenouil' }, ctx, { chercher, navigate: (p) => navs.push(p) });
-      await tapeEtAttend(root, trouve, appels);
+      await tapeEtAttend(root, trouve);
       const a = root.querySelectorAll('a[target="_blank"][rel="noopener noreferrer"]');
       eq([...a].map((n) => [n.getAttribute('href'), n.textContent]), [['https://a.test/r?x=1', '<b>Saumon</b> au fenouil'], ['https://b.test/', 'b.test']], 'trouve : un lien par résultat, href exact, titre en TEXTE littéral (I-H, Review Focus 3)');
       eq(root.querySelectorAll('b').length, 0, 'trouve : aucun élément créé par un titre hostile');
@@ -1051,22 +1055,22 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
       // repli
       S.reinitialiserWeb();
       root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
-      await tapeEtAttend(root, { ...trouve, repli: true, recherches: null }, appels);
+      await tapeEtAttend(root, { ...trouve, repli: true, recherches: null });
       ok(texte(root).includes('Liens tels que trouvés, sans tri de l’assistant.') && !texte(root).includes('Recherches faites'), 'repli : ligne repli ; pas de compte quand recherches est null');
       root.remove();
       // rien + Réessayer force enLigne (S9)
       S.reinitialiserWeb();
       root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
-      await tapeEtAttend(root, { etat: 'rien', raison: null, liens: [], repli: false, recherches: 1, modele: 'm' }, appels);
+      await tapeEtAttend(root, { etat: 'rien', raison: null, liens: [], repli: false, recherches: 1, modele: 'm' });
       ok(texte(root).includes('Aucune page trouvée pour cette demande. Reformule ou cherche autrement.') && !!bouton(root, 'Réessayer'), 'rien : texte + Réessayer');
-      { const n = appels.n; bouton(root, 'Réessayer').click(); await Promise.resolve(); eq([appels.n, appels.deps[appels.deps.length - 1].enLigne()], [n + 1, true], 'réessayer : rappelle chercher avec enLigne forcé à vrai (S9)'); appels.rendre(trouve); await new Promise((r) => setTimeout(r, 0)); }
+      { const n = appels.n; bouton(root, 'Réessayer').click(); await tick(); eq([appels.n, appels.deps[appels.deps.length - 1].enLigne()], [n + 1, true], 'réessayer : rappelle chercher avec enLigne forcé à vrai (S9)'); appels.rendre(trouve); await tick(); }
       root.remove();
       // indisponible × 8
       const CAS = [['hors_ligne', 'Tu es hors ligne.', true, false], ['cle_refusee', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.', false, true], ['recherche_desactivee', 'La recherche web n’est pas activée sur ton compte Anthropic.', false, true], ['trop_de_demandes', 'Trop de demandes pour l’instant. Réessaie dans une minute.', true, false], ['refus', 'L’assistant a refusé cette demande.', false, false], ['pas_cherche', 'L’assistant n’a pas cherché sur le web. Réessaie.', true, false], ['delai', 'L’assistant n’a pas répondu. Réessaie.', true, false], ['interne', 'L’assistant n’a pas répondu. Réessaie.', true, false]];
       for (const [raison, attendu, reessai, reglages] of CAS) {
         S.reinitialiserWeb();
         root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
-        await tapeEtAttend(root, { etat: 'indisponible', raison, liens: [], repli: false, recherches: null, modele: 'm' }, appels);
+        await tapeEtAttend(root, { etat: 'indisponible', raison, liens: [], repli: false, recherches: null, modele: 'm' });
         const statut = root.querySelector('.status.warn[role="status"]');
         eq([statut?.textContent.includes(attendu), !!bouton(root, 'Réessayer'), !!root.querySelector('a[href="#/settings"]')], [true, reessai, reglages], `indisponible/${raison} : texte, Réessayer=${reessai}, Réglages=${reglages}`);
         root.remove();
@@ -1074,7 +1078,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
       // Réglage changé pendant le vol (Review Focus 5) : l'issue non_configure se rend avec le texte de la garde
       S.reinitialiserWeb();
       root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
-      await tapeEtAttend(root, { etat: 'non_configure', raison: null, liens: [], repli: false, recherches: null, modele: null }, appels);
+      await tapeEtAttend(root, { etat: 'non_configure', raison: null, liens: [], repli: false, recherches: null, modele: null });
       ok(texte(root).includes('Pour chercher sur le web, configure l’assistant IA') && !!root.querySelector('a[href="#/settings"]'), 'non_configure en issue : texte de la garde + Réglages (F5)');
       root.remove();
       ok(!(await (async () => (await fetch('../src/ui/search.js?v=' + Date.now(), { cache: 'no-store' })).text())()).includes('innerHTML'), 'search.js : aucun innerHTML');
