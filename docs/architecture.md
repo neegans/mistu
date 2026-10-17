@@ -362,7 +362,7 @@ nommée : `source_pages.sha256` reste la même sorte de relation latente, jamais
 ## Chercher sur le web avec l'assistant (17 octobre 2026)
 
 Spec : `docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md` (rév. 2.1 ; § 11.2 : ce que la construction a
-amendé, R-WEB-1 à R-WEB-8). Livré ici : l'onglet « Web » de la recherche lance, sur une tape et sur elle seule, **un**
+amendé, R-WEB-1 à R-WEB-9). Livré ici : l'onglet « Web » de la recherche lance, sur une tape et sur elle seule, **un**
 appel à l'API Anthropic avec l'outil de recherche web côté serveur (`web_search_20250305`), affiche au plus cinq liens
 pris dans les résultats bruts du serveur, et « Garder ce lien » ouvre le signet prérempli. Deux modules neufs ; les
 autres changements tiennent en quelques lignes chacun.
@@ -401,7 +401,8 @@ serveur, elle meurt au rechargement — I-G) ; `vol` (`{ cle, controller, promes
 l'app — I-I) ; `vues` (un ensemble de `{ root, redessiner }` : les instances vivantes du mode Web, dédoublonnées par
 racine, purgées à chaque rendu et à chaque notification dès que leur racine a quitté le document). `etatWeb()` et
 `reinitialiserWeb()` exposent et remettent cet état pour les tests, qui attendent un fait et jamais un délai. Une tape
-(`lancer`) relit le champ seulement s'il a changé depuis la dernière analyse (R-WEB-2), abandonne le vol précédent, pose
+(`lancer`) relit le champ seulement s'il a changé depuis la dernière analyse (R-WEB-2) — et y réunit alors les
+restrictions affichées, jamais assouplies par la frappe (R-WEB-9) —, abandonne le vol précédent, pose
 le nouveau, puis rejoue la route ; au retour, une promesse qui n'est plus celle du vol n'écrit rien ; une exception
 devient l'issue gelée `interne` (filet de l'écran : jamais d'écran figé). « Annuler » abandonne sans rien lancer, et la
 mémoire reste ce qu'elle était.

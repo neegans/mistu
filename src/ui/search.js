@@ -36,6 +36,20 @@ const TEXTES_INDISPONIBLE = {
 };
 const SANS_REESSAI = ['cle_refusee', 'recherche_desactivee', 'refus'];
 const AVEC_REGLAGES = ['cle_refusee', 'recherche_desactivee'];
+// R-WEB-9 (amende § 5.4.1) : un champ CHANGÉ est relu, mais les restrictions déjà affichées — type, régimes, exclusions —
+// sont réunies à la nouvelle analyse (les anciennes d'abord, puis les nouvelles absentes) : la frappe n'assouplit jamais
+// une restriction, seule la croix d'une puce la retire. Un ingrédient exclu ne reste pas « avec » (même règle que parseQuery).
+function reunirRestrictions(avant, analyse) {
+  const unir = (a, b) => [...new Set([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])])];
+  const f = analyse.filters;
+  f.diets = unir(avant?.diets, f.diets);
+  f.exclude = unir(avant?.exclude, f.exclude);
+  const textes = unir(avant?.exclude_text, f.exclude_text);
+  if (textes.length) f.exclude_text = textes;
+  if (f.type == null && avant?.type) f.type = avant.type;
+  f.include = f.include.filter((id) => !f.exclude.includes(id));
+  return analyse;
+}
 
 export async function renderSearch(params, query, ctx, deps = {}) {
   const root = el('div', null);
@@ -46,7 +60,10 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   if (forRecipe && role) state.parsed.filters.type = role;
 
   const input = el('input', { type: 'search', value: state.q, placeholder: forRecipe ? t('Préciser : concombre, sans gluten, 15 minutes…') : t('Ex. : une salade avec du concombre, sans gluten, en quinze minutes'), enterkeyhint: 'search' });
-  const run = () => { state.q = input.value.trim(); state.parsed = parseQuery(state.q); if (forRecipe && role) state.parsed.filters.type = role; navigate('/search' + buildQuery({ q: state.q, mode: state.mode, fav: state.favorites ? 1 : '', cooked: state.cooked ? 1 : '', any: state.requireAll ? '' : 1, for: query.for || '', role: role || '' }), { replace: true }); render(); };
+  // L'adresse de la recherche n'a qu'UNE définition : run() (Entrée, mode, cases) et lancer() (la tape web) la rejouent
+  // en replace par le `navigate` injecté (par défaut celui du routeur).
+  const requeteRoute = () => '/search' + buildQuery({ q: state.q, mode: state.mode, fav: state.favorites ? 1 : '', cooked: state.cooked ? 1 : '', any: state.requireAll ? '' : 1, for: query.for || '', role: role || '' });
+  const run = () => { state.q = input.value.trim(); state.parsed = parseQuery(state.q); if (forRecipe && role) state.parsed.filters.type = role; nav(requeteRoute(), { replace: true }); render(); };
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
   input.addEventListener('input', () => {
     const vide = !borner(input.value, 500).trim(); // même règle que construireDemande
@@ -126,14 +143,15 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   // --- Recherche web (spec Web § 5)
   const textesDesPuces = () => chipsFor(state.parsed.filters).map((c) => libellePuce(c, ctx.ingredientsById));
   const demandeCourante = () => construireDemande({ q: state.q, filtres: textesDesPuces(), langue: getUiLocale() });
-  const requeteRoute = () => '/search' + buildQuery({ q: state.q, mode: state.mode, fav: state.favorites ? 1 : '', cooked: state.cooked ? 1 : '', any: state.requireAll ? '' : 1, for: query.for || '', role: role || '' });
   // § 5.4 : le champ est RELU s'il a changé depuis la dernière analyse (I-J) — s'il n'a pas changé, les puces ajoutées
   // par les listes « + type » / « + restriction » ou retirées à la main RESTENT ce qu'elles sont à l'écran (R-WEB-2 : une
-  // relecture inconditionnelle les écrasait). Puis le vol précédent est abandonné (I-I), le nouveau posé au module, et la
-  // route rejouée en replace (elle se ré-instancie et retrouve le vol par sa clé). « Réessayer » passe { enLigne: () => true }.
+  // relecture inconditionnelle les écrasait) ; s'il a changé, les restrictions affichées sont réunies à la nouvelle
+  // analyse (R-WEB-9 : la frappe sans Entrée effaçait la restriction choisie). Puis le vol précédent est abandonné
+  // (I-I), le nouveau posé au module, et la route rejouée en replace (elle se ré-instancie et retrouve le vol par sa
+  // clé). « Réessayer » passe { enLigne: () => true }.
   const lancer = (depsForces = {}) => {
     const champ = input.value.trim();
-    if (champ !== state.q) { state.q = champ; state.parsed = parseQuery(champ); if (forRecipe && role) state.parsed.filters.type = role; }
+    if (champ !== state.q) { const avant = state.parsed.filters; state.q = champ; state.parsed = reunirRestrictions(avant, parseQuery(champ)); if (forRecipe && role) state.parsed.filters.type = role; }
     const demande = demandeCourante();
     if (!demande.cle) { render(); return; }
     vol?.controller.abort();

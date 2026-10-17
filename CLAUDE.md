@@ -442,7 +442,7 @@ deux ISBN, les suggestions, la recherche « bbq ».
 **Où.** Branche `recherche-web`, worktree `~/projects/mistu-web` (jamais `~/projects/mistu`), serveur de vérification
 `http://localhost:8083/` (suite : `http://localhost:8083/tests/`). Spec :
 `docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md` (rév. 2.1 ; **§ 11.2** « Ce que la construction a
-amendé » : R-WEB-1 à R-WEB-8, tests durcis, fixtures corrigées, notes de couche). Plan :
+amendé » : R-WEB-1 à R-WEB-9, tests durcis, fixtures corrigées, notes de couche, vague finale). Plan :
 `docs/superpowers/plans/2026-10-17-chercher-sur-le-web.md`. Registre : `.superpowers/sdd/2026-10-17-chercher-sur-le-web/`
 (`progress.md`, un brief et un rapport par tâche, les diffs revus ; lanceur `suite.cjs`). Base : `main` `e4e841b` (lot
 ISBN fusionné, 1537/1537, total épinglé 1536). Neuf tâches, chacune avec au plus une ronde de corrections. Le site public
@@ -473,6 +473,7 @@ de code, Cc/Cf retirés) arrivent à l'écran. Les rulings, une ligne chacun (d�
 - **R-WEB-6** un 403 est lu comme le 400 : « web search … not enabled / disabled » → `recherche_desactivee`, sinon `cle_refusee`.
 - **R-WEB-7** K1 pour `trouve` seulement ; les écrans sans « Réessayer » offrent « Chercher à nouveau » (pas d'impasse après une clé corrigée).
 - **R-WEB-8** l'hôte de la bannière « Adresse reçue » vient de `signetModel` (même décision que l'enregistrement) ; une adresse d'espaces n'est pas « reçue ».
+- **R-WEB-9** champ changé sans Entrée : la tape le relit et y **réunit** les restrictions affichées (type, régimes, exclusions) — la frappe n'assouplit jamais une restriction.
 
 **Ce qui n'est PAS prouvé.** **Aucun appel réel avec la clé de Neegan** : statut et corps exacts d'un compte sans
 recherche web (400 ou 403, texte du message), forme réelle de `page_age`, de `web_search_requests`, de `pause_turn` et
@@ -483,9 +484,9 @@ une PWA iOS en arrière-plan, 45 s ne sont pas 45 s réelles.
 **Dettes (assumées, nommées dans le registre).** Pays fixé à `CA` (spec R3) ; délai de 45 s (R6) ; classement du
 400/403 « recherche web non activée » par le texte de `error.message` (R10 : un libellé changé retombe en `requete` ou
 `cle_refusee`) ; `vues` purgées par `isConnected` : « pas encore monté » et « démonté » confondus (inatteignable
-aujourd'hui) ; timers de `signalDelai` non annulables (inoffensif) ; `requeteRoute` duplique le `buildQuery` de `run()` ;
+aujourd'hui) ; timers de `signalDelai` non annulables (inoffensif) ;
 textes de garde dupliqués entre `renderWeb` et `renderIssue` ; une levée dans un redessin interrompt `notifier()` (rejet
-non géré) ; `src/ui/search.js` passe de 100 à 231 lignes (l'écran web
+non géré) ; `src/ui/search.js` passe de 100 à 249 lignes (l'écran web
 pourra avoir son propre module) ; `issue()` relit `cfg.model` dans le `catch` externe (un getter qui lève à chaque accès
 ferait lever ; `cfg` est du JSON simple) ; un `trouve` sans carte survivante (rendu `rien`) suit encore K1. Tests : défauts
 (fuseau, `enLigne`, 45 s, 2 Mio, 64 Kio) non épinglés ; en-têtes avant le `try` et `ctl.abort()` en `finally` sans test
@@ -494,7 +495,7 @@ pins de `VERSION` répétés dans trois suites ; `!includes('notice')` sur tout 
 `progress.md`.
 
 **Versions.** `APP_VERSION = '0.5.0'` (pins `v0\.5\.0-\d+` dans `tests/ajouter.js`, `tests/sync-l3.js` et
-`tests/recherche-web.js`), `sw.js VERSION = 'cuisine-os-v0.5.0-9'` (clôture, tâche 9), `SHELL` + `./src/core/bornes.js`
+`tests/recherche-web.js`), `sw.js VERSION = 'cuisine-os-v0.5.0-10'` (vague finale ; `-9` à la clôture de la tâche 9), `SHELL` + `./src/core/bornes.js`
 et `./src/domain/recherche-web.js` (deux modules neufs). Aucun schéma touché, aucune migration, aucun réglage neuf,
 `DB_VERSION` inchangée ; CSP inchangée (`connect-src https:` couvre déjà `api.anthropic.com`).
 
@@ -504,13 +505,22 @@ l'assertion du total s'ajoute elle-même au bilan affiché), une seule erreur de
 tools/generer-migrations.mjs --check` : **0** ; aucun U+200B-200F, U+2028/2029 ni U+202E dans les fichiers touchés par
 la tâche 9.
 
+**Vague finale de corrections (17 octobre 2026, après la revue de branche — rapport `final-fix-report.md`).** Un
+Important et quatre mineurs, rouge d'abord : **R-WEB-9** (ci-dessus ; la tape envoyait la demande SANS la restriction
+choisie par « + restriction » quand le champ avait été tapé sans Entrée, et la puce disparaissait) · `signetModel`
+compte le titre en **points de code**, comme `borner` (200 emoji préremplis n'étaient plus « trop longs ») · `run()`
+passe par `requeteRoute` et le `navigate` injecté (une seule définition de l'adresse de recherche ; la dette nommée
+ci-dessus est fermée) · `construireDemande(null)` ne lève plus · en-tête de `recherche-web.js` : le « pourquoi » borné
+est I-H. Suite complète **1761/1761 verts** (total épinglé **1760**), même 404 de `/favicon.ico` seul en console ;
+`tools` 40/40 ; `--check` 0 ; `sw.js` `cuisine-os-v0.5.0-10`.
+
 **Gestes de Neegan** (spec § 10 R2, hors code). 1) Créer la clé dans un **workspace Anthropic dédié à Cuisine OS, avec
 un plafond de dépense mensuel**, puis l'entrer dans Réglages → Assistant IA. 2) **Ne pas entrer cette clé sur le site
 public** (`neegans.github.io`) **tant que D5** (sous-domaine dédié) **n'est pas fait** : toute autre page Pages du compte
 lit la même IndexedDB. 3) Après la revue finale et `/verify` : d'abord écarter le `STATE.md` non suivi de l'arbre principal (ce lot ajoute un
 `STATE.md` suivi, et `git merge` refuserait d'écraser un fichier non suivi) : `! mv ~/projects/mistu/STATE.md ~/projects/mistu/STATE.avant-web.md` (le
 nouveau le remplace ; l'ancien peut être effacé après lecture) ; puis fusionner par `!` (`cd ~/projects/mistu && git merge
---ff-only recherche-web`, ou rebaser si `main` a bougé depuis `e4e841b`), puis `! git push`. 4) **Preuve réelle**, sur le
+--ff-only recherche-web`, ou rebaser si `main` a bougé depuis `e4e841b`), puis `! git -C ~/projects/mistu push origin main` (le dossier courant peut être un worktree). 4) **Preuve réelle**, sur le
 Mac d'abord, puis sur l'iPhone (qui n'a que le site public : après D5) : « saumon fenouil » → des liens, « Garder ce
 lien » → signet prérempli ; noter la durée, le nombre de recherches affiché et, si observable, la forme du refus d'un
 compte sans recherche web.

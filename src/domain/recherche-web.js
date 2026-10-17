@@ -1,6 +1,6 @@
 // Chercher sur le web avec l'assistant (spec docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md, § 4).
 // Pur, sauf l'appel réseau de chercherRecettesWeb (tâche 4). Un lien n'existe que s'il est dans les RÉSULTATS BRUTS du
-// serveur (I-A) ; le texte de l'assistant ne donne que « pourquoi », borné (I-J) ; rien de l'API n'est recopié dans
+// serveur (I-A) ; le texte de l'assistant ne donne que « pourquoi », borné (I-H) ; rien de l'API n'est recopié dans
 // l'issue (I-C) ; aucune fonction ne lève vers l'appelant.
 import { parseJsonLoose, ANTHROPIC_MESSAGES_URL, anthropicHeaders } from './llm.js';
 import { lienSignet } from '../core/lien.js';
@@ -32,7 +32,8 @@ const SYSTEM = {
   ].join('\n'),
 };
 
-export function construireDemande({ q, filtres, langue } = {}) {
+export function construireDemande(args) {
+  const { q, filtres, langue } = args ?? {}; // null ne lève pas (même garde que chercherRecettesWeb)
   const demande = borner(q, LIMITES_WEB.demande).trim();
   const propres = (Array.isArray(filtres) ? filtres : []).map((f) => borner(f, LIMITES_WEB.filtre).trim()).filter(Boolean).slice(0, LIMITES_WEB.filtres);
   const lang = langue === 'fr' ? 'fr' : 'en';

@@ -86,6 +86,7 @@ export async function runRechercheWebTests({ eq, ok }) {
     eq(W.construireDemande({ q: 'x'.repeat(600), filtres: [], langue: 'fr' }).user.length, 500, 'demande : q bornée à 500 points de code');
     eq(W.construireDemande({ q: '\u{200B}\u{200B}', filtres: [], langue: 'fr' }), { system: null, user: null, cle: null, q: '', filtres: [] }, 'demande : une demande faite de Cf est vide → aucune clé');
     eq([d.q, d.filtres], ['saumon fenouil', ['Sans gluten', 'x']], 'demande : q et filtres NETTOYÉS sont rendus (c’est eux que l’écran rappelle — R-WEB-1)');
+    { let r; try { r = W.construireDemande(null); } catch (e) { r = `leve : ${e?.message}`; } eq(r, { system: null, user: null, cle: null, q: '', filtres: [] }, 'demande : construireDemande(null) ne lève pas → demande vide, sans clé (comme chercherRecettesWeb(null))'); }
     {
       const r = W.construireDemande({ q: '\u{202E}' + 'x'.repeat(600), filtres: [], langue: 'fr' });
       eq([r.q, r.user], ['x'.repeat(500), 'x'.repeat(500)], 'demande : le bidi en tête est retiré AVANT la coupe, puis q et user sont bornés à 500 (un bidi après la coupe ne prouverait rien)');
@@ -407,6 +408,62 @@ export async function runRechercheWebTests({ eq, ok }) {
         eq([...root.querySelectorAll('.muted')].find((n) => n.textContent.startsWith('Demande envoyée'))?.textContent, 'Demande envoyée : saumon · ' + puces(root).join(' ; '), 'R-WEB-2 : « Demande envoyée » dit EXACTEMENT q puis les puces, jointes par « ; » (I-J)');
         root.remove();
       }
+      // R-WEB-9 : champ CHANGÉ sans Entrée, puis « + restriction » → la tape relit le champ ET garde la restriction affichée
+      // (union : une restriction n'est jamais assouplie par la frappe ; ce qui part reste ce qui est affiché, I-J)
+      {
+        S.reinitialiserWeb();
+        const appels = [];
+        const root = await monter({ q: '' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        taper(root, 'saumon');
+        const liste = [...root.querySelectorAll('select')].find((s) => s.options[0]?.textContent === '+ restriction');
+        liste.value = 'sans_gluten'; liste.dispatchEvent(new Event('change'));
+        const avantTape = puces(root);
+        bouton(root, 'Chercher sur le web avec l’assistant').click();
+        await tick();
+        const apres = puces(root);
+        eq([avantTape, appels.length, appels[0]?.a.q, appels[0]?.a.filtres, apres.includes('Sans gluten')], [['Sans gluten'], 1, 'saumon', apres, true], 'R-WEB-9 : champ changé sans Entrée + « + restriction » → la demande relit le champ, porte EXACTEMENT les puces affichées après la tape, « Sans gluten » comprise');
+        eq(apres, ['Sans gluten', 'avec saumon'], 'R-WEB-9 : après la tape, la puce « Sans gluten » est toujours affichée, à côté de celle du champ relu');
+        root.remove();
+      }
+      // R-WEB-9 : type et exclusions affichés survivent eux aussi à un champ changé (jamais assouplis par la frappe)
+      {
+        S.reinitialiserWeb();
+        const appels = [];
+        const root = await monter({ q: 'salade sans xyzzy' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        const avant = puces(root);
+        taper(root, 'saumon');
+        bouton(root, 'Chercher sur le web avec l’assistant').click();
+        await tick();
+        const apres = puces(root);
+        eq([avant.length, avant.every((c) => apres.includes(c)), apres.includes('avec saumon'), appels[0]?.a.filtres], [2, true, true, apres], 'R-WEB-9 : le type et l’exclusion en texte affichés avant la tape restent affichés et partent avec la demande relue');
+        root.remove();
+      }
+      // R-WEB-9 : l'union ne contredit pas une exclusion — un ingrédient exclu n'est pas aussi « avec » (même règle que parseQuery)
+      {
+        S.reinitialiserWeb();
+        const appels = [];
+        const root = await monter({ q: 'sans fenouil' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        const avant = puces(root);
+        taper(root, 'saumon fenouil');
+        bouton(root, 'Chercher sur le web avec l’assistant').click();
+        await tick();
+        eq([avant, puces(root), appels[0]?.a.filtres], [['sans fenouil'], ['avec saumon', 'sans fenouil'], ['avec saumon', 'sans fenouil']], 'R-WEB-9 : « sans fenouil » gardée, et « fenouil » retapé ne devient pas « avec fenouil » (aucune demande contradictoire)');
+        root.remove();
+      }
+      // run() passe par requeteRoute et le `navigate` injecté : Entrée dans le champ navigue par le faux, sans appeler l'assistant (I-B)
+      {
+        S.reinitialiserWeb();
+        const navs = []; let appels = 0;
+        const adresseAvant = location.href;
+        try {
+          const root = await monter({ q: 'saumon' }, ctxDe(ANTH), { chercher: async () => { appels += 1; return issueTrouve; }, navigate: (p, o) => { navs.push([p, o]); } });
+          champ(root).value = 'saumon fenouil';
+          champ(root).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+          const [chemin, options] = navs[0] || [];
+          eq([navs.length, typeof chemin === 'string' && chemin.startsWith('/search?') && chemin.includes('q='), chemin, options, appels, location.href === adresseAvant], [1, true, '/search?q=saumon+fenouil&mode=web', { replace: true }, 0, true], 'run() : Entrée → le navigate INJECTÉ reçoit /search?q=… (requeteRoute, en replace), aucun appel à l’assistant, l’adresse de la page de tests intacte');
+          root.remove();
+        } finally { if (location.href !== adresseAvant) history.replaceState(null, '', adresseAvant); }
+      }
       // R-WEB-1 : ce qui part est la demande NETTOYÉE par construireDemande (un Cf retiré), jamais la saisie brute
       {
         S.reinitialiserWeb();
@@ -623,6 +680,9 @@ export async function runRechercheWebTests({ eq, ok }) {
         eq([banniere(root), champ(root, 'Adresse *').value], [null, ''], 'signet prérempli : une adresse d’espaces n’est pas « reçue » — aucune bannière, champ vide (R-WEB-8)');
         root = await S.renderSignetRoute({}, { adresse: 'https://exemple.test/r', titre: 't'.repeat(400) + '\u{202E}' }, ctx, deps);
         eq([champ(root, 'Titre *').value.length, champ(root, 'Titre *').value.includes('\u{202E}')], [300, false], 'signet prérempli : titre borné à 300 points de code sans bidi (S2)');
+        root = await S.renderSignetRoute({}, { adresse: 'https://exemple.test/r', titre: '😀'.repeat(200) }, ctx, deps);
+        { const err = root.querySelector('[data-erreur="titre"]'); eq([Array.from(champ(root, 'Titre *').value).length, err.textContent, err.hidden, garder(root).disabled], [200, '', true, false], 'signet prérempli : 200 emoji (400 unités UTF-16) — signetModel compte des POINTS DE CODE comme borner : aucune erreur « Titre trop long. », bouton ouvert'); }
+        { const a = 'https://exemple.test/r'; const m300 = S.signetModel({ adresse: a, titre: '😀'.repeat(300) }); const m301 = S.signetModel({ adresse: a, titre: '😀'.repeat(301) }); eq([m300.valide, m301.valide, !!m301.erreurs.titre], [true, false, true], 'signetModel : la borne du titre est 300 POINTS DE CODE (300 emoji passent, 301 non)'); }
         root = await S.renderSignetRoute({}, {}, ctx, deps);
         eq([banniere(root), champ(root, 'Adresse *').value], [null, ''], 'signet sans query : aucune bannière, champ vide (comportement inchangé)');
       });

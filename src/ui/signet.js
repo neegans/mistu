@@ -26,7 +26,9 @@ export function signetModel({ adresse = '', titre = '', editionId = '', cuisines
   else if (lien.href.length > LIMITES_SIGNET.adresse) erreurs.adresse = t('Adresse trop longue.');
   const titreNet = String(titre ?? '').trim();
   if (!titreNet) erreurs.titre = t('Donne un titre au lien.');
-  else if (titreNet.length > LIMITES_SIGNET.titre) erreurs.titre = t('Titre trop long.');
+  // En POINTS DE CODE, comme borner() qui préremplit le champ : 151 emoji passent la borne du préremplissage et ne
+  // doivent pas être refusés ici (l'adresse, elle, est ASCII après new URL : sa longueur en unités suffit).
+  else if (Array.from(titreNet).length > LIMITES_SIGNET.titre) erreurs.titre = t('Titre trop long.');
   const valide = Object.keys(erreurs).length === 0;
   // D-T7 : `enCours` vit DANS l'état, comme dans livre-ajout.js — le bouton se ferme parce que le MODÈLE le dit,
   // pas parce qu'un geste a touché un nœud au passage. `valide` reste la validité de la SAISIE (ce que l'écriture
