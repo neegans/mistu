@@ -2,11 +2,19 @@
 // les fonctions IA affichent « assistant non configuré » au lieu de simuler un résultat.
 // Les fournisseurs distants ci-dessous n'ont pas été exercés dans cet environnement : à valider avec une clé réelle.
 
+export const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
+// Les en-têtes d'un appel direct depuis le navigateur (clé en en-tête, jamais dans l'adresse — I-C) : une seule
+// définition, lue par `complete` et par recherche-web.js.
+export function anthropicHeaders(apiKey) {
+  return { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
+}
+
 export class LLMProvider {
   constructor(config = {}) { this.config = config; }
   get name() { return 'none'; }
   get configured() { return false; }
   get supportsVision() { return false; }
+  get supportsWebSearch() { return false; }
   // messages: [{ role: 'system'|'user', content: string | [{type:'text',text}|{type:'image', mime, base64}] }]
   async complete(/* messages, { json = false } */) { throw new Error('Aucun assistant IA configuré. Réglages → Assistant IA.'); }
 }
@@ -40,6 +48,7 @@ export class AnthropicProvider extends LLMProvider {
   get name() { return 'anthropic'; }
   get configured() { return !!(this.config.api_key && this.config.model); }
   get supportsVision() { return true; }
+  get supportsWebSearch() { return true; }
   async complete(messages, { maxTokens = 4000 } = {}) {
     const system = messages.filter((m) => m.role === 'system').map((m) => (typeof m.content === 'string' ? m.content : m.content.map((p) => p.text || '').join('\n'))).join('\n');
     const body = {
@@ -51,11 +60,7 @@ export class AnthropicProvider extends LLMProvider {
           : { type: 'image', source: { type: 'base64', media_type: p.mime, data: p.base64 } }),
       })),
     };
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': this.config.api_key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify(body),
-    });
+    const res = await fetch(ANTHROPIC_MESSAGES_URL, { method: 'POST', headers: anthropicHeaders(this.config.api_key), body: JSON.stringify(body) });
     if (!res.ok) throw new Error(`Fournisseur IA : ${res.status} ${await res.text()}`);
     const data = await res.json();
     return (data.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');
