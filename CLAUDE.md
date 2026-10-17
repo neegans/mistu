@@ -442,7 +442,7 @@ deux ISBN, les suggestions, la recherche « bbq ».
 **Où.** Branche `recherche-web`, worktree `~/projects/mistu-web` (jamais `~/projects/mistu`), serveur de vérification
 `http://localhost:8083/` (suite : `http://localhost:8083/tests/`). Spec :
 `docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md` (rév. 2.1 ; **§ 11.2** « Ce que la construction a
-amendé » : R-WEB-1 à R-WEB-9, tests durcis, fixtures corrigées, notes de couche, vague finale). Plan :
+amendé » : R-WEB-1 à R-WEB-10, tests durcis, fixtures corrigées, notes de couche, vague finale, vague `/verify`). Plan :
 `docs/superpowers/plans/2026-10-17-chercher-sur-le-web.md`. Registre : `.superpowers/sdd/2026-10-17-chercher-sur-le-web/`
 (`progress.md`, un brief et un rapport par tâche, les diffs revus ; lanceur `suite.cjs`). Base : `main` `e4e841b` (lot
 ISBN fusionné, 1537/1537, total épinglé 1536). Neuf tâches, chacune avec au plus une ronde de corrections. Le site public
@@ -473,7 +473,8 @@ de code, Cc/Cf retirés) arrivent à l'écran. Les rulings, une ligne chacun (d�
 - **R-WEB-6** un 403 est lu comme le 400 : « web search … not enabled / disabled » → `recherche_desactivee`, sinon `cle_refusee`.
 - **R-WEB-7** K1 pour `trouve` seulement ; les écrans sans « Réessayer » offrent « Chercher à nouveau » (pas d'impasse après une clé corrigée).
 - **R-WEB-8** l'hôte de la bannière « Adresse reçue » vient de `signetModel` (même décision que l'enregistrement) ; une adresse d'espaces n'est pas « reçue ».
-- **R-WEB-9** champ changé sans Entrée : la tape le relit et y **réunit** les restrictions affichées (type, régimes, exclusions, durées), puis met l'adresse à jour sans re-rendu (`remplacerAdresse`) : l'instance garde ses puces et son vol. Portée : les restrictions affichées survivent à la TAPE ; Entrée, changement de mode ou de case (`run()`, préexistant) réanalysent encore le champ.
+- **R-WEB-9** la tape met l'adresse à jour sans re-rendu (`remplacerAdresse`) : l'instance garde ses puces et son vol (sa réunion des restrictions est remplacée par R-WEB-10).
+- **R-WEB-10** champ changé sans Entrée : la tape le relit ; seules survivent les puces des listes « + type » / « + restriction » (affichées moins l'analyse de l'ancien texte) ; exclusions, ingrédients et durées viennent du nouveau texte. Entrée, mode ou case (`run()`) réanalysent sans rien garder.
 
 **Ce qui n'est PAS prouvé.** **Aucun appel réel avec la clé de Neegan** : statut et corps exacts d'un compte sans
 recherche web (400 ou 403, texte du message), forme réelle de `page_age`, de `web_search_requests`, de `pause_turn` et
@@ -493,10 +494,28 @@ ferait lever ; `cfg` est du JSON simple) ; un `trouve` sans carte survivante (re
 dédié ; branches `exclude`/`max_active` de `libellePuce` non épinglées ; chemin `filtres` de `borner` sans fixture Cf ;
 pins de `VERSION` répétés dans trois suites ; `!includes('notice')` sur tout `pairing.js` fragile — liste exacte dans
 `progress.md`.
-**Reconstruction de l'écran pendant un vol** : une passe de synchronisation qui écrit (`cuisineos:refresh`, `doitRendreApresPasse` vaut vrai pour `/search`) ou un retour arrière dans l'historique reconstruit la route depuis l'adresse ; les puces ajoutées par les listes et les restrictions réunies (R-WEB-9) n'y sont pas, l'écran du vol disparaît et une nouvelle tape repartirait sans elles (préexistant depuis R-WEB-2, plus rare que la tape, jusqu'à 45 s d'exposition) — remède = porter les puces de liste dans l'adresse (lot ultérieur).
+**Reconstruction de l'écran pendant un vol** : une passe de synchronisation qui écrit (`cuisineos:refresh`, `doitRendreApresPasse` vaut vrai pour `/search`) ou un retour arrière dans l'historique reconstruit la route depuis l'adresse ; les puces ajoutées par les listes (R-WEB-10) n'y sont pas, l'écran du vol disparaît et une nouvelle tape repartirait sans elles (préexistant depuis R-WEB-2, plus rare que la tape, jusqu'à 45 s d'exposition) — remède = porter les puces de liste dans l'adresse (lot ultérieur).
+**Nommées par `/verify`** (17 octobre, une ligne chacune, détail en spec § 11.2) :
+- **V-F8** `page_age` et `recherches` ne sont pas typés par les tests (un nombre ou un objet à leur place n'est pas éprouvé).
+- **V-F9** branches sans fixture : `server_tool_use` seul (sans bloc de résultats), `stop_reason: 'max_tokens'`, une page « autre » au titre vide.
+- **V-F10** I-K (l'avertissement fixe sous les liens) n'est affirmé que sur un seul `trouve`.
+- **V-F11** aucune fixture où la frappe REMPLACE un ingrédient en gardant une puce de liste (« saumon » → « truite »).
+- **V-F13** `lire()` des tests de source ne vérifie pas `res.ok` (un 404 serait lu comme un source).
+- **V-F14** `suite.cjs` lit n'importe quel `h2` de la page, et son code de sortie ignore la console.
+- **V-C3** une prose qui met une accolade APRÈS le JSON `choix` le rend illisible → repli (liens sans « pourquoi »).
+- **V-C4** les bornes 12 filtres / 80 points de code par filtre coupent la demande sans que les puces affichées le disent.
+- **V-C5** `libellePuce` rend toujours le français (libellés `fr` des ingrédients), même en interface anglaise.
+- **V-S3** un lien profond `#/search?q=…` peut préremplir le champ avec des espaces cachés (rien ne part sans tape).
+- **V-S4** un vol en cours pour une AUTRE clé est invisible depuis l'écran courant ; I-I vaut par document (le module), pas par app (deux onglets = deux vols).
+- **V-S5** un plafond de dépense atteint ou un crédit épuisé est classé `requete` (statut et corps réels à mesurer).
+- **V-S6** « ce qui part » (I-C) compte aussi `Origin`, `User-Agent`, `Accept-Language` et les indices client du navigateur ; les requêtes de recherche rédigées par le modèle atteignent le fournisseur de recherche.
+- **V-S7** fermé par cette vague (V-C2, `t()` sans motifs `$`).
+- **V-S8** le titre d'une page est rendu dans un lien habillé en bouton (`a.btn`) ; les marques combinantes (Mn) ne sont pas retirées des titres.
+- **V-S9** (préexistant) `AnthropicProvider.complete` part sans `redirect: 'error'` ni `credentials: 'omit'` ; « Tester » (Réglages) affiche le corps d'erreur brut.
+- **V-S1 / V-S2** les deux murs hors code : plafond du workspace Anthropic et D5 (V-S1) ; préfixe « Selon l'assistant » devant le « pourquoi » et filtre déterministe par `DIET_TAGS` en suite (V-S2).
 
 **Versions.** `APP_VERSION = '0.5.0'` (pins `v0\.5\.0-\d+` dans `tests/ajouter.js`, `tests/sync-l3.js` et
-`tests/recherche-web.js`), `sw.js VERSION = 'cuisine-os-v0.5.0-10'` (vague finale ; `-9` à la clôture de la tâche 9), `SHELL` + `./src/core/bornes.js`
+`tests/recherche-web.js`), `sw.js VERSION = 'cuisine-os-v0.5.0-11'` (vague `/verify` ; `-10` à la vague finale, `-9` à la clôture de la tâche 9), `SHELL` + `./src/core/bornes.js`
 et `./src/domain/recherche-web.js` (deux modules neufs). Aucun schéma touché, aucune migration, aucun réglage neuf,
 `DB_VERSION` inchangée ; CSP inchangée (`connect-src https:` couvre déjà `api.anthropic.com`).
 
@@ -516,7 +535,16 @@ est I-H. **Vague 2** (re-revue, même jour) : la tape ré-instanciait encore la 
 perdues à l'écran, vol masqué par un bouton rallumé (double facturation possible) ; elle passe désormais par
 `remplacerAdresse` (sans re-rendu, testé avec un faux routeur qui ré-instancie comme `app.js`), et la réunion porte
 aussi les durées. Suite complète **1765/1765 verts** (total épinglé **1764**), même 404 de `/favicon.ico` seul en
-console ; `tools` 40/40 ; `--check` 0 ; `sw.js` `cuisine-os-v0.5.0-10`.
+console ; `tools` 40/40 ; `--check` 0 ; `sw.js` alors à `-10`.
+
+**Vague `/verify` (17 octobre 2026, trois lentilles — rapport `final-fix-report.md`, « Vague 3 »).** **R-WEB-10**
+corrige R-WEB-9 : une demande neuve tapée sans Entrée héritait des contraintes de l'ancien texte (« soupe sans gluten
+en 20 minutes » puis « gâteau au chocolat » partait avec « Soupe ; Sans gluten ; prêt en ≤ 20 min ») ; seules les
+puces de liste survivent désormais · **V-C2** `t()` remplace par fonction (une valeur avec `$&` ou `$$` était
+déformée) · **V-C6** un 200 sans corps lisible est `interne`, plus `reseau` · faux-verts V-F1 à V-F7 et V-F12 fermés,
+chaque mutant rejoué sur une copie (survivant avant, tué après) · dettes nommées ci-dessus. Suite complète
+**1778/1778 verts** (total épinglé **1777**), même 404 de `/favicon.ico` seul en console ; `tools` 40/40 ;
+`--check` 0 ; `sw.js` `cuisine-os-v0.5.0-11`.
 
 **Gestes de Neegan** (spec § 10 R2, hors code). 1) Créer la clé dans un **workspace Anthropic dédié à Cuisine OS, avec
 un plafond de dépense mensuel**, puis l'entrer dans Réglages → Assistant IA. 2) **Ne pas entrer cette clé sur le site

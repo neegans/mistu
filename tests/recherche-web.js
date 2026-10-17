@@ -126,6 +126,12 @@ export async function runRechercheWebTests({ eq, ok }) {
       eq(W.choisirLiens(deuxBlocs).liens[0].pourquoi, 'ok', 'lecture : un JSON coupé par une citation sur deux blocs est lu (F7)');
     }
 
+    {
+      // V-F3 : deux pages du MÊME hôte sont deux pages (dédoublonnage par href exact, jamais par hôte)
+      const lu2 = W.lireReponse({ content: [blocRes([res('https://a.test/1', 'Un'), res('https://a.test/2', 'Deux')]), texte('{"choix":[{"url":"https://a.test/2","pourquoi":"La deuxième."}]}')] });
+      const c2 = W.choisirLiens(lu2);
+      eq([lu2.resultats.map((r) => r.href), c2.liens.map((l) => l.href), c2.liens[0]?.pourquoi, c2.autres.map((l) => l.href)], [['https://a.test/1', 'https://a.test/2'], ['https://a.test/2'], 'La deuxième.', ['https://a.test/1']], 'lecture : deux pages du même hôte restent deux résultats, et la seconde peut être choisie (V-F3)');
+    }
     // 4.4 choisirLiens
     const ch = W.choisirLiens(lu);
     eq(ch.liens.map((l) => l.href), ['https://c.test/r3', 'https://a.test/r1'], 'choix : seuls les choix survivants, dans l’ordre des choix ; l’adresse inventée est écartée (I-A) ; pas de complément (K2)');
@@ -173,13 +179,15 @@ export async function runRechercheWebTests({ eq, ok }) {
     let appels = [];
     const fauxFetch = function (url, options) { appels.push({ url, options, self: this }); return Promise.resolve(fauxFetch.rendre(url, options)); };
     fauxFetch.rendre = () => reponse(200, nominal);
-    const lancer = (deps = {}, a = args) => { appels = []; return W.chercherRecettesWeb(a, { fetch: fauxFetch, enLigne: () => true, fuseau: 'America/Toronto', ...deps }); };
+    // V-F2 : CHAQUE issue rendue par lancer() est contrôlée (ni la clé, ni le corps d'erreur sentinelle) ; bilan en fin de bloc.
+    const issuesVues = { n: 0, fautives: [] };
+    const lancer = async (deps = {}, a = args) => { appels = []; const i = await W.chercherRecettesWeb(a, { fetch: fauxFetch, enLigne: () => true, fuseau: 'America/Toronto', ...deps }); issuesVues.n += 1; if (!sansClef(i)) issuesVues.fautives.push(i); return i; };
 
     // Forme de l'appel
     const ok1 = await lancer();
     eq([ok1.etat, ok1.liens.map((l) => l.href), ok1.autres.map((l) => l.href), ok1.liens[0].pourquoi, ok1.recherches, ok1.modele, ok1.repli], ['trouve', ['https://b.test/2'], ['https://a.test/1'], 'Fenouil.', 2, 'modele-test', false], 'appel : cas nominal → trouve, le choix seul dans liens, l’autre page à part (K2), recherches, modèle');
     eq(appels.length, 1, 'appel : un seul fetch');
-    eq(appels[0].self, undefined, 'appel : fetch est appelé comme fonction libre, sans this (F11)');
+    ok(appels[0].self === undefined, 'appel : fetch est appelé comme fonction libre, sans this (F11, V-F12 : comparaison stricte, pas par JSON)');
     eq(appels[0].url, 'https://api.anthropic.com/v1/messages', 'appel : l’URL Messages, sans la clé');
     ok(!appels[0].url.includes(CLE), 'appel : la clé n’est pas dans l’adresse');
     eq([appels[0].options.method, appels[0].options.headers['x-api-key'], appels[0].options.headers['anthropic-dangerous-direct-browser-access'], appels[0].options.credentials, appels[0].options.cache, appels[0].options.referrerPolicy, appels[0].options.mode, appels[0].options.redirect], ['POST', CLE, 'true', 'omit', 'no-store', 'no-referrer', 'cors', 'error'], 'appel : en-têtes et options réseau du lot ISBN, et redirect error (la clé ne suit jamais une redirection)');
@@ -213,7 +221,7 @@ export async function runRechercheWebTests({ eq, ok }) {
     eq((await lancer()).raison, 'reseau', 'réseau : fetch qui lève → reseau');
     fauxFetch.rendre = (url, options) => new Promise((_, reject) => { options.signal.addEventListener('abort', () => reject(new DOMException('abandon', 'AbortError')), { once: true }); });
     eq((await lancer({ tentativeMs: 1 })).raison, 'delai', 'délai : abandon par le chrono → delai (F18)');
-    { const c = new AbortController(); const p = lancer({ signal: c.signal, tentativeMs: 60000 }); c.abort(); eq((await p).raison, 'annule', 'abandon : signal extérieur pendant le vol → annule'); }
+    { const c = new AbortController(); const p = lancer({ signal: c.signal, tentativeMs: 60000 }); c.abort(); const relaye = appels[0]?.options.signal.aborted === true; eq([relaye, (await p).raison], [true, 'annule'], 'abandon : signal extérieur pendant le vol → le signal du fetch est abandonné AUSSITÔT (V-F6), issue annule'); }
     {
       // Abandon extérieur PENDANT la lecture du corps d'erreur d'un 400 : annule, pas `requete`.
       const c = new AbortController();
@@ -225,8 +233,9 @@ export async function runRechercheWebTests({ eq, ok }) {
       eq((await p).raison, 'annule', 'abandon : signal extérieur pendant la lecture du corps d’erreur d’un 400 → annule');
       fauxFetch.rendre = () => reponse(200, nominal);
     }
-    fauxFetch.rendre = () => new Response(new Blob(['x'.repeat(4096)]), { status: 200 });
-    eq((await lancer({ corpsMax: 1024 })).raison, 'reponse_illisible', 'corps : une vraie Response en flux > corpsMax → reponse_illisible (lireBornee)');
+    // V-F1 : le corps trop gros est du JSON VALIDE — seule la borne peut le refuser (un corps invalide passait par JSON.parse).
+    fauxFetch.rendre = () => new Response(new Blob([JSON.stringify({ ...nominal, bourrage: 'x'.repeat(4096) })]), { status: 200 });
+    eq((await lancer({ corpsMax: 1024 })).raison, 'reponse_illisible', 'corps : une vraie Response en flux, JSON valide > corpsMax → reponse_illisible (lireBornee, V-F1)');
     fauxFetch.rendre = () => new Response(new Blob([JSON.stringify(nominal)]), { status: 200, headers: { 'content-type': 'application/json' } });
     { const i = await lancer(); eq([i.etat, i.liens[0]?.href], ['trouve', 'https://b.test/2'], 'corps : une vraie Response en flux sous la borne → trouve (chemin lireBornee puis Blob, celui de la production)'); }
     fauxFetch.rendre = () => reponse(200, 'pas du json');
@@ -246,6 +255,8 @@ export async function runRechercheWebTests({ eq, ok }) {
     eq((await contenu({ stop_reason: 'end_turn', content: [blocRes([])] })).etat, 'rien', 'contenu : une recherche faite, aucune page → rien');
     fauxFetch.rendre = () => ({});
     eq((await lancer()).raison, 'interne', 'filet : une réponse sans statut → interne, sans lever');
+    fauxFetch.rendre = () => ({ ok: true, status: 200 });
+    eq((await lancer()).raison, 'interne', 'corps : un 200 sans corps lisible ni text() → interne, jamais reseau (V-C6)');
     fauxFetch.rendre = () => reponse(200, nominal);
     {
       // Le filet extérieur : le corps de la requête est calculé HORS du try du réseau. Un `model` qui lève à son 2e accès
@@ -260,6 +271,16 @@ export async function runRechercheWebTests({ eq, ok }) {
       eq([vus.length, Object.keys(charge ?? {}), charge?.reason], [1, ['reason', 'name'], 'interne'], 'filet : le journal ne porte que reason et name, reason = interne');
       ok(!JSON.stringify(vus).includes(CLE) && !JSON.stringify(vus).includes('model'), 'filet : le journal ne contient ni la clé ni le modèle (S10/F12)');
     }
+    eq([issuesVues.n, issuesVues.fautives.length], [42, 0], 'I-C : CHACUNE des issues rendues dans ce bloc (toutes comptées) est sans clé ni corps d’erreur (V-F2)');
+  }
+
+  // --- V-C2 : t() rend une valeur telle quelle, même avec les motifs « $ » de replaceAll
+  {
+    const { t: traduire, setUiLocale: poserLangue, getUiLocale: langue } = await import('../src/core/i18n.js');
+    const avant = langue(); poserLangue('fr');
+    try {
+      eq([traduire('Demande envoyée : {q}', { q: 'a$&b' }), traduire('Demande envoyée : {q}', { q: '5$$' }), traduire('Demande envoyée : {q}', { q: "x$'y" })], ['Demande envoyée : a$&b', 'Demande envoyée : 5$$', "Demande envoyée : x$'y"], 't() : $&, $$ et $\' dans une valeur sont rendus tels quels (V-C2)');
+    } finally { poserLangue(avant); }
   }
 
   // --- § 7.3 libellePuce : la même définition pour la puce affichée et pour la demande envoyée (I-J, F1)
@@ -287,9 +308,10 @@ export async function runRechercheWebTests({ eq, ok }) {
     globalThis.fetch = async (u) => { appelsReseau += 1; throw new Error(`aucun reseau attendu ici : ${u}`); };
     const scene = document.createElement('div'); scene.hidden = true; document.body.append(scene);
     try {
-      const ING = new Map([['ing_salmon', { labels: { fr: { label: 'saumon' } } }], ['ing_fennel_bulb', { labels: { fr: { label: 'fenouil' } } }]]);
+      const ING = new Map([['ing_salmon', { labels: { fr: { label: 'saumon' } } }], ['ing_fennel_bulb', { labels: { fr: { label: 'fenouil' } } }], ['ing_chicken', { labels: { fr: { label: 'poulet' } } }]]);
       const ctxDe = (llm) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING, meal_feedback: [], settings: { llm } });
-      const ANTH = { provider: 'anthropic', api_key: 'k', model: 'm' };
+      const CLE_ECRAN = 'sk-ant-cle-ecran-sentinelle'; // V-F2 : elle doit atteindre chercher(), jamais l'état ni l'écran
+      const ANTH = { provider: 'anthropic', api_key: CLE_ECRAN, model: 'm' };
       const pilote = () => { const p = {}; p.promesse = new Promise((res) => { p.resoudre = res; }); return p; };
       const tick = () => new Promise((r) => setTimeout(r, 0)); // un tour de boucle : les .then de lancer() ont tourné
       // remplacerAdresse factice par défaut : la tape (lancer) met l'adresse à jour par history.replaceState, pas celle de la page de tests.
@@ -409,8 +431,8 @@ export async function runRechercheWebTests({ eq, ok }) {
         eq([...root.querySelectorAll('.muted')].find((n) => n.textContent.startsWith('Demande envoyée'))?.textContent, 'Demande envoyée : saumon · ' + puces(root).join(' ; '), 'R-WEB-2 : « Demande envoyée » dit EXACTEMENT q puis les puces, jointes par « ; » (I-J)');
         root.remove();
       }
-      // R-WEB-9 : champ CHANGÉ sans Entrée, puis « + restriction » → la tape relit le champ ET garde la restriction affichée
-      // (union : une restriction n'est jamais assouplie par la frappe ; ce qui part reste ce qui est affiché, I-J)
+      // R-WEB-9/10 : champ CHANGÉ sans Entrée, puis « + restriction » → la tape relit le champ ET garde la puce de LISTE
+      // (ce qui part reste ce qui est affiché, I-J)
       {
         S.reinitialiserWeb();
         const appels = [];
@@ -426,7 +448,22 @@ export async function runRechercheWebTests({ eq, ok }) {
         eq(apres, ['Sans gluten', 'avec saumon'], 'R-WEB-9 : après la tape, la puce « Sans gluten » est toujours affichée, à côté de celle du champ relu');
         root.remove();
       }
-      // R-WEB-9 : type, exclusions et durées affichés survivent eux aussi à un champ changé, à la tape
+      // R-WEB-10 (corrige R-WEB-9) : une demande NEUVE tapée sans Entrée n'hérite pas des contraintes de l'ancien texte
+      {
+        S.reinitialiserWeb();
+        const appels = [];
+        const root = await monter({ q: 'soupe sans gluten en 20 minutes' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        bouton(root, 'Chercher sur le web avec l’assistant').click();
+        await tick();
+        const avant = puces(root);
+        taper(root, 'gâteau au chocolat');
+        bouton(root, 'Chercher à nouveau').click();
+        await tick();
+        const apres = puces(root);
+        eq([avant.length, appels.length, appels[1]?.a.q, appels[1]?.a.filtres, avant.filter((c) => apres.includes(c))], [3, 2, 'gâteau au chocolat', apres, []], 'R-WEB-10 : « soupe sans gluten en 20 minutes » puis « gâteau au chocolat » sans Entrée → « Chercher à nouveau » n’envoie AUCUNE contrainte de l’ancien texte (type, régime, durée) : exactement les puces affichées');
+        root.remove();
+      }
+      // R-WEB-10 : l'exclusion en texte et la durée de l'ancien texte ne sont pas portées non plus
       {
         S.reinitialiserWeb();
         const appels = [];
@@ -436,10 +473,10 @@ export async function runRechercheWebTests({ eq, ok }) {
         bouton(root, 'Chercher sur le web avec l’assistant').click();
         await tick();
         const apres = puces(root);
-        eq([avant.length, avant.every((c) => apres.includes(c)), apres.includes('avec saumon'), appels[0]?.a.filtres], [3, true, true, apres], 'R-WEB-9 : le type, l’exclusion en texte et la durée affichés avant la tape restent affichés et partent avec la demande relue');
+        eq([avant.length, apres, appels[0]?.a.filtres], [3, ['avec saumon'], ['avec saumon']], 'R-WEB-10 : le type, l’exclusion en texte et la durée de l’ancien texte ne partent pas : seule « avec saumon » (le nouveau texte)');
         root.remove();
       }
-      // R-WEB-9 : l'union ne contredit pas une exclusion — un ingrédient exclu n'est pas aussi « avec » (même règle que parseQuery)
+      // R-WEB-10 : l'exclusion de l'ancien texte n'est pas portée — « sans fenouil » puis « saumon fenouil » ne se contredit pas
       {
         S.reinitialiserWeb();
         const appels = [];
@@ -448,10 +485,10 @@ export async function runRechercheWebTests({ eq, ok }) {
         taper(root, 'saumon fenouil');
         bouton(root, 'Chercher sur le web avec l’assistant').click();
         await tick();
-        eq([avant, puces(root), appels[0]?.a.filtres], [['sans fenouil'], ['avec saumon', 'sans fenouil'], ['avec saumon', 'sans fenouil']], 'R-WEB-9 : « sans fenouil » gardée, et « fenouil » retapé ne devient pas « avec fenouil » (aucune demande contradictoire)');
+        eq([avant, puces(root), appels[0]?.a.filtres], [['sans fenouil'], ['avec fenouil', 'avec saumon'], ['avec fenouil', 'avec saumon']], 'R-WEB-10 : « sans fenouil » puis « saumon fenouil » → la demande est celle du NOUVEAU texte seul, sans exclusion héritée (aucune demande contradictoire)');
         root.remove();
       }
-      // R-WEB-9 : la durée « actives » affichée survit aussi à la tape (même règle que le type)
+      // R-WEB-10 : la durée « actives » de l'ancien texte n'est pas portée
       {
         S.reinitialiserWeb();
         const appels = [];
@@ -460,8 +497,59 @@ export async function runRechercheWebTests({ eq, ok }) {
         taper(root, 'saumon');
         bouton(root, 'Chercher sur le web avec l’assistant').click();
         await tick();
-        eq([avant.length, avant.every((c) => puces(root).includes(c)), puces(root).includes('avec saumon'), appels[0]?.a.filtres], [1, true, true, puces(root)], 'R-WEB-9 : « ≤ 10 min actives » reste affichée et part avec la demande relue');
+        eq([avant.length, puces(root), appels[0]?.a.filtres], [1, ['avec saumon'], ['avec saumon']], 'R-WEB-10 : « ≤ 10 min actives » de l’ancien texte ne part pas avec « saumon »');
         root.remove();
+      }
+      // R-WEB-10 : une puce de LISTE survit à un champ retapé ; ce que l'ancien texte avait donné, non
+      {
+        S.reinitialiserWeb();
+        const appels = [];
+        const root = await monter({ q: '' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        taper(root, 'saumon');
+        const liste = [...root.querySelectorAll('select')].find((s) => s.options[0]?.textContent === '+ restriction');
+        liste.value = 'sans_gluten'; liste.dispatchEvent(new Event('change'));
+        taper(root, 'poulet');
+        bouton(root, 'Chercher sur le web avec l’assistant').click();
+        await tick();
+        const f = appels[0]?.a.filtres || [];
+        eq([f, f.includes('Sans gluten'), f.includes('avec poulet'), f.includes('avec saumon'), puces(root)], [['Sans gluten', 'avec poulet'], true, true, false, ['Sans gluten', 'avec poulet']], 'R-WEB-10 : « saumon » tapé, « + restriction : Sans gluten », champ changé en « poulet » → Sans gluten (liste) et avec poulet partent, pas avec saumon');
+        root.remove();
+      }
+      {
+        S.reinitialiserWeb();
+        const appels = [];
+        const root = await monter({ q: 'soupe saumon sans lactose' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        const parNom = (nom) => [...root.querySelectorAll('select')].find((s) => s.options[0]?.textContent === nom);
+        parNom('+ type').value = 'dessert'; parNom('+ type').dispatchEvent(new Event('change'));
+        parNom('+ restriction').value = 'sans_gluten'; parNom('+ restriction').dispatchEvent(new Event('change'));
+        const typeListe = puces(root)[0]; // chipsFor : le type vient en premier
+        taper(root, 'poulet');
+        bouton(root, 'Chercher sur le web avec l’assistant').click();
+        await tick();
+        eq([typeListe === 'Soupe', appels[0]?.a.filtres, puces(root)], [false, [typeListe, 'Sans gluten', 'avec poulet'], [typeListe, 'Sans gluten', 'avec poulet']], 'R-WEB-10 : type et régime choisis par les LISTES survivent au champ retapé ; « Sans lactose », « Soupe » et « avec saumon » de l’ancien texte ne partent pas');
+        root.remove();
+      }
+      // R-WEB-10 : « Entrée puis tape » = « tape seule » — même texte, deux chemins, même demande
+      {
+        const { parseHash } = await import('../src/core/router.js');
+        const filtresDe = async (avecEntree) => {
+          S.reinitialiserWeb();
+          const appels = []; const navs = [];
+          const deps = { chercher: async (a) => { appels.push(a); return issueTrouve; }, navigate: (chemin) => { navs.push(chemin); } };
+          let root = await monter({ q: 'soupe sans gluten en 20 minutes' }, ctxDe(ANTH), deps);
+          taper(root, 'saumon fenouil');
+          if (avecEntree) {
+            champ(root).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+            root.remove();
+            root = await monter(parseHash('#' + navs[navs.length - 1]).query, ctxDe(ANTH), deps); // la ré-instanciation de production
+          }
+          bouton(root, 'Chercher sur le web avec l’assistant').click();
+          await tick();
+          root.remove();
+          return appels[0]?.filtres;
+        };
+        const parEntree = await filtresDe(true); const parTape = await filtresDe(false);
+        eq([parEntree, parTape], [['avec fenouil', 'avec saumon'], ['avec fenouil', 'avec saumon']], 'R-WEB-10 : « soupe sans gluten en 20 minutes » puis « saumon fenouil » : Entrée puis tape et tape seule envoient la MÊME demande');
       }
       // R-WEB-9 de bout en bout : la tape ne ré-instancie PAS la route. Le faux `navigate` fait ce que fait app.js sur
       // hashchange (une NOUVELLE instance montée depuis l'adresse) ; la tape doit passer par remplacerAdresse, sans re-rendu.
@@ -488,6 +576,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         p.resoudre(issueTrouve);
         await tick();
         eq([vue === root, texte(vue).includes('Trouvé sur le web'), texte(vue).includes('La demande a changé depuis cette recherche.'), puces(vue).includes('Sans gluten')], [true, true, false, true], 'R-WEB-9 : à la réponse, les liens s’affichent dans cette instance SANS la mention K1 (la demande affichée est celle qui est partie)');
+        eq([appels[0]?.a.cfg?.api_key === CLE_ECRAN, JSON.stringify(S.etatWeb()).includes(CLE_ECRAN), texte(vue).includes(CLE_ECRAN), document.body.textContent.includes(CLE_ECRAN)], [true, false, false, false], 'I-C écran : la clé atteint chercher(), jamais etatWeb() ni le texte rendu après un trouvé (V-F2)');
         root.remove();
       }
       // R-WEB-9, dépendance par défaut : sans remplacerAdresse injecté, la tape pose l'adresse par history.replaceState (aucun
@@ -560,15 +649,17 @@ export async function runRechercheWebTests({ eq, ok }) {
     const scene = document.createElement('div'); scene.hidden = true; document.body.append(scene);
     try {
       // I-J : « saumon » et « fenouil » sont des ingrédients du lexique et deviennent des puces « avec … » ; leurs libellés fr.
-      const ING = new Map([['ing_salmon', { labels: { fr: { label: 'saumon' } } }], ['ing_fennel_bulb', { labels: { fr: { label: 'fenouil' } } }]]);
+      const ING = new Map([['ing_salmon', { labels: { fr: { label: 'saumon' } } }], ['ing_fennel_bulb', { labels: { fr: { label: 'fenouil' } } }], ['ing_chicken', { labels: { fr: { label: 'poulet' } } }]]);
       const ctxDe = (llm) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING, meal_feedback: [], settings: { llm } });
-      const ANTH = { provider: 'anthropic', api_key: 'k', model: 'm' };
+      const CLE_ECRAN = 'sk-ant-cle-ecran-sentinelle'; // V-F2 : elle doit atteindre chercher(), jamais l'état ni l'écran
+      const ANTH = { provider: 'anthropic', api_key: CLE_ECRAN, model: 'm' };
       // remplacerAdresse factice par défaut : la tape (lancer) met l'adresse à jour par history.replaceState, pas celle de la page de tests.
       const monter = async (query, ctx, deps) => { const root = await S.renderSearch({}, { mode: 'web', ...query }, ctx, { remplacerAdresse: () => {}, ...deps }); scene.append(root); return root; };
       const texte = (root) => root.textContent;
       const bouton = (root, nom) => [...root.querySelectorAll('button')].find((b) => b.textContent === nom);
       const tick = () => new Promise((r) => setTimeout(r, 0));
       const puces = (root) => [...root.querySelectorAll('.chip')].map((c) => c.textContent); // les puces AFFICHÉES
+      const enVol = (root) => !!root.querySelector('[role="status"]') && texte(root).includes('L’assistant cherche sur le web…'); // « rien » a aussi un role=status
       // Tape, laisse lancer() appeler chercher (qui pose appels.rendre), résout l'issue, laisse la mémoire et le redessin se poser.
       const tapeEtAttend = async (root, issue) => { bouton(root, 'Chercher sur le web avec l’assistant').click(); await tick(); appels.rendre(issue); await tick(); };
       const liens = [{ href: 'https://a.test/r?x=1', hote: 'a.test', titre: '<b>Saumon</b> au fenouil', date: 'May 1, 2026', pourquoi: 'Fenouil et saumon.' }, { href: 'https://b.test/', hote: 'b.test', titre: 'b.test', date: null, pourquoi: null }, { href: 'https://u:p@a.test/x', hote: 'a.test', titre: '', date: null, pourquoi: null }];
@@ -587,6 +678,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       eq(root.querySelectorAll('b').length, 0, 'trouve : aucun élément créé par un titre hostile');
       ok(texte(root).includes('a.test · May 1, 2026') && texte(root).includes('Fenouil et saumon.'), 'trouve : hôte, date, pourquoi');
       ok(texte(root).includes('Trouvé sur le web') && texte(root).includes('Demande envoyée : saumon fenouil'), 'trouve : titre de section et demande envoyée (I-J)');
+      eq([appels.args[0]?.cfg?.api_key === CLE_ECRAN, JSON.stringify(S.etatWeb()).includes(CLE_ECRAN), texte(root).includes(CLE_ECRAN)], [true, false, false], 'I-C écran : après un trouvé, la clé n’est ni dans etatWeb() ni dans le texte rendu — elle a bien atteint chercher() (V-F2)');
       // R-WEB-1 : une saisie avec un caractère de format (U+200B) est nettoyée AVANT l'envoi ; l'écran rappelle la demande partie
       {
         const r0 = await monter({ q: 'saumon\u{200B} fenouil' }, ctx, { chercher, navigate: () => {} });
@@ -617,6 +709,15 @@ export async function runRechercheWebTests({ eq, ok }) {
         eq([dernier.length, p.get('adresse'), p.get('titre')], [2, 'https://a.test/x', 'a.test'], 'garder : la carte à identifiants navigue avec l’adresse SANS u:p et le titre de repli (I-H)');
       }
       ok(!!bouton(root, 'Chercher à nouveau'), 'trouve : « Chercher à nouveau » présent');
+      // V-F7 : « Annuler » laisse une VRAIE mémoire intacte — « Chercher à nouveau » depuis un trouvé, puis « Annuler »
+      {
+        const n = appels.n;
+        bouton(root, 'Chercher à nouveau')?.click(); await tick();
+        const enCours = [enVol(root), !!bouton(root, 'Annuler'), appels.n];
+        bouton(root, 'Annuler')?.click(); // ?. : un écran faux rend l'assertion rouge au lieu d'interrompre le bloc
+        eq([enCours, S.etatWeb().memoire?.etat, S.etatWeb().enCours, root.querySelectorAll('a[target="_blank"]').length, texte(root).includes('Trouvé sur le web')], [[true, true, n + 1], 'trouve', false, 3, true], 'annuler : depuis un trouvé, « Chercher à nouveau » puis « Annuler » → la mémoire reste « trouve » et ses liens sont remontrés (V-F7)');
+        appels.rendre({ etat: 'indisponible', raison: 'annule', liens: [], autres: [], repli: false, recherches: null, modele: 'm' }); await tick(); // le vol annulé finit, muet
+      }
       // Mémoire par clé (F13/S5/F20) : une nouvelle instance avec la même demande montre les liens SANS appel
       root.remove();
       const nAvant = appels.n;
@@ -659,7 +760,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {}, enLigne: () => false });
       await tapeEtAttend(root, { etat: 'rien', raison: null, liens: [], repli: false, recherches: 1, modele: 'm' });
       ok(texte(root).includes('Aucune page trouvée pour cette demande. Reformule ou cherche autrement.') && !!bouton(root, 'Réessayer'), 'rien : texte + Réessayer');
-      { const n = appels.n; bouton(root, 'Réessayer').click(); await tick(); eq([appels.n, appels.deps[appels.deps.length - 1].enLigne()], [n + 1, true], 'réessayer : rappelle chercher avec enLigne forcé à vrai (S9)'); appels.rendre(trouve); await tick(); }
+      { const n = appels.n; bouton(root, 'Réessayer').click(); await tick(); eq([appels.n, appels.deps[appels.deps.length - 1].enLigne()], [n + 1, true], 'réessayer : rappelle chercher avec enLigne forcé à vrai (S9)'); eq([enVol(root), !!bouton(root, 'Annuler'), !!bouton(root, 'Chercher à nouveau')], [true, true, false], 'réessayer depuis « rien » : écran du vol, « Annuler », plus de « Chercher à nouveau » (V-F4)'); appels.rendre(trouve); await tick(); }
       root.remove();
       // indisponible × 8
       const CAS = [['hors_ligne', 'Tu es hors ligne.', true, false, false], ['cle_refusee', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.', false, true, false], ['recherche_desactivee', 'La recherche web n’est pas activée sur ton compte Anthropic.', false, true, false], ['trop_de_demandes', 'Trop de demandes pour l’instant. Réessaie dans une minute.', true, false, false], ['refus', 'L’assistant a refusé cette demande.', false, false, false], ['pas_cherche', 'L’assistant n’a pas cherché sur le web. Réessaie.', true, false, false], ['delai', 'L’assistant n’a pas répondu. Réessaie.', true, false, true], ['interne', 'L’assistant n’a pas répondu. Réessaie.', true, false, true], ['constructor', 'L’assistant n’a pas répondu. Réessaie.', true, false, true]]; // « constructor » : une clé du prototype n'est pas une raison connue (Object.hasOwn)
@@ -679,6 +780,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         const n = appels.n; const b = bouton(root, 'Chercher à nouveau'); const present = !!b;
         b?.click(); await tick();
         eq([present, appels.n, appels.args[appels.args.length - 1].q, appels.deps[appels.deps.length - 1].enLigne()], [true, n + 1, 'saumon', false], 'cle_refusee : « Chercher à nouveau » relance la même demande, un appel, enLigne NON forcé (contraste avec « Réessayer », R-WEB-7)');
+        eq([enVol(root), !!bouton(root, 'Annuler'), !!bouton(root, 'Chercher à nouveau')], [true, true, false], 'cle_refusee : après « Chercher à nouveau », écran du vol avec « Annuler », plus de « Chercher à nouveau » (V-F4)');
         appels.rendre(trouve); await tick();
       }
       root.remove();
@@ -739,8 +841,8 @@ export async function runRechercheWebTests({ eq, ok }) {
         eq([banniere(root)?.querySelector('strong')?.textContent, garder(root).disabled], ['exemple.test', false], 'signet prérempli : adresse à NBSP en tête → la bannière montre l’hôte que le formulaire enregistrera (R-WEB-8)');
         root = await S.renderSignetRoute({}, { adresse: '   ', titre: 'X' }, ctx, deps);
         eq([banniere(root), champ(root, 'Adresse *').value], [null, ''], 'signet prérempli : une adresse d’espaces n’est pas « reçue » — aucune bannière, champ vide (R-WEB-8)');
-        root = await S.renderSignetRoute({}, { adresse: 'https://exemple.test/r', titre: 't'.repeat(400) + '\u{202E}' }, ctx, deps);
-        eq([champ(root, 'Titre *').value.length, champ(root, 'Titre *').value.includes('\u{202E}')], [300, false], 'signet prérempli : titre borné à 300 points de code sans bidi (S2)');
+        root = await S.renderSignetRoute({}, { adresse: 'https://exemple.test/r', titre: 't'.repeat(100) + '\u{202E}' + 't'.repeat(300) }, ctx, deps);
+        eq([champ(root, 'Titre *').value.length, champ(root, 'Titre *').value.includes('\u{202E}')], [300, false], 'signet prérempli : titre borné à 300 points de code, le bidi placé AVANT la coupe est retiré (S2, V-F5)');
         root = await S.renderSignetRoute({}, { adresse: 'https://exemple.test/r', titre: '😀'.repeat(200) }, ctx, deps);
         { const err = root.querySelector('[data-erreur="titre"]'); eq([Array.from(champ(root, 'Titre *').value).length, err.textContent, err.hidden, garder(root).disabled], [200, '', true, false], 'signet prérempli : 200 emoji (400 unités UTF-16) — signetModel compte des POINTS DE CODE comme borner : aucune erreur « Titre trop long. », bouton ouvert'); }
         { const a = 'https://exemple.test/r'; const m300 = S.signetModel({ adresse: a, titre: '😀'.repeat(300) }); const m301 = S.signetModel({ adresse: a, titre: '😀'.repeat(301) }); eq([m300.valide, m301.valide, !!m301.erreurs.titre], [true, false, true], 'signetModel : la borne du titre est 300 POINTS DE CODE (300 emoji passent, 301 non)'); }

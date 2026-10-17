@@ -1,21 +1,22 @@
 # STATE.md — Cuisine OS (mistu) — état au 17 octobre 2026 (fin du lot « Chercher sur le web »)
 
 ## Où on en est
-**FINI dans le worktree, revue finale faite le 17 octobre, une vague de corrections, prête à fusionner par Neegan ; PAS
-fusionné, PAS poussé** : lot « Chercher sur le web avec
+**FINI dans le worktree, revue finale faite le 17 octobre, une vague de corrections, puis `/verify` et sa vague,
+prête à fusionner par Neegan ; PAS fusionné, PAS poussé** : lot « Chercher sur le web avec
 l'assistant », branche `recherche-web`, worktree `~/projects/mistu-web` (serveur `python3 -m http.server 8083`), base
 `main` `e4e841b`. Neuf tâches (une ronde de corrections au plus chacune), puis la vague finale de la revue de branche
-(R-WEB-9 et quatre mineurs), puis sa vague 2 (la tape met l'adresse à jour sans re-rendu). Après la vague 2 : suite
-**1765/1765** (total épinglé **1764** dans `tests/tests.js`), une
+(R-WEB-9 et quatre mineurs), puis sa vague 2 (la tape met l'adresse à jour sans re-rendu), puis la vague `/verify`
+(R-WEB-10, V-C2, V-C6, faux-verts fermés, dettes nommées). Après la vague `/verify` : suite
+**1778/1778** (total épinglé **1777** dans `tests/tests.js`), une
 seule erreur de console (404 `/favicon.ico`, pré-existant), `node --test tools/*.test.mjs` 40/40,
 `node tools/generer-migrations.mjs --check` 0. `APP_VERSION 0.5.0`, `sw.js`
-`cuisine-os-v0.5.0-10`, `SHELL` + `./src/core/bornes.js` et `./src/domain/recherche-web.js`. `main` était
+`cuisine-os-v0.5.0-11`, `SHELL` + `./src/core/bornes.js` et `./src/domain/recherche-web.js`. `main` était
 `e4e841b` (lot ISBN) au départ du lot ; vérifier avant la fusion. Le site public ne change qu'à la fusion et au
 `git push` de Neegan.
 Ce que fait le lot : l'onglet « Web » de la recherche lance, sur une tape, **un** appel à l'API Anthropic avec l'outil de
 recherche web ; au plus 5 liens, tous pris dans les résultats bruts du serveur (rien d'inventé) ; « Garder ce lien » →
 signet prérempli ; issues distinctes ; mémoire vive par demande ; un seul appel en vol dans l'app.
-Spec `docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md` (§ 11.2 = R-WEB-1 à R-WEB-9 et tout ce que la
+Spec `docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md` (§ 11.2 = R-WEB-1 à R-WEB-10 et tout ce que la
 construction a amendé), plan `docs/superpowers/plans/2026-10-17-chercher-sur-le-web.md`, registre
 `.superpowers/sdd/2026-10-17-chercher-sur-le-web/progress.md`, section du lot dans `CLAUDE.md` et dans
 `docs/architecture.md`.
@@ -29,8 +30,8 @@ construction a amendé), plan `docs/superpowers/plans/2026-10-17-chercher-sur-le
 
 ## Reste à faire
 1. Fait le 17 octobre : revue finale de branche et sa vague de corrections, rouge d'abord (rapport
-   `.superpowers/sdd/2026-10-17-chercher-sur-le-web/final-fix-report.md`, spec § 11.2 R-WEB-9). Le `/verify` du chef
-   d'orchestre précède le geste de fusion s'il n'est pas déjà joué.
+   `.superpowers/sdd/2026-10-17-chercher-sur-le-web/final-fix-report.md`, spec § 11.2 R-WEB-9) ; puis `/verify` (trois
+   lentilles) et sa vague : R-WEB-10, V-C2, V-C6, faux-verts fermés, dettes nommées (même rapport, « Vague 3 »).
 2. **À faire, pas encore fait pour ce lot** : copier `~/projects/mistu-web/.superpowers/sdd/2026-10-17-chercher-sur-le-web/`
    dans `~/projects/mistu/.superpowers/sdd/`. Règle : les registres SDD sont copiés dans `~/projects/mistu/.superpowers/sdd/`
    **avant** tout `git worktree remove` (le registre vit à la racine du worktree et meurt avec lui).
@@ -63,7 +64,7 @@ construction a amendé), plan `docs/superpowers/plans/2026-10-17-chercher-sur-le
 ```
 cd ~/projects/mistu-web && git status --short && git log --oneline -3
 curl -sS -o /dev/null -w "8083 http=%{http_code}\n" http://localhost:8083/tests/ || (nohup python3 -m http.server 8083 > /dev/null 2>&1 &)
-node ~/projects/mistu-web/.superpowers/sdd/2026-10-17-chercher-sur-le-web/suite.cjs 8083   # attendu : 1765/1765 (+ 1 x 404 favicon)
+node ~/projects/mistu-web/.superpowers/sdd/2026-10-17-chercher-sur-le-web/suite.cjs 8083   # attendu : 1778/1778 (+ 1 x 404 favicon)
 node --test tools/*.test.mjs && node tools/generer-migrations.mjs --check
 ```
 Avant la fusion (geste de Neegan, arbre principal) : `mv ~/projects/mistu/STATE.md ~/projects/mistu/STATE.avant-web.md`, puis § « Reste à faire », point 3.

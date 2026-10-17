@@ -363,7 +363,7 @@ puce dit.
 ## 8. Données, versions, dictionnaire, CSP, docs
 
 - **Aucun** changement de schéma, aucune migration, aucun réglage neuf. `tools/generer-migrations.mjs --check` reste 0.
-- `src/model/schema.js` : `APP_VERSION = '0.5.0'`. `sw.js` : `VERSION = 'cuisine-os-v0.5.0-10'` (valeur réelle après la vague finale ; `-9` à la
+- `src/model/schema.js` : `APP_VERSION = '0.5.0'`. `sw.js` : `VERSION = 'cuisine-os-v0.5.0-11'` (valeur réelle après la vague `/verify` ; `-10` à la vague finale, `-9` à la
   clôture, tâche 9), `SHELL` += `'./src/domain/recherche-web.js'` et `'./src/core/bornes.js'` (le test « SHELL complet »
   de `tests/sync.js` rougit sinon).
 - **Tests existants qui passent au rouge et sont mis à jour** (F15) : `tests/ajouter.js` l. 1800 (`v0\.4\.1-\d+` →
@@ -465,7 +465,7 @@ appellent `reinitialiserWeb()` avant chaque cas et lisent `etatWeb()` comme **fa
   parseQuery('salade'), { mode: 'web' })` → `admissible.length === 0` et `notice === undefined` ; `tests/backup.js` sur le
   secret `llm` reste vert.
 - **9.8 Statiques.** `sw.js` : `SHELL` contient les deux modules neufs (garde existante) et `VERSION ===
-  'cuisine-os-v0.5.0-10'` ; `APP_VERSION === '0.5.0'` ; chaque texte « » des § 5 et 6 a sa clé dans `en.js` ; les sources de
+  'cuisine-os-v0.5.0-11'` ; `APP_VERSION === '0.5.0'` ; chaque texte « » des § 5 et 6 a sa clé dans `en.js` ; les sources de
   `src/ui/search.js` et `src/domain/search.js` ne contiennent plus « Le Web n’est pas activé » ; `supportsWebSearch` vaut
   `false` pour `none` et `openai_compatible`, `true` pour `anthropic` ; `anthropicHeaders('k')` rend exactement les quatre
   en-têtes ; `src/domain/recherche-web.js` et `src/core/bornes.js` n'importent rien de `src/ui/`.
@@ -580,21 +580,30 @@ Une ligne par écart entre cette spec et ce qui a été construit (tâches 1 à 
   `signetModel(etat).hote || ''` (même décision que l'enregistrement : rognage, longueur) ; la garde `recue` exige
   `query.adresse.trim() !== ''` ; la bannière est volontairement statique (« reçue » = l'adresse telle qu'arrivée).
   Coût si faux : aucun.
-- **R-WEB-9** (revue de branche, vague finale puis vague 2 ; amende § 5.4.1, § 5.4.3 et R-WEB-2) quand le champ a
+- **R-WEB-9** (revue de branche, vague finale puis vague 2 ; amende § 5.4.1, § 5.4.3 et R-WEB-2 ; sa réunion est
+  **remplacée par R-WEB-10**, l'adresse sans re-rendu tient) quand le champ a
   changé depuis la dernière analyse, `lancer` le relit puis y **réunit** les restrictions affichées juste avant la
   tape : `diets`, `exclude`, `exclude_text` (sans doublon, les anciennes d'abord, puis les nouvelles absentes), et le
   `type`, `max_total_minutes` et `max_active_minutes` précédents si la nouvelle analyse n'en a pas ; un ingrédient exclu
   ne reste pas « avec » (même règle que `parseQuery`). § 5.4.3 : la tape met l'adresse à jour **sans re-rendu**
   (`remplacerAdresse`, `history.replaceState`, aucun `hashchange`) au lieu de `navigate(…, { replace: true })` ;
-  l'instance courante garde ses puces et son vol. Portée : les restrictions affichées survivent à la TAPE ; Entrée, changement de mode ou de case (`run()`, préexistant) réanalysent encore le champ. Défaut corrigé : « saumon » tapé sans
+  l'instance courante garde ses puces et son vol. Portée (depuis R-WEB-10) : seules les puces de liste survivent à la TAPE ; Entrée, changement de mode ou de case (`run()`, préexistant) réanalysent encore le champ. Défaut corrigé : « saumon » tapé sans
   Entrée, puis « + restriction : Sans gluten », puis la tape → la demande payante partait SANS « Sans gluten » et la
   puce disparaissait. Vague 2 (re-revue) : la première correction réunissait bien la DEMANDE, mais la navigation de la
   tape ré-instanciait la route depuis l'adresse (sans les puces réunies) : la puce disparaissait encore, l'écran du vol
   et « Annuler » laissaient place à un bouton rallumé pendant l'appel payant (une seconde tape l'abandonnait et
   repayait sans la restriction), et une issue autre que `trouve` restait cachée (R-WEB-7). Coût si faux : une puce de
   trop dans une demande.
+- **R-WEB-10** (`/verify`, corrige R-WEB-9, amende § 5.4.1) quand le champ a changé, `lancer` le relit et ne garde que
+  les puces que les LISTES ont ajoutées : `ajouts = affichées − parseQuery(ancien state.q).filters`, pour `diets` et
+  pour `type` (gardé seulement si le nouveau texte n'en dit pas) ; une puce retirée à la main n'est plus affichée, donc
+  jamais reportée. `exclude`, `exclude_text`, `include` et les deux durées viennent du NOUVEAU texte seul ; le nettoyage
+  `include − exclude` reste. Défaut corrigé : « soupe sans gluten en 20 minutes » → résultats → champ remplacé par
+  « gâteau au chocolat » → « Chercher à nouveau » : la demande payante partait avec `Contraintes : Soupe ; Sans gluten ;
+  prêt en ≤ 20 min` ; « sans fenouil » puis « saumon fenouil » se contredisait. « Entrée puis tape » et « tape seule »
+  envoient désormais la même demande quand aucune liste n'a servi (testé). Coût si faux : une puce de liste perdue.
 - **Résidu de R-WEB-9 (nommé, non corrigé)** : une reconstruction de la route PENDANT un vol par `cuisineos:refresh` (passe de
-  synchronisation qui écrit) ou par l'historique perd les puces de liste et la réunion (elles ne sont pas dans l'adresse) ; l'écran du
+  synchronisation qui écrit) ou par l'historique perd les puces de liste (R-WEB-10 ; elles ne sont pas dans l'adresse) ; l'écran du
   vol disparaît et une nouvelle tape repartirait sans elles. Préexistant depuis R-WEB-2, plus rare que la tape. Remède : porter les
   puces de liste dans l'adresse (lot ultérieur). Note : le test de la dépendance par défaut de la vague 2 appelle un vrai
   `history.replaceState` sur la page de tests, restauré en `finally` — exception à la convention « jamais dans un test » du lot UX.
@@ -630,4 +639,30 @@ Une ligne par écart entre cette spec et ce qui a été construit (tâches 1 à 
   textes `indisponible` passent par `t(cle)` avec une variable : aucune lecture du source ne les voit). `VERSION` est
   épinglée par le motif `v0\.5\.0-\d+` dans trois suites, pas par une valeur exacte ; la valeur réelle de clôture est
   aux § 8 et § 9.8. Total épinglé à la clôture : **1752** (`tests/tests.js`), suite 1753/1753 ; après la vague finale :
-  **1760**, suite 1761/1761 ; après la vague 2 : **1764**, suite 1765/1765. Coût si faux : aucun.
+  **1760**, suite 1761/1761 ; après la vague 2 : **1764**, suite 1765/1765 ; après la vague `/verify` : **1777**, suite
+  1778/1778. Coût si faux : aucun.
+- **Vague `/verify`** (trois lentilles, 17 octobre) : **V-C2** `t()` remplace par fonction (`$&`, `$$`, `` $` ``, `$'`
+  d'une valeur étaient interprétés) ; **V-C6** un 200 sans flux lisible ni `text()` → `interne`, plus `reseau` ;
+  faux-verts **V-F1** (corps trop gros en JSON valide), **V-F2** (chaque issue du bloc § 4.5 contrôlée, 42 appels comptés ;
+  clé sentinelle à l'écran), **V-F3** (deux pages du même hôte), **V-F4** (écran du vol après une relance depuis une
+  issue), **V-F5** (bidi avant la coupe du titre prérempli), **V-F6** (relais du signal vérifié aussitôt), **V-F7**
+  (« Annuler » sur une vraie mémoire), **V-F12** (`self === undefined` strict) fermés ; chaque mutant rejoué sur une copie,
+  survivant avant, tué après (rapport `final-fix-report.md`, « Vague 3 »). Coût si faux : aucun.
+- **Dettes nommées par `/verify`** (une ligne chacune) :
+  - **V-F8** `page_age` et `recherches` ne sont pas typés par les tests (un nombre ou un objet à leur place n'est pas éprouvé).
+  - **V-F9** branches sans fixture : `server_tool_use` seul (sans bloc de résultats), `stop_reason: 'max_tokens'`, une page « autre » au titre vide.
+  - **V-F10** I-K (l'avertissement fixe sous les liens) n'est affirmé que sur un seul `trouve`.
+  - **V-F11** aucune fixture où la frappe REMPLACE un ingrédient en gardant une puce de liste (« saumon » → « truite »).
+  - **V-F13** `lire()` des tests de source ne vérifie pas `res.ok` (un 404 serait lu comme un source).
+  - **V-F14** `suite.cjs` lit n'importe quel `h2` de la page, et son code de sortie ignore la console.
+  - **V-C3** une prose qui met une accolade APRÈS le JSON `choix` le rend illisible → repli (liens sans « pourquoi »).
+  - **V-C4** les bornes 12 filtres / 80 points de code par filtre coupent la demande sans que les puces affichées le disent.
+  - **V-C5** `libellePuce` rend toujours le français (libellés `fr` des ingrédients), même en interface anglaise.
+  - **V-S3** un lien profond `#/search?q=…` peut préremplir le champ avec des espaces cachés (rien ne part sans tape).
+  - **V-S4** un vol en cours pour une AUTRE clé est invisible depuis l'écran courant ; I-I vaut par document (le module), pas par app (deux onglets = deux vols).
+  - **V-S5** un plafond de dépense atteint ou un crédit épuisé est classé `requete` (statut et corps réels à mesurer).
+  - **V-S6** « ce qui part » (I-C) compte aussi `Origin`, `User-Agent`, `Accept-Language` et les indices client du navigateur ; les requêtes de recherche rédigées par le modèle atteignent le fournisseur de recherche.
+  - **V-S7** fermé par cette vague (V-C2, `t()` sans motifs `$`).
+  - **V-S8** le titre d'une page est rendu dans un lien habillé en bouton (`a.btn`) ; les marques combinantes (Mn) ne sont pas retirées des titres.
+  - **V-S9** (préexistant) `AnthropicProvider.complete` part sans `redirect: 'error'` ni `credentials: 'omit'` ; « Tester » (Réglages) affiche le corps d'erreur brut.
+  - **V-S1 / V-S2** les deux murs hors code : plafond du workspace Anthropic et D5 (V-S1) ; préfixe « Selon l'assistant » devant le « pourquoi » et filtre déterministe par `DIET_TAGS` en suite (V-S2).

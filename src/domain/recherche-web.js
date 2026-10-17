@@ -175,6 +175,8 @@ export async function chercherRecettesWeb(args, deps = {}) {
       }
       if (r.status >= 400 && r.status < 500) return issue('indisponible', 'requete');
       if (r.status >= 500) return issue('indisponible', 'serveur');
+      // V-C6 : une réponse sans flux lisible NI text() n'est pas une panne réseau — c'est une forme impossible : interne.
+      if (typeof r.text !== 'function' && !(r.body && typeof r.body.getReader === 'function')) return issue('indisponible', 'interne');
       let texte;
       try {
         const morceaux = await lireBornee(r, corpsMax);

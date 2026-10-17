@@ -16,7 +16,7 @@ const MODES = [['recipes', 'Mes recettes'], ['books', 'Mes livres'], ['web', 'We
 
 // --- Recherche web : état AU NIVEAU DU MODULE (spec Web § 5.1). run() navigue en `replace`, donc chaque Entrée,
 // changement de mode ou de case ré-instancie la route : un état d'instance ne survit pas (la tape web, elle, ne fait que
-// remplacer l'adresse sans re-rendu — R-WEB-9). Ici vivent la dernière issue
+// remplacer l'adresse sans re-rendu — R-WEB-9 ; ce qu'elle garde du champ : R-WEB-10). Ici vivent la dernière issue
 // (mémoire VIVE, jamais en base — I-G), sous la clé exacte de la demande qui l'a produite, et l'UNIQUE appel en vol de
 // l'app (I-I). Les instances sont des vues : elles s'abonnent, et sont oubliées dès que leur racine quitte le document.
 let memoire = null; // { cle, issue, q, filtres }
@@ -37,21 +37,19 @@ const TEXTES_INDISPONIBLE = {
 };
 const SANS_REESSAI = ['cle_refusee', 'recherche_desactivee', 'refus'];
 const AVEC_REGLAGES = ['cle_refusee', 'recherche_desactivee'];
-// R-WEB-9 (amende § 5.4.1) : à la TAPE, un champ changé est relu, mais les restrictions déjà affichées — type, régimes,
-// exclusions, durées — sont réunies à la nouvelle analyse (les anciennes d'abord, puis les nouvelles absentes) : elles
-// survivent à la tape. Entrée, changement de mode ou de case (run(), préexistant) réanalysent encore le champ. Un
-// ingrédient exclu ne reste pas « avec » (même règle que parseQuery).
-function reunirRestrictions(avant, analyse) {
-  const unir = (a, b) => [...new Set([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])])];
+// R-WEB-10 (corrige R-WEB-9, amende § 5.4.1) : à la TAPE, un champ changé est relu ; ne survivent que les puces que les
+// LISTES « + type » / « + restriction » ont ajoutées = affichées MOINS ce que l'analyse de l'ancien texte avait donné
+// (régimes, et le type si le nouveau texte n'en dit pas). Une puce retirée à la main n'est plus affichée : elle ne revient
+// pas. Exclusions, ingrédients et durées viennent du NOUVEAU texte seul : une demande neuve n'hérite pas des contraintes
+// de l'ancienne. Ainsi « Entrée puis tape » et « tape seule » envoient la même demande quand aucune liste n'a servi.
+// Entrée, changement de mode ou de case (run(), préexistant) réanalysent le champ sans rien garder.
+function garderAjoutsDesListes(affiches, ancienTexte, analyse) {
   const f = analyse.filters;
-  f.diets = unir(avant?.diets, f.diets);
-  f.exclude = unir(avant?.exclude, f.exclude);
-  const textes = unir(avant?.exclude_text, f.exclude_text);
-  if (textes.length) f.exclude_text = textes;
-  if (f.type == null && avant?.type) f.type = avant.type;
-  if (f.max_total_minutes == null && avant?.max_total_minutes) f.max_total_minutes = avant.max_total_minutes;
-  if (f.max_active_minutes == null && avant?.max_active_minutes) f.max_active_minutes = avant.max_active_minutes;
-  f.include = f.include.filter((id) => !f.exclude.includes(id));
+  const duTexte = Array.isArray(ancienTexte?.diets) ? ancienTexte.diets : [];
+  const ajouts = (Array.isArray(affiches?.diets) ? affiches.diets : []).filter((d) => !duTexte.includes(d));
+  f.diets = [...new Set([...f.diets, ...ajouts])];
+  if (f.type == null && affiches?.type && affiches.type !== ancienTexte?.type) f.type = affiches.type;
+  f.include = f.include.filter((id) => !f.exclude.includes(id)); // même règle que parseQuery
   return analyse;
 }
 
@@ -149,14 +147,15 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   const demandeCourante = () => construireDemande({ q: state.q, filtres: textesDesPuces(), langue: getUiLocale() });
   // § 5.4 : le champ est RELU s'il a changé depuis la dernière analyse (I-J) — s'il n'a pas changé, les puces ajoutées
   // par les listes « + type » / « + restriction » ou retirées à la main RESTENT ce qu'elles sont à l'écran (R-WEB-2 : une
-  // relecture inconditionnelle les écrasait) ; s'il a changé, les restrictions affichées sont réunies à la nouvelle
-  // analyse (R-WEB-9 : la frappe sans Entrée effaçait la restriction choisie). Puis le vol précédent est abandonné
-  // (I-I), le nouveau posé au module, et l'adresse mise à jour SANS re-rendu (remplacerAdresse, aucun hashchange) :
-  // l'instance courante garde ses puces et son vol — une ré-instanciation repartirait de l'adresse, qui ne porte ni les
-  // puces des listes ni les restrictions réunies, et perdrait le vol (autre clé). « Réessayer » passe { enLigne: () => true }.
+  // relecture inconditionnelle les écrasait) ; s'il a changé, il est relu et seules les puces de LISTE survivent
+  // (R-WEB-10 : la frappe sans Entrée effaçait la restriction choisie, R-WEB-9 portait aussi celles de l'ancien texte).
+  // Puis le vol précédent est abandonné (I-I), le nouveau posé au module, et l'adresse mise à jour SANS re-rendu
+  // (remplacerAdresse, aucun hashchange) : l'instance courante garde ses puces et son vol — une ré-instanciation
+  // repartirait de l'adresse, qui ne porte pas les puces des listes, et perdrait le vol (autre clé). « Réessayer » passe
+  // { enLigne: () => true }.
   const lancer = (depsForces = {}) => {
     const champ = input.value.trim();
-    if (champ !== state.q) { const avant = state.parsed.filters; state.q = champ; state.parsed = reunirRestrictions(avant, parseQuery(champ)); if (forRecipe && role) state.parsed.filters.type = role; }
+    if (champ !== state.q) { const affiches = state.parsed.filters; const ancienTexte = parseQuery(state.q).filters; state.q = champ; state.parsed = garderAjoutsDesListes(affiches, ancienTexte, parseQuery(champ)); if (forRecipe && role) state.parsed.filters.type = role; }
     const demande = demandeCourante();
     if (!demande.cle) { render(); return; }
     vol?.controller.abort();

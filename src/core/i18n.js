@@ -15,7 +15,8 @@ export const getUiLocale = () => uiLocale;
 
 export function t(fr, vars = null) {
   let s = uiLocale === 'en' ? (EN[fr] ?? fr) : fr;
-  if (vars) for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, String(v));
+  // Remplacement par FONCTION : une chaîne de remplacement interpréterait $&, $$, $` et $' venus d'une valeur (V-C2).
+  if (vars) for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, () => String(v));
   return s;
 }
 
