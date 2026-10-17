@@ -734,6 +734,29 @@ export async function runRechercheWebTests({ eq, ok }) {
       restriction.value = 'sans_gluten'; restriction.dispatchEvent(new Event('change'));
       { const n = appels.n; const affichees = puces(root); bouton(root, 'Chercher à nouveau').click(); await tick(); const dernier = appels.args[appels.args.length - 1]; eq([appels.n, dernier.q, dernier.filtres, affichees.includes('Sans gluten')], [n + 1, 'saumon fenouil', affichees, true], 'tape : le filtre ajouté par la liste part avec la demande (EXACTEMENT les puces affichées), le champ inchangé n’est pas réanalysé (R-WEB-2)'); appels.rendre(trouve); await tick(); }
       eq([...root.querySelectorAll('.muted')].find((n) => n.textContent.startsWith('Demande envoyée'))?.textContent, 'Demande envoyée : saumon fenouil · ' + puces(root).join(' ; '), 'Chercher à nouveau : « Demande envoyée » dit EXACTEMENT la demande relancée, puces jointes par « ; » (I-J)');
+      // Confort après preuve (item 2) : quand la demande a changé (K1), « Chercher à nouveau » est AUSSI sur la ligne de la
+      // mention, AVANT les liens (il n'était qu'en bas, sous les cartes et « Autres pages ») ; le bouton du bas reste.
+      root.remove(); S.reinitialiserWeb();
+      root = await monter({ q: 'saumon fenouil' }, ctx, { chercher, navigate: () => {} });
+      await tapeEtAttend(root, trouve);
+      {
+        const relances = () => [...root.querySelectorAll('button')].filter((b) => b.textContent === 'Chercher à nouveau');
+        const avantLiens = (b) => !!(b && (b.compareDocumentPosition(root.querySelector('a[target="_blank"]')) & Node.DOCUMENT_POSITION_FOLLOWING));
+        const ajouterSansGluten = () => { const l = [...root.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.textContent === '+ restriction')); l.value = 'sans_gluten'; l.dispatchEvent(new Event('change')); };
+        ajouterSansGluten();
+        { const [haut, bas] = relances(); const ligne = haut?.parentElement;
+          eq([relances().length, avantLiens(haut), ligne?.matches('.status.row.between'), ligne?.querySelector('span')?.textContent, avantLiens(bas), bas?.parentElement?.tagName],
+            [2, true, true, 'La demande a changé depuis cette recherche.', false, 'SECTION'], 'K1 : demande changée → DEUX « Chercher à nouveau » : le premier sur la ligne de la mention, avant le premier lien ; celui du bas reste (confort, item 2)'); }
+        [...root.querySelectorAll('.chip.removable')].find((c) => c.textContent === 'Sans gluten').click();
+        { const r = relances(); eq([r.length, avantLiens(r[0]), r[0]?.parentElement?.tagName, texte(root).includes('La demande a changé depuis cette recherche.')], [1, false, 'SECTION', false], 'sans mention (puce retirée) : UN seul « Chercher à nouveau », en bas (confort, item 2)'); }
+        ajouterSansGluten();
+        const n = appels.n; const affichees = puces(root);
+        const haut = relances()[0]; const enHaut = avantLiens(haut);
+        haut.click(); await tick();
+        const dernier = appels.args[appels.args.length - 1];
+        eq([enHaut, appels.n, dernier.q, dernier.filtres, affichees.includes('Sans gluten'), enVol(root)], [true, n + 1, 'saumon fenouil', affichees, true, true], 'le « Chercher à nouveau » de la mention (avant les liens) lance la tape : un appel, avec les puces courantes (confort, item 2)');
+        appels.rendre(trouve); await tick();
+      }
       // R-WEB-3 : un « trouvé » dont aucune adresse ne survit à la revalidation au rendu replie sur l'écran « rien »
       root.remove(); S.reinitialiserWeb();
       root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });

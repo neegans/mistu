@@ -238,7 +238,9 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     const demande = memoire?.filtres?.length ? `${memoire.q} · ${memoire.filtres.join(' ; ')}` : (memoire?.q ?? state.q);
     return section(t('Trouvé sur le web'),
       el('div', { class: 'muted' }, t('Demande envoyée : {q}', { q: demande })),
-      demandeDiffere ? el('div', { class: 'status' }, t('La demande a changé depuis cette recherche.')) : null, // K1
+      // K1 ; la relance est AUSSI sur la ligne de la mention, avant les liens (confort après preuve, 17 octobre) — le
+      // bouton du bas reste. chercherANouveau() est une fabrique : un bouton neuf à chaque appel.
+      demandeDiffere ? el('div', { class: 'status row between' }, el('span', null, t('La demande a changé depuis cette recherche.')), chercherANouveau()) : null,
       ...cartes,
       autres.length ? el('details', null, el('summary', { class: 'btn' }, t('Autres pages trouvées ({n})', { n: autres.length })), ...autres) : null, // K2
       el('div', { class: 'status' }, t('L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.')),
