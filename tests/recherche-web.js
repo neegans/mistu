@@ -277,15 +277,17 @@ export async function runRechercheWebTests({ eq, ok }) {
 
   // --- § 5.1-5.4 écran du mode Web : état de module, garde, tape, vol, annulation, filet
   {
-    const { setUiLocale } = await import('../src/core/i18n.js');
-    setUiLocale('fr'); // une suite antérieure bascule 'en' ; ce bloc affirme langue === 'fr'
+    const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
+    const localeAvant = getUiLocale();
+    setUiLocale('fr'); // une suite antérieure bascule 'en' ; ce bloc affirme langue === 'fr' (rendue dans le finally)
     const S = await import('../src/ui/search.js');
     const vraiFetch = globalThis.fetch;
     let appelsReseau = 0;
     globalThis.fetch = async (u) => { appelsReseau += 1; throw new Error(`aucun reseau attendu ici : ${u}`); };
     const scene = document.createElement('div'); scene.hidden = true; document.body.append(scene);
     try {
-      const ctxDe = (llm) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: new Map(), meal_feedback: [], settings: { llm } });
+      const ING = new Map([['ing_salmon', { labels: { fr: { label: 'saumon' } } }], ['ing_fennel_bulb', { labels: { fr: { label: 'fenouil' } } }]]);
+      const ctxDe = (llm) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING, meal_feedback: [], settings: { llm } });
       const ANTH = { provider: 'anthropic', api_key: 'k', model: 'm' };
       const pilote = () => { const p = {}; p.promesse = new Promise((res) => { p.resoudre = res; }); return p; };
       const tick = () => new Promise((r) => setTimeout(r, 0)); // un tour de boucle : les .then de lancer() ont tourné
@@ -294,6 +296,9 @@ export async function runRechercheWebTests({ eq, ok }) {
       const bouton = (root, nom) => [...root.querySelectorAll('button')].find((b) => b.textContent === nom);
       const champ = (root) => root.querySelector('input[type="search"]');
       const taper = (root, v) => { champ(root).value = v; champ(root).dispatchEvent(new Event('input', { bubbles: true })); };
+      const puces = (root) => [...root.querySelectorAll('.chip')].map((c) => c.textContent); // les puces AFFICHÉES
+      const aide = (root) => root.querySelector('[data-role="aide-web"]');
+      const enVol = (root) => !!root.querySelector('[role="status"]');
       const issueTrouve = { etat: 'trouve', raison: null, liens: [{ href: 'https://a.test/r', hote: 'a.test', titre: 'A', date: null, pourquoi: null }], repli: false, recherches: 1, modele: 'm' };
 
       // Garde du fournisseur (§ 5.2) : une seule source de vérité
@@ -314,13 +319,17 @@ export async function runRechercheWebTests({ eq, ok }) {
         eq([b.disabled, texte(root).includes('Écris d’abord ce que tu cherches.'), texte(root).includes('Une recherche = un appel à ton compte Anthropic.'), appels.length], [true, true, true, 0], 'bouton : champ vide → éteint, deux lignes, aucun appel au rendu (I-B)');
         taper(root, 'saumon fenouil');
         eq(b.disabled, false, 'bouton : la frappe ouvre le bouton sans Entrée ni redessin');
+        const aideCacheeParLaFrappe = aide(root)?.hidden;
+        taper(root, '');
+        eq([aideCacheeParLaFrappe, aide(root)?.hidden, b.disabled], [true, false, true], 'aide : la frappe cache « Écris d’abord… », l’effacement la remontre et éteint le bouton');
         taper(root, '\u{200B}');
         eq(b.disabled, true, 'bouton : une saisie faite de Cf laisse le bouton éteint (même règle que construireDemande)');
         taper(root, 'saumon fenouil sans gluten');
         b.click();
         await tick();
         eq(appels.length, 1, 'tape : un appel');
-        eq([appels[0].a.q, appels[0].a.filtres, appels[0].a.langue, appels[0].a.cfg], ['saumon fenouil sans gluten', ['Sans gluten', 'avec ing_fennel_bulb', 'avec ing_salmon'], 'fr', ANTH], 'tape : la demande est le CHAMP relu tel quel (q brut), les puces comprises en TEXTE (« Sans gluten » et les ingrédients du lexique, par leur id faute de table), la langue, la cfg (I-J)');
+        eq([appels[0].a.q, appels[0].a.filtres, appels[0].a.langue, appels[0].a.cfg], ['saumon fenouil sans gluten', ['Sans gluten', 'avec fenouil', 'avec saumon'], 'fr', ANTH], 'tape : la demande est le CHAMP relu (q), les puces comprises en TEXTE (« Sans gluten », les ingrédients par leur libellé), la langue, la cfg (I-J)');
+        eq(appels[0].a.filtres, puces(root), 'tape : les filtres envoyés sont EXACTEMENT les puces affichées après la relecture du champ (I-J)');
         ok(appels[0].d.signal instanceof AbortSignal && typeof appels[0].d.enLigne === 'undefined', 'tape : un signal est passé ; enLigne n’est pas forcé à la tape');
         const e = S.etatWeb();
         eq([e.enCours, typeof e.cle, e.memoire], [true, 'string', null], 'tape : etatWeb dit un vol en cours, rien en mémoire');
@@ -329,7 +338,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         ok(bouton(root, 'Chercher sur le web avec l’assistant')?.disabled === true && !!bouton(root, 'Annuler'), 'vol : bouton éteint, « Annuler » présent');
         // Annuler (§ 5.4.6)
         bouton(root, 'Annuler').click();
-        eq([appels[0].d.signal.aborted, S.etatWeb().enCours, S.etatWeb().memoire, !!bouton(root, 'Chercher sur le web avec l’assistant')], [true, false, null, true], 'annuler : signal abandonné, plus de vol, mémoire intacte, écran du bouton');
+        eq([appels[0].d.signal.aborted, S.etatWeb().enCours, S.etatWeb().memoire, !!root.querySelector('[data-role="chercher-web"]') && !enVol(root)], [true, false, null, true], 'annuler : signal abandonné, plus de vol, mémoire intacte, écran du bouton (pas celui du vol)');
         p.resoudre({ ...issueTrouve, raison: 'annule', etat: 'indisponible', liens: [] });
         await tick();
         eq(S.etatWeb().memoire, null, 'annuler : la résolution tardive d’un vol annulé n’écrit rien');
@@ -348,19 +357,63 @@ export async function runRechercheWebTests({ eq, ok }) {
         ok(!!r2.querySelector('[role="status"]') && !!bouton(r2, 'Annuler'), 'instance 2 : retrouve le vol par sa clé et montre « en cours »');
         r1.remove();
         taper(r2, 'saumon fenouil');
+        eq([r2.querySelector('[data-role="chercher-web"]'), bouton(r2, 'Chercher sur le web avec l’assistant')?.disabled, enVol(r2)], [null, true, true], 'vol : la frappe pendant le vol ne rouvre pas le bouton éteint (il n’a pas de data-role)');
         // le bouton de r2 est éteint pendant le vol : la seconde tape passe par « Annuler » puis le bouton
         bouton(r2, 'Annuler').click();
         bouton(r2, 'Chercher sur le web avec l’assistant').click();
         await tick();
-        eq([appels.length, appels[0].aborted, appels[1].aborted], [2, true, false], 'instance 2 : deux appels, le premier abandonné (I-I)');
+        eq([appels.length, appels[0].aborted, appels[1].aborted], [2, true, false], 'instance 2 : deux appels, le premier abandonné');
         p1.resoudre({ ...issueTrouve, liens: [{ ...issueTrouve.liens[0], titre: 'TARDIF' }] });
         await tick();
         eq(S.etatWeb().memoire, null, 'instance 2 : la réponse tardive du vol 1 n’écrit rien');
         p2.resoudre(issueTrouve);
         await tick();
         eq([S.etatWeb().enCours, S.etatWeb().memoire?.etat], [false, 'trouve'], 'instance 2 : la réponse du vol 2 est en mémoire');
+        eq([enVol(r2), texte(r2).includes('Résultat reçu.')], [false, true], 'instance 2 : la résolution redessine la vue abonnée (notifier → vues) : l’écran « en cours » ne reste pas figé');
         ok(!texte(r2).includes('TARDIF'), 'instance 2 : l’écran ne montre rien du vol 1');
         r2.remove();
+      }
+      // I-I sans « Annuler » : une puce retirée change la clé dans la MÊME instance ; la tape suivante abandonne le vol en l'air
+      {
+        S.reinitialiserWeb();
+        const appels = []; const p1 = pilote(); const p2 = pilote();
+        const chercher = async (a, d) => { appels.push({ a, d }); return appels.length === 1 ? p1.promesse : p2.promesse; };
+        const root = await monter({ q: 'saumon sans gluten' }, ctxDe(ANTH), { chercher, navigate: () => {} });
+        bouton(root, 'Chercher sur le web avec l’assistant').click();
+        await tick();
+        [...root.querySelectorAll('.chip.removable')].find((c) => c.textContent === 'Sans gluten').click();
+        eq([S.etatWeb().enCours, enVol(root), root.querySelector('[data-role="chercher-web"]')?.disabled], [true, false, false], 'I-I : la puce retirée change la clé : écran du bouton (allumé) alors que le vol 1 est encore en l’air');
+        root.querySelector('[data-role="chercher-web"]').click();
+        await tick();
+        eq([appels.length, appels[0].d.signal.aborted, appels[1].d.signal.aborted, appels[1].a.filtres], [2, true, false, ['avec saumon']], 'I-I : sans « Annuler », la nouvelle tape abandonne le vol précédent ; la demande porte les puces restantes');
+        p1.resoudre(issueTrouve);
+        await tick();
+        eq(S.etatWeb().memoire, null, 'I-I : la réponse tardive du vol remplacé n’écrit rien');
+        root.remove();
+      }
+      // R-WEB-2 : champ INCHANGÉ → pas de relecture ; la restriction ajoutée par « + restriction » part avec la demande
+      {
+        S.reinitialiserWeb();
+        const appels = [];
+        const root = await monter({ q: 'saumon' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        eq(aide(root)?.hidden, true, 'aide : champ rempli au montage → la ligne d’aide est cachée');
+        const liste = [...root.querySelectorAll('select')].find((s) => s.options[0]?.textContent === '+ restriction');
+        liste.value = 'sans_gluten'; liste.dispatchEvent(new Event('change'));
+        const affichees = puces(root);
+        bouton(root, 'Chercher sur le web avec l’assistant').click();
+        await tick();
+        eq([affichees, appels[0]?.a.filtres], [['Sans gluten', 'avec saumon'], ['Sans gluten', 'avec saumon']], 'R-WEB-2 : champ inchangé → pas de relecture ; la demande porte EXACTEMENT les puces affichées, la restriction ajoutée comprise (I-J)');
+        root.remove();
+      }
+      // R-WEB-1 : ce qui part est la demande NETTOYÉE par construireDemande (un Cf retiré), jamais la saisie brute
+      {
+        S.reinitialiserWeb();
+        const appels = [];
+        const root = await monter({ q: 'saumon\u{200B} fenouil' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        bouton(root, 'Chercher sur le web avec l’assistant').click();
+        await tick();
+        eq(appels.map((x) => x.a.q), ['saumon fenouil'], 'R-WEB-1 : la demande envoyée est q NETTOYÉ (le U+200B retiré), pas la saisie brute');
+        root.remove();
       }
       // Filet (§ 5.4.5, F12)
       {
@@ -369,9 +422,10 @@ export async function runRechercheWebTests({ eq, ok }) {
         bouton(root, 'Chercher sur le web avec l’assistant').click();
         await new Promise((r) => setTimeout(r, 0));
         eq([S.etatWeb().enCours, S.etatWeb().memoire?.etat], [false, 'indisponible'], 'filet : un chercher qui lève → indisponible en mémoire, plus de vol (jamais d’écran figé)');
+        eq([enVol(root), texte(root).includes('Résultat reçu.')], [false, true], 'filet : la vue abonnée est redessinée (notifier → vues) : plus d’écran « en cours »');
         root.remove();
       }
       eq(appelsReseau, 0, 'écran web : aucun appel réseau réel pendant ces tests');
-    } finally { globalThis.fetch = vraiFetch; scene.remove(); S.reinitialiserWeb(); }
+    } finally { globalThis.fetch = vraiFetch; scene.remove(); S.reinitialiserWeb(); setUiLocale(localeAvant); }
   }
 }

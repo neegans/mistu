@@ -24,7 +24,7 @@ const vues = new Set(); // { root, redessiner }
 export function etatWeb() { return { cle: vol?.cle ?? null, enCours: !!vol, memoire: memoire ? { cle: memoire.cle, etat: memoire.issue.etat } : null }; }
 export function reinitialiserWeb() { vol?.controller.abort(); vol = null; memoire = null; vues.clear(); } // tests seulement
 function notifier() { for (const v of [...vues]) { if (!v.root.isConnected) { vues.delete(v); continue; } v.redessiner(); } }
-const ISSUE_INTERNE = { etat: 'indisponible', raison: 'interne', liens: [], autres: [], repli: false, recherches: null, modele: null };
+const ISSUE_INTERNE = Object.freeze({ etat: 'indisponible', raison: 'interne', liens: Object.freeze([]), autres: Object.freeze([]), repli: false, recherches: null, modele: null }); // rangée telle quelle dans `memoire`
 
 export async function renderSearch(params, query, ctx, deps = {}) {
   const root = el('div', null);
@@ -37,7 +37,11 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   const input = el('input', { type: 'search', value: state.q, placeholder: forRecipe ? t('Préciser : concombre, sans gluten, 15 minutes…') : t('Ex. : une salade avec du concombre, sans gluten, en quinze minutes'), enterkeyhint: 'search' });
   const run = () => { state.q = input.value.trim(); state.parsed = parseQuery(state.q); if (forRecipe && role) state.parsed.filters.type = role; navigate('/search' + buildQuery({ q: state.q, mode: state.mode, fav: state.favorites ? 1 : '', cooked: state.cooked ? 1 : '', any: state.requireAll ? '' : 1, for: query.for || '', role: role || '' }), { replace: true }); render(); };
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
-  input.addEventListener('input', () => { const b = root.querySelector('[data-role="chercher-web"]'); if (b) b.disabled = !borner(input.value, 500).trim(); });
+  input.addEventListener('input', () => {
+    const vide = !borner(input.value, 500).trim(); // même règle que construireDemande
+    const b = root.querySelector('[data-role="chercher-web"]'); if (b) b.disabled = vide;
+    const aide = root.querySelector('[data-role="aide-web"]'); if (aide) aide.hidden = !vide;
+  });
 
   const results = el('div', null);
   const header = el('div', { class: 'card sage stack' },
@@ -158,7 +162,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     return el('div', { class: 'card flat stack' },
       boutonChercher(demandeVide),
       el('small', { class: 'muted' }, t('Une recherche = un appel à ton compte Anthropic.')),
-      demandeVide ? el('small', { class: 'muted' }, t('Écris d’abord ce que tu cherches.')) : null);
+      el('small', { class: 'muted', dataset: { role: 'aide-web' }, hidden: !demandeVide }, t('Écris d’abord ce que tu cherches.'))); // toujours là : la frappe la montre ou la cache
   }
   // Provisoire (tâche 6) : la tâche 7 remplace ce corps par le rendu des issues (§ 5.5-5.6).
   function renderIssue(issue, reglages, { demandeDiffere = false } = {}) {
