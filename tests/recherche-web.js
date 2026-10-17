@@ -404,6 +404,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         bouton(root, 'Chercher sur le web avec l’assistant').click();
         await tick();
         eq([affichees, appels[0]?.a.filtres], [['Sans gluten', 'avec saumon'], ['Sans gluten', 'avec saumon']], 'R-WEB-2 : champ inchangé → pas de relecture ; la demande porte EXACTEMENT les puces affichées, la restriction ajoutée comprise (I-J)');
+        eq([...root.querySelectorAll('.muted')].find((n) => n.textContent.startsWith('Demande envoyée'))?.textContent, 'Demande envoyée : saumon · ' + puces(root).join(' ; '), 'R-WEB-2 : « Demande envoyée » dit EXACTEMENT q puis les puces, jointes par « ; » (I-J)');
         root.remove();
       }
       // R-WEB-1 : ce qui part est la demande NETTOYÉE par construireDemande (un Cf retiré), jamais la saisie brute
@@ -449,9 +450,10 @@ export async function runRechercheWebTests({ eq, ok }) {
       const texte = (root) => root.textContent;
       const bouton = (root, nom) => [...root.querySelectorAll('button')].find((b) => b.textContent === nom);
       const tick = () => new Promise((r) => setTimeout(r, 0));
+      const puces = (root) => [...root.querySelectorAll('.chip')].map((c) => c.textContent); // les puces AFFICHÉES
       // Tape, laisse lancer() appeler chercher (qui pose appels.rendre), résout l'issue, laisse la mémoire et le redessin se poser.
       const tapeEtAttend = async (root, issue) => { bouton(root, 'Chercher sur le web avec l’assistant').click(); await tick(); appels.rendre(issue); await tick(); };
-      const liens = [{ href: 'https://a.test/r?x=1', hote: 'a.test', titre: '<b>Saumon</b> au fenouil', date: 'May 1, 2026', pourquoi: 'Fenouil et saumon.' }, { href: 'https://b.test/', hote: 'b.test', titre: 'b.test', date: null, pourquoi: null }];
+      const liens = [{ href: 'https://a.test/r?x=1', hote: 'a.test', titre: '<b>Saumon</b> au fenouil', date: 'May 1, 2026', pourquoi: 'Fenouil et saumon.' }, { href: 'https://b.test/', hote: 'b.test', titre: 'b.test', date: null, pourquoi: null }, { href: 'https://u:p@a.test/x', hote: 'a.test', titre: '', date: null, pourquoi: null }];
       const trouve = { etat: 'trouve', raison: null, liens, autres: [], repli: false, recherches: 2, modele: 'm' };
       const appels = { n: 0, deps: [], args: [], rendre: null };
       const chercher = async (a, d) => { appels.n += 1; appels.deps.push(d); appels.args.push(a); return new Promise((r) => { appels.rendre = r; }); };
@@ -463,7 +465,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       let root = await monter({ q: 'saumon fenouil' }, ctx, { chercher, navigate: (p) => navs.push(p) });
       await tapeEtAttend(root, trouve);
       const a = root.querySelectorAll('a[target="_blank"][rel="noopener noreferrer"]');
-      eq([...a].map((n) => [n.getAttribute('href'), n.textContent]), [['https://a.test/r?x=1', '<b>Saumon</b> au fenouil'], ['https://b.test/', 'b.test']], 'trouve : un lien par résultat, href exact, titre en TEXTE littéral (I-H, Review Focus 3)');
+      eq([...a].map((n) => [n.getAttribute('href'), n.textContent]), [['https://a.test/r?x=1', '<b>Saumon</b> au fenouil'], ['https://b.test/', 'b.test'], ['https://a.test/x', 'a.test']], 'trouve : un lien par résultat, href exact (identifiants retirés AU RENDU), titre en TEXTE littéral, titre vide → hôte (I-H, Review Focus 3)');
       eq(root.querySelectorAll('b').length, 0, 'trouve : aucun élément créé par un titre hostile');
       ok(texte(root).includes('a.test · May 1, 2026') && texte(root).includes('Fenouil et saumon.'), 'trouve : hôte, date, pourquoi');
       ok(texte(root).includes('Trouvé sur le web') && texte(root).includes('Demande envoyée : saumon fenouil'), 'trouve : titre de section et demande envoyée (I-J)');
@@ -488,22 +490,31 @@ export async function runRechercheWebTests({ eq, ok }) {
       const versSignet = navs.filter((p) => p.startsWith('/add/signet'));
       eq([avantGarder, versSignet.length], [0, 1], 'garder : une seule navigation vers le signet, après le clic seulement');
       { const [chemin, qs] = versSignet[0].split('?'); const p = new URLSearchParams(qs); eq([chemin, p.get('adresse'), p.get('titre')], ['/add/signet', 'https://a.test/r?x=1', '<b>Saumon</b> au fenouil'], 'garder : route signet préremplie, adresse et titre encodés'); }
+      // I-H au rendu : la carte d'une adresse à identifiants garde l'href NETTOYÉ, jusque dans « Garder ce lien »
+      {
+        const carteCred = root.querySelector('a[href="https://a.test/x"]')?.parentElement;
+        [...(carteCred?.querySelectorAll('button') ?? [])].find((b) => b.textContent === 'Garder ce lien')?.click();
+        const dernier = navs.filter((p) => p.startsWith('/add/signet'));
+        const p = new URLSearchParams(dernier[dernier.length - 1]?.split('?')[1] ?? '');
+        eq([dernier.length, p.get('adresse'), p.get('titre')], [2, 'https://a.test/x', 'a.test'], 'garder : la carte à identifiants navigue avec l’adresse SANS u:p et le titre de repli (I-H)');
+      }
       ok(!!bouton(root, 'Chercher à nouveau'), 'trouve : « Chercher à nouveau » présent');
       // Mémoire par clé (F13/S5/F20) : une nouvelle instance avec la même demande montre les liens SANS appel
       root.remove();
       const nAvant = appels.n;
       root = await monter({ q: 'saumon fenouil' }, ctx, { chercher, navigate: () => {} });
-      eq([appels.n, root.querySelectorAll('a[target="_blank"]').length], [nAvant, 2], 'mémoire : même demande, nouvelle instance → les liens, aucun appel (F3/F20)');
+      eq([appels.n, root.querySelectorAll('a[target="_blank"]').length], [nAvant, 3], 'mémoire : même demande, nouvelle instance → les liens, aucun appel (F3/F20)');
       // Puce ajoutée → clé différente → les liens RESTENT, la différence est dite (K1) ; puce retirée → la mention disparaît (Review Focus 2)
       const selects = root.querySelectorAll('select');
       const restriction = [...selects].find((s) => [...s.options].some((o) => o.textContent === '+ restriction'));
       restriction.value = 'sans_gluten'; restriction.dispatchEvent(new Event('change'));
-      eq([root.querySelectorAll('a[target="_blank"]').length, texte(root).includes('La demande a changé depuis cette recherche.'), appels.n], [2, true, nAvant], 'puce : ajoutée → les liens RESTENT, la mention « la demande a changé » apparaît, aucun appel (K1)');
+      eq([root.querySelectorAll('a[target="_blank"]').length, texte(root).includes('La demande a changé depuis cette recherche.'), appels.n], [3, true, nAvant], 'puce : ajoutée → les liens RESTENT, la mention « la demande a changé » apparaît, aucun appel (K1)');
       [...root.querySelectorAll('.chip.removable')].find((c) => c.textContent === 'Sans gluten').click();
-      eq([root.querySelectorAll('a[target="_blank"]').length, texte(root).includes('La demande a changé depuis cette recherche.'), appels.n], [2, false, nAvant], 'puce : retirée → la mention disparaît, aucun appel');
+      eq([root.querySelectorAll('a[target="_blank"]').length, texte(root).includes('La demande a changé depuis cette recherche.'), appels.n], [3, false, nAvant], 'puce : retirée → la mention disparaît, aucun appel');
       // R-WEB-2 : un filtre ajouté par la liste, champ inchangé, PART avec la tape (il n'est pas écrasé par une relecture du champ)
       restriction.value = 'sans_gluten'; restriction.dispatchEvent(new Event('change'));
-      { const n = appels.n; const affichees = [...root.querySelectorAll('.chip')].map((c) => c.textContent); bouton(root, 'Chercher à nouveau').click(); await tick(); const dernier = appels.args[appels.args.length - 1]; eq([appels.n, dernier.q, dernier.filtres, affichees.includes('Sans gluten')], [n + 1, 'saumon fenouil', affichees, true], 'tape : le filtre ajouté par la liste part avec la demande (EXACTEMENT les puces affichées), le champ inchangé n’est pas réanalysé (R-WEB-2)'); appels.rendre(trouve); await tick(); }
+      { const n = appels.n; const affichees = puces(root); bouton(root, 'Chercher à nouveau').click(); await tick(); const dernier = appels.args[appels.args.length - 1]; eq([appels.n, dernier.q, dernier.filtres, affichees.includes('Sans gluten')], [n + 1, 'saumon fenouil', affichees, true], 'tape : le filtre ajouté par la liste part avec la demande (EXACTEMENT les puces affichées), le champ inchangé n’est pas réanalysé (R-WEB-2)'); appels.rendre(trouve); await tick(); }
+      eq([...root.querySelectorAll('.muted')].find((n) => n.textContent.startsWith('Demande envoyée'))?.textContent, 'Demande envoyée : saumon fenouil · ' + puces(root).join(' ; '), 'Chercher à nouveau : « Demande envoyée » dit EXACTEMENT la demande relancée, puces jointes par « ; » (I-J)');
       // R-WEB-3 : un « trouvé » dont aucune adresse ne survit à la revalidation au rendu replie sur l'écran « rien »
       root.remove(); S.reinitialiserWeb();
       root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
@@ -513,7 +524,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       root.remove(); S.reinitialiserWeb();
       root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
       await tapeEtAttend(root, { ...trouve, autres: [{ href: 'https://c.test/x', hote: 'c.test', titre: 'C', date: null, pourquoi: null }] });
-      { const d = root.querySelector('details'); eq([d?.querySelector('summary')?.textContent, d?.open, d?.querySelectorAll('a[target="_blank"]').length, root.querySelectorAll('a[target="_blank"]').length], ['Autres pages trouvées (1)', false, 1, 3], 'autres : repliées sous « Autres pages trouvées (1) », avec leur lien (K2)'); }
+      { const d = root.querySelector('details'); eq([d?.querySelector('summary')?.textContent, d?.open, d?.querySelectorAll('a[target="_blank"]').length, root.querySelectorAll('a[target="_blank"]').length], ['Autres pages trouvées (1)', false, 1, 4], 'autres : repliées sous « Autres pages trouvées (1) », avec leur lien (K2)'); }
       // mode all : aucun lien web
       root.remove();
       root = await monter({ q: 'saumon fenouil', mode: 'all' }, ctx, { chercher, navigate: () => {} });
@@ -525,31 +536,60 @@ export async function runRechercheWebTests({ eq, ok }) {
       await tapeEtAttend(root, { ...trouve, repli: true, recherches: null });
       ok(texte(root).includes('Liens tels que trouvés, sans tri de l’assistant.') && !texte(root).includes('Recherches faites'), 'repli : ligne repli ; pas de compte quand recherches est null');
       root.remove();
-      // rien + Réessayer force enLigne (S9)
+      // rien + Réessayer force enLigne (S9) : monté avec enLigne FAUX, l'appel de « Réessayer » doit recevoir vrai
       S.reinitialiserWeb();
-      root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
+      root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {}, enLigne: () => false });
       await tapeEtAttend(root, { etat: 'rien', raison: null, liens: [], repli: false, recherches: 1, modele: 'm' });
       ok(texte(root).includes('Aucune page trouvée pour cette demande. Reformule ou cherche autrement.') && !!bouton(root, 'Réessayer'), 'rien : texte + Réessayer');
       { const n = appels.n; bouton(root, 'Réessayer').click(); await tick(); eq([appels.n, appels.deps[appels.deps.length - 1].enLigne()], [n + 1, true], 'réessayer : rappelle chercher avec enLigne forcé à vrai (S9)'); appels.rendre(trouve); await tick(); }
       root.remove();
       // indisponible × 8
-      const CAS = [['hors_ligne', 'Tu es hors ligne.', true, false, false], ['cle_refusee', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.', false, true, false], ['recherche_desactivee', 'La recherche web n’est pas activée sur ton compte Anthropic.', false, true, false], ['trop_de_demandes', 'Trop de demandes pour l’instant. Réessaie dans une minute.', true, false, false], ['refus', 'L’assistant a refusé cette demande.', false, false, false], ['pas_cherche', 'L’assistant n’a pas cherché sur le web. Réessaie.', true, false, false], ['delai', 'L’assistant n’a pas répondu. Réessaie.', true, false, true], ['interne', 'L’assistant n’a pas répondu. Réessaie.', true, false, true]];
+      const CAS = [['hors_ligne', 'Tu es hors ligne.', true, false, false], ['cle_refusee', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.', false, true, false], ['recherche_desactivee', 'La recherche web n’est pas activée sur ton compte Anthropic.', false, true, false], ['trop_de_demandes', 'Trop de demandes pour l’instant. Réessaie dans une minute.', true, false, false], ['refus', 'L’assistant a refusé cette demande.', false, false, false], ['pas_cherche', 'L’assistant n’a pas cherché sur le web. Réessaie.', true, false, false], ['delai', 'L’assistant n’a pas répondu. Réessaie.', true, false, true], ['interne', 'L’assistant n’a pas répondu. Réessaie.', true, false, true], ['constructor', 'L’assistant n’a pas répondu. Réessaie.', true, false, true]]; // « constructor » : une clé du prototype n'est pas une raison connue (Object.hasOwn)
       for (const [raison, attendu, reessai, reglages, code] of CAS) {
         S.reinitialiserWeb();
         root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
         await tapeEtAttend(root, { etat: 'indisponible', raison, liens: [], repli: false, recherches: null, modele: 'm' });
         const statut = root.querySelector('.status.warn[role="status"]');
-        eq([statut?.textContent.includes(attendu), !!bouton(root, 'Réessayer'), !!root.querySelector('a[href="#/settings"]'), texte(root).includes('Code : ' + raison)], [true, reessai, reglages, code], `indisponible/${raison} : texte, Réessayer=${reessai}, Réglages=${reglages}, code=${code} (K3)`);
+        eq([statut?.textContent.includes(attendu), !!bouton(root, 'Réessayer'), !!bouton(root, 'Chercher à nouveau'), !!root.querySelector('a[href="#/settings"]'), texte(root).includes('Code : ' + raison)], [true, reessai, !reessai, reglages, code], `indisponible/${raison} : texte, Réessayer=${reessai}, Chercher à nouveau=${!reessai}, Réglages=${reglages}, code=${code} (K3, R-WEB-7)`);
         root.remove();
       }
-      // Réglage changé pendant le vol (Review Focus 5) : l'issue non_configure se rend avec le texte de la garde
+      // R-WEB-7 (a) : une issue sans « Réessayer » relance la MÊME demande par « Chercher à nouveau », SANS forcer enLigne
+      S.reinitialiserWeb();
+      root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {}, enLigne: () => false });
+      await tapeEtAttend(root, { etat: 'indisponible', raison: 'cle_refusee', liens: [], repli: false, recherches: null, modele: 'm' });
+      {
+        const n = appels.n; const b = bouton(root, 'Chercher à nouveau'); const present = !!b;
+        b?.click(); await tick();
+        eq([present, appels.n, appels.args[appels.args.length - 1].q, appels.deps[appels.deps.length - 1].enLigne()], [true, n + 1, 'saumon', false], 'cle_refusee : « Chercher à nouveau » relance la même demande, un appel, enLigne NON forcé (contraste avec « Réessayer », R-WEB-7)');
+        appels.rendre(trouve); await tick();
+      }
+      root.remove();
+      // R-WEB-7 (b) : K1 ne vaut que pour « trouvé » — un refus en mémoire, une puce ajoutée → retour à l'écran du bouton, aucun appel
       S.reinitialiserWeb();
       root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
-      await tapeEtAttend(root, { etat: 'non_configure', raison: null, liens: [], repli: false, recherches: null, modele: null });
-      ok(texte(root).includes('Pour chercher sur le web, configure l’assistant IA') && !!root.querySelector('a[href="#/settings"]'), 'non_configure en issue : texte de la garde + Réglages (F5)');
+      await tapeEtAttend(root, { etat: 'indisponible', raison: 'refus', liens: [], repli: false, recherches: null, modele: 'm' });
+      {
+        const n = appels.n; const avant = texte(root).includes('L’assistant a refusé cette demande.');
+        const liste = [...root.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.textContent === '+ restriction'));
+        liste.value = 'sans_gluten'; liste.dispatchEvent(new Event('change'));
+        const b = root.querySelector('[data-role="chercher-web"]');
+        eq([avant, texte(root).includes('L’assistant a refusé cette demande.'), !!b, b?.disabled, appels.n], [true, false, true, false, n], 'refus : une puce ajoutée change la demande → l’écran du refus disparaît, écran du bouton allumé, aucun appel (R-WEB-7)');
+      }
       root.remove();
+      // Réglage changé pendant le vol (Review Focus 5) : les issues de garde se rendent avec le texte de la garde, + une sortie
+      for (const [etat, attendu] of [['non_configure', 'Pour chercher sur le web, configure l’assistant IA'], ['non_pris_en_charge', 'Ce fournisseur ne cherche pas sur le web.']]) {
+        S.reinitialiserWeb();
+        root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
+        await tapeEtAttend(root, { etat, raison: null, liens: [], repli: false, recherches: null, modele: null });
+        eq([texte(root).includes(attendu), !!root.querySelector('a[href="#/settings"]'), !!bouton(root, 'Chercher à nouveau')], [true, true, true], `${etat} en issue : texte de la garde + Réglages + « Chercher à nouveau » (F5, R-WEB-7)`);
+        root.remove();
+      }
       // Lu par le VRAI fetch : le global est remplacé ici par un piège qui lève (aucun réseau pendant les rendus).
-      ok(!(await (async () => (await vraiFetch('../src/ui/search.js?v=' + Date.now(), { cache: 'no-store' })).text())()).includes('innerHTML'), 'search.js : aucun innerHTML');
+      {
+        const res = await vraiFetch('../src/ui/search.js?v=' + Date.now(), { cache: 'no-store' });
+        const src = await res.text();
+        eq([res.ok, src.includes('function renderIssue'), src.includes('innerHTML'), src.includes('html:')], [true, true, false, false], 'search.js : source réellement lu (renderIssue présent), aucun innerHTML ni html:');
+      }
     } finally { globalThis.fetch = vraiFetch; scene.remove(); S.reinitialiserWeb(); setUiLocale(localeAvant); }
   }
 }

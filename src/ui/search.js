@@ -25,6 +25,17 @@ export function etatWeb() { return { cle: vol?.cle ?? null, enCours: !!vol, memo
 export function reinitialiserWeb() { vol?.controller.abort(); vol = null; memoire = null; vues.clear(); } // tests seulement
 function notifier() { for (const v of [...vues]) { if (!v.root.isConnected) { vues.delete(v); continue; } v.redessiner(); } }
 const ISSUE_INTERNE = Object.freeze({ etat: 'indisponible', raison: 'interne', liens: Object.freeze([]), autres: Object.freeze([]), repli: false, recherches: null, modele: null }); // rangée telle quelle dans `memoire`
+// § 5.6 : textes des raisons connues (lus par Object.hasOwn : une raison « constructor » ou « toString » n'est pas connue).
+const TEXTES_INDISPONIBLE = {
+  hors_ligne: 'Tu es hors ligne.',
+  cle_refusee: 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.',
+  recherche_desactivee: 'La recherche web n’est pas activée sur ton compte Anthropic.',
+  trop_de_demandes: 'Trop de demandes pour l’instant. Réessaie dans une minute.',
+  refus: 'L’assistant a refusé cette demande.',
+  pas_cherche: 'L’assistant n’a pas cherché sur le web. Réessaie.',
+};
+const SANS_REESSAI = ['cle_refusee', 'recherche_desactivee', 'refus'];
+const AVEC_REGLAGES = ['cle_refusee', 'recherche_desactivee'];
 
 export async function renderSearch(params, query, ctx, deps = {}) {
   const root = el('div', null);
@@ -157,38 +168,35 @@ export async function renderSearch(params, query, ctx, deps = {}) {
         // Sans data-role : l'écouteur de frappe ne doit PAS rouvrir ce bouton pendant le vol.
         el('div', { class: 'row' }, el('button', { class: 'btn primary', disabled: true }, t('Chercher sur le web avec l’assistant')), el('button', { class: 'btn', onClick: annuler }, t('Annuler'))));
     }
-    if (memoire) return renderIssue(memoire.issue, reglages, { demandeDiffere: memoire.cle !== cle }); // K1 : les liens restent ; la différence est dite
+    // K1 : les liens d'un « trouvé » restent quand la demande change, et la différence est dite. Toute autre issue ne vaut
+    // que pour SA demande (R-WEB-7) : une demande changée revient à l'écran du bouton — sinon un refus ou une clé refusée
+    // resteraient affichés sans issue après la correction de la demande ou des réglages.
+    if (memoire && (memoire.issue.etat === 'trouve' || memoire.cle === cle)) return renderIssue(memoire.issue, reglages, { demandeDiffere: memoire.cle !== cle });
     const demandeVide = !borner(input.value, 500).trim();
     return el('div', { class: 'card flat stack' },
       boutonChercher(demandeVide),
       el('small', { class: 'muted' }, t('Une recherche = un appel à ton compte Anthropic.')),
       el('small', { class: 'muted', dataset: { role: 'aide-web' }, hidden: !demandeVide }, t('Écris d’abord ce que tu cherches.'))); // toujours là : la frappe la montre ou la cache
   }
-  const TEXTES_INDISPONIBLE = {
-    hors_ligne: 'Tu es hors ligne.',
-    cle_refusee: 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.',
-    recherche_desactivee: 'La recherche web n’est pas activée sur ton compte Anthropic.',
-    trop_de_demandes: 'Trop de demandes pour l’instant. Réessaie dans une minute.',
-    refus: 'L’assistant a refusé cette demande.',
-    pas_cherche: 'L’assistant n’a pas cherché sur le web. Réessaie.',
-  };
-  const SANS_REESSAI = ['cle_refusee', 'recherche_desactivee', 'refus'];
-  const AVEC_REGLAGES = ['cle_refusee', 'recherche_desactivee'];
   // § 5.5-5.6 : chaque issue a son écran ; les liens sont revalidés AU RENDU par lienSignet (I-H) ; l'avertissement
   // I-K accompagne toujours les liens ; aucun texte de l'API n'est rendu hors « pourquoi » (borné en amont).
   function renderIssue(issue, reglages, { demandeDiffere = false } = {}) {
     const reessayer = () => el('button', { class: 'btn', onClick: () => lancer({ enLigne: () => true }) }, t('Réessayer'));
-    if (issue.etat === 'non_configure') return el('div', { class: 'status warn' }, t('Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'), ' ', reglages());
-    if (issue.etat === 'non_pris_en_charge') return el('div', { class: 'status warn' }, t('Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.'), ' ', reglages());
+    // R-WEB-7 : les issues sans « Réessayer » gardent une sortie — la même demande, relancée sans forcer enLigne (une clé
+    // corrigée dans Réglages sert alors tout de suite).
+    const chercherANouveau = () => el('button', { class: 'btn', onClick: () => lancer() }, t('Chercher à nouveau'));
+    if (issue.etat === 'non_configure') return el('div', { class: 'card flat stack' }, el('div', { class: 'status warn' }, t('Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'), ' ', reglages()), chercherANouveau());
+    if (issue.etat === 'non_pris_en_charge') return el('div', { class: 'card flat stack' }, el('div', { class: 'status warn' }, t('Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.'), ' ', reglages()), chercherANouveau());
     if (issue.etat === 'rien') return el('div', { class: 'card flat stack' }, el('div', { class: 'status', role: 'status' }, t('Aucune page trouvée pour cette demande. Reformule ou cherche autrement.')), reessayer());
     if (issue.etat === 'indisponible') {
       const demandeVide = issue.raison === 'requete' && !state.q;
-      const cle = demandeVide ? 'Écris d’abord ce que tu cherches.' : (TEXTES_INDISPONIBLE[issue.raison] || 'L’assistant n’a pas répondu. Réessaie.');
-      const generique = !demandeVide && !TEXTES_INDISPONIBLE[issue.raison]; // K3 : le code reste lisible sous le texte générique
+      const connue = Object.hasOwn(TEXTES_INDISPONIBLE, issue.raison);
+      const cle = demandeVide ? 'Écris d’abord ce que tu cherches.' : (connue ? TEXTES_INDISPONIBLE[issue.raison] : 'L’assistant n’a pas répondu. Réessaie.');
+      const generique = !demandeVide && !connue; // K3 : le code reste lisible sous le texte générique
       return el('div', { class: 'card flat stack' },
         el('div', { class: 'status warn', role: 'status' }, t(cle), AVEC_REGLAGES.includes(issue.raison) ? [' ', reglages()] : null),
         generique ? el('small', { class: 'muted' }, t('Code : {c}', { c: String(issue.raison || 'inconnu') })) : null,
-        SANS_REESSAI.includes(issue.raison) ? null : reessayer());
+        SANS_REESSAI.includes(issue.raison) ? chercherANouveau() : reessayer());
     }
     // trouve
     const carte = (lien) => {
@@ -214,7 +222,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
       el('div', { class: 'status' }, t('L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.')),
       issue.recherches != null ? el('small', { class: 'muted' }, t('Recherches faites par l’assistant : {n}', { n: issue.recherches })) : null,
       issue.repli ? el('small', { class: 'muted' }, t('Liens tels que trouvés, sans tri de l’assistant.')) : null,
-      el('button', { class: 'btn', onClick: () => lancer() }, t('Chercher à nouveau')));
+      chercherANouveau());
   }
   render();
   return root;
