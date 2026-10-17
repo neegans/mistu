@@ -164,11 +164,57 @@ export async function renderSearch(params, query, ctx, deps = {}) {
       el('small', { class: 'muted' }, t('Une recherche = un appel à ton compte Anthropic.')),
       el('small', { class: 'muted', dataset: { role: 'aide-web' }, hidden: !demandeVide }, t('Écris d’abord ce que tu cherches.'))); // toujours là : la frappe la montre ou la cache
   }
-  // Provisoire (tâche 6) : la tâche 7 remplace ce corps par le rendu des issues (§ 5.5-5.6).
+  const TEXTES_INDISPONIBLE = {
+    hors_ligne: 'Tu es hors ligne.',
+    cle_refusee: 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.',
+    recherche_desactivee: 'La recherche web n’est pas activée sur ton compte Anthropic.',
+    trop_de_demandes: 'Trop de demandes pour l’instant. Réessaie dans une minute.',
+    refus: 'L’assistant a refusé cette demande.',
+    pas_cherche: 'L’assistant n’a pas cherché sur le web. Réessaie.',
+  };
+  const SANS_REESSAI = ['cle_refusee', 'recherche_desactivee', 'refus'];
+  const AVEC_REGLAGES = ['cle_refusee', 'recherche_desactivee'];
+  // § 5.5-5.6 : chaque issue a son écran ; les liens sont revalidés AU RENDU par lienSignet (I-H) ; l'avertissement
+  // I-K accompagne toujours les liens ; aucun texte de l'API n'est rendu hors « pourquoi » (borné en amont).
   function renderIssue(issue, reglages, { demandeDiffere = false } = {}) {
+    const reessayer = () => el('button', { class: 'btn', onClick: () => lancer({ enLigne: () => true }) }, t('Réessayer'));
     if (issue.etat === 'non_configure') return el('div', { class: 'status warn' }, t('Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'), ' ', reglages());
     if (issue.etat === 'non_pris_en_charge') return el('div', { class: 'status warn' }, t('Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.'), ' ', reglages());
-    return el('div', { class: 'status' }, 'Résultat reçu.');
+    if (issue.etat === 'rien') return el('div', { class: 'card flat stack' }, el('div', { class: 'status', role: 'status' }, t('Aucune page trouvée pour cette demande. Reformule ou cherche autrement.')), reessayer());
+    if (issue.etat === 'indisponible') {
+      const demandeVide = issue.raison === 'requete' && !state.q;
+      const cle = demandeVide ? 'Écris d’abord ce que tu cherches.' : (TEXTES_INDISPONIBLE[issue.raison] || 'L’assistant n’a pas répondu. Réessaie.');
+      const generique = !demandeVide && !TEXTES_INDISPONIBLE[issue.raison]; // K3 : le code reste lisible sous le texte générique
+      return el('div', { class: 'card flat stack' },
+        el('div', { class: 'status warn', role: 'status' }, t(cle), AVEC_REGLAGES.includes(issue.raison) ? [' ', reglages()] : null),
+        generique ? el('small', { class: 'muted' }, t('Code : {c}', { c: String(issue.raison || 'inconnu') })) : null,
+        SANS_REESSAI.includes(issue.raison) ? null : reessayer());
+    }
+    // trouve
+    const carte = (lien) => {
+      const l = lienSignet(lien.href);
+      if (!l.ok) return null; // revalidé AU RENDU (I-H) : une adresse refusée ici n'a pas de carte
+      const titre = lien.titre || l.hote;
+      return el('div', { class: 'card flat stack' },
+        el('a', { class: 'btn', href: l.href, target: '_blank', rel: 'noopener noreferrer' }, titre),
+        el('div', { class: 'muted', style: { fontSize: '.85rem' } }, lien.date ? `${l.hote} · ${lien.date}` : l.hote),
+        lien.pourquoi ? el('div', null, lien.pourquoi) : null,
+        el('button', { class: 'btn small', onClick: () => nav('/add/signet' + buildQuery({ adresse: l.href, titre })) }, t('Garder ce lien')));
+    };
+    const cartes = (Array.isArray(issue.liens) ? issue.liens : []).map(carte).filter(Boolean);
+    const autres = (Array.isArray(issue.autres) ? issue.autres : []).map(carte).filter(Boolean); // K2 : repliées, jamais mêlées aux choix
+    // R-WEB-3 : un « trouvé » dont aucune carte ne survit à la revalidation ne montre pas un titre sans rien dessous.
+    if (!cartes.length) return renderIssue({ ...issue, etat: 'rien' }, reglages);
+    const demande = memoire?.filtres?.length ? `${memoire.q} · ${memoire.filtres.join(' ; ')}` : (memoire?.q ?? state.q);
+    return section(t('Trouvé sur le web'),
+      el('div', { class: 'muted' }, t('Demande envoyée : {q}', { q: demande })),
+      demandeDiffere ? el('div', { class: 'status' }, t('La demande a changé depuis cette recherche.')) : null, // K1
+      ...cartes,
+      autres.length ? el('details', null, el('summary', { class: 'btn' }, t('Autres pages trouvées ({n})', { n: autres.length })), ...autres) : null, // K2
+      el('div', { class: 'status' }, t('L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.')),
+      issue.recherches != null ? el('small', { class: 'muted' }, t('Recherches faites par l’assistant : {n}', { n: issue.recherches })) : null,
+      issue.repli ? el('small', { class: 'muted' }, t('Liens tels que trouvés, sans tri de l’assistant.')) : null,
+      el('button', { class: 'btn', onClick: () => lancer() }, t('Chercher à nouveau')));
   }
   render();
   return root;

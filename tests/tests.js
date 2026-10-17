@@ -182,7 +182,7 @@ catch (error) { ok(false, `Suite recherche web interrompue : ${error?.message ||
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 1699, 'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 1732, 'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);
