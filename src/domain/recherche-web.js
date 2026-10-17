@@ -127,11 +127,16 @@ async function rechercheDesactivee(r, max) {
 
 // § 4.5 : UN appel, délai et abandon extérieur combinés, classement dans l'ordre du tableau de la spec. Ne lève jamais :
 // toute exception inattendue devient `interne` (journal sans aucun champ de cfg — S10/F12).
-export async function chercherRecettesWeb({ q, filtres, langue, cfg } = {}, deps = {}) {
+export async function chercherRecettesWeb(args, deps = {}) {
+  let cfg = null;                                           // lu par `issue` ; affecté DANS le try (args peut être null)
   const issue = (etat, raison = null, extra = {}) => ({ etat, raison, liens: [], autres: [], repli: false, recherches: null, modele: typeof cfg?.model === 'string' ? cfg.model : null, ...extra });
   try {
+    const { q, filtres, langue, cfg: cfgRecue } = args ?? {};
+    cfg = cfgRecue;
     if (!cfg || typeof cfg !== 'object' || !cfg.provider || cfg.provider === 'none' || !cfg.api_key || !cfg.model) return issue('non_configure');
     if (cfg.provider !== 'anthropic') return issue('non_pris_en_charge');
+    // Une clé collée avec un caractère invisible ou hors ASCII ferait lever fetch (« ByteString ») avant tout réseau : c'est une clé refusée, pas une panne.
+    if (!/^[\x21-\x7e]+$/.test(cfg.api_key)) return issue('indisponible', 'cle_refusee');
     const demande = construireDemande({ q, filtres, langue });
     if (!demande.cle) return issue('indisponible', 'requete');
     const enLigne = deps.enLigne ?? (() => (typeof navigator === 'undefined' ? true : navigator.onLine !== false));
@@ -151,15 +156,22 @@ export async function chercherRecettesWeb({ q, filtres, langue, cfg } = {}, deps
     try {
       // Le corps est calculé HORS du try du réseau : une exception ici est `interne` (filet), jamais `reseau`.
       const corps = JSON.stringify(corpsRequete({ cfg, demande, fuseau }));
+      const entetes = anthropicHeaders(cfg.api_key);
       let r;
       try {
         // redirect: 'error' — l'en-tête x-api-key ne doit JAMAIS suivre une redirection vers un autre hôte (I-C).
-        r = await f(ANTHROPIC_MESSAGES_URL, { ...OPTIONS_FETCH, method: 'POST', redirect: 'error', headers: anthropicHeaders(cfg.api_key), body: corps, signal: ctl.signal });
+        r = await f(ANTHROPIC_MESSAGES_URL, { ...OPTIONS_FETCH, method: 'POST', redirect: 'error', headers: entetes, body: corps, signal: ctl.signal });
       } catch { return issue('indisponible', ctl.signal.aborted ? motifAbandon() : 'reseau'); }
       if (!r || typeof r.status !== 'number') return issue('indisponible', 'interne');
-      if (r.status === 401 || r.status === 403) return issue('indisponible', 'cle_refusee');
+      if (r.status === 401) return issue('indisponible', 'cle_refusee');
       if (r.status === 429) return issue('indisponible', 'trop_de_demandes');
-      if (r.status === 400) return issue('indisponible', (await rechercheDesactivee(r, corpsErreurMax)) ? 'recherche_desactivee' : 'requete');
+      if (r.status === 400 || r.status === 403) {
+        // Un 403 « recherche web non activée » est une fonction désactivée, pas une clé refusée : même lecture bornée que le 400.
+        const desactivee = await rechercheDesactivee(r, corpsErreurMax);
+        if (ctl.signal.aborted) return issue('indisponible', motifAbandon());   // abandon pendant la lecture du corps d'erreur
+        if (desactivee) return issue('indisponible', 'recherche_desactivee');
+        return issue('indisponible', r.status === 403 ? 'cle_refusee' : 'requete');
+      }
       if (r.status >= 400 && r.status < 500) return issue('indisponible', 'requete');
       if (r.status >= 500) return issue('indisponible', 'serveur');
       let texte;
@@ -187,6 +199,7 @@ export async function chercherRecettesWeb({ q, filtres, langue, cfg } = {}, deps
     } finally {
       delai.removeEventListener('abort', relaisDelai);
       deps.signal?.removeEventListener('abort', relaisExterne);
+      ctl.abort();                                            // libère le flux d'une sortie anticipée ; sans effet après une lecture complète
     }
   } catch (e) {
     logError('web_recherche', { reason: 'interne', error: e });

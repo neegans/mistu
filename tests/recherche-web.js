@@ -193,12 +193,15 @@ export async function runRechercheWebTests({ eq, ok }) {
       const i = await lancer({}, { ...args, cfg: c });
       eq([i.etat, i.liens, appels.length], [etat, [], 0], `garde : ${nom} → ${etat}, aucun appel`);
     }
+    eq([(await W.chercherRecettesWeb(null)).etat, (await W.chercherRecettesWeb()).etat], ['non_configure', 'non_configure'], 'garde : arguments null ou absents → non_configure, sans lever');
+    eq([(await lancer({}, { ...args, cfg: { ...cfg, api_key: 'sk-ant-\u{200B}x' } })).raison, appels.length], ['cle_refusee', 0], 'garde : clé collée avec un caractère invisible → cle_refusee, aucun appel (fetch lèverait « ByteString » avant tout réseau)');
     eq([(await lancer({}, { ...args, q: '\u{200B}' })).raison, appels.length], ['requete', 0], 'garde : demande vide après nettoyage → indisponible/requete, aucun appel');
     eq([(await lancer({ enLigne: () => false })).raison, appels.length], ['hors_ligne', 0], 'garde : hors ligne → aucun appel');
     { const c = new AbortController(); c.abort(); eq([(await lancer({ signal: c.signal })).raison, appels.length], ['annule', 0], 'garde : signal déjà abandonné → annule, aucun appel'); }
     // Statuts HTTP
     const statut = async (s, corps = { error: { type: 'x', message: 'CORPS-SENTINELLE' } }) => { fauxFetch.rendre = () => reponse(s, corps); const i = await lancer(); fauxFetch.rendre = () => reponse(200, nominal); return i; };
     eq([(await statut(401)).raison, (await statut(403)).raison], ['cle_refusee', 'cle_refusee'], 'statut : 401 et 403 → cle_refusee');
+    eq((await statut(403, { error: { type: 'permission_error', message: 'Web search is not enabled for this organization' } })).raison, 'recherche_desactivee', 'statut : 403 « web search not enabled » → recherche_desactivee, pas une clé refusée (S12)');
     eq((await statut(400, { error: { type: 'invalid_request_error', message: 'Web search is not enabled for this organization' } })).raison, 'recherche_desactivee', 'statut : 400 « web search not enabled » → recherche_desactivee (S12)');
     eq([(await statut(400)).raison, (await statut(404)).raison, (await statut(422)).raison], ['requete', 'requete', 'requete'], 'statut : autres 4xx → requete');
     eq((await statut(429)).raison, 'trop_de_demandes', 'statut : 429 → trop_de_demandes');
@@ -210,8 +213,21 @@ export async function runRechercheWebTests({ eq, ok }) {
     fauxFetch.rendre = (url, options) => new Promise((_, reject) => { options.signal.addEventListener('abort', () => reject(new DOMException('abandon', 'AbortError')), { once: true }); });
     eq((await lancer({ tentativeMs: 1 })).raison, 'delai', 'délai : abandon par le chrono → delai (F18)');
     { const c = new AbortController(); const p = lancer({ signal: c.signal, tentativeMs: 60000 }); c.abort(); eq((await p).raison, 'annule', 'abandon : signal extérieur pendant le vol → annule'); }
+    {
+      // Abandon extérieur PENDANT la lecture du corps d'erreur d'un 400 : annule, pas `requete`.
+      const c = new AbortController();
+      let finir; const attente = new Promise((resoudre) => { finir = resoudre; });
+      let lectureCommencee; const commence = new Promise((resoudre) => { lectureCommencee = resoudre; });
+      fauxFetch.rendre = () => ({ ok: false, status: 400, headers: new Headers(), text: () => { lectureCommencee(); return attente; } });
+      const p = lancer({ signal: c.signal, tentativeMs: 60000 });
+      await commence; c.abort(); finir('{"error":{"message":"autre chose"}}');
+      eq((await p).raison, 'annule', 'abandon : signal extérieur pendant la lecture du corps d’erreur d’un 400 → annule');
+      fauxFetch.rendre = () => reponse(200, nominal);
+    }
     fauxFetch.rendre = () => new Response(new Blob(['x'.repeat(4096)]), { status: 200 });
     eq((await lancer({ corpsMax: 1024 })).raison, 'reponse_illisible', 'corps : une vraie Response en flux > corpsMax → reponse_illisible (lireBornee)');
+    fauxFetch.rendre = () => new Response(new Blob([JSON.stringify(nominal)]), { status: 200, headers: { 'content-type': 'application/json' } });
+    { const i = await lancer(); eq([i.etat, i.liens[0]?.href], ['trouve', 'https://b.test/2'], 'corps : une vraie Response en flux sous la borne → trouve (chemin lireBornee puis Blob, celui de la production)'); }
     fauxFetch.rendre = () => reponse(200, 'pas du json');
     eq((await lancer()).raison, 'reponse_illisible', 'corps : JSON invalide → reponse_illisible');
     fauxFetch.rendre = () => reponse(200, { content: 'x' });
@@ -230,5 +246,18 @@ export async function runRechercheWebTests({ eq, ok }) {
     fauxFetch.rendre = () => ({});
     eq((await lancer()).raison, 'interne', 'filet : une réponse sans statut → interne, sans lever');
     fauxFetch.rendre = () => reponse(200, nominal);
+    {
+      // Le filet extérieur : le corps de la requête est calculé HORS du try du réseau. Un `model` qui lève à son 2e accès
+      // (1 = la garde `!cfg.model`, 2 = corpsRequete, avant tout fetch) doit donner `interne` — jamais `reseau` — sans fetch.
+      let acces = 0;
+      const cfgPiege = { provider: 'anthropic', api_key: CLE, get model() { acces += 1; if (acces === 2) throw new Error('modele piege'); return 'modele-test'; } };
+      const vus = []; const vraiErreur = console.error;
+      console.error = (...a) => { vus.push(a); };
+      let i; try { i = await lancer({}, { ...args, cfg: cfgPiege }); } finally { console.error = vraiErreur; }
+      eq([i.etat, i.raison, appels.length], ['indisponible', 'interne', 0], 'filet : une exception pendant le calcul du corps → interne, aucun fetch (jamais reseau)');
+      const charge = vus[0]?.[1];
+      eq([vus.length, Object.keys(charge ?? {}), charge?.reason], [1, ['reason', 'name'], 'interne'], 'filet : le journal ne porte que reason et name, reason = interne');
+      ok(!JSON.stringify(vus).includes(CLE) && !JSON.stringify(vus).includes('model'), 'filet : le journal ne contient ni la clé ni le modèle (S10/F12)');
+    }
   }
 }
