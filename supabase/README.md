@@ -242,8 +242,8 @@ appelle la fonction. Aucun des gestes ci-dessous n'appelle Anthropic ni ne dépe
    `migrations/0004_assistant_journal.sql` en entier (à ajout seul ; attendu `Success. No rows returned`), puis
    `proofs/0004_assistant_journal.sql` — **rien à remplacer, aucune adresse à ajouter** — en choisissant
    **« Run without RLS »**. Lire d'abord la ligne `999 BILAN` (`0 faux` = vert), puis consigner le tableau tel quel dans
-   `RESULTATS-mitsu.md` (la preuve n'affiche aucune adresse). Tant que `0004` n'est pas collée, un `POST` répond
-   `502 serveur` avant tout appel au fournisseur.
+   `RESULTATS-mitsu.md` (la preuve n'affiche aucune adresse). Tant que `0004` n'est pas collée, un `POST` valide
+   (session ouverte, adresse admise) répond `502 serveur` avant tout appel au fournisseur.
 4. **Trois sondes sans dépense.** Dans Terminal : `U=https://ybdooerfeziiabsbfxtb.supabase.co/functions/v1/assistant`,
    puis, avec l'en-tête d'origine (sans lui, la fonction répond `403 origine`, sa première garde) :
    - `curl -i -X OPTIONS -H 'Origin: https://neegans.github.io' "$U"` → **204**, avec `Access-Control-Allow-Origin` ;
