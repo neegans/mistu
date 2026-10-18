@@ -275,7 +275,9 @@ export const EN = {
   "Trouvé sur le web": "Found on the web",
   "Demande envoyée : {q}": "Request sent: {q}",
   "Garder ce lien": "Keep this link",
-  "L’assistant présente les plats d’après les pages et ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.": "The assistant presents dishes from the pages and checks neither ingredients nor restrictions: read the page before cooking.",
+  "L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.": "The assistant checks neither ingredients nor restrictions: read the page before cooking.",
+  "L’assistant présente les plats et estime le temps d’après les pages : il ne vérifie ni le temps, ni les ingrédients, ni les restrictions. Relis la page avant de cuisiner.": "The assistant presents dishes and estimates time from the pages: it checks neither time, nor ingredients, nor restrictions. Read the page before cooking.",
+  "Estimé par l’assistant : {r}": "Estimated by the assistant: {r}",
   // Présentation du serveur (18 octobre) : la ligne de repères d'une carte. « Voir la recette » existe déjà (accueil) : même texte, même clé.
   "≈ {n} min": "≈ {n} min",
   "≈ {h} h": "≈ {h} h",

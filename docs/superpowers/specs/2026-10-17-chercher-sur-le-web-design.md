@@ -82,7 +82,7 @@ personnel, décision du 17 octobre) · **mode « Créer avec l'IA »** (lot 2, e
 - **I-A Rien d'inventé.** Un lien ne s'affiche que si son adresse, normalisée par `lienSignet`, est **égale** à celle d'un
   bloc `web_search_result` de la réponse. Le texte de l'assistant ne peut ni ajouter une adresse, ni en changer le titre,
   ni la raccourcir. Si l'assistant ne rend pas de choix lisible, l'app liste les résultats bruts tels quels, sans
-  « pourquoi ». **Une adresse n'est jamais tronquée** (F9/S3) : trop longue, elle est refusée là où elle arrive.
+  « pourquoi » (rév. 18 oct., § 12 : présentation et repères remplacent « pourquoi »). **Une adresse n'est jamais tronquée** (F9/S3) : trop longue, elle est refusée là où elle arrive.
 - **I-B Aucune requête sans tape.** Le rendu du mode Web ne fait aucun appel réseau. Seuls « Chercher sur le web avec
   l’assistant » et « Réessayer » déclenchent l'appel ; demande vide = bouton éteint.
 - **I-C La clé reste sur l'appareil — un dos-d'âne, pas un mur (S7).** Elle part dans l'en-tête `x-api-key` de
@@ -106,7 +106,7 @@ personnel, décision du 17 octobre) · **mode « Créer avec l'IA »** (lot 2, e
   chaque puce touchée est plus brutal qu'utile ; S5 reste couvert par la mention et par la ligne de la demande).
 - **I-H Rendu sûr.** Tout texte passe par `el()` (nœuds texte, jamais `innerHTML`). Chaque adresse est revalidée **au
   rendu** par `lienSignet`. **Titre et date d'un résultat sont bornés** (300 et 40 points de code, Cc/Cf et U+2028/2029
-  retirés — F8/S2) ; « pourquoi » à 200.
+  retirés — F8/S2) ; « pourquoi » à 200 (rév. 18 oct., § 12 : présentation et repères remplacent « pourquoi »).
 - **I-I Un appel en vol dans toute l'app** (F2/F3). Le vol vit au niveau du module ; une nouvelle tape l'abandonne
   (`AbortController`) avant d'en lancer un autre ; « Annuler » l'abandonne sans rien lancer. Une réponse d'un vol
   abandonné n'écrit rien.
@@ -294,7 +294,7 @@ hôte (+ « · » + date si connue) ; `pourquoi` si présent ; bouton « Garder 
 buildQuery({ adresse: lien.href, titre: lien.titre }))` (F4). Si `autres` n'est pas vide : `details` dont le `summary` dit
 « Autres pages trouvées ({n}) », une ligne par page (même `a`, hôte, « Garder ce lien »), repliées par défaut (K2). Sous la
 liste, **toujours** : `status` « L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de
-cuisiner. » (S1/I-K) ; « Recherches faites par l’assistant : {n} » si `recherches` connu ; « Liens tels que trouvés, sans
+cuisiner. » (S1/I-K) (rév. 18 oct., § 12 : présentation et repères remplacent « pourquoi » ; mention reformulée) ; « Recherches faites par l’assistant : {n} » si `recherches` connu ; « Liens tels que trouvés, sans
 tri de l’assistant. » si `repli`. Puis le bouton « Chercher à nouveau » (= tape, § 5.4). Un « trouvé » dont aucune carte ne
 survit à la revalidation au rendu se rend comme `rien` (R-WEB-3).
 
@@ -374,7 +374,7 @@ puce dit.
   Choisis Anthropic dans Réglages → Assistant IA. » · « Chercher sur le web avec l’assistant » · « Une recherche = un
   appel à ton compte Anthropic. » · « Écris d’abord ce que tu cherches. » · « L’assistant cherche sur le web… » ·
   « Annuler » (vérifier si elle existe) · « Trouvé sur le web » · « Demande envoyée : {q} » · « Garder ce lien » ·
-  « L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner. » · « Recherches
+  « L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner. » (rév. 18 oct., § 12 : présentation et repères remplacent « pourquoi » ; mention reformulée, « Estimé par l’assistant : {r} ») · « Recherches
   faites par l’assistant : {n} » · « Liens tels que trouvés, sans tri de l’assistant. » · « Chercher à nouveau » ·
   « Aucune page trouvée pour cette demande. Reformule ou cherche autrement. » · « Ta clé Anthropic a été refusée, ou
   n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA. » · « La recherche web n’est pas activée sur ton compte
@@ -691,9 +691,20 @@ présente le plat à table, puis une ligne de repères à part (temps estimé, d
   de 1 à 99. Sinon `null`. Lien rendu : `{ href, hote, titre, date, presentation, temps_min, difficulte, ingredients }` ; repli et `autres` : quatre `null`.
 - **`bornerAuMot(s, max)`** (`src/core/bornes.js`, pur). Un texte nettoyé qui tient en `max` points de code est rendu tel quel. Sinon : `max - 1`
   points de code, coupe à la dernière espace si elle est dans la moitié droite (index ≥ `floor((max - 1) / 2)`), espaces de fin retirées, puis « … ».
-- **Écran (§ 5.5).** Titre, hôte · date, présentation (nœud texte), ligne de repères (`div.muted`, .9rem : `≈ 15 min` / `≈ 1 h 30` / `≈ 2 h 05`,
-  `facile` / `moyen` / `exigeant`, `1 ingrédient` / `n ingrédients`, joints par « · » ; une partie absente disparaît, aucune = pas de ligne),
-  puis « Voir la recette » (`a.btn.small`, `target=_blank`, `rel=noopener noreferrer`) et « Garder ce lien ». Chaque repère est revalidé au rendu.
-- **I-K reformulée** : « L'assistant présente les plats d'après les pages et ne vérifie ni les ingrédients ni les restrictions : relis la page
-  avant de cuisiner. » `APP_VERSION` 0.8.1, `sw.js` `-v0.8.1-1`. **Non prouvé** : la qualité réelle des présentations et des estimations, et
-  la tenue de `max_tokens` 4096 avec cinq présentations de 400 caractères (aucun appel réel).
+- **Écran (§ 5.5).** Titre, hôte · date, présentation (nœud texte), ligne de repères (`div.muted`, .9rem, « Estimé par l'assistant : {r} » où `{r}`
+  = `≈ 15 min` / `≈ 1 h 30` / `≈ 2 h 05`, `facile` / `moyen` / `exigeant`, `1 ingrédient` / `n ingrédients`, joints par « · » ; une partie absente
+  disparaît, aucune = pas de ligne), puis « Voir la recette » (`a.btn.small`, `target=_blank`, `rel=noopener noreferrer`) et « Garder ce lien ».
+  Chaque repère est revalidé au rendu, bornes du domaine comprises (1440 min, 99 ingrédients).
+- **I-K reformulée** : « L'assistant présente les plats et estime le temps d'après les pages : il ne vérifie ni le temps, ni les ingrédients, ni les
+  restrictions. Relis la page avant de cuisiner. » Sur un `repli`, l'assistant n'a rien présenté : l'ancienne phrase (sans estimation) reste.
+  `APP_VERSION` 0.8.1, `sw.js` `-v0.8.1-2`. **Non prouvé** : la qualité réelle des présentations et des estimations, et la tenue de `max_tokens`
+  4096 avec cinq présentations de 400 caractères (aucun appel réel).
+- **Ratifié à la construction.** « Voir la recette » garde la clé partagée de l'accueil (« View recipe » en anglais) ; `difficulte` n'est lue que si
+  c'est une chaîne (pas de `String(x)` : un objet à `toString` hostile lèverait) ; le point de coupe de `bornerAuMot` est toute espace Unicode (`\s`)
+  sauf les insécables U+00A0 et U+202F ; l'`url` d'un choix est lue elle aussi par `Object.hasOwn`.
+- **Ronde 1 de corrections (revue adverse).** I1 : la ligne de repères dit « Estimé par l'assistant : » et la mention I-K parle de l'estimation du temps.
+  I2 : la consigne interdit d'affirmer une restriction ou une durée et toute adresse web dans la présentation ; une présentation qui porte une adresse
+  (schéma, `www.`, hôte suivi d'un chemin, testée en NFKC) est écartée (`MOTIF_ADRESSE`, `recherche-web.js` ; celui de `creation-ia.js` n'est pas exporté
+  et ne couvre pas « hôte/chemin »), sans préfixe « Selon l'assistant ». `bornerAuMot` : borne invalide → `''` (m1), sauts de ligne → une espace (m2), mesure
+  sur le texte rogné (m3), insécables jamais coupées (m4) ; les graphèmes combinés restent parqués. `choix` lu par `Object.hasOwn` (m5), bornes hautes au
+  rendu (m6), ancienne mention sur un repli (m7). La consigne et le `rel` du lien-titre sont épinglés par les tests.

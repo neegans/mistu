@@ -426,19 +426,23 @@ devient l'issue gelée `interne` (filet de l'écran : jamais d'écran figé). «
 mémoire reste ce qu'elle était.
 
 **Le mur I-A : rien d'inventé.** Un lien ne s'affiche que si son adresse, normalisée par `lienSignet`, est **égale** au
-`href` d'un bloc `web_search_result` de la réponse. Le texte de l'assistant ne fait qu'étiqueter : il choisit parmi ces
-pages et dit « pourquoi » (borné à 200) ; titre (300), hôte et date (40) viennent du résultat, bornés et nettoyés des
-Cc/Cf. Un choix qui désigne une adresse absente des résultats est ignoré ; si aucun choix ne survit, `repli` : les cinq
+`href` d'un bloc `web_search_result` de la réponse. Le texte de l'assistant ne fait qu'habiller : il choisit parmi ces
+pages et en donne une présentation (deux ou trois phrases dans la voix d'un serveur, bornée AU MOT à 400 points de code
+par `bornerAuMot`, écartée si elle porte une adresse web) et trois repères typés (`temps_min` entier de 1 à 1440,
+`difficulte` ∈ facile / moyen / exigeant, `ingredients` entier de 1 à 99 ; sinon `null`), lus par `Object.hasOwn` ; titre
+(300), hôte et date (40) viennent du résultat, bornés et nettoyés des Cc/Cf. Un choix qui désigne une adresse absente des résultats est ignoré ; si aucun choix ne survit, `repli` : les cinq
 premiers résultats tels quels, avec « Liens tels que trouvés, sans tri de l’assistant. ». Une adresse n'est jamais
 tronquée. Au rendu, chaque `href` est revalidé par `lienSignet` (une adresse refusée n'a pas de carte ; un « trouvé »
-sans carte survivante se rend comme « rien », R-WEB-3), et l'avertissement « L’assistant ne vérifie ni les ingrédients
-ni les restrictions : relis la page avant de cuisiner. » est toujours sous les liens (I-K). Pas de complément
+sans carte survivante se rend comme « rien », R-WEB-3). La ligne de repères de chaque carte commence par « Estimé par
+l’assistant : » (c'est une estimation, pas une donnée de la page), et la mention I-K est toujours sous les liens :
+« L’assistant présente les plats et estime le temps d’après les pages : il ne vérifie ni le temps, ni les ingrédients, ni
+les restrictions. Relis la page avant de cuisiner. » (sur un `repli`, l'ancienne phrase, sans estimation). Pas de complément
 automatique : les pages non choisies sont repliées sous « Autres pages trouvées ({n}) » (K2).
 
 **Issues.** `chercherRecettesWeb` rend toujours `{ etat, raison, liens, autres, repli, recherches, modele }`, sans la clé
 ni aucun texte d'un corps d'**erreur** (I-C : il sert au classement, pas à l'écran) ; d'une réponse réussie, seuls les
-titres et dates des résultats (bornés, nettoyés) et le « pourquoi » de chaque lien (200 points de code, Cc/Cf retirés)
-arrivent à l'écran. `non_configure` et `non_pris_en_charge` : aucun appel. `indisponible`, avec une raison :
+titres et dates des résultats (bornés, nettoyés) et la présentation de chaque lien (400 points de code coupés au mot,
+Cc/Cf retirés) avec ses trois repères typés arrivent à l'écran. `non_configure` et `non_pris_en_charge` : aucun appel. `indisponible`, avec une raison :
 `requete` (demande vide, ou un 4xx sans autre sens), `hors_ligne`, `annule` (jamais rendue), `delai` (45 s), `reseau`,
 `cle_refusee` (401 ; 403 ; clé hors `[\x21-\x7e]`, refusée avant tout appel — R-WEB-5), `recherche_desactivee` (400 ou
 403 dont l'`error.message`, lu en flux et borné à 64 Kio, dit « web search … not enabled / disabled » — R-WEB-6),

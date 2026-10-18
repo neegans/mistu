@@ -32,6 +32,19 @@ export async function runRechercheWebTests({ eq, ok }) {
       // La coupe à l'espace n'a lieu que si cette espace est dans la moitié droite : index ≥ floor((400 − 1) / 2) = 199.
       eq([bm('a'.repeat(199) + ' ' + 'b'.repeat(600), 400), bm('a'.repeat(198) + ' ' + 'b'.repeat(600), 400), bm('a'.repeat(300) + '  ' + 'b'.repeat(300), 400)], ['a'.repeat(199) + '…', 'a'.repeat(198) + ' ' + 'b'.repeat(200) + '…', 'a'.repeat(300) + '…'], 'bornerAuMot : une espace à l’index 199 coupe le mot, une espace à l’index 198 (moitié gauche) ne coupe pas ; une double espace à la coupe ne laisse aucune espace avant « … »');
       eq([bm(42, 400), bm(null, 400), bm(undefined, 400)], ['', '', ''], 'bornerAuMot : tout ce qui n’est pas une chaîne vaut la chaîne vide');
+      // m1 : une borne qui n'est pas un entier >= 1 ne produit rien (jamais de slice négatif ni de NaN)
+      eq([bm('abc', 0), bm('abc', NaN), bm('abc', undefined), bm('abc', -3), bm('abc', 1.5), bm('abc', '5')], ['', '', '', '', '', ''], 'bornerAuMot : max 0, NaN, indéfini, négatif, fractionnaire ou non numérique → chaîne vide');
+      // m2 : un saut de ligne ou une tabulation est une espace entre deux phrases (borner les retirerait et colle les mots)
+      eq([bm('Un saumon rôti.\nLe fenouil fond.', 400), bm('a\t\r\nb', 400), bm('a\n\n\nb   c', 400)], ['Un saumon rôti. Le fenouil fond.', 'a b', 'a b c'], 'bornerAuMot : sauts de ligne, retours et tabulations deviennent UNE espace (jamais « rôti.Le »)');
+      // m3 : la longueur se mesure sur le texte ROGNÉ — les espaces de tête et de fin ne coûtent rien
+      eq([bm(' '.repeat(500), 400), bm('x' + ' '.repeat(500), 400), bm(' '.repeat(30) + 'y'.repeat(380), 400)], ['', 'x', 'y'.repeat(380)], 'bornerAuMot : 500 espaces → vide ; « x » + 500 espaces → « x » ; 30 espaces + 380 points de code → rendu entier, sans « … »');
+      // m4 : une insécable (U+00A0, U+202F) n'est jamais un point de coupe — « 15 min » ne se coupe pas entre 15 et min
+      { const avant = 'a'.repeat(250) + ' ' + 'b'.repeat(143);
+        for (const [nom, esp] of [['U+00A0', '\u{00A0}'], ['U+202F', '\u{202F}']]) {
+          const r = bm(avant + '15' + esp + 'min' + 'c'.repeat(200), 400);
+          eq([r, r.includes(esp)], ['a'.repeat(250) + '…', false], `bornerAuMot : l’insécable ${nom} de « 15 min » n’est pas un point de coupe — on coupe à l’espace d’avant`);
+        } }
+      eq(bm('a'.repeat(300) + ' \u{2003}' + 'b'.repeat(300), 400), 'a'.repeat(300) + '…', 'bornerAuMot : une espace large (U+2003) reste un point de coupe, et l’espace qui la précède est retirée avant « … »');
     }
     const srcBornes = await lire('../src/core/bornes.js');
     ok(!/^\s*import\s/m.test(srcBornes), 'bornes : le module n’importe rien (pur, utilisable par le domaine)');
@@ -100,6 +113,31 @@ export async function runRechercheWebTests({ eq, ok }) {
       const fr = W.construireDemande({ q: 'saumon', filtres: [], langue: 'fr' }).system; const en = W.construireDemande({ q: 'saumon', filtres: [], langue: 'en' }).system;
       ok(fr.includes('deux ou trois phrases') && fr.includes('serveur') && fr.includes('400 caractères au plus') && fr.includes('omets tout champ que tu ne peux pas établir') && fr.includes('Québec') && fr.includes('N’affirme JAMAIS'), 'demande : le system français porte la voix du serveur, les 400 caractères, l’omission des champs inconnus, et garde Québec et l’interdiction d’affirmer');
       ok(en.includes('two or three sentences') && en.includes('waiter') && en.includes('400 characters at most') && en.includes('omit any field you cannot establish') && en.includes('NEVER claim'), 'demande : le system anglais porte la voix du serveur, les 400 caractères, l’omission des champs inconnus, et garde l’interdiction d’affirmer');
+    }
+    // I4 : la consigne est épinglée MOT POUR MOT — huit lignes par langue recopiées ici (une sortie de construireDemande, pas le source).
+    {
+      const LIGNES_FR = [
+        'Tu trouves des pages de recettes sur le web pour Cuisine OS, une bibliothèque de recettes personnelle.',
+        'Cherche TOUJOURS sur le web avec l’outil web_search (1 à 3 recherches), même si tu crois connaître des recettes.',
+        'Préfère les pages de recettes complètes ; en français du Québec d’abord.',
+        'N’affirme JAMAIS qu’une page respecte une restriction alimentaire ou une durée : dis seulement ce que la page annonce.',
+        'Puis réponds UNIQUEMENT par un objet JSON de cette forme : {"choix":[{"url":"…","presentation":"…","temps_min":15,"difficulte":"facile","ingredients":7}]}',
+        '— 5 entrées au plus ; chaque url est l’adresse EXACTE d’une page trouvée par la recherche ; n’invente ni page ni adresse ;',
+        'presentation = deux ou trois phrases, comme un serveur qui présente le plat à table, en tutoyant : les ingrédients principaux, ce qui fait son charme, et en dernière phrase le lien avec la demande ; le temps ou les portions seulement si la page les donne ; n’affirme jamais qu’elle respecte une restriction ou une durée, dis ce que la page annonce ; aucune adresse web dans le texte ; 400 caractères au plus ;',
+        'temps_min = durée totale estimée en minutes (le chiffre de la page si elle en donne un) ; difficulte = "facile", "moyen" ou "exigeant" ; ingredients = nombre d’ingrédients de la page sans compter sel et poivre ; omets tout champ que tu ne peux pas établir.',
+      ];
+      const LIGNES_EN = [
+        'You find recipe pages on the web for Cuisine OS, a personal recipe library.',
+        'ALWAYS search the web with the web_search tool (1 to 3 searches), even if you think you know recipes.',
+        'Prefer complete recipe pages.',
+        'NEVER claim that a page meets a dietary restriction or a duration: only say what the page announces.',
+        'Then answer ONLY with a JSON object of this shape: {"choix":[{"url":"…","presentation":"…","temps_min":15,"difficulte":"facile","ingredients":7}]}',
+        '— at most 5 entries; each url is the EXACT address of a page found by the search; never invent a page or an address;',
+        'presentation = two or three sentences, like a waiter presenting the dish at the table, addressing the reader as "you": the main ingredients, what makes it appealing, and in the last sentence the link with the request; time or servings only if the page gives them; never claim it meets a restriction or a duration, say what the page announces; no web address in the text; 400 characters at most;',
+        'temps_min = estimated total time in minutes (the page’s figure if it gives one); difficulte = "facile", "moyen" or "exigeant" (keep these French tokens); ingredients = number of ingredients on the page, not counting salt and pepper; omit any field you cannot establish.',
+      ];
+      eq(W.construireDemande({ q: 'saumon', filtres: [], langue: 'fr' }).system, LIGNES_FR.join('\n'), 'consigne : le system français est EXACTEMENT les huit lignes attendues (voix du serveur, interdiction d’affirmer, aucune adresse)');
+      eq(W.construireDemande({ q: 'salmon', filtres: [], langue: 'en' }).system, LIGNES_EN.join('\n'), 'consigne : le system anglais est EXACTEMENT les huit lignes attendues (jetons de difficulté français gardés)');
     }
     eq([W.LIMITES_WEB.presentation, W.LIMITES_WEB.tempsMax, W.LIMITES_WEB.ingredientsMax, 'pourquoi' in W.LIMITES_WEB, W.DIFFICULTES], [400, 1440, 99, false, ['facile', 'moyen', 'exigeant']], 'limites : présentation 400, durée 1440, ingrédients 99, plus de « pourquoi » ; DIFFICULTES exportée');
 
@@ -204,6 +242,16 @@ export async function runRechercheWebTests({ eq, ok }) {
       { const p = un({ presentation: longue }).presentation;
         eq([p.endsWith('…'), Array.from(p).length <= 400, p.slice(0, -1).endsWith(' '), longue.startsWith(p.slice(0, -1)), longue[p.length - 1]], [true, true, false, true, ' '], 'choix : une présentation longue est bornée AU MOT à 400 points de code, avec « … » (jamais en plein mot)'); }
       eq([42, null, {}, ['x'], true, '', '   ', '\u{200B}'].map((v) => un({ presentation: v }).presentation), [null, null, null, null, null, null, null, null], 'choix : présentation non-chaîne, vide, d’espaces ou faite de Cf → null');
+      // I2 : une présentation qui porte une adresse web est ÉCARTÉE (null), le reste du choix survit
+      eq(['Va sur https://evil.test/phish', 'Regarde www.evil.test', 'Voir evil.test/x', 'HTTPS://EVIL.TEST', 'ｗｗｗ.evil.test', 'Va sur htt\u{200B}ps://evil.test'].map((v) => un({ presentation: v, temps_min: 20 }).presentation), [null, null, null, null, null, null], 'choix : une présentation qui contient une adresse (https://, www., hôte/chemin, majuscules, pleine chasse, invisible dans le schéma) est écartée → null');
+      eq(un({ presentation: 'Va sur https://evil.test/phish', temps_min: 20 }).temps_min, 20, 'choix : une présentation écartée pour adresse laisse les repères du choix');
+      eq(['Une salade fraîche, prête en 15 min.', 'Servi avec du pain et/ou du riz.'].map((v) => un({ presentation: v }).presentation), ['Une salade fraîche, prête en 15 min.', 'Servi avec du pain et/ou du riz.'], 'choix : une présentation sans adresse est gardée (point final, « et/ou »)');
+      // m5 : « choix » est lu PROPRE, pas par le prototype
+      {
+        let c;
+        try { Object.prototype.choix = [{ url: R.href, presentation: 'HÉRITÉE', temps_min: 5 }]; c = W.choisirLiens({ resultats: [R], texte: '{"x":1}' }); } finally { delete Object.prototype.choix; }
+        eq([c.repli, c.liens[0].presentation, c.liens[0].temps_min, Object.hasOwn(Object.prototype, 'choix')], [true, null, null, false], 'choix : « choix » hérité du prototype n’est jamais lu — aucun choix, repli');
+      }
       // temps_min : entier de 1 à 1440
       eq([15, 1, 1440, '15', 0, -3, 1441, 100000, 1.5, null, true, [15]].map((v) => un({ temps_min: v }).temps_min), [15, 1, 1440, null, null, null, null, null, null, null, null, null], 'choix : temps_min entier de 1 à 1440 seulement (« 15 », 0, -3, 1441, 100000, 1.5, null → null)');
       // difficulte : jeton de DIFFICULTES, casse et espaces tolérés
@@ -829,9 +877,9 @@ export async function runRechercheWebTests({ eq, ok }) {
       let root = await monter({ q: 'saumon fenouil' }, ctx, { chercher, navigate: (p) => navs.push(p) });
       await tapeEtAttend(root, trouve);
       const a = titres(root);
-      eq([...a].map((n) => [n.getAttribute('href'), n.textContent]), [['https://a.test/r?x=1', '<b>Saumon</b> au fenouil'], ['https://b.test/', 'b.test'], ['https://a.test/x', 'a.test']], 'trouve : un lien par résultat, href exact (identifiants retirés AU RENDU), titre en TEXTE littéral, titre vide → hôte (I-H, Review Focus 3)');
+      eq([...a].map((n) => [n.getAttribute('href'), n.getAttribute('target'), n.getAttribute('rel'), n.textContent]), [['https://a.test/r?x=1', '_blank', 'noopener noreferrer', '<b>Saumon</b> au fenouil'], ['https://b.test/', '_blank', 'noopener noreferrer', 'b.test'], ['https://a.test/x', '_blank', 'noopener noreferrer', 'a.test']], 'trouve : un lien par résultat, href exact (identifiants retirés AU RENDU), target _blank, rel noopener noreferrer, titre en TEXTE littéral, titre vide → hôte (I-H, Review Focus 3)');
       eq(root.querySelectorAll('b').length, 0, 'trouve : aucun élément créé par un titre hostile');
-      ok(texte(root).includes('a.test · 1 mai 2026') && texte(root).includes('Fenouil et saumon.') && texte(root).includes('≈ 15 min · facile · 7 ingrédients'), 'trouve : hôte, date mise en forme (confort, item 3), présentation et ligne de repères');
+      ok(texte(root).includes('a.test · 1 mai 2026') && texte(root).includes('Fenouil et saumon.') && texte(root).includes('Estimé par l’assistant : ≈ 15 min · facile · 7 ingrédients'), 'trouve : hôte, date mise en forme (confort, item 3), présentation et ligne de repères (« Estimé par l’assistant : … »)');
       eq([...root.querySelectorAll('a.btn.small[target="_blank"][rel="noopener noreferrer"]')].map((n) => [n.getAttribute('href'), n.textContent]), [['https://a.test/r?x=1', 'Voir la recette'], ['https://b.test/', 'Voir la recette'], ['https://a.test/x', 'Voir la recette']], 'trouve : un « Voir la recette » par carte, même adresse que le titre (identifiants retirés AU RENDU)');
       ok(texte(root).includes('Trouvé sur le web') && texte(root).includes('Demande envoyée : saumon fenouil'), 'trouve : titre de section et demande envoyée (I-J)');
       eq([appels.args[0]?.session?.access_token === JETON_ECRAN, JSON.stringify(S.etatWeb()).includes(JETON_ECRAN), texte(root).includes(JETON_ECRAN)], [true, false, false], 'I-C écran : après un trouvé, le jeton n’est ni dans etatWeb() ni dans le texte rendu — il a bien atteint chercher() (V-F2)');
@@ -848,7 +896,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         eq(appels.n, n + 1, 'tape : un seul appel pour cette saisie');
         r0.remove();
       }
-      ok(texte(root).includes('L’assistant présente les plats d’après les pages et ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.'), 'trouve : l’avertissement fixe (reformulé) est TOUJOURS là (I-K, S1)');
+      ok(texte(root).includes('L’assistant présente les plats et estime le temps d’après les pages : il ne vérifie ni le temps, ni les ingrédients, ni les restrictions. Relis la page avant de cuisiner.'), 'trouve : l’avertissement fixe (reformulé : il estime le temps) est TOUJOURS là (I-K, S1)');
       ok(texte(root).includes('Recherches faites par l’assistant : 2') && !texte(root).includes('Liens tels que trouvés'), 'trouve : compte des recherches ; pas de ligne repli');
       // lancer() ne navigue pas (R-WEB-9 : remplacerAdresse, sans re-rendu) : seules les navigations vers le signet comptent.
       const avantGarder = navs.filter((p) => p.startsWith('/add/signet')).length;
@@ -969,11 +1017,13 @@ export async function runRechercheWebTests({ eq, ok }) {
         const cartes = (r) => [...titres(r)].map((n) => n.parentElement);
         const forme = (carte) => [...carte.children].map((n) => n.tagName + (n.className ? '.' + String(n.className).split(' ').join('.') : ''));
         const reperes = (carte) => [...carte.querySelectorAll('div.muted')].slice(1).map((n) => n.textContent); // div.muted n° 1 = hôte · date
-        const MENTION = 'L’assistant présente les plats d’après les pages et ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.';
+        const P = 'Estimé par l’assistant : ';
+        const E = (...parties) => parties.map((x) => [P + x]); // la ligne de repères dit toujours de qui vient l'estimation (I1)
+        const MENTION = 'L’assistant présente les plats et estime le temps d’après les pages : il ne vérifie ni le temps, ni les ingrédients, ni les restrictions. Relis la page avant de cuisiner.';
         const ANCIENNE = 'L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.';
         let r1 = await rendre([lienR({ presentation: 'Un saumon rôti, fenouil fondant.', temps_min: 15, difficulte: 'facile', ingredients: 7 })]);
         { const c = cartes(r1)[0];
-          eq([forme(c), c.children[2].textContent, c.children[3].textContent, c.children[3].style.fontSize], [['A.btn', 'DIV.muted', 'DIV', 'DIV.muted', 'DIV.row'], 'Un saumon rôti, fenouil fondant.', '≈ 15 min · facile · 7 ingrédients', '0.9rem'], 'présentation : la carte = titre, hôte, présentation, ligne de repères (« ≈ 15 min · facile · 7 ingrédients », .9rem), rangée de boutons — dans cet ordre');
+          eq([forme(c), c.children[2].textContent, c.children[3].textContent, c.children[3].style.fontSize], [['A.btn', 'DIV.muted', 'DIV', 'DIV.muted', 'DIV.row'], 'Un saumon rôti, fenouil fondant.', 'Estimé par l’assistant : ≈ 15 min · facile · 7 ingrédients', '0.9rem'], 'présentation : la carte = titre, hôte, présentation, ligne de repères (« Estimé par l’assistant : ≈ 15 min · facile · 7 ingrédients », .9rem), rangée de boutons — dans cet ordre');
           const rangee = [...c.children[4].children];
           eq([rangee.map((n) => n.tagName + '.' + n.className), rangee.map((n) => n.textContent)], [['A.btn small', 'BUTTON.btn small'], ['Voir la recette', 'Garder ce lien']], 'présentation : la rangée = « Voir la recette » (lien) puis « Garder ce lien » (bouton), tous deux .btn.small');
           eq([rangee[0].getAttribute('href'), rangee[0].getAttribute('target'), rangee[0].getAttribute('rel'), titres(r1)[0].getAttribute('href')], ['https://r0.test/r', '_blank', 'noopener noreferrer', 'https://r0.test/r'], '« Voir la recette » : a avec href = l’adresse du titre, target _blank, rel noopener noreferrer');
@@ -981,19 +1031,23 @@ export async function runRechercheWebTests({ eq, ok }) {
           rangee[1].click();
           const apres = navs.filter((p) => p.startsWith('/add/signet'));
           eq([apres.length - avant, new URLSearchParams(apres[apres.length - 1].split('?')[1]).get('adresse')], [1, 'https://r0.test/r'], 'présentation : « Garder ce lien » navigue toujours vers /add/signet avec l’adresse'); }
-        ok(texte(r1).includes(MENTION) && !texte(r1).includes(ANCIENNE), 'présentation : la mention I-K reformulée est rendue, l’ancienne ne l’est plus');
+        ok(texte(r1).includes(MENTION) && !texte(r1).includes(ANCIENNE), 'présentation : sur un « trouvé » trié par l’assistant, la mention I-K qui dit qu’il estime le temps est rendue, l’ancienne ne l’est pas');
         r1.remove();
         // le temps : < 60 → minutes ; sinon heures et minutes
         r1 = await rendre([15, 59, 60, 61, 90, 125, 1440].map((n, i) => lienR({ temps_min: n }, i)));
-        eq(cartes(r1).map(reperes), [['≈ 15 min'], ['≈ 59 min'], ['≈ 1 h'], ['≈ 1 h 01'], ['≈ 1 h 30'], ['≈ 2 h 05'], ['≈ 24 h']], 'repères : 15 → « ≈ 15 min », 60 → « ≈ 1 h », 90 → « ≈ 1 h 30 », 125 → « ≈ 2 h 05 » (minutes sur deux chiffres), 1440 → « ≈ 24 h »');
+        eq(cartes(r1).map(reperes), E('≈ 15 min', '≈ 59 min', '≈ 1 h', '≈ 1 h 01', '≈ 1 h 30', '≈ 2 h 05', '≈ 24 h'), 'repères : 15 → « ≈ 15 min », 60 → « ≈ 1 h », 90 → « ≈ 1 h 30 », 125 → « ≈ 2 h 05 » (minutes sur deux chiffres), 1440 → « ≈ 24 h »');
         r1.remove();
         // un seul repère : aucun « · » ; deux : les parties présentes seulement, dans l'ordre
         r1 = await rendre([{ difficulte: 'facile' }, { difficulte: 'moyen' }, { difficulte: 'exigeant' }, { ingredients: 1 }, { ingredients: 7 }, { temps_min: 15, ingredients: 7 }, { difficulte: 'moyen', ingredients: 3 }, { temps_min: 30, difficulte: 'exigeant' }].map((c, i) => lienR(c, i)));
-        eq(cartes(r1).map(reperes), [['facile'], ['moyen'], ['exigeant'], ['1 ingrédient'], ['7 ingrédients'], ['≈ 15 min · 7 ingrédients'], ['moyen · 3 ingrédients'], ['≈ 30 min · exigeant']], 'repères : un seul repère sans « · » ; « 1 ingrédient » au singulier ; une partie absente disparaît sans trou');
+        eq(cartes(r1).map(reperes), E('facile', 'moyen', 'exigeant', '1 ingrédient', '7 ingrédients', '≈ 15 min · 7 ingrédients', 'moyen · 3 ingrédients', '≈ 30 min · exigeant'), 'repères : un seul repère sans « · » ; « 1 ingrédient » au singulier ; une partie absente disparaît sans trou');
         r1.remove();
         // présence de la présentation et de la ligne : les quatre formes de carte
         r1 = await rendre([lienR({}, 0), lienR({ presentation: 'Seule.' }, 1), lienR({ temps_min: 20 }, 2), lienR({ presentation: 42, temps_min: '15', difficulte: 'impossible', ingredients: 0 }, 3), lienR({ temps_min: 20, difficulte: 'impossible' }, 4)]);
-        eq([cartes(r1).map(forme), reperes(cartes(r1)[4])], [[['A.btn', 'DIV.muted', 'DIV.row'], ['A.btn', 'DIV.muted', 'DIV', 'DIV.row'], ['A.btn', 'DIV.muted', 'DIV.muted', 'DIV.row'], ['A.btn', 'DIV.muted', 'DIV.row'], ['A.btn', 'DIV.muted', 'DIV.muted', 'DIV.row']], ['≈ 20 min']], 'carte : sans présentation ni repère → ni l’un ni l’autre ; la ligne de repères n’existe que s’il y a un repère ; des valeurs illisibles à l’écran (« 15 », « impossible », 0, 42) ne font rien paraître, sans « · » orphelin à côté d’un repère valide');
+        eq([cartes(r1).map(forme), reperes(cartes(r1)[4])], [[['A.btn', 'DIV.muted', 'DIV.row'], ['A.btn', 'DIV.muted', 'DIV', 'DIV.row'], ['A.btn', 'DIV.muted', 'DIV.muted', 'DIV.row'], ['A.btn', 'DIV.muted', 'DIV.row'], ['A.btn', 'DIV.muted', 'DIV.muted', 'DIV.row']], [P + '≈ 20 min']], 'carte : sans présentation ni repère → ni l’un ni l’autre ; la ligne de repères n’existe que s’il y a un repère ; des valeurs illisibles à l’écran (« 15 », « impossible », 0, 42) ne font rien paraître, sans « · » orphelin à côté d’un repère valide');
+        r1.remove();
+        // m6 : au-delà des bornes du domaine (1440 min, 99 ingrédients), un repère ne paraît pas non plus à l'écran
+        r1 = await rendre([lienR({ temps_min: 1e9, ingredients: 1e9 }, 0), lienR({ temps_min: 1441, ingredients: 100 }, 1), lienR({ temps_min: 1e9, difficulte: 'facile', ingredients: 99 }, 2)]);
+        eq(cartes(r1).map(reperes), [[], [], E('facile · 99 ingrédients')[0]], 'repères : temps > 1440 et ingrédients > 99 ne font rien paraître à l’écran (10^9, 1441, 100) ; 99 reste affiché');
         r1.remove();
         // la présentation est un TEXTE
         r1 = await rendre([lienR({ presentation: '<b>x</b>' })]);
@@ -1007,7 +1061,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         r1 = await rendre([lienR({ presentation: 'Roast salmon.', temps_min: 90, difficulte: 'moyen', ingredients: 1 }, 0), lienR({ difficulte: 'exigeant', ingredients: 12 }, 1), lienR({ temps_min: 15, difficulte: 'facile' }, 2)]);
         setUiLocale('en');
         { const nAv = appels.n; const en = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
-          eq([cartes(en).map(reperes), [...en.querySelectorAll('a.btn.small')].map((n) => n.textContent), appels.n - nAv, texte(en).includes('The assistant presents dishes from the pages and checks neither ingredients nor restrictions: read the page before cooking.')], [[['≈ 1 h 30 · medium · 1 ingredient'], ['demanding · 12 ingredients'], ['≈ 15 min · easy']], ['View recipe', 'View recipe', 'View recipe'], 0, true], 'repères : interface anglaise → easy / medium / demanding, « 1 ingredient », « View recipe » et la mention traduite');
+          eq([cartes(en).map(reperes), [...en.querySelectorAll('a.btn.small')].map((n) => n.textContent), appels.n - nAv, texte(en).includes('The assistant presents dishes and estimates time from the pages: it checks neither time, nor ingredients, nor restrictions. Read the page before cooking.')], [[['Estimated by the assistant: ≈ 1 h 30 · medium · 1 ingredient'], ['Estimated by the assistant: demanding · 12 ingredients'], ['Estimated by the assistant: ≈ 15 min · easy']], ['View recipe', 'View recipe', 'View recipe'], 0, true], 'repères : interface anglaise → « Estimated by the assistant: », easy / medium / demanding, « 1 ingredient », « View recipe » et la mention traduite');
           en.remove(); }
         setUiLocale('fr'); r1.remove();
       }
@@ -1021,6 +1075,8 @@ export async function runRechercheWebTests({ eq, ok }) {
       root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
       await tapeEtAttend(root, { ...trouve, repli: true, recherches: null });
       ok(texte(root).includes('Liens tels que trouvés, sans tri de l’assistant.') && !texte(root).includes('Recherches faites'), 'repli : ligne repli ; pas de compte quand recherches est null');
+      // m7 : en repli l'assistant n'a rien présenté ni estimé — l'ancienne mention, pas celle qui parle d'estimation du temps
+      ok(texte(root).includes('L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.') && !texte(root).includes('estime le temps'), 'repli : la mention I-K d’avant (sans estimation) est rendue, pas la nouvelle');
       root.remove();
       // rien + Réessayer force enLigne (S9) : monté avec enLigne FAUX, l'appel de « Réessayer » doit recevoir vrai
       S.reinitialiserWeb();
@@ -1124,9 +1180,9 @@ export async function runRechercheWebTests({ eq, ok }) {
   // --- § 8 / § 9.8 dictionnaire et statiques
   {
     const { EN } = await import('../src/i18n/en.js');
-    const CLES = ['Connecte-toi pour utiliser l’assistant.', 'Se connecter', 'Ce compte n’a pas accès à l’assistant.', 'Tu as atteint la limite du jour pour l’assistant ({n} appels).', 'Tu as atteint la limite du jour pour l’assistant.', 'La demande est trop lourde.', 'Chercher sur le web avec l’assistant', 'Une recherche = un appel à l’assistant, compté dans ton quota du jour.', 'Écris d’abord ce que tu cherches.', 'L’assistant cherche sur le web…', 'Annuler', 'Trouvé sur le web', 'Demande envoyée : {q}', 'Garder ce lien', 'L’assistant présente les plats d’après les pages et ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.', 'Voir la recette', '≈ {n} min', '≈ {h} h', '≈ {h} h {m}', 'facile', 'moyen', 'exigeant', '1 ingrédient', '{n} ingrédients', 'Recherches faites par l’assistant : {n}', 'Liens tels que trouvés, sans tri de l’assistant.', 'Chercher à nouveau', 'Aucune page trouvée pour cette demande. Reformule ou cherche autrement.', 'Trop de demandes pour l’instant. Réessaie dans une minute.', 'L’assistant a refusé cette demande.', 'L’assistant n’a pas cherché sur le web. Réessaie.', 'L’assistant n’a pas répondu. Réessaie.', 'Adresse reçue : vérifie-la avant d’enregistrer.', 'La demande a changé depuis cette recherche.', 'Autres pages trouvées ({n})', 'Réessayer', 'Réglages', 'Tu es hors ligne.', 'Code : {c}'];
+    const CLES = ['Connecte-toi pour utiliser l’assistant.', 'Se connecter', 'Ce compte n’a pas accès à l’assistant.', 'Tu as atteint la limite du jour pour l’assistant ({n} appels).', 'Tu as atteint la limite du jour pour l’assistant.', 'La demande est trop lourde.', 'Chercher sur le web avec l’assistant', 'Une recherche = un appel à l’assistant, compté dans ton quota du jour.', 'Écris d’abord ce que tu cherches.', 'L’assistant cherche sur le web…', 'Annuler', 'Trouvé sur le web', 'Demande envoyée : {q}', 'Garder ce lien', 'L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.', 'L’assistant présente les plats et estime le temps d’après les pages : il ne vérifie ni le temps, ni les ingrédients, ni les restrictions. Relis la page avant de cuisiner.', 'Estimé par l’assistant : {r}', 'Voir la recette', '≈ {n} min', '≈ {h} h', '≈ {h} h {m}', 'facile', 'moyen', 'exigeant', '1 ingrédient', '{n} ingrédients', 'Recherches faites par l’assistant : {n}', 'Liens tels que trouvés, sans tri de l’assistant.', 'Chercher à nouveau', 'Aucune page trouvée pour cette demande. Reformule ou cherche autrement.', 'Trop de demandes pour l’instant. Réessaie dans une minute.', 'L’assistant a refusé cette demande.', 'L’assistant n’a pas cherché sur le web. Réessaie.', 'L’assistant n’a pas répondu. Réessaie.', 'Adresse reçue : vérifie-la avant d’enregistrer.', 'La demande a changé depuis cette recherche.', 'Autres pages trouvées ({n})', 'Réessayer', 'Réglages', 'Tu es hors ligne.', 'Code : {c}'];
     eq(CLES.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'en.js : chaque texte du lot a sa traduction');
-    eq(['Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.', 'Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.', 'La recherche web n’est pas activée sur ton compte Anthropic.', 'Une recherche = un appel à ton compte Anthropic.', 'Une création = un appel à ton compte Anthropic.', 'L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.'].filter((k) => k in EN), [], 'en.js : les textes de l’ancienne clé locale (configure, fournisseur, clé refusée, recherche désactivée) sont retirés avec leurs écrans (Passerelle T4), l’ancienne mention I-K avec la présentation du serveur');
+    eq(['Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.', 'Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.', 'La recherche web n’est pas activée sur ton compte Anthropic.', 'Une recherche = un appel à ton compte Anthropic.', 'Une création = un appel à ton compte Anthropic.', 'L’assistant présente les plats d’après les pages et ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.'].filter((k) => k in EN), [], 'en.js : les textes de l’ancienne clé locale (configure, fournisseur, clé refusée, recherche désactivée) sont retirés avec leurs écrans (Passerelle T4), la mention intermédiaire « présente les plats d’après les pages » (remplacée avant d’être servie)');
     ok(!('Le Web n’est pas activé : aucune source externe n’est configurée. Aucune recherche extérieure n’a été faite.' in EN), 'en.js : la clé morte du mode Web est retirée');
     ok(!(await lire('../src/ui/search.js')).includes('Le Web n’est pas activé'), 'search.js : la coquille est retirée');
     ok(!/from '\.\.\/ui\//.test(await lire('../src/core/bornes.js')) && !/from '\.\.\/ui\//.test(await lire('../src/domain/recherche-web.js')), 'couches : bornes.js et recherche-web.js n’importent rien de src/ui/');

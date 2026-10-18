@@ -1111,7 +1111,7 @@ export async function runCreerIaTests({ eq, ok }) {
       // (b) « trouvé » : après l'avertissement I-K  (la porte « recherche web désactivée » a disparu avec cette issue : la passerelle ne la distingue plus)
       {
         const root = await ouvrir(trouve);
-        const avertissement = [...root.querySelectorAll('.status')].find((n) => n.textContent === 'L’assistant présente les plats d’après les pages et ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.');
+        const avertissement = [...root.querySelectorAll('.status')].find((n) => n.textContent === 'L’assistant présente les plats et estime le temps d’après les pages : il ne vérifie ni le temps, ni les ingrédients, ni les restrictions. Relis la page avant de cuisiner.');
         eq(root.querySelectorAll('[data-role="creer-depuis-web"]').length, 1, 'porte Web : « trouvé » → un seul bouton');
         ok(!!avertissement && apres(avertissement, porte(root)), 'porte Web : « trouvé » → le bouton vient APRÈS l’avertissement I-K (qui reste)');
         eq(await cliquer(root), { navs: 1, adresse: '/recipes/creer?q=saumon+fenouil&diets=sans_gluten', appels: 0, enVol: false }, 'porte Web : « trouvé » → même adresse, aucun appel web');

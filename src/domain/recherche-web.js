@@ -13,6 +13,9 @@ import { logError } from '../core/log.js';
 export const LIMITES_WEB = { demande: 500, filtre: 80, filtres: 12, titre: 300, date: 40, presentation: 400, tempsMax: 1440, ingredientsMax: 99, liens: 5, recherches: 3, tentativeMs: 135000, corps: 2 * 1024 * 1024, corpsErreur: 64 * 1024 };
 export const OUTIL_RECHERCHE = 'web_search_20250305';
 export const DIFFICULTES = Object.freeze(['facile', 'moyen', 'exigeant']); // les trois jetons de difficulté, en français dans les deux langues
+// Une adresse web dans une présentation (I2) : schéma, « www. » ou hôte suivi d'un chemin. La présentation est la voix de l'assistant,
+// pas une source : une adresse n'y a pas sa place (les liens sont les résultats bruts, I-A). Testé sur le texte NFKC (pleine chasse).
+export const MOTIF_ADRESSE = /(https?:\/\/|www\.|[a-z0-9-]+\.[a-z]{2,}\/)/iu;
 
 // Le system par langue (§ 4.1). Il cherche TOUJOURS, n'affirme JAMAIS une restriction (I-K), répond en JSON `choix`.
 const SYSTEM = {
@@ -23,7 +26,7 @@ const SYSTEM = {
     'N’affirme JAMAIS qu’une page respecte une restriction alimentaire ou une durée : dis seulement ce que la page annonce.',
     'Puis réponds UNIQUEMENT par un objet JSON de cette forme : {"choix":[{"url":"…","presentation":"…","temps_min":15,"difficulte":"facile","ingredients":7}]}',
     '— 5 entrées au plus ; chaque url est l’adresse EXACTE d’une page trouvée par la recherche ; n’invente ni page ni adresse ;',
-    'presentation = deux ou trois phrases, comme un serveur qui présente le plat à table, en tutoyant : les ingrédients principaux, ce qui fait son charme, et en dernière phrase le lien avec la demande ; le temps ou les portions seulement si la page les donne ; 400 caractères au plus ;',
+    'presentation = deux ou trois phrases, comme un serveur qui présente le plat à table, en tutoyant : les ingrédients principaux, ce qui fait son charme, et en dernière phrase le lien avec la demande ; le temps ou les portions seulement si la page les donne ; n’affirme jamais qu’elle respecte une restriction ou une durée, dis ce que la page annonce ; aucune adresse web dans le texte ; 400 caractères au plus ;',
     'temps_min = durée totale estimée en minutes (le chiffre de la page si elle en donne un) ; difficulte = "facile", "moyen" ou "exigeant" ; ingredients = nombre d’ingrédients de la page sans compter sel et poivre ; omets tout champ que tu ne peux pas établir.',
   ].join('\n'),
   en: [
@@ -33,7 +36,7 @@ const SYSTEM = {
     'NEVER claim that a page meets a dietary restriction or a duration: only say what the page announces.',
     'Then answer ONLY with a JSON object of this shape: {"choix":[{"url":"…","presentation":"…","temps_min":15,"difficulte":"facile","ingredients":7}]}',
     '— at most 5 entries; each url is the EXACT address of a page found by the search; never invent a page or an address;',
-    'presentation = two or three sentences, like a waiter presenting the dish at the table, addressing the reader as "you": the main ingredients, what makes it appealing, and in the last sentence the link with the request; time or servings only if the page gives them; 400 characters at most;',
+    'presentation = two or three sentences, like a waiter presenting the dish at the table, addressing the reader as "you": the main ingredients, what makes it appealing, and in the last sentence the link with the request; time or servings only if the page gives them; never claim it meets a restriction or a duration, say what the page announces; no web address in the text; 400 characters at most;',
     'temps_min = estimated total time in minutes (the page’s figure if it gives one); difficulte = "facile", "moyen" or "exigeant" (keep these French tokens); ingredients = number of ingredients on the page, not counting salt and pepper; omit any field you cannot establish.',
   ].join('\n'),
 };
@@ -135,8 +138,9 @@ function ficheDe(c) {
   const p = propre(c, 'presentation');
   const d = propre(c, 'difficulte');
   const jeton = typeof d === 'string' ? d.trim().toLowerCase() : ''; // pas de String(d) : un objet à toString hostile lèverait
+  const texte = typeof p === 'string' ? bornerAuMot(p, LIMITES_WEB.presentation) : '';
   return {
-    presentation: typeof p === 'string' ? bornerAuMot(p, LIMITES_WEB.presentation).trim() || null : null,
+    presentation: texte && !MOTIF_ADRESSE.test(texte.normalize('NFKC')) ? texte : null,
     temps_min: entierDe(propre(c, 'temps_min'), LIMITES_WEB.tempsMax),
     difficulte: DIFFICULTES.includes(jeton) ? jeton : null,
     ingredients: entierDe(propre(c, 'ingredients'), LIMITES_WEB.ingredientsMax),
@@ -147,7 +151,7 @@ export function choisirLiens(lu, { max = LIMITES_WEB.liens } = {}) {
   const parHref = new Map(resultats.map((r) => [r.href, r]));
   const liens = []; const pris = new Set();
   let choix = null;
-  try { const data = parseJsonLoose(lu?.texte); choix = Array.isArray(data?.choix) ? data.choix : null; } catch { choix = null; }
+  try { const data = parseJsonLoose(lu?.texte); choix = data && typeof data === 'object' && Object.hasOwn(data, 'choix') && Array.isArray(data.choix) ? data.choix : null; } catch { choix = null; }
   for (const c of choix || []) {
     if (liens.length >= max) break;
     if (!c || typeof c !== 'object') continue;

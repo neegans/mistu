@@ -12,17 +12,21 @@ export function borner(s, max) {
 }
 
 // Comme `borner` (même nettoyage), mais pour un texte LU par une personne : la coupe se fait AU MOT et se dit par « … ».
-// Un texte qui tient en `max` points de code une fois nettoyé est rendu tel quel. Sinon on garde `max - 1` points de code ;
-// s'il y a une espace dans la moitié droite de ce qui reste (index ≥ floor((max - 1) / 2)), on coupe à la DERNIÈRE espace ;
-// sans espace là (un seul très long mot, ou une espace tout au début), on coupe net. Le résultat tient toujours en `max`
-// points de code, « … » (U+2026) compris. Tout ce qui n'est pas une chaîne vaut ''.
+// D'abord les fins de ligne et tabulations deviennent UNE espace (borner les retirerait et collerait « rôti.Le »), puis le
+// nettoyage de `borner`, puis le texte est ROGNÉ : on mesure ce qui sera lu. Un texte qui tient en `max` points de code est
+// rendu tel quel. Sinon on garde `max - 1` points de code ; s'il y a un point de coupe dans la moitié droite de ce qui reste
+// (index ≥ floor((max - 1) / 2)), on coupe à la DERNIÈRE ; sans point de coupe là (un seul très long mot), on coupe net.
+// Une insécable (U+00A0, U+202F) n'est jamais un point de coupe : « 15 min » ne se sépare pas. Le résultat tient toujours
+// en `max` points de code, « … » (U+2026) compris. Une borne qui n'est pas un entier ≥ 1, ou autre chose qu'une chaîne : ''.
+const POINT_DE_COUPE = /[^\S\u{00A0}\u{202F}]/u; // toute espace Unicode SAUF les deux insécables
 export function bornerAuMot(s, max) {
-  if (typeof s !== 'string') return '';
-  if (Array.from(borner(s, max + 1)).length <= max) return borner(s, max);
-  const coupe = Array.from(borner(s, max - 1));
+  if (typeof s !== 'string' || !Number.isInteger(max) || max < 1) return '';
+  const texte = Array.from(borner(s.replace(/[\t\n\r ]+/g, ' '), Infinity).trim());
+  if (texte.length <= max) return texte.join('');
+  const coupe = texte.slice(0, max - 1);
   const seuil = Math.floor((max - 1) / 2);
   let i = coupe.length - 1;
-  while (i >= seuil && !/\s/u.test(coupe[i])) i -= 1;
+  while (i >= seuil && !POINT_DE_COUPE.test(coupe[i])) i -= 1;
   return (i >= seuil ? coupe.slice(0, i) : coupe).join('').trimEnd() + '…';
 }
 

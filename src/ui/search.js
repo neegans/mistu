@@ -7,7 +7,7 @@ import { lienSignet } from '../core/lien.js';
 import { parseQuery, searchDocs, chipsFor } from '../domain/search.js';
 import { findAccompaniments } from '../domain/pairing.js';
 import { providerFrom } from '../domain/llm.js';
-import { chercherRecettesWeb, construireDemande, dateLisible, DIFFICULTES } from '../domain/recherche-web.js';
+import { chercherRecettesWeb, construireDemande, dateLisible, DIFFICULTES, LIMITES_WEB } from '../domain/recherche-web.js';
 import { RECIPE_TYPES, DIET_TAGS } from '../model/schema.js';
 import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select, sessionAssistant, carteConnexion, texteRefusAssistant } from './components.js';
 import { addToMealFlow } from './meals.js';
@@ -39,11 +39,11 @@ const TEXTES_INDISPONIBLE = {
 const SANS_REESSAI = ['refus', 'non_admis', 'quota'];
 // La ligne de repères d'une carte (présentation du serveur) : temps estimé, difficulté, nombre d'ingrédients — les parties
 // PRÉSENTES, jointes par « · », dans cet ordre ; '' s'il n'y en a aucune. Chaque partie est revalidée ici (l'issue vient de la
-// mémoire de l'écran) : une valeur illisible ne fait rien paraître.
+// mémoire de l'écran) : une valeur illisible ou hors des bornes du domaine (1440 min, 99 ingrédients) ne fait rien paraître.
 function reperes(lien) {
   const parties = [];
   const n = lien.temps_min;
-  if (Number.isInteger(n) && n >= 1) {
+  if (Number.isInteger(n) && n >= 1 && n <= LIMITES_WEB.tempsMax) {
     if (n < 60) parties.push(t('≈ {n} min', { n }));
     else {
       const h = Math.floor(n / 60); const m = n % 60;
@@ -52,7 +52,7 @@ function reperes(lien) {
   }
   if (DIFFICULTES.includes(lien.difficulte)) parties.push({ facile: t('facile'), moyen: t('moyen'), exigeant: t('exigeant') }[lien.difficulte]);
   const k = lien.ingredients;
-  if (Number.isInteger(k) && k >= 1) parties.push(k === 1 ? t('1 ingrédient') : t('{n} ingrédients', { n: k }));
+  if (Number.isInteger(k) && k >= 1 && k <= LIMITES_WEB.ingredientsMax) parties.push(k === 1 ? t('1 ingrédient') : t('{n} ingrédients', { n: k }));
   return parties.join(' · ');
 }
 // R-WEB-10 (corrige R-WEB-9, amende § 5.4.1) : à la TAPE, un champ changé est relu ; ne survivent que les puces que les
@@ -274,7 +274,8 @@ export async function renderSearch(params, query, ctx, deps = {}) {
         el('a', { class: 'btn', href: l.href, target: '_blank', rel: 'noopener noreferrer' }, titre),
         el('div', { class: 'muted', style: { fontSize: '.85rem' } }, date ? `${l.hote} · ${date}` : l.hote),
         presentation ? el('div', null, presentation) : null,
-        ligneReperes ? el('div', { class: 'muted', style: { fontSize: '.9rem' } }, ligneReperes) : null,
+        // C'est une ESTIMATION de l'assistant, pas une donnée de la page : la ligne le dit (I1).
+        ligneReperes ? el('div', { class: 'muted', style: { fontSize: '.9rem' } }, t('Estimé par l’assistant : {r}', { r: ligneReperes })) : null,
         el('div', { class: 'row' },
           el('a', { class: 'btn small', href: l.href, target: '_blank', rel: 'noopener noreferrer' }, t('Voir la recette')),
           el('button', { class: 'btn small', onClick: () => nav('/add/signet' + buildQuery({ adresse: l.href, titre })) }, t('Garder ce lien'))));
@@ -292,7 +293,10 @@ export async function renderSearch(params, query, ctx, deps = {}) {
       demandeDiffere ? el('div', { class: 'status row between' }, el('span', null, t('La demande a changé depuis cette recherche.')), demandePrete ? chercherANouveau() : null) : null,
       ...cartes,
       autres.length ? el('details', null, el('summary', { class: 'btn' }, t('Autres pages trouvées ({n})', { n: autres.length })), ...autres) : null, // K2
-      el('div', { class: 'status' }, t('L’assistant présente les plats d’après les pages et ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.')),
+      // I-K : sur un repli l'assistant n'a rien présenté ni estimé (les liens sont les résultats bruts) — l'ancienne phrase, sans estimation.
+      el('div', { class: 'status' }, issue.repli
+        ? t('L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.')
+        : t('L’assistant présente les plats et estime le temps d’après les pages : il ne vérifie ni le temps, ni les ingrédients, ni les restrictions. Relis la page avant de cuisiner.')),
       creerDepuisWeb(),
       issue.recherches != null ? el('small', { class: 'muted' }, t('Recherches faites par l’assistant : {n}', { n: issue.recherches })) : null,
       issue.repli ? el('small', { class: 'muted' }, t('Liens tels que trouvés, sans tri de l’assistant.')) : null,
