@@ -9,12 +9,12 @@ réservé `exemple.invalid`, retirées de `private.allowed_users` après coup (�
 
 | Heure | Collage | Résultat |
 | --- | --- | --- |
-| 11 h 17 | `0001_tables_et_regles.sql` sans sa dernière ligne | `Success. No rows returned` (`create extension pg_cron` passé du premier coup) |
-| 11 h 18 | `select cron.schedule('cuisine-os-tombales', '15 4 * * *', …)` | `schedule = 1` |
-| 11 h 19 | `insert into private.allowed_users …` (2 adresses réelles + 2 adresses de preuve) | `autorisees = 4` |
-| 11 h 20 | preuve `0001` — **premier essai** | `42P01 relation "preuve" does not exist` — voir « Piège du tableau de bord » |
-| 11 h 23 | sondes : état intact ? table temporaire visible d'une instruction à l'autre ? | `autorisees 4 / comptes 0 / livres 0` ; `meme_session 1` |
-| 11 h 25 | preuve `0001` — **second essai, « Run without RLS »** | **`999 BILAN : 0 faux sur 76`** |
+| 10 h 43 | `insert into private.allowed_users …` (2 adresses de preuve `exemple.invalid`) | `allowed_users_apres = 4` (2 avant) |
+| 10 h 46 | `migrations/0003_assistant_config.sql` | `Success. No rows returned` |
+| 10 h 46 | empreinte du `0003` collé : `shasum -a 256 supabase/migrations/0003_assistant_config.sql` | `37f9f80d62cf82457b177f35979892ce7deeaf2067567a506228e145ad8efd39` |
+| 10 h 50 | preuve `0003` (« Run without RLS ») | `999 BILAN : 0 faux sur 45` |
+| 10 h 55 | retrait des 2 adresses de preuve | `allowed_users_apres_retrait = 2` (le nombre d'avant l'étape 1) |
+| — | `notify pgrst, 'reload schema';` (seulement si une lecture a rendu 404) | non nécessaire à ce stade (rien de servi encore) |
 
 ## Piège du tableau de bord (à connaître avant de jouer une preuve)
 
@@ -147,11 +147,11 @@ blanche d'hôtes (`neegans.github.io` → entrée `prod`). « À envoyer : 0 » 
 (64 ingrédients, 27 unités, 5 conventions = amorçage, hors capture). **Pas encore mesuré** : le retour OAuth depuis
 la PWA installée sur iPhone (spec § 4.1) — à faire par Neegan sur l'appareil.
 
-## Preuve `0003_assistant_config.sql` — à jouer (à remplir par Neegan, sans aucune valeur de data)
+## Preuve `0003_assistant_config.sql` — 45 verdicts, 0 faux (18 octobre 2026, 10 h 50, geste de Neegan)
 
 Section préparée le 18 octobre 2026 (lot « la configuration de l'assistant suit le compte », spec
 `docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md` § 6.3 ; procédure : étape 8 bis du README).
-**Rien n'a encore été joué sur `mitsu`.** À remplir au moment du collage, **avant** la fusion et le `push` du code.
+**Jouée le 18 octobre 2026 vers 10 h 50 (heure de Montréal) par Neegan, avant toute fusion et tout `push` du code.** Jetons remis ci-dessous ; aucune valeur de `data` (seulement des longueurs de clé).
 
 Le dépôt est public : jetons `A_EMAIL` / `B_EMAIL` / `A_UUID` / `B_UUID` remis partout, et **aucune valeur de la
 colonne `data`** — la preuve n'affiche que des compteurs, des motifs et des longueurs de clé. Si une cellule montre
@@ -179,7 +179,60 @@ jamais une valeur de `data`.
 | … | retrait des 2 adresses de preuve | … |
 | … | `notify pgrst, 'reload schema';` (seulement si une lecture a rendu 404) | … |
 
-Tableau des verdicts (ordre, etape, attendu, obtenu, ok) : à coller ici.
+Tableau des verdicts (ordre, etape, attendu, obtenu, ok), tel que rendu par l'éditeur SQL :
 
-Lignes `7.01` à `7.05` (journaux de Postgres, `ok = true` quelle que soit la valeur) : à recopier telles quelles —
-c'est la mesure que la spec § 7 attendait (S9) —, puis à juger par la clé de lecture ci-dessus, avant le `push`.
+| ordre | etape | attendu | obtenu | ok |
+| --- | --- | --- | --- | --- |
+| 0.01 | usage sur le schema temporaire pour authenticated | accorde ou implicite | accorde explicitement | true |
+| 0.02 | deux comptes de preuve crees (annules au rollback) | 2 | 2 | true |
+| 1.01 | public.assistant_config presente, RLS activee | true | true | true |
+| 1.02 | quatre regles : une par commande, pour authenticated, is_allowed et owner_id partout, delete sous app.purge | 4 : DELETE, INSERT, SELECT, UPDATE / {authenticated} / delete sous app.purge | 4 : DELETE, INSERT, SELECT, UPDATE / {authenticated} / delete sous app.purge | true |
+| 1.03 | declencheur assistant_config_seq -> public.touch_server_seq(), actif | 1 | 1 | true |
+| 1.04 | index assistant_config_recv (owner_id, server_seq) | 1 | 1 | true |
+| 1.05 | cle primaire composee (owner_id, id) : elle isole les comptes (S8) | 1 | 1 | true |
+| 1.06 | owner_id references auth.users on delete cascade | 1 | 1 | true |
+| 2.01 | authenticated : select, insert, update sur public.assistant_config | true / true / true | true / true / true | true |
+| 2.02 | anon : aucun privilege sur les 26 tables de public | 26 tables, 0 avec un privilege anon | 26 tables, 0 avec un privilege anon | true |
+| 2.03 | anon : execute sur public.sync_push(jsonb) | false | false | true |
+| 2.04 | anon : execute sur public.sync_purge(text, text) | false | false | true |
+| 2.05 | anon : execute sur public.sync_purge_all() | false | false | true |
+| 2.06 | anon : execute sur public.purge_tombstones() | false | false | true |
+| 2.07 | authenticated : execute sur public.sync_push(jsonb) | true | true | true |
+| 2.08 | authenticated : execute sur public.sync_purge(text, text) | true | true | true |
+| 2.09 | authenticated : execute sur public.sync_purge_all() | true | true | true |
+| 2.10 | authenticated : execute sur public.purge_tombstones() | false | false | true |
+| 2.11 | les 26 tables synchronisees de public ont toutes la RLS activee | 26 | 26 | true |
+| 3.01 | A pousse sa configuration llm (cle factice) | accepted 1, adjusted 0, rejected 0 | accepted 1, adjusted 0, rejected 0 | true |
+| 3.02 | A relit sa ligne par owner_id : une ligne, cle de 17 caracteres (jamais la valeur) | 1 ligne, cle de 17 | 1 ligne, cle de 17 | true |
+| 3.03 | le reste de la fiche est celui qui a ete pousse (compare sans etre affiche) | conforme | conforme | true |
+| 3.04 | A pousse llm PLUS ANCIEN avec une autre cle factice : rejete, motif conflit | rejected 1, motif conflit, accepted 0 | rejected 1, motif conflit, accepted 0 | true |
+| 3.05 | apres le conflit, la cle est toujours celle de 3.01 | cle de 17 | cle de 17 | true |
+| 3.06 | A pousse llm PLUS RECENT (cle tournee, factice) : accepte | accepted 1, rejected 0 | accepted 1, rejected 0 | true |
+| 3.07 | la cle a change : longueur 25 au lieu de 17, toujours une seule ligne | 1 ligne, cle de 25 | 1 ligne, cle de 25 | true |
+| 4.01 | B ne voit rien de A | 0 | 0 | true |
+| 4.02 | B pousse son propre llm (plus ancien que celui de A) : accepte | accepted 1, rejected 0 | accepted 1, rejected 0 | true |
+| 4.03 | B ne voit que SA ligne : une ligne, cle de 12 | 1 ligne, cle de 12 | 1 ligne, cle de 12 | true |
+| 4.04 | B ne peut pas ecrire chez A | 42501 (refus de la regle) | 42501 new row violates row-level security policy for table "assistant_config" | true |
+| 4.05 | B ne peut pas modifier la ligne de A : aucune ligne touchee | 0 | 0 | true |
+| 4.06 | meme id llm chez les deux comptes de preuve (vu de postgres : hors RLS) | 2 lignes, 2 proprietaires | 2 lignes, 2 proprietaires | true |
+| 4.07 | aucune ligne piratee chez les deux comptes de preuve | 0 | 0 | true |
+| 5.01 | delete direct de A, sans app.purge : aucune ligne supprimee, sans erreur | 0 | 0 | true |
+| 5.02 | A garde sa ligne apres le delete | 1 | 1 | true |
+| 6.01 | public.sync_push(jsonb) : 26 magasins, la liste finit par files, assistant_config | 26 / true | 26 / true | true |
+| 6.02 | public.sync_purge(text, text) : 26 magasins, la liste finit par files, assistant_config | 26 / true | 26 / true | true |
+| 6.03 | public.sync_purge_all() : 26 magasins, la liste finit par files, assistant_config | 26 / true | 26 / true | true |
+| 6.04 | public.purge_tombstones() : 26 magasins, la liste finit par files, assistant_config | 26 / true | 26 / true | true |
+| 6.05 | sync_push : keys et required connaissent assistant_config | true / true | true / true | true |
+| 7.01 | log_min_error_statement (informatif) | valeur relevee | error | true |
+| 7.02 | log_parameter_max_length_on_error (informatif) | valeur relevee | 0 | true |
+| 7.03 | log_statement (informatif) | valeur relevee | ddl | true |
+| 7.04 | log_min_duration_statement (informatif) | valeur relevee | -1 | true |
+| 7.05 | log_parameter_max_length (informatif) | valeur relevee | -1 | true |
+| 999 | BILAN | aucun verdict faux | 0 faux sur 45 | true |
+
+**Jugement des lignes `7.01` à `7.05` (journaux de Postgres), fait avant le `push`** : `log_statement = ddl` et
+`log_min_duration_statement = -1` → un envoi **réussi** de `sync_push` n'est pas journalisé avec ses paramètres (la
+valeur de `log_parameter_max_length`, `-1`, est sans effet) ; `log_min_error_statement = error` **mais**
+`log_parameter_max_length_on_error = 0` → un envoi **en erreur** n'est pas journalisé avec ses paramètres. **Aucune
+des deux conditions n'est remplie : la clé de l'assistant ne peut pas finir dans les journaux de Postgres de `mitsu`**
+avec ces réglages (à rejuger si Supabase les change).
