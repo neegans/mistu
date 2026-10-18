@@ -14,9 +14,13 @@ export function assessVersion(version, ingredientsById, dietTag) {
     const ing = ri.ingredient_id ? ingredientsById.get(ri.ingredient_id) : null;
     if (!ing) { unknown.push(ri.source_text || ri.name_text || '?'); continue; }
     if (!Array.isArray(ing.contains)) { unknown.push(ri.source_text || ing.labels?.fr?.label || ing.id); continue; }
-    examined.push(ing.id);
     const hit = ing.contains.filter((c) => rule.blocked.includes(c));
-    if (hit.length) blocking.push({ ingredient_id: ing.id, label: ing.labels?.fr?.label || ing.id, categories: hit, optional: !!ri.optional, source_text: ri.source_text });
+    // N-8 (règle asymétrique, R-CRE-1) : une identité proposée par le parseur n'est pas une identité vérifiée. Sans correspondance
+    // bloquante, une ligne non vérifiée ne certifie rien : elle est inconnue (le libellé « selon les ingrédients vérifiés » reste vrai).
+    // Avec une correspondance bloquante, elle bloque TOUJOURS (jamais assoupli : un faux positif prudent vaut mieux qu'un faux « compatible »).
+    if (!hit.length && ri.verification_state !== 'verified') { unknown.push(ri.source_text || ri.name_text || '?'); continue; }
+    examined.push(ing.id);
+    if (hit.length) blocking.push({ ingredient_id: ing.id, label: ing.labels?.fr?.label || ing.id, categories: hit, optional: !!ri.optional, source_text: ri.source_text, proposed: ri.verification_state !== 'verified' });
   }
   let state;
   if (blocking.some((b) => !b.optional)) state = 'incompatible';

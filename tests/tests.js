@@ -89,7 +89,12 @@ eq(scaleVersion({ ...version, servings: null }, 8).ok, false, 'portions inconnue
 
 // --- Régimes
 eq(assessVersion(version, ingById, 'sans_gluten').state, 'incompatible', 'spaghetti → incompatible sans gluten');
-eq(assessVersion(version, ingById, 'vegetarien').state, 'compatible', 'végétarien compatible');
+// N-8 (T5) : « compatible » se mesure sur des lignes VÉRIFIÉES — une identité proposée par le parseur ne certifie rien. Les lignes de `version`
+// restent non vérifiées pour les gardes anti-régression : le spaghetti bloque encore (ci-dessus), le parmesan facultatif reste une adaptation,
+// un inconnu reste à vérifier (ci-dessous). `V` pose l'état « vérifié » sur une copie de la version.
+const V = (v) => ({ ...v, ingredients: v.ingredients.map((l) => ({ ...l, verification_state: 'verified' })) });
+eq(assessVersion(V(version), ingById, 'vegetarien').state, 'compatible', 'végétarien compatible (lignes vérifiées)');
+eq(assessVersion(version, ingById, 'vegetarien').state, 'to_verify', 'N-8 : les mêmes lignes NON vérifiées → à vérifier, jamais compatible');
 const vUnknown = { ...version, ingredients: [parseIngredientLine('1 tasse de mystère')] };
 eq(assessVersion(vUnknown, ingById, 'sans_gluten').state, 'to_verify', 'inconnu → à vérifier, jamais compatible par défaut');
 const vOpt = { ...version, ingredients: [parseIngredientLine('parmesan (facultatif)')] };
@@ -97,11 +102,16 @@ eq(assessVersion(vOpt, ingById, 'vegetalien').state, 'adaptation', 'ingrédient 
 
 // --- Courses
 const v2 = { id: 'v2', recipe_id: 'r2', servings: 2, ingredients: [parseIngredientLine('200 g de spaghetti'), parseIngredientLine('1 gousse d’ail'), parseIngredientLine('250 ml de bouillon de poulet'), parseIngredientLine('250 ml d’eau')] };
-const list = buildShoppingList([{ version, servings: 4, title: 'A' }, { version: v2, servings: 2, title: 'B' }], ingById);
+const list = buildShoppingList([{ version: V(version), servings: 4, title: 'A' }, { version: V(v2), servings: 2, title: 'B' }], ingById);
 const pasta = list.find((g) => g.ingredient_id === 'ing_wheat_pasta');
 eq(pasta.totals[0].text, '600 g', 'spaghetti consolidés 400 + 200');
 eq(list.find((g) => g.ingredient_id === 'ing_garlic').totals[0].text, '3 gousse', 'gousses additionnées (même unité)');
 ok(list.some((g) => g.ingredient_id === 'ing_chicken_stock') && list.some((g) => g.ingredient_id === 'ing_water'), 'bouillon et eau distincts');
+// N-9 (T5) : les mêmes lignes NON vérifiées se regroupent par leur texte (jamais par l'identité proposée) et additionnent encore les quantités.
+const listeNV = buildShoppingList([{ version, servings: 4, title: 'A' }, { version: v2, servings: 2, title: 'B' }], ingById);
+eq(listeNV.map((g) => [g.key, g.ingredient_id, g.label, g.totals.map((x) => x.text)]).sort((a, b) => (a[0] < b[0] ? -1 : 1)),
+  [['name:ail', null, 'ail', ['3 gousse']], ['name:bouillon de poulet', null, 'bouillon de poulet', ['250 ml']], ['name:eau', null, 'eau', ['250 ml']], ['name:sel', null, 'sel', []], ['name:spaghetti', null, 'spaghetti', ['600 g']]],
+  'N-9 : lignes non vérifiées → groupes par texte, ingredient_id null, quantités additionnées');
 
 // --- Recherche
 const q = parseQuery('une salade avec du concombre, sans gluten, en 15 minutes');
@@ -192,7 +202,7 @@ catch (error) { ok(false, `Suite créer avec l'IA interrompue : ${error?.message
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 2262, 'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 2290, 'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

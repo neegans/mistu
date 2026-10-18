@@ -306,4 +306,118 @@ export async function runCreerIaTests({ eq, ok }) {
   ok(erreurs.length >= 2 && erreurs.every((a) => /illisible|interne/.test(JSON.stringify(a))), 'journal : seuls illisible et interne journalisent (P13)');
   eq(erreurs.filter((a) => /illisible:json/.test(JSON.stringify(a))).length >= 1 && erreurs.every((a) => a.length === 2 && Object.keys(a[1]).every((k) => ['store', 'id', 'status', 'reason', 'table', 'count', 'name'].includes(k))), true, 'journal : clés SAFE seulement, motif de la forme « illisible:json » (P13)');
   } finally { console.error = vraiError; }
+
+  // --- T5 : N-8 « une ligne non vérifiée ne certifie rien » (règle ASYMÉTRIQUE, R-CRE-1) et N-9 « telle qu'écrite » (S1, S2, F12, P5, P11)
+  {
+    const { assessVersion, assessMeal } = await import('../src/domain/diet.js');
+    const { buildShoppingList } = await import('../src/domain/grocery.js');
+    const { ingredientLineEl } = await import('../src/ui/components.js');
+    const { renderCook } = await import('../src/ui/cook.js');
+    const { parseQuery, buildDocs, searchDocs } = await import('../src/domain/search.js');
+    const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
+    const ING_BY_ID = new Map(INGREDIENTS.map((i) => [i.id, i]));
+    const L1 = (txt) => ({ ...parseIngredientLine(txt), verification_state: 'to_verify' });
+    const VER = (txt) => ({ ...parseIngredientLine(txt), verification_state: 'verified' });
+    const version = (...lignes) => ({ id: 'v', ingredients: lignes });
+
+    // N-8 : sans correspondance bloquante, une ligne non vérifiée est INCONNUE — jamais compatible (S1/F12).
+    for (const [txt, diet] of [['60 g farine, beurre et lait', 'sans_lactose'], ['125 ml pesto au basilic', 'sans_lactose'], ['30 g beurre d’amande', 'sans_noix']]) {
+      const a = assessVersion(version(L1(txt)), ING_BY_ID, diet);
+      eq([a.state, a.unknown.length, a.blocking.length], ['to_verify', 1, 0], `N-8 : « ${txt} » non vérifiée, sans allergène bloquant dans l’identité proposée → à vérifier, jamais compatible (S1/F12)`);
+    }
+    // R-CRE-6 : « lait de coco » — le seed n'a pas d'entrée coco ; le parseur propose ing_milk (mesuré), qui porte le lactose.
+    eq(parseIngredientLine('250 ml lait de coco').ingredient_id, 'ing_milk', 'R-CRE-6 (mesure) : le parseur propose ing_milk pour « lait de coco » (le seed n’a pas de coco)');
+    {
+      const a = assessVersion(version(L1('250 ml lait de coco')), ING_BY_ID, 'sans_lactose');
+      eq([a.state, a.unknown.length, a.blocking.map((b) => [b.ingredient_id, b.proposed])], ['incompatible', 0, [['ing_milk', true]]],
+        'N-8 : « lait de coco » non vérifié, identité proposée bloquante → incompatible, signalé « proposée » (faux positif prudent, F12 : jamais assouplir)');
+    }
+    // N-8 : l'autre côté de l'asymétrie — une ligne VÉRIFIÉE se comporte comme avant.
+    eq(assessVersion(version(VER('60 g farine')), ING_BY_ID, 'sans_lactose').state, 'compatible', 'N-8 : une ligne VÉRIFIÉE sans allergène bloquant reste compatible');
+    {
+      const a = assessVersion(version(VER('250 ml lait')), ING_BY_ID, 'sans_lactose');
+      eq([a.state, a.blocking.map((b) => b.proposed)], ['incompatible', [false]], 'N-8 : une ligne vérifiée bloquante reste incompatible, non « proposée »');
+    }
+    // N-8 : jamais assouplir — une correspondance bloquante sur une ligne non vérifiée bloque encore (puttanesca au blé, tests.js).
+    {
+      const a = assessVersion(version(L1('400 g de spaghetti')), ING_BY_ID, 'sans_gluten');
+      eq([a.state, a.blocking.map((b) => [b.ingredient_id, b.proposed])], ['incompatible', [['ing_wheat_pasta', true]]], 'N-8 : spaghetti non vérifié + sans gluten → toujours incompatible (jamais assoupli)');
+      eq(assessVersion(version(L1('parmesan (facultatif)')), ING_BY_ID, 'vegetalien').state, 'adaptation', 'N-8 : un bloquant facultatif non vérifié reste une adaptation');
+      eq(assessVersion(version(L1('1 tasse de mystère')), ING_BY_ID, 'sans_gluten').state, 'to_verify', 'N-8 : une ligne sans identité reste à vérifier');
+      // un mélange : un bloquant non vérifié l'emporte sur une ligne vérifiée sans allergène, et une inconnue ne cache pas un bloquant
+      eq(assessVersion(version(VER('60 g farine'), L1('400 g de spaghetti'), L1('1 tasse de mystère')), ING_BY_ID, 'sans_gluten').state, 'incompatible', 'N-8 : un bloquant non vérifié l’emporte sur le reste');
+      // une seule ligne vérifiée compatible ne rachète pas une ligne non vérifiée sans allergène : le tout reste à vérifier
+      eq(assessVersion(version(VER('60 g farine'), L1('2 gousses d’ail')), ING_BY_ID, 'sans_lactose').state, 'to_verify', 'N-8 : vérifiée compatible + non vérifiée sans allergène → à vérifier (rien ne certifie la seconde)');
+      eq(assessVersion(version(VER('60 g farine'), VER('2 gousses d’ail')), ING_BY_ID, 'sans_lactose').state, 'compatible', 'N-8 : toutes vérifiées, aucun allergène → compatible');
+    }
+    // N-8 dans la recherche et dans les repas : les deux consommateurs de assessVersion héritent de la règle.
+    {
+      const recettes = [
+        { id: 'rN', edition_id: 'e1', original_title: 'Gratin non vérifié', availability: 'available', type: 'plat_principal', current_version_id: 'vN' },
+        { id: 'rV', edition_id: 'e1', original_title: 'Gratin vérifié', availability: 'available', type: 'plat_principal', current_version_id: 'vV' },
+      ];
+      const vN = { id: 'vN', recipe_id: 'rN', kind: 'extraction', servings: 2, total_minutes: 30, ingredients: [L1('60 g farine')], steps: [] };
+      const vV = { id: 'vV', recipe_id: 'rV', kind: 'extraction', servings: 2, total_minutes: 30, ingredients: [VER('60 g farine')], steps: [] };
+      const docs = buildDocs({ recipes: recettes, versions: [vN, vV], editions: [{ id: 'e1', book_id: 'b1' }], books: [{ id: 'b1', title: 'Livre', author: 'A' }], dishes: [], links: [] });
+      const r = searchDocs(docs, parseQuery('plat principal sans lactose'), { mode: 'all', ingredientsById: ING_BY_ID });
+      eq([r.admissible.map((h) => h.doc.recipe.id), r.to_verify.map((h) => h.doc.recipe.id), r.incompatible], [['rV'], ['rN'], 0], 'N-8 : recherche sans lactose — la recette aux lignes vérifiées est admissible, celle aux lignes non vérifiées est « à vérifier »');
+      eq([assessMeal([{ version: vN, title: 'N' }], ING_BY_ID, 'sans_lactose').state, assessMeal([{ version: vV, title: 'V' }], ING_BY_ID, 'sans_lactose').state], ['to_verify', 'compatible'], 'N-8 : un repas n’est « compatible » que si ses lignes sont vérifiées');
+    }
+
+    // N-9 : l'affichage. La langue d'interface est posée et rendue (P17).
+    const localeAvant = getUiLocale();
+    setUiLocale('fr');
+    try {
+      const CTX = { system: 'original', locale: 'fr', readingLocale: 'original', originalLocale: 'fr', showSource: true };
+      const textes = (li, sel) => [...li.querySelectorAll(sel)].map((n) => n.textContent);
+      const nom = (li) => li.querySelector('.row').children[1];
+      {
+        const li = ingredientLineEl(L1('250 ml lait de coco'), CTX, ING_BY_ID);
+        eq(nom(li).childNodes[0].textContent, 'lait de coco', 'N-9 : une ligne non vérifiée affiche le texte tel qu’écrit (« lait de coco »), pas le libellé du lexique');
+        eq(textes(nom(li), '.muted'), [' (identité proposée : lait ?)'], 'N-9 : … et mentionne l’identité proposée, avec un point d’interrogation (S2)');
+        ok(li.textContent.includes('À vérifier'), 'N-9 : la puce « À vérifier » reste');
+      }
+      {
+        const li = ingredientLineEl(VER('250 ml lait'), CTX, ING_BY_ID);
+        eq([nom(li).childNodes[0].textContent, textes(nom(li), '.muted'), li.textContent.includes('identité proposée'), li.textContent.includes('À vérifier')], ['lait', [], false, false], 'N-9 : une ligne vérifiée garde le libellé du lexique, sans mention ni puce');
+      }
+      {
+        const li = ingredientLineEl({ ...L1('250 ml lait'), name_text: '' }, CTX, ING_BY_ID);
+        eq(nom(li).childNodes[0].textContent, '250 ml lait', 'N-9 : sans name_text, une ligne non vérifiée retombe sur son texte source');
+        const sans = ingredientLineEl(L1('1 tasse de mystère'), CTX, ING_BY_ID);
+        eq([nom(sans).childNodes[0].textContent, textes(sans, '.muted').filter((x) => x.includes('identité proposée'))], ['mystère', []], 'N-9 : une ligne sans identité proposée n’a pas de mention');
+      }
+      {
+        // Le badge « Traduction » dit « ce libellé est traduit » : faux pour un texte écrit (P11). Lecture en anglais d'une ligne française.
+        const EN_CTX = { ...CTX, readingLocale: 'en' };
+        const verif = ingredientLineEl(VER('250 ml lait'), EN_CTX, ING_BY_ID);
+        const nonVerif = ingredientLineEl(L1('250 ml lait'), EN_CTX, ING_BY_ID);
+        eq([textes(verif, '.badge'), nom(verif).childNodes[0].textContent], [['Traduction'], ING_BY_ID.get('ing_milk').labels.en.label], 'P11 : une ligne vérifiée lue en anglais est traduite → badge « Traduction »');
+        eq([textes(nonVerif, '.badge'), nom(nonVerif).childNodes[0].textContent], [[], 'lait'], 'P11 : une ligne non vérifiée est affichée telle qu’écrite → aucun badge « Traduction »');
+      }
+
+      // P11 : le mode cuisine affiche aussi le texte écrit.
+      {
+        const session = { id: 'cs1', selected_version_ids: ['vc'], servings: 2, progress: {} };
+        const vc = { id: 'vc', recipe_id: 'rc', servings: 2, ingredients: [L1('250 ml lait de coco'), VER('250 ml lait')], steps: [{ id: 'st1', position: 1, text: 'Chauffer doucement.', timers: [] }] };
+        const rc = { id: 'rc', original_title: 'Soupe' };
+        const ctx = { cook_sessions: [session], versionsById: new Map([['vc', vc]]), recipesById: new Map([['rc', rc]]), ingredientsById: ING_BY_ID, conventionFor: () => null };
+        const racine = await renderCook({ id: 'cs1' }, {}, ctx);
+        eq([...racine.querySelectorAll('ul.ingredients li > span:first-child')].map((n) => n.textContent), ['lait de coco', 'lait'], 'P11 : mode cuisine — la ligne non vérifiée est écrite telle quelle, la vérifiée porte le libellé du lexique');
+      }
+    } finally { setUiLocale(localeAvant); }
+
+    // N-9 : la liste d'épicerie regroupe une ligne non vérifiée par son texte, jamais par l'identité proposée.
+    {
+      const liste = buildShoppingList([{ version: { id: 'v', servings: 2, ingredients: [L1('250 ml lait de coco'), VER('250 ml lait')] }, servings: 2, title: 'T' }], ING_BY_ID);
+      eq(liste.map((g) => g.label).sort(), ['lait', 'lait de coco'], 'N-9 : l’épicerie regroupe une ligne non vérifiée par son texte, pas par l’identité proposée (S2)');
+      const etendue = buildShoppingList([
+        { version: { id: 'v', servings: 2, ingredients: [L1('250 ml lait de coco'), VER('250 ml lait'), L1('100 ml lait')] }, servings: 2, title: 'A' },
+        { version: { id: 'v2', servings: 2, ingredients: [L1('250 ml lait de coco'), VER('100 ml lait')] }, servings: 2, title: 'B' },
+      ], ING_BY_ID);
+      eq(etendue.map((g) => [g.key, g.ingredient_id, g.label, g.entries.length, g.totals.map((x) => x.text)]).sort((a, b) => (a[0] < b[0] ? -1 : 1)),
+        [['ing:ing_milk', 'ing_milk', 'lait', 2, ['350 ml']], ['name:lait', null, 'lait', 1, ['100 ml']], ['name:lait de coco', null, 'lait de coco', 2, ['500 ml']]],
+        'N-9 : la ligne vérifiée garde son groupe par identité ; une non vérifiée au même nom reste à part ; deux lignes non vérifiées de même texte s’additionnent');
+    }
+  }
 }

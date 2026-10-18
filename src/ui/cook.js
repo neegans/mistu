@@ -78,7 +78,7 @@ export async function renderCook(params, query, ctx) {
       const ing = ri.ingredient_id ? ctx.ingredientsById.get(ri.ingredient_id) : null;
       const names = [ri.name_text, ing?.labels?.fr?.label, ing?.labels?.en?.label, ...(ing?.labels?.fr?.aliases || []), ...(ing?.labels?.en?.aliases || [])].filter(Boolean).map(normalizeText);
       const hit = step && names.some((n) => n.length >= 3 && stepNorm.includes(n));
-      const li = el('li', { class: hit ? 'hit' : '' }, el('span', null, ing ? ing.labels.fr.label : (ri.name_text || ri.source_text), ri.preparation ? el('span', { class: 'muted' }, `, ${ri.preparation}`) : null), qtyEl(ri, { system: session.units || 'original', convention_id: it.convention_id, ingredient: ing }));
+      const li = el('li', { class: hit ? 'hit' : '' }, el('span', null, ing && ri.verification_state === 'verified' ? ing.labels.fr.label : (ri.name_text || ri.source_text), ri.preparation ? el('span', { class: 'muted' }, `, ${ri.preparation}`) : null), qtyEl(ri, { system: session.units || 'original', convention_id: it.convention_id, ingredient: ing }));
       if (hit) recalled.push(li.cloneNode(true));
       ingUl.append(li);
     }

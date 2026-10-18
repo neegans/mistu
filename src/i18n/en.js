@@ -302,4 +302,5 @@ export const EN = {
   "Retirer l’assistant de tous tes appareils ?": "Remove the assistant from all your devices?",
   "Rien à retirer : aucun assistant n’est configuré ici.": "Nothing to remove: no assistant is configured here.",
   "URL de base refusée : https exigé (ou http://localhost pour un serveur local), sans identifiants.": "Base URL refused: https required (or http://localhost for a local server), without credentials.",
+  'identité proposée': 'proposed identity',
 };

@@ -173,12 +173,17 @@ export function qtyEl(ri, { system = 'original', locale = 'fr', convention_id = 
 export function ingredientLineEl(ri, ctx, ingredientsById) {
   const ing = ri.ingredient_id ? ingredientsById?.get(ri.ingredient_id) : null;
   const locale = ctx.readingLocale === 'original' ? (ctx.originalLocale || 'fr') : ctx.readingLocale;
-  const name = ing ? (ing.labels?.[locale]?.label || ing.labels?.fr?.label) : (ri.name_text || ri.source_text);
-  const translated = ing && ri.name_text && locale !== ri.match_locale && ctx.readingLocale !== 'original';
+  // N-9 : une ligne non vérifiée s'affiche telle qu'écrite ; l'identité que le parseur propose n'est qu'une mention. Le badge « Traduction »
+  // ne vaut que pour un libellé du lexique (une ligne vérifiée) : un texte écrit n'est pas traduit (P11).
+  const verifiee = ri.verification_state === 'verified';
+  const libelle = ing ? (ing.labels?.[locale]?.label || ing.labels?.fr?.label) : null;
+  const name = ing && verifiee ? libelle : (ri.name_text || ri.source_text);
+  const translated = ing && verifiee && ri.name_text && locale !== ri.match_locale && ctx.readingLocale !== 'original';
   return el('li', null,
     el('div', { class: 'row', style: { gap: '.4rem' } },
       qtyEl(ri, { ...ctx, ingredient: ing }),
-      el('span', null, name, ri.preparation ? el('span', { class: 'muted' }, `, ${ri.preparation}`) : null, ri.optional ? el('span', { class: 'muted' }, ` (${t('facultatif')})`) : null),
+      el('span', null, name, ri.preparation ? el('span', { class: 'muted' }, `, ${ri.preparation}`) : null, ri.optional ? el('span', { class: 'muted' }, ` (${t('facultatif')})`) : null,
+        ing && !verifiee ? el('span', { class: 'muted' }, ` (${t('identité proposée')} : ${libelle} ?)`) : null),
       translated ? el('span', { class: 'badge' }, t('Traduction')) : null,
       ri.verification_state === 'to_verify' ? el('span', { class: 'chip warn', title: t('Ligne à vérifier') }, t('À vérifier')) : null),
     ri.source_text && (ri.source_text !== `${ri.quantity?.raw || ''} ${ri.unit_text || ''} ${ri.name_text || ''}`.replace(/\s+/g, ' ').trim()) && ctx.showSource

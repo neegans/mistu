@@ -11,11 +11,13 @@ export function buildShoppingList(items, ingredientsById, { locale = 'fr' } = {}
   for (const it of items) {
     const scaled = scaleVersion(it.version, it.servings || it.version.servings);
     for (const ri of scaled.ingredients) {
-      const key = ri.ingredient_id ? `ing:${ri.ingredient_id}` : `name:${normalizeText(ri.name_text || ri.source_text)}`;
+      // N-9 : seule une ligne vérifiée se regroupe par identité ; une ligne non vérifiée, par le texte écrit (l'identité n'est que proposée).
+      const identite = ri.ingredient_id && ri.verification_state === 'verified' ? ri.ingredient_id : null;
+      const key = identite ? `ing:${identite}` : `name:${normalizeText(ri.name_text || ri.source_text)}`;
       if (!groups.has(key)) {
-        const ing = ri.ingredient_id ? ingredientsById.get(ri.ingredient_id) : null;
+        const ing = identite ? ingredientsById.get(identite) : null;
         groups.set(key, {
-          key, ingredient_id: ri.ingredient_id || null,
+          key, ingredient_id: identite,
           label: ing ? (ing.labels?.[locale]?.label || ing.labels?.fr?.label) : (ri.name_text || ri.source_text),
           entries: [], totals: [], notes: [], checked: false,
         });
