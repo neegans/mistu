@@ -1,7 +1,24 @@
-# STATE.md — Cuisine OS (mistu) — état au 18 octobre 2026 (lot « Passerelle de l'assistant » fini dans le worktree `mistu-passerelle`, fonction déployée sur mitsu en version 3, `0004` collée et prouvée 20/20, pas fusionné ; les trois lots de la nuit sont en ligne)
+# STATE.md — Cuisine OS (mistu) — état au 18 octobre 2026 (lot « Passerelle de l'assistant » EN LIGNE, `main` = `3998f97`, première recherche réelle OK ; lot « Présentation du serveur » fini dans le worktree `mistu-serveur`, revu, pas fusionné)
+
+**18 octobre 2026, 17 h 30 — LOT « PRÉSENTATION DU SERVEUR » : FINI dans le worktree `~/projects/mistu-serveur` (branche
+`presentation-serveur`, base `main 3998f97`, serveur 8087), revu et re-revu, PAS fusionné, PAS poussé.** Décision de Neegan après la
+première recherche réelle : chaque résultat Web porte une présentation en deux ou trois phrases « comme un serveur qui présente le
+plat », puis une ligne « Estimé par l’assistant : ≈ 15 min · facile · 7 ingrédients » (hors sel et poivre), et un bouton « Voir la
+recette » qui ouvre la page ; même appel, serveur intact ; `pourquoi` retiré ; `bornerAuMot` (fin du « La recet » coupé). Suite
+**3011/3011** (épinglé 3010), Node 101/101, `sw.js` `cuisine-os-v0.8.1-3`, `APP_VERSION 0.8.1`. Commits `d124de6` + `5ab689f` + `778883c`. Revue
+adverse (opus) : 0 Critical, 4 Important corrigés en ronde 1, 9 Minor ; re-revue 13/13 ; ronde 2 = hôte nu écarté + résidus (graphèmes parqués). Détail : `CLAUDE.md`, section
+« La présentation du serveur ». **Gestes :** `! git -C ~/projects/mistu merge --ff-only presentation-serveur` puis `push` ; preuve réelle :
+une recherche Web connecté → présentations et ligne « Estimé par l’assistant », « Voir la recette » ouvre la page ; « clean » après
+copie du registre `.superpowers/sdd/2026-10-18-presentation-serveur/`. Hors périmètre, lot suivant si voulu : lire une page
+(`web_fetch`), recette complète dans l'app.
+
+**18 octobre 2026, 16 h 54 — LOT « PASSERELLE DE L'ASSISTANT » : EN LIGNE.** Fusion rapide et `push` par Neegan (`main` = `3998f97`, 22
+commits), Pages servi à 20 h 51 UTC (`cuisine-os-v0.8.0-6`, `passerelle.js` 200, le code servi ne nomme plus `api.anthropic.com`) ;
+**première recherche réelle rendue sur le site public sans clé** (« salade concombre sans gluten 15 minutes », quatre résultats, capture
+16 h 54). Non lu encore : `select * from public.assistant_usage_jour;`, `assistant_journal.statut`, la valeur `cles` du GET, le 499.
 
 **18 octobre 2026, 15 h 19 — LOT « PASSERELLE DE L'ASSISTANT » : FINI dans le worktree, fonction DÉPLOYÉE sur `mitsu` (version 3),
-`0004` COLLÉE et PROUVÉE par Neegan (20 h 40 UTC : `999 BILAN` = `0 faux sur 20`, `assistant_reserver` visible de PostgREST), PAS fusionné, PAS poussé.** Branche `passerelle-assistant`, worktree `~/projects/mistu-passerelle` (serveur 8086), base
+`0004` COLLÉE et PROUVÉE par Neegan (20 h 40 UTC : `999 BILAN` = `0 faux sur 20`, `assistant_reserver` visible de PostgREST), puis FUSIONNÉ et POUSSÉ (ci-dessus).** Branche `passerelle-assistant`, worktree `~/projects/mistu-passerelle` (serveur 8086), base
 `main` `cdbd6e0`, tête `2a2f838` (19 commits, dont deux commits RESULTATS du contrôleur et les deux de la vague finale `f43e071` serveur et
 `2a2f838` app). Pour Neegan : plus de clé à taper ; connecté, l'assistant marche sur tous les appareils (60 appels par compte et par jour,
 `claude-sonnet-5-5`, Réglages dit « Vérification… » puis « actif pour … » une fois le serveur répondu) ; la clé est un secret du projet et

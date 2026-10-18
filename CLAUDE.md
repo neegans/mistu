@@ -1434,6 +1434,49 @@ illimitée, préfixe public lu pour la clé secrète : tous tués). Tests de CAR
 `git worktree remove` ; le geste 1 **avant** tout `push` (un code servi sans `0004` laisserait chaque appel d'assistant en
 502 `serveur`, avant tout appel au fournisseur : README, étape 10).
 
+## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
+
+**Contexte.** Lot 4 fusionné et poussé par Neegan (`main` = `3998f97`, Pages servi à 20 h 51 UTC, `cuisine-os-v0.8.0-6`) ; preuve
+`0004` jouée (20/20) ; **première recherche réelle rendue sur le site public sans clé** (capture 16 h 54, Montréal). Neegan a alors
+demandé « un résumé de chaque recette », précisé « comme une petite présentation faite par un serveur », plus « une ligne à part :
+le temps estimé, la difficulté, le nombre d'ingrédients (en dehors du sel et poivre) ». Choix entre trois formes (recette complète
+dans l'app / résumé dans la liste au même appel / les deux) : **option 2**, même appel, **serveur intact**. Classé **borné** : design
+approuvé en chat, pas de spec ni de plan ; un brief (`.superpowers/sdd/2026-10-18-presentation-serveur/task-1-brief.md`), un
+implémenteur (sonnet, TDD), une revue adverse (opus), une ronde de corrections, une re-revue. Worktree `~/projects/mistu-serveur`,
+branche `presentation-serveur` (base `3998f97`), servi sur 8087.
+
+**Ce qui change (spec « chercher sur le web », § 12).** L'assistant répond `{"choix":[{"url","presentation","temps_min","difficulte",
+"ingredients"}]}` ; `pourquoi` a disparu partout. `presentation` = deux ou trois phrases dans la voix d'un serveur, bornée **au mot**
+à 400 points de code par `bornerAuMot` (`src/core/bornes.js` : sauts de ligne → espace, mesure après `trim`, coupe à la dernière
+espace de la moitié droite hors insécables, « … » ; `max` < 1 → `''`) — fin du « La recet » coupé en plein mot ; une présentation qui
+porte une adresse web est **écartée** (`MOTIF_ADRESSE` : `https?://`, `www.`, `hôte/chemin` ; `MOTIF_HOTE` : hôte nu sur une liste fermée de domaines de premier niveau ; test sur le texte NFKC où U+3002/U+FF61 valent « . » et U+2215/U+2044 valent « / » ; faux positif connu et accepté : une phrase collée suivie de « Ca », « Le sel.Ca y est »). Repères typés : `temps_min` entier 1..1440, `difficulte` ∈
+`facile | moyen | exigeant` (jetons français dans les deux langues, chaîne seulement), `ingredients` entier 1..99 ; tout le reste vaut
+`null` ; lus par `Object.hasOwn` (y compris `url` et `choix`). Un choix ne survit toujours que s'il désigne exactement un résultat
+(I-A) ; repli et `autres` portent les quatre champs à `null`. Écran : titre (lien), hôte · date, présentation en **nœud texte**, ligne
+« Estimé par l’assistant : ≈ 15 min · facile · 7 ingrédients » (parties présentes, « ≈ 1 h 30 », « 1 ingrédient » ; bornes hautes
+revalidées au rendu), rangée « Voir la recette » (`a`, `href` du résultat revalidé par `lienSignet`, `target=_blank`, `rel=noopener
+noreferrer` ; clé `en.js` partagée « View recipe ») + « Garder ce lien ». Mention I-K : « L’assistant présente les plats et estime le
+temps d’après les pages : il ne vérifie ni le temps, ni les ingrédients, ni les restrictions. Relis la page avant de cuisiner. » ; en
+repli, l'ancienne phrase. Consigne `SYSTEM` fr/en : « n’affirme jamais qu’elle respecte une restriction ou une durée, dis ce que la
+page annonce ; aucune adresse web dans le texte », **épinglée mot pour mot** par le test (sortie de `construireDemande`, pas le source).
+`APP_VERSION 0.8.1`, `sw.js` `cuisine-os-v0.8.1-3`. `max_tokens` reste 4096.
+
+**Revue adverse (opus) et rulings.** 0 Critical. I1 repères rendus comme une donnée de la page → préfixe « Estimé par l’assistant » +
+mention étendue au temps ; I2 consigne qui poussait à affirmer une restriction, 400 points de code d'injection, adresse possible →
+consigne renforcée + adresse écartée, **pas** de préfixe sur la présentation (la voix est le but) ; I3 faux-vert : `rel` du titre plus
+épinglé → `[href, target, rel, texte]` ; I4 consigne non épinglée (gardes inversées, jetons anglais : verts) → épinglage littéral.
+m1-m7 appliqués ; m8 ratifié (« View recipe », `difficulte` chaîne) ; m9 `docs/architecture.md` et parenthèses dans la spec. Re-revue :
+13/13 réglés, 8 mutants rouges ; **ronde 2** sur ses résidus : hôte nu (`MOTIF_HOTE`, recommandation mesurée du relecteur : cinq hôtes
+écartés, dix fragments honnêtes gardés), normalisations U+3002/U+FF61/U+2215/U+2044, tous les séparateurs de ligne → espace dans
+`bornerAuMot` (U+2028/2029/0085, VT, FF), U+2007 hors des points de coupe. **Parqué** : coupe des graphèmes combinés (accents
+combinants, drapeaux) ; courriels dans une présentation ; homoglyphes d'un autre alphabet (UTS #39, pas de table) ; qualité réelle
+des présentations et des estimations (aucun appel réel pendant la construction).
+
+**Chiffres.** Suite **3011/3011** (épinglé 3010 ; avant le lot 2953), Node 101/101, `--check` 0, mutants : 21 rejoués après la
+ronde 1 et 9 après la ronde 2 par l'implémenteur, 8 par le relecteur, 1 par le contrôleur (`MOTIF_HOTE` ignoré → 3009/3011), tous
+tués ; 0 invisible, 0 insécable littérale sur les fichiers du lot. Commits `d124de6` (tâche), `5ab689f` (ronde 1 ; son sujet porte un
+accent, laissé tel quel : jamais réécrire l'historique), `778883c` (ronde 2), puis les docs du contrôleur.
+
 ## Premier lot de fiabilisation — 8 septembre 2026, à réviser
 
 À la suite d’un audit statique, l’utilisateur a autorisé le premier lot consacré à la sauvegarde/restauration. Modifications effectuées uniquement via MCP vibeforge_files, avec écritures conditionnées au SHA-256 ; aucun shell, réseau, build, test exécuté, commit ou déploiement.
