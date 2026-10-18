@@ -1,6 +1,8 @@
 # Créer une recette avec l'assistant IA — spec de design
 
-Date : 18 octobre 2026 (nuit). **Révision 2** (après deux revues adverses : sécurité S1-S15, faisabilité F1-F23 — § 12). Branche
+Date : 18 octobre 2026 (nuit). **Révision 2** (après deux revues adverses : sécurité S1-S15, faisabilité F1-F23 — § 12),
+**amendée à la clôture** (tâche 8, 18 octobre) : N-8, N-9, § 3.3, § 3.5, § 4.4, § 7, § 9, § 10, § 11 (rulings R-CRE-1 à R-CRE-12) ;
+le registre `.superpowers/sdd/2026-10-18-creer-avec-l-ia/progress.md` fait foi en cas d'écart. Branche
 `creer-ia` sur la pointe d'`assistant-compte`, worktree `~/projects/mistu-ia` (serveur `http://localhost:8084/`). Specs parentes : lot
 web `docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md` (I-A…I-K, R-WEB-1…10, V-S*), lot « assistant par le compte »
 (K-1…K-12, R-CPT-1…4). Kit de référence (hors dépôt, lecture seule) : `~/Downloads/mistu-claude-code-kit/` (`MISTU-SPEC.md`,
@@ -31,10 +33,18 @@ lots, incluant le design ». Les choix suivants sont les miens, chacun renversab
   l'identité proposée porte un allergène bloquant reste **bloquante** (« jamais assoupli » : la règle symétrique aurait fait passer une
   puttanesca au blé non vérifiée de « écartée » à « à vérifier » dans une recherche sans gluten — mesuré). Une recette d'un livre aux
   lignes non vérifiées passe de « compatible » à « à vérifier » : c'est l'état réel. **À confirmer par Neegan au matin** ; renversable
-  (restreindre à `estCreationIA`).
+  (restreindre à `estCreationIA`). Construit (T5, R-CRE-9) : un bloquant **facultatif** ne masque jamais une ligne inconnue (`to_verify`
+  au lieu d'`adaptation` tant qu'une ligne reste à vérifier). Mesuré sous la règle asymétrique : « 250 ml lait de coco » (identité
+  proposée `ing_milk`) sous sans lactose → `incompatible`, bloquant `proposed: true` (faux positif prudent, § 9).
 - **N-9 (issue de S2, app entière) Une ligne non vérifiée s'affiche telle qu'écrite.** `ingredientLineEl` rend `name_text` quand la
   ligne n'est pas vérifiée, avec la mention « identité proposée : {libellé} ? » si le lexique en propose une ; la liste d'épicerie
-  regroupe une ligne non vérifiée par son `name_text`. **À confirmer par Neegan** ; renversable de même.
+  regroupe une ligne non vérifiée par son `name_text`. **À confirmer par Neegan** ; renversable de même. Construit (T5, P11) : texte
+  exact de la mention ` (identité proposée : {libellé} ?)` ; le mode cuisine (`cook.js`) affiche lui aussi `name_text` d'une ligne non
+  vérifiée ; le badge « Traduction » ne vaut que pour une ligne vérifiée ; `qtyEl` ne reçoit jamais l'identité proposée (aucune
+  conversion par la densité d'un ingrédient seulement proposé) ; une ligne sans `verification_state` compte comme non vérifiée ; le
+  groupe de courses d'une ligne non vérifiée porte `ingredient_id: null` (clé `name:<texte normalisé>`). Effet sur les fiches de LIVRE
+  (mesuré sur fixtures) : « 3 oignons » et « 1 oignon » non vérifiés font deux groupes (`name:oignons`, `name:oignon`), un seul
+  (`ing:ing_onion`) une fois vérifiés.
 - **N-10 « Corriger » reste offert** sur une création IA (corriger une quantité est utile) ; la fiche garde `origine: 'ia'`, la version
   corrigée est manuelle et s'étiquette « Corrigée par toi — d'après une création IA » ; la section N-7 et la provenance lisent
   `origine`, pas la version courante.
@@ -160,19 +170,31 @@ modèle saisi librement dans Réglages).
 - « Marquer testée » : `kind ∈ {adaptation, synthesis}` et `status !== 'tested'`.
 - Sur une version `estCreationIA` : « Selon l'assistant : {description} », liste « Conseils », liste « À vérifier avant de servir »,
   « environ {m} min (estimé par l'assistant) », avertissement C-9 (rebornés au rendu : une ligne synchronisée peut porter n'importe quoi).
-- `cook.js` : en tête, étiquette C-2 + avertissement C-9 pour `estCreationIA`.
-- `ingredientLineEl` (N-9) : ligne non vérifiée ⇒ `name_text` + « identité proposée : {libellé} ? » (si `ingredient_id`).
+- `cook.js` : en tête, étiquette C-2 + avertissement C-9 pour `estCreationIA`. **Amendé par R-CRE-10** : l'étiquette
+  `etiquetteIA(version, recipe)` est posée pour TOUTE fiche `origine: 'ia'` (une correction dit « Corrigée par toi — d'après une
+  création IA ») ; l'avertissement C-9 reste réservé aux versions `estCreationIA`.
+- `ingredientLineEl` (N-9) : ligne non vérifiée ⇒ `name_text` + « identité proposée : {libellé} ? » (si `ingredient_id`). Construit
+  (P11) : mention exacte ` (identité proposée : {libellé} ?)`, badge « Traduction » seulement si la ligne est vérifiée, `qtyEl` sans
+  l'identité proposée ; même affichage du texte écrit dans `cook.js`.
 
 ### 3.4 Bibliothèque (`src/ui/library.js`, N-7)
 Section « Recettes créées avec l'IA » après « Liens web gardés » : `ctx.recipes.filter((r) => r.origine === 'ia')`, tri `created_at`
 desc, `recipeCard(doc)` via `ctx.docsByRecipe` (F15 : pas de `versionsByRecipe` dans le montage des tests), absente quand vide.
 
 ### 3.5 Domaine transverse (N-8, N-9, S13)
-- `src/domain/diet.js` `assessVersion` : une ligne `verification_state !== 'verified'` est **inconnue** (`unknown`), jamais bloquante ni
-  compatible ; tests existants retournés le cas échéant (fixtures aux lignes non vérifiées).
-- `src/domain/grocery.js` : regroupement par `ingredient_id` seulement si la ligne est vérifiée, sinon par `name_text` normalisé.
-- `src/domain/lines.js` `detectTimers` : au plus 4 minuteurs par étape, chacun ≤ 24 h (86 400 s), `Infinity`/`NaN` écartés (S13) —
-  règle générale, testée.
+- `src/domain/diet.js` `assessVersion` — **règle ASYMÉTRIQUE (R-CRE-1, P5 ; remplace le texte symétrique de la rév. 2, « jamais
+  bloquante ni compatible », qui assouplissait : la garde « restriction jamais assouplie : puttanesca écartée » passait
+  d'« écartée » à « à vérifier »)** : une ligne
+  `verification_state !== 'verified'` dont l'identité proposée ne porte **aucun** allergène bloquant est **inconnue** (`unknown`),
+  jamais compatible ; une ligne dont l'identité proposée porte un allergène bloquant reste **bloquante**, avec `proposed: true`
+  (jamais assoupli). Un bloquant facultatif ne masque pas une inconnue : `state = unknown.length ? 'to_verify' : 'adaptation'`
+  (R-CRE-9). Tests existants de `tests/tests.js` (lignes relues à la clôture) : les gardes « spaghetti → incompatible sans gluten »
+  (l. 91), « inconnu → à vérifier » (l. 99) et « puttanesca écartée » (l. 131) restent sur des lignes NON vérifiées ;
+  « végétarien compatible » passe en lignes vérifiées (l. 96), et les mêmes lignes non vérifiées rendent `to_verify` (l. 97).
+- `src/domain/grocery.js` : regroupement par `ingredient_id` seulement si la ligne est vérifiée, sinon par `name_text` normalisé ;
+  le groupe d'une ligne non vérifiée porte `ingredient_id: null`.
+- `src/domain/lines.js` `detectTimers` : au plus 4 minuteurs par étape, chacun ≤ 24 h (86 400 s) — **au-delà ÉCARTÉ, jamais plafonné
+  (R-CRE-8)** ; `seconds_max` > 86 400 → `null` ; `Infinity`/`NaN` écartés (S13) — règle générale, testée.
 
 ## 4. Domaine (module pur `src/domain/creation-ia.js`)
 
@@ -223,8 +245,11 @@ Squelette de `chercherRecettesWeb` : gardes `non_configure`, `non_pris_en_charge
 role: 'user', content: user }] }` — **sans paramètre `thinking`** (la réflexion adaptative tourne quand même et compte dans
 `max_tokens` : seuls les blocs `text` sont lus — F11) ; statuts → mêmes raisons que le web ; corps borné 1 Mio ; `stop_reason`
 `refusal` ⇒ `refus`, `max_tokens` ⇒ `interrompu` ; texte → `parseJsonLoose` (échec ⇒ `illisible`, motif `json` ; `reponse_illisible` = corps HTTP non JSON, P13) → `validerRecetteIA` ⇒ `trouve { recette,
-avertissements, modele, usage: { entree, sortie } }` ou `indisponible { raison: 'illisible', motif }`. `logError('creation_ia', {
-raison, motif })` sans corps.
+avertissements, modele, usage: { entree, sortie } }` ou `indisponible { raison: 'illisible', motif }`. Journal (**amendé par P13** :
+la rév. 2 disait `logError('creation_ia', { raison, motif })`, clés que `log.js` ne garde pas) : `logError('creation_ia', { reason:
+'illisible:' + motif })` (clé SAFE de `src/core/log.js`), et `{ reason: 'interne', error }` pour le filet (`log.js` n'en garde que
+`error.name`) ; seules ces deux issues
+journalisent, jamais un corps ni un texte du modèle.
 
 ## 5. État du module d'écran
 `memoire = { cle, issue, demande, filtres, parente, changement, gardee, echec }`, `vol = { cle, controller, promesse }`, `vues` =
@@ -254,8 +279,10 @@ proposition. » + « Créer à nouveau » quand `memoire.cle !== cle` ; mémoire
 - Portes : grille 6 cartes ; bouton web sur rien/trouvé/désactivée ; navigation avec q + puces, `appels.n` inchangé.
 - Fiche/cartes/cuisine/exports : chaque surface C-2 ; « Marquer testée » ; « Adapter avec l'IA » seulement si `estCreationIA` ; garde
   `?adapter=` (absent, étranger, extraction IA de livre → refus) ; description/conseils/notes rendus ; « Corriger » garde `origine`.
-- Domaine transverse : N-8 (trois fixtures de S1 : farine-beurre-lait, pesto, beurre d'amande → `to_verify`, jamais `compatible`), N-9
-  (« lait de coco » affiché), S13 (175 minuteurs → 4 ; 99999 h → ≤ 24 h ; `Infinity` écarté).
+- Domaine transverse : N-8 (trois fixtures de S1 : farine-beurre-lait, pesto, beurre d'amande → `to_verify`, jamais `compatible` ;
+  **« 250 ml lait de coco » sous sans lactose → `incompatible`, bloquant `proposed: true`** — R-CRE-6, mesuré : le parseur propose
+  `ing_milk`), N-9 (« lait de coco » affiché), S13 (175 minuteurs → 4 ; 99999 h → **écarté, `{}`** — R-CRE-8, la rév. 2 disait
+  « ≤ 24 h » ; `Infinity` écarté).
 - Bibliothèque : section, tri, absence.
 - Pins : APP 0.7.0 (`tests/ajouter.js:1858,1860`, `tests/sync-l3.js:1867`, `tests/recherche-web.js:40,43`, `tests/assistant-compte.js:8`),
   `ROUTES_DE_SAISIE`, `SHELL` (+2 modules), total épinglé, couverture `en.js` (motif `tests/recherche-web.js:936-938`), test « aucune
@@ -266,25 +293,80 @@ proposition. » + « Créer à nouveau » quand `memoire.cle !== cle` ; mémoire
 Aucun schéma, aucune migration, `DB_VERSION` 3, CSP inchangée.
 
 ## 9. Dettes nommées à l'avance
-- N-8/N-9 décidées app entière : à confirmer par Neegan (renversables).
-- Lexique : « lait de coco » → `ing_milk`, « crème de coco » → `ing_cream`, « farine de riz » → `ing_ap_flour` (F12) : avec N-8 elles
-  restent « à vérifier » ; un lexique plus fin est un lot à part.
+- N-8/N-9 décidées app entière : **à confirmer par Neegan** (renversables).
+- Lexique : « lait de coco » → `ing_milk`, « crème de coco » → `ing_cream`, « farine de riz » → `ing_ap_flour` (F12). **Réécrit à la
+  clôture, d'après les mesures** (la rév. 2 disait qu'avec N-8 elles « restent à vérifier » : faux sous la règle asymétrique). Mesuré
+  (`parseIngredientLine` sur l'index du seed, puis `assessVersion`, lignes non vérifiées) : « 250 ml lait de coco » et « 250 ml crème
+  de coco » sous sans lactose → `incompatible`, bloquant `proposed: true` ; « 200 g farine de riz » sous sans gluten → `incompatible`,
+  `proposed: true` ; « 250 ml lait de coco » sous sans gluten → `to_verify` (1 inconnue). « À vérifier » seulement pour une restriction
+  que l'identité proposée ne bloque pas ; sinon un faux positif prudent, jamais un faux « compatible ». Un lexique plus fin est un lot
+  à part.
 - `output_config` JSON structuré non utilisé (modèle libre dans Réglages).
 - Le titre refusé pour une affirmation coûte un appel (rare si le prompt tient).
 - La demande n'a pas de bouton d'effacement.
 - `AnthropicProvider.complete` (V-S9) inchangé : ce lot ne l'utilise pas.
 
 ## 10. Gestes de Neegan
-Aucun avant la fusion. Après le push : une création réelle (Mac, site public) → noter durée, jetons affichés, coût console ; « Garder »
-→ Mes livres → « Recettes créées avec l'IA » ; « Marquer testée » après cuisson ; une adaptation ; confirmer ou renverser N-8/N-9.
+Aucun geste propre à ce lot avant la fusion — mais ce lot est bâti sur la pointe d'`assistant-compte` (`ce9eb5d`, lot « L'assistant
+suit le compte », **non fusionné**) : les gestes de ce lot-là passent d'abord. **Amendé à la clôture**, dans cet ordre :
+1. **Lot 1 d'abord** : coller `supabase/migrations/0003_assistant_config.sql` sur `mitsu`, puis sa preuve (ligne `999 BILAN`, `0 faux`),
+   **avant tout `push`** (`supabase/README.md`, étape 8 bis ; `CLAUDE.md`, section « L'assistant suit le compte », gestes 1-2).
+2. Copier `.superpowers/sdd/2026-10-18-creer-avec-l-ia/` dans `~/projects/mistu/.superpowers/sdd/` avant tout `git worktree remove`.
+3. Fusions `--ff-only` **en chaîne** dans `~/projects/mistu` : `assistant-compte`, puis `creer-ia`, puis le lot 3 s'il est fini ; puis
+   **un** `push`. Ouvrir `https://neegans.github.io/mistu/tests/` et lire le BILAN.
+4. **Preuve réelle** (Mac, site public, clé de Neegan) : une création → noter durée, jetons affichés, coût dans la console Anthropic ;
+   « Garder » → Mes livres → « Recettes créées avec l'IA » ; « Marquer testée » après cuisson ; une adaptation.
+5. **Confirmer ou renverser N-8/N-9** (effet sur les fiches de LIVRE : N-8, N-9 ci-dessus et `CLAUDE.md`).
+
+**Décisions à confirmer par Neegan** (aucune n'est tranchée par la construction ; chacune renversable) : N-1 à N-10 (§ 0), N-8 et N-9
+en tête ; la borne `estimated_minutes` ≤ 240 refuse un long braisé même sans maximum demandé (un appel payé perdu : avertir plutôt que
+refuser ?) ; `"image": null` explicite est refusé `lien` (la clé est présente : tolérer `null` ?) ; « Ketchup 100 % maison » est refusé
+`affirmation` (`100 ?%`, coût connu § 9) ; le détecteur d'adresses (motif de § 4.2, inchangé) a des faux positifs quand l'espace manque
+après un point (« sel.Ca y est » → `lien`) et des contournements best-effort (`.io`, `.quebec`, « ricardo . com ») ; le titre proposé
+pour une adaptation est validé (motif `affirmation` compris) mais jamais sauvé (une version n'a pas de titre) : garder la validation ou
+l'assouplir ? ; l'exemple sans portions de R-CRE-12, à confirmer à l'usage ; les surfaces N-9 que cette spec ne couvrait pas
+(`dishes.js` `compareBundles` regroupe par identité proposée, `cook.js` surligne par les alias de l'identité proposée, `search.js`
+filtre avec/sans par identité proposée, `dietChip` ne nomme plus le bloquant facultatif en `to_verify`) ; `DIET_RULE_VERSION` reste 1
+alors que le sens a changé (aucun consommateur ne persiste l'évaluation) ; `assessMeal` et `searchDocs` font passer `adaptation`
+avant `to_verify` entre éléments ou restrictions (une adaptation masque un à-vérifier, préexistant).
 
 ## 11. Rulings de construction
-- **R-CRE-1** (relecture du plan, P5) : N-8 est asymétrique — jamais certifier, jamais assouplir (texte dans N-8).
-- **R-CRE-2** (P16) : une seule fonction d'étiquette `etiquetteCreationIA(version, recipe)` dans `creation-ia.js` ; « Corrigée par toi — d'après une
-  création IA » pour `kind === 'correction'`, « Ma version — d'après une création IA » pour une adaptation manuelle d'une fiche `origine: 'ia'`.
-- **R-CRE-3** (P15) : la demande d'une adaptation est celle de la parente (préremplie) ; un changement vide n'appelle pas ; le titre de la
-  parente vient de la fiche.
-- (suite pendant le SDD)
+Une ligne par ruling (registre `.superpowers/sdd/2026-10-18-creer-avec-l-ia/progress.md`), avec son coût si le ruling était faux.
+- **R-CRE-1** (relecture du plan, P5 ; construit en T5) N-8 est asymétrique : une ligne non vérifiée sans correspondance bloquante est
+  inconnue (jamais compatible) ; avec une correspondance bloquante, elle bloque, `proposed: true` — jamais certifier, jamais assouplir
+  (texte dans N-8 et § 3.5). Coût si faux : un faux positif prudent (« lait de coco » incompatible sans lactose), jamais un faux
+  « compatible ».
+- **R-CRE-2** (P16 ; T1, T6) une seule fonction d'étiquette `etiquetteCreationIA(version, recipe)` dans `creation-ia.js` ; « Corrigée par
+  toi — d'après une création IA » pour `kind === 'correction'`, « Ma version — d'après une création IA » pour une adaptation manuelle
+  d'une fiche `origine: 'ia'`. Coût si faux : un libellé.
+- **R-CRE-3** (P15 ; T7) la demande d'une adaptation est celle de la parente (préremplie) ; un changement vide n'appelle pas ; le titre
+  de la parente vient de la fiche (`recipe.original_title`). Coût si faux : un champ à retaper.
+- **R-CRE-4** (pré-vol) UNE fonction de texte `etiquetteCreationIA(version, recipe = null)` (T1, clé française, `t()` au rendu, texte
+  brut dans les exports) ; T3 n'exporte pas d'`ETIQUETTE` ; helper DOM facultatif `etiquetteIA(version, recipe = null)` dans
+  `components.js`, même ordre d'arguments, qui délègue. Coût si faux : un renommage.
+- **R-CRE-5** (pré-vol) ordre d'exécution T1, T2, T5, T3, T4, T6, T7, T8 (T3 asserte « À vérifier », qui dépend de N-8, donc de T5) ;
+  suffixe de `sw.js` = numéro de tâche (clé de cache, pas d'ordre) — **précisé en T3** : suffixe MONOTONE (-1, -2, -5, -6, -7, -8, -9,
+  puis -10 à la clôture). Coût si faux : un suffixe hors ordre dans l'historique.
+- **R-CRE-6** (pré-vol ; mesuré en T5) « 250 ml lait de coco » + sans lactose : l'attendu est celui du parseur, mesuré —
+  `parseIngredientLine` propose `ing_milk` (`contains: ['dairy']`), donc `incompatible`, bloquant `proposed: true` (P5 avait raison :
+  faux positif prudent, F12) ; les trois fixtures S1 restent `to_verify`. Amende § 7 et § 9. Coût si faux : un attendu de test.
+- **R-CRE-7** (T1) P21 précisé : `texteLigne` garde le texte de `formatNumber` seulement s'il relit la MÊME valeur (`parseQuantity`), ou
+  à 2 % près pour une fraction (⅓, ½, 2½) ; sinon la décimale exacte (0,35 → « 0,35 », pas « ⅓ »). Mesuré par la revue : 73 906
+  quantités relues sans échec, pire écart d'une fraction 2,0 %. Coût si faux : une ligne moins jolie, jamais une quantité faussée.
+- **R-CRE-8** (T1 revue ; amende § 3.5 et le test du plan « 99999 h → 86 400 ») un minuteur de plus de 24 h est ÉCARTÉ, jamais
+  plafonné ; `seconds_max` > 86 400 → `null` (« aucune durée inventée »). Coût si faux : un minuteur de 30 h non offert.
+- **R-CRE-9** (T5 revue ; amende l'échelle d'états de `diet.js`) un bloquant FACULTATIF ne masque jamais des lignes inconnues :
+  `state = unknown.length ? 'to_verify' : 'adaptation'`. Mesuré avant : pesto non vérifié + parmesan facultatif sous sans lactose
+  donnait `adaptation`. Coût si faux : « à vérifier » au lieu d'« adaptation » (plus prudent).
+- **R-CRE-10** (T6 revue ; amende § 3.3) en mode cuisine, l'étiquette `etiquetteIA(version, recipe)` pour TOUTE fiche `origine: 'ia'`
+  (une correction dit « Corrigée par toi — d'après une création IA ») ; l'avertissement C-9 reste réservé à `estCreationIA`. Coût si
+  faux : une ligne de plus.
+- **R-CRE-11** (T7) le formulaire d'adaptation PRÉREMPLIT `diets`, `type` et `maxMinutes` depuis `parente.provenance.creation.filtres`
+  (la personne peut changer) — sinon adapter une création « sans lactose » n'envoyait aucune restriction. **Précisé par la revue de
+  T7** : adresse fraîche → préremplissage par la même liste blanche que C-16 ; dès que `changement` est dans l'adresse, seule l'adresse
+  compte. Coût si faux : une puce de plus à retirer.
+- **R-CRE-12** (T7 revue) l'exemple du champ « Ce que tu veux changer » ne parle pas de portions (« Ex. : sans four, plus épicé, avec
+  du poulet ») et une aide dit « Pour changer les portions, modifie Portions. ». Coût si faux : une ligne de plus.
 
 ## 12. Ce que la revue a amendé
 **Sécurité (S1-S15).** S1 ⇒ N-8 + évaluation sur la proposition (C-9). S2 ⇒ N-9. S3 ⇒ `origine: 'ia'` durable, N-10, C-2 sans

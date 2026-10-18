@@ -4,7 +4,7 @@
 
 - **PWA sans étape de build** : modules ES natifs, aucune dépendance npm. Un serveur statique suffit. Choix guidé par « éviter la surarchitecture » (spec §15) et par la possibilité de tout vérifier en ouvrant l'app.
 - **Local-first** : IndexedDB comme base unique (un magasin par entité), blobs (photos, PDF) stockés dédupliqués par SHA-256 dans le magasin `files`. La sauvegarde complète (ZIP) reste un mécanisme de durabilité et de transfert entre appareils, utilisable sans compte. Depuis le lot L3, **les fiches** peuvent aussi voyager par un serveur Supabase quand un compte est connecté (voir « Synchronisation (L3) ») ; les **octets des fichiers**, eux, ne partent pas encore (L4). L'app reste utilisable sans compte, sur un appareil seul.
-- **Déterministe avant IA** : unités, portions, courses, régimes, sauvegarde et recherche sont du code sans LLM. L'IA est une abstraction `LLMProvider` (aucun, compatible OpenAI, Anthropic) branchée sur l'extraction de pages et d'index, et sur la recherche web (Anthropic seulement), où le texte de l'assistant ne peut qu'étiqueter des pages que le serveur a réellement rapportées ; la lecture de la réponse et le choix des liens sont du code sans LLM. Ses résultats sont toujours « à vérifier ».
+- **Déterministe avant IA** : unités, portions, courses, régimes, sauvegarde et recherche sont du code sans LLM. L'IA est une abstraction `LLMProvider` (aucun, compatible OpenAI, Anthropic) branchée sur l'extraction de pages et d'index, et sur la recherche web (Anthropic seulement), où le texte de l'assistant ne peut qu'étiqueter des pages que le serveur a réellement rapportées ; la lecture de la réponse et le choix des liens sont du code sans LLM ; et, depuis le 18 octobre, sur la création d'une recette (Anthropic seulement), dont la sortie est une donnée validée champ par champ par du code sans LLM. Ses résultats sont toujours « à vérifier ».
 
 ## Carte des modules
 
@@ -18,15 +18,17 @@ src/domain/  quantity.js (fractions, plages, qualitatif), units.js (conventions,
              diet.js, grocery.js, search.js (langage naturel → pastilles; groupes), dishes.js (rapprochement, comparaison), pairing.js (accompagnements, résumé de repas),
              rediscover.js, timers.js, backup.js (archive, inspection isolée, restauration, vérification), exporters.js (JSON-LD, YAML Paprika, HTML), llm.js,
              recherche-web.js (demande, corps, lecture de la réponse et choix des liens de la recherche web ; un appel, ne lève jamais),
-             assistant-config.js (normalisation de la configuration de l'assistant IA, pure — voir « L'assistant suit le compte »)
-src/ui/      state.js (cache), components.js, home, search, library, book, dish, recipe, recipe-edit, cook, import, meals, grocery, kitchen, settings, add
+             assistant-config.js (normalisation de la configuration de l'assistant IA, pure — voir « L'assistant suit le compte »),
+             creation-ia.js (demande, validation, fabrication et appel de « Créer une recette avec l'assistant » — voir cette section)
+src/ui/      state.js (cache), components.js, home, search, library, book, dish, recipe, recipe-edit, cook, import, meals, grocery, kitchen, settings, add,
+             creer-ia (écran #/recipes/creer)
 src/sync/    tables.js, mime.js, clock.js, outbox.js, config.js, auth.js — voir « Synchronisation (L1-L2) »
              transport.js, lots.js, reponses.js, push.js, backfill.js, pull.js, conflits.js, moteur.js — voir « Synchronisation (L3) »
 src/core/log.js            point d'entrée unique du journal d'erreurs (logError)
 src/vendor/  supabase-2.117.3.umd.js (dépendance embarquée, vérifiée deux fois)
 tests/       tests.js + index.html : tests du domaine ; backup.js : régressions IndexedDB dans des bases temporaires ; sync.js : lot « compte et stockage distant » (L1-L2) ;
              sync-l3.js + transport-factice.js + sync-fixture.js : lot « envoi et réception » (L3), transport simulé, aucun réseau ;
-             assistant-compte.js : lot « l'assistant suit le compte »
+             assistant-compte.js : lot « l'assistant suit le compte » ; creer-ia.js : lot « créer une recette avec l'assistant » (fetch factice injecté)
 ```
 
 ## Dépendance embarquée
@@ -256,7 +258,8 @@ recapturées. `syncNow()` (horloge corrigée du décalage mesuré) horodate tout
 ## Page « Ajouter » et flux des livres
 
 Spec : `docs/superpowers/specs/2026-10-13-ajouter-et-livres-ux-design.md` (§ 15.2 : ce que la construction a
-amendé). Livré ici : la grille de cinq cartes, un livre créé en deux pas (ISBN ou saisie), les puces « Cuisines »
+amendé). Livré ici : la grille de cinq cartes (six depuis le 18 octobre : « Créer avec l'IA », voir « Créer une recette
+avec l'assistant »), un livre créé en deux pas (ISBN ou saisie), les puces « Cuisines »
 partagées entre le livre et la fiche recette, l'accueil d'un livre ajouté, le signet (lien web gardé comme
 référence), et la couverture (reçue par ISBN ou photographiée).
 
@@ -543,6 +546,104 @@ quarantaine `refus`, `inconnu` → recul, `tests/sync-l3.js`) et l'ordre « `ass
 `localhost` (prédicat injecté) ; K-12 (le formulaire n'est pas reconstruit sous le focus) n'est éprouvé que par
 `occupeParAssistant`, le câblage dans `suivreMoteurDeLaPage` est lu au source.
 
+## Créer une recette avec l'assistant (18 octobre 2026)
+
+Spec : `docs/superpowers/specs/2026-10-18-creer-avec-l-ia-design.md` (rév. 2, amendée à la clôture ; § 11 : rulings R-CRE-1
+à R-CRE-12). Livré ici : une demande en texte libre, avec restrictions, type, portions et temps maximal, devient, sur un clic
+et sur lui seul, **un** appel à l'API Anthropic (Messages, sans outil) qui rend **une** proposition de recette ; « Garder »
+l'écrit comme une recette ordinaire du modèle existant — aucun magasin neuf, `DB_VERSION` 3 inchangée, aucune migration, CSP
+inchangée. Deux modules neufs ; ailleurs, des changements bornés.
+
+```text
+src/domain/creation-ia.js  pur, sauf creerRecetteIA qui reçoit fetch en dépendance ; n'importe rien de src/ui/.
+                           estCreationIA(v) : generated_by 'ai', provenance.creation objet, et kind synthesis — ou adaptation
+                           avec derived_from (une extraction IA de livre n'en est jamais une, F6) ;
+                           etiquetteCreationIA(version, recipe = null) : LA fonction d'étiquette (clé française ; null = aucune) ;
+                           AVERTISSEMENT_CREATION_IA ; lireCreation(version) : description, conseils, notes et minutes estimées
+                           RELUS et rebornés à chaque rendu et export (une ligne reçue peut porter n'importe quoi) ;
+                           construireDemandeCreation → { system, user, cle } (demande bornée à 500, en adaptation un bloc
+                           délimité « donnée » + le changement) ; validerRecetteIA(json, { servings, maxMinutes }) →
+                           { ok, recette, avertissements } ou { ok: false, motif } ; texteLigne (R-CRE-7) ;
+                           fabriquerRecetteIA → { recipe | null, version } (lignes par parseIngredientLine, identifiants
+                           réattribués par le newId injecté) ; creerRecetteIA(args, deps) → issue, ne lève jamais ;
+                           LIMITES_CREATION, CLES_REFUSEES, conventionCreation.
+src/ui/creer-ia.js         renderCreerIA(params, query, ctx, deps) — creer, repo, navigate, toast, enLigne, remplacerAdresse
+                           injectés ; filtresDepuisQuery(query, parente) : liste blanche C-16 ; etatCreation() et
+                           reinitialiserCreation() pour les tests.
+src/app.js                 route('/recipes/creer', renderCreerIA) AVANT /recipes/:id (F1).
+src/ui/state.js            '/recipes/creer' dans ROUTES_DE_SAISIE : une passe de synchronisation ne reconstruit pas l'écran
+                           pendant la saisie.
+src/ui/add.js              carte creerIA (sixième de la grille, avant congelateur) → navigate('/recipes/creer').
+src/ui/search.js           bouton « Créer une recette avec ces critères » (creer-depuis-web) sur rien, trouvé et
+                           recherche_desactivee : relireChamp puis navigation avec q et les puces affichées ; aucun appel.
+src/ui/components.js       etiquetteIA(version, recipe = null) (helper DOM qui délègue, R-CRE-4) ; versionBadge, recipeCard,
+                           provenanceText ; ingredientLineEl (N-9).
+src/ui/recipe.js, cook.js, meals.js, library.js
+                           étiquette, blocs de la création, « Adapter avec l'IA » (→ #/recipes/creer?adapter=<version>),
+                           « Marquer testée » étendu à synthesis, section « Recettes créées avec l'IA » de Mes livres.
+src/domain/exporters.js    étiquette en texte brut (jamais t()) ; pour une fiche origine 'ia' : ni livre, ni ISBN, ni page,
+                           ni source_url, ni durée ; les blocs de la création et l'avertissement voyagent.
+src/domain/diet.js         N-8, règle asymétrique (R-CRE-1) ; R-CRE-9.
+src/domain/grocery.js      N-9 : regroupement par identité pour une ligne vérifiée seulement.
+src/domain/lines.js        detectTimers borné : 4 minuteurs par étape au plus, ≤ 24 h, au-delà écarté (R-CRE-8).
+```
+
+**L'appel.** Même squelette et mêmes murs que la recherche web : gardes `non_configure` (cfg, clé et modèle chaînes non
+vides), `non_pris_en_charge` (fournisseur autre qu'Anthropic), clé `/^[\x21-\x7e]+$/` sinon `cle_refusee` sans appel,
+`requete` (demande vide, ou adaptation sans changement), `hors_ligne`, `annule` ; corps `{ model, max_tokens: 16000,
+system, messages }` sans `thinking` ni `tools` (seuls les blocs `text` sont lus) ; `redirect: 'error'`, `credentials:
+'omit'` ; délai 120 s ; corps lu en flux et borné à 1 Mio ; le corps d'une réponse en erreur n'est jamais lu (le statut
+seul classe : 401/403 `cle_refusee`, 429 `trop_de_demandes`, autre 4xx `requete`, hors 2xx `serveur`) ; `stop_reason`
+`refusal` → `refus`, `max_tokens` → `interrompu` ; texte du modèle illisible → `illisible`, motif `json` ; sinon
+`validerRecetteIA` → `trouve { recette, avertissements, modele, usage }` ou `illisible` + motif (`forme`, `bornes`,
+`lien`, `affirmation`, `caracteres`). Journal : `{ reason: 'illisible:<motif>' }` ou `{ reason: 'interne' }` + nom de
+l'erreur, jamais un corps (P13). L'issue ne porte jamais la clé.
+
+**La sortie du modèle est une donnée hostile.** Lecture propriété par propriété (`Object.hasOwn`), bornes strictes
+(refus, jamais de troncature silencieuse), Cc/Cf retirés puis NFC et espaces repliés, refus des marques combinantes
+empilées (`\p{M}{3,}`) ; refus `lien` pour une adresse (best-effort après NFKC) ou une clé de `CLES_REFUSEES` ;
+refus `affirmation` pour un titre qui nomme une restriction (libellés FR/EN de `DIET_TAGS`) ou promet une certitude ;
+portions ou durée différentes de la demande : avertissements, pas de refus (l'appel est payé). Rendu en texte seul
+(`el()`).
+
+**L'écran.** État au niveau du module, comme la recherche web : `memoire` (`{ cle, demande, filtres, langue, parente,
+changement, issue, gardee, echec }` — ce qui est PARTI, jamais le formulaire ; mémoire de session, jamais en base),
+`vol` (`{ cle, controller, promesse }` : UN vol pour toute l'app ; une seconde création est refusée tant que rien n'est
+annulé ; une réponse dont la promesse n'est plus celle du vol n'écrit rien) et `vues` (instances vivantes, purgées par
+`isConnected`, toutes notifiées : toute instance montre le vol). Le rendu suit la table de décision P7 du plan (vol,
+gardes, proposition gardée, proposition, K1, issue, formulaire). La saisie ne redessine pas (focus iPhone) ; elle
+bascule seulement la mention K1. « Garder cette recette » pose `memoire.gardee` de façon synchrone puis écrit **une**
+transaction (`repo.saveBatch` : fiche + version, ou version seule pour une adaptation) : un retour arrière montre
+« Recette gardée » + « Ouvrir la fiche », jamais un second « Garder ».
+
+**La fiche gardée.** `recipe.origine: 'ia'` (durable, survit à « Corriger », N-10), sans `edition_id` ni `source_url` ;
+version `synthesis` (ou `adaptation` enfant, `recipe_id` de la parente, `current_version_id` inchangé), `status:
+'proposed'`, lignes `to_verify`, `total_minutes: null` (la durée estimée vit dans `provenance.creation.minutes_estimees`,
+affichée « environ {m} min (estimé par l'assistant) », jamais exportée), `provenance.creation` = demande, filtres
+partis, description, conseils, notes de restrictions, date, jetons.
+
+**L'étiquette est dérivée des données, jamais de `source_label`** (C-2). `etiquetteCreationIA(version, recipe)` :
+`synthesis` → « Créée avec l'IA · non testée / testée » ; adaptation IA → « Adaptée avec l'IA · … » ; sur une fiche
+`origine: 'ia'`, une correction → « Corrigée par toi — d'après une création IA », une autre version manuelle → « Ma
+version — d'après une création IA » ; fiche seule → « Créée avec l'IA ». Une seule source pour l'écran (`t()` au rendu,
+par `etiquetteIA`) et les exports (texte brut). Le mode cuisine pose l'étiquette pour toute fiche `origine: 'ia'` et
+l'avertissement C-9 pour une version `estCreationIA` seulement (R-CRE-10).
+
+**N-8 et N-9 : l'app entière, pas seulement les créations (à confirmer par Neegan, renversables).** N-8, dans
+`assessVersion` : une ligne non vérifiée dont l'identité proposée ne bloque pas est **inconnue** ; si elle bloque, elle
+bloque (`proposed: true`) ; un bloquant facultatif ne masque pas une inconnue (R-CRE-9). Mesuré (lignes non vérifiées,
+index du seed) : « 250 ml lait de coco » → `ing_milk` → `incompatible` sous sans lactose, `to_verify` sous sans gluten.
+N-9 : une ligne non vérifiée s'affiche telle qu'écrite, avec ` (identité proposée : {libellé} ?)` (fiche et mode
+cuisine), sans badge « Traduction », sans conversion par l'identité proposée (`qtyEl`), et se regroupe dans les courses
+par son texte (`ingredient_id: null`). Effet sur les fiches de LIVRE : une recette aux lignes non vérifiées passe de
+« compatible » à « à vérifier » ; « 3 oignons » et « 1 oignon » non vérifiés font deux groupes de courses (mesuré).
+
+**Ce qui n'est pas prouvé.** **Aucun appel réel** : chaque test passe par un `fetch` factice injecté, et le parcours
+dans l'app réelle de la tâche 3 avait l'API Anthropic interceptée ; forme réelle d'une réponse, taux de refus `illisible` ou
+`affirmation`, durée, jetons et coût d'un appel réel restent à mesurer (geste de Neegan, spec § 10). Ni Safari ni
+l'iPhone ; ni les minuteurs Siri d'une étape de création sur appareil ; ni l'effet de N-8/N-9 sur la vraie bibliothèque
+de Neegan (fixtures seulement).
+
 ## Modèle de données (magasins IndexedDB)
 
 `books`, `book_editions` (ISBN, langue, `unit_convention_id`), `source_documents` (fichier, sha256, type), `source_pages` (page imprimée, position),
@@ -578,4 +679,4 @@ Le format reste v1 : les archives complètes produites précédemment restent li
 - Pas de reconnaissance vocale; minuterie confiée au système (Siri / raccourci).
 - EPUB conservé mais non rendu; PDF affiché via le lecteur du navigateur, pages référencées à la main.
 - Interface anglaise partielle (dictionnaire `src/i18n/en.js`).
-- Adaptations Rapide / On se gâte / Meal prep, moteur de salubrité, planificateur multi-repas et synthèse : paliers V1–V1.5, non implémentés (indiqués comme tels dans l'interface).
+- Adaptations Rapide / On se gâte / Meal prep, moteur de salubrité, planificateur multi-repas et synthèse : paliers V1–V1.5, non implémentés (indiqués comme tels dans l'interface). Exception depuis le 18 octobre : une version de genre `synthesis` naît désormais de « Créer une recette avec l'assistant » (une proposition à vérifier, voir cette section).

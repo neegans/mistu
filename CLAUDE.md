@@ -475,6 +475,7 @@ de code, Cc/Cf retirés) arrivent à l'écran. Les rulings, une ligne chacun (d�
 - **R-WEB-8** l'hôte de la bannière « Adresse reçue » vient de `signetModel` (même décision que l'enregistrement) ; une adresse d'espaces n'est pas « reçue ».
 - **R-WEB-9** la tape met l'adresse à jour sans re-rendu (`remplacerAdresse`) : l'instance garde ses puces et son vol (sa réunion des restrictions est remplacée par R-WEB-10).
 - **R-WEB-10** champ changé sans Entrée : la tape le relit ; seules survivent les puces des listes « + type » / « + restriction » (affichées moins l'analyse de l'ancien texte) ; exclusions, ingrédients et durées viennent du nouveau texte. Entrée, mode ou case (`run()`) réanalysent sans rien garder.
+- **Ajouté le 18 octobre par le lot « Créer une recette avec l'assistant »** (branche `creer-ia`, non fusionnée) : un bouton « Créer une recette avec ces critères » (`data-role="creer-depuis-web"`) sur « rien », sous les liens d'un « trouvé » et sur « recherche web désactivée » ; il relit le champ (`relireChamp`) puis ouvre `#/recipes/creer` avec `q` et les puces affichées, **sans aucun appel** (voir cette section plus bas).
 
 **Mesuré en réel (17 octobre 2026, site public).** Un appel réel avec la clé de Neegan, demande « puttanesca » : **un**
 POST vers l'API Messages → 200, 2 recherches, 5 liens choisis + 13 autres pages, ≈ 20 s ; `page_age` vu en « 654 days
@@ -742,6 +743,179 @@ sous R-CPT-7.
 
 **Fusion.** Revue finale de branche puis `/verify` par le chef d'orchestre ; le registre se copie **avant** tout
 `git worktree remove` ; les gestes 1 et 2 ci-dessus **avant** la fusion.
+
+### Créer une recette avec l'assistant (18 octobre 2026)
+
+**Pour toi.** Tu décris ce que tu veux, l'assistant propose UNE recette, tu la gardes ou pas. Rien n'est écrit sans
+« Garder cette recette » ; une recette gardée dit partout « Créée avec l'IA · non testée » jusqu'à ce que tu la marques
+testée après l'avoir cuisinée, et « Adapter avec l'IA » en demande une variante sans toucher l'original.
+
+**Où.** Branche `creer-ia`, worktree `~/projects/mistu-ia` (jamais `~/projects/mistu`), serveur de vérification
+`http://localhost:8084/` (suite : `http://localhost:8084/tests/`). Spec :
+`docs/superpowers/specs/2026-10-18-creer-avec-l-ia-design.md` (rév. 2, amendée à la clôture ; **§ 0** : décisions de nuit
+N-1 à N-10 ; **§ 10** : gestes et décisions à confirmer ; **§ 11** : rulings R-CRE-1 à R-CRE-12). Plan :
+`docs/superpowers/plans/2026-10-18-creer-avec-l-ia.md` (les amendements P1-P29, en fin de plan, font foi sur le texte des
+tâches). Registre : `.superpowers/sdd/2026-10-18-creer-avec-l-ia/` (`progress.md`, un brief, des notes et un rapport par
+tâche, les diffs revus ; lanceur `suite.cjs`). Base : pointe d'`assistant-compte` `ce9eb5d` (lot « L'assistant suit le
+compte » ci-dessus, **lui-même non fusionné**) ; commit de départ `4fee65e` (spec et plan). Huit tâches dans l'ordre
+R-CRE-5 (T1, T2, T5, T3, T4, T6, T7, T8), chacune avec au plus une ronde de corrections (T4 aucune). **FINI dans le
+worktree, PAS fusionné, PAS poussé** ; revue finale de branche et `/verify` : au chef d'orchestre. Le site public ne change
+qu'à la fusion et au `git push` de Neegan, **après** les gestes 1 et 2 du lot précédent.
+
+**Ce qui marche** (éprouvé par la suite : `fetch` factice injecté, bases jetables, gestes et navigation injectés, aucun
+réseau) :
+- **Deux portes, sur clic seulement** : la carte « Créer avec l'IA » (« Une proposition à vérifier ») d'Ajouter — la grille
+  a désormais six cartes, celle-ci avant « Ajouter un lot au congélateur » — et le bouton « Créer une recette avec ces
+  critères » de l'onglet Web, qui ouvre `#/recipes/creer` prérempli sans aucun appel.
+- **L'écran `#/recipes/creer`** (`src/ui/creer-ia.js`) : demande, restrictions (puces), type, portions (1-12, défaut 4),
+  temps maximal (5-240, facultatif) ; préremplissage depuis l'adresse par liste blanche ; Anthropic seulement (autre
+  fournisseur ou rien de configuré : « Réglages », aucun appel) ; hors ligne dit avant tout appel ; **un clic = un appel** ;
+  **un seul vol dans toute l'app** (toute instance de l'écran montre le vol et « Annuler » ; une seconde création est
+  refusée tant que rien n'est annulé ; une réponse tardive n'écrit rien) ; la saisie ne redessine pas (focus iPhone) ; une
+  valeur illisible ou hors bornes dans Portions ou Temps maximal éteint le bouton et dit pourquoi.
+- **L'appel** (`creerRecetteIA`, `src/domain/creation-ia.js`) : API Messages sans outil ni `thinking`, `max_tokens` 16 000,
+  délai 120 s, corps lu en flux et borné à 1 Mio, `redirect: 'error'` ; ne lève jamais ; la clé n'est ni dans l'issue, ni
+  dans l'adresse, ni dans l'état de l'écran, ni dans le journal ; issues alignées sur le lot web, plus `interrompu`
+  (`max_tokens`) et `illisible` avec son motif (« Code : … »).
+- **La sortie du modèle est une donnée hostile** : validée propriété par propriété, bornes strictes (refus, jamais de
+  troncature silencieuse), aucune adresse, source, auteur ni image (motif `lien`, best-effort), un titre qui nomme une
+  restriction ou promet une certitude est refusé (`affirmation`), rendu en texte seul ; des portions ou une durée
+  différentes de la demande donnent un avertissement, pas un refus (l'appel est payé).
+- **La proposition** : étiquette, « Selon l'assistant : … », lignes passées par le parseur de l'app (toutes « à
+  vérifier »), étapes, conseils, « À vérifier avant de servir », évaluation des restrictions demandées (« Incompatible :
+  … » ou « À vérifier », jamais « Compatible »), avertissement fixe « L'assistant n'a pas cuisiné cette recette … »,
+  « Demande envoyée : … », jetons ; « Garder cette recette » (une transaction, non rejouable : un retour arrière montre
+  « Recette gardée » + « Ouvrir la fiche »), « Recommencer » (un échec garde la proposition dessous), « Modifier la
+  demande », K1 (« La demande a changé depuis cette proposition. » + « Créer à nouveau »).
+- **La fiche gardée** : `origine: 'ia'`, version `synthesis` `proposed`, `total_minutes: null` (« environ {m} min (estimé
+  par l'assistant) », jamais exporté) ; étiquette **dérivée des données** (`etiquetteCreationIA`, jamais `source_label`)
+  sur la fiche, les cartes, le mode cuisine, les repas, les exports et la section « Recettes créées avec l'IA » de Mes
+  livres ; « Marquer testée » ; « Corriger » garde `origine` (« Corrigée par toi — d'après une création IA ») ; l'export
+  d'une fiche IA ne porte ni livre, ni ISBN, ni page, ni `source_url`, ni durée (les exports d'une fiche de livre sont
+  restés identiques octet pour octet, mesuré en T6).
+- **« Adapter avec l'IA »** (créations IA seulement, `?adapter=` gardé par la route) : version enfant `adaptation`,
+  l'original et `current_version_id` intacts, formulaire prérempli de la demande et des filtres de la création de départ.
+- **Transverse** : N-8 et N-9 (ci-dessous, app entière) ; minuteurs bornés pour toute l'app (4 par étape, ≤ 24 h, au-delà
+  écartés).
+
+Les rulings, une ligne chacun (détail en spec § 11) :
+- **R-CRE-1** N-8 asymétrique : une ligne non vérifiée sans correspondance bloquante est inconnue, avec une correspondance bloquante elle bloque (`proposed: true`) — jamais certifier, jamais assouplir.
+- **R-CRE-2** une seule fonction d'étiquette `etiquetteCreationIA(version, recipe)` ; « Corrigée par toi — d'après une création IA » pour une correction, « Ma version — d'après une création IA » pour une autre version manuelle d'une fiche `origine: 'ia'`.
+- **R-CRE-3** la demande d'une adaptation est celle de la parente (préremplie) ; un changement vide n'appelle pas ; le titre de la parente vient de la fiche.
+- **R-CRE-4** une fonction de texte `etiquetteCreationIA(version, recipe = null)` dans `creation-ia.js` ; le helper DOM `etiquetteIA(version, recipe = null)` de `components.js` délègue.
+- **R-CRE-5** ordre d'exécution T1, T2, T5, T3, T4, T6, T7, T8 (T3 dépend de N-8) ; suffixe de `sw.js` monotone (précisé en T3).
+- **R-CRE-6** « 250 ml lait de coco » + sans lactose : attendu MESURÉ sur le parseur (`ing_milk` → `incompatible`, `proposed: true`).
+- **R-CRE-7** `texteLigne` garde le texte de `formatNumber` seulement s'il relit la même valeur (ou à 2 % près pour une fraction), sinon la décimale exacte (0,35 → « 0,35 »).
+- **R-CRE-8** un minuteur de plus de 24 h est écarté, jamais plafonné ; `seconds_max` > 86 400 → `null`.
+- **R-CRE-9** un bloquant facultatif ne masque jamais une ligne inconnue (`to_verify` au lieu d'`adaptation`).
+- **R-CRE-10** en mode cuisine, l'étiquette pour toute fiche `origine: 'ia'` ; l'avertissement C-9 pour `estCreationIA` seulement.
+- **R-CRE-11** l'adaptation préremplit restrictions, type et temps maximal depuis la création de départ (adresse fraîche, liste blanche C-16) ; dès que `changement` est dans l'adresse, seule l'adresse compte.
+- **R-CRE-12** l'exemple du champ « Ce que tu veux changer » ne parle pas de portions, et une aide dit « Pour changer les portions, modifie Portions. ».
+
+**Ce qui n'est PAS prouvé.**
+- **Aucun appel réel** n'a été fait pendant ce lot : chaque test passe par un `fetch` factice injecté, et le seul parcours
+  dans l'app réelle qui a cliqué « Créer ma recette » (tâche 3) avait l'API Anthropic **interceptée**. Non mesurés : la
+  forme réelle d'une réponse (JSON nu ou entouré de prose), le taux de refus `illisible` ou `affirmation` (un refus après
+  la réponse coûte l'appel), la **durée**, les **jetons** et le **coût** d'un appel (spec § 6 : « ≈ 2 à 5 k jetons de
+  sortie, réflexion comprise » est une estimation, pas une mesure). Preuve = geste 5 ci-dessous, avec la clé de Neegan.
+- **Safari et l'iPhone** (aucun WebKit ici) ; le délai de 120 s compte le temps actif (PWA iOS en arrière-plan).
+- **Minuteurs Siri** d'une étape de création, sur appareil.
+- L'effet de N-8 et N-9 sur la **vraie bibliothèque** de Neegan : mesuré sur fixtures seulement (aucune écriture dans sa
+  base).
+
+**Données et coût** (spec § 6). La demande part chez Anthropic et reste dans `provenance.creation.demande` (synchronisée
+avec les fiches, incluse dans les archives ZIP) ; aucun secret n'est attendu dans une demande de recette. Un `delai` ou
+une réponse coupée sont probablement facturés (non mesuré) ; aucune reprise automatique ; « Recommencer » est un nouvel
+appel.
+
+**Décisions de nuit N-1 à N-10 — à confirmer par Neegan** (spec § 0 ; prises sans toi, chacune renversable sans défaire
+le reste) :
+- **N-1** deux portes, toutes deux sur clic (carte d'Ajouter ; bouton de l'onglet Web sur rien, trouvé et recherche
+  désactivée) ; jamais de création lancée par une recherche.
+- **N-2** Anthropic seulement (un autre fournisseur voit « Ce fournisseur ne crée pas de recette ici » + « Réglages »).
+- **N-3** une recette ordinaire du modèle existant : `origine: 'ia'`, version `synthesis`, statut `proposed` ; aucun magasin
+  neuf, `DB_VERSION` inchangée.
+- **N-4** les lignes passent par le parseur existant (identité proposée quand le lexique la reconnaît ; toutes « à
+  vérifier »).
+- **N-5** l'adaptation par l'IA est réservée aux créations IA (version enfant, original intact).
+- **N-6** ni image, ni nutrition, ni import de page, ni conversation, ni choix entre plusieurs propositions.
+- **N-7** section « Recettes créées avec l'IA » dans Mes livres, après « Liens web gardés ».
+- **N-8 (app entière) Une ligne non vérifiée ne certifie rien, mais une correspondance bloquante bloque toujours** (R-CRE-1,
+  R-CRE-9). **Effet sur les fiches de LIVRE** : une recette d'un livre aux lignes non vérifiées passe de « compatible » à
+  « à vérifier » dans la recherche et sur la fiche ; une ligne non vérifiée dont l'identité proposée bloque l'écarte
+  — mesuré : « 250 ml lait de coco » (identité proposée `ing_milk`) et « 250 ml crème de coco » (`ing_cream`) →
+  `incompatible` sans lactose ; « 200 g farine de riz » (`ing_ap_flour`) → `incompatible` sans gluten (faux positifs
+  prudents, jamais un faux « compatible »). Renversable : restreindre à `estCreationIA`.
+- **N-9 (app entière) Une ligne non vérifiée s'affiche telle qu'écrite**, avec « (identité proposée : {libellé} ?) », sur
+  la fiche et en mode cuisine. **Effet sur les fiches de LIVRE** : plus de badge « Traduction » ni de libellé du lexique
+  sur une ligne non vérifiée ; dans les courses, elle se regroupe par son TEXTE — « 3 oignons » et « 1 oignon » font deux
+  groupes (mesuré ; un seul une fois vérifiés), FR/EN ne se rejoignent plus (nommé par la revue) ; la puce « non
+  identifié » (`src/ui/grocery.js:26`) est inexacte quand une identité est proposée ; les coches existantes des lignes non
+  vérifiées se perdent **une fois** (clé `ing:` → `name:`). Renversable de même.
+- **N-10** « Corriger » reste offert sur une création IA ; la fiche garde `origine: 'ia'`.
+
+**Décisions de spec à trancher** (nommées par les revues, non tranchées par la construction ; liste exacte en spec § 10) :
+borne `estimated_minutes` ≤ 240 (refuse un long braisé même sans maximum demandé : avertir plutôt ?) · `"image": null`
+explicite refusé `lien` (tolérer `null` ?) · « Ketchup 100 % maison » refusé `affirmation` · détecteur d'adresses : faux
+positif « sel.Ca y est », contournements best-effort (`.io`, `.quebec`, « ricardo . com ») · titre d'une adaptation validé
+mais jamais sauvé (un refus coûte l'appel) · exemple sans portions (R-CRE-12) à confirmer à l'usage · surfaces N-9 non
+couvertes par la spec (`compareBundles` de `dishes.js` et le surlignage de `cook.js` par identité proposée, filtres
+avec/sans de la recherche, `dietChip` qui ne nomme plus le bloquant facultatif) · `DIET_RULE_VERSION` reste 1 alors que
+le sens a changé · `assessMeal` et `searchDocs` font passer `adaptation` avant `to_verify` (préexistant).
+
+**Dettes (assumées, une ligne chacune ; détail dans `progress.md` et les rapports de tâche).**
+- R-WEB-4 (corps et en-têtes construits avant le `try`) n'est pas épinglé par un test dans `creerRecetteIA` (le mutant survit ; la configuration est du JSON normalisé en production).
+- `creerRecetteIA` : le mutant `ctl.signal` / `dp.signal` survit (test à ajouter : `fetch` sourd + `tentativeMs` court + sans signal externe → jamais `annule`) ; l'abandon n'est pas revérifié après le classement par statut (double sourd seulement) ; une réponse déjà payée est jetée si « Annuler » arrive pendant la lecture (voulu).
+- Transport dupliqué entre `chercherRecettesWeb` et `creerRecetteIA` (≈ 50 lignes ; divergences déjà : `issue()` relit `cfg`, 403) → refactor ultérieur.
+- Titre : la forme compactée n'est pas appliquée à `MOTS_CERTITUDE` (« sans » + U+200B + « danger », « sans » + U+2212 + « danger » passent) ; limites numériques de l'invite non épinglées ; abréviations (« GF ») best-effort ; `eggless` et `plant based` refusés au-delà du ruling.
+- Trous de tests de la validation : frontière 4/5 chiffres de `\d{5,}`, tiret non ASCII pour la certitude, compaction de `_` et `.`, portions de la parente non numériques ; `parenteBornee` exige `ingredients` et `steps` tableaux (sinon `requete`, choix de fermeté).
+- `fabriquerRecetteIA` tire des `newId` réels (`crypto.randomUUID`) dans `parseIngredientLine` / `parseStepsBlock` puis les écrase : sortie déterministe, pure à ces tirages jetés près.
+- Avec l'unité omise, un nom qui commence par un nombre ou un mot d'intervalle (« à 3 œufs ») est relu comme une autre quantité (sortie bizarre du modèle seulement).
+- Interface anglaise : les avertissements du domaine (portions, durée) et le libellé `labels.fr` de l'identité proposée restent en français ; le « ; » de l'évaluation est hors `t()` ; la mention « (… : … ?) » garde l'espacement français.
+- Écran : sans demande mais avec une proposition en mémoire, K1 + « Créer à nouveau » s'affichent au-dessus d'un champ vide (formulation à revoir) ; la branche « incompatible » ne nomme pas les inconnues ; `provenance.creation.cree_le` vient de l'horloge brute, pas de `syncNow()` ; double tape sur « Annuler » non mesurée (M3 du lot web).
+- Adaptation : l'invite système annonce « Créée avec l'IA · non testée » même pour une adaptation (inexact, sans conséquence) ; version orpheline possible si une tombale de la fiche arrive entre le rendu et « Garder » ; une proposition d'adaptation de A en mémoire s'affiche sous le résumé de B (ligne 5 de P7, conforme F21, déroutant).
+- Portes : quatre chaînes `t()` de `search.js` antérieures au lot sans entrée `en.js` (gelées dans `ANTERIEURES`) ; le commentaire `src/i18n/en.js:28` dit encore « cinq cartes » ; le mutant `{ replace: true }` sur la navigation de la porte web survit ; `q` non borné dans l'adresse de la porte (l'écran le borne à 500) ; R-WEB-3 avec la porte non épinglé ; les ingrédients et exclusions de l'onglet Web ne passent que dans `q`, en texte.
+- Fiche IA : `dish.js:54`, `:94` affichent « p. {printed_page} » si une page a été tapée ; `recipe-edit.js:171` garde le champ « Page imprimée » (il écrit encore `printed_page`) ; « Corriger » préremplit la source de « Créée avec l'IA » (sans effet) ; le bloc « Pages originales » n'est pas gardé ; `lireCreation` ne retire pas `\p{Cs}`.
+- Préexistant : `t('testée')` / `t('proposée')` du sélecteur de `recipe.js` sans `en.js` ; une ancienne adaptation IA d'un livre dit « Adaptation IA » à l'écran mais « Adaptation personnelle » dans les exports.
+- Régimes et courses : R-CRE-9 vaut aussi pour une ligne vérifiée sans identité (cohérent, non épinglé) ; `qtyEl` sans l'identité proposée n'est gardé par aucun mutant observable (le seed n'a aucune équivalence volume↔masse : test d'intention, et aucun test dédié en mode cuisine) ; un `name_text` vide sur une ligne non vérifiée affiche `source_text` entier (préexistant, rare).
+- Banc de test : `tests/erreur.js:2` rend `e.message` par `innerHTML` (préexistant, pas une sortie du modèle) ; la commande des invisibles ne couvre pas U+FE00-FE0F (`src/app.js` en porte 3, antérieurs).
+- **Fermées à la clôture** : spec § 4.4 (`logError` sous la forme P13) ; README « six cartes » ; `LIBELLES_RESTRICTION.en.sans_lactose` = `en.js` « Dairy-free » (relu).
+
+**Gestes de Neegan, dans cet ordre.**
+1. **Lot précédent d'abord** : gestes 1 et 2 de « L'assistant suit le compte » (coller `0003` sur `mitsu`, puis sa preuve à
+   `0 faux`) — **avant tout `push`**.
+2. Après la revue finale et `/verify` des deux lots : copier `.superpowers/sdd/2026-10-18-creer-avec-l-ia/` dans
+   `~/projects/mistu/.superpowers/sdd/` (celui du lot précédent y est déjà, identique : `diff -rq` muet le 18 octobre).
+3. **Fusions `--ff-only` en chaîne** : `! cd ~/projects/mistu && git merge --ff-only assistant-compte`, puis
+   `! cd ~/projects/mistu && git merge --ff-only creer-ia`, puis le lot 3 s'il est fini ; si `assistant-compte` a bougé
+   depuis `ce9eb5d`, rebaser `creer-ia` dessus d'abord ; puis **un** `! git -C ~/projects/mistu push origin main` ; ouvrir
+   `https://neegans.github.io/mistu/tests/` et lire le BILAN.
+4. Geste 4 du lot précédent (Réglages sur le Mac, connexion depuis l'iPhone).
+5. **Preuve réelle** sur le site public (Mac, ta clé) : « un souper pour deux avec du saumon et du fenouil, sans lactose,
+   en 30 minutes » → noter la durée, les jetons affichés et le coût dans la console Anthropic ; « Garder » → Mes livres →
+   « Recettes créées avec l'IA » ; après cuisson, « Marquer testée » ; une adaptation (« Adapter avec l'IA »).
+6. **Trancher N-8 et N-9** (confirmer, ou restreindre à `estCreationIA`), puis les autres décisions ci-dessus.
+
+**Versions.** `APP_VERSION = '0.7.0'` (pins `v0\.7\.0-\d+` dans `tests/ajouter.js`, `tests/sync-l3.js` et
+`tests/recherche-web.js` ; `'0.7.0'` dans `tests/ajouter.js`, `tests/recherche-web.js`, `tests/assistant-compte.js` et
+`tests/creer-ia.js`), `DB_VERSION = 3` (inchangée), `sw.js VERSION = 'cuisine-os-v0.7.0-10'` (clôture ; suffixe
+monotone -1, -2, -5, -6, -7, -8, -9 au fil des tâches ; six commits de ronde ont touché `src/` sans incrément —
+`0254f80`, `5e5000c`, `2749593`, `86ff397`, `91fea1f`, `58faf36` — : `-10` les couvre, et rien n'a été servi entre :
+`origin/main` = `66c5d19`, `git ls-remote` le 18 octobre), `SHELL` + `./src/domain/creation-ia.js` +
+`./src/ui/creer-ia.js` (deux modules neufs). `ROUTES_DE_SAISIE` + `'/recipes/creer'`. Aucun schéma, aucune migration,
+CSP inchangée.
+
+**Bilan (clôture, 18 octobre 2026).** Suite complète **2524/2524 verts** (total épinglé **2523** dans `tests/tests.js`,
+lu dans « obtenu » : l'assertion du total s'ajoute elle-même au bilan affiché ; départ du lot remesuré à la clôture sur
+une copie de `4fee65e` servie à part : **1967/1967**, épinglé 1966), une seule erreur de console : le 404 de
+`/favicon.ico` (pré-existant) ; `node --test tools/*.test.mjs` **45/45** ; `node tools/generer-migrations.mjs --check` :
+**0** ; 13 commits de lot sur `4fee65e` avant celui de la clôture ; aucun caractère invisible (commande de la ligne 21 du
+plan du lot précédent, extraite par script) dans les fichiers du lot ; scan des clés Anthropic (`git grep -nEi
+'sk-ant-[0-9A-Za-z_-]{10,}'`) : seules les quatre sentinelles de test du lot web (`…-sentinelle`). Les mutants, rejoués
+par tâche sur des copies servies à part, sont comptés dans chaque rapport de tâche.
+
+**Fusion.** Revue finale de branche puis `/verify` par le chef d'orchestre ; le registre se copie **avant** tout
+`git worktree remove` ; les gestes 1 et 2 du lot précédent **avant** tout `push`.
 
 ## Premier lot de fiabilisation — 8 septembre 2026, à réviser
 

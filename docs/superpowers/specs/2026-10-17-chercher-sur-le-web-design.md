@@ -674,3 +674,7 @@ Une ligne par écart entre cette spec et ce qui a été construit (tâches 1 à 
   tant que D5 n'est pas fait » est **retiré** (le site public est la seule origine de l'iPhone) ; D5 reste recommandé, et
   le plafond de dépense du workspace Anthropic reste le mur. Ce qu'I-C dit de l'appel à l'API Anthropic (en-tête
   `x-api-key`, corps, adresse, ce qui part) ne change pas.
+- **Bouton « Créer une recette avec ces critères »** (`data-role="creer-depuis-web"`), ajouté par le lot « Créer une recette avec
+  l'assistant » (18 octobre, `docs/superpowers/specs/2026-10-18-creer-avec-l-ia-design.md` § 3.1, N-1) : sur « rien », sous les liens
+  d'un `trouve` et sur `recherche_desactivee` ; il relit le champ (`relireChamp`, R-WEB-10) puis ouvre `#/recipes/creer` avec `q` et
+  les puces affichées (`diets`, `type`, `max`) — aucun appel (le compteur de requêtes du test reste inchangé).

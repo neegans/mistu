@@ -163,7 +163,7 @@ export async function runCreerIaTests({ eq, ok }) {
   // --- detectTimers borné (S13, § 3.5)
   const L = await import('../src/domain/lines.js');
   eq((L.detectTimers(Array.from({ length: 175 }, () => '1 s').join(' ')).timers || []).length, 4, 'minuteurs : au plus 4 par étape');
-  eq(L.detectTimers('Cuire 99999 h.').timers?.[0]?.seconds, 86400, 'minuteurs : plafonnés à 24 h');
+  eq(L.detectTimers('Cuire 99999 h.').timers?.[0]?.seconds, 86400, 'minuteurs : plafonnés à 24 h'); // amendé par R-CRE-8 : écarté → {}
   eq(L.detectTimers('Cuire ' + '9'.repeat(400) + ' h'), {}, 'minuteurs : un nombre qui déborde ne produit rien (ni Infinity ni NaN)');
   eq(L.detectTimers('Laisser reposer 8 min, puis cuire 1 h 30.').timers.map((x) => x.seconds), [480, 5400], 'minuteurs : le cas ordinaire est inchangé');
 }
