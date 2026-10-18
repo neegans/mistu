@@ -47,17 +47,16 @@ export async function runAssistantCompteTests({ eq, ok }) {
   ok(Object.isFrozen(SYNC_STORES_0001), 'la liste figée de 0001 est gelée');
 
   // --- T2 : jamais de suppression d'origine locale (K-6, § 5.4, S6) — garde de COMPORTEMENT dans db.mutate
-  const { Database } = await import('../src/core/db.js');
   const { withDatabase } = await import('./backup.js');
   const T2_STORES = { a: { keyPath: 'id', indexes: [] }, verrou: { keyPath: 'id', indexes: [], noDelete: true } };
   await withDatabase(async (db) => {
     await db.mutate({ puts: { verrou: [{ id: 'llm', api_key: 'sk-factice-2' }], a: [{ id: 'x' }] } });
     let levee = null;
     try { await db.mutate({ deletes: { verrou: ['llm'] } }); } catch (e) { levee = e; }
-    ok(levee instanceof Error && /noDelete|verrou/.test(levee.message), 'noDelete : une suppression d’origine local lève, en nommant le magasin');
+    ok(levee instanceof Error && /Suppression interdite sur verrou \(noDelete\)/.test(levee.message), 'noDelete : une suppression d’origine local lève, en nommant le magasin');
     levee = null;
     try { await db.mutate({ deletes: { verrou: ['llm'] }, origin: 'device' }); } catch (e) { levee = e; }
-    ok(!!levee, 'noDelete : origine device → lève aussi');
+    ok(levee instanceof Error && /Suppression interdite sur verrou \(noDelete\)/.test(levee.message), 'noDelete : origine device → lève aussi, même message');
     levee = null;
     try { await db.delete('verrou', 'llm'); } catch (e) { levee = e; }
     ok(!!levee && !!(await db.get('verrou', 'llm')), 'noDelete : db.delete lève et la ligne est intacte');
@@ -74,12 +73,25 @@ export async function runAssistantCompteTests({ eq, ok }) {
     eq(captures, 0, 'noDelete : la garde précède onMutate — rien n’entre en file');
     db.onMutate = null;
   }, T2_STORES);
-  // Les gestes de conflit refusent ce magasin par son nom (K-5)
+  // Les gestes de conflit refusent ce magasin par son nom (K-5) — avec la CAPTURE posée, pour que « rien en file » soit
+  // une mesure et non un vide : sans capture, l'outbox serait vide même si un geste avait écrit.
   const C = await import('../src/sync/conflits.js');
+  const { installCapture, uninstallCapture } = await import('../src/sync/outbox.js');
   await withDatabase(async (db) => {
-    const conflit = { id: 'assistant_config:llm', store: 'assistant_config', record_id: 'llm', local: { id: 'llm', api_key: 'sk-factice-l' }, server: { data: { id: 'llm', api_key: 'sk-factice-s' }, updated_at: '2026-10-17T10:00:00Z', deleted_at: null }, at: 'x', kind: 'donnees' };
-    await db.mutate({ puts: { sync_conflicts: [conflit] }, origin: 'device' });
-    eq([await C.garderIci(db, conflit), await C.garderAilleurs(db, conflit), await C.ignorerRenvoye(db, conflit)], [false, false, false], 'conflits : les trois gestes refusent assistant_config');
-    eq([await db.get('assistant_config', 'llm'), (await db.getAll('outbox')).length], [undefined, 0], 'conflits : rien écrit, rien en file');
+    installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false });
+    try {
+      const conflit = { id: 'assistant_config:llm', store: 'assistant_config', record_id: 'llm', local: { id: 'llm', api_key: 'sk-factice-l' }, server: { data: { id: 'llm', api_key: 'sk-factice-s' }, updated_at: '2026-10-17T10:00:00Z', deleted_at: null }, at: 'x', kind: 'donnees' };
+      await db.mutate({ puts: { sync_conflicts: [conflit] }, origin: 'device' });
+      eq([await C.garderIci(db, conflit), await C.garderAilleurs(db, conflit), await C.ignorerRenvoye(db, conflit)], [false, false, false], 'conflits : les trois gestes refusent assistant_config');
+      // ignorerRenvoye refuse déjà un conflit SANS `renvoye` : seule cette fixture (renvoye: true) éprouve sa garde de magasin.
+      eq([await C.ignorerRenvoye(db, { ...conflit, renvoye: true }), !!(await db.get('sync_conflicts', conflit.id))], [false, true], 'conflits : ignorerRenvoye refuse aussi un conflit renvoyé de ce magasin, le journal reste');
+      eq([await db.get('assistant_config', 'llm'), (await db.getAll('outbox')).length, !!(await db.get('sync_conflicts', conflit.id))], [undefined, 0, true], 'conflits : rien écrit, rien en file (capture posée), le conflit reste au journal');
+      // Le vrai magasin (STORES) porte bien noDelete : sa suppression d'origine locale lève, la ligne reste, rien en file.
+      await db.mutate({ puts: { assistant_config: [{ id: 'llm', provider: 'none', model: '', base_url: '', api_key: '', updated_at: '2026-10-17T10:00:00Z' }] }, origin: 'device' });
+      let levee = null;
+      try { await db.delete('assistant_config', 'llm'); } catch (e) { levee = e; }
+      ok(levee instanceof Error && /Suppression interdite sur assistant_config \(noDelete\)/.test(levee.message) && !!(await db.get('assistant_config', 'llm')), 'noDelete : le vrai magasin assistant_config refuse db.delete, la ligne est intacte');
+      eq((await db.getAll('outbox')).length, 0, 'noDelete : la suppression refusée du vrai magasin n’a rien mis en file');
+    } finally { uninstallCapture(db); }
   });
 }

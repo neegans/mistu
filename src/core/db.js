@@ -165,8 +165,9 @@ export class Database {
     for (const [name, rows] of Object.entries(puts)) if (!Array.isArray(rows)) throw new TypeError('Les données de ' + name + ' doivent être un tableau');
     for (const [name, keys] of Object.entries(deletes)) if (!Array.isArray(keys)) throw new TypeError('Les clés de ' + name + ' doivent être un tableau');
     // K-6 / S6 : un magasin `noDelete` (assistant_config) n'accepte aucune suppression d'origine locale ou device —
-    // une suppression copie la fiche dans la file (payload), et ce magasin porte un secret. Seule la réception
-    // (origine 'remote', tombale venue du serveur) peut retirer la ligne ; `clearStores` reste permis (vidage d'appareil).
+    // une suppression copie la fiche dans la file (payload), et ce magasin porte un secret. L'origine 'remote' =
+    // donnée reçue du serveur, seule exemptée ; ne l'employer pour rien d'autre (la garde se fie à l'étiquette).
+    // `clearStores` reste permis (vidage d'appareil).
     for (const [name, keys] of Object.entries(deletes)) {
       if (keys.length && this.stores[name]?.noDelete && origin !== 'remote') {
         throw new Error(`Suppression interdite sur ${name} (noDelete) : écrire une ligne vide à la place`);
