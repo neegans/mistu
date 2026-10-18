@@ -1,58 +1,90 @@
-/* Cuisine OS — direction visuelle : crème et vert profond, touches de sauge. */
+/* Cuisine OS — direction « magazine culinaire » : papier ivoire, encre, action tomate, accent vert (spec 2026-10-18-refonte-visuelle). */
 :root {
-  --cream: #f6f1e7;
-  --cream-2: #efe7d8;
-  --card: #fffdf8;
-  --green: #1f4d3a;
-  --green-2: #2f6a50;
-  --sage: #9fb8a4;
-  --sage-2: #d7e3d8;
-  --ink: #1d231f;
-  --muted: #5f6b63;
-  --line: #e2dccd;
-  --warn: #b7791f;
+  --paper: #f8f5ef;
+  --paper-2: #f1ece3;
+  --card: #fffdf9;
+  --ink: #242821;
+  --muted: #636860;
+  --line: #e4dfd5;
+  --field-line: #8f8a80;
+  --action: #bc3026;
+  --action-2: #98231b;
+  --action-bg: #f7e3e0;
+  --accent: #45604a;
+  --accent-2: #55705a;
+  --accent-bg: #e4ebe2;
+  --warn: #8d6111;
   --warn-bg: #fbf1dc;
-  --danger: #a33a2c;
+  --warn-line: #ead9b3;
+  --danger: #9c2f22;
   --danger-bg: #f9e4df;
-  --ok: #2f6a50;
+  --danger-line: #e9bfb6;
+  --ok: #3d6b4a;
   --ok-bg: #e2efe4;
-  --radius: 14px;
-  --shadow: 0 1px 2px rgba(0,0,0,.06), 0 6px 20px rgba(31,77,58,.08);
+  --backdrop: rgba(36,40,33,.45);
+  --tap: rgba(188,48,38,.15);
+  --radius: 12px;
+  --radius-pill: 999px;
+  --shadow: 0 1px 2px rgba(36,40,33,.05), 0 8px 24px rgba(36,40,33,.06);
+  --serif: Georgia, "Times New Roman", serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --topbar-h: 64px;
   --nav-h: 64px;
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Anciens noms (T-2) : alias des jetons ci-dessus, pour les règles qui les portent encore. */
+  --cream: var(--paper);
+  --cream-2: var(--paper-2);
+  --green: var(--accent);
+  --green-2: var(--accent-2);
+  --sage: #b9c8bb;
+  --sage-2: var(--accent-bg);
+  color-scheme: light;
+  font-family: var(--sans);
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; background: var(--cream); color: var(--ink); }
-body { -webkit-text-size-adjust: 100%; line-height: 1.45; }
-a { color: var(--green); }
+html, body { margin: 0; padding: 0; background: var(--paper); color: var(--ink); }
+body { -webkit-text-size-adjust: 100%; font-size: 1rem; line-height: 1.5; }
+a { color: var(--action); }
 img { max-width: 100%; display: block; }
-h1, h2, h3, h4 { margin: 0 0 .4rem; line-height: 1.2; color: var(--green); }
-h1 { font-size: 1.6rem; }
-h2 { font-size: 1.25rem; }
-h3 { font-size: 1.05rem; }
+h1, h2, h3, h4 { margin: 0 0 .4rem; line-height: 1.2; color: var(--ink); font-family: var(--serif); font-weight: 600; overflow-wrap: anywhere; -webkit-hyphens: auto; hyphens: auto; }
+h1 { font-size: 2.1rem; line-height: 1.1; }
+@media (min-width: 900px) { h1 { font-size: 2.6rem; } }
+h2 { font-size: 1.45rem; }
+h3 { font-size: 1.15rem; }
 p { margin: 0 0 .6rem; }
 small, .muted { color: var(--muted); }
 hr { border: 0; border-top: 1px solid var(--line); margin: 1rem 0; }
 code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; }
-pre { background: var(--cream-2); padding: .6rem .8rem; border-radius: 8px; overflow: auto; }
+pre { background: var(--paper-2); padding: .6rem .8rem; border-radius: 8px; overflow: auto; }
+/* T-9 : l'attribut hidden cache vraiment, même sous une règle display d'auteur (.status, .row, .btn…). */
+[hidden] { display: none !important; }
+/* T-5 : focus visible au clavier, anneau tomate décalé. */
+:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
+/* T-6 : mouvement réduit = aucune transition ni animation. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
 
 /* Layout */
 .app { min-height: 100vh; display: flex; flex-direction: column; }
 .topbar {
-  display: flex; align-items: center; gap: .6rem;
-  padding: calc(.6rem + var(--safe-t)) 1rem .6rem;
-  background: var(--green); color: var(--cream);
+  display: flex; align-items: center; gap: .6rem; min-height: calc(var(--topbar-h) + var(--safe-t));
+  padding: calc(.5rem + var(--safe-t)) 1rem .5rem;
+  background: var(--paper); color: var(--ink); border-bottom: 1px solid var(--line); -webkit-tap-highlight-color: var(--tap);
   position: sticky; top: 0; z-index: 20;
 }
-.topbar .brand { font-weight: 700; letter-spacing: .02em; color: var(--cream); text-decoration: none; font-size: 1.05rem; white-space: nowrap; }
+.topbar .brand { font-family: var(--serif); font-weight: 600; letter-spacing: .01em; color: var(--ink); text-decoration: none; font-size: 1.25rem; white-space: nowrap; }
 .topbar .spacer { flex: 1; }
-.topbar .btn { background: rgba(255,255,255,.14); color: var(--cream); border-color: transparent; }
-.topbar .btn.primary { background: var(--sage); color: var(--green); }
+.topbar .btn { background: transparent; color: var(--ink); border-color: var(--line); min-width: 0; }
+/* Roue des Réglages (dernier enfant de la barre) : cible de 44 × 44 (T-4). */
+.topbar .btn:last-child { min-width: 44px; min-height: 44px; justify-content: center; }
+/* T-7 : à 375 px, pastille visible comprise, seul le libellé de la recherche se resserre (points de suspension). */
+.topbar .brand, .topbar .pastille, .topbar .btn:last-child { flex-shrink: 0; }
+.topbar .btn .nowrap { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* Pastille « N non envoyés » : présente seulement quand la file d'envoi n'est pas vide (spec § 4.2). */
-.pastille { background: var(--warn-bg); color: var(--warn); border-radius: 999px; padding: .15rem .55rem; font-size: .78rem; font-weight: 600; white-space: nowrap; }
+.pastille { background: var(--warn-bg); color: var(--warn); border-radius: var(--radius-pill); padding: .15rem .55rem; font-size: .78rem; font-weight: 600; white-space: nowrap; }
 .frame { display: flex; flex: 1; min-height: 0; }
 main.content { flex: 1; padding: 1rem 1rem calc(var(--nav-h) + var(--safe-b) + 1rem); max-width: 1100px; width: 100%; margin: 0 auto; }
 nav.tabs {
@@ -63,32 +95,32 @@ nav.tabs {
 }
 nav.tabs a {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 2px; text-decoration: none; color: var(--muted); font-size: .72rem; padding: .3rem 0;
+  gap: 2px; text-decoration: none; color: var(--muted); font-size: .72rem; padding: .3rem 0; min-height: 48px;
 }
 nav.tabs a .ico { font-size: 1.3rem; line-height: 1; }
-nav.tabs a.active { color: var(--green); font-weight: 600; }
-nav.tabs a.add .ico { background: var(--green); color: var(--cream); border-radius: 50%; width: 38px; height: 38px; display: grid; place-items: center; }
+nav.tabs a.active { color: var(--action); font-weight: 600; box-shadow: inset 0 2px 0 var(--action); }
+nav.tabs a.add .ico { background: var(--action); color: var(--paper); border-radius: 50%; width: 40px; height: 40px; flex-shrink: 0; display: grid; place-items: center; }
 aside.sidenav { display: none; }
 
 @media (min-width: 900px) {
   nav.tabs { display: none; }
   aside.sidenav {
     display: flex; flex-direction: column; gap: .2rem; width: 220px; flex-shrink: 0;
-    padding: 1rem .8rem; border-right: 1px solid var(--line); background: var(--cream-2);
-    position: sticky; top: 56px; height: calc(100vh - 56px); overflow: auto;
+    padding: 1rem .8rem; border-right: 1px solid var(--line); background: var(--paper-2);
+    position: sticky; top: var(--topbar-h); height: calc(100vh - var(--topbar-h)); overflow: auto;
   }
-  aside.sidenav a { text-decoration: none; color: var(--ink); padding: .55rem .7rem; border-radius: 10px; display: flex; gap: .6rem; align-items: center; }
-  aside.sidenav a.active { background: var(--card); color: var(--green); font-weight: 600; box-shadow: var(--shadow); }
-  aside.sidenav a.add { margin-top: .6rem; background: var(--green); color: var(--cream); justify-content: center; }
+  aside.sidenav a { text-decoration: none; color: var(--ink); padding: .55rem .7rem; border-radius: 10px; display: flex; gap: .6rem; align-items: center; min-height: 44px; }
+  aside.sidenav a.active { background: var(--card); color: var(--action); font-weight: 600; box-shadow: inset 3px 0 0 var(--action); }
+  aside.sidenav a.add { margin-top: .6rem; background: var(--action); color: var(--paper); justify-content: center; }
   main.content { padding-bottom: 2rem; }
 }
 
 /* Components */
-.card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: .9rem 1rem; margin-bottom: .9rem; }
+.card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: .9rem 1rem; margin-bottom: .9rem; scroll-margin-top: calc(var(--topbar-h) + .5rem); }
 .card.flat { box-shadow: none; border: 1px solid var(--line); }
 .card.sage { background: var(--sage-2); }
-.card.warn { background: var(--warn-bg); border: 1px solid #ead9b3; }
-.card.danger { background: var(--danger-bg); border: 1px solid #e9bfb6; }
+.card.warn { background: var(--warn-bg); border: 1px solid var(--warn-line); }
+.card.danger { background: var(--danger-bg); border: 1px solid var(--danger-line); }
 .card.carte { text-align: left; cursor: pointer; border: 0; font: inherit; width: 100%; }
 .card.carte .carte-ico { font-size: 1.6rem; }
 .card.carte p { margin: 0; font-size: .9rem; }
@@ -118,7 +150,7 @@ aside.sidenav { display: none; }
 .btn.primary { background: var(--green); color: var(--cream); border-color: var(--green); }
 .btn.primary:hover { background: var(--green-2); }
 .btn.sage { background: var(--sage-2); border-color: var(--sage-2); color: var(--green); }
-.btn.danger { color: var(--danger); border-color: #e9bfb6; }
+.btn.danger { color: var(--danger); border-color: var(--danger-line); }
 .btn.small { padding: .3rem .6rem; min-height: 32px; font-size: .85rem; }
 .btn.big { font-size: 1.15rem; padding: .9rem 1.2rem; min-height: 56px; border-radius: 14px; }
 .btn.block { width: 100%; justify-content: center; }
@@ -138,7 +170,7 @@ aside.sidenav { display: none; }
 }
 .porte .porte-logo { width: 72px; height: 72px; }
 .porte .porte-nom { margin: 0; font-size: .85rem; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
-.porte .porte-titre { margin: 0 0 .3rem; font-size: 2.6rem; color: var(--green); }
+.porte .porte-titre { margin: 0 0 .3rem; font-family: var(--serif); font-size: 3rem; color: var(--accent); }
 .porte .porte-ligne { margin: 0; max-width: 24rem; color: var(--ink); }
 .porte .porte-actions { display: flex; flex-direction: column; gap: .5rem; width: 100%; max-width: 19rem; margin-top: 1.6rem; }
 .porte .porte-actions .btn { justify-content: center; }
@@ -164,10 +196,10 @@ aside.sidenav { display: none; }
 .badge { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; padding: .15rem .45rem; border-radius: 6px; background: var(--cream-2); color: var(--muted); }
 .badge.available { background: var(--ok-bg); color: var(--ok); }
 .badge.reference { background: var(--warn-bg); color: var(--warn); }
-.badge.partial { background: #eef0d8; color: #6f7a1f; }
-.badge.ai { background: #e8e4f5; color: #4d3f8a; }
+.badge.partial { background: var(--paper-2); color: var(--ink); }
+.badge.ai { background: var(--action-bg); color: var(--action); }
 .badge.original { background: var(--sage-2); color: var(--green); }
-.badge.personal { background: #e4ecf7; color: #2c4f7c; }
+.badge.personal { background: var(--paper-2); color: var(--ink); }
 
 /* Un champ est le plus souvent un <label>, mais pas quand il contient un groupe de boutons (puces « Cuisines ») :
    un <label> enveloppant volerait le clic vers la première puce (R-UX-8). Le sélecteur vise donc la classe. */
@@ -228,8 +260,6 @@ table.compare th { color: var(--green); background: var(--cream-2); }
 .status.warn { background: var(--warn-bg); color: var(--warn); }
 .status.danger { background: var(--danger-bg); color: var(--danger); }
 .status.ok { background: var(--ok-bg); color: var(--ok); }
-/* .status impose display:inline-flex, qui l'emporterait sur [hidden] du navigateur : une mention basculée par la frappe (K1) doit vraiment disparaître. */
-.status[hidden] { display: none; }
 /* C-7 / S14 : une sortie de modèle (ou une fiche synchronisée) sans espace ne déborde jamais de l'écran. */
 .proposition, .recipe-body { overflow-wrap: anywhere; }
 
@@ -248,7 +278,7 @@ table.compare th { color: var(--green); background: var(--cream-2); }
 .toast { position: fixed; left: 50%; bottom: calc(var(--nav-h) + var(--safe-b) + 12px); transform: translateX(-50%); background: var(--ink); color: var(--cream); padding: .6rem 1rem; border-radius: 12px; z-index: 50; box-shadow: var(--shadow); font-size: .95rem; max-width: 90vw; }
 @media (min-width: 900px) { .toast { bottom: 20px; } }
 dialog { border: 0; border-radius: var(--radius); padding: 1.2rem; max-width: 560px; width: calc(100vw - 2rem); box-shadow: var(--shadow); background: var(--card); color: var(--ink); }
-dialog::backdrop { background: rgba(29,35,31,.45); }
+dialog::backdrop { background: var(--backdrop); }
 
 .empty { text-align: center; color: var(--muted); padding: 2rem 1rem; }
 .empty .ico { font-size: 2rem; }
