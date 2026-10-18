@@ -25,14 +25,16 @@ export async function renderLibrary(params, query, ctx) {
   return root;
 }
 
-// Les signets sans livre (edition_id nul, source_url posé), le dernier GARDÉ d'abord : created_at, updated_at en repli
-// (un favori touché ne réordonne pas la liste — ronde 1) ; sans horodatage, en dernier. Aucun : rien n'est rendu.
+// Ordre commun aux deux sections : le plus récemment créé d'abord (created_at, updated_at en repli), sans horodatage en dernier.
 const quand = (r) => String(r.created_at || r.updated_at || '');
 const plusRecentesDabord = (a, b) => (quand(a) < quand(b) ? 1 : quand(a) > quand(b) ? -1 : 0);
 const carteOuLien = (ctx, r) => {
   const doc = ctx.docsByRecipe?.get(r.id);
   return doc ? recipeCard(doc) : el('a', { class: 'btn', href: `#/recipes/${r.id}` }, r.display_title || r.original_title || t('Sans titre'));
 };
+
+// Les signets sans livre (edition_id nul, source_url posé), le dernier GARDÉ d'abord : created_at, updated_at en repli
+// (un favori touché ne réordonne pas la liste — ronde 1) ; sans horodatage, en dernier. Aucun : rien n'est rendu.
 function liensWebGardes(ctx) {
   const signets = (ctx.recipes || []).filter((r) => !r.edition_id && typeof r.source_url === 'string' && r.source_url).sort(plusRecentesDabord);
   if (!signets.length) return null;

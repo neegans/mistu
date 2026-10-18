@@ -109,7 +109,8 @@ export async function renderRecipe(params, query, ctx) {
   // Pages originales
   if (pages.length) root.append(section(t('Original'), el('p', { class: 'muted' }, t('Pages du livre telles que photographiées. Une adaptation n’est jamais présentée comme le texte original.')),
     el('div', { class: 'thumbs' }, ...pages.map((p) => { const img = el('img', { alt: t('Page originale'), loading: 'lazy' }); repo.getFile(p.sha256).then((f) => { const u = displayUrl(f); if (u) img.src = u; }); return el('figure', null, img, el('figcaption', null, p.printed_page ? `${t('p.')} ${p.printed_page}` : '')); }))));
-  else if (recipe.printed_page) root.append(el('p', { class: 'muted' }, t('Original : page {p} du livre (pages non photographiées).', { p: recipe.printed_page })));
+  // C-2 : une fiche origine 'ia' n'a pas de livre — un numéro de page tapé dans « Corriger » (champ « Page imprimée ») ne la fait pas passer pour une page d'original.
+  else if (recipe.printed_page && recipe.origine !== 'ia') root.append(el('p', { class: 'muted' }, t('Original : page {p} du livre (pages non photographiées).', { p: recipe.printed_page })));
 
   // Versions
   root.append(section(t('Versions'), el('ul', { class: 'list' }, ...versions.map((v) => el('li', { class: 'row between' },

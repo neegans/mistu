@@ -60,7 +60,7 @@ export function toJsonLd(bundle, { locale = 'fr' } = {}) {
   };
   obj['cuisineos:provenance'] = {
     recipe_id: recipe.id, version_id: version?.id, version_kind: version?.kind, version_status: version?.status,
-    book: book?.title, edition_isbn: edition?.isbn, printed_page: recipe.printed_page, exported_at: new Date().toISOString(),
+    book: book?.title, edition_isbn: edition?.isbn, printed_page: recipe.origine === 'ia' ? undefined : recipe.printed_page, exported_at: new Date().toISOString(),
     ...(ia ? { origine: recipe.origine ?? undefined, generated_by: version?.provenance?.generated_by ?? undefined } : {}),
   };
   return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined && !(Array.isArray(v) && !v.length)));
@@ -134,8 +134,7 @@ export function toReadableSite(bundles, filesBySha, { locale = 'fr' } = {}) {
 <h1>${esc(title)}</h1>
 <p class="meta">${book ? esc(`${book.title}${book.author ? ` — ${book.author}` : ''}`) : esc(libelleSource(recipe) || 'Source personnelle')}${recipe.printed_page && recipe.origine !== 'ia' ? `, page ${recipe.printed_page}` : ''}
 ${etiquette ? ` · <span class="badge">${esc(etiquette)}</span>` : version?.kind === 'adaptation' ? ' · <span class="badge">Adaptation personnelle</span>' : version ? ' · <span class="badge">Original</span>' : ''}</p>
-${version?.servings ? `<p class="meta">${esc(`${version.servings} portions`)}${version.prep_minutes != null && !sansDurees ? ` · préparation ${version.prep_minutes} min` : ''}${version.cook_minutes != null && !sansDurees ? ` · cuisson ${version.cook_minutes} min` : ''}</p>` : ''}
-${ia ? ia.slice(1).map((l) => `<p>${esc(l)}</p>`).join('') : ''}
+${version?.servings ? `<p class="meta">${esc(`${version.servings} portions`)}${version.prep_minutes != null && !sansDurees ? ` · préparation ${version.prep_minutes} min` : ''}${version.cook_minutes != null && !sansDurees ? ` · cuisson ${version.cook_minutes} min` : ''}</p>` : ''}${ia ? ia.slice(1).map((l) => `<p>${esc(l)}</p>`).join('') : ''}
 ${version ? `<h2>Ingrédients</h2><ul>${(version.ingredients || []).map((ri) => `<li>${esc(ingredientLine(ri, locale))}</li>`).join('')}</ul>
 <h2>Préparation</h2><ol>${(version.steps || []).map((s) => `<li>${esc(s.text)}</li>`).join('')}</ol>` : '<p><em>Référence d’index seulement : la recette n’a pas encore été numérisée.</em></p>'}
 ${version?.changes ? `<h2>Changements</h2><p>${esc(version.changes)}</p>` : ''}

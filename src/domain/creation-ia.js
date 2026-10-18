@@ -28,7 +28,7 @@ export function etiquetteCreationIA(version, recipe = null) {
     return testee ? 'Créée avec l’IA · testée' : 'Créée avec l’IA · non testée';
   }
   if (recipe?.origine === 'ia' && version) return version.kind === 'correction' ? 'Corrigée par toi — d’après une création IA' : 'Ma version — d’après une création IA';
-  if (recipe?.origine === 'ia') return 'Créée avec l’IA';
+  if (recipe?.origine === 'ia') return ETIQUETTE_SOURCE;
   return null;
 }
 
@@ -37,12 +37,13 @@ export const AVERTISSEMENT_CREATION_IA = 'L’assistant n’a pas cuisiné cette
 
 // § 3.3 : les blocs d'une création (description, durée estimée, conseils, notes), RELUS à chaque rendu et à chaque export — une ligne
 // reçue ou restaurée peut porter n'importe quoi : chaînes seulement (propre : Cc/Cf retirés, NFC, espaces repliés), rebornées aux
-// limites de C-7, listes coupées à leur compte maximal, minutes entières dans [5, 240] sinon absentes. null hors création (F6).
+// limites de C-7, une chaîne aux marques combinantes empilées (\p{M}{3,}, S14) écartée comme à la validation, listes coupées à leur
+// compte maximal, minutes entières dans [5, 240] sinon absentes. null hors création (F6).
 export function lireCreation(version) {
   if (!estCreationIA(version)) return null;
   const c = version.provenance.creation;
   const L = LIMITES_CREATION;
-  const texte = (x, max) => borner(propre(x) || '', max) || null;
+  const texte = (x, max) => { const s = borner(propre(x) || '', max); return s && !/\p{M}{3,}/u.test(s) ? s : null; };
   const liste = (xs, [, n], max) => (Array.isArray(xs) ? xs : []).map((x) => texte(x, max)).filter(Boolean).slice(0, n);
   const m = c.minutes_estimees;
   return { description: texte(c.description, L.description), conseils: liste(c.conseils, L.conseils, L.conseil), notes: liste(c.notes_restrictions, L.notes, L.note), minutes: Number.isInteger(m) && m >= L.minutes[0] && m <= L.minutes[1] ? m : null };
