@@ -1,0 +1,305 @@
+// Écran « Créer une recette avec l'assistant IA » (spec 2026-10-18-creer-avec-l-ia § 3.2, § 5 ; table de décision P7 des
+// amendements). L'état vit AU NIVEAU DU MODULE, comme la recherche web (search.js) : UN vol pour toute l'app (C-1), une mémoire de
+// session (C-4), des vues abonnées purgées par isConnected (P6). Rien n'est écrit avant « Garder » ; « Garder » n'est pas rejouable
+// (memoire.gardee posé AVANT l'écriture). Tout ce qui vient du modèle est rendu en TEXTE (el(), jamais innerHTML) ; la clé ne fait
+// que passer de ctx.settings.llm à creer() : elle n'entre ni dans la mémoire, ni dans l'adresse, ni dans le DOM (C-8).
+import { el, toast } from '../core/dom.js';
+import { t, label, getUiLocale } from '../core/i18n.js';
+import { navigate, remplacerAdresse, buildQuery } from '../core/router.js';
+import { borner } from '../core/bornes.js';
+import { logError } from '../core/log.js';
+import * as repo from '../model/repo.js';
+import { providerFrom } from '../domain/llm.js';
+import { creerRecetteIA, construireDemandeCreation, fabriquerRecetteIA, estCreationIA, etiquetteCreationIA, conventionCreation, LIMITES_CREATION } from '../domain/creation-ia.js';
+import { assessVersion } from '../domain/diet.js';
+import { DIET_TAGS, RECIPE_TYPES } from '../model/schema.js';
+import { pageHeader, field, select } from './components.js';
+
+let memoire = null; // { cle, demande, filtres, langue, parente, changement, issue, gardee, echec } — ce qui est PARTI, jamais le formulaire
+let vol = null;     // { cle, controller, promesse }
+const vues = new Set(); // { root, redessiner }
+export const etatCreation = () => ({ memoire: memoire ? { ...memoire } : null, enCours: !!vol });
+export function reinitialiserCreation() { vol?.controller.abort(); vol = null; memoire = null; vues.clear(); } // tests seulement
+function notifier() { for (const v of [...vues]) { if (!v.root.isConnected) { vues.delete(v); continue; } v.redessiner(); } }
+
+const ISSUE_INTERNE = Object.freeze({ etat: 'indisponible', raison: 'interne', motif: null, recette: null, avertissements: Object.freeze([]), modele: null, usage: null });
+const ISSUE_HORS_LIGNE = Object.freeze({ ...ISSUE_INTERNE, raison: 'hors_ligne' });
+const TEXTE_NON_CONFIGURE = 'Pour créer une recette, configure l’assistant IA : fournisseur Anthropic, modèle et clé.';
+const TEXTE_AUTRE_FOURNISSEUR = 'Ce fournisseur ne crée pas de recette ici. Choisis Anthropic dans Réglages → Assistant IA.';
+// Textes des raisons connues (lus par Object.hasOwn : « constructor » n'est pas une raison connue) ; les autres : texte générique + code.
+const TEXTES_INDISPONIBLE = {
+  hors_ligne: 'Tu es hors ligne.',
+  cle_refusee: 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.',
+  trop_de_demandes: 'Trop de demandes pour l’instant. Réessaie dans une minute.',
+  refus: 'L’assistant a refusé cette demande.',
+  interrompu: 'Réponse coupée : réessaie avec une demande plus courte.',
+  illisible: 'L’assistant n’a pas rendu une recette lisible. Recommence.',
+};
+const SANS_REESSAI = ['cle_refusee', 'refus'];
+const AVEC_REGLAGES = ['cle_refusee'];
+
+// C-16 : la demande préremplie est nettoyée comme construireDemandeCreation la nettoiera (fins de ligne en espaces, Cc/Cf retirés,
+// NFC, espaces repliés), puis bornée à 500 points de code.
+const nettoyerDemande = (v) => (typeof v === 'string' ? borner(borner(v.replace(/[\t\n\v\f\r\x85\p{Zl}\p{Zp}]/gu, ' '), Number.MAX_SAFE_INTEGER).normalize('NFC').replace(/\s+/g, ' ').trim(), LIMITES_CREATION.demande) : '');
+const entierDans = (v, [min, max]) => { const s = String(v ?? '').trim(); if (!/^\d{1,4}$/.test(s)) return null; const n = Number(s); return n >= min && n <= max ? n : null; };
+
+// C-16 : préremplissage depuis l'adresse = liste blanche (restrictions ⊂ DIET_TAGS, type ∈ RECIPE_TYPES, portions 1-12, max 5-240).
+function formulaireInitial(query, parente) {
+  const q = nettoyerDemande(query?.q);
+  const diets = [...new Set(String(query?.diets ?? '').split(',').map((s) => s.trim()).filter((d) => DIET_TAGS.includes(d)))];
+  const type = RECIPE_TYPES.includes(query?.type) ? query.type : '';
+  const portions = entierDans(query?.portions, LIMITES_CREATION.portions) ?? entierDans(parente?.servings, LIMITES_CREATION.portions) ?? 4;
+  const max = entierDans(query?.max, LIMITES_CREATION.minutes);
+  return { demande: q || (parente ? nettoyerDemande(parente.provenance?.creation?.demande) : ''), diets, type, portions: String(portions), max: max === null ? '' : String(max), changement: '' };
+}
+// « Recommencer » relance ce qui est PARTI (memoire), pas un formulaire modifié depuis (§ 3.2).
+const formulaireDepuis = (m) => ({ demande: m.demande, diets: [...m.filtres.diets], type: m.filtres.type || '', portions: String(m.filtres.servings), max: m.filtres.maxMinutes == null ? '' : String(m.filtres.maxMinutes), changement: m.changement || '' });
+// C-10 : la demande part comme elle est affichée — une valeur que construireDemandeCreation remplacerait (portions 13 → 4) n'est pas envoyable.
+function lireFormulaire(form) {
+  const servings = entierDans(form.portions, LIMITES_CREATION.portions);
+  const maxVide = String(form.max ?? '').trim() === '';
+  const maxMinutes = maxVide ? null : entierDans(form.max, LIMITES_CREATION.minutes);
+  return { filtres: { diets: [...form.diets], type: form.type || null, servings, maxMinutes }, erreur: servings === null ? 'portions' : (!maxVide && maxMinutes === null ? 'max' : null) };
+}
+// Une issue reçue est relue avant d'être rangée : une forme inattendue est « interne », jamais un écran qui lève au rendu.
+function issueSure(x) {
+  if (!x || typeof x !== 'object' || typeof x.etat !== 'string') return ISSUE_INTERNE;
+  if (x.etat !== 'trouve') return x;
+  const r = x.recette;
+  const lignesOk = Array.isArray(r?.ingredients) && r.ingredients.every((i) => i && typeof i === 'object' && typeof i.name === 'string' && typeof i.unit === 'string' && Number.isFinite(i.quantity));
+  const ok = lignesOk && typeof r.title === 'string' && typeof r.description === 'string' && Number.isFinite(r.servings) && Number.isFinite(r.estimated_minutes) && Array.isArray(r.steps) && r.steps.every((s) => typeof s === 'string');
+  return ok ? x : ISSUE_INTERNE;
+}
+// P7, résolution d'un vol : annule → mémoire inchangée ; un échec alors qu'une proposition payée n'est pas gardée → elle reste, l'échec
+// s'affiche au-dessus (F21 élargi, quelle que soit la clé) ; sinon la mémoire devient ce qui vient de partir et ce qui en est revenu.
+function resoudre(parti, brute) {
+  const issue = issueSure(brute);
+  if (issue.raison === 'annule') return;
+  if (issue.etat !== 'trouve' && memoire?.issue?.etat === 'trouve' && !memoire.gardee) { memoire.echec = issue; return; }
+  memoire = { ...parti, issue, gardee: null, echec: null };
+}
+const portionsTexte = (n) => (n === 1 ? t('1 portion') : t('{n} portions', { n }));
+
+export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA, repo: r = repo, navigate: nav = navigate, toast: dire = toast, enLigne = () => navigator.onLine !== false, remplacerAdresse: remplacer = remplacerAdresse } = {}) {
+  // C-15 : ?adapter n'est accepté que pour une création IA dont la fiche existe ; la parente porte le titre de sa fiche (P15).
+  const idParente = typeof query?.adapter === 'string' && query.adapter ? query.adapter : null;
+  const versionParente = idParente ? ctx?.versionsById?.get(idParente) : null;
+  const ficheParente = versionParente ? ctx?.recipesById?.get(versionParente.recipe_id) : null;
+  const parente = versionParente && ficheParente && estCreationIA(versionParente) ? { ...versionParente, title: ficheParente.original_title } : null;
+  const fournisseur = providerFrom(ctx?.settings);
+  // P7.2 (C-14, P29) : décidée une fois par instance ; jamais un appel derrière une garde.
+  const garde = !fournisseur.configured ? { texte: TEXTE_NON_CONFIGURE, reglages: true }
+    : fournisseur.name !== 'anthropic' ? { texte: TEXTE_AUTRE_FOURNISSEUR, reglages: true }
+      : idParente && !parente ? { texte: 'Cette version ne peut pas être adaptée ici.', reglages: false } : null;
+  let form = formulaireInitial(query, parente);
+  let ouvert = false; // « Modifier la demande » (P7.4) : le formulaire replié devient visible
+
+  const root = el('div', null, pageHeader(t('Créer une recette avec l’assistant IA'), { back: parente ? { href: `/recipes/${encodeURIComponent(ficheParente.id)}`, label: t('Retour à la recette') } : { href: '/add', label: t('Ajouter') } }));
+  const zone = el('div', { class: 'stack' });
+  root.append(zone);
+  const partout = () => { notifier(); if (!root.isConnected) render(); };
+
+  const demandeCourante = () => {
+    const { filtres, erreur } = lireFormulaire(form);
+    if (erreur) return { erreur };
+    const langue = getUiLocale();
+    return { ...construireDemandeCreation({ demande: form.demande, filtres, langue, parente, changement: form.changement }), langue };
+  };
+  const cleCourante = () => demandeCourante().cle ?? null;
+  const k1Cache = (C) => !(memoire?.issue?.etat === 'trouve' && memoire.cle !== C);
+  const messageAide = () => {
+    if (!nettoyerDemande(form.demande)) return t('Écris d’abord ce que tu veux cuisiner.');
+    const { erreur } = lireFormulaire(form);
+    if (erreur === 'portions') return t('Portions : un nombre entier de 1 à 12.');
+    if (erreur === 'max') return t('Temps maximal : de 5 à 240 minutes, ou vide.');
+    return ''; // une adaptation sans changement : T7 pose le champ et sa phrase
+  };
+  // La saisie ne redessine JAMAIS (focus et clavier de l'iPhone) : elle bascule sur place le bouton, l'aide et la mention K1.
+  function majSaisie() {
+    const C = cleCourante();
+    const b = root.querySelector('[data-role="creer-ia"]'); if (b) b.disabled = C === null;
+    const aide = root.querySelector('[data-role="aide-ia"]'); if (aide) { const m = messageAide(); aide.textContent = m; aide.hidden = !m; }
+    const k1 = root.querySelector('[data-role="k1"]'); if (k1) k1.hidden = k1Cache(C);
+  }
+
+  // C-1 : la garde est SYNCHRONE et au module — un vol en cours refuse toute nouvelle création, d'où qu'elle vienne (l'abandon côté
+  // client n'est pas garanti non facturé : rien n'est annulé à la place de la personne). `vol` est posé avant tout `await`.
+  function lancer(depsForces = {}) {
+    if (vol) { dire(t('Une création est déjà en cours : annule-la d’abord.')); partout(); return; }
+    const d = demandeCourante();
+    if (!d.cle) { render(); return; }
+    const parti = { cle: d.cle, demande: d.demande, filtres: d.filtres, langue: d.langue, parente, changement: d.changement };
+    ouvert = false;
+    // F2 / C-10 : l'adresse porte ce qui part — les seuls champs de la liste blanche C-16 — pour qu'une reconstruction retrouve la clé.
+    remplacer('/recipes/creer' + buildQuery({ q: d.demande, diets: d.filtres.diets.join(','), type: d.filtres.type || '', portions: d.filtres.servings, max: d.filtres.maxMinutes || '', adapter: parente?.id || '' }));
+    const enLigneIci = depsForces.enLigne ?? enLigne;
+    if (!enLigneIci()) { resoudre(parti, ISSUE_HORS_LIGNE); partout(); return; } // C-14 : dit avant tout appel
+    const controller = new AbortController();
+    const promesse = Promise.resolve()
+      .then(() => creer({ demande: d.demande, filtres: d.filtres, langue: d.langue, cfg: ctx?.settings?.llm, parente, changement: d.changement }, { enLigne: enLigneIci, signal: controller.signal }))
+      .catch(() => ISSUE_INTERNE)
+      .then((issue) => {
+        if (vol?.promesse !== promesse) return; // abandonnée ou remplacée : muette
+        vol = null;
+        resoudre(parti, issue);
+        notifier();
+      });
+    vol = { cle: d.cle, controller, promesse };
+    partout();
+  }
+  const annuler = () => { vol?.controller.abort(); vol = null; partout(); };
+  const recommencer = () => { if (!memoire) return; if (!vol) form = formulaireDepuis(memoire); lancer(); }; // pendant un vol : lancer() refuse et le dit
+
+  // C-4 : UNE écriture ; gardee posé de façon synchrone AVANT l'écriture (un second clic, un bouton périmé d'une autre vue n'écrivent
+  // pas), remis à null si elle échoue ; rien n'est annoncé avant qu'elle ait réussi. Fabriqué depuis la mémoire (ce qui est parti).
+  async function garder() {
+    const m = memoire;
+    if (!m || m.issue?.etat !== 'trouve' || m.gardee || vol) return;
+    let fab;
+    try {
+      fab = fabriquerRecetteIA({ recette: m.issue.recette, demande: m.demande, filtres: m.filtres, langue: m.langue, modele: m.issue.modele ?? null, usage: m.issue.usage ?? null, convention: conventionCreation(), parente: m.parente, changement: m.changement, newId: r.newId, maintenant: new Date().toISOString() });
+    } catch (e) { logError('creer_ia.fabriquer', { error: e }); dire(t('La recette n’a pas pu être gardée. Réessaie.')); return; }
+    const gardee = { recipeId: fab.version.recipe_id, versionId: fab.version.id, ecrite: false };
+    m.gardee = gardee;
+    for (const v of vues) for (const b of v.root.querySelectorAll('[data-role="garder-ia"], [data-role="recommencer-ia"]')) b.disabled = true;
+    try {
+      await r.saveBatch(fab.recipe ? { recipes: [fab.recipe], recipe_versions: [fab.version] } : { recipe_versions: [fab.version] });
+    } catch (e) {
+      if (m.gardee === gardee) m.gardee = null;
+      logError('creer_ia.garder', { error: e });
+      dire(t('La recette n’a pas pu être gardée. Réessaie.'));
+      partout();
+      return;
+    }
+    gardee.ecrite = true;
+    dire(t('Recette gardée'));
+    partout();
+    nav(cheminFiche(gardee));
+  }
+  const cheminFiche = (g) => `/recipes/${encodeURIComponent(g.recipeId)}?v=${encodeURIComponent(g.versionId)}`;
+
+  // P7 — table de décision (première ligne qui s'applique). V = vol, M = mémoire, C = clé du formulaire, T = M trouvé, G = M gardé.
+  function render() {
+    for (const v of [...vues]) if (!v.root.isConnected) vues.delete(v);
+    if (![...vues].some((v) => v.root === root)) vues.add({ root, redessiner: render });
+    zone.replaceChildren(...contenu().filter(Boolean));
+  }
+  function contenu() {
+    const M = memoire;
+    const T = M?.issue?.etat === 'trouve';
+    const G = !!M?.gardee;
+    if (vol) return [ecranDuVol(), T && !G ? proposition(M) : null]; // 1 : toute instance, toute clé
+    if (garde) return [carteGarde(garde)]; // 2
+    const C = cleCourante();
+    const egal = !!M && C !== null && M.cle === C;
+    if (T && G) return egal ? [blocGardee(M.gardee), proposition(M)] : [formulaire({ k1: true }), blocGardee(M.gardee), proposition(M)]; // 3
+    if (T && egal) return [ouvert ? formulaire({ k1: true }) : null, M.echec ? blocIssue(M.echec) : null, proposition(M, { actions: 'toutes' })]; // 4
+    if (T) return [formulaire({ k1: true }), M.echec ? blocIssue(M.echec) : null, proposition(M, { actions: 'garder' })]; // 5
+    if (M && egal) return [blocIssue(M.issue), formulaire()]; // 6
+    return [formulaire()]; // 7
+  }
+
+  const reglages = () => el('a', { class: 'btn small', href: '#/settings' }, t('Réglages'));
+  const carteGarde = (g) => el('div', { class: 'card flat stack', dataset: { role: 'garde-ia' } },
+    el('div', { class: 'status warn' }, el('span', null, t(g.texte)), g.reglages ? [' ', reglages()] : null));
+  const ecranDuVol = () => el('div', { class: 'card flat stack' },
+    el('div', { class: 'status', role: 'status' }, t('L’assistant compose une recette…')),
+    // Sans data-role : ni la frappe ni une autre vue ne peuvent rallumer ce bouton pendant le vol (C-1).
+    el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn primary', disabled: true }, t('Créer ma recette')),
+      el('button', { type: 'button', class: 'btn', dataset: { role: 'annuler-ia' }, onClick: annuler }, t('Annuler'))));
+
+  function formulaire({ k1 = false } = {}) {
+    const C = cleCourante();
+    const message = messageAide();
+    const demande = el('textarea', { dataset: { role: 'demande-ia' }, maxlength: LIMITES_CREATION.demande, placeholder: t('Ex. : un souper pour deux avec du saumon et du fenouil, en 30 minutes'), onInput: (e) => { form.demande = e.target.value; majSaisie(); } });
+    demande.value = form.demande;
+    const puce = (d) => {
+      const b = el('button', { type: 'button', class: 'puce', dataset: { diet: d }, 'aria-pressed': form.diets.includes(d) ? 'true' : 'false' }, label('diet', d));
+      b.addEventListener('click', () => { form.diets = form.diets.includes(d) ? form.diets.filter((x) => x !== d) : [...form.diets, d]; b.setAttribute('aria-pressed', form.diets.includes(d) ? 'true' : 'false'); majSaisie(); });
+      return b;
+    };
+    const type = select([{ value: '', label: t('Au choix de l’assistant') }, ...RECIPE_TYPES.map((v) => ({ value: v, label: label('recipe_type', v) }))], form.type, (v) => { form.type = v; majSaisie(); });
+    type.name = 'type'; // P14
+    const nombre = (nom, [min, max]) => el('input', { type: 'number', name: nom, min, max, step: 1, value: form[nom], onInput: (e) => { form[nom] = e.target.value; majSaisie(); } });
+    return el('div', { class: 'card stack', dataset: { role: 'formulaire-ia' } },
+      field(t('Ce que tu as, ce que tu veux'), demande),
+      // R-UX-8 : un groupe de boutons ne va jamais dans un <label> (le clic sur le libellé presserait la première puce).
+      el('div', { class: 'field' }, el('span', null, t('Restrictions')), el('div', { class: 'puces', role: 'group', 'aria-label': t('Restrictions') }, ...DIET_TAGS.map(puce))),
+      field(t('Type de recette'), type),
+      el('div', { class: 'row' }, field(t('Portions'), nombre('portions', LIMITES_CREATION.portions)), field(t('Temps maximal (minutes, facultatif)'), nombre('max', LIMITES_CREATION.minutes))),
+      k1 ? el('div', { class: 'status warn', dataset: { role: 'k1' }, hidden: k1Cache(C) }, t('La demande a changé depuis cette proposition.')) : null,
+      el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn primary', dataset: { role: 'creer-ia' }, disabled: C === null, onClick: () => lancer() }, k1 ? t('Créer à nouveau') : t('Créer ma recette'))),
+      el('small', { class: 'muted', dataset: { role: 'aide-ia' }, hidden: !message }, message),
+      el('small', { class: 'muted' }, t('Une création = un appel à ton compte Anthropic.')));
+  }
+
+  function blocIssue(issue) {
+    const reessayer = () => el('button', { type: 'button', class: 'btn', dataset: { role: 'reessayer-ia' }, onClick: () => lancer({ enLigne: () => true }) }, t('Réessayer')); // navigator.onLine peut mentir
+    if (issue.etat === 'non_configure' || issue.etat === 'non_pris_en_charge') {
+      return el('div', { class: 'card flat stack', dataset: { role: 'issue-ia' } }, el('div', { class: 'status warn', role: 'status' }, el('span', null, t(issue.etat === 'non_configure' ? TEXTE_NON_CONFIGURE : TEXTE_AUTRE_FOURNISSEUR)), ' ', reglages()));
+    }
+    const raison = typeof issue.raison === 'string' && issue.raison ? issue.raison : 'inconnu';
+    const connue = Object.hasOwn(TEXTES_INDISPONIBLE, raison);
+    const code = raison === 'illisible' ? (issue.motif || raison) : (connue ? null : raison); // K3 : le code reste lisible sous le texte générique
+    return el('div', { class: 'card flat stack', dataset: { role: 'issue-ia' } },
+      el('div', { class: 'status warn', role: 'status' }, el('span', null, t(connue ? TEXTES_INDISPONIBLE[raison] : 'L’assistant n’a pas répondu. Réessaie.')), AVEC_REGLAGES.includes(raison) ? [' ', reglages()] : null),
+      code ? el('small', { class: 'muted' }, t('Code : {c}', { c: String(code) })) : null,
+      SANS_REESSAI.includes(raison) ? null : reessayer());
+  }
+
+  const blocGardee = (g) => el('div', { class: 'card flat stack', dataset: { role: 'gardee-ia' } },
+    g.ecrite
+      ? [el('div', { class: 'status ok' }, t('Recette gardée')), el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn primary', dataset: { role: 'ouvrir-fiche' }, onClick: () => nav(cheminFiche(g)) }, t('Ouvrir la fiche')))]
+      : el('div', { class: 'status', role: 'status' }, t('Enregistrement de la recette…')));
+
+  // L'aperçu est fabriqué comme « Garder » le fera (mêmes lignes, mêmes étapes) mais avec des identifiants jetables : jamais écrit.
+  const apercu = (m) => fabriquerRecetteIA({ recette: m.issue.recette, demande: m.demande, filtres: m.filtres, langue: m.langue, modele: m.issue.modele ?? null, usage: m.issue.usage ?? null, convention: null, parente: m.parente, changement: m.changement, newId: (p) => `${p}_apercu`, maintenant: null }).version;
+  const demandeEnvoyee = (m) => [m.demande, m.filtres.diets.length ? m.filtres.diets.map((d) => label('diet', d)).join(' ; ') : null, m.filtres.type ? label('recipe_type', m.filtres.type) : null, portionsTexte(m.filtres.servings), m.filtres.maxMinutes ? t('au plus {m} min', { m: m.filtres.maxMinutes }) : null].filter(Boolean).join(' · ');
+  // C-9 / S1 / P9 : les restrictions DEMANDÉES, évaluées par assessVersion (N-8) ; jamais « Compatible » sur une proposition — tout état
+  // autre qu'« incompatible » se dit « À vérifier », avec la ligne à retirer quand seul un facultatif bloque. La ligne est celle ÉCRITE.
+  function evaluation(m, version) {
+    const diets = Array.isArray(m.filtres?.diets) ? m.filtres.diets : [];
+    if (!diets.length) return null;
+    const parIds = ctx?.ingredientsById instanceof Map ? ctx.ingredientsById : new Map();
+    return el('div', { class: 'stack', dataset: { role: 'evaluation-ia' } }, el('h3', null, t('Restrictions demandées')),
+      el('ul', null, ...diets.map((d) => {
+        const a = assessVersion(version, parIds, d);
+        const lignes = a.blocking.map((b) => (b.source_text || b.label) + (b.proposed ? ` (${t('identité proposée')} : ${b.label} ?)` : '')).join(', ');
+        const etat = a.state === 'incompatible' ? t('Incompatible : {lignes}', { lignes }) : (a.blocking.length ? t('À vérifier, à retirer : {lignes}', { lignes }) : t('À vérifier'));
+        return el('li', null, `${label('diet', d)} — ${etat}`);
+      })));
+  }
+  function proposition(m, { actions = null } = {}) { // actions : null (inerte) | 'garder' | 'toutes'
+    const rec = m.issue.recette;
+    const version = apercu(m);
+    const conseils = Array.isArray(rec.tips) ? rec.tips : [];
+    const notes = Array.isArray(rec.restrictions_notes) ? rec.restrictions_notes : [];
+    const avertissements = Array.isArray(m.issue.avertissements) ? m.issue.avertissements : [];
+    const u = m.issue.usage;
+    return el('section', { class: 'card stack proposition', dataset: { role: 'proposition-ia' } },
+      el('div', null, el('span', { class: 'badge ai', dataset: { role: 'etiquette-ia' } }, t(etiquetteCreationIA(version) || 'Créée avec l’IA · non testée'))),
+      el('h2', null, rec.title),
+      el('p', { dataset: { role: 'description-ia' } }, t('Selon l’assistant : {texte}', { texte: rec.description })),
+      el('div', { class: 'muted', dataset: { role: 'portions-ia' } }, `${portionsTexte(rec.servings)} · ${t('environ {m} min (estimé par l’assistant)', { m: rec.estimated_minutes })}`),
+      ...avertissements.map((a) => el('div', { class: 'status warn' }, String(a))),
+      el('h3', null, t('Ingrédients')), el('ul', { dataset: { role: 'ingredients-ia' } }, ...version.ingredients.map((l) => el('li', null, l.source_text))),
+      el('h3', null, t('Étapes')), el('ol', { dataset: { role: 'etapes-ia' } }, ...version.steps.map((s) => el('li', null, s.text))),
+      conseils.length ? [el('h3', null, t('Conseils')), el('ul', { dataset: { role: 'conseils-ia' } }, ...conseils.map((c) => el('li', null, t('Selon l’assistant : {texte}', { texte: c }))))] : null,
+      notes.length ? [el('h3', null, t('À vérifier avant de servir')), el('ul', { dataset: { role: 'notes-ia' } }, ...notes.map((n) => el('li', null, String(n))))] : null,
+      evaluation(m, version),
+      el('div', { class: 'status warn', dataset: { role: 'avertissement-ia' } }, t('L’assistant n’a pas cuisiné cette recette : vérifie les quantités, les cuissons et les étiquettes avant de la servir.')),
+      el('div', { class: 'muted', dataset: { role: 'demande-envoyee' } }, t('Demande envoyée : {q}', { q: demandeEnvoyee(m) })),
+      Number.isInteger(u?.entree) && Number.isInteger(u?.sortie) ? el('small', { class: 'muted', dataset: { role: 'jetons-ia' } }, t('{u} jetons', { u: u.entree + u.sortie })) : null,
+      m.gardee ? null : el('small', { class: 'muted', dataset: { role: 'memoire-ia' } }, t('Cette proposition n’est pas enregistrée : elle sera perdue à la fermeture de l’app.')),
+      actions ? el('div', { class: 'row' },
+        el('button', { type: 'button', class: 'btn primary', dataset: { role: 'garder-ia' }, onClick: garder }, t('Garder cette recette')),
+        actions === 'toutes' ? el('button', { type: 'button', class: 'btn', dataset: { role: 'recommencer-ia' }, onClick: recommencer }, t('Recommencer')) : null,
+        actions === 'toutes' && !ouvert ? el('button', { type: 'button', class: 'btn', dataset: { role: 'modifier-demande' }, onClick: () => { ouvert = true; render(); } }, t('Modifier la demande')) : null) : null);
+  }
+
+  render();
+  // P6 : le routeur insère la racine APRÈS la fin de la route ; si un vol se résout dans cet intervalle, notifier() écarte la racine
+  // encore détachée. Une fois montée, elle se réabonne et se redessine (sinon elle resterait figée sur l'écran du vol).
+  setTimeout(() => { if (root.isConnected && ![...vues].some((v) => v.root === root)) render(); }, 0);
+  return root;
+}

@@ -228,6 +228,10 @@ table.compare th { color: var(--green); background: var(--cream-2); }
 .status.warn { background: var(--warn-bg); color: var(--warn); }
 .status.danger { background: var(--danger-bg); color: var(--danger); }
 .status.ok { background: var(--ok-bg); color: var(--ok); }
+/* .status impose display:inline-flex, qui l'emporterait sur [hidden] du navigateur : une mention basculée par la frappe (K1) doit vraiment disparaître. */
+.status[hidden] { display: none; }
+/* C-7 / S14 : une sortie de modèle (ou une fiche synchronisée) sans espace ne déborde jamais de l'écran. */
+.proposition, .recipe-body { overflow-wrap: anywhere; }
 
 /* Mode cuisine */
 .cook { display: grid; gap: 1rem; grid-template-columns: 1fr; }

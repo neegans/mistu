@@ -30,6 +30,7 @@ import { renderShoppingList } from './ui/grocery.js';
 import { renderAdd } from './ui/add.js';
 import { renderLivreAjoutRoute } from './ui/livre-ajout.js';
 import { renderSignetRoute } from './ui/signet.js';
+import { renderCreerIA } from './ui/creer-ia.js';
 import { porteEntreeModel, renderPorteEntree } from './ui/porte-entree.js';
 
 const NAV = [
@@ -97,6 +98,7 @@ function registerRoutes() {
   route('/books/:id', renderBook);
   route('/dishes/:id', renderDish);
   route('/recipes/new', (p, q, c) => renderRecipeEdit({ id: null }, q, c));
+  route('/recipes/creer', renderCreerIA); // AVANT /recipes/:id (F1) : sinon « creer » serait lu comme un identifiant de fiche
   route('/recipes/:id', renderRecipe);
   route('/recipes/:id/edit', renderRecipeEdit);
   route('/cook/:id', renderCook);

@@ -474,4 +474,393 @@ export async function runCreerIaTests({ eq, ok }) {
         'N-9 : la ligne vérifiée garde son groupe par identité ; une non vérifiée au même nom reste à part ; deux lignes non vérifiées de même texte s’additionnent');
     }
   }
+  // --- T3 : écran #/recipes/creer (§ 3.2, § 5 ; C-1, C-4, C-8, C-9, C-10, C-14, C-15, C-16 ; P6, P7, P9, P14, P17, P18, P29).
+  // Chaque assertion d'écran nomme la ligne de la table de décision P7 qu'elle atteint (« P7.n »).
+  {
+    const S = await import('../src/ui/creer-ia.js');
+    const { withRepo } = await import('./sync-fixture.js');
+    const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
+    const localeAvant = getUiLocale();
+    setUiLocale('fr'); // P17 : une suite antérieure bascule 'en' ; ce bloc affirme des textes français (rendue dans le finally)
+    const vraiFetch = globalThis.fetch;
+    let appelsReseau = 0;
+    globalThis.fetch = async (u) => { appelsReseau += 1; throw new Error(`aucun reseau attendu ici : ${u}`); };
+    const scene = document.createElement('div'); scene.hidden = true; document.body.append(scene);
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    const bouton = (root, role) => root.querySelector(`[data-role="${role}"]`);
+    const textes = (root, sel) => [...root.querySelectorAll(sel)].map((n) => n.textContent);
+    const libelle = (root, role) => bouton(root, role)?.textContent ?? null;
+    const statutVol = (root) => [...root.querySelectorAll('[role="status"]')].some((n) => n.textContent === 'L’assistant compose une recette…');
+    const ING_BY_ID = new Map(INGREDIENTS.map((i) => [i.id, i]));
+    const ctxDe = (llm, extra = {}) => ({ recipes: [], docs: [], docsByRecipe: new Map(), ingredientsById: ING_BY_ID, versionsById: new Map(), recipesById: new Map(), settings: { llm }, conventionFor: () => null, ...extra });
+    const CLE = 'sk-factice-ecran';
+    const ANTH = { provider: 'anthropic', api_key: CLE, model: 'm' };
+    const trouve = { etat: 'trouve', raison: null, motif: null, recette: VALIDE, avertissements: [], modele: 'm', usage: { entree: 1, sortie: 2 } };
+    const sansAppel = async () => { throw new Error('aucun appel attendu'); };
+    const monter = async (query, deps = {}, ctx = ctxDe(ANTH)) => { const root = await S.renderCreerIA({}, query, ctx, { creer: sansAppel, remplacerAdresse: () => {}, navigate: () => {}, toast: () => {}, ...deps }); scene.append(root); return root; };
+    // Un « creer » dont chaque appel attend qu'on le résolve à la main : a.rendre[i](issue).
+    const enMain = () => { const a = { n: 0, args: [], deps: [], rendre: [] }; a.creer = (args, deps) => { a.n += 1; a.args.push(args); a.deps.push(deps); return new Promise((r) => { a.rendre.push(r); }); }; return a; };
+    try {
+      // P7.2 — gardes fournisseur (C-14, P29 : par fournisseur.name, pas par supportsWebSearch) : la carte et « Réglages », rien d'autre
+      for (const [nom, llm, attendu] of [
+        ['aucun fournisseur', { provider: 'none' }, 'Pour créer une recette, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'],
+        ['Anthropic sans clé', { provider: 'anthropic', api_key: '', model: 'm' }, 'Pour créer une recette, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'],
+        ['compatible OpenAI configuré', { provider: 'openai_compatible', api_key: 'k', model: 'm', base_url: '' }, 'Ce fournisseur ne crée pas de recette ici. Choisis Anthropic dans Réglages → Assistant IA.'],
+      ]) {
+        S.reinitialiserCreation();
+        const root = await monter({ q: 'saumon' }, {}, ctxDe(llm));
+        eq([textes(root, '[data-role="garde-ia"] .status > span'), !!root.querySelector('[data-role="garde-ia"] a[href="#/settings"]'), bouton(root, 'creer-ia') === null, bouton(root, 'demande-ia') === null], [[attendu], true, true, true], `P7.2 garde (${nom}) : texte exact, lien Réglages, ni formulaire ni bouton de création`);
+        root.remove();
+      }
+      // P7.2 — garde C-15 (?adapter) ; frontière avec T7 : une parente valide donne le formulaire ORDINAIRE prérempli, sans changement ni appel
+      {
+        S.reinitialiserCreation();
+        const fiche = { id: 'rc_ia', origine: 'ia', original_title: 'Saumon au fenouil' };
+        const creation = { id: 'rv_ia', recipe_id: 'rc_ia', kind: 'synthesis', status: 'proposed', servings: 2, ingredients: [], steps: [], provenance: { generated_by: 'ai', creation: { demande: 'saumon fenouil' } } };
+        const extraction = { id: 'rv_livre', recipe_id: 'rc_livre', kind: 'extraction', provenance: { generated_by: 'ai' } };
+        const ctx = ctxDe(ANTH, { versionsById: new Map([['rv_ia', creation], ['rv_livre', extraction], ['rv_orpheline', { ...creation, id: 'rv_orpheline', recipe_id: 'rc_absente' }]]), recipesById: new Map([['rc_ia', fiche], ['rc_livre', { id: 'rc_livre', original_title: 'Livre' }]]) });
+        for (const [nom, id] of [['version absente', 'rv_rien'], ['extraction IA de livre', 'rv_livre'], ['fiche absente', 'rv_orpheline']]) {
+          const root = await monter({ adapter: id }, {}, ctx);
+          eq([textes(root, '[data-role="garde-ia"] .status > span'), bouton(root, 'demande-ia') === null, bouton(root, 'creer-ia') === null], [['Cette version ne peut pas être adaptée ici.'], true, true], `P7.2 garde C-15 (${nom}) : refus, sans formulaire ni bouton`);
+          root.remove();
+        }
+        const a = enMain();
+        const root = await monter({ adapter: 'rv_ia' }, { creer: a.creer }, ctx);
+        eq([bouton(root, 'demande-ia')?.value, root.querySelector('input[name="portions"]')?.value, bouton(root, 'changement-ia') === null, bouton(root, 'creer-ia')?.disabled, root.querySelector('header a')?.getAttribute('href')], ['saumon fenouil', '2', true, true, '#/recipes/rc_ia'],
+          'C-15 parente valide (frontière T7) : formulaire ordinaire prérempli (demande et portions de la parente), sans champ de changement, bouton éteint, retour vers la fiche');
+        bouton(root, 'creer-ia')?.click(); await tick();
+        eq([a.n, S.etatCreation()], [0, { memoire: null, enCours: false }], 'C-15 parente valide : aucun appel d’adaptation tant que T7 n’a pas posé le changement');
+        root.remove();
+      }
+
+      await withRepo(async (repo) => {
+        // C-16 — préremplissage par liste blanche ; C-1 — aucun appel sans clic
+        S.reinitialiserCreation();
+        const a = enMain();
+        const adresses = [];
+        const dits = [];
+        const brut = ' saumon' + String.fromCharCode(0x200b) + '   fenouil ';
+        const root = await monter({ q: brut, diets: 'sans_lactose,inconnu,vegetalien,sans_lactose', type: 'salade', portions: '20', max: '3' }, { creer: a.creer, remplacerAdresse: (x) => adresses.push(x) });
+        eq([bouton(root, 'demande-ia').value, root.querySelectorAll('.puces[role="group"] button.puce[data-diet]').length, textes(root, '.puces[role="group"] button.puce[data-diet][aria-pressed="true"]'), root.querySelector('select[name="type"]').value, root.querySelector('input[type="number"][name="portions"]').value, root.querySelector('input[type="number"][name="max"]').value, libelle(root, 'creer-ia')],
+          ['saumon fenouil', 9, ['Végétalien', 'Sans lactose'], 'salade', '4', '', 'Créer ma recette'], 'C-16 : q nettoyé (invisible retiré, espaces repliés), restrictions filtrées et dédoublonnées (9 puces, 2 choisies), type gardé, portions hors bornes → 4, max hors bornes → vide');
+        for (const [query, attendu, nom] of [[{ q: 'x', portions: '12', max: '240' }, ['12', '240'], 'bornes hautes acceptées'], [{ q: 'x', portions: '1', max: '5' }, ['1', '5'], 'bornes basses acceptées'], [{ q: 'x', portions: '2.5', max: '241' }, ['4', ''], 'décimale et max + 1 écartés'], [{ q: 'x', portions: '0', max: '4' }, ['4', ''], 'min − 1 écartés']]) {
+          const r0 = await monter(query);
+          eq([r0.querySelector('input[name="portions"]').value, r0.querySelector('input[name="max"]').value], attendu, 'C-16 : ' + nom);
+          r0.remove();
+        }
+        {
+          const r0 = await monter({ q: 'é'.repeat(600), type: 'constructor', diets: '__proto__,toString' });
+          eq([Array.from(bouton(r0, 'demande-ia').value).length, r0.querySelector('select[name="type"]').value, r0.querySelectorAll('[data-diet][aria-pressed="true"]').length], [500, '', 0], 'C-16 : q borné à 500 points de code, type et restrictions hors liste ignorés');
+          r0.remove();
+        }
+        eq(a.n, 0, 'C-1 : aucun appel sans clic');
+
+        // P7.1 — un clic = un appel, ce qui est affiché part (C-10), l'adresse est remplacée (F2) ; toutes les instances montrent le vol (C-1, P6)
+        const autre = await monter({ q: 'autre chose' }, { creer: a.creer, toast: (m) => dits.push(m) });
+        const perime = bouton(autre, 'creer-ia');
+        bouton(root, 'creer-ia').click(); await tick();
+        eq([a.n, a.args[0].demande, a.args[0].filtres, a.args[0].cfg === ANTH, a.args[0].langue, a.args[0].parente, a.args[0].changement, typeof a.deps[0].enLigne, a.deps[0].signal instanceof AbortSignal, adresses],
+          [1, 'saumon fenouil', { diets: ['sans_lactose', 'vegetalien'], type: 'salade', servings: 4, maxMinutes: null }, true, 'fr', null, null, 'function', true, ['/recipes/creer?q=saumon+fenouil&diets=sans_lactose%2Cvegetalien&type=salade&portions=4']],
+          'C-10 : un clic = un appel avec ce qui est affiché ; F2 : adresse remplacée par les seuls champs de la liste blanche');
+        eq([statutVol(root), !!bouton(root, 'annuler-ia'), bouton(root, 'creer-ia') === null, [...root.querySelectorAll('button')].filter((b) => b.disabled && !b.dataset.role).map((b) => b.textContent), bouton(root, 'demande-ia') === null, S.etatCreation().enCours],
+          [true, true, true, ['Créer ma recette'], true, true], 'P7.1 vol : statut, « Annuler », bouton de création éteint SANS data-role, pas de formulaire');
+        eq([statutVol(autre), bouton(autre, 'creer-ia') === null, !!bouton(autre, 'annuler-ia')], [true, true, true], 'C-1 / P6 : une instance montée AVANT le vol est redessinée et montre le vol');
+        perime.click(); await tick();
+        eq([a.n, dits, statutVol(autre), S.etatCreation().enCours], [1, ['Une création est déjà en cours : annule-la d’abord.'], true, true], 'C-1 : le bouton périmé d’une autre instance est REFUSÉ pendant le vol (garde synchrone au module) — aucun second appel, rien d’annulé');
+        autre.remove();
+        const r2 = await monter({ q: 'encore autre chose' }, { creer: a.creer });
+        eq([statutVol(r2), bouton(r2, 'creer-ia') === null, !!bouton(r2, 'annuler-ia')], [true, true, true], 'C-1 : une instance montée PENDANT le vol (reconstruction, retour arrière) montre le vol et n’offre aucune création');
+        r2.remove();
+
+        // P7.4 — la proposition (§ 3.2, C-9, P9), texte seul
+        a.rendre[0](trouve); await tick();
+        const prop = root.querySelector('.proposition');
+        eq([textes(prop, '[data-role="etiquette-ia"]'), prop.querySelector('h2')?.textContent, textes(prop, '[data-role="description-ia"]'), textes(prop, '[data-role="portions-ia"]'), textes(prop, '[data-role="ingredients-ia"] li'), textes(prop, '[data-role="etapes-ia"] li'), textes(prop, '[data-role="conseils-ia"] li'), textes(prop, '[data-role="notes-ia"] li')],
+          [['Créée avec l’IA · non testée'], 'Saumon au fenouil', ['Selon l’assistant : Un plat simple.'], ['2 portions · environ 25 min (estimé par l’assistant)'], ['300 g saumon', '1 fenouil'], ['Préchauffer le four à 200 °C.', 'Cuire 12 min.'], ['Selon l’assistant : Servir chaud.'], ['Vérifie l’étiquette du bouillon.']],
+          'P7.4 proposition : étiquette C-2, titre, description préfixée, portions et durée estimée, lignes, étapes, conseils préfixés, notes « à vérifier avant de servir »');
+        eq([textes(prop, '[data-role="avertissement-ia"]'), textes(prop, '[data-role="demande-envoyee"]'), textes(prop, '[data-role="jetons-ia"]'), textes(prop, '[data-role="memoire-ia"]')],
+          [['L’assistant n’a pas cuisiné cette recette : vérifie les quantités, les cuissons et les étiquettes avant de la servir.'], ['Demande envoyée : saumon fenouil · Sans lactose ; Végétalien · Salade · 4 portions'], ['3 jetons'], ['Cette proposition n’est pas enregistrée : elle sera perdue à la fermeture de l’app.']],
+          'P7.4 proposition : avertissement fixe C-9, demande envoyée (C-10), jetons, mention de session (C-4)');
+        eq(textes(prop, '[data-role="evaluation-ia"] li'), ['Sans lactose — À vérifier', 'Végétalien — Incompatible : 300 g saumon (identité proposée : saumon ?)'], 'P9 / S1 : chaque restriction demandée, texte exact — « À vérifier » ou « Incompatible : {ligne écrite} (identité proposée) », jamais « Compatible »');
+        eq([libelle(root, 'garder-ia'), libelle(root, 'recommencer-ia'), libelle(root, 'modifier-demande'), bouton(root, 'demande-ia') === null, bouton(root, 'k1') === null, S.etatCreation().memoire.gardee, S.etatCreation().memoire.echec],
+          ['Garder cette recette', 'Recommencer', 'Modifier la demande', true, true, null, null], 'P7.4 : Garder, Recommencer, Modifier la demande ; formulaire replié ; rien n’est gardé');
+        eq([JSON.stringify(S.etatCreation()).includes(CLE), root.outerHTML.includes(CLE), a.args[0].cfg.api_key === CLE], [false, false, true], 'C-8 : la clé a atteint creer() mais n’est ni dans etatCreation() ni dans le DOM (texte et attributs)');
+        root.remove();
+
+        // P9 — une restriction dont seul un ingrédient FACULTATIF bloque : jamais « Compatible », le nom de la ligne reste dit (M1 de la re-revue T5)
+        {
+          S.reinitialiserCreation();
+          const facultatif = { ...trouve, recette: { ...VALIDE, ingredients: [{ name: 'parmesan (facultatif)', quantity: 30, unit: 'g' }] } };
+          const r = await monter({ q: 'pâtes', diets: 'sans_lactose' }, { creer: async () => facultatif });
+          bouton(r, 'creer-ia').click(); await tick(); await tick();
+          eq(textes(r, '[data-role="evaluation-ia"] li'), ['Sans lactose — À vérifier, à retirer : 30 g parmesan (facultatif) (identité proposée : parmesan ?)'], 'P9 : un bloquant facultatif → « À vérifier », avec la ligne à retirer (jamais « Adaptation » ni « Compatible »)');
+          r.remove();
+        }
+
+        // I-H — texte seul : une sortie de modèle hostile ne crée aucun élément
+        {
+          S.reinitialiserCreation();
+          const hostile = { ...trouve, recette: { ...VALIDE, title: '<b>Titre</b>', description: '<img src=x onerror=alert(1)>', steps: ['<img src=x onerror=alert(1)>', '<script>alert(1)</script>'], tips: ['<a href="javascript:alert(1)">x</a>'] } };
+          const r3 = await monter({ q: 'x' }, { creer: async () => hostile });
+          bouton(r3, 'creer-ia').click(); await tick(); await tick();
+          eq([r3.querySelectorAll('b, img, script, a[href^="javascript"]').length, r3.querySelector('.proposition h2')?.textContent, textes(r3, '[data-role="etapes-ia"] li'), textes(r3, '[data-role="description-ia"]')],
+            [0, '<b>Titre</b>', ['<img src=x onerror=alert(1)>', '<script>alert(1)</script>'], ['Selon l’assistant : <img src=x onerror=alert(1)>']], 'I-H : texte seul — aucun élément créé par la sortie du modèle, le balisage reste lisible tel quel');
+          r3.remove();
+        }
+
+        // C-4 — Garder : gardee posé AVANT la fin de l'écriture ; le double clic n'écrit qu'une fois ; annonce et navigation APRÈS l'écriture
+        S.reinitialiserCreation();
+        const ecritures = []; let finir = null; const navs = []; const dits2 = [];
+        const faux = { ...repo, newId: repo.newId, saveBatch: (b) => { ecritures.push(b); return new Promise((r) => { finir = () => r(b); }); } };
+        const r4 = await monter({ q: 'saumon fenouil' }, { creer: async () => trouve, repo: faux, navigate: (p) => navs.push(p), toast: (m) => dits2.push(m) });
+        const r4b = await monter({ q: 'saumon fenouil' }, { repo: faux, navigate: (p) => navs.push(p), toast: (m) => dits2.push(m) });
+        bouton(r4, 'creer-ia').click(); await tick(); await tick();
+        // Un « Garder » PÉRIMÉ d'une autre vue (détaché par un redessin, donc jamais éteint) : seule la garde gardee peut l'arrêter.
+        const gPerime = bouton(r4b, 'garder-ia');
+        bouton(r4b, 'modifier-demande').click(); await tick();
+        const g = bouton(r4, 'garder-ia');
+        g.click(); gPerime.click(); g.click();
+        const pendant = [ecritures.length, !!S.etatCreation().memoire.gardee, g.disabled, bouton(r4, 'recommencer-ia')?.disabled, bouton(r4b, 'garder-ia')?.disabled, gPerime.isConnected, gPerime.disabled, navs.length, dits2.length, r4.textContent.includes('Recette gardée')];
+        const rPendant = await monter({ q: 'saumon fenouil' }, { repo: faux });
+        const vuePendant = [textes(rPendant, '[data-role="gardee-ia"] .status'), bouton(rPendant, 'ouvrir-fiche') === null, bouton(rPendant, 'garder-ia') === null];
+        finir(); await tick();
+        eq([vuePendant, textes(rPendant, '[data-role="gardee-ia"] .status'), !!bouton(rPendant, 'ouvrir-fiche')], [[['Enregistrement de la recette…'], true, true], ['Recette gardée'], true], 'C-4 : une vue montée PENDANT l’écriture dit « Enregistrement… » (jamais « gardée » sans écriture), puis « Recette gardée » une fois l’écriture faite');
+        rPendant.remove();
+        eq(pendant, [1, true, true, true, true, false, false, 0, 0, false], 'C-4 : au clic, gardee est posé de façon SYNCHRONE, Garder et Recommencer s’éteignent dans toutes les vues, rien n’est annoncé avant l’écriture ; ni le second clic ni un bouton périmé n’écrivent');
+        const [b0] = ecritures;
+        eq([ecritures.length, Object.keys(b0).sort(), b0.recipes[0].origine, b0.recipe_versions[0].kind, b0.recipe_versions[0].status, b0.recipes[0].original_title, b0.recipe_versions[0].provenance.creation.demande, b0.recipe_versions[0].provenance.model, b0.recipe_versions[0].recipe_id === b0.recipes[0].id, navs, dits2, S.etatCreation().memoire.gardee],
+          [1, ['recipe_versions', 'recipes'], 'ia', 'synthesis', 'proposed', 'Saumon au fenouil', 'saumon fenouil', 'm', true, [`/recipes/${b0.recipes[0].id}?v=${b0.recipe_versions[0].id}`], ['Recette gardée'], { recipeId: b0.recipes[0].id, versionId: b0.recipe_versions[0].id, ecrite: true }],
+          'C-4 : UNE écriture (fiche + version) fabriquée depuis la mémoire ; « Recette gardée » et navigation vers la fiche APRÈS l’écriture ; gardee posé');
+        // P7.3 (eq) — retour arrière après Garder
+        const r5 = await monter({ q: 'saumon fenouil' }, { repo: faux, navigate: (p) => navs.push(p) });
+        eq([textes(r5, '[data-role="gardee-ia"] .status'), !!bouton(r5, 'ouvrir-fiche'), bouton(r5, 'garder-ia') === null, bouton(r5, 'recommencer-ia') === null, bouton(r5, 'modifier-demande') === null, bouton(r5, 'demande-ia') === null, r5.querySelector('.proposition h2')?.textContent, textes(r5, '[data-role="memoire-ia"]'), ecritures.length],
+          [['Recette gardée'], true, true, true, true, true, 'Saumon au fenouil', [], 1], 'P7.3 (eq) retour arrière après Garder : « Recette gardée » + « Ouvrir la fiche », proposition inerte, ni Garder ni Recommencer (S9b/F3)');
+        bouton(r5, 'ouvrir-fiche').click(); await tick();
+        eq(navs, [navs[0], navs[0]], 'P7.3 : « Ouvrir la fiche » mène à la fiche gardée');
+        r5.remove();
+        // P7.3 (non eq) — une autre demande : formulaire + K1 + « Créer à nouveau », la proposition gardée reste inerte
+        const r5b = await monter({ q: 'truite' }, { repo: faux });
+        eq([!!bouton(r5b, 'demande-ia'), bouton(r5b, 'k1')?.hidden, libelle(r5b, 'creer-ia'), textes(r5b, '[data-role="gardee-ia"] .status'), bouton(r5b, 'garder-ia') === null, bouton(r5b, 'recommencer-ia') === null],
+          [true, false, 'Créer à nouveau', ['Recette gardée'], true, true], 'P7.3 (non eq) : formulaire + K1 visible + « Créer à nouveau » ; jamais Garder ni Recommencer');
+        r5b.remove(); r4.remove(); r4b.remove();
+
+        // C-4 — une écriture refusée remet gardee à null : Garder redevient possible, rien n'est annoncé comme gardé
+        {
+          S.reinitialiserCreation();
+          const journal = []; const consoleErreur = console.error; console.error = (...x) => journal.push(x);
+          try {
+            let essais = 0; const ecr = []; const navs3 = []; const dits3 = [];
+            const fragile = { ...repo, newId: repo.newId, saveBatch: async (b) => { essais += 1; if (essais === 1) throw new Error('quota'); ecr.push(b); return b; } };
+            const r = await monter({ q: 'saumon fenouil' }, { creer: async () => trouve, repo: fragile, navigate: (p) => navs3.push(p), toast: (m) => dits3.push(m) });
+            bouton(r, 'creer-ia').click(); await tick(); await tick();
+            bouton(r, 'garder-ia').click(); await tick();
+            eq([S.etatCreation().memoire.gardee, bouton(r, 'garder-ia')?.disabled, dits3, navs3, journal.map((e) => e[0]), JSON.stringify(journal).includes('Saumon'), r.textContent.includes('Recette gardée')],
+              [null, false, ['La recette n’a pas pu être gardée. Réessaie.'], [], ['[cuisine-os] creer_ia.garder'], false, false], 'C-4 : écriture refusée → gardee remis à null, Garder rallumé, l’échec est dit et journalisé (code seul, jamais la recette), aucune navigation');
+            bouton(r, 'garder-ia').click(); await tick();
+            eq([essais, ecr.length, navs3.length, dits3[1]], [2, 1, 1, 'Recette gardée'], 'C-4 : après un échec, Garder réessaie et écrit une fois');
+            r.remove();
+          } finally { console.error = consoleErreur; }
+        }
+
+        // P7.4 + F21 — « Recommencer » échoué : l'échec AU-DESSUS, la proposition reste ; « Modifier la demande » ; saisie sans redessin ; K1
+        S.reinitialiserCreation();
+        let fois = 0; const args6 = []; const creer2 = async (x) => { args6.push(x); return ++fois === 1 ? trouve : { etat: 'indisponible', raison: 'serveur', motif: null }; };
+        const r6 = await monter({ q: 'saumon fenouil' }, { creer: creer2 });
+        bouton(r6, 'creer-ia').click(); await tick(); await tick();
+        bouton(r6, 'recommencer-ia').click(); await tick(); await tick();
+        eq([fois, textes(r6, '[data-role="issue-ia"] .status > span'), textes(r6, '[data-role="issue-ia"] small'), !!bouton(r6, 'reessayer-ia'), r6.querySelector('.proposition h2')?.textContent, !!bouton(r6, 'garder-ia'), S.etatCreation().memoire.echec?.raison, S.etatCreation().memoire.issue.etat, r6.textContent.includes('indisponible')],
+          [2, ['L’assistant n’a pas répondu. Réessaie.'], ['Code : serveur'], true, 'Saumon au fenouil', true, 'serveur', 'trouve', false], 'P7.4 + F21 : « Recommencer » échoué — l’échec est dit (texte, code, Réessayer), la proposition payée reste avec Garder');
+        eq(r6.querySelector('[data-role="issue-ia"]').compareDocumentPosition(r6.querySelector('.proposition')) & Node.DOCUMENT_POSITION_FOLLOWING, Node.DOCUMENT_POSITION_FOLLOWING, 'F21 : l’échec est placé AU-DESSUS de la proposition');
+        ok(bouton(r6, 'demande-ia') === null, 'P7.4 : formulaire replié tant que « Modifier la demande » n’est pas touché (le nœud n’existe pas)');
+        bouton(r6, 'modifier-demande').click(); await tick();
+        const ta = bouton(r6, 'demande-ia');
+        eq([ta?.value, bouton(r6, 'k1')?.hidden, r6.querySelector('.proposition h2')?.textContent, !!bouton(r6, 'garder-ia'), bouton(r6, 'modifier-demande') === null, libelle(r6, 'creer-ia')], ['saumon fenouil', true, 'Saumon au fenouil', true, true, 'Créer à nouveau'], 'Modifier la demande : formulaire visible (K1 caché : rien n’a changé), proposition conservée');
+        ta.value = 'truite'; ta.dispatchEvent(new Event('input'));
+        ok(bouton(r6, 'demande-ia') === ta && r6.contains(ta), 'saisie : la frappe ne redessine pas (même nœud — focus iPhone)');
+        eq(bouton(r6, 'k1')?.hidden, false, 'K1 : demande modifiée → « La demande a changé depuis cette proposition. » apparaît (le nœud bascule, sans redessin)');
+        ta.value = ' saumon   fenouil'; ta.dispatchEvent(new Event('input'));
+        eq(bouton(r6, 'k1')?.hidden, true, 'K1 : revenue à la demande envoyée (espaces repliés) → la mention se cache');
+        const puce = r6.querySelector('[data-diet="sans_gluten"]');
+        puce.click(); await tick();
+        eq([r6.querySelector('[data-diet="sans_gluten"]') === puce, puce.getAttribute('aria-pressed'), bouton(r6, 'k1').hidden, bouton(r6, 'demande-ia') === ta], [true, 'true', false, true], 'puce : bascule sur place (aria-pressed), K1 visible, aucun redessin');
+        puce.click(); await tick();
+        eq([puce.getAttribute('aria-pressed'), bouton(r6, 'k1').hidden], ['false', true], 'puce : rebasculée → K1 caché');
+        const typ = r6.querySelector('select[name="type"]');
+        typ.value = 'soupe'; typ.dispatchEvent(new Event('change'));
+        const k1Type = bouton(r6, 'k1').hidden;
+        typ.value = ''; typ.dispatchEvent(new Event('change'));
+        eq([k1Type, bouton(r6, 'k1').hidden, r6.querySelector('select[name="type"]') === typ], [false, true, true], 'type : changé → K1 visible ; remis → caché ; aucun redessin');
+        const champ = (nom) => r6.querySelector(`input[name="${nom}"]`);
+        const aide = () => [bouton(r6, 'creer-ia').disabled, bouton(r6, 'aide-ia').hidden, bouton(r6, 'aide-ia').textContent];
+        champ('portions').value = '13'; champ('portions').dispatchEvent(new Event('input'));
+        const p13 = aide();
+        champ('portions').value = '4'; champ('portions').dispatchEvent(new Event('input'));
+        const p4 = aide();
+        champ('max').value = '300'; champ('max').dispatchEvent(new Event('input'));
+        const m300 = aide();
+        champ('max').value = ''; champ('max').dispatchEvent(new Event('input'));
+        ta.value = ' '; ta.dispatchEvent(new Event('input'));
+        const vide = aide();
+        ta.value = 'saumon fenouil'; ta.dispatchEvent(new Event('input'));
+        eq([p13, p4, m300, vide, aide()], [[true, false, 'Portions : un nombre entier de 1 à 12.'], [false, true, ''], [true, false, 'Temps maximal : de 5 à 240 minutes, ou vide.'], [true, false, 'Écris d’abord ce que tu veux cuisiner.'], [false, true, '']], 'C-10 : une valeur que la demande ne porterait pas telle quelle éteint le bouton et la raison est dite (rien ne part autrement qu’affiché)');
+        ta.value = 'truite'; ta.dispatchEvent(new Event('input'));
+        bouton(r6, 'recommencer-ia').click(); await tick(); await tick();
+        eq([args6.length, args6[2]?.demande, S.etatCreation().memoire.demande, bouton(r6, 'demande-ia') === null, S.etatCreation().memoire.echec?.raison], [3, 'saumon fenouil', 'saumon fenouil', true, 'serveur'], '« Recommencer » relance la demande PARTIE (memoire.demande), pas la frappe en cours ; le formulaire se replie');
+        ok(!JSON.stringify(S.etatCreation()).includes(CLE) && !r6.outerHTML.includes(CLE), 'C-8 : la clé n’est pas dans etatCreation() ni dans le DOM');
+        r6.remove();
+
+        // P7.5 — T, non eq, non G : une nouvelle instance avec une autre demande ; F21 élargi (« Créer à nouveau » échoué sous une autre clé)
+        S.reinitialiserCreation();
+        const ecr5 = [];
+        const faux5 = { ...repo, newId: repo.newId, saveBatch: async (b) => { ecr5.push(b); return b; } };
+        const ra = await monter({ q: 'saumon fenouil' }, { creer: async () => trouve });
+        bouton(ra, 'creer-ia').click(); await tick(); await tick();
+        ra.remove();
+        const appels5 = [];
+        const rb = await monter({ q: 'truite' }, { creer: async (x) => { appels5.push(x); return { etat: 'indisponible', raison: 'refus', motif: null }; }, repo: faux5 });
+        eq([bouton(rb, 'demande-ia')?.value, bouton(rb, 'k1')?.hidden, libelle(rb, 'creer-ia'), rb.querySelector('.proposition h2')?.textContent, !!bouton(rb, 'garder-ia'), bouton(rb, 'recommencer-ia') === null, bouton(rb, 'issue-ia') === null],
+          ['truite', false, 'Créer à nouveau', 'Saumon au fenouil', true, true, true], 'P7.5 : formulaire + K1 + « Créer à nouveau » + proposition avec Garder, sans Recommencer');
+        bouton(rb, 'creer-ia').click(); await tick(); await tick();
+        eq([appels5.map((x) => x.demande), S.etatCreation().memoire.issue.etat, S.etatCreation().memoire.demande, S.etatCreation().memoire.echec?.raison, textes(rb, '[data-role="issue-ia"] .status > span'), bouton(rb, 'reessayer-ia') === null, rb.querySelector('.proposition h2')?.textContent, !!bouton(rb, 'garder-ia'), bouton(rb, 'k1')?.hidden],
+          [['truite'], 'trouve', 'saumon fenouil', 'refus', ['L’assistant a refusé cette demande.'], true, 'Saumon au fenouil', true, false], 'F21 élargi (P7) : « Créer à nouveau » refusé sous une AUTRE clé — la proposition payée reste, l’échec est dit, K1 aussi');
+        bouton(rb, 'garder-ia').click(); await tick();
+        eq([ecr5.length, ecr5[0]?.recipes[0].original_title, ecr5[0]?.recipe_versions[0].provenance.creation.demande], [1, 'Saumon au fenouil', 'saumon fenouil'], 'C-4 : Garder fabrique depuis la mémoire (ce qui est parti), jamais depuis le formulaire modifié');
+        rb.remove();
+
+        // P7.6 — non T et eq : l'issue et le formulaire ; P7.7 — une autre demande : le formulaire seul
+        S.reinitialiserCreation();
+        const r7 = await monter({ q: 'saumon' }, { creer: async () => ({ etat: 'indisponible', raison: 'illisible', motif: 'json' }) });
+        bouton(r7, 'creer-ia').click(); await tick(); await tick();
+        eq([textes(r7, '[data-role="issue-ia"] .status > span'), textes(r7, '[data-role="issue-ia"] small'), !!bouton(r7, 'reessayer-ia'), bouton(r7, 'demande-ia')?.value, libelle(r7, 'creer-ia'), r7.querySelector('.proposition') === null, bouton(r7, 'k1') === null],
+          [['L’assistant n’a pas rendu une recette lisible. Recommence.'], ['Code : json'], true, 'saumon', 'Créer ma recette', true, true], 'P7.6 : issue illisible (C-3) — texte, « Code : {motif} », Réessayer, et le formulaire');
+        r7.remove();
+        const r8 = await monter({ q: 'autre' });
+        eq([bouton(r8, 'issue-ia') === null, libelle(r8, 'creer-ia'), !!bouton(r8, 'demande-ia')], [true, 'Créer ma recette', true], 'P7.7 : une autre demande sans proposition → le formulaire seul (une issue ne vaut que pour SA demande)');
+        r8.remove();
+        for (const [issue, attendu, nom] of [
+          [{ etat: 'indisponible', raison: 'cle_refusee' }, [['Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.'], [], true, false], 'clé refusée : Réglages, pas de Réessayer'],
+          [{ etat: 'indisponible', raison: 'interrompu' }, [['Réponse coupée : réessaie avec une demande plus courte.'], [], false, true], 'coupure (C-13)'],
+          [{ etat: 'indisponible', raison: 'trop_de_demandes' }, [['Trop de demandes pour l’instant. Réessaie dans une minute.'], [], false, true], 'limite'],
+          [{ etat: 'indisponible', raison: 'constructor' }, [['L’assistant n’a pas répondu. Réessaie.'], ['Code : constructor'], false, true], 'raison inconnue (même « constructor ») : texte générique et code'],
+          [{ etat: 'non_configure', raison: null }, [['Pour créer une recette, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'], [], true, false], 'non configuré rendu par l’appel'],
+          [{ etat: 'non_pris_en_charge', raison: null }, [['Ce fournisseur ne crée pas de recette ici. Choisis Anthropic dans Réglages → Assistant IA.'], [], true, false], 'autre fournisseur rendu par l’appel'],
+        ]) {
+          S.reinitialiserCreation();
+          const r = await monter({ q: 'saumon' }, { creer: async () => issue });
+          bouton(r, 'creer-ia').click(); await tick(); await tick();
+          eq([textes(r, '[data-role="issue-ia"] .status > span'), textes(r, '[data-role="issue-ia"] small'), !!r.querySelector('[data-role="issue-ia"] a[href="#/settings"]'), !!bouton(r, 'reessayer-ia')], attendu, 'P7.6 issue — ' + nom);
+          r.remove();
+        }
+
+        // P18 — « Annuler » : vol abandonné, formulaire, aucune écriture ; la réponse du vol annulé reste muette
+        S.reinitialiserCreation();
+        const versionsAvant = (await repo.all('recipe_versions')).length;
+        const ecrA = []; const fauxA = { ...repo, newId: repo.newId, saveBatch: async (b) => { ecrA.push(b); return b; } };
+        const aA = enMain();
+        const rA = await monter({ q: 'saumon fenouil' }, { creer: aA.creer, repo: fauxA });
+        const rA2 = await monter({ q: 'saumon fenouil' }, { creer: aA.creer, repo: fauxA });
+        bouton(rA, 'creer-ia').click(); await tick();
+        bouton(rA2, 'annuler-ia').click(); await tick(); // annulé depuis une AUTRE instance : le vol est celui de l'app
+        eq([aA.deps[0].signal.aborted, S.etatCreation(), statutVol(rA), statutVol(rA2), libelle(rA, 'creer-ia'), libelle(rA2, 'creer-ia')], [true, { memoire: null, enCours: false }, false, false, 'Créer ma recette', 'Créer ma recette'], 'P18 Annuler : le signal du vol est abandonné, plus de vol, les DEUX instances reviennent au formulaire');
+        aA.rendre[0](trouve); await tick();
+        eq([S.etatCreation().memoire, ecrA.length, (await repo.all('recipe_versions')).length - versionsAvant, rA.querySelector('.proposition') === null], [null, 0, 0, true], 'P18 Annuler : la réponse arrivée après l’annulation n’écrit rien — ni en mémoire, ni en base');
+        // « Annuler » laisse une VRAIE mémoire intacte (P7 : annule → M inchangée) ; P7.1 avec T non G
+        bouton(rA, 'creer-ia').click(); await tick(); aA.rendre[1](trouve); await tick();
+        bouton(rA, 'recommencer-ia').click(); await tick();
+        const pendantRecommencer = [statutVol(rA), rA.querySelector('.proposition h2')?.textContent, bouton(rA, 'garder-ia') === null, bouton(rA, 'recommencer-ia') === null, bouton(rA, 'modifier-demande') === null];
+        bouton(rA, 'annuler-ia').click(); await tick();
+        aA.rendre[2]({ etat: 'indisponible', raison: 'annule' }); await tick();
+        eq([pendantRecommencer, aA.deps[2].signal.aborted, S.etatCreation().memoire?.issue?.etat, S.etatCreation().memoire?.echec, !!bouton(rA, 'garder-ia'), ecrA.length], [[true, 'Saumon au fenouil', true, true, true], true, 'trouve', null, true, 0], 'P7.1 (T non G) : pendant « Recommencer », la proposition reste en dessous, inerte ; « Annuler » laisse la mémoire intacte');
+        rA.remove(); rA2.remove();
+
+        // P18 — réponse tardive : deux vols, la promesse du premier (annulé) résout APRÈS celle du second
+        S.reinitialiserCreation();
+        const aL = enMain();
+        const rL = await monter({ q: 'saumon fenouil' }, { creer: aL.creer });
+        bouton(rL, 'creer-ia').click(); await tick();
+        bouton(rL, 'annuler-ia').click(); await tick();
+        bouton(rL, 'creer-ia').click(); await tick();
+        aL.rendre[1]({ ...trouve, recette: { ...VALIDE, title: 'Truite aux herbes' } }); await tick();
+        aL.rendre[0](trouve); await tick();
+        eq([aL.n, S.etatCreation().memoire.issue.recette.title, rL.querySelector('.proposition h2')?.textContent], [2, 'Truite aux herbes', 'Truite aux herbes'], 'P18 réponse tardive : la promesse du premier vol résout après la seconde et n’écrit rien (garde de génération)');
+        // … et dans l'autre ordre : pendant le second vol, la réponse tardive du premier ne le termine pas
+        S.reinitialiserCreation();
+        const aL2 = enMain();
+        const rL2 = await monter({ q: 'saumon fenouil' }, { creer: aL2.creer });
+        bouton(rL2, 'creer-ia').click(); await tick();
+        bouton(rL2, 'annuler-ia').click(); await tick();
+        bouton(rL2, 'creer-ia').click(); await tick();
+        aL2.rendre[0](trouve); await tick();
+        const pendantSecond = [S.etatCreation().enCours, statutVol(rL2), S.etatCreation().memoire];
+        aL2.rendre[1]({ etat: 'indisponible', raison: 'serveur' }); await tick();
+        eq([pendantSecond, S.etatCreation().memoire?.issue?.raison], [[true, true, null], 'serveur'], 'P18 réponse tardive : pendant le second vol, la réponse du premier est muette — le vol continue, la mémoire reste vide');
+        rL.remove(); rL2.remove();
+
+        // P18 — hors ligne (C-14) : dit AVANT tout appel ; « Réessayer » force l'état en ligne
+        S.reinitialiserCreation();
+        const aO = enMain(); const adrO = [];
+        const rO = await monter({ q: 'saumon' }, { creer: aO.creer, enLigne: () => false, remplacerAdresse: (x) => adrO.push(x) });
+        bouton(rO, 'creer-ia').click(); await tick();
+        eq([aO.n, textes(rO, '[data-role="issue-ia"] .status > span'), !!bouton(rO, 'reessayer-ia'), S.etatCreation().enCours, S.etatCreation().memoire?.issue?.raison, !!bouton(rO, 'demande-ia')], [0, ['Tu es hors ligne.'], true, false, 'hors_ligne', true], 'P18 hors ligne : aucun appel, aucun vol, le texte, « Réessayer » et le formulaire');
+        bouton(rO, 'reessayer-ia').click(); await tick();
+        eq([aO.n, aO.deps[0]?.enLigne?.(), statutVol(rO), adrO.length], [1, true, true, 2], 'P18 hors ligne : « Réessayer » force l’état en ligne (navigator.onLine peut mentir) et lance UN appel');
+        bouton(rO, 'annuler-ia').click(); await tick();
+        rO.remove();
+
+        // Filet : jamais d'écran figé ni de proposition illisible
+        for (const [nom, creer] of [['un appel qui lève', async () => { throw new TypeError('bogue'); }], ['un trouvé sans recette', async () => ({ etat: 'trouve', recette: null })], ['un trouvé aux lignes informes', async () => ({ ...trouve, recette: { ...VALIDE, ingredients: [{}] } })], ['une issue nulle', async () => null]]) {
+          S.reinitialiserCreation();
+          const r = await monter({ q: 'saumon' }, { creer });
+          bouton(r, 'creer-ia').click(); await tick(); await tick();
+          eq([S.etatCreation().enCours, S.etatCreation().memoire?.issue?.raison, textes(r, '[data-role="issue-ia"] small'), r.querySelector('.proposition') === null], [false, 'interne', ['Code : interne'], true], 'filet (' + nom + ') : plus de vol, issue interne, aucune proposition');
+          r.remove();
+        }
+
+        // P7 (résolution) — une issue « annule » venue de l'appel lui-même (signal extérieur) ne touche jamais la mémoire
+        {
+          S.reinitialiserCreation();
+          let n = 0; const creerA = async () => (++n === 1 ? trouve : { etat: 'indisponible', raison: 'annule' });
+          const r = await monter({ q: 'saumon' }, { creer: async () => ({ etat: 'indisponible', raison: 'annule' }) });
+          bouton(r, 'creer-ia').click(); await tick(); await tick();
+          const sansMemoire = [S.etatCreation(), bouton(r, 'issue-ia') === null, libelle(r, 'creer-ia')];
+          r.remove();
+          const r2b = await monter({ q: 'saumon fenouil' }, { creer: creerA });
+          bouton(r2b, 'creer-ia').click(); await tick(); await tick();
+          bouton(r2b, 'recommencer-ia').click(); await tick(); await tick();
+          eq([sansMemoire, n, S.etatCreation().memoire?.issue?.etat, S.etatCreation().memoire?.echec, bouton(r2b, 'issue-ia') === null, !!bouton(r2b, 'garder-ia')], [[{ memoire: null, enCours: false }, true, 'Créer ma recette'], 2, 'trouve', null, true, true], 'P7 : « annule » laisse la mémoire telle quelle — sans mémoire, le formulaire ; après une proposition, ni échec affiché ni proposition perdue');
+          r2b.remove();
+        }
+
+        // P6 — une racine construite pendant le vol mais montée APRÈS sa résolution (le routeur l'insère après la fin de la route) ne reste pas figée
+        S.reinitialiserCreation();
+        const aM = enMain();
+        const rM = await monter({ q: 'saumon fenouil' }, { creer: aM.creer });
+        bouton(rM, 'creer-ia').click(); await tick();
+        const tardive = await S.renderCreerIA({}, { q: 'saumon fenouil' }, ctxDe(ANTH), { creer: sansAppel, remplacerAdresse: () => {}, navigate: () => {}, toast: () => {} });
+        const enVolAvant = statutVol(tardive);
+        aM.rendre[0](trouve);
+        for (let i = 0; i < 12; i += 1) await Promise.resolve(); // la résolution passe avant le montage (notifier écarte la racine détachée)
+        const resoluAvantMontage = !S.etatCreation().enCours;
+        scene.append(tardive);
+        await tick();
+        eq([enVolAvant, resoluAvantMontage, statutVol(tardive), tardive.querySelector('.proposition h2')?.textContent, !!bouton(tardive, 'garder-ia')], [true, true, false, 'Saumon au fenouil', true], 'P6 : une racine montée après la résolution du vol se remet à jour (ni écran du vol figé, ni « Annuler » d’un vol fini)');
+        rM.remove(); tardive.remove();
+      });
+      eq(appelsReseau, 0, 'écran de création : aucun appel réseau réel pendant ces tests');
+    } finally { globalThis.fetch = vraiFetch; scene.remove(); S.reinitialiserCreation(); setUiLocale(localeAvant); }
+
+    // F2 — ROUTES_DE_SAISIE : une passe de synchronisation ne reconstruit jamais l'écran de création (sa saisie et son vol)
+    const etatUi = await import('../src/ui/state.js');
+    ok(etatUi.ROUTES_DE_SAISIE.includes('/recipes/creer') && etatUi.estRouteDeSaisie('/recipes/creer') && !etatUi.estRouteDeSaisie('/recipes/rc1'), 'F2 : /recipes/creer est un écran de saisie, /recipes/rc1 ne l’est pas');
+
+    // en.js : chaque texte de l'écran a sa traduction
+    const CLES_T3 = ['Créer une recette avec l’assistant IA', 'Pour créer une recette, configure l’assistant IA : fournisseur Anthropic, modèle et clé.', 'Ce fournisseur ne crée pas de recette ici. Choisis Anthropic dans Réglages → Assistant IA.', 'Cette version ne peut pas être adaptée ici.', 'Retour à la recette',
+      'Ce que tu as, ce que tu veux', 'Ex. : un souper pour deux avec du saumon et du fenouil, en 30 minutes', 'Restrictions', 'Type de recette', 'Au choix de l’assistant', 'Portions', 'Temps maximal (minutes, facultatif)', 'Créer ma recette', 'Créer à nouveau', 'Une création = un appel à ton compte Anthropic.',
+      'Écris d’abord ce que tu veux cuisiner.', 'Portions : un nombre entier de 1 à 12.', 'Temps maximal : de 5 à 240 minutes, ou vide.', 'L’assistant compose une recette…', 'Annuler', 'Une création est déjà en cours : annule-la d’abord.', 'La demande a changé depuis cette proposition.',
+      'Créée avec l’IA · non testée', 'Adaptée avec l’IA · non testée', 'Selon l’assistant : {texte}', '1 portion', '{n} portions', 'environ {m} min (estimé par l’assistant)', 'Ingrédients', 'Étapes', 'Conseils', 'À vérifier avant de servir', 'Restrictions demandées', 'Incompatible : {lignes}', 'À vérifier, à retirer : {lignes}', 'À vérifier', 'identité proposée',
+      'L’assistant n’a pas cuisiné cette recette : vérifie les quantités, les cuissons et les étiquettes avant de la servir.', 'Demande envoyée : {q}', 'au plus {m} min', '{u} jetons', 'Cette proposition n’est pas enregistrée : elle sera perdue à la fermeture de l’app.', 'Garder cette recette', 'Recommencer', 'Modifier la demande',
+      'Recette gardée', 'Ouvrir la fiche', 'Enregistrement de la recette…', 'La recette n’a pas pu être gardée. Réessaie.', 'L’assistant n’a pas rendu une recette lisible. Recommence.', 'Réponse coupée : réessaie avec une demande plus courte.', 'Tu es hors ligne.', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.',
+      'Trop de demandes pour l’instant. Réessaie dans une minute.', 'L’assistant a refusé cette demande.', 'L’assistant n’a pas répondu. Réessaie.', 'Réessayer', 'Réglages', 'Code : {c}'];
+    eq(CLES_T3.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'en.js : chaque texte de l’écran de création a sa traduction');
+  }
 }
