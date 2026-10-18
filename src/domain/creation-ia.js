@@ -213,7 +213,8 @@ export async function creerRecetteIA(args, deps) {
   try {
     const dp = deps && typeof deps === 'object' ? deps : {};
     const { demande: texteDemande, filtres, langue, cfg, parente, changement } = args ?? {};
-    modele = typeof cfg?.model === 'string' ? cfg.model : null;
+    const lu0 = cfg?.model;                                 // UNE lecture : le corps et l'issue portent la même valeur (un getter ne peut pas les départager)
+    modele = typeof lu0 === 'string' ? lu0 : null;
     if (!cfg || typeof cfg !== 'object' || !cfg.provider || cfg.provider === 'none' || typeof cfg.api_key !== 'string' || !cfg.api_key || !modele) return issue('non_configure');
     if (cfg.provider !== 'anthropic') return issue('non_pris_en_charge');
     // Une clé collée avec un caractère invisible ou hors ASCII ferait lever fetch (« ByteString ») avant tout réseau : c'est une clé refusée, pas une panne.
@@ -235,7 +236,7 @@ export async function creerRecetteIA(args, deps) {
     try {
       // Corps et en-têtes sont calculés HORS du try du réseau : une exception ici est `interne` (filet), jamais `reseau`.
       // Pas de `thinking`, pas de `tools` : seuls les blocs `text` sont lus (F11).
-      const corps = JSON.stringify({ model: cfg.model, max_tokens: LIMITES_CREATION.maxTokens, system: demande.system, messages: [{ role: 'user', content: demande.user }] });
+      const corps = JSON.stringify({ model: modele, max_tokens: LIMITES_CREATION.maxTokens, system: demande.system, messages: [{ role: 'user', content: demande.user }] });
       const entetes = anthropicHeaders(cfg.api_key);
       let r;
       try {
@@ -255,6 +256,8 @@ export async function creerRecetteIA(args, deps) {
         if (morceaux === null) return issue('indisponible', 'reponse_illisible');
         texte = morceaux === false ? await r.text() : await new Blob(morceaux).text();
       } catch { return issue('indisponible', ctl.signal.aborted ? motifAbandon() : 'reseau'); }
+      // Un fetch sourd au signal (ou une réponse déjà arrivée) ne rend jamais un résultat après un abandon extérieur : « annule » ne dépend pas de l'écran.
+      if (dp.signal?.aborted) return issue('indisponible', 'annule');
       if (typeof texte !== 'string' || texte.length > corpsMax) return issue('indisponible', 'reponse_illisible');
       let json;
       try { json = JSON.parse(texte); } catch { return issue('indisponible', 'reponse_illisible'); }

@@ -243,13 +243,16 @@ export async function runCreerIaTests({ eq, ok }) {
   { const { issue } = await appel(() => reponse(200, { content: [{ type: 'text', text: '{' }], stop_reason: 'max_tokens' })); eq(issue.raison, 'interrompu', 'coupure : max_tokens → interrompu (C-13)'); }
   { const { issue } = await appel(() => reponse(200, { content: [], stop_reason: 'refusal' })); eq(issue.raison, 'refus', 'refus du modèle → refus'); }
   { const { issue } = await appel(() => reponse(200, { content: [{ type: 'thinking', thinking: 'x' }, { type: 'text', text: JSON.stringify(VALIDE) }], stop_reason: 'end_turn' })); eq(issue.etat, 'trouve', 'seuls les blocs text sont lus (F11)'); }
-  for (const [status, raison] of [[401, 'cle_refusee'], [429, 'trop_de_demandes'], [400, 'requete'], [403, 'cle_refusee'], [500, 'serveur'], [418, 'requete']]) { const { issue } = await appel(() => reponse(status, 'CORPS-SENTINELLE')); eq([issue.raison, JSON.stringify(issue).includes('SENTINELLE')], [raison, false], `statut ${status} → ${raison}, corps d’erreur jamais dans l’issue`); }
+  for (const [status, raison] of [[401, 'cle_refusee'], [429, 'trop_de_demandes'], [400, 'requete'], [403, 'cle_refusee'], [500, 'serveur'], [418, 'requete'], [302, 'serveur']]) { const { issue } = await appel(() => reponse(status, 'CORPS-SENTINELLE')); eq([issue.raison, JSON.stringify(issue).includes('SENTINELLE')], [raison, false], `statut ${status} → ${raison}, corps d’erreur jamais dans l’issue`); }
   { const { issue } = await appel(() => { throw new TypeError('Failed to fetch'); }); eq(issue.raison, 'reseau', 'réseau'); }
   { const { issue } = await appel(() => reponse(200, 'pas du json')); eq(issue.raison, 'reponse_illisible', 'corps HTTP non JSON → reponse_illisible (F19)'); }
   { const { issue } = await appel(() => reponse(200, corpsOk('Je ne peux pas, désolé.'))); eq([issue.raison, issue.motif], ['illisible', 'json'], 'texte du modèle sans JSON → illisible, motif json (C-3, P13)'); }
   { const ctl = new AbortController(); ctl.abort(); const { issue, appels } = await appel(() => reponse(200, corpsOk('{}')), { signal: ctl.signal }); eq([issue.raison, appels.length], ['annule', 0], 'déjà annulé → annule sans fetch'); }
-  { const { issue } = await appel(pendante, { tentativeMs: 5 }); eq(issue.raison, 'delai', 'délai → delai (P2)'); }
-  { const c = new AbortController(); const p = appel(pendante, { signal: c.signal, tentativeMs: 60000 }); c.abort(); const { issue } = await p; eq(issue.raison, 'annule', 'abandon extérieur en vol → annule (P2/P18)'); }
+  // Une garde de 2 s : si un relais d'abandon disparaît, `pendante` ne se rejette jamais — le test ROUGIT au lieu de pendre la suite.
+  const avecGarde = async (p) => { let minuterie; try { return await Promise.race([p, new Promise((fin) => { minuterie = setTimeout(() => fin({ issue: { raison: 'PENDU : le relais d’abandon n’a pas joué' } }), 2000); })]); } finally { clearTimeout(minuterie); } };
+  { const { issue } = await avecGarde(appel(pendante, { tentativeMs: 5 })); eq(issue.raison, 'delai', 'délai → delai (P2)'); }
+  { const c = new AbortController(); const p = appel(pendante, { signal: c.signal, tentativeMs: 60000 }); c.abort(); const { issue } = await avecGarde(p); eq(issue.raison, 'annule', 'abandon extérieur en vol → annule (P2/P18)'); }
+  { const c = new AbortController(); const sourd = () => new Promise((fin) => setTimeout(() => fin(reponse(200, corpsOk(JSON.stringify(VALIDE)))), 80)); setTimeout(() => c.abort(), 20); const { issue, appels } = await appel(sourd, { signal: c.signal, tentativeMs: 60000 }); eq([issue.etat, issue.raison, issue.recette, appels.length], ['indisponible', 'annule', null, 1], 'abandon extérieur : un fetch sourd au signal qui répond après l’abandon rend annule, jamais la recette'); }
   { const { issue } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), { corpsMax: 10 }); eq(issue.raison, 'reponse_illisible', 'corps au-dessus de corpsMax → reponse_illisible'); }
   { const vraie = new Response(JSON.stringify(corpsOk(JSON.stringify(VALIDE))), { status: 200, headers: { 'content-type': 'application/json' } }); const { issue } = await appel(() => vraie); eq(issue.etat, 'trouve', 'corps lu en flux (vraie Response) → trouve (P18, V-F1)'); }
   { const { issue } = await appel(() => reponse(200, corpsOk(JSON.stringify({ ...VALIDE, title: 't'.repeat(120), ingredients: Array.from({ length: 40 }, (_, i) => ({ name: 'ing' + i, quantity: 1, unit: 'g' })), steps: Array.from({ length: 20 }, () => 'é'.repeat(500)) })))); eq(issue.etat, 'trouve', 'bornes maximales acceptées (P18)'); }
@@ -278,6 +281,8 @@ export async function runCreerIaTests({ eq, ok }) {
   { const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { cfg: { ...cfg, api_key: 'a\u0000b' } }); eq([issue.raison, appels.length], ['cle_refusee', 0], 'garde : clé avec un caractère de contrôle → cle_refusee sans appel'); }
   { const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { cfg: { ...cfg, api_key: 12345 } }); eq([issue.etat, appels.length], ['non_configure', 0], 'garde : clé qui n’est pas une chaîne → non_configure sans appel'); }
   { const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { cfg: { ...cfg, model: '' } }); eq([issue.etat, appels.length], ['non_configure', 0], 'garde : modèle vide → non_configure sans appel'); }
+  { const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { cfg: { ...cfg, model: 42 } }); eq([issue.etat, issue.modele, appels.length], ['non_configure', null, 0], 'garde : modèle qui n’est pas une chaîne → non_configure sans appel, modèle null dans l’issue'); }
+  { let lectures = 0; const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { cfg: { provider: 'anthropic', api_key: CLE, get model() { lectures += 1; return 'modele-' + lectures; } } }); eq([issue.etat, issue.modele, JSON.parse(appels[0].options.body).model, lectures], ['trouve', 'modele-1', 'modele-1', 1], 'modèle : lu UNE seule fois, le corps et l’issue portent la même valeur'); }
   {
     const parente = { id: 'rv_p', recipe_id: 'rc_p', title: 'Saumon', servings: 2, ingredients: [{ source_text: '200 g saumon' }], steps: [{ text: 'Cuire.' }], provenance: { creation: { description: 'Un plat.' } } };
     const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { parente, changement: ' pour 4 personnes ' });
@@ -288,23 +293,32 @@ export async function runCreerIaTests({ eq, ok }) {
   }
   { // « ne lève jamais » : chaque entrée absurde rend une issue, avec la raison attendue
     const enLigne = () => true;
+    // Aucun réseau : les entrées sans fetch propre reçoivent un espion qui enregistre puis lève ; il ne doit JAMAIS être appelé.
+    const reseauTente = [];
+    const espion = () => { reseauTente.push(1); throw new Error('réseau interdit dans la suite'); };
     const ENTREES = [
       ['rien', [undefined, undefined], ['non_configure', null]], ['nuls', [null, null], ['non_configure', null]], ['nombre', [42, {}], ['non_configure', null]], ['chaîne', ['x', { fetch: 3 }], ['non_configure', null]], ['cfg nul', [{ cfg: null }, {}], ['non_configure', null]],
-      ['getter qui lève', [{ demande: 'saumon', cfg: { provider: 'anthropic', api_key: CLE, get model() { throw new Error('boom'); } } }, { enLigne }], ['indisponible', 'interne']],
-      ['enLigne qui lève', [{ demande: 'saumon', cfg }, { enLigne: () => { throw new Error('boom'); } }], ['indisponible', 'interne']],
+      ['getter qui lève', [{ demande: 'saumon', cfg: { provider: 'anthropic', api_key: CLE, get model() { throw new Error('boom'); } } }, { fetch: espion, enLigne }], ['indisponible', 'interne']],
+      ['enLigne qui lève', [{ demande: 'saumon', cfg }, { fetch: espion, enLigne: () => { throw new Error('boom'); } }], ['indisponible', 'interne']],
       ['fetch qui lève (sync)', [{ demande: 'saumon', cfg }, { fetch: () => { throw new RangeError('boom'); }, enLigne }], ['indisponible', 'reseau']],
       ['fetch rend null', [{ demande: 'saumon', cfg }, { fetch: async () => null, enLigne }], ['indisponible', 'interne']],
       ['signal qui n’en est pas un', [{ demande: 'saumon', cfg }, { fetch: async () => reponse(200, 'x'), enLigne, signal: { aborted: false } }], ['indisponible', 'interne']],
-      ['demande non chaîne', [{ demande: { toString() { throw new Error('boom'); } }, cfg }, { enLigne }], ['indisponible', 'requete']],
+      ['demande non chaîne', [{ demande: { toString() { throw new Error('boom'); } }, cfg }, { fetch: espion, enLigne }], ['indisponible', 'requete']],
     ];
     const rendus = [];
     for (const [, [a, dp]] of ENTREES) { let i; try { i = await C.creerRecetteIA(a, dp); } catch (e) { i = { etat: 'LEVE', raison: String(e) }; } vues.push(i); rendus.push([i.etat, i.raison]); }
     eq(rendus, ENTREES.map((e) => e[2]), 'ne lève jamais : ' + ENTREES.map((e) => e[0]).join(', '));
+    eq(reseauTente.length, 0, 'aucun réseau : l’espion des trois entrées sans fetch propre n’a jamais été appelé');
   }
   ok(vues.every((i) => !JSON.stringify(i).includes(CLE)), 'clé : aucune des issues rendues par le bloc ne la contient (C-8)');
   ok(!JSON.stringify(erreurs).includes(CLE), 'journal : la clé n’est jamais journalisée (C-8)');
-  ok(erreurs.length >= 2 && erreurs.every((a) => /illisible|interne/.test(JSON.stringify(a))), 'journal : seuls illisible et interne journalisent (P13)');
-  eq(erreurs.filter((a) => /illisible:json/.test(JSON.stringify(a))).length >= 1 && erreurs.every((a) => a.length === 2 && Object.keys(a[1]).every((k) => ['store', 'id', 'status', 'reason', 'table', 'count', 'name'].includes(k))), true, 'journal : clés SAFE seulement, motif de la forme « illisible:json » (P13)');
+  // P13 : chaque entrée du journal est EXACTEMENT { reason } ou { reason, name } (clés SAFE de log.js, jamais un corps ni un id), reason dans une liste fermée.
+  const RAISON_JOURNAL = /^(interne|illisible:(json|forme|bornes|lien|affirmation|caracteres))$/;
+  const cles = (a) => Object.keys(a[1] || {}).sort().join(',');
+  ok(erreurs.length >= 2, 'journal : le bloc a journalisé (au moins un illisible et un interne)');
+  ok(erreurs.every((a) => a.length === 2 && a[0] === '[cuisine-os] creation_ia' && /^(reason|name,reason)$/.test(cles(a))), 'journal : chaque entrée est exactement { reason } ou { reason, name }, sous le code creation_ia (P13)');
+  ok(erreurs.every((a) => RAISON_JOURNAL.test(a[1].reason) && (a[1].name === undefined || (a[1].reason === 'interne' && /Error$/.test(a[1].name)))), 'journal : reason dans la liste fermée (interne | illisible:motif) ; name seulement avec interne');
+  ok(erreurs.some((a) => a[1].reason === 'illisible:json') && erreurs.some((a) => a[1].reason === 'illisible:affirmation') && erreurs.some((a) => a[1].reason === 'interne'), 'journal : illisible:json, illisible:affirmation et interne ont chacun été journalisés');
   } finally { console.error = vraiError; }
 
   // --- T5 : N-8 « une ligne non vérifiée ne certifie rien » (règle ASYMÉTRIQUE, R-CRE-1) et N-9 « telle qu'écrite » (S1, S2, F12, P5, P11)
