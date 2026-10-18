@@ -62,6 +62,7 @@
 - Create: `src/domain/assistant-config.js`
 - Modify: `src/sync/tables.js` (fin de fichier : `SYNC_STORES_0001`)
 - Modify: `sw.js` (`SHELL` + module, `VERSION = 'cuisine-os-v0.6.0-1'`)
+- Modify (minimal, Step 6 bis) : `tools/generer-migrations.mjs:9-10,50`, `tools/generer-migrations.test.mjs:5,23,49-52`
 - Create: `tests/assistant-compte.js` ; Modify: `tests/tests.js:23,178-185`
 - Modify (retournés) : `tests/sync.js:9` (26), `:70` (`DB_VERSION`), `:226` (`V1_SEULEMENT` sans `assistant_config`), `:243` (`schema.DB_VERSION`), `tests/ajouter.js:1858,1860`, `tests/sync-l3.js:1864`, `tests/recherche-web.js:40,43`
 - Create: `.superpowers/sdd/2026-10-17-assistant-compte/suite.cjs` (copie de celui du lot confort)
@@ -104,7 +105,7 @@ export async function runAssistantCompteTests({ eq, ok }) {
   eq(N({ provider: 'anthropic', model: 'a​b\u0007c', api_key: 'k‮k' }), { provider: 'anthropic', model: 'abc', base_url: '', api_key: 'kk' }, 'normaliser : Cc/Cf retirés (I-H)');
   eq([N({ provider: 'anthropic', model: 'm'.repeat(300), api_key: 'k' }).model.length, N({ provider: 'anthropic', model: 'm', api_key: 'k'.repeat(600) }).api_key.length], [200, 500], 'normaliser : bornes 200 / 500 points de code');
   eq(N({ provider: 'anthropic', model: 7, api_key: ['k'], base_url: {} }), { provider: 'anthropic', model: '', base_url: '', api_key: '' }, 'normaliser : types faux → chaînes vides, jamais une levée');
-  eq([A.configVide(VIDE), A.configVide(null), A.configVide({ provider: 'anthropic', api_key: 'k' })], [true, true, false], 'configVide');
+  eq([A.configVide(VIDE), A.configVide(null), A.configVide({ provider: 'anthropic', api_key: 'k' }), A.configVide({ provider: 'inconnu', api_key: 'k' })], [true, true, false, true], 'configVide : délègue à la normalisation (fournisseur inconnu = vide)');
 }
 ```
 
@@ -162,7 +163,8 @@ export function normaliserConfigAssistant(brut) {
   };
 }
 
-export const configVide = (cfg) => !cfg || typeof cfg !== 'object' || cfg.provider === 'none' || cfg.provider === undefined;
+// Une seule définition du « vide » : celle de la normalisation (revue Neegan 1.2 : un fournisseur inconnu est vide).
+export const configVide = (cfg) => normaliserConfigAssistant(cfg).provider === 'none';
 ```
 Vérifier la signature réelle de `borner(s, max)` dans `src/core/bornes.js:9` (retire Cc/Cf et tronque par points de code) ; si elle ne tronque pas, tronquer par `Array.from(s).slice(0, max).join('')` après.
 
@@ -175,7 +177,12 @@ export const SYNC_STORES_0001 = Object.freeze(['books', 'book_editions', 'source
 
 - [ ] **Step 6 : versions, SHELL, pins, tests retournés** — `sw.js` : `SHELL` + `'./src/domain/assistant-config.js'`, `VERSION = 'cuisine-os-v0.6.0-1'`. Pins : `v0\.5\.1` → `v0\.6\.0`, `'0.5.1'` → `'0.6.0'` aux cinq lignes listées. `tests/sync.js:9` → `26, '26 magasins synchronisables'` ; `:70` → `eq(schema.DB_VERSION, 3, 'DB_VERSION 3')` ; `:226` → `V1_SEULEMENT` exclut aussi `'assistant_config'` (`!SYNC_INTERNAL_STORES.includes(n) && n !== 'assistant_config'`) ; `:243` → `eq(v2.idb.version, schema.DB_VERSION, …)` ; ligne 237 (« les trois magasins internes sont créés ») : ajouter `ok(v2.idb.objectStoreNames.contains('assistant_config'), 'montée 2 → 3 : le magasin assistant_config est créé')`. Le commentaire de la ligne 211 parle de « 26 magasins d'avant le lot » : laisser.
 
-- [ ] **Step 7 : vert** — suite complète verte, total épinglé relu et posé ; `node tools/generer-migrations.mjs --check` **encore 0** (le générateur n'est pas touché : il lit `SYNC_STORES` → **il doit produire 26 tables → `--check` passe à 1**). **Ruling attendu** : à cette tâche, `--check` rend 1 et `tools/*.test.mjs` rouge (25 attendues) : **accepté temporairement**, consigné ; la tâche 8 les remet au vert. Ne PAS régénérer `0001`.
+- [ ] **Step 6 bis : le générateur lit la liste figée dès maintenant** (revue Neegan 1.1, « confort SDD » : sans cela `--check` et `tools/*.test.mjs` seraient rouges de T1 à T7). Changement **minimal**, la factorisation reste en T8 :
+  - `tools/generer-migrations.mjs:9-10` : `import { TABLES, SYNC_STORES_0001 } from '../src/sync/tables.js';` (retirer l'import de `SYNC_STORES` depuis `schema.js`) ; ligne 50 : `const stores = SYNC_STORES_0001;`.
+  - `tools/generer-migrations.test.mjs:5` : importer `SYNC_STORES_0001` depuis `../src/sync/tables.js` (garder `SYNC_STORES` si d'autres tests l'utilisent) ; ligne 23 : boucle sur `SYNC_STORES_0001` ; lignes 49-52 : littéral bâti sur `SYNC_STORES_0001`.
+  - Vérifier : `node tools/generer-migrations.mjs --check` → **0**, `node --test tools/*.test.mjs` → tout vert, `shasum -a 256 supabase/migrations/0001_tables_et_regles.sql` inchangé (`e90ff35e…`).
+
+- [ ] **Step 7 : vert** — suite complète verte, total épinglé relu et posé ; `--check` 0 ; tools verts. Ne PAS régénérer `0001`.
 
 - [ ] **Step 8 : commit** `Assistant par le compte 1 : schema v3, magasin assistant_config, module de normalisation, APP 0.6.0, SW -1`
 
@@ -610,7 +617,8 @@ Vérifier que `'ecrire'` d'une ligne `deleted_at` posée est impossible : `decid
         const serveur = r.server;
         const inchangee = !!locale && !!element && locale.updated_at === element.updated_at;
         const aussiRecente = !!serveur?.data && !serveur.deleted_at && Number.isFinite(Date.parse(serveur.updated_at)) && Date.parse(serveur.updated_at) >= Date.parse(locale?.updated_at || 0);
-        if (inchangee && aussiRecente) (reecrire[r.store] ||= []).push({ ...serveur.data, updated_at: serveur.updated_at });
+        // `id` forcé (revue Neegan 1.3) : la clé primaire ne dépend jamais de ce que `data` porte.
+        if (inchangee && aussiRecente) (reecrire[r.store] ||= []).push({ ...serveur.data, id: element.id, updated_at: serveur.updated_at });
         continue;
       }
       conflits.push({ … inchangé … });
@@ -720,11 +728,43 @@ Vérifier que `'ecrire'` d'une ligne `deleted_at` posée est impossible : `decid
       champCle.value = 'sk-factice-nouvelle'; champCle.dispatchEvent(new Event('input'));
       bouton(sec, 'Enregistrer').click(); await tick();
       eq(appels, [{ provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-nouvelle' }], 'Enregistrer : saveConfig reçoit la configuration tapée');
-      // K-12 : focus dans la section → occupé
-      sec.hidden = false; champCle.focus();
-      eq(S.occupeParAssistant(), document.activeElement === champCle, 'K-12 : occupé quand le focus est dans la section (si le navigateur a donné le focus à un nœud caché)');
+      // K-12 : focus RÉEL dans la section (revue Neegan 1.4 : un nœud sous `hidden` ne reçoit jamais le focus, et
+      // « occupé === (activeElement === champ) » valait false === false — un faux vert). La scène est rendue visible
+      // le temps du focus.
+      scene.hidden = false;
+      champCle.focus();
+      eq(document.activeElement, champCle, 'K-12 : le champ a réellement reçu le focus');
+      eq(S.occupeParAssistant(), true, 'K-12 : occupé quand le focus est dans la section');
       champCle.blur();
+      scene.hidden = true;
       eq(S.occupeParAssistant(), false, 'K-12 : libre sans focus');
+      sec.remove();
+    }
+    // S14 sur « Tester » (revue Neegan 1.1, critique) : le test part de la configuration NORMALISÉE — une base_url en
+    // http ou avec identifiants ne reçoit jamais la clé en Bearer, même avant « Enregistrer ».
+    {
+      const recu = [];
+      const sec = monter({ provider: 'openai_compatible', model: 'm', base_url: 'http://x.invalid/v1', api_key: 'sk-factice-test' }, {}, { tester: async (cfg) => { recu.push(cfg); return 'OK'; }, saveConfig: async () => {}, dire: () => {}, confirm: async () => true });
+      bouton(sec, 'Tester').click(); await tick();
+      eq(recu, [{ provider: 'openai_compatible', model: 'm', base_url: '', api_key: 'sk-factice-test' }], 'S14 : « Tester » reçoit la configuration normalisée (base_url http vidée)');
+      const urlBase = [...sec.querySelectorAll('input[type="text"]')].find((i) => i.placeholder.startsWith('https://api.openai.com'));
+      urlBase.value = 'https://u:p@x.invalid/v1'; urlBase.dispatchEvent(new Event('input'));
+      bouton(sec, 'Tester').click(); await tick();
+      eq(recu.at(-1).base_url, '', 'S14 : identifiants dans l’URL → vidée aussi pour « Tester »');
+      sec.remove();
+    }
+    // K-6 : après un « Enregistrer » réussi, « Aucun » sait qu'une ligne existe maintenant (revue Neegan 1.5 : `avait` suit)
+    {
+      const appels = [];
+      const sec = monter({ provider: 'none', model: '', base_url: '', api_key: '' }, {}, { saveConfig: async (c) => { appels.push(c); }, dire: () => {}, confirm: async () => true });
+      const sel = selectFournisseur(sec); sel.value = 'anthropic'; sel.dispatchEvent(new Event('change'));
+      const champs = [...sec.querySelectorAll('input')];
+      const modele = champs.find((i) => i.placeholder.startsWith('ex. gpt')); modele.value = 'm'; modele.dispatchEvent(new Event('input'));
+      const cle = sec.querySelector('input[type="password"]'); cle.value = 'sk-factice-puis-aucun'; cle.dispatchEvent(new Event('input'));
+      bouton(sec, 'Enregistrer').click(); await tick();
+      sel.value = 'none'; sel.dispatchEvent(new Event('change'));
+      bouton(sec, 'Enregistrer').click(); await tick();
+      eq(appels.map((c) => c.provider), ['anthropic', 'none'], 'K-6 : enregistrer puis « Aucun » dans la même instance → la ligne vide part (avait mis à jour)');
       sec.remove();
     }
     // suivreMoteur ne rafraîchit pas quand occupé (déjà éprouvé ; ici : le câblage de la page passe par occupeParAssistant)
@@ -758,7 +798,7 @@ export const occupeParAssistant = (doc = document) => !!doc.activeElement?.close
 export function sectionAssistant({ llm: initial, sync = {}, lie = false, suitLeCompte = configAssistantSuitLeCompte },
   { saveConfig = repo.saveAssistantConfig, confirm = confirmDialog, dire = toast, tester = null, rafraichir = refresh } = {}) {
   const llm = { provider: 'none', base_url: '', model: '', api_key: '', ...(initial || {}) };
-  const avait = !configVide(initial);
+  let avait = !configVide(initial); // suit les enregistrements de cette instance (revue Neegan 1.5)
   const llmStatus = el('div', { class: 'muted' });
   const enregistrer = async () => {
     const cfg = normaliserConfigAssistant(llm);
@@ -768,10 +808,19 @@ export function sectionAssistant({ llm: initial, sync = {}, lie = false, suitLeC
       if (sync.user && !(await confirm(t('Retirer l’assistant de tous tes appareils ?'), { danger: true, okLabel: t('Retirer') }))) return;
     }
     await saveConfig(cfg);
+    avait = !configVide(cfg);
     dire(t('Assistant enregistré'));
     rafraichir();
   };
-  const testerCfg = tester || (async () => { const p = providerFrom({ llm }); if (!p.configured) throw new Error(t('Configuration incomplète')); return String(await p.complete([{ role: 'user', content: 'Réponds uniquement : OK' }], { maxTokens: 5 })).slice(0, 80); });
+  // S14 (revue Neegan 1.1, critique) : « Tester » part de la configuration NORMALISÉE, jamais de l'objet tapé — une
+  // base_url en http ou avec identifiants ne reçoit la clé en Bearer ni avant ni après « Enregistrer ».
+  const testerCfg = async () => {
+    const cfg = normaliserConfigAssistant(llm);
+    if (tester) return tester(cfg);
+    const p = providerFrom({ llm: cfg });
+    if (!p.configured) throw new Error(t('Configuration incomplète'));
+    return String(await p.complete([{ role: 'user', content: 'Réponds uniquement : OK' }], { maxTokens: 5 })).slice(0, 80);
+  };
   const sec = section(t('Assistant IA'),
     el('p', { class: 'muted' }, t('Fournisseur-agnostique. Sans configuration, tout fonctionne à la main.') + ' ' + texteAssistant({ sync, lie, suitLeCompte })),
     el('div', { class: 'two-col' },
