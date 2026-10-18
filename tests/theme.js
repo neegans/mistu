@@ -1,7 +1,9 @@
 // Thème « magazine culinaire » (spec 2026-10-18-refonte-visuelle). La feuille est LUE et MESURÉE, jamais recopiée.
 const JETONS = ['--paper', '--paper-2', '--card', '--ink', '--muted', '--line', '--field-line', '--action', '--action-2', '--action-bg', '--accent', '--accent-2', '--accent-bg', '--warn', '--warn-bg', '--warn-line', '--danger', '--danger-bg', '--danger-line', '--ok', '--ok-bg', '--backdrop', '--tap', '--radius', '--radius-pill', '--shadow', '--serif', '--sans', '--topbar-h', '--cream', '--cream-2', '--green', '--green-2', '--sage', '--sage-2'];
 // (texte, fond, où) — spec § 3.6
-const PAIRES = [['--ink', '--paper', 'corps'], ['--muted', '--paper', '.muted'], ['--muted', '--paper-2', '.badge / .chip.neutral'], ['--muted', '--card', 'cartes'], ['--muted', '--accent-bg', 'small.muted dans .card.sage'], ['--muted', '--warn-bg', ''], ['--muted', '--danger-bg', ''], ['--muted', '--ok-bg', ''], ['--muted', '--action-bg', ''], ['--action', '--paper', 'liens'], ['--paper', '--action', '.btn.primary'], ['--paper', '--action-2', 'survol'], ['--accent', '--paper', ''], ['--accent', '--accent-bg', '.badge.original'], ['--action', '--action-bg', '.badge.ai'], ['--action', '--accent-bg', ''], ['--warn', '--warn-bg', '.status.warn / .chip.warn / .badge.reference'], ['--warn', '--paper', '.qty .est'], ['--warn', '--card', ''], ['--danger', '--danger-bg', ''], ['--ok', '--ok-bg', ''], ['--ink', '--paper-2', '.segmented actif'], ['--ink', '--card', ''], ['--card', '--ink', '.toast'], ['--paper', '--accent', '.cover bas'], ['--paper', '--accent-2', '.cover haut']];
+const PAIRES = [['--ink', '--paper', 'corps'], ['--muted', '--paper', '.muted'], ['--muted', '--paper-2', '.badge / .chip.neutral'], ['--muted', '--card', 'cartes'], ['--muted', '--accent-bg', 'small.muted dans .card.sage'], ['--muted', '--warn-bg', ''], ['--muted', '--danger-bg', ''], ['--muted', '--ok-bg', ''], ['--muted', '--action-bg', ''], ['--action', '--paper', 'liens'], ['--paper', '--action', '.btn.primary'], ['--paper', '--action-2', 'survol'], ['--accent', '--paper', ''], ['--accent', '--accent-bg', '.badge.original'], ['--action', '--action-bg', '.badge.ai'], ['--action', '--accent-bg', ''], ['--warn', '--warn-bg', '.status.warn / .chip.warn / .badge.reference'], ['--warn', '--paper', '.qty .est'], ['--warn', '--card', ''], ['--danger', '--danger-bg', ''], ['--ok', '--ok-bg', ''], ['--ink', '--paper-2', '.segmented actif'], ['--ink', '--card', ''], ['--card', '--ink', '.toast'], ['--paper', '--accent', '.cover bas'], ['--paper', '--accent-2', '.cover haut'], ['--action', '--card', 'onglet actif / panneau actif']];
+// T-2 : liste FERMÉE des 148 couleurs nommées de CSS Color 4 (transparent, currentColor et inherit n'en sont pas : permis).
+const COULEURS_NOMMEES = new Set('aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen'.split(' '));
 const HEX3 = (h) => (h.length === 4 ? '#' + [...h.slice(1)].map((c) => c + c).join('') : h);
 const lum = (hex) => { const h = HEX3(hex); const [r, g, b] = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
 const contraste = (a, b) => { const [l1, l2] = [lum(a), lum(b)].sort((x, y) => y - x); return (l1 + 0.05) / (l2 + 0.05); };
@@ -26,12 +28,20 @@ export async function runThemeTests({ eq, ok }) {
   const hors = css.replace(racine[0], '');
   const durs = [...hors.matchAll(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/gi)].map((m) => m[0].toLowerCase()).filter((h) => !['#fff', '#ffffff', '#222'].includes(h));
   eq(durs, [], 'T-2 : aucune couleur en dur hors :root (liste blanche #fff, #222)');
+  // Valeurs des déclarations seulement (jamais les sélecteurs), noms de jetons var(--…) et chaînes retirés : « --green » n'est pas « green ».
+  const valeurs = [...hors.matchAll(/\{([^{}]*)\}/g)].flatMap((m) => m[1].split(';')).filter((d) => d.includes(':')).map((d) => d.slice(d.indexOf(':') + 1).replace(/var\(--[\w-]+\)/g, '').replace(/"[^"]*"|'[^']*'/g, '').toLowerCase());
+  eq(valeurs.flatMap((x) => x.match(/[a-z]+/g) || []).filter((w) => COULEURS_NOMMEES.has(w)), [], 'T-2 : aucune couleur nommée hors :root (white, red… ; transparent, currentColor, inherit permis)');
   // Le bloc de déclarations exclut « { » : sinon la règle qui ouvre un @media est nommée « @media (…) » au lieu de son sélecteur (nav.tabs).
   const caches = [...hors.matchAll(/([^{}]+)\{[^{}]*display:\s*none[^{}]*\}/g)].map((m) => m[1].trim().replace(/\s+/g, ' ')).filter((s) => s !== '[hidden]');
   const attendus = ['aside.sidenav', 'nav.tabs', '.accueil-livre .sources:empty', '.menu-source summary::-webkit-details-marker', '.cover.with-img .title, .cover.with-img .author'];
   eq(caches.sort(), attendus.sort(), 'T-1 : inventaire EXACT des display:none (les cinq d’origine ; [hidden] à part)');
-  eq((hors.match(/visibility:\s*hidden|opacity:\s*0\b|font-size:\s*0\b/g) || []).length, 0, 'T-1 : ni visibility:hidden, ni opacity:0, ni font-size:0');
-  ok(/\[hidden\]\s*\{\s*display:\s*none\s*!important/.test(hors) && /:focus-visible/.test(hors) && /prefers-reduced-motion:\s*reduce/.test(hors), 'T-9/T-5/T-6 : [hidden] imposé, focus visible, mouvement réduit');
+  // « 0(?![.\d]) » : 0, 0px et 0% sont attrapés, 0.5 et 0.9rem non (« \b » passait entre 0 et le point).
+  eq((hors.match(/visibility:\s*hidden|opacity:\s*0(?![.\d])|font-size:\s*0(?![.\d])/g) || []).length, 0, 'T-1 : ni visibility:hidden, ni opacity:0, ni font-size:0');
+  // Le CONTENU des blocs, pas leur seule présence : l'anneau global (2 px tomate décalé 2 px) et le bloc du mouvement réduit.
+  const anneau = hors.match(/(?:^|\n)\s*:focus-visible\s*\{([^}]*)\}/)?.[1] || '';
+  const reduit = hors.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[^{}]*\{([^}]*)\}\s*\}/)?.[1] || '';
+  ok(/\[hidden\]\s*\{\s*display:\s*none\s*!important/.test(hors) && /outline:\s*2px\s+solid\s+var\(--action\)/.test(anneau) && /outline-offset:\s*2px/.test(anneau) && /transition:\s*none\s*!important/.test(reduit) && /animation:\s*none\s*!important/.test(reduit), 'T-9/T-5/T-6 : [hidden] imposé ; :focus-visible = 2px tomate décalé 2px ; mouvement réduit = transition et animation none !important (contenu des blocs)');
+  eq([...hors.matchAll(/([^{}]+)\{[^{}]*\b56px[^{}]*\}/g)].map((m) => m[1].trim()), ['.btn.big'], 'T-11 : seul .btn.big garde 56px en dur (le panneau latéral suit --topbar-h)');
   const html = await (await fetch('../index.html?v=' + v, { cache: 'no-store' })).text();
   const manifest = await (await fetch('../manifest.webmanifest?v=' + v, { cache: 'no-store' })).json();
   eq([new RegExp('name="theme-color" content="' + hex('--paper') + '"').test(html), manifest.theme_color, manifest.background_color, /apple-mobile-web-app-status-bar-style" content="default"/.test(html)], [true, hex('--paper'), hex('--paper'), true], 'T-8 : theme-color, manifeste = papier ; barre d’état default');
@@ -48,7 +58,30 @@ export async function runThemeTests({ eq, ok }) {
     // La racine aussi : ici body tient sa police de tests.css, qui masquerait un :root { font-family } en serif (le corps de l'app en hérite).
     ok(/georgia/i.test(getComputedStyle(h1).fontFamily) && !/georgia/i.test(getComputedStyle(p).fontFamily) && !/georgia/i.test(getComputedStyle(document.documentElement).fontFamily), 'typographie : h1 Georgia, corps et racine sans (calculés ; R2)');
     for (const [cls, tag] of [['pastille', 'span'], ['card', 'div'], ['muted', 'small'], ['status', 'span']]) { const n = document.createElement(tag); n.className = cls; n.hidden = true; n.textContent = 'x'; scene.append(n); eq(getComputedStyle(n).display, 'none', `T-9 : .${cls}[hidden] est caché`); }
+    const carte = document.createElement('div'); carte.className = 'card'; carte.textContent = 'Carte'; scene.append(carte);
+    eq(getComputedStyle(carte).scrollMarginTop, '72px', 'T-11 : .card scroll-margin-top = --topbar-h + .5rem (calculé : 64 + 8)');
     const top = document.createElement('div'); top.className = 'topbar'; const brand = document.createElement('a'); brand.className = 'brand'; brand.textContent = 'Cuisine OS'; top.append(brand); scene.append(top);
     ok(contraste(rgbVersHex(getComputedStyle(brand).color), rgbVersHex(getComputedStyle(top).backgroundColor)) >= 4.5, 'coquille : la marque se lit sur la barre haute (calculé)');
+    const b = document.createElement('button'); b.className = 'btn'; b.textContent = 'Un bouton'; scene.append(b);
+    const s = document.createElement('button'); s.className = 'btn small'; s.textContent = 'Petit'; scene.append(s);
+    const l = document.createElement('button'); l.className = 'btn link'; l.textContent = 'Lien'; scene.append(l);
+    const ch = document.createElement('span'); ch.className = 'chip'; ch.textContent = 'Puce'; scene.append(ch);
+    ok(b.getBoundingClientRect().height >= 44 && s.getBoundingClientRect().height >= 36 && l.getBoundingClientRect().height >= 44, 'T-4 : .btn ≥ 44, .btn.small ≥ 36, .btn.link ≥ 44 (mesurés)');
+    eq([getComputedStyle(b).borderRadius, getComputedStyle(ch).borderRadius], ['999px', '999px'], 'composants : boutons et puces en pilule');
+    const seg = document.createElement('div'); seg.className = 'segmented'; const sb = document.createElement('button'); sb.className = 'active'; sb.textContent = 'Web'; seg.append(sb); scene.append(seg);
+    ok(contraste(rgbVersHex(getComputedStyle(sb).color), rgbVersHex(getComputedStyle(sb).backgroundColor)) >= 4.5, 'segments : l’option active se lit (calculé)');
+    const badge = document.createElement('span'); badge.className = 'badge ai'; badge.textContent = 'IA'; scene.append(badge);
+    eq(rgbVersHex(getComputedStyle(badge).color), hex('--action'), 'badges : .badge.ai en tomate');
+    const inp = document.createElement('input'); inp.type = 'text'; scene.append(inp); inp.focus();
+    ok(document.activeElement === inp && rgbVersHex(getComputedStyle(inp).outlineColor) === hex('--action') && parseFloat(getComputedStyle(inp).fontSize) >= 16, 'T-5/T-8 : champ focalisé = anneau tomate, 16 px minimum (iOS ne zoome pas)');
+    inp.blur();
+    ok(contraste(rgbVersHex(getComputedStyle(inp).borderColor), '#ffffff') >= 3, 'T-10 : contour du champ ≥ 3:1 (calculé)');
+    // T-3 / R-VIS-2 : titre et auteur d'une couverture sans image se lisent EN BAS (flex-end), donc l'arrêt du bas est le plus sombre (accent, 6,38) : dégradé INVERSÉ.
+    const cov = document.createElement('div'); cov.className = 'cover'; cov.textContent = 'Titre'; scene.append(cov);
+    const arrets = (getComputedStyle(cov).backgroundImage.match(/rgba?\([^)]*\)/g) || []).map(rgbVersHex);
+    eq([arrets.length, arrets[0], arrets[arrets.length - 1], rgbVersHex(getComputedStyle(cov).color)], [2, hex('--accent-2'), hex('--accent'), hex('--paper')], 'T-3 : .cover = dégradé accent-2 (haut) → accent (bas), texte papier (calculés)');
+    // Les deux autres champs tapés de l'app (adresse du signet, clé API des Réglages) : hors sélecteur, le navigateur les rendait à 13,33 px (iOS zoome).
+    const autres = ['url', 'password'].map((t) => { const i = document.createElement('input'); i.type = t; scene.append(i); return i; });
+    ok(autres.every((i) => parseFloat(getComputedStyle(i).fontSize) >= 16 && contraste(rgbVersHex(getComputedStyle(i).borderTopColor), '#ffffff') >= 3), 'T-8/T-10 : champs adresse et clé aussi à 16 px, contour ≥ 3:1 (calculés)');
   } finally { scene.remove(); link.remove(); }
 }
