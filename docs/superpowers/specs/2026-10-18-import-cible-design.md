@@ -1,288 +1,374 @@
-# Lot A — « Importer une recette repérée » : journal d'import et import ciblé — spec (rév. 1)
+# Lot A — « Importer une recette repérée » : journal d'import et import ciblé — spec (rév. 2)
 
 Date : 18 octobre 2026. Base : `main` `57babc6`. Branche `import-cible`, worktree `~/projects/mistu-import` (serveur 8088).
 Sources : audit `docs/audits/2026-10-18-import-livres-photos-web.md` ; dossier de passation de Neegan (`Mitsu_Claude_Code`, 18 oct :
 cahier des besoins B3 et B8, plan § 3-4, maquette `mobile/04_import_recette_ciblee.png`) ; design approuvé en chat le 18 oct (journal en
-tête d'Ajouter). Méthode : spec → revue adverse → plan → construction par sous-agents → `/verify` → fusion par Neegan.
+tête d'Ajouter). Rév. 2 : après la revue adverse de la rév. 1 (2 Critical, 17 Important, mineurs) ; les rulings sont en § 12.
+Méthode : spec → revue adverse → plan → construction par sous-agents → `/verify` → fusion par Neegan.
 
 ## 0. Décisions (chacune renversable sans défaire le reste)
 
 - **D-1 (Neegan)** Le journal d'import se voit en tête de la page **Ajouter** (section « Imports »), avec un rappel sur la fiche du livre.
-- **D-2 (contrôleur, d'après le dossier)** Le lot A livre **le journal ET l'import ciblé** : toucher une recette « Repérée dans ton livre »
-  ouvre un écran déjà rattaché à sa référence, photos réorganisables, photo du plat facultative, « Extraire et enregistrer ». Le journal
-  seul n'aurait rien de visible ; l'import ciblé est son premier consommateur et le « plus petit lot utilisable » demandé. Coût si faux :
-  scinder en A1 (journal) et A2 (écran) ne défait rien.
-- **D-3** « Extraire et enregistrer » **enregistre sans passer par l'éditeur** : la recette reçoit sa version `extraction` dès que le résultat
-  est validé ; la vérification ligne à ligne reste **offerte, jamais imposée** (« Corriger » ouvre l'éditeur existant). La compatibilité
-  alimentaire ne se certifie toujours pas sur une ligne non vérifiée (règle N-8, inchangée).
-- **D-4** Photo du plat : **manuelle et facultative** dans ce lot (photographier ou choisir ; remplacer ; retirer), rangée dans `files` et
-  pointée par `recipes.photo_sha256`. Aucune récupération automatique (lot F).
-- **D-5** **Aucun changement serveur.** La consigne d'extraction (côté app, `src/domain/llm.js`) gagne deux booléens `incomplete` et
-  `missing_page`, `notes` est enfin lue, `max_tokens` passe de 4 000 à 8 000, `stop_reason` est lu (`max_tokens` → « lecture coupée »).
-- **D-6** Discordance : si le titre lu ne ressemble pas au titre de la référence (ou si la page lue diffère de plus de 3), l'écran demande
-  « Le texte lu s'intitule “X” ; la référence est “Y” (p. N). Rattacher quand même ? » **avant** d'écrire. Jamais de rattachement silencieux
-  à une autre recette, jamais de création d'une seconde fiche depuis cet écran.
-- **D-7** Le journal est **synchronisé** comme les autres magasins (texte seulement, réponse brute bornée à 64 Ko) et **archivé**. Sur un
-  autre appareil, « Reprendre » n'est offert que si le résultat validé est présent ; les photos restent sur l'appareil d'origine (lot G).
-- **D-8** L'ancienne voie « Scanner cette recette » → page Ajouter + clé `sessionStorage.cuisineos.pending_recipe` est **remplacée** par la
-  route ciblée ; la clé disparaît. « Saisir à la main » reste.
-- **D-9** La direction visuelle des maquettes (crème, olive, grandes photos) est **hors lot** : le thème « magazine » (papier, tomate, vert)
-  reste ; la couleur d'accent est une décision à part. Les maquettes fixent les **gestes et les libellés**, pas le code.
-- **D-10** L'ordre des lots suivants est revu en § 9 : **G (octets entre appareils) remonte** en parallèle de B.
+- **D-2 (contrôleur, d'après le dossier B3)** Le lot A livre **le journal ET l'import ciblé** : toucher une recette « Repérée dans ton
+  livre » ouvre un écran déjà rattaché à sa référence, photos réorganisables, photo du plat facultative, « Extraire et enregistrer ». Le
+  journal seul n'aurait rien de visible ; l'écran est le « plus petit lot utilisable » demandé. Coût si faux : scinder en A1 / A2.
+- **D-3 (dossier B3 et § 3 du plan de Neegan : « Mitsu extrait automatiquement le contenu ; il demande une intervention seulement
+  lorsqu'une ambiguïté … le justifie » ; « ne pas imposer la confirmation manuelle de chaque ligne lisible » — à CONFIRMER par Neegan,
+  revue I14)** « Extraire et enregistrer » **enregistre sans passer par l'éditeur**. La vérification ligne à ligne reste **offerte, jamais
+  imposée** (« Corriger »). La compatibilité alimentaire ne se certifie toujours pas sur une ligne non vérifiée (N-8). **Le mode cuisine et
+  la liste de courses portent le bandeau « Lue par l'assistant, non relue »** tant que la version courante est une extraction non vérifiée.
+- **D-4 (dossier B3 : zone « Photo du plat — facultatif »)** Photo du plat **manuelle et facultative** : photographier ou choisir ;
+  remplacer ; retirer. Rangée dans `files`, pointée par `recipes.photo_sha256`. Aucune récupération automatique (lot F).
+- **D-5** **Aucun changement serveur.** La consigne d'extraction (côté app) gagne `incomplete` et `missing_page`, `notes` est lue,
+  `max_tokens` passe de 4 000 à **6 000** (une sortie plus longue frôlerait l'abandon serveur à 120 s ; la preuve § 10 mesure), `stop_reason`
+  est lu.
+- **D-6** Discordance : le titre lu doit **contenir chaque mot distinctif** du titre de la référence (mots vides retirés, accents et casse
+  ignorés) ; sinon, ou si la page lue diffère de plus de 3, ou si le titre lu est nul : dialogue **avant** d'écrire. Jamais de rattachement
+  silencieux, jamais de seconde fiche depuis cet écran.
+- **D-7** Le journal est **synchronisé** (texte ; réponse brute bornée à 16 Ko, effacée à l'enregistrement) et **archivé** ; une archive plus
+  ancienne sans `imports` reste restaurable. Sur un autre appareil, « Reprendre » n'est offert que si le résultat validé est présent.
+- **D-8** La voie « Scanner cette recette » → Ajouter + `sessionStorage.cuisineos.pending_recipe` est **remplacée** par la route ciblée ;
+  la clé et la case « Oui, rattacher » disparaissent ; « Saisir à la main » reste.
+- **D-9** Direction visuelle des maquettes (crème, olive, grandes photos) : **hors lot** ; le thème « magazine » reste ; les maquettes fixent
+  les **gestes et les libellés**.
+- **D-10** Ordre des lots suivants (§ 9) : **G remonte**, en parallèle de B (fusions séquentielles : les deux touchent `sw.js`, `APP_VERSION`,
+  `en.js`, `schema.js` et le total épinglé).
+- **D-11 (rév. 2)** Entrées de l'écran : une recette `reference_only` sans `source_url`, ou `partial` (import à refaire). Une recette
+  `available` n'a pas d'entrée dans ce lot (la « relecture » d'une recette complète est hors périmètre : I-5 s'y réduit).
+- **D-12 (rév. 2)** Validation du vocabulaire : une fonction de domaine partagée (`assertVocabulaire`) appelée par les **fabricants** de fiches
+  (import ciblé, création IA, signet, éditeur), jamais un mur dans `db.mutate` (la restauration, la réception et les passes du démarrage
+  restent tolérantes).
 
 ## 1. Pour toi
 
 Dans un livre, une recette « Repérée » se touche : l'écran s'ouvre déjà sur son titre, son livre et sa page. Tu photographies ses pages
 ou tu les choisis, tu les remets dans l'ordre si besoin, tu ajoutes la photo du plat si le livre en a une, puis **« Extraire et
 enregistrer »**. L'assistant lit, l'app enregistre : la recette devient disponible, avec ses pages d'origine et sa photo, et dit ce qui
-reste incertain. Si tu fermes l'app en route, rien n'est perdu : la section **Imports** de la page Ajouter te montre ce qui est en
-cours, à reprendre ou en échec, et un geste suffit. Une relance ne rappelle pas l'assistant si sa réponse est déjà là.
+reste incertain. Si tu fermes l'app en route, les photos, l'ordre et la lecture déjà reçue sont gardés : la section **Imports** de la
+page Ajouter montre ce qui est en cours, à reprendre ou en échec, et un geste suffit. Une relance ne rappelle pas l'assistant si sa
+réponse est déjà là.
 
 ## 2. Invariants
 
 - **I-1 Rien d'inventé.** Un champ absent ou illisible vaut `null` ou `uncertain` ; `incomplete` et `missing_page` sont montrés, jamais
-  comblés. Le texte du modèle est une **donnée hostile** : validé champ par champ, borné, rendu en nœuds texte.
+  comblés. Le texte du modèle est une **donnée hostile** : validé champ par champ, borné (un dépassement **refuse** le résultat, raison
+  `hors_bornes`), rendu en nœuds texte. Un résultat **revenu du journal** (synchro, archive) est **revalidé** avant tout usage (I2).
 - **I-2 Une référence, une recette.** L'import ciblé écrit **dans** la fiche visée (même identifiant) ; il ne crée jamais de seconde fiche.
+  **Un seul import non terminé par `recipe_id`** : entrer dans l'écran reprend l'import ouvert s'il existe (I8).
 - **I-3 Le résultat vit dans le journal avant d'atteindre l'écran.** Toute réponse validée est écrite dans `imports` **avant** tout rendu ou
-  toute écriture de recette. Une fermeture ne perd que ce qui n'était pas encore reçu.
-- **I-4 Pas de promesse « exactement une fois ».** Une coupure entre la réponse du fournisseur et l'écriture locale laisse l'import
-  `echec` raison `incertain` : l'écran dit que l'appel a peut-être abouti et que relancer coûtera un appel. Le quota est réservé côté
-  serveur avant l'appel (lot passerelle) : ce lot n'y touche pas.
-- **I-5 Une correction est une version.** Relancer un import sur une recette déjà `available` crée une nouvelle version `extraction`
-  (`parent_version_id` = la courante) et ne touche jamais une version `correction` existante ; `current_version_id` ne change que si la
-  personne le demande (« Remplacer par cette lecture »).
-- **I-6 Images sources ≠ photo du plat.** Les pages (`source_page_ids`, `role: 'recette'`) servent à lire ; la photo du plat
-  (`photo_sha256`) sert à illustrer. L'une n'alimente jamais l'autre dans ce lot.
-- **I-7 Un seul import en vol par appareil**, un bouton verrouillé, un « Annuler » qui abandonne l'appel (le serveur journalise 499).
-- **I-8 Les états de la recette ne changent pas de vocabulaire** : `availability` et `verification_state` restent ; « en cours »,
-  « échec », « à reprendre » sont des états du **journal**.
+  toute écriture de recette.
+- **I-4 Pas de promesse « exactement une fois ».** Tout état où un appel a pu partir sans que sa réponse soit enregistrée (`interrompu`,
+  `annule`, `incertain`) est dit avec la même phrase : « L'appel a peut-être été compté ; relancer en coûtera un autre. » (I1).
+- **I-5 Une correction est une version, et une version de correction n'est jamais réécrite.** Sur une recette `partial`, une nouvelle
+  lecture crée une version `extraction` (parent = la courante) ; elle devient courante **sauf** si une version `correction` existe, auquel
+  cas l'écran demande « Remplacer par cette lecture ? » (défaut : non, la fiche ne change pas) (I3).
+- **I-6 Images sources ≠ photo du plat.** Pages (`source_page_ids`, `kind: 'recipe'`) pour lire ; photo du plat (`photo_sha256`) pour
+  illustrer. L'une n'alimente jamais l'autre dans ce lot.
+- **I-7 Un seul import en vol par document** (onglet), tenu par une variable de module ; « Annuler » n'est offert que par le document qui
+  tient le vol ; ailleurs, la ligne dit « En cours sur un autre écran » (I11).
+- **I-8 Les états de la recette ne changent pas de vocabulaire** : `availability` et `verification_state` restent ; « en cours », « échec »,
+  « à reprendre » sont des états du **journal**.
 - **I-9 Tout texte d'écran passe par `t()`** avec son entrée `en.js` ; aucun texte ne nomme le fournisseur ni la base.
+- **I-10 Toute transition du journal est un compare-and-set** dans une seule transaction (`db.transitionner`, § 3.6) : une transition
+  depuis un état périmé est refusée, nommée, sans écriture (I11).
 
 ## 3. Données
 
-### 3.1 Magasin `imports` (neuf, `DB_VERSION 4`)
+### 3.1 Magasin `imports` (neuf, `DB_VERSION 4`, déclaré **en dernier** dans `STORES` pour garder l'ordre de réception, K-9)
 
 ```
 { id: 'imp_…', kind: 'recette' | 'index',            // 'couverture' et 'web' réservés aux lots E et B
-  edition_id, recipe_id,                             // la référence visée (recette) ; null pour un index
-  scan_session_id, page_ids: [ 'pg_…' ],             // les photos, dans l'ordre de lecture
+  edition_id, recipe_id,                             // la référence visée ; null pour un index ou un « Regrouper en recette »
+  scan_session_id, page_ids: [ 'pg_…' ],             // les photos, DANS L'ORDRE DE LECTURE (seule source de vérité de l'ordre)
   photo_sha256: null | '…',                          // photo du plat choisie sur l'écran (posée sur la recette à l'enregistrement)
   status: 'a_lancer' | 'en_cours' | 'a_verifier' | 'enregistre' | 'echec' | 'ignore',
-  erreur: null | { raison, extra },                  // raisons de la passerelle + 'interrompu' | 'incertain' | 'hors_ligne' | 'annule' | 'coupe' | 'illisible'
-  resultat: null | { … sortie validée … },           // § 3.4
-  reponse_brute: null | string,                      // ≤ 64 Ko (points de code), diagnostic seulement, jamais rendue
-  appels: 0, model: null | string, duree_ms: null,
-  device_id, created_at, updated_at, started_at, finished_at }
+  erreur: null | { raison, extra },                  // raisons § 4.4
+  resultat: null | { … sortie validée, § 3.4 … },
+  reponse_brute: null | string,                      // ≤ 16 000 points de code, diagnostic, jamais rendue, mise à null à `enregistre`
+  appels: 0, model: null, duree_ms: null,
+  device_id, document_id_vol: null | string,          // le document (onglet) qui tient le vol, et son battement
+  battement_at: null | iso,
+  created_at, updated_at, started_at, finished_at }
 ```
-Index : `['edition_id','edition_id'], ['recipe_id','recipe_id'], ['status','status']`. Relations : `edition_id → book_editions`,
-`recipe_id → recipes`, `scan_session_id → scan_sessions`, `page_ids[] → source_pages`. Synchronisé, archivé, hors `noDelete`.
-Transitions : `a_lancer → en_cours → a_verifier | echec` ; `a_verifier → enregistre` ; `echec → en_cours` (relance) | `ignore` ;
-`en_cours → echec(annule)` par « Annuler » ; `en_cours → echec(interrompu)` au démarrage pour les lignes de **cet** appareil.
-Rétention : `enregistre` et `ignore` purgés à `init()` après 30 jours (origine `device`, hors file de synchro), comme les conflits.
+Index : `edition_id`, `recipe_id`, `status`. Relations d'archive : `edition_id → book_editions`, `scan_session_id → scan_sessions` ;
+**`recipe_id` et `page_ids[]` sont des pointeurs souples** (hors `RELATIONS`, comme `cover_sha256`) : une page retirée ou une recette
+supprimée ne bloquent pas une archive ; la fabrication ignore une page absente. Taille : résultat ≤ 6 000 jetons de sortie, réponse brute
+≤ 16 000 points de code : sous la borne de 512 Kio par élément de `sync_push`.
+
+**Transitions** (toutes par `db.transitionner`, I-10) :
+`a_lancer → en_cours | ignore` · `en_cours → a_verifier | echec` · `a_verifier → enregistre | a_lancer (changer les pages) | ignore` ·
+`echec → en_cours (relancer) | a_lancer (changer les pages) | ignore` · `en_cours → echec(annule)` par le document qui tient le vol ·
+`en_cours → echec(interrompu)` au démarrage, **seulement si `battement_at` a plus de 90 s** (le vol bat toutes les 15 s) · aucune autre.
+Une réponse qui arrive après un `annule`/`interrompu` tente `echec → a_verifier`, qui n'existe pas : elle est **écrite dans
+`reponse_brute` seulement** (diagnostic), l'état reste `echec` ; c'est le prix assumé de I-4.
+
+**Rétention** : à `enregistre`, `reponse_brute` passe à `null` ; après 30 jours, `enregistre` et `ignore` sont **supprimés** à `init()`
+par une suppression **d'origine `local`** (tombale synchronisée, R57) : la ligne disparaît aussi du serveur et des autres appareils.
+`provenance.import_id` est un **pointeur souple** (une version survit à son import).
 
 ### 3.2 Autres champs
 
 | Magasin | Ajout | Sens |
 |---|---|---|
-| `source_pages` | `position` **modifiable** ; `role: 'recette' \| 'index' \| null` posé à l'enregistrement (en plus de `kind`, conservé pour l'existant) | ordre corrigé par la personne ; nature de la photo |
-| `recipes` | `photo_sha256: null \| string` (pointeur souple, comme `cover_sha256`), `photo_origin: 'appareil' \| 'galerie' \| null` | photo du plat |
-| lignes d'ingrédients (`recipe_versions.ingredients[]`) | `uncertain: boolean` | l'incertitude dite par le modèle survit |
-| `recipe_versions.provenance` | `+ import_id`, `+ incomplete`, `+ missing_page` | d'où vient la version, et ses limites |
+| `source_pages` | `position` réécrite à l'enregistrement depuis l'ordre de `page_ids` ; `kind: 'recipe'` posé comme aujourd'hui (pas de champ `role`) | l'ordre choisi ; nature de la photo |
+| `recipes` | `photo_sha256: null \| string` (pointeur souple), `photo_origin: 'photo' \| 'image' \| null` (le geste touché) | photo du plat |
+| lignes d'ingrédients | `uncertain: boolean` | l'incertitude dite par le modèle |
+| `recipe_versions.provenance` | `import_id` (souple), `incomplete`, `missing_page`, `titre_lu` | d'où vient la version et ses limites |
 
-### 3.3 Vocabulaire validé à l'écriture
+### 3.3 Vocabulaire (D-12)
 
-`db.mutate` (porte unique) refuse une fiche `recipes` dont `availability` ∉ `AVAILABILITY` ou `verification_state` ∉ `VERIFICATION`,
-et une fiche `imports` dont `status` est hors liste (erreur nommée, aucune écriture). Les fiches reçues de la synchro ne sont pas
-revalidées (comme aujourd'hui pour les chaînes de contrôle : règle à la réception = tolérance).
+`assertVocabulaire(fiche, magasin)` (`src/domain/vocabulaire.js`, pur) : pour `recipes`, `availability` **présent et** ∉ `AVAILABILITY` ou
+`verification_state` **présent et** ∉ `VERIFICATION` → lève, nommée ; champ absent toléré. Pour `imports`, `status` ∉ liste → lève. Appelée
+par `fabriquerExtraction`, `fabriquerRecetteIA`, `fabriquerSignet` et le `save()` de l'éditeur ; un test de source épingle les appelants.
 
 ### 3.4 Sortie de l'extraction (contrat avec le modèle, côté app)
 
-Schéma demandé (`PARSER_SYSTEM` amendé, `src/domain/llm.js`) :
-```
-{"title", "language", "servings", "prep_minutes", "cook_minutes",
- "ingredients":[{"source_text","uncertain"}], "steps":[{"text"}], "printed_page",
- "sub_recipes":[{"title","page_reference"}], "uncertain_fields":[string], "notes",
- "incomplete": boolean, "missing_page": boolean}
-```
-Règles ajoutées à la consigne : « Si une page semble manquer (étapes qui commencent au milieu, ingrédients sans étapes, renvoi à une page
-absente), mets `missing_page: true` ; si la recette est visiblement partielle, `incomplete: true` ; une étape peut tenir sur plusieurs
-lignes : garde-la entière. » `validateParsedRecipe` : bornes **strictes** (titre ≤ 200 points de code, ligne ≤ 300, étape ≤ 2 000, notes
-≤ 2 000, ≤ 80 lignes, ≤ 60 étapes, entiers finis ≥ 0 pour portions/durées/page, booléens coercés, tableaux filtrés) ; `max_tokens` 8 000 ;
-`stop_reason === 'max_tokens'` → `echec(coupe)` sans écrire de recette ; JSON illisible → `echec(illisible)` (réponse brute gardée).
+Schéma demandé (`PARSER_SYSTEM` amendé) : comme aujourd'hui plus `"incomplete": boolean, "missing_page": boolean`, et la consigne : « Si
+une page semble manquer (étapes qui commencent au milieu, ingrédients sans étapes, renvoi à une page absente), `missing_page: true` ; si la
+recette est visiblement partielle, `incomplete: true` ; une étape peut tenir sur plusieurs lignes : garde-la entière dans un seul `text`. »
+`validateParsedRecipe` (durci, exporté, testé) : titre ≤ 200 points de code, ligne ≤ 300, étape ≤ 2 000, notes ≤ 2 000, ≤ 80 lignes, ≤ 60
+étapes, `sub_recipes` ≤ 20 × (titre ≤ 200, renvoi ≤ 40), `uncertain_fields` ≤ 40 × 200, entiers finis ≥ 0 pour portions, durées, page,
+booléens coercés ; **tout dépassement refuse** (`hors_bornes`). `language` n'est plus demandé (jamais utilisé). `uncertain_fields` est gardé
+dans `resultat` et affiché dans le bandeau de la fiche (« Incertain : … », borné à 300 points de code).
+`PasserelleProvider.complete(messages, { maxTokens, signal })` : `signal` relayé à `appelerAssistant` (qui l'accepte déjà) ; après l'appel
+`this.modele` (existant) **et `this.stopReason`** sont posés ; `extractRecipeFromImages(images, { signal })` et `extractIndexFromImages`
+les rendent dans leur résultat (`{ recette, stopReason, modele }`). `stopReason === 'max_tokens'` → `echec(coupe)` ; aucun JSON → `echec(illisible)` ;
+zéro ligne **et** zéro étape → `echec(vide)` : rien n'est écrit sur la recette (I13).
 
 ### 3.5 Serveur : migration `0005_imports.sql`
 
-Générée par `tools/generer-migrations.mjs` : la liste `SYNC_STORES_0003` (26) est **figée** dans `src/sync/tables.js` (dette nommée du lot
-« assistant par le compte »), `0003` est rendue depuis elle et son empreinte SHA-256 épinglée ; `0005` est rendue, à ajout seul, pour les
-magasins absents de `SYNC_STORES_0003` (ici `imports`), avec les quatre fonctions recréées sur les 27 magasins. Preuve
-`supabase/proofs/0005_imports.sql` (table, RLS, `revoke anon`, colonnes générées `edition_id` / `recipe_id` / `status`, `sync_push` accepte
-une ligne `imports`, `rollback;` dernier). `supabase/README.md` étape 11. **Ordre des gestes : `0005` collée avant le `push`** (sinon la
-synchro met les lignes `imports` en quarantaine `refus`, bruyant mais non destructif).
+Générée par `tools/generer-migrations.mjs` : `SYNC_STORES_0003` (26 noms) **figée** dans `src/sync/tables.js`, `0003` rendue depuis elle,
+son empreinte SHA-256 épinglée ; `0005` rendue, à ajout seul, pour les magasins absents de `SYNC_STORES_0003` (ici `imports`), avec les
+quatre fonctions recréées sur les 27 magasins. Preuve `supabase/proofs/0005_imports.sql` (table, RLS, `revoke anon`, colonnes générées
+`edition_id` / `recipe_id` / `status`, `sync_push` accepte une ligne `imports`, `rollback;` dernier). `supabase/README.md` étape 11.
+**`0005` collée avant le `push`** (sinon quarantaine `refus`, bruyante, non destructive).
+
+### 3.6 Deux primitives neuves
+
+- `db.transitionner(store, id, { attendus: [...statuts], patch })` : **une** transaction readwrite : lit, vérifie `status ∈ attendus`, écrit
+  `{ ...fiche, ...patch, updated_at }` avec capture d'outbox ; sinon lève `TransitionRefusee` sans écriture. Base de I-10.
+- `repo.ajouterPages(files, { edition_id, session_id, import_id })` : comme `startScanSession` **sans navigation ni toast**, en **une**
+  transaction pour les lignes (octets par `putFile` avant, comme aujourd'hui) : `source_documents`, `source_pages`, `scan_sessions` et
+  `imports.page_ids` (ajout en fin). `startScanSession` l'appelle pour les chemins existants.
+
+### 3.7 Archives (C1)
+
+`MAGASINS_AJOUTES_APRES_V1 = ['imports']` dans `schema.js` : à l'inspection et à la restauration d'une archive de format 1, un magasin de
+cette liste **absent** de l'archive vaut `[]` ; décomptes et empreintes ne l'exigent pas. Un client **plus ancien** qui lit une archive
+plus récente la refuse déjà (« entrée non déclarée ») : le README le dit (« mets l'app à jour »). Test sur une archive **figée** sans
+`imports` (fixture).
 
 ## 4. Parcours
 
-### 4.1 Entrée
+### 4.1 Entrées
 
-- Fiche du livre (`src/ui/book.js`) : la ligne d'une recette `reference_only` sans `source_url` devient un lien vers
-  `#/recipes/<id>/importer` ; le bouton « Scanner cette recette » disparaît, « Saisir à la main » reste.
-- Fiche d'une référence (`src/ui/recipe.js`) : « Scanner cette recette » devient « Importer cette recette » → même route.
-- Route neuve `route('/recipes/:id/importer', renderImportCible)` **avant** `/recipes/:id` dans `src/app.js` ; module neuf
-  `src/ui/import-cible.js` (écran) + `src/domain/import-cible.js` (logique pure : modèle d'écran, fabrication de la version, discordance,
-  transitions du journal). Une fiche qui n'est pas `reference_only` ou qui porte un `source_url` ouvre l'écran en mode « relecture »
-  (I-5) ou renvoie à la fiche avec un toast, selon le cas (§ 4.4).
+- Fiche du livre (`src/ui/book.js`) : la carte d'une recette `reference_only` sans `source_url` (ou `partial`) garde son lien vers la
+  **fiche** ; sa rangée gagne un bouton **« Importer »** (`.btn.small`, pas un lien imbriqué) → `#/recipes/<id>/importer` ; « Scanner cette
+  recette » disparaît ; « Saisir à la main » reste.
+- Fiche d'une référence (`src/ui/recipe.js`) : « Scanner cette recette » devient **« Importer cette recette »** (primaire) → même route ;
+  une fiche `partial` offre « Relire les pages » (secondaire) → même route.
+- Route `route('/recipes/:id/importer', renderImportCible)` dans `src/app.js` (regex ancrée : l'ordre n'importe pas) ; ajoutée à
+  `ROUTES_DE_SAISIE` (`src/ui/state.js`) : une passe de synchro ne reconstruit pas l'écran en plein vol (I16). Modules neufs
+  `src/ui/import-cible.js` (écran) et `src/domain/import-cible.js` (pur), tous deux dans `SHELL`. `getData` charge `imports`.
+- Une fiche `available`, ou un signet : toast « Cette recette a déjà son texte. » / « Un lien web s'importe au lot suivant. », retour fiche.
+- À l'ouverture, l'écran **reprend l'import non terminé** de cette recette s'il existe (`a_lancer`, `a_verifier`, `echec`, `en_cours`),
+  sinon en crée un `a_lancer` à la première photo (pas avant : une visite sans photo n'écrit rien). La séance d'un import est **exclue** des
+  rappels génériques (« Séances à reprendre », « Séance en cours » de la fiche livre) : filtre par `imports.scan_session_id`.
 
 ### 4.2 L'écran `#/recipes/<id>/importer`
 
-1. **En-tête** : sur-titre « Importer une recette », titre de la référence, « {livre} · p. {n} », badge « Repérée dans ton livre ».
-2. **Pages de la recette** : vignettes dans l'ordre de `position`, chacune avec son rang, son champ « p. imprimée », les boutons
-   « Monter », « Descendre » (toujours présents, ≥ 44 px) et « Retirer » (nom accessible « Retirer la page {n} ») ; le glisser au toucher
-   est un **plus** par-dessus, jamais le seul moyen. Sous les vignettes : « Photographier » et « Choisir des photos » (`pickFiles`,
-   `multiple`, `capture: 'environment'`). Chaque ajout **persiste tout de suite** : une séance liée à l'import (`scan_sessions.status:
-   'open'`, `source_documents`, `source_pages`, octets dans `files`) et `imports.page_ids` ; réordonner écrit `position` ; retirer détache
-   la page de l'import (la ligne `source_pages` reste, l'octet aussi : règle actuelle).
-3. **Photo du plat — facultatif** : « Prendre une photo », « Choisir une image », aperçu, « Remplacer », « Retirer » ; réduite par
-   `reduireImage` (1 200 px, JPEG, 16 Mpx max) comme une couverture ; octets dans `files`, `imports.photo_sha256`.
-4. **« Extraire et enregistrer »** (primaire, éteint sans page, sans session, hors ligne ou pendant un vol ; sous le bouton : « Les pages et
-   la photo seront liées à cette recette. »). Pendant le vol : « Lecture des pages par l'assistant… », « Annuler ».
-5. Sans session : la carte « Connecte-toi pour utiliser l'assistant. » (`carteConnexion(connecter, ctx)`), les photos s'ajoutent quand même.
+1. **En-tête** : sur-titre « Importer une recette », titre de la référence, « {livre} · p. {n} », badge d'état.
+2. **Pages de la recette** : vignettes dans l'ordre de `page_ids`, chacune avec son rang, son champ « p. imprimée », « Monter la page {n} »,
+   « Descendre la page {n} » (toujours présents, ≥ 44 px, le focus suit la page déplacée), « Retirer la page {n} » ; le glisser au toucher
+   est un plus. Sous les vignettes : « Photographier » (`capture: 'environment'`) et « Choisir des photos » (**sans** `capture`). Chaque
+   ajout passe par `repo.ajouterPages` : **persistant avant tout appel**. Réordonner réécrit `page_ids` (transition sur place, même statut).
+   Retirer détache la page de l'import (la ligne `source_pages` et l'octet restent, règle actuelle).
+3. **Photo du plat — facultatif** : « Prendre une photo », « Choisir une image », aperçu (`urlDeBlob`, type sûr), « Remplacer », « Retirer » ;
+   passe par le **même mur qu'une couverture** (`preparerPhotoLocale` extraite de `poserCouverture` dans `src/core/image.js` : 25 Mo, 16 Mpx,
+   JPEG 1 200 px) ; octets dans `files`, `imports.photo_sha256`.
+4. **« Extraire et enregistrer »** (primaire, jamais seul : « Retour à la fiche » à côté ; éteint sans page, sans session, hors ligne —
+   écoute `online`/`offline` — ou pendant un vol ; sous le bouton : « Les pages et la photo seront liées à cette recette. »). Pendant le vol :
+   `.status[role="status"]` « Lecture des pages par l'assistant… » suivie d'une `.row` avec « Annuler » (structure R-VIS-8).
+5. Sans session : la carte « Connecte-toi pour utiliser l'assistant. » ; les photos s'ajoutent quand même.
+6. Mode `a_verifier` (résultat déjà là) : l'écran montre « Lecture reçue le {d} » et le bouton devient **« Enregistrer cette lecture »**
+   (sans appel) ; « Changer les pages » → `a_lancer`.
 
 ### 4.3 Extraction et enregistrement
 
-1. `imports` → `en_cours` (`started_at`, `appels + 1`). Appel unique : `PasserelleProvider.complete` avec les pages **dans l'ordre de
-   `position`**, réduites par `pagePourEnvoi` (existant), `maxTokens: 8000`, `signal` d'un `AbortController` (nouveau paramètre de
-   `complete`, propagé à `appelerAssistant`).
-2. Réponse → `parseJsonLoose` + `validateParsedRecipe` → **écriture `imports.resultat` + `reponse_brute` + `model` + `duree_ms`,
-   `status: 'a_verifier'`** (I-3). Échec → `status: 'echec'`, `erreur` (raison de la passerelle : `non_connecte`, `non_admis`, `quota`,
-   `trop_de_demandes`, `trop_lourd`, `requete`, `serveur`, `delai`, `reseau` ; ou `annule`, `coupe`, `illisible`).
-3. **Discordance** (D-6, `discordance(resultat, reference)` pure) : titre lu vs titre de la référence par `normalizeText` + Jaccard des
-   mots ≥ 0,5 ou inclusion ; page lue vs `printed_page` à ± 3. Si discordance : dialogue « Rattacher quand même ? » / « Annuler » ;
-   « Annuler » laisse l'import `a_verifier` (reprenable, le résultat n'est pas perdu).
-4. **Fabrication** (`fabriquerExtraction(resultat, { reference, pages, edition, convention, importId, modele })`, pure, dans
-   `src/domain/import-cible.js`, calquée sur `fabriquerRecetteIA`) : lignes par `parseIngredientLine` (avec `uncertain` du modèle,
-   `verification_state: 'to_verify'`), étapes par `parseStepsBlock` sur le texte **par étape** (une étape du modèle = une étape, même
-   multi-lignes), version `kind: 'extraction'`, `provenance { source_page_ids, source_document_id, generated_by: 'ai', model, edition_id,
-   convention_snapshot, import_id, incomplete, missing_page }`, `verification_state: 'to_verify'` ; fiche : `availability` = `available`
-   si lignes et étapes, `partial` sinon (`reference_only` conservé si rien) ; `incomplete` ou `missing_page` → `partial` au plus ;
-   `original_title` **conservé** (celui de la référence ; le titre lu va dans `provenance.titre_lu`), `printed_page` posé si vide,
-   `source_page_ids` = union, `photo_sha256`/`photo_origin` posés, `current_version_id` = la nouvelle version (sauf I-5), `ingredient_ids`.
-5. **Une transaction** `repo.saveBatch({ recipes, recipe_versions, source_pages (role 'recette', printed_page), scan_sessions
-   (recipe_ids, status 'done'), imports (status 'enregistre', finished_at) })`. Puis navigation vers la fiche, toast « Recette importée ».
-6. **Fiche** (`src/ui/recipe.js`) : bandeau « Lue par l'assistant le {date} · {n} ligne(s) incertaine(s) » (ou « · page possiblement
-   manquante », « · lecture incomplète »), état de vérification de la fiche enfin affiché (« Vérifiée » / « {n} lignes à vérifier »), photo
-   du plat en tête quand `photo_sha256` a ses octets (sinon rien, pas de message), « Corriger » (éditeur existant) ; les lignes
-   `uncertain` portent une puce « incertain » distincte de « à vérifier ».
+1. Garde : session, en ligne, au moins une page ; `imports` `a_lancer | echec → en_cours` (`started_at`, `document_id_vol`, `battement_at`) ;
+   `appels + 1` **au moment où le `fetch` part** (pas avant). Appel unique : `PasserelleProvider.complete`, pages dans l'ordre de `page_ids`,
+   réduites par `pagePourEnvoi`, `maxTokens: 6000`, `signal`. Battement toutes les 15 s (`battement_at`, même statut).
+2. Réponse → `validateParsedRecipe` → **`db.transitionner(en_cours → a_verifier, { resultat, reponse_brute, model, duree_ms })`** (I-3).
+   Échec → `en_cours → echec` avec `erreur`. Écriture locale impossible après une réponse (exception) → tentative `echec(incertain)` ; si
+   elle échoue aussi, la ligne reste `en_cours` et deviendra `interrompu` au démarrage (même phrase, I-4).
+3. **Discordance** (`discordance(resultat, reference)`, pure) : mots du titre de la référence, `normalizeText` puis mots vides retirés
+   (liste fermée fr/en : le, la, les, l, de, du, des, d, au, aux, à, et, en, un, une, the, of, and, with, a, an) ; **chaque** mot restant doit
+   apparaître dans les mots du titre lu ; page lue vs `printed_page` à ± 3 quand les deux sont connues ; titre lu nul → discordance.
+   Dialogue : « Le texte lu s'intitule “X” ; la référence est “Y” (p. N). Rattacher quand même ? » / « Rattacher » / « Garder la lecture sans
+   l'enregistrer » (reste `a_verifier`) / « Changer les pages » (`a_lancer`). Table de paires voisines dans les tests (pommes/poires,
+   oignon/ail, « Tarte aux pommes » / « Tarte aux pommes de ma grand-mère » = concordant).
+4. **Fabrication** (`fabriquerExtraction(resultat, { reference, pages, edition, convention, importId, modele })`, pure) : lignes par
+   `parseIngredientLine` + `uncertain` + `verification_state: 'to_verify'` ; **étapes construites directement** (`{ id, position: i + 1,
+   text, timers: detectTimers(text) }`, sauts de ligne gardés : pas de `parseStepsBlock`) ; version `kind: 'extraction'`, `parent_version_id`
+   = la courante s'il y en a une, `provenance { source_page_ids, source_document_id, generated_by: 'ai', model, edition_id,
+   convention_snapshot, import_id, incomplete, missing_page, titre_lu }`, `verification_state: 'to_verify'` ; fiche : `original_title`
+   conservé, `printed_page` posé si vide, `source_page_ids` = union, `photo_sha256` / `photo_origin`, `availability` = `available` si lignes
+   et étapes, `partial` sinon, et `partial` au plus si `incomplete` ou `missing_page` ; `verification_state` = celui de la version ;
+   `current_version_id` → la nouvelle (sauf I-5). La référence est **relue** juste avant la transaction (leçon C4) ; `assertVocabulaire`.
+5. **Une transaction** `repo.saveBatch({ recipes, recipe_versions, source_pages (kind 'recipe', position, printed_page), scan_sessions
+   (recipe_ids, status 'done'), imports (… `a_verifier → enregistre` par `transitionner` dans la même transaction, `reponse_brute: null`,
+   `finished_at`) })`. Puis fiche, toast « Recette importée ».
+6. **Fiche** : bandeau « Lue par l'assistant le {d} · {n} ligne(s) incertaine(s) » (+ « page possiblement manquante », « lecture
+   incomplète », « Incertain : … ») ; état de vérification **de la version affichée** (« Vérifiée » / « {n} lignes à vérifier ») ; photo du
+   plat quand ses octets sont là ; « Corriger » ; puce « incertain » sur les lignes concernées. **Mode cuisine et courses** : bandeau « Lue par
+   l'assistant, non relue » tant que la version courante est une `extraction` à `to_verify` (D-3).
+7. **« Corriger » hérite** (I4) : l'éditeur ouvre les étapes jointes par **une ligne vide** et `parseStepsBlock(texte, { parParagraphe:
+   true })` (option neuve, défaut inchangé) recoupe sur les lignes vides ; `reparse()` recopie `uncertain` d'une ligne dont le
+   `source_text` n'a pas changé ; la version `correction` hérite `incomplete`, `missing_page`, `import_id`, `titre_lu` de sa parente ; le
+   bandeau de la fiche lit la **version affichée**.
 
 ### 4.4 Cas et textes
 
 | Cas | Journal | Écran |
 |---|---|---|
-| Hors ligne au clic | rien n'est créé | « Tu es hors ligne. » (bouton éteint tant que `navigator.onLine` est faux) |
+| Hors ligne | rien | « Tu es hors ligne. » (bouton éteint, écoute `online`/`offline`) |
 | Session absente | rien | carte « Connecte-toi pour utiliser l'assistant. » |
-| Quota, trop lourd, serveur, délai, réseau, compte refusé | `echec(raison)` | textes existants de `texteEchecAssistant` / `texteRefusAssistant` + « Relancer » (sauf quota : « Chercher demain » n'existe pas ; « Relancer » reste, le serveur dira 429) |
-| « Annuler » | `echec(annule)` | « Lecture annulée. » + « Relancer » |
-| Réponse coupée (`max_tokens`) | `echec(coupe)` | « La lecture a été coupée : essaie avec moins de pages. » |
-| JSON illisible | `echec(illisible)` | « L'assistant n'a pas répondu lisiblement. Réessaie. » (« Code : illisible ») |
-| App fermée pendant le vol | `echec(interrompu)` au démarrage | « La lecture a été interrompue. Relance-la. » |
-| Réponse reçue, écriture locale échouée (exception dans `db.mutate`) | `echec(incertain)` | « L'appel a peut-être abouti sans être enregistré ; relancer coûtera un appel. » |
-| Discordance | reste `a_verifier` si refus | dialogue D-6 |
-| Déjà `available` (relecture) | nouvelle version, `current_version_id` inchangé | « Cette recette a déjà un texte. La nouvelle lecture sera une version de plus. » + « Remplacer par cette lecture » (facultatif) |
-| Signet (`source_url`) | — | toast « Un lien web s'importe au lot suivant. », retour fiche |
+| `non_admis`, `quota`, `trop_de_demandes`, `trop_lourd` (413 : `requete` + extra), `requete`, `serveur`, `delai`, `reseau`, `interne` | `echec(raison)` | textes existants (`texteRefusAssistant` / `texteEchecAssistant`) + « Relancer » (éteint hors ligne ou sans session) |
+| « Annuler » (document qui tient le vol) | `echec(annule)` | « Lecture annulée. L'appel a peut-être été compté ; relancer en coûtera un autre. » |
+| Réponse coupée | `echec(coupe)` | « La lecture a été coupée : essaie avec moins de pages. » |
+| JSON illisible / hors bornes / vide | `echec(illisible \| hors_bornes \| vide)` | « L'assistant n'a pas répondu lisiblement. Réessaie. » (« Code : … ») ; `vide` : « Aucun ingrédient ni étape lus sur ces pages. » |
+| App fermée pendant le vol | `echec(interrompu)` au démarrage (battement > 90 s) | « La lecture a été interrompue. L'appel a peut-être été compté ; relancer en coûtera un autre. » |
+| Réponse reçue, écriture impossible | `echec(incertain)` | même phrase |
+| Discordance | reste `a_verifier` si refus | dialogue § 4.3.3 |
+| `partial` avec version `correction` | `a_verifier` → dialogue | « Remplacer par cette lecture ? » (défaut non : la version est ajoutée, la fiche ne change pas) |
+| `available` / signet | — | toasts § 4.1 |
+| En cours sur un autre document | — | « En cours sur un autre écran », sans « Annuler » |
 
 ### 4.5 Reprise : la section « Imports »
 
-Page Ajouter (`src/ui/add.js`), **avant** la grille, seulement si non vide : une ligne par import `en_cours`, `a_verifier`, `echec` et une
-par séance `open` sans import (« Photos conservées : {n} page(s) · {livre} » → « Ouvrir la séance », ce qui absorbe « Séances à
-reprendre »). Ligne : titre de la référence (ou « Index · {livre} »), âge (« il y a 2 h »), état, gestes : `en_cours` → « Annuler » ;
-`a_verifier` → « Reprendre » (ouvre l'écran ciblé en relecture du résultat : discordance puis enregistrement, **sans appel**) ;
-`echec` → « Relancer » (nouvel appel sur les mêmes pages ; si `resultat` existe déjà, « Reprendre » est offert en premier) et
-« Ignorer » (`ignore`). Fiche du livre : « {n} import(s) à reprendre » → même liste filtrée. Autre appareil : « Photos sur un autre
-appareil » ; « Reprendre » seulement si `resultat` est présent ; « Relancer » absent.
+Page Ajouter, **avant** la grille, seulement si non vide : une ligne par import `a_lancer`, `en_cours`, `a_verifier`, `echec`, et une par
+séance `open` **sans import** (« Photos conservées : {n} page(s) · {livre} » → « Ouvrir la séance »). Ligne : titre de la référence
+(ou « Index · {livre} », ou « Recette à regrouper · {livre} »), âge (« il y a {n} min / h / j »), état, gestes (`.btn`, ≥ 44 px) :
+`a_lancer` → « Reprendre » (écran, photos en place) · `en_cours` → « Annuler » si ce document tient le vol, sinon « En cours sur un autre
+écran » · `a_verifier` → « Reprendre » (écran en mode « Enregistrer cette lecture », **résultat revalidé**, sans appel) · `echec` →
+« Relancer » et « Ignorer » · tous → « Ignorer » sauf `en_cours`. **Cibles de « Reprendre » par sorte** : `kind: 'recette'` avec
+`recipe_id` → `#/recipes/<id>/importer` ; `kind: 'recette'` sans `recipe_id` (« Regrouper en recette ») → `#/recipes/new?import=<imp>`,
+éditeur prérempli depuis `resultat` ; `kind: 'index'` → `#/import?session=…&import=<imp>`, panneau d'index prérempli. Fiche du livre :
+« {n} import(s) à reprendre » → `#/add#imports` (ancre de la section). Autre appareil : « Photos sur un autre appareil » ; « Reprendre »
+seulement si `resultat` ; « Relancer » absent ; `recipe_id` pas encore reçu → « (référence pas encore reçue) », sans geste.
 
-### 4.6 Ce qui disparaît
+### 4.6 Ce qui change ailleurs
 
-`sessionStorage.cuisineos.pending_recipe` (poseurs et lecteur) ; le bouton « Scanner cette recette » ; la case « Oui, rattacher » de
-l'éditeur (`recipe-edit.js`) n'a plus de source : retirée. L'éditeur garde « Lire avec l'assistant IA » pour une recette sans référence
-(« Regrouper en recette » depuis une séance) : ce chemin **écrit aussi dans le journal** (`kind: 'recette'`, `recipe_id: null` jusqu'à
-l'enregistrement) pour ne plus perdre une lecture ; son remplissage de formulaire reste inchangé. Le panneau d'index écrit de même
-(`kind: 'index'`, `resultat = { entries, uncertain }`) et son bouton est verrouillé pendant l'appel.
+`pending_recipe` disparaît (poseurs et lecteur) ; « Oui, rattacher » disparaît ; le chemin `#/add?edition=` (R-UX-16) perd son dernier
+appelant et est retiré. L'éditeur garde « Extraire avec l'assistant IA » pour une recette sans référence : il écrit dans le journal
+(`kind: 'recette'`, `recipe_id: null`) et relit par `?import=` ; le panneau d'index écrit de même (`kind: 'index'`, `resultat = { entries,
+uncertain }`), son bouton est verrouillé pendant l'appel.
 
-## 5. Textes (FR → EN, toutes par `t()`)
+## 5. Textes (FR → EN, toutes par `t()` ; les clés exactes font foi dans `en.js`)
 
-« Importer une recette » → "Import a recipe" · « Pages de la recette » → "Recipe pages" · « {n} photo(s) ajoutée(s) » → "{n} photo(s)
-added" · « Monter » → "Move up" · « Descendre » → "Move down" · « Retirer la page {n} » → "Remove page {n}" · « Photographier » (existante)
-· « Choisir des photos » → "Choose photos" · « Photo du plat » → "Dish photo" · « Facultatif » → "Optional" · « Ajoute la photo du livre,
-s'il y en a une. » → "Add the book's photo, if there is one." · « Prendre une photo » → "Take a photo" · « Choisir une image » (existante)
-· « Remplacer » → "Replace" · « Extraire et enregistrer » → "Extract and save" · « Les pages et la photo seront liées à cette recette. » →
-"The pages and the photo will be linked to this recipe." · « Lecture des pages par l'assistant… » (existante) · « Recette importée » →
-"Recipe imported" · « Lue par l'assistant le {d} » → "Read by the assistant on {d}" · « {n} ligne(s) incertaine(s) » → "{n} uncertain
-line(s)" · « page possiblement manquante » → "page possibly missing" · « lecture incomplète » → "incomplete reading" · « Vérifiée » /
-« {n} lignes à vérifier » → "Verified" / "{n} lines to check" · « Imports » → "Imports" · « Reprendre » → "Resume" · « Relancer » → "Retry"
-· « Ignorer » → "Dismiss" · « Photos conservées : {n} page(s) » → "Photos kept: {n} page(s)" · « Photos sur un autre appareil » → "Photos
-on another device" · « {n} import(s) à reprendre » → "{n} import(s) to resume" · les textes de § 4.4 et D-6. Les clés exactes font foi
-dans `en.js` ; le plan les reprend.
+« Importer une recette » · « Importer cette recette » · « Importer » · « Relire les pages » · « Pages de la recette » · « {n} photo(s)
+ajoutée(s) » · « Monter la page {n} » · « Descendre la page {n} » · « Retirer la page {n} » · « Choisir des photos » · « Photo du plat » ·
+« Facultatif » · « Ajoute la photo du livre, s'il y en a une. » · « Prendre une photo » · « Remplacer » · « Extraire et enregistrer » ·
+« Enregistrer cette lecture » · « Changer les pages » · « Retour à la fiche » · « Les pages et la photo seront liées à cette recette. » ·
+« Lecture des pages par l'assistant… » (entrée `en.js` à ajouter) · « Lecture reçue le {d} » · « Recette importée » · « Lue par l'assistant
+le {d} » · « {n} ligne(s) incertaine(s) » · « page possiblement manquante » · « lecture incomplète » · « Incertain : {t} » · « incertain » ·
+« Vérifiée » · « {n} lignes à vérifier » · « Lue par l'assistant, non relue » · « Imports » · « Reprendre » · « Relancer » · « Ignorer » ·
+« Ouvrir la séance » · « Photos conservées : {n} page(s) » · « Index · {l} » · « Recette à regrouper · {l} » · « il y a {n} min » / « h » /
+« j » · « En cours sur un autre écran » · « Photos sur un autre appareil » · « (référence pas encore reçue) » · « {n} import(s) à
+reprendre » · « Cette recette a déjà son texte. » · « Un lien web s'importe au lot suivant. » · les textes de § 4.3.3 et § 4.4.
 
 ## 6. Serveur
 
-Aucun changement de la fonction `assistant` (outil `extraction`, borne 8 Mio, modèle forcé). Migration `0005`, preuve, README (§ 3.5).
+Aucun changement de la fonction `assistant`. Migration `0005`, preuve, README (§ 3.5).
 
 ## 7. Tests (suite navigateur, fixtures, `fetch` factice ; Node pour le générateur)
 
-- **Schéma** : montée `DB_VERSION 3 → 4` sur une base peuplée (magasin et index créés, données intactes) ; `imports` dans `SYNC_STORES`,
-  `ARCHIVE_DATA_STORES`, `RELATIONS` ; archive aller-retour avec une ligne `imports` ; validation du vocabulaire (écriture refusée,
-  nommée, rien d'écrit).
-- **Domaine pur** (`src/domain/import-cible.js`) : `modeleEcran` (ordre, Monter/Descendre aux bornes, retrait), `discordance` (titres
-  proches / éloignés, page ± 3, accents et casse), `fabriquerExtraction` (version, provenance, `uncertain`, `partial` sur `incomplete`,
-  titre de la référence conservé, étapes multi-lignes entières, `current_version_id` selon I-5), transitions de `imports` (table complète,
-  transitions interdites refusées), `validateParsedRecipe` durci (chaque borne, booléens, `stop_reason`).
-- **Écran** : route rendue pour une référence ; ajout de photos → séance et `imports.page_ids` écrits **avant** tout appel ; réordonner
-  écrit `position` ; « Extraire et enregistrer » → **un** POST, pages dans l'ordre de `position`, résultat écrit dans `imports` **avant**
-  la recette (ordre des `db.mutate` espionné) ; enregistrement en **une** transaction ; fiche : bandeau, puces, photo ; « Annuler » → abandon
-  + `echec(annule)` + aucune recette écrite ; chaque raison de § 4.4 → texte et geste ; discordance → dialogue, refus → `a_verifier` ;
-  double clic → un appel ; hors ligne → aucun appel ; session absente → carte, photos ajoutables ; signet → toast et retour.
-- **Reprise** : section « Imports » absente quand vide, une ligne par état, « Reprendre » → écran prérempli **sans appel** et enregistrement
-  possible ; « Relancer » → un appel, **aucune** page ni séance en double ; « Ignorer » ; redémarrage avec `en_cours` de cet appareil →
-  `interrompu` ; ligne d'un autre appareil sans résultat → ni Reprendre ni Relancer ; purge à 30 jours.
-- **Régression** : `pending_recipe` absent du source ; « Saisir à la main » intact ; « Regrouper en recette » écrit dans le journal ;
-  panneau d'index verrouillé pendant l'appel ; tests existants de `tests/passerelle.js` adaptés (nouveau `maxTokens`, `signal`).
-- **Générateur** : `SYNC_STORES_0003` figée (26 noms), empreinte de `0003` épinglée, `0005` rendue pour `imports` seul, `--check` 0, preuve
-  `0005` : syntaxe pglast, `rollback` dernier ; test node du README (étape 11).
-- Total épinglé relevé ; `sw.js` et `APP_VERSION 0.9.0` ; mutants rejoués sur copies (ordre journal → recette ; discordance ignorée ;
-  `pending_recipe` réintroduit ; signal non propagé ; validation du vocabulaire retirée).
+- **Schéma** : montée `DB_VERSION 3 → 4` sur une base peuplée ; `imports` dernier de `STORES`, dans `SYNC_STORES`, `ARCHIVE_DATA_STORES`,
+  relations déclarées (et **pas** `recipe_id` ni `page_ids`) ; archive aller-retour avec une ligne `imports` ; **archive figée sans `imports`
+  restaurée** (C1) ; `assertVocabulaire` (refus nommé, absent toléré) et test de source de ses appelants.
+- **Primitives** : `db.transitionner` (une transaction : attendu faux → aucune écriture, outbox capturée sur succès, course simulée par
+  deux appels entrelacés) ; `repo.ajouterPages` (une transaction pour les lignes, ordre de `page_ids`, pas de navigation).
+- **Domaine pur** : `modeleEcran` (ordre, bornes de Monter/Descendre, retrait, focus cible) ; `discordance` (table : pommes/poires,
+  oignon/ail, variantes concordantes, titre nul, page ± 3, accents et casse) ; `fabriquerExtraction` (version, provenance, `uncertain`,
+  étapes entières, `partial` sur `incomplete`, titre conservé, I-5 avec et sans `correction`, page absente ignorée) ; transitions (table
+  complète, interdites refusées) ; `validateParsedRecipe` (chaque borne → `hors_bornes`, `vide`, booléens) ; `parseStepsBlock` par
+  paragraphe ; héritage de `reparse()`.
+- **Écran** : route pour une `reference_only` et une `partial` ; `available` et signet → toast ; photos → séance et `page_ids` écrits
+  **avant** tout appel ; réordonner → `page_ids` ; « Extraire et enregistrer » → **un** POST, pages dans l'ordre, `appels` incrémenté au
+  départ du `fetch` ; `a_verifier` écrit **avant** la recette (ordre des écritures espionné) ; enregistrement en **une** transaction ; fiche :
+  bandeau, puces, photo ; « Annuler » → abandon + `echec(annule)` + aucune recette ; chaque raison de § 4.4 → texte et geste ; discordance →
+  dialogue et ses trois sorties ; double clic → un appel ; hors ligne (état basculé **après** le rendu) → aucun appel ; session absente →
+  carte, photos ajoutables ; second import sur la même recette → le premier est repris ; séance de l'import absente des rappels génériques ;
+  R-VIS-8 (structure) ; `ROUTES_DE_SAISIE`.
+- **Reprise** : section absente quand vide ; une ligne par état et par sorte avec sa cible ; « Reprendre » sur `a_verifier` → écran, résultat
+  **revalidé** (un `resultat` hostile injecté → `echec(illisible)`), enregistrement sans appel ; « Relancer » → un appel, **aucune** page ni
+  séance en double ; « Ignorer » ; démarrage : `en_cours` battement > 90 s → `interrompu`, battement récent → intact ; ligne d'un autre
+  appareil : ni Reprendre sans résultat, ni Relancer ; `incertain` ; purge à 30 jours = suppression capturée (outbox `delete`).
+- **Mode cuisine et courses** : bandeau D-3 présent pour une extraction non relue, absent après « Vérifié » ou sur une `correction`.
+- **Régression** : `pending_recipe` et `?edition` absents du source ; « Saisir à la main » intact ; « Regrouper en recette » et le panneau
+  d'index écrivent dans le journal et relisent par `?import=` ; `tests/passerelle.js` adaptés (`maxTokens` 6000, `signal`, `stopReason`).
+- **Générateur** : `SYNC_STORES_0003` figée, empreinte de `0003`, `0005` pour `imports` seul, `--check` 0, preuve `0005` (pglast, `rollback`
+  dernier), README étape 11 (test node).
+- **Versions** : `APP_VERSION 0.9.0`, `sw.js` et `SHELL` (+ 2 modules + `vocabulaire.js`), total épinglé. **Mutants** sur copies : ordre
+  journal → recette inversé ; discordance ignorée ; `pending_recipe` réintroduit ; `signal` non relayé ; revalidation de « Reprendre »
+  retirée ; archive sans `imports` refusée ; `reparse()` perd `uncertain` ; `interrompu` posé malgré un battement récent ; relance qui
+  duplique les pages ; purge non capturée.
 
 ## 8. Hors périmètre (nommé pour ne pas y glisser)
 
 Classement automatique d'un lot de photos (D) ; table des matières structurée et ordre proposé par le modèle (C) ; lecture d'une page web
-(B) ; lecture de la couverture (E) ; récupération ou recadrage automatique de la photo du plat (F) ; octets entre appareils (G) ;
-changement de thème ou de couleur d'accent (décision à part) ; quota visible dans l'app ; modèle autre que celui du serveur.
+(B) ; lecture de la couverture (E) ; récupération ou recadrage automatique de la photo du plat (F) ; octets entre appareils (G) ; relecture
+d'une recette `available` ; thème ou couleur d'accent ; quota visible dans l'app ; autre modèle que celui du serveur.
 
 ## 9. Suite B à G (ordre revu)
 
-- **G remonte** : sans les octets, aucune photo prise sur l'iPhone n'est visible sur le Mac, et la preuve « deux appareils » du dossier
-  est impossible. G ne dépend de rien ; il peut se construire **en parallèle de B** par un second sous-agent (fichiers disjoints : `src/sync/`
-  + seau `pages` contre `supabase/functions/` + écran web). Ordre proposé : **A → (B ∥ G) → C → D → E → F**. E reste petit et peut
-  s'intercaler.
-- Dépendances réelles : C et D consomment le journal (A) ; D consomme l'appariement et `index_page_id` (C) ; F consomme B pour l'image
-  web et `photo_sha256` (A) ; rien ne dépend de G sauf la preuve multi-appareils.
+**A → (B ∥ G) → C → D → E → F.** G ne dépend de rien et conditionne la preuve « deux appareils » ; B et G se construisent en parallèle par
+deux sous-agents mais **fusionnent l'un après l'autre** (fichiers communs : `sw.js`, `APP_VERSION`, `en.js`, `schema.js`, total épinglé).
+C et D consomment le journal ; D consomme l'appariement et `index_page_id` (C) ; F consomme B (image web) et `photo_sha256` (A) ; E est
+petit et s'intercale.
 
 ## 10. Preuve réelle préalable (geste de Neegan, avant la construction)
 
 Sur le site public, connecté : Ajouter → « Photographier ou importer des pages » → une vraie page de recette → « Regrouper en recette »
-→ « Lire avec l'assistant IA ». À noter : le **modèle** affiché dans Réglages → Assistant (« Modèle en service : … », c'est la valeur réelle
-du secret `ASSISTANT_MODELE`, par défaut `claude-sonnet-5-5`), la **durée**, le texte obtenu contre la page (ingrédients, quantités,
-unités, étapes), et ce qu'il reste après avoir quitté l'écran et rouvert l'app (attendu : rien, c'est ce que le lot corrige). Aucun agent
-ne dépense d'appel à la place de Neegan. Si le résultat révèle une limite (JSON coupé à 4 000 jetons, lenteur, texte infidèle), la spec
-est amendée **avant** le plan.
+→ **« Extraire avec l'assistant IA »**. À noter : le **modèle** de Réglages → Assistant (« Modèle en service : … », valeur réelle du secret
+`ASSISTANT_MODELE`, défaut `claude-sonnet-5-5`), la **durée**, le texte obtenu contre la page, et ce qu'il reste après fermeture et
+réouverture (attendu : rien, c'est ce que le lot corrige). Une page **dense** (longue liste, étapes longues) dit si 6 000 jetons tiennent
+sous les 120 s du serveur. Aucun agent ne dépense d'appel à la place de Neegan. Si le résultat révèle une limite, la spec s'amende
+**avant** le plan.
 
 ## 11. Risques et limites assumés
 
-- Le décodage d'une photo d'iPhone de plusieurs dizaines de Mpx par `createImageBitmap` n'a jamais été mesuré ; `pagePourEnvoi` réduit à
-  1 568 px mais décode d'abord l'original.
-- 8 Mio par appel ≈ 8 à 10 pages réduites ; au-delà, 413 « trop lourde : choisis moins de pages ».
-- Une ligne `imports` synchronisée avant que la fiche `recipes` le soit peut, sur un autre appareil, pointer un `recipe_id` encore absent :
-  la section l'affiche avec « (référence pas encore reçue) », sans geste, jusqu'à la passe suivante.
+- `createImageBitmap` sur une photo d'iPhone de plusieurs dizaines de Mpx n'est pas mesuré ; 8 Mio par appel ≈ 8 à 10 pages réduites.
+- Deux appareils qui importent la **même** référence : le dernier qui enregistre gagne (`source_page_ids` et `photo_sha256` de l'autre
+  perdus, puis conflit de pointeur sur la fiche) ; I-2 ne vaut que par appareil tant que `imports` ne porte pas de verrou serveur.
+- « Le serveur journalise 499 » à « Annuler » n'est prouvé que sous Node (lot passerelle, F-5).
 - Le glisser au toucher n'est pas mesuré sur Safari ; Monter/Descendre sont le chemin garanti.
-- La purge à 30 jours ne concerne que `enregistre` et `ignore` ; un `echec` reste jusqu'à un geste.
+- Charger `imports` dans `getData` à chaque rendu : `reponse_brute` est effacée à `enregistre` et bornée à 16 000 points de code ; à surveiller.
+- Un `echec` reste jusqu'à un geste (pas de purge) ; `interrompu` par battement : un onglet figé plus de 90 s sans réponse est tenu pour mort.
 
-## 12. Ce que la construction a amendé
+## 12. Ce que la revue a amendé (rév. 1 → rév. 2)
 
-(à remplir par les rulings)
+- **C1** archives antérieures → § 3.7 `MAGASINS_AJOUTES_APRES_V1`, fixture figée.
+- **C2** Jaccard 0,5 → D-6 et § 4.3.3 : contenance de tous les mots distinctifs, mots vides retirés, table de paires voisines.
+- **I1** → I-4 et § 4.4 : même phrase pour `interrompu`, `annule`, `incertain`.
+- **I2** → I-1 et § 4.5 : « Reprendre » revalide.
+- **I3** → D-11 et I-5 : pas d'entrée pour `available` ; sur `partial` avec `correction`, « Remplacer ? » défaut non ; état affiché = version affichée.
+- **I4** → § 4.3.7 : héritage de `uncertain`, `incomplete`, `missing_page`, étapes par paragraphe.
+- **I5** → § 4.3.4 : étapes construites directement.
+- **I6** → § 3.1 : transitions `a_verifier → ignore | a_lancer`, `a_lancer → ignore` ; `a_lancer` listé ; branche « `echec` avec résultat » retirée.
+- **I7** → § 4.5 : cibles de « Reprendre » par sorte.
+- **I8** → I-2 et § 4.1 : un import ouvert par recette, séance exclue des rappels.
+- **I9** → § 3.1 : `page_ids` et `recipe_id` pointeurs souples.
+- **I10** → D-12 : `assertVocabulaire` chez les fabricants, pas dans `db.mutate`.
+- **I11** → I-7, I-10, § 3.6 : `db.transitionner`, battement, « Annuler » par le document du vol.
+- **I12** → D-5, § 3.4 : `stopReason` posé par `complete`, 6 000 jetons, mesure en § 10.
+- **I13** → § 3.4 : `vide` → rien d'écrit.
+- **I14** → D-3 sourcée au dossier, soumise à Neegan, bandeau en mode cuisine et courses.
+- **I15** → § 3.1 : purge par suppression `local` (tombale), `import_id` souple.
+- **I16** → § 4.1-4.2 : `ROUTES_DE_SAISIE`, structure R-VIS-8.
+- **I17** → D-2, D-4 : photo du plat et réordonnancement sont dans le cahier B3 de Neegan (gardés) ; relecture d'`available` sortie (D-11).
+- Mineurs : bornes → refus `hors_bornes` ; `titre_lu` en § 3.2 ; `role` abandonné (`kind` seul) ; ordre = `page_ids` ; `repo.ajouterPages` ;
+  « Choisir » sans `capture` ; `preparerPhotoLocale` ; `getData` ; textes complétés ; « Extraire avec l'assistant IA » ; vocabulaire mort retiré ;
+  `appels` au départ du `fetch` ; accessibilité ; fiche du livre (bouton, pas de lien imbriqué) ; `#/add#imports` ; titre nul ; 16 000 points
+  de code et 512 Kio ; relecture avant `saveBatch` ; `imports` dernier ; B ∥ G avec fusions séquentielles ; 499 non prouvé ; deux appareils ;
+  R-UX-16 retiré ; `SHELL` ; hors ligne basculé après le rendu ; mutants ajoutés.
