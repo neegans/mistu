@@ -654,6 +654,68 @@ dans l'app réelle de la tâche 3 avait l'API Anthropic interceptée ; forme ré
 l'iPhone ; ni les minuteurs Siri d'une étape de création sur appareil ; ni l'effet de N-8/N-9 sur la vraie bibliothèque
 de Neegan (fixtures seulement).
 
+## Thème « magazine culinaire » (18 octobre 2026)
+
+Spec : `docs/superpowers/specs/2026-10-18-refonte-visuelle-design.md` (rév. 2, amendée à la clôture ; § 2 : invariants T-1 à T-11 ;
+§ 8 : rulings R-VIS-1 à R-VIS-12). Un thème, pas une refonte des écrans : la feuille, deux balises d'`index.html`, deux couleurs du
+manifeste et un bloc de tests ; aucun module de `src/` touché, aucune classe lue par le JS renommée, aucun test de comportement retouché.
+
+```text
+styles.css            :root = 38 propriétés : les 29 jetons de la spec § 3.1 (papier, encre, gris, filets, action tomate,
+                      accent vert, ambre, brique, ok, voile, reflet de tape, rayons, ombre, serif, sans, --topbar-h),
+                      --nav-h, --safe-b et --safe-t inchangés, et 6 alias des anciens noms (--cream, --cream-2, --green,
+                      --green-2, --sage, --sage-2) ; color-scheme: light ; hors :root, seules couleurs en dur : #fff et
+                      #222 (T-2). 315 lignes (260 à la pointe du lot 2).
+index.html            theme-color #f8f5ef ; apple-mobile-web-app-status-bar-style default (était black-translucent).
+manifest.webmanifest  theme_color et background_color #f8f5ef.
+tests/theme.js        runThemeTests({ eq, ok }) : 69 assertions, dernier bloc de tests/tests.js avant le total épinglé.
+```
+
+**Jetons.** Toute couleur vit dans `:root` : une règle nouvelle prend un jeton, jamais une valeur. Les anciens noms restent des
+alias en `var()` (seul `--sage` garde une valeur propre, `#b9c8bb`), pour les règles qui les portent encore. La hauteur de la barre
+est un jeton, `--topbar-h` (64 px) : le panneau latéral (≥ 900 px) et le `scroll-margin-top` des cartes la suivent ; `.btn.big`
+garde son `56px` en dur, seul restant. Ni `color-mix()` ni `oklch` (iOS < 16.2), aucune police externe, aucune image.
+
+**`[hidden] { display: none !important; }`** (T-9). Le JS cache par l'attribut `hidden` (pastille, mention K1, erreurs, aides) ;
+une règle d'auteur qui pose `display` (`.status` en `inline-flex`, `.row`, `.btn`) le montrerait sinon. D'où R-VIS-1 : la règle
+`.status[hidden]` du lot 2 est retirée, redondante. L'inventaire des `display: none` est **exact** (les cinq d'origine, `[hidden]` à
+part) et la feuille ne contient ni `visibility: hidden`, ni `opacity: 0`, ni `font-size: 0` : cacher autrement qu'avant serait un
+changement de comportement.
+
+**Comment `tests/theme.js` mesure** (la feuille est LUE et MESURÉE, jamais recopiée dans le test). Deux temps.
+1. **Lecture** : `fetch('../styles.css?v=…', { cache: 'no-store' })`, commentaires retirés ; `:root` lu par une expression ancrée,
+   `hex()` résout les `var()` en chaîne ; les paires `PAIRES` (texte, fond, où : spec § 3.6) sont calculées par la formule WCAG ;
+   inventaire des `display: none`, couleurs en dur et couleurs nommées hors `:root`, contenu des blocs `:focus-visible`, mouvement
+   réduit et `@media (hover: hover)` ; `index.html` et le manifeste sont relus.
+2. **Rendu** : la feuille est injectée par un `<link>` (avec `?v=`) dans une scène hors écran mais **visible**
+   (`position:absolute; left:-9999px`, 390 px de large) ; les composants y sont montés, puis mesurés par `getBoundingClientRect` et
+   `getComputedStyle` (couleurs ramenées en hex par `rgbVersHex`) ; le `<link>` et la scène sont retirés en `finally` (aucun reste,
+   vérifié par les mutants des tâches).
+
+Deux limites assumées : la page de tests est large, donc les règles sous 440 px (R-VIS-4) n'y jouent pas — seule la preuve visuelle
+les mesure ; et les assertions de focus suivent l'heuristique `:focus-visible` de Chromium (une interaction au pointeur avant le bloc
+donnerait un faux rouge, jamais un faux vert).
+
+**La preuve visuelle vit hors git**, dans le registre du lot : `.superpowers/sdd/2026-10-18-refonte-visuelle/preuve-visuelle.cjs`
+(Playwright **dédié**, jamais le navigateur MCP partagé ;
+`node preuve-visuelle.cjs 8085 [--css=<fichier>] [--largeurs=…] [--seulement=…]`, code de sortie 0 = vert) et `galerie.html` (toutes les variantes de composants ; servie par le serveur de l'arbre,
+elle lie `/styles.css`). Quatre largeurs (375 × 812, 390 × 844, 768 × 1024, 1512 × 982), `reducedMotion: 'reduce'`, service workers
+bloqués, réseau externe coupé (sauf l'API interceptée de M3), porte passée par « Continuer sans compte ». Colonnes : débordement,
+navigation, cibles, contraste par nœud texte contre son fond effectif (un dégradé compte comme ses arrêts, le pire gagne), `[hidden]`,
+console ; plus **M3** (vrai vol sur `#/search?mode=web`, configuration factice, API interceptée, aucune clé réelle) et **M14** (focus au
+clavier réel, rayons de l'anneau lus par coin). Sorties : `resultats.md` / `.json` et `captures/<largeur>-<nom>.png`. `--css=<fichier>`
+sert une feuille figée : c'est ainsi que l'outil a été vu ROUGE sur l'ancien thème (331 fautes) avant de servir de preuve. Le registre
+se copie dans le dépôt principal **avant** tout `git worktree remove`, sinon l'outil et les captures disparaissent.
+
+**Rulings** : R-VIS-1 à R-VIS-12, une ligne chacun en spec § 8 (registre : `progress.md`, `task-3-report.md`). Trois touchent la
+structure plus que la couleur : **R-VIS-7** `.cover { position: relative }` (l'image d'une couverture prend `.cover` pour bloc
+conteneur : coins arrondis, même rectangle à 0,1 px près) ; **R-VIS-8**
+`.status[role="status"] + .row > .btn:not(.primary) { margin-left: auto }` (« Annuler » à droite pendant un vol ; dépend de l'attribut `role` posé par `search.js:202` et `creer-ia.js:238`,
+seules annonces suivies d'une `.row`) — un **crochet de style** sur une structure du JS : `role="status"` est gardé par les tests de
+comportement (`tests/recherche-web.js:383`, `tests/creer-ia.js`), mais l'assertion R-VIS-8 de `tests/theme.js` construit son propre DOM,
+donc une rangée enveloppée ou une classe `.status` changée ne serait vue que par la preuve M3 (hors git) ; **R-VIS-10** `.chip.clickable:has(> input:checked)` (ignorée sans prise en charge de `:has()` :
+retour à la puce neutre).
+
 ## Modèle de données (magasins IndexedDB)
 
 `books`, `book_editions` (ISBN, langue, `unit_convention_id`), `source_documents` (fichier, sha256, type), `source_pages` (page imprimée, position),
