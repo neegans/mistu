@@ -181,11 +181,11 @@ export function ingredientLineEl(ri, ctx, ingredientsById) {
   const translated = ing && verifiee && ri.name_text && locale !== ri.match_locale && ctx.readingLocale !== 'original';
   return el('li', null,
     el('div', { class: 'row', style: { gap: '.4rem' } },
-      qtyEl(ri, { ...ctx, ingredient: ing }),
+      qtyEl(ri, { ...ctx, ingredient: verifiee ? ing : null }), // N-9 : jamais l'identité proposée pour une conversion
       el('span', null, name, ri.preparation ? el('span', { class: 'muted' }, `, ${ri.preparation}`) : null, ri.optional ? el('span', { class: 'muted' }, ` (${t('facultatif')})`) : null,
         ing && !verifiee ? el('span', { class: 'muted' }, ` (${t('identité proposée')} : ${libelle} ?)`) : null),
       translated ? el('span', { class: 'badge' }, t('Traduction')) : null,
-      ri.verification_state === 'to_verify' ? el('span', { class: 'chip warn', title: t('Ligne à vérifier') }, t('À vérifier')) : null),
+      !verifiee ? el('span', { class: 'chip warn', title: t('Ligne à vérifier') }, t('À vérifier')) : null),
     ri.source_text && (ri.source_text !== `${ri.quantity?.raw || ''} ${ri.unit_text || ''} ${ri.name_text || ''}`.replace(/\s+/g, ' ').trim()) && ctx.showSource
       ? el('div', { class: 'src-text' }, `${t('Texte source')} : ${ri.source_text}`) : null);
 }

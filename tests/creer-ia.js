@@ -363,6 +363,23 @@ export async function runCreerIaTests({ eq, ok }) {
       // une seule ligne vérifiée compatible ne rachète pas une ligne non vérifiée sans allergène : le tout reste à vérifier
       eq(assessVersion(version(VER('60 g farine'), L1('2 gousses d’ail')), ING_BY_ID, 'sans_lactose').state, 'to_verify', 'N-8 : vérifiée compatible + non vérifiée sans allergène → à vérifier (rien ne certifie la seconde)');
       eq(assessVersion(version(VER('60 g farine'), VER('2 gousses d’ail')), ING_BY_ID, 'sans_lactose').state, 'compatible', 'N-8 : toutes vérifiées, aucun allergène → compatible');
+      // R-CRE-9 : un bloquant FACULTATIF ne masque jamais une ligne inconnue (« information manquante jamais assimilée à une absence »).
+      {
+        const a = assessVersion(version(L1('125 ml pesto au basilic'), L1('parmesan (facultatif)')), ING_BY_ID, 'sans_lactose');
+        eq([a.state, a.unknown.length, a.blocking.map((b) => [b.ingredient_id, b.optional, b.proposed])], ['to_verify', 1, [['ing_parmesan', true, true]]], 'R-CRE-9 : pesto non vérifié + parmesan facultatif bloquant → à vérifier (retirer le parmesan ne suffit pas à conclure)');
+        eq(assessVersion(version(L1('1 tasse de mystère'), L1('parmesan (facultatif)')), ING_BY_ID, 'sans_lactose').state, 'to_verify', 'R-CRE-9 : une ligne sans identité + un facultatif bloquant → à vérifier');
+        const b = assessVersion(version(VER('60 g farine'), VER('parmesan (facultatif)')), ING_BY_ID, 'sans_lactose');
+        eq([b.state, b.unknown.length, b.blocking.map((x) => [x.optional, x.proposed])], ['adaptation', 0, [[true, false]]], 'R-CRE-9 : tout vérifié + seul un facultatif bloque → adaptation (inchangé)');
+      }
+      // F2 : une ligne SANS verification_state (donnée ancienne) n'est pas vérifiée — l'état se lit « différent de verified », jamais « égal à to_verify ».
+      {
+        const SANS_ETAT = (txt) => { const { verification_state: _etat, ...ligne } = parseIngredientLine(txt); return ligne; };
+        ok(!('verification_state' in SANS_ETAT('60 g farine')), 'F2 (fixture) : la ligne de test n’a pas de verification_state');
+        const a = assessVersion(version(SANS_ETAT('60 g farine')), ING_BY_ID, 'sans_lactose');
+        eq([a.state, a.unknown.length, a.blocking.length], ['to_verify', 1, 0], 'N-8 : une ligne sans verification_state sans allergène bloquant → à vérifier, jamais compatible');
+        const b = assessVersion(version(SANS_ETAT('250 ml lait')), ING_BY_ID, 'sans_lactose');
+        eq([b.state, b.blocking.map((x) => x.proposed)], ['incompatible', [true]], 'N-8 : une ligne sans verification_state bloquante bloque encore, « proposée »');
+      }
     }
     // N-8 dans la recherche et dans les repas : les deux consommateurs de assessVersion héritent de la règle.
     {
@@ -408,6 +425,29 @@ export async function runCreerIaTests({ eq, ok }) {
         const nonVerif = ingredientLineEl(L1('250 ml lait'), EN_CTX, ING_BY_ID);
         eq([textes(verif, '.badge'), nom(verif).childNodes[0].textContent], [['Traduction'], ING_BY_ID.get('ing_milk').labels.en.label], 'P11 : une ligne vérifiée lue en anglais est traduite → badge « Traduction »');
         eq([textes(nonVerif, '.badge'), nom(nonVerif).childNodes[0].textContent], [[], 'lait'], 'P11 : une ligne non vérifiée est affichée telle qu’écrite → aucun badge « Traduction »');
+      }
+      {
+        // F2 : la puce « À vérifier » suit « n'est pas vérifiée », pas la valeur littérale 'to_verify' (ligne sans état, état inconnu).
+        const sansEtat = (() => { const { verification_state: _etat, ...ligne } = parseIngredientLine('250 ml lait de coco'); return ligne; })();
+        const puces = [sansEtat, { ...sansEtat, verification_state: 'unverified' }, { ...sansEtat, verification_state: 'to_verify' }].map((l) => textes(ingredientLineEl(l, CTX, ING_BY_ID), '.chip.warn'));
+        eq(puces, [['À vérifier'], ['À vérifier'], ['À vérifier']], 'F2 : la puce « À vérifier » s’affiche pour toute ligne non vérifiée (sans état, « unverified », « to_verify »)');
+        eq(textes(ingredientLineEl(VER('250 ml lait'), CTX, ING_BY_ID), '.chip.warn'), [], 'F2 : … et jamais pour une ligne vérifiée');
+        const li = ingredientLineEl(sansEtat, CTX, ING_BY_ID);
+        eq([nom(li).childNodes[0].textContent, textes(nom(li), '.muted')], ['lait de coco', [' (identité proposée : lait ?)']], 'F2 : une ligne sans état s’affiche telle qu’écrite, avec la mention');
+      }
+      {
+        // F3 (durcissement) : l'identité PROPOSÉE n'est jamais passée à qtyEl — jamais une conversion par une identité non vérifiée. Le seed n'a aucune
+        // équivalence volume↔masse et displayQuantity ne traverse pas les dimensions : aucune différence observable aujourd'hui, ce test épingle
+        // l'INTENTION (quantité rendue telle quelle, équivalences de l'identité proposée jamais lues).
+        const lues = [];
+        const lait = new Proxy({ ...ING_BY_ID.get('ing_milk'), equivalences: [{ volume_unit_id: 'ml', volume_value: 100, mass_g: 103, source: 'x' }] }, { get(cible, cle) { if (cle === 'equivalences') lues.push(cle); return cible[cle]; } });
+        const avecEquivalence = new Map(ING_BY_ID); avecEquivalence.set('ing_milk', lait);
+        const METRIQUE = { ...CTX, system: 'metric', convention_id: 'metric_ca' };
+        const qte = (li) => li.querySelector('.qty').textContent;
+        const ligne = L1('1 tasse de lait de coco');
+        const avec = ingredientLineEl(ligne, METRIQUE, avecEquivalence);
+        const sans = ingredientLineEl({ ...ligne, ingredient_id: null }, METRIQUE, avecEquivalence);
+        eq([qte(avec), qte(sans), lues], ['250 ml ↺', '250 ml ↺', []], 'F3 : une ligne non vérifiée rend sa quantité comme sans identité proposée, et son équivalence n’est jamais lue');
       }
 
       // P11 : le mode cuisine affiche aussi le texte écrit.

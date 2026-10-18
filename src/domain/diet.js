@@ -24,7 +24,9 @@ export function assessVersion(version, ingredientsById, dietTag) {
   }
   let state;
   if (blocking.some((b) => !b.optional)) state = 'incompatible';
-  else if (blocking.length) state = 'adaptation'; // seuls des ingrédients facultatifs bloquent : retirable explicitement
+  // Seuls des ingrédients facultatifs bloquent : retirable explicitement — mais jamais en masquant une ligne inconnue (R-CRE-9 : une information
+  // manquante n'est pas assimilée à une absence ; retirer le facultatif ne suffit pas à conclure tant qu'une ligne reste à vérifier).
+  else if (blocking.length) state = unknown.length ? 'to_verify' : 'adaptation';
   else if (unknown.length) state = 'to_verify';
   else state = 'compatible';
   if (!(version.ingredients || []).length) state = 'to_verify';
