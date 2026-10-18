@@ -19,21 +19,32 @@ export async function renderLibrary(params, query, ctx) {
     // « ← Mes livres » de sa fiche y ramène (confort après preuve, 17 octobre).
     const liens = liensWebGardes(ctx);
     if (liens) root.append(liens);
+    const creees = recettesCreeesIA(ctx); // N-7 : après « Liens web gardés »
+    if (creees) root.append(creees);
   }
   return root;
 }
 
 // Les signets sans livre (edition_id nul, source_url posé), le dernier GARDÉ d'abord : created_at, updated_at en repli
 // (un favori touché ne réordonne pas la liste — ronde 1) ; sans horodatage, en dernier. Aucun : rien n'est rendu.
+const quand = (r) => String(r.created_at || r.updated_at || '');
+const plusRecentesDabord = (a, b) => (quand(a) < quand(b) ? 1 : quand(a) > quand(b) ? -1 : 0);
+const carteOuLien = (ctx, r) => {
+  const doc = ctx.docsByRecipe?.get(r.id);
+  return doc ? recipeCard(doc) : el('a', { class: 'btn', href: `#/recipes/${r.id}` }, r.display_title || r.original_title || t('Sans titre'));
+};
 function liensWebGardes(ctx) {
-  const quand = (r) => String(r.created_at || r.updated_at || '');
-  const signets = (ctx.recipes || []).filter((r) => !r.edition_id && typeof r.source_url === 'string' && r.source_url)
-    .sort((a, b) => (quand(a) < quand(b) ? 1 : quand(a) > quand(b) ? -1 : 0));
+  const signets = (ctx.recipes || []).filter((r) => !r.edition_id && typeof r.source_url === 'string' && r.source_url).sort(plusRecentesDabord);
   if (!signets.length) return null;
-  return section(t('Liens web gardés'), ...signets.map((r) => {
-    const doc = ctx.docsByRecipe?.get(r.id);
-    return doc ? recipeCard(doc) : el('a', { class: 'btn', href: `#/recipes/${r.id}` }, r.display_title || r.original_title || t('Sans titre'));
-  }));
+  return section(t('Liens web gardés'), ...signets.map((r) => carteOuLien(ctx, r)));
+}
+
+// N-7 / N-10 : les fiches créées avec l'assistant, filtrées sur `origine` (pas sur la version courante : une fiche corrigée y reste),
+// la plus récemment créée d'abord (même ordre que les signets) ; la carte dit l'étiquette C-2. Aucune : rien n'est rendu.
+function recettesCreeesIA(ctx) {
+  const creees = (ctx.recipes || []).filter((r) => r.origine === 'ia').sort(plusRecentesDabord);
+  if (!creees.length) return null;
+  return section(t('Recettes créées avec l’IA'), ...creees.map((r) => carteOuLien(ctx, r)));
 }
 
 async function booksTab(ctx) {

@@ -32,6 +32,22 @@ export function etiquetteCreationIA(version, recipe = null) {
   return null;
 }
 
+// C-9 : l'avertissement fixe d'une création, rendu par t() à l'écran (fiche, mode cuisine) et tel quel dans les exports.
+export const AVERTISSEMENT_CREATION_IA = 'L’assistant n’a pas cuisiné cette recette : vérifie les quantités, les cuissons et les étiquettes avant de la servir.';
+
+// § 3.3 : les blocs d'une création (description, durée estimée, conseils, notes), RELUS à chaque rendu et à chaque export — une ligne
+// reçue ou restaurée peut porter n'importe quoi : chaînes seulement (propre : Cc/Cf retirés, NFC, espaces repliés), rebornées aux
+// limites de C-7, listes coupées à leur compte maximal, minutes entières dans [5, 240] sinon absentes. null hors création (F6).
+export function lireCreation(version) {
+  if (!estCreationIA(version)) return null;
+  const c = version.provenance.creation;
+  const L = LIMITES_CREATION;
+  const texte = (x, max) => borner(propre(x) || '', max) || null;
+  const liste = (xs, [, n], max) => (Array.isArray(xs) ? xs : []).map((x) => texte(x, max)).filter(Boolean).slice(0, n);
+  const m = c.minutes_estimees;
+  return { description: texte(c.description, L.description), conseils: liste(c.conseils, L.conseils, L.conseil), notes: liste(c.notes_restrictions, L.notes, L.note), minutes: Number.isInteger(m) && m >= L.minutes[0] && m <= L.minutes[1] ? m : null };
+}
+
 // P25 : la convention vient du module des unités, jamais d'une fixture ; forme { id, revision, values } comme recipe-edit.js:210.
 export function conventionCreation(id = 'metric_ca') {
   const c = getConvention(id);

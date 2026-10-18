@@ -4,6 +4,7 @@ import { formatQuantity } from './quantity.js';
 import { unitLabel } from './units.js';
 import { extFor } from './backup.js';
 import { libelleSource } from '../core/lien.js';
+import { estCreationIA, etiquetteCreationIA, lireCreation, AVERTISSEMENT_CREATION_IA } from './creation-ia.js';
 
 function ingredientLine(ri, locale) {
   if (ri.source_text) return ri.source_text;
@@ -17,25 +18,50 @@ function isoDuration(minutes) {
   return `PT${Math.floor(m / 60) ? `${Math.floor(m / 60)}H` : ''}${m % 60 ? `${m % 60}M` : ''}` || 'PT0M';
 }
 
+// C-2 : une fiche IA dans un export, texte BRUT (un autre logiciel le lit : jamais t()). L'étiquette vient de etiquetteCreationIA —
+// « X · statut » s'écrit « X (statut) » dans une phrase —, puis, pour une création, ce que la fiche montre (§ 3.3, C-9), relu et
+// reborné par lireCreation. null pour une recette ordinaire et pour une extraction IA de livre (F6).
+const enParentheses = (etiquette) => etiquette.replace(/ · (.+)$/u, ' ($1)');
+function lignesIA(recipe, version) {
+  const etiquette = etiquetteCreationIA(version, recipe);
+  if (!etiquette) return null;
+  const statut = version?.kind === 'adaptation' && !estCreationIA(version) ? ` (${version.status === 'tested' ? 'testée' : 'proposée'})` : '';
+  const c = lireCreation(version);
+  return [`${enParentheses(etiquette)}${statut}.`,
+    c?.description ? `Selon l’assistant : ${c.description}` : null,
+    c?.minutes ? `Environ ${c.minutes} min (estimé par l’assistant).` : null,
+    ...(c?.conseils || []).map((x) => `Conseil, selon l’assistant : ${x}`),
+    c?.notes.length ? `À vérifier avant de servir : ${c.notes.join(' ; ')}` : null,
+    c ? AVERTISSEMENT_CREATION_IA : null].filter(Boolean);
+}
+// C-2 : jamais un livre (ni son ISBN) comme provenance d'une création ; C-6 : jamais de durée exportée pour une création.
+const livreDe = (recipe, book) => (recipe.origine === 'ia' ? null : book);
+
 // bundle : { recipe, version, book, edition, translation? }
 export function toJsonLd(bundle, { locale = 'fr' } = {}) {
-  const { recipe, version, book, edition } = bundle;
+  const { recipe, version } = bundle;
+  const book = livreDe(recipe, bundle.book);
+  const edition = livreDe(recipe, bundle.edition);
+  const ia = lignesIA(recipe, version);
+  const duree = (m) => (estCreationIA(version) ? undefined : isoDuration(m));
   const title = recipe.display_title || recipe.original_title;
   const obj = {
     '@context': 'https://schema.org', '@type': 'Recipe', name: title, inLanguage: recipe.original_language || undefined,
     author: book?.author ? { '@type': 'Person', name: book.author } : undefined,
     isBasedOn: book ? `${book.title}${recipe.printed_page ? `, p. ${recipe.printed_page}` : ''}${edition?.isbn ? ` (ISBN ${edition.isbn})` : ''}` : undefined,
     recipeYield: version?.servings ? String(version.servings) : undefined,
-    prepTime: isoDuration(version?.prep_minutes), cookTime: isoDuration(version?.cook_minutes), totalTime: isoDuration(version?.total_minutes),
+    prepTime: duree(version?.prep_minutes), cookTime: duree(version?.cook_minutes), totalTime: duree(version?.total_minutes),
     recipeCategory: recipe.type || undefined,
     recipeCuisine: recipe.cuisines?.length ? recipe.cuisines.join(', ') : undefined,
     recipeIngredient: (version?.ingredients || []).map((ri) => ingredientLine(ri, locale)),
     recipeInstructions: (version?.steps || []).map((s, i) => ({ '@type': 'HowToStep', position: i + 1, text: s.text })),
-    description: version?.kind === 'adaptation' ? `Adaptation personnelle (${version.status === 'tested' ? 'testée' : 'proposée'}) de la recette originale.${version.changes ? ' ' + version.changes : ''}` : undefined,
+    description: ia ? [ia[0], version?.changes || null, ...ia.slice(1)].filter(Boolean).join(' ')
+      : version?.kind === 'adaptation' ? `Adaptation personnelle (${version.status === 'tested' ? 'testée' : 'proposée'}) de la recette originale.${version.changes ? ' ' + version.changes : ''}` : undefined,
   };
   obj['cuisineos:provenance'] = {
     recipe_id: recipe.id, version_id: version?.id, version_kind: version?.kind, version_status: version?.status,
     book: book?.title, edition_isbn: edition?.isbn, printed_page: recipe.printed_page, exported_at: new Date().toISOString(),
+    ...(ia ? { origine: recipe.origine ?? undefined, generated_by: version?.provenance?.generated_by ?? undefined } : {}),
   };
   return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined && !(Array.isArray(v) && !v.length)));
 }
@@ -48,7 +74,11 @@ function yamlBlock(lines, indent = '    ') {
 }
 
 export function toPaprikaYaml(bundles, { locale = 'fr' } = {}) {
-  const docs = bundles.map(({ recipe, version, book, edition }) => {
+  const docs = bundles.map(({ recipe, version, ...b }) => {
+    const book = livreDe(recipe, b.book);
+    const edition = livreDe(recipe, b.edition);
+    const ia = lignesIA(recipe, version);
+    const sansDurees = estCreationIA(version);
     const title = recipe.display_title || recipe.original_title;
     const lines = [`- name: ${yamlStr(title)}`];
     if (version?.servings) lines.push(`  servings: ${yamlStr(`${version.servings} portions`)}`);
@@ -56,14 +86,15 @@ export function toPaprikaYaml(bundles, { locale = 'fr' } = {}) {
     // archive ou le serveur peut avoir rempli avec n'importe quoi (S7). Un export est lu par un autre logiciel.
     const source = book ? `${book.title}${book.author ? ` — ${book.author}` : ''}${recipe.printed_page ? `, p. ${recipe.printed_page}` : ''}` : libelleSource(recipe);
     if (source) lines.push(`  source: ${yamlStr(source)}`);
-    if (recipe.source_url) lines.push(`  source_url: ${yamlStr(recipe.source_url)}`);
-    if (version?.prep_minutes != null) lines.push(`  prep_time: ${yamlStr(`${version.prep_minutes} minutes`)}`);
-    if (version?.cook_minutes != null) lines.push(`  cook_time: ${yamlStr(`${version.cook_minutes} minutes`)}`);
+    if (recipe.source_url && recipe.origine !== 'ia') lines.push(`  source_url: ${yamlStr(recipe.source_url)}`); // C-2 : jamais un site
+    if (version?.prep_minutes != null && !sansDurees) lines.push(`  prep_time: ${yamlStr(`${version.prep_minutes} minutes`)}`);
+    if (version?.cook_minutes != null && !sansDurees) lines.push(`  cook_time: ${yamlStr(`${version.cook_minutes} minutes`)}`);
     if (recipe.favorite) lines.push('  on_favorites: yes');
     const cats = [recipe.type, ...(recipe.cuisines || [])].filter(Boolean);
     if (cats.length) lines.push(`  categories: [${cats.map(yamlStr).join(', ')}]`);
     const notes = [];
-    if (version?.kind === 'adaptation') notes.push(`Adaptation personnelle (${version.status === 'tested' ? 'testée' : 'proposée'}), distincte de l’original.`);
+    if (ia) notes.push(...ia);
+    else if (version?.kind === 'adaptation') notes.push(`Adaptation personnelle (${version.status === 'tested' ? 'testée' : 'proposée'}), distincte de l’original.`);
     if (version?.changes) notes.push(`Changements : ${version.changes}`);
     if (edition?.isbn) notes.push(`ISBN ${edition.isbn}`);
     notes.push(`Exporté de Cuisine OS — recette ${recipe.id}, version ${version?.id || '—'}, langue ${recipe.original_language || '—'}`);
@@ -83,7 +114,11 @@ const HTML_CSS = 'body{font-family:-apple-system,Helvetica,Arial,sans-serif;max-
 export function toReadableSite(bundles, filesBySha, { locale = 'fr' } = {}) {
   const entries = [];
   const usedImages = new Map();
-  const items = bundles.map(({ recipe, version, book, pages = [] }) => {
+  const items = bundles.map(({ recipe, version, pages = [], ...b }) => {
+    const book = livreDe(recipe, b.book);
+    const etiquette = etiquetteCreationIA(version, recipe);
+    const ia = lignesIA(recipe, version);
+    const sansDurees = estCreationIA(version);
     const title = recipe.display_title || recipe.original_title;
     const file = `recipes/${recipe.id}.html`;
     const imgs = [];
@@ -97,9 +132,10 @@ export function toReadableSite(bundles, filesBySha, { locale = 'fr' } = {}) {
     const body = `<!doctype html><html lang="${esc(recipe.original_language || locale)}"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${HTML_CSS}</style></head><body>
 <p><a href="../index.html">← Index</a></p>
 <h1>${esc(title)}</h1>
-<p class="meta">${book ? esc(`${book.title}${book.author ? ` — ${book.author}` : ''}`) : esc(libelleSource(recipe) || 'Source personnelle')}${recipe.printed_page ? `, page ${recipe.printed_page}` : ''}
-${version?.kind === 'adaptation' ? ' · <span class="badge">Adaptation personnelle</span>' : version ? ' · <span class="badge">Original</span>' : ''}</p>
-${version?.servings ? `<p class="meta">${esc(`${version.servings} portions`)}${version.prep_minutes != null ? ` · préparation ${version.prep_minutes} min` : ''}${version.cook_minutes != null ? ` · cuisson ${version.cook_minutes} min` : ''}</p>` : ''}
+<p class="meta">${book ? esc(`${book.title}${book.author ? ` — ${book.author}` : ''}`) : esc(libelleSource(recipe) || 'Source personnelle')}${recipe.printed_page && recipe.origine !== 'ia' ? `, page ${recipe.printed_page}` : ''}
+${etiquette ? ` · <span class="badge">${esc(etiquette)}</span>` : version?.kind === 'adaptation' ? ' · <span class="badge">Adaptation personnelle</span>' : version ? ' · <span class="badge">Original</span>' : ''}</p>
+${version?.servings ? `<p class="meta">${esc(`${version.servings} portions`)}${version.prep_minutes != null && !sansDurees ? ` · préparation ${version.prep_minutes} min` : ''}${version.cook_minutes != null && !sansDurees ? ` · cuisson ${version.cook_minutes} min` : ''}</p>` : ''}
+${ia ? ia.slice(1).map((l) => `<p>${esc(l)}</p>`).join('') : ''}
 ${version ? `<h2>Ingrédients</h2><ul>${(version.ingredients || []).map((ri) => `<li>${esc(ingredientLine(ri, locale))}</li>`).join('')}</ul>
 <h2>Préparation</h2><ol>${(version.steps || []).map((s) => `<li>${esc(s.text)}</li>`).join('')}</ol>` : '<p><em>Référence d’index seulement : la recette n’a pas encore été numérisée.</em></p>'}
 ${version?.changes ? `<h2>Changements</h2><p>${esc(version.changes)}</p>` : ''}

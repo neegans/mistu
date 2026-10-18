@@ -353,4 +353,12 @@ export const EN = {
   "Créer avec l’IA": "Create with AI",
   "Une proposition à vérifier": "A proposal to check",
   "Créer une recette avec ces critères": "Create a recipe with these criteria",
+  // L'étiquette C-2 sur la fiche, les cartes, le mode cuisine, le repas et la bibliothèque (§ 3.3, § 3.4, N-7, N-10 ; textes de etiquetteCreationIA).
+  "Créée avec l’IA": "Created with AI",
+  "Créée avec l’IA · testée": "Created with AI · tested",
+  "Adaptée avec l’IA · testée": "Adapted with AI · tested",
+  "Corrigée par toi — d’après une création IA": "Corrected by you — from an AI creation",
+  "Ma version — d’après une création IA": "My version — from an AI creation",
+  "Adapter avec l’IA": "Adapt with AI",
+  "Recettes créées avec l’IA": "Recipes created with AI",
 };

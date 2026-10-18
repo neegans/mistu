@@ -9,6 +9,7 @@ import { navigate } from '../core/router.js';
 import { displayUrl, safeDisplayType } from '../sync/mime.js';
 import * as repo from '../model/repo.js';
 import { pastilleModel } from './state.js';
+import { estCreationIA, etiquetteCreationIA } from '../domain/creation-ia.js';
 
 export function pageHeader(title, { subtitle = null, actions = [], back = null } = {}) {
   return el('header', { class: 'stack', style: { marginBottom: '1rem' } },
@@ -34,8 +35,21 @@ export function availabilityBadge(recipe) {
   return el('span', { class: `badge ${cls}` }, text);
 }
 
-export function versionBadge(version) {
+// C-2 / R-CRE-4 : l'étiquette d'une création IA (ou d'une version d'une fiche origine 'ia'), TEXTE de etiquetteCreationIA rendu par t() ;
+// null quand les données ne disent rien d'une création — jamais lue dans source_label.
+export function etiquetteIA(version, recipe = null) {
+  const texte = etiquetteCreationIA(version, recipe);
+  return texte ? el('span', { class: 'badge ai', dataset: { role: 'etiquette-ia' } }, t(texte)) : null;
+}
+
+// Le second paramètre (la fiche) est facultatif : sans lui, une création reste une création, mais une version manuelle d'une fiche
+// origine 'ia' ne peut pas dire sa lignée (N-10). Une extraction IA de livre reste « Original » (F6).
+export function versionBadge(version, recipe = null) {
   if (!version) return null;
+  const ia = etiquetteIA(version, recipe);
+  if (ia && estCreationIA(version)) return ia; // l'étiquette porte déjà « testée / non testée »
+  if (ia && version.kind !== 'adaptation' && version.kind !== 'synthesis') return ia;
+  if (ia) return el('span', { class: 'row', style: { gap: '.3rem' } }, ia, el('span', { class: 'badge' }, label('version_status', version.status || 'proposed')));
   if (version.kind === 'extraction' || version.kind === 'correction') return el('span', { class: 'badge original' }, t('Original'));
   if (version.kind === 'translation') return el('span', { class: 'badge' }, t('Traduction'));
   const who = version.provenance?.generated_by === 'ai' ? el('span', { class: 'badge ai' }, t('Adaptation IA')) : el('span', { class: 'badge personal' }, t('Ma version'));
@@ -43,7 +57,7 @@ export function versionBadge(version) {
 }
 
 export function timeText(version) {
-  if (!version) return '';
+  if (!version || estCreationIA(version)) return ''; // C-6 : la durée d'une création n'est qu'une estimation, dite à part (recipe.js)
   const parts = [];
   const active = version.active_minutes ?? version.prep_minutes;
   if (active != null) parts.push(`${t('actif')} ${formatMinutes(active)}`);
@@ -53,6 +67,9 @@ export function timeText(version) {
 }
 
 export function provenanceText(recipe, book, edition) {
+  // C-2 : une fiche créée avec l'assistant le dit EN TÊTE — ni son source_label (une valeur stockée n'est pas une preuve), ni un
+  // livre, ni un site ne prennent sa place. Le texte vient de etiquetteCreationIA (fiche seule).
+  if (recipe?.origine === 'ia') return t(etiquetteCreationIA(null, recipe));
   // Signet web (R-UX-11, S7) : l'hôte est RECALCULÉ depuis l'adresse, ici comme dans la vue recette — source_label
   // peut venir d'une archive ou du serveur et nommer n'importe quoi. Une adresse illisible le dit, et n'emprunte
   // pas le libellé stocké pour se faire passer pour un site.
@@ -71,11 +88,13 @@ export function provenanceText(recipe, book, edition) {
 // doc : { recipe, version, book, edition, cooked }
 export function recipeCard(doc, { extra = null, href = null, reasons = null } = {}) {
   const { recipe, version, book, edition } = doc;
+  const etiquette = etiquetteIA(version, recipe); // C-2 : depuis doc.version ou recipe.origine
   return el('a', { class: 'item-link card', href: href || `#/recipes/${recipe.id}` },
     el('div', { class: 'row between top' },
       el('div', { style: { flex: '1', minWidth: '0' } },
         el('h3', null, recipe.display_title || recipe.original_title),
         el('div', { class: 'muted', style: { fontSize: '.85rem' } }, provenanceText(recipe, book, edition)),
+        etiquette ? el('div', null, etiquette) : null,
         version ? el('div', { class: 'muted', style: { fontSize: '.85rem' } }, timeText(version)) : null,
         reasons?.length ? el('div', { class: 'muted', style: { fontSize: '.8rem' } }, `${t('Correspond à')} : ${reasons.slice(0, 4).join(', ')}`) : null),
       el('div', { class: 'col', style: { alignItems: 'flex-end', gap: '.3rem' } },

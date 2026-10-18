@@ -11,6 +11,7 @@ import { assessVersion } from '../domain/diet.js';
 import { toJsonLd, toPaprikaYaml } from '../domain/exporters.js';
 import { DIET_TAGS } from '../model/schema.js';
 import { pageHeader, section, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard } from './components.js';
+import { estCreationIA, etiquetteCreationIA, lireCreation, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
 import { addToMealFlow } from './meals.js';
 import { deviceId } from './import.js';
 import { createTimerLaunch } from '../domain/timers.js';
@@ -55,18 +56,27 @@ export async function renderRecipe(params, query, ctx) {
       el('p', null, t('Une autre version a été créée ailleurs — les deux versions sont conservées.')),
       el('a', { class: 'btn', href: '#/settings' }, t('Trancher dans Réglages'))));
   }
-  root.append(el('div', { class: 'row', style: { marginBottom: '.8rem' } }, availabilityBadge(recipe), versionBadge(version), recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, capitaliser(c)))));
+  root.append(el('div', { class: 'row', style: { marginBottom: '.8rem' } }, availabilityBadge(recipe), versionBadge(version, recipe), recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, capitaliser(c)))));
 
   if (!version) { root.append(referenceOnly()); return root; }
 
-  // Sélecteur Original / Ma version
+  // Sélecteur Original / Ma version — C-2 : sur une création IA (ou une fiche origine 'ia'), chaque version porte son étiquette, jamais
+  // « Original » ; une version manuelle d'une fiche IA garde son statut.
+  const statutDe = (v) => (v.status === 'tested' ? t('testée') : t('proposée'));
+  const libelleOption = (v, { adaptation }) => {
+    const ia = etiquetteCreationIA(v, recipe);
+    if (!ia) return adaptation ? `${t('Ma version')} — ${statutDe(v)} ${formatDate(v.created_at)}` : t('Original');
+    const statut = adaptation && !estCreationIA(v) ? ` — ${statutDe(v)}` : '';
+    return adaptation ? `${t(ia)}${statut} ${formatDate(v.created_at)}` : t(ia);
+  };
   const versionOptions = [];
-  if (original) versionOptions.push({ value: original.id, label: t('Original') });
-  for (const a of adaptations) versionOptions.push({ value: a.id, label: `${t('Ma version')} — ${a.status === 'tested' ? t('testée') : t('proposée')} ${formatDate(a.created_at)}` });
+  if (original) versionOptions.push({ value: original.id, label: libelleOption(original, { adaptation: false }) });
+  for (const a of adaptations) versionOptions.push({ value: a.id, label: libelleOption(a, { adaptation: true }) });
+  const estUneCreation = estCreationIA(version);
   const selectVersion = (id) => navigate(`/recipes/${recipe.id}${buildQuery({ v: id, servings: state.servings || '' })}`, { replace: true });
   const controls = el('div', { class: 'card sage stack' },
     el('div', { class: 'row between' },
-      versionOptions.length > 1 ? select(versionOptions, version.id, selectVersion) : el('span', { class: 'badge original' }, t('Original')),
+      versionOptions.length > 1 ? select(versionOptions, version.id, selectVersion) : etiquetteCreationIA(version, recipe) ? versionBadge(version, recipe) : el('span', { class: 'badge original' }, t('Original')),
       el('div', { class: 'row' },
         el('a', { class: 'btn small', href: `#/recipes/${recipe.id}/edit?kind=adaptation&v=${version.id}` }, t('Créer ma version')),
         el('a', { class: 'btn small', href: `#/recipes/${recipe.id}/edit?kind=correction&v=${version.id}` }, t('Corriger')))),
@@ -77,8 +87,11 @@ export async function renderRecipe(params, query, ctx) {
         el('button', { class: 'btn small', onClick: () => setServings((state.servings || 0) + 1) }, '+'))),
       el('label', { class: 'field' }, el('span', null, t('Unités')), segmented([{ value: 'original', label: t('Original') }, { value: 'metric', label: t('Métrique') }, { value: 'us', label: 'US' }], state.units, (v) => { state.units = v; drawBody(); })),
       el('label', { class: 'field' }, el('span', null, t('Langue de lecture')), segmented([{ value: 'original', label: t('Original') }, { value: 'fr', label: 'FR' }, { value: 'en', label: 'EN' }], state.lang, (v) => { state.lang = v; drawBody(); }))),
-    el('div', { class: 'chips' },
-      ...[t('Rapide'), t('On se gâte'), t('Meal prep')].map((n) => el('span', { class: 'chip neutral', title: t('Adaptation assistée : palier V1, non disponible dans cette version. Utilise « Créer ma version » pour décrire toi-même les changements.') }, `${n} · V1`))),
+    // N-5 : une création IA s'adapte par l'assistant (version enfant, original intact) ; les puces V1 s'effacent devant ce geste réel.
+    estUneCreation
+      ? el('div', { class: 'row' }, el('a', { class: 'btn small', href: `#/recipes/creer${buildQuery({ adapter: version.id })}`, dataset: { role: 'adapter-ia' } }, t('Adapter avec l’IA')))
+      : el('div', { class: 'chips' },
+        ...[t('Rapide'), t('On se gâte'), t('Meal prep')].map((n) => el('span', { class: 'chip neutral', title: t('Adaptation assistée : palier V1, non disponible dans cette version. Utilise « Créer ma version » pour décrire toi-même les changements.') }, `${n} · V1`))),
     el('small', { class: 'muted' }, t('Changer les portions, les unités ou la langue ne crée pas de nouvelle version. Les durées ne sont pas multipliées.')));
   root.append(controls);
 
@@ -89,7 +102,7 @@ export async function renderRecipe(params, query, ctx) {
     el('button', { class: 'btn', onClick: makeList }, t('Liste d’épicerie')),
     dish ? el('a', { class: 'btn', href: `#/dishes/${dish.id}` }, t('Autres recettes de ce plat')) : el('button', { class: 'btn', onClick: attachDish }, t('Rattacher à un plat'))));
 
-  const body = el('div', null);
+  const body = el('div', { class: 'recipe-body' }); // C-7 : overflow-wrap (styles.css)
   root.append(body);
   drawBody();
 
@@ -100,11 +113,11 @@ export async function renderRecipe(params, query, ctx) {
 
   // Versions
   root.append(section(t('Versions'), el('ul', { class: 'list' }, ...versions.map((v) => el('li', { class: 'row between' },
-    el('div', null, el('div', { class: 'row' }, versionBadge(v), el('span', { class: 'muted' }, `${label('version_kind', v.kind)} · ${formatDate(v.created_at, { withTime: true })}`), v.verification_state === 'to_verify' ? el('span', { class: 'chip warn' }, t('À vérifier')) : null),
+    el('div', null, el('div', { class: 'row' }, versionBadge(v, recipe), el('span', { class: 'muted' }, `${label('version_kind', v.kind)} · ${formatDate(v.created_at, { withTime: true })}`), v.verification_state === 'to_verify' ? el('span', { class: 'chip warn' }, t('À vérifier')) : null),
       v.changes ? el('div', { style: { fontSize: '.9rem' } }, v.changes) : null,
-      v.provenance?.generated_by === 'ai' ? el('div', { class: 'muted', style: { fontSize: '.8rem' } }, t('Extraction IA ({m}) — vérifiée à la main ensuite ?', { m: v.provenance.model || 'IA' })) : null),
+      v.provenance?.generated_by === 'ai' && !estCreationIA(v) ? el('div', { class: 'muted', style: { fontSize: '.8rem' } }, t('Extraction IA ({m}) — vérifiée à la main ensuite ?', { m: v.provenance.model || 'IA' })) : null),
     el('div', { class: 'row' }, v.id !== version.id ? el('button', { class: 'btn small', onClick: () => selectVersion(v.id) }, t('Afficher')) : el('span', { class: 'chip ok' }, t('affichée')),
-      v.kind === 'adaptation' && v.status !== 'tested' ? el('button', { class: 'btn small', onClick: async () => { await repo.save('recipe_versions', { ...v, status: 'tested' }); refresh(); } }, t('Marquer testée')) : null))))));
+      (v.kind === 'adaptation' || v.kind === 'synthesis') && v.status !== 'tested' ? el('button', { class: 'btn small', onClick: async () => { await repo.save('recipe_versions', { ...v, status: 'tested' }); refresh(); } }, t('Marquer testée')) : null))))));
 
   // Historique
   if (history.length) root.append(section(t('Mémoire culinaire'), el('ul', { class: 'list' }, ...history.map((h) => el('li', { class: 'row between top' },
@@ -135,6 +148,13 @@ export async function renderRecipe(params, query, ctx) {
       li.append(el('button', { class: 'btn small', style: { marginLeft: '.4rem' }, onClick: () => replaceIngredient(ri) }, t('Remplacer')));
       ingList.append(li);
     });
+    // § 3.3, C-6, C-9 : sur une création, ce que l'assistant a dit (préfixé « Selon l’assistant »), sa durée ESTIMÉE (jamais dans
+    // timeText), et l'avertissement fixe — relus et rebornés par lireCreation (une ligne reçue peut porter n'importe quoi), en texte seul.
+    const lc = lireCreation(version);
+    if (lc) body.append(el('section', { class: 'card stack', dataset: { role: 'creation-ia' } },
+      lc.description ? el('p', { dataset: { role: 'description-ia' } }, t('Selon l’assistant : {texte}', { texte: lc.description })) : null,
+      lc.minutes ? el('div', { class: 'muted', dataset: { role: 'minutes-ia' } }, t('environ {m} min (estimé par l’assistant)', { m: lc.minutes })) : null,
+      el('div', { class: 'status warn', dataset: { role: 'avertissement-ia' } }, t(AVERTISSEMENT_CREATION_IA))));
     const dietSel = select([{ value: '', label: t('Évaluer une restriction…') }, ...DIET_TAGS.map((d) => ({ value: d, label: label('diet', d) }))], state.diet, (v) => { state.diet = v; drawBody(); });
     const assessment = state.diet ? assessVersion(version, ctx.ingredientsById, state.diet) : null;
     body.append(section(`${t('Ingrédients')}${scaled.ok && scaled.factor !== 1 ? ` — ${t('recalculés pour {n} portions', { n: state.servings })}` : version.servings ? ` — ${t('{n} portions', { n: version.servings })}` : ''}`,
@@ -153,6 +173,8 @@ export async function renderRecipe(params, query, ctx) {
       steps.append(li);
     });
     body.append(section(t('Préparation'), (version.steps || []).length ? steps : el('p', { class: 'muted' }, t('Étapes non numérisées.')), version.notes ? el('p', { class: 'muted' }, version.notes) : null));
+    if (lc?.conseils.length) body.append(section(t('Conseils'), el('ul', { dataset: { role: 'conseils-ia' } }, ...lc.conseils.map((c) => el('li', null, t('Selon l’assistant : {texte}', { texte: c }))))));
+    if (lc?.notes.length) body.append(section(t('À vérifier avant de servir'), el('ul', { dataset: { role: 'notes-ia' } }, ...lc.notes.map((n) => el('li', null, n)))));
   }
 
   async function startCooking() {

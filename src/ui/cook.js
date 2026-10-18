@@ -8,7 +8,8 @@ import { scaleVersion } from '../domain/scaling.js';
 import { normalizeText } from '../domain/units.js';
 import { createTimerLaunch, shortcutUrl, siriPhrase, describeDuration, isAppleTouchDevice, TIMER_STATE_HELP } from '../domain/timers.js';
 import { label } from '../core/i18n.js';
-import { qtyEl, section, field } from './components.js';
+import { qtyEl, section, field, etiquetteIA } from './components.js';
+import { estCreationIA, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
 import { deviceId } from './import.js';
 
 export async function renderCook(params, query, ctx) {
@@ -33,6 +34,12 @@ export async function renderCook(params, query, ctx) {
       el('span', { class: 'muted', style: { fontSize: '.85rem' } }, t('Progression conservée sur cet appareil')),
       el('button', { class: 'btn', onClick: finish }, t('Terminer')),
       el('a', { class: 'btn', href: `#/recipes/${items[activeIdx].recipe.id}?v=${items[activeIdx].version.id}` }, t('Fiche')))));
+  // § 3.3 / C-2 / C-9 : une création IA le dit EN TÊTE, sous la rangée du titre (cook.js n'a pas de pageHeader — P16) ; dans un repas,
+  // chaque création est nommée par son titre.
+  const creations = items.filter((it) => estCreationIA(it.version));
+  if (creations.length) root.append(el('div', { class: 'stack', style: { marginBottom: '.6rem' }, dataset: { role: 'cuisine-ia' } },
+    el('div', { class: 'row' }, ...creations.map((it) => (items.length > 1 ? el('span', null, `${it.recipe.display_title || it.recipe.original_title} · `, etiquetteIA(it.version, it.recipe)) : etiquetteIA(it.version, it.recipe)))),
+    el('div', { class: 'status warn' }, t(AVERTISSEMENT_CREATION_IA))));
 
   // Avant de commencer : attentes longues ou préparations préalables
   const warnings = [];

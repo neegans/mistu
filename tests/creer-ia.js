@@ -1067,4 +1067,237 @@ export async function runCreerIaTests({ eq, ok }) {
     eq(sansEntree(sources, EN).filter((k) => !ANTERIEURES.includes(k)), [], 'en.js : chaque chaîne t() de creer-ia.js, add.js et search.js (hors quatre antérieures au lot) a sa traduction');
     ok(chainesDe(sources['add.js']).includes('Créer avec l’IA') && chainesDe(sources['search.js']).includes('Créer une recette avec ces critères') && chainesDe(sources['creer-ia.js']).includes('Écris d’abord ce que tu veux cuisiner.'), 'couverture en.js : le détecteur lit bien les chaînes des trois sources (garde contre un scan vide)');
   }
+
+  // --- T6 : l'étiquette C-2 partout, dérivée des DONNÉES (kind, provenance.generated_by, provenance.creation, recipe.origine — jamais
+  // source_label) : badge de version, provenance, cartes, fiche, mode cuisine, repas, exports, bibliothèque, « Adapter avec l’IA »
+  // (§ 3.3, § 3.4, N-7, N-10, F6, P16, R-CRE-2, R-CRE-4). P17 : français et fetch neutralisé, rendus dans le finally. Les textes attendus
+  // sont écrits en clair (une fonction d'étiquette changée rougit ici) ; une extraction IA de livre et une recette saisie à la main sont
+  // épinglées INCHANGÉES sur chaque surface (F6).
+  {
+    const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
+    const localeAvant = getUiLocale();
+    setUiLocale('fr');
+    const K = await import('../src/ui/components.js');
+    const { libelleSource } = await import('../src/core/lien.js');
+    const { renderRecipe } = await import('../src/ui/recipe.js');
+    const { renderCook } = await import('../src/ui/cook.js');
+    const { renderMeal } = await import('../src/ui/meals.js');
+    const { renderLibrary } = await import('../src/ui/library.js');
+    const X = await import('../src/domain/exporters.js');
+    const { buildDocs } = await import('../src/domain/search.js');
+    const { withRepo } = await import('./sync-fixture.js');
+    const vraiFetch = globalThis.fetch;
+    let appelsReseau = 0;
+    globalThis.fetch = async (u) => { appelsReseau += 1; throw new Error(`aucun reseau attendu ici : ${u}`); };
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    const attendre = async (pred) => { for (let i = 0; i < 200 && !(await pred()); i += 1) await new Promise((r) => setTimeout(r, 10)); return pred(); };
+    const ING = new Map(INGREDIENTS.map((i) => [i.id, i]));
+    const texte = (n) => (n ? n.textContent : null);
+    const textes = (racine, sel) => [...racine.querySelectorAll(sel)].map((n) => n.textContent);
+    const apres = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+    const AVERT = 'L’assistant n’a pas cuisiné cette recette : vérifie les quantités, les cuissons et les étiquettes avant de la servir.';
+    try {
+      let k6 = 0; const id6 = (p) => `${p}_t6_${++k6}`;
+      const conv = C.conventionCreation('metric_ca');
+      const fab = C.fabriquerRecetteIA({ recette: VALIDE, demande: 'saumon fenouil', filtres: { diets: ['sans_lactose'], type: 'plat_principal', servings: 2, maxMinutes: 30 }, langue: 'fr', modele: 'claude-sonnet-5-5', usage: { entree: 900, sortie: 700 }, convention: conv, newId: id6, maintenant: '2026-10-18T03:00:00.000Z' });
+      // Ce que saveBatch y ajoute (horodatages) ; source_label « Ricardo » : une valeur stockée n'est pas une preuve (C-2, S3).
+      const fiche = { ...fab.recipe, source_label: 'Ricardo', created_at: '2026-10-18T03:00:00.000Z', updated_at: '2026-10-18T03:00:00.000Z' };
+      const creation = { ...fab.version, created_at: '2026-10-18T03:00:00.000Z' };
+      const testee = { ...creation, status: 'tested' };
+      const adIA = { ...C.fabriquerRecetteIA({ recette: { ...VALIDE, servings: 4 }, demande: 'saumon fenouil', filtres: { servings: 4 }, langue: 'fr', modele: 'm', usage: null, convention: conv, parente: creation, changement: 'pour 4 personnes', newId: id6, maintenant: '2026-10-18T04:00:00.000Z' }).version, created_at: '2026-10-18T04:00:00.000Z' };
+      // « Corriger » (N-10) comme recipe-edit.js:216-231 l'écrit : version manuelle, la fiche garde `origine`, current_version_id déplacé.
+      const correction = { id: 'rv_t6_corr', recipe_id: fiche.id, kind: 'correction', parent_version_id: creation.id, status: null, servings: 2, prep_minutes: null, cook_minutes: null, active_minutes: null, total_minutes: null, ingredients: creation.ingredients, steps: creation.steps, constraints: {}, changes: '', notes: '', provenance: { source_page_ids: [], source_document_id: null, generated_by: 'manual', model: null, edition_id: null, convention_snapshot: null }, verification_state: 'to_verify', created_at: '2026-10-18T05:00:00.000Z' };
+      const ficheCorrigee = { ...fiche, current_version_id: correction.id };
+      const maVersion = { ...correction, id: 'rv_t6_ma', kind: 'adaptation', status: 'proposed', changes: 'Moins de sel.', created_at: '2026-10-18T06:00:00.000Z' };
+      // Les témoins qui ne doivent PAS bouger : une extraction IA d'un livre (F6) et une recette saisie à la main.
+      const livre = { id: 'b_t6', title: 'Mon livre', author: 'A. B.' };
+      const edition = { id: 'e_t6', book_id: 'b_t6', year: 2019 };
+      const ficheLivre = { id: 'rc_t6_livre', edition_id: 'e_t6', original_title: 'Tarte aux pommes', original_language: 'fr', availability: 'available', source_page_ids: [], printed_page: 58, current_version_id: 'rv_t6_livre', created_at: '2026-10-01T00:00:00.000Z' };
+      const extractionIA = { id: 'rv_t6_livre', recipe_id: ficheLivre.id, kind: 'extraction', status: null, servings: 6, prep_minutes: 20, cook_minutes: 40, total_minutes: 60, ingredients: [{ ...parseIngredientLine('200 g farine'), id: 'ri_t6_l', verification_state: 'verified' }], steps: [{ id: 'st_t6_l', position: 1, text: 'Cuire.' }], provenance: { generated_by: 'ai', model: 'claude-extraction', source_page_ids: [] }, verification_state: 'verified', created_at: '2026-10-01T00:00:00.000Z' };
+      const ficheMain = { id: 'rc_t6_main', edition_id: null, original_title: 'Soupe de famille', original_language: 'fr', availability: 'available', source_label: 'Recette de famille', current_version_id: 'rv_t6_main', created_at: '2026-10-02T00:00:00.000Z' };
+      const manuelle = { ...extractionIA, id: 'rv_t6_main', recipe_id: ficheMain.id, provenance: { generated_by: 'manual', source_page_ids: [] } };
+      const adManuelle = { ...manuelle, id: 'rv_t6_main_ad', kind: 'adaptation', status: 'proposed', changes: 'Plus de poivre.' };
+
+      // --- versionBadge(version, recipe = null) : le texte de etiquetteCreationIA, rendu par t() (R-CRE-4)
+      eq([texte(K.versionBadge(creation, fiche)), texte(K.versionBadge(testee, fiche)), texte(K.versionBadge(adIA, fiche)), texte(K.versionBadge({ ...adIA, status: 'tested' }, fiche)), texte(K.versionBadge(correction, ficheCorrigee)), texte(K.versionBadge(creation))],
+        ['Créée avec l’IA · non testée', 'Créée avec l’IA · testée', 'Adaptée avec l’IA · non testée', 'Adaptée avec l’IA · testée', 'Corrigée par toi — d’après une création IA', 'Créée avec l’IA · non testée'],
+        'versionBadge : synthèse proposée / testée, adaptation IA proposée / testée, correction d’une fiche IA ; sans la fiche, une création reste une création (C-2)');
+      eq([K.versionBadge(creation, fiche).dataset.role, [creation, testee, adIA, correction].map((v) => texte(K.versionBadge(v, ficheCorrigee))).join('|') === [creation, testee, adIA, correction].map((v) => C.etiquetteCreationIA(v, ficheCorrigee)).join('|')], ['etiquette-ia', true], 'versionBadge : un seul texte, celui d’etiquetteCreationIA (P16), sous data-role « etiquette-ia »');
+      eq(textes(K.versionBadge(maVersion, ficheCorrigee), '.badge'), ['Ma version — d’après une création IA', 'Proposée'], 'versionBadge : une version manuelle d’une fiche IA dit sa lignée, avec son statut (R-CRE-2)');
+      eq([texte(K.versionBadge(extractionIA, ficheLivre)), K.versionBadge(extractionIA, ficheLivre).className, texte(K.versionBadge(extractionIA)), texte(K.versionBadge(manuelle, ficheMain)), textes(K.versionBadge(adManuelle, ficheMain), '.badge'), textes(K.versionBadge({ ...adManuelle, provenance: { generated_by: 'ai' } }, ficheMain), '.badge'), K.versionBadge(null, fiche)],
+        ['Original', 'badge original', 'Original', 'Original', ['Ma version', 'Proposée'], ['Adaptation IA', 'Proposée'], null], 'versionBadge : extraction IA de livre, recette à la main, adaptations ordinaires — inchangés (F6)');
+
+      // --- provenanceText / libelleSource : « Créée avec l’IA » en tête, sans lire source_label (C-2)
+      eq([K.provenanceText(fiche, null, null), K.provenanceText({ ...fiche, source_url: 'https://ricardo.test/x' }, null, null), K.provenanceText(fiche, livre, edition), libelleSource(fiche), libelleSource({ ...fiche, source_url: 'https://ricardo.test/x' })],
+        ['Créée avec l’IA', 'Créée avec l’IA', 'Créée avec l’IA', 'Créée avec l’IA', 'Créée avec l’IA'], 'provenance : une fiche origine ia est « Créée avec l’IA » — jamais son source_label (« Ricardo »), ni un site, ni un livre (C-2)');
+      eq([K.provenanceText(ficheMain, null, null), libelleSource(ficheMain), K.provenanceText(ficheLivre, livre, edition), K.provenanceText({ ...fiche, origine: null }, null, null), libelleSource({ ...fiche, origine: null })],
+        ['Recette de famille', 'Recette de famille', 'Mon livre — A. B. · page 58', 'Ricardo', 'Ricardo'], 'provenance : sans origine ia, rien ne change — c’est `origine`, pas source_label, qui décide');
+
+      // --- timeText : jamais une durée pour une création (C-6), même si une ligne reçue en portait une
+      eq([K.timeText(creation), K.timeText({ ...creation, total_minutes: 30, prep_minutes: 10 }), K.timeText(extractionIA)], ['', '', 'actif 20 min · total 1 h'], 'timeText : vide pour une création (même une ligne reçue qui porterait des durées) ; une extraction de livre inchangée');
+
+      // --- recipeCard : la ligne d'étiquette sous la provenance
+      const docs = buildDocs({ recipes: [fiche, ficheLivre, ficheMain], versions: [creation, extractionIA, manuelle], editions: [edition], books: [livre], dishes: [], links: [] });
+      const carteDe = (id) => K.recipeCard(docs.find((d) => d.recipe.id === id));
+      const cIA = carteDe(fiche.id);
+      ok(cIA.textContent.includes('Créée avec l’IA · non testée'), 'carte : « Créée avec l’IA · non testée »');
+      const lignesCarte = [...cIA.querySelector('h3').parentNode.children].map((n) => n.textContent);
+      eq(lignesCarte.slice(0, 3), ['Saumon au fenouil', 'Créée avec l’IA', 'Créée avec l’IA · non testée'], 'carte : titre, provenance « Créée avec l’IA » (jamais « Ricardo »), puis l’étiquette — sous la provenance');
+      eq([carteDe(ficheLivre.id).querySelector('[data-role="etiquette-ia"]') === null, carteDe(ficheMain.id).querySelector('[data-role="etiquette-ia"]') === null, carteDe(ficheLivre.id).textContent.includes('IA'), texte(carteDe(ficheMain.id).querySelector('h3 + div'))],
+        [true, true, false, 'Recette de famille'], 'carte : une extraction IA de livre et une recette à la main n’ont aucune étiquette IA');
+
+      // --- Fiche recette (§ 3.3) : une base jetable (renderRecipe journalise l'ouverture et lit sync_conflicts)
+      const ctxFiche = (recipes, versions) => ({
+        recipesById: new Map(recipes.map((r) => [r.id, r])), versionsByRecipe: new Map(recipes.map((r) => [r.id, versions.filter((v) => v.recipe_id === r.id)])), versionsById: new Map(versions.map((v) => [v.id, v])),
+        editionsById: new Map([[edition.id, edition]]), booksById: new Map([[livre.id, livre]]), pagesById: new Map(), dishesById: new Map(),
+        cook_history: [], dish_recipe_links: [], recipe_translations: [], ingredients: INGREDIENTS, ingredientsById: ING, dishes: [],
+        settings: { units: 'original', reading_locale: 'original' }, conventionFor: (r) => r?.unit_convention_id || null,
+      });
+      const boutons = (racine, nom) => [...racine.querySelectorAll('button')].filter((b) => b.textContent === nom);
+      const pucesV1 = (racine) => textes(racine, '.chip').filter((c) => c.endsWith(' · V1'));
+      await withRepo(async (repoTemp) => {
+        const page = await renderRecipe({ id: fiche.id }, {}, ctxFiche([fiche], [creation]));
+        eq([texte(page.querySelector('header p')), textes(page, '.badge').includes('Original'), page.querySelectorAll('.badge.original').length, textes(page, 'option').includes('Original')],
+          ['Créée avec l’IA', false, 0, false], 'fiche IA : sous-titre « Créée avec l’IA » ; aucun badge « Original » (C-2) — hors sélecteur d’unités/langue');
+        eq(textes(page, '[data-role="etiquette-ia"]'), ['Créée avec l’IA · non testée', 'Créée avec l’IA · non testée', 'Créée avec l’IA · non testée'], 'fiche IA : l’étiquette en tête, dans la carte de contrôle (version unique) et dans la liste des versions');
+        const versionsSec = [...page.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Versions');
+        eq([textes(versionsSec, 'li .muted')[0]?.split(' · ')[0], versionsSec.textContent.includes('Extraction IA'), page.textContent.includes('Extraction IA')], ['Création', false, false], 'fiche IA : « Création » dans la liste des versions, pas de ligne « Extraction IA » (§ 3.3)');
+        eq(pucesV1(page), [], 'fiche IA : les puces « Rapide · V1 » sont masquées');
+        const adapter = page.querySelector('[data-role="adapter-ia"]');
+        eq([adapter?.tagName, adapter?.getAttribute('href'), adapter?.textContent], ['A', `#/recipes/creer?adapter=${creation.id}`, 'Adapter avec l’IA'], 'fiche IA : « Adapter avec l’IA » → #/recipes/creer?adapter=<version> (N-5)');
+        ok(apres(page.querySelector('.card.sage .row.between'), adapter) && page.querySelector('.card.sage').contains(adapter), 'fiche IA : le bouton est dans la carte de contrôle, à la place des puces V1');
+        eq([texte(page.querySelector('[data-role="description-ia"]')), texte(page.querySelector('[data-role="minutes-ia"]')), textes(page, '[data-role="conseils-ia"] li'), textes(page, '[data-role="notes-ia"] li'), texte(page.querySelector('[data-role="avertissement-ia"]'))],
+          ['Selon l’assistant : Un plat simple.', 'environ 25 min (estimé par l’assistant)', ['Selon l’assistant : Servir chaud.'], ['Vérifie l’étiquette du bouillon.'], AVERT], 'fiche IA : « Selon l’assistant », durée estimée, « Conseils », « À vérifier avant de servir », avertissement C-9 (§ 3.3, C-6, C-9)');
+        ok(['Conseils', 'À vérifier avant de servir'].every((h) => textes(page, 'h2, h3').includes(h)), 'fiche IA : les blocs portent leurs titres « Conseils » et « À vérifier avant de servir »');
+        eq([/\b(actif|total)\b/.test(page.textContent), page.querySelector('.recipe-body')?.contains(page.querySelector('[data-role="notes-ia"]'))], [false, true], 'fiche IA : timeText vide (aucune durée « actif » ni « total ») ; les blocs vivent dans .recipe-body (overflow-wrap, C-7)');
+        const marquer = boutons(page, 'Marquer testée');
+        eq(marquer.length, 1, 'fiche IA : « Marquer testée » offert sur une synthèse proposée (N-3)');
+        await repoTemp.save('recipe_versions', creation);
+        marquer[0].click();
+        eq(await attendre(async () => (await repoTemp.get('recipe_versions', creation.id))?.status === 'tested'), true, 'fiche IA : « Marquer testée » écrit status tested sur la version de la création');
+        const pageTestee = await renderRecipe({ id: fiche.id }, {}, ctxFiche([fiche], [testee]));
+        eq([textes(pageTestee, '[data-role="etiquette-ia"]')[0], boutons(pageTestee, 'Marquer testée').length], ['Créée avec l’IA · testée', 0], 'fiche IA testée : l’étiquette suit le statut, plus de « Marquer testée »');
+
+        // Données hostiles (ligne reçue ou restaurée) : rebornées au rendu, texte seul
+        const hostile = { ...creation, provenance: { ...creation.provenance, creation: { ...creation.provenance.creation, description: '<b>gras</b>' + 'x'.repeat(5000), conseils: ['a', 42, null, ...Array.from({ length: 10 }, (_, i) => `c${i}`)], notes_restrictions: 'pas une liste', minutes_estimees: 9999 } } };
+        const pageH = await renderRecipe({ id: fiche.id }, {}, ctxFiche([fiche], [hostile]));
+        eq([Array.from(texte(pageH.querySelector('[data-role="description-ia"]'))).length, pageH.querySelectorAll('[data-role="description-ia"] b').length, textes(pageH, '[data-role="conseils-ia"] li').length, pageH.querySelector('[data-role="notes-ia"]'), pageH.querySelector('[data-role="minutes-ia"]'), texte(pageH.querySelector('[data-role="avertissement-ia"]'))],
+          [Array.from('Selon l’assistant : ').length + 400, 0, 6, null, null, AVERT], 'fiche IA hostile : description bornée à 400 et rendue en texte, 6 conseils au plus (chaînes seulement), notes non-liste et minutes hors bornes omises ; l’avertissement reste');
+        eq(C.lireCreation(hostile), { description: '<b>gras</b>' + 'x'.repeat(389), conseils: ['a', 'c0', 'c1', 'c2', 'c3', 'c4'], notes: [], minutes: null }, 'lireCreation : bornes de C-7 (400 / 6 × 250 / 8 × 250 / [5, 240]) relues au rendu');
+        eq([C.lireCreation(extractionIA), C.lireCreation(correction), C.lireCreation(null)], [null, null, null], 'lireCreation : rien hors création (extraction IA de livre, correction)');
+
+        // N-10 : « Corriger » garde `origine` — la fiche corrigée montre encore la lignée IA, jamais « Original »
+        const pageC = await renderRecipe({ id: fiche.id }, {}, ctxFiche([ficheCorrigee], [creation, correction]));
+        eq([texte(pageC.querySelector('header p')), textes(pageC, '.badge').includes('Original'), textes(pageC, '[data-role="etiquette-ia"]')[0]], ['Créée avec l’IA', false, 'Corrigée par toi — d’après une création IA'], 'fiche corrigée (N-10) : provenance « Créée avec l’IA », en-tête « Corrigée par toi — d’après une création IA », jamais « Original »');
+        const options = textes(pageC, '.card.sage select option');
+        eq([options.length, options[0], options[1]?.startsWith('Créée avec l’IA · non testée ')], [2, 'Corrigée par toi — d’après une création IA', true], 'fiche corrigée : le sélecteur nomme les deux versions par leur étiquette C-2');
+        eq([pageC.querySelector('[data-role="adapter-ia"]') === null, pucesV1(pageC).length, pageC.querySelector('[data-role="avertissement-ia"]') === null], [true, 3, true], 'fiche corrigée : la version affichée est manuelle — ni « Adapter avec l’IA », ni blocs IA (§ 3.3 : seulement sur estCreationIA)');
+        const pageCv = await renderRecipe({ id: fiche.id }, { v: creation.id }, ctxFiche([ficheCorrigee], [creation, correction]));
+        eq([pageCv.querySelector('[data-role="adapter-ia"]')?.getAttribute('href'), pucesV1(pageCv).length, texte(pageCv.querySelector('[data-role="description-ia"]'))], [`#/recipes/creer?adapter=${creation.id}`, 0, 'Selon l’assistant : Un plat simple.'], 'fiche corrigée, création affichée (?v=) : « Adapter avec l’IA » et les blocs reviennent');
+
+        // Une création et son adaptation IA (T7) : le sélecteur nomme chacune par son étiquette ; l'adaptation s'adapte à son tour (estCreationIA)
+        const pageA = await renderRecipe({ id: fiche.id }, { v: adIA.id }, ctxFiche([fiche], [creation, adIA]));
+        const optionsA = textes(pageA, '.card.sage select option');
+        eq([optionsA.length, optionsA[0]?.startsWith('Créée avec l’IA · non testée '), optionsA[1]?.startsWith('Adaptée avec l’IA · non testée '), textes(pageA, '.badge').includes('Original'), pageA.querySelector('[data-role="adapter-ia"]')?.getAttribute('href')],
+          [2, true, true, false, `#/recipes/creer?adapter=${adIA.id}`], 'fiche IA avec adaptation IA : deux options étiquetées C-2, aucun « Original », « Adapter avec l’IA » sur l’adaptation affichée');
+
+        // Témoins : extraction IA d'un livre (F6) et recette à la main — inchangés
+        const pageL = await renderRecipe({ id: ficheLivre.id }, {}, ctxFiche([ficheLivre], [extractionIA]));
+        eq([texte(pageL.querySelector('header p')), textes(pageL, '.badge.original').length >= 2, pageL.querySelector('[data-role="etiquette-ia"]') === null, pageL.querySelector('[data-role="adapter-ia"]') === null, pucesV1(pageL).length, pageL.textContent.includes('Extraction IA (claude-extraction) — vérifiée à la main ensuite ?'), boutons(pageL, 'Marquer testée').length, pageL.querySelector('[data-role="avertissement-ia"]') === null, /total 1 h/.test(pageL.textContent)],
+          ['Mon livre — A. B. · page 58', true, true, true, 3, true, 0, true, true], 'fiche d’une extraction IA de livre : « Original », puces V1, ligne « Extraction IA », durée — jamais d’étiquette ni de bouton d’adaptation (F6)');
+        const pageM = await renderRecipe({ id: ficheMain.id }, {}, ctxFiche([ficheMain], [manuelle]));
+        eq([texte(pageM.querySelector('header p')), textes(pageM, '.badge.original').length >= 2, pageM.querySelector('[data-role="etiquette-ia"]') === null, pageM.querySelector('[data-role="adapter-ia"]') === null, pucesV1(pageM).length], ['Recette de famille', true, true, true, 3], 'fiche saisie à la main : inchangée');
+      });
+
+      // --- Mode cuisine (§ 3.4) : étiquette + avertissement en tête, après la rangée du titre
+      const session = (vid, rid) => ({ id: `cs_${vid}`, recipe_id: rid, selected_version_ids: [vid], servings: 2, progress: { done_step_ids: [] }, status: 'active', units: 'original' });
+      const ctxCuisine = (sessions, recipes, versions) => ({ cook_sessions: sessions, versionsById: new Map(versions.map((v) => [v.id, v])), recipesById: new Map(recipes.map((r) => [r.id, r])), conventionFor: () => null, ingredientsById: ING });
+      const cuisine = await renderCook({ id: `cs_${creation.id}` }, {}, ctxCuisine([session(creation.id, fiche.id)], [fiche], [creation]));
+      const tete = cuisine.querySelector('[data-role="cuisine-ia"]');
+      eq([texte(tete?.querySelector('[data-role="etiquette-ia"]')), texte(tete?.querySelector('.status'))], ['Créée avec l’IA · non testée', AVERT], 'cuisine : l’étiquette C-2 et l’avertissement C-9 en tête');
+      ok(apres(cuisine.querySelector('h1'), tete) && apres(tete, cuisine.querySelector('.cook')), 'cuisine : après la rangée du titre, avant l’étape (P16 : cook.js n’a pas de pageHeader)');
+      const cuisineL = await renderCook({ id: `cs_${extractionIA.id}` }, {}, ctxCuisine([session(extractionIA.id, ficheLivre.id)], [ficheLivre], [extractionIA]));
+      eq([cuisineL.querySelector('[data-role="cuisine-ia"]') === null, cuisineL.textContent.includes('IA')], [true, false], 'cuisine : une extraction IA de livre n’a ni étiquette ni avertissement');
+      const duo = { ...session(creation.id, fiche.id), id: 'cs_t6_duo', selected_version_ids: [extractionIA.id, creation.id] };
+      const cuisineDuo = await renderCook({ id: 'cs_t6_duo' }, {}, ctxCuisine([duo], [fiche, ficheLivre], [creation, extractionIA]));
+      eq([texte(cuisineDuo.querySelector('[data-role="cuisine-ia"] .row')), textes(cuisineDuo, '[data-role="cuisine-ia"] .status').length], ['Saumon au fenouil · Créée avec l’IA · non testée', 1], 'cuisine, repas de deux recettes : seule la création est étiquetée, nommée par son titre ; un seul avertissement');
+
+      // --- Repas (P16, meals.js:83) : le badge reçoit la fiche ; la source dit la création
+      const repas = { id: 'm_t6', title: 'Souper', servings: 2, constraints_snapshot: { diets: [] }, items: [{ id: 'mi_t6_1', recipe_id: fiche.id, recipe_version_id: correction.id, role: 'plat_principal', servings: 2 }, { id: 'mi_t6_2', recipe_id: ficheLivre.id, recipe_version_id: extractionIA.id, role: 'accompagnement', servings: 2 }] };
+      const ctxRepas = { meals: [repas], recipesById: new Map([[fiche.id, ficheCorrigee], [ficheLivre.id, ficheLivre]]), versionsById: new Map([[correction.id, correction], [extractionIA.id, extractionIA]]), editionsById: new Map([[edition.id, edition]]), editionLabel: (e) => (e ? livre.title : ''), ingredientsById: ING, meal_feedback: [], settings: {}, docs: [], docsByRecipe: new Map() };
+      const pageRepas = await renderMeal({ id: 'm_t6' }, {}, ctxRepas);
+      const cartesRepas = [...pageRepas.querySelectorAll('.card.flat.stack')];
+      eq(cartesRepas.map((c) => [textes(c, '.badge'), texte(c.querySelector('.row.between > div > .muted'))]), [[['Corrigée par toi — d’après une création IA'], 'Créée avec l’IA'], [['Original'], 'Mon livre']], 'repas : la fiche IA corrigée dit sa lignée et « Créée avec l’IA » (jamais « Ricardo ») ; l’extraction de livre reste « Original »');
+
+      // --- Exports (C-2) : texte BRUT (jamais t()), jamais source_label, jamais de totalTime pour une création (C-6)
+      const ld = X.toJsonLd({ recipe: fiche, version: creation, book: null, edition: null });
+      eq(['totalTime' in ld, 'prepTime' in ld, 'cookTime' in ld, ld['cuisineos:provenance'].generated_by, ld['cuisineos:provenance'].origine, ld.description.startsWith('Créée avec l’IA (non testée)'), 'author' in ld, 'isBasedOn' in ld],
+        [false, false, false, 'ai', 'ia', true, false, false], 'JSON-LD : aucune durée, generated_by « ai », origine « ia », description « Créée avec l’IA (non testée)… »');
+      eq(ld.description, `Créée avec l’IA (non testée). Selon l’assistant : Un plat simple. Environ 25 min (estimé par l’assistant). Conseil, selon l’assistant : Servir chaud. À vérifier avant de servir : Vérifie l’étiquette du bouillon. ${AVERT}`, 'JSON-LD : la description porte la création telle que la fiche la montre (C-9)');
+      eq('totalTime' in X.toJsonLd({ recipe: fiche, version: { ...creation, total_minutes: 30, prep_minutes: 10 }, book: livre, edition }), false, 'JSON-LD : une création reçue avec des durées n’exporte toujours pas de totalTime');
+      eq([X.toJsonLd({ recipe: fiche, version: adIA }).description.startsWith('Adaptée avec l’IA (non testée).'), X.toJsonLd({ recipe: fiche, version: adIA }).description.includes('Adaptation personnelle'), X.toJsonLd({ recipe: ficheCorrigee, version: correction }).description, X.toJsonLd({ recipe: ficheCorrigee, version: maVersion }).description, X.toJsonLd({ recipe: ficheCorrigee, version: correction })['cuisineos:provenance'].generated_by],
+        [true, false, 'Corrigée par toi — d’après une création IA.', 'Ma version — d’après une création IA (proposée). Moins de sel.', 'manual'], 'JSON-LD : une adaptation IA n’est plus « Adaptation personnelle » (P16) ; correction et version manuelle d’une fiche IA disent leur lignée ; generated_by fidèle');
+      const ldL = X.toJsonLd({ recipe: ficheLivre, version: extractionIA, book: livre, edition });
+      eq([ldL.totalTime, ldL.description, 'generated_by' in ldL['cuisineos:provenance'], 'origine' in ldL['cuisineos:provenance'], X.toJsonLd({ recipe: ficheMain, version: adManuelle }).description], ['PT1H', undefined, false, false, 'Adaptation personnelle (proposée) de la recette originale. Plus de poivre.'], 'JSON-LD : extraction IA de livre et adaptation ordinaire inchangées (F6)');
+      setUiLocale('en'); // le texte brut ne passe jamais par t() : une interface anglaise n'y change rien
+      const yaml = X.toPaprikaYaml([{ recipe: fiche, version: creation, book: null, edition: null }]);
+      const site = X.toReadableSite([{ recipe: fiche, version: creation, book: null }], new Map()).entries.find((e) => e.path === `recipes/${fiche.id}.html`).data;
+      setUiLocale('fr');
+      eq([yaml.includes('  source: "Créée avec l’IA"\n'), yaml.includes('Ricardo'), yaml.includes('    Créée avec l’IA (non testée).\n'), yaml.includes(`    ${AVERT}\n`), yaml.includes('    À vérifier avant de servir : Vérifie l’étiquette du bouillon.\n'), yaml.includes('Adaptation personnelle')],
+        [true, false, true, true, true, false], 'Paprika : source « Créée avec l’IA » (jamais source_label), notes : étiquette, « À vérifier avant de servir », avertissement — en français même sous une interface anglaise');
+      eq([site.includes('<span class="badge">Créée avec l’IA · non testée</span>'), site.includes('>Original<'), site.includes('Ricardo'), site.includes('<p class="meta">Créée avec l’IA'), site.includes(`<p>${AVERT}</p>`), site.includes('<p>Selon l’assistant : Un plat simple.</p>')],
+        [true, false, false, true, true, true], 'site lisible : badge « Créée avec l’IA · non testée » au lieu d’« Original », provenance « Créée avec l’IA », blocs de la création, avertissement');
+      const siteH = X.toReadableSite([{ recipe: fiche, version: { ...creation, provenance: { ...creation.provenance, creation: { ...creation.provenance.creation, description: '<img src=x onerror=alert(1)>' } } } }], new Map()).entries[1].data;
+      eq([siteH.includes('<img'), siteH.includes('&lt;img src=x onerror=alert(1)&gt;')], [false, true], 'site lisible : une description reçue est échappée (texte seul)');
+      const siteA = X.toReadableSite([{ recipe: fiche, version: adIA }, { recipe: ficheLivre, version: extractionIA, book: livre }, { recipe: ficheMain, version: adManuelle }], new Map()).entries;
+      const badgeDe = (id) => /<span class="badge">([^<]*)<\/span>/.exec(siteA.find((e) => e.path === `recipes/${id}.html`).data)?.[1];
+      eq([badgeDe(fiche.id), badgeDe(ficheLivre.id), badgeDe(ficheMain.id)], ['Adaptée avec l’IA · non testée', 'Original', 'Adaptation personnelle'], 'site lisible : adaptation IA « Adaptée avec l’IA » (P16) ; extraction de livre « Original » et adaptation ordinaire inchangées');
+      const siteMa = X.toReadableSite([{ recipe: ficheCorrigee, version: maVersion }], new Map()).entries[1].data;
+      eq(/<span class="badge">([^<]*)<\/span>/.exec(siteMa)?.[1], 'Ma version — d’après une création IA', 'site lisible : la version manuelle d’une fiche IA dit sa lignée, jamais « Adaptation personnelle » ni « Original »');
+      // Une ligne reçue qui rattacherait la création à un livre, une adresse ou des durées : aucune n'en devient la provenance (C-2, C-6)
+      {
+        const ficheH = { ...fiche, source_url: 'https://ricardo.test/x', printed_page: 12 };
+        const versionH = { ...creation, prep_minutes: 10, cook_minutes: 20, total_minutes: 30 };
+        const ldH = X.toJsonLd({ recipe: ficheH, version: versionH, book: livre, edition: { ...edition, isbn: '9780000000002' } });
+        const yamlH = X.toPaprikaYaml([{ recipe: ficheH, version: versionH, book: livre, edition: { ...edition, isbn: '9780000000002' } }]);
+        const siteHH = X.toReadableSite([{ recipe: ficheH, version: versionH, book: livre }], new Map()).entries;
+        eq([['author', 'isBasedOn', 'prepTime', 'cookTime', 'totalTime'].filter((c) => c in ldH), ldH['cuisineos:provenance'].book, ldH['cuisineos:provenance'].edition_isbn],
+          [[], undefined, undefined], 'JSON-LD hostile : ni auteur, ni livre, ni ISBN, ni durée pour une fiche origine ia');
+        eq([yamlH.includes('  source: "Créée avec l’IA"\n'), /source_url|prep_time|cook_time|ISBN|Mon livre|ricardo/.test(yamlH)], [true, false], 'Paprika hostile : source « Créée avec l’IA », ni adresse, ni durée, ni livre, ni ISBN');
+        eq([siteHH[1].data.includes('<p class="meta">Créée avec l’IA'), /Mon livre|ricardo|page 12|préparation \d+ min|cuisson \d+ min/.test(siteHH.map((e) => e.data).join(''))], [true, false], 'site lisible hostile : provenance « Créée avec l’IA », ni livre (fiche ni index), ni page, ni adresse, ni durée');
+      }
+      const yamlL = X.toPaprikaYaml([{ recipe: ficheLivre, version: extractionIA, book: livre, edition }, { recipe: ficheMain, version: adManuelle }]);
+      eq([yamlL.includes('  source: "Mon livre — A. B., p. 58"\n'), yamlL.includes('  source: "Recette de famille"\n'), yamlL.includes('    Adaptation personnelle (proposée), distincte de l’original.\n'), yamlL.includes('IA')], [true, true, true, false], 'Paprika : extraction IA de livre et adaptation ordinaire inchangées (F6)');
+
+      // --- Bibliothèque (N-7) : « Recettes créées avec l’IA » après « Liens web gardés », tri created_at décroissant, absente sans fiche ia
+      const ctxBiblio = (recipes, versions) => {
+        const d = buildDocs({ recipes, versions, editions: [], books: [], dishes: [], links: [] });
+        return { book_editions: [], recipes, recipe_versions: versions, source_documents: [], source_pages: [], rediscovery_prefs: [], dishes: [], dish_recipe_links: [], recipesById: new Map(recipes.map((r) => [r.id, r])), docsByRecipe: new Map(d.map((x) => [x.recipe.id, x])), scan_sessions: [], settings: {}, books: [], booksById: new Map(), editionsById: new Map(), editionLabel: () => '' };
+      };
+      const signet = { id: 'rc_t6_sig', original_title: 'Un lien gardé', availability: 'reference_only', source_url: 'https://a.test/x', edition_id: null, created_at: '2026-10-19T00:00:00.000Z' };
+      const recente = { ...fiche, id: 'rc_t6_rec', original_title: 'La plus récente', current_version_id: 'rv_t6_rec', created_at: '2026-10-18T09:00:00.000Z' };
+      const ancienne = { ...fiche, id: 'rc_t6_anc', original_title: 'La plus ancienne', current_version_id: 'rv_t6_anc', created_at: '2026-10-17T00:00:00.000Z' };
+      const vRecente = { ...creation, id: 'rv_t6_rec', recipe_id: recente.id };
+      const vAncienne = { ...creation, id: 'rv_t6_anc', recipe_id: ancienne.id };
+      const sections = (racine) => [...racine.querySelectorAll('section.card')].map((s) => s.querySelector('h2')?.textContent);
+      const sectionIA = (racine) => [...racine.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Recettes créées avec l’IA') || null;
+      const biblio = await renderLibrary({}, {}, ctxBiblio([ancienne, fiche, signet, ficheMain, recente], [vAncienne, creation, manuelle, vRecente]));
+      eq(sections(biblio), ['Liens web gardés', 'Recettes créées avec l’IA'], 'bibliothèque : la section « Recettes créées avec l’IA » vient après « Liens web gardés » (N-7)');
+      eq([textes(sectionIA(biblio), 'h3'), textes(sectionIA(biblio), '[data-role="etiquette-ia"]')], [['La plus récente', 'Saumon au fenouil', 'La plus ancienne'], ['Créée avec l’IA · non testée', 'Créée avec l’IA · non testée', 'Créée avec l’IA · non testée']], 'bibliothèque : les fiches origine ia seulement (ni le signet, ni la recette à la main), la plus récemment créée d’abord, avec leur étiquette');
+      eq(sections(await renderLibrary({}, {}, ctxBiblio([signet, ficheMain], [manuelle]))), ['Liens web gardés'], 'bibliothèque : sans fiche origine ia, aucune section');
+      const biblioC = await renderLibrary({}, {}, ctxBiblio([ficheCorrigee], [creation, correction]));
+      eq([sections(biblioC), textes(sectionIA(biblioC), 'h3 + div'), textes(sectionIA(biblioC), '[data-role="etiquette-ia"]')], [['Recettes créées avec l’IA'], ['Créée avec l’IA'], ['Corrigée par toi — d’après une création IA']], 'bibliothèque (N-10) : une fiche corrigée reste dans la section (origine, pas la version courante) et dit sa lignée');
+
+      // --- Chaînes anglaises : chaque texte neuf de T6 a son entrée, et l'interface anglaise les rend
+      const CLES_T6 = ['Créée avec l’IA', 'Créée avec l’IA · non testée', 'Créée avec l’IA · testée', 'Adaptée avec l’IA · non testée', 'Adaptée avec l’IA · testée', 'Corrigée par toi — d’après une création IA', 'Ma version — d’après une création IA', 'Adapter avec l’IA', 'Recettes créées avec l’IA', 'Selon l’assistant : {texte}', 'environ {m} min (estimé par l’assistant)', 'Conseils', 'À vérifier avant de servir', AVERT, 'Création'];
+      const sorties = [creation, testee, adIA, { ...adIA, status: 'tested' }, correction, maVersion, null].map((v) => C.etiquetteCreationIA(v, fiche));
+      eq([CLES_T6.filter((k) => typeof EN[k] !== 'string' || !EN[k]), sorties.filter((s) => !CLES_T6.includes(s))], [[], []], 'en.js : chaque texte neuf de T6 a sa traduction, et chaque sortie d’etiquetteCreationIA est dans la liste');
+      setUiLocale('en');
+      const repasEn = await renderMeal({ id: 'm_t6' }, {}, ctxRepas);
+      eq([texte(K.versionBadge(creation, fiche)), K.provenanceText(fiche, null, null), texte(K.versionBadge(correction, ficheCorrigee)), texte(repasEn.querySelector('.card.flat.stack .row.between > div > .muted')), texte(K.recipeCard(docs.find((d) => d.recipe.id === ficheMain.id)).querySelector('h3 + div'))],
+        ['Created with AI · untested', 'Created with AI', 'Corrected by you — from an AI creation', 'Created with AI', 'Recette de famille'], 'en : l’étiquette et la provenance sont traduites au rendu (t()), sur le repas aussi ; un libellé libre de la personne ne l’est jamais');
+      setUiLocale('fr');
+      eq(appelsReseau, 0, 'T6 : aucun appel réseau');
+    } finally { globalThis.fetch = vraiFetch; setUiLocale(localeAvant); }
+  }
 }
