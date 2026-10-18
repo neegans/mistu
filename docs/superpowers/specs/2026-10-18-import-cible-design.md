@@ -1,9 +1,9 @@
-# Lot A — « Importer une recette repérée » : journal d'import et import ciblé — spec (rév. 2)
+# Lot A — « Importer une recette repérée » : journal d'import et import ciblé — spec (rév. 3)
 
 Date : 18 octobre 2026. Base : `main` `57babc6`. Branche `import-cible`, worktree `~/projects/mistu-import` (serveur 8088).
 Sources : audit `docs/audits/2026-10-18-import-livres-photos-web.md` ; dossier de passation de Neegan (`Mitsu_Claude_Code`, 18 oct :
 cahier des besoins B3 et B8, plan § 3-4, maquette `mobile/04_import_recette_ciblee.png`) ; design approuvé en chat le 18 oct (journal en
-tête d'Ajouter). Rév. 2 : après la revue adverse de la rév. 1 (2 Critical, 17 Important, mineurs) ; les rulings sont en § 12.
+tête d'Ajouter). Rév. 2 : après la revue adverse de la rév. 1 (2 Critical, 17 Important, mineurs). Rév. 3 : après la re-revue de la rév. 2 (N1-N5, m1-m10) ; les rulings sont en § 12.
 Méthode : spec → revue adverse → plan → construction par sous-agents → `/verify` → fusion par Neegan.
 
 ## 0. Décisions (chacune renversable sans défaire le reste)
@@ -25,7 +25,7 @@ Méthode : spec → revue adverse → plan → construction par sous-agents → 
 - **D-6** Discordance : le titre lu doit **contenir chaque mot distinctif** du titre de la référence (mots vides retirés, accents et casse
   ignorés) ; sinon, ou si la page lue diffère de plus de 3, ou si le titre lu est nul : dialogue **avant** d'écrire. Jamais de rattachement
   silencieux, jamais de seconde fiche depuis cet écran.
-- **D-7** Le journal est **synchronisé** (texte ; réponse brute bornée à 16 Ko, effacée à l'enregistrement) et **archivé** ; une archive plus
+- **D-7** Le journal est **synchronisé** (texte ; réponse brute bornée à 16 000 points de code, effacée à l'enregistrement) et **archivé** ; une archive plus
   ancienne sans `imports` reste restaurable. Sur un autre appareil, « Reprendre » n'est offert que si le résultat validé est présent.
 - **D-8** La voie « Scanner cette recette » → Ajouter + `sessionStorage.cuisineos.pending_recipe` est **remplacée** par la route ciblée ;
   la clé et la case « Oui, rattacher » disparaissent ; « Saisir à la main » reste.
@@ -45,8 +45,8 @@ Dans un livre, une recette « Repérée » se touche : l'écran s'ouvre déjà s
 ou tu les choisis, tu les remets dans l'ordre si besoin, tu ajoutes la photo du plat si le livre en a une, puis **« Extraire et
 enregistrer »**. L'assistant lit, l'app enregistre : la recette devient disponible, avec ses pages d'origine et sa photo, et dit ce qui
 reste incertain. Si tu fermes l'app en route, les photos, l'ordre et la lecture déjà reçue sont gardés : la section **Imports** de la
-page Ajouter montre ce qui est en cours, à reprendre ou en échec, et un geste suffit. Une relance ne rappelle pas l'assistant si sa
-réponse est déjà là.
+page Ajouter montre ce qui est en cours, à reprendre ou en échec, et un geste suffit. Une lecture reçue et gardée « à vérifier »
+s'enregistre sans rappeler l'assistant.
 
 ## 2. Invariants
 
@@ -59,9 +59,11 @@ réponse est déjà là.
   toute écriture de recette.
 - **I-4 Pas de promesse « exactement une fois ».** Tout état où un appel a pu partir sans que sa réponse soit enregistrée (`interrompu`,
   `annule`, `incertain`) est dit avec la même phrase : « L'appel a peut-être été compté ; relancer en coûtera un autre. » (I1).
-- **I-5 Une correction est une version, et une version de correction n'est jamais réécrite.** Sur une recette `partial`, une nouvelle
-  lecture crée une version `extraction` (parent = la courante) ; elle devient courante **sauf** si une version `correction` existe, auquel
-  cas l'écran demande « Remplacer par cette lecture ? » (défaut : non, la fiche ne change pas) (I3).
+- **I-5 Une correction est une version, et ce que la personne a écrit n'est jamais masqué sans question.** Sur une recette `partial`, une
+  nouvelle lecture crée une version `extraction` (parent = la courante) ; elle devient courante **sauf** si une version **non produite par
+  l'assistant** existe (`generated_by !== 'ai'` : saisie à la main ou `correction`), auquel cas l'écran demande « Remplacer par cette
+  lecture ? » ; sur « non », la version est ajoutée sans devenir courante, et la fiche reçoit quand même l'union des pages, `kind: 'recipe'`
+  sur les pages et la photo du plat (ce que l'écran a promis), rien d'autre (I3, N4).
 - **I-6 Images sources ≠ photo du plat.** Pages (`source_page_ids`, `kind: 'recipe'`) pour lire ; photo du plat (`photo_sha256`) pour
   illustrer. L'une n'alimente jamais l'autre dans ce lot.
 - **I-7 Un seul import en vol par document** (onglet), tenu par une variable de module ; « Annuler » n'est offert que par le document qui
@@ -69,8 +71,9 @@ réponse est déjà là.
 - **I-8 Les états de la recette ne changent pas de vocabulaire** : `availability` et `verification_state` restent ; « en cours », « échec »,
   « à reprendre » sont des états du **journal**.
 - **I-9 Tout texte d'écran passe par `t()`** avec son entrée `en.js` ; aucun texte ne nomme le fournisseur ni la base.
-- **I-10 Toute transition du journal est un compare-and-set** dans une seule transaction (`db.transitionner`, § 3.6) : une transition
-  depuis un état périmé est refusée, nommée, sans écriture (I11).
+- **I-10 Toute écriture qui touche une ligne du journal est conditionnée** (`conditions` de `db.mutate`, § 3.6) : lue, vérifiée et écrite
+  dans la même transaction que tout ce qui l'accompagne (recette, pages, séance) ; une condition fausse annule la transaction entière,
+  nommée, sans écriture (I11, N1).
 
 ## 3. Données
 
@@ -84,7 +87,7 @@ réponse est déjà là.
   status: 'a_lancer' | 'en_cours' | 'a_verifier' | 'enregistre' | 'echec' | 'ignore',
   erreur: null | { raison, extra },                  // raisons § 4.4
   resultat: null | { … sortie validée, § 3.4 … },
-  reponse_brute: null | string,                      // ≤ 16 000 points de code, diagnostic, jamais rendue, mise à null à `enregistre`
+  reponse_brute: null | string,                      // ≤ 16 000 points de code (une sortie de 6 000 jetons peut dépasser : coupée, m7), diagnostic, jamais rendue, null à `enregistre`
   appels: 0, model: null, duree_ms: null,
   device_id, document_id_vol: null | string,          // le document (onglet) qui tient le vol, et son battement
   battement_at: null | iso,
@@ -98,12 +101,14 @@ supprimée ne bloquent pas une archive ; la fabrication ignore une page absente.
 **Transitions** (toutes par `db.transitionner`, I-10) :
 `a_lancer → en_cours | ignore` · `en_cours → a_verifier | echec` · `a_verifier → enregistre | a_lancer (changer les pages) | ignore` ·
 `echec → en_cours (relancer) | a_lancer (changer les pages) | ignore` · `en_cours → echec(annule)` par le document qui tient le vol ·
-`en_cours → echec(interrompu)` au démarrage, **seulement si `battement_at` a plus de 90 s** (le vol bat toutes les 15 s) · aucune autre.
+`en_cours → echec(interrompu)` au démarrage, **seulement si `battement_at` a plus de 90 s** (le vol bat toutes les 15 s, écriture d'origine
+`device` : jamais en file de synchro, m2) · aucune autre.
 Une réponse qui arrive après un `annule`/`interrompu` tente `echec → a_verifier`, qui n'existe pas : elle est **écrite dans
 `reponse_brute` seulement** (diagnostic), l'état reste `echec` ; c'est le prix assumé de I-4.
 
 **Rétention** : à `enregistre`, `reponse_brute` passe à `null` ; après 30 jours, `enregistre` et `ignore` sont **supprimés** à `init()`
-par une suppression **d'origine `local`** (tombale synchronisée, R57) : la ligne disparaît aussi du serveur et des autres appareils.
+par une suppression **d'origine `local`** (tombale synchronisée, R57) : la ligne disparaît aussi du serveur et des autres appareils ; ce
+jour-là, « À envoyer » et la pastille montent d'autant sans geste de la personne (m1, assumé).
 `provenance.import_id` est un **pointeur souple** (une version survit à son import).
 
 ### 3.2 Autres champs
@@ -131,8 +136,9 @@ recette est visiblement partielle, `incomplete: true` ; une étape peut tenir su
 booléens coercés ; **tout dépassement refuse** (`hors_bornes`). `language` n'est plus demandé (jamais utilisé). `uncertain_fields` est gardé
 dans `resultat` et affiché dans le bandeau de la fiche (« Incertain : … », borné à 300 points de code).
 `PasserelleProvider.complete(messages, { maxTokens, signal })` : `signal` relayé à `appelerAssistant` (qui l'accepte déjà) ; après l'appel
-`this.modele` (existant) **et `this.stopReason`** sont posés ; `extractRecipeFromImages(images, { signal })` et `extractIndexFromImages`
-les rendent dans leur résultat (`{ recette, stopReason, modele }`). `stopReason === 'max_tokens'` → `echec(coupe)` ; aucun JSON → `echec(illisible)` ;
+`this.modele` (existant) **et `this.stopReason`** sont posés ; `extraireRecette(images, provider, { signal, maxTokens })` et `extraireIndex(images, provider, { signal })` les rendent dans leur
+résultat (`{ recette | entrees, stopReason, modele }`) ; `extractRecipeFromImages(images, provider, opts)` et `extractIndexFromImages` restent
+des enveloppes compatibles (m5) jusqu'à ce que leurs appelants passent au journal (tâches 4 et 6). `stopReason === 'max_tokens'` → `echec(coupe)` ; aucun JSON → `echec(illisible)` ;
 zéro ligne **et** zéro étape → `echec(vide)` : rien n'est écrit sur la recette (I13).
 
 ### 3.5 Serveur : migration `0005_imports.sql`
@@ -143,13 +149,23 @@ quatre fonctions recréées sur les 27 magasins. Preuve `supabase/proofs/0005_im
 `edition_id` / `recipe_id` / `status`, `sync_push` accepte une ligne `imports`, `rollback;` dernier). `supabase/README.md` étape 11.
 **`0005` collée avant le `push`** (sinon quarantaine `refus`, bruyante, non destructive).
 
-### 3.6 Deux primitives neuves
+### 3.6 Deux primitives neuves (N1, N2)
 
-- `db.transitionner(store, id, { attendus: [...statuts], patch })` : **une** transaction readwrite : lit, vérifie `status ∈ attendus`, écrit
-  `{ ...fiche, ...patch, updated_at }` avec capture d'outbox ; sinon lève `TransitionRefusee` sans écriture. Base de I-10.
-- `repo.ajouterPages(files, { edition_id, session_id, import_id })` : comme `startScanSession` **sans navigation ni toast**, en **une**
-  transaction pour les lignes (octets par `putFile` avant, comme aujourd'hui) : `source_documents`, `source_pages`, `scan_sessions` et
-  `imports.page_ids` (ajout en fin). `startScanSession` l'appelle pour les chemins existants.
+- **`db.mutate` gagne `conditions`** : `db.mutate({ puts, deletes, clearStores, origin, payloads, conditions })` où
+  `conditions = { [store]: [{ key, attendus: [...statuts], patch }] }` ; `patch` est un objet ou une fonction `(courant) => objet`. Dans la **même
+  transaction readwrite** que les `puts`/`deletes` : chaque fiche conditionnée est lue (`get` dans la transaction), `status ∈ attendus` est
+  vérifié, la fiche fusionnée `{ ...courant, ...patch(courant) }` est ajoutée aux `puts`, puis `onMutate` est appelé **de façon synchrone** dans le
+  rappel de la dernière lecture (capture d'outbox, portée `outbox` ouverte seulement si la base la possède : les bases de test `TEST_STORES`
+  n'en ont pas), puis tout est écrit ; une condition fausse → `transaction.abort()` et `TransitionRefusee { store, key, statut }` : **rien**
+  n'est écrit. `MUTATING_METHODS` est inchangé (c'est toujours `mutate`), le pin de `tests/sync.js:47` ne bouge pas.
+- **`repo.transitionner(store, key, { attendus, patch, puts = {}, deletes = {}, origin = 'local' })`** : enveloppe de `repo` qui nettoie les
+  chaînes (`nettoyerChaines`, R61 : un `resultat` ou une `reponse_brute` du modèle porte des caractères de contrôle), pose `updated_at =
+  syncNow()` sur chaque fiche écrite, appelle `db.mutate` avec la condition, puis `emit('change')`. **Tous** les écrans passent par elle (jamais
+  `db.mutate` direct) ; `repo.saveBatch(batch, { conditions })` l'étend au cas sans patch.
+- **`repo.ajouterPages(files, { edition_id, session_id, import_id })`** : comme `startScanSession` **sans navigation ni toast**, octets par
+  `putFile` avant, puis **un** `repo.transitionner('imports', import_id, { attendus: ['a_lancer', 'a_verifier', 'echec'], patch: (c) => ({
+  page_ids: [...c.page_ids, ...nouveaux] }), puts: { source_documents, source_pages, scan_sessions } })` (sans `import_id` : `saveBatch`
+  simple, chemin existant). `startScanSession` l'appelle.
 
 ### 3.7 Archives (C1)
 
@@ -163,8 +179,8 @@ plus récente la refuse déjà (« entrée non déclarée ») : le README le dit
 ### 4.1 Entrées
 
 - Fiche du livre (`src/ui/book.js`) : la carte d'une recette `reference_only` sans `source_url` (ou `partial`) garde son lien vers la
-  **fiche** ; sa rangée gagne un bouton **« Importer »** (`.btn.small`, pas un lien imbriqué) → `#/recipes/<id>/importer` ; « Scanner cette
-  recette » disparaît ; « Saisir à la main » reste.
+  **fiche** ; **sous** la carte (hors du `<a>` : `recipeCard` met `extra` à l'intérieur, m4), une rangée porte **« Importer »** (`.btn.small`) →
+  `#/recipes/<id>/importer` et « Saisir à la main » ; « Scanner cette recette » disparaît.
 - Fiche d'une référence (`src/ui/recipe.js`) : « Scanner cette recette » devient **« Importer cette recette »** (primaire) → même route ;
   une fiche `partial` offre « Relire les pages » (secondaire) → même route.
 - Route `route('/recipes/:id/importer', renderImportCible)` dans `src/app.js` (regex ancrée : l'ordre n'importe pas) ; ajoutée à
@@ -172,8 +188,10 @@ plus récente la refuse déjà (« entrée non déclarée ») : le README le dit
   `src/ui/import-cible.js` (écran) et `src/domain/import-cible.js` (pur), tous deux dans `SHELL`. `getData` charge `imports`.
 - Une fiche `available`, ou un signet : toast « Cette recette a déjà son texte. » / « Un lien web s'importe au lot suivant. », retour fiche.
 - À l'ouverture, l'écran **reprend l'import non terminé** de cette recette s'il existe (`a_lancer`, `a_verifier`, `echec`, `en_cours`),
-  sinon en crée un `a_lancer` à la première photo (pas avant : une visite sans photo n'écrit rien). La séance d'un import est **exclue** des
-  rappels génériques (« Séances à reprendre », « Séance en cours » de la fiche livre) : filtre par `imports.scan_session_id`.
+  sinon en crée un `a_lancer` à la première photo (pas avant : une visite sans photo n'écrit rien). **Seule la séance créée par l'écran ciblé**
+  (import `kind: 'recette'` **avec** `recipe_id`, non terminé) est exclue des rappels génériques (« Séances à reprendre », « Séance en
+  cours » de la fiche livre, « Photos conservées ») ; elle y réapparaît si l'import passe à `ignore`. Les séances où « Regrouper en recette »
+  ou le panneau d'index ont écrit un import restent visibles (N3).
 
 ### 4.2 L'écran `#/recipes/<id>/importer`
 
@@ -197,11 +215,11 @@ plus récente la refuse déjà (« entrée non déclarée ») : le README le dit
 
 1. Garde : session, en ligne, au moins une page ; `imports` `a_lancer | echec → en_cours` (`started_at`, `document_id_vol`, `battement_at`) ;
    `appels + 1` **au moment où le `fetch` part** (pas avant). Appel unique : `PasserelleProvider.complete`, pages dans l'ordre de `page_ids`,
-   réduites par `pagePourEnvoi`, `maxTokens: 6000`, `signal`. Battement toutes les 15 s (`battement_at`, même statut).
+   réduites par `pagePourEnvoi`, `maxTokens: 6000`, `signal`. Battement toutes les 15 s (`battement_at`, même statut, origine `device` : hors file).
 2. Réponse → `validateParsedRecipe` → **`db.transitionner(en_cours → a_verifier, { resultat, reponse_brute, model, duree_ms })`** (I-3).
    Échec → `en_cours → echec` avec `erreur`. Écriture locale impossible après une réponse (exception) → tentative `echec(incertain)` ; si
    elle échoue aussi, la ligne reste `en_cours` et deviendra `interrompu` au démarrage (même phrase, I-4).
-3. **Discordance** (`discordance(resultat, reference)`, pure) : mots du titre de la référence, `normalizeText` puis mots vides retirés
+3. **Discordance** (`discordance(resultat, reference)`, pure) : mots du titre de la référence (`normalizeText`, puis découpage sur espaces, apostrophes, traits d'union et points), mots vides retirés
    (liste fermée fr/en : le, la, les, l, de, du, des, d, au, aux, à, et, en, un, une, the, of, and, with, a, an) ; **chaque** mot restant doit
    apparaître dans les mots du titre lu ; page lue vs `printed_page` à ± 3 quand les deux sont connues ; titre lu nul → discordance.
    Dialogue : « Le texte lu s'intitule “X” ; la référence est “Y” (p. N). Rattacher quand même ? » / « Rattacher » / « Garder la lecture sans
@@ -215,17 +233,20 @@ plus récente la refuse déjà (« entrée non déclarée ») : le README le dit
    conservé, `printed_page` posé si vide, `source_page_ids` = union, `photo_sha256` / `photo_origin`, `availability` = `available` si lignes
    et étapes, `partial` sinon, et `partial` au plus si `incomplete` ou `missing_page` ; `verification_state` = celui de la version ;
    `current_version_id` → la nouvelle (sauf I-5). La référence est **relue** juste avant la transaction (leçon C4) ; `assertVocabulaire`.
-5. **Une transaction** `repo.saveBatch({ recipes, recipe_versions, source_pages (kind 'recipe', position, printed_page), scan_sessions
-   (recipe_ids, status 'done'), imports (… `a_verifier → enregistre` par `transitionner` dans la même transaction, `reponse_brute: null`,
-   `finished_at`) })`. Puis fiche, toast « Recette importée ».
+5. **Une transaction** : `repo.transitionner('imports', id, { attendus: ['a_verifier'], patch: { status: 'enregistre', reponse_brute: null,
+   finished_at }, puts: { recipes, recipe_versions, source_pages (kind 'recipe', position, printed_page), scan_sessions (recipe_ids, status
+   'done') } })` ; une condition fausse (import déjà enregistré par un autre onglet) n'écrit rien et l'écran se redessine. Puis fiche, toast
+   « Recette importée ».
 6. **Fiche** : bandeau « Lue par l'assistant le {d} · {n} ligne(s) incertaine(s) » (+ « page possiblement manquante », « lecture
    incomplète », « Incertain : … ») ; état de vérification **de la version affichée** (« Vérifiée » / « {n} lignes à vérifier ») ; photo du
    plat quand ses octets sont là ; « Corriger » ; puce « incertain » sur les lignes concernées. **Mode cuisine et courses** : bandeau « Lue par
    l'assistant, non relue » tant que la version courante est une `extraction` à `to_verify` (D-3).
-7. **« Corriger » hérite** (I4) : l'éditeur ouvre les étapes jointes par **une ligne vide** et `parseStepsBlock(texte, { parParagraphe:
-   true })` (option neuve, défaut inchangé) recoupe sur les lignes vides ; `reparse()` recopie `uncertain` d'une ligne dont le
-   `source_text` n'a pas changé ; la version `correction` hérite `incomplete`, `missing_page`, `import_id`, `titre_lu` de sa parente ; le
-   bandeau de la fiche lit la **version affichée**.
+7. **« Corriger » hérite** (I4, N5) : quand la version de départ a **au moins une étape qui contient un saut de ligne**, l'éditeur passe en
+   mode « une étape par paragraphe » : étapes jointes par une ligne vide, aide « Une étape par paragraphe (ligne vide entre deux étapes). »,
+   aperçu et `save()` par `parseStepsBlock(texte, { parParagraphe: true })` (option neuve) ; sinon rien ne change (une étape par ligne ou par
+   paragraphe, aide actuelle). `reparse()` recopie `uncertain` d'une ligne dont le `source_text` n'a pas changé ; la version `correction` hérite
+   `incomplete`, `missing_page`, `import_id`, `titre_lu` de sa parente ; le bandeau de la fiche lit la **version affichée** ; le texte d'une
+   étape est rendu en `white-space: pre-line` sur la fiche et en mode cuisine (m10).
 
 ### 4.4 Cas et textes
 
@@ -233,7 +254,7 @@ plus récente la refuse déjà (« entrée non déclarée ») : le README le dit
 |---|---|---|
 | Hors ligne | rien | « Tu es hors ligne. » (bouton éteint, écoute `online`/`offline`) |
 | Session absente | rien | carte « Connecte-toi pour utiliser l'assistant. » |
-| `non_admis`, `quota`, `trop_de_demandes`, `trop_lourd` (413 : `requete` + extra), `requete`, `serveur`, `delai`, `reseau`, `interne` | `echec(raison)` | textes existants (`texteRefusAssistant` / `texteEchecAssistant`) + « Relancer » (éteint hors ligne ou sans session) |
+| `non_admis`, `quota`, `trop_de_demandes`, `trop_lourd` (413 : `requete` + extra), `requete`, `serveur`, `delai`, `reseau`, `interne`, `reponse_illisible` | `echec(raison)` | textes existants (`texteRefusAssistant` / `texteEchecAssistant`) + « Relancer » (éteint hors ligne ou sans session) |
 | « Annuler » (document qui tient le vol) | `echec(annule)` | « Lecture annulée. L'appel a peut-être été compté ; relancer en coûtera un autre. » |
 | Réponse coupée | `echec(coupe)` | « La lecture a été coupée : essaie avec moins de pages. » |
 | JSON illisible / hors bornes / vide | `echec(illisible \| hors_bornes \| vide)` | « L'assistant n'a pas répondu lisiblement. Réessaie. » (« Code : … ») ; `vide` : « Aucun ingrédient ni étape lus sur ces pages. » |
@@ -254,7 +275,7 @@ séance `open` **sans import** (« Photos conservées : {n} page(s) · {livre} �
 « Relancer » et « Ignorer » · tous → « Ignorer » sauf `en_cours`. **Cibles de « Reprendre » par sorte** : `kind: 'recette'` avec
 `recipe_id` → `#/recipes/<id>/importer` ; `kind: 'recette'` sans `recipe_id` (« Regrouper en recette ») → `#/recipes/new?import=<imp>`,
 éditeur prérempli depuis `resultat` ; `kind: 'index'` → `#/import?session=…&import=<imp>`, panneau d'index prérempli. Fiche du livre :
-« {n} import(s) à reprendre » → `#/add#imports` (ancre de la section). Autre appareil : « Photos sur un autre appareil » ; « Reprendre »
+« {n} import(s) à reprendre » → `#/add?section=imports` (la section est rendue en premier et reçoit le focus ; `parseHash` ne porte pas d'ancre, m3). Autre appareil : « Photos sur un autre appareil » ; « Reprendre »
 seulement si `resultat` ; « Relancer » absent ; `recipe_id` pas encore reçu → « (référence pas encore reçue) », sans geste.
 
 ### 4.6 Ce qui change ailleurs
@@ -285,7 +306,7 @@ Aucun changement de la fonction `assistant`. Migration `0005`, preuve, README (�
 
 - **Schéma** : montée `DB_VERSION 3 → 4` sur une base peuplée ; `imports` dernier de `STORES`, dans `SYNC_STORES`, `ARCHIVE_DATA_STORES`,
   relations déclarées (et **pas** `recipe_id` ni `page_ids`) ; archive aller-retour avec une ligne `imports` ; **archive figée sans `imports`
-  restaurée** (C1) ; `assertVocabulaire` (refus nommé, absent toléré) et test de source de ses appelants.
+  restaurée** (C1) ; `assertVocabulaire` (refus nommé, absent toléré) et test de source de ses appelants (faible, admis : un mutant « appel commenté » est rejoué à la vague finale, m9).
 - **Primitives** : `db.transitionner` (une transaction : attendu faux → aucune écriture, outbox capturée sur succès, course simulée par
   deux appels entrelacés) ; `repo.ajouterPages` (une transaction pour les lignes, ordre de `page_ids`, pas de navigation).
 - **Domaine pur** : `modeleEcran` (ordre, bornes de Monter/Descendre, retrait, focus cible) ; `discordance` (table : pommes/poires,
@@ -367,7 +388,13 @@ sous les 120 s du serveur. Aucun agent ne dépense d'appel à la place de Neegan
 - **I15** → § 3.1 : purge par suppression `local` (tombale), `import_id` souple.
 - **I16** → § 4.1-4.2 : `ROUTES_DE_SAISIE`, structure R-VIS-8.
 - **I17** → D-2, D-4 : photo du plat et réordonnancement sont dans le cahier B3 de Neegan (gardés) ; relecture d'`available` sortie (D-11).
-- Mineurs : bornes → refus `hors_bornes` ; `titre_lu` en § 3.2 ; `role` abandonné (`kind` seul) ; ordre = `page_ids` ; `repo.ajouterPages` ;
+**Rév. 2 → rév. 3 (re-revue).** **N1** → I-10, § 3.6, § 4.3.5 : une seule primitive (`conditions` de `db.mutate`), `repo.transitionner` enveloppe,
+enregistrement et `ajouterPages` conditionnés. **N2** → § 3.6 : `MUTATING_METHODS` inchangé, nettoyage et `syncNow` dans `repo`, portée `outbox`
+conditionnelle. **N3** → § 4.1 : seule la séance de l'écran ciblé est exclue, réapparition sur `ignore`. **N4** → I-5 : garde sur toute version non
+`ai`, chemin « non » pose pages et photo. **N5** → § 4.3.7 : paragraphe seulement si une étape porte un saut de ligne, aide et aperçu alignés.
+m1 « À envoyer » monte ; m2 battement `device` ; m3 `?section=imports` ; m4 bouton hors carte ; m5 signatures ; m6 `reponse_illisible` ; m7 unités ;
+m8 § 1 reformulé ; m9 mutant à la vague finale ; m10 `pre-line`.
+- Mineurs (rév. 2) : bornes → refus `hors_bornes` ; `titre_lu` en § 3.2 ; `role` abandonné (`kind` seul) ; ordre = `page_ids` ; `repo.ajouterPages` ;
   « Choisir » sans `capture` ; `preparerPhotoLocale` ; `getData` ; textes complétés ; « Extraire avec l'assistant IA » ; vocabulaire mort retiré ;
   `appels` au départ du `fetch` ; accessibilité ; fiche du livre (bouton, pas de lien imbriqué) ; `#/add#imports` ; titre nul ; 16 000 points
   de code et 512 Kio ; relecture avant `saveBatch` ; `imports` dernier ; B ∥ G avec fusions séquentielles ; 499 non prouvé ; deux appareils ;
