@@ -481,4 +481,29 @@ export async function runAssistantCompteTests({ eq, ok }) {
       } finally { uninstallCapture(db); repoModule.bindDatabase(origine); }
     });
   }
+
+  // --- T6 : archives (K-7) et cycle du compte (K-8)
+  const B = await import('../src/domain/backup.js');
+  await withRepo(async (repo, db) => {
+    await repo.saveAssistantConfig({ provider: 'anthropic', model: 'm', api_key: 'sk-factice-archive' });
+    await repo.save('books', { id: 'b_arch', title: 'Livre' });
+    const archive = await B.createArchive(db, { deviceName: 'Appareil de test' });
+    const texte = new TextDecoder().decode(await archive.blob.arrayBuffer());
+    ok(!texte.includes('sk-factice-archive') && !texte.includes('assistant_config'), 'K-7 : ni la clé ni le magasin dans les octets du ZIP');
+    const inspection = await B.inspectArchive(await archive.blob.arrayBuffer());
+    ok(inspection.ok, 'K-7 : une archive sans ce magasin (comme toute archive d’avant ce lot) reste valide à l’inspection');
+    ok(!('assistant_config' in (inspection.payload?.stores || {})), 'K-7 : l’inspection ne connaît pas ce magasin');
+    // remplacement : la ligne reste ; fusion : aussi
+    await B.applyArchive(db, inspection, { mode: 'replace' });
+    eq((await repo.getSettings()).llm.api_key, 'sk-factice-archive', 'K-7 : une restauration en REMPLACEMENT garde la configuration');
+    eq((await db.get('books', 'b_arch'))?.title, 'Livre', 'K-7 : … et la restauration a bien remis la bibliothèque (le remplacement a joué)');
+    await B.applyArchive(db, inspection, { mode: 'merge' });
+    eq((await repo.getSettings()).llm.api_key, 'sk-factice-archive', 'K-7 : une fusion aussi');
+    ok((await B.verifyRestored(db, inspection, { mode: 'replace' })).ok, 'K-7 : le bilan de restauration reste vert malgré le magasin hors archive');
+    eq(B.compterFichesSynchronisees(inspection) >= 1, true, 'K-7 : compterFichesSynchronisees tolère l’absence du magasin');
+    // K-8 : effacer l'appareil vide la ligne, rien en file, rien envoyé
+    await db.mutate({ deletes: { outbox: (await db.getAll('outbox')).map((e) => e.seq) }, origin: 'device' });
+    await repo.clearDevice();
+    eq([await db.get('assistant_config', 'llm'), (await db.getAll('outbox')).length, (await repo.getSettings()).llm.provider], [undefined, 0, 'none'], 'K-8 : clearDevice vide assistant_config sans rien mettre en file');
+  });
 }

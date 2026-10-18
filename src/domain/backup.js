@@ -294,7 +294,9 @@ export async function applyArchive(db, inspection, { mode = 'merge', horodater =
     batch.files.push({ ...existing, sha256: file.sha256, blob, mime: file.mime, size: file.size, created_at: existing?.created_at || new Date().toISOString() });
   }
   normaliserFiches(batch, { horodater });
-  await db.putBatch(batch, { clearStores: mode === 'replace' ? Object.keys(STORES).filter((s) => !SYNC_INTERNAL_STORES.includes(s)) : [] });
+  // K-7 (spec assistant-par-le-compte) : la configuration de l'assistant n'est pas de la bibliothèque — une
+  // restauration en remplacement ne la vide pas (elle n'est dans aucune archive : il n'y aurait rien pour la réécrire).
+  await db.putBatch(batch, { clearStores: mode === 'replace' ? Object.keys(STORES).filter((s) => !SYNC_INTERNAL_STORES.includes(s) && s !== 'assistant_config') : [] });
   return Object.fromEntries(Object.entries(batch).map(([name, rows]) => [name, rows.length]));
 }
 
