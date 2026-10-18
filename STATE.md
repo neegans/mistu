@@ -1,5 +1,18 @@
 # STATE.md — Cuisine OS (mistu) — état au 18 octobre 2026 (lot « Refonte visuelle magazine » fini dans le worktree, sur les lots « Créer une recette avec l'assistant » et « l'assistant suit le compte », eux aussi finis et non fusionnés)
 
+**18 octobre 2026, 10 h 50 — LES TROIS LOTS SONT EN LIGNE.** Geste de Neegan : `0003_assistant_config.sql` collée sur `mitsu`
+(`Success`), preuve `0003` jouée : **45 verdicts, 0 faux**, journaux de Postgres jugés (la clé ne peut pas y finir :
+`log_statement = ddl`, durée `-1`, `log_parameter_max_length_on_error = 0`), adresses de preuve retirées (2) ; puis trois
+fusions `--ff-only` (`assistant-compte` → `creer-ia` → `refonte-visuelle`) et un `push` : **`main` = `origin/main` = `7a95777`**
+(50 commits sur `66c5d19`). Suite publique `https://neegans.github.io/mistu/tests/` relancée par le contrôleur dans un Chrome
+sans fenêtre, contexte neuf, aucune clé : **2633/2633**, seule erreur de console le 404 `/favicon.ico` ; `sw.js` servi
+`cuisine-os-v0.7.0-25`. Les paragraphes ci-dessous décrivent chaque lot tel qu'il était à sa clôture (« FINI dans le
+worktree, PAS fusionné, PAS poussé ») : c'est désormais de l'histoire. Reste à Neegan : iPhone (connexion Google, « suit ton
+compte », barre d'état `default`, onglet actif, porte, survol), preuve réelle du lot 2 avec sa clé (un seul POST, étiquette,
+« Garder »), décisions (N-8/N-9 sur les livres, V-3/V-4, R-VIS-8, R-VIS-4, ovale, 240 min, `image: null`, « 100 % », titre
+d'adaptation, « filets » lu comme `dash`), rotation de la clé Anthropic + plafond, « clean » des cinq worktrees (les cinq
+registres sont copiés identiques dans `~/projects/mistu/.superpowers/sdd/`, captures du lot 3 comprises).
+
 ## Où on en est
 **Lot « Refonte visuelle magazine culinaire » (18 octobre) : FINI dans le worktree, PAS fusionné, PAS poussé** — branche
 `refonte-visuelle`, worktree `~/projects/mistu-look` (serveur `python3 -m http.server 8085`), base = pointe finale de `creer-ia`
