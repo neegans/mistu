@@ -146,3 +146,26 @@ garde de compte côté app (`is_allowed()` vrai pour ce jeton), le retour OAuth 
 blanche d'hôtes (`neegans.github.io` → entrée `prod`). « À envoyer : 0 » : bibliothèque neuve sur cette origine
 (64 ingrédients, 27 unités, 5 conventions = amorçage, hors capture). **Pas encore mesuré** : le retour OAuth depuis
 la PWA installée sur iPhone (spec § 4.1) — à faire par Neegan sur l'appareil.
+
+## Preuve `0003_assistant_config.sql` — à jouer (à remplir par Neegan, sans aucune valeur de data)
+
+Section préparée le 18 octobre 2026 (lot « la configuration de l'assistant suit le compte », spec
+`docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md` § 6.3 ; procédure : étape 8 bis du README).
+**Rien n'a encore été joué sur `mitsu`.** À remplir au moment du collage, **avant** la fusion et le `push` du code.
+
+Le dépôt est public : jetons `A_EMAIL` / `B_EMAIL` / `A_UUID` / `B_UUID` remis partout, et **aucune valeur de la
+colonne `data`** — la preuve n'affiche que des compteurs, des motifs et des longueurs de clé. Si une cellule montre
+une clé (`sk-…`) ou un objet `data`, ne pas la coller ici : le signaler.
+
+| Heure | Collage | Résultat |
+| --- | --- | --- |
+| … | `insert into private.allowed_users …` (2 adresses de preuve `exemple.invalid`) | … |
+| … | `migrations/0003_assistant_config.sql` | … |
+| … | preuve `0003` (« Run without RLS ») | `999 BILAN : … faux sur …` |
+| … | retrait des 2 adresses de preuve | … |
+| … | `notify pgrst, 'reload schema';` (seulement si une lecture a rendu 404) | … |
+
+Tableau des verdicts (ordre, etape, attendu, obtenu, ok) : à coller ici.
+
+Lignes `7.01` à `7.05` (journaux de Postgres, informatives) : à recopier telles quelles — c'est la mesure que la
+spec § 7 attendait (S9).

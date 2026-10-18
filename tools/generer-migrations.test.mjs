@@ -1,11 +1,14 @@
 // Tests du générateur de migrations (spec § 3.1-3.7). Aucune base Postgres ici : on vérifie le SQL produit.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { renderMigrations } from './generer-migrations.mjs';
-import { SYNC_STORES_0001 } from '../src/sync/tables.js';
+import { SYNC_STORES_0001, TABLES } from '../src/sync/tables.js';
+import { SYNC_STORES } from '../src/model/schema.js';
 import { ALLOWED_MIME } from '../src/sync/mime.js';
 
-const { tables: sql, storage } = renderMigrations();
+const { tables: sql, storage, delta } = renderMigrations();
+const sha = (s) => createHash('sha256').update(s).digest('hex');
 
 // Corps d'une fonction, borne au premier « $$; » qui suit sa declaration : une assertion portant sur UNE fonction ne
 // peut pas etre satisfaite par le texte d'une autre.
@@ -184,9 +187,54 @@ test('N1 : un echec non imputable a l element remonte au lieu de devenir un reje
   assert.ok(iForme > iListe, 'les classes remontent avant que « forme » ne soit pose');
 });
 test('aucune donnee personnelle, determinisme', () => {
-  assert.doesNotMatch(sql + storage, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+  assert.doesNotMatch(sql + storage + delta, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
   const again = renderMigrations();
-  assert.equal(again.tables, sql); assert.equal(again.storage, storage);
+  assert.equal(again.tables, sql); assert.equal(again.storage, storage); assert.equal(again.delta, delta);
+});
+
+// --- Assistant par le compte, tache 8 : migration 0003 a ajout seul (spec assistant-par-le-compte § 6.1-6.2) -------
+// 0001 et 0002 sont appliquees sur mitsu : --check prouve « genere = commite », l'empreinte prouve « commite =
+// applique » (F11). Une factorisation du generateur qui bougerait un seul octet de 0001 casse ce test-ci.
+test('0001 et 0002 : octet pour octet ceux appliques sur mitsu (empreintes du 17 octobre 2026)', () => {
+  assert.equal(sha(sql), 'e90ff35ec7c031f63dfb903e6885103ed7e42202866f59359ce019d00b85ee51');
+  assert.equal(sha(storage), '2e90d2b1beb7270601f83c7408b1a2a2be32c800772f14f454960b233a2d5944');
+});
+test('0003 : une table neuve, revoke anon, quatre fonctions avec les 26 magasins', () => {
+  const nouvelles = SYNC_STORES.filter((s) => !SYNC_STORES_0001.includes(s));
+  assert.deepEqual(nouvelles, ['assistant_config']);
+  assert.equal((delta.match(/create table public\./g) || []).length, 1);
+  assert.match(delta, /create table public\.assistant_config \(/);
+  assert.equal((delta.match(/create policy[^;]+;/g) || []).length, 4);
+  assert.equal((delta.match(/execute function public\.touch_server_seq\(\)/g) || []).length, 1);
+  assert.match(delta, /create index assistant_config_recv on public\.assistant_config \(owner_id, server_seq\);/);
+  assert.match(delta, /revoke all on public\.assistant_config from anon;/);
+  const litteral26 = 'array[' + SYNC_STORES.map((s) => `'${s}'`).join(', ') + ']';
+  assert.equal(delta.split(litteral26).length - 1, 4, 'sync_push, sync_purge, sync_purge_all, purge_tombstones');
+  assert.match(delta, /"assistant_config":"id"/);
+  assert.match(delta, /"assistant_config":\[\]/);
+  assert.doesNotMatch(delta, /cron\.schedule/);
+  assert.doesNotMatch(delta, /create table public\.books/);
+  assert.match(delta, /grant execute on function public\.sync_push\(jsonb\) to authenticated;/);
+});
+// Les quatre fonctions de 0003 sont celles de 0001, aux seules listes pres : rien d'autre ne doit changer en les
+// recreant sur mitsu. On remplace dans 0003 les trois constantes a 26 noms par celles a 25, et le bloc doit etre
+// identique a celui de 0001 (du commentaire « -- Envoi » jusqu'a la ligne cron.schedule, exclue).
+test('0003 : les quatre fonctions recreees sont celles de 0001, aux trois listes pres', () => {
+  const debutDe = (texte) => texte.indexOf('-- Envoi (spec § 3.4)');
+  assert.notEqual(debutDe(sql), -1); assert.notEqual(debutDe(delta), -1);
+  const bloc0001 = sql.slice(debutDe(sql), sql.indexOf("select cron.schedule('cuisine-os-tombales'"));
+  const enJson = (stores, champ) => JSON.stringify(Object.fromEntries(stores.map((s) => [s, TABLES[s][champ]]))).replace(/'/g, "''");
+  const litteral = (stores) => 'array[' + stores.map((s) => `'${s}'`).join(', ') + ']';
+  const ramene = delta.slice(debutDe(delta))
+    .split(litteral(SYNC_STORES)).join(litteral(SYNC_STORES_0001))
+    .split(enJson(SYNC_STORES, 'key')).join(enJson(SYNC_STORES_0001, 'key'))
+    .split(enJson(SYNC_STORES, 'required')).join(enJson(SYNC_STORES_0001, 'required'));
+  assert.equal(ramene, bloc0001);
+  // Et 0003 ne touche a rien d'autre que sa table et ces quatre fonctions.
+  assert.equal((delta.match(/create or replace function public\.(\w+)\(/g) || []).length, 4);
+  for (const autre of ['touch_server_seq() returns', 'is_allowed() returns', 'before_user_created(', 'enforce_allowed_user() returns', 'storage.objects', 'storage.buckets', 'create schema', 'create sequence', 'create extension', 'private.allowed_users (', 'revoke all on all tables']) {
+    assert.ok(!delta.includes(autre), autre);
+  }
 });
 
 // --- Tache 4 : preuves SQL, gabarits de preuve et mode d'emploi -------------------------------------------------
@@ -204,7 +252,7 @@ const lire = (chemin) => readFileSync(new URL('../' + chemin, import.meta.url), 
 const RACINE_MIG = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const SCRIPT_MIG = path.join(RACINE_MIG, 'tools', 'generer-migrations.mjs');
 const MIGRATIONS = path.join(RACINE_MIG, 'supabase', 'migrations');
-const NOMS = ['0001_tables_et_regles.sql', '0002_stockage.sql'];
+const NOMS = ['0001_tables_et_regles.sql', '0002_stockage.sql', '0003_assistant_config.sql'];
 const instructions = (texte) => texte.split('\n').map((l) => l.trim()).filter((l) => l !== '');
 
 test('preuve 0001 : les cinq motifs, les privileges, R12, rollback final, aucune adresse reelle', () => {
@@ -336,6 +384,7 @@ test('F1 : --check --dir rend 0 sur une copie conforme, 1 des quun fichier est a
     assert.equal(rouge.status, 1, 'fichier altere : code 1 attendu');
     assert.match(rouge.stderr, /0001_tables_et_regles\.sql/);
     assert.doesNotMatch(rouge.stderr, /0002_stockage\.sql/, 'seul le fichier altere est nomme');
+    assert.doesNotMatch(rouge.stderr, /0003_assistant_config\.sql/, 'seul le fichier altere est nomme');
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 test('F1 : --dir vaut aussi pour lecriture, et le depot nest pas touche', () => {
@@ -358,4 +407,74 @@ test('README : schema temporaire refuse, et colonnes not null de auth.users', ()
   const r = lire('supabase/README.md');
   assert.ok(r.includes('pg_temp'), 'quoi faire si permission denied for schema pg_temp_...');
   assert.ok(r.includes('encrypted_password'), 'colonnes not null sans defaut cote GoTrue');
+});
+
+// --- Assistant par le compte, tache 8 : preuve 0003, README et RESULTATS (spec assistant-par-le-compte § 6.3, § 7) --
+// La preuve 0003 est ecrite a la main et jouee par Neegan ; sa sortie va dans un depot PUBLIC. Ce test verifie ce
+// qu'une relecture laisse passer : une lecture de la colonne data (la cle de l'assistant, en clair sur le serveur),
+// une reponse de sync_push affichee telle quelle (un conflit porte server.data), une cle qui ne serait pas factice,
+// une adresse reelle, et un rollback qui ne serait plus la derniere instruction.
+test('preuve 0003 : rollback final, aucune adresse reelle, jamais la colonne data, cles factices, 26 tables', () => {
+  const p = lire('supabase/proofs/0003_assistant_config.sql');
+  const l = instructions(p);
+  assert.equal(l[l.length - 1], 'rollback;');
+  assert.equal(l.filter((x) => x === 'begin;').length, 1, 'une seule transaction');
+  // Aucune adresse : une fois les jetons et l'operateur jsonb « @> » retires, il ne reste aucun « @ ».
+  const sansJetons = p.replace(/A_EMAIL|B_EMAIL|@>/g, '');
+  assert.doesNotMatch(sansJetons, /@/, 'aucune adresse : seuls les jetons');
+  for (const j of ['A_UUID', 'A_EMAIL', 'B_UUID', 'B_EMAIL']) assert.ok(p.includes(j), j);
+  // Regle de lecture (S7) : la longueur de la cle, jamais la colonne entiere.
+  assert.ok(p.includes("length(data->>'api_key')"), 'la cle est relue par sa longueur');
+  for (const interdit of ['select data', 'data::text', 'select *', 'to_jsonb(', 'row_to_json', "data->>'api_key' =", "->>'api_key')::"]) {
+    assert.ok(!p.toLowerCase().includes(interdit), interdit);
+  }
+  // Toute reponse de sync_push s'appelle « reponse » et n'est jamais convertie en texte : seuls ses compteurs et
+  // son motif sont affiches (la reponse a un conflit porte server.data, donc la cle).
+  // Un appel = « public.sync_push(' » suivi du lot ; les autres mentions (privileges, corps relus) passent sa signature.
+  const appels = (p.match(/public\.sync_push\('\[/g) || []).length;
+  assert.equal(appels, 4, 'quatre envois : 3.01, 3.04, 3.06, 4.02');
+  assert.equal((p.match(/\) as reponse\) t;/g) || []).length, appels, 'chaque envoi est nomme reponse');
+  assert.ok(!p.includes('reponse::text') && !p.includes("reponse->'rejected'->0->'server'"), 'reponse jamais affichee');
+  // Cles factices seulement.
+  const cles = p.match(/sk-[A-Za-z0-9_-]*/g) || [];
+  assert.ok(cles.length >= 4, 'des cles poussees');
+  for (const c of cles) assert.ok(c === 'sk-' || c.startsWith('sk-factice-'), c);
+  // Privileges sur les 26 tables (S4), relus comme 8.01 de 0001, et les quatre fonctions recreees.
+  assert.ok(p.includes("has_table_privilege('anon'"), 'privileges de anon');
+  // Borne au verdict 2.02 : « count(*) = 26 » figure aussi ailleurs (2.11), et ne doit pas suffire.
+  const d202 = p.indexOf('select 2.02,');
+  assert.notEqual(d202, -1, 'verdict 2.02');
+  const v202 = p.slice(d202, p.indexOf('insert into pg_temp.preuve', d202));
+  assert.ok(v202.includes('count(*) = 26 and bool_and('), '26 tables, toutes sans privilege anon');
+  for (const priv of ['select', 'insert', 'update', 'delete']) {
+    assert.ok(v202.includes(`not has_table_privilege('anon', 'public.' || tablename, '${priv}')`), priv);
+  }
+  assert.ok(v202.includes("from pg_tables where schemaname = 'public'"), 'toutes les tables de public');
+  for (const f of ['sync_push(jsonb)', 'sync_purge(text, text)', 'sync_purge_all()', 'purge_tombstones()']) {
+    assert.ok(p.includes(`has_function_privilege('anon', 'public.${f}', 'execute'), false`), 'anon sans execute : ' + f);
+    assert.ok(p.includes(`'public.${f}'),`) || p.includes(`'public.${f}')`), 'definition relue : ' + f);
+  }
+  assert.ok(p.includes('pg_get_functiondef'), 'les quatre corps sont relus');
+  // Conflit sur le meme compte, delete sans app.purge, journaux de Postgres mesures (S8, S9).
+  assert.ok(p.includes("= 'conflit'"), 'motif conflit');
+  assert.match(p, /with d as \(delete from public\.assistant_config where id = 'llm' returning 1\)/);
+  for (const g of ['log_min_error_statement', 'log_parameter_max_length_on_error']) assert.ok(p.includes(g), g);
+  assert.ok(p.includes("'Run without RLS'") || p.includes('« Run without RLS »'), 'le piege du tableau de bord est rappele');
+});
+test('README : etape 8 bis (0003 et sa preuve) et procedure « appareil perdu ou cle exposee »', () => {
+  const r = lire('supabase/README.md');
+  const debut = r.indexOf('### 8 bis. Coller `0003_assistant_config.sql`, puis jouer sa preuve');
+  assert.notEqual(debut, -1, 'etape 8 bis');
+  const etape = r.slice(debut, r.indexOf('\n## ', debut));
+  for (const m of ['migrations/0003_assistant_config.sql', 'proofs/0003_assistant_config.sql', 'exemple.invalid', 'Run without RLS',
+    "notify pgrst, 'reload schema';", 'push', 'A_UUID', 'B_EMAIL', 'RESULTATS-mitsu.md', "length(data->>'api_key')"]) assert.ok(etape.includes(m), m);
+  const perdu = r.slice(r.indexOf('## Appareil perdu ou clé exposée'));
+  assert.ok(perdu.startsWith('## Appareil perdu'), 'section appareil perdu');
+  // L'ordre de la spec § 7 : retirer l'adresse, fermer les sessions, revoquer la cle, remettre l'adresse.
+  const i = ['delete from private.allowed_users', 'Authentication → Users', 'console Anthropic', 'insert into private.allowed_users'].map((m) => perdu.indexOf(m));
+  assert.ok(i.every((x) => x !== -1), 'quatre gestes presents');
+  assert.deepEqual([...i].sort((a, b) => a - b), i, 'dans l ordre de la spec');
+  const res = lire('supabase/proofs/RESULTATS-mitsu.md');
+  assert.ok(res.includes('## Preuve `0003_assistant_config.sql` — à jouer (à remplir par Neegan, sans aucune valeur de data)'));
+  assert.doesNotMatch(res, /sk-(?!…)[A-Za-z0-9_-]{4,}/, 'aucune cle dans RESULTATS');
 });

@@ -1,6 +1,6 @@
 # Supabase — comment appliquer et prouver le serveur de synchronisation
 
-Ce dossier contient **tout le serveur** de Cuisine OS : deux migrations générées (`migrations/`) et les preuves à
+Ce dossier contient **tout le serveur** de Cuisine OS : trois migrations générées (`migrations/`) et les preuves à
 jouer après les avoir appliquées (`proofs/`). Rien n'est appliqué automatiquement : chaque étape est un geste de
 Neegan dans l'éditeur SQL du tableau de bord Supabase. Spec de référence :
 `docs/spec-compte-et-stockage-distant.md` (§ 3 pour le serveur, § 7.2 pour les preuves).
@@ -9,8 +9,10 @@ Neegan dans l'éditeur SQL du tableau de bord Supabase. Spec de référence :
 supabase/
   migrations/0001_tables_et_regles.sql   généré par tools/generer-migrations.mjs — ne pas éditer à la main
   migrations/0002_stockage.sql           idem
+  migrations/0003_assistant_config.sql   idem ; à ajout seul (lot « assistant par le compte », étape 8 bis)
   proofs/0001_tables_et_regles.sql       à coller après 0001 ; jetons à remplacer ; n'écrit rien (rollback final)
   proofs/0002_stockage.sql               à coller après 0002 ; lecture seule
+  proofs/0003_assistant_config.sql       à coller après 0003 ; jetons à remplacer ; n'écrit rien (rollback final)
   proofs/0001_hook.md                    gabarit : capture du crochet « Before User Created »
   proofs/0001_providers.md               gabarit : capture des fournisseurs de connexion
   proofs/RESULTATS-<projet>.md           tes sorties, collées (à créer : un fichier par projet)
@@ -22,7 +24,8 @@ La spec prévoyait deux projets (D8 : `mistu-dev` puis `mistu`). Neegan a révoq
 coûte 10 $ par mois sur l'organisation Pro, pour un usage personnel. **Tout se joue sur `mitsu`**, le projet réel —
 d'où deux règles : la preuve `0001` se joue **avant la première connexion réelle** (elle insère deux comptes et les
 annule), et `localhost` reste autorisé (Redirect URLs, entrée `dev` de `config.js`) sur ce projet. Les neuf étapes
-ci-dessous ont été jouées le 13 octobre ; sorties dans `proofs/RESULTATS-mitsu.md`. Pour un projet neuf (changement
+ci-dessous ont été jouées le 13 octobre ; sorties dans `proofs/RESULTATS-mitsu.md`. L'étape **8 bis** (migration
+`0003`, lot « la configuration de l'assistant suit le compte ») s'y ajoute et reste **à jouer**. Pour un projet neuf (changement
 d'hébergement, retour à deux projets), elles sont à refaire en entier : les migrations ne « voyagent » pas d'un
 projet à l'autre.
 
@@ -150,6 +153,50 @@ Tableau de bord → **Authentication → Providers** : **Google** activé, et lu
 passe, ni *magic link*), **Phone** désactivé, **Anonymous** désactivé, *Confirm email* activé, liaison automatique
 d'identités désactivée. Puis remplir `proofs/0001_providers.md` (capture + date + projet).
 
+### 8 bis. Coller `0003_assistant_config.sql`, puis jouer sa preuve
+
+Lot « la configuration de l'assistant suit le compte » (spec
+`docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md`, § 6). Cette étape s'ajoute aux neuf autres et
+se joue **une fois**, sur un projet où elles sont faites — et **avant tout `push` du code de ce lot** : un client neuf
+contre un serveur sans `0003` mettrait sa configuration en quarantaine (`refus`), et un `raise` de `sync_push` peut
+journaliser son paramètre côté Postgres (spec § 6.4).
+
+`0003` est **à ajout seul** : elle crée `public.assistant_config` (même gabarit que les 25 autres tables), la révoque
+pour `anon` (la révocation générale de `0001` ne couvrait que les tables d'alors), et **recrée** les quatre fonctions
+qui portent la liste des magasins — `sync_push`, `sync_purge`, `sync_purge_all`, `purge_tombstones` — avec les 26
+noms ; leurs `revoke`/`grant` sont rejoués, sans effet. `0001` et `0002` ne changent pas d'un octet (empreintes
+SHA-256 épinglées dans `tools/generer-migrations.test.mjs`). Comme `0001`, elle n'est **pas rejouable** : un second
+collage échoue sur le `create table` et n'applique rien. Pas de `cron.schedule` ici : la tâche du ménage appelle
+`purge_tombstones` par son nom, la recréer ne la touche pas.
+
+1. **Deux adresses de preuve**, tapées à la main : deux adresses inventées du domaine réservé `exemple.invalid` (rien
+   ne leur est envoyé), sans compte dans `auth.users` — les mêmes que pour `0001` conviennent, puisqu'elles ont été
+   retirées :
+   ```sql
+   insert into private.allowed_users (email) values (lower('...')), (lower('...')) on conflict do nothing;
+   ```
+2. **Coller `migrations/0003_assistant_config.sql`** en entier, depuis l'éditeur SQL, sous `postgres` (comme `0001` :
+   c'est ce qui donne à `authenticated` ses droits sur la table neuve — verdict 2.01 de la preuve). Attendu :
+   `Success. No rows returned`.
+3. **Jouer `proofs/0003_assistant_config.sql`** : remplacer les quatre jetons (`A_UUID`, `B_UUID` : deux
+   `select gen_random_uuid();` ; `A_EMAIL`, `B_EMAIL` : les deux adresses de l'étape 1, en minuscules), coller le
+   tout, exécuter, et choisir **« Run without RLS »** au dialogue du tableau de bord (voir l'étape 5, « Jouer la preuve
+   `0001` »). Lire d'abord la
+   ligne `999 BILAN` : `0 faux`, c'est vert. Les clés poussées par la preuve sont **factices** (`sk-factice-…`) et la
+   preuve n'affiche jamais la colonne `data` : seulement la longueur de la clé. Les lignes `7.0x` (journaux de
+   Postgres) sont informatives : leur valeur est relevée, pas jugée.
+4. **Retirer les deux adresses de preuve** :
+   `delete from private.allowed_users where email in (lower('...'), lower('...'));`, puis contrôle
+   `select count(*) from private.allowed_users;` (le nombre d'avant l'étape 1).
+5. Si une lecture de la table rend **404** ensuite (dans l'app ou par l'API) : `notify pgrst, 'reload schema';` — le
+   cache de schéma de PostgREST n'avait pas encore vu la table.
+6. **Consigner** la sortie dans `proofs/RESULTATS-mitsu.md`, section « Preuve `0003_assistant_config.sql` » déjà
+   préparée : jetons remis, **aucune valeur de `data`** (le dépôt est public). Ensuite seulement : fusion et `push`.
+
+> **Règle de lecture de `public.assistant_config`** (spec § 7) : aucune requête, humaine ou d'agent, ne lit la colonne
+> `data` de cette table — elle porte la clé de l'assistant, en clair. Pour un diagnostic : `data - 'api_key'` (la
+> fiche sans la clé) et `length(data->>'api_key')`, rien d'autre.
+
 ## Où coller les sorties
 
 Dans `supabase/proofs/RESULTATS-<projet>.md` — donc `RESULTATS-mitsu.md` (un seul projet depuis le 13 octobre, R33). Un fichier
@@ -161,3 +208,19 @@ plus : la clé `anon` et l'URL du projet sont publiques par conception et vivent
 `service_role`, jamais, nulle part.
 
 L1 n'est fini que quand les deux preuves sont vertes et consignées, et que les deux captures sont collées.
+
+## Appareil perdu ou clé exposée
+
+Depuis le lot « la configuration de l'assistant suit le compte » (spec § 7), un appareil connecté porte la clé de
+l'assistant de **tous** les appareils du compte, et une clé tournée lui parviendrait à sa prochaine passe. Choisir
+« Aucun » dans Réglages → Assistant IA ne révoque rien (un appareil hors ligne garde sa copie, les sauvegardes du
+projet Supabase aussi). Dans cet ordre :
+
+1. **Retirer l'adresse** de la liste, tapée à la main :
+   `delete from private.allowed_users where email = lower('...');` — toute lecture et tout envoi sont refusés dès la
+   requête suivante (preuve `0001`, verdicts 9.01-9.03), même avec une session encore ouverte.
+2. **Fermer les sessions** : tableau de bord → **Authentication → Users** → ce compte → fermer toutes ses sessions.
+3. **Révoquer l'ancienne clé** dans la console Anthropic (workspace de Cuisine OS).
+4. **Remettre l'adresse** (`insert into private.allowed_users (email) values (lower('...'));`), reconnecter les
+   appareils gardés, et entrer la nouvelle clé **une fois**, dans Réglages → Assistant IA d'un appareil connecté :
+   elle suit le compte jusqu'aux autres.

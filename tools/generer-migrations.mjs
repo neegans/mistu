@@ -1,17 +1,20 @@
 #!/usr/bin/env node
-// Génère les migrations SQL du lot « compte et stockage distant » depuis src/sync/tables.js (spec § 3.1-3.7).
-// Usage : node tools/generer-migrations.mjs            → écrit supabase/migrations/0001_*.sql et 0002_*.sql
+// Génère les migrations SQL du lot « compte et stockage distant » depuis src/sync/tables.js (spec § 3.1-3.7), et la
+// migration à ajout seul 0003 du lot « assistant par le compte » (spec 2026-10-17-assistant-par-le-compte § 6).
+// Usage : node tools/generer-migrations.mjs            → écrit supabase/migrations/0001_*.sql, 0002_*.sql et 0003_*.sql
 //         node tools/generer-migrations.mjs --check    → code 1 si les fichiers commités diffèrent du généré
 //         … --dir <chemin>                             → autre répertoire (écriture ET --check) ; code 2 sans chemin
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { TABLES, SYNC_STORES_0001 } from '../src/sync/tables.js';
+import { SYNC_STORES } from '../src/model/schema.js';
 import { ALLOWED_MIME } from '../src/sync/mime.js';
 
 // En-tête volontairement sans date : la sortie doit être déterministe (le test le vérifie, et --check sert de garde).
-const ENTETE = (nom) => `-- ${nom} — généré par tools/generer-migrations.mjs ; ne pas éditer à la main.
--- Spec : docs/spec-compte-et-stockage-distant.md (v3). Aucune valeur personnelle ici : les adresses vont dans private.allowed_users par l'éditeur SQL.
+// La spec par défaut est celle de 0001 et 0002 : leurs octets ne bougent pas (empreintes épinglées dans le test).
+const ENTETE = (nom, spec = 'docs/spec-compte-et-stockage-distant.md (v3)') => `-- ${nom} — généré par tools/generer-migrations.mjs ; ne pas éditer à la main.
+-- Spec : ${spec}. Aucune valeur personnelle ici : les adresses vont dans private.allowed_users par l'éditeur SQL.
 
 `;
 const q = (s) => `'${s.replace(/'/g, "''")}'`;
@@ -45,86 +48,13 @@ create trigger ${store}_seq before insert or update on public.${store} for each 
 `;
 }
 
-export function renderMigrations() {
-  const stores = SYNC_STORES_0001;
+// Les quatre fonctions qui portent la liste littérale des magasins (sync_push, sync_purge, sync_purge_all,
+// purge_tombstones), rendues pour UNE liste : 0001 avec les 25 d'origine, 0003 avec les 26. Le texte est celui de 0001,
+// déplacé tel quel : --check et l'empreinte SHA-256 du test prouvent qu'il n'a pas bougé d'un octet.
+function fonctions(stores) {
   const keys = JSON.stringify(Object.fromEntries(stores.map((s) => [s, TABLES[s].key])));
   const required = JSON.stringify(Object.fromEntries(stores.map((s) => [s, TABLES[s].required])));
-  const tables = ENTETE('0001_tables_et_regles.sql') + `create extension if not exists pg_cron;
-create schema if not exists private;
-create sequence if not exists public.sync_seq;
-
--- Liste des personnes autorisées (spec § 3.2) : écrite seulement par l'éditeur SQL, en minuscules.
-create table if not exists private.allowed_users (
-  email text primary key check (email = lower(email) and email like '%@%'),
-  added_at timestamptz not null default now()
-);
-alter table private.allowed_users enable row level security;
-revoke all on all tables in schema private from anon, authenticated;
-revoke usage on schema private from anon, authenticated;
-
-create or replace function public.is_allowed() returns boolean
-language sql stable security definer set search_path = '' as $$
-  select exists (select 1 from private.allowed_users a where a.email = lower(coalesce(auth.jwt()->>'email', '')));
-$$;
-revoke all on function public.is_allowed() from public, anon;
-grant execute on function public.is_allowed() to authenticated;
-
--- B1 : crochet « Before User Created » (branché par Neegan dans Authentication → Hooks ; preuve 0001_hook.md).
-create or replace function public.before_user_created(event jsonb) returns jsonb
-language plpgsql security definer set search_path = '' as $$
-declare e text := lower(coalesce(event->'user'->>'email', ''));
-begin
-  if e = '' or not exists (select 1 from private.allowed_users a where a.email = e) then
-    return jsonb_build_object('error', jsonb_build_object('http_code', 403, 'message', 'adresse non autorisée'));
-  end if;
-  return '{}'::jsonb;
-end $$;
-grant usage on schema public to supabase_auth_admin;
-revoke execute on function public.before_user_created(jsonb) from public, anon, authenticated;
-grant execute on function public.before_user_created(jsonb) to supabase_auth_admin;
-
--- B1 secondaire : déclencheur sur auth.users.
-create or replace function public.enforce_allowed_user() returns trigger
-language plpgsql security definer set search_path = '' as $$
-begin
-  if new.email is null or not exists (select 1 from private.allowed_users a where a.email = lower(new.email)) then
-    raise exception 'adresse non autorisée';
-  end if;
-  return new;
-end $$;
-revoke execute on function public.enforce_allowed_user() from public, anon, authenticated;
-grant execute on function public.enforce_allowed_user() to supabase_auth_admin;
-drop trigger if exists enforce_allowed_user on auth.users;
-create trigger enforce_allowed_user before insert on auth.users for each row execute function public.enforce_allowed_user();
-
--- Ordre de réception (spec § 3.1, amendé R25) : une séquence globale, posée par le SERVEUR à chaque insert et à
--- chaque update, hors maintenance. La valeur fournie par l'appelant n'est jamais lue, donc jamais conservée : la
--- règle *_update n'autorise que par ligne, jamais par colonne, et le rôle authenticated a le privilège update sur
--- les 25 tables. Sans cette pose inconditionnelle, un PATCH direct écrirait server_seq — le curseur de réception de
--- TOUS les appareils (spec § 5.5) — et la réception s'arrêterait en silence. Une écriture qui ne change rien coûte
--- donc un numéro de séquence : c'est le prix de la garantie, et sync_push n'écrit déjà rien sur un réessai identique.
--- S2 (précise § 3.1 « posée par le serveur ») : la tombale deleted_at est FIGÉE de la même façon. Même raison — la
--- règle *_update n'autorise que par ligne, jamais par colonne : un PATCH direct posant deleted_at = now() aurait
--- fait disparaître la fiche de TOUS les appareils à la prochaine réception, sans passer par sync_push et sans qu'un
--- client puisse distinguer cela d'une suppression voulue. Seule sync_push dégèle la colonne, par un drapeau local à
--- sa transaction. Sous app.maintenance, rien n'est touché : ni la séquence (sinon purge_tombstones réémettrait tout),
--- ni la tombale — et l'ancienne valeur de server_seq est reposée, pour que celle de l'appelant ne survive nulle part.
-create or replace function public.touch_server_seq() returns trigger language plpgsql set search_path = '' as $$
-begin
-  if tg_op = 'INSERT' then new.server_seq := nextval('public.sync_seq'); return new; end if;
-  if current_setting('app.maintenance', true) = 'on' then new.server_seq := old.server_seq; return new; end if;
-  if current_setting('app.sync_push', true) <> 'on' then new.deleted_at := old.deleted_at; end if;
-  new.server_seq := nextval('public.sync_seq');
-  return new;
-end $$;
-
-${stores.map(table).join('\n')}
-revoke all on all tables in schema public from anon;
--- Personne ne l'appelle directement : les 25 déclencheurs ci-dessus sont déjà créés, et PostgreSQL ne revérifie pas
--- le droit d'exécution d'une fonction de déclencheur au moment où il se déclenche.
-revoke execute on function public.touch_server_seq() from public, anon, authenticated;
-
--- Envoi (spec § 3.4) : sous RLS, par élément, idempotent, jamais d'exception pour une ligne.
+  return `-- Envoi (spec § 3.4) : sous RLS, par élément, idempotent, jamais d'exception pour une ligne.
 create or replace function public.sync_push(rows jsonb) returns jsonb
 language plpgsql security invoker set search_path = '' as $$
 declare
@@ -265,7 +195,87 @@ begin
   return n;
 end $$;
 revoke execute on function public.purge_tombstones() from public, anon, authenticated;
-select cron.schedule('cuisine-os-tombales', '15 4 * * *', 'select public.purge_tombstones()');
+`;
+}
+
+export function renderMigrations() {
+  const stores = SYNC_STORES_0001;
+  const tables = ENTETE('0001_tables_et_regles.sql') + `create extension if not exists pg_cron;
+create schema if not exists private;
+create sequence if not exists public.sync_seq;
+
+-- Liste des personnes autorisées (spec § 3.2) : écrite seulement par l'éditeur SQL, en minuscules.
+create table if not exists private.allowed_users (
+  email text primary key check (email = lower(email) and email like '%@%'),
+  added_at timestamptz not null default now()
+);
+alter table private.allowed_users enable row level security;
+revoke all on all tables in schema private from anon, authenticated;
+revoke usage on schema private from anon, authenticated;
+
+create or replace function public.is_allowed() returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from private.allowed_users a where a.email = lower(coalesce(auth.jwt()->>'email', '')));
+$$;
+revoke all on function public.is_allowed() from public, anon;
+grant execute on function public.is_allowed() to authenticated;
+
+-- B1 : crochet « Before User Created » (branché par Neegan dans Authentication → Hooks ; preuve 0001_hook.md).
+create or replace function public.before_user_created(event jsonb) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare e text := lower(coalesce(event->'user'->>'email', ''));
+begin
+  if e = '' or not exists (select 1 from private.allowed_users a where a.email = e) then
+    return jsonb_build_object('error', jsonb_build_object('http_code', 403, 'message', 'adresse non autorisée'));
+  end if;
+  return '{}'::jsonb;
+end $$;
+grant usage on schema public to supabase_auth_admin;
+revoke execute on function public.before_user_created(jsonb) from public, anon, authenticated;
+grant execute on function public.before_user_created(jsonb) to supabase_auth_admin;
+
+-- B1 secondaire : déclencheur sur auth.users.
+create or replace function public.enforce_allowed_user() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  if new.email is null or not exists (select 1 from private.allowed_users a where a.email = lower(new.email)) then
+    raise exception 'adresse non autorisée';
+  end if;
+  return new;
+end $$;
+revoke execute on function public.enforce_allowed_user() from public, anon, authenticated;
+grant execute on function public.enforce_allowed_user() to supabase_auth_admin;
+drop trigger if exists enforce_allowed_user on auth.users;
+create trigger enforce_allowed_user before insert on auth.users for each row execute function public.enforce_allowed_user();
+
+-- Ordre de réception (spec § 3.1, amendé R25) : une séquence globale, posée par le SERVEUR à chaque insert et à
+-- chaque update, hors maintenance. La valeur fournie par l'appelant n'est jamais lue, donc jamais conservée : la
+-- règle *_update n'autorise que par ligne, jamais par colonne, et le rôle authenticated a le privilège update sur
+-- les 25 tables. Sans cette pose inconditionnelle, un PATCH direct écrirait server_seq — le curseur de réception de
+-- TOUS les appareils (spec § 5.5) — et la réception s'arrêterait en silence. Une écriture qui ne change rien coûte
+-- donc un numéro de séquence : c'est le prix de la garantie, et sync_push n'écrit déjà rien sur un réessai identique.
+-- S2 (précise § 3.1 « posée par le serveur ») : la tombale deleted_at est FIGÉE de la même façon. Même raison — la
+-- règle *_update n'autorise que par ligne, jamais par colonne : un PATCH direct posant deleted_at = now() aurait
+-- fait disparaître la fiche de TOUS les appareils à la prochaine réception, sans passer par sync_push et sans qu'un
+-- client puisse distinguer cela d'une suppression voulue. Seule sync_push dégèle la colonne, par un drapeau local à
+-- sa transaction. Sous app.maintenance, rien n'est touché : ni la séquence (sinon purge_tombstones réémettrait tout),
+-- ni la tombale — et l'ancienne valeur de server_seq est reposée, pour que celle de l'appelant ne survive nulle part.
+create or replace function public.touch_server_seq() returns trigger language plpgsql set search_path = '' as $$
+begin
+  if tg_op = 'INSERT' then new.server_seq := nextval('public.sync_seq'); return new; end if;
+  if current_setting('app.maintenance', true) = 'on' then new.server_seq := old.server_seq; return new; end if;
+  if current_setting('app.sync_push', true) <> 'on' then new.deleted_at := old.deleted_at; end if;
+  new.server_seq := nextval('public.sync_seq');
+  return new;
+end $$;
+
+${stores.map(table).join('\n')}
+revoke all on all tables in schema public from anon;
+-- Personne ne l'appelle directement : les 25 déclencheurs ci-dessus sont déjà créés, et PostgreSQL ne revérifie pas
+-- le droit d'exécution d'une fonction de déclencheur au moment où il se déclenche.
+revoke execute on function public.touch_server_seq() from public, anon, authenticated;
+
+` + fonctions(stores) + `select cron.schedule('cuisine-os-tombales', '15 4 * * *', 'select public.purge_tombstones()');
 `;
   const storage = ENTETE('0002_stockage.sql') + `insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('pages', 'pages', false, 52428800, array[${list(ALLOWED_MIME)}])
@@ -285,7 +295,17 @@ create or replace view private.storage_usage as
 -- par l'API les uuid des propriétaires et leur consommation.
 revoke all on private.storage_usage from anon, authenticated;
 `;
-  return { tables, storage };
+  // 0003, à ajout seul (spec assistant-par-le-compte § 6.1) : les tables neuves (celles de SYNC_STORES absentes de la
+  // liste figée de 0001), leur révocation pour anon, puis les quatre fonctions recréées avec les 26 noms. Pas de
+  // cron.schedule ici : la tâche planifiée appelle purge_tombstones par son nom, la recréer ne la touche pas.
+  const nouvelles = SYNC_STORES.filter((s) => !SYNC_STORES_0001.includes(s));
+  const delta = ENTETE('0003_assistant_config.sql', 'docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md (rév. 2, § 6)') + `-- Migration À AJOUT SEUL : ${nouvelles.length} table(s) neuve(s) et les quatre fonctions recréées avec la liste des ${SYNC_STORES.length} magasins.
+-- À coller APRÈS 0001 et 0002, une seule fois. Les droits des fonctions sont rejoués (idempotents).
+
+${nouvelles.map(table).join('\n')}-- S4 : la révocation générale pour anon, en 0001, n'a couvert que les tables d'alors ; chaque table neuve est révoquée ici.
+${nouvelles.map((s) => `revoke all on public.${s} from anon;\n`).join('')}
+` + fonctions(SYNC_STORES);
+  return { tables, storage, delta };
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -307,8 +327,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const args = process.argv.slice(2);
   const dir = dossierDemande(args);
   if (!dir) { console.error('--dir : chemin du répertoire des migrations manquant.'); process.exit(2); }
-  const { tables, storage } = renderMigrations();
-  const targets = [['0001_tables_et_regles.sql', tables], ['0002_stockage.sql', storage]];
+  const { tables, storage, delta } = renderMigrations();
+  const targets = [['0001_tables_et_regles.sql', tables], ['0002_stockage.sql', storage], ['0003_assistant_config.sql', delta]];
   if (args.includes('--check')) {
     let differ = false;
     for (const [name, content] of targets) {
