@@ -1,7 +1,8 @@
 # Supabase — comment appliquer et prouver le serveur de synchronisation
 
-Ce dossier contient **tout le serveur** de Cuisine OS : trois migrations générées (`migrations/`) et les preuves à
-jouer après les avoir appliquées (`proofs/`). Rien n'est appliqué automatiquement : chaque étape est un geste de
+Ce dossier contient **tout le serveur** de Cuisine OS : trois migrations générées et une quatrième écrite à la main
+(`migrations/`), les preuves à jouer après les avoir appliquées (`proofs/`) et la fonction de la passerelle de l'assistant
+(`functions/`). Rien n'est appliqué automatiquement : chaque étape est un geste de
 Neegan dans l'éditeur SQL du tableau de bord Supabase. Spec de référence :
 `docs/spec-compte-et-stockage-distant.md` (§ 3 pour le serveur, § 7.2 pour les preuves).
 
@@ -13,6 +14,9 @@ supabase/
   proofs/0001_tables_et_regles.sql       à coller après 0001 ; jetons à remplacer ; n'écrit rien (rollback final)
   proofs/0002_stockage.sql               à coller après 0002 ; lecture seule
   proofs/0003_assistant_config.sql       à coller après 0003 ; jetons à remplacer ; n'écrit rien (rollback final)
+  migrations/0004_assistant_journal.sql  écrite à la main, hors du générateur (lot « passerelle de l'assistant », étape 10)
+  proofs/0004_assistant_journal.sql      à coller après 0004 ; rien à remplacer ; n'écrit rien (rollback final)
+  functions/assistant/                   la fonction de la passerelle (index.ts, logique.js, deno.json) ; déployée par le CLI, étape 10
   proofs/0001_hook.md                    gabarit : capture du crochet « Before User Created »
   proofs/0001_providers.md               gabarit : capture des fournisseurs de connexion
   proofs/RESULTATS-<projet>.md           tes sorties, collées (à créer : un fichier par projet)
@@ -25,7 +29,7 @@ coûte 10 $ par mois sur l'organisation Pro, pour un usage personnel. **Tout se 
 d'où deux règles : la preuve `0001` se joue **avant la première connexion réelle** (elle insère deux comptes et les
 annule), et `localhost` reste autorisé (Redirect URLs, entrée `dev` de `config.js`) sur ce projet. Les neuf étapes
 ci-dessous ont été jouées le 13 octobre ; sorties dans `proofs/RESULTATS-mitsu.md`. L'étape **8 bis** (migration
-`0003`, lot « la configuration de l'assistant suit le compte ») s'y ajoute et reste **à jouer**. Pour un projet neuf (changement
+`0003`, lot « la configuration de l'assistant suit le compte ») s'y ajoute et reste **à jouer**, ainsi que l'étape **10** (fonction `assistant` et migration `0004`, lot « passerelle de l'assistant »). Pour un projet neuf (changement
 d'hébergement, retour à deux projets), elles sont à refaire en entier : les migrations ne « voyagent » pas d'un
 projet à l'autre.
 
@@ -212,6 +216,48 @@ prochain lot qui touche le générateur. L'empreinte du fichier collé se relit 
 Tableau de bord → **Authentication → Providers** : **Google** activé, et lui seul — **Email** désactivé (ni mot de
 passe, ni *magic link*), **Phone** désactivé, **Anonymous** désactivé, *Confirm email* activé, liaison automatique
 d'identités désactivée. Puis remplir `proofs/0001_providers.md` (capture + date + projet).
+
+### 10. La passerelle de l'assistant : secret, fonction, `0004` et sa preuve
+
+Lot « passerelle de l'assistant » (spec `docs/superpowers/specs/2026-10-18-passerelle-assistant-design.md`) : la clé
+Anthropic quitte les appareils. Une fonction Supabase, `assistant`, la pose sur chaque appel, après avoir vérifié la
+session, la liste des adresses admises et le quota du jour ; elle ne journalise que des compteurs (table
+`assistant_journal`, migration `0004`). Cette étape se joue **une fois**, **avant** de pousser le code du client qui
+appelle la fonction. Aucun des gestes ci-dessous n'appelle Anthropic ni ne dépense.
+
+1. **Poser le secret.** Tableau de bord → **Edge Functions → Secrets** : ajouter `ANTHROPIC_API_KEY`, la clé du
+   workspace Anthropic de Cuisine OS (celui qui a un plafond de dépense mensuel). **Jamais dans un fichier**, ni dans
+   le dépôt, ni dans une conversation : seul son nom y figure. Trois autres secrets sont facultatifs, avec une valeur
+   par défaut : `ASSISTANT_MODELE` (le modèle imposé aux appels, `claude-sonnet-5-5`), `ASSISTANT_QUOTA_JOUR` (appels par
+   compte et par jour UTC, 60) et `ASSISTANT_ORIGINES` (origines admises, séparées par des virgules,
+   `https://neegans.github.io` ; ajouter `http://localhost:8083` pour essayer depuis le Mac).
+2. **Déployer la fonction.** Préalable, une seule fois : `supabase login` dans Terminal. Puis, depuis la racine du dépôt :
+   ```
+   supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt
+   ```
+   `--no-verify-jwt` est voulu : la fonction vérifie elle-même la session (`auth.getUser`) et la liste admise
+   (`is_allowed()`), et le navigateur envoie d'abord une requête `OPTIONS` **sans jeton** que la vérification amont de
+   Supabase refuserait — le client n'enverrait alors jamais sa vraie demande.
+3. **Coller `0004`, puis sa preuve**, dans l'éditeur SQL sous `postgres`, comme à l'étape 8 bis : d'abord
+   `migrations/0004_assistant_journal.sql` en entier (à ajout seul ; attendu `Success. No rows returned`), puis
+   `proofs/0004_assistant_journal.sql` — **rien à remplacer, aucune adresse à ajouter** — en choisissant
+   **« Run without RLS »**. Lire d'abord la ligne `999 BILAN` (`0 faux` = vert), puis consigner le tableau tel quel dans
+   `RESULTATS-mitsu.md` (la preuve n'affiche aucune adresse). Tant que `0004` n'est pas collée, un `POST` répond
+   `502 serveur` avant tout appel au fournisseur.
+4. **Trois sondes sans dépense.** Dans Terminal : `U=https://ybdooerfeziiabsbfxtb.supabase.co/functions/v1/assistant`,
+   puis, avec l'en-tête d'origine (sans lui, la fonction répond `403 origine`, sa première garde) :
+   - `curl -i -X OPTIONS -H 'Origin: https://neegans.github.io' "$U"` → **204**, avec `Access-Control-Allow-Origin` ;
+   - `curl -i -X POST -H 'Origin: https://neegans.github.io' "$U"` → **401** `{"erreur":"non_connecte"}` (un 401 qui
+     dit `Invalid JWT` vient du portail Supabase : la fonction a été déployée sans `--no-verify-jwt`) ;
+   - `GET` avec un jeton de session : dans la console du navigateur, sur le site connecté,
+     `JSON.parse(localStorage.getItem('sb-ybdooerfeziiabsbfxtb-auth-token')).access_token` (nom par défaut de
+     supabase-js, non vérifié ici), puis `curl -i -H 'Origin: https://neegans.github.io' -H 'Authorization: Bearer <jeton>' "$U"`
+     → **200** `{"modele":"claude-sonnet-5-5","quotaJour":60}`. Le jeton vaut une heure : ne le colle nulle part.
+5. **Changer le quota sans redéployer** : `supabase secrets set ASSISTANT_QUOTA_JOUR=120 --project-ref ybdooerfeziiabsbfxtb`,
+   puis relire `quotaJour` par la troisième sonde (même geste pour `ASSISTANT_MODELE` et `ASSISTANT_ORIGINES`).
+6. **Faire tourner la clé** (rotation) : remplacer la valeur du secret `ANTHROPIC_API_KEY` dans le tableau de bord (pas par
+   `supabase secrets set`, qui laisserait la clé dans l'historique du shell), puis révoquer l'ancienne dans la console
+   Anthropic. Rien d'autre : ni migration, ni changement dans l'app.
 
 ## Où coller les sorties
 

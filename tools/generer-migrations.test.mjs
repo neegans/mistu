@@ -511,3 +511,156 @@ test('README : etape 8 bis (0003 et sa preuve) et procedure « appareil perdu ou
   assert.ok(res.includes('## Preuve `0003_assistant_config.sql` — ')) // titre provisoire « à jouer » avant le collage, puis « 45 verdicts, 0 faux » une fois jouee (18 oct);
   assert.doesNotMatch(res, /sk-(?!…)[A-Za-z0-9_-]{4,}/, 'aucune cle dans RESULTATS');
 });
+
+// --- Passerelle, tache 2 : 0004, preuve, index.ts, README (spec 2026-10-18-passerelle-assistant § 4-5) -----------------
+// 0004 est ecrite a la main (comme les preuves) : NOMS et le generateur n'y touchent pas, et `--check` ne la lit pas.
+// Ces tests relisent ce qu'une relecture laisse passer : une regle de lecture, un privilege client, une colonne qui
+// pourrait porter du contenu, une adresse reelle, un import hors liste, un journal de console, une cle, des gardes
+// dans le mauvais ordre. Les tests de texte du SOURCE d'index.ts restent des filets : le comportement des gardes se
+// prouve par les sondes du deploiement (README, etape 10), pas ici.
+import { OUTILS as OUTILS_PASSERELLE } from '../supabase/functions/assistant/logique.js';
+const sansCommentaires = (texte) => texte.split('\n').filter((ligne) => !/^\s*(--|\/\/)/.test(ligne)).join('\n');
+const FONCTION = 'supabase/functions/assistant';
+
+test('0004 : une transaction a ajout seul, journal de compteurs sans contenu, RLS sans regle, aucun privilege client', () => {
+  const m = lire('supabase/migrations/0004_assistant_journal.sql');
+  const code = sansCommentaires(m);
+  const l = instructions(code);
+  assert.equal(l[0], 'begin;'); assert.equal(l[l.length - 1], 'commit;');
+  assert.equal(l.filter((x) => x === 'begin;').length, 1, 'une seule transaction');
+  assert.equal(code, code.toLowerCase(), 'SQL en minuscules');
+  // A ajout seul : rien de supprime, rien de modifie, aucune fonction recreee ; un seul `alter table`, celui de la RLS.
+  assert.doesNotMatch(code, /\b(drop|truncate)\b|\bcreate or replace\b|^\s*(delete|update)\b/m);   // « on delete cascade » (cle etrangere) reste permis
+  assert.deepEqual(code.match(/\balter table [^;]+;/g), ['alter table public.assistant_journal enable row level security;']);
+  assert.match(code, /create table public\.assistant_journal \(/);
+  assert.equal((code.match(/create table /g) || []).length, 1, 'une seule table');
+  // Compteurs seulement : les colonnes du brief, une seule colonne texte (l'outil), jamais jsonb ni bytea.
+  for (const c of ['owner_id uuid not null references auth.users (id) on delete cascade', 'outil text not null', 'statut integer not null', 'jetons_entree integer', 'jetons_sortie integer', 'duree_ms integer not null default 0', 'octets integer', 'jour date not null', 'cree_le timestamptz not null default now()']) assert.ok(code.includes(c), c);
+  assert.equal((code.match(/\btext\b/g) || []).length, 1, 'une seule colonne texte : l outil');
+  assert.doesNotMatch(code, /\b(jsonb?|bytea|varchar|char)\b/);
+  // La liste blanche des outils du journal est celle de la logique pure.
+  assert.ok(code.includes(`check (outil in (${OUTILS_PASSERELLE.map((o) => `'${o}'`).join(', ')}))`), 'outils du journal = OUTILS');
+  // RLS activee SANS aucune regle, et plus aucun privilege pour les roles clients (table, sequence, vue).
+  assert.doesNotMatch(code, /create policy/);
+  assert.ok(code.includes('alter table public.assistant_journal enable row level security;'));
+  assert.ok(code.includes('revoke all on public.assistant_journal from anon, authenticated;'));
+  assert.ok(code.includes('revoke all on sequence public.assistant_journal_id_seq from anon, authenticated;'));
+  assert.ok(code.includes('create index assistant_journal_owner_jour on public.assistant_journal (owner_id, jour);'));
+  assert.equal((code.match(/create index /g) || []).length, 1, 'un seul index');
+  assert.match(code, /create view public\.assistant_usage_jour with \(security_invoker = true\) as/);
+  assert.ok(code.includes('revoke all on public.assistant_usage_jour from anon, authenticated;'));
+  assert.ok(!code.includes('grant '), 'aucun grant : seule la cle secrete du projet ecrit et lit');
+  assert.doesNotMatch(m, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i, 'aucune adresse');
+  assert.ok(!m.includes('sk-'), 'aucune cle');
+});
+test('0004 : hors du generateur — NOMS inchange, le dossier de migrations la contient', () => {
+  assert.deepEqual(NOMS, ['0001_tables_et_regles.sql', '0002_stockage.sql', '0003_assistant_config.sql']);
+  assert.ok(readFileSync(path.join(MIGRATIONS, '0004_assistant_journal.sql'), 'utf8').length > 0);
+});
+
+test('preuve 0004 : rollback final, BILAN, aucune adresse ni jeton, privileges et refus 42501 des deux roles clients', () => {
+  const p = lire('supabase/proofs/0004_assistant_journal.sql');
+  const code = sansCommentaires(p);
+  const l = instructions(code);
+  assert.equal(l[l.length - 1], 'rollback;');
+  assert.equal(l[l.length - 2], 'select ordre, etape, attendu, obtenu, ok from pg_temp.preuve order by ordre;');
+  assert.equal(l.filter((x) => x === 'begin;').length, 1, 'une seule transaction');
+  assert.match(code, /select 999,\s*'BILAN'/);
+  // Aucune adresse : ni reelle, ni meme exemple.invalid — la preuve emprunte un compte existant sans jamais le nommer.
+  assert.doesNotMatch(p, /@(?!exemple\.invalid)[a-z0-9.-]+\.[a-z]{2,}/i, 'aucune adresse reelle');
+  assert.ok(!p.includes('@'), 'aucun arobase du tout');
+  assert.doesNotMatch(p, /A_UUID|B_UUID|A_EMAIL|B_EMAIL/, 'aucun jeton a remplacer');
+  assert.doesNotMatch(code, /allowed_users/, 'la liste des adresses n est pas touchee');
+  assert.doesNotMatch(code, /\bemail\b/i, 'aucune adresse lue ni affichee');
+  assert.ok(!p.includes('sk-'), 'aucune cle');
+  // Les verdicts du brief : 1.01-1.05 (presence, RLS, aucune regle, privileges, index, vue), 2.01-2.02 (refus), 3.01.
+  for (const n of ['0.01', '1.01', '1.02', '1.03', '1.04', '1.05', '2.01', '2.02', '3.01']) assert.ok(code.includes(`${n},`), 'verdict ' + n);
+  assert.ok(code.includes("to_regclass('public.assistant_journal') is null"), 'garde : 0004 collee d abord');
+  assert.ok(code.includes('relrowsecurity'), 'RLS activee');
+  assert.ok(code.includes('pg_policies'), 'aucune regle');
+  for (const role of ['anon', 'authenticated']) {
+    assert.ok(code.includes(`has_table_privilege('${role}', 'public.assistant_journal'`), 'privileges de ' + role);
+    assert.ok(code.includes(`has_table_privilege('${role}', 'public.assistant_usage_jour'`), 'privileges de ' + role + ' sur la vue');
+  }
+  assert.ok(code.includes('select, insert, update, delete'), 'les quatre privileges de donnees');
+  assert.ok(code.includes('assistant_journal_owner_jour'), 'index (owner_id, jour)');
+  assert.ok(code.includes('security_invoker=true'), 'vue en security invoker');
+  // Refus sous le role authenticated : lecture ET ecriture levent 42501 (attrapes), puis le role est remis.
+  assert.ok(code.includes('insufficient_privilege') || code.includes('42501'), '42501 attendu');
+  assert.ok(code.includes('select count(*) from public.assistant_journal') || code.includes('perform count(*) from public.assistant_journal'), 'lecture tentee');
+  assert.match(code, /insert into public\.assistant_journal/, 'ecriture tentee ou de preuve');
+  const posRole = (re) => [...code.matchAll(re)].map((m) => m.index);
+  const sets = posRole(/set local role authenticated;/g); const resets = posRole(/reset role;/g);
+  assert.ok(sets.length >= 1 && sets.length === resets.length, 'chaque role pris est rendu');
+  assert.ok(sets.every((s, i) => s < resets[i] && (i + 1 === sets.length || resets[i] < sets[i + 1])), 'set local role / reset role alternent');
+  // 3.01 : compte existant, jamais affiche ; sans compte, etape sautee mais verdict vert.
+  assert.ok(code.includes('from auth.users order by created_at limit 1'), 'compte existant le plus ancien');
+  assert.ok(code.includes("'aucun compte : etape sautee'"), 'auth.users vide');
+  assert.ok(code.includes('from public.assistant_usage_jour'), 'la vue est lue');
+});
+
+test('index.ts : imports fermes, deno.json epingle, aucune cle ni journal de console, gardes dans l ordre', () => {
+  const src = lire(`${FONCTION}/index.ts`);
+  const code = sansCommentaires(src);
+  // Imports : exactement deux, ./logique.js et le specificateur nu resolu par deno.json.
+  assert.equal((code.match(/^\s*import\b/gm) || []).length, 2, 'deux imports');
+  const specs = [...code.matchAll(/^\s*import\s[^;]*?\sfrom\s+(['"])([^'"]+)\1/gm)].map((m) => m[2]).sort();
+  assert.deepEqual(specs, ['./logique.js', '@supabase/supabase-js']);
+  assert.doesNotMatch(code, /\bimport\s*\(/); assert.doesNotMatch(code, /\brequire\s*\(/);
+  assert.doesNotMatch(code, /\bfrom\s+['"](?:https?:|npm:|jsr:|node:)/);
+  const deno = JSON.parse(lire(`${FONCTION}/deno.json`));
+  assert.deepEqual(deno, { imports: { '@supabase/supabase-js': 'npm:@supabase/supabase-js@2.118.0' } });
+  assert.ok(code.includes('Deno.serve('));
+  // Jamais : une cle, l'acces direct du navigateur, un journal de console (aucun corps de demande ou de reponse n'est journalise).
+  assert.ok(!src.includes('sk-'), 'aucune cle');
+  assert.ok(!src.includes('anthropic-dangerous-direct-browser-access'));
+  assert.ok(!src.includes('console.log('));
+  assert.doesNotMatch(src, /\bconsole\s*\./, 'aucun journal du tout');
+  assert.equal((code.match(/ANTHROPIC_API_KEY/g) || []).length, 1, 'la cle n est lue qu une fois : dans l en-tete x-api-key');
+  assert.ok(code.includes("'x-api-key': env('ANTHROPIC_API_KEY')"));
+  assert.ok(code.includes("redirect: 'error'"));
+  assert.ok(code.includes("'anthropic-version': '2023-06-01'"));
+  assert.ok(code.includes('LIMITES.attenteMs'), 'delai de 120 s');
+  // Octets : la taille en OCTETS du corps lu (pas les unites UTF-16 du texte), a la lecture et au journal.
+  assert.ok(code.includes('new Uint8Array(await req.arrayBuffer())') && code.includes('new TextDecoder().decode(bytes)'));
+  assert.doesNotMatch(code, /texte\.length/);
+  assert.equal((code.match(/octets: bytes\.byteLength/g) || []).length, 3, 'lireDemande + les deux lignes du journal');
+  assert.ok(code.includes('maxTokens: LIMITES.maxTokens'));
+  assert.equal((code.match(/maintenant: new Date\(\)\.toISOString\(\)/g) || []).length, 2, 'reservation et mise a jour');
+  // Les raisons de lireDemande rejoignent la liste fermee de l'erreur HTTP.
+  assert.ok(code.includes("lu.raison === 'trop_lourd' ? 'trop_lourd' : lu.raison === 'bornes' ? 'bornes' : lu.raison === 'serveur' ? 'serveur' : 'requete'"));
+  assert.ok(code.includes('json(lu.statut,'));
+  // Ordre des gardes (spec § 5) : OPTIONS, origine, methode, session, liste admise, GET, corps, quota, reservation, Anthropic, mise a jour.
+  const ordre = ["req.method === 'OPTIONS'", 'origineAdmise(origine, ORIGINES)', "req.method !== 'POST'", 'auth.getUser(jeton)', "rpc('is_allowed')", "req.method === 'GET'", 'await req.arrayBuffer()', 'lireDemande(texte', 'decisionQuota(', '.insert(', 'await fetch(ANTHROPIC', '.update('];
+  const pos = ordre.map((s) => code.indexOf(s));
+  assert.ok(pos.every((x) => x !== -1), 'toutes les gardes presentes : ' + pos.join(','));
+  assert.deepEqual([...pos].sort((a, b) => a - b), pos, 'gardes dans l ordre de la spec');
+  assert.equal((code.match(/await fetch\(/g) || []).length, 1, 'un seul appel sortant');
+});
+test('deno.d.ts : declarations minimales pour tsc, jamais importees', () => {
+  const d = lire(`${FONCTION}/deno.d.ts`);
+  assert.match(d, /declare namespace Deno/);
+  assert.match(d, /declare module '@supabase\/supabase-js'/);
+  assert.ok(!sansCommentaires(lire(`${FONCTION}/index.ts`)).includes('deno.d'), 'index.ts n importe pas deno.d.ts');
+  assert.ok(!d.includes('sk-'));
+});
+
+test('README : etape 10 (secrets, deploiement --no-verify-jwt, 0004 et sa preuve, sondes, quota, rotation)', () => {
+  const r = lire('supabase/README.md');
+  const debut = r.indexOf("### 10. La passerelle de l'assistant : secret, fonction, `0004` et sa preuve");
+  assert.notEqual(debut, -1, 'etape 10');
+  assert.ok(r.indexOf('### 9. Fermer les autres portes') < debut && debut < r.indexOf('## Où coller les sorties'), '10 apres 9, avant « Où coller les sorties »');
+  const etape = r.slice(debut, r.indexOf('\n## ', debut));
+  for (const m of ['--no-verify-jwt', 'ANTHROPIC_API_KEY', 'OPTIONS', '0004', 'ASSISTANT_MODELE', 'ASSISTANT_QUOTA_JOUR', 'ASSISTANT_ORIGINES',
+    'Edge Functions', 'Secrets', 'supabase login', 'supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt',
+    'migrations/0004_assistant_journal.sql', 'proofs/0004_assistant_journal.sql', 'Run without RLS', '999 BILAN',
+    '204', '401', '"erreur":"non_connecte"', 'quotaJour', 'supabase secrets set ASSISTANT_QUOTA_JOUR=', 'rotation']) assert.ok(etape.includes(m), m);
+  // Ordre de lecture : secret, deploiement, 0004 puis sa preuve, sondes, quota, rotation.
+  const i = ['ANTHROPIC_API_KEY', 'supabase functions deploy assistant', 'migrations/0004_assistant_journal.sql', 'proofs/0004_assistant_journal.sql', '"erreur":"non_connecte"', 'supabase secrets set ASSISTANT_QUOTA_JOUR=', 'rotation'].map((m) => etape.indexOf(m));
+  assert.deepEqual([...i].sort((a, b) => a - b), i, 'dans l ordre : ' + i.join(','));
+  // Le secret ne vit jamais dans un fichier ni dans le depot : on ne cite que son NOM.
+  assert.doesNotMatch(etape, /sk-[A-Za-z0-9_-]{4,}/, 'aucune cle');
+  assert.ok(/jamais dans un fichier/i.test(etape), 'secret jamais en fichier');
+  // L'arbre du README nomme les nouveaux fichiers.
+  for (const f of ['migrations/0004_assistant_journal.sql', 'proofs/0004_assistant_journal.sql', 'functions/assistant/']) assert.ok(r.slice(0, debut).includes(f), 'arbre : ' + f);
+});
