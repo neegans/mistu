@@ -26,7 +26,7 @@ référence dans la bibliothèque — l'app ne le lit pas, elle se contente de l
 
 **Créer avec l'IA** (carte « Créer avec l'IA » d'Ajouter, ou bouton « Créer une recette avec ces critères » de
 l'onglet Web de la recherche) : tu décris ce que tu veux, l'assistant propose **une** recette, tu la gardes ou pas.
-Un appel à ton compte Anthropic par clic, jamais sans clic ; rien n'est enregistré sans « Garder cette recette ».
+Un appel à l'assistant par clic (compté dans ton quota du jour), jamais sans clic ; rien n'est enregistré sans « Garder cette recette ».
 Une recette gardée dit partout « Créée avec l'IA · non testée » (fiche, cartes, mode cuisine, exports, section
 « Recettes créées avec l'IA » de Mes livres) jusqu'à « Marquer testée » ; ses lignes sont toutes « à vérifier », et
 ses restrictions ne sont jamais certifiées. « Adapter avec l'IA » en fait une variante, sans toucher l'original.
@@ -38,7 +38,7 @@ Aucun appel réel n'a encore été fait avec ce code (voir « Vérifications à 
 | Séance de scan continue : photos, PDF, EPUB conservés localement, miniatures numérotées, remplacement d'une page, séance reprenable | Ajouter → Importer |
 | Entrées d'index → références « Repérée dans ton livre — page N », doublons ignorés | Importer, fiche livre |
 | Saisie ou extraction d'une recette avec correction ciblée (quantités, unités ambiguës `oz`, identité d'ingrédient proposée à confirmer) | Nouvelle recette / Corriger |
-| Recherche FR/EN en langage naturel → pastilles modifiables; modes Mes recettes / Mes livres / Web (avec l'assistant Anthropic configuré dans Réglages) / Tout; groupes admissibles, à vérifier, références | Recherche |
+| Recherche FR/EN en langage naturel → pastilles modifiables; modes Mes recettes / Mes livres / Web (avec l'assistant, une fois connecté) / Tout; groupes admissibles, à vérifier, références | Recherche |
 | Fiche recette : Original / Ma version, portions (durées non multipliées), unités (original / métrique / US avec hypothèses), langue de lecture, remplacer un ingrédient, évaluation d'une restriction, exports | Fiche recette |
 | Plats : rapprochements proposés par titre, confirmation/refus réversibles, comparaison de 2–3 recettes | Mes livres → Plats |
 | Composer un repas : « Avec quoi on mange ça ? », propositions expliquées, ajouter/remplacer/retirer/verrouiller, résumé du temps et conflits de four, contraintes du repas, duo mémorisé | Ma semaine |
@@ -47,8 +47,8 @@ Aucun appel réel n'a encore été fait avec ce code (voir « Vérifications à 
 | Redécouvrir : fondé sur les consultations dans l'app, « À explorer » sans historique, Plus tard / Masquer | Aujourd'hui |
 | Appareils par capacités, inventaire de lots (date limite saisie, pas calculée) | Ma cuisine |
 | Sauvegarde ZIP complète, restauration validée en espace isolé puis vérifiée, réimport sans doublon; exports JSON-LD, YAML Paprika, copie HTML | Réglages |
-| Assistant IA optionnel (compatible OpenAI ou Anthropic) pour lire pages et index; sorties toujours « à vérifier » | Réglages |
-| Créer une recette avec l'assistant (Anthropic seulement) : une proposition à vérifier, gardée d'un clic, adaptable | Ajouter → Créer avec l'IA ; Recherche → Web |
+| Assistant IA, servi par ton compte (la clé vit côté serveur, rien à configurer) : lire pages et index; sorties toujours « à vérifier » | Importer, Nouvelle recette ; état dans Réglages |
+| Créer une recette avec l'assistant : une proposition à vérifier, gardée d'un clic, adaptable | Ajouter → Créer avec l'IA ; Recherche → Web |
 | Synchronisation des fiches entre appareils (compte Google) : file d'envoi, réception, conflits à trancher, quarantaine, « Envoyer maintenant », pastille « N non envoyés »; les photos restent locales (L4) | Réglages, en-tête |
 
 ## Synchronisation entre appareils
@@ -71,7 +71,7 @@ Adaptations Rapide / On se gâte / Meal prep, moteur de salubrité, planificateu
 2. Raccourci `CuisineOS-Minuterie` : `docs/raccourci-minuterie.md`.
 3. Générer un ZIP, vérifier sa présence dans Téléchargements/Fichiers, puis le restaurer dans un autre navigateur avec une base vide. Conserver la bibliothèque d’origine pendant cette validation.
 4. Import du YAML dans Paprika et lecture du JSON-LD dans l'application cible.
-5. Appels IA avec une clé réelle : seule la recherche web a été exercée (17 octobre, site public) ; « Créer avec l'IA », « Adapter avec l'IA », l'extraction de pages et « Tester » ne l'ont jamais été (pour une création : noter la durée, les jetons affichés et le coût dans la console Anthropic).
+5. Appels de l'assistant par la passerelle, connecté (il est servi par le compte : la clé vit côté serveur, rien à configurer) : aucun appel réel n'est encore passé par elle. Avant elle, seule la recherche web avait été exercée (17 octobre, site public) ; « Créer avec l'IA », « Adapter avec l'IA » et la lecture de pages ne l'ont jamais été (pour une création : noter la durée, les jetons affichés et le coût dans la console Anthropic).
 6. **Synchronisation, aller-retour réel entre deux appareils** (spec § 7.3) : iPhone hors ligne → écrire une recette → voir le compteur « non envoyés » → remettre le réseau → la recette arrive sur le Mac ; la bibliothèque du Mac arrive entièrement sur l'iPhone ; une suppression se propage ; un conflit volontaire (la même fiche modifiée des deux côtés hors ligne) se tranche par « Garder celle d'ici ».
 
 

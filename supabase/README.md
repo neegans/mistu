@@ -231,14 +231,16 @@ appelle la fonction. Aucun des gestes ci-dessous n'appelle Anthropic ni ne dépe
    par défaut : `ASSISTANT_MODELE` (le modèle imposé aux appels, `claude-sonnet-5-5`), `ASSISTANT_QUOTA_JOUR` (appels par
    compte et par jour UTC, 60) et `ASSISTANT_ORIGINES` (origines admises, séparées par des virgules). Posée,
    `ASSISTANT_ORIGINES` **REMPLACE la valeur par défaut** (`https://neegans.github.io`) : pour essayer depuis le Mac,
-   lister les deux origines, séparées par une virgule (`https://neegans.github.io,http://localhost:8083`).
+   lister les deux origines, séparées par une virgule (`https://neegans.github.io,http://localhost:8086` : le port est celui du
+   serveur local qui sert l'app).
    Ces trois valeurs sont relues à chaque requête : une valeur changée est prise au prochain appel ; un isolat déjà chaud
    peut garder l'ancienne valeur jusqu'à son recyclage (non prouvé).
 2. **Déployer la fonction.** Préalable, une seule fois : `supabase login` dans Terminal. Puis, depuis la racine du dépôt :
    ```
-   supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt
+   supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api
    ```
-   `--no-verify-jwt` est voulu : la fonction vérifie elle-même la session (`auth.getUser`) et la liste admise
+   `--use-api` fait construire le paquet côté serveur de Supabase : ni Docker ni démon local n'est requis (c'est la forme qui a
+   servi aux deux déploiements du 18 octobre). `--no-verify-jwt` est voulu : la fonction vérifie elle-même la session (`auth.getUser`) et la liste admise
    (`is_allowed()`), et le navigateur envoie d'abord une requête `OPTIONS` **sans jeton** que la vérification amont de
    Supabase refuserait — le client n'enverrait alors jamais sa vraie demande.
 3. **Coller `0004`, puis sa preuve**, dans l'éditeur SQL sous `postgres`, comme à l'étape 8 bis : d'abord
@@ -264,12 +266,29 @@ appelle la fonction. Aucun des gestes ci-dessous n'appelle Anthropic ni ne dépe
      supabase-js, non vérifié ici) ; copier le jeton, puis dans Terminal **ne jamais le coller dans une commande** (il
      resterait dans l'historique) : `read -rs JETON` (coller le jeton, Entrée : rien ne s'affiche), puis
      `curl -i -H 'Origin: https://neegans.github.io' -H "Authorization: Bearer $JETON" "$U"`
-     → **200** `{"modele":"claude-sonnet-5-5","quotaJour":60}`, et enfin `unset JETON`. Le jeton vaut une heure.
+     → **200** `{"modele":"claude-sonnet-5-5","quotaJour":60,"cles":"nouvelles"}`, et enfin `unset JETON`. Le jeton vaut une heure.
+     `cles` est un repère **non secret** : par quelle voie la fonction a lu ses deux clés Supabase. `nouvelles` : les variables
+     injectées `SUPABASE_PUBLISHABLE_KEYS` et `SUPABASE_SECRET_KEYS` (une clé n'est prise que si elle commence par son préfixe,
+     `sb_publishable_` ou `sb_secret_` — liste d'objets `{ api_key }`, liste de chaînes, objet ou chaîne nue, toutes les formes
+     sont lues) ; `legacy` : le repli sur `SUPABASE_ANON_KEY` et `SUPABASE_SERVICE_ROLE_KEY` ; `mixte` : une de chaque. Les deux
+     valeurs marchent ; ce champ dit seulement laquelle sert (la sonde d'un jeton bidon, elle, ne les distingue pas).
 5. **Changer le quota sans redéployer** : `supabase secrets set ASSISTANT_QUOTA_JOUR=120 --project-ref ybdooerfeziiabsbfxtb`,
    puis relire `quotaJour` par la troisième sonde (même geste pour `ASSISTANT_MODELE` et `ASSISTANT_ORIGINES`).
 6. **Faire tourner la clé** (rotation) : remplacer la valeur du secret `ANTHROPIC_API_KEY` dans le tableau de bord (pas par
    `supabase secrets set`, qui laisserait la clé dans l'historique du shell), puis révoquer l'ancienne dans la console
    Anthropic. Rien d'autre : ni migration, ni changement dans l'app.
+7. **Geste facultatif : vider côté serveur toute ligne de configuration qui porterait encore une clé.** L'app vide elle-même
+   la sienne : à **chaque** démarrage, une ligne `llm` qui porte une clé ou un fournisseur est réécrite vide et part au compte
+   (elle efface alors celle du serveur et des autres appareils). Mais une ligne-clé qui dort sur le serveur sans qu'aucun
+   appareil se reconnecte reste là ; ce geste la vide à la main, une fois, dans l'éditeur SQL sous `postgres`. **À ne coller que
+   si tu le veux : la fonction ne le fait pas, et rien dans le dépôt ne l'exécute.** Attendu `UPDATE n`, où *n* est le nombre
+   de lignes qui portaient une clé ou un fournisseur (`UPDATE 0` : rien à vider) :
+   ```sql
+   update public.assistant_config set data = data || '{"provider":"none","model":"","base_url":"","api_key":""}'::jsonb, updated_at = now() where coalesce(data->>'api_key','') <> '' or coalesce(data->>'provider','none') <> 'none';
+   ```
+   (La table est celle de `0003` : `data` est la colonne jsonb de la ligne, `updated_at` son horodatage ; le déclencheur
+   `touch_server_seq` pose le numéro de séquence, donc les appareils la reçoivent à leur prochaine passe. La clé, elle, reste
+   valide chez Anthropic tant qu'on ne l'a pas révoquée : voir le point 6.)
 
 ## Où coller les sorties
 

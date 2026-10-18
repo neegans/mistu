@@ -634,6 +634,11 @@ test('preuve 0004 : rollback final, BILAN, aucune adresse ni jeton, privileges e
   const v109 = code.slice(code.indexOf('select 1.09,'), code.indexOf('insert into pg_temp.preuve', code.indexOf('select 1.09,')));
   for (const priv of ['select', 'insert', 'update']) assert.ok(v109.includes(`has_table_privilege('service_role', 'public.assistant_journal', '${priv}')`), '1.09 ' + priv);
   assert.doesNotMatch(v109, /has_table_privilege\('service_role', 'public\.assistant_journal', '[a-z]+,/, '1.09 : pas de liste de privileges');
+  // F-12 (M10) : l'id est un bigserial — l'insertion de la reservation (service_role) appelle nextval, donc exige USAGE sur la sequence. Le verdict
+  // 1.09 le prouve avec les autres droits de la cle secrete (un seul privilege, relie par `and` aux autres).
+  assert.ok(v109.includes("has_sequence_privilege('service_role', 'public.assistant_journal_id_seq', 'usage')"), '1.09 : usage sur la sequence de id');
+  assert.doesNotMatch(v109, /has_sequence_privilege\('service_role', 'public\.assistant_journal_id_seq', '[a-z]+,/, '1.09 : pas de liste de privileges de sequence');
+  assert.ok(v109.includes("'true / true / true / true / true'") && v109.includes('s and i and u and v and q'), '1.09 : cinq verdicts relies par and');
   // Le jeton de la requete est pose par un `perform` dans un bloc do : aucun `select set_config` ne renvoie l\'UUID emprunte.
   assert.ok(code.includes('perform set_config('));
   assert.doesNotMatch(code, /^select set_config\(/m);
@@ -734,4 +739,58 @@ test('README : etape 10 (secrets, deploiement --no-verify-jwt, 0004 et sa preuve
   assert.ok(etape.replace(/\s+/g, ' ').includes("prise au prochain appel ; un isolat déjà chaud peut garder l'ancienne valeur jusqu'à son recyclage (non prouvé)"), 'P-6 : README (a la coupure de ligne pres)');
   // L'arbre du README nomme les nouveaux fichiers.
   for (const f of ['migrations/0004_assistant_journal.sql', 'proofs/0004_assistant_journal.sql', 'functions/assistant/']) assert.ok(r.slice(0, debut).includes(f), 'arbre : ' + f);
+});
+
+// --- Vague finale : README racine (F-2), README du serveur étape 10 (F-1, F-9, F-14), RESULTATS (F-1, une phrase) ----------
+test('README racine (F-2) : plus de cle ni de fournisseur a configurer — l assistant est servi par le compte, la cle vit cote serveur', () => {
+  const r = lire('README.md');
+  for (const motif of [/Anthropic configur/, /clé réelle/, /Tester/, /compatible OpenAI/, /compte Anthropic/, /Anthropic seulement/, /assistant Anthropic/, /dans Réglages\)/, /clé locale/]) assert.doesNotMatch(r, motif, 'README racine : ' + motif);
+  assert.ok(r.includes("Web (avec l'assistant, une fois connecté)"), 'la ligne de la recherche Web');
+  // Une phrase, aux deux endroits qui parlaient de configurer : la ligne du tableau et la verification sur appareil.
+  const tableau = r.split('\n').find((l) => l.startsWith('| Assistant IA'));
+  assert.ok(tableau && tableau.includes('servi par ton compte') && tableau.includes('la clé vit côté serveur') && tableau.includes('rien à configurer'), 'tableau : ' + tableau);
+  const verif = r.split('\n').find((l) => l.startsWith('5. '));
+  assert.ok(verif && verif.includes('servi par le compte') && verif.includes('la clé vit côté serveur') && verif.includes('rien à configurer'), 'verification 5 : ' + verif);
+  assert.ok(r.includes("Un appel à l'assistant par clic"), 'Creer avec l IA : un appel a l assistant par clic');
+});
+
+test('README etape 10 (F-14) : deploiement avec --use-api, exemple d origine locale sur 8086', () => {
+  const r = lire('supabase/README.md');
+  const debut = r.indexOf("### 10. La passerelle de l'assistant");
+  const etape = r.slice(debut, r.indexOf('\n## ', debut));
+  assert.ok(etape.includes('supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api'), 'commande avec --use-api');
+  assert.ok(/--use-api[^\n]*\n|`--use-api`/.test(etape) && /Docker/.test(etape), '--use-api est expliqué : sans Docker');
+  assert.ok(!etape.includes('8083') && etape.includes('http://localhost:8086'), 'exemple d origine locale : le port 8086, plus 8083');
+});
+
+test('README etape 10 (F-1) : la sonde GET montre { modele, quotaJour, cles } — le repere des cles, jamais une cle', () => {
+  const r = lire('supabase/README.md');
+  const debut = r.indexOf("### 10. La passerelle de l'assistant");
+  const etape = r.slice(debut, r.indexOf('\n## ', debut));
+  assert.ok(etape.includes('"modele":"claude-sonnet-5-5","quotaJour":60,"cles":') , 'le GET montre cles');
+  for (const m of ['nouvelles', 'legacy', 'mixte', 'sb_publishable_', 'sb_secret_']) assert.ok(etape.includes(m), 'cles : ' + m);
+  assert.doesNotMatch(etape, /sb_(publishable|secret)_[A-Za-z0-9]{6,}/, 'aucune cle reelle : les prefixes seulement');
+});
+
+test('README etape 10 (F-9) : un geste FACULTATIF pour vider cote serveur toute ligne qui porterait encore une cle', () => {
+  const r = lire('supabase/README.md');
+  const debut = r.indexOf("### 10. La passerelle de l'assistant");
+  const etape = r.slice(debut, r.indexOf('\n## ', debut));
+  const sql = `update public.assistant_config set data = data || '{"provider":"none","model":"","base_url":"","api_key":""}'::jsonb, updated_at = now() where coalesce(data->>'api_key','') <> '' or coalesce(data->>'provider','none') <> 'none';`;
+  assert.ok(etape.includes(sql), 'la commande SQL exacte');
+  const i = etape.indexOf(sql);
+  const entour = etape.slice(Math.max(0, i - 900), i + 900);
+  assert.ok(/facultatif/i.test(entour), 'dite facultative');
+  assert.ok(i > etape.indexOf('rotation'), 'apres la rotation, en dernier geste de l etape');
+  // Les noms de colonnes sont ceux de 0003 (table public.assistant_config, colonne jsonb `data`, `updated_at`).
+  const m3 = lire('supabase/migrations/0003_assistant_config.sql');
+  for (const col of ['create table public.assistant_config', '  data       jsonb not null,', '  updated_at timestamptz not null,']) assert.ok(m3.includes(col), '0003 : ' + col);
+});
+
+test('RESULTATS-mitsu (F-1) : la note de S5 ne dit plus « cle publique nouvelle » — nouvelle ou legacy, la sonde ne les distingue pas', () => {
+  const res = lire('supabase/proofs/RESULTATS-mitsu.md');
+  const s5 = res.split('\n').find((l) => l.startsWith('| S5 |'));
+  assert.ok(s5, 'ligne S5');
+  assert.ok(s5.includes('donc `createClient` a reçu une clé publique valide — nouvelle ou legacy, cette sonde ne les distingue pas ; le GET avec une session réelle le dira (`cles`)'), s5);
+  assert.ok(!s5.includes('a bien reçu') && !s5.includes('SUPABASE_PUBLISHABLE_KEYS` lu'), 'ancienne affirmation retiree');
 });

@@ -251,7 +251,7 @@ Code : `supabase/functions/assistant/` (spec `docs/superpowers/specs/2026-10-18-
 | S2 | `OPTIONS`, `Origin: https://evil.example` | 204 | — | **sans** `access-control-allow-origin` ; 17 ms |
 | S3 | `POST` sans `Authorization`, origine admise | 401 | `{"erreur":"non_connecte"}` | CORS présent, `cache-control: no-store` |
 | S4 | `POST`, `Origin: https://evil.example` | 403 | `{"erreur":"origine"}` | sans Allow-Origin |
-| S5 | `POST`, `Authorization: Bearer bidon.bidon.bidon` + `apikey` publique | 401 | `{"erreur":"non_connecte"}` | `getUser` a refusé ; donc `createClient` a bien reçu une clé publique valide (`SUPABASE_PUBLISHABLE_KEYS` lu) ; 104 ms |
+| S5 | `POST`, `Authorization: Bearer bidon.bidon.bidon` + `apikey` publique | 401 | `{"erreur":"non_connecte"}` | `getUser` a refusé ; donc `createClient` a reçu une clé publique valide — nouvelle ou legacy, cette sonde ne les distingue pas ; le GET avec une session réelle le dira (`cles`) ; 104 ms |
 | S6 | `GET`, jeton bidon | 401 | `{"erreur":"non_connecte"}` | |
 | S7 | `PUT`, origine admise | 405 | `{"erreur":"methode"}` | |
 | S8 | `POST` sans en-tête `Origin` | 403 | `{"erreur":"origine"}` | un appelant hors navigateur sans Origin est refusé |

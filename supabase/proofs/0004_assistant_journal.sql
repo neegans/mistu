@@ -83,14 +83,16 @@ select 1.08, 'owner_id references auth.users on delete cascade', '1', count(*)::
 from pg_constraint where conrelid = to_regclass('public.assistant_journal') and contype = 'f'
   and confrelid = 'auth.users'::regclass and confdeltype = 'c';
 -- La clé secrète du projet (rôle service_role : c'est elle qui écrit et lit ce journal) garde ses droits, sinon la
--- fonction répondrait 502 au premier comptage.
+-- fonction répondrait 502 au premier comptage. L'id est un bigserial : l'insertion de la réservation appelle nextval, donc
+-- exige aussi USAGE sur la séquence (un `revoke` trop large sur les séquences casserait chaque appel).
 insert into pg_temp.preuve
-select 1.09, 'service_role : select, insert, update sur la table, select sur la vue', 'true / true / true / true',
-  s::text || ' / ' || i::text || ' / ' || u::text || ' / ' || v::text, s and i and u and v
+select 1.09, 'service_role : select, insert, update sur la table, select sur la vue, usage sur la sequence de id', 'true / true / true / true / true',
+  s::text || ' / ' || i::text || ' / ' || u::text || ' / ' || v::text || ' / ' || q::text, s and i and u and v and q
 from (select has_table_privilege('service_role', 'public.assistant_journal', 'select') as s,
              has_table_privilege('service_role', 'public.assistant_journal', 'insert') as i,
              has_table_privilege('service_role', 'public.assistant_journal', 'update') as u,
-             has_table_privilege('service_role', 'public.assistant_usage_jour', 'select') as v) t;
+             has_table_privilege('service_role', 'public.assistant_usage_jour', 'select') as v,
+             has_sequence_privilege('service_role', 'public.assistant_journal_id_seq', 'usage') as q) t;
 -- La réservation atomique d'un appel : security invoker (les droits du seul appelant), volatile, search_path fixé ;
 -- exécutable par la clé secrète du projet seulement.
 insert into pg_temp.preuve

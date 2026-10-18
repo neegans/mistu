@@ -60,6 +60,8 @@ before(async () => {
   writeFileSync(fichier, code);
   globalThis.Deno = { env: { get: (k) => ENV[k] }, serve: (h) => { handler = h; } };
   globalThis.fetch = async (url, options) => {
+    // Comme le vrai fetch : un signal DEJA abandonne ne part jamais sur le reseau (rejet immediat, aucun appel enregistre).
+    if (options?.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     appelsFetch.push({ url, options });
     faux.evenements.push('fetch');
     return reponseFetch(url, options);
@@ -84,11 +86,12 @@ function remise() {
   reponseFetch = async () => jsonReponse(200, REPONSE_OK);
 }
 const corpsCreation = (extra = {}) => JSON.stringify({ outil: 'creation', corps: { messages: [{ role: 'user', content: 'x' }], ...extra } });
-function requete(methode = 'POST', { origine = ORIGINE, jeton = 'jeton.valide-1', texte, entetes = {}, body } = {}) {
+function requete(methode = 'POST', { origine = ORIGINE, jeton = 'jeton.valide-1', texte, entetes = {}, body, signal } = {}) {
   const h = { 'content-type': 'application/json', ...entetes };
   if (origine) h.origin = origine;
   if (jeton) h.authorization = 'Bearer ' + jeton;
   const init = { method: methode, headers: h };
+  if (signal) init.signal = signal;
   if (body !== undefined) { init.body = body; init.duplex = 'half'; }
   else if (methode !== 'GET' && methode !== 'OPTIONS') init.body = texte ?? corpsCreation();
   return new Request(URL_FONCTION, init);
@@ -154,13 +157,13 @@ test('d. liste admise : false, erreur, ou erreur avec true -> 403 non_admis ; au
 test('e. GET admis : modele et quota du jour, sans fetch ni reservation ; secrets relus a chaque requete', async () => {
   remise();
   const r = await handler(requete('GET'));
-  assert.equal(r.status, 200); assert.deepEqual(await lire(r), { modele: 'claude-sonnet-5-5', quotaJour: 2 });
+  assert.equal(r.status, 200); assert.deepEqual(await lire(r), { modele: 'claude-sonnet-5-5', quotaJour: 2, cles: 'nouvelles' });
   assert.equal(r.headers.get('cache-control'), 'no-store');
   assert.equal(r.headers.get('access-control-allow-origin'), ORIGINE);
   assert.equal(appelsFetch.length, 0); assert.equal(reserves().length, 0);
   // Fix 4 : un secret change est pris au prochain appel, sans redeploiement.
   ENV.ASSISTANT_QUOTA_JOUR = '5'; ENV.ASSISTANT_MODELE = 'claude-autre-modele';
-  assert.deepEqual(await lire(await handler(requete('GET'))), { modele: 'claude-autre-modele', quotaJour: 5 });
+  assert.deepEqual(await lire(await handler(requete('GET'))), { modele: 'claude-autre-modele', quotaJour: 5, cles: 'nouvelles' });
   for (const mauvais of ['abc', '0', '-3', '', '1.5x']) {
     ENV.ASSISTANT_QUOTA_JOUR = mauvais;
     const q = (await lire(await handler(requete('GET')))).quotaJour;
@@ -346,6 +349,7 @@ test('m. cles legacy : SUPABASE_ANON_KEY et SUPABASE_SERVICE_ROLE_KEY quand les 
   assert.equal(faux.registre[0].key, 'anon-legacy');
   assert.equal(faux.registre[1].key, 'service-legacy');
   assert.equal(reserves()[0].cle, 'service-legacy');
+  assert.equal((await lire(await handler(requete('GET')))).cles, 'legacy', 'F-1 : le GET dit que les deux cles viennent du repli legacy');
 });
 
 test('n. corps invalide : JSON illisible, outil inconnu, forme -> 400 requete, bornes -> 422 ; reservation et fetch jamais', async () => {
@@ -402,4 +406,171 @@ test('p. content-length declare trop grand : le corps est ANNULE avant le 413, s
   await new Promise((fini) => setImmediate(fini));
   assert.ok(annuleReponse, 'le flux de la reponse d Anthropic est annule');
   assert.equal(appelsFetch.length, 1);
+});
+
+// --- Vague finale : F-1 (forme des cles injectees), F-10 (GET), F-5 (abandon par le client) ---------------------------------------
+// Une variable de cles injectee peut avoir plusieurs formes (liste d'objets { api_key }, liste de chaines, chaine nue, objet) : le
+// lecteur est tolerant, mais une cle n'est prise que si elle porte SON prefixe (sb_publishable_ / sb_secret_) — une cle secrete
+// posee dans la variable publique n'est jamais prise pour une cle publique. Tout le reste retombe sur la cle legacy.
+const FORMES = (p) => [
+  // (a) une chaine commencant par le prefixe : nue, ou entre guillemets JSON
+  [`${p}brut`, `${p}brut`, 'chaine nue'],
+  [JSON.stringify(`${p}json`), `${p}json`, 'chaine JSON'],
+  // (b) une liste : chaines, objets { api_key }, ou un objet sans api_key AVANT l'objet qui en a une
+  [JSON.stringify([`${p}liste`]), `${p}liste`, 'liste de chaines'],
+  [JSON.stringify([{ api_key: `${p}listeobj` }]), `${p}listeobj`, 'liste d objets { api_key }'],
+  [JSON.stringify([{ name: 'x' }, 7, null, { api_key: `${p}second` }]), `${p}second`, 'liste : le premier element utilisable'],
+  [JSON.stringify([{ api_key: 'autre_prefixe_x' }, { api_key: `${p}apres` }]), `${p}apres`, 'liste : un element au mauvais prefixe est saute'],
+  // (c) un objet : .default, une autre valeur, ou { api_key }
+  [JSON.stringify({ default: `${p}defaut` }), `${p}defaut`, 'objet { default }'],
+  [JSON.stringify({ web: 'pas_une_cle', mobile: `${p}valeur` }), `${p}valeur`, 'objet : une valeur au bon prefixe'],
+  [JSON.stringify({ api_key: `${p}objet` }), `${p}objet`, 'objet { api_key }'],
+];
+const REPLIS = ['', '   ', '[]', '{}', 'pas du json', 'null', '42', 'true', '["autre_prefixe_x"]', '[{"api_key":""}]', '[{"api_key":5}]', '{"default":""}',
+  JSON.stringify({ a: { b: { c: { d: { api_key: 'sb_publishable_trop_profond' } } } } })];
+
+test('q. F-1 : cles injectees tolerantes — trois formes pour chaque variable, prefixe exige, repli legacy, champ cles du GET', async () => {
+  for (const [variable, prefixe, indice, legacy, nomLegacy] of [
+    ['SUPABASE_PUBLISHABLE_KEYS', 'sb_publishable_', 0, 'anon-legacy', 'SUPABASE_ANON_KEY'],
+    ['SUPABASE_SECRET_KEYS', 'sb_secret_', 1, 'service-legacy', 'SUPABASE_SERVICE_ROLE_KEY'],
+  ]) {
+    for (const [brut, attendue, nom] of FORMES(prefixe)) {
+      remise();
+      ENV[variable] = brut; ENV.SUPABASE_ANON_KEY = 'anon-legacy'; ENV.SUPABASE_SERVICE_ROLE_KEY = 'service-legacy';
+      const r = await handler(requete('POST'));
+      assert.equal(r.status, 200, `${variable} ${nom}`);
+      assert.equal(faux.registre[indice].key, attendue, `${variable} (${nom}) : la cle lue`);
+      assert.notEqual(faux.registre[indice].key, legacy, `${variable} (${nom}) : pas le repli`);
+    }
+    for (const brut of REPLIS) {
+      remise();
+      ENV[variable] = brut; ENV.SUPABASE_ANON_KEY = 'anon-legacy'; ENV.SUPABASE_SERVICE_ROLE_KEY = 'service-legacy';
+      const r = await handler(requete('POST'));
+      assert.equal(r.status, 200, `${variable} repli ${JSON.stringify(brut)}`);
+      assert.equal(faux.registre[indice].key, legacy, `${variable} = ${JSON.stringify(brut).slice(0, 60)} : repli sur ${nomLegacy}`);
+    }
+  }
+  // Une cle d'un AUTRE prefixe n'est jamais prise : la cle secrete dans la variable publique (et l'inverse) retombe sur le legacy.
+  remise();
+  ENV.SUPABASE_PUBLISHABLE_KEYS = '[{"api_key":"sb_secret_dans_la_publique"}]'; ENV.SUPABASE_SECRET_KEYS = '[{"api_key":"sb_publishable_dans_la_secrete"}]';
+  ENV.SUPABASE_ANON_KEY = 'anon-legacy'; ENV.SUPABASE_SERVICE_ROLE_KEY = 'service-legacy';
+  await handler(requete('POST'));
+  assert.deepEqual([faux.registre[0].key, faux.registre[1].key], ['anon-legacy', 'service-legacy'], 'les prefixes ne se croisent jamais');
+  // Sans aucune cle (ni nouvelle ni legacy) : createClient recoit une chaine vide, jamais undefined (le vrai createClient la refuse : 502, cas l).
+  remise();
+  delete ENV.SUPABASE_PUBLISHABLE_KEYS; delete ENV.SUPABASE_SECRET_KEYS;
+  const sans = await handler(requete('GET'));
+  assert.equal(sans.status, 200);
+  assert.equal(faux.registre[0].key, '');
+});
+
+test('q2. F-1 : le GET dit quelle voie a servi (nouvelles / legacy / mixte), jamais une cle', async () => {
+  const cles = async () => { const r = await handler(requete('GET')); assert.equal(r.status, 200); const t = await r.text(); for (const secret of ['sb_publishable', 'sb_secret', 'anon-legacy', 'service-legacy']) assert.ok(!t.includes(secret), 'le GET ne porte aucune cle : ' + secret); return JSON.parse(t).cles; };
+  remise();
+  assert.equal(await cles(), 'nouvelles', 'les deux cles viennent des nouvelles listes');
+  ENV.SUPABASE_ANON_KEY = 'anon-legacy'; ENV.SUPABASE_SERVICE_ROLE_KEY = 'service-legacy';
+  assert.equal(await cles(), 'nouvelles', 'les cles legacy presentes mais inutilisees : nouvelles');
+  delete ENV.SUPABASE_PUBLISHABLE_KEYS;
+  assert.equal(await cles(), 'mixte', 'publique legacy + secrete nouvelle');
+  ENV.SUPABASE_PUBLISHABLE_KEYS = '[{"api_key":"sb_publishable_factice"}]'; delete ENV.SUPABASE_SECRET_KEYS;
+  assert.equal(await cles(), 'mixte', 'publique nouvelle + secrete legacy');
+  delete ENV.SUPABASE_PUBLISHABLE_KEYS;
+  assert.equal(await cles(), 'legacy', 'les deux viennent du repli');
+  ENV.SUPABASE_PUBLISHABLE_KEYS = 'pas du json'; ENV.SUPABASE_SECRET_KEYS = '[]';
+  assert.equal(await cles(), 'legacy', 'des formes illisibles = repli = legacy');
+  // Le repere n'existe que sur le GET admis : une 401 ou une 403 ne le porte pas.
+  remise();
+  const refus = await handler(requete('GET', { jeton: null }));
+  assert.ok(!('cles' in await lire(refus)));
+});
+
+test('r. F-10 : GET sans jeton -> 401 ; GET d une session valide NON admise -> 403 ; ni fetch ni reservation', async () => {
+  remise();
+  const r1 = await handler(requete('GET', { jeton: null }));
+  assert.equal(r1.status, 401); assert.deepEqual(await lire(r1), { erreur: 'non_connecte' });
+  assert.equal(r1.headers.get('access-control-allow-origin'), ORIGINE);
+  assert.equal(faux.registre.length, 0, 'sans jeton : aucun client');
+  const r2 = await handler(requete('GET', { jeton: 'a b;c' }));
+  assert.equal(r2.status, 401, 'jeton mal forme');
+  faux.REPONSES.getUser = async () => ({ data: { user: null }, error: { message: 'jwt expired' } });
+  const r2b = await handler(requete('GET'));
+  assert.equal(r2b.status, 401, 'jeton refuse par getUser'); assert.deepEqual(await lire(r2b), { erreur: 'non_connecte' });
+  assert.equal(faux.RPC.length, 0, 'sans session valide, is_allowed n est pas interroge');
+  faux.REPONSES.getUser = async () => ({ data: { user: { id: 'compte-1' } }, error: null });
+  faux.REPONSES.rpc = async (nom) => (nom === 'is_allowed' ? { data: false, error: null } : { data: 7, error: null });
+  const r3 = await handler(requete('GET'));
+  assert.equal(r3.status, 403); assert.deepEqual(await lire(r3), { erreur: 'non_admis' });
+  assert.ok(!('modele' in await lire(await handler(requete('GET')))), 'un compte non admis ne lit ni le modele ni le quota');
+  assert.equal(appelsFetch.length, 0); assert.equal(reserves().length, 0);
+  assert.deepEqual(faux.RPC.map((a) => a.nom), ['is_allowed', 'is_allowed'], 'seule la liste admise est interrogee');
+});
+
+// F-5 : « Annuler » dans l'app ferme la connexion de la requete ; sans propagation, la passerelle attendrait Anthropic (et le facturerait)
+// jusqu'a 120 s pour personne. req.signal abandonne l'appel amont ; la ligne du journal passe a 499 et rien n'est relaye.
+test('s. F-5 : abandon par le client (req.signal) -> appel amont abandonne, journal 499, aucun corps relaye', { timeout: 8000 }, async () => {
+  remise();
+  let signalAmont = null; let appele;
+  const fetchAppele = new Promise((res) => { appele = res; });
+  reponseFetch = (url, options) => new Promise((_, rejeter) => {
+    signalAmont = options.signal;
+    options.signal.addEventListener('abort', () => rejeter(new DOMException('Aborted', 'AbortError')));
+    appele();
+  });
+  const client = new AbortController();
+  const enCours = handler(requete('POST', { signal: client.signal }));
+  await fetchAppele;
+  assert.equal(signalAmont.aborted, false, 'tant que le client est la, l appel amont tient');
+  client.abort();
+  assert.equal(signalAmont.aborted, true, 'le client part : l appel amont est abandonne');
+  const r = await enCours;
+  assert.equal(r.status, 499);
+  assert.equal(await r.text(), '', 'le client est parti : aucun corps relaye');
+  assert.equal(faux.MAJ.length, 1); assert.equal(faux.MAJ[0].v.statut, 499, 'journal 499, pas 504');
+  assert.equal(faux.MAJ[0].id, 7);
+  assert.equal(appelsFetch.length, 1);
+});
+
+test('s2. F-5 : abandon PENDANT la lecture de la reponse d Anthropic -> 499 aussi (pas 502), corps jamais relaye', { timeout: 8000 }, async () => {
+  remise();
+  let atteinte; const lectureCommencee = new Promise((res) => { atteinte = res; });
+  reponseFetch = (url, options) => {
+    const flux = new ReadableStream({ start(c) { options.signal.addEventListener('abort', () => c.error(new DOMException('Aborted', 'AbortError'))); }, pull() { atteinte(); } });
+    return new Response(flux, { status: 200 });
+  };
+  const client = new AbortController();
+  const enCours = handler(requete('POST', { signal: client.signal }));
+  await lectureCommencee;
+  client.abort();
+  const r = await enCours;
+  assert.equal(r.status, 499); assert.equal(await r.text(), '');
+  assert.equal(faux.MAJ.at(-1).v.statut, 499);
+});
+
+test('s3. F-5 : le client est deja parti avant l appel amont (pendant la reservation) -> Anthropic n est jamais appele, journal 499', { timeout: 8000 }, async () => {
+  remise();
+  const client = new AbortController();
+  faux.REPONSES.rpc = async (nom) => { if (nom === 'assistant_reserver') client.abort(); return nom === 'is_allowed' ? { data: true, error: null } : { data: 7, error: null }; };
+  const r = await handler(requete('POST', { signal: client.signal }));
+  assert.equal(r.status, 499); assert.equal(await r.text(), '');
+  assert.equal(appelsFetch.length, 0, 'aucun appel a Anthropic pour un client parti');
+  assert.equal(faux.MAJ.at(-1).v.statut, 499);
+});
+
+test('s4. F-5 : sans abandon, rien ne change — 200 relaye, signal propre intact ; le delai de 120 s reste 504 (pas 499)', { timeout: 8000 }, async () => {
+  remise();
+  const client = new AbortController();
+  const ok = await handler(requete('POST', { signal: client.signal }));
+  assert.equal(ok.status, 200); assert.deepEqual(await lire(ok), REPONSE_OK);
+  assert.equal(faux.MAJ.at(-1).v.statut, 200);
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    let appele; const fetchAppele = new Promise((res) => { appele = res; });
+    reponseFetch = (url, options) => new Promise((_, rejeter) => { options.signal.addEventListener('abort', () => rejeter(new DOMException('Aborted', 'AbortError'))); appele(); });
+    const enCours = handler(requete('POST', { signal: new AbortController().signal }));
+    await fetchAppele;
+    mock.timers.tick(LIMITES.attenteMs);
+    const r = await enCours;
+    assert.equal(r.status, 504, 'le delai du serveur n est pas un abandon du client');
+    assert.equal(faux.MAJ.at(-1).v.statut, 504);
+  } finally { mock.timers.reset(); }
 });
