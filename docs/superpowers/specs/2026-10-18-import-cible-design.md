@@ -1,4 +1,4 @@
-# Lot A — « Importer une recette repérée » : journal d'import et import ciblé — spec (rév. 3)
+# Lot A — « Importer une recette repérée » : journal d'import et import ciblé — spec (rév. 3.1)
 
 Date : 18 octobre 2026. Base : `main` `57babc6`. Branche `import-cible`, worktree `~/projects/mistu-import` (serveur 8088).
 Sources : audit `docs/audits/2026-10-18-import-livres-photos-web.md` ; dossier de passation de Neegan (`Mitsu_Claude_Code`, 18 oct :
@@ -77,7 +77,7 @@ s'enregistre sans rappeler l'assistant.
 
 ## 3. Données
 
-### 3.1 Magasin `imports` (neuf, `DB_VERSION 4`, déclaré **en dernier** dans `STORES` pour garder l'ordre de réception, K-9)
+### 3.1 Magasin `imports` (neuf, `DB_VERSION 4`, **dernier magasin synchronisé** : déclaré dans `STORES` juste après `assistant_config` et avant `settings`, pour garder l'ordre de réception, K-9)
 
 ```
 { id: 'imp_…', kind: 'recette' | 'index',            // 'couverture' et 'web' réservés aux lots E et B
@@ -98,10 +98,10 @@ Index : `edition_id`, `recipe_id`, `status`. Relations d'archive : `edition_id �
 supprimée ne bloquent pas une archive ; la fabrication ignore une page absente. Taille : résultat ≤ 6 000 jetons de sortie, réponse brute
 ≤ 16 000 points de code : sous la borne de 512 Kio par élément de `sync_push`.
 
-**Transitions** (toutes par `db.transitionner`, I-10) :
+**Transitions** (toutes par `repo.transitionner`, I-10) :
 `a_lancer → en_cours | ignore` · `en_cours → a_verifier | echec` · `a_verifier → enregistre | a_lancer (changer les pages) | ignore` ·
 `echec → en_cours (relancer) | a_lancer (changer les pages) | ignore` · `en_cours → echec(annule)` par le document qui tient le vol ·
-`en_cours → echec(interrompu)` au démarrage, **seulement si `battement_at` a plus de 90 s** (le vol bat toutes les 15 s, écriture d'origine
+`en_cours → echec(interrompu)` au démarrage, **pour les lignes de cet appareil seulement** (le battement, d'origine `device`, n'est pas visible ailleurs) et **seulement si `battement_at` a plus de 90 s** (le vol bat toutes les 15 s, écriture d'origine
 `device` : jamais en file de synchro, m2) · aucune autre.
 Une réponse qui arrive après un `annule`/`interrompu` tente `echec → a_verifier`, qui n'existe pas : elle est **écrite dans
 `reponse_brute` seulement** (diagnostic), l'état reste `echec` ; c'est le prix assumé de I-4.
@@ -136,9 +136,10 @@ recette est visiblement partielle, `incomplete: true` ; une étape peut tenir su
 booléens coercés ; **tout dépassement refuse** (`hors_bornes`). `language` n'est plus demandé (jamais utilisé). `uncertain_fields` est gardé
 dans `resultat` et affiché dans le bandeau de la fiche (« Incertain : … », borné à 300 points de code).
 `PasserelleProvider.complete(messages, { maxTokens, signal })` : `signal` relayé à `appelerAssistant` (qui l'accepte déjà) ; après l'appel
-`this.modele` (existant) **et `this.stopReason`** sont posés ; `extraireRecette(images, provider, { signal, maxTokens })` et `extraireIndex(images, provider, { signal })` les rendent dans leur
-résultat (`{ recette | entrees, stopReason, modele }`) ; `extractRecipeFromImages(images, provider, opts)` et `extractIndexFromImages` restent
-des enveloppes compatibles (m5) jusqu'à ce que leurs appelants passent au journal (tâches 4 et 6). `stopReason === 'max_tokens'` → `echec(coupe)` ; aucun JSON → `echec(illisible)` ;
+`this.modele` (existant) **et `this.stopReason`** sont posés ; `extraireRecette(provider, images, { signal, maxTokens })` → `{ recette, stopReason, modele }` et `extraireIndex(provider, images, { signal })` →
+`{ index: { entries, uncertain }, stopReason, modele }` ; `extractRecipeFromImages(provider, images)` et `extractIndexFromImages(provider, images)`
+(ordre **existant** des arguments) restent des enveloppes compatibles (m5) jusqu'à ce que leurs appelants passent au journal (tâches 4 et 6).
+`REPONSE_BRUTE_MAX = 16000` (points de code) borne la réponse brute gardée dans le journal. `stopReason === 'max_tokens'` → `echec(coupe)` ; aucun JSON → `echec(illisible)` ;
 zéro ligne **et** zéro étape → `echec(vide)` : rien n'est écrit sur la recette (I13).
 
 ### 3.5 Serveur : migration `0005_imports.sql`
@@ -171,7 +172,8 @@ quatre fonctions recréées sur les 27 magasins. Preuve `supabase/proofs/0005_im
 
 `MAGASINS_AJOUTES_APRES_V1 = ['imports']` dans `schema.js` : à l'inspection et à la restauration d'une archive de format 1, un magasin de
 cette liste **absent** de l'archive vaut `[]` ; décomptes et empreintes ne l'exigent pas. Un client **plus ancien** qui lit une archive
-plus récente la refuse déjà (« entrée non déclarée ») : le README le dit (« mets l'app à jour »). Test sur une archive **figée** sans
+plus récente la refuse déjà (« Description de magasin absente ou inconnue », « Décompte de magasin inconnu : imports ») : le README le dit
+(« mets l'app à jour »). Test sur une archive **figée** sans
 `imports` (fixture).
 
 ## 4. Parcours
@@ -216,18 +218,20 @@ plus récente la refuse déjà (« entrée non déclarée ») : le README le dit
 1. Garde : session, en ligne, au moins une page ; `imports` `a_lancer | echec → en_cours` (`started_at`, `document_id_vol`, `battement_at`) ;
    `appels + 1` **au moment où le `fetch` part** (pas avant). Appel unique : `PasserelleProvider.complete`, pages dans l'ordre de `page_ids`,
    réduites par `pagePourEnvoi`, `maxTokens: 6000`, `signal`. Battement toutes les 15 s (`battement_at`, même statut, origine `device` : hors file).
-2. Réponse → `validateParsedRecipe` → **`db.transitionner(en_cours → a_verifier, { resultat, reponse_brute, model, duree_ms })`** (I-3).
+2. Réponse → `validateParsedRecipe` → **`repo.transitionner('imports', id, { attendus: ['en_cours'], patch: { status: 'a_verifier', resultat, reponse_brute (coupée à 16 000 points de code), model, duree_ms } })`** (I-3).
    Échec → `en_cours → echec` avec `erreur`. Écriture locale impossible après une réponse (exception) → tentative `echec(incertain)` ; si
    elle échoue aussi, la ligne reste `en_cours` et deviendra `interrompu` au démarrage (même phrase, I-4).
 3. **Discordance** (`discordance(resultat, reference)`, pure) : mots du titre de la référence (`normalizeText`, puis découpage sur espaces, apostrophes, traits d'union et points), mots vides retirés
-   (liste fermée fr/en : le, la, les, l, de, du, des, d, au, aux, à, et, en, un, une, the, of, and, with, a, an) ; **chaque** mot restant doit
+   (liste fermée fr/en : le, la, les, l, de, du, des, d, au, aux, à, et, en, un, une, ma, mon, mes, ta, ton, tes, sa, son, ses, notre, nos, votre,
+   vos, leur, leurs, the, of, and, with, a, an, my, your, our) ; **chaque** mot restant doit
    apparaître dans les mots du titre lu ; page lue vs `printed_page` à ± 3 quand les deux sont connues ; titre lu nul → discordance.
    Dialogue : « Le texte lu s'intitule “X” ; la référence est “Y” (p. N). Rattacher quand même ? » / « Rattacher » / « Garder la lecture sans
    l'enregistrer » (reste `a_verifier`) / « Changer les pages » (`a_lancer`). Table de paires voisines dans les tests (pommes/poires,
    oignon/ail, « Tarte aux pommes » / « Tarte aux pommes de ma grand-mère » = concordant).
-4. **Fabrication** (`fabriquerExtraction(resultat, { reference, pages, edition, convention, importId, modele })`, pure) : lignes par
-   `parseIngredientLine` + `uncertain` + `verification_state: 'to_verify'` ; **étapes construites directement** (`{ id, position: i + 1,
-   text, timers: detectTimers(text) }`, sauts de ligne gardés : pas de `parseStepsBlock`) ; version `kind: 'extraction'`, `parent_version_id`
+4. **Fabrication** (`fabriquerExtraction(resultat, { reference, versions, pages, pageIds, edition, convention, importId, modele, photo, maintenant })`,
+   pure, qui appelle elle-même `assertVocabulaire`) : lignes par `parseIngredientLine` + `uncertain` + `verification_state: 'to_verify'` ; **étapes
+   construites directement** (`{ id, position: i + 1, text, ...detectTimers(text) }`, sauts de ligne gardés : pas de `parseStepsBlock`) ; `notes` du
+   modèle → `version.notes` ; version `kind: 'extraction'`, `parent_version_id`
    = la courante s'il y en a une, `provenance { source_page_ids, source_document_id, generated_by: 'ai', model, edition_id,
    convention_snapshot, import_id, incomplete, missing_page, titre_lu }`, `verification_state: 'to_verify'` ; fiche : `original_title`
    conservé, `printed_page` posé si vide, `source_page_ids` = union, `photo_sha256` / `photo_origin`, `availability` = `available` si lignes
@@ -307,8 +311,9 @@ Aucun changement de la fonction `assistant`. Migration `0005`, preuve, README (�
 - **Schéma** : montée `DB_VERSION 3 → 4` sur une base peuplée ; `imports` dernier de `STORES`, dans `SYNC_STORES`, `ARCHIVE_DATA_STORES`,
   relations déclarées (et **pas** `recipe_id` ni `page_ids`) ; archive aller-retour avec une ligne `imports` ; **archive figée sans `imports`
   restaurée** (C1) ; `assertVocabulaire` (refus nommé, absent toléré) et test de source de ses appelants (faible, admis : un mutant « appel commenté » est rejoué à la vague finale, m9).
-- **Primitives** : `db.transitionner` (une transaction : attendu faux → aucune écriture, outbox capturée sur succès, course simulée par
-  deux appels entrelacés) ; `repo.ajouterPages` (une transaction pour les lignes, ordre de `page_ids`, pas de navigation).
+- **Primitives** : `db.mutate({ conditions })` (une transaction : condition fausse → aucune écriture, même des `puts` ; outbox capturée sur succès ;
+  course simulée par deux appels entrelacés ; `TransitionRefusee` nommée, pas le rejet générique d'une transaction annulée) et `repo.transitionner`
+  (nettoyage, `updated_at`, `change`) ; un test statique : `transitionner(` n'existe que dans `repo.js` et, ailleurs, sous la forme `repo.transitionner(` ; `repo.ajouterPages` (une transaction pour les lignes, ordre de `page_ids`, pas de navigation).
 - **Domaine pur** : `modeleEcran` (ordre, bornes de Monter/Descendre, retrait, focus cible) ; `discordance` (table : pommes/poires,
   oignon/ail, variantes concordantes, titre nul, page ± 3, accents et casse) ; `fabriquerExtraction` (version, provenance, `uncertain`,
   étapes entières, `partial` sur `incomplete`, titre conservé, I-5 avec et sans `correction`, page absente ignorée) ; transitions (table
@@ -394,6 +399,10 @@ conditionnelle. **N3** → § 4.1 : seule la séance de l'écran ciblé est excl
 `ai`, chemin « non » pose pages et photo. **N5** → § 4.3.7 : paragraphe seulement si une étape porte un saut de ligne, aide et aperçu alignés.
 m1 « À envoyer » monte ; m2 battement `device` ; m3 `?section=imports` ; m4 bouton hors carte ; m5 signatures ; m6 `reponse_illisible` ; m7 unités ;
 m8 § 1 reformulé ; m9 mutant à la vague finale ; m10 `pre-line`.
+**Rév. 3 → rév. 3.1 (pré-vol du plan, trois lentilles).** Position de `imports` précisée (dernier synchronisé, avant `settings`) ; `db.transitionner`
+n'existe pas : `db.mutate({ conditions })` + `repo.transitionner` partout ; signatures `(provider, images, opts)` et retour `{ index: { entries,
+uncertain } }` ; `REPONSE_BRUTE_MAX` ; possessifs dans les mots vides ; `...detectTimers(text)` ; signature complète de `fabriquerExtraction` (qui appelle
+`assertVocabulaire`) ; messages réels d'un ancien client ; passe `interrompu` limitée à cet appareil.
 - Mineurs (rév. 2) : bornes → refus `hors_bornes` ; `titre_lu` en § 3.2 ; `role` abandonné (`kind` seul) ; ordre = `page_ids` ; `repo.ajouterPages` ;
   « Choisir » sans `capture` ; `preparerPhotoLocale` ; `getData` ; textes complétés ; « Extraire avec l'assistant IA » ; vocabulaire mort retiré ;
   `appels` au départ du `fetch` ; accessibilité ; fiche du livre (bouton, pas de lien imbriqué) ; `#/add#imports` ; titre nul ; 16 000 points
