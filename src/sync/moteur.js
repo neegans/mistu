@@ -38,6 +38,7 @@ export function createMoteur({
   db,
   getUserId,
   isActivitySynced = () => false,
+  configSuitLeCompte = () => false,
   transport,
   fenetre = globalThis,
   bus = null,
@@ -100,6 +101,7 @@ export function createMoteur({
     db,
     transport: compte,
     isActivitySynced,
+    configSuitLeCompte,
     getUserId,
     surProgression: (p) => poser({ phase: p.phase, progression: { table: p.table, n: p.n, total: p.total } }),
   });
@@ -176,6 +178,7 @@ export function createMoteur({
           db,
           getUserId,
           isActivitySynced,
+          configSuitLeCompte,
           surProgression: (p) => poser({ progression: { table: p.table, n: p.n, total: p.total } }),
         });
         poser({ phase: 'envoi', progression: null });

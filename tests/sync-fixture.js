@@ -16,7 +16,7 @@ export function withRepo(test) {
     try {
       // init() avant la capture, comme au démarrage de l'app : l'amorçage des références n'a pas à partir au serveur.
       await repo.init();
-      installCapture(tempDb, { getUserId: () => 'u1', isActivitySynced: () => false });
+      installCapture(tempDb, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true }); // R-CPT-2 : un appareil de production
       return await test(repo, tempDb);
     } finally {
       uninstallCapture(tempDb);

@@ -10,12 +10,14 @@ const MARQUEUR = (table) => `backfill:${table}`;
 // entière de photos en file aurait figé « À envoyer : N » sur un nombre que rien ne pouvait faire redescendre.
 // Son marqueur `backfill:files` n'est donc PAS posé : L4 trouvera la table entière à envoyer, sans rattrapage.
 // Les tables candidates sont nommées une fois, et c'est aussi elles que compte la progression affichée.
-export function tablesCandidates({ isActivitySynced = () => false } = {}) {
-  return SYNC_STORES.filter((t) => t !== 'files' && (t !== 'library_activity' || isActivitySynced()));
+// Spec assistant-par-le-compte K-3 : `assistant_config` n'est candidate que sur un appareil de production
+// (`configSuitLeCompte`, faux par défaut — R-CPT-1).
+export function tablesCandidates({ isActivitySynced = () => false, configSuitLeCompte = () => false } = {}) {
+  return SYNC_STORES.filter((t) => t !== 'files' && (t !== 'library_activity' || isActivitySynced()) && (t !== 'assistant_config' || configSuitLeCompte()));
 }
 
-export function tablesAEnvoyer({ marqueurs = {}, isActivitySynced = () => false }) {
-  return tablesCandidates({ isActivitySynced }).filter((t) => marqueurs[MARQUEUR(t)] !== 'fait');
+export function tablesAEnvoyer({ marqueurs = {}, isActivitySynced = () => false, configSuitLeCompte = () => false }) {
+  return tablesCandidates({ isActivitySynced, configSuitLeCompte }).filter((t) => marqueurs[MARQUEUR(t)] !== 'fait');
 }
 
 export async function lireMarqueurs(db) {
@@ -27,9 +29,9 @@ export async function retirerMarqueur(db, table) {
   await db.mutate({ deletes: { sync_state: [MARQUEUR(table)] }, origin: 'device' });
 }
 
-export async function envoiInitial({ db, getUserId, isActivitySynced = () => false, surProgression = () => {}, tailleMorceau = 500 }) {
-  const tables = tablesAEnvoyer({ marqueurs: await lireMarqueurs(db), isActivitySynced });
-  const total = tablesCandidates({ isActivitySynced }).length;
+export async function envoiInitial({ db, getUserId, isActivitySynced = () => false, configSuitLeCompte = () => false, surProgression = () => {}, tailleMorceau = 500 }) {
+  const tables = tablesAEnvoyer({ marqueurs: await lireMarqueurs(db), isActivitySynced, configSuitLeCompte });
+  const total = tablesCandidates({ isActivitySynced, configSuitLeCompte }).length;
   let mises = 0;
   const user_id = getUserId();
   for (const [i, table] of tables.entries()) {

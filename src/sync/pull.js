@@ -87,10 +87,10 @@ function refusDeForme(table, ligne, clePrimaire) {
   return null;
 }
 
-export function createPull({ db, transport, isActivitySynced = () => false, getUserId = () => null, surProgression = () => {}, limite = 1000 }) {
+export function createPull({ db, transport, isActivitySynced = () => false, configSuitLeCompte = () => false, getUserId = () => null, surProgression = () => {}, limite = 1000 }) {
   // SYNC_STORES n'est pas modifié : seule la liste de réception est réordonnée (R-L3-12).
   function tables() {
-    const retenues = SYNC_STORES.filter((t) => t !== 'library_activity' || isActivitySynced());
+    const retenues = SYNC_STORES.filter((t) => (t !== 'library_activity' || isActivitySynced()) && (t !== 'assistant_config' || configSuitLeCompte()));
     const prioritaires = ORDRE_PRIORITAIRE.filter((t) => retenues.includes(t));
     return [...prioritaires, ...retenues.filter((t) => !prioritaires.includes(t))];
   }

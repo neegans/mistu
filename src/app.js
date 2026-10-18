@@ -11,6 +11,7 @@ import { installCapture } from './sync/outbox.js';
 import { createAuth } from './sync/auth.js';
 import { createMoteur } from './sync/moteur.js';
 import { createTransport } from './sync/transport.js';
+import { configAssistantSuitLeCompte } from './sync/config.js';
 import { pastille, majPastille } from './ui/components.js';
 
 import { renderHome } from './ui/home.js';
@@ -183,6 +184,7 @@ function demarrerMoteur() {
     transport: createTransport(client),
     getUserId: () => getSyncState().user?.id || null,
     isActivitySynced,
+    configSuitLeCompte: () => configAssistantSuitLeCompte(),
     fenetre: window,
     bus: { on },
   }));
@@ -273,7 +275,7 @@ async function boot() {
     on('settings', ({ key, value }) => { if (key === 'ui_locale') { setUiLocale(value); current = null; refresh(); } });
     // Capture posée avant toute écriture de l'application : une seule porte, la mutation de db.js (spec § 5.2).
     // L'historique de consultation n'entre en file que si le réglage le dit, à chaque écriture.
-    installCapture(repo.db, { getUserId: () => getSyncState().user?.id || null, isActivitySynced });
+    installCapture(repo.db, { getUserId: () => getSyncState().user?.id || null, isActivitySynced, configSuitLeCompte: () => configAssistantSuitLeCompte() });
     // Avant la porte (R34) : l'app doit être installable dès la première visite, même si la personne reste devant
     // l'écran d'accueil sans rien toucher.
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {

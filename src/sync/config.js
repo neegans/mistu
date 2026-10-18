@@ -27,3 +27,11 @@ export function currentConfig(hostname = globalThis.location?.hostname || '') {
   }
   return null;
 }
+
+// Spec assistant-par-le-compte K-3 (S3) : la configuration de l'assistant ne suit le compte que sur les hôtes de
+// PRODUCTION. Une origine localhost:<port> est partagée par tout autre projet servi sur ce port — IndexedDB et jeton
+// de session compris : s'y connecter y déposerait la clé. Hors production, le magasin reste local à l'appareil.
+export function configAssistantSuitLeCompte(hostname = globalThis.location?.hostname || '') {
+  const hote = String(hostname || '').toLowerCase();
+  return !!hote && SUPABASE.prod.hosts.some((h) => String(h).toLowerCase() === hote);
+}

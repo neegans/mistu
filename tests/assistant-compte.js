@@ -234,4 +234,75 @@ export async function runAssistantCompteTests({ eq, ok }) {
       finally { repoModule.bindDatabase(origine); }
     });
   }
+
+  // --- T4 : production seulement (K-3, S3) — prédicat injecté, faux par défaut (R-CPT-1)
+  const cfgMod = await import('../src/sync/config.js');
+  eq([cfgMod.configAssistantSuitLeCompte('neegans.github.io'), cfgMod.configAssistantSuitLeCompte('NEEGANS.GITHUB.IO'), cfgMod.configAssistantSuitLeCompte('localhost'), cfgMod.configAssistantSuitLeCompte('127.0.0.1'), cfgMod.configAssistantSuitLeCompte(''), cfgMod.configAssistantSuitLeCompte(undefined)],
+    [true, true, false, false, false, cfgMod.configAssistantSuitLeCompte(globalThis.location?.hostname)], 'K-3 : vrai seulement pour les hôtes de production (prod.hosts), insensible à la casse');
+  const { tablesAEnvoyer, envoiInitial } = await import('../src/sync/backfill.js');
+  const { createPull } = await import('../src/sync/pull.js');
+  const { creerTransportFactice } = await import('./transport-factice.js');
+  const LIGNE = (k) => ({ id: 'llm', provider: 'anthropic', model: 'm', base_url: '', api_key: k, updated_at: '2026-10-17T10:00:00Z' });
+  await withDatabase(async (db) => {
+    installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false }); // défaut : hors production
+    await db.mutate({ puts: { assistant_config: [LIGNE('sk-factice-dev')] } });
+    eq((await db.getAll('outbox')).length, 0, 'capture : hors production (défaut), assistant_config n’entre pas en file');
+    uninstallCapture(db);
+    installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
+    await db.mutate({ puts: { assistant_config: [LIGNE('sk-factice-prod')] } });
+    eq((await db.getAll('outbox')).map((e) => [e.store, e.op, e.user_id]), [['assistant_config', 'put', 'u1']], 'capture : en production, capturée comme les autres');
+    await db.mutate({ puts: { assistant_config: [LIGNE('sk-factice-recu')] }, origin: 'remote' });
+    eq((await db.getAll('outbox')).length, 1, 'capture : une réception n’est pas recapturée');
+    uninstallCapture(db);
+  });
+  eq([tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false }).includes('assistant_config'), tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false, configSuitLeCompte: () => true }).includes('assistant_config'), tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true, configSuitLeCompte: () => true }).length], [false, true, 25], 'envoi initial : hors production exclue ; en production incluse (25 avec l’historique)');
+  // L'envoi initial lui-même (pas seulement la liste des tables) : la ligne d'ici est mise en file en production, au nom
+  // du compte, et la progression « n/total » compte la même liste que celle qui est parcourue.
+  await withDatabase(async (db) => {
+    await db.mutate({ puts: { assistant_config: [LIGNE('sk-factice-envoi')] }, origin: 'device' });
+    const prog = [];
+    const r = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true, surProgression: (p) => prog.push(p) });
+    eq([r.tables.length, r.tables.at(-1), prog.every((p) => p.total === 24), (await db.getAll('outbox')).map((e) => [e.store, e.op, e.user_id])], [24, 'assistant_config', true, [['assistant_config', 'put', 'u1']]], 'envoi initial : en production, assistant_config est parcourue en dernier, mise en file au nom du compte, progression sur 24');
+  });
+  await withDatabase(async (db) => {
+    await db.mutate({ puts: { assistant_config: [LIGNE('sk-factice-envoi-dev')] }, origin: 'device' });
+    const prog = [];
+    const r = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false, surProgression: (p) => prog.push(p) });
+    eq([r.tables.includes('assistant_config'), prog.every((p) => p.total === 23), await db.count('outbox'), await db.get('sync_state', 'backfill:assistant_config')], [false, true, 0, undefined], 'envoi initial : hors production (défaut), rien en file, aucun marqueur posé, progression sur 23');
+  });
+  // Réception : hors production la table n'est pas lue ; en production elle est lue EN DERNIER (K-9)
+  const tf = creerTransportFactice({ serveur: true });
+  await tf.pousser([{ store: 'assistant_config', id: 'llm', data: LIGNE('sk-factice-serveur'), updated_at: '2026-10-17T10:00:00Z' }]);
+  await withDatabase(async (db) => {
+    const lues = [];
+    const r0 = await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1', surProgression: (p) => lues.push(p.table) }).recevoir();
+    eq([r0.recues, lues.includes('assistant_config'), await db.get('assistant_config', 'llm')], [0, false, undefined], 'réception : hors production, la table n’est ni lue ni écrite');
+    lues.length = 0;
+    const r1 = await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1', configSuitLeCompte: () => true, surProgression: (p) => lues.push(p.table) }).recevoir();
+    eq([r1.recues, lues.at(-1), (await db.get('assistant_config', 'llm'))?.api_key, (await db.getAll('outbox')).length], [1, 'assistant_config', 'sk-factice-serveur', 0], 'réception : en production, lue EN DERNIER (K-9), écrite telle quelle, rien en file');
+  });
+  // Le moteur porte le prédicat jusqu'à l'envoi initial ET à la réception (R-CPT-1 : faux par défaut). Sans ce
+  // câblage, les deux modules ci-dessus seraient justes et l'application ne les verrait jamais « en production ».
+  const { createMoteur } = await import('../src/sync/moteur.js');
+  const fenetreM = { addEventListener() {}, removeEventListener() {}, document: { visibilityState: 'visible' } };
+  const busM = { on: () => () => {} };
+  try {
+    for (const suit of [false, true]) {
+      const options = suit ? { configSuitLeCompte: () => true } : {};
+      // Envoi : la ligne d'ici (écrite sans capture) part par l'envoi initial, en production seulement.
+      const tfEnvoi = creerTransportFactice({ serveur: true });
+      await withDatabase(async (db) => {
+        await db.mutate({ puts: { assistant_config: [LIGNE('sk-factice-moteur-ici')] }, origin: 'device' });
+        await createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: tfEnvoi, fenetre: fenetreM, bus: busM, ...options }).executer('t');
+        eq([tfEnvoi.ligne('assistant_config', 'llm')?.data?.api_key ?? null, tfEnvoi.journal.some((a) => a.appel === 'pousser' && a.rows.some((r) => r.store === 'assistant_config'))], suit ? ['sk-factice-moteur-ici', true] : [null, false], `moteur : envoi initial de assistant_config ${suit ? 'en production' : 'hors production (défaut)'}`);
+      });
+      // Réception : la ligne du serveur arrive ici, en production seulement.
+      const tfRecu = creerTransportFactice({ serveur: true });
+      await tfRecu.pousser([{ store: 'assistant_config', id: 'llm', data: LIGNE('sk-factice-moteur-serveur'), updated_at: '2026-10-17T10:00:00Z' }]);
+      await withDatabase(async (db) => {
+        await createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: tfRecu, fenetre: fenetreM, bus: busM, ...options }).executer('t');
+        eq([(await db.get('assistant_config', 'llm'))?.api_key ?? null, tfRecu.journal.some((a) => a.appel === 'lire' && a.table === 'assistant_config')], suit ? ['sk-factice-moteur-serveur', true] : [null, false], `moteur : réception de assistant_config ${suit ? 'en production' : 'hors production (défaut)'}`);
+      });
+    }
+  } finally { setClockOffset(0); }
 }

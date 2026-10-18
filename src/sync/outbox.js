@@ -20,13 +20,13 @@ function payloadFor(payloads, store, key) {
   return bag && Object.hasOwn(bag, key) ? bag[key] || null : null;
 }
 
-export function installCapture(db, { getUserId = () => null, isActivitySynced = () => false } = {}) {
+export function installCapture(db, { getUserId = () => null, isActivitySynced = () => false, configSuitLeCompte = () => false } = {}) {
   db.onMutate = ({ puts = {}, deletes = {}, origin = 'local', payloads = {} }) => {
     // Réception, ajustement du serveur et vidage d'appareil ne repartent jamais vers le serveur.
     if (origin !== 'local') return null;
     const rows = [];
     const user_id = getUserId();
-    const wanted = (store) => SYNCHRONISEES.includes(store) && (store !== 'library_activity' || isActivitySynced());
+    const wanted = (store) => SYNCHRONISEES.includes(store) && (store !== 'library_activity' || isActivitySynced()) && (store !== 'assistant_config' || configSuitLeCompte());
     for (const [store, list] of Object.entries(puts)) {
       if (!wanted(store)) continue;
       for (const r of list) {
