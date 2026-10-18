@@ -42,6 +42,9 @@ export async function runThemeTests({ eq, ok }) {
   const reduit = hors.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[^{}]*\{([^}]*)\}\s*\}/)?.[1] || '';
   ok(/\[hidden\]\s*\{\s*display:\s*none\s*!important/.test(hors) && /outline:\s*2px\s+solid\s+var\(--action\)/.test(anneau) && /outline-offset:\s*2px/.test(anneau) && /transition:\s*none\s*!important/.test(reduit) && /animation:\s*none\s*!important/.test(reduit), 'T-9/T-5/T-6 : [hidden] imposé ; :focus-visible = 2px tomate décalé 2px ; mouvement réduit = transition et animation none !important (contenu des blocs)');
   eq([...hors.matchAll(/([^{}]+)\{[^{}]*\b56px[^{}]*\}/g)].map((m) => m[1].trim()), ['.btn.big'], 'T-11 : seul .btn.big garde 56px en dur (le panneau latéral suit --topbar-h)');
+  // Survol réservé aux appareils à pointeur (sur iOS il reste collé après une tape) : les deux :hover des boutons vivent sous @media (hover: hover), aucun au niveau racine.
+  const survols = [...hors.matchAll(/@media\s*\(hover:\s*hover\)\s*\{\s*([^{}]+)\{/g)].map((m) => m[1].trim());
+  ok(survols.includes('.btn:hover') && survols.includes('.btn.primary:hover') && !/(?:^|\})\s*\.btn(?:\.primary)?:hover\s*\{/.test(hors), 'survol : .btn:hover et .btn.primary:hover seulement sous @media (hover: hover)');
   const html = await (await fetch('../index.html?v=' + v, { cache: 'no-store' })).text();
   const manifest = await (await fetch('../manifest.webmanifest?v=' + v, { cache: 'no-store' })).json();
   eq([new RegExp('name="theme-color" content="' + hex('--paper') + '"').test(html), manifest.theme_color, manifest.background_color, /apple-mobile-web-app-status-bar-style" content="default"/.test(html)], [true, hex('--paper'), hex('--paper'), true], 'T-8 : theme-color, manifeste = papier ; barre d’état default');
@@ -83,5 +86,64 @@ export async function runThemeTests({ eq, ok }) {
     // Les deux autres champs tapés de l'app (adresse du signet, clé API des Réglages) : hors sélecteur, le navigateur les rendait à 13,33 px (iOS zoome).
     const autres = ['url', 'password'].map((t) => { const i = document.createElement('input'); i.type = t; scene.append(i); return i; });
     ok(autres.every((i) => parseFloat(getComputedStyle(i).fontSize) >= 16 && contraste(rgbVersHex(getComputedStyle(i).borderTopColor), '#ffffff') >= 3), 'T-8/T-10 : champs adresse et clé aussi à 16 px, contour ≥ 3:1 (calculés)');
+    // T-5 au clavier : .btn.active et un segment focalisés montrent l'anneau tomate (Chromium sans interaction au pointeur : focus() donne :focus-visible).
+    const actif = document.createElement('button'); actif.className = 'btn active'; actif.textContent = 'Actif'; scene.append(actif); actif.focus();
+    ok(actif.matches(':focus-visible') && rgbVersHex(getComputedStyle(actif).outlineColor) === hex('--action'), 'T-5 : .btn.active focalisé = anneau tomate, pas le contour vert d’état (calculé)');
+    sb.focus();
+    ok(sb.matches(':focus-visible') && rgbVersHex(getComputedStyle(sb).outlineColor) === hex('--action') && getComputedStyle(sb).outlineOffset === '-3px', 'T-5 : segment focalisé = anneau tomate rentré de 3 px (calculé)');
+    sb.blur();
+    // Chaque règle de composant reliée à SA paire : couleur RENDUE sur le fond RENDU (premier fond opaque en remontant) ≥ 4,5 ; hauteurs T-4 dans la même boucle.
+    const teinte = (c) => (/^rgba\(.*,\s*0\)$/.test(c) ? 'transparent' : rgbVersHex(c));
+    const fondRendu = (n) => { for (let x = n; x; x = x.parentElement) { const c = getComputedStyle(x).backgroundColor; const m = c.match(/[\d.]+/g); if (m && (m.length < 4 || Number(m[3]) === 1)) return rgbVersHex(c); } return '#ffffff'; };
+    const support = document.createElement('div'); support.className = 'card'; scene.append(support);
+    const composants = [['button', 'btn primary'], ['button', 'btn sage'], ['button', 'btn danger'], ['button', 'btn link'], ['span', 'chip'], ['span', 'chip warn'], ['span', 'chip danger'], ['span', 'chip ok'], ['span', 'chip neutral'], ['span', 'chip removable'], ['span', 'chip outline'], ['span', 'chip clickable'], ['button', 'puce', ['aria-pressed', 'true']], ['span', 'badge'], ...['available', 'reference', 'partial', 'ai', 'original', 'personal'].map((v) => ['span', `badge ${v}`]), ['div', 'status'], ...['info', 'warn', 'danger', 'ok'].map((v) => ['div', `status ${v}`]), ['span', 'step-num'], ['div', 'toast', null, 'position:static;transform:none'], ['span', 'pastille']];
+    const fautes = [];
+    for (const [tag, cls, attr, style] of composants) {
+      const n = document.createElement(tag); n.className = cls; n.textContent = 'Texte 12'; if (attr) n.setAttribute(attr[0], attr[1]); if (style) n.style.cssText = style; support.append(n);
+      const c = contraste(rgbVersHex(getComputedStyle(n).color), fondRendu(n));
+      if (!(c >= 4.5)) fautes.push(`.${cls.replace(/ /g, '.')} ${c.toFixed(2)}`);
+      if (cls === 'chip removable' && n.getBoundingClientRect().height < 32) fautes.push(`.chip.removable ${n.getBoundingClientRect().height} px < 32`);
+    }
+    const barre = document.createElement('div'); barre.className = 'search-bar'; const champ = document.createElement('input'); champ.type = 'search'; barre.append(champ); support.append(barre);
+    if (Math.round(champ.getBoundingClientRect().height) !== 52) fautes.push(`.search-bar input ${champ.getBoundingClientRect().height} px ≠ 52`);
+    eq(fautes, [], 'composants : chaque règle reliée à sa paire (couleur rendue sur fond rendu ≥ 4,5) ; .chip.removable ≥ 32, .search-bar input = 52 (mesurés)');
+    // R-VIS-3 : la marque et la pilule de recherche sont des cibles principales, comme la roue (44 px) ; la barre garde 64 px.
+    const pilule = document.createElement('a'); pilule.className = 'btn small'; pilule.href = '#/search'; pilule.append('⌕ ', Object.assign(document.createElement('span'), { className: 'nowrap', textContent: 'Qu’est-ce qu’on cuisine ?' }));
+    const roue = document.createElement('a'); roue.className = 'btn small'; roue.href = '#/settings'; roue.textContent = '⚙';
+    top.append(Object.assign(document.createElement('span'), { className: 'spacer' }), pilule, roue);
+    const [rb, rp, rr] = [brand, pilule, roue].map((x) => x.getBoundingClientRect());
+    ok(rb.height >= 44 && rp.height >= 44 && rp.width >= 44 && rr.height >= 44 && rr.width >= 44 && Math.round(top.getBoundingClientRect().height) === 64, 'R-VIS-3 : marque, pilule de recherche et roue ≥ 44 px ; barre haute = 64 px (mesurés)');
+    // R-VIS-5 : l'auteur d'une couverture se lit sur les DEUX arrêts du dégradé, opacité comprise (un titre sur deux lignes le remonte vers accent-2).
+    const auteur = Object.assign(document.createElement('div'), { className: 'author', textContent: 'Josée Di Stasio · 2004' }); cov.append(auteur);
+    const op = parseFloat(getComputedStyle(auteur).opacity); const ca = rgbVersHex(getComputedStyle(auteur).color).match(/[0-9a-f]{2}/g).map((h) => parseInt(h, 16));
+    const melange = (f) => '#' + f.match(/[0-9a-f]{2}/g).map((h, i) => Math.round(op * ca[i] + (1 - op) * parseInt(h, 16)).toString(16).padStart(2, '0')).join('');
+    ok(arrets.length === 2 && arrets.every((a) => contraste(melange(a), a) >= 4.5), 'R-VIS-5 : auteur de couverture ≥ 4,5 sur accent-2 ET sur accent, opacité comprise (calculé)');
+    // R-VIS-6 : les segments d'extrémité épousent la pilule (l'anneau de focus suit le rayon : plus de coins coupés, M14).
+    const seg3 = document.createElement('div'); seg3.className = 'segmented'; const bs = ['A', 'B', 'C'].map((x) => Object.assign(document.createElement('button'), { textContent: x })); seg3.append(...bs); scene.append(seg3);
+    const rd = (n, coin) => getComputedStyle(n)[coin];
+    eq([rd(bs[0], 'borderTopLeftRadius'), rd(bs[0], 'borderBottomLeftRadius'), rd(bs[0], 'borderTopRightRadius'), rd(bs[1], 'borderTopLeftRadius'), rd(bs[1], 'borderTopRightRadius'), rd(bs[2], 'borderTopRightRadius'), rd(bs[2], 'borderBottomRightRadius'), rd(bs[2], 'borderBottomLeftRadius')], ['999px', '999px', '0px', '0px', '0px', '999px', '999px', '0px'], 'R-VIS-6 : segments d’extrémité arrondis comme la pilule, segment du milieu droit (calculés)');
+    // R-VIS-7 : une couverture AVEC image a ses coins arrondis — l'image a .cover pour bloc conteneur (même boîte que .cover-wrap, donc même place).
+    const enveloppe = document.createElement('a'); enveloppe.className = 'cover-wrap'; enveloppe.href = '#/'; const cov2 = document.createElement('div'); cov2.className = 'cover with-img';
+    const image = document.createElement('div'); image.className = 'cover-img'; cov2.append(image); enveloppe.append(cov2); scene.append(enveloppe);
+    const [ri, rc] = [image.getBoundingClientRect(), cov2.getBoundingClientRect()];
+    ok(image.offsetParent === cov2 && rc.height > 0 && ['left', 'top', 'width', 'height'].every((k) => Math.abs(ri[k] - rc[k]) < 0.5), 'R-VIS-7 : couverture avec image rognée par .cover (coins arrondis), image à la même place (mesurés)');
+    // R-VIS-8 (M3) : pendant un vol (annonce role=status puis rangée), « Annuler » se range à droite, jamais sous le doigt qui vient de lancer l'appel.
+    const vol = document.createElement('div'); vol.className = 'card flat stack';
+    const annonce = document.createElement('div'); annonce.className = 'status'; annonce.setAttribute('role', 'status'); annonce.textContent = 'L’assistant cherche sur le web…';
+    const rangee = document.createElement('div'); rangee.className = 'row';
+    const prim = Object.assign(document.createElement('button'), { className: 'btn primary', disabled: true, textContent: 'Chercher sur le web avec l’assistant' });
+    const annuler = Object.assign(document.createElement('button'), { className: 'btn', textContent: 'Annuler' });
+    rangee.append(prim, annuler); vol.append(annonce, rangee); scene.append(vol);
+    const [ra, rg, rpr] = [annuler, rangee, prim].map((x) => x.getBoundingClientRect());
+    ok(Math.abs(ra.right - rg.right) < 1 && ra.left > rpr.left + 44, 'R-VIS-8 : « Annuler » du vol rangé à droite de sa rangée (mesuré)');
+    // R-VIS-10 : une puce bascule ALLUMÉE (case cochée, capacités d'un appareil) garde une teinte d'état ; éteinte = .outline ;
+    // une puce cliquable sans case (exemples de l'accueil sur la carte sauge, contraintes d'un repas) reste une puce ordinaire.
+    const bascule = (tag, cls, coche) => { const n = Object.assign(document.createElement(tag), { className: cls }); if (coche !== null) n.append(Object.assign(document.createElement('input'), { type: 'checkbox', checked: coche, style: 'display:none' })); n.append('Four'); scene.append(n); return n; };
+    const bascules = [bascule('label', 'chip clickable', true), bascule('label', 'chip clickable outline', false), bascule('span', 'chip clickable', null), bascule('span', 'chip clickable warn', null)];
+    eq(bascules.map((n) => [teinte(getComputedStyle(n).backgroundColor), rgbVersHex(getComputedStyle(n).color)]), [[hex('--accent-bg'), hex('--accent')], ['transparent', hex('--muted')], [hex('--paper-2'), hex('--ink')], [hex('--warn-bg'), hex('--warn')]], 'R-VIS-10 : bascule cochée = accent, éteinte = transparente grise ; puce cliquable sans case = ordinaire, contrainte = ambre (calculés)');
+    // R-VIS-11 : dans un champ (colonne flex), la pilule de segments prend la largeur de ses options, sans queue vide.
+    const champSeg = document.createElement('div'); champSeg.className = 'field'; const segC = document.createElement('div'); segC.className = 'segmented';
+    segC.append(...['Original', 'FR'].map((x) => Object.assign(document.createElement('button'), { textContent: x }))); champSeg.append(Object.assign(document.createElement('span'), { textContent: 'Langue' }), segC); scene.append(champSeg);
+    ok(segC.getBoundingClientRect().width < champSeg.getBoundingClientRect().width - 100, 'R-VIS-11 : segments d’un champ à la largeur de leurs options (mesuré)');
   } finally { scene.remove(); link.remove(); }
 }

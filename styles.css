@@ -75,14 +75,23 @@ pre { background: var(--paper-2); padding: .6rem .8rem; border-radius: 8px; over
   background: var(--paper); color: var(--ink); border-bottom: 1px solid var(--line); -webkit-tap-highlight-color: var(--tap);
   position: sticky; top: 0; z-index: 20;
 }
-.topbar .brand { font-family: var(--serif); font-weight: 600; letter-spacing: .01em; color: var(--ink); text-decoration: none; font-size: 1.25rem; white-space: nowrap; }
+.topbar .brand { font-family: var(--serif); font-weight: 600; letter-spacing: .01em; color: var(--ink); text-decoration: none; font-size: 1.25rem; white-space: nowrap; display: inline-flex; align-items: center; min-height: 44px; }
 .topbar .spacer { flex: 1; }
 .topbar .btn { background: transparent; color: var(--ink); border-color: var(--line); min-width: 0; }
 /* Roue des Réglages (dernier enfant de la barre) : cible de 44 × 44 (T-4). */
 .topbar .btn:last-child { min-width: 44px; min-height: 44px; justify-content: center; }
+/* R-VIS-3 : la pilule de recherche est une cible principale, comme la roue (44 px ; la barre garde 64 px). */
+.topbar .btn.small { min-width: 44px; min-height: 44px; }
 /* T-7 : à 375 px, pastille visible comprise, seul le libellé de la recherche se resserre (points de suspension). */
 .topbar .brand, .topbar .pastille, .topbar .btn:last-child { flex-shrink: 0; }
 .topbar .btn .nowrap { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* R-VIS-4 : sous 440 px (mesuré : sans ces leviers, le libellé de la recherche est coupé ou à moins de 8 px de l'être),
+   la barre se resserre ; à 375 px et pastille visible, le libellé reste coupé (points de suspension, T-7). */
+@media (max-width: 439.98px) {
+  .topbar { gap: .4rem; padding-left: .75rem; padding-right: .75rem; }
+  .topbar .brand { font-size: 1.15rem; }
+  .topbar .btn.small { padding-left: .6rem; padding-right: .6rem; }
+}
 /* Pastille « N non envoyés » : présente seulement quand la file d'envoi n'est pas vide (spec § 4.2). */
 .pastille { background: var(--warn-bg); color: var(--warn); border-radius: var(--radius-pill); padding: .15rem .55rem; font-size: .78rem; font-weight: 600; white-space: nowrap; }
 .frame { display: flex; flex: 1; min-height: 0; }
@@ -145,10 +154,11 @@ aside.sidenav { display: none; }
   padding: .55rem 1rem; border-radius: var(--radius-pill); font: inherit; font-size: .95rem; cursor: pointer;
   display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; text-decoration: none;
 }
-.btn:hover { border-color: var(--field-line); }
+/* Survol réservé aux appareils à pointeur : sur iOS, il reste collé après une tape et se lirait comme un état « choisi ». */
+@media (hover: hover) { .btn:hover { border-color: var(--field-line); } }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn.primary { background: var(--action); color: var(--paper); border-color: var(--action); font-weight: 600; }
-.btn.primary:hover { background: var(--action-2); border-color: var(--action-2); }
+@media (hover: hover) { .btn.primary:hover { background: var(--action-2); border-color: var(--action-2); } }
 .btn.sage { background: var(--accent-bg); border-color: var(--accent-bg); color: var(--accent); }
 .btn.danger { color: var(--danger); border-color: var(--danger-line); }
 .btn.small { padding: .3rem .75rem; min-height: 36px; font-size: .85rem; }
@@ -185,6 +195,9 @@ aside.sidenav { display: none; }
 }
 .chip.removable { cursor: pointer; min-height: 32px; }
 .chip.removable::after { content: "×"; font-weight: 700; margin-left: .1rem; }
+/* R-VIS-10 : une puce bascule ALLUMÉE (sa case cochée : capacités d'un appareil) garde une teinte d'état (accent) ; éteinte,
+   .chip.outline. Les puces cliquables sans case (exemples de l'accueil, contraintes d'un repas) restent des puces ordinaires. */
+.chip.clickable:has(> input:checked) { background: var(--accent-bg); color: var(--accent); border-color: var(--accent-bg); }
 .chip.outline { background: transparent; border-color: var(--line); color: var(--muted); }
 .chip.warn { background: var(--warn-bg); color: var(--warn); border-color: var(--warn-line); }
 .chip.danger { background: var(--danger-bg); color: var(--danger); border-color: var(--danger-line); }
@@ -217,10 +230,15 @@ label.check { display: inline-flex; gap: .45rem; align-items: center; font-size:
 .search-bar { display: flex; gap: .5rem; }
 .search-bar input { flex: 1; font-size: 1.05rem; min-height: 52px; border-radius: var(--radius-pill); padding: .55rem 1.1rem; }
 .segmented { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-pill); overflow: hidden; background: var(--card); }
+/* R-VIS-11 : dans un champ (colonne flex), la pilule prend la largeur de ses options, sans queue vide qui se lirait comme un champ. */
+.field > .segmented { align-self: flex-start; }
 .segmented button { border: 0; background: transparent; padding: .45rem .8rem; font: inherit; cursor: pointer; color: var(--muted); }
 .segmented button.active { background: var(--paper-2); color: var(--ink); box-shadow: inset 0 -2px 0 var(--action); }
 /* T-5 : l'anneau rentre dans le bouton, sinon overflow: hidden le coupe. */
 .segmented button:focus-visible { outline-offset: -3px; }
+/* R-VIS-6 : aux extrémités, le bouton épouse la courbe de la pilule ; l'anneau (qui suit le rayon) n'est plus coupé aux coins. */
+.segmented button:first-child { border-top-left-radius: var(--radius-pill); border-bottom-left-radius: var(--radius-pill); }
+.segmented button:last-child { border-top-right-radius: var(--radius-pill); border-bottom-right-radius: var(--radius-pill); }
 
 .list { list-style: none; margin: 0; padding: 0; }
 .list li { padding: .6rem 0; border-bottom: 1px solid var(--line); }
@@ -229,10 +247,10 @@ label.check { display: inline-flex; gap: .45rem; align-items: center; font-size:
 .item-link { text-decoration: none; color: inherit; display: block; }
 .item-link:hover h3 { text-decoration: underline; }
 
-.cover { aspect-ratio: 3 / 4; background: linear-gradient(160deg, var(--accent-2), var(--accent)); color: var(--paper); border-radius: var(--radius); padding: .7rem; display: flex; flex-direction: column; justify-content: flex-end; text-decoration: none; overflow: hidden; }
+.cover { aspect-ratio: 3 / 4; background: linear-gradient(160deg, var(--accent-2), var(--accent)); color: var(--paper); border-radius: var(--radius); padding: .7rem; display: flex; flex-direction: column; justify-content: flex-end; text-decoration: none; overflow: hidden; position: relative; }
 .cover img, .cover-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .cover .title { font-weight: 700; font-size: .95rem; line-height: 1.2; }
-.cover .author { font-size: .78rem; opacity: .85; }
+.cover .author { font-size: .78rem; }
 /* Une vraie couverture se lit seule : le titre de secours s'efface au lieu de se superposer à l'image (spec § 6). */
 .cover.with-img .title, .cover.with-img .author { display: none; }
 .cover-wrap { position: relative; display: block; text-decoration: none; }
@@ -266,6 +284,9 @@ table.compare th { color: var(--green); background: var(--cream-2); }
 .status.ok { background: var(--ok-bg); color: var(--ok); }
 /* C-7 / S14 : une sortie de modèle (ou une fiche synchronisée) sans espace ne déborde jamais de l'écran. */
 .proposition, .recipe-body { overflow-wrap: anywhere; }
+/* R-VIS-8 (M3) : pendant un vol (annonce role=status puis rangée de boutons), « Annuler » se range à droite : une double
+   tape sur le bouton qui a lancé l'appel (à gauche, en bas de page) ne tombe jamais sur « Annuler ». */
+.status[role="status"] + .row > .btn:not(.primary) { margin-left: auto; }
 
 /* Mode cuisine */
 .cook { display: grid; gap: 1rem; grid-template-columns: 1fr; }
