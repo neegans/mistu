@@ -518,6 +518,9 @@ export async function runAssistantCompteTests({ eq, ok }) {
   // --- T7 : Réglages (K-6, K-10, K-12, S14, R-CPT-4)
   const S = await import('../src/ui/settings.js');
   const REFUS_URL = 'URL de base refusée : https exigé (ou http://localhost pour un serveur local), sans identifiants.';
+  const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
+  const avantLocale = getUiLocale();
+  setUiLocale('fr'); // une suite antérieure peut basculer 'en' ; ce bloc compare des textes français (rendue dans le finally)
   const scene = document.createElement('div'); scene.hidden = true; document.body.append(scene);
   try {
     const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -527,8 +530,10 @@ export async function runAssistantCompteTests({ eq, ok }) {
     ok(texteDe({}, true, true).includes('prochaine connexion'), 'K-10 (c) : appareil lié, déconnecté');
     ok(texteDe({ user: { id: 'u1' } }, true, true).includes('suit ton compte'), 'K-10 (d) : connectée');
     for (const [sync, lie, prod] of [[{}, false, false], [{}, false, true], [{}, true, true], [{ user: { id: 'u1' } }, true, true]]) ok(texteDe(sync, lie, prod).includes('jamais incluse dans les sauvegardes ZIP'), 'K-10 : toujours la phrase des archives');
-    ok(S.texteAssistant({ sync: { user: { id: 'u1' } }, lie: true }).includes('adresse de développement'), 'K-10 : par défaut, l’hôte réel de la suite (localhost) est hors production, même connectée');
-    const monter = (llm, sync, deps) => { const sec = S.sectionAssistant({ llm, sync, lie: !!sync.user, suitLeCompte: () => true }, { tester: async () => 'OK', rafraichir: () => {}, ...deps }); scene.append(sec); return sec; };
+    // Le prédicat par défaut est celui de l'hôte réel : la même suite tourne sur localhost ET sur le site public.
+    const prodIci = cfgMod.configAssistantSuitLeCompte();
+    ok(S.texteAssistant({ sync: { user: { id: 'u1' } }, lie: true }).includes(prodIci ? 'suit ton compte' : 'adresse de développement'), `K-10 : par défaut, le texte suit l’hôte réel de la suite (${prodIci ? 'production → suit le compte' : 'hors production → adresse de développement, même connectée'})`);
+    const monter = (llm, sync, deps, etat = {}) => { const sec = S.sectionAssistant({ llm, sync, lie: !!sync.user, suitLeCompte: () => true, ...etat }, { tester: async () => 'OK', rafraichir: () => {}, ...deps }); scene.append(sec); return sec; };
     const bouton = (root, nom) => [...root.querySelectorAll('button')].find((b) => b.textContent === nom);
     const selectFournisseur = (root) => root.querySelector('select');
     const champUrl = (root) => [...root.querySelectorAll('input[type="text"]')].find((i) => i.placeholder.startsWith('https://api.openai.com'));
@@ -539,7 +544,22 @@ export async function runAssistantCompteTests({ eq, ok }) {
       const appels = []; const dits = [];
       const sec = monter({ provider: 'none', model: '', base_url: '', api_key: '' }, {}, { saveConfig: async (c) => { appels.push(c); }, dire: (m) => dits.push(m), confirm: async () => true });
       bouton(sec, 'Enregistrer').click(); await tick();
-      eq([appels.length, dits.length > 0], [0, true], 'K-6 : « Aucun » sans configuration ici → rien écrit, et on le dit');
+      eq([appels.length, dits], [0, ['Rien à retirer : aucun assistant n’est configuré ici.']], 'K-6 : « Aucun » sans configuration ici → rien écrit, et on le dit');
+      sec.remove();
+    }
+    // R-CPT-5 : la confirmation « Retirer de tous tes appareils » vaut quand la ligne vide PARTIRA au compte — en production,
+    // connectée OU appareil lié (déconnectée, l'écriture est capturée avec user_id null et part à la reconnexion). Hors
+    // production (K-3), la ligne reste ici : aucune confirmation. Dans tous les cas, la ligne vide est écrite.
+    for (const [nom, sync, etat, attendu] of [
+      ['développement + connectée → aucune confirmation', { user: { id: 'u1' } }, { lie: true, suitLeCompte: () => false }, 0],
+      ['production + déconnectée + appareil lié → confirmation', {}, { lie: true, suitLeCompte: () => true }, 1],
+      ['production + déconnectée + jamais liée → aucune confirmation', {}, { lie: false, suitLeCompte: () => true }, 0],
+    ]) {
+      const appels = []; let demandes = 0;
+      const sec = monter({ provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-r5' }, sync, { saveConfig: async (c) => { appels.push(c); }, dire: () => {}, confirm: async () => { demandes += 1; return true; } }, etat);
+      choisir(selectFournisseur(sec), 'none');
+      bouton(sec, 'Enregistrer').click(); await tick();
+      eq([demandes, appels.map((c) => c.provider)], [attendu, ['none']], `R-CPT-5 : ${nom}, ligne vide écrite`);
       sec.remove();
     }
     // K-6 : « Aucun » avec clé et compte → confirmation ; refusée → rien ; acceptée → ligne vide
@@ -553,20 +573,22 @@ export async function runAssistantCompteTests({ eq, ok }) {
     }
     // Enregistrer normal : la config normalisée part à saveConfig ; la clé n'est ni dans textContent ni dans outerHTML
     {
-      const appels = []; const dits = []; let rendus = 0;
-      const sec = monter({ provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-ui' }, { user: { id: 'u1' } }, { saveConfig: async (c) => { appels.push(c); }, dire: (m) => dits.push(m), confirm: async () => true, rafraichir: () => { rendus += 1; } });
+      const appels = []; const journal = [];
+      // Un seul journal pour l'écriture, le message et le rendu : l'ORDRE est mesuré, pas seulement la présence. saveConfig
+      // rend la main un tour plus tard (setTimeout) : un « enregistré » dit sans attendre l'écriture arriverait avant elle.
+      const sec = monter({ provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-ui' }, { user: { id: 'u1' } }, { saveConfig: async (c) => { await new Promise((r) => setTimeout(r, 0)); appels.push(c); journal.push('save'); }, dire: (m) => journal.push(`dire:${m}`), confirm: async () => true, rafraichir: () => { journal.push('rendu'); } });
       const champCle = sec.querySelector('input[type="password"]');
       ok(!!champCle && !sec.textContent.includes('sk-factice-ui') && !sec.outerHTML.includes('sk-factice-ui'), 'K-2 : champ password, clé ni dans le texte ni dans le HTML');
       taper(champCle, 'sk-factice-nouvelle');
-      bouton(sec, 'Enregistrer').click(); await tick();
+      bouton(sec, 'Enregistrer').click(); await tick(); await tick();
       eq(appels, [{ provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-nouvelle' }], 'Enregistrer : saveConfig reçoit la configuration tapée');
-      eq([dits, rendus], [['Assistant enregistré'], 1], 'Enregistrer : « Assistant enregistré » dit APRÈS l’écriture, puis la page est redessinée une fois');
+      eq(journal, ['save', 'dire:Assistant enregistré', 'rendu'], 'Enregistrer : « Assistant enregistré » dit APRÈS l’écriture, puis la page est redessinée une fois');
       // K-12 : focus RÉEL dans la section (revue Neegan 1.4 : un nœud sous `hidden` ne reçoit jamais le focus, et
       // « occupé === (activeElement === champ) » valait false === false — un faux vert). La scène est rendue visible
       // le temps du focus.
       scene.hidden = false;
       champCle.focus();
-      eq(document.activeElement, champCle, 'K-12 : le champ a réellement reçu le focus');
+      ok(document.activeElement === champCle, 'K-12 : le champ a réellement reçu le focus'); // identité : eq sérialise, tout nœud vaut « {} »
       eq(S.occupeParAssistant(), true, 'K-12 : occupé quand le focus est dans la section');
       champCle.blur();
       scene.hidden = true;
@@ -610,8 +632,8 @@ export async function runAssistantCompteTests({ eq, ok }) {
     }
     // K-6 : après un « Enregistrer » réussi, « Aucun » sait qu'une ligne existe maintenant (revue Neegan 1.5 : `avait` suit)
     {
-      const appels = [];
-      const sec = monter({ provider: 'none', model: '', base_url: '', api_key: '' }, {}, { saveConfig: async (c) => { appels.push(c); }, dire: () => {}, confirm: async () => true });
+      const appels = []; let demandes = 0;
+      const sec = monter({ provider: 'none', model: '', base_url: '', api_key: '' }, {}, { saveConfig: async (c) => { appels.push(c); }, dire: () => {}, confirm: async () => { demandes += 1; return true; } });
       const sel = selectFournisseur(sec);
       choisir(sel, 'anthropic');
       const champs = [...sec.querySelectorAll('input')];
@@ -620,21 +642,21 @@ export async function runAssistantCompteTests({ eq, ok }) {
       bouton(sec, 'Enregistrer').click(); await tick();
       choisir(sel, 'none');
       bouton(sec, 'Enregistrer').click(); await tick();
-      eq(appels.map((c) => c.provider), ['anthropic', 'none'], 'K-6 : enregistrer puis « Aucun » dans la même instance → la ligne vide part (avait mis à jour)');
+      eq([appels.map((c) => c.provider), demandes], [['anthropic', 'none'], 0], 'K-6 : enregistrer puis « Aucun » dans la même instance → la ligne vide part (avait mis à jour), sans confirmation (ni compte ni appareil lié)');
       sec.remove();
     }
     // suivreMoteur ne rafraîchit pas quand occupé (déjà éprouvé ; ici : le câblage de la page passe par occupeParAssistant)
-    ok(typeof S.occupeParAssistant === 'function', 'K-12 : occupeParAssistant exporté et câblé dans suivreMoteurDeLaPage (lire le source : pas testable autrement sans monter la page)');
-  } finally { scene.remove(); }
-  // La page entière : renderSettings monte la section depuis le magasin (getSettings().llm), marquée data-section, et la clé
-  // n'apparaît ni dans le texte ni dans le HTML de toute la page (seulement dans la propriété `value` du champ).
-  await withRepo(async (repoTemp) => {
-    await repoTemp.saveAssistantConfig({ provider: 'anthropic', model: 'm', api_key: 'sk-factice-page' });
-    const page = await S.renderSettings({}, {}, { settings: await repoTemp.getSettings(), sync: {} });
-    const sec = page.querySelector('[data-section="assistant"]');
-    eq([!!sec, sec?.querySelector('input[type="password"]')?.value, sec?.querySelector('select')?.value], [true, 'sk-factice-page', 'anthropic'], 'renderSettings : section « Assistant IA » marquée data-section, remplie depuis assistant_config');
-    ok(!page.textContent.includes('sk-factice-page') && !page.outerHTML.includes('sk-factice-page'), 'K-2 : la clé n’est ni dans le texte ni dans le HTML de la page Réglages entière');
-  });
+    ok(typeof S.occupeParAssistant === 'function', 'K-12 : occupeParAssistant exporté ; câblage dans suivreMoteurDeLaPage lu au source (settings.js, `occupe:`), non éprouvé sans monter la page');
+    // La page entière : renderSettings monte la section depuis le magasin (getSettings().llm), marquée data-section, et la
+    // clé n'apparaît ni dans le texte ni dans le HTML de toute la page (seulement dans la propriété `value` du champ).
+    await withRepo(async (repoTemp) => {
+      await repoTemp.saveAssistantConfig({ provider: 'anthropic', model: 'm', api_key: 'sk-factice-page' });
+      const page = await S.renderSettings({}, {}, { settings: await repoTemp.getSettings(), sync: {} });
+      const sec = page.querySelector('[data-section="assistant"]');
+      eq([!!sec, sec?.querySelector('input[type="password"]')?.value, sec?.querySelector('select')?.value], [true, 'sk-factice-page', 'anthropic'], 'renderSettings : section « Assistant IA » marquée data-section, remplie depuis assistant_config');
+      ok(!page.textContent.includes('sk-factice-page') && !page.outerHTML.includes('sk-factice-page'), 'K-2 : la clé n’est ni dans le texte ni dans le HTML de la page Réglages entière');
+    });
+  } finally { scene.remove(); setUiLocale(avantLocale); }
   // en.js : les quatre textes K-10 et les chaînes neuves ont une traduction
   const { EN } = await import('../src/i18n/en.js'); // export nommé `EN` (src/i18n/en.js:3)
   for (const fr of ['Sur cette adresse de développement, la configuration reste sur cet appareil.', 'Sans compte, la configuration reste sur cet appareil.', 'Ce qui est enregistré ici partira à ton compte à la prochaine connexion.', 'La configuration de l’assistant suit ton compte sur tes appareils connectés.', 'Elle n’est jamais incluse dans les sauvegardes ZIP.', 'Retirer l’assistant de tous tes appareils ?', 'Rien à retirer : aucun assistant n’est configuré ici.', 'Retirer', REFUS_URL]) ok(typeof EN[fr] === 'string' && EN[fr].length > 0, 'en.js : ' + fr.slice(0, 40));

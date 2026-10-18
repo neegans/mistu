@@ -551,9 +551,13 @@ export function sectionAssistant({ llm: initial, sync = {}, lie = false, suitLeC
     if (urlDeBaseRefusee(llm)) { dire(refusUrl()); return; } // R-CPT-4 : rien n'est écrit, pas même « Aucun »
     const cfg = normaliserConfigAssistant(llm);
     if (cfg.provider === 'none') {
-      // K-6 (F5) : sans ligne ici, « Aucun » n'écrit RIEN — une ligne vide plus récente effacerait la clé du compte.
+      // K-6 (F5) : sans configuration non vide ici, « Aucun » n'écrit RIEN — une ligne vide plus récente effacerait la clé
+      // du compte.
       if (!avait) { dire(t('Rien à retirer : aucun assistant n’est configuré ici.')); return; }
-      if (sync?.user && !(await confirm(t('Retirer l’assistant de tous tes appareils ?'), { danger: true, okLabel: t('Retirer') }))) return;
+      // R-CPT-5 : confirmer quand la ligne vide PARTIRA au compte — en production (K-3), connectée ou appareil lié (écrite
+      // déconnectée, elle est capturée avec user_id null et part à la reconnexion). Hors production, elle reste ici.
+      const partiraAuCompte = suitLeCompte() && !!(sync?.user || lie);
+      if (partiraAuCompte && !(await confirm(t('Retirer l’assistant de tous tes appareils ?'), { danger: true, okLabel: t('Retirer') }))) return;
     }
     await saveConfig(cfg);
     avait = !configVide(cfg);
