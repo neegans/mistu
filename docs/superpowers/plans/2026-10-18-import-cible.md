@@ -52,7 +52,7 @@ les rulings de § 12 font foi ; ce plan les met en tâches.
 
 **Files:**
 - Modify: `src/model/schema.js` (`DB_VERSION`, `APP_VERSION`, `STORES.imports`, `RELATIONS`, `MAGASINS_AJOUTES_APRES_V1`, `STATUTS_IMPORT`)
-- Modify: `src/core/db.js` (`transitionner`, `MUTATING_METHODS`)
+- Modify: `src/core/db.js` (`conditions` de `mutate`), `src/model/repo.js` (`transitionner`, `saveBatch(batch, { conditions })`)
 - Modify: `src/domain/backup.js` (tolérance des magasins ajoutés après le format 1)
 - Create: `src/domain/vocabulaire.js`
 - Modify: `src/domain/creation-ia.js`, `src/ui/signet.js`, `src/ui/recipe-edit.js` (appel d'`assertVocabulaire` avant écriture)
@@ -64,8 +64,9 @@ les rulings de § 12 font foi ; ce plan les met en tâches.
 **Interfaces:**
 - Produces: `STATUTS_IMPORT = ['a_lancer','en_cours','a_verifier','enregistre','echec','ignore']` (schema.js) ;
   `MAGASINS_AJOUTES_APRES_V1 = ['imports']` ;
-  `db.transitionner(store, key, { attendus, patch, puts = {}, origin = 'local' })` → `Promise<fiche écrite>` ou lève `TransitionRefusee`
-  (`{ store, key, statut }`) ; `assertVocabulaire(fiche, magasin)` (lève `ErreurVocabulaire { magasin, champ, valeur }`).
+  `db.mutate({ …, conditions: { [store]: [{ key, attendus, patch }] } })` (vérifié dans la transaction ; `patch` objet ou fonction du courant ;
+  condition fausse → `abort` + `TransitionRefusee { store, key, statut }`) ; `repo.transitionner(store, key, { attendus, patch, puts, deletes, origin })`
+  (nettoyage des chaînes, `updated_at = syncNow()`, `emit('change')`) ; `repo.saveBatch(batch, { conditions })` ; `assertVocabulaire(fiche, magasin)` (lève `ErreurVocabulaire { magasin, champ, valeur }`).
 
 - [ ] **Step 1 : tests rouges du schéma**
 
@@ -84,28 +85,31 @@ eq(S.STATUTS_IMPORT, ['a_lancer', 'en_cours', 'a_verifier', 'enregistre', 'echec
 - [ ] **Step 2 : test rouge de la montée de version sur base peuplée** (fixture : ouvrir une base jetable en `DB_VERSION 3` avec le `STORES`
   d'avant, y poser une recette et un livre, fermer, rouvrir avec le schéma courant : la recette est intacte, `imports` existe avec ses trois index).
 
-- [ ] **Step 3 : tests rouges de `db.transitionner`**
+- [ ] **Step 3 : tests rouges de `db.mutate({ conditions })` et `repo.transitionner`**
 
 ```js
 await withDatabase(async (db) => {
   await db.put('imports', { id: 'imp_1', status: 'a_lancer', updated_at: '2026-10-18T00:00:00.000Z' });
-  const r = await db.transitionner('imports', 'imp_1', { attendus: ['a_lancer'], patch: { status: 'en_cours' } });
-  eq([r.status, (await db.get('imports', 'imp_1')).status], ['en_cours', 'en_cours'], 'transitionner : écrit quand le statut est attendu');
-  let refus = null; try { await db.transitionner('imports', 'imp_1', { attendus: ['a_lancer'], patch: { status: 'en_cours' } }); } catch (e) { refus = e; }
+  await db.mutate({ conditions: { imports: [{ key: 'imp_1', attendus: ['a_lancer'], patch: { status: 'en_cours' } }] } });
+  eq((await db.get('imports', 'imp_1')).status, 'en_cours', 'conditions : écrit quand le statut est attendu');
+  let refus = null; try { await db.mutate({ conditions: { imports: [{ key: 'imp_1', attendus: ['a_lancer'], patch: { status: 'en_cours' } }] }, puts: { recipes: [{ id: 'rc_non' }] } }); } catch (e) { refus = e; }
+  eq((await db.get('recipes', 'rc_non')), undefined, 'conditions : une condition fausse n’écrit RIEN, pas même les puts');
   eq([refus?.name, refus?.statut], ['TransitionRefusee', 'en_cours'], 'transitionner : refuse depuis un état périmé, nommé');
   // puts supplémentaires dans la MÊME transaction, et capture d’outbox
   const entrees = []; db.onMutate = ({ puts, origin }) => { entrees.push([Object.keys(puts).sort(), origin]); return {}; };
-  await db.transitionner('imports', 'imp_1', { attendus: ['en_cours'], patch: { status: 'a_verifier' }, puts: { recipes: [{ id: 'rc_x', availability: 'available' }] } });
-  eq([entrees, (await db.get('recipes', 'rc_x'))?.id], [[[['imports', 'recipes'], 'local']], 'rc_x'], 'transitionner : puts supplémentaires et capture dans une seule transaction');
+  await db.mutate({ conditions: { imports: [{ key: 'imp_1', attendus: ['en_cours'], patch: (c) => ({ status: 'a_verifier', appels: (c.appels || 0) + 1 }) }] }, puts: { recipes: [{ id: 'rc_x', availability: 'available' }] } });
+  eq([entrees, (await db.get('recipes', 'rc_x'))?.id, (await db.get('imports', 'imp_1')).appels], [[[['imports', 'recipes'], 'local']], 'rc_x', 1], 'conditions : patch-fonction, puts et capture dans une seule transaction');
   // deux transitions entrelacées : une seule gagne
   await db.put('imports', { id: 'imp_2', status: 'echec' });
-  const res = await Promise.allSettled([1, 2].map(() => db.transitionner('imports', 'imp_2', { attendus: ['echec'], patch: { status: 'en_cours' } })));
+  const res = await Promise.allSettled([1, 2].map(() => db.mutate({ conditions: { imports: [{ key: 'imp_2', attendus: ['echec'], patch: { status: 'en_cours' } }] } })));
   eq(res.map((x) => x.status).sort(), ['fulfilled', 'rejected'], 'transitionner : course entre deux transitions, une seule écrit');
 });
 ```
 Contrainte d'implémentation : lecture, vérification, appel synchrone de `onMutate` et écritures **dans les rappels `onsuccess` de la même
-transaction readwrite** (aucun `await` entre : IndexedDB valide la transaction dès que la file est vide). `MUTATING_METHODS` gagne
-`'transitionner'` ; le test statique de la porte unique (grep `MUTATING_METHODS` dans `tests/`) est mis à jour.
+transaction readwrite** (aucun `await` entre : IndexedDB valide la transaction dès que la file est vide) ; la portée inclut `outbox` seulement
+si la base la possède (bases de test `TEST_STORES`). `MUTATING_METHODS` **inchangé** (le pin de `tests/sync.js:47` ne bouge pas). Puis
+`repo.transitionner` (nettoyage des chaînes, `updated_at = syncNow()`, `emit('change')`) testé sur base jetable : chaînes de contrôle retirées
+du `patch`, `updated_at` posé, un abonné `change` notifié.
 
 - [ ] **Step 4 : tests rouges des archives (Review Focus 1)** : une archive **construite sans `imports`** (helper du test : exporter une base
   jetable, puis reconstruire le ZIP sans `data/imports.json` et sans son entrée de manifeste, décomptes et empreintes recalculés) passe
@@ -186,7 +190,9 @@ eq((src.match(/assertVocabulaire\(/g) || []).length >= 3, true, 'vocabulaire : l
   `{ recipe, version, pageUpdates, remplacement: boolean }` (`remplacement` vrai quand une version `correction` existe : I-5) ;
   `ageTexte(iso, maintenant)` → « il y a {n} min / h / j » ; `RAISONS_ECHEC` (liste fermée § 4.4).
 - Produces (`llm.js`) : `ErreurExtraction` (`raison` ∈ `coupe | illisible | hors_bornes | vide`) ; `extraireRecette` ; `BORNES_EXTRACTION = { titre: 200, ligne: 300, etape: 2000, notes: 2000, lignes: 80, etapes: 60, sousRecettes: 20, champsIncertains: 40, champIncertain: 200 }` ; `MAX_TOKENS_EXTRACTION = 6000`.
-- Produces (`repo.js`) : `repo.ajouterPages(files, { edition_id, session_id, import_id })` → `{ session, pages, docs }` sans navigation ni toast.
+- Produces (`repo.js`) : `repo.ajouterPages(files, { edition_id, session_id, import_id })` → `{ session, pages, docs }` sans navigation ni toast ;
+  avec `import_id`, un seul `repo.transitionner('imports', import_id, { attendus: ['a_lancer','a_verifier','echec'], patch: (c) => ({ page_ids: [...c.page_ids, ...neufs] }), puts: {…} })`.
+- Produces (`llm.js`) : `extraireRecette(images, provider, { signal, maxTokens = 6000 })`, `extraireIndex(images, provider, { signal })` ; `extractRecipeFromImages(images, provider, opts)` reste une enveloppe compatible.
 - Produces (`core/image.js`) : `preparerPhotoLocale(blob)` → `Blob` JPEG (lève `ErreurImage('trop_lourde' | 'type' | 'trop_grande' | 'indecodable')`).
 
 - [ ] **Step 1 : tests rouges du domaine** (dans `tests/import-cible.js`)
@@ -217,7 +223,8 @@ entrée du modèle, texte multi-lignes intact, `position` 1..n, `timers` posés 
   recette seule (compatibilité) ; `parseStepsBlock('a\nb\n\nc', { parParagraphe: true })` → deux étapes (`'a\nb'`, `'c'`) et sans option trois.
 - [ ] **Step 3 : tests rouges de `repo.ajouterPages`** (base jetable, `navigate` espionné : non appelé ; une transaction pour les lignes : un
   `onMutate` espion voit `source_documents`, `source_pages`, `scan_sessions` et `imports` dans le même appel quand `import_id` est fourni ;
-  `page_ids` ajoutés en fin ; `startScanSession` passe toujours par là et navigue, lui).
+  `page_ids` ajoutés en fin **par patch-fonction** (un `page_ids` modifié entre-temps par un autre onglet n'est pas écrasé) ; import `enregistre`
+  → `TransitionRefusee`, rien d'écrit ; `startScanSession` passe toujours par là et navigue, lui).
 - [ ] **Step 4 : test rouge de `preparerPhotoLocale`** (reprend les cas de `poserCouverture` : `trop_lourde` > 25 Mo, `type`, `trop_grande` > 16 Mpx,
   JPEG 1 200 px en sortie ; `poserCouverture` reste vert).
 - [ ] **Step 5 : rouge lu ; implémenter ; vert.** `PARSER_SYSTEM` fr, texte ajouté mot pour mot : « Si une page semble manquer (étapes qui commencent
@@ -232,8 +239,8 @@ entrée du modèle, texte multi-lignes intact, `position` 1..n, `timers` posés 
 
 **Files:**
 - Create: `src/ui/import-cible.js` (`renderImportCible(params, query, ctx)`)
-- Modify: `src/app.js` (route), `src/ui/state.js` (`ROUTES_DE_SAISIE` + `'/recipes/*/importer'`), `src/ui/book.js` (bouton « Importer », retrait de
-  « Scanner cette recette » et de `pending_recipe`), `src/ui/recipe.js` (« Importer cette recette », « Relire les pages », retrait de `pending_recipe`),
+- Modify: `src/app.js` (route), `src/ui/state.js` (`ROUTES_DE_SAISIE` + `'/recipes/*/importer'`), `src/ui/book.js` (rangée **sous** la carte, hors du
+  `<a>` : « Importer » + « Saisir à la main » ; retrait de « Scanner cette recette » et de `pending_recipe`), `src/ui/recipe.js` (« Importer cette recette », « Relire les pages », retrait de `pending_recipe`),
   `src/ui/recipe-edit.js` (retrait de `pendingRef` / « Oui, rattacher »), `src/ui/add.js` (retrait du chemin `?edition`, R-UX-16), `src/i18n/en.js`, `sw.js`
 - Modify: `tests/import-cible.js`, `tests/ajouter.js` (tests de « Scanner cette recette » et `?edition` à retirer ou retourner)
 
@@ -256,6 +263,8 @@ entrée du modèle, texte multi-lignes intact, `position` 1..n, `timers` posés 
     (`kind: 'recipe'`, `position` 1..n), `scan_sessions` (`status: 'done'`, `recipe_ids`), `imports` (`enregistre`, `reponse_brute: null`) ;
     `navigate('/recipes/<id>?v=…')`, toast « Recette importée » ; la recette garde son `original_title` et son `id`, `availability: 'available'`,
     `photo_sha256` posé ;
+  - **I-5 (N4)** : `partial` dont la version courante est une extraction **saisie à la main** → « Remplacer par cette lecture ? » ; refus → version
+    ajoutée non courante, mais `source_page_ids` (union), `kind: 'recipe'` sur les pages et `photo_sha256` posés quand même ;
   - **Review Focus 4** : « Annuler » pendant le vol → `fetch` abandonné (signal), `imports` `echec(annule)`, texte « L'appel a peut-être été compté… »,
     puis la réponse tardive du faux `fetch` arrive : **aucune** recette écrite, `reponse_brute` posée, statut toujours `echec` ;
   - discordance (titre lu « Tarte aux poires ») : panneau à trois boutons ; « Garder la lecture sans l'enregistrer » → reste `a_verifier`, rien écrit ;
@@ -268,10 +277,10 @@ entrée du modèle, texte multi-lignes intact, `position` 1..n, `timers` posés 
     `seancesOuvertes(ctx)` de `add.js` ni dans « Séance en cours » de `book.js` ;
   - `ROUTES_DE_SAISIE` contient `'/recipes/*/importer'` ; `grep` de `pending_recipe` et de `'?edition='` / `query.edition` dans `src/` : 0 (test de
     comportement en plus : le bouton « Importer » de `book.js` navigue vers `/recipes/<id>/importer`, « Scanner cette recette » absent).
-- [ ] **Step 2 : rouge lu ; implémenter ; vert.** Enregistrement : `fabriquerExtraction` → `assertVocabulaire` → **une** `db.transitionner('imports', id,
+- [ ] **Step 2 : rouge lu ; implémenter ; vert.** Enregistrement : `fabriquerExtraction` → `assertVocabulaire` → **une** `repo.transitionner('imports', id,
   { attendus: ['a_verifier'], patch: { status: 'enregistre', reponse_brute: null, finished_at }, puts: { recipes, recipe_versions, source_pages,
-  scan_sessions } })`. Relire la référence (`repo.get`) juste avant. Battement : `setInterval` 15 s pendant le vol, transition sur place
-  (`attendus: ['en_cours']`, `patch: { battement_at }`), nettoyé en `finally`. `pickFiles` : « Photographier » `{ accept: 'image/*', capture: 'environment', multiple: true }`,
+  scan_sessions } })` ; `TransitionRefusee` → redessin, rien d'écrit. Relire la référence (`repo.get`) juste avant. Battement : `setInterval` 15 s
+  pendant le vol, `repo.transitionner` sur place (`attendus: ['en_cours']`, `patch: { battement_at }`, **`origin: 'device'`**), nettoyé en `finally`. `pickFiles` : « Photographier » `{ accept: 'image/*', capture: 'environment', multiple: true }`,
   « Choisir des photos » `{ accept: 'image/*', multiple: true }`. `SHELL` + `./src/ui/import-cible.js`, `VERSION` +1.
 - [ ] **Step 3 : commit** `Ecran d import cible : pages reorganisables, photo du plat, extraire et enregistrer, discordance, annulation (lot A, tache 4)`.
 
@@ -281,8 +290,10 @@ entrée du modèle, texte multi-lignes intact, `position` 1..n, `timers` posés 
 
 **Files:**
 - Modify: `src/ui/recipe.js` (bandeau de lecture, état de la version affichée, photo du plat, puces « incertain »), `src/ui/cook.js` et `src/ui/grocery.js`
-  (bandeau D-3), `src/ui/recipe-edit.js` (étapes jointes par ligne vide + `parParagraphe: true` ; `reparse()` hérite `uncertain` ; version `correction`
-  hérite `import_id`, `incomplete`, `missing_page`, `titre_lu`), `src/ui/components.js` (puce `incertain`), `src/i18n/en.js`, `sw.js`
+  (bandeau D-3), `src/ui/recipe-edit.js` (mode « une étape par paragraphe » **seulement** si une étape de la version de départ porte un saut de
+  ligne : jointure par ligne vide, aide « Une étape par paragraphe (ligne vide entre deux étapes). », aperçu et `save()` avec `parParagraphe: true` ;
+  `reparse()` hérite `uncertain` ; version `correction` hérite `import_id`, `incomplete`, `missing_page`, `titre_lu`), `src/ui/components.js` (puce
+  `incertain`), `src/ui/recipe.js` + `src/ui/cook.js` (texte d'étape en `white-space: pre-line`), `src/i18n/en.js`, `sw.js`
 - Modify: `tests/import-cible.js`
 
 **Interfaces:**
@@ -295,7 +306,8 @@ entrée du modèle, texte multi-lignes intact, `position` 1..n, `timers` posés 
   bandeau « Lue par l'assistant, non relue » présent pour une `extraction` à `to_verify`, absent pour une `correction` ou après vérification ;
   **Review Focus 5** : ouvrir « Corriger », changer une quantité d'une ligne, enregistrer → la ligne touchée perd `uncertain`, les autres le gardent,
   `provenance.incomplete/missing_page/import_id/titre_lu` hérités, les étapes multi-lignes restent entières (zone de texte jointe par ligne vide,
-  `parParagraphe: true`), bandeau toujours là.
+  `parParagraphe: true`, aide adaptée), bandeau toujours là ; **une recette sans étape multi-ligne** garde l'éditeur d'aujourd'hui (une étape
+  ajoutée sur une nouvelle ligne reste une étape) ; une étape multi-ligne est rendue avec ses sauts de ligne sur la fiche et en mode cuisine.
 - [ ] **Step 2 : rouge lu ; implémenter ; vert ; `VERSION` +1.**
 - [ ] **Step 3 : commit** `Fiche, cuisine, courses et Corriger : lecture visible, heritage des incertitudes (lot A, tache 5)`.
 
@@ -304,8 +316,9 @@ entrée du modèle, texte multi-lignes intact, `position` 1..n, `timers` posés 
 ### Task 6 : Section « Imports », reprise, journal pour l'éditeur et l'index, démarrage
 
 **Files:**
-- Modify: `src/ui/add.js` (section « Imports » avant la grille, ancre `#imports`, `seancesOuvertes` filtrée), `src/ui/book.js` (« {n} import(s) à reprendre »
-  → `#/add#imports`, « Séance en cours » filtrée), `src/ui/recipe-edit.js` (« Extraire avec l'assistant IA » écrit dans le journal `kind: 'recette'`,
+- Modify: `src/ui/add.js` (section « Imports » avant la grille, `?section=imports` → section en premier avec le focus, `seancesOuvertes` filtrée des
+  **seules** séances d'un import ciblé non terminé), `src/ui/book.js` (« {n} import(s) à reprendre » → `#/add?section=imports`, « Séance en cours »
+  filtrée de même), `src/ui/recipe-edit.js` (« Extraire avec l'assistant IA » écrit dans le journal `kind: 'recette'`,
   `recipe_id: null` ; `?import=<id>` préremplit depuis `resultat` revalidé ; bouton verrouillé pendant l'appel ; `signal`), `src/ui/import.js` (panneau
   d'index : journal `kind: 'index'`, verrou, `?import=`), `src/model/repo.js` (`init()` : passe `interrompu` si `battement_at` > 90 s pour les lignes
   `en_cours` de cet appareil ; purge des `enregistre`/`ignore` de plus de 30 jours par suppression d'origine `local`), `src/domain/import-cible.js`
@@ -318,15 +331,17 @@ entrée du modèle, texte multi-lignes intact, `position` 1..n, `timers` posés 
 
 - [ ] **Step 1 : tests rouges** : `lignesImports` (table : un cas par état et par sorte ; `en_cours` tenu par `documentId` → `annuler`, sinon
   `ailleurs` ; `a_verifier` sans `resultat` d'un autre appareil → sans `reprendre` ; `recipe_id` inconnu → `referenceAbsente`, sans geste ; séance
-  `open` sans import → `ouvrir_seance` ; séance d'un import → absente de `seancesOuvertes`) ; page Ajouter : section absente quand vide, rendue
+  `open` sans import → `ouvrir_seance` ; séance d'un import **ciblé** non terminé → absente de `seancesOuvertes`, de retour après `ignore` ; séance
+  où « Regrouper en recette » a écrit un import → **toujours** listée) ; page Ajouter : section absente quand vide, rendue
   avant la grille sinon, gestes câblés (« Reprendre » navigue vers la cible ; « Relancer » → **un** POST, **aucune** page ni séance en double ;
   « Ignorer » → `ignore` ; « Annuler » absent pour un vol d'ailleurs) ; « Reprendre » sur `a_verifier` → écran en mode « Enregistrer cette lecture »,
   `resultat` **revalidé** (un `resultat` hostile injecté dans la base → `echec(illisible)` au lieu d'une écriture) ; fiche du livre : « 2 imports à
-  reprendre » → `#/add#imports` ; éditeur : « Extraire avec l'assistant IA » crée `imports{kind:'recette', recipe_id:null}` puis `a_verifier` avec
+  reprendre » → `#/add?section=imports` (section rendue en premier, focus dessus) ; éditeur : « Extraire avec l'assistant IA » crée `imports{kind:'recette', recipe_id:null}` puis `a_verifier` avec
   `resultat`, bouton éteint pendant l'appel ; `#/recipes/new?import=<imp>` préremplit titre, ingrédients, étapes sans POST ; panneau d'index : idem
   avec `entries`, bouton verrouillé (double clic → un POST) ; `init()` : **Review Focus 3** : `en_cours` avec `battement_at` à −120 s → `interrompu`,
   à −30 s → intact, d'un autre `device_id` → intact ; `enregistre` vieux de 31 jours → supprimé **avec** une entrée d'outbox `delete` (origine
-  `local`), vieux de 29 jours → intact ; `echec` vieux de 60 jours → intact.
+  `local` ; « À envoyer » monte d'autant, assumé), vieux de 29 jours → intact ; `echec` vieux de 60 jours → intact ; battement : écriture d'origine
+  `device`, **aucune** entrée d'outbox.
 - [ ] **Step 2 : rouge lu ; implémenter ; vert ; `VERSION` +1.**
 - [ ] **Step 3 : commit** `Section Imports, reprise par sorte, journal pour l editeur et l index, interrompu et purge au demarrage (lot A, tache 6)`.
 
