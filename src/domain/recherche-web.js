@@ -16,6 +16,16 @@ export const DIFFICULTES = Object.freeze(['facile', 'moyen', 'exigeant']); // le
 // Une adresse web dans une présentation (I2) : schéma, « www. » ou hôte suivi d'un chemin. La présentation est la voix de l'assistant,
 // pas une source : une adresse n'y a pas sa place (les liens sont les résultats bruts, I-A). Testé sur le texte NFKC (pleine chasse).
 export const MOTIF_ADRESSE = /(https?:\/\/|www\.|[a-z0-9-]+\.[a-z]{2,}\/)/iu;
+// L'HÔTE NU (« la recette est sur evil.com ») : un nom de domaine dont le dernier segment est dans une liste FERMÉE de domaines de premier
+// niveau, ni précédé d'une lettre, d'un chiffre, de « @ », « . », « _ » ou « - », ni suivi d'une lettre, d'un chiffre ou d'un tiret. Faux positif
+// CONNU et assumé : « Le sel.Ca y est » (point collé et « ca ») est écarté ; « 15 min. Le », « aneth.Tu », « 2.0 » ne le sont pas.
+export const MOTIF_HOTE = /(?<![\p{L}\p{N}@._-])[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9-]+)*\.(?:com|net|org|ca|quebec|fr|be|ch|io|co|info|app|blog|xyz|site|online|shop|me|tv|us|uk|ly|gl)(?![\p{L}\p{N}-])/iu;
+// Le texte est normalisé POUR LE TEST seulement (NFKC, puis « 。 » U+3002 et « ｡ » U+FF61 → « . », « ∕ » U+2215 et « ⁄ » U+2044 → « / ») : le texte affiché
+// n'est jamais modifié.
+function porteUneAdresse(texte) {
+  const n = texte.normalize('NFKC').replace(/[\u{3002}\u{FF61}]/gu, '.').replace(/[\u{2215}\u{2044}]/gu, '/');
+  return MOTIF_ADRESSE.test(n) || MOTIF_HOTE.test(n);
+}
 
 // Le system par langue (§ 4.1). Il cherche TOUJOURS, n'affirme JAMAIS une restriction (I-K), répond en JSON `choix`.
 const SYSTEM = {
@@ -140,7 +150,7 @@ function ficheDe(c) {
   const jeton = typeof d === 'string' ? d.trim().toLowerCase() : ''; // pas de String(d) : un objet à toString hostile lèverait
   const texte = typeof p === 'string' ? bornerAuMot(p, LIMITES_WEB.presentation) : '';
   return {
-    presentation: texte && !MOTIF_ADRESSE.test(texte.normalize('NFKC')) ? texte : null,
+    presentation: texte && !porteUneAdresse(texte) ? texte : null,
     temps_min: entierDe(propre(c, 'temps_min'), LIMITES_WEB.tempsMax),
     difficulte: DIFFICULTES.includes(jeton) ? jeton : null,
     ingredients: entierDe(propre(c, 'ingredients'), LIMITES_WEB.ingredientsMax),

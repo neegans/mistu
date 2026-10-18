@@ -697,7 +697,7 @@ présente le plat à table, puis une ligne de repères à part (temps estimé, d
   Chaque repère est revalidé au rendu, bornes du domaine comprises (1440 min, 99 ingrédients).
 - **I-K reformulée** : « L'assistant présente les plats et estime le temps d'après les pages : il ne vérifie ni le temps, ni les ingrédients, ni les
   restrictions. Relis la page avant de cuisiner. » Sur un `repli`, l'assistant n'a rien présenté : l'ancienne phrase (sans estimation) reste.
-  `APP_VERSION` 0.8.1, `sw.js` `-v0.8.1-2`. **Non prouvé** : la qualité réelle des présentations et des estimations, et la tenue de `max_tokens`
+  `APP_VERSION` 0.8.1, `sw.js` `-v0.8.1-3`. **Non prouvé** : la qualité réelle des présentations et des estimations, et la tenue de `max_tokens`
   4096 avec cinq présentations de 400 caractères (aucun appel réel).
 - **Ratifié à la construction.** « Voir la recette » garde la clé partagée de l'accueil (« View recipe » en anglais) ; `difficulte` n'est lue que si
   c'est une chaîne (pas de `String(x)` : un objet à `toString` hostile lèverait) ; le point de coupe de `bornerAuMot` est toute espace Unicode (`\s`)
@@ -708,3 +708,10 @@ présente le plat à table, puis une ligne de repères à part (temps estimé, d
   et ne couvre pas « hôte/chemin »), sans préfixe « Selon l'assistant ». `bornerAuMot` : borne invalide → `''` (m1), sauts de ligne → une espace (m2), mesure
   sur le texte rogné (m3), insécables jamais coupées (m4) ; les graphèmes combinés restent parqués. `choix` lu par `Object.hasOwn` (m5), bornes hautes au
   rendu (m6), ancienne mention sur un repli (m7). La consigne et le `rel` du lien-titre sont épinglés par les tests.
+- **Ronde 2 (re-revue de la ronde 1).** L'hôte nu (« la recette est sur evil.com ») est écarté lui aussi : `MOTIF_HOTE` (`recherche-web.js`), nom de domaine
+  dont le dernier segment est dans une liste FERMÉE de domaines de premier niveau (com, net, org, ca, quebec, fr, be, ch, io, co, info, app, blog, xyz,
+  site, online, shop, me, tv, us, uk, ly, gl), ni précédé ni suivi d'une lettre, d'un chiffre ou d'un tiret (« 15 min. Le », « aneth.Tu », « 2.0 »,
+  « sel/poivre » passent). **Faux positif connu et assumé** : « Le sel.Ca y est » (point collé et « ca ») est écarté ; une adresse de courriel ou un
+  domaine hors de la liste (« evil.test » sans chemin) ne l'est pas. Avant le test, « 。 » U+3002 et « ｡ » U+FF61 valent « . » et « ∕ » U+2215 et
+  « ⁄ » U+2044 valent « / » (après NFKC) ; le texte affiché n'est pas touché. `bornerAuMot` : VT, FF, NEL, U+2028 et U+2029 valent UNE espace (m2) ;
+  U+2007 (espace tabulaire) n'est pas un point de coupe (m4). `sw.js` `-v0.8.1-3`.

@@ -12,16 +12,16 @@ export function borner(s, max) {
 }
 
 // Comme `borner` (même nettoyage), mais pour un texte LU par une personne : la coupe se fait AU MOT et se dit par « … ».
-// D'abord les fins de ligne et tabulations deviennent UNE espace (borner les retirerait et collerait « rôti.Le »), puis le
+// D'abord les fins de ligne (LF, CR, VT, FF, NEL, U+2028, U+2029) et tabulations deviennent UNE espace (borner les retirerait et collerait « rôti.Le »), puis le
 // nettoyage de `borner`, puis le texte est ROGNÉ : on mesure ce qui sera lu. Un texte qui tient en `max` points de code est
 // rendu tel quel. Sinon on garde `max - 1` points de code ; s'il y a un point de coupe dans la moitié droite de ce qui reste
 // (index ≥ floor((max - 1) / 2)), on coupe à la DERNIÈRE ; sans point de coupe là (un seul très long mot), on coupe net.
-// Une insécable (U+00A0, U+202F) n'est jamais un point de coupe : « 15 min » ne se sépare pas. Le résultat tient toujours
+// Une insécable (U+00A0, U+2007, U+202F) n'est jamais un point de coupe : « 15 min » ne se sépare pas. Le résultat tient toujours
 // en `max` points de code, « … » (U+2026) compris. Une borne qui n'est pas un entier ≥ 1, ou autre chose qu'une chaîne : ''.
-const POINT_DE_COUPE = /[^\S\u{00A0}\u{202F}]/u; // toute espace Unicode SAUF les deux insécables
+const POINT_DE_COUPE = /[^\S\u{00A0}\u{2007}\u{202F}]/u; // toute espace Unicode SAUF les insécables (U+00A0, U+2007 tabulaire, U+202F)
 export function bornerAuMot(s, max) {
   if (typeof s !== 'string' || !Number.isInteger(max) || max < 1) return '';
-  const texte = Array.from(borner(s.replace(/[\t\n\r ]+/g, ' '), Infinity).trim());
+  const texte = Array.from(borner(s.replace(/[\t\n\v\f\r\u{0085}\u{2028}\u{2029} ]+/gu, ' '), Infinity).trim());
   if (texte.length <= max) return texte.join('');
   const coupe = texte.slice(0, max - 1);
   const seuil = Math.floor((max - 1) / 2);

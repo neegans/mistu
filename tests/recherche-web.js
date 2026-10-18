@@ -36,11 +36,13 @@ export async function runRechercheWebTests({ eq, ok }) {
       eq([bm('abc', 0), bm('abc', NaN), bm('abc', undefined), bm('abc', -3), bm('abc', 1.5), bm('abc', '5')], ['', '', '', '', '', ''], 'bornerAuMot : max 0, NaN, indéfini, négatif, fractionnaire ou non numérique → chaîne vide');
       // m2 : un saut de ligne ou une tabulation est une espace entre deux phrases (borner les retirerait et colle les mots)
       eq([bm('Un saumon rôti.\nLe fenouil fond.', 400), bm('a\t\r\nb', 400), bm('a\n\n\nb   c', 400)], ['Un saumon rôti. Le fenouil fond.', 'a b', 'a b c'], 'bornerAuMot : sauts de ligne, retours et tabulations deviennent UNE espace (jamais « rôti.Le »)');
+      // m2 (résidu) : tous les séparateurs de ligne — VT, FF, NEL, U+2028, U+2029 — valent UNE espace (borner retirerait les deux derniers et collerait les phrases)
+      eq([bm('phrase un.\u{2028}phrase deux.', 400), bm('phrase un.\u{2029}phrase deux.', 400), bm('a\u{000B}b\u{000C}c\u{0085}d', 400)], ['phrase un. phrase deux.', 'phrase un. phrase deux.', 'a b c d'], 'bornerAuMot : U+2028, U+2029, tabulation verticale, saut de page et NEL deviennent UNE espace (jamais « un.phrase »)');
       // m3 : la longueur se mesure sur le texte ROGNÉ — les espaces de tête et de fin ne coûtent rien
       eq([bm(' '.repeat(500), 400), bm('x' + ' '.repeat(500), 400), bm(' '.repeat(30) + 'y'.repeat(380), 400)], ['', 'x', 'y'.repeat(380)], 'bornerAuMot : 500 espaces → vide ; « x » + 500 espaces → « x » ; 30 espaces + 380 points de code → rendu entier, sans « … »');
       // m4 : une insécable (U+00A0, U+202F) n'est jamais un point de coupe — « 15 min » ne se coupe pas entre 15 et min
       { const avant = 'a'.repeat(250) + ' ' + 'b'.repeat(143);
-        for (const [nom, esp] of [['U+00A0', '\u{00A0}'], ['U+202F', '\u{202F}']]) {
+        for (const [nom, esp] of [['U+00A0', '\u{00A0}'], ['U+2007', '\u{2007}'], ['U+202F', '\u{202F}']]) {
           const r = bm(avant + '15' + esp + 'min' + 'c'.repeat(200), 400);
           eq([r, r.includes(esp)], ['a'.repeat(250) + '…', false], `bornerAuMot : l’insécable ${nom} de « 15 min » n’est pas un point de coupe — on coupe à l’espace d’avant`);
         } }
@@ -244,6 +246,13 @@ export async function runRechercheWebTests({ eq, ok }) {
       eq([42, null, {}, ['x'], true, '', '   ', '\u{200B}'].map((v) => un({ presentation: v }).presentation), [null, null, null, null, null, null, null, null], 'choix : présentation non-chaîne, vide, d’espaces ou faite de Cf → null');
       // I2 : une présentation qui porte une adresse web est ÉCARTÉE (null), le reste du choix survit
       eq(['Va sur https://evil.test/phish', 'Regarde www.evil.test', 'Voir evil.test/x', 'HTTPS://EVIL.TEST', 'ｗｗｗ.evil.test', 'Va sur htt\u{200B}ps://evil.test'].map((v) => un({ presentation: v, temps_min: 20 }).presentation), [null, null, null, null, null, null], 'choix : une présentation qui contient une adresse (https://, www., hôte/chemin, majuscules, pleine chasse, invisible dans le schéma) est écartée → null');
+      // Ronde 2 : l'HÔTE NU (« la recette est sur evil.com ») est le cas principal — liste fermée de domaines de premier niveau
+      eq(['La recette complète est sur evil.com, tu verras.', 'Inspirée de ricardocuisine.com avec des herbes.', 'Va voir EVIL.COM pour la suite.', 'Un classique de recettes.qc.ca : une salade fraîche.', 'Le raccourci bit.ly cache la page.'].map((v) => un({ presentation: v }).presentation), [null, null, null, null, null], 'choix : un hôte nu (evil.com, ricardocuisine.com, EVIL.COM, recettes.qc.ca, bit.ly) dans une présentation → écartée');
+      { const gardees = ['Dorée en 15 min. Le fenouil caramélise doucement.', 'Dorée en 30 min.Le fenouil caramélise doucement.', 'Un saumon à l’aneth.Tu vas l’adorer.', 'Poêle le saumon.Coupe-le en deux pour servir.', 'Cuit env. 4 minutes de chaque côté.', 'Ajoute 2 c. à s. de miel avant de servir.', 'Compte 2.0 dl de crème pour la sauce.', 'Environ 3.5 kg de saumon pour la tablée.', 'Four à 180°C/350°F pour 20 minutes.', 'Assaisonne de sel/poivre au goût.'];
+        eq(gardees.map((v) => un({ presentation: v }).presentation), gardees, 'choix : les points de ponctuation et d’unités ne sont pas des adresses (15 min. Le, 30 min.Le, aneth.Tu, saumon.Coupe-le, env. 4, 2 c. à s., 2.0, 3.5, 180°C/350°F, sel/poivre) → gardées'); }
+      eq(un({ presentation: 'Le sel.Ca y est vraiment très bon.' }).presentation, null, 'choix : faux positif CONNU et assumé — « sel.Ca » (point collé et « ca » : domaine de la liste fermée) est écarté plutôt que risquer une adresse');
+      // Ronde 2 : les points et barres d'autres écritures sont ramenés à « . » et « / » avant le test (le texte affiché n'est pas touché)
+      eq(['Va sur evil\u{3002}com/x pour voir.', 'Va sur evil.com\u{2215}x pour voir.', 'Va sur evil\u{3002}test/x pour voir.', 'Va sur evil\u{FF61}test/x pour voir.', 'Va sur evil.test\u{2215}x pour voir.', 'Va sur evil.test\u{2044}x pour voir.'].map((v) => un({ presentation: v }).presentation), [null, null, null, null, null, null], 'choix : « 。 » (U+3002), « ｡ » (U+FF61), « ∕ » (U+2215) et « ⁄ » (U+2044) valent « . » et « / » pour le test d’adresse');
       eq(un({ presentation: 'Va sur https://evil.test/phish', temps_min: 20 }).temps_min, 20, 'choix : une présentation écartée pour adresse laisse les repères du choix');
       eq(['Une salade fraîche, prête en 15 min.', 'Servi avec du pain et/ou du riz.'].map((v) => un({ presentation: v }).presentation), ['Une salade fraîche, prête en 15 min.', 'Servi avec du pain et/ou du riz.'], 'choix : une présentation sans adresse est gardée (point final, « et/ou »)');
       // m5 : « choix » est lu PROPRE, pas par le prototype
