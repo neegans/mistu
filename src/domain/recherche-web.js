@@ -88,7 +88,7 @@ export function lireReponse(json) {
 // le garde tel quel, borné. L'écran ne le montre que sous une forme de LISTE BLANCHE (« rien d'inventé », rondes 1-2),
 // SANS Date.parse (sa lecture des formes non ISO dépend du moteur et accepte « Mayhem 5, 2025 ») :
 // « Mois jour, année » avec un mois de la liste FERMÉE ci-dessous (casse libre, point facultatif, année 1000-2999), ou la
-// date ISO seule « 2025-04-30 ». La date est construite en UTC et refusée si elle déborde (« Feb 30 », « Feb 29, 2025 »),
+// date ISO seule « 2025-04-30 » (même plage d'années). La date est construite en UTC et refusée si elle déborde (« Feb 30 », « Feb 29, 2025 »),
 // puis rendue en UTC (jamais la veille). Tout le reste — relatif, jour absent, année seule, nombre, barres, RFC 1123,
 // mois français, pas une chaîne — → null, et la date est masquée. Pure, ne lève pas.
 const MOIS_ANGLAIS = new Map([
@@ -110,7 +110,7 @@ export function dateLisible(texte, langue) {
     const mois = MOIS_ANGLAIS.get(mja[1].toLowerCase());
     return mois === undefined ? null : dateUtcLisible(Number(mja[3]), mois, Number(mja[2]), langue);
   }
-  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  const iso = /^([12]\d{3})-(\d{2})-(\d{2})$/.exec(s); // même plage d'années que la forme mois-jour-année (ronde 3)
   if (iso) return dateUtcLisible(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]), langue);
   return null;
 }

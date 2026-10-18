@@ -193,7 +193,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     // K1 : les liens d'un « trouvé » restent quand la demande change, et la différence est dite. Toute autre issue ne vaut
     // que pour SA demande (R-WEB-7) : une demande changée revient à l'écran du bouton — sinon un refus ou une clé refusée
     // resteraient affichés sans issue après la correction de la demande ou des réglages.
-    if (memoire && (memoire.issue.etat === 'trouve' || memoire.cle === cle)) return renderIssue(memoire.issue, reglages, { demandeDiffere: memoire.cle !== cle });
+    if (memoire && (memoire.issue.etat === 'trouve' || memoire.cle === cle)) return renderIssue(memoire.issue, reglages, { demandeDiffere: memoire.cle !== cle, demandePrete: cle != null });
     const demandeVide = !borner(input.value, 500).trim();
     return el('div', { class: 'card flat stack' },
       boutonChercher(demandeVide),
@@ -202,7 +202,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   }
   // § 5.5-5.6 : chaque issue a son écran ; les liens sont revalidés AU RENDU par lienSignet (I-H) ; l'avertissement
   // I-K accompagne toujours les liens ; aucun texte de l'API n'est rendu hors « pourquoi » (borné en amont).
-  function renderIssue(issue, reglages, { demandeDiffere = false } = {}) {
+  function renderIssue(issue, reglages, { demandeDiffere = false, demandePrete = true } = {}) {
     const reessayer = () => el('button', { class: 'btn', onClick: () => lancer({ enLigne: () => true }) }, t('Réessayer'));
     // R-WEB-7 : les issues sans « Réessayer » gardent une sortie — la même demande, relancée sans forcer enLigne (une clé
     // corrigée dans Réglages sert alors tout de suite).
@@ -240,8 +240,9 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     return section(t('Trouvé sur le web'),
       el('div', { class: 'muted' }, t('Demande envoyée : {q}', { q: demande })),
       // K1 ; la relance est AUSSI sur la ligne de la mention, avant les liens (confort après preuve, 17 octobre) — le
-      // bouton du bas reste. chercherANouveau() est une fabrique : un bouton neuf à chaque appel.
-      demandeDiffere ? el('div', { class: 'status row between' }, el('span', null, t('La demande a changé depuis cette recherche.')), chercherANouveau()) : null,
+      // bouton du bas reste. chercherANouveau() est une fabrique : un bouton neuf à chaque appel. Sans demande (champ vidé
+      // puis Entrée : clé nulle), la mention reste mais sans relance en haut, qui ne ferait rien (ronde 3, M1).
+      demandeDiffere ? el('div', { class: 'status row between' }, el('span', null, t('La demande a changé depuis cette recherche.')), demandePrete ? chercherANouveau() : null) : null,
       ...cartes,
       autres.length ? el('details', null, el('summary', { class: 'btn' }, t('Autres pages trouvées ({n})', { n: autres.length })), ...autres) : null, // K2
       el('div', { class: 'status' }, t('L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.')),

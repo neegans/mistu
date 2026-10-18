@@ -128,6 +128,10 @@ export async function runRechercheWebTests({ eq, ok }) {
         'dateLisible : « Sept. », « Sep », le 29 février d’une année bissextile et la casse libre sont lus (confort, ronde 2)');
       { const refusees = ['Mayhem 5, 2025', 'April 30, 0025', 'Feb 29, 2025', 'Avril 30, 2025'];
         eq(refusees.map((x) => dl(x, 'fr')), refusees.map(() => null), 'dateLisible : un mot qui commence comme un mois, une année hors 1000-2999, un 29 février non bissextile ou un mois français → null (rien d’inventé, ronde 2)'); }
+      // Ronde 3 (F1) : la borne d'année 1000-2999 est épinglée, et la même pour la date ISO seule.
+      eq([dl('Dec 31, 2999', 'fr'), dl('2999-12-31', 'fr')], ['31 décembre 2999', '31 décembre 2999'], 'dateLisible : l’année 2999 est lue, en mois-jour-année comme en ISO (confort, ronde 3)');
+      { const refusees = ['April 30, 0150', 'April 30, 3000', '0150-04-30', '3000-04-30'];
+        eq(refusees.map((x) => dl(x, 'fr')), refusees.map(() => null), 'dateLisible : une année hors 1000-2999 → null, en mois-jour-année comme en ISO (confort, ronde 3)'); }
     }
     eq([lu.resultats[2].titre.length, lu.resultats[2].titre.includes('\u{202E}')], [300, false], 'lecture : un titre de 351 dont le U+202E est AVANT la coupe est nettoyé puis borné à 300 points de code (S2)');
     eq(lu.resultats[2].hote, 'c.test', 'lecture : l’hôte est recalculé');
@@ -773,6 +777,29 @@ export async function runRechercheWebTests({ eq, ok }) {
         const dernier = appels.args[appels.args.length - 1];
         eq([enHaut, appels.n, dernier.q, dernier.filtres, affichees.includes('Sans gluten'), enVol(root)], [true, n + 1, 'saumon fenouil', affichees, true, true], 'le « Chercher à nouveau » de la mention (avant les liens) lance la tape : un appel, avec les puces courantes (confort, item 2)');
         appels.rendre(trouve); await tick();
+        // Ronde 3 (F3) : bouton() prend désormais celui du HAUT dans l'état K1 — le bouton du BAS y relance lui aussi.
+        [...root.querySelectorAll('.chip.removable')].find((c) => c.textContent === 'Sans gluten').click();
+        {
+          const r = relances(); const bas = r[r.length - 1]; const etat = [r.length, bas?.parentElement?.tagName];
+          const n2 = appels.n; const affichees2 = puces(root);
+          bas?.click(); await tick();
+          const d2 = appels.args[appels.args.length - 1];
+          eq([etat, appels.n, d2?.q, d2?.filtres, enVol(root)], [[2, 'SECTION'], n2 + 1, 'saumon fenouil', affichees2, true], 'K1 : le « Chercher à nouveau » du BAS lance aussi la tape : un appel, avec les puces affichées (confort, ronde 3)');
+          appels.rendre(trouve); await tick();
+        }
+        // Ronde 3 (M1) : champ vidé puis Entrée → la demande n'a plus de clé (construireDemande). La mention K1 reste, mais pas
+        // de relance en haut : elle ne ferait rien. Le bouton du bas (préexistant) ne change pas. La frappe seule ne redessine
+        // pas l'écran (l'écouteur `input` ne fait qu'ouvrir ou fermer le bouton de l'écran sans issue) : c'est Entrée qui le fait.
+        {
+          const champ = root.querySelector('input[type="search"]');
+          const n3 = appels.n;
+          champ.value = ''; champ.dispatchEvent(new Event('input')); await tick();
+          champ.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); await tick();
+          const r = relances();
+          eq([texte(root).includes('La demande a changé depuis cette recherche.'), r.length, r[0]?.parentElement?.tagName, appels.n], [true, 1, 'SECTION', n3], 'K1 avec une demande vide : la mention reste, UN seul « Chercher à nouveau » (celui du bas), aucun appel (confort, ronde 3)');
+          champ.value = 'saumon fenouil'; champ.dispatchEvent(new Event('input'));
+          champ.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); await tick();
+        }
       }
       // R-WEB-3 : un « trouvé » dont aucune adresse ne survit à la revalidation au rendu replie sur l'écran « rien »
       root.remove(); S.reinitialiserWeb();
