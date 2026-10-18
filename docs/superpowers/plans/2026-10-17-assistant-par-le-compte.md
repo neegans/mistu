@@ -20,7 +20,7 @@
 - Commits : message ASCII sans accents, fichiers nommés (`git add <fichiers>`, jamais `-A`), trailer `Co-Authored-By: <modèle réel> <noreply@anthropic.com>`. Jamais réécrire l'historique. Push = geste de Neegan.
 - Caractères invisibles : **jamais `grep`** (dans ce shell, `grep` est une fonction qui appelle `ugrep` en UTF-8 : un motif d'octets rend 0 à tort — mesuré le 18 octobre). Mesurer en Python : `python3 -I -c 'import sys,re; inv=re.compile("[​-‏  ‪-‮⁠-⁤⁦-⁩﻿]"); [print(p, len(inv.findall(open(p,encoding="utf-8").read()))) for p in sys.argv[1:]]' <fichiers touchés>` → 0 partout. Une fixture qui doit contenir un tel caractère s'écrit en `\uXXXX` dans le source du test (par un script si l'outil d'écriture décode les échappements) et se vérifie par les octets.
 - `0001` et `0002` ne bougent pas d'un octet (`--check` + empreintes SHA-256 épinglées, tâche 8).
-- Les prédicats injectés valent **`false` par défaut** (`configSuitLeCompte = () => false`) : hors production par défaut, donc les tests existants d'envoi initial (23/24) ne bougent pas ; les tests du lot passent `() => true`. **R-CPT-1**, consigné en spec § 12 à la tâche 9.
+- Les prédicats injectés valent **`false` par défaut** (`configSuitLeCompte = () => false`) : hors production par défaut : les tests existants d'envoi initial (23/24), portés provisoirement à 24/25 par la tâche 1, **reviennent à 23/24 à la tâche 4** ; les tests du lot passent `() => true`. **R-CPT-1**, consigné en spec § 12 à la tâche 9. **R-CPT-2** : `withRepo` (tests/sync-fixture.js) pose la capture avec `configSuitLeCompte: () => true` dès la tâche 4.
 
 ## Review Focus
 
