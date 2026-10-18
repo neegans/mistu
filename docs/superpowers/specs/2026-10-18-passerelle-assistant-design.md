@@ -3,7 +3,7 @@
 Date : 18 octobre 2026 (matin, après la mise en ligne des trois lots de la nuit : `main` = `cdbd6e0`). Branche
 `passerelle-assistant`, worktree `~/projects/mistu-passerelle` (serveur `python3 -m http.server 8086`). Révision 1 (§ 9 tranché par
 Neegan le 18 octobre) ; **révision 2 à la clôture** : § 2, § 4, § 6, § 8 et § 9 amendés par ce que la construction a établi, § 10 ajouté
-(rulings).
+(rulings). **Vague finale** (revue finale de branche, 18 octobre) : § 2, § 5, § 8 et § 10 complétés (F-1 à F-14).
 
 ## 0. Ce que Neegan a tranché (18 octobre, 11 h)
 
@@ -47,7 +47,8 @@ app (GitHub Pages) ──POST /functions/v1/assistant (Bearer <jeton de session 
   5. appelle Anthropic avec la clé `ANTHROPIC_API_KEY` (secret), délai 120 s, puis **renvoie le corps JSON d'Anthropic tel quel** avec
      son statut (l'app garde son classement actuel des issues) — les en-têtes d'Anthropic ne sont pas relayés. Amendé à la clôture :
      seuls 200, 400, 403, 413 et 429 sont relayés avec leur corps ; 529 devient 503 et tout autre statut (401, 404, 5xx, redirection) devient 502,
-     sans le corps d'Anthropic ; la réponse est lue bornée à 2 Mio d'octets ;
+     sans le corps d'Anthropic ; la réponse est lue bornée à 2 Mio d'octets ; amendé (F-5) : si le client part (`req.signal`), l'appel amont est
+     abandonné, la ligne du journal porte 499 et rien n'est relayé — le client attend 135 s, pas 120 ;
   6. journalise une ligne : compte, outil, statut, jetons d'entrée/sortie (depuis `usage`), durée, taille du corps — **jamais** le
      contenu, jamais la clé, jamais une erreur brute d'Anthropic au-delà de son `type`.
 - **Côté app** : un module `src/domain/passerelle.js` (`appelerAssistant(outil, corps, deps)`) remplace `anthropicHeaders` +
@@ -56,7 +57,8 @@ app (GitHub Pages) ──POST /functions/v1/assistant (Bearer <jeton de session 
   (clé publique) + `Authorization: Bearer <access_token>`. Sans session → issue `non_connecte` (nouvelle raison), aucun appel.
 - **`settings.llm` / `assistant_config`** : plus lus pour l'assistant. La section Réglages devient : « L'assistant est actif pour
   `<adresse>` — modèle `<nom>` » (le nom vient d'un `GET` de la fonction qui ne demande rien à Anthropic), ou « Connecte-toi pour
-  utiliser l'assistant ». Le magasin `assistant_config` et sa table restent (migration à ajout seul, données vides) ; une passe
+  utiliser l'assistant » (amendé, F-4 : rien n'est affirmé avant la réponse du `GET` — « Vérification de l’assistant… » — et « actif » n'est dit
+  qu'après un 200 lisible). Le magasin `assistant_config` et sa table restent (migration à ajout seul, données vides) ; une passe
   **efface** la ligne `llm` locale si elle porte une clé (`api_key` → `''`), pour qu'aucune clé ne traîne dans IndexedDB ; la
   synchro reçoit la ligne vide. Dette nommée : retirer le magasin à un lot ultérieur (il faudrait une migration et le compte des
   26 → 25 magasins).
@@ -99,7 +101,7 @@ fonction (24 instructions + 5 blocs `do` à l'analyse ; **jamais jouée** : gest
 | quota du jour atteint | 429 `quota` | `quota` | « Tu as atteint la limite du jour pour l'assistant ({n} appels). » |
 | Anthropic 429 / 5xx / 4xx | relayé | inchangé (`trop_de_demandes`, `serveur`, `requete`) | inchangé |
 | fonction en panne / délai | 502 / 504 | `serveur` / `delai` | inchangé |
-| corps trop gros | 413 | `requete` | « La demande est trop lourde. » |
+| corps trop gros | 413 | `requete` | « La demande est trop lourde. » (lecture de pages : « La demande est trop lourde : choisis moins de pages. ») |
 
 ## 6. Déploiement et secrets (gestes de Neegan)
 
@@ -139,10 +141,11 @@ Complété à la clôture (détail et sources dans `CLAUDE.md`, section « La pa
   service ; la porte « Créer une recette avec ces critères » qui s'affichait sur cette issue a disparu avec elle.
 - `decisionQuota` (pur, testé sous Node) n'est plus importé par `index.ts` : la règle réelle vit en SQL, dans `assistant_reserver`.
 - Le test d'ordre `installCapture` / `repo.init()` de `app.js` est un test de texte source ; dérive d'horloge avant la première réponse
-  serveur ; un appareil en ancienne version qui réécrit sa clé après la passe d'effacement (garde à usage unique).
+  serveur ; un appareil en ancienne version qui réécrit sa clé : la passe d'effacement tournant à chaque démarrage (F-9), elle le rattrape au
+  démarrage suivant d'un appareil à jour, mais la clé a transité par le serveur entre-temps.
 - Le `GET` n'est pas annoncé dans `Access-Control-Allow-Methods` ; `pause_turn` non géré (relayé tel quel) ; `getUser()` est un appel
   réseau par requête ; une ligne « en vol » (statut 0) compte dans le quota si la fonction plante ; `connect-src 'self' https:` non resserrée.
-- La commande de déploiement de `supabase/README.md` (étape 10) n'a pas `--use-api`, celle qui a servi.
+- F-15 / M7 : le corps de la demande (jusqu'à 8 Mio) est analysé deux fois (`index.ts`, puis `lireDemande`) ; non pris.
 
 ## 9. Décisions — tranchées par Neegan le 18 octobre
 
@@ -158,7 +161,7 @@ Une ligne chacun ; le détail, la raison et le « coût si faux » sont dans le 
 `.superpowers/sdd/2026-10-18-passerelle-assistant/progress.md` (hors git, à copier avant tout `git worktree remove`).
 
 - **R-PV-1** (pré-vol) la raison d'`appelerAssistant` est le champ `erreur` du corps quand il existe, sinon le statut (401 `non_connecte`, 403 `non_admis`, 429 `quota`, 413 `trop_lourd`, 400/422 `requete`, 504 `delai`, ≥ 500 `serveur`) ; les modules de domaine classent ensuite (413/422/400 → `requete`, 429 sans `erreur` → `trop_de_demandes`, 502/503 → `serveur`, 504 → `delai`).
-- **R-PV-2** (pré-vol) T3 ajoute `etatAssistant({ fetch, session, config, signal })` : un `GET` qui rend `{ modele, quotaJour }`, pour Réglages et pour une sonde sans dépense.
+- **R-PV-2** (pré-vol) T3 ajoute `etatAssistant({ fetch, session, config, signal })` : un `GET` que la fonction rend `{ modele, quotaJour, cles }` (`cles` ajouté par F-1 ; l'app n'en relit que les deux premiers), pour Réglages et pour une sonde sans dépense.
 - **R-PV-3** (pré-vol) T3 retire `non_configure`, `non_pris_en_charge` et `cle_refusee` des modules de domaine ; T4 retire leurs textes et adapte les écrans.
 - **R-T1-1** les bornes 512 Kio / 8 Mio se mesurent en OCTETS : `lireDemande` reçoit `octets` (lu par `index.ts`) ; sans lui, elle retombe sur `texte.length`.
 - **R-T1-2** `ligneJournal` ne validait ni l'outil, ni le statut, ni `ownerId` (l'appelant les tient) ; relu en T2, durci par R-T1-6.
@@ -176,7 +179,7 @@ Une ligne chacun ; le détail, la raison et le « coût si faux » sont dans le 
 - **R-T2-5** la mise à jour du journal ne pose que le statut, les jetons et la durée.
 - **R-T2-6** preuve 1.09 : un `has_table_privilege` par privilège, reliés par `and` (une liste vaut OU) ; `set_config` en `perform` dans un bloc `do` ; README : jeton lu par `read -rs`, `ASSISTANT_ORIGINES` REMPLACE le défaut.
 - **R-T2-7** `index.ts` est éprouvé sous Node par comportement (`stripTypeScriptTypes`, faux `Deno`, faux supabase-js, faux `fetch`), pas par épinglage de lignes.
-- **R-T3-1** plomberie minimale des écrans : `auth.jeton()` (lecture locale, sans réseau) fournit la session aux cinq points d'appel ; textes et Réglages restent à T4 (`sessionCourante` écarté).
+- **R-T3-1** plomberie minimale des écrans : `auth.jeton()` (lecture locale ; un jeton expiré peut être rafraîchi par le réseau par supabase-js, l'attente est bornée à 2 s par `sessionAssistant`, R-T3-11) fournit la session aux cinq points d'appel ; textes et Réglages restent à T4 (`sessionCourante` écarté).
 - **R-T3-2** la session est une DONNÉE `{ access_token, user? } | null` ; sans jeton non vide → `non_connecte` sans `fetch` ; le jeton n'apparaît dans aucun objet rendu.
 - **R-T3-3** `cfg` disparaît des deux modules de domaine ; `non_configure`, `non_pris_en_charge` et `cle_refusee` n'existent plus ; le modèle d'une issue vient de `json.model` (≤ 80 points de code) ; les gardes « args null » rendent `non_connecte`.
 - **R-T3-4** classement des statuts dans `passerelle.js` (champ `erreur` d'abord, puis statut) puis dans les modules de domaine ; les erreurs d'outil web restent telles quelles.
@@ -190,9 +193,9 @@ Une ligne chacun ; le détail, la raison et le « coût si faux » sont dans le 
 - **R-T3-12** le balayage « le jeton est absent de chaque résultat » attend chaque résultat (`garde(await …)`) et compte exactement (86).
 - **R-T3-13** `ecrite: true|false` sur tous les résultats : un 429 écrit par la passerelle → `quota`, un 429 relayé → `trop_de_demandes`.
 - **R-T4-1** pas de `ctx.session` : l'écran lit la session par `sessionAssistant(ctx)` ; aucun champ `session` dans `state.js` ni `app.js`.
-- **R-T4-2** Réglages → Assistant en deux états, première ligne = le but ; plus de champs fournisseur / modèle / URL / clé, ni Enregistrer, ni Tester, ni « Retirer… ».
-- **R-T4-3** passe unique `effacerCleLocale()` dans `init()` (garde `sync_state.cle_locale_effacee`) : une ligne `assistant_config` qui porte une clé ou un fournisseur est réécrite vide, d'origine `local`, pour partir au compte.
-- **R-T4-4** textes exacts des gardes (« Connecte-toi… » + « Se connecter », `non_admis`, `quota`, 413 « La demande est trop lourde. »), par `t()` avec leur entrée `en.js`.
+- **R-T4-2** Réglages → Assistant en deux états (sans session / avec session), première ligne = le but ; plus de champs fournisseur / modèle / URL / clé, ni Enregistrer, ni Tester, ni « Retirer… » ; amendé par F-4 : avec une session, « Vérification de l’assistant… » jusqu'à la réponse du `GET`, puis une seule des quatre sorties.
+- **R-T4-3** passe d'effacement `effacerCleLocale()` dans `init()` : une ligne `assistant_config` qui porte une clé ou un fournisseur est réécrite vide, d'origine `local`, pour partir au compte ; amendé par F-9 : elle tourne à CHAQUE `init()`, il n'y a plus de garde `sync_state.cle_locale_effacee` (le « une fois » laissait passer une clé arrivée après le premier démarrage) ; l'idempotence tient à la ligne vide.
+- **R-T4-4** textes exacts des gardes (« Connecte-toi… » + « Se connecter », `non_admis`, `quota`, 413 « La demande est trop lourde. » — « La demande est trop lourde : choisis moins de pages. » pour la lecture de pages, F-3), par `t()` avec leur entrée `en.js`.
 - **R-T4-5** `OpenAICompatibleProvider` est retiré ; le magasin `assistant_config` et `assistant-config.js` restent (dette).
 - **R-T4-6** tests par comportement (deux états de Réglages, passe d'effacement, quatre écrans à 0 appel) et mutant sur la garde de `search.js`.
 - **R-T4-7** `sw.js` `-4` ; total épinglé relevé dans « obtenu ».
@@ -201,3 +204,20 @@ Une ligne chacun ; le détail, la raison et le « coût si faux » sont dans le 
 - **R-T4-10** à la bascule vers « Web » dans la même instance de `search.js`, la session est relue avant de rendre : pas de flash « Connecte-toi » pour une personne connectée.
 - **R-T4-11** les textes « Une recherche / Une création = un appel à l’assistant, compté dans ton quota du jour. » : plus aucun texte d'écran ne nomme Anthropic.
 - **T5a** (restes parqués, sans numéro R) : P-1 `jourDe` → `null` hors `AAAA-MM-JJ` ; P-2 défaut `max_tokens` = `min(4000, plafond)` ; P-3 preuve 2.04 reconnaît aussi `assistant_reserver` / `function` ; P-4 corps annulé quand `content-length` dépasse ; P-5 quota borné à l'int4 ; P-6 « isolat chaud » dit non prouvé ; P-7 `notify pgrst, 'reload schema';` au README ; P-8 commentaire READ COMMITTED dans `0004` ; P-10 « Code : … » borné à 40 points de code.
+
+**Vague finale (revue finale de branche, 18 octobre 2026 ; rulings F-1 à F-14 du contrôleur, commits `f43e071` serveur et `2a2f838` app).** Une ligne chacun :
+- **F-1** (I2) `cleDepuis(brut, prefixe)` lit les clés Supabase injectées sous toutes leurs formes (chaîne nue ou JSON, liste de chaînes ou d'objets `{ api_key }`, objet), à condition qu'elles portent LEUR préfixe (`sb_publishable_` / `sb_secret_`) ; sinon repli legacy ; le `GET` ajoute `cles: nouvelles | legacy | mixte` (repère non secret).
+- **F-2** (I3) `README.md` racine : plus de clé ni de fournisseur à configurer ; l'assistant est servi par le compte.
+- **F-3** (I1) les pages envoyées sont réduites (1568 px au plus, JPEG) ; la page stockée reste telle quelle ; le 413 d'une lecture de pages dit « choisis moins de pages ».
+- **F-4** (M1) Réglages : « Vérification de l’assistant… » pendant le `GET` ; « actif pour X » seulement après un 200 ; `non_admis` seul ; 401 → « Connecte-toi… » + bouton ; autre → « indisponible » seul.
+- **F-5** (M2) `tentativeMs` client 135 000 ; côté serveur, `req.signal` abandonne l'appel amont, journal 499, aucun corps relayé.
+- **F-6** (M3) `origine` → `serveur` côté app (panne de configuration, pas un compte refusé).
+- **F-7** (M4) garde de compte refusée : `carteConnexion(connecter, ctx)` dit le message de la garde, sans « Se connecter » (pas de boucle OAuth).
+- **F-8** (M5) la carte « Connecte-toi » se cache et se montre sans être retirée ; le bouton d'extraction d'une recette ne se rallume que si le fournisseur est configuré.
+- **F-9** (M6) la passe d'effacement tourne à chaque `init()` ; geste facultatif au README pour vider côté serveur.
+- **F-10** (M8) harnais : `GET` sans jeton → 401, non admis → 403, sans fetch ni réservation.
+- **F-11** (M9) test `jeton()` reformulé ; R-T3-1 : lecture locale, rafraîchissement possible par le réseau, attente bornée à 2 s.
+- **F-12** (M10) preuve `0004`, verdict 1.09 : `USAGE` sur la séquence de `id` pour `service_role`.
+- **F-13** (M11) passe d'effacement sans compte : l'entrée d'outbox existe avec `user_id` nul (R-L3-24).
+- **F-14** README étape 10 : `--use-api`, origine locale d'exemple `:8086` ; « Appareil perdu ou clé exposée » réécrite pour la passerelle.
+- **F-15** (M7, parqué) double `JSON.parse` : non pris, dette (§ 8).

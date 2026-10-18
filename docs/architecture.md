@@ -373,8 +373,8 @@ nommée : `source_pages.sha256` reste la même sorte de relation latente, jamais
 ## Chercher sur le web avec l'assistant (17 octobre 2026)
 
 > **Amendé le 18 octobre** (lot « La passerelle de l'assistant », branche non fusionnée) : `ANTHROPIC_MESSAGES_URL`, `anthropicHeaders` et toute clé ont disparu de
-> l'app ; le transport passe par `passerelle.js` (session, jamais de clé) ; `cle_refusee` et `recherche_desactivee` n'existent plus. Le texte ci-dessous
-> décrit le lot tel qu'il était à sa clôture.
+> l'app ; le transport passe par `passerelle.js` (session, jamais de clé) ; `cle_refusee` et `recherche_desactivee` n'existent plus ; le délai client
+> est de 135 s (et non plus 45 s). Le texte ci-dessous décrit le lot tel qu'il était à sa clôture.
 
 Spec : `docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md` (rév. 2.1 ; § 11.2 : ce que la construction a
 amendé, R-WEB-1 à R-WEB-10). Livré ici : l'onglet « Web » de la recherche lance, sur une tape et sur elle seule, **un**
@@ -558,7 +558,8 @@ quarantaine `refus`, `inconnu` → recul, `tests/sync-l3.js`) et l'ordre « `ass
 ## Créer une recette avec l'assistant (18 octobre 2026)
 
 > **Amendé le 18 octobre** (lot « La passerelle de l'assistant », branche non fusionnée) : l'appel de création passe par la fonction `assistant` (outil `creation`),
-> avec la session ; sans session, l'écran dit « Connecte-toi pour utiliser l’assistant. ». Le texte ci-dessous décrit le lot tel qu'il était à sa clôture.
+> avec la session ; sans session, l'écran dit « Connecte-toi pour utiliser l’assistant. » ; le délai client est de 135 s (et non plus 120 s). Le texte ci-dessous
+> décrit le lot tel qu'il était à sa clôture.
 
 Spec : `docs/superpowers/specs/2026-10-18-creer-avec-l-ia-design.md` (rév. 2, amendée à la clôture puis à la vague finale ;
 § 11 : rulings R-CRE-1 à R-CRE-15). Livré ici : une demande en texte libre, avec restrictions, type, portions et temps maximal, devient, sur un clic
@@ -740,7 +741,8 @@ Spec : `docs/superpowers/specs/2026-10-18-passerelle-assistant-design.md` (rév.
 R-PV-1 à R-T4-11). Livré ici (branche `passerelle-assistant`, non fusionnée) : l'app n'appelle plus l'API d'Anthropic. Elle poste à
 une fonction Supabase, `assistant`, avec la session de la personne ; la clé Anthropic est un secret du projet et ne quitte jamais le
 serveur. Un module neuf côté app (`passerelle.js`), une fonction et une migration côté serveur ; ailleurs, des gardes « Connecte-toi »
-et une section Réglages sans champ.
+et une section Réglages sans champ. Amendé par la vague finale de la revue de branche (F-1 à F-14, commits `f43e071` et `2a2f838`) : les
+points touchés sont dits ci-dessous ; la fonction est déployée en version 3 (code `2a2f838`).
 
 ```text
 app (GitHub Pages, session Supabase)
@@ -749,14 +751,15 @@ app (GitHub Pages, session Supabase)
   v
 fonction « assistant » (Deno, verify_jwt false), gardes dans CET ordre :
   OPTIONS -> 204 | origine admise | méthode POST ou GET | jeton de forme valide | auth.getUser(jeton) |
-  is_allowed() (clé publique + jeton de la personne) | GET -> { modele, quotaJour }, fin |
+  is_allowed() (clé publique + jeton de la personne) | GET -> { modele, quotaJour, cles }, fin |
   corps lu en flux, coupé à 8 Mio | JSON + liste blanche + bornes de l'outil (lireDemande)
   |
   v   rpc, clé SECRÈTE du projet
 public.assistant_reserver(owner, outil, octets, quota)   verrou consultatif par compte, comptage du jour UTC,
   |                                                      insertion « en vol » (statut 0) ; null = quota atteint -> 429
   v
-api.anthropic.com/v1/messages   x-api-key = secret ANTHROPIC_API_KEY, modèle forcé, redirect 'error', 120 s
+api.anthropic.com/v1/messages   x-api-key = secret ANTHROPIC_API_KEY, modèle forcé, redirect 'error', 120 s ;
+  |                               req.signal (le client part) abandonne l'appel -> journal 499, aucun corps relayé
   |
   v   réponse lue bornée (2 Mio d'octets), corps relayé tel quel pour 200 / 400 / 403 / 413 / 429
 public.assistant_journal : la ligne reçoit statut, jetons, durée (jamais de contenu) ; vue public.assistant_usage_jour
@@ -769,16 +772,23 @@ supabase/functions/assistant/logique.js   pur (aucune API Deno ; tourne sous Nod
                                           statutRelaye, ligneJournal (compteurs), corpsErreur, decisionQuota (règle de référence
                                           testée sous Node ; plus importée par index.ts : la règle vit en SQL).
 supabase/functions/assistant/index.ts     Deno.serve : l'ordre des gardes, lireCorpsBorne (demande et réponse), la réservation,
-                                          l'appel, la mise à jour du journal, le try/catch global ; secrets lus à chaque requête.
+                                          l'appel (abandonné si le client part : 499), la mise à jour du journal, le try/catch global ;
+                                          secrets lus à chaque requête ; cleDepuis(brut, prefixe) lit les clés Supabase injectées sous
+                                          toutes leurs formes, à condition qu'elles portent leur préfixe (repli sur les clés legacy).
 supabase/functions/assistant/deno.json    import map : npm:@supabase/supabase-js@2.118.0 (épinglé) ; deno.d.ts : types pour tsc, jamais importé.
 supabase/migrations/0004_assistant_journal.sql   table, vue, fonction ; à ajout seul ; hors du générateur (NOMS inchangé).
-supabase/proofs/0004_assistant_journal.sql       preuve (24 instructions + 5 blocs do) ; jamais jouée.
+supabase/proofs/0004_assistant_journal.sql       preuve (24 instructions + 5 blocs do ; 1.09 : droits de service_role dont USAGE sur la
+                                          séquence de id) ; jamais jouée.
 src/domain/passerelle.js    transport pur : appelerAssistant (POST), etatAssistant (GET), echecDomaine, urlAssistant, sessionValide.
-src/domain/llm.js           PasserelleProvider ; providerFrom(settings, { session }) ; NoneProvider sans session.
+src/domain/llm.js           PasserelleProvider ; providerFrom(settings, { session }) ; NoneProvider sans session ;
+                            pagePourEnvoi(blob) : la copie d'une page qui part à l'assistant (1568 px au plus, JPEG).
 src/domain/recherche-web.js, creation-ia.js   transport seulement (session au lieu de cfg) ; toute leur logique est inchangée.
-src/sync/auth.js            jeton() : { access_token, user: { id, email } } | null, lu sur l'appareil, sans réseau.
-src/ui/components.js        sessionAssistant(ctx, { delaiMs }), carteConnexion, texteRefusAssistant, texteEchecAssistant.
-src/ui/settings.js          section Assistant à deux états ; src/model/repo.js effacerCleLocale() ; src/app.js installCapture avant init().
+src/sync/auth.js            jeton() : { access_token, user: { id, email } } | null ; lecture locale, un jeton expiré peut être rafraîchi
+                            par le réseau par supabase-js (l'attente est bornée à 2 s par sessionAssistant).
+src/ui/components.js        sessionAssistant(ctx, { delaiMs }), carteConnexion(connecter, ctx), messageGardeRefusee, texteRefusAssistant,
+                            texteEchecAssistant.
+src/ui/settings.js          section Assistant (sans session, ou avec session et un GET) ; src/model/repo.js effacerCleLocale() (à chaque
+                            init()) ; src/app.js installCapture avant init().
 tests : tools/assistant-logique.test.mjs, assistant-index.test.mjs (+ faux/supabase.mjs), generer-migrations.test.mjs ; tests/passerelle.js.
 ```
 
@@ -787,6 +797,9 @@ tests : tools/assistant-logique.test.mjs, assistant-index.test.mjs (+ faux/supab
 `non_connecte` sans `fetch`. Un seul transport interne pour le POST et le GET : trois en-têtes, `redirect: 'error'`, `credentials: 'omit'`,
 corps de succès lu en flux (2 Mio), corps d'erreur (64 Kio) lu pour son seul champ `erreur`, jamais rendu. Le jeton n'entre dans aucun
 objet rendu. Les écrans (`search.js`, `creer-ia.js`, `import.js`, `recipe-edit.js`) lisent la session au rendu et la relisent à l'appel.
+Quand la garde de compte a refusé l'adresse sur cet appareil (`ctx.sync.guard.ok === false`), `carteConnexion` dit le message de la garde au
+lieu de « Connecte-toi » et n'offre pas « Se connecter » (il boucle sur le même refus) ; Réglages fait de même. Les pages d'une lecture sont
+réduites avant l'envoi (`pagePourEnvoi`) ; une page indécodable n'est jamais envoyée.
 
 **Réservation atomique.** `public.assistant_reserver` fait en une transaction ce que deux appels simultanés ne pouvaient pas faire
 séparément : prendre un verrou consultatif propre au compte, compter les lignes du jour UTC, refuser au quota (`null`), sinon insérer la
@@ -797,7 +810,8 @@ concurrence elle-même ne se prouve pas dans l'éditeur SQL (une session, verrou
 **Bornes.** Demande : `content-length` refusé avant lecture, flux coupé à 8 Mio (la plus grande borne d'outil), puis 512 Kio
 (`recherche-web`, `creation`) ou 8 Mio (`extraction`), en octets ; `max_tokens` ≤ 16 000 (défaut `min(4000, plafond)`) ; `system` ≤ 20 000
 caractères, 20 messages, `max_uses` ≤ 5 ; délai amont 120 s ; réponse ≤ 2 Mio d'octets ; quota par défaut 60 par compte et par jour UTC,
-borné à l'int4 (secret `ASSISTANT_QUOTA_JOUR`). Côté app : 120 s par appel, corps d'état 16 Kio.
+borné à l'int4 (secret `ASSISTANT_QUOTA_JOUR`). Côté app : 135 s par appel (le serveur attend Anthropic 120 s plus ses propres étapes, et l'idle de
+la plateforme est de 150 s ; le GET d'état de Réglages garde 15 s), corps d'état 16 Kio ; une page envoyée tient en 1568 px de côté au plus.
 
 **Classement des statuts.**
 
@@ -806,25 +820,31 @@ borné à l'int4 (secret `ASSISTANT_QUOTA_JOUR`). Côté app : 120 s par appel, 
 | 204 (`OPTIONS`) | aucun ; `Allow-Origin` seulement si l'origine est admise | — |
 | 200, 400, 403, 413, 429 d'Anthropic | corps d'Anthropic, sans champ `erreur` | succès ; 400/413 → `requete` (413 : « trop lourde ») ; 403 → `serveur` ; 429 → `trop_de_demandes` |
 | 401 | `non_connecte` | `non_connecte` |
-| 403 | `origine` (absente ou refusée) ou `non_admis` | `non_admis` |
+| 403 | `non_admis` | `non_admis` |
+| 403 | `origine` (absente ou refusée) | `serveur` (une panne de configuration, pas un compte refusé) |
 | 405 | `methode` | `requete` |
-| 400 / 422 / 413 | `requete` / `bornes` / `trop_lourd` | `requete` (413 : « trop lourde ») |
+| 400 / 422 / 413 | `requete` / `bornes` / `trop_lourd` | `requete` (413 : « trop lourde » ; « choisis moins de pages » pour une lecture de pages) |
 | 429 | `quota` + `quota: n` | `quota` (« {n} appels », ou sans nombre) |
 | 502 | `serveur` : réservation en erreur, exception, réponse > 2 Mio, 401 / 404 / 5xx / redirection d'Anthropic | `serveur` |
 | 503 | `serveur` (529 d'Anthropic) | `serveur` |
 | 504 | `delai` | `delai` |
+| 499 | aucun corps : le client est parti, l'appel amont est abandonné | — (le client n'est plus là) ; la ligne du journal porte 499 |
 
 **Ce qui est absent.** Streaming, cache des réponses, plusieurs modèles par outil, quotas par jetons (le quota compte des appels), relevé
 d'usage dans l'app (aujourd'hui : `public.assistant_usage_jour` dans l'éditeur SQL), assistant sans compte, plusieurs clés ou
 fournisseurs (`OpenAICompatibleProvider` est retiré), gestion de `pause_turn` (relayé tel quel), et le retrait du magasin
-`assistant_config` (26 → 25) : il reste, ainsi que `assistant-config.js`, mais plus rien ne le lit pour l'assistant. Une passe unique de
-`repo.init()` (`effacerCleLocale`, garde `sync_state.cle_locale_effacee`) réécrit vide toute ligne qui porte une clé ou un fournisseur, en
-origine `local` : sur un hôte de production, la ligne vide part au compte et efface la clé du serveur et des autres appareils.
+`assistant_config` (26 → 25) : il reste, ainsi que `assistant-config.js`, mais plus rien ne le lit pour l'assistant. Une passe de
+`repo.init()` (`effacerCleLocale`) réécrit vide toute ligne qui porte une clé ou un fournisseur, en origine `local` : sur un hôte de production,
+la ligne vide part au compte et efface la clé du serveur et des autres appareils. Elle tourne à **chaque** démarrage, sans garde (une garde
+« une fois » laissait passer une clé arrivée après le premier démarrage) : une ligne déjà vide, incomplète ou absente n'écrit rien. Dette nommée
+(F-15, M7) : le corps de la demande, jusqu'à 8 Mio, est analysé deux fois (`index.ts`, puis `lireDemande`).
 
 **Ce qui n'est pas prouvé.** La preuve `0004` n'a pas été jouée ; aucun POST réel n'a eu lieu (aucun appel à Anthropic, aucune ligne de
-journal) ; le préflight d'un vrai navigateur, le `GET` avec session, `is_allowed` pour une session non admise, l'ordre `installCapture` /
-`init()` dans l'app réelle (`app.js` n'est pas importable par la suite), Safari et l'iPhone. Mesuré : le déploiement (v1 et v2) et neuf
-sondes `curl` sans dépense (`supabase/proofs/RESULTATS-mitsu.md`).
+journal) ; le préflight d'un vrai navigateur, le `GET` avec session (dont la valeur de `cles` : par quelle voie la plateforme sert les clés),
+`is_allowed` pour une session non admise, l'abandon du client → 499 (prouvé sous Node seulement : que `req.signal` s'abaisse dans le runtime
+Supabase reste à constater), l'ordre `installCapture` / `init()` dans l'app réelle (`app.js` n'est pas importable par la suite), Safari et
+l'iPhone. Mesuré : le déploiement (v1, v2 et v3) et neuf sondes `curl` sans dépense, identiques aux trois versions
+(`supabase/proofs/RESULTATS-mitsu.md`).
 
 ## Modèle de données (magasins IndexedDB)
 

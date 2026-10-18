@@ -1,18 +1,21 @@
-# STATE.md — Cuisine OS (mistu) — état au 18 octobre 2026 (lot « Passerelle de l'assistant » fini dans le worktree `mistu-passerelle`, fonction déployée sur mitsu, `0004` pas collée, pas fusionné ; les trois lots de la nuit sont en ligne)
+# STATE.md — Cuisine OS (mistu) — état au 18 octobre 2026 (lot « Passerelle de l'assistant » fini dans le worktree `mistu-passerelle`, fonction déployée sur mitsu en version 3, `0004` pas collée, pas fusionné ; les trois lots de la nuit sont en ligne)
 
-**18 octobre 2026, 14 h 29 — LOT « PASSERELLE DE L'ASSISTANT » : FINI dans le worktree, fonction DÉPLOYÉE sur `mitsu` (version 2),
+**18 octobre 2026, 15 h 19 — LOT « PASSERELLE DE L'ASSISTANT » : FINI dans le worktree, fonction DÉPLOYÉE sur `mitsu` (version 3),
 `0004` PAS collée, PAS fusionné, PAS poussé.** Branche `passerelle-assistant`, worktree `~/projects/mistu-passerelle` (serveur 8086), base
-`main` `cdbd6e0`, 15 commits jusqu'à `00424b6`, plus la clôture des documents. Pour Neegan : plus de clé à taper ; connecté, l'assistant
-marche sur tous les appareils (60 appels par compte et par jour, `claude-sonnet-5-5`, Réglages dit « actif pour … ») ; la clé est un
-secret du projet et l'app n'appelle plus `api.anthropic.com`. Déployée par le contrôleur : v1 17 h 05 UTC (`1590ba8`), **v2 18 h 16 UTC
-(`6d7ed21`)**, `verify_jwt: false`, neuf sondes sans dépense conformes aux deux ; **aucun POST réel**. Suite **2910/2910** (épinglé 2909),
-Node **89/89**, `--check` 0, `sw.js` `cuisine-os-v0.8.0-5`. **Gestes, dans l'ordre :** (1) coller `0004` sur `mitsu`, puis `notify pgrst,
-'reload schema';` seule, puis sa preuve (`999 BILAN` à `0 faux`, tableau dans `RESULTATS-mitsu.md`) ; (2) après revue finale et `/verify` :
-`! git -C ~/projects/mistu merge --ff-only passerelle-assistant`, puis `push` ; (3) preuve réelle sur le site public, connecté : « saumon
-fenouil » → un POST `/functions/v1/assistant` 200, zéro `api.anthropic.com`, Réglages « actif … 60 », puis `select … from
-public.assistant_usage_jour;` ; (4) iPhone avec l'autre compte, rien à configurer ; (5) console Anthropic : révoquer l'ancienne clé,
-plafond mensuel ; (6) « clean » après copie du registre `.superpowers/sdd/2026-10-18-passerelle-assistant/`. Non prouvé : `CLAUDE.md`,
-section du lot.
+`main` `cdbd6e0`, tête `2a2f838` (19 commits, dont deux commits RESULTATS du contrôleur et les deux de la vague finale `f43e071` serveur et
+`2a2f838` app). Pour Neegan : plus de clé à taper ; connecté, l'assistant marche sur tous les appareils (60 appels par compte et par jour,
+`claude-sonnet-5-5`, Réglages dit « Vérification… » puis « actif pour … » une fois le serveur répondu) ; la clé est un secret du projet et
+l'app n'appelle plus `api.anthropic.com`. Déployée par le contrôleur : v1 17 h 05 UTC (`1590ba8`), v2 18 h 16 UTC (`6d7ed21`), **v3 19 h 19 UTC
+(`2a2f838`, `--no-verify-jwt --use-api`, `verify_jwt: false`, `ezbr_sha256 95034efd…`)**, neuf sondes sans dépense identiques aux trois ;
+**aucun POST réel**. Revue finale de branche (opus) : 0 Critical, 3 Important (pages non réduites, forme des clés injectées, README racine), 11
+Minor ; rulings F-1 à F-14 appliqués, F-15 (double `JSON.parse`) laissé en dette. Suite **2953/2953** (épinglé 2952), Node **101/101**,
+`--check` 0, tsc strict 0, pglast OK (12 + 24 instructions), `sw.js` `cuisine-os-v0.8.0-6`, `APP_VERSION 0.8.0`. **Gestes, dans l'ordre :** (1)
+coller `0004` sur `mitsu`, puis `notify pgrst, 'reload schema';` seule, puis sa preuve (`999 BILAN` à `0 faux`, tableau dans `RESULTATS-mitsu.md`) ;
+(2) après `/verify` : `! git -C ~/projects/mistu merge --ff-only passerelle-assistant`, puis `push` ; (3) preuve réelle sur le site public,
+connecté : « saumon fenouil » → un POST `/functions/v1/assistant` 200, zéro `api.anthropic.com`, Réglages « actif … 60 », puis `select … from
+public.assistant_usage_jour;` ; avec la session, la sonde `GET` du README (étape 10) lit `cles` ; couper un appel en vol et lire le 499 dans le
+journal ; (4) iPhone avec l'autre compte, rien à configurer ; (5) console Anthropic : révoquer l'ancienne clé, plafond mensuel ; (6) « clean »
+après copie du registre `.superpowers/sdd/2026-10-18-passerelle-assistant/`. Non prouvé : `CLAUDE.md`, section du lot.
 
 **18 octobre 2026, 10 h 50 — LES TROIS LOTS SONT EN LIGNE.** Geste de Neegan : `0003_assistant_config.sql` collée sur `mitsu`
 (`Success`), preuve `0003` jouée : **45 verdicts, 0 faux**, journaux de Postgres jugés (la clé ne peut pas y finir :
@@ -92,7 +95,8 @@ en fichiers seulement : `supabase/migrations/0003_assistant_config.sql` et sa pr
 ## Ce qui n'est pas prouvé
 - **Lot passerelle** : la preuve `0004` (ni la migration, ni `notify pgrst`, ni la preuve n'ont été jouées sur `mitsu` ; syntaxe vérifiée par pglast
   seulement) ; **aucun POST réel** (aucune ligne `assistant_journal`, aucun appel à Anthropic, validité du secret non exercée) ; le `GET`
-  `{ modele, quotaJour }` et `is_allowed` pour une session non admise ; le préflight d'un vrai navigateur (S1 est un `OPTIONS` à la main) ;
+  `{ modele, quotaJour, cles }` avec une session (dont la valeur de `cles`) et `is_allowed` pour une session non admise ; l'abandon du client
+  → 499 (prouvé sous Node seulement) ; le préflight d'un vrai navigateur (S1 est un `OPTIONS` à la main) ;
   un secret changé pris par un isolat chaud ; l'ordre `installCapture` / `repo.init()` dans l'app réelle (test de source seulement) ;
   Safari et l'iPhone.
 - **Lot refonte** : rien sous Safari ni sur l'iPhone — barre d'état `default` (app à réinstaller pour relire la balise), onglet
@@ -112,7 +116,7 @@ en fichiers seulement : `supabase/migrations/0003_assistant_config.sql` et sa pr
 - **Lot confort** : le parcours réel de bout en bout par Neegan.
 - **Lot web** : statut et corps d'un compte sans recherche web, `pause_turn`, `refusal`, taille du corps, coût.
 - **Safari et l'iPhone** partout (aucun WebKit ici) ; `target="_blank"` et `navigator.onLine` depuis une PWA installée ;
-  les délais (45 s, 120 s) comptent le temps actif (PWA iOS en arrière-plan).
+  les délais (135 s pour l'assistant) comptent le temps actif (PWA iOS en arrière-plan).
 
 ## Reste à faire (gestes de Neegan, dans cet ordre)
 1. **Lot 1 d'abord, `0003` avant tout `push`** : éditeur SQL de `mitsu`, coller `supabase/migrations/0003_assistant_config.sql`
@@ -174,8 +178,8 @@ Lot passerelle (le plus récent) :
 ```
 cd ~/projects/mistu-passerelle && git status --short && git log --oneline -3
 curl -sS -o /dev/null -w "8086 http=%{http_code}\n" http://localhost:8086/tests/ || (nohup python3 -m http.server 8086 > /dev/null 2>&1 &)
-node ~/projects/mistu-passerelle/.superpowers/sdd/2026-10-18-passerelle-assistant/suite.cjs 8086   # attendu : 2910/2910 (+ 1 x 404 favicon)
-node --test tools/*.test.mjs && node tools/generer-migrations.mjs --check   # attendu : 89/89, code 0
+node ~/projects/mistu-passerelle/.superpowers/sdd/2026-10-18-passerelle-assistant/suite.cjs 8086   # attendu : 2953/2953 (+ 1 x 404 favicon)
+node --test tools/*.test.mjs && node tools/generer-migrations.mjs --check   # attendu : 101/101, code 0
 ```
 Lot refonte (les trois lots de la nuit sont en ligne ; ce bloc sert à reprendre l'outil de preuve visuelle) :
 ```

@@ -304,25 +304,27 @@ L1 n'est fini que quand les deux preuves sont vertes et consignées, et que les 
 
 ## Appareil perdu ou clé exposée
 
-Depuis le lot « la configuration de l'assistant suit le compte » (spec § 7), un appareil connecté porte la clé de
-l'assistant de **tous** les appareils du compte, et une clé tournée lui parviendrait à sa prochaine passe. Choisir
-« Aucun » dans Réglages → Assistant IA ne révoque rien (un appareil hors ligne garde sa copie, les sauvegardes du
-projet Supabase aussi). Dans cet ordre :
+Depuis le lot « passerelle de l'assistant » (étape 10), aucun appareil ne porte plus la clé d'Anthropic : c'est un secret du projet
+Supabase (`ANTHROPIC_API_KEY`) et Réglages → Assistant IA n'a plus aucun champ. Un appareil perdu ne livre donc pas la clé ; il garde en
+revanche une **session**, et tant qu'elle vit, celui qui le tient peut appeler l'assistant — et lire la synchronisation — au nom du compte.
+Une clé exposée ailleurs (une conversation, un appareil resté sur une ancienne version de l'app qui portait encore l'ancienne clé locale,
+une sauvegarde) reste utilisable directement chez le fournisseur tant qu'on ne l'a pas révoquée. Dans cet ordre :
 
 1. **Retirer l'adresse** de la liste, tapée à la main :
-   `delete from private.allowed_users where email = lower('...');` — toute lecture et tout envoi sont refusés dès la
-   requête suivante (preuve `0001`, verdicts 9.01-9.03), même avec une session encore ouverte.
+   `delete from private.allowed_users where email = lower('...');` — toute lecture, tout envoi et tout appel de l'assistant sont refusés dès la
+   requête suivante (preuve `0001`, verdicts 9.01-9.03 ; la fonction `assistant` interroge la même `is_allowed()`), même avec une session encore ouverte.
 2. **Fermer les sessions** : tableau de bord → **Authentication → Users** → ce compte → fermer toutes ses sessions.
 3. **Révoquer l'ancienne clé** dans la console Anthropic (workspace de Cuisine OS), sans attendre : la clé exposée
-   est utilisable directement chez le fournisseur.
+   est utilisable directement chez le fournisseur. Tant que le secret du projet nomme la clé révoquée, l'assistant répond en erreur pour
+   tout le monde : pour éviter la coupure, crée d'abord la nouvelle clé et pose-la comme secret (étape 10, point 6) avant de révoquer
+   l'ancienne.
 4. **Attendre l'expiration des jetons d'accès** (R-CPT-6) : attendre que la durée de vie d'un jeton d'accès se soit
    écoulée depuis la fermeture des sessions — réglage « JWT expiry » du projet, 3600 s par défaut, à lire dans
    Authentication → Settings (emplacement à confirmer dans le tableau de bord : non vérifié). Fermer les sessions
    révoque les jetons de rafraîchissement, mais un jeton d'accès déjà émis reste valide jusqu'à son expiration :
-   l'adresse remise trop tôt, l'appareil perdu recevrait la nouvelle clé à sa prochaine passe. L'adresse reste hors de la liste pendant tout ce temps.
+   l'adresse remise trop tôt, l'appareil perdu pourrait encore appeler l'assistant et la synchronisation avec ce jeton. L'adresse reste hors de la liste pendant tout ce temps.
 5. **Remettre l'adresse** (`insert into private.allowed_users (email) values (lower('...'));`), reconnecter les
-   appareils gardés, et entrer la nouvelle clé **une fois**, dans Réglages → Assistant IA d'un appareil connecté :
-   elle suit le compte jusqu'aux autres. Sur chaque appareil gardé, **recharger Réglages et vérifier que la clé reçue
-   est la nouvelle avant tout « Enregistrer »** : la synchronisation est « dernier qui écrit gagne » à la ligne, et un
-   « Enregistrer » fait avec l'ancienne clé encore en mémoire (appareil resté hors ligne pendant la rotation, ou page
-   Réglages restée ouverte) la renverrait partout.
+   appareils gardés, et entrer la nouvelle clé **une fois**, comme secret du projet Supabase (tableau de bord → **Edge Functions → Secrets**,
+   `ANTHROPIC_API_KEY` ; étape 10, point 6) : **rien dans l'app**, aucun appareil ne la reçoit. Un appareil resté sur une ancienne version
+   de l'app garde sa clé locale jusqu'à son prochain démarrage sur la version à jour (la passe d'effacement tourne à chaque démarrage et
+   renvoie la ligne vide au compte) ; c'est la révocation de l'étape 3 qui la rend inoffensive.
