@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderMigrations } from './generer-migrations.mjs';
-import { SYNC_STORES } from '../src/model/schema.js';
+import { SYNC_STORES_0001 } from '../src/sync/tables.js';
 import { ALLOWED_MIME } from '../src/sync/mime.js';
 
 const { tables: sql, storage } = renderMigrations();
@@ -20,7 +20,7 @@ function corps(nom) {
 
 test('25 tables, cle composee, proprietaire non nul, aucun owner_id is null', () => {
   assert.equal((sql.match(/create table public\./g) || []).length, 25);
-  for (const t of SYNC_STORES) assert.match(sql, new RegExp(`create table public\\.${t} \\(`));
+  for (const t of SYNC_STORES_0001) assert.match(sql, new RegExp(`create table public\\.${t} \\(`));
   assert.equal((sql.match(/primary key \(owner_id, id\)/g) || []).length, 25);
   assert.equal((sql.match(/owner_id\s+uuid not null default auth\.uid\(\)/g) || []).length, 25);
   assert.doesNotMatch(sql, /owner_id is null/);
@@ -46,8 +46,8 @@ test('sync_push : liste litterale, format %I, bornes, motifs, idempotence sans e
   assert.ok(corpsPush.includes('rows jsonb'), 'corps de sync_push isole');
   assert.doesNotMatch(corpsPush, /security definer/);
 });
-test('la liste litterale vaut exactement SYNC_STORES, aux quatre endroits (spec § 3.1)', () => {
-  const litteral = 'array[' + SYNC_STORES.map((s) => `'${s}'`).join(', ') + ']';
+test('la liste litterale vaut exactement SYNC_STORES_0001, aux quatre endroits (spec § 3.1)', () => {
+  const litteral = 'array[' + SYNC_STORES_0001.map((s) => `'${s}'`).join(', ') + ']';
   assert.equal(sql.split(litteral).length - 1, 4); // sync_push, sync_purge, sync_purge_all, purge_tombstones
 });
 test('files : pas de blob en base ; colonnes size et mime', () => {

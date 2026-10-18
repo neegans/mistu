@@ -6,8 +6,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { TABLES } from '../src/sync/tables.js';
-import { SYNC_STORES } from '../src/model/schema.js';
+import { TABLES, SYNC_STORES_0001 } from '../src/sync/tables.js';
 import { ALLOWED_MIME } from '../src/sync/mime.js';
 
 // En-tête volontairement sans date : la sortie doit être déterministe (le test le vérifie, et --check sert de garde).
@@ -47,7 +46,7 @@ create trigger ${store}_seq before insert or update on public.${store} for each 
 }
 
 export function renderMigrations() {
-  const stores = SYNC_STORES;
+  const stores = SYNC_STORES_0001;
   const keys = JSON.stringify(Object.fromEntries(stores.map((s) => [s, TABLES[s].key])));
   const required = JSON.stringify(Object.fromEntries(stores.map((s) => [s, TABLES[s].required])));
   const tables = ENTETE('0001_tables_et_regles.sql') + `create extension if not exists pg_cron;

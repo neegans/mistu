@@ -6,7 +6,7 @@ import { TABLES, keyOf } from '../src/sync/tables.js';
 export async function runSyncTests({ eq, ok }) {
   // --- Constantes et tables (spec § 3.1, § 7.1)
   eq(SYNC_INTERNAL_STORES, ['outbox', 'sync_state', 'sync_conflicts'], 'trois magasins internes');
-  eq(SYNC_STORES.length, 25, '25 magasins synchronisables');
+  eq(SYNC_STORES.length, 26, '26 magasins synchronisables');
   ok(!SYNC_STORES.includes('settings') && SYNC_INTERNAL_STORES.every((s) => !SYNC_STORES.includes(s)), 'settings et internes exclus');
   eq(Object.keys(TABLES).sort(), [...SYNC_STORES].sort(), 'une table par magasin synchronisable');
   for (const store of SYNC_STORES) {
@@ -67,7 +67,7 @@ export async function runSyncTests({ eq, ok }) {
   // --- Schéma v2 et archive (spec § 5.1, I3)
   const schema = await import('../src/model/schema.js');
   const { createArchive, inspectArchive, applyArchive, verifyRestored } = await import('../src/domain/backup.js');
-  eq(schema.DB_VERSION, 2, 'DB_VERSION 2');
+  eq(schema.DB_VERSION, 3, 'DB_VERSION 3');
   eq(schema.STORES.outbox, { keyPath: 'seq', autoIncrement: true, indexes: [['store_id', ['store', 'id']]] }, 'outbox autoIncrement');
   ok(schema.STORES.sync_state.keyPath === 'key' && schema.STORES.sync_conflicts.keyPath === 'id', 'sync_state et sync_conflicts');
   ok(schema.SYNC_INTERNAL_STORES.every((s) => !schema.ARCHIVE_DATA_STORES.includes(s)), 'internes hors archive');
@@ -223,7 +223,7 @@ export async function runSyncTests({ eq, ok }) {
     const repoModule = await import('../src/model/repo.js');
     const baseOrigine = repoModule.db;
     const ancienneCle = localStorage.getItem('cuisineos.device');
-    const V1_SEULEMENT = Object.fromEntries(Object.entries(STORES).filter(([n]) => !SYNC_INTERNAL_STORES.includes(n)));
+    const V1_SEULEMENT = Object.fromEntries(Object.entries(STORES).filter(([n]) => !SYNC_INTERNAL_STORES.includes(n) && n !== 'assistant_config'));
     const avant = {
       recipes: { id: 'r_v1', original_title: 'Avant le lot', availability: 'available', type: 'salade', created_at: '2026-01-02T03:04:05Z' },
       ingredients: { id: 'ing_corrige_a_la_main', labels: { fr: { label: 'sel fin', aliases: [] } } },
@@ -240,8 +240,9 @@ export async function runSyncTests({ eq, ok }) {
         repoModule.bindDatabase(v2);
         try {
           await repoModule.init(); // chemin normal du démarrage : montée, identité, amorçage, horodatage
-          eq(v2.idb.version, 2, 'montée : la base est passée en v2 sans rejet');
+          eq(v2.idb.version, schema.DB_VERSION, 'montée : la base est passée à la version courante sans rejet');
           eq(SYNC_INTERNAL_STORES.filter((n) => !v2.idb.objectStoreNames.contains(n)), [], 'les trois magasins internes sont créés par la montée');
+          ok(v2.idb.objectStoreNames.contains('assistant_config'), 'montée de la base v1 à la version courante (3) : le magasin assistant_config est créé');
           eq(await v2.byIndex('outbox', 'store_id', ['books', 'b1']), [], 'l’index composé store_id du magasin neuf est utilisable');
           // Aucune fiche perdue, aucun champ perdu : les objets sont comparés en entier, pas comptés.
           eq(sansHorodatage(await v2.get('recipes', 'r_v1')), avant.recipes, 'la recette d’avant le lot est intacte, champ pour champ');

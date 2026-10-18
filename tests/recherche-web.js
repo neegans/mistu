@@ -34,13 +34,13 @@ export async function runRechercheWebTests({ eq, ok }) {
     ok(!(await lire('../src/domain/pairing.js')).includes('notice'), 'domaine : pairing.js ne propage plus de notice');
   }
 
-  // --- § 8 : version 0.5.1 (confort après preuve), SHELL
+  // --- § 8 : version 0.6.0 (assistant par le compte), SHELL
   {
     const sw = await lire('../sw.js');
-    ok(/VERSION = 'cuisine-os-v0\.5\.1-\d+'/.test(sw), 'sw.js : VERSION 0.5.1');
+    ok(/VERSION = 'cuisine-os-v0\.6\.0-\d+'/.test(sw), 'sw.js : VERSION 0.6.0');
     ok(sw.includes("'./src/core/bornes.js'"), 'SHELL : ./src/core/bornes.js');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.5.1', 'APP_VERSION 0.5.1');
+    eq(APP_VERSION, '0.6.0', 'APP_VERSION 0.6.0');
   }
 
   // --- § 7.1 / § 9.7 : AnthropicProvider.complete envoie la même requête avant et après le refactor (écrit AVANT, vert dès le départ)
