@@ -363,4 +363,13 @@ export const EN = {
   "Ma version — d’après une création IA": "My version — from an AI creation",
   "Adapter avec l’IA": "Adapt with AI",
   "Recettes créées avec l’IA": "Recipes created with AI",
+  // « Adapter avec l’IA » (N-5, C-15, P15) : l'écran d'adaptation d'une création IA.
+  "Recette de départ": "Starting recipe",
+  "L’original reste tel quel : l’adaptation s’ajoute comme une autre version de la recette.": "The original stays as it is: the adaptation is added as another version of the recipe.",
+  "Ce que tu veux changer": "What you want to change",
+  "Ex. : pour 4 personnes, sans four, plus épicé": "E.g.: for 4 people, no oven, spicier",
+  "Écris ce que tu veux changer dans cette recette.": "Write what you want to change in this recipe.",
+  "Créer cette adaptation": "Create this adaptation",
+  "Cette recette est trop longue pour être adaptée par l’assistant.": "This recipe is too long for the assistant to adapt.",
+  "Changement : {c}": "Change: {c}",
 };

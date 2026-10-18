@@ -38,9 +38,9 @@ const TEXTES_INDISPONIBLE = {
 const SANS_REESSAI = ['cle_refusee', 'refus'];
 const AVEC_REGLAGES = ['cle_refusee'];
 
-// C-16 : la demande préremplie est nettoyée comme construireDemandeCreation la nettoiera (fins de ligne en espaces, Cc/Cf retirés,
-// NFC, espaces repliés), puis bornée à 500 points de code.
-const nettoyerDemande = (v) => (typeof v === 'string' ? borner(borner(v.replace(/[\t\n\v\f\r\x85\p{Zl}\p{Zp}]/gu, ' '), Number.MAX_SAFE_INTEGER).normalize('NFC').replace(/\s+/g, ' ').trim(), LIMITES_CREATION.demande) : '');
+// C-16 : la demande (et, en adaptation, le changement) préremplie est nettoyée comme construireDemandeCreation la nettoiera (fins de
+// ligne en espaces, Cc/Cf retirés, NFC, espaces repliés), puis bornée à 500 points de code.
+const nettoyerDemande = (v, max = LIMITES_CREATION.demande) => (typeof v === 'string' ? borner(borner(v.replace(/[\t\n\v\f\r\x85\p{Zl}\p{Zp}]/gu, ' '), Number.MAX_SAFE_INTEGER).normalize('NFC').replace(/\s+/g, ' ').trim(), max) : '');
 const entierDans = (v, [min, max]) => { const s = String(v ?? '').trim(); if (!/^\d{1,4}$/.test(s)) return null; const n = Number(s); return n >= min && n <= max ? n : null; };
 
 // C-16 : préremplissage depuis l'adresse = liste blanche (restrictions ⊂ DIET_TAGS, type ∈ RECIPE_TYPES, portions 1-12, max 5-240 ;
@@ -53,7 +53,9 @@ export function filtresDepuisQuery(query = {}, parente = null) {
 }
 // L'état du formulaire garde le TEXTE des champs numériques, et s'ils sont illisibles (validity.badInput : « 3- » rend value '').
 const formulaireDe = ({ demande, filtres: f, changement }) => ({ demande, diets: [...f.diets], type: f.type || '', portions: String(f.servings), max: f.maxMinutes == null ? '' : String(f.maxMinutes), changement: changement || '', illisible: { portions: false, max: false } });
-const formulaireInitial = (query, parente) => formulaireDe({ demande: nettoyerDemande(query?.q) || (parente ? nettoyerDemande(parente.provenance?.creation?.demande) : ''), filtres: filtresDepuisQuery(query, parente), changement: '' });
+// T7 : en adaptation, le changement est relu de l'adresse (posé par lancer(), F2) — sinon une reconstruction ou un retour arrière perdrait la
+// clé de ce qui est parti et afficherait K1 à tort. Sans ?adapter valide, il est ignoré (C-16).
+const formulaireInitial = (query, parente) => formulaireDe({ demande: nettoyerDemande(query?.q) || (parente ? nettoyerDemande(parente.provenance?.creation?.demande) : ''), filtres: filtresDepuisQuery(query, parente), changement: parente ? nettoyerDemande(query?.changement, LIMITES_CREATION.changement) : '' });
 // « Recommencer » relance ce qui est PARTI (memoire), pas un formulaire modifié depuis (§ 3.2).
 const formulaireDepuis = (m) => formulaireDe(m);
 // C-10 : la demande part comme elle est affichée — une valeur que construireDemandeCreation remplacerait (portions 13 → 4) ou qu'une
@@ -91,13 +93,19 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
   const parente = versionParente && ficheParente && estCreationIA(versionParente) ? { ...versionParente, title: ficheParente.original_title } : null;
   const fournisseur = providerFrom(ctx?.settings);
   // P7.2 (C-14, P29) : décidée une fois par instance ; jamais un appel derrière une garde.
+  // T7 : une parente sans listes d'ingrédients et d'étapes (ligne reçue informe) est refusée comme C-15 ; une parente que
+  // construireDemandeCreation refuserait (hors bornes C-7 : parenteBornee) est dite d'emblée — la sonde passe une demande et un
+  // changement non vides, seule la parente peut donc faire refuser.
+  const formeParente = !!parente && Array.isArray(parente.ingredients) && Array.isArray(parente.steps);
+  const parenteTropLongue = formeParente && !!construireDemandeCreation({ demande: '.', parente, changement: '.' }).erreur;
   const garde = !fournisseur.configured ? { texte: TEXTE_NON_CONFIGURE, reglages: true }
     : fournisseur.name !== 'anthropic' ? { texte: TEXTE_AUTRE_FOURNISSEUR, reglages: true }
-      : idParente && !parente ? { texte: 'Cette version ne peut pas être adaptée ici.', reglages: false } : null;
+      : idParente && !formeParente ? { texte: 'Cette version ne peut pas être adaptée ici.', reglages: false }
+        : parenteTropLongue ? { texte: 'Cette recette est trop longue pour être adaptée par l’assistant.', reglages: false } : null;
   let form = formulaireInitial(query, parente);
   let ouvert = false; // « Modifier la demande » (P7.4) : le formulaire replié devient visible
 
-  const root = el('div', null, pageHeader(t('Créer une recette avec l’assistant IA'), { back: parente ? { href: `/recipes/${encodeURIComponent(ficheParente.id)}`, label: t('Retour à la recette') } : { href: '/add', label: t('Ajouter') } }));
+  const root = el('div', null, pageHeader(parente ? t('Adapter avec l’IA') : t('Créer une recette avec l’assistant IA'), { back: parente ? { href: `/recipes/${encodeURIComponent(ficheParente.id)}`, label: t('Retour à la recette') } : { href: '/add', label: t('Ajouter') } }));
   const zone = el('div', { class: 'stack' });
   root.append(zone);
   const partout = () => { notifier(); if (!root.isConnected) render(); };
@@ -111,11 +119,12 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
   const cleCourante = () => demandeCourante().cle ?? null;
   const k1Cache = (C) => !(memoire?.issue?.etat === 'trouve' && memoire.cle !== C);
   const messageAide = () => {
+    if (parente && !nettoyerDemande(form.changement, LIMITES_CREATION.changement)) return t('Écris ce que tu veux changer dans cette recette.'); // P15 : rien ne part sans changement
     if (!nettoyerDemande(form.demande)) return t('Écris d’abord ce que tu veux cuisiner.');
     const { erreur } = lireFormulaire(form);
     if (erreur === 'portions') return t('Portions : un nombre entier de 1 à 12.');
     if (erreur === 'max') return t('Temps maximal : de 5 à 240 minutes, ou vide.');
-    return ''; // une adaptation sans changement : T7 pose le champ et sa phrase
+    return '';
   };
   // La saisie ne redessine JAMAIS (focus et clavier de l'iPhone) : elle bascule sur place le bouton, l'aide et la mention K1.
   function majSaisie() {
@@ -134,7 +143,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
     const parti = { cle: d.cle, demande: d.demande, filtres: d.filtres, langue: d.langue, parente, changement: d.changement };
     ouvert = false;
     // F2 / C-10 : l'adresse porte ce qui part — les seuls champs de la liste blanche C-16 — pour qu'une reconstruction retrouve la clé.
-    remplacer('/recipes/creer' + buildQuery({ q: d.demande, diets: d.filtres.diets.join(','), type: d.filtres.type || '', portions: d.filtres.servings, max: d.filtres.maxMinutes || '', adapter: parente?.id || '' }));
+    remplacer('/recipes/creer' + buildQuery({ q: d.demande, diets: d.filtres.diets.join(','), type: d.filtres.type || '', portions: d.filtres.servings, max: d.filtres.maxMinutes || '', adapter: parente?.id || '', changement: d.changement || '' }));
     const enLigneIci = depsForces.enLigne ?? enLigne;
     if (!enLigneIci()) { resoudre(parti, ISSUE_HORS_LIGNE); partout(); return; } // C-14 : dit avant tout appel
     const controller = new AbortController();
@@ -185,7 +194,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
   function render() {
     for (const v of [...vues]) if (!v.root.isConnected) vues.delete(v);
     if (![...vues].some((v) => v.root === root)) vues.add({ root, redessiner: render });
-    zone.replaceChildren(...contenu().filter(Boolean));
+    zone.replaceChildren(...[garde ? null : resumeParente(), ...contenu()].filter(Boolean));
   }
   function contenu() {
     const M = memoire;
@@ -203,12 +212,19 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
   }
 
   const reglages = () => el('a', { class: 'btn small', href: '#/settings' }, t('Réglages'));
+  const libelleCreer = () => (parente ? t('Créer cette adaptation') : t('Créer ma recette'));
+  // T7 : la recette de départ (titre de sa FICHE, portions de la version), en texte seul ; rappel que l'original ne bouge pas (C-12).
+  const resumeParente = () => (parente ? el('div', { class: 'card flat stack', dataset: { role: 'parente-ia' } },
+    el('small', { class: 'muted' }, t('Recette de départ')),
+    el('strong', null, typeof parente.title === 'string' ? parente.title : ''),
+    Number.isInteger(parente.servings) && parente.servings > 0 ? el('span', { class: 'muted' }, portionsTexte(parente.servings)) : null,
+    el('small', { class: 'muted' }, t('L’original reste tel quel : l’adaptation s’ajoute comme une autre version de la recette.'))) : null);
   const carteGarde = (g) => el('div', { class: 'card flat stack', dataset: { role: 'garde-ia' } },
     el('div', { class: 'status warn' }, el('span', null, t(g.texte)), g.reglages ? [' ', reglages()] : null));
   const ecranDuVol = () => el('div', { class: 'card flat stack' },
     el('div', { class: 'status', role: 'status' }, t('L’assistant compose une recette…')),
     // Sans data-role : ni la frappe ni une autre vue ne peuvent rallumer ce bouton pendant le vol (C-1).
-    el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn primary', disabled: true }, t('Créer ma recette')),
+    el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn primary', disabled: true }, libelleCreer()),
       el('button', { type: 'button', class: 'btn', dataset: { role: 'annuler-ia' }, onClick: annuler }, t('Annuler'))));
 
   function formulaire({ k1 = false } = {}) {
@@ -224,14 +240,18 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
     const type = select([{ value: '', label: t('Au choix de l’assistant') }, ...RECIPE_TYPES.map((v) => ({ value: v, label: label('recipe_type', v) }))], form.type, (v) => { form.type = v; majSaisie(); });
     type.name = 'type'; // P14
     const nombre = (nom, [min, max]) => el('input', { type: 'number', name: nom, min, max, step: 1, value: form[nom], onInput: (e) => { form[nom] = e.target.value; form.illisible = { ...form.illisible, [nom]: !!e.target.validity?.badInput }; majSaisie(); } });
+    // T7 : en adaptation, le changement d'abord (c'est le but de l'écran) ; la frappe ne redessine jamais (focus iPhone), comme la demande.
+    const changement = parente ? el('textarea', { dataset: { role: 'changement-ia' }, maxlength: LIMITES_CREATION.changement, placeholder: t('Ex. : pour 4 personnes, sans four, plus épicé'), onInput: (e) => { form.changement = e.target.value; majSaisie(); } }) : null;
+    if (changement) changement.value = form.changement;
     return el('div', { class: 'card stack', dataset: { role: 'formulaire-ia' } },
+      changement ? field(t('Ce que tu veux changer'), changement) : null,
       field(t('Ce que tu as, ce que tu veux'), demande),
       // R-UX-8 : un groupe de boutons ne va jamais dans un <label> (le clic sur le libellé presserait la première puce).
       el('div', { class: 'field' }, el('span', null, t('Restrictions')), el('div', { class: 'puces', role: 'group', 'aria-label': t('Restrictions') }, ...DIET_TAGS.map(puce))),
       field(t('Type de recette'), type),
       el('div', { class: 'row' }, field(t('Portions'), nombre('portions', LIMITES_CREATION.portions)), field(t('Temps maximal (minutes, facultatif)'), nombre('max', LIMITES_CREATION.minutes))),
       k1 ? el('div', { class: 'status warn', dataset: { role: 'k1' }, hidden: k1Cache(C) }, t('La demande a changé depuis cette proposition.')) : null,
-      el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn primary', dataset: { role: 'creer-ia' }, disabled: C === null, onClick: () => lancer() }, k1 ? t('Créer à nouveau') : t('Créer ma recette'))),
+      el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn primary', dataset: { role: 'creer-ia' }, disabled: C === null, onClick: () => lancer() }, k1 ? t('Créer à nouveau') : libelleCreer())),
       el('small', { class: 'muted', dataset: { role: 'aide-ia' }, hidden: !message }, message),
       el('small', { class: 'muted' }, t('Une création = un appel à ton compte Anthropic.')));
   }
@@ -257,7 +277,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
 
   // L'aperçu est fabriqué comme « Garder » le fera (mêmes lignes, mêmes étapes) mais avec des identifiants jetables : jamais écrit.
   const apercu = (m) => fabriquerRecetteIA({ recette: m.issue.recette, demande: m.demande, filtres: m.filtres, langue: m.langue, modele: m.issue.modele ?? null, usage: m.issue.usage ?? null, convention: null, parente: m.parente, changement: m.changement, newId: (p) => `${p}_apercu`, maintenant: null }).version;
-  const demandeEnvoyee = (m) => [m.demande, m.filtres.diets.length ? m.filtres.diets.map((d) => label('diet', d)).join(' ; ') : null, m.filtres.type ? label('recipe_type', m.filtres.type) : null, portionsTexte(m.filtres.servings), m.filtres.maxMinutes ? t('au plus {m} min', { m: m.filtres.maxMinutes }) : null].filter(Boolean).join(' · ');
+  const demandeEnvoyee = (m) => [m.demande, m.filtres.diets.length ? m.filtres.diets.map((d) => label('diet', d)).join(' ; ') : null, m.filtres.type ? label('recipe_type', m.filtres.type) : null, portionsTexte(m.filtres.servings), m.filtres.maxMinutes ? t('au plus {m} min', { m: m.filtres.maxMinutes }) : null, m.changement ? t('Changement : {c}', { c: m.changement }) : null].filter(Boolean).join(' · ');
   // C-9 / S1 / P9 : les restrictions DEMANDÉES, évaluées par assessVersion (N-8) ; jamais « Compatible » sur une proposition — tout état
   // autre qu'« incompatible » se dit « À vérifier », avec la ligne à retirer quand seul un facultatif bloque. La ligne est celle ÉCRITE.
   function evaluation(m, version) {
@@ -285,7 +305,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
     const u = m.issue.usage;
     return el('section', { class: 'card stack proposition', dataset: { role: 'proposition-ia' } },
       el('div', null, el('span', { class: 'badge ai', dataset: { role: 'etiquette-ia' } }, t(etiquetteCreationIA(version)))),
-      el('h2', null, rec.title),
+      el('h2', null, m.parente ? (typeof m.parente.title === 'string' ? m.parente.title : '') : rec.title), // T7 : une version n'a pas de titre — la fiche garde le sien
       el('p', { dataset: { role: 'description-ia' } }, t('Selon l’assistant : {texte}', { texte: rec.description })),
       el('div', { class: 'muted', dataset: { role: 'portions-ia' } }, `${portionsTexte(rec.servings)} · ${t('environ {m} min (estimé par l’assistant)', { m: rec.estimated_minutes })}`),
       ...avertissements.map((a) => el('div', { class: 'status warn' }, String(a))),
