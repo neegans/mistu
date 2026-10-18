@@ -53,9 +53,22 @@ export function filtresDepuisQuery(query = {}, parente = null) {
 }
 // L'état du formulaire garde le TEXTE des champs numériques, et s'ils sont illisibles (validity.badInput : « 3- » rend value '').
 const formulaireDe = ({ demande, filtres: f, changement }) => ({ demande, diets: [...f.diets], type: f.type || '', portions: String(f.servings), max: f.maxMinutes == null ? '' : String(f.maxMinutes), changement: changement || '', illisible: { portions: false, max: false } });
+// R-CRE-11 : les filtres de la création de départ, mis en forme d'ADRESSE pour passer par la même liste blanche que C-16 (filtresDepuisQuery) ;
+// seules des valeurs de la bonne nature sont reprises (une ligne reçue peut porter n'importe quoi : rien n'est converti en texte au hasard).
+function filtresDeLaParente(parente) {
+  const f = parente?.provenance?.creation?.filtres;
+  if (!f || typeof f !== 'object') return {};
+  return { diets: Array.isArray(f.diets) ? f.diets.filter((d) => DIET_TAGS.includes(d)).join(',') : '', type: typeof f.type === 'string' ? f.type : '', max: Number.isInteger(f.maxMinutes) ? String(f.maxMinutes) : '' };
+}
 // T7 : en adaptation, le changement est relu de l'adresse (posé par lancer(), F2) — sinon une reconstruction ou un retour arrière perdrait la
-// clé de ce qui est parti et afficherait K1 à tort. Sans ?adapter valide, il est ignoré (C-16).
-const formulaireInitial = (query, parente) => formulaireDe({ demande: nettoyerDemande(query?.q) || (parente ? nettoyerDemande(parente.provenance?.creation?.demande) : ''), filtres: filtresDepuisQuery(query, parente), changement: parente ? nettoyerDemande(query?.changement, LIMITES_CREATION.changement) : '' });
+// clé de ce qui est parti et afficherait K1 à tort. Sans ?adapter valide, il est ignoré (C-16). R-CRE-11 : adresse FRAÎCHE (pas de
+// `changement`) → restrictions, type et temps maximal de la parente, un champ présent dans l'adresse l'emportant ; dès que `changement` est
+// dans l'adresse (lancer()), SEULE l'adresse compte (une restriction retirée avant le lancement ne revient pas au retour arrière).
+const formulaireInitial = (query, parente) => {
+  const q = query && typeof query === 'object' ? query : {};
+  const fraiche = !!parente && !Object.hasOwn(q, 'changement');
+  return formulaireDe({ demande: nettoyerDemande(q.q) || (parente ? nettoyerDemande(parente.provenance?.creation?.demande) : ''), filtres: filtresDepuisQuery(fraiche ? { ...filtresDeLaParente(parente), ...q } : q, parente), changement: parente ? nettoyerDemande(q.changement, LIMITES_CREATION.changement) : '' });
+};
 // « Recommencer » relance ce qui est PARTI (memoire), pas un formulaire modifié depuis (§ 3.2).
 const formulaireDepuis = (m) => formulaireDe(m);
 // C-10 : la demande part comme elle est affichée — une valeur que construireDemandeCreation remplacerait (portions 13 → 4) ou qu'une
@@ -105,7 +118,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
   let form = formulaireInitial(query, parente);
   let ouvert = false; // « Modifier la demande » (P7.4) : le formulaire replié devient visible
 
-  const root = el('div', null, pageHeader(parente ? t('Adapter avec l’IA') : t('Créer une recette avec l’assistant IA'), { back: parente ? { href: `/recipes/${encodeURIComponent(ficheParente.id)}`, label: t('Retour à la recette') } : { href: '/add', label: t('Ajouter') } }));
+  const root = el('div', null, pageHeader(parente ? t('Adapter avec l’IA') : t('Créer une recette avec l’assistant IA'), { back: parente ? { href: `/recipes/${encodeURIComponent(ficheParente.id)}?v=${encodeURIComponent(parente.id)}`, label: t('Retour à la recette') } : { href: '/add', label: t('Ajouter') } }));
   const zone = el('div', { class: 'stack' });
   root.append(zone);
   const partout = () => { notifier(); if (!root.isConnected) render(); };
@@ -241,10 +254,10 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
     type.name = 'type'; // P14
     const nombre = (nom, [min, max]) => el('input', { type: 'number', name: nom, min, max, step: 1, value: form[nom], onInput: (e) => { form[nom] = e.target.value; form.illisible = { ...form.illisible, [nom]: !!e.target.validity?.badInput }; majSaisie(); } });
     // T7 : en adaptation, le changement d'abord (c'est le but de l'écran) ; la frappe ne redessine jamais (focus iPhone), comme la demande.
-    const changement = parente ? el('textarea', { dataset: { role: 'changement-ia' }, maxlength: LIMITES_CREATION.changement, placeholder: t('Ex. : pour 4 personnes, sans four, plus épicé'), onInput: (e) => { form.changement = e.target.value; majSaisie(); } }) : null;
+    const changement = parente ? el('textarea', { dataset: { role: 'changement-ia' }, maxlength: LIMITES_CREATION.changement, placeholder: t('Ex. : sans four, plus épicé, avec du poulet'), onInput: (e) => { form.changement = e.target.value; majSaisie(); } }) : null;
     if (changement) changement.value = form.changement;
     return el('div', { class: 'card stack', dataset: { role: 'formulaire-ia' } },
-      changement ? field(t('Ce que tu veux changer'), changement) : null,
+      changement ? field(t('Ce que tu veux changer'), changement, t('Pour changer les portions, modifie Portions.')) : null, // R-CRE-12
       field(t('Ce que tu as, ce que tu veux'), demande),
       // R-UX-8 : un groupe de boutons ne va jamais dans un <label> (le clic sur le libellé presserait la première puce).
       el('div', { class: 'field' }, el('span', null, t('Restrictions')), el('div', { class: 'puces', role: 'group', 'aria-label': t('Restrictions') }, ...DIET_TAGS.map(puce))),
