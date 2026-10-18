@@ -571,7 +571,8 @@ export function sectionAssistant({ llm: initial, sync = {}, lie = false, suitLeC
   const testerCfg = async () => {
     const cfg = normaliserConfigAssistant(llm);
     if (tester) return tester(cfg);
-    const p = providerFrom({ llm: cfg });
+    // Le test passe par la passerelle quand une session existe (R-T3-1) ; T4 retire tout ce formulaire.
+    const p = providerFrom({ llm: cfg }, { session: await sync?.auth?.jeton?.() ?? null });
     if (!p.configured) throw new Error(t('Configuration incomplète'));
     return p.complete([{ role: 'user', content: 'Réponds uniquement : OK' }], { maxTokens: 5 });
   };

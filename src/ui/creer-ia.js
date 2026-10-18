@@ -1,8 +1,8 @@
 // Écran « Créer une recette avec l'assistant IA » (spec 2026-10-18-creer-avec-l-ia § 3.2, § 5 ; table de décision P7 des
 // amendements). L'état vit AU NIVEAU DU MODULE, comme la recherche web (search.js) : UN vol pour toute l'app (C-1), une mémoire de
 // session (C-4), des vues abonnées purgées par isConnected (P6). Rien n'est écrit avant « Garder » ; « Garder » n'est pas rejouable
-// (memoire.gardee posé AVANT l'écriture). Tout ce qui vient du modèle est rendu en TEXTE (el(), jamais innerHTML) ; la clé ne fait
-// que passer de ctx.settings.llm à creer() : elle n'entre ni dans la mémoire, ni dans l'adresse, ni dans le DOM (C-8).
+// (memoire.gardee posé AVANT l'écriture). Tout ce qui vient du modèle est rendu en TEXTE (el(), jamais innerHTML) ; le jeton de la
+// session ne fait que passer de ctx.sync.auth.jeton() à creer() (R-T3-1) : il n'entre ni dans la mémoire, ni dans l'adresse, ni dans le DOM (C-8).
 import { el, toast } from '../core/dom.js';
 import { t, label, getUiLocale } from '../core/i18n.js';
 import { navigate, remplacerAdresse, buildQuery } from '../core/router.js';
@@ -13,7 +13,7 @@ import { providerFrom } from '../domain/llm.js';
 import { creerRecetteIA, construireDemandeCreation, fabriquerRecetteIA, estCreationIA, etiquetteCreationIA, conventionCreation, LIMITES_CREATION } from '../domain/creation-ia.js';
 import { assessVersion } from '../domain/diet.js';
 import { DIET_TAGS, RECIPE_TYPES } from '../model/schema.js';
-import { pageHeader, field, select } from './components.js';
+import { pageHeader, field, select, sessionAssistant } from './components.js';
 
 let memoire = null; // { cle, demande, filtres, langue, parente, changement, issue, gardee, echec } — ce qui est PARTI, jamais le formulaire
 let vol = null;     // { cle, controller, promesse }
@@ -104,7 +104,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
   const versionParente = idParente ? ctx?.versionsById?.get(idParente) : null;
   const ficheParente = versionParente ? ctx?.recipesById?.get(versionParente.recipe_id) : null;
   const parente = versionParente && ficheParente && estCreationIA(versionParente) ? { ...versionParente, title: ficheParente.original_title } : null;
-  const fournisseur = providerFrom(ctx?.settings);
+  const fournisseur = providerFrom(ctx?.settings, { session: await sessionAssistant(ctx) }); // la passerelle (R-T3-1) : la session décide
   // P7.2 (C-14, P29) : décidée une fois par instance ; jamais un appel derrière une garde.
   // T7 : une parente sans listes d'ingrédients et d'étapes (ligne reçue informe) est refusée comme C-15 ; une parente que
   // construireDemandeCreation refuserait (hors bornes C-7 : parenteBornee) est dite d'emblée — la sonde passe une demande et un
@@ -161,7 +161,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
     if (!enLigneIci()) { resoudre(parti, ISSUE_HORS_LIGNE); partout(); return; } // C-14 : dit avant tout appel
     const controller = new AbortController();
     const promesse = Promise.resolve()
-      .then(() => creer({ demande: d.demande, filtres: d.filtres, langue: d.langue, cfg: ctx?.settings?.llm, parente, changement: d.changement }, { enLigne: enLigneIci, signal: controller.signal }))
+      .then(async () => creer({ demande: d.demande, filtres: d.filtres, langue: d.langue, session: await sessionAssistant(ctx), parente, changement: d.changement }, { enLigne: enLigneIci, signal: controller.signal }))
       .catch(() => ISSUE_INTERNE)
       .then((issue) => {
         if (vol?.promesse !== promesse) return; // abandonnée ou remplacée : muette

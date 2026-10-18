@@ -160,6 +160,24 @@ export function createAuth(options = {}) {
     }
   }
 
+  // La session-DONNÉE de l'assistant (passerelle, src/domain/passerelle.js) : { access_token, user: { id, email } } ou null. Sans
+  // réseau : getSession() lit le stockage local (et rafraîchit un jeton expiré). C'est la seule sortie du jeton d'accès de ce
+  // module, vers les écrans qui le passent à la passerelle ; il n'est ni gardé ni journalisé ici (l'erreur du client va au
+  // journal par son code seul).
+  async function jeton() {
+    if (!client) return null;
+    try {
+      const { data, error } = await client.auth.getSession();
+      if (error) { logError('auth.jeton', detailsOf(error)); return null; }
+      const courante = data?.session;
+      if (typeof courante?.access_token !== 'string' || !courante.access_token || !courante.user) return null;
+      return { access_token: courante.access_token, user: { id: courante.user.id, email: courante.user.email || '' } };
+    } catch (error) {
+      logError('auth.jeton', detailsOf(error));
+      return null;
+    }
+  }
+
   function onChange(fn) {
     if (!client) return () => {};
     let handle = null;
@@ -212,5 +230,5 @@ export function createAuth(options = {}) {
 
   // getClient : seule sortie du client, vers transport.js, jamais vers l'interface. Rend null quand il manque
   // (bibliothèque absente ou origine sans configuration) : le transport refuse alors en « auth » sans rien tenter.
-  return { available: !!client, reason, signIn, signOut, session, onChange, handleReturn, readError, guard, getClient: () => client };
+  return { available: !!client, reason, signIn, signOut, session, jeton, onChange, handleReturn, readError, guard, getClient: () => client };
 }

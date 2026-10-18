@@ -9,7 +9,7 @@ import { findAccompaniments } from '../domain/pairing.js';
 import { providerFrom } from '../domain/llm.js';
 import { chercherRecettesWeb, construireDemande, dateLisible } from '../domain/recherche-web.js';
 import { RECIPE_TYPES, DIET_TAGS } from '../model/schema.js';
-import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select } from './components.js';
+import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select, sessionAssistant } from './components.js';
 import { addToMealFlow } from './meals.js';
 
 const MODES = [['recipes', 'Mes recettes'], ['books', 'Mes livres'], ['web', 'Web'], ['all', 'Tout']];
@@ -57,6 +57,8 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   const root = el('div', null);
   const { chercher = chercherRecettesWeb, enLigne, navigate: nav = navigate, remplacerAdresse: remplacer = remplacerAdresse } = deps;
   const state = { q: query.q || '', mode: query.mode || 'all', favorites: query.fav === '1', cooked: query.cooked === '1', requireAll: query.any !== '1', parsed: parseQuery(query.q || '') };
+  // La session de l'assistant (R-T3-1) : lue ICI pour les gardes de l'écran, relue à chaque appel (un jeton expiré se rafraîchit).
+  const session = await sessionAssistant(ctx);
   const forRecipe = query.for ? ctx.docsByRecipe.get(query.for) : null; // Avec quoi on mange ça ?
   const role = query.role || (forRecipe ? 'salade' : null);
   if (forRecipe && role) state.parsed.filters.type = role;
@@ -167,7 +169,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     const controller = new AbortController();
     const cle = demande.cle; const q = demande.q; const filtres = demande.filtres; // nettoyés : ce qui part (R-WEB-1)
     const promesse = Promise.resolve()
-      .then(() => chercher({ q, filtres, langue: getUiLocale(), cfg: ctx.settings?.llm }, { enLigne, signal: controller.signal, ...depsForces }))
+      .then(async () => chercher({ q, filtres, langue: getUiLocale(), session: await sessionAssistant(ctx) }, { enLigne, signal: controller.signal, ...depsForces }))
       .catch(() => ISSUE_INTERNE)
       .then((issue) => {
         if (vol?.promesse !== promesse) return;           // abandonné ou remplacé : muet
@@ -191,7 +193,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   function renderWeb() {
     for (const v of [...vues]) if (!v.root.isConnected) vues.delete(v); // borné en permanence, pas seulement à la résolution d'un vol
     if (![...vues].some((v) => v.root === root)) vues.add({ root, redessiner: render });
-    const fournisseur = providerFrom(ctx.settings);
+    const fournisseur = providerFrom(ctx.settings, { session });
     const reglages = () => el('a', { class: 'btn small', href: '#/settings' }, t('Réglages'));
     if (!fournisseur.configured) return el('div', { class: 'status warn' }, t('Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'), ' ', reglages());
     if (!fournisseur.supportsWebSearch) return el('div', { class: 'status warn' }, t('Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.'), ' ', reglages());

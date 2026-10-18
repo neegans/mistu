@@ -34,39 +34,21 @@ export async function runRechercheWebTests({ eq, ok }) {
     ok(!(await lire('../src/domain/pairing.js')).includes('notice'), 'domaine : pairing.js ne propage plus de notice');
   }
 
-  // --- § 8 : version 0.7.0 (créer avec l'IA), SHELL
+  // --- § 8 : version 0.8.0 (passerelle de l'assistant), SHELL
   {
     const sw = await lire('../sw.js');
-    ok(/VERSION = 'cuisine-os-v0\.7\.0-\d+'/.test(sw), 'sw.js : VERSION 0.7.0');
+    ok(/VERSION = 'cuisine-os-v0\.8\.0-\d+'/.test(sw), 'sw.js : VERSION 0.8.0');
     ok(sw.includes("'./src/core/bornes.js'"), 'SHELL : ./src/core/bornes.js');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.7.0', 'APP_VERSION 0.7.0');
+    eq(APP_VERSION, '0.8.0', 'APP_VERSION 0.8.0');
   }
 
-  // --- § 7.1 / § 9.7 : AnthropicProvider.complete envoie la même requête avant et après le refactor (écrit AVANT, vert dès le départ)
-  {
-    const { AnthropicProvider } = await import('../src/domain/llm.js');
-    const vraiFetch = globalThis.fetch;
-    let appel = null;
-    try {
-      globalThis.fetch = async (url, options) => { appel = { url, options }; return { ok: true, status: 200, json: async () => ({ content: [{ type: 'text', text: 'OK' }] }) }; };
-      const p = new AnthropicProvider({ provider: 'anthropic', api_key: 'cle-test', model: 'modele-test' });
-      const sortie = await p.complete([{ role: 'system', content: 'S' }, { role: 'user', content: 'U' }], { maxTokens: 5 });
-      eq(sortie, 'OK', 'llm : complete rend le texte des blocs text');
-      eq(appel.url, 'https://api.anthropic.com/v1/messages', 'llm : complete appelle l’URL Messages');
-      eq(appel.options.method, 'POST', 'llm : complete fait un POST');
-      eq(appel.options.headers, { 'content-type': 'application/json', 'x-api-key': 'cle-test', 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, 'llm : complete envoie exactement les quatre en-têtes');
-      eq(JSON.parse(appel.options.body), { model: 'modele-test', max_tokens: 5, system: 'S', messages: [{ role: 'user', content: 'U' }] }, 'llm : complete envoie le même corps qu’avant le lot');
-    } finally { globalThis.fetch = vraiFetch; }
-  }
-
-  // --- § 7.1 : exports neufs, et supportsWebSearch lu par l'écran (F6)
+  // --- § 7.1 : supportsWebSearch lu par l'écran (F6) — seule la passerelle (une SESSION) cherche sur le web
   {
     const L = await import('../src/domain/llm.js');
-    eq(L.ANTHROPIC_MESSAGES_URL, 'https://api.anthropic.com/v1/messages', 'llm : ANTHROPIC_MESSAGES_URL exportée');
-    eq(L.anthropicHeaders('k'), { 'content-type': 'application/json', 'x-api-key': 'k', 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, 'llm : anthropicHeaders rend exactement les quatre en-têtes');
-    eq([L.providerFrom({ llm: { provider: 'none' } }).supportsWebSearch, L.providerFrom({ llm: { provider: 'openai_compatible', api_key: 'k', model: 'm' } }).supportsWebSearch, L.providerFrom({ llm: { provider: 'anthropic', api_key: 'k', model: 'm' } }).supportsWebSearch], [false, false, true], 'llm : seul Anthropic cherche sur le web');
-    eq([L.providerFrom({ llm: { provider: 'anthropic', api_key: '', model: 'm' } }).configured, L.providerFrom({ llm: { provider: 'anthropic', api_key: 'k', model: '' } }).configured], [false, false], 'llm : Anthropic sans clé ou sans modèle n’est pas configuré (garde § 5.2)');
+    const SESSION = { access_token: 'jeton-factice-0123', user: { id: 'u1', email: 'a@exemple.invalid' } };
+    eq([L.providerFrom({ llm: { provider: 'none' } }).supportsWebSearch, L.providerFrom({ llm: { provider: 'openai_compatible', api_key: 'k', model: 'm' } }).supportsWebSearch, L.providerFrom({ llm: { provider: 'none' } }, { session: SESSION }).supportsWebSearch], [false, false, true], 'llm : seule la passerelle (une session) cherche sur le web');
+    eq([L.providerFrom({ llm: { provider: 'anthropic', api_key: 'k', model: 'm' } }).configured, L.providerFrom({}, { session: { access_token: '' } }).configured, L.providerFrom({}, { session: SESSION }).configured], [false, false, true], 'llm : sans session (même avec une clé locale), pas configuré — garde § 5.2 ; avec une session, configuré');
   }
 
   // --- § 4.1-4.4 recherche-web.js : fonctions pures sur des réponses fixes
@@ -96,11 +78,11 @@ export async function runRechercheWebTests({ eq, ok }) {
     eq(W.construireDemande({ q: 'a', filtres: Array.from({ length: 20 }, (_, i) => `f${i}`), langue: 'fr' }).user.split(' ; ').length, 12, 'demande : douze filtres au plus');
 
     // 4.2 corpsRequete
-    const corps = W.corpsRequete({ cfg: { model: 'modele-test' }, demande: d, fuseau: 'America/Toronto' });
+    const corps = W.corpsRequete({ demande: d, fuseau: 'America/Toronto' });
     eq(corps.tools, [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3, user_location: { type: 'approximate', country: 'CA', timezone: 'America/Toronto' } }], 'corps : outil web_search_20250305, 3 recherches, Canada, fuseau');
-    eq([corps.model, corps.max_tokens, corps.system, corps.messages], ['modele-test', 4096, d.system, [{ role: 'user', content: d.user }]], 'corps : modèle, max_tokens, system, un message user');
+    eq([corps.max_tokens, corps.system, corps.messages, 'model' in corps], [4096, d.system, [{ role: 'user', content: d.user }], false], 'corps : max_tokens, system, un message user, JAMAIS de model (le serveur le choisit)');
     eq(['thinking', 'output_config', 'stream', 'allowed_callers'].filter((k) => k in corps || k in corps.tools[0]), [], 'corps : ni thinking, ni output_config, ni stream, ni allowed_callers');
-    eq('timezone' in W.corpsRequete({ cfg: { model: 'm' }, demande: d, fuseau: '' }).tools[0].user_location, false, 'corps : fuseau vide → timezone omis');
+    eq('timezone' in W.corpsRequete({ demande: d, fuseau: '' }).tools[0].user_location, false, 'corps : fuseau vide → timezone omis');
 
     // 4.3 lireReponse — fixture exacte (F17) : A = [a, b, c avec identifiants], B = [a doublon, ftp, d]
     const json = { stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1, server_tool_use: { web_search_requests: 2 } }, content: [
@@ -186,57 +168,64 @@ export async function runRechercheWebTests({ eq, ok }) {
     ok(!/from '\.\.\/ui\//.test(await lire('../src/domain/recherche-web.js')), 'recherche-web.js : n’importe rien de src/ui/ (couche domaine)');
   }
 
-  // --- § 4.5 chercherRecettesWeb : fetch factice, classement des issues, jamais la clé dans l'issue
+  // --- § 4.5 chercherRecettesWeb : fetch factice, classement des issues, jamais le jeton dans l'issue
   {
     const W = await import('../src/domain/recherche-web.js');
-    const CLE = 'sk-ant-cle-test-sentinelle';
-    const cfg = { provider: 'anthropic', api_key: CLE, model: 'modele-test' };
-    const args = { q: 'saumon fenouil', filtres: ['Sans gluten'], langue: 'fr', cfg };
+    const { CHEMIN_ASSISTANT } = await import('../src/domain/passerelle.js');
+    const { SUPABASE } = await import('../src/sync/config.js');
+    const JETON = 'jeton-factice-0123';
+    const SESSION = { access_token: JETON, user: { id: 'u1', email: 'a@exemple.invalid' } };
+    const CONFIG = SUPABASE.prod; // explicite : la suite ne dépend pas du nom d'hôte de la page de tests
+    const args = { q: 'saumon fenouil', filtres: ['Sans gluten'], langue: 'fr', session: SESSION };
     const res = (url, title) => ({ type: 'web_search_result', url, title, page_age: 'May 1, 2026', encrypted_content: 'x' });
     const blocRes = (liste) => ({ type: 'web_search_tool_result', tool_use_id: 'srvtoolu_1', content: liste });
     const reponse = (status, corps) => ({ ok: status >= 200 && status < 300, status, headers: new Headers(), text: async () => (typeof corps === 'string' ? corps : JSON.stringify(corps)) });
-    const nominal = { stop_reason: 'end_turn', usage: { server_tool_use: { web_search_requests: 2 } }, content: [{ type: 'server_tool_use', id: 's', name: 'web_search', input: {} }, blocRes([res('https://a.test/1', 'A'), res('https://b.test/2', 'B')]), { type: 'text', text: '{"choix":[{"url":"https://b.test/2","pourquoi":"Fenouil."}]}' }] };
-    const sansClef = (issue) => !JSON.stringify(issue).includes(CLE) && !JSON.stringify(issue).includes('CORPS-SENTINELLE');
+    const nominal = { model: 'modele-test', stop_reason: 'end_turn', usage: { server_tool_use: { web_search_requests: 2 } }, content: [{ type: 'server_tool_use', id: 's', name: 'web_search', input: {} }, blocRes([res('https://a.test/1', 'A'), res('https://b.test/2', 'B')]), { type: 'text', text: '{"choix":[{"url":"https://b.test/2","pourquoi":"Fenouil."}]}' }] };
+    const sansJeton = (issue) => { const s = JSON.stringify(issue); return !s.includes(JETON) && !s.includes('access_token') && !s.includes('CORPS-SENTINELLE'); };
     let appels = [];
     const fauxFetch = function (url, options) { appels.push({ url, options, self: this }); return Promise.resolve(fauxFetch.rendre(url, options)); };
     fauxFetch.rendre = () => reponse(200, nominal);
-    // V-F2 : CHAQUE issue rendue par lancer() est contrôlée (ni la clé, ni le corps d'erreur sentinelle) ; bilan en fin de bloc.
+    // V-F2 : CHAQUE issue rendue par lancer() est contrôlée (ni le jeton, ni le corps d'erreur sentinelle) ; bilan en fin de bloc.
     const issuesVues = { n: 0, fautives: [] };
-    const lancer = async (deps = {}, a = args) => { appels = []; const i = await W.chercherRecettesWeb(a, { fetch: fauxFetch, enLigne: () => true, fuseau: 'America/Toronto', ...deps }); issuesVues.n += 1; if (!sansClef(i)) issuesVues.fautives.push(i); return i; };
+    const lancer = async (deps = {}, a = args) => { appels = []; const i = await W.chercherRecettesWeb(a, { fetch: fauxFetch, enLigne: () => true, fuseau: 'America/Toronto', config: CONFIG, ...deps }); issuesVues.n += 1; if (!sansJeton(i)) issuesVues.fautives.push(i); return i; };
 
     // Forme de l'appel
     const ok1 = await lancer();
-    eq([ok1.etat, ok1.liens.map((l) => l.href), ok1.autres.map((l) => l.href), ok1.liens[0].pourquoi, ok1.recherches, ok1.modele, ok1.repli], ['trouve', ['https://b.test/2'], ['https://a.test/1'], 'Fenouil.', 2, 'modele-test', false], 'appel : cas nominal → trouve, le choix seul dans liens, l’autre page à part (K2), recherches, modèle');
+    eq([ok1.etat, ok1.liens.map((l) => l.href), ok1.autres.map((l) => l.href), ok1.liens[0].pourquoi, ok1.recherches, ok1.modele, ok1.repli], ['trouve', ['https://b.test/2'], ['https://a.test/1'], 'Fenouil.', 2, 'modele-test', false], 'appel : cas nominal → trouve, le choix seul dans liens, l’autre page à part (K2), recherches, modèle PORTÉ PAR LA RÉPONSE (json.model)');
     eq(appels.length, 1, 'appel : un seul fetch');
     ok(appels[0].self === undefined, 'appel : fetch est appelé comme fonction libre, sans this (F11, V-F12 : comparaison stricte, pas par JSON)');
-    eq(appels[0].url, 'https://api.anthropic.com/v1/messages', 'appel : l’URL Messages, sans la clé');
-    ok(!appels[0].url.includes(CLE), 'appel : la clé n’est pas dans l’adresse');
-    eq([appels[0].options.method, appels[0].options.headers['x-api-key'], appels[0].options.headers['anthropic-dangerous-direct-browser-access'], appels[0].options.credentials, appels[0].options.cache, appels[0].options.referrerPolicy, appels[0].options.mode, appels[0].options.redirect], ['POST', CLE, 'true', 'omit', 'no-store', 'no-referrer', 'cors', 'error'], 'appel : en-têtes et options réseau du lot ISBN, et redirect error (la clé ne suit jamais une redirection)');
+    eq(appels[0].url, 'https://ybdooerfeziiabsbfxtb.supabase.co/functions/v1/assistant', 'appel : la fonction assistant du projet, sans le jeton');
+    ok(appels.every((a) => a.url.endsWith(CHEMIN_ASSISTANT) && new URL(a.url).host.endsWith('.supabase.co')), 'appel : toute requête va à …supabase.co/functions/v1/assistant, jamais ailleurs');
+    ok(!appels[0].url.includes(JETON), 'appel : le jeton n’est pas dans l’adresse');
+    eq([appels[0].options.method, appels[0].options.headers.authorization, appels[0].options.headers.apikey, 'x-api-key' in appels[0].options.headers, appels[0].options.credentials, appels[0].options.cache, appels[0].options.referrerPolicy, appels[0].options.mode, appels[0].options.redirect], ['POST', 'Bearer jeton-factice-0123', SUPABASE.prod.anonKey, false, 'omit', 'no-store', 'no-referrer', 'cors', 'error'], 'appel : POST, jeton en Bearer, clé PUBLIQUE en apikey, jamais x-api-key, options réseau du lot ISBN, et redirect error (le jeton ne suit jamais une redirection)');
     ok(appels[0].options.signal instanceof AbortSignal, 'appel : un signal d’abandon est posé');
     {
-      const corps = JSON.parse(appels[0].options.body);
-      eq([corps.model, corps.tools[0].type, corps.tools[0].max_uses, corps.tools[0].user_location], ['modele-test', 'web_search_20250305', 3, { type: 'approximate', country: 'CA', timezone: 'America/Toronto' }], 'appel : corps = corpsRequete');
+      const envoye = JSON.parse(appels[0].options.body);
+      const corps = envoye.corps;
+      eq([envoye.outil, Object.keys(envoye), 'model' in corps, corps.tools[0].type, corps.tools[0].max_uses, corps.tools[0].user_location], ['recherche-web', ['outil', 'corps'], false, 'web_search_20250305', 3, { type: 'approximate', country: 'CA', timezone: 'America/Toronto' }], 'appel : { outil: recherche-web, corps } où corps = corpsRequete, SANS model');
       ok(corps.messages[0].content.includes('saumon fenouil') && corps.messages[0].content.includes('Sans gluten'), 'appel : la demande et les textes des puces partent (I-J)');
     }
-    // Gardes sans appel
-    for (const [nom, c, etat] of [['cfg absent', undefined, 'non_configure'], ['none', { provider: 'none' }, 'non_configure'], ['anthropic sans clé', { provider: 'anthropic', api_key: '', model: 'm' }, 'non_configure'], ['anthropic sans modèle', { provider: 'anthropic', api_key: 'k', model: '' }, 'non_configure'], ['openai', { provider: 'openai_compatible', api_key: 'k', model: 'm' }, 'non_pris_en_charge']]) {
-      const i = await lancer({}, { ...args, cfg: c });
-      eq([i.etat, i.liens, appels.length], [etat, [], 0], `garde : ${nom} → ${etat}, aucun appel`);
+    // Gardes sans appel : plus de clé côté app, la session décide
+    for (const [nom, s] of [['session absente', undefined], ['session nulle', null], ['sans jeton', { user: { id: 'u1' } }], ['jeton vide', { access_token: '' }], ['jeton à caractère invisible', { access_token: 'jeton\u{200B}x' }]]) {
+      const i = await lancer({}, { ...args, session: s });
+      eq([i.etat, i.raison, i.liens, appels.length], ['indisponible', 'non_connecte', [], 0], `garde : ${nom} → non_connecte, aucun appel`);
     }
-    eq([(await W.chercherRecettesWeb(null)).etat, (await W.chercherRecettesWeb()).etat], ['non_configure', 'non_configure'], 'garde : arguments null ou absents → non_configure, sans lever');
-    eq([(await lancer({}, { ...args, cfg: { ...cfg, api_key: 'sk-ant-\u{200B}x' } })).raison, appels.length], ['cle_refusee', 0], 'garde : clé collée avec un caractère invisible → cle_refusee, aucun appel (fetch lèverait « ByteString » avant tout réseau)');
+    eq([(await W.chercherRecettesWeb(null)).raison, (await W.chercherRecettesWeb()).raison], ['non_connecte', 'non_connecte'], 'garde : arguments null ou absents → non_connecte, sans lever');
     eq([(await lancer({}, { ...args, q: '\u{200B}' })).raison, appels.length], ['requete', 0], 'garde : demande vide après nettoyage → indisponible/requete, aucun appel');
     eq([(await lancer({ enLigne: () => false })).raison, appels.length], ['hors_ligne', 0], 'garde : hors ligne → aucun appel');
     { const c = new AbortController(); c.abort(); eq([(await lancer({ signal: c.signal })).raison, appels.length], ['annule', 0], 'garde : signal déjà abandonné → annule, aucun appel'); }
-    // Statuts HTTP
-    const statut = async (s, corps = { error: { type: 'x', message: 'CORPS-SENTINELLE' } }) => { fauxFetch.rendre = () => reponse(s, corps); const i = await lancer(); fauxFetch.rendre = () => reponse(200, nominal); return i; };
-    eq([(await statut(401)).raison, (await statut(403)).raison], ['cle_refusee', 'cle_refusee'], 'statut : 401 et 403 → cle_refusee');
-    eq((await statut(403, { error: { type: 'permission_error', message: 'Web search is not enabled for this organization' } })).raison, 'recherche_desactivee', 'statut : 403 « web search not enabled » → recherche_desactivee, pas une clé refusée (S12)');
-    eq((await statut(400, { error: { type: 'invalid_request_error', message: 'Web search is not enabled for this organization' } })).raison, 'recherche_desactivee', 'statut : 400 « web search not enabled » → recherche_desactivee (S12)');
-    eq([(await statut(400)).raison, (await statut(404)).raison, (await statut(422)).raison], ['requete', 'requete', 'requete'], 'statut : autres 4xx → requete');
-    eq((await statut(429)).raison, 'trop_de_demandes', 'statut : 429 → trop_de_demandes');
-    eq([(await statut(500)).raison, (await statut(529)).raison], ['serveur', 'serveur'], 'statut : 5xx → serveur');
-    ok(sansClef(await statut(400)) && sansClef(await statut(500)), 'statut : l’issue ne recopie ni la clé ni le corps d’erreur (I-C)');
+    // Statuts HTTP (R-T3-4) : le champ `erreur` de la passerelle prime ; un 429 SANS champ erreur est celui d'Anthropic, relayé
+    const anthropic = { type: 'error', error: { type: 'x', message: 'CORPS-SENTINELLE' } };
+    const statut = async (s, corps = anthropic) => { fauxFetch.rendre = () => reponse(s, corps); const i = await lancer(); fauxFetch.rendre = () => reponse(200, nominal); return i; };
+    eq([(await statut(401)).raison, (await statut(403)).raison, (await statut(401, { erreur: 'non_connecte' })).raison, (await statut(403, { erreur: 'non_admis' })).raison], ['non_connecte', 'non_admis', 'non_connecte', 'non_admis'], 'statut : 401 → non_connecte, 403 → non_admis (plus de cle_refusee)');
+    { const q = await statut(429, { erreur: 'quota', quota: 60 }); eq([q.etat, q.raison, q.quota, q.liens], ['indisponible', 'quota', 60, []], 'statut : 429 { erreur: quota, quota: 60 } → quota, avec quota: 60 dans l’issue'); }
+    eq([(await statut(429)).raison, (await statut(429)).quota], ['trop_de_demandes', undefined], 'statut : 429 SANS champ erreur (Anthropic relayé) → trop_de_demandes, sans quota');
+    eq([(await statut(400)).raison, (await statut(404)).raison, (await statut(422)).raison, (await statut(422, { erreur: 'bornes' })).raison], ['requete', 'requete', 'requete', 'requete'], 'statut : 400, 404, 422 → requete');
+    { const i = await statut(413, { erreur: 'trop_lourd' }); eq([i.raison, i.trop_lourd, (await statut(400)).trop_lourd], ['requete', true, undefined], 'statut : 413 → requete, avec trop_lourd: true (« La demande est trop lourde. », texte de l’écran)'); }
+    eq([(await statut(500)).raison, (await statut(502, { erreur: 'serveur' })).raison, (await statut(503)).raison, (await statut(529)).raison], ['serveur', 'serveur', 'serveur', 'serveur'], 'statut : 5xx (dont 502 et 503 de la passerelle) → serveur');
+    eq((await statut(504, { erreur: 'delai' })).raison, 'delai', 'statut : 504 → delai');
+    eq([(await statut(400, { error: { type: 'invalid_request_error', message: 'Web search is not enabled for this organization' } })).raison, (await statut(403, { error: { type: 'permission_error', message: 'Web search is not enabled for this organization' } })).raison], ['requete', 'non_admis'], 'statut : « web search not enabled » n’est plus lu (le corps d’erreur d’Anthropic n’arrive jamais jusqu’au domaine) — plus de recherche_desactivee');
+    ok(sansJeton(await statut(400)) && sansJeton(await statut(500)), 'statut : l’issue ne recopie ni le jeton ni le corps d’erreur (I-C)');
     // Réseau, délai, abandon, corps
     fauxFetch.rendre = () => { throw new Error('coupé'); };
     eq((await lancer()).raison, 'reseau', 'réseau : fetch qui lève → reseau');
@@ -263,8 +252,10 @@ export async function runRechercheWebTests({ eq, ok }) {
     eq((await lancer()).raison, 'reponse_illisible', 'corps : JSON invalide → reponse_illisible');
     fauxFetch.rendre = () => reponse(200, { content: 'x' });
     eq((await lancer()).raison, 'reponse_illisible', 'corps : content non tableau → reponse_illisible');
-    // Contenu de la réponse
     const contenu = async (json) => { fauxFetch.rendre = () => reponse(200, json); const i = await lancer(); fauxFetch.rendre = () => reponse(200, nominal); return i; };
+    // Le modèle de l'issue vient de la RÉPONSE : borné à 80 points de code, null sans chaîne
+    eq([(await contenu({ ...nominal, model: undefined })).modele, (await contenu({ ...nominal, model: 42 })).modele, (await contenu({ ...nominal, model: 'm'.repeat(200) })).modele, (await contenu({ ...nominal, model: 'a\u{202E}b' })).modele], [null, null, 'm'.repeat(80), 'ab'], 'modèle : json.model borné à 80 points de code et nettoyé, sinon null (R-T3-3)');
+    // Contenu de la réponse
     eq((await contenu({ ...nominal, stop_reason: 'refusal' })).raison, 'refus', 'contenu : refusal AVEC résultats → refus, aucun lien (F22)');
     eq((await contenu({ ...nominal, stop_reason: 'refusal' })).liens, [], 'contenu : refus → liens vides');
     eq((await contenu({ content: [blocRes({ type: 'web_search_tool_result_error', error_code: 'too_many_requests' })] })).raison, 'trop_de_demandes', 'contenu : too_many_requests sans résultat → trop_de_demandes');
@@ -280,19 +271,18 @@ export async function runRechercheWebTests({ eq, ok }) {
     eq((await lancer()).raison, 'interne', 'corps : un 200 sans corps lisible ni text() → interne, jamais reseau (V-C6)');
     fauxFetch.rendre = () => reponse(200, nominal);
     {
-      // Le filet extérieur : le corps de la requête est calculé HORS du try du réseau. Un `model` qui lève à son 2e accès
-      // (1 = la garde `!cfg.model`, 2 = corpsRequete, avant tout fetch) doit donner `interne` — jamais `reseau` — sans fetch.
-      let acces = 0;
-      const cfgPiege = { provider: 'anthropic', api_key: CLE, get model() { acces += 1; if (acces === 2) throw new Error('modele piege'); return 'modele-test'; } };
+      // Le filet extérieur : une exception levée AVANT l'appel (ici un `fuseau` qui lève à sa lecture) donne `interne` — jamais
+      // `reseau` — sans fetch ; le journal ne porte ni le jeton ni le texte de l'erreur.
       const vus = []; const vraiErreur = console.error;
       console.error = (...a) => { vus.push(a); };
-      let i; try { i = await lancer({}, { ...args, cfg: cfgPiege }); } finally { console.error = vraiErreur; }
-      eq([i.etat, i.raison, appels.length], ['indisponible', 'interne', 0], 'filet : une exception pendant le calcul du corps → interne, aucun fetch (jamais reseau)');
+      appels = []; let i; try { i = await W.chercherRecettesWeb(args, { fetch: fauxFetch, enLigne: () => true, config: CONFIG, get fuseau() { throw new Error('fuseau piege'); } }); } finally { console.error = vraiErreur; }
+      issuesVues.n += 1; if (!sansJeton(i)) issuesVues.fautives.push(i);
+      eq([i.etat, i.raison, appels.length], ['indisponible', 'interne', 0], 'filet : une exception avant l’appel → interne, aucun fetch (jamais reseau)');
       const charge = vus[0]?.[1];
       eq([vus.length, Object.keys(charge ?? {}), charge?.reason], [1, ['reason', 'name'], 'interne'], 'filet : le journal ne porte que reason et name, reason = interne');
-      ok(!JSON.stringify(vus).includes(CLE) && !JSON.stringify(vus).includes('model'), 'filet : le journal ne contient ni la clé ni le modèle (S10/F12)');
+      ok(!JSON.stringify(vus).includes(JETON) && !JSON.stringify(vus).includes('piege'), 'filet : le journal ne contient ni le jeton ni le texte de l’erreur (S10/F12)');
     }
-    eq([issuesVues.n, issuesVues.fautives.length], [42, 0], 'I-C : CHACUNE des issues rendues dans ce bloc (toutes comptées) est sans clé ni corps d’erreur (V-F2)');
+    eq([issuesVues.n, issuesVues.fautives.length], [55, 0], 'I-C : CHACUNE des issues rendues dans ce bloc (toutes comptées) est sans jeton ni corps d’erreur (V-F2)');
   }
 
   // --- V-C2 : t() rend une valeur telle quelle, même avec les motifs « $ » de replaceAll
@@ -330,9 +320,10 @@ export async function runRechercheWebTests({ eq, ok }) {
     const scene = document.createElement('div'); scene.hidden = true; document.body.append(scene);
     try {
       const ING = new Map([['ing_salmon', { labels: { fr: { label: 'saumon' } } }], ['ing_fennel_bulb', { labels: { fr: { label: 'fenouil' } } }], ['ing_chicken', { labels: { fr: { label: 'poulet' } } }]]);
-      const ctxDe = (llm) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING, meal_feedback: [], settings: { llm } });
-      const CLE_ECRAN = 'sk-ant-cle-ecran-sentinelle'; // V-F2 : elle doit atteindre chercher(), jamais l'état ni l'écran
-      const ANTH = { provider: 'anthropic', api_key: CLE_ECRAN, model: 'm' };
+      // La session vient de ctx.sync.auth.jeton() (R-T3-1) : sans session, ni clé locale ni réglage ne donnent un assistant.
+      const ctxDe = (session, llm = { provider: 'none' }) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING, meal_feedback: [], settings: { llm }, sync: { auth: { jeton: async () => session } } });
+      const JETON_ECRAN = 'jeton-ecran-sentinelle'; // V-F2 : il doit atteindre chercher(), jamais l'état ni l'écran
+      const SESSION_ECRAN = { access_token: JETON_ECRAN, user: { id: 'u1', email: 'a@exemple.invalid' } };
       const pilote = () => { const p = {}; p.promesse = new Promise((res) => { p.resoudre = res; }); return p; };
       const tick = () => new Promise((r) => setTimeout(r, 0)); // un tour de boucle : les .then de lancer() ont tourné
       // remplacerAdresse factice par défaut : la tape (lancer) met l'adresse à jour par history.replaceState, pas celle de la page de tests.
@@ -346,20 +337,26 @@ export async function runRechercheWebTests({ eq, ok }) {
       const enVol = (root) => !!root.querySelector('[role="status"]');
       const issueTrouve = { etat: 'trouve', raison: null, liens: [{ href: 'https://a.test/r', hote: 'a.test', titre: 'A', date: null, pourquoi: null }], repli: false, recherches: 1, modele: 'm' };
 
-      // Garde du fournisseur (§ 5.2) : une seule source de vérité
+      // Garde du fournisseur (§ 5.2) : une seule source de vérité — la SESSION (R-T3-1) ; les textes de T4 viendront ensuite
       S.reinitialiserWeb();
-      for (const [nom, llm, attendu] of [['none', { provider: 'none' }, 'Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'], ['anthropic sans clé', { provider: 'anthropic', api_key: '', model: 'm' }, 'Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'], ['openai', { provider: 'openai_compatible', api_key: 'k', model: 'm' }, 'Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.']]) {
+      for (const [nom, session, llm, attendu] of [['sans session', null, { provider: 'none' }, 'Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'], ['sans session, une clé locale ne sert plus', null, { provider: 'anthropic', api_key: 'cle-locale', model: 'm' }, 'Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'], ['jeton vide', { access_token: '' }, { provider: 'none' }, 'Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'], ['openai sans session', null, { provider: 'openai_compatible', api_key: 'k', model: 'm' }, 'Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.']]) {
         let appels = 0;
-        const root = await monter({ q: 'saumon' }, ctxDe(llm), { chercher: async () => { appels += 1; return issueTrouve; } });
+        const root = await monter({ q: 'saumon' }, ctxDe(session, llm), { chercher: async () => { appels += 1; return issueTrouve; } });
         ok(texte(root).includes(attendu), `garde : ${nom} → « ${attendu.slice(0, 30)}… »`);
         ok(!!root.querySelector('a[href="#/settings"]'), `garde : ${nom} → lien Réglages`);
         eq([appels, !!bouton(root, 'Chercher sur le web avec l’assistant')], [0, false], `garde : ${nom} → aucun appel, pas de bouton`);
         root.remove();
       }
+      {
+        // Avec une session, AUCUN réglage local n'est nécessaire : l'écran du bouton s'affiche (la clé n'existe plus côté app)
+        const root = await monter({ q: 'saumon' }, ctxDe(SESSION_ECRAN, { provider: 'none' }), { chercher: async () => issueTrouve });
+        eq([!!bouton(root, 'Chercher sur le web avec l’assistant'), texte(root).includes('configure l’assistant IA')], [true, false], 'garde : une session suffit — le bouton « Chercher sur le web » est là, sans réglage local');
+        root.remove();
+      }
       // Écran du bouton (§ 5.3) et frappe sans Entrée (Review Focus 1)
       {
         let appels = []; const p = pilote();
-        const root = await monter({}, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return p.promesse; }, navigate: () => {} });
+        const root = await monter({}, ctxDe(SESSION_ECRAN), { chercher: async (a, d) => { appels.push({ a, d }); return p.promesse; }, navigate: () => {} });
         const b = bouton(root, 'Chercher sur le web avec l’assistant');
         eq([b.disabled, texte(root).includes('Écris d’abord ce que tu cherches.'), texte(root).includes('Une recherche = un appel à ton compte Anthropic.'), appels.length], [true, true, true, 0], 'bouton : champ vide → éteint, deux lignes, aucun appel au rendu (I-B)');
         eq(aide(root)?.hidden, false, 'aide : champ vide au montage → la ligne « Écris d’abord… » est VISIBLE (elle est toujours rendue : le texte seul ne le prouve pas)');
@@ -374,7 +371,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         b.click();
         await tick();
         eq(appels.length, 1, 'tape : un appel');
-        eq([appels[0].a.q, appels[0].a.filtres, appels[0].a.langue, appels[0].a.cfg], ['saumon fenouil sans gluten', ['Sans gluten', 'avec fenouil', 'avec saumon'], 'fr', ANTH], 'tape : la demande est le CHAMP relu (q), les puces comprises en TEXTE (« Sans gluten », les ingrédients par leur libellé), la langue, la cfg (I-J)');
+        eq([appels[0].a.q, appels[0].a.filtres, appels[0].a.langue, appels[0].a.session, 'cfg' in appels[0].a], ['saumon fenouil sans gluten', ['Sans gluten', 'avec fenouil', 'avec saumon'], 'fr', SESSION_ECRAN, false], 'tape : la demande est le CHAMP relu (q), les puces comprises en TEXTE (« Sans gluten », les ingrédients par leur libellé), la langue, la SESSION relue au moment de l’appel, jamais de cfg (I-J)');
         eq(appels[0].a.filtres, puces(root), 'tape : les filtres envoyés sont EXACTEMENT les puces affichées après la relecture du champ (I-J)');
         ok(appels[0].d.signal instanceof AbortSignal && typeof appels[0].d.enLigne === 'undefined', 'tape : un signal est passé ; enLigne n’est pas forcé à la tape');
         const e = S.etatWeb();
@@ -395,7 +392,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         S.reinitialiserWeb();
         const appels = []; const p1 = pilote(); const p2 = pilote();
         const chercher = async (a, d) => { appels.push(d.signal); return appels.length === 1 ? p1.promesse : p2.promesse; };
-        const ctx = ctxDe(ANTH);
+        const ctx = ctxDe(SESSION_ECRAN);
         const r1 = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
         bouton(r1, 'Chercher sur le web avec l’assistant').click();
         await tick();
@@ -424,7 +421,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         S.reinitialiserWeb();
         const appels = []; const p1 = pilote(); const p2 = pilote();
         const chercher = async (a, d) => { appels.push({ a, d }); return appels.length === 1 ? p1.promesse : p2.promesse; };
-        const root = await monter({ q: 'saumon sans gluten' }, ctxDe(ANTH), { chercher, navigate: () => {} });
+        const root = await monter({ q: 'saumon sans gluten' }, ctxDe(SESSION_ECRAN), { chercher, navigate: () => {} });
         bouton(root, 'Chercher sur le web avec l’assistant').click();
         await tick();
         [...root.querySelectorAll('.chip.removable')].find((c) => c.textContent === 'Sans gluten').click();
@@ -441,7 +438,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       {
         S.reinitialiserWeb();
         const appels = [];
-        const root = await monter({ q: 'saumon' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        const root = await monter({ q: 'saumon' }, ctxDe(SESSION_ECRAN), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
         eq(aide(root)?.hidden, true, 'aide : champ rempli au montage → la ligne d’aide est cachée');
         const liste = [...root.querySelectorAll('select')].find((s) => s.options[0]?.textContent === '+ restriction');
         liste.value = 'sans_gluten'; liste.dispatchEvent(new Event('change'));
@@ -457,7 +454,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       {
         S.reinitialiserWeb();
         const appels = [];
-        const root = await monter({ q: '' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        const root = await monter({ q: '' }, ctxDe(SESSION_ECRAN), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
         taper(root, 'saumon');
         const liste = [...root.querySelectorAll('select')].find((s) => s.options[0]?.textContent === '+ restriction');
         liste.value = 'sans_gluten'; liste.dispatchEvent(new Event('change'));
@@ -473,7 +470,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       {
         S.reinitialiserWeb();
         const appels = [];
-        const root = await monter({ q: 'soupe sans gluten en 20 minutes' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        const root = await monter({ q: 'soupe sans gluten en 20 minutes' }, ctxDe(SESSION_ECRAN), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
         bouton(root, 'Chercher sur le web avec l’assistant').click();
         await tick();
         const avant = puces(root);
@@ -488,7 +485,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       {
         S.reinitialiserWeb();
         const appels = [];
-        const root = await monter({ q: 'salade sans xyzzy en 20 minutes' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        const root = await monter({ q: 'salade sans xyzzy en 20 minutes' }, ctxDe(SESSION_ECRAN), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
         const avant = puces(root);
         taper(root, 'saumon');
         bouton(root, 'Chercher sur le web avec l’assistant').click();
@@ -501,7 +498,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       {
         S.reinitialiserWeb();
         const appels = [];
-        const root = await monter({ q: 'sans fenouil' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        const root = await monter({ q: 'sans fenouil' }, ctxDe(SESSION_ECRAN), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
         const avant = puces(root);
         taper(root, 'saumon fenouil');
         bouton(root, 'Chercher sur le web avec l’assistant').click();
@@ -513,7 +510,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       {
         S.reinitialiserWeb();
         const appels = [];
-        const root = await monter({ q: '10 min actives' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        const root = await monter({ q: '10 min actives' }, ctxDe(SESSION_ECRAN), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
         const avant = puces(root);
         taper(root, 'saumon');
         bouton(root, 'Chercher sur le web avec l’assistant').click();
@@ -525,7 +522,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       {
         S.reinitialiserWeb();
         const appels = [];
-        const root = await monter({ q: '' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        const root = await monter({ q: '' }, ctxDe(SESSION_ECRAN), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
         taper(root, 'saumon');
         const liste = [...root.querySelectorAll('select')].find((s) => s.options[0]?.textContent === '+ restriction');
         liste.value = 'sans_gluten'; liste.dispatchEvent(new Event('change'));
@@ -539,7 +536,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       {
         S.reinitialiserWeb();
         const appels = [];
-        const root = await monter({ q: 'soupe saumon sans lactose' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        const root = await monter({ q: 'soupe saumon sans lactose' }, ctxDe(SESSION_ECRAN), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
         const parNom = (nom) => [...root.querySelectorAll('select')].find((s) => s.options[0]?.textContent === nom);
         parNom('+ type').value = 'dessert'; parNom('+ type').dispatchEvent(new Event('change'));
         parNom('+ restriction').value = 'sans_gluten'; parNom('+ restriction').dispatchEvent(new Event('change'));
@@ -557,12 +554,12 @@ export async function runRechercheWebTests({ eq, ok }) {
           S.reinitialiserWeb();
           const appels = []; const navs = [];
           const deps = { chercher: async (a) => { appels.push(a); return issueTrouve; }, navigate: (chemin) => { navs.push(chemin); } };
-          let root = await monter({ q: 'soupe sans gluten en 20 minutes' }, ctxDe(ANTH), deps);
+          let root = await monter({ q: 'soupe sans gluten en 20 minutes' }, ctxDe(SESSION_ECRAN), deps);
           taper(root, 'saumon fenouil');
           if (avecEntree) {
             champ(root).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
             root.remove();
-            root = await monter(parseHash('#' + navs[navs.length - 1]).query, ctxDe(ANTH), deps); // la ré-instanciation de production
+            root = await monter(parseHash('#' + navs[navs.length - 1]).query, ctxDe(SESSION_ECRAN), deps); // la ré-instanciation de production
           }
           bouton(root, 'Chercher sur le web avec l’assistant').click();
           await tick();
@@ -578,7 +575,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         S.reinitialiserWeb();
         const { parseHash } = await import('../src/core/router.js');
         const appels = []; const p = pilote(); const adresses = []; let reinstanciations = 0;
-        const ctx = ctxDe(ANTH);
+        const ctx = ctxDe(SESSION_ECRAN);
         let vue = null;
         const deps = {
           chercher: async (a, d) => { appels.push({ a, d }); return p.promesse; },
@@ -597,7 +594,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         p.resoudre(issueTrouve);
         await tick();
         eq([vue === root, texte(vue).includes('Trouvé sur le web'), texte(vue).includes('La demande a changé depuis cette recherche.'), puces(vue).includes('Sans gluten')], [true, true, false, true], 'R-WEB-9 : à la réponse, les liens s’affichent dans cette instance SANS la mention K1 (la demande affichée est celle qui est partie)');
-        eq([appels[0]?.a.cfg?.api_key === CLE_ECRAN, JSON.stringify(S.etatWeb()).includes(CLE_ECRAN), texte(vue).includes(CLE_ECRAN), document.body.textContent.includes(CLE_ECRAN)], [true, false, false, false], 'I-C écran : la clé atteint chercher(), jamais etatWeb() ni le texte rendu après un trouvé (V-F2)');
+        eq([appels[0]?.a.session?.access_token === JETON_ECRAN, JSON.stringify(S.etatWeb()).includes(JETON_ECRAN), texte(vue).includes(JETON_ECRAN), document.body.textContent.includes(JETON_ECRAN)], [true, false, false, false], 'I-C écran : le jeton atteint chercher(), jamais etatWeb() ni le texte rendu après un trouvé (V-F2)');
         root.remove();
       }
       // R-WEB-9, dépendance par défaut : sans remplacerAdresse injecté, la tape pose l'adresse par history.replaceState (aucun
@@ -609,7 +606,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         window.addEventListener('hashchange', compter);
         try {
           const p = pilote(); let navs = 0;
-          const root = await S.renderSearch({}, { mode: 'web', q: 'saumon' }, ctxDe(ANTH), { chercher: async () => p.promesse, navigate: () => { navs += 1; } });
+          const root = await S.renderSearch({}, { mode: 'web', q: 'saumon' }, ctxDe(SESSION_ECRAN), { chercher: async () => p.promesse, navigate: () => { navs += 1; } });
           scene.append(root);
           bouton(root, 'Chercher sur le web avec l’assistant').click();
           await tick();
@@ -626,7 +623,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         const navs = []; let appels = 0;
         const adresseAvant = location.href;
         try {
-          const root = await monter({ q: 'saumon' }, ctxDe(ANTH), { chercher: async () => { appels += 1; return issueTrouve; }, navigate: (p, o) => { navs.push([p, o]); } });
+          const root = await monter({ q: 'saumon' }, ctxDe(SESSION_ECRAN), { chercher: async () => { appels += 1; return issueTrouve; }, navigate: (p, o) => { navs.push([p, o]); } });
           champ(root).value = 'saumon fenouil';
           champ(root).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
           const [chemin, options] = navs[0] || [];
@@ -638,7 +635,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       {
         S.reinitialiserWeb();
         const appels = [];
-        const root = await monter({ q: 'saumon\u{200B} fenouil' }, ctxDe(ANTH), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
+        const root = await monter({ q: 'saumon\u{200B} fenouil' }, ctxDe(SESSION_ECRAN), { chercher: async (a, d) => { appels.push({ a, d }); return issueTrouve; }, navigate: () => {} });
         bouton(root, 'Chercher sur le web avec l’assistant').click();
         await tick();
         eq(appels.map((x) => x.a.q), ['saumon fenouil'], 'R-WEB-1 : la demande envoyée est q NETTOYÉ (le U+200B retiré), pas la saisie brute');
@@ -647,7 +644,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       // Filet (§ 5.4.5, F12)
       {
         S.reinitialiserWeb();
-        const root = await monter({ q: 'saumon' }, ctxDe(ANTH), { chercher: async () => { throw new TypeError('bogue'); }, navigate: () => {} });
+        const root = await monter({ q: 'saumon' }, ctxDe(SESSION_ECRAN), { chercher: async () => { throw new TypeError('bogue'); }, navigate: () => {} });
         bouton(root, 'Chercher sur le web avec l’assistant').click();
         await new Promise((r) => setTimeout(r, 0));
         eq([S.etatWeb().enCours, S.etatWeb().memoire?.etat], [false, 'indisponible'], 'filet : un chercher qui lève → indisponible en mémoire, plus de vol (jamais d’écran figé)');
@@ -671,9 +668,9 @@ export async function runRechercheWebTests({ eq, ok }) {
     try {
       // I-J : « saumon » et « fenouil » sont des ingrédients du lexique et deviennent des puces « avec … » ; leurs libellés fr.
       const ING = new Map([['ing_salmon', { labels: { fr: { label: 'saumon' } } }], ['ing_fennel_bulb', { labels: { fr: { label: 'fenouil' } } }], ['ing_chicken', { labels: { fr: { label: 'poulet' } } }]]);
-      const ctxDe = (llm) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING, meal_feedback: [], settings: { llm } });
-      const CLE_ECRAN = 'sk-ant-cle-ecran-sentinelle'; // V-F2 : elle doit atteindre chercher(), jamais l'état ni l'écran
-      const ANTH = { provider: 'anthropic', api_key: CLE_ECRAN, model: 'm' };
+      const ctxDe = (session) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING, meal_feedback: [], settings: { llm: { provider: 'none' } }, sync: { auth: { jeton: async () => session } } });
+      const JETON_ECRAN = 'jeton-ecran-sentinelle'; // V-F2 : il doit atteindre chercher(), jamais l'état ni l'écran
+      const SESSION_ECRAN = { access_token: JETON_ECRAN, user: { id: 'u1', email: 'a@exemple.invalid' } };
       // remplacerAdresse factice par défaut : la tape (lancer) met l'adresse à jour par history.replaceState, pas celle de la page de tests.
       const monter = async (query, ctx, deps) => { const root = await S.renderSearch({}, { mode: 'web', ...query }, ctx, { remplacerAdresse: () => {}, ...deps }); scene.append(root); return root; };
       const texte = (root) => root.textContent;
@@ -688,7 +685,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       const appels = { n: 0, deps: [], args: [], rendre: null };
       const chercher = async (a, d) => { appels.n += 1; appels.deps.push(d); appels.args.push(a); return new Promise((r) => { appels.rendre = r; }); };
       const navs = [];
-      const ctx = ctxDe(ANTH);
+      const ctx = ctxDe(SESSION_ECRAN);
 
       // trouve
       S.reinitialiserWeb();
@@ -699,7 +696,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       eq(root.querySelectorAll('b').length, 0, 'trouve : aucun élément créé par un titre hostile');
       ok(texte(root).includes('a.test · 1 mai 2026') && texte(root).includes('Fenouil et saumon.'), 'trouve : hôte, date mise en forme (confort, item 3), pourquoi');
       ok(texte(root).includes('Trouvé sur le web') && texte(root).includes('Demande envoyée : saumon fenouil'), 'trouve : titre de section et demande envoyée (I-J)');
-      eq([appels.args[0]?.cfg?.api_key === CLE_ECRAN, JSON.stringify(S.etatWeb()).includes(CLE_ECRAN), texte(root).includes(CLE_ECRAN)], [true, false, false], 'I-C écran : après un trouvé, la clé n’est ni dans etatWeb() ni dans le texte rendu — elle a bien atteint chercher() (V-F2)');
+      eq([appels.args[0]?.session?.access_token === JETON_ECRAN, JSON.stringify(S.etatWeb()).includes(JETON_ECRAN), texte(root).includes(JETON_ECRAN)], [true, false, false], 'I-C écran : après un trouvé, le jeton n’est ni dans etatWeb() ni dans le texte rendu — il a bien atteint chercher() (V-F2)');
       // R-WEB-1 : une saisie avec un caractère de format (U+200B) est nettoyée AVANT l'envoi ; l'écran rappelle la demande partie
       {
         const r0 = await monter({ q: 'saumon\u{200B} fenouil' }, ctx, { chercher, navigate: () => {} });

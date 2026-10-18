@@ -8,7 +8,7 @@ import { EN } from '../src/i18n/en.js';
 export async function runCreerIaTests({ eq, ok }) {
   const C = await import('../src/domain/creation-ia.js');
   buildIngredientIndex(INGREDIENTS); // l'index des lignes est global (lines.js:6) : la suite le pose elle-même (F10)
-  eq(APP_VERSION, '0.7.0', 'T1 : APP_VERSION 0.7.0');
+  eq(APP_VERSION, '0.8.0', 'T1 : APP_VERSION 0.8.0');
 
   // --- estCreationIA (C-2, F6)
   const synth = { kind: 'synthesis', provenance: { generated_by: 'ai', creation: { demande: 'x' } } };
@@ -277,34 +277,41 @@ export async function runCreerIaTests({ eq, ok }) {
   eq(L.detectTimers('Cuire 0 min.'), {}, 'minuteurs : une durée nulle ne produit rien');
   // --- T2 : creerRecetteIA (§ 4.4, C-8, C-13, C-14)
   const reponse = (status, corps, headers = {}) => ({ ok: status >= 200 && status < 300, status, headers: new Headers(headers), text: async () => (typeof corps === 'string' ? corps : JSON.stringify(corps)), body: null });
-  const CLE = 'sk-factice-creation';
-  const cfg = { provider: 'anthropic', api_key: CLE, model: 'modele-test' };
-  // Toutes les issues rendues par `appel` et par les appels directs : aucune ne doit contenir la clé (C-8), contrôlé en fin de bloc.
+  // Passerelle (R-T3-3) : plus de clé ni de cfg — la SESSION de la personne, un jeton factice, et la config publique du projet.
+  const { SUPABASE } = await import('../src/sync/config.js');
+  const { CHEMIN_ASSISTANT } = await import('../src/domain/passerelle.js');
+  const CLE = 'jeton-factice-0123'; // le JETON : nom conservé pour les contrôles « jamais dans une issue » (C-8)
+  const SESSION = { access_token: CLE, user: { id: 'u1', email: 'a@exemple.invalid' } };
+  const CONFIG = SUPABASE.prod; // explicite : la suite ne dépend pas du nom d'hôte de la page de tests
+  // Toutes les issues rendues par `appel` et par les appels directs : aucune ne doit contenir le jeton (C-8), contrôlé en fin de bloc.
   const vues = [];
   // P2 : le faux fetch reçoit `options` (dont `signal`) ; `pendante` écoute l'abandon — sans cela le test du délai bloquerait la suite.
-  const appel = (rendre, deps = {}, args = {}) => { const appels = []; const f = async (url, options) => { appels.push({ url, options }); return rendre(appels.length, options); }; return C.creerRecetteIA({ demande: 'saumon fenouil', filtres: { servings: 2 }, langue: 'fr', cfg, ...args }, { fetch: f, enLigne: () => true, ...deps }).then((issue) => { vues.push(issue); return { issue, appels }; }); };
+  const appel = (rendre, deps = {}, args = {}) => { const appels = []; const f = async (url, options) => { appels.push({ url, options }); return rendre(appels.length, options); }; return C.creerRecetteIA({ demande: 'saumon fenouil', filtres: { servings: 2 }, langue: 'fr', session: SESSION, ...args }, { fetch: f, enLigne: () => true, config: CONFIG, ...deps }).then((issue) => { vues.push(issue); return { issue, appels }; }); };
   const pendante = (n, o) => new Promise((_, rej) => o.signal.addEventListener('abort', () => rej(new DOMException('abandon', 'AbortError')), { once: true }));
   // P13 : `creerRecetteIA` ne journalise que `illisible` et `interne` ; console.error est remplacé le temps du bloc (critère « 0 erreur console »).
   const vraiError = console.error; const erreurs = []; console.error = (...a) => erreurs.push(a);
   try {
-  const corpsOk = (texte) => ({ content: [{ type: 'text', text: texte }], stop_reason: 'end_turn', usage: { input_tokens: 900, output_tokens: 700 } });
-  for (const [nom, c, etat] of [['absent', undefined, 'non_configure'], ['none', { provider: 'none' }, 'non_configure'], ['sans clé', { provider: 'anthropic', api_key: '', model: 'm' }, 'non_configure'], ['openai', { provider: 'openai_compatible', api_key: 'k', model: 'm', base_url: '' }, 'non_pris_en_charge']]) {
-    const { issue, appels } = await appel(() => reponse(200, corpsOk('{}')), {}, { cfg: c });
-    eq([issue.etat, appels.length], [etat, 0], 'garde : ' + nom + ' → aucun appel');
+  const corpsOk = (texte) => ({ model: 'modele-test', content: [{ type: 'text', text: texte }], stop_reason: 'end_turn', usage: { input_tokens: 900, output_tokens: 700 } });
+  for (const [nom, sess] of [['absente', undefined], ['nulle', null], ['sans jeton', { user: { id: 'u1' } }], ['jeton vide', { access_token: '' }], ['jeton à espace', { access_token: 'jeton avec espace' }], ['jeton à caractère de contrôle', { access_token: 'a\u0000b' }], ['jeton non chaîne', { access_token: 12345 }]]) {
+    const { issue, appels } = await appel(() => reponse(200, corpsOk('{}')), {}, { session: sess });
+    eq([issue.etat, issue.raison, appels.length], ['indisponible', 'non_connecte', 0], 'garde : session ' + nom + ' → non_connecte, aucun appel');
   }
-  { const { issue, appels } = await appel(() => reponse(200, corpsOk('{}')), {}, { cfg: { ...cfg, api_key: 'clé avec espace' } }); eq([issue.etat, issue.raison, appels.length], ['indisponible', 'cle_refusee', 0], 'garde : clé hors [\\x21-\\x7e] → cle_refusee sans appel'); }
   { const { issue, appels } = await appel(() => reponse(200, corpsOk('{}')), { enLigne: () => false }); eq([issue.raison, appels.length], ['hors_ligne', 0], 'garde : hors ligne'); }
   { const { issue, appels } = await appel(() => reponse(200, corpsOk('{}')), {}, { demande: ' ' }); eq([issue.raison, appels.length], ['requete', 0], 'garde : demande vide'); }
   { const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE)))); 
-    const corps = JSON.parse(appels[0].options.body);
-    eq([issue.etat, issue.recette.title, issue.usage, issue.modele, corps.max_tokens, corps.model, 'thinking' in corps, 'tools' in corps, appels[0].options.redirect, appels[0].options.credentials, appels[0].options.headers['x-api-key'] === CLE, JSON.stringify(issue).includes(CLE)],
-      ['trouve', 'Saumon au fenouil', { entree: 900, sortie: 700 }, 'modele-test', 16000, 'modele-test', false, false, 'error', 'omit', true, false], 'trouve : recette validée, usage, 16 000 jetons, sans thinking ni outil, redirect error, clé dans l’en-tête et nulle part ailleurs (C-8)'); }
+    const envoye = JSON.parse(appels[0].options.body); const interieur = envoye.corps;
+    eq([issue.etat, issue.recette.title, issue.usage, issue.modele, interieur.max_tokens, 'model' in interieur, 'thinking' in interieur, 'tools' in interieur, envoye.outil, appels[0].options.redirect, appels[0].options.credentials, appels[0].options.headers.authorization === 'Bearer ' + CLE, 'x-api-key' in appels[0].options.headers, appels[0].options.headers.apikey === SUPABASE.prod.anonKey, JSON.stringify(issue).includes(CLE), appels[0].url.includes(CLE), appels[0].options.body.includes(CLE)],
+      ['trouve', 'Saumon au fenouil', { entree: 900, sortie: 700 }, 'modele-test', 16000, false, false, false, 'creation', 'error', 'omit', true, false, true, false, false, false], 'trouve : recette validée, usage, modèle PORTÉ PAR LA RÉPONSE, 16 000 jetons, sans model ni thinking ni outil, outil creation, redirect error, jeton en Bearer et nulle part ailleurs, apikey publique (C-8)'); }
   { const { issue } = await appel(() => reponse(200, corpsOk('Voici la recette :\n' + JSON.stringify(VALIDE) + '\nBon appétit'))); eq(issue.etat, 'trouve', 'trouve : prose autour du JSON tolérée (parseJsonLoose)'); }
+  { const { issue } = await appel(() => reponse(200, { ...corpsOk(JSON.stringify(VALIDE)), model: undefined })); const b = await appel(() => reponse(200, { ...corpsOk(JSON.stringify(VALIDE)), model: 'm'.repeat(200) })); const c = await appel(() => reponse(200, { ...corpsOk(JSON.stringify(VALIDE)), model: 42 })); eq([issue.modele, b.issue.modele, c.issue.modele], [null, 'm'.repeat(80), null], 'modèle : json.model borné à 80 points de code, null sans chaîne (R-T3-3)'); }
   { const { issue } = await appel(() => reponse(200, corpsOk(JSON.stringify({ ...VALIDE, title: 'Soupe sans gluten' })))); eq([issue.etat, issue.raison, issue.motif], ['indisponible', 'illisible', 'affirmation'], 'illisible : une recette invalide porte son motif (C-3)'); }
   { const { issue } = await appel(() => reponse(200, { content: [{ type: 'text', text: '{' }], stop_reason: 'max_tokens' })); eq(issue.raison, 'interrompu', 'coupure : max_tokens → interrompu (C-13)'); }
   { const { issue } = await appel(() => reponse(200, { content: [], stop_reason: 'refusal' })); eq(issue.raison, 'refus', 'refus du modèle → refus'); }
   { const { issue } = await appel(() => reponse(200, { content: [{ type: 'thinking', thinking: 'x' }, { type: 'text', text: JSON.stringify(VALIDE) }], stop_reason: 'end_turn' })); eq(issue.etat, 'trouve', 'seuls les blocs text sont lus (F11)'); }
-  for (const [status, raison] of [[401, 'cle_refusee'], [429, 'trop_de_demandes'], [400, 'requete'], [403, 'cle_refusee'], [500, 'serveur'], [418, 'requete'], [302, 'serveur']]) { const { issue } = await appel(() => reponse(status, 'CORPS-SENTINELLE')); eq([issue.raison, JSON.stringify(issue).includes('SENTINELLE')], [raison, false], `statut ${status} → ${raison}, corps d’erreur jamais dans l’issue`); }
+  for (const [status, raison] of [[401, 'non_connecte'], [429, 'trop_de_demandes'], [400, 'requete'], [403, 'non_admis'], [413, 'requete'], [422, 'requete'], [500, 'serveur'], [502, 'serveur'], [503, 'serveur'], [504, 'delai'], [418, 'requete'], [302, 'serveur']]) { const { issue } = await appel(() => reponse(status, 'CORPS-SENTINELLE')); eq([issue.raison, JSON.stringify(issue).includes('SENTINELLE')], [raison, false], `statut ${status} → ${raison}, corps d’erreur jamais dans l’issue`); }
+  { const { issue } = await appel(() => reponse(429, { erreur: 'quota', quota: 60 })); eq([issue.etat, issue.raison, issue.quota, issue.recette], ['indisponible', 'quota', 60, null], 'statut 429 { erreur: quota, quota: 60 } → quota, avec quota: 60'); }
+  { const a = await appel(() => reponse(413, { erreur: 'trop_lourd' })); const b = await appel(() => reponse(400, { type: 'error' })); eq([a.issue.raison, a.issue.trop_lourd, b.issue.trop_lourd], ['requete', true, undefined], 'statut 413 → requete avec trop_lourd: true (« La demande est trop lourde. »)'); }
+  { const a = await appel(() => reponse(502, { erreur: 'serveur' })); const b = await appel(() => reponse(504, { erreur: 'delai' })); const c = await appel(() => reponse(403, { erreur: 'non_admis' })); const d = await appel(() => reponse(401, { erreur: 'non_connecte' })); eq([a.issue.raison, b.issue.raison, c.issue.raison, d.issue.raison], ['serveur', 'delai', 'non_admis', 'non_connecte'], 'champ erreur de la passerelle : serveur, delai, non_admis, non_connecte'); }
   { const { issue } = await appel(() => { throw new TypeError('Failed to fetch'); }); eq(issue.raison, 'reseau', 'réseau'); }
   { const { issue } = await appel(() => reponse(200, 'pas du json')); eq(issue.raison, 'reponse_illisible', 'corps HTTP non JSON → reponse_illisible (F19)'); }
   { const { issue } = await appel(() => reponse(200, corpsOk('Je ne peux pas, désolé.'))); eq([issue.raison, issue.motif], ['illisible', 'json'], 'texte du modèle sans JSON → illisible, motif json (C-3, P13)'); }
@@ -320,9 +327,11 @@ export async function runCreerIaTests({ eq, ok }) {
 
   // --- T2, compléments de l'implémenteur : ce qui part, ce qui revient, ce qui ne lève jamais
   { const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { langue: 'en' });
-    const corps = JSON.parse(appels[0].options.body);
+    const enveloppe = JSON.parse(appels[0].options.body); const corps = enveloppe.corps;
+    eq([Object.keys(enveloppe), enveloppe.outil], [['outil', 'corps'], 'creation'], 'enveloppe : { outil: creation, corps }');
+    ok(appels.every((x) => x.url.endsWith(CHEMIN_ASSISTANT) && new URL(x.url).host.endsWith('.supabase.co')), 'enveloppe : toute requête va à …supabase.co/functions/v1/assistant, jamais ailleurs');
     eq([Object.keys(corps).sort(), typeof corps.system, corps.messages.length, corps.messages[0].role, corps.messages[0].content.includes('saumon fenouil'), corps.system.includes('You design'), corps.system.includes('exactly 2'), appels[0].url, appels[0].options.method, appels[0].options.headers['anthropic-version'], appels[0].options.signal instanceof AbortSignal, issue.etat],
-      [['max_tokens', 'messages', 'model', 'system'], 'string', 1, 'user', true, true, true, 'https://api.anthropic.com/v1/messages', 'POST', '2023-06-01', true, 'trouve'], 'corps : exactement model, max_tokens, system, messages ; en anglais en interface anglaise ; adresse Messages ; un signal'); }
+      [['max_tokens', 'messages', 'system'], 'string', 1, 'user', true, true, true, 'https://ybdooerfeziiabsbfxtb.supabase.co/functions/v1/assistant', 'POST', undefined, true, 'trouve'], 'corps : exactement max_tokens, system, messages (JAMAIS model) ; en anglais en interface anglaise ; la fonction assistant du projet ; aucun en-tête anthropic ; un signal'); }
   { const { appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE)))); ok(appels[0].options.signal.aborted === true, 'sortie : le signal du fetch est abandonné à la sortie (ctl.abort() en finally)'); }
   { const { issue } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { filtres: { servings: 4, maxMinutes: 10 } }); eq([issue.etat, issue.avertissements], ['trouve', ['L’assistant a rendu 2 portions au lieu de 4.', 'Durée estimée 25 min, au-dessus des 10 min demandées.']], 'avertissements : portions et durée comparées aux filtres normalisés de la demande'); }
   { const { issue } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { filtres: null }); eq([issue.etat, issue.avertissements], ['trouve', ['L’assistant a rendu 2 portions au lieu de 4.']], 'filtres nuls : portions par défaut 4, aucune levée'); }
@@ -339,15 +348,10 @@ export async function runCreerIaTests({ eq, ok }) {
   { const { issue } = await appel(() => ({ status: 200 })); eq(issue.raison, 'interne', 'réponse sans text() ni flux → interne (V-C6), pas reseau'); }
   { const { issue } = await appel(() => ({ ok: true, status: 200, text: async () => { throw new Error('flux coupé'); } })); eq(issue.raison, 'reseau', 'lecture du corps qui échoue → reseau'); }
   { const gros = new Response(JSON.stringify(corpsOk(JSON.stringify(VALIDE))), { status: 200 }); const { issue } = await appel(() => gros, { corpsMax: 100 }); eq(issue.raison, 'reponse_illisible', 'vraie Response au-dessus de corpsMax → reponse_illisible (lecture en flux coupée)'); }
-  { const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { cfg: { ...cfg, api_key: 'a\u0000b' } }); eq([issue.raison, appels.length], ['cle_refusee', 0], 'garde : clé avec un caractère de contrôle → cle_refusee sans appel'); }
-  { const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { cfg: { ...cfg, api_key: 12345 } }); eq([issue.etat, appels.length], ['non_configure', 0], 'garde : clé qui n’est pas une chaîne → non_configure sans appel'); }
-  { const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { cfg: { ...cfg, model: '' } }); eq([issue.etat, appels.length], ['non_configure', 0], 'garde : modèle vide → non_configure sans appel'); }
-  { const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { cfg: { ...cfg, model: 42 } }); eq([issue.etat, issue.modele, appels.length], ['non_configure', null, 0], 'garde : modèle qui n’est pas une chaîne → non_configure sans appel, modèle null dans l’issue'); }
-  { let lectures = 0; const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { cfg: { provider: 'anthropic', api_key: CLE, get model() { lectures += 1; return 'modele-' + lectures; } } }); eq([issue.etat, issue.modele, JSON.parse(appels[0].options.body).model, lectures], ['trouve', 'modele-1', 'modele-1', 1], 'modèle : lu UNE seule fois, le corps et l’issue portent la même valeur'); }
   {
     const parente = { id: 'rv_p', recipe_id: 'rc_p', title: 'Saumon', servings: 2, ingredients: [{ source_text: '200 g saumon' }], steps: [{ text: 'Cuire.' }], provenance: { creation: { description: 'Un plat.' } } };
     const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { parente, changement: ' pour 4 personnes ' });
-    const contenu = JSON.parse(appels[0].options.body).messages[0].content;
+    const contenu = JSON.parse(appels[0].options.body).corps.messages[0].content;
     eq([issue.etat, contenu.includes('<<<RECETTE_DE_DEPART'), contenu.includes('Changement demandé : pour 4 personnes')], ['trouve', true, true], 'adaptation : la parente et le changement sont transmis à la demande');
     const sans = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { parente, changement: '  ' });
     eq([sans.issue.raison, sans.appels.length], ['requete', 0], 'adaptation sans changement → requete, aucun appel (P15)');
@@ -358,13 +362,13 @@ export async function runCreerIaTests({ eq, ok }) {
     const reseauTente = [];
     const espion = () => { reseauTente.push(1); throw new Error('réseau interdit dans la suite'); };
     const ENTREES = [
-      ['rien', [undefined, undefined], ['non_configure', null]], ['nuls', [null, null], ['non_configure', null]], ['nombre', [42, {}], ['non_configure', null]], ['chaîne', ['x', { fetch: 3 }], ['non_configure', null]], ['cfg nul', [{ cfg: null }, {}], ['non_configure', null]],
-      ['getter qui lève', [{ demande: 'saumon', cfg: { provider: 'anthropic', api_key: CLE, get model() { throw new Error('boom'); } } }, { fetch: espion, enLigne }], ['indisponible', 'interne']],
-      ['enLigne qui lève', [{ demande: 'saumon', cfg }, { fetch: espion, enLigne: () => { throw new Error('boom'); } }], ['indisponible', 'interne']],
-      ['fetch qui lève (sync)', [{ demande: 'saumon', cfg }, { fetch: () => { throw new RangeError('boom'); }, enLigne }], ['indisponible', 'reseau']],
-      ['fetch rend null', [{ demande: 'saumon', cfg }, { fetch: async () => null, enLigne }], ['indisponible', 'interne']],
-      ['signal qui n’en est pas un', [{ demande: 'saumon', cfg }, { fetch: async () => reponse(200, 'x'), enLigne, signal: { aborted: false } }], ['indisponible', 'interne']],
-      ['demande non chaîne', [{ demande: { toString() { throw new Error('boom'); } }, cfg }, { fetch: espion, enLigne }], ['indisponible', 'requete']],
+      ['rien', [undefined, undefined], ['indisponible', 'non_connecte']], ['nuls', [null, null], ['indisponible', 'non_connecte']], ['nombre', [42, {}], ['indisponible', 'non_connecte']], ['chaîne', ['x', { fetch: 3 }], ['indisponible', 'non_connecte']], ['session nulle', [{ session: null }, {}], ['indisponible', 'non_connecte']],
+      ['getter qui lève', [{ demande: 'saumon', session: { get access_token() { throw new Error('boom'); } } }, { fetch: espion, enLigne, config: CONFIG }], ['indisponible', 'interne']],
+      ['enLigne qui lève', [{ demande: 'saumon', session: SESSION }, { fetch: espion, enLigne: () => { throw new Error('boom'); }, config: CONFIG }], ['indisponible', 'interne']],
+      ['fetch qui lève (sync)', [{ demande: 'saumon', session: SESSION }, { fetch: () => { throw new RangeError('boom'); }, enLigne, config: CONFIG }], ['indisponible', 'reseau']],
+      ['fetch rend null', [{ demande: 'saumon', session: SESSION }, { fetch: async () => null, enLigne, config: CONFIG }], ['indisponible', 'interne']],
+      ['signal qui n’en est pas un', [{ demande: 'saumon', session: SESSION }, { fetch: async () => reponse(200, 'x'), enLigne, config: CONFIG, signal: { aborted: false } }], ['indisponible', 'interne']],
+      ['demande non chaîne', [{ demande: { toString() { throw new Error('boom'); } }, session: SESSION }, { fetch: espion, enLigne, config: CONFIG }], ['indisponible', 'requete']],
     ];
     const rendus = [];
     for (const [, [a, dp]] of ENTREES) { let i; try { i = await C.creerRecetteIA(a, dp); } catch (e) { i = { etat: 'LEVE', raison: String(e) }; } vues.push(i); rendus.push([i.etat, i.raison]); }
@@ -553,24 +557,32 @@ export async function runCreerIaTests({ eq, ok }) {
     const libelle = (root, role) => bouton(root, role)?.textContent ?? null;
     const statutVol = (root) => [...root.querySelectorAll('[role="status"]')].some((n) => n.textContent === 'L’assistant compose une recette…');
     const ING_BY_ID = new Map(INGREDIENTS.map((i) => [i.id, i]));
-    const ctxDe = (llm, extra = {}) => ({ recipes: [], docs: [], docsByRecipe: new Map(), ingredientsById: ING_BY_ID, versionsById: new Map(), recipesById: new Map(), settings: { llm }, conventionFor: () => null, ...extra });
-    const CLE = 'sk-factice-ecran';
-    const ANTH = { provider: 'anthropic', api_key: CLE, model: 'm' };
+    // La session vient de ctx.sync.auth.jeton() (R-T3-1) ; `extra` peut remplacer `settings` pour les gardes sans session.
+    const ctxDe = (session, extra = {}) => ({ recipes: [], docs: [], docsByRecipe: new Map(), ingredientsById: ING_BY_ID, versionsById: new Map(), recipesById: new Map(), settings: { llm: { provider: 'none' } }, sync: { auth: { jeton: async () => session } }, conventionFor: () => null, ...extra });
+    const JETON = 'jeton-ecran-sentinelle'; // C-8 : il doit atteindre creer(), jamais l'état ni le DOM
+    const SESSION = { access_token: JETON, user: { id: 'u1', email: 'a@exemple.invalid' } };
     const trouve = { etat: 'trouve', raison: null, motif: null, recette: VALIDE, avertissements: [], modele: 'm', usage: { entree: 1, sortie: 2 } };
     const sansAppel = async () => { throw new Error('aucun appel attendu'); };
-    const monter = async (query, deps = {}, ctx = ctxDe(ANTH)) => { const root = await S.renderCreerIA({}, query, ctx, { creer: sansAppel, remplacerAdresse: () => {}, navigate: () => {}, toast: () => {}, ...deps }); scene.append(root); return root; };
+    const monter = async (query, deps = {}, ctx = ctxDe(SESSION)) => { const root = await S.renderCreerIA({}, query, ctx, { creer: sansAppel, remplacerAdresse: () => {}, navigate: () => {}, toast: () => {}, ...deps }); scene.append(root); return root; };
     // Un « creer » dont chaque appel attend qu'on le résolve à la main : a.rendre[i](issue).
     const enMain = () => { const a = { n: 0, args: [], deps: [], rendre: [] }; a.creer = (args, deps) => { a.n += 1; a.args.push(args); a.deps.push(deps); return new Promise((r) => { a.rendre.push(r); }); }; return a; };
     try {
       // P7.2 — gardes fournisseur (C-14, P29 : par fournisseur.name, pas par supportsWebSearch) : la carte et « Réglages », rien d'autre
       for (const [nom, llm, attendu] of [
-        ['aucun fournisseur', { provider: 'none' }, 'Pour créer une recette, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'],
-        ['Anthropic sans clé', { provider: 'anthropic', api_key: '', model: 'm' }, 'Pour créer une recette, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'],
-        ['compatible OpenAI configuré', { provider: 'openai_compatible', api_key: 'k', model: 'm', base_url: '' }, 'Ce fournisseur ne crée pas de recette ici. Choisis Anthropic dans Réglages → Assistant IA.'],
+        ['sans session, aucun fournisseur', { provider: 'none' }, 'Pour créer une recette, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'],
+        ['sans session, une clé locale ne sert plus', { provider: 'anthropic', api_key: 'cle-locale', model: 'm' }, 'Pour créer une recette, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'],
+        ['sans session, compatible OpenAI configuré', { provider: 'openai_compatible', api_key: 'k', model: 'm', base_url: '' }, 'Ce fournisseur ne crée pas de recette ici. Choisis Anthropic dans Réglages → Assistant IA.'],
       ]) {
         S.reinitialiserCreation();
-        const root = await monter({ q: 'saumon' }, {}, ctxDe(llm));
+        const root = await monter({ q: 'saumon' }, {}, ctxDe(null, { settings: { llm } }));
         eq([textes(root, '[data-role="garde-ia"] .status > span'), !!root.querySelector('[data-role="garde-ia"] a[href="#/settings"]'), bouton(root, 'creer-ia') === null, bouton(root, 'demande-ia') === null], [[attendu], true, true, true], `P7.2 garde (${nom}) : texte exact, lien Réglages, ni formulaire ni bouton de création`);
+        root.remove();
+      }
+      {
+        // Avec une session, AUCUN réglage local n'est nécessaire : le formulaire est là (la clé n'existe plus côté app)
+        S.reinitialiserCreation();
+        const root = await monter({ q: 'saumon' }, {}, ctxDe(SESSION));
+        eq([bouton(root, 'creer-ia') !== null, bouton(root, 'demande-ia') !== null, root.querySelector('[data-role="garde-ia"]') === null], [true, true, true], 'P7.2 garde : une session suffit — le formulaire et « Créer ma recette » sont là, sans réglage local');
         root.remove();
       }
       // P7.2 — garde C-15 (?adapter) ; frontière avec T7 : une parente valide donne le formulaire ORDINAIRE prérempli, sans changement ni appel
@@ -579,7 +591,7 @@ export async function runCreerIaTests({ eq, ok }) {
         const fiche = { id: 'rc_ia', origine: 'ia', original_title: 'Saumon au fenouil' };
         const creation = { id: 'rv_ia', recipe_id: 'rc_ia', kind: 'synthesis', status: 'proposed', servings: 2, ingredients: [], steps: [], provenance: { generated_by: 'ai', creation: { demande: 'saumon fenouil' } } };
         const extraction = { id: 'rv_livre', recipe_id: 'rc_livre', kind: 'extraction', provenance: { generated_by: 'ai' } };
-        const ctx = ctxDe(ANTH, { versionsById: new Map([['rv_ia', creation], ['rv_livre', extraction], ['rv_orpheline', { ...creation, id: 'rv_orpheline', recipe_id: 'rc_absente' }]]), recipesById: new Map([['rc_ia', fiche], ['rc_livre', { id: 'rc_livre', original_title: 'Livre' }]]) });
+        const ctx = ctxDe(SESSION, { versionsById: new Map([['rv_ia', creation], ['rv_livre', extraction], ['rv_orpheline', { ...creation, id: 'rv_orpheline', recipe_id: 'rc_absente' }]]), recipesById: new Map([['rc_ia', fiche], ['rc_livre', { id: 'rc_livre', original_title: 'Livre' }]]) });
         for (const [nom, id] of [['version absente', 'rv_rien'], ['extraction IA de livre', 'rv_livre'], ['fiche absente', 'rv_orpheline']]) {
           const root = await monter({ adapter: id }, {}, ctx);
           eq([textes(root, '[data-role="garde-ia"] .status > span'), bouton(root, 'demande-ia') === null, bouton(root, 'creer-ia') === null], [['Cette version ne peut pas être adaptée ici.'], true, true], `P7.2 garde C-15 (${nom}) : refus, sans formulaire ni bouton`);
@@ -629,7 +641,7 @@ export async function runCreerIaTests({ eq, ok }) {
         const autre = await monter({ q: 'autre chose' }, { creer: a.creer, toast: (m) => dits.push(m) });
         const perime = bouton(autre, 'creer-ia');
         bouton(root, 'creer-ia').click(); await tick();
-        eq([a.n, a.args[0].demande, a.args[0].filtres, a.args[0].cfg === ANTH, a.args[0].langue, a.args[0].parente, a.args[0].changement, typeof a.deps[0].enLigne, a.deps[0].signal instanceof AbortSignal, adresses],
+        eq([a.n, a.args[0].demande, a.args[0].filtres, a.args[0].session?.access_token === JETON && !('cfg' in a.args[0]), a.args[0].langue, a.args[0].parente, a.args[0].changement, typeof a.deps[0].enLigne, a.deps[0].signal instanceof AbortSignal, adresses],
           [1, 'saumon fenouil', { diets: ['sans_lactose', 'vegetalien'], type: 'salade', servings: 4, maxMinutes: null }, true, 'fr', null, null, 'function', true, ['/recipes/creer?q=saumon+fenouil&diets=sans_lactose%2Cvegetalien&type=salade&portions=4']],
           'C-10 : un clic = un appel avec ce qui est affiché ; F2 : adresse remplacée par les seuls champs de la liste blanche');
         eq([statutVol(root), !!bouton(root, 'annuler-ia'), bouton(root, 'creer-ia') === null, [...root.querySelectorAll('button')].filter((b) => b.disabled && !b.dataset.role).map((b) => b.textContent), bouton(root, 'demande-ia') === null, S.etatCreation().enCours],
@@ -654,7 +666,7 @@ export async function runCreerIaTests({ eq, ok }) {
         eq(textes(prop, '[data-role="evaluation-ia"] li'), ['Sans lactose — À vérifier', 'Végétalien — Incompatible : 300 g saumon (identité proposée : saumon ?)'], 'P9 / S1 : chaque restriction demandée, texte exact — « À vérifier » ou « Incompatible : {ligne écrite} (identité proposée) », jamais « Compatible »');
         eq([libelle(root, 'garder-ia'), libelle(root, 'recommencer-ia'), libelle(root, 'modifier-demande'), bouton(root, 'demande-ia') === null, bouton(root, 'k1') === null, S.etatCreation().memoire.gardee, S.etatCreation().memoire.echec],
           ['Garder cette recette', 'Recommencer', 'Modifier la demande', true, true, null, null], 'P7.4 : Garder, Recommencer, Modifier la demande ; formulaire replié ; rien n’est gardé');
-        eq([JSON.stringify(S.etatCreation()).includes(CLE), root.outerHTML.includes(CLE), a.args[0].cfg.api_key === CLE], [false, false, true], 'C-8 : la clé a atteint creer() mais n’est ni dans etatCreation() ni dans le DOM (texte et attributs)');
+        eq([JSON.stringify(S.etatCreation()).includes(JETON), root.outerHTML.includes(JETON), a.args[0].session.access_token === JETON], [false, false, true], 'C-8 : le jeton a atteint creer() mais n’est ni dans etatCreation() ni dans le DOM (texte et attributs)');
         root.remove();
 
         // P9 — une restriction dont seul un ingrédient FACULTATIF bloque : jamais « Compatible », le nom de la ligne reste dit (M1 de la re-revue T5)
@@ -827,7 +839,7 @@ export async function runCreerIaTests({ eq, ok }) {
         ta.value = 'truite'; ta.dispatchEvent(new Event('input'));
         bouton(r6, 'recommencer-ia').click(); await tick(); await tick();
         eq([args6.length, args6[2]?.demande, S.etatCreation().memoire.demande, bouton(r6, 'demande-ia') === null, S.etatCreation().memoire.echec?.raison], [3, 'saumon fenouil', 'saumon fenouil', true, 'serveur'], '« Recommencer » relance la demande PARTIE (memoire.demande), pas la frappe en cours ; le formulaire se replie');
-        ok(!JSON.stringify(S.etatCreation()).includes(CLE) && !r6.outerHTML.includes(CLE), 'C-8 : la clé n’est pas dans etatCreation() ni dans le DOM');
+        ok(!JSON.stringify(S.etatCreation()).includes(JETON) && !r6.outerHTML.includes(JETON), 'C-8 : le jeton n’est pas dans etatCreation() ni dans le DOM');
         r6.remove();
 
         // P7.5 — T, non eq, non G : une nouvelle instance avec une autre demande ; F21 élargi (« Créer à nouveau » échoué sous une autre clé)
@@ -957,7 +969,7 @@ export async function runCreerIaTests({ eq, ok }) {
         const aM = enMain();
         const rM = await monter({ q: 'saumon fenouil' }, { creer: aM.creer });
         bouton(rM, 'creer-ia').click(); await tick();
-        const tardive = await S.renderCreerIA({}, { q: 'saumon fenouil' }, ctxDe(ANTH), { creer: sansAppel, remplacerAdresse: () => {}, navigate: () => {}, toast: () => {} });
+        const tardive = await S.renderCreerIA({}, { q: 'saumon fenouil' }, ctxDe(SESSION), { creer: sansAppel, remplacerAdresse: () => {}, navigate: () => {}, toast: () => {} });
         const enVolAvant = statutVol(tardive);
         aM.rendre[0](trouve);
         for (let i = 0; i < 12; i += 1) await Promise.resolve(); // la résolution passe avant le montage (notifier écarte la racine détachée)
@@ -1001,12 +1013,12 @@ export async function runCreerIaTests({ eq, ok }) {
     const adresseAvant = location.href;
     const tick = () => new Promise((r) => setTimeout(r, 0));
     const ING_T4 = new Map(INGREDIENTS.map((i) => [i.id, i]));
-    const ANTH = { provider: 'anthropic', api_key: 'sk-factice-portes', model: 'm' };
-    const ctxDe = (llm) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING_T4, meal_feedback: [], settings: { llm }, versionsById: new Map(), recipesById: new Map(), conventionFor: () => null });
+    const SESSION = { access_token: 'jeton-factice-portes', user: { id: 'u1', email: 'a@exemple.invalid' } };
+    const ctxDe = (session) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING_T4, meal_feedback: [], settings: { llm: { provider: 'none' } }, sync: { auth: { jeton: async () => session } }, versionsById: new Map(), recipesById: new Map(), conventionFor: () => null });
     const appels = { n: 0, rendre: null };
     const chercher = async () => { appels.n += 1; return new Promise((r) => { appels.rendre = r; }); };
     const navs = [];
-    const monter = async (query, ctx = ctxDe(ANTH)) => { const root = await S.renderSearch({}, { mode: 'web', ...query }, ctx, { chercher, remplacerAdresse: () => {}, navigate: (p) => navs.push(p) }); scene.append(root); return root; };
+    const monter = async (query, ctx = ctxDe(SESSION)) => { const root = await S.renderSearch({}, { mode: 'web', ...query }, ctx, { chercher, remplacerAdresse: () => {}, navigate: (p) => navs.push(p) }); scene.append(root); return root; };
     const parTexte = (root, nom) => [...root.querySelectorAll('button')].find((b) => b.textContent === nom);
     const porte = (root) => root.querySelector('[data-role="creer-depuis-web"]');
     const liste = (root, premiere) => [...root.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.textContent === premiere));
@@ -1096,9 +1108,9 @@ export async function runCreerIaTests({ eq, ok }) {
         eq([S.etatWeb().enCours, !!parTexte(root, 'Annuler'), !!porte(root)], [true, true, false], 'porte Web : pendant le vol → pas de bouton');
         parTexte(root, 'Annuler').click(); appels.rendre({ ...base, etat: 'indisponible', raison: 'annule' }); await tick();
         root.remove();
-        // assistant non configuré : l'écran de garde, aucune porte
-        const garde = await monter({ q: 'saumon fenouil' }, ctxDe({}));
-        eq([garde.textContent.includes('configure l’assistant IA'), !!porte(garde)], [true, false], 'porte Web : assistant non configuré → la garde, pas de bouton');
+        // pas de session : l'écran de garde, aucune porte
+        const garde = await monter({ q: 'saumon fenouil' }, ctxDe(null));
+        eq([garde.textContent.includes('configure l’assistant IA'), !!porte(garde)], [true, false], 'porte Web : sans session → la garde, pas de bouton');
         garde.remove();
       }
       // (d) relireChamp : le champ tapé SANS Entrée est relu avant de naviguer (R-WEB-10), les puces des listes survivent
@@ -1128,7 +1140,7 @@ export async function runCreerIaTests({ eq, ok }) {
         eq(r.adresse, '/recipes/creer?q=poulet+%26+riz+%231+100%25+en+20+minutes&diets=sans_gluten%2Csans_lactose&type=soupe&max=20', 'porte Web : l’adresse exacte — texte libre encodé par buildQuery (+, %26, %23, %25), régimes séparés par %2C (P12)');
         // l'écran de création, monté depuis cette adresse, est prérempli (filtresDepuisQuery)
         const query = Object.fromEntries(p.entries());
-        const ecran = await SC.renderCreerIA({}, query, ctxDe(ANTH), { creer: async () => { throw new Error('aucun appel attendu'); }, remplacerAdresse: () => {}, navigate: () => {}, toast: () => {} });
+        const ecran = await SC.renderCreerIA({}, query, ctxDe(SESSION), { creer: async () => { throw new Error('aucun appel attendu'); }, remplacerAdresse: () => {}, navigate: () => {}, toast: () => {} });
         scene.append(ecran);
         eq([ecran.querySelector('[data-role="demande-ia"]').value, [...ecran.querySelectorAll('[data-diet][aria-pressed="true"]')].map((b) => b.dataset.diet), ecran.querySelector('select[name="type"]').value, ecran.querySelector('input[name="max"]').value],
           ['poulet & riz #1 100% en 20 minutes', ['sans_gluten', 'sans_lactose'], 'soupe', '20'], 'porte Web → écran de création : demande, régimes, type et durée arrivent préremplis');
@@ -1498,15 +1510,15 @@ export async function runCreerIaTests({ eq, ok }) {
     const eteintSansRole = (root) => [...root.querySelectorAll('button')].filter((b) => b.disabled && !b.dataset.role).map((b) => b.textContent);
     const saisir = (champ, valeur) => { champ.value = valeur; champ.dispatchEvent(new Event('input')); };
     const ING = new Map(INGREDIENTS.map((i) => [i.id, i]));
-    const CLE = 'sk-factice-adaptation';
-    const ANTH = { provider: 'anthropic', api_key: CLE, model: 'm' };
+    const JETON = 'jeton-adaptation-sentinelle'; // C-8 : il doit atteindre creer(), jamais l'état ni le DOM
+    const SESSION = { access_token: JETON, user: { id: 'u1', email: 'a@exemple.invalid' } };
     const enMain = () => { const a = { n: 0, args: [], deps: [], rendre: [] }; a.creer = (args, deps) => { a.n += 1; a.args.push(args); a.deps.push(deps); return new Promise((r) => { a.rendre.push(r); }); }; return a; };
     // La création de départ, fabriquée comme « Garder » l'écrit (identifiants fixes rc_x / rv_x ; horodatage posé, que saveBatch garde).
     let k7 = 0; const id7 = (p) => (p === 'rc' ? 'rc_x' : p === 'rv' ? 'rv_x' : `${p}_t7_${++k7}`);
     const fab = C.fabriquerRecetteIA({ recette: VALIDE, demande: 'saumon fenouil', filtres: { diets: ['sans_lactose'], type: 'plat_principal', servings: 2, maxMinutes: 30 }, langue: 'fr', modele: 'm', usage: null, convention: C.conventionCreation('metric_ca'), newId: id7, maintenant: '2026-10-18T03:00:00.000Z' });
     const fiche = { ...fab.recipe, created_at: '2026-10-18T03:00:00.000Z' };
     const creation = { ...fab.version, created_at: '2026-10-18T03:00:00.000Z' };
-    const ctxDe = (versions, recipes, llm = ANTH) => ({ recipes, docs: [], docsByRecipe: new Map(), ingredientsById: ING, versionsById: new Map(versions.map((v) => [v.id, v])), recipesById: new Map(recipes.map((r) => [r.id, r])), settings: { llm }, conventionFor: () => null });
+    const ctxDe = (versions, recipes, session = SESSION) => ({ recipes, docs: [], docsByRecipe: new Map(), ingredientsById: ING, versionsById: new Map(versions.map((v) => [v.id, v])), recipesById: new Map(recipes.map((r) => [r.id, r])), settings: { llm: { provider: 'none' } }, sync: { auth: { jeton: async () => session } }, conventionFor: () => null });
     const sansAppel = async () => { throw new Error('aucun appel attendu'); };
     const monter = async (query, deps = {}, ctx = ctxDe([creation], [fiche])) => { const root = await S.renderCreerIA({}, query, ctx, { creer: sansAppel, remplacerAdresse: () => {}, navigate: () => {}, toast: () => {}, ...deps }); scene.append(root); return root; };
     // Ce que l'assistant rend pour « pour 4 personnes » (son titre n'est pas gardé : une version n'a pas de titre, la fiche garde le sien).
@@ -1654,7 +1666,7 @@ export async function runCreerIaTests({ eq, ok }) {
         const autre = await monter({ q: 'autre chose' }, { creer: a.creer });
         bouton(root, 'creer-ia').click(); await tick();
         const [args0] = a.args;
-        eq([a.n, args0.parente, args0.changement, args0.demande, args0.filtres, args0.cfg === ANTH, adresses],
+        eq([a.n, args0.parente, args0.changement, args0.demande, args0.filtres, args0.session?.access_token === JETON && !('cfg' in args0), adresses],
           [1, { ...parenteAvant, title: 'Saumon au fenouil' }, 'pour 4 personnes', 'saumon fenouil', { diets: ['sans_lactose'], type: 'plat_principal', servings: 4, maxMinutes: 30 }, true, ['/recipes/creer?q=saumon+fenouil&diets=sans_lactose&type=plat_principal&portions=4&max=30&adapter=rv_x&changement=pour+4+personnes']],
           'C-10 / C-15 : un appel avec la parente stockée (titre de la fiche, P15) et le changement nettoyé ; l’adresse porte adapter et changement (F2)');
         const envoye = C.construireDemandeCreation(args0);
@@ -1679,7 +1691,7 @@ export async function runCreerIaTests({ eq, ok }) {
           [[true, { memoire: null, enCours: false }, brut, false, 0], 2, ['Adaptée avec l’IA · non testée'], 'Saumon au fenouil', ['4 portions · environ 25 min (estimé par l’assistant)'], ['600 g saumon', '2 fenouil'], ['Demande envoyée : saumon fenouil · Sans lactose · Plat principal · 4 portions · au plus 30 min · Changement : pour 4 personnes']],
           'P18 + P7.4 : Annuler garde le changement tapé ; la réponse tardive est muette ; proposition « Adaptée avec l’IA · non testée », titre de la FICHE (celui qu’elle gardera), lignes du modèle, changement rappelé (C-10)');
         const M = S.etatCreation().memoire;
-        eq([libelle(root, 'garder-ia'), libelle(root, 'recommencer-ia'), libelle(root, 'modifier-demande'), bouton(root, 'changement-ia') === null, M.parente.id, M.changement, M.gardee, ecritures.length, JSON.stringify(S.etatCreation()).includes(CLE), root.outerHTML.includes(CLE)],
+        eq([libelle(root, 'garder-ia'), libelle(root, 'recommencer-ia'), libelle(root, 'modifier-demande'), bouton(root, 'changement-ia') === null, M.parente.id, M.changement, M.gardee, ecritures.length, JSON.stringify(S.etatCreation()).includes(JETON), root.outerHTML.includes(JETON)],
           ['Garder cette recette', 'Recommencer', 'Modifier la demande', true, 'rv_x', 'pour 4 personnes', null, 0, false, false], 'P7.4 : Garder, Recommencer, Modifier ; mémoire = parente + changement partis ; rien d’écrit avant Garder ; la clé ni dans etatCreation() ni dans le DOM (C-8)');
 
         // P7.5 / K1 — le CHANGEMENT compte dans la clé : en changer fait paraître la mention, sans redessin

@@ -10,7 +10,7 @@ import { currentVersion } from '../domain/search.js';
 import { getConvention } from '../domain/units.js';
 import { providerFrom, extractRecipeFromImages, blobToBase64 } from '../domain/llm.js';
 import { RECIPE_TYPES } from '../model/schema.js';
-import { pageHeader, field, select, aiNotice, section, pdfFrame } from './components.js';
+import { pageHeader, field, select, aiNotice, section, pdfFrame, sessionAssistant } from './components.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
 
 const SUBRECIPE_RE = /(?:voir|see|cf\.?)\s+(?:la\s+)?(?:page|p\.)\s*(\d{1,4})|\bp\.\s*(\d{1,4})\b/gi;
@@ -31,7 +31,7 @@ export async function renderRecipeEdit(params, query, ctx) {
   const pageIds = query.pages ? query.pages.split(',').filter(Boolean) : (recipe?.source_page_ids || []);
   const pages = pageIds.map((id) => ctx.pagesById.get(id)).filter(Boolean);
   const doc = query.doc ? ctx.source_documents.find((d) => d.id === query.doc) : null;
-  const provider = providerFrom(ctx.settings);
+  const provider = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) }); // la passerelle (R-T3-1) : la session décide
 
   // Référence en attente (bouton « Scanner cette recette » depuis la fiche du livre)
   let pendingRef = null;
@@ -145,13 +145,14 @@ export async function renderRecipeEdit(params, query, ctx) {
     try {
       const images = [];
       for (const p of pages) { const fl = await repo.getFile(p.sha256); images.push({ mime: fl.mime, base64: await blobToBase64(fl.blob) }); }
-      const r = await extractRecipeFromImages(provider, images);
+      const courant = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) }); // relue au clic : un jeton expiré se rafraîchit
+      const r = await extractRecipeFromImages(courant, images);
       if (r.title && !f.title) { f.title = r.title; titleInput.value = r.title; }
       if (r.language) f.language = r.language;
       if (r.servings != null) f.servings = r.servings; if (r.prep_minutes != null) f.prep = r.prep_minutes; if (r.cook_minutes != null) f.cook = r.cook_minutes; if (r.printed_page != null && !f.printed_page) f.printed_page = r.printed_page;
       f.ingredientsText = r.ingredients.map((i) => i.source_text).join('\n'); ingTa.value = f.ingredientsText;
       f.stepsText = r.steps.map((s) => s.text).join('\n'); stepsTa.value = f.stepsText;
-      f.aiUsed = true; f.aiModel = ctx.settings.llm?.model || provider.name;
+      f.aiUsed = true; f.aiModel = courant.modele || (courant.name === 'openai_compatible' ? ctx.settings.llm?.model : null) || courant.name; // le modèle choisi par le SERVEUR (passerelle) quand il l'a dit
       parsedLines = []; reparse(); drawSteps();
       const uncertain = r.ingredients.filter((i) => i.uncertain).map((i) => i.source_text).concat(r.uncertain_fields);
       aiStatus.textContent = t('Extraction proposée par l’assistant — toutes les lignes sont à vérifier.') + (uncertain.length ? ` ${t('Incertain')} : ${uncertain.join(' ; ')}` : '');

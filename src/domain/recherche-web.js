@@ -1,10 +1,12 @@
 // Chercher sur le web avec l'assistant (spec docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md, § 4).
-// Pur, sauf l'appel réseau de chercherRecettesWeb (tâche 4). Un lien n'existe que s'il est dans les RÉSULTATS BRUTS du
-// serveur (I-A) ; le texte de l'assistant ne donne que « pourquoi », borné (I-H) ; rien de l'API n'est recopié dans
-// l'issue (I-C) ; aucune fonction ne lève vers l'appelant.
-import { parseJsonLoose, ANTHROPIC_MESSAGES_URL, anthropicHeaders } from './llm.js';
+// Pur, sauf l'appel réseau de chercherRecettesWeb, qui passe par la PASSERELLE (src/domain/passerelle.js) avec la session de la
+// personne : aucune clé ici, jamais d'appel direct au fournisseur d'IA. Un lien n'existe que s'il est dans les RÉSULTATS BRUTS
+// du serveur (I-A) ; le texte de l'assistant ne donne que « pourquoi », borné (I-H) ; rien de la réponse n'est recopié dans
+// l'issue hors ce qui est borné et nettoyé (I-C) ; aucune fonction ne lève vers l'appelant.
+import { parseJsonLoose } from './llm.js';
+import { appelerAssistant, echecDomaine, sessionValide, LIMITES_PASSERELLE } from './passerelle.js';
 import { lienSignet } from '../core/lien.js';
-import { borner, lireBornee, signalDelai, OPTIONS_FETCH } from '../core/bornes.js';
+import { borner } from '../core/bornes.js';
 import { logError } from '../core/log.js';
 
 export const LIMITES_WEB = { demande: 500, filtre: 80, filtres: 12, titre: 300, date: 40, pourquoi: 200, liens: 5, recherches: 3, tentativeMs: 45000, corps: 2 * 1024 * 1024, corpsErreur: 64 * 1024 };
@@ -43,11 +45,12 @@ export function construireDemande(args) {
   return { system: SYSTEM[lang], user, cle: JSON.stringify([demande, propres, lang]), q: demande, filtres: propres };
 }
 
-export function corpsRequete({ cfg, demande, fuseau } = {}) {
+// Le corps de l'outil « recherche-web » de la passerelle : SANS `model` (le serveur choisit le modèle).
+export function corpsRequete({ demande, fuseau } = {}) {
   const user_location = { type: 'approximate', country: 'CA' };
   if (typeof fuseau === 'string' && fuseau) user_location.timezone = fuseau;
   return {
-    model: cfg.model, max_tokens: 4096, system: demande.system,
+    max_tokens: 4096, system: demande.system,
     messages: [{ role: 'user', content: demande.user }],
     tools: [{ type: OUTIL_RECHERCHE, name: 'web_search', max_uses: LIMITES_WEB.recherches, user_location }],
   };
@@ -144,97 +147,41 @@ function fuseauAppareil() {
   try { const z = Intl.DateTimeFormat().resolvedOptions().timeZone; return typeof z === 'string' ? z : ''; } catch { return ''; }
 }
 
-// Un 400 peut dire « recherche web non activée sur ce compte » (S12) : lu dans error.message du JSON BORNÉ, jamais
-// recopié. Toute autre forme → false (le 400 reste `requete`).
-async function rechercheDesactivee(r, max) {
-  try {
-    const morceaux = await lireBornee(r, max);
-    if (morceaux === null) return false;
-    const texte = morceaux === false ? await r.text() : await new Blob(morceaux).text();
-    if (typeof texte !== 'string' || texte.length > max) return false;
-    const msg = String(JSON.parse(texte)?.error?.message ?? '').toLowerCase();
-    return /web.?search/.test(msg) && /not enabled|disabled/.test(msg);
-  } catch { return false; }
-}
-
-// § 4.5 : UN appel, délai et abandon extérieur combinés, classement dans l'ordre du tableau de la spec. Ne lève jamais :
-// toute exception inattendue devient `interne` (journal sans aucun champ de cfg — S10/F12).
+// § 4.5 : UN appel, délai et abandon extérieur combinés (dans la passerelle). Ne lève jamais : toute exception inattendue devient
+// `interne` (journal sans aucun champ de la session).
 export async function chercherRecettesWeb(args, deps = {}) {
-  let cfg = null;                                           // lu par `issue` ; affecté DANS le try (args peut être null)
-  const issue = (etat, raison = null, extra = {}) => ({ etat, raison, liens: [], autres: [], repli: false, recherches: null, modele: typeof cfg?.model === 'string' ? cfg.model : null, ...extra });
+  let modele = null;                                        // porté par la RÉPONSE (json.model), connu seulement après elle
+  const issue = (etat, raison = null, extra = {}) => ({ etat, raison, liens: [], autres: [], repli: false, recherches: null, modele, ...extra });
   try {
-    const { q, filtres, langue, cfg: cfgRecue } = args ?? {};
-    cfg = cfgRecue;
-    if (!cfg || typeof cfg !== 'object' || !cfg.provider || cfg.provider === 'none' || !cfg.api_key || !cfg.model) return issue('non_configure');
-    if (cfg.provider !== 'anthropic') return issue('non_pris_en_charge');
-    // Une clé collée avec un caractère invisible ou hors ASCII ferait lever fetch (« ByteString ») avant tout réseau : c'est une clé refusée, pas une panne.
-    if (!/^[\x21-\x7e]+$/.test(cfg.api_key)) return issue('indisponible', 'cle_refusee');
+    const { q, filtres, langue, session } = args ?? {};
+    if (!sessionValide(session)) return issue('indisponible', 'non_connecte');
     const demande = construireDemande({ q, filtres, langue });
     if (!demande.cle) return issue('indisponible', 'requete');
     const enLigne = deps.enLigne ?? (() => (typeof navigator === 'undefined' ? true : navigator.onLine !== false));
     if (!enLigne()) return issue('indisponible', 'hors_ligne');
     if (deps.signal?.aborted) return issue('indisponible', 'annule');
-    const f = deps.fetch ?? globalThis.fetch;                 // fonction LIBRE : jamais deps.fetch(...) (Illegal invocation)
     const corpsMax = deps.corpsMax ?? LIMITES_WEB.corps;
     const corpsErreurMax = deps.corpsErreurMax ?? LIMITES_WEB.corpsErreur;
     const fuseau = deps.fuseau ?? fuseauAppareil();
-    const ctl = new AbortController();
-    const delai = signalDelai(deps.tentativeMs ?? LIMITES_WEB.tentativeMs);
-    const relaisDelai = () => ctl.abort();
-    const relaisExterne = () => ctl.abort();
-    if (delai.aborted) ctl.abort(); else delai.addEventListener('abort', relaisDelai, { once: true });
-    deps.signal?.addEventListener('abort', relaisExterne, { once: true });
-    const motifAbandon = () => (deps.signal?.aborted ? 'annule' : 'delai');
-    try {
-      // Le corps est calculé HORS du try du réseau : une exception ici est `interne` (filet), jamais `reseau`.
-      const corps = JSON.stringify(corpsRequete({ cfg, demande, fuseau }));
-      const entetes = anthropicHeaders(cfg.api_key);
-      let r;
-      try {
-        // redirect: 'error' — l'en-tête x-api-key ne doit JAMAIS suivre une redirection vers un autre hôte (I-C).
-        r = await f(ANTHROPIC_MESSAGES_URL, { ...OPTIONS_FETCH, method: 'POST', redirect: 'error', headers: entetes, body: corps, signal: ctl.signal });
-      } catch { return issue('indisponible', ctl.signal.aborted ? motifAbandon() : 'reseau'); }
-      if (!r || typeof r.status !== 'number') return issue('indisponible', 'interne');
-      if (r.status === 401) return issue('indisponible', 'cle_refusee');
-      if (r.status === 429) return issue('indisponible', 'trop_de_demandes');
-      if (r.status === 400 || r.status === 403) {
-        // Un 403 « recherche web non activée » est une fonction désactivée, pas une clé refusée : même lecture bornée que le 400.
-        const desactivee = await rechercheDesactivee(r, corpsErreurMax);
-        if (ctl.signal.aborted) return issue('indisponible', motifAbandon());   // abandon pendant la lecture du corps d'erreur
-        if (desactivee) return issue('indisponible', 'recherche_desactivee');
-        return issue('indisponible', r.status === 403 ? 'cle_refusee' : 'requete');
-      }
-      if (r.status >= 400 && r.status < 500) return issue('indisponible', 'requete');
-      if (r.status >= 500) return issue('indisponible', 'serveur');
-      // V-C6 : une réponse sans flux lisible NI text() n'est pas une panne réseau — c'est une forme impossible : interne.
-      if (typeof r.text !== 'function' && !(r.body && typeof r.body.getReader === 'function')) return issue('indisponible', 'interne');
-      let texte;
-      try {
-        const morceaux = await lireBornee(r, corpsMax);
-        if (morceaux === null) return issue('indisponible', 'reponse_illisible');
-        texte = morceaux === false ? await r.text() : await new Blob(morceaux).text();
-      } catch { return issue('indisponible', ctl.signal.aborted ? motifAbandon() : 'reseau'); }
-      if (typeof texte !== 'string' || texte.length > corpsMax) return issue('indisponible', 'reponse_illisible');
-      let json;
-      try { json = JSON.parse(texte); } catch { return issue('indisponible', 'reponse_illisible'); }
-      if (!json || typeof json !== 'object' || !Array.isArray(json.content)) return issue('indisponible', 'reponse_illisible');
-      const lu = lireReponse(json);
-      const avec = { recherches: lu.recherches };
-      if (lu.stopReason === 'refusal') return issue('indisponible', 'refus', avec);
-      if (lu.resultats.length === 0) {
-        if (lu.erreursOutil.includes('too_many_requests')) return issue('indisponible', 'trop_de_demandes', avec);
-        if (lu.erreursOutil.length) return issue('indisponible', 'outil', avec);
-        if (lu.stopReason === 'pause_turn' || lu.stopReason === 'max_tokens') return issue('indisponible', 'interrompu', avec);
-        if (!lu.aCherche) return issue('indisponible', 'pas_cherche', avec);
-        return issue('rien', null, avec);
-      }
-      const { liens, autres, repli } = choisirLiens(lu);
-      return issue('trouve', null, { ...avec, liens, autres, repli });
-    } finally {
-      delai.removeEventListener('abort', relaisDelai);
-      deps.signal?.removeEventListener('abort', relaisExterne);
-      ctl.abort();                                            // libère le flux d'une sortie anticipée ; sans effet après une lecture complète
+    // Le corps est calculé HORS du réseau : une exception ici est `interne` (filet), jamais `reseau`.
+    const corps = corpsRequete({ demande, fuseau });
+    const r = await appelerAssistant('recherche-web', corps, { fetch: deps.fetch, session, config: deps.config, signal: deps.signal, tentativeMs: deps.tentativeMs ?? LIMITES_WEB.tentativeMs, corpsMax, corpsErreurMax });
+    if (r.raison) { const c = echecDomaine(r); return issue('indisponible', c.raison, c.extra); }
+    const json = r.corps;
+    if (!Array.isArray(json.content)) return issue('indisponible', 'reponse_illisible');
+    modele = typeof json.model === 'string' ? borner(json.model, LIMITES_PASSERELLE.modele) || null : null;
+    const lu = lireReponse(json);
+    const avec = { recherches: lu.recherches };
+    if (lu.stopReason === 'refusal') return issue('indisponible', 'refus', avec);
+    if (lu.resultats.length === 0) {
+      if (lu.erreursOutil.includes('too_many_requests')) return issue('indisponible', 'trop_de_demandes', avec);
+      if (lu.erreursOutil.length) return issue('indisponible', 'outil', avec);
+      if (lu.stopReason === 'pause_turn' || lu.stopReason === 'max_tokens') return issue('indisponible', 'interrompu', avec);
+      if (!lu.aCherche) return issue('indisponible', 'pas_cherche', avec);
+      return issue('rien', null, avec);
     }
+    const { liens, autres, repli } = choisirLiens(lu);
+    return issue('trouve', null, { ...avec, liens, autres, repli });
   } catch (e) {
     logError('web_recherche', { reason: 'interne', error: e });
     return issue('indisponible', 'interne');

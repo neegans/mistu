@@ -224,6 +224,12 @@ export function timerBlock(seconds, { onRequest = null, locale = 'fr', compact =
   return box;
 }
 
+// La session de l'assistant (R-T3-1) : une DONNÉE { access_token, user } lue de ctx.sync.auth.jeton() — sans réseau, null sans
+// connexion — que les écrans passent à providerFrom / aux modules de domaine. Jamais le module d'auth, jamais le contexte.
+export async function sessionAssistant(ctx) {
+  try { return (await ctx?.sync?.auth?.jeton?.()) ?? null; } catch { return null; }
+}
+
 export function aiNotice(ctx) {
   const configured = ctx?.settings?.llm?.provider && ctx.settings.llm.provider !== 'none';
   if (configured) return null;

@@ -8,7 +8,7 @@ import { displayUrl } from '../sync/mime.js';
 import { sha256Hex } from '../core/hash.js';
 import { normalizeText } from '../domain/units.js';
 import { providerFrom, extractIndexFromImages, blobToBase64 } from '../domain/llm.js';
-import { pageHeader, section, emptyState, select, field, aiNotice, pdfFrame, libelleLivre } from './components.js';
+import { pageHeader, section, emptyState, select, field, aiNotice, pdfFrame, libelleLivre, sessionAssistant } from './components.js';
 
 const SMALL_IMAGE_BYTES = 80 * 1024;
 
@@ -200,26 +200,31 @@ export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId 
   const ta = el('textarea', { placeholder: 'Magret de canard aux cerises — 132\nSalade de fenouil, p. 58\n212 Pâtes puttanesca', rows: 8 });
   const preview = el('div', null);
   const status = el('div', { class: 'muted' });
-  const provider = providerFrom(ctx.settings);
+  // La passerelle (R-T3-1) : la session arrive de façon asynchrone — le bouton reste éteint jusqu'à sa lecture, et elle est relue au
+  // clic (un jeton expiré se rafraîchit). `indexEntriesPanel` reste synchrone : c'est le fournisseur qui se met à jour.
+  let provider = providerFrom(ctx.settings);
+  const lierAssistant = async () => { provider = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) }); aiBtn.disabled = !provider.configured; };
   const parse = () => parseIndexLines(ta.value);
   const draw = () => {
     const entries = parse();
     preview.replaceChildren(entries.length ? el('ul', { class: 'list plain' }, ...entries.map((e) => el('li', null, el('strong', null, e.title), e.printed_page ? el('span', { class: 'muted' }, ` — ${t('page')} ${e.printed_page}`) : el('span', { class: 'chip warn' }, t('page inconnue'))))) : null);
   };
   ta.addEventListener('input', draw);
-  const aiBtn = el('button', { class: 'btn', disabled: !provider.configured, onClick: async () => {
+  const aiBtn = el('button', { class: 'btn', disabled: true, onClick: async () => {
     const ids = getSelectedPageIds();
     if (!ids.length) { toast(t('Sélectionne les pages d’index à lire')); return; }
     status.textContent = t('Lecture des pages par l’assistant…');
     try {
       const images = [];
       for (const id of ids) { const p = ctx.pagesById.get(id); const f = await repo.getFile(p.sha256); images.push({ mime: f.mime, base64: await blobToBase64(f.blob) }); }
+      await lierAssistant();
       const res = await extractIndexFromImages(provider, images);
       ta.value = res.entries.map((e) => `${e.title} — ${e.printed_page ?? ''}`).join('\n');
       status.textContent = t('{n} entrée(s) proposée(s) par l’assistant — vérifie avant de créer.', { n: res.entries.length }) + (res.uncertain.length ? ` ${t('Incertain')} : ${res.uncertain.join('; ')}` : '');
       draw();
     } catch (e) { status.textContent = `${t('Échec')} : ${e.message}`; }
   } }, t('Lire avec l’assistant IA'));
+  lierAssistant();
   const create = async () => {
     const edId = editionId || session?.edition_id;
     if (!edId) { toast(t('Associe d’abord un livre à cette séance')); return; }

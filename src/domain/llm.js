@@ -1,13 +1,9 @@
-// Abstraction fournisseur-agnostique (spec §12, §15). Sans configuration, l'application fonctionne entièrement à la main ;
+// Abstraction fournisseur-agnostique (spec §12, §15). Sans session, l'application fonctionne entièrement à la main ;
 // les fonctions IA affichent « assistant non configuré » au lieu de simuler un résultat.
-// Les fournisseurs distants ci-dessous n'ont pas été exercés dans cet environnement : à valider avec une clé réelle.
-
-export const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
-// Les en-têtes d'un appel direct depuis le navigateur (clé en en-tête, jamais dans l'adresse — I-C) : une seule
-// définition, lue par `complete` et par recherche-web.js.
-export function anthropicHeaders(apiKey) {
-  return { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
-}
+// L'assistant passe par la passerelle (src/domain/passerelle.js) : l'app n'a plus aucune clé de fournisseur d'IA.
+// Le fournisseur compatible OpenAI ci-dessous n'a pas été exercé dans cet environnement : à valider avec une clé réelle.
+import { appelerAssistant, sessionValide, LIMITES_PASSERELLE } from './passerelle.js';
+import { borner } from '../core/bornes.js';
 
 export class LLMProvider {
   constructor(config = {}) { this.config = config; }
@@ -44,15 +40,18 @@ export class OpenAICompatibleProvider extends LLMProvider {
   }
 }
 
-export class AnthropicProvider extends LLMProvider {
+// L'assistant par la passerelle : `complete` poste l'outil « extraction » avec la SESSION de la personne. `name` reste 'anthropic'
+// (les gardes des écrans le lisent) ; il est configuré quand une session existe. La session est une donnée (jamais le module d'auth).
+export class PasserelleProvider extends LLMProvider {
+  constructor(config = {}, { session = null, fetch = undefined } = {}) { super(config); this.session = session; this.fetch = fetch; this.modele = null; }
   get name() { return 'anthropic'; }
-  get configured() { return !!(this.config.api_key && this.config.model); }
+  get configured() { return sessionValide(this.session); }
   get supportsVision() { return true; }
   get supportsWebSearch() { return true; }
   async complete(messages, { maxTokens = 4000 } = {}) {
     const system = messages.filter((m) => m.role === 'system').map((m) => (typeof m.content === 'string' ? m.content : m.content.map((p) => p.text || '').join('\n'))).join('\n');
-    const body = {
-      model: this.config.model, max_tokens: maxTokens, system: system || undefined,
+    const corps = {
+      max_tokens: maxTokens, system: system || undefined,
       messages: messages.filter((m) => m.role !== 'system').map((m) => ({
         role: m.role,
         content: typeof m.content === 'string' ? m.content : m.content.map((p) => p.type === 'text'
@@ -60,17 +59,20 @@ export class AnthropicProvider extends LLMProvider {
           : { type: 'image', source: { type: 'base64', media_type: p.mime, data: p.base64 } }),
       })),
     };
-    const res = await fetch(ANTHROPIC_MESSAGES_URL, { method: 'POST', headers: anthropicHeaders(this.config.api_key), body: JSON.stringify(body) });
-    if (!res.ok) throw new Error(`Fournisseur IA : ${res.status} ${await res.text()}`);
-    const data = await res.json();
-    return (data.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');
+    const r = await appelerAssistant('extraction', corps, { fetch: this.fetch, session: this.session });
+    // Le message de l'erreur est la RAISON (un mot de la liste fermée de la passerelle), jamais le corps de la réponse.
+    if (r.raison) throw new Error(r.raison);
+    this.modele = typeof r.corps.model === 'string' ? borner(r.corps.model, LIMITES_PASSERELLE.modele) || null : null; // le modèle que le SERVEUR a choisi (provenance)
+    return (Array.isArray(r.corps.content) ? r.corps.content : []).filter((c) => c && c.type === 'text' && typeof c.text === 'string').map((c) => c.text).join('');
   }
 }
 
-export function providerFrom(settings) {
+// Une session (donnée) → la passerelle, quels que soient les réglages locaux. Sans session : le fournisseur compatible OpenAI s'il a
+// encore une clé locale (inchangé, hors passerelle), sinon rien — une clé locale Anthropic ne sert plus à rien.
+export function providerFrom(settings, { session = null } = {}) {
   const cfg = settings?.llm || { provider: 'none' };
-  if (cfg.provider === 'openai_compatible') return new OpenAICompatibleProvider(cfg);
-  if (cfg.provider === 'anthropic') return new AnthropicProvider(cfg);
+  if (sessionValide(session)) return new PasserelleProvider(cfg, { session });
+  if (cfg.provider === 'openai_compatible' && cfg.api_key) return new OpenAICompatibleProvider(cfg);
   return new NoneProvider(cfg);
 }
 
