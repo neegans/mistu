@@ -45,4 +45,41 @@ export async function runAssistantCompteTests({ eq, ok }) {
   ok(Array.from(longue).length === 500 && longue.startsWith('https://'), 'normaliser : une URL https de 600 points de code est TRONQUÉE à 500 (et reste une URL https), jamais gardée entière');
   eq(['https://token@h/v1', 'https://:p@h/v1'].map((u) => N({ provider: 'openai_compatible', model: 'm', api_key: 'k', base_url: u }).base_url), ['', ''], 'normaliser : un identifiant seul, ou un mot de passe seul, vide la base_url (S14)');
   ok(Object.isFrozen(SYNC_STORES_0001), 'la liste figée de 0001 est gelée');
+
+  // --- T2 : jamais de suppression d'origine locale (K-6, § 5.4, S6) — garde de COMPORTEMENT dans db.mutate
+  const { Database } = await import('../src/core/db.js');
+  const { withDatabase } = await import('./backup.js');
+  const T2_STORES = { a: { keyPath: 'id', indexes: [] }, verrou: { keyPath: 'id', indexes: [], noDelete: true } };
+  await withDatabase(async (db) => {
+    await db.mutate({ puts: { verrou: [{ id: 'llm', api_key: 'sk-factice-2' }], a: [{ id: 'x' }] } });
+    let levee = null;
+    try { await db.mutate({ deletes: { verrou: ['llm'] } }); } catch (e) { levee = e; }
+    ok(levee instanceof Error && /noDelete|verrou/.test(levee.message), 'noDelete : une suppression d’origine local lève, en nommant le magasin');
+    levee = null;
+    try { await db.mutate({ deletes: { verrou: ['llm'] }, origin: 'device' }); } catch (e) { levee = e; }
+    ok(!!levee, 'noDelete : origine device → lève aussi');
+    levee = null;
+    try { await db.delete('verrou', 'llm'); } catch (e) { levee = e; }
+    ok(!!levee && !!(await db.get('verrou', 'llm')), 'noDelete : db.delete lève et la ligne est intacte');
+    await db.mutate({ deletes: { a: ['x'] } });
+    eq(await db.get('a', 'x'), undefined, 'noDelete : un autre magasin se supprime normalement');
+    await db.mutate({ deletes: { verrou: ['llm'] }, origin: 'remote' });
+    eq(await db.get('verrou', 'llm'), undefined, 'noDelete : une suppression d’origine remote (tombale reçue) passe');
+    await db.mutate({ puts: { verrou: [{ id: 'llm' }] } });
+    await db.mutate({ clearStores: ['verrou'], origin: 'device' });
+    eq(await db.count('verrou'), 0, 'noDelete : clearStores reste permis (K-8, clearDevice)');
+    // La levée précède la transaction : une capture posée ne voit rien.
+    let captures = 0; db.onMutate = () => { captures += 1; return null; };
+    try { await db.mutate({ deletes: { verrou: ['llm'] } }); } catch { /* attendu */ }
+    eq(captures, 0, 'noDelete : la garde précède onMutate — rien n’entre en file');
+    db.onMutate = null;
+  }, T2_STORES);
+  // Les gestes de conflit refusent ce magasin par son nom (K-5)
+  const C = await import('../src/sync/conflits.js');
+  await withDatabase(async (db) => {
+    const conflit = { id: 'assistant_config:llm', store: 'assistant_config', record_id: 'llm', local: { id: 'llm', api_key: 'sk-factice-l' }, server: { data: { id: 'llm', api_key: 'sk-factice-s' }, updated_at: '2026-10-17T10:00:00Z', deleted_at: null }, at: 'x', kind: 'donnees' };
+    await db.mutate({ puts: { sync_conflicts: [conflit] }, origin: 'device' });
+    eq([await C.garderIci(db, conflit), await C.garderAilleurs(db, conflit), await C.ignorerRenvoye(db, conflit)], [false, false, false], 'conflits : les trois gestes refusent assistant_config');
+    eq([await db.get('assistant_config', 'llm'), (await db.getAll('outbox')).length], [undefined, 0], 'conflits : rien écrit, rien en file');
+  });
 }

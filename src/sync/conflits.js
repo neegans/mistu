@@ -13,6 +13,7 @@ import { nettoyerChaines } from './lots.js';
 // la fiche en file, et c'est précisément le renvoi voulu. Le retrait du conflit voyage dans la même transaction et
 // reste interne (sync_conflicts n'est pas un magasin synchronisé : la capture ne le regarde pas).
 export async function garderIci(db, conflit) {
+  if (conflit?.store === 'assistant_config') return false; // K-5 : ce magasin n'a jamais de conflit à trancher
   if (conflit?.renvoye === true) return false; // R-L3-30 : la version d'ici part déjà, rien à trancher ici
   // Version locale nulle : la fiche a été supprimée ici pendant l'aller-retour. « Garder celle d'ici » veut alors
   // dire garder la suppression — jamais écrire une fiche sans clé, que la base refuserait. Le payload porte un
@@ -38,6 +39,7 @@ export async function garderIci(db, conflit) {
 }
 
 export async function garderAilleurs(db, conflit) {
+  if (conflit?.store === 'assistant_config') return false; // K-5 : ce magasin n'a jamais de conflit à trancher
   const serveur = conflit.server;
   // R-L3-30 : refusé sur un conflit renvoyé — c'est ce geste-là qui écrasait la version d'ici par celle qui a
   // perdu l'arbitrage. SAUF quand la version d'ailleurs est une TOMBALE : là, le choix n'est pas « une version plus
@@ -65,6 +67,7 @@ export async function garderAilleurs(db, conflit) {
 // ordinaire, ce geste refuse, parce que celui-là attend vraiment une décision de la personne. Origine 'remote' :
 // un retrait de journal n'est pas un geste sur les données et ne repart jamais au serveur.
 export async function ignorerRenvoye(db, conflit) {
+  if (conflit?.store === 'assistant_config') return false; // K-5 : ce magasin n'a jamais de conflit à trancher
   if (conflit?.renvoye !== true) return false;
   await db.mutate({ deletes: { sync_conflicts: [conflit.id] }, origin: 'remote' });
   return true;
