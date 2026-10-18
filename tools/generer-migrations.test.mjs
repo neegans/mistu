@@ -536,7 +536,8 @@ test('0004 : une transaction a ajout seul, journal de compteurs sans contenu, RL
   assert.equal((code.match(/create table /g) || []).length, 1, 'une seule table');
   // Compteurs seulement : les colonnes du brief, une seule colonne texte (l'outil), jamais jsonb ni bytea.
   for (const c of ['owner_id uuid not null references auth.users (id) on delete cascade', 'outil text not null', 'statut integer not null', 'jetons_entree integer', 'jetons_sortie integer', 'duree_ms integer not null default 0', 'octets integer', 'jour date not null', 'cree_le timestamptz not null default now()']) assert.ok(code.includes(c), c);
-  assert.equal((code.match(/\btext\b/g) || []).length, 1, 'une seule colonne texte : l outil');
+  const bloc = code.slice(code.indexOf('create table public.assistant_journal ('), code.indexOf('\n);', code.indexOf('create table public.assistant_journal (')));
+  assert.equal((bloc.match(/\btext\b/g) || []).length, 1, 'une seule colonne texte dans la table : l outil');
   assert.doesNotMatch(code, /\b(jsonb?|bytea|varchar|char)\b/);
   // La liste blanche des outils du journal est celle de la logique pure.
   assert.ok(code.includes(`check (outil in (${OUTILS_PASSERELLE.map((o) => `'${o}'`).join(', ')}))`), 'outils du journal = OUTILS');
@@ -549,7 +550,18 @@ test('0004 : une transaction a ajout seul, journal de compteurs sans contenu, RL
   assert.equal((code.match(/create index /g) || []).length, 1, 'un seul index');
   assert.match(code, /create view public\.assistant_usage_jour with \(security_invoker = true\) as/);
   assert.ok(code.includes('revoke all on public.assistant_usage_jour from anon, authenticated;'));
-  assert.ok(!code.includes('grant '), 'aucun grant : seule la cle secrete du projet ecrit et lit');
+  // Le seul grant du fichier : l'execution de la fonction de reservation par la cle secrete du projet (service_role).
+  assert.deepEqual(code.match(/\bgrant [^;]+;/g), ['grant execute on function public.assistant_reserver(uuid, text, integer, integer) to service_role;']);
+  // La reservation atomique (fix 1) : verrou par compte, comptage du jour UTC, insertion statut 0 ; security INVOKER.
+  assert.equal((code.match(/create function /g) || []).length, 1, 'une seule fonction');
+  assert.ok(code.includes('create function public.assistant_reserver(p_owner uuid, p_outil text, p_octets integer, p_quota integer)'));
+  assert.ok(code.includes('returns bigint language plpgsql security invoker set search_path = \'\' as $$'), 'security invoker, search_path vide');
+  assert.doesNotMatch(code, /security definer/);
+  assert.ok(code.includes("perform pg_advisory_xact_lock(hashtext('assistant_journal'), hashtext(p_owner::text));"), 'verrou par compte');
+  assert.ok(code.includes("v_jour date := (now() at time zone 'utc')::date"), 'jour UTC');
+  assert.ok(code.includes('if v_n >= p_quota then return null; end if;'), 'quota atteint : null');
+  assert.ok(code.includes('insert into public.assistant_journal (owner_id, outil, statut, octets, jour) values (p_owner, p_outil, 0, p_octets, v_jour) returning id into v_id;'));
+  assert.ok(code.includes('revoke all on function public.assistant_reserver(uuid, text, integer, integer) from public, anon, authenticated;'));
   assert.doesNotMatch(m, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i, 'aucune adresse');
   assert.ok(!m.includes('sk-'), 'aucune cle');
 });
@@ -574,7 +586,7 @@ test('preuve 0004 : rollback final, BILAN, aucune adresse ni jeton, privileges e
   assert.doesNotMatch(code, /\bemail\b/i, 'aucune adresse lue ni affichee');
   assert.ok(!p.includes('sk-'), 'aucune cle');
   // Les verdicts du brief : 1.01-1.05 (presence, RLS, aucune regle, privileges, index, vue), 2.01-2.02 (refus), 3.01.
-  for (const n of ['0.01', '1.01', '1.02', '1.03', '1.04', '1.05', '2.01', '2.02', '3.01']) assert.ok(code.includes(`${n},`), 'verdict ' + n);
+  for (const n of ['0.01', '1.01', '1.02', '1.03', '1.04', '1.05', '1.06', '1.07', '1.08', '1.09', '1.10', '1.11', '2.01', '2.02', '2.03', '2.04', '3.01', '3.02', '3.03', '3.04']) assert.ok(code.includes(`${n},`), 'verdict ' + n);
   assert.ok(code.includes("to_regclass('public.assistant_journal') is null"), 'garde : 0004 collee d abord');
   assert.ok(code.includes('relrowsecurity'), 'RLS activee');
   assert.ok(code.includes('pg_policies'), 'aucune regle');
@@ -597,6 +609,21 @@ test('preuve 0004 : rollback final, BILAN, aucune adresse ni jeton, privileges e
   assert.ok(code.includes('from auth.users order by created_at limit 1'), 'compte existant le plus ancien');
   assert.ok(code.includes("'aucun compte : etape sautee'"), 'auth.users vide');
   assert.ok(code.includes('from public.assistant_usage_jour'), 'la vue est lue');
+  // Fix 1 : la fonction de reservation est prouvee (existence, security invoker, volatile, search_path, privileges des trois roles,
+  // refus 42501 sous authenticated, puis quota atteint sous postgres) ; la concurrence elle-meme est dite non prouvable ici.
+  assert.ok(code.includes("to_regprocedure('public.assistant_reserver(uuid,text,integer,integer)') is null"), 'garde : fonction absente');
+  for (const m of ['prosecdef', 'provolatile', "like 'search_path=%'", 'public.assistant_reserver(uuid,text,integer,integer)']) assert.ok(code.includes(m), m);
+  for (const role of ['anon', 'authenticated', 'service_role']) assert.ok(code.includes(`has_function_privilege('${role}', 'public.assistant_reserver(uuid,text,integer,integer)', 'execute')`), 'execute de ' + role);
+  assert.ok(code.includes("perform public.assistant_reserver('00000000-0000-0000-0000-000000000000'"), 'appel refuse sous authenticated');
+  assert.ok(code.includes('public.assistant_reserver(uid, \'creation\', 1, c::integer + 1)') || code.includes('public.assistant_reserver(uid, '), 'reservation sous postgres');
+  assert.ok(/non prouvable|ne se prouve pas/.test(p), 'la concurrence n est pas revendiquee');
+  // 1.09 : un has_table_privilege PAR privilege, relies par `and` (une liste ne demande que l\'un d\'eux).
+  const v109 = code.slice(code.indexOf('select 1.09,'), code.indexOf('insert into pg_temp.preuve', code.indexOf('select 1.09,')));
+  for (const priv of ['select', 'insert', 'update']) assert.ok(v109.includes(`has_table_privilege('service_role', 'public.assistant_journal', '${priv}')`), '1.09 ' + priv);
+  assert.doesNotMatch(v109, /has_table_privilege\('service_role', 'public\.assistant_journal', '[a-z]+,/, '1.09 : pas de liste de privileges');
+  // Le jeton de la requete est pose par un `perform` dans un bloc do : aucun `select set_config` ne renvoie l\'UUID emprunte.
+  assert.ok(code.includes('perform set_config('));
+  assert.doesNotMatch(code, /^select set_config\(/m);
 });
 
 test('index.ts : imports fermes, deno.json epingle, aucune cle ni journal de console, gardes dans l ordre', () => {
@@ -606,6 +633,9 @@ test('index.ts : imports fermes, deno.json epingle, aucune cle ni journal de con
   assert.equal((code.match(/^\s*import\b/gm) || []).length, 2, 'deux imports');
   const specs = [...code.matchAll(/^\s*import\s[^;]*?\sfrom\s+(['"])([^'"]+)\1/gm)].map((m) => m[2]).sort();
   assert.deepEqual(specs, ['./logique.js', '@supabase/supabase-js']);
+  const importes = (code.match(/import \{([^}]*)\} from '\.\/logique\.js'/) || [])[1] || '';
+  assert.ok(importes.includes('lireDemande'), 'lireDemande importee');
+  assert.ok(!/\bdecisionQuota\b/.test(code), 'decisionQuota reste dans logique.js, plus dans index.ts');
   assert.doesNotMatch(code, /\bimport\s*\(/); assert.doesNotMatch(code, /\brequire\s*\(/);
   assert.doesNotMatch(code, /\bfrom\s+['"](?:https?:|npm:|jsr:|node:)/);
   const deno = JSON.parse(lire(`${FONCTION}/deno.json`));
@@ -622,16 +652,28 @@ test('index.ts : imports fermes, deno.json epingle, aucune cle ni journal de con
   assert.ok(code.includes("'anthropic-version': '2023-06-01'"));
   assert.ok(code.includes('LIMITES.attenteMs'), 'delai de 120 s');
   // Octets : la taille en OCTETS du corps lu (pas les unites UTF-16 du texte), a la lecture et au journal.
-  assert.ok(code.includes('new Uint8Array(await req.arrayBuffer())') && code.includes('new TextDecoder().decode(bytes)'));
+  // Fix 2 : le corps est lu BORNE (content-length, puis flux par morceaux), jamais par req.text() ni arrayBuffer().
+  assert.ok(code.includes("async function lireCorpsBorne(") && code.includes("headers.get('content-length')") && code.includes('getReader('));
+  assert.ok(code.includes('await lireCorpsBorne(req, LIMITES.corpsExtraction)') && code.includes('await lireCorpsBorne(r, LIMITES.reponse)'));
+  assert.ok(code.includes('new TextDecoder().decode('));
+  assert.doesNotMatch(code, /\.arrayBuffer\(|\.text\(\)|\.json\(\)/, 'aucune lecture non bornee');
+  // Fix 3 : aucune exception ne sort sans CORS ni { erreur }.
+  assert.match(code, /try \{\s*return await traiter\(req, cors, origine\);\s*\} catch \{\s*return json\(502, corpsErreur\('serveur'\), cors\);/);
+  // Fix 4 : les secrets sont lus par requete, pas au chargement du module.
+  assert.doesNotMatch(code, /^const (ORIGINES|MODELE|QUOTA)\b/m);
+  assert.ok(code.includes("Number.isInteger(brut) && brut > 0 ? brut : LIMITES.quotaJour"));
+  // Fix 5 : la mise a jour ne pose que quatre champs.
+  assert.ok(code.includes('update({ statut: l.statut, jetons_entree: l.jetons_entree, jetons_sortie: l.jetons_sortie, duree_ms: l.duree_ms })'));
   assert.doesNotMatch(code, /texte\.length/);
-  assert.equal((code.match(/octets: bytes\.byteLength/g) || []).length, 3, 'lireDemande + les deux lignes du journal');
+  assert.equal((code.match(/\boctets: bytes\.byteLength/g) || []).length, 2, 'lireDemande + la ligne du journal');
+  assert.equal((code.match(/p_octets: bytes\.byteLength/g) || []).length, 1, 'la reservation compte des octets');
   assert.ok(code.includes('maxTokens: LIMITES.maxTokens'));
-  assert.equal((code.match(/maintenant: new Date\(\)\.toISOString\(\)/g) || []).length, 2, 'reservation et mise a jour');
+  assert.equal((code.match(/maintenant: new Date\(\)\.toISOString\(\)/g) || []).length, 1, 'la mise a jour (la reservation est en SQL)');
   // Les raisons de lireDemande rejoignent la liste fermee de l'erreur HTTP.
   assert.ok(code.includes("lu.raison === 'trop_lourd' ? 'trop_lourd' : lu.raison === 'bornes' ? 'bornes' : lu.raison === 'serveur' ? 'serveur' : 'requete'"));
   assert.ok(code.includes('json(lu.statut,'));
   // Ordre des gardes (spec § 5) : OPTIONS, origine, methode, session, liste admise, GET, corps, quota, reservation, Anthropic, mise a jour.
-  const ordre = ["req.method === 'OPTIONS'", 'origineAdmise(origine, ORIGINES)', "req.method !== 'POST'", 'auth.getUser(jeton)', "rpc('is_allowed')", "req.method === 'GET'", 'await req.arrayBuffer()', 'lireDemande(texte', 'decisionQuota(', '.insert(', 'await fetch(ANTHROPIC', '.update('];
+  const ordre = ["req.method === 'OPTIONS'", 'origineAdmise(origine, admises)', "req.method !== 'POST'", 'auth.getUser(jeton)', "rpc('is_allowed')", "req.method === 'GET'", 'await lireCorpsBorne(req,', 'lireDemande(texte', ".rpc('assistant_reserver'", 'await fetch(ANTHROPIC', '.update('];
   const pos = ordre.map((s) => code.indexOf(s));
   assert.ok(pos.every((x) => x !== -1), 'toutes les gardes presentes : ' + pos.join(','));
   assert.deepEqual([...pos].sort((a, b) => a - b), pos, 'gardes dans l ordre de la spec');
@@ -661,6 +703,11 @@ test('README : etape 10 (secrets, deploiement --no-verify-jwt, 0004 et sa preuve
   // Le secret ne vit jamais dans un fichier ni dans le depot : on ne cite que son NOM.
   assert.doesNotMatch(etape, /sk-[A-Za-z0-9_-]{4,}/, 'aucune cle');
   assert.ok(/jamais dans un fichier/i.test(etape), 'secret jamais en fichier');
+  // Fix 6 : le jeton de session n'est jamais colle en clair dans une commande ; ASSISTANT_ORIGINES remplace le defaut ; 0004 porte la reservation.
+  assert.ok(etape.includes('read -rs JETON') && etape.includes('"Authorization: Bearer $JETON"') && etape.includes('unset JETON'), 'jeton lu sans echo');
+  assert.doesNotMatch(etape, /Bearer <jeton>/, 'jamais le jeton en clair dans une commande');
+  assert.ok(etape.includes('REMPLACE la valeur par défaut') && etape.includes('lister les deux origines'), 'ASSISTANT_ORIGINES remplace le defaut');
+  assert.ok(etape.includes('assistant_reserver'), 'la reservation atomique est nommee');
   // L'arbre du README nomme les nouveaux fichiers.
   for (const f of ['migrations/0004_assistant_journal.sql', 'proofs/0004_assistant_journal.sql', 'functions/assistant/']) assert.ok(r.slice(0, debut).includes(f), 'arbre : ' + f);
 });

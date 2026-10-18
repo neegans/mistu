@@ -229,8 +229,10 @@ appelle la fonction. Aucun des gestes ci-dessous n'appelle Anthropic ni ne dépe
    workspace Anthropic de Cuisine OS (celui qui a un plafond de dépense mensuel). **Jamais dans un fichier**, ni dans
    le dépôt, ni dans une conversation : seul son nom y figure. Trois autres secrets sont facultatifs, avec une valeur
    par défaut : `ASSISTANT_MODELE` (le modèle imposé aux appels, `claude-sonnet-5-5`), `ASSISTANT_QUOTA_JOUR` (appels par
-   compte et par jour UTC, 60) et `ASSISTANT_ORIGINES` (origines admises, séparées par des virgules,
-   `https://neegans.github.io` ; ajouter `http://localhost:8083` pour essayer depuis le Mac).
+   compte et par jour UTC, 60) et `ASSISTANT_ORIGINES` (origines admises, séparées par des virgules). Posée,
+   `ASSISTANT_ORIGINES` **REMPLACE la valeur par défaut** (`https://neegans.github.io`) : pour essayer depuis le Mac,
+   lister les deux origines, séparées par une virgule (`https://neegans.github.io,http://localhost:8083`).
+   Ces trois valeurs sont relues à chaque requête : une valeur changée est prise au prochain appel.
 2. **Déployer la fonction.** Préalable, une seule fois : `supabase login` dans Terminal. Puis, depuis la racine du dépôt :
    ```
    supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt
@@ -239,7 +241,9 @@ appelle la fonction. Aucun des gestes ci-dessous n'appelle Anthropic ni ne dépe
    (`is_allowed()`), et le navigateur envoie d'abord une requête `OPTIONS` **sans jeton** que la vérification amont de
    Supabase refuserait — le client n'enverrait alors jamais sa vraie demande.
 3. **Coller `0004`, puis sa preuve**, dans l'éditeur SQL sous `postgres`, comme à l'étape 8 bis : d'abord
-   `migrations/0004_assistant_journal.sql` en entier (à ajout seul ; attendu `Success. No rows returned`), puis
+   `migrations/0004_assistant_journal.sql` en entier (à ajout seul ; elle crée aussi la fonction
+   `public.assistant_reserver`, la réservation atomique d'un appel, que seule la clé secrète du projet peut exécuter ;
+   attendu `Success. No rows returned`), puis
    `proofs/0004_assistant_journal.sql` — **rien à remplacer, aucune adresse à ajouter** — en choisissant
    **« Run without RLS »**. Lire d'abord la ligne `999 BILAN` (`0 faux` = vert), puis consigner le tableau tel quel dans
    `RESULTATS-mitsu.md` (la preuve n'affiche aucune adresse). Tant que `0004` n'est pas collée, un `POST` valide
@@ -251,8 +255,10 @@ appelle la fonction. Aucun des gestes ci-dessous n'appelle Anthropic ni ne dépe
      dit `Invalid JWT` vient du portail Supabase : la fonction a été déployée sans `--no-verify-jwt`) ;
    - `GET` avec un jeton de session : dans la console du navigateur, sur le site connecté,
      `JSON.parse(localStorage.getItem('sb-ybdooerfeziiabsbfxtb-auth-token')).access_token` (nom par défaut de
-     supabase-js, non vérifié ici), puis `curl -i -H 'Origin: https://neegans.github.io' -H 'Authorization: Bearer <jeton>' "$U"`
-     → **200** `{"modele":"claude-sonnet-5-5","quotaJour":60}`. Le jeton vaut une heure : ne le colle nulle part.
+     supabase-js, non vérifié ici) ; copier le jeton, puis dans Terminal **ne jamais le coller dans une commande** (il
+     resterait dans l'historique) : `read -rs JETON` (coller le jeton, Entrée : rien ne s'affiche), puis
+     `curl -i -H 'Origin: https://neegans.github.io' -H "Authorization: Bearer $JETON" "$U"`
+     → **200** `{"modele":"claude-sonnet-5-5","quotaJour":60}`, et enfin `unset JETON`. Le jeton vaut une heure.
 5. **Changer le quota sans redéployer** : `supabase secrets set ASSISTANT_QUOTA_JOUR=120 --project-ref ybdooerfeziiabsbfxtb`,
    puis relire `quotaJour` par la troisième sonde (même geste pour `ASSISTANT_MODELE` et `ASSISTANT_ORIGINES`).
 6. **Faire tourner la clé** (rotation) : remplacer la valeur du secret `ANTHROPIC_API_KEY` dans le tableau de bord (pas par

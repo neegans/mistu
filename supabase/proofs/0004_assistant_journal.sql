@@ -15,7 +15,9 @@
 --
 -- Ce que la preuve ne dit pas : que la fonction « assistant » écrit bien dans ce journal. Cela se prouve par les
 -- sondes du déploiement (README, étape 10) ; ici, on prouve que le journal est fermé aux clients et ouvert à la clé
--- secrète du projet (verdict 1.09).
+-- secrète du projet (verdict 1.09), et que la réservation d'un appel (assistant_reserver) est fermée aux clients, ouverte
+-- à cette clé, et refuse un appel de trop (verdicts 1.10, 1.11, 2.04, 3.04). La CONCURRENCE elle-même (deux appels
+-- simultanés) ne se prouve pas dans l'éditeur : une seule session, et les verrous consultatifs y sont réentrants.
 
 begin;
 
@@ -27,6 +29,9 @@ begin
   end if;
   if to_regclass('public.assistant_usage_jour') is null then
     raise exception 'public.assistant_usage_jour absente : 0004 na pas ete collee en entier (etape 10 du README)';
+  end if;
+  if to_regprocedure('public.assistant_reserver(uuid,text,integer,integer)') is null then
+    raise exception 'public.assistant_reserver absente : 0004 na pas ete collee en entier (etape 10 du README)';
   end if;
 end $$;
 
@@ -80,17 +85,37 @@ from pg_constraint where conrelid = to_regclass('public.assistant_journal') and 
 -- La clé secrète du projet (rôle service_role : c'est elle qui écrit et lit ce journal) garde ses droits, sinon la
 -- fonction répondrait 502 au premier comptage.
 insert into pg_temp.preuve
-select 1.09, 'service_role : select, insert, update sur la table, select sur la vue', 'true / true', a::text || ' / ' || b::text, a and b
-from (select has_table_privilege('service_role', 'public.assistant_journal', 'select, insert, update') as a,
-             has_table_privilege('service_role', 'public.assistant_usage_jour', 'select') as b) t;
+select 1.09, 'service_role : select, insert, update sur la table, select sur la vue', 'true / true / true / true',
+  s::text || ' / ' || i::text || ' / ' || u::text || ' / ' || v::text, s and i and u and v
+from (select has_table_privilege('service_role', 'public.assistant_journal', 'select') as s,
+             has_table_privilege('service_role', 'public.assistant_journal', 'insert') as i,
+             has_table_privilege('service_role', 'public.assistant_journal', 'update') as u,
+             has_table_privilege('service_role', 'public.assistant_usage_jour', 'select') as v) t;
+-- La réservation atomique d'un appel : security invoker (les droits du seul appelant), volatile, search_path fixé ;
+-- exécutable par la clé secrète du projet seulement.
+insert into pg_temp.preuve
+select 1.10, 'assistant_reserver : security invoker, volatile, search_path fixe', 'false / v / true',
+  d::text || ' / ' || v || ' / ' || c::text, not d and v = 'v' and c
+from (select p.prosecdef as d, p.provolatile::text as v,
+             exists (select 1 from unnest(coalesce(p.proconfig, '{}')) x where x like 'search_path=%') as c
+      from pg_proc p where p.oid = to_regprocedure('public.assistant_reserver(uuid,text,integer,integer)')) t;
+insert into pg_temp.preuve
+select 1.11, 'assistant_reserver : execute refuse a anon et authenticated, accorde a service_role', 'false / false / true',
+  a::text || ' / ' || b::text || ' / ' || c::text, not a and not b and c
+from (select has_function_privilege('anon', 'public.assistant_reserver(uuid,text,integer,integer)', 'execute') as a,
+             has_function_privilege('authenticated', 'public.assistant_reserver(uuid,text,integer,integer)', 'execute') as b,
+             has_function_privilege('service_role', 'public.assistant_reserver(uuid,text,integer,integer)', 'execute') as c) t;
 
 -- 2. LES REFUS, JOUÉS COMME UN CLIENT (spec § 4). Sous `authenticated`, avec la session d'un compte existant (jamais
 --    nommé), lecture et écriture lèvent 42501 : l'erreur est attrapée et son code est le verdict. Le privilège est
 --    vérifié avant la règle de ligne, donc le jeton de session n'y change rien ; il est posé pour que la preuve
 --    ressemble à un vrai client. Les identifiants de la requête ne sont jamais affichés.
-select set_config('request.jwt.claims',
-  json_build_object('sub', coalesce((select id::text from auth.users order by created_at limit 1), '00000000-0000-0000-0000-000000000000'),
-                    'role', 'authenticated')::text, true);
+do $$
+begin
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', coalesce((select id::text from auth.users order by created_at limit 1), '00000000-0000-0000-0000-000000000000'),
+                      'role', 'authenticated')::text, true);
+end $$;
 set local role authenticated;
 do $$
 declare v text;
@@ -113,6 +138,12 @@ begin
   exception when others then v := sqlstate || ' ' || sqlerrm;
   end;
   insert into pg_temp.preuve values (2.03, 'authenticated : select sur assistant_usage_jour est refuse', '42501 (permission denied)', v, v like '42501%');
+  begin
+    perform public.assistant_reserver('00000000-0000-0000-0000-000000000000', 'creation', 1, 5);
+    v := 'AUCUNE ERREUR : la reservation a ete permise';
+  exception when others then v := sqlstate || ' ' || sqlerrm;
+  end;
+  insert into pg_temp.preuve values (2.04, 'authenticated : l appel de assistant_reserver est refuse', '42501 (permission denied)', v, v like '42501%');
 end $$;
 reset role;
 
@@ -120,14 +151,15 @@ reset role;
 --    d'il y a longtemps (2000-01-01) : de vraies lignes du même compte, d'aujourd'hui, ne faussent donc pas « appels = 1 ».
 --    Le compte emprunté est le plus ancien de `auth.users` ; il n'est jamais affiché. Tout est annulé au rollback final.
 do $$
-declare uid uuid; n bigint; e bigint; s bigint; v text;
+declare uid uuid; n bigint; e bigint; s bigint; v text; c bigint; r1 bigint; r2 bigint;
 begin
   select id into uid from auth.users order by created_at limit 1;
   if uid is null then
     insert into pg_temp.preuve values
       (3.01, 'sous postgres : une ligne de journal, puis assistant_usage_jour la compte', 'appels = 1', 'aucun compte : etape sautee', true),
       (3.02, 'la vue additionne les jetons de la ligne', 'jetons 10 / 20', 'aucun compte : etape sautee', true),
-      (3.03, 'un outil hors liste est refuse par le check', '23514', 'aucun compte : etape sautee', true);
+      (3.03, 'un outil hors liste est refuse par le check', '23514', 'aucun compte : etape sautee', true),
+      (3.04, 'assistant_reserver : un id tant que le quota n est pas atteint, puis null', 'id non nul, puis null', 'aucun compte : etape sautee', true);
     return;
   end if;
   insert into public.assistant_journal (owner_id, outil, statut, jetons_entree, jetons_sortie, duree_ms, octets, jour)
@@ -143,6 +175,14 @@ begin
   exception when others then v := sqlstate;
   end;
   insert into pg_temp.preuve values (3.03, 'un outil hors liste est refuse par le check', '23514', v, v = '23514');
+  -- La réservation : avec un quota d'un appel de plus que le compte du jour UTC, le premier appel rend un id, le second
+  -- (même quota) rend null. Les deux lignes « en vol » créées ici sont annulées au rollback final.
+  select count(*) into c from public.assistant_journal where owner_id = uid and jour = (now() at time zone 'utc')::date;
+  r1 := public.assistant_reserver(uid, 'creation', 1, c::integer + 1);
+  r2 := public.assistant_reserver(uid, 'creation', 1, c::integer + 1);
+  insert into pg_temp.preuve values (3.04, 'assistant_reserver : un id tant que le quota n est pas atteint, puis null', 'id non nul, puis null',
+    'id ' || case when r1 is null then 'null' else 'non nul' end || ', puis ' || case when r2 is null then 'null' else 'NON NUL' end,
+    r1 is not null and r2 is null);
 end $$;
 
 -- BILAN : une seule ligne à lire.
