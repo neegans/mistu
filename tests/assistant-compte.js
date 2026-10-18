@@ -94,4 +94,101 @@ export async function runAssistantCompteTests({ eq, ok }) {
       eq((await db.getAll('outbox')).length, 0, 'noDelete : la suppression refusée du vrai magasin n’a rien mis en file');
     } finally { uninstallCapture(db); }
   });
+
+  // --- T3 : lecture composée, secrets refusés, écriture, passe unique (K-1, § 5.1, § 5.2, § 5.6, S1, F3)
+  const { withRepo } = await import('./sync-fixture.js');
+  const bus = await import('../src/core/bus.js');
+  await withRepo(async (repo, db) => {
+    eq((await repo.getSettings()).llm, { provider: 'none', model: '', base_url: '', api_key: '' }, 'lecture : sans ligne, configuration vide');
+    let levee = null; try { await repo.setSetting('llm', { api_key: 'sk-factice-3' }); } catch (e) { levee = e; }
+    ok(!!levee && !(await db.get('settings', 'llm')), 'K-1 : setSetting(llm) lève et n’écrit rien');
+    levee = null; try { await repo.getSetting('llm'); } catch (e) { levee = e; }
+    ok(!!levee, 'K-1 : getSetting(llm) lève (F15)');
+    // Écriture : capturée (fixture = capture posée, user u1), horodatée par syncNow, événements change + settings sans valeur
+    const evenements = [];
+    const off1 = bus.on('settings', (p) => evenements.push(['settings', p]));
+    const off2 = bus.on('change', (p) => evenements.push(['change', p]));
+    try {
+      const ligne = await repo.saveAssistantConfig({ provider: 'anthropic', model: ' m ', api_key: ' sk-factice-3 ', base_url: 'https://x.invalid' });
+      eq([ligne.id, ligne.provider, ligne.model, ligne.api_key, ligne.base_url, typeof ligne.updated_at], ['llm', 'anthropic', 'm', 'sk-factice-3', '', 'string'], 'écriture : ligne normalisée et horodatée');
+      eq((await repo.getSettings()).llm, { provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-3' }, 'lecture : composée depuis assistant_config, sans id ni dates');
+      const file = (await db.getAll('outbox')).filter((e) => e.store === 'assistant_config');
+      eq(file.map((e) => [e.op, e.id, e.user_id, 'payload' in e]), [['put', 'llm', 'u1', false]], 'écriture : capturée, un put sans copie de la fiche');
+      ok(evenements.some(([n, p]) => n === 'change' && p.store === 'assistant_config') && evenements.some(([n, p]) => n === 'settings' && p.key === 'llm' && !('value' in p)), 'écriture : change + settings { key } SANS la valeur (K-2)');
+      ok(!JSON.stringify(evenements).includes('sk-factice-3'), 'écriture : aucun événement ne porte la clé');
+    } finally { off1(); off2(); }
+    // Une ligne settings.llm résiduelle est ignorée à la lecture
+    await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', api_key: 'sk-factice-residu' } }] }, origin: 'device' });
+    eq((await repo.getSettings()).llm.api_key, 'sk-factice-3', 'lecture : settings.llm résiduel ignoré');
+    // Ligne reçue abîmée : la lecture reste saine
+    await db.mutate({ puts: { assistant_config: [{ id: 'llm', provider: 'anthropic', model: 7, api_key: 'k\u0007', updated_at: '2026-10-17T10:00:00Z' }] }, origin: 'remote' });
+    eq((await repo.getSettings()).llm, { provider: 'anthropic', model: '', base_url: '', api_key: 'k' }, 'lecture : une ligne reçue abîmée est normalisée (F13)');
+  });
+  // Passe unique § 5.6 : dans l'ordre de boot() — init() SANS capture, puis envoi initial (F3, S10)
+  {
+    const repoModule = await import('../src/model/repo.js');
+    const { envoiInitial } = await import('../src/sync/backfill.js');
+    const origine = repoModule.db;
+    await withDatabase(async (db) => {
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-mac' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      repoModule.bindDatabase(db);
+      try {
+        await repoModule.init();
+        const ligne = await db.get('assistant_config', 'llm');
+        eq([ligne?.provider, ligne?.api_key, ligne?.updated_at, await db.get('settings', 'llm'), (await db.get('sync_state', 'assistant_config_migre'))?.value, await db.count('outbox')],
+          ['anthropic', 'sk-factice-mac', '2026-10-01T12:00:00.000Z', undefined, 1, 0], 'passe unique : copiée avec l’horodatage D’ORIGINE (S1), settings.llm effacé, garde posée, rien en file (init précède la capture)');
+        const r = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
+        ok(r.tables.includes('assistant_config') && (await db.getAll('outbox')).some((e) => e.store === 'assistant_config' && e.op === 'put' && e.user_id === 'u1'), 'passe unique : c’est l’envoi initial qui met la ligne en file, au nom du compte (F3)');
+        await repoModule.init();
+        eq((await db.get('assistant_config', 'llm')).updated_at, '2026-10-01T12:00:00.000Z', 'passe unique : idempotente (seconde init)');
+      } finally { repoModule.bindDatabase(origine); }
+    });
+    // Repli 1970 sans horodatage lisible ; rien copié si none / clé vide ; ligne déjà reçue respectée
+    await withDatabase(async (db) => {
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-sans-date' } }] }, origin: 'device' });
+      repoModule.bindDatabase(db);
+      try { await repoModule.init(); eq((await db.get('assistant_config', 'llm'))?.updated_at, '1970-01-01T00:00:00.000Z', 'passe unique : sans horodatage lisible → 1970 (toute version du compte gagne)'); }
+      finally { repoModule.bindDatabase(origine); }
+    });
+    await withDatabase(async (db) => {
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'none' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      repoModule.bindDatabase(db);
+      try { await repoModule.init(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [undefined, undefined], 'passe unique : none → rien copié, settings.llm effacé'); }
+      finally { repoModule.bindDatabase(origine); }
+    });
+    await withDatabase(async (db) => {
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-vieille' }, updated_at: '2026-10-01T12:00:00.000Z' }], assistant_config: [{ id: 'llm', provider: 'anthropic', model: 'm2', base_url: '', api_key: 'sk-factice-recue', updated_at: '2026-10-17T12:00:00.000Z' }] }, origin: 'remote' });
+      repoModule.bindDatabase(db);
+      try { await repoModule.init(); eq([(await db.get('assistant_config', 'llm')).api_key, await db.get('settings', 'llm')], ['sk-factice-recue', undefined], 'passe unique : une ligne déjà reçue n’est pas écrasée ; settings.llm effacé'); }
+      finally { repoModule.bindDatabase(origine); }
+    });
+  }
+  // T3, durcissement (/verify de l'implémenteur, lentille faux-vert) : trois mutants que le bloc ci-dessus laissait vivre.
+  // 1) Origine de la passe : sans capture, « rien en file » vaut même si la passe écrivait en 'local' — capture posée ici
+  //    (configSuitLeCompte: () => true, ignoré avant la tâche 4, comme pour l'envoi initial ci-dessus : R-CPT-2).
+  // 2) Clé vide sous un vrai fournisseur : rien copié, settings.llm effacé (§ 5.6 « et une api_key non vide »).
+  // 3) Horodatage présent mais illisible : repli 1970, jamais la chaîne telle quelle.
+  {
+    const repoModule = await import('../src/model/repo.js');
+    const origine = repoModule.db;
+    await withDatabase(async (db) => {
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-capture' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      repoModule.bindDatabase(db);
+      installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
+      try { await repoModule.init(); eq([(await db.get('assistant_config', 'llm'))?.api_key, await db.count('outbox')], ['sk-factice-capture', 0], 'passe unique : origine device — capture posée, la passe ne met rien en file'); }
+      finally { uninstallCapture(db); repoModule.bindDatabase(origine); }
+    });
+    await withDatabase(async (db) => {
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: '' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      repoModule.bindDatabase(db);
+      try { await repoModule.init(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [undefined, undefined], 'passe unique : clé vide → rien copié, settings.llm effacé'); }
+      finally { repoModule.bindDatabase(origine); }
+    });
+    await withDatabase(async (db) => {
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-date-illisible' }, updated_at: 'pas une date' }] }, origin: 'device' });
+      repoModule.bindDatabase(db);
+      try { await repoModule.init(); eq((await db.get('assistant_config', 'llm'))?.updated_at, '1970-01-01T00:00:00.000Z', 'passe unique : horodatage illisible → 1970, jamais la chaîne reçue'); }
+      finally { repoModule.bindDatabase(origine); }
+    });
+  }
 }

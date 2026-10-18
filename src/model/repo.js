@@ -1,12 +1,13 @@
 // Accès aux données : base unique, amorçage des références, réglages et journal d'activité.
 import { Database } from '../core/db.js';
-import { DB_NAME, DB_VERSION, STORES, SYNC_STORES } from './schema.js';
+import { DB_NAME, DB_VERSION, STORES, SYNC_STORES, SECRET_SETTING_KEYS } from './schema.js';
 import { UNIT_DEFINITIONS, UNIT_CONVENTIONS, INGREDIENTS } from './seed.js';
 import { newId, nowIso } from '../core/ids.js';
 import { emit } from '../core/bus.js';
 import { syncNow } from '../sync/clock.js';
 import { nettoyerChaines, porteDesCaracteresDeControle } from '../sync/lots.js';
 import { resolveMime } from '../sync/mime.js';
+import { normaliserConfigAssistant, LIGNE_ASSISTANT } from '../domain/assistant-config.js';
 
 // Base de l'application. Liaison vivante : bindDatabase ne sert qu'aux tests, pour travailler sur une base jetable.
 export let db = new Database(DB_NAME, DB_VERSION, STORES);
@@ -67,7 +68,32 @@ export async function init() {
   if (Object.keys(aPoser).length) await saveBatch(aPoser, { origin: 'device' });
   await horodaterAnciennesFiches();
   await nettoyerAnciennesFiches();
+  await migrerConfigAssistant();
   await purgerFilesEnFile();
+}
+
+// Passe unique (spec assistant-par-le-compte § 5.6, S1/F3/F4) : l'ancien réglage settings.llm devient la ligne
+// assistant_config, UNE transaction d'origine 'device'. L'horodatage est celui de l'ancienne ligne (repli 1970) —
+// JAMAIS « maintenant » : une vieille clé restée sur une autre origine battrait une clé tournée depuis. Rien n'entre
+// en file ici (init() précède installCapture) : l'envoi initial enverra la ligne au premier passage avec un compte.
+// Placée après le nettoyage des chaînes : la ligne copiée est déjà normalisée (Cc/Cf retirés), rien à y nettoyer.
+const MIGRATION_ASSISTANT_GUARD = 'assistant_config_migre';
+const EPOQUE = '1970-01-01T00:00:00.000Z';
+async function migrerConfigAssistant() {
+  if ((await db.get('sync_state', MIGRATION_ASSISTANT_GUARD))?.value === 1) return false;
+  const ancien = await db.get('settings', LIGNE_ASSISTANT);
+  const existante = await db.get('assistant_config', LIGNE_ASSISTANT);
+  const cfg = normaliserConfigAssistant(ancien?.value);
+  const copier = !existante && cfg.provider !== 'none' && cfg.api_key !== '';
+  const puts = { sync_state: [{ key: MIGRATION_ASSISTANT_GUARD, value: 1 }] };
+  if (copier) {
+    const quand = typeof ancien.updated_at === 'string' && Number.isFinite(Date.parse(ancien.updated_at)) ? ancien.updated_at : EPOQUE;
+    puts.assistant_config = [{ id: LIGNE_ASSISTANT, ...cfg, created_at: quand, updated_at: quand }];
+  }
+  // La garde, la copie et l'effacement de settings.llm partent dans la MÊME transaction : une passe à moitié faite
+  // serait rejouée en entier, et la clé ne vit jamais à deux endroits après la passe.
+  await db.mutate({ puts, deletes: ancien ? { settings: [LIGNE_ASSISTANT] } : {}, origin: 'device' });
+  return copier;
 }
 
 // Passe unique (R-L3-27) : les fiches écrites AVANT cette vague portent peut-être des caractères de contrôle —
@@ -147,10 +173,13 @@ const DEFAULT_SETTINGS = {
   sync_activity: false,       // historique de consultation envoyé au serveur : jamais sans ce geste (spec § 4.2)
   last_backup: null,          // { at, counts, files, bytes }
   device_name: '',
-  llm: { provider: 'none' },  // exclu de la sauvegarde
+  // `llm` n'est plus un réglage (K-1) : la configuration de l'assistant vit dans assistant_config, composée par getSettings.
 };
 
+const estSecret = (key) => SECRET_SETTING_KEYS.includes(key);
+
 export async function getSetting(key) {
+  if (estSecret(key)) throw new Error(`Réglage secret « ${key} » : lire getSettings().llm (K-1)`);
   const row = await db.get('settings', key);
   return row ? row.value : DEFAULT_SETTINGS[key];
 }
@@ -158,13 +187,25 @@ export async function getSetting(key) {
 export async function getSettings() {
   const rows = await db.getAll('settings');
   const out = { ...DEFAULT_SETTINGS };
-  for (const r of rows) out[r.key] = r.value;
+  for (const r of rows) if (!estSecret(r.key)) out[r.key] = r.value; // une ligne settings.llm résiduelle est ignorée
+  // K-1 / K-11 : la configuration de l'assistant vit dans assistant_config ; les consommateurs lisent toujours settings.llm.
+  out.llm = normaliserConfigAssistant(await db.get('assistant_config', LIGNE_ASSISTANT));
   return out;
 }
 
 export async function setSetting(key, value) {
+  if (estSecret(key)) throw new Error(`Réglage secret « ${key} » : passer par saveAssistantConfig (K-1)`);
   await db.put('settings', { key, value, updated_at: nowIso() });
   emit('settings', { key, value });
+}
+
+// K-6 / § 5.2 : normalisée, horodatée par syncNow (save), capturée si l'origine et l'hôte le permettent (outbox.js),
+// `change` émis par save ; `settings` sans la valeur (K-2 : aucun événement ne porte la clé).
+export async function saveAssistantConfig(brut) {
+  const cfg = normaliserConfigAssistant(brut);
+  const ligne = await save('assistant_config', { id: LIGNE_ASSISTANT, ...cfg });
+  emit('settings', { key: LIGNE_ASSISTANT });
+  return ligne;
 }
 
 // --- Aides génériques ------------------------------------------------------

@@ -2021,7 +2021,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     const origine = repoModule.db;
     try {
       const appels = [];
-      const base = (ouverte) => ({ idb: ouverte ? {} : null, getAll: async (store) => { appels.push(store); return []; } });
+      const base = (ouverte) => ({ idb: ouverte ? {} : null, getAll: async (store) => { appels.push(store); return []; }, get: async () => undefined });
       repoModule.bindDatabase(base(false));
       emit('settings', { key: 'device_name', value: 'base fermée' });
       await etat.relectureEnCours();
