@@ -22,7 +22,7 @@
 - `src/domain/search.js` : une recette sans `type` est exclue d'une recherche typée (« salade »); les références d'index ne remontent que si leur titre contient un mot de la demande, un libellé FR/EN d'un ingrédient demandé ou un mot du type.
 - `src/ui/recipe-edit.js` : la vue la plus dense (analyse des lignes, IA facultative, sauvegarde de version); tester extraction, correction, adaptation et traduction.
 - `src/domain/backup.js` : gate V0 = restaurer dans une base vide avec mêmes identifiants et empreintes; `verifyRestored` doit rapporter zéro écart.
-- `src/domain/llm.js` : fournisseurs OpenAI-compatible et Anthropic écrits sans appel réel. (Premier appel réel mesuré le 17 octobre 2026, lot « Chercher sur le web » : `AnthropicProvider` via l'API Messages, voir cette section.)
+- `src/domain/llm.js` : fournisseurs OpenAI-compatible et Anthropic écrits sans appel réel. (Premier appel réel mesuré le 17 octobre 2026, lot « Chercher sur le web » : `AnthropicProvider` via l'API Messages, voir cette section.) **Amendé le 18 octobre par le lot « La passerelle de l'assistant »** : `OpenAICompatibleProvider` est retiré et `AnthropicProvider` est remplacé par `PasserelleProvider` ; l'app n'appelle plus jamais Anthropic directement (voir « La passerelle de l'assistant »).
 - ~~`manifest.webmanifest` : icône SVG seulement, pas d'`apple-touch-icon` PNG (fichier binaire à ajouter).~~ Levé le 12 octobre : `icons/apple-touch-icon.png` (180 × 180, opaque) généré par `tools/make-apple-touch-icon.py` (Python standard, formes de `icons/apple-touch-icon.svg`, variante pleine sans coins arrondis), câblé dans `index.html`, le manifeste et `SHELL`. La vignette `qlmanage` avait été écartée : marge blanche visible.
 - Dictionnaire anglais partiel (`src/i18n/en.js`).
 
@@ -439,6 +439,11 @@ deux ISBN, les suggestions, la recherche « bbq ».
 
 ### Chercher sur le web avec l'assistant (17 octobre 2026)
 
+> **Amendé le 18 octobre par le lot « La passerelle de l'assistant »** (branche `passerelle-assistant`, non fusionnée) : l'app n'appelle plus l'API
+> Anthropic ; le transport passe par la fonction `assistant` de `mitsu` avec la session de la personne (jamais de clé dans le navigateur) ; les
+> raisons `cle_refusee` et `recherche_desactivee` n'existent plus, et la porte « Créer une recette avec ces critères » qui s'affichait sur cette
+> dernière a disparu avec elle. Ce qui suit décrit le lot tel qu'il était à sa clôture.
+
 **Où.** Branche `recherche-web`, worktree `~/projects/mistu-web` (jamais `~/projects/mistu`), serveur de vérification
 `http://localhost:8083/` (suite : `http://localhost:8083/tests/`). Spec :
 `docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md` (rév. 2.1 ; **§ 11.2** « Ce que la construction a
@@ -584,6 +589,10 @@ Web → « Pour chercher sur le web, configure l’assistant IA … » sur un na
 - **Perf** un `Intl.DateTimeFormat` est construit par carte et par rendu (négligeable ; deux formateurs en cache suffiraient).
 
 ### L'assistant suit le compte (17-18 octobre 2026)
+
+> **Amendé le 18 octobre par le lot « La passerelle de l'assistant »** (branche `passerelle-assistant`, non fusionnée) : la clé ne vit plus dans le
+> navigateur ni dans Réglages (la section est à deux états, sans champ) ; une passe unique vide toute clé trouvée dans `assistant_config` ; le
+> magasin et `assistant-config.js` restent (dette). Ce qui suit décrit le lot tel qu'il était à sa clôture.
 
 **Où.** Branche `assistant-compte`, worktree `~/projects/mistu-web` (jamais `~/projects/mistu`), serveur de vérification
 `http://localhost:8083/` (suite : `http://localhost:8083/tests/`). Spec :
@@ -745,6 +754,10 @@ sous R-CPT-7.
 `git worktree remove` ; les gestes 1 et 2 ci-dessus **avant** la fusion.
 
 ### Créer une recette avec l'assistant (18 octobre 2026)
+
+> **Amendé le 18 octobre par le lot « La passerelle de l'assistant »** (branche `passerelle-assistant`, non fusionnée) : la création passe par la
+> fonction `assistant` (outil `creation`), avec la session ; sans session, l'écran dit « Connecte-toi pour utiliser l’assistant. » ; plus de clé ni
+> de fournisseur à choisir. Ce qui suit décrit le lot tel qu'il était à sa clôture.
 
 **Pour toi.** Tu décris ce que tu veux, l'assistant propose UNE recette, tu la gardes ou pas. Rien n'est écrit sans
 « Garder cette recette » ; une recette gardée dit partout « Créée avec l'IA · non testée » jusqu'à ce que tu la marques
@@ -1157,6 +1170,223 @@ rendu 4,62 sur 1 760 nœuds ; mutants de la vague : 11 sur 11.
 
 **Fusion.** Revue finale de branche puis `/verify` par le chef d'orchestre ; le registre (avec `captures/`) se copie **avant** tout
 `git worktree remove` ; les gestes 1 et 2 du lot 1 **avant** tout `push`.
+
+### La passerelle de l'assistant (18 octobre 2026)
+
+**Pour toi.** Plus de clé à taper, à copier ni à synchroniser : tu te connectes et l'assistant marche, sur le Mac comme sur
+l'iPhone, pour toute adresse admise de `mitsu` (la liste de la synchronisation, `private.allowed_users`). La clé Anthropic
+est un secret du projet Supabase ; l'app n'appelle plus jamais `api.anthropic.com` : elle poste à la fonction `assistant`
+avec ta session. Le serveur décide du modèle (`claude-sonnet-5-5`) et du quota : **60 appels par compte et par jour**
+(jour UTC : le compte repart à zéro à 20 h à Montréal en heure d'été), modifiable sans redéployer par le secret
+`ASSISTANT_QUOTA_JOUR`. Réglages → Assistant n'a plus aucun champ : « L’assistant est actif pour {adresse}. » puis « Modèle
+en service : … Quota : 60 appels par jour. », ou « Connecte-toi pour utiliser l’assistant. » avec « Se connecter ». Sans
+compte, l'app reste entière ; la recherche web, la création et la lecture de pages photographiées disent « Connecte-toi
+pour utiliser l’assistant. » et n'appellent rien. Au premier démarrage d'un appareil qui portait encore une clé, une passe
+unique la vide : la ligne vide part au compte et l'efface aussi du serveur et des autres appareils. Inviter quelqu'un =
+l'ajouter à la liste admise, comme pour la synchronisation ; c'est toi qui paies, et le plafond du workspace Anthropic reste
+le mur. Rien n'arrive sur le site public avant ta fusion et ton `push` ; `0004` doit être collée avant le premier appel réel.
+
+**Où.** Branche `passerelle-assistant`, worktree `~/projects/mistu-passerelle` (jamais `~/projects/mistu`), serveur de
+vérification `http://localhost:8086/` (suite : `http://localhost:8086/tests/`). Spec :
+`docs/superpowers/specs/2026-10-18-passerelle-assistant-design.md` (rév. 2 ; **§ 9** : décisions tranchées le 18 octobre ;
+**§ 10** : rulings). Plan : `docs/superpowers/plans/2026-10-18-passerelle-assistant.md`. Registre, **hors git** (`.superpowers/`
+n'est pas suivi) : `.superpowers/sdd/2026-10-18-passerelle-assistant/` (`progress.md` avec les verdicts de revue, un brief et un
+rapport par tâche, les paquets de revue `review-*.diff` ; lanceur `suite.cjs`). Base : `main` `cdbd6e0` ; 15 commits jusqu'à `00424b6` (spec, plan ×2, T1 ×2,
+T2 ×3, T3 ×2, T4 ×2, RESULTATS ×2, T5a), 40 fichiers touchés (`git diff --stat cdbd6e0..00424b6`). Cinq tâches, T1 à T5a relues
+(sonnet ou opus) avec au plus une ronde de corrections ; T5 découpée en 5a (restes parqués, `6d7ed21`), redéploiement et sondes
+(contrôleur), 5b (ces documents). **FINI dans le worktree, fonction DÉPLOYÉE sur `mitsu` (version 2), `0004` PAS collée, PAS
+fusionné, PAS poussé** ; revue finale de branche et `/verify` : au chef d'orchestre. Fichiers :
+- Serveur : `supabase/functions/assistant/{index.ts,logique.js,deno.json,deno.d.ts}` (`logique.js` est pur et tourne sous Node
+  et Deno ; `deno.d.ts` ne sert qu'à `tsc`, jamais importé), `supabase/migrations/0004_assistant_journal.sql` (table
+  `public.assistant_journal`, vue `public.assistant_usage_jour`, fonction `public.assistant_reserver`),
+  `supabase/proofs/0004_assistant_journal.sql`, `supabase/README.md` (étape 10), `supabase/proofs/RESULTATS-mitsu.md`
+  (section « Passerelle `assistant` »).
+- App : `src/domain/passerelle.js` (neuf : `appelerAssistant`, `etatAssistant`, `echecDomaine`), `src/domain/llm.js`
+  (`PasserelleProvider`), `src/domain/recherche-web.js` et `creation-ia.js` (transport seulement), `src/sync/auth.js`
+  (`jeton()`), `src/ui/components.js` (`sessionAssistant`, `carteConnexion`, `texteRefusAssistant`, `texteEchecAssistant`),
+  `src/ui/settings.js` (section Assistant à deux états), `src/ui/search.js`, `creer-ia.js`, `import.js`, `recipe-edit.js`
+  (gardes), `src/model/repo.js` (`effacerCleLocale`, passe unique gardée par `sync_state.cle_locale_effacee`), `src/app.js`
+  (`installCapture` avant `repo.init()`), `src/i18n/en.js`.
+- Tests : `tools/assistant-logique.test.mjs`, `tools/assistant-index.test.mjs`, `tools/faux/supabase.mjs`,
+  `tools/generer-migrations.test.mjs` (blocs `0004`, preuve, `index.ts`, README), `tests/passerelle.js` (neuf),
+  `tests/assistant-compte.js`, `tests/recherche-web.js`, `tests/creer-ia.js`, `tests/ajouter.js`.
+
+**Ce qui marche, prouvé** (suite navigateur : `fetch` injecté, bases jetables, aucun réseau ; tests Node : faux `Deno`, faux
+supabase-js, faux `fetch` ; fonction déployée : neuf sondes `curl` sans dépense — aucun appel réel à Anthropic n'a eu lieu) :
+- **L'app n'appelle plus Anthropic.** `git grep -n -E "api\.anthropic\.com|x-api-key|anthropic-dangerous" -- src` est vide
+  (relu à la clôture) ; un mutant « `passerelle.js` poste vers `api.anthropic.com` » rougit la suite (2748/2760, T3). Chaque
+  appel (recherche web, création, lecture de pages, état de Réglages) part vers `/functions/v1/assistant` avec trois en-têtes
+  (`content-type`, `apikey` publique, `authorization: Bearer <access_token>`), `redirect: 'error'`, `credentials: 'omit'` et un
+  corps `{ outil, corps }` sans `model`. Sans session valide, aucun `fetch` ne part (`non_connecte`, sept formes de session,
+  POST et GET) ; le jeton n'est dans aucun des 86 résultats contrôlés par `JSON.stringify`. Les statuts sont classés (R-PV-1,
+  R-T3-4, R-T3-10, R-T3-13), un corps d'erreur n'est jamais rendu, et l'échec d'une lecture de pages garde la classification de la
+  passerelle (« (60 appels) » pour un quota écrit, « Trop de demandes… » pour un 429 relayé, « La demande est trop lourde. »,
+  « Code : … » borné à 40 points de code).
+- **Les écrans.** Réglages n'a plus aucun champ (`git grep -n "type: 'password'" -- src/ui/settings.js` vide) et ses deux états
+  sont éprouvés (sans session : une phrase, un bouton, aucun appel ; avec session : « … » puis le texte exact du `GET`,
+  « Ce compte n’a pas accès à l’assistant. » sur `non_admis`, « L’assistant est indisponible pour le moment. » sur toute autre
+  issue ou sur un 200 sans modèle ni quota). Les quatre écrans qui appellent l'assistant (`search.js`, `creer-ia.js`,
+  `import.js`, `recipe-edit.js`) montrent la carte « Connecte-toi pour utiliser l’assistant. » sans session et n'appellent rien ;
+  la garde retirée de `search.js` rougit (2729/2742). Plus aucun texte d'écran ne nomme Anthropic
+  (`git grep -n "Anthropic" -- src/ui src/i18n` vide).
+- **La passe d'effacement** (dix cas, dont un de bout en bout contre le transport factice en mode `serveur`) : une ligne qui
+  porte une clé ou un fournisseur est réécrite vide, d'origine `local`, avec UNE entrée d'outbox ; absente ou déjà vide, seule
+  la garde est posée ; rejouée, elle n'écrit rien ; la ligne vide gagne contre la clé sur le serveur factice et sur un second
+  appareil ; hors production, la clé locale est effacée aussi, sans entrée de file.
+- **La logique de la fonction** (`logique.js`, 21 tests Node) : liste blanche des champs par outil (`system`, `messages`,
+  `max_tokens` ; `tools` pour `recherche-web` seulement), modèle forcé, `max_tokens` ≤ 16 000, bornes en octets (512 Kio ;
+  8 Mio pour `extraction`), CORS, relais des statuts (200, 400, 403, 413, 429 tels quels ; 529 → 503 ; le reste → 502 sans
+  corps d'Anthropic), journal = compteurs seulement (aucune chaîne du corps ne s'y retrouve).
+- **`index.ts`** (16 cas a-p, lu par `stripTypeScriptTypes`, faux `Deno`, faux supabase-js, faux `fetch`, de vraies `Request`) :
+  ordre des gardes, qui est appelé avec quelle clé (`is_allowed` par la clé publique, `assistant_reserver` par la clé secrète),
+  borne AVANT lecture avec annulation du flux, abandon à 120 s exactes (119,999 s non abandonné), réponse bornée à 2 Mio
+  d'octets, 429 sur `null`, 502 sur erreur de réservation, exception interne → 502 avec CORS, secrets relus à chaque
+  requête, quota borné à l'int4, clés legacy en repli.
+- **Le SQL — syntaxe seulement** (pglast v8.6, rejoué par le contrôleur après T2 et T5a) : `0004` = 12 instructions de premier
+  niveau + 1 fonction plpgsql (dernière instruction `commit`), preuve = 24 instructions + 5 blocs `do` (dernière `rollback`),
+  aucune erreur ; le SQL de `0004` hors commentaires est identique à celui de `1590ba8` (script). Ce n'est **pas** une
+  exécution (voir « Non prouvé »).
+- **Déploiement et sondes** (contrôleur, 18 octobre 2026). `~/.local/bin/supabase functions deploy assistant --project-ref
+  ybdooerfeziiabsbfxtb --no-verify-jwt --use-api` depuis le worktree (bundle côté serveur, sans Docker ; aucun `config.toml`
+  dans le dépôt) : **version 1** à 17 h 05 UTC (13 h 05 à Montréal, code `1590ba8`), **version 2** à 18 h 16 UTC (14 h 16, code
+  `6d7ed21`, `ezbr_sha256 245fcab5…`) ; `supabase functions list` : `ACTIVE`, `verify_jwt: false`, `import_map: true`. Neuf
+  sondes `curl`, **identiques aux deux versions**, qui s'arrêtent toutes à une garde avant la réservation (aucune n'atteint
+  Anthropic) : S1 `OPTIONS`, origine admise → 204 + `Access-Control-Allow-Origin` (et `Allow-Headers`, `Allow-Methods: POST,
+  OPTIONS`, `Max-Age: 600`) · S2 `OPTIONS`, origine refusée → 204 **sans** Allow-Origin · S3 `POST` sans jeton → 401
+  `non_connecte` · S4 `POST`, origine refusée → 403 `origine` · S5 jeton bidon + `apikey` publique → 401 `non_connecte`
+  (donc `createClient` a reçu une clé publique valide) · S6 `GET`, jeton bidon → 401 · S7 `PUT` → 405 `methode` · S8 `POST`
+  sans en-tête `Origin` → 403 `origine` · S9 clé publique en Bearer → 401 `non_connecte`. Détail et en-têtes :
+  `supabase/proofs/RESULTATS-mitsu.md`, section « Passerelle `assistant` ». S10 (`content-length` mensonger de 9 000 000) a été
+  refusée par la bordure Cloudflare (400, page HTML) avant la fonction : elle ne mesure pas notre borne, couverte par le
+  test Node (cas f).
+
+Les rulings, une ligne chacun (détail dans le registre `progress.md` et en spec § 10) :
+- **R-PV-1** (pré-vol) la raison d'`appelerAssistant` est le champ `erreur` du corps quand il existe, sinon le statut (401 `non_connecte`, 403 `non_admis`, 429 `quota`, 413 `trop_lourd`, 400/422 `requete`, 504 `delai`, ≥ 500 `serveur`) ; les modules de domaine classent ensuite (413/422/400 → `requete`, 429 sans `erreur` → `trop_de_demandes`, 502/503 → `serveur`, 504 → `delai`).
+- **R-PV-2** (pré-vol) T3 ajoute `etatAssistant({ fetch, session, config, signal })` : un `GET` qui rend `{ modele, quotaJour }`, pour Réglages et pour une sonde sans dépense.
+- **R-PV-3** (pré-vol) T3 retire `non_configure`, `non_pris_en_charge` et `cle_refusee` des modules de domaine ; T4 retire leurs textes et adapte les écrans.
+- **R-T1-1** les bornes 512 Kio / 8 Mio se mesurent en OCTETS : `lireDemande` reçoit `octets` (lu par `index.ts`) ; sans lui, elle retombe sur `texte.length`.
+- **R-T1-2** `ligneJournal` ne validait ni l'outil, ni le statut, ni `ownerId` (l'appelant les tient) ; relu en T2, durci par R-T1-6.
+- **R-T1-3** le trailer `Co-Authored-By` est celui du modèle réel de l'implémenteur (convention du dépôt) ; jamais de réécriture d'historique.
+- **R-T1-4** `max_uses` vaut `LIMITES.maxUses` (5) quand le client l'omet : plus de recherche web sans plafond.
+- **R-T1-5** tests à mutants : prototype pollué (en `try/finally`) et épluchage imbriqué assertés.
+- **R-T1-6** gardes de `ligneJournal` : outil dans `OUTILS` sinon `null`, statut entier, compteurs entiers sûrs ≥ 0, jour par `toISOString()`.
+- **R-T1-7** `max_tokens` plafonné à 16 000 par le serveur ; modèle absent → 502 `serveur`.
+- **R-T1-8** `corpsErreur` rend `{ ...extra, erreur }` : le champ `erreur` ne s'écrase pas.
+- **R-T1-9** `decisionQuota` exige `appels ≥ 0`.
+- **R-T2-1** la réservation est UNE fonction SQL atomique, `public.assistant_reserver(uuid, text, integer, integer)` (plpgsql, volatile, `security invoker`, `search_path` vide, verrou consultatif par compte, comptage du jour UTC, insertion « en vol » au statut 0, `execute` pour `service_role` seulement) ; `index.ts` fait un seul `rpc` : `null` → 429, erreur → 502.
+- **R-T2-2** `lireCorpsBorne` (`content-length` d'abord, puis flux borné à 8 Mio, 413 avant tout parse) sert aussi à la réponse d'Anthropic (2 Mio d'octets).
+- **R-T2-3** un `try/catch` global rend 502 `serveur` avec les en-têtes CORS : aucune exception ne sort sans `{ erreur }`.
+- **R-T2-4** les secrets (`ASSISTANT_ORIGINES`, `ASSISTANT_MODELE`, `ASSISTANT_QUOTA_JOUR`) sont lus à chaque requête ; un quota invalide retombe sur 60.
+- **R-T2-5** la mise à jour du journal ne pose que le statut, les jetons et la durée.
+- **R-T2-6** preuve 1.09 : un `has_table_privilege` par privilège, reliés par `and` (une liste vaut OU) ; `set_config` en `perform` dans un bloc `do` ; README : jeton lu par `read -rs`, `ASSISTANT_ORIGINES` REMPLACE le défaut.
+- **R-T2-7** `index.ts` est éprouvé sous Node par comportement (`stripTypeScriptTypes`, faux `Deno`, faux supabase-js, faux `fetch`), pas par épinglage de lignes.
+- **R-T3-1** plomberie minimale des écrans : `auth.jeton()` (lecture locale, sans réseau) fournit la session aux cinq points d'appel ; textes et Réglages restent à T4 (`sessionCourante` écarté).
+- **R-T3-2** la session est une DONNÉE `{ access_token, user? } | null` ; sans jeton non vide → `non_connecte` sans `fetch` ; le jeton n'apparaît dans aucun objet rendu.
+- **R-T3-3** `cfg` disparaît des deux modules de domaine ; `non_configure`, `non_pris_en_charge` et `cle_refusee` n'existent plus ; le modèle d'une issue vient de `json.model` (≤ 80 points de code) ; les gardes « args null » rendent `non_connecte`.
+- **R-T3-4** classement des statuts dans `passerelle.js` (champ `erreur` d'abord, puis statut) puis dans les modules de domaine ; les erreurs d'outil web restent telles quelles.
+- **R-T3-5** `llm.js` : plus d'URL ni d'en-têtes Anthropic ; `AnthropicProvider` devient `PasserelleProvider` (`name` reste `'anthropic'`) ; `providerFrom(settings, { session })`.
+- **R-T3-6** `tests/passerelle.js` : URL exacte, en-têtes exacts (jamais `x-api-key`), `redirect: 'error'`, `credentials: 'omit'`, corps `{ outil, corps }` ; mutant « poste vers `api.anthropic.com` » obligatoire.
+- **R-T3-7** `APP_VERSION 0.8.0`, `sw.js` `-3`, `SHELL` + `./src/domain/passerelle.js`, pins de version déplacés.
+- **R-T3-8** le lanceur `suite.cjs 8086` et `node --test tools/*.test.mjs` restent verts à chaque tâche.
+- **R-T3-9** `sessionAssistant` rend `null` sans `ctx.sync.user` (compte refusé ou absent), sans appeler `jeton()`.
+- **R-T3-10** un 403 sans champ `erreur` (Anthropic relayé) est `serveur`, jamais « compte non admis ».
+- **R-T3-11** `sessionAssistant` est borné à 2 s (`Promise.race`, comme `demarrerSync`) ; `search.js` n'attend la session qu'en mode web.
+- **R-T3-12** le balayage « le jeton est absent de chaque résultat » attend chaque résultat (`garde(await …)`) et compte exactement (86).
+- **R-T3-13** `ecrite: true|false` sur tous les résultats : un 429 écrit par la passerelle → `quota`, un 429 relayé → `trop_de_demandes`.
+- **R-T4-1** pas de `ctx.session` : l'écran lit la session par `sessionAssistant(ctx)` ; aucun champ `session` dans `state.js` ni `app.js`.
+- **R-T4-2** Réglages → Assistant en deux états, première ligne = le but ; plus de champs fournisseur / modèle / URL / clé, ni Enregistrer, ni Tester, ni « Retirer… ».
+- **R-T4-3** passe unique `effacerCleLocale()` dans `init()` (garde `sync_state.cle_locale_effacee`) : une ligne `assistant_config` qui porte une clé ou un fournisseur est réécrite vide, d'origine `local`, pour partir au compte.
+- **R-T4-4** textes exacts des gardes (« Connecte-toi… » + « Se connecter », `non_admis`, `quota`, 413 « La demande est trop lourde. »), par `t()` avec leur entrée `en.js`.
+- **R-T4-5** `OpenAICompatibleProvider` est retiré ; le magasin `assistant_config` et `assistant-config.js` restent (dette).
+- **R-T4-6** tests par comportement (deux états de Réglages, passe d'effacement, quatre écrans à 0 appel) et mutant sur la garde de `search.js`.
+- **R-T4-7** `sw.js` `-4` ; total épinglé relevé dans « obtenu ».
+- **R-T4-8** même lanceur que T3 ; Node reste vert.
+- **R-T4-9** `quota` nul → « Tu as atteint la limite du jour pour l’assistant. » sans nombre.
+- **R-T4-10** à la bascule vers « Web » dans la même instance de `search.js`, la session est relue avant de rendre : pas de flash « Connecte-toi » pour une personne connectée.
+- **R-T4-11** les textes « Une recherche / Une création = un appel à l’assistant, compté dans ton quota du jour. » : plus aucun texte d'écran ne nomme Anthropic.
+- **T5a** (restes parqués, sans numéro R) : P-1 `jourDe` → `null` hors `AAAA-MM-JJ` ; P-2 défaut `max_tokens` = `min(4000, plafond)` ; P-3 preuve 2.04 reconnaît aussi `assistant_reserver` / `function` ; P-4 corps annulé quand `content-length` dépasse ; P-5 quota borné à l'int4 ; P-6 « isolat chaud » dit non prouvé ; P-7 `notify pgrst, 'reload schema';` au README ; P-8 commentaire READ COMMITTED dans `0004` ; P-10 « Code : … » borné à 40 points de code.
+
+**Ce qui n'est PAS prouvé.**
+- **La preuve `0004`** : ni la migration, ni `notify pgrst, 'reload schema';`, ni la preuve n'ont été jouées sur `mitsu`
+  (geste 1). Seule la syntaxe est vérifiée hors ligne. Constructions jamais mesurées sur `mitsu` : `pg_advisory_xact_lock(int,
+  int)` avec `hashtext`, `set search_path = ''` avec objets qualifiés, `has_function_privilege` sur la signature
+  `(uuid,text,integer,integer)`, `unnest(coalesce(proconfig, '{}'))`, `'security_invoker=true' = any (reloptions)`,
+  `has_sequence_privilege(…, 'usage, select, update')` ; le verdict 1.09 (`service_role` garde ses droits) dépend des
+  privilèges par défaut de Supabase et dira vrai ou faux pour de bon. Tant que `0004` n'est pas collée, un `POST` admis rend 502
+  `serveur` (inférence : `assistant_reserver` inconnue, `PGRST202`). La concurrence elle-même (deux appels simultanés) ne se
+  prouve pas dans l'éditeur SQL.
+- **Aucun POST réel** : aucune ligne `assistant_journal` n'a été écrite ; aucun appel à Anthropic n'est passé par la fonction ;
+  ni la validité du secret `ANTHROPIC_API_KEY` (sa pose est consignée par le contrôleur dans `RESULTATS-mitsu.md` ; aucune sonde ne
+  l'exerce), ni la forme réelle d'une réponse relayée, ni la durée, les jetons et le coût d'un appel ne sont mesurés.
+- **Une session réelle** : le `GET` → `{ modele, quotaJour }` (seule la 401 d'un jeton bidon est mesurée, S6) ; le comportement
+  de `is_allowed` pour une session non admise (403 `non_admis` réel) ; un secret changé pris par un isolat déjà chaud (dit
+  non prouvé dans le README et dans `index.ts`).
+- **Le préflight d'un vrai navigateur** : S1 est un `OPTIONS` à la main (`curl`). L'app envoie `cache: 'no-store'` (options du
+  lot ISBN) ; ces options pourraient ajouter au préflight des en-têtes que `Allow-Headers` ne liste pas (T3, inquiétude 3, non
+  vérifié) : première chose à regarder si l'app échoue en `reseau` sur le site public. De même, la borne de 8 Mio de la
+  fonction elle-même n'a jamais été atteinte en réel (S10 a été arrêtée avant elle).
+- **L'ordre `installCapture` / `repo.init()` dans l'app réelle** : `app.js` n'est pas importable par la suite (il lance
+  l'application à l'import) ; l'ordre n'est gardé que par un test de source et un mutant. Revue de T4 : correct et nécessaire
+  (`installCapture` ne fait qu'assigner `db.onMutate` ; toutes les autres passes d'`init()` écrivent avec l'origine `device`,
+  non capturée). À observer au premier démarrage réel : une entrée `assistant_config` dans « À envoyer » si une clé traînait.
+- **Safari et l'iPhone** : connexion Google depuis l'app installée, session lue par `jeton()`, textes de Réglages et des gardes,
+  `Promise.race` de 2 s sur `sessionAssistant` ; le délai de 120 s compte le temps actif (PWA iOS en arrière-plan).
+- **La lecture de pages en réel** (images en base64 jusqu'à 8 Mio) : non mesurée.
+
+**Dettes (assumées, une ligne chacune ; spec § 8).**
+- Retrait du magasin `assistant_config` (26 → 25, avec une migration) : `assistant-config.js`, le magasin et `getSettings().llm` restent (R-T4-5) ; le serveur garde la ligne vide.
+- Quotas par jetons et non par appels ; relevé d'usage visible dans l'app (aujourd'hui : `public.assistant_usage_jour` dans l'éditeur SQL) ; streaming ; cache ; plusieurs modèles par outil.
+- Un 403 relayé d'Anthropic (« recherche web non activée pour l'organisation ») est `serveur` et s'affiche comme une panne de service ; la porte « Créer une recette avec ces critères » qui s'affichait sur cette issue a disparu avec elle.
+- `decisionQuota` (pur, testé sous Node) n'est plus importé par `index.ts` : la règle vit en SQL, dans `assistant_reserver` (deux copies de la règle, la référence testée et la réelle).
+- Le test d'ordre de `app.js` est un test de texte source ; dérive d'horloge avant la première réponse serveur (la ligne vide de la passe d'effacement pourrait perdre face à la ligne du serveur si l'horloge de l'appareil retarde) ; un appareil en ancienne version qui réécrit sa clé après la passe (la garde est à usage unique).
+- Le `GET` n'est pas annoncé dans `Access-Control-Allow-Methods` (`POST, OPTIONS`) : à vérifier au premier `GET` d'un navigateur.
+- `pause_turn` n'est pas géré (relayé tel quel) ; `getUser()` est un appel réseau par requête ; une ligne « en vol » (statut 0) compte dans le quota si la fonction plante ; `connect-src 'self' https:` couvre `*.supabase.co` mais n'a pas été resserrée.
+- Réglages fait un `GET` (sans dépense) à chaque rendu avec session ; il peut dire « Connecte-toi » alors que Synchronisation dit « Connectée » si `jeton()` échoue ou dépasse 2 s ; « Chercher à nouveau » reste offert sur `non_admis`, `quota` et « trop lourd » côté recherche (R-WEB-7).
+- `supabase/README.md` étape 10 donne la commande de déploiement sans `--use-api`, celle qui a servi ; à aligner.
+- `lireDemande` avec un plafond appelant < 1 donnerait `max_tokens` 0 : inatteignable, `index.ts` passe toujours 16 000.
+
+**Gestes de Neegan, dans cet ordre.**
+1. Éditeur SQL de `mitsu` : coller `supabase/migrations/0004_assistant_journal.sql` **entier** (un collage = une transaction ;
+   attendu `Success. No rows returned`), puis, **collée seule**, `notify pgrst, 'reload schema';`, puis
+   `supabase/proofs/0004_assistant_journal.sql` (rien à remplacer, aucune adresse à ajouter ; « Run without RLS »). Lire la
+   ligne `999 BILAN` (`0 faux` = vert) et coller le tableau tel quel dans `supabase/proofs/RESULTATS-mitsu.md`, à la suite de
+   « Preuve `0004_assistant_journal.sql` — à jouer ». Détail : `supabase/README.md`, étape 10, point 3.
+2. Après la revue finale et `/verify` par le chef d'orchestre : `! git -C ~/projects/mistu merge --ff-only passerelle-assistant`
+   (si `main` a bougé depuis `cdbd6e0`, rebaser d'abord ; les lignes de version et le total épinglé se résolvent en faveur de la
+   branche), puis `! git -C ~/projects/mistu push origin main`. Ouvrir `https://neegans.github.io/mistu/tests/` et lire le BILAN
+   (attendu : 2910/2910, total épinglé 2909, plus le 404 de `/favicon.ico`) ; service worker `cuisine-os-v0.8.0-5`.
+3. **Preuve réelle** sur le site public, connecté (Mac, onglet Réseau ouvert) : onglet Web, « saumon fenouil » → **un** POST
+   `/functions/v1/assistant` en 200, **zéro** requête vers `api.anthropic.com` ; Réglages dit « L’assistant est actif pour
+   … » et « Modèle en service : claude-sonnet-5-5. Quota : 60 appels par jour. » ; puis, dans l'éditeur SQL,
+   `select owner_id, jour, appels, jetons_entree, jetons_sortie from public.assistant_usage_jour;` montre la ligne. Au premier
+   démarrage, regarder Réglages → Synchronisation : « À envoyer : 1 » (une entrée `assistant_config` dans l'outbox) si une clé
+   traînait sur cet appareil ; c'est la seule observation de l'ordre `installCapture` / `init()` dans l'app réelle.
+4. **iPhone** avec l'autre compte : ouvrir l'app, « Connexion avec Google », rien à configurer ; Réglages dit « actif », un
+   appel d'assistant marche (la mesure iOS du retour OAuth, due depuis le 13 octobre, ne dépend pas de ce lot).
+5. **Console Anthropic** : révoquer l'ancienne clé (elle a transité par un chat) et poser, ou vérifier, le plafond de dépense
+   mensuel du workspace (rotation du secret : `supabase/README.md`, étape 10, point 6).
+6. « clean » **seulement après** avoir copié le registre `.superpowers/sdd/2026-10-18-passerelle-assistant/` dans
+   `~/projects/mistu/.superpowers/sdd/` (il n'est pas dans git ; `diff -rq` muet) ; ensuite `git worktree remove` de
+   `mistu-passerelle`. Les worktrees des lots précédents (STATE.md) restent à nettoyer selon leur propre liste.
+
+**Versions.** `APP_VERSION = '0.8.0'` (était 0.7.0 ; pins `v0\.8\.0-\d+` / `'0.8.0'` dans `tests/ajouter.js`,
+`tests/sync-l3.js`, `tests/recherche-web.js`, `tests/assistant-compte.js` et `tests/creer-ia.js`), `DB_VERSION = 3` (inchangée),
+`sw.js VERSION = 'cuisine-os-v0.8.0-5'` (`-3` à T3, `-4` à T4, `-5` à T5a ; T1 et T2 ne touchent pas la coquille), `SHELL` +
+`./src/domain/passerelle.js` (seul module neuf). Aucun schéma IndexedDB ; la migration `0004` est côté serveur, à ajout seul
+(`NOMS` et le générateur ne la connaissent pas). CSP inchangée.
+
+**Bilan (T5a, `6d7ed21`, 18 octobre 2026).** Depuis `6d7ed21`, seul `supabase/proofs/RESULTATS-mitsu.md` a changé (`git diff --stat`) : la suite
+navigateur n'a pas été relancée à la clôture, `node --test` l'a été. Suite complète **2910/2910 verts** (total épinglé **2909** dans `tests/tests.js:215`, lu
+dans « obtenu » : l'assertion du total s'ajoute elle-même au bilan affiché ; départ du lot sur `cdbd6e0` : 2633/2633, épinglé
+2632), une seule erreur de console : le 404 de `/favicon.ico` (pré-existant) ; `node --test tools/*.test.mjs` **89/89** (45 à la
+base ; relancé à la clôture) ; `node tools/generer-migrations.mjs --check` : **0** ; `tsc` 5.6.3 `--strict` : **0** ; scans de clôture des cinq documents de
+cette tâche : aucun caractère invisible (Python), aucune clé (motifs de clés Anthropic, JWT et Supabase cherchés dans les cinq fichiers, valeurs factices exclues). Mutants rejoués sur des copies
+(chacun rouge ; comptes dans les rapports de tâche) : T2 14 puis 17, T3 le mutant `api.anthropic.com` (12 échecs), T4 la garde de
+`search.js` plus 19 autres puis 7, T5a 9 (revue).
+
+**Fusion.** Revue finale de branche puis `/verify` par le chef d'orchestre ; le registre se copie **avant** tout
+`git worktree remove` ; le geste 1 **avant** tout `push` (un code servi sans `0004` laisserait chaque appel d'assistant en
+502 `serveur`, avant tout appel au fournisseur : README, étape 10).
 
 ## Premier lot de fiabilisation — 8 septembre 2026, à réviser
 

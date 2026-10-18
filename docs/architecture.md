@@ -4,7 +4,7 @@
 
 - **PWA sans étape de build** : modules ES natifs, aucune dépendance npm. Un serveur statique suffit. Choix guidé par « éviter la surarchitecture » (spec §15) et par la possibilité de tout vérifier en ouvrant l'app.
 - **Local-first** : IndexedDB comme base unique (un magasin par entité), blobs (photos, PDF) stockés dédupliqués par SHA-256 dans le magasin `files`. La sauvegarde complète (ZIP) reste un mécanisme de durabilité et de transfert entre appareils, utilisable sans compte. Depuis le lot L3, **les fiches** peuvent aussi voyager par un serveur Supabase quand un compte est connecté (voir « Synchronisation (L3) ») ; les **octets des fichiers**, eux, ne partent pas encore (L4). L'app reste utilisable sans compte, sur un appareil seul.
-- **Déterministe avant IA** : unités, portions, courses, régimes, sauvegarde et recherche sont du code sans LLM. L'IA est une abstraction `LLMProvider` (aucun, compatible OpenAI, Anthropic) branchée sur l'extraction de pages et d'index, et sur la recherche web (Anthropic seulement), où le texte de l'assistant ne peut qu'étiqueter des pages que le serveur a réellement rapportées ; la lecture de la réponse et le choix des liens sont du code sans LLM ; et, depuis le 18 octobre, sur la création d'une recette (Anthropic seulement), dont la sortie est une donnée validée champ par champ par du code sans LLM. Ses résultats sont toujours « à vérifier ».
+- **Déterministe avant IA** : unités, portions, courses, régimes, sauvegarde et recherche sont du code sans LLM. L'IA est une abstraction `LLMProvider` (aucun, ou la passerelle `assistant` ; depuis le 18 octobre, plus de fournisseur compatible OpenAI ni de clé dans l'app) branchée sur l'extraction de pages et d'index, et sur la recherche web (Anthropic seulement), où le texte de l'assistant ne peut qu'étiqueter des pages que le serveur a réellement rapportées ; la lecture de la réponse et le choix des liens sont du code sans LLM ; et, depuis le 18 octobre, sur la création d'une recette (Anthropic seulement), dont la sortie est une donnée validée champ par champ par du code sans LLM. Ses résultats sont toujours « à vérifier ».
 
 ## Carte des modules
 
@@ -16,7 +16,7 @@ src/core/    db.js (IndexedDB), router.js (#/…), dom.js (el, dialogues), i18n.
 src/model/   schema.js (magasins, relations, vocabulaires), seed.js (unités, conventions, ingrédients FR/EN, presets d'appareils), repo.js (accès, réglages, activité, fichiers)
 src/domain/  quantity.js (fractions, plages, qualitatif), units.js (conventions, conversions, affichage), lines.js (analyse d'une ligne d'ingrédient), scaling.js,
              diet.js, grocery.js, search.js (langage naturel → pastilles; groupes), dishes.js (rapprochement, comparaison), pairing.js (accompagnements, résumé de repas),
-             rediscover.js, timers.js, backup.js (archive, inspection isolée, restauration, vérification), exporters.js (JSON-LD, YAML Paprika, HTML), llm.js,
+             rediscover.js, timers.js, backup.js (archive, inspection isolée, restauration, vérification), exporters.js (JSON-LD, YAML Paprika, HTML), llm.js, passerelle.js (transport vers la fonction `assistant` — voir « La passerelle de l'assistant »),
              recherche-web.js (demande, corps, lecture de la réponse et choix des liens de la recherche web ; un appel, ne lève jamais),
              assistant-config.js (normalisation de la configuration de l'assistant IA, pure — voir « L'assistant suit le compte »),
              creation-ia.js (demande, validation, fabrication et appel de « Créer une recette avec l'assistant » — voir cette section)
@@ -28,7 +28,8 @@ src/core/log.js            point d'entrée unique du journal d'erreurs (logError
 src/vendor/  supabase-2.117.3.umd.js (dépendance embarquée, vérifiée deux fois)
 tests/       tests.js + index.html : tests du domaine ; backup.js : régressions IndexedDB dans des bases temporaires ; sync.js : lot « compte et stockage distant » (L1-L2) ;
              sync-l3.js + transport-factice.js + sync-fixture.js : lot « envoi et réception » (L3), transport simulé, aucun réseau ;
-             assistant-compte.js : lot « l'assistant suit le compte » ; creer-ia.js : lot « créer une recette avec l'assistant » (fetch factice injecté)
+             assistant-compte.js : lot « l'assistant suit le compte » ; creer-ia.js : lot « créer une recette avec l'assistant » (fetch factice injecté) ;
+             passerelle.js : lot « la passerelle de l'assistant » (fetch factice injecté) ; côté serveur, tools/assistant-*.test.mjs (Node)
 ```
 
 ## Dépendance embarquée
@@ -371,6 +372,10 @@ nommée : `source_pages.sha256` reste la même sorte de relation latente, jamais
 
 ## Chercher sur le web avec l'assistant (17 octobre 2026)
 
+> **Amendé le 18 octobre** (lot « La passerelle de l'assistant », branche non fusionnée) : `ANTHROPIC_MESSAGES_URL`, `anthropicHeaders` et toute clé ont disparu de
+> l'app ; le transport passe par `passerelle.js` (session, jamais de clé) ; `cle_refusee` et `recherche_desactivee` n'existent plus. Le texte ci-dessous
+> décrit le lot tel qu'il était à sa clôture.
+
 Spec : `docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md` (rév. 2.1 ; § 11.2 : ce que la construction a
 amendé, R-WEB-1 à R-WEB-10). Livré ici : l'onglet « Web » de la recherche lance, sur une tape et sur elle seule, **un**
 appel à l'API Anthropic avec l'outil de recherche web côté serveur (`web_search_20250305`), affiche au plus cinq liens
@@ -458,6 +463,10 @@ l'iPhone (aucun WebKit ici), ni `target="_blank"` et `navigator.onLine` depuis u
 `AbortSignal.timeout` compte le temps **actif** : sur une PWA iOS en arrière-plan, 45 s ne sont pas 45 s réelles.
 
 ## L'assistant suit le compte (17-18 octobre 2026)
+
+> **Amendé le 18 octobre** (lot « La passerelle de l'assistant », branche non fusionnée) : la clé ne vit plus dans le navigateur ni dans Réglages (section à deux
+> états, sans champ) ; une passe unique vide toute clé trouvée ; le magasin `assistant_config` reste (dette). Le texte ci-dessous décrit le lot tel qu'il
+> était à sa clôture.
 
 Spec : `docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md` (rév. 2 ; § 12 : rulings R-CPT-1 à
 R-CPT-7) ; spec parente `docs/spec-compte-et-stockage-distant.md` § 11, R65. Livré ici : la configuration de
@@ -547,6 +556,9 @@ quarantaine `refus`, `inconnu` → recul, `tests/sync-l3.js`) et l'ordre « `ass
 `occupeParAssistant`, le câblage dans `suivreMoteurDeLaPage` est lu au source.
 
 ## Créer une recette avec l'assistant (18 octobre 2026)
+
+> **Amendé le 18 octobre** (lot « La passerelle de l'assistant », branche non fusionnée) : l'appel de création passe par la fonction `assistant` (outil `creation`),
+> avec la session ; sans session, l'écran dit « Connecte-toi pour utiliser l’assistant. ». Le texte ci-dessous décrit le lot tel qu'il était à sa clôture.
 
 Spec : `docs/superpowers/specs/2026-10-18-creer-avec-l-ia-design.md` (rév. 2, amendée à la clôture puis à la vague finale ;
 § 11 : rulings R-CRE-1 à R-CRE-15). Livré ici : une demande en texte libre, avec restrictions, type, portions et temps maximal, devient, sur un clic
@@ -721,6 +733,98 @@ donc une rangée enveloppée ou une classe `.status` changée ne serait vue que 
 retour à la puce neutre). **R-VIS-13** (vague finale) `--warn: #8b5f10` : l'ambre d'une quantité estimée sur une ligne surlignée du
 mode cuisine (`.cook .ingredients li.hit .est`, accent-bg) passe de 4,49 à 4,62 ; c'est la 28e paire. **R-VIS-14** : ce qui portait
 le comportement n'était tenu que par la relecture (cinq mutants survivaient) ; il est épinglé par `tests/theme.js`.
+
+## La passerelle de l'assistant (18 octobre 2026)
+
+Spec : `docs/superpowers/specs/2026-10-18-passerelle-assistant-design.md` (rév. 2 ; § 9 : décisions du 18 octobre ; § 10 : rulings
+R-PV-1 à R-T4-11). Livré ici (branche `passerelle-assistant`, non fusionnée) : l'app n'appelle plus l'API d'Anthropic. Elle poste à
+une fonction Supabase, `assistant`, avec la session de la personne ; la clé Anthropic est un secret du projet et ne quitte jamais le
+serveur. Un module neuf côté app (`passerelle.js`), une fonction et une migration côté serveur ; ailleurs, des gardes « Connecte-toi »
+et une section Réglages sans champ.
+
+```text
+app (GitHub Pages, session Supabase)
+  |  POST /functions/v1/assistant   corps { outil, corps }   (outil : recherche-web | creation | extraction)
+  |  authorization: Bearer <access_token>  .  apikey: <clé publique du projet>  .  content-type: application/json
+  v
+fonction « assistant » (Deno, verify_jwt false), gardes dans CET ordre :
+  OPTIONS -> 204 | origine admise | méthode POST ou GET | jeton de forme valide | auth.getUser(jeton) |
+  is_allowed() (clé publique + jeton de la personne) | GET -> { modele, quotaJour }, fin |
+  corps lu en flux, coupé à 8 Mio | JSON + liste blanche + bornes de l'outil (lireDemande)
+  |
+  v   rpc, clé SECRÈTE du projet
+public.assistant_reserver(owner, outil, octets, quota)   verrou consultatif par compte, comptage du jour UTC,
+  |                                                      insertion « en vol » (statut 0) ; null = quota atteint -> 429
+  v
+api.anthropic.com/v1/messages   x-api-key = secret ANTHROPIC_API_KEY, modèle forcé, redirect 'error', 120 s
+  |
+  v   réponse lue bornée (2 Mio d'octets), corps relayé tel quel pour 200 / 400 / 403 / 413 / 429
+public.assistant_journal : la ligne reçoit statut, jetons, durée (jamais de contenu) ; vue public.assistant_usage_jour
+```
+
+**Modules, un rôle chacun.**
+```text
+supabase/functions/assistant/logique.js   pur (aucune API Deno ; tourne sous Node et sous Deno) : OUTILS, LIMITES, origineAdmise,
+                                          entetesCors, lireDemande (liste blanche par outil, modèle forcé, bornes en octets),
+                                          statutRelaye, ligneJournal (compteurs), corpsErreur, decisionQuota (règle de référence
+                                          testée sous Node ; plus importée par index.ts : la règle vit en SQL).
+supabase/functions/assistant/index.ts     Deno.serve : l'ordre des gardes, lireCorpsBorne (demande et réponse), la réservation,
+                                          l'appel, la mise à jour du journal, le try/catch global ; secrets lus à chaque requête.
+supabase/functions/assistant/deno.json    import map : npm:@supabase/supabase-js@2.118.0 (épinglé) ; deno.d.ts : types pour tsc, jamais importé.
+supabase/migrations/0004_assistant_journal.sql   table, vue, fonction ; à ajout seul ; hors du générateur (NOMS inchangé).
+supabase/proofs/0004_assistant_journal.sql       preuve (24 instructions + 5 blocs do) ; jamais jouée.
+src/domain/passerelle.js    transport pur : appelerAssistant (POST), etatAssistant (GET), echecDomaine, urlAssistant, sessionValide.
+src/domain/llm.js           PasserelleProvider ; providerFrom(settings, { session }) ; NoneProvider sans session.
+src/domain/recherche-web.js, creation-ia.js   transport seulement (session au lieu de cfg) ; toute leur logique est inchangée.
+src/sync/auth.js            jeton() : { access_token, user: { id, email } } | null, lu sur l'appareil, sans réseau.
+src/ui/components.js        sessionAssistant(ctx, { delaiMs }), carteConnexion, texteRefusAssistant, texteEchecAssistant.
+src/ui/settings.js          section Assistant à deux états ; src/model/repo.js effacerCleLocale() ; src/app.js installCapture avant init().
+tests : tools/assistant-logique.test.mjs, assistant-index.test.mjs (+ faux/supabase.mjs), generer-migrations.test.mjs ; tests/passerelle.js.
+```
+
+**Ordre des gardes (côté app).** `sessionAssistant(ctx)` rend `null` sans compte reconnu sur l'appareil (`ctx.sync.user`), sans appeler
+`jeton()`, et au-delà de 2 s (`Promise.race`, comme `demarrerSync`). Sans session valide (jeton ASCII visible), `appelerAssistant` rend
+`non_connecte` sans `fetch`. Un seul transport interne pour le POST et le GET : trois en-têtes, `redirect: 'error'`, `credentials: 'omit'`,
+corps de succès lu en flux (2 Mio), corps d'erreur (64 Kio) lu pour son seul champ `erreur`, jamais rendu. Le jeton n'entre dans aucun
+objet rendu. Les écrans (`search.js`, `creer-ia.js`, `import.js`, `recipe-edit.js`) lisent la session au rendu et la relisent à l'appel.
+
+**Réservation atomique.** `public.assistant_reserver` fait en une transaction ce que deux appels simultanés ne pouvaient pas faire
+séparément : prendre un verrou consultatif propre au compte, compter les lignes du jour UTC, refuser au quota (`null`), sinon insérer la
+ligne « en vol ». Elle est `security invoker` (seule la clé secrète a des droits sur la table : un `execute` qui fuirait tomberait en
+42501) ; le motif suppose READ COMMITTED, défaut de PostgREST. Un plantage laisse une ligne au statut 0 qui compte : voulu. La
+concurrence elle-même ne se prouve pas dans l'éditeur SQL (une session, verrous réentrants).
+
+**Bornes.** Demande : `content-length` refusé avant lecture, flux coupé à 8 Mio (la plus grande borne d'outil), puis 512 Kio
+(`recherche-web`, `creation`) ou 8 Mio (`extraction`), en octets ; `max_tokens` ≤ 16 000 (défaut `min(4000, plafond)`) ; `system` ≤ 20 000
+caractères, 20 messages, `max_uses` ≤ 5 ; délai amont 120 s ; réponse ≤ 2 Mio d'octets ; quota par défaut 60 par compte et par jour UTC,
+borné à l'int4 (secret `ASSISTANT_QUOTA_JOUR`). Côté app : 120 s par appel, corps d'état 16 Kio.
+
+**Classement des statuts.**
+
+| Statut de la fonction | Corps | Issue côté app |
+|---|---|---|
+| 204 (`OPTIONS`) | aucun ; `Allow-Origin` seulement si l'origine est admise | — |
+| 200, 400, 403, 413, 429 d'Anthropic | corps d'Anthropic, sans champ `erreur` | succès ; 400/413 → `requete` (413 : « trop lourde ») ; 403 → `serveur` ; 429 → `trop_de_demandes` |
+| 401 | `non_connecte` | `non_connecte` |
+| 403 | `origine` (absente ou refusée) ou `non_admis` | `non_admis` |
+| 405 | `methode` | `requete` |
+| 400 / 422 / 413 | `requete` / `bornes` / `trop_lourd` | `requete` (413 : « trop lourde ») |
+| 429 | `quota` + `quota: n` | `quota` (« {n} appels », ou sans nombre) |
+| 502 | `serveur` : réservation en erreur, exception, réponse > 2 Mio, 401 / 404 / 5xx / redirection d'Anthropic | `serveur` |
+| 503 | `serveur` (529 d'Anthropic) | `serveur` |
+| 504 | `delai` | `delai` |
+
+**Ce qui est absent.** Streaming, cache des réponses, plusieurs modèles par outil, quotas par jetons (le quota compte des appels), relevé
+d'usage dans l'app (aujourd'hui : `public.assistant_usage_jour` dans l'éditeur SQL), assistant sans compte, plusieurs clés ou
+fournisseurs (`OpenAICompatibleProvider` est retiré), gestion de `pause_turn` (relayé tel quel), et le retrait du magasin
+`assistant_config` (26 → 25) : il reste, ainsi que `assistant-config.js`, mais plus rien ne le lit pour l'assistant. Une passe unique de
+`repo.init()` (`effacerCleLocale`, garde `sync_state.cle_locale_effacee`) réécrit vide toute ligne qui porte une clé ou un fournisseur, en
+origine `local` : sur un hôte de production, la ligne vide part au compte et efface la clé du serveur et des autres appareils.
+
+**Ce qui n'est pas prouvé.** La preuve `0004` n'a pas été jouée ; aucun POST réel n'a eu lieu (aucun appel à Anthropic, aucune ligne de
+journal) ; le préflight d'un vrai navigateur, le `GET` avec session, `is_allowed` pour une session non admise, l'ordre `installCapture` /
+`init()` dans l'app réelle (`app.js` n'est pas importable par la suite), Safari et l'iPhone. Mesuré : le déploiement (v1 et v2) et neuf
+sondes `curl` sans dépense (`supabase/proofs/RESULTATS-mitsu.md`).
 
 ## Modèle de données (magasins IndexedDB)
 

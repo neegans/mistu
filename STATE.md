@@ -1,4 +1,18 @@
-# STATE.md — Cuisine OS (mistu) — état au 18 octobre 2026 (lot « Refonte visuelle magazine » fini dans le worktree, sur les lots « Créer une recette avec l'assistant » et « l'assistant suit le compte », eux aussi finis et non fusionnés)
+# STATE.md — Cuisine OS (mistu) — état au 18 octobre 2026 (lot « Passerelle de l'assistant » fini dans le worktree `mistu-passerelle`, fonction déployée sur mitsu, `0004` pas collée, pas fusionné ; les trois lots de la nuit sont en ligne)
+
+**18 octobre 2026, 14 h 29 — LOT « PASSERELLE DE L'ASSISTANT » : FINI dans le worktree, fonction DÉPLOYÉE sur `mitsu` (version 2),
+`0004` PAS collée, PAS fusionné, PAS poussé.** Branche `passerelle-assistant`, worktree `~/projects/mistu-passerelle` (serveur 8086), base
+`main` `cdbd6e0`, 15 commits jusqu'à `00424b6`, plus la clôture des documents. Pour Neegan : plus de clé à taper ; connecté, l'assistant
+marche sur tous les appareils (60 appels par compte et par jour, `claude-sonnet-5-5`, Réglages dit « actif pour … ») ; la clé est un
+secret du projet et l'app n'appelle plus `api.anthropic.com`. Déployée par le contrôleur : v1 17 h 05 UTC (`1590ba8`), **v2 18 h 16 UTC
+(`6d7ed21`)**, `verify_jwt: false`, neuf sondes sans dépense conformes aux deux ; **aucun POST réel**. Suite **2910/2910** (épinglé 2909),
+Node **89/89**, `--check` 0, `sw.js` `cuisine-os-v0.8.0-5`. **Gestes, dans l'ordre :** (1) coller `0004` sur `mitsu`, puis `notify pgrst,
+'reload schema';` seule, puis sa preuve (`999 BILAN` à `0 faux`, tableau dans `RESULTATS-mitsu.md`) ; (2) après revue finale et `/verify` :
+`! git -C ~/projects/mistu merge --ff-only passerelle-assistant`, puis `push` ; (3) preuve réelle sur le site public, connecté : « saumon
+fenouil » → un POST `/functions/v1/assistant` 200, zéro `api.anthropic.com`, Réglages « actif … 60 », puis `select … from
+public.assistant_usage_jour;` ; (4) iPhone avec l'autre compte, rien à configurer ; (5) console Anthropic : révoquer l'ancienne clé,
+plafond mensuel ; (6) « clean » après copie du registre `.superpowers/sdd/2026-10-18-passerelle-assistant/`. Non prouvé : `CLAUDE.md`,
+section du lot.
 
 **18 octobre 2026, 10 h 50 — LES TROIS LOTS SONT EN LIGNE.** Geste de Neegan : `0003_assistant_config.sql` collée sur `mitsu`
 (`Success`), preuve `0003` jouée : **45 verdicts, 0 faux**, journaux de Postgres jugés (la clé ne peut pas y finir :
@@ -76,6 +90,11 @@ en fichiers seulement : `supabase/migrations/0003_assistant_config.sql` et sa pr
 `dc7444a`, prouvé par l'appel réel du 17 octobre sur le site public, « puttanesca »). Sections dans `CLAUDE.md`.
 
 ## Ce qui n'est pas prouvé
+- **Lot passerelle** : la preuve `0004` (ni la migration, ni `notify pgrst`, ni la preuve n'ont été jouées sur `mitsu` ; syntaxe vérifiée par pglast
+  seulement) ; **aucun POST réel** (aucune ligne `assistant_journal`, aucun appel à Anthropic, validité du secret non exercée) ; le `GET`
+  `{ modele, quotaJour }` et `is_allowed` pour une session non admise ; le préflight d'un vrai navigateur (S1 est un `OPTIONS` à la main) ;
+  un secret changé pris par un isolat chaud ; l'ordre `installCapture` / `repo.init()` dans l'app réelle (test de source seulement) ;
+  Safari et l'iPhone.
 - **Lot refonte** : rien sous Safari ni sur l'iPhone — barre d'état `default` (app à réinstaller pour relire la balise), onglet
   actif, survol collant (R-VIS-12), marge de 3,4 px du libellé de recherche à 390 px (Chrome seulement) ; à 320 px avec la pastille,
   la barre haute mesure 341 px (320 px = iPhone de 375 ou 390 px en « Agrandir l'affichage », selon la revue de T3) ; `::backdrop` +
@@ -136,8 +155,9 @@ en fichiers seulement : `supabase/migrations/0003_assistant_config.sql` et sa pr
    toucher.
 
 ## Lots suivants (décisions du 17 octobre, spec web § 10 R11)
-- Mistu reste **personnel** : pas de passerelle serveur ni de clé commune ; la clé suit le compte de Neegan (lot 1), et le
-  mur reste le plafond du workspace Anthropic. D5 (sous-domaine dédié) reste recommandé.
+- Mistu reste **personnel**. *Décision du 17 octobre (pas de passerelle serveur ni de clé commune) renversée par Neegan le 18 octobre à 11 h :*
+  une seule clé Anthropic, côté serveur (lot « Passerelle de l'assistant ») ; le mur reste le plafond du workspace Anthropic. D5
+  (sous-domaine dédié) reste recommandé.
 - **Après le lot 3** (dettes nommées, spec refonte § 5) : mode sombre, barre haute sur bureau (V-3), icônes SVG, police de marque,
   `.chip.removable` focalisable, `aria-current` sur l'onglet actif, `scrollIntoView` qui respecte le mouvement réduit, « − / + »
   des portions à 44 px, champ « p. imprimée » de `src/ui/import.js:136` à 16 px, liste blanche T-2 vérifiée par usage, `--safe-t`
@@ -150,6 +170,14 @@ en fichiers seulement : `supabase/migrations/0003_assistant_config.sql` et sa pr
   (`CLAUDE.md`, sections des lots) ; lot ISBN (R-ISBN-9, R-ISBN-11, S3, S4, C6, C7, D6).
 
 ## Reprendre
+Lot passerelle (le plus récent) :
+```
+cd ~/projects/mistu-passerelle && git status --short && git log --oneline -3
+curl -sS -o /dev/null -w "8086 http=%{http_code}\n" http://localhost:8086/tests/ || (nohup python3 -m http.server 8086 > /dev/null 2>&1 &)
+node ~/projects/mistu-passerelle/.superpowers/sdd/2026-10-18-passerelle-assistant/suite.cjs 8086   # attendu : 2910/2910 (+ 1 x 404 favicon)
+node --test tools/*.test.mjs && node tools/generer-migrations.mjs --check   # attendu : 89/89, code 0
+```
+Lot refonte (les trois lots de la nuit sont en ligne ; ce bloc sert à reprendre l'outil de preuve visuelle) :
 ```
 cd ~/projects/mistu-look && git status --short && git log --oneline -3
 curl -sS -o /dev/null -w "8085 http=%{http_code}\n" http://localhost:8085/tests/ || (nohup python3 -m http.server 8085 > /dev/null 2>&1 &)
