@@ -8,7 +8,7 @@ import { displayUrl } from '../sync/mime.js';
 import { parseIngredientBlock, parseIngredientLine, parseStepsBlock } from '../domain/lines.js';
 import { currentVersion } from '../domain/search.js';
 import { getConvention } from '../domain/units.js';
-import { providerFrom, extractRecipeFromImages, blobToBase64 } from '../domain/llm.js';
+import { providerFrom, extractRecipeFromImages, pagePourEnvoi } from '../domain/llm.js';
 import { RECIPE_TYPES } from '../model/schema.js';
 import { pageHeader, field, select, carteConnexion, texteEchecAssistant, section, pdfFrame, sessionAssistant } from './components.js';
 import { demarrerConnexion } from './settings.js';
@@ -143,10 +143,12 @@ export async function renderRecipeEdit(params, query, ctx) {
 
   const aiBtn = el('button', { class: 'btn', disabled: !provider.configured || (!pages.length), onClick: async () => {
     aiBtn.disabled = true; aiStatus.textContent = t('Lecture des pages par l’assistant…');
+    let configure = provider.configured; // F-8 : le bouton ne se rallume que si le fournisseur est (encore) configuré
     try {
       const images = [];
-      for (const p of pages) { const fl = await repo.getFile(p.sha256); images.push({ mime: fl.mime, base64: await blobToBase64(fl.blob) }); }
+      for (const p of pages) { const fl = await repo.getFile(p.sha256); images.push(await pagePourEnvoi(fl.blob)); } // F-3 : la copie envoyée est réduite
       const courant = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) }); // relue au clic : un jeton expiré se rafraîchit
+      configure = courant.configured;
       const r = await extractRecipeFromImages(courant, images);
       if (r.title && !f.title) { f.title = r.title; titleInput.value = r.title; }
       if (r.language) f.language = r.language;
@@ -159,13 +161,13 @@ export async function renderRecipeEdit(params, query, ctx) {
       aiStatus.textContent = t('Extraction proposée par l’assistant — toutes les lignes sont à vérifier.') + (uncertain.length ? ` ${t('Incertain')} : ${uncertain.join(' ; ')}` : '');
       for (const k of ['servings', 'prep', 'cook', 'printed_page']) { const inp = numInputs[k]; if (inp) inp.value = f[k]; }
     } catch (e) { aiStatus.textContent = texteEchecAssistant(e); }
-    aiBtn.disabled = false;
+    aiBtn.disabled = !configure; // une session disparue au clic : le bouton reste éteint, la phrase « Connecte-toi » est à l'écran
   } }, t('Extraire avec l’assistant IA'));
   const aiStatus = el('div', { class: 'muted', style: { fontSize: '.9rem' } });
   const numInputs = { servings: num('servings'), prep: num('prep'), cook: num('cook'), active: num('active'), total: num('total'), printed_page: num('printed_page') };
 
   const right = el('div', { class: 'stack' },
-    provider.configured ? null : carteConnexion(() => demarrerConnexion(ctx.sync?.auth)), el('div', { class: 'row' }, aiBtn, aiStatus),
+    provider.configured ? null : carteConnexion(() => demarrerConnexion(ctx.sync?.auth), ctx), el('div', { class: 'row' }, aiBtn, aiStatus),
     field(t('Titre original *'), titleInput),
     el('div', { class: 'two-col' },
       field(t('Langue du texte'), select([{ value: 'fr', label: 'Français' }, { value: 'en', label: 'English' }], f.language, (v) => { f.language = v; })),

@@ -4,6 +4,7 @@
 // autre fournisseur (le fournisseur compatible OpenAI, configurable par une clé locale, est retiré : Passerelle T4).
 import { appelerAssistant, echecDomaine, sessionValide, LIMITES_PASSERELLE } from './passerelle.js';
 import { borner } from '../core/bornes.js';
+import { reduireImage } from '../core/image.js';
 
 export class LLMProvider {
   constructor(config = {}) { this.config = config; }
@@ -38,7 +39,7 @@ export class PasserelleProvider extends LLMProvider {
           : { type: 'image', source: { type: 'base64', media_type: p.mime, data: p.base64 } }),
       })),
     };
-    const r = await appelerAssistant('extraction', corps, { fetch: this.fetch, session: this.session });
+    const r = await appelerAssistant('extraction', corps, { fetch: this.fetch, session: this.session, tentativeMs: LIMITES_PASSERELLE.tentativeMs });
     // Le message de l'erreur est la RAISON d'issue (le classement des écrans, echecDomaine : un 429 non écrit par la passerelle est
     // trop_de_demandes, jamais « quota »), jamais le corps de la réponse ; ses extras (le nombre du quota, trop_lourd) sont portés par l'Error.
     if (r.raison) { const d = echecDomaine(r); throw Object.assign(new Error(d.raison), d.extra ?? {}); }
@@ -106,6 +107,16 @@ export function validateParsedRecipe(data) {
     uncertain_fields: Array.isArray(data.uncertain_fields) ? data.uncertain_fields : [],
     notes: typeof data.notes === 'string' ? data.notes : null,
   };
+}
+
+// La copie d'une page qui PART à l'assistant (F-3) : réduite à 1568 px de côté au plus, et toujours en JPEG (reduireImage ré-encode). Sans cela,
+// trois photos de téléphone de 3-5 Mo, en base64, dépassent la borne de 8 Mio de la passerelle (413) avant d'avoir servi à quoi que ce soit.
+// 1568 px est la taille au-delà de laquelle le fournisseur réduit lui-même l'image : rien n'est perdu à l'envoyer plus petite. La page STOCKÉE
+// n'est jamais touchée. Une page qui ne se décode pas lève (ErreurImage « indecodable ») : jamais envoyée telle quelle, elle contournerait la borne.
+export const COTE_MAX_ENVOI = 1568;
+export async function pagePourEnvoi(blob) {
+  const reduite = await reduireImage(blob, { maxCote: COTE_MAX_ENVOI });
+  return { mime: reduite.type, base64: await blobToBase64(reduite) };
 }
 
 export async function blobToBase64(blob) {

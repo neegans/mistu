@@ -217,7 +217,7 @@ export async function runRechercheWebTests({ eq, ok }) {
     // Statuts HTTP (R-T3-4) : le champ `erreur` de la passerelle prime ; un 429 SANS champ erreur est celui d'Anthropic, relayé
     const anthropic = { type: 'error', error: { type: 'x', message: 'CORPS-SENTINELLE' } };
     const statut = async (s, corps = anthropic) => { fauxFetch.rendre = () => reponse(s, corps); const i = await lancer(); fauxFetch.rendre = () => reponse(200, nominal); return i; };
-    eq([(await statut(401)).raison, (await statut(403)).raison, (await statut(401, { erreur: 'non_connecte' })).raison, (await statut(403, { erreur: 'non_admis' })).raison, (await statut(403, { erreur: 'origine' })).raison], ['non_connecte', 'serveur', 'non_connecte', 'non_admis', 'non_admis'], 'statut : 401 → non_connecte ; un 403 RELAYÉ d’Anthropic (sans champ erreur) → serveur, pas « compte non admis » ; 403 { erreur: non_admis } ou origine → non_admis (plus de cle_refusee)');
+    eq([(await statut(401)).raison, (await statut(403)).raison, (await statut(401, { erreur: 'non_connecte' })).raison, (await statut(403, { erreur: 'non_admis' })).raison, (await statut(403, { erreur: 'origine' })).raison], ['non_connecte', 'serveur', 'non_connecte', 'non_admis', 'serveur'], 'statut : 401 → non_connecte ; un 403 RELAYÉ d’Anthropic (sans champ erreur) → serveur, pas « compte non admis » ; 403 { erreur: non_admis } → non_admis ; 403 { erreur: origine } → serveur (F-6 : une panne de configuration, pas un compte refusé ; plus de cle_refusee)');
     { const q = await statut(429, { erreur: 'quota', quota: 60 }); eq([q.etat, q.raison, q.quota, q.liens], ['indisponible', 'quota', 60, []], 'statut : 429 { erreur: quota, quota: 60 } → quota, avec quota: 60 dans l’issue'); }
     { const q = await statut(429, { erreur: 'quota' }); const q2 = await statut(429, { erreur: 'quota', quota: '60' }); eq([q.raison, 'quota' in q, q.quota, q2.raison, q2.quota], ['quota', true, null, 'quota', null], 'statut : 429 { erreur: quota } SANS nombre → quota quand même (la passerelle l’a écrit), quota: null dans l’issue — jamais « trop de demandes »'); }
     eq([(await statut(429)).raison, (await statut(429)).quota], ['trop_de_demandes', undefined], 'statut : 429 SANS champ erreur (Anthropic relayé) → trop_de_demandes, sans quota');
@@ -360,6 +360,17 @@ export async function runRechercheWebTests({ eq, ok }) {
         const root = await monter({ q: 'saumon' }, ctx, { chercher: async () => { throw new Error('aucun appel attendu'); } });
         try { bouton(root, 'Se connecter').click(); await tick(); await tick(); } finally { try { sessionStorage.removeItem(SYNC_ROUTE_KEY); } catch { /* stockage indisponible */ } }
         eq(signIns.length, 1, 'garde : « Se connecter » appelle auth.signIn() du contexte (le chemin de la section Compte)');
+        root.remove();
+      }
+      {
+        // F-7 (M4) : la garde de compte a REFUSÉ l'adresse sur cet appareil — « Se connecter » renverrait au même refus (boucle OAuth) :
+        // la carte dit le message de la garde, sans bouton, et rien n'est appelé
+        const MESSAGE_GARDE = 'Cet appareil a été synchronisé avec b@exemple.invalid.';
+        const signIns = [];
+        const ctx = { ...ctxDe(null), sync: { user: null, guard: { ok: false, message: MESSAGE_GARDE }, auth: { jeton: async () => null, signIn: async () => { signIns.push(1); return { error: null }; } } } };
+        const root = await monter({ q: 'saumon' }, ctx, { chercher: async () => { throw new Error('aucun appel attendu'); } });
+        const carte = root.querySelector('[data-role="connexion-ia"]');
+        eq([!!carte, carte?.textContent.includes(MESSAGE_GARDE), carte?.textContent.includes('Connecte-toi'), !!bouton(root, 'Se connecter'), signIns.length], [true, true, false, false, 0], 'F-7 garde de compte refusée : le message de la garde, ni « Connecte-toi » ni « Se connecter » (pas de boucle OAuth)');
         root.remove();
       }
       {

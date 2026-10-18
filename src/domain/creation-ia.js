@@ -10,7 +10,7 @@ import { formatNumber, parseQuantity } from './quantity.js';
 import { DIET_TAGS, RECIPE_TYPES } from '../model/schema.js';
 import { getConvention } from './units.js';
 
-export const LIMITES_CREATION = { demande: 500, changement: 500, titre: 120, description: 400, portions: [1, 12], minutes: [5, 240], ingredients: [1, 40], nom: 100, unite: 30, quantite: [0.05, 10000], etapes: [2, 20], etape: 500, conseils: [0, 6], conseil: 250, notes: [0, 8], note: 250, tentativeMs: 120000, corps: 1024 * 1024, maxTokens: 16000 };
+export const LIMITES_CREATION = { demande: 500, changement: 500, titre: 120, description: 400, portions: [1, 12], minutes: [5, 240], ingredients: [1, 40], nom: 100, unite: 30, quantite: [0.05, 10000], etapes: [2, 20], etape: 500, conseils: [0, 6], conseil: 250, notes: [0, 8], note: 250, tentativeMs: 135000, corps: 1024 * 1024, maxTokens: 16000 };
 export const CLES_REFUSEES = ['source', 'url', 'href', 'link', 'author', 'chef', 'image', 'photo', 'citation'];
 const ETIQUETTE_SOURCE = 'Créée avec l’IA';
 

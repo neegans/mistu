@@ -11,13 +11,15 @@ import { OPTIONS_FETCH, lireBornee, signalDelai, borner } from '../core/bornes.j
 
 export const CHEMIN_ASSISTANT = '/functions/v1/assistant';
 // Délai de repli d'un appel (les modules de domaine passent le leur), taille des corps lus : la réponse d'un succès, et celle
-// d'une erreur (qui ne sert qu'à lire le champ `erreur` de la passerelle).
-export const LIMITES_PASSERELLE = { tentativeMs: 120000, etatMs: 15000, corps: 2 * 1024 * 1024, corpsErreur: 64 * 1024, corpsEtat: 16 * 1024, modele: 80 };
+// d'une erreur (qui ne sert qu'à lire le champ `erreur` de la passerelle). 135 s (F-5) : le serveur attend Anthropic 120 s PLUS ses propres
+// étapes (session, liste admise, réservation, journal), et l'idle de la plateforme est de 150 s — un client à 120 s (ou 45 s) abandonnerait
+// avant la réponse d'un appel que le serveur, lui, finirait de payer. « Annuler » ferme la connexion et le serveur abandonne l'amont.
+export const LIMITES_PASSERELLE = { tentativeMs: 135000, etatMs: 15000, corps: 2 * 1024 * 1024, corpsErreur: 64 * 1024, corpsEtat: 16 * 1024, modele: 80 };
 
 // Le champ `erreur` d'une réponse de la passerelle (T2) ramené aux raisons connues de l'app (lu par Object.hasOwn : « constructor »
-// n'est pas une raison). Une origine refusée est un 403 de plus (« non_admis ») ; une méthode ou des bornes refusées sont une
-// requête refusée.
-const RAISON_DE_ERREUR = { non_connecte: 'non_connecte', non_admis: 'non_admis', origine: 'non_admis', methode: 'requete', requete: 'requete', trop_lourd: 'trop_lourd', bornes: 'requete', quota: 'quota', serveur: 'serveur', delai: 'delai' };
+// n'est pas une raison). Une origine refusée (F-6) est une PANNE DE CONFIGURATION — la passerelle n'admet pas ce site —, pas un compte
+// refusé : `serveur`, jamais « Ce compte n'a pas accès » ; une méthode ou des bornes refusées sont une requête refusée.
+const RAISON_DE_ERREUR = { non_connecte: 'non_connecte', non_admis: 'non_admis', origine: 'serveur', methode: 'requete', requete: 'requete', trop_lourd: 'trop_lourd', bornes: 'requete', quota: 'quota', serveur: 'serveur', delai: 'delai' };
 
 export function urlAssistant(config = currentConfig()) {
   const base = typeof config?.url === 'string' ? config.url.replace(/\/+$/, '') : '';

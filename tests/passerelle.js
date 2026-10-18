@@ -71,7 +71,7 @@ export async function runPasserelleTests({ eq, ok }) {
       const r = await statut(403, { type: 'error', error: { type: 'permission_error', message: 'x' } });
       eq([r.raison, r.ecrite, r.corps], ['serveur', false, null], 'statut 403 relayé d’Anthropic (permission_error, sans champ erreur) → serveur, ecrite: false');
       const a = await statut(403, { erreur: 'non_admis' }); const o = await statut(403, { erreur: 'origine' });
-      eq([a.raison, a.ecrite, o.raison, o.ecrite], ['non_admis', true, 'non_admis', true], 'statut 403 { erreur: non_admis } ou { erreur: origine } (écrits par la passerelle) → non_admis, ecrite: true');
+      eq([a.raison, a.ecrite, o.raison, o.ecrite], ['non_admis', true, 'serveur', true], 'statut 403 { erreur: non_admis } (écrit par la passerelle) → non_admis ; { erreur: origine } (F-6) → serveur : une origine refusée est une panne de configuration, pas un compte refusé');
     }
     const q = await statut(429, { erreur: 'quota', quota: 60 });
     eq([q.statut, q.raison, q.quota, q.corps], [429, 'quota', 60, null], '429 { erreur: quota, quota: 60 } → quota, avec quota: 60');
@@ -81,7 +81,7 @@ export async function runPasserelleTests({ eq, ok }) {
       [{ raison: 'quota', extra: { quota: 60 } }, { raison: 'quota', extra: { quota: null } }, { raison: 'trop_de_demandes', extra: {} }, { raison: 'trop_de_demandes', extra: {} }], 'echecDomaine : un quota écrit par la passerelle → quota (nombre ou null) ; un 429 non écrit → trop_de_demandes'); 
     eq([(await statut(429, { erreur: 'quota', quota: '60' })).quota, (await statut(429, { erreur: 'quota', quota: -1 })).quota, (await statut(429, { erreur: 'quota', quota: 1.5 })).quota, (await statut(429, { erreur: 'quota' })).quota], [null, null, null, null], 'quota : seulement un entier positif ou nul, sinon null');
     eq([(await statut(401, { erreur: 'non_connecte' })).raison, (await statut(403, { erreur: 'non_admis' })).raison, (await statut(403, { erreur: 'origine' })).raison, (await statut(405, { erreur: 'methode' })).raison, (await statut(400, { erreur: 'requete' })).raison, (await statut(413, { erreur: 'trop_lourd' })).raison, (await statut(422, { erreur: 'bornes' })).raison, (await statut(502, { erreur: 'serveur' })).raison, (await statut(504, { erreur: 'delai' })).raison],
-      ['non_connecte', 'non_admis', 'non_admis', 'requete', 'requete', 'trop_lourd', 'requete', 'serveur', 'delai'], 'champ erreur de la passerelle : lu, et ramené aux raisons connues (origine → non_admis, methode et bornes → requete)');
+      ['non_connecte', 'non_admis', 'serveur', 'requete', 'requete', 'trop_lourd', 'requete', 'serveur', 'delai'], 'champ erreur de la passerelle : lu, et ramené aux raisons connues (F-6 : origine → serveur, une panne de configuration ; methode et bornes → requete)');
     eq([(await statut(502, { erreur: 'constructor' })).raison, (await statut(502, { erreur: '__proto__' })).raison, (await statut(403, { erreur: 'toString' })).raison, (await statut(500, { erreur: 7 })).raison, (await statut(500, { erreur: ['quota'] })).raison, (await statut(500, 'pas du json')).raison, (await statut(500, '')).raison], ['serveur', 'serveur', 'serveur', 'serveur', 'serveur', 'serveur', 'serveur'], 'champ erreur inconnu, hérité du prototype ou mal typé, corps illisible ou vide : le statut seul classe');
     ok(!JSON.stringify(resultats).includes(SENTINELLE), 'aucun corps d’erreur n’est recopié dans un résultat (le champ erreur de la passerelle est le seul lu)');
   }
@@ -122,6 +122,29 @@ export async function runPasserelleTests({ eq, ok }) {
     eq([(await lancer(async () => ({}))).raison, (await lancer(async () => null)).raison, (await lancer(async () => ({ ok: true, status: 200 }))).raison], ['interne', 'interne', 'interne'], 'filet : une réponse sans statut, nulle, ou un 200 sans corps lisible ni text() → interne (jamais reseau)');
     // Le corps d'erreur trop gros n'est pas lu en entier : le statut classe quand même
     eq((await lancer(async () => new Response(new Blob(['x'.repeat(4096)]), { status: 502 }), { corpsErreurMax: 1024 })).raison, 'serveur', 'erreur : un corps d’erreur plus gros que corpsErreurMax est écarté, le statut classe');
+  }
+
+  // --- F-5 : le délai client par défaut est de 135 s PARTOUT. Le serveur attend Anthropic 120 s plus ses propres étapes (session, liste admise,
+  // réservation, journal), et l'idle de la plateforme est 150 s : un client à 120 s (ou 45 s pour la recherche) abandonnerait avant la réponse
+  // d'un appel qui, lui, serait payé. Mesuré sur ce qui est ARMÉ (AbortSignal.timeout), sans attendre. Le relevé n'écoute que pendant le début
+  // SYNCHRONE de l'appel (là où le délai est armé) : un rafraîchissement de Réglages resté en tâche de fond d'un autre bloc de la suite arme
+  // ses propres 15 s (etatAssistant) à n'importe quel moment, et ne doit pas entrer dans la mesure.
+  {
+    const W = await import('../src/domain/recherche-web.js');
+    const C = await import('../src/domain/creation-ia.js');
+    const L = await import('../src/domain/llm.js');
+    const vraiTimeout = AbortSignal.timeout; const armes = []; let ecoute = false;
+    AbortSignal.timeout = (ms) => { if (ecoute) armes.push(ms); return new AbortController().signal; }; // jamais d'abandon, jamais de minuterie réelle de 135 s
+    const rate = async () => { throw new TypeError('Failed to fetch'); };
+    const armement = async (lancer) => { armes.length = 0; ecoute = true; let p; try { p = lancer(); } finally { ecoute = false; } await p.catch(() => {}); return [...armes]; };
+    try {
+      eq([P.LIMITES_PASSERELLE.tentativeMs, W.LIMITES_WEB.tentativeMs, C.LIMITES_CREATION.tentativeMs], [135000, 135000, 135000], 'délais (F-5) : LIMITES_PASSERELLE, LIMITES_WEB et LIMITES_CREATION valent 135 000 ms');
+      eq(await armement(() => P.appelerAssistant('creation', {}, { fetch: rate, session: SESSION, config: CONFIG })), [135000], 'délais (F-5) : appelerAssistant sans délai passé arme 135 s');
+      eq(await armement(() => W.chercherRecettesWeb({ q: 'saumon fenouil', filtres: [], langue: 'fr', session: SESSION }, { fetch: rate, enLigne: () => true, config: CONFIG })), [135000], 'délais (F-5) : la recherche web arme 135 s (était 45 s)');
+      eq(await armement(() => C.creerRecetteIA({ demande: 'saumon fenouil', filtres: { servings: 2 }, langue: 'fr', session: SESSION }, { fetch: rate, enLigne: () => true, config: CONFIG })), [135000], 'délais (F-5) : la création arme 135 s (était 120 s)');
+      eq(await armement(() => new L.PasserelleProvider({}, { session: SESSION, fetch: rate }).complete([{ role: 'user', content: 'x' }])), [135000], 'délais (F-5) : l’extraction (PasserelleProvider) arme 135 s');
+      eq(await armement(() => P.etatAssistant({ fetch: rate, session: SESSION, config: CONFIG })), [15000], 'délais (F-5) : le GET d’état de Réglages garde ses 15 s');
+    } finally { AbortSignal.timeout = vraiTimeout; }
   }
 
   // --- Le corps de la requête est calculé HORS du try du réseau : une exception y est `interne`, jamais `reseau`, sans fetch
@@ -229,7 +252,7 @@ export async function runPasserelleTests({ eq, ok }) {
     eq(await createAuth({ config: null, factory: fabrique(async () => ({ data: { session }, error: null })), win: fenetre }).jeton(), null, 'jeton() : sans configuration de projet (pas de client) → null');
     let reseau = 0; const vraiFetch = globalThis.fetch; globalThis.fetch = async () => { reseau += 1; throw new Error('aucun reseau attendu'); };
     try { await creer(async () => ({ data: { session }, error: null })).jeton(); } finally { globalThis.fetch = vraiFetch; }
-    eq(reseau, 0, 'jeton() : aucun appel réseau (getSession lit le stockage local)');
+    eq(reseau, 0, 'jeton() : n’appelle jamais fetch par lui-même (F-11 : lecture locale du client ; un jeton expiré peut être rafraîchi par le RÉSEAU, par supabase-js — ce que ce faux client ne montre pas — et c’est sessionAssistant qui borne l’attente à 2 s, voir plus bas)');
     ok(vus.every((a) => a[0] === '[cuisine-os] auth.jeton' && !JSON.stringify(a).includes(JETON)), 'jeton() : chaque ligne de journal porte le code auth.jeton et jamais le jeton');
     } finally { console.error = vraiErreur; }
   }
@@ -268,11 +291,16 @@ export async function runPasserelleTests({ eq, ok }) {
         const GEN = 'L’assistant n’a pas répondu. Réessaie.';
         for (const [erreur, attendu] of [
           [err('quota', { quota: 60 }), 'Tu as atteint la limite du jour pour l’assistant (60 appels).'], [err('quota', { quota: 0 }), 'Tu as atteint la limite du jour pour l’assistant (0 appels).'], [err('quota', { quota: null }), 'Tu as atteint la limite du jour pour l’assistant.'], [err('quota'), 'Tu as atteint la limite du jour pour l’assistant.'],
-          [err('trop_de_demandes'), 'Trop de demandes pour l’instant. Réessaie dans une minute.'], [err('requete', { trop_lourd: true }), 'La demande est trop lourde.'], [err('requete'), GEN + ' Code : requete'],
+          [err('trop_de_demandes'), 'Trop de demandes pour l’instant. Réessaie dans une minute.'], [err('requete', { trop_lourd: true }), 'La demande est trop lourde : choisis moins de pages.'], [err('requete'), GEN + ' Code : requete'],
           [err('non_admis'), 'Ce compte n’a pas accès à l’assistant.'], [err('non_connecte'), 'Connecte-toi pour utiliser l’assistant.'],
           [err('serveur'), GEN + ' Code : serveur'], [err('delai'), GEN + ' Code : delai'], [err('reseau'), GEN + ' Code : reseau'], [err('reponse_illisible'), GEN + ' Code : reponse_illisible'], [err('interne'), GEN + ' Code : interne'],
           [new TypeError('Cannot read properties of undefined'), GEN + ' Code : Cannot read properties of undefined'], [undefined, GEN + ' Code : inconnu'], [null, GEN + ' Code : inconnu'], [{ message: 7 }, GEN + ' Code : inconnu'],
         ]) eq(texteEchecAssistant(erreur), attendu, `texteEchecAssistant(${erreur === undefined || erreur === null ? String(erreur) : erreur.message}${erreur?.quota !== undefined ? ', quota ' + erreur.quota : ''}${erreur?.trop_lourd ? ', trop_lourd' : ''}) : « ${attendu} »`);
+        // F-3 : « choisis moins de pages » ne vaut que pour la LECTURE de pages (texteEchecAssistant) ; la recherche web et la création, qui n'ont
+        // pas de pages, gardent « La demande est trop lourde. » (texteRefusAssistant).
+        const { texteRefusAssistant } = await import('../src/ui/components.js');
+        eq([texteRefusAssistant({ raison: 'requete', trop_lourd: true }), texteEchecAssistant(err('requete', { trop_lourd: true }))], ['La demande est trop lourde.', 'La demande est trop lourde : choisis moins de pages.'], 'F-3 : le texte « choisis moins de pages » est celui de l’extraction seule ; recherche et création gardent « La demande est trop lourde. »');
+        { const { EN } = await import('../src/i18n/en.js'); eq(EN['La demande est trop lourde : choisis moins de pages.'], 'The request is too large: choose fewer pages.', 'F-3 en.js : « choisis moins de pages » est traduit'); }
         // P-10 : le « Code : {c} » ne porte qu'un mot de code BORNÉ — un message qui n'est pas une raison connue est coupé à 40 caractères,
         // sans retour à la ligne ; un message vide ou fait d'espaces est « inconnu ».
         const codeDe = (erreur) => texteEchecAssistant(erreur).slice(GEN.length + ' Code : '.length);
@@ -320,14 +348,17 @@ export async function runPasserelleTests({ eq, ok }) {
 
       // Un clic sur l'assistant avec une session : UN POST à la passerelle ; le refus de la passerelle est dit en clair (texte, pas un mot de code)
       await withRepo(async (repoTemp) => {
-        await repoTemp.putFile('sha-x', new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' }), {});
+        // F-3 : les pages sont réduites avant l'envoi — il faut une VRAIE image à décoder (des octets quelconques ne se décodent pas).
+        const imageDe = async (l, h, type = 'image/jpeg') => { const c = new OffscreenCanvas(l, h); const cx = c.getContext('2d'); cx.fillStyle = '#c33'; cx.fillRect(0, 0, l, h); cx.fillStyle = '#fff'; cx.fillRect(Math.round(l / 4), Math.round(h / 4), Math.round(l / 2), Math.round(h / 2)); return c.convertToBlob({ type }); };
+        await repoTemp.putFile('sha-x', await imageDe(40, 30), {});
         const R = await import('../src/ui/recipe-edit.js');
         const appels = [];
         const repondre = (statut, corps) => { globalThis.fetch = async (url, options) => { appels.push({ url, options }); return reponse(statut, corps); }; };
         const page = { id: 'p1', sha256: 'sha-x', printed_page: 12 };
-        const ctxPages = (session, auth) => ({ ...ctxDe(session, NONE, auth), pagesById: new Map([['p1', page]]), recipesById: new Map(), versionsByRecipe: new Map(), versionsById: new Map(), booksById: new Map(), source_documents: [], ingredients: [], ingredientsById: new Map(), recipes: [], editions: [], books: [] });
+        const pagesImg = new Map([['p1', page], ['pg', { id: 'pg', sha256: 'sha-grande', printed_page: 3 }], ['pp', { id: 'pp', sha256: 'sha-petite' }], ['pn', { id: 'pn', sha256: 'sha-png' }], ['pb', { id: 'pb', sha256: 'sha-pas-une-image' }]]);
+        const ctxPages = (session, auth) => ({ ...ctxDe(session, NONE, auth), pagesById: pagesImg, recipesById: new Map(), versionsByRecipe: new Map(), versionsById: new Map(), booksById: new Map(), source_documents: [], ingredients: [], ingredientsById: new Map(), recipes: [], editions: [], books: [] });
         const GENERIQUE = 'L’assistant n’a pas répondu. Réessaie.';
-        const CAS = [[403, { erreur: 'non_admis' }, 'Ce compte n’a pas accès à l’assistant.'], [413, { erreur: 'trop_lourd' }, 'La demande est trop lourde.'], [413, 'pas du json', 'La demande est trop lourde.'],
+        const CAS = [[403, { erreur: 'non_admis' }, 'Ce compte n’a pas accès à l’assistant.'], [413, { erreur: 'trop_lourd' }, 'La demande est trop lourde : choisis moins de pages.'], [413, 'pas du json', 'La demande est trop lourde : choisis moins de pages.'],
           [429, { erreur: 'quota', quota: 60 }, 'Tu as atteint la limite du jour pour l’assistant (60 appels).'], [429, { erreur: 'quota' }, 'Tu as atteint la limite du jour pour l’assistant.'], [429, {}, 'Trop de demandes pour l’instant. Réessaie dans une minute.'],
           [401, { erreur: 'non_connecte' }, TEXTE_CONNEXION], [502, { erreur: 'serveur' }, GENERIQUE + ' Code : serveur'], [504, {}, GENERIQUE + ' Code : delai']];
         // import.js — panneau d'index
@@ -363,6 +394,110 @@ export async function runPasserelleTests({ eq, ok }) {
           await tick();
           eq([appels.length, JSON.parse(appels[0]?.options.body ?? '{}').outil, appels[0]?.options.headers.authorization, edit.textContent.includes(attendu)], [1, 'extraction', 'Bearer ' + JETON, true], `recette, ${statut} ${typeof corps === 'string' ? '(corps illisible)' : corps.erreur} : un POST d'extraction, « ${attendu} » à l'écran`);
           ok(!edit.textContent.includes(JETON) && !/trop_lourd|non_admis|non_connecte/.test(edit.textContent) && !edit.textContent.includes('Échec :') && (!attendu.startsWith('Trop de demandes') || !edit.textContent.includes('limite du jour')), `recette, ${statut} : ni le jeton, ni un mot de code seul après « Échec : », ni « limite du jour » pour un 429 relayé`);
+        }
+
+        // F-3 (I1) : les pages sont RÉDUITES avant l'envoi — côté le plus long ≤ 1568 px, toujours en JPEG — pour qu'une lecture de plusieurs
+        // photos de téléphone tienne dans la borne de 8 Mio du serveur ; la page STOCKÉE reste telle quelle (seule la copie envoyée est réduite).
+        const grande = await imageDe(3000, 2000); const petite = await imageDe(800, 600); const png = await imageDe(2000, 1000, 'image/png');
+        await repoTemp.putFile('sha-grande', grande, {}); await repoTemp.putFile('sha-petite', petite, {}); await repoTemp.putFile('sha-png', png, {});
+        await repoTemp.putFile('sha-pas-une-image', new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' }), {});
+        const dimsEnvoyees = async (appel) => Promise.all(JSON.parse(appel.options.body).corps.messages[0].content.filter((c) => c.type === 'image').map(async (im) => {
+          const octets = Uint8Array.from(atob(im.source.data), (c) => c.charCodeAt(0));
+          const bmp = await createImageBitmap(new Blob([octets], { type: im.source.media_type })); const d = [bmp.width, bmp.height, im.source.media_type, im.source.type]; bmp.close(); return d;
+        }));
+        const attendu3 = [[1568, 1045, 'image/jpeg', 'base64'], [800, 600, 'image/jpeg', 'base64'], [1568, 784, 'image/jpeg', 'base64']];
+        {
+          appels.length = 0; repondre(200, { model: 'm', content: [{ type: 'text', text: '{"entries":[],"uncertain":[]}' }] });
+          const panneau = I.indexEntriesPanel(null, ctxPages(SESSION), () => ['pg', 'pp', 'pn'], { editionId: 'ed1' });
+          await tick();
+          [...panneau.querySelectorAll('button')].find((x) => x.textContent === 'Lire avec l’assistant IA').click();
+          for (let i = 0; i < 200 && appels.length === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
+          eq([appels.length, appels.length ? await dimsEnvoyees(appels[0]) : null], [1, attendu3], 'F-3 panneau d’index : trois pages (3000×2000 JPEG, 800×600 JPEG, 2000×1000 PNG) → envoyées en 1568×1045, 800×600 (jamais agrandie), 1568×784, toutes en image/jpeg');
+        }
+        {
+          appels.length = 0; repondre(200, { model: 'm', content: [{ type: 'text', text: '{"title":"T","ingredients":[],"steps":[]}' }] });
+          const edit = await R.renderRecipeEdit({}, { pages: 'pg,pp,pn' }, ctxPages(SESSION));
+          [...edit.querySelectorAll('button')].find((x) => x.textContent === 'Extraire avec l’assistant IA').click();
+          for (let i = 0; i < 200 && appels.length === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
+          eq([appels.length, appels.length ? await dimsEnvoyees(appels[0]) : null], [1, attendu3], 'F-3 recette : les mêmes trois pages sont réduites avant l’envoi (1568 px au plus, image/jpeg)');
+        }
+        {
+          const st = await repoTemp.getFile('sha-grande'); const bmp = await createImageBitmap(st.blob);
+          eq([st.blob.size, st.mime, bmp.width, bmp.height], [grande.size, 'image/jpeg', 3000, 2000], 'F-3 : la page STOCKÉE n’est pas touchée (mêmes octets, 3000×2000) — seule la copie envoyée est réduite');
+          bmp.close();
+          const stPng = await repoTemp.getFile('sha-png'); eq([stPng.blob.size, stPng.mime], [png.size, 'image/png'], 'F-3 : un PNG stocké reste un PNG');
+        }
+        { // une page qui ne se décode pas n'est JAMAIS envoyée telle quelle (elle contournerait la borne) : aucun POST, la phrase générique + son code
+          appels.length = 0; repondre(200, {});
+          const panneau = I.indexEntriesPanel(null, ctxPages(SESSION), () => ['pb'], { editionId: 'ed1' });
+          await tick();
+          [...panneau.querySelectorAll('button')].find((x) => x.textContent === 'Lire avec l’assistant IA').click();
+          for (let i = 0; i < 100 && !panneau.textContent.includes('Code :'); i += 1) await new Promise((r) => setTimeout(r, 5));
+          eq([appels.length, panneau.textContent.includes(GENERIQUE + ' Code : indecodable')], [0, true], 'F-3 panneau d’index : une page indécodable → aucun POST, « … Code : indecodable »');
+          appels.length = 0;
+          const edit = await R.renderRecipeEdit({}, { pages: 'pb' }, ctxPages(SESSION));
+          [...edit.querySelectorAll('button')].find((x) => x.textContent === 'Extraire avec l’assistant IA').click();
+          for (let i = 0; i < 100 && !edit.textContent.includes('Code :'); i += 1) await new Promise((r) => setTimeout(r, 5));
+          eq([appels.length, edit.textContent.includes(GENERIQUE + ' Code : indecodable')], [0, true], 'F-3 recette : une page indécodable → aucun POST, « … Code : indecodable »');
+        }
+
+        // F-8 (M5) : la carte « Connecte-toi » n'est jamais retirée puis réaffichée sur un nœud détaché — elle se cache et se montre, sur le MÊME nœud.
+        {
+          const jetons = [SESSION, null]; let n = 0; // la session est là au rendu, puis disparaît (jeton expiré, autre onglet déconnecté) quand on clique
+          const ctx = ctxPages(SESSION, { jeton: async () => jetons[Math.min(n++, jetons.length - 1)] });
+          appels.length = 0; repondre(200, {});
+          const panneau = I.indexEntriesPanel(null, ctx, () => ['p1'], { editionId: 'ed1' });
+          await tick();
+          const carte = panneau.querySelector('[data-role="connexion-ia"]'); const bouton = [...panneau.querySelectorAll('button')].find((x) => x.textContent === 'Lire avec l’assistant IA');
+          eq([!!carte, carte?.hidden, !!carte && panneau.contains(carte), bouton.disabled], [true, true, true, false], 'F-8 panneau d’index, session lue : la carte existe toujours (cachée, dans le panneau) ; le bouton est allumé');
+          bouton.click();
+          for (let i = 0; i < 200 && !bouton.disabled; i += 1) await new Promise((r) => setTimeout(r, 5));
+          await tick();
+          eq([panneau.contains(carte), carte.hidden, panneau.querySelector('[data-role="connexion-ia"]') === carte, bouton.disabled, appels.length], [true, false, true, true, 0], 'F-8 panneau d’index, session disparue au clic : la MÊME carte se montre (dans le panneau), le bouton s’éteint, aucun POST');
+        }
+        {
+          // recipe-edit : la session disparaît au clic → le bouton reste éteint (il n'est rallumé que si le fournisseur est configuré)
+          const jetons = [SESSION, null]; let n = 0;
+          const ctx = ctxPages(SESSION, { jeton: async () => jetons[Math.min(n++, jetons.length - 1)] });
+          appels.length = 0; repondre(200, {});
+          const edit = await R.renderRecipeEdit({}, { pages: 'p1' }, ctx);
+          const bouton = [...edit.querySelectorAll('button')].find((x) => x.textContent === 'Extraire avec l’assistant IA');
+          eq(bouton.disabled, false, 'F-8 recette, session lue au rendu : le bouton est allumé');
+          bouton.click();
+          for (let i = 0; i < 200 && !edit.textContent.includes(TEXTE_CONNEXION); i += 1) await new Promise((r) => setTimeout(r, 5));
+          await tick(); await tick();
+          eq([edit.textContent.includes(TEXTE_CONNEXION), bouton.disabled, appels.length], [true, true, 0], 'F-8 recette, session disparue au clic : « Connecte-toi… », le bouton reste ÉTEINT (plus de clic qui ne mènerait à rien), aucun POST');
+          // …et avec une session qui tient, le bouton se rallume après l'échec (503 serveur : on peut réessayer)
+          const ctx2 = ctxPages(SESSION); appels.length = 0; repondre(502, { erreur: 'serveur' });
+          const edit2 = await R.renderRecipeEdit({}, { pages: 'p1' }, ctx2);
+          const b2 = [...edit2.querySelectorAll('button')].find((x) => x.textContent === 'Extraire avec l’assistant IA');
+          b2.click();
+          for (let i = 0; i < 200 && !edit2.textContent.includes('Code : serveur'); i += 1) await new Promise((r) => setTimeout(r, 5));
+          await tick(); await tick();
+          eq([b2.disabled, appels.length], [false, 1], 'F-8 recette, session valide et échec du serveur : le bouton est rallumé pour réessayer');
+        }
+
+        // F-7 (M4) : sur un appareil dont la garde de compte a REFUSÉ l'adresse, « Se connecter » renverrait au même refus (boucle OAuth).
+        // La carte dit alors le message de la garde, sans bouton. (Chaque écran passe son contexte à carteConnexion.)
+        {
+          const { carteConnexion } = await import('../src/ui/components.js');
+          const MESSAGE_GARDE = 'Cet appareil a été synchronisé avec b@exemple.invalid.';
+          const guard = { ok: false, message: MESSAGE_GARDE };
+          let connexions = 0; const connecter = () => { connexions += 1; };
+          const lire = (carte) => [carte.textContent.includes(TEXTE_CONNEXION), carte.textContent.includes(MESSAGE_GARDE), carte.querySelectorAll('button').length, carte.dataset.role];
+          eq(lire(carteConnexion(connecter)), [true, false, 1, 'connexion-ia'], 'F-7 carteConnexion sans contexte : « Connecte-toi » + « Se connecter » (inchangé)');
+          eq(lire(carteConnexion(connecter, { sync: { guard: { ok: true } } })), [true, false, 1, 'connexion-ia'], 'F-7 carteConnexion, garde acceptée : inchangé');
+          eq(lire(carteConnexion(connecter, { sync: { guard: null } })), [true, false, 1, 'connexion-ia'], 'F-7 carteConnexion, aucune garde : inchangé');
+          eq(lire(carteConnexion(connecter, { sync: { guard } })), [false, true, 0, 'connexion-ia'], 'F-7 carteConnexion, garde REFUSÉE : le message de la garde, sans « Connecte-toi » ni bouton (c’est la même carte : data-role conservé)');
+          eq(lire(carteConnexion(connecter, { sync: { guard: { ok: false } } })).slice(0, 3), [false, false, 0], 'F-7 carteConnexion, garde refusée sans message : aucun bouton non plus');
+          eq(carteConnexion(connecter, { sync: { guard: { ok: false } } }).textContent.trim().length > 0, true, 'F-7 carteConnexion, garde refusée sans message : une phrase de repli, jamais une carte vide');
+          const ctxG = { ...ctxPages(null), sync: { user: null, guard, auth: { jeton: async () => null, signIn: async () => { connexions += 1; return { error: null }; } } } };
+          const panneau = I.indexEntriesPanel(null, ctxG, () => [], { editionId: 'ed1' });
+          await tick();
+          eq([...lire(panneau.querySelector('[data-role="connexion-ia"]')), panneau.querySelector('[data-role="connexion-ia"]').hidden], [false, true, 0, 'connexion-ia', false], 'F-7 panneau d’index (garde refusée) : le message de la garde, sans bouton « Se connecter »');
+          const edit = await R.renderRecipeEdit({}, { pages: 'p1' }, ctxG);
+          eq(lire(edit.querySelector('[data-role="connexion-ia"]')), [false, true, 0, 'connexion-ia'], 'F-7 recette (garde refusée) : le message de la garde, sans bouton « Se connecter »');
+          eq(connexions, 0, 'F-7 : aucune connexion lancée');
         }
       });
       eq(reseauInterdit, [], 'écrans d\'extraction : aucun appel réseau sans clic sur l\'assistant, ni pour la recette sans session');

@@ -231,7 +231,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
     Number.isInteger(parente.servings) && parente.servings > 0 ? el('span', { class: 'muted' }, portionsTexte(parente.servings)) : null,
     el('small', { class: 'muted' }, t('L’original reste tel quel : l’adaptation s’ajoute comme une autre version de la recette.'))) : null);
   const carteGarde = (g) => el('div', { class: 'card flat stack', dataset: { role: 'garde-ia' } },
-    g.connexion ? carteConnexion(connecter) : el('div', { class: 'status warn' }, el('span', null, t(g.texte))));
+    g.connexion ? carteConnexion(connecter, ctx) : el('div', { class: 'status warn' }, el('span', null, t(g.texte))));
   const ecranDuVol = () => el('div', { class: 'card flat stack' },
     el('div', { class: 'status', role: 'status' }, t('L’assistant compose une recette…')),
     // Sans data-role : ni la frappe ni une autre vue ne peuvent rallumer ce bouton pendant le vol (C-1).
@@ -271,7 +271,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
   function blocIssue(issue) {
     const reessayer = () => el('button', { type: 'button', class: 'btn', dataset: { role: 'reessayer-ia' }, onClick: () => lancer({ enLigne: () => true }) }, t('Réessayer')); // navigator.onLine peut mentir
     // La session a disparu entre le rendu et le clic : la carte « Connecte-toi » ; relancer sans session ne mènerait à rien.
-    if (issue.raison === 'non_connecte') return el('div', { class: 'card flat stack', dataset: { role: 'issue-ia' } }, carteConnexion(connecter));
+    if (issue.raison === 'non_connecte') return el('div', { class: 'card flat stack', dataset: { role: 'issue-ia' } }, carteConnexion(connecter, ctx));
     const refus = texteRefusAssistant(issue); // non_admis, quota (avec ou sans nombre), demande trop lourde (R-T4-4, R-T4-9)
     const raison = typeof issue.raison === 'string' && issue.raison ? issue.raison : 'inconnu';
     const connue = Object.hasOwn(TEXTES_INDISPONIBLE, raison);

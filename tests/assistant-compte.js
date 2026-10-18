@@ -146,47 +146,46 @@ export async function runAssistantCompteTests({ eq, ok }) {
     await db.mutate({ puts: { assistant_config: [{ id: 'llm', provider: 'anthropic', model: 7, api_key: 'k\u0007', updated_at: '2026-10-17T10:00:00Z' }] }, origin: 'remote' });
     eq((await repo.getSettings()).llm, { provider: 'anthropic', model: '', base_url: '', api_key: 'k' }, 'lecture : une ligne reçue abîmée est normalisée (F13)');
   });
-  // La passe d'effacement de la clé locale (Passerelle T4, bloc plus bas) suit la migration dans init() : elle viderait aussitôt la ligne copiée.
-  // Ces blocs éprouvent la MIGRATION seule : l'appareil y a déjà passé l'effacement (garde posée), la ligne copiée reste donc lisible.
-  // La suite des deux passes ensemble est éprouvée dans le bloc d'effacement.
-  const SANS_EFFACEMENT = { sync_state: [{ key: 'cle_locale_effacee', value: 1 }] };
+  // La passe d'effacement de la clé locale (Passerelle T4, bloc plus bas) suit la migration dans init() ET, depuis F-9, s'exécute à CHAQUE
+  // init() : elle viderait aussitôt la ligne copiée. Ces blocs éprouvent donc la MIGRATION seule (`migrerConfigAssistant`, exportée pour
+  // cela) : la ligne copiée reste lisible. La suite des deux passes ensemble est éprouvée dans le bloc d'effacement.
   // Passe unique § 5.6 : dans l'ordre de boot() — init() SANS capture, puis envoi initial (F3, S10)
   {
     const repoModule = await import('../src/model/repo.js');
     const { envoiInitial } = await import('../src/sync/backfill.js');
     const origine = repoModule.db;
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'anthropic', model: ' m ', api_key: ' sk-factice-mac ', base_url: 'https://u:p@x.invalid', extra: 1 }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: ' m ', api_key: ' sk-factice-mac ', base_url: 'https://u:p@x.invalid', extra: 1 }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
       repoModule.bindDatabase(db);
       try {
-        await repoModule.init();
+        await repoModule.migrerConfigAssistant();
         const ligne = await db.get('assistant_config', 'llm');
         eq(ligne, { id: 'llm', provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-mac', created_at: '2026-10-01T12:00:00.000Z', updated_at: '2026-10-01T12:00:00.000Z' }, 'passe unique : la ligne copiée est la valeur NORMALISÉE (trim, base_url vidée, champ inconnu écarté), ligne entière');
         eq([ligne?.provider, ligne?.api_key, ligne?.updated_at, await db.get('settings', 'llm'), (await db.get('sync_state', 'assistant_config_migre'))?.value, await db.count('outbox')],
           ['anthropic', 'sk-factice-mac', '2026-10-01T12:00:00.000Z', undefined, 1, 0], 'passe unique : copiée avec l’horodatage D’ORIGINE (S1), settings.llm effacé, garde posée, rien en file (init précède la capture)');
         const r = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
         ok(r.tables.includes('assistant_config') && (await db.getAll('outbox')).some((e) => e.store === 'assistant_config' && e.op === 'put' && e.user_id === 'u1'), 'passe unique : c’est l’envoi initial qui met la ligne en file, au nom du compte (F3)');
-        await repoModule.init();
+        await repoModule.migrerConfigAssistant();
         eq((await db.get('assistant_config', 'llm')).updated_at, '2026-10-01T12:00:00.000Z', 'passe unique : idempotente (seconde init)');
       } finally { repoModule.bindDatabase(origine); }
     });
     // Repli 1970 sans horodatage lisible ; rien copié si none / clé vide ; ligne déjà reçue respectée
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-sans-date' } }] }, origin: 'device' });
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-sans-date' } }] }, origin: 'device' });
       repoModule.bindDatabase(db);
-      try { await repoModule.init(); eq((await db.get('assistant_config', 'llm'))?.updated_at, '1970-01-01T00:00:00.000Z', 'passe unique : sans horodatage lisible → 1970 (toute version du compte gagne)'); }
+      try { await repoModule.migrerConfigAssistant(); eq((await db.get('assistant_config', 'llm'))?.updated_at, '1970-01-01T00:00:00.000Z', 'passe unique : sans horodatage lisible → 1970 (toute version du compte gagne)'); }
       finally { repoModule.bindDatabase(origine); }
     });
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'none' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'none' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
       repoModule.bindDatabase(db);
-      try { await repoModule.init(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [undefined, undefined], 'passe unique : none → rien copié, settings.llm effacé'); }
+      try { await repoModule.migrerConfigAssistant(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [undefined, undefined], 'passe unique : none → rien copié, settings.llm effacé'); }
       finally { repoModule.bindDatabase(origine); }
     });
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-vieille' }, updated_at: '2026-10-01T12:00:00.000Z' }], assistant_config: [{ id: 'llm', provider: 'anthropic', model: 'm2', base_url: '', api_key: 'sk-factice-recue', updated_at: '2026-10-17T12:00:00.000Z' }] }, origin: 'remote' });
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-vieille' }, updated_at: '2026-10-01T12:00:00.000Z' }], assistant_config: [{ id: 'llm', provider: 'anthropic', model: 'm2', base_url: '', api_key: 'sk-factice-recue', updated_at: '2026-10-17T12:00:00.000Z' }] }, origin: 'remote' });
       repoModule.bindDatabase(db);
-      try { await repoModule.init(); eq([(await db.get('assistant_config', 'llm')).api_key, await db.get('settings', 'llm')], ['sk-factice-recue', undefined], 'passe unique : une ligne déjà reçue n’est pas écrasée ; settings.llm effacé'); }
+      try { await repoModule.migrerConfigAssistant(); eq([(await db.get('assistant_config', 'llm')).api_key, await db.get('settings', 'llm')], ['sk-factice-recue', undefined], 'passe unique : une ligne déjà reçue n’est pas écrasée ; settings.llm effacé'); }
       finally { repoModule.bindDatabase(origine); }
     });
   }
@@ -200,49 +199,51 @@ export async function runAssistantCompteTests({ eq, ok }) {
     const repoModule = await import('../src/model/repo.js');
     const origine = repoModule.db;
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-capture' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-capture' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
       repoModule.bindDatabase(db);
       installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
-      try { await repoModule.init(); eq([(await db.get('assistant_config', 'llm'))?.api_key, await db.count('outbox')], ['sk-factice-capture', 0], 'passe unique : origine device — capture posée, la passe ne met rien en file'); }
+      try { await repoModule.migrerConfigAssistant(); eq([(await db.get('assistant_config', 'llm'))?.api_key, await db.count('outbox')], ['sk-factice-capture', 0], 'passe unique : origine device — capture posée, la passe ne met rien en file'); }
       finally { uninstallCapture(db); repoModule.bindDatabase(origine); }
     });
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: '' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: '' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
       repoModule.bindDatabase(db);
-      try { await repoModule.init(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [undefined, undefined], 'passe unique : clé vide → rien copié, settings.llm effacé'); }
+      try { await repoModule.migrerConfigAssistant(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [undefined, undefined], 'passe unique : clé vide → rien copié, settings.llm effacé'); }
       finally { repoModule.bindDatabase(origine); }
     });
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-date-illisible' }, updated_at: 'pas une date' }] }, origin: 'device' });
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-date-illisible' }, updated_at: 'pas une date' }] }, origin: 'device' });
       repoModule.bindDatabase(db);
-      try { await repoModule.init(); eq((await db.get('assistant_config', 'llm'))?.updated_at, '1970-01-01T00:00:00.000Z', 'passe unique : horodatage illisible → 1970, jamais la chaîne reçue'); }
+      try { await repoModule.migrerConfigAssistant(); eq((await db.get('assistant_config', 'llm'))?.updated_at, '1970-01-01T00:00:00.000Z', 'passe unique : horodatage illisible → 1970, jamais la chaîne reçue'); }
       finally { repoModule.bindDatabase(origine); }
     });
     // Fix round 1 : la décision « copier » se prend sur la valeur NORMALISÉE, jamais sur la valeur brute.
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'inconnu', api_key: 'sk-factice-x' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'inconnu', api_key: 'sk-factice-x' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
       repoModule.bindDatabase(db);
-      try { await repoModule.init(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [undefined, undefined], 'passe unique : fournisseur inconnu (clé présente) → rien copié, settings.llm effacé'); }
+      try { await repoModule.migrerConfigAssistant(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [undefined, undefined], 'passe unique : fournisseur inconnu (clé présente) → rien copié, settings.llm effacé'); }
       finally { repoModule.bindDatabase(origine); }
     });
     // R-CPT-4 : un Ollama local migre avec son URL ; une URL refusée ne migre pas (la clé partirait vers OpenAI).
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'openai_compatible', model: 'llama3', api_key: 'sk-factice-ollama', base_url: 'http://localhost:11434/v1' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'openai_compatible', model: 'llama3', api_key: 'sk-factice-ollama', base_url: 'http://localhost:11434/v1' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
       repoModule.bindDatabase(db);
-      try { await repoModule.init(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [{ id: 'llm', provider: 'openai_compatible', model: 'llama3', base_url: 'http://localhost:11434/v1', api_key: 'sk-factice-ollama', created_at: '2026-10-01T12:00:00.000Z', updated_at: '2026-10-01T12:00:00.000Z' }, undefined], 'passe unique (R-CPT-4) : un Ollama local (http://localhost) migre avec son URL intacte'); }
+      try { await repoModule.migrerConfigAssistant(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [{ id: 'llm', provider: 'openai_compatible', model: 'llama3', base_url: 'http://localhost:11434/v1', api_key: 'sk-factice-ollama', created_at: '2026-10-01T12:00:00.000Z', updated_at: '2026-10-01T12:00:00.000Z' }, undefined], 'passe unique (R-CPT-4) : un Ollama local (http://localhost) migre avec son URL intacte'); }
       finally { repoModule.bindDatabase(origine); }
     });
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'openai_compatible', model: 'llama3', api_key: 'sk-factice-lan', base_url: 'http://192.168.1.5/v1' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'openai_compatible', model: 'llama3', api_key: 'sk-factice-lan', base_url: 'http://192.168.1.5/v1' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
       repoModule.bindDatabase(db);
-      try { await repoModule.init(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [undefined, undefined], 'passe unique (R-CPT-4) : config OpenAI-compatible à URL refusée : non migrée, à retaper (settings.llm effacé)'); }
+      try { await repoModule.migrerConfigAssistant(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [undefined, undefined], 'passe unique (R-CPT-4) : config OpenAI-compatible à URL refusée : non migrée, à retaper (settings.llm effacé)'); }
       finally { repoModule.bindDatabase(origine); }
     });
   }
 
   // --- Passerelle T4 : passe d'effacement de la clé locale (R-T4-3). La clé n'est plus lue nulle part (la passerelle tient la
-  // sienne côté serveur) : une clé restée dans assistant_config est VIDÉE une fois (garde sync_state.cle_locale_effacee), par une écriture
-  // d'origine 'local' — capturée, donc envoyée au compte, qui efface la clé du serveur et des autres appareils. La capture est posée AVANT
+  // sienne côté serveur) : une clé restée dans assistant_config est VIDÉE, par une écriture d'origine 'local' — capturée, donc envoyée au
+  // compte, qui efface la clé du serveur et des autres appareils. F-9 : la passe tourne à CHAQUE init() (plus de garde à usage unique) —
+  // une ligne-clé reçue APRÈS le premier démarrage (un appareil en ancienne version qui réécrit sa clé, une réception tardive) est effacée
+  // au démarrage suivant ; l'idempotence tient à la ligne elle-même, déjà vide : le second init() n'écrit RIEN. La capture est posée AVANT
   // init(), comme app.js la pose (l'écriture est de la personne : sans capture posée d'abord, la ligne vide ne partirait jamais).
   {
     const repoModule = await import('../src/model/repo.js');
@@ -250,24 +251,24 @@ export async function runAssistantCompteTests({ eq, ok }) {
     const GARDE = 'cle_locale_effacee';
     const sansDates = (l) => { const { created_at, updated_at, ...reste } = l; return reste; };
     const VIDE_LIGNE = { id: 'llm', provider: 'none', model: '', base_url: '', api_key: '' };
-    const sur = (preparer, test, { prod = true } = {}) => withDatabase(async (db) => {
+    const sur = (preparer, test, { prod = true, userId = 'u1' } = {}) => withDatabase(async (db) => {
       await preparer(db);
       repoModule.bindDatabase(db);
-      installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => prod });
+      installCapture(db, { getUserId: () => userId, isActivitySynced: () => false, configSuitLeCompte: () => prod });
       try { await test(db); } finally { uninstallCapture(db); repoModule.bindDatabase(origine); }
     });
     const ligne = (extra) => ({ id: 'llm', provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-vieille', created_at: '2026-10-01T12:00:00.000Z', updated_at: '2026-10-01T12:00:00.000Z', ...extra });
     const poser = (l) => (db) => db.mutate({ puts: { assistant_config: [l] }, origin: 'device' });
     const fichierEntree = async (db) => (await db.getAll('outbox')).filter((e) => e.store === 'assistant_config').map((e) => [e.op, e.id, e.user_id, 'payload' in e]);
 
-    // Une clé locale → ligne vide, UNE entrée d'outbox (origine local), garde posée ; la seconde init() n'écrit rien
+    // Une clé locale → ligne vide, UNE entrée d'outbox (origine local), AUCUNE garde ; la seconde init() n'écrit rien
     await sur(poser(ligne()), async (db) => {
       await repoModule.init();
       const apres = await db.get('assistant_config', 'llm');
       eq(sansDates(apres), VIDE_LIGNE, 'effacement : la ligne devient { provider none, model, base_url et api_key vides }');
       ok(Date.parse(apres.updated_at) > Date.parse('2026-10-01T12:00:00.000Z'), 'effacement : horodatée MAINTENANT (la ligne vide bat la vieille clé du compte)');
       eq(await fichierEntree(db), [['put', 'llm', 'u1', false]], 'effacement : UNE entrée d’outbox pour assistant_config — origine local, donc capturée (le compte reçoit la ligne vide)');
-      eq((await db.get('sync_state', GARDE))?.value, 1, 'effacement : garde sync_state.cle_locale_effacee posée');
+      eq(await db.get('sync_state', GARDE), undefined, 'F-9 effacement : plus de garde à usage unique — aucune ligne sync_state.cle_locale_effacee');
       ok(!JSON.stringify(await db.getAll('assistant_config')).includes('sk-factice-vieille') && !JSON.stringify(await db.getAll('outbox')).includes('sk-factice-vieille'), 'effacement : la clé n’est ni dans la ligne ni dans la file');
       const avantSeconde = { ligne: apres, file: await db.getAll('outbox') };
       await repoModule.init();
@@ -288,22 +289,56 @@ export async function runAssistantCompteTests({ eq, ok }) {
       await repoModule.init();
       eq([sansDates(await db.get('assistant_config', 'llm')), (await fichierEntree(db)).length], [VIDE_LIGNE, 1], 'effacement : une ligne sans fournisseur mais avec une clé est effacée');
     });
-    // Pas de ligne : la garde seule, rien d'autre
+    // Pas de ligne : RIEN n'est écrit (aucune ligne créée, aucune entrée de file, aucune garde)
     await sur(async () => {}, async (db) => {
       await repoModule.init();
-      eq([await db.getAll('assistant_config'), (await db.getAll('outbox')).length, (await db.get('sync_state', GARDE))?.value], [[], 0, 1], 'effacement : sans ligne, la garde est posée et RIEN d’autre (aucune ligne créée, aucune entrée de file)');
+      eq([await db.getAll('assistant_config'), (await db.getAll('outbox')).length, await db.get('sync_state', GARDE)], [[], 0, undefined], 'F-9 effacement : sans ligne, rien n’est écrit (aucune ligne créée, aucune entrée de file, aucune garde)');
     });
     // Ligne déjà vide : rien n'est réécrit (pas d'horodatage neuf, pas d'entrée de file)
     const dejaVide = ligne({ provider: 'none', model: '', base_url: '', api_key: '' });
     await sur(poser(dejaVide), async (db) => {
       await repoModule.init();
-      eq([await db.get('assistant_config', 'llm'), (await db.getAll('outbox')).length, (await db.get('sync_state', GARDE))?.value], [dejaVide, 0, 1], 'effacement : une ligne déjà vide n’est pas réécrite (même horodatage), 0 entrée de file, garde posée');
+      eq([await db.get('assistant_config', 'llm'), (await db.getAll('outbox')).length, await db.get('sync_state', GARDE)], [dejaVide, 0, undefined], 'F-9 effacement : une ligne déjà vide n’est pas réécrite (même horodatage), 0 entrée de file, aucune garde');
     });
-    // La garde est un « une seule fois » : posée, la passe ne touche plus à rien (même si une ligne avec clé revient)
-    await sur(async (db) => { await db.mutate({ puts: { assistant_config: [ligne({ api_key: 'sk-factice-apres' })], sync_state: [{ key: GARDE, value: 1 }] }, origin: 'device' }); }, async (db) => {
+    // Une ligne sans clé ni fournisseur (champs absents, à la façon d'une ligne reçue incomplète) est « déjà vide » aussi : la passe ne la réécrit
+    // pas à chaque démarrage (un `undefined !== ''` ferait réécrire — et renvoyer au compte — la même ligne à chaque init()).
+    const incomplete = { id: 'llm', provider: 'none', updated_at: '2026-10-01T12:00:00.000Z' };
+    await sur(poser(incomplete), async (db) => {
+      await repoModule.init(); await repoModule.init();
+      eq([await db.get('assistant_config', 'llm'), (await db.getAll('outbox')).length], [incomplete, 0], 'F-9 effacement : une ligne incomplète sans clé ni fournisseur n’est jamais réécrite (deux init(), 0 entrée de file)');
+    });
+    // F-9 (M6) — le cas qui motive le changement : une ligne-clé REÇUE après le premier démarrage est effacée au démarrage suivant
+    await sur(async () => {}, async (db) => {
       await repoModule.init();
-      eq([(await db.get('assistant_config', 'llm')).api_key, (await db.getAll('outbox')).length], ['sk-factice-apres', 0], 'effacement : garde posée → la passe ne rejoue pas (une seule fois)');
+      eq([await db.getAll('assistant_config'), (await db.getAll('outbox')).length], [[], 0], 'F-9 premier démarrage : rien à effacer, rien d’écrit');
+      await db.mutate({ puts: { assistant_config: [ligne({ api_key: 'sk-factice-tardive', updated_at: '2026-10-02T09:00:00.000Z' })] }, origin: 'remote' });
+      eq((await db.get('assistant_config', 'llm')).api_key, 'sk-factice-tardive', 'F-9 : la ligne-clé est bien arrivée (origine remote, rien en file)');
+      eq((await db.getAll('outbox')).length, 0, 'F-9 : une réception n’entre pas en file');
+      await repoModule.init();
+      const apres = await db.get('assistant_config', 'llm');
+      eq([sansDates(apres), JSON.stringify(await db.getAll('outbox')).includes('sk-factice-tardive'), await fichierEntree(db)], [VIDE_LIGNE, false, [['put', 'llm', 'u1', false]]], 'F-9 démarrage suivant : la ligne-clé reçue entre-temps est effacée, UNE entrée d’outbox (la ligne vide part au compte)');
+      await repoModule.init();
+      eq([await db.get('assistant_config', 'llm'), (await db.getAll('outbox')).length], [apres, 1], 'F-9 : le démarrage d’après n’écrit rien (idempotent par la ligne vide)');
     });
+    // F-9 : « 0 écriture » MESURÉ au point d'écriture (db.mutate), pas déduit d'une garde
+    await sur(async () => {}, async (db) => {
+      const vrai = db.mutate.bind(db); let n = 0; db.mutate = (...a) => { n += 1; return vrai(...a); };
+      try {
+        eq([await repoModule.effacerCleLocale(), n], [false, 0], 'F-9 effacerCleLocale : sans ligne → faux, 0 écriture');
+        await poser(ligne())(db); n = 0;
+        eq([await repoModule.effacerCleLocale(), n], [true, 1], 'F-9 effacerCleLocale : une ligne-clé → vrai, UNE écriture');
+        n = 0;
+        eq([await repoModule.effacerCleLocale(), await repoModule.effacerCleLocale(), n], [false, false, 0], 'F-9 effacerCleLocale : la ligne est vide ensuite → faux, faux, 0 écriture');
+      } finally { db.mutate = vrai; }
+    });
+    // F-13 (M11) — appareil JAMAIS connecté (getUserId nul) : l'écriture est quand même capturée, avec un user_id NUL ; l'entrée part sous le
+    // PREMIER compte qui se connecte ici (R-L3-24 : `fileDe` garde les entrées sans compte) — la clé locale est effacée du serveur à la première connexion
+    await sur(poser(ligne()), async (db) => {
+      await repoModule.init();
+      eq([sansDates(await db.get('assistant_config', 'llm')), await fichierEntree(db)], [VIDE_LIGNE, [['put', 'llm', null, false]]], 'F-13 effacement sans compte (getUserId nul) : la ligne est vidée et l’entrée d’outbox existe, avec user_id NUL (chemin R-L3-24)');
+      const { fileDe } = await import('../src/sync/outbox.js');
+      eq([(await fileDe(db, 'u1')).length, (await fileDe(db, 'u2')).length, (await fileDe(db, null)).length], [1, 1, 1], 'F-13 : cette entrée sans compte est dans la file de N’IMPORTE QUEL compte qui se connecte ici (R-L3-24)');
+    }, { userId: null });
     // Hors production (localhost) : la clé est effacée ICI, mais la ligne ne part nulle part (K-3)
     await sur(poser(ligne()), async (db) => {
       await repoModule.init();
@@ -313,7 +348,7 @@ export async function runAssistantCompteTests({ eq, ok }) {
     await sur(async (db) => { await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-jamais-migre' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' }); }, async (db) => {
       await repoModule.init();
       eq([sansDates(await db.get('assistant_config', 'llm')), await db.get('settings', 'llm'), (await db.get('sync_state', 'assistant_config_migre'))?.value, (await db.get('sync_state', GARDE))?.value, await fichierEntree(db)],
-        [VIDE_LIGNE, undefined, 1, 1, [['put', 'llm', 'u1', false]]], 'migration PUIS effacement : un settings.llm jamais migré ne laisse aucune clé (ni settings ni assistant_config) et envoie la ligne vide au compte');
+        [VIDE_LIGNE, undefined, 1, undefined, [['put', 'llm', 'u1', false]]], 'migration PUIS effacement : un settings.llm jamais migré ne laisse aucune clé (ni settings ni assistant_config) et envoie la ligne vide au compte (F-9 : aucune garde d’effacement)');
     });
     // L'ordre du démarrage (app.js n'est jamais importé par la suite : il lance l'application à l'import) est lu au SOURCE, comme le câblage
     // de K-12 — c'est un test faible (il ne voit pas l'exécution), mais il fait rougir le retour de installCapture APRÈS repo.init(), qui
@@ -562,12 +597,12 @@ export async function runAssistantCompteTests({ eq, ok }) {
     const tf = creerTransportFactice({ serveur: true });
     await tf.pousser([{ store: 'assistant_config', id: 'llm', data: L('sk-factice-K2', H.t3), updated_at: H.t3 }]);
     await withDatabase(async (db) => {
-      // Garde d'effacement posée : ce bloc éprouve l'horodatage D'ORIGINE de la migration. La passe d'effacement (Passerelle T4) viderait
+      // Migration seule (F-9) : ce bloc éprouve l'horodatage D'ORIGINE de la migration. La passe d'effacement (Passerelle T4) viderait
       // aussitôt la ligne, et sa ligne vide, plus récente que K2, effacerait K2 aussi — voir le bloc suivant, qui l'éprouve de bout en bout.
-      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-K1' }, updated_at: H.t1 }] }, origin: 'device' });
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-K1' }, updated_at: H.t1 }] }, origin: 'device' });
       repoModule.bindDatabase(db);
       try {
-        await repoModule.init();
+        await repoModule.migrerConfigAssistant();
         installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
         await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
         const r = await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer();
@@ -642,7 +677,8 @@ export async function runAssistantCompteTests({ eq, ok }) {
 
   // --- Passerelle T4 : Réglages → Assistant IA (R-T4-2). DEUX états, AUCUN champ : la clé n'existe plus côté app (K-6, K-10, S14 et
   // R-CPT-4 portaient le formulaire de clé, retiré avec lui). Première ligne = à quoi sert la section ; l'état vient d'un GET de la
-  // passerelle (fetch INJECTÉ — jamais le réseau), affiché « … » pendant l'attente.
+  // passerelle (fetch INJECTÉ — jamais le réseau), affiché « Vérification de l’assistant… » pendant l'attente ; « L’assistant est actif pour X. »
+  // n'est dit qu'APRÈS un GET 200 (F-4 : avant, ou sur un refus, ce serait annoncer un état que personne n'a constaté).
   const S = await import('../src/ui/settings.js');
   const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
   const avantLocale = getUiLocale();
@@ -659,6 +695,9 @@ export async function runAssistantCompteTests({ eq, ok }) {
     const bouton = (root, nom) => [...root.querySelectorAll('button')].find((b) => b.textContent === nom);
     const compteur = (suite) => { const c = { appels: [], f: null }; c.f = async (url, options) => { c.appels.push({ url, options }); return suite(url, options); }; return c; };
     const ligneEtat = (sec) => sec.querySelector('[data-role="etat-assistant"]');
+    const ATTENTE = 'Vérification de l’assistant…';
+    const ACTIF = 'L’assistant est actif pour a@exemple.invalid.';
+    const finDeLAttente = (sec) => attendre(() => ligneEtat(sec)?.textContent !== ATTENTE);
     const sansChamp = (sec) => sec.querySelectorAll('input, select, textarea').length;
     const U = SESSION.user;
 
@@ -710,48 +749,53 @@ export async function runAssistantCompteTests({ eq, ok }) {
       let resoudre; const attente = new Promise((r) => { resoudre = r; });
       const reseau = compteur(() => attente);
       const sec = monter({ user: U, auth: {} }, SESSION, { fetch: reseau.f });
-      eq(sec.querySelector('p')?.textContent, 'L’assistant est actif pour a@exemple.invalid.', 'avec session : la première ligne dit pour qui l’assistant est actif');
-      eq(ligneEtat(sec)?.textContent, '…', 'avec session : « … » pendant que le GET est en vol');
+      eq([sec.querySelector('p')?.textContent, ligneEtat(sec)?.textContent, sec.textContent.includes('est actif'), sec.querySelectorAll('button').length], [ATTENTE, ATTENTE, false, 0], 'F-4 avec session : pendant que le GET est en vol, « Vérification de l’assistant… » SEUL — « actif » n’est pas dit avant la réponse');
       eq(reseau.appels.length, 1, 'avec session : un seul GET au rendu');
       const a = reseau.appels[0];
       eq([a.options.method, new URL(a.url).host.endsWith('.supabase.co'), a.url.endsWith('/functions/v1/assistant'), a.options.headers.authorization, 'body' in a.options], ['GET', true, true, 'Bearer ' + JETON, false], 'avec session : GET /functions/v1/assistant avec le jeton de la session, sans corps');
       resoudre(reponse(200, { modele: 'claude-sonnet-5-5', quotaJour: 60 }));
-      ok(await attendre(() => ligneEtat(sec).textContent !== '…'), 'avec session : la ligne d’état se remplit à la réponse');
-      eq(ligneEtat(sec).textContent, 'Modèle en service : claude-sonnet-5-5. Quota : 60 appels par jour.', 'avec session : le modèle et le quota, texte exact');
+      ok(await finDeLAttente(sec), 'avec session : la ligne d’état se remplit à la réponse');
+      eq([sec.querySelector('p').textContent, ligneEtat(sec).textContent, sec.textContent.includes(ATTENTE)], [ACTIF, 'Modèle en service : claude-sonnet-5-5. Quota : 60 appels par jour.', false], 'F-4 avec session, GET 200 : la première ligne dit pour qui l’assistant est actif, puis le modèle et le quota (texte exact), plus de « Vérification… »');
       eq([sansChamp(sec), !!bouton(sec, 'Se connecter'), [...sec.querySelectorAll('button')].length], [0, false, 0], 'avec session : aucun champ, aucun bouton');
       ok(!sec.textContent.includes(JETON) && !sec.outerHTML.includes(JETON), 'avec session : le jeton n’est ni dans le texte ni dans le HTML');
       sec.remove();
     }
     // Le GET dit non (403 non_admis), ou ne répond pas : le texte juste, jamais le corps de l'erreur
-    for (const [nom, suite, attendu] of [
+    for (const [nom, suite, attendu, avecBouton = false] of [
       ['403 non_admis', async () => reponse(403, { erreur: 'non_admis', detail: 'CORPS-SENTINELLE' }), 'Ce compte n’a pas accès à l’assistant.'],
-      ['403 origine (la passerelle écrit origine)', async () => reponse(403, { erreur: 'origine' }), 'Ce compte n’a pas accès à l’assistant.'],
+      ['403 origine (la passerelle écrit origine : F-6, une panne de configuration, pas un compte refusé)', async () => reponse(403, { erreur: 'origine' }), 'L’assistant est indisponible pour le moment.'],
       ['réseau coupé', async () => { throw new TypeError('Failed to fetch'); }, 'L’assistant est indisponible pour le moment.'],
       ['502', async () => reponse(502, { erreur: 'serveur' }), 'L’assistant est indisponible pour le moment.'],
-      ['401', async () => reponse(401, { erreur: 'non_connecte' }), 'L’assistant est indisponible pour le moment.'],
+      ['401 non_connecte (jeton refusé par le serveur)', async () => reponse(401, { erreur: 'non_connecte' }), 'Connecte-toi pour utiliser l’assistant.', true],
       ['429', async () => reponse(429, { erreur: 'quota', quota: 60 }), 'L’assistant est indisponible pour le moment.'],
       ['200 illisible', async () => reponse(200, 'pas du json'), 'L’assistant est indisponible pour le moment.'],
     ]) {
       const reseau = compteur(suite);
-      const sec = monter({ user: U, auth: {} }, SESSION, { fetch: reseau.f });
-      await attendre(() => ligneEtat(sec).textContent !== '…');
-      eq(ligneEtat(sec).textContent, attendu, `avec session, GET ${nom} : « ${attendu} »`);
-      ok(!sec.textContent.includes('CORPS-SENTINELLE') && !sec.textContent.includes(JETON) && sec.querySelector('p').textContent.startsWith('L’assistant est actif pour'), `avec session, GET ${nom} : ni corps d’erreur ni jeton à l’écran ; la première ligne reste`);
+      const connexions = [];
+      const sec = monter({ user: U, auth: { signIn: async () => ({ error: null }) } }, SESSION, { fetch: reseau.f, connecter: (a) => { connexions.push(a); } });
+      await finDeLAttente(sec);
+      eq([ligneEtat(sec).textContent, sec.querySelector('p').textContent, sec.textContent.includes('est actif'), [...sec.querySelectorAll('button')].map((b) => b.textContent)], [attendu, attendu, false, avecBouton ? ['Se connecter'] : []], `F-4 avec session, GET ${nom} : « ${attendu} » SEUL — jamais « L’assistant est actif… » sur un refus ou une panne${avecBouton ? ', avec « Se connecter »' : ', sans bouton'}`);
+      if (avecBouton) { bouton(sec, 'Se connecter').click(); await tick(); eq(connexions.length, 1, `F-4 GET ${nom} : « Se connecter » lance la connexion`); }
+      ok(!sec.textContent.includes('CORPS-SENTINELLE') && !sec.textContent.includes(JETON), `avec session, GET ${nom} : ni corps d’erreur ni jeton à l’écran`);
       sec.remove();
     }
     // Formes du 200 : quota de 1 au singulier ; modèle ou quota absents : seule la partie connue est dite ; les deux absents : « indisponible », jamais une ligne vide
     for (const [corps, attendu] of [[{ modele: 'm', quotaJour: 1 }, 'Modèle en service : m. Quota : 1 appel par jour.'], [{ modele: 'm', quotaJour: null }, 'Modèle en service : m.'], [{ modele: null, quotaJour: 60 }, 'Quota : 60 appels par jour.'], [{ modele: null, quotaJour: null }, 'L’assistant est indisponible pour le moment.'], [{}, 'L’assistant est indisponible pour le moment.'], [{ modele: 7, quotaJour: -1 }, 'L’assistant est indisponible pour le moment.']]) {
       const sec = monter({ user: U, auth: {} }, SESSION, { fetch: compteur(async () => reponse(200, corps)).f });
-      await attendre(() => ligneEtat(sec).textContent !== '…');
-      eq(ligneEtat(sec).textContent, attendu, `avec session, 200 ${JSON.stringify(corps)} : « ${attendu} »`);
+      await finDeLAttente(sec);
+      const lisible = attendu !== 'L’assistant est indisponible pour le moment.';
+      eq([ligneEtat(sec).textContent, sec.textContent.includes('est actif')], [attendu, lisible], `avec session, 200 ${JSON.stringify(corps)} : « ${attendu} »${lisible ? ' (avec la ligne « actif »)' : ' SEUL : un 200 sans modèle ni quota lisibles n’est pas une réponse de la passerelle, « actif » n’est pas dit'}`);
       sec.remove();
     }
     // Adresse absente de la session : la phrase reste vraie (celle du compte du contexte, sinon sans adresse)
     {
-      const sec = monter({ user: { id: 'u1', email: 'b@exemple.invalid' }, auth: {} }, { access_token: JETON, user: { id: 'u1', email: '' } }, { fetch: compteur(async () => reponse(200, {})).f });
+      const bon = compteur(async () => reponse(200, { modele: 'm', quotaJour: 60 }));
+      const sec = monter({ user: { id: 'u1', email: 'b@exemple.invalid' }, auth: {} }, { access_token: JETON, user: { id: 'u1', email: '' } }, { fetch: bon.f });
+      await finDeLAttente(sec);
       eq(sec.querySelector('p').textContent, 'L’assistant est actif pour b@exemple.invalid.', 'adresse : celle du compte du contexte quand la session n’en porte pas');
       sec.remove();
-      const sec2 = monter({ user: { id: 'u1' }, auth: {} }, { access_token: JETON, user: { id: 'u1' } }, { fetch: compteur(async () => reponse(200, {})).f });
+      const sec2 = monter({ user: { id: 'u1' }, auth: {} }, { access_token: JETON, user: { id: 'u1' } }, { fetch: bon.f });
+      await finDeLAttente(sec2);
       eq(sec2.querySelector('p').textContent, 'L’assistant est actif sur ton compte.', 'adresse : aucune adresse connue → « sur ton compte », jamais « pour undefined »');
       sec2.remove();
     }
@@ -762,6 +806,19 @@ export async function runAssistantCompteTests({ eq, ok }) {
       await tick();
       eq([sec.querySelector('p').textContent, reseau.appels.length], ['Connecte-toi pour utiliser l’assistant.', 0], `session invalide (${JSON.stringify(mauvaise)}) : état « sans session », aucun appel`);
       sec.remove();
+    }
+    // F-7 (M4) : appareil dont la garde de compte a refusé l'adresse — « Se connecter » renverrait au même refus (boucle OAuth) :
+    // le message de la garde, sans bouton, aucun appel
+    {
+      const MESSAGE_GARDE = 'Cet appareil a été synchronisé avec b@exemple.invalid.';
+      const reseau = compteur(async () => reponse(200, {}));
+      const sec = monter({ auth: { signIn: async () => ({ error: null }) }, guard: { ok: false, message: MESSAGE_GARDE } }, null, { fetch: reseau.f, connecter: () => { throw new Error('aucune connexion attendue'); } });
+      await tick();
+      eq([sec.querySelector('p')?.textContent, sec.querySelectorAll('button').length, reseau.appels.length, sec.dataset.section], [MESSAGE_GARDE, 0, 0, 'assistant'], 'F-7 sans session, garde de compte refusée : le message de la garde, aucun bouton « Se connecter », aucun appel');
+      sec.remove();
+      const sec2 = monter({ auth: {}, guard: { ok: true } }, null, { fetch: reseau.f, connecter: () => {} });
+      eq([sec2.querySelector('p')?.textContent, [...sec2.querySelectorAll('button')].map((b) => b.textContent)], ['Connecte-toi pour utiliser l’assistant.', ['Se connecter']], 'F-7 garde acceptée : « Connecte-toi » + « Se connecter » (inchangé)');
+      sec2.remove();
     }
     // K-12 : la page n'est pas reconstruite sous les doigts — le focus RÉEL dans la section vaut « occupé »
     {
@@ -791,12 +848,12 @@ export async function runAssistantCompteTests({ eq, ok }) {
       const pageAvec = await S.renderSettings({}, {}, ctxCompte, { fetch: avec.f });
       scene.append(pageAvec);
       const secAvec = pageAvec.querySelector('[data-section="assistant"]');
-      await attendre(() => ligneEtat(secAvec).textContent !== '…');
+      await finDeLAttente(secAvec);
       eq([secAvec.querySelector('p').textContent, ligneEtat(secAvec).textContent, avec.appels.length, lectures.length, pageAvec.querySelectorAll('input[type="password"]').length], ['L’assistant est actif pour a@exemple.invalid.', 'Modèle en service : claude-sonnet-5-5. Quota : 60 appels par jour.', 1, 1, 0], 'renderSettings avec compte : la session est lue UNE fois, un GET, l’état à l’écran');
       pageAvec.remove();
     });
   } finally { scene.remove(); setUiLocale(avantLocale); }
   // en.js : chaque chaîne neuve de la section a sa traduction
   const { EN } = await import('../src/i18n/en.js'); // export nommé `EN` (src/i18n/en.js:3)
-  for (const fr of ['Connecte-toi pour utiliser l’assistant.', 'Se connecter', 'L’assistant est actif pour {adresse}.', 'L’assistant est actif sur ton compte.', 'Modèle en service : {m}.', 'Quota : {n} appels par jour.', 'Quota : 1 appel par jour.', 'Ce compte n’a pas accès à l’assistant.', 'L’assistant est indisponible pour le moment.']) ok(typeof EN[fr] === 'string' && EN[fr].length > 0, 'en.js : ' + fr.slice(0, 40));
+  for (const fr of ['Connecte-toi pour utiliser l’assistant.', 'Se connecter', 'L’assistant est actif pour {adresse}.', 'L’assistant est actif sur ton compte.', 'Modèle en service : {m}.', 'Quota : {n} appels par jour.', 'Quota : 1 appel par jour.', 'Ce compte n’a pas accès à l’assistant.', 'L’assistant est indisponible pour le moment.', 'Vérification de l’assistant…']) ok(typeof EN[fr] === 'string' && EN[fr].length > 0, 'en.js : ' + fr.slice(0, 40));
 }

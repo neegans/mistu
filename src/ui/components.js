@@ -254,7 +254,21 @@ export function boutonSeConnecter(connecter, { classe = 'btn' } = {}) {
   return el('button', { type: 'button', class: classe, dataset: { role: 'se-connecter' }, onClick: () => { try { Promise.resolve(connecter()).catch(echec); } catch { echec(); } } }, t('Se connecter'));
 }
 
-export const carteConnexion = (connecter) => el('div', { class: 'status warn', dataset: { role: 'connexion-ia' } }, el('span', null, t(TEXTE_CONNEXION)), ' ', boutonSeConnecter(connecter));
+// Garde de compte REFUSÉE sur cet appareil (F-7) : l'adresse connectée n'est pas celle que cet appareil sert — `ctx.sync.user` est nul et
+// la session de l'assistant aussi, comme sans compte. « Se connecter » renverrait Google, puis la même garde, puis le même refus : une
+// boucle OAuth. Le message de la garde (qui dit à quel compte l'appareil est lié) remplace donc la phrase et le bouton ; les deux issues de
+// la garde (« Se déconnecter », « Changer de compte sur cet appareil ») vivent dans Réglages → Synchronisation.
+export function messageGardeRefusee(sync) {
+  const garde = sync?.guard;
+  if (!garde || garde.ok !== false) return null;
+  return typeof garde.message === 'string' && garde.message ? garde.message : t('Cet appareil ne peut pas vérifier le compte.');
+}
+
+export function carteConnexion(connecter, ctx = null) {
+  const gardeRefusee = messageGardeRefusee(ctx?.sync);
+  if (gardeRefusee) return el('div', { class: 'status warn', dataset: { role: 'connexion-ia' } }, el('span', null, gardeRefusee));
+  return el('div', { class: 'status warn', dataset: { role: 'connexion-ia' } }, el('span', null, t(TEXTE_CONNEXION)), ' ', boutonSeConnecter(connecter));
+}
 
 // Le texte du refus d'une issue de domaine — { raison, quota, trop_lourd } — ou null pour toute autre raison (leurs textes restent à l'écran
 // qui les connaît). `quota` : le nombre du jour quand la passerelle l'a donné, sinon la phrase sans nombre (R-T4-9).
@@ -275,6 +289,9 @@ const codeAssistant = (message) => Array.from(message.replace(/\s+/g, ' ').trim(
 export function texteEchecAssistant(erreur) {
   const raison = typeof erreur?.message === 'string' ? erreur.message : '';
   if (raison === 'non_connecte') return t(TEXTE_CONNEXION);
+  // Une demande trop lourde est ici une LECTURE DE PAGES (seuls import.js et recipe-edit.js passent par cette fonction) : la phrase dit quoi faire
+  // (F-3). La recherche web et la création, sans pages, gardent « La demande est trop lourde. » (texteRefusAssistant).
+  if (raison === 'requete' && erreur?.trop_lourd === true) return t('La demande est trop lourde : choisis moins de pages.');
   const refus = texteRefusAssistant({ raison, quota: erreur?.quota, trop_lourd: erreur?.trop_lourd });
   if (refus) return refus;
   if (raison === 'trop_de_demandes') return t('Trop de demandes pour l’instant. Réessaie dans une minute.');

@@ -297,9 +297,11 @@ export const EN = {
   "Quota : 1 appel par jour.": "Quota: 1 call per day.",
   "Ce compte n’a pas accès à l’assistant.": "This account does not have access to the assistant.",
   "L’assistant est indisponible pour le moment.": "The assistant is unavailable right now.",
+  "Vérification de l’assistant…": "Checking the assistant…",
   "Tu as atteint la limite du jour pour l’assistant ({n} appels).": "You have reached today’s limit for the assistant ({n} calls).",
   "Tu as atteint la limite du jour pour l’assistant.": "You have reached today’s limit for the assistant.",
   "La demande est trop lourde.": "The request is too large.",
+  "La demande est trop lourde : choisis moins de pages.": "The request is too large: choose fewer pages.",
   'identité proposée': 'proposed identity',
   // Créer une recette avec l'assistant IA : écran #/recipes/creer (§ 3.2, § 5).
   "Créer une recette avec l’assistant IA": "Create a recipe with the AI assistant",

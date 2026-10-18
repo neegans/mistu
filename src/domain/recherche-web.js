@@ -9,7 +9,7 @@ import { lienSignet } from '../core/lien.js';
 import { borner } from '../core/bornes.js';
 import { logError } from '../core/log.js';
 
-export const LIMITES_WEB = { demande: 500, filtre: 80, filtres: 12, titre: 300, date: 40, pourquoi: 200, liens: 5, recherches: 3, tentativeMs: 45000, corps: 2 * 1024 * 1024, corpsErreur: 64 * 1024 };
+export const LIMITES_WEB = { demande: 500, filtre: 80, filtres: 12, titre: 300, date: 40, pourquoi: 200, liens: 5, recherches: 3, tentativeMs: 135000, corps: 2 * 1024 * 1024, corpsErreur: 64 * 1024 };
 export const OUTIL_RECHERCHE = 'web_search_20250305';
 
 // Le system par langue (§ 4.1). Il cherche TOUJOURS, n'affirme JAMAIS une restriction (I-K), répond en JSON `choix`.

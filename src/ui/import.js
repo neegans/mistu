@@ -7,7 +7,7 @@ import * as repo from '../model/repo.js';
 import { displayUrl } from '../sync/mime.js';
 import { sha256Hex } from '../core/hash.js';
 import { normalizeText } from '../domain/units.js';
-import { providerFrom, extractIndexFromImages, blobToBase64 } from '../domain/llm.js';
+import { providerFrom, extractIndexFromImages, pagePourEnvoi } from '../domain/llm.js';
 import { pageHeader, section, emptyState, select, field, carteConnexion, texteEchecAssistant, pdfFrame, libelleLivre, sessionAssistant } from './components.js';
 import { demarrerConnexion } from './settings.js';
 
@@ -206,12 +206,14 @@ export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId 
   // « Connecte-toi… » attend la même lecture (cachée au départ : une personne connectée ne la voit jamais en flash) ; avec une
   // session elle est retirée, sans session elle se montre (R-T4-4).
   let provider = providerFrom(ctx.settings);
-  const connexion = carteConnexion(() => demarrerConnexion(ctx.sync?.auth));
+  const connexion = carteConnexion(() => demarrerConnexion(ctx.sync?.auth), ctx);
   connexion.hidden = true;
+  // F-8 : la carte reste dans le document, cachée ou montrée — jamais retirée (un `hidden = false` sur un nœud détaché ne montre rien : la
+  // session disparue au clic laissait un bouton éteint et aucune explication) ; le bouton suit la session dans les deux sens.
   const lierAssistant = async () => {
     provider = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) });
     aiBtn.disabled = !provider.configured;
-    if (provider.configured) connexion.remove(); else connexion.hidden = false;
+    connexion.hidden = provider.configured;
   };
   const parse = () => parseIndexLines(ta.value);
   const draw = () => {
@@ -225,7 +227,7 @@ export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId 
     status.textContent = t('Lecture des pages par l’assistant…');
     try {
       const images = [];
-      for (const id of ids) { const p = ctx.pagesById.get(id); const f = await repo.getFile(p.sha256); images.push({ mime: f.mime, base64: await blobToBase64(f.blob) }); }
+      for (const id of ids) { const p = ctx.pagesById.get(id); const f = await repo.getFile(p.sha256); images.push(await pagePourEnvoi(f.blob)); } // F-3 : la copie envoyée est réduite
       await lierAssistant();
       const res = await extractIndexFromImages(provider, images);
       ta.value = res.entries.map((e) => `${e.title} — ${e.printed_page ?? ''}`).join('\n');

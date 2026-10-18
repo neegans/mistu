@@ -73,7 +73,7 @@ export async function runCreerIaTests({ eq, ok }) {
   refus({ ...VALIDE, ingredients: [{ name: 'x', quantity: 0.049, unit: 'g' }] }, 'bornes', '0.049 (sous la borne basse, 3 décimales)');
   // Bornes de la spec, en NOMBRES LITTÉRAUX (jamais lus dans LIMITES_CREATION : une borne changée changerait aussi son test). Maximum accepté,
   // maximum + 1 → bornes, minimum accepté, minimum − 1 → bornes (null = pas de minimum à franchir).
-  eq(C.LIMITES_CREATION, { demande: 500, changement: 500, titre: 120, description: 400, portions: [1, 12], minutes: [5, 240], ingredients: [1, 40], nom: 100, unite: 30, quantite: [0.05, 10000], etapes: [2, 20], etape: 500, conseils: [0, 6], conseil: 250, notes: [0, 8], note: 250, tentativeMs: 120000, corps: 1024 * 1024, maxTokens: 16000 }, 'LIMITES_CREATION : valeurs de la spec § 4.1-4.2 épinglées');
+  eq(C.LIMITES_CREATION, { demande: 500, changement: 500, titre: 120, description: 400, portions: [1, 12], minutes: [5, 240], ingredients: [1, 40], nom: 100, unite: 30, quantite: [0.05, 10000], etapes: [2, 20], etape: 500, conseils: [0, 6], conseil: 250, notes: [0, 8], note: 250, tentativeMs: 135000, corps: 1024 * 1024, maxTokens: 16000 }, 'LIMITES_CREATION : valeurs de la spec § 4.1-4.2 épinglées (tentativeMs 135 000 : F-5)');
   {
     const T = (n) => 'a'.repeat(n);
     const ing = (n) => Array.from({ length: n }, () => ({ name: 'x', quantity: 1, unit: 'g' }));
@@ -594,6 +594,15 @@ export async function runCreerIaTests({ eq, ok }) {
         const root = await monter({ q: 'saumon' }, {}, ctx);
         try { bouton(root, 'se-connecter').click(); await tick(); await tick(); } finally { try { sessionStorage.removeItem(SYNC_ROUTE_KEY); } catch { /* stockage indisponible */ } }
         eq(signIns.length, 1, 'P7.2 garde : « Se connecter » appelle auth.signIn() du contexte');
+        root.remove();
+      }
+      {
+        // F-7 (M4) : garde de compte refusée sur cet appareil → le message de la garde, sans « Se connecter » (il renverrait au même refus)
+        S.reinitialiserCreation();
+        const MESSAGE_GARDE = 'Cet appareil a été synchronisé avec b@exemple.invalid.';
+        const ctx = ctxDe(null); ctx.sync = { user: null, guard: { ok: false, message: MESSAGE_GARDE }, auth: { jeton: async () => null, signIn: async () => { throw new Error('aucune connexion attendue'); } } };
+        const root = await monter({ q: 'saumon' }, { creer: async () => { throw new Error('aucun appel attendu'); } }, ctx);
+        eq([textes(root, '[data-role="garde-ia"] .status > span'), bouton(root, 'se-connecter') === null, bouton(root, 'creer-ia') === null], [[MESSAGE_GARDE], true, true], 'F-7 garde de compte refusée : le message de la garde, sans « Se connecter », ni formulaire ni bouton de création');
         root.remove();
       }
       {

@@ -82,7 +82,7 @@ export async function init() {
 // Placée après le nettoyage des chaînes : la ligne copiée est déjà normalisée (Cc/Cf retirés), rien à y nettoyer.
 const MIGRATION_ASSISTANT_GUARD = 'assistant_config_migre';
 const EPOQUE = '1970-01-01T00:00:00.000Z';
-async function migrerConfigAssistant() {
+export async function migrerConfigAssistant() {
   if ((await db.get('sync_state', MIGRATION_ASSISTANT_GUARD))?.value === 1) return false;
   const ancien = await db.get('settings', LIGNE_ASSISTANT);
   const existante = await db.get('assistant_config', LIGNE_ASSISTANT);
@@ -99,24 +99,25 @@ async function migrerConfigAssistant() {
   return copier;
 }
 
-// Passe unique (Passerelle T4, R-T4-3) : l'assistant passe par la passerelle (la clé vit côté serveur), donc une clé restée dans
-// assistant_config ne sert plus à rien — et ne doit plus traîner dans IndexedDB. Elle est vidée UNE fois (garde
-// `sync_state.cle_locale_effacee`) : la ligne `llm` devient la configuration vide. L'écriture est d'origine 'local', comme une
-// décision de la personne : capturée dans l'outbox (sur un hôte de production seulement, K-3), la ligne vide PART au compte et efface la
-// clé du serveur et des autres appareils. Cela suppose que la capture soit posée AVANT init() — app.js la pose en premier, c'est
-// pourquoi installCapture précède repo.init() au démarrage.
+// Passe d'effacement de la clé locale (Passerelle T4, R-T4-3) : l'assistant passe par la passerelle (la clé vit côté serveur), donc une clé
+// restée dans assistant_config ne sert plus à rien — et ne doit plus traîner dans IndexedDB. La ligne `llm` qui porte une clé OU un fournisseur
+// devient la configuration vide. L'écriture est d'origine 'local', comme une décision de la personne : capturée dans l'outbox (sur un hôte de
+// production seulement, K-3), la ligne vide PART au compte et efface la clé du serveur et des autres appareils. Cela suppose que la capture
+// soit posée AVANT init() — app.js la pose en premier, c'est pourquoi installCapture précède repo.init() au démarrage.
+// F-9 : la passe tourne à CHAQUE init(), sans garde à usage unique. Une garde « une fois » laissait passer une clé arrivée APRÈS le premier
+// démarrage (un appareil resté en ancienne version qui réécrit sa clé et la renvoie au compte ; une réception tardive) : elle traînait pour
+// toujours. L'idempotence tient à la ligne elle-même : une fois vide, le démarrage suivant ne trouve rien à effacer et N'ÉCRIT RIEN (ni garde,
+// ni horodatage neuf, ni entrée de file) ; sans ligne, rien non plus.
 // La ligne est lue BRUTE : une ligne reçue abîmée (fournisseur inconnu, clé gardée) se normaliserait en « vide » à la lecture, sa clé
-// resterait pourtant stockée. Est effacée toute ligne qui porte une clé OU un fournisseur ; absente ou déjà vide, rien n'est écrit et
-// seule la garde est posée (aucune ligne créée, aucune entrée de file). Rejouable : une passe à moitié faite (ligne écrite, garde
-// non posée) est reprise et ne trouve plus rien à effacer. Après la migration `assistant_config_migre` : la clé d'un ancien
-// settings.llm copiée par elle est effacée dans la foulée.
-const EFFACEMENT_CLE_GUARD = 'cle_locale_effacee';
+// resterait pourtant stockée. Est effacée toute ligne qui porte une clé OU un fournisseur — un champ ABSENT vaut vide (une ligne incomplète
+// sans clé ni fournisseur n'est pas réécrite à chaque démarrage). Rejouable : une passe à moitié faite ne trouve plus rien à effacer. Après la
+// migration `assistant_config_migre` : la clé d'un ancien settings.llm copiée par elle est effacée dans la foulée.
 export async function effacerCleLocale() {
-  if ((await db.get('sync_state', EFFACEMENT_CLE_GUARD))?.value === 1) return false;
   const ligne = await db.get('assistant_config', LIGNE_ASSISTANT);
-  const efface = !!ligne && (ligne.api_key !== '' || ligne.provider !== 'none');
+  const porteUneCle = ligne?.api_key != null && ligne.api_key !== '';
+  const porteUnFournisseur = ligne?.provider != null && ligne.provider !== 'none';
+  const efface = !!ligne && (porteUneCle || porteUnFournisseur);
   if (efface) await saveAssistantConfig({ provider: 'none', model: '', base_url: '', api_key: '' });
-  await db.mutate({ puts: { sync_state: [{ key: EFFACEMENT_CLE_GUARD, value: 1 }] }, origin: 'device' });
   return efface;
 }
 

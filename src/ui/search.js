@@ -204,7 +204,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     for (const v of [...vues]) if (!v.root.isConnected) vues.delete(v); // borné en permanence, pas seulement à la résolution d'un vol
     if (![...vues].some((v) => v.root === root)) vues.add({ root, redessiner: render });
     // Sans session : « Connecte-toi… » + « Se connecter », aucun appel (R-T4-4). La passerelle cherche toujours sur le web.
-    if (!providerFrom(ctx.settings, { session }).configured) return carteConnexion(connecter);
+    if (!providerFrom(ctx.settings, { session }).configured) return carteConnexion(connecter, ctx);
     const cle = demandeCourante().cle;
     const boutonChercher = (eteint) => el('button', { class: 'btn primary', dataset: { role: 'chercher-web' }, disabled: eteint, onClick: () => lancer() }, t('Chercher sur le web avec l’assistant')); // data-role : rouvert par la frappe (§ 5.3)
     if (vol && vol.cle === cle) {
@@ -233,7 +233,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     if (issue.etat === 'rien') return el('div', { class: 'card flat stack' }, el('div', { class: 'status', role: 'status' }, t('Aucune page trouvée pour cette demande. Reformule ou cherche autrement.')), reessayer(), creerDepuisWeb());
     if (issue.etat === 'indisponible') {
       // La session a disparu pendant le vol : la carte « Connecte-toi » ; la relancer sans session ne mènerait à rien (R-T4-4).
-      if (issue.raison === 'non_connecte') return el('div', { class: 'card flat stack' }, carteConnexion(connecter));
+      if (issue.raison === 'non_connecte') return el('div', { class: 'card flat stack' }, carteConnexion(connecter, ctx));
       const refus = texteRefusAssistant(issue); // non_admis, quota (avec ou sans nombre), demande trop lourde (R-T4-4, R-T4-9)
       const demandeVide = !refus && issue.raison === 'requete' && !state.q;
       const connue = Object.hasOwn(TEXTES_INDISPONIBLE, issue.raison);

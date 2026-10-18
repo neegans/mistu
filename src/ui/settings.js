@@ -16,7 +16,7 @@ import { extFor } from '../domain/backup.js';
 import { etatAssistant, sessionValide } from '../domain/passerelle.js';
 import { shortcutUrl, SHORTCUT_NAME, isAppleTouchDevice } from '../domain/timers.js';
 import { STORES, SYNC_INTERNAL_STORES, APP_VERSION, ARCHIVE_FORMAT_VERSION } from '../model/schema.js';
-import { pageHeader, section, field, segmented, majPastille, sessionAssistant, TEXTE_CONNEXION, boutonSeConnecter } from './components.js';
+import { pageHeader, section, field, segmented, majPastille, sessionAssistant, TEXTE_CONNEXION, boutonSeConnecter, messageGardeRefusee } from './components.js';
 import { invalidate, setSyncState, getSyncState, relireReglages, SYNC_ROUTE_KEY } from './state.js';
 
 // Évite deux opérations d’archive concurrentes, même après un changement d’écran.
@@ -523,32 +523,44 @@ export function gestesL3Pour({
 export const occupeParAssistant = (doc = document) => !!doc.activeElement?.closest?.('[data-section="assistant"]');
 
 // Section « Assistant IA » (Passerelle T4, R-T4-2) : DEUX états, aucun champ — la clé n'existe plus côté app. Première ligne = à quoi sert la
-// section. Sans session : « Connecte-toi… » + « Se connecter » (le geste de la section Compte), aucun appel. Avec une session : « L’assistant
-// est actif pour <adresse>. », puis une ligne d'état remplie par un GET de la passerelle (« … » pendant l'attente) — le GET ne demande rien
-// au fournisseur d'IA. Dépendances injectées : `fetch` (les tests n'ont jamais de réseau) et `connecter` (défaut : demarrerConnexion).
+// section. Sans session : « Connecte-toi… » + « Se connecter » (le geste de la section Compte), aucun appel — sauf garde de compte refusée
+// (F-7) : le message de la garde, sans bouton (il bouclerait sur le même refus). Avec une session : un GET de la passerelle (elle ne demande
+// rien au fournisseur d'IA) dit l'état, et RIEN n'est affirmé avant sa réponse (F-4) : « Vérification de l’assistant… » pendant l'attente ;
+// puis, selon la réponse — 200 : « L’assistant est actif pour <adresse>. » + le modèle et le quota ; compte non admis : « Ce compte n’a pas
+// accès à l’assistant. » seul ; 401 : « Connecte-toi… » + « Se connecter » (le jeton local est refusé par le serveur) ; tout le reste :
+// « L’assistant est indisponible pour le moment. » seul. Dépendances injectées : `fetch` (les tests n'ont jamais de réseau) et `connecter`
+// (défaut : demarrerConnexion).
 export function sectionAssistant({ sync = {}, session = null } = {}, { fetch = undefined, connecter = demarrerConnexion } = {}) {
-  const avecSession = sessionValide(session);
-  const sec = avecSession ? section(t('Assistant IA'), ...assistantActif(sync, session, fetch)) : section(t('Assistant IA'),
-    el('p', null, t(TEXTE_CONNEXION)),
-    el('div', { class: 'row' }, boutonSeConnecter(() => connecter(sync.auth), { classe: 'btn primary' })));
+  const geste = () => el('div', { class: 'row' }, boutonSeConnecter(() => connecter(sync.auth), { classe: 'btn primary' }));
+  let contenu;
+  if (sessionValide(session)) contenu = assistantActif(sync, session, fetch, geste);
+  else {
+    const gardeRefusee = messageGardeRefusee(sync);
+    contenu = gardeRefusee ? [el('p', null, gardeRefusee)] : [el('p', null, t(TEXTE_CONNEXION)), geste()];
+  }
+  const sec = section(t('Assistant IA'), ...contenu);
   sec.dataset.section = 'assistant';
   return sec;
 }
 
-function assistantActif(sync, session, fetch) {
+function assistantActif(sync, session, fetch, geste) {
   const adresse = [session.user?.email, sync.user?.email].find((a) => typeof a === 'string' && a !== '');
-  const etat = el('p', { class: 'muted', role: 'status', dataset: { role: 'etat-assistant' } }, '…');
-  // Rien n'est rendu du corps d'une erreur : seule la raison classe — le refus du compte, ou « indisponible » pour tout le reste.
+  const etat = el('p', { class: 'muted', role: 'status', dataset: { role: 'etat-assistant' } }, t('Vérification de l’assistant…'));
+  const indisponible = () => { etat.textContent = t('L’assistant est indisponible pour le moment.'); };
+  // Rien n'est rendu du corps d'une erreur : seule la raison classe.
   etatAssistant({ fetch, session }).then((r) => {
     if (r.raison === 'non_admis') etat.textContent = t('Ce compte n’a pas accès à l’assistant.');
-    else if (r.raison) etat.textContent = t('L’assistant est indisponible pour le moment.');
+    else if (r.raison === 'non_connecte') { etat.textContent = t(TEXTE_CONNEXION); etat.after(geste()); }
+    else if (r.raison) indisponible();
     else {
       const { modele, quotaJour } = r.corps;
       const dit = [modele ? t('Modèle en service : {m}.', { m: modele }) : null, quotaJour == null ? null : (quotaJour === 1 ? t('Quota : 1 appel par jour.') : t('Quota : {n} appels par jour.', { n: quotaJour }))].filter(Boolean).join(' ');
-      etat.textContent = dit || t('L’assistant est indisponible pour le moment.'); // un 200 sans modèle ni quota lisibles : jamais une ligne vide
+      if (!dit) { indisponible(); return; } // un 200 sans modèle ni quota lisibles n'est pas une réponse de la passerelle : « actif » n'est pas dit
+      etat.before(el('p', null, adresse ? t('L’assistant est actif pour {adresse}.', { adresse }) : t('L’assistant est actif sur ton compte.')));
+      etat.textContent = dit;
     }
-  }, () => { etat.textContent = t('L’assistant est indisponible pour le moment.'); });
-  return [el('p', null, adresse ? t('L’assistant est actif pour {adresse}.', { adresse }) : t('L’assistant est actif sur ton compte.')), etat];
+  }, indisponible);
+  return [etat];
 }
 // === fin Assistant IA
 
