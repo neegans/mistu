@@ -237,7 +237,7 @@ valeur de `log_parameter_max_length`, `-1`, est sans effet) ; `log_min_error_sta
 des deux conditions n'est remplie : la clé de l'assistant ne peut pas finir dans les journaux de Postgres de `mitsu`**
 avec ces réglages (à rejuger si Supabase les change).
 
-## Passerelle `assistant` — déployée le 18 octobre 2026 (17 h 05 UTC), sondes sans dépense 9/9 conformes
+## Passerelle `assistant` — déployée le 18 octobre 2026 (v1 17 h 05 UTC, v2 18 h 16 UTC), sondes sans dépense 9/9 conformes aux deux versions
 
 Code : `supabase/functions/assistant/` (spec `docs/superpowers/specs/2026-10-18-passerelle-assistant-design.md`). La clé Anthropic est un secret du projet (`ANTHROPIC_API_KEY`, posé par Neegan dans Edge Functions → Secrets le 18 octobre, 15 h 13 UTC) : rien d'elle n'est ici, ni ailleurs dans le dépôt.
 
@@ -259,5 +259,7 @@ Code : `supabase/functions/assistant/` (spec `docs/superpowers/specs/2026-10-18-
 | S10 | `POST`, `content-length: 9000000` mensonger (2 octets envoyés) | 400 | page HTML Cloudflare | refusé par la bordure Cloudflare avant la fonction : ne mesure pas notre borne (couverte par le test Node, cas f) |
 
 **Non mesuré ici (exige une session réelle = geste de Neegan)** : `GET` → `{ modele, quotaJour }` ; un `POST` admis → une ligne `assistant_journal` et un appel Anthropic ; le comportement de `is_allowed` pour une session non admise ; la prise en compte d'un secret changé par un isolat chaud. **Préalable au premier POST réel** : `0004` collée + `notify pgrst, 'reload schema';` (sinon `assistant_reserver` inconnue → 502).
+
+**Redéploiement (contrôleur, 18 octobre 2026, 18 h 16 UTC = 14 h 16 à Montréal)** : même commande, code = commit `6d7ed21` (après les restes parqués de la revue : annulation du corps quand `content-length` dépasse la borne, plafond int4 du quota, `jourDe` fermé, défaut `max_tokens` borné). `supabase functions list` : **version 2**, `ACTIVE`, `verify_jwt: false`, `import_map: true`, `ezbr_sha256 245fcab5…`. Les neuf sondes S1-S9 rejouées à 18 h 16 UTC : **mêmes statuts, mêmes corps, mêmes en-têtes CORS** (S1 204 + Allow-Origin, 626 ms à froid ; S2 204 sans Allow-Origin ; S3 401 `non_connecte` ; S4 403 `origine` ; S5 401 `non_connecte` 363 ms ; S6 401 ; S7 405 `methode` ; S8 403 `origine` ; S9 401 `non_connecte`). Aucune n'a atteint Anthropic ni la réservation (0004 n'est pas collée : un POST admis rendrait 502 `serveur` tant que `assistant_reserver` n'existe pas).
 
 **Preuve `0004_assistant_journal.sql` — à jouer (geste de Neegan, après le collage de `0004` et `notify pgrst, 'reload schema';`)** : le BILAN et les verdicts seront collés ici.
