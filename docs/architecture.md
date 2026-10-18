@@ -17,14 +17,16 @@ src/model/   schema.js (magasins, relations, vocabulaires), seed.js (unités, co
 src/domain/  quantity.js (fractions, plages, qualitatif), units.js (conventions, conversions, affichage), lines.js (analyse d'une ligne d'ingrédient), scaling.js,
              diet.js, grocery.js, search.js (langage naturel → pastilles; groupes), dishes.js (rapprochement, comparaison), pairing.js (accompagnements, résumé de repas),
              rediscover.js, timers.js, backup.js (archive, inspection isolée, restauration, vérification), exporters.js (JSON-LD, YAML Paprika, HTML), llm.js,
-             recherche-web.js (demande, corps, lecture de la réponse et choix des liens de la recherche web ; un appel, ne lève jamais)
+             recherche-web.js (demande, corps, lecture de la réponse et choix des liens de la recherche web ; un appel, ne lève jamais),
+             assistant-config.js (normalisation de la configuration de l'assistant IA, pure — voir « L'assistant suit le compte »)
 src/ui/      state.js (cache), components.js, home, search, library, book, dish, recipe, recipe-edit, cook, import, meals, grocery, kitchen, settings, add
 src/sync/    tables.js, mime.js, clock.js, outbox.js, config.js, auth.js — voir « Synchronisation (L1-L2) »
              transport.js, lots.js, reponses.js, push.js, backfill.js, pull.js, conflits.js, moteur.js — voir « Synchronisation (L3) »
 src/core/log.js            point d'entrée unique du journal d'erreurs (logError)
 src/vendor/  supabase-2.117.3.umd.js (dépendance embarquée, vérifiée deux fois)
 tests/       tests.js + index.html : tests du domaine ; backup.js : régressions IndexedDB dans des bases temporaires ; sync.js : lot « compte et stockage distant » (L1-L2) ;
-             sync-l3.js + transport-factice.js + sync-fixture.js : lot « envoi et réception » (L3), transport simulé, aucun réseau
+             sync-l3.js + transport-factice.js + sync-fixture.js : lot « envoi et réception » (L3), transport simulé, aucun réseau ;
+             assistant-compte.js : lot « l'assistant suit le compte »
 ```
 
 ## Dépendance embarquée
@@ -118,7 +120,10 @@ donnée : une écriture annulée ne laisse aucune entrée de file.
 `SYNC_INTERNAL_STORES = ['outbox', 'sync_state', 'sync_conflicts']` (`DB_VERSION` 2). Ils sont **hors archive** :
 `ARCHIVE_DATA_STORES` les exclut, l'inspection et la vérification de restauration n'en voient aucune trace, les puces
 « Données sur cet appareil » ne les listent pas, et un remplacement par ZIP ne les vide pas. Seul `repo.clearDevice()`
-les vide — en une transaction sans capture, en gardant `sync_state.device_id`. L'identité d'appareil vit dans
+les vide — en une transaction sans capture, en gardant `sync_state.device_id`. Un magasin qui n'est **pas** interne
+partage ces trois traits depuis le lot « L'assistant suit le compte » : `assistant_config` (la configuration de l'assistant, synchronisée) est
+hors archive, un remplacement par ZIP ne le vide pas, et `repo.clearDevice()` le vide (voir « L'assistant suit le
+compte »). L'identité d'appareil vit dans
 `sync_state.device_id` (plus aucun reflet dans `localStorage`) ; l'ancienne clé `cuisineos.device` est reprise une
 seule fois puis retirée.
 
@@ -160,6 +165,8 @@ S2 —, RLS avec `is_allowed()` sur chaque règle, règle `delete` gardée par `
 (`--dir <chemin>` vise un autre répertoire, pour l'écriture comme pour la vérification : c'est ainsi que `--check`
 lui-même est éprouvé, sur une copie altérée dans un répertoire temporaire).
 Application et preuves : `supabase/README.md` (gestes manuels de Neegan dans l'éditeur SQL, preuves `supabase/proofs/`).
+Une troisième migration, `0003_assistant_config.sql`, à ajout seul, est générée de la même façon et fait partie de
+`--check` (voir « L'assistant suit le compte ») ; `0001` et `0002` ne changent pas.
 
 ## Synchronisation (L3)
 
@@ -447,6 +454,86 @@ statut et corps exacts d'un compte sans recherche web, `pause_turn` et `refusal`
 l'iPhone (aucun WebKit ici), ni `target="_blank"` et `navigator.onLine` depuis une PWA installée. Et
 `AbortSignal.timeout` compte le temps **actif** : sur une PWA iOS en arrière-plan, 45 s ne sont pas 45 s réelles.
 
+## L'assistant suit le compte (17-18 octobre 2026)
+
+Spec : `docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md` (rév. 2 ; § 12 : rulings R-CPT-1 à
+R-CPT-6) ; spec parente `docs/spec-compte-et-stockage-distant.md` § 11, R65. Livré ici : la configuration de
+l'assistant IA (fournisseur, modèle, URL de base, clé) s'entre une fois sur un appareil connecté et suit le compte
+jusqu'aux autres ; elle ne vit plus dans `settings`. Un module neuf ; ailleurs, des changements bornés (les plus gros :
+la section Réglages et le générateur de migrations).
+
+```text
+src/domain/assistant-config.js  pur : normaliserConfigAssistant(brut) → { provider, model, base_url, api_key } (chaînes
+                                rognées, Cc/Cf retirés par borner, bornes 200 / 500 / 500 ; fournisseur hors liste → none ;
+                                none vide tout ; base_url en https, ou en http vers la boucle locale seulement, jamais
+                                d'identifiants, toujours vide pour anthropic ; refusée pour openai_compatible → toute la
+                                configuration à none, R-CPT-4) ; LIGNE_ASSISTANT = 'llm' ; configVide.
+src/model/schema.js             DB_VERSION 3 ; magasin assistant_config (keyPath id, noDelete), déclaré après files et
+                                avant settings : dernier des 26 SYNC_STORES ; hors ARCHIVE_DATA_STORES.
+src/core/db.js                  mutate lève, avant toute transaction, pour une suppression sur un magasin noDelete dont
+                                l'origine n'est pas 'remote' ; clearStores reste permis (vidage d'appareil).
+src/model/repo.js               getSettings compose llm depuis la ligne assistant_config (normalisée) ; getSetting et
+                                setSetting lèvent sur une clé de SECRET_SETTING_KEYS ; saveAssistantConfig ; passe unique
+                                migrerConfigAssistant dans init().
+src/sync/config.js              configAssistantSuitLeCompte(hostname) : vrai ssi l'hôte figure dans SUPABASE.prod.hosts.
+src/sync/outbox.js, backfill.js, pull.js, moteur.js
+                                prédicat injecté configSuitLeCompte, faux par défaut (R-CPT-1) ; app.js passe le vrai.
+src/sync/pull.js                regleDuMagasin, après decider : conflit → ecrire, conflit_renvoyer → renvoyer_seulement.
+src/sync/reponses.js            refus conflit sur ce magasin : retirer de la file, jamais d'entrée de conflit ; réécrire
+                                la version du compte seulement si c'est un objet nu, sans tombale, au moins aussi récent,
+                                et si la fiche n'a pas bougé pendant l'aller-retour.
+src/sync/conflits.js            garderIci, garderAilleurs et ignorerRenvoye refusent ce magasin par son nom.
+src/domain/backup.js            le remplacement ne vide pas assistant_config (K-7).
+src/ui/settings.js              sectionAssistant (dépendances injectées), texteAssistant (quatre états K-10),
+                                occupeParAssistant (K-12, câblé dans le occupe de suivreMoteurDeLaPage).
+src/sync/tables.js              SYNC_STORES_0001 : les 25 noms de 0001, figés.
+tools/generer-migrations.mjs    0001 depuis SYNC_STORES_0001, 0002 inchangée, 0003 depuis SYNC_STORES ; le bloc des quatre
+                                fonctions est partagé (fonctions(stores)) ; --check couvre les trois fichiers.
+```
+
+**Le magasin.** Une ligne `{ id: 'llm', provider, model, base_url, api_key, created_at, updated_at }`, normalisée à
+l'écriture locale (« Enregistrer ») et à la lecture (`getSettings`), jamais à la réception : la ligne reçue est écrite
+telle que le serveur la porte (normaliser créerait une différence à instant égal, réécrite à chaque passe). Les
+consommateurs lisent toujours `ctx.settings.llm` (`providerFrom`, `search.js`, `recipe-edit.js`, `import.js`,
+`components.js`, `recherche-web.js` : inchangés, K-11). Le cache de `src/ui/state.js` est invalidé après une passe qui
+a écrit : une configuration reçue est lue au rendu suivant.
+
+**Production seulement (K-3).** Capture (`installCapture`), envoi initial (`envoiInitial`, marqueur
+`backfill:assistant_config`) et réception (`createPull`) ne voient ce magasin que si `configSuitLeCompte()` est vrai,
+c'est-à-dire sur un hôte de `SUPABASE.prod.hosts`. Sur `localhost` / `127.0.0.1`, la configuration reste sur
+l'appareil : une origine `localhost:<port>` est partagée par tout autre projet servi sur ce port, IndexedDB et jeton de
+session compris.
+
+**Jamais de conflit, jamais de suppression (K-5, K-6).** I7 s'applique sans écran : le plus récent gagne ; à instant
+égal et contenu différent, la version du compte gagne et est écrite ici ; plus récente ici, la fiche repart (remise en
+file sans journal). Aucune entrée `sync_conflicts` n'est créée pour ce magasin. « Aucun (manuel) » écrit la ligne vide
+(`provider: 'none'`, champs vides) : la clé disparaît partout par une **écriture** ; sans configuration ici, rien n'est
+écrit ; la confirmation « Retirer l'assistant de tous tes appareils ? » n'est demandée que si la ligne vide partira au
+compte (R-CPT-5). Une tombale reçue (d'un autre client) suit le chemin générique : supprimée ici si elle est plus récente ou
+égale, jamais écrite (elle porte l'ancienne `data`, clé comprise).
+
+**La passe unique (§ 5.6).** Dans `repo.init()`, après l'horodatage des anciennes fiches et le nettoyage des chaînes,
+garde `sync_state.assistant_config_migre = 1` : une seule transaction d'origine `device` copie `settings.llm` vers
+`assistant_config` (si le fournisseur n'est pas `none`, que la clé n'est pas vide et qu'aucune ligne n'existe) avec
+**l'horodatage de l'ancienne ligne**, à défaut `1970-01-01T00:00:00.000Z` (jamais « maintenant » : une vieille clé
+battrait une clé tournée), pose la garde et efface `settings.llm` dans tous les cas. `init()` précède
+`installCapture` : rien n'entre en file ici, c'est l'envoi initial qui envoie la ligne.
+
+**La table serveur.** `public.assistant_config`, du même gabarit que les 25 autres (`owner_id`, `id`, `data`,
+`updated_at`, `server_seq`, `deleted_at`, RLS propriétaire avec `is_allowed()`), plus `revoke all on
+public.assistant_config from anon` ; `0003_assistant_config.sql` recrée `sync_push`, `sync_purge`, `sync_purge_all` et
+`purge_tombstones` avec les 26 noms. La clé y repose **en clair** dans `data` : aucune requête humaine ou d'agent ne
+lit cette colonne (`data - 'api_key'` et `length(data->>'api_key')` pour un diagnostic). Preuve écrite :
+`supabase/proofs/0003_assistant_config.sql` (clés factices, `data` jamais affichée). Ni la migration ni la preuve n'ont
+été exécutées : leur syntaxe seulement est vérifiée hors ligne (pglast v8.6 : `0003` 20 instructions, preuve `0003`
+48 instructions, aucune erreur). Application : `supabase/README.md`, étape 8 bis, **avant** tout `push` du code.
+
+**Ce qui n'est pas prouvé.** La passe réelle contre `mitsu` (aucune n'a tourné : ni `0003`, ni sa preuve) ; l'iPhone ;
+le chemin « nouveau client, ancien serveur » (quarantaine `refus` et réception `inconnu`, mesurés en factice
+seulement) ; l'état « appareil lié sans session » de K-10, inobservable sur `localhost` (prédicat injecté) ; K-12 (le
+formulaire n'est pas reconstruit sous le focus) n'est éprouvé que par `occupeParAssistant`, le câblage dans
+`suivreMoteurDeLaPage` est lu au source.
+
 ## Modèle de données (magasins IndexedDB)
 
 `books`, `book_editions` (ISBN, langue, `unit_convention_id`), `source_documents` (fichier, sha256, type), `source_pages` (page imprimée, position),
@@ -454,7 +541,7 @@ l'iPhone (aucun WebKit ici), ni `target="_blank"` et `navigator.onLine` depuis u
 `recipe_versions` (extraction / correction / adaptation / traduction / synthèse; ingrédients avec texte source, quantité, unité, identité proposée; étapes à identifiant stable; provenance avec instantané de convention),
 `recipe_translations`, `ingredients` (identité neutre, libellés FR/EN, `contains` pour les régimes, équivalences documentées), `unit_definitions`, `unit_conventions` (révision),
 `substitutions`, `appliances` (capacités), `cook_history` (version exacte, portions, quantités effectivement utilisées), `cook_sessions` (progression par identifiant d'étape),
-`inventory`, `meals` (éléments avec rôle, portions, verrouillage), `meal_feedback`, `shopping_lists`, `library_activity`, `rediscovery_prefs`, `timer_launches`, `files`, `settings`.
+`inventory`, `meals` (éléments avec rôle, portions, verrouillage), `meal_feedback`, `shopping_lists`, `library_activity`, `rediscovery_prefs`, `timer_launches`, `files`, `assistant_config` (une ligne `llm` : la configuration de l'assistant, clé comprise ; jamais supprimée localement, jamais archivée), `settings`.
 
 Règles : identifiants stables préfixés; une correction crée une version (jamais de réécriture); l'historique référence la version et un instantané des quantités; les adaptations sont des versions, sans table concurrente.
 
@@ -465,7 +552,7 @@ L’export lit tous les magasins dans une transaction IndexedDB commune, puis co
 
 L’inspection exige tous les magasins de données et les réglages, leurs décomptes et leurs empreintes. Elle refuse les clés absentes ou dupliquées, les chemins ZIP répétés, les entrées non déclarées, les fichiers corrompus et les relations connues cassées. Les chemins de relations dans le schéma peuvent traverser des objets et des tableaux. Il s’agit d’une validation de structure, de clés et de relations, pas d’un contrôle de tous les champs métier.
 
-La restauration prépare les objets et fichiers avant toute écriture. La fusion et le remplacement utilisent une seule transaction ; en remplacement, les vidages font partie de cette transaction. Une exception synchrone ou une erreur IndexedDB annule les écritures du lot. En fusion, les fiches portant le même identifiant sont remplacées, les autres sont conservées ; les métadonnées locales des fichiers existants sont conservées et leurs octets sont réécrits depuis l’archive validée. Les réglages secrets sont ignorés à l’import ; en remplacement, les secrets locaux sont effacés avec les autres réglages.
+La restauration prépare les objets et fichiers avant toute écriture. La fusion et le remplacement utilisent une seule transaction ; en remplacement, les vidages font partie de cette transaction. Une exception synchrone ou une erreur IndexedDB annule les écritures du lot. En fusion, les fiches portant le même identifiant sont remplacées, les autres sont conservées ; les métadonnées locales des fichiers existants sont conservées et leurs octets sont réécrits depuis l’archive validée. Les réglages secrets sont ignorés à l’import (`SECRET_SETTING_KEYS`) ; en remplacement, les réglages locaux sont vidés et remplacés par ceux de l’archive. La configuration de l’assistant, elle, n’est plus un réglage : elle vit dans `assistant_config`, qui n’entre dans aucune archive et qu’un remplacement **garde** (K-7) — une archive ne peut ni la porter ni l’effacer.
 
 La vérification relit un instantané commun et compare le contenu JSON complet des fiches importées, leurs clés, les relations déclarées, les tailles/types et empreintes des fichiers. En remplacement, les décomptes doivent aussi être identiques ; en fusion, des fiches supplémentaires sont permises. Le bilan reste visible et l’utilisateur recharge explicitement l’application. Les anciennes commandes sont désactivées pour éviter d’exporter un contexte périmé.
 

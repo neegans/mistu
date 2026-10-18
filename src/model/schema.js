@@ -37,7 +37,7 @@ export const STORES = {
   files:               { keyPath: 'sha256', indexes: [] },
   // Configuration de l'assistant IA : une ligne 'llm', synchronisée sur les hôtes de production (spec
   // 2026-10-17-assistant-par-le-compte § 4). noDelete : jamais de suppression d'origine locale (K-6, lue par db.mutate).
-  // (noDelete lu par db.mutate à partir de la tâche 2 ; synchronisé sur les hôtes de production à partir de la tâche 4)
+  // (capture, envoi initial et réception le filtrent par le prédicat injecté configSuitLeCompte, faux par défaut : R-CPT-1)
   assistant_config:    { keyPath: 'id', indexes: [], noDelete: true },
   settings:            { keyPath: 'key', indexes: [] },
   // Magasins internes de la synchronisation (spec § 5.1) — jamais archivés.

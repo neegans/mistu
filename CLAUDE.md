@@ -520,7 +520,9 @@ pins de `VERSION` répétés dans trois suites ; `!includes('notice')` sur tout 
 **Versions.** `APP_VERSION = '0.5.0'` (pins `v0\.5\.0-\d+` dans `tests/ajouter.js`, `tests/sync-l3.js` et
 `tests/recherche-web.js`), `sw.js VERSION = 'cuisine-os-v0.5.0-11'` (vague `/verify` ; `-10` à la vague finale, `-9` à la clôture de la tâche 9), `SHELL` + `./src/core/bornes.js`
 et `./src/domain/recherche-web.js` (deux modules neufs). Aucun schéma touché, aucune migration, aucun réglage neuf,
-`DB_VERSION` inchangée ; CSP inchangée (`connect-src https:` couvre déjà `api.anthropic.com`).
+`DB_VERSION` inchangée ; CSP inchangée (`connect-src https:` couvre déjà `api.anthropic.com`). Ligne historique du lot
+web : **amendé les 17-18 octobre** — la configuration de l'assistant (clé comprise) suit désormais le compte, voir
+« L'assistant suit le compte » ci-dessous (`APP_VERSION 0.6.0`, `DB_VERSION 3`).
 
 **Bilan (clôture, tâche 9).** Suite complète **1753/1753 verts** (total épinglé **1752** dans `tests/tests.js` :
 l'assertion du total s'ajoute elle-même au bilan affiché), une seule erreur de console : le 404 de `/favicon.ico`
@@ -550,9 +552,11 @@ chaque mutant rejoué sur une copie (survivant avant, tué après) · dettes nom
 `--check` 0 ; `sw.js` `cuisine-os-v0.5.0-11`.
 
 **Gestes de Neegan** (spec § 10 R2, hors code). 1) Créer la clé dans un **workspace Anthropic dédié à Cuisine OS, avec
-un plafond de dépense mensuel**, puis l'entrer dans Réglages → Assistant IA. 2) **Ne pas entrer cette clé sur le site
-public** (`neegans.github.io`) **tant que D5** (sous-domaine dédié) **n'est pas fait** : toute autre page Pages du compte
-lit la même IndexedDB. 3) Après la revue finale et `/verify` : d'abord écarter le `STATE.md` non suivi de l'arbre principal (ce lot ajoute un
+un plafond de dépense mensuel**, puis l'entrer dans Réglages → Assistant IA. 2) ~~Ne pas entrer cette clé sur le site
+public (`neegans.github.io`) tant que D5 (sous-domaine dédié) n'est pas fait : toute autre page Pages du compte lit la
+même IndexedDB.~~ **Geste RETIRÉ le 17 octobre** (spec assistant-par-le-compte § 1, décision de Neegan) : le site public
+est la seule origine de l'iPhone, et le but du lot « L'assistant suit le compte » est justement d'y déposer la clé ; D5 reste recommandé, le
+plafond du workspace reste le mur. 3) Après la revue finale et `/verify` : d'abord écarter le `STATE.md` non suivi de l'arbre principal (ce lot ajoute un
 `STATE.md` suivi, et `git merge` refuserait d'écraser un fichier non suivi) : `! mv ~/projects/mistu/STATE.md ~/projects/mistu/STATE.avant-web.md` (le
 nouveau le remplace ; l'ancien peut être effacé après lecture) ; puis fusionner par `!` (`cd ~/projects/mistu && git merge
 --ff-only recherche-web`, ou rebaser si `main` a bougé depuis `e4e841b`), puis `! git -C ~/projects/mistu push origin main` (le dossier courant peut être un worktree). 4) **Preuve réelle** : faite
@@ -577,6 +581,141 @@ Web → « Pour chercher sur le web, configure l’assistant IA … » sur un na
 - **F2** la construction UTC de `dateLisible` n'est épinglée par les tests que pour les machines à l'est d'UTC, et le formatage `timeZone: 'UTC'` que pour celles à l'ouest (la suite tourne en America/Toronto).
 - **M3** à 390 px, après une tape sur le « Chercher à nouveau » de K1 (y 684-726), « Annuler » de l'écran du vol arrive à y 649-691 et x 33-117 : une bande de 7 px chevauche le haut à gauche de l'ancien bouton, une double tape précise pourrait annuler un appel facturé (mesuré le 17 octobre, non corrigé).
 - **Perf** un `Intl.DateTimeFormat` est construit par carte et par rendu (négligeable ; deux formateurs en cache suffiraient).
+
+### L'assistant suit le compte (17-18 octobre 2026)
+
+**Où.** Branche `assistant-compte`, worktree `~/projects/mistu-web` (jamais `~/projects/mistu`), serveur de vérification
+`http://localhost:8083/` (suite : `http://localhost:8083/tests/`). Spec :
+`docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md` (rév. 2 ; **§ 12** : revues S1-S14 et F1-F15, puis
+les **rulings de construction R-CPT-1 à R-CPT-6**) ; spec parente amendée : `docs/spec-compte-et-stockage-distant.md`
+§ 11, **R65** ; spec web § 11.2 : I-C et geste R2 amendés. Plan : `docs/superpowers/plans/2026-10-17-assistant-par-le-compte.md`.
+Registre : `.superpowers/sdd/2026-10-17-assistant-par-le-compte/` (`progress.md`, un brief et un rapport par tâche, les
+diffs revus ; lanceur `suite.cjs`). Base : `main` `66c5d19` (lot confort ; `origin/main` = `66c5d19`, lu par
+`git ls-remote` le 18 octobre). Neuf tâches, chacune avec au plus une ronde de corrections. **FINI dans le worktree,
+PAS fusionné, PAS poussé** ; le site public ne change qu'à la fusion et au `git push` de Neegan, **après** `0003`.
+
+**Pourquoi.** Le 17 octobre au soir, l'iPhone disait « configure l'assistant IA » alors que la clé était entrée sur le
+Mac : elle vivait dans `settings.llm`, que la synchronisation ne porte pas (spec parente § 3.1). Décision de Neegan :
+la même clé partout, par son compte.
+
+**Ce qui marche** (éprouvé par la suite : bases jetables, transport factice en mode `serveur`, prédicats et gestes
+injectés, aucun réseau) : la configuration vit dans le magasin **`assistant_config`** (une ligne `llm`), plus dans
+`settings` (`getSetting('llm')` et `setSetting('llm', …)` lèvent) ; elle est normalisée à l'écriture locale et à la
+lecture (`src/domain/assistant-config.js`, seul module neuf), jamais à la réception ; sur un hôte de production
+(`SUPABASE.prod.hosts`), elle est capturée, envoyée (envoi initial compris) et reçue comme les 25 autres magasins —
+**jamais** hors production (`localhost`, `127.0.0.1`) ; **jamais de conflit à trancher** (à instant égal, la version du
+compte gagne sans écran ; aucune entrée `sync_conflicts`, ni à la réception ni à l'envoi) ; **jamais de suppression
+locale** (garde `noDelete` dans `db.mutate`) : « Aucun » écrit une ligne vide, n'écrit rien sans configuration ici, et
+ne demande « Retirer l'assistant de tous tes appareils ? » que si cette ligne partira au compte ; une **passe unique**
+copie l'ancien `settings.llm` avec son horodatage d'origine (repli 1970) puis l'efface ; une archive ZIP ne porte jamais
+la configuration (une archive fabriquée qui la porte est refusée), une restauration en fusion ou en remplacement la
+garde ; « Effacer les données de cet appareil » la vide ici seulement ; Réglages → Assistant IA dit en quatre textes ce
+qui se passe sur cet appareil (adresse de développement / sans compte / appareil lié déconnecté / connecté), toujours
+suivis de « Elle n’est jamais incluse dans les sauvegardes ZIP. » ; une URL de base refusée est dite, ni enregistrée ni
+testée ; « Tester » part de la configuration normalisée ; la page n'est pas reconstruite par le moteur tant que le focus
+est dans la section (`occupeParAssistant`). Serveur, en fichiers : migration **à ajout seul**
+`supabase/migrations/0003_assistant_config.sql` (table du même gabarit, `revoke all … from anon`, quatre fonctions
+recréées avec les 26 noms ; `0001` et `0002` inchangées, empreintes épinglées) et sa preuve
+`supabase/proofs/0003_assistant_config.sql` (clés factices, `data` jamais affichée) ; procédure : `supabase/README.md`,
+étape 8 bis. Les rulings, une ligne chacun (détail en spec § 12) :
+- **R-CPT-1** le prédicat `configSuitLeCompte` (injecté dans `installCapture`, `createPull`, `envoiInitial`) vaut `() => false` par défaut ; `src/app.js` passe `configAssistantSuitLeCompte()` (vrai ssi l'hôte est dans `SUPABASE.prod.hosts`).
+- **R-CPT-2** la fixture `withRepo` pose la capture en production (`configSuitLeCompte: () => true`) ; les tests hors production passent par `withDatabase` et un `installCapture` explicite.
+- **R-CPT-3** une `base_url` de plus de 500 points de code est tronquée, pas rejetée.
+- **R-CPT-4** `https` partout, `http` pour la boucle locale seulement (`localhost`, `127.0.0.1`, `[::1]`), jamais d'identifiants ; `openai_compatible` à URL fournie mais refusée → configuration entière à `none` (jamais de repli vers OpenAI), refus dit sans rien écrire ; une telle configuration n'est pas copiée par la passe unique (à retaper).
+- **R-CPT-5** la confirmation « Retirer… » ssi `suitLeCompte() && (sync.user || lie)` (`lie` = `sync_state.user_id` présent).
+- **R-CPT-6** procédure « appareil perdu » : attendre l'expiration des jetons d'accès avant de remettre l'adresse (ci-dessous).
+
+**Ce qui n'est PAS prouvé.**
+- **La passe réelle contre `mitsu`** avec `0003` collée, puis sa preuve (verdicts 0.01 à 7.05, ligne `999 BILAN`) :
+  **aucune n'a tourné**. Quatre tournures de la preuve n'ont jamais été mesurées sur `mitsu` (relues dans le fichier
+  après la ronde 1 de la tâche 8, qui a remplacé `f::regprocedure` et `regexp_match`) : `to_regprocedure(f)` sur une
+  colonne `text` issue de `values` (6.01-6.04), `split_part(split_part(…, 'array[', 2), ']', 1)` sur
+  `pg_get_functiondef` (mêmes verdicts), `has_table_privilege` avec une liste de privilèges séparés par des virgules
+  (2.02), `current_setting(nom, true)` sur des réglages de journaux (7.01-7.05, protégé par un bloc `exception`). Une
+  erreur de syntaxe annulerait le collage entier sans rien appliquer (« un collage = une transaction »,
+  `supabase/README.md`) ; une erreur de sémantique dans la preuve se lit dans le BILAN (verdict rouge), pas dans la migration. Seule la **syntaxe**
+  est vérifiée, hors ligne, par l'analyseur PostgreSQL embarqué de pglast v8.6 (`0003` 20 instructions, preuve `0003`
+  48 ; témoins `0001` 253, `0002` 7, preuve `0001` 85 ; aucune erreur) : ce n'est **pas** une exécution, la sémantique
+  (noms, signatures, privilèges) ne se prouve que par la passe réelle.
+- **iPhone / Safari** : rien de mesuré sur appareil (connexion Google, clé déposée, lecture sur un second appareil).
+- **Chemin « nouveau client, ancien serveur »** (code servi alors que `0003` n'est pas collée) : quarantaine `refus` et
+  réception `inconnu` mesurées en factice seulement, jamais contre le vrai PostgREST — d'où l'ordre des gestes :
+  `0003` **avant** le `push`.
+- **État (c) de K-10** (appareil lié, sans session) : inobservable sur `localhost` ; vérifié par prédicat injecté
+  seulement.
+- **K-12** : le câblage `occupe: () => archiveOperation || occupeParAssistant()` dans `suivreMoteurDeLaPage` est lu au
+  source ; seul `occupeParAssistant` est éprouvé (focus réel), pas la page entière sous une passe.
+- **Appels réels des fournisseurs** : l'intro de Réglages → Assistant IA a perdu, en se raccourcissant, la phrase « Les
+  appels distants n’ont pas été exercés lors du développement : à valider avec une clé réelle. » Elle reste vraie hors
+  de la recherche web : aucun appel réel de « Tester », de l'extraction ni du fournisseur compatible OpenAI n'est
+  consigné (seul l'appel de la recherche web à l'API Messages l'est, le 17 octobre). C'est dit ici, plus à l'écran.
+
+**Dettes (assumées, une ligne chacune ; plus celles de la spec § 9).**
+- `envoyes` (compteur du moteur) compte un refus `conflit` sur `assistant_config` retiré **sans** réécriture.
+- Format d'horodatage PostgREST (`+00:00`, microsecondes) contre le factice (ISO `Z`) : un faux conflit « instant égal » reste possible sur les 25 autres tables (note L3 connue) ; pour `assistant_config`, la comparaison passe par des `Date.parse` finis.
+- TOCTOU de `fichesLocales` (lecture puis écriture en deux transactions) : dette L3 connue, inchangée.
+- Ramenage du serveur à +5 min (`sync_push` : un `updated_at` au-delà de `now() + 5 minutes` est ramené à `now()`, rendu en `adjusted`) face au plancher monotone `floorIso` de `syncNow()` : question de spec parente, non tranchée ici.
+- La CSP `connect-src 'self' https:` n'autorise pas un serveur local en `http://localhost:<port>` (R-CPT-4) : une configuration Ollama est gardée mais inerte, et le message de refus propose quand même `http://localhost`.
+- Horodatage d'origine de la ligne migrée = celui de `settings.llm`, écrit par `nowIso()` (horloge brute de l'appareil, sans le décalage serveur de `syncNow()`) : une horloge en avance peut faire gagner une vieille clé ; 1970 si illisible.
+- Passe unique : lectures hors transaction (`db.get` puis un `db.mutate`) — course théorique entre deux onglets qui monteraient la base en même temps.
+- Une `base_url` qui n'est pas une chaîne compte comme fournie, donc refusée (configuration à `none`) : strict, assumé.
+- Le défaut sans argument de `configAssistantSuitLeCompte()` (`location.hostname`) ne se simule pas dans le navigateur : la suite éprouve les valeurs à hôte explicite, et le câblage du défaut par l'assertion K-10.
+- `SECRET_SETTING_KEYS` reste une liste, pas une liste de motifs (spec parente § 6.5).
+- `0003` est rendue depuis le `SYNC_STORES` vivant (spec § 6.2) : dès qu'un 27e magasin arrivera, son texte généré changera alors qu'elle sera appliquée (le test `nouvelles` / `deepEqual(['assistant_config'])` de `tools/generer-migrations.test.mjs` le dira). **Geste suivant**, après le collage par Neegan : figer `SYNC_STORES_0003` et épingler l'empreinte SHA-256 de `0003` (logique F11), au prochain lot qui touche le générateur (le README le dit à la fin de l'étape 8 bis).
+- Le filet « jamais `data` affichée » du test de la preuve est une liste blanche de formes (ronde 1 de la tâche 8) : toute nouvelle forme légitime devra y être ajoutée explicitement.
+
+**Gestes de Neegan, dans cet ordre.**
+1. Éditeur SQL de `mitsu` : coller `supabase/migrations/0003_assistant_config.sql` **entier** (un collage = une
+   transaction ; si une lecture de la table rend 404 ensuite : `notify pgrst, 'reload schema';`).
+2. Preuve : deux adresses `…@exemple.invalid` dans `private.allowed_users` ; les quatre jetons `A_UUID`, `B_UUID`,
+   `A_EMAIL`, `B_EMAIL` remplacés ; coller `supabase/proofs/0003_assistant_config.sql` ; « Run without RLS » ; lire la
+   ligne `999 BILAN` (`0 faux` = vert) ; consigner les verdicts dans `supabase/proofs/RESULTATS-mitsu.md` (section
+   préparée ; **jamais** une valeur de `data`) ; retirer les deux adresses. Détail : `supabase/README.md`, étape 8 bis.
+3. **Seulement après** : copier `.superpowers/sdd/2026-10-17-assistant-par-le-compte/` dans
+   `~/projects/mistu/.superpowers/sdd/`, puis fusion par `!` (`cd ~/projects/mistu && git merge --ff-only
+   assistant-compte`, ou rebaser si `main` a bougé depuis `66c5d19`), puis `! git -C ~/projects/mistu push origin main`,
+   Pages. Un code servi avant `0003` mettrait la configuration en quarantaine `refus` (non destructif mais bruyant ;
+   après `0003` : Réglages → Synchronisation → « Réessayer » sur cette entrée).
+4. Appareils : sur le Mac, site public, Réglages → Assistant IA montre la configuration existante (passe unique) et
+   « La configuration de l’assistant suit ton compte sur tes appareils connectés. » ; « Envoyer maintenant » force
+   l'envoi. Sur l'iPhone : « Connexion avec Google » (la mesure iOS du 13 octobre reste due : où atterrit le retour),
+   puis vérifier que la clé déposée sur le Mac apparaît.
+5. Hygiène : faire tourner la clé Anthropic (elle a transité par un chat) et poser un plafond de dépense mensuel sur le
+   workspace.
+
+**Appareil perdu ou clé exposée** (le texte qui fait foi : `supabase/README.md`, section du même nom ; spec § 7,
+R-CPT-6). « Aucun » dans Réglages ne révoque rien. Dans cet ordre : 1) retirer l'adresse de `private.allowed_users`
+(toute lecture et tout envoi refusés dès la requête suivante, même avec une session ouverte) ; 2) fermer toutes les
+sessions du compte (tableau de bord → Authentication → Users) ; 3) révoquer l'ancienne clé dans la console Anthropic,
+**sans attendre** ; 4) **attendre l'expiration des jetons d'accès** : la durée « JWT expiry » du projet, 3600 s par
+défaut, comptée depuis la fermeture des sessions (fermer les sessions révoque les jetons de rafraîchissement, pas un
+jeton d'accès déjà émis ; l'adresse remise trop tôt, l'appareil perdu recevrait la nouvelle clé) — l'emplacement
+« Authentication → Settings » de ce réglage n'a **pas** été vérifié dans le tableau de bord ; 5) remettre l'adresse,
+reconnecter les appareils gardés, entrer la nouvelle clé **une fois**.
+
+**Versions.** `APP_VERSION = '0.6.0'` (pins `v0\.6\.0-\d+` / `'0.6.0'` dans `tests/ajouter.js`, `tests/sync-l3.js` et
+`tests/recherche-web.js`), `DB_VERSION = 3` (était 2), `sw.js VERSION = 'cuisine-os-v0.6.0-9'` (clôture ; `-7` depuis
+la tâche 7, dont la ronde a changé `src/ui/settings.js` sans incrément), `SHELL` + `./src/domain/assistant-config.js`
+(seul module neuf). `SYNC_STORES` 25 → 26 (`assistant_config` dernier ; `SYNC_STORES_0001` = les 25 de `0001`, figés) ;
+`assistant_config` hors `ARCHIVE_DATA_STORES`, `noDelete: true`. CSP inchangée.
+
+**Bilan (clôture, tâche 9, 18 octobre 2026).** Suite complète **1966/1966 verts** (total épinglé **1965** dans
+`tests/tests.js` ; départ du lot, remesuré sur `66c5d19` : 1802/1802, épinglé 1801), une seule erreur de console : le
+404 de `/favicon.ico` (pré-existant) ; `node --test tools/*.test.mjs` **45/45** (40 au départ, remesuré) ; `node
+tools/generer-migrations.mjs --check` : **0** (trois fichiers) ; `shasum -a 256` : `0001` =
+`e90ff35ec7c031f63dfb903e6885103ed7e42202866f59359ce019d00b85ee51`, `0002` =
+`2e90d2b1beb7270601f83c7408b1a2a2be32c800772f14f454960b233a2d5944` (égales aux valeurs épinglées), `0003` commitée =
+`37f9f80d62cf82457b177f35979892ce7deeaf2067567a506228e145ad8efd39` (à relire après le collage, fin de l'étape 8 bis) ;
+aucun caractère invisible (U+200B-200F, U+2028/2029, U+202A-202E, U+2060-2064, U+2066-2069, U+FEFF) dans les fichiers
+touchés par la tâche 9 ; scan des clés Anthropic (`git grep -nEi 'sk-ant-[0-9A-Za-z_-]{10,}'` sur `src`, `tests`,
+`docs`, `supabase`, `tools`, `CLAUDE.md`, `STATE.md`) : aucune clé réelle — seules les quatre sentinelles de test du lot
+web (`…-sentinelle`, `tests/recherche-web.js` et le plan web, déjà présentes sur `66c5d19`) ; aucune ligne ajoutée par
+la tâche 9 ne porte de clé, factice ou non. La tâche 9 ajoute le cas R-CPT-5 « production + connectée + appareil pas
+encore lié » (le mutant `suitLeCompte() && lie` passait la suite avant, rougit après — rejoué sur une copie servie à
+part) et remplace deux commentaires à numéro de tâche par ce qu'ils décrivent.
+
+**Fusion.** Revue finale de branche puis `/verify` par le chef d'orchestre ; le registre se copie **avant** tout
+`git worktree remove` ; les gestes 1 et 2 ci-dessus **avant** la fusion.
 
 ## Premier lot de fiabilisation — 8 septembre 2026, à réviser
 

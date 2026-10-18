@@ -666,3 +666,11 @@ Une ligne par écart entre cette spec et ce qui a été construit (tâches 1 à 
   - **V-S8** le titre d'une page est rendu dans un lien habillé en bouton (`a.btn`) ; les marques combinantes (Mn) ne sont pas retirées des titres.
   - **V-S9** (préexistant) `AnthropicProvider.complete` part sans `redirect: 'error'` ni `credentials: 'omit'` ; « Tester » (Réglages) affiche le corps d'erreur brut.
   - **V-S1 / V-S2** les deux murs hors code : plafond du workspace Anthropic et D5 (V-S1) ; préfixe « Selon l'assistant » devant le « pourquoi » et filtre déterministe par `DIET_TAGS` en suite (V-S2).
+- **I-C et geste R2 amendés par la spec assistant-par-le-compte** (17-18 octobre,
+  `docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md` § 1, décision de Neegan) : la configuration de
+  l'assistant, clé comprise, **voyage par la synchronisation**, et seulement par elle (jamais dans une archive ZIP, une
+  adresse, un écran de conflit, un journal ni un texte rendu) ; elle ne « reste » donc plus « sur l'appareil » (I-C)
+  quand un compte est connecté sur un hôte de production. Le geste **R2** « ne pas entrer cette clé sur le site public
+  tant que D5 n'est pas fait » est **retiré** (le site public est la seule origine de l'iPhone) ; D5 reste recommandé, et
+  le plafond de dépense du workspace Anthropic reste le mur. Ce qu'I-C dit de l'appel à l'API Anthropic (en-tête
+  `x-api-key`, corps, adresse, ce qui part) ne change pas.

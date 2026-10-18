@@ -1,6 +1,7 @@
 # La configuration de l'assistant suit le compte — spec de design
 
 Date : 17 octobre 2026 (soir). **Révision 2** (après deux revues adverses : sécurité S1-S14, faisabilité F1-F15 — § 12).
+Clôture le 18 octobre : rulings de construction R-CPT-1 à R-CPT-6 au § 12 ; K-6, § 4.1, § 5.2 et § 11 amendés en place.
 Branche `assistant-compte`, worktree `~/projects/mistu-web` (serveur `http://localhost:8083/`), base `main` `66c5d19`
 (lots « Chercher sur le web » et « Confort après preuve » LIVE). Spec parente de la synchronisation :
 `docs/spec-compte-et-stockage-distant.md` (§ 3.1 « `settings` n'est jamais synchronisé », § 5.5 I7, § 6.5, § 11
@@ -65,8 +66,9 @@ serveur) — quand il viendra, il exclura ce magasin.
   Sur un appareil qui **n'a aucune ligne** (neuf, ou vidé, configuration pas encore reçue), « Enregistrer » avec
   « Aucun » **n'écrit rien** (sinon une ligne vide plus récente effacerait la clé du compte : F5). Avec un compte
   connecté et une clé présente, « Aucun » demande d'abord « Retirer l'assistant de tous tes appareils ? » (même
-  mécanisme de confirmation que « Effacer les données de cet appareil »). **« Aucun » retire la clé de la
-  configuration, il ne la révoque pas** (§ 7).
+  mécanisme de confirmation que « Effacer les données de cet appareil » ; **précisé par R-CPT-5**, § 12 : la question
+  est posée dès que la ligne vide partira au compte — hôte de production, et compte connecté ou appareil lié —, jamais
+  hors production). **« Aucun » retire la clé de la configuration, il ne la révoque pas** (§ 7).
 - **K-7 Une archive ne touche pas la configuration.** Exclue de `ARCHIVE_DATA_STORES` ; une restauration en mode
   **remplacement** la garde (elle n'est pas de la bibliothèque) ; une fusion aussi ; une vieille archive sans ce magasin
   reste valide ; `validateRows` refuse toujours un magasin inconnu (une archive ne peut ni porter ni injecter la ligne).
@@ -110,8 +112,12 @@ Ligne : `{ id: 'llm', provider: 'none' | 'openai_compatible' | 'anthropic', mode
 api_key: string, updated_at: iso }` (`created_at` posé par `save`, ignoré à la lecture). Normalisation (module pur
 `src/domain/assistant-config.js`, `normaliserConfigAssistant(brut) → { provider, model, base_url, api_key }`) : chaînes
 `trim()`, Cc/Cf retirés (`borner` de `src/core/bornes.js`), `model` ≤ 200 points de code, `base_url` ≤ 500, `api_key`
-≤ 500 ; `provider` hors liste → `'none'` ; `provider === 'none'` → les trois autres champs vidés ; `base_url` n'est
-gardée que si c'est une URL `https:` absolue sans identifiants, et toujours vidée pour `anthropic` (S14).
+≤ 500 (une `base_url` plus longue est tronquée, pas rejetée : R-CPT-3) ; `provider` hors liste → `'none'` ;
+`provider === 'none'` → les trois autres champs vidés ; `base_url` n'est gardée que si c'est une URL absolue sans
+identifiants, en `https:` — ou en `http:` vers la boucle locale seulement (`localhost`, `127.0.0.1`, `[::1]`) —, et
+toujours vidée pour `anthropic` (S14, **amendé par R-CPT-4**, § 12) ; pour `openai_compatible`, une `base_url`
+**fournie mais refusée** rend toute la configuration `'none'` (jamais de repli silencieux vers l'adresse par défaut
+d'OpenAI), et Réglages le dit sans rien écrire.
 **Elle s'applique à l'écriture locale (« Enregistrer ») et à la lecture (`getSettings`)** ; la réception écrit la
 ligne **telle que le serveur la porte** (normaliser une ligne reçue créerait, à instant égal, une différence avec la
 copie du serveur, réécrite à chaque passe : F13).
@@ -139,10 +145,16 @@ passe qui a écrit (`passeAEcrit`) : une configuration reçue est lue au rendu s
 { id: 'llm', …normalisé })` (qui horodate par `syncNow()`, nettoie, écrit par `db.mutate` d'origine `local` — capturée
 sur un hôte de production avec le `user_id` du compte courant ou `null` — et émet `change`, que le moteur écoute) +
 `bus.emit('settings', { key: 'llm' })` **sans la valeur**. Règles K-6 (rien à écrire / confirmation) appliquées avant.
-Plus aucun appel à `setSetting('llm', …)` dans `src/`. « Tester » ne change pas (il teste l'objet non enregistré). Le
-toast reste « Assistant enregistré ». Pour les tests, la section est rendue par une fonction exportée à dépendances
-injectées (`{ repo, toast, confirmer }`), comme `reglerHistorique` — on ne pose pas d'espion sur un espace de noms de
-module (F12) ; les effets mesurés sont la ligne en base, l'entrée de file, les événements et le toast dans le DOM.
+Plus aucun appel à `setSetting('llm', …)` dans `src/`. **« Tester » normalise** (amendé à la clôture ; revue du plan
+par Neegan, point 1.1) : il teste l'objet non enregistré **passé par `normaliserConfigAssistant`**, jamais l'objet tapé
+— la clé ne part jamais en Bearer vers une `base_url` refusée (S14) ; une `base_url` refusée n'est ni testée ni
+enregistrée, et le refus est dit (R-CPT-4). Le toast reste « Assistant enregistré », dit **après** l'écriture. Pour les
+tests, la section est rendue par une fonction exportée à dépendances injectées, `sectionAssistant({ llm, sync, lie,
+suitLeCompte }, { saveConfig, confirm, dire, tester, rafraichir })`, comme `reglerHistorique` — on ne pose pas d'espion
+sur un espace de noms de module (F12) —, avec les **dépendances réelles par défaut** (`repo.saveAssistantConfig`,
+`confirmDialog`, `toast`, `refresh`, et `providerFrom` quand `tester` est nul). Les effets se mesurent en deux étages :
+`repo.saveAssistantConfig` (ligne en base, entrée de file, `change` + `settings` sans valeur) et la section (appels
+injectés et leur ordre ; page Réglages entière montée sur une base jetable).
 
 ### 5.3 Réception
 Chemin générique de `pull.js` : la ligne arrive dans le magasin `assistant_config` avec l'origine `remote` (pas de
@@ -362,7 +374,8 @@ consigner dans `supabase/proofs/RESULTATS-mitsu.md` (nouvelle section datée, ge
 
 `APP_VERSION = '0.6.0'` (nouveau schéma local, nouvelle table serveur), `DB_VERSION = 3`, `sw.js VERSION =
 'cuisine-os-v0.6.0-N'` (N = numéro de tâche), `SHELL` + `./src/domain/assistant-config.js` (seul module neuf). Pins
-`v0\.6\.0-\d+` et `'0.6.0'`.
+`v0\.6\.0-\d+` et `'0.6.0'`. Valeur de clôture : `cuisine-os-v0.6.0-9` (la ronde de la tâche 7 avait changé
+`src/ui/settings.js` sans incrément ; la tâche 8 ne touche pas `src/`).
 
 ## 12. Ce que la revue a amendé
 
@@ -391,4 +404,43 @@ d'espion sur un espace de noms → fonction à dépendances injectées (§ 5.2).
 lot. F15 : `getSetting('llm')` lève aussi, garde = 1, `created_at` ignoré, chaînes en `en.js`, condition `ctx.sync.user`,
 puce « assistant_config : 1 », tests à deux bases par `dbB.mutate`, égalités d'instant par `updated_at` fixes.
 
-**Rulings de construction** : R-CPT-1… (à consigner pendant le SDD).
+**Rulings de construction** (registre `.superpowers/sdd/2026-10-17-assistant-par-le-compte/progress.md`) : une ligne par
+écart entre cette spec et ce qui a été construit, avec son coût si le ruling était faux.
+
+- **R-CPT-1** (pré-vol / T4) le prédicat `configSuitLeCompte`, injecté dans `installCapture`, `createPull` et
+  `envoiInitial` (relayé par `createMoteur`), a pour défaut `() => false` : hors production, `assistant_config` n'est
+  jamais capturé, envoyé ni reçu ; `src/app.js` passe `configAssistantSuitLeCompte()` (vrai ssi `location.hostname`
+  figure dans `SUPABASE.prod.hosts`, casse ignorée). Coût si faux : une clé partirait d'un appareil de développement
+  vers le compte.
+- **R-CPT-2** (pré-vol) la fixture `withRepo` des tests pose la capture avec `configSuitLeCompte: () => true` (un
+  appareil de production) ; les tests « hors production » utilisent `withDatabase` et un `installCapture` explicite.
+  Coût si faux : un test faux-vert ou faux-rouge ; aucun effet en production.
+- **R-CPT-3** (T1 ronde 1) une `base_url` de plus de 500 points de code est **tronquée** (bornée comme les autres
+  champs), pas rejetée : même hôte, donc aucune fuite. Coût si faux : un appel vers un mauvais chemin sur une URL
+  absurde.
+- **R-CPT-4** (T3 ronde 1, amende § 4.1 et S14) `urlSure` : `https` partout, `http` pour la boucle locale seulement
+  (`localhost`, `127.0.0.1`, `[::1]`), jamais d'identifiants ; pour `openai_compatible`, une `base_url` **non vide
+  refusée** rend TOUTE la configuration `none` — jamais de repli silencieux vers OpenAI (`OpenAICompatibleProvider`
+  prend `https://api.openai.com/v1` quand `base_url` est vide) ; la passe unique ne copie pas une telle configuration
+  (à retaper) ; Réglages affiche « URL de base refusée : https exigé (ou http://localhost pour un serveur local), sans
+  identifiants. » **sans rien écrire**, et « Tester » ne part pas. La règle vaut aussi à la lecture d'une ligne reçue :
+  le « `base_url` reçue non `https:` → vidée à la lecture » du § 7 se lit, pour `openai_compatible`, « configuration
+  entière à `none` ». Dette : la CSP `connect-src 'self' https:` (lue dans `index.html`) n'autorise pas un serveur local
+  en `http://localhost:<port>` — une configuration Ollama est gardée mais inerte, et le message la propose quand même.
+  Coût si faux : la clé d'un serveur local envoyée à OpenAI (évité) ; un message qui promet trop (dette nommée).
+- **R-CPT-5** (T7 revue, amende K-6) la confirmation « Retirer l'assistant de tous tes appareils ? » n'est demandée que
+  si la ligne vide **partira** au compte : `suitLeCompte() && (sync.user || lie)` (`lie` = `sync_state.user_id`
+  présent) ; sinon « Aucun » écrit la ligne vide sans question (quand une ligne existe ici : sans ligne, rien n'est
+  écrit, K-6). Le bloc R-CPT-5 de `tests/assistant-compte.js` en éprouve quatre cas — développement connecté (0),
+  production déconnectée et liée (1), production déconnectée jamais liée (0), production connectée sur un appareil pas
+  encore lié (1, ajouté à la clôture : il tue le mutant `suitLeCompte() && lie`, qui passait la suite avant) —, et le
+  bloc K-6 le cas connecté et lié. Coût si faux : une question inutile en développement, ou une révocation silencieuse
+  sur tous les appareils (évitée).
+- **R-CPT-6** (T8 revue, amende § 7) procédure « Appareil perdu ou clé exposée » : entre « fermer les sessions » et
+  « remettre l'adresse », attendre au moins la durée de vie d'un jeton d'accès (réglage « JWT expiry » du projet
+  Supabase, 3600 s par défaut, comptée depuis la fermeture des sessions) — fermer les sessions révoque les jetons de
+  rafraîchissement, pas un jeton d'accès déjà émis. Ordre retenu (T8 ronde 1, texte de `supabase/README.md`) : retirer
+  l'adresse → fermer les sessions → révoquer l'ancienne clé chez le fournisseur, sans attendre → attendre l'expiration
+  → remettre l'adresse → entrer la nouvelle clé une fois. L'emplacement « Authentication → Settings » du réglage n'a
+  **pas** été vérifié dans le tableau de bord. Coût si faux : une heure d'attente inutile ; coût de l'oubli :
+  l'appareil perdu recevrait la nouvelle clé à sa prochaine passe.

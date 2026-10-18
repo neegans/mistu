@@ -188,7 +188,8 @@ export async function runAssistantCompteTests({ eq, ok }) {
   }
   // T3, durcissement (/verify de l'implémenteur, lentille faux-vert) : trois mutants que le bloc ci-dessus laissait vivre.
   // 1) Origine de la passe : sans capture, « rien en file » vaut même si la passe écrivait en 'local' — capture posée ici
-  //    (configSuitLeCompte: () => true, ignoré avant la tâche 4, comme pour l'envoi initial ci-dessus : R-CPT-2).
+  //    (configSuitLeCompte: () => true : un appareil de production, sans quoi la capture écarterait assistant_config et
+  //    « rien en file » vaudrait pour une autre raison ; même pose que pour l'envoi initial ci-dessus : R-CPT-2).
   // 2) Clé vide sous un vrai fournisseur : rien copié, settings.llm effacé (§ 5.6 « et une api_key non vide »).
   // 3) Horodatage présent mais illisible : repli 1970, jamais la chaîne telle quelle.
   {
@@ -237,8 +238,10 @@ export async function runAssistantCompteTests({ eq, ok }) {
 
   // --- T4 : production seulement (K-3, S3) — prédicat injecté, faux par défaut (R-CPT-1)
   const cfgMod = await import('../src/sync/config.js');
-  // Le défaut sans argument (location.hostname) ne se simule pas dans le navigateur : il n'est pas éprouvé ici, seul le
-  // prédicat à hôte explicite l'est (le défaut vaut faux sur localhost, où tourne cette suite).
+  // Ce bloc éprouve le prédicat à hôte explicite. Le défaut sans argument lit location.hostname, qui ne se simule pas
+  // dans le navigateur : il est appelé sur l'hôte réel de la suite par l'assertion K-10 du bloc Réglages, qui compare le
+  // texte par défaut de texteAssistant à configAssistantSuitLeCompte() (le câblage du défaut est éprouvé là ; les
+  // valeurs par hôte, ici).
   eq([cfgMod.configAssistantSuitLeCompte('neegans.github.io'), cfgMod.configAssistantSuitLeCompte('NEEGANS.GITHUB.IO'), cfgMod.configAssistantSuitLeCompte('localhost'), cfgMod.configAssistantSuitLeCompte('127.0.0.1'), cfgMod.configAssistantSuitLeCompte('')],
     [true, true, false, false, false], 'K-3 : vrai seulement pour les hôtes de production (prod.hosts), insensible à la casse');
   ok(cfgMod.SUPABASE.prod.hosts.length > 0 && cfgMod.SUPABASE.prod.hosts.every((h) => cfgMod.configAssistantSuitLeCompte(h)) && cfgMod.SUPABASE.dev.hosts.every((h) => !cfgMod.configAssistantSuitLeCompte(h)), 'K-3 : chaque hôte de prod.hosts de la configuration suit le compte, aucun hôte de dev.hosts ne le suit (dérivé de la configuration, pas d’une liste copiée)');
@@ -554,6 +557,8 @@ export async function runAssistantCompteTests({ eq, ok }) {
       ['développement + connectée → aucune confirmation', { user: { id: 'u1' } }, { lie: true, suitLeCompte: () => false }, 0],
       ['production + déconnectée + appareil lié → confirmation', {}, { lie: true, suitLeCompte: () => true }, 1],
       ['production + déconnectée + jamais liée → aucune confirmation', {}, { lie: false, suitLeCompte: () => true }, 0],
+      // Connectée sur un appareil pas encore lié (sync_state.user_id absent) : la ligne vide part au compte → confirmation.
+      ['production + connectée + appareil pas encore lié → confirmation', { user: { id: 'u1' } }, { lie: false, suitLeCompte: () => true }, 1],
     ]) {
       const appels = []; let demandes = 0;
       const sec = monter({ provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-r5' }, sync, { saveConfig: async (c) => { appels.push(c); }, dire: () => {}, confirm: async () => { demandes += 1; return true; } }, etat);
