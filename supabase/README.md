@@ -147,17 +147,12 @@ sont prononcés par l'API de téléversement et se jouent **depuis l'app**, au l
 Tableau de bord → **Authentication → Hooks** → **Before User Created** → type *Postgres function* → choisir
 `public.before_user_created` → activer. Puis remplir `proofs/0001_hook.md` (capture + date + projet).
 
-### 9. Fermer les autres portes, et le prouver
-
-Tableau de bord → **Authentication → Providers** : **Google** activé, et lui seul — **Email** désactivé (ni mot de
-passe, ni *magic link*), **Phone** désactivé, **Anonymous** désactivé, *Confirm email* activé, liaison automatique
-d'identités désactivée. Puis remplir `proofs/0001_providers.md` (capture + date + projet).
-
 ### 8 bis. Coller `0003_assistant_config.sql`, puis jouer sa preuve
 
 Lot « la configuration de l'assistant suit le compte » (spec
-`docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md`, § 6). Cette étape s'ajoute aux neuf autres et
-se joue **une fois**, sur un projet où elles sont faites — et **avant tout `push` du code de ce lot** : un client neuf
+`docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md`, § 6). Cette étape s'ajoute aux neuf autres
+(placée ici pour l'ordre de lecture : elle ne dépend que de `0001` et `0002`) et se joue **une fois** — et **avant
+tout `push` du code de ce lot** : un client neuf
 contre un serveur sans `0003` mettrait sa configuration en quarantaine (`refus`), et un `raise` de `sync_push` peut
 journaliser son paramètre côté Postgres (spec § 6.4).
 
@@ -197,6 +192,16 @@ collage échoue sur le `create table` et n'applique rien. Pas de `cron.schedule`
 > `data` de cette table — elle porte la clé de l'assistant, en clair. Pour un diagnostic : `data - 'api_key'` (la
 > fiche sans la clé) et `length(data->>'api_key')`, rien d'autre.
 
+Une fois `0003` appliquée, la figer : liste `SYNC_STORES_0003` + empreinte SHA-256 épinglée (logique F11), au
+prochain lot qui touche le générateur. L'empreinte du fichier collé se relit par
+`shasum -a 256 supabase/migrations/0003_assistant_config.sql` et se consigne dans `RESULTATS-mitsu.md`.
+
+### 9. Fermer les autres portes, et le prouver
+
+Tableau de bord → **Authentication → Providers** : **Google** activé, et lui seul — **Email** désactivé (ni mot de
+passe, ni *magic link*), **Phone** désactivé, **Anonymous** désactivé, *Confirm email* activé, liaison automatique
+d'identités désactivée. Puis remplir `proofs/0001_providers.md` (capture + date + projet).
+
 ## Où coller les sorties
 
 Dans `supabase/proofs/RESULTATS-<projet>.md` — donc `RESULTATS-mitsu.md` (un seul projet depuis le 13 octobre, R33). Un fichier
@@ -220,7 +225,13 @@ projet Supabase aussi). Dans cet ordre :
    `delete from private.allowed_users where email = lower('...');` — toute lecture et tout envoi sont refusés dès la
    requête suivante (preuve `0001`, verdicts 9.01-9.03), même avec une session encore ouverte.
 2. **Fermer les sessions** : tableau de bord → **Authentication → Users** → ce compte → fermer toutes ses sessions.
-3. **Révoquer l'ancienne clé** dans la console Anthropic (workspace de Cuisine OS).
-4. **Remettre l'adresse** (`insert into private.allowed_users (email) values (lower('...'));`), reconnecter les
+3. **Révoquer l'ancienne clé** dans la console Anthropic (workspace de Cuisine OS), sans attendre : la clé exposée
+   est utilisable directement chez le fournisseur.
+4. **Attendre l'expiration des jetons d'accès** (R-CPT-6) : attendre que la durée de vie d'un jeton d'accès se soit
+   écoulée depuis la fermeture des sessions (réglage « JWT expiry » du projet, 3600 s par défaut, à lire dans
+   Authentication → Settings). Fermer les sessions révoque les jetons de rafraîchissement, mais un jeton d'accès déjà
+   émis reste valide jusqu'à son expiration : l'adresse remise trop tôt, l'appareil perdu recevrait la nouvelle clé à
+   sa prochaine passe. L'adresse reste hors de la liste pendant tout ce temps.
+5. **Remettre l'adresse** (`insert into private.allowed_users (email) values (lower('...'));`), reconnecter les
    appareils gardés, et entrer la nouvelle clé **une fois**, dans Réglages → Assistant IA d'un appareil connecté :
    elle suit le compte jusqu'aux autres.

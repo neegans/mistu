@@ -161,6 +161,7 @@ une clé (`sk-…`) ou un objet `data`, ne pas la coller ici : le signaler.
 | --- | --- | --- |
 | … | `insert into private.allowed_users …` (2 adresses de preuve `exemple.invalid`) | … |
 | … | `migrations/0003_assistant_config.sql` | … |
+| … | empreinte du `0003` collé : `shasum -a 256 supabase/migrations/0003_assistant_config.sql` | … |
 | … | preuve `0003` (« Run without RLS ») | `999 BILAN : … faux sur …` |
 | … | retrait des 2 adresses de preuve | … |
 | … | `notify pgrst, 'reload schema';` (seulement si une lecture a rendu 404) | … |

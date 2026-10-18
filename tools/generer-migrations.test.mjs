@@ -207,7 +207,9 @@ test('0003 : une table neuve, revoke anon, quatre fonctions avec les 26 magasins
   assert.equal((delta.match(/create policy[^;]+;/g) || []).length, 4);
   assert.equal((delta.match(/execute function public\.touch_server_seq\(\)/g) || []).length, 1);
   assert.match(delta, /create index assistant_config_recv on public\.assistant_config \(owner_id, server_seq\);/);
+  assert.equal((delta.match(/create index /g) || []).length, 1, 'un seul index');
   assert.match(delta, /revoke all on public\.assistant_config from anon;/);
+  assert.equal((delta.match(/revoke all on public\./g) || []).length, 1, 'un seul revoke de table');
   const litteral26 = 'array[' + SYNC_STORES.map((s) => `'${s}'`).join(', ') + ']';
   assert.equal(delta.split(litteral26).length - 1, 4, 'sync_push, sync_purge, sync_purge_all, purge_tombstones');
   assert.match(delta, /"assistant_config":"id"/);
@@ -425,8 +427,33 @@ test('preuve 0003 : rollback final, aucune adresse reelle, jamais la colonne dat
   for (const j of ['A_UUID', 'A_EMAIL', 'B_UUID', 'B_EMAIL']) assert.ok(p.includes(j), j);
   // Regle de lecture (S7) : la longueur de la cle, jamais la colonne entiere.
   assert.ok(p.includes("length(data->>'api_key')"), 'la cle est relue par sa longueur');
-  for (const interdit of ['select data', 'data::text', 'select *', 'to_jsonb(', 'row_to_json', "data->>'api_key' =", "->>'api_key')::"]) {
-    assert.ok(!p.toLowerCase().includes(interdit), interdit);
+  // Liste BLANCHE (ronde 1) : une liste de formes interdites laissait vivre max(data->>'api_key'),
+  // cast(data as text) et jsonb_pretty(data). Hors commentaires (la preuve n'a que des commentaires en ligne entiere,
+  // donc seules ces lignes sont retirees : un « -- » en fin de ligne de code ne cacherait rien), chaque mot « data »
+  // doit etre l'une des quatre formes ci-dessous, relevees dans le fichier : la longueur de la cle, la fiche privee de
+  // sa cle comparee a une constante, la cle « data » du JSON pousse, la liste de colonnes de l'insert pirate (4.04).
+  const code = p.split('\n').filter((ligne) => !/^\s*--/.test(ligne)).join('\n');
+  const AUTORISEES = ["length(data->>'api_key')", "(data - 'api_key') = '", '"data":{', 'owner_id, id, data, updated_at)'];
+  for (const a of AUTORISEES) assert.ok(code.includes(a), 'forme autorisee presente : ' + a);
+  const reste = AUTORISEES.reduce((t, a) => t.split(a).join(''), code);
+  const hors = reste.match(/.{0,40}\bdata\b.{0,40}/gi) || [];
+  assert.deepEqual(hors, [], 'data hors des formes autorisees');
+  // Ronde 1 (4.06) : hors RLS (sous postgres), la table contient aussi les vraies lignes « llm » des comptes reels.
+  // Toute lecture de public.assistant_config jouee sous postgres est donc bornee aux deux comptes de preuve ; sous
+  // authenticated, la RLS borne d'elle-meme. Le role courant suit les « set local role » / « reset role » du fichier.
+  let role = 'postgres'; let bornees = 0;
+  for (const instr of code.split(';').map((x) => x.trim())) {
+    if (instr === 'set local role authenticated') role = 'authenticated';
+    else if (instr === 'reset role') role = 'postgres';
+    else if (role === 'postgres' && /from public\.assistant_config\b/.test(instr)) {
+      assert.match(instr, /owner_id in \('A_UUID', 'B_UUID'\)/, 'lecture hors RLS non bornee : ' + instr.slice(0, 120));
+      bornees += 1;
+    }
+  }
+  assert.ok(bornees >= 2, 'les verdicts 4.06 et 4.07 sont bien lus sous postgres');
+  // Et rien qui affiche une ligne ENTIERE sans nommer data (alias de ligne, agregat de lignes).
+  for (const interdit of ['select *', '.*', 'to_jsonb(', 'row_to_json', 'jsonb_agg(', 'json_agg(', 'array_agg(', 'jsonb_pretty(']) {
+    assert.ok(!code.toLowerCase().includes(interdit), interdit);
   }
   // Toute reponse de sync_push s'appelle « reponse » et n'est jamais convertie en texte : seuls ses compteurs et
   // son motif sont affiches (la reponse a un conflit porte server.data, donc la cle).
@@ -465,14 +492,20 @@ test('README : etape 8 bis (0003 et sa preuve) et procedure « appareil perdu ou
   const r = lire('supabase/README.md');
   const debut = r.indexOf('### 8 bis. Coller `0003_assistant_config.sql`, puis jouer sa preuve');
   assert.notEqual(debut, -1, 'etape 8 bis');
-  const etape = r.slice(debut, r.indexOf('\n## ', debut));
+  // Ronde 1 : l'etape 8 bis est placee entre 8 et 9 (ordre de lecture) ; elle s'arrete au titre de l'etape 9.
+  assert.ok(r.indexOf('### 8. Brancher le crochet') < debut && debut < r.indexOf('### 9. Fermer les autres portes'), '8 bis entre 8 et 9');
+  const etape = r.slice(debut, r.indexOf('\n### 9. ', debut));
   for (const m of ['migrations/0003_assistant_config.sql', 'proofs/0003_assistant_config.sql', 'exemple.invalid', 'Run without RLS',
-    "notify pgrst, 'reload schema';", 'push', 'A_UUID', 'B_EMAIL', 'RESULTATS-mitsu.md', "length(data->>'api_key')"]) assert.ok(etape.includes(m), m);
+    "notify pgrst, 'reload schema';", 'push', 'A_UUID', 'B_EMAIL', 'RESULTATS-mitsu.md', "length(data->>'api_key')",
+    'SYNC_STORES_0003', 'shasum -a 256 supabase/migrations/0003_assistant_config.sql']) assert.ok(etape.includes(m), m);
   const perdu = r.slice(r.indexOf('## Appareil perdu ou clé exposée'));
   assert.ok(perdu.startsWith('## Appareil perdu'), 'section appareil perdu');
-  // L'ordre de la spec § 7 : retirer l'adresse, fermer les sessions, revoquer la cle, remettre l'adresse.
-  const i = ['delete from private.allowed_users', 'Authentication → Users', 'console Anthropic', 'insert into private.allowed_users'].map((m) => perdu.indexOf(m));
-  assert.ok(i.every((x) => x !== -1), 'quatre gestes presents');
+  // L'ordre de la spec § 7 (amende R-CPT-6) : retirer l'adresse, fermer les sessions, revoquer la cle, ATTENDRE
+  // l'expiration des jetons d'acces (un jeton deja emis reste valide), remettre l'adresse et entrer la cle neuve.
+  const i = ["private.allowed_users where email = lower('...');", 'Authentication → Users', 'console Anthropic', '« JWT expiry »',
+    'insert into private.allowed_users', 'entrer la nouvelle clé'].map((m) => perdu.indexOf(m));
+  assert.ok(i.every((x) => x !== -1), 'six gestes presents : ' + i.join(','));
+  assert.ok(perdu.includes('3600 s par défaut'), 'la valeur par defaut du reglage');
   assert.deepEqual([...i].sort((a, b) => a - b), i, 'dans l ordre de la spec');
   const res = lire('supabase/proofs/RESULTATS-mitsu.md');
   assert.ok(res.includes('## Preuve `0003_assistant_config.sql` — à jouer (à remplir par Neegan, sans aucune valeur de data)'));

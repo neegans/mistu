@@ -211,14 +211,16 @@ insert into pg_temp.preuve
 select 4.05, 'B ne peut pas modifier la ligne de A : aucune ligne touchee', '0', count(*)::text, count(*) = 0 from u;
 
 -- Vu de `postgres` (propriétaire de la table, donc hors RLS) : deux lignes « llm », deux propriétaires, rien de
--- piraté. Toujours sans lire `data`.
+-- piraté. Toujours sans lire `data`. Hors RLS, la table contient AUSSI les vraies lignes « llm » des comptes réels
+-- (dès le premier envoi de l'app) : chaque compte est donc borné aux deux comptes de preuve.
 reset role;
 insert into pg_temp.preuve
-select 4.06, 'meme id llm chez deux proprietaires (vu de postgres : hors RLS)', '2 lignes, 2 proprietaires',
+select 4.06, 'meme id llm chez les deux comptes de preuve (vu de postgres : hors RLS)', '2 lignes, 2 proprietaires',
   count(*) || ' lignes, ' || count(distinct owner_id) || ' proprietaires', count(*) = 2 and count(distinct owner_id) = 2
-from public.assistant_config where id = 'llm';
+from public.assistant_config where id = 'llm' and owner_id in ('A_UUID', 'B_UUID');
 insert into pg_temp.preuve
-select 4.07, 'aucune ligne piratee', '0', count(*)::text, count(*) = 0 from public.assistant_config where id = 'llm_pirate';
+select 4.07, 'aucune ligne piratee chez les deux comptes de preuve', '0', count(*)::text, count(*) = 0
+from public.assistant_config where id = 'llm_pirate' and owner_id in ('A_UUID', 'B_UUID');
 
 -- 5. SUPPRESSION DIRECTE (comme 4.01 de 0001) : la règle delete n'est franchissable que sous `app.purge`. Aucune purge
 --    n'a été jouée plus haut ; le drapeau est remis à vide quand même, pour que le verdict ne dépende pas de l'ordre.
@@ -236,23 +238,24 @@ reset role;
 -- 6. LES QUATRE FONCTIONS RECRÉÉES (spec § 6.1) : chacune liste 26 magasins, et la liste finit par 'files',
 --    'assistant_config' (K-9 : la table neuve est la dernière). Le premier `array[` de chaque corps est la constante
 --    `stores`. La garde 0 a déjà vu 'assistant_config' dans `sync_push` ; 6.01 en vérifie en plus le nombre et la place.
+--    `to_regprocedure` rend NULL (au lieu de lever) pour une fonction absente : chaque NULL donne un verdict FAUX.
 insert into pg_temp.preuve
 select n, f || ' : 26 magasins, la liste finit par files, assistant_config', '26 / true',
-  coalesce(nb::text, 'aucune liste') || ' / ' || fin::text, coalesce(nb = 26, false) and fin
+  coalesce(nb::text, 'aucune liste') || ' / ' || coalesce(fin::text, 'fonction absente'), coalesce(nb = 26 and fin, false)
 from (values
   (6.01, 'public.sync_push(jsonb)'),
   (6.02, 'public.sync_purge(text, text)'),
   (6.03, 'public.sync_purge_all()'),
   (6.04, 'public.purge_tombstones()')
 ) as x(n, f),
-lateral (select pg_get_functiondef(f::regprocedure) as d) y,
-lateral (select array_length(string_to_array((regexp_match(y.d, 'array\[([^]]*)\]'))[1], ', '), 1) as nb,
+lateral (select pg_get_functiondef(to_regprocedure(f)) as d) y,
+lateral (select array_length(string_to_array(split_part(split_part(y.d, 'array[', 2), ']', 1), ', '), 1) as nb,
                 position('''files'', ''assistant_config'']' in y.d) > 0 as fin) z;
 insert into pg_temp.preuve
 select 6.05, 'sync_push : keys et required connaissent assistant_config', 'true / true',
-  (position('"assistant_config":"id"' in d) > 0)::text || ' / ' || (position('"assistant_config":[]' in d) > 0)::text,
-  position('"assistant_config":"id"' in d) > 0 and position('"assistant_config":[]' in d) > 0
-from (select pg_get_functiondef('public.sync_push(jsonb)'::regprocedure) as d) t;
+  coalesce((position('"assistant_config":"id"' in d) > 0)::text || ' / ' || (position('"assistant_config":[]' in d) > 0)::text, 'fonction absente'),
+  coalesce(position('"assistant_config":"id"' in d) > 0 and position('"assistant_config":[]' in d) > 0, false)
+from (select pg_get_functiondef(to_regprocedure('public.sync_push(jsonb)')) as d) t;
 
 -- 7. JOURNAUX DE POSTGRES (S9 : le « non mesuré » du § 7 devient une mesure). Verdicts INFORMATIFS : `ok = true`
 --    quelle que soit la valeur, qui est simplement relevée. Lecture d'après la documentation de PostgreSQL :

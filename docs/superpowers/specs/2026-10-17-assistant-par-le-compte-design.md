@@ -282,8 +282,12 @@ consigner dans `supabase/proofs/RESULTATS-mitsu.md` (nouvelle section datée, ge
   (appareils hors ligne, sauvegardes Supabase). **Procédure « appareil perdu ou clé exposée », dans cet ordre** :
   1. retirer l'adresse de `private.allowed_users` (coupe toute lecture à la requête suivante : preuve 9.01-9.03) ;
   2. Supabase → Authentication → Users → fermer toutes les sessions du compte ;
-  3. révoquer l'ancienne clé dans la console Anthropic ;
-  4. remettre l'adresse, reconnecter les appareils gardés, entrer la nouvelle clé une fois.
+  3. révoquer l'ancienne clé dans la console Anthropic, sans attendre ;
+  4. attendre que la durée de vie d'un jeton d'accès se soit écoulée depuis la fermeture des sessions (réglage « JWT
+     expiry » du projet, 3600 s par défaut, à lire dans Authentication → Settings) : fermer les sessions révoque les
+     jetons de rafraîchissement, mais un jeton d'accès déjà émis reste valide jusqu'à son expiration — l'adresse
+     remise trop tôt, l'appareil perdu recevrait la nouvelle clé à sa prochaine passe (R-CPT-6) ;
+  5. remettre l'adresse, reconnecter les appareils gardés, entrer la nouvelle clé une fois.
   Cette procédure figure dans `supabase/README.md` et dans CLAUDE.md.
 - **Réception d'une ligne hostile** : normalisée à la lecture (§ 4.1) ; la clé reçue n'est jamais rendue (champ
   `password`) ; `providerFrom` ne voit qu'un objet typé ; `base_url` reçue non `https:` → vidée à la lecture.
