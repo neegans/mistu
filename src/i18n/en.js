@@ -349,4 +349,8 @@ export const EN = {
   "La recette n’a pas pu être gardée. Réessaie.": "The recipe could not be kept. Try again.",
   "L’assistant n’a pas rendu une recette lisible. Recommence.": "The assistant did not return a readable recipe. Start over.",
   "Réponse coupée : réessaie avec une demande plus courte.": "Answer cut off: try again with a shorter request.",
+  // Les deux portes vers l'écran de création : la carte de la page Ajouter et le bouton de l'onglet Web de la recherche (§ 3.1).
+  "Créer avec l’IA": "Create with AI",
+  "Une proposition à vérifier": "A proposal to check",
+  "Créer une recette avec ces critères": "Create a recipe with these criteria",
 };

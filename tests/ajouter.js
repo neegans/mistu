@@ -83,16 +83,16 @@ export async function runAjouterTests({ eq, ok }) {
   // --- § 4 Grille et § 10 sélecteur avant scan
   const { grilleModel, GRILLE_ACTIONS, renderGrille, selecteurScanModel, renderSelecteurScan, parametresDeScan, ACCEPT_PHOTOS, ACCEPT_FICHIERS } = await import('../src/ui/add.js');
   const { libelleLivre, carte } = await import('../src/ui/components.js');
-  eq(GRILLE_ACTIONS, ['ajouterLivre', 'pages', 'saisir', 'signet', 'congelateur'], 'grille : cinq gestes nommés, dans l’ordre des cartes');
+  eq(GRILLE_ACTIONS, ['ajouterLivre', 'pages', 'saisir', 'signet', 'creerIA', 'congelateur'], 'grille : six gestes nommés, dans l’ordre des cartes — « Créer avec l’IA » juste avant le congélateur (lot Créer avec l’IA, T4)');
   // RF-m14 : `grilleModel` ne prend AUCUN argument — l'appeler avec `{}` laissait croire à une option qui n'existe pas.
   eq(grilleModel().cartes.map((c) => c.action), GRILLE_ACTIONS, 'grille : une carte par geste, même ordre');
-  eq(grilleModel().cartes.map((c) => c.titre), ['Ajouter un livre', 'Photographier ou importer des pages', 'Saisir une recette', 'Garder un lien web', 'Ajouter un lot au congélateur'], 'grille : les cinq titres de la spec');
+  eq(grilleModel().cartes.map((c) => c.titre), ['Ajouter un livre', 'Photographier ou importer des pages', 'Saisir une recette', 'Garder un lien web', 'Créer avec l’IA', 'Ajouter un lot au congélateur'], 'grille : les six titres de la spec');
   {
     const appels = [];
     const gestes = Object.fromEntries(GRILLE_ACTIONS.map((a) => [a, () => appels.push(a)]));
     const noeud = renderGrille(grilleModel(), gestes);
     const cartes = [...noeud.querySelectorAll('button.carte')];
-    eq(cartes.length, 5, 'grille : cinq cartes rendues, aucun formulaire');
+    eq(cartes.length, 6, 'grille : six cartes rendues, aucun formulaire');
     eq(noeud.querySelectorAll('input, select, textarea').length, 0, 'grille : plus aucun champ de formulaire sur la page Ajouter');
     cartes[3].click(); cartes[0].click();
     eq(appels, ['signet', 'ajouterLivre'], 'grille : chaque carte appelle son geste');
@@ -169,14 +169,14 @@ export async function runAjouterTests({ eq, ok }) {
       ],
     };
     const grille = await renderAdd({}, {}, ctxAdd);
-    eq([grille.querySelectorAll('button.carte').length, grille.querySelector('.selecteur-scan')], [5, null], 'page Ajouter : sans ?edition, la grille des cinq cartes et aucun sélecteur');
+    eq([grille.querySelectorAll('button.carte').length, grille.querySelector('.selecteur-scan')], [6, null], 'page Ajouter : sans ?edition, la grille des six cartes et aucun sélecteur');
     const impose = await renderAdd({}, { edition: 'e1' }, ctxAdd);
     const sel = impose.querySelector('.selecteur-scan select');
     eq([!!impose.querySelector('.selecteur-scan'), impose.querySelectorAll('button.carte').length, sel.disabled, sel.value], [true, 0, true, 'e1'],
       'page Ajouter : un ?edition connu ouvre DIRECTEMENT le sélecteur, livre fixé — plus de grille à traverser (C5, R-UX-16)');
     [...impose.querySelectorAll('button')].find((b) => b.textContent === '← Retour').click();
-    eq([impose.querySelectorAll('button.carte').length, impose.querySelector('.selecteur-scan')], [5, null], 'page Ajouter : « ← Retour » ramène à la grille, pour qui voulait autre chose');
-    eq((await renderAdd({}, { edition: 'jamais vue' }, ctxAdd)).querySelectorAll('button.carte').length, 5, 'page Ajouter : un ?edition inconnu est traité comme absent — la grille, pas un sélecteur sur un livre fantôme (S9)');
+    eq([impose.querySelectorAll('button.carte').length, impose.querySelector('.selecteur-scan')], [6, null], 'page Ajouter : « ← Retour » ramène à la grille, pour qui voulait autre chose');
+    eq((await renderAdd({}, { edition: 'jamais vue' }, ctxAdd)).querySelectorAll('button.carte').length, 6, 'page Ajouter : un ?edition inconnu est traité comme absent — la grille, pas un sélecteur sur un livre fantôme (S9)');
     // C8 : deux ouvertures de janvier ne passent plus devant une ouverture d'hier, et une date illisible ne vaut
     // pas « 1970 » — elle ne compte pas du tout.
     const grille2 = await renderAdd({}, {}, ctxAdd);

@@ -863,4 +863,208 @@ export async function runCreerIaTests({ eq, ok }) {
       'Trop de demandes pour l’instant. Réessaie dans une minute.', 'L’assistant a refusé cette demande.', 'L’assistant n’a pas répondu. Réessaie.', 'Réessayer', 'Réglages', 'Code : {c}'];
     eq(CLES_T3.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'en.js : chaque texte de l’écran de création a sa traduction');
   }
+
+  // --- T4 : les deux portes vers #/recipes/creer (§ 3.1, N-1) et les chaînes anglaises. P12 : l'adresse omet les vides ; P17 :
+  // langue française et fetch neutralisé dans le bloc d'écran (rendus dans le finally).
+  {
+    const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
+    const localeAvant = getUiLocale();
+    setUiLocale('fr');
+    const A = await import('../src/ui/add.js');
+    const S = await import('../src/ui/search.js');
+    const SC = await import('../src/ui/creer-ia.js');
+    const vraiFetch = globalThis.fetch;
+    let appelsReseau = 0;
+    globalThis.fetch = async (u) => { appelsReseau += 1; throw new Error(`aucun reseau attendu ici : ${u}`); };
+    const scene = document.createElement('div'); scene.hidden = true; document.body.append(scene);
+    const adresseAvant = location.href;
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    const ING_T4 = new Map(INGREDIENTS.map((i) => [i.id, i]));
+    const ANTH = { provider: 'anthropic', api_key: 'sk-factice-portes', model: 'm' };
+    const ctxDe = (llm) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING_T4, meal_feedback: [], settings: { llm }, versionsById: new Map(), recipesById: new Map(), conventionFor: () => null });
+    const appels = { n: 0, rendre: null };
+    const chercher = async () => { appels.n += 1; return new Promise((r) => { appels.rendre = r; }); };
+    const navs = [];
+    const monter = async (query, ctx = ctxDe(ANTH)) => { const root = await S.renderSearch({}, { mode: 'web', ...query }, ctx, { chercher, remplacerAdresse: () => {}, navigate: (p) => navs.push(p) }); scene.append(root); return root; };
+    const parTexte = (root, nom) => [...root.querySelectorAll('button')].find((b) => b.textContent === nom);
+    const porte = (root) => root.querySelector('[data-role="creer-depuis-web"]');
+    const liste = (root, premiere) => [...root.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.textContent === premiere));
+    const choisir = (root, premiere, valeur) => { const l = liste(root, premiere); l.value = valeur; l.dispatchEvent(new Event('change')); };
+    const base = { raison: null, liens: [], autres: [], repli: false, recherches: null, modele: 'm' };
+    const rien = { ...base, etat: 'rien' };
+    const refuse = { ...base, etat: 'indisponible', raison: 'recherche_desactivee' };
+    const trouve = { ...base, etat: 'trouve', liens: [{ href: 'https://a.test/r', hote: 'a.test', titre: 'Saumon au fenouil', date: null, pourquoi: 'Fenouil et saumon.' }], recherches: 1 };
+    // Ouvre l'écran Web sur une demande « saumon fenouil » + « Sans gluten » (choisi dans la liste), tape, résout l'issue donnée.
+    const ouvrir = async (issue, { q = 'saumon fenouil', diets = ['sans_gluten'], type = '' } = {}) => {
+      S.reinitialiserWeb();
+      const root = await monter({ q });
+      for (const d of diets) choisir(root, '+ restriction', d);
+      if (type) choisir(root, '+ type', type);
+      parTexte(root, 'Chercher sur le web avec l’assistant').click(); await tick();
+      appels.rendre(issue); await tick();
+      return root;
+    };
+    const apres = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+    // Clique la porte : une navigation, aucune recherche web (N-1 : la porte ne coûte rien) ; rend l'adresse.
+    const cliquer = async (root) => {
+      const n = appels.n; const avant = navs.length;
+      porte(root).click(); await tick();
+      return { navs: navs.length - avant, adresse: navs[navs.length - 1], appels: appels.n - n, enVol: S.etatWeb().enCours };
+    };
+    try {
+      // --- Porte 1 : la carte « Créer avec l'IA » de la page Ajouter
+      {
+        const carteIA = A.grilleModel().cartes.find((c) => c.action === 'creerIA');
+        eq([carteIA?.ico, carteIA?.titre, carteIA?.sousTitre, A.grilleModel().cartes.map((c) => c.action).indexOf('creerIA'), A.grilleModel().cartes.length], ['✨', 'Créer avec l’IA', 'Une proposition à vérifier', 4, 6], 'porte Ajouter : la carte ✨ « Créer avec l’IA » est la cinquième, juste avant le congélateur');
+        const page = await A.renderAdd({}, {}, { book_editions: [], booksById: new Map(), editionsById: new Map(), library_activity: [] });
+        const rendue = [...page.querySelectorAll('button.carte')].find((b) => b.querySelector('h3')?.textContent === 'Créer avec l’IA');
+        eq([!!rendue, rendue?.querySelector('p')?.textContent, page.querySelectorAll('button.carte').length], [true, 'Une proposition à vérifier', 6], 'porte Ajouter : la carte est rendue sur la page, avec son sous-titre — six cartes');
+        eq(location.hash === '#/recipes/creer', false, 'porte Ajouter : l’adresse de la page de tests n’est pas déjà celle de l’écran de création');
+        rendue.click();
+        eq(location.hash, '#/recipes/creer', 'porte Ajouter : toucher la carte ouvre #/recipes/creer, sans paramètre');
+        history.replaceState(null, '', adresseAvant);
+        // Une carte sans geste câblé n'est pas rendue (même garde que les autres cartes).
+        eq(A.renderGrille(A.grilleModel(), { pages: () => {} }).querySelectorAll('button.carte').length, 1, 'porte Ajouter : sans geste creerIA câblé, la carte ne se rend pas');
+      }
+
+      // --- Porte 2 : « Créer une recette avec ces critères » sur l'onglet Web (§ 3.1)
+      // (a) issue « rien » : après « Réessayer », l'adresse porte exactement les puces AFFICHÉES (P12 : les vides sont omis)
+      {
+        const root = await ouvrir(rien);
+        const b = porte(root);
+        eq([b?.tagName, b?.textContent, b?.type], ['BUTTON', 'Créer une recette avec ces critères', 'button'], 'porte Web : « rien » → le bouton, libellé de la spec');
+        ok(apres(parTexte(root, 'Réessayer'), b), 'porte Web : « rien » → le bouton vient APRÈS « Réessayer »');
+        eq(await cliquer(root), { navs: 1, adresse: '/recipes/creer?q=saumon+fenouil&diets=sans_gluten', appels: 0, enVol: false }, 'porte Web : « rien » → une navigation vers l’écran de création, q et régime affichés, type et max omis (P12), aucun appel web');
+        root.remove();
+      }
+      // (b) « indisponible » : seulement quand la recherche web n'est pas activée sur le compte (la création, elle, peut marcher)
+      {
+        const root = await ouvrir(refuse);
+        eq([!!porte(root), !!parTexte(root, 'Chercher à nouveau')], [true, true], 'porte Web : recherche_desactivee → le bouton, avec « Chercher à nouveau » (qui lui reste)');
+        ok(apres(parTexte(root, 'Chercher à nouveau'), porte(root)), 'porte Web : recherche_desactivee → le bouton vient après « Chercher à nouveau »');
+        eq(await cliquer(root), { navs: 1, adresse: '/recipes/creer?q=saumon+fenouil&diets=sans_gluten', appels: 0, enVol: false }, 'porte Web : recherche_desactivee → même adresse, aucun appel web');
+        root.remove();
+      }
+      // (c) « trouvé » : après l'avertissement I-K
+      {
+        const root = await ouvrir(trouve);
+        const avertissement = [...root.querySelectorAll('.status')].find((n) => n.textContent === 'L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.');
+        eq(root.querySelectorAll('[data-role="creer-depuis-web"]').length, 1, 'porte Web : « trouvé » → un seul bouton');
+        ok(!!avertissement && apres(avertissement, porte(root)), 'porte Web : « trouvé » → le bouton vient APRÈS l’avertissement I-K (qui reste)');
+        eq(await cliquer(root), { navs: 1, adresse: '/recipes/creer?q=saumon+fenouil&diets=sans_gluten', appels: 0, enVol: false }, 'porte Web : « trouvé » → même adresse, aucun appel web');
+        // R-WEB-10 / « affichées » : une puce retirée à la main n'est plus dans l'adresse
+        [...root.querySelectorAll('.chip.removable')].find((c) => c.textContent === 'Sans gluten').click();
+        eq(await cliquer(root), { navs: 1, adresse: '/recipes/creer?q=saumon+fenouil', appels: 0, enVol: false }, 'porte Web : une puce retirée n’est plus dans l’adresse — ce qui part est ce qui est affiché (R-WEB-10)');
+        root.remove();
+      }
+      // Les autres issues et les écrans de garde n'ont pas la porte (la spec la met en trois endroits seulement)
+      {
+        const manque = [];
+        for (const issue of [{ ...base, etat: 'indisponible', raison: 'cle_refusee' }, { ...base, etat: 'indisponible', raison: 'refus' }, { ...base, etat: 'indisponible', raison: 'hors_ligne' }, { ...base, etat: 'indisponible', raison: 'reseau' }, { ...base, etat: 'indisponible', raison: 'trop_de_demandes' }, { ...base, etat: 'indisponible', raison: 'pas_cherche' }, { ...base, etat: 'indisponible', raison: 'interne' }, { ...base, etat: 'non_configure' }, { ...base, etat: 'non_pris_en_charge' }]) {
+          const root = await ouvrir(issue);
+          // l'écran de l'issue est bien là (pas le premier écran du bouton, où la porte est aussi absente)
+          manque.push([`${issue.etat}:${issue.raison}`, S.etatWeb().memoire?.etat === issue.etat && !parTexte(root, 'Chercher sur le web avec l’assistant'), !!porte(root)]);
+          root.remove();
+        }
+        eq(manque.filter(([, ecranDeLIssue, laPorte]) => !ecranDeLIssue || laPorte), [], 'porte Web : ni cle_refusee, refus, hors_ligne, reseau, trop_de_demandes, pas_cherche, interne, non_configure ni non_pris_en_charge n’ont le bouton (et chacun est bien affiché)');
+        // pendant le vol : jamais
+        S.reinitialiserWeb();
+        const root = await monter({ q: 'saumon fenouil' });
+        eq(!!porte(root), false, 'porte Web : premier écran (avant toute recherche) → pas de bouton');
+        parTexte(root, 'Chercher sur le web avec l’assistant').click(); await tick();
+        eq([S.etatWeb().enCours, !!parTexte(root, 'Annuler'), !!porte(root)], [true, true, false], 'porte Web : pendant le vol → pas de bouton');
+        parTexte(root, 'Annuler').click(); appels.rendre({ ...base, etat: 'indisponible', raison: 'annule' }); await tick();
+        root.remove();
+        // assistant non configuré : l'écran de garde, aucune porte
+        const garde = await monter({ q: 'saumon fenouil' }, ctxDe({}));
+        eq([garde.textContent.includes('configure l’assistant IA'), !!porte(garde)], [true, false], 'porte Web : assistant non configuré → la garde, pas de bouton');
+        garde.remove();
+      }
+      // (d) relireChamp : le champ tapé SANS Entrée est relu avant de naviguer (R-WEB-10), les puces des listes survivent
+      {
+        const root = await ouvrir(rien);
+        const champ = root.querySelector('input[type="search"]');
+        champ.value = 'truite'; champ.dispatchEvent(new Event('input'));
+        eq(await cliquer(root), { navs: 1, adresse: '/recipes/creer?q=truite&diets=sans_gluten', appels: 0, enVol: false }, 'porte Web : champ « truite » tapé sans Entrée → q=truite (relireChamp), la restriction choisie dans la liste survit, aucun appel web');
+        champ.value = '  '; champ.dispatchEvent(new Event('input'));
+        eq((await cliquer(root)).adresse, '/recipes/creer?diets=sans_gluten', 'porte Web : champ vidé → pas de q dans l’adresse (les vides sont omis)');
+        root.remove();
+      }
+      // (d bis) la durée ACTIVE et les exclusions ne passent pas : l'écran de création ne lit que q, diets, type, portions et max
+      {
+        const root = await ouvrir(rien, { q: 'soupe 10 minutes de travail', diets: [] });
+        eq((await cliquer(root)).adresse, '/recipes/creer?q=soupe+10+minutes+de+travail&type=soupe', 'porte Web : une durée active (10 min de travail) ne devient pas un max ; le type compris du texte, lui, est porté');
+        root.remove();
+      }
+      // (e) type, durée et plusieurs régimes ; caractères réservés encodés ; l'écran de création reçoit ce que la porte a posé
+      {
+        const root = await ouvrir(rien, { q: 'poulet & riz #1 100% en 20 minutes', diets: ['sans_gluten', 'sans_lactose'], type: 'soupe' });
+        const r = await cliquer(root);
+        eq([r.navs, r.appels], [1, 0], 'porte Web : type + durée + deux régimes → une navigation, aucun appel');
+        const [chemin, qs] = r.adresse.split('?');
+        const p = new URLSearchParams(qs);
+        eq([chemin, p.get('q'), p.get('diets'), p.get('type'), p.get('max'), [...p.keys()]], ['/recipes/creer', 'poulet & riz #1 100% en 20 minutes', 'sans_gluten,sans_lactose', 'soupe', '20', ['q', 'diets', 'type', 'max']], 'porte Web : l’adresse ne porte que q, diets, type et max, dans cet ordre, en valeurs lisibles après décodage');
+        eq(r.adresse, '/recipes/creer?q=poulet+%26+riz+%231+100%25+en+20+minutes&diets=sans_gluten%2Csans_lactose&type=soupe&max=20', 'porte Web : l’adresse exacte — texte libre encodé par buildQuery (+, %26, %23, %25), régimes séparés par %2C (P12)');
+        // l'écran de création, monté depuis cette adresse, est prérempli (filtresDepuisQuery)
+        const query = Object.fromEntries(p.entries());
+        const ecran = await SC.renderCreerIA({}, query, ctxDe(ANTH), { creer: async () => { throw new Error('aucun appel attendu'); }, remplacerAdresse: () => {}, navigate: () => {}, toast: () => {} });
+        scene.append(ecran);
+        eq([ecran.querySelector('[data-role="demande-ia"]').value, [...ecran.querySelectorAll('[data-diet][aria-pressed="true"]')].map((b) => b.dataset.diet), ecran.querySelector('select[name="type"]').value, ecran.querySelector('input[name="max"]').value],
+          ['poulet & riz #1 100% en 20 minutes', ['sans_gluten', 'sans_lactose'], 'soupe', '20'], 'porte Web → écran de création : demande, régimes, type et durée arrivent préremplis');
+        ecran.remove(); SC.reinitialiserCreation(); root.remove();
+      }
+      eq(appelsReseau, 0, 'portes : aucun appel réseau réel pendant ces tests');
+
+      // --- Chaînes anglaises des deux portes : t() lit en.js quand l'interface est en anglais
+      setUiLocale('en');
+      const carteEn = A.grilleModel().cartes.find((c) => c.action === 'creerIA');
+      eq([carteEn.titre, carteEn.sousTitre], ['Create with AI', 'A proposal to check'], 'en : la carte Ajouter est traduite');
+      S.reinitialiserWeb();
+      const rootEn = await monter({ q: 'saumon fenouil' });
+      parTexte(rootEn, EN['Chercher sur le web avec l’assistant']).click(); await tick(); appels.rendre(rien); await tick();
+      eq(porte(rootEn)?.textContent, 'Create a recipe with these criteria', 'en : le bouton de l’onglet Web est traduit');
+      rootEn.remove();
+    } finally { globalThis.fetch = vraiFetch; scene.remove(); S.reinitialiserWeb(); SC.reinitialiserCreation(); setUiLocale(localeAvant); if (location.href !== adresseAvant) history.replaceState(null, '', adresseAvant); }
+  }
+
+  // --- T4 : couverture en.js — chaque chaîne t() NEUVE de creer-ia.js, add.js et search.js a son entrée (motif de tests/recherche-web.js,
+  // mais lu dans le SOURCE : une chaîne ajoutée demain sans traduction rougit ici sans qu'on pense à l'ajouter à une liste).
+  {
+    // Chaînes littérales du PREMIER argument de chaque appel t(…) (ternaires et « || » compris) ; un littéral de comparaison (=== 'x') n'est pas un texte.
+    const chainesDe = (src) => {
+      const sortie = [];
+      const re = /(?<![\w$.])t\(/g;
+      let m;
+      while ((m = re.exec(src))) {
+        let i = m.index + m[0].length; let profondeur = 1; let premierArgument = true;
+        while (i < src.length && profondeur > 0) {
+          const c = src[i];
+          if (c === '\'' || c === '"' || c === '`') {
+            let j = i + 1; let s = '';
+            while (j < src.length && src[j] !== c) { if (src[j] === '\\') { s += src[j + 1]; j += 2; continue; } s += src[j]; j += 1; }
+            const avant = src.slice(Math.max(0, i - 4), i).trim();
+            if (c !== '`' && premierArgument && !/[=!]=?=?$/.test(avant)) sortie.push(s);
+            i = j + 1; continue;
+          }
+          if (c === '(' || c === '[' || c === '{') profondeur += 1; else if (c === ')' || c === ']' || c === '}') profondeur -= 1; else if (c === ',' && profondeur === 1) premierArgument = false;
+          i += 1;
+        }
+      }
+      // Textes rangés dans des constantes puis passés à t(variable) : TEXTE_…, le tableau TEXTES_INDISPONIBLE et `texte: '…'`.
+      for (const x of src.matchAll(/\b(?:TEXTE_[A-Z_]+\s*=|texte:)\s*'((?:\\.|[^'\\])*)'/g)) sortie.push(x[1]);
+      const bloc = /const TEXTES_INDISPONIBLE = \{([\s\S]*?)\n\};/.exec(src);
+      if (bloc) for (const x of bloc[1].matchAll(/^\s+\w+:\s*'((?:\\.|[^'\\])*)'/gm)) sortie.push(x[1]);
+      return [...new Set(sortie)];
+    };
+    const sansEntree = (sources, dico) => Object.entries(sources).flatMap(([nom, src]) => chainesDe(src).filter((k) => typeof dico[k] !== 'string' || !dico[k]).map((k) => `${nom} : ${k}`));
+    // Le détecteur lui-même : une chaîne sans entrée est vue, les faux positifs connus ne le sont pas.
+    eq(sansEntree({ 'x.js': "t('Chaîne neuve sans entrée') + t('Réglages') + t(a === 'non_configure' ? 'Annuler' : 'Créer ma recette') + t('Code : {c}', { c: String(r || 'inconnu') }) + t(g.texte)" }, EN), ['x.js : Chaîne neuve sans entrée'], 'couverture en.js : le détecteur voit une chaîne sans entrée, ignore un littéral de comparaison, un second argument et une variable');
+    eq(sansEntree({ 'y.js': "const TEXTE_X = 'Texte rangé sans entrée';\nconst TEXTES_INDISPONIBLE = {\n  a: 'Réglages',\n  b: 'Autre sans entrée',\n};\nf({ texte: 'Annuler' }); f({ texte: 'Troisième sans entrée' })" }, EN).sort(), ['y.js : Autre sans entrée', 'y.js : Texte rangé sans entrée', 'y.js : Troisième sans entrée'], 'couverture en.js : le détecteur lit aussi les textes rangés dans une constante, dans TEXTES_INDISPONIBLE et dans « texte: »');
+    const lire = async (chemin) => { const r = await fetch(new URL(chemin, import.meta.url), { cache: 'no-store' }); if (!r.ok) throw new Error(`${chemin} : HTTP ${r.status}`); return r.text(); };
+    const sources = { 'creer-ia.js': await lire('../src/ui/creer-ia.js'), 'add.js': await lire('../src/ui/add.js'), 'search.js': await lire('../src/ui/search.js') };
+    // Antérieures au lot et hors périmètre (gelées ici pour ne rien cacher d'autre) : quatre chaînes de search.js sans entrée.
+    const ANTERIEURES = ['search.js : Préciser : concombre, sans gluten, 15 minutes…', 'search.js : Ex. : une salade avec du concombre, sans gluten, en quinze minutes', 'search.js : Références d’index : ingrédients, durées et compatibilités inconnus tant que la recette n’est pas scannée.', 'search.js : {n} recette(s) écartée(s) par une restriction alimentaire.'];
+    eq(sansEntree(sources, EN).filter((k) => !ANTERIEURES.includes(k)), [], 'en.js : chaque chaîne t() de creer-ia.js, add.js et search.js (hors quatre antérieures au lot) a sa traduction');
+    ok(chainesDe(sources['add.js']).includes('Créer avec l’IA') && chainesDe(sources['search.js']).includes('Créer une recette avec ces critères') && chainesDe(sources['creer-ia.js']).includes('Écris d’abord ce que tu veux cuisiner.'), 'couverture en.js : le détecteur lit bien les chaînes des trois sources (garde contre un scan vide)');
+  }
 }

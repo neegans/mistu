@@ -1,12 +1,13 @@
-// Ajouter (spec UX § 4, § 10) : une grille de cinq cartes, et — avant un scan parti d'ici — la question « ces pages vont
-// où ? ». Le formulaire « Ajouter un livre » vit dans livre-ajout.js (#/add/livre), le signet dans signet.js (#/add/signet).
+// Ajouter (spec UX § 4, § 10) : une grille de six cartes (dont « Créer avec l'IA », qui ouvre #/recipes/creer — spec de création § 3.1),
+// et — avant un scan parti d'ici — la question « ces pages vont où ? ». Le formulaire « Ajouter un livre » vit dans livre-ajout.js
+// (#/add/livre), le signet dans signet.js (#/add/signet).
 import { el, pickFiles } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { navigate } from '../core/router.js';
 import { pageHeader, carte, libelleLivre, field, select } from './components.js';
 import { startScanSession } from './import.js';
 
-export const GRILLE_ACTIONS = ['ajouterLivre', 'pages', 'saisir', 'signet', 'congelateur'];
+export const GRILLE_ACTIONS = ['ajouterLivre', 'pages', 'saisir', 'signet', 'creerIA', 'congelateur'];
 export const ACCEPT_PHOTOS = 'image/*';
 export const ACCEPT_FICHIERS = 'image/*,application/pdf,application/epub+zip';
 
@@ -16,6 +17,7 @@ export function grilleModel() {
     { action: 'pages', ico: '📷', titre: t('Photographier ou importer des pages'), sousTitre: t('Caméra, photos ou PDF — pour une recette ou un index') },
     { action: 'saisir', ico: '✍️', titre: t('Saisir une recette'), sousTitre: t('À la main') },
     { action: 'signet', ico: '🔗', titre: t('Garder un lien web'), sousTitre: t('Une recette ou une page à retrouver') },
+    { action: 'creerIA', ico: '✨', titre: t('Créer avec l’IA'), sousTitre: t('Une proposition à vérifier') },
     { action: 'congelateur', ico: '🧊', titre: t('Ajouter un lot au congélateur'), sousTitre: t('Portions, date, recette source et méthode de réchauffage.') },
   ] };
 }
@@ -96,6 +98,7 @@ export async function renderAdd(params, query, ctx) {
     pages: () => dessinerSelecteur(),
     saisir: () => navigate('/recipes/new' + (editionImposee ? `?edition=${encodeURIComponent(editionImposee)}` : '')), // S9
     signet: () => navigate('/add/signet'),
+    creerIA: () => navigate('/recipes/creer'),
     congelateur: () => navigate('/kitchen?tab=inventory&add=1'),
   }));
   // C5 / R-UX-16 : un ?edition connu arrive de « Scanner cette recette » — le livre est DÉJÀ décidé. L'écran ouvre

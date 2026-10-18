@@ -145,6 +145,12 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   // --- Recherche web (spec Web § 5)
   const textesDesPuces = () => chipsFor(state.parsed.filters).map((c) => libellePuce(c, ctx.ingredientsById));
   const demandeCourante = () => construireDemande({ q: state.q, filtres: textesDesPuces(), langue: getUiLocale() });
+  // La relecture du champ (§ 5.4, R-WEB-10), seule : la tape (lancer) et la porte « Créer une recette avec ces critères » s'en servent,
+  // pour que ce qui part — ou ce qui est porté à l'écran de création — soit ce qui est AFFICHÉ, y compris un champ tapé sans Entrée.
+  const relireChamp = () => {
+    const champ = input.value.trim();
+    if (champ !== state.q) { const affiches = state.parsed.filters; const ancienTexte = parseQuery(state.q).filters; state.q = champ; state.parsed = garderAjoutsDesListes(affiches, ancienTexte, parseQuery(champ)); if (forRecipe && role) state.parsed.filters.type = role; }
+  };
   // § 5.4 : le champ est RELU s'il a changé depuis la dernière analyse (I-J) — s'il n'a pas changé, les puces ajoutées
   // par les listes « + type » / « + restriction » ou retirées à la main RESTENT ce qu'elles sont à l'écran (R-WEB-2 : une
   // relecture inconditionnelle les écrasait) ; s'il a changé, il est relu et seules les puces de LISTE survivent
@@ -154,8 +160,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   // repartirait de l'adresse, qui ne porte pas les puces des listes, et perdrait le vol (autre clé). « Réessayer » passe
   // { enLigne: () => true }.
   const lancer = (depsForces = {}) => {
-    const champ = input.value.trim();
-    if (champ !== state.q) { const affiches = state.parsed.filters; const ancienTexte = parseQuery(state.q).filters; state.q = champ; state.parsed = garderAjoutsDesListes(affiches, ancienTexte, parseQuery(champ)); if (forRecipe && role) state.parsed.filters.type = role; }
+    relireChamp();
     const demande = demandeCourante();
     if (!demande.cle) { render(); return; }
     vol?.controller.abort();
@@ -175,6 +180,14 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     render();
   };
   const annuler = () => { vol?.controller.abort(); vol = null; render(); };
+  // La porte vers #/recipes/creer (création sur critères, spec de création § 3.1) : elle ne lance AUCUNE recherche web et ne touche pas
+  // au vol. L'adresse porte les puces AFFICHÉES (R-WEB-10) — texte du champ relu d'abord, puis régimes, type et durée totale ; buildQuery
+  // omet les vides et encode. Les exclusions, les ingrédients et la durée active ne passent pas (l'écran de création ne les lit pas).
+  const creerDepuisWeb = () => el('button', { type: 'button', class: 'btn', dataset: { role: 'creer-depuis-web' }, onClick: () => {
+    relireChamp();
+    const f = state.parsed.filters;
+    nav('/recipes/creer' + buildQuery({ q: state.q, diets: (f.diets || []).join(',') || '', type: f.type || '', max: f.max_total_minutes || '' }));
+  } }, t('Créer une recette avec ces critères'));
   function renderWeb() {
     for (const v of [...vues]) if (!v.root.isConnected) vues.delete(v); // borné en permanence, pas seulement à la résolution d'un vol
     if (![...vues].some((v) => v.root === root)) vues.add({ root, redessiner: render });
@@ -209,7 +222,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     const chercherANouveau = () => el('button', { class: 'btn', onClick: () => lancer() }, t('Chercher à nouveau'));
     if (issue.etat === 'non_configure') return el('div', { class: 'card flat stack' }, el('div', { class: 'status warn' }, t('Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'), ' ', reglages()), chercherANouveau());
     if (issue.etat === 'non_pris_en_charge') return el('div', { class: 'card flat stack' }, el('div', { class: 'status warn' }, t('Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.'), ' ', reglages()), chercherANouveau());
-    if (issue.etat === 'rien') return el('div', { class: 'card flat stack' }, el('div', { class: 'status', role: 'status' }, t('Aucune page trouvée pour cette demande. Reformule ou cherche autrement.')), reessayer());
+    if (issue.etat === 'rien') return el('div', { class: 'card flat stack' }, el('div', { class: 'status', role: 'status' }, t('Aucune page trouvée pour cette demande. Reformule ou cherche autrement.')), reessayer(), creerDepuisWeb());
     if (issue.etat === 'indisponible') {
       const demandeVide = issue.raison === 'requete' && !state.q;
       const connue = Object.hasOwn(TEXTES_INDISPONIBLE, issue.raison);
@@ -218,7 +231,8 @@ export async function renderSearch(params, query, ctx, deps = {}) {
       return el('div', { class: 'card flat stack' },
         el('div', { class: 'status warn', role: 'status' }, t(cle), AVEC_REGLAGES.includes(issue.raison) ? [' ', reglages()] : null),
         generique ? el('small', { class: 'muted' }, t('Code : {c}', { c: String(issue.raison || 'inconnu') })) : null,
-        SANS_REESSAI.includes(issue.raison) ? chercherANouveau() : reessayer());
+        SANS_REESSAI.includes(issue.raison) ? chercherANouveau() : reessayer(),
+        issue.raison === 'recherche_desactivee' ? creerDepuisWeb() : null); // la recherche web n'est pas activée : la création, elle, peut marcher
     }
     // trouve
     const carte = (lien) => {
@@ -246,6 +260,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
       ...cartes,
       autres.length ? el('details', null, el('summary', { class: 'btn' }, t('Autres pages trouvées ({n})', { n: autres.length })), ...autres) : null, // K2
       el('div', { class: 'status' }, t('L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.')),
+      creerDepuisWeb(),
       issue.recherches != null ? el('small', { class: 'muted' }, t('Recherches faites par l’assistant : {n}', { n: issue.recherches })) : null,
       issue.repli ? el('small', { class: 'muted' }, t('Liens tels que trouvés, sans tri de l’assistant.')) : null,
       chercherANouveau());
