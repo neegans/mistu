@@ -3,11 +3,13 @@
 import { borner } from '../core/bornes.js';
 
 export const LIGNE_ASSISTANT = 'llm';
-export const FOURNISSEURS = ['none', 'openai_compatible', 'anthropic'];
-export const BORNES_ASSISTANT = { model: 200, base_url: 500, api_key: 500 };
+export const FOURNISSEURS = Object.freeze(['none', 'openai_compatible', 'anthropic']);
+export const BORNES_ASSISTANT = Object.freeze({ model: 200, base_url: 500, api_key: 500 });
 const VIDE = Object.freeze({ provider: 'none', model: '', base_url: '', api_key: '' });
 
-const texte = (v, max) => (typeof v === 'string' ? borner(v.trim(), max) : '');
+// Le premier trim évite qu'une marge mange le budget ; le second retire le blanc que la suppression d'un invisible (Cc/Cf)
+// ou la troncature laisse en tête ou en queue : sans lui, N(N(x)) différerait de N(x).
+const texte = (v, max) => (typeof v === 'string' ? borner(v.trim(), max).trim() : '');
 
 // S14 : une URL de base ne voyage que si elle est https, absolue, sans identifiants — la clé part en Bearer vers elle.
 function urlSure(u) {

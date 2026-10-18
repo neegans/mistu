@@ -234,6 +234,7 @@ export async function runSyncTests({ eq, ok }) {
       await withDatabase(async (v1) => {
         await v1.mutate({ puts: { recipes: [avant.recipes], ingredients: [avant.ingredients], settings: [avant.settings] } });
         eq([v1.idb.version, v1.idb.objectStoreNames.contains('outbox')], [1, false], 'montée : la base de départ est bien en v1, sans magasin interne');
+        eq(v1.idb.objectStoreNames.contains('assistant_config'), false, 'montée : la base de départ n’a pas encore le magasin assistant_config (l’assertion après la montée n’est pas vide)');
         v1.idb.close(); v1.idb = null; // la montée a besoin de la base libre
         localStorage.setItem('cuisineos.device', 'dev-avant-le-lot');
         const v2 = new Database(v1.name, schema.DB_VERSION, STORES);

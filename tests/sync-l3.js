@@ -523,8 +523,8 @@ export async function runSyncL3Tests({ eq, ok }) {
   // L4 trouvera donc la table entière à envoyer, sans rattrapage à faire.
   // Assistant par le compte, tâche 1 : `assistant_config` entre dans SYNC_STORES, donc dans les candidates (+1) ; la
   // tâche 4 la rend conditionnelle (`configSuitLeCompte`, faux par défaut) et ces quatre décomptes reviennent à 23/24.
-  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false }).length, 24, 'envoi initial : 24 tables sans l’historique ni les fichiers (R-L3-22), assistant_config comprise');
-  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true }).length, 25, 'envoi initial : 25 tables avec l’historique');
+  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false }).length, 24, 'envoi initial : 24 tables sans l’historique ni les fichiers (R-L3-22), assistant_config comprise (provisoire : T4 ramène à 23/24)');
+  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true }).length, 25, 'envoi initial : 25 tables avec l’historique (provisoire : T4 ramène à 23/24)');
   eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true }).includes('files'), false, 'R-L3-22 : « files » n’est jamais de l’envoi initial en L3');
   eq(tablesAEnvoyer({ marqueurs: { 'backfill:books': 'fait' }, isActivitySynced: () => false }).includes('books'), false, 'envoi initial : une table marquée « fait » ne repart pas');
   await withRepo(async (repo, db) => {
@@ -533,7 +533,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     eq(await db.count('outbox'), 0, 'envoi initial : rien en file avant');
     const progression = [];
     const r = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false, surProgression: (p) => progression.push(p), tailleMorceau: 1 });
-    eq(r.tables.length, 24, 'envoi initial : les 24 tables sont parcourues (ni l’historique, ni les fichiers)');
+    eq(r.tables.length, 24, 'envoi initial : les 24 tables sont parcourues (ni l’historique, ni les fichiers) (provisoire : T4 ramène à 23/24)');
     const file = await db.getAll('outbox');
     const refs = (await db.count('ingredients')) + (await db.count('unit_definitions')) + (await db.count('unit_conventions')); // amorçage mesuré : ingredients, unit_definitions, unit_conventions
     eq(file.length, refs + 2, 'envoi initial : références amorcées + 2 livres en file (R-L3-22 : aucun fichier)');
@@ -541,7 +541,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(!file.some((e) => e.store === 'files'), 'R-L3-22 : aucune ligne files n’est mise en file par l’envoi initial, synchronisable ou non');
     eq(await db.get('sync_state', 'backfill:files'), undefined, 'R-L3-22 : le marqueur « backfill:files » n’est PAS posé — L4 trouvera la table entière à envoyer');
     eq((await db.get('sync_state', 'backfill:books'))?.value, 'fait', 'envoi initial : marqueur posé après la table');
-    ok(progression.some((p) => p.table === 'books' && p.n >= 1 && p.total === 24), 'envoi initial : progression « table n/24 »');
+    ok(progression.some((p) => p.table === 'books' && p.n >= 1 && p.total === 24), 'envoi initial : progression « table n/24 » (provisoire : T4 ramène à 23/24)');
     // Une table vide (aucune ligne) reçoit quand même son marqueur, sans aucune entrée en file pour elle.
     eq((await db.get('sync_state', 'backfill:dishes'))?.value, 'fait', 'envoi initial : une table vide est marquée « fait »');
     ok(!file.some((e) => e.store === 'dishes'), 'envoi initial : une table vide ne met jamais rien en file');

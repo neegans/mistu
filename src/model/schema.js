@@ -37,6 +37,7 @@ export const STORES = {
   files:               { keyPath: 'sha256', indexes: [] },
   // Configuration de l'assistant IA : une ligne 'llm', synchronisée sur les hôtes de production (spec
   // 2026-10-17-assistant-par-le-compte § 4). noDelete : jamais de suppression d'origine locale (K-6, lue par db.mutate).
+  // (noDelete lu par db.mutate à partir de la tâche 2 ; synchronisé sur les hôtes de production à partir de la tâche 4)
   assistant_config:    { keyPath: 'id', indexes: [], noDelete: true },
   settings:            { keyPath: 'key', indexes: [] },
   // Magasins internes de la synchronisation (spec § 5.1) — jamais archivés.
@@ -48,6 +49,7 @@ export const STORES = {
 // Magasins internes du lot « compte et stockage distant » (spec § 5.1) : jamais archivés, jamais synchronisés.
 export const SYNC_INTERNAL_STORES = ['outbox', 'sync_state', 'sync_conflicts'];
 // Magasins de données inclus dans l'archive complète. « files » est exporté sous forme de fichiers (files/<sha256>).
+// assistant_config : porte une clé, jamais archivée (K-7).
 export const ARCHIVE_DATA_STORES = Object.keys(STORES).filter((s) => s !== 'files' && s !== 'settings' && s !== 'assistant_config' && !SYNC_INTERNAL_STORES.includes(s));
 // Réglages exclus de la sauvegarde : secrets d'accès (spec §31.1).
 export const SECRET_SETTING_KEYS = ['llm'];
