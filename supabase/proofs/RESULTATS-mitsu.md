@@ -236,3 +236,28 @@ valeur de `log_parameter_max_length`, `-1`, est sans effet) ; `log_min_error_sta
 `log_parameter_max_length_on_error = 0` → un envoi **en erreur** n'est pas journalisé avec ses paramètres. **Aucune
 des deux conditions n'est remplie : la clé de l'assistant ne peut pas finir dans les journaux de Postgres de `mitsu`**
 avec ces réglages (à rejuger si Supabase les change).
+
+## Passerelle `assistant` — déployée le 18 octobre 2026 (17 h 05 UTC), sondes sans dépense 9/9 conformes
+
+Code : `supabase/functions/assistant/` (spec `docs/superpowers/specs/2026-10-18-passerelle-assistant-design.md`). La clé Anthropic est un secret du projet (`ANTHROPIC_API_KEY`, posé par Neegan dans Edge Functions → Secrets le 18 octobre, 15 h 13 UTC) : rien d'elle n'est ici, ni ailleurs dans le dépôt.
+
+**Déploiement (contrôleur, 18 octobre 2026, 17 h 05 UTC = 13 h 05 à Montréal)** : `~/.local/bin/supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api` depuis le worktree, code = commit `1590ba8` (index.ts, logique.js, deno.json téléversés ; bundle côté serveur, sans Docker). `supabase functions list` : slug `assistant`, **version 1**, `status ACTIVE`, **`verify_jwt: false`**, `import_map: true` (deno.json), `ezbr_sha256 b5905318…`. Aucun `config.toml` dans le dépôt.
+
+**Sondes sans dépense (curl, 17 h 05-17 h 06 UTC ; aucune n'atteint Anthropic : toutes s'arrêtent à une garde avant la réservation)** :
+
+| Sonde | Requête | Statut | Corps | Notes |
+|---|---|---|---|---|
+| S1 | `OPTIONS`, `Origin: https://neegans.github.io` | 204 | — | `access-control-allow-origin: https://neegans.github.io`, `allow-headers: authorization, apikey, content-type, x-client-info`, `allow-methods: POST, OPTIONS`, `max-age: 600`, `vary: Origin` ; 269 ms (démarrage à froid) |
+| S2 | `OPTIONS`, `Origin: https://evil.example` | 204 | — | **sans** `access-control-allow-origin` ; 17 ms |
+| S3 | `POST` sans `Authorization`, origine admise | 401 | `{"erreur":"non_connecte"}` | CORS présent, `cache-control: no-store` |
+| S4 | `POST`, `Origin: https://evil.example` | 403 | `{"erreur":"origine"}` | sans Allow-Origin |
+| S5 | `POST`, `Authorization: Bearer bidon.bidon.bidon` + `apikey` publique | 401 | `{"erreur":"non_connecte"}` | `getUser` a refusé ; donc `createClient` a bien reçu une clé publique valide (`SUPABASE_PUBLISHABLE_KEYS` lu) ; 104 ms |
+| S6 | `GET`, jeton bidon | 401 | `{"erreur":"non_connecte"}` | |
+| S7 | `PUT`, origine admise | 405 | `{"erreur":"methode"}` | |
+| S8 | `POST` sans en-tête `Origin` | 403 | `{"erreur":"origine"}` | un appelant hors navigateur sans Origin est refusé |
+| S9 | `POST`, clé publique `sb_publishable_…` en Bearer | 401 | `{"erreur":"non_connecte"}` | la clé publique seule ne vaut pas une session |
+| S10 | `POST`, `content-length: 9000000` mensonger (2 octets envoyés) | 400 | page HTML Cloudflare | refusé par la bordure Cloudflare avant la fonction : ne mesure pas notre borne (couverte par le test Node, cas f) |
+
+**Non mesuré ici (exige une session réelle = geste de Neegan)** : `GET` → `{ modele, quotaJour }` ; un `POST` admis → une ligne `assistant_journal` et un appel Anthropic ; le comportement de `is_allowed` pour une session non admise ; la prise en compte d'un secret changé par un isolat chaud. **Préalable au premier POST réel** : `0004` collée + `notify pgrst, 'reload schema';` (sinon `assistant_reserver` inconnue → 502).
+
+**Preuve `0004_assistant_journal.sql` — à jouer (geste de Neegan, après le collage de `0004` et `notify pgrst, 'reload schema';`)** : le BILAN et les verdicts seront collés ici.
