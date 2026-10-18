@@ -52,6 +52,21 @@ export function appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales = 
     if (!seqs.length) continue; // R-L3-8
     if (r.reason === 'conflit') {
       for (const s of seqs) retirer.push(s);
+      if (r.store === 'assistant_config') {
+        // K-5 (§ 5.5, S11/F7) : aucun journal. La version du compte est réécrite ici seulement si elle existe, n'est pas
+        // une tombale, est au moins aussi récente, ET si la fiche n'a pas bougé pendant l'aller-retour (R-L3-7) —
+        // sinon rien : une saisie faite entre-temps a sa propre entrée de file. Jamais remettre en file la version
+        // refusée : elle n'est pas plus récente, le serveur la refuserait encore. Serveur en tombale : retirer
+        // seulement — sa data porte l'ancienne clé, et c'est la réception qui appliquera la suppression.
+        const element = lot.elements.find((e) => cleDe(e) === k);
+        const locale = fichesLocales[k];
+        const serveur = r.server;
+        const inchangee = !!locale && !!element && locale.updated_at === element.updated_at;
+        const aussiRecente = !!serveur?.data && !serveur.deleted_at && Number.isFinite(Date.parse(serveur.updated_at)) && Date.parse(serveur.updated_at) >= Date.parse(locale?.updated_at || 0);
+        // `id` forcé (revue Neegan 1.3) : la clé primaire ne dépend jamais de ce que `data` porte.
+        if (inchangee && aussiRecente) (reecrire[r.store] ||= []).push({ ...serveur.data, id: element.id, updated_at: serveur.updated_at });
+        continue;
+      }
       conflits.push({ id: k, store: r.store, record_id: r.id, local: fichesLocales[k] ?? null, server: r.server || null, at, kind: 'donnees' });
     } else {
       // updated_at | cle | forme | taille (R9) : permanent, la fiche est nommée, la personne décide (Réglages).

@@ -312,4 +312,155 @@ export async function runAssistantCompteTests({ eq, ok }) {
       });
     }
   } finally { setClockOffset(0); }
+
+  // --- T5 : jamais de conflit à trancher (K-5, § 5.5), tombale (§ 5.4, S5/F6), S1 « K2 reste partout »
+  // Instants FIXES et passés (le plancher monotone de syncNow reste ≈ 2 h en avance après le test T3) : chaque égalité
+  // ou inégalité d'instant est fabriquée par `db.mutate` sur des lignes à `updated_at` fixe (F15), jamais par repo.save.
+  const { createPush } = await import('../src/sync/push.js');
+  const { decider } = await import('../src/sync/pull.js');
+  const { appliquerReponse } = await import('../src/sync/reponses.js');
+  const H = { t1: '2026-10-17T10:00:00.000Z', t2: '2026-10-17T11:00:00.000Z', t3: '2026-10-17T12:00:00.000Z' };
+  const L = (k, t) => ({ id: 'llm', provider: 'anthropic', model: 'm', base_url: '', api_key: k, updated_at: t });
+  // decider reste PUR et générique : ses verdicts ne changent pas (F7)
+  eq(decider({ locale: L('a', H.t1), distante: { data: L('b', H.t1), updated_at: H.t1, deleted_at: null } }), 'conflit', 'decider : inchangé (égalité différente → conflit) ; la règle du magasin vit dans appliquerPage');
+  // S5/F6 : une tombale ne rend JAMAIS 'conflit' — le seul verdict que la règle du magasin change en 'ecrire'. Absente
+  // ici, plus récente, égale, plus ancienne : aucune tombale ne peut donc être écrite.
+  const tombaleRecue = (t) => ({ data: L('sk-factice-tombale', t), updated_at: t, deleted_at: t });
+  eq([decider({ locale: undefined, distante: tombaleRecue(H.t2) }), decider({ locale: L('a', H.t1), distante: tombaleRecue(H.t2) }), decider({ locale: L('a', H.t2), distante: tombaleRecue(H.t2) }), decider({ locale: L('a', H.t3), distante: tombaleRecue(H.t2) })],
+    ['ignorer', 'supprimer', 'supprimer', 'conflit_renvoyer'], 'S5 : une tombale ne rend jamais « conflit », donc jamais « ecrire » après la règle du magasin');
+  // reponses.js, en unité : l'id réécrit est TOUJOURS celui de l'élément envoyé (revue Neegan 1.3), jamais celui de data.
+  {
+    const element = { store: 'assistant_config', id: 'llm', data: L('sk-factice-envoye', H.t1), updated_at: H.t1, deleted: false };
+    const effets = appliquerReponse({
+      lot: { elements: [element], seqs: [7] },
+      reponse: { server_time: H.t3, accepted: [], adjusted: [], rejected: [{ store: 'assistant_config', id: 'llm', reason: 'conflit', server: { data: { id: 'autre', provider: 'anthropic', api_key: 'sk-factice-serveur' }, updated_at: H.t2, deleted_at: null } }] },
+      entreesParSeq: new Map([[7, { seq: 7, store: 'assistant_config', id: 'llm', op: 'put' }]]),
+      fichesLocales: { 'assistant_config:llm': L('sk-factice-envoye', H.t1) },
+    });
+    eq([effets.retirer, effets.conflits, (effets.reecrire.assistant_config || []).map((x) => [x.id, x.updated_at, x.api_key])], [[7], [], [['llm', H.t2, 'sk-factice-serveur']]], 'reponses : refus conflit → entrée retirée, id forcé à celui de l’élément, heure du serveur, aucun conflit');
+  }
+  const deuxAppareils = async (scenario) => withRepo(async (repo, dbA) => withDatabase(async (dbB) => {
+    const tf = creerTransportFactice({ serveur: true });
+    installCapture(dbB, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
+    uninstallCapture(dbA); installCapture(dbA, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
+    const push = (db) => createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer();
+    const pull = (db) => createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1', configSuitLeCompte: () => true }).recevoir();
+    try { return await scenario({ dbA, dbB, tf, push, pull, repo }); } finally { uninstallCapture(dbB); }
+  }));
+  const propre = async (db) => [(await db.getAll('sync_conflicts')).length, (await db.getAll('outbox')).filter((e) => e.store === 'assistant_config').length];
+  // 1. Plus récent ailleurs → écrit ici
+  await deuxAppareils(async ({ dbA, dbB, push, pull }) => {
+    await dbA.mutate({ puts: { assistant_config: [L('sk-factice-A', H.t1)] } }); await push(dbA);
+    await dbB.mutate({ puts: { assistant_config: [L('sk-factice-B', H.t2)] } }); await push(dbB);
+    await pull(dbA);
+    eq([(await dbA.get('assistant_config', 'llm')).api_key, ...(await propre(dbA))], ['sk-factice-B', 0, 0], 'K-5 : plus récent ailleurs → écrit ici, aucun conflit, rien en file');
+  });
+  // 2. Égalité différente → le COMPTE gagne, sans écran (réception et envoi)
+  await deuxAppareils(async ({ dbA, dbB, push, pull, tf }) => {
+    await dbA.mutate({ puts: { assistant_config: [L('sk-factice-compte', H.t2)] } }); await push(dbA);
+    await dbB.mutate({ puts: { assistant_config: [L('sk-factice-local', H.t2)] } });
+    await pull(dbB);
+    eq([(await dbB.get('assistant_config', 'llm')).api_key, ...(await propre(dbB))], ['sk-factice-compte', 0, 1], 'K-5 réception : égalité différente → la version du compte est écrite ici, aucun conflit (l’entrée de file locale reste : l’envoi la réglera)');
+    const r = await push(dbB);
+    eq([r.conflits, ...(await propre(dbB)), (await dbB.get('assistant_config', 'llm')).api_key, tf.ligne('assistant_config', 'llm').data.api_key], [0, 0, 0, 'sk-factice-compte', 'sk-factice-compte'], 'K-5 envoi : refus conflit → entrée retirée, aucun conflit journalisé, le compte reste');
+  });
+  // 2b. Égalité différente, ENVOI d'abord (aucune réception avant) : le refus conflit de l'arbitre réécrit ici la version
+  // du compte (reponses.js), comptée en « ajustés » — c'est ce compte qui fait invalider le cache (passeAEcrit).
+  await deuxAppareils(async ({ dbA, dbB, push, tf }) => {
+    await dbA.mutate({ puts: { assistant_config: [L('sk-factice-compte', H.t2)] } }); await push(dbA);
+    await dbB.mutate({ puts: { assistant_config: [L('sk-factice-local', H.t2)] } });
+    const r = await push(dbB);
+    eq([r.conflits, r.ajustes, ...(await propre(dbB)), await dbB.get('assistant_config', 'llm'), tf.ligne('assistant_config', 'llm').data.api_key], [0, 1, 0, 0, L('sk-factice-compte', H.t2), 'sk-factice-compte'], 'K-5 envoi : égalité différente refusée → la version du compte réécrite ici (ligne entière), comptée en ajustés, aucun conflit, rien en file');
+  });
+  // 3. Plus récent ici → repart, sans journal. La fiche d'ici est écrite SANS capture (origine device) : seule la remise en
+  // file de la réception peut la faire repartir — une entrée de capture laissée par l'écriture la masquerait.
+  await deuxAppareils(async ({ dbA, dbB, push, pull }) => {
+    await dbA.mutate({ puts: { assistant_config: [L('sk-factice-vieux', H.t1)] } }); await push(dbA);
+    await dbB.mutate({ puts: { assistant_config: [L('sk-factice-neuf', H.t3)] }, origin: 'device' });
+    await pull(dbB);
+    eq([(await dbB.get('assistant_config', 'llm')).api_key, ...(await propre(dbB))], ['sk-factice-neuf', 0, 1], 'K-5 : plus récent ici → conservé, aucun conflit, remis en file par la réception');
+    await push(dbB); await pull(dbA);
+    eq([(await dbA.get('assistant_config', 'llm')).api_key, ...(await propre(dbA))], ['sk-factice-neuf', 0, 0], 'K-5 : … et il arrive sur l’autre appareil');
+  });
+  // 4. Refus conflit au push alors que la fiche a BOUGÉ pendant l'aller-retour (R-L3-7, S11) : rien réécrit
+  await deuxAppareils(async ({ dbA, dbB, push, tf }) => {
+    await dbA.mutate({ puts: { assistant_config: [L('sk-factice-compte', H.t2)] } }); await push(dbA);
+    await dbB.mutate({ puts: { assistant_config: [L('sk-factice-perdant', H.t2)] } });
+    // simuler l'édition pendant l'aller-retour : le transport pousse puis on modifie la fiche locale avant l'application
+    const vraiPousser = tf.pousser.bind(tf);
+    tf.pousser = async (rows) => { const rep = await vraiPousser(rows); await dbB.mutate({ puts: { assistant_config: [L('sk-factice-tape-pendant', H.t3)] } }); return rep; };
+    let r;
+    try { r = await push(dbB); } finally { tf.pousser = vraiPousser; }
+    eq([r.conflits, r.ajustes, (await dbB.get('assistant_config', 'llm')).api_key, (await dbB.getAll('sync_conflicts')).length], [0, 0, 'sk-factice-tape-pendant', 0], 'S11 : la fiche a bougé pendant l’aller-retour → la version du serveur n’écrase pas la saisie ; aucun conflit');
+    await push(dbB);
+    eq(tf.ligne('assistant_config', 'llm').data.api_key, 'sk-factice-tape-pendant', 'S11 : … et la saisie (plus récente) part à son tour');
+  });
+  // 4b. Même course, mais la saisie faite pendant l'aller-retour est PLUS ANCIENNE que la version du compte : seule la
+  // règle « la fiche n'a pas bougé » (R-L3-7) empêche alors la réécriture pendant l'aller-retour. La saisie garde sa
+  // propre entrée ; à l'envoi suivant elle est refusée à son tour et, la fiche n'ayant plus bougé, le compte est écrit.
+  await deuxAppareils(async ({ dbA, dbB, push, tf }) => {
+    await dbA.mutate({ puts: { assistant_config: [L('sk-factice-compte', H.t2)] } }); await push(dbA);
+    await dbB.mutate({ puts: { assistant_config: [L('sk-factice-perdant', H.t1)] } });
+    const vraiPousser = tf.pousser.bind(tf);
+    tf.pousser = async (rows) => { const rep = await vraiPousser(rows); await dbB.mutate({ puts: { assistant_config: [L('sk-factice-tape-pendant', '2026-10-17T10:30:00.000Z')] } }); return rep; };
+    let r;
+    try { r = await push(dbB); } finally { tf.pousser = vraiPousser; }
+    eq([r.conflits, r.ajustes, (await dbB.get('assistant_config', 'llm')).api_key, ...(await propre(dbB))], [0, 0, 'sk-factice-tape-pendant', 0, 1], 'S11 : saisie pendant l’aller-retour, plus ancienne que le compte → pas écrasée pendant l’aller-retour, son entrée reste, aucun conflit');
+    const r2 = await push(dbB);
+    eq([r2.conflits, r2.ajustes, await dbB.get('assistant_config', 'llm'), ...(await propre(dbB))], [0, 1, L('sk-factice-compte', H.t2), 0, 0], 'S11 : … son envoi est refusé à son tour ; la fiche n’a plus bougé → la version du compte (plus récente) est écrite, rien en file');
+  });
+  // 5. Tombale reçue : JAMAIS écrite (elle porte l'ancienne clé) ; plus récente → suppression locale d'origine remote
+  await deuxAppareils(async ({ dbA, dbB, push, pull, tf }) => {
+    await dbA.mutate({ puts: { assistant_config: [L('sk-factice-ancienne', H.t1)] } }); await push(dbA); await pull(dbB);
+    // un autre client (hors de ce code) supprime : le serveur garde data (coalesce) — simulé par le factice
+    await tf.pousser([{ store: 'assistant_config', id: 'llm', data: L('sk-factice-ancienne', H.t2), updated_at: H.t2, deleted: true }]);
+    ok(tf.ligne('assistant_config', 'llm').deleted_at && tf.ligne('assistant_config', 'llm').data.api_key === 'sk-factice-ancienne', 'tombale : le serveur porte deleted_at ET l’ancienne data (comme sync_push)');
+    const r = await pull(dbB);
+    eq([await dbB.get('assistant_config', 'llm'), ...(await propre(dbB)), r.supprimees], [undefined, 0, 0, 1], 'tombale plus récente → ligne locale SUPPRIMÉE (origine remote, noDelete laisse passer), rien écrit, rien en file');
+    // tombale data {} (après purge) : ni erreur ni blocage. Le factice refuse `data: {}` (motif « cle » : un objet sans
+    // id) — la tombale part donc sans data, puis la ligne du serveur reçoit `data = {}` (l'objet rendu est la ligne vive).
+    await tf.pousser([{ store: 'assistant_config', id: 'llm', data: null, updated_at: H.t3, deleted: true }]);
+    tf.ligne('assistant_config', 'llm').data = {};
+    const r2 = await pull(dbB);
+    eq([r2.erreur, await dbB.get('assistant_config', 'llm'), (await dbB.get('sync_state', 'cursor:assistant_config'))?.value, tf.ligne('assistant_config', 'llm').server_seq], [null, undefined, tf.ligne('assistant_config', 'llm').server_seq, 3], 'tombale data {} → pas d’erreur, le curseur avance');
+    // tombale PLUS ANCIENNE qu'une saisie locale : remise en file, pas de journal (§ 5.4). Saisie écrite sans capture
+    // (origine device) : l'entrée `put` mesurée ne peut venir que de la remise en file de la réception.
+    await dbB.mutate({ puts: { assistant_config: [L('sk-factice-apres', '2026-10-18T00:00:00.000Z')] }, origin: 'device' });
+    eq((await propre(dbB))[1], 0, 'tombale plus ancienne : avant la réception, rien en file (saisie sans capture)');
+    await tf.pousser([{ store: 'assistant_config', id: 'llm', data: null, updated_at: '2026-10-17T23:00:00.000Z', deleted: true }]);
+    tf.ligne('assistant_config', 'llm').data = {};
+    ok(tf.ligne('assistant_config', 'llm').updated_at === '2026-10-17T23:00:00.000Z' && tf.ligne('assistant_config', 'llm').deleted_at, 'tombale plus ancienne : le serveur la porte bien (le factice l’a acceptée)');
+    await pull(dbB);
+    eq([(await dbB.get('assistant_config', 'llm'))?.api_key, (await dbB.getAll('sync_conflicts')).length, (await dbB.getAll('outbox')).some((e) => e.store === 'assistant_config' && e.op === 'put')], ['sk-factice-apres', 0, true], 'tombale plus ancienne → la saisie locale reste et repart, aucun conflit');
+  });
+  // 5b. Refus conflit au push face à une TOMBALE du serveur : retirer seulement. Sa data porte l'ancienne clé : elle n'est
+  // jamais réécrite ici (§ 5.5 « serveur en tombale : retirer seulement »), et la réception applique ensuite la tombale.
+  await deuxAppareils(async ({ dbB, push, pull, tf }) => {
+    await tf.pousser([{ store: 'assistant_config', id: 'llm', data: L('sk-factice-ancienne', H.t1), updated_at: H.t1 }]);
+    await tf.pousser([{ store: 'assistant_config', id: 'llm', data: L('sk-factice-ancienne', H.t3), updated_at: H.t3, deleted: true }]);
+    await dbB.mutate({ puts: { assistant_config: [L('sk-factice-ici', H.t2)] } });
+    const r = await push(dbB);
+    eq([r.conflits, r.ajustes, ...(await propre(dbB)), (await dbB.get('assistant_config', 'llm')).api_key], [0, 0, 0, 0, 'sk-factice-ici'], 'K-5 envoi : serveur en tombale → entrée retirée, rien réécrit (l’ancienne clé de la tombale n’arrive pas ici), aucun conflit');
+    const r2 = await pull(dbB);
+    eq([await dbB.get('assistant_config', 'llm'), r2.supprimees, ...(await propre(dbB))], [undefined, 1, 0, 0], 'K-5 : … puis la réception applique la tombale plus récente (ligne supprimée, origine remote), rien en file');
+  });
+  // 6. S1 : le serveur porte K2 (tournée) ; une base monte avec K1 dans settings → K2 reste partout
+  {
+    const repoModule = await import('../src/model/repo.js');
+    const origine = repoModule.db;
+    const tf = creerTransportFactice({ serveur: true });
+    await tf.pousser([{ store: 'assistant_config', id: 'llm', data: L('sk-factice-K2', H.t3), updated_at: H.t3 }]);
+    await withDatabase(async (db) => {
+      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-K1' }, updated_at: H.t1 }] }, origin: 'device' });
+      repoModule.bindDatabase(db);
+      try {
+        await repoModule.init();
+        installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
+        await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
+        const r = await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer();
+        await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1', configSuitLeCompte: () => true }).recevoir();
+        eq([tf.ligne('assistant_config', 'llm').data.api_key, (await db.get('assistant_config', 'llm')).api_key, r.conflits, (await db.getAll('sync_conflicts')).length], ['sk-factice-K2', 'sk-factice-K2', 0, 0], 'S1 : K1 (horodatage d’origine, plus vieux) ne bat pas K2 ; K2 arrive ici ; aucun conflit');
+      } finally { uninstallCapture(db); repoModule.bindDatabase(origine); }
+    });
+  }
 }

@@ -60,6 +60,18 @@ export function decider({ locale, distante }) {
   return identiques(locale, distante.data) ? 'ignorer' : 'conflit';
 }
 
+// Spec assistant-par-le-compte K-5 (§ 5.5) : pour assistant_config, I7 s'applique SANS écran. `decider` reste pur et
+// générique ; la règle du magasin se pose ici, après lui. Une tombale reçue suit le chemin générique ('supprimer' ou
+// 'renvoyer_seulement') : jamais 'ecrire' d'une tombale — elle porte l'ancienne data, clé comprise (S5/F6). `decider`
+// ne rend jamais 'conflit' pour une tombale (il tranche sur `deleted_at` avant de comparer les contenus), donc la
+// seule conversion vers 'ecrire' ne peut pas la toucher.
+function regleDuMagasin(table, decision) {
+  if (table !== 'assistant_config') return decision;
+  if (decision === 'conflit') return 'ecrire';
+  if (decision === 'conflit_renvoyer') return 'renvoyer_seulement';
+  return decision;
+}
+
 // Une version est l'ancêtre d'une autre si on la retrouve en remontant parent_version_id (elle-même comprise).
 // `vus` arrête une chaîne bouclée (fiche bricolée, archive incohérente) au lieu de tourner sans fin.
 export function estAncetre(versions, candidatId, cibleId) {
@@ -131,7 +143,11 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
       const refus = refusDeForme(table, ligne, clePrimaire);
       if (refus) return { erreur: refus };
       const locale = await db.get(table, ligne.id);
-      const decision = decider({ locale, distante: ligne });
+      const decision = regleDuMagasin(table, decider({ locale, distante: ligne }));
+      if (decision === 'renvoyer_seulement') { // K-5 : plus récent ici → repart, SANS entrée de journal
+        refile.push({ user_id: getUserId(), store: table, id: ligne.id, op: 'put', updated_at: locale.updated_at || null, tries: 0 });
+        continue;
+      }
       if (decision === 'supprimer') { (deletes[table] ||= []).push(ligne.id); supprimees += 1; continue; }
       if (decision === 'ignorer') continue;
       if (decision === 'ecrire') {
