@@ -336,6 +336,8 @@ export const EN = {
   "Restrictions demandées": "Requested restrictions",
   "Incompatible : {lignes}": "Incompatible: {lignes}",
   "À vérifier, à retirer : {lignes}": "To check, remove: {lignes}",
+  "À vérifier : {inconnues}": "To check: {inconnues}",
+  "à retirer : {lignes}": "remove: {lignes}",
   "L’assistant n’a pas cuisiné cette recette : vérifie les quantités, les cuissons et les étiquettes avant de la servir.": "The assistant has not cooked this recipe: check quantities, cooking and labels before serving it.",
   "au plus {m} min": "at most {m} min",
   "{u} jetons": "{u} tokens",

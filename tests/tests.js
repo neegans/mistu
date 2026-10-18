@@ -202,10 +202,13 @@ catch (error) { ok(false, `Suite créer avec l'IA interrompue : ${error?.message
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 2473, 'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 2479, 'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);
 const out = document.getElementById('out');
-out.innerHTML = `<h2>${failed.length ? '❌' : '✅'} ${results.length - failed.length}/${results.length} tests réussis</h2>` +
-  results.map((r) => `<div class="${r.ok ? 'ok' : 'ko'}">${r.ok ? '✓' : '✗'} ${r.msg}${r.ok ? '' : `<pre>obtenu : ${JSON.stringify(r.got)}\nattendu : ${JSON.stringify(r.want)}</pre>`}</div>`).join('');
+// Le bilan est fait de NŒUDS TEXTE (jamais innerHTML) : un libellé, un « obtenu » ou un « attendu » portent souvent une sortie de modèle
+// hostile (I-H) — rendue en HTML, une assertion qui échoue exécuterait ce balisage dans la page de tests.
+const bloc = (tag, cls, texte) => { const n = document.createElement(tag); if (cls) n.className = cls; n.textContent = texte; return n; };
+out.replaceChildren(bloc('h2', null, `${failed.length ? '❌' : '✅'} ${results.length - failed.length}/${results.length} tests réussis`),
+  ...results.map((r) => { const d = bloc('div', r.ok ? 'ok' : 'ko', `${r.ok ? '✓' : '✗'} ${r.msg}`); if (!r.ok) d.append(bloc('pre', null, `obtenu : ${JSON.stringify(r.got)}\nattendu : ${JSON.stringify(r.want)}`)); return d; }));

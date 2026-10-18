@@ -553,6 +553,9 @@ export async function runCreerIaTests({ eq, ok }) {
           eq([Array.from(bouton(r0, 'demande-ia').value).length, r0.querySelector('select[name="type"]').value, r0.querySelectorAll('[data-diet][aria-pressed="true"]').length], [500, '', 0], 'C-16 : q borné à 500 points de code, type et restrictions hors liste ignorés');
           r0.remove();
         }
+        eq([S.filtresDepuisQuery({ diets: 'sans_lactose,inconnu,vegetalien,sans_lactose', type: 'salade', portions: '20', max: '3' }), S.filtresDepuisQuery({ portions: '12', max: '240', type: 'constructor', diets: '__proto__' }), S.filtresDepuisQuery({ portions: 'x' }, { servings: 2 }), S.filtresDepuisQuery()],
+          [{ diets: ['sans_lactose', 'vegetalien'], type: 'salade', servings: 4, maxMinutes: null }, { diets: [], type: null, servings: 12, maxMinutes: 240 }, { diets: [], type: null, servings: 2, maxMinutes: null }, { diets: [], type: null, servings: 4, maxMinutes: null }],
+          'C-16 / F4 : filtresDepuisQuery (nom du plan) — liste blanche, bornes, portions de la parente puis 4, max retiré hors bornes');
         eq(a.n, 0, 'C-1 : aucun appel sans clic');
 
         // P7.1 — un clic = un appel, ce qui est affiché part (C-10), l'adresse est remplacée (F2) ; toutes les instances montrent le vol (C-1, P6)
@@ -595,6 +598,21 @@ export async function runCreerIaTests({ eq, ok }) {
           bouton(r, 'creer-ia').click(); await tick(); await tick();
           eq(textes(r, '[data-role="evaluation-ia"] li'), ['Sans lactose — À vérifier, à retirer : 30 g parmesan (facultatif) (identité proposée : parmesan ?)'], 'P9 : un bloquant facultatif → « À vérifier », avec la ligne à retirer (jamais « Adaptation » ni « Compatible »)');
           r.remove();
+          // P9 + R-CRE-9 (ronde 1, F1) : un facultatif bloquant AVEC des lignes inconnues — les inconnues sont nommées (texte écrit), avant le
+          // facultatif : la ligne « à retirer » ne se lit jamais comme la liste complète de ce qui reste à vérifier.
+          S.reinitialiserCreation();
+          const mixte = { ...trouve, recette: { ...VALIDE, ingredients: [...VALIDE.ingredients, { name: 'parmesan (facultatif)', quantity: 30, unit: 'g' }] } };
+          const rm = await monter({ q: 'pâtes', diets: 'sans_lactose' }, { creer: async () => mixte });
+          bouton(rm, 'creer-ia').click(); await tick(); await tick();
+          eq(textes(rm, '[data-role="evaluation-ia"] li'), ['Sans lactose — À vérifier : 300 g saumon, 1 fenouil ; à retirer : 30 g parmesan (facultatif) (identité proposée : parmesan ?)'], 'P9 + R-CRE-9 : inconnues ET facultatif — « À vérifier : {inconnues} ; à retirer : {facultatif} », texte exact');
+          rm.remove();
+          // … et un texte du modèle qui contient « {lignes} » n'est jamais substitué une seconde fois (deux clés à une seule variable)
+          S.reinitialiserCreation();
+          const accolades = { ...trouve, recette: { ...VALIDE, ingredients: [{ name: '{lignes}', quantity: 1, unit: 'unité' }, { name: 'parmesan (facultatif)', quantity: 30, unit: 'g' }] } };
+          const ra2 = await monter({ q: 'pâtes', diets: 'sans_lactose' }, { creer: async () => accolades });
+          bouton(ra2, 'creer-ia').click(); await tick(); await tick();
+          eq(textes(ra2, '[data-role="evaluation-ia"] li'), ['Sans lactose — À vérifier : 1 {lignes} ; à retirer : 30 g parmesan (facultatif) (identité proposée : parmesan ?)'], 'P9 : « {lignes} » écrit par le modèle reste du texte (aucune seconde substitution)');
+          ra2.remove();
         }
 
         // I-H — texte seul : une sortie de modèle hostile ne crée aucun élément
@@ -662,6 +680,22 @@ export async function runCreerIaTests({ eq, ok }) {
           } finally { console.error = consoleErreur; }
         }
 
+        // C-1 / C-4 (ronde 1, F5) : un « Garder » PÉRIMÉ cliqué pendant un vol n'écrit rien — la proposition y est inerte, et rien ne l'avait éteint
+        {
+          S.reinitialiserCreation();
+          const ecrV = []; const fauxV = { ...repo, newId: repo.newId, saveBatch: async (b) => { ecrV.push(b); return b; } };
+          const aV = enMain();
+          const r = await monter({ q: 'saumon fenouil' }, { creer: aV.creer, repo: fauxV });
+          bouton(r, 'creer-ia').click(); await tick(); aV.rendre[0](trouve); await tick();
+          const gPerimeVol = bouton(r, 'garder-ia');
+          bouton(r, 'recommencer-ia').click(); await tick();
+          const etat = [statutVol(r), gPerimeVol.isConnected, gPerimeVol.disabled];
+          gPerimeVol.click(); await tick();
+          eq([etat, ecrV.length, S.etatCreation().memoire.gardee], [[true, false, false], 0, null], 'C-1 : un Garder périmé (détaché, jamais éteint) cliqué pendant un vol n’écrit rien et ne pose pas gardee');
+          bouton(r, 'annuler-ia').click(); await tick();
+          r.remove();
+        }
+
         // P7.4 + F21 — « Recommencer » échoué : l'échec AU-DESSUS, la proposition reste ; « Modifier la demande » ; saisie sans redessin ; K1
         S.reinitialiserCreation();
         let fois = 0; const args6 = []; const creer2 = async (x) => { args6.push(x); return ++fois === 1 ? trouve : { etat: 'indisponible', raison: 'serveur', motif: null }; };
@@ -691,18 +725,38 @@ export async function runCreerIaTests({ eq, ok }) {
         typ.value = ''; typ.dispatchEvent(new Event('change'));
         eq([k1Type, bouton(r6, 'k1').hidden, r6.querySelector('select[name="type"]') === typ], [false, true, true], 'type : changé → K1 visible ; remis → caché ; aucun redessin');
         const champ = (nom) => r6.querySelector(`input[name="${nom}"]`);
-        const aide = () => [bouton(r6, 'creer-ia').disabled, bouton(r6, 'aide-ia').hidden, bouton(r6, 'aide-ia').textContent];
-        champ('portions').value = '13'; champ('portions').dispatchEvent(new Event('input'));
+        const aide = () => [bouton(r6, 'creer-ia')?.disabled ?? null, bouton(r6, 'aide-ia')?.hidden ?? null, bouton(r6, 'aide-ia')?.textContent ?? null]; // ?. : un écran parti en vol rougit l'assertion au lieu d'interrompre le bloc
+        const p0 = champ('portions'); const x0 = champ('max'); const memes = [];
+        const memesChamps = () => memes.push(champ('portions') === p0 && r6.contains(p0) && champ('max') === x0 && r6.contains(x0));
+        champ('portions').value = '13'; champ('portions').dispatchEvent(new Event('input')); memesChamps();
         const p13 = aide();
-        champ('portions').value = '4'; champ('portions').dispatchEvent(new Event('input'));
+        champ('portions').value = '4'; champ('portions').dispatchEvent(new Event('input')); memesChamps();
         const p4 = aide();
-        champ('max').value = '300'; champ('max').dispatchEvent(new Event('input'));
+        champ('max').value = '300'; champ('max').dispatchEvent(new Event('input')); memesChamps();
         const m300 = aide();
-        champ('max').value = ''; champ('max').dispatchEvent(new Event('input'));
+        champ('max').value = ''; champ('max').dispatchEvent(new Event('input')); memesChamps();
+        eq(memes, [true, true, true, true], 'saisie : Portions et Temps maximal ne redessinent pas (mêmes nœuds — focus iPhone)');
         ta.value = ' '; ta.dispatchEvent(new Event('input'));
         const vide = aide();
         ta.value = 'saumon fenouil'; ta.dispatchEvent(new Event('input'));
         eq([p13, p4, m300, vide, aide()], [[true, false, 'Portions : un nombre entier de 1 à 12.'], [false, true, ''], [true, false, 'Temps maximal : de 5 à 240 minutes, ou vide.'], [true, false, 'Écris d’abord ce que tu veux cuisiner.'], [false, true, '']], 'C-10 : une valeur que la demande ne porterait pas telle quelle éteint le bouton et la raison est dite (rien ne part autrement qu’affiché)');
+        // C-10 (ronde 1, F3) : « 3- » dans un champ number rend value '' avec validity.badInput — le maximum ne disparaît pas en silence
+        {
+          const n = args6.length;
+          Object.defineProperty(x0, 'validity', { value: { badInput: true }, configurable: true });
+          x0.value = ''; x0.dispatchEvent(new Event('input'));
+          const illisible = aide();
+          bouton(r6, 'creer-ia').click(); await tick();
+          const appelsPendant = args6.length - n;
+          delete x0.validity;
+          x0.value = ''; x0.dispatchEvent(new Event('input'));
+          Object.defineProperty(p0, 'validity', { value: { badInput: true }, configurable: true });
+          p0.value = ''; p0.dispatchEvent(new Event('input'));
+          const portionsIllisibles = aide();
+          delete p0.validity;
+          p0.value = '4'; p0.dispatchEvent(new Event('input'));
+          eq([illisible, appelsPendant, portionsIllisibles, aide()], [[true, false, 'Temps maximal : de 5 à 240 minutes, ou vide.'], 0, [true, false, 'Portions : un nombre entier de 1 à 12.'], [false, true, '']], 'C-10 : une saisie illisible (badInput) dans Temps maximal ou Portions éteint le bouton, la raison est dite, aucun appel ; corrigée, le bouton se rallume');
+        }
         ta.value = 'truite'; ta.dispatchEvent(new Event('input'));
         bouton(r6, 'recommencer-ia').click(); await tick(); await tick();
         eq([args6.length, args6[2]?.demande, S.etatCreation().memoire.demande, bouton(r6, 'demande-ia') === null, S.etatCreation().memoire.echec?.raison], [3, 'saumon fenouil', 'saumon fenouil', true, 'serveur'], '« Recommencer » relance la demande PARTIE (memoire.demande), pas la frappe en cours ; le formulaire se replie');
@@ -857,7 +911,7 @@ export async function runCreerIaTests({ eq, ok }) {
     const CLES_T3 = ['Créer une recette avec l’assistant IA', 'Pour créer une recette, configure l’assistant IA : fournisseur Anthropic, modèle et clé.', 'Ce fournisseur ne crée pas de recette ici. Choisis Anthropic dans Réglages → Assistant IA.', 'Cette version ne peut pas être adaptée ici.', 'Retour à la recette',
       'Ce que tu as, ce que tu veux', 'Ex. : un souper pour deux avec du saumon et du fenouil, en 30 minutes', 'Restrictions', 'Type de recette', 'Au choix de l’assistant', 'Portions', 'Temps maximal (minutes, facultatif)', 'Créer ma recette', 'Créer à nouveau', 'Une création = un appel à ton compte Anthropic.',
       'Écris d’abord ce que tu veux cuisiner.', 'Portions : un nombre entier de 1 à 12.', 'Temps maximal : de 5 à 240 minutes, ou vide.', 'L’assistant compose une recette…', 'Annuler', 'Une création est déjà en cours : annule-la d’abord.', 'La demande a changé depuis cette proposition.',
-      'Créée avec l’IA · non testée', 'Adaptée avec l’IA · non testée', 'Selon l’assistant : {texte}', '1 portion', '{n} portions', 'environ {m} min (estimé par l’assistant)', 'Ingrédients', 'Étapes', 'Conseils', 'À vérifier avant de servir', 'Restrictions demandées', 'Incompatible : {lignes}', 'À vérifier, à retirer : {lignes}', 'À vérifier', 'identité proposée',
+      'Créée avec l’IA · non testée', 'Adaptée avec l’IA · non testée', 'Selon l’assistant : {texte}', '1 portion', '{n} portions', 'environ {m} min (estimé par l’assistant)', 'Ingrédients', 'Étapes', 'Conseils', 'À vérifier avant de servir', 'Restrictions demandées', 'Incompatible : {lignes}', 'À vérifier, à retirer : {lignes}', 'À vérifier : {inconnues}', 'à retirer : {lignes}', 'À vérifier', 'identité proposée',
       'L’assistant n’a pas cuisiné cette recette : vérifie les quantités, les cuissons et les étiquettes avant de la servir.', 'Demande envoyée : {q}', 'au plus {m} min', '{u} jetons', 'Cette proposition n’est pas enregistrée : elle sera perdue à la fermeture de l’app.', 'Garder cette recette', 'Recommencer', 'Modifier la demande',
       'Recette gardée', 'Ouvrir la fiche', 'Enregistrement de la recette…', 'La recette n’a pas pu être gardée. Réessaie.', 'L’assistant n’a pas rendu une recette lisible. Recommence.', 'Réponse coupée : réessaie avec une demande plus courte.', 'Tu es hors ligne.', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.',
       'Trop de demandes pour l’instant. Réessaie dans une minute.', 'L’assistant a refusé cette demande.', 'L’assistant n’a pas répondu. Réessaie.', 'Réessayer', 'Réglages', 'Code : {c}'];

@@ -43,22 +43,25 @@ const AVEC_REGLAGES = ['cle_refusee'];
 const nettoyerDemande = (v) => (typeof v === 'string' ? borner(borner(v.replace(/[\t\n\v\f\r\x85\p{Zl}\p{Zp}]/gu, ' '), Number.MAX_SAFE_INTEGER).normalize('NFC').replace(/\s+/g, ' ').trim(), LIMITES_CREATION.demande) : '');
 const entierDans = (v, [min, max]) => { const s = String(v ?? '').trim(); if (!/^\d{1,4}$/.test(s)) return null; const n = Number(s); return n >= min && n <= max ? n : null; };
 
-// C-16 : préremplissage depuis l'adresse = liste blanche (restrictions ⊂ DIET_TAGS, type ∈ RECIPE_TYPES, portions 1-12, max 5-240).
-function formulaireInitial(query, parente) {
-  const q = nettoyerDemande(query?.q);
+// C-16 : préremplissage depuis l'adresse = liste blanche (restrictions ⊂ DIET_TAGS, type ∈ RECIPE_TYPES, portions 1-12, max 5-240 ;
+// hors bornes : portions de la parente sinon 4, max retiré). Pur ; le nom est celui du plan (T4 et T8 le citent).
+export function filtresDepuisQuery(query = {}, parente = null) {
   const diets = [...new Set(String(query?.diets ?? '').split(',').map((s) => s.trim()).filter((d) => DIET_TAGS.includes(d)))];
-  const type = RECIPE_TYPES.includes(query?.type) ? query.type : '';
-  const portions = entierDans(query?.portions, LIMITES_CREATION.portions) ?? entierDans(parente?.servings, LIMITES_CREATION.portions) ?? 4;
-  const max = entierDans(query?.max, LIMITES_CREATION.minutes);
-  return { demande: q || (parente ? nettoyerDemande(parente.provenance?.creation?.demande) : ''), diets, type, portions: String(portions), max: max === null ? '' : String(max), changement: '' };
+  const type = RECIPE_TYPES.includes(query?.type) ? query.type : null;
+  const servings = entierDans(query?.portions, LIMITES_CREATION.portions) ?? entierDans(parente?.servings, LIMITES_CREATION.portions) ?? 4;
+  return { diets, type, servings, maxMinutes: entierDans(query?.max, LIMITES_CREATION.minutes) };
 }
+// L'état du formulaire garde le TEXTE des champs numériques, et s'ils sont illisibles (validity.badInput : « 3- » rend value '').
+const formulaireDe = ({ demande, filtres: f, changement }) => ({ demande, diets: [...f.diets], type: f.type || '', portions: String(f.servings), max: f.maxMinutes == null ? '' : String(f.maxMinutes), changement: changement || '', illisible: { portions: false, max: false } });
+const formulaireInitial = (query, parente) => formulaireDe({ demande: nettoyerDemande(query?.q) || (parente ? nettoyerDemande(parente.provenance?.creation?.demande) : ''), filtres: filtresDepuisQuery(query, parente), changement: '' });
 // « Recommencer » relance ce qui est PARTI (memoire), pas un formulaire modifié depuis (§ 3.2).
-const formulaireDepuis = (m) => ({ demande: m.demande, diets: [...m.filtres.diets], type: m.filtres.type || '', portions: String(m.filtres.servings), max: m.filtres.maxMinutes == null ? '' : String(m.filtres.maxMinutes), changement: m.changement || '' });
-// C-10 : la demande part comme elle est affichée — une valeur que construireDemandeCreation remplacerait (portions 13 → 4) n'est pas envoyable.
+const formulaireDepuis = (m) => formulaireDe(m);
+// C-10 : la demande part comme elle est affichée — une valeur que construireDemandeCreation remplacerait (portions 13 → 4) ou qu'une
+// saisie illisible a vidée (« 3- » dans Temps maximal partait SANS maximum) n'est pas envoyable.
 function lireFormulaire(form) {
-  const servings = entierDans(form.portions, LIMITES_CREATION.portions);
-  const maxVide = String(form.max ?? '').trim() === '';
-  const maxMinutes = maxVide ? null : entierDans(form.max, LIMITES_CREATION.minutes);
+  const servings = form.illisible?.portions ? null : entierDans(form.portions, LIMITES_CREATION.portions);
+  const maxVide = !form.illisible?.max && String(form.max ?? '').trim() === '';
+  const maxMinutes = maxVide || form.illisible?.max ? null : entierDans(form.max, LIMITES_CREATION.minutes);
   return { filtres: { diets: [...form.diets], type: form.type || null, servings, maxMinutes }, erreur: servings === null ? 'portions' : (!maxVide && maxMinutes === null ? 'max' : null) };
 }
 // Une issue reçue est relue avant d'être rangée : une forme inattendue est « interne », jamais un écran qui lève au rendu.
@@ -220,7 +223,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
     };
     const type = select([{ value: '', label: t('Au choix de l’assistant') }, ...RECIPE_TYPES.map((v) => ({ value: v, label: label('recipe_type', v) }))], form.type, (v) => { form.type = v; majSaisie(); });
     type.name = 'type'; // P14
-    const nombre = (nom, [min, max]) => el('input', { type: 'number', name: nom, min, max, step: 1, value: form[nom], onInput: (e) => { form[nom] = e.target.value; majSaisie(); } });
+    const nombre = (nom, [min, max]) => el('input', { type: 'number', name: nom, min, max, step: 1, value: form[nom], onInput: (e) => { form[nom] = e.target.value; form.illisible = { ...form.illisible, [nom]: !!e.target.validity?.badInput }; majSaisie(); } });
     return el('div', { class: 'card stack', dataset: { role: 'formulaire-ia' } },
       field(t('Ce que tu as, ce que tu veux'), demande),
       // R-UX-8 : un groupe de boutons ne va jamais dans un <label> (le clic sur le libellé presserait la première puce).
@@ -265,7 +268,11 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
       el('ul', null, ...diets.map((d) => {
         const a = assessVersion(version, parIds, d);
         const lignes = a.blocking.map((b) => (b.source_text || b.label) + (b.proposed ? ` (${t('identité proposée')} : ${b.label} ?)` : '')).join(', ');
-        const etat = a.state === 'incompatible' ? t('Incompatible : {lignes}', { lignes }) : (a.blocking.length ? t('À vérifier, à retirer : {lignes}', { lignes }) : t('À vérifier'));
+        // R-CRE-9 : un facultatif à retirer ne se lit jamais comme la liste complète — les lignes inconnues sont nommées avant lui.
+        // Deux clés à une seule variable : un texte du modèle qui contiendrait « {lignes} » n'est jamais substitué une seconde fois.
+        const etat = a.state === 'incompatible' ? t('Incompatible : {lignes}', { lignes })
+          : a.blocking.length && a.unknown.length ? `${t('À vérifier : {inconnues}', { inconnues: a.unknown.join(', ') })} ; ${t('à retirer : {lignes}', { lignes })}`
+            : a.blocking.length ? t('À vérifier, à retirer : {lignes}', { lignes }) : t('À vérifier');
         return el('li', null, `${label('diet', d)} — ${etat}`);
       })));
   }
@@ -277,7 +284,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
     const avertissements = Array.isArray(m.issue.avertissements) ? m.issue.avertissements : [];
     const u = m.issue.usage;
     return el('section', { class: 'card stack proposition', dataset: { role: 'proposition-ia' } },
-      el('div', null, el('span', { class: 'badge ai', dataset: { role: 'etiquette-ia' } }, t(etiquetteCreationIA(version) || 'Créée avec l’IA · non testée'))),
+      el('div', null, el('span', { class: 'badge ai', dataset: { role: 'etiquette-ia' } }, t(etiquetteCreationIA(version)))),
       el('h2', null, rec.title),
       el('p', { dataset: { role: 'description-ia' } }, t('Selon l’assistant : {texte}', { texte: rec.description })),
       el('div', { class: 'muted', dataset: { role: 'portions-ia' } }, `${portionsTexte(rec.servings)} · ${t('environ {m} min (estimé par l’assistant)', { m: rec.estimated_minutes })}`),
