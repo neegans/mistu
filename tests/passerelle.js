@@ -187,8 +187,11 @@ export async function runPasserelleTests({ eq, ok }) {
     const avec = L.providerFrom({ llm: { provider: 'none' } }, { session: SESSION });
     eq([avec.name, avec.configured, avec.supportsWebSearch, avec.supportsVision, avec instanceof L.PasserelleProvider], ['anthropic', true, true, true, true], 'providerFrom : une session → PasserelleProvider, quel que soit settings.llm');
     eq([L.providerFrom(undefined, { session: SESSION }).name, L.providerFrom(null).name, L.providerFrom({}, {}).name, L.providerFrom({}, { session: { access_token: '' } }).name], ['anthropic', 'none', 'none', 'none'], 'providerFrom : réglages absents tolérés ; un jeton vide n’est pas une session');
-    const oc = L.providerFrom({ llm: { provider: 'openai_compatible', api_key: 'k', model: 'm' } });
-    eq([oc.name, oc.configured, oc.supportsWebSearch, L.providerFrom({ llm: { provider: 'openai_compatible', api_key: '', model: 'm' } }).name, L.providerFrom({ llm: { provider: 'openai_compatible', api_key: 'k', model: 'm' } }, { session: SESSION }).name], ['openai_compatible', true, false, 'none', 'anthropic'], 'providerFrom : le fournisseur compatible OpenAI ne se rend que sans session et avec une clé (inchangé) ; une session gagne');
+    // Passerelle T4 : le fournisseur compatible OpenAI est retiré (aucune interface ne pouvait plus le configurer) ; providerFrom garde sa
+    // signature mais ne lit plus rien de `settings` — seule la session décide.
+    const oc = L.providerFrom({ llm: { provider: 'openai_compatible', api_key: 'k', model: 'm', base_url: 'https://api.openai.com/v1' } });
+    eq([oc.name, oc.configured, oc.supportsWebSearch, L.providerFrom({ llm: { provider: 'openai_compatible', api_key: 'k', model: 'm' } }, { session: SESSION }).name], ['none', false, false, 'anthropic'], 'providerFrom : une configuration compatible OpenAI avec clé ne donne plus de fournisseur sans session ; une session gagne');
+    eq([typeof L.OpenAICompatibleProvider, L.providerFrom({ llm: { provider: 'anthropic', api_key: 'sk-factice-x', model: 'm' } }, { session: SESSION }).config, L.providerFrom({ llm: { provider: 'anthropic', api_key: 'sk-factice-x' } }, { session: SESSION }) instanceof L.PasserelleProvider], ['undefined', {}, true], 'providerFrom : OpenAICompatibleProvider n’existe plus ; avec une session, rien des réglages locaux n’est lu (ni gardé, ni envoyé)');
     eq([typeof L.ANTHROPIC_MESSAGES_URL, typeof L.anthropicHeaders, typeof L.AnthropicProvider], ['undefined', 'undefined', 'undefined'], 'llm : ANTHROPIC_MESSAGES_URL, anthropicHeaders et AnthropicProvider n’existent plus');
     // Sans session, l'extraction refuse AVANT tout appel
     {
@@ -219,7 +222,7 @@ export async function runPasserelleTests({ eq, ok }) {
     } finally { console.error = vraiErreur; }
   }
 
-  // --- Les écrans lisent la session et la passent (plomberie MINIMALE, R-T3-1 ; les textes « Connecte-toi » sont ceux de la tâche 4)
+  // --- Les écrans lisent la session et la passent (R-T3-1) ; sans session ils disent « Connecte-toi » (R-T4-4)
   {
     const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
     const avant = getUiLocale(); setUiLocale('fr');
@@ -245,45 +248,85 @@ export async function runPasserelleTests({ eq, ok }) {
           ok(effaces >= 1, 'sessionAssistant : le minuteur du délai est effacé quand la session arrive avant lui');
         }
       }
-      // Le panneau d'index (import.js) : le bouton de l'assistant s'allume quand la session est lue, jamais sur une clé locale
+      // Les écrans d'extraction (import.js, recipe-edit.js) : le bouton de l'assistant s'allume quand la session est lue, jamais sur une clé locale
+      // ni un réglage ; sans session, « Connecte-toi pour utiliser l’assistant. » et « Se connecter » apparaissent une fois la session lue
+      // (jamais en flash pour une personne connectée) et AUCUN appel ne part (Passerelle T4, R-T4-4).
+      const { withRepo } = await import('./sync-fixture.js');
+      const { SYNC_ROUTE_KEY } = await import('../src/ui/state.js');
       const I = await import('../src/ui/import.js');
-      const ctxDe = (session, llm) => ({ settings: { llm }, sync: { user: session ? { id: 'u1', email: 'a@exemple.invalid' } : null, auth: { jeton: async () => session } }, pagesById: new Map(), editionsById: new Map(), recipes: [] });
+      const ctxDe = (session, llm, auth = {}) => ({ settings: { llm }, sync: { user: session ? { id: 'u1', email: 'a@exemple.invalid' } : null, auth: { jeton: async () => session, ...auth } }, pagesById: new Map(), editionsById: new Map(), recipes: [] });
       const NONE = { provider: 'none' };
-      for (const [nom, session, llm, allume] of [['session, aucun réglage local', SESSION, NONE, true], ['sans session', null, NONE, false], ['jeton vide', { access_token: '' }, NONE, false], ['clé Anthropic locale, sans session', null, { provider: 'anthropic', api_key: 'cle-locale', model: 'm' }, false], ['compatible OpenAI configuré, sans session', null, { provider: 'openai_compatible', api_key: 'k', model: 'm' }, true], ['session ET compatible OpenAI', SESSION, { provider: 'openai_compatible', api_key: 'k', model: 'm' }, true]]) {
+      const TEXTE_CONNEXION = 'Connecte-toi pour utiliser l’assistant.';
+      const nettoyerRoute = () => { try { sessionStorage.removeItem(SYNC_ROUTE_KEY); } catch { /* stockage indisponible */ } };
+      const reseauInterdit = [];
+      globalThis.fetch = async (u) => { reseauInterdit.push(u); throw new Error('aucun reseau attendu'); };
+      for (const [nom, session, llm, allume] of [['session, aucun réglage local', SESSION, NONE, true], ['sans session', null, NONE, false], ['jeton vide', { access_token: '' }, NONE, false], ['clé Anthropic locale, sans session', null, { provider: 'anthropic', api_key: 'cle-locale', model: 'm' }, false], ['compatible OpenAI configuré, sans session', null, { provider: 'openai_compatible', api_key: 'k', model: 'm' }, false], ['session ET compatible OpenAI', SESSION, { provider: 'openai_compatible', api_key: 'k', model: 'm' }, true]]) {
         const panneau = I.indexEntriesPanel(null, ctxDe(session, llm), () => [], { editionId: 'ed1' });
         const b = [...panneau.querySelectorAll('button')].find((x) => x.textContent === 'Lire avec l’assistant IA');
-        const auDepart = b.disabled; await tick();
-        eq([auDepart, b.disabled], [true, !allume], `panneau d'index (${nom}) : éteint au départ, ${allume ? 'allumé' : 'éteint'} une fois la session lue`);
+        const phrase = panneau.querySelector('[data-role="connexion-ia"]');
+        const auDepart = [b.disabled, phrase?.hidden]; await tick();
+        eq([auDepart, b.disabled, phrase?.hidden], [[true, true], !allume, allume], `panneau d'index (${nom}) : bouton et phrase « Connecte-toi » cachés au départ (rien à dire avant la lecture de la session), ${allume ? 'bouton allumé, phrase cachée' : 'bouton éteint, phrase montrée'} ensuite`);
+        if (!allume) eq([phrase.textContent.includes(TEXTE_CONNEXION), !![...phrase.querySelectorAll('button')].find((x) => x.textContent === 'Se connecter'), panneau.textContent.includes('Assistant IA non configuré')], [true, true, false], `panneau d'index (${nom}) : « ${TEXTE_CONNEXION} » + « Se connecter », plus d'« Assistant IA non configuré »`);
       }
-      { // sans ctx.sync du tout (ancien contexte) : éteint, sans lever
+      { // sans ctx.sync du tout (ancien contexte) : éteint, la phrase est là, sans lever
         const panneau = I.indexEntriesPanel(null, { settings: { llm: NONE }, pagesById: new Map(), editionsById: new Map(), recipes: [] }, () => [], { editionId: 'ed1' });
         await tick();
-        eq([...panneau.querySelectorAll('button')].find((x) => x.textContent === 'Lire avec l’assistant IA').disabled, true, 'panneau d\'index : sans ctx.sync, le bouton reste éteint');
+        eq([[...panneau.querySelectorAll('button')].find((x) => x.textContent === 'Lire avec l’assistant IA').disabled, panneau.querySelector('[data-role="connexion-ia"]').hidden], [true, false], 'panneau d\'index : sans ctx.sync, le bouton reste éteint et la phrase est montrée');
       }
-      // « Tester » de Réglages (T4 retire la section) : par la passerelle quand une session existe, aucune clé n'est lue
-      const St = await import('../src/ui/settings.js');
-      const dits = [];
-      const tester = async (sync) => {
+      { // « Se connecter » : le geste de la section Compte (auth.signIn du contexte)
+        const signIns = [];
+        const panneau = I.indexEntriesPanel(null, ctxDe(null, NONE, { signIn: async () => { signIns.push(1); return { error: null }; } }), () => [], { editionId: 'ed1' });
+        await tick();
+        try { [...panneau.querySelectorAll('button')].find((x) => x.textContent === 'Se connecter').click(); await tick(); await tick(); } finally { nettoyerRoute(); }
+        eq(signIns.length, 1, 'panneau d\'index : « Se connecter » appelle auth.signIn() du contexte');
+      }
+      eq(reseauInterdit, [], 'écrans d\'extraction : aucun appel réseau tant qu\'on ne clique pas sur l\'assistant');
+
+      // Un clic sur l'assistant avec une session : UN POST à la passerelle ; le refus de la passerelle est dit en clair (texte, pas un mot de code)
+      await withRepo(async (repoTemp) => {
+        await repoTemp.putFile('sha-x', new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' }), {});
+        const R = await import('../src/ui/recipe-edit.js');
         const appels = [];
-        globalThis.fetch = async (url, options) => { appels.push({ url, options }); return reponse(200, { model: 'claude-x', content: [{ type: 'text', text: 'OK' }] }); };
-        try {
-          const sec = St.sectionAssistant({ llm: { provider: 'none', model: '', base_url: '', api_key: '' }, sync }, { saveConfig: async () => {}, dire: (m) => dits.push(m), confirm: async () => true });
-          [...sec.querySelectorAll('button')].find((x) => x.textContent === 'Tester').click();
+        const repondre = (statut, corps) => { globalThis.fetch = async (url, options) => { appels.push({ url, options }); return reponse(statut, corps); }; };
+        const page = { id: 'p1', sha256: 'sha-x', printed_page: 12 };
+        const ctxPages = (session, auth) => ({ ...ctxDe(session, NONE, auth), pagesById: new Map([['p1', page]]), recipesById: new Map(), versionsByRecipe: new Map(), versionsById: new Map(), booksById: new Map(), source_documents: [], ingredients: [], ingredientsById: new Map(), recipes: [], editions: [], books: [] });
+        const CAS = [[403, { erreur: 'non_admis' }, 'Ce compte n’a pas accès à l’assistant.'], [413, { erreur: 'trop_lourd' }, 'La demande est trop lourde.'], [413, 'pas du json', 'La demande est trop lourde.'], [429, { erreur: 'quota', quota: 60 }, 'Tu as atteint la limite du jour pour l’assistant.'], [401, { erreur: 'non_connecte' }, TEXTE_CONNEXION], [502, { erreur: 'serveur' }, 'Échec : serveur']];
+        // import.js — panneau d'index
+        for (const [statut, corps, attendu] of CAS) {
+          appels.length = 0; repondre(statut, corps);
+          const panneau = I.indexEntriesPanel(null, ctxPages(SESSION), () => ['p1'], { editionId: 'ed1' });
+          await tick();
+          const b = [...panneau.querySelectorAll('button')].find((x) => x.textContent === 'Lire avec l’assistant IA');
+          b.click();
+          for (let i = 0; i < 100 && appels.length === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
           await tick(); await tick();
-          return { appels, texte: sec.textContent };
-        } finally { globalThis.fetch = vraiFetch; }
-      };
-      {
-        const avecSession = await tester({ user: { id: 'u1', email: 'a@exemple.invalid' }, auth: { jeton: async () => SESSION } });
-        const a = avecSession.appels[0];
-        eq([avecSession.appels.length, a && new URL(a.url).host.endsWith('.supabase.co') && a.url.endsWith(P.CHEMIN_ASSISTANT), a?.options.headers.authorization, JSON.parse(a?.options.body ?? '{}').outil, avecSession.texte.includes('Réponse : OK')], [1, true, 'Bearer jeton-factice-0123', 'extraction', true], '« Tester » avec une session : un POST à la passerelle (outil extraction, jeton en Bearer), jamais ailleurs');
-        const sansCompte = await tester({ user: null, auth: { jeton: async () => SESSION } });
-        eq([sansCompte.appels.length, sansCompte.texte.includes('Échec : Configuration incomplète')], [0, true], '« Tester » avec un jeton mais sans compte reconnu sur cet appareil (garde de compte) : aucun appel');
-        const sans = await tester({ user: { id: 'u1' }, auth: { jeton: async () => null } });
-        eq([sans.appels.length, sans.texte.includes('Échec : Configuration incomplète')], [0, true], '« Tester » sans session : aucun appel, « Configuration incomplète »');
-        const sansAuth = await tester({});
-        eq([sansAuth.appels.length, sansAuth.texte.includes('Échec : Configuration incomplète')], [0, true], '« Tester » sans module d’auth (ctx.sync vide) : aucun appel, « Configuration incomplète »');
-      }
+          eq([appels.length, JSON.parse(appels[0]?.options.body ?? '{}').outil, appels[0]?.options.headers.authorization, panneau.textContent.includes(attendu)], [1, 'extraction', 'Bearer ' + JETON, true], `panneau d'index, ${statut} ${typeof corps === 'string' ? '(corps illisible)' : corps.erreur} : un POST d'extraction, « ${attendu} » à l'écran`);
+          ok(!panneau.textContent.includes(JETON) && !/trop_lourd|non_admis|non_connecte/.test(panneau.textContent), `panneau d'index, ${statut} : ni le jeton ni un mot de code à l'écran`);
+        }
+        // recipe-edit.js — éditeur de nouvelle recette (aucun rendu de la vraie base : les pages viennent de la base jetable de withRepo)
+        globalThis.fetch = async (u) => { reseauInterdit.push(u); throw new Error('aucun reseau attendu'); };
+        const sansSession = await R.renderRecipeEdit({}, { pages: 'p1' }, ctxPages(null));
+        const btnSans = [...sansSession.querySelectorAll('button')].find((x) => x.textContent === 'Extraire avec l’assistant IA');
+        const phraseSans = sansSession.querySelector('[data-role="connexion-ia"]');
+        eq([btnSans.disabled, !!phraseSans && !phraseSans.hidden, phraseSans?.textContent.includes(TEXTE_CONNEXION), !![...(phraseSans?.querySelectorAll('button') ?? [])].find((x) => x.textContent === 'Se connecter'), sansSession.textContent.includes('Assistant IA non configuré')], [true, true, true, true, false], 'recette (sans session) : bouton éteint, « Connecte-toi… » + « Se connecter », plus d\'« Assistant IA non configuré »');
+        const signIns = [];
+        const sansSessionAvecAuth = await R.renderRecipeEdit({}, { pages: 'p1' }, ctxPages(null, { signIn: async () => { signIns.push(1); return { error: null }; } }));
+        try { [...sansSessionAvecAuth.querySelectorAll('[data-role="connexion-ia"] button')].find((x) => x.textContent === 'Se connecter').click(); await tick(); await tick(); } finally { nettoyerRoute(); }
+        eq(signIns.length, 1, 'recette : « Se connecter » appelle auth.signIn() du contexte');
+        const avecSession = await R.renderRecipeEdit({}, { pages: 'p1' }, ctxPages(SESSION));
+        eq([avecSession.querySelector('[data-role="connexion-ia"]'), [...avecSession.querySelectorAll('button')].find((x) => x.textContent === 'Extraire avec l’assistant IA').disabled, avecSession.textContent.includes('Assistant IA non configuré')], [null, false, false], 'recette (avec session, aucun réglage local) : pas de phrase « Connecte-toi », le bouton est allumé, plus d\'« Assistant IA non configuré »');
+        for (const [statut, corps, attendu] of CAS) {
+          appels.length = 0; repondre(statut, corps);
+          const edit = await R.renderRecipeEdit({}, { pages: 'p1' }, ctxPages(SESSION));
+          const bouton = [...edit.querySelectorAll('button')].find((x) => x.textContent === 'Extraire avec l’assistant IA');
+          bouton.click();
+          for (let i = 0; i < 100 && (appels.length === 0 || bouton.disabled); i += 1) await new Promise((r) => setTimeout(r, 5));
+          await tick();
+          eq([appels.length, JSON.parse(appels[0]?.options.body ?? '{}').outil, appels[0]?.options.headers.authorization, edit.textContent.includes(attendu)], [1, 'extraction', 'Bearer ' + JETON, true], `recette, ${statut} ${typeof corps === 'string' ? '(corps illisible)' : corps.erreur} : un POST d'extraction, « ${attendu} » à l'écran`);
+          ok(!edit.textContent.includes(JETON) && !/trop_lourd|non_admis|non_connecte/.test(edit.textContent), `recette, ${statut} : ni le jeton ni un mot de code à l'écran`);
+        }
+      });
+      eq(reseauInterdit, [], 'écrans d\'extraction : aucun appel réseau sans clic sur l\'assistant, ni pour la recette sans session');
     } finally { globalThis.fetch = vraiFetch; setUiLocale(avant); }
   }
 

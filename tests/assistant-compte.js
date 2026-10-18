@@ -146,13 +146,17 @@ export async function runAssistantCompteTests({ eq, ok }) {
     await db.mutate({ puts: { assistant_config: [{ id: 'llm', provider: 'anthropic', model: 7, api_key: 'k\u0007', updated_at: '2026-10-17T10:00:00Z' }] }, origin: 'remote' });
     eq((await repo.getSettings()).llm, { provider: 'anthropic', model: '', base_url: '', api_key: 'k' }, 'lecture : une ligne reçue abîmée est normalisée (F13)');
   });
+  // La passe d'effacement de la clé locale (Passerelle T4, bloc plus bas) suit la migration dans init() : elle viderait aussitôt la ligne copiée.
+  // Ces blocs éprouvent la MIGRATION seule : l'appareil y a déjà passé l'effacement (garde posée), la ligne copiée reste donc lisible.
+  // La suite des deux passes ensemble est éprouvée dans le bloc d'effacement.
+  const SANS_EFFACEMENT = { sync_state: [{ key: 'cle_locale_effacee', value: 1 }] };
   // Passe unique § 5.6 : dans l'ordre de boot() — init() SANS capture, puis envoi initial (F3, S10)
   {
     const repoModule = await import('../src/model/repo.js');
     const { envoiInitial } = await import('../src/sync/backfill.js');
     const origine = repoModule.db;
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: ' m ', api_key: ' sk-factice-mac ', base_url: 'https://u:p@x.invalid', extra: 1 }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'anthropic', model: ' m ', api_key: ' sk-factice-mac ', base_url: 'https://u:p@x.invalid', extra: 1 }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
       repoModule.bindDatabase(db);
       try {
         await repoModule.init();
@@ -168,19 +172,19 @@ export async function runAssistantCompteTests({ eq, ok }) {
     });
     // Repli 1970 sans horodatage lisible ; rien copié si none / clé vide ; ligne déjà reçue respectée
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-sans-date' } }] }, origin: 'device' });
+      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-sans-date' } }] }, origin: 'device' });
       repoModule.bindDatabase(db);
       try { await repoModule.init(); eq((await db.get('assistant_config', 'llm'))?.updated_at, '1970-01-01T00:00:00.000Z', 'passe unique : sans horodatage lisible → 1970 (toute version du compte gagne)'); }
       finally { repoModule.bindDatabase(origine); }
     });
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'none' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'none' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
       repoModule.bindDatabase(db);
       try { await repoModule.init(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [undefined, undefined], 'passe unique : none → rien copié, settings.llm effacé'); }
       finally { repoModule.bindDatabase(origine); }
     });
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-vieille' }, updated_at: '2026-10-01T12:00:00.000Z' }], assistant_config: [{ id: 'llm', provider: 'anthropic', model: 'm2', base_url: '', api_key: 'sk-factice-recue', updated_at: '2026-10-17T12:00:00.000Z' }] }, origin: 'remote' });
+      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-vieille' }, updated_at: '2026-10-01T12:00:00.000Z' }], assistant_config: [{ id: 'llm', provider: 'anthropic', model: 'm2', base_url: '', api_key: 'sk-factice-recue', updated_at: '2026-10-17T12:00:00.000Z' }] }, origin: 'remote' });
       repoModule.bindDatabase(db);
       try { await repoModule.init(); eq([(await db.get('assistant_config', 'llm')).api_key, await db.get('settings', 'llm')], ['sk-factice-recue', undefined], 'passe unique : une ligne déjà reçue n’est pas écrasée ; settings.llm effacé'); }
       finally { repoModule.bindDatabase(origine); }
@@ -196,54 +200,137 @@ export async function runAssistantCompteTests({ eq, ok }) {
     const repoModule = await import('../src/model/repo.js');
     const origine = repoModule.db;
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-capture' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-capture' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
       repoModule.bindDatabase(db);
       installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
       try { await repoModule.init(); eq([(await db.get('assistant_config', 'llm'))?.api_key, await db.count('outbox')], ['sk-factice-capture', 0], 'passe unique : origine device — capture posée, la passe ne met rien en file'); }
       finally { uninstallCapture(db); repoModule.bindDatabase(origine); }
     });
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: '' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: '' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
       repoModule.bindDatabase(db);
       try { await repoModule.init(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [undefined, undefined], 'passe unique : clé vide → rien copié, settings.llm effacé'); }
       finally { repoModule.bindDatabase(origine); }
     });
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-date-illisible' }, updated_at: 'pas une date' }] }, origin: 'device' });
+      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-date-illisible' }, updated_at: 'pas une date' }] }, origin: 'device' });
       repoModule.bindDatabase(db);
       try { await repoModule.init(); eq((await db.get('assistant_config', 'llm'))?.updated_at, '1970-01-01T00:00:00.000Z', 'passe unique : horodatage illisible → 1970, jamais la chaîne reçue'); }
       finally { repoModule.bindDatabase(origine); }
     });
     // Fix round 1 : la décision « copier » se prend sur la valeur NORMALISÉE, jamais sur la valeur brute.
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'inconnu', api_key: 'sk-factice-x' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'inconnu', api_key: 'sk-factice-x' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
       repoModule.bindDatabase(db);
       try { await repoModule.init(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [undefined, undefined], 'passe unique : fournisseur inconnu (clé présente) → rien copié, settings.llm effacé'); }
       finally { repoModule.bindDatabase(origine); }
     });
     // R-CPT-4 : un Ollama local migre avec son URL ; une URL refusée ne migre pas (la clé partirait vers OpenAI).
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'openai_compatible', model: 'llama3', api_key: 'sk-factice-ollama', base_url: 'http://localhost:11434/v1' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'openai_compatible', model: 'llama3', api_key: 'sk-factice-ollama', base_url: 'http://localhost:11434/v1' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
       repoModule.bindDatabase(db);
       try { await repoModule.init(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [{ id: 'llm', provider: 'openai_compatible', model: 'llama3', base_url: 'http://localhost:11434/v1', api_key: 'sk-factice-ollama', created_at: '2026-10-01T12:00:00.000Z', updated_at: '2026-10-01T12:00:00.000Z' }, undefined], 'passe unique (R-CPT-4) : un Ollama local (http://localhost) migre avec son URL intacte'); }
       finally { repoModule.bindDatabase(origine); }
     });
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'openai_compatible', model: 'llama3', api_key: 'sk-factice-lan', base_url: 'http://192.168.1.5/v1' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
+      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'openai_compatible', model: 'llama3', api_key: 'sk-factice-lan', base_url: 'http://192.168.1.5/v1' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' });
       repoModule.bindDatabase(db);
       try { await repoModule.init(); eq([await db.get('assistant_config', 'llm'), await db.get('settings', 'llm')], [undefined, undefined], 'passe unique (R-CPT-4) : config OpenAI-compatible à URL refusée : non migrée, à retaper (settings.llm effacé)'); }
       finally { repoModule.bindDatabase(origine); }
     });
   }
 
+  // --- Passerelle T4 : passe d'effacement de la clé locale (R-T4-3). La clé n'est plus lue nulle part (la passerelle tient la
+  // sienne côté serveur) : une clé restée dans assistant_config est VIDÉE une fois (garde sync_state.cle_locale_effacee), par une écriture
+  // d'origine 'local' — capturée, donc envoyée au compte, qui efface la clé du serveur et des autres appareils. La capture est posée AVANT
+  // init(), comme app.js la pose (l'écriture est de la personne : sans capture posée d'abord, la ligne vide ne partirait jamais).
+  {
+    const repoModule = await import('../src/model/repo.js');
+    const origine = repoModule.db;
+    const GARDE = 'cle_locale_effacee';
+    const sansDates = (l) => { const { created_at, updated_at, ...reste } = l; return reste; };
+    const VIDE_LIGNE = { id: 'llm', provider: 'none', model: '', base_url: '', api_key: '' };
+    const sur = (preparer, test, { prod = true } = {}) => withDatabase(async (db) => {
+      await preparer(db);
+      repoModule.bindDatabase(db);
+      installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => prod });
+      try { await test(db); } finally { uninstallCapture(db); repoModule.bindDatabase(origine); }
+    });
+    const ligne = (extra) => ({ id: 'llm', provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-vieille', created_at: '2026-10-01T12:00:00.000Z', updated_at: '2026-10-01T12:00:00.000Z', ...extra });
+    const poser = (l) => (db) => db.mutate({ puts: { assistant_config: [l] }, origin: 'device' });
+    const fichierEntree = async (db) => (await db.getAll('outbox')).filter((e) => e.store === 'assistant_config').map((e) => [e.op, e.id, e.user_id, 'payload' in e]);
+
+    // Une clé locale → ligne vide, UNE entrée d'outbox (origine local), garde posée ; la seconde init() n'écrit rien
+    await sur(poser(ligne()), async (db) => {
+      await repoModule.init();
+      const apres = await db.get('assistant_config', 'llm');
+      eq(sansDates(apres), VIDE_LIGNE, 'effacement : la ligne devient { provider none, model, base_url et api_key vides }');
+      ok(Date.parse(apres.updated_at) > Date.parse('2026-10-01T12:00:00.000Z'), 'effacement : horodatée MAINTENANT (la ligne vide bat la vieille clé du compte)');
+      eq(await fichierEntree(db), [['put', 'llm', 'u1', false]], 'effacement : UNE entrée d’outbox pour assistant_config — origine local, donc capturée (le compte reçoit la ligne vide)');
+      eq((await db.get('sync_state', GARDE))?.value, 1, 'effacement : garde sync_state.cle_locale_effacee posée');
+      ok(!JSON.stringify(await db.getAll('assistant_config')).includes('sk-factice-vieille') && !JSON.stringify(await db.getAll('outbox')).includes('sk-factice-vieille'), 'effacement : la clé n’est ni dans la ligne ni dans la file');
+      const avantSeconde = { ligne: apres, file: await db.getAll('outbox') };
+      await repoModule.init();
+      eq([await db.get('assistant_config', 'llm'), await db.getAll('outbox')], [avantSeconde.ligne, avantSeconde.file], 'effacement : idempotent — une seconde init() n’écrit rien (ligne identique, même file)');
+    });
+    // Une configuration sans clé mais avec un fournisseur est vidée aussi (R-T4-3 : api_key non vide OU provider différent de none)
+    await sur(poser(ligne({ provider: 'openai_compatible', model: 'llama3', base_url: 'http://localhost:11434/v1', api_key: '' })), async (db) => {
+      await repoModule.init();
+      eq([sansDates(await db.get('assistant_config', 'llm')), (await fichierEntree(db)).length], [VIDE_LIGNE, 1], 'effacement : un fournisseur sans clé est vidé aussi');
+    });
+    // Lue BRUTE : une ligne reçue abîmée (fournisseur inconnu, clé gardée) ne se normalise pas en « vide » à la lecture — sa clé est effacée
+    await sur(poser({ id: 'llm', provider: 'inconnu', api_key: 'sk-factice-brute', updated_at: '2026-10-01T12:00:00.000Z' }), async (db) => {
+      await repoModule.init();
+      const apres = await db.get('assistant_config', 'llm');
+      eq([sansDates(apres), JSON.stringify(apres).includes('sk-factice-brute'), (await fichierEntree(db)).length], [VIDE_LIGNE, false, 1], 'effacement : une clé sous un fournisseur inconnu (ligne abîmée) est effacée elle aussi, lue brute');
+    });
+    await sur(poser({ id: 'llm', api_key: 'sk-factice-sans-fournisseur', updated_at: '2026-10-01T12:00:00.000Z' }), async (db) => {
+      await repoModule.init();
+      eq([sansDates(await db.get('assistant_config', 'llm')), (await fichierEntree(db)).length], [VIDE_LIGNE, 1], 'effacement : une ligne sans fournisseur mais avec une clé est effacée');
+    });
+    // Pas de ligne : la garde seule, rien d'autre
+    await sur(async () => {}, async (db) => {
+      await repoModule.init();
+      eq([await db.getAll('assistant_config'), (await db.getAll('outbox')).length, (await db.get('sync_state', GARDE))?.value], [[], 0, 1], 'effacement : sans ligne, la garde est posée et RIEN d’autre (aucune ligne créée, aucune entrée de file)');
+    });
+    // Ligne déjà vide : rien n'est réécrit (pas d'horodatage neuf, pas d'entrée de file)
+    const dejaVide = ligne({ provider: 'none', model: '', base_url: '', api_key: '' });
+    await sur(poser(dejaVide), async (db) => {
+      await repoModule.init();
+      eq([await db.get('assistant_config', 'llm'), (await db.getAll('outbox')).length, (await db.get('sync_state', GARDE))?.value], [dejaVide, 0, 1], 'effacement : une ligne déjà vide n’est pas réécrite (même horodatage), 0 entrée de file, garde posée');
+    });
+    // La garde est un « une seule fois » : posée, la passe ne touche plus à rien (même si une ligne avec clé revient)
+    await sur(async (db) => { await db.mutate({ puts: { assistant_config: [ligne({ api_key: 'sk-factice-apres' })], sync_state: [{ key: GARDE, value: 1 }] }, origin: 'device' }); }, async (db) => {
+      await repoModule.init();
+      eq([(await db.get('assistant_config', 'llm')).api_key, (await db.getAll('outbox')).length], ['sk-factice-apres', 0], 'effacement : garde posée → la passe ne rejoue pas (une seule fois)');
+    });
+    // Hors production (localhost) : la clé est effacée ICI, mais la ligne ne part nulle part (K-3)
+    await sur(poser(ligne()), async (db) => {
+      await repoModule.init();
+      eq([sansDates(await db.get('assistant_config', 'llm')), (await db.getAll('outbox')).length], [VIDE_LIGNE, 0], 'effacement : hors production la clé locale est effacée aussi, sans entrée de file (le magasin ne part qu’en production)');
+    }, { prod: false });
+    // Les deux passes ensemble : un settings.llm jamais migré (clé) → la migration le copie, l'effacement le vide, UNE entrée de file
+    await sur(async (db) => { await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-jamais-migre' }, updated_at: '2026-10-01T12:00:00.000Z' }] }, origin: 'device' }); }, async (db) => {
+      await repoModule.init();
+      eq([sansDates(await db.get('assistant_config', 'llm')), await db.get('settings', 'llm'), (await db.get('sync_state', 'assistant_config_migre'))?.value, (await db.get('sync_state', GARDE))?.value, await fichierEntree(db)],
+        [VIDE_LIGNE, undefined, 1, 1, [['put', 'llm', 'u1', false]]], 'migration PUIS effacement : un settings.llm jamais migré ne laisse aucune clé (ni settings ni assistant_config) et envoie la ligne vide au compte');
+    });
+    // L'ordre du démarrage (app.js n'est jamais importé par la suite : il lance l'application à l'import) est lu au SOURCE, comme le câblage
+    // de K-12 — c'est un test faible (il ne voit pas l'exécution), mais il fait rougir le retour de installCapture APRÈS repo.init(), qui
+    // laisserait la passe d'effacement sans capture : la ligne vide ne partirait jamais au compte.
+    {
+      const reponse = await fetch(new URL('../src/app.js', import.meta.url), { cache: 'no-store' });
+      const code = (await reponse.text()).split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+      const captureA = code.indexOf('installCapture(repo.db'); const initA = code.indexOf('await repo.init()');
+      ok(reponse.ok && captureA > 0 && initA > 0 && captureA < initA, 'effacement : app.js pose la capture AVANT repo.init() (lu au source, hors commentaires) — sinon la ligne vide de la passe ne serait jamais mise en file');
+    }
+  }
+
   // --- T4 : production seulement (K-3, S3) — prédicat injecté, faux par défaut (R-CPT-1)
   const cfgMod = await import('../src/sync/config.js');
   // Ce bloc éprouve le prédicat à hôte explicite. Le défaut sans argument lit location.hostname, qui ne se simule pas
-  // dans le navigateur. L'assertion K-10 du bloc Réglages compare le texte par défaut de texteAssistant à
-  // configAssistantSuitLeCompte() appelé sans argument : la MÊME fonction des deux côtés. Elle éprouve donc le CÂBLAGE
-  // de texteAssistant vers ce prédicat, PAS la valeur du défaut (un défaut codé en dur 'neegans.github.io' survivrait
-  // sur localhost). Sur localhost, elle ne tue que le mutant `suitLeCompte = () => true` ; le mutant `() => false` ne
-  // l'est que par la suite servie sur le site public. Les valeurs par hôte sont éprouvées ici.
+  // dans le navigateur : la valeur par hôte est éprouvée ici, et seule la suite servie sur le site public éprouve le défaut.
+  // (Passerelle T4 : le texte K-10 de Réglages, qui lisait ce prédicat, a disparu avec le formulaire de clé.)
   eq([cfgMod.configAssistantSuitLeCompte('neegans.github.io'), cfgMod.configAssistantSuitLeCompte('NEEGANS.GITHUB.IO'), cfgMod.configAssistantSuitLeCompte('localhost'), cfgMod.configAssistantSuitLeCompte('127.0.0.1'), cfgMod.configAssistantSuitLeCompte('')],
     [true, true, false, false, false], 'K-3 : vrai seulement pour les hôtes de production (prod.hosts), insensible à la casse');
   ok(cfgMod.SUPABASE.prod.hosts.length > 0 && cfgMod.SUPABASE.prod.hosts.every((h) => cfgMod.configAssistantSuitLeCompte(h)) && cfgMod.SUPABASE.dev.hosts.every((h) => !cfgMod.configAssistantSuitLeCompte(h)), 'K-3 : chaque hôte de prod.hosts de la configuration suit le compte, aucun hôte de dev.hosts ne le suit (dérivé de la configuration, pas d’une liste copiée)');
@@ -475,7 +562,9 @@ export async function runAssistantCompteTests({ eq, ok }) {
     const tf = creerTransportFactice({ serveur: true });
     await tf.pousser([{ store: 'assistant_config', id: 'llm', data: L('sk-factice-K2', H.t3), updated_at: H.t3 }]);
     await withDatabase(async (db) => {
-      await db.mutate({ puts: { settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-K1' }, updated_at: H.t1 }] }, origin: 'device' });
+      // Garde d'effacement posée : ce bloc éprouve l'horodatage D'ORIGINE de la migration. La passe d'effacement (Passerelle T4) viderait
+      // aussitôt la ligne, et sa ligne vide, plus récente que K2, effacerait K2 aussi — voir le bloc suivant, qui l'éprouve de bout en bout.
+      await db.mutate({ puts: { ...SANS_EFFACEMENT, settings: [{ key: 'llm', value: { provider: 'anthropic', model: 'm', api_key: 'sk-factice-K1' }, updated_at: H.t1 }] }, origin: 'device' });
       repoModule.bindDatabase(db);
       try {
         await repoModule.init();
@@ -484,6 +573,33 @@ export async function runAssistantCompteTests({ eq, ok }) {
         const r = await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer();
         await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1', configSuitLeCompte: () => true }).recevoir();
         eq([tf.ligne('assistant_config', 'llm').data.api_key, (await db.get('assistant_config', 'llm')).api_key, r.conflits, (await db.getAll('sync_conflicts')).length], ['sk-factice-K2', 'sk-factice-K2', 0, 0], 'S1 : K1 (horodatage d’origine, plus vieux) ne bat pas K2 ; K2 arrive ici ; aucun conflit');
+      } finally { uninstallCapture(db); repoModule.bindDatabase(origine); }
+    });
+  }
+  // 7. Passerelle T4 : la passe d'effacement, de bout en bout. La ligne vide est écrite MAINTENANT : plus récente que toute clé du compte,
+  //    elle vide la ligne du serveur (K2 comprise) et celle d'un autre appareil — la clé ne traîne plus nulle part. La capture est posée
+  //    AVANT init(), comme app.js (sinon la ligne vide ne partirait jamais).
+  {
+    const repoModule = await import('../src/model/repo.js');
+    const origine = repoModule.db;
+    const tf = creerTransportFactice({ serveur: true });
+    await tf.pousser([{ store: 'assistant_config', id: 'llm', data: L('sk-factice-K2', H.t3), updated_at: H.t3 }]);
+    await withDatabase(async (db) => {
+      await db.mutate({ puts: { assistant_config: [L('sk-factice-K1', H.t1)] }, origin: 'device' });
+      repoModule.bindDatabase(db);
+      installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
+      try {
+        await repoModule.init();
+        const r = await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer();
+        const serveur = tf.ligne('assistant_config', 'llm');
+        eq([serveur.data.api_key, serveur.data.provider, r.conflits, (await db.get('assistant_config', 'llm')).api_key, (await db.getAll('outbox')).length, (await db.getAll('sync_conflicts')).length], ['', 'none', 0, '', 0, 0], 'effacement de bout en bout : la ligne vide bat K2 sur le serveur, la file est vidée, aucun conflit');
+        // Un autre appareil qui porte encore K2 reçoit la ligne vide (plus récente que la sienne) : sa clé disparaît aussi
+        await withDatabase(async (dbB) => {
+          await dbB.mutate({ puts: { assistant_config: [L('sk-factice-K2', H.t3)] }, origin: 'device' });
+          await createPull({ db: dbB, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1', configSuitLeCompte: () => true }).recevoir();
+          const b = await dbB.get('assistant_config', 'llm');
+          eq([b.api_key, b.provider], ['', 'none'], 'effacement de bout en bout : un autre appareil qui porte encore K2 reçoit la ligne vide, sa clé disparaît');
+        });
       } finally { uninstallCapture(db); repoModule.bindDatabase(origine); }
     });
   }
@@ -524,152 +640,163 @@ export async function runAssistantCompteTests({ eq, ok }) {
     eq([await db.get('assistant_config', 'llm'), (await db.getAll('outbox')).length, (await repo.getSettings()).llm.provider], [undefined, 0, 'none'], 'K-8 : clearDevice vide assistant_config, la file est vide ensuite et la configuration redevient « aucun »');
   });
 
-  // --- T7 : Réglages (K-6, K-10, K-12, S14, R-CPT-4)
+  // --- Passerelle T4 : Réglages → Assistant IA (R-T4-2). DEUX états, AUCUN champ : la clé n'existe plus côté app (K-6, K-10, S14 et
+  // R-CPT-4 portaient le formulaire de clé, retiré avec lui). Première ligne = à quoi sert la section ; l'état vient d'un GET de la
+  // passerelle (fetch INJECTÉ — jamais le réseau), affiché « … » pendant l'attente.
   const S = await import('../src/ui/settings.js');
-  const REFUS_URL = 'URL de base refusée : https exigé (ou http://localhost pour un serveur local), sans identifiants.';
   const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
   const avantLocale = getUiLocale();
   setUiLocale('fr'); // une suite antérieure peut basculer 'en' ; ce bloc compare des textes français (rendue dans le finally)
   const scene = document.createElement('div'); scene.hidden = true; document.body.append(scene);
+  const JETON = 'jeton-factice-0123'; // jamais un vrai jeton ; il ne doit apparaître dans AUCUN rendu
+  const SESSION = { access_token: JETON, user: { id: 'u1', email: 'a@exemple.invalid' } };
+  const { SYNC_ROUTE_KEY } = await import('../src/ui/state.js');
   try {
     const tick = () => new Promise((r) => setTimeout(r, 0));
-    const texteDe = (sync, lie, prod) => S.texteAssistant({ sync, lie, suitLeCompte: () => prod });
-    ok(texteDe({}, false, false).includes('adresse de développement'), 'K-10 (a) : hôte hors production');
-    ok(texteDe({}, false, true).startsWith('Sans compte, la configuration reste sur cet appareil jusqu’à ta première connexion, puis elle suit ton compte. '), 'K-10 (b) : jamais connectée, en production (R-CPT-7) : la ligne partira au premier compte qui se connectera ici');
-    ok(texteDe({}, true, true).includes('prochaine connexion'), 'K-10 (c) : appareil lié, déconnecté');
-    ok(texteDe({ user: { id: 'u1' } }, true, true).includes('suit ton compte'), 'K-10 (d) : connectée');
-    for (const [sync, lie, prod] of [[{}, false, false], [{}, false, true], [{}, true, true], [{ user: { id: 'u1' } }, true, true]]) ok(texteDe(sync, lie, prod).includes('jamais incluse dans les sauvegardes ZIP'), 'K-10 : toujours la phrase des archives');
-    // Le prédicat par défaut est celui de l'hôte réel : la même suite tourne sur localhost ET sur le site public.
-    const prodIci = cfgMod.configAssistantSuitLeCompte();
-    ok(S.texteAssistant({ sync: { user: { id: 'u1' } }, lie: true }).includes(prodIci ? 'suit ton compte' : 'adresse de développement'), `K-10 : par défaut, le texte suit l’hôte réel de la suite (${prodIci ? 'production → suit le compte' : 'hors production → adresse de développement, même connectée'})`);
-    const monter = (llm, sync, deps, etat = {}) => { const sec = S.sectionAssistant({ llm, sync, lie: !!sync.user, suitLeCompte: () => true, ...etat }, { tester: async () => 'OK', rafraichir: () => {}, ...deps }); scene.append(sec); return sec; };
+    const attendre = async (pred) => { for (let i = 0; i < 100 && !(await pred()); i += 1) await new Promise((r) => setTimeout(r, 5)); return pred(); };
+    const reponse = (statut, corps) => ({ ok: statut >= 200 && statut < 300, status: statut, headers: new Headers(), text: async () => JSON.stringify(corps) });
+    const monter = (sync, session, deps) => { const sec = S.sectionAssistant({ sync, session }, deps); scene.append(sec); return sec; };
     const bouton = (root, nom) => [...root.querySelectorAll('button')].find((b) => b.textContent === nom);
-    const selectFournisseur = (root) => root.querySelector('select');
-    const champUrl = (root) => [...root.querySelectorAll('input[type="text"]')].find((i) => i.placeholder.startsWith('https://api.openai.com'));
-    const taper = (champ, valeur) => { champ.value = valeur; champ.dispatchEvent(new Event('input')); };
-    const choisir = (sel, valeur) => { sel.value = valeur; sel.dispatchEvent(new Event('change')); };
-    // K-6 : « Aucun » sans ligne ici → rien écrit
+    const compteur = (suite) => { const c = { appels: [], f: null }; c.f = async (url, options) => { c.appels.push({ url, options }); return suite(url, options); }; return c; };
+    const ligneEtat = (sec) => sec.querySelector('[data-role="etat-assistant"]');
+    const sansChamp = (sec) => sec.querySelectorAll('input, select, textarea').length;
+    const U = SESSION.user;
+
+    eq([typeof S.texteAssistant, typeof S.sectionAssistant, typeof S.occupeParAssistant], ['undefined', 'function', 'function'], 'Réglages : texteAssistant (les quatre textes K-10) n’existe plus ; la section et K-12 restent');
+
+    // ÉTAT 1 — sans session : le but d'abord, un bouton, AUCUN champ, AUCUN appel
     {
-      const appels = []; const dits = [];
-      const sec = monter({ provider: 'none', model: '', base_url: '', api_key: '' }, {}, { saveConfig: async (c) => { appels.push(c); }, dire: (m) => dits.push(m), confirm: async () => true });
-      bouton(sec, 'Enregistrer').click(); await tick();
-      eq([appels.length, dits], [0, ['Rien à retirer : aucun assistant n’est configuré ici.']], 'K-6 : « Aucun » sans configuration ici → rien écrit, et on le dit');
+      const reseau = compteur(async () => reponse(200, {}));
+      const connexions = [];
+      const auth = { signIn: async () => ({ error: null }) };
+      const sec = monter({ auth }, null, { fetch: reseau.f, connecter: (a) => { connexions.push(a); } });
+      await tick(); await tick();
+      eq(sec.dataset.section, 'assistant', 'sans session : la section reste marquée data-section="assistant" (K-12)');
+      eq(sec.querySelector('p')?.textContent, 'Connecte-toi pour utiliser l’assistant.', 'sans session : la première ligne dit à quoi sert la section');
+      eq([...sec.querySelectorAll('button')].map((b) => b.textContent), ['Se connecter'], 'sans session : un seul bouton, « Se connecter »');
+      eq(sansChamp(sec), 0, 'sans session : aucun champ (ni input, ni select, ni textarea) — plus de fournisseur, de modèle, d’URL ni de clé');
+      for (const mot of ['Fournisseur', 'Clé API', 'URL de base', 'Enregistrer', 'Tester', 'Aucun (manuel)', 'Fournisseur-agnostique', 'sauvegardes ZIP', 'Retirer']) ok(!sec.textContent.includes(mot), `sans session : « ${mot} » a disparu`);
+      eq(reseau.appels.length, 0, 'sans session : AUCUN appel réseau');
+      bouton(sec, 'Se connecter').click(); await tick();
+      eq([connexions.length, connexions[0] === auth], [1, true], '« Se connecter » appelle le chemin de la section Compte avec le module d’auth du contexte');
+      sec.remove();
+      // le chemin par défaut est demarrerConnexion (même geste que « Connexion avec Google ») : signIn du module d'auth, route mémorisée
+      const signIns = []; let memorisee = null;
+      const sec2 = monter({ auth: { signIn: async () => { signIns.push(1); return { error: null }; } } }, null, { fetch: reseau.f });
+      try { bouton(sec2, 'Se connecter').click(); await tick(); await tick(); memorisee = sessionStorage.getItem(SYNC_ROUTE_KEY); }
+      finally { try { sessionStorage.removeItem(SYNC_ROUTE_KEY); } catch { /* stockage indisponible */ } }
+      eq([signIns.length, typeof memorisee], [1, 'string'], '« Se connecter » (chemin par défaut) : auth.signIn() une fois, la route courante mémorisée pour le retour de Google');
+      sec2.remove();
+    }
+
+    // Un geste de connexion qui échoue (rejet ou levée) n'échappe jamais d'un onClick : une phrase fixe, jamais le message du fournisseur
+    {
+      let nonTraites = 0; const surRejet = (e) => { nonTraites += 1; e.preventDefault(); };
+      window.addEventListener('unhandledrejection', surRejet);
+      try {
+        for (const [nom, connecter] of [['rejet', async () => { throw new Error('boom-fournisseur'); }], ['levée', () => { throw new Error('boom-fournisseur'); }]]) {
+          const sec = monter({ auth: {} }, null, { fetch: compteur(async () => reponse(200, {})).f, connecter });
+          bouton(sec, 'Se connecter').click();
+          await tick(); await tick(); await tick();
+          const dit = document.querySelector('.toast')?.textContent;
+          eq([dit, nonTraites], ['La connexion n’a pas pu démarrer.', 0], `« Se connecter » (${nom}) : phrase fixe, jamais « boom-fournisseur », aucun rejet non traité`);
+          sec.remove();
+        }
+      } finally { window.removeEventListener('unhandledrejection', surRejet); const t = document.querySelector('.toast'); if (t) t.style.display = 'none'; }
+    }
+
+    // ÉTAT 2 — avec session : « actif pour <adresse> », puis le GET de la passerelle (« … » pendant l'attente)
+    {
+      let resoudre; const attente = new Promise((r) => { resoudre = r; });
+      const reseau = compteur(() => attente);
+      const sec = monter({ user: U, auth: {} }, SESSION, { fetch: reseau.f });
+      eq(sec.querySelector('p')?.textContent, 'L’assistant est actif pour a@exemple.invalid.', 'avec session : la première ligne dit pour qui l’assistant est actif');
+      eq(ligneEtat(sec)?.textContent, '…', 'avec session : « … » pendant que le GET est en vol');
+      eq(reseau.appels.length, 1, 'avec session : un seul GET au rendu');
+      const a = reseau.appels[0];
+      eq([a.options.method, new URL(a.url).host.endsWith('.supabase.co'), a.url.endsWith('/functions/v1/assistant'), a.options.headers.authorization, 'body' in a.options], ['GET', true, true, 'Bearer ' + JETON, false], 'avec session : GET /functions/v1/assistant avec le jeton de la session, sans corps');
+      resoudre(reponse(200, { modele: 'claude-sonnet-5-5', quotaJour: 60 }));
+      ok(await attendre(() => ligneEtat(sec).textContent !== '…'), 'avec session : la ligne d’état se remplit à la réponse');
+      eq(ligneEtat(sec).textContent, 'Modèle en service : claude-sonnet-5-5. Quota : 60 appels par jour.', 'avec session : le modèle et le quota, texte exact');
+      eq([sansChamp(sec), !!bouton(sec, 'Se connecter'), [...sec.querySelectorAll('button')].length], [0, false, 0], 'avec session : aucun champ, aucun bouton');
+      ok(!sec.textContent.includes(JETON) && !sec.outerHTML.includes(JETON), 'avec session : le jeton n’est ni dans le texte ni dans le HTML');
       sec.remove();
     }
-    // R-CPT-7 (remplace R-CPT-5) : la confirmation « Retirer de tous tes appareils » vaut quand la ligne vide PARTIRA au
-    // compte, c'est-à-dire sur TOUT hôte de production : connectée, appareil lié ou jamais lié (déconnectée, l'écriture est
-    // capturée avec user_id null et part sous le premier compte qui se connecte ici : fileDe, R-L3-24). Hors production
-    // (K-3), la ligne reste ici : aucune confirmation. Dans tous les cas, la ligne vide est écrite.
-    for (const [nom, sync, etat, attendu] of [
-      ['développement + connectée → aucune confirmation', { user: { id: 'u1' } }, { lie: true, suitLeCompte: () => false }, 0],
-      ['production + déconnectée + appareil lié → confirmation', {}, { lie: true, suitLeCompte: () => true }, 1],
-      ['production + déconnectée + jamais liée → confirmation (la ligne partira au premier compte connecté ici)', {}, { lie: false, suitLeCompte: () => true }, 1],
-      // Connectée sur un appareil pas encore lié (sync_state.user_id absent) : la ligne vide part au compte → confirmation.
-      ['production + connectée + appareil pas encore lié → confirmation', { user: { id: 'u1' } }, { lie: false, suitLeCompte: () => true }, 1],
+    // Le GET dit non (403 non_admis), ou ne répond pas : le texte juste, jamais le corps de l'erreur
+    for (const [nom, suite, attendu] of [
+      ['403 non_admis', async () => reponse(403, { erreur: 'non_admis', detail: 'CORPS-SENTINELLE' }), 'Ce compte n’a pas accès à l’assistant.'],
+      ['403 origine (la passerelle écrit origine)', async () => reponse(403, { erreur: 'origine' }), 'Ce compte n’a pas accès à l’assistant.'],
+      ['réseau coupé', async () => { throw new TypeError('Failed to fetch'); }, 'L’assistant est indisponible pour le moment.'],
+      ['502', async () => reponse(502, { erreur: 'serveur' }), 'L’assistant est indisponible pour le moment.'],
+      ['401', async () => reponse(401, { erreur: 'non_connecte' }), 'L’assistant est indisponible pour le moment.'],
+      ['429', async () => reponse(429, { erreur: 'quota', quota: 60 }), 'L’assistant est indisponible pour le moment.'],
+      ['200 illisible', async () => reponse(200, 'pas du json'), 'L’assistant est indisponible pour le moment.'],
     ]) {
-      const appels = []; let demandes = 0;
-      const sec = monter({ provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-r5' }, sync, { saveConfig: async (c) => { appels.push(c); }, dire: () => {}, confirm: async () => { demandes += 1; return true; } }, etat);
-      choisir(selectFournisseur(sec), 'none');
-      bouton(sec, 'Enregistrer').click(); await tick();
-      eq([demandes, appels.map((c) => c.provider)], [attendu, ['none']], `R-CPT-7 : ${nom}, ligne vide écrite`);
+      const reseau = compteur(suite);
+      const sec = monter({ user: U, auth: {} }, SESSION, { fetch: reseau.f });
+      await attendre(() => ligneEtat(sec).textContent !== '…');
+      eq(ligneEtat(sec).textContent, attendu, `avec session, GET ${nom} : « ${attendu} »`);
+      ok(!sec.textContent.includes('CORPS-SENTINELLE') && !sec.textContent.includes(JETON) && sec.querySelector('p').textContent.startsWith('L’assistant est actif pour'), `avec session, GET ${nom} : ni corps d’erreur ni jeton à l’écran ; la première ligne reste`);
       sec.remove();
     }
-    // K-6 : « Aucun » avec clé et compte → confirmation ; refusée → rien ; acceptée → ligne vide
-    for (const reponse of [false, true]) {
-      const appels = []; let demandes = 0;
-      const sec = monter({ provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-ui' }, { user: { id: 'u1' } }, { saveConfig: async (c) => { appels.push(c); }, dire: () => {}, confirm: async () => { demandes += 1; return reponse; } });
-      choisir(selectFournisseur(sec), 'none');
-      bouton(sec, 'Enregistrer').click(); await tick();
-      eq([demandes, appels.map((c) => c.provider)], [1, reponse ? ['none'] : []], `K-6 : confirmation ${reponse ? 'acceptée → ligne vide' : 'refusée → rien'}`);
+    // Formes du 200 : quota de 1 au singulier ; modèle ou quota absents : seule la partie connue est dite
+    for (const [corps, attendu] of [[{ modele: 'm', quotaJour: 1 }, 'Modèle en service : m. Quota : 1 appel par jour.'], [{ modele: 'm', quotaJour: null }, 'Modèle en service : m.'], [{ modele: null, quotaJour: 60 }, 'Quota : 60 appels par jour.'], [{ modele: null, quotaJour: null }, '']]) {
+      const sec = monter({ user: U, auth: {} }, SESSION, { fetch: compteur(async () => reponse(200, corps)).f });
+      await attendre(() => ligneEtat(sec).textContent !== '…');
+      eq(ligneEtat(sec).textContent, attendu, `avec session, 200 ${JSON.stringify(corps)} : « ${attendu} »`);
       sec.remove();
     }
-    // Enregistrer normal : la config normalisée part à saveConfig ; la clé n'est ni dans textContent ni dans outerHTML
+    // Adresse absente de la session : la phrase reste vraie (celle du compte du contexte, sinon sans adresse)
     {
-      const appels = []; const journal = [];
-      // Un seul journal pour l'écriture, le message et le rendu : l'ORDRE est mesuré, pas seulement la présence. saveConfig
-      // rend la main un tour plus tard (setTimeout) : un « enregistré » dit sans attendre l'écriture arriverait avant elle.
-      const sec = monter({ provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-ui' }, { user: { id: 'u1' } }, { saveConfig: async (c) => { await new Promise((r) => setTimeout(r, 0)); appels.push(c); journal.push('save'); }, dire: (m) => journal.push(`dire:${m}`), confirm: async () => true, rafraichir: () => { journal.push('rendu'); } });
-      const champCle = sec.querySelector('input[type="password"]');
-      ok(!!champCle && !sec.textContent.includes('sk-factice-ui') && !sec.outerHTML.includes('sk-factice-ui'), 'K-2 : champ password, clé ni dans le texte ni dans le HTML');
-      taper(champCle, 'sk-factice-nouvelle');
-      bouton(sec, 'Enregistrer').click(); await tick(); await tick();
-      eq(appels, [{ provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-nouvelle' }], 'Enregistrer : saveConfig reçoit la configuration tapée');
-      eq(journal, ['save', 'dire:Assistant enregistré', 'rendu'], 'Enregistrer : « Assistant enregistré » dit APRÈS l’écriture, puis la page est redessinée une fois');
-      // K-12 : focus RÉEL dans la section (revue Neegan 1.4 : un nœud sous `hidden` ne reçoit jamais le focus, et
-      // « occupé === (activeElement === champ) » valait false === false — un faux vert). La scène est rendue visible
-      // le temps du focus.
-      scene.hidden = false;
-      champCle.focus();
-      ok(document.activeElement === champCle, 'K-12 : le champ a réellement reçu le focus'); // identité : eq sérialise, tout nœud vaut « {} »
+      const sec = monter({ user: { id: 'u1', email: 'b@exemple.invalid' }, auth: {} }, { access_token: JETON, user: { id: 'u1', email: '' } }, { fetch: compteur(async () => reponse(200, {})).f });
+      eq(sec.querySelector('p').textContent, 'L’assistant est actif pour b@exemple.invalid.', 'adresse : celle du compte du contexte quand la session n’en porte pas');
+      sec.remove();
+      const sec2 = monter({ user: { id: 'u1' }, auth: {} }, { access_token: JETON, user: { id: 'u1' } }, { fetch: compteur(async () => reponse(200, {})).f });
+      eq(sec2.querySelector('p').textContent, 'L’assistant est actif sur ton compte.', 'adresse : aucune adresse connue → « sur ton compte », jamais « pour undefined »');
+      sec2.remove();
+    }
+    // Un jeton qui n'est pas une session (vide, espace) : l'état « sans session », aucun appel
+    for (const mauvaise of [{ access_token: '' }, { access_token: 'a b' }, { user: U }]) {
+      const reseau = compteur(async () => reponse(200, {}));
+      const sec = monter({ user: U, auth: {} }, mauvaise, { fetch: reseau.f });
+      await tick();
+      eq([sec.querySelector('p').textContent, reseau.appels.length], ['Connecte-toi pour utiliser l’assistant.', 0], `session invalide (${JSON.stringify(mauvaise)}) : état « sans session », aucun appel`);
+      sec.remove();
+    }
+    // K-12 : la page n'est pas reconstruite sous les doigts — le focus RÉEL dans la section vaut « occupé »
+    {
+      const sec = monter({ auth: {} }, null, { fetch: compteur(async () => reponse(200, {})).f, connecter: () => {} });
+      scene.hidden = false; // un nœud sous `hidden` ne reçoit jamais le focus
+      const b = bouton(sec, 'Se connecter');
+      b.focus();
+      ok(document.activeElement === b, 'K-12 : le bouton a réellement reçu le focus'); // identité : eq sérialise, tout nœud vaut « {} »
       eq(S.occupeParAssistant(), true, 'K-12 : occupé quand le focus est dans la section');
-      champCle.blur();
+      b.blur();
       scene.hidden = true;
       eq(S.occupeParAssistant(), false, 'K-12 : libre sans focus');
       sec.remove();
     }
-    // S14 sur « Tester » (revue Neegan 1.1, critique) : le test part de la configuration NORMALISÉE. Depuis R-CPT-4, une
-    // base_url en http hors boucle locale ou avec identifiants n'est pas « vidée » mais REFUSÉE : rien n'est testé (la clé
-    // ne part en Bearer vers aucune adresse, pas même le défaut d'OpenAI), et le refus est dit.
-    {
-      const recu = []; const dits = [];
-      const sec = monter({ provider: 'openai_compatible', model: 'm', base_url: 'http://x.invalid/v1', api_key: 'sk-factice-test' }, {}, { tester: async (cfg) => { recu.push(cfg); return 'OK'; }, saveConfig: async () => {}, dire: (m) => dits.push(m), confirm: async () => true });
-      bouton(sec, 'Tester').click(); await tick();
-      eq([recu.length, dits], [0, [REFUS_URL]], 'S14 / R-CPT-4 : « Tester » avec une base_url http hors boucle locale → rien testé, le refus est dit');
-      ok(sec.textContent.includes(REFUS_URL) && !sec.textContent.includes('Test en cours'), 'S14 / R-CPT-4 : la ligne d’état du test dit le refus (jamais « Test en cours… » pour un test qui ne part pas)');
-      taper(champUrl(sec), 'https://u:p@x.invalid/v1');
-      bouton(sec, 'Tester').click(); await tick();
-      eq([recu.length, dits.length], [0, 2], 'S14 / R-CPT-4 : identifiants dans l’URL → rien testé non plus, refus dit');
-      taper(champUrl(sec), 'https://x.invalid/v1');
-      bouton(sec, 'Tester').click(); await tick();
-      eq(recu, [{ provider: 'openai_compatible', model: 'm', base_url: 'https://x.invalid/v1', api_key: 'sk-factice-test' }], 'S14 : une URL https est testée telle quelle');
-      ok(sec.textContent.includes('Réponse : OK') && !sec.textContent.includes(REFUS_URL), 'S14 : la réponse du test remplace le refus sur la ligne d’état');
-      choisir(selectFournisseur(sec), 'anthropic');
-      bouton(sec, 'Tester').click(); await tick();
-      eq(recu.at(-1), { provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-test' }, 'S14 : « Tester » reçoit la configuration NORMALISÉE (base_url tapée vidée pour anthropic, dont l’adresse est fixe)');
-      sec.remove();
-    }
-    // R-CPT-4 sur « Enregistrer » : une base_url refusée est DITE et rien n'est écrit. Sans cette garde, la normalisation
-    // rendait « Aucun » et la confirmation acceptée effaçait la clé du compte sous un message de succès.
-    {
-      const appels = []; const dits = []; let demandes = 0;
-      const sec = monter({ provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-lan' }, { user: { id: 'u1' } }, { saveConfig: async (c) => { appels.push(c); }, dire: (m) => dits.push(m), confirm: async () => { demandes += 1; return true; } });
-      choisir(selectFournisseur(sec), 'openai_compatible');
-      taper(champUrl(sec), 'http://192.168.1.5:11434/v1');
-      bouton(sec, 'Enregistrer').click(); await tick();
-      eq([appels.length, demandes, dits], [0, 0, [REFUS_URL]], 'R-CPT-4 : http://192.168.1.5 → aucun saveConfig, aucune confirmation « Retirer », le refus est dit');
-      taper(champUrl(sec), 'http://localhost:11434/v1');
-      bouton(sec, 'Enregistrer').click(); await tick();
-      eq(appels, [{ provider: 'openai_compatible', model: 'm', base_url: 'http://localhost:11434/v1', api_key: 'sk-factice-lan' }], 'R-CPT-4 : http://localhost → saveConfig reçoit la configuration, URL intacte');
-      sec.remove();
-    }
-    // K-6 : après un « Enregistrer » réussi, « Aucun » sait qu'une ligne existe maintenant (revue Neegan 1.5 : `avait` suit)
-    {
-      const appels = []; let demandes = 0;
-      const sec = monter({ provider: 'none', model: '', base_url: '', api_key: '' }, {}, { saveConfig: async (c) => { appels.push(c); }, dire: () => {}, confirm: async () => { demandes += 1; return true; } });
-      const sel = selectFournisseur(sec);
-      choisir(sel, 'anthropic');
-      const champs = [...sec.querySelectorAll('input')];
-      taper(champs.find((i) => i.placeholder.startsWith('ex. gpt')), 'm');
-      taper(sec.querySelector('input[type="password"]'), 'sk-factice-puis-aucun');
-      bouton(sec, 'Enregistrer').click(); await tick();
-      choisir(sel, 'none');
-      bouton(sec, 'Enregistrer').click(); await tick();
-      eq([appels.map((c) => c.provider), demandes], [['anthropic', 'none'], 1], 'K-6 : enregistrer puis « Aucun » dans la même instance → la ligne vide part (avait mis à jour), après confirmation même sans compte ni appareil lié (hôte de production : R-CPT-7)');
-      sec.remove();
-    }
-    // suivreMoteur ne rafraîchit pas quand occupé (déjà éprouvé ; ici : le câblage de la page passe par occupeParAssistant)
-    ok(typeof S.occupeParAssistant === 'function', 'K-12 : occupeParAssistant exporté ; câblage dans suivreMoteurDeLaPage lu au source (settings.js, `occupe:`), non éprouvé sans monter la page');
-    // La page entière : renderSettings monte la section depuis le magasin (getSettings().llm), marquée data-section, et la
-    // clé n'apparaît ni dans le texte ni dans le HTML de toute la page (seulement dans la propriété `value` du champ).
+    // La page entière : renderSettings lit la session, passe le fetch injecté, et ne rend jamais un champ de clé — même si un
+    // réglage hérité en portait une (ctx.settings.llm) : la clé ne va ni dans le texte ni dans le HTML.
     await withRepo(async (repoTemp) => {
-      await repoTemp.saveAssistantConfig({ provider: 'anthropic', model: 'm', api_key: 'sk-factice-page' });
-      const page = await S.renderSettings({}, {}, { settings: await repoTemp.getSettings(), sync: {} });
-      const sec = page.querySelector('[data-section="assistant"]');
-      eq([!!sec, sec?.querySelector('input[type="password"]')?.value, sec?.querySelector('select')?.value], [true, 'sk-factice-page', 'anthropic'], 'renderSettings : section « Assistant IA » marquée data-section, remplie depuis assistant_config');
-      ok(!page.textContent.includes('sk-factice-page') && !page.outerHTML.includes('sk-factice-page'), 'K-2 : la clé n’est ni dans le texte ni dans le HTML de la page Réglages entière');
+      const base = { ...(await repoTemp.getSettings()), llm: { provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-page' } };
+      const sans = compteur(async () => reponse(200, {}));
+      const pageSans = await S.renderSettings({}, {}, { settings: base, sync: {} }, { fetch: sans.f });
+      const secSans = pageSans.querySelector('[data-section="assistant"]');
+      eq([!!secSans, secSans?.querySelector('p')?.textContent, pageSans.querySelectorAll('input[type="password"]').length, sans.appels.length], [true, 'Connecte-toi pour utiliser l’assistant.', 0, 0], 'renderSettings sans compte : section marquée, « Connecte-toi… », aucun champ de mot de passe sur la page, aucun appel');
+      ok(!pageSans.textContent.includes('sk-factice-page') && !pageSans.outerHTML.includes('sk-factice-page'), 'renderSettings : un réglage hérité ne fuit ni dans le texte ni dans le HTML de la page');
+      const avec = compteur(async () => reponse(200, { modele: 'claude-sonnet-5-5', quotaJour: 60 }));
+      const lectures = [];
+      const ctxCompte = { settings: base, sync: { user: U, auth: { jeton: async () => { lectures.push(1); return SESSION; } } } };
+      const pageAvec = await S.renderSettings({}, {}, ctxCompte, { fetch: avec.f });
+      scene.append(pageAvec);
+      const secAvec = pageAvec.querySelector('[data-section="assistant"]');
+      await attendre(() => ligneEtat(secAvec).textContent !== '…');
+      eq([secAvec.querySelector('p').textContent, ligneEtat(secAvec).textContent, avec.appels.length, lectures.length, pageAvec.querySelectorAll('input[type="password"]').length], ['L’assistant est actif pour a@exemple.invalid.', 'Modèle en service : claude-sonnet-5-5. Quota : 60 appels par jour.', 1, 1, 0], 'renderSettings avec compte : la session est lue UNE fois, un GET, l’état à l’écran');
+      pageAvec.remove();
     });
   } finally { scene.remove(); setUiLocale(avantLocale); }
-  // en.js : les quatre textes K-10 et les chaînes neuves ont une traduction
+  // en.js : chaque chaîne neuve de la section a sa traduction
   const { EN } = await import('../src/i18n/en.js'); // export nommé `EN` (src/i18n/en.js:3)
-  for (const fr of ['Sur cette adresse de développement, la configuration reste sur cet appareil.', 'Sans compte, la configuration reste sur cet appareil jusqu’à ta première connexion, puis elle suit ton compte.', 'Ce qui est enregistré ici partira à ton compte à la prochaine connexion.', 'La configuration de l’assistant suit ton compte sur tes appareils connectés.', 'Elle n’est jamais incluse dans les sauvegardes ZIP.', 'Retirer l’assistant de tous tes appareils ?', 'Rien à retirer : aucun assistant n’est configuré ici.', 'Retirer', REFUS_URL]) ok(typeof EN[fr] === 'string' && EN[fr].length > 0, 'en.js : ' + fr.slice(0, 40));
+  for (const fr of ['Connecte-toi pour utiliser l’assistant.', 'Se connecter', 'L’assistant est actif pour {adresse}.', 'L’assistant est actif sur ton compte.', 'Modèle en service : {m}.', 'Quota : {n} appels par jour.', 'Quota : 1 appel par jour.', 'Ce compte n’a pas accès à l’assistant.', 'L’assistant est indisponible pour le moment.']) ok(typeof EN[fr] === 'string' && EN[fr].length > 0, 'en.js : ' + fr.slice(0, 40));
 }

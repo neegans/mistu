@@ -269,15 +269,17 @@ async function porteDEntree() {
 
 async function boot() {
   try {
+    // Capture posée avant toute écriture de l'application, init() compris : une seule porte, la mutation de db.js (spec § 5.2).
+    // L'historique de consultation n'entre en file que si le réglage le dit, à chaque écriture. Les passes d'init() écrivent toutes en
+    // origine 'device' (jamais capturées) SAUF l'effacement de la clé locale (Passerelle T4) : écriture d'origine 'local', elle doit
+    // être capturée pour que la ligne vide parte au compte et efface la clé du serveur. Poser la capture après init() la perdrait.
+    installCapture(repo.db, { getUserId: () => getSyncState().user?.id || null, isActivitySynced, configSuitLeCompte: () => configAssistantSuitLeCompte() });
     await repo.init();
     // Une seule lecture : state.js garde les réglages pour la capture et les relit à chaque événement qui
     // peut les réécrire (réglage touché, restauration d'archive, vidage d'appareil).
     const settings = await relireReglages();
     setUiLocale(settings.ui_locale);
     on('settings', ({ key, value }) => { if (key === 'ui_locale') { setUiLocale(value); current = null; refresh(); } });
-    // Capture posée avant toute écriture de l'application : une seule porte, la mutation de db.js (spec § 5.2).
-    // L'historique de consultation n'entre en file que si le réglage le dit, à chaque écriture.
-    installCapture(repo.db, { getUserId: () => getSyncState().user?.id || null, isActivitySynced, configSuitLeCompte: () => configAssistantSuitLeCompte() });
     // Avant la porte (R34) : l'app doit être installable dès la première visite, même si la personne reste devant
     // l'écran d'accueil sans rien toucher.
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {

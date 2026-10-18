@@ -338,21 +338,62 @@ export async function runRechercheWebTests({ eq, ok }) {
       const enVol = (root) => !!root.querySelector('[role="status"]');
       const issueTrouve = { etat: 'trouve', raison: null, liens: [{ href: 'https://a.test/r', hote: 'a.test', titre: 'A', date: null, pourquoi: null }], repli: false, recherches: 1, modele: 'm' };
 
-      // Garde du fournisseur (§ 5.2) : une seule source de vérité — la SESSION (R-T3-1) ; les textes de T4 viendront ensuite
+      // Garde (R-T4-4) : une seule source de vérité — la SESSION (R-T3-1). Sans session : « Connecte-toi… » + « Se connecter », rien d'autre — aucun
+      // appel, plus de lien Réglages (il n'y a plus rien à configurer), quel que soit le réglage local hérité.
+      const { SYNC_ROUTE_KEY } = await import('../src/ui/state.js');
       S.reinitialiserWeb();
-      for (const [nom, session, llm, attendu] of [['sans session', null, { provider: 'none' }, 'Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'], ['sans session, une clé locale ne sert plus', null, { provider: 'anthropic', api_key: 'cle-locale', model: 'm' }, 'Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'], ['jeton vide', { access_token: '' }, { provider: 'none' }, 'Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'], ['openai sans session', null, { provider: 'openai_compatible', api_key: 'k', model: 'm' }, 'Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.']]) {
+      for (const [nom, session, llm] of [['sans session', null, { provider: 'none' }], ['sans session, une clé locale ne sert plus', null, { provider: 'anthropic', api_key: 'cle-locale', model: 'm' }], ['jeton vide', { access_token: '' }, { provider: 'none' }], ['openai sans session', null, { provider: 'openai_compatible', api_key: 'k', model: 'm' }]]) {
         let appels = 0;
         const root = await monter({ q: 'saumon' }, ctxDe(session, llm), { chercher: async () => { appels += 1; return issueTrouve; } });
-        ok(texte(root).includes(attendu), `garde : ${nom} → « ${attendu.slice(0, 30)}… »`);
-        ok(!!root.querySelector('a[href="#/settings"]'), `garde : ${nom} → lien Réglages`);
-        eq([appels, !!bouton(root, 'Chercher sur le web avec l’assistant')], [0, false], `garde : ${nom} → aucun appel, pas de bouton`);
+        eq(root.querySelector('.status.warn > span')?.textContent, 'Connecte-toi pour utiliser l’assistant.', `garde : ${nom} → « Connecte-toi pour utiliser l’assistant. »`);
+        eq([!!bouton(root, 'Se connecter'), !!root.querySelector('a[href="#/settings"]'), appels, !!bouton(root, 'Chercher sur le web avec l’assistant'), texte(root).includes('configure l’assistant IA')], [true, false, 0, false, false], `garde : ${nom} → « Se connecter », ni lien Réglages ni bouton de recherche, aucun appel`);
+        // Garde retirée : le bouton de recherche existerait et un clic enverrait la demande — ni le domaine injecté ni le réseau ne doivent rien voir
+        const reseauAvant = appelsReseau;
+        bouton(root, 'Chercher sur le web avec l’assistant')?.click(); await tick();
+        eq([appels, appelsReseau - reseauAvant], [0, 0], `garde : ${nom} → aucun appel du domaine ni du réseau, même en cherchant un bouton à cliquer`);
+        root.remove();
+      }
+      {
+        // « Se connecter » : le geste de la section Compte — auth.signIn() du contexte
+        const signIns = [];
+        const ctx = { ...ctxDe(null), sync: { user: null, auth: { jeton: async () => null, signIn: async () => { signIns.push(1); return { error: null }; } } } };
+        const root = await monter({ q: 'saumon' }, ctx, { chercher: async () => { throw new Error('aucun appel attendu'); } });
+        try { bouton(root, 'Se connecter').click(); await tick(); await tick(); } finally { try { sessionStorage.removeItem(SYNC_ROUTE_KEY); } catch { /* stockage indisponible */ } }
+        eq(signIns.length, 1, 'garde : « Se connecter » appelle auth.signIn() du contexte (le chemin de la section Compte)');
         root.remove();
       }
       {
         // Avec une session, AUCUN réglage local n'est nécessaire : l'écran du bouton s'affiche (la clé n'existe plus côté app)
         const root = await monter({ q: 'saumon' }, ctxDe(SESSION_ECRAN, { provider: 'none' }), { chercher: async () => issueTrouve });
-        eq([!!bouton(root, 'Chercher sur le web avec l’assistant'), texte(root).includes('configure l’assistant IA')], [true, false], 'garde : une session suffit — le bouton « Chercher sur le web » est là, sans réglage local');
+        eq([!!bouton(root, 'Chercher sur le web avec l’assistant'), texte(root).includes('Connecte-toi'), !!bouton(root, 'Se connecter')], [true, false, false], 'garde : une session suffit — le bouton « Chercher sur le web » est là, sans « Connecte-toi » ni réglage local');
         root.remove();
+      }
+      {
+        // R-T4-10 : basculer vers « Web » dans la MÊME instance (run() → render(), sans ré-instanciation) relit la session AVANT de rendre —
+        // une personne connectée ne voit jamais « Connecte-toi » en flash.
+        S.reinitialiserWeb();
+        let lectures = 0; const pj = pilote();
+        const ctxCompte = { ...ctxDe(SESSION_ECRAN), sync: { user: { id: 'u1' }, auth: { jeton: () => { lectures += 1; return pj.promesse; } } } };
+        const root = await S.renderSearch({}, { mode: 'recipes', q: 'saumon' }, ctxCompte, { remplacerAdresse: () => {}, navigate: () => {} });
+        scene.append(root);
+        const avant = lectures;
+        [...root.querySelectorAll('.segmented button')].find((b) => b.textContent === 'Web').click();
+        await tick();
+        eq([avant, lectures, texte(root).includes('Connecte-toi'), !!bouton(root, 'Chercher sur le web avec l’assistant')], [0, 1, false, false], 'bascule vers Web : la session est lue UNE fois, et tant qu’elle n’est pas là l’écran ne montre pas « Connecte-toi » (pas de flash)');
+        pj.resoudre(SESSION_ECRAN);
+        await tick(); await tick();
+        eq([lectures, texte(root).includes('Connecte-toi'), !!bouton(root, 'Chercher sur le web avec l’assistant')], [1, false, true], 'bascule vers Web : la session lue, l’écran porte l’état connecté (le bouton de recherche), toujours une seule lecture');
+        root.remove();
+        // …et sans compte : l'écran dit « Connecte-toi » tout de suite, jeton() n'est jamais appelé (garde de compte)
+        let lectures2 = 0;
+        const ctxSans = { ...ctxDe(null), sync: { user: null, auth: { jeton: async () => { lectures2 += 1; return SESSION_ECRAN; } } } };
+        const root2 = await S.renderSearch({}, { mode: 'recipes', q: 'saumon' }, ctxSans, { remplacerAdresse: () => {}, navigate: () => {} });
+        scene.append(root2);
+        [...root2.querySelectorAll('.segmented button')].find((b) => b.textContent === 'Web').click();
+        await tick(); await tick();
+        eq([lectures2, texte(root2).includes('Connecte-toi pour utiliser l’assistant.'), !!bouton(root2, 'Se connecter')], [0, true, true], 'bascule vers Web sans compte : « Connecte-toi… » et « Se connecter », jeton() jamais appelé');
+        root2.remove();
+        S.reinitialiserWeb();
       }
       {
         // La session n'est attendue qu'en mode web : un jeton() lent (rafraîchissement réseau) ne retarde pas les autres modes de recherche
@@ -851,25 +892,36 @@ export async function runRechercheWebTests({ eq, ok }) {
       ok(texte(root).includes('Aucune page trouvée pour cette demande. Reformule ou cherche autrement.') && !!bouton(root, 'Réessayer'), 'rien : texte + Réessayer');
       { const n = appels.n; bouton(root, 'Réessayer').click(); await tick(); eq([appels.n, appels.deps[appels.deps.length - 1].enLigne()], [n + 1, true], 'réessayer : rappelle chercher avec enLigne forcé à vrai (S9)'); eq([enVol(root), !!bouton(root, 'Annuler'), !!bouton(root, 'Chercher à nouveau')], [true, true, false], 'réessayer depuis « rien » : écran du vol, « Annuler », plus de « Chercher à nouveau » (V-F4)'); appels.rendre(trouve); await tick(); }
       root.remove();
-      // indisponible × 8
-      const CAS = [['hors_ligne', 'Tu es hors ligne.', true, false, false], ['cle_refusee', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.', false, true, false], ['recherche_desactivee', 'La recherche web n’est pas activée sur ton compte Anthropic.', false, true, false], ['trop_de_demandes', 'Trop de demandes pour l’instant. Réessaie dans une minute.', true, false, false], ['refus', 'L’assistant a refusé cette demande.', false, false, false], ['pas_cherche', 'L’assistant n’a pas cherché sur le web. Réessaie.', true, false, false], ['delai', 'L’assistant n’a pas répondu. Réessaie.', true, false, true], ['interne', 'L’assistant n’a pas répondu. Réessaie.', true, false, true], ['constructor', 'L’assistant n’a pas répondu. Réessaie.', true, false, true]]; // « constructor » : une clé du prototype n'est pas une raison connue (Object.hasOwn)
-      for (const [raison, attendu, reessai, reglages, code] of CAS) {
+      // indisponible — les raisons connues (R-T4-4 : non_admis, quota avec ou sans nombre, trop lourd ; cle_refusee et recherche_desactivee
+      // n'existent plus : la passerelle les classe requete / serveur) et le texte générique + « Code : … » pour le reste
+      const GENERIQUE = 'L’assistant n’a pas répondu. Réessaie.';
+      const CAS = [['hors_ligne', {}, 'Tu es hors ligne.', true, false], ['trop_de_demandes', {}, 'Trop de demandes pour l’instant. Réessaie dans une minute.', true, false], ['refus', {}, 'L’assistant a refusé cette demande.', false, false], ['pas_cherche', {}, 'L’assistant n’a pas cherché sur le web. Réessaie.', true, false],
+        ['non_admis', {}, 'Ce compte n’a pas accès à l’assistant.', false, false], ['quota', { quota: 60 }, 'Tu as atteint la limite du jour pour l’assistant (60 appels).', false, false], ['quota', { quota: null }, 'Tu as atteint la limite du jour pour l’assistant.', false, false],
+        ['requete', { trop_lourd: true }, 'La demande est trop lourde.', false, false],
+        ['requete', {}, GENERIQUE, true, true], ['serveur', {}, GENERIQUE, true, true], ['delai', {}, GENERIQUE, true, true], ['interne', {}, GENERIQUE, true, true], ['cle_refusee', {}, GENERIQUE, true, true], ['recherche_desactivee', {}, GENERIQUE, true, true], ['constructor', {}, GENERIQUE, true, true]]; // « constructor » : une clé du prototype n'est pas une raison connue (Object.hasOwn) ; les deux anciennes raisons ne sont plus connues non plus
+      for (const [raison, extras, attendu, reessai, code] of CAS) {
         S.reinitialiserWeb();
         root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
-        await tapeEtAttend(root, { etat: 'indisponible', raison, liens: [], repli: false, recherches: null, modele: 'm' });
+        await tapeEtAttend(root, { etat: 'indisponible', raison, liens: [], repli: false, recherches: null, modele: 'm', ...extras });
         const statut = root.querySelector('.status.warn[role="status"]');
-        eq([statut?.textContent.includes(attendu), !!bouton(root, 'Réessayer'), !!bouton(root, 'Chercher à nouveau'), !!root.querySelector('a[href="#/settings"]'), texte(root).includes('Code : ' + raison)], [true, reessai, !reessai, reglages, code], `indisponible/${raison} : texte, Réessayer=${reessai}, Chercher à nouveau=${!reessai}, Réglages=${reglages}, code=${code} (K3, R-WEB-7)`);
+        eq([statut?.textContent.includes(attendu), !!bouton(root, 'Réessayer'), !!bouton(root, 'Chercher à nouveau'), !!root.querySelector('a[href="#/settings"]'), texte(root).includes('Code : ' + raison)], [true, reessai, !reessai, false, code], `indisponible/${raison}${extras.quota !== undefined ? ' quota ' + extras.quota : ''}${extras.trop_lourd ? ' trop lourd' : ''} : texte, Réessayer=${reessai}, Chercher à nouveau=${!reessai}, jamais de lien Réglages, code=${code} (K3, R-WEB-7)`);
         root.remove();
       }
+      // non_connecte rendu par l'appel (la session a disparu pendant le vol) : « Connecte-toi… » + « Se connecter », pas de relance qui ne mène à rien
+      S.reinitialiserWeb();
+      root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
+      await tapeEtAttend(root, { etat: 'indisponible', raison: 'non_connecte', liens: [], repli: false, recherches: null, modele: 'm' });
+      eq([root.querySelector('.status.warn > span')?.textContent, !!bouton(root, 'Se connecter'), !!bouton(root, 'Réessayer'), !!bouton(root, 'Chercher à nouveau'), texte(root).includes('Code : ')], ['Connecte-toi pour utiliser l’assistant.', true, false, false, false], 'indisponible/non_connecte : « Connecte-toi… » + « Se connecter », ni Réessayer ni Chercher à nouveau, pas de code');
+      root.remove();
       // R-WEB-7 (a) : une issue sans « Réessayer » relance la MÊME demande par « Chercher à nouveau », SANS forcer enLigne
       S.reinitialiserWeb();
       root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {}, enLigne: () => false });
-      await tapeEtAttend(root, { etat: 'indisponible', raison: 'cle_refusee', liens: [], repli: false, recherches: null, modele: 'm' });
+      await tapeEtAttend(root, { etat: 'indisponible', raison: 'non_admis', liens: [], repli: false, recherches: null, modele: 'm' });
       {
         const n = appels.n; const b = bouton(root, 'Chercher à nouveau'); const present = !!b;
         b?.click(); await tick();
-        eq([present, appels.n, appels.args[appels.args.length - 1].q, appels.deps[appels.deps.length - 1].enLigne()], [true, n + 1, 'saumon', false], 'cle_refusee : « Chercher à nouveau » relance la même demande, un appel, enLigne NON forcé (contraste avec « Réessayer », R-WEB-7)');
-        eq([enVol(root), !!bouton(root, 'Annuler'), !!bouton(root, 'Chercher à nouveau')], [true, true, false], 'cle_refusee : après « Chercher à nouveau », écran du vol avec « Annuler », plus de « Chercher à nouveau » (V-F4)');
+        eq([present, appels.n, appels.args[appels.args.length - 1].q, appels.deps[appels.deps.length - 1].enLigne()], [true, n + 1, 'saumon', false], 'non_admis : « Chercher à nouveau » relance la même demande, un appel, enLigne NON forcé (contraste avec « Réessayer », R-WEB-7)');
+        eq([enVol(root), !!bouton(root, 'Annuler'), !!bouton(root, 'Chercher à nouveau')], [true, true, false], 'non_admis : après « Chercher à nouveau », écran du vol avec « Annuler », plus de « Chercher à nouveau » (V-F4)');
         appels.rendre(trouve); await tick();
       }
       root.remove();
@@ -885,14 +937,6 @@ export async function runRechercheWebTests({ eq, ok }) {
         eq([avant, texte(root).includes('L’assistant a refusé cette demande.'), !!b, b?.disabled, appels.n], [true, false, true, false, n], 'refus : une puce ajoutée change la demande → l’écran du refus disparaît, écran du bouton allumé, aucun appel (R-WEB-7)');
       }
       root.remove();
-      // Réglage changé pendant le vol (Review Focus 5) : les issues de garde se rendent avec le texte de la garde, + une sortie
-      for (const [etat, attendu] of [['non_configure', 'Pour chercher sur le web, configure l’assistant IA'], ['non_pris_en_charge', 'Ce fournisseur ne cherche pas sur le web.']]) {
-        S.reinitialiserWeb();
-        root = await monter({ q: 'saumon' }, ctx, { chercher, navigate: () => {} });
-        await tapeEtAttend(root, { etat, raison: null, liens: [], repli: false, recherches: null, modele: null });
-        eq([texte(root).includes(attendu), !!root.querySelector('a[href="#/settings"]'), !!bouton(root, 'Chercher à nouveau')], [true, true, true], `${etat} en issue : texte de la garde + Réglages + « Chercher à nouveau » (F5, R-WEB-7)`);
-        root.remove();
-      }
       // Lu par le VRAI fetch : le global est remplacé ici par un piège qui lève (aucun réseau pendant les rendus).
       {
         const res = await vraiFetch('../src/ui/search.js?v=' + Date.now(), { cache: 'no-store' });
@@ -943,8 +987,9 @@ export async function runRechercheWebTests({ eq, ok }) {
   // --- § 8 / § 9.8 dictionnaire et statiques
   {
     const { EN } = await import('../src/i18n/en.js');
-    const CLES = ['Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.', 'Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.', 'Chercher sur le web avec l’assistant', 'Une recherche = un appel à ton compte Anthropic.', 'Écris d’abord ce que tu cherches.', 'L’assistant cherche sur le web…', 'Annuler', 'Trouvé sur le web', 'Demande envoyée : {q}', 'Garder ce lien', 'L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.', 'Recherches faites par l’assistant : {n}', 'Liens tels que trouvés, sans tri de l’assistant.', 'Chercher à nouveau', 'Aucune page trouvée pour cette demande. Reformule ou cherche autrement.', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.', 'La recherche web n’est pas activée sur ton compte Anthropic.', 'Trop de demandes pour l’instant. Réessaie dans une minute.', 'L’assistant a refusé cette demande.', 'L’assistant n’a pas cherché sur le web. Réessaie.', 'L’assistant n’a pas répondu. Réessaie.', 'Adresse reçue : vérifie-la avant d’enregistrer.', 'La demande a changé depuis cette recherche.', 'Autres pages trouvées ({n})', 'Réessayer', 'Réglages', 'Tu es hors ligne.', 'Code : {c}'];
+    const CLES = ['Connecte-toi pour utiliser l’assistant.', 'Se connecter', 'Ce compte n’a pas accès à l’assistant.', 'Tu as atteint la limite du jour pour l’assistant ({n} appels).', 'Tu as atteint la limite du jour pour l’assistant.', 'La demande est trop lourde.', 'Chercher sur le web avec l’assistant', 'Une recherche = un appel à ton compte Anthropic.', 'Écris d’abord ce que tu cherches.', 'L’assistant cherche sur le web…', 'Annuler', 'Trouvé sur le web', 'Demande envoyée : {q}', 'Garder ce lien', 'L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.', 'Recherches faites par l’assistant : {n}', 'Liens tels que trouvés, sans tri de l’assistant.', 'Chercher à nouveau', 'Aucune page trouvée pour cette demande. Reformule ou cherche autrement.', 'Trop de demandes pour l’instant. Réessaie dans une minute.', 'L’assistant a refusé cette demande.', 'L’assistant n’a pas cherché sur le web. Réessaie.', 'L’assistant n’a pas répondu. Réessaie.', 'Adresse reçue : vérifie-la avant d’enregistrer.', 'La demande a changé depuis cette recherche.', 'Autres pages trouvées ({n})', 'Réessayer', 'Réglages', 'Tu es hors ligne.', 'Code : {c}'];
     eq(CLES.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'en.js : chaque texte du lot a sa traduction');
+    eq(['Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.', 'Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.', 'La recherche web n’est pas activée sur ton compte Anthropic.'].filter((k) => k in EN), [], 'en.js : les textes de l’ancienne clé locale (configure, fournisseur, clé refusée, recherche désactivée) sont retirés avec leurs écrans (Passerelle T4)');
     ok(!('Le Web n’est pas activé : aucune source externe n’est configurée. Aucune recherche extérieure n’a été faite.' in EN), 'en.js : la clé morte du mode Web est retirée');
     ok(!(await lire('../src/ui/search.js')).includes('Le Web n’est pas activé'), 'search.js : la coquille est retirée');
     ok(!/from '\.\.\/ui\//.test(await lire('../src/core/bornes.js')) && !/from '\.\.\/ui\//.test(await lire('../src/domain/recherche-web.js')), 'couches : bornes.js et recherche-web.js n’importent rien de src/ui/');

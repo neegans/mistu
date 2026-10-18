@@ -69,6 +69,7 @@ export async function init() {
   await horodaterAnciennesFiches();
   await nettoyerAnciennesFiches();
   await migrerConfigAssistant();
+  await effacerCleLocale();
   await purgerFilesEnFile();
 }
 
@@ -94,6 +95,27 @@ async function migrerConfigAssistant() {
   // serait rejouée en entier, et la clé ne vit jamais à deux endroits après la passe.
   await db.mutate({ puts, deletes: ancien ? { settings: [LIGNE_ASSISTANT] } : {}, origin: 'device' });
   return copier;
+}
+
+// Passe unique (Passerelle T4, R-T4-3) : l'assistant passe par la passerelle (la clé vit côté serveur), donc une clé restée dans
+// assistant_config ne sert plus à rien — et ne doit plus traîner dans IndexedDB. Elle est vidée UNE fois (garde
+// `sync_state.cle_locale_effacee`) : la ligne `llm` devient la configuration vide. L'écriture est d'origine 'local', comme une
+// décision de la personne : capturée dans l'outbox (sur un hôte de production seulement, K-3), la ligne vide PART au compte et efface la
+// clé du serveur et des autres appareils. Cela suppose que la capture soit posée AVANT init() — app.js la pose en premier, c'est
+// pourquoi installCapture précède repo.init() au démarrage.
+// La ligne est lue BRUTE : une ligne reçue abîmée (fournisseur inconnu, clé gardée) se normaliserait en « vide » à la lecture, sa clé
+// resterait pourtant stockée. Est effacée toute ligne qui porte une clé OU un fournisseur ; absente ou déjà vide, rien n'est écrit et
+// seule la garde est posée (aucune ligne créée, aucune entrée de file). Rejouable : une passe à moitié faite (ligne écrite, garde
+// non posée) est reprise et ne trouve plus rien à effacer. Après la migration `assistant_config_migre` : la clé d'un ancien
+// settings.llm copiée par elle est effacée dans la foulée.
+const EFFACEMENT_CLE_GUARD = 'cle_locale_effacee';
+export async function effacerCleLocale() {
+  if ((await db.get('sync_state', EFFACEMENT_CLE_GUARD))?.value === 1) return false;
+  const ligne = await db.get('assistant_config', LIGNE_ASSISTANT);
+  const efface = !!ligne && (ligne.api_key !== '' || ligne.provider !== 'none');
+  if (efface) await saveAssistantConfig({ provider: 'none', model: '', base_url: '', api_key: '' });
+  await db.mutate({ puts: { sync_state: [{ key: EFFACEMENT_CLE_GUARD, value: 1 }] }, origin: 'device' });
+  return efface;
 }
 
 // Passe unique (R-L3-27) : les fiches écrites AVANT cette vague portent peut-être des caractères de contrôle —
@@ -188,7 +210,8 @@ export async function getSettings() {
   const rows = await db.getAll('settings');
   const out = { ...DEFAULT_SETTINGS };
   for (const r of rows) if (!estSecret(r.key)) out[r.key] = r.value; // une ligne settings.llm résiduelle est ignorée
-  // K-1 / K-11 : la configuration de l'assistant vit dans assistant_config ; les consommateurs lisent toujours settings.llm.
+  // K-1 / K-11 : la configuration de l'assistant vit dans assistant_config, composée ici sous `llm`. Plus aucun écran ne la lit depuis la
+  // passerelle (Passerelle T4 : providerFrom ignore les réglages) ; elle reste, avec le magasin, jusqu'au lot qui le retirera (dette nommée).
   out.llm = normaliserConfigAssistant(await db.get('assistant_config', LIGNE_ASSISTANT));
   return out;
 }

@@ -10,7 +10,8 @@ import { currentVersion } from '../domain/search.js';
 import { getConvention } from '../domain/units.js';
 import { providerFrom, extractRecipeFromImages, blobToBase64 } from '../domain/llm.js';
 import { RECIPE_TYPES } from '../model/schema.js';
-import { pageHeader, field, select, aiNotice, section, pdfFrame, sessionAssistant } from './components.js';
+import { pageHeader, field, select, carteConnexion, texteEchecAssistant, section, pdfFrame, sessionAssistant } from './components.js';
+import { demarrerConnexion } from './settings.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
 
 const SUBRECIPE_RE = /(?:voir|see|cf\.?)\s+(?:la\s+)?(?:page|p\.)\s*(\d{1,4})|\bp\.\s*(\d{1,4})\b/gi;
@@ -152,19 +153,19 @@ export async function renderRecipeEdit(params, query, ctx) {
       if (r.servings != null) f.servings = r.servings; if (r.prep_minutes != null) f.prep = r.prep_minutes; if (r.cook_minutes != null) f.cook = r.cook_minutes; if (r.printed_page != null && !f.printed_page) f.printed_page = r.printed_page;
       f.ingredientsText = r.ingredients.map((i) => i.source_text).join('\n'); ingTa.value = f.ingredientsText;
       f.stepsText = r.steps.map((s) => s.text).join('\n'); stepsTa.value = f.stepsText;
-      f.aiUsed = true; f.aiModel = courant.modele || (courant.name === 'openai_compatible' ? ctx.settings.llm?.model : null) || courant.name; // le modèle choisi par le SERVEUR (passerelle) quand il l'a dit
+      f.aiUsed = true; f.aiModel = courant.modele || courant.name; // le modèle choisi par le SERVEUR (passerelle) quand il l'a dit
       parsedLines = []; reparse(); drawSteps();
       const uncertain = r.ingredients.filter((i) => i.uncertain).map((i) => i.source_text).concat(r.uncertain_fields);
       aiStatus.textContent = t('Extraction proposée par l’assistant — toutes les lignes sont à vérifier.') + (uncertain.length ? ` ${t('Incertain')} : ${uncertain.join(' ; ')}` : '');
       for (const k of ['servings', 'prep', 'cook', 'printed_page']) { const inp = numInputs[k]; if (inp) inp.value = f[k]; }
-    } catch (e) { aiStatus.textContent = `${t('Échec')} : ${e.message}`; }
+    } catch (e) { aiStatus.textContent = texteEchecAssistant(e); }
     aiBtn.disabled = false;
   } }, t('Extraire avec l’assistant IA'));
   const aiStatus = el('div', { class: 'muted', style: { fontSize: '.9rem' } });
   const numInputs = { servings: num('servings'), prep: num('prep'), cook: num('cook'), active: num('active'), total: num('total'), printed_page: num('printed_page') };
 
   const right = el('div', { class: 'stack' },
-    aiNotice(ctx), el('div', { class: 'row' }, aiBtn, aiStatus),
+    provider.configured ? null : carteConnexion(() => demarrerConnexion(ctx.sync?.auth)), el('div', { class: 'row' }, aiBtn, aiStatus),
     field(t('Titre original *'), titleInput),
     el('div', { class: 'two-col' },
       field(t('Langue du texte'), select([{ value: 'fr', label: 'Français' }, { value: 'en', label: 'English' }], f.language, (v) => { f.language = v; })),

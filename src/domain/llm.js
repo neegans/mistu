@@ -1,7 +1,7 @@
-// Abstraction fournisseur-agnostique (spec §12, §15). Sans session, l'application fonctionne entièrement à la main ;
-// les fonctions IA affichent « assistant non configuré » au lieu de simuler un résultat.
-// L'assistant passe par la passerelle (src/domain/passerelle.js) : l'app n'a plus aucune clé de fournisseur d'IA.
-// Le fournisseur compatible OpenAI ci-dessous n'a pas été exercé dans cet environnement : à valider avec une clé réelle.
+// Abstraction de l'assistant (spec §12, §15). Sans session, l'application fonctionne entièrement à la main ;
+// les écrans de l'assistant disent « Connecte-toi pour utiliser l’assistant. » au lieu de simuler un résultat.
+// L'assistant passe par la passerelle (src/domain/passerelle.js) : l'app n'a plus aucune clé de fournisseur d'IA, et plus aucun
+// autre fournisseur (le fournisseur compatible OpenAI, configurable par une clé locale, est retiré : Passerelle T4).
 import { appelerAssistant, sessionValide, LIMITES_PASSERELLE } from './passerelle.js';
 import { borner } from '../core/bornes.js';
 
@@ -12,33 +12,10 @@ export class LLMProvider {
   get supportsVision() { return false; }
   get supportsWebSearch() { return false; }
   // messages: [{ role: 'system'|'user', content: string | [{type:'text',text}|{type:'image', mime, base64}] }]
-  async complete(/* messages, { json = false } */) { throw new Error('Aucun assistant IA configuré. Réglages → Assistant IA.'); }
+  async complete(/* messages, { json = false } */) { throw new Error('Aucun assistant IA sans session.'); }
 }
 
 export class NoneProvider extends LLMProvider {}
-
-export class OpenAICompatibleProvider extends LLMProvider {
-  get name() { return 'openai_compatible'; }
-  get configured() { return !!(this.config.api_key && this.config.model); }
-  get supportsVision() { return this.config.vision !== false; }
-  async complete(messages, { json = false, maxTokens = 4000 } = {}) {
-    const base = (this.config.base_url || 'https://api.openai.com/v1').replace(/\/$/, '');
-    const body = {
-      model: this.config.model, max_tokens: maxTokens, temperature: 0.2,
-      messages: messages.map((m) => ({
-        role: m.role,
-        content: typeof m.content === 'string' ? m.content : m.content.map((p) => p.type === 'text'
-          ? { type: 'text', text: p.text }
-          : { type: 'image_url', image_url: { url: `data:${p.mime};base64,${p.base64}` } }),
-      })),
-    };
-    if (json) body.response_format = { type: 'json_object' };
-    const res = await fetch(`${base}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${this.config.api_key}` }, body: JSON.stringify(body) });
-    if (!res.ok) throw new Error(`Fournisseur IA : ${res.status} ${await res.text()}`);
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content ?? '';
-  }
-}
 
 // L'assistant par la passerelle : `complete` poste l'outil « extraction » avec la SESSION de la personne. `name` reste 'anthropic'
 // (les gardes des écrans le lisent) ; il est configuré quand une session existe. La session est une donnée (jamais le module d'auth).
@@ -67,13 +44,10 @@ export class PasserelleProvider extends LLMProvider {
   }
 }
 
-// Une session (donnée) → la passerelle, quels que soient les réglages locaux. Sans session : le fournisseur compatible OpenAI s'il a
-// encore une clé locale (inchangé, hors passerelle), sinon rien — une clé locale Anthropic ne sert plus à rien.
-export function providerFrom(settings, { session = null } = {}) {
-  const cfg = settings?.llm || { provider: 'none' };
-  if (sessionValide(session)) return new PasserelleProvider(cfg, { session });
-  if (cfg.provider === 'openai_compatible' && cfg.api_key) return new OpenAICompatibleProvider(cfg);
-  return new NoneProvider(cfg);
+// Une session (donnée) → la passerelle ; sans session, rien. `settings` garde sa place dans la signature (les écrans passent toujours
+// ctx.settings) mais n'est plus lu : aucune clé ni aucun fournisseur local ne décide de l'assistant (Passerelle T4).
+export function providerFrom(_settings, { session = null } = {}) {
+  return sessionValide(session) ? new PasserelleProvider({}, { session }) : new NoneProvider({});
 }
 
 // --- Recipe Parser : pages → JSON strict. Le résultat est TOUJOURS marqué « à vérifier » ; rien n'est inventé.

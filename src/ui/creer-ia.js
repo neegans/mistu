@@ -13,7 +13,8 @@ import { providerFrom } from '../domain/llm.js';
 import { creerRecetteIA, construireDemandeCreation, fabriquerRecetteIA, estCreationIA, etiquetteCreationIA, conventionCreation, LIMITES_CREATION } from '../domain/creation-ia.js';
 import { assessVersion } from '../domain/diet.js';
 import { DIET_TAGS, RECIPE_TYPES } from '../model/schema.js';
-import { pageHeader, field, select, sessionAssistant } from './components.js';
+import { pageHeader, field, select, sessionAssistant, carteConnexion, texteRefusAssistant } from './components.js';
+import { demarrerConnexion } from './settings.js';
 
 let memoire = null; // { cle, demande, filtres, langue, parente, changement, issue, gardee, echec } — ce qui est PARTI, jamais le formulaire
 let vol = null;     // { cle, controller, promesse }
@@ -24,19 +25,17 @@ function notifier() { for (const v of [...vues]) { if (!v.root.isConnected) { vu
 
 const ISSUE_INTERNE = Object.freeze({ etat: 'indisponible', raison: 'interne', motif: null, recette: null, avertissements: Object.freeze([]), modele: null, usage: null });
 const ISSUE_HORS_LIGNE = Object.freeze({ ...ISSUE_INTERNE, raison: 'hors_ligne' });
-const TEXTE_NON_CONFIGURE = 'Pour créer une recette, configure l’assistant IA : fournisseur Anthropic, modèle et clé.';
-const TEXTE_AUTRE_FOURNISSEUR = 'Ce fournisseur ne crée pas de recette ici. Choisis Anthropic dans Réglages → Assistant IA.';
 // Textes des raisons connues (lus par Object.hasOwn : « constructor » n'est pas une raison connue) ; les autres : texte générique + code.
+// Les refus de la passerelle (non_admis, quota, trop lourd) ont leur texte dans components.js (texteRefusAssistant, R-T4-4) ; non_connecte
+// (la session a disparu entre le rendu et le clic) a sa carte « Connecte-toi » : ni l'un ni l'autre n'offre « Réessayer ».
 const TEXTES_INDISPONIBLE = {
   hors_ligne: 'Tu es hors ligne.',
-  cle_refusee: 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.',
   trop_de_demandes: 'Trop de demandes pour l’instant. Réessaie dans une minute.',
   refus: 'L’assistant a refusé cette demande.',
   interrompu: 'Réponse coupée : réessaie avec une demande plus courte.',
   illisible: 'L’assistant n’a pas rendu une recette lisible. Recommence.',
 };
-const SANS_REESSAI = ['cle_refusee', 'refus'];
-const AVEC_REGLAGES = ['cle_refusee'];
+const SANS_REESSAI = ['refus', 'non_admis', 'quota'];
 
 // C-16 : la demande (et, en adaptation, le changement) préremplie est nettoyée comme construireDemandeCreation la nettoiera (fins de
 // ligne en espaces, Cc/Cf retirés, NFC, espaces repliés), puis bornée à 500 points de code.
@@ -105,16 +104,16 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
   const ficheParente = versionParente ? ctx?.recipesById?.get(versionParente.recipe_id) : null;
   const parente = versionParente && ficheParente && estCreationIA(versionParente) ? { ...versionParente, title: ficheParente.original_title } : null;
   const fournisseur = providerFrom(ctx?.settings, { session: await sessionAssistant(ctx) }); // la passerelle (R-T3-1) : la session décide
+  const connecter = () => demarrerConnexion(ctx?.sync?.auth);
   // P7.2 (C-14, P29) : décidée une fois par instance ; jamais un appel derrière une garde.
   // T7 : une parente sans listes d'ingrédients et d'étapes (ligne reçue informe) est refusée comme C-15 ; une parente que
   // construireDemandeCreation refuserait (hors bornes C-7 : parenteBornee) est dite d'emblée — la sonde passe une demande et un
   // changement non vides, seule la parente peut donc faire refuser.
   const formeParente = !!parente && Array.isArray(parente.ingredients) && Array.isArray(parente.steps);
   const parenteTropLongue = formeParente && !!construireDemandeCreation({ demande: '.', parente, changement: '.' }).erreur;
-  const garde = !fournisseur.configured ? { texte: TEXTE_NON_CONFIGURE, reglages: true }
-    : fournisseur.name !== 'anthropic' ? { texte: TEXTE_AUTRE_FOURNISSEUR, reglages: true }
-      : idParente && !formeParente ? { texte: 'Cette version ne peut pas être adaptée ici.', reglages: false }
-        : parenteTropLongue ? { texte: 'Cette recette est trop longue pour être adaptée par l’assistant.', reglages: false } : null;
+  const garde = !fournisseur.configured ? { connexion: true } // R-T4-4 : sans session, « Connecte-toi… » + « Se connecter »
+    : idParente && !formeParente ? { texte: 'Cette version ne peut pas être adaptée ici.' }
+      : parenteTropLongue ? { texte: 'Cette recette est trop longue pour être adaptée par l’assistant.' } : null;
   let form = formulaireInitial(query, parente);
   let ouvert = false; // « Modifier la demande » (P7.4) : le formulaire replié devient visible
 
@@ -224,7 +223,6 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
     return [formulaire()]; // 7
   }
 
-  const reglages = () => el('a', { class: 'btn small', href: '#/settings' }, t('Réglages'));
   const libelleCreer = () => (parente ? t('Créer cette adaptation') : t('Créer ma recette'));
   // T7 : la recette de départ (titre de sa FICHE, portions de la version), en texte seul ; rappel que l'original ne bouge pas (C-12).
   const resumeParente = () => (parente ? el('div', { class: 'card flat stack', dataset: { role: 'parente-ia' } },
@@ -233,7 +231,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
     Number.isInteger(parente.servings) && parente.servings > 0 ? el('span', { class: 'muted' }, portionsTexte(parente.servings)) : null,
     el('small', { class: 'muted' }, t('L’original reste tel quel : l’adaptation s’ajoute comme une autre version de la recette.'))) : null);
   const carteGarde = (g) => el('div', { class: 'card flat stack', dataset: { role: 'garde-ia' } },
-    el('div', { class: 'status warn' }, el('span', null, t(g.texte)), g.reglages ? [' ', reglages()] : null));
+    g.connexion ? carteConnexion(connecter) : el('div', { class: 'status warn' }, el('span', null, t(g.texte))));
   const ecranDuVol = () => el('div', { class: 'card flat stack' },
     el('div', { class: 'status', role: 'status' }, t('L’assistant compose une recette…')),
     // Sans data-role : ni la frappe ni une autre vue ne peuvent rallumer ce bouton pendant le vol (C-1).
@@ -272,16 +270,16 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
 
   function blocIssue(issue) {
     const reessayer = () => el('button', { type: 'button', class: 'btn', dataset: { role: 'reessayer-ia' }, onClick: () => lancer({ enLigne: () => true }) }, t('Réessayer')); // navigator.onLine peut mentir
-    if (issue.etat === 'non_configure' || issue.etat === 'non_pris_en_charge') {
-      return el('div', { class: 'card flat stack', dataset: { role: 'issue-ia' } }, el('div', { class: 'status warn', role: 'status' }, el('span', null, t(issue.etat === 'non_configure' ? TEXTE_NON_CONFIGURE : TEXTE_AUTRE_FOURNISSEUR)), ' ', reglages()));
-    }
+    // La session a disparu entre le rendu et le clic : la carte « Connecte-toi » ; relancer sans session ne mènerait à rien.
+    if (issue.raison === 'non_connecte') return el('div', { class: 'card flat stack', dataset: { role: 'issue-ia' } }, carteConnexion(connecter));
+    const refus = texteRefusAssistant(issue); // non_admis, quota (avec ou sans nombre), demande trop lourde (R-T4-4, R-T4-9)
     const raison = typeof issue.raison === 'string' && issue.raison ? issue.raison : 'inconnu';
     const connue = Object.hasOwn(TEXTES_INDISPONIBLE, raison);
-    const code = raison === 'illisible' ? (issue.motif || raison) : (connue ? null : raison); // K3 : le code reste lisible sous le texte générique
+    const code = refus ? null : (raison === 'illisible' ? (issue.motif || raison) : (connue ? null : raison)); // K3 : le code reste lisible sous le texte générique
     return el('div', { class: 'card flat stack', dataset: { role: 'issue-ia' } },
-      el('div', { class: 'status warn', role: 'status' }, el('span', null, t(connue ? TEXTES_INDISPONIBLE[raison] : 'L’assistant n’a pas répondu. Réessaie.')), AVEC_REGLAGES.includes(raison) ? [' ', reglages()] : null),
+      el('div', { class: 'status warn', role: 'status' }, el('span', null, refus ?? t(connue ? TEXTES_INDISPONIBLE[raison] : 'L’assistant n’a pas répondu. Réessaie.'))),
       code ? el('small', { class: 'muted' }, t('Code : {c}', { c: String(code) })) : null,
-      SANS_REESSAI.includes(raison) ? null : reessayer());
+      SANS_REESSAI.includes(raison) || issue.trop_lourd === true ? null : reessayer());
   }
 
   const blocGardee = (g) => el('div', { class: 'card flat stack', dataset: { role: 'gardee-ia' } },

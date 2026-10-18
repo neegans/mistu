@@ -1,9 +1,9 @@
 // Configuration de l'assistant IA (spec 2026-10-17-assistant-par-le-compte § 4.1). Pur : aucune base, aucun DOM.
 // Une seule forme, à l'écriture locale ET à la lecture ; la réception écrit la ligne telle que le serveur la porte.
 // URL de base (S14, R-CPT-4) : https vers tout hôte, http vers la boucle locale seulement (Ollama, LM Studio), jamais
-// d'identifiants. Une URL FOURNIE mais refusée vide TOUTE la configuration (fournisseur 'none') : OpenAICompatibleProvider
-// prend https://api.openai.com/v1 quand base_url est vide, et la clé d'un serveur local partirait chez OpenAI en silence.
-// Sans URL (absente ou blanche), openai_compatible garde le défaut du fournisseur, comme avant.
+// d'identifiants. Une URL FOURNIE mais refusée vide TOUTE la configuration (fournisseur 'none') : le fournisseur compatible OpenAI
+// (retiré en Passerelle T4 ; cette normalisation reste, le magasin aussi) prenait https://api.openai.com/v1 quand base_url était vide, et la
+// clé d'un serveur local partait chez OpenAI en silence. Sans URL (absente ou blanche), openai_compatible gardait le défaut du fournisseur.
 import { borner } from '../core/bornes.js';
 
 export const LIGNE_ASSISTANT = 'llm';

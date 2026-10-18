@@ -14,7 +14,8 @@ export function withRepo(test) {
   return withDatabase(async (tempDb) => {
     repo.bindDatabase(tempDb);
     try {
-      // init() avant la capture, comme au démarrage de l'app : l'amorçage des références n'a pas à partir au serveur.
+      // init() sur une base vide, AVANT la capture : l'amorçage des références (origine 'device') n'a rien à partir au serveur. (L'app, elle, pose
+      // la capture avant init() — l'effacement de la clé locale est une écriture 'local' qui doit partir : Passerelle T4, tests/assistant-compte.js.)
       await repo.init();
       installCapture(tempDb, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true }); // R-CPT-2 : un appareil de production
       return await test(repo, tempDb);

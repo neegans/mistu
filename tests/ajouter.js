@@ -1793,9 +1793,9 @@ export async function runAjouterTests({ eq, ok }) {
   }
 
   // --- § 12 CSP, § 13.10 statique (tâche 10, clôture). S10 RETIRÉE par R-UX-15 : l'assistant IA (src/domain/llm.js)
-  // accepte une URL de base LIBRE (compatible OpenAI, configurée dans Réglages) — aucune liste fermée ne peut la
-  // couvrir sans casser cette fonctionnalité antérieure au lot. connect-src reste donc `'self' https:` (dos-d'âne
-  // assumé, pas un mur) ; les vrais murs sont script-src 'self', img-src fermé (aucune image externe : les
+  // acceptait alors une URL de base LIBRE (compatible OpenAI, configurée dans Réglages ; ce fournisseur est retiré depuis la
+  // passerelle) — et Open Library, Google Books et le projet Supabase restent des hôtes https que le navigateur appelle.
+  // connect-src reste donc `'self' https:` (dos-d'âne assumé, pas un mur) ; les vrais murs sont script-src 'self', img-src fermé (aucune image externe : les
   // couvertures passent par blob: après ré-encodage) et object-src 'none'.
   const lire = async (chemin) => (await fetch(chemin + '?v=' + Date.now(), { cache: 'no-store' })).text();
   for (const page of ['../index.html', './index.html']) {

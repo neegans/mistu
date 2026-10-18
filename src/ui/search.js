@@ -9,8 +9,9 @@ import { findAccompaniments } from '../domain/pairing.js';
 import { providerFrom } from '../domain/llm.js';
 import { chercherRecettesWeb, construireDemande, dateLisible } from '../domain/recherche-web.js';
 import { RECIPE_TYPES, DIET_TAGS } from '../model/schema.js';
-import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select, sessionAssistant } from './components.js';
+import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select, sessionAssistant, carteConnexion, texteRefusAssistant } from './components.js';
 import { addToMealFlow } from './meals.js';
+import { demarrerConnexion } from './settings.js';
 
 const MODES = [['recipes', 'Mes recettes'], ['books', 'Mes livres'], ['web', 'Web'], ['all', 'Tout']];
 
@@ -26,17 +27,16 @@ export function etatWeb() { return { cle: vol?.cle ?? null, enCours: !!vol, memo
 export function reinitialiserWeb() { vol?.controller.abort(); vol = null; memoire = null; vues.clear(); } // tests seulement
 function notifier() { for (const v of [...vues]) { if (!v.root.isConnected) { vues.delete(v); continue; } v.redessiner(); } }
 const ISSUE_INTERNE = Object.freeze({ etat: 'indisponible', raison: 'interne', liens: Object.freeze([]), autres: Object.freeze([]), repli: false, recherches: null, modele: null }); // rangée telle quelle dans `memoire`
-// § 5.6 : textes des raisons connues (lus par Object.hasOwn : une raison « constructor » ou « toString » n'est pas connue).
+// § 5.6 : textes des raisons connues (lus par Object.hasOwn : une raison « constructor » ou « toString » n'est pas connue). Les refus de la
+// passerelle (non_admis, quota, trop lourd) ont leur texte dans components.js (texteRefusAssistant, R-T4-4) ; non_connecte (la session a
+// disparu pendant le vol) a sa carte « Connecte-toi » : ni l'un ni l'autre n'offre « Réessayer » — la même demande échouerait pareil.
 const TEXTES_INDISPONIBLE = {
   hors_ligne: 'Tu es hors ligne.',
-  cle_refusee: 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.',
-  recherche_desactivee: 'La recherche web n’est pas activée sur ton compte Anthropic.',
   trop_de_demandes: 'Trop de demandes pour l’instant. Réessaie dans une minute.',
   refus: 'L’assistant a refusé cette demande.',
   pas_cherche: 'L’assistant n’a pas cherché sur le web. Réessaie.',
 };
-const SANS_REESSAI = ['cle_refusee', 'recherche_desactivee', 'refus'];
-const AVEC_REGLAGES = ['cle_refusee', 'recherche_desactivee'];
+const SANS_REESSAI = ['refus', 'non_admis', 'quota'];
 // R-WEB-10 (corrige R-WEB-9, amende § 5.4.1) : à la TAPE, un champ changé est relu ; ne survivent que les puces que les
 // LISTES « + type » / « + restriction » ont ajoutées = affichées MOINS ce que l'analyse de l'ancien texte avait donné
 // (régimes, et le type si le nouveau texte n'en dit pas). Une puce retirée à la main n'est plus affichée : elle ne revient
@@ -59,8 +59,11 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   const state = { q: query.q || '', mode: query.mode || 'all', favorites: query.fav === '1', cooked: query.cooked === '1', requireAll: query.any !== '1', parsed: parseQuery(query.q || '') };
   // La session de l'assistant (R-T3-1) : lue ICI pour les gardes de l'écran, relue à chaque appel (un jeton expiré se rafraîchit).
   // Attendue en mode web SEULEMENT : jeton() peut rafraîchir le jeton par le réseau, et les autres modes de recherche n'en ont pas
-  // besoin (un changement de mode ré-instancie la route : le mode web relit alors la session).
-  const session = state.mode === 'web' ? await sessionAssistant(ctx) : null;
+  // besoin. Quand la personne bascule vers « Web » dans cette MÊME instance (run() → render(), sans ré-instanciation), elle est lue avant
+  // de rendre (R-T4-10) : une personne connectée ne voit jamais « Connecte-toi » en flash.
+  let session = state.mode === 'web' ? await sessionAssistant(ctx) : null;
+  let sessionLue = state.mode === 'web';
+  const connecter = () => demarrerConnexion(ctx.sync?.auth);
   const forRecipe = query.for ? ctx.docsByRecipe.get(query.for) : null; // Avec quoi on mange ça ?
   const role = query.role || (forRecipe ? 'salade' : null);
   if (forRecipe && role) state.parsed.filters.type = role;
@@ -69,7 +72,12 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   // L'adresse de la recherche n'a qu'UNE définition : run() (Entrée, mode, cases) et lancer() (la tape web) la rejouent
   // en replace par le `navigate` injecté (par défaut celui du routeur).
   const requeteRoute = () => '/search' + buildQuery({ q: state.q, mode: state.mode, fav: state.favorites ? 1 : '', cooked: state.cooked ? 1 : '', any: state.requireAll ? '' : 1, for: query.for || '', role: role || '' });
-  const run = () => { state.q = input.value.trim(); state.parsed = parseQuery(state.q); if (forRecipe && role) state.parsed.filters.type = role; nav(requeteRoute(), { replace: true }); render(); };
+  const run = async () => {
+    state.q = input.value.trim(); state.parsed = parseQuery(state.q); if (forRecipe && role) state.parsed.filters.type = role;
+    nav(requeteRoute(), { replace: true });
+    if (state.mode === 'web' && !sessionLue) { sessionLue = true; session = await sessionAssistant(ctx); } // R-T4-10 ; sessionAssistant ne lève jamais
+    render();
+  };
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
   input.addEventListener('input', () => {
     const vide = !borner(input.value, 500).trim(); // même règle que construireDemande
@@ -195,10 +203,8 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   function renderWeb() {
     for (const v of [...vues]) if (!v.root.isConnected) vues.delete(v); // borné en permanence, pas seulement à la résolution d'un vol
     if (![...vues].some((v) => v.root === root)) vues.add({ root, redessiner: render });
-    const fournisseur = providerFrom(ctx.settings, { session });
-    const reglages = () => el('a', { class: 'btn small', href: '#/settings' }, t('Réglages'));
-    if (!fournisseur.configured) return el('div', { class: 'status warn' }, t('Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'), ' ', reglages());
-    if (!fournisseur.supportsWebSearch) return el('div', { class: 'status warn' }, t('Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.'), ' ', reglages());
+    // Sans session : « Connecte-toi… » + « Se connecter », aucun appel (R-T4-4). La passerelle cherche toujours sur le web.
+    if (!providerFrom(ctx.settings, { session }).configured) return carteConnexion(connecter);
     const cle = demandeCourante().cle;
     const boutonChercher = (eteint) => el('button', { class: 'btn primary', dataset: { role: 'chercher-web' }, disabled: eteint, onClick: () => lancer() }, t('Chercher sur le web avec l’assistant')); // data-role : rouvert par la frappe (§ 5.3)
     if (vol && vol.cle === cle) {
@@ -208,9 +214,9 @@ export async function renderSearch(params, query, ctx, deps = {}) {
         el('div', { class: 'row' }, el('button', { class: 'btn primary', disabled: true }, t('Chercher sur le web avec l’assistant')), el('button', { class: 'btn', onClick: annuler }, t('Annuler'))));
     }
     // K1 : les liens d'un « trouvé » restent quand la demande change, et la différence est dite. Toute autre issue ne vaut
-    // que pour SA demande (R-WEB-7) : une demande changée revient à l'écran du bouton — sinon un refus ou une clé refusée
-    // resteraient affichés sans issue après la correction de la demande ou des réglages.
-    if (memoire && (memoire.issue.etat === 'trouve' || memoire.cle === cle)) return renderIssue(memoire.issue, reglages, { demandeDiffere: memoire.cle !== cle, demandePrete: cle != null });
+    // que pour SA demande (R-WEB-7) : une demande changée revient à l'écran du bouton — sinon un refus ou un quota atteint
+    // resteraient affichés sans issue après la correction de la demande.
+    if (memoire && (memoire.issue.etat === 'trouve' || memoire.cle === cle)) return renderIssue(memoire.issue, { demandeDiffere: memoire.cle !== cle, demandePrete: cle != null });
     const demandeVide = !borner(input.value, 500).trim();
     return el('div', { class: 'card flat stack' },
       boutonChercher(demandeVide),
@@ -219,24 +225,24 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   }
   // § 5.5-5.6 : chaque issue a son écran ; les liens sont revalidés AU RENDU par lienSignet (I-H) ; l'avertissement
   // I-K accompagne toujours les liens ; aucun texte de l'API n'est rendu hors « pourquoi » (borné en amont).
-  function renderIssue(issue, reglages, { demandeDiffere = false, demandePrete = true } = {}) {
+  function renderIssue(issue, { demandeDiffere = false, demandePrete = true } = {}) {
     const reessayer = () => el('button', { class: 'btn', onClick: () => lancer({ enLigne: () => true }) }, t('Réessayer'));
-    // R-WEB-7 : les issues sans « Réessayer » gardent une sortie — la même demande, relancée sans forcer enLigne (une clé
-    // corrigée dans Réglages sert alors tout de suite).
+    // R-WEB-7 : les issues sans « Réessayer » gardent une sortie — la même demande, relancée sans forcer enLigne (un compte
+    // admis entre-temps, ou le quota du lendemain, servent alors tout de suite).
     const chercherANouveau = () => el('button', { class: 'btn', onClick: () => lancer() }, t('Chercher à nouveau'));
-    if (issue.etat === 'non_configure') return el('div', { class: 'card flat stack' }, el('div', { class: 'status warn' }, t('Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'), ' ', reglages()), chercherANouveau());
-    if (issue.etat === 'non_pris_en_charge') return el('div', { class: 'card flat stack' }, el('div', { class: 'status warn' }, t('Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.'), ' ', reglages()), chercherANouveau());
     if (issue.etat === 'rien') return el('div', { class: 'card flat stack' }, el('div', { class: 'status', role: 'status' }, t('Aucune page trouvée pour cette demande. Reformule ou cherche autrement.')), reessayer(), creerDepuisWeb());
     if (issue.etat === 'indisponible') {
-      const demandeVide = issue.raison === 'requete' && !state.q;
+      // La session a disparu pendant le vol : la carte « Connecte-toi » ; la relancer sans session ne mènerait à rien (R-T4-4).
+      if (issue.raison === 'non_connecte') return el('div', { class: 'card flat stack' }, carteConnexion(connecter));
+      const refus = texteRefusAssistant(issue); // non_admis, quota (avec ou sans nombre), demande trop lourde (R-T4-4, R-T4-9)
+      const demandeVide = !refus && issue.raison === 'requete' && !state.q;
       const connue = Object.hasOwn(TEXTES_INDISPONIBLE, issue.raison);
-      const cle = demandeVide ? 'Écris d’abord ce que tu cherches.' : (connue ? TEXTES_INDISPONIBLE[issue.raison] : 'L’assistant n’a pas répondu. Réessaie.');
-      const generique = !demandeVide && !connue; // K3 : le code reste lisible sous le texte générique
+      const generique = !refus && !demandeVide && !connue; // K3 : le code reste lisible sous le texte générique
+      const texte = refus ?? t(demandeVide ? 'Écris d’abord ce que tu cherches.' : (connue ? TEXTES_INDISPONIBLE[issue.raison] : 'L’assistant n’a pas répondu. Réessaie.'));
       return el('div', { class: 'card flat stack' },
-        el('div', { class: 'status warn', role: 'status' }, t(cle), AVEC_REGLAGES.includes(issue.raison) ? [' ', reglages()] : null),
+        el('div', { class: 'status warn', role: 'status' }, texte),
         generique ? el('small', { class: 'muted' }, t('Code : {c}', { c: String(issue.raison || 'inconnu') })) : null,
-        SANS_REESSAI.includes(issue.raison) ? chercherANouveau() : reessayer(),
-        issue.raison === 'recherche_desactivee' ? creerDepuisWeb() : null); // la recherche web n'est pas activée : la création, elle, peut marcher
+        SANS_REESSAI.includes(issue.raison) || issue.trop_lourd === true ? chercherANouveau() : reessayer());
     }
     // trouve
     const carte = (lien) => {
@@ -253,7 +259,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     const cartes = (Array.isArray(issue.liens) ? issue.liens : []).map(carte).filter(Boolean);
     const autres = (Array.isArray(issue.autres) ? issue.autres : []).map(carte).filter(Boolean); // K2 : repliées, jamais mêlées aux choix
     // R-WEB-3 : un « trouvé » dont aucune carte ne survit à la revalidation ne montre pas un titre sans rien dessous.
-    if (!cartes.length) return renderIssue({ ...issue, etat: 'rien' }, reglages);
+    if (!cartes.length) return renderIssue({ ...issue, etat: 'rien' });
     const demande = memoire?.filtres?.length ? `${memoire.q} · ${memoire.filtres.join(' ; ')}` : (memoire?.q ?? state.q);
     return section(t('Trouvé sur le web'),
       el('div', { class: 'muted' }, t('Demande envoyée : {q}', { q: demande })),

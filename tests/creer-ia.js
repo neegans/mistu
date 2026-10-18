@@ -569,15 +569,31 @@ export async function runCreerIaTests({ eq, ok }) {
     // Un « creer » dont chaque appel attend qu'on le résolve à la main : a.rendre[i](issue).
     const enMain = () => { const a = { n: 0, args: [], deps: [], rendre: [] }; a.creer = (args, deps) => { a.n += 1; a.args.push(args); a.deps.push(deps); return new Promise((r) => { a.rendre.push(r); }); }; return a; };
     try {
-      // P7.2 — gardes fournisseur (C-14, P29 : par fournisseur.name, pas par supportsWebSearch) : la carte et « Réglages », rien d'autre
-      for (const [nom, llm, attendu] of [
-        ['sans session, aucun fournisseur', { provider: 'none' }, 'Pour créer une recette, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'],
-        ['sans session, une clé locale ne sert plus', { provider: 'anthropic', api_key: 'cle-locale', model: 'm' }, 'Pour créer une recette, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'],
-        ['sans session, compatible OpenAI configuré', { provider: 'openai_compatible', api_key: 'k', model: 'm', base_url: '' }, 'Ce fournisseur ne crée pas de recette ici. Choisis Anthropic dans Réglages → Assistant IA.'],
+      // P7.2 — garde (R-T4-4) : sans session, « Connecte-toi… » + « Se connecter » — ni formulaire, ni bouton de création, ni lien Réglages
+      // (rien à configurer), aucun appel, quel que soit le réglage local hérité (C-14 : la garde est décidée une fois par instance)
+      const { SYNC_ROUTE_KEY } = await import('../src/ui/state.js');
+      for (const [nom, llm] of [
+        ['sans session, aucun fournisseur', { provider: 'none' }],
+        ['sans session, une clé locale ne sert plus', { provider: 'anthropic', api_key: 'cle-locale', model: 'm' }],
+        ['sans session, compatible OpenAI configuré', { provider: 'openai_compatible', api_key: 'k', model: 'm', base_url: '' }],
       ]) {
         S.reinitialiserCreation();
-        const root = await monter({ q: 'saumon' }, {}, ctxDe(null, { settings: { llm } }));
-        eq([textes(root, '[data-role="garde-ia"] .status > span'), !!root.querySelector('[data-role="garde-ia"] a[href="#/settings"]'), bouton(root, 'creer-ia') === null, bouton(root, 'demande-ia') === null], [[attendu], true, true, true], `P7.2 garde (${nom}) : texte exact, lien Réglages, ni formulaire ni bouton de création`);
+        let appelsCreer = 0; const reseauAvant = appelsReseau;
+        const root = await monter({ q: 'saumon' }, { creer: async () => { appelsCreer += 1; return trouve; } }, ctxDe(null, { settings: { llm } }));
+        eq([textes(root, '[data-role="garde-ia"] .status > span'), !!root.querySelector('[data-role="garde-ia"] a[href="#/settings"]'), !!bouton(root, 'se-connecter'), libelle(root, 'se-connecter'), bouton(root, 'creer-ia') === null, bouton(root, 'demande-ia') === null], [['Connecte-toi pour utiliser l’assistant.'], false, true, 'Se connecter', true, true], `P7.2 garde (${nom}) : « Connecte-toi pour utiliser l’assistant. » + « Se connecter », ni lien Réglages, ni formulaire ni bouton de création`);
+        // Garde retirée : le formulaire serait là, prérempli (q), et un clic enverrait la demande — le domaine injecté et le réseau ne voient rien
+        bouton(root, 'creer-ia')?.click(); await tick(); await tick();
+        eq([appelsCreer, appelsReseau - reseauAvant], [0, 0], `P7.2 garde (${nom}) : aucun appel du domaine ni du réseau`);
+        root.remove();
+      }
+      {
+        // « Se connecter » : le geste de la section Compte — auth.signIn() du contexte ; aucun appel de création n'est parti
+        S.reinitialiserCreation();
+        const signIns = [];
+        const ctx = ctxDe(null); ctx.sync.auth.signIn = async () => { signIns.push(1); return { error: null }; };
+        const root = await monter({ q: 'saumon' }, {}, ctx);
+        try { bouton(root, 'se-connecter').click(); await tick(); await tick(); } finally { try { sessionStorage.removeItem(SYNC_ROUTE_KEY); } catch { /* stockage indisponible */ } }
+        eq(signIns.length, 1, 'P7.2 garde : « Se connecter » appelle auth.signIn() du contexte');
         root.remove();
       }
       {
@@ -873,17 +889,28 @@ export async function runCreerIaTests({ eq, ok }) {
         eq([bouton(r8, 'issue-ia') === null, libelle(r8, 'creer-ia'), !!bouton(r8, 'demande-ia')], [true, 'Créer ma recette', true], 'P7.7 : une autre demande sans proposition → le formulaire seul (une issue ne vaut que pour SA demande)');
         r8.remove();
         for (const [issue, attendu, nom] of [
-          [{ etat: 'indisponible', raison: 'cle_refusee' }, [['Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.'], [], true, false], 'clé refusée : Réglages, pas de Réessayer'],
+          [{ etat: 'indisponible', raison: 'non_admis' }, [['Ce compte n’a pas accès à l’assistant.'], [], false, false], 'compte non admis (R-T4-4) : le texte, ni Réglages ni Réessayer'],
+          [{ etat: 'indisponible', raison: 'quota', quota: 60 }, [['Tu as atteint la limite du jour pour l’assistant (60 appels).'], [], false, false], 'quota avec son nombre (R-T4-4)'],
+          [{ etat: 'indisponible', raison: 'quota', quota: null }, [['Tu as atteint la limite du jour pour l’assistant.'], [], false, false], 'quota sans nombre (R-T4-9)'],
+          [{ etat: 'indisponible', raison: 'requete', trop_lourd: true }, [['La demande est trop lourde.'], [], false, false], 'demande trop lourde (413)'],
+          [{ etat: 'indisponible', raison: 'requete' }, [['L’assistant n’a pas répondu. Réessaie.'], ['Code : requete'], false, true], 'requête refusée sans trop_lourd : texte générique et code'],
+          [{ etat: 'indisponible', raison: 'cle_refusee' }, [['L’assistant n’a pas répondu. Réessaie.'], ['Code : cle_refusee'], false, true], 'cle_refusee n’existe plus : texte générique et code'],
           [{ etat: 'indisponible', raison: 'interrompu' }, [['Réponse coupée : réessaie avec une demande plus courte.'], [], false, true], 'coupure (C-13)'],
           [{ etat: 'indisponible', raison: 'trop_de_demandes' }, [['Trop de demandes pour l’instant. Réessaie dans une minute.'], [], false, true], 'limite'],
           [{ etat: 'indisponible', raison: 'constructor' }, [['L’assistant n’a pas répondu. Réessaie.'], ['Code : constructor'], false, true], 'raison inconnue (même « constructor ») : texte générique et code'],
-          [{ etat: 'non_configure', raison: null }, [['Pour créer une recette, configure l’assistant IA : fournisseur Anthropic, modèle et clé.'], [], true, false], 'non configuré rendu par l’appel'],
-          [{ etat: 'non_pris_en_charge', raison: null }, [['Ce fournisseur ne crée pas de recette ici. Choisis Anthropic dans Réglages → Assistant IA.'], [], true, false], 'autre fournisseur rendu par l’appel'],
         ]) {
           S.reinitialiserCreation();
           const r = await monter({ q: 'saumon' }, { creer: async () => issue });
           bouton(r, 'creer-ia').click(); await tick(); await tick();
           eq([textes(r, '[data-role="issue-ia"] .status > span'), textes(r, '[data-role="issue-ia"] small'), !!r.querySelector('[data-role="issue-ia"] a[href="#/settings"]'), !!bouton(r, 'reessayer-ia')], attendu, 'P7.6 issue — ' + nom);
+          r.remove();
+        }
+        // non_connecte rendu par l'appel (la session a disparu entre le rendu et le clic) : « Connecte-toi… » + « Se connecter », pas de Réessayer
+        {
+          S.reinitialiserCreation();
+          const r = await monter({ q: 'saumon' }, { creer: async () => ({ etat: 'indisponible', raison: 'non_connecte' }) });
+          bouton(r, 'creer-ia').click(); await tick(); await tick();
+          eq([textes(r, '[data-role="issue-ia"] .status > span'), !!bouton(r, 'se-connecter'), !!bouton(r, 'reessayer-ia'), textes(r, '[data-role="issue-ia"] small')], [['Connecte-toi pour utiliser l’assistant.'], true, false, []], 'P7.6 issue — non_connecte : « Connecte-toi… » + « Se connecter », ni Réessayer ni code');
           r.remove();
         }
 
@@ -989,12 +1016,12 @@ export async function runCreerIaTests({ eq, ok }) {
     ok(etatUi.ROUTES_DE_SAISIE.includes('/recipes/creer') && etatUi.estRouteDeSaisie('/recipes/creer') && !etatUi.estRouteDeSaisie('/recipes/rc1'), 'F2 : /recipes/creer est un écran de saisie, /recipes/rc1 ne l’est pas');
 
     // en.js : chaque texte de l'écran a sa traduction
-    const CLES_T3 = ['Créer une recette avec l’assistant IA', 'Pour créer une recette, configure l’assistant IA : fournisseur Anthropic, modèle et clé.', 'Ce fournisseur ne crée pas de recette ici. Choisis Anthropic dans Réglages → Assistant IA.', 'Cette version ne peut pas être adaptée ici.', 'Retour à la recette',
+    const CLES_T3 = ['Créer une recette avec l’assistant IA', 'Connecte-toi pour utiliser l’assistant.', 'Se connecter', 'Ce compte n’a pas accès à l’assistant.', 'Tu as atteint la limite du jour pour l’assistant ({n} appels).', 'Tu as atteint la limite du jour pour l’assistant.', 'La demande est trop lourde.', 'Cette version ne peut pas être adaptée ici.', 'Retour à la recette',
       'Ce que tu as, ce que tu veux', 'Ex. : saumon et fenouil au four, croûte aux herbes', 'Portions, durée et restrictions se règlent ci-dessous.', 'Restrictions', 'Type de recette', 'Au choix de l’assistant', 'Portions', 'Temps maximal (minutes, facultatif)', 'Créer ma recette', 'Créer à nouveau', 'Une création = un appel à ton compte Anthropic.',
       'Écris d’abord ce que tu veux cuisiner.', 'Portions : un nombre entier de 1 à 12.', 'Temps maximal : de 5 à 240 minutes, ou vide.', 'L’assistant compose une recette…', 'Annuler', 'Une création est déjà en cours : annule-la d’abord.', 'La demande a changé depuis cette proposition.',
       'Créée avec l’IA · non testée', 'Adaptée avec l’IA · non testée', 'Selon l’assistant : {texte}', '1 portion', '{n} portions', 'environ {m} min (estimé par l’assistant)', 'Ingrédients', 'Étapes', 'Conseils', 'À vérifier avant de servir', 'Restrictions demandées', 'Incompatible : {lignes}', 'À vérifier, à retirer : {lignes}', 'À vérifier : {inconnues}', 'à retirer : {lignes}', 'À vérifier', 'identité proposée',
       'L’assistant n’a pas cuisiné cette recette : vérifie les quantités, les cuissons et les étiquettes avant de la servir.', 'Demande envoyée : {q}', 'au plus {m} min', '{u} jetons', 'Cette proposition n’est pas enregistrée : elle sera perdue à la fermeture de l’app.', 'Garder cette recette', 'Recommencer', 'Modifier la demande',
-      'Recette gardée', 'Ouvrir la fiche', 'Enregistrement de la recette…', 'La recette n’a pas pu être gardée. Réessaie.', 'L’assistant n’a pas rendu une recette lisible. Recommence.', 'Réponse coupée : réessaie avec une demande plus courte.', 'Tu es hors ligne.', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.',
+      'Recette gardée', 'Ouvrir la fiche', 'Enregistrement de la recette…', 'La recette n’a pas pu être gardée. Réessaie.', 'L’assistant n’a pas rendu une recette lisible. Recommence.', 'Réponse coupée : réessaie avec une demande plus courte.', 'Tu es hors ligne.',
       'Trop de demandes pour l’instant. Réessaie dans une minute.', 'L’assistant a refusé cette demande.', 'L’assistant n’a pas répondu. Réessaie.', 'Réessayer', 'Réglages', 'Code : {c}'];
     eq(CLES_T3.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'en.js : chaque texte de l’écran de création a sa traduction');
   }
@@ -1027,7 +1054,6 @@ export async function runCreerIaTests({ eq, ok }) {
     const choisir = (root, premiere, valeur) => { const l = liste(root, premiere); l.value = valeur; l.dispatchEvent(new Event('change')); };
     const base = { raison: null, liens: [], autres: [], repli: false, recherches: null, modele: 'm' };
     const rien = { ...base, etat: 'rien' };
-    const refuse = { ...base, etat: 'indisponible', raison: 'recherche_desactivee' };
     const trouve = { ...base, etat: 'trouve', liens: [{ href: 'https://a.test/r', hote: 'a.test', titre: 'Saumon au fenouil', date: null, pourquoi: 'Fenouil et saumon.' }], recherches: 1 };
     // Ouvre l'écran Web sur une demande « saumon fenouil » + « Sans gluten » (choisi dans la liste), tape, résout l'issue donnée.
     const ouvrir = async (issue, { q = 'saumon fenouil', diets = ['sans_gluten'], type = '' } = {}) => {
@@ -1072,15 +1098,7 @@ export async function runCreerIaTests({ eq, ok }) {
         eq(await cliquer(root), { navs: 1, adresse: '/recipes/creer?q=saumon+fenouil&diets=sans_gluten', appels: 0, enVol: false }, 'porte Web : « rien » → une navigation vers l’écran de création, q et régime affichés, type et max omis (P12), aucun appel web');
         root.remove();
       }
-      // (b) « indisponible » : seulement quand la recherche web n'est pas activée sur le compte (la création, elle, peut marcher)
-      {
-        const root = await ouvrir(refuse);
-        eq([!!porte(root), !!parTexte(root, 'Chercher à nouveau')], [true, true], 'porte Web : recherche_desactivee → le bouton, avec « Chercher à nouveau » (qui lui reste)');
-        ok(apres(parTexte(root, 'Chercher à nouveau'), porte(root)), 'porte Web : recherche_desactivee → le bouton vient après « Chercher à nouveau »');
-        eq(await cliquer(root), { navs: 1, adresse: '/recipes/creer?q=saumon+fenouil&diets=sans_gluten', appels: 0, enVol: false }, 'porte Web : recherche_desactivee → même adresse, aucun appel web');
-        root.remove();
-      }
-      // (c) « trouvé » : après l'avertissement I-K
+      // (b) « trouvé » : après l'avertissement I-K  (la porte « recherche web désactivée » a disparu avec cette issue : la passerelle ne la distingue plus)
       {
         const root = await ouvrir(trouve);
         const avertissement = [...root.querySelectorAll('.status')].find((n) => n.textContent === 'L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.');
@@ -1095,13 +1113,13 @@ export async function runCreerIaTests({ eq, ok }) {
       // Les autres issues et les écrans de garde n'ont pas la porte (la spec la met en trois endroits seulement)
       {
         const manque = [];
-        for (const issue of [{ ...base, etat: 'indisponible', raison: 'cle_refusee' }, { ...base, etat: 'indisponible', raison: 'refus' }, { ...base, etat: 'indisponible', raison: 'hors_ligne' }, { ...base, etat: 'indisponible', raison: 'reseau' }, { ...base, etat: 'indisponible', raison: 'trop_de_demandes' }, { ...base, etat: 'indisponible', raison: 'pas_cherche' }, { ...base, etat: 'indisponible', raison: 'interne' }, { ...base, etat: 'non_configure' }, { ...base, etat: 'non_pris_en_charge' }]) {
+        for (const issue of [{ ...base, etat: 'indisponible', raison: 'non_admis' }, { ...base, etat: 'indisponible', raison: 'quota', quota: 60 }, { ...base, etat: 'indisponible', raison: 'non_connecte' }, { ...base, etat: 'indisponible', raison: 'recherche_desactivee' }, { ...base, etat: 'indisponible', raison: 'refus' }, { ...base, etat: 'indisponible', raison: 'hors_ligne' }, { ...base, etat: 'indisponible', raison: 'reseau' }, { ...base, etat: 'indisponible', raison: 'trop_de_demandes' }, { ...base, etat: 'indisponible', raison: 'pas_cherche' }, { ...base, etat: 'indisponible', raison: 'interne' }]) {
           const root = await ouvrir(issue);
           // l'écran de l'issue est bien là (pas le premier écran du bouton, où la porte est aussi absente)
           manque.push([`${issue.etat}:${issue.raison}`, S.etatWeb().memoire?.etat === issue.etat && !parTexte(root, 'Chercher sur le web avec l’assistant'), !!porte(root)]);
           root.remove();
         }
-        eq(manque.filter(([, ecranDeLIssue, laPorte]) => !ecranDeLIssue || laPorte), [], 'porte Web : ni cle_refusee, refus, hors_ligne, reseau, trop_de_demandes, pas_cherche, interne, non_configure ni non_pris_en_charge n’ont le bouton (et chacun est bien affiché)');
+        eq(manque.filter(([, ecranDeLIssue, laPorte]) => !ecranDeLIssue || laPorte), [], 'porte Web : ni non_admis, quota, non_connecte, recherche_desactivee (qui n’existe plus), refus, hors_ligne, reseau, trop_de_demandes, pas_cherche ni interne n’ont le bouton (et chacun est bien affiché)');
         // pendant le vol : jamais
         S.reinitialiserWeb();
         const root = await monter({ q: 'saumon fenouil' });
@@ -1112,7 +1130,7 @@ export async function runCreerIaTests({ eq, ok }) {
         root.remove();
         // pas de session : l'écran de garde, aucune porte
         const garde = await monter({ q: 'saumon fenouil' }, ctxDe(null));
-        eq([garde.textContent.includes('configure l’assistant IA'), !!porte(garde)], [true, false], 'porte Web : sans session → la garde, pas de bouton');
+        eq([garde.textContent.includes('Connecte-toi pour utiliser l’assistant.'), !!porte(garde)], [true, false], 'porte Web : sans session → la garde « Connecte-toi », pas de bouton');
         garde.remove();
       }
       // (d) relireChamp : le champ tapé SANS Entrée est relu avant de naviguer (R-WEB-10), les puces des listes survivent
@@ -1159,6 +1177,11 @@ export async function runCreerIaTests({ eq, ok }) {
       parTexte(rootEn, EN['Chercher sur le web avec l’assistant']).click(); await tick(); appels.rendre(rien); await tick();
       eq(porte(rootEn)?.textContent, 'Create a recipe with these criteria', 'en : le bouton de l’onglet Web est traduit');
       rootEn.remove();
+      // La garde « Connecte-toi » et ses refus, en anglais (R-T4-4) : le texte et le bouton passent par t()
+      S.reinitialiserWeb();
+      const gardeEn = await monter({ q: 'saumon' }, ctxDe(null));
+      eq([EN['Connecte-toi pour utiliser l’assistant.'], gardeEn.textContent.includes(EN['Connecte-toi pour utiliser l’assistant.']), !!parTexte(gardeEn, EN['Se connecter'])], ['Sign in to use the assistant.', true, true], 'en : la garde « Connecte-toi » de l’onglet Web est traduite, bouton compris');
+      gardeEn.remove();
     } finally { globalThis.fetch = vraiFetch; scene.remove(); S.reinitialiserWeb(); SC.reinitialiserCreation(); setUiLocale(localeAvant); if (location.href !== adresseAvant) history.replaceState(null, '', adresseAvant); }
   }
 
@@ -1196,11 +1219,19 @@ export async function runCreerIaTests({ eq, ok }) {
     eq(sansEntree({ 'x.js': "t('Chaîne neuve sans entrée') + t('Réglages') + t(a === 'non_configure' ? 'Annuler' : 'Créer ma recette') + t('Code : {c}', { c: String(r || 'inconnu') }) + t(g.texte)" }, EN), ['x.js : Chaîne neuve sans entrée'], 'couverture en.js : le détecteur voit une chaîne sans entrée, ignore un littéral de comparaison, un second argument et une variable');
     eq(sansEntree({ 'y.js': "const TEXTE_X = 'Texte rangé sans entrée';\nconst TEXTES_INDISPONIBLE = {\n  a: 'Réglages',\n  b: 'Autre sans entrée',\n};\nf({ texte: 'Annuler' }); f({ texte: 'Troisième sans entrée' })" }, EN).sort(), ['y.js : Autre sans entrée', 'y.js : Texte rangé sans entrée', 'y.js : Troisième sans entrée'], 'couverture en.js : le détecteur lit aussi les textes rangés dans une constante, dans TEXTES_INDISPONIBLE et dans « texte: »');
     const lire = async (chemin) => { const r = await fetch(new URL(chemin, import.meta.url), { cache: 'no-store' }); if (!r.ok) throw new Error(`${chemin} : HTTP ${r.status}`); return r.text(); };
-    const sources = { 'creer-ia.js': await lire('../src/ui/creer-ia.js'), 'add.js': await lire('../src/ui/add.js'), 'search.js': await lire('../src/ui/search.js') };
+    // Passerelle T4 : les textes de l'assistant sans session et de ses refus vivent dans components.js (UNE définition pour search.js, creer-ia.js,
+    // import.js et recipe-edit.js) et la section de Réglages dans settings.js. Ces deux fichiers ont de nombreuses chaînes antérieures sans
+    // entrée : seul le bloc de l'assistant est scanné (components.js : entre ses deux repères ; settings.js : aussi, la section de l'assistant).
+    const tranche = (src, debut, fin) => { const i = src.indexOf(debut); const j = src.indexOf(fin, i + debut.length); return i >= 0 && j > i ? src.slice(i, j) : ''; };
+    const components = await lire('../src/ui/components.js');
+    const settings = await lire('../src/ui/settings.js');
+    const sources = { 'creer-ia.js': await lire('../src/ui/creer-ia.js'), 'add.js': await lire('../src/ui/add.js'), 'search.js': await lire('../src/ui/search.js'),
+      'components.js (assistant)': tranche(components, '// === Assistant sans session', '// === fin Assistant'), 'settings.js (assistant)': tranche(settings, '// === Assistant IA (section de Réglages)', '// === fin Assistant IA') };
     // Antérieures au lot et hors périmètre (gelées ici pour ne rien cacher d'autre) : quatre chaînes de search.js sans entrée.
     const ANTERIEURES = ['search.js : Préciser : concombre, sans gluten, 15 minutes…', 'search.js : Ex. : une salade avec du concombre, sans gluten, en quinze minutes', 'search.js : Références d’index : ingrédients, durées et compatibilités inconnus tant que la recette n’est pas scannée.', 'search.js : {n} recette(s) écartée(s) par une restriction alimentaire.'];
-    eq(sansEntree(sources, EN).filter((k) => !ANTERIEURES.includes(k)), [], 'en.js : chaque chaîne t() de creer-ia.js, add.js et search.js (hors quatre antérieures au lot) a sa traduction');
+    eq(sansEntree(sources, EN).filter((k) => !ANTERIEURES.includes(k)), [], 'en.js : chaque chaîne t() de creer-ia.js, add.js, search.js, du bloc de l’assistant de components.js et de celui de settings.js (hors quatre antérieures au lot) a sa traduction');
     ok(chainesDe(sources['add.js']).includes('Créer avec l’IA') && chainesDe(sources['search.js']).includes('Créer une recette avec ces critères') && chainesDe(sources['creer-ia.js']).includes('Écris d’abord ce que tu veux cuisiner.'), 'couverture en.js : le détecteur lit bien les chaînes des trois sources (garde contre un scan vide)');
+    ok(chainesDe(sources['components.js (assistant)']).includes('Connecte-toi pour utiliser l’assistant.') && chainesDe(sources['components.js (assistant)']).includes('Ce compte n’a pas accès à l’assistant.') && chainesDe(sources['settings.js (assistant)']).includes('Modèle en service : {m}.') && chainesDe(sources['settings.js (assistant)']).includes('L’assistant est indisponible pour le moment.'), 'couverture en.js : le détecteur lit bien les blocs de l’assistant de components.js et de settings.js (garde contre une tranche vide)');
   }
 
   // --- T6 : l'étiquette C-2 partout, dérivée des DONNÉES (kind, provenance.generated_by, provenance.creation, recipe.origine — jamais

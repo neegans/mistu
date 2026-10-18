@@ -241,12 +241,38 @@ export async function sessionAssistant(ctx, { delaiMs = 2000 } = {}) {
   } catch { return null; } finally { clearTimeout(minuterie); }
 }
 
-export function aiNotice(ctx) {
-  const configured = ctx?.settings?.llm?.provider && ctx.settings.llm.provider !== 'none';
-  if (configured) return null;
-  return el('div', { class: 'status warn' }, t('Assistant IA non configuré : saisie et corrections manuelles. Réglages → Assistant IA.'),
-    el('a', { class: 'btn small', href: '#/settings' }, t('Réglages')));
+// === Assistant sans session et refus de la passerelle (R-T4-4) : UNE définition pour search.js, creer-ia.js, import.js et recipe-edit.js.
+// Le but d'abord (règle d'écran : dire à quoi sert la chose, pas comment le système marche) : sans session, la phrase et le geste
+// de connexion ; avec une session que la passerelle refuse, le refus en clair — jamais le corps de la réponse ni un mot de code.
+export const TEXTE_CONNEXION = 'Connecte-toi pour utiliser l’assistant.';
+
+// Le geste de connexion est celui de la section Compte de Réglages : il est passé par l'appelant (`demarrerConnexion` vit dans
+// settings.js, qui importe ce module — l'importer ici ferait un cycle).
+export function boutonSeConnecter(connecter, { classe = 'btn' } = {}) {
+  // Appelé sur le geste lui-même (pas différé), et aucun rejet ne s'échappe d'un onClick : une phrase fixe, jamais le message du fournisseur.
+  const echec = () => toast(t('La connexion n’a pas pu démarrer.'));
+  return el('button', { type: 'button', class: classe, dataset: { role: 'se-connecter' }, onClick: () => { try { Promise.resolve(connecter()).catch(echec); } catch { echec(); } } }, t('Se connecter'));
 }
+
+export const carteConnexion = (connecter) => el('div', { class: 'status warn', dataset: { role: 'connexion-ia' } }, el('span', null, t(TEXTE_CONNEXION)), ' ', boutonSeConnecter(connecter));
+
+// Le texte du refus d'une issue de domaine — { raison, quota, trop_lourd } — ou null pour toute autre raison (leurs textes restent à l'écran
+// qui les connaît). `quota` : le nombre du jour quand la passerelle l'a donné, sinon la phrase sans nombre (R-T4-9).
+export function texteRefusAssistant(issue) {
+  if (issue?.raison === 'non_admis') return t('Ce compte n’a pas accès à l’assistant.');
+  if (issue?.raison === 'quota') return Number.isInteger(issue.quota) && issue.quota >= 0 ? t('Tu as atteint la limite du jour pour l’assistant ({n} appels).', { n: issue.quota }) : t('Tu as atteint la limite du jour pour l’assistant.');
+  if (issue?.raison === 'requete' && issue.trop_lourd === true) return t('La demande est trop lourde.');
+  return null;
+}
+
+// Le texte d'un échec de l'extraction (PasserelleProvider.complete lève Error(raison), un mot de la liste fermée de la passerelle) : le refus
+// en clair quand c'est un refus connu, sinon « Échec : <raison> ». Un 413 y est `trop_lourd`, sans le nombre du quota.
+export function texteEchecAssistant(erreur) {
+  const raison = typeof erreur?.message === 'string' ? erreur.message : '';
+  if (raison === 'non_connecte') return t(TEXTE_CONNEXION);
+  return texteRefusAssistant({ raison: raison === 'trop_lourd' ? 'requete' : raison, trop_lourd: raison === 'trop_lourd' }) ?? `${t('Échec')} : ${raison}`;
+}
+// === fin Assistant
 
 // --- Pastille « N non envoyés » de la barre du haut (spec § 4.2) ----------
 // Un seul nœud dans toute l'application, posé par la coquille (app.js) et mis à jour par le moteur. La mise à jour

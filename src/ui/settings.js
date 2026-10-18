@@ -13,12 +13,10 @@ import { syncNow } from '../sync/clock.js';
 import { toJsonLd, toPaprikaYaml, toReadableSite } from '../domain/exporters.js';
 import { createZip } from '../core/zip.js';
 import { extFor } from '../domain/backup.js';
-import { providerFrom } from '../domain/llm.js';
-import { normaliserConfigAssistant, configVide } from '../domain/assistant-config.js';
-import { configAssistantSuitLeCompte } from '../sync/config.js';
+import { etatAssistant, sessionValide } from '../domain/passerelle.js';
 import { shortcutUrl, SHORTCUT_NAME, isAppleTouchDevice } from '../domain/timers.js';
 import { STORES, SYNC_INTERNAL_STORES, APP_VERSION, ARCHIVE_FORMAT_VERSION } from '../model/schema.js';
-import { pageHeader, section, field, select, segmented, majPastille, sessionAssistant } from './components.js';
+import { pageHeader, section, field, segmented, majPastille, sessionAssistant, TEXTE_CONNEXION, boutonSeConnecter } from './components.js';
 import { invalidate, setSyncState, getSyncState, relireReglages, SYNC_ROUTE_KEY } from './state.js';
 
 // Évite deux opérations d’archive concurrentes, même après un changement d’écran.
@@ -33,7 +31,7 @@ export const archiveEnCours = () => archiveOperation;
 // Posée par le bouton d’archive de cette page, jamais déduite d’un réglage ni d’une date.
 const ARCHIVE_FLAG = 'cuisineos.archive_created';
 
-export async function renderSettings(params, query, ctx) {
+export async function renderSettings(params, query, ctx, { fetch } = {}) {
   const s = ctx.settings;
   const root = el('div', null, pageHeader(t('Réglages'), { subtitle: `Cuisine OS ${APP_VERSION}` }));
 
@@ -154,11 +152,9 @@ export async function renderSettings(params, query, ctx) {
       } }, t('Créer une copie lisible (HTML)'))),
     el('small', { class: 'muted' }, t('À tester dans les applications cibles (Paprika : Fichier → Importer, YAML). Le HTML se lit hors connexion sans Cuisine OS.'))));
 
-  // Assistant IA (spec assistant-par-le-compte K-6, K-10, K-12) : la configuration vient du magasin assistant_config
-  // (getSettings().llm), l'écriture passe par repo.saveAssistantConfig. « Lié » = un compte a déjà été accepté sur cet
-  // appareil (K-10 c) : ce qui est tapé déconnecté partira à ce compte à la prochaine connexion.
-  const lie = !!(await repo.db.get('sync_state', 'user_id'))?.value;
-  root.append(sectionAssistant({ llm: s.llm, sync, lie }));
+  // Assistant IA (Passerelle T4) : plus de configuration ici — la clé vit côté serveur. La section dit si l'assistant est actif pour ce
+  // compte (session lue, bornée à 2 s, comme les écrans) et l'état vient d'un GET de la passerelle. `fetch` : injecté par les tests.
+  root.append(sectionAssistant({ sync, session: await sessionAssistant(ctx) }, { fetch }));
 
   // Minuterie système
   root.append(section(t('Minuterie système (iPhone / iPad)'),
@@ -522,80 +518,38 @@ export function gestesL3Pour({
   };
 }
 
-// K-10 : quatre états, un texte chacun — ce qui se passe SUR CET APPAREIL, MAINTENANT. Toujours la phrase des archives.
-export function texteAssistant({ sync = {}, lie = false, suitLeCompte = configAssistantSuitLeCompte } = {}) {
-  let etat;
-  if (!suitLeCompte()) etat = t('Sur cette adresse de développement, la configuration reste sur cet appareil.');
-  else if (sync?.user) etat = t('La configuration de l’assistant suit ton compte sur tes appareils connectés.');
-  else if (lie) etat = t('Ce qui est enregistré ici partira à ton compte à la prochaine connexion.');
-  else etat = t('Sans compte, la configuration reste sur cet appareil jusqu’à ta première connexion, puis elle suit ton compte.'); // R-CPT-7
-  return `${etat} ${t('Elle n’est jamais incluse dans les sauvegardes ZIP.')}`;
-}
-
+// === Assistant IA (section de Réglages)
 // K-12 : la page n'est pas reconstruite sous les doigts — le focus dans cette section vaut « occupé » pour suivreMoteur.
 export const occupeParAssistant = (doc = document) => !!doc.activeElement?.closest?.('[data-section="assistant"]');
 
-// R-CPT-4 : pour openai_compatible (fournisseur connu), la normalisation ne rend « Aucun » que si une URL de base FOURNIE
-// est refusée — http hors boucle locale, identifiants, texte libre. Ce refus est DIT : enregistré, il écrirait une ligne
-// vide (la clé effacée sur tous les appareils, sous un « Assistant enregistré ») ; testé, il n'aurait rien à tester.
-const urlDeBaseRefusee = (brut) => brut.provider === 'openai_compatible' && normaliserConfigAssistant(brut).provider === 'none';
-
-// Section « Assistant IA », à dépendances injectées (F12 : on ne pose pas d'espion sur un espace de noms de module).
-export function sectionAssistant({ llm: initial, sync = {}, lie = false, suitLeCompte = configAssistantSuitLeCompte } = {},
-  { saveConfig = repo.saveAssistantConfig, confirm = confirmDialog, dire = toast, tester = null, rafraichir = refresh } = {}) {
-  const llm = { provider: 'none', base_url: '', model: '', api_key: '', ...(initial || {}) };
-  let avait = !configVide(initial); // suit les enregistrements de cette instance (revue Neegan 1.5)
-  const llmStatus = el('div', { class: 'muted' });
-  const refusUrl = () => t('URL de base refusée : https exigé (ou http://localhost pour un serveur local), sans identifiants.');
-  const enregistrer = async () => {
-    if (urlDeBaseRefusee(llm)) { dire(refusUrl()); return; } // R-CPT-4 : rien n'est écrit, pas même « Aucun »
-    const cfg = normaliserConfigAssistant(llm);
-    if (cfg.provider === 'none') {
-      // K-6 (F5) : sans configuration non vide ici, « Aucun » n'écrit RIEN — une ligne vide plus récente effacerait la clé
-      // du compte.
-      if (!avait) { dire(t('Rien à retirer : aucun assistant n’est configuré ici.')); return; }
-      // R-CPT-7 (remplace R-CPT-5) : confirmer quand la ligne vide PARTIRA au compte, c'est-à-dire sur TOUT hôte de
-      // production (K-3) : connectée, elle part maintenant ; déconnectée, elle est capturée avec user_id null et part sous
-      // le compte qui se connectera ici le premier (fileDe, R-L3-24) — appareil lié ou jamais lié. Hors production, elle
-      // reste ici.
-      const partiraAuCompte = suitLeCompte();
-      if (partiraAuCompte && !(await confirm(t('Retirer l’assistant de tous tes appareils ?'), { danger: true, okLabel: t('Retirer') }))) return;
-    }
-    await saveConfig(cfg);
-    avait = !configVide(cfg);
-    dire(t('Assistant enregistré')); // après l'écriture seulement : pas de « enregistré » sans écriture
-    rafraichir();
-  };
-  // S14 (revue Neegan 1.1, critique) : « Tester » part de la configuration NORMALISÉE, jamais de l'objet tapé — une
-  // base_url refusée ne reçoit la clé en Bearer ni avant ni après « Enregistrer » (R-CPT-4 : le refus est dit).
-  const testerCfg = async () => {
-    const cfg = normaliserConfigAssistant(llm);
-    if (tester) return tester(cfg);
-    // Le test passe par la passerelle quand une session existe (R-T3-1) ; T4 retire tout ce formulaire.
-    const p = providerFrom({ llm: cfg }, { session: await sessionAssistant({ sync }) });
-    if (!p.configured) throw new Error(t('Configuration incomplète'));
-    return p.complete([{ role: 'user', content: 'Réponds uniquement : OK' }], { maxTokens: 5 });
-  };
-  const lancerTest = async () => {
-    if (urlDeBaseRefusee(llm)) { const refus = refusUrl(); llmStatus.textContent = refus; dire(refus); return; }
-    llmStatus.textContent = t('Test en cours…');
-    try { llmStatus.textContent = `${t('Réponse')} : ${String(await testerCfg()).slice(0, 80)}`; }
-    catch (e) { llmStatus.textContent = `${t('Échec')} : ${e.message}`; }
-  };
-  const sec = section(t('Assistant IA'),
-    el('p', { class: 'muted' }, t('Fournisseur-agnostique. Sans configuration, tout fonctionne à la main.') + ' ' + texteAssistant({ sync, lie, suitLeCompte })),
-    el('div', { class: 'two-col' },
-      field(t('Fournisseur'), select([{ value: 'none', label: t('Aucun (manuel)') }, { value: 'openai_compatible', label: t('API compatible OpenAI (OpenAI, Ollama, LM Studio…)') }, { value: 'anthropic', label: 'Anthropic' }], llm.provider, (v) => { llm.provider = v; })),
-      field(t('Modèle'), el('input', { type: 'text', value: llm.model, placeholder: 'ex. gpt-4o / claude-…', onInput: (e) => { llm.model = e.target.value.trim(); } })),
-      field(t('URL de base (compatible OpenAI seulement)'), el('input', { type: 'text', value: llm.base_url, placeholder: 'https://api.openai.com/v1', onInput: (e) => { llm.base_url = e.target.value.trim(); } })),
-      field(t('Clé API'), el('input', { type: 'password', value: llm.api_key, autocomplete: 'off', onInput: (e) => { llm.api_key = e.target.value.trim(); } }))),
-    el('div', { class: 'row' },
-      el('button', { class: 'btn primary', onClick: enregistrer }, t('Enregistrer')),
-      el('button', { class: 'btn', onClick: lancerTest }, t('Tester')),
-      llmStatus));
+// Section « Assistant IA » (Passerelle T4, R-T4-2) : DEUX états, aucun champ — la clé n'existe plus côté app. Première ligne = à quoi sert la
+// section. Sans session : « Connecte-toi… » + « Se connecter » (le geste de la section Compte), aucun appel. Avec une session : « L’assistant
+// est actif pour <adresse>. », puis une ligne d'état remplie par un GET de la passerelle (« … » pendant l'attente) — le GET ne demande rien
+// au fournisseur d'IA. Dépendances injectées : `fetch` (les tests n'ont jamais de réseau) et `connecter` (défaut : demarrerConnexion).
+export function sectionAssistant({ sync = {}, session = null } = {}, { fetch = undefined, connecter = demarrerConnexion } = {}) {
+  const avecSession = sessionValide(session);
+  const sec = avecSession ? section(t('Assistant IA'), ...assistantActif(sync, session, fetch)) : section(t('Assistant IA'),
+    el('p', null, t(TEXTE_CONNEXION)),
+    el('div', { class: 'row' }, boutonSeConnecter(() => connecter(sync.auth), { classe: 'btn primary' })));
   sec.dataset.section = 'assistant';
   return sec;
 }
+
+function assistantActif(sync, session, fetch) {
+  const adresse = [session.user?.email, sync.user?.email].find((a) => typeof a === 'string' && a !== '');
+  const etat = el('p', { class: 'muted', role: 'status', dataset: { role: 'etat-assistant' } }, '…');
+  // Rien n'est rendu du corps d'une erreur : seule la raison classe — le refus du compte, ou « indisponible » pour tout le reste.
+  etatAssistant({ fetch, session }).then((r) => {
+    if (r.raison === 'non_admis') etat.textContent = t('Ce compte n’a pas accès à l’assistant.');
+    else if (r.raison) etat.textContent = t('L’assistant est indisponible pour le moment.');
+    else {
+      const { modele, quotaJour } = r.corps;
+      etat.textContent = [modele ? t('Modèle en service : {m}.', { m: modele }) : null, quotaJour == null ? null : (quotaJour === 1 ? t('Quota : 1 appel par jour.') : t('Quota : {n} appels par jour.', { n: quotaJour }))].filter(Boolean).join(' ');
+    }
+  }, () => { etat.textContent = t('L’assistant est indisponible pour le moment.'); });
+  return [el('p', null, adresse ? t('L’assistant est actif pour {adresse}.', { adresse }) : t('L’assistant est actif sur ton compte.')), etat];
+}
+// === fin Assistant IA
 
 // Abonnement à l'état du moteur : plusieurs changements rapprochés ne font qu'UN rendu, et l'abonné se retire de
 // lui-même dès que la vue affichée n'est plus Réglages. Le routeur ne démonte pas les vues (aucun crochet de

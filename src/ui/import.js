@@ -8,7 +8,8 @@ import { displayUrl } from '../sync/mime.js';
 import { sha256Hex } from '../core/hash.js';
 import { normalizeText } from '../domain/units.js';
 import { providerFrom, extractIndexFromImages, blobToBase64 } from '../domain/llm.js';
-import { pageHeader, section, emptyState, select, field, aiNotice, pdfFrame, libelleLivre, sessionAssistant } from './components.js';
+import { pageHeader, section, emptyState, select, field, carteConnexion, texteEchecAssistant, pdfFrame, libelleLivre, sessionAssistant } from './components.js';
+import { demarrerConnexion } from './settings.js';
 
 const SMALL_IMAGE_BYTES = 80 * 1024;
 
@@ -201,9 +202,17 @@ export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId 
   const preview = el('div', null);
   const status = el('div', { class: 'muted' });
   // La passerelle (R-T3-1) : la session arrive de façon asynchrone — le bouton reste éteint jusqu'à sa lecture, et elle est relue au
-  // clic (un jeton expiré se rafraîchit). `indexEntriesPanel` reste synchrone : c'est le fournisseur qui se met à jour.
+  // clic (un jeton expiré se rafraîchit). `indexEntriesPanel` reste synchrone : c'est le fournisseur qui se met à jour. La phrase
+  // « Connecte-toi… » attend la même lecture (cachée au départ : une personne connectée ne la voit jamais en flash) ; avec une
+  // session elle est retirée, sans session elle se montre (R-T4-4).
   let provider = providerFrom(ctx.settings);
-  const lierAssistant = async () => { provider = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) }); aiBtn.disabled = !provider.configured; };
+  const connexion = carteConnexion(() => demarrerConnexion(ctx.sync?.auth));
+  connexion.hidden = true;
+  const lierAssistant = async () => {
+    provider = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) });
+    aiBtn.disabled = !provider.configured;
+    if (provider.configured) connexion.remove(); else connexion.hidden = false;
+  };
   const parse = () => parseIndexLines(ta.value);
   const draw = () => {
     const entries = parse();
@@ -222,7 +231,7 @@ export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId 
       ta.value = res.entries.map((e) => `${e.title} — ${e.printed_page ?? ''}`).join('\n');
       status.textContent = t('{n} entrée(s) proposée(s) par l’assistant — vérifie avant de créer.', { n: res.entries.length }) + (res.uncertain.length ? ` ${t('Incertain')} : ${res.uncertain.join('; ')}` : '');
       draw();
-    } catch (e) { status.textContent = `${t('Échec')} : ${e.message}`; }
+    } catch (e) { status.textContent = texteEchecAssistant(e); }
   } }, t('Lire avec l’assistant IA'));
   lierAssistant();
   const create = async () => {
@@ -249,7 +258,7 @@ export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId 
     ta.value = ''; draw(); refresh();
   };
   panel.append(el('p', { class: 'muted' }, t('Une ligne par recette : titre puis numéro de page. Un titre ne suffit pas à déduire des ingrédients : ces entrées deviennent des références « Repérée dans ton livre ».')),
-    aiNotice(ctx), ta, el('div', { class: 'row' }, aiBtn, el('button', { class: 'btn primary', onClick: create }, t('Créer les références'))), status, preview);
+    connexion, ta, el('div', { class: 'row' }, aiBtn, el('button', { class: 'btn primary', onClick: create }, t('Créer les références'))), status, preview);
   return panel;
 }
 
