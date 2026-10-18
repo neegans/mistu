@@ -24,6 +24,7 @@ import { runRechercheWebTests } from './recherche-web.js';
 import { runAssistantCompteTests } from './assistant-compte.js';
 import { runCreerIaTests } from './creer-ia.js';
 import { runPasserelleTests } from './passerelle.js';
+import { runImportCibleTests } from './import-cible.js';
 import { runThemeTests } from './theme.js';
 
 const results = [];
@@ -204,6 +205,10 @@ catch (error) { ok(false, `Suite créer avec l'IA interrompue : ${error?.message
 try { await runPasserelleTests({ eq, ok }); }
 catch (error) { ok(false, `Suite passerelle interrompue : ${error?.message || String(error)}`); }
 
+// --- Importer une recette repérée (lot A, tâche 1) : schéma imports (DB_VERSION 4), conditions de db.mutate, repo.transitionner, archives tolérantes, vocabulaire.
+try { await runImportCibleTests({ eq, ok }); }
+catch (error) { ok(false, `Suite import ciblé interrompue : ${error?.message || String(error)}`); }
+
 // --- Thème « magazine culinaire » : la feuille servie est lue (jetons, contrastes, inventaire) et mesurée (scène hors écran visible).
 try { await runThemeTests({ eq, ok }); }
 catch (error) { ok(false, `Suite thème interrompue : ${error?.message || String(error)}`); }
@@ -212,7 +217,7 @@ catch (error) { ok(false, `Suite thème interrompue : ${error?.message || String
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 3010, 'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 3071, 'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

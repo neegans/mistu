@@ -218,7 +218,7 @@ on('change', ({ store } = {}) => { if (!store || store === 'settings' || store =
 
 export async function getData(force = false) {
   if (cache && !force) return cache;
-  const names = ['recipes', 'recipe_versions', 'book_editions', 'books', 'dishes', 'dish_recipe_links', 'ingredients', 'recipe_translations', 'cook_history', 'unit_definitions', 'unit_conventions', 'library_activity', 'rediscovery_prefs', 'meals', 'meal_feedback', 'inventory', 'appliances', 'cook_sessions', 'source_pages', 'source_documents', 'shopping_lists', 'scan_sessions', 'substitutions'];
+  const names = ['recipes', 'recipe_versions', 'book_editions', 'books', 'dishes', 'dish_recipe_links', 'ingredients', 'recipe_translations', 'cook_history', 'unit_definitions', 'unit_conventions', 'library_activity', 'rediscovery_prefs', 'meals', 'meal_feedback', 'inventory', 'appliances', 'cook_sessions', 'source_pages', 'source_documents', 'shopping_lists', 'scan_sessions', 'substitutions', 'imports'];
   const rows = await Promise.all(names.map((n) => repo.all(n)));
   const d = Object.fromEntries(names.map((n, i) => [n, rows[i]]));
   loadUnits(d.unit_definitions, d.unit_conventions);

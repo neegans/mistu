@@ -9,6 +9,7 @@ import { lienSignet } from '../core/lien.js';
 import { logError } from '../core/log.js';
 import { navigate } from '../core/router.js';
 import * as repo from '../model/repo.js';
+import { assertVocabulaire } from '../domain/vocabulaire.js';
 import { pageHeader, field, select, libelleLivre } from './components.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
 
@@ -43,12 +44,14 @@ export function signetModel({ adresse = '', titre = '', editionId = '', cuisines
 // Une recette-référence et rien d'autre : pas de version, pas d'ingrédient, pas de durée — l'app n'a rien lu (I-E).
 // source_label garde l'hôte pour les listes, mais aucun affichage ne lui fait confiance : tout est recalculé (S7).
 export function fabriquerSignet(m, { newId, langue }) {
-  return {
+  const fiche = {
     id: newId('rc'), edition_id: m.editionId || null, original_title: m.titre, original_language: langue,
     availability: 'reference_only', verification_state: 'unverified', printed_page: null, section: null, type: null,
     tags: [], cuisines: [...m.cuisines], favorite: false, source_page_ids: [], current_version_id: null,
     ingredient_ids: [], source_url: m.href, source_label: m.hote,
   };
+  assertVocabulaire(fiche, 'recipes'); // D-12 : le fabricant vérifie le vocabulaire fermé avant toute écriture
+  return fiche;
 }
 
 // Deuxième porte de la borne S13 : une adresse hostile ou trop longue qui arriverait d'ailleurs que de l'écran

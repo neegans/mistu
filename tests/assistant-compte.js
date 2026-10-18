@@ -5,14 +5,14 @@ import { SYNC_STORES_0001 } from '../src/sync/tables.js';
 
 export async function runAssistantCompteTests({ eq, ok }) {
   // --- T1 : schéma (K-9, § 4.1)
-  eq([DB_VERSION, APP_VERSION], [3, '0.8.1'], 'T1 : DB_VERSION 3, APP_VERSION 0.8.1');
+  eq([DB_VERSION, APP_VERSION], [4, '0.9.0'], 'T1 (lot A, import ciblé) : DB_VERSION 4, APP_VERSION 0.9.0');
   eq(STORES.assistant_config, { keyPath: 'id', indexes: [], noDelete: true }, 'T1 : magasin assistant_config, clé id, noDelete');
-  eq([SYNC_STORES.length, SYNC_STORES.at(-1)], [26, 'assistant_config'], 'K-9 : 26 magasins synchronisés, assistant_config DERNIER');
+  eq([SYNC_STORES.length, SYNC_STORES.slice(-2)], [27, ['assistant_config', 'imports']], 'K-9 (lot A) : 27 magasins synchronisés, assistant_config puis imports DERNIER');
   eq(SYNC_STORES.slice(0, 25), [...SYNC_STORES_0001], 'K-9 : les 25 premiers = la liste figée de 0001, dans l’ordre');
   ok(!ARCHIVE_DATA_STORES.includes('assistant_config'), 'K-7 : hors archive');
   eq(SECRET_SETTING_KEYS, ['llm'], 'la liste des réglages secrets reste (filtre des vieilles archives)');
   const ordre = Object.keys(STORES);
-  ok(ordre.indexOf('assistant_config') === ordre.indexOf('files') + 1 && ordre.indexOf('settings') === ordre.indexOf('assistant_config') + 1, 'K-9 : déclaré après files, avant settings');
+  ok(ordre.indexOf('assistant_config') === ordre.indexOf('files') + 1 && ordre.indexOf('imports') === ordre.indexOf('assistant_config') + 1 && ordre.indexOf('settings') === ordre.indexOf('imports') + 1, 'K-9 : déclaré après files ; puis imports (lot A, dernier synchronisé), puis settings');
 
   // --- T1 : normalisation (§ 4.1, S14, F13)
   const A = await import('../src/domain/assistant-config.js');
@@ -385,20 +385,20 @@ export async function runAssistantCompteTests({ eq, ok }) {
     eq((await db.getAll('outbox')).length, 1, 'capture : une réception n’est pas recapturée');
     uninstallCapture(db);
   });
-  eq([tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false }).includes('assistant_config'), tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false, configSuitLeCompte: () => true }).includes('assistant_config'), tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true, configSuitLeCompte: () => true }).length], [false, true, 25], 'envoi initial : hors production exclue ; en production incluse (25 avec l’historique)');
+  eq([tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false }).includes('assistant_config'), tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false, configSuitLeCompte: () => true }).includes('assistant_config'), tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true, configSuitLeCompte: () => true }).length], [false, true, 26], 'envoi initial : hors production exclue ; en production incluse (26 avec l’historique et imports)');
   // L'envoi initial lui-même (pas seulement la liste des tables) : la ligne d'ici est mise en file en production, au nom
   // du compte, et la progression « n/total » compte la même liste que celle qui est parcourue.
   await withDatabase(async (db) => {
     await db.mutate({ puts: { assistant_config: [LIGNE('sk-factice-envoi')] }, origin: 'device' });
     const prog = [];
     const r = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true, surProgression: (p) => prog.push(p) });
-    eq([r.tables.length, r.tables.at(-1), prog.every((p) => p.total === 24), (await db.getAll('outbox')).map((e) => [e.store, e.op, e.user_id])], [24, 'assistant_config', true, [['assistant_config', 'put', 'u1']]], 'envoi initial : en production, assistant_config est parcourue en dernier, mise en file au nom du compte, progression sur 24');
+    eq([r.tables.length, r.tables.slice(-2), prog.every((p) => p.total === 25), (await db.getAll('outbox')).map((e) => [e.store, e.op, e.user_id])], [25, ['assistant_config', 'imports'], true, [['assistant_config', 'put', 'u1']]], 'envoi initial : en production, 25 tables, assistant_config puis imports (dernière, lot A) sont parcourues, la ligne mise en file au nom du compte, progression sur 25');
   });
   await withDatabase(async (db) => {
     await db.mutate({ puts: { assistant_config: [LIGNE('sk-factice-envoi-dev')] }, origin: 'device' });
     const prog = [];
     const r = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false, surProgression: (p) => prog.push(p) });
-    eq([r.tables.includes('assistant_config'), prog.every((p) => p.total === 23), await db.count('outbox'), await db.get('sync_state', 'backfill:assistant_config')], [false, true, 0, undefined], 'envoi initial : hors production (défaut), rien en file, aucun marqueur posé, progression sur 23');
+    eq([r.tables.includes('assistant_config'), prog.every((p) => p.total === 24), await db.count('outbox'), await db.get('sync_state', 'backfill:assistant_config')], [false, true, 0, undefined], 'envoi initial : hors production (défaut), rien en file, aucun marqueur posé, progression sur 24 (imports comprise)');
   });
   // Réception : hors production la table n'est pas lue ; en production elle est lue EN DERNIER (K-9)
   const tf = creerTransportFactice({ serveur: true });
@@ -412,7 +412,7 @@ export async function runAssistantCompteTests({ eq, ok }) {
       eq([r0.recues, lues.includes('assistant_config'), await db.get('assistant_config', 'llm')], [0, false, undefined], 'réception : hors production, la table n’est ni lue ni écrite');
       lues.length = 0;
       const r1 = await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1', configSuitLeCompte: () => true, surProgression: (p) => lues.push(p.table) }).recevoir();
-      eq([r1.recues, lues.at(-1), await db.get('assistant_config', 'llm'), (await db.getAll('outbox')).length], [1, 'assistant_config', LIGNE('sk-factice-serveur'), 0], 'réception : en production, lue EN DERNIER (K-9), la ligne entière écrite telle quelle, rien en file (capture posée)');
+      eq([r1.recues, lues.slice(-2), await db.get('assistant_config', 'llm'), (await db.getAll('outbox')).length], [1, ['assistant_config', 'imports'], LIGNE('sk-factice-serveur'), 0], 'réception : en production, assistant_config lue après les 25 de 0001 puis imports EN DERNIER (K-9, lot A), la ligne entière écrite telle quelle, rien en file (capture posée)');
     } finally { uninstallCapture(db); }
   });
   // Le moteur porte le prédicat jusqu'à l'envoi initial ET à la réception (R-CPT-1 : faux par défaut). Sans ce

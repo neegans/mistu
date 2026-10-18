@@ -2,7 +2,7 @@
 // fichiers sources avec empreinte SHA-256. Validation en mémoire avant toute écriture ; réimport idempotent (upsert par identifiant).
 import { createZip, readZip, textOf } from '../core/zip.js';
 import { sha256Hex } from '../core/hash.js';
-import { ARCHIVE_FORMAT, ARCHIVE_FORMAT_VERSION, SUPPORTED_ARCHIVE_VERSIONS, ARCHIVE_DATA_STORES, SECRET_SETTING_KEYS, RELATIONS, STORES, APP_VERSION, SYNC_INTERNAL_STORES, SYNC_STORES } from '../model/schema.js';
+import { ARCHIVE_FORMAT, ARCHIVE_FORMAT_VERSION, SUPPORTED_ARCHIVE_VERSIONS, ARCHIVE_DATA_STORES, SECRET_SETTING_KEYS, RELATIONS, STORES, APP_VERSION, SYNC_INTERNAL_STORES, SYNC_STORES, MAGASINS_AJOUTES_APRES_V1 } from '../model/schema.js';
 import { nettoyerChaines } from '../sync/lots.js';
 import { syncNow } from '../sync/clock.js';
 
@@ -32,6 +32,9 @@ function validateRows(stores) {
     if (!DATA_STORES.includes(name)) errors.push('Magasin inattendu : ' + name);
   }
   for (const name of DATA_STORES) {
+    // C1 (spec import-cible § 3.7) : une archive faite avant qu'un magasin existe ne le porte pas ; absent, il vaut [] — présent, il
+    // doit être un tableau comme les autres.
+    if (!own(stores, name) && MAGASINS_AJOUTES_APRES_V1.includes(name)) continue;
     if (!own(stores, name) || !Array.isArray(stores[name])) {
       errors.push('Magasin absent ou invalide : ' + name);
       continue;
@@ -99,8 +102,10 @@ export function checkRelations(stores, fileHashes) {
 export async function createArchive(db, { deviceName = '' } = {}) {
   // Les magasins internes (spec § 5.1) n'existent pas forcément sur une base plus ancienne : lire ceux de la base, pas du schéma courant.
   const snapshot = await db.getSnapshot(Object.keys(db.stores));
+  // Une base plus ancienne (ouverte avec un STORES d'avant) n'a pas forcément un magasin ajouté après le format 1 : il vaut [] (C1).
+  const lignes = (name) => snapshot[name] ?? (MAGASINS_AJOUTES_APRES_V1.includes(name) ? [] : snapshot[name]);
   const stores = Object.fromEntries(DATA_STORES.map((name) => [
-    name, JSON.parse(JSON.stringify(name === 'settings' ? publicSettings(snapshot[name]) : snapshot[name])),
+    name, JSON.parse(JSON.stringify(name === 'settings' ? publicSettings(lignes(name)) : lignes(name))),
   ]));
   const errors = validateRows(stores);
   // Une incohérence déjà présente ne doit pas empêcher de conserver une copie.
@@ -225,9 +230,10 @@ function requireInspection(inspection, mode) {
   if (errors.length) throw new Error('Archive non validée : ' + errors.slice(0, 10).join(' · '));
 }
 
+// C1 (spec import-cible § 3.7) : un magasin ajouté après le format 1 et absent de l'archive vaut [] — en remplacement, il est donc vidé.
 function restoredStores(inspection) {
   return Object.fromEntries(DATA_STORES.map((name) => [name,
-    name === 'settings' ? publicSettings(inspection.payload.stores[name]) : inspection.payload.stores[name],
+    name === 'settings' ? publicSettings(inspection.payload.stores[name]) : (inspection.payload.stores[name] ?? []),
   ]));
 }
 

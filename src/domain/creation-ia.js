@@ -9,6 +9,7 @@ import { parseIngredientLine, parseStepsBlock } from './lines.js';
 import { formatNumber, parseQuantity } from './quantity.js';
 import { DIET_TAGS, RECIPE_TYPES } from '../model/schema.js';
 import { getConvention } from './units.js';
+import { assertVocabulaire } from './vocabulaire.js';
 
 export const LIMITES_CREATION = { demande: 500, changement: 500, titre: 120, description: 400, portions: [1, 12], minutes: [5, 240], ingredients: [1, 40], nom: 100, unite: 30, quantite: [0.05, 10000], etapes: [2, 20], etape: 500, conseils: [0, 6], conseil: 250, notes: [0, 8], note: 250, tentativeMs: 135000, corps: 1024 * 1024, maxTokens: 16000 };
 export const CLES_REFUSEES = ['source', 'url', 'href', 'link', 'author', 'chef', 'image', 'photo', 'citation'];
@@ -233,6 +234,7 @@ export function fabriquerRecetteIA({ recette, demande, filtres, langue = 'fr', m
   };
   if (parente) return { recipe: null, version };
   const recipe = { id: recipeId, origine: 'ia', edition_id: null, original_title: recette.title, original_language: langue, type: filtres?.type || null, cuisines: [], tags: [], favorite: false, source_page_ids: [], ingredient_ids: [...new Set(ingredients.map((l) => l.ingredient_id).filter(Boolean))], source_label: ETIQUETTE_SOURCE, unit_convention_id: convention?.id || 'metric_ca', availability: 'available', verification_state: 'to_verify', current_version_id: version.id };
+  assertVocabulaire(recipe, 'recipes'); // D-12 : le fabricant vérifie le vocabulaire fermé avant toute écriture
   return { recipe, version };
 }
 

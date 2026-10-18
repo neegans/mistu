@@ -2,8 +2,8 @@
 // Chaque magasin correspond à une entité ; les libellés FR/EN des plats et ingrédients sont embarqués dans leur document.
 
 export const DB_NAME = 'cuisine-os';
-export const DB_VERSION = 3;
-export const APP_VERSION = '0.8.1';
+export const DB_VERSION = 4;
+export const APP_VERSION = '0.9.0';
 
 export const ARCHIVE_FORMAT = 'cuisine-os-archive';
 export const ARCHIVE_FORMAT_VERSION = 1;
@@ -39,6 +39,10 @@ export const STORES = {
   // 2026-10-17-assistant-par-le-compte § 4). noDelete : jamais de suppression d'origine locale (K-6, lue par db.mutate).
   // (capture, envoi initial et réception le filtrent par le prédicat injecté configSuitLeCompte, faux par défaut : R-CPT-1)
   assistant_config:    { keyPath: 'id', indexes: [], noDelete: true },
+  // Journal des imports (lot A « Importer une recette repérée », spec import-cible § 3.1) : DERNIER magasin synchronisé, déclaré après
+  // assistant_config et avant settings pour garder l'ordre de réception (K-9). recipe_id et page_ids[] sont des pointeurs souples
+  // (hors RELATIONS, comme cover_sha256) : une recette supprimée ou une page retirée ne bloquent pas une archive.
+  imports:             { keyPath: 'id', indexes: [['edition_id', 'edition_id'], ['recipe_id', 'recipe_id'], ['status', 'status']] },
   settings:            { keyPath: 'key', indexes: [] },
   // Magasins internes de la synchronisation (spec § 5.1) — jamais archivés.
   outbox:              { keyPath: 'seq', autoIncrement: true, indexes: [['store_id', ['store', 'id']]] },
@@ -53,6 +57,10 @@ export const SYNC_INTERNAL_STORES = ['outbox', 'sync_state', 'sync_conflicts'];
 export const ARCHIVE_DATA_STORES = Object.keys(STORES).filter((s) => s !== 'files' && s !== 'settings' && s !== 'assistant_config' && !SYNC_INTERNAL_STORES.includes(s));
 // Réglages exclus de la sauvegarde : secrets d'accès (spec §31.1).
 export const SECRET_SETTING_KEYS = ['llm'];
+// Magasins ajoutés APRÈS le format d'archive 1 (spec import-cible § 3.7, C1) : une archive plus ancienne ne les porte pas. À l'inspection
+// et à la restauration, un magasin de cette liste absent de l'archive vaut [] ; décomptes et empreintes ne l'exigent pas. Un client plus
+// ancien qui lit une archive plus récente la refuse déjà (« Description de magasin absente ou inconnue »).
+export const MAGASINS_AJOUTES_APRES_V1 = ['imports'];
 
 // Magasins miroirs d'une table serveur (spec § 3.1) : tout sauf les réglages et les internes.
 export const SYNC_STORES = Object.keys(STORES).filter((s) => s !== 'settings' && !SYNC_INTERNAL_STORES.includes(s));
@@ -128,6 +136,10 @@ export const RELATIONS = [
   ['rediscovery_prefs', 'edition_id', 'book_editions'],
   ['timer_launches', 'cook_session_id', 'cook_sessions'],
   ['timer_launches', 'recipe_version_id', 'recipe_versions'],
+
+  // Journal des imports (spec import-cible § 3.1) : recipe_id et page_ids[] sont VOLONTAIREMENT absents (pointeurs souples).
+  ['imports', 'edition_id', 'book_editions'],
+  ['imports', 'scan_session_id', 'scan_sessions'],
 ];
 
 // Vocabulaire fermé des états (libellés visibles dans src/i18n).
@@ -135,6 +147,8 @@ export const AVAILABILITY = ['reference_only', 'partial', 'available'];
 export const VERIFICATION = ['unverified', 'to_verify', 'verified'];
 export const VERSION_KIND = ['extraction', 'correction', 'adaptation', 'translation', 'synthesis'];
 export const VERSION_STATUS = ['proposed', 'tested'];
+// États du journal des imports (spec import-cible § 3.1) ; les transitions permises vivent dans src/domain/import-cible.js (tâche 3).
+export const STATUTS_IMPORT = ['a_lancer', 'en_cours', 'a_verifier', 'enregistre', 'echec', 'ignore'];
 export const LINK_STATE = ['proposed', 'confirmed', 'refused'];
 export const RECIPE_TYPES = ['plat_principal', 'entree', 'salade', 'soupe', 'legumes', 'feculent', 'sauce', 'dessert', 'boulangerie', 'boisson', 'autre'];
 export const MEAL_ROLES = ['plat_principal', 'entree', 'accompagnement', 'dessert', 'autre'];

@@ -524,8 +524,8 @@ export async function runSyncL3Tests({ eq, ok }) {
   // Assistant par le compte (K-3, R-CPT-1) : `assistant_config` est dans SYNC_STORES mais n'est candidate que sur un
   // appareil de production (`configSuitLeCompte`, faux par défaut) : ces décomptes restent 23/24 sans lui ; les
   // 24/25 avec lui sont éprouvés dans tests/assistant-compte.js.
-  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false }).length, 23, 'envoi initial : 23 tables sans l’historique ni les fichiers (R-L3-22), ni assistant_config (hors production par défaut)');
-  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true }).length, 24, 'envoi initial : 24 tables avec l’historique');
+  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false }).length, 24, 'envoi initial : 24 tables (imports comprise, lot A) sans l’historique ni les fichiers (R-L3-22), ni assistant_config (hors production par défaut)');
+  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true }).length, 25, 'envoi initial : 25 tables avec l’historique');
   eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true }).includes('files'), false, 'R-L3-22 : « files » n’est jamais de l’envoi initial en L3');
   eq(tablesAEnvoyer({ marqueurs: { 'backfill:books': 'fait' }, isActivitySynced: () => false }).includes('books'), false, 'envoi initial : une table marquée « fait » ne repart pas');
   await withRepo(async (repo, db) => {
@@ -534,7 +534,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     eq(await db.count('outbox'), 0, 'envoi initial : rien en file avant');
     const progression = [];
     const r = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false, surProgression: (p) => progression.push(p), tailleMorceau: 1 });
-    eq(r.tables.length, 23, 'envoi initial : les 23 tables sont parcourues (ni l’historique, ni les fichiers, ni assistant_config hors production)');
+    eq(r.tables.length, 24, 'envoi initial : les 24 tables sont parcourues (imports comprise ; ni l’historique, ni les fichiers, ni assistant_config hors production)');
     const file = await db.getAll('outbox');
     const refs = (await db.count('ingredients')) + (await db.count('unit_definitions')) + (await db.count('unit_conventions')); // amorçage mesuré : ingredients, unit_definitions, unit_conventions
     eq(file.length, refs + 2, 'envoi initial : références amorcées + 2 livres en file (R-L3-22 : aucun fichier)');
@@ -542,7 +542,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(!file.some((e) => e.store === 'files'), 'R-L3-22 : aucune ligne files n’est mise en file par l’envoi initial, synchronisable ou non');
     eq(await db.get('sync_state', 'backfill:files'), undefined, 'R-L3-22 : le marqueur « backfill:files » n’est PAS posé — L4 trouvera la table entière à envoyer');
     eq((await db.get('sync_state', 'backfill:books'))?.value, 'fait', 'envoi initial : marqueur posé après la table');
-    ok(progression.some((p) => p.table === 'books' && p.n >= 1 && p.total === 23), 'envoi initial : progression « table n/23 »');
+    ok(progression.some((p) => p.table === 'books' && p.n >= 1 && p.total === 24), 'envoi initial : progression « table n/24 »');
     // Une table vide (aucune ligne) reçoit quand même son marqueur, sans aucune entrée en file pour elle.
     eq((await db.get('sync_state', 'backfill:dishes'))?.value, 'fait', 'envoi initial : une table vide est marquée « fait »');
     ok(!file.some((e) => e.store === 'dishes'), 'envoi initial : une table vide ne met jamais rien en file');
@@ -1864,7 +1864,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(liste.length > 30, 'SHELL lu : ' + liste.length + ' entrées à relire avant de conclure');
     eq(['./src/sync/transport.js', './src/sync/lots.js', './src/sync/reponses.js', './src/sync/push.js', './src/sync/pull.js', './src/sync/conflits.js', './src/sync/backfill.js', './src/sync/moteur.js']
       .filter((c) => !liste.includes(c)), [], 'SHELL : les modules d’envoi et de réception, désormais atteignables depuis app.js, sont servis hors connexion');
-    ok(/VERSION = 'cuisine-os-v0\.8\.1-\d+'/.test(source), 'sw.js : VERSION incrémentée (format cuisine-os-vMAJOR.MINOR.PATCH-N), l’ancien cache est purgé à l’activation');
+    ok(/VERSION = 'cuisine-os-v0\.9\.0-\d+'/.test(source), 'sw.js : VERSION incrémentée (format cuisine-os-vMAJOR.MINOR.PATCH-N), l’ancien cache est purgé à l’activation');
     // Le nom du cache et la version affichée dans Réglages doivent dire la MÊME chose : deux versions qui se
     // contredisent rendent impossible de savoir ce qui est servi (un cache « 0.2.0 » pour une app qui s'annonce
     // « 0.3.0 » est exactement le genre de doute qu'un marqueur de version existe pour lever). Le contrôle porte

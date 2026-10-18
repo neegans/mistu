@@ -36,3 +36,8 @@ export const keyOf = (store, record) => record[STORES[store].keyPath];
 // Les 25 magasins de la migration 0001, FIGÉS : 0001 est appliquée sur mitsu et doit rester identique octet pour octet
 // (spec assistant-par-le-compte § 6.1). Toute table neuve va dans une migration à ajout seul (0003, …).
 export const SYNC_STORES_0001 = Object.freeze(['books', 'book_editions', 'source_documents', 'source_pages', 'scan_sessions', 'dishes', 'dish_recipe_links', 'recipes', 'recipe_versions', 'recipe_translations', 'ingredients', 'unit_definitions', 'unit_conventions', 'substitutions', 'appliances', 'cook_history', 'cook_sessions', 'inventory', 'meals', 'meal_feedback', 'shopping_lists', 'library_activity', 'rediscovery_prefs', 'timer_launches', 'files']);
+
+// Les 26 magasins de la migration 0003, FIGÉS (lot A « import ciblé », spec § 3.5) : 0003 est appliquée sur mitsu (18 octobre 2026) et doit
+// rester identique octet pour octet — son empreinte SHA-256 est épinglée dans tools/generer-migrations.test.mjs. Toute table neuve va dans
+// une migration à ajout seul (0005, …), rendue pour les magasins de SYNC_STORES absents de cette liste.
+export const SYNC_STORES_0003 = Object.freeze(['books', 'book_editions', 'source_documents', 'source_pages', 'scan_sessions', 'dishes', 'dish_recipe_links', 'recipes', 'recipe_versions', 'recipe_translations', 'ingredients', 'unit_definitions', 'unit_conventions', 'substitutions', 'appliances', 'cook_history', 'cook_sessions', 'inventory', 'meals', 'meal_feedback', 'shopping_lists', 'library_activity', 'rediscovery_prefs', 'timer_launches', 'files', 'assistant_config']);

@@ -10,6 +10,7 @@ import { currentVersion } from '../domain/search.js';
 import { getConvention } from '../domain/units.js';
 import { providerFrom, extractRecipeFromImages, pagePourEnvoi } from '../domain/llm.js';
 import { RECIPE_TYPES } from '../model/schema.js';
+import { assertVocabulaire } from '../domain/vocabulaire.js';
 import { pageHeader, field, select, carteConnexion, texteEchecAssistant, section, pdfFrame, sessionAssistant } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
@@ -237,6 +238,7 @@ export async function renderRecipeEdit(params, query, ctx) {
       rec.ingredient_ids = [...new Set(parsedLines.map((l) => l.ingredient_id).filter(Boolean))];
     }
     const pageUpdates = pages.map((p) => ({ ...p, kind: 'recipe', printed_page: p.printed_page ?? n(f.printed_page) }));
+    assertVocabulaire(rec, 'recipes'); // D-12 : vocabulaire fermé vérifié avant l'écriture
     await repo.saveBatch({ recipes: [rec], recipe_versions: [version], source_pages: pageUpdates });
     sessionStorage.removeItem('cuisineos.pending_recipe');
     if (query.session) { const s = ctx.scan_sessions.find((x) => x.id === query.session); if (s) { s.recipe_ids = [...new Set([...(s.recipe_ids || []), recipeId])]; await repo.save('scan_sessions', s); } }

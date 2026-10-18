@@ -121,7 +121,8 @@ async function prepared(db) {
 
 // Recalcule CRC et SHA des JSON modifiés : les cas de validation ci-dessous
 // isolent les clés, décomptes et relations plutôt qu'une simple corruption ZIP.
-async function rewriteArchive(blob, edit) {
+// Exportée pour tests/import-cible.js (lot A, § 3.7) : archives construites au vol sans data/imports.json.
+export async function rewriteArchive(blob, edit) {
   const entries = new Map([...readZip(await blob.arrayBuffer())].map(([path, entry]) => [path, entry.data]));
   const manifest = JSON.parse(textOf({ data: entries.get('manifest.json') }));
   const rewriteRows = async (store, change) => {

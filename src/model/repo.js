@@ -261,16 +261,34 @@ export async function save(store, record) {
 
 // `origin` : 'local' par défaut (écriture de la personne, donc capturée) ; 'device' pour ce qui ne part jamais au
 // serveur (amorçage des références, rattrapages) — c'est la capture qui tranche, d'après l'origine (src/sync/outbox.js).
-export async function saveBatch(batch, { origin = 'local' } = {}) {
+// `conditions` (spec import-cible § 3.6) : le lot n'est écrit que si chaque fiche conditionnée porte un statut attendu, dans la même
+// transaction ; condition fausse → TransitionRefusee, rien d'écrit (c'est transitionner sans patch).
+export async function saveBatch(batch, { origin = 'local', conditions = null } = {}) {
   const now = syncNow();
   const stamped = {};
   for (const [store, rows] of Object.entries(batch)) {
     // R-L3-25 : nettoyé à l'écriture, comme save() — même raison, et un seul endroit qui en décide (`propre`).
     stamped[store] = rows.map((r) => ({ ...propre(store, r), created_at: r.created_at || now, updated_at: now }));
   }
-  await db.putBatch(stamped, { origin });
+  if (conditions) await db.mutate({ puts: stamped, origin, conditions });
+  else await db.putBatch(stamped, { origin });
   for (const store of Object.keys(stamped)) emit('change', { store });
   return stamped;
+}
+
+// Transition conditionnée (spec import-cible § 3.6, I-10) : la fiche `key` de `store` est lue, son statut vérifié parmi `attendus`,
+// le patch (objet, ou fonction du courant) fusionné, puis TOUT — la fiche, les puts, les deletes et la capture — est écrit dans UNE
+// transaction par db.mutate({ conditions }). Condition fausse : TransitionRefusee { store, key, statut }, rien d'écrit. Enveloppe de
+// repo : nettoyage des chaînes (R61 : un `resultat` ou une `reponse_brute` du modèle porte des caractères de contrôle), `updated_at =
+// syncNow()` sur chaque fiche écrite (created_at conservé), puis UN `change`. Tous les écrans passent par elle, jamais par db.mutate
+// (test statique : « transitionner( » n'existe que sous la forme repo.transitionner( hors de ce fichier).
+export async function transitionner(store, key, { attendus, patch = null, puts = {}, deletes = {}, origin = 'local' } = {}) {
+  const now = syncNow();
+  const stamped = {};
+  for (const [s, rows] of Object.entries(puts)) stamped[s] = rows.map((r) => ({ ...propre(s, r), created_at: r.created_at || now, updated_at: now }));
+  const modif = (courant) => ({ ...propre(store, typeof patch === 'function' ? patch(courant) : (patch || {})), updated_at: now });
+  await db.mutate({ puts: stamped, deletes, origin, conditions: { [store]: [{ key, attendus, patch: modif }] } });
+  emit('change', { store, id: key });
 }
 
 // La fiche est relue avant sa suppression : la capture a besoin de sa copie pour l'envoyer (spec § 5.1).

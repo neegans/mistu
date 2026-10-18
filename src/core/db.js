@@ -17,6 +17,78 @@ function done(tx) {
   });
 }
 
+// Refus nommé d'une écriture conditionnée (spec import-cible § 3.6, I-10) : le statut lu n'est pas parmi les attendus, ou la fiche
+// n'existe pas (statut indéfini). La transaction entière a été annulée : RIEN n'a été écrit, pas même les puts qui l'accompagnaient.
+export class TransitionRefusee extends Error {
+  constructor(store, key, statut) {
+    super(`Transition refusée : ${store}/${String(key)} au statut ${String(statut)}`);
+    this.name = 'TransitionRefusee';
+    this.store = store;
+    this.key = key;
+    this.statut = statut;
+  }
+}
+
+// Aplatit et vérifie la forme des conditions : { [store]: [{ key, attendus, patch? }] } → liste. `patch` est un objet ou une fonction
+// du courant ; absent, la fiche est seulement vérifiée (pas réécrite).
+function listeConditions(conditions) {
+  if (!conditions || typeof conditions !== 'object' || Array.isArray(conditions)) throw new TypeError('Les conditions doivent associer chaque magasin à un tableau');
+  const liste = [];
+  for (const [store, items] of Object.entries(conditions)) {
+    if (!Array.isArray(items)) throw new TypeError('Les conditions de ' + store + ' doivent être un tableau');
+    for (const c of items) {
+      if (!c || typeof c !== 'object' || c.key == null) throw new TypeError('Condition sans clé sur ' + store);
+      if (!Array.isArray(c.attendus)) throw new TypeError('Condition sans statuts attendus sur ' + store);
+      if (c.patch != null && typeof c.patch !== 'object' && typeof c.patch !== 'function') throw new TypeError('Le patch d’une condition est un objet ou une fonction (' + store + ')');
+      liste.push({ store, key: c.key, attendus: c.attendus, patch: c.patch ?? null });
+    }
+  }
+  return liste;
+}
+
+// Écriture conditionnée (spec import-cible § 3.6, I-10) : dans UNE transaction readwrite, chaque fiche conditionnée est lue (get), son
+// statut vérifié parmi `attendus`, la fiche fusionnée { ...courant, ...patch(courant) } ajoutée aux puts ; puis, DANS LE RAPPEL onsuccess
+// de la dernière lecture (aucun await : IndexedDB valide la transaction dès que la file est vide), onMutate est appelé de façon synchrone
+// (capture d'outbox) et tout est écrit. Une condition fausse → tx.abort() et TransitionRefusee, capturée dans la fermeture et relancée à
+// la place du rejet générique « Transaction annulée » de done() ; une exception du patch ou d'un put est relancée de même. La portée
+// inclut `outbox` seulement si la base la possède : la capture écrit là, et les bases de test TEST_STORES n'en ont pas.
+async function ecrireConditionne(db, { puts, deletes, clearStores, origin, payloads, liste }) {
+  const toClear = knownStoreNames(db.stores, clearStores);
+  const portee = knownStoreNames(db.stores, [...toClear, ...Object.keys(puts), ...Object.keys(deletes), ...liste.map((c) => c.store), ...(db.stores.outbox ? ['outbox'] : [])]);
+  const tx = await db.tx(portee, 'readwrite');
+  let refus = null;
+  const completion = runTransaction(tx, () => {
+    const lus = new Array(liste.length);
+    let restants = liste.length;
+    const ecrire = () => {
+      try {
+        const allPuts = { ...puts };
+        for (const [i, c] of liste.entries()) {
+          const courant = lus[i];
+          const statut = courant?.status;
+          if (courant == null || !c.attendus.includes(statut)) { refus = new TransitionRefusee(c.store, c.key, statut); tx.abort(); return; }
+          if (c.patch == null) continue; // vérification seule : la fiche n'est pas réécrite
+          const modif = typeof c.patch === 'function' ? c.patch(courant) : c.patch;
+          allPuts[c.store] = [...(allPuts[c.store] || []), { ...courant, ...modif }];
+        }
+        const extra = db.onMutate ? (db.onMutate({ puts: allPuts, deletes, clearStores, origin, payloads }) || {}) : {};
+        for (const [name, rows] of Object.entries(extra)) allPuts[name] = [...(allPuts[name] || []), ...rows];
+        for (const name of toClear) tx.objectStore(name).clear();
+        for (const [name, rows] of Object.entries(allPuts)) { const os = tx.objectStore(name); for (const row of rows) os.put(row); }
+        for (const [name, keys] of Object.entries(deletes)) { const os = tx.objectStore(name); for (const key of keys) os.delete(key); }
+      } catch (error) {
+        refus = error;
+        try { tx.abort(); } catch (_) { /* transaction déjà terminée */ }
+      }
+    };
+    for (const [i, c] of liste.entries()) {
+      const request = tx.objectStore(c.store).get(c.key);
+      request.onsuccess = () => { lus[i] = request.result; if (--restants === 0) ecrire(); };
+    }
+  });
+  try { await completion; } catch (error) { throw refus || error; }
+}
+
 function knownStoreNames(stores, names) {
   if (!Array.isArray(names)) throw new TypeError('La liste des magasins doit être un tableau');
   const unique = [...new Set(names)];
@@ -161,7 +233,9 @@ export class Database {
 
   // Porte unique d'écriture (spec § 5.1) : puts, deletes et vidages dans UNE transaction ; le crochet onMutate peut
   // ajouter des lignes (capture d'outbox) écrites dans la même transaction. origin : 'local' | 'remote' | 'device'.
-  async mutate({ puts = {}, deletes = {}, clearStores = [], origin = 'local', payloads = {} } = {}) {
+  // `conditions` (spec import-cible § 3.6) : { [store]: [{ key, attendus, patch }] } — la fiche est lue, son statut vérifié et le
+  // patch fusionné dans la MÊME transaction que tout le reste ; condition fausse → TransitionRefusee, rien d'écrit (ecrireConditionne).
+  async mutate({ puts = {}, deletes = {}, clearStores = [], origin = 'local', payloads = {}, conditions = {} } = {}) {
     for (const [name, rows] of Object.entries(puts)) if (!Array.isArray(rows)) throw new TypeError('Les données de ' + name + ' doivent être un tableau');
     for (const [name, keys] of Object.entries(deletes)) if (!Array.isArray(keys)) throw new TypeError('Les clés de ' + name + ' doivent être un tableau');
     // K-6 / S6 : un magasin `noDelete` (assistant_config) n'accepte aucune suppression d'origine locale ou device —
@@ -173,6 +247,8 @@ export class Database {
         throw new Error(`Suppression interdite sur ${name} (noDelete) : écrire une ligne vide à la place`);
       }
     }
+    const liste = listeConditions(conditions);
+    if (liste.length) return ecrireConditionne(this, { puts, deletes, clearStores, origin, payloads, liste });
     const extra = this.onMutate ? (this.onMutate({ puts, deletes, clearStores, origin, payloads }) || {}) : {};
     const allPuts = { ...puts };
     for (const [name, rows] of Object.entries(extra)) allPuts[name] = [...(allPuts[name] || []), ...rows];

@@ -7,8 +7,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { TABLES, SYNC_STORES_0001 } from '../src/sync/tables.js';
-import { SYNC_STORES } from '../src/model/schema.js';
+import { TABLES, SYNC_STORES_0001, SYNC_STORES_0003 } from '../src/sync/tables.js';
 import { ALLOWED_MIME } from '../src/sync/mime.js';
 
 // En-tête volontairement sans date : la sortie doit être déterministe (le test le vérifie, et --check sert de garde).
@@ -295,16 +294,18 @@ create or replace view private.storage_usage as
 -- par l'API les uuid des propriétaires et leur consommation.
 revoke all on private.storage_usage from anon, authenticated;
 `;
-  // 0003, à ajout seul (spec assistant-par-le-compte § 6.1) : les tables neuves (celles de SYNC_STORES absentes de la
-  // liste figée de 0001), leur révocation pour anon, puis les quatre fonctions recréées avec les 26 noms. Pas de
-  // cron.schedule ici : la tâche planifiée appelle purge_tombstones par son nom, la recréer ne la touche pas.
-  const nouvelles = SYNC_STORES.filter((s) => !SYNC_STORES_0001.includes(s));
-  const delta = ENTETE('0003_assistant_config.sql', 'docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md (rév. 2, § 6)') + `-- Migration À AJOUT SEUL : ${nouvelles.length} table(s) neuve(s) et les quatre fonctions recréées avec la liste des ${SYNC_STORES.length} magasins.
+  // 0003, à ajout seul (spec assistant-par-le-compte § 6.1), rendue depuis la liste FIGÉE SYNC_STORES_0003 (lot A import ciblé, § 3.5) :
+  // 0003 est appliquée sur mitsu, son texte ne doit plus bouger d'un octet quand SYNC_STORES grandit (empreinte épinglée dans le test).
+  // Les tables neuves (celles de SYNC_STORES_0003 absentes de la liste figée de 0001), leur révocation pour anon, puis les quatre
+  // fonctions recréées avec les 26 noms. Pas de cron.schedule ici : la tâche planifiée appelle purge_tombstones par son nom, la
+  // recréer ne la touche pas. Un 27e magasin (imports) va dans 0005, rendue pour les magasins de SYNC_STORES absents de SYNC_STORES_0003.
+  const nouvelles = SYNC_STORES_0003.filter((s) => !SYNC_STORES_0001.includes(s));
+  const delta = ENTETE('0003_assistant_config.sql', 'docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md (rév. 2, § 6)') + `-- Migration À AJOUT SEUL : ${nouvelles.length} table(s) neuve(s) et les quatre fonctions recréées avec la liste des ${SYNC_STORES_0003.length} magasins.
 -- À coller APRÈS 0001 et 0002, une seule fois. Les droits des fonctions sont rejoués (idempotents).
 
 ${nouvelles.map(table).join('\n')}-- S4 : la révocation générale pour anon, en 0001, n'a couvert que les tables d'alors ; chaque table neuve est révoquée ici.
 ${nouvelles.map((s) => `revoke all on public.${s} from anon;\n`).join('')}
-` + fonctions(SYNC_STORES);
+` + fonctions(SYNC_STORES_0003);
   return { tables, storage, delta };
 }
 

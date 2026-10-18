@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { renderMigrations } from './generer-migrations.mjs';
-import { SYNC_STORES_0001, TABLES } from '../src/sync/tables.js';
+import { SYNC_STORES_0001, SYNC_STORES_0003, TABLES } from '../src/sync/tables.js';
 import { SYNC_STORES } from '../src/model/schema.js';
 import { ALLOWED_MIME } from '../src/sync/mime.js';
 
@@ -199,8 +199,22 @@ test('0001 et 0002 : octet pour octet ceux appliques sur mitsu (empreintes du 17
   assert.equal(sha(sql), 'e90ff35ec7c031f63dfb903e6885103ed7e42202866f59359ce019d00b85ee51');
   assert.equal(sha(storage), '2e90d2b1beb7270601f83c7408b1a2a2be32c800772f14f454960b233a2d5944');
 });
+// Lot A (import ciblé), tâche 1 : 0003 est appliquée sur mitsu (18 octobre 2026). Sa liste de 26 magasins est FIGÉE dans
+// src/sync/tables.js (SYNC_STORES_0003) et 0003 est rendue depuis elle, plus depuis le SYNC_STORES vivant : un 27e magasin
+// (imports) ne change plus un octet de 0003 — l'empreinte le prouve, et la comparaison au fichier commité aussi.
+test('SYNC_STORES_0003 : 26 noms figes, les 25 de 0001 puis assistant_config, geles', () => {
+  assert.equal(SYNC_STORES_0003.length, 26);
+  assert.equal(SYNC_STORES_0003.at(-1), 'assistant_config');
+  assert.deepEqual(SYNC_STORES_0003.slice(0, 25), [...SYNC_STORES_0001]);
+  assert.ok(Object.isFrozen(SYNC_STORES_0003), 'gelee');
+});
+test('0003 : octet pour octet celle commitee et appliquee sur mitsu (empreinte du 18 octobre 2026), meme avec un 27e magasin dans SYNC_STORES', () => {
+  assert.equal(sha(delta), '37f9f80d62cf82457b177f35979892ce7deeaf2067567a506228e145ad8efd39');
+  assert.equal(delta, lire('supabase/migrations/0003_assistant_config.sql'), 'identique au fichier commite');
+  assert.ok(SYNC_STORES.length > SYNC_STORES_0003.length && SYNC_STORES.includes('imports'), 'le schema vivant a un magasin de plus (imports) : la liste figee tient quand meme');
+});
 test('0003 : une table neuve, revoke anon, quatre fonctions avec les 26 magasins', () => {
-  const nouvelles = SYNC_STORES.filter((s) => !SYNC_STORES_0001.includes(s));
+  const nouvelles = SYNC_STORES_0003.filter((s) => !SYNC_STORES_0001.includes(s));
   assert.deepEqual(nouvelles, ['assistant_config']);
   assert.equal((delta.match(/create table public\./g) || []).length, 1);
   assert.match(delta, /create table public\.assistant_config \(/);
@@ -210,7 +224,7 @@ test('0003 : une table neuve, revoke anon, quatre fonctions avec les 26 magasins
   assert.equal((delta.match(/create index /g) || []).length, 1, 'un seul index');
   assert.match(delta, /revoke all on public\.assistant_config from anon;/);
   assert.equal((delta.match(/revoke all on public\./g) || []).length, 1, 'un seul revoke de table');
-  const litteral26 = 'array[' + SYNC_STORES.map((s) => `'${s}'`).join(', ') + ']';
+  const litteral26 = 'array[' + SYNC_STORES_0003.map((s) => `'${s}'`).join(', ') + ']';
   assert.equal(delta.split(litteral26).length - 1, 4, 'sync_push, sync_purge, sync_purge_all, purge_tombstones');
   assert.match(delta, /"assistant_config":"id"/);
   assert.match(delta, /"assistant_config":\[\]/);
@@ -228,9 +242,9 @@ test('0003 : les quatre fonctions recreees sont celles de 0001, aux trois listes
   const enJson = (stores, champ) => JSON.stringify(Object.fromEntries(stores.map((s) => [s, TABLES[s][champ]]))).replace(/'/g, "''");
   const litteral = (stores) => 'array[' + stores.map((s) => `'${s}'`).join(', ') + ']';
   const ramene = delta.slice(debutDe(delta))
-    .split(litteral(SYNC_STORES)).join(litteral(SYNC_STORES_0001))
-    .split(enJson(SYNC_STORES, 'key')).join(enJson(SYNC_STORES_0001, 'key'))
-    .split(enJson(SYNC_STORES, 'required')).join(enJson(SYNC_STORES_0001, 'required'));
+    .split(litteral(SYNC_STORES_0003)).join(litteral(SYNC_STORES_0001))
+    .split(enJson(SYNC_STORES_0003, 'key')).join(enJson(SYNC_STORES_0001, 'key'))
+    .split(enJson(SYNC_STORES_0003, 'required')).join(enJson(SYNC_STORES_0001, 'required'));
   assert.equal(ramene, bloc0001);
   // Et 0003 ne touche a rien d'autre que sa table et ces quatre fonctions.
   assert.equal((delta.match(/create or replace function public\.(\w+)\(/g) || []).length, 4);

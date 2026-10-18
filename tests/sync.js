@@ -6,7 +6,7 @@ import { TABLES, keyOf } from '../src/sync/tables.js';
 export async function runSyncTests({ eq, ok }) {
   // --- Constantes et tables (spec § 3.1, § 7.1)
   eq(SYNC_INTERNAL_STORES, ['outbox', 'sync_state', 'sync_conflicts'], 'trois magasins internes');
-  eq(SYNC_STORES.length, 26, '26 magasins synchronisables');
+  eq(SYNC_STORES.length, 27, '27 magasins synchronisables (imports depuis le lot A)');
   ok(!SYNC_STORES.includes('settings') && SYNC_INTERNAL_STORES.every((s) => !SYNC_STORES.includes(s)), 'settings et internes exclus');
   eq(Object.keys(TABLES).sort(), [...SYNC_STORES].sort(), 'une table par magasin synchronisable');
   for (const store of SYNC_STORES) {
@@ -67,7 +67,7 @@ export async function runSyncTests({ eq, ok }) {
   // --- Schéma v2 et archive (spec § 5.1, I3)
   const schema = await import('../src/model/schema.js');
   const { createArchive, inspectArchive, applyArchive, verifyRestored } = await import('../src/domain/backup.js');
-  eq(schema.DB_VERSION, 3, 'DB_VERSION 3');
+  eq(schema.DB_VERSION, 4, 'DB_VERSION 4 (lot A : magasin imports)');
   eq(schema.STORES.outbox, { keyPath: 'seq', autoIncrement: true, indexes: [['store_id', ['store', 'id']]] }, 'outbox autoIncrement');
   ok(schema.STORES.sync_state.keyPath === 'key' && schema.STORES.sync_conflicts.keyPath === 'id', 'sync_state et sync_conflicts');
   ok(schema.SYNC_INTERNAL_STORES.every((s) => !schema.ARCHIVE_DATA_STORES.includes(s)), 'internes hors archive');
