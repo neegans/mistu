@@ -273,6 +273,16 @@ export async function runPasserelleTests({ eq, ok }) {
           [err('serveur'), GEN + ' Code : serveur'], [err('delai'), GEN + ' Code : delai'], [err('reseau'), GEN + ' Code : reseau'], [err('reponse_illisible'), GEN + ' Code : reponse_illisible'], [err('interne'), GEN + ' Code : interne'],
           [new TypeError('Cannot read properties of undefined'), GEN + ' Code : Cannot read properties of undefined'], [undefined, GEN + ' Code : inconnu'], [null, GEN + ' Code : inconnu'], [{ message: 7 }, GEN + ' Code : inconnu'],
         ]) eq(texteEchecAssistant(erreur), attendu, `texteEchecAssistant(${erreur === undefined || erreur === null ? String(erreur) : erreur.message}${erreur?.quota !== undefined ? ', quota ' + erreur.quota : ''}${erreur?.trop_lourd ? ', trop_lourd' : ''}) : « ${attendu} »`);
+        // P-10 : le « Code : {c} » ne porte qu'un mot de code BORNÉ — un message qui n'est pas une raison connue est coupé à 40 caractères,
+        // sans retour à la ligne ; un message vide ou fait d'espaces est « inconnu ».
+        const codeDe = (erreur) => texteEchecAssistant(erreur).slice(GEN.length + ' Code : '.length);
+        eq(codeDe(err('x'.repeat(200))), 'x'.repeat(40), 'texteEchecAssistant : un message de 200 caractères → 40 affichés');
+        eq(codeDe(err('x'.repeat(40))), 'x'.repeat(40), 'texteEchecAssistant : 40 caractères exactement → tels quels');
+        eq(codeDe(err('abcdefghij'.repeat(5) + 'é')), 'abcdefghij'.repeat(4), 'texteEchecAssistant : seuls les 40 premiers caractères du message');
+        eq(codeDe(err('Unexpected token\nsecond\r\nligne\tsuite ' + 'z'.repeat(80))), 'Unexpected token second ligne suite zzzzz'.slice(0, 40), 'texteEchecAssistant : aucun retour à la ligne dans le code (chaque suite d’espaces devient une espace)');
+        eq([codeDe(err('   ')), codeDe(err('\n\n')), codeDe(err(''))], ['inconnu', 'inconnu', 'inconnu'], 'texteEchecAssistant : un message vide ou fait d’espaces → inconnu');
+        eq(codeDe(err('😀'.repeat(60))), '😀'.repeat(40), 'texteEchecAssistant : 40 caractères, jamais une paire de substitution coupée en deux');
+        ok(!texteEchecAssistant(err('a\nb')).includes('\n'), 'texteEchecAssistant : aucun \\n dans le texte rendu');
       }
       // Les écrans d'extraction (import.js, recipe-edit.js) : le bouton de l'assistant s'allume quand la session est lue, jamais sur une clé locale
       // ni un réglage ; sans session, « Connecte-toi pour utiliser l’assistant. » et « Se connecter » apparaissent une fois la session lue

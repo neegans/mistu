@@ -143,7 +143,7 @@ begin
     v := 'AUCUNE ERREUR : la reservation a ete permise';
   exception when others then v := sqlstate || ' ' || sqlerrm;
   end;
-  insert into pg_temp.preuve values (2.04, 'authenticated : l appel de assistant_reserver est refuse', '42501 (permission denied)', v, v like '42501%');
+  insert into pg_temp.preuve values (2.04, 'authenticated : l appel de assistant_reserver est refuse', '42501 (permission denied)', v, v like '42501%' and (v like '%assistant_reserver%' or v like '%function%'));
 end $$;
 reset role;
 

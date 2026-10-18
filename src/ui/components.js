@@ -267,15 +267,18 @@ export function texteRefusAssistant(issue) {
 
 // Le texte d'un échec de l'extraction : PasserelleProvider.complete lève Error(raison d'issue) avec ses extras (`quota`, `trop_lourd`), le même
 // classement que les écrans de recherche et de création (echecDomaine) — le refus en clair avec son nombre, « Trop de demandes… » pour un 429
-// relayé, la phrase de connexion sans session ; toute raison technique (serveur, delai, reseau…) est le texte générique + « Code : {raison} »,
-// jamais le mot de code seul.
+// relayé, la phrase de connexion sans session ; toute raison technique (serveur, delai, reseau…) est le texte générique + « Code : {c} »,
+// jamais le mot de code seul. {c} est BORNÉ : une raison connue tient en un mot ; tout autre message (une exception du navigateur, du parseur…)
+// est coupé à 40 caractères (points de code), ses retours à la ligne et suites d'espaces ramenés à une espace, et un message vide est « inconnu ».
+const CODE_ASSISTANT_MAX = 40;
+const codeAssistant = (message) => Array.from(message.replace(/\s+/g, ' ').trim()).slice(0, CODE_ASSISTANT_MAX).join('') || 'inconnu';
 export function texteEchecAssistant(erreur) {
   const raison = typeof erreur?.message === 'string' ? erreur.message : '';
   if (raison === 'non_connecte') return t(TEXTE_CONNEXION);
   const refus = texteRefusAssistant({ raison, quota: erreur?.quota, trop_lourd: erreur?.trop_lourd });
   if (refus) return refus;
   if (raison === 'trop_de_demandes') return t('Trop de demandes pour l’instant. Réessaie dans une minute.');
-  return `${t('L’assistant n’a pas répondu. Réessaie.')} ${t('Code : {c}', { c: raison || 'inconnu' })}`;
+  return `${t('L’assistant n’a pas répondu. Réessaie.')} ${t('Code : {c}', { c: codeAssistant(raison) })}`;
 }
 // === fin Assistant
 

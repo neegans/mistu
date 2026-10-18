@@ -232,7 +232,8 @@ appelle la fonction. Aucun des gestes ci-dessous n'appelle Anthropic ni ne dépe
    compte et par jour UTC, 60) et `ASSISTANT_ORIGINES` (origines admises, séparées par des virgules). Posée,
    `ASSISTANT_ORIGINES` **REMPLACE la valeur par défaut** (`https://neegans.github.io`) : pour essayer depuis le Mac,
    lister les deux origines, séparées par une virgule (`https://neegans.github.io,http://localhost:8083`).
-   Ces trois valeurs sont relues à chaque requête : une valeur changée est prise au prochain appel.
+   Ces trois valeurs sont relues à chaque requête : une valeur changée est prise au prochain appel ; un isolat déjà chaud
+   peut garder l'ancienne valeur jusqu'à son recyclage (non prouvé).
 2. **Déployer la fonction.** Préalable, une seule fois : `supabase login` dans Terminal. Puis, depuis la racine du dépôt :
    ```
    supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt
@@ -243,7 +244,12 @@ appelle la fonction. Aucun des gestes ci-dessous n'appelle Anthropic ni ne dépe
 3. **Coller `0004`, puis sa preuve**, dans l'éditeur SQL sous `postgres`, comme à l'étape 8 bis : d'abord
    `migrations/0004_assistant_journal.sql` en entier (à ajout seul ; elle crée aussi la fonction
    `public.assistant_reserver`, la réservation atomique d'un appel, que seule la clé secrète du projet peut exécuter ;
-   attendu `Success. No rows returned`), puis
+   attendu `Success. No rows returned`), puis, **collée seule** dans l'éditeur, la ligne
+   ```sql
+   notify pgrst, 'reload schema';
+   ```
+   (PostgREST doit connaître `assistant_reserver` : sans elle, l'appel de la fonction répond `PGRST202` et tous les `POST`
+   valides rendent `502 serveur`), puis
    `proofs/0004_assistant_journal.sql` — **rien à remplacer, aucune adresse à ajouter** — en choisissant
    **« Run without RLS »**. Lire d'abord la ligne `999 BILAN` (`0 faux` = vert), puis consigner le tableau tel quel dans
    `RESULTATS-mitsu.md` (la preuve n'affiche aucune adresse). Tant que `0004` n'est pas collée, un `POST` valide

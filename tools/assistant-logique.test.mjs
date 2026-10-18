@@ -152,3 +152,27 @@ test('journal : garde-fous des champs (outil, statut, compteurs, durée, date)',
   assert.equal(ligneJournal({ ...base, maintenant: new Date('2026-10-18T23:59:59.999Z') }).jour, '2026-10-18', 'Date acceptée');
   assert.equal(ligneJournal({ ...base, maintenant: 'n importe quoi' }).jour, null, 'date invalide');
 });
+test('lireDemande : sans max_tokens, le defaut est min(4000, plafond) — jamais au-dessus du plafond de l appelant (P-2)', () => {
+  const sans = { corps: { messages: [{ role: 'user', content: 'x' }] } };
+  assert.equal(lire(sans, 'creation', { maxTokens: 1000 }).corps.max_tokens, 1000, 'plafond 1000 : defaut 1000, pas 4000');
+  assert.equal(lire(sans, 'creation', { maxTokens: 4000 }).corps.max_tokens, 4000);
+  assert.equal(lire(sans, 'creation', { maxTokens: 5000 }).corps.max_tokens, 4000, 'plafond 5000 : defaut 4000');
+  assert.equal(lire(sans, 'creation').corps.max_tokens, 4000, 'plafond du serveur 16000 : defaut 4000');
+  assert.equal(lire(sans, 'creation', { maxTokens: 'n' }).corps.max_tokens, 4000, 'plafond invalide = LIMITES.maxTokens : defaut 4000');
+  assert.equal(lire({ corps: { ...sans.corps, max_tokens: 1001 } }, 'creation', { maxTokens: 1000 }).statut, 422, 'un max_tokens explicite au-dessus du plafond reste refuse');
+});
+test('journal : jour null hors AAAA-MM-JJ — null, true, epoques extremes (P-1)', () => {
+  const base = { ownerId: 'u', outil: 'creation', statut: 200, usage: { input_tokens: 1, output_tokens: 1 }, dureeMs: 1, octets: 1, maintenant: '2026-10-18T15:13:01.000Z' };
+  const jour = (maintenant) => ligneJournal({ ...base, maintenant }).jour;
+  assert.equal(jour(null), null, 'new Date(null) est 1970 : pas une date de journal');
+  assert.equal(jour(true), null, 'new Date(true) est 1970 : idem');
+  assert.equal(jour(undefined), null);
+  assert.equal(jour(8.64e15), null, 'epoque extreme : +275760-09-13');
+  assert.equal(jour(-8.64e15), null, 'epoque extreme negative : -271821-04-20');
+  assert.equal(jour(new Date(NaN)), null, 'Date invalide');
+  assert.equal(jour({}), null);
+  assert.equal(jour('2026-10-18T15:13:01.000Z'), '2026-10-18', 'les cas existants restent');
+  assert.equal(jour(new Date('2026-10-18T23:59:59.999Z')), '2026-10-18');
+  assert.equal(jour(Date.UTC(2026, 9, 18, 23, 59, 59)), '2026-10-18', 'un nombre d epoque reste admis');
+  for (const v of [null, true, 8.64e15, -8.64e15, 'n importe quoi']) assert.equal(ligneJournal({ ...base, maintenant: v }).jour, null, String(v));
+});

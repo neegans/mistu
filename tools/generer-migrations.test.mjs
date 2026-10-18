@@ -565,6 +565,14 @@ test('0004 : une transaction a ajout seul, journal de compteurs sans contenu, RL
   assert.doesNotMatch(m, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i, 'aucune adresse');
   assert.ok(!m.includes('sk-'), 'aucune cle');
 });
+test('0004 (P-8) : le commentaire dit l hypothese READ COMMITTED juste au-dessus de la fonction', () => {
+  const m = lire('supabase/migrations/0004_assistant_journal.sql');
+  const fn = m.indexOf('create function public.assistant_reserver(');
+  assert.notEqual(fn, -1);
+  const avant = m.slice(0, fn).split('\n');
+  assert.equal(avant.at(-1), '', 'la fonction commence en debut de ligne');
+  assert.equal(avant.at(-2), "-- Le motif verrou-puis-comptage suppose READ COMMITTED (défaut de PostgREST) : en REPEATABLE READ l'instantané précéderait le verrou.");
+});
 test('0004 : hors du generateur — NOMS inchange, le dossier de migrations la contient', () => {
   assert.deepEqual(NOMS, ['0001_tables_et_regles.sql', '0002_stockage.sql', '0003_assistant_config.sql']);
   assert.ok(readFileSync(path.join(MIGRATIONS, '0004_assistant_journal.sql'), 'utf8').length > 0);
@@ -599,6 +607,11 @@ test('preuve 0004 : rollback final, BILAN, aucune adresse ni jeton, privileges e
   assert.ok(code.includes('security_invoker=true'), 'vue en security invoker');
   // Refus sous le role authenticated : lecture ET ecriture levent 42501 (attrapes), puis le role est remis.
   assert.ok(code.includes('insufficient_privilege') || code.includes('42501'), '42501 attendu');
+  // P-3 : 2.04 ne se contente pas d un 42501 quelconque (un refus de schema serait aussi un 42501) : le message doit NOMMER la fonction.
+  const v204 = code.slice(code.indexOf('(2.04,'), code.indexOf('end $$;', code.indexOf('(2.04,')));
+  assert.ok(v204.includes("v like '42501%' and (v like '%assistant_reserver%' or v like '%function%')"), '2.04 : 42501 ET message qui nomme la fonction');
+  assert.ok(!/(2\.04,[^;]*), v like '42501%'\);/.test(v204), '2.04 : plus de verdict sur le seul 42501');
+  assert.equal(l[l.length - 1], 'rollback;', 'rollback reste la derniere instruction');
   assert.ok(code.includes('select count(*) from public.assistant_journal') || code.includes('perform count(*) from public.assistant_journal'), 'lecture tentee');
   assert.match(code, /insert into public\.assistant_journal/, 'ecriture tentee ou de preuve');
   const posRole = (re) => [...code.matchAll(re)].map((m) => m.index);
@@ -661,7 +674,11 @@ test('index.ts : imports fermes, deno.json epingle, aucune cle ni journal de con
   assert.match(code, /try \{\s*return await traiter\(req, cors, origine\);\s*\} catch \{\s*return json\(502, corpsErreur\('serveur'\), cors\);/);
   // Fix 4 : les secrets sont lus par requete, pas au chargement du module.
   assert.doesNotMatch(code, /^const (ORIGINES|MODELE|QUOTA)\b/m);
-  assert.ok(code.includes("Number.isInteger(brut) && brut > 0 ? brut : LIMITES.quotaJour"));
+  assert.ok(code.includes("Number.isInteger(brut) && brut > 0 && brut <= INT4_MAX ? brut : LIMITES.quotaJour"), 'P-5 : quota borne a l int4');
+  assert.ok(code.includes('const INT4_MAX = 2147483647;'), 'P-5 : la borne est celle de l integer SQL (p_quota)');
+  // P-6 : un secret change est pris au prochain appel — un isolat deja chaud peut garder l ancienne valeur (non prouve).
+  assert.ok(src.includes("un isolat déjà chaud peut garder l'ancienne valeur jusqu'à son recyclage (non prouvé)"), 'P-6 : le commentaire ne promet plus « meme par un isolat deja chaud »');
+  assert.ok(!src.includes('même par un isolat déjà chaud'));
   // Fix 5 : la mise a jour ne pose que quatre champs.
   assert.ok(code.includes('update({ statut: l.statut, jetons_entree: l.jetons_entree, jetons_sortie: l.jetons_sortie, duree_ms: l.duree_ms })'));
   assert.doesNotMatch(code, /texte\.length/);
@@ -708,6 +725,13 @@ test('README : etape 10 (secrets, deploiement --no-verify-jwt, 0004 et sa preuve
   assert.doesNotMatch(etape, /Bearer <jeton>/, 'jamais le jeton en clair dans une commande');
   assert.ok(etape.includes('REMPLACE la valeur par défaut') && etape.includes('lister les deux origines'), 'ASSISTANT_ORIGINES remplace le defaut');
   assert.ok(etape.includes('assistant_reserver'), 'la reservation atomique est nommee');
+  // P-7 : apres 0004 et avant sa preuve, la ligne de rechargement du schema de PostgREST, collee seule, avec sa raison.
+  const notify = "notify pgrst, 'reload schema';";
+  assert.equal(etape.split(notify).length - 1, 1, 'P-7 : la ligne est donnee une fois');
+  assert.ok(etape.indexOf('migrations/0004_assistant_journal.sql') < etape.indexOf(notify) && etape.indexOf(notify) < etape.indexOf('proofs/0004_assistant_journal.sql'), 'P-7 : apres 0004, avant sa preuve');
+  assert.ok(etape.includes('PGRST202') && etape.includes('502') && /seule/.test(etape.slice(etape.indexOf(notify) - 200, etape.indexOf(notify) + 300)), 'P-7 : collee seule, raison dite (PGRST202, les POST rendent 502)');
+  // P-6 : un isolat deja chaud peut garder l ancienne valeur d un secret.
+  assert.ok(etape.replace(/\s+/g, ' ').includes("prise au prochain appel ; un isolat déjà chaud peut garder l'ancienne valeur jusqu'à son recyclage (non prouvé)"), 'P-6 : README (a la coupure de ligne pres)');
   // L'arbre du README nomme les nouveaux fichiers.
   for (const f of ['migrations/0004_assistant_journal.sql', 'proofs/0004_assistant_journal.sql', 'functions/assistant/']) assert.ok(r.slice(0, debut).includes(f), 'arbre : ' + f);
 });

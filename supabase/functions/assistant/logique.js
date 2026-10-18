@@ -57,7 +57,7 @@ export function lireDemande(texte, { outil, modele, maxTokens = LIMITES.maxToken
     out.messages.push({ role, content: blocs });
   }
   const mt = own(corps, 'max_tokens');
-  if (mt === undefined) out.max_tokens = 4000;
+  if (mt === undefined) out.max_tokens = Math.min(4000, plafond);
   else if (!Number.isInteger(mt)) return refus(400, 'forme');
   else if (mt < 1 || mt > plafond) return refus(422, 'bornes');
   else out.max_tokens = mt;
@@ -92,7 +92,12 @@ export function statutRelaye(s) {
   return 502;   // 401 (clé serveur refusée), 404, 5xx, redirections : panne de la passerelle, jamais « ta clé »
 }
 const entierOuNul = (v) => (Number.isSafeInteger(v) && v >= 0 ? v : null);
-const jourDe = (maintenant) => { try { return new Date(maintenant).toISOString().slice(0, 10); } catch { return null; } };
+// Une chaîne, une Date ou un nombre d'époque seulement (new Date(null) et new Date(true) rendraient 1970 sans erreur), et le résultat doit être AAAA-MM-JJ
+// (une époque extrême rend « +275760-09 » ou « -271821-04 »). Sinon null.
+const jourDe = (maintenant) => {
+  if (typeof maintenant !== 'string' && typeof maintenant !== 'number' && !(maintenant instanceof Date)) return null;
+  try { const j = new Date(maintenant).toISOString().slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(j) ? j : null; } catch { return null; }
+};
 export function ligneJournal({ ownerId, outil, statut, usage, dureeMs, octets, maintenant }) {
   const duree = Number(dureeMs);
   return { owner_id: ownerId, outil: OUTILS.includes(outil) ? outil : null, statut: Number.isInteger(statut) ? statut : null, jetons_entree: entierOuNul(own(usage, 'input_tokens')), jetons_sortie: entierOuNul(own(usage, 'output_tokens')), duree_ms: Number.isFinite(duree) ? Math.max(0, Math.floor(duree)) : 0, octets: entierOuNul(octets), jour: jourDe(maintenant) };

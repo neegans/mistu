@@ -9,10 +9,12 @@ const lireDemande = lireDemandeJs as (texte: string, o: { outil: string; modele:
 
 const ANTHROPIC = 'https://api.anthropic.com/v1/messages';
 const env = (k: string) => Deno.env.get(k) ?? '';
-// Les secrets sont lus À CHAQUE REQUÊTE (Deno.env.get est bon marché) : un secret changé est pris au prochain appel, même par un isolat déjà chaud.
+// Les secrets sont lus À CHAQUE REQUÊTE (Deno.env.get est bon marché) : un secret changé est pris au prochain appel ; un isolat déjà chaud peut garder l'ancienne valeur jusqu'à son recyclage (non prouvé).
 const origines = () => (env('ASSISTANT_ORIGINES') || 'https://neegans.github.io').split(',').map((s) => s.trim()).filter(Boolean);
 const modele = () => env('ASSISTANT_MODELE') || 'claude-sonnet-5-5';
-const quotaJour = (): number => { const brut = Number.parseInt(env('ASSISTANT_QUOTA_JOUR') || '', 10); return Number.isInteger(brut) && brut > 0 ? brut : LIMITES.quotaJour; };
+// p_quota est un `integer` SQL (int4) : au-delà de 2147483647 la réservation échouerait en 502 pour tous ; on retombe sur le défaut.
+const INT4_MAX = 2147483647;
+const quotaJour = (): number => { const brut = Number.parseInt(env('ASSISTANT_QUOTA_JOUR') || '', 10); return Number.isInteger(brut) && brut > 0 && brut <= INT4_MAX ? brut : LIMITES.quotaJour; };
 const cleSecrete = (): string => {
   try { const j = JSON.parse(env('SUPABASE_SECRET_KEYS') || '[]'); const k = Array.isArray(j) ? j.find((x: { api_key?: string }) => typeof x?.api_key === 'string')?.api_key : null; if (k) return k; } catch { /* legacy */ }
   return env('SUPABASE_SERVICE_ROLE_KEY');
@@ -24,10 +26,10 @@ const clePublique = (): string => {
 const json = (statut: number, corps: unknown, entetes: Record<string, string>) => new Response(JSON.stringify(corps), { status: statut, headers: { ...entetes, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 
 // Lit un corps (la demande du client, ou la réponse d'Anthropic) en refusant d'en lire plus que `max` OCTETS : `content-length`
-// déclaré trop grand → null sans rien lire ; sinon lecture par morceaux, annulée dès que le total dépasse. null = trop lourd.
+// déclaré trop grand → corps annulé (connexion libérée), null sans rien lire ; sinon lecture par morceaux, annulée dès que le total dépasse. null = trop lourd.
 async function lireCorpsBorne(source: Request | Response, max: number): Promise<Uint8Array | null> {
   const declare = source.headers.get('content-length');
-  if (declare !== null && /^\d+$/.test(declare.trim()) && Number(declare) > max) return null;
+  if (declare !== null && /^\d+$/.test(declare.trim()) && Number(declare) > max) { void source.body?.cancel().catch(() => {}); return null; }
   const reader = source.body?.getReader();
   if (!reader) return new Uint8Array(0);
   const morceaux: Uint8Array[] = []; let total = 0;

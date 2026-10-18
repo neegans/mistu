@@ -24,6 +24,7 @@ create view public.assistant_usage_jour with (security_invoker = true) as
 revoke all on public.assistant_usage_jour from anon, authenticated;
 -- Réservation atomique d'un appel : verrou consultatif par compte, comptage du jour UTC, insertion de la ligne « en vol » (statut 0).
 -- security INVOKER : seule la clé secrète (service_role) a les droits sur la table ; un EXECUTE qui fuirait tomberait en 42501.
+-- Le motif verrou-puis-comptage suppose READ COMMITTED (défaut de PostgREST) : en REPEATABLE READ l'instantané précéderait le verrou.
 create function public.assistant_reserver(p_owner uuid, p_outil text, p_octets integer, p_quota integer)
 returns bigint language plpgsql security invoker set search_path = '' as $$
 declare v_jour date := (now() at time zone 'utc')::date; v_n bigint; v_id bigint;

@@ -361,3 +361,45 @@ test('n. corps invalide : JSON illisible, outil inconnu, forme -> 400 requete, b
   }
   assert.equal(reserves().length, 0); assert.equal(appelsFetch.length, 0);
 });
+
+test('o. quota du jour : borne a l int4 (2147483647) ; au-dela, le defaut LIMITES.quotaJour (P-5)', async () => {
+  remise();
+  const quota = async (valeur) => { ENV.ASSISTANT_QUOTA_JOUR = valeur; return (await lire(await handler(requete('GET')))).quotaJour; };
+  assert.equal(await quota('99999999999'), LIMITES.quotaJour, 'au-dela de l int4 : 60, jamais 99999999999');
+  assert.equal(LIMITES.quotaJour, 60);
+  assert.equal(await quota('2147483648'), 60, 'int4 + 1');
+  assert.equal(await quota('2147483647'), 2147483647, 'exactement l int4 : accepte');
+  assert.equal(await quota('12'), 12, 'une valeur ordinaire reste prise');
+  // Le meme nombre part a la reservation (p_quota est un integer cote SQL) : un hors-borne n y arrive jamais.
+  ENV.ASSISTANT_QUOTA_JOUR = '99999999999';
+  await handler(requete('POST'));
+  assert.equal(reserves()[0].args.p_quota, 60);
+});
+
+test('p. content-length declare trop grand : le corps est ANNULE avant le 413, sans rien lire (P-4)', async () => {
+  remise();
+  // La demande du client : flux avec un content-length de 9 Mo declare ; le flux n est pas consomme, il est annule.
+  let tires = 0; let annule = false;
+  const flux = new ReadableStream({
+    pull(c) { tires += 1; c.enqueue(new Uint8Array(1024)); },
+    cancel() { annule = true; },
+  });
+  const r = await handler(requete('POST', { body: flux, entetes: { 'content-length': '9000000' } }));
+  assert.equal(r.status, 413); assert.deepEqual(await lire(r), { erreur: 'trop_lourd' });
+  await new Promise((fini) => setImmediate(fini));
+  assert.ok(annule, 'le flux de la demande est annule des que le content-length depasse');
+  assert.ok(tires <= 1, 'rien n a ete lu au-dela de l amorce du flux : ' + tires);
+  assert.equal(reserves().length, 0); assert.equal(appelsFetch.length, 0);
+  // La reponse d Anthropic : meme fonction, meme annulation (la connexion est liberee), 502 serveur.
+  let annuleReponse = false;
+  const fluxReponse = new ReadableStream({
+    pull(c) { c.enqueue(new Uint8Array(1024)); },
+    cancel() { annuleReponse = true; },
+  });
+  reponseFetch = async () => new Response(fluxReponse, { status: 200, headers: { 'content-length': String(LIMITES.reponse + 1) } });
+  const r2 = await handler(requete('POST'));
+  assert.equal(r2.status, 502); assert.deepEqual(await lire(r2), { erreur: 'serveur' });
+  await new Promise((fini) => setImmediate(fini));
+  assert.ok(annuleReponse, 'le flux de la reponse d Anthropic est annule');
+  assert.equal(appelsFetch.length, 1);
+});

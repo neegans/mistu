@@ -127,8 +127,9 @@ export async function appelerAssistant(outil, corps, { fetch, session, config, s
   return echanger({ methode: 'POST', corps: envoi, fetch, session, config, signal, tentativeMs, corpsMax, corpsErreurMax });
 }
 
-// GET → { statut, corps: { modele, quotaJour } | null, raison, quota } : l'état de l'assistant, sans appeler le fournisseur
-// (Réglages, sondes). Mêmes en-têtes, mêmes options réseau ; le corps rendu est reconstruit, jamais recopié.
+// GET → { statut, corps: { modele, quotaJour } | null, raison, quota, ecrite } : l'état de l'assistant, sans appeler le fournisseur
+// (Réglages, sondes). Mêmes en-têtes, mêmes options réseau ; le corps rendu est reconstruit, jamais recopié. `ecrite` comme pour
+// appelerAssistant : vrai quand le corps d'erreur portait un champ `erreur` de la passerelle (toujours faux sur un 200).
 export async function etatAssistant({ fetch, session, config, signal, tentativeMs } = {}) {
   const r = await echanger({ methode: 'GET', fetch, session, config, signal, tentativeMs: tentativeMs ?? LIMITES_PASSERELLE.etatMs, corpsMax: LIMITES_PASSERELLE.corpsEtat });
   if (r.raison) return r;
