@@ -8,7 +8,7 @@ import { EN } from '../src/i18n/en.js';
 export async function runCreerIaTests({ eq, ok }) {
   const C = await import('../src/domain/creation-ia.js');
   buildIngredientIndex(INGREDIENTS); // l'index des lignes est global (lines.js:6) : la suite le pose elle-même (F10)
-  eq(APP_VERSION, '0.8.0', 'T1 : APP_VERSION 0.8.0');
+  eq(APP_VERSION, '0.8.1', 'T1 : APP_VERSION 0.8.1');
 
   // --- estCreationIA (C-2, F6)
   const synth = { kind: 'synthesis', provenance: { generated_by: 'ai', creation: { demande: 'x' } } };
@@ -1064,7 +1064,7 @@ export async function runCreerIaTests({ eq, ok }) {
     const choisir = (root, premiere, valeur) => { const l = liste(root, premiere); l.value = valeur; l.dispatchEvent(new Event('change')); };
     const base = { raison: null, liens: [], autres: [], repli: false, recherches: null, modele: 'm' };
     const rien = { ...base, etat: 'rien' };
-    const trouve = { ...base, etat: 'trouve', liens: [{ href: 'https://a.test/r', hote: 'a.test', titre: 'Saumon au fenouil', date: null, pourquoi: 'Fenouil et saumon.' }], recherches: 1 };
+    const trouve = { ...base, etat: 'trouve', liens: [{ href: 'https://a.test/r', hote: 'a.test', titre: 'Saumon au fenouil', date: null, presentation: 'Fenouil et saumon.', temps_min: null, difficulte: null, ingredients: null }], recherches: 1 };
     // Ouvre l'écran Web sur une demande « saumon fenouil » + « Sans gluten » (choisi dans la liste), tape, résout l'issue donnée.
     const ouvrir = async (issue, { q = 'saumon fenouil', diets = ['sans_gluten'], type = '' } = {}) => {
       S.reinitialiserWeb();
@@ -1111,7 +1111,7 @@ export async function runCreerIaTests({ eq, ok }) {
       // (b) « trouvé » : après l'avertissement I-K  (la porte « recherche web désactivée » a disparu avec cette issue : la passerelle ne la distingue plus)
       {
         const root = await ouvrir(trouve);
-        const avertissement = [...root.querySelectorAll('.status')].find((n) => n.textContent === 'L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.');
+        const avertissement = [...root.querySelectorAll('.status')].find((n) => n.textContent === 'L’assistant présente les plats d’après les pages et ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.');
         eq(root.querySelectorAll('[data-role="creer-depuis-web"]').length, 1, 'porte Web : « trouvé » → un seul bouton');
         ok(!!avertissement && apres(avertissement, porte(root)), 'porte Web : « trouvé » → le bouton vient APRÈS l’avertissement I-K (qui reste)');
         eq(await cliquer(root), { navs: 1, adresse: '/recipes/creer?q=saumon+fenouil&diets=sans_gluten', appels: 0, enVol: false }, 'porte Web : « trouvé » → même adresse, aucun appel web');

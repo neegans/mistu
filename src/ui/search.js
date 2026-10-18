@@ -7,7 +7,7 @@ import { lienSignet } from '../core/lien.js';
 import { parseQuery, searchDocs, chipsFor } from '../domain/search.js';
 import { findAccompaniments } from '../domain/pairing.js';
 import { providerFrom } from '../domain/llm.js';
-import { chercherRecettesWeb, construireDemande, dateLisible } from '../domain/recherche-web.js';
+import { chercherRecettesWeb, construireDemande, dateLisible, DIFFICULTES } from '../domain/recherche-web.js';
 import { RECIPE_TYPES, DIET_TAGS } from '../model/schema.js';
 import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select, sessionAssistant, carteConnexion, texteRefusAssistant } from './components.js';
 import { addToMealFlow } from './meals.js';
@@ -37,6 +37,24 @@ const TEXTES_INDISPONIBLE = {
   pas_cherche: 'L’assistant n’a pas cherché sur le web. Réessaie.',
 };
 const SANS_REESSAI = ['refus', 'non_admis', 'quota'];
+// La ligne de repères d'une carte (présentation du serveur) : temps estimé, difficulté, nombre d'ingrédients — les parties
+// PRÉSENTES, jointes par « · », dans cet ordre ; '' s'il n'y en a aucune. Chaque partie est revalidée ici (l'issue vient de la
+// mémoire de l'écran) : une valeur illisible ne fait rien paraître.
+function reperes(lien) {
+  const parties = [];
+  const n = lien.temps_min;
+  if (Number.isInteger(n) && n >= 1) {
+    if (n < 60) parties.push(t('≈ {n} min', { n }));
+    else {
+      const h = Math.floor(n / 60); const m = n % 60;
+      parties.push(m === 0 ? t('≈ {h} h', { h }) : t('≈ {h} h {m}', { h, m: String(m).padStart(2, '0') }));
+    }
+  }
+  if (DIFFICULTES.includes(lien.difficulte)) parties.push({ facile: t('facile'), moyen: t('moyen'), exigeant: t('exigeant') }[lien.difficulte]);
+  const k = lien.ingredients;
+  if (Number.isInteger(k) && k >= 1) parties.push(k === 1 ? t('1 ingrédient') : t('{n} ingrédients', { n: k }));
+  return parties.join(' · ');
+}
 // R-WEB-10 (corrige R-WEB-9, amende § 5.4.1) : à la TAPE, un champ changé est relu ; ne survivent que les puces que les
 // LISTES « + type » / « + restriction » ont ajoutées = affichées MOINS ce que l'analyse de l'ancien texte avait donné
 // (régimes, et le type si le nouveau texte n'en dit pas). Une puce retirée à la main n'est plus affichée : elle ne revient
@@ -224,7 +242,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
       el('small', { class: 'muted', dataset: { role: 'aide-web' }, hidden: !demandeVide }, t('Écris d’abord ce que tu cherches.'))); // toujours là : la frappe la montre ou la cache
   }
   // § 5.5-5.6 : chaque issue a son écran ; les liens sont revalidés AU RENDU par lienSignet (I-H) ; l'avertissement
-  // I-K accompagne toujours les liens ; aucun texte de l'API n'est rendu hors « pourquoi » (borné en amont).
+  // I-K accompagne toujours les liens ; aucun texte de l'API n'est rendu hors la présentation du plat (bornée en amont).
   function renderIssue(issue, { demandeDiffere = false, demandePrete = true } = {}) {
     const reessayer = () => el('button', { class: 'btn', onClick: () => lancer({ enLigne: () => true }) }, t('Réessayer'));
     // R-WEB-7 : les issues sans « Réessayer » gardent une sortie — la même demande, relancée sans forcer enLigne (un compte
@@ -250,11 +268,16 @@ export async function renderSearch(params, query, ctx, deps = {}) {
       if (!l.ok) return null; // revalidé AU RENDU (I-H) : une adresse refusée ici n'a pas de carte
       const titre = lien.titre || l.hote;
       const date = dateLisible(lien.date, getUiLocale()); // lisible et mise en forme, sinon masquée (confort après preuve)
+      const presentation = typeof lien.presentation === 'string' && lien.presentation ? lien.presentation : null; // un NŒUD TEXTE, jamais du HTML
+      const ligneReperes = reperes(lien);
       return el('div', { class: 'card flat stack' },
         el('a', { class: 'btn', href: l.href, target: '_blank', rel: 'noopener noreferrer' }, titre),
         el('div', { class: 'muted', style: { fontSize: '.85rem' } }, date ? `${l.hote} · ${date}` : l.hote),
-        lien.pourquoi ? el('div', null, lien.pourquoi) : null,
-        el('button', { class: 'btn small', onClick: () => nav('/add/signet' + buildQuery({ adresse: l.href, titre })) }, t('Garder ce lien')));
+        presentation ? el('div', null, presentation) : null,
+        ligneReperes ? el('div', { class: 'muted', style: { fontSize: '.9rem' } }, ligneReperes) : null,
+        el('div', { class: 'row' },
+          el('a', { class: 'btn small', href: l.href, target: '_blank', rel: 'noopener noreferrer' }, t('Voir la recette')),
+          el('button', { class: 'btn small', onClick: () => nav('/add/signet' + buildQuery({ adresse: l.href, titre })) }, t('Garder ce lien'))));
     };
     const cartes = (Array.isArray(issue.liens) ? issue.liens : []).map(carte).filter(Boolean);
     const autres = (Array.isArray(issue.autres) ? issue.autres : []).map(carte).filter(Boolean); // K2 : repliées, jamais mêlées aux choix
@@ -269,7 +292,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
       demandeDiffere ? el('div', { class: 'status row between' }, el('span', null, t('La demande a changé depuis cette recherche.')), demandePrete ? chercherANouveau() : null) : null,
       ...cartes,
       autres.length ? el('details', null, el('summary', { class: 'btn' }, t('Autres pages trouvées ({n})', { n: autres.length })), ...autres) : null, // K2
-      el('div', { class: 'status' }, t('L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.')),
+      el('div', { class: 'status' }, t('L’assistant présente les plats d’après les pages et ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.')),
       creerDepuisWeb(),
       issue.recherches != null ? el('small', { class: 'muted' }, t('Recherches faites par l’assistant : {n}', { n: issue.recherches })) : null,
       issue.repli ? el('small', { class: 'muted' }, t('Liens tels que trouvés, sans tri de l’assistant.')) : null,

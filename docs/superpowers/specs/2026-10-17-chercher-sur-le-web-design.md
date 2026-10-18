@@ -678,3 +678,22 @@ Une ligne par écart entre cette spec et ce qui a été construit (tâches 1 à 
   l'assistant » (18 octobre, `docs/superpowers/specs/2026-10-18-creer-avec-l-ia-design.md` § 3.1, N-1) : sur « rien », sous les liens
   d'un `trouve` et sur `recherche_desactivee` ; il relit le champ (`relireChamp`, R-WEB-10) puis ouvre `#/recipes/creer` avec `q` et
   les puces affichées (`diets`, `type`, `max`) — aucun appel (le compteur de requêtes du test reste inchangé).
+
+## 12. Révision du 18 octobre 2026 : la présentation du serveur
+
+**Décision de Neegan.** Chaque résultat de l'onglet Web porte une présentation en deux ou trois phrases, dans la voix d'un serveur qui
+présente le plat à table, puis une ligne de repères à part (temps estimé, difficulté, nombre d'ingrédients hors sel et poivre). Même appel
+(`max_tokens` 4096), aucun changement côté serveur. « pourquoi » est retiré partout : `borner` le coupait en plein mot (« La recet »).
+- **Contrat (§ 4.1, § 4.4).** `{"choix":[{"url","presentation","temps_min","difficulte","ingredients"}]}`, tout champ omis quand il ne peut
+  pas être établi. `SYSTEM` fr et en : voix du serveur, tutoiement, 400 caractères au plus, `difficulte` ∈ `facile` / `moyen` / `exigeant`.
+- **Lecture.** I-A inchangé (l'`url` doit égaler un résultat brut). Champs lus par `Object.hasOwn`. `presentation` : `bornerAuMot(…, 400)`
+  puis `trim`, sinon `null`. `temps_min` : entier de 1 à 1440. `difficulte` : `trim` + minuscules ∈ les trois jetons. `ingredients` : entier
+  de 1 à 99. Sinon `null`. Lien rendu : `{ href, hote, titre, date, presentation, temps_min, difficulte, ingredients }` ; repli et `autres` : quatre `null`.
+- **`bornerAuMot(s, max)`** (`src/core/bornes.js`, pur). Un texte nettoyé qui tient en `max` points de code est rendu tel quel. Sinon : `max - 1`
+  points de code, coupe à la dernière espace si elle est dans la moitié droite (index ≥ `floor((max - 1) / 2)`), espaces de fin retirées, puis « … ».
+- **Écran (§ 5.5).** Titre, hôte · date, présentation (nœud texte), ligne de repères (`div.muted`, .9rem : `≈ 15 min` / `≈ 1 h 30` / `≈ 2 h 05`,
+  `facile` / `moyen` / `exigeant`, `1 ingrédient` / `n ingrédients`, joints par « · » ; une partie absente disparaît, aucune = pas de ligne),
+  puis « Voir la recette » (`a.btn.small`, `target=_blank`, `rel=noopener noreferrer`) et « Garder ce lien ». Chaque repère est revalidé au rendu.
+- **I-K reformulée** : « L'assistant présente les plats d'après les pages et ne vérifie ni les ingrédients ni les restrictions : relis la page
+  avant de cuisiner. » `APP_VERSION` 0.8.1, `sw.js` `-v0.8.1-1`. **Non prouvé** : la qualité réelle des présentations et des estimations, et
+  la tenue de `max_tokens` 4096 avec cinq présentations de 400 caractères (aucun appel réel).

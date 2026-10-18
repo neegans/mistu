@@ -1,16 +1,18 @@
 // Chercher sur le web avec l'assistant (spec docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md, § 4).
 // Pur, sauf l'appel réseau de chercherRecettesWeb, qui passe par la PASSERELLE (src/domain/passerelle.js) avec la session de la
 // personne : aucune clé ici, jamais d'appel direct au fournisseur d'IA. Un lien n'existe que s'il est dans les RÉSULTATS BRUTS
-// du serveur (I-A) ; le texte de l'assistant ne donne que « pourquoi », borné (I-H) ; rien de la réponse n'est recopié dans
-// l'issue hors ce qui est borné et nettoyé (I-C) ; aucune fonction ne lève vers l'appelant.
+// du serveur (I-A) ; le texte de l'assistant ne donne que la présentation du plat (bornée au mot) et trois repères typés — temps
+// estimé, difficulté, nombre d'ingrédients (I-H) ; rien de la réponse n'est recopié dans l'issue hors ce qui est borné et
+// nettoyé (I-C) ; aucune fonction ne lève vers l'appelant.
 import { parseJsonLoose } from './llm.js';
 import { appelerAssistant, echecDomaine, sessionValide, LIMITES_PASSERELLE } from './passerelle.js';
 import { lienSignet } from '../core/lien.js';
-import { borner } from '../core/bornes.js';
+import { borner, bornerAuMot } from '../core/bornes.js';
 import { logError } from '../core/log.js';
 
-export const LIMITES_WEB = { demande: 500, filtre: 80, filtres: 12, titre: 300, date: 40, pourquoi: 200, liens: 5, recherches: 3, tentativeMs: 135000, corps: 2 * 1024 * 1024, corpsErreur: 64 * 1024 };
+export const LIMITES_WEB = { demande: 500, filtre: 80, filtres: 12, titre: 300, date: 40, presentation: 400, tempsMax: 1440, ingredientsMax: 99, liens: 5, recherches: 3, tentativeMs: 135000, corps: 2 * 1024 * 1024, corpsErreur: 64 * 1024 };
 export const OUTIL_RECHERCHE = 'web_search_20250305';
+export const DIFFICULTES = Object.freeze(['facile', 'moyen', 'exigeant']); // les trois jetons de difficulté, en français dans les deux langues
 
 // Le system par langue (§ 4.1). Il cherche TOUJOURS, n'affirme JAMAIS une restriction (I-K), répond en JSON `choix`.
 const SYSTEM = {
@@ -19,18 +21,20 @@ const SYSTEM = {
     'Cherche TOUJOURS sur le web avec l’outil web_search (1 à 3 recherches), même si tu crois connaître des recettes.',
     'Préfère les pages de recettes complètes ; en français du Québec d’abord.',
     'N’affirme JAMAIS qu’une page respecte une restriction alimentaire ou une durée : dis seulement ce que la page annonce.',
-    'Puis réponds UNIQUEMENT par un objet JSON de cette forme : {"choix":[{"url":"…","pourquoi":"…"}]}',
+    'Puis réponds UNIQUEMENT par un objet JSON de cette forme : {"choix":[{"url":"…","presentation":"…","temps_min":15,"difficulte":"facile","ingredients":7}]}',
     '— 5 entrées au plus ; chaque url est l’adresse EXACTE d’une page trouvée par la recherche ; n’invente ni page ni adresse ;',
-    'pourquoi = une phrase courte qui relie la page à la demande.',
+    'presentation = deux ou trois phrases, comme un serveur qui présente le plat à table, en tutoyant : les ingrédients principaux, ce qui fait son charme, et en dernière phrase le lien avec la demande ; le temps ou les portions seulement si la page les donne ; 400 caractères au plus ;',
+    'temps_min = durée totale estimée en minutes (le chiffre de la page si elle en donne un) ; difficulte = "facile", "moyen" ou "exigeant" ; ingredients = nombre d’ingrédients de la page sans compter sel et poivre ; omets tout champ que tu ne peux pas établir.',
   ].join('\n'),
   en: [
     'You find recipe pages on the web for Cuisine OS, a personal recipe library.',
     'ALWAYS search the web with the web_search tool (1 to 3 searches), even if you think you know recipes.',
     'Prefer complete recipe pages.',
     'NEVER claim that a page meets a dietary restriction or a duration: only say what the page announces.',
-    'Then answer ONLY with a JSON object of this shape: {"choix":[{"url":"…","pourquoi":"…"}]}',
+    'Then answer ONLY with a JSON object of this shape: {"choix":[{"url":"…","presentation":"…","temps_min":15,"difficulte":"facile","ingredients":7}]}',
     '— at most 5 entries; each url is the EXACT address of a page found by the search; never invent a page or an address;',
-    'pourquoi = one short sentence linking the page to the request.',
+    'presentation = two or three sentences, like a waiter presenting the dish at the table, addressing the reader as "you": the main ingredients, what makes it appealing, and in the last sentence the link with the request; time or servings only if the page gives them; 400 characters at most;',
+    'temps_min = estimated total time in minutes (the page’s figure if it gives one); difficulte = "facile", "moyen" or "exigeant" (keep these French tokens); ingredients = number of ingredients on the page, not counting salt and pepper; omit any field you cannot establish.',
   ].join('\n'),
 };
 
@@ -121,6 +125,23 @@ export function dateLisible(texte, langue) {
 // § 4.4 : les choix de l'assistant ne SURVIVENT que s'ils désignent exactement un résultat (I-A) ; titre, hôte et
 // date viennent du résultat. PAS de complément automatique (K2) : les résultats non choisis vont dans `autres`, que
 // l'écran replie. repli = aucun choix n'a survécu : `liens` = les premiers résultats tels quels.
+// Un choix vivant apporte, en plus, sa présentation et ses trois repères (présentation du serveur, 18 octobre) : lus PROPRES
+// (Object.hasOwn, jamais la chaîne de prototype), typés et bornés champ par champ ; ce qui n'est pas lisible vaut null. Le repli
+// et `autres` portent les quatre champs à null : rien de l'assistant n'y est présenté.
+const SANS_FICHE = Object.freeze({ presentation: null, temps_min: null, difficulte: null, ingredients: null });
+const propre = (o, cle) => (Object.hasOwn(o, cle) ? o[cle] : undefined);
+const entierDe = (x, max) => (Number.isInteger(x) && x >= 1 && x <= max ? x : null);
+function ficheDe(c) {
+  const p = propre(c, 'presentation');
+  const d = propre(c, 'difficulte');
+  const jeton = typeof d === 'string' ? d.trim().toLowerCase() : ''; // pas de String(d) : un objet à toString hostile lèverait
+  return {
+    presentation: typeof p === 'string' ? bornerAuMot(p, LIMITES_WEB.presentation).trim() || null : null,
+    temps_min: entierDe(propre(c, 'temps_min'), LIMITES_WEB.tempsMax),
+    difficulte: DIFFICULTES.includes(jeton) ? jeton : null,
+    ingredients: entierDe(propre(c, 'ingredients'), LIMITES_WEB.ingredientsMax),
+  };
+}
 export function choisirLiens(lu, { max = LIMITES_WEB.liens } = {}) {
   const resultats = Array.isArray(lu?.resultats) ? lu.resultats : [];
   const parHref = new Map(resultats.map((r) => [r.href, r]));
@@ -129,16 +150,17 @@ export function choisirLiens(lu, { max = LIMITES_WEB.liens } = {}) {
   try { const data = parseJsonLoose(lu?.texte); choix = Array.isArray(data?.choix) ? data.choix : null; } catch { choix = null; }
   for (const c of choix || []) {
     if (liens.length >= max) break;
-    if (!c || typeof c !== 'object' || typeof c.url !== 'string') continue;
-    const lien = lienSignet(c.url);
+    if (!c || typeof c !== 'object') continue;
+    const url = propre(c, 'url');
+    if (typeof url !== 'string') continue;
+    const lien = lienSignet(url);
     if (!lien.ok || !parHref.has(lien.href) || pris.has(lien.href)) continue;
     pris.add(lien.href);
-    const pourquoi = borner(c.pourquoi, LIMITES_WEB.pourquoi).trim();
-    liens.push({ ...parHref.get(lien.href), pourquoi: pourquoi || null });
+    liens.push({ ...parHref.get(lien.href), ...ficheDe(c) });
   }
   const repli = liens.length === 0;
-  if (repli) for (const r of resultats) { if (liens.length >= max) break; pris.add(r.href); liens.push({ ...r, pourquoi: null }); }
-  const autres = resultats.filter((r) => !pris.has(r.href)).map((r) => ({ ...r, pourquoi: null }));
+  if (repli) for (const r of resultats) { if (liens.length >= max) break; pris.add(r.href); liens.push({ ...r, ...SANS_FICHE }); }
+  const autres = resultats.filter((r) => !pris.has(r.href)).map((r) => ({ ...r, ...SANS_FICHE }));
   const nommer = (l) => ({ ...l, titre: l.titre || l.hote });
   return { liens: liens.map(nommer), autres: autres.map(nommer), repli };
 }
