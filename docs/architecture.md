@@ -457,7 +457,7 @@ l'iPhone (aucun WebKit ici), ni `target="_blank"` et `navigator.onLine` depuis u
 ## L'assistant suit le compte (17-18 octobre 2026)
 
 Spec : `docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md` (rév. 2 ; § 12 : rulings R-CPT-1 à
-R-CPT-6) ; spec parente `docs/spec-compte-et-stockage-distant.md` § 11, R65. Livré ici : la configuration de
+R-CPT-7) ; spec parente `docs/spec-compte-et-stockage-distant.md` § 11, R65. Livré ici : la configuration de
 l'assistant IA (fournisseur, modèle, URL de base, clé) s'entre une fois sur un appareil connecté et suit le compte
 jusqu'aux autres ; elle ne vit plus dans `settings`. Un module neuf ; ailleurs, des changements bornés (les plus gros :
 la section Réglages et le générateur de migrations).
@@ -508,9 +508,13 @@ session compris.
 égal et contenu différent, la version du compte gagne et est écrite ici ; plus récente ici, la fiche repart (remise en
 file sans journal). Aucune entrée `sync_conflicts` n'est créée pour ce magasin. « Aucun (manuel) » écrit la ligne vide
 (`provider: 'none'`, champs vides) : la clé disparaît partout par une **écriture** ; sans configuration ici, rien n'est
-écrit ; la confirmation « Retirer l'assistant de tous tes appareils ? » n'est demandée que si la ligne vide partira au
-compte (R-CPT-5). Une tombale reçue (d'un autre client) suit le chemin générique : supprimée ici si elle est plus récente ou
-égale, jamais écrite (elle porte l'ancienne `data`, clé comprise).
+écrit ; la confirmation « Retirer l'assistant de tous tes appareils ? » est demandée dès que la ligne vide partira au
+compte, c'est-à-dire sur **tout hôte de production** (R-CPT-7, qui remplace R-CPT-5 : écrite déconnectée, la ligne est
+capturée avec `user_id: null` et part sous le premier compte qui se connecte ici, appareil lié ou jamais lié — `fileDe`,
+R-L3-24) ; hors production, jamais. En production, le texte « sans compte » le dit : « Sans compte, la configuration
+reste sur cet appareil jusqu’à ta première connexion, puis elle suit ton compte. » Une tombale reçue (d'un autre
+client) suit le chemin générique : supprimée ici si elle est plus récente ou égale, jamais écrite (elle porte l'ancienne
+`data`, clé comprise).
 
 **La passe unique (§ 5.6).** Dans `repo.init()`, après l'horodatage des anciennes fiches et le nettoyage des chaînes,
 garde `sync_state.assistant_config_migre = 1` : une seule transaction d'origine `device` copie `settings.llm` vers
@@ -525,14 +529,19 @@ public.assistant_config from anon` ; `0003_assistant_config.sql` recrée `sync_p
 `purge_tombstones` avec les 26 noms. La clé y repose **en clair** dans `data` : aucune requête humaine ou d'agent ne
 lit cette colonne (`data - 'api_key'` et `length(data->>'api_key')` pour un diagnostic). Preuve écrite :
 `supabase/proofs/0003_assistant_config.sql` (clés factices, `data` jamais affichée). Ni la migration ni la preuve n'ont
-été exécutées : leur syntaxe seulement est vérifiée hors ligne (pglast v8.6 : `0003` 20 instructions, preuve `0003`
-48 instructions, aucune erreur). Application : `supabase/README.md`, étape 8 bis, **avant** tout `push` du code.
+été exécutées : leur syntaxe seulement est vérifiée hors ligne, par pglast v8.6 — `parse_sql` sur les instructions de
+premier niveau (`0003` 20, preuve `0003` 48, aucune erreur ; il traite un corps `$$…$$` comme une chaîne opaque), puis
+`parse_plpgsql` sur les corps PL/pgSQL (les 4 fonctions de `0003`, les 4 blocs `do` de la preuve : aucune erreur ; un
+`thn` dans `sync_push` et un `valuez` dans un bloc `do`, posés sur des copies, passent `parse_sql` et sont refusés par
+`parse_plpgsql`). Application : `supabase/README.md`, étape 8 bis, **avant** tout `push` du code.
 
 **Ce qui n'est pas prouvé.** La passe réelle contre `mitsu` (aucune n'a tourné : ni `0003`, ni sa preuve) ; l'iPhone ;
-le chemin « nouveau client, ancien serveur » (quarantaine `refus` et réception `inconnu`, mesurés en factice
-seulement) ; l'état « appareil lié sans session » de K-10, inobservable sur `localhost` (prédicat injecté) ; K-12 (le
-formulaire n'est pas reconstruit sous le focus) n'est éprouvé que par `occupeParAssistant`, le câblage dans
-`suivreMoteurDeLaPage` est lu au source.
+le chemin « nouveau client, ancien serveur » : non mesuré, ni en factice ni contre PostgREST (le transport factice
+n'arbitre pas `store inconnu`) ; le 400 est une inférence ; éprouvés seulement : les briques génériques L3 (dichotomie →
+quarantaine `refus`, `inconnu` → recul, `tests/sync-l3.js`) et l'ordre « `assistant_config` lu en dernier »
+(`tests/assistant-compte.js` ≈ l. 281-293) ; l'état « appareil lié sans session » de K-10, inobservable sur
+`localhost` (prédicat injecté) ; K-12 (le formulaire n'est pas reconstruit sous le focus) n'est éprouvé que par
+`occupeParAssistant`, le câblage dans `suivreMoteurDeLaPage` est lu au source.
 
 ## Modèle de données (magasins IndexedDB)
 

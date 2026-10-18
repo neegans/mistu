@@ -2,10 +2,12 @@
 
 Date : 17 octobre 2026 (soir). **Révision 2** (après deux revues adverses : sécurité S1-S14, faisabilité F1-F15 — § 12).
 Clôture le 18 octobre : rulings de construction R-CPT-1 à R-CPT-6 au § 12 ; K-6, § 4.1, § 5.2 et § 11 amendés en place.
+Vague finale (18 octobre, après la revue de branche) : **R-CPT-7** (remplace R-CPT-5) au § 12 ; K-6, K-10, § 7, § 8,
+§ 10 et § 11 amendés en place.
 Branche `assistant-compte`, worktree `~/projects/mistu-web` (serveur `http://localhost:8083/`), base `main` `66c5d19`
 (lots « Chercher sur le web » et « Confort après preuve » LIVE). Spec parente de la synchronisation :
 `docs/spec-compte-et-stockage-distant.md` (§ 3.1 « `settings` n'est jamais synchronisé », § 5.5 I7, § 6.5, § 11
-R1-R64). Spec du lot web : `docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md` (I-C, geste R2).
+R1-R65). Spec du lot web : `docs/superpowers/specs/2026-10-17-chercher-sur-le-web-design.md` (I-C, geste R2).
 
 ## 1. Décision, contexte, ce que ce lot amende
 
@@ -66,9 +68,10 @@ serveur) — quand il viendra, il exclura ce magasin.
   Sur un appareil qui **n'a aucune ligne** (neuf, ou vidé, configuration pas encore reçue), « Enregistrer » avec
   « Aucun » **n'écrit rien** (sinon une ligne vide plus récente effacerait la clé du compte : F5). Avec un compte
   connecté et une clé présente, « Aucun » demande d'abord « Retirer l'assistant de tous tes appareils ? » (même
-  mécanisme de confirmation que « Effacer les données de cet appareil » ; **précisé par R-CPT-5**, § 12 : la question
-  est posée dès que la ligne vide partira au compte — hôte de production, et compte connecté ou appareil lié —, jamais
-  hors production). **« Aucun » retire la clé de la configuration, il ne la révoque pas** (§ 7).
+  mécanisme de confirmation que « Effacer les données de cet appareil » ; **précisé par R-CPT-7**, § 12, qui remplace
+  R-CPT-5 : la question est posée dès que la ligne vide partira au compte, c'est-à-dire sur **tout hôte de production**
+  — connectée, appareil lié ou jamais lié —, jamais hors production). **« Aucun » retire la clé de la configuration,
+  il ne la révoque pas** (§ 7).
 - **K-7 Une archive ne touche pas la configuration.** Exclue de `ARCHIVE_DATA_STORES` ; une restauration en mode
   **remplacement** la garde (elle n'est pas de la bibliothèque) ; une fusion aussi ; une vieille archive sans ce magasin
   reste valide ; `validateRows` refuse toujours un magasin inconnu (une archive ne peut ni porter ni injecter la ligne).
@@ -80,7 +83,8 @@ serveur) — quand il viendra, il exclura ce magasin.
   compris). Tests : `SYNC_STORES.at(-1) === 'assistant_config'` et `SYNC_STORES.slice(0, 25)` égal à `SYNC_STORES_0001`.
 - **K-10 Réglages dit l'état réel, en quatre textes.** Section « Assistant IA », selon `ctx.sync` et l'hôte :
   (a) hôte hors production : « Sur cette adresse de développement, la configuration reste sur cet appareil. » ;
-  (b) jamais connectée : « Sans compte, la configuration reste sur cet appareil. » ; (c) appareil lié à un compte mais
+  (b) jamais connectée : « Sans compte, la configuration reste sur cet appareil jusqu’à ta première connexion, puis elle
+  suit ton compte. » (amendé par R-CPT-7, § 12 : (b) n'existe qu'en production) ; (c) appareil lié à un compte mais
   déconnecté : « Ce qui est enregistré ici partira à ton compte à la prochaine connexion. » ; (d) connectée : « La
   configuration de l'assistant suit ton compte sur tes appareils connectés. » Toujours suivi de « Elle n'est jamais
   incluse dans les sauvegardes ZIP. » Les quatre chaînes entrent dans `src/i18n/en.js`.
@@ -296,7 +300,8 @@ consigner dans `supabase/proofs/RESULTATS-mitsu.md` (nouvelle section datée, ge
   2. Supabase → Authentication → Users → fermer toutes les sessions du compte ;
   3. révoquer l'ancienne clé dans la console Anthropic, sans attendre ;
   4. attendre que la durée de vie d'un jeton d'accès se soit écoulée depuis la fermeture des sessions (réglage « JWT
-     expiry » du projet, 3600 s par défaut, à lire dans Authentication → Settings) : fermer les sessions révoque les
+     expiry » du projet, 3600 s par défaut, à lire dans Authentication → Settings — emplacement à confirmer dans le
+     tableau de bord : non vérifié) : fermer les sessions révoque les
      jetons de rafraîchissement, mais un jeton d'accès déjà émis reste valide jusqu'à son expiration — l'adresse
      remise trop tôt, l'appareil perdu recevrait la nouvelle clé à sa prochaine passe (R-CPT-6) ;
   5. remettre l'adresse, reconnecter les appareils gardés, entrer la nouvelle clé une fois.
@@ -339,8 +344,10 @@ consigner dans `supabase/proofs/RESULTATS-mitsu.md` (nouvelle section datée, ge
   1 déclencheur, 1 index, 1 `revoke anon`, 4 fonctions × 26 noms, `keys`/`required` avec `assistant_config`).
 - **Tests existants à retourner délibérément** (chacun nommé dans le plan) : `tests/sync.js:9-11` (25 → 26), `:70`
   (`DB_VERSION`), `:155-157` (capture), `:226` (`V1_SEULEMENT`), `:243` (`idb.version` → `DB_VERSION`) ;
-  `tests/sync-l3.js:524-535` (envoi initial 23/24 → 24/25), `:542` (progression `total` 23 → 24), `:2022-2034` (fausse
-  base avec `get`) ; `tools/generer-migrations.test.mjs:23`, `:49-52` (→ `SYNC_STORES_0001`), `:208` (`NOMS` + `0003`) ;
+  `tests/sync-l3.js` ≈ 527-545 (envoi initial 23/24, progression `total` 23 : **amendé par R-CPT-1**, ces décomptes
+  restent ceux d'avant le lot, hors production par défaut ; les décomptes de production 24/25 et 24 vivent dans
+  `tests/assistant-compte.js`), `:2022-2034` (fausse base avec `get`) ; `tools/generer-migrations.test.mjs:23`,
+  `:49-52` (→ `SYNC_STORES_0001`), `:208` (`NOMS` + `0003`) ;
   pins `v0\.6\.0-\d+` (`tests/ajouter.js` ≈ 1858/1860, `tests/sync-l3.js` ≈ 1864, `tests/recherche-web.js` 40/43) ;
   total épinglé (`tests/tests.js`, relu dans « obtenu ») ; le test de `SHELL` (`tests/sync.js` ≈ 922-963) impose le
   module neuf. `tests/recherche-web.js:239, 295, 600, 702` (clé jamais dans une issue ni un rendu) restent verts.
@@ -361,8 +368,9 @@ consigner dans `supabase/proofs/RESULTATS-mitsu.md` (nouvelle section datée, ge
    `supabase/migrations/0003_assistant_config.sql` puis `supabase/proofs/0003_assistant_config.sql` (jetons remplacés,
    « Run without RLS »), coller la sortie dans `RESULTATS-mitsu.md` (section préparée, sans aucune valeur de `data`),
    retirer les deux adresses. Si une lecture rend 404 ensuite : `notify pgrst, 'reload schema';`.
-2. **iPhone** : « Connexion avec Google » depuis l'app installée, me dire où atterrit le retour (mesure iOS attendue
-   depuis le 13 octobre ; si le retour tombe dans Safari, lot à part : `skipBrowserRedirect`).
+2. **iPhone** : « Connexion avec Google » depuis l'app installée, me dire où atterrit le retour (mesure iOS due depuis
+   le 13 octobre ; elle ne dépend pas de ce lot : avant la fusion, ou au plus tard après le `push` ; si le retour tombe
+   dans Safari, lot à part : `skipBrowserRedirect`).
 3. Fusion et `push` (ses gestes). Puis sur le Mac, **site public** : Réglages → Assistant IA montre la configuration
    existante (passe unique) et le texte (d) ; « Envoyer maintenant » force l'envoi initial ; sur l'iPhone connecté :
    la configuration arrive à la passe suivante (« Envoyer maintenant » la force) ; si une entrée est en quarantaine
@@ -374,8 +382,11 @@ consigner dans `supabase/proofs/RESULTATS-mitsu.md` (nouvelle section datée, ge
 
 `APP_VERSION = '0.6.0'` (nouveau schéma local, nouvelle table serveur), `DB_VERSION = 3`, `sw.js VERSION =
 'cuisine-os-v0.6.0-N'` (N = numéro de tâche), `SHELL` + `./src/domain/assistant-config.js` (seul module neuf). Pins
-`v0\.6\.0-\d+` et `'0.6.0'`. Valeur de clôture : `cuisine-os-v0.6.0-9` (la ronde de la tâche 7 avait changé
-`src/ui/settings.js` sans incrément ; la tâche 8 ne touche pas `src/`).
+`v0\.6\.0-\d+` et `'0.6.0'`. Valeur après la vague finale : `cuisine-os-v0.6.0-10` (la vague touche
+`src/ui/settings.js` et `src/i18n/en.js`). Six commits de ronde avaient touché `src/` sans incrément (`7f4758c`,
+`ccb295c`, `1a8d9c2`, `af7c458`, `860364c`, `ef2e7fa`) ; l'incrément de la clôture de la tâche 9 les couvrait tous, et
+rien n'a été servi entre (`origin/main` = `66c5d19`). Suite après la vague finale : **1967/1967** (total épinglé
+**1966** dans `tests/tests.js`).
 
 ## 12. Ce que la revue a amendé
 
@@ -428,8 +439,9 @@ puce « assistant_config : 1 », tests à deux bases par `dbB.mutate`, égalité
   entière à `none` ». Dette : la CSP `connect-src 'self' https:` (lue dans `index.html`) n'autorise pas un serveur local
   en `http://localhost:<port>` — une configuration Ollama est gardée mais inerte, et le message la propose quand même.
   Coût si faux : la clé d'un serveur local envoyée à OpenAI (évité) ; un message qui promet trop (dette nommée).
-- **R-CPT-5** (T7 revue, amende K-6) la confirmation « Retirer l'assistant de tous tes appareils ? » n'est demandée que
-  si la ligne vide **partira** au compte : `suitLeCompte() && (sync.user || lie)` (`lie` = `sync_state.user_id`
+- **R-CPT-5** (T7 revue, amende K-6 ; **remplacé par R-CPT-7**, texte gardé pour l'histoire) la confirmation
+  « Retirer l'assistant de tous tes appareils ? » n'est demandée que si la ligne vide **partira** au compte :
+  `suitLeCompte() && (sync.user || lie)` (`lie` = `sync_state.user_id`
   présent) ; sinon « Aucun » écrit la ligne vide sans question (quand une ligne existe ici : sans ligne, rien n'est
   écrit, K-6). Le bloc R-CPT-5 de `tests/assistant-compte.js` en éprouve quatre cas — développement connecté (0),
   production déconnectée et liée (1), production déconnectée jamais liée (0), production connectée sur un appareil pas
@@ -444,3 +456,16 @@ puce « assistant_config : 1 », tests à deux bases par `dbB.mutate`, égalité
   → remettre l'adresse → entrer la nouvelle clé une fois. L'emplacement « Authentication → Settings » du réglage n'a
   **pas** été vérifié dans le tableau de bord. Coût si faux : une heure d'attente inutile ; coût de l'oubli :
   l'appareil perdu recevrait la nouvelle clé à sa prochaine passe.
+- **R-CPT-7** (revue finale de branche, C-1 ; **remplace R-CPT-5**, amende K-6 et K-10 (b)) sur un hôte de production,
+  la ligne vide atteint **toujours** un compte : celui d'aujourd'hui, ou le premier qui se connectera ici — écrite
+  déconnectée, elle est capturée avec `user_id: null`, et `fileDe` fait partir les entrées `user_id == null` sous le
+  compte qui arrive (R-L3-24). La confirmation « Retirer l'assistant de tous tes appareils ? » vaut donc sur **tout**
+  hôte de production : `partiraAuCompte = suitLeCompte()`. Pourquoi R-CPT-5 était faux : « `sync.user || lie` » ne
+  voyait pas un appareil **jamais lié** ; sa ligne vide partait sans question à la première connexion et, plus récente
+  que la ligne du compte, effaçait la clé sur tous les appareils (sonde de la revue finale : `envoyes 1, conflits 0`,
+  serveur puis Mac à `none`). Texte K-10 (b), qui n'existe qu'en production : « Sans compte, la configuration reste sur
+  cet appareil jusqu’à ta première connexion, puis elle suit ton compte. » (hors production, le texte (a) est
+  inchangé). Tests : bloc R-CPT-7 de `tests/assistant-compte.js` (production, déconnectée, jamais liée → 1) et cas
+  K-6 « enregistrer puis Aucun dans la même instance » (→ 1) ; le mutant de l'ancienne condition, rejoué sur une copie
+  servie à part, rougit sur ces deux cas exactement. Coût si faux : une question de plus sur un appareil de production
+  qui ne se connectera jamais.

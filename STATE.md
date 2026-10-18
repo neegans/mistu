@@ -8,11 +8,13 @@ poussé** — branche `assistant-compte`, worktree `~/projects/mistu-web` (serve
 sur les hôtes de production seulement (jamais sur `localhost`) ; jamais de conflit à trancher, jamais de suppression
 locale (« Aucun » écrit une ligne vide), jamais dans une archive ; passe unique depuis l'ancien `settings.llm`. Serveur
 en fichiers seulement : `supabase/migrations/0003_assistant_config.sql` et sa preuve, **pas encore collées sur
-`mitsu`**. Neuf tâches, chacune avec au plus une ronde de corrections. Suite **1966/1966** (total épinglé **1965** dans
-`tests/tests.js` ; départ 1802/1802), seul le 404 `/favicon.ico` en console ; `node --test tools/*.test.mjs` 45/45 ;
-`node tools/generer-migrations.mjs --check` 0 ; empreintes SHA-256 de `0001`/`0002` égales aux valeurs épinglées.
-`APP_VERSION 0.6.0`, `DB_VERSION 3`, `sw.js` `cuisine-os-v0.6.0-9`, `SHELL` + `./src/domain/assistant-config.js`.
-Spec `docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md` (§ 12 : rulings R-CPT-1 à R-CPT-6), plan
+`mitsu`**. Neuf tâches, chacune avec au plus une ronde de corrections, puis une vague finale après la revue de branche
+(R-CPT-7 : la confirmation « Retirer l'assistant de tous tes appareils ? » sur tout hôte de production ; rapport
+`final-fix-report.md`). Suite **1967/1967** (total épinglé **1966** dans `tests/tests.js` ; départ 1802/1802), seul le
+404 `/favicon.ico` en console ; `node --test tools/*.test.mjs` 45/45 ; `node tools/generer-migrations.mjs --check` 0 ;
+empreintes SHA-256 de `0001`/`0002` égales aux valeurs épinglées.
+`APP_VERSION 0.6.0`, `DB_VERSION 3`, `sw.js` `cuisine-os-v0.6.0-10`, `SHELL` + `./src/domain/assistant-config.js`.
+Spec `docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md` (§ 12 : rulings R-CPT-1 à R-CPT-7), plan
 `docs/superpowers/plans/2026-10-17-assistant-par-le-compte.md`, spec parente § 11 R65, section du lot dans `CLAUDE.md`
 (ordre des gestes, procédure « appareil perdu ou clé exposée ») et dans `docs/architecture.md`.
 
@@ -30,9 +32,13 @@ l'assistant), registre `.superpowers/sdd/2026-10-17-chercher-sur-le-web/`.
 
 ## Ce qui n'est pas prouvé
 - **Lot assistant** : aucune passe réelle contre `mitsu` (ni `0003` ni sa preuve n'ont tourné ; leur syntaxe seulement
-  est vérifiée hors ligne, par pglast v8.6) ; l'iPhone ; le chemin « nouveau client, ancien serveur » (factice
-  seulement) ; l'état « appareil lié sans session » de K-10 (prédicat injecté) ; K-12 au niveau de la page (câblage lu
-  au source) ; les appels réels de « Tester », de l'extraction et du fournisseur compatible OpenAI.
+  est vérifiée hors ligne, par pglast v8.6 : `parse_sql` sur les instructions, `parse_plpgsql` sur les corps — 4
+  fonctions de `0003`, 4 blocs `do` de la preuve, aucune erreur) ; l'iPhone ; le chemin « nouveau client, ancien
+  serveur » : non mesuré, ni en factice ni contre PostgREST ; le 400 est une inférence ; éprouvés seulement : les
+  briques génériques L3 (dichotomie → quarantaine `refus`, `inconnu` → recul) et l'ordre « `assistant_config` lu en
+  dernier » (`tests/assistant-compte.js` ≈ l. 281-293) ; l'état « appareil lié sans session » de K-10 (prédicat
+  injecté) ; K-12 au niveau de la page (câblage lu au source) ; les appels réels de « Tester », de l'extraction et du
+  fournisseur compatible OpenAI.
 - **Lot confort** : le parcours réel de bout en bout par Neegan.
 - **Lot web** : statut et corps d'un compte sans recherche web, `pause_turn`, `refusal`, taille du corps, coût.
 - **Safari et l'iPhone** partout (aucun WebKit ici) ; `target="_blank"` et `navigator.onLine` depuis une PWA installée ;
@@ -46,10 +52,13 @@ l'assistant), registre `.superpowers/sdd/2026-10-17-chercher-sur-le-web/`.
 2. **Seulement après** : revue finale et `/verify` du chef d'orchestre ; copier
    `~/projects/mistu-web/.superpowers/sdd/2026-10-17-assistant-par-le-compte/` dans `~/projects/mistu/.superpowers/sdd/` ;
    `! cd ~/projects/mistu && git merge --ff-only assistant-compte` (ou rebaser si `main` a bougé depuis `66c5d19`) ;
-   `! git -C ~/projects/mistu push origin main`.
+   `! git -C ~/projects/mistu push origin main` ; puis ouvrir `https://neegans.github.io/mistu/tests/` et lire le
+   BILAN (seule la suite publique tue le mutant `() => false` du défaut de `texteAssistant`).
 3. Mac, site public : Réglages → Assistant IA montre la configuration et « La configuration de l’assistant suit ton
-   compte sur tes appareils connectés. » ; iPhone : « Connexion avec Google » (mesure iOS due depuis le 13 octobre), la
-   clé arrive à la passe suivante (« Envoyer maintenant » la force).
+   compte sur tes appareils connectés. » ; iPhone : « Connexion avec Google » depuis l'app installée (mesure iOS due
+   depuis le 13 octobre : où atterrit le retour ; elle ne dépend pas de ce lot : avant la fusion, ou au plus tard ici),
+   la clé arrive à la passe suivante (« Envoyer maintenant » la force).
+   Preuve iPhone du lot web, toujours due : « saumon fenouil » → des liens ; « Garder ce lien » → signet prérempli.
 4. Faire tourner la clé Anthropic (elle a transité par un chat) et poser un plafond de dépense mensuel sur le workspace.
 5. Registres à copier dans `~/projects/mistu/.superpowers/sdd/` **avant** tout `git worktree remove` (le registre vit à
    la racine du worktree et meurt avec lui) : `2026-10-17-chercher-sur-le-web/` et `2026-10-17-confort-web/` (copie
@@ -72,7 +81,7 @@ l'assistant), registre `.superpowers/sdd/2026-10-17-chercher-sur-le-web/`.
 ```
 cd ~/projects/mistu-web && git status --short && git log --oneline -3
 curl -sS -o /dev/null -w "8083 http=%{http_code}\n" http://localhost:8083/tests/ || (nohup python3 -m http.server 8083 > /dev/null 2>&1 &)
-node ~/projects/mistu-web/.superpowers/sdd/2026-10-17-assistant-par-le-compte/suite.cjs 8083   # attendu : 1966/1966 (+ 1 x 404 favicon)
+node ~/projects/mistu-web/.superpowers/sdd/2026-10-17-assistant-par-le-compte/suite.cjs 8083   # attendu : 1967/1967 (+ 1 x 404 favicon)
 node --test tools/*.test.mjs && node tools/generer-migrations.mjs --check   # attendu : 45/45, code 0
 ```
 Ordre des gestes du lot : § « Reste à faire », points 1 et 2 (`0003` AVANT le `push`).

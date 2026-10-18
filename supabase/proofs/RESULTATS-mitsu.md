@@ -157,6 +157,19 @@ Le dépôt est public : jetons `A_EMAIL` / `B_EMAIL` / `A_UUID` / `B_UUID` remis
 colonne `data`** — la preuve n'affiche que des compteurs, des motifs et des longueurs de clé. Si une cellule montre
 une clé (`sk-…`) ou un objet `data`, ne pas la coller ici : le signaler.
 
+**Clé de lecture des lignes `7.01` à `7.05`, à juger AVANT le `push`** (même clé que l'étape 8 bis du README ; d'après
+la documentation de PostgreSQL, non mesurée sur `mitsu`). La clé de l'assistant peut finir dans les journaux de
+Postgres si :
+- `log_statement` (7.03) vaut `all` ou `log_min_duration_statement` (7.04) n'est pas `-1` — **et, dans les deux cas,**
+  `log_parameter_max_length` (7.05) n'est pas `0` : un envoi **réussi** de `sync_push` peut être journalisé avec ses
+  paramètres ;
+- `log_min_error_statement` (7.01) vaut `error` ou un niveau plus bas — **et** `log_parameter_max_length_on_error`
+  (7.02) n'est pas `0` : un envoi **en erreur** (adresse retirée, `store inconnu`) peut être journalisé avec ses
+  paramètres.
+
+Si l'une de ces conditions est remplie : l'écrire ici et le dire avant le `push`. On recopie les valeurs des réglages,
+jamais une valeur de `data`.
+
 | Heure | Collage | Résultat |
 | --- | --- | --- |
 | … | `insert into private.allowed_users …` (2 adresses de preuve `exemple.invalid`) | … |
@@ -168,5 +181,5 @@ une clé (`sk-…`) ou un objet `data`, ne pas la coller ici : le signaler.
 
 Tableau des verdicts (ordre, etape, attendu, obtenu, ok) : à coller ici.
 
-Lignes `7.01` à `7.05` (journaux de Postgres, informatives) : à recopier telles quelles — c'est la mesure que la
-spec § 7 attendait (S9).
+Lignes `7.01` à `7.05` (journaux de Postgres, `ok = true` quelle que soit la valeur) : à recopier telles quelles —
+c'est la mesure que la spec § 7 attendait (S9) —, puis à juger par la clé de lecture ci-dessus, avant le `push`.

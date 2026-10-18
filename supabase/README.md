@@ -178,8 +178,19 @@ collage échoue sur le `create table` et n'applique rien. Pas de `cron.schedule`
    tout, exécuter, et choisir **« Run without RLS »** au dialogue du tableau de bord (voir l'étape 5, « Jouer la preuve
    `0001` »). Lire d'abord la
    ligne `999 BILAN` : `0 faux`, c'est vert. Les clés poussées par la preuve sont **factices** (`sk-factice-…`) et la
-   preuve n'affiche jamais la colonne `data` : seulement la longueur de la clé. Les lignes `7.0x` (journaux de
-   Postgres) sont informatives : leur valeur est relevée, pas jugée.
+   preuve n'affiche jamais la colonne `data` : seulement la longueur de la clé. Les lignes `7.01` à `7.05` (journaux
+   de Postgres) restent `ok = true` quelle que soit leur valeur, mais elles **se jugent ici, avant le `push`** : c'est
+   le seul moment où on les voit. Clé de lecture (d'après la documentation de PostgreSQL, non mesurée sur `mitsu`) —
+   la clé de l'assistant peut finir dans les journaux de Postgres si :
+   - `log_statement` (7.03) vaut `all` ou `log_min_duration_statement` (7.04) n'est pas `-1` — **et, dans les deux
+     cas,** `log_parameter_max_length` (7.05) n'est pas `0` : un envoi **réussi** de `sync_push` peut être journalisé
+     avec ses paramètres (le lot envoyé, donc la clé) ;
+   - `log_min_error_statement` (7.01) vaut `error` ou un niveau plus bas (`warning`, `notice`, `info`, `debug1` à
+     `debug5`) — **et** `log_parameter_max_length_on_error` (7.02) n'est pas `0` : un envoi **en erreur** (adresse
+     retirée de la liste, `store inconnu`) peut être journalisé avec ses paramètres.
+
+   Si l'une de ces conditions est remplie : le noter dans `RESULTATS-mitsu.md` et le dire **avant** le `push`. Jamais
+   une valeur de `data` recopiée.
 4. **Retirer les deux adresses de preuve** :
    `delete from private.allowed_users where email in (lower('...'), lower('...'));`, puis contrôle
    `select count(*) from private.allowed_users;` (le nombre d'avant l'étape 1).
@@ -228,10 +239,13 @@ projet Supabase aussi). Dans cet ordre :
 3. **Révoquer l'ancienne clé** dans la console Anthropic (workspace de Cuisine OS), sans attendre : la clé exposée
    est utilisable directement chez le fournisseur.
 4. **Attendre l'expiration des jetons d'accès** (R-CPT-6) : attendre que la durée de vie d'un jeton d'accès se soit
-   écoulée depuis la fermeture des sessions (réglage « JWT expiry » du projet, 3600 s par défaut, à lire dans
-   Authentication → Settings). Fermer les sessions révoque les jetons de rafraîchissement, mais un jeton d'accès déjà
-   émis reste valide jusqu'à son expiration : l'adresse remise trop tôt, l'appareil perdu recevrait la nouvelle clé à
-   sa prochaine passe. L'adresse reste hors de la liste pendant tout ce temps.
+   écoulée depuis la fermeture des sessions — réglage « JWT expiry » du projet, 3600 s par défaut, à lire dans
+   Authentication → Settings (emplacement à confirmer dans le tableau de bord : non vérifié). Fermer les sessions
+   révoque les jetons de rafraîchissement, mais un jeton d'accès déjà émis reste valide jusqu'à son expiration :
+   l'adresse remise trop tôt, l'appareil perdu recevrait la nouvelle clé à sa prochaine passe. L'adresse reste hors de la liste pendant tout ce temps.
 5. **Remettre l'adresse** (`insert into private.allowed_users (email) values (lower('...'));`), reconnecter les
    appareils gardés, et entrer la nouvelle clé **une fois**, dans Réglages → Assistant IA d'un appareil connecté :
-   elle suit le compte jusqu'aux autres.
+   elle suit le compte jusqu'aux autres. Sur chaque appareil gardé, **recharger Réglages et vérifier que la clé reçue
+   est la nouvelle avant tout « Enregistrer »** : la synchronisation est « dernier qui écrit gagne » à la ligne, et un
+   « Enregistrer » fait avec l'ancienne clé encore en mémoire (appareil resté hors ligne pendant la rotation, ou page
+   Réglages restée ouverte) la renverrait partout.

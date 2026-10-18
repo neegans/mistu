@@ -528,7 +528,7 @@ export function texteAssistant({ sync = {}, lie = false, suitLeCompte = configAs
   if (!suitLeCompte()) etat = t('Sur cette adresse de développement, la configuration reste sur cet appareil.');
   else if (sync?.user) etat = t('La configuration de l’assistant suit ton compte sur tes appareils connectés.');
   else if (lie) etat = t('Ce qui est enregistré ici partira à ton compte à la prochaine connexion.');
-  else etat = t('Sans compte, la configuration reste sur cet appareil.');
+  else etat = t('Sans compte, la configuration reste sur cet appareil jusqu’à ta première connexion, puis elle suit ton compte.'); // R-CPT-7
   return `${etat} ${t('Elle n’est jamais incluse dans les sauvegardes ZIP.')}`;
 }
 
@@ -554,9 +554,11 @@ export function sectionAssistant({ llm: initial, sync = {}, lie = false, suitLeC
       // K-6 (F5) : sans configuration non vide ici, « Aucun » n'écrit RIEN — une ligne vide plus récente effacerait la clé
       // du compte.
       if (!avait) { dire(t('Rien à retirer : aucun assistant n’est configuré ici.')); return; }
-      // R-CPT-5 : confirmer quand la ligne vide PARTIRA au compte — en production (K-3), connectée ou appareil lié (écrite
-      // déconnectée, elle est capturée avec user_id null et part à la reconnexion). Hors production, elle reste ici.
-      const partiraAuCompte = suitLeCompte() && !!(sync?.user || lie);
+      // R-CPT-7 (remplace R-CPT-5) : confirmer quand la ligne vide PARTIRA au compte, c'est-à-dire sur TOUT hôte de
+      // production (K-3) : connectée, elle part maintenant ; déconnectée, elle est capturée avec user_id null et part sous
+      // le compte qui se connectera ici le premier (fileDe, R-L3-24) — appareil lié ou jamais lié. Hors production, elle
+      // reste ici.
+      const partiraAuCompte = suitLeCompte();
       if (partiraAuCompte && !(await confirm(t('Retirer l’assistant de tous tes appareils ?'), { danger: true, okLabel: t('Retirer') }))) return;
     }
     await saveConfig(cfg);

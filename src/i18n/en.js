@@ -295,7 +295,7 @@ export const EN = {
   // Assistant par le compte : Réglages → Assistant IA (K-6, K-10, R-CPT-4).
   "Fournisseur-agnostique. Sans configuration, tout fonctionne à la main.": "Provider-agnostic. Without configuration, everything works by hand.",
   "Sur cette adresse de développement, la configuration reste sur cet appareil.": "On this development address, the configuration stays on this device.",
-  "Sans compte, la configuration reste sur cet appareil.": "Without an account, the configuration stays on this device.",
+  "Sans compte, la configuration reste sur cet appareil jusqu’à ta première connexion, puis elle suit ton compte.": "Without an account, the configuration stays on this device until your first sign-in, then it follows your account.",
   "Ce qui est enregistré ici partira à ton compte à la prochaine connexion.": "What is saved here will go to your account at the next sign-in.",
   "La configuration de l’assistant suit ton compte sur tes appareils connectés.": "The assistant configuration follows your account on your signed-in devices.",
   "Elle n’est jamais incluse dans les sauvegardes ZIP.": "It is never included in ZIP backups.",
