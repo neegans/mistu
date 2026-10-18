@@ -1,7 +1,9 @@
-// Une réponse de sync_push → des effets, sans toucher à la base (spec § 5.3). Rend exactement quatre clés —
-// `{ retirer, reecrire, conflits, quarantaine }` — et `src/sync/push.js` les applique en UNE transaction.
-// Clés par (store, id) ; une clé que le serveur nomme hors du lot envoyé n'a AUCUN effet (R-L3-8) : ni retrait,
-// ni réécriture, ni conflit, ni quarantaine.
+// Une réponse de sync_push → des effets, sans toucher à la base (spec § 5.3). Rend exactement cinq clés —
+// `{ retirer, reecrire, conflits, quarantaine, retirerConflits }` — et `src/sync/push.js` les applique en UNE
+// transaction. Clés par (store, id) ; une clé que le serveur nomme hors du lot envoyé n'a AUCUN effet (R-L3-8) : ni
+// retrait, ni réécriture, ni conflit, ni quarantaine. Exception K-5 (spec assistant-par-le-compte § 5.5) : un refus
+// `conflit` sur assistant_config ne produit JAMAIS d'entrée `conflits` — retirer, et réécrire la version du compte
+// seulement aux conditions écrites dans la branche `conflit` ci-dessous.
 import { cleDe } from './lots.js';
 
 export function appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales = {}, conflitsRenvoyes = new Set() }) {
@@ -62,7 +64,11 @@ export function appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales = 
         const locale = fichesLocales[k];
         const serveur = r.server;
         const inchangee = !!locale && !!element && locale.updated_at === element.updated_at;
-        const aussiRecente = !!serveur?.data && !serveur.deleted_at && Number.isFinite(Date.parse(serveur.updated_at)) && Date.parse(serveur.updated_at) >= Date.parse(locale?.updated_at || 0);
+        // Une data qui n'est pas un objet nu (chaîne, tableau) serait ÉTALÉE dans le magasin, caractère par caractère :
+        // jamais réécrite. Les deux instants doivent être lisibles — aucun repli : une fiche sans heure ne se compare à rien.
+        const objetNu = !!serveur?.data && typeof serveur.data === 'object' && !Array.isArray(serveur.data);
+        const instantServeur = Date.parse(serveur?.updated_at), instantLocal = Date.parse(locale?.updated_at);
+        const aussiRecente = objetNu && !serveur.deleted_at && Number.isFinite(instantServeur) && Number.isFinite(instantLocal) && instantServeur >= instantLocal;
         // `id` forcé (revue Neegan 1.3) : la clé primaire ne dépend jamais de ce que `data` porte.
         if (inchangee && aussiRecente) (reecrire[r.store] ||= []).push({ ...serveur.data, id: element.id, updated_at: serveur.updated_at });
         continue;

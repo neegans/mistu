@@ -339,6 +339,24 @@ export async function runAssistantCompteTests({ eq, ok }) {
     });
     eq([effets.retirer, effets.conflits, (effets.reecrire.assistant_config || []).map((x) => [x.id, x.updated_at, x.api_key])], [[7], [], [['llm', H.t2, 'sk-factice-serveur']]], 'reponses : refus conflit → entrée retirée, id forcé à celui de l’élément, heure du serveur, aucun conflit');
   }
+  // Ronde 1 : la réécriture exige une data OBJET NU (jamais une chaîne ni un tableau étalés dans le magasin) et DEUX
+  // instants lisibles (aucun repli : une fiche sans heure ne se compare à rien). Dans les deux cas : retirer seulement.
+  {
+    const refus = (data) => [{ store: 'assistant_config', id: 'llm', reason: 'conflit', server: { data, updated_at: H.t2, deleted_at: null } }];
+    const effetsDe = ({ element, locale, data }) => appliquerReponse({
+      lot: { elements: [element], seqs: [7] },
+      reponse: { server_time: H.t3, accepted: [], adjusted: [], rejected: refus(data) },
+      entreesParSeq: new Map([[7, { seq: 7, store: 'assistant_config', id: 'llm', op: 'put' }]]),
+      fichesLocales: { 'assistant_config:llm': locale },
+    });
+    const envoye = { store: 'assistant_config', id: 'llm', data: L('sk-factice-envoye', H.t1), updated_at: H.t1, deleted: false };
+    const resume = (e) => [e.retirer, e.conflits.length, Object.keys(e.reecrire)];
+    eq([effetsDe({ element: envoye, locale: L('sk-factice-envoye', H.t1), data: 'chaîne' }), effetsDe({ element: envoye, locale: L('sk-factice-envoye', H.t1), data: ['sk-factice-tableau'] })].map(resume),
+      [[[7], 0, []], [[7], 0, []]], 'reponses : data du serveur chaîne ou tableau → entrée retirée, rien réécrit, aucun conflit');
+    const { updated_at: _h, ...sansHeure } = L('sk-factice-sans-heure', H.t1);
+    eq(resume(effetsDe({ element: { store: 'assistant_config', id: 'llm', data: sansHeure, deleted: false }, locale: sansHeure, data: L('sk-factice-serveur', H.t2) })),
+      [[7], 0, []], 'reponses : fiche locale sans updated_at (élément sans heure) → rien réécrit, aucun conflit (aucun repli sur une heure par défaut)');
+  }
   const deuxAppareils = async (scenario) => withRepo(async (repo, dbA) => withDatabase(async (dbB) => {
     const tf = creerTransportFactice({ serveur: true });
     installCapture(dbB, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
@@ -359,8 +377,8 @@ export async function runAssistantCompteTests({ eq, ok }) {
   await deuxAppareils(async ({ dbA, dbB, push, pull, tf }) => {
     await dbA.mutate({ puts: { assistant_config: [L('sk-factice-compte', H.t2)] } }); await push(dbA);
     await dbB.mutate({ puts: { assistant_config: [L('sk-factice-local', H.t2)] } });
-    await pull(dbB);
-    eq([(await dbB.get('assistant_config', 'llm')).api_key, ...(await propre(dbB))], ['sk-factice-compte', 0, 1], 'K-5 réception : égalité différente → la version du compte est écrite ici, aucun conflit (l’entrée de file locale reste : l’envoi la réglera)');
+    const rp = await pull(dbB);
+    eq([(await dbB.get('assistant_config', 'llm')).api_key, ...(await propre(dbB)), rp.recues], ['sk-factice-compte', 0, 1, 1], 'K-5 réception : égalité différente → la version du compte est écrite ici, comptée en reçues (passeAEcrit invalide le cache), aucun conflit (l’entrée de file locale reste : l’envoi la réglera)');
     const r = await push(dbB);
     eq([r.conflits, ...(await propre(dbB)), (await dbB.get('assistant_config', 'llm')).api_key, tf.ligne('assistant_config', 'llm').data.api_key], [0, 0, 0, 'sk-factice-compte', 'sk-factice-compte'], 'K-5 envoi : refus conflit → entrée retirée, aucun conflit journalisé, le compte reste');
   });

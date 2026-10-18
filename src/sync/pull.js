@@ -1,6 +1,7 @@
 // Réception (spec § 5.5) : par table, pages par server_seq croissant ; le curseur n'avance qu'avec l'écriture de la
 // page (même transaction). Règle I7, la même qu'à l'envoi : le plus récent gagne ; égal + identique = rien ;
-// égal + différent = conflit. Tout ce qui s'écrit ici porte origin 'remote' : jamais recapturé.
+// égal + différent = conflit — sauf assistant_config : K-5, la version du compte gagne, sans journal (et plus récent
+// ici = remise en file, sans journal non plus). Tout ce qui s'écrit ici porte origin 'remote' : jamais recapturé.
 import { SYNC_STORES, STORES } from '../model/schema.js';
 import { logError } from '../core/log.js';
 
@@ -61,8 +62,9 @@ export function decider({ locale, distante }) {
 }
 
 // Spec assistant-par-le-compte K-5 (§ 5.5) : pour assistant_config, I7 s'applique SANS écran. `decider` reste pur et
-// générique ; la règle du magasin se pose ici, après lui. Une tombale reçue suit le chemin générique ('supprimer' ou
-// 'renvoyer_seulement') : jamais 'ecrire' d'une tombale — elle porte l'ancienne data, clé comprise (S5/F6). `decider`
+// générique ; la règle du magasin se pose ici, après lui. Une tombale reçue suit le chemin générique : 'supprimer'
+// (plus récente ou égale), 'renvoyer_seulement' (plus ancienne que la fiche d'ici) ou 'ignorer' (aucune fiche ici) —
+// jamais 'ecrire' d'une tombale : elle porte l'ancienne data, clé comprise (S5/F6). `decider`
 // ne rend jamais 'conflit' pour une tombale (il tranche sur `deleted_at` avant de comparer les contenus), donc la
 // seule conversion vers 'ecrire' ne peut pas la toucher.
 function regleDuMagasin(table, decision) {
@@ -100,6 +102,10 @@ function refusDeForme(table, ligne, clePrimaire) {
 }
 
 export function createPull({ db, transport, isActivitySynced = () => false, configSuitLeCompte = () => false, getUserId = () => null, surProgression = () => {}, limite = 1000 }) {
+  // La fiche d'ici, plus récente, repart : une entrée `put` écrite EXPLICITEMENT (l'origine 'remote' de la page fait que
+  // la capture ne la verrait pas). Une seule définition pour les deux chemins (conflit renvoyé, K-5 sans journal).
+  const remiseEnFile = (table, ligne, locale) => ({ user_id: getUserId(), store: table, id: ligne.id, op: 'put', updated_at: locale.updated_at || null, tries: 0 });
+
   // SYNC_STORES n'est pas modifié : seule la liste de réception est réordonnée (R-L3-12).
   function tables() {
     // K-9 : « assistant_config en dernier » repose sur l'ordre de déclaration de STORES (dont SYNC_STORES est dérivée), pas sur ORDRE_PRIORITAIRE.
@@ -145,7 +151,7 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
       const locale = await db.get(table, ligne.id);
       const decision = regleDuMagasin(table, decider({ locale, distante: ligne }));
       if (decision === 'renvoyer_seulement') { // K-5 : plus récent ici → repart, SANS entrée de journal
-        refile.push({ user_id: getUserId(), store: table, id: ligne.id, op: 'put', updated_at: locale.updated_at || null, tries: 0 });
+        refile.push(remiseEnFile(table, ligne, locale));
         continue;
       }
       if (decision === 'supprimer') { (deletes[table] ||= []).push(ligne.id); supprimees += 1; continue; }
@@ -174,7 +180,7 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
       // conflit_renvoyer : la fiche d'ici est plus récente, elle est conservée ET remise en file — le serveur
       // l'acceptera. L'entrée est écrite EXPLICITEMENT : l'origine 'remote' de la transaction fait que la capture
       // ne la verrait pas (c'est voulu : rien d'autre dans cette page ne doit repartir).
-      if (decision === 'conflit_renvoyer') refile.push({ user_id: getUserId(), store: table, id: ligne.id, op: 'put', updated_at: locale.updated_at || null, tries: 0 });
+      if (decision === 'conflit_renvoyer') refile.push(remiseEnFile(table, ligne, locale));
     }
     if (conflits.length) puts.sync_conflicts = conflits;
     if (refile.length) puts.outbox = refile;
