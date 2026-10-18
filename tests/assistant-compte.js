@@ -92,7 +92,7 @@ export async function runAssistantCompteTests({ eq, ok }) {
   const C = await import('../src/sync/conflits.js');
   const { installCapture, uninstallCapture } = await import('../src/sync/outbox.js');
   await withDatabase(async (db) => {
-    installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false });
+    installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true }); // R-CPT-1 : sinon la capture ignore ce magasin et « rien en file » ne mesure plus rien
     try {
       const conflit = { id: 'assistant_config:llm', store: 'assistant_config', record_id: 'llm', local: { id: 'llm', api_key: 'sk-factice-l' }, server: { data: { id: 'llm', api_key: 'sk-factice-s' }, updated_at: '2026-10-17T10:00:00Z', deleted_at: null }, at: 'x', kind: 'donnees' };
       await db.mutate({ puts: { sync_conflicts: [conflit] }, origin: 'device' });
@@ -237,8 +237,11 @@ export async function runAssistantCompteTests({ eq, ok }) {
 
   // --- T4 : production seulement (K-3, S3) — prédicat injecté, faux par défaut (R-CPT-1)
   const cfgMod = await import('../src/sync/config.js');
-  eq([cfgMod.configAssistantSuitLeCompte('neegans.github.io'), cfgMod.configAssistantSuitLeCompte('NEEGANS.GITHUB.IO'), cfgMod.configAssistantSuitLeCompte('localhost'), cfgMod.configAssistantSuitLeCompte('127.0.0.1'), cfgMod.configAssistantSuitLeCompte(''), cfgMod.configAssistantSuitLeCompte(undefined)],
-    [true, true, false, false, false, cfgMod.configAssistantSuitLeCompte(globalThis.location?.hostname)], 'K-3 : vrai seulement pour les hôtes de production (prod.hosts), insensible à la casse');
+  // Le défaut sans argument (location.hostname) ne se simule pas dans le navigateur : il n'est pas éprouvé ici, seul le
+  // prédicat à hôte explicite l'est (le défaut vaut faux sur localhost, où tourne cette suite).
+  eq([cfgMod.configAssistantSuitLeCompte('neegans.github.io'), cfgMod.configAssistantSuitLeCompte('NEEGANS.GITHUB.IO'), cfgMod.configAssistantSuitLeCompte('localhost'), cfgMod.configAssistantSuitLeCompte('127.0.0.1'), cfgMod.configAssistantSuitLeCompte('')],
+    [true, true, false, false, false], 'K-3 : vrai seulement pour les hôtes de production (prod.hosts), insensible à la casse');
+  ok(cfgMod.SUPABASE.prod.hosts.length > 0 && cfgMod.SUPABASE.prod.hosts.every((h) => cfgMod.configAssistantSuitLeCompte(h)) && cfgMod.SUPABASE.dev.hosts.every((h) => !cfgMod.configAssistantSuitLeCompte(h)), 'K-3 : chaque hôte de prod.hosts de la configuration suit le compte, aucun hôte de dev.hosts ne le suit (dérivé de la configuration, pas d’une liste copiée)');
   const { tablesAEnvoyer, envoiInitial } = await import('../src/sync/backfill.js');
   const { createPull } = await import('../src/sync/pull.js');
   const { creerTransportFactice } = await import('./transport-factice.js');
@@ -274,12 +277,16 @@ export async function runAssistantCompteTests({ eq, ok }) {
   const tf = creerTransportFactice({ serveur: true });
   await tf.pousser([{ store: 'assistant_config', id: 'llm', data: LIGNE('sk-factice-serveur'), updated_at: '2026-10-17T10:00:00Z' }]);
   await withDatabase(async (db) => {
-    const lues = [];
-    const r0 = await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1', surProgression: (p) => lues.push(p.table) }).recevoir();
-    eq([r0.recues, lues.includes('assistant_config'), await db.get('assistant_config', 'llm')], [0, false, undefined], 'réception : hors production, la table n’est ni lue ni écrite');
-    lues.length = 0;
-    const r1 = await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1', configSuitLeCompte: () => true, surProgression: (p) => lues.push(p.table) }).recevoir();
-    eq([r1.recues, lues.at(-1), (await db.get('assistant_config', 'llm'))?.api_key, (await db.getAll('outbox')).length], [1, 'assistant_config', 'sk-factice-serveur', 0], 'réception : en production, lue EN DERNIER (K-9), écrite telle quelle, rien en file');
+    // Capture posée en production : « rien en file » mesure alors l'origine 'remote' de la réception, pas un vide.
+    installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
+    try {
+      const lues = [];
+      const r0 = await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1', surProgression: (p) => lues.push(p.table) }).recevoir();
+      eq([r0.recues, lues.includes('assistant_config'), await db.get('assistant_config', 'llm')], [0, false, undefined], 'réception : hors production, la table n’est ni lue ni écrite');
+      lues.length = 0;
+      const r1 = await createPull({ db, transport: tf, isActivitySynced: () => false, getUserId: () => 'u1', configSuitLeCompte: () => true, surProgression: (p) => lues.push(p.table) }).recevoir();
+      eq([r1.recues, lues.at(-1), await db.get('assistant_config', 'llm'), (await db.getAll('outbox')).length], [1, 'assistant_config', LIGNE('sk-factice-serveur'), 0], 'réception : en production, lue EN DERNIER (K-9), la ligne entière écrite telle quelle, rien en file (capture posée)');
+    } finally { uninstallCapture(db); }
   });
   // Le moteur porte le prédicat jusqu'à l'envoi initial ET à la réception (R-CPT-1 : faux par défaut). Sans ce
   // câblage, les deux modules ci-dessus seraient justes et l'application ne les verrait jamais « en production ».
