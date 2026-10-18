@@ -19,6 +19,7 @@ test('CORS : en-têtes pour une origine admise, aucun Allow-Origin sinon', () =>
   assert.equal(h['Access-Control-Allow-Headers'], 'authorization, apikey, content-type, x-client-info');
   assert.equal(h['Access-Control-Allow-Methods'], 'POST, OPTIONS');
   assert.equal(h.Vary, 'Origin');
+  assert.equal(h['Access-Control-Max-Age'], '600');
   assert.equal('Access-Control-Allow-Origin' in entetesCors('https://evil.example', ['https://neegans.github.io']), false);
 });
 test('lireDemande : liste blanche, modèle forcé, champs interdits ignorés', () => {
@@ -64,6 +65,10 @@ test('lireDemande : images seulement pour extraction, types fermés, taille', ()
 test('lireDemande : propriétés héritées et __proto__ ignorées', () => {
   const r = lire('{"__proto__":{"corps":{"messages":[{"role":"user","content":"x"}]}}}');
   assert.equal(r.ok, false); assert.equal(r.statut, 400);
+  try {
+    Object.defineProperty(Object.prototype, 'corps', { value: { messages: [{ role: 'user', content: 'x' }] }, configurable: true, writable: true });
+    assert.equal(lire('{}').statut, 400, 'un corps herite du prototype est ignore');
+  } finally { delete Object.prototype.corps; }
   assert.equal(Object.prototype.corps, undefined);
 });
 test('quota', () => {
@@ -71,6 +76,7 @@ test('quota', () => {
   assert.deepEqual(decisionQuota(60, 60), { ok: false, statut: 429, raison: 'quota' });
   assert.deepEqual(decisionQuota(0, 0), { ok: false, statut: 429, raison: 'quota' });
   assert.deepEqual(decisionQuota(NaN, 60), { ok: false, statut: 429, raison: 'quota' }, 'inconnu = refus');
+  assert.deepEqual(decisionQuota(-5, 60), { ok: false, statut: 429, raison: 'quota' }, 'négatif = refus');
 });
 test('statuts relayés : la clé serveur ne devient jamais une clé refusée côté app', () => {
   assert.deepEqual([200, 400, 401, 403, 404, 413, 429, 500, 529, 302, 999].map(statutRelaye), [200, 400, 502, 403, 502, 413, 429, 502, 503, 502, 502]);
@@ -83,4 +89,66 @@ test('journal : compteurs seulement, jamais une chaîne du corps', () => {
   assert.equal(JSON.stringify(l2).includes('sk-factice'), false);
   for (const v of Object.values(l)) assert.ok(v === null || typeof v === 'number' || /^[0-9a-f-]{36}$|^[a-z-]+$|^\d{4}-\d{2}-\d{2}$/.test(String(v)));
 });
-test('corpsErreur : forme stable', () => { assert.deepEqual(corpsErreur('quota', { quota: 60 }), { erreur: 'quota', quota: 60 }); });
+test('corpsErreur : forme stable, champ erreur non écrasable', () => {
+  assert.deepEqual(corpsErreur('quota', { quota: 60 }), { erreur: 'quota', quota: 60 });
+  assert.deepEqual(corpsErreur('quota', { erreur: 'x', quota: 60 }), { erreur: 'quota', quota: 60 });
+});
+test('lireDemande : max_uses toujours présent (plafond 5 si omis)', () => {
+  const r = lire({ corps: { ...CREATION.corps, tools: [{ type: 'web_search_20250305', name: 'web_search' }] } }, 'recherche-web');
+  assert.equal(r.ok, true);
+  assert.equal(r.corps.tools[0].max_uses, 5);
+});
+test('lireDemande : formes fermées imbriquées, champs en trop retirés', () => {
+  const r = lire({ corps: { messages: [{ role: 'user', content: [{ type: 'text', text: 'a', cache_control: { type: 'ephemeral' }, extra: 1 }], name: 'x', bidon: true }] } }, 'creation');
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.corps.messages, [{ role: 'user', content: [{ type: 'text', text: 'a' }] }]);
+  const img = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA', url: 'https://x' }, cache_control: { type: 'ephemeral' } };
+  const e = lire({ corps: { messages: [{ role: 'user', content: [img] }] } }, 'extraction');
+  assert.equal(e.ok, true);
+  assert.deepEqual(e.corps.messages[0].content, [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }]);
+  const outil = { type: 'web_search_20250305', name: 'web_search', max_uses: 2, cache_control: { type: 'ephemeral' }, user_location: { type: 'approximate', country: 'CA', ip: '203.0.113.7' } };
+  const w = lire({ corps: { ...CREATION.corps, tools: [outil] } }, 'recherche-web');
+  assert.equal(w.ok, true);
+  assert.deepEqual(Object.keys(w.corps.tools[0]), ['type', 'name', 'max_uses', 'user_location']);
+  assert.deepEqual(Object.keys(w.corps.tools[0].user_location), ['type', 'country']);
+});
+test('lireDemande : tools hostiles et borne du pays (64 accepté, 65 refusé)', () => {
+  const base = { messages: [{ role: 'user', content: 'x' }] };
+  assert.equal(lire({ corps: { ...base, tools: {} } }, 'recherche-web').statut, 400, 'tools objet');
+  assert.equal(lire({ corps: { ...base, tools: null } }, 'recherche-web').statut, 400, 'tools null');
+  const loc = (country) => lire({ corps: { ...base, tools: [{ type: 'web_search_20250305', name: 'web_search', user_location: { type: 'approximate', country } }] } }, 'recherche-web');
+  assert.equal(loc('x'.repeat(65)).statut, 400, 'pays de 65 caractères');
+  assert.equal(loc('x'.repeat(64)).ok, true, 'pays de 64 caractères accepté');
+});
+test('lireDemande : données base64 hostiles refusées (espace, saut, tiret, souligné, vide)', () => {
+  for (const data of ['AA AA', 'AA\nAA', 'AA-AA', 'AA_AA', '']) {
+    const r = lire({ corps: { messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } }] }] } }, 'extraction');
+    assert.equal(r.statut, 400, JSON.stringify(data));
+  }
+});
+test('lireDemande : plafond serveur, modèle obligatoire (502), ordre des contrôles', () => {
+  assert.equal(lire({ corps: { messages: [{ role: 'user', content: 'x' }], max_tokens: 999999 } }, 'creation', { maxTokens: 1e9 }).statut, 422, 'plafond appelant ne relève pas LIMITES.maxTokens');
+  assert.equal(lire({ corps: { messages: [{ role: 'user', content: 'x' }], max_tokens: 16001 } }, 'creation', { maxTokens: 'n' }).statut, 422, 'plafond invalide = LIMITES.maxTokens');
+  assert.deepEqual(lireDemande(JSON.stringify(CREATION), { outil: 'creation', modele: undefined }), { ok: false, statut: 502, raison: 'serveur' });
+  assert.equal(lireDemande(JSON.stringify(CREATION), { outil: 'creation', modele: '' }).statut, 502, 'modèle vide');
+  assert.equal(lireDemande('{', { outil: 'creation' }).statut, 502, 'modèle vérifié avant le texte');
+  assert.equal(lireDemande('{', { outil: 'inconnu', modele: MODELE }).statut, 400, 'outil vérifié avant le modèle');
+});
+test('lireDemande : borne réelle en octets (R-T1-1)', () => {
+  const euros = '€'.repeat(300000);
+  const t = JSON.stringify({ corps: { messages: [{ role: 'user', content: euros }] } });
+  assert.equal(lireDemande(t, { outil: 'creation', modele: MODELE }).ok, true, 'sous 512 Ki caractères');
+  const octets = new TextEncoder().encode(t).length;
+  assert.ok(octets > LIMITES.corps);
+  assert.equal(lireDemande(t, { outil: 'creation', modele: MODELE, octets }).statut, 413, 'plus de 512 Kio d octets');
+  assert.equal(lireDemande(t, { outil: 'creation', modele: MODELE, octets: -1 }).ok, true, 'octets négatifs ignorés');
+});
+test('journal : garde-fous des champs (outil, statut, compteurs, durée, date)', () => {
+  const base = { ownerId: 'u', outil: 'creation', statut: 200, usage: { input_tokens: 1, output_tokens: 1 }, dureeMs: 1, octets: 1, maintenant: '2026-10-18T15:13:01.000Z' };
+  assert.equal(ligneJournal({ ...base, outil: '<script>' }).outil, null, 'outil hors liste');
+  assert.equal(ligneJournal({ ...base, statut: 'abc' }).statut, null, 'statut non entier');
+  assert.equal(ligneJournal({ ...base, usage: { input_tokens: 1e21, output_tokens: 1 } }).jetons_entree, null, 'compteur hors entier sûr');
+  assert.equal(ligneJournal({ ...base, dureeMs: Infinity }).duree_ms, 0, 'durée infinie');
+  assert.equal(ligneJournal({ ...base, maintenant: new Date('2026-10-18T23:59:59.999Z') }).jour, '2026-10-18', 'Date acceptée');
+  assert.equal(ligneJournal({ ...base, maintenant: 'n importe quoi' }).jour, null, 'date invalide');
+});

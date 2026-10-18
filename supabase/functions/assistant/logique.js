@@ -28,11 +28,14 @@ function bloc(b, outil) {
   }
   return null;
 }
-export function lireDemande(texte, { outil, modele, maxTokens = LIMITES.maxTokens } = {}) {
+export function lireDemande(texte, { outil, modele, maxTokens = LIMITES.maxTokens, octets } = {}) {
   if (!OUTILS.includes(outil)) return refus(400, 'outil');
+  if (typeof modele !== 'string' || modele === '') return refus(502, 'serveur');
   if (typeof texte !== 'string') return refus(400, 'forme');
   const borne = outil === 'extraction' ? LIMITES.corpsExtraction : LIMITES.corps;
-  if (texte.length > borne) return refus(413, 'trop_lourd');
+  const taille = Number.isInteger(octets) && octets >= 0 ? Math.max(octets, texte.length) : texte.length;
+  if (taille > borne) return refus(413, 'trop_lourd');
+  const plafond = Number.isInteger(maxTokens) ? Math.min(maxTokens, LIMITES.maxTokens) : LIMITES.maxTokens;
   let enveloppe; try { enveloppe = JSON.parse(texte); } catch { return refus(400, 'forme'); }
   const corps = own(enveloppe, 'corps');
   if (!objetNu(corps)) return refus(400, 'forme');
@@ -56,7 +59,7 @@ export function lireDemande(texte, { outil, modele, maxTokens = LIMITES.maxToken
   const mt = own(corps, 'max_tokens');
   if (mt === undefined) out.max_tokens = 4000;
   else if (!Number.isInteger(mt)) return refus(400, 'forme');
-  else if (mt < 1 || mt > maxTokens) return refus(422, 'bornes');
+  else if (mt < 1 || mt > plafond) return refus(422, 'bornes');
   else out.max_tokens = mt;
   if (outil === 'recherche-web') {
     const tools = own(corps, 'tools');
@@ -67,8 +70,7 @@ export function lireDemande(texte, { outil, modele, maxTokens = LIMITES.maxToken
       if (!objetNu(t) || own(t, 'type') !== OUTIL_WEB || own(t, 'name') !== 'web_search') return refus(400, 'forme');
       const mu = own(t, 'max_uses');
       if (mu !== undefined && (!Number.isInteger(mu) || mu < 1 || mu > LIMITES.maxUses)) return refus(422, 'bornes');
-      const outilNu = { type: OUTIL_WEB, name: 'web_search' };
-      if (mu !== undefined) outilNu.max_uses = mu;
+      const outilNu = { type: OUTIL_WEB, name: 'web_search', max_uses: mu === undefined ? LIMITES.maxUses : mu };
       const loc = own(t, 'user_location');
       if (loc !== undefined) {
         if (!objetNu(loc) || own(loc, 'type') !== 'approximate') return refus(400, 'forme');
@@ -82,15 +84,17 @@ export function lireDemande(texte, { outil, modele, maxTokens = LIMITES.maxToken
   return { ok: true, corps: out };
 }
 export function decisionQuota(appelsDuJour, quotaJour) {
-  return Number.isInteger(appelsDuJour) && Number.isInteger(quotaJour) && appelsDuJour < quotaJour ? { ok: true } : { ok: false, statut: 429, raison: 'quota' };
+  return Number.isInteger(appelsDuJour) && appelsDuJour >= 0 && Number.isInteger(quotaJour) && appelsDuJour < quotaJour ? { ok: true } : { ok: false, statut: 429, raison: 'quota' };
 }
 export function statutRelaye(s) {
   if (s === 200 || s === 400 || s === 403 || s === 413 || s === 429) return s;
   if (s === 529) return 503;
   return 502;   // 401 (clé serveur refusée), 404, 5xx, redirections : panne de la passerelle, jamais « ta clé »
 }
-const entierOuNul = (v) => (Number.isInteger(v) && v >= 0 ? v : null);
+const entierOuNul = (v) => (Number.isSafeInteger(v) && v >= 0 ? v : null);
+const jourDe = (maintenant) => { try { return new Date(maintenant).toISOString().slice(0, 10); } catch { return null; } };
 export function ligneJournal({ ownerId, outil, statut, usage, dureeMs, octets, maintenant }) {
-  return { owner_id: ownerId, outil, statut, jetons_entree: entierOuNul(own(usage, 'input_tokens')), jetons_sortie: entierOuNul(own(usage, 'output_tokens')), duree_ms: Math.max(0, Math.floor(Number(dureeMs) || 0)), octets: entierOuNul(octets), jour: String(maintenant).slice(0, 10) };
+  const duree = Number(dureeMs);
+  return { owner_id: ownerId, outil: OUTILS.includes(outil) ? outil : null, statut: Number.isInteger(statut) ? statut : null, jetons_entree: entierOuNul(own(usage, 'input_tokens')), jetons_sortie: entierOuNul(own(usage, 'output_tokens')), duree_ms: Number.isFinite(duree) ? Math.max(0, Math.floor(duree)) : 0, octets: entierOuNul(octets), jour: jourDe(maintenant) };
 }
-export function corpsErreur(raison, extra = {}) { return { erreur: raison, ...extra }; }
+export function corpsErreur(raison, extra = {}) { return { ...extra, erreur: raison }; }
