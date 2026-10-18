@@ -214,4 +214,96 @@ export async function runCreerIaTests({ eq, ok }) {
   eq(L.detectTimers('Cuire 9 min, puis ' + '9'.repeat(400) + ' h.').timers.map((x) => x.seconds), [540], 'minuteurs : un nombre qui déborde n’efface pas les minuteurs valides de l’étape');
   ok(!('seconds_max' in L.detectTimers('Cuire 2 h.').timers[0]), 'minuteurs : une durée en heures n’acquiert pas de clé seconds_max');
   eq(L.detectTimers('Cuire 0 min.'), {}, 'minuteurs : une durée nulle ne produit rien');
+  // --- T2 : creerRecetteIA (§ 4.4, C-8, C-13, C-14)
+  const reponse = (status, corps, headers = {}) => ({ ok: status >= 200 && status < 300, status, headers: new Headers(headers), text: async () => (typeof corps === 'string' ? corps : JSON.stringify(corps)), body: null });
+  const CLE = 'sk-factice-creation';
+  const cfg = { provider: 'anthropic', api_key: CLE, model: 'modele-test' };
+  // Toutes les issues rendues par `appel` et par les appels directs : aucune ne doit contenir la clé (C-8), contrôlé en fin de bloc.
+  const vues = [];
+  // P2 : le faux fetch reçoit `options` (dont `signal`) ; `pendante` écoute l'abandon — sans cela le test du délai bloquerait la suite.
+  const appel = (rendre, deps = {}, args = {}) => { const appels = []; const f = async (url, options) => { appels.push({ url, options }); return rendre(appels.length, options); }; return C.creerRecetteIA({ demande: 'saumon fenouil', filtres: { servings: 2 }, langue: 'fr', cfg, ...args }, { fetch: f, enLigne: () => true, ...deps }).then((issue) => { vues.push(issue); return { issue, appels }; }); };
+  const pendante = (n, o) => new Promise((_, rej) => o.signal.addEventListener('abort', () => rej(new DOMException('abandon', 'AbortError')), { once: true }));
+  // P13 : `creerRecetteIA` ne journalise que `illisible` et `interne` ; console.error est remplacé le temps du bloc (critère « 0 erreur console »).
+  const vraiError = console.error; const erreurs = []; console.error = (...a) => erreurs.push(a);
+  try {
+  const corpsOk = (texte) => ({ content: [{ type: 'text', text: texte }], stop_reason: 'end_turn', usage: { input_tokens: 900, output_tokens: 700 } });
+  for (const [nom, c, etat] of [['absent', undefined, 'non_configure'], ['none', { provider: 'none' }, 'non_configure'], ['sans clé', { provider: 'anthropic', api_key: '', model: 'm' }, 'non_configure'], ['openai', { provider: 'openai_compatible', api_key: 'k', model: 'm', base_url: '' }, 'non_pris_en_charge']]) {
+    const { issue, appels } = await appel(() => reponse(200, corpsOk('{}')), {}, { cfg: c });
+    eq([issue.etat, appels.length], [etat, 0], 'garde : ' + nom + ' → aucun appel');
+  }
+  { const { issue, appels } = await appel(() => reponse(200, corpsOk('{}')), {}, { cfg: { ...cfg, api_key: 'clé avec espace' } }); eq([issue.etat, issue.raison, appels.length], ['indisponible', 'cle_refusee', 0], 'garde : clé hors [\\x21-\\x7e] → cle_refusee sans appel'); }
+  { const { issue, appels } = await appel(() => reponse(200, corpsOk('{}')), { enLigne: () => false }); eq([issue.raison, appels.length], ['hors_ligne', 0], 'garde : hors ligne'); }
+  { const { issue, appels } = await appel(() => reponse(200, corpsOk('{}')), {}, { demande: ' ' }); eq([issue.raison, appels.length], ['requete', 0], 'garde : demande vide'); }
+  { const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE)))); 
+    const corps = JSON.parse(appels[0].options.body);
+    eq([issue.etat, issue.recette.title, issue.usage, issue.modele, corps.max_tokens, corps.model, 'thinking' in corps, 'tools' in corps, appels[0].options.redirect, appels[0].options.credentials, appels[0].options.headers['x-api-key'] === CLE, JSON.stringify(issue).includes(CLE)],
+      ['trouve', 'Saumon au fenouil', { entree: 900, sortie: 700 }, 'modele-test', 16000, 'modele-test', false, false, 'error', 'omit', true, false], 'trouve : recette validée, usage, 16 000 jetons, sans thinking ni outil, redirect error, clé dans l’en-tête et nulle part ailleurs (C-8)'); }
+  { const { issue } = await appel(() => reponse(200, corpsOk('Voici la recette :\n' + JSON.stringify(VALIDE) + '\nBon appétit'))); eq(issue.etat, 'trouve', 'trouve : prose autour du JSON tolérée (parseJsonLoose)'); }
+  { const { issue } = await appel(() => reponse(200, corpsOk(JSON.stringify({ ...VALIDE, title: 'Soupe sans gluten' })))); eq([issue.etat, issue.raison, issue.motif], ['indisponible', 'illisible', 'affirmation'], 'illisible : une recette invalide porte son motif (C-3)'); }
+  { const { issue } = await appel(() => reponse(200, { content: [{ type: 'text', text: '{' }], stop_reason: 'max_tokens' })); eq(issue.raison, 'interrompu', 'coupure : max_tokens → interrompu (C-13)'); }
+  { const { issue } = await appel(() => reponse(200, { content: [], stop_reason: 'refusal' })); eq(issue.raison, 'refus', 'refus du modèle → refus'); }
+  { const { issue } = await appel(() => reponse(200, { content: [{ type: 'thinking', thinking: 'x' }, { type: 'text', text: JSON.stringify(VALIDE) }], stop_reason: 'end_turn' })); eq(issue.etat, 'trouve', 'seuls les blocs text sont lus (F11)'); }
+  for (const [status, raison] of [[401, 'cle_refusee'], [429, 'trop_de_demandes'], [400, 'requete'], [403, 'cle_refusee'], [500, 'serveur'], [418, 'requete']]) { const { issue } = await appel(() => reponse(status, 'CORPS-SENTINELLE')); eq([issue.raison, JSON.stringify(issue).includes('SENTINELLE')], [raison, false], `statut ${status} → ${raison}, corps d’erreur jamais dans l’issue`); }
+  { const { issue } = await appel(() => { throw new TypeError('Failed to fetch'); }); eq(issue.raison, 'reseau', 'réseau'); }
+  { const { issue } = await appel(() => reponse(200, 'pas du json')); eq(issue.raison, 'reponse_illisible', 'corps HTTP non JSON → reponse_illisible (F19)'); }
+  { const { issue } = await appel(() => reponse(200, corpsOk('Je ne peux pas, désolé.'))); eq([issue.raison, issue.motif], ['illisible', 'json'], 'texte du modèle sans JSON → illisible, motif json (C-3, P13)'); }
+  { const ctl = new AbortController(); ctl.abort(); const { issue, appels } = await appel(() => reponse(200, corpsOk('{}')), { signal: ctl.signal }); eq([issue.raison, appels.length], ['annule', 0], 'déjà annulé → annule sans fetch'); }
+  { const { issue } = await appel(pendante, { tentativeMs: 5 }); eq(issue.raison, 'delai', 'délai → delai (P2)'); }
+  { const c = new AbortController(); const p = appel(pendante, { signal: c.signal, tentativeMs: 60000 }); c.abort(); const { issue } = await p; eq(issue.raison, 'annule', 'abandon extérieur en vol → annule (P2/P18)'); }
+  { const { issue } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), { corpsMax: 10 }); eq(issue.raison, 'reponse_illisible', 'corps au-dessus de corpsMax → reponse_illisible'); }
+  { const vraie = new Response(JSON.stringify(corpsOk(JSON.stringify(VALIDE))), { status: 200, headers: { 'content-type': 'application/json' } }); const { issue } = await appel(() => vraie); eq(issue.etat, 'trouve', 'corps lu en flux (vraie Response) → trouve (P18, V-F1)'); }
+  { const { issue } = await appel(() => reponse(200, corpsOk(JSON.stringify({ ...VALIDE, title: 't'.repeat(120), ingredients: Array.from({ length: 40 }, (_, i) => ({ name: 'ing' + i, quantity: 1, unit: 'g' })), steps: Array.from({ length: 20 }, () => 'é'.repeat(500)) })))); eq(issue.etat, 'trouve', 'bornes maximales acceptées (P18)'); }
+
+  // --- T2, compléments de l'implémenteur : ce qui part, ce qui revient, ce qui ne lève jamais
+  { const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { langue: 'en' });
+    const corps = JSON.parse(appels[0].options.body);
+    eq([Object.keys(corps).sort(), typeof corps.system, corps.messages.length, corps.messages[0].role, corps.messages[0].content.includes('saumon fenouil'), corps.system.includes('You design'), corps.system.includes('exactly 2'), appels[0].url, appels[0].options.method, appels[0].options.headers['anthropic-version'], appels[0].options.signal instanceof AbortSignal, issue.etat],
+      [['max_tokens', 'messages', 'model', 'system'], 'string', 1, 'user', true, true, true, 'https://api.anthropic.com/v1/messages', 'POST', '2023-06-01', true, 'trouve'], 'corps : exactement model, max_tokens, system, messages ; en anglais en interface anglaise ; adresse Messages ; un signal'); }
+  { const { appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE)))); ok(appels[0].options.signal.aborted === true, 'sortie : le signal du fetch est abandonné à la sortie (ctl.abort() en finally)'); }
+  { const { issue } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { filtres: { servings: 4, maxMinutes: 10 } }); eq([issue.etat, issue.avertissements], ['trouve', ['L’assistant a rendu 2 portions au lieu de 4.', 'Durée estimée 25 min, au-dessus des 10 min demandées.']], 'avertissements : portions et durée comparées aux filtres normalisés de la demande'); }
+  { const { issue } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { filtres: null }); eq([issue.etat, issue.avertissements], ['trouve', ['L’assistant a rendu 2 portions au lieu de 4.']], 'filtres nuls : portions par défaut 4, aucune levée'); }
+  { const { issue } = await appel(() => reponse(200, { content: [{ type: 'text', text: JSON.stringify(VALIDE) }], stop_reason: 'max_tokens' })); eq(issue.raison, 'interrompu', 'coupure : un JSON complet mais stop_reason max_tokens reste interrompu (C-13)'); }
+  { const { issue } = await appel(() => reponse(200, { content: [{ type: 'text', text: JSON.stringify(VALIDE) }], stop_reason: 'refusal' })); eq(issue.raison, 'refus', 'refus : stop_reason refusal l’emporte sur un texte présent'); }
+  for (const [nom, usage] of [['absent', undefined], ['chaînes', { input_tokens: 'x', output_tokens: '7' }], ['négatifs', { input_tokens: -1, output_tokens: 5 }], ['partiel', { input_tokens: 9 }], ['objet nu', 7]]) {
+    const { issue } = await appel(() => reponse(200, { content: [{ type: 'text', text: JSON.stringify(VALIDE) }], stop_reason: 'end_turn', ...(usage === undefined ? {} : { usage }) }));
+    eq([issue.etat, issue.usage], ['trouve', null], 'usage ' + nom + ' → null, la recette est quand même rendue');
+  }
+  { const { issue } = await appel(() => reponse(200, { content: [{ type: 'thinking', thinking: 'brouillon {"title":"faux"}', text: '{"title":"faux"}' }, { type: 'text', text: JSON.stringify(VALIDE) }], stop_reason: 'end_turn' })); eq([issue.etat, issue.recette?.title], ['trouve', 'Saumon au fenouil'], 'blocs : un bloc non text ne contribue jamais au texte lu, même avec un champ text ou un brouillon à accolades'); }
+  { const { issue } = await appel(() => reponse(200, { content: [null, 7, { type: 'text', text: 12 }, { type: 'text' }, { type: 'text', text: JSON.stringify(VALIDE) }], stop_reason: 'end_turn' })); eq(issue.etat, 'trouve', 'blocs hostiles (null, nombre, text non chaîne) ignorés, le bloc text valide est lu'); }
+  { const { issue } = await appel(() => reponse(200, { content: 'x', stop_reason: 'end_turn' })); eq(issue.raison, 'reponse_illisible', 'content qui n’est pas un tableau → reponse_illisible'); }
+  { const { issue } = await appel(() => reponse(200, [1, 2])); eq(issue.raison, 'reponse_illisible', 'corps JSON qui n’est pas un objet → reponse_illisible'); }
+  { const { issue } = await appel(() => ({ status: 200 })); eq(issue.raison, 'interne', 'réponse sans text() ni flux → interne (V-C6), pas reseau'); }
+  { const { issue } = await appel(() => ({ ok: true, status: 200, text: async () => { throw new Error('flux coupé'); } })); eq(issue.raison, 'reseau', 'lecture du corps qui échoue → reseau'); }
+  { const gros = new Response(JSON.stringify(corpsOk(JSON.stringify(VALIDE))), { status: 200 }); const { issue } = await appel(() => gros, { corpsMax: 100 }); eq(issue.raison, 'reponse_illisible', 'vraie Response au-dessus de corpsMax → reponse_illisible (lecture en flux coupée)'); }
+  { const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { cfg: { ...cfg, api_key: 'a\u0000b' } }); eq([issue.raison, appels.length], ['cle_refusee', 0], 'garde : clé avec un caractère de contrôle → cle_refusee sans appel'); }
+  { const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { cfg: { ...cfg, api_key: 12345 } }); eq([issue.etat, appels.length], ['non_configure', 0], 'garde : clé qui n’est pas une chaîne → non_configure sans appel'); }
+  { const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { cfg: { ...cfg, model: '' } }); eq([issue.etat, appels.length], ['non_configure', 0], 'garde : modèle vide → non_configure sans appel'); }
+  {
+    const parente = { id: 'rv_p', recipe_id: 'rc_p', title: 'Saumon', servings: 2, ingredients: [{ source_text: '200 g saumon' }], steps: [{ text: 'Cuire.' }], provenance: { creation: { description: 'Un plat.' } } };
+    const { issue, appels } = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { parente, changement: ' pour 4 personnes ' });
+    const contenu = JSON.parse(appels[0].options.body).messages[0].content;
+    eq([issue.etat, contenu.includes('<<<RECETTE_DE_DEPART'), contenu.includes('Changement demandé : pour 4 personnes')], ['trouve', true, true], 'adaptation : la parente et le changement sont transmis à la demande');
+    const sans = await appel(() => reponse(200, corpsOk(JSON.stringify(VALIDE))), {}, { parente, changement: '  ' });
+    eq([sans.issue.raison, sans.appels.length], ['requete', 0], 'adaptation sans changement → requete, aucun appel (P15)');
+  }
+  { // « ne lève jamais » : chaque entrée absurde rend une issue, avec la raison attendue
+    const enLigne = () => true;
+    const ENTREES = [
+      ['rien', [undefined, undefined], ['non_configure', null]], ['nuls', [null, null], ['non_configure', null]], ['nombre', [42, {}], ['non_configure', null]], ['chaîne', ['x', { fetch: 3 }], ['non_configure', null]], ['cfg nul', [{ cfg: null }, {}], ['non_configure', null]],
+      ['getter qui lève', [{ demande: 'saumon', cfg: { provider: 'anthropic', api_key: CLE, get model() { throw new Error('boom'); } } }, { enLigne }], ['indisponible', 'interne']],
+      ['enLigne qui lève', [{ demande: 'saumon', cfg }, { enLigne: () => { throw new Error('boom'); } }], ['indisponible', 'interne']],
+      ['fetch qui lève (sync)', [{ demande: 'saumon', cfg }, { fetch: () => { throw new RangeError('boom'); }, enLigne }], ['indisponible', 'reseau']],
+      ['fetch rend null', [{ demande: 'saumon', cfg }, { fetch: async () => null, enLigne }], ['indisponible', 'interne']],
+      ['signal qui n’en est pas un', [{ demande: 'saumon', cfg }, { fetch: async () => reponse(200, 'x'), enLigne, signal: { aborted: false } }], ['indisponible', 'interne']],
+      ['demande non chaîne', [{ demande: { toString() { throw new Error('boom'); } }, cfg }, { enLigne }], ['indisponible', 'requete']],
+    ];
+    const rendus = [];
+    for (const [, [a, dp]] of ENTREES) { let i; try { i = await C.creerRecetteIA(a, dp); } catch (e) { i = { etat: 'LEVE', raison: String(e) }; } vues.push(i); rendus.push([i.etat, i.raison]); }
+    eq(rendus, ENTREES.map((e) => e[2]), 'ne lève jamais : ' + ENTREES.map((e) => e[0]).join(', '));
+  }
+  ok(vues.every((i) => !JSON.stringify(i).includes(CLE)), 'clé : aucune des issues rendues par le bloc ne la contient (C-8)');
+  ok(!JSON.stringify(erreurs).includes(CLE), 'journal : la clé n’est jamais journalisée (C-8)');
+  ok(erreurs.length >= 2 && erreurs.every((a) => /illisible|interne/.test(JSON.stringify(a))), 'journal : seuls illisible et interne journalisent (P13)');
+  eq(erreurs.filter((a) => /illisible:json/.test(JSON.stringify(a))).length >= 1 && erreurs.every((a) => a.length === 2 && Object.keys(a[1]).every((k) => ['store', 'id', 'status', 'reason', 'table', 'count', 'name'].includes(k))), true, 'journal : clés SAFE seulement, motif de la forme « illisible:json » (P13)');
+  } finally { console.error = vraiError; }
 }

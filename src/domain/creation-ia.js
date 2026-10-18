@@ -1,7 +1,9 @@
 // Création d'une recette par l'assistant (spec 2026-10-18-creer-avec-l-ia). Pur : aucune base, aucun DOM, aucun réseau ici
 // (creerRecetteIA, en bas, reçoit fetch en dépendance). La sortie du modèle est une DONNÉE HOSTILE : validée champ par champ,
 // propriétés propres seulement, bornes strictes, jamais de troncature silencieuse (C-7), jamais d'adresse ni de source (C-5).
-import { borner } from '../core/bornes.js';
+import { borner, lireBornee, signalDelai, OPTIONS_FETCH } from '../core/bornes.js';
+import { logError } from '../core/log.js';
+import { parseJsonLoose, ANTHROPIC_MESSAGES_URL, anthropicHeaders } from './llm.js';
 import { parseIngredientLine, parseStepsBlock } from './lines.js';
 import { formatNumber, parseQuantity } from './quantity.js';
 import { DIET_TAGS, RECIPE_TYPES } from '../model/schema.js';
@@ -199,4 +201,88 @@ export function fabriquerRecetteIA({ recette, demande, filtres, langue = 'fr', m
   if (parente) return { recipe: null, version };
   const recipe = { id: recipeId, origine: 'ia', edition_id: null, original_title: recette.title, original_language: langue, type: filtres?.type || null, cuisines: [], tags: [], favorite: false, source_page_ids: [], ingredient_ids: [...new Set(ingredients.map((l) => l.ingredient_id).filter(Boolean))], source_label: ETIQUETTE_SOURCE, unit_convention_id: convention?.id || 'metric_ca', availability: 'available', verification_state: 'to_verify', current_version_id: version.id };
   return { recipe, version };
+}
+
+// § 4.4 : UN appel à l'API Messages, mêmes murs que chercherRecettesWeb (recherche-web.js) : gardes AVANT tout fetch, aucun `await` avant
+// l'appel (un abandon extérieur arrive donc toujours à un fetch déjà posé), `redirect: 'error'` (la clé ne suit jamais une redirection),
+// corps borné et lu en flux, corps d'erreur JAMAIS lu ni rendu, clé uniquement dans l'en-tête (jamais dans l'issue ni dans le journal).
+// Ne lève jamais : toute exception inattendue devient `interne`. P13 : seuls `illisible` et `interne` journalisent, avec les clés SAFE de log.js.
+export async function creerRecetteIA(args, deps) {
+  let modele = null;                                        // lu par `issue` ; affecté DANS le try (args et cfg peuvent être n'importe quoi)
+  const issue = (etat, raison = null, extra = {}) => ({ etat, raison, motif: null, recette: null, avertissements: [], modele, usage: null, ...extra });
+  try {
+    const dp = deps && typeof deps === 'object' ? deps : {};
+    const { demande: texteDemande, filtres, langue, cfg, parente, changement } = args ?? {};
+    modele = typeof cfg?.model === 'string' ? cfg.model : null;
+    if (!cfg || typeof cfg !== 'object' || !cfg.provider || cfg.provider === 'none' || typeof cfg.api_key !== 'string' || !cfg.api_key || !modele) return issue('non_configure');
+    if (cfg.provider !== 'anthropic') return issue('non_pris_en_charge');
+    // Une clé collée avec un caractère invisible ou hors ASCII ferait lever fetch (« ByteString ») avant tout réseau : c'est une clé refusée, pas une panne.
+    if (!/^[\x21-\x7e]+$/.test(cfg.api_key)) return issue('indisponible', 'cle_refusee');
+    const demande = construireDemandeCreation({ demande: texteDemande, filtres, langue, parente, changement });
+    if (demande.erreur) return issue('indisponible', 'requete');
+    const enLigne = dp.enLigne ?? (() => (typeof navigator === 'undefined' ? true : navigator.onLine !== false));
+    if (!enLigne()) return issue('indisponible', 'hors_ligne');
+    if (dp.signal?.aborted) return issue('indisponible', 'annule');
+    const f = dp.fetch ?? globalThis.fetch;                 // fonction LIBRE : jamais dp.fetch(...) (Illegal invocation)
+    const corpsMax = dp.corpsMax ?? LIMITES_CREATION.corps;
+    const ctl = new AbortController();
+    const delai = signalDelai(dp.tentativeMs ?? LIMITES_CREATION.tentativeMs);
+    const relaisDelai = () => ctl.abort();
+    const relaisExterne = () => ctl.abort();
+    if (delai.aborted) ctl.abort(); else delai.addEventListener('abort', relaisDelai, { once: true });
+    dp.signal?.addEventListener('abort', relaisExterne, { once: true });
+    const motifAbandon = () => (dp.signal?.aborted ? 'annule' : 'delai');
+    try {
+      // Corps et en-têtes sont calculés HORS du try du réseau : une exception ici est `interne` (filet), jamais `reseau`.
+      // Pas de `thinking`, pas de `tools` : seuls les blocs `text` sont lus (F11).
+      const corps = JSON.stringify({ model: cfg.model, max_tokens: LIMITES_CREATION.maxTokens, system: demande.system, messages: [{ role: 'user', content: demande.user }] });
+      const entetes = anthropicHeaders(cfg.api_key);
+      let r;
+      try {
+        r = await f(ANTHROPIC_MESSAGES_URL, { ...OPTIONS_FETCH, method: 'POST', redirect: 'error', headers: entetes, body: corps, signal: ctl.signal });
+      } catch { return issue('indisponible', ctl.signal.aborted ? motifAbandon() : 'reseau'); }
+      if (!r || typeof r.status !== 'number') return issue('indisponible', 'interne');
+      // Le corps d'une réponse en erreur n'est jamais lu (il ne sert à aucune décision ici) : le statut seul classe.
+      if (r.status === 401 || r.status === 403) return issue('indisponible', 'cle_refusee');
+      if (r.status === 429) return issue('indisponible', 'trop_de_demandes');
+      if (r.status >= 400 && r.status < 500) return issue('indisponible', 'requete');
+      if (r.status < 200 || r.status >= 300) return issue('indisponible', 'serveur');   // 5xx, et tout statut hors 2xx qui aurait franchi redirect: 'error'
+      // V-C6 : une réponse sans flux lisible NI text() n'est pas une panne réseau — c'est une forme impossible : interne.
+      if (typeof r.text !== 'function' && !(r.body && typeof r.body.getReader === 'function')) return issue('indisponible', 'interne');
+      let texte;
+      try {
+        const morceaux = await lireBornee(r, corpsMax);
+        if (morceaux === null) return issue('indisponible', 'reponse_illisible');
+        texte = morceaux === false ? await r.text() : await new Blob(morceaux).text();
+      } catch { return issue('indisponible', ctl.signal.aborted ? motifAbandon() : 'reseau'); }
+      if (typeof texte !== 'string' || texte.length > corpsMax) return issue('indisponible', 'reponse_illisible');
+      let json;
+      try { json = JSON.parse(texte); } catch { return issue('indisponible', 'reponse_illisible'); }
+      if (!json || typeof json !== 'object' || !Array.isArray(json.content)) return issue('indisponible', 'reponse_illisible');
+      if (json.stop_reason === 'refusal') return issue('indisponible', 'refus');
+      if (json.stop_reason === 'max_tokens') return issue('indisponible', 'interrompu');   // C-13 : une coupure n'est jamais prise pour une recette
+      const lu = json.content.filter((b) => b && typeof b === 'object' && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('');
+      let brut;
+      try { brut = parseJsonLoose(lu); } catch {
+        logError('creation_ia', { reason: 'illisible:json' });
+        return issue('indisponible', 'illisible', { motif: 'json' });
+      }
+      const v = validerRecetteIA(brut, { servings: demande.filtres.servings, maxMinutes: demande.filtres.maxMinutes });
+      if (!v.ok) {
+        logError('creation_ia', { reason: 'illisible:' + v.motif });
+        return issue('indisponible', 'illisible', { motif: v.motif });
+      }
+      const jetons = (n) => (Number.isInteger(n) && n >= 0 ? n : null);
+      const entree = jetons(json.usage?.input_tokens);
+      const sortie = jetons(json.usage?.output_tokens);
+      return issue('trouve', null, { recette: v.recette, avertissements: v.avertissements, usage: entree !== null && sortie !== null ? { entree, sortie } : null });
+    } finally {
+      delai.removeEventListener('abort', relaisDelai);
+      dp.signal?.removeEventListener('abort', relaisExterne);
+      ctl.abort();                                          // libère le flux d'une sortie anticipée ; sans effet après une lecture complète
+    }
+  } catch (e) {
+    logError('creation_ia', { reason: 'interne', error: e });
+    return issue('indisponible', 'interne');
+  }
 }
