@@ -308,8 +308,10 @@ export async function runCreerIaTests({ eq, ok }) {
   { const { issue } = await appel(() => reponse(200, { content: [{ type: 'text', text: '{' }], stop_reason: 'max_tokens' })); eq(issue.raison, 'interrompu', 'coupure : max_tokens → interrompu (C-13)'); }
   { const { issue } = await appel(() => reponse(200, { content: [], stop_reason: 'refusal' })); eq(issue.raison, 'refus', 'refus du modèle → refus'); }
   { const { issue } = await appel(() => reponse(200, { content: [{ type: 'thinking', thinking: 'x' }, { type: 'text', text: JSON.stringify(VALIDE) }], stop_reason: 'end_turn' })); eq(issue.etat, 'trouve', 'seuls les blocs text sont lus (F11)'); }
-  for (const [status, raison] of [[401, 'non_connecte'], [429, 'trop_de_demandes'], [400, 'requete'], [403, 'non_admis'], [413, 'requete'], [422, 'requete'], [500, 'serveur'], [502, 'serveur'], [503, 'serveur'], [504, 'delai'], [418, 'requete'], [302, 'serveur']]) { const { issue } = await appel(() => reponse(status, 'CORPS-SENTINELLE')); eq([issue.raison, JSON.stringify(issue).includes('SENTINELLE')], [raison, false], `statut ${status} → ${raison}, corps d’erreur jamais dans l’issue`); }
+  for (const [status, raison] of [[401, 'non_connecte'], [429, 'trop_de_demandes'], [400, 'requete'], [403, 'serveur'], [413, 'requete'], [422, 'requete'], [500, 'serveur'], [502, 'serveur'], [503, 'serveur'], [504, 'delai'], [418, 'requete'], [302, 'serveur']]) { const { issue } = await appel(() => reponse(status, 'CORPS-SENTINELLE')); eq([issue.raison, JSON.stringify(issue).includes('SENTINELLE')], [raison, false], `statut ${status} → ${raison}, corps d’erreur jamais dans l’issue`); }
   { const { issue } = await appel(() => reponse(429, { erreur: 'quota', quota: 60 })); eq([issue.etat, issue.raison, issue.quota, issue.recette], ['indisponible', 'quota', 60, null], 'statut 429 { erreur: quota, quota: 60 } → quota, avec quota: 60'); }
+  { const { issue } = await appel(() => reponse(429, { erreur: 'quota' })); eq([issue.etat, issue.raison, 'quota' in issue, issue.quota], ['indisponible', 'quota', true, null], 'statut 429 { erreur: quota } SANS nombre → quota quand même (la passerelle l’a écrit), quota: null — jamais « trop de demandes »'); }
+  { const { issue } = await appel(() => reponse(403, { type: 'error', error: { type: 'permission_error', message: 'x' } })); eq([issue.raison], ['serveur'], 'statut 403 RELAYÉ d’Anthropic (sans champ erreur) → serveur, pas « compte non admis »'); }
   { const a = await appel(() => reponse(413, { erreur: 'trop_lourd' })); const b = await appel(() => reponse(400, { type: 'error' })); eq([a.issue.raison, a.issue.trop_lourd, b.issue.trop_lourd], ['requete', true, undefined], 'statut 413 → requete avec trop_lourd: true (« La demande est trop lourde. »)'); }
   { const a = await appel(() => reponse(502, { erreur: 'serveur' })); const b = await appel(() => reponse(504, { erreur: 'delai' })); const c = await appel(() => reponse(403, { erreur: 'non_admis' })); const d = await appel(() => reponse(401, { erreur: 'non_connecte' })); eq([a.issue.raison, b.issue.raison, c.issue.raison, d.issue.raison], ['serveur', 'delai', 'non_admis', 'non_connecte'], 'champ erreur de la passerelle : serveur, delai, non_admis, non_connecte'); }
   { const { issue } = await appel(() => { throw new TypeError('Failed to fetch'); }); eq(issue.raison, 'reseau', 'réseau'); }
@@ -558,7 +560,7 @@ export async function runCreerIaTests({ eq, ok }) {
     const statutVol = (root) => [...root.querySelectorAll('[role="status"]')].some((n) => n.textContent === 'L’assistant compose une recette…');
     const ING_BY_ID = new Map(INGREDIENTS.map((i) => [i.id, i]));
     // La session vient de ctx.sync.auth.jeton() (R-T3-1) ; `extra` peut remplacer `settings` pour les gardes sans session.
-    const ctxDe = (session, extra = {}) => ({ recipes: [], docs: [], docsByRecipe: new Map(), ingredientsById: ING_BY_ID, versionsById: new Map(), recipesById: new Map(), settings: { llm: { provider: 'none' } }, sync: { auth: { jeton: async () => session } }, conventionFor: () => null, ...extra });
+    const ctxDe = (session, extra = {}) => ({ recipes: [], docs: [], docsByRecipe: new Map(), ingredientsById: ING_BY_ID, versionsById: new Map(), recipesById: new Map(), settings: { llm: { provider: 'none' } }, sync: { user: session ? { id: 'u1', email: 'a@exemple.invalid' } : null, auth: { jeton: async () => session } }, conventionFor: () => null, ...extra });
     const JETON = 'jeton-ecran-sentinelle'; // C-8 : il doit atteindre creer(), jamais l'état ni le DOM
     const SESSION = { access_token: JETON, user: { id: 'u1', email: 'a@exemple.invalid' } };
     const trouve = { etat: 'trouve', raison: null, motif: null, recette: VALIDE, avertissements: [], modele: 'm', usage: { entree: 1, sortie: 2 } };
@@ -1014,7 +1016,7 @@ export async function runCreerIaTests({ eq, ok }) {
     const tick = () => new Promise((r) => setTimeout(r, 0));
     const ING_T4 = new Map(INGREDIENTS.map((i) => [i.id, i]));
     const SESSION = { access_token: 'jeton-factice-portes', user: { id: 'u1', email: 'a@exemple.invalid' } };
-    const ctxDe = (session) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING_T4, meal_feedback: [], settings: { llm: { provider: 'none' } }, sync: { auth: { jeton: async () => session } }, versionsById: new Map(), recipesById: new Map(), conventionFor: () => null });
+    const ctxDe = (session) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING_T4, meal_feedback: [], settings: { llm: { provider: 'none' } }, sync: { user: session ? { id: 'u1', email: 'a@exemple.invalid' } : null, auth: { jeton: async () => session } }, versionsById: new Map(), recipesById: new Map(), conventionFor: () => null });
     const appels = { n: 0, rendre: null };
     const chercher = async () => { appels.n += 1; return new Promise((r) => { appels.rendre = r; }); };
     const navs = [];
@@ -1518,7 +1520,7 @@ export async function runCreerIaTests({ eq, ok }) {
     const fab = C.fabriquerRecetteIA({ recette: VALIDE, demande: 'saumon fenouil', filtres: { diets: ['sans_lactose'], type: 'plat_principal', servings: 2, maxMinutes: 30 }, langue: 'fr', modele: 'm', usage: null, convention: C.conventionCreation('metric_ca'), newId: id7, maintenant: '2026-10-18T03:00:00.000Z' });
     const fiche = { ...fab.recipe, created_at: '2026-10-18T03:00:00.000Z' };
     const creation = { ...fab.version, created_at: '2026-10-18T03:00:00.000Z' };
-    const ctxDe = (versions, recipes, session = SESSION) => ({ recipes, docs: [], docsByRecipe: new Map(), ingredientsById: ING, versionsById: new Map(versions.map((v) => [v.id, v])), recipesById: new Map(recipes.map((r) => [r.id, r])), settings: { llm: { provider: 'none' } }, sync: { auth: { jeton: async () => session } }, conventionFor: () => null });
+    const ctxDe = (versions, recipes, session = SESSION) => ({ recipes, docs: [], docsByRecipe: new Map(), ingredientsById: ING, versionsById: new Map(versions.map((v) => [v.id, v])), recipesById: new Map(recipes.map((r) => [r.id, r])), settings: { llm: { provider: 'none' } }, sync: { user: session ? { id: 'u1', email: 'a@exemple.invalid' } : null, auth: { jeton: async () => session } }, conventionFor: () => null });
     const sansAppel = async () => { throw new Error('aucun appel attendu'); };
     const monter = async (query, deps = {}, ctx = ctxDe([creation], [fiche])) => { const root = await S.renderCreerIA({}, query, ctx, { creer: sansAppel, remplacerAdresse: () => {}, navigate: () => {}, toast: () => {}, ...deps }); scene.append(root); return root; };
     // Ce que l'assistant rend pour « pour 4 personnes » (son titre n'est pas gardé : une version n'a pas de titre, la fiche garde le sien).

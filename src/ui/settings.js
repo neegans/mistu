@@ -18,7 +18,7 @@ import { normaliserConfigAssistant, configVide } from '../domain/assistant-confi
 import { configAssistantSuitLeCompte } from '../sync/config.js';
 import { shortcutUrl, SHORTCUT_NAME, isAppleTouchDevice } from '../domain/timers.js';
 import { STORES, SYNC_INTERNAL_STORES, APP_VERSION, ARCHIVE_FORMAT_VERSION } from '../model/schema.js';
-import { pageHeader, section, field, select, segmented, majPastille } from './components.js';
+import { pageHeader, section, field, select, segmented, majPastille, sessionAssistant } from './components.js';
 import { invalidate, setSyncState, getSyncState, relireReglages, SYNC_ROUTE_KEY } from './state.js';
 
 // Évite deux opérations d’archive concurrentes, même après un changement d’écran.
@@ -572,7 +572,7 @@ export function sectionAssistant({ llm: initial, sync = {}, lie = false, suitLeC
     const cfg = normaliserConfigAssistant(llm);
     if (tester) return tester(cfg);
     // Le test passe par la passerelle quand une session existe (R-T3-1) ; T4 retire tout ce formulaire.
-    const p = providerFrom({ llm: cfg }, { session: await sync?.auth?.jeton?.() ?? null });
+    const p = providerFrom({ llm: cfg }, { session: await sessionAssistant({ sync }) });
     if (!p.configured) throw new Error(t('Configuration incomplète'));
     return p.complete([{ role: 'user', content: 'Réponds uniquement : OK' }], { maxTokens: 5 });
   };

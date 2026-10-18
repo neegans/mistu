@@ -58,7 +58,9 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   const { chercher = chercherRecettesWeb, enLigne, navigate: nav = navigate, remplacerAdresse: remplacer = remplacerAdresse } = deps;
   const state = { q: query.q || '', mode: query.mode || 'all', favorites: query.fav === '1', cooked: query.cooked === '1', requireAll: query.any !== '1', parsed: parseQuery(query.q || '') };
   // La session de l'assistant (R-T3-1) : lue ICI pour les gardes de l'écran, relue à chaque appel (un jeton expiré se rafraîchit).
-  const session = await sessionAssistant(ctx);
+  // Attendue en mode web SEULEMENT : jeton() peut rafraîchir le jeton par le réseau, et les autres modes de recherche n'en ont pas
+  // besoin (un changement de mode ré-instancie la route : le mode web relit alors la session).
+  const session = state.mode === 'web' ? await sessionAssistant(ctx) : null;
   const forRecipe = query.for ? ctx.docsByRecipe.get(query.for) : null; // Avec quoi on mange ça ?
   const role = query.role || (forRecipe ? 'salade' : null);
   if (forRecipe && role) state.parsed.filters.type = role;

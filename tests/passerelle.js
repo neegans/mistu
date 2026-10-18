@@ -32,7 +32,7 @@ export async function runPasserelleTests({ eq, ok }) {
       const e = garde(await P.etatAssistant({ fetch: f, session, config: CONFIG }));
       eq([r.statut, r.corps, r.raison, r.quota, e.statut, e.corps, e.raison, n], [0, null, 'non_connecte', null, 0, null, 'non_connecte', 0], `sans session (${nom}) : non_connecte, aucun fetch, ni en POST ni en GET`);
     }
-    eq([(await P.appelerAssistant('creation', {}, { fetch: f, session: SESSION, config: null })).raison, (await P.appelerAssistant('creation', {}, { fetch: f, session: SESSION, config: { url: 'https://x.supabase.co' } })).raison, n], ['non_connecte', 'non_connecte', 0], 'sans configuration de projet sur cette origine (ou sans clé publique) : non_connecte, aucun fetch');
+    eq([garde(await P.appelerAssistant('creation', {}, { fetch: f, session: SESSION, config: null })).raison, garde(await P.appelerAssistant('creation', {}, { fetch: f, session: SESSION, config: { url: 'https://x.supabase.co' } })).raison, n], ['non_connecte', 'non_connecte', 0], 'sans configuration de projet sur cette origine (ou sans clé publique) : non_connecte, aucun fetch');
   }
 
   // --- La requête exacte
@@ -63,23 +63,32 @@ export async function runPasserelleTests({ eq, ok }) {
     const SENTINELLE = 'CORPS-SENTINELLE';
     const statut = async (s, corps) => { const f = async () => reponse(s, corps); return garde(await P.appelerAssistant('recherche-web', {}, { fetch: f, session: SESSION, config: CONFIG })); };
     const anthropic = { type: 'error', error: { type: 'x', message: SENTINELLE } }; // un corps d'erreur d'Anthropic relayé : SANS champ `erreur`
-    for (const [s, raison] of [[401, 'non_connecte'], [403, 'non_admis'], [413, 'trop_lourd'], [400, 'requete'], [422, 'requete'], [404, 'requete'], [418, 'requete'], [429, 'quota'], [500, 'serveur'], [502, 'serveur'], [503, 'serveur'], [504, 'delai'], [529, 'serveur'], [204, 'serveur'], [302, 'serveur']]) {
+    for (const [s, raison] of [[401, 'non_connecte'], [403, 'serveur'], [413, 'trop_lourd'], [400, 'requete'], [422, 'requete'], [404, 'requete'], [418, 'requete'], [429, 'quota'], [500, 'serveur'], [502, 'serveur'], [503, 'serveur'], [504, 'delai'], [529, 'serveur'], [204, 'serveur'], [302, 'serveur']]) {
       const r = await statut(s, anthropic);
-      eq([r.statut, r.corps, r.raison], [s, null, raison], `statut ${s} sans champ erreur → ${raison}, corps null (le corps d’erreur n’est jamais relayé)`);
+      eq([r.statut, r.corps, r.raison, r.ecrite], [s, null, raison, false], `statut ${s} sans champ erreur → ${raison}, corps null (le corps d’erreur n’est jamais relayé), ecrite: false`);
+    }
+    { // un 403 RELAYÉ d'Anthropic (permission_error, ex. « web search not enabled ») n'est PAS un compte non admis : la passerelle écrit toujours `erreur` pour ses propres 403
+      const r = await statut(403, { type: 'error', error: { type: 'permission_error', message: 'x' } });
+      eq([r.raison, r.ecrite, r.corps], ['serveur', false, null], 'statut 403 relayé d’Anthropic (permission_error, sans champ erreur) → serveur, ecrite: false');
+      const a = await statut(403, { erreur: 'non_admis' }); const o = await statut(403, { erreur: 'origine' });
+      eq([a.raison, a.ecrite, o.raison, o.ecrite], ['non_admis', true, 'non_admis', true], 'statut 403 { erreur: non_admis } ou { erreur: origine } (écrits par la passerelle) → non_admis, ecrite: true');
     }
     const q = await statut(429, { erreur: 'quota', quota: 60 });
     eq([q.statut, q.raison, q.quota, q.corps], [429, 'quota', 60, null], '429 { erreur: quota, quota: 60 } → quota, avec quota: 60');
-    eq((await statut(429, anthropic)).quota, null, '429 relayé d’Anthropic (sans champ erreur) : quota null — le domaine y lit « trop de demandes », pas « limite du jour »');
+    eq([(await statut(429, anthropic)).quota, (await statut(429, anthropic)).ecrite, q.ecrite], [null, false, true], '429 relayé d’Anthropic (sans champ erreur) : quota null et ecrite false — le domaine y lit « trop de demandes », pas « limite du jour »');
+    { const sansNombre = await statut(429, { erreur: 'quota' }); eq([sansNombre.raison, sansNombre.quota, sansNombre.ecrite], ['quota', null, true], '429 { erreur: quota } sans nombre : raison quota, quota null, ecrite true (c’est ecrite, pas quota === null, qui distingue la passerelle d’Anthropic)'); }
+    eq([P.echecDomaine({ raison: 'quota', quota: 60, ecrite: true }), P.echecDomaine({ raison: 'quota', quota: null, ecrite: true }), P.echecDomaine({ raison: 'quota', quota: null, ecrite: false }), P.echecDomaine({ raison: 'quota', quota: 60, ecrite: false })],
+      [{ raison: 'quota', extra: { quota: 60 } }, { raison: 'quota', extra: { quota: null } }, { raison: 'trop_de_demandes', extra: {} }, { raison: 'trop_de_demandes', extra: {} }], 'echecDomaine : un quota écrit par la passerelle → quota (nombre ou null) ; un 429 non écrit → trop_de_demandes'); 
     eq([(await statut(429, { erreur: 'quota', quota: '60' })).quota, (await statut(429, { erreur: 'quota', quota: -1 })).quota, (await statut(429, { erreur: 'quota', quota: 1.5 })).quota, (await statut(429, { erreur: 'quota' })).quota], [null, null, null, null], 'quota : seulement un entier positif ou nul, sinon null');
     eq([(await statut(401, { erreur: 'non_connecte' })).raison, (await statut(403, { erreur: 'non_admis' })).raison, (await statut(403, { erreur: 'origine' })).raison, (await statut(405, { erreur: 'methode' })).raison, (await statut(400, { erreur: 'requete' })).raison, (await statut(413, { erreur: 'trop_lourd' })).raison, (await statut(422, { erreur: 'bornes' })).raison, (await statut(502, { erreur: 'serveur' })).raison, (await statut(504, { erreur: 'delai' })).raison],
       ['non_connecte', 'non_admis', 'non_admis', 'requete', 'requete', 'trop_lourd', 'requete', 'serveur', 'delai'], 'champ erreur de la passerelle : lu, et ramené aux raisons connues (origine → non_admis, methode et bornes → requete)');
-    eq([(await statut(502, { erreur: 'constructor' })).raison, (await statut(502, { erreur: '__proto__' })).raison, (await statut(403, { erreur: 'toString' })).raison, (await statut(500, { erreur: 7 })).raison, (await statut(500, { erreur: ['quota'] })).raison, (await statut(500, 'pas du json')).raison, (await statut(500, '')).raison], ['serveur', 'serveur', 'non_admis', 'serveur', 'serveur', 'serveur', 'serveur'], 'champ erreur inconnu, hérité du prototype ou mal typé, corps illisible ou vide : le statut seul classe');
+    eq([(await statut(502, { erreur: 'constructor' })).raison, (await statut(502, { erreur: '__proto__' })).raison, (await statut(403, { erreur: 'toString' })).raison, (await statut(500, { erreur: 7 })).raison, (await statut(500, { erreur: ['quota'] })).raison, (await statut(500, 'pas du json')).raison, (await statut(500, '')).raison], ['serveur', 'serveur', 'serveur', 'serveur', 'serveur', 'serveur', 'serveur'], 'champ erreur inconnu, hérité du prototype ou mal typé, corps illisible ou vide : le statut seul classe');
     ok(!JSON.stringify(resultats).includes(SENTINELLE), 'aucun corps d’erreur n’est recopié dans un résultat (le champ erreur de la passerelle est le seul lu)');
   }
 
   // --- Réseau, délai, abandon, corps
   {
-    const lancer = (f, deps = {}) => garde(P.appelerAssistant('creation', {}, { fetch: f, session: SESSION, config: CONFIG, ...deps }));
+    const lancer = async (f, deps = {}) => garde(await P.appelerAssistant('creation', {}, { fetch: f, session: SESSION, config: CONFIG, ...deps }));
     eq((await lancer(async () => { throw new TypeError('Failed to fetch'); })).raison, 'reseau', 'réseau : TypeError (dont celui d’une redirection refusée) → reseau');
     eq((await lancer(() => { throw new RangeError('coupé'); })).raison, 'reseau', 'réseau : fetch qui lève de façon synchrone → reseau');
     const sourd = (url, options) => new Promise((_, rejeter) => { options.signal.addEventListener('abort', () => rejeter(new DOMException('abandon', 'AbortError')), { once: true }); });
@@ -138,13 +147,13 @@ export async function runPasserelleTests({ eq, ok }) {
     eq((await lancer(200, { modele: 'm'.repeat(200), quotaJour: 60, secret: 'AUTRE' })).corps, { modele: 'm'.repeat(80), quotaJour: 60 }, 'état : le modèle est borné à 80 points de code, un champ en trop n’est pas rendu');
     eq((await lancer(200, { modele: 7, quotaJour: 'beaucoup' })).corps, { modele: null, quotaJour: null }, 'état : un champ mal typé vaut null');
     eq([(await lancer(403, { erreur: 'non_admis' })).raison, (await lancer(401, { erreur: 'non_connecte' })).raison, (await lancer(502, {})).raison, (await lancer(200, 'x')).raison, (await lancer(200, '[]')).raison], ['non_admis', 'non_connecte', 'serveur', 'reponse_illisible', 'reponse_illisible'], 'état : 403 → non_admis, 401 → non_connecte, 502 → serveur, corps illisible → reponse_illisible');
-    eq([(await P.etatAssistant({ fetch: async () => { throw new TypeError('x'); }, session: SESSION, config: CONFIG })).raison], ['reseau'], 'état : réseau coupé → reseau');
+    eq([garde(await P.etatAssistant({ fetch: async () => { throw new TypeError('x'); }, session: SESSION, config: CONFIG })).raison], ['reseau'], 'état : réseau coupé → reseau');
   }
 
   // --- Le jeton n'apparaît dans AUCUN objet rendu
   {
     const fautifs = resultats.filter((r) => /access_token|jeton-factice/.test(JSON.stringify(r)));
-    eq([resultats.length > 60, fautifs.length], [true, 0], `jeton : ${resultats.length} résultats contrôlés, aucun ne contient « access_token » ni la valeur du jeton (R-T3-2)`);
+    eq([resultats.length, resultats.every((r) => r && typeof r === 'object' && 'raison' in r), fautifs.length], [86, true, 0], `jeton : ${resultats.length} résultats contrôlés (tous de vrais résultats, aucune promesse), aucun ne contient « access_token » ni la valeur du jeton (R-T3-2)`);
   }
 
   // --- Le fournisseur de l'app : PasserelleProvider (extraction de pages), providerFrom
@@ -217,9 +226,28 @@ export async function runPasserelleTests({ eq, ok }) {
     const tick = () => new Promise((r) => setTimeout(r, 0));
     const vraiFetch = globalThis.fetch;
     try {
+      // sessionAssistant : la session-donnée des écrans — bornée à 2 s, et seulement pour un compte reconnu sur cet appareil
+      const { sessionAssistant } = await import('../src/ui/components.js');
+      {
+        const U = { id: 'u1', email: 'a@exemple.invalid' };
+        const ctxS = (user, jeton) => ({ sync: { user, auth: { jeton } } });
+        let lectures = 0; const compter = async () => { lectures += 1; return SESSION; };
+        eq([await sessionAssistant(ctxS(U, compter)), lectures], [SESSION, 1], 'sessionAssistant : avec un compte reconnu, la session de jeton()');
+        lectures = 0;
+        eq([await sessionAssistant(ctxS(null, compter)), await sessionAssistant({ sync: { auth: { jeton: compter } } }), lectures], [null, null, 0], 'sessionAssistant : sans ctx.sync.user (garde de compte refusée, ou aucun compte) → null, jeton() n’est même pas appelé');
+        const debut = Date.now();
+        eq([await sessionAssistant(ctxS(U, () => new Promise(() => {})), { delaiMs: 20 }), Date.now() - debut < 1500], [null, true], 'sessionAssistant : un jeton() qui ne se résout jamais (rafraîchissement réseau bloqué) → null au bout du délai, l’écran se rend « sans session »');
+        eq(await sessionAssistant(ctxS(U, () => new Promise((res) => setTimeout(() => res(SESSION), 5))), { delaiMs: 1000 }), SESSION, 'sessionAssistant : un jeton() lent mais dans le délai rend la session');
+        eq([await sessionAssistant(ctxS(U, async () => { throw new Error('boom'); })), await sessionAssistant(ctxS(U, async () => undefined)), await sessionAssistant(null), await sessionAssistant({}), await sessionAssistant({ sync: { user: U } })], [null, null, null, null, null], 'sessionAssistant : jeton() qui lève ou rend rien, contexte absent ou sans auth → null, sans lever');
+        { // le minuteur du délai est libéré dès que la session est là (aucun minuteur orphelin par rendu)
+          const vrai = globalThis.clearTimeout; let effaces = 0; globalThis.clearTimeout = (id) => { effaces += 1; return vrai(id); };
+          try { await sessionAssistant(ctxS(U, async () => SESSION), { delaiMs: 1000 }); } finally { globalThis.clearTimeout = vrai; }
+          ok(effaces >= 1, 'sessionAssistant : le minuteur du délai est effacé quand la session arrive avant lui');
+        }
+      }
       // Le panneau d'index (import.js) : le bouton de l'assistant s'allume quand la session est lue, jamais sur une clé locale
       const I = await import('../src/ui/import.js');
-      const ctxDe = (session, llm) => ({ settings: { llm }, sync: { auth: { jeton: async () => session } }, pagesById: new Map(), editionsById: new Map(), recipes: [] });
+      const ctxDe = (session, llm) => ({ settings: { llm }, sync: { user: session ? { id: 'u1', email: 'a@exemple.invalid' } : null, auth: { jeton: async () => session } }, pagesById: new Map(), editionsById: new Map(), recipes: [] });
       const NONE = { provider: 'none' };
       for (const [nom, session, llm, allume] of [['session, aucun réglage local', SESSION, NONE, true], ['sans session', null, NONE, false], ['jeton vide', { access_token: '' }, NONE, false], ['clé Anthropic locale, sans session', null, { provider: 'anthropic', api_key: 'cle-locale', model: 'm' }, false], ['compatible OpenAI configuré, sans session', null, { provider: 'openai_compatible', api_key: 'k', model: 'm' }, true], ['session ET compatible OpenAI', SESSION, { provider: 'openai_compatible', api_key: 'k', model: 'm' }, true]]) {
         const panneau = I.indexEntriesPanel(null, ctxDe(session, llm), () => [], { editionId: 'ed1' });
@@ -246,10 +274,12 @@ export async function runPasserelleTests({ eq, ok }) {
         } finally { globalThis.fetch = vraiFetch; }
       };
       {
-        const avecSession = await tester({ auth: { jeton: async () => SESSION } });
+        const avecSession = await tester({ user: { id: 'u1', email: 'a@exemple.invalid' }, auth: { jeton: async () => SESSION } });
         const a = avecSession.appels[0];
         eq([avecSession.appels.length, a && new URL(a.url).host.endsWith('.supabase.co') && a.url.endsWith(P.CHEMIN_ASSISTANT), a?.options.headers.authorization, JSON.parse(a?.options.body ?? '{}').outil, avecSession.texte.includes('Réponse : OK')], [1, true, 'Bearer jeton-factice-0123', 'extraction', true], '« Tester » avec une session : un POST à la passerelle (outil extraction, jeton en Bearer), jamais ailleurs');
-        const sans = await tester({ auth: { jeton: async () => null } });
+        const sansCompte = await tester({ user: null, auth: { jeton: async () => SESSION } });
+        eq([sansCompte.appels.length, sansCompte.texte.includes('Échec : Configuration incomplète')], [0, true], '« Tester » avec un jeton mais sans compte reconnu sur cet appareil (garde de compte) : aucun appel');
+        const sans = await tester({ user: { id: 'u1' }, auth: { jeton: async () => null } });
         eq([sans.appels.length, sans.texte.includes('Échec : Configuration incomplète')], [0, true], '« Tester » sans session : aucun appel, « Configuration incomplète »');
         const sansAuth = await tester({});
         eq([sansAuth.appels.length, sansAuth.texte.includes('Échec : Configuration incomplète')], [0, true], '« Tester » sans module d’auth (ctx.sync vide) : aucun appel, « Configuration incomplète »');
@@ -269,7 +299,7 @@ export async function runPasserelleTests({ eq, ok }) {
       eq(lus.filter(([, s]) => s.includes(motif)).map(([m]) => m), [], `absence : « ${motif} » n’apparaît dans aucun module de la coquille`);
     }
     const passerelle = lus.find(([m]) => m === 'src/domain/passerelle.js')?.[1] ?? '';
-    ok(/redirect: 'error'/.test(passerelle) && passerelle.includes('OPTIONS_FETCH') && !/from '\.\.\/ui\//.test(passerelle), 'passerelle.js : redirect error, OPTIONS_FETCH (credentials omit), n’importe rien de src/ui/');
+    ok(!/from '\.\.\/ui\//.test(passerelle), 'passerelle.js : n’importe rien de src/ui/ (couche domaine)');
     ok(sw.includes("'./src/domain/passerelle.js'"), 'SHELL : ./src/domain/passerelle.js');
     ok(/VERSION = 'cuisine-os-v0\.8\.0-\d+'/.test(sw), 'sw.js : VERSION 0.8.0');
     const { APP_VERSION } = await import('../src/model/schema.js');

@@ -224,10 +224,21 @@ export function timerBlock(seconds, { onRequest = null, locale = 'fr', compact =
   return box;
 }
 
-// La session de l'assistant (R-T3-1) : une DONNÉE { access_token, user } lue de ctx.sync.auth.jeton() — sans réseau, null sans
-// connexion — que les écrans passent à providerFrom / aux modules de domaine. Jamais le module d'auth, jamais le contexte.
-export async function sessionAssistant(ctx) {
-  try { return (await ctx?.sync?.auth?.jeton?.()) ?? null; } catch { return null; }
+// La session de l'assistant (R-T3-1) : une DONNÉE { access_token, user } lue de ctx.sync.auth.jeton() que les écrans passent à
+// providerFrom / aux modules de domaine. Jamais le module d'auth, jamais le contexte. Trois murs :
+//  - garde de compte : sans ctx.sync.user (aucun compte, ou la garde de compte a refusé l'adresse sur cet appareil) → null, et
+//    jeton() n'est même pas appelé — aucun jeton ne part pour un compte refusé ;
+//  - délai : jeton() peut rafraîchir le jeton PAR LE RÉSEAU (supabase-js) ; au-delà de `delaiMs` (2 s, comme demarrerSync, R28)
+//    → null, l'écran se rend « sans session » cette fois et le rendu suivant réessaie ;
+//  - jamais de levée : toute erreur → null.
+export async function sessionAssistant(ctx, { delaiMs = 2000 } = {}) {
+  let minuterie = null;
+  try {
+    if (!ctx?.sync?.user) return null;
+    const lecture = Promise.resolve(ctx.sync.auth?.jeton?.()).catch(() => null);
+    const delai = new Promise((fin) => { minuterie = setTimeout(() => fin(null), delaiMs); });
+    return (await Promise.race([lecture, delai])) ?? null;
+  } catch { return null; } finally { clearTimeout(minuterie); }
 }
 
 export function aiNotice(ctx) {

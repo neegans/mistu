@@ -31,18 +31,19 @@ export function sessionValide(session) {
   return typeof jeton === 'string' && /^[\x21-\x7e]+$/.test(jeton);
 }
 
-const echec = (raison, statut = 0, quota = null) => ({ statut, corps: null, raison, quota });
+const echec = (raison, statut = 0, quota = null, ecrite = false) => ({ statut, corps: null, raison, quota, ecrite });
 
 // Le classement d'une réponse en erreur : le champ `erreur` de la passerelle quand elle l'a écrit, sinon le statut seul
-// (R-T3-4). Un 429 SANS champ `erreur` est celui d'Anthropic, relayé : il porte `quota: null` (le quota du jour de la passerelle
-// porte toujours son nombre) — les modules de domaine y lisent « trop de demandes », pas « limite du jour ».
+// (R-T3-4). `ecrite` dit lequel des deux : vrai quand le corps portait un champ `erreur` de la passerelle. Un statut SANS champ
+// `erreur` est celui d'Anthropic, relayé : un 429 y est « trop de demandes » (pas « limite du jour »), un 403 y est une panne
+// de service (`serveur`) — jamais « compte non admis », que la passerelle écrit toujours elle-même (`non_admis`, `origine`).
 function classerReponse(statut, corps) {
   const brut = corps && typeof corps === 'object' && !Array.isArray(corps) ? corps.erreur : undefined;
   const ecrite = typeof brut === 'string' && Object.hasOwn(RAISON_DE_ERREUR, brut) ? RAISON_DE_ERREUR[brut] : null;
-  const raison = ecrite ?? (statut === 401 ? 'non_connecte' : statut === 403 ? 'non_admis' : statut === 429 ? 'quota' : statut === 413 ? 'trop_lourd'
-    : statut === 504 ? 'delai' : statut >= 500 || statut < 400 ? 'serveur' : 'requete');
+  const raison = ecrite ?? (statut === 401 ? 'non_connecte' : statut === 429 ? 'quota' : statut === 413 ? 'trop_lourd'
+    : statut === 504 ? 'delai' : statut >= 500 || statut < 400 || statut === 403 ? 'serveur' : 'requete');
   const n = ecrite === 'quota' && Number.isInteger(corps.quota) && corps.quota >= 0 ? corps.quota : null;
-  return { raison, quota: n };
+  return { raison, quota: n, ecrite: ecrite !== null };
 }
 
 // Un échange avec la fonction : POST (corps) ou GET (sans corps). Ne lève jamais ; toute exception inattendue est `interne`
@@ -89,11 +90,11 @@ async function echanger({ methode, corps = null, fetch: f = globalThis.fetch, se
       if (texte !== null) { try { json = JSON.parse(texte); } catch { json = null; } }
       if (succes) {
         if (!json || typeof json !== 'object' || Array.isArray(json)) return echec('reponse_illisible', 200);
-        return { statut: 200, corps: json, raison: null, quota: null };
+        return { statut: 200, corps: json, raison: null, quota: null, ecrite: false };
       }
       // Un corps d'erreur n'est JAMAIS relayé : seul son champ `erreur` (et le nombre du quota) classe l'échec.
-      const { raison, quota } = classerReponse(r.status, json);
-      return echec(raison, r.status, quota);
+      const { raison, quota, ecrite } = classerReponse(r.status, json);
+      return echec(raison, r.status, quota, ecrite);
     } finally {
       delai.removeEventListener('abort', relaisDelai);
       signal?.removeEventListener('abort', relaisExterne);
@@ -105,19 +106,21 @@ async function echanger({ methode, corps = null, fetch: f = globalThis.fetch, se
 }
 
 // Le classement d'un échec de la passerelle en raison d'ISSUE des modules de domaine (R-T3-4) — UNE définition pour la recherche
-// web et la création : non_connecte / non_admis / quota → issues homonymes (`quota` porte son nombre dans `extra`) ; un 429 SANS
-// champ `erreur` (Anthropic relayé, quota null) → trop_de_demandes ; 413 → requete avec `trop_lourd: true` (texte à part) ;
-// 400, 422 → requete ; 502, 503 → serveur ; 504 et délai local → delai ; abandon → annule ; réseau coupé → reseau.
-export function echecDomaine({ raison, quota } = {}) {
-  if (raison === 'quota') return quota === null ? { raison: 'trop_de_demandes', extra: {} } : { raison: 'quota', extra: { quota } };
+// web et la création : non_connecte / non_admis / quota → issues homonymes (`quota` porte son nombre dans `extra`, `null` si la
+// passerelle ne l'a pas donné) ; un 429 que la passerelle n'a pas écrit (`ecrite` faux : Anthropic relayé) → trop_de_demandes ;
+// 413 → requete avec `trop_lourd: true` (texte à part) ; 400, 422 → requete ; 502, 503 et un 403 relayé → serveur ; 504 et délai
+// local → delai ; abandon → annule ; réseau coupé → reseau.
+export function echecDomaine({ raison, quota = null, ecrite = false } = {}) {
+  if (raison === 'quota') return ecrite ? { raison: 'quota', extra: { quota } } : { raison: 'trop_de_demandes', extra: {} };
   if (raison === 'trop_lourd') return { raison: 'requete', extra: { trop_lourd: true } };
   if (['non_connecte', 'non_admis', 'requete', 'serveur', 'delai', 'reseau', 'annule', 'reponse_illisible'].includes(raison)) return { raison, extra: {} };
   return { raison: 'interne', extra: {} };
 }
 
-// POST { outil, corps } → { statut, corps, raison, quota }.
+// POST { outil, corps } → { statut, corps, raison, quota, ecrite }.
 //   raison ∈ non_connecte | non_admis | quota | requete | trop_lourd | delai | serveur | reseau | reponse_illisible | annule | interne | null
-//   (null = 200, `corps` = le JSON de la réponse). `quota` = le nombre du quota du jour quand la passerelle l'a écrit, sinon null.
+//   (null = 200, `corps` = le JSON de la réponse). `quota` = le nombre du quota du jour quand la passerelle l'a écrit, sinon null ;
+//   `ecrite` = le corps d'erreur portait un champ `erreur` écrit par la passerelle (faux : erreur d'Anthropic relayée, ou pas de corps).
 export async function appelerAssistant(outil, corps, { fetch, session, config, signal, tentativeMs, corpsMax, corpsErreurMax } = {}) {
   let envoi;
   try { envoi = JSON.stringify({ outil, corps }); } catch { return echec('interne'); } // calculé hors du réseau : jamais `reseau`
@@ -131,7 +134,7 @@ export async function etatAssistant({ fetch, session, config, signal, tentativeM
   if (r.raison) return r;
   const c = r.corps;
   return {
-    statut: 200, raison: null, quota: null,
+    statut: 200, raison: null, quota: null, ecrite: false,
     corps: { modele: typeof c.modele === 'string' ? borner(c.modele, LIMITES_PASSERELLE.modele) || null : null, quotaJour: Number.isInteger(c.quotaJour) && c.quotaJour >= 0 ? c.quotaJour : null },
   };
 }

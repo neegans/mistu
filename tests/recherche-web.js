@@ -217,14 +217,15 @@ export async function runRechercheWebTests({ eq, ok }) {
     // Statuts HTTP (R-T3-4) : le champ `erreur` de la passerelle prime ; un 429 SANS champ erreur est celui d'Anthropic, relayé
     const anthropic = { type: 'error', error: { type: 'x', message: 'CORPS-SENTINELLE' } };
     const statut = async (s, corps = anthropic) => { fauxFetch.rendre = () => reponse(s, corps); const i = await lancer(); fauxFetch.rendre = () => reponse(200, nominal); return i; };
-    eq([(await statut(401)).raison, (await statut(403)).raison, (await statut(401, { erreur: 'non_connecte' })).raison, (await statut(403, { erreur: 'non_admis' })).raison], ['non_connecte', 'non_admis', 'non_connecte', 'non_admis'], 'statut : 401 → non_connecte, 403 → non_admis (plus de cle_refusee)');
+    eq([(await statut(401)).raison, (await statut(403)).raison, (await statut(401, { erreur: 'non_connecte' })).raison, (await statut(403, { erreur: 'non_admis' })).raison, (await statut(403, { erreur: 'origine' })).raison], ['non_connecte', 'serveur', 'non_connecte', 'non_admis', 'non_admis'], 'statut : 401 → non_connecte ; un 403 RELAYÉ d’Anthropic (sans champ erreur) → serveur, pas « compte non admis » ; 403 { erreur: non_admis } ou origine → non_admis (plus de cle_refusee)');
     { const q = await statut(429, { erreur: 'quota', quota: 60 }); eq([q.etat, q.raison, q.quota, q.liens], ['indisponible', 'quota', 60, []], 'statut : 429 { erreur: quota, quota: 60 } → quota, avec quota: 60 dans l’issue'); }
+    { const q = await statut(429, { erreur: 'quota' }); const q2 = await statut(429, { erreur: 'quota', quota: '60' }); eq([q.raison, 'quota' in q, q.quota, q2.raison, q2.quota], ['quota', true, null, 'quota', null], 'statut : 429 { erreur: quota } SANS nombre → quota quand même (la passerelle l’a écrit), quota: null dans l’issue — jamais « trop de demandes »'); }
     eq([(await statut(429)).raison, (await statut(429)).quota], ['trop_de_demandes', undefined], 'statut : 429 SANS champ erreur (Anthropic relayé) → trop_de_demandes, sans quota');
     eq([(await statut(400)).raison, (await statut(404)).raison, (await statut(422)).raison, (await statut(422, { erreur: 'bornes' })).raison], ['requete', 'requete', 'requete', 'requete'], 'statut : 400, 404, 422 → requete');
     { const i = await statut(413, { erreur: 'trop_lourd' }); eq([i.raison, i.trop_lourd, (await statut(400)).trop_lourd], ['requete', true, undefined], 'statut : 413 → requete, avec trop_lourd: true (« La demande est trop lourde. », texte de l’écran)'); }
     eq([(await statut(500)).raison, (await statut(502, { erreur: 'serveur' })).raison, (await statut(503)).raison, (await statut(529)).raison], ['serveur', 'serveur', 'serveur', 'serveur'], 'statut : 5xx (dont 502 et 503 de la passerelle) → serveur');
     eq((await statut(504, { erreur: 'delai' })).raison, 'delai', 'statut : 504 → delai');
-    eq([(await statut(400, { error: { type: 'invalid_request_error', message: 'Web search is not enabled for this organization' } })).raison, (await statut(403, { error: { type: 'permission_error', message: 'Web search is not enabled for this organization' } })).raison], ['requete', 'non_admis'], 'statut : « web search not enabled » n’est plus lu (le corps d’erreur d’Anthropic n’arrive jamais jusqu’au domaine) — plus de recherche_desactivee');
+    eq([(await statut(400, { error: { type: 'invalid_request_error', message: 'Web search is not enabled for this organization' } })).raison, (await statut(403, { error: { type: 'permission_error', message: 'Web search is not enabled for this organization' } })).raison], ['requete', 'serveur'], 'statut : « web search not enabled » n’est plus lu (le corps d’erreur d’Anthropic n’arrive jamais jusqu’au domaine) — plus de recherche_desactivee');
     ok(sansJeton(await statut(400)) && sansJeton(await statut(500)), 'statut : l’issue ne recopie ni le jeton ni le corps d’erreur (I-C)');
     // Réseau, délai, abandon, corps
     fauxFetch.rendre = () => { throw new Error('coupé'); };
@@ -282,7 +283,7 @@ export async function runRechercheWebTests({ eq, ok }) {
       eq([vus.length, Object.keys(charge ?? {}), charge?.reason], [1, ['reason', 'name'], 'interne'], 'filet : le journal ne porte que reason et name, reason = interne');
       ok(!JSON.stringify(vus).includes(JETON) && !JSON.stringify(vus).includes('piege'), 'filet : le journal ne contient ni le jeton ni le texte de l’erreur (S10/F12)');
     }
-    eq([issuesVues.n, issuesVues.fautives.length], [55, 0], 'I-C : CHACUNE des issues rendues dans ce bloc (toutes comptées) est sans jeton ni corps d’erreur (V-F2)');
+    eq([issuesVues.n, issuesVues.fautives.length], [58, 0], 'I-C : CHACUNE des issues rendues dans ce bloc (toutes comptées) est sans jeton ni corps d’erreur (V-F2)');
   }
 
   // --- V-C2 : t() rend une valeur telle quelle, même avec les motifs « $ » de replaceAll
@@ -321,7 +322,7 @@ export async function runRechercheWebTests({ eq, ok }) {
     try {
       const ING = new Map([['ing_salmon', { labels: { fr: { label: 'saumon' } } }], ['ing_fennel_bulb', { labels: { fr: { label: 'fenouil' } } }], ['ing_chicken', { labels: { fr: { label: 'poulet' } } }]]);
       // La session vient de ctx.sync.auth.jeton() (R-T3-1) : sans session, ni clé locale ni réglage ne donnent un assistant.
-      const ctxDe = (session, llm = { provider: 'none' }) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING, meal_feedback: [], settings: { llm }, sync: { auth: { jeton: async () => session } } });
+      const ctxDe = (session, llm = { provider: 'none' }) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING, meal_feedback: [], settings: { llm }, sync: { user: session ? { id: 'u1', email: 'a@exemple.invalid' } : null, auth: { jeton: async () => session } } });
       const JETON_ECRAN = 'jeton-ecran-sentinelle'; // V-F2 : il doit atteindre chercher(), jamais l'état ni l'écran
       const SESSION_ECRAN = { access_token: JETON_ECRAN, user: { id: 'u1', email: 'a@exemple.invalid' } };
       const pilote = () => { const p = {}; p.promesse = new Promise((res) => { p.resoudre = res; }); return p; };
@@ -352,6 +353,17 @@ export async function runRechercheWebTests({ eq, ok }) {
         const root = await monter({ q: 'saumon' }, ctxDe(SESSION_ECRAN, { provider: 'none' }), { chercher: async () => issueTrouve });
         eq([!!bouton(root, 'Chercher sur le web avec l’assistant'), texte(root).includes('configure l’assistant IA')], [true, false], 'garde : une session suffit — le bouton « Chercher sur le web » est là, sans réglage local');
         root.remove();
+      }
+      {
+        // La session n'est attendue qu'en mode web : un jeton() lent (rafraîchissement réseau) ne retarde pas les autres modes de recherche
+        let lectures = 0;
+        const ctxCompte = { ...ctxDe(SESSION_ECRAN), sync: { user: { id: 'u1' }, auth: { jeton: async () => { lectures += 1; return SESSION_ECRAN; } } } };
+        S.reinitialiserWeb();
+        const autre = await S.renderSearch({}, { mode: 'recipes', q: 'saumon' }, ctxCompte, { remplacerAdresse: () => {}, navigate: () => {} });
+        const apresAutre = lectures;
+        const web = await monter({ q: 'saumon' }, ctxCompte, { chercher: async () => issueTrouve });
+        eq([apresAutre, lectures, !!bouton(web, 'Chercher sur le web avec l’assistant')], [0, 1, true], 'session : lue en mode web seulement (0 lecture pour le mode recipes, 1 pour le mode web)');
+        autre.remove(); web.remove();
       }
       // Écran du bouton (§ 5.3) et frappe sans Entrée (Review Focus 1)
       {
@@ -668,7 +680,7 @@ export async function runRechercheWebTests({ eq, ok }) {
     try {
       // I-J : « saumon » et « fenouil » sont des ingrédients du lexique et deviennent des puces « avec … » ; leurs libellés fr.
       const ING = new Map([['ing_salmon', { labels: { fr: { label: 'saumon' } } }], ['ing_fennel_bulb', { labels: { fr: { label: 'fenouil' } } }], ['ing_chicken', { labels: { fr: { label: 'poulet' } } }]]);
-      const ctxDe = (session) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING, meal_feedback: [], settings: { llm: { provider: 'none' } }, sync: { auth: { jeton: async () => session } } });
+      const ctxDe = (session) => ({ docs: [], docsByRecipe: new Map(), ingredientsById: ING, meal_feedback: [], settings: { llm: { provider: 'none' } }, sync: { user: session ? { id: 'u1', email: 'a@exemple.invalid' } : null, auth: { jeton: async () => session } } });
       const JETON_ECRAN = 'jeton-ecran-sentinelle'; // V-F2 : il doit atteindre chercher(), jamais l'état ni l'écran
       const SESSION_ECRAN = { access_token: JETON_ECRAN, user: { id: 'u1', email: 'a@exemple.invalid' } };
       // remplacerAdresse factice par défaut : la tape (lancer) met l'adresse à jour par history.replaceState, pas celle de la page de tests.
