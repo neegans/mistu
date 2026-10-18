@@ -25,7 +25,7 @@ export const EN = {
   'Photographier des pages': 'Photograph pages', 'Choisir des photos ou un PDF': 'Choose photos or a PDF', 'Saisir une recette': 'Type a recipe', 'Ajouter un lot au congélateur': 'Add a freezer batch',
   'Auteur / chef': 'Author / chef', 'Éditeur': 'Publisher', 'Année': 'Year',
   'Autre…': 'Other…', 'Autre cuisine': 'Other cuisine',
-  // Page « Ajouter » : la grille de cinq cartes et le sélecteur avant scan (spec UX § 4, § 10).
+  // Page « Ajouter » : la grille de six cartes (cinq au lot UX, « Créer avec l’IA » depuis le 18 octobre) et le sélecteur avant scan (spec UX § 4, § 10).
   'ISBN (scan ou saisie), ou titre à la main': 'ISBN (scan or typed), or title by hand',
   'Photographier ou importer des pages': 'Photograph or import pages',
   'Caméra, photos ou PDF — pour une recette ou un index': 'Camera, photos or PDF — for a recipe or an index',
@@ -310,7 +310,8 @@ export const EN = {
   "Cette version ne peut pas être adaptée ici.": "This version cannot be adapted here.",
   "Retour à la recette": "Back to the recipe",
   "Ce que tu as, ce que tu veux": "What you have, what you want",
-  "Ex. : un souper pour deux avec du saumon et du fenouil, en 30 minutes": "E.g.: dinner for two with salmon and fennel, in 30 minutes",
+  "Ex. : saumon et fenouil au four, croûte aux herbes": "E.g.: baked salmon and fennel, herb crust",
+  "Portions, durée et restrictions se règlent ci-dessous.": "Servings, time and restrictions are set below.",
   "Restrictions": "Restrictions",
   "Type de recette": "Recipe type",
   "Au choix de l’assistant": "Assistant’s choice",

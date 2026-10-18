@@ -752,8 +752,8 @@ testée après l'avoir cuisinée, et « Adapter avec l'IA » en demande une vari
 
 **Où.** Branche `creer-ia`, worktree `~/projects/mistu-ia` (jamais `~/projects/mistu`), serveur de vérification
 `http://localhost:8084/` (suite : `http://localhost:8084/tests/`). Spec :
-`docs/superpowers/specs/2026-10-18-creer-avec-l-ia-design.md` (rév. 2, amendée à la clôture ; **§ 0** : décisions de nuit
-N-1 à N-10 ; **§ 10** : gestes et décisions à confirmer ; **§ 11** : rulings R-CRE-1 à R-CRE-12). Plan :
+`docs/superpowers/specs/2026-10-18-creer-avec-l-ia-design.md` (rév. 2, amendée à la clôture puis à la vague finale ; **§ 0** :
+décisions de nuit N-1 à N-10 ; **§ 10** : gestes et décisions à confirmer ; **§ 11** : rulings R-CRE-1 à R-CRE-15). Plan :
 `docs/superpowers/plans/2026-10-18-creer-avec-l-ia.md` (les amendements P1-P29, en fin de plan, font foi sur le texte des
 tâches). Registre : `.superpowers/sdd/2026-10-18-creer-avec-l-ia/` (`progress.md`, un brief, des notes et un rapport par
 tâche, les diffs revus ; lanceur `suite.cjs`). Base : pointe d'`assistant-compte` `ce9eb5d` (lot « L'assistant suit le
@@ -772,7 +772,9 @@ réseau) :
   fournisseur ou rien de configuré : « Réglages », aucun appel) ; hors ligne dit avant tout appel ; **un clic = un appel** ;
   **un seul vol dans toute l'app** (toute instance de l'écran montre le vol et « Annuler » ; une seconde création est
   refusée tant que rien n'est annulé ; une réponse tardive n'écrit rien) ; la saisie ne redessine pas (focus iPhone) ; une
-  valeur illisible ou hors bornes dans Portions ou Temps maximal éteint le bouton et dit pourquoi.
+  valeur illisible ou hors bornes dans Portions ou Temps maximal éteint le bouton et dit pourquoi ; l'exemple de la demande ne
+  parle ni de portions, ni de durée, ni de restriction (« Ex. : saumon et fenouil au four, croûte aux herbes ») et une aide
+  dit « Portions, durée et restrictions se règlent ci-dessous. » (R-CRE-15).
 - **L'appel** (`creerRecetteIA`, `src/domain/creation-ia.js`) : API Messages sans outil ni `thinking`, `max_tokens` 16 000,
   délai 120 s, corps lu en flux et borné à 1 Mio, `redirect: 'error'` ; ne lève jamais ; la clé n'est ni dans l'issue, ni
   dans l'adresse, ni dans l'état de l'écran, ni dans le journal ; issues alignées sur le lot web, plus `interrompu`
@@ -780,7 +782,10 @@ réseau) :
 - **La sortie du modèle est une donnée hostile** : validée propriété par propriété, bornes strictes (refus, jamais de
   troncature silencieuse), aucune adresse, source, auteur ni image (motif `lien`, best-effort), un titre qui nomme une
   restriction ou promet une certitude est refusé (`affirmation`), rendu en texte seul ; des portions ou une durée
-  différentes de la demande donnent un avertissement, pas un refus (l'appel est payé).
+  différentes de la demande donnent un avertissement, pas un refus (l'appel est payé). L'invite annonce, en français et en
+  anglais, **chaque** règle qui refuse, avec des cibles sous les bornes pour ce qui se compte en caractères (R-CRE-13 ; une
+  table de tests « règle refusée → phrase » le garde) ; une unité vide vaut « unité » (« 2 œufs ») ; l'invite demande de
+  respecter les restrictions demandées sans rien certifier (R-CRE-14).
 - **La proposition** : étiquette, « Selon l'assistant : … », lignes passées par le parseur de l'app (toutes « à
   vérifier »), étapes, conseils, « À vérifier avant de servir », évaluation des restrictions demandées (« Incompatible :
   … » ou « À vérifier », jamais « Compatible »), avertissement fixe « L'assistant n'a pas cuisiné cette recette … »,
@@ -788,11 +793,14 @@ réseau) :
   « Recette gardée » + « Ouvrir la fiche »), « Recommencer » (un échec garde la proposition dessous), « Modifier la
   demande », K1 (« La demande a changé depuis cette proposition. » + « Créer à nouveau »).
 - **La fiche gardée** : `origine: 'ia'`, version `synthesis` `proposed`, `total_minutes: null` (« environ {m} min (estimé
-  par l'assistant) », jamais exporté) ; étiquette **dérivée des données** (`etiquetteCreationIA`, jamais `source_label`)
-  sur la fiche, les cartes, le mode cuisine, les repas, les exports et la section « Recettes créées avec l'IA » de Mes
-  livres ; « Marquer testée » ; « Corriger » garde `origine` (« Corrigée par toi — d'après une création IA ») ; l'export
-  d'une fiche IA ne porte ni livre, ni ISBN, ni page, ni `source_url`, ni durée (les exports d'une fiche de livre sont
-  restés identiques octet pour octet, mesuré en T6).
+  par l'assistant) », jamais exportée en `totalTime` : elle voyage en texte dans la description, « Environ {m} min (estimé
+  par l'assistant). », `src/domain/exporters.js:32`) ; étiquette **dérivée des données** (`etiquetteCreationIA`, jamais
+  `source_label`) sur la fiche, les cartes, le mode cuisine, les repas, les exports, la comparaison de plats et les
+  rattachements proposés (`src/ui/dish.js`, vague finale) et la section « Recettes créées avec l'IA » de Mes livres ;
+  « Marquer testée » ; « Corriger » garde `origine` (« Corrigée par toi — d'après une création IA ») ; l'export d'une fiche
+  IA ne porte ni livre, ni ISBN, ni page, ni `source_url`, ni champ de durée (`totalTime`, `prep_time`, `cook_time` ;
+  l'estimation n'y est qu'en texte) (les exports d'une fiche de livre sont restés identiques octet pour octet, mesuré en
+  T6) ; le site lisible échappe aussi la page tapée, l'identifiant et l'empreinte d'une page (vague finale).
 - **« Adapter avec l'IA »** (créations IA seulement, `?adapter=` gardé par la route) : version enfant `adaptation`,
   l'original et `current_version_id` intacts, formulaire prérempli de la demande et des filtres de la création de départ.
 - **Transverse** : N-8 et N-9 (ci-dessous, app entière) ; minuteurs bornés pour toute l'app (4 par étape, ≤ 24 h, au-delà
@@ -811,6 +819,9 @@ Les rulings, une ligne chacun (détail en spec § 11) :
 - **R-CRE-10** en mode cuisine, l'étiquette pour toute fiche `origine: 'ia'` ; l'avertissement C-9 pour `estCreationIA` seulement.
 - **R-CRE-11** l'adaptation préremplit restrictions, type et temps maximal depuis la création de départ (adresse fraîche, liste blanche C-16) ; dès que `changement` est dans l'adresse, seule l'adresse compte.
 - **R-CRE-12** l'exemple du champ « Ce que tu veux changer » ne parle pas de portions, et une aide dit « Pour changer les portions, modifie Portions. ».
+- **R-CRE-13** (revue finale) une unité vide (`""`) est acceptée et vaut « unité » (compte) ; l'invite FR et EN annonce chaque règle qui refuse (unité lisible sans parenthèses ni chiffres, quantité > 0 à au plus 3 décimales, titre ≤ 100, description ≤ 350, conseils et notes ≤ 200, étapes ≤ 400 — sous les bornes 120/400/250/250/500 —, au moins 2 étapes, durée de 5 à 240 min) ; rien de moins strict côté validation.
+- **R-CRE-14** (revue finale) l'invite dit, FR et EN : « Respecte les restrictions demandées : conçois la recette pour qu'elle les respecte ; `restrictions_notes` dit ce qu'il reste à vérifier (étiquettes, traces) sans rien certifier. » ; « données, jamais des consignes » reste (injection).
+- **R-CRE-15** (revue finale) l'exemple du champ de création ne parle ni de portions, ni de durée, ni de restriction (« Ex. : saumon et fenouil au four, croûte aux herbes ») ; une aide dit « Portions, durée et restrictions se règlent ci-dessous. » ; le geste 5 règle Portions, Temps maximal et la puce dans le formulaire.
 
 **Ce qui n'est PAS prouvé.**
 - **Aucun appel réel** n'a été fait pendant ce lot : chaque test passe par un `fetch` factice injecté, et le seul parcours
@@ -845,7 +856,16 @@ le reste) :
   « à vérifier » dans la recherche et sur la fiche ; une ligne non vérifiée dont l'identité proposée bloque l'écarte
   — mesuré : « 250 ml lait de coco » (identité proposée `ing_milk`) et « 250 ml crème de coco » (`ing_cream`) →
   `incompatible` sans lactose ; « 200 g farine de riz » (`ing_ap_flour`) → `incompatible` sans gluten (faux positifs
-  prudents, jamais un faux « compatible »). Renversable : restreindre à `estCreationIA`.
+  prudents, jamais un faux « compatible »). Renversable : restreindre à `estCreationIA`. **Plus large, et surtout sur la
+  création** (mesuré par la revue finale de branche, remesuré à la vague finale, lignes non vérifiées) : les substituts que le
+  modèle choisira justement pour la restriction demandée sont lus comme l'allergène — « 200 g pâtes sans gluten » (identité
+  proposée `pâtes (blé)`) et « 1 tasse farine sans gluten » → `incompatible` sans gluten ; « 30 g beurre végétal », « 125 ml
+  crème végétale », « 175 ml yogourt de soya » → `incompatible` sans lactose ; « 250 ml lait de soya », « 30 g parmesan
+  végétalien » → `incompatible` végétalien. Une création « sans gluten » ou « sans lactose » sera donc souvent dite
+  incompatible avec ce qui a été demandé : c'est le prix de la règle prudente (une ligne non vérifiée dont l'identité
+  proposée bloque, bloque) ; **vérifier la ligne lève le faux positif**. **Décision de Neegan** (documentée, aucun code) ;
+  pistes : une ligne dont le nom écrit dit « sans <allergène> » ou « végétal(ien) » rendue inconnue plutôt que bloquante
+  (jamais compatible), ou un lexique plus fin (lot à part).
 - **N-9 (app entière) Une ligne non vérifiée s'affiche telle qu'écrite**, avec « (identité proposée : {libellé} ?) », sur
   la fiche et en mode cuisine. **Effet sur les fiches de LIVRE** : plus de badge « Traduction » ni de libellé du lexique
   sur une ligne non vérifiée ; dans les courses, elle se regroupe par son TEXTE — « 3 oignons » et « 1 oignon » font deux
@@ -866,20 +886,22 @@ le sens a changé · `assessMeal` et `searchDocs` font passer `adaptation` avant
 **Dettes (assumées, une ligne chacune ; détail dans `progress.md` et les rapports de tâche).**
 - R-WEB-4 (corps et en-têtes construits avant le `try`) n'est pas épinglé par un test dans `creerRecetteIA` (le mutant survit ; la configuration est du JSON normalisé en production).
 - `creerRecetteIA` : le mutant `ctl.signal` / `dp.signal` survit (test à ajouter : `fetch` sourd + `tentativeMs` court + sans signal externe → jamais `annule`) ; l'abandon n'est pas revérifié après le classement par statut (double sourd seulement) ; une réponse déjà payée est jetée si « Annuler » arrive pendant la lecture (voulu).
-- Transport dupliqué entre `chercherRecettesWeb` et `creerRecetteIA` (≈ 50 lignes ; divergences déjà : `issue()` relit `cfg`, 403) → refactor ultérieur.
-- Titre : la forme compactée n'est pas appliquée à `MOTS_CERTITUDE` (« sans » + U+200B + « danger », « sans » + U+2212 + « danger » passent) ; limites numériques de l'invite non épinglées ; abréviations (« GF ») best-effort ; `eggless` et `plant based` refusés au-delà du ruling.
-- Trous de tests de la validation : frontière 4/5 chiffres de `\d{5,}`, tiret non ASCII pour la certitude, compaction de `_` et `.`, portions de la parente non numériques ; `parenteBornee` exige `ingredients` et `steps` tableaux (sinon `requete`, choix de fermeté).
+- Transport dupliqué entre `chercherRecettesWeb` et `creerRecetteIA` (≈ 50 lignes, estimation de la revue de T2 ; 28 lignes normalisées identiques mesurées par la revue de T8 ; divergences déjà : `issue()` relit `cfg`, 403) → refactor ultérieur.
+- Titre : la forme compactée n'est pas appliquée à `MOTS_CERTITUDE` (« sans » + U+200B + « danger », « sans » + U+2212 + « danger » passent) ; abréviations (« GF ») best-effort ; `eggless` et `plant based` refusés au-delà du ruling ; titres de sûreté qui passent encore (revue finale, Lens 2 n° 1, mesuré) : « Gâteau hypoallergénique », « Biscuits sans arachides », « Pâtes sans blé », « Wheat-free pancakes », « Recette approuvée par un diététiste » (« sans allergènes », « allergen-free », « allergen free » et « guaranteed » refusés depuis la vague finale).
+- Trous de tests de la validation : tiret non ASCII pour la certitude, compaction de `_` et `.`, portions de la parente non numériques ; `parenteBornee` exige `ingredients` et `steps` tableaux (sinon `requete`, choix de fermeté).
 - `fabriquerRecetteIA` tire des `newId` réels (`crypto.randomUUID`) dans `parseIngredientLine` / `parseStepsBlock` puis les écrase : sortie déterministe, pure à ces tirages jetés près.
 - Avec l'unité omise, un nom qui commence par un nombre ou un mot d'intervalle (« à 3 œufs ») est relu comme une autre quantité (sortie bizarre du modèle seulement).
 - Interface anglaise : les avertissements du domaine (portions, durée) et le libellé `labels.fr` de l'identité proposée restent en français ; le « ; » de l'évaluation est hors `t()` ; la mention « (… : … ?) » garde l'espacement français.
 - Écran : sans demande mais avec une proposition en mémoire, K1 + « Créer à nouveau » s'affichent au-dessus d'un champ vide (formulation à revoir) ; la branche « incompatible » ne nomme pas les inconnues ; `provenance.creation.cree_le` vient de l'horloge brute, pas de `syncNow()` ; double tape sur « Annuler » non mesurée (M3 du lot web).
-- Adaptation : l'invite système annonce « Créée avec l'IA · non testée » même pour une adaptation (inexact, sans conséquence) ; version orpheline possible si une tombale de la fiche arrive entre le rendu et « Garder » ; une proposition d'adaptation de A en mémoire s'affiche sous le résumé de B (ligne 5 de P7, conforme F21, déroutant).
-- Portes : quatre chaînes `t()` de `search.js` antérieures au lot sans entrée `en.js` (gelées dans `ANTERIEURES`) ; le commentaire `src/i18n/en.js:28` dit encore « cinq cartes » ; le mutant `{ replace: true }` sur la navigation de la porte web survit ; `q` non borné dans l'adresse de la porte (l'écran le borne à 500) ; R-WEB-3 avec la porte non épinglé ; les ingrédients et exclusions de l'onglet Web ne passent que dans `q`, en texte.
-- Fiche IA : `dish.js:54`, `:94` affichent « p. {printed_page} » si une page a été tapée ; `recipe-edit.js:171` garde le champ « Page imprimée » (il écrit encore `printed_page`) ; « Corriger » préremplit la source de « Créée avec l'IA » (sans effet) ; le bloc « Pages originales » n'est pas gardé ; `lireCreation` ne retire pas `\p{Cs}`.
-- Préexistant : `t('testée')` / `t('proposée')` du sélecteur de `recipe.js` sans `en.js` ; une ancienne adaptation IA d'un livre dit « Adaptation IA » à l'écran mais « Adaptation personnelle » dans les exports.
-- Régimes et courses : R-CRE-9 vaut aussi pour une ligne vérifiée sans identité (cohérent, non épinglé) ; `qtyEl` sans l'identité proposée n'est gardé par aucun mutant observable (le seed n'a aucune équivalence volume↔masse : test d'intention, et aucun test dédié en mode cuisine) ; un `name_text` vide sur une ligne non vérifiée affiche `source_text` entier (préexistant, rare).
-- Banc de test : `tests/erreur.js:2` rend `e.message` par `innerHTML` (préexistant, pas une sortie du modèle) ; la commande des invisibles ne couvre pas U+FE00-FE0F (`src/app.js` en porte 3, antérieurs).
+- Adaptation : l'invite système annonce « Créée avec l'IA · non testée » même pour une adaptation (inexact, sans conséquence), et ne dit pas d'appliquer le changement demandé (il n'est que dans le message ; R-CRE-14 ne vise que les restrictions) ; l'encodage de `?v=` (`encodeURIComponent`) du retour n'est pas éprouvé (les identifiants des fixtures n'ont aucun caractère à encoder) ; version orpheline possible si une tombale de la fiche arrive entre le rendu et « Garder » ; une proposition d'adaptation de A en mémoire s'affiche sous le résumé de B (ligne 5 de P7, conforme F21, déroutant).
+- Portes : quatre chaînes `t()` de `search.js` antérieures au lot sans entrée `en.js` (gelées dans `ANTERIEURES`) ; le mutant `{ replace: true }` sur la navigation de la porte web survit ; `q` non borné dans l'adresse de la porte (l'écran le borne à 500) ; R-WEB-3 avec la porte non épinglé ; les ingrédients et exclusions de l'onglet Web ne passent que dans `q`, en texte.
+- Fiche IA : `recipe-edit.js:171` garde le champ « Page imprimée » (il écrit encore `printed_page`) ; « Corriger » préremplit la source de « Créée avec l'IA » (sans effet) ; le bloc « Pages originales » n'est pas gardé ; `lireCreation` ne retire pas `\p{Cs}`.
+- Préexistant : `t('testée')` / `t('proposée')` du sélecteur de `recipe.js` sans `en.js` ; une ancienne adaptation IA d'un livre dit « Adaptation IA » à l'écran mais « Adaptation personnelle » dans les exports ; l'index du site lisible écrit encore `lang="${locale}"` sans `esc()` — `locale` vient du réglage `ui_locale`, que porte une archive ZIP restaurée (relevé par l'auto-revue de la vague finale, non exploité ni testé).
+- Régimes et courses : R-CRE-9 vaut aussi pour une ligne vérifiée sans identité (cohérent, non épinglé) ; `qtyEl` sans l'identité proposée n'est gardé par aucun mutant observable (le seed n'a aucune équivalence volume↔masse : test d'intention, et aucun test dédié en mode cuisine) ; un `name_text` vide sur une ligne non vérifiée affiche `source_text` entier (préexistant, rare) ; les coches d'une liste de courses sont indexées par `r.key` (`src/ui/grocery.js:22-23`) : la clé elle-même est structurellement fragile (tout changement de regroupement la change), pas seulement l'effet N-9 (`ing:` → `name:`).
+- Lexique : « filet(s) » est un alias de l'unité `dash` (`src/model/seed.js:40`) : « 2 filets saumon, sans la peau » est relu `unit_id: 'dash'` (remesuré à la vague finale) et la fiche affiche « 2 trait saumon … » (revue finale, app réelle) ; décision de Neegan : dette nommée, aucun changement de seed dans la vague.
+- Banc de test : `tests/erreur.js:2` rend `e.message` par `innerHTML` (préexistant, pas une sortie du modèle) ; la commande des invisibles ne couvre pas U+FE00-FE0F (`src/app.js` en porte 3 U+FE0E et `src/ui/add.js:18` 1 U+FE0F, l'émoji U+270D + U+FE0F, tous antérieurs) ; deux tests dépendent d'horloges courtes (abandon à 20 ms d'un `fetch` sourd qui répond à 80 ms ; bloc P6, 12 micro-tâches avant le montage) : rouges possibles sur une machine chargée, jamais un faux vert (revue finale, Lens 3 n° 2) ; `eq` sur des tableaux qui contiennent `undefined` (`JSON.stringify` rend `null`) ne distingue pas un champ absent d'un champ nul (Lens 3 n° 3, sans effet sur ce qui est affirmé).
 - **Fermées à la clôture** : spec § 4.4 (`logError` sous la forme P13) ; README « six cartes » ; `LIBELLES_RESTRICTION.en.sans_lactose` = `en.js` « Dairy-free » (relu).
+- **Fermées à la vague finale** : limites numériques de l'invite non épinglées et aucun test reliant une règle à sa phrase (Lens 3 n° 1 : table « règle → phrase ») ; frontière 4/5 chiffres de `\d{5,}` (9999 accepté, 99999 refusé, dans la table) ; `dish.js` « p. {printed_page} » sur une fiche IA (comparaison et rattachements disent l'étiquette) ; interpolations non échappées du site lisible (Lens 2 n° 2 : page, image, lien de l'index) ; README « Web (non configuré) » ; commentaire « cinq cartes » de `src/i18n/en.js:28`.
 
 **Gestes de Neegan, dans cet ordre.**
 1. **Lot précédent d'abord** : gestes 1 et 2 de « L'assistant suit le compte » (coller `0003` sur `mitsu`, puis sa preuve à
@@ -891,28 +913,49 @@ le sens a changé · `assessMeal` et `searchDocs` font passer `adaptation` avant
    depuis `ce9eb5d`, rebaser `creer-ia` dessus d'abord ; puis **un** `! git -C ~/projects/mistu push origin main` ; ouvrir
    `https://neegans.github.io/mistu/tests/` et lire le BILAN.
 4. Geste 4 du lot précédent (Réglages sur le Mac, connexion depuis l'iPhone).
-5. **Preuve réelle** sur le site public (Mac, ta clé) : « un souper pour deux avec du saumon et du fenouil, sans lactose,
-   en 30 minutes » → noter la durée, les jetons affichés et le coût dans la console Anthropic ; « Garder » → Mes livres →
-   « Recettes créées avec l'IA » ; après cuisson, « Marquer testée » ; une adaptation (« Adapter avec l'IA »).
-6. **Trancher N-8 et N-9** (confirmer, ou restreindre à `estCreationIA`), puis les autres décisions ci-dessus.
+5. **Preuve réelle** sur le site public (Mac, ta clé ; réécrit par R-CRE-15) : taper « saumon fenouil » dans la demande,
+   puis régler **dans le formulaire** la puce « Sans lactose », Portions 2 et Temps maximal 30 → « Créer ma recette » ;
+   vérifier qu'**un seul** POST part (onglet Réseau) et que la proposition affiche « Créée avec l’IA · non testée » ; noter
+   la durée, les jetons affichés et le coût dans la console Anthropic ; « Garder » → Mes livres → « Recettes créées avec
+   l'IA » ; après cuisson, « Marquer testée » ; une adaptation (« Adapter avec l'IA »).
+6. **Trancher N-8 et N-9** (confirmer, ou restreindre à `estCreationIA` ; faux positifs de N-8 sur les substituts
+   ci-dessus), puis les autres décisions ci-dessus.
+7. Geste 5 du lot précédent, toujours dû : faire tourner la clé Anthropic (elle a transité par un chat) et poser un
+   plafond de dépense mensuel sur le workspace.
 
 **Versions.** `APP_VERSION = '0.7.0'` (pins `v0\.7\.0-\d+` dans `tests/ajouter.js`, `tests/sync-l3.js` et
 `tests/recherche-web.js` ; `'0.7.0'` dans `tests/ajouter.js`, `tests/recherche-web.js`, `tests/assistant-compte.js` et
-`tests/creer-ia.js`), `DB_VERSION = 3` (inchangée), `sw.js VERSION = 'cuisine-os-v0.7.0-10'` (clôture ; suffixe
-monotone -1, -2, -5, -6, -7, -8, -9 au fil des tâches ; six commits de ronde ont touché `src/` sans incrément —
-`0254f80`, `5e5000c`, `2749593`, `86ff397`, `91fea1f`, `58faf36` — : `-10` les couvre, et rien n'a été servi entre :
-`origin/main` = `66c5d19`, `git ls-remote` le 18 octobre), `SHELL` + `./src/domain/creation-ia.js` +
+`tests/creer-ia.js`), `DB_VERSION = 3` (inchangée), `sw.js VERSION = 'cuisine-os-v0.7.0-11'` (vague finale, qui touche
+`src/` ; suffixe monotone -1, -2, -5, -6, -7, -8, -9 au fil des tâches, -10 à la clôture ; six commits de ronde ont touché
+`src/` sans incrément — `0254f80`, `5e5000c`, `2749593`, `86ff397`, `91fea1f`, `58faf36` — : la clôture les couvrait, et
+rien n'a été servi entre : `origin/main` = `66c5d19`, relu par `git ls-remote` à la vague finale), `SHELL` + `./src/domain/creation-ia.js` +
 `./src/ui/creer-ia.js` (deux modules neufs). `ROUTES_DE_SAISIE` + `'/recipes/creer'`. Aucun schéma, aucune migration,
 CSP inchangée.
 
-**Bilan (clôture, 18 octobre 2026).** Suite complète **2524/2524 verts** (total épinglé **2523** dans `tests/tests.js`,
-lu dans « obtenu » : l'assertion du total s'ajoute elle-même au bilan affiché ; départ du lot remesuré à la clôture sur
-une copie de `4fee65e` servie à part : **1967/1967**, épinglé 1966), une seule erreur de console : le 404 de
-`/favicon.ico` (pré-existant) ; `node --test tools/*.test.mjs` **45/45** ; `node tools/generer-migrations.mjs --check` :
-**0** ; 13 commits de lot sur `4fee65e` avant celui de la clôture ; aucun caractère invisible (commande de la ligne 21 du
-plan du lot précédent, extraite par script) dans les fichiers du lot ; scan des clés Anthropic (`git grep -nEi
-'sk-ant-[0-9A-Za-z_-]{10,}'`) : seules les quatre sentinelles de test du lot web (`…-sentinelle`). Les mutants, rejoués
-par tâche sur des copies servies à part, sont comptés dans chaque rapport de tâche.
+**Vague finale de corrections (18 octobre 2026, après la revue finale de branche — brief `final-fix-wave.md`, rapport
+`final-fix-report.md`, rulings R-CRE-13 à R-CRE-15).** Les quatre Important de la revue : **R-CRE-13** le validateur
+refusait des réponses que l'invite autorisait ou n'interdisait pas (mesuré par la revue : `unit: ""` → `bornes`,
+« boîte (398 ml) » → `caracteres`, 0.3333 → `bornes`, aucune marge sur titre, description, conseils et notes) — une
+unité vide vaut désormais « unité », et l'invite annonce chaque règle qui refuse, sous les bornes ; **R-CRE-14** l'invite
+demande enfin de respecter les restrictions demandées ; **R-CRE-15** l'exemple « un souper pour deux … en 30 minutes »
+envoyait « Portions : 4 » contre « pour deux » : exemple et aide neufs, geste 5 réécrit ; **N-8** les faux positifs
+mesurés sur les substituts, documentés pour la décision de Neegan. Plus : quatre mots de titre (« sans allergènes »,
+« allergen-free », « allergen free », « guaranteed »), `esc()` sur la page, l'image et le lien de l'index du site lisible,
+la lignée IA dans la comparaison de plats et les rattachements proposés, et les écarts de documentation (durée « jamais
+exportée en `totalTime` », carte cinquième, `add.js:18`, README).
+
+**Bilan (vague finale, 18 octobre 2026).** Suite complète **2554/2554 verts** (total épinglé **2553** dans
+`tests/tests.js`, lu dans « obtenu » : l'assertion du total s'ajoute elle-même au bilan affiché ; la vague ajoute
+30 assertions à l'épinglé de la clôture, 2523 ; départ du lot remesuré à la clôture sur une copie de `4fee65e` servie à
+part : **1967/1967**, épinglé 1966), une seule erreur de console : le 404 de `/favicon.ico` (pré-existant) ;
+`node --test tools/*.test.mjs` **45/45** ; `node tools/generer-migrations.mjs --check` : **0** ; 14 commits de lot sur
+`4fee65e` avant celui de la vague finale (clôture comprise) ; aucun caractère invisible (commande de la ligne 21 du plan
+du lot précédent, extraite par script) dans les fichiers touchés par la vague ; scan des clés Anthropic (`git grep -nEi
+'sk-ant-[0-9A-Za-z_-]{10,}'`) : seules les quatre sentinelles de test du lot web (`…-sentinelle`). **Mutants de la vague**
+(copie servie sur 8096, rapport) : 17 sur 17 rougissent — branche « unité vide » retirée, `null` admis comme « unité »,
+phrases de l'unité et de la quantité retirées de l'invite française, titre anglais remis à 120, phrase R-CRE-14 retirée
+(FR, puis EN), chacun des trois mots de titre, chacun des trois `esc()`, les deux branches IA de `dish.js`, l'ancien
+exemple, l'aide retirée. Les mutants des tâches sont comptés dans chaque rapport de tâche.
 
 **Fusion.** Revue finale de branche puis `/verify` par le chef d'orchestre ; le registre se copie **avant** tout
 `git worktree remove` ; les gestes 1 et 2 du lot précédent **avant** tout `push`.

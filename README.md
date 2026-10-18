@@ -38,7 +38,7 @@ Aucun appel réel n'a encore été fait avec ce code (voir « Vérifications à 
 | Séance de scan continue : photos, PDF, EPUB conservés localement, miniatures numérotées, remplacement d'une page, séance reprenable | Ajouter → Importer |
 | Entrées d'index → références « Repérée dans ton livre — page N », doublons ignorés | Importer, fiche livre |
 | Saisie ou extraction d'une recette avec correction ciblée (quantités, unités ambiguës `oz`, identité d'ingrédient proposée à confirmer) | Nouvelle recette / Corriger |
-| Recherche FR/EN en langage naturel → pastilles modifiables; modes Mes recettes / Mes livres / Web (non configuré) / Tout; groupes admissibles, à vérifier, références | Recherche |
+| Recherche FR/EN en langage naturel → pastilles modifiables; modes Mes recettes / Mes livres / Web (avec l'assistant Anthropic configuré dans Réglages) / Tout; groupes admissibles, à vérifier, références | Recherche |
 | Fiche recette : Original / Ma version, portions (durées non multipliées), unités (original / métrique / US avec hypothèses), langue de lecture, remplacer un ingrédient, évaluation d'une restriction, exports | Fiche recette |
 | Plats : rapprochements proposés par titre, confirmation/refus réversibles, comparaison de 2–3 recettes | Mes livres → Plats |
 | Composer un repas : « Avec quoi on mange ça ? », propositions expliquées, ajouter/remplacer/retirer/verrouiller, résumé du temps et conflits de four, contraintes du repas, duo mémorisé | Ma semaine |

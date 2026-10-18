@@ -6,6 +6,18 @@ import * as repo from '../model/repo.js';
 import { proposeRecipesForDish, compareBundles } from '../domain/dishes.js';
 import { currentVersion } from '../domain/search.js';
 import { pageHeader, section, recipeCard, field, emptyState } from './components.js';
+import { etiquetteCreationIA } from '../domain/creation-ia.js';
+
+// C-2 (vague finale, B6) : la comparaison et les rattachements proposés disent la lignée IA d'une fiche `origine: 'ia'` — jamais un livre ni
+// « p. {page} » (une page tapée par « Corriger » reste dans la fiche, elle n'en devient pas la provenance). Textes purs, épinglés par les tests.
+export function provenanceComparee({ recipe, version = null, book = null }) {
+  if (recipe?.origine === 'ia') return [t(etiquetteCreationIA(version, recipe)), label('availability', recipe.availability)].filter(Boolean).join(' · ');
+  return [book?.title, book?.author, recipe.printed_page ? `p. ${recipe.printed_page}` : null, label('availability', recipe.availability)].filter(Boolean).join(' · ');
+}
+export function lieuRattachement(recipe, editionTexte) {
+  if (recipe?.origine === 'ia') return t(etiquetteCreationIA(null, recipe));
+  return `${editionTexte}${recipe.printed_page ? ` · p. ${recipe.printed_page}` : ''}`;
+}
 
 export async function renderDish(params, query, ctx) {
   const dish = ctx.dishesById.get(params.id);
@@ -51,7 +63,7 @@ export async function renderDish(params, query, ctx) {
       const c = compareBundles(bundles, ctx.ingredientsById, { normalizeServings: n });
       const wide = window.matchMedia('(min-width: 760px)').matches;
       const heads = c.cols.map((col) => `${col.recipe.display_title || col.recipe.original_title}`);
-      const prov = c.cols.map((col) => [col.book?.title, col.book?.author, col.recipe.printed_page ? `p. ${col.recipe.printed_page}` : null, label('availability', col.recipe.availability)].filter(Boolean).join(' · '));
+      const prov = c.cols.map(provenanceComparee);
       const rows = [
         [t('Provenance'), prov],
         [t('Portions'), c.technique.map((x, i) => (c.cols[i].normalized ? `${n} (${t('normalisées depuis')} ${x.servings})` : x.servings ?? t('inconnues')))],
@@ -91,7 +103,7 @@ export async function renderDish(params, query, ctx) {
   function proposalRow(recipe, evidence, onDecide) {
     if (!recipe) return null;
     return el('div', { class: 'row between card flat' },
-      el('div', null, el('strong', null, recipe.display_title || recipe.original_title), el('div', { class: 'muted', style: { fontSize: '.85rem' } }, `${ctx.editionLabel(ctx.editionsById.get(recipe.edition_id))}${recipe.printed_page ? ` · p. ${recipe.printed_page}` : ''} · ${evidence}`)),
+      el('div', null, el('strong', null, recipe.display_title || recipe.original_title), el('div', { class: 'muted', style: { fontSize: '.85rem' } }, `${lieuRattachement(recipe, ctx.editionLabel(ctx.editionsById.get(recipe.edition_id)))} · ${evidence}`)),
       el('div', { class: 'row' }, el('button', { class: 'btn small primary', onClick: () => onDecide('confirmed') }, t('Confirmer')), el('button', { class: 'btn small', onClick: () => onDecide('refused') }, t('Refuser'))));
   }
   async function attachRecipe() {

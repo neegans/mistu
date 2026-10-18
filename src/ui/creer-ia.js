@@ -243,7 +243,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
   function formulaire({ k1 = false } = {}) {
     const C = cleCourante();
     const message = messageAide();
-    const demande = el('textarea', { dataset: { role: 'demande-ia' }, maxlength: LIMITES_CREATION.demande, placeholder: t('Ex. : un souper pour deux avec du saumon et du fenouil, en 30 minutes'), onInput: (e) => { form.demande = e.target.value; majSaisie(); } });
+    const demande = el('textarea', { dataset: { role: 'demande-ia' }, maxlength: LIMITES_CREATION.demande, placeholder: t('Ex. : saumon et fenouil au four, croûte aux herbes'), onInput: (e) => { form.demande = e.target.value; majSaisie(); } });
     demande.value = form.demande;
     const puce = (d) => {
       const b = el('button', { type: 'button', class: 'puce', dataset: { diet: d }, 'aria-pressed': form.diets.includes(d) ? 'true' : 'false' }, label('diet', d));
@@ -258,7 +258,8 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
     if (changement) changement.value = form.changement;
     return el('div', { class: 'card stack', dataset: { role: 'formulaire-ia' } },
       changement ? field(t('Ce que tu veux changer'), changement, t('Pour changer les portions, modifie Portions.')) : null, // R-CRE-12
-      field(t('Ce que tu as, ce que tu veux'), demande),
+      // R-CRE-15 : l'exemple ne parle ni de portions, ni de durée, ni de restriction (ce qui est vérifié se règle dans les champs dessous).
+      field(t('Ce que tu as, ce que tu veux'), demande, t('Portions, durée et restrictions se règlent ci-dessous.')),
       // R-UX-8 : un groupe de boutons ne va jamais dans un <label> (le clic sur le libellé presserait la première puce).
       el('div', { class: 'field' }, el('span', null, t('Restrictions')), el('div', { class: 'puces', role: 'group', 'aria-label': t('Restrictions') }, ...DIET_TAGS.map(puce))),
       field(t('Type de recette'), type),

@@ -1,4 +1,4 @@
-# STATE.md — Cuisine OS (mistu) — état au 18 octobre 2026 (lot « Créer une recette avec l'assistant » fini dans le worktree, sur le lot « l'assistant suit le compte », lui aussi fini et non fusionné)
+# STATE.md — Cuisine OS (mistu) — état au 18 octobre 2026 (lot « Créer une recette avec l'assistant » fini dans le worktree, vague finale comprise, sur le lot « l'assistant suit le compte », lui aussi fini et non fusionné)
 
 ## Où on en est
 **Lot « Créer une recette avec l'assistant » (18 octobre) : FINI dans le worktree, PAS fusionné, PAS poussé** — branche
@@ -9,15 +9,19 @@ la gardes ou pas ; une recette gardée dit partout « Créée avec l'IA · non t
 avec l'IA » en fait une variante sans toucher l'original. Deux portes sur clic (carte « Créer avec l'IA » d'Ajouter, six
 cartes ; bouton « Créer une recette avec ces critères » de l'onglet Web), un appel par clic, un seul vol pour toute l'app,
 rien d'écrit sans « Garder ». Huit tâches (ordre T1, T2, T5, T3, T4, T6, T7, T8), une ronde de corrections au plus chacune,
-13 commits sur `4fee65e` avant la clôture. Suite **2524/2524** (total épinglé **2523** dans `tests/tests.js` ; départ
-remesuré sur `4fee65e` : 1967/1967, épinglé 1966), seul le 404 `/favicon.ico` en console ; `node --test tools/*.test.mjs`
-45/45 ; `node tools/generer-migrations.mjs --check` 0. `APP_VERSION 0.7.0`, `DB_VERSION 3` (inchangé), `sw.js`
-`cuisine-os-v0.7.0-10`, `SHELL` + `./src/domain/creation-ia.js` + `./src/ui/creer-ia.js`. **Aucun appel réel** pendant le
+14 commits sur `4fee65e` (clôture comprise), puis la **vague finale** après la revue de branche (R-CRE-13 : unité vide
+acceptée et invite alignée sur le validateur ; R-CRE-14 : restrictions demandées dans l'invite ; R-CRE-15 : exemple du
+champ ; faux positifs N-8 documentés ; exports échappés). Suite **2554/2554** (total épinglé **2553** dans
+`tests/tests.js` ; départ remesuré sur `4fee65e` : 1967/1967, épinglé 1966), seul le 404 `/favicon.ico` en console ;
+`node --test tools/*.test.mjs` 45/45 ; `node tools/generer-migrations.mjs --check` 0. `APP_VERSION 0.7.0`, `DB_VERSION 3`
+(inchangé), `sw.js` `cuisine-os-v0.7.0-11`, `SHELL` + `./src/domain/creation-ia.js` + `./src/ui/creer-ia.js`. **Aucun appel réel** pendant le
 lot (`fetch` factice injecté partout). Décisions de nuit N-1 à N-10 **à confirmer par Neegan**, **N-8/N-9 en tête** : elles
 changent l'app entière (une fiche de LIVRE aux lignes non vérifiées passe de « compatible » à « à vérifier » ; courses
-groupées par le texte écrit). Spec `docs/superpowers/specs/2026-10-18-creer-avec-l-ia-design.md` (§ 11 : rulings R-CRE-1
-à R-CRE-12 ; § 10 : gestes), plan `docs/superpowers/plans/2026-10-18-creer-avec-l-ia.md` (amendements P1-P29), section du
-lot dans `CLAUDE.md` et dans `docs/architecture.md`. Revue finale de branche et `/verify` : au chef d'orchestre.
+groupées par le texte écrit ; et N-8 dit souvent « incompatible » une création « sans gluten » ou « sans lactose » à cause de
+ses substituts non vérifiés, pâtes sans gluten ou lait de soya : mesuré, décision de Neegan). Spec
+`docs/superpowers/specs/2026-10-18-creer-avec-l-ia-design.md` (§ 11 : rulings R-CRE-1 à R-CRE-15 ; § 10 : gestes), plan `docs/superpowers/plans/2026-10-18-creer-avec-l-ia.md` (amendements P1-P29), section du
+lot dans `CLAUDE.md` et dans `docs/architecture.md`. Revue finale de branche faite (une vague de corrections) ; re-revue
+ciblée et `/verify` : au chef d'orchestre.
 
 **Lot « La configuration de l'assistant suit le compte » (17-18 octobre) : FINI dans le worktree, PAS fusionné, PAS
 poussé** — branche `assistant-compte`, worktree `~/projects/mistu-web` (serveur `python3 -m http.server 8083`), base
@@ -30,10 +34,10 @@ en fichiers seulement : `supabase/migrations/0003_assistant_config.sql` et sa pr
 `docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md` (§ 12 : R-CPT-1 à R-CPT-7), section du lot dans
 `CLAUDE.md` (ordre des gestes, procédure « appareil perdu ou clé exposée »).
 
-**Lots déjà en ligne** (`origin/main` = `66c5d19`, lu par `git ls-remote` le 18 octobre) : « confort après preuve »
+**Lots poussés** (`origin/main` = `66c5d19`, relu par `git ls-remote` le 18 octobre) : « confort après preuve »
 (`confort-web` : « Liens web gardés », « Chercher à nouveau » sur la ligne K1, date de page en liste blanche ; suite
-1802/1802) et « Chercher sur le web avec l'assistant » (LIVE depuis `dc7444a` ; un appel réel mesuré le 17 octobre sur le
-site public, « puttanesca »). Sections dans `CLAUDE.md`.
+1802/1802) — poussé, **site public non relu dans cette session** — et « Chercher sur le web avec l'assistant » (LIVE depuis
+`dc7444a`, prouvé par l'appel réel du 17 octobre sur le site public, « puttanesca »). Sections dans `CLAUDE.md`.
 
 ## Ce qui n'est pas prouvé
 - **Lot création** : **aucun appel réel** (chaque test passe par un `fetch` factice ; le parcours dans l'app réelle de la
@@ -57,7 +61,9 @@ site public, « puttanesca »). Sections dans `CLAUDE.md`.
    étape 8 bis.
 2. **Seulement après** : revue finale et `/verify` des deux lots par le chef d'orchestre ; copier
    `~/projects/mistu-ia/.superpowers/sdd/2026-10-18-creer-avec-l-ia/` dans `~/projects/mistu/.superpowers/sdd/` (celui du
-   lot 1 y est déjà : `diff -rq` muet contre `~/projects/mistu-web` le 18 octobre).
+   lot 1 y est déjà ; les registres `2026-10-17-assistant-par-le-compte`, `2026-10-17-chercher-sur-le-web` et
+   `2026-10-17-confort-web` sont **vérifiés identiques (`diff -rq`) le 18 octobre** entre `~/projects/mistu/.superpowers/sdd/`
+   et le worktree `~/projects/mistu-web`).
 3. **Fusions `--ff-only` en chaîne**, puis **un** `push` : `! cd ~/projects/mistu && git merge --ff-only assistant-compte`,
    puis `! cd ~/projects/mistu && git merge --ff-only creer-ia`, puis le lot 3 s'il est fini (ff-only depuis la pointe de
    `creer-ia`) ; si `assistant-compte` a bougé depuis `ce9eb5d` (vague de revue), rebaser `creer-ia` dessus d'abord ; puis
@@ -66,9 +72,11 @@ site public, « puttanesca »). Sections dans `CLAUDE.md`.
 4. Lot 1 sur les appareils : Mac, site public, Réglages → Assistant IA montre la configuration et « La configuration de
    l’assistant suit ton compte sur tes appareils connectés. » ; iPhone : « Connexion avec Google » depuis l'app installée
    (mesure iOS due depuis le 13 octobre : où atterrit le retour), la clé arrive à la passe suivante.
-5. **Preuve réelle de la création** (Mac, site public) : une création → noter la durée, les jetons affichés et le coût
-   dans la console Anthropic ; « Garder » → Mes livres → « Recettes créées avec l'IA » ; « Marquer testée » après
-   cuisson ; une adaptation (« Adapter avec l'IA »). Preuve iPhone du lot web, toujours due : « saumon fenouil » → des
+5. **Preuve réelle de la création** (Mac, site public ; réécrit par R-CRE-15) : taper « saumon fenouil » dans la demande,
+   puis régler dans le formulaire la puce « Sans lactose », Portions 2 et Temps maximal 30 → « Créer ma recette » ; vérifier
+   qu'**un seul** POST part et que la proposition affiche « Créée avec l’IA · non testée » ; noter la durée, les jetons
+   affichés et le coût dans la console Anthropic ; « Garder » → Mes livres → « Recettes créées avec l'IA » ; « Marquer
+   testée » après cuisson ; une adaptation (« Adapter avec l'IA »). Preuve iPhone du lot web, toujours due : « saumon fenouil » → des
    liens ; « Garder ce lien » → signet prérempli.
 6. **Confirmer ou renverser N-8/N-9** (et les autres décisions de nuit N-1 à N-10, plus les décisions de spec listées dans
    `CLAUDE.md`, section du lot de création).
@@ -91,7 +99,7 @@ site public, « puttanesca »). Sections dans `CLAUDE.md`.
 ```
 cd ~/projects/mistu-ia && git status --short && git log --oneline -3
 curl -sS -o /dev/null -w "8084 http=%{http_code}\n" http://localhost:8084/tests/ || (nohup python3 -m http.server 8084 > /dev/null 2>&1 &)
-node ~/projects/mistu-ia/.superpowers/sdd/2026-10-18-creer-avec-l-ia/suite.cjs 8084   # attendu : 2524/2524 (+ 1 x 404 favicon)
+node ~/projects/mistu-ia/.superpowers/sdd/2026-10-18-creer-avec-l-ia/suite.cjs 8084   # attendu : 2554/2554 (+ 1 x 404 favicon)
 node --test tools/*.test.mjs && node tools/generer-migrations.mjs --check   # attendu : 45/45, code 0
 ```
 Ordre des gestes : § « Reste à faire », points 1 à 3 (`0003` AVANT le `push`, fusions ff-only en chaîne).
@@ -100,7 +108,8 @@ Ordre des gestes : § « Reste à faire », points 1 à 3 (`0003` AVANT le `push
 `\uXXXX` nu dans un appel d'outil = caractère réel écrit (écrire `\u{XXXX}`, vérifier les octets) ; `grep` de ce shell
 appelle `ugrep` en UTF-8 : les caractères invisibles se mesurent en Python (commande de la ligne 21 du plan
 `docs/superpowers/plans/2026-10-17-assistant-par-le-compte.md`, lue par script, jamais retapée ; elle ne couvre pas les
-sélecteurs de variante U+FE00-FE0F : `src/app.js` en porte 3, antérieurs) ; le total épinglé de `tests/tests.js` se lit
+sélecteurs de variante U+FE00-FE0F : `src/app.js` en porte 3 U+FE0E et `src/ui/add.js:18` 1 U+FE0F, l'émoji U+270D + U+FE0F, tous
+antérieurs) ; le total épinglé de `tests/tests.js` se lit
 dans « obtenu : X » puis se pose, jamais deviné ; messages de commit en ASCII sans accents ; jamais `git add -A`
 (`.superpowers/` non suivi) ; ne jamais toucher `~/projects/mistu` depuis un worktree (l'arbre principal est servi sur
 8080) ; aucune requête ne lit `public.assistant_config.data` (la clé y est en clair) ; un serveur de copie se lance sur un

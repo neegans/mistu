@@ -548,8 +548,8 @@ quarantaine `refus`, `inconnu` → recul, `tests/sync-l3.js`) et l'ordre « `ass
 
 ## Créer une recette avec l'assistant (18 octobre 2026)
 
-Spec : `docs/superpowers/specs/2026-10-18-creer-avec-l-ia-design.md` (rév. 2, amendée à la clôture ; § 11 : rulings R-CRE-1
-à R-CRE-12). Livré ici : une demande en texte libre, avec restrictions, type, portions et temps maximal, devient, sur un clic
+Spec : `docs/superpowers/specs/2026-10-18-creer-avec-l-ia-design.md` (rév. 2, amendée à la clôture puis à la vague finale ;
+§ 11 : rulings R-CRE-1 à R-CRE-15). Livré ici : une demande en texte libre, avec restrictions, type, portions et temps maximal, devient, sur un clic
 et sur lui seul, **un** appel à l'API Anthropic (Messages, sans outil) qui rend **une** proposition de recette ; « Garder »
 l'écrit comme une recette ordinaire du modèle existant — aucun magasin neuf, `DB_VERSION` 3 inchangée, aucune migration, CSP
 inchangée. Deux modules neufs ; ailleurs, des changements bornés.
@@ -573,16 +573,21 @@ src/ui/creer-ia.js         renderCreerIA(params, query, ctx, deps) — creer, re
 src/app.js                 route('/recipes/creer', renderCreerIA) AVANT /recipes/:id (F1).
 src/ui/state.js            '/recipes/creer' dans ROUTES_DE_SAISIE : une passe de synchronisation ne reconstruit pas l'écran
                            pendant la saisie.
-src/ui/add.js              carte creerIA (sixième de la grille, avant congelateur) → navigate('/recipes/creer').
+src/ui/add.js              carte creerIA (cinquième de la grille, GRILLE_ACTIONS add.js:10 ; le congélateur est sixième)
+                           → navigate('/recipes/creer').
 src/ui/search.js           bouton « Créer une recette avec ces critères » (creer-depuis-web) sur rien, trouvé et
                            recherche_desactivee : relireChamp puis navigation avec q et les puces affichées ; aucun appel.
 src/ui/components.js       etiquetteIA(version, recipe = null) (helper DOM qui délègue, R-CRE-4) ; versionBadge, recipeCard,
                            provenanceText ; ingredientLineEl (N-9).
+src/ui/dish.js             provenanceComparee, lieuRattachement (vague finale) : la comparaison de plats et les rattachements
+                           proposés disent l'étiquette d'une fiche origine 'ia', jamais un livre ni « p. {page} ».
 src/ui/recipe.js, cook.js, meals.js, library.js
                            étiquette, blocs de la création, « Adapter avec l'IA » (→ #/recipes/creer?adapter=<version>),
                            « Marquer testée » étendu à synthesis, section « Recettes créées avec l'IA » de Mes livres.
 src/domain/exporters.js    étiquette en texte brut (jamais t()) ; pour une fiche origine 'ia' : ni livre, ni ISBN, ni page,
-                           ni source_url, ni durée ; les blocs de la création et l'avertissement voyagent.
+                           ni source_url, ni champ de durée (totalTime, prep_time, cook_time) ; les blocs de la création et
+                           l'avertissement voyagent, l'estimation en texte (« Environ {m} min (estimé par l'assistant). »,
+                           exporters.js:32) ; le site lisible échappe aussi page, empreinte d'image et lien de l'index.
 src/domain/diet.js         N-8, règle asymétrique (R-CRE-1) ; R-CRE-9.
 src/domain/grocery.js      N-9 : regroupement par identité pour une ligne vérifiée seulement.
 src/domain/lines.js        detectTimers borné : 4 minuteurs par étape au plus, ≤ 24 h, au-delà écarté (R-CRE-8).
@@ -604,7 +609,11 @@ l'erreur, jamais un corps (P13). L'issue ne porte jamais la clé.
 empilées (`\p{M}{3,}`) ; refus `lien` pour une adresse (best-effort après NFKC) ou une clé de `CLES_REFUSEES` ;
 refus `affirmation` pour un titre qui nomme une restriction (libellés FR/EN de `DIET_TAGS`) ou promet une certitude ;
 portions ou durée différentes de la demande : avertissements, pas de refus (l'appel est payé). Rendu en texte seul
-(`el()`).
+(`el()`). Contrat invite ↔ validateur (vague finale, R-CRE-13/14) : l'invite FR et EN annonce chaque règle qui refuse, avec
+des cibles sous les bornes pour ce qui se compte en caractères (titre 100/120, description 350/400, conseils et notes
+200/250, étapes 400/500, nom 80/100, unité 20/30), et demande de respecter les restrictions demandées sans rien certifier ;
+une unité vide vaut « unité » (« 2 œufs »), aucune autre règle n'est assouplie ; une table de tests « règle refusée →
+phrase » (FR et EN, création et adaptation) rougit quand une phrase disparaît.
 
 **L'écran.** État au niveau du module, comme la recherche web : `memoire` (`{ cle, demande, filtres, langue, parente,
 changement, issue, gardee, echec }` — ce qui est PARTI, jamais le formulaire ; mémoire de session, jamais en base),
@@ -619,7 +628,8 @@ transaction (`repo.saveBatch` : fiche + version, ou version seule pour une adapt
 **La fiche gardée.** `recipe.origine: 'ia'` (durable, survit à « Corriger », N-10), sans `edition_id` ni `source_url` ;
 version `synthesis` (ou `adaptation` enfant, `recipe_id` de la parente, `current_version_id` inchangé), `status:
 'proposed'`, lignes `to_verify`, `total_minutes: null` (la durée estimée vit dans `provenance.creation.minutes_estimees`,
-affichée « environ {m} min (estimé par l'assistant) », jamais exportée), `provenance.creation` = demande, filtres
+affichée « environ {m} min (estimé par l'assistant) », jamais exportée en `totalTime` : elle voyage en texte dans la
+description, `exporters.js:32`), `provenance.creation` = demande, filtres
 partis, description, conseils, notes de restrictions, date, jetons.
 
 **L'étiquette est dérivée des données, jamais de `source_label`** (C-2). `etiquetteCreationIA(version, recipe)` :

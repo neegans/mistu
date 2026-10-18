@@ -106,6 +106,8 @@ export function toPaprikaYaml(bundles, { locale = 'fr' } = {}) {
   return docs.join('\n') + '\n';
 }
 
+// Vague finale (B6) : TOUT texte d'une fiche passe par esc() — titre, page tapée, identifiant (dans l'adresse d'un lien), empreinte d'une
+// page (dans l'adresse d'une image) : une ligne reçue ou restaurée peut porter du balisage, exécuté à l'ouverture du site exporté.
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const HTML_CSS = 'body{font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;color:#1d231f;background:#f6f1e7;line-height:1.5}h1,h2{color:#1f4d3a}.meta{color:#5f6b63;font-size:.9rem}img{max-width:100%;border-radius:8px}li{margin:.2rem 0}a{color:#1f4d3a}.badge{font-size:.75rem;background:#d7e3d8;padding:.1rem .4rem;border-radius:6px}';
@@ -132,13 +134,13 @@ export function toReadableSite(bundles, filesBySha, { locale = 'fr' } = {}) {
     const body = `<!doctype html><html lang="${esc(recipe.original_language || locale)}"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${HTML_CSS}</style></head><body>
 <p><a href="../index.html">← Index</a></p>
 <h1>${esc(title)}</h1>
-<p class="meta">${book ? esc(`${book.title}${book.author ? ` — ${book.author}` : ''}`) : esc(libelleSource(recipe) || 'Source personnelle')}${recipe.printed_page && recipe.origine !== 'ia' ? `, page ${recipe.printed_page}` : ''}
+<p class="meta">${book ? esc(`${book.title}${book.author ? ` — ${book.author}` : ''}`) : esc(libelleSource(recipe) || 'Source personnelle')}${recipe.printed_page && recipe.origine !== 'ia' ? `, page ${esc(recipe.printed_page)}` : ''}
 ${etiquette ? ` · <span class="badge">${esc(etiquette)}</span>` : version?.kind === 'adaptation' ? ' · <span class="badge">Adaptation personnelle</span>' : version ? ' · <span class="badge">Original</span>' : ''}</p>
 ${version?.servings ? `<p class="meta">${esc(`${version.servings} portions`)}${version.prep_minutes != null && !sansDurees ? ` · préparation ${version.prep_minutes} min` : ''}${version.cook_minutes != null && !sansDurees ? ` · cuisson ${version.cook_minutes} min` : ''}</p>` : ''}${ia ? ia.slice(1).map((l) => `<p>${esc(l)}</p>`).join('') : ''}
 ${version ? `<h2>Ingrédients</h2><ul>${(version.ingredients || []).map((ri) => `<li>${esc(ingredientLine(ri, locale))}</li>`).join('')}</ul>
 <h2>Préparation</h2><ol>${(version.steps || []).map((s) => `<li>${esc(s.text)}</li>`).join('')}</ol>` : '<p><em>Référence d’index seulement : la recette n’a pas encore été numérisée.</em></p>'}
 ${version?.changes ? `<h2>Changements</h2><p>${esc(version.changes)}</p>` : ''}
-${imgs.length ? `<h2>Pages originales</h2>${imgs.map((p) => `<p><img src="../${p}" alt="Page originale"></p>`).join('')}` : ''}
+${imgs.length ? `<h2>Pages originales</h2>${imgs.map((p) => `<p><img src="../${esc(p)}" alt="Page originale"></p>`).join('')}` : ''}
 <p class="meta">Exporté de Cuisine OS le ${esc(new Date().toLocaleDateString(locale === 'en' ? 'en-CA' : 'fr-CA'))}. Identifiant ${esc(recipe.id)}.</p>
 </body></html>`;
     entries.push({ path: file, data: body });
@@ -147,7 +149,7 @@ ${imgs.length ? `<h2>Pages originales</h2>${imgs.map((p) => `<p><img src="../${p
   items.sort((a, b) => a.title.localeCompare(b.title, locale));
   const index = `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><title>Mes recettes — Cuisine OS</title><style>${HTML_CSS}</style></head><body>
 <h1>Mes recettes</h1><p class="meta">${items.length} recette(s) — copie lisible hors connexion, produite par Cuisine OS.</p>
-<ul>${items.map((it) => `<li><a href="${it.file}">${esc(it.title)}</a>${it.book ? ` <span class="meta">— ${esc(it.book.title)}</span>` : ''}</li>`).join('')}</ul></body></html>`;
+<ul>${items.map((it) => `<li><a href="${esc(it.file)}">${esc(it.title)}</a>${it.book ? ` <span class="meta">— ${esc(it.book.title)}</span>` : ''}</li>`).join('')}</ul></body></html>`;
   entries.unshift({ path: 'index.html', data: index });
   return { entries, images: usedImages };
 }
