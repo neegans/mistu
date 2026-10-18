@@ -62,8 +62,9 @@ export async function init() {
   // updated_at — les 96 références seraient parties en quarantaine au premier envoi initial (spec § 5.2, § 5.3).
   // Seuls les magasins qui ont réellement quelque chose à écrire sont touchés : rien à faire au démarrage ordinaire.
   // Origine 'device' : comme la passe d'horodatage, l'amorçage n'est pas une écriture de la personne et n'a rien à
-  // envoyer. init() précède installCapture au démarrage, mais un rappel d'init() sur une base amputée d'une
-  // référence (restauration partielle, référence corrigée puis supprimée) mettrait sinon jusqu'à 96 fiches en file.
+  // envoyer. La capture est posée AVANT init() depuis le lot Passerelle (la passe d'effacement de la clé locale écrit en 'local'), donc
+  // l'origine 'device' compte ici : un rappel d'init() sur une base amputée d'une référence (restauration partielle, référence
+  // corrigée puis supprimée) mettrait sinon jusqu'à 96 fiches en file.
   const aPoser = Object.fromEntries(Object.entries(batch).filter(([, rows]) => rows.length));
   if (Object.keys(aPoser).length) await saveBatch(aPoser, { origin: 'device' });
   await horodaterAnciennesFiches();
@@ -76,7 +77,8 @@ export async function init() {
 // Passe unique (spec assistant-par-le-compte § 5.6, S1/F3/F4) : l'ancien réglage settings.llm devient la ligne
 // assistant_config, UNE transaction d'origine 'device'. L'horodatage est celui de l'ancienne ligne (repli 1970) —
 // JAMAIS « maintenant » : une vieille clé restée sur une autre origine battrait une clé tournée depuis. Rien n'entre
-// en file ici (init() précède installCapture) : l'envoi initial enverra la ligne au premier passage avec un compte.
+// en file ici (origine 'device', jamais capturée, même si la capture précède init()) : l'envoi initial enverra la ligne au premier passage
+// avec un compte.
 // Placée après le nettoyage des chaînes : la ligne copiée est déjà normalisée (Cc/Cf retirés), rien à y nettoyer.
 const MIGRATION_ASSISTANT_GUARD = 'assistant_config_migre';
 const EPOQUE = '1970-01-01T00:00:00.000Z';

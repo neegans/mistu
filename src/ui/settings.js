@@ -544,7 +544,8 @@ function assistantActif(sync, session, fetch) {
     else if (r.raison) etat.textContent = t('L’assistant est indisponible pour le moment.');
     else {
       const { modele, quotaJour } = r.corps;
-      etat.textContent = [modele ? t('Modèle en service : {m}.', { m: modele }) : null, quotaJour == null ? null : (quotaJour === 1 ? t('Quota : 1 appel par jour.') : t('Quota : {n} appels par jour.', { n: quotaJour }))].filter(Boolean).join(' ');
+      const dit = [modele ? t('Modèle en service : {m}.', { m: modele }) : null, quotaJour == null ? null : (quotaJour === 1 ? t('Quota : 1 appel par jour.') : t('Quota : {n} appels par jour.', { n: quotaJour }))].filter(Boolean).join(' ');
+      etat.textContent = dit || t('L’assistant est indisponible pour le moment.'); // un 200 sans modèle ni quota lisibles : jamais une ligne vide
     }
   }, () => { etat.textContent = t('L’assistant est indisponible pour le moment.'); });
   return [el('p', null, adresse ? t('L’assistant est actif pour {adresse}.', { adresse }) : t('L’assistant est actif sur ton compte.')), etat];

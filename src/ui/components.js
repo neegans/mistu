@@ -265,12 +265,17 @@ export function texteRefusAssistant(issue) {
   return null;
 }
 
-// Le texte d'un échec de l'extraction (PasserelleProvider.complete lève Error(raison), un mot de la liste fermée de la passerelle) : le refus
-// en clair quand c'est un refus connu, sinon « Échec : <raison> ». Un 413 y est `trop_lourd`, sans le nombre du quota.
+// Le texte d'un échec de l'extraction : PasserelleProvider.complete lève Error(raison d'issue) avec ses extras (`quota`, `trop_lourd`), le même
+// classement que les écrans de recherche et de création (echecDomaine) — le refus en clair avec son nombre, « Trop de demandes… » pour un 429
+// relayé, la phrase de connexion sans session ; toute raison technique (serveur, delai, reseau…) est le texte générique + « Code : {raison} »,
+// jamais le mot de code seul.
 export function texteEchecAssistant(erreur) {
   const raison = typeof erreur?.message === 'string' ? erreur.message : '';
   if (raison === 'non_connecte') return t(TEXTE_CONNEXION);
-  return texteRefusAssistant({ raison: raison === 'trop_lourd' ? 'requete' : raison, trop_lourd: raison === 'trop_lourd' }) ?? `${t('Échec')} : ${raison}`;
+  const refus = texteRefusAssistant({ raison, quota: erreur?.quota, trop_lourd: erreur?.trop_lourd });
+  if (refus) return refus;
+  if (raison === 'trop_de_demandes') return t('Trop de demandes pour l’instant. Réessaie dans une minute.');
+  return `${t('L’assistant n’a pas répondu. Réessaie.')} ${t('Code : {c}', { c: raison || 'inconnu' })}`;
 }
 // === fin Assistant
 

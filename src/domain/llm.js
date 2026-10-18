@@ -2,7 +2,7 @@
 // les écrans de l'assistant disent « Connecte-toi pour utiliser l’assistant. » au lieu de simuler un résultat.
 // L'assistant passe par la passerelle (src/domain/passerelle.js) : l'app n'a plus aucune clé de fournisseur d'IA, et plus aucun
 // autre fournisseur (le fournisseur compatible OpenAI, configurable par une clé locale, est retiré : Passerelle T4).
-import { appelerAssistant, sessionValide, LIMITES_PASSERELLE } from './passerelle.js';
+import { appelerAssistant, echecDomaine, sessionValide, LIMITES_PASSERELLE } from './passerelle.js';
 import { borner } from '../core/bornes.js';
 
 export class LLMProvider {
@@ -12,7 +12,9 @@ export class LLMProvider {
   get supportsVision() { return false; }
   get supportsWebSearch() { return false; }
   // messages: [{ role: 'system'|'user', content: string | [{type:'text',text}|{type:'image', mime, base64}] }]
-  async complete(/* messages, { json = false } */) { throw new Error('Aucun assistant IA sans session.'); }
+  // Sans session, l'extraction dit la même chose que les écrans : non_connecte (l'écran en fait « Connecte-toi… » si la session disparaît
+  // entre le rendu et le clic).
+  async complete(/* messages, { json = false } */) { throw new Error('non_connecte'); }
 }
 
 export class NoneProvider extends LLMProvider {}
@@ -37,8 +39,9 @@ export class PasserelleProvider extends LLMProvider {
       })),
     };
     const r = await appelerAssistant('extraction', corps, { fetch: this.fetch, session: this.session });
-    // Le message de l'erreur est la RAISON (un mot de la liste fermée de la passerelle), jamais le corps de la réponse.
-    if (r.raison) throw new Error(r.raison);
+    // Le message de l'erreur est la RAISON d'issue (le classement des écrans, echecDomaine : un 429 non écrit par la passerelle est
+    // trop_de_demandes, jamais « quota »), jamais le corps de la réponse ; ses extras (le nombre du quota, trop_lourd) sont portés par l'Error.
+    if (r.raison) { const d = echecDomaine(r); throw Object.assign(new Error(d.raison), d.extra ?? {}); }
     this.modele = typeof r.corps.model === 'string' ? borner(r.corps.model, LIMITES_PASSERELLE.modele) || null : null; // le modèle que le SERVEUR a choisi (provenance)
     return (Array.isArray(r.corps.content) ? r.corps.content : []).filter((c) => c && c.type === 'text' && typeof c.text === 'string').map((c) => c.text).join('');
   }
@@ -61,7 +64,7 @@ N'invente jamais une quantité, une durée ou une portion absente : mets null ou
 Si une quantité est illisible, garde le texte lisible et ajoute la ligne dans uncertain_fields.`;
 
 export async function extractRecipeFromImages(provider, images /* [{mime, base64}] */) {
-  if (!provider.configured) throw new Error('Assistant IA non configuré');
+  if (!provider.configured) throw new Error('non_connecte');
   if (!provider.supportsVision) throw new Error('Ce fournisseur ne prend pas en charge la lecture d’images');
   const content = [{ type: 'text', text: 'Extrais la recette de ces pages. JSON seulement.' }, ...images.map((im) => ({ type: 'image', mime: im.mime, base64: im.base64 }))];
   const raw = await provider.complete([{ role: 'system', content: PARSER_SYSTEM }, { role: 'user', content }], { json: true });
@@ -73,7 +76,7 @@ const INDEX_SYSTEM = `Tu lis la table des matières ou l'index d'un livre de cui
 Ne déduis aucun ingrédient d'un titre ; "ingredients_mentioned" ne contient que des mots explicitement imprimés dans l'entrée.`;
 
 export async function extractIndexFromImages(provider, images) {
-  if (!provider.configured) throw new Error('Assistant IA non configuré');
+  if (!provider.configured) throw new Error('non_connecte');
   const content = [{ type: 'text', text: 'Liste les entrées de cet index. JSON seulement.' }, ...images.map((im) => ({ type: 'image', mime: im.mime, base64: im.base64 }))];
   const raw = await provider.complete([{ role: 'system', content: INDEX_SYSTEM }, { role: 'user', content }], { json: true });
   const data = parseJsonLoose(raw);

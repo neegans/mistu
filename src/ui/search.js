@@ -220,7 +220,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     const demandeVide = !borner(input.value, 500).trim();
     return el('div', { class: 'card flat stack' },
       boutonChercher(demandeVide),
-      el('small', { class: 'muted' }, t('Une recherche = un appel à ton compte Anthropic.')),
+      el('small', { class: 'muted' }, t('Une recherche = un appel à l’assistant, compté dans ton quota du jour.')),
       el('small', { class: 'muted', dataset: { role: 'aide-web' }, hidden: !demandeVide }, t('Écris d’abord ce que tu cherches.'))); // toujours là : la frappe la montre ou la cache
   }
   // § 5.5-5.6 : chaque issue a son écran ; les liens sont revalidés AU RENDU par lienSignet (I-H) ; l'avertissement

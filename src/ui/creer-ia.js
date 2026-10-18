@@ -265,7 +265,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
       k1 ? el('div', { class: 'status warn', dataset: { role: 'k1' }, hidden: k1Cache(C) }, t('La demande a changé depuis cette proposition.')) : null,
       el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn primary', dataset: { role: 'creer-ia' }, disabled: C === null, onClick: () => lancer() }, k1 ? t('Créer à nouveau') : libelleCreer())),
       el('small', { class: 'muted', dataset: { role: 'aide-ia' }, hidden: !message }, message),
-      el('small', { class: 'muted' }, t('Une création = un appel à ton compte Anthropic.')));
+      el('small', { class: 'muted' }, t('Une création = un appel à l’assistant, compté dans ton quota du jour.')));
   }
 
   function blocIssue(issue) {

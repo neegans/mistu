@@ -601,6 +601,7 @@ export async function runCreerIaTests({ eq, ok }) {
         S.reinitialiserCreation();
         const root = await monter({ q: 'saumon' }, {}, ctxDe(SESSION));
         eq([bouton(root, 'creer-ia') !== null, bouton(root, 'demande-ia') !== null, root.querySelector('[data-role="garde-ia"]') === null], [true, true, true], 'P7.2 garde : une session suffit — le formulaire et « Créer ma recette » sont là, sans réglage local');
+        ok(root.textContent.includes('Une création = un appel à l’assistant, compté dans ton quota du jour.') && !root.textContent.includes('Anthropic'), 'formulaire : « un appel à l’assistant, compté dans ton quota du jour », aucun texte de l’écran ne nomme Anthropic');
         root.remove();
       }
       // P7.2 — garde C-15 (?adapter) ; frontière avec T7 : une parente valide donne le formulaire ORDINAIRE prérempli, sans changement ni appel
@@ -1017,7 +1018,7 @@ export async function runCreerIaTests({ eq, ok }) {
 
     // en.js : chaque texte de l'écran a sa traduction
     const CLES_T3 = ['Créer une recette avec l’assistant IA', 'Connecte-toi pour utiliser l’assistant.', 'Se connecter', 'Ce compte n’a pas accès à l’assistant.', 'Tu as atteint la limite du jour pour l’assistant ({n} appels).', 'Tu as atteint la limite du jour pour l’assistant.', 'La demande est trop lourde.', 'Cette version ne peut pas être adaptée ici.', 'Retour à la recette',
-      'Ce que tu as, ce que tu veux', 'Ex. : saumon et fenouil au four, croûte aux herbes', 'Portions, durée et restrictions se règlent ci-dessous.', 'Restrictions', 'Type de recette', 'Au choix de l’assistant', 'Portions', 'Temps maximal (minutes, facultatif)', 'Créer ma recette', 'Créer à nouveau', 'Une création = un appel à ton compte Anthropic.',
+      'Ce que tu as, ce que tu veux', 'Ex. : saumon et fenouil au four, croûte aux herbes', 'Portions, durée et restrictions se règlent ci-dessous.', 'Restrictions', 'Type de recette', 'Au choix de l’assistant', 'Portions', 'Temps maximal (minutes, facultatif)', 'Créer ma recette', 'Créer à nouveau', 'Une création = un appel à l’assistant, compté dans ton quota du jour.',
       'Écris d’abord ce que tu veux cuisiner.', 'Portions : un nombre entier de 1 à 12.', 'Temps maximal : de 5 à 240 minutes, ou vide.', 'L’assistant compose une recette…', 'Annuler', 'Une création est déjà en cours : annule-la d’abord.', 'La demande a changé depuis cette proposition.',
       'Créée avec l’IA · non testée', 'Adaptée avec l’IA · non testée', 'Selon l’assistant : {texte}', '1 portion', '{n} portions', 'environ {m} min (estimé par l’assistant)', 'Ingrédients', 'Étapes', 'Conseils', 'À vérifier avant de servir', 'Restrictions demandées', 'Incompatible : {lignes}', 'À vérifier, à retirer : {lignes}', 'À vérifier : {inconnues}', 'à retirer : {lignes}', 'À vérifier', 'identité proposée',
       'L’assistant n’a pas cuisiné cette recette : vérifie les quantités, les cuissons et les étiquettes avant de la servir.', 'Demande envoyée : {q}', 'au plus {m} min', '{u} jetons', 'Cette proposition n’est pas enregistrée : elle sera perdue à la fermeture de l’app.', 'Garder cette recette', 'Recommencer', 'Modifier la demande',

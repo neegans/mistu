@@ -179,6 +179,11 @@ export async function runPasserelleTests({ eq, ok }) {
       let erreur = null; try { await new L.PasserelleProvider({}, { session: SESSION, fetch: async () => reponse(s, corpsErr) }).complete([{ role: 'user', content: 'U' }]); } catch (e) { erreur = e; }
       eq([erreur instanceof Error, erreur?.message], [true, message], `complete : ${s} → Error(« ${message} »), sans le corps de la réponse`);
     }
+    // Fix round 1 (T4) : l'Error porte la classification du domaine (echecDomaine) — raison d'issue + extras — pas la raison brute de la passerelle
+    for (const [s, corpsErr, message, extras, nom] of [[429, { erreur: 'quota', quota: 60 }, 'quota', { quota: 60 }, '429 écrit avec son nombre'], [429, { erreur: 'quota' }, 'quota', { quota: null }, '429 écrit sans nombre'], [429, {}, 'trop_de_demandes', {}, '429 relayé d’Anthropic (non écrit) : ce n’est PAS la limite du jour'], [413, { erreur: 'trop_lourd' }, 'requete', { trop_lourd: true }, '413'], [504, {}, 'delai', {}, '504'], [418, {}, 'requete', {}, '418']]) {
+      let erreur = null; try { await new L.PasserelleProvider({}, { session: SESSION, fetch: async () => reponse(s, corpsErr) }).complete([{ role: 'user', content: 'U' }]); } catch (e) { erreur = e; }
+      eq([erreur instanceof Error, erreur?.message, erreur?.quota, erreur?.trop_lourd], [true, message, extras.quota, extras.trop_lourd], `complete : ${nom} → Error(« ${message} ») classée par echecDomaine${extras.quota !== undefined ? ', quota ' + extras.quota : ''}${extras.trop_lourd ? ', trop_lourd' : ''}`);
+    }
     { let n = 0; let erreur = null; try { await new L.PasserelleProvider({}, { session: null, fetch: async () => { n += 1; return reponse(200, {}); } }).complete([{ role: 'user', content: 'U' }]); } catch (e) { erreur = e; } eq([erreur?.message, n], ['non_connecte', 0], 'complete : sans session → Error(non_connecte), aucun fetch'); }
     // providerFrom : la session décide, plus aucune clé locale
     const avecCle = { llm: { provider: 'anthropic', api_key: 'sk-factice-locale', model: 'm' } };
@@ -193,11 +198,18 @@ export async function runPasserelleTests({ eq, ok }) {
     eq([oc.name, oc.configured, oc.supportsWebSearch, L.providerFrom({ llm: { provider: 'openai_compatible', api_key: 'k', model: 'm' } }, { session: SESSION }).name], ['none', false, false, 'anthropic'], 'providerFrom : une configuration compatible OpenAI avec clé ne donne plus de fournisseur sans session ; une session gagne');
     eq([typeof L.OpenAICompatibleProvider, L.providerFrom({ llm: { provider: 'anthropic', api_key: 'sk-factice-x', model: 'm' } }, { session: SESSION }).config, L.providerFrom({ llm: { provider: 'anthropic', api_key: 'sk-factice-x' } }, { session: SESSION }) instanceof L.PasserelleProvider], ['undefined', {}, true], 'providerFrom : OpenAICompatibleProvider n’existe plus ; avec une session, rien des réglages locaux n’est lu (ni gardé, ni envoyé)');
     eq([typeof L.ANTHROPIC_MESSAGES_URL, typeof L.anthropicHeaders, typeof L.AnthropicProvider], ['undefined', 'undefined', 'undefined'], 'llm : ANTHROPIC_MESSAGES_URL, anthropicHeaders et AnthropicProvider n’existent plus');
+    // NoneProvider (sans session) : complete() rejette non_connecte, sans réseau (la session disparue entre le rendu et le clic dit « Connecte-toi… »)
+    {
+      let n3 = 0; const vf3 = globalThis.fetch; globalThis.fetch = async () => { n3 += 1; throw new Error('aucun reseau attendu'); };
+      const rejets = [];
+      try { for (const p of [L.providerFrom({ llm: { provider: 'none' } }, { session: null }), L.providerFrom(avecCle), L.providerFrom(undefined)]) { try { await p.complete([{ role: 'user', content: 'U' }]); rejets.push('résolu'); } catch (e) { rejets.push(e.message); } } } finally { globalThis.fetch = vf3; }
+      eq([rejets, n3], [['non_connecte', 'non_connecte', 'non_connecte'], 0], 'NoneProvider.complete : sans session, Error(non_connecte) et aucun appel');
+    }
     // Sans session, l'extraction refuse AVANT tout appel
     {
       let n2 = 0; const vf = globalThis.fetch; globalThis.fetch = async () => { n2 += 1; throw new Error('aucun reseau attendu'); };
       let e2 = null; try { await L.extractRecipeFromImages(L.providerFrom(avecCle), images); } catch (e) { e2 = e; } finally { globalThis.fetch = vf; }
-      eq([e2?.message, n2], ['Assistant IA non configuré', 0], 'extraction : sans session, « Assistant IA non configuré » avant tout appel (le fetch global n’est jamais touché)');
+      eq([e2?.message, n2], ['non_connecte', 0], 'extraction : sans session, Error(non_connecte) avant tout appel (le fetch global n’est jamais touché) — l’écran en fait « Connecte-toi… »');
     }
   }
 
@@ -248,6 +260,20 @@ export async function runPasserelleTests({ eq, ok }) {
           ok(effaces >= 1, 'sessionAssistant : le minuteur du délai est effacé quand la session arrive avant lui');
         }
       }
+      // texteEchecAssistant (fix round 1) : l'Error de l'extraction porte la classification du domaine ; le texte en est dérivé. Le quota dit son nombre
+      // quand il existe ; un 429 relayé (trop_de_demandes) n'est PAS « la limite du jour » ; une raison technique n'est jamais un mot de code seul.
+      {
+        const { texteEchecAssistant } = await import('../src/ui/components.js');
+        const err = (message, extra = {}) => Object.assign(new Error(message), extra);
+        const GEN = 'L’assistant n’a pas répondu. Réessaie.';
+        for (const [erreur, attendu] of [
+          [err('quota', { quota: 60 }), 'Tu as atteint la limite du jour pour l’assistant (60 appels).'], [err('quota', { quota: 0 }), 'Tu as atteint la limite du jour pour l’assistant (0 appels).'], [err('quota', { quota: null }), 'Tu as atteint la limite du jour pour l’assistant.'], [err('quota'), 'Tu as atteint la limite du jour pour l’assistant.'],
+          [err('trop_de_demandes'), 'Trop de demandes pour l’instant. Réessaie dans une minute.'], [err('requete', { trop_lourd: true }), 'La demande est trop lourde.'], [err('requete'), GEN + ' Code : requete'],
+          [err('non_admis'), 'Ce compte n’a pas accès à l’assistant.'], [err('non_connecte'), 'Connecte-toi pour utiliser l’assistant.'],
+          [err('serveur'), GEN + ' Code : serveur'], [err('delai'), GEN + ' Code : delai'], [err('reseau'), GEN + ' Code : reseau'], [err('reponse_illisible'), GEN + ' Code : reponse_illisible'], [err('interne'), GEN + ' Code : interne'],
+          [new TypeError('Cannot read properties of undefined'), GEN + ' Code : Cannot read properties of undefined'], [undefined, GEN + ' Code : inconnu'], [null, GEN + ' Code : inconnu'], [{ message: 7 }, GEN + ' Code : inconnu'],
+        ]) eq(texteEchecAssistant(erreur), attendu, `texteEchecAssistant(${erreur === undefined || erreur === null ? String(erreur) : erreur.message}${erreur?.quota !== undefined ? ', quota ' + erreur.quota : ''}${erreur?.trop_lourd ? ', trop_lourd' : ''}) : « ${attendu} »`);
+      }
       // Les écrans d'extraction (import.js, recipe-edit.js) : le bouton de l'assistant s'allume quand la session est lue, jamais sur une clé locale
       // ni un réglage ; sans session, « Connecte-toi pour utiliser l’assistant. » et « Se connecter » apparaissent une fois la session lue
       // (jamais en flash pour une personne connectée) et AUCUN appel ne part (Passerelle T4, R-T4-4).
@@ -290,7 +316,10 @@ export async function runPasserelleTests({ eq, ok }) {
         const repondre = (statut, corps) => { globalThis.fetch = async (url, options) => { appels.push({ url, options }); return reponse(statut, corps); }; };
         const page = { id: 'p1', sha256: 'sha-x', printed_page: 12 };
         const ctxPages = (session, auth) => ({ ...ctxDe(session, NONE, auth), pagesById: new Map([['p1', page]]), recipesById: new Map(), versionsByRecipe: new Map(), versionsById: new Map(), booksById: new Map(), source_documents: [], ingredients: [], ingredientsById: new Map(), recipes: [], editions: [], books: [] });
-        const CAS = [[403, { erreur: 'non_admis' }, 'Ce compte n’a pas accès à l’assistant.'], [413, { erreur: 'trop_lourd' }, 'La demande est trop lourde.'], [413, 'pas du json', 'La demande est trop lourde.'], [429, { erreur: 'quota', quota: 60 }, 'Tu as atteint la limite du jour pour l’assistant.'], [401, { erreur: 'non_connecte' }, TEXTE_CONNEXION], [502, { erreur: 'serveur' }, 'Échec : serveur']];
+        const GENERIQUE = 'L’assistant n’a pas répondu. Réessaie.';
+        const CAS = [[403, { erreur: 'non_admis' }, 'Ce compte n’a pas accès à l’assistant.'], [413, { erreur: 'trop_lourd' }, 'La demande est trop lourde.'], [413, 'pas du json', 'La demande est trop lourde.'],
+          [429, { erreur: 'quota', quota: 60 }, 'Tu as atteint la limite du jour pour l’assistant (60 appels).'], [429, { erreur: 'quota' }, 'Tu as atteint la limite du jour pour l’assistant.'], [429, {}, 'Trop de demandes pour l’instant. Réessaie dans une minute.'],
+          [401, { erreur: 'non_connecte' }, TEXTE_CONNEXION], [502, { erreur: 'serveur' }, GENERIQUE + ' Code : serveur'], [504, {}, GENERIQUE + ' Code : delai']];
         // import.js — panneau d'index
         for (const [statut, corps, attendu] of CAS) {
           appels.length = 0; repondre(statut, corps);
@@ -301,7 +330,7 @@ export async function runPasserelleTests({ eq, ok }) {
           for (let i = 0; i < 100 && appels.length === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
           await tick(); await tick();
           eq([appels.length, JSON.parse(appels[0]?.options.body ?? '{}').outil, appels[0]?.options.headers.authorization, panneau.textContent.includes(attendu)], [1, 'extraction', 'Bearer ' + JETON, true], `panneau d'index, ${statut} ${typeof corps === 'string' ? '(corps illisible)' : corps.erreur} : un POST d'extraction, « ${attendu} » à l'écran`);
-          ok(!panneau.textContent.includes(JETON) && !/trop_lourd|non_admis|non_connecte/.test(panneau.textContent), `panneau d'index, ${statut} : ni le jeton ni un mot de code à l'écran`);
+          ok(!panneau.textContent.includes(JETON) && !/trop_lourd|non_admis|non_connecte/.test(panneau.textContent) && !panneau.textContent.includes('Échec :') && (!attendu.startsWith('Trop de demandes') || !panneau.textContent.includes('limite du jour')), `panneau d'index, ${statut} : ni le jeton, ni un mot de code seul après « Échec : », ni « limite du jour » pour un 429 relayé`);
         }
         // recipe-edit.js — éditeur de nouvelle recette (aucun rendu de la vraie base : les pages viennent de la base jetable de withRepo)
         globalThis.fetch = async (u) => { reseauInterdit.push(u); throw new Error('aucun reseau attendu'); };
@@ -323,7 +352,7 @@ export async function runPasserelleTests({ eq, ok }) {
           for (let i = 0; i < 100 && (appels.length === 0 || bouton.disabled); i += 1) await new Promise((r) => setTimeout(r, 5));
           await tick();
           eq([appels.length, JSON.parse(appels[0]?.options.body ?? '{}').outil, appels[0]?.options.headers.authorization, edit.textContent.includes(attendu)], [1, 'extraction', 'Bearer ' + JETON, true], `recette, ${statut} ${typeof corps === 'string' ? '(corps illisible)' : corps.erreur} : un POST d'extraction, « ${attendu} » à l'écran`);
-          ok(!edit.textContent.includes(JETON) && !/trop_lourd|non_admis|non_connecte/.test(edit.textContent), `recette, ${statut} : ni le jeton ni un mot de code à l'écran`);
+          ok(!edit.textContent.includes(JETON) && !/trop_lourd|non_admis|non_connecte/.test(edit.textContent) && !edit.textContent.includes('Échec :') && (!attendu.startsWith('Trop de demandes') || !edit.textContent.includes('limite du jour')), `recette, ${statut} : ni le jeton, ni un mot de code seul après « Échec : », ni « limite du jour » pour un 429 relayé`);
         }
       });
       eq(reseauInterdit, [], 'écrans d\'extraction : aucun appel réseau sans clic sur l\'assistant, ni pour la recette sans session');

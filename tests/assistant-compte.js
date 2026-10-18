@@ -739,8 +739,8 @@ export async function runAssistantCompteTests({ eq, ok }) {
       ok(!sec.textContent.includes('CORPS-SENTINELLE') && !sec.textContent.includes(JETON) && sec.querySelector('p').textContent.startsWith('L’assistant est actif pour'), `avec session, GET ${nom} : ni corps d’erreur ni jeton à l’écran ; la première ligne reste`);
       sec.remove();
     }
-    // Formes du 200 : quota de 1 au singulier ; modèle ou quota absents : seule la partie connue est dite
-    for (const [corps, attendu] of [[{ modele: 'm', quotaJour: 1 }, 'Modèle en service : m. Quota : 1 appel par jour.'], [{ modele: 'm', quotaJour: null }, 'Modèle en service : m.'], [{ modele: null, quotaJour: 60 }, 'Quota : 60 appels par jour.'], [{ modele: null, quotaJour: null }, '']]) {
+    // Formes du 200 : quota de 1 au singulier ; modèle ou quota absents : seule la partie connue est dite ; les deux absents : « indisponible », jamais une ligne vide
+    for (const [corps, attendu] of [[{ modele: 'm', quotaJour: 1 }, 'Modèle en service : m. Quota : 1 appel par jour.'], [{ modele: 'm', quotaJour: null }, 'Modèle en service : m.'], [{ modele: null, quotaJour: 60 }, 'Quota : 60 appels par jour.'], [{ modele: null, quotaJour: null }, 'L’assistant est indisponible pour le moment.'], [{}, 'L’assistant est indisponible pour le moment.'], [{ modele: 7, quotaJour: -1 }, 'L’assistant est indisponible pour le moment.']]) {
       const sec = monter({ user: U, auth: {} }, SESSION, { fetch: compteur(async () => reponse(200, corps)).f });
       await attendre(() => ligneEtat(sec).textContent !== '…');
       eq(ligneEtat(sec).textContent, attendu, `avec session, 200 ${JSON.stringify(corps)} : « ${attendu} »`);
