@@ -514,4 +514,128 @@ export async function runAssistantCompteTests({ eq, ok }) {
     await repo.clearDevice();
     eq([await db.get('assistant_config', 'llm'), (await db.getAll('outbox')).length, (await repo.getSettings()).llm.provider], [undefined, 0, 'none'], 'K-8 : clearDevice vide assistant_config, la file est vide ensuite et la configuration redevient « aucun »');
   });
+
+  // --- T7 : Réglages (K-6, K-10, K-12, S14, R-CPT-4)
+  const S = await import('../src/ui/settings.js');
+  const REFUS_URL = 'URL de base refusée : https exigé (ou http://localhost pour un serveur local), sans identifiants.';
+  const scene = document.createElement('div'); scene.hidden = true; document.body.append(scene);
+  try {
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    const texteDe = (sync, lie, prod) => S.texteAssistant({ sync, lie, suitLeCompte: () => prod });
+    ok(texteDe({}, false, false).includes('adresse de développement'), 'K-10 (a) : hôte hors production');
+    ok(texteDe({}, false, true).includes('Sans compte'), 'K-10 (b) : jamais connectée');
+    ok(texteDe({}, true, true).includes('prochaine connexion'), 'K-10 (c) : appareil lié, déconnecté');
+    ok(texteDe({ user: { id: 'u1' } }, true, true).includes('suit ton compte'), 'K-10 (d) : connectée');
+    for (const [sync, lie, prod] of [[{}, false, false], [{}, false, true], [{}, true, true], [{ user: { id: 'u1' } }, true, true]]) ok(texteDe(sync, lie, prod).includes('jamais incluse dans les sauvegardes ZIP'), 'K-10 : toujours la phrase des archives');
+    ok(S.texteAssistant({ sync: { user: { id: 'u1' } }, lie: true }).includes('adresse de développement'), 'K-10 : par défaut, l’hôte réel de la suite (localhost) est hors production, même connectée');
+    const monter = (llm, sync, deps) => { const sec = S.sectionAssistant({ llm, sync, lie: !!sync.user, suitLeCompte: () => true }, { tester: async () => 'OK', rafraichir: () => {}, ...deps }); scene.append(sec); return sec; };
+    const bouton = (root, nom) => [...root.querySelectorAll('button')].find((b) => b.textContent === nom);
+    const selectFournisseur = (root) => root.querySelector('select');
+    const champUrl = (root) => [...root.querySelectorAll('input[type="text"]')].find((i) => i.placeholder.startsWith('https://api.openai.com'));
+    const taper = (champ, valeur) => { champ.value = valeur; champ.dispatchEvent(new Event('input')); };
+    const choisir = (sel, valeur) => { sel.value = valeur; sel.dispatchEvent(new Event('change')); };
+    // K-6 : « Aucun » sans ligne ici → rien écrit
+    {
+      const appels = []; const dits = [];
+      const sec = monter({ provider: 'none', model: '', base_url: '', api_key: '' }, {}, { saveConfig: async (c) => { appels.push(c); }, dire: (m) => dits.push(m), confirm: async () => true });
+      bouton(sec, 'Enregistrer').click(); await tick();
+      eq([appels.length, dits.length > 0], [0, true], 'K-6 : « Aucun » sans configuration ici → rien écrit, et on le dit');
+      sec.remove();
+    }
+    // K-6 : « Aucun » avec clé et compte → confirmation ; refusée → rien ; acceptée → ligne vide
+    for (const reponse of [false, true]) {
+      const appels = []; let demandes = 0;
+      const sec = monter({ provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-ui' }, { user: { id: 'u1' } }, { saveConfig: async (c) => { appels.push(c); }, dire: () => {}, confirm: async () => { demandes += 1; return reponse; } });
+      choisir(selectFournisseur(sec), 'none');
+      bouton(sec, 'Enregistrer').click(); await tick();
+      eq([demandes, appels.map((c) => c.provider)], [1, reponse ? ['none'] : []], `K-6 : confirmation ${reponse ? 'acceptée → ligne vide' : 'refusée → rien'}`);
+      sec.remove();
+    }
+    // Enregistrer normal : la config normalisée part à saveConfig ; la clé n'est ni dans textContent ni dans outerHTML
+    {
+      const appels = []; const dits = []; let rendus = 0;
+      const sec = monter({ provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-ui' }, { user: { id: 'u1' } }, { saveConfig: async (c) => { appels.push(c); }, dire: (m) => dits.push(m), confirm: async () => true, rafraichir: () => { rendus += 1; } });
+      const champCle = sec.querySelector('input[type="password"]');
+      ok(!!champCle && !sec.textContent.includes('sk-factice-ui') && !sec.outerHTML.includes('sk-factice-ui'), 'K-2 : champ password, clé ni dans le texte ni dans le HTML');
+      taper(champCle, 'sk-factice-nouvelle');
+      bouton(sec, 'Enregistrer').click(); await tick();
+      eq(appels, [{ provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-nouvelle' }], 'Enregistrer : saveConfig reçoit la configuration tapée');
+      eq([dits, rendus], [['Assistant enregistré'], 1], 'Enregistrer : « Assistant enregistré » dit APRÈS l’écriture, puis la page est redessinée une fois');
+      // K-12 : focus RÉEL dans la section (revue Neegan 1.4 : un nœud sous `hidden` ne reçoit jamais le focus, et
+      // « occupé === (activeElement === champ) » valait false === false — un faux vert). La scène est rendue visible
+      // le temps du focus.
+      scene.hidden = false;
+      champCle.focus();
+      eq(document.activeElement, champCle, 'K-12 : le champ a réellement reçu le focus');
+      eq(S.occupeParAssistant(), true, 'K-12 : occupé quand le focus est dans la section');
+      champCle.blur();
+      scene.hidden = true;
+      eq(S.occupeParAssistant(), false, 'K-12 : libre sans focus');
+      sec.remove();
+    }
+    // S14 sur « Tester » (revue Neegan 1.1, critique) : le test part de la configuration NORMALISÉE. Depuis R-CPT-4, une
+    // base_url en http hors boucle locale ou avec identifiants n'est pas « vidée » mais REFUSÉE : rien n'est testé (la clé
+    // ne part en Bearer vers aucune adresse, pas même le défaut d'OpenAI), et le refus est dit.
+    {
+      const recu = []; const dits = [];
+      const sec = monter({ provider: 'openai_compatible', model: 'm', base_url: 'http://x.invalid/v1', api_key: 'sk-factice-test' }, {}, { tester: async (cfg) => { recu.push(cfg); return 'OK'; }, saveConfig: async () => {}, dire: (m) => dits.push(m), confirm: async () => true });
+      bouton(sec, 'Tester').click(); await tick();
+      eq([recu.length, dits], [0, [REFUS_URL]], 'S14 / R-CPT-4 : « Tester » avec une base_url http hors boucle locale → rien testé, le refus est dit');
+      ok(sec.textContent.includes(REFUS_URL) && !sec.textContent.includes('Test en cours'), 'S14 / R-CPT-4 : la ligne d’état du test dit le refus (jamais « Test en cours… » pour un test qui ne part pas)');
+      taper(champUrl(sec), 'https://u:p@x.invalid/v1');
+      bouton(sec, 'Tester').click(); await tick();
+      eq([recu.length, dits.length], [0, 2], 'S14 / R-CPT-4 : identifiants dans l’URL → rien testé non plus, refus dit');
+      taper(champUrl(sec), 'https://x.invalid/v1');
+      bouton(sec, 'Tester').click(); await tick();
+      eq(recu, [{ provider: 'openai_compatible', model: 'm', base_url: 'https://x.invalid/v1', api_key: 'sk-factice-test' }], 'S14 : une URL https est testée telle quelle');
+      ok(sec.textContent.includes('Réponse : OK') && !sec.textContent.includes(REFUS_URL), 'S14 : la réponse du test remplace le refus sur la ligne d’état');
+      choisir(selectFournisseur(sec), 'anthropic');
+      bouton(sec, 'Tester').click(); await tick();
+      eq(recu.at(-1), { provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-test' }, 'S14 : « Tester » reçoit la configuration NORMALISÉE (base_url tapée vidée pour anthropic, dont l’adresse est fixe)');
+      sec.remove();
+    }
+    // R-CPT-4 sur « Enregistrer » : une base_url refusée est DITE et rien n'est écrit. Sans cette garde, la normalisation
+    // rendait « Aucun » et la confirmation acceptée effaçait la clé du compte sous un message de succès.
+    {
+      const appels = []; const dits = []; let demandes = 0;
+      const sec = monter({ provider: 'anthropic', model: 'm', base_url: '', api_key: 'sk-factice-lan' }, { user: { id: 'u1' } }, { saveConfig: async (c) => { appels.push(c); }, dire: (m) => dits.push(m), confirm: async () => { demandes += 1; return true; } });
+      choisir(selectFournisseur(sec), 'openai_compatible');
+      taper(champUrl(sec), 'http://192.168.1.5:11434/v1');
+      bouton(sec, 'Enregistrer').click(); await tick();
+      eq([appels.length, demandes, dits], [0, 0, [REFUS_URL]], 'R-CPT-4 : http://192.168.1.5 → aucun saveConfig, aucune confirmation « Retirer », le refus est dit');
+      taper(champUrl(sec), 'http://localhost:11434/v1');
+      bouton(sec, 'Enregistrer').click(); await tick();
+      eq(appels, [{ provider: 'openai_compatible', model: 'm', base_url: 'http://localhost:11434/v1', api_key: 'sk-factice-lan' }], 'R-CPT-4 : http://localhost → saveConfig reçoit la configuration, URL intacte');
+      sec.remove();
+    }
+    // K-6 : après un « Enregistrer » réussi, « Aucun » sait qu'une ligne existe maintenant (revue Neegan 1.5 : `avait` suit)
+    {
+      const appels = [];
+      const sec = monter({ provider: 'none', model: '', base_url: '', api_key: '' }, {}, { saveConfig: async (c) => { appels.push(c); }, dire: () => {}, confirm: async () => true });
+      const sel = selectFournisseur(sec);
+      choisir(sel, 'anthropic');
+      const champs = [...sec.querySelectorAll('input')];
+      taper(champs.find((i) => i.placeholder.startsWith('ex. gpt')), 'm');
+      taper(sec.querySelector('input[type="password"]'), 'sk-factice-puis-aucun');
+      bouton(sec, 'Enregistrer').click(); await tick();
+      choisir(sel, 'none');
+      bouton(sec, 'Enregistrer').click(); await tick();
+      eq(appels.map((c) => c.provider), ['anthropic', 'none'], 'K-6 : enregistrer puis « Aucun » dans la même instance → la ligne vide part (avait mis à jour)');
+      sec.remove();
+    }
+    // suivreMoteur ne rafraîchit pas quand occupé (déjà éprouvé ; ici : le câblage de la page passe par occupeParAssistant)
+    ok(typeof S.occupeParAssistant === 'function', 'K-12 : occupeParAssistant exporté et câblé dans suivreMoteurDeLaPage (lire le source : pas testable autrement sans monter la page)');
+  } finally { scene.remove(); }
+  // La page entière : renderSettings monte la section depuis le magasin (getSettings().llm), marquée data-section, et la clé
+  // n'apparaît ni dans le texte ni dans le HTML de toute la page (seulement dans la propriété `value` du champ).
+  await withRepo(async (repoTemp) => {
+    await repoTemp.saveAssistantConfig({ provider: 'anthropic', model: 'm', api_key: 'sk-factice-page' });
+    const page = await S.renderSettings({}, {}, { settings: await repoTemp.getSettings(), sync: {} });
+    const sec = page.querySelector('[data-section="assistant"]');
+    eq([!!sec, sec?.querySelector('input[type="password"]')?.value, sec?.querySelector('select')?.value], [true, 'sk-factice-page', 'anthropic'], 'renderSettings : section « Assistant IA » marquée data-section, remplie depuis assistant_config');
+    ok(!page.textContent.includes('sk-factice-page') && !page.outerHTML.includes('sk-factice-page'), 'K-2 : la clé n’est ni dans le texte ni dans le HTML de la page Réglages entière');
+  });
+  // en.js : les quatre textes K-10 et les chaînes neuves ont une traduction
+  const { EN } = await import('../src/i18n/en.js'); // export nommé `EN` (src/i18n/en.js:3)
+  for (const fr of ['Sur cette adresse de développement, la configuration reste sur cet appareil.', 'Sans compte, la configuration reste sur cet appareil.', 'Ce qui est enregistré ici partira à ton compte à la prochaine connexion.', 'La configuration de l’assistant suit ton compte sur tes appareils connectés.', 'Elle n’est jamais incluse dans les sauvegardes ZIP.', 'Retirer l’assistant de tous tes appareils ?', 'Rien à retirer : aucun assistant n’est configuré ici.', 'Retirer', REFUS_URL]) ok(typeof EN[fr] === 'string' && EN[fr].length > 0, 'en.js : ' + fr.slice(0, 40));
 }

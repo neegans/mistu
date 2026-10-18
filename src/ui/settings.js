@@ -14,6 +14,8 @@ import { toJsonLd, toPaprikaYaml, toReadableSite } from '../domain/exporters.js'
 import { createZip } from '../core/zip.js';
 import { extFor } from '../domain/backup.js';
 import { providerFrom } from '../domain/llm.js';
+import { normaliserConfigAssistant, configVide } from '../domain/assistant-config.js';
+import { configAssistantSuitLeCompte } from '../sync/config.js';
 import { shortcutUrl, SHORTCUT_NAME, isAppleTouchDevice } from '../domain/timers.js';
 import { STORES, SYNC_INTERNAL_STORES, APP_VERSION, ARCHIVE_FORMAT_VERSION } from '../model/schema.js';
 import { pageHeader, section, field, select, segmented, majPastille } from './components.js';
@@ -152,24 +154,11 @@ export async function renderSettings(params, query, ctx) {
       } }, t('Créer une copie lisible (HTML)'))),
     el('small', { class: 'muted' }, t('À tester dans les applications cibles (Paprika : Fichier → Importer, YAML). Le HTML se lit hors connexion sans Cuisine OS.'))));
 
-  // Assistant IA
-  const llm = { provider: 'none', base_url: '', model: '', api_key: '', ...(s.llm || {}) };
-  const llmStatus = el('div', { class: 'muted' });
-  root.append(section(t('Assistant IA'),
-    el('p', { class: 'muted' }, t('Fournisseur-agnostique. Sans configuration, tout fonctionne à la main. La clé reste sur cet appareil et n’est jamais incluse dans les sauvegardes. Les appels distants n’ont pas été exercés lors du développement : à valider avec une clé réelle.')),
-    el('div', { class: 'two-col' },
-      field(t('Fournisseur'), select([{ value: 'none', label: t('Aucun (manuel)') }, { value: 'openai_compatible', label: t('API compatible OpenAI (OpenAI, Ollama, LM Studio…)') }, { value: 'anthropic', label: 'Anthropic' }], llm.provider, (v) => { llm.provider = v; })),
-      field(t('Modèle'), el('input', { type: 'text', value: llm.model, placeholder: 'ex. gpt-4o / claude-…', onInput: (e) => { llm.model = e.target.value.trim(); } })),
-      field(t('URL de base (compatible OpenAI seulement)'), el('input', { type: 'text', value: llm.base_url, placeholder: 'https://api.openai.com/v1', onInput: (e) => { llm.base_url = e.target.value.trim(); } })),
-      field(t('Clé API'), el('input', { type: 'password', value: llm.api_key, autocomplete: 'off', onInput: (e) => { llm.api_key = e.target.value.trim(); } }))),
-    el('div', { class: 'row' },
-      el('button', { class: 'btn primary', onClick: async () => { await repo.setSetting('llm', llm); toast(t('Assistant enregistré')); } }, t('Enregistrer')),
-      el('button', { class: 'btn', onClick: async () => {
-        llmStatus.textContent = t('Test en cours…');
-        try { const p = providerFrom({ llm }); if (!p.configured) throw new Error(t('Configuration incomplète')); const out = await p.complete([{ role: 'user', content: 'Réponds uniquement : OK' }], { maxTokens: 5 }); llmStatus.textContent = `${t('Réponse')} : ${String(out).slice(0, 80)}`; }
-        catch (e) { llmStatus.textContent = `${t('Échec')} : ${e.message}`; }
-      } }, t('Tester')),
-      llmStatus)));
+  // Assistant IA (spec assistant-par-le-compte K-6, K-10, K-12) : la configuration vient du magasin assistant_config
+  // (getSettings().llm), l'écriture passe par repo.saveAssistantConfig. « Lié » = un compte a déjà été accepté sur cet
+  // appareil (K-10 c) : ce qui est tapé déconnecté partira à ce compte à la prochaine connexion.
+  const lie = !!(await repo.db.get('sync_state', 'user_id'))?.value;
+  root.append(sectionAssistant({ llm: s.llm, sync, lie }));
 
   // Minuterie système
   root.append(section(t('Minuterie système (iPhone / iPad)'),
@@ -533,6 +522,74 @@ export function gestesL3Pour({
   };
 }
 
+// K-10 : quatre états, un texte chacun — ce qui se passe SUR CET APPAREIL, MAINTENANT. Toujours la phrase des archives.
+export function texteAssistant({ sync = {}, lie = false, suitLeCompte = configAssistantSuitLeCompte } = {}) {
+  let etat;
+  if (!suitLeCompte()) etat = t('Sur cette adresse de développement, la configuration reste sur cet appareil.');
+  else if (sync?.user) etat = t('La configuration de l’assistant suit ton compte sur tes appareils connectés.');
+  else if (lie) etat = t('Ce qui est enregistré ici partira à ton compte à la prochaine connexion.');
+  else etat = t('Sans compte, la configuration reste sur cet appareil.');
+  return `${etat} ${t('Elle n’est jamais incluse dans les sauvegardes ZIP.')}`;
+}
+
+// K-12 : la page n'est pas reconstruite sous les doigts — le focus dans cette section vaut « occupé » pour suivreMoteur.
+export const occupeParAssistant = (doc = document) => !!doc.activeElement?.closest?.('[data-section="assistant"]');
+
+// R-CPT-4 : pour openai_compatible (fournisseur connu), la normalisation ne rend « Aucun » que si une URL de base FOURNIE
+// est refusée — http hors boucle locale, identifiants, texte libre. Ce refus est DIT : enregistré, il écrirait une ligne
+// vide (la clé effacée sur tous les appareils, sous un « Assistant enregistré ») ; testé, il n'aurait rien à tester.
+const urlDeBaseRefusee = (brut) => brut.provider === 'openai_compatible' && normaliserConfigAssistant(brut).provider === 'none';
+
+// Section « Assistant IA », à dépendances injectées (F12 : on ne pose pas d'espion sur un espace de noms de module).
+export function sectionAssistant({ llm: initial, sync = {}, lie = false, suitLeCompte = configAssistantSuitLeCompte } = {},
+  { saveConfig = repo.saveAssistantConfig, confirm = confirmDialog, dire = toast, tester = null, rafraichir = refresh } = {}) {
+  const llm = { provider: 'none', base_url: '', model: '', api_key: '', ...(initial || {}) };
+  let avait = !configVide(initial); // suit les enregistrements de cette instance (revue Neegan 1.5)
+  const llmStatus = el('div', { class: 'muted' });
+  const refusUrl = () => t('URL de base refusée : https exigé (ou http://localhost pour un serveur local), sans identifiants.');
+  const enregistrer = async () => {
+    if (urlDeBaseRefusee(llm)) { dire(refusUrl()); return; } // R-CPT-4 : rien n'est écrit, pas même « Aucun »
+    const cfg = normaliserConfigAssistant(llm);
+    if (cfg.provider === 'none') {
+      // K-6 (F5) : sans ligne ici, « Aucun » n'écrit RIEN — une ligne vide plus récente effacerait la clé du compte.
+      if (!avait) { dire(t('Rien à retirer : aucun assistant n’est configuré ici.')); return; }
+      if (sync?.user && !(await confirm(t('Retirer l’assistant de tous tes appareils ?'), { danger: true, okLabel: t('Retirer') }))) return;
+    }
+    await saveConfig(cfg);
+    avait = !configVide(cfg);
+    dire(t('Assistant enregistré')); // après l'écriture seulement : pas de « enregistré » sans écriture
+    rafraichir();
+  };
+  // S14 (revue Neegan 1.1, critique) : « Tester » part de la configuration NORMALISÉE, jamais de l'objet tapé — une
+  // base_url refusée ne reçoit la clé en Bearer ni avant ni après « Enregistrer » (R-CPT-4 : le refus est dit).
+  const testerCfg = async () => {
+    const cfg = normaliserConfigAssistant(llm);
+    if (tester) return tester(cfg);
+    const p = providerFrom({ llm: cfg });
+    if (!p.configured) throw new Error(t('Configuration incomplète'));
+    return p.complete([{ role: 'user', content: 'Réponds uniquement : OK' }], { maxTokens: 5 });
+  };
+  const lancerTest = async () => {
+    if (urlDeBaseRefusee(llm)) { const refus = refusUrl(); llmStatus.textContent = refus; dire(refus); return; }
+    llmStatus.textContent = t('Test en cours…');
+    try { llmStatus.textContent = `${t('Réponse')} : ${String(await testerCfg()).slice(0, 80)}`; }
+    catch (e) { llmStatus.textContent = `${t('Échec')} : ${e.message}`; }
+  };
+  const sec = section(t('Assistant IA'),
+    el('p', { class: 'muted' }, t('Fournisseur-agnostique. Sans configuration, tout fonctionne à la main.') + ' ' + texteAssistant({ sync, lie, suitLeCompte })),
+    el('div', { class: 'two-col' },
+      field(t('Fournisseur'), select([{ value: 'none', label: t('Aucun (manuel)') }, { value: 'openai_compatible', label: t('API compatible OpenAI (OpenAI, Ollama, LM Studio…)') }, { value: 'anthropic', label: 'Anthropic' }], llm.provider, (v) => { llm.provider = v; })),
+      field(t('Modèle'), el('input', { type: 'text', value: llm.model, placeholder: 'ex. gpt-4o / claude-…', onInput: (e) => { llm.model = e.target.value.trim(); } })),
+      field(t('URL de base (compatible OpenAI seulement)'), el('input', { type: 'text', value: llm.base_url, placeholder: 'https://api.openai.com/v1', onInput: (e) => { llm.base_url = e.target.value.trim(); } })),
+      field(t('Clé API'), el('input', { type: 'password', value: llm.api_key, autocomplete: 'off', onInput: (e) => { llm.api_key = e.target.value.trim(); } }))),
+    el('div', { class: 'row' },
+      el('button', { class: 'btn primary', onClick: enregistrer }, t('Enregistrer')),
+      el('button', { class: 'btn', onClick: lancerTest }, t('Tester')),
+      llmStatus));
+  sec.dataset.section = 'assistant';
+  return sec;
+}
+
 // Abonnement à l'état du moteur : plusieurs changements rapprochés ne font qu'UN rendu, et l'abonné se retire de
 // lui-même dès que la vue affichée n'est plus Réglages. Le routeur ne démonte pas les vues (aucun crochet de
 // nettoyage) : sans ce retrait, chaque navigation laisserait un abonné de plus, et chaque passe rafraîchirait un
@@ -573,7 +630,7 @@ function suivreMoteurDeLaPage(moteur) {
     moteur,
     surReglages: () => currentPath() === '/settings',
     rafraichir: refresh,
-    occupe: () => archiveOperation,
+    occupe: () => archiveOperation || occupeParAssistant(), // K-12 : ni sous une archive, ni sous les doigts
   });
 }
 
