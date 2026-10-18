@@ -488,22 +488,30 @@ export async function runAssistantCompteTests({ eq, ok }) {
     await repo.saveAssistantConfig({ provider: 'anthropic', model: 'm', api_key: 'sk-factice-archive' });
     await repo.save('books', { id: 'b_arch', title: 'Livre' });
     const archive = await B.createArchive(db, { deviceName: 'Appareil de test' });
+    await repo.save('books', { id: 'b_locale', title: 'Locale' }); // fiche locale HORS archive : seul un vrai vidage la fait disparaître
     const texte = new TextDecoder().decode(await archive.blob.arrayBuffer());
     ok(!texte.includes('sk-factice-archive') && !texte.includes('assistant_config'), 'K-7 : ni la clé ni le magasin dans les octets du ZIP');
     const inspection = await B.inspectArchive(await archive.blob.arrayBuffer());
     ok(inspection.ok, 'K-7 : une archive sans ce magasin (comme toute archive d’avant ce lot) reste valide à l’inspection');
     ok(!('assistant_config' in (inspection.payload?.stores || {})), 'K-7 : l’inspection ne connaît pas ce magasin');
+    // Une archive fabriquée qui porterait ce magasin est refusée AVANT toute écriture : la configuration ne bouge pas.
+    const forgee = { ...inspection, payload: { ...inspection.payload, stores: { ...inspection.payload.stores, assistant_config: [{ id: 'llm', provider: 'anthropic', model: 'm', api_key: 'sk-factice-hostile' }] } } };
+    let refus = '';
+    try { await B.applyArchive(db, forgee, { mode: 'replace' }); } catch (e) { refus = e.message; }
+    ok(refus.includes('Magasin inattendu : assistant_config'), 'K-7 : une archive fabriquée qui porte assistant_config est refusée à la restauration');
+    eq((await repo.getSettings()).llm.api_key, 'sk-factice-archive', 'K-7 : … et la configuration n’a pas bougé');
     // remplacement : la ligne reste ; fusion : aussi
     await B.applyArchive(db, inspection, { mode: 'replace' });
     eq((await repo.getSettings()).llm.api_key, 'sk-factice-archive', 'K-7 : une restauration en REMPLACEMENT garde la configuration');
-    eq((await db.get('books', 'b_arch'))?.title, 'Livre', 'K-7 : … et la restauration a bien remis la bibliothèque (le remplacement a joué)');
+    eq(await db.get('books', 'b_locale'), undefined, 'K-7 : le remplacement a bien vidé la bibliothèque (la fiche locale hors archive a disparu) et seule la configuration est restée');
     await B.applyArchive(db, inspection, { mode: 'merge' });
     eq((await repo.getSettings()).llm.api_key, 'sk-factice-archive', 'K-7 : une fusion aussi');
     ok((await B.verifyRestored(db, inspection, { mode: 'replace' })).ok, 'K-7 : le bilan de restauration reste vert malgré le magasin hors archive');
     eq(B.compterFichesSynchronisees(inspection) >= 1, true, 'K-7 : compterFichesSynchronisees tolère l’absence du magasin');
-    // K-8 : effacer l'appareil vide la ligne, rien en file, rien envoyé
-    await db.mutate({ deletes: { outbox: (await db.getAll('outbox')).map((e) => e.seq) }, origin: 'device' });
+    // K-8 : effacer l'appareil vide la ligne. La file est vidée par clearDevice lui-même (outbox est dans STORES) et la capture
+    // ne lit jamais `clearStores` : le vidage ne peut donc rien mettre en file pour effacer le compte. « 0 » mesure l'état final,
+    // pas une absence d'envoi observée (aucun transport ici).
     await repo.clearDevice();
-    eq([await db.get('assistant_config', 'llm'), (await db.getAll('outbox')).length, (await repo.getSettings()).llm.provider], [undefined, 0, 'none'], 'K-8 : clearDevice vide assistant_config sans rien mettre en file');
+    eq([await db.get('assistant_config', 'llm'), (await db.getAll('outbox')).length, (await repo.getSettings()).llm.provider], [undefined, 0, 'none'], 'K-8 : clearDevice vide assistant_config, la file est vide ensuite et la configuration redevient « aucun »');
   });
 }
