@@ -28,7 +28,7 @@ const STATE_LABELS = {
     available: 'Recette disponible',
   },
   verification: { unverified: 'Non vérifiée', to_verify: 'À vérifier', verified: 'Vérifiée' },
-  version_kind: { extraction: 'Extraction', correction: 'Correction', adaptation: 'Adaptation', translation: 'Traduction', synthesis: 'Synthèse' },
+  version_kind: { extraction: 'Extraction', correction: 'Correction', adaptation: 'Adaptation', translation: 'Traduction', synthesis: 'Création' },
   version_status: { proposed: 'Proposée', tested: 'Testée par Neegan' },
   link_state: { proposed: 'Proposé', confirmed: 'Confirmé', refused: 'Refusé' },
   recipe_type: {

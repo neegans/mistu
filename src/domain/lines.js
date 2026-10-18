@@ -107,5 +107,11 @@ export function detectTimers(text) {
       timers.push({ label: m[0].trim(), seconds: Math.round(a * mult), seconds_max: b ? Math.round(b * mult) : null });
     }
   }
-  return timers.length ? { timers } : {};
+  // Bornes (S13) : un nombre qui déborde (Infinity) ou nul ne produit aucun minuteur ; 24 h au plus ; 4 au plus par étape.
+  // `seconds_max` n'est borné que s'il existe (le cas « 8 h » n'en porte pas : pas de clé ajoutée).
+  const bornes = timers
+    .filter((tm) => Number.isFinite(tm.seconds) && tm.seconds > 0)
+    .map((tm) => { const b = { ...tm, seconds: Math.min(tm.seconds, 86400) }; if (tm.seconds_max != null) b.seconds_max = Math.min(tm.seconds_max, 86400); return b; })
+    .slice(0, 4);
+  return bornes.length ? { timers: bornes } : {};
 }

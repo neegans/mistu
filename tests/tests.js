@@ -22,6 +22,7 @@ import { runSyncL3Tests } from './sync-l3.js';
 import { runAjouterTests } from './ajouter.js';
 import { runRechercheWebTests } from './recherche-web.js';
 import { runAssistantCompteTests } from './assistant-compte.js';
+import { runCreerIaTests } from './creer-ia.js';
 
 const results = [];
 const eq = (a, b, msg) => { const ok = JSON.stringify(a) === JSON.stringify(b); results.push({ ok, msg, got: a, want: b }); };
@@ -183,11 +184,15 @@ catch (error) { ok(false, `Suite recherche web interrompue : ${error?.message ||
 try { await runAssistantCompteTests({ eq, ok }); }
 catch (error) { ok(false, `Suite assistant par le compte interrompue : ${error?.message || String(error)}`); }
 
+// --- Créer une recette avec l'assistant IA : module pur (demande, validation, fabrication), minuteurs bornés.
+try { await runCreerIaTests({ eq, ok }); }
+catch (error) { ok(false, `Suite créer avec l'IA interrompue : ${error?.message || String(error)}`); }
+
 // --- Compte total épinglé (F2). Une assertion qui DISPARAÎT — un bloc supprimé, une boucle qui ne tourne plus, une
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 1966, 'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 2052, 'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);
