@@ -1,7 +1,7 @@
-# STATE.md — Cuisine OS (mistu) — état au 18 octobre 2026 (lot « Passerelle de l'assistant » fini dans le worktree `mistu-passerelle`, fonction déployée sur mitsu en version 3, `0004` pas collée, pas fusionné ; les trois lots de la nuit sont en ligne)
+# STATE.md — Cuisine OS (mistu) — état au 18 octobre 2026 (lot « Passerelle de l'assistant » fini dans le worktree `mistu-passerelle`, fonction déployée sur mitsu en version 3, `0004` collée et prouvée 20/20, pas fusionné ; les trois lots de la nuit sont en ligne)
 
 **18 octobre 2026, 15 h 19 — LOT « PASSERELLE DE L'ASSISTANT » : FINI dans le worktree, fonction DÉPLOYÉE sur `mitsu` (version 3),
-`0004` PAS collée, PAS fusionné, PAS poussé.** Branche `passerelle-assistant`, worktree `~/projects/mistu-passerelle` (serveur 8086), base
+`0004` COLLÉE et PROUVÉE par Neegan (20 h 40 UTC : `999 BILAN` = `0 faux sur 20`, `assistant_reserver` visible de PostgREST), PAS fusionné, PAS poussé.** Branche `passerelle-assistant`, worktree `~/projects/mistu-passerelle` (serveur 8086), base
 `main` `cdbd6e0`, tête `2a2f838` (19 commits, dont deux commits RESULTATS du contrôleur et les deux de la vague finale `f43e071` serveur et
 `2a2f838` app). Pour Neegan : plus de clé à taper ; connecté, l'assistant marche sur tous les appareils (60 appels par compte et par jour,
 `claude-sonnet-5-5`, Réglages dit « Vérification… » puis « actif pour … » une fois le serveur répondu) ; la clé est un secret du projet et
@@ -10,7 +10,7 @@ l'app n'appelle plus `api.anthropic.com`. Déployée par le contrôleur : v1 17 
 **aucun POST réel**. Revue finale de branche (opus) : 0 Critical, 3 Important (pages non réduites, forme des clés injectées, README racine), 11
 Minor ; rulings F-1 à F-14 appliqués, F-15 (double `JSON.parse`) laissé en dette. Suite **2953/2953** (épinglé 2952), Node **101/101**,
 `--check` 0, tsc strict 0, pglast OK (12 + 24 instructions), `sw.js` `cuisine-os-v0.8.0-6`, `APP_VERSION 0.8.0`. **Gestes, dans l'ordre :** (1)
-coller `0004` sur `mitsu`, puis `notify pgrst, 'reload schema';` seule, puis sa preuve (`999 BILAN` à `0 faux`, tableau dans `RESULTATS-mitsu.md`) ;
+FAIT le 18 oct à 20 h 40 UTC : `0004` collée, preuve `999 BILAN` = `0 faux sur 20` (tableau dans `RESULTATS-mitsu.md`, sondes S11-S12 : fonction connue de PostgREST, `anon` refusé 42501) ;
 (2) après `/verify` : `! git -C ~/projects/mistu merge --ff-only passerelle-assistant`, puis `push` ; (3) preuve réelle sur le site public,
 connecté : « saumon fenouil » → un POST `/functions/v1/assistant` 200, zéro `api.anthropic.com`, Réglages « actif … 60 », puis `select … from
 public.assistant_usage_jour;` ; avec la session, la sonde `GET` du README (étape 10) lit `cles` ; couper un appel en vol et lire le 499 dans le
@@ -93,8 +93,7 @@ en fichiers seulement : `supabase/migrations/0003_assistant_config.sql` et sa pr
 `dc7444a`, prouvé par l'appel réel du 17 octobre sur le site public, « puttanesca »). Sections dans `CLAUDE.md`.
 
 ## Ce qui n'est pas prouvé
-- **Lot passerelle** : la preuve `0004` (ni la migration, ni `notify pgrst`, ni la preuve n'ont été jouées sur `mitsu` ; syntaxe vérifiée par pglast
-  seulement) ; **aucun POST réel** (aucune ligne `assistant_journal`, aucun appel à Anthropic, validité du secret non exercée) ; le `GET`
+- **Lot passerelle** : (la preuve `0004` est jouée : 20/20 le 18 oct à 20 h 40 UTC, tableau dans `RESULTATS-mitsu.md`) ; **aucun POST réel** (aucune ligne `assistant_journal`, aucun appel à Anthropic, validité du secret non exercée) ; le `GET`
   `{ modele, quotaJour, cles }` avec une session (dont la valeur de `cles`) et `is_allowed` pour une session non admise ; l'abandon du client
   → 499 (prouvé sous Node seulement) ; le préflight d'un vrai navigateur (S1 est un `OPTIONS` à la main) ;
   un secret changé pris par un isolat chaud ; l'ordre `installCapture` / `repo.init()` dans l'app réelle (test de source seulement) ;

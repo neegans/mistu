@@ -1198,8 +1198,8 @@ rapport par tâche, les paquets de revue `review-*.diff` ; lanceur `suite.cjs`).
 (spec, plan ×2, T1 ×2, T2 ×3, T3 ×2, T4 ×2, RESULTATS ×2 du contrôleur, T5a, T5b, vague finale ×2 : `f43e071` serveur, `2a2f838` app). Cinq
 tâches, T1 à T5a relues (sonnet ou opus) avec au plus une ronde de corrections ; T5 découpée en 5a (restes parqués, `6d7ed21`), redéploiement
 et sondes (contrôleur), 5b (ces documents) ; puis la revue finale de branche (opus : 0 Critical, 3 Important, 11 Minor) et sa **vague
-finale** (F-1 à F-14, ci-dessous). **FINI dans le worktree, fonction DÉPLOYÉE sur `mitsu` (version 3, code `2a2f838`), `0004` PAS
-collée, PAS fusionné, PAS poussé** ; `/verify` : au chef d'orchestre. Fichiers :
+finale** (F-1 à F-14, ci-dessous). **FINI dans le worktree, fonction DÉPLOYÉE sur `mitsu` (version 3, code `2a2f838`), `0004` COLLÉE
+et PROUVÉE par Neegan (18 oct, 20 h 40 UTC, `0 faux sur 20`), PAS fusionné, PAS poussé** ; `/verify` : au chef d'orchestre. Fichiers :
 - Serveur : `supabase/functions/assistant/{index.ts,logique.js,deno.json,deno.d.ts}` (`logique.js` est pur et tourne sous Node
   et Deno ; `deno.d.ts` ne sert qu'à `tsc`, jamais importé), `supabase/migrations/0004_assistant_journal.sql` (table
   `public.assistant_journal`, vue `public.assistant_usage_jour`, fonction `public.assistant_reserver`),
@@ -1337,14 +1337,14 @@ Les rulings, une ligne chacun (détail dans le registre `progress.md` et en spec
 - **F-15** (M7, parqué) double `JSON.parse` du corps (jusqu'à 8 Mio) : NON pris, dette ci-dessous.
 
 **Ce qui n'est PAS prouvé.**
-- **La preuve `0004`** : ni la migration, ni `notify pgrst, 'reload schema';`, ni la preuve n'ont été jouées sur `mitsu`
-  (geste 1). Seule la syntaxe est vérifiée hors ligne. Constructions jamais mesurées sur `mitsu` : `pg_advisory_xact_lock(int,
-  int)` avec `hashtext`, `set search_path = ''` avec objets qualifiés, `has_function_privilege` sur la signature
-  `(uuid,text,integer,integer)`, `unnest(coalesce(proconfig, '{}'))`, `'security_invoker=true' = any (reloptions)`,
-  `has_sequence_privilege(…, 'usage, select, update')` ; le verdict 1.09 (`service_role` garde ses droits, USAGE sur la séquence de `id`
-  compris depuis F-12) dépend des privilèges par défaut de Supabase et dira vrai ou faux pour de bon. Tant que `0004` n'est pas collée, un `POST` admis rend 502
-  `serveur` (inférence : `assistant_reserver` inconnue, `PGRST202`). La concurrence elle-même (deux appels simultanés) ne se
-  prouve pas dans l'éditeur SQL.
+- **La preuve `0004`** : JOUÉE par Neegan le 18 octobre à 20 h 40 UTC (`Run without RLS`), `999 BILAN` = **`0 faux sur 20`**, tableau
+  dans `RESULTATS-mitsu.md`. Les constructions jamais mesurées jusque-là (`pg_advisory_xact_lock(int, int)` avec `hashtext`,
+  `set search_path = ''` avec objets qualifiés, `has_function_privilege` sur `(uuid,text,integer,integer)`, `unnest(coalesce(proconfig,
+  '{}'))`, `'security_invoker=true' = any (reloptions)`, `has_sequence_privilege(…, 'usage, select, update')`) tiennent sur `mitsu` ;
+  le verdict 1.09 (`service_role` garde ses droits, USAGE sur la séquence compris) est **vrai**. Sondes du contrôleur à 20 h 46-20 h 47 UTC
+  (clé publique seule, aucune dépense) : S11 `PGRST202` dont l'indice nomme `assistant_reserver(p_octets, p_outil, p_owner, p_quota)`
+  → le cache de schéma de PostgREST connaît la fonction (plus de 502 `PGRST202` à craindre) ; S12 avec les bons noms → 401 `42501`
+  (`anon` refusé par la voie HTTP). **Reste non prouvé** : la concurrence elle-même (deux appels simultanés sous le verrou).
 - **Aucun POST réel** : aucune ligne `assistant_journal` n'a été écrite ; aucun appel à Anthropic n'est passé par la fonction ;
   ni la validité du secret `ANTHROPIC_API_KEY` (sa pose est consignée par le contrôleur dans `RESULTATS-mitsu.md` ; aucune sonde ne
   l'exerce), ni la forme réelle d'une réponse relayée, ni la durée, les jetons et le coût d'un appel ne sont mesurés.
@@ -1384,7 +1384,7 @@ Les rulings, une ligne chacun (détail dans le registre `progress.md` et en spec
 - `lireDemande` avec un plafond appelant < 1 donnerait `max_tokens` 0 : inatteignable, `index.ts` passe toujours 16 000.
 
 **Gestes de Neegan, dans cet ordre.**
-1. Éditeur SQL de `mitsu` : coller `supabase/migrations/0004_assistant_journal.sql` **entier** (un collage = une transaction ;
+1. **FAIT le 18 octobre (20 h 40 UTC, BILAN `0 faux sur 20`, tableau consigné).** Éditeur SQL de `mitsu` : coller `supabase/migrations/0004_assistant_journal.sql` **entier** (un collage = une transaction ;
    attendu `Success. No rows returned`), puis, **collée seule**, `notify pgrst, 'reload schema';`, puis
    `supabase/proofs/0004_assistant_journal.sql` (rien à remplacer, aucune adresse à ajouter ; « Run without RLS »). Lire la
    ligne `999 BILAN` (`0 faux` = vert) et coller le tableau tel quel dans `supabase/proofs/RESULTATS-mitsu.md`, à la suite de

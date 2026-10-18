@@ -264,4 +264,37 @@ Code : `supabase/functions/assistant/` (spec `docs/superpowers/specs/2026-10-18-
 
 **Troisième déploiement (contrôleur, 18 octobre 2026, 19 h 19 UTC = 15 h 19 à Montréal), après la revue finale de branche** : même commande, code = commit `2a2f838` (vague finale : lecteur tolérant des clés Supabase injectées + repère non secret `cles` dans le GET, abandon du client propagé à l'appel amont et journalisé 499, pages photographiées réduites avant l'envoi côté app, délais client 135 s). `supabase functions list` : **version 3**, `ACTIVE`, `verify_jwt: false`, `import_map: true`, `ezbr_sha256 95034efd…`. Les neuf sondes S1-S9 rejouées à 19 h 19 UTC : **identiques aux versions 1 et 2** (S1 204 + Allow-Origin, 732 ms à froid ; S2 204 sans Allow-Origin ; S3 401 `non_connecte` ; S4 403 `origine` ; S5 401 `non_connecte` ; S6 401 ; S7 405 `methode` ; S8 403 `origine` ; S9 401 `non_connecte`). Non mesuré, exige une session réelle : le `GET` → `{ modele, quotaJour, cles }` (quelle voie de clés a servi), un `POST` admis, le 499 sur une requête coupée en vol.
 
-**Preuve `0004_assistant_journal.sql` — à jouer (geste de Neegan, après le collage de `0004` et `notify pgrst, 'reload schema';`)** : le BILAN et les verdicts seront collés ici.
+**Preuve `0004_assistant_journal.sql` — JOUÉE par Neegan le 18 octobre 2026 (vers 20 h 40 UTC = 16 h 40 à Montréal), après le collage de `0004` entière (« Run without RLS », `Success. No rows returned`)** : `999 BILAN` = **0 faux sur 20**. Tableau tel quel (aucune valeur de `data`, aucun identifiant réel : la preuve pose ses propres lignes puis `rollback;`) :
+
+| ordre | etape                                                                                              | attendu                          | obtenu                                                  | ok   |
+| ----- | -------------------------------------------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------- | ---- |
+| 0.01  | usage sur le schema temporaire pour authenticated                                                  | accorde ou implicite             | accorde explicitement                                   | true |
+| 1.01  | public.assistant_journal presente, RLS activee                                                     | true                             | true                                                    | true |
+| 1.02  | aucune regle (policy) sur assistant_journal                                                        | 0                                | 0                                                       | true |
+| 1.03  | anon et authenticated : aucun privilege sur la table                                               | false / false                    | false / false                                           | true |
+| 1.04  | index assistant_journal_owner_jour (owner_id, jour)                                                | 1                                | 1                                                       | true |
+| 1.05  | vue assistant_usage_jour presente, en security invoker                                             | true                             | true                                                    | true |
+| 1.06  | anon et authenticated : aucun privilege sur la vue                                                 | false / false                    | false / false                                           | true |
+| 1.07  | anon et authenticated : aucun privilege sur la sequence de id                                      | false / false                    | false / false                                           | true |
+| 1.08  | owner_id references auth.users on delete cascade                                                   | 1                                | 1                                                       | true |
+| 1.09  | service_role : select, insert, update sur la table, select sur la vue, usage sur la sequence de id | true / true / true / true / true | true / true / true / true / true                        | true |
+| 1.10  | assistant_reserver : security invoker, volatile, search_path fixe                                  | false / v / true                 | false / v / true                                        | true |
+| 1.11  | assistant_reserver : execute refuse a anon et authenticated, accorde a service_role                | false / false / true             | false / false / true                                    | true |
+| 2.01  | authenticated : select count(*) sur assistant_journal est refuse                                   | 42501 (permission denied)        | 42501 permission denied for table assistant_journal     | true |
+| 2.02  | authenticated : insert dans assistant_journal est refuse                                           | 42501 (permission denied)        | 42501 permission denied for table assistant_journal     | true |
+| 2.03  | authenticated : select sur assistant_usage_jour est refuse                                         | 42501 (permission denied)        | 42501 permission denied for view assistant_usage_jour   | true |
+| 2.04  | authenticated : l appel de assistant_reserver est refuse                                           | 42501 (permission denied)        | 42501 permission denied for function assistant_reserver | true |
+| 3.01  | sous postgres : une ligne de journal, puis assistant_usage_jour la compte                          | appels = 1                       | appels = 1                                              | true |
+| 3.02  | la vue additionne les jetons de la ligne                                                           | jetons 10 / 20                   | jetons 10 / 20                                          | true |
+| 3.03  | un outil hors liste est refuse par le check                                                        | 23514                            | 23514                                                   | true |
+| 3.04  | assistant_reserver : un id tant que le quota n est pas atteint, puis null                          | id non nul, puis null            | id non nul, puis null                                   | true |
+| 999   | BILAN                                                                                              | aucun verdict faux               | 0 faux sur 20                                           | true |
+
+**Sondes du contrôleur juste après (20 h 46-20 h 47 UTC, clé publique `sb_publishable_…` seule, `POST /rest/v1/rpc/assistant_reserver`, aucune dépense, aucune ligne écrite)** :
+
+| Sonde | Requête | Statut | Corps | Ce que ça prouve |
+|---|---|---|---|---|
+| S11 | corps avec des noms de paramètres faux (`p_modele`) | 404 | `PGRST202` … « Perhaps you meant to call the function public.assistant_reserver(p_octets, p_outil, p_owner, p_quota) » | le cache de schéma de PostgREST **connaît** `assistant_reserver` avec sa vraie signature : le rechargement a eu lieu (par `notify pgrst` ou par le déclencheur DDL de Supabase), donc plus de 502 `PGRST202` à craindre au premier POST réel |
+| S12 | corps avec les bons noms (`p_owner`, `p_outil`, `p_quota`, `p_octets`) | 401 | `{"code":"42501","message":"permission denied for function assistant_reserver"}` | `anon` est refusé par l'API aussi (le verdict 2.04 vaut par la voie HTTP) ; seule `service_role`, donc la fonction `assistant`, peut réserver |
+
+Reste non prouvé côté SQL : la concurrence réelle (deux appels simultanés sous le verrou), qui ne se joue pas dans l'éditeur.
