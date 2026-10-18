@@ -508,6 +508,6 @@ test('README : etape 8 bis (0003 et sa preuve) et procedure « appareil perdu ou
   assert.ok(perdu.includes('3600 s par défaut'), 'la valeur par defaut du reglage');
   assert.deepEqual([...i].sort((a, b) => a - b), i, 'dans l ordre de la spec');
   const res = lire('supabase/proofs/RESULTATS-mitsu.md');
-  assert.ok(res.includes('## Preuve `0003_assistant_config.sql` — à jouer (à remplir par Neegan, sans aucune valeur de data)'));
+  assert.ok(res.includes('## Preuve `0003_assistant_config.sql` — ')) // titre provisoire « à jouer » avant le collage, puis « 45 verdicts, 0 faux » une fois jouee (18 oct);
   assert.doesNotMatch(res, /sk-(?!…)[A-Za-z0-9_-]{4,}/, 'aucune cle dans RESULTATS');
 });
