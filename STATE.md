@@ -4,20 +4,25 @@
 **Lot « Refonte visuelle magazine culinaire » (18 octobre) : FINI dans le worktree, PAS fusionné, PAS poussé** — branche
 `refonte-visuelle`, worktree `~/projects/mistu-look` (serveur `python3 -m http.server 8085`), base = pointe finale de `creer-ia`
 `237047a` (lot 2 ci-dessous, **lui-même non fusionné** sur le lot 1 `ce9eb5d`, **lui-même non fusionné** sur `main` `66c5d19`) ;
-commit de départ `174415b` (spec et plan rév. 2), puis T1, T2, T3 et la clôture. Registre **hors git** :
+commit de départ `174415b` (spec et plan rév. 2), puis T1, T2, T3, la clôture et la **vague finale** après la revue finale de
+branche (R-VIS-13 : ambre `#8b5f10` ; R-VIS-14 : règles de comportement épinglées ; anneau des onglets bas rentré). Registre **hors git** :
 `.superpowers/sdd/2026-10-18-refonte-visuelle/` (`progress.md`, rapports, outil `preuve-visuelle.cjs`, `galerie.html`, résultats et
 **`captures/`**, 136 PNG). Pour Neegan : l'app change d'habit, pas de gestes — papier ivoire, titres en serif, la tomate pour
-l'action, le vert pour les états ; mêmes écrans, mêmes textes, aucun test de comportement retouché ; seul « Annuler » se range à
-droite pendant un vol (R-VIS-8, à confirmer). Fichiers : `styles.css`, `index.html`, `manifest.webmanifest`, `sw.js`,
-`tests/theme.js` (neuf), `tests/tests.js` ; aucun `src/`. Suite **2623/2623** (total épinglé **2622** dans `tests/tests.js` ; départ
-sur `237047a`, mesuré par le contrôleur : 2554/2554, épinglé 2553), seul le 404 `/favicon.ico` en console ; `node --test tools/*.test.mjs` 45/45 ;
-`node tools/generer-migrations.mjs --check` 0 ; les 27 paires de contraste de la spec § 3.6 recalculées ≥ 4,5 (minimum 4,63).
-Preuve visuelle de la tâche 3 **VERTE** (code de sortie 0) : 40 lignes sur 40 aux largeurs 375, 390, 768 et 1512, contraste rendu
-minimum 4,67 sur 1 732 nœuds, M3 sans recouvrement, M14 20 sur 20, 136 captures. `APP_VERSION 0.7.0`, `DB_VERSION 3` (inchangés),
-`sw.js` `cuisine-os-v0.7.0-24`, `SHELL` inchangé. Décisions de nuit V-1 à V-6 **à confirmer par Neegan**, avec R-VIS-8 (placement
-d'« Annuler ») et R-VIS-4 (libellé de recherche coupé à 375 px). Spec `docs/superpowers/specs/2026-10-18-refonte-visuelle-design.md`
-(§ 8 : rulings R-VIS-1 à R-VIS-12 ; § 5 : dettes), section du lot dans `CLAUDE.md` et dans `docs/architecture.md`. Revue finale de
-branche et `/verify` : au chef d'orchestre.
+l'action, le vert pour les états ; mêmes écrans, mêmes textes, aucun test de comportement retouché ; à l'écran, « Annuler » se range
+à droite pendant un vol (R-VIS-8, à confirmer), les segments des Réglages ne s'étirent plus, la puce bascule cochée passe en vert, les
+coins des couvertures sont arrondis. Fichiers : `styles.css`, `index.html`, `manifest.webmanifest`, `sw.js`,
+`tests/theme.js` (neuf), `tests/tests.js` ; aucun `src/`. Suite **2633/2633** (total épinglé **2632** dans `tests/tests.js`, après la
+vague finale ; 2622 à la clôture ; départ sur `237047a`, mesuré par le contrôleur : 2554/2554, épinglé 2553), seul le 404 `/favicon.ico` en console ;
+`node --test tools/*.test.mjs` 45/45 ; `node tools/generer-migrations.mjs --check` 0 ; les 28 paires de contraste de la spec § 3.6
+recalculées ≥ 4,5 (minimum 4,62, ambre sur accent-bg du mode cuisine, qui valait 4,49 avant R-VIS-13). Preuve visuelle **relancée par
+la vague finale**, VERTE (code de sortie 0) : 40 lignes sur 40 aux largeurs 375, 390, 768 et 1512, contraste rendu minimum 4,62 sur
+1 760 nœuds, M3 sans recouvrement, M14 20 sur 20, 136 captures (avant la vague, la tâche 3, la revue finale et le contrôleur
+l'avaient trouvée identique : 40/40, minimum 4,67 sur 1 732 nœuds, 136 captures). Mutants de la vague : 11 sur 11 rougissent. `APP_VERSION 0.7.0`, `DB_VERSION 3` (inchangés),
+`sw.js` `cuisine-os-v0.7.0-25`, `SHELL` inchangé. Décisions de nuit V-1 à V-6 **à confirmer par Neegan**, avec R-VIS-8 (placement
+d'« Annuler »), R-VIS-4 (libellé de recherche coupé à 375 px) et l'ovale des titres web sur plusieurs lignes (capture
+`375-galerie-boutons.png`). Spec `docs/superpowers/specs/2026-10-18-refonte-visuelle-design.md`
+(§ 8 : rulings R-VIS-1 à R-VIS-14 ; § 5 : dettes), section du lot dans `CLAUDE.md` et dans `docs/architecture.md`. Revue finale de
+branche faite (une vague de corrections) ; re-revue ciblée et `/verify` : au chef d'orchestre.
 
 **Lot « Créer une recette avec l'assistant » (18 octobre) : FINI dans le worktree, PAS fusionné, PAS poussé** — branche
 `creer-ia`, worktree `~/projects/mistu-ia` (serveur `python3 -m http.server 8084`), base = pointe d'`assistant-compte`
@@ -62,8 +67,8 @@ en fichiers seulement : `supabase/migrations/0003_assistant_config.sql` et sa pr
   actif, survol collant (R-VIS-12), marge de 3,4 px du libellé de recherche à 390 px (Chrome seulement) ; à 320 px avec la pastille,
   la barre haute mesure 341 px (320 px = iPhone de 375 ou 390 px en « Agrandir l'affichage », selon la revue de T3) ; `::backdrop` +
   `var()` exige Safari 17.4 et `:has()` iOS 15.4 ; R-VIS-8 est un crochet de style : l'assertion de `tests/theme.js` construit son
-  propre DOM, seule la preuve M3 (hors git, recherche web seulement) voit la vraie structure ; la preuve visuelle n'a pas été
-  relancée à la clôture (aucune feuille touchée).
+  propre DOM, seule la preuve M3 (hors git, recherche web seulement) voit la vraie structure ; l'anneau rentré des onglets bas
+  (vague finale) est mesuré dans la scène des tests et dans la galerie, pas dans l'app.
 - **Lot création** : **aucun appel réel** (chaque test passe par un `fetch` factice ; le parcours dans l'app réelle de la
   tâche 3 avait l'API Anthropic interceptée) — forme réelle d'une réponse, durée, jetons, coût, taux de refus `illisible`
   ou `affirmation` ; Safari et l'iPhone ; les minuteurs Siri d'une étape de création sur appareil ; l'effet de N-8/N-9
@@ -89,9 +94,9 @@ en fichiers seulement : `supabase/migrations/0003_assistant_config.sql` et sa pr
    `66c5d19` ⊂ `ce9eb5d` ⊂ `237047a` ⊂ `refonte-visuelle`) : `! git -C ~/projects/mistu merge --ff-only assistant-compte`, puis
    `! git -C ~/projects/mistu merge --ff-only creer-ia`, puis `! git -C ~/projects/mistu merge --ff-only refonte-visuelle` ; si une
    branche a bougé pendant une vague de revue, rebaser la suivante dessus d'abord ; puis `! git -C ~/projects/mistu push origin main`.
-4. Suite publique : ouvrir `https://neegans.github.io/mistu/tests/` et lire le BILAN (à cette clôture : 2623/2623, épinglé 2622,
+4. Suite publique : ouvrir `https://neegans.github.io/mistu/tests/` et lire le BILAN (après la vague finale : 2633/2633, épinglé 2632,
    plus le 404 de `/favicon.ico` ; seule la suite publique tue le mutant `() => false` du défaut de `texteAssistant`, lot 1) ;
-   service worker `cuisine-os-v0.7.0-24`.
+   service worker `cuisine-os-v0.7.0-25`.
 5. iPhone, app **réinstallée** depuis le site public : barre d'état lisible, onglet actif, porte « Kwe. », aucun survol collé après
    une tape, libellé de la recherche, et dire si « Agrandir l'affichage » est activé (lot 3) ; « Connexion avec Google » depuis l'app installée (mesure iOS due depuis le
    13 octobre : où atterrit le retour), la clé arrive à la passe suivante (lot 1, geste 4) ; sur le Mac, Réglages → Assistant IA
@@ -102,11 +107,14 @@ en fichiers seulement : `supabase/migrations/0003_assistant_config.sql` et sa pr
    affichés et le coût dans la console Anthropic ; « Garder » → Mes livres → « Recettes créées avec l'IA » ; « Marquer
    testée » après cuisson ; une adaptation (« Adapter avec l'IA »). Preuve iPhone du lot web, toujours due : « saumon fenouil » → des
    liens ; « Garder ce lien » → signet prérempli.
-7. **Décisions** : V-1 à V-6 du lot 3 (renverser V-3 ou V-4 au besoin), R-VIS-8 et R-VIS-4 ; N-8/N-9 en tête puis N-1 à N-10 du
+7. **Décisions** : V-1 à V-6 du lot 3 (renverser V-3 ou V-4 au besoin), R-VIS-8, R-VIS-4 et l'ovale des titres web sur plusieurs
+   lignes ; N-8/N-9 en tête puis N-1 à N-10 du
    lot 2, et les décisions de spec listées dans `CLAUDE.md` (borne de 240 min, etc.).
 8. Faire tourner la clé Anthropic (elle a transité par un chat) et poser un plafond de dépense mensuel sur le workspace.
-9. « clean » **seulement après** avoir copié les trois registres dans `~/projects/mistu/.superpowers/sdd/` :
+9. « clean » **seulement après** avoir copié les registres dans `~/projects/mistu/.superpowers/sdd/` :
    `2026-10-17-assistant-par-le-compte` (déjà là, `diff -rq` muet contre `~/projects/mistu-web` le 18 octobre),
+   `2026-10-17-chercher-sur-le-web` et `2026-10-17-confort-web` (dans `~/projects/mistu-web` : déjà là, vérifiés identiques, `diff -rq`
+   muet le 18 octobre — `git worktree remove` de `mistu-web` détruirait les originaux),
    `2026-10-18-creer-avec-l-ia` (copié par le contrôleur, `diff -rq` muet contre `~/projects/mistu-ia` le 18 octobre),
    `2026-10-18-refonte-visuelle` **avec `captures/`** (une copie du contrôleur existe déjà, mais chaque rapport la périme : la
    recopier en dernier, puis `diff -rq` muet) ; ensuite seulement `git worktree remove` de `mistu-look`, `mistu-ia`, `mistu-web`.
@@ -119,7 +127,8 @@ en fichiers seulement : `supabase/migrations/0003_assistant_config.sql` et sa pr
   mur reste le plafond du workspace Anthropic. D5 (sous-domaine dédié) reste recommandé.
 - **Après le lot 3** (dettes nommées, spec refonte § 5) : mode sombre, barre haute sur bureau (V-3), icônes SVG, police de marque,
   `.chip.removable` focalisable, `aria-current` sur l'onglet actif, `scrollIntoView` qui respecte le mouvement réduit, « − / + »
-  des portions à 44 px, champ « p. imprimée » de `src/ui/import.js:136` à 16 px ; et, pour un lot de comportement, le bug
+  des portions à 44 px, champ « p. imprimée » de `src/ui/import.js:136` à 16 px, liste blanche T-2 vérifiée par usage, `--safe-t`
+  sur le panneau latéral et `scroll-margin-top` si la barre d'état repasse en `black-translucent` (revue finale) ; et, pour un lot de comportement, le bug
   préexistant de Réglages (`src/ui/settings.js:43-45` : segments dans un `label.field`, toucher le libellé active la première
   option — revue de T3). Un lot à la fois.
 - Au prochain lot qui touche le générateur, après le collage de `0003` : figer `SYNC_STORES_0003` et épingler
@@ -131,7 +140,7 @@ en fichiers seulement : `supabase/migrations/0003_assistant_config.sql` et sa pr
 ```
 cd ~/projects/mistu-look && git status --short && git log --oneline -3
 curl -sS -o /dev/null -w "8085 http=%{http_code}\n" http://localhost:8085/tests/ || (nohup python3 -m http.server 8085 > /dev/null 2>&1 &)
-node ~/projects/mistu-look/.superpowers/sdd/2026-10-18-refonte-visuelle/suite.cjs 8085   # attendu : 2623/2623 (+ 1 x 404 favicon)
+node ~/projects/mistu-look/.superpowers/sdd/2026-10-18-refonte-visuelle/suite.cjs 8085   # attendu : 2633/2633 (+ 1 x 404 favicon)
 node --test tools/*.test.mjs && node tools/generer-migrations.mjs --check   # attendu : 45/45, code 0
 ```
 Preuve visuelle (réécrit `resultats.md`, `resultats.json` et `captures/` : jamais pendant qu'une revue les lit) :

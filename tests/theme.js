@@ -1,7 +1,7 @@
 // Thème « magazine culinaire » (spec 2026-10-18-refonte-visuelle). La feuille est LUE et MESURÉE, jamais recopiée.
 const JETONS = ['--paper', '--paper-2', '--card', '--ink', '--muted', '--line', '--field-line', '--action', '--action-2', '--action-bg', '--accent', '--accent-2', '--accent-bg', '--warn', '--warn-bg', '--warn-line', '--danger', '--danger-bg', '--danger-line', '--ok', '--ok-bg', '--backdrop', '--tap', '--radius', '--radius-pill', '--shadow', '--serif', '--sans', '--topbar-h', '--cream', '--cream-2', '--green', '--green-2', '--sage', '--sage-2'];
 // (texte, fond, où) — spec § 3.6
-const PAIRES = [['--ink', '--paper', 'corps'], ['--muted', '--paper', '.muted'], ['--muted', '--paper-2', '.badge / .chip.neutral'], ['--muted', '--card', 'cartes'], ['--muted', '--accent-bg', 'small.muted dans .card.sage'], ['--muted', '--warn-bg', ''], ['--muted', '--danger-bg', ''], ['--muted', '--ok-bg', ''], ['--muted', '--action-bg', ''], ['--action', '--paper', 'liens'], ['--paper', '--action', '.btn.primary'], ['--paper', '--action-2', 'survol'], ['--accent', '--paper', ''], ['--accent', '--accent-bg', '.badge.original'], ['--action', '--action-bg', '.badge.ai'], ['--action', '--accent-bg', ''], ['--warn', '--warn-bg', '.status.warn / .chip.warn / .badge.reference'], ['--warn', '--paper', '.qty .est'], ['--warn', '--card', ''], ['--danger', '--danger-bg', ''], ['--ok', '--ok-bg', ''], ['--ink', '--paper-2', '.segmented actif'], ['--ink', '--card', ''], ['--card', '--ink', '.toast'], ['--paper', '--accent', '.cover bas'], ['--paper', '--accent-2', '.cover haut'], ['--action', '--card', 'onglet actif / panneau actif']];
+const PAIRES = [['--ink', '--paper', 'corps'], ['--muted', '--paper', '.muted'], ['--muted', '--paper-2', '.badge / .chip.neutral'], ['--muted', '--card', 'cartes'], ['--muted', '--accent-bg', 'small.muted dans .card.sage'], ['--muted', '--warn-bg', ''], ['--muted', '--danger-bg', ''], ['--muted', '--ok-bg', ''], ['--muted', '--action-bg', ''], ['--action', '--paper', 'liens'], ['--paper', '--action', '.btn.primary'], ['--paper', '--action-2', 'survol'], ['--accent', '--paper', ''], ['--accent', '--accent-bg', '.badge.original'], ['--action', '--action-bg', '.badge.ai'], ['--action', '--accent-bg', ''], ['--warn', '--warn-bg', '.status.warn / .chip.warn / .badge.reference'], ['--warn', '--paper', '.qty .est'], ['--warn', '--card', ''], ['--warn', '--accent-bg', '.cook .ingredients li.hit .est (R-VIS-13)'], ['--danger', '--danger-bg', ''], ['--ok', '--ok-bg', ''], ['--ink', '--paper-2', '.segmented actif'], ['--ink', '--card', ''], ['--card', '--ink', '.toast'], ['--paper', '--accent', '.cover bas'], ['--paper', '--accent-2', '.cover haut'], ['--action', '--card', 'onglet actif / panneau actif']];
 // T-2 : liste FERMÉE des 148 couleurs nommées de CSS Color 4 (transparent, currentColor et inherit n'en sont pas : permis).
 const COULEURS_NOMMEES = new Set('aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen'.split(' '));
 const HEX3 = (h) => (h.length === 4 ? '#' + [...h.slice(1)].map((c) => c + c).join('') : h);
@@ -9,6 +9,11 @@ const lum = (hex) => { const h = HEX3(hex); const [r, g, b] = [1, 3, 5].map((i) 
 const contraste = (a, b) => { const [l1, l2] = [lum(a), lum(b)].sort((x, y) => y - x); return (l1 + 0.05) / (l2 + 0.05); };
 const rgbVersHex = (rgb) => { const m = rgb.match(/\d+/g); return m ? '#' + m.slice(0, 3).map((n) => Number(n).toString(16).padStart(2, '0')).join('') : null; };
 const sansCommentaires = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
+// R-VIS-14 : les règles de la feuille dans l'ordre des sources, avec leur @media (la feuille n'a qu'un niveau d'imbrication).
+const regles = (css) => { const out = []; const pile = []; let sel = null; let debut = 0; for (let i = 0; i < css.length; i++) { if (css[i] === '{') { const tete = css.slice(debut, i).trim(); if (tete.startsWith('@')) pile.push(tete); else sel = tete.replace(/\s+/g, ' '); debut = i + 1; } else if (css[i] === '}') { if (sel !== null) { out.push({ sel, corps: css.slice(debut, i), media: pile.length ? pile[pile.length - 1] : null }); sel = null; } else pile.pop(); debut = i + 1; } } return out; };
+const declarations = (corps) => Object.fromEntries(corps.split(';').filter((d) => d.includes(':')).map((d) => [d.slice(0, d.indexOf(':')).trim(), d.slice(d.indexOf(':') + 1).trim()]));
+// Valeurs d'une propriété raccourcie, découpées aux espaces hors parenthèses (calc(var(--nav-h) + …) reste entier).
+const termes = (v) => (v || '').match(/[^\s()]*\((?:[^()]|\([^()]*\))*\)|[^\s()]+/g) || [];
 
 export async function runThemeTests({ eq, ok }) {
   const v = Date.now();
@@ -19,7 +24,7 @@ export async function runThemeTests({ eq, ok }) {
   const jetons = Object.fromEntries([...(racine?.[1] || '').matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));
   eq(JETONS.filter((j) => !(j in jetons)), [], 'thème : tous les jetons de § 3.1 (alias compris) sont dans :root');
   const hex = (j) => { let x = jetons[j]; for (let i = 0; i < 5 && x && x.startsWith('var('); i++) x = jetons[x.slice(4, -1).trim()]; return /^#[0-9a-f]{3}$|^#[0-9a-f]{6}$/i.test(x || '') ? HEX3(x.toLowerCase()) : null; };
-  eq([hex('--paper'), hex('--action'), hex('--ink'), hex('--accent'), hex('--warn'), hex('--muted')], ['#f8f5ef', '#bc3026', '#242821', '#45604a', '#8d6111', '#636860'], 'thème : jetons de la direction 01 (revus R4)');
+  eq([hex('--paper'), hex('--action'), hex('--ink'), hex('--accent'), hex('--warn'), hex('--muted')], ['#f8f5ef', '#bc3026', '#242821', '#45604a', '#8b5f10', '#636860'], 'thème : jetons de la direction 01 (revus R4 ; --warn R-VIS-13 : ambre sur accent-bg 4,49 → 4,62)');
   eq(hex('--accent-2'), '#55705a', 'R-VIS-2 : --accent-2 = #55705a (papier sur accent-2 = 5,01 ; #5f7a64 donnait 4,33)');
   eq([hex('--cream'), hex('--green'), hex('--cream-2'), hex('--sage-2')], [hex('--paper'), hex('--accent'), hex('--paper-2'), hex('--accent-bg')], 'T-2 : anciens noms = alias');
   for (const [fg, bg, ou] of PAIRES) { const a = hex(fg), b = hex(bg); const c = a && b ? contraste(a, b) : 0; ok(c >= 4.5, `T-3 : ${fg} sur ${bg} = ${c.toFixed(2)} ≥ 4,5${ou ? ' (' + ou + ')' : ''}`); }
@@ -41,6 +46,14 @@ export async function runThemeTests({ eq, ok }) {
   const anneau = hors.match(/(?:^|\n)\s*:focus-visible\s*\{([^}]*)\}/)?.[1] || '';
   const reduit = hors.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[^{}]*\{([^}]*)\}\s*\}/)?.[1] || '';
   ok(/\[hidden\]\s*\{\s*display:\s*none\s*!important/.test(hors) && /outline:\s*2px\s+solid\s+var\(--action\)/.test(anneau) && /outline-offset:\s*2px/.test(anneau) && /transition:\s*none\s*!important/.test(reduit) && /animation:\s*none\s*!important/.test(reduit), 'T-9/T-5/T-6 : [hidden] imposé ; :focus-visible = 2px tomate décalé 2px ; mouvement réduit = transition et animation none !important (contenu des blocs)');
+  const R = regles(hors); const base = (s) => R.filter((r) => r.sel === s && !r.media).map((r) => declarations(r.corps));
+  const iRow = R.findIndex((r) => r.sel === '.row' && !r.media); const iStatus = R.findIndex((r) => r.sel === '.status' && !r.media);
+  ok(iRow >= 0 && iStatus > iRow, `R-VIS-14 (T-1) : la règle .status vient APRÈS la règle .row dans la feuille servie (positions ${iRow} et ${iStatus})`);
+  const calePile = /^calc\(\s*var\(--nav-h\)\s*\+\s*var\(--safe-b\)\s*\+/;
+  const toastBas = base('.toast').map((d) => d.bottom).filter(Boolean).pop();
+  const mainBas = base('main.content').map((d) => d['padding-bottom'] || (termes(d.padding).length >= 3 ? termes(d.padding)[2] : termes(d.padding)[0])).filter(Boolean).pop();
+  ok(calePile.test(toastBas || ''), `R-VIS-14 (T-1) : .toast (règle de base) calé sur calc(var(--nav-h) + var(--safe-b) + …) : « ${toastBas} »`);
+  ok(calePile.test(mainBas || ''), `R-VIS-14 (T-1) : main.content (règle de base) a son bas calé sur calc(var(--nav-h) + var(--safe-b) + …) : « ${mainBas} »`);
   eq([...hors.matchAll(/([^{}]+)\{[^{}]*\b56px[^{}]*\}/g)].map((m) => m[1].trim()), ['.btn.big'], 'T-11 : seul .btn.big garde 56px en dur (le panneau latéral suit --topbar-h)');
   // Survol réservé aux appareils à pointeur (sur iOS il reste collé après une tape) : les deux :hover des boutons vivent sous @media (hover: hover), aucun au niveau racine.
   const survols = [...hors.matchAll(/@media\s*\(hover:\s*hover\)\s*\{\s*([^{}]+)\{/g)].map((m) => m[1].trim());
@@ -60,6 +73,9 @@ export async function runThemeTests({ eq, ok }) {
     ok(a.getBoundingClientRect().height >= 48, 'T-4 : un onglet bas ≥ 48 px (mesuré)');
     // La racine aussi : ici body tient sa police de tests.css, qui masquerait un :root { font-family } en serif (le corps de l'app en hérite).
     ok(/georgia/i.test(getComputedStyle(h1).fontFamily) && !/georgia/i.test(getComputedStyle(p).fontFamily) && !/georgia/i.test(getComputedStyle(document.documentElement).fontFamily), 'typographie : h1 Georgia, corps et racine sans (calculés ; R2)');
+    const h2 = document.createElement('h2'); h2.textContent = 'Sous-titre'; scene.append(h2);
+    const miroir = document.createElement('div'); miroir.className = 'mirror'; miroir.textContent = 'Indicatif : 11 min 32 s'; scene.append(miroir);
+    ok(/georgia/i.test(getComputedStyle(h2).fontFamily) && !/georgia/i.test(getComputedStyle(miroir).fontFamily), 'typographie : h2 Georgia ; .mirror sans, chiffres tabulaires (R14 : Georgia ignore tabular-nums) (calculés)');
     for (const [cls, tag] of [['pastille', 'span'], ['card', 'div'], ['muted', 'small'], ['status', 'span']]) { const n = document.createElement(tag); n.className = cls; n.hidden = true; n.textContent = 'x'; scene.append(n); eq(getComputedStyle(n).display, 'none', `T-9 : .${cls}[hidden] est caché`); }
     const carte = document.createElement('div'); carte.className = 'card'; carte.textContent = 'Carte'; scene.append(carte);
     eq(getComputedStyle(carte).scrollMarginTop, '72px', 'T-11 : .card scroll-margin-top = --topbar-h + .5rem (calculé : 64 + 8)');
@@ -77,6 +93,7 @@ export async function runThemeTests({ eq, ok }) {
     eq(rgbVersHex(getComputedStyle(badge).color), hex('--action'), 'badges : .badge.ai en tomate');
     const inp = document.createElement('input'); inp.type = 'text'; scene.append(inp); inp.focus();
     ok(document.activeElement === inp && rgbVersHex(getComputedStyle(inp).outlineColor) === hex('--action') && parseFloat(getComputedStyle(inp).fontSize) >= 16, 'T-5/T-8 : champ focalisé = anneau tomate, 16 px minimum (iOS ne zoome pas)');
+    ok(rgbVersHex(getComputedStyle(inp).borderTopColor) === hex('--action') && getComputedStyle(inp).outlineOffset === '2px' && getComputedStyle(inp).outlineStyle === 'solid', 'T-5 : input:focus-visible = contour du champ tomate en plus de l’anneau 2 px décalé 2 px (l’anneau global seul laisse le contour gris) (calculé)');
     inp.blur();
     ok(contraste(rgbVersHex(getComputedStyle(inp).borderColor), '#ffffff') >= 3, 'T-10 : contour du champ ≥ 3:1 (calculé)');
     // T-3 / R-VIS-2 : titre et auteur d'une couverture sans image se lisent EN BAS (flex-end), donc l'arrêt du bas est le plus sombre (accent, 6,38) : dégradé INVERSÉ.
@@ -92,6 +109,9 @@ export async function runThemeTests({ eq, ok }) {
     sb.focus();
     ok(sb.matches(':focus-visible') && rgbVersHex(getComputedStyle(sb).outlineColor) === hex('--action') && getComputedStyle(sb).outlineOffset === '-3px', 'T-5 : segment focalisé = anneau tomate rentré de 3 px (calculé)');
     sb.blur();
+    a.focus();
+    ok(a.matches(':focus-visible') && rgbVersHex(getComputedStyle(a).outlineColor) === hex('--action') && getComputedStyle(a).outlineOffset === '-3px', 'T-5 : onglet bas focalisé = anneau tomate rentré de 3 px (collé au bas de l’écran, un décalage de +2 px sortait de l’écran) (calculé)');
+    a.blur();
     // Chaque règle de composant reliée à SA paire : couleur RENDUE sur le fond RENDU (premier fond opaque en remontant) ≥ 4,5 ; hauteurs T-4 dans la même boucle.
     const teinte = (c) => (/^rgba\(.*,\s*0\)$/.test(c) ? 'transparent' : rgbVersHex(c));
     const fondRendu = (n) => { for (let x = n; x; x = x.parentElement) { const c = getComputedStyle(x).backgroundColor; const m = c.match(/[\d.]+/g); if (m && (m.length < 4 || Number(m[3]) === 1)) return rgbVersHex(c); } return '#ffffff'; };
@@ -136,6 +156,12 @@ export async function runThemeTests({ eq, ok }) {
     rangee.append(prim, annuler); vol.append(annonce, rangee); scene.append(vol);
     const [ra, rg, rpr] = [annuler, rangee, prim].map((x) => x.getBoundingClientRect());
     ok(Math.abs(ra.right - rg.right) < 1 && ra.left > rpr.left + 44, 'R-VIS-8 : « Annuler » du vol rangé à droite de sa rangée (mesuré)');
+    // R-VIS-14 (T-1) : les règles qui portent le comportement, mesurées sur le rendu (la suite de comportement ne charge pas la feuille).
+    const k1 = document.createElement('div'); k1.className = 'status row between'; k1.setAttribute('role', 'status'); k1.textContent = 'La demande a changé depuis cette recherche.'; scene.append(k1);
+    eq([getComputedStyle(rangee).flexWrap, getComputedStyle(k1).display], ['wrap', 'inline-flex'], 'R-VIS-14 (T-1) : .row { flex-wrap: wrap } ; la mention K1 div.status.row.between reste inline-flex (.status après .row) (calculés)');
+    const menu = document.createElement('details'); menu.className = 'menu-source'; const resume = document.createElement('summary'); resume.textContent = '+ Recette'; menu.append(resume); scene.append(menu);
+    eq([getComputedStyle(resume).display, getComputedStyle(resume).listStyleType], ['inline-flex', 'none'], 'R-VIS-14 (T-1) : .menu-source summary { display: inline-flex; list-style: none } (calculés)');
+    eq(getComputedStyle(enveloppe).position, 'relative', 'R-VIS-14 (T-1) : .cover-wrap { position: relative } (calculé)');
     // R-VIS-10 : une puce bascule ALLUMÉE (case cochée, capacités d'un appareil) garde une teinte d'état ; éteinte = .outline ;
     // une puce cliquable sans case (exemples de l'accueil sur la carte sauge, contraintes d'un repas) reste une puce ordinaire.
     const bascule = (tag, cls, coche) => { const n = Object.assign(document.createElement(tag), { className: cls }); if (coche !== null) n.append(Object.assign(document.createElement('input'), { type: 'checkbox', checked: coche, style: 'display:none' })); n.append('Four'); scene.append(n); return n; };

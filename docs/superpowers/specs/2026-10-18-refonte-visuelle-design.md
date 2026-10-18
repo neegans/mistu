@@ -1,12 +1,13 @@
 # Refonte visuelle « magazine culinaire » — spec de design
 
 Date : 18 octobre 2026 (nuit). **Révision 2** (après la revue adverse R1-R19 — § 7). **Amendée à la clôture** (tâche 4, sur la
-pointe `332d818`) : § 2 (T-1, T-3, T-4, T-5, T-7), § 3.6, § 4, § 5, § 6 et § 8 (rulings R-VIS-1 à R-VIS-12). Les vérifications sur iPhone sont
+pointe `332d818`) : § 2 (T-1, T-3, T-4, T-5, T-7), § 3.6, § 4, § 5, § 6 et § 8 (rulings R-VIS-1 à R-VIS-12). **Amendée à la vague finale** (après la revue
+finale de branche, sur `77e0218`) : V-5, § 2 (T-1, T-4, T-5, T-7), § 3.1, § 3.6, § 4, § 5, § 6, § 7 (R4) et § 8 (R-VIS-13, R-VIS-14). Les vérifications sur iPhone sont
 marquées « à vérifier sur l'iPhone » : rien de ce lot n'a été mesuré sous Safari (aucun WebKit ici). Branche `refonte-visuelle` sur la pointe de
 `creer-ia`, worktree `~/projects/mistu-look` (serveur `http://localhost:8085/`). Entrées : kit Gemini (hors dépôt, lecture seule)
 `~/Downloads/mistu-claude-code-kit/` — `assets/design-references/01-magazine-culinaire.png` (direction retenue le 17 octobre),
 `assets/design-tokens.json`, `MISTU-SPEC.md` § « Direction d'interface », `docs/05-ASSETS-SOURCES.md` (les photos du kit sont des
-illustrations générées : **aucune n'entre dans l'app**). État actuel : `styles.css` (256 lignes à la pointe d'`assistant-compte` ; le
+illustrations générées : **aucune n'entre dans l'app**). État actuel : `styles.css` (260 lignes à `237047a`, 315 après le lot (`77e0218`), 317 après la vague finale ; le
 lot 2 y ajoute au moins `.proposition, .recipe-body { overflow-wrap: anywhere }` — **toute plage de lignes se reprend sur la pointe de
 `creer-ia`**), coquille `src/app.js` `shell()` (barre haute verte, onglets bas sur mobile, panneau latéral ≥ 900 px).
 
@@ -22,7 +23,8 @@ lot 2 y ajoute au moins `.proposition, .recipe-body { overflow-wrap: anywhere }`
 - **V-4 Le vert reste aux états** (« ok », « Original », couvertures sans image) ; ambre aux avertissements, brique aux dangers ; la
   tomate est l'action (boutons primaires, liens, actif, anneau de focus).
 - **V-5 Accessibilité mesurée** : contrastes AA **calculés sur la feuille lue** pour chaque paire texte/fond réellement utilisée
-  (§ 3.6), contour des champs ≥ 3:1, cibles ≥ 44 px (boutons, onglets, roue des Réglages), focus visible partout (y compris segments et
+  (§ 3.6 ; *amendé à la vague finale* : vrai seulement depuis la 28e paire, ambre sur accent-bg de `.cook .ingredients li.hit .est`,
+  qui valait 4,49 et que ni la liste des 27 ni la galerie ne montraient — R-VIS-13), contour des champs ≥ 3:1, cibles ≥ 44 px (boutons, onglets, roue des Réglages), focus visible partout (y compris segments et
   état actif), `prefers-reduced-motion`, `color-scheme: light`, champs ≥ 16 px (iOS ne zoome pas), `[hidden]` imposé.
 - **V-6 Preuve visuelle du contrôleur** (Playwright **dédié**, jamais le navigateur MCP partagé) : largeurs 375/390/768/1512 ; **porte
   d'entrée capturée puis passée** (« Continuer sans compte », une fois par contexte — sur localhost la synchro est configurée, R7) ;
@@ -49,7 +51,11 @@ l'état actif des onglets repose sur le libellé et le trait, R16) · impression
   la structure « `.status[role="status"]` suivie d'une `.row` » devient un **crochet de style** (« Annuler » à droite pendant un
   vol). Dans l'app, `role="status"` est gardé par les tests de comportement (`tests/recherche-web.js:383`, F20 ; `tests/creer-ia.js`,
   aide `statutVol` l. 554 et 1497) ; l'assertion R-VIS-8 de `tests/theme.js` construit son propre DOM : si la rangée est enveloppée
-  ou la classe `.status` changée, **seule la preuve M3** (hors git) le verra.
+  ou la classe `.status` changée, **seule la preuve M3** (hors git) le verra. *Amendé (vague finale, R-VIS-14)* : les règles qui portent le
+  comportement sont **épinglées** par `tests/theme.js` — ordre des sources (`.status` après `.row`, positions lues dans la feuille
+  servie), `.row` en `wrap`, la mention K1 `div.status.row.between` en `inline-flex`, `.menu-source summary` (`inline-flex`, sans
+  marqueur) et `.cover-wrap` (`relative`) mesurés au rendu ; `.toast` et `main.content` (règles de base) lus sur leurs déclarations ;
+  les cinq mutants de la revue finale rougissent (copie servie à part).
 - **T-2 Jetons uniques.** Toute couleur vit dans `:root` ; hors `:root`, liste blanche **exacte** : `#fff` (champs, `iframe.pdf`, `.kbd`) et
   `#222` (`.page-view`) ; aucun `rgba(`/`hsl(` hors `:root` (le fond du dialogue devient `--backdrop`). Alias des anciens noms.
 - **T-3 Contrastes AA calculés** sur les paires de § 3.6 (≥ 4,5:1) ; **T-10 contour des champs ≥ 3:1** (`--field-line`) ; couverture :
@@ -59,20 +65,23 @@ l'état actif des onglets repose sur le libellé et le trait, R16) · impression
   **5,01** sur `accent-2`, 6,38 sur `accent`.
 - **T-4 Cibles ≥ 44 px** : `.btn`, `.btn.link`, `.btn.big`, roue des Réglages de la barre haute (`44×44`), onglets bas ≥ 48 px ; `.btn.small`
   ≥ 36 px (jamais seul sur un geste principal : dette nommée pour « − / + » des portions) ; `.chip.removable` ≥ 32 px. *Amendé (R-VIS-3, tâche 3)* : dans la barre haute, la marque `a.brand` (boîte flex de 44 px de
-  haut) et la pilule de recherche (`.topbar .btn.small`, ≥ 44 × 44) sont des cibles principales, comme la roue ; la barre garde 64 px
-  (44 + 16 + 1). Champs : 44 px de haut (tâche 2, alignés sur `.btn` dans une `.row`).
+  haut) et la pilule de recherche (`.topbar .btn.small`, ≥ 44 × 44) sont des cibles principales, comme la roue ; la barre garde 64 px par
+  `min-height: calc(var(--topbar-h) + var(--safe-t))` (`styles.css` l. 73 ; le contenu seul en fait 61 : 44 + 16 + 1). Champs : 44 px de haut (tâche 2, alignés sur `.btn` dans une `.row`).
 - **T-5 Focus visible** : `:focus-visible` tomate 2 px décalé 2 px ; `.segmented button:focus-visible { outline-offset: -3px }` (sinon
   coupé par `overflow: hidden`) ; `.btn.active:focus-visible { outline-color: var(--action) }` ; champs `:focus-visible` tomate (R9). *Amendé (tâche 3)* : les segments d'extrémité sont arrondis côté extérieur
   (`.segmented button:first-child` / `:last-child`, `--radius-pill`, R-VIS-6) — l'anneau décalé de −3 px suit le rayon et n'est plus
   coupé aux coins (M14 : focus au clavier réel, 20 cibles sur 20 aux quatre largeurs) ; le survol `.btn:hover` / `.btn.primary:hover`
   vit sous `@media (hover: hover)` (R-VIS-12 : sur iOS, un survol reste collé après une tape et se lit « choisi » — à vérifier sur
-  l'iPhone).
+  l'iPhone). *Amendé (vague finale)* : `nav.tabs a:focus-visible { outline-offset: -3px }` — l'onglet touche le bas de l'écran
+  quand `--safe-b` vaut 0 ; décalé de +2 px, l'anneau sortait de l'écran (revue finale : `[-4, 633, 68, 704]` pour une fenêtre
+  320 × 700) ; rentré, son contour extérieur est à 1 px à l'intérieur de l'onglet (Tab réel dans la galerie, 320 × 700 et 375 × 812). Le
+  champ focalisé se distingue de l'anneau global par son contour tomate (`input:focus-visible`, épinglé).
 - **T-6 Mouvement** : transitions ≤ 160 ms (couleur, fond, bordure) ; `prefers-reduced-motion: reduce` → aucune transition ni animation.
 - **T-7 Pas de débordement horizontal** à 375 et 390 px, **pastille visible comprise** (R8) : `.topbar .brand, .topbar .pastille, .topbar
   .btn:last-child { flex-shrink: 0 }`, `.topbar .btn { min-width: 0 }`, `.topbar .btn .nowrap { min-width: 0; overflow: hidden;
   text-overflow: ellipsis }`, titres `overflow-wrap: anywhere; hyphens: auto`. *Amendé (R-VIS-3, tâche 3 ; revue de T3)* : pour la pilule de
-  recherche, `.topbar .btn.small { min-width: 44px }` remplace le `min-width: 0` de `.topbar .btn` (plancher de cible) ; marge restante
-  à 375 px avec la pastille : 21,7 px (mesure de la revue) ; c'est ce plancher qui fait déborder la barre à 320 px avec la pastille
+  recherche, `.topbar .btn.small { min-width: 44px }` remplace le `min-width: 0` de `.topbar .btn` (plancher de cible) ; à 375 px avec
+  la pastille, la pilule peut encore céder 21,7 px (65,7 → plancher de 44 ; `task-3-report.md`) ; c'est ce plancher qui fait déborder la barre à 320 px avec la pastille
   (341 px) — 320 px est la largeur d'un iPhone de 375 ou 390 px en mode « Agrandir l'affichage » (revue de T3) : à signaler à Neegan.
 - **T-8 Le thème est servi et la barre d'état se lit** : `sw.js VERSION` ; `meta theme-color` et manifeste = `--paper` ; `apple-mobile-web-
   app-status-bar-style` passe à **`default`** (R6 : avec `black-translucent`, iOS écrit l'heure en blanc sur l'ivoire — 1,09:1) ;
@@ -87,13 +96,14 @@ l'état actif des onglets repose sur le libellé et le trait, R16) · impression
 ```
 --paper:#f8f5ef --paper-2:#f1ece3 --card:#fffdf9 --ink:#242821 --muted:#636860 --line:#e4dfd5 --field-line:#8f8a80
 --action:#bc3026 --action-2:#98231b --action-bg:#f7e3e0 --accent:#45604a --accent-2:#55705a --accent-bg:#e4ebe2
---warn:#8d6111 --warn-bg:#fbf1dc --warn-line:#ead9b3 --danger:#9c2f22 --danger-bg:#f9e4df --danger-line:#e9bfb6 --ok:#3d6b4a --ok-bg:#e2efe4
+--warn:#8b5f10 --warn-bg:#fbf1dc --warn-line:#ead9b3 --danger:#9c2f22 --danger-bg:#f9e4df --danger-line:#e9bfb6 --ok:#3d6b4a --ok-bg:#e2efe4
 --backdrop:rgba(36,40,33,.45) --tap:rgba(188,48,38,.15)
 --radius:12px --radius-pill:999px --shadow:0 1px 2px rgba(36,40,33,.05), 0 8px 24px rgba(36,40,33,.06)
 --serif:Georgia,"Times New Roman",serif --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif
 --topbar-h:64px --nav-h:64px --safe-b/--safe-t inchangés ; color-scheme: light
 alias : --cream:var(--paper) --cream-2:var(--paper-2) --green:var(--accent) --green-2:var(--accent-2) --sage:#b9c8bb --sage-2:var(--accent-bg)
 ```
+*Amendé à la vague finale (R-VIS-13)* : `--warn` passe de `#8d6111` à `#8b5f10`.
 ### 3.2 Typographie
 `body` sans 16 px / 1,5 ; `h1` serif 2,1 rem (2,6 rem ≥ 900) 600 / 1,1 encre, `overflow-wrap: anywhere; hyphens: auto` ; `h2` serif 1,45 ;
 `h3` serif 1,15 ; `.porte-titre` serif 3 rem ; `.brand` serif 1,25 rem, **aucun `text-transform`** ; `.qty` tabulaire encre ; **`.mirror`
@@ -120,15 +130,24 @@ tomate ; `.progress > div` tomate ; `.cover` dégradé `accent-2 → accent` ; `
 encre/papier (corps) · gris/papier (`.muted`) · gris/papier-2 (`.badge`, `.chip.neutral`) · gris/carte · gris/accent-bg (`small.muted` dans
 `.card.sage`) · gris/warn-bg, gris/danger-bg, gris/ok-bg, gris/action-bg · tomate/papier (liens) · papier/tomate (`.btn.primary`) ·
 papier/action-2 (survol) · accent/papier · accent/accent-bg (`.badge.original`) · tomate/action-bg (`.badge.ai`) · tomate/accent-bg ·
-ambre/warn-bg (`.status.warn`, `.chip.warn`, `.badge.reference`) · ambre/papier (`.qty .est`) · ambre/carte · brique/danger-bg · ok/ok-bg ·
+ambre/warn-bg (`.status.warn`, `.chip.warn`, `.badge.reference`) · ambre/papier (`.qty .est`) · ambre/carte · ambre/accent-bg
+(`.cook .ingredients li.hit .est`, 28e paire, R-VIS-13) · brique/danger-bg · ok/ok-bg ·
 encre/paper-2 (`.segmented` actif) · encre/carte · carte/encre (`.toast`) · papier/accent (`.cover` bas) · papier/accent-2 (`.cover` haut).
-Toutes ≥ 4,5 (papier/accent-2 = 5,01 avec `#55705a` — R-VIS-2 : `#5f7a64` donnait 4,33). Contour : `--field-line`/`#fff` 3,43 et `--field-line`/papier 3,16 (≥ 3).
+Toutes ≥ 4,5 — *vrai seulement depuis la 28e paire de la vague finale, voir plus bas* (papier/accent-2 = 5,01 avec `#55705a` — R-VIS-2 : `#5f7a64` donnait 4,33). Contour : `--field-line`/`#fff` 3,43 et `--field-line`/papier 3,16 (≥ 3).
 
 *Amendé à la clôture (recalculé par la formule du test sur les jetons de `332d818`)* : une 27e paire, **tomate/carte** (onglet actif,
 panneau actif, `.btn.link`, `.mirror` : 5,76), ajoutée par la tâche 2 ; minimum des 27 paires **4,63** (gris/action-bg), puis 4,67
 (gris/danger-bg) et 4,70 (gris/accent-bg). Couverture : papier/accent-2 **5,01** et papier/accent 6,38, pour le titre **et** pour
 l'auteur, désormais sans opacité (R-VIS-5 ; la note « auteur 5,16 » de T-3 valait pour `opacity: .85` sur `accent` seul). Contraste
 **rendu** (preuve V-6 de la tâche 3, chaque nœud texte contre son fond effectif) : minimum **4,67** sur 1 732 nœuds, aucun sous 4,5.
+
+*Amendé à la vague finale (R-VIS-13)* : « toutes ≥ 4,5 » était faux pour une paire utilisée et absente de la liste : ambre sur accent-bg
+(mode cuisine, l'étape courante cite un ingrédient dont la quantité est estimée ou convertie : `li.hit` + `span.est`) valait **4,49**
+avec `#8d6111` — ni `PAIRES` ni la galerie ne la montraient. Avec `--warn: #8b5f10`, recalculées par la formule du test sur la feuille
+de la vague : les **28** paires sont ≥ 4,5, minimum **4,62** (ambre/accent-bg), puis 4,63 (gris/action-bg) ; paires de l'ambre :
+accent-bg 4,62, warn-bg 5,00, papier 5,16, carte 5,52 (hors liste : papier-2 4,77) ; contour inchangé (3,43 / 3,16). Contraste **rendu**
+(preuve relancée par la vague, la galerie montre désormais `li.hit .est`) : minimum **4,62** sur 1 760 nœuds, aucun sous 4,5 ; avec
+l'ancien `--warn` (feuille forcée, copie servie à part), la même galerie sort ROUGE : 2 nœuds `span.est` à 4,49.
 
 ## 4. Tests (`tests/theme.js`, lit et mesure, ne recopie pas)
 Jetons de § 3.1 présents (alias compris) ; `hex()` résout `var()` et accepte 3 ou 6 chiffres ; `:root` lu par regex ancrée ; toutes les
@@ -148,6 +167,11 @@ réduit ; la tâche 3, le focus mesuré de `.btn.active` et d'un segment (`:focu
 contraste **rendu** des composants (`.btn.*`, `.chip*`, `.puce`, `.badge.*`, `.status.*`, `.step-num`, `.toast`, `.pastille`) avec
 `.chip.removable` ≥ 32 et `.search-bar input` = 52, le survol sous `(hover: hover)` (lu sur la feuille) et R-VIS-3, 5, 6, 7, 8, 10, 11.
 **R-VIS-4 n'est pas épinglé** (la page de tests est large : les règles sous 440 px n'y jouent pas) : seule la preuve V-6 le mesure.
+
+*Amendé à la vague finale* : **79** assertions (total épinglé 2622 → 2632) — la 28e paire et le pin de `--warn` (R-VIS-13) ; six
+assertions R-VIS-14 (ordre des sources `.status`/`.row`, `.toast` et `main.content` calés sur `--nav-h + --safe-b`, `.row` en `wrap` et
+K1 en `inline-flex`, `summary` du menu, `.cover-wrap`) ; `h2` Georgia et `.mirror` sans ; `input:focus-visible` (contour tomate,
+anneau décalé 2 px) distingué de l'anneau global ; onglet bas focalisé rentré de 3 px.
 
 ## 5. Dettes nommées
 Mode sombre · barre haute bureau · icônes SVG · police de marque · `exporters.js` · barre d'état iOS à vérifier sur l'appareil (app
@@ -183,6 +207,20 @@ des portions en 36 px · pas de `color-mix()`/`oklch` (iOS < 16.2) — respecté
 - Le souligné tomate de l'option active d'extrémité suit la courbe de la pilule (R-VIS-6 : accepté).
 - L'outil de preuve `preuve-visuelle.cjs`, `galerie.html`, les résultats et les 136 captures vivent dans le registre SDD, **hors git**.
 
+*Complété à la vague finale* (ce que la vague ne corrige pas ; revue finale de branche) :
+- Liste blanche T-2 sans vérification d'usage : `tests/theme.js` accepte `#fff` et `#222` partout hors `:root` (une règle neuve
+  `color: #fff` passerait) ; la spec dit où (champs, `iframe.pdf`, `.kbd` ; `.page-view`), le test ne le vérifie pas.
+- `--safe-t` ignoré par `aside.sidenav` (`top`/`height` sur `--topbar-h`) et par `.card { scroll-margin-top }` alors que la barre haute
+  en tient compte : sans effet en `default` (`--safe-t` = 0) ; à refaire si la barre d'état repasse en `black-translucent`.
+- Titre d'une page trouvée (onglet Web, `a.btn`, `src/ui/search.js:244`) sur plusieurs lignes : la pilule devient un **ovale** (309 × 88
+  à 375 px, 324 × 88 à 390, trois lignes, mesuré dans la galerie ; 275 × 88 dans l'app selon la revue) — **décision de Neegan**
+  (garder, ou `--radius` pour ce cas) ; capture `captures/375-galerie-boutons.png` (échantillon ajouté à la galerie, hors git).
+- R-VIS-14 lit `.toast` et `main.content` par expressions sur les déclarations : une réécriture équivalente (`calc(var(--safe-b) +
+  var(--nav-h) + 12px)`) rougit — voulu (coût de R-VIS-14).
+- L'anneau rentré des onglets bas est mesuré dans la scène de `tests/theme.js` et au Tab réel dans la galerie, pas dans l'app.
+- Fermées par la vague : `.mirror` et `h2` épinglés ; `input:focus-visible` distingué de l'anneau global ; `li.hit .est` dans la
+  galerie (et dans `PAIRES`).
+
 ## 6. Gestes de Neegan
 Aucun avant la fusion. Au matin : regarder les captures (porte, coquille, galerie) ; sur l'iPhone, la barre d'état et l'onglet actif ;
 renverser V-3/V-4 au besoin.
@@ -190,22 +228,24 @@ renverser V-3/V-4 au besoin.
 *Complété à la clôture* : captures dans `.superpowers/sdd/2026-10-18-refonte-visuelle/captures/` du worktree `~/projects/mistu-look`
 (136 PNG, 34 par largeur : huit écrans dont la porte, 18 sections de la galerie, 5 focus au clavier, 3 de M3) — copier le registre dans
 le dépôt principal **avant** tout `git worktree remove`. Sur l'iPhone, après fusion, `push` et **réinstallation** de l'app : barre
-d'état, onglet actif, porte « Kwe. », survol après une tape, libellé de la recherche (à vérifier sur l'iPhone). Confirmer ou
-renverser V-1 à V-6, R-VIS-8 (placement d'« Annuler ») et R-VIS-4 (libellé coupé à 375 px). Ordre complet des gestes : `CLAUDE.md`,
+d'état, onglet actif, porte « Kwe. », survol après une tape, libellé de la recherche (à vérifier sur l'iPhone). Dire si « Agrandir
+l'affichage » est activé sur l'iPhone (il le ramène à 320 px de large : avec la pastille, la barre haute y mesure 341 px). Confirmer ou
+renverser V-1 à V-6, R-VIS-8 (placement d'« Annuler ») et R-VIS-4 (libellé coupé à 375 px) ; trancher l'ovale des titres web sur
+plusieurs lignes (§ 5, capture `375-galerie-boutons.png`). Ordre complet des gestes : `CLAUDE.md`,
 section du lot.
 
 ## 7. Ce que la revue a amendé (R1-R19)
-R1 onglet monté `display:flex` · R2 `/georgia/i` · R3 assertions `.btn`/hex/rayon déplacées en T2 · R4 jetons `--warn #8d6111`, `--muted
+R1 onglet monté `display:flex` · R2 `/georgia/i` · R3 assertions `.btn`/hex/rayon déplacées en T2 · R4 jetons `--warn #8d6111` (→ `#8b5f10`, R-VIS-13), `--muted
 #636860`, dégradé inversé, paires § 3.6 · R5 T-9 `[hidden]` · R6 status bar `default` · R7 porte passée + galerie · R8 T-7 barre haute avec
 pastille, 375 px · R9 T-5 segments/actif/champs · R10 `--field-line` · R11 inventaire exact · R12 `--warn-line`/`--danger-line`/`--backdrop`,
 scan rgba, liste blanche `#fff`/`#222` · R13 cibles (roue 44, `.btn.link` 44, dette « − / + ») · R14 `.mirror` sans · R15 hygiène du test ·
 R16 `--topbar-h`, règle morte, `text-transform`, émojis · R17 `color-scheme`, `--tap`, champs 16 px, `overflow-wrap`, dettes JS · R18 plages
 reprises sur `creer-ia`, M3 re-mesuré · R19 recette de capture.
 
-## 8. Rulings (R-VIS-1 à R-VIS-12)
+## 8. Rulings (R-VIS-1 à R-VIS-14)
 Une ligne chacun : **R-VIS-n** (tâche) quoi — coût si faux. Détail : registre `.superpowers/sdd/2026-10-18-refonte-visuelle/`
-(`progress.md`, `task-3-report.md` ; hors git). Tous renversables sans défaire le reste ; **R-VIS-8 et R-VIS-4 sont à confirmer par
-Neegan**.
+(`progress.md`, `task-3-report.md`, `final-fix-report.md` ; hors git). Chacun se renverse sans défaire le reste (R-VIS-2, R-VIS-5 et
+R-VIS-13 sont imposés par le contraste AA ; R-VIS-4 et R-VIS-8 sont les décisions de produit à confirmer par Neegan).
 - **R-VIS-1** (pré-vol, appliqué en tâche 1) `.status[hidden] { display: none; }`, ajoutée par le lot 2, est retirée (redondante avec
   `[hidden] { display: none !important }`, T-9) ; l'inventaire T-1 redevient les cinq d'origine ; `['status', 'span']` rejoint les cas
   T-9 mesurés ; aucun test de comportement retouché (le test K1 du lot 2 lit `.hidden`) — coût si faux : la mention K1 visible (la suite
@@ -243,6 +283,14 @@ Neegan**.
 - **R-VIS-12** (tâche 3) `.btn:hover` et `.btn.primary:hover` sous `@media (hover: hover)`, texte des règles inchangé (survol collant
   sur iOS) ; `.btn.link:hover` et `.item-link:hover h3` restent hors média (nommés) — coût si faux : aucun survol sur un appareil
   tactile à souris non déclarée.
+- **R-VIS-13** (contrôleur, vague finale) `--warn: #8b5f10` (était `#8d6111`) : ambre sur accent-bg 4,49 → 4,62 (`.cook .ingredients
+  li.hit .est`, mode cuisine) ; les autres paires de l'ambre restent ≥ 4,5 (warn-bg 5,00, papier 5,16, carte 5,52) ; la paire entre
+  dans `PAIRES` et dans § 3.6 (28e), le pin `hex('--warn')` suit — coût si faux : un ambre un peu plus sombre.
+- **R-VIS-14** (contrôleur, vague finale) les règles porteuses de comportement de T-1 sont épinglées par `tests/theme.js` : `.status`
+  après `.row` (positions dans la feuille lue, et K1 mesurée `inline-flex`), `.row { flex-wrap: wrap }`, `.menu-source summary
+  { display: inline-flex; list-style: none }`, `.cover-wrap { position: relative }` (mesurés au rendu), `.toast` et `main.content`
+  calés sur `calc(var(--nav-h) + var(--safe-b) …)` (déclarations des règles de base) ; les cinq mutants de la revue finale rougissent
+  — coût si faux : un faux rouge sur une réécriture légitime d'une de ces règles (voulu).
 
 ### Précisions du pré-vol (18 oct, mesurées sur la pointe `618b454` du lot 2)
 - Précision T-11 : seuls les deux `56px` de `aside.sidenav` (`top`/`height`) deviennent `var(--topbar-h)` ; `.btn.big { min-height: 56px }` reste.

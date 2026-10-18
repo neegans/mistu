@@ -13,7 +13,7 @@
   --accent: #45604a;
   --accent-2: #55705a;
   --accent-bg: #e4ebe2;
-  --warn: #8d6111;
+  --warn: #8b5f10;
   --warn-bg: #fbf1dc;
   --warn-line: #ead9b3;
   --danger: #9c2f22;
@@ -108,6 +108,8 @@ nav.tabs a {
 }
 nav.tabs a .ico { font-size: 1.3rem; line-height: 1; }
 nav.tabs a.active { color: var(--action); font-weight: 600; box-shadow: inset 0 2px 0 var(--action); }
+/* T-5 : l'onglet est collé au bas de l'écran (--safe-b vaut 0 sans barre d'accueil) : l'anneau rentre, sinon son bas sort de l'écran. */
+nav.tabs a:focus-visible { outline-offset: -3px; }
 nav.tabs a.add .ico { background: var(--action); color: var(--paper); border-radius: 50%; width: 40px; height: 40px; flex-shrink: 0; display: grid; place-items: center; }
 aside.sidenav { display: none; }
 

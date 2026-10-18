@@ -657,7 +657,7 @@ de Neegan (fixtures seulement).
 ## Thème « magazine culinaire » (18 octobre 2026)
 
 Spec : `docs/superpowers/specs/2026-10-18-refonte-visuelle-design.md` (rév. 2, amendée à la clôture ; § 2 : invariants T-1 à T-11 ;
-§ 8 : rulings R-VIS-1 à R-VIS-12). Un thème, pas une refonte des écrans : la feuille, deux balises d'`index.html`, deux couleurs du
+§ 8 : rulings R-VIS-1 à R-VIS-14). Un thème, pas une refonte des écrans : la feuille, deux balises d'`index.html`, deux couleurs du
 manifeste et un bloc de tests ; aucun module de `src/` touché, aucune classe lue par le JS renommée, aucun test de comportement retouché.
 
 ```text
@@ -665,10 +665,10 @@ styles.css            :root = 38 propriétés : les 29 jetons de la spec § 3.1 
                       accent vert, ambre, brique, ok, voile, reflet de tape, rayons, ombre, serif, sans, --topbar-h),
                       --nav-h, --safe-b et --safe-t inchangés, et 6 alias des anciens noms (--cream, --cream-2, --green,
                       --green-2, --sage, --sage-2) ; color-scheme: light ; hors :root, seules couleurs en dur : #fff et
-                      #222 (T-2). 315 lignes (260 à la pointe du lot 2).
+                      #222 (T-2). 317 lignes (260 à la pointe du lot 2, 315 à la clôture).
 index.html            theme-color #f8f5ef ; apple-mobile-web-app-status-bar-style default (était black-translucent).
 manifest.webmanifest  theme_color et background_color #f8f5ef.
-tests/theme.js        runThemeTests({ eq, ok }) : 69 assertions, dernier bloc de tests/tests.js avant le total épinglé.
+tests/theme.js        runThemeTests({ eq, ok }) : 79 assertions, dernier bloc de tests/tests.js avant le total épinglé.
 ```
 
 **Jetons.** Toute couleur vit dans `:root` : une règle nouvelle prend un jeton, jamais une valeur. Les anciens noms restent des
@@ -686,11 +686,15 @@ changement de comportement.
 1. **Lecture** : `fetch('../styles.css?v=…', { cache: 'no-store' })`, commentaires retirés ; `:root` lu par une expression ancrée,
    `hex()` résout les `var()` en chaîne ; les paires `PAIRES` (texte, fond, où : spec § 3.6) sont calculées par la formule WCAG ;
    inventaire des `display: none`, couleurs en dur et couleurs nommées hors `:root`, contenu des blocs `:focus-visible`, mouvement
-   réduit et `@media (hover: hover)` ; `index.html` et le manifeste sont relus.
+   réduit et `@media (hover: hover)` ; `index.html` et le manifeste sont relus. Depuis la vague finale (R-VIS-14), un petit lecteur
+   `regles()` rend les règles dans l'ordre des sources avec leur `@media` : `.status` doit venir après `.row`, et les règles de base de
+   `.toast` (`bottom`) et de `main.content` (bas du `padding`) doivent rester calées sur `calc(var(--nav-h) + var(--safe-b) + …)`.
 2. **Rendu** : la feuille est injectée par un `<link>` (avec `?v=`) dans une scène hors écran mais **visible**
    (`position:absolute; left:-9999px`, 390 px de large) ; les composants y sont montés, puis mesurés par `getBoundingClientRect` et
    `getComputedStyle` (couleurs ramenées en hex par `rgbVersHex`) ; le `<link>` et la scène sont retirés en `finally` (aucun reste,
-   vérifié par les mutants des tâches).
+   vérifié par les mutants des tâches). Les règles qui portent le comportement (R-VIS-14) y sont mesurées : `.row` en `wrap`, une
+   mention `div.status.row.between` en `inline-flex`, `details.menu-source > summary` en `inline-flex` sans marqueur, `.cover-wrap` en
+   `relative`.
 
 Deux limites assumées : la page de tests est large, donc les règles sous 440 px (R-VIS-4) n'y jouent pas — seule la preuve visuelle
 les mesure ; et les assertions de focus suivent l'heuristique `:focus-visible` de Chromium (une interaction au pointeur avant le bloc
@@ -707,14 +711,16 @@ clavier réel, rayons de l'anneau lus par coin). Sorties : `resultats.md` / `.js
 sert une feuille figée : c'est ainsi que l'outil a été vu ROUGE sur l'ancien thème (331 fautes) avant de servir de preuve. Le registre
 se copie dans le dépôt principal **avant** tout `git worktree remove`, sinon l'outil et les captures disparaissent.
 
-**Rulings** : R-VIS-1 à R-VIS-12, une ligne chacun en spec § 8 (registre : `progress.md`, `task-3-report.md`). Trois touchent la
+**Rulings** : R-VIS-1 à R-VIS-14, une ligne chacun en spec § 8 (registre : `progress.md`, `task-3-report.md`). Trois touchent la
 structure plus que la couleur : **R-VIS-7** `.cover { position: relative }` (l'image d'une couverture prend `.cover` pour bloc
 conteneur : coins arrondis, même rectangle à 0,1 px près) ; **R-VIS-8**
 `.status[role="status"] + .row > .btn:not(.primary) { margin-left: auto }` (« Annuler » à droite pendant un vol ; dépend de l'attribut `role` posé par `search.js:202` et `creer-ia.js:238`,
 seules annonces suivies d'une `.row`) — un **crochet de style** sur une structure du JS : `role="status"` est gardé par les tests de
 comportement (`tests/recherche-web.js:383`, `tests/creer-ia.js`), mais l'assertion R-VIS-8 de `tests/theme.js` construit son propre DOM,
 donc une rangée enveloppée ou une classe `.status` changée ne serait vue que par la preuve M3 (hors git) ; **R-VIS-10** `.chip.clickable:has(> input:checked)` (ignorée sans prise en charge de `:has()` :
-retour à la puce neutre).
+retour à la puce neutre). **R-VIS-13** (vague finale) `--warn: #8b5f10` : l'ambre d'une quantité estimée sur une ligne surlignée du
+mode cuisine (`.cook .ingredients li.hit .est`, accent-bg) passe de 4,49 à 4,62 ; c'est la 28e paire. **R-VIS-14** : ce qui portait
+le comportement n'était tenu que par la relecture (cinq mutants survivaient) ; il est épinglé par `tests/theme.js`.
 
 ## Modèle de données (magasins IndexedDB)
 

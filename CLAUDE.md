@@ -909,7 +909,8 @@ le sens a changé · `assessMeal` et `searchDocs` font passer `adaptation` avant
 2. Après la revue finale et `/verify` des deux lots : copier `.superpowers/sdd/2026-10-18-creer-avec-l-ia/` dans
    `~/projects/mistu/.superpowers/sdd/` (celui du lot précédent y est déjà, identique : `diff -rq` muet le 18 octobre).
 3. **Fusions `--ff-only` en chaîne** : `! cd ~/projects/mistu && git merge --ff-only assistant-compte`, puis
-   `! cd ~/projects/mistu && git merge --ff-only creer-ia`, puis le lot 3 s'il est fini ; si `assistant-compte` a bougé
+   `! cd ~/projects/mistu && git merge --ff-only creer-ia`, puis `! cd ~/projects/mistu && git merge --ff-only refonte-visuelle`
+   (lot 3, « Refonte visuelle ») ; si `assistant-compte` a bougé
    depuis `ce9eb5d`, rebaser `creer-ia` dessus d'abord ; puis **un** `! git -C ~/projects/mistu push origin main` ; ouvrir
    `https://neegans.github.io/mistu/tests/` et lire le BILAN.
 4. Geste 4 du lot précédent (Réglages sur le Mac, connexion depuis l'iPhone).
@@ -964,55 +965,70 @@ exemple, l'aide retirée. Les mutants des tâches sont comptés dans chaque rapp
 
 **Pour toi.** L'app change d'habit, pas de gestes : papier ivoire, grands titres en serif (Georgia, police du système : rien à télécharger), une
 seule couleur d'action — la tomate des boutons principaux, des liens, de l'onglet actif et de l'anneau de focus — et le vert gardé
-pour les états (« Original », « ok », couvertures sans image). Mêmes écrans, mêmes boutons, mêmes textes ; une seule chose change de
-place : pendant une recherche web ou une création en cours, « Annuler » se range à droite (R-VIS-8, à confirmer). Rien n'arrive sur
-le site public avant la fusion et ton `push`.
+pour les états (« Original », « ok », couvertures sans image). Mêmes écrans, mêmes boutons, mêmes textes ; à l'écran, « Annuler » se
+range à droite pendant un vol (recherche web ou création en cours ; R-VIS-8, à confirmer), les segments des Réglages ne s'étirent plus,
+la puce bascule cochée passe en vert, les coins des couvertures sont arrondis. Rien n'arrive sur le site public avant la fusion et ton
+`push`.
 
 **Où.** Branche `refonte-visuelle`, worktree `~/projects/mistu-look` (jamais `~/projects/mistu`), serveur de vérification
 `http://localhost:8085/` (suite : `http://localhost:8085/tests/`). Spec : `docs/superpowers/specs/2026-10-18-refonte-visuelle-design.md`
 (rév. 2, amendée à la clôture ; **§ 0** : décisions de nuit V-1 à V-6 ; **§ 2** : invariants T-1 à T-11 ; **§ 5** : dettes ; **§ 7** :
-revue R1-R19 ; **§ 8** : rulings R-VIS-1 à R-VIS-12). Plan : `docs/superpowers/plans/2026-10-18-refonte-visuelle.md`. Registre, **hors
+revue R1-R19 ; **§ 8** : rulings R-VIS-1 à R-VIS-14). Plan : `docs/superpowers/plans/2026-10-18-refonte-visuelle.md`. Registre, **hors
 git** (`.superpowers/` est exclu par `.git/info/exclude`) : `.superpowers/sdd/2026-10-18-refonte-visuelle/` (`progress.md`, un brief,
 des notes et un rapport par tâche, les diffs revus ; lanceur `suite.cjs` ; outil de preuve `preuve-visuelle.cjs`, page
 `galerie.html`, résultats `resultats*.md` / `.json` et `captures/`). Base : pointe finale de `creer-ia` `237047a` (lot 2 ci-dessus,
 **lui-même non fusionné** sur le lot 1 `ce9eb5d`, **lui-même non fusionné** sur `main` `66c5d19`) ; commit de départ `174415b` (spec et
 plan rév. 2). Trois tâches de construction (T1 jetons, base et coquille ; T2 composants ; T3 galerie, preuve et retouches mesurées)
 et cette clôture ; T1, T2 et T3 revues (conformes à la spec, qualité approuvée ; les points de documentation de la revue de T3 sont
-repris ici et dans la spec). **FINI dans
-le worktree, PAS fusionné, PAS poussé** ; revue finale de branche et `/verify` : au chef d'orchestre. Fichiers du lot : `styles.css`
-(260 → 315 lignes), `index.html` et `manifest.webmanifest` (deux lignes chacun), `sw.js` (`VERSION` seulement), `tests/theme.js`
+repris ici et dans la spec) ; puis la **vague finale** après la revue finale de branche (brief `final-fix-wave.md`, rapport
+`final-fix-report.md`, rulings R-VIS-13 et R-VIS-14).
+**FINI dans le worktree, PAS fusionné, PAS poussé** ; re-revue ciblée et `/verify` : au chef d'orchestre. Fichiers du lot : `styles.css`
+(260 → 317 lignes ; 315 à la clôture), `index.html` et `manifest.webmanifest` (deux lignes chacun), `sw.js` (`VERSION` seulement), `tests/theme.js`
 (neuf), `tests/tests.js` (import, appel, total épinglé) ; **aucun fichier de `src/`** (`git diff --stat 237047a..HEAD`).
 
 **Ce qui marche** (mesuré dans Chrome sans tête — la suite, et une preuve visuelle Playwright dédiée, jamais le navigateur MCP
 partagé —, service worker bloqué, réseau externe coupé ; aucun appareil) :
-- **Le thème est lu et mesuré par la suite** (`tests/theme.js`, 69 assertions, dernier bloc avant le total épinglé) : les 29 jetons de
+- **Le thème est lu et mesuré par la suite** (`tests/theme.js`, 79 assertions — 69 à la clôture —, dernier bloc avant le total épinglé) : les 29 jetons de
   la spec § 3.1 et 6 alias dans `:root`, aucune couleur en dur ailleurs que `#fff` et `#222`, inventaire exact des `display: none` (les cinq
   d'origine), `[hidden]` imposé, `:focus-visible` tomate 2 px, mouvement réduit, `color-scheme: light`, `theme-color` et manifeste
   `#f8f5ef`, barre d'état `default` ; puis la feuille injectée dans une scène hors écran : cibles, rayons, focus, contraste rendu des
-  composants, et les retouches R-VIS-3, 5, 6, 7, 8, 10, 11.
-- **Paires calculées** (recalculées à la clôture sur les jetons de `332d818`, par la formule du test) : les **27** paires texte/fond
-  de la spec § 3.6 sont ≥ 4,5 — minimum **4,63** (gris sur action-bg) ; papier sur accent-2 5,01, papier sur accent 6,38, tomate sur
-  carte 5,76 ; contour des champs 3,43 sur blanc et 3,16 sur papier (≥ 3).
+  composants, et les retouches R-VIS-3, 5, 6, 7, 8, 10, 11 ; depuis la vague finale, les règles qui portent le comportement (R-VIS-14 :
+  `.status` après `.row`, `.row` en `wrap`, la mention K1 en `inline-flex`, `summary` du menu, `.cover-wrap`, `.toast` et
+  `main.content` calés sur `--nav-h + --safe-b`), `h2` serif et `.mirror` sans, le contour tomate du champ focalisé et l'anneau des
+  onglets bas rentré de 3 px.
+- **Paires calculées** (recalculées à la vague finale sur la feuille de la vague, par la formule du test) : les **28** paires
+  texte/fond de la spec § 3.6 sont ≥ 4,5 — minimum **4,62** (ambre sur accent-bg : `.cook .ingredients li.hit .est`, la 28e, qui
+  valait 4,49 avec l'ancien `--warn` et manquait à la liste : R-VIS-13), puis 4,63 (gris sur action-bg) ; ambre sur warn-bg 5,00,
+  sur papier 5,16, sur carte 5,52 ; papier sur accent-2 5,01, papier sur accent 6,38, tomate sur carte 5,76 ; contour des champs 3,43
+  sur blanc et 3,16 sur papier (≥ 3). (À la clôture : 27 paires, minimum 4,63.)
 - **Géométrie** (mesurée par les tâches 1 à 3 dans l'app réelle, contextes jetables, porte passée par « Continuer sans compte ») :
   barre haute **64 px** ; marque 44 px de haut, roue 44 × 44, pilule de recherche ≥ 44 × 44 (R-VIS-3) ; onglets bas 63 px ; pastille
   « Ajouter » 40 × 40 ; `.btn` ≥ 44, `.btn.small` 36 ; champs 16 px, 44 px de haut, contour `#8f8a80` (adresse du signet et clé de
   Réglages compris) ; à 1512 px, le panneau latéral démarre sous la barre (`--topbar-h`, 64 px).
-- **Preuve visuelle** (tâche 3, `preuve-visuelle.cjs` sur la feuille finale, le 18 octobre à 13 h 11 UTC, trois minutes avant le
-  commit `332d818`) : verdict **VERT, code de sortie 0** ; **40 lignes sur 40** — dix par largeur, à 375, 390, 768 et 1512 px : la
+- **Preuve visuelle** (relancée par la vague finale, `preuve-visuelle.cjs 8085` sans `--setcontent`, sur le thème servi après
+  R-VIS-13, le 18 octobre à 14 h 08 UTC ; l'ancien `resultats.md` archivé en `resultats-t4.md`) : verdict **VERT, code de sortie 0** ; **40 lignes sur 40** — dix par largeur, à 375, 390, 768 et 1512 px : la
   porte, sept écrans (`#/`, `#/search?mode=web`, `#/library`, `#/add`, `#/recipes/creer`, `#/settings`, `#/kitchen`), la galerie et son
   dialogue modal — sans débordement, navigation, cibles, contraste, `[hidden]` et console : ok partout ; contraste **rendu** minimum
-  **4,67** sur 1 732 nœuds texte (lu dans `resultats.json`) ; **M3** : 0 recouvrement entre « Chercher à nouveau » et « Annuler » aux
+  **4,62** sur **1 760** nœuds texte (lu dans `resultats.json` ; la galerie montre désormais une ligne surlignée du mode cuisine avec
+  sa quantité estimée, ambre sur accent-bg, et un titre web long) ; **M3** : 0 recouvrement entre « Chercher à nouveau » et « Annuler » aux
   quatre largeurs (« Annuler » à x 255-342 à 375 px, x 270-357 à 390 px) ; **M14** : focus au clavier réel, 20 cibles sur 20, anneau
-  tomate entier ; 0 requête externe, 0 erreur console ; **136 captures**. Contre-preuve de l'outil : la même preuve sort ROUGE sur
-  l'ancien thème (feuille de `174415b` forcée : 40 lignes fautives sur 40, 331 fautes, `resultats-ancien-theme.md`) et sur le thème de
-  la tâche 2 (32 lignes fautives, 74 fautes, `resultats-t2.md`).
+  tomate entier ; 0 requête externe, 0 erreur console ; **136 captures**. Avant la vague : la tâche 3 (13 h 11 UTC, trois minutes avant
+  `332d818`), puis la revue finale et le contrôleur sur `77e0218` (sans `--setcontent`) : identiques — 40/40, 136 captures, minimum
+  4,67 sur 1 732 nœuds. Contre-preuves de l'outil : la même preuve sort ROUGE sur l'ancien thème (feuille de `174415b` forcée :
+  40 lignes fautives sur 40, 331 fautes, `resultats-ancien-theme.md`), sur le thème de la tâche 2 (32 lignes fautives, 74 fautes,
+  `resultats-t2.md`) et, pour la vague, sur la galerie avec l'ancien `--warn` forcé (copie servie à part, 390 px : code 1, 2 nœuds
+  `span.est` à 4,49).
 - **Mutants** (copies servies à part, comptés dans les rapports de tâche) : 14 sur 14 (tâche 1), 24 sur 24 plus deux témoins de faux
   rouge restés verts (tâche 2), 18 sur 18 (tâche 3) rougissent ; la revue de T1 en a fait rougir 11, celle de T2 10, et les cinq
   survivants de la revue de T2 (focus de `.btn.active`, décalage −3 px des segments, `.btn.primary` en gris, `.chip.removable` 32 px,
-  `.search-bar input` 52 px) sont tués par les assertions de la tâche 3.
+  `.search-bar input` 52 px) sont tués par les assertions de la tâche 3 ; la vague finale : **11 sur 11** sur la suite complète
+  (copie servie sur 8191, témoin vert 2633/2633) — les cinq de R-VIS-14 (`.status` avant `.row`, `.row` en `nowrap`, `summary` en
+  `block`, `.cover-wrap` en `static`, `.toast` à `12px`), l'ancien `--warn`, l'anneau des onglets sans −3 px, `main.content` décroché
+  de `--nav-h`, `input:focus-visible` retirée, `.mirror` en serif, `h2` en sans.
 - **Aucun test de comportement retouché** : `tests/tests.js` ne change que par l'import, l'appel du bloc thème et le total.
 
-Les rulings, une ligne chacun (détail et « coût si faux » en spec § 8 ; tous renversables) :
+Les rulings, une ligne chacun (détail et « coût si faux » en spec § 8 ; chacun se renverse sans défaire le reste — R-VIS-2, R-VIS-5
+et R-VIS-13 sont imposés par le contraste AA ; R-VIS-4 et R-VIS-8 sont les décisions de produit à confirmer) :
 - **R-VIS-1** (pré-vol) `.status[hidden]` du lot 2 retirée, redondante avec `[hidden] { display: none !important }` ; inventaire = les cinq d'origine.
 - **R-VIS-2** (pré-vol) `--accent-2: #55705a` : papier sur accent-2 4,33 → 5,01.
 - **R-VIS-3** marque et pilule de recherche ≥ 44 px, comme la roue ; la barre garde 64 px ; seuil ±4 px de M3 accepté et nommé.
@@ -1025,6 +1041,9 @@ Les rulings, une ligne chacun (détail et « coût si faux » en spec § 8 ; tou
 - **R-VIS-10** puce bascule cochée (capacités d'un appareil) en accent, par `:has(> input:checked)`.
 - **R-VIS-11** `.field > .segmented { align-self: flex-start }` : plus de queue vide qui se lit comme un champ.
 - **R-VIS-12** survol des boutons sous `@media (hover: hover)` (survol collant sur iOS).
+- **R-VIS-13** (vague finale) `--warn: #8b5f10` (était `#8d6111`) : ambre sur accent-bg 4,49 → 4,62 (mode cuisine, `li.hit .est`) ; 28e paire.
+- **R-VIS-14** (vague finale) les règles de T-1 qui portent le comportement sont épinglées par `tests/theme.js` ; une réécriture, même légitime, rougit (voulu).
+- Retenu par la vague finale, sans numéro : `nav.tabs a:focus-visible { outline-offset: -3px }` (collé au bas de l'écran, l'anneau en sortait).
 
 **Ce qui n'est PAS prouvé.**
 - **Safari et l'iPhone** : rien de ce lot n'y a été vu (aucun WebKit ici), donc **à vérifier sur l'iPhone** : la **barre d'état
@@ -1045,8 +1064,8 @@ Les rulings, une ligne chacun (détail et « coût si faux » en spec § 8 ; tou
   R-VIS-8 n'est pas mesuré en vrai vol.
 - Les huit écrans sont capturés dans des contextes jetables (aucune donnée de ta bibliothèque) : les variantes chargées
   (couvertures avec et sans image, badges, longs titres) ne sont vues que dans la galerie.
-- La preuve visuelle **n'a pas été relancée à la clôture** : la clôture ne touche ni `styles.css` ni le HTML (seul `VERSION` de
-  `sw.js` bouge).
+- L'anneau rentré des onglets bas (vague finale) est mesuré dans la scène de `tests/theme.js` et au Tab réel dans la galerie (contour
+  extérieur 1 px à l'intérieur de l'onglet, 320 × 700 et 375 × 812), pas dans l'app.
 - Le site public ne porte rien de ce lot (rien n'est poussé).
 
 **Décisions de nuit V-1 à V-6 — à confirmer par Neegan** (spec § 0 ; prises sans toi, chacune renversable sans défaire le reste) :
@@ -1067,6 +1086,9 @@ Les rulings, une ligne chacun (détail et « coût si faux » en spec § 8 ; tou
   lui, 0 recouvrement aux quatre largeurs. Le retirer rouvre M3.
 - **Barre d'état iOS** `default` au lieu de `black-translucent` (spec R6 : en `black-translucent`, iOS écrit l'heure en blanc sur
   l'ivoire, 1,09:1) — à vérifier sur l'iPhone, app réinstallée.
+- **Titre d'une page trouvée sur plusieurs lignes** (onglet Web, `a.btn`, `src/ui/search.js:244`) : la pilule devient un **ovale**
+  (309 × 88 px à 375, trois lignes, mesuré dans la galerie ; 275 × 88 dans l'app selon la revue finale). Garder, ou un rayon de 12 px
+  pour ce cas : capture `captures/375-galerie-boutons.png` (revue finale, Lens 2 n° 3 : à te montrer, pas corrigé d'office).
 
 **Dettes (assumées, une ligne chacune ; spec § 5).**
 - Hors lot par décision : mode sombre, barre haute bureau, icônes SVG (les émojis ne prennent pas `color`), police de marque, CSS en ligne de `exporters.js`.
@@ -1083,6 +1105,9 @@ Les rulings, une ligne chacun (détail et « coût si faux » en spec § 8 ; tou
 - Portée de R-VIS-8 : la règle vise **tous** les boutons non primaires de la rangée ; une future annonce suivie d'une `.row` à deux boutons non primaires ou plus les écarterait tous (un `:last-child` la bornerait).
 - L'assertion groupée du contraste rendu de `tests/theme.js` ignore l'opacité (seule celle de l'auteur, R-VIS-5, la compose) ; le souligné tomate d'un segment d'extrémité suit la courbe (R-VIS-6, accepté).
 - L'outil de preuve, la galerie, les résultats et les 136 captures vivent dans le registre, **hors git** : ils disparaissent avec le worktree si le registre n'est pas copié.
+- Nommées par la revue finale, non corrigées : la liste blanche T-2 (`#fff`, `#222`) est comptée sans vérifier OÙ (une règle neuve `color: #fff` passerait) ; `--safe-t` ignoré par `aside.sidenav` (`top`/`height`) et par `scroll-margin-top` (sans effet en `default`, à refaire si la barre d'état repasse en `black-translucent`) ; titre web sur plusieurs lignes en pilule = ovale (décision ci-dessus).
+- R-VIS-14 lit `.toast` et `main.content` par expressions sur les déclarations : une réécriture équivalente (`calc(var(--safe-b) + var(--nav-h) + 12px)`) rougit (voulu).
+- Fermées par la vague finale : `.mirror` et `h2` épinglés ; `input:focus-visible` distingué de l'anneau global ; `li.hit .est` dans `PAIRES` et dans la galerie.
 
 **Gestes de Neegan, dans cet ordre** (les trois lots non fusionnés ; la chaîne est linéaire, mesuré par
 `git merge-base --is-ancestor` : `66c5d19` ⊂ `ce9eb5d` ⊂ `237047a` ⊂ `refonte-visuelle`) :
@@ -1092,37 +1117,43 @@ Les rulings, une ligne chacun (détail et « coût si faux » en spec § 8 ; tou
    `<largeur>-<nom>.png`, 34 par largeur : huit écrans dont la porte, 18 sections de la galerie, 5 focus au clavier, 3 de M3) ; la
    galerie elle-même s'ouvre sur `http://localhost:8085/.superpowers/sdd/2026-10-18-refonte-visuelle/galerie.html`. Sur
    `375-accueil.png`, « Restaurer une sauvegarde » paraît survolé : la souris de Playwright est restée au point du clic (rapport de
-   la tâche 3).
+   la tâche 3). L'ovale du titre web long : `375-galerie-boutons.png`.
 3. Après la revue finale et `/verify` des trois lots par le chef d'orchestre, fusions `--ff-only` en chaîne :
    `! git -C ~/projects/mistu merge --ff-only assistant-compte`, puis `! git -C ~/projects/mistu merge --ff-only creer-ia`, puis
    `! git -C ~/projects/mistu merge --ff-only refonte-visuelle` (si une branche a bougé pendant une vague de revue, rebaser la suivante
    dessus d'abord) ; puis **un** `! git -C ~/projects/mistu push origin main`.
-4. Suite publique : ouvrir `https://neegans.github.io/mistu/tests/` et lire le BILAN (à cette clôture : 2623/2623, total épinglé 2622,
-   plus le 404 de `/favicon.ico`) ; service worker `cuisine-os-v0.7.0-24`.
+4. Suite publique : ouvrir `https://neegans.github.io/mistu/tests/` et lire le BILAN (après la vague finale : 2633/2633, total épinglé
+   2632, plus le 404 de `/favicon.ico`) ; service worker `cuisine-os-v0.7.0-25`.
 5. iPhone, app **réinstallée** depuis le site public : barre d'état lisible, onglet actif, porte « Kwe. », aucun survol collé après une
    tape, libellé « Qu’est-ce qu’on cuisine ? » ; dire si « Agrandir l'affichage » est activé (la barre déborde alors de 21 px
    avec la pastille) ; puis le geste 4 du lot 1 (connexion depuis l'app installée) et la preuve réelle du
    lot 2 (geste 5 de sa section).
-6. Décisions : V-1 à V-6 (renverser V-3 ou V-4 au besoin), R-VIS-8 (« Annuler » à droite) et R-VIS-4 (libellé coupé à 375 px) ; puis
+6. Décisions : V-1 à V-6 (renverser V-3 ou V-4 au besoin), R-VIS-8 (« Annuler » à droite), R-VIS-4 (libellé coupé à 375 px) et l'ovale
+   des titres web sur plusieurs lignes ; puis
    N-8/N-9 et les décisions de spec du lot 2 (borne de 240 min, etc.).
 7. Faire tourner la clé Anthropic (elle a transité par un chat) et poser un plafond de dépense mensuel sur le workspace.
-8. « clean » **seulement après** avoir copié les trois registres dans `~/projects/mistu/.superpowers/sdd/` :
+8. « clean » **seulement après** avoir copié les registres dans `~/projects/mistu/.superpowers/sdd/` :
    `2026-10-17-assistant-par-le-compte` (déjà là, `diff -rq` muet contre `~/projects/mistu-web` le 18 octobre),
+   `2026-10-17-chercher-sur-le-web` et `2026-10-17-confort-web` (dans `~/projects/mistu-web` : déjà là, vérifiés identiques, `diff -rq`
+   muet le 18 octobre — `git worktree remove` de `mistu-web` détruirait les originaux),
    `2026-10-18-creer-avec-l-ia` (copié par le contrôleur, `diff -rq` muet contre `~/projects/mistu-ia` le 18 octobre) et
    `2026-10-18-refonte-visuelle` **avec `captures/`** (une copie du contrôleur existe déjà, mais chaque rapport la périme : la
    recopier **en dernier**, après la revue finale, puis `diff -rq` muet) ; ensuite seulement `git worktree remove` de `mistu-look`,
    `mistu-ia` et `mistu-web`.
 
-**Versions.** `APP_VERSION = '0.7.0'` et `DB_VERSION = 3` inchangées ; `sw.js VERSION = 'cuisine-os-v0.7.0-24'` (clôture ; -21, -22,
--23 aux tâches 1 à 3 ; la pointe du lot 2 était à -11 : suffixe monotone), `SHELL` inchangé (aucun module neuf : `tests/theme.js` est un
+**Versions.** `APP_VERSION = '0.7.0'` et `DB_VERSION = 3` inchangées ; `sw.js VERSION = 'cuisine-os-v0.7.0-25'` (vague finale ; -24 à
+la clôture, -21, -22, -23 aux tâches 1 à 3 ; la pointe du lot 2 était à -11 : suffixe monotone), `SHELL` inchangé (aucun module neuf : `tests/theme.js` est un
 test). Aucun schéma, aucune migration ; CSP inchangée (`index.html` ne change que par `theme-color` et la barre d'état).
 
-**Bilan (clôture, 18 octobre 2026).** Suite complète **2623/2623 verts** (total épinglé **2622** dans `tests/tests.js:210`, lu dans
-« obtenu » : l'assertion du total s'ajoute elle-même au bilan affiché ; départ du lot sur `237047a`, mesuré par le contrôleur : 2554/2554, épinglé 2553), une
-seule erreur de console : le 404 de `http://localhost:8085/favicon.ico` (URL lue par une sonde) ; `node --test tools/*.test.mjs`
-**45/45** ; `node tools/generer-migrations.mjs --check` : **0** ; quatre commits sur `174415b` (T1, T2, T3, clôture) ; aucun caractère
-invisible dans les cinq fichiers de la clôture (commande de la ligne 21 du plan du lot 1, extraite par script) ; scan des clés
-Anthropic (`git grep -nEi 'sk-ant-[0-9A-Za-z_-]{10,}'`) : seules les quatre sentinelles de test du lot web (`…-sentinelle`).
+**Bilan (vague finale, 18 octobre 2026 — brief `final-fix-wave.md`, rapport `final-fix-report.md`).** Suite complète **2633/2633
+verts** (total épinglé **2632** dans `tests/tests.js:210`, lu dans « obtenu » : l'assertion du total s'ajoute elle-même au bilan affiché ;
+la vague ajoute 10 assertions au bloc thème, 69 → 79, sur l'épinglé de la clôture, 2622 ; départ du lot sur `237047a`, mesuré par le
+contrôleur : 2554/2554, épinglé 2553), une seule erreur de console : le 404 de `/favicon.ico` (journal du serveur de la copie : 12
+passages, 12 × `/favicon.ico`, rien d'autre) ; `node --test tools/*.test.mjs` **45/45** ; `node tools/generer-migrations.mjs --check` :
+**0** ; cinq commits sur `174415b` (T1, T2, T3, clôture, vague finale) ; aucun caractère invisible dans les huit fichiers de la vague
+(commande de la ligne 21 du plan du lot 1, extraite par script) ; scan des clés Anthropic (`git grep -nEi 'sk-ant-[0-9A-Za-z_-]{10,}'`) :
+seules les quatre sentinelles de test du lot web (`…-sentinelle`) ; preuve visuelle relancée : code 0, 40/40, 136 captures, minimum
+rendu 4,62 sur 1 760 nœuds ; mutants de la vague : 11 sur 11.
 
 **Fusion.** Revue finale de branche puis `/verify` par le chef d'orchestre ; le registre (avec `captures/`) se copie **avant** tout
 `git worktree remove` ; les gestes 1 et 2 du lot 1 **avant** tout `push`.
