@@ -135,6 +135,17 @@ export function fabriquerExtraction(resultat, { reference, versions = [], pages 
   return { recipe, version, pageUpdates, remplacement };
 }
 
+// --- Couverture d'une relecture (ronde finale 2, I-5) : les pages de la version COURANTE (provenance.source_page_ids, identifiants seulement,
+// dédoublonnés, dans leur ordre) qu'une lecture ne relit pas (`lues` : les pages de la nouvelle version). Tant qu'il en reste, l'écran demande
+// « Remplacer par cette lecture ? » au lieu de rendre courante une version qui perdrait en silence les lignes de ces pages (une page dont les octets
+// ne sont pas sur cet appareil, une page retirée de la ligne). Sans courante ou sans pages : rien (une première lecture n'a rien à couvrir).
+const estIdPage = (id) => typeof id === 'string' && !!id;
+export function pagesNonRelues(courante, lues) {
+  const attendues = Array.isArray(courante?.provenance?.source_page_ids) ? [...new Set(courante.provenance.source_page_ids.filter(estIdPage))] : [];
+  const relues = new Set(Array.isArray(lues) ? lues.filter(estIdPage) : []);
+  return attendues.filter((id) => !relues.has(id));
+}
+
 // --- Âge d'une ligne (spec § 4.5) : { n, unite: 'min' | 'h' | 'j' }, arrondi vers le bas ; l'écran traduit (« il y a {n} min / h / j »).
 // Une horloge en avance ou une date illisible vaut 0 min : jamais négatif, jamais NaN. `maintenant` : ISO, Date ou millisecondes.
 const enMs = (x) => (x instanceof Date ? x.getTime() : typeof x === 'number' ? x : Date.parse(x));

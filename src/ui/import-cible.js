@@ -17,7 +17,7 @@ import { TransitionRefusee } from '../core/db.js';
 import { safeDisplayType } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
 import { PasserelleProvider, extraireRecette, extraireIndex, validateParsedRecipe, validerIndex, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION } from '../domain/llm.js';
-import { discordance, deplacerPage, retirerPage, fabriquerExtraction, RAISONS_ECHEC, importOuvert, dateReception } from '../domain/import-cible.js';
+import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception } from '../domain/import-cible.js';
 import { getConvention } from '../domain/units.js';
 import { currentVersion } from '../domain/search.js';
 import { section, sessionAssistant, carteConnexion, texteEchecAssistant, TEXTE_CONNEXION } from './components.js';
@@ -306,9 +306,10 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
   // ligne : l'import NON TERMINÉ de cette recette (un seul, I-2) ; pages : ses source_pages par id ; question : 'discordance' | 'remplacer' | null ;
   // cleQuestion : la clé (cleLecture) de LA lecture pour laquelle `question` a été posée (T4-R2 : toute réponse s'y rapporte) ; rattache : la clé de
   // la lecture pour laquelle « Rattacher » a été répondu, sinon null ; verdict : la discordance calculée par decider() ; focus : le bouton à focaliser
-  // après un déplacement ; occupe : une écriture est en cours (aucune double pose).
-  const etat = { ligne: null, pages: new Map(), question: null, cleQuestion: null, rattache: null, verdict: null, focus: null, occupe: false };
-  const oublierQuestion = () => { etat.question = null; etat.cleQuestion = null; etat.rattache = null; etat.verdict = null; };
+  // après un déplacement ; occupe : une écriture est en cours (aucune double pose) ; ecriteMain : la question « Remplacer ? » vient d'une version écrite à
+  // la main (I-5), et non de la seule couverture des pages (ronde finale 2) — la phrase qui le dit n'est montrée que dans ce cas.
+  const etat = { ligne: null, pages: new Map(), question: null, cleQuestion: null, rattache: null, verdict: null, focus: null, occupe: false, ecriteMain: false };
+  const oublierQuestion = () => { etat.question = null; etat.cleQuestion = null; etat.rattache = null; etat.verdict = null; etat.ecriteMain = false; };
   root.etatRoute = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, pageIds: [...(Array.isArray(etat.ligne?.page_ids) ? etat.ligne.page_ids : [])], vol: !!vol && !!etat.ligne && vol.importId === etat.ligne.id, discordance: etat.verdict });
   if (!recipe) { root.append(el('div', { class: 'card' }, t('Recette introuvable.'))); return root; }
   // D-11 : un signet web ou une recette qui a déjà son texte n'a pas d'entrée ici — le dire, revenir à la fiche.
@@ -362,12 +363,20 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
   // Vague finale (Important, « Relire les pages ») : les pages DÉJÀ liées à la fiche — celles de sa version courante, `kind: 'recipe'`, présentes ici, dans
   // leur ordre — sont placées en tête de la ligne que la première photo ouvre : la relecture d'une fiche partial lit la recette ENTIÈRE (la nouvelle
   // version ne perd jamais en silence les lignes d'une page déjà lue) ; « Retirer » reste offert sur chacune.
+  // Ronde finale 2 : seulement celles dont les OCTETS sont sur cet appareil (repo.getFile rend un Blob) — sur un second appareil ou une PWA réinstallée,
+  // la ligne source_pages arrive par la synchro sans ses octets (R58, L4) : placée, elle ferait refuser l'envoi (octets_absents) et ne laisserait que
+  // « Retirer ». La ligne ne porte que ce qui peut partir ; une lecture qui ne couvre plus la courante pose la question I-5 (decider, pagesNonRelues).
   async function pagesDejaLiees() {
     const ref = (await repo.get('recipes', recipe.id)) ?? recipe;
     const courante = currentVersion(ref, await repo.byIndex('recipe_versions', 'recipe_id', recipe.id));
     const ids = [...new Set((Array.isArray(courante?.provenance?.source_page_ids) ? courante.provenance.source_page_ids : []).filter((id) => typeof id === 'string' && id))];
     const pages = await Promise.all(ids.map((id) => repo.get('source_pages', id)));
-    return ids.filter((_, i) => pages[i]?.kind === 'recipe');
+    const octetsIci = async (p) => {
+      if (p?.kind !== 'recipe' || typeof p.sha256 !== 'string' || !p.sha256) return false;
+      try { return (await repo.getFile(p.sha256))?.blob instanceof Blob; } catch { return false; }
+    };
+    const ici = await Promise.all(pages.map(octetsIci));
+    return ids.filter((_, i) => ici[i]);
   }
   // Chaque ajout passe par repo.ajouterPages : persistant AVANT tout appel (spec § 4.2.2). Première photo → la ligne a_lancer naît (une visite sans
   // photo n'écrit rien, § 4.1) ; ensuite les pages s'ajoutent EN FIN de la même ligne (un seul import ouvert par recette, I-2).
@@ -503,7 +512,12 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
       const conventionId = typeof ctx.conventionFor === 'function' ? ctx.conventionFor(reference) : (ed?.unit_convention_id ?? null);
       const options = { reference, versions, pages, pageIds, edition: ed, convention: conventionId ? getConvention(conventionId) : null, importId: L.id, modele: modeleBorne(L.model), photo: photoBornee(L), maintenant: maintenant() };
       const sonde = fabriquerExtraction(resultat, options); // pur : lu pour `remplacement` (I-5) avant la décision
-      etat.question = questionAPoser({ ok: verdict.ok, rattachee, remplacement: sonde.remplacement, remplacer });
+      // Ronde finale 2 (garde de couverture) : une lecture qui ne relit pas TOUTES les pages de la version courante (octets absents ici, page retirée de la
+      // ligne) ne la remplace jamais d'office — elle perdrait en silence les lignes de ces pages. « Remplacer par cette lecture ? » (I-5) est posée ;
+      // current_version_id ne change pas tant que la question n'est pas tranchée (« Garder ma version » ajoute la version sans la rendre courante).
+      const nonRelues = pagesNonRelues(currentVersion(reference, versions), sonde.version.provenance.source_page_ids);
+      etat.question = questionAPoser({ ok: verdict.ok, rattachee, remplacement: sonde.remplacement || nonRelues.length > 0, remplacer });
+      etat.ecriteMain = etat.question === 'remplacer' && sonde.remplacement;
       etat.cleQuestion = etat.question ? cle : null; // la question posée est celle de CETTE lecture (T4-R2)
       if (etat.question) return;
       apres = 'redessiner';
@@ -615,7 +629,9 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
   }
   const panneauRemplacer = () => el('div', { class: 'card warn stack', dataset: { role: 'remplacer' } },
     el('p', { style: { margin: 0 } }, t('Remplacer par cette lecture ?')),
-    el('small', { class: 'muted' }, t('Une version écrite à la main existe. « Garder ma version » ajoute la lecture sans la mettre en avant ; les pages et la photo sont liées quand même.')),
+    // Ronde finale 2 : la phrase « version écrite à la main » n'est dite que si c'est vrai — posée par la seule couverture des pages, la question vient sans
+    // elle (aucun texte neuf : spec § 5 ; rien d'inventé).
+    etat.ecriteMain ? el('small', { class: 'muted' }, t('Une version écrite à la main existe. « Garder ma version » ajoute la lecture sans la mettre en avant ; les pages et la photo sont liées quand même.')) : null,
     el('div', { class: 'row' },
       el('button', { type: 'button', class: 'btn primary', onClick: () => decider({ remplacer: false }) }, t('Garder ma version')), // défaut non (I-5)
       el('button', { type: 'button', class: 'btn', onClick: () => decider({ remplacer: true }) }, t('Remplacer'))));

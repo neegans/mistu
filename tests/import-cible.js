@@ -370,6 +370,10 @@ export async function runImportCibleTests({ eq, ok }) {
       D.fabriquerExtraction(resultat, { ...opts, versions: [{ id: 'rv0', kind: 'adaptation', provenance: { generated_by: 'ai' } }, { id: 'rv1', kind: 'adaptation', provenance: { generated_by: 'manual' } }] }).remplacement,
       D.fabriquerExtraction(resultat, { ...opts, versions: [{ id: 'rv0', kind: 'extraction', provenance: { generated_by: 'ai' } }, { id: 'rv1', kind: 'adaptation', provenance: { generated_by: 'manual' } }, { id: 'rv2', kind: 'correction', provenance: { generated_by: 'manual' } }] }).remplacement],
     [false, false, true], 'fabrication (I-5, vague finale m5) : une adaptation à la main ne déclenche pas « Remplacer ? » ; une correction à la main, si');
+    // Ronde finale 2 (I-5, couverture) : les pages de la version courante qu'une lecture ne relit pas — tant qu'il en reste, l'écran demande « Remplacer ? ».
+    eq([D.pagesNonRelues({ provenance: { source_page_ids: ['pg1', 'pg2'] } }, ['pg2', 'pg3']), D.pagesNonRelues({ provenance: { source_page_ids: ['pg1'] } }, ['pg3', 'pg1']), D.pagesNonRelues(null, ['pg1']), D.pagesNonRelues({ provenance: null }, []),
+      D.pagesNonRelues({ provenance: { source_page_ids: ['pg1', 'pg1', '', 7, null] } }, []), D.pagesNonRelues({ provenance: { source_page_ids: ['pg1'] } }, null), D.pagesNonRelues({ provenance: { source_page_ids: 'pg1' } }, [])],
+    [['pg1'], [], [], [], ['pg1'], ['pg1'], []], 'pagesNonRelues (ronde finale 2) : les pages de la courante absentes de la lecture, dédoublonnées, dans leur ordre ; sans courante ou sans pages, rien ; des entrées qui ne sont pas des identifiants sont ignorées ; une lecture illisible ne relit rien');
     // Vague finale (m14) : le vocabulaire est vérifié PAR COMPORTEMENT chez ce fabricant (le test de source ne voit pas un appel neutralisé) — une
     // référence reçue hors vocabulaire, recopiée telle quelle sur le chemin « non » (I-5), fait refuser la fabrication.
     let horsVocabulaire = null; try { D.fabriquerExtraction(resultat, { ...opts, reference: { ...reference, availability: 'dispo' }, remplacer: false }); } catch (e) { horsVocabulaire = e; }
@@ -885,6 +889,7 @@ export async function runImportCibleTests({ eq, ok }) {
         await attendre(() => !!root.querySelector('[data-role="remplacer"]'), 'question « Remplacer ? »');
         const q = root.querySelector('[data-role="remplacer"]');
         eq([q.textContent.includes('Remplacer par cette lecture ?'), [...q.querySelectorAll('button')].map((b) => b.textContent), (await db.get('imports', impE)).status, root.etatRoute().discordance?.ok, root.querySelector('[data-role="discordance"]')], [true, ['Garder ma version', 'Remplacer'], 'a_verifier', true, null], 'I-5 (N4) : version courante saisie à la main → « Remplacer par cette lecture ? », « Garder ma version » d’abord (défaut non), reste a_verifier ; titre concordant, pas de discordance');
+        eq(q.textContent.includes('Une version écrite à la main existe.'), true, 'I-5 (ronde finale 2) : posée pour une version écrite à la main, la question le dit (la phrase n’est tue que lorsque seule la couverture des pages la pose)');
         bouton(q, 'Garder ma version').click();
         await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_e?v=')), 'enregistrée');
         const rc = await db.get('recipes', 'rc_e'); const vs = await db.byIndex('recipe_versions', 'recipe_id', 'rc_e'); const neuve = vs.find((v) => v.id !== 'rv_e_main');
@@ -1257,6 +1262,79 @@ export async function runImportCibleTests({ eq, ok }) {
         const corps = JSON.parse(ff.appels[0].options.body);
         const rc = await db.get('recipes', 'rc_bb'); const v = await db.get('recipe_versions', rc.current_version_id);
         eq([ff.appels.length, corps.corps.messages[0].content.filter((c) => c.type === 'image').length, v.provenance.source_page_ids, v.parent_version_id, rc.source_page_ids], [1, 2, pageIds, 'rv_bb', pageIds], 'relire (vague finale, Important) : UN POST qui porte les DEUX pages (la déjà lue d’abord) ; la nouvelle version couvre les deux — jamais une version faite de la seule page neuve qui remplacerait la courante sans question');
+      });
+
+      // Ronde finale 2 (re-revue de la vague, Important) : « Relire les pages » sur un appareil qui n'a PAS les octets d'une page déjà lue (second appareil,
+      // PWA réinstallée : la ligne source_pages arrive par la synchro, ses octets non — R58, L4). La page n'est pas placée en tête (la ligne ne porte que ce
+      // qui peut partir) ; une lecture qui ne couvre plus les pages de la version courante pose « Remplacer par cette lecture ? » (I-5), jamais d'office.
+      const ficheRelue = async (id, couleur, { octets = true } = {}) => {
+        const { pages: [lue] } = await repo.ajouterPages([await imageDe(`p132-${id}.jpg`, couleur)], { edition_id: 'ed1' });
+        const vieille = { ...(await db.get('source_pages', lue.id)), kind: 'recipe', printed_page: 132 };
+        await db.put('source_pages', vieille);
+        if (!octets) await db.mutate({ deletes: { files: [vieille.sha256] }, origin: 'device' });
+        const courante = { ...versionDe('rv_' + id, id, 'ai'), provenance: { generated_by: 'ai', source_page_ids: [vieille.id], import_id: null, missing_page: true, incomplete: false }, verification_state: 'to_verify' };
+        await db.mutate({ puts: { recipes: [fiche(id, { availability: 'partial', verification_state: 'to_verify', current_version_id: courante.id, source_page_ids: [vieille.id] })], recipe_versions: [courante] }, origin: 'device' });
+        return vieille;
+      };
+      const premierePhoto = async (root, nom, couleur) => {
+        pick.suivant.push([await imageDe(nom, couleur)]);
+        bouton(root, 'Photographier').click();
+        await attendre(() => root.etatRoute().pageIds.length >= 1, 'première photo');
+        return root.etatRoute();
+      };
+      const imagesEnvoyees = (ff) => JSON.parse(ff.appels[0].options.body).corps.messages[0].content.filter((c) => c.type === 'image').length;
+      const idsVersions = async (id) => (await db.byIndex('recipe_versions', 'recipe_id', id)).map((v) => v.id).sort();
+
+      await bloc('relire : page déjà liée SANS ses octets ici → non placée, l’appel part, question I-5 puis « Remplacer » (ronde finale 2, Important)', async () => {
+        const vieille = await ficheRelue('rc_gg', '#5b2', { octets: false });
+        eq([(await repo.getFile(vieille.sha256)) ?? null, (await db.get('source_pages', vieille.id))?.kind], [null, 'recipe'], 'relire sans octets (montage) : la ligne source_pages de la p. 132 est sur cet appareil, ses octets non (second appareil, PWA réinstallée)');
+        const ff = fauxFetch([200, corpsOk()]);
+        const root = await monter('rc_gg', { deps: { fetch: ff.fetch } });
+        const { pageIds, importId } = await premierePhoto(root, 'p133-rc_gg.jpg', '#2b5');
+        eq([pageIds.length, pageIds.includes(vieille.id), root.textContent.includes('1 photo ajoutée'), (await db.get('imports', importId))?.page_ids], [1, false, true, pageIds], '(a) relire (ronde finale 2) : une page de la version courante SANS ses octets ici n’est pas placée en tête — la ligne ne porte que la page neuve (ce qui peut partir), aucune vignette vide');
+        bouton(root, 'Extraire et enregistrer').click();
+        await attendre(() => !!root.querySelector('[data-role="remplacer"]') || navs.length > 0 || UI.volEnCours() === null && ff.appels.length === 0 && dits.length > 0, 'décision après la lecture');
+        eq([ff.appels.length, ff.appels.length ? imagesEnvoyees(ff) : 0, dits.includes('Les photos de cette recette ne sont pas sur cet appareil.'), (await db.get('imports', importId)).status], [1, 1, false, 'a_verifier'], '(a) relire (ronde finale 2) : l’appel PART — un POST, une image (la page neuve) ; jamais « Les photos de cette recette ne sont pas sur cet appareil. » pour une photo prise ici ; la lecture est dans le journal (a_verifier)');
+        const q = root.querySelector('[data-role="remplacer"]');
+        eq([!!q, q?.textContent.includes('Remplacer par cette lecture ?'), q ? [...q.querySelectorAll('button')].map((b) => b.textContent) : null, q?.textContent.includes('Une version écrite à la main existe.'), (await db.get('recipes', 'rc_gg')).current_version_id, await idsVersions('rc_gg'), [...navs]], [true, true, ['Garder ma version', 'Remplacer'], false, 'rv_rc_gg', ['rv_rc_gg'], []], '(b) relire (ronde finale 2) : la lecture ne couvre pas la p. 132 de la version courante → « Remplacer par cette lecture ? » (I-5) au lieu d’une version courante d’office ; current_version_id INCHANGÉ, aucune version écrite ; la phrase « version écrite à la main » n’est pas dite (aucune n’existe : rien d’inventé)');
+        // Une seconde instance (reprise, autre onglet) : « Enregistrer cette lecture » repose la question — current_version_id ne bouge pas tant qu'elle n'est pas tranchée.
+        const reprise = await monter('rc_gg', { deps: { fetch: ff.fetch } });
+        bouton(reprise, 'Enregistrer cette lecture').click();
+        await attendre(() => !!reprise.querySelector('[data-role="remplacer"]') || navs.length > 0, 'question reposée');
+        eq([!!reprise.querySelector('[data-role="remplacer"]'), (await db.get('recipes', 'rc_gg')).current_version_id, await idsVersions('rc_gg'), (await db.get('imports', importId)).status, ff.appels.length, [...navs]], [true, 'rv_rc_gg', ['rv_rc_gg'], 'a_verifier', 1, []], '(b) relire (ronde finale 2) : repris ailleurs, « Enregistrer cette lecture » repose la question (aucun appel de plus) ; rien n’est écrit tant qu’elle n’est pas tranchée');
+        bouton(root.querySelector('[data-role="remplacer"]'), 'Remplacer').click();
+        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_gg?v=')), 'enregistrée');
+        const rc = await db.get('recipes', 'rc_gg'); const neuve = await db.get('recipe_versions', rc.current_version_id);
+        eq([rc.current_version_id !== 'rv_rc_gg', neuve?.kind, neuve?.parent_version_id, neuve?.provenance?.source_page_ids, rc.source_page_ids, (await idsVersions('rc_gg')).length, (await db.get('imports', importId)).status], [true, 'extraction', 'rv_rc_gg', pageIds, [vieille.id, ...pageIds], 2, 'enregistre'], '(b) « Remplacer » (ronde finale 2) : la lecture devient courante (parent = l’ancienne courante) ; la fiche garde l’union des pages ; import enregistre');
+      });
+
+      await bloc('relire sans octets : « Garder ma version » ajoute la lecture, la courante reste (ronde finale 2)', async () => {
+        const vieille = await ficheRelue('rc_hh', '#b52', { octets: false });
+        const ff = fauxFetch([200, corpsOk()]);
+        const root = await monter('rc_hh', { deps: { fetch: ff.fetch } });
+        const { pageIds, importId } = await premierePhoto(root, 'p133-rc_hh.jpg', '#25b');
+        bouton(root, 'Extraire et enregistrer').click();
+        await attendre(() => !!root.querySelector('[data-role="remplacer"]') || navs.length > 0, 'question « Remplacer ? »');
+        eq([!!root.querySelector('[data-role="remplacer"]'), pageIds.includes(vieille.id), ff.appels.length, (await db.get('recipes', 'rc_hh')).current_version_id], [true, false, 1, 'rv_rc_hh'], '(b) relire sans octets (ronde finale 2) : une page neuve seule, un POST, la question posée, la courante inchangée');
+        bouton(root.querySelector('[data-role="remplacer"]'), 'Garder ma version').click();
+        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_hh?v=')), 'enregistrée');
+        const rc = await db.get('recipes', 'rc_hh'); const neuve = (await db.byIndex('recipe_versions', 'recipe_id', 'rc_hh')).find((v) => v.id !== 'rv_rc_hh');
+        eq([rc.current_version_id, rc.availability, rc.verification_state, (await idsVersions('rc_hh')).length, neuve?.kind, neuve?.parent_version_id, neuve?.provenance?.source_page_ids, rc.source_page_ids, (await db.get('source_pages', pageIds[0]))?.kind, (await db.get('imports', importId)).status, navs.at(-1)], ['rv_rc_hh', 'partial', 'to_verify', 2, 'extraction', 'rv_rc_hh', pageIds, [vieille.id, ...pageIds], 'recipe', 'enregistre', `/recipes/rc_hh?v=${neuve?.id}`], '(b) « Garder ma version » (ronde finale 2) : la version est AJOUTÉE sans devenir courante (current_version_id, availability, verification_state intacts) ; union des pages et kind recipe posés quand même ; la fiche s’ouvre sur la version ajoutée');
+      });
+
+      await bloc('relire puis « Retirer » la page placée en tête : la lecture ne couvre plus la courante → question I-5 (ronde finale 2)', async () => {
+        const vieille = await ficheRelue('rc_ii', '#52b');
+        const ff = fauxFetch([200, corpsOk()]);
+        const root = await monter('rc_ii', { deps: { fetch: ff.fetch } });
+        const avant = await premierePhoto(root, 'p133-rc_ii.jpg', '#b25');
+        eq([avant.pageIds.length, avant.pageIds[0]], [2, vieille.id], '(c) témoin (ronde finale 2) : octets présents ici → la page déjà liée est placée en tête, puis la page neuve');
+        root.querySelector(`button[data-role="retirer"][data-page="${CSS.escape(vieille.id)}"]`).click();
+        await attendre(() => root.etatRoute().pageIds.length === 1, 'page retirée');
+        const { pageIds, importId } = root.etatRoute();
+        bouton(root, 'Extraire et enregistrer').click();
+        await attendre(() => !!root.querySelector('[data-role="remplacer"]') || navs.length > 0, 'décision après la lecture');
+        eq([pageIds.includes(vieille.id), ff.appels.length, ff.appels.length ? imagesEnvoyees(ff) : 0, !!root.querySelector('[data-role="remplacer"]'), (await db.get('recipes', 'rc_ii')).current_version_id, await idsVersions('rc_ii'), (await db.get('imports', importId)).status, [...navs]], [false, 1, 1, true, 'rv_rc_ii', ['rv_rc_ii'], 'a_verifier', []], '(c) « Retirer » la page placée en tête (ronde finale 2) : la lecture d’une seule page ne couvre plus la version courante → « Remplacer par cette lecture ? » (I-5) ; current_version_id inchangé, rien d’écrit (jamais la régression silencieuse que la vague devait fermer)');
+        await db.put('imports', { ...(await db.get('imports', importId)), status: 'ignore' });
       });
 
       await bloc('annulerVol d’un import tenu ailleurs PENDANT un vol réel (vague finale, I-7)', async () => {
