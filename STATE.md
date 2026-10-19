@@ -1,4 +1,41 @@
-# STATE.md — Cuisine OS (mistu) — état au 18 octobre 2026 (lot « Passerelle de l'assistant » EN LIGNE, `main` = `3998f97`, première recherche réelle OK ; lot « Présentation du serveur » fini dans le worktree `mistu-serveur`, revu, pas fusionné)
+# STATE.md — Cuisine OS (mistu) — état au 19 octobre 2026 (lots « Passerelle de l'assistant » et « Présentation du serveur » EN LIGNE, `main` = `57babc6` ; lot A « Import ciblé et journal d'import » FINI dans le worktree `mistu-import`, pas fusionné, `0005` pas collée)
+
+**19 octobre 2026, 19 h 45 — LOT A « IMPORT CIBLÉ ET JOURNAL D'IMPORT » : FINI dans le worktree `~/projects/mistu-import` (branche `import-cible`,
+base `main 57babc6`, tête `58bb49b` (dernier commit de code ; le commit de clôture qui pose ces documents le suit), serveur 8088), revu (six tâches à trois lentilles, revue finale de branche, vague finale VF-1 à VF-15, ronde
+finale 2 et sa re-revue PROPRE, clôture du chef d'orchestre : m9, m12, m13 ratifiés, VF-16, VF-17), PAS fusionné, PAS poussé, `0005` PAS collée ;
+`/verify` FAIT le 19 octobre à 17 h 40 (suite 3694/3694, Node 125/125, `--check` 0, invisibles 0, scan de secrets : deux noms de clés dans des tests, aucune valeur).** Pour Neegan : une recette « Repérée dans ton livre » s'importe depuis son propre écran (`#/recipes/<id>/importer` :
+« Importer » sur la fiche du livre, « Importer cette recette » sur sa fiche) — pages photographiées ou choisies et remises dans l'ordre, photo du plat
+facultative, puis « Extraire et enregistrer », qui écrit DANS la référence sans passer par l'éditeur (D-3) ; un titre lu qui ne concorde pas demande
+« Rattacher quand même ? » avant d'écrire ; une version que tu as écrite n'est jamais remplacée sans « Remplacer par cette lecture ? » ; la section
+« Imports », en tête d'Ajouter, garde chaque lecture payée (« Reprendre », « Relancer », « Annuler », « Ignorer ») ; une app fermée en plein vol dit
+« La lecture a été interrompue… » au démarrage suivant (90 s), et les lignes terminées s'effacent après 30 jours. La ronde finale 2 a fermé le dernier
+Important : « Relire les pages » ne reprend en tête que les pages dont les octets sont sur cet appareil, et une relecture qui ne couvre plus toute la
+recette pose la question I-5 au lieu de remplacer d'office. Chiffres : suite **3694/3694** (épinglé 3693 ; départ 3011/3011), Node **125/125**,
+`--check` 0, pglast `0005` 23 instructions + 4 fonctions et preuve 37 instructions + 2 blocs `do`, `APP_VERSION 0.9.0`, `DB_VERSION 4`, `sw.js`
+`cuisine-os-v0.9.0-13`, 152 mutants joués (tous rouges sauf `hb-ignore`, déclaré équivalent, et M3, survivant nommé, pratiquement inatteignable), 16 commits de
+construction sur `7fba2da`, plus la ronde finale 2 (`58bb49b`) et le commit de clôture de la spec. **Aucune extraction réelle** (la preuve § 10 de la
+spec n'a jamais été faite) ; `0005` jamais jouée sur `mitsu`. **Gestes, dans l'ordre :** (1) **AVANT tout `push`**, dans l'éditeur SQL de `mitsu`
+(`supabase/README.md`, étape 11) : **d'abord** insérer l'adresse de preuve (`exemple.invalid`) dans `private.allowed_users`, puis coller
+`supabase/migrations/0005_imports.sql` entière, puis, collée seule, `notify pgrst, 'reload schema';`, puis jouer la preuve
+`supabase/proofs/0005_imports.sql` (jetons `A_UUID` et `A_EMAIL` = cette adresse, « Run without RLS », lire `999 BILAN` : `0 faux sur 35`) et coller
+le tableau dans `supabase/proofs/RESULTATS-mitsu.md` ; retirer l'adresse de preuve ; (2) après `/verify`, **d'abord** écarter le fichier NON SUIVI
+`docs/audits/2026-10-18-import-livres-photos-web.md` de `~/projects/mistu` (identique à celui de la branche : `cmp` muet ; déjà écarté par le chef d’orchestre le 19 octobre, déplacé hors du dépôt, puis `rm`), sinon la fusion
+refuse (« untracked working tree files would be overwritten ») ; puis `! git -C ~/projects/mistu merge --ff-only import-cible` ; (3) `! git -C
+~/projects/mistu push origin main` (suite publique attendue : 3694/3694, plus le 404 de `/favicon.ico`) ; (4) preuve réelle sur le site public,
+connecté : l'écran ciblé `#/recipes/<id>/importer` sur une recette « Repérée dans ton livre », ses photos, « Extraire et enregistrer » — la PREMIÈRE
+extraction réelle jamais faite (noter le modèle, la durée, la fidélité, une page dense) ; puis la section « Imports » de la page Ajouter (« Reprendre »,
+« Ignorer », « Annuler ») ; puis `select jour, appels from public.assistant_usage_jour;` ; (5) iPhone (même route depuis l'app installée, une app
+fermée en plein vol) ; (6) décision de texte VF-16 (spec § 5, sans urgence : dire pourquoi « Remplacer par cette lecture ? » est posée quand des pages
+ne sont pas relues ; un libellé pour « Garder ma version » quand la courante est une lecture de l'assistant) ; (7) « clean » en dernier : le registre
+`.superpowers/sdd/2026-10-18-import-cible/` est déjà copié dans `~/projects/mistu/.superpowers/sdd/` (`diff -rq` muet le 19 octobre) ; le recopier si
+la clôture y ajoute quelque chose, puis `git worktree remove`. Non prouvé et dettes nommées (m9, m12, m13 ratifiés à la clôture ; `hb-ignore`
+équivalent ; survivant M3 ; I-2 aveugle à la sorte, à trancher au lot B ; `imports` chargé par `getData` à chaque rendu) : `CLAUDE.md`, section
+« Importer une recette repérée », et `docs/architecture.md`, section du lot.
+
+**Correction (19 octobre) : le paragraphe « Présentation du serveur » ci-dessous dit « PAS fusionné, PAS poussé » — c'est de l'histoire. Le lot
+est EN LIGNE depuis le 18 octobre : fusion et `push` faits par Neegan, `main` = `origin/main` = `57babc6` (commit de docs au-dessus de `778883c`) ;
+les lots 4 (« Passerelle de l'assistant ») et 5 (« Présentation du serveur ») sont servis.** Ses autres gestes (preuve réelle d'une recherche
+Web, « clean » de `mistu-serveur` après copie de son registre) restent à relire tels qu'écrits.
 
 **18 octobre 2026, 17 h 30 — LOT « PRÉSENTATION DU SERVEUR » : FINI dans le worktree `~/projects/mistu-serveur` (branche
 `presentation-serveur`, base `main 3998f97`, serveur 8087), revu et re-revu, PAS fusionné, PAS poussé.** Décision de Neegan après la
@@ -190,6 +227,15 @@ en fichiers seulement : `supabase/migrations/0003_assistant_config.sql` et sa pr
   (`CLAUDE.md`, sections des lots) ; lot ISBN (R-ISBN-9, R-ISBN-11, S3, S4, C6, C7, D6).
 
 ## Reprendre
+
+Lot A, import ciblé (le plus récent) :
+```
+cd ~/projects/mistu-import && git status --short && git log --oneline -3
+curl -sS -o /dev/null -w "8088 http=%{http_code}\n" http://localhost:8088/tests/ || (nohup python3 -m http.server 8088 > /dev/null 2>&1 &)
+# suite.cjs charge Playwright depuis le cache npx (~/.npm/_npx/9833c18b2d85bc59/node_modules/playwright) : un ménage du cache npm casse ce lanceur
+node ~/projects/mistu-import/.superpowers/sdd/2026-10-18-import-cible/suite.cjs 8088   # attendu : 3694/3694 (+ 1 x 404 favicon)
+node --test tools/*.test.mjs && node tools/generer-migrations.mjs --check   # attendu : 125/125, code 0
+```
 Lot passerelle (le plus récent) :
 ```
 cd ~/projects/mistu-passerelle && git status --short && git log --oneline -3
