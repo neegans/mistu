@@ -33,33 +33,50 @@ export class TransitionRefusee extends Error {
   }
 }
 
-// Aplatit et vérifie la forme des conditions : { [store]: [{ key, attendus, patch? }] } → liste. `attendus` : des chaînes non vides, au
-// moins une (`[undefined]` laisserait passer une ligne SANS statut, reçue ou restaurée). `patch` est un objet ou une fonction du courant ;
-// absent, la fiche est seulement vérifiée (pas réécrite). Deux conditions sur la même fiche sont refusées (la seconde écraserait la
-// première en silence). `null` ou absent : aucune condition.
+// Aplatit et vérifie la forme des conditions : { [store]: [condition, …] } → liste. Trois formes (spec § 3.6 ; les deux dernières : ronde 1 de
+// la tâche 3, pour que la CRÉATION d'une ligne du journal soit conditionnée comme ses transitions, I-10 et I-2) :
+// - { key, attendus, patch? } : la fiche existe et `status ∈ attendus` ; `attendus` : des chaînes non vides, au moins une (`[undefined]`
+//   laisserait passer une ligne SANS statut, reçue ou restaurée) ; `patch` est un objet ou une fonction du courant ; absent, la fiche est
+//   seulement vérifiée (pas réécrite) ;
+// - { key, absente: true } : la fiche N'EXISTE PAS (une création ne doit jamais écraser une ligne, quel que soit son statut) ;
+// - { index, valeur, exclus } : AUCUNE fiche de l'index `index` à cette `valeur` n'a un statut parmi `exclus` (chaînes non vides, au moins une).
+// Deux conditions sur la même fiche (ou le même index/valeur) sont refusées (la seconde écraserait la première en silence). `null` ou absent :
+// aucune condition.
+const statutsValides = (xs) => Array.isArray(xs) && xs.length > 0 && xs.every((a) => typeof a === 'string' && a);
 function listeConditions(conditions) {
   if (conditions == null) return [];
   if (typeof conditions !== 'object' || Array.isArray(conditions)) throw new TypeError('Les conditions doivent associer chaque magasin à un tableau');
   const liste = [];
   const vues = new Set();
+  const unique = (fiche) => { if (vues.has(fiche)) throw new TypeError('Deux conditions sur la même fiche ' + fiche); vues.add(fiche); };
   for (const [store, items] of Object.entries(conditions)) {
     if (!Array.isArray(items)) throw new TypeError('Les conditions de ' + store + ' doivent être un tableau');
     for (const c of items) {
-      if (!c || typeof c !== 'object' || c.key == null) throw new TypeError('Condition sans clé sur ' + store);
-      if (!Array.isArray(c.attendus) || !c.attendus.length || c.attendus.some((a) => typeof a !== 'string' || !a)) throw new TypeError('Les statuts attendus d’une condition sont des chaînes non vides, au moins une (' + store + ')');
+      if (!c || typeof c !== 'object') throw new TypeError('Condition sans clé sur ' + store);
+      if (c.index != null) {
+        if (typeof c.index !== 'string' || !c.index || c.valeur == null || c.key != null || !statutsValides(c.exclus)) throw new TypeError('Une condition d’index porte index, valeur et des statuts exclus (chaînes non vides, au moins un), sans clé (' + store + ')');
+        unique(store + '/#' + c.index + '=' + String(c.valeur));
+        liste.push({ store, index: c.index, valeur: c.valeur, exclus: c.exclus });
+        continue;
+      }
+      if (c.key == null) throw new TypeError('Condition sans clé sur ' + store);
+      unique(store + '/' + String(c.key));
+      if (c.absente === true) {
+        if (c.attendus != null || c.patch != null) throw new TypeError('Une condition « absente » ne porte ni attendus ni patch (' + store + ')');
+        liste.push({ store, key: c.key, absente: true });
+        continue;
+      }
+      if (!statutsValides(c.attendus)) throw new TypeError('Les statuts attendus d’une condition sont des chaînes non vides, au moins une (' + store + ')');
       if (c.patch != null && typeof c.patch !== 'object' && typeof c.patch !== 'function') throw new TypeError('Le patch d’une condition est un objet ou une fonction (' + store + ')');
-      const fiche = store + '/' + String(c.key);
-      if (vues.has(fiche)) throw new TypeError('Deux conditions sur la même fiche ' + fiche);
-      vues.add(fiche);
       liste.push({ store, key: c.key, attendus: c.attendus, patch: c.patch ?? null });
     }
   }
   return liste;
 }
 
-// Écriture conditionnée (spec import-cible § 3.6, I-10) : dans UNE transaction readwrite, chaque fiche conditionnée est lue (get), son
-// statut vérifié parmi `attendus`, la fiche fusionnée { ...courant, ...patch(courant) } ajoutée aux puts ; puis, DANS LE RAPPEL onsuccess
-// de la dernière lecture (aucun await : IndexedDB valide la transaction dès que la file est vide), onMutate est appelé de façon synchrone
+// Écriture conditionnée (spec import-cible § 3.6, I-10) : dans UNE transaction readwrite, chaque fiche conditionnée est lue (get ; ou les
+// fiches d'un index par getAll(valeur)), son statut vérifié parmi `attendus` (ou son ABSENCE ; ou l'absence de tout statut `exclus` sur l'index),
+// la fiche fusionnée { ...courant, ...patch(courant) } ajoutée aux puts ; puis, DANS LE RAPPEL onsuccess
 // (capture d'outbox) et tout est écrit. Une condition fausse → tx.abort() et TransitionRefusee, capturée dans la fermeture et relancée à
 // la place du rejet générique « Transaction annulée » de done() ; une exception du patch ou d'un put est relancée de même. Un patch ne
 // change jamais la clé (TypeError, transaction annulée) : la fiche fusionnée s'écrirait sinon À CÔTÉ de l'originale. La portée inclut
@@ -79,6 +96,15 @@ async function ecrireConditionne(db, { puts, deletes, clearStores, origin, paylo
         const allPuts = { ...puts };
         for (const [i, c] of liste.entries()) {
           const courant = lus[i];
+          if (c.index) { // aucune fiche de l'index à cette valeur n'a un statut exclu (I-2 : un seul import ouvert par recette)
+            const fautive = (Array.isArray(courant) ? courant : []).find((r) => r && c.exclus.includes(r.status));
+            if (fautive) { refus = new TransitionRefusee(c.store, c.index + '=' + String(c.valeur), fautive.status); tx.abort(); return; }
+            continue;
+          }
+          if (c.absente) { // la fiche n'existe pas : une création n'écrase jamais une ligne, quel que soit son statut
+            if (courant != null) { refus = new TransitionRefusee(c.store, c.key, courant.status); tx.abort(); return; }
+            continue;
+          }
           const statut = courant?.status;
           if (courant == null || !c.attendus.includes(statut)) { refus = new TransitionRefusee(c.store, c.key, statut); tx.abort(); return; }
           if (c.patch == null) continue; // vérification seule : la fiche n'est pas réécrite
@@ -97,7 +123,7 @@ async function ecrireConditionne(db, { puts, deletes, clearStores, origin, paylo
       }
     };
     for (const [i, c] of liste.entries()) {
-      const request = tx.objectStore(c.store).get(c.key);
+      const request = c.index ? tx.objectStore(c.store).index(c.index).getAll(c.valeur) : tx.objectStore(c.store).get(c.key);
       request.onsuccess = () => { lus[i] = request.result; if (--restants === 0) ecrireTout(); };
     }
   });

@@ -6,7 +6,11 @@
 // PNG, WebP) : un en-tête illisible (HEIC, que Safari décode) passe, et c'est le ré-encodage qui tranche.
 // 16 Mpx (S6) = 4 000 × 4 000 : au-delà, aucune couverture de livre n'a de raison d'être, et le canvas d'un téléphone
 // renonce bien avant (une photo de 48 Mpx est un cas réel, pas une couverture).
-import { ALLOWED_MIME } from '../sync/mime.js';
+import { COVER_INPUT_MIME } from '../sync/mime.js';
+
+// Types acceptés pour une photo choisie ICI : les images de la liste blanche des couvertures plus HEIC (que Safari décode). Jamais ALLOWED_MIME :
+// un PDF ou un EPUB « photo du plat » doit être refusé par `type` (ce que l'écran dit), pas par le décodage (ronde 1).
+export const MIME_PHOTO_LOCALE = Object.freeze([...COVER_INPUT_MIME, 'image/heic']);
 
 export const LIMITES_COUVERTURE = { octetsDistants: 5 * 1024 * 1024, octetsLocaux: 25 * 1024 * 1024, pixels: 16_000_000, maxCote: 1200, qualite: 0.85 };
 
@@ -78,7 +82,7 @@ export async function reduireImage(blob, { maxCote = LIMITES_COUVERTURE.maxCote,
 export async function preparerPhotoLocale(blob) {
   if (!(blob instanceof Blob)) throw new ErreurImage('indecodable');
   if (blob.size > LIMITES_COUVERTURE.octetsLocaux) throw new ErreurImage('trop_lourde');
-  if (blob.type && !ALLOWED_MIME.includes(blob.type)) throw new ErreurImage('type');
+  if (blob.type && !MIME_PHOTO_LOCALE.includes(blob.type)) throw new ErreurImage('type');
   const dims = await dimensionsImage(blob);
   if (dims && dims.largeur * dims.hauteur > LIMITES_COUVERTURE.pixels) throw new ErreurImage('trop_grande');
   return reduireImage(blob);

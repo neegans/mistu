@@ -23,6 +23,7 @@ export const EN = {
   'Livres': 'Books', 'Plats': 'Dishes', 'Aucun livre pour l’instant.': 'No books yet.', 'Ajouter un livre': 'Add a book', '{n} disponible(s)': '{n} available', '{n} repérée(s)': '{n} spotted', 'Aucune recette indexée': 'No recipe indexed',
   'Nouveau plat': 'New dish', '{n} recette(s) dans {m} livre(s)': '{n} recipe(s) in {m} book(s)', '{n} à confirmer': '{n} to confirm', 'Rapprochements proposés': 'Proposed matches', 'Confirmer': 'Confirm', 'Refuser': 'Refuse',
   'Photographier des pages': 'Photograph pages', 'Choisir des photos ou un PDF': 'Choose photos or a PDF', 'Saisir une recette': 'Type a recipe', 'Ajouter un lot au congélateur': 'Add a freezer batch',
+  'Image très légère : possiblement floue ou trop petite': 'Very light image: possibly blurry or too small',
   'Auteur / chef': 'Author / chef', 'Éditeur': 'Publisher', 'Année': 'Year',
   'Autre…': 'Other…', 'Autre cuisine': 'Other cuisine',
   // Page « Ajouter » : la grille de six cartes (cinq au lot UX, « Créer avec l’IA » depuis le 18 octobre) et le sélecteur avant scan (spec UX § 4, § 10).

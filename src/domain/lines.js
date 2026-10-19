@@ -85,9 +85,10 @@ export function parseIngredientBlock(text) {
 
 // Étapes : une par ligne ou par paragraphe ; numérotation initiale retirée ; identifiant stable par étape.
 // `parParagraphe` (spec import-cible § 4.3.7, N5) : une étape par PARAGRAPHE seulement (ligne vide entre deux étapes), les sauts de ligne
-// internes gardés — l'éditeur y passe quand la version de départ a une étape sur plusieurs lignes. Sans l'option, comme avant.
+// internes gardés — l'éditeur y passe quand la version de départ a une étape sur plusieurs lignes. Sans l'option, comme avant : seul CRLF est
+// normalisé en LF (l'ancien `\r?\n`) ; un CR seul n'a jamais été une fin de ligne ici et ne le devient pas (ronde 1).
 export function parseStepsBlock(text, { parParagraphe = false } = {}) {
-  const brut = (text || '').replace(/\r\n?/g, '\n');
+  const brut = (text || '').replace(/\r\n/g, '\n');
   const parts = brut.split(parParagraphe ? /\n\s*\n/ : /\n\s*\n|\n/).map((s) => s.replace(/^\s*(?:\d+[.)]|[-•*])\s*/, '').trim()).filter(Boolean);
   return parts.map((body, i) => ({ id: newId('st'), position: i + 1, text: body, ...detectTimers(body) }));
 }

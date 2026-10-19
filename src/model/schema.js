@@ -149,6 +149,9 @@ export const VERSION_KIND = ['extraction', 'correction', 'adaptation', 'translat
 export const VERSION_STATUS = ['proposed', 'tested'];
 // États du journal des imports (spec import-cible § 3.1) ; les transitions permises vivent dans src/domain/import-cible.js (tâche 3).
 export const STATUTS_IMPORT = ['a_lancer', 'en_cours', 'a_verifier', 'enregistre', 'echec', 'ignore'];
+// Les deux états TERMINAUX (aucune transition n'en sort) ; les autres sont « ouverts » : un seul import ouvert par recette (I-2), et seule la
+// séance d'un import ouvert est exclue des rappels génériques (§ 4.1). Une seule définition, lue par le domaine (import-cible.js) et par repo.ajouterPages.
+export const IMPORTS_TERMINES = ['enregistre', 'ignore'];
 export const LINK_STATE = ['proposed', 'confirmed', 'refused'];
 export const RECIPE_TYPES = ['plat_principal', 'entree', 'salade', 'soupe', 'legumes', 'feculent', 'sauce', 'dessert', 'boulangerie', 'boisson', 'autre'];
 export const MEAL_ROLES = ['plat_principal', 'entree', 'accompagnement', 'dessert', 'autre'];

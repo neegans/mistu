@@ -115,7 +115,7 @@ jour-là, « À envoyer » et la pastille montent d'autant sans geste de la pers
 
 | Magasin | Ajout | Sens |
 |---|---|---|
-| `source_pages` | `position` réécrite à l'enregistrement depuis l'ordre de `page_ids` ; `kind: 'recipe'` posé comme aujourd'hui (pas de champ `role`) | l'ordre choisi ; nature de la photo |
+| `source_pages` | `position` réécrite à l'enregistrement depuis l'ordre de `page_ids` ; `kind: 'recipe'` posé comme aujourd'hui (pas de champ `role`) ; `printed_page` de la page gardé, et une page SANS numéro ne reçoit celui de la fiche que si elle est la **première** de l'ordre (T3 ronde 1 : la deuxième photo d'une recette p. 132 est la p. 133, rien d'inventé) | l'ordre choisi ; nature de la photo |
 | `recipes` | `photo_sha256: null \| string` (pointeur souple), `photo_origin: 'photo' \| 'image' \| null` (le geste touché) | photo du plat |
 | lignes d'ingrédients | `uncertain: boolean` | l'incertitude dite par le modèle |
 | `recipe_versions.provenance` | `import_id` (souple), `incomplete`, `missing_page`, `titre_lu` | d'où vient la version et ses limites |
@@ -155,8 +155,11 @@ quatre fonctions recréées sur les 27 magasins. Preuve `supabase/proofs/0005_im
 ### 3.6 Deux primitives neuves (N1, N2)
 
 - **`db.mutate` gagne `conditions`** : `db.mutate({ puts, deletes, clearStores, origin, payloads, conditions })` où
-  `conditions = { [store]: [{ key, attendus: [...statuts], patch }] }` ; `patch` est un objet ou une fonction `(courant) => objet`. Dans la **même
-  transaction readwrite** que les `puts`/`deletes` : chaque fiche conditionnée est lue (`get` dans la transaction), `status ∈ attendus` est
+  `conditions = { [store]: [{ key, attendus: [...statuts], patch }] }` ; `patch` est un objet ou une fonction `(courant) => objet`. **Deux formes de
+  plus (T3 ronde 1)** : `{ key, absente: true }` (la fiche n'existe pas : une création n'écrase jamais une ligne, quel que soit son statut, I-10) et
+  `{ index, valeur, exclus: [...statuts] }` (aucune fiche de l'index à cette valeur n'a un statut exclu : un seul import ouvert par `recipe_id`, I-2 ;
+  refus nommé `TransitionRefusee { store, key: 'index=valeur', statut }`). Dans la **même
+  transaction readwrite** que les `puts`/`deletes` : chaque fiche conditionnée est lue (`get` dans la transaction, ou `index.getAll(valeur)`), `status ∈ attendus` est
   vérifié, la fiche fusionnée `{ ...courant, ...patch(courant) }` est ajoutée aux `puts`, puis `onMutate` est appelé **de façon synchrone** dans le
   rappel de la dernière lecture (capture d'outbox, portée `outbox` ouverte seulement si la base la possède : les bases de test `TEST_STORES`
   n'en ont pas), puis tout est écrit ; une condition fausse → `transaction.abort()` et `TransitionRefusee { store, key, statut }` : **rien**
@@ -165,10 +168,14 @@ quatre fonctions recréées sur les 27 magasins. Preuve `supabase/proofs/0005_im
   chaînes (`nettoyerChaines`, R61 : un `resultat` ou une `reponse_brute` du modèle porte des caractères de contrôle), pose `updated_at =
   syncNow()` sur chaque fiche écrite, appelle `db.mutate` avec la condition, puis `emit('change')`. **Tous** les écrans passent par elle (jamais
   `db.mutate` direct) ; `repo.saveBatch(batch, { conditions })` l'étend au cas sans patch.
-- **`repo.ajouterPages(files, { edition_id, session_id, import_id })`** : comme `startScanSession` **sans navigation ni toast**, octets par
+- **`repo.ajouterPages(files, { edition_id, session_id, import_id, import })`** : comme `startScanSession` **sans navigation ni toast**, octets par
   `putFile` avant, puis **un** `repo.transitionner('imports', import_id, { attendus: ['a_lancer', 'a_verifier', 'echec'], patch: (c) => ({
   page_ids: [...c.page_ids, ...nouveaux] }), puts: { source_documents, source_pages, scan_sessions } })` (sans `import_id` : `saveBatch`
-  simple, chemin existant). `startScanSession` l'appelle.
+  simple, chemin existant). `startScanSession` l'appelle. **T3 ronde 1** : la ligne du journal est lue **avant** le premier `putFile` (un import
+  terminé, en vol, inconnu, déjà créé ou doublé refuse sans laisser d'octets orphelins ; la condition en transaction reste le mur) ; `import_id`
+  sans `session_id` reprend le `scan_session_id` de la ligne, une séance qui n'est pas la sienne refuse (`TypeError`) ; `import: {…}` (première
+  photo) écrit par un `saveBatch` **conditionné** (`absente` + `index recipe_id / exclus = statuts ouverts`) ; `import_id` et `import` ensemble, ou un
+  `kind` hors `recette | index` → `TypeError`.
 
 ### 3.7 Archives (C1)
 
@@ -223,10 +230,11 @@ plus récente la refuse déjà (« Description de magasin absente ou inconnue »
 2. Réponse → `validateParsedRecipe` → **`repo.transitionner('imports', id, { attendus: ['en_cours'], patch: { status: 'a_verifier', resultat, reponse_brute (coupée à 16 000 points de code), model, duree_ms } })`** (I-3).
    Échec → `en_cours → echec` avec `erreur`. Écriture locale impossible après une réponse (exception) → tentative `echec(incertain)` ; si
    elle échoue aussi, la ligne reste `en_cours` et deviendra `interrompu` au démarrage (même phrase, I-4).
-3. **Discordance** (`discordance(resultat, reference)`, pure) : mots du titre de la référence (`normalizeText`, puis découpage sur espaces, apostrophes, traits d'union et points), mots vides retirés
+3. **Discordance** (`discordance(resultat, reference)`, pure) : mots du titre de la référence (`normalizeText`, puis découpage sur espaces et **toute ponctuation** `\p{P}` — apostrophes, traits d'union et tirets Unicode, points, virgules, parenthèses, guillemets ; T3 ronde 1, superset des quatre classes de la rév. 3), mots vides retirés
    (liste fermée fr/en : le, la, les, l, de, du, des, d, au, aux, à, et, en, un, une, ma, mon, mes, ta, ton, tes, sa, son, ses, notre, nos, votre,
    vos, leur, leurs, the, of, and, with, a, an, my, your, our) ; **chaque** mot restant doit
-   apparaître dans les mots du titre lu ; page lue vs `printed_page` à ± 3 quand les deux sont connues ; titre lu nul → discordance.
+   apparaître dans les mots du titre lu ; page lue vs `printed_page` à ± 3 quand les deux sont connues ; titre lu nul → discordance ; une référence **sans
+   mot distinctif** (titre vide, fait de mots vides, absente) → discordance `titre` aussi (T3 ronde 1 : jamais une concordance par vérité vide).
    Dialogue : « Le texte lu s'intitule “X” ; la référence est “Y” (p. N). Rattacher quand même ? » / « Rattacher » / « Garder la lecture sans
    l'enregistrer » (reste `a_verifier`) / « Changer les pages » (`a_lancer`). Table de paires voisines dans les tests (pommes/poires,
    oignon/ail, « Tarte aux pommes » / « Tarte aux pommes de ma grand-mère » = concordant).
@@ -238,7 +246,9 @@ plus récente la refuse déjà (« Description de magasin absente ou inconnue »
    convention_snapshot, import_id, incomplete, missing_page, titre_lu }`, `verification_state: 'to_verify'` ; fiche : `original_title`
    conservé, `printed_page` posé si vide, `source_page_ids` = union, `photo_sha256` / `photo_origin`, `availability` = `available` si lignes
    et étapes, `partial` sinon, et `partial` au plus si `incomplete` ou `missing_page` ; `verification_state` = celui de la version ;
-   `current_version_id` → la nouvelle (sauf I-5). La référence est **relue** juste avant la transaction (leçon C4) ; `assertVocabulaire`.
+   `current_version_id` → la nouvelle (sauf I-5 : option `remplacer: false` du fabricant — la fiche rendue ne reçoit alors que l'union des pages et la
+   photo du plat, tout le reste intact, la version fabriquée quand même ; T3 ronde 1, la recomposition n'est jamais refaite à l'écran). La référence est
+   **relue** juste avant la transaction (leçon C4) ; `assertVocabulaire`.
 5. **Une transaction** : `repo.transitionner('imports', id, { attendus: ['a_verifier'], patch: { status: 'enregistre', reponse_brute: null,
    finished_at }, puts: { recipes, recipe_versions, source_pages (kind 'recipe', position, printed_page), scan_sessions (recipe_ids, status
    'done') } })` ; une condition fausse (import déjà enregistré par un autre onglet) n'écrit rien et l'écran se redessine. Puis fiche, toast
@@ -410,3 +420,12 @@ uncertain } }` ; `REPONSE_BRUTE_MAX` ; possessifs dans les mots vides ; `...dete
   `appels` au départ du `fetch` ; accessibilité ; fiche du livre (bouton, pas de lien imbriqué) ; `#/add#imports` ; titre nul ; 16 000 points
   de code et 512 Kio ; relecture avant `saveBatch` ; `imports` dernier ; B ∥ G avec fusions séquentielles ; 499 non prouvé ; deux appareils ;
   R-UX-16 retiré ; `SHELL` ; hors ligne basculé après le rendu ; mutants ajoutés.
+**Tâche 3, ronde 1 (revue adverse, trois lentilles — rapport `task-3-report.md` § Ronde 1).** **T3-R1-a** `fabriquerExtraction(…, { remplacer })`
+porte le « non » de I-5 (§ 4.3.4) · **T3-R1-b** la création d'une ligne du journal est conditionnée (`absente` + index `recipe_id` ; § 3.6) et la ligne
+est lue avant le premier `putFile` · **T3-R1-c** Cc/Cf retirés des textes du modèle (recette et index), `BORNES_NOMBRES` (999 / 1 440 / 9 999 → `null`) ·
+**T3-R1-d** séparateurs = `\p{P}` et référence sans mot distinctif = discordance (§ 4.3.3) · **T3-R1-e** `printed_page` de la fiche sur la première page
+sans numéro seulement (§ 3.2) · **T3-R1-f** `RAISONS_ECHEC` sans `trop_lourd` (413 = `requete` + extra), `non_connecte` ratifié · **T3-R1-g**
+`extractIndexFromImages` rend `{ entries, uncertain }` (ce que le panneau d'index lit ; brief T6 amendé) · **T3-R1-h** `preparerPhotoLocale` : liste des
+images (`COVER_INPUT_MIME` + HEIC), un PDF est refusé par `type` · **T3-R1-i** `parseStepsBlock` ne normalise que CRLF · **T3-R1-j** `issuesPourImage`
+(repo) partagé avec `replacePage`, entrée `en.js` · refusé : rendre `{ texte, stopReason, modele }` par `complete` (le brief fixe `this.stopReason`) —
+remise à zéro des deux champs avant l'appel et test « deux appels sur la même instance » à la place.

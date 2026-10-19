@@ -12,8 +12,6 @@ import { providerFrom, extractIndexFromImages, pagePourEnvoi } from '../domain/l
 import { pageHeader, section, emptyState, select, field, carteConnexion, texteEchecAssistant, pdfFrame, libelleLivre, sessionAssistant } from './components.js';
 import { demarrerConnexion } from './settings.js';
 
-const { SMALL_IMAGE_BYTES } = repo; // une seule définition (repo.ajouterPages signale l'image très légère ; replacePage aussi)
-
 const INTENTIONS = ['index', 'recette'];
 // L'intention (spec § 10) voyage dans l'adresse, pas dans la base : consommée au premier rendu, puis retirée.
 // S9 : l'identifiant est encodé — il entre dans une adresse, et rien ne garantit qu'une fiche venue d'ailleurs
@@ -161,8 +159,7 @@ function sessionView(session, ctx, query = {}, { historique = { remplacer: rempl
     const sha256 = await sha256Hex(file);
     await repo.putFile(sha256, file, { original_filename: file.name });
     const doc = { id: repo.newId('doc'), edition_id: p.edition_id, source_type: 'photo', original_filename: file.name, blob_path: `files/${sha256}`, sha256, size: file.size, mime: file.type, scan_session_id: session.id, captured_at: repo.nowIso(), replaces_document_id: p.document_id };
-    const issues = file.size < SMALL_IMAGE_BYTES ? [t('Image très légère : possiblement floue ou trop petite')] : [];
-    await repo.saveBatch({ source_documents: [doc], source_pages: [{ ...p, document_id: doc.id, sha256, issues, replaced_at: repo.nowIso() }] });
+    await repo.saveBatch({ source_documents: [doc], source_pages: [{ ...p, document_id: doc.id, sha256, issues: repo.issuesPourImage(file.size), replaced_at: repo.nowIso() }] }); // une seule définition du signalement (repo.issuesPourImage)
     toast(t('Page remplacée')); refresh();
   }
   async function removePages(ids) {

@@ -206,18 +206,37 @@ export async function runPasserelleTests({ eq, ok }) {
       { const ctl = new AbortController(); ctl.abort(); let n = 0; let e = null;
         try { await L.extraireRecette(new L.PasserelleProvider({}, { session: SESSION, fetch: async () => { n += 1; return reponse(200, {}); } }), images, { signal: ctl.signal }); } catch (x) { e = x; }
         eq([e?.message, n], ['annule', 0], 'extraireRecette : un signal déjà levé → aucun POST, Error(annule)'); }
-      // Le signal est RELAYÉ au fetch (mutant « signal non relayé ») : abandonner pendant l'appel coupe le fetch et rend annule.
-      { const ctl = new AbortController(); let vuSignal = null;
-        const lent = (url, options) => new Promise((_, reject) => { vuSignal = options.signal; options.signal.addEventListener('abort', () => reject(new DOMException('abandon', 'AbortError')), { once: true }); });
-        const p = L.extraireRecette(new L.PasserelleProvider({}, { session: SESSION, fetch: lent }), images, { signal: ctl.signal });
-        await Promise.resolve(); ctl.abort();
-        let e = null; try { await p; } catch (x) { e = x; }
-        eq([e?.message, vuSignal instanceof AbortSignal, vuSignal?.aborted], ['annule', true, true], 'extraireRecette : « Annuler » pendant le vol → le signal du fetch est levé, Error(annule)'); }
       const texte = (t, extra = {}) => ({ model: 'claude-x', stop_reason: 'end_turn', content: [{ type: 'text', text: t }], ...extra });
       const avecCorps = (corpsRep) => new L.PasserelleProvider({}, { session: SESSION, fetch: async () => reponse(200, corpsRep) });
       const echec = async (corpsRep, fn = L.extraireRecette) => { try { await fn(avecCorps(corpsRep), images); return 'acceptée'; } catch (e) { return [e.name, e.raison ?? e.message]; } };
       const RECETTE_OK = '{"title":"x","ingredients":[{"source_text":"a"}],"steps":[{"text":"s"}]}';
+      // Le signal est RELAYÉ au fetch (mutant « signal non relayé ») : abandonner pendant l'appel coupe le fetch et rend annule. Ronde 1 : le fetch « lent »
+      // se résout DE LUI-MÊME en 50 ms par une recette valide — un signal non relayé donne alors un succès (≠ annule) tout de suite, plus un délai de 135 s.
+      { const ctl = new AbortController(); let vuSignal = null;
+        const lent = (url, options) => new Promise((resolve, reject) => { vuSignal = options.signal; setTimeout(() => resolve(reponse(200, texte(RECETTE_OK))), 50); options.signal?.addEventListener('abort', () => reject(new DOMException('abandon', 'AbortError')), { once: true }); });
+        const p = L.extraireRecette(new L.PasserelleProvider({}, { session: SESSION, fetch: lent }), images, { signal: ctl.signal });
+        await Promise.resolve(); ctl.abort();
+        let e = null; try { await p; } catch (x) { e = x; }
+        eq([e?.message, vuSignal instanceof AbortSignal, vuSignal?.aborted], ['annule', true, true], 'extraireRecette : « Annuler » pendant le vol → le signal du fetch est levé, Error(annule) (le fetch aurait répondu une recette valide 50 ms plus tard)'); }
+      // Ronde 1 : l'option maxTokens est transmise (le mutant qui envoie toujours MAX_TOKENS_EXTRACTION rougit).
+      { const corpsVus = []; await L.extraireRecette(new L.PasserelleProvider({}, { session: SESSION, fetch: async (u, o) => { corpsVus.push(JSON.parse(o.body).corps.max_tokens); return reponse(200, texte(RECETTE_OK)); } }), images, { maxTokens: 123 });
+        eq(corpsVus, [123], 'extraireRecette : { maxTokens: 123 } → max_tokens 123 dans le corps envoyé (6000 n’est que le défaut)'); }
+      // Ronde 1 : le MESSAGE d'une ErreurExtraction est sa raison (texteEchecAssistant lit e.message → « Code : coupe »), construite ou levée par extraireRecette.
+      { const { texteEchecAssistant } = await import('../src/ui/components.js');
+        eq(['coupe', 'illisible', 'hors_bornes', 'vide'].map((r) => { const e = new L.ErreurExtraction(r); return [e.name, e.message, e.raison, e instanceof Error]; }), [['ErreurExtraction', 'coupe', 'coupe', true], ['ErreurExtraction', 'illisible', 'illisible', true], ['ErreurExtraction', 'hors_bornes', 'hors_bornes', true], ['ErreurExtraction', 'vide', 'vide', true]], 'ErreurExtraction : message === raison pour les quatre raisons (contrat lu par texteEchecAssistant)');
+        eq([texteEchecAssistant(new L.ErreurExtraction('coupe')).includes('Code : coupe'), texteEchecAssistant(new L.ErreurExtraction('hors_bornes')).includes('Code : hors_bornes')], [true, true], 'texteEchecAssistant(ErreurExtraction) : « Code : coupe » / « Code : hors_bornes » tant que la tâche 4 n’a pas posé ses textes (§ 4.4)');
+        const levee = async (corpsRep) => { try { await L.extraireRecette(avecCorps(corpsRep), images); return 'acceptée'; } catch (e) { return [e.name, e.message, e.raison]; } };
+        eq([await levee(texte(RECETTE_OK, { stop_reason: 'max_tokens' })), await levee(texte('prose')), await levee(texte('{"title":"x","ingredients":[],"steps":[]}')), await levee(texte(JSON.stringify({ title: 'x'.repeat(201), ingredients: [{ source_text: 'a' }], steps: [] })))], [['ErreurExtraction', 'coupe', 'coupe'], ['ErreurExtraction', 'illisible', 'illisible'], ['ErreurExtraction', 'vide', 'vide'], ['ErreurExtraction', 'hors_bornes', 'hors_bornes']], 'extraireRecette : chaque refus levé porte message === raison'); }
       eq(await echec(texte(RECETTE_OK, { stop_reason: 'max_tokens' })), ['ErreurExtraction', 'coupe'], 'extraireRecette : stop_reason max_tokens → ErreurExtraction(coupe), même si le JSON est entier');
+      // Ronde 1 : stop_reason est une donnée hostile — bornée à 40 points de code, Cc/Cf retirés (le mutant qui la recopie telle quelle rougit).
+      { const long = await L.extraireRecette(avecCorps(texte(RECETTE_OK, { stop_reason: 'x'.repeat(100) + '\u202E\u0007' })), images);
+        const bidi = await L.extraireRecette(avecCorps(texte(RECETTE_OK, { stop_reason: '\u200Bend\u202E_turn\u0000' })), images);
+        eq([long.stopReason, bidi.stopReason, (await L.extraireRecette(avecCorps(texte(RECETTE_OK, { stop_reason: 7 })), images)).stopReason], ['x'.repeat(40), 'end_turn', null], 'extraireRecette : stopReason borné à 40 points de code, sans Cc/Cf, null s’il n’est pas une chaîne'); }
+      // Ronde 1 : this.stopReason et this.modele sont remis à zéro AVANT chaque appel — un appel qui échoue ne laisse rien du précédent sur l’instance.
+      { let n = 0; const p = new L.PasserelleProvider({}, { session: SESSION, fetch: async () => (n++ === 0 ? reponse(200, texte(RECETTE_OK)) : reponse(502, { erreur: 'serveur' })) });
+        const premier = await L.extraireRecette(p, images);
+        let e = null; try { await L.extraireRecette(p, images); } catch (x) { e = x; }
+        eq([premier.stopReason, premier.modele, e?.message, p.stopReason, p.modele], ['end_turn', 'claude-x', 'serveur', null, null], 'PasserelleProvider : après un appel réussi puis un échec sur la MÊME instance, stopReason et modele sont nuls (rien du premier appel ne survit)'); }
       eq(await echec(texte('{"title":"x","ingredients":[],"steps":[]}')), ['ErreurExtraction', 'vide'], 'extraireRecette : zéro ligne ET zéro étape → vide');
       eq([await echec(texte('pas du json')), await echec(texte('[1,2]')), await echec(texte('{"title": "ouvert"')), await echec({ model: 'claude-x', stop_reason: 'end_turn', content: [] })], [['ErreurExtraction', 'illisible'], ['ErreurExtraction', 'illisible'], ['ErreurExtraction', 'illisible'], ['ErreurExtraction', 'illisible']], 'extraireRecette : prose sans JSON, tableau, JSON tronqué ou réponse sans texte → illisible');
       eq(await echec(texte('{"title":"x","ingredients":[{"source_text":"  "}],"steps":[{"text":""}]}')), ['ErreurExtraction', 'vide'], 'extraireRecette : des lignes et des étapes blanches ne comptent pas (vide)');
@@ -243,6 +262,16 @@ export async function runPasserelleTests({ eq, ok }) {
       }
       eq([await echec(texte(JSON.stringify({ ...base, title: '😀'.repeat(200) }))), await echec(texte(JSON.stringify({ ...base, title: '😀'.repeat(201) })))], ['acceptée', ['ErreurExtraction', 'hors_bornes']], 'bornes : comptées en POINTS DE CODE (200 emoji = 400 unités UTF-16 passent, 201 non)');
       eq(await echec(texte(JSON.stringify({ ...base, title: ' ' + 'x'.repeat(200) + ' ' }))), 'acceptée', 'bornes : le titre est mesuré après trim');
+      // Ronde 1 : les caractères de format (Cf : RLO, largeur nulle, isolats bidi, BOM) et de contrôle (Cc, sauf le saut de ligne d'une étape) sont RETIRÉS des textes du
+      // modèle avant la mesure et le trim — comme `borner` pour toute sortie distante ; une tabulation vaut une espace, CRLF vaut LF.
+      { const sale = L.validateParsedRecipe({ title: 'Tarte\u202E aux\u200B pommes', ingredients: [{ source_text: '2 \u202Eoeufs\t!', uncertain: false }], steps: [{ text: 'Cuire\u2066 10 min\r\nPuis\u2028 servir\u0000' }], notes: 'n\uFEFFote\u2069', sub_recipes: [{ title: 'S\u200Dr', page_reference: 'p.\u200C 1' }], uncertain_fields: ['u\u202E'] });
+        eq([sale.title, sale.ingredients[0].source_text, sale.steps[0].text, sale.notes, sale.sub_recipes[0], sale.uncertain_fields], ['Tarte aux pommes', '2 oeufs !', 'Cuire 10 min\nPuis servir', 'note', { title: 'Sr', page_reference: 'p. 1' }, ['u']], 'validateParsedRecipe : U+202E, U+200B, U+2066, U+2069, U+FEFF, U+200C/D, U+0000 et U+2028 retirés de chaque texte ; tabulation → espace ; CRLF → LF ; le saut de ligne d’une étape est gardé');
+        eq([await echec(texte(JSON.stringify({ ...base, title: 'x'.repeat(200) + '\u200B'.repeat(50) }))), L.validateParsedRecipe({ ...base, title: '\u202E\u200B  ' }).title, L.validateParsedRecipe({ ...base, ingredients: [{ source_text: '\uFEFF' }], steps: [{ text: 'ok' }] }).ingredients], ['acceptée', null, []], 'validateParsedRecipe : la borne se mesure APRÈS le retrait (200 x + 50 U+200B passent) ; un texte fait de Cf seuls vaut null, une ligne faite de Cf est écartée'); }
+      // Ronde 1 : les nombres du modèle sont bornés aussi (BORNES_NOMBRES : portions ≤ 999, minutes ≤ 1 440, page ≤ 9 999) — au-delà, null (rien d'inventé), jamais 10^15 dans une fiche.
+      eq(L.BORNES_NOMBRES, { portions: 999, minutes: 1440, page: 9999 }, 'BORNES_NOMBRES : la table');
+      { const n = L.validateParsedRecipe({ ...base, servings: 1000, prep_minutes: 1441, cook_minutes: 1440, printed_page: 10000 });
+        const m = L.validateParsedRecipe({ ...base, servings: 999, prep_minutes: 2 ** 53, cook_minutes: 1e15, printed_page: 9999 });
+        eq([n.servings, n.prep_minutes, n.cook_minutes, n.printed_page, m.servings, m.prep_minutes, m.cook_minutes, m.printed_page], [null, null, 1440, null, 999, null, null, 9999], 'validateParsedRecipe : 1 000 portions, 1 441 min, p. 10 000, 2^53, 10^15 → null ; 999, 1 440 et 9 999 acceptés'); }
       // Typage champ par champ (validateParsedRecipe, exporté) : entiers finis ≥ 0 ou null ; booléens stricts ; language retiré ; formes hostiles écartées.
       const v = L.validateParsedRecipe({ ...base, servings: -1, prep_minutes: NaN, cook_minutes: '12', printed_page: 4.5, incomplete: 'oui', missing_page: 1, language: 'fr' });
       eq([v.servings, v.prep_minutes, v.cook_minutes, v.printed_page, v.incomplete, v.missing_page, 'language' in v], [null, null, null, null, false, false, false], 'validateParsedRecipe : -1, NaN, "12" et 4,5 → null ; "incomplete":"oui" et missing_page 1 → false ; plus de language');
@@ -274,6 +303,11 @@ export async function runPasserelleTests({ eq, ok }) {
         const r = await L.extraireIndex(pi, images);
         eq(r, { index: { entries: [{ title: 'Tarte', printed_page: 12, section: null, ingredients_mentioned: ['pomme'] }, { title: 'Soupe', printed_page: null, section: null, ingredients_mentioned: [] }], uncertain: ['x'] }, stopReason: 'end_turn', modele: 'claude-x', texteBrut: brutIndex }, 'extraireIndex : { index: { entries, uncertain }, stopReason, modele, texteBrut } — entrées typées, incertitudes chaînes seulement');
         eq(await L.extractIndexFromImages(pi, images), r.index, 'extractIndexFromImages(provider, images) : enveloppe compatible, { entries, uncertain } seuls');
+        // Ronde 1 : les entrées de l'index sont des données hostiles aussi (elles deviennent recipes.original_title par « Créer les références ») : titre ≤ 200 points de code
+        // sinon hors_bornes, Cc/Cf retirés, section chaîne ou null, ingredients_mentioned chaînes seulement, page entier borné.
+        { const typee = await L.extraireIndex(avecCorps(texte(JSON.stringify({ entries: [{ title: 'Tar\u202Ete', printed_page: 12.5, section: { a: 1 }, ingredients_mentioned: ['a', 3, null, 'b\u200B'] }, { title: 'Ok', printed_page: 100000, section: ' Desserts ' }, { title: '\u200B  ' }], uncertain: ['x\u202E', 4] }))), images);
+          eq(typee.index, { entries: [{ title: 'Tarte', printed_page: null, section: null, ingredients_mentioned: ['a', 'b'] }, { title: 'Ok', printed_page: null, section: 'Desserts', ingredients_mentioned: [] }], uncertain: ['x'] }, 'extraireIndex : entrées typées — Cf retirés du titre, page non entière ou > 9 999 → null, section non chaîne → null, mentions chaînes seulement, entrée au titre vide écartée');
+          eq([await echec(texte(JSON.stringify({ entries: [{ title: 'x'.repeat(201) }] })), L.extraireIndex), await echec(texte(JSON.stringify({ entries: [{ title: 'x'.repeat(200) }] })), L.extraireIndex)], [['ErreurExtraction', 'hors_bornes'], 'acceptée'], 'extraireIndex : un titre d’entrée au-delà de 200 points de code → hors_bornes ; à 200 → accepté'); }
         eq([await echec(texte(brutIndex, { stop_reason: 'max_tokens' }), L.extraireIndex), await echec(texte('pas du json'), L.extraireIndex), await echec(texte('{"x":1}'), L.extraireIndex)], [['ErreurExtraction', 'coupe'], ['ErreurExtraction', 'illisible'], ['ErreurExtraction', 'illisible']], 'extraireIndex : coupure → coupe ; prose ou JSON sans entries → illisible');
         { const ctl = new AbortController(); ctl.abort(); let n = 0; let e = null;
           try { await L.extraireIndex(new L.PasserelleProvider({}, { session: SESSION, fetch: async () => { n += 1; return reponse(200, {}); } }), images, { signal: ctl.signal }); } catch (x) { e = x; }
@@ -283,6 +317,7 @@ export async function runPasserelleTests({ eq, ok }) {
       eq([parseStepsBlock('a\nb\n\nc', { parParagraphe: true }).map((s) => s.text), parseStepsBlock('a\nb\n\nc').map((s) => s.text), parseStepsBlock('a\nb\n\nc', {}).map((s) => s.text)], [['a\nb', 'c'], ['a', 'b', 'c'], ['a', 'b', 'c']], 'parseStepsBlock : deux étapes par paragraphe, trois sans option (ou avec un sac vide)');
       eq(parseStepsBlock('1. Peler les pommes\r\nles couper.\r\n\r\n2. Cuire 10 min\n\n\n', { parParagraphe: true }).map((s) => [s.position, s.text, s.timers?.[0]?.seconds]), [[1, 'Peler les pommes\nles couper.', undefined], [2, 'Cuire 10 min', 600]], 'parseStepsBlock par paragraphe : numérotation retirée en tête de paragraphe, CRLF normalisé, paragraphes vides ignorés, minuteurs détectés sur le texte entier');
       eq(parseStepsBlock('1. a\r\n2. b').map((s) => s.text), ['a', 'b'], 'parseStepsBlock sans option : CRLF coupe toujours une étape par ligne (inchangé)');
+      eq([parseStepsBlock('a\rb').map((s) => s.text), parseStepsBlock('a\rb', { parParagraphe: true }).map((s) => s.text)], [['a\rb'], ['a\rb']], 'parseStepsBlock (ronde 1) : un CR SEUL n’est pas une fin de ligne, avec ou sans option — seul CRLF est normalisé (comme l’ancien \\r?\\n)');
     }
     // Échecs : la raison devient le message de l'Error ; le corps de la réponse n'y est pas
     for (const [s, corpsErr, message] of [[401, { erreur: 'non_connecte' }, 'non_connecte'], [403, { erreur: 'non_admis' }, 'non_admis'], [429, { erreur: 'quota', quota: 60 }, 'quota'], [502, { erreur: 'serveur', detail: 'CORPS-SENTINELLE' }, 'serveur']]) {

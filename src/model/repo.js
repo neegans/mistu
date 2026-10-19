@@ -1,6 +1,6 @@
 // Accès aux données : base unique, amorçage des références, réglages et journal d'activité.
-import { Database } from '../core/db.js';
-import { DB_NAME, DB_VERSION, STORES, SYNC_STORES, SECRET_SETTING_KEYS } from './schema.js';
+import { Database, TransitionRefusee } from '../core/db.js';
+import { DB_NAME, DB_VERSION, STORES, SYNC_STORES, SECRET_SETTING_KEYS, STATUTS_IMPORT, IMPORTS_TERMINES } from './schema.js';
 import { UNIT_DEFINITIONS, UNIT_CONVENTIONS, INGREDIENTS } from './seed.js';
 import { newId, nowIso } from '../core/ids.js';
 import { emit } from '../core/bus.js';
@@ -409,15 +409,40 @@ export async function getFiles(sha256s) {
 // file : R58), puis les lignes de séance (source_documents, source_pages, scan_sessions) en UN lot. Trois chemins :
 // - `import_id` : UN repo.transitionner sur la ligne du journal (attendus a_lancer | a_verifier | echec ; patch-FONCTION : les page_ids neufs
 //   s'ajoutent EN FIN de ceux LUS DANS LA TRANSACTION, jamais d'une copie périmée), les lignes de séance dans la même transaction. Un import
-//   terminé (enregistre, ignore) ou en vol refuse (TransitionRefusee) et RIEN de la séance n'est écrit — la ligne files posée avant reste (assumé).
+//   terminé (enregistre, ignore) ou en vol refuse (TransitionRefusee) et RIEN de la séance n'est écrit. Sans `session_id`, la séance est celle de
+//   la ligne (scan_session_id) ; une séance qui n'est pas la sienne refuse (TypeError) : journal et séance ne divergent jamais (ronde 1).
 // - `import: { id, kind, recipe_id, edition_id, device_id }` (première photo : la ligne n'existe pas encore, spec § 4.1 — une visite sans photo
-//   n'écrit rien) : un saveBatch qui écrit la ligne a_lancer (scan_session_id, page_ids) AVEC les lignes de séance.
+//   n'écrit rien) : un saveBatch CONDITIONNÉ (ronde 1, I-10 et I-2) qui écrit la ligne a_lancer (scan_session_id, page_ids) AVEC les lignes de
+//   séance, si et seulement si aucune ligne de cet id n'existe (jamais d'écrasement, quel que soit son statut) et qu'aucun import OUVERT ne porte
+//   déjà cette recipe_id (un seul import non terminé par recette).
 // - ni l'un ni l'autre : le saveBatch existant.
+// Vérification RAPIDE d'abord (ronde 1) : la ligne du journal est lue AVANT le premier putFile, et un import terminé, en vol, inconnu, déjà créé ou
+// doublé refuse tout de suite — sinon N blobs (jusqu'à 25 Mo chacun) resteraient orphelins dans `files` ; la condition en transaction reste le mur.
 // Rend { session, pages, docs, importId } ; startScanSession navigue et notifie, lui. Une image très légère garde son signalement (issues).
 export const SMALL_IMAGE_BYTES = 80 * 1024;
+// Le signalement d'une image très légère est une DONNÉE stockée dans `issues` (comportement antérieur à l'import ciblé) : UNE définition, lue
+// par ajouterPages et par replacePage (src/ui/import.js) ; son entrée en.js existe.
+export const issuesPourImage = (octets) => (octets < SMALL_IMAGE_BYTES ? [t('Image très légère : possiblement floue ou trop petite')] : []);
 const estPdf = (file) => file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
 const estEpub = (file) => file.type === 'application/epub+zip' || /\.epub$/i.test(file.name);
+const ATTENDUS_AJOUT = ['a_lancer', 'a_verifier', 'echec']; // les statuts qui acceptent des pages (spec § 3.6)
+const IMPORTS_OUVERTS = STATUTS_IMPORT.filter((s) => !IMPORTS_TERMINES.includes(s)); // I-2 : un seul import ouvert par recette
+const KINDS_IMPORT = ['recette', 'index'];
 export async function ajouterPages(files, { edition_id = null, session_id = null, import_id = null, import: nouvelImport = null } = {}) {
+  if (import_id && nouvelImport) throw new TypeError('ajouterPages : import_id et import ne se donnent pas ensemble');
+  if (nouvelImport && !KINDS_IMPORT.includes(nouvelImport.kind)) throw new TypeError('ajouterPages : kind d’import inconnu (' + String(nouvelImport.kind) + ')');
+  if (import_id) {
+    const lue = await db.get('imports', import_id);
+    if (!lue || !ATTENDUS_AJOUT.includes(lue.status)) throw new TransitionRefusee('imports', import_id, lue?.status);
+    if (session_id && lue.scan_session_id && lue.scan_session_id !== session_id) throw new TypeError('ajouterPages : l’import ' + import_id + ' pointe la séance ' + String(lue.scan_session_id) + ', pas ' + String(session_id));
+    session_id = session_id ?? lue.scan_session_id ?? null;
+  }
+  if (nouvelImport) {
+    const deja = await db.get('imports', nouvelImport.id);
+    if (deja) throw new TransitionRefusee('imports', nouvelImport.id, deja.status);
+    const ouvert = nouvelImport.recipe_id != null ? (await db.byIndex('imports', 'recipe_id', nouvelImport.recipe_id)).find((i) => IMPORTS_OUVERTS.includes(i?.status)) : null;
+    if (ouvert) throw new TransitionRefusee('imports', 'recipe_id=' + String(nouvelImport.recipe_id), ouvert.status);
+  }
   const existante = session_id ? await db.get('scan_sessions', session_id) : null;
   const session = existante
     ? { ...existante, page_ids: [...(existante.page_ids || [])], document_ids: [...(existante.document_ids || [])] }
@@ -432,8 +457,7 @@ export async function ajouterPages(files, { edition_id = null, session_id = null
     docs.push(doc);
     session.document_ids.push(doc.id);
     if (!pdf && !epub) {
-      const issues = file.size < SMALL_IMAGE_BYTES ? [t('Image très légère : possiblement floue ou trop petite')] : [];
-      const page = { id: newId('pg'), document_id: doc.id, edition_id: doc.edition_id, sha256, printed_page: null, file_position: null, locator: null, position: ++position, issues, kind: null };
+      const page = { id: newId('pg'), document_id: doc.id, edition_id: doc.edition_id, sha256, printed_page: null, file_position: null, locator: null, position: ++position, issues: issuesPourImage(file.size), kind: null };
       pages.push(page);
       session.page_ids.push(page.id);
     }
@@ -442,7 +466,12 @@ export async function ajouterPages(files, { edition_id = null, session_id = null
   const lignes = { source_documents: docs, source_pages: pages, scan_sessions: [session] };
   const neufs = pages.map((p) => p.id);
   if (import_id) {
-    await transitionner('imports', import_id, { attendus: ['a_lancer', 'a_verifier', 'echec'], patch: (c) => ({ page_ids: [...(c.page_ids || []), ...neufs] }), puts: lignes });
+    // Le mur (dans la transaction) : la ligne relue porte un statut attendu ET pointe cette séance (ou aucune : elle la reçoit) ; page_ids EN FIN des siens.
+    const patch = (c) => {
+      if (c.scan_session_id && c.scan_session_id !== session.id) throw new TypeError('ajouterPages : l’import ' + import_id + ' pointe la séance ' + String(c.scan_session_id) + ', pas ' + session.id);
+      return { page_ids: [...(c.page_ids || []), ...neufs], scan_session_id: c.scan_session_id ?? session.id };
+    };
+    await transitionner('imports', import_id, { attendus: ATTENDUS_AJOUT, patch, puts: lignes });
     return { session, pages, docs, importId: import_id };
   }
   if (nouvelImport) {
@@ -452,7 +481,9 @@ export async function ajouterPages(files, { edition_id = null, session_id = null
       appels: 0, model: null, duree_ms: null, device_id: nouvelImport.device_id ?? deviceId(), document_id_vol: null, battement_at: null, started_at: null, finished_at: null,
     };
     assertVocabulaire(ligne, 'imports'); // D-12 : la ligne du journal naît ici, dans son vocabulaire fermé
-    await saveBatch({ ...lignes, imports: [ligne] });
+    // Le mur (dans la transaction, I-10 et I-2) : la ligne n'existe pas, et aucun import ouvert ne porte cette recette (sans recipe_id — un index —, I-2 ne joue pas).
+    const conditions = { imports: [{ key: ligne.id, absente: true }, ...(ligne.recipe_id != null ? [{ index: 'recipe_id', valeur: ligne.recipe_id, exclus: IMPORTS_OUVERTS }] : [])] };
+    await saveBatch({ ...lignes, imports: [ligne] }, { conditions });
     return { session, pages, docs, importId: ligne.id };
   }
   await saveBatch(lignes);

@@ -41,7 +41,7 @@ export class PasserelleProvider extends LLMProvider {
           : { type: 'image', source: { type: 'base64', media_type: p.mime, data: p.base64 } }),
       })),
     };
-    this.stopReason = null;
+    this.stopReason = null; this.modele = null; // ronde 1 : un appel qui échoue ne laisse rien du précédent sur l'instance (contexteDe les relit)
     const r = await appelerAssistant('extraction', corps, { fetch: this.fetch, session: this.session, tentativeMs: LIMITES_PASSERELLE.tentativeMs, signal });
     // Le message de l'erreur est la RAISON d'issue (le classement des écrans, echecDomaine : un 429 non écrit par la passerelle est
     // trop_de_demandes, jamais « quota »), jamais le corps de la réponse ; ses extras (le nombre du quota, trop_lourd) sont portés par l'Error.
@@ -62,6 +62,9 @@ export function providerFrom(_settings, { session = null } = {}) {
 // --- Extraction : bornes et raisons (spec import-cible § 3.4, I-1). La sortie du modèle est une donnée hostile : validée champ par champ,
 // bornée en POINTS DE CODE, et tout dépassement REFUSE le résultat (hors_bornes) — jamais de troncature silencieuse.
 export const BORNES_EXTRACTION = Object.freeze({ titre: 200, ligne: 300, etape: 2000, notes: 2000, lignes: 80, etapes: 60, sousRecettes: 20, sousRecetteTitre: 200, sousRecetteRenvoi: 40, champsIncertains: 40, champIncertain: 200 });
+// Les nombres du modèle (ronde 1) : au-delà, la valeur vaut null (rien d'inventé : « p. 9007199254740991 » ou une mise à l'échelle par 10^15 ne sont
+// pas des lectures). 24 h comme detectTimers (R-CRE-8) ; 999 portions ; 9 999 pages. Un refus (hors_bornes) jetterait une recette lisible pour un nombre.
+export const BORNES_NOMBRES = Object.freeze({ portions: 999, minutes: 1440, page: 9999 });
 // D-5 : 6 000 jetons de sortie (était 4 000) ; une sortie plus longue frôlerait l'abandon serveur à 120 s — la preuve § 10 mesure.
 export const MAX_TOKENS_EXTRACTION = 6000;
 // La réponse brute gardée dans le journal (diagnostic, jamais rendue) : coupée à 16 000 points de code (sous la borne de 512 Kio de sync_push).
@@ -83,6 +86,21 @@ export class ErreurExtraction extends Error {
 
 const longueur = (s) => Array.from(s).length;
 const tronquer = (s, max) => (longueur(s) > max ? Array.from(s).slice(0, max).join('') : s);
+
+// Un texte du modèle (ronde 1) : CRLF → LF, tabulation → espace, puis les caractères de CONTRÔLE (Cc) et de FORMAT (Cf : RLO U+202E, largeur nulle
+// U+200B-D, isolats bidi U+2066-9, BOM U+FEFF…) et les séparateurs U+2028/2029 sont RETIRÉS — sauf le saut de ligne, gardé pour une étape sur
+// plusieurs lignes —, comme `borner` (core/bornes.js) pour toute sortie distante ; puis trim, puis la borne en points de code : dépasser REFUSE
+// (hors_bornes), jamais de troncature silencieuse. Pas une chaîne → null ; blanc (ou fait de Cf seuls) → null.
+const INVISIBLES = /(?!\n)[\p{Cc}\p{Cf}\u{2028}\u{2029}]/gu;
+const horsBornes = () => { throw new ErreurExtraction('hors_bornes'); };
+const texteBorne = (v, max) => {
+  if (typeof v !== 'string') return null;
+  const s = v.replace(/\r\n/g, '\n').replace(/\t/g, ' ').replace(INVISIBLES, '').trim();
+  if (longueur(s) > max) horsBornes();
+  return s || null;
+};
+// Un entier fini de 0 à `max` ; tout le reste (négatif, NaN, chaîne, décimal, au-delà) vaut null.
+const entierBorne = (v, max) => (Number.isInteger(v) && v >= 0 && v <= max ? v : null);
 
 // --- Recipe Parser : pages → JSON strict. Le résultat est TOUJOURS marqué « à vérifier » ; rien n'est inventé. `language` n'est plus demandé
 // (jamais utilisé) ; `incomplete` et `missing_page` sont demandés et montrés, jamais comblés (spec import-cible § 3.4, I-1).
@@ -135,9 +153,15 @@ export async function extraireIndex(provider, images, { signal } = {}) {
   let data;
   try { data = parseJsonLoose(raw); } catch { throw new ErreurExtraction('illisible', contexte); }
   if (!Array.isArray(data?.entries)) throw new ErreurExtraction('illisible', contexte);
-  const entries = data.entries.filter((e) => e && typeof e.title === 'string').map((e) => ({ title: e.title.trim(), printed_page: Number.isFinite(e.printed_page) ? e.printed_page : null, section: e.section || null, ingredients_mentioned: Array.isArray(e.ingredients_mentioned) ? e.ingredients_mentioned : [] }));
-  const uncertain = Array.isArray(data.uncertain) ? data.uncertain.filter((u) => typeof u === 'string') : [];
-  return { index: { entries, uncertain }, ...contexte };
+  // Ronde 1 : les entrées deviennent des fiches (« Créer les références ») — typées et bornées comme la recette (titre ≤ 200 points de code sinon
+  // hors_bornes, Cc/Cf retirés, page entier ≤ 9 999, section chaîne ou null, mentions chaînes seulement) ; une entrée au titre vide est écartée.
+  try {
+    const entries = data.entries.filter((e) => e && typeof e.title === 'string')
+      .map((e) => ({ title: texteBorne(e.title, BORNES_EXTRACTION.titre), printed_page: entierBorne(e.printed_page, BORNES_NOMBRES.page), section: texteBorne(e.section, BORNES_EXTRACTION.titre), ingredients_mentioned: (Array.isArray(e.ingredients_mentioned) ? e.ingredients_mentioned : []).map((m) => texteBorne(m, BORNES_EXTRACTION.ligne)).filter(Boolean) }))
+      .filter((e) => e.title);
+    const uncertain = (Array.isArray(data.uncertain) ? data.uncertain : []).map((u) => texteBorne(u, BORNES_EXTRACTION.champIncertain)).filter(Boolean);
+    return { index: { entries, uncertain }, ...contexte };
+  } catch (e) { if (e instanceof ErreurExtraction) Object.assign(e, contexte); throw e; }
 }
 
 // Enveloppe compatible (m5) : { entries, uncertain } seuls (ce que le panneau d'index lit aujourd'hui).
@@ -154,16 +178,15 @@ export function parseJsonLoose(text) {
 }
 
 // Validation durcie (spec import-cible § 3.4) : titre ≤ 200 points de code, ligne ≤ 300, étape ≤ 2 000, notes ≤ 2 000, ≤ 80 lignes, ≤ 60 étapes,
-// sub_recipes ≤ 20 × (titre ≤ 200, renvoi ≤ 40), uncertain_fields ≤ 40 × 200 ; entiers finis ≥ 0 (sinon null) pour portions, durées, page ;
+// sub_recipes ≤ 20 × (titre ≤ 200, renvoi ≤ 40), uncertain_fields ≤ 40 × 200 ; Cc/Cf retirés de chaque texte (ronde 1) ; entiers finis de 0 à
+// BORNES_NOMBRES (sinon null) pour portions, durées, page ;
 // `incomplete` et `missing_page` vrais seulement s'ils valent `true` ; textes trim (un saut de ligne INTERNE d'une étape est gardé) ; une entrée
 // mal formée ou blanche est écartée. Tout dépassement → ErreurExtraction(hors_bornes) ; pas un objet → illisible ; zéro ligne ET zéro étape → vide.
 export function validateParsedRecipe(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new ErreurExtraction('illisible');
-  const B = BORNES_EXTRACTION;
-  const horsBornes = () => { throw new ErreurExtraction('hors_bornes'); };
-  const texte = (v, max) => { if (typeof v !== 'string') return null; const s = v.trim(); if (longueur(s) > max) horsBornes(); return s || null; };
+  const B = BORNES_EXTRACTION, N = BORNES_NOMBRES;
+  const texte = texteBorne; // Cc/Cf retirés, trim, borne en points de code (ronde 1)
   const liste = (v) => (Array.isArray(v) ? v : []);
-  const entier = (v) => (Number.isInteger(v) && v >= 0 ? v : null);
   const ingredients = liste(data.ingredients).filter((i) => i && typeof i.source_text === 'string').map((i) => ({ source_text: texte(i.source_text, B.ligne), uncertain: !!i.uncertain })).filter((i) => i.source_text);
   if (ingredients.length > B.lignes) horsBornes();
   const steps = liste(data.steps).filter((s) => s && typeof s.text === 'string').map((s) => ({ text: texte(s.text, B.etape) })).filter((s) => s.text);
@@ -174,9 +197,9 @@ export function validateParsedRecipe(data) {
   if (uncertain_fields.length > B.champsIncertains) horsBornes();
   const recette = {
     title: texte(data.title, B.titre),
-    servings: entier(data.servings), prep_minutes: entier(data.prep_minutes), cook_minutes: entier(data.cook_minutes),
+    servings: entierBorne(data.servings, N.portions), prep_minutes: entierBorne(data.prep_minutes, N.minutes), cook_minutes: entierBorne(data.cook_minutes, N.minutes),
     ingredients, steps,
-    printed_page: entier(data.printed_page),
+    printed_page: entierBorne(data.printed_page, N.page),
     sub_recipes, uncertain_fields,
     notes: texte(data.notes, B.notes),
     incomplete: data.incomplete === true, missing_page: data.missing_page === true,
