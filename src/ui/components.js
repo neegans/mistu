@@ -66,6 +66,38 @@ export function timeText(version) {
   return parts.join(' · ');
 }
 
+// --- Lecture par l'assistant (lot import ciblé, spec § 4.3.6-4.3.7, D-3) ------------------------------------------------------------
+// banniereLecture(version, ligne = null) : PURE. Ce que la fiche dit d'une version lue par l'assistant — { date, incertaines, missing_page,
+// incomplete, incertain } — ou null quand la version ne vient pas d'un import (provenance.import_id absent : saisie à la main, extraction
+// d'avant le lot). La date est celle de la LECTURE : `provenance.lu_le` quand une correction l'a héritée, sinon created_at (l'extraction
+// elle-même) ; une valeur qui n'est pas une chaîne vaut null (rien d'inventé). `incertaines` ne compte que les lignes uncertain === true.
+// `incertain` vient de resultat.uncertain_fields de la ligne du journal (pointeur souple : null quand la ligne est absente, ou n'est pas
+// celle de cet import) — une DONNÉE HOSTILE (reçue, restaurée) : chaînes seulement, Cc/Cf retirés, espaces repliées, jointes par « ; »,
+// bornée à INCERTAIN_MAX points de code (coupée avec « … », total ≤ INCERTAIN_MAX), null quand il ne reste rien.
+export const INCERTAIN_MAX = 300;
+const CONTROLES_INCERTAIN = /[\p{Cc}\p{Cf}]/gu;
+export function banniereLecture(version, ligne = null) {
+  const p = version?.provenance;
+  if (!p || typeof p.import_id !== 'string' || !p.import_id) return null;
+  const date = typeof p.lu_le === 'string' && p.lu_le ? p.lu_le : (typeof version.created_at === 'string' && version.created_at ? version.created_at : null);
+  const incertaines = (Array.isArray(version.ingredients) ? version.ingredients : []).filter((l) => l?.uncertain === true).length;
+  let incertain = null;
+  const champs = ligne && ligne.id === p.import_id && ligne.resultat && typeof ligne.resultat === 'object' ? ligne.resultat.uncertain_fields : null;
+  if (Array.isArray(champs)) {
+    const texte = champs.filter((c) => typeof c === 'string').map((c) => c.replace(CONTROLES_INCERTAIN, '').replace(/\s+/g, ' ').trim()).filter(Boolean).join(' ; ');
+    const points = Array.from(texte);
+    incertain = points.length === 0 ? null : points.length <= INCERTAIN_MAX ? texte : points.slice(0, INCERTAIN_MAX - 1).join('') + '…';
+  }
+  return { date, incertaines, missing_page: p.missing_page === true, incomplete: p.incomplete === true, incertain };
+}
+
+// estExtractionNonRelue(version) : PURE. D-3 : le mode cuisine et les courses disent « Lue par l'assistant, non relue » tant que la version est
+// une extraction de l'assistant (kind extraction, generated_by ai) dont les lignes restent à vérifier ; une correction, une saisie à la main,
+// une adaptation ou une version vérifiée ne le sont pas.
+export function estExtractionNonRelue(version) {
+  return !!version && version.kind === 'extraction' && version.provenance?.generated_by === 'ai' && version.verification_state === 'to_verify';
+}
+
 export function provenanceText(recipe, book, edition) {
   // C-2 : une fiche créée avec l'assistant le dit EN TÊTE — ni son source_label (une valeur stockée n'est pas une preuve), ni un
   // livre, ni un site ne prennent sa place. Le texte vient de etiquetteCreationIA (fiche seule).
@@ -204,7 +236,9 @@ export function ingredientLineEl(ri, ctx, ingredientsById) {
       el('span', null, name, ri.preparation ? el('span', { class: 'muted' }, `, ${ri.preparation}`) : null, ri.optional ? el('span', { class: 'muted' }, ` (${t('facultatif')})`) : null,
         ing && !verifiee ? el('span', { class: 'muted' }, ` (${t('identité proposée')} : ${libelle} ?)`) : null),
       translated ? el('span', { class: 'badge' }, t('Traduction')) : null,
-      !verifiee ? el('span', { class: 'chip warn', title: t('Ligne à vérifier') }, t('À vérifier')) : null),
+      !verifiee ? el('span', { class: 'chip warn', title: t('Ligne à vérifier') }, t('À vérifier')) : null,
+      // Import ciblé (spec § 4.3.6) : l'incertitude dite par le modèle sur CETTE ligne — uncertain === true seulement, jamais une autre forme reçue.
+      ri.uncertain === true ? el('span', { class: 'chip warn', title: t('Ligne incertaine selon l’assistant') }, t('incertain')) : null),
     ri.source_text && (ri.source_text !== `${ri.quantity?.raw || ''} ${ri.unit_text || ''} ${ri.name_text || ''}`.replace(/\s+/g, ' ').trim()) && ctx.showSource
       ? el('div', { class: 'src-text' }, `${t('Texte source')} : ${ri.source_text}`) : null);
 }

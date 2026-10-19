@@ -8,7 +8,7 @@ import { scaleVersion } from '../domain/scaling.js';
 import { normalizeText } from '../domain/units.js';
 import { createTimerLaunch, shortcutUrl, siriPhrase, describeDuration, isAppleTouchDevice, TIMER_STATE_HELP } from '../domain/timers.js';
 import { label } from '../core/i18n.js';
-import { qtyEl, section, field, etiquetteIA } from './components.js';
+import { qtyEl, section, field, etiquetteIA, estExtractionNonRelue } from './components.js';
 import { estCreationIA, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
 import { deviceId } from './import.js';
 
@@ -41,6 +41,11 @@ export async function renderCook(params, query, ctx) {
   if (lignees.length) root.append(el('div', { class: 'stack', style: { marginBottom: '.6rem' }, dataset: { role: 'cuisine-ia' } },
     el('div', { class: 'row' }, ...lignees.map(({ it, etiquette }) => (items.length > 1 ? el('span', null, `${it.recipe.display_title || it.recipe.original_title} · `, etiquette) : etiquette))),
     items.some((it) => estCreationIA(it.version)) ? el('div', { class: 'status warn' }, t(AVERTISSEMENT_CREATION_IA)) : null));
+  // D-3 (import ciblé) : tant qu'une version est une extraction de l'assistant non relue, le mode cuisine le dit en tête (les quantités et les
+  // étapes viennent d'une lecture à vérifier) ; dans un repas, la recette concernée est nommée.
+  const nonRelues = items.filter((it) => estExtractionNonRelue(it.version));
+  if (nonRelues.length) root.append(el('div', { class: 'status warn', style: { marginBottom: '.6rem' }, dataset: { role: 'bandeau-non-relue' } },
+    ...nonRelues.map((it, i) => el('span', null, `${i ? ' · ' : ''}${items.length > 1 ? `${it.recipe.display_title || it.recipe.original_title} · ` : ''}${t('Lue par l’assistant, non relue')}`))));
 
   // Avant de commencer : attentes longues ou préparations préalables
   const warnings = [];
@@ -95,7 +100,7 @@ export async function renderCook(params, query, ctx) {
     right.append(el('div', { class: 'progress' }, el('div', { style: { width: steps.length ? `${Math.round(progress.done_step_ids.filter((id) => steps.some((s) => s.id === id)).length / steps.length * 100)}%` : '0%' } })));
     if (!step) right.append(el('div', { class: 'step-big' }, t('Aucune étape numérisée pour cette version.')));
     else {
-      right.append(el('div', { class: 'step-big' }, el('div', { class: 'muted', style: { fontSize: '.9rem', marginBottom: '.4rem' } }, `${t('Étape')} ${idx + 1} / ${steps.length}`), step.text,
+      right.append(el('div', { class: 'step-big' }, el('div', { class: 'muted', style: { fontSize: '.9rem', marginBottom: '.4rem' } }, `${t('Étape')} ${idx + 1} / ${steps.length}`), el('div', { style: { whiteSpace: 'pre-line' }, dataset: { role: 'texte-etape' } }, step.text), // m10 : étape entière, sauts de ligne gardés
         recalled.length ? el('ul', { class: 'ingredients list plain', style: { fontSize: '1rem', marginTop: '.8rem' } }, ...recalled) : null));
       for (const tm of step.timers || []) right.append(timerCard(tm, it, step));
     }

@@ -4,13 +4,14 @@ import { el, toast, chooseDialog, promptDialog, confirmDialog, formatDate, downl
 import { t, label } from '../core/i18n.js';
 import { navigate, buildQuery, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
-import { displayUrl } from '../sync/mime.js';
+import { displayUrl, safeDisplayType } from '../sync/mime.js';
+import { urlDeBlob } from '../core/blob-urls.js';
 import { currentVersion } from '../domain/search.js';
 import { scaleVersion } from '../domain/scaling.js';
 import { assessVersion } from '../domain/diet.js';
 import { toJsonLd, toPaprikaYaml } from '../domain/exporters.js';
 import { DIET_TAGS } from '../model/schema.js';
-import { pageHeader, section, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard } from './components.js';
+import { pageHeader, section, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture } from './components.js';
 import { estCreationIA, etiquetteCreationIA, lireCreation, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
 import { addToMealFlow } from './meals.js';
 import { deviceId } from './import.js';
@@ -56,7 +57,12 @@ export async function renderRecipe(params, query, ctx) {
       el('p', null, t('Une autre version a été créée ailleurs — les deux versions sont conservées.')),
       el('a', { class: 'btn', href: '#/settings' }, t('Trancher dans Réglages'))));
   }
-  root.append(el('div', { class: 'row', style: { marginBottom: '.8rem' } }, availabilityBadge(recipe), versionBadge(version, recipe), recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, capitaliser(c)))));
+  // Import ciblé (spec § 4.3.6-4.3.7) : ce que l'assistant a lu — l'état de vérification de la VERSION AFFICHÉE, le bandeau de lecture (daté de
+  // la lecture, « Incertain : … » lu dans la ligne du journal par import_id, pointeur souple) et la photo du plat. `lecture` est null hors import.
+  const lecture = banniereLecture(version, (ctx.imports || []).find((i) => i?.id === version?.provenance?.import_id) || null);
+  root.append(el('div', { class: 'row', style: { marginBottom: '.8rem' } }, availabilityBadge(recipe), versionBadge(version, recipe), lecture ? etatVerification(version) : null, recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, capitaliser(c)))));
+  if (lecture) root.append(bandeauLecture(lecture));
+  root.append(await photoDuPlat(recipe));
 
   if (!version) { root.append(referenceOnly()); return root; }
 
@@ -170,7 +176,7 @@ export async function renderRecipe(params, query, ctx) {
     const steps = el('ol', { class: 'list steps' });
     (version.steps || []).forEach((s, i) => {
       const li = el('li', null, el('span', { class: 'step-num' }, String(i + 1)), el('div', { style: { flex: 1 } },
-        el('div', null, s.text),
+        el('div', { style: { whiteSpace: 'pre-line' }, dataset: { role: 'texte-etape' } }, s.text), // m10 : une étape lue entière garde ses sauts de ligne
         translation?.translated_content?.steps?.[i] ? el('div', { class: 'muted', style: { fontSize: '.9rem' } }, translation.translated_content.steps[i]) : null,
         ...(s.timers || []).slice(0, 2).map((tm) => timerBlock(tm.seconds, { compact: true, onRequest: (channel) => repo.save('timer_launches', createTimerLaunch({ recipe_version_id: version.id, step_id: s.id, device_id: deviceId(), duration_seconds: tm.seconds, channel })) }))));
       steps.append(li);
@@ -258,6 +264,38 @@ export function blocSignet(recipe) {
     lien.ok
       ? el('div', { class: 'row' }, el('a', { class: 'btn primary', href: lien.href, target: '_blank', rel: 'noopener noreferrer' }, t('Ouvrir le lien')), el('span', { class: 'muted' }, lien.hote))
       : el('p', { class: 'muted' }, t('Adresse non reconnue : '), adresseInerte(recipe.source_url)));
+}
+
+// État de vérification de la VERSION AFFICHÉE (spec § 4.3.6 ; I3 de la revue : jamais celui de la fiche) : « Vérifiée », ou le nombre de lignes à vérifier.
+function etatVerification(version) {
+  if (version?.verification_state === 'verified') return el('span', { class: 'chip ok', dataset: { role: 'etat-verification' } }, t('Vérifiée'));
+  const n = (version?.ingredients || []).filter((l) => l?.verification_state !== 'verified').length;
+  return el('span', { class: 'chip warn', dataset: { role: 'etat-verification' } }, n === 0 ? t('À vérifier') : n === 1 ? t('1 ligne à vérifier') : t('{n} lignes à vérifier', { n }));
+}
+
+// Bandeau « Lue par l'assistant le {d} · … » : les parties présentes seulement, jointes par « · » ; « Incertain : … » (texte du modèle, borné par
+// banniereLecture) dessous, en nœud texte. `.status` est en inline-flex : posé en colonne pour ses deux lignes.
+function bandeauLecture(lecture) {
+  const parts = [t('Lue par l’assistant le {d}', { d: formatDate(lecture.date) })];
+  if (lecture.incertaines > 0) parts.push(t('{n} ligne(s) incertaine(s)', { n: lecture.incertaines }));
+  if (lecture.missing_page) parts.push(t('page possiblement manquante'));
+  if (lecture.incomplete) parts.push(t('lecture incomplète'));
+  return el('div', { class: 'status warn', dataset: { role: 'bandeau-lecture' }, style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '.2rem', marginBottom: '.8rem' } },
+    el('div', { dataset: { role: 'ligne-lecture' } }, parts.join(' · ')),
+    lecture.incertain ? el('div', { dataset: { role: 'incertain-lecture' }, style: { fontSize: '.9rem' } }, t('Incertain : {t}', { t: lecture.incertain })) : null);
+}
+
+// Photo du plat (spec D-4, § 4.3.6) : rendue seulement quand files a les octets — un pointeur sans octets (ligne reçue avant L4) ne rend rien, pas
+// même un cadre ; type d'affichage par la liste blanche (S3), URL blob: suivie (révoquée au changement de route). Rend null sinon (append l'ignore).
+async function photoDuPlat(recipe) {
+  if (typeof recipe?.photo_sha256 !== 'string' || !recipe.photo_sha256) return null;
+  let fichier = null;
+  try { fichier = await repo.getFile(recipe.photo_sha256); } catch { fichier = null; }
+  const type = safeDisplayType(fichier?.mime);
+  if (!(fichier?.blob instanceof Blob) || !type || !type.startsWith('image/')) return null;
+  const blob = fichier.blob.type === type ? fichier.blob : new Blob([fichier.blob], { type });
+  return el('figure', { class: 'photo-plat', dataset: { role: 'photo-plat' }, style: { margin: '0 0 .8rem' } },
+    el('img', { alt: t('Photo du plat'), src: urlDeBlob(blob), loading: 'lazy', style: { display: 'block', width: '320px', maxWidth: '100%', borderRadius: 'var(--radius)' } }));
 }
 
 function slug(s) { return (s || 'recette').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60); }

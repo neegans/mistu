@@ -3,7 +3,7 @@ import { el, toast } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import * as repo from '../model/repo.js';
 import { buildShoppingList, shoppingListToText } from '../domain/grocery.js';
-import { pageHeader, section, emptyState } from './components.js';
+import { pageHeader, section, emptyState, estExtractionNonRelue } from './components.js';
 
 export async function renderShoppingList(params, query, ctx) {
   const list = ctx.shopping_lists.find((l) => l.id === params.id);
@@ -16,6 +16,8 @@ export async function renderShoppingList(params, query, ctx) {
     navigator.share ? el('button', { class: 'btn', onClick: () => navigator.share({ title: list.title, text: shoppingListToText(rows) }).catch(() => {}) }, t('Partager')) : null,
   ] }));
   root.append(el('p', { class: 'muted' }, `${items.map((it) => `${it.title}${it.servings ? ` (${it.servings} ${t('portions')})` : ''}`).join(' · ')}`));
+  // D-3 (import ciblé) : une version lue par l'assistant et non relue le dit au-dessus de la liste — ses quantités viennent d'une lecture à vérifier.
+  if (items.some((it) => estExtractionNonRelue(it.version))) root.append(el('div', { class: 'status warn', style: { marginBottom: '.6rem' }, dataset: { role: 'bandeau-non-relue' } }, t('Lue par l’assistant, non relue')));
   if (!rows.length) { root.append(emptyState('🛒', t('Aucun ingrédient structuré dans ces recettes.'))); return root; }
   const ul = el('ul', { class: 'list' });
   for (const r of rows) {

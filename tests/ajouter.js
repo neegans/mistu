@@ -8,11 +8,17 @@ export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', 
 // pas seulement les lignes ajoutées : une ligne réécrite pour une autre raison peut porter une chaîne déjà sur main —
 // book.js:'Cuisines', recipe-edit.js:'Cuisines / régions' et import.js:'— Aucun livre (à associer plus tard) —'
 // existaient déjà mot pour mot sur main, donc ÉCARTÉES d'ici malgré une ligne « + » dans le diff). Lot A, tâche 4 : les entrées de l'import ciblé
-// sur la fiche du livre (« Importer ») et la fiche recette (« Importer cette recette », « Relire les pages »).
+// sur la fiche du livre (« Importer ») et la fiche recette (« Importer cette recette », « Relire les pages »). Lot A, tâche 5 : le bandeau de
+// lecture et l'état de la version affichée (recipe.js), la puce « incertain » (components.js), le bandeau D-3 (cook.js, grocery.js), l'aide
+// « une étape par paragraphe » (recipe-edit.js).
 export const CHAINES_NEUVES_AILLEURS = {
   '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', '+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer'],
-  '../src/ui/recipe.js': ['Lien web gardé.', 'L’app n’a pas lu la page : ouvre-la pour cuisiner.', 'Ouvrir le lien', 'Adresse non reconnue : ', 'Importer cette recette', 'Relire les pages'],
-  '../src/ui/components.js': ['Lien web', 'Adresse non reconnue'],
+  '../src/ui/recipe.js': ['Lien web gardé.', 'L’app n’a pas lu la page : ouvre-la pour cuisiner.', 'Ouvrir le lien', 'Adresse non reconnue : ', 'Importer cette recette', 'Relire les pages',
+    'Lue par l’assistant le {d}', '{n} ligne(s) incertaine(s)', 'page possiblement manquante', 'lecture incomplète', 'Incertain : {t}', 'Vérifiée', 'À vérifier', '1 ligne à vérifier', '{n} lignes à vérifier', 'Photo du plat'],
+  '../src/ui/components.js': ['Lien web', 'Adresse non reconnue', 'incertain', 'Ligne incertaine selon l’assistant'],
+  '../src/ui/cook.js': ['Lue par l’assistant, non relue'],
+  '../src/ui/grocery.js': ['Lue par l’assistant, non relue'],
+  '../src/ui/recipe-edit.js': ['Une étape par paragraphe (ligne vide entre deux étapes).', 'Une étape par ligne ou par paragraphe.'],
 };
 
 export async function runAjouterTests({ eq, ok }) {

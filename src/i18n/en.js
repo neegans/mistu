@@ -435,4 +435,17 @@ export const EN = {
   "Remplacer par cette lecture ?": "Replace with this reading?",
   "Une version écrite à la main existe. « Garder ma version » ajoute la lecture sans la mettre en avant ; les pages et la photo sont liées quand même.": "A hand-written version exists. “Keep my version” adds the reading without putting it forward; the pages and the photo are linked anyway.",
   "Garder ma version": "Keep my version",
+  // Import ciblé, tâche 5 (spec § 4.3.6, § 4.3.7, D-3) : fiche, mode cuisine, courses et « Corriger ».
+  "Lue par l’assistant le {d}": "Read by the assistant on {d}",
+  "{n} ligne(s) incertaine(s)": "{n} uncertain line(s)",
+  "page possiblement manquante": "page possibly missing",
+  "lecture incomplète": "incomplete reading",
+  "Incertain : {t}": "Uncertain: {t}",
+  "incertain": "uncertain",
+  "Ligne incertaine selon l’assistant": "Line uncertain according to the assistant",
+  "1 ligne à vérifier": "1 line to check",
+  "{n} lignes à vérifier": "{n} lines to check",
+  "Lue par l’assistant, non relue": "Read by the assistant, not reviewed",
+  "Une étape par paragraphe (ligne vide entre deux étapes).": "One step per paragraph (blank line between two steps).",
+  "Une étape par ligne ou par paragraphe.": "One step per line or per paragraph.",
 };
