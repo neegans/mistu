@@ -37,7 +37,10 @@ export async function renderRecipe(params, query, ctx) {
   const dish = dishLink ? ctx.dishesById.get(dishLink.dish_id) : null;
   const original = currentVersion(recipe, versions.filter((v) => v.kind !== 'adaptation' && v.kind !== 'synthesis')) || null;
   const adaptations = versions.filter((v) => v.kind === 'adaptation' || v.kind === 'synthesis');
-  let version = (query.v && ctx.versionsById.get(query.v)) || original || versions[0] || null;
+  // `?v=` n'est suivi que pour une version de CETTE fiche (ronde 1) : une version d'une autre recette (adresse forgée, lien ancien) n'est jamais
+  // affichée ici — sa lecture, son bandeau et son import ne sont pas ceux de cette fiche ; retour à la version courante.
+  const demandee = query.v ? ctx.versionsById.get(query.v) : null;
+  let version = (demandee?.recipe_id === recipe.id ? demandee : null) || original || versions[0] || null;
   const state = { servings: query.servings ? Number(query.servings) : version?.servings || null, units: ctx.settings.units, lang: query.lang || ctx.settings.reading_locale, diet: '' };
   const conventionId = ctx.conventionFor(recipe);
   const root = el('div', null);
@@ -62,7 +65,8 @@ export async function renderRecipe(params, query, ctx) {
   const lecture = banniereLecture(version, (ctx.imports || []).find((i) => i?.id === version?.provenance?.import_id) || null);
   root.append(el('div', { class: 'row', style: { marginBottom: '.8rem' } }, availabilityBadge(recipe), versionBadge(version, recipe), lecture ? etatVerification(version) : null, recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, capitaliser(c)))));
   if (lecture) root.append(bandeauLecture(lecture));
-  root.append(await photoDuPlat(recipe));
+  const photo = await photoDuPlat(recipe); // ronde 1 : jamais root.append(null) — le DOM natif écrirait le nœud texte « null »
+  if (photo) root.append(photo);
 
   if (!version) { root.append(referenceOnly()); return root; }
 
@@ -276,7 +280,8 @@ function etatVerification(version) {
 // Bandeau « Lue par l'assistant le {d} · … » : les parties présentes seulement, jointes par « · » ; « Incertain : … » (texte du modèle, borné par
 // banniereLecture) dessous, en nœud texte. `.status` est en inline-flex : posé en colonne pour ses deux lignes.
 function bandeauLecture(lecture) {
-  const parts = [t('Lue par l’assistant le {d}', { d: formatDate(lecture.date) })];
+  // Une date illisible (ligne reçue ou restaurée mal formée) n'est pas dite : jamais « le » suivi de rien (ronde 1).
+  const parts = [lecture.date ? t('Lue par l’assistant le {d}', { d: formatDate(lecture.date) }) : t('Lue par l’assistant')];
   if (lecture.incertaines > 0) parts.push(t('{n} ligne(s) incertaine(s)', { n: lecture.incertaines }));
   if (lecture.missing_page) parts.push(t('page possiblement manquante'));
   if (lecture.incomplete) parts.push(t('lecture incomplète'));
@@ -286,16 +291,17 @@ function bandeauLecture(lecture) {
 }
 
 // Photo du plat (spec D-4, § 4.3.6) : rendue seulement quand files a les octets — un pointeur sans octets (ligne reçue avant L4) ne rend rien, pas
-// même un cadre ; type d'affichage par la liste blanche (S3), URL blob: suivie (révoquée au changement de route). Rend null sinon (append l'ignore).
+// même un cadre ; un type d'image seulement, retypé par la liste blanche (S3, displayUrl : une seule copie de la règle), URL blob: suivie (urlDeBlob,
+// révoquée au changement de route). Rend null sinon : l'appelant n'ajoute rien (Element.append(null) écrirait « null »).
 async function photoDuPlat(recipe) {
   if (typeof recipe?.photo_sha256 !== 'string' || !recipe.photo_sha256) return null;
   let fichier = null;
   try { fichier = await repo.getFile(recipe.photo_sha256); } catch { fichier = null; }
-  const type = safeDisplayType(fichier?.mime);
-  if (!(fichier?.blob instanceof Blob) || !type || !type.startsWith('image/')) return null;
-  const blob = fichier.blob.type === type ? fichier.blob : new Blob([fichier.blob], { type });
+  if (!safeDisplayType(fichier?.mime)?.startsWith('image/')) return null;
+  const src = displayUrl(fichier, urlDeBlob);
+  if (!src) return null;
   return el('figure', { class: 'photo-plat', dataset: { role: 'photo-plat' }, style: { margin: '0 0 .8rem' } },
-    el('img', { alt: t('Photo du plat'), src: urlDeBlob(blob), loading: 'lazy', style: { display: 'block', width: '320px', maxWidth: '100%', borderRadius: 'var(--radius)' } }));
+    el('img', { alt: t('Photo du plat'), src, loading: 'lazy', style: { display: 'block', width: '320px', maxWidth: '100%', borderRadius: 'var(--radius)' } }));
 }
 
 function slug(s) { return (s || 'recette').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60); }

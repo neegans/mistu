@@ -8,10 +8,10 @@ import { displayUrl } from '../sync/mime.js';
 import { parseIngredientBlock, parseIngredientLine, parseStepsBlock } from '../domain/lines.js';
 import { currentVersion } from '../domain/search.js';
 import { getConvention } from '../domain/units.js';
-import { providerFrom, extractRecipeFromImages, pagePourEnvoi } from '../domain/llm.js';
+import { providerFrom, extractRecipeFromImages, pagePourEnvoi, BORNES_EXTRACTION } from '../domain/llm.js';
 import { RECIPE_TYPES } from '../model/schema.js';
 import { assertVocabulaire } from '../domain/vocabulaire.js';
-import { pageHeader, field, select, carteConnexion, texteEchecAssistant, section, pdfFrame, sessionAssistant } from './components.js';
+import { pageHeader, field, select, carteConnexion, texteEchecAssistant, section, pdfFrame, sessionAssistant, isoLisible } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
 
@@ -26,12 +26,19 @@ export async function renderRecipeEdit(params, query, ctx) {
   if (params.id && !recipe) return el('div', { class: 'card' }, t('Recette introuvable.'));
   const versions = recipe ? (ctx.versionsByRecipe.get(recipe.id) || []) : [];
   const kind = query.kind || (recipe && versions.length ? 'correction' : 'extraction');
-  const base = recipe ? (query.v ? ctx.versionsById.get(query.v) : currentVersion(recipe, versions)) : null;
+  // `?v=` n'est suivi que pour une version de CETTE fiche (ronde 1) : jamais la base, ni l'héritage de lecture, d'une autre recette — retour à la courante.
+  const demandee = recipe && query.v ? ctx.versionsById.get(query.v) : null;
+  const base = recipe ? ((demandee?.recipe_id === recipe.id ? demandee : null) || currentVersion(recipe, versions)) : null;
   // Import ciblé (spec § 4.3.7, N5) : une étape de la version de départ qui porte un saut de ligne a été lue ENTIÈRE par l'assistant ; l'éditeur
   // passe alors en « une étape par paragraphe » (zone jointe par une ligne vide, aide adaptée, aperçu et save() par parseStepsBlock parParagraphe) ;
   // sinon rien ne change (une étape par ligne ou par paragraphe, aide actuelle : une étape ajoutée sur une nouvelle ligne reste une étape).
   const parParagraphe = (base?.steps || []).some((s) => typeof s?.text === 'string' && s.text.includes('\n'));
   const aideEtapes = parParagraphe ? t('Une étape par paragraphe (ligne vide entre deux étapes).') : t('Une étape par ligne ou par paragraphe.');
+  // En « par paragraphe », une ligne vide INTERNE d'une étape (sous-titre puis texte) est repliée en un saut de ligne : sinon parseStepsBlock la
+  // couperait en deux au save() (ronde 1). Sert aussi au remplissage par l'assistant, pour que ses étapes restent séparées par une ligne vide.
+  const joindreEtapes = (liste) => (parParagraphe
+    ? liste.map((s) => (typeof s?.text === 'string' ? s.text.replace(/\n\s*\n/g, '\n') : '')).join('\n\n')
+    : liste.map((s) => s?.text).join('\n'));
   const editionId = query.edition || recipe?.edition_id || null;
   const edition = editionId ? ctx.editionsById.get(editionId) : null;
   const book = edition ? ctx.booksById.get(edition.book_id) : null;
@@ -45,7 +52,7 @@ export async function renderRecipeEdit(params, query, ctx) {
     title: recipe?.original_title || '', language: recipe?.original_language || edition?.language || 'fr', type: recipe?.type || '', cuisines: [...(recipe?.cuisines || [])],
     printed_page: recipe?.printed_page ?? pages.find((p) => p.printed_page)?.printed_page ?? '', source_label: recipe?.source_label || '',
     servings: base?.servings ?? '', prep: base?.prep_minutes ?? '', cook: base?.cook_minutes ?? '', active: base?.active_minutes ?? '', total: base?.total_minutes ?? '',
-    ingredientsText: (base?.ingredients || []).map((i) => i.source_text).join('\n'), stepsText: (base?.steps || []).map((s) => s.text).join(parParagraphe ? '\n\n' : '\n'),
+    ingredientsText: (base?.ingredients || []).map((i) => i.source_text).join('\n'), stepsText: joindreEtapes(base?.steps || []),
     notes: base?.notes || '', changes: '', status: 'proposed', translationLocale: f_defaultTranslation(recipe), aiUsed: false, aiModel: null,
   };
   if (kind === 'adaptation') { f.changes = ''; }
@@ -83,8 +90,9 @@ export async function renderRecipeEdit(params, query, ctx) {
     const prior = new Map(parsedLines.map((l) => [l.source_text, l]));
     parsedLines = fresh.map((l) => {
       const p = prior.get(l.source_text);
-      // Import ciblé (spec § 4.3.7, I4) : `uncertain` suit la ligne dont le texte n'a pas changé ; une ligne retapée repart sans incertitude.
-      return p ? { ...l, ingredient_id: p.ingredient_id, unit_id: p.unit_id ?? l.unit_id, unit_candidates: p.unit_id ? null : l.unit_candidates, verification_state: p.verification_state, id: p.id, ...(Object.hasOwn(p, 'uncertain') ? { uncertain: p.uncertain } : {}) } : l;
+      // Import ciblé (spec § 4.3.7, I4) : `uncertain` suit la ligne dont le texte n'a pas changé (retypé en booléen : une forme reçue hostile ne se
+      // recopie pas, ronde 1) ; une ligne retapée repart sans incertitude.
+      return p ? { ...l, ingredient_id: p.ingredient_id, unit_id: p.unit_id ?? l.unit_id, unit_candidates: p.unit_id ? null : l.unit_candidates, verification_state: p.verification_state, id: p.id, ...(Object.hasOwn(p, 'uncertain') ? { uncertain: p.uncertain === true } : {}) } : l;
     });
     drawLines();
   };
@@ -152,7 +160,7 @@ export async function renderRecipeEdit(params, query, ctx) {
       if (r.language) f.language = r.language;
       if (r.servings != null) f.servings = r.servings; if (r.prep_minutes != null) f.prep = r.prep_minutes; if (r.cook_minutes != null) f.cook = r.cook_minutes; if (r.printed_page != null && !f.printed_page) f.printed_page = r.printed_page;
       f.ingredientsText = r.ingredients.map((i) => i.source_text).join('\n'); ingTa.value = f.ingredientsText;
-      f.stepsText = r.steps.map((s) => s.text).join('\n'); stepsTa.value = f.stepsText;
+      f.stepsText = joindreEtapes(r.steps); stepsTa.value = f.stepsText;
       f.aiUsed = true; f.aiModel = courant.modele || courant.name; // le modèle choisi par le SERVEUR (passerelle) quand il l'a dit
       parsedLines = []; reparse(); drawSteps();
       const uncertain = r.ingredients.filter((i) => i.uncertain).map((i) => i.source_text).concat(r.uncertain_fields);
@@ -218,15 +226,19 @@ export async function renderRecipeEdit(params, query, ctx) {
     const kindVersion = recipe && kind !== 'adaptation' && versions.length ? 'correction' : kind;
     // Import ciblé (spec § 4.3.7, I4) : une correction hérite de sa parente ce que la lecture a dit — import_id (souple), incomplete, missing_page,
     // titre_lu — et la date de la lecture (lu_le : celle que la parente porte, sinon sa création), pour que le bandeau de la fiche date la LECTURE ;
-    // rien hors d'une lecture (une parente sans import_id ne lègue rien), rien pour une adaptation.
+    // rien hors d'une lecture (une parente sans import_id ne lègue rien), rien pour une adaptation, et RIEN pour une relecture par l'assistant faite
+    // ici (f.aiUsed : ce n'est pas cette lecture-là ; ronde 1). Revalidé à l'héritage (I-1) : titre_lu ≤ 200 points de code, lu_le lisible.
     const parente = base?.provenance;
-    const heritageLecture = kindVersion === 'correction' && typeof parente?.import_id === 'string' && parente.import_id
-      ? { import_id: parente.import_id, incomplete: parente.incomplete === true, missing_page: parente.missing_page === true, titre_lu: typeof parente.titre_lu === 'string' ? parente.titre_lu : null, lu_le: typeof parente.lu_le === 'string' && parente.lu_le ? parente.lu_le : (typeof base.created_at === 'string' ? base.created_at : null) }
+    const heritageLecture = kindVersion === 'correction' && !f.aiUsed && typeof parente?.import_id === 'string' && parente.import_id
+      ? { import_id: parente.import_id, incomplete: parente.incomplete === true, missing_page: parente.missing_page === true,
+        titre_lu: typeof parente.titre_lu === 'string' && Array.from(parente.titre_lu).length <= BORNES_EXTRACTION.titre ? parente.titre_lu : null,
+        lu_le: Object.hasOwn(parente, 'lu_le') ? isoLisible(parente.lu_le) : isoLisible(base.created_at) }
       : {};
     const version = {
       id: repo.newId('rv'), recipe_id: recipeId, kind: kindVersion, parent_version_id: base?.id || null,
       status: kind === 'adaptation' ? f.status : null, servings: n(f.servings), prep_minutes: n(f.prep), cook_minutes: n(f.cook), active_minutes: n(f.active), total_minutes: n(f.total),
-      ingredients: parsedLines.map((l) => ({ ...l, unit_candidates: l.unit_candidates || null })), steps, constraints: {}, changes: f.changes.trim(), notes: f.notes.trim(),
+      // Une ligne VÉRIFIÉE n'est plus incertaine (ronde 1, une seule règle) : la personne l'a relue — la fiche ne dit jamais « Vérifiée » et « incertaine ».
+      ingredients: parsedLines.map((l) => ({ ...l, unit_candidates: l.unit_candidates || null, ...(Object.hasOwn(l, 'uncertain') ? { uncertain: l.uncertain === true && l.verification_state !== 'verified' } : {}) })), steps, constraints: {}, changes: f.changes.trim(), notes: f.notes.trim(),
       provenance: { source_page_ids: pageIds, source_document_id: doc?.id || null, generated_by: f.aiUsed ? 'ai' : 'manual', model: f.aiModel, edition_id: editionId, convention_snapshot: convention ? { id: convention.id, revision: convention.revision, values: convention.values } : null, ...heritageLecture },
       verification_state: parsedLines.some((l) => l.verification_state !== 'verified') ? 'to_verify' : 'verified',
     };

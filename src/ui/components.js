@@ -69,33 +69,41 @@ export function timeText(version) {
 // --- Lecture par l'assistant (lot import ciblé, spec § 4.3.6-4.3.7, D-3) ------------------------------------------------------------
 // banniereLecture(version, ligne = null) : PURE. Ce que la fiche dit d'une version lue par l'assistant — { date, incertaines, missing_page,
 // incomplete, incertain } — ou null quand la version ne vient pas d'un import (provenance.import_id absent : saisie à la main, extraction
-// d'avant le lot). La date est celle de la LECTURE : `provenance.lu_le` quand une correction l'a héritée, sinon created_at (l'extraction
-// elle-même) ; une valeur qui n'est pas une chaîne vaut null (rien d'inventé). `incertaines` ne compte que les lignes uncertain === true.
-// `incertain` vient de resultat.uncertain_fields de la ligne du journal (pointeur souple : null quand la ligne est absente, ou n'est pas
-// celle de cet import) — une DONNÉE HOSTILE (reçue, restaurée) : chaînes seulement, Cc/Cf retirés, espaces repliées, jointes par « ; »,
-// bornée à INCERTAIN_MAX points de code (coupée avec « … », total ≤ INCERTAIN_MAX), null quand il ne reste rien.
+// d'avant le lot). La date est celle de la LECTURE : `provenance.lu_le` quand la version le porte (une correction l'hérite), sinon created_at
+// (l'extraction elle-même) ; une date illisible vaut null, et une lu_le présente mais illisible ne retombe jamais sur created_at (la date d'une
+// correction n'est pas celle de la lecture ; rien d'inventé, ronde 1). `incertaines` ne compte que les lignes uncertain === true. `incertain` :
+// texteIncertain(ligne, import_id) ci-dessous (deux arguments, décision 2 de la tâche 5, consignée en spec § 12).
 export const INCERTAIN_MAX = 300;
 const CONTROLES_INCERTAIN = /[\p{Cc}\p{Cf}]/gu;
+// Une date ISO lisible (chaîne que Date.parse comprend), sinon null — pour une valeur reçue, restaurée ou héritée.
+export const isoLisible = (d) => (typeof d === 'string' && Number.isFinite(Date.parse(d)) ? d : null);
 export function banniereLecture(version, ligne = null) {
   const p = version?.provenance;
   if (!p || typeof p.import_id !== 'string' || !p.import_id) return null;
-  const date = typeof p.lu_le === 'string' && p.lu_le ? p.lu_le : (typeof version.created_at === 'string' && version.created_at ? version.created_at : null);
+  const date = Object.hasOwn(p, 'lu_le') ? isoLisible(p.lu_le) : isoLisible(version.created_at);
   const incertaines = (Array.isArray(version.ingredients) ? version.ingredients : []).filter((l) => l?.uncertain === true).length;
-  let incertain = null;
-  const champs = ligne && ligne.id === p.import_id && ligne.resultat && typeof ligne.resultat === 'object' ? ligne.resultat.uncertain_fields : null;
-  if (Array.isArray(champs)) {
-    const texte = champs.filter((c) => typeof c === 'string').map((c) => c.replace(CONTROLES_INCERTAIN, '').replace(/\s+/g, ' ').trim()).filter(Boolean).join(' ; ');
-    const points = Array.from(texte);
-    incertain = points.length === 0 ? null : points.length <= INCERTAIN_MAX ? texte : points.slice(0, INCERTAIN_MAX - 1).join('') + '…';
-  }
-  return { date, incertaines, missing_page: p.missing_page === true, incomplete: p.incomplete === true, incertain };
+  return { date, incertaines, missing_page: p.missing_page === true, incomplete: p.incomplete === true, incertain: texteIncertain(ligne, p.import_id) };
+}
+
+// texteIncertain(ligne, importId) : PURE (ronde 1, extraite de banniereLecture). Le « Incertain : … » d'une lecture = resultat.uncertain_fields de la
+// ligne du journal de CET import (pointeur souple : null quand la ligne est absente, purgée, ou celle d'un autre import) — une DONNÉE HOSTILE (reçue,
+// restaurée) : chaînes seulement, Cc/Cf retirés, espaces repliées, jointes par « ; », bornée à INCERTAIN_MAX points de code (coupée avec « … »,
+// total ≤ INCERTAIN_MAX), null quand il ne reste rien. Rendue en nœud texte par l'appelant.
+export function texteIncertain(ligne, importId) {
+  if (typeof importId !== 'string' || !importId) return null;
+  const champs = ligne && ligne.id === importId && ligne.resultat && typeof ligne.resultat === 'object' ? ligne.resultat.uncertain_fields : null;
+  if (!Array.isArray(champs)) return null;
+  const texte = champs.filter((c) => typeof c === 'string').map((c) => c.replace(CONTROLES_INCERTAIN, '').replace(/\s+/g, ' ').trim()).filter(Boolean).join(' ; ');
+  const points = Array.from(texte);
+  return points.length === 0 ? null : points.length <= INCERTAIN_MAX ? texte : points.slice(0, INCERTAIN_MAX - 1).join('') + '…';
 }
 
 // estExtractionNonRelue(version) : PURE. D-3 : le mode cuisine et les courses disent « Lue par l'assistant, non relue » tant que la version est
-// une extraction de l'assistant (kind extraction, generated_by ai) dont les lignes restent à vérifier ; une correction, une saisie à la main,
-// une adaptation ou une version vérifiée ne le sont pas.
+// une LECTURE de l'assistant (generated_by ai) dont les lignes restent à vérifier : une extraction, ou une relecture par l'assistant depuis
+// « Corriger » (écrite en `correction`, ronde 1) ; une correction à la main, une saisie à la main, une adaptation, une création (synthesis, qui a
+// sa propre étiquette) ou une version vérifiée ne le sont pas.
 export function estExtractionNonRelue(version) {
-  return !!version && version.kind === 'extraction' && version.provenance?.generated_by === 'ai' && version.verification_state === 'to_verify';
+  return !!version && (version.kind === 'extraction' || version.kind === 'correction') && version.provenance?.generated_by === 'ai' && version.verification_state === 'to_verify';
 }
 
 export function provenanceText(recipe, book, edition) {

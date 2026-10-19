@@ -437,6 +437,7 @@ export const EN = {
   "Garder ma version": "Keep my version",
   // Import ciblé, tâche 5 (spec § 4.3.6, § 4.3.7, D-3) : fiche, mode cuisine, courses et « Corriger ».
   "Lue par l’assistant le {d}": "Read by the assistant on {d}",
+  "Lue par l’assistant": "Read by the assistant",
   "{n} ligne(s) incertaine(s)": "{n} uncertain line(s)",
   "page possiblement manquante": "page possibly missing",
   "lecture incomplète": "incomplete reading",

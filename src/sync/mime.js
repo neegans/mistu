@@ -22,9 +22,10 @@ export function resolveMime(type, filename = '') {
 export const safeDisplayType = (mime) => (isAllowed(mime) ? mime : null);
 export const extensionFor = (mime) => (Object.hasOwn(MIME_TO_EXT, mime) ? MIME_TO_EXT[mime] : 'bin');
 
-// URL d'affichage d'une ligne files : le blob est retypé avec un type de la liste blanche, ou rien n'est affiché.
-export function displayUrl(fileRow) {
+// URL d'affichage d'une ligne files : le blob est retypé avec un type de la liste blanche, ou rien n'est affiché. `creerUrl` : qui crée l'URL
+// (par défaut URL.createObjectURL ; une vue qui suit ses URL passe urlDeBlob de core/blob-urls.js — une seule copie de la règle S3).
+export function displayUrl(fileRow, creerUrl = (b) => URL.createObjectURL(b)) {
   const type = safeDisplayType(fileRow?.mime);
   if (!type || !(fileRow.blob instanceof Blob)) return null;
-  return URL.createObjectURL(fileRow.blob.type === type ? fileRow.blob : new Blob([fileRow.blob], { type }));
+  return creerUrl(fileRow.blob.type === type ? fileRow.blob : new Blob([fileRow.blob], { type }));
 }

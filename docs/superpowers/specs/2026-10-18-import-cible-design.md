@@ -121,7 +121,7 @@ jour-là, « À envoyer » et la pastille montent d'autant sans geste de la pers
 | `source_pages` | `position` réécrite à l'enregistrement depuis l'ordre de `page_ids` ; `kind: 'recipe'` posé comme aujourd'hui (pas de champ `role`) ; `printed_page` de la page gardé, et une page SANS numéro ne reçoit celui de la fiche que si elle est la **première** de l'ordre (T3 ronde 1 : la deuxième photo d'une recette p. 132 est la p. 133, rien d'inventé) | l'ordre choisi ; nature de la photo |
 | `recipes` | `photo_sha256: null \| string` (pointeur souple), `photo_origin: 'photo' \| 'image' \| null` (le geste touché) | photo du plat |
 | lignes d'ingrédients | `uncertain: boolean` | l'incertitude dite par le modèle |
-| `recipe_versions.provenance` | `import_id` (souple), `incomplete`, `missing_page`, `titre_lu` | d'où vient la version et ses limites |
+| `recipe_versions.provenance` | `import_id` (souple), `incomplete`, `missing_page`, `titre_lu` ; sur une `correction` qui en hérite, `lu_le` (date ISO de la lecture, tâche 5, ronde 1) | d'où vient la version et ses limites |
 
 ### 3.3 Vocabulaire (D-12)
 
@@ -454,3 +454,17 @@ relue au clic : « Rattacher » cliqué après l'arrivée d'une autre lecture re
 après l'arrivée d'une autre lecture repose la question (I-5 : rien ne devient courant sans avoir été vu) ; un redessin entre l'arrivée et le clic
 oublie la question de l'ancienne lecture (plus de panneau ni d'ancien titre ; « Enregistrer cette lecture » la redemande) · toujours différé (à
 ratifier, même raison) : la ligne `en_cours` tenue par ce document sans vol.
+**Tâche 5, ronde 1 (revue adverse, trois lentilles — rapport `task-5-report.md` § Ronde 1).** **T5-R1-a** une fiche sans photo du plat n'ajoute rien
+(`Element.append(null)` y écrivait le nœud texte « null ») · **T5-R1-b** une seule règle : une ligne enregistrée `verified` perd `uncertain` (au `save()`
+de l'éditeur ; `reparse()` retype `uncertain` en booléen) — la fiche ne dit jamais « Vérifiée » et « incertaine » à la fois · **T5-R1-c** en mode « par
+paragraphe », une ligne vide INTERNE d'une étape est repliée en un saut de ligne (jointure de départ et remplissage par l'assistant) : une étape lue
+« a, ligne vide, b » reste une étape à la correction · **T5-R1-d** une relecture par l'assistant depuis « Corriger » (`generated_by: 'ai'`, écrite en
+`correction`) n'hérite rien de l'ancienne lecture ; `estExtractionNonRelue` vaut pour toute lecture de l'assistant à vérifier (`extraction` ou
+`correction`, jamais `adaptation` ni `synthesis`) · **T5-R1-e** `?v=` d'une version d'une autre recette est ignoré par la fiche et par l'éditeur (retour à
+la version courante) · **T5-R1-f** `lu_le` consigné en § 3.2 ; une date illisible n'est pas dite (« Lue par l'assistant », clé neuve) ; une `lu_le`
+présente mais illisible ne retombe jamais sur `created_at` ; héritage revalidé (`titre_lu` ≤ 200 points de code, `lu_le` lisible) · **T5-R1-g** consignés
+(décisions de la tâche 5) : `banniereLecture(version, ligne)` à deux arguments, « Incertain » lu dans la ligne du journal de CET import et extrait en
+`texteIncertain(ligne, importId)` (pure) ; l'état de vérification rendu sur une version lue seulement ; « {n} ligne(s) incertaine(s) » omis à n = 0 ;
+clé « 1 ligne à vérifier » · **T5-R1-h** `displayUrl(fichier, creerUrl)` : la photo du plat passe par la même règle S3 (URL suivie par `urlDeBlob`) ·
+non tranché (à ratifier) : une correction qui hérite `incomplete` ou `missing_page` garde la fiche `partial` (décision 5 ; lever la page manquante
+demande un geste, lot suivant) ; une extraction enregistrée plus tard que sa lecture est datée de l'enregistrement (`created_at`), pas de la lecture.

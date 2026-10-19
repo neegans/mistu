@@ -1199,6 +1199,7 @@ export async function runImportCibleTests({ eq, ok }) {
     const { renderRecipe } = await import('../src/ui/recipe.js');
     const { renderCook } = await import('../src/ui/cook.js');
     const { renderShoppingList } = await import('../src/ui/grocery.js');
+    const L = await import('../src/domain/llm.js');
     const { renderRecipeEdit } = await import('../src/ui/recipe-edit.js');
     const { formatDate } = await import('../src/core/dom.js');
     const { sha256Hex } = await import('../src/core/hash.js');
@@ -1217,7 +1218,7 @@ export async function runImportCibleTests({ eq, ok }) {
     const champ = (root, libelle) => [...root.querySelectorAll('.field')].find((f) => f.querySelector('span')?.textContent === libelle) || null;
     try {
       // --- banniereLecture(version, ligne) et estExtractionNonRelue(version) : pures, par table
-      const LU = '2026-10-19T12:00:00.000Z';
+      const LU = '2026-09-01T12:00:00.000Z'; // ronde 1 : une date de lecture franchement passée — la date d'une correction écrite le jour du test ne la contrefait jamais
       const prov = (over = {}) => ({ source_page_ids: [], source_document_id: null, generated_by: 'ai', model: 'claude-x', edition_id: 'ed5', convention_snapshot: null, import_id: 'imp_fiche', incomplete: false, missing_page: true, titre_lu: 'Tarte aux pommes', ...over });
       const lignes = (...u) => u.map((x, i) => ({ id: 'ri' + i, source_text: 'x', verification_state: 'to_verify', uncertain: x }));
       const extr = (over = {}) => ({ id: 'rv_x', kind: 'extraction', ingredients: lignes(false, true, true), steps: [], provenance: prov(), verification_state: 'to_verify', created_at: LU, ...over });
@@ -1226,6 +1227,7 @@ export async function runImportCibleTests({ eq, ok }) {
       eq(K.banniereLecture(extr({ provenance: prov({ incomplete: true, missing_page: 'oui' }), ingredients: lignes(false, false) })), { date: LU, incertaines: 0, missing_page: false, incomplete: true, incertain: null }, 'banniereLecture : incomplete et missing_page sont des booléens stricts ; 0 incertaine ; une ligne uncertain non booléenne ne compte pas');
       eq(K.banniereLecture(extr({ ingredients: [{ uncertain: 'oui' }, { uncertain: 1 }, { uncertain: true }], created_at: 7 })).incertaines, 1, 'banniereLecture : seules les lignes uncertain === true comptent (données reçues ou restaurées)');
       eq(K.banniereLecture(extr({ created_at: 7 })).date, null, 'banniereLecture : une date qui n’est pas une chaîne vaut null (rien d’inventé)');
+      eq([K.banniereLecture(extr({ created_at: 'pas une date' })).date, K.banniereLecture(extr({ provenance: prov({ lu_le: '<script>' }) })).date, K.banniereLecture(extr({ provenance: prov({ lu_le: null }) })).date], [null, null, null], 'banniereLecture (ronde 1) : une date illisible vaut null ; une lu_le présente mais illisible ne retombe JAMAIS sur created_at (la date d’une correction n’est pas celle de la lecture)');
       const ligneJ = (uf) => ({ id: 'imp_fiche', status: 'enregistre', resultat: { title: 'T', uncertain_fields: uf } });
       eq(K.banniereLecture(extr(), ligneJ(['sucre', 'lait'])).incertain, 'sucre ; lait', 'banniereLecture : « Incertain » = les uncertain_fields de la ligne du journal, joints par « ; »');
       const coupe = K.banniereLecture(extr(), ligneJ(['sucre', 42, null, 'z'.repeat(400)])).incertain;
@@ -1234,8 +1236,9 @@ export async function runImportCibleTests({ eq, ok }) {
       eq([K.banniereLecture(extr(), ligneJ([])).incertain, K.banniereLecture(extr(), ligneJ('pas une liste')).incertain, K.banniereLecture(extr(), { id: 'imp_fiche', resultat: 'hostile' }).incertain, K.banniereLecture(extr(), { id: 'imp_autre', resultat: { uncertain_fields: ['x'] } }).incertain, K.banniereLecture(extr(), null).incertain, K.banniereLecture(extr(), ligneJ(['  ', '\u0007'])).incertain], [null, null, null, null, null, null], 'banniereLecture : liste vide, forme hostile, résultat non objet, ligne d’un AUTRE import, absente, ou faite de blancs et de caractères de contrôle → incertain nul');
       eq(K.banniereLecture(extr(), ligneJ(['a\u0007b', ' c\n d '])).incertain, 'ab ; c d', 'banniereLecture : caractères de contrôle retirés, espaces repliées, chaque valeur coupée aux bords');
       eq(K.banniereLecture({ ...extr(), kind: 'correction', created_at: '2026-10-20T08:00:00.000Z', provenance: prov({ generated_by: 'manual', lu_le: LU }) }).date, LU, 'banniereLecture : une correction dit la date de la LECTURE héritée (provenance.lu_le), pas la sienne');
+      eq([K.texteIncertain(ligneJ(['a', 'b']), 'imp_fiche'), K.texteIncertain(ligneJ(['a']), 'imp_autre'), K.texteIncertain(null, 'imp_fiche'), K.texteIncertain(ligneJ(['a']), null)], ['a ; b', null, null, null], 'texteIncertain(ligne, importId) (ronde 1) : pure, bornée, la ligne de CET import seulement');
       const E = (kind, generated_by, verification_state) => K.estExtractionNonRelue({ kind, provenance: { generated_by }, verification_state });
-      eq([E('extraction', 'ai', 'to_verify'), E('extraction', 'ai', 'verified'), E('correction', 'manual', 'to_verify'), E('extraction', 'manual', 'to_verify'), E('adaptation', 'ai', 'to_verify'), K.estExtractionNonRelue(null), K.estExtractionNonRelue({ kind: 'extraction', verification_state: 'to_verify' })], [true, false, false, false, false, false, false], 'estExtractionNonRelue (D-3) : vrai pour une extraction de l’assistant à vérifier seulement — faux une fois vérifiée, pour une correction, une saisie à la main, une adaptation, sans provenance');
+      eq([E('extraction', 'ai', 'to_verify'), E('extraction', 'ai', 'verified'), E('correction', 'manual', 'to_verify'), E('extraction', 'manual', 'to_verify'), E('adaptation', 'ai', 'to_verify'), K.estExtractionNonRelue(null), K.estExtractionNonRelue({ kind: 'extraction', verification_state: 'to_verify' }), E('correction', 'ai', 'to_verify'), E('correction', 'ai', 'verified'), E('synthesis', 'ai', 'to_verify')], [true, false, false, false, false, false, false, true, false, false], 'estExtractionNonRelue (D-3, ronde 1) : vrai pour une lecture de l’assistant à vérifier (extraction, ou relecture par l’assistant depuis « Corriger », écrite en correction) — faux une fois vérifiée, pour une correction à la main, une saisie à la main, une adaptation, une création, sans provenance');
 
       // --- Fixture : une recette importée par fabriquerExtraction (7 lignes dont 2 incertaines, une étape sur deux lignes, page possiblement
       // manquante), sa ligne du journal `enregistre` avec uncertain_fields, la photo du plat dans files ; une correction vérifiée faite à part ;
@@ -1243,7 +1246,8 @@ export async function runImportCibleTests({ eq, ok }) {
       const livre = { id: 'b5', title: 'Mon livre', author: 'A. B.', updated_at: DATE };
       const edition = { id: 'ed5', book_id: 'b5', language: 'fr', updated_at: DATE };
       const reference = { id: 'rc_imp', edition_id: 'ed5', original_title: 'Tarte aux pommes', original_language: 'fr', availability: 'reference_only', verification_state: 'unverified', printed_page: 132, source_page_ids: [], current_version_id: null, tags: [], cuisines: [], favorite: false, ingredient_ids: [], created_at: DATE, updated_at: DATE };
-      const RES = { title: 'Tarte aux pommes', servings: 6, prep_minutes: 20, cook_minutes: 45, ingredients: [{ source_text: '4 pommes', uncertain: false }, { source_text: '? g de sucre', uncertain: true }, { source_text: '1 oeuf', uncertain: false }, { source_text: '100 g de beurre', uncertain: false }, { source_text: '? ml de lait', uncertain: true }, { source_text: '1 pincée de sel', uncertain: false }, { source_text: '200 g de farine', uncertain: false }], steps: [{ text: 'Peler les pommes.\nLes couper en quartiers.' }, { text: 'Cuire 45 min.' }], printed_page: 132, sub_recipes: [], uncertain_fields: ['sucre', 'lait', 'z'.repeat(400)], notes: null, incomplete: false, missing_page: true };
+      const HOSTILE = '<img src=x onerror="void 0">'; // ronde 1 : un uncertain_fields hostile (reçu, restauré) doit rester du TEXTE affiché tel quel
+      const RES = { title: 'Tarte aux pommes', servings: 6, prep_minutes: 20, cook_minutes: 45, ingredients: [{ source_text: '4 pommes', uncertain: false }, { source_text: '? g de sucre', uncertain: true }, { source_text: '1 oeuf', uncertain: false }, { source_text: '100 g de beurre', uncertain: false }, { source_text: '? ml de lait', uncertain: true }, { source_text: '1 pincée de sel', uncertain: false }, { source_text: '200 g de farine', uncertain: false }], steps: [{ text: 'Peler les pommes.\nLes couper en quartiers.' }, { text: 'Cuire 45 min.' }], printed_page: 132, sub_recipes: [], uncertain_fields: [HOSTILE, 'sucre', 'lait', 'z'.repeat(400)], notes: null, incomplete: false, missing_page: true };
       const toile = new OffscreenCanvas(320, 240); const cx = toile.getContext('2d'); cx.fillStyle = '#a52'; cx.fillRect(0, 0, 320, 240);
       const photoBlob = await toile.convertToBlob({ type: 'image/jpeg', quality: 0.9 });
       const shaPhoto = await sha256Hex(photoBlob);
@@ -1256,14 +1260,35 @@ export async function runImportCibleTests({ eq, ok }) {
       const versionSimple = { id: 'rv_simple', recipe_id: 'rc_simple', kind: 'extraction', status: null, servings: 4, prep_minutes: null, cook_minutes: null, active_minutes: null, total_minutes: null, ingredients: [{ ...extraction.ingredients[0], id: 'ri_s0', verification_state: 'verified', uncertain: false }], steps: [{ id: 'st_s1', position: 1, text: 'Peler.' }, { id: 'st_s2', position: 2, text: 'Cuire.' }], constraints: {}, changes: '', notes: '', provenance: { source_page_ids: [], source_document_id: null, generated_by: 'manual', model: null, edition_id: 'ed5', convention_snapshot: null }, verification_state: 'verified', created_at: LU, updated_at: LU };
       const sansOctets = { ...recette, id: 'rc_sansoctets', current_version_id: 'rv_so', photo_sha256: 'f'.repeat(64) };
       const versionSansOctets = { ...extraction, id: 'rv_so', recipe_id: 'rc_sansoctets' };
-      await db.mutate({ puts: { books: [livre], book_editions: [edition], recipes: [recette, simple, sansOctets], recipe_versions: [extraction, correction, versionSimple, versionSansOctets], imports: [ligneImport] }, origin: 'device' });
+      // Ronde 1 : une SECONDE ligne du journal, rangée AVANT celle de la fiche (clé « imp_aaa ») — la fiche doit trouver la ligne de SON import ;
+      // des versions qui discriminent l'état (3 vérifiées sur 7, 1 à vérifier, lecture sans ligne), « lecture incomplète », une date illisible,
+      // des formes reçues de `uncertain` ; une photo du plat dont les octets ne sont pas une image ; une étape lue avec une ligne vide interne.
+      const ligneAutre = { ...ligneImport, id: 'imp_aaa', recipe_id: 'rc_simple', photo_sha256: null, resultat: { ...RES, uncertain_fields: ['autre import'] } };
+      const ligneVerifiee = (l) => ({ ...l, verification_state: 'verified', uncertain: false }); // ce que l'éditeur écrit pour une ligne cochée
+      const corrigee = (id, over) => ({ ...extraction, id, kind: 'correction', parent_version_id: extraction.id, provenance: { ...extraction.provenance, generated_by: 'manual', model: null, lu_le: LU }, created_at: '2026-10-20T08:00:00.000Z', updated_at: '2026-10-20T08:00:00.000Z', ...over });
+      const mixte = corrigee('rv_mixte', { ingredients: extraction.ingredients.map((l, i) => (i < 3 ? ligneVerifiee(l) : l)) });
+      const uneSeule = corrigee('rv_une', { ingredients: extraction.ingredients.map((l, i) => (i < 6 ? ligneVerifiee(l) : l)) });
+      const sansLigne = { ...extraction, id: 'rv_sansligne', ingredients: [] }; // une lecture sans ingrédient : fabriquerExtraction la laisse to_verify
+      const lectureIncomplete = { ...extraction, id: 'rv_incomplete', provenance: { ...extraction.provenance, incomplete: true } };
+      const sansDate = { ...extraction, id: 'rv_sansdate', created_at: 'pas une date' };
+      const formes = { ...extraction, id: 'rv_formes', ingredients: extraction.ingredients.slice(0, 3).map((l, i) => ({ ...l, uncertain: ['oui', 1, true][i] })) };
+      const pdfBlob = new Blob(['%PDF-1.4 pas une image'], { type: 'application/pdf' });
+      const shaPdf = await sha256Hex(pdfBlob);
+      await repo.putFile(shaPdf, pdfBlob, { origin: 'device' });
+      const avecPdf = { ...recette, id: 'rc_pdf', current_version_id: 'rv_pdf', photo_sha256: shaPdf };
+      const versionPdf = { ...extraction, id: 'rv_pdf', recipe_id: 'rc_pdf' };
+      const RES_PARA = { ...RES, uncertain_fields: [], steps: [{ text: 'Faire la pâte :\n\nMélanger la farine et le beurre.' }, { text: 'Cuire 45 min.' }] };
+      const fabPara = D.fabriquerExtraction(L.validateParsedRecipe(RES_PARA), { reference: { ...reference, id: 'rc_para', original_title: 'Tarte en deux temps' }, versions: [], pages: [], pageIds: [], edition, importId: 'imp_para', modele: 'claude-x', photo: null, maintenant: LU });
+      await db.mutate({ puts: { books: [livre], book_editions: [edition], recipes: [recette, simple, sansOctets, avecPdf, { ...fabPara.recipe, updated_at: LU }], recipe_versions: [extraction, correction, versionSimple, versionSansOctets, mixte, uneSeule, sansLigne, lectureIncomplete, sansDate, formes, versionPdf, { ...fabPara.version, updated_at: LU }], imports: [ligneImport, ligneAutre] }, origin: 'device' });
       eq([extraction.steps[0].text.includes('\n'), extraction.ingredients.filter((l) => l.uncertain).length, extraction.ingredients.length, recette.availability, recette.photo_sha256, extraction.provenance.import_id], [true, 2, 7, 'partial', shaPhoto, 'imp_fiche'], 'fixture : étape sur deux lignes, 2 lignes incertaines sur 7, fiche partial (page possiblement manquante), photo du plat pointée, import_id posé');
       const ctxDe = async (over = {}) => {
         const recipes = await db.getAll('recipes'); const vs = await db.getAll('recipe_versions');
         return { recipes, recipesById: new Map(recipes.map((r) => [r.id, r])), recipe_versions: vs, versionsByRecipe: repo.groupBy(vs, 'recipe_id'), versionsById: new Map(vs.map((v) => [v.id, v])), editionsById: new Map([['ed5', edition]]), booksById: new Map([['b5', livre]]), books: [livre], book_editions: [edition], pagesById: new Map(), imports: await db.getAll('imports'), dishesById: new Map(), dishes: [], cook_history: [], dish_recipe_links: [], recipe_translations: [], ingredients: INGREDIENTS, ingredientsById: ING, source_documents: [], source_pages: [], scan_sessions: [], settings: { units: 'original', reading_locale: 'original', ui_locale: 'fr', llm: { provider: 'none' } }, conventionFor: () => null, ...over };
       };
-      const INCERTAIN_ATTENDU = Array.from('sucre ; lait ; ' + 'z'.repeat(400)).slice(0, 299).join('') + '…';
+      const INCERTAIN_ATTENDU = Array.from(HOSTILE + ' ; sucre ; lait ; ' + 'z'.repeat(400)).slice(0, 299).join('') + '…';
       const LIGNE_LECTURE = `Lue par l’assistant le ${formatDate(LU)} · 2 ligne(s) incertaine(s) · page possiblement manquante`;
+      const LIGNE_LECTURE_1 = `Lue par l’assistant le ${formatDate(LU)} · 1 ligne(s) incertaine(s) · page possiblement manquante`;
+      const textesDirects = (p) => [...p.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent);
 
       // --- Fiche (spec § 4.3.6) : bandeau de lecture, « Incertain », état de la version affichée, photo du plat, puces « incertain », étape entière
       {
@@ -1272,7 +1297,8 @@ export async function runImportCibleTests({ eq, ok }) {
         eq([texte(bandeau?.querySelector('[data-role="ligne-lecture"]')), bandeau?.classList.contains('status')], [LIGNE_LECTURE, true], 'fiche : bandeau « Lue par l’assistant le {d} · 2 ligne(s) incertaine(s) · page possiblement manquante » (sans « lecture incomplète » : incomplete faux)');
         const inc = texte(bandeau?.querySelector('[data-role="incertain-lecture"]'));
         eq([inc, Array.from(inc || '').length], ['Incertain : ' + INCERTAIN_ATTENDU, Array.from('Incertain : ').length + 300], 'fiche : « Incertain : … » lu dans resultat.uncertain_fields de la ligne du journal (import_id, pointeur souple), coupé à 300 points de code');
-        eq(bandeau?.querySelector('[data-role="incertain-lecture"]')?.children.length, 0, 'fiche : « Incertain » est un nœud texte (une sortie de modèle n’est jamais du balisage)');
+        const incN = bandeau?.querySelector('[data-role="incertain-lecture"]');
+        eq([incN?.children.length, incN?.querySelectorAll('img').length, incN?.textContent.startsWith('Incertain : ' + HOSTILE + ' ; sucre')], [0, 0, true], 'fiche : « Incertain » est un nœud texte — une valeur hostile (<img onerror>) reste du texte affiché tel quel, aucun élément (une sortie de modèle n’est jamais du balisage)');
         const etat = page.querySelector('[data-role="etat-verification"]');
         eq([texte(etat), etat?.classList.contains('warn')], ['7 lignes à vérifier', true], 'fiche : état de la version affichée « 7 lignes à vérifier »');
         const img = page.querySelector('[data-role="photo-plat"] img');
@@ -1290,9 +1316,22 @@ export async function runImportCibleTests({ eq, ok }) {
         eq([pageSo.querySelector('[data-role="photo-plat"]'), !!pageSo.querySelector('[data-role="bandeau-lecture"]')], [null, true], 'fiche : un photo_sha256 sans octets dans files ne rend rien (pas même un cadre vide) ; le bandeau reste');
         const pageS = await renderRecipe({ id: 'rc_simple' }, {}, await ctxDe()); scene.append(pageS);
         eq([pageS.querySelector('[data-role="bandeau-lecture"]'), pageS.querySelector('[data-role="etat-verification"]'), pageS.querySelector('[data-role="photo-plat"]'), [...pageS.querySelectorAll('[data-role="texte-etape"]')].map((n) => n.textContent)], [null, null, null, ['Peler.', 'Cuire.']], 'témoin : une recette saisie à la main n’a ni bandeau, ni état de lecture, ni photo ; ses étapes passent par le même rendu');
+        // Ronde 1 (Critique) : `Element.append(null)` écrit le nœud texte « null » — la fiche n'a AUCUN nœud texte direct, avec ou sans photo.
+        eq([textesDirects(page), textesDirects(pageSo), textesDirects(pageS), pageS.textContent.includes('null')], [[], [], [], false], 'fiche : aucun nœud texte direct sous la racine — ni « null » d’une photo absente (avec photo, octets absents, recette saisie à la main)');
+        const etatDe = async (v) => texte((await renderRecipe({ id: 'rc_imp' }, { v }, await ctxDe())).querySelector('[data-role="etat-verification"]'));
+        eq([await etatDe('rv_mixte'), await etatDe('rv_une'), await etatDe('rv_sansligne')], ['4 lignes à vérifier', '1 ligne à vérifier', 'À vérifier'], 'fiche : l’état compte les lignes NON vérifiées de la version affichée (3 vérifiées sur 7 → « 4 lignes à vérifier » ; « 1 ligne à vérifier » ; une lecture sans ligne → « À vérifier »)');
+        const ligneDe = async (v) => texte((await renderRecipe({ id: 'rc_imp' }, { v }, await ctxDe())).querySelector('[data-role="ligne-lecture"]'));
+        eq([await ligneDe('rv_incomplete'), await ligneDe('rv_sansdate'), await ligneDe('rv_sansligne')], [`Lue par l’assistant le ${formatDate(LU)} · 2 ligne(s) incertaine(s) · page possiblement manquante · lecture incomplète`, 'Lue par l’assistant · 2 ligne(s) incertaine(s) · page possiblement manquante', `Lue par l’assistant le ${formatDate(LU)} · page possiblement manquante`], 'fiche : « lecture incomplète » est dite, en dernier (date, incertaines, page manquante, lecture incomplète) ; une date illisible n’est pas dite (jamais « le » suivi de rien) ; 0 incertaine → partie omise');
+        const pageF = await renderRecipe({ id: 'rc_imp' }, { v: 'rv_formes' }, await ctxDe());
+        eq([...pageF.querySelectorAll('.recipe-body ul.list.plain > li')].map((li) => [...li.querySelectorAll('.chip')].some((c) => c.textContent === 'incertain')), [false, false, true], 'fiche : la puce « incertain » pour uncertain === true seulement — « oui » et 1 (formes reçues ou restaurées) n’en ont pas');
+        const pageP = await renderRecipe({ id: 'rc_pdf' }, {}, await ctxDe());
+        eq([pageP.querySelector('[data-role="photo-plat"]'), textesDirects(pageP), !!pageP.querySelector('[data-role="bandeau-lecture"]')], [null, [], true], 'fiche : une photo du plat dont les octets ne sont pas une image (application/pdf) ne rend rien (S3), ni cadre ni nœud texte');
+        const pageX = await renderRecipe({ id: 'rc_simple' }, { v: extraction.id }, await ctxDe());
+        eq([pageX.querySelector('[data-role="bandeau-lecture"]'), [...pageX.querySelectorAll('[data-role="texte-etape"]')].map((n) => n.textContent)], [null, ['Peler.', 'Cuire.']], 'fiche : ?v= d’une version d’une AUTRE recette est ignoré (retour à la version courante) — jamais la lecture d’un autre import sur cette fiche');
       }
 
       // --- Mode cuisine (D-3) : bandeau « Lue par l'assistant, non relue » tant que la version est une extraction à vérifier ; étape entière
+      await db.put('recipe_versions', { ...extraction, id: 'rv_verif', verification_state: 'verified' }); // une extraction reçue vérifiée (cuisine et courses)
       {
         const session = (id, vids) => ({ id, recipe_id: 'rc_imp', selected_version_ids: vids, servings: 6, progress: { done_step_ids: [] }, status: 'active', units: 'original' });
         const ctxCuisine = async (sessions) => ({ ...(await ctxDe()), cook_sessions: sessions });
@@ -1302,13 +1341,10 @@ export async function runImportCibleTests({ eq, ok }) {
         const et = cuisine.querySelector('.step-big [data-role="texte-etape"]');
         eq([et?.textContent, et?.style.whiteSpace], ['Peler les pommes.\nLes couper en quartiers.', 'pre-line'], 'cuisine : l’étape « a\\nb » est rendue entière (pre-line)');
         const cuisineC = await renderCook({ id: 'cs_c' }, {}, await ctxCuisine([session('cs_c', ['rv_corr'])]));
-        const verifiee = { ...extraction, id: 'rv_verif', verification_state: 'verified' };
-        await db.put('recipe_versions', verifiee);
         const cuisineV = await renderCook({ id: 'cs_v' }, {}, await ctxCuisine([session('cs_v', ['rv_verif'])]));
         eq([cuisineC.querySelector('[data-role="bandeau-non-relue"]'), cuisineV.querySelector('[data-role="bandeau-non-relue"]')], [null, null], 'cuisine (D-3) : bandeau absent pour une correction et après vérification');
         const duo = await renderCook({ id: 'cs_duo' }, {}, await ctxCuisine([session('cs_duo', [extraction.id, 'rv_simple'])]));
         eq(texte(duo.querySelector('[data-role="bandeau-non-relue"]')), 'Tarte aux pommes · Lue par l’assistant, non relue', 'cuisine (D-3) : dans un repas, le bandeau nomme la recette non relue (pas l’autre)');
-        await db.delete('recipe_versions', 'rv_verif');
       }
 
       // --- Courses (D-3)
@@ -1317,11 +1353,14 @@ export async function runImportCibleTests({ eq, ok }) {
         const ctxCourses = async (listes) => ({ ...(await ctxDe()), shopping_lists: listes });
         const courses = await renderShoppingList({ id: 'sl_e' }, {}, await ctxCourses([liste('sl_e', extraction.id)]));
         const b = courses.querySelector('[data-role="bandeau-non-relue"]');
-        eq([texte(b), b?.classList.contains('status'), courses.querySelectorAll('ul.list > li').length > 0], ['Lue par l’assistant, non relue', true, true], 'courses (D-3) : bandeau « Lue par l’assistant, non relue » pour une extraction à vérifier, au-dessus de la liste');
+        const ulCourses = courses.querySelector('ul.list');
+        eq([texte(b), b?.classList.contains('status'), courses.querySelectorAll('ul.list > li').length > 0, !!b && !!ulCourses && b.compareDocumentPosition(ulCourses) === Node.DOCUMENT_POSITION_FOLLOWING], ['Lue par l’assistant, non relue', true, true, true], 'courses (D-3) : bandeau « Lue par l’assistant, non relue » pour une extraction à vérifier, AU-DESSUS de la liste (ordre affirmé)');
         const coursesC = await renderShoppingList({ id: 'sl_c' }, {}, await ctxCourses([liste('sl_c', 'rv_corr')]));
         const coursesS = await renderShoppingList({ id: 'sl_s' }, {}, await ctxCourses([liste('sl_s', 'rv_simple')]));
-        eq([coursesC.querySelector('[data-role="bandeau-non-relue"]'), coursesS.querySelector('[data-role="bandeau-non-relue"]')], [null, null], 'courses (D-3) : bandeau absent pour une correction et pour une recette saisie à la main');
+        const coursesV = await renderShoppingList({ id: 'sl_v' }, {}, await ctxCourses([liste('sl_v', 'rv_verif')]));
+        eq([coursesC.querySelector('[data-role="bandeau-non-relue"]'), coursesS.querySelector('[data-role="bandeau-non-relue"]'), coursesV.querySelector('[data-role="bandeau-non-relue"]')], [null, null, null], 'courses (D-3) : bandeau absent pour une correction, une recette saisie à la main et une extraction vérifiée');
       }
+      await db.delete('recipe_versions', 'rv_verif');
 
       // --- « Corriger » (Review Focus 5, spec § 4.3.7) : une étape par paragraphe, héritage de uncertain et de la provenance de lecture
       {
@@ -1329,23 +1368,75 @@ export async function runImportCibleTests({ eq, ok }) {
         const fEtapes = champ(editeur, 'Étapes'); const stepsTa = fEtapes?.querySelector('textarea');
         eq([stepsTa?.value, stepsTa?.placeholder, texte(fEtapes?.querySelector('small'))], ['Peler les pommes.\nLes couper en quartiers.\n\nCuire 45 min.', 'Une étape par paragraphe (ligne vide entre deux étapes).', 'Une étape par paragraphe (ligne vide entre deux étapes).'], 'Corriger : une étape de la version de départ porte un saut de ligne → zone jointe par une ligne vide, aide « Une étape par paragraphe (ligne vide entre deux étapes). »');
         eq(editeur.textContent.includes('2 étape(s)'), true, 'Corriger : l’aperçu compte 2 étapes (par paragraphe), pas 3 (par ligne)');
+        // Enregistrer depuis l'éditeur : la version neuve est celle qui n'existait pas avant le clic ; l'adresse posée par la navigation est rendue.
+        const idsDe = async (rid) => new Set((await db.byIndex('recipe_versions', 'recipe_id', rid)).map((v) => v.id));
+        const enregistrer = async (ed, rid) => {
+          const avant = await idsDe(rid);
+          bouton(ed, 'Enregistrer une nouvelle version').click();
+          await attendre(async () => (await idsDe(rid)).size === avant.size + 1, 'version écrite (' + rid + ')');
+          await tick();
+          const neuve = (await db.byIndex('recipe_versions', 'recipe_id', rid)).find((v) => !avant.has(v.id));
+          const hash = location.hash; history.replaceState(null, '', adresseAvant);
+          return { neuve, hash };
+        };
+        // Ronde 1 : la ligne retapée est une ligne INCERTAINE (« ? g de sucre » → « 100 g de sucre ») — elle perd uncertain, « ? ml de lait » le garde.
         const ingTa = champ(editeur, 'Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)')?.querySelector('textarea');
-        ingTa.value = ingTa.value.replace('4 pommes', '5 pommes'); ingTa.dispatchEvent(new Event('input', { bubbles: true }));
+        ingTa.value = ingTa.value.replace('? g de sucre', '100 g de sucre'); ingTa.dispatchEvent(new Event('input', { bubbles: true }));
         bouton(editeur, 'Analyser les lignes').click();
         eq(editeur.querySelectorAll('table.compare tbody tr').length, 7, 'Corriger : sept lignes analysées après le changement d’une quantité');
-        const avant = (await db.byIndex('recipe_versions', 'recipe_id', 'rc_imp')).length;
-        bouton(editeur, 'Enregistrer une nouvelle version').click();
-        await attendre(async () => (await db.byIndex('recipe_versions', 'recipe_id', 'rc_imp')).length === avant + 1, 'version de correction écrite');
-        await tick();
-        const neuve = (await db.byIndex('recipe_versions', 'recipe_id', 'rc_imp')).find((v) => ![extraction.id, 'rv_corr'].includes(v.id));
+        const { neuve, hash } = await enregistrer(editeur, 'rc_imp');
         const rc = await db.get('recipes', 'rc_imp');
         eq([neuve.kind, neuve.parent_version_id, neuve.provenance.generated_by, neuve.provenance.import_id, neuve.provenance.incomplete, neuve.provenance.missing_page, neuve.provenance.titre_lu, neuve.provenance.lu_le], ['correction', extraction.id, 'manual', 'imp_fiche', false, true, 'Tarte aux pommes', LU], 'Corriger (Review Focus 5) : la version correction hérite import_id, incomplete, missing_page, titre_lu (et la date de lecture, lu_le) de sa parente');
-        eq(neuve.ingredients.map((l) => [l.source_text, l.uncertain === true]), [['5 pommes', false], ['? g de sucre', true], ['1 oeuf', false], ['100 g de beurre', false], ['? ml de lait', true], ['1 pincée de sel', false], ['200 g de farine', false]], 'Corriger (Review Focus 5) : la ligne touchée perd uncertain, les autres le gardent');
+        eq(neuve.ingredients.map((l) => [l.source_text, l.uncertain === true]), [['4 pommes', false], ['100 g de sucre', false], ['1 oeuf', false], ['100 g de beurre', false], ['? ml de lait', true], ['1 pincée de sel', false], ['200 g de farine', false]], 'Corriger (Review Focus 5) : la ligne INCERTAINE retapée (« ? g de sucre » → « 100 g de sucre ») perd uncertain ; l’autre incertaine (« ? ml de lait ») le garde ; les autres restent sans');
         eq([neuve.steps.map((s) => s.text), neuve.verification_state], [['Peler les pommes.\nLes couper en quartiers.', 'Cuire 45 min.'], 'to_verify'], 'Corriger (Review Focus 5) : les étapes multi-lignes restent entières (parParagraphe: true au save()) ; la version reste à vérifier');
-        eq([rc.current_version_id, rc.availability, rc.verification_state, location.hash], [neuve.id, 'partial', 'to_verify', `#/recipes/rc_imp?v=${neuve.id}`], 'Corriger : la correction devient courante ; la fiche reste partial (page possiblement manquante : jamais comblée, I-1) ; navigation vers la version');
-        history.replaceState(null, '', adresseAvant);
+        eq([rc.current_version_id, rc.availability, rc.verification_state, hash], [neuve.id, 'partial', 'to_verify', `#/recipes/rc_imp?v=${neuve.id}`], 'Corriger : la correction devient courante ; la fiche reste partial (page possiblement manquante : jamais comblée, I-1) ; navigation vers la version');
         const pageN = await renderRecipe({ id: 'rc_imp' }, { v: neuve.id }, await ctxDe()); scene.append(pageN);
-        eq([texte(pageN.querySelector('[data-role="ligne-lecture"]')), texte(pageN.querySelector('[data-role="etat-verification"]')), [...pageN.querySelectorAll('.recipe-body .chip')].filter((c) => c.textContent === 'incertain').length], [LIGNE_LECTURE, '7 lignes à vérifier', 2], 'Corriger (Review Focus 5) : après la correction, le bandeau est toujours là (2 incertaines, page possiblement manquante, date de la lecture), « 7 lignes à vérifier », deux puces « incertain »');
+        eq([texte(pageN.querySelector('[data-role="ligne-lecture"]')), texte(pageN.querySelector('[data-role="etat-verification"]')), [...pageN.querySelectorAll('.recipe-body .chip')].filter((c) => c.textContent === 'incertain').length], [LIGNE_LECTURE_1, '7 lignes à vérifier', 1], 'Corriger (Review Focus 5) : après la correction, le bandeau est toujours là (1 incertaine, page possiblement manquante, date de la LECTURE — pas celle du jour), « 7 lignes à vérifier », une puce « incertain »');
+
+        // Ronde 1 : cocher « Vérifié » sur chaque ligne SANS rien retaper, puis enregistrer — le cas joué PAR l'éditeur (plus par une fixture posée à
+        // la main) : une ligne vérifiée n'est plus incertaine (une seule règle, au save()) ; la fiche dit « Vérifiée », sans « ligne(s) incertaine(s) ».
+        const editeurV = await renderRecipeEdit({ id: 'rc_imp' }, { kind: 'correction', v: extraction.id }, await ctxDe()); scene.append(editeurV);
+        const cases = () => [...editeurV.querySelectorAll('table.compare tbody input[type="checkbox"]')];
+        for (let i = 0; i < 7; i += 1) cases()[i].click();
+        eq(cases().map((c) => c.checked), [true, true, true, true, true, true, true], 'Corriger : les sept cases « Vérifié » sont cochées (sans texte retapé)');
+        const { neuve: neuveV } = await enregistrer(editeurV, 'rc_imp');
+        eq([neuveV.verification_state, neuveV.ingredients.map((l) => `${l.verification_state}/${l.uncertain}`)], ['verified', Array(7).fill('verified/false')], 'Corriger : une ligne cochée « Vérifié » est enregistrée sans incertitude (vérifiée ⇒ plus incertaine), même sans texte retapé');
+        const pageV = await renderRecipe({ id: 'rc_imp' }, { v: neuveV.id }, await ctxDe());
+        eq([texte(pageV.querySelector('[data-role="etat-verification"]')), texte(pageV.querySelector('[data-role="ligne-lecture"]')), [...pageV.querySelectorAll('.recipe-body .chip')].filter((c) => c.textContent === 'incertain').length, [...pageV.querySelectorAll('.recipe-body .chip')].filter((c) => c.textContent === 'À vérifier').length], ['Vérifiée', `Lue par l’assistant le ${formatDate(LU)} · page possiblement manquante`, 0, 0], 'Corriger puis tout cocher : « Vérifiée », ni « ligne(s) incertaine(s) » ni puce « incertain » ; le bandeau de lecture reste (page possiblement manquante, date de la lecture)');
+
+        // Ronde 1 : une étape lue avec une ligne vide INTERNE (gardée par validateParsedRecipe) reste UNE étape à la correction d'une seule quantité.
+        const editeurP = await renderRecipeEdit({ id: 'rc_para' }, { kind: 'correction', v: fabPara.version.id }, await ctxDe()); scene.append(editeurP);
+        const taP = champ(editeurP, 'Étapes')?.querySelector('textarea');
+        eq([fabPara.version.steps.map((s) => s.text), taP?.value, editeurP.textContent.includes('2 étape(s)')], [['Faire la pâte :\n\nMélanger la farine et le beurre.', 'Cuire 45 min.'], 'Faire la pâte :\nMélanger la farine et le beurre.\n\nCuire 45 min.', true], 'Corriger : une étape à ligne vide interne est jointe repliée (un seul saut de ligne) — l’aperçu compte 2 étapes, pas 3');
+        const ingP = champ(editeurP, 'Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)')?.querySelector('textarea');
+        ingP.value = ingP.value.replace('4 pommes', '5 pommes'); ingP.dispatchEvent(new Event('input', { bubbles: true }));
+        const { neuve: neuveP } = await enregistrer(editeurP, 'rc_para');
+        eq(neuveP.steps.map((s) => s.text), ['Faire la pâte :\nMélanger la farine et le beurre.', 'Cuire 45 min.'], 'Corriger (Review Focus 5) : l’étape à ligne vide interne survit entière au changement d’une seule quantité (2 étapes, pas 3)');
+
+        // Ronde 1 : relecture par l'assistant DEPUIS « Corriger » (session et fetch factices : aucun réseau réel). La version écrite est de l'assistant :
+        // elle n'hérite RIEN de l'ancienne lecture, ses étapes restent séparées en mode « par paragraphe », et le mode cuisine comme les courses disent
+        // « Lue par l'assistant, non relue » (D-3).
+        const SESSION_IA = { access_token: 'jeton-factice-t5', user: { id: 'u1', email: 'a@exemple.invalid' } };
+        const LECTURE_IA = { title: 'Tarte aux pommes', servings: 6, ingredients: [{ source_text: '4 pommes', uncertain: false }, { source_text: '150 g de sucre', uncertain: false }], steps: [{ text: 'Peler les pommes.' }, { text: 'Cuire 45 min.' }], incomplete: false, missing_page: false };
+        let appelsIA = 0;
+        globalThis.fetch = async () => { appelsIA += 1; return { ok: true, status: 200, headers: new Headers(), text: async () => JSON.stringify({ model: 'claude-x', content: [{ type: 'text', text: JSON.stringify(LECTURE_IA) }] }) }; };
+        try {
+          const ctxIA = { ...(await ctxDe()), pagesById: new Map([['pg_ia', { id: 'pg_ia', sha256: shaPhoto, printed_page: 132 }]]), sync: { user: SESSION_IA.user, auth: { jeton: async () => SESSION_IA } } };
+          const editeurIA = await renderRecipeEdit({ id: 'rc_imp' }, { kind: 'correction', v: extraction.id, pages: 'pg_ia' }, ctxIA); scene.append(editeurIA);
+          const btnIA = bouton(editeurIA, 'Extraire avec l’assistant IA');
+          eq(btnIA?.disabled, false, 'Corriger (relecture par l’assistant) : bouton allumé (session, une page)');
+          btnIA.click();
+          await attendre(() => editeurIA.textContent.includes('Extraction proposée par l’assistant'), 'relecture par l’assistant reçue');
+          const { neuve: neuveIA } = await enregistrer(editeurIA, 'rc_imp');
+          eq([appelsIA, neuveIA.kind, neuveIA.provenance.generated_by, ['import_id', 'incomplete', 'missing_page', 'titre_lu', 'lu_le'].filter((k) => k in neuveIA.provenance), K.banniereLecture(neuveIA), K.estExtractionNonRelue(neuveIA), neuveIA.steps.map((s) => s.text)], [1, 'correction', 'ai', [], null, true, ['Peler les pommes.', 'Cuire 45 min.']], 'Corriger → relecture par l’assistant : un appel ; la version est de l’assistant et n’hérite RIEN de l’ancienne lecture (ni import_id, ni page manquante, ni titre lu, ni date) ; ses deux étapes restent deux en mode « par paragraphe »');
+          const cuisineIA = await renderCook({ id: 'cs_ia' }, {}, { ...(await ctxDe()), cook_sessions: [{ id: 'cs_ia', recipe_id: 'rc_imp', selected_version_ids: [neuveIA.id], servings: 6, progress: { done_step_ids: [] }, status: 'active', units: 'original' }] });
+          const coursesIA = await renderShoppingList({ id: 'sl_ia' }, {}, { ...(await ctxDe()), shopping_lists: [{ id: 'sl_ia', title: 'Courses', items: [{ recipe_id: 'rc_imp', recipe_version_id: neuveIA.id, servings: 6, title: 'T' }], checked: {} }] });
+          eq([texte(cuisineIA.querySelector('[data-role="bandeau-non-relue"]')), texte(coursesIA.querySelector('[data-role="bandeau-non-relue"]'))], ['Lue par l’assistant, non relue', 'Lue par l’assistant, non relue'], 'Corriger → relecture par l’assistant : mode cuisine et courses disent « Lue par l’assistant, non relue » (D-3), même écrite en correction');
+        } finally { globalThis.fetch = async (u) => { reseau += 1; throw new Error('aucun reseau attendu : ' + u); }; }
+
+        // Ronde 1 : `?v=` d'une version d'une AUTRE recette n'est jamais la base de l'éditeur (ni son héritage de lecture).
+        const editeurX = await renderRecipeEdit({ id: 'rc_simple' }, { kind: 'correction', v: extraction.id }, await ctxDe());
+        eq(champ(editeurX, 'Étapes')?.querySelector('textarea')?.value, 'Peler.\nCuire.', 'Corriger : ?v= d’une version d’une AUTRE recette est ignoré — la base est la version courante de cette fiche');
         const editeurS = await renderRecipeEdit({ id: 'rc_simple' }, { kind: 'correction', v: 'rv_simple' }, await ctxDe()); scene.append(editeurS);
         const fS = champ(editeurS, 'Étapes'); const taS = fS?.querySelector('textarea');
         eq([taS?.value, taS?.placeholder, fS?.querySelector('small')], ['Peler.\nCuire.', 'Une étape par ligne ou par paragraphe.', null], 'éditeur d’aujourd’hui : sans étape multi-ligne, une étape par ligne, aide actuelle, pas d’aide « par paragraphe »');
