@@ -13,13 +13,18 @@ const sha = (s) => createHash('sha256').update(s).digest('hex');
 // Corps d'une fonction, borne au premier « $$; » qui suit sa declaration : une assertion portant sur UNE fonction ne
 // peut pas etre satisfaite par le texte d'une autre.
 // La parenthese ouvrante est indispensable : « sync_purge » est un prefixe de « sync_purge_all ».
-function corps(nom) {
-  const debut = sql.indexOf(`create or replace function public.${nom}(`);
+const corpsDe = (texte, nom) => {
+  const debut = texte.indexOf(`create or replace function public.${nom}(`);
   assert.notEqual(debut, -1, 'declaration de ' + nom);
-  const fin = sql.indexOf('$$;', debut);
+  const fin = texte.indexOf('$$;', debut);
   assert.notEqual(fin, -1, 'fin du corps de ' + nom);
-  return sql.slice(debut, fin + 3);
-}
+  return texte.slice(debut, fin + 3);
+};
+const corps = (nom) => corpsDe(sql, nom);
+// La liste litterale des magasins telle que les quatre fonctions la portent : array['books', …].
+const litteralDe = (stores) => 'array[' + stores.map((s) => `'${s}'`).join(', ') + ']';
+// Un fichier sans ses lignes de commentaire (-- en SQL, // en JS/TS) : un filet de texte ne doit jamais etre satisfait par un commentaire.
+const sansCommentaires = (texte) => texte.split('\n').filter((ligne) => !/^\s*(--|\/\/)/.test(ligne)).join('\n');
 
 test('25 tables, cle composee, proprietaire non nul, aucun owner_id is null', () => {
   assert.equal((sql.match(/create table public\./g) || []).length, 25);
@@ -50,8 +55,7 @@ test('sync_push : liste litterale, format %I, bornes, motifs, idempotence sans e
   assert.doesNotMatch(corpsPush, /security definer/);
 });
 test('la liste litterale vaut exactement SYNC_STORES_0001, aux quatre endroits (spec § 3.1)', () => {
-  const litteral = 'array[' + SYNC_STORES_0001.map((s) => `'${s}'`).join(', ') + ']';
-  assert.equal(sql.split(litteral).length - 1, 4); // sync_push, sync_purge, sync_purge_all, purge_tombstones
+  assert.equal(sql.split(litteralDe(SYNC_STORES_0001)).length - 1, 4); // sync_push, sync_purge, sync_purge_all, purge_tombstones
 });
 test('files : pas de blob en base ; colonnes size et mime', () => {
   assert.match(sql, /check \(not \(data \? 'blob'\)\)/);
@@ -224,8 +228,7 @@ test('0003 : une table neuve, revoke anon, quatre fonctions avec les 26 magasins
   assert.equal((delta.match(/create index /g) || []).length, 1, 'un seul index');
   assert.match(delta, /revoke all on public\.assistant_config from anon;/);
   assert.equal((delta.match(/revoke all on public\./g) || []).length, 1, 'un seul revoke de table');
-  const litteral26 = 'array[' + SYNC_STORES_0003.map((s) => `'${s}'`).join(', ') + ']';
-  assert.equal(delta.split(litteral26).length - 1, 4, 'sync_push, sync_purge, sync_purge_all, purge_tombstones');
+  assert.equal(delta.split(litteralDe(SYNC_STORES_0003)).length - 1, 4, 'sync_push, sync_purge, sync_purge_all, purge_tombstones');
   assert.match(delta, /"assistant_config":"id"/);
   assert.match(delta, /"assistant_config":\[\]/);
   assert.doesNotMatch(delta, /cron\.schedule/);
@@ -240,9 +243,8 @@ test('0003 : les quatre fonctions recreees sont celles de 0001, aux trois listes
   assert.notEqual(debutDe(sql), -1); assert.notEqual(debutDe(delta), -1);
   const bloc0001 = sql.slice(debutDe(sql), sql.indexOf("select cron.schedule('cuisine-os-tombales'"));
   const enJson = (stores, champ) => JSON.stringify(Object.fromEntries(stores.map((s) => [s, TABLES[s][champ]]))).replace(/'/g, "''");
-  const litteral = (stores) => 'array[' + stores.map((s) => `'${s}'`).join(', ') + ']';
   const ramene = delta.slice(debutDe(delta))
-    .split(litteral(SYNC_STORES_0003)).join(litteral(SYNC_STORES_0001))
+    .split(litteralDe(SYNC_STORES_0003)).join(litteralDe(SYNC_STORES_0001))
     .split(enJson(SYNC_STORES_0003, 'key')).join(enJson(SYNC_STORES_0001, 'key'))
     .split(enJson(SYNC_STORES_0003, 'required')).join(enJson(SYNC_STORES_0001, 'required'));
   assert.equal(ramene, bloc0001);
@@ -542,7 +544,6 @@ test('README : etape 8 bis (0003 et sa preuve) et procedure « appareil perdu ou
 // dans le mauvais ordre. Les tests de texte du SOURCE d'index.ts restent des filets : le comportement des gardes se
 // prouve par les sondes du deploiement (README, etape 10), pas ici.
 import { OUTILS as OUTILS_PASSERELLE } from '../supabase/functions/assistant/logique.js';
-const sansCommentaires = (texte) => texte.split('\n').filter((ligne) => !/^\s*(--|\/\/)/.test(ligne)).join('\n');
 const FONCTION = 'supabase/functions/assistant';
 
 test('0004 : une transaction a ajout seul, journal de compteurs sans contenu, RLS sans regle, aucun privilege client', () => {
@@ -820,16 +821,7 @@ test('RESULTATS-mitsu (F-1) : la note de S5 ne dit plus « cle publique nouvelle
 // 0005 est rendue pour les magasins de SYNC_STORES absents de la liste FIGEE SYNC_STORES_0003 (aujourd'hui : imports, le dernier, K-9), avec
 // les quatre fonctions recreees sur les 27 noms. 0001, 0002 et 0003 ne bougent pas d'un octet (empreintes plus haut). Les tests relisent le
 // SQL PRODUIT (renderMigrations) puis le fichier commite, la preuve, le README et RESULTATS, comme pour 0003.
-const corpsDe = (texte, nom) => {
-  const debut = texte.indexOf(`create or replace function public.${nom}(`);
-  assert.notEqual(debut, -1, 'declaration de ' + nom);
-  const fin = texte.indexOf('$$;', debut);
-  assert.notEqual(fin, -1, 'fin du corps de ' + nom);
-  return texte.slice(debut, fin + 3);
-};
 const QUATRE = ['sync_push', 'sync_purge', 'sync_purge_all', 'purge_tombstones'];
-const litteralDe = (stores) => 'array[' + stores.map((s) => `'${s}'`).join(', ') + ']';
-const sansCommentairesSql = (texte) => texte.split('\n').filter((ligne) => !/^\s*--/.test(ligne)).join('\n');
 
 test('SYNC_STORES : 27 noms, les 26 figes de 0003 puis imports, le dernier (K-9) ; 0005 ne porte qu imports', () => {
   assert.equal(SYNC_STORES.length, 27);
@@ -936,59 +928,98 @@ test('0005 : --check rend 0 sur le depot, 1 (en nommant 0005 seule) sur une copi
 });
 
 // La preuve 0005 est ecrite a la main (gabarit : la preuve 0003) et jouee par Neegan ; sa sortie va dans un depot PUBLIC. Memes filets que
-// 0003 : rollback dernier, une transaction, aucune adresse, jamais la colonne data (ici par les colonnes generees et des comparaisons
-// « conforme / different »), reponse de sync_push jamais affichee telle quelle, lectures de la table sous RLS seulement, les verdicts du brief.
-test('preuve 0005 : rollback final, une transaction, BILAN, jeton A seul, aucune adresse, jamais la colonne data, lectures sous RLS', () => {
-  const p = lire('supabase/proofs/0005_imports.sql');
-  const code = sansCommentairesSql(p);
+// 0003, UN TEST PAR INVARIANT (ronde 1) : rollback et transaction ; jetons et adresses ; LISTE BLANCHE de ce que chaque instruction qui
+// touche public.imports peut porter ; lectures sous RLS seulement ; reponses de sync_push jamais converties ; puis les verdicts, section
+// par section. Ronde 1 (Important) : la liste NOIRE de formes (« select * », « to_jsonb( »…) laissait VERTS trois mutants qui affichaient la
+// fiche entiere (`i::text`, `to_json(i)::text` sur un alias de table) ou la reponse de sync_push (`(reponse->'rejected')::text`) ; mesure
+// sur une copie : 5 mutants sur 5 survivaient, 5 sur 5 rougissent avec les listes blanches ci-dessous.
+const PREUVE_0005 = 'supabase/proofs/0005_imports.sql';
+const preuve0005 = () => { const p = lire(PREUVE_0005); return { p, code: sansCommentaires(p) }; };
+// Les instructions (hors commentaires) qui lisent ou touchent public.imports : les relectures 3.02, 3.03, 3.05, 3.07, le delete 4.01, 4.02.
+const instructionsImports = (code) => code.split(';').map((x) => x.trim()).filter((x) => /\bfrom public\.imports\b/.test(x));
+
+test('preuve 0005 : rollback final, une seule transaction, BILAN, « Run without RLS » rappele', () => {
+  const { p, code } = preuve0005();
   const l = instructions(code);
   assert.equal(instructions(p).at(-1), 'rollback;', 'rollback est la derniere ligne non vide, commentaires compris');
   assert.equal(l[l.length - 1], 'rollback;');
   assert.equal(l[l.length - 2], 'select ordre, etape, attendu, obtenu, ok from pg_temp.preuve order by ordre;');
   assert.equal(l.filter((x) => x === 'begin;').length, 1, 'une seule transaction');
   assert.match(p, /select 999, 'BILAN'/);
+  assert.ok(p.includes('« Run without RLS »'), 'le piege du tableau de bord est rappele');
+});
+test('preuve 0005 : jeton A seul, aucune adresse, aucune cle', () => {
+  const { p } = preuve0005();
   const sansJetons = p.replace(/A_EMAIL|@>/g, '');
   assert.doesNotMatch(sansJetons, /@/, 'aucune adresse : seul le jeton A_EMAIL');
   for (const j of ["'A_UUID'", "'A_EMAIL'"]) assert.ok(p.includes(j), j);
   assert.doesNotMatch(p, /B_UUID|B_EMAIL/, 'un seul compte de preuve');
-  // Liste BLANCHE des formes du mot « data » hors commentaires : la cle « data » du JSON pousse, la fiche entiere comparee sans etre affichee.
-  const AUTORISEES = ['"data":{', "bool_and(data = '"];
-  for (const a of AUTORISEES) assert.ok(code.includes(a), 'forme autorisee presente : ' + a);
-  const reste = AUTORISEES.reduce((t, a) => t.split(a).join(''), code);
-  assert.deepEqual(reste.match(/.{0,40}\bdata\b.{0,40}/gi) || [], [], 'data hors des formes autorisees');
-  for (const interdit of ['select *', '.*', 'to_jsonb(', 'row_to_json', 'jsonb_agg(', 'json_agg(', 'array_agg(', 'jsonb_pretty(']) {
-    assert.ok(!code.toLowerCase().includes(interdit), interdit);
+  assert.ok(!p.includes('sk-'), 'aucune cle, meme factice : imports n en porte pas');
+});
+// LISTE BLANCHE des lectures de public.imports. Une fois les litteraux vides et les quatre formes admises retirees — la fiche entiere
+// COMPAREE par bool_and(data = '…'::jsonb), un compte affiche par count(*)::text, count(*) nu, « from public.imports where » —, il ne
+// doit rester AUCUNE conversion (::), aucune etoile, aucun chemin json (-> / #>), aucun alias ni jointure derriere le nom de la table, et
+// aucun identifiant hors des mots ci-dessous (les colonnes generees, owner_id et id en comparaison, auth.uid(), la plomberie de
+// l'insertion dans pg_temp.preuve et du CTE `d` de 4.01). Un identifiant de plus (string_agg, to_json, format, un alias `i`) rougit avec
+// son instruction : c'est ce qui aurait ete AFFICHE dans RESULTATS-mitsu.md. Une forme legitime de plus s'ajoute ICI, explicitement.
+const FORMES_IMPORTS = ["bool_and(data = ''::jsonb)", 'count(*)::text', 'count(*)', 'from public.imports where'];
+const MOTS_IMPORTS = new Set(['insert', 'into', 'pg_temp', 'preuve', 'select', 'case', 'when', 'then', 'else', 'end', 'coalesce', 'bool_and', 'and', 'or', 'not',
+  'is', 'null', 'true', 'false', 'with', 'd', 'as', 'delete', 'returning', 'from', 'where', 'owner_id', 'auth', 'uid', 'id', 'edition_id', 'recipe_id', 'status']);
+test('preuve 0005 : jamais la colonne data ni une ligne entiere — liste blanche de chaque instruction qui touche public.imports', () => {
+  const { code } = preuve0005();
+  const lectures = instructionsImports(code);
+  assert.equal(lectures.length, 6, 'six instructions touchent public.imports : 3.02, 3.03, 3.05, 3.07, 4.01 (delete) et 4.02');
+  assert.equal(code.split("bool_and(data = '").length - 1, 2, 'la fiche entiere est comparee deux fois (3.03 : obtenu et ok), jamais ailleurs');
+  for (const instr of lectures) {
+    const ou = instr.replace(/\s+/g, ' ').slice(0, 70);
+    assert.doesNotMatch(instr, /from public\.imports\s+(?!where\b)\S/, 'ni alias ni jointure derriere public.imports : ' + ou);
+    const sansLitteraux = instr.replace(/'(?:[^']|'')*'/g, "''");
+    const reste = FORMES_IMPORTS.reduce((t, f) => t.split(f).join(' '), sansLitteraux);
+    assert.doesNotMatch(reste, /::|\*|->|#>/, 'conversion, etoile ou chemin json hors des formes admises : ' + ou);
+    const inconnus = (reste.match(/\b[a-z_][a-z0-9_]*\b/gi) || []).filter((m) => !MOTS_IMPORTS.has(m.toLowerCase()));
+    assert.deepEqual(inconnus, [], 'identifiants hors liste blanche dans : ' + ou);
   }
-  // Toute lecture de public.imports se fait sous authenticated (RLS) : aucune sous postgres.
+  // Hors de ces six instructions, le mot « data » n'est que la cle du JSON pousse a sync_push.
+  const horsLectures = lectures.reduce((t, i) => t.split(i).join(''), code);
+  assert.deepEqual((horsLectures.match(/.{0,40}\bdata\b.{0,40}/gi) || []).filter((x) => !x.includes('"data":{')), [], 'data hors des lectures et hors du JSON pousse');
+});
+test('preuve 0005 : toute lecture de public.imports se fait sous authenticated (RLS) — six, pas une de moins ; set/reset role en nombre egal', () => {
+  const { code } = preuve0005();
   let role = 'postgres';
   let sousRls = 0;
   for (const instr of code.split(';').map((x) => x.trim())) {
     if (instr === 'set local role authenticated') role = 'authenticated';
     else if (instr === 'reset role') role = 'postgres';
-    else if (/from public\.imports\b/.test(instr)) { assert.equal(role, 'authenticated', 'lecture hors RLS : ' + instr.slice(0, 120)); sousRls += 1; }
+    else if (/\bfrom public\.imports\b/.test(instr)) { assert.equal(role, 'authenticated', 'lecture hors RLS : ' + instr.slice(0, 120)); sousRls += 1; }
   }
-  assert.ok(sousRls >= 5, 'les relectures 3.02, 3.03, 3.05, 3.07, 4.01 et 4.02 sont lues sous RLS : ' + sousRls);
+  assert.equal(sousRls, 6, 'les relectures 3.02, 3.03, 3.05, 3.07, le delete 4.01 et 4.02 sont joues sous RLS : ' + sousRls);
   const sets = (code.match(/set local role authenticated;/g) || []).length;
   assert.ok(sets >= 1 && sets === (code.match(/reset role;/g) || []).length, 'set local role / reset role en nombre egal');
-  // Les reponses de sync_push : trois envois nommes « reponse », jamais convertis en texte.
+});
+// LISTE BLANCHE des reponses de sync_push : « reponse » n'existe que nommee en sortie d'un envoi, COMPTEE par jsonb_array_length sur
+// accepted / adjusted / rejected, ou COMPAREE par @> a la cle de la fiche. Jamais convertie (::text, ->>, #>>), jamais parcourue
+// (->0->'server' porterait la ligne du serveur dans un conflit). Le mot hors de ces formes rougit.
+const FORMES_REPONSE = ["jsonb_array_length(reponse->'accepted')", "jsonb_array_length(reponse->'adjusted')", "jsonb_array_length(reponse->'rejected')",
+  `reponse->'accepted' @> '[{"store":"imports","id":"imp_preuve"}]'::jsonb`, ') as reponse) t;'];
+test('preuve 0005 : trois envois sync_push nommes reponse, comptes ou compares, jamais convertis ni parcourus', () => {
+  const { p, code } = preuve0005();
   const appels = (p.match(/public\.sync_push\('\[/g) || []).length;
   assert.equal(appels, 3, 'trois envois : 3.01, 3.04, 3.06');
   assert.equal((p.match(/\) as reponse\) t;/g) || []).length, appels, 'chaque envoi est nomme reponse');
-  assert.ok(!p.includes('reponse::text') && !p.includes("reponse->'rejected'->0->'server'"), 'reponse jamais affichee');
-  assert.ok(!p.includes('sk-'), 'aucune cle, meme factice : imports n en porte pas');
-  assert.ok(p.includes('« Run without RLS »'), 'le piege du tableau de bord est rappele');
+  const reste = FORMES_REPONSE.reduce((t, f) => t.split(f).join(' '), code);
+  assert.deepEqual(reste.match(/.{0,30}\breponse\b.{0,30}/g) || [], [], 'reponse hors des formes admises');
 });
-test('preuve 0005 : gardes, table et RLS, colonnes generees, privileges des 27, envoi imports accepte puis relu, delete sous app.purge, les quatre fonctions a 27', () => {
-  const p = lire('supabase/proofs/0005_imports.sql');
-  const code = sansCommentairesSql(p);
-  // Gardes 0 : 0005 collee (la table ET sync_push), adresse listee, sans compte.
+test('preuve 0005 § 0 : gardes de lecture (table, sync_push connait imports, adresse listee, sans compte) et les 35 verdicts numerotes', () => {
+  const { code } = preuve0005();
   assert.ok(code.includes("to_regclass('public.imports') is null"), 'garde : table');
   assert.ok(code.includes("position('''imports''' in pg_get_functiondef('public.sync_push(jsonb)'::regprocedure)) = 0"), 'garde : sync_push connait imports');
   assert.ok(code.includes("from private.allowed_users where email = 'A_EMAIL'"), 'garde : adresse listee');
   assert.ok(code.includes("from auth.users where email = 'A_EMAIL'"), 'garde : pas de compte');
   for (const n of ['0.01', '0.02', '1.01', '1.02', '1.03', '1.04', '1.05', '1.06', '1.07', '1.08', '2.01', '2.02', '2.03', '2.04', '2.05', '2.06', '2.07', '2.08', '2.09', '2.10', '2.11',
     '3.01', '3.02', '3.03', '3.04', '3.05', '3.06', '3.07', '4.01', '4.02', '5.01', '5.02', '5.03', '5.04', '5.05']) assert.ok(code.includes(`${n},`), 'verdict ' + n);
-  // 1. Table : RLS, quatre regles (delete sous app.purge), declencheur, index recv, cle primaire, cascade, colonnes generees, leurs index.
+});
+test('preuve 0005 § 1 : RLS, quatre regles (delete sous app.purge), declencheur, index recv, cle primaire, cascade, colonnes generees stockees et leurs index', () => {
+  const { code } = preuve0005();
   assert.ok(code.includes("relrowsecurity from pg_class where oid = to_regclass('public.imports')"), '1.01 RLS');
   assert.ok(code.includes("tablename = 'imports'") && code.includes("qual like '%app.purge%'"), '1.02 regles');
   assert.ok(code.includes("tgname = 'imports_seq'") && code.includes("tgfoid = 'public.touch_server_seq()'::regprocedure"), '1.03 declencheur');
@@ -997,7 +1028,9 @@ test('preuve 0005 : gardes, table et RLS, colonnes generees, privileges des 27, 
   assert.ok(code.includes("confrelid = 'auth.users'::regclass and confdeltype = 'c'"), '1.06 cascade');
   assert.ok(code.includes("attname in ('edition_id', 'recipe_id', 'status')") && code.includes("attgenerated = 's'") && code.includes("atttypid = 'text'::regtype") && code.includes('not attisdropped'), '1.07 colonnes generees stockees, text');
   assert.ok(code.includes("indexname in ('imports_edition_id', 'imports_recipe_id', 'imports_status')"), '1.08 index des colonnes generees');
-  // 2. Privileges : authenticated sur imports ; anon sur aucune table de public, les 27 synchronisees nommees ; execute des quatre ; RLS des 27.
+});
+test('preuve 0005 § 2 : authenticated sur imports ; anon sur aucune table de public, les 27 synchronisees nommees ; execute des quatre ; RLS des 27', () => {
+  const { code } = preuve0005();
   for (const priv of ['select', 'insert', 'update']) assert.ok(code.includes(`has_table_privilege('authenticated', 'public.imports', '${priv}')`), '2.01 ' + priv);
   const d202 = code.indexOf('select 2.02,');
   assert.notEqual(d202, -1, 'verdict 2.02');
@@ -1014,18 +1047,25 @@ test('preuve 0005 : gardes, table et RLS, colonnes generees, privileges des 27, 
   assert.notEqual(d211, -1, 'verdict 2.11');
   const v211 = code.slice(d211, code.indexOf('insert into pg_temp.preuve', d211));
   assert.ok(v211.includes('relrowsecurity') && v211.includes(litteralDe(SYNC_STORES)) && v211.includes('= 27'), '2.11 : RLS sur les 27');
-  // 3. Envoi : une ligne imports (a_lancer) acceptee, relue par ses colonnes generees ; transition a_verifier plus recente acceptee ; import d index sans recipe_id.
+});
+test('preuve 0005 § 3 : session de A, envoi imports accepte et nomme, relu par ses colonnes generees, transition suivie, import d index sans recipe_id', () => {
+  const { code } = preuve0005();
+  assert.ok(code.includes('set local request.jwt.claims = \'{"sub":"A_UUID","email":"A_EMAIL","role":"authenticated"}\''), 'session de A');
   assert.ok(code.includes('"store":"imports","id":"imp_preuve","data":{"id":"imp_preuve"'), '3.01 : la fiche poussee porte sa cle');
   assert.ok(code.includes(`reponse->'accepted' @> '[{"store":"imports","id":"imp_preuve"}]'::jsonb`), '3.01 : accepted nomme la ligne');
   assert.ok(code.includes("edition_id = 'ed_preuve' and recipe_id = 'rc_preuve' and status = 'a_lancer'"), '3.02 : colonnes generees relues (comparees, pas affichees)');
   assert.ok(code.includes("status = 'a_verifier'"), '3.05 : la colonne generee suit la fiche');
   assert.ok(code.includes('"id":"imp_index"') && code.includes('"recipe_id":null'), '3.06 : import d index sans recipe_id');
   assert.ok(code.includes('recipe_id is null'), '3.07 : colonne generee nulle');
-  assert.ok(code.includes('set local request.jwt.claims = \'{"sub":"A_UUID","email":"A_EMAIL","role":"authenticated"}\''), 'session de A');
-  // 4. Delete direct sans app.purge : rien, sans erreur.
+});
+test('preuve 0005 § 4 : delete direct sans app.purge, drapeau remis a vide, rien de supprime', () => {
+  const { code } = preuve0005();
   assert.ok(code.includes("set_config('app.purge', '', true)"), 'drapeau remis a vide');
   assert.match(code, /with d as \(delete from public\.imports where id = 'imp_preuve' returning 1\)/);
-  // 5. Les quatre fonctions : 27 magasins, liste finissant par assistant_config, imports ; keys et required.
+  assert.ok(code.includes("'A garde ses deux lignes apres le delete', '2'"), '4.02 : les deux lignes restent');
+});
+test('preuve 0005 § 5 : les quatre fonctions relues a 27, liste finissant par assistant_config, imports ; keys et required', () => {
+  const { code } = preuve0005();
   for (const f of ['public.sync_push(jsonb)', 'public.sync_purge(text, text)', 'public.sync_purge_all()', 'public.purge_tombstones()']) assert.ok(code.includes(`'${f}')`), 'definition relue : ' + f);
   assert.ok(code.includes('pg_get_functiondef(to_regprocedure(f))'), 'les quatre corps sont relus');
   assert.ok(code.includes("position('''assistant_config'', ''imports'']' in y.d) > 0"), 'imports dernier (K-9)');
@@ -1040,7 +1080,7 @@ test('README : etape 11 (0005, notify seule, preuve, RESULTATS) entre 10 et « O
   assert.ok(r.indexOf("### 10. La passerelle de l'assistant") < debut && debut < r.indexOf('## Où coller les sorties'), '11 apres 10, avant « Où coller les sorties »');
   const etape = rubrique(r, titre);
   for (const m of ['migrations/0005_imports.sql', 'proofs/0005_imports.sql', "notify pgrst, 'reload schema';", 'Run without RLS', 'exemple.invalid', 'A_UUID', 'A_EMAIL',
-    'push', 'RESULTATS-mitsu.md', 'SYNC_STORES_0003', 'SYNC_STORES_0005', 'shasum -a 256 supabase/migrations/0005_imports.sql', 'edition_id', 'recipe_id', 'status', '27',
+    'RESULTATS-mitsu.md', 'SYNC_STORES_0003', 'SYNC_STORES_0005', 'shasum -a 256 supabase/migrations/0005_imports.sql', 'edition_id', 'recipe_id', 'status', '27',
     'sync_push', 'sync_purge', 'sync_purge_all', 'purge_tombstones', 'Description de magasin absente ou inconnue', 'Décompte de magasin inconnu : imports',
     "mets l'app à jour", 'Ensuite seulement : fusion et `push`.', 'quarantaine']) assert.ok(etape.includes(m), m);
   // Ordre des gestes : adresse de preuve, 0005, notify (collee seule), preuve, retrait de l'adresse, RESULTATS.

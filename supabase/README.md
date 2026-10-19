@@ -1,7 +1,7 @@
 # Supabase — comment appliquer et prouver le serveur de synchronisation
 
 Ce dossier contient **tout le serveur** de Cuisine OS : quatre migrations générées (`0001`, `0002`, `0003`, `0005`) et une
-écrite à la main (`0004`) (`migrations/`), les preuves à jouer après les avoir appliquées (`proofs/`) et la fonction de la passerelle de l'assistant
+écrite à la main (`0004`), dans `migrations/` ; les preuves à jouer après les avoir appliquées (`proofs/`) et la fonction de la passerelle de l'assistant
 (`functions/`). Rien n'est appliqué automatiquement : chaque étape est un geste de
 Neegan dans l'éditeur SQL du tableau de bord Supabase. Spec de référence :
 `docs/spec-compte-et-stockage-distant.md` (§ 3 pour le serveur, § 7.2 pour les preuves).
@@ -39,7 +39,7 @@ projet à l'autre.
 
 ## Trois choses à savoir avant de coller
 
-- **Coller depuis l'éditeur SQL du tableau de bord, sous le rôle `postgres`.** Les 25 tables n'héritent des
+- **Coller depuis l'éditeur SQL du tableau de bord, sous le rôle `postgres`.** Les tables synchronisées (27 avec `0005`) n'héritent des
   privilèges de `authenticated` que par les `alter default privileges` du projet, qui ne s'appliquent qu'aux objets
   créés par `postgres` dans le schéma `public`. Appliquées par une autre connexion (un autre rôle, un outil tiers),
   les tables existeraient, les règles aussi, et **l'application ne pourrait rien lire ni écrire** : la section 1 de
@@ -300,7 +300,11 @@ Lot A « importer une recette repérée » (spec `docs/superpowers/specs/2026-10
 imports (magasin `imports`, 27e magasin synchronisé, le dernier, K-9) a sa table sur le serveur. Cette étape se joue **une fois**,
 après `0003` (elle ne dépend pas de `0004`), et **avant tout `push` du code de ce lot** : un client neuf contre un serveur sans
 `0005` verrait `sync_push` refuser son lot (`store inconnu`) et mettrait ses lignes `imports` en quarantaine (`refus`, bruyante, non
-destructive : Réglages → Synchronisation → « Réessayer » sur l'entrée, une fois `0005` collée).
+destructive : Réglages → Synchronisation → « Réessayer » sur l'entrée, une fois `0005` collée). Côté **réception**, le même client
+s'arrêterait sur `imports` — la dernière table (K-9) : les 26 autres sont reçues, rien n'est perdu — avec un échange en erreur à chaque
+passe (le 404 de PostgREST sur une table qu'il ne connaît pas est classé `inconnu`), visible dans Réglages → Synchronisation ; il
+disparaît sans geste dès que `0005` est collée et le cache de schéma de PostgREST rechargé (geste 3). Lecture du code (`src/sync/transport.js`, `src/sync/pull.js`), non
+mesurée contre PostgREST.
 
 `0005` est **à ajout seul**, générée par `tools/generer-migrations.mjs` pour les magasins de `SYNC_STORES` absents de la liste figée
 `SYNC_STORES_0003` (aujourd'hui `imports`, seul) : elle crée `public.imports` (même gabarit que les 26 autres tables, plus trois
@@ -336,8 +340,8 @@ ici non plus.
    remis, aucune adresse. Ensuite seulement : fusion et `push`.
 
 **Archives et clients plus anciens.** Une archive ZIP faite par l'app à jour porte `data/imports.json` et son décompte. Un client
-**plus ancien** (0.8.x) qui la lit la refuse déjà, par ses contrôles d'archive — « Description de magasin absente ou inconnue » et
-« Décompte de magasin inconnu : imports » — : le remède est simple, **mets l'app à jour** sur cet appareil (recharge la page ou relance
+**plus ancien** (0.8.x) qui la lit la refuse déjà, par ses contrôles d'archive — trois messages : « Description de magasin absente ou inconnue »,
+« Décompte de magasin inconnu : imports » et « Entrée non déclarée dans le manifeste : data/imports.json » — : le remède est simple, **mets l'app à jour** sur cet appareil (recharge la page ou relance
 l'app installée), puis restaure ; ne retouche pas l'archive. L'inverse — une archive d'avant le lot lue par l'app à jour — se restaure
 en fusion comme en remplacement : `imports` y vaut une liste vide.
 

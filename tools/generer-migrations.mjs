@@ -199,6 +199,19 @@ revoke execute on function public.purge_tombstones() from public, anon, authenti
 `;
 }
 
+// Une migration À AJOUT SEUL (0003, 0005, la 0006 à venir), d'un seul gabarit : les tables neuves (`nouvelles` : celles de `stores`
+// absentes de la liste figée précédente), leur révocation pour anon (S4 : la révocation générale de 0001 n'a couvert que les tables
+// d'alors), puis les quatre fonctions recréées avec la liste complète `stores`. Un seul texte pour toutes : l'empreinte épinglée de 0003
+// dans le test et `--check` garantissent qu'il rend 0003 octet pour octet (ronde 1 de la tâche 2 du lot A : le bloc 0005 recopiait 0003).
+function ajoutSeul(nom, spec, nouvelles, stores, apres) {
+  return ENTETE(nom, spec) + `-- Migration À AJOUT SEUL : ${nouvelles.length} table(s) neuve(s) et les quatre fonctions recréées avec la liste des ${stores.length} magasins.
+-- À coller APRÈS ${apres}, une seule fois. Les droits des fonctions sont rejoués (idempotents).
+
+${nouvelles.map(table).join('\n')}-- S4 : la révocation générale pour anon, en 0001, n'a couvert que les tables d'alors ; chaque table neuve est révoquée ici.
+${nouvelles.map((s) => `revoke all on public.${s} from anon;\n`).join('')}
+` + fonctions(stores);
+}
+
 export function renderMigrations() {
   const stores = SYNC_STORES_0001;
   const tables = ENTETE('0001_tables_et_regles.sql') + `create extension if not exists pg_cron;
@@ -301,24 +314,14 @@ revoke all on private.storage_usage from anon, authenticated;
   // Les tables neuves (celles de SYNC_STORES_0003 absentes de la liste figée de 0001), leur révocation pour anon, puis les quatre
   // fonctions recréées avec les 26 noms. Pas de cron.schedule ici : la tâche planifiée appelle purge_tombstones par son nom, la
   // recréer ne la touche pas. Un 27e magasin (imports) va dans 0005, rendue pour les magasins de SYNC_STORES absents de SYNC_STORES_0003.
-  const nouvelles = SYNC_STORES_0003.filter((s) => !SYNC_STORES_0001.includes(s));
-  const delta = ENTETE('0003_assistant_config.sql', 'docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md (rév. 2, § 6)') + `-- Migration À AJOUT SEUL : ${nouvelles.length} table(s) neuve(s) et les quatre fonctions recréées avec la liste des ${SYNC_STORES_0003.length} magasins.
--- À coller APRÈS 0001 et 0002, une seule fois. Les droits des fonctions sont rejoués (idempotents).
-
-${nouvelles.map(table).join('\n')}-- S4 : la révocation générale pour anon, en 0001, n'a couvert que les tables d'alors ; chaque table neuve est révoquée ici.
-${nouvelles.map((s) => `revoke all on public.${s} from anon;\n`).join('')}
-` + fonctions(SYNC_STORES_0003);
+  const delta = ajoutSeul('0003_assistant_config.sql', 'docs/superpowers/specs/2026-10-17-assistant-par-le-compte-design.md (rév. 2, § 6)',
+    SYNC_STORES_0003.filter((s) => !SYNC_STORES_0001.includes(s)), SYNC_STORES_0003, '0001 et 0002');
   // 0005, à ajout seul (lot A « import ciblé », spec 2026-10-18-import-cible § 3.5) : les magasins de SYNC_STORES absents de la liste FIGÉE
   // SYNC_STORES_0003 (aujourd'hui imports, le dernier : K-9), leur révocation pour anon, puis les quatre fonctions recréées avec les 27 noms.
   // Tant que 0005 n'est pas appliquée sur mitsu, elle suit le SYNC_STORES vivant ; une fois collée, la figer comme 0003 (SYNC_STORES_0005 +
   // empreinte épinglée) et rendre le magasin suivant dans une 0006 (README, étape 11).
-  const nouvelles0005 = SYNC_STORES.filter((s) => !SYNC_STORES_0003.includes(s));
-  const imports = ENTETE('0005_imports.sql', 'docs/superpowers/specs/2026-10-18-import-cible-design.md (rév. 3.1, § 3.5)') + `-- Migration À AJOUT SEUL : ${nouvelles0005.length} table(s) neuve(s) et les quatre fonctions recréées avec la liste des ${SYNC_STORES.length} magasins.
--- À coller APRÈS 0001, 0002 et 0003 (0004 est indépendante), une seule fois. Les droits des fonctions sont rejoués (idempotents).
-
-${nouvelles0005.map(table).join('\n')}-- S4 : la révocation générale pour anon, en 0001, n'a couvert que les tables d'alors ; chaque table neuve est révoquée ici.
-${nouvelles0005.map((s) => `revoke all on public.${s} from anon;\n`).join('')}
-` + fonctions(SYNC_STORES);
+  const imports = ajoutSeul('0005_imports.sql', 'docs/superpowers/specs/2026-10-18-import-cible-design.md (rév. 3.1, § 3.5)',
+    SYNC_STORES.filter((s) => !SYNC_STORES_0003.includes(s)), SYNC_STORES, '0001, 0002 et 0003 (0004 est indépendante)');
   return { tables, storage, delta, imports };
 }
 
