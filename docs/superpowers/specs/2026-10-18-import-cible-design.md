@@ -102,7 +102,10 @@ supprimée ne bloquent pas une archive ; la fabrication ignore une page absente.
 `a_lancer → en_cours | ignore` · `en_cours → a_verifier | echec` · `a_verifier → enregistre | a_lancer (changer les pages) | ignore` ·
 `echec → en_cours (relancer) | a_lancer (changer les pages) | ignore` · `en_cours → echec(annule)` par le document qui tient le vol ·
 `en_cours → echec(interrompu)` au démarrage, **pour les lignes de cet appareil seulement** (le battement, d'origine `device`, n'est pas visible ailleurs) et **seulement si `battement_at` a plus de 90 s** (le vol bat toutes les 15 s, écriture d'origine
-`device` : jamais en file de synchro, m2) ; **amendé à la ronde 1 de la tâche 6** : une ligne `en_cours` d'un **autre** appareil dont le vol a
+`device` : jamais en file de synchro, m2 ; **amendé à la vague finale** : le battement n'est plus écrit dans la ligne `imports` — `battement_at` n'y est
+posé qu'au départ du vol — mais dans une ligne interne de `sync_state`, `battement:<id>` (`status: 'vol'`, origine `device`, aucun `change`), relue dans
+la transaction de la passe et effacée avec le vol ; un horodatage à plus de 10 min dans le futur ne prouve aucun vol vivant ; les lignes d'un autre
+appareil se comparent à l'heure corrigée par le décalage serveur) ; **amendé à la ronde 1 de la tâche 6** : une ligne `en_cours` d'un **autre** appareil dont le vol a
 plus de **10 min** (`battement_at` ou `started_at` tels que synchronisés, bien au-delà du délai client de 135 s) est interrompue sur **n'importe
 quel** appareil (iPhone perdu, PWA réinstallée, archive restaurée ailleurs : sinon elle restait « En cours sur un autre écran » sans geste), et
 la passe est rejouée à l'affichage de la section « Imports » · `a_verifier → echec(illisible)` (T4-R1, ratifiée) pour **un seul cas** : un
@@ -128,7 +131,7 @@ jour-là, « À envoyer » et la pastille montent d'autant sans geste de la pers
 | `source_pages` | `position` réécrite à l'enregistrement depuis l'ordre de `page_ids` ; `kind: 'recipe'` posé comme aujourd'hui (pas de champ `role`) ; `printed_page` de la page gardé, et une page SANS numéro ne reçoit celui de la fiche que si elle est la **première** de l'ordre (T3 ronde 1 : la deuxième photo d'une recette p. 132 est la p. 133, rien d'inventé) | l'ordre choisi ; nature de la photo |
 | `recipes` | `photo_sha256: null \| string` (pointeur souple), `photo_origin: 'photo' \| 'image' \| null` (le geste touché) | photo du plat |
 | lignes d'ingrédients | `uncertain: boolean` | l'incertitude dite par le modèle |
-| `recipe_versions.provenance` | `import_id` (souple), `incomplete`, `missing_page`, `titre_lu` ; sur une `correction` qui en hérite, `lu_le` (date ISO de la lecture, tâche 5, ronde 1) | d'où vient la version et ses limites |
+| `recipe_versions.provenance` | `import_id` (souple), `incomplete`, `missing_page`, `titre_lu`, `uncertain_fields` (≤ 40 × 200 points de code, vague finale) ; sur une `correction` qui en hérite, `lu_le` (date ISO de la lecture, tâche 5, ronde 1) | d'où vient la version et ses limites |
 
 ### 3.3 Vocabulaire (D-12)
 
@@ -475,3 +478,26 @@ présente mais illisible ne retombe jamais sur `created_at` ; héritage revalid�
 clé « 1 ligne à vérifier » · **T5-R1-h** `displayUrl(fichier, creerUrl)` : la photo du plat passe par la même règle S3 (URL suivie par `urlDeBlob`) ·
 non tranché (à ratifier) : une correction qui hérite `incomplete` ou `missing_page` garde la fiche `partial` (décision 5 ; lever la page manquante
 demande un geste, lot suivant) ; une extraction enregistrée plus tard que sa lecture est datée de l'enregistrement (`created_at`), pas de la lecture.
+**Vague finale (revue finale de branche, 19 octobre — rapport `final-fix-report.md`).** **VF-1** « Relire les pages » : la première photo d'une
+fiche qui a déjà des pages ouvre une ligne qui porte EN TÊTE celles de sa version courante (`kind: 'recipe'`, présentes ici, dans leur ordre ;
+`repo.ajouterPages({ import: { …, page_ids } })`) — la relecture lit la recette entière, jamais la seule page neuve · **VF-2** le battement sort de la
+ligne synchronisée (§ 3.1 amendé : `repo.battre` / `repo.oublierBattement`, ligne interne `battement:<id>` de `sync_state`, relue dans la transaction
+de `marquerInterrompus` par une condition de plus — `repo.transitionner(…, { autres })`, sur un autre magasin que celui de la transition) · **VF-3**
+l'éditeur passe en « une étape par paragraphe » dès qu'une lecture POSÉE (`?import=`, « Extraire ») porte une étape multi-ligne (§ 4.3.7 étendu) ·
+**VF-4** le départ d'un vol vaut pour les pages LUES (`page_ids` changées pendant la réduction → départ refusé, aucun POST) et l'écran fige ses pages
+dès la pose du vol · **VF-5** la clôture de l'écran ciblé est liée à la lecture fabriquée (`cleLecture`, comme T6-R1-d) · **VF-6** après synchro, une
+recette peut avoir un import ouvert par appareil : « Reprendre » porte la ligne (`#/recipes/<id>/importer?import=<imp>`), l'écran prend la ligne
+affichée, puis `?import=`, puis une lecture reçue (`a_verifier`), puis celle de cet appareil · **VF-7** I-5 ne compte que les versions non `ai` qui
+peuvent être courantes (`kind` `extraction` ou `correction`) : une adaptation n'appelle pas « Remplacer ? » · **VF-8** le bandeau de lecture est celui
+d'une LECTURE (`extraction` / `correction`, de l'assistant ou héritière de `lu_le`), jamais d'une adaptation ; il montre `incomplete` / `missing_page`
+même sans `import_id` (lecture de l'éditeur détachée, I-1) · **VF-9** « Lecture reçue le {d} » = `started_at` + `duree_ms` (`dateReception`), plus
+`updated_at` · **VF-10** `provenance.uncertain_fields` (§ 3.2 : ≤ 40 × 200 points de code, hérité par « Corriger », porté par l'éditeur) : « Incertain »
+survit à la purge de la ligne du journal (la ligne reste lue d'abord) · **VF-11** « ouvert » a une seule définition (`importOuvert`) pour l'écran ciblé
+et le filtre des séances : une ligne hors vocabulaire n'est ni reprise ni bloquante (I-2 ne couvre que le vocabulaire connu) · **VF-12** `recent()`
+borné dans le futur (10 min) et lignes d'un autre appareil comparées à l'heure corrigée (`getClockOffset`) · **VF-13** une page envoyée à l'assistant
+passe un mur AVANT le décodage (`pagePourEnvoi` : ≤ 50 Mo, ≤ 50 Mpx lus dans l'en-tête → `trop_grande`) · **VF-14** « Extraire » de « Corriger »
+(hors journal) tient le vol du document (`tenirVol` / `libererVol`, sans ligne) : I-7 dans les deux sens · **VF-15** l'écran ciblé rejoue la passe
+`interrompu` à l'affichage puis toutes les `BATTEMENT_MORT_MS` (+ 1 s) tant que sa ligne vole ailleurs ; la section « Imports » la rejoue une fois
+encore après ce délai si la page est montée (`veilleMs` injectable) · refusés ou différés (à ratifier) : « Ignorer »
+sur une référence absente (§ 4.5 dit « sans geste ») ; une borne d'octets dans `ajouterPages` (un PDF de livre dépasse couramment 50 Mo : décision de
+produit) ; l'abandon de la relecture de « Corriger » au changement de route (aucun crochet de sortie de route ; le vol est tenu puis libéré à la fin).
