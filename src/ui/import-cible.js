@@ -54,8 +54,9 @@ const brute = (s) => (typeof s === 'string' ? s : null);
 const raisonDe = (e) => { const r = e instanceof ErreurExtraction ? e.raison : (typeof e?.message === 'string' ? e.message : ''); return RAISONS_ECHEC.includes(r) ? r : 'interne'; };
 const extraDe = (e) => ({ ...(Number.isInteger(e?.quota) || e?.quota === null ? { quota: e.quota } : {}), ...(e?.trop_lourd === true ? { trop_lourd: true } : {}) });
 const estRefus = (e) => e instanceof TransitionRefusee;
-// « Rattacher » (D-6) vaut pour LA lecture à laquelle il a été répondu : la ligne, le départ de son vol et son résultat. Une lecture arrivée d'un
-// autre onglet entre-temps (même id, même statut a_verifier) a une autre clé → la discordance est redemandée (T4-R1).
+// « Rattacher » (D-6) et « Remplacer » (I-5) valent pour LA lecture pour laquelle la question a été POSÉE : la ligne, le départ de son vol et son
+// résultat (etat.cleQuestion). Une lecture arrivée d'un autre onglet entre-temps (même id, même statut a_verifier) a une autre clé → la réponse est
+// ignorée et la question redemandée pour la nouvelle lecture (T4-R1, puis T4-R2 : jamais la clé de la ligne RELUE au clic).
 const cleLecture = (L) => JSON.stringify([L.id, L.started_at ?? null, L.resultat ?? null]);
 // Deux champs relus du journal, bornés avant d'entrer dans la fiche (T4-R1) : le modèle ≤ 80 points de code (la borne de PasserelleProvider), la
 // photo du plat = une empreinte hexadécimale de 64 (la clé de files) ; tout le reste vaut null.
@@ -193,9 +194,11 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
   const recipe = ctx?.recipesById?.get(params?.id);
   const root = el('div', null);
   // ligne : l'import NON TERMINÉ de cette recette (un seul, I-2) ; pages : ses source_pages par id ; question : 'discordance' | 'remplacer' | null ;
-  // rattache : la clé (cleLecture) de LA lecture pour laquelle « Rattacher » a été répondu, sinon null ; verdict : la discordance calculée par
-  // decider() ; focus : le bouton à focaliser après un déplacement ; occupe : une écriture est en cours (aucune double pose).
-  const etat = { ligne: null, pages: new Map(), question: null, rattache: null, verdict: null, focus: null, occupe: false };
+  // cleQuestion : la clé (cleLecture) de LA lecture pour laquelle `question` a été posée (T4-R2 : toute réponse s'y rapporte) ; rattache : la clé de
+  // la lecture pour laquelle « Rattacher » a été répondu, sinon null ; verdict : la discordance calculée par decider() ; focus : le bouton à focaliser
+  // après un déplacement ; occupe : une écriture est en cours (aucune double pose).
+  const etat = { ligne: null, pages: new Map(), question: null, cleQuestion: null, rattache: null, verdict: null, focus: null, occupe: false };
+  const oublierQuestion = () => { etat.question = null; etat.cleQuestion = null; etat.rattache = null; etat.verdict = null; };
   root.etatRoute = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, pageIds: [...(Array.isArray(etat.ligne?.page_ids) ? etat.ligne.page_ids : [])], vol: !!vol && !!etat.ligne && vol.importId === etat.ligne.id, discordance: etat.verdict });
   if (!recipe) { root.append(el('div', { class: 'card' }, t('Recette introuvable.'))); return root; }
   // D-11 : un signet web ou une recette qui a déjà son texte n'a pas d'entrée ici — le dire, revenir à la fiche.
@@ -216,7 +219,9 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
     // I-1 : un résultat revenu du journal (synchro, archive) est REVALIDÉ avant tout usage ; hostile → a_verifier → echec(illisible) (transition ratifiée
     // T4-R1, § 3.1), rien n'atteint l'écran (spec § 4.5). C'est la seule écriture que le simple montage de l'écran peut faire (origine local : en file).
     if (ouverte?.status === 'a_verifier' && !resultatValide(ouverte)) { await illisible(ouverte); ouverte = await ligneOuverte(); }
-    if (ouverte?.id !== etat.ligne?.id || ouverte?.status !== 'a_verifier') { etat.question = null; etat.rattache = null; etat.verdict = null; }
+    // Une question posée ne survit ni à un changement de ligne ou de statut, ni à une NOUVELLE lecture sur la même ligne (T4-R2 : un redessin ne
+    // montre jamais l'ancien titre pour une lecture arrivée entre-temps ; « Enregistrer cette lecture » la redemandera).
+    if (ouverte?.id !== etat.ligne?.id || ouverte?.status !== 'a_verifier' || (etat.cleQuestion !== null && cleLecture(ouverte) !== etat.cleQuestion)) oublierQuestion();
     const ids = Array.isArray(ouverte?.page_ids) ? ouverte.page_ids : [];
     const manquantes = ids.filter((id) => !etat.pages.has(id));
     if (manquantes.length) for (const p of await Promise.all(manquantes.map((id) => repo.get('source_pages', id)))) if (p) etat.pages.set(p.id, p);
@@ -316,7 +321,7 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
   async function lancer() {
     if (vol) { if (vol.importId !== etat.ligne?.id) toast(t('Une lecture est déjà en cours : annule-la d’abord.')); return; } // double tape : muette
     const L = etat.ligne; if (!L) return;
-    etat.question = null; etat.rattache = null;
+    oublierQuestion();
     const r = await lancerExtraction(L.id, { ctx, repo, fetch: fetchInjecte, maintenant, enLigne: () => enLigneFlag, battementMs });
     if (r.issue === 'refuse') {
       if (r.raison === 'image') toast(messageErreurImage({ code: r.code }));
@@ -329,7 +334,7 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
   async function annuler() { const L = etat.ligne; if (!L) return; await annulerVol(L.id); await redessiner(); }
   async function changerLesPages() {
     const L = etat.ligne; if (!L || etat.occupe) return;
-    etat.question = null; etat.rattache = null;
+    oublierQuestion();
     try { await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: { status: 'a_lancer', resultat: null } }); }
     catch (e) { if (!estRefus(e)) logError('import_cible.changer_pages', { error: e, id: L.id }); }
     await redessiner();
@@ -351,7 +356,11 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
       const reference = await repo.get('recipes', recipe.id);
       if (!reference) { etat.question = null; apres = 'redessiner'; if (root.isConnected) { toast(t('Recette introuvable.')); navigate('/library'); } return; }
       const cle = cleLecture(L);
-      if (rattache) etat.rattache = cle;
+      // T4-R2 : la réponse vaut pour la lecture pour laquelle la question a été POSÉE (etat.cleQuestion), jamais pour la ligne relue au clic : « Rattacher »
+      // lie cette clé-là (une autre lecture arrivée entre-temps redemande la discordance, D-6) ; « Remplacer » / « Garder ma version » sont ignorés et la
+      // question reposée si la ligne relue n'est plus cette lecture (I-5 : rien ne devient courant sans avoir été vu).
+      if (rattache) etat.rattache = etat.cleQuestion;
+      if (remplacer !== null && cle !== etat.cleQuestion) remplacer = null;
       const rattachee = etat.rattache === cle; // « Rattacher » répondu pour CETTE lecture, pas pour une autre arrivée entre-temps (D-6)
       const verdict = discordance(resultat, reference);
       etat.verdict = verdict;
@@ -363,6 +372,7 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
       const options = { reference, versions, pages, pageIds, edition: ed, convention: conventionId ? getConvention(conventionId) : null, importId: L.id, modele: modeleBorne(L.model), photo: photoBornee(L), maintenant: maintenant() };
       const sonde = fabriquerExtraction(resultat, options); // pur : lu pour `remplacement` (I-5) avant la décision
       etat.question = questionAPoser({ ok: verdict.ok, rattachee, remplacement: sonde.remplacement, remplacer });
+      etat.cleQuestion = etat.question ? cle : null; // la question posée est celle de CETTE lecture (T4-R2)
       if (etat.question) return;
       apres = 'redessiner';
       await enregistrer(L, remplacer === false ? fabriquerExtraction(resultat, { ...options, remplacer: false }) : sonde);
@@ -464,7 +474,7 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
       el('p', { style: { margin: 0 } }, texte),
       el('div', { class: 'row' },
         el('button', { type: 'button', class: 'btn primary', onClick: () => decider({ rattache: true }) }, t('Rattacher')),
-        el('button', { type: 'button', class: 'btn', onClick: () => { etat.question = null; etat.rattache = null; dessiner(); } }, t('Garder la lecture sans l’enregistrer')),
+        el('button', { type: 'button', class: 'btn', onClick: () => { oublierQuestion(); dessiner(); } }, t('Garder la lecture sans l’enregistrer')),
         el('button', { type: 'button', class: 'btn', onClick: changerLesPages }, t('Changer les pages'))));
   }
   const panneauRemplacer = () => el('div', { class: 'card warn stack', dataset: { role: 'remplacer' } },

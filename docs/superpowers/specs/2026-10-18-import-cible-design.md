@@ -448,3 +448,9 @@ l'écran l'écrit telle quelle · tests ajoutés : I-1 hostile au montage et au 
 figées en `a_verifier` et en `en_cours`, `appels` écrit séparément et relu par le `fetch`, rejets non gérés, signet devenu `partial` ·
 différé (à ratifier) : ligne `en_cours` dont `document_id_vol` est ce document sans vol tenu (après deux écritures impossibles) : « En cours sur un
 autre écran » sans geste jusqu'à la passe `interrompu` de la tâche 6.
+**Tâche 4, ronde 2 (résidu mesuré de T4-R1-b — rapport `task-4-report.md` § Ronde 2).** **T4-R2-a** la réponse à une question (« Rattacher »,
+« Remplacer », « Garder ma version ») vaut pour la lecture pour laquelle la question a été **posée** (clé mémorisée à la pose), jamais pour la ligne
+relue au clic : « Rattacher » cliqué après l'arrivée d'une autre lecture redemande la discordance avec le nouveau titre (D-6) ; « Remplacer » cliqué
+après l'arrivée d'une autre lecture repose la question (I-5 : rien ne devient courant sans avoir été vu) ; un redessin entre l'arrivée et le clic
+oublie la question de l'ancienne lecture (plus de panneau ni d'ancien titre ; « Enregistrer cette lecture » la redemande) · toujours différé (à
+ratifier, même raison) : la ligne `en_cours` tenue par ce document sans vol.

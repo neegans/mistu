@@ -515,16 +515,17 @@ export async function runImportCibleTests({ eq, ok }) {
     const edition = { id: 'ed1', book_id: 'b1', language: 'fr', updated_at: DATE };
     const fiche = (id, over = {}) => ({ id, edition_id: 'ed1', original_title: 'Tarte aux pommes', original_language: 'fr', availability: 'reference_only', verification_state: 'unverified', printed_page: 132, source_page_ids: [], current_version_id: null, tags: [], cuisines: [], favorite: false, ingredient_ids: [], created_at: DATE, updated_at: DATE, ...over });
     const versionDe = (id, recipe_id, generated_by) => ({ id, recipe_id, kind: 'extraction', status: null, servings: 4, ingredients: [{ id: 'ri_' + id, source_text: '1 pomme', name_text: 'pomme', quantity: { value: 1, raw: '1' }, verification_state: 'verified' }], steps: [{ id: 'st_' + id, position: 1, text: 'Cuire.' }], provenance: { generated_by, source_page_ids: [] }, verification_state: 'verified', created_at: DATE, updated_at: DATE });
-    const recettes = ['rc_a', 'rc_b', 'rc_c', 'rc_d', 'rc_f', 'rc_g', 'rc_h', 'rc_i', 'rc_j', 'rc_k', 'rc_l', 'rc_o', 'rc_p', 'rc_q', 'rc_r', 'rc_s', 'rc_ref'].map((id) => fiche(id)).concat([
+    const recettes = ['rc_a', 'rc_b', 'rc_c', 'rc_d', 'rc_f', 'rc_g', 'rc_h', 'rc_i', 'rc_j', 'rc_k', 'rc_l', 'rc_o', 'rc_p', 'rc_q', 'rc_r', 'rc_s', 'rc_t', 'rc_v', 'rc_ref'].map((id) => fiche(id)).concat([
       fiche('rc_dispo', { availability: 'available', verification_state: 'verified', current_version_id: 'rv_dispo' }),
       fiche('rc_signet', { edition_id: null, source_url: 'https://exemple.test/x', printed_page: null }),
       fiche('rc_sigpart', { availability: 'partial', source_url: 'https://exemple.test/y', printed_page: null }), // un signet devenu partial (texte saisi à la main)
       fiche('rc_e', { availability: 'partial', verification_state: 'verified', current_version_id: 'rv_e_main', ingredient_ids: ['ing_x'] }),
       fiche('rc_m', { availability: 'partial', verification_state: 'verified', current_version_id: 'rv_m_main' }),
       fiche('rc_n', { availability: 'partial', verification_state: 'verified', current_version_id: 'rv_n_main' }),
+      fiche('rc_u', { availability: 'partial', verification_state: 'verified', current_version_id: 'rv_u_main' }),
       fiche('rc_part', { availability: 'partial', verification_state: 'to_verify', current_version_id: 'rv_part' }),
     ]);
-    const versions = [versionDe('rv_dispo', 'rc_dispo', 'ai'), versionDe('rv_e_main', 'rc_e', 'manual'), versionDe('rv_m_main', 'rc_m', 'manual'), versionDe('rv_n_main', 'rc_n', 'manual'), versionDe('rv_part', 'rc_part', 'ai')];
+    const versions = [versionDe('rv_dispo', 'rc_dispo', 'ai'), versionDe('rv_e_main', 'rc_e', 'manual'), versionDe('rv_m_main', 'rc_m', 'manual'), versionDe('rv_n_main', 'rc_n', 'manual'), versionDe('rv_u_main', 'rc_u', 'manual'), versionDe('rv_part', 'rc_part', 'ai')];
     await db.mutate({ puts: { books: [livre], book_editions: [edition], recipes: recettes, recipe_versions: versions }, origin: 'device' });
     const JETON = 'jeton-import-sentinelle';
     const SESSION = { access_token: JETON, user: { id: 'u1', email: 'a@exemple.invalid' } };
@@ -790,7 +791,8 @@ export async function runImportCibleTests({ eq, ok }) {
         const root = await monter('rc_b', { deps: { fetch: ff.fetch } });
         const avantRc = await db.get('recipes', 'rc_b');
         bouton(root, 'Extraire et enregistrer').click();
-        await attendre(() => root.etatRoute().status === 'a_verifier' && !!root.etatRoute().discordance, 'a_verifier avec verdict');
+        // T4-R2 : attendre le panneau DESSINÉ (le verdict est posé deux lectures avant le dessin : un faux rouge a été vu dans cette fenêtre).
+        await attendre(() => root.etatRoute().status === 'a_verifier' && !!root.querySelector('[data-role="discordance"]'), 'a_verifier avec le panneau de discordance');
         eq([root.querySelectorAll('[data-role="monter"], [data-role="descendre"], [data-role="retirer"]').length, bouton(root, 'Photographier'), bouton(root, 'Choisir des photos'), bouton(root, 'Prendre une photo')?.disabled], [0, null, null, false], 'discordance (T4-R1, décision 5) : en a_verifier les pages sont figées (ni Monter/Descendre/Retirer, ni ajout) ; la photo du plat reste modifiable (lue à l’enregistrement)');
         const l = await db.get('imports', impB);
         eq([l.status, Array.from(l.reponse_brute).length, l.resultat?.title, l.resultat?.ingredients?.length, JSON.stringify(l).length < 512 * 1024], ['a_verifier', 16000, 'Tarte aux poires', 2, true], 'reponse_brute : coupée à 16 000 points de code, resultat intact, la ligne tient sous 512 Kio');
@@ -940,6 +942,75 @@ export async function runImportCibleTests({ eq, ok }) {
         const panneau = root.querySelector('[data-role="discordance"]');
         eq([!!panneau, panneau?.textContent.includes('Gratin de courgettes'), vus, [...navs], (await db.get('imports', impN)).status, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_n')).map((v) => v.id), (await db.get('recipes', 'rc_n')).current_version_id], [true, true, [], [], 'a_verifier', ['rv_n_main'], 'rv_n_main'], 'D-6 (T4-R1) : « Rattacher » répondu pour « Tarte aux poires » ne vaut pas pour « Gratin de courgettes » arrivée entre-temps — la discordance est redemandée, rien n’est écrit');
         await db.put('imports', { ...(await db.get('imports', impN)), status: 'ignore' });
+      });
+
+      // Ronde 2 (T4-R2) : la réponse à une question vaut pour la lecture pour laquelle la question a été POSÉE, jamais pour la ligne relue au clic.
+      // Trois fenêtres : « Rattacher » cliqué après l'arrivée d'une autre lecture (D-6), « Remplacer » cliqué après l'arrivée d'une autre lecture
+      // (I-5), et un redessin entre les deux (la question de l'ancienne lecture ne doit pas survivre à la nouvelle).
+      await bloc('résidu D-6 : « Rattacher » cliqué après l’arrivée d’une autre lecture (T4-R2)', async () => {
+        const impT = await preparer('rc_t', 1);
+        const ff = fauxFetch([200, corpsOk({ ...RECETTE, title: 'Tarte aux poires' })]);
+        const root = await monter('rc_t', { deps: { fetch: ff.fetch } });
+        bouton(root, 'Extraire et enregistrer').click();
+        await attendre(() => !!root.querySelector('[data-role="discordance"]'), 'discordance');
+        // L'autre onglet (ou l'autre appareil, par la synchro) : une NOUVELLE lecture sur la même ligne pendant que le panneau reste ouvert ici
+        // (/recipes/*/importer est une ROUTE_DE_SAISIE : la passe ne reconstruit pas l'écran, le panneau reste).
+        await db.put('imports', { ...(await db.get('imports', impT)), started_at: '2026-10-19T12:05:00.000Z', resultat: { ...RECETTE, title: 'Gratin de courgettes' }, reponse_brute: 'y' });
+        const vus = []; const capture = db.onMutate; db.onMutate = (m) => { vus.push(Object.keys(m.puts)); return capture ? capture(m) : {}; };
+        try {
+          bouton(root.querySelector('[data-role="discordance"]'), 'Rattacher').click();
+          await attendre(async () => navs.length > 0 || (await db.get('imports', impT)).status === 'enregistre' || !!root.querySelector('[data-role="discordance"]')?.textContent.includes('Gratin de courgettes'), 'changement d’état');
+          await tick(); await tick();
+        } finally { db.onMutate = capture; }
+        const panneau = root.querySelector('[data-role="discordance"]');
+        eq([!!panneau, panneau?.textContent.includes('Gratin de courgettes'), vus, [...navs], (await db.get('imports', impT)).status, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_t')).length], [true, true, [], [], 'a_verifier', 0], 'résidu D-6 (T4-R2) : « Rattacher » répondu pour « Tarte aux poires » ne vaut pas pour « Gratin de courgettes » arrivée AVANT le clic : la discordance est redemandée avec le nouveau titre, rien n’est écrit, aucune navigation');
+        // La réponse à la question POSÉE pour « Gratin de courgettes », elle, vaut.
+        bouton(panneau, 'Rattacher').click();
+        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_t?v=')), 'enregistrée');
+        const [v] = await db.byIndex('recipe_versions', 'recipe_id', 'rc_t');
+        eq([v?.provenance?.titre_lu, (await db.get('imports', impT)).status, (await db.get('recipes', 'rc_t')).original_title, ff.appels.length], ['Gratin de courgettes', 'enregistre', 'Tarte aux pommes', 1], 'résidu D-6 (T4-R2) : « Rattacher » répondu à la question posée pour « Gratin de courgettes » l’enregistre (titre lu en provenance), la fiche garde son titre, aucun appel de plus');
+      });
+
+      await bloc('résidu I-5 : « Remplacer » cliqué après l’arrivée d’une autre lecture (T4-R2)', async () => {
+        const impU = await preparer('rc_u', 1);
+        const ff = fauxFetch([200, corpsOk()]);
+        const root = await monter('rc_u', { deps: { fetch: ff.fetch } });
+        bouton(root, 'Extraire et enregistrer').click();
+        await attendre(() => !!root.querySelector('[data-role="remplacer"]'), 'question « Remplacer ? »');
+        const ancien = root.querySelector('[data-role="remplacer"]');
+        // Une autre lecture, CONCORDANTE (même titre, 8 portions), arrive sur la même ligne : « Remplacer » répondu pour la première ne doit pas
+        // mettre la seconde en avant sans qu'elle ait été vue (I-5 : la question doit être reposée).
+        await db.put('imports', { ...(await db.get('imports', impU)), started_at: '2026-10-19T12:05:00.000Z', resultat: { ...RECETTE, servings: 8 }, reponse_brute: 'y' });
+        const vus = []; const capture = db.onMutate; db.onMutate = (m) => { vus.push(Object.keys(m.puts)); return capture ? capture(m) : {}; };
+        try {
+          bouton(ancien, 'Remplacer').click();
+          await attendre(async () => navs.length > 0 || (await db.get('imports', impU)).status === 'enregistre' || (root.querySelector('[data-role="remplacer"]') !== null && root.querySelector('[data-role="remplacer"]') !== ancien), 'décision rendue');
+          await tick(); await tick();
+        } finally { db.onMutate = capture; }
+        const q = root.querySelector('[data-role="remplacer"]');
+        eq([!!q && q !== ancien, root.querySelector('[data-role="discordance"]'), vus, [...navs], (await db.get('imports', impU)).status, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_u')).map((x) => x.id), (await db.get('recipes', 'rc_u')).current_version_id], [true, null, [], [], 'a_verifier', ['rv_u_main'], 'rv_u_main'], 'résidu I-5 (T4-R2) : « Remplacer » répondu pour la première lecture ne s’applique pas à la seconde arrivée entre-temps : la question est reposée, rien n’est écrit, la version manuelle reste courante');
+        bouton(q, 'Remplacer').click();
+        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_u?v=')), 'enregistrée');
+        const rcU = await db.get('recipes', 'rc_u'); const neuve = (await db.byIndex('recipe_versions', 'recipe_id', 'rc_u')).find((x) => x.id !== 'rv_u_main');
+        eq([neuve?.servings, rcU.current_version_id === neuve?.id, (await db.get('imports', impU)).status, ff.appels.length], [8, true, 'enregistre', 1], 'résidu I-5 (T4-R2) : « Remplacer » répondu à la question reposée vaut pour la seconde lecture (8 portions), qui devient courante ; aucun appel de plus');
+      });
+
+      await bloc('résidu D-6 : un redessin ne montre plus l’ancien titre pour une nouvelle lecture (T4-R2)', async () => {
+        const impV = await preparer('rc_v', 1);
+        const ff = fauxFetch([200, corpsOk({ ...RECETTE, title: 'Tarte aux poires' })]);
+        const root = await monter('rc_v', { deps: { fetch: ff.fetch } });
+        bouton(root, 'Extraire et enregistrer').click();
+        await attendre(() => !!root.querySelector('[data-role="discordance"]'), 'discordance');
+        await db.put('imports', { ...(await db.get('imports', impV)), started_at: '2026-10-19T12:05:00.000Z', resultat: { ...RECETTE, title: 'Gratin de courgettes' }, reponse_brute: 'y' });
+        // Un redessin venu d'ailleurs (la fin d'un lancement, même refusé, sur un autre import de ce document notifie toutes les vues) : l'écran relit la ligne.
+        eq((await UI.lancerExtraction('imp_inexistant', { ctx: await ctxDe(), repo })).raison, 'inconnu', 'fixture (T4-R2) : un lancement refusé (import inconnu) notifie les vues montées');
+        await attendre(() => !root.querySelector('[data-role="discordance"]'), 'panneau fermé');
+        await tick();
+        eq([!!bouton(root, 'Enregistrer cette lecture'), root.etatRoute().discordance, root.textContent.includes('Tarte aux poires'), (await db.get('imports', impV)).status, [...navs]], [true, null, false, 'a_verifier', []], 'redessin (T4-R2) : la question posée pour « Tarte aux poires » ne survit pas à l’arrivée de « Gratin de courgettes » : plus de panneau ni d’ancien titre, « Enregistrer cette lecture » revient, rien n’est écrit');
+        bouton(root, 'Enregistrer cette lecture').click();
+        await attendre(() => !!root.querySelector('[data-role="discordance"]')?.textContent.includes('Gratin de courgettes'), 'discordance pour la nouvelle lecture');
+        eq([(await db.get('imports', impV)).status, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_v')).length], ['a_verifier', 0], 'redessin (T4-R2) : « Enregistrer cette lecture » redemande la discordance pour « Gratin de courgettes », rien n’est écrit');
+        await db.put('imports', { ...(await db.get('imports', impV)), status: 'ignore' });
       });
 
       await bloc('fiche supprimée entre le rendu et l’enregistrement (R57 ; T4-R1)', async () => {
