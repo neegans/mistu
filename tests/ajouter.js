@@ -13,16 +13,17 @@ export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', 
 // « une étape par paragraphe » (recipe-edit.js). Tâche 5, ronde 1 : « Lue par l’assistant » (date illisible, recipe.js) ; « Une étape par ligne ou par
 // paragraphe. » retirée d'ici (elle existait déjà sur main, sans entrée en.js : l'entrée a été ajoutée au passage, la chaîne n'est pas neuve). Lot A,
 // tâche 6 : « {n} import(s) à reprendre » (book.js), les textes du journal du panneau d'index (import.js) et de l'éditeur (recipe-edit.js) ; la section
-// « Imports » vit dans add.js, déjà scanné en entier (MODULES_NEUFS).
+// « Imports » vit dans add.js, déjà scanné en entier (MODULES_NEUFS). Tâche 6, ronde 1 : la plomberie du journal (et ses phrases de refus) a rejoint
+// src/ui/import-cible.js, scanné en entier ; l'éditeur dit en plus le vol tenu et ce que la lecture a dit d'incomplet (chaînes déjà traduites).
 export const CHAINES_NEUVES_AILLEURS = {
   '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', '+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer', '{n} import à reprendre', '{n} imports à reprendre'],
-  '../src/ui/import.js': ['Une lecture est déjà en cours : annule-la d’abord.', 'Les photos de cette recette ne sont pas sur cet appareil.', 'Tu es hors ligne.', 'Les références n’ont pas pu être créées. Réessaie.'],
+  '../src/ui/import.js': ['Les références n’ont pas pu être créées. Réessaie.'],
   '../src/ui/recipe.js': ['Lien web gardé.', 'L’app n’a pas lu la page : ouvre-la pour cuisiner.', 'Ouvrir le lien', 'Adresse non reconnue : ', 'Importer cette recette', 'Relire les pages',
     'Lue par l’assistant le {d}', 'Lue par l’assistant', '{n} ligne(s) incertaine(s)', 'page possiblement manquante', 'lecture incomplète', 'Incertain : {t}', 'Vérifiée', 'À vérifier', '1 ligne à vérifier', '{n} lignes à vérifier', 'Photo du plat'],
   '../src/ui/components.js': ['Lien web', 'Adresse non reconnue', 'incertain', 'Ligne incertaine selon l’assistant'],
   '../src/ui/cook.js': ['Lue par l’assistant, non relue'],
   '../src/ui/grocery.js': ['Lue par l’assistant, non relue'],
-  '../src/ui/recipe-edit.js': ['Une étape par paragraphe (ligne vide entre deux étapes).', 'La recette n’a pas pu être enregistrée. Réessaie.'],
+  '../src/ui/recipe-edit.js': ['Une étape par paragraphe (ligne vide entre deux étapes).', 'La recette n’a pas pu être enregistrée. Réessaie.', 'Une lecture est déjà en cours : annule-la d’abord.', 'page possiblement manquante', 'lecture incomplète'],
 };
 
 export async function runAjouterTests({ eq, ok }) {

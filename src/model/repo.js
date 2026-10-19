@@ -1,6 +1,6 @@
 // Accès aux données : base unique, amorçage des références, réglages et journal d'activité.
 import { Database, TransitionRefusee } from '../core/db.js';
-import { DB_NAME, DB_VERSION, STORES, SYNC_STORES, SECRET_SETTING_KEYS, STATUTS_IMPORT, IMPORTS_TERMINES } from './schema.js';
+import { DB_NAME, DB_VERSION, STORES, SYNC_STORES, SECRET_SETTING_KEYS, IMPORTS_TERMINES } from './schema.js';
 import { UNIT_DEFINITIONS, UNIT_CONVENTIONS, INGREDIENTS } from './seed.js';
 import { newId, nowIso } from '../core/ids.js';
 import { emit } from '../core/bus.js';
@@ -9,6 +9,7 @@ import { nettoyerChaines, porteDesCaracteresDeControle } from '../sync/lots.js';
 import { resolveMime } from '../sync/mime.js';
 import { normaliserConfigAssistant, LIGNE_ASSISTANT } from '../domain/assistant-config.js';
 import { assertVocabulaire } from '../domain/vocabulaire.js';
+import { IMPORTS_OUVERTS, KINDS_IMPORT } from '../domain/import-cible.js'; // une définition (tâche 6, ronde 1) : I-2 et les sortes que ce lot écrit
 import { sha256Hex } from '../core/hash.js';
 import { t } from '../core/i18n.js';
 
@@ -85,16 +86,23 @@ export async function init() {
 // (I-4 : « L'appel a peut-être été compté… »). Le battement est RELU DANS LA TRANSACTION (patch qui refuse) : un autre onglet qui l'a rafraîchi
 // entre la lecture et l'écriture garde son vol (deux onglets, Review Focus 3). Un battement illisible ne prouve aucun vol vivant : il compte comme
 // vieux. Origine 'local' (une transition du journal part en file, comme les autres). Rejouable : une ligne passée echec n'est plus en_cours.
+// Ronde 1 de la tâche 6 : une ligne en_cours d'un AUTRE appareil (ou d'un appareil perdu, d'une PWA réinstallée, d'une archive restaurée ailleurs)
+// n'avait aucune issue : son battement n'est jamais vu ici. Au-delà de VOL_MORT_MS depuis le départ du vol tel qu'il a été synchronisé
+// (battement_at posé au départ, ou started_at), bien au-delà du délai client de 135 s, aucun vol ne vit plus nulle part : elle est interrompue
+// sur n'importe quel appareil (une réponse tardive n'écrit que reponse_brute, § 3.1). Exportée : la section « Imports » la rejoue à l'affichage
+// (un rechargement dans les 90 s ne laisse plus la ligne bloquée jusqu'au démarrage suivant).
 export const BATTEMENT_MORT_MS = 90 * 1000;
-const battementFrais = (iso, maintenant) => { const quand = Date.parse(typeof iso === 'string' ? iso : ''); return Number.isFinite(quand) && maintenant - quand <= BATTEMENT_MORT_MS; };
-async function marquerInterrompus(maintenant = Date.now()) {
+export const VOL_MORT_MS = 10 * 60 * 1000;
+const recent = (iso, maintenant, borne) => { const quand = Date.parse(typeof iso === 'string' ? iso : ''); return Number.isFinite(quand) && maintenant - quand <= borne; };
+const volVivant = (l, moi, maintenant) => (l.device_id === moi ? recent(l.battement_at, maintenant, BATTEMENT_MORT_MS) : recent(l.battement_at, maintenant, VOL_MORT_MS) || recent(l.started_at, maintenant, VOL_MORT_MS));
+export async function marquerInterrompus(maintenant = Date.now()) {
   const moi = deviceId();
   if (!moi) return 0;
   let n = 0;
   for (const ligne of await db.byIndex('imports', 'status', 'en_cours')) {
-    if (!ligne || ligne.device_id !== moi || battementFrais(ligne.battement_at, maintenant)) continue;
+    if (!ligne || volVivant(ligne, moi, maintenant)) continue;
     const patch = (c) => {
-      if (c.device_id !== moi || battementFrais(c.battement_at, maintenant)) throw new TransitionRefusee('imports', ligne.id, c.status); // relu dans la transaction
+      if (volVivant(c, moi, maintenant)) throw new TransitionRefusee('imports', ligne.id, c.status); // relu dans la transaction
       return { status: 'echec', erreur: { raison: 'interrompu', extra: {} }, document_id_vol: null };
     };
     try { await transitionner('imports', ligne.id, { attendus: ['en_cours'], patch }); n += 1; }
@@ -474,8 +482,6 @@ export const issuesPourImage = (octets) => (octets < SMALL_IMAGE_BYTES ? [t('Ima
 const estPdf = (file) => file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
 const estEpub = (file) => file.type === 'application/epub+zip' || /\.epub$/i.test(file.name);
 const ATTENDUS_AJOUT = ['a_lancer', 'a_verifier', 'echec']; // les statuts qui acceptent des pages (spec § 3.6)
-const IMPORTS_OUVERTS = STATUTS_IMPORT.filter((s) => !IMPORTS_TERMINES.includes(s)); // I-2 : un seul import ouvert par recette
-const KINDS_IMPORT = ['recette', 'index'];
 // Une ligne du journal NEUVE (a_lancer), dans son vocabulaire fermé (D-12), et la condition de sa création (I-10, I-2) : la clé est libre, et aucun
 // import ouvert ne porte déjà cette recipe_id (sans recipe_id — un index, « Regrouper en recette » —, I-2 ne joue pas). Une définition pour les deux
 // chemins qui ouvrent une ligne : ajouterPages (première photo de l'écran ciblé) et ouvrirImport (pages déjà là : éditeur, panneau d'index).

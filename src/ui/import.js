@@ -10,11 +10,11 @@ import { displayUrl } from '../sync/mime.js';
 import { sha256Hex } from '../core/hash.js';
 import { normalizeText } from '../domain/units.js';
 import { assertVocabulaire } from '../domain/vocabulaire.js';
-import { providerFrom, validateParsedRecipe, validerIndex } from '../domain/llm.js';
-import { seanceDUnImportCible } from '../domain/import-cible.js';
+import { providerFrom } from '../domain/llm.js';
+import { seanceDUnImportCible, importOuvert } from '../domain/import-cible.js';
 import { pageHeader, section, emptyState, select, field, carteConnexion, texteEchecAssistant, pdfFrame, libelleLivre, sessionAssistant } from './components.js';
 import { demarrerConnexion } from './settings.js';
-import { lancerExtraction, volEnCours, texteEchec } from './import-cible.js';
+import { lireDansLeJournal, relireDuJournal, phraseEchec, cleLecture } from './import-cible.js';
 
 const INTENTIONS = ['index', 'recette'];
 // L'intention (spec § 10) voyage dans l'adresse, pas dans la base : consommée au premier rendu, puis retirée.
@@ -43,58 +43,8 @@ export async function startScanSession(files, { edition_id = null, session_id = 
 // Identité de l'appareil : une seule, celle de la base (spec § 4.2). Posée par repo.init() au démarrage.
 export function deviceId() { return repo.deviceId(); }
 
-// --- Lectures SANS référence écrites dans le journal (spec import-cible § 4.6, tâche 6) -------------------------------------------------------
-// « Extraire avec l'assistant IA » de l'éditeur (kind recette, recipe_id null : « Regrouper en recette ») et « Lire avec l'assistant IA » du
-// panneau d'index (kind index) passent par le journal, comme l'écran ciblé : la section « Imports » les montre, les reprend (?import=), les
-// relance ou les annule. Le résultat d'une ligne est REVALIDÉ avant tout usage (I-1), par sorte ; le modèle relu est borné (80 points de code).
-const VALIDEURS = { recette: validateParsedRecipe, index: validerIndex };
-const validerSelon = (kind, resultat) => { try { return VALIDEURS[kind] ? VALIDEURS[kind](resultat) : null; } catch { return null; } };
-const modeleBorne = (m) => (typeof m === 'string' && m && Array.from(m).length <= 80 ? m : null);
-const sansReference = (ligne, kind) => !!ligne && ligne.kind === kind && ligne.recipe_id == null; // une ligne CIBLÉE se reprend par son écran
-export const phraseEchec = (erreur) => { const { texte, code } = texteEchec(erreur); return code ? `${texte} ${code}` : texte; };
-
-// Une ligne relue pour un écran qui la REPREND (?import=) : seulement une ligne de cette sorte, sans référence. a_verifier → son résultat revalidé ;
-// hostile → a_verifier → echec(illisible), résultat effacé (la transition ratifiée T4-R1, origine local) : rien n'atteint l'écran. Rend
-// { ligne, resultat, modele } (resultat nul hors d'un a_verifier valide), ou null (absente, d'une autre sorte, ciblée).
-export async function relireDuJournal(importId, kind) {
-  if (typeof importId !== 'string' || !importId) return null;
-  const ligne = await repo.get('imports', importId);
-  if (!sansReference(ligne, kind)) return null;
-  if (ligne.status !== 'a_verifier') return { ligne, resultat: null, modele: null };
-  const resultat = validerSelon(kind, ligne.resultat);
-  if (resultat) return { ligne, resultat, modele: modeleBorne(ligne.model) };
-  try { return { ligne: await repo.transitionner('imports', importId, { attendus: ['a_verifier'], patch: { status: 'echec', erreur: { raison: 'illisible', extra: {} }, resultat: null } }), resultat: null, modele: null }; }
-  catch (e) { if (!(e instanceof TransitionRefusee)) throw e; return { ligne: (await repo.get('imports', importId)) ?? ligne, resultat: null, modele: null }; }
-}
-
-// Une lecture par l'assistant écrite dans le journal : la ligne `importId` est reprise si elle est encore ouverte, de cette sorte et sans référence
-// (remise à a_lancer SUR CES PAGES, l'ancien résultat effacé — vérifié dans la transaction), sinon une ligne a_lancer est ouverte ici
-// (repo.ouvrirImport) ; puis LE vol de l'écran ciblé (lancerExtraction : un seul par document, battement, appels comptés, signal, « Annuler »
-// depuis la section) ; la réponse validée est écrite dans le journal AVANT d'atteindre l'écran (I-3), qui la relit et la revalide (I-1).
-// Rend { importId, resultat, modele, texte, connecte } : `resultat` non nul = la lecture à poser ; sinon `texte` dit pourquoi ; `connecte` faux
-// = la session manquait au clic (la carte « Connecte-toi » revient, le bouton reste éteint).
-export async function lireDansLeJournal({ kind, importId = null, pageIds = [], editionId = null, sessionId = null, ctx }) {
-  const rien = (texte, extra = {}) => ({ importId, resultat: null, modele: null, texte, connecte: true, ...extra });
-  if (volEnCours()) return rien(t('Une lecture est déjà en cours : annule-la d’abord.')); // rien n'est écrit tant qu'un vol est tenu ici
-  let id = null;
-  if (importId) {
-    const patch = (c) => { if (!sansReference(c, kind)) throw new TransitionRefusee('imports', importId, c.status); return { status: 'a_lancer', resultat: null, page_ids: [...pageIds] }; };
-    try { id = (await repo.transitionner('imports', importId, { attendus: ['a_lancer', 'a_verifier', 'echec'], patch })).id; }
-    catch (e) { if (!(e instanceof TransitionRefusee)) throw e; } // terminée, en vol ailleurs, ou d'une autre sorte : une ligne neuve
-  }
-  if (!id) id = (await repo.ouvrirImport({ kind, edition_id: editionId, scan_session_id: sessionId, page_ids: [...pageIds] })).id;
-  const r = await lancerExtraction(id, { ctx, repo });
-  if (r.issue === 'a_verifier') {
-    const relue = await relireDuJournal(id, kind);
-    return relue?.resultat ? { importId: id, resultat: relue.resultat, modele: relue.modele, texte: null, connecte: true } : { ...rien(phraseEchec(relue?.ligne?.erreur ?? { raison: 'illisible' })), importId: id };
-  }
-  if (r.issue === 'echec') return { ...rien(phraseEchec((await repo.get('imports', id))?.erreur ?? { raison: r.raison })), importId: id };
-  const texte = r.raison === 'octets_absents' ? t('Les photos de cette recette ne sont pas sur cet appareil.')
-    : r.raison === 'hors_ligne' ? t('Tu es hors ligne.')
-    : r.raison === 'vol_tenu' ? t('Une lecture est déjà en cours : annule-la d’abord.')
-    : texteEchecAssistant({ message: r.raison === 'image' ? (r.code || 'image') : r.raison }); // une page indécodable n'est jamais envoyée (F-3)
-  return { ...rien(texte, { connecte: r.raison !== 'non_connecte' }), importId: id };
-}
+// Les lectures SANS référence du panneau d'index passent par le journal : lireDansLeJournal, relireDuJournal et phraseEchec vivent à côté du vol, dans
+// src/ui/import-cible.js (tâche 6, ronde 1 : l'éditeur ne dépend plus de ce module de route pour son journal).
 
 export async function renderImport(params, query, ctx) {
   if (!query.session) return sessionsList(ctx);
@@ -127,7 +77,8 @@ function sessionView(session, ctx, query = {}, { historique = { remplacer: rempl
   // correspondait à aucune miniature, et « Regrouper en recette » l'emportait dans son adresse.
   const applique = appliquerIntention({ intention: query.intention, pageIds: pages.map((p) => p.id) });
   // ?import=<imp> (spec § 4.5, tâche 6) : la lecture d'index de CETTE séance se reprend dans le panneau — ouvert, prérempli, ses pages cochées.
-  const ligneImport = query.import ? (ctx.imports || []).find((i) => i && i.id === query.import && i.kind === 'index' && i.scan_session_id === session.id) || null : null;
+  // Ronde 1 : seulement une lecture OUVERTE (une lecture close par « Créer les références » ne rouvre pas le panneau au refresh qui suit).
+  const ligneImport = query.import ? (ctx.imports || []).find((i) => importOuvert(i) && i.id === query.import && i.kind === 'index' && i.scan_session_id === session.id) || null : null;
   const selected = new Set(ligneImport ? (Array.isArray(ligneImport.page_ids) ? ligneImport.page_ids : []).filter((id) => pages.some((p) => p.id === id)) : applique.selection);
   const edition = session.edition_id ? ctx.editionsById.get(session.edition_id) : null;
   const root = el('div', null);
@@ -269,6 +220,7 @@ export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId 
     draw();
   };
   let importCourant = importId; // la ligne du journal de ce panneau : reprise par ?import=, ouverte au premier clic, close par « Créer les références »
+  let cleZone = null; // la clé (cleLecture) de LA lecture posée dans la zone : « Créer les références » ne clôt qu'elle (T4-R2, ronde 1)
   let occupe = false;
   const aiBtn = el('button', { class: 'btn', disabled: true, onClick: async () => {
     if (occupe) return;
@@ -280,7 +232,7 @@ export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId 
     try {
       const r = await lireDansLeJournal({ kind: 'index', importId: importCourant, pageIds: ids, editionId: editionId || session?.edition_id || null, sessionId: session?.id ?? null, ctx });
       importCourant = r.importId; connecte = r.connecte;
-      if (r.resultat) remplir(r.resultat); else status.textContent = r.texte;
+      if (r.resultat) { remplir(r.resultat); cleZone = r.cle; } else status.textContent = r.texte;
     } catch (e) { logError('import.index_lecture', { error: e }); status.textContent = texteEchecAssistant(e); }
     finally {
       occupe = false;
@@ -292,7 +244,7 @@ export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId 
   // ?import= : la lecture déjà reçue est relue et REVALIDÉE (I-1), puis posée dans la zone — aucun appel ; une ligne en échec dit sa raison.
   if (importId) relireDuJournal(importId, 'index').then((relue) => {
     if (!relue) { importCourant = null; return; }
-    if (relue.resultat) remplir(relue.resultat);
+    if (relue.resultat) { remplir(relue.resultat); cleZone = cleLecture(relue.ligne); }
     else if (relue.ligne?.status === 'echec') status.textContent = phraseEchec(relue.ligne.erreur);
   }).catch((e) => logError('import.index_relu', { error: e }));
   const create = async () => {
@@ -316,20 +268,23 @@ export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId 
       created.push(fiche);
     }
     const pagesIndex = pageIds.map((id) => ({ ...ctx.pagesById.get(id), kind: 'index' }));
-    // Tâche 6 : une lecture du journal reçue ici (a_verifier) est CLOSE avec ce qu'elle a produit — références et pages d'index —, dans UNE
-    // transaction conditionnée (I-10). Refusée (un autre onglet l'a close ou ignorée entre-temps) : rien n'est écrit ; le panneau se détache de la
-    // ligne, et « Créer les références » écrira à nouveau sans elle.
-    const ouverte = importCourant ? await repo.get('imports', importCourant) : null;
-    if (ouverte?.status === 'a_verifier' && ouverte.kind === 'index') {
+    // Tâche 6 : la lecture du journal POSÉE DANS LA ZONE (a_verifier, sa clé) est CLOSE avec ce qu'elle a produit — références et pages d'index —, dans UNE
+    // transaction conditionnée (I-10) à cette même lecture (T4-R2, ronde 1 : une lecture plus récente, arrivée d'un autre onglet, n'est jamais close sans
+    // avoir été vue ; les références de la zone s'écrivent alors sans elle). Refusée (close ou ignorée entre-temps) : rien n'est écrit ; le panneau se
+    // détache de la ligne, et « Créer les références » écrira à nouveau sans elle.
+    const ouverte = importCourant && cleZone ? await repo.get('imports', importCourant) : null;
+    if (ouverte?.status === 'a_verifier' && ouverte.kind === 'index' && cleLecture(ouverte) === cleZone) {
+      const cle = cleZone;
+      const cloture = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', ouverte.id, c.status); return { status: 'enregistre', reponse_brute: null, finished_at: repo.nowIso() }; };
       try {
-        await repo.transitionner('imports', ouverte.id, { attendus: ['a_verifier'], patch: { status: 'enregistre', reponse_brute: null, finished_at: repo.nowIso() }, puts: { ...(pagesIndex.length ? { source_pages: pagesIndex } : {}), ...(created.length ? { recipes: created } : {}) } });
+        await repo.transitionner('imports', ouverte.id, { attendus: ['a_verifier'], patch: cloture, puts: { ...(pagesIndex.length ? { source_pages: pagesIndex } : {}), ...(created.length ? { recipes: created } : {}) } });
       } catch (e) {
         if (!(e instanceof TransitionRefusee)) throw e;
-        importCourant = null;
+        importCourant = null; cleZone = null;
         toast(t('Les références n’ont pas pu être créées. Réessaie.'));
         return;
       }
-      importCourant = null;
+      importCourant = null; cleZone = null;
     } else {
       if (pagesIndex.length) await repo.saveBatch({ source_pages: pagesIndex });
       if (created.length) await repo.saveBatch({ recipes: created });

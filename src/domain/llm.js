@@ -65,6 +65,9 @@ export const BORNES_EXTRACTION = Object.freeze({ titre: 200, ligne: 300, etape: 
 // Les nombres du modèle (ronde 1) : au-delà, la valeur vaut null (rien d'inventé : « p. 9007199254740991 » ou une mise à l'échelle par 10^15 ne sont
 // pas des lectures). 24 h comme detectTimers (R-CRE-8) ; 999 portions ; 9 999 pages. Un refus (hors_bornes) jetterait une recette lisible pour un nombre.
 export const BORNES_NOMBRES = Object.freeze({ portions: 999, minutes: 1440, page: 9999 });
+// Les listes d'un index (tâche 6, ronde 1) : comme celles de la recette, un dépassement REFUSE (hors_bornes). 500 entrées est au-delà de ce qu'une réponse
+// peut porter (≈ 15 jetons par entrée) ; un index relu du journal (synchro, archive) qui en porterait 20 000 ne devient jamais 20 000 fiches.
+export const BORNES_INDEX = Object.freeze({ entrees: 500, incertains: 40, mentions: 80 });
 // D-5 : 6 000 jetons de sortie (était 4 000) ; une sortie plus longue frôlerait l'abandon serveur à 120 s — la preuve § 10 mesure.
 export const MAX_TOKENS_EXTRACTION = 6000;
 // La réponse brute gardée dans le journal (diagnostic, jamais rendue) : coupée à 16 000 points de code (sous la borne de 512 Kio de sync_push).
@@ -160,19 +163,19 @@ export async function extraireIndex(provider, images, { signal } = {}) {
 // (titre ≤ 200 points de code sinon hors_bornes, Cc/Cf retirés, page entier ≤ 9 999, section chaîne ou null, mentions chaînes seulement) ; une
 // entrée au titre vide est écartée ; pas de liste d'entrées → illisible. Exportée (tâche 6) : UNE définition, pour la réponse du modèle ET pour un
 // résultat relu du journal (synchro, archive), REVALIDÉ avant tout usage par le panneau d'index (I-1), comme validateParsedRecipe pour une recette.
+// Ronde 1 de la tâche 6 : les NOMBRES d'entrées, d'incertitudes et de mentions sont bornés aussi (BORNES_INDEX, hors_bornes au-delà).
 export function validerIndex(data) {
   if (!data || typeof data !== 'object' || !Array.isArray(data.entries)) throw new ErreurExtraction('illisible');
+  const mentions = (m) => { const l = (Array.isArray(m) ? m : []).map((x) => texteBorne(x, BORNES_EXTRACTION.ligne)).filter(Boolean); if (l.length > BORNES_INDEX.mentions) horsBornes(); return l; };
   const entries = data.entries.filter((e) => e && typeof e.title === 'string')
-    .map((e) => ({ title: texteBorne(e.title, BORNES_EXTRACTION.titre), printed_page: entierBorne(e.printed_page, BORNES_NOMBRES.page), section: texteBorne(e.section, BORNES_EXTRACTION.titre), ingredients_mentioned: (Array.isArray(e.ingredients_mentioned) ? e.ingredients_mentioned : []).map((m) => texteBorne(m, BORNES_EXTRACTION.ligne)).filter(Boolean) }))
+    .map((e) => ({ title: texteBorne(e.title, BORNES_EXTRACTION.titre), printed_page: entierBorne(e.printed_page, BORNES_NOMBRES.page), section: texteBorne(e.section, BORNES_EXTRACTION.titre), ingredients_mentioned: mentions(e.ingredients_mentioned) }))
     .filter((e) => e.title);
+  if (entries.length > BORNES_INDEX.entrees) horsBornes();
   const uncertain = (Array.isArray(data.uncertain) ? data.uncertain : []).map((u) => texteBorne(u, BORNES_EXTRACTION.champIncertain)).filter(Boolean);
+  if (uncertain.length > BORNES_INDEX.incertains) horsBornes();
   return { entries, uncertain };
 }
-
-// Enveloppe compatible (m5) : { entries, uncertain } seuls (ce que le panneau d'index lit aujourd'hui).
-export async function extractIndexFromImages(provider, images) {
-  return (await extraireIndex(provider, images)).index;
-}
+// (Ronde 1 de la tâche 6 : l'enveloppe m5 extractIndexFromImages est retirée — son seul appelant, le panneau d'index, lit désormais par le journal.)
 
 export function parseJsonLoose(text) {
   const s = String(text || '').trim();

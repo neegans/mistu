@@ -10,8 +10,11 @@ import { IMPORTS_TERMINES, STATUTS_IMPORT } from '../model/schema.js';
 
 // --- Transitions du journal (spec § 3.1) : toutes par repo.transitionner (I-10) ; aucune autre. `en_cours → echec` couvre annule,
 // interrompu et incertain (la raison est dans `erreur`). `a_verifier → echec` (T4-R1, ratifiée) couvre UN seul cas : un `resultat` relu du
-// journal (synchro, archive) qui ne passe plus validateParsedRecipe → echec(illisible), résultat effacé (I-1, § 4.5) ; c'est la seule écriture
-// que le simple montage de l'écran peut faire. Les deux états terminaux n'en permettent aucune. Gelée en PROFONDEUR (ronde 1) :
+// journal (synchro, archive) qui ne passe plus sa validation — validateParsedRecipe pour une recette, validerIndex pour un index — → echec(illisible),
+// résultat effacé (I-1, § 4.5), conditionné à la lecture relue (tâche 6, ronde 1) ; c'est la seule écriture que le simple MONTAGE d'un écran peut
+// faire, et trois écrans la font : l'écran ciblé, l'éditeur (?import=) et le panneau d'index (?import=). Une lecture SANS référence relancée sur
+// d'autres pages (éditeur, panneau) passe `a_verifier → a_lancer → en_cours` en UNE transaction, après les gardes du vol (tâche 6, ronde 1 : un
+// clic refusé n'écrit rien). Les deux états terminaux n'en permettent aucune. Gelée en PROFONDEUR (ronde 1) :
 // un module qui pousserait dans un tableau lèverait au lieu de changer les transitions de toute l'app.
 export const TRANSITIONS = Object.freeze({
   a_lancer: Object.freeze(['en_cours', 'ignore']),
@@ -170,7 +173,8 @@ export function cibleReprise(ligne) {
 //   a_lancer → reprendre, ignorer · en_cours → annuler si CE document tient le vol (document_id_vol), sinon aucun (« ailleurs ») ·
 //   a_verifier → reprendre, ignorer · echec → relancer, ignorer ;
 //   ligne d'un AUTRE appareil (« Photos sur un autre appareil ») : reprendre seulement si un résultat est là, jamais relancer → ignorer seul sinon ;
-//   référence pas encore reçue (recipe_id inconnu ici) → aucun geste ; rien où reprendre (index sans séance) → pas de « reprendre ».
+//   référence pas encore reçue (recipe_id inconnu ici) → aucun geste ; rien où reprendre (index sans séance) → pas de « reprendre » ;
+//   (ronde 1) référence devenue `available` (complétée ailleurs : l'écran ciblé la refuse) → ignorer seul ; echec sans page → pas de « relancer ».
 // Rend [{ id, kind, titre: { type: reference | index | regrouper | seance, texte, livre }, etat, age: { n, unite }, raison, gestes, cible,
 // ailleurs, autreAppareil, referenceAbsente, pages }].
 const parRecence = (champ) => (a, b) => String(b[champ] || '').localeCompare(String(a[champ] || ''));
@@ -194,9 +198,11 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     let gestes;
     if (referenceAbsente) gestes = [];
     else if (i.status === 'en_cours') gestes = tenu ? ['annuler'] : [];
+    else if (recette?.availability === 'available') gestes = ['ignorer']; // un POST ne servirait à rien : l'écran ciblé refuse une recette qui a son texte
     else if (autreAppareil) gestes = i.status === 'a_verifier' && i.resultat != null ? ['reprendre', 'ignorer'] : ['ignorer'];
     else gestes = i.status === 'echec' ? ['relancer', 'ignorer'] : ['reprendre', 'ignorer'];
     if (!cible) gestes = gestes.filter((g) => g !== 'reprendre');
+    if (!nbPages(i)) gestes = gestes.filter((g) => g !== 'relancer'); // un vol sans page serait refusé (sans_page) sans rien dire
     return {
       id: i.id, kind: i.kind, titre: { type, texte: recette ? chaine(recette.original_title) : null, livre: livreDe(recette?.edition_id ?? i.edition_id) },
       etat: i.status, age: ageDepuis(i.updated_at, maintenant), raison: i.status === 'echec' ? chaine(i.erreur?.raison) : null,

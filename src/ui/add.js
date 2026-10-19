@@ -10,10 +10,9 @@ import { logError } from '../core/log.js';
 import { TransitionRefusee } from '../core/db.js';
 import * as repoModule from '../model/repo.js';
 import { lignesImports } from '../domain/import-cible.js';
-import { pageHeader, carte, libelleLivre, field, select, TEXTE_CONNEXION } from './components.js';
+import { pageHeader, carte, libelleLivre, field, select } from './components.js';
 import { startScanSession } from './import.js';
-import { DOCUMENT_ID, lancerExtraction, annulerVol, texteEchec } from './import-cible.js';
-import { messageErreurImage } from './livre-ajout.js';
+import { DOCUMENT_ID, lancerExtraction, annulerVol, phraseEchec, texteRefus, cleLecture } from './import-cible.js';
 
 export const GRILLE_ACTIONS = ['ajouterLivre', 'pages', 'saisir', 'signet', 'creerIA', 'congelateur'];
 export const ACCEPT_PHOTOS = 'image/*';
@@ -85,25 +84,17 @@ function titreLigne(l) {
   return l.referenceAbsente ? t('(référence pas encore reçue)') : (l.titre.texte ?? t('Sans titre'));
 }
 // L'état dit en clair ; `brute` : la ligne du journal (sa date et son erreur, avec le nombre du quota ou « trop lourd » — que la ligne du domaine ne
-// porte pas). I-4 : interrompu, annule et incertain disent la même phrase (texteEchec, une définition avec l'écran ciblé).
+// porte pas). I-4 : interrompu, annule et incertain disent la même phrase (phraseEchec, une définition avec l'écran ciblé, l'éditeur et le panneau).
 function etatLigne(l, brute) {
   if (l.kind === 'seance') return null;
   if (l.etat === 'a_lancer') return l.pages <= 1 ? t('{n} photo ajoutée', { n: l.pages }) : t('{n} photos ajoutées', { n: l.pages });
   if (l.etat === 'en_cours') return l.ailleurs ? t('En cours sur un autre écran') : t('Lecture des pages par l’assistant…');
   if (l.etat === 'a_verifier') return t('Lecture reçue le {d}', { d: formatDate(brute?.updated_at, { withTime: true }) });
-  if (l.etat === 'echec') { const { texte, code } = texteEchec(brute?.erreur ?? { raison: l.raison }); return code ? `${texte} ${code}` : texte; }
+  if (l.etat === 'echec') return phraseEchec(brute?.erreur ?? { raison: l.raison });
   return null;
 }
 const LIBELLES = { reprendre: () => t('Reprendre'), relancer: () => t('Relancer'), annuler: () => t('Annuler'), ignorer: () => t('Ignorer'), ouvrir_seance: () => t('Ouvrir la séance') };
-// Ce qu'un « Relancer » refusé dit (rien n'est parti) ; un refus sans phrase (ligne changée ailleurs entre-temps) se voit au redessin.
-function texteRefus(r) {
-  if (r.raison === 'vol_tenu') return t('Une lecture est déjà en cours : annule-la d’abord.');
-  if (r.raison === 'hors_ligne') return t('Tu es hors ligne.');
-  if (r.raison === 'non_connecte') return t(TEXTE_CONNEXION);
-  if (r.raison === 'octets_absents') return t('Les photos de cette recette ne sont pas sur cet appareil.');
-  if (r.raison === 'image') return messageErreurImage({ code: r.code });
-  return null;
-}
+// Ce qu'un « Relancer » refusé dit : texteRefus (src/ui/import-cible.js, une définition) ; un refus sans phrase (ligne changée ailleurs) se voit au redessin.
 
 // La section : absente quand il n'y a rien ; sinon une ligne par import ouvert et par séance libre, avec ses gestes (.btn, ≥ 44 px). Le premier dessin
 // vient du contexte de la route (getData charge imports et scan_sessions : sans eux, la page ne lit aucune base) ; chaque écriture du journal ou des
@@ -113,13 +104,24 @@ function texteRefus(r) {
 function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, battementMs }) {
   const hote = el('div', null);
   let file = Promise.resolve();
-  const lireBase = async () => { const [imports, scan_sessions] = await Promise.all([repo.all('imports'), repo.all('scan_sessions')]); return { imports, scan_sessions }; };
+  // Ronde 1 : les références visées sont relues aussi — une fiche reçue (synchro) pendant que la page est montée donne son titre et ses gestes au redessin.
+  const lireBase = async () => {
+    const [imports, scan_sessions] = await Promise.all([repo.all('imports'), repo.all('scan_sessions')]);
+    const ids = [...new Set((Array.isArray(imports) ? imports : []).map((i) => i?.recipe_id).filter((id) => typeof id === 'string' && id))];
+    const recipesById = new Map(ctx?.recipesById instanceof Map ? ctx.recipesById : []);
+    for (const [id, r] of await Promise.all(ids.map(async (id) => [id, await repo.get('recipes', id)]))) { if (r) recipesById.set(id, r); else recipesById.delete(id); }
+    return { imports, scan_sessions, recipesById };
+  };
   const redessiner = () => { file = file.then(async () => dessiner(await lireBase())).catch((e) => logError('add.imports', { error: e })); return file; };
-  async function agir(geste, l) {
+  async function agir(geste, l, brute) {
     if (geste === 'reprendre' || geste === 'ouvrir_seance') { if (l.cible) navigate(l.cible); return; }
     if (geste === 'annuler') await annulerVol(l.id); // rien si ce document ne tient pas ce vol : le redessin dit l'état réel
     else if (geste === 'ignorer') {
-      try { await repo.transitionner('imports', l.id, { attendus: ATTENDUS_IGNORER, patch: { status: 'ignore', finished_at: maintenant() } }); }
+      // « Ignorer » vaut pour LA lecture affichée (T4-R2, ronde 1) : une ligne relancée ailleurs depuis le dessin (autre lecture, autre départ) n'est pas
+      // ignorée sans avoir été vue — le redessin la montre, et un second « Ignorer » vaudra pour elle.
+      const cle = cleLecture(brute);
+      const patch = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', l.id, c.status); return { status: 'ignore', finished_at: maintenant() }; };
+      try { await repo.transitionner('imports', l.id, { attendus: ATTENDUS_IGNORER, patch }); }
       catch (e) { if (!(e instanceof TransitionRefusee)) logError('add.ignorer', { error: e, id: l.id }); }
     } else if (geste === 'relancer') {
       // UN appel par le vol de l'écran ciblé (spec § 4.5) : aucune page ni séance n'est écrite ; la ligne s'arrête à a_verifier (« Reprendre » ensuite).
@@ -135,11 +137,11 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
       el('div', { class: 'row between' }, el('strong', null, titreLigne(l)), el('span', { class: 'muted' }, ageTexte(l.age))),
       etat ? el('span', { class: l.etat === 'echec' ? 'status warn' : 'muted' }, etat) : null,
       l.autreAppareil && l.kind !== 'seance' ? el('small', { class: 'muted' }, t('Photos sur un autre appareil')) : null,
-      l.gestes.length ? el('div', { class: 'row' }, ...l.gestes.map((g) => el('button', { type: 'button', class: g === 'reprendre' || g === 'ouvrir_seance' ? 'btn primary' : 'btn', dataset: { geste: g }, onClick: () => agir(g, l) }, LIBELLES[g]()))) : null);
+      l.gestes.length ? el('div', { class: 'row' }, ...l.gestes.map((g) => el('button', { type: 'button', class: g === 'reprendre' || g === 'ouvrir_seance' ? 'btn primary' : 'btn', dataset: { geste: g }, onClick: () => agir(g, l, brute) }, LIBELLES[g]()))) : null);
   }
-  function dessiner({ imports = [], scan_sessions = [] } = {}) {
+  function dessiner({ imports = [], scan_sessions = [], recipesById = ctx?.recipesById } = {}) {
     const brutes = new Map((Array.isArray(imports) ? imports : []).filter((i) => i && typeof i.id === 'string').map((i) => [i.id, i]));
-    const lignes = lignesImports({ ...ctx, imports, scan_sessions }, { maintenant: maintenant(), documentId: DOCUMENT_ID, deviceId: repo.deviceId() });
+    const lignes = lignesImports({ ...ctx, imports, scan_sessions, recipesById }, { maintenant: maintenant(), documentId: DOCUMENT_ID, deviceId: repo.deviceId() });
     const actif = hote.contains(document.activeElement) ? document.activeElement : null;
     const repere = actif ? { id: actif.closest('[data-role="ligne-import"]')?.dataset.id ?? null, geste: actif.dataset?.geste ?? null } : null;
     if (!lignes.length) { hote.replaceChildren(); return; }
@@ -161,8 +163,12 @@ export async function renderAdd(params, query, ctx, { repo = repoModule, navigat
   const desabonner = on('change', ({ store } = {}) => {
     if (!root.isConnected) { if (montee) desabonner(); return; }
     montee = true;
-    if (store === 'imports' || store === 'scan_sessions' || store === '*') imports.redessiner();
+    if (store === 'imports' || store === 'scan_sessions' || store === 'recipes' || store === '*') imports.redessiner();
   });
+  // Ronde 1 : la passe `interrompu` du démarrage est rejouée à l'affichage quand le journal porte un vol (repo.marquerInterrompus, mêmes règles) : un
+  // rechargement dans les 90 s, ou une ligne d'un appareil perdu, ne reste plus bloqué « En cours… » sans geste jusqu'au prochain démarrage.
+  // Le redessin suit la passe elle-même (et pas seulement le bus) : finie avant que la page soit montée, elle serait sinon perdue.
+  if ((ctx?.imports || []).some((i) => i?.status === 'en_cours') && typeof repo.marquerInterrompus === 'function') repo.marquerInterrompus().then((n) => { if (n) imports.redessiner(); }).catch((e) => logError('add.interrompus', { error: e }));
   // ?section=imports (fiche du livre, « {n} imports à reprendre » ; parseHash ne porte pas d'ancre, m3) : la section reçoit le focus une fois montée.
   setTimeout(() => {
     if (!root.isConnected) { desabonner(); return; }

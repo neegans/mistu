@@ -15,7 +15,7 @@ import { assertVocabulaire } from '../domain/vocabulaire.js';
 import { pageHeader, field, select, carteConnexion, texteEchecAssistant, section, pdfFrame, sessionAssistant, isoLisible } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
-import { lireDansLeJournal, relireDuJournal, phraseEchec } from './import.js';
+import { lireDansLeJournal, relireDuJournal, phraseEchec, cleLecture, volEnCours } from './import-cible.js';
 
 const SUBRECIPE_RE = /(?:voir|see|cf\.?)\s+(?:la\s+)?(?:page|p\.)\s*(\d{1,4})|\bp\.\s*(\d{1,4})\b/gi;
 
@@ -47,6 +47,9 @@ export async function renderRecipeEdit(params, query, ctx) {
   const reprise = !recipe && query.import ? await relireDuJournal(query.import, 'recette') : null;
   const ligneImport = reprise?.ligne ?? null;
   let importCourant = ligneImport?.id ?? null; // la ligne du journal de cet éditeur : reprise, ou ouverte au premier « Extraire avec l'assistant IA »
+  // LA lecture du journal posée dans le formulaire (ronde 1) : sa clé (cleLecture — « Enregistrer » ne clôt qu'elle, T4-R2) et ce qu'elle a dit
+  // d'incomplet (I-1 : montré à l'écran, porté par la version, jamais comblé).
+  let lecturePosee = null; // { cle, resultat } | null
   const editionId = query.edition || recipe?.edition_id || ligneImport?.edition_id || null;
   const edition = editionId ? ctx.editionsById.get(editionId) : null;
   const book = edition ? ctx.booksById.get(edition.book_id) : null;
@@ -166,7 +169,8 @@ export async function renderRecipeEdit(params, query, ctx) {
     f.aiUsed = true; f.aiModel = modele ?? null;
     parsedLines = []; reparse(); drawSteps();
     const uncertain = r.ingredients.filter((i) => i.uncertain).map((i) => i.source_text).concat(r.uncertain_fields);
-    aiStatus.textContent = t('Extraction proposée par l’assistant — toutes les lignes sont à vérifier.') + (uncertain.length ? ` ${t('Incertain')} : ${uncertain.join(' ; ')}` : '');
+    const manques = [r.missing_page === true ? t('page possiblement manquante') : null, r.incomplete === true ? t('lecture incomplète') : null].filter(Boolean); // I-1 : montrés, jamais comblés
+    aiStatus.textContent = t('Extraction proposée par l’assistant — toutes les lignes sont à vérifier.') + (manques.length ? ` ${manques.join(' · ')}.` : '') + (uncertain.length ? ` ${t('Incertain')} : ${uncertain.join(' ; ')}` : '');
     for (const k of ['servings', 'prep', 'cook', 'printed_page']) { const inp = numInputs[k]; if (inp) inp.value = f[k]; }
   };
   const aiBtn = el('button', { class: 'btn', disabled: !provider.configured || (!pages.length), onClick: async () => {
@@ -180,7 +184,9 @@ export async function renderRecipeEdit(params, query, ctx) {
         const r = await lireDansLeJournal({ kind: 'recette', importId: importCourant, pageIds: pages.map((p) => p.id), editionId, sessionId, ctx });
         importCourant = r.importId;
         if (!r.connecte) configure = false;
-        if (r.resultat) remplir(r.resultat, r.modele); else aiStatus.textContent = r.texte;
+        if (r.resultat) { remplir(r.resultat, r.modele); lecturePosee = { cle: r.cle, resultat: r.resultat }; } else aiStatus.textContent = r.texte;
+      } else if (volEnCours()) {
+        aiStatus.textContent = t('Une lecture est déjà en cours : annule-la d’abord.'); // I-7 (ronde 1) : un seul appel en vol par document, même hors journal
       } else {
         // Une relecture depuis « Corriger » (recette existante) reste hors journal : sa cible est la fiche ouverte, pas une ligne « à regrouper ».
         const images = [];
@@ -227,7 +233,7 @@ export async function renderRecipeEdit(params, query, ctx) {
 
   root.append(el('div', { class: 'two-col' }, left, right));
   reparse(); drawSteps();
-  if (reprise?.resultat) remplir(reprise.resultat, reprise.modele); // ?import= : la lecture reçue, revalidée, sans appel
+  if (reprise?.resultat) { remplir(reprise.resultat, reprise.modele); lecturePosee = { cle: cleLecture(reprise.ligne), resultat: reprise.resultat }; } // ?import= : la lecture reçue, revalidée, sans appel
   else if (ligneImport?.status === 'echec') aiStatus.textContent = phraseEchec(ligneImport.erreur);
   return root;
 
@@ -259,12 +265,18 @@ export async function renderRecipeEdit(params, query, ctx) {
         titre_lu: typeof parente.titre_lu === 'string' && Array.from(parente.titre_lu).length <= BORNES_EXTRACTION.titre ? parente.titre_lu : null,
         lu_le: Object.hasOwn(parente, 'lu_le') ? isoLisible(parente.lu_le) : isoLisible(base.created_at) }
       : {};
+    // Une lecture du JOURNAL posée dans ce formulaire (ronde 1, I-1) : la version garde ce qu'elle a dit d'incomplet (titre lu compris), et la fiche reste
+    // partial au plus (comme fabriquerExtraction) ; elle nomme la ligne (import_id, pointeur souple) seulement quand c'est CETTE lecture qui est close.
+    const lu = !targetRecipe && f.aiUsed && lecturePosee ? lecturePosee.resultat : null;
+    const ligneLue = lu && importCourant && lecturePosee.cle ? await repo.get('imports', importCourant) : null;
+    const fermer = ligneLue?.status === 'a_verifier' && ligneLue.kind === 'recette' && ligneLue.recipe_id == null && cleLecture(ligneLue) === lecturePosee.cle;
+    const lectureJournal = lu ? { ...(fermer ? { import_id: ligneLue.id } : {}), incomplete: lu.incomplete === true, missing_page: lu.missing_page === true, titre_lu: typeof lu.title === 'string' ? lu.title : null } : {};
     const version = {
       id: repo.newId('rv'), recipe_id: recipeId, kind: kindVersion, parent_version_id: base?.id || null,
       status: kind === 'adaptation' ? f.status : null, servings: n(f.servings), prep_minutes: n(f.prep), cook_minutes: n(f.cook), active_minutes: n(f.active), total_minutes: n(f.total),
       // Une ligne VÉRIFIÉE n'est plus incertaine (ronde 1, une seule règle) : la personne l'a relue — la fiche ne dit jamais « Vérifiée » et « incertaine ».
       ingredients: parsedLines.map((l) => ({ ...l, unit_candidates: l.unit_candidates || null, ...(Object.hasOwn(l, 'uncertain') ? { uncertain: l.uncertain === true && l.verification_state !== 'verified' } : {}) })), steps, constraints: {}, changes: f.changes.trim(), notes: f.notes.trim(),
-      provenance: { source_page_ids: pageIds, source_document_id: doc?.id || null, generated_by: f.aiUsed ? 'ai' : 'manual', model: f.aiModel, edition_id: editionId, convention_snapshot: convention ? { id: convention.id, revision: convention.revision, values: convention.values } : null, ...heritageLecture },
+      provenance: { source_page_ids: pageIds, source_document_id: doc?.id || null, generated_by: f.aiUsed ? 'ai' : 'manual', model: f.aiModel, edition_id: editionId, convention_snapshot: convention ? { id: convention.id, revision: convention.revision, values: convention.values } : null, ...heritageLecture, ...lectureJournal },
       verification_state: parsedLines.some((l) => l.verification_state !== 'verified') ? 'to_verify' : 'verified',
     };
     const rec = targetRecipe ? { ...targetRecipe } : { id: recipeId, edition_id: editionId, favorite: false, tags: [], source_page_ids: [], ingredient_ids: [] };
@@ -276,7 +288,7 @@ export async function renderRecipeEdit(params, query, ctx) {
     if (kind !== 'adaptation') {
       rec.availability = availability === 'reference_only' && rec.availability ? rec.availability : availability;
       // I-1 : une page possiblement manquante ou une lecture incomplète n'est jamais comblée par une correction — la fiche reste partial au plus.
-      if ((heritageLecture.incomplete || heritageLecture.missing_page) && rec.availability === 'available') rec.availability = 'partial';
+      if ((heritageLecture.incomplete || heritageLecture.missing_page || lectureJournal.incomplete || lectureJournal.missing_page) && rec.availability === 'available') rec.availability = 'partial';
       rec.current_version_id = version.id;
       rec.verification_state = version.verification_state;
       rec.ingredient_ids = [...new Set(parsedLines.map((l) => l.ingredient_id).filter(Boolean))];
@@ -284,20 +296,24 @@ export async function renderRecipeEdit(params, query, ctx) {
     const pageUpdates = pages.map((p) => ({ ...p, kind: 'recipe', printed_page: p.printed_page ?? n(f.printed_page) }));
     assertVocabulaire(rec, 'recipes'); // D-12 : vocabulaire fermé vérifié avant l'écriture
     const lot = { recipes: [rec], recipe_versions: [version], source_pages: pageUpdates };
-    // Tâche 6 : une lecture du journal posée dans ce formulaire (a_verifier) est CLOSE avec la recette — enregistre, réponse brute effacée — dans UNE
-    // transaction conditionnée (I-10) ; refusée (un autre onglet l'a close ou ignorée entre-temps) : rien n'est écrit, l'éditeur se détache de la
-    // ligne et « Enregistrer » écrira à nouveau sans elle.
-    const lue = !targetRecipe && f.aiUsed && importCourant ? await repo.get('imports', importCourant) : null;
-    if (lue?.status === 'a_verifier' && lue.kind === 'recette' && lue.recipe_id == null) {
-      try { await repo.transitionner('imports', lue.id, { attendus: ['a_verifier'], patch: { status: 'enregistre', reponse_brute: null, finished_at: repo.nowIso() }, puts: lot }); }
+    // La séance (recipe_ids) s'écrit dans la MÊME transaction que la recette (I-10, ronde 1), relue juste avant (leçon C4).
+    const seance = sessionId ? await repo.get('scan_sessions', sessionId) : null;
+    if (seance) lot.scan_sessions = [{ ...seance, recipe_ids: [...new Set([...(Array.isArray(seance.recipe_ids) ? seance.recipe_ids : []), recipeId])] }];
+    // Tâche 6 : LA lecture du journal posée dans ce formulaire (a_verifier, sa clé) est CLOSE avec la recette — enregistre, réponse brute effacée — dans
+    // UNE transaction conditionnée (I-10) à cette même lecture (T4-R2, ronde 1 : une lecture plus récente, arrivée d'un autre onglet, n'est jamais close
+    // sans avoir été vue ; la recette relue s'enregistre alors sans elle). Refusée (close ou ignorée entre-temps) : rien n'est écrit, l'éditeur se détache
+    // de la ligne et « Enregistrer » écrira à nouveau sans elle.
+    if (fermer) {
+      const cle = lecturePosee.cle;
+      const cloture = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', ligneLue.id, c.status); return { status: 'enregistre', reponse_brute: null, finished_at: repo.nowIso() }; };
+      try { await repo.transitionner('imports', ligneLue.id, { attendus: ['a_verifier'], patch: cloture, puts: lot }); }
       catch (e) {
         if (!(e instanceof TransitionRefusee)) throw e;
-        importCourant = null;
+        importCourant = null; lecturePosee = { ...lecturePosee, cle: null }; // détachée de la ligne ; ce que la lecture a dit d'incomplet reste porté
         toast(t('La recette n’a pas pu être enregistrée. Réessaie.'));
         return;
       }
     } else await repo.saveBatch(lot);
-    if (sessionId) { const s = ctx.scan_sessions.find((x) => x.id === sessionId); if (s) { s.recipe_ids = [...new Set([...(s.recipe_ids || []), recipeId])]; await repo.save('scan_sessions', s); } }
     toast(kind === 'adaptation' ? t('Ma version enregistrée') : t('Recette enregistrée'));
     navigate(`/recipes/${recipeId}?v=${version.id}`);
   }

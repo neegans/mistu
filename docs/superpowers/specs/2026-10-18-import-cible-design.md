@@ -102,10 +102,17 @@ supprimée ne bloquent pas une archive ; la fabrication ignore une page absente.
 `a_lancer → en_cours | ignore` · `en_cours → a_verifier | echec` · `a_verifier → enregistre | a_lancer (changer les pages) | ignore` ·
 `echec → en_cours (relancer) | a_lancer (changer les pages) | ignore` · `en_cours → echec(annule)` par le document qui tient le vol ·
 `en_cours → echec(interrompu)` au démarrage, **pour les lignes de cet appareil seulement** (le battement, d'origine `device`, n'est pas visible ailleurs) et **seulement si `battement_at` a plus de 90 s** (le vol bat toutes les 15 s, écriture d'origine
-`device` : jamais en file de synchro, m2) · `a_verifier → echec(illisible)` (T4-R1, ratifiée) pour **un seul cas** : un `resultat` relu du
-journal (synchro, archive) qui ne passe plus `validateParsedRecipe` — au montage de l'écran ciblé ou au clic « Enregistrer cette lecture » (I-1,
-§ 4.5) ; le résultat est effacé (`resultat: null`), rien n'atteint l'écran, et c'est la **seule écriture qu'un simple montage de l'écran peut
-faire** (origine `local` : elle part en file, comme toute transition du journal) · aucune autre.
+`device` : jamais en file de synchro, m2) ; **amendé à la ronde 1 de la tâche 6** : une ligne `en_cours` d'un **autre** appareil dont le vol a
+plus de **10 min** (`battement_at` ou `started_at` tels que synchronisés, bien au-delà du délai client de 135 s) est interrompue sur **n'importe
+quel** appareil (iPhone perdu, PWA réinstallée, archive restaurée ailleurs : sinon elle restait « En cours sur un autre écran » sans geste), et
+la passe est rejouée à l'affichage de la section « Imports » · `a_verifier → echec(illisible)` (T4-R1, ratifiée) pour **un seul cas** : un
+`resultat` relu du journal (synchro, archive) qui ne passe plus sa validation — `validateParsedRecipe` pour une recette, `validerIndex` pour un
+index — au montage de l'écran ciblé, de l'éditeur (`?import=`) ou du panneau d'index (`?import=`), ou au clic « Enregistrer cette lecture » (I-1,
+§ 4.5) ; conditionnée à **la** lecture relue (ronde 1 de la tâche 6 : une lecture valide arrivée entre-temps n'est jamais effacée) ; le résultat
+est effacé (`resultat: null`), rien n'atteint l'écran, et c'est la **seule écriture qu'un simple montage d'un de ces trois écrans peut faire**
+(origine `local` : elle part en file, comme toute transition du journal) · une lecture **sans référence** relancée par l'éditeur ou le panneau
+d'index passe `a_verifier → a_lancer → en_cours` (ses `page_ids` remises, l'ancien résultat effacé) en **une** transaction, et seulement
+**après** les gardes du vol (ronde 1 de la tâche 6 : hors ligne, sans session, octets absents, vol tenu → journal : rien, § 4.4) · aucune autre.
 Une réponse qui arrive après un `annule`/`interrompu` tente `echec → a_verifier`, qui n'existe pas : elle est **écrite dans
 `reponse_brute` seulement** (diagnostic), l'état reste `echec` ; c'est le prix assumé de I-4.
 

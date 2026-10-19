@@ -1520,13 +1520,11 @@ export async function runImportCibleTests({ eq, ok }) {
         sync: { user: session ? { id: 'u1', email: 'a@exemple.invalid' } : null, auth: { jeton: async () => session } }, conventionFor: () => null, editionLabel: (e) => (e?.id === 'ed6' ? 'Livre six' : '') };
     };
     try {
-      eq([typeof D.lignesImports, typeof D.cibleReprise, typeof A.renderAdd], ['function', 'function', 'function'], 'tâche 6 : lignesImports et cibleReprise exportés par le domaine');
-
       // --- 1. Domaine PUR (spec § 4.5) : une ligne par import ouvert et par séance ouverte, par table.
       await bloc('domaine : lignesImports et cibleReprise', async () => {
         const ICI = 'doc-ici', MOI = 'dev-ici', AUTRE = 'dev-ailleurs';
         const ilYa = (min) => new Date(Date.parse(NOW) - min * 60000).toISOString();
-        const ctxL = (imports, scan_sessions = []) => ({ imports, scan_sessions, recipesById: new Map([['rc1', { id: 'rc1', edition_id: 'ed1', original_title: 'Tarte aux pommes' }]]), editionsById: new Map([['ed1', { id: 'ed1', book_id: 'b1' }]]), booksById: new Map([['b1', { id: 'b1', title: 'Mon livre' }]]) });
+        const ctxL = (imports, scan_sessions = []) => ({ imports, scan_sessions, recipesById: new Map([['rc1', { id: 'rc1', edition_id: 'ed1', original_title: 'Tarte aux pommes' }], ['rc_dispo', { id: 'rc_dispo', edition_id: 'ed1', original_title: 'Gâteau', availability: 'available' }]]), editionsById: new Map([['ed1', { id: 'ed1', book_id: 'b1' }]]), booksById: new Map([['b1', { id: 'b1', title: 'Mon livre' }]]) });
         const opts = { maintenant: NOW, documentId: ICI, deviceId: MOI };
         const lig = (id, over = {}) => ({ id, kind: 'recette', recipe_id: 'rc1', edition_id: 'ed1', scan_session_id: 'ss_' + id, page_ids: ['p1', 'p2'], status: 'a_lancer', erreur: null, resultat: null, device_id: MOI, document_id_vol: null, updated_at: ilYa(5), ...over });
         const un = (l) => { const r = D.lignesImports(ctxL([l]), opts); return r.length === 1 ? r[0] : { rien: r }; };
@@ -1542,6 +1540,19 @@ export async function runImportCibleTests({ eq, ok }) {
           ['a_verifier, index → le panneau d’index de la séance par ?import=', lig('i7', { kind: 'index', recipe_id: null, status: 'a_verifier', resultat: { entries: [], uncertain: [] } }), ['a_verifier', 'index', ['reprendre', 'ignorer'], false, false, false, null, '/import?session=ss_i7&import=i7']],
           ['echec, index → Relancer, Ignorer', lig('i8', { kind: 'index', recipe_id: null, status: 'echec', erreur: { raison: 'serveur', extra: {} } }), ['echec', 'index', ['relancer', 'ignorer'], false, false, false, 'serveur', '/import?session=ss_i8&import=i8']],
           ['index sans séance : rien où reprendre (Ignorer seulement)', lig('i9', { kind: 'index', recipe_id: null, scan_session_id: null, status: 'a_verifier', resultat: { entries: [] } }), ['a_verifier', 'index', ['ignorer'], false, false, false, null, null]],
+          // Ronde 1 : les douze combinaisons (4 états × 3 sortes) — « Recette à regrouper » et index aux états qui manquaient.
+          ['en_cours, « Regrouper en recette », tenu par CE document → Annuler seulement', lig('r1', { recipe_id: null, status: 'en_cours', document_id_vol: ICI }), ['en_cours', 'regrouper', ['annuler'], false, false, false, null, '/recipes/new?import=r1']],
+          ['a_verifier, « Regrouper en recette » → Reprendre (l’éditeur prérempli), Ignorer', lig('r2', { recipe_id: null, status: 'a_verifier', resultat: { title: 'T' } }), ['a_verifier', 'regrouper', ['reprendre', 'ignorer'], false, false, false, null, '/recipes/new?import=r2']],
+          ['echec, « Regrouper en recette » → Relancer, Ignorer', lig('r3', { recipe_id: null, status: 'echec', erreur: { raison: 'delai', extra: {} } }), ['echec', 'regrouper', ['relancer', 'ignorer'], false, false, false, 'delai', '/recipes/new?import=r3']],
+          ['a_lancer, index → Reprendre (le panneau de sa séance), Ignorer', lig('x1', { kind: 'index', recipe_id: null }), ['a_lancer', 'index', ['reprendre', 'ignorer'], false, false, false, null, '/import?session=ss_x1&import=x1']],
+          ['en_cours, index tenu par CE document → Annuler seulement', lig('x2', { kind: 'index', recipe_id: null, status: 'en_cours', document_id_vol: ICI }), ['en_cours', 'index', ['annuler'], false, false, false, null, '/import?session=ss_x2&import=x2']],
+          ['en_cours, index tenu ailleurs → « ailleurs », aucun geste', lig('x4', { kind: 'index', recipe_id: null, status: 'en_cours', document_id_vol: 'doc-autre' }), ['en_cours', 'index', [], true, false, false, null, '/import?session=ss_x4&import=x4']],
+          // Ronde 1 (mineurs) : « Relancer » sans page ne lirait rien (refus sans_page, muet) ; une référence devenue available est refusée par l'écran ciblé
+          // (« Cette recette a déjà son texte. ») : Ignorer seulement, aucun POST payé pour rien.
+          ['echec SANS page → Ignorer seulement', lig('x3', { status: 'echec', page_ids: [], erreur: { raison: 'serveur', extra: {} } }), ['echec', 'reference', ['ignorer'], false, false, false, 'serveur', CIBLE]],
+          ['echec, référence devenue available → Ignorer seulement', lig('d1', { recipe_id: 'rc_dispo', status: 'echec', erreur: { raison: 'serveur', extra: {} } }), ['echec', 'reference', ['ignorer'], false, false, false, 'serveur', '/recipes/rc_dispo/importer']],
+          ['a_verifier, référence devenue available → Ignorer seulement', lig('d2', { recipe_id: 'rc_dispo', status: 'a_verifier', resultat: { title: 'T' } }), ['a_verifier', 'reference', ['ignorer'], false, false, false, null, '/recipes/rc_dispo/importer']],
+          ['a_lancer, référence devenue available → Ignorer seulement', lig('d3', { recipe_id: 'rc_dispo' }), ['a_lancer', 'reference', ['ignorer'], false, false, false, null, '/recipes/rc_dispo/importer']],
           ['autre appareil, a_lancer → Ignorer seulement (ni Reprendre sans résultat, ni Relancer)', lig('j1', { device_id: AUTRE }), ['a_lancer', 'reference', ['ignorer'], false, true, false, null, CIBLE]],
           ['autre appareil, a_verifier SANS résultat → sans Reprendre', lig('j2', { device_id: AUTRE, status: 'a_verifier' }), ['a_verifier', 'reference', ['ignorer'], false, true, false, null, CIBLE]],
           ['autre appareil, a_verifier avec résultat → Reprendre, Ignorer', lig('j3', { device_id: AUTRE, status: 'a_verifier', resultat: { title: 'T' } }), ['a_verifier', 'reference', ['reprendre', 'ignorer'], false, true, false, null, CIBLE]],
@@ -1568,49 +1579,66 @@ export async function runImportCibleTests({ eq, ok }) {
         eq(D.lignesImports(ctxL([lig('a1')], [seance('s1', { page_ids: undefined })]), opts).map((r) => [r.kind, r.pages]), [['recette', 2], ['seance', 0]], 'lignesImports : les imports d’abord, puis les séances ; une séance sans page_ids compte 0 page');
         eq([D.cibleReprise({ id: 'imp a', kind: 'recette', recipe_id: 'rc/1' }), D.cibleReprise({ id: 'imp_b', kind: 'recette', recipe_id: null }), D.cibleReprise({ id: 'imp&c', kind: 'index', scan_session_id: 'ss&1' }), D.cibleReprise({ id: 'imp_d', kind: 'index', scan_session_id: null }), D.cibleReprise({ id: 'imp_e', kind: 'web' }), D.cibleReprise(null)],
           ['/recipes/rc%2F1/importer', '/recipes/new?import=imp_b', '/import?session=ss%261&import=imp%26c', null, null, null], 'cibleReprise : recette ciblée → l’écran ciblé ; recette sans recipe_id → l’éditeur ?import= ; index → le panneau de sa séance ; identifiants encodés ; sans séance ou sorte inconnue → null');
+        // Ronde 1 (mineur) : validerIndex borne aussi le NOMBRE d'entrées, d'incertitudes et de mentions — un index relu du journal (synchro, archive) en
+        // porterait 20 000 sous la borne de 512 Kio, et « Créer les références » écrirait autant de fiches.
+        const L = await import('../src/domain/llm.js');
+        const raisonIndex = (data) => { try { L.validerIndex(data); return 'ok'; } catch (e) { return e?.raison ?? e?.message; } };
+        const n = (k, f) => Array.from({ length: k }, (_, i) => f(i));
+        eq([L.BORNES_INDEX, raisonIndex({ entries: n(500, (i) => ({ title: 'T' + i, printed_page: 1 })), uncertain: n(40, (i) => 'u' + i) }), raisonIndex({ entries: n(501, (i) => ({ title: 'T' + i })) }), raisonIndex({ entries: [], uncertain: n(41, (i) => 'u' + i) }),
+          raisonIndex({ entries: [{ title: 'T', ingredients_mentioned: n(80, (i) => 'm' + i) }] }), raisonIndex({ entries: [{ title: 'T', ingredients_mentioned: n(81, (i) => 'm' + i) }] })],
+        [{ entrees: 500, incertains: 40, mentions: 80 }, 'ok', 'hors_bornes', 'hors_bornes', 'ok', 'hors_bornes'], 'validerIndex (ronde 1) : 500 entrées, 40 incertitudes et 80 mentions par entrée au plus ; au-delà → hors_bornes (comme les listes de la recette)');
       });
 
       // --- 2. Démarrage (spec § 3.1, Review Focus 3) : capture posée PUIS repo.init() rappelé (comme tests/assistant-compte.js).
-      await bloc('démarrage : interrompu (> 90 s, cet appareil) et purge à 30 jours', async () => {
-        const T = Date.now();
-        const avant = (ms) => new Date(T - ms).toISOString();
-        const J = 24 * 3600 * 1000;
-        const moi = repo.deviceId();
-        ok(typeof moi === 'string' && moi.length > 0, 'démarrage : l’appareil a son identité (posée par init)');
-        const base = (id, over) => ({ id, kind: 'recette', recipe_id: null, edition_id: null, scan_session_id: null, page_ids: [], photo_sha256: null, erreur: null, resultat: null, reponse_brute: 'brut', appels: 1, model: null, duree_ms: null, device_id: moi, document_id_vol: null, battement_at: null, started_at: avant(200000), finished_at: null, created_at: avant(40 * J), ...over });
-        const lignes = [
-          base('imp_mort', { status: 'en_cours', document_id_vol: 'doc-ferme', battement_at: avant(120000), updated_at: avant(120000) }),
-          base('imp_vif', { status: 'en_cours', document_id_vol: 'doc-ouvert', battement_at: avant(30000), updated_at: avant(30000) }),
-          base('imp_ailleurs', { status: 'en_cours', device_id: 'dev-autre', document_id_vol: 'doc-autre', battement_at: avant(120000), updated_at: avant(120000) }),
-          base('imp_course', { status: 'en_cours', document_id_vol: 'doc-ouvert', battement_at: avant(10000), updated_at: avant(10000) }),
-          base('imp_enr31', { status: 'enregistre', reponse_brute: null, finished_at: avant(31 * J), updated_at: avant(31 * J) }),
-          base('imp_ign31', { status: 'ignore', updated_at: avant(31 * J) }),
-          base('imp_enr29', { status: 'enregistre', reponse_brute: null, updated_at: avant(29 * J) }),
-          base('imp_ign29', { status: 'ignore', updated_at: avant(29 * J) }),
-          base('imp_echec60', { status: 'echec', erreur: { raison: 'serveur', extra: {} }, updated_at: avant(60 * J) }),
-        ];
-        const version = { id: 'rv_purge', recipe_id: 'rc_purge', kind: 'extraction', ingredients: [], steps: [], provenance: { generated_by: 'ai', import_id: 'imp_enr31' }, verification_state: 'to_verify', created_at: avant(31 * J), updated_at: avant(31 * J) };
-        await db.mutate({ puts: { imports: lignes, recipe_versions: [version] }, origin: 'device' });
-        const fileAvant = new Set((await db.getAll('outbox')).map((e) => e.seq));
-        // La course entre deux onglets : le démarrage LIT un battement vieux pour imp_course, alors que l'autre onglet l'a rafraîchi (−10 s) — la passe
-        // relit le battement DANS sa transaction et n'écrit rien.
-        const lireIndex = db.byIndex.bind(db);
-        db.byIndex = async (s, i, v) => (await lireIndex(s, i, v)).map((l) => (l?.id === 'imp_course' ? { ...l, battement_at: avant(120000) } : l));
-        try { await repo.init(); } finally { db.byIndex = lireIndex; }
-        const parId = new Map((await db.getAll('imports')).map((l) => [l.id, l]));
-        const mort = parId.get('imp_mort');
-        eq([mort?.status, mort?.erreur, mort?.document_id_vol, mort?.battement_at], ['echec', { raison: 'interrompu', extra: {} }, null, lignes[0].battement_at], 'démarrage : en_cours de CET appareil dont le battement a 120 s → echec(interrompu), vol libéré');
-        eq(['imp_vif', 'imp_ailleurs', 'imp_course'].map((id) => [parId.get(id)?.status, parId.get(id)?.updated_at]), [['en_cours', lignes[1].updated_at], ['en_cours', lignes[2].updated_at], ['en_cours', lignes[3].updated_at]], 'démarrage (Review Focus 3) : battement à −30 s → intact ; ligne d’un AUTRE appareil (−120 s) → intacte ; battement rafraîchi par un autre onglet entre la lecture et la transaction → intact (relu dans la transaction)');
-        eq(['imp_enr31', 'imp_ign31'].map((id) => parId.has(id)), [false, false], 'démarrage : enregistre et ignore vieux de 31 jours → supprimés');
-        eq(['imp_enr29', 'imp_ign29', 'imp_echec60'].map((id) => parId.get(id)?.status), ['enregistre', 'ignore', 'echec'], 'démarrage : vieux de 29 jours → intacts ; un echec de 60 jours reste (un échec attend un geste)');
-        eq(await db.get('recipe_versions', 'rv_purge'), version, 'démarrage : la version dont provenance.import_id pointe une ligne purgée reste intacte (pointeur souple)');
-        const neuves = (await db.getAll('outbox')).filter((e) => !fileAvant.has(e.seq));
-        eq(neuves.map((e) => [e.store, e.id, e.op]).sort(), [['imports', 'imp_enr31', 'delete'], ['imports', 'imp_ign31', 'delete'], ['imports', 'imp_mort', 'put']], 'démarrage : interrompu (put) et chaque purge (delete, tombale d’origine local : « À envoyer » monte d’autant, assumé) entrent en file ; rien pour les lignes intactes');
-        eq(neuves.filter((e) => e.op === 'delete').map((e) => e.payload?.id).sort(), ['imp_enr31', 'imp_ign31'], 'démarrage : la tombale porte la copie de la ligne supprimée');
-        const n1 = (await db.getAll('outbox')).length;
-        await repo.init();
-        eq([(await db.getAll('outbox')).length, (await db.get('imports', 'imp_vif'))?.status, (await db.count('imports'))], [n1, 'en_cours', 7], 'démarrage : un second init() n’écrit rien de plus (rejouable)');
-        await db.mutate({ clearStores: ['imports', 'recipe_versions'], origin: 'device' }); // les blocs suivants partent d'un journal vide
+      await bloc('démarrage : interrompu (> 90 s, cet appareil) et purge à 30 jours ; ronde 1 : battement illisible, autre appareil au-delà de 10 min', async () => {
+        try {
+          const T = Date.now();
+          const avant = (ms) => new Date(T - ms).toISOString();
+          const J = 24 * 3600 * 1000;
+          const moi = repo.deviceId();
+          ok(typeof moi === 'string' && moi.length > 0, 'démarrage : l’appareil a son identité (posée par init)');
+          const base = (id, over) => ({ id, kind: 'recette', recipe_id: null, edition_id: null, scan_session_id: null, page_ids: [], photo_sha256: null, erreur: null, resultat: null, reponse_brute: 'brut', appels: 1, model: null, duree_ms: null, device_id: moi, document_id_vol: null, battement_at: null, started_at: avant(200000), finished_at: null, created_at: avant(40 * J), ...over });
+          const lignes = [
+            base('imp_mort', { status: 'en_cours', document_id_vol: 'doc-ferme', battement_at: avant(120000), updated_at: avant(120000) }),
+            base('imp_vif', { status: 'en_cours', document_id_vol: 'doc-ouvert', battement_at: avant(30000), updated_at: avant(30000) }),
+            base('imp_ailleurs', { status: 'en_cours', device_id: 'dev-autre', document_id_vol: 'doc-autre', battement_at: avant(120000), updated_at: avant(120000) }),
+            base('imp_course', { status: 'en_cours', document_id_vol: 'doc-ouvert', battement_at: avant(10000), updated_at: avant(10000) }),
+            base('imp_enr31', { status: 'enregistre', reponse_brute: null, finished_at: avant(31 * J), updated_at: avant(31 * J) }),
+            base('imp_ign31', { status: 'ignore', updated_at: avant(31 * J) }),
+            base('imp_enr29', { status: 'enregistre', reponse_brute: null, updated_at: avant(29 * J) }),
+            base('imp_ign29', { status: 'ignore', updated_at: avant(29 * J) }),
+            base('imp_echec60', { status: 'echec', erreur: { raison: 'serveur', extra: {} }, updated_at: avant(60 * J) }),
+            // Ronde 1 : un battement ILLISIBLE ne prouve aucun vol vivant (décision 6) ; une ligne d'un AUTRE appareil dont le vol a commencé il y a plus
+            // de 10 min (bien au-delà du délai client de 135 s) n'a plus de vol vivant nulle part — iPhone perdu, PWA réinstallée, archive restaurée
+            // ailleurs : elle est interrompue sur n'importe quel appareil ; à 9 min, elle reste (son vol peut encore vivre).
+            base('imp_sans_battement', { status: 'en_cours', document_id_vol: 'doc-ferme', battement_at: null, updated_at: avant(200000) }),
+            base('imp_perdu', { status: 'en_cours', device_id: 'dev-perdu', document_id_vol: 'doc-perdu', battement_at: '2026-01-01T00:00:00.000Z', started_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' }),
+            base('imp_ailleurs9', { status: 'en_cours', device_id: 'dev-autre', document_id_vol: 'doc-autre', battement_at: avant(9 * 60000), started_at: avant(9 * 60000), updated_at: avant(9 * 60000) }),
+          ];
+          const version = { id: 'rv_purge', recipe_id: 'rc_purge', kind: 'extraction', ingredients: [], steps: [], provenance: { generated_by: 'ai', import_id: 'imp_enr31' }, verification_state: 'to_verify', created_at: avant(31 * J), updated_at: avant(31 * J) };
+          await db.mutate({ puts: { imports: lignes, recipe_versions: [version] }, origin: 'device' });
+          const fileAvant = new Set((await db.getAll('outbox')).map((e) => e.seq));
+          // La course entre deux onglets : le démarrage LIT un battement vieux pour imp_course, alors que l'autre onglet l'a rafraîchi (−10 s) — la passe
+          // relit le battement DANS sa transaction et n'écrit rien.
+          const lireIndex = db.byIndex.bind(db);
+          db.byIndex = async (s, i, v) => (await lireIndex(s, i, v)).map((l) => (l?.id === 'imp_course' ? { ...l, battement_at: avant(120000) } : l));
+          try { await repo.init(); } finally { db.byIndex = lireIndex; }
+          const parId = new Map((await db.getAll('imports')).map((l) => [l.id, l]));
+          const mort = parId.get('imp_mort');
+          eq([mort?.status, mort?.erreur, mort?.document_id_vol, mort?.battement_at], ['echec', { raison: 'interrompu', extra: {} }, null, lignes[0].battement_at], 'démarrage : en_cours de CET appareil dont le battement a 120 s → echec(interrompu), vol libéré');
+          eq(['imp_vif', 'imp_ailleurs', 'imp_course'].map((id) => [parId.get(id)?.status, parId.get(id)?.updated_at]), [['en_cours', lignes[1].updated_at], ['en_cours', lignes[2].updated_at], ['en_cours', lignes[3].updated_at]], 'démarrage (Review Focus 3) : battement à −30 s → intact ; ligne d’un AUTRE appareil (−120 s) → intacte ; battement rafraîchi par un autre onglet entre la lecture et la transaction → intact (relu dans la transaction)');
+          eq(['imp_sans_battement', 'imp_perdu'].map((id) => [parId.get(id)?.status, parId.get(id)?.erreur?.raison, parId.get(id)?.document_id_vol]), [['echec', 'interrompu', null], ['echec', 'interrompu', null]], 'démarrage (ronde 1) : en_cours de CET appareil sans battement lisible → interrompu ; en_cours d’un AUTRE appareil dont le vol a plus de 10 min → interrompu (plus d’impasse « En cours sur un autre écran » sans geste)');
+          eq([parId.get('imp_ailleurs9')?.status, parId.get('imp_ailleurs9')?.updated_at], ['en_cours', lignes.find((l) => l.id === 'imp_ailleurs9').updated_at], 'démarrage (ronde 1) : une ligne d’un autre appareil dont le vol a 9 min reste en_cours, intacte');
+          eq(['imp_enr31', 'imp_ign31'].map((id) => parId.has(id)), [false, false], 'démarrage : enregistre et ignore vieux de 31 jours → supprimés');
+          eq(['imp_enr29', 'imp_ign29', 'imp_echec60'].map((id) => parId.get(id)?.status), ['enregistre', 'ignore', 'echec'], 'démarrage : vieux de 29 jours → intacts ; un echec de 60 jours reste (un échec attend un geste)');
+          eq(await db.get('recipe_versions', 'rv_purge'), version, 'démarrage : la version dont provenance.import_id pointe une ligne purgée reste intacte (pointeur souple)');
+          const neuves = (await db.getAll('outbox')).filter((e) => !fileAvant.has(e.seq));
+          eq(neuves.map((e) => [e.store, e.id, e.op]).sort(), [['imports', 'imp_enr31', 'delete'], ['imports', 'imp_ign31', 'delete'], ['imports', 'imp_mort', 'put'], ['imports', 'imp_perdu', 'put'], ['imports', 'imp_sans_battement', 'put']], 'démarrage : interrompu (put) et chaque purge (delete, tombale d’origine local : « À envoyer » monte d’autant, assumé) entrent en file ; rien pour les lignes intactes');
+          eq(neuves.filter((e) => e.op === 'delete').map((e) => e.payload?.id).sort(), ['imp_enr31', 'imp_ign31'], 'démarrage : la tombale porte la copie de la ligne supprimée');
+          const n1 = (await db.getAll('outbox')).length;
+          await repo.init();
+          eq([(await db.getAll('outbox')).length, (await db.get('imports', 'imp_vif'))?.status, (await db.count('imports'))], [n1, 'en_cours', 10], 'démarrage : un second init() n’écrit rien de plus (rejouable)');
+        } finally { await db.mutate({ clearStores: ['imports', 'recipe_versions'], origin: 'device' }); } // les blocs suivants partent d'un journal vide, même après un rouge (ronde 1)
       });
 
       // --- 3. Page Ajouter (spec § 4.5) : la section, ses lignes et ses gestes câblés ; « Reprendre » sur a_verifier → l'écran ciblé, revalidé.
@@ -1699,6 +1727,67 @@ export async function runImportCibleTests({ eq, ok }) {
         eq([(await db.get('imports', impD)).status, (await db.get('imports', impD)).erreur?.raison, (await db.get('imports', impD)).resultat, bouton(hostile, 'Enregistrer cette lecture'), hostile.textContent.includes('HOSTILE-'), reseau], ['echec', 'illisible', null, null, false, 0], 'Reprendre (a_verifier) : un resultat hostile injecté (titre de 201 points de code) → echec(illisible), rien à l’écran, aucun appel');
       });
 
+      // --- 3 bis. Page Ajouter, ronde 1 : les autres sortes et l'autre appareil câblés à la PAGE, les textes exacts des lignes, « Ignorer » lié à la lecture
+      // AFFICHÉE (T4-R2), « Relancer » d'un index depuis la section, la passe interrompu à l'affichage, une référence reçue pendant que la page est montée.
+      await bloc('page Ajouter : sortes, autre appareil, textes, Ignorer, interrompu (ronde 1)', async () => {
+        await db.mutate({ clearStores: ['imports'], origin: 'device' });
+        const moi = repo.deviceId();
+        const ilYa = (ms) => new Date(Date.parse(NOW) - ms).toISOString(); // l'âge affiché part de maintenant() = NOW
+        const reel = (ms) => new Date(Date.now() - ms).toISOString(); // le battement se compare à l'horloge de l'appareil
+        const { importId: impX } = await repo.ajouterPages(await images(2, 'idx'), { edition_id: 'ed6', import: { id: 'imp_idx', kind: 'index' } });
+        await db.put('imports', { ...(await db.get('imports', impX)), status: 'echec', erreur: { raison: 'serveur', extra: {} }, appels: 1, updated_at: ilYa(3 * 3600000) });
+        const { importId: impG } = await repo.ajouterPages(await images(1, 'grp'), { edition_id: 'ed6', import: { id: 'imp_grp', kind: 'recette' } });
+        await db.put('imports', { ...(await db.get('imports', impG)), status: 'a_verifier', resultat: { ...RECETTE, title: 'Lecture R1' }, started_at: reel(60000), model: 'claude-x', updated_at: ilYa(2 * 60000) });
+        const brut = (id, over) => ({ id, kind: 'recette', recipe_id: null, edition_id: 'ed6', scan_session_id: null, page_ids: ['pg_ailleurs'], photo_sha256: null, status: 'a_lancer', erreur: null, resultat: null, reponse_brute: null, appels: 0, model: null, duree_ms: null, device_id: moi, document_id_vol: null, battement_at: null, started_at: null, finished_at: null, created_at: ilYa(60000), updated_at: ilYa(60000), ...over });
+        await db.mutate({ puts: { imports: [
+          brut('imp_absente', { recipe_id: 'rc6z', status: 'a_verifier', resultat: { ...RECETTE } }),
+          brut('imp_aut_echec', { recipe_id: 'rc6g', device_id: 'dev-iphone', status: 'echec', erreur: { raison: 'serveur', extra: {} } }),
+          brut('imp_aut_lancer', { device_id: 'dev-iphone' }),
+          brut('imp_mort_ici', { status: 'en_cours', document_id_vol: 'doc-ferme', battement_at: reel(120000), started_at: reel(130000) }),
+        ] }, origin: 'device' });
+        const ff = fauxFetch();
+        const root = await A.renderAdd({}, {}, await ctxDe(), { repo, navigate: (p) => navs.push(p), toast: (m) => dits.push(m), fetch: ff.fetch, maintenant: () => NOW });
+        scene.append(root);
+        const ligne = (id) => root.querySelector(`[data-role="ligne-import"][data-id="${CSS.escape(id)}"]`);
+        const titre = (id) => ligne(id)?.querySelector('strong')?.textContent ?? null;
+        const age = (id) => ligne(id)?.querySelector('.row.between > span.muted')?.textContent ?? null;
+        // La passe interrompu tourne aussi à l'affichage de la section (plus d'attente du prochain démarrage) : la ligne morte de CET appareil passe echec.
+        await attendre(async () => (await db.get('imports', 'imp_mort_ici')).status === 'echec' && (boutons(ligne('imp_mort_ici')) || []).includes('Relancer'), 'interrompu à l’affichage');
+        eq([(await db.get('imports', 'imp_mort_ici')).erreur, ligne('imp_mort_ici').textContent.includes('La lecture a été interrompue. L’appel a peut-être été compté ; relancer en coûtera un autre.')], [{ raison: 'interrompu', extra: {} }, true], 'Ajouter (ronde 1) : une ligne en_cours de CET appareil au battement mort passe interrompu dès l’affichage de la section, avec la phrase I-4');
+        eq([titre(impX), titre(impG), titre('imp_absente'), age(impX), age(impG)], ['Index · Livre six', 'Recette à regrouper · Livre six', '(référence pas encore reçue)', 'il y a 3 h', 'il y a 2 min'], 'Ajouter (ronde 1) : titres exacts par sorte (« Index · {livre} », « Recette à regrouper · {livre} », référence pas encore reçue) et âge réel de la ligne');
+        eq([boutons(ligne(impX)), boutons(ligne(impG)), boutons(ligne('imp_absente'))], [['Relancer', 'Ignorer'], ['Reprendre', 'Ignorer'], []], 'Ajouter (ronde 1) : un index en échec → Relancer, Ignorer ; une recette à regrouper lue → Reprendre, Ignorer ; une référence pas encore reçue → aucun geste');
+        eq([boutons(ligne('imp_aut_echec')), boutons(ligne('imp_aut_lancer')), ligne('imp_aut_echec').textContent.includes('Photos sur un autre appareil'), ligne('imp_aut_lancer').textContent.includes('Photos sur un autre appareil'), ligne(impX).textContent.includes('Photos sur un autre appareil')], [['Ignorer'], ['Ignorer'], true, true, false], 'Ajouter (ronde 1) : une ligne d’un AUTRE appareil (echec, a_lancer) → « Ignorer » seul et « Photos sur un autre appareil » (câblage deviceId de la page) ; rien de tel pour une ligne d’ici');
+        bouton(ligne(impG), 'Reprendre').click();
+        eq(navs.at(-1), '/recipes/new?import=imp_grp', 'Ajouter (ronde 1) : « Reprendre » d’une recette à regrouper → l’éditeur par ?import=');
+        // « Ignorer » vaut pour la lecture AFFICHÉE (T4-R2) : un autre onglet a relancé la ligne et reçu R2 sans que la page se redessine → rien n'est ignoré.
+        await db.put('imports', { ...(await db.get('imports', impG)), started_at: reel(1000), resultat: { ...RECETTE, title: 'Lecture R2' } }); // sans bus : la ligne affichée est encore R1
+        const avantIgnorer = ligne(impG);
+        bouton(avantIgnorer, 'Ignorer').click();
+        await attendre(() => !!ligne(impG) && ligne(impG) !== avantIgnorer, 'redessin après le refus');
+        eq([(await db.get('imports', impG)).status, (await db.get('imports', impG)).resultat?.title], ['a_verifier', 'Lecture R2'], 'Ignorer (ronde 1, T4-R2) : la ligne a reçu une AUTRE lecture depuis l’affichage → rien n’est ignoré (R2, jamais vue, reste à reprendre)');
+        bouton(ligne(impG), 'Ignorer').click();
+        await attendre(async () => (await db.get('imports', impG)).status === 'ignore', 'ignorée après redessin');
+        // « Relancer » d'un index depuis la section : extraireIndex, le résultat { entries, uncertain } ; le vol tenu ICI dit « Lecture des pages… ».
+        bouton(ligne(impX), 'Relancer').click();
+        await attendre(() => ff.appels.length === 1 && !!bouton(ligne(impX), 'Annuler'), 'vol d’index parti');
+        const corps = JSON.parse(ff.appels[0].options.body);
+        eq([ligne(impX).textContent.includes('Lecture des pages par l’assistant…'), ligne(impX).textContent.includes('En cours sur un autre écran'), corps.corps.system.startsWith('Tu lis la table des matières'), corps.corps.messages[0].content.filter((c) => c.type === 'image').length], [true, false, true, 2], 'Relancer (index, section) : le vol tenu ICI dit « Lecture des pages par l’assistant… », jamais « En cours sur un autre écran » ; la consigne de l’index, ses deux pages');
+        ff.rendre[0](200, corpsOk({ entries: [{ title: 'Tarte fine', printed_page: 12 }], uncertain: ['p. 41 ?'] }));
+        await attendre(async () => (await db.get('imports', impX)).status === 'a_verifier' && !!bouton(ligne(impX), 'Reprendre'), 'index relu');
+        eq([(await db.get('imports', impX)).resultat, boutons(ligne(impX))], [{ entries: [{ title: 'Tarte fine', printed_page: 12, section: null, ingredients_mentioned: [] }], uncertain: ['p. 41 ?'] }, ['Reprendre', 'Ignorer']], 'Relancer (index, section) : le journal reçoit { entries, uncertain } (jamais une recette) ; « Reprendre » mène ensuite au panneau');
+        // Une référence reçue pendant que la page est montée (synchro) : la ligne prend son titre et ses gestes au redessin, sans navigation.
+        await repo.save('recipes', fiche('rc6z'));
+        await attendre(() => titre('imp_absente') === 'Tarte rc6z', 'référence reçue');
+        eq(boutons(ligne('imp_absente')), ['Reprendre', 'Ignorer'], 'Ajouter (ronde 1) : une référence reçue pendant que la page est montée → titre et gestes au redessin (les recettes sont relues, pas figées au rendu)');
+        // La passe finie AVANT le montage de la page (le bus ignore une page pas encore montée) : le redessin suit la passe elle-même.
+        await db.put('imports', brut('imp_mort_tot', { status: 'en_cours', document_id_vol: 'doc-ferme', battement_at: reel(120000), started_at: reel(130000) }));
+        const tot = await A.renderAdd({}, {}, await ctxDe(), { repo, navigate: (p) => navs.push(p), toast: (m) => dits.push(m), fetch: ff.fetch, maintenant: () => NOW });
+        await attendre(async () => (await db.get('imports', 'imp_mort_tot')).status === 'echec', 'passe finie avant le montage');
+        await attendre(() => (boutons(tot.querySelector('[data-role="ligne-import"][data-id="imp_mort_tot"]')) || []).includes('Relancer'), 'redessin après la passe');
+        scene.append(tot);
+        eq(boutons(tot.querySelector('[data-role="ligne-import"][data-id="imp_mort_tot"]')), ['Relancer', 'Ignorer'], 'Ajouter (ronde 1) : une passe interrompu finie avant le montage redessine quand même la section (Relancer, Ignorer)');
+      });
+
       // --- 4. Fiche du livre (spec § 4.5) et séances filtrées (« Séances à reprendre », § 4.1).
       await bloc('fiche du livre : imports à reprendre ; séances filtrées', async () => {
         const ed7 = { id: 'ed7', book_id: 'b7' }, b7 = { id: 'b7', title: 'Livre sept' };
@@ -1731,16 +1820,24 @@ export async function runImportCibleTests({ eq, ok }) {
         await attendre(() => ff.appels.length === 1, 'POST parti');
         const enVol = await neuve();
         eq([enVol?.kind, enVol?.recipe_id, enVol?.scan_session_id, enVol?.page_ids, enVol?.edition_id, enVol?.status, enVol?.document_id_vol, b.disabled], ['recette', null, ssE.id, [pe1.id, pe2.id], 'ed6', 'en_cours', UI.DOCUMENT_ID, true], 'éditeur : le clic crée imports{kind recette, recipe_id null} sur ces pages, dans cette séance, puis le vol (en_cours tenu par ce document) ; bouton éteint pendant l’appel');
+        eq([(await db.getAll('imports')).filter((i) => !avantImports.has(i.id)).length, ff.appels.length], [1, 1], 'éditeur (ronde 1) : le double clic n’ouvre qu’UNE ligne du journal (aucune orpheline a_lancer) et ne fait qu’un POST');
         eq([ff.appels[0].options.signal instanceof AbortSignal, JSON.parse(ff.appels[0].options.body).corps.max_tokens], [true, 6000], 'éditeur : l’appel porte un signal (Annuler depuis la section) et max_tokens 6000');
         ff.rendre[0](200, corpsOk(LU));
         await attendre(async () => (await db.get('imports', enVol.id)).status === 'a_verifier' && !b.disabled, 'lecture reçue');
         const titre = champ(edit, 'Titre original *')?.querySelector('input'); const ings = champ(edit, 'Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)')?.querySelector('textarea'); const etapes = champ(edit, 'Étapes')?.querySelector('textarea');
         eq([(await db.get('imports', enVol.id)).resultat?.title, titre?.value, ings?.value, etapes?.value, champ(edit, 'Portions')?.querySelector('input')?.value, ff.appels.length], ['Gratin dauphinois', 'Gratin dauphinois', '1 kg de pommes de terre\n500 ml de crème', 'Trancher.\nCuire 1 h.', '4', 1], 'éditeur : la lecture est écrite dans le journal (a_verifier, resultat) AVANT de remplir le formulaire (titre, ingrédients, étapes, portions) ; UN POST');
         ok(edit.textContent.includes('Extraction proposée par l’assistant — toutes les lignes sont à vérifier.'), 'éditeur : « Extraction proposée par l’assistant — toutes les lignes sont à vérifier. »');
+        // Ronde 1 : un second « Extraire » REPREND la même ligne (aucune ligne neuve), sur les pages de l'éditeur, et la remet en vol ; un second POST.
+        b.click();
+        await attendre(() => ff.appels.length === 2, 'second POST');
+        const reprise = await db.get('imports', enVol.id);
+        eq([(await db.getAll('imports')).filter((i) => !avantImports.has(i.id)).length, reprise.status, reprise.page_ids, reprise.resultat, JSON.parse(ff.appels[1].options.body).corps.messages[0].content.filter((c) => c.type === 'image').length], [1, 'en_cours', [pe1.id, pe2.id], null, 2], 'éditeur (ronde 1) : un second « Extraire » reprend la MÊME ligne (en_cours, résultat effacé au départ du vol), sur les pages de l’éditeur ; un second POST de deux pages');
+        ff.rendre[1](200, corpsOk(LU));
+        await attendre(async () => (await db.get('imports', enVol.id)).status === 'a_verifier' && !b.disabled, 'seconde lecture reçue');
         // ?import= : un nouvel éditeur relit la ligne et préremplit, SANS POST (pages, livre et séance viennent de la ligne).
         const edit2 = await R.renderRecipeEdit({ id: null }, { import: enVol.id }, await ctxDe());
         scene.append(edit2);
-        eq([champ(edit2, 'Titre original *')?.querySelector('input')?.value, champ(edit2, 'Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)')?.querySelector('textarea')?.value, champ(edit2, 'Étapes')?.querySelector('textarea')?.value, edit2.querySelectorAll('img.page-view').length, ff.appels.length, reseau], ['Gratin dauphinois', '1 kg de pommes de terre\n500 ml de crème', 'Trancher.\nCuire 1 h.', 2, 1, 0], '#/recipes/new?import=<imp> : titre, ingrédients et étapes préremplis depuis le résultat, les deux pages de la ligne, sans POST');
+        eq([champ(edit2, 'Titre original *')?.querySelector('input')?.value, champ(edit2, 'Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)')?.querySelector('textarea')?.value, champ(edit2, 'Étapes')?.querySelector('textarea')?.value, edit2.querySelectorAll('img.page-view').length, ff.appels.length, reseau], ['Gratin dauphinois', '1 kg de pommes de terre\n500 ml de crème', 'Trancher.\nCuire 1 h.', 2, 2, 0], '#/recipes/new?import=<imp> : titre, ingrédients et étapes préremplis depuis le résultat, les deux pages de la ligne, sans POST');
         // L'enregistrement ferme la lecture : enregistre, dans la MÊME transaction que la recette.
         const vus = []; const capture = db.onMutate; db.onMutate = (m) => { vus.push(Object.keys(m.puts).sort()); return capture ? capture(m) : {}; };
         try {
@@ -1749,22 +1846,114 @@ export async function runImportCibleTests({ eq, ok }) {
         } finally { db.onMutate = capture; history.replaceState(null, '', adresseAvant); }
         const rec = (await db.getAll('recipes')).find((r) => r.original_title === 'Gratin dauphinois');
         const ver = rec ? await db.get('recipe_versions', rec.current_version_id) : null;
-        eq([!!rec, ver?.provenance?.generated_by, ver?.provenance?.model, (await db.get('imports', enVol.id)).reponse_brute, typeof (await db.get('imports', enVol.id)).finished_at, vus[0]], [true, 'ai', 'claude-x', null, 'string', ['imports', 'recipe_versions', 'recipes', 'source_pages']], 'éditeur : « Enregistrer la recette » écrit la recette ET passe la lecture à enregistre (reponse_brute null) dans UNE transaction ; la version dit l’assistant et le modèle du serveur');
+        eq([!!rec, ver?.provenance?.generated_by, ver?.provenance?.model, ver?.provenance?.import_id, (await db.get('imports', enVol.id)).reponse_brute, typeof (await db.get('imports', enVol.id)).finished_at, vus[0], (await db.get('scan_sessions', ssE.id)).recipe_ids.includes(rec?.id)], [true, 'ai', 'claude-x', enVol.id, null, 'string', ['imports', 'recipe_versions', 'recipes', 'scan_sessions', 'source_pages'], true], 'éditeur : « Enregistrer la recette » écrit la recette, la séance (recipe_ids) ET passe la lecture à enregistre (reponse_brute null) dans UNE transaction (I-10, ronde 1) ; la version dit l’assistant, le modèle du serveur et la lecture (import_id)');
         // Un résultat hostile relu du journal est REVALIDÉ (I-1) : echec(illisible), rien de prérempli.
         const hostile = await repo.ouvrirImport({ kind: 'recette', edition_id: 'ed6', scan_session_id: ssE.id, page_ids: [pe1.id] });
         await db.put('imports', { ...(await db.get('imports', hostile.id)), status: 'a_verifier', resultat: { ...LU, title: 'HOSTILE-' + 'x'.repeat(201) } });
         const edit3 = await R.renderRecipeEdit({ id: null }, { import: hostile.id }, await ctxDe());
-        eq([(await db.get('imports', hostile.id)).status, (await db.get('imports', hostile.id)).erreur?.raison, (await db.get('imports', hostile.id)).resultat, champ(edit3, 'Titre original *')?.querySelector('input')?.value, edit3.textContent.includes('HOSTILE-'), ff.appels.length], ['echec', 'illisible', null, '', false, 1], '?import= : un résultat hostile (titre de 201 points de code) → echec(illisible), resultat effacé, rien de prérempli, aucun appel');
+        eq([(await db.get('imports', hostile.id)).status, (await db.get('imports', hostile.id)).erreur?.raison, (await db.get('imports', hostile.id)).resultat, champ(edit3, 'Titre original *')?.querySelector('input')?.value, edit3.textContent.includes('HOSTILE-'), ff.appels.length], ['echec', 'illisible', null, '', false, 2], '?import= : un résultat hostile (titre de 201 points de code) → echec(illisible), resultat effacé, rien de prérempli, aucun appel');
+
+        // --- Ronde 1 (Critical) : un clic REFUSÉ n'écrit rien dans le journal (spec § 4.4 : hors ligne, session absente → « rien ») — ni la remise à a_lancer
+        // d'une lecture déjà reçue (et payée), ni une ligne neuve orpheline.
+        const ouvrirLue = async (over = {}) => { const l = await repo.ouvrirImport({ kind: 'recette', edition_id: 'ed6', scan_session_id: ssE.id, page_ids: [pe1.id] }); await db.put('imports', { ...(await db.get('imports', l.id)), status: 'a_verifier', resultat: { ...LU, title: 'Gratin payé', printed_page: 90 }, started_at: NOW, model: 'claude-x', ...over }); return db.get('imports', l.id); };
+        const postsAvant = ff.appels.length;
+        const payee = await ouvrirLue();
+        const nImports = await db.count('imports');
+        const edit4 = await R.renderRecipeEdit({ id: null }, { import: payee.id }, await ctxDe());
+        scene.append(edit4);
+        const editNeuf = await R.renderRecipeEdit({ id: null }, { pages: pe2.id, edition: 'ed6', session: ssE.id }, await ctxDe());
+        scene.append(editNeuf);
+        eq(champ(edit4, 'Titre original *')?.querySelector('input')?.value, 'Gratin payé', 'éditeur ?import= : la lecture reçue est posée dans le formulaire');
+        window.dispatchEvent(new Event('offline'));
+        try {
+          bouton(edit4, 'Extraire avec l’assistant IA').click();
+          await attendre(() => edit4.textContent.includes('Tu es hors ligne.') && !bouton(edit4, 'Extraire avec l’assistant IA').disabled, 'refus hors ligne (reprise)');
+          bouton(editNeuf, 'Extraire avec l’assistant IA').click();
+          await attendre(() => editNeuf.textContent.includes('Tu es hors ligne.') && !bouton(editNeuf, 'Extraire avec l’assistant IA').disabled, 'refus hors ligne (neuve)');
+        } finally { window.dispatchEvent(new Event('online')); }
+        eq([await db.get('imports', payee.id), await db.count('imports'), ff.appels.length - postsAvant], [payee, nImports, 0], 'éditeur (ronde 1, Critical) : hors ligne, « Extraire » ne touche PAS le journal — la lecture reçue reste a_verifier avec son résultat, aucune ligne a_lancer orpheline, aucun POST');
+        // Octets absents (une lecture reçue d'un AUTRE appareil : les octets des pages sont L4) : même règle, rien n'est écrit.
+        await db.put('source_pages', { id: 'pg_sans_octets', edition_id: 'ed6', sha256: 'f'.repeat(64), position: 1, kind: null, printed_page: null, issues: [] });
+        const venue = await ouvrirLue({ page_ids: ['pg_sans_octets'], device_id: 'dev-iphone', resultat: { ...LU, title: 'Venue d’ailleurs', printed_page: 95 } });
+        const edit5 = await R.renderRecipeEdit({ id: null }, { import: venue.id }, await ctxDe());
+        scene.append(edit5);
+        bouton(edit5, 'Extraire avec l’assistant IA').click();
+        await attendre(() => edit5.textContent.includes('Les photos de cette recette ne sont pas sur cet appareil.'), 'refus octets absents');
+        eq([await db.get('imports', venue.id), await db.count('imports'), ff.appels.length - postsAvant], [venue, nImports + 1, 0], 'éditeur (ronde 1, Critical) : octets absents → la lecture reçue d’un autre appareil reste intacte, aucune ligne neuve, aucun POST');
+        // I-2 (ronde 1) : ?import= d'un import CIBLÉ (recipe_id posé) n'est jamais repris par l'éditeur d'une recette NEUVE — rien de prérempli, aucune page,
+        // la ligne intacte (« Enregistrer » créerait une seconde fiche).
+        await db.put('imports', { ...payee, id: 'imp_cible_edit', recipe_id: 'rc6a', resultat: { ...LU, title: 'Ciblée' } });
+        const cibleeAvant = await db.get('imports', 'imp_cible_edit');
+        const edit6 = await R.renderRecipeEdit({ id: null }, { import: 'imp_cible_edit' }, await ctxDe());
+        eq([champ(edit6, 'Titre original *')?.querySelector('input')?.value, edit6.querySelectorAll('img.page-view').length, await db.get('imports', 'imp_cible_edit')], ['', 0, cibleeAvant], '?import= d’un import CIBLÉ : rien de prérempli, aucune page reprise, la ligne intacte (I-2)');
+        // La phrase d'un échec (I-4, § 4.4) est à l'écran d'un ?import= en échec.
+        await db.put('imports', { ...payee, id: 'imp_echec_edit', status: 'echec', erreur: { raison: 'coupe', extra: {} }, resultat: null });
+        const edit7 = await R.renderRecipeEdit({ id: null }, { import: 'imp_echec_edit' }, await ctxDe());
+        ok(edit7.textContent.includes('La lecture a été coupée : essaie avec moins de pages.'), '?import= d’une lecture en échec : la phrase de l’échec est à l’écran');
+        // Le modèle relu est borné (81 points de code → null) ; « page possiblement manquante » est montrée, et la fiche enregistrée reste partial au plus,
+        // avec import_id et le drapeau dans la provenance (I-1 : montré, jamais comblé).
+        const longue = await ouvrirLue({ model: 'm'.repeat(81), resultat: { ...LU, title: 'Gratin long', printed_page: 91, missing_page: true } });
+        const edit8 = await R.renderRecipeEdit({ id: null }, { import: longue.id }, await ctxDe());
+        scene.append(edit8);
+        ok(edit8.textContent.includes('page possiblement manquante'), '?import= (ronde 1) : « page possiblement manquante » est montrée avec la lecture');
+        try {
+          bouton(edit8, 'Enregistrer la recette').click();
+          await attendre(async () => (await db.get('imports', longue.id)).status === 'enregistre', 'lecture longue enregistrée');
+        } finally { history.replaceState(null, '', adresseAvant); }
+        const recL = (await db.getAll('recipes')).find((r) => r.original_title === 'Gratin long');
+        const verL = recL ? await db.get('recipe_versions', recL.current_version_id) : null;
+        eq([verL?.provenance?.model, verL?.provenance?.import_id, verL?.provenance?.missing_page, verL?.provenance?.incomplete, recL?.availability], [null, longue.id, true, false, 'partial'], 'Enregistrer (ronde 1) : modèle de 81 points de code → null ; import_id et missing_page portés par la version ; la fiche reste partial (jamais comblée)');
+        // T4-R2 (ronde 1) : « Enregistrer » ne clôt QUE la lecture posée dans le formulaire. Un autre onglet a relancé la ligne et reçu R2 entre-temps : la
+        // recette relue (R1) est enregistrée, R2 reste à reprendre (jamais close sans avoir été vue).
+        const r1 = await ouvrirLue({ resultat: { ...LU, title: 'Lecture R1', printed_page: 92 } });
+        const edit9 = await R.renderRecipeEdit({ id: null }, { import: r1.id }, await ctxDe());
+        scene.append(edit9);
+        await db.put('imports', { ...(await db.get('imports', r1.id)), started_at: new Date().toISOString(), resultat: { ...LU, title: 'Lecture R2', printed_page: 93 } });
+        try {
+          bouton(edit9, 'Enregistrer la recette').click();
+          await attendre(async () => (await db.getAll('recipes')).some((r) => r.original_title === 'Lecture R1'), 'R1 enregistrée');
+          await tick(); await tick();
+        } finally { history.replaceState(null, '', adresseAvant); }
+        eq([(await db.get('imports', r1.id)).status, (await db.get('imports', r1.id)).resultat?.title], ['a_verifier', 'Lecture R2'], 'Enregistrer (ronde 1, T4-R2) : la ligne a reçu une autre lecture (R2) depuis le formulaire → R2 n’est pas close, elle reste à reprendre');
+        // Clôture refusée (décision 4, ronde 1) : la ligne est ignorée par un autre onglet ENTRE la lecture de l'éditeur et sa transaction → rien n'est écrit
+        // (ni recette, ni séance), la phrase est dite ; le second « Enregistrer » écrit sans la ligne, qui reste ignorée.
+        const course = await ouvrirLue({ resultat: { ...LU, title: 'Course', printed_page: 94 } });
+        const edit10 = await R.renderRecipeEdit({ id: null }, { import: course.id }, await ctxDe());
+        scene.append(edit10);
+        await db.put('imports', { ...(await db.get('imports', course.id)), status: 'ignore' });
+        const lireFiche = db.get.bind(db);
+        db.get = async (s, k) => (s === 'imports' && k === course.id ? { ...(await lireFiche(s, k)), status: 'a_verifier' } : lireFiche(s, k)); // la lecture périmée de l'éditeur
+        const toastEl = () => document.querySelector('.toast');
+        if (toastEl()) toastEl().textContent = '';
+        const seanceAvant = await db.get('scan_sessions', ssE.id);
+        try {
+          bouton(edit10, 'Enregistrer la recette').click();
+          await attendre(() => toastEl()?.textContent === 'La recette n’a pas pu être enregistrée. Réessaie.', 'clôture refusée dite');
+        } finally { db.get = lireFiche; }
+        eq([(await db.getAll('recipes')).some((r) => r.original_title === 'Course'), (await db.get('imports', course.id)).status, (await db.get('scan_sessions', ssE.id)).recipe_ids], [false, 'ignore', seanceAvant.recipe_ids], 'Enregistrer (ronde 1) : clôture refusée → aucune recette, aucune séance écrite, la ligne reste ignorée, la phrase est dite');
+        try {
+          bouton(edit10, 'Enregistrer la recette').click();
+          await attendre(async () => (await db.getAll('recipes')).some((r) => r.original_title === 'Course'), 'second Enregistrer');
+        } finally { history.replaceState(null, '', adresseAvant); }
+        eq((await db.get('imports', course.id)).status, 'ignore', 'Enregistrer (ronde 1) : le second clic écrit la recette SANS la ligne, qui reste ignorée');
+        // La revalidation (I-1) ne marque illisible QUE la lecture relue (T4-R2, ronde 1) : une lecture valide R2 arrivée entre la lecture hostile et la
+        // transaction n'est jamais effacée.
+        const valide = await ouvrirLue({ resultat: { ...LU, title: 'Valide R2', printed_page: 96 } });
+        db.get = async (s, k) => (s === 'imports' && k === valide.id ? { ...(await lireFiche(s, k)), started_at: '2026-01-01T00:00:00.000Z', resultat: { ...LU, title: 'HOSTILE-' + 'x'.repeat(201) } } : lireFiche(s, k)); // la lecture hostile, périmée
+        let edit11;
+        try { edit11 = await R.renderRecipeEdit({ id: null }, { import: valide.id }, await ctxDe()); } finally { db.get = lireFiche; }
+        eq([(await db.get('imports', valide.id)).status, (await db.get('imports', valide.id)).resultat?.title, edit11.textContent.includes('HOSTILE-')], ['a_verifier', 'Valide R2', false], '?import= (ronde 1, T4-R2) : la revalidation d’une lecture hostile ne marque pas illisible une lecture valide arrivée entre-temps (conditionnée à la lecture relue) ; rien d’hostile à l’écran');
       });
 
       // --- 6. Panneau d'index (spec § 4.6) : journal kind index, bouton verrouillé (double clic → un POST), ?import= relit.
       await bloc('panneau d’index : journal, verrou et ?import=', async () => {
-        const { session: ssI, pages: [pi1] } = await repo.ajouterPages(await images(1, 'index'), { edition_id: 'ed6' });
+        const { session: ssI, pages: [pi1, pi2] } = await repo.ajouterPages(await images(2, 'index'), { edition_id: 'ed6' });
+        let sel = [pi1.id]; // la sélection de pages du panneau (changée pour la seconde lecture, ronde 1)
         const INDEX = { entries: [{ title: 'Tarte fine', printed_page: 12 }, { title: 'Gratin', printed_page: 40 }], uncertain: ['p. 41 ?'] };
         const ff = fauxFetch(); globalThis.fetch = ff.fetch;
         const avantImports = new Set((await db.getAll('imports')).map((i) => i.id));
         const neuve = async () => (await db.getAll('imports')).find((i) => !avantImports.has(i.id)) || null;
-        const panneau = I.indexEntriesPanel(ssI, await ctxDe(), () => [pi1.id]);
+        const panneau = I.indexEntriesPanel(ssI, await ctxDe(), () => sel);
         scene.append(panneau);
         const lire = () => bouton(panneau, 'Lire avec l’assistant IA');
         await attendre(() => !lire().disabled, 'session lue');
@@ -1774,8 +1963,19 @@ export async function runImportCibleTests({ eq, ok }) {
         const enVol = await neuve();
         const corps = JSON.parse(ff.appels[0].options.body);
         eq([ff.appels.length, lire().disabled, enVol?.kind, enVol?.recipe_id, enVol?.scan_session_id, enVol?.page_ids, enVol?.edition_id, enVol?.status, corps.corps.system.startsWith('Tu lis la table des matières')], [1, true, 'index', null, ssI.id, [pi1.id], 'ed6', 'en_cours', true], 'panneau d’index : double clic → UN POST (consigne de l’index) ; imports{kind index} sur la page choisie, dans la séance ; bouton verrouillé pendant l’appel');
+        eq((await db.getAll('imports')).filter((i) => !avantImports.has(i.id)).length, 1, 'panneau d’index (ronde 1) : le double clic n’ouvre qu’UNE ligne du journal (aucune orpheline a_lancer)');
         ff.rendre[0](200, corpsOk(INDEX));
         await attendre(async () => (await db.get('imports', enVol.id)).status === 'a_verifier' && !lire().disabled, 'index reçu');
+        ok(panneau.textContent.includes('Incertain : p. 41 ?'), 'panneau d’index (ronde 1) : les incertitudes de la lecture sont dites (« Incertain : … »)');
+        // Ronde 1 : une seconde lecture, sur une sélection CHANGÉE, reprend la MÊME ligne (aucune ligne neuve) avec les nouvelles pages — c'est elles que
+        // le vol lit et envoie.
+        sel = [pi1.id, pi2.id];
+        lire().click();
+        await attendre(() => ff.appels.length === 2, 'second POST');
+        const relance = await db.get('imports', enVol.id);
+        eq([(await db.getAll('imports')).filter((i) => !avantImports.has(i.id)).length, relance.status, relance.page_ids, JSON.parse(ff.appels[1].options.body).corps.messages[0].content.filter((c) => c.type === 'image').length], [1, 'en_cours', [pi1.id, pi2.id], 2], 'panneau d’index (ronde 1) : une seconde lecture sur une autre sélection reprend la MÊME ligne, ses page_ids remises, et le POST porte les deux pages choisies');
+        ff.rendre[1](200, corpsOk(INDEX));
+        await attendre(async () => (await db.get('imports', enVol.id)).status === 'a_verifier' && !lire().disabled, 'second index reçu');
         const ta = panneau.querySelector('textarea');
         eq([(await db.get('imports', enVol.id)).resultat, ta.value, panneau.textContent.includes('2 entrée(s) proposée(s) par l’assistant')], [{ entries: [{ title: 'Tarte fine', printed_page: 12, section: null, ingredients_mentioned: [] }, { title: 'Gratin', printed_page: 40, section: null, ingredients_mentioned: [] }], uncertain: ['p. 41 ?'] }, 'Tarte fine — 12\nGratin — 40', true], 'panneau d’index : le résultat { entries, uncertain } est écrit dans le journal (a_verifier) PUIS rempli dans la zone');
         // ?import= : la séance s'ouvre sur le panneau prérempli, ses pages cochées, SANS POST.
@@ -1783,7 +1983,7 @@ export async function runImportCibleTests({ eq, ok }) {
         scene.append(vue);
         const p2 = vue.querySelector('textarea')?.closest('.card');
         await attendre(() => vue.querySelector('textarea')?.value === 'Tarte fine — 12\nGratin — 40', 'panneau prérempli');
-        eq([p2?.hidden, [...vue.querySelectorAll('.thumbs input[type="checkbox"]')].map((c) => c.checked), ff.appels.length, reseau], [false, [true], 1, 0], '#/import?session=…&import=<imp> : le panneau d’index est ouvert, prérempli, la page de la lecture cochée, sans POST');
+        eq([p2?.hidden, [...vue.querySelectorAll('.thumbs input[type="checkbox"]')].map((c) => c.checked), ff.appels.length, reseau], [false, [true, true], 2, 0], '#/import?session=…&import=<imp> : le panneau d’index est ouvert, prérempli, la page de la lecture cochée, sans POST');
         // « Créer les références » ferme la lecture : enregistre, avec les références et la page d'index, dans UNE transaction.
         bouton(vue, 'Créer les références').click();
         await attendre(async () => (await db.get('imports', enVol.id)).status === 'enregistre', 'références créées');
@@ -1794,7 +1994,95 @@ export async function runImportCibleTests({ eq, ok }) {
         await db.put('imports', { ...(await db.get('imports', hostile.id)), status: 'a_verifier', resultat: { entries: [{ title: 'HOSTILE-' + 'x'.repeat(201), printed_page: 1 }], uncertain: [] } });
         const p3 = I.indexEntriesPanel(ssI, await ctxDe(), () => [pi1.id], { importId: hostile.id });
         await attendre(async () => (await db.get('imports', hostile.id)).status === 'echec', 'revalidé');
-        eq([(await db.get('imports', hostile.id)).erreur?.raison, (await db.get('imports', hostile.id)).resultat, p3.querySelector('textarea').value, p3.textContent.includes('HOSTILE-'), ff.appels.length], ['illisible', null, '', false, 1], 'panneau d’index ?import= : un index hostile (titre de 201 points de code) → echec(illisible), rien de prérempli, aucun appel');
+        eq([(await db.get('imports', hostile.id)).erreur?.raison, (await db.get('imports', hostile.id)).resultat, p3.querySelector('textarea').value, p3.textContent.includes('HOSTILE-'), ff.appels.length], ['illisible', null, '', false, 2], 'panneau d’index ?import= : un index hostile (titre de 201 points de code) → echec(illisible), rien de prérempli, aucun appel');
+
+        // --- Ronde 1 (Critical) : un clic refusé n'écrit rien. Hors ligne sur une lecture reçue → intacte ; session disparue au clic → aucune ligne neuve.
+        const ouvrirIndexLu = async (over = {}) => { const l = await repo.ouvrirImport({ kind: 'index', edition_id: 'ed6', scan_session_id: ssI.id, page_ids: [pi1.id] }); await db.put('imports', { ...(await db.get('imports', l.id)), status: 'a_verifier', resultat: { entries: [{ title: 'Payée', printed_page: 3, section: null, ingredients_mentioned: [] }], uncertain: [] }, started_at: NOW, ...over }); return db.get('imports', l.id); };
+        const postsAvant = ff.appels.length;
+        const lu = await ouvrirIndexLu();
+        const nI = await db.count('imports');
+        const pLu = I.indexEntriesPanel(ssI, await ctxDe(), () => [pi1.id], { importId: lu.id });
+        scene.append(pLu);
+        const lireLu = () => bouton(pLu, 'Lire avec l’assistant IA');
+        await attendre(() => pLu.querySelector('textarea').value === 'Payée — 3' && !lireLu().disabled, 'lecture reçue posée');
+        window.dispatchEvent(new Event('offline'));
+        try { lireLu().click(); await attendre(() => pLu.textContent.includes('Tu es hors ligne.') && !lireLu().disabled, 'refus hors ligne'); }
+        finally { window.dispatchEvent(new Event('online')); }
+        eq([await db.get('imports', lu.id), await db.count('imports'), ff.appels.length - postsAvant], [lu, nI, 0], 'panneau d’index (ronde 1, Critical) : hors ligne, « Lire » ne touche pas la lecture reçue (ni a_lancer, ni résultat effacé), aucune ligne neuve, aucun POST');
+        const jetons = [SESSION, null]; let nj = 0;
+        const ctxPerdue = { ...(await ctxDe()), sync: { user: { id: 'u1', email: 'a@exemple.invalid' }, auth: { jeton: async () => jetons[Math.min(nj++, 1)] } } };
+        const pPerdue = I.indexEntriesPanel(ssI, ctxPerdue, () => [pi1.id]);
+        scene.append(pPerdue);
+        await attendre(() => !bouton(pPerdue, 'Lire avec l’assistant IA').disabled, 'session lue');
+        bouton(pPerdue, 'Lire avec l’assistant IA').click();
+        await attendre(() => pPerdue.querySelector('[data-role="connexion-ia"]')?.hidden === false, 'carte « Connecte-toi »');
+        eq([await db.count('imports'), ff.appels.length - postsAvant], [nI, 0], 'panneau d’index (ronde 1, Critical) : la session disparaît au clic → aucune ligne a_lancer créée (journal : rien), aucun POST');
+        // T4-R2 (ronde 1) : « Créer les références » ne clôt QUE la lecture posée dans la zone ; R2 reçue entre-temps (autre onglet) reste à reprendre.
+        await db.put('imports', { ...(await db.get('imports', lu.id)), started_at: new Date().toISOString(), resultat: { entries: [{ title: 'R2', printed_page: 4, section: null, ingredients_mentioned: [] }], uncertain: [] } });
+        bouton(pLu, 'Créer les références').click();
+        await attendre(async () => (await db.getAll('recipes')).some((r) => r.original_title === 'Payée'), 'références créées');
+        await tick(); await tick();
+        eq([(await db.get('imports', lu.id)).status, (await db.get('imports', lu.id)).resultat?.entries?.[0]?.title], ['a_verifier', 'R2'], 'Créer les références (ronde 1, T4-R2) : la ligne a reçu une autre lecture (R2) → R2 n’est pas close, elle reste à reprendre');
+        // Clôture refusée (décision 4, ronde 1) : la lecture est ignorée par un autre onglet ENTRE la lecture du panneau et sa transaction → aucune référence,
+        // la phrase est dite ; le second « Créer les références » écrit sans la ligne, qui reste ignorée.
+        const ignoree = await ouvrirIndexLu({ resultat: { entries: [{ title: 'Ignorée ailleurs', printed_page: 5, section: null, ingredients_mentioned: [] }], uncertain: [] } });
+        const pIgn = I.indexEntriesPanel(ssI, await ctxDe(), () => [pi1.id], { importId: ignoree.id });
+        scene.append(pIgn);
+        await attendre(() => pIgn.querySelector('textarea').value === 'Ignorée ailleurs — 5', 'lecture posée (course)');
+        await db.put('imports', { ...(await db.get('imports', ignoree.id)), status: 'ignore' });
+        const lireFicheP = db.get.bind(db);
+        db.get = async (s, k) => (s === 'imports' && k === ignoree.id ? { ...(await lireFicheP(s, k)), status: 'a_verifier' } : lireFicheP(s, k)); // la lecture périmée du panneau
+        const toastP = () => document.querySelector('.toast');
+        if (toastP()) toastP().textContent = '';
+        try {
+          bouton(pIgn, 'Créer les références').click();
+          await attendre(() => toastP()?.textContent === 'Les références n’ont pas pu être créées. Réessaie.', 'clôture refusée dite (panneau)');
+        } finally { db.get = lireFicheP; }
+        eq([(await db.getAll('recipes')).some((r) => r.original_title === 'Ignorée ailleurs'), (await db.get('imports', ignoree.id)).status], [false, 'ignore'], 'Créer les références (ronde 1) : clôture refusée → aucune référence écrite, la ligne reste ignorée, la phrase est dite');
+        bouton(pIgn, 'Créer les références').click();
+        await attendre(async () => (await db.getAll('recipes')).some((r) => r.original_title === 'Ignorée ailleurs'), 'second Créer les références');
+        eq((await db.get('imports', ignoree.id)).status, 'ignore', 'Créer les références (ronde 1) : le second clic écrit les références SANS la ligne, qui reste ignorée');
+        // ?import= (ronde 1) : le panneau ne se rouvre que sur une lecture d'index OUVERTE de CETTE séance.
+        const { session: ssAutre } = await repo.ajouterPages(await images(1, 'autre'), { edition_id: 'ed6' });
+        const autre = await repo.ouvrirImport({ kind: 'index', edition_id: 'ed6', scan_session_id: ssAutre.id, page_ids: [] });
+        const vueAutre = await I.renderImport({}, { session: ssI.id, import: autre.id }, await ctxDe());
+        const vueClose = await I.renderImport({}, { session: ssI.id, import: enVol.id }, await ctxDe()); // enVol est close (enregistre) par « Créer les références »
+        eq([vueAutre.querySelector('textarea')?.closest('.card')?.hidden, vueClose.querySelector('textarea')?.closest('.card')?.hidden], [true, true], '?import= (ronde 1) : une lecture d’une AUTRE séance, ou une lecture déjà close, ne rouvre pas le panneau d’index');
+        // Une ligne d'une autre sorte (recette) n'est ni posée, ni revalidée comme un index (rien d'écrit).
+        const recetteLue = await repo.ouvrirImport({ kind: 'recette', edition_id: 'ed6', scan_session_id: ssI.id, page_ids: [pi1.id] });
+        await db.put('imports', { ...(await db.get('imports', recetteLue.id)), status: 'a_verifier', resultat: { ...RECETTE } });
+        const recAvant = await db.get('imports', recetteLue.id);
+        const pSorte = I.indexEntriesPanel(ssI, await ctxDe(), () => [pi1.id], { importId: recetteLue.id });
+        await new Promise((r) => setTimeout(r, 100)); // rien ne doit arriver : on laisse à une relecture le temps d'écrire
+        eq([pSorte.querySelector('textarea').value, await db.get('imports', recetteLue.id)], ['', recAvant], 'panneau d’index (ronde 1) : une ligne d’une autre sorte n’est ni posée ni revalidée comme un index (la ligne reste intacte)');
+        // La phrase d'un échec (I-4) est dite sur un ?import= en échec.
+        const enEchec = await repo.ouvrirImport({ kind: 'index', edition_id: 'ed6', scan_session_id: ssI.id, page_ids: [pi1.id] });
+        await db.put('imports', { ...(await db.get('imports', enEchec.id)), status: 'echec', erreur: { raison: 'coupe', extra: {} } });
+        const pEchec = I.indexEntriesPanel(ssI, await ctxDe(), () => [pi1.id], { importId: enEchec.id });
+        await attendre(() => pEchec.textContent.includes('La lecture a été coupée : essaie avec moins de pages.'), 'phrase de l’échec');
+        ok(pEchec.textContent.includes('La lecture a été coupée : essaie avec moins de pages.'), 'panneau d’index ?import= d’une lecture en échec : la phrase de l’échec est dite');
+        // I-7 (ronde 1) : un vol tenu par ce document — un autre « Lire » n'ouvre aucune ligne ; « Extraire » d'une recette EXISTANTE (Corriger, hors
+        // journal) ne part pas non plus : un seul POST en vol par document.
+        const ffT = fauxFetch(); globalThis.fetch = ffT.fetch;
+        const pVol = I.indexEntriesPanel(ssI, await ctxDe(), () => [pi1.id]);
+        scene.append(pVol);
+        await attendre(() => !bouton(pVol, 'Lire avec l’assistant IA').disabled, 'session lue (vol)');
+        bouton(pVol, 'Lire avec l’assistant IA').click();
+        await attendre(() => ffT.appels.length === 1, 'vol tenu');
+        const nVol = await db.count('imports');
+        const pSecond = I.indexEntriesPanel(ssI, await ctxDe(), () => [pi1.id]);
+        scene.append(pSecond);
+        await attendre(() => !bouton(pSecond, 'Lire avec l’assistant IA').disabled, 'session lue (second)');
+        bouton(pSecond, 'Lire avec l’assistant IA').click();
+        await attendre(() => pSecond.textContent.includes('Une lecture est déjà en cours : annule-la d’abord.'), 'vol tenu dit');
+        const corriger = await R.renderRecipeEdit({ id: 'rc6b' }, { pages: pi1.id }, await ctxDe());
+        scene.append(corriger);
+        bouton(corriger, 'Extraire avec l’assistant IA').click();
+        await attendre(() => corriger.textContent.includes('Une lecture est déjà en cours : annule-la d’abord.'), 'Corriger refusé');
+        eq([await db.count('imports'), ffT.appels.length], [nVol, 1], 'vol tenu (ronde 1) : un second « Lire » n’ouvre aucune ligne ; « Extraire » de Corriger ne part pas (un seul POST en vol par document)');
+        ffT.rendre[0](200, corpsOk(INDEX));
+        await attendre(() => !UI.volEnCours() && !bouton(pVol, 'Lire avec l’assistant IA').disabled, 'vol fini');
+        globalThis.fetch = ff.fetch;
       });
     } finally {
       UI.reinitialiserImportCible?.();

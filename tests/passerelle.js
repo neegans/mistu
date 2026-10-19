@@ -297,12 +297,11 @@ export async function runPasserelleTests({ eq, ok }) {
         eq(Array.from(r.texteBrut).length, 16000, 'extraireRecette : texteBrut d’un succès est coupé à 16 000 points de code aussi');
         let c = null; try { await L.extraireRecette(avecCorps(texte('{"title":"x"', { stop_reason: 'max_tokens' })), images); } catch (x) { c = x; }
         eq([c?.raison, c?.texteBrut, c?.stopReason], ['coupe', '{"title":"x"', 'max_tokens'], 'extraireRecette : une coupure garde le texte reçu et stopReason sur l’erreur'); }
-      // extraireIndex : { index: { entries, uncertain }, stopReason, modele, texteBrut } ; extractIndexFromImages rend les entrées seules.
+      // extraireIndex : { index: { entries, uncertain }, stopReason, modele, texteBrut } (l'enveloppe extractIndexFromImages est retirée : lot A, tâche 6, ronde 1).
       { const brutIndex = '{"entries":[{"title":" Tarte ","printed_page":12,"section":null,"ingredients_mentioned":["pomme"]},{"title":5},{"title":"Soupe","printed_page":"9"}],"uncertain":["x",4]}';
         const pi = avecCorps(texte(brutIndex));
         const r = await L.extraireIndex(pi, images);
         eq(r, { index: { entries: [{ title: 'Tarte', printed_page: 12, section: null, ingredients_mentioned: ['pomme'] }, { title: 'Soupe', printed_page: null, section: null, ingredients_mentioned: [] }], uncertain: ['x'] }, stopReason: 'end_turn', modele: 'claude-x', texteBrut: brutIndex }, 'extraireIndex : { index: { entries, uncertain }, stopReason, modele, texteBrut } — entrées typées, incertitudes chaînes seulement');
-        eq(await L.extractIndexFromImages(pi, images), r.index, 'extractIndexFromImages(provider, images) : enveloppe compatible, { entries, uncertain } seuls');
         // Ronde 1 : les entrées de l'index sont des données hostiles aussi (elles deviennent recipes.original_title par « Créer les références ») : titre ≤ 200 points de code
         // sinon hors_bornes, Cc/Cf retirés, section chaîne ou null, ingredients_mentioned chaînes seulement, page entier borné.
         { const typee = await L.extraireIndex(avecCorps(texte(JSON.stringify({ entries: [{ title: 'Tar\u202Ete', printed_page: 12.5, section: { a: 1 }, ingredients_mentioned: ['a', 3, null, 'b\u200B'] }, { title: 'Ok', printed_page: 100000, section: ' Desserts ' }, { title: '\u200B  ' }], uncertain: ['x\u202E', 4] }))), images);
@@ -583,11 +582,12 @@ export async function runPasserelleTests({ eq, ok }) {
           await tick();
           const carte = panneau.querySelector('[data-role="connexion-ia"]'); const bouton = [...panneau.querySelectorAll('button')].find((x) => x.textContent === 'Lire avec l’assistant IA');
           eq([!!carte, carte?.hidden, !!carte && panneau.contains(carte), bouton.disabled], [true, true, true, false], 'F-8 panneau d’index, session lue : la carte existe toujours (cachée, dans le panneau) ; le bouton est allumé');
+          const lignesAvant = (await repoTemp.all('imports')).length;
           bouton.click();
           // Tâche 6 : le bouton est verrouillé DÈS le clic (double clic → un POST) ; attendre que la carte se montre, pas que le bouton s'éteigne.
           for (let i = 0; i < 200 && carte.hidden; i += 1) await new Promise((r) => setTimeout(r, 5));
           await tick();
-          eq([panneau.contains(carte), carte.hidden, panneau.querySelector('[data-role="connexion-ia"]') === carte, bouton.disabled, appels.length], [true, false, true, true, 0], 'F-8 panneau d’index, session disparue au clic : la MÊME carte se montre (dans le panneau), le bouton s’éteint, aucun POST');
+          eq([panneau.contains(carte), carte.hidden, panneau.querySelector('[data-role="connexion-ia"]') === carte, bouton.disabled, appels.length, (await repoTemp.all('imports')).length - lignesAvant], [true, false, true, true, 0, 0], 'F-8 panneau d’index, session disparue au clic : la MÊME carte se montre (dans le panneau), le bouton s’éteint, aucun POST, et RIEN dans le journal (lot A, ronde 1 de la tâche 6 : spec § 4.4, « Session absente → rien »)');
         }
         {
           // recipe-edit : la session disparaît au clic → le bouton reste éteint (il n'est rallumé que si le fournisseur est configuré)
@@ -597,10 +597,11 @@ export async function runPasserelleTests({ eq, ok }) {
           const edit = await R.renderRecipeEdit({}, { pages: 'p1' }, ctx);
           const bouton = [...edit.querySelectorAll('button')].find((x) => x.textContent === 'Extraire avec l’assistant IA');
           eq(bouton.disabled, false, 'F-8 recette, session lue au rendu : le bouton est allumé');
+          const lignesAvant = (await repoTemp.all('imports')).length;
           bouton.click();
           for (let i = 0; i < 200 && !edit.textContent.includes(TEXTE_CONNEXION); i += 1) await new Promise((r) => setTimeout(r, 5));
           await tick(); await tick();
-          eq([edit.textContent.includes(TEXTE_CONNEXION), bouton.disabled, appels.length], [true, true, 0], 'F-8 recette, session disparue au clic : « Connecte-toi… », le bouton reste ÉTEINT (plus de clic qui ne mènerait à rien), aucun POST');
+          eq([edit.textContent.includes(TEXTE_CONNEXION), bouton.disabled, appels.length, (await repoTemp.all('imports')).length - lignesAvant], [true, true, 0, 0], 'F-8 recette, session disparue au clic : « Connecte-toi… », le bouton reste ÉTEINT (plus de clic qui ne mènerait à rien), aucun POST, et RIEN dans le journal (lot A, ronde 1 de la tâche 6)');
           // …et avec une session qui tient, le bouton se rallume après l'échec (503 serveur : on peut réessayer)
           const ctx2 = ctxPages(SESSION); appels.length = 0; repondre(502, { erreur: 'serveur' });
           const edit2 = await R.renderRecipeEdit({}, { pages: 'p1' }, ctx2);
