@@ -11,15 +11,18 @@ export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', 
 // sur la fiche du livre (« Importer ») et la fiche recette (« Importer cette recette », « Relire les pages »). Lot A, tâche 5 : le bandeau de
 // lecture et l'état de la version affichée (recipe.js), la puce « incertain » (components.js), le bandeau D-3 (cook.js, grocery.js), l'aide
 // « une étape par paragraphe » (recipe-edit.js). Tâche 5, ronde 1 : « Lue par l’assistant » (date illisible, recipe.js) ; « Une étape par ligne ou par
-// paragraphe. » retirée d'ici (elle existait déjà sur main, sans entrée en.js : l'entrée a été ajoutée au passage, la chaîne n'est pas neuve).
+// paragraphe. » retirée d'ici (elle existait déjà sur main, sans entrée en.js : l'entrée a été ajoutée au passage, la chaîne n'est pas neuve). Lot A,
+// tâche 6 : « {n} import(s) à reprendre » (book.js), les textes du journal du panneau d'index (import.js) et de l'éditeur (recipe-edit.js) ; la section
+// « Imports » vit dans add.js, déjà scanné en entier (MODULES_NEUFS).
 export const CHAINES_NEUVES_AILLEURS = {
-  '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', '+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer'],
+  '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', '+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer', '{n} import à reprendre', '{n} imports à reprendre'],
+  '../src/ui/import.js': ['Une lecture est déjà en cours : annule-la d’abord.', 'Les photos de cette recette ne sont pas sur cet appareil.', 'Tu es hors ligne.', 'Les références n’ont pas pu être créées. Réessaie.'],
   '../src/ui/recipe.js': ['Lien web gardé.', 'L’app n’a pas lu la page : ouvre-la pour cuisiner.', 'Ouvrir le lien', 'Adresse non reconnue : ', 'Importer cette recette', 'Relire les pages',
     'Lue par l’assistant le {d}', 'Lue par l’assistant', '{n} ligne(s) incertaine(s)', 'page possiblement manquante', 'lecture incomplète', 'Incertain : {t}', 'Vérifiée', 'À vérifier', '1 ligne à vérifier', '{n} lignes à vérifier', 'Photo du plat'],
   '../src/ui/components.js': ['Lien web', 'Adresse non reconnue', 'incertain', 'Ligne incertaine selon l’assistant'],
   '../src/ui/cook.js': ['Lue par l’assistant, non relue'],
   '../src/ui/grocery.js': ['Lue par l’assistant, non relue'],
-  '../src/ui/recipe-edit.js': ['Une étape par paragraphe (ligne vide entre deux étapes).'],
+  '../src/ui/recipe-edit.js': ['Une étape par paragraphe (ligne vide entre deux étapes).', 'La recette n’a pas pu être enregistrée. Réessaie.'],
 };
 
 export async function runAjouterTests({ eq, ok }) {
@@ -735,6 +738,17 @@ export async function runAjouterTests({ eq, ok }) {
       // supposé bien formé) : la fiche entière ne doit pas blanchir pour autant.
       const sansPages = await renderBook({ id: 'e1' }, {}, ctxDe({ scan_sessions: [{ id: 's9', status: 'open', edition_id: 'e1' }] }));
       ok(sansPages.textContent.includes('Séance en cours : 0 page(s)'), 'fiche : une séance sans page_ids compte 0 page au lieu de faire tomber tout le rendu');
+      // Import ciblé (lot A, tâche 6 ; spec import-cible § 4.1, N3) : la séance d'un import CIBLÉ non terminé n'est pas une « Séance en cours » de la
+      // fiche (elle se reprend par la section « Imports ») ; elle revient après ignore ; celle de « Regrouper en recette » reste toujours rappelée.
+      {
+        const libre = { id: 's1b', status: 'open', edition_id: 'e1', page_ids: ['p1', 'p2'], started_at: '2026-10-18T10:00:00.000Z' };
+        const ciblee = { id: 's5', status: 'open', edition_id: 'e1', page_ids: ['p5'], started_at: '2026-10-19T10:00:00.000Z' };
+        const imp = { id: 'imp5', kind: 'recette', recipe_id: 'r5', edition_id: 'e1', scan_session_id: 's5', status: 'a_lancer' };
+        const reprendre = (r) => [...r.querySelectorAll('a')].filter((a) => a.textContent === 'Reprendre').map((a) => a.getAttribute('href'));
+        eq(reprendre(await renderBook({ id: 'e1' }, {}, ctxDe({ scan_sessions: [libre, ciblee], imports: [imp] }))), ['#/import?session=s1b'], 'fiche : la séance d’un import ciblé non terminé n’est pas « Séance en cours » — la plus récente des AUTRES est rappelée');
+        eq(reprendre(await renderBook({ id: 'e1' }, {}, ctxDe({ scan_sessions: [libre, ciblee], imports: [{ ...imp, status: 'ignore' }] }))), ['#/import?session=s5'], 'fiche : … de retour après ignore (la plus récente)');
+        eq(reprendre(await renderBook({ id: 'e1' }, {}, ctxDe({ scan_sessions: [libre, ciblee], imports: [{ ...imp, recipe_id: null }] }))), ['#/import?session=s5'], 'fiche : la séance où « Regrouper en recette » a écrit un import reste rappelée');
+      }
 
       // R-UX-8 : le champ « Cuisines » n'est pas un <label> — sinon un clic sur le mot « Cuisines » activerait
       // la première puce. Et un clic sur une puce ne doit re-rendre QUE le conteneur des puces.

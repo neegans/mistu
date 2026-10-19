@@ -478,6 +478,9 @@ export async function runPasserelleTests({ eq, ok }) {
         const repondre = (statut, corps) => { globalThis.fetch = async (url, options) => { appels.push({ url, options }); return reponse(statut, corps); }; };
         const page = { id: 'p1', sha256: 'sha-x', printed_page: 12 };
         const pagesImg = new Map([['p1', page], ['pg', { id: 'pg', sha256: 'sha-grande', printed_page: 3 }], ['pp', { id: 'pp', sha256: 'sha-petite' }], ['pn', { id: 'pn', sha256: 'sha-png' }], ['pb', { id: 'pb', sha256: 'sha-pas-une-image' }]]);
+        // Lot A, tâche 6 : la lecture de l'éditeur et du panneau d'index passe par le journal (lancerExtraction lit les pages DANS LA BASE, dans l'ordre de
+        // page_ids) : les pages de ces écrans y sont donc écrites, comme une séance de scan les écrit.
+        await repoTemp.saveBatch({ source_pages: [...pagesImg.values()].map((p) => ({ ...p })) }, { origin: 'device' });
         const ctxPages = (session, auth) => ({ ...ctxDe(session, NONE, auth), pagesById: pagesImg, recipesById: new Map(), versionsByRecipe: new Map(), versionsById: new Map(), booksById: new Map(), source_documents: [], ingredients: [], ingredientsById: new Map(), recipes: [], editions: [], books: [] });
         const GENERIQUE = 'L’assistant n’a pas répondu. Réessaie.';
         const CAS = [[403, { erreur: 'non_admis' }, 'Ce compte n’a pas accès à l’assistant.'], [413, { erreur: 'trop_lourd' }, 'La demande est trop lourde : choisis moins de pages.'], [413, 'pas du json', 'La demande est trop lourde : choisis moins de pages.'],
@@ -490,7 +493,11 @@ export async function runPasserelleTests({ eq, ok }) {
           await tick();
           const b = [...panneau.querySelectorAll('button')].find((x) => x.textContent === 'Lire avec l’assistant IA');
           b.click();
-          for (let i = 0; i < 100 && appels.length === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
+          // Lot A, tâche 6 : la lecture passe par le journal — le bouton est verrouillé pendant l'appel et la phrase est posée AVANT qu'il se rallume
+          // (après l'écriture de l'échec) ; attendre ces faits, pas deux tours de boucle. (La carte « Connecte-toi » cachée porte déjà sa phrase :
+          // attendre le texte seul serait un faux vert.)
+          for (let i = 0; i < 200 && appels.length === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
+          for (let i = 0; i < 200 && b.disabled; i += 1) await new Promise((r) => setTimeout(r, 5));
           await tick(); await tick();
           eq([appels.length, JSON.parse(appels[0]?.options.body ?? '{}').outil, appels[0]?.options.headers.authorization, panneau.textContent.includes(attendu)], [1, 'extraction', 'Bearer ' + JETON, true], `panneau d'index, ${statut} ${typeof corps === 'string' ? '(corps illisible)' : corps.erreur} : un POST d'extraction, « ${attendu} » à l'écran`);
           ok(!panneau.textContent.includes(JETON) && !/trop_lourd|non_admis|non_connecte/.test(panneau.textContent) && !panneau.textContent.includes('Échec :') && (!attendu.startsWith('Trop de demandes') || !panneau.textContent.includes('limite du jour')), `panneau d'index, ${statut} : ni le jeton, ni un mot de code seul après « Échec : », ni « limite du jour » pour un 429 relayé`);
@@ -532,16 +539,20 @@ export async function runPasserelleTests({ eq, ok }) {
           appels.length = 0; repondre(200, { model: 'm', content: [{ type: 'text', text: '{"entries":[],"uncertain":[]}' }] });
           const panneau = I.indexEntriesPanel(null, ctxPages(SESSION), () => ['pg', 'pp', 'pn'], { editionId: 'ed1' });
           await tick();
-          [...panneau.querySelectorAll('button')].find((x) => x.textContent === 'Lire avec l’assistant IA').click();
+          const lire = [...panneau.querySelectorAll('button')].find((x) => x.textContent === 'Lire avec l’assistant IA');
+          lire.click();
           for (let i = 0; i < 200 && appels.length === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
           eq([appels.length, appels.length ? await dimsEnvoyees(appels[0]) : null], [1, attendu3], 'F-3 panneau d’index : trois pages (3000×2000 JPEG, 800×600 JPEG, 2000×1000 PNG) → envoyées en 1568×1045, 800×600 (jamais agrandie), 1568×784, toutes en image/jpeg');
+          for (let i = 0; i < 200 && lire.disabled; i += 1) await new Promise((r) => setTimeout(r, 5)); // tâche 6 : la lecture (UN vol par document) finit avant la suivante
         }
         {
           appels.length = 0; repondre(200, { model: 'm', content: [{ type: 'text', text: '{"title":"T","ingredients":[],"steps":[]}' }] });
           const edit = await R.renderRecipeEdit({}, { pages: 'pg,pp,pn' }, ctxPages(SESSION));
-          [...edit.querySelectorAll('button')].find((x) => x.textContent === 'Extraire avec l’assistant IA').click();
+          const extraire = [...edit.querySelectorAll('button')].find((x) => x.textContent === 'Extraire avec l’assistant IA');
+          extraire.click();
           for (let i = 0; i < 200 && appels.length === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
           eq([appels.length, appels.length ? await dimsEnvoyees(appels[0]) : null], [1, attendu3], 'F-3 recette : les mêmes trois pages sont réduites avant l’envoi (1568 px au plus, image/jpeg)');
+          for (let i = 0; i < 200 && extraire.disabled; i += 1) await new Promise((r) => setTimeout(r, 5)); // tâche 6 : la lecture (UN vol par document) finit avant la suivante
         }
         {
           const st = await repoTemp.getFile('sha-grande'); const bmp = await createImageBitmap(st.blob);
@@ -573,7 +584,8 @@ export async function runPasserelleTests({ eq, ok }) {
           const carte = panneau.querySelector('[data-role="connexion-ia"]'); const bouton = [...panneau.querySelectorAll('button')].find((x) => x.textContent === 'Lire avec l’assistant IA');
           eq([!!carte, carte?.hidden, !!carte && panneau.contains(carte), bouton.disabled], [true, true, true, false], 'F-8 panneau d’index, session lue : la carte existe toujours (cachée, dans le panneau) ; le bouton est allumé');
           bouton.click();
-          for (let i = 0; i < 200 && !bouton.disabled; i += 1) await new Promise((r) => setTimeout(r, 5));
+          // Tâche 6 : le bouton est verrouillé DÈS le clic (double clic → un POST) ; attendre que la carte se montre, pas que le bouton s'éteigne.
+          for (let i = 0; i < 200 && carte.hidden; i += 1) await new Promise((r) => setTimeout(r, 5));
           await tick();
           eq([panneau.contains(carte), carte.hidden, panneau.querySelector('[data-role="connexion-ia"]') === carte, bouton.disabled, appels.length], [true, false, true, true, 0], 'F-8 panneau d’index, session disparue au clic : la MÊME carte se montre (dans le panneau), le bouton s’éteint, aucun POST');
         }

@@ -75,6 +75,54 @@ export async function init() {
   await migrerConfigAssistant();
   await effacerCleLocale();
   await purgerFilesEnFile();
+  await marquerInterrompus();
+  await purgerImportsAnciens();
+}
+
+// --- Journal des imports au démarrage (spec import-cible § 3.1, Review Focus 3 ; tâche 6) ----------------------------------------------------
+// Passe `interrompu` : une ligne en_cours DE CET APPAREIL (le battement, d'origine device, n'est visible nulle part ailleurs) dont le battement a
+// plus de 90 s n'a plus de vol vivant (l'app a été fermée en route, ou deux écritures ont échoué) : en_cours → echec(interrompu), vol libéré
+// (I-4 : « L'appel a peut-être été compté… »). Le battement est RELU DANS LA TRANSACTION (patch qui refuse) : un autre onglet qui l'a rafraîchi
+// entre la lecture et l'écriture garde son vol (deux onglets, Review Focus 3). Un battement illisible ne prouve aucun vol vivant : il compte comme
+// vieux. Origine 'local' (une transition du journal part en file, comme les autres). Rejouable : une ligne passée echec n'est plus en_cours.
+export const BATTEMENT_MORT_MS = 90 * 1000;
+const battementFrais = (iso, maintenant) => { const quand = Date.parse(typeof iso === 'string' ? iso : ''); return Number.isFinite(quand) && maintenant - quand <= BATTEMENT_MORT_MS; };
+async function marquerInterrompus(maintenant = Date.now()) {
+  const moi = deviceId();
+  if (!moi) return 0;
+  let n = 0;
+  for (const ligne of await db.byIndex('imports', 'status', 'en_cours')) {
+    if (!ligne || ligne.device_id !== moi || battementFrais(ligne.battement_at, maintenant)) continue;
+    const patch = (c) => {
+      if (c.device_id !== moi || battementFrais(c.battement_at, maintenant)) throw new TransitionRefusee('imports', ligne.id, c.status); // relu dans la transaction
+      return { status: 'echec', erreur: { raison: 'interrompu', extra: {} }, document_id_vol: null };
+    };
+    try { await transitionner('imports', ligne.id, { attendus: ['en_cours'], patch }); n += 1; }
+    catch (e) { if (!(e instanceof TransitionRefusee)) throw e; }
+  }
+  return n;
+}
+
+// Purge à 30 jours : les lignes enregistre et ignore dont la dernière écriture a plus de 30 jours sont SUPPRIMÉES par une suppression d'origine
+// 'local' (tombale synchronisée, R57 : elles disparaissent aussi du serveur et des autres appareils ; « À envoyer » monte d'autant ce jour-là,
+// assumé, m1). Conditionnée (I-10) : une ligne qui ne serait plus terminée annule la purge entière, retentée au démarrage suivant. Un echec n'est
+// jamais purgé (il attend un geste) ; une date illisible ne l'est pas non plus (rien d'inventé). provenance.import_id est un pointeur souple : les
+// versions qui nomment une ligne purgée restent intactes.
+export const RETENTION_IMPORTS_MS = 30 * 24 * 3600 * 1000;
+async function purgerImportsAnciens(maintenant = Date.now()) {
+  const vieilles = [];
+  for (const statut of IMPORTS_TERMINES) for (const ligne of await db.byIndex('imports', 'status', statut)) {
+    const quand = Date.parse(typeof ligne?.updated_at === 'string' ? ligne.updated_at : '');
+    if (Number.isFinite(quand) && maintenant - quand > RETENTION_IMPORTS_MS) vieilles.push(ligne);
+  }
+  if (!vieilles.length) return 0;
+  const copies = Object.create(null); // une clé homonyme d'une propriété native reste une clé (comme removeMany)
+  for (const ligne of vieilles) copies[ligne.id] = ligne;
+  try {
+    await db.mutate({ deletes: { imports: vieilles.map((l) => l.id) }, payloads: { imports: copies }, origin: 'local', conditions: { imports: vieilles.map((l) => ({ key: l.id, attendus: [...IMPORTS_TERMINES] })) } });
+  } catch (e) { if (e instanceof TransitionRefusee) return 0; throw e; }
+  emit('change', { store: 'imports' });
+  return vieilles.length;
 }
 
 // Passe unique (spec assistant-par-le-compte § 5.6, S1/F3/F4) : l'ancien réglage settings.llm devient la ligne
@@ -428,6 +476,29 @@ const estEpub = (file) => file.type === 'application/epub+zip' || /\.epub$/i.tes
 const ATTENDUS_AJOUT = ['a_lancer', 'a_verifier', 'echec']; // les statuts qui acceptent des pages (spec § 3.6)
 const IMPORTS_OUVERTS = STATUTS_IMPORT.filter((s) => !IMPORTS_TERMINES.includes(s)); // I-2 : un seul import ouvert par recette
 const KINDS_IMPORT = ['recette', 'index'];
+// Une ligne du journal NEUVE (a_lancer), dans son vocabulaire fermé (D-12), et la condition de sa création (I-10, I-2) : la clé est libre, et aucun
+// import ouvert ne porte déjà cette recipe_id (sans recipe_id — un index, « Regrouper en recette » —, I-2 ne joue pas). Une définition pour les deux
+// chemins qui ouvrent une ligne : ajouterPages (première photo de l'écran ciblé) et ouvrirImport (pages déjà là : éditeur, panneau d'index).
+function nouvelleLigneImport({ id, kind, recipe_id = null, edition_id = null, scan_session_id = null, page_ids = [], device_id = null }) {
+  const ligne = {
+    id, kind, edition_id: edition_id ?? null, recipe_id: recipe_id ?? null, scan_session_id: scan_session_id ?? null, page_ids: [...page_ids], photo_sha256: null, status: 'a_lancer', erreur: null,
+    resultat: null, reponse_brute: null, appels: 0, model: null, duree_ms: null, device_id: device_id ?? deviceId(), document_id_vol: null, battement_at: null, started_at: null, finished_at: null,
+  };
+  assertVocabulaire(ligne, 'imports'); // D-12 : la ligne du journal naît dans son vocabulaire fermé
+  const conditions = { imports: [{ key: ligne.id, absente: true }, ...(ligne.recipe_id != null ? [{ index: 'recipe_id', valeur: ligne.recipe_id, exclus: IMPORTS_OUVERTS }] : [])] };
+  return { ligne, conditions };
+}
+
+// Ouvre une ligne du journal sur des pages DÉJÀ présentes (spec import-cible § 4.6, tâche 6) : « Extraire avec l'assistant IA » de l'éditeur (kind
+// recette, recipe_id null : « Regrouper en recette ») et « Lire avec l'assistant IA » du panneau d'index (kind index). Aucun octet, aucune séance
+// écrite : la ligne seule, a_lancer, par un saveBatch CONDITIONNÉ (même mur que la première photo de l'écran ciblé). Rend la ligne écrite.
+export async function ouvrirImport({ id = newId('imp'), kind, recipe_id = null, edition_id = null, scan_session_id = null, page_ids = [] } = {}) {
+  if (!KINDS_IMPORT.includes(kind)) throw new TypeError('ouvrirImport : kind d’import inconnu (' + String(kind) + ')');
+  if (!Array.isArray(page_ids) || page_ids.some((p) => typeof p !== 'string' || !p)) throw new TypeError('ouvrirImport : page_ids doit être une liste d’identifiants');
+  const { ligne, conditions } = nouvelleLigneImport({ id, kind, recipe_id, edition_id, scan_session_id, page_ids });
+  const ecrit = await saveBatch({ imports: [ligne] }, { conditions });
+  return ecrit.imports[0];
+}
 export async function ajouterPages(files, { edition_id = null, session_id = null, import_id = null, import: nouvelImport = null } = {}) {
   if (import_id && nouvelImport) throw new TypeError('ajouterPages : import_id et import ne se donnent pas ensemble');
   if (nouvelImport && !KINDS_IMPORT.includes(nouvelImport.kind)) throw new TypeError('ajouterPages : kind d’import inconnu (' + String(nouvelImport.kind) + ')');
@@ -475,14 +546,8 @@ export async function ajouterPages(files, { edition_id = null, session_id = null
     return { session, pages, docs, importId: import_id };
   }
   if (nouvelImport) {
-    const ligne = {
-      id: nouvelImport.id, kind: nouvelImport.kind, edition_id: nouvelImport.edition_id ?? session.edition_id ?? null, recipe_id: nouvelImport.recipe_id ?? null,
-      scan_session_id: session.id, page_ids: neufs, photo_sha256: null, status: 'a_lancer', erreur: null, resultat: null, reponse_brute: null,
-      appels: 0, model: null, duree_ms: null, device_id: nouvelImport.device_id ?? deviceId(), document_id_vol: null, battement_at: null, started_at: null, finished_at: null,
-    };
-    assertVocabulaire(ligne, 'imports'); // D-12 : la ligne du journal naît ici, dans son vocabulaire fermé
     // Le mur (dans la transaction, I-10 et I-2) : la ligne n'existe pas, et aucun import ouvert ne porte cette recette (sans recipe_id — un index —, I-2 ne joue pas).
-    const conditions = { imports: [{ key: ligne.id, absente: true }, ...(ligne.recipe_id != null ? [{ index: 'recipe_id', valeur: ligne.recipe_id, exclus: IMPORTS_OUVERTS }] : [])] };
+    const { ligne, conditions } = nouvelleLigneImport({ id: nouvelImport.id, kind: nouvelImport.kind, recipe_id: nouvelImport.recipe_id, edition_id: nouvelImport.edition_id ?? session.edition_id, scan_session_id: session.id, page_ids: neufs, device_id: nouvelImport.device_id });
     await saveBatch({ ...lignes, imports: [ligne] }, { conditions });
     return { session, pages, docs, importId: ligne.id };
   }

@@ -3,6 +3,7 @@
 import { el, toast, promptDialog, confirmDialog } from '../core/dom.js';
 import { t, label } from '../core/i18n.js';
 import { navigate } from '../core/router.js';
+import { TransitionRefusee } from '../core/db.js';
 import * as repo from '../model/repo.js';
 import { displayUrl } from '../sync/mime.js';
 import { parseIngredientBlock, parseIngredientLine, parseStepsBlock } from '../domain/lines.js';
@@ -14,6 +15,7 @@ import { assertVocabulaire } from '../domain/vocabulaire.js';
 import { pageHeader, field, select, carteConnexion, texteEchecAssistant, section, pdfFrame, sessionAssistant, isoLisible } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
+import { lireDansLeJournal, relireDuJournal, phraseEchec } from './import.js';
 
 const SUBRECIPE_RE = /(?:voir|see|cf\.?)\s+(?:la\s+)?(?:page|p\.)\s*(\d{1,4})|\bp\.\s*(\d{1,4})\b/gi;
 
@@ -39,10 +41,17 @@ export async function renderRecipeEdit(params, query, ctx) {
   const joindreEtapes = (liste) => (parParagraphe
     ? liste.map((s) => (typeof s?.text === 'string' ? s.text.replace(/\n\s*\n/g, '\n') : '')).join('\n\n')
     : liste.map((s) => s?.text).join('\n'));
-  const editionId = query.edition || recipe?.edition_id || null;
+  // Import ciblé, tâche 6 (spec § 4.5, § 4.6) : #/recipes/new?import=<imp> reprend une lecture « Regrouper en recette » du journal — ses pages, son
+  // livre, sa séance, et son résultat REVALIDÉ (I-1 : hostile → echec(illisible), rien de prérempli) pour remplir le formulaire, SANS appel. Une
+  // recette existante (correction) ne lit ni n'écrit le journal.
+  const reprise = !recipe && query.import ? await relireDuJournal(query.import, 'recette') : null;
+  const ligneImport = reprise?.ligne ?? null;
+  let importCourant = ligneImport?.id ?? null; // la ligne du journal de cet éditeur : reprise, ou ouverte au premier « Extraire avec l'assistant IA »
+  const editionId = query.edition || recipe?.edition_id || ligneImport?.edition_id || null;
   const edition = editionId ? ctx.editionsById.get(editionId) : null;
   const book = edition ? ctx.booksById.get(edition.book_id) : null;
-  const pageIds = query.pages ? query.pages.split(',').filter(Boolean) : (recipe?.source_page_ids || []);
+  const pageIds = query.pages ? query.pages.split(',').filter(Boolean) : recipe ? (recipe.source_page_ids || []) : (Array.isArray(ligneImport?.page_ids) ? ligneImport.page_ids : []);
+  const sessionId = query.session || ligneImport?.scan_session_id || null;
   const pages = pageIds.map((id) => ctx.pagesById.get(id)).filter(Boolean);
   const doc = query.doc ? ctx.source_documents.find((d) => d.id === query.doc) : null;
   const provider = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) }); // la passerelle (R-T3-1) : la session décide
@@ -147,25 +156,39 @@ export async function renderRecipeEdit(params, query, ctx) {
   ingTa.addEventListener('input', () => { clearTimeout(ingTa._t); ingTa._t = setTimeout(reparse, 400); });
   stepsTa.addEventListener('input', () => { clearTimeout(stepsTa._t); stepsTa._t = setTimeout(drawSteps, 400); });
 
+  // Une lecture VALIDÉE (par validateParsedRecipe, à la réponse ou à la relecture du journal) posée dans le formulaire : rien n'est écrit ici, la
+  // personne relit puis enregistre. `modele` : celui que le SERVEUR a choisi (passerelle), borné.
+  const remplir = (r, modele) => {
+    if (r.title && !f.title) { f.title = r.title; titleInput.value = r.title; }
+    if (r.servings != null) f.servings = r.servings; if (r.prep_minutes != null) f.prep = r.prep_minutes; if (r.cook_minutes != null) f.cook = r.cook_minutes; if (r.printed_page != null && !f.printed_page) f.printed_page = r.printed_page;
+    f.ingredientsText = r.ingredients.map((i) => i.source_text).join('\n'); ingTa.value = f.ingredientsText;
+    f.stepsText = joindreEtapes(r.steps); stepsTa.value = f.stepsText;
+    f.aiUsed = true; f.aiModel = modele ?? null;
+    parsedLines = []; reparse(); drawSteps();
+    const uncertain = r.ingredients.filter((i) => i.uncertain).map((i) => i.source_text).concat(r.uncertain_fields);
+    aiStatus.textContent = t('Extraction proposée par l’assistant — toutes les lignes sont à vérifier.') + (uncertain.length ? ` ${t('Incertain')} : ${uncertain.join(' ; ')}` : '');
+    for (const k of ['servings', 'prep', 'cook', 'printed_page']) { const inp = numInputs[k]; if (inp) inp.value = f[k]; }
+  };
   const aiBtn = el('button', { class: 'btn', disabled: !provider.configured || (!pages.length), onClick: async () => {
-    aiBtn.disabled = true; aiStatus.textContent = t('Lecture des pages par l’assistant…');
+    if (aiBtn.disabled) return;
+    aiBtn.disabled = true; aiStatus.textContent = t('Lecture des pages par l’assistant…'); // verrou AVANT tout await : un double clic ne fait qu'un POST
     let configure = provider.configured; // F-8 : le bouton ne se rallume que si le fournisseur est (encore) configuré
     try {
-      const images = [];
-      for (const p of pages) { const fl = await repo.getFile(p.sha256); images.push(await pagePourEnvoi(fl.blob)); } // F-3 : la copie envoyée est réduite
-      const courant = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) }); // relue au clic : un jeton expiré se rafraîchit
-      configure = courant.configured;
-      const r = await extractRecipeFromImages(courant, images);
-      if (r.title && !f.title) { f.title = r.title; titleInput.value = r.title; }
-      if (r.language) f.language = r.language;
-      if (r.servings != null) f.servings = r.servings; if (r.prep_minutes != null) f.prep = r.prep_minutes; if (r.cook_minutes != null) f.cook = r.cook_minutes; if (r.printed_page != null && !f.printed_page) f.printed_page = r.printed_page;
-      f.ingredientsText = r.ingredients.map((i) => i.source_text).join('\n'); ingTa.value = f.ingredientsText;
-      f.stepsText = joindreEtapes(r.steps); stepsTa.value = f.stepsText;
-      f.aiUsed = true; f.aiModel = courant.modele || courant.name; // le modèle choisi par le SERVEUR (passerelle) quand il l'a dit
-      parsedLines = []; reparse(); drawSteps();
-      const uncertain = r.ingredients.filter((i) => i.uncertain).map((i) => i.source_text).concat(r.uncertain_fields);
-      aiStatus.textContent = t('Extraction proposée par l’assistant — toutes les lignes sont à vérifier.') + (uncertain.length ? ` ${t('Incertain')} : ${uncertain.join(' ; ')}` : '');
-      for (const k of ['servings', 'prep', 'cook', 'printed_page']) { const inp = numInputs[k]; if (inp) inp.value = f[k]; }
+      if (!recipe) {
+        // Tâche 6 (spec § 4.6) : une recette SANS référence (« Regrouper en recette ») lit DANS LE JOURNAL (kind recette, recipe_id null) — le vol de
+        // l'écran ciblé (signal, battement, appels, « Annuler » depuis la section « Imports ») ; la lecture est écrite (a_verifier) AVANT le formulaire.
+        const r = await lireDansLeJournal({ kind: 'recette', importId: importCourant, pageIds: pages.map((p) => p.id), editionId, sessionId, ctx });
+        importCourant = r.importId;
+        if (!r.connecte) configure = false;
+        if (r.resultat) remplir(r.resultat, r.modele); else aiStatus.textContent = r.texte;
+      } else {
+        // Une relecture depuis « Corriger » (recette existante) reste hors journal : sa cible est la fiche ouverte, pas une ligne « à regrouper ».
+        const images = [];
+        for (const p of pages) { const fl = await repo.getFile(p.sha256); images.push(await pagePourEnvoi(fl.blob)); } // F-3 : la copie envoyée est réduite
+        const courant = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) }); // relue au clic : un jeton expiré se rafraîchit
+        configure = courant.configured;
+        remplir(await extractRecipeFromImages(courant, images), courant.modele || courant.name);
+      }
     } catch (e) { aiStatus.textContent = texteEchecAssistant(e); }
     aiBtn.disabled = !configure; // une session disparue au clic : le bouton reste éteint, la phrase « Connecte-toi » est à l'écran
   } }, t('Extraire avec l’assistant IA'));
@@ -204,6 +227,8 @@ export async function renderRecipeEdit(params, query, ctx) {
 
   root.append(el('div', { class: 'two-col' }, left, right));
   reparse(); drawSteps();
+  if (reprise?.resultat) remplir(reprise.resultat, reprise.modele); // ?import= : la lecture reçue, revalidée, sans appel
+  else if (ligneImport?.status === 'echec') aiStatus.textContent = phraseEchec(ligneImport.erreur);
   return root;
 
   async function save() {
@@ -258,8 +283,21 @@ export async function renderRecipeEdit(params, query, ctx) {
     }
     const pageUpdates = pages.map((p) => ({ ...p, kind: 'recipe', printed_page: p.printed_page ?? n(f.printed_page) }));
     assertVocabulaire(rec, 'recipes'); // D-12 : vocabulaire fermé vérifié avant l'écriture
-    await repo.saveBatch({ recipes: [rec], recipe_versions: [version], source_pages: pageUpdates });
-    if (query.session) { const s = ctx.scan_sessions.find((x) => x.id === query.session); if (s) { s.recipe_ids = [...new Set([...(s.recipe_ids || []), recipeId])]; await repo.save('scan_sessions', s); } }
+    const lot = { recipes: [rec], recipe_versions: [version], source_pages: pageUpdates };
+    // Tâche 6 : une lecture du journal posée dans ce formulaire (a_verifier) est CLOSE avec la recette — enregistre, réponse brute effacée — dans UNE
+    // transaction conditionnée (I-10) ; refusée (un autre onglet l'a close ou ignorée entre-temps) : rien n'est écrit, l'éditeur se détache de la
+    // ligne et « Enregistrer » écrira à nouveau sans elle.
+    const lue = !targetRecipe && f.aiUsed && importCourant ? await repo.get('imports', importCourant) : null;
+    if (lue?.status === 'a_verifier' && lue.kind === 'recette' && lue.recipe_id == null) {
+      try { await repo.transitionner('imports', lue.id, { attendus: ['a_verifier'], patch: { status: 'enregistre', reponse_brute: null, finished_at: repo.nowIso() }, puts: lot }); }
+      catch (e) {
+        if (!(e instanceof TransitionRefusee)) throw e;
+        importCourant = null;
+        toast(t('La recette n’a pas pu être enregistrée. Réessaie.'));
+        return;
+      }
+    } else await repo.saveBatch(lot);
+    if (sessionId) { const s = ctx.scan_sessions.find((x) => x.id === sessionId); if (s) { s.recipe_ids = [...new Set([...(s.recipe_ids || []), recipeId])]; await repo.save('scan_sessions', s); } }
     toast(kind === 'adaptation' ? t('Ma version enregistrée') : t('Recette enregistrée'));
     navigate(`/recipes/${recipeId}?v=${version.id}`);
   }

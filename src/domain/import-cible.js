@@ -1,12 +1,12 @@
 // Domaine PUR de l'import ciblé (lot A « Importer une recette repérée », spec docs/superpowers/specs/2026-10-18-import-cible-design.md :
-// § 3.1 transitions du journal, § 4.3.3 discordance, § 4.3.4 fabrication, § 4.4 raisons d'échec, § 4.5 âge, § 4.1 séance exclue).
+// § 3.1 transitions du journal, § 4.3.3 discordance, § 4.3.4 fabrication, § 4.4 raisons d'échec, § 4.5 âge et section « Imports », § 4.1 séance exclue).
 // Aucun accès à la base, aucun réseau, aucun texte d'écran : l'écran (src/ui/import-cible.js, tâche 4) traduit et écrit par repo.transitionner.
 // La sortie du modèle est une DONNÉE HOSTILE déjà validée et bornée par validateParsedRecipe (llm.js) : ici elle est seulement assemblée.
 import { normalizeText } from './units.js';
 import { parseIngredientLine, detectTimers } from './lines.js';
 import { assertVocabulaire } from './vocabulaire.js';
 import { newId } from '../core/ids.js';
-import { IMPORTS_TERMINES } from '../model/schema.js';
+import { IMPORTS_TERMINES, STATUTS_IMPORT } from '../model/schema.js';
 
 // --- Transitions du journal (spec § 3.1) : toutes par repo.transitionner (I-10) ; aucune autre. `en_cours → echec` couvre annule,
 // interrompu et incertain (la raison est dans `erreur`). `a_verifier → echec` (T4-R1, ratifiée) couvre UN seul cas : un `resultat` relu du
@@ -141,4 +141,71 @@ export function ageDepuis(iso, maintenant) {
 // rappels génériques (« Séances à reprendre », « Séance en cours », « Photos conservées ») ; elle y réapparaît sur enregistre / ignore.
 export function seanceDUnImportCible(seance, imports) {
   return (Array.isArray(imports) ? imports : []).some((i) => i && i.kind === 'recette' && !!i.recipe_id && i.scan_session_id === seance?.id && !IMPORTS_TERMINES.includes(i.status));
+}
+
+// --- Section « Imports » d'Ajouter (spec § 4.5, tâche 6) ---------------------------------------------------------------------------------------
+// Les sortes que ce lot écrit (« couverture » et « web » sont réservées aux lots E et B : une ligne d'une autre sorte n'est pas listée, rien
+// d'inventé) et les statuts NON terminés. `importOuvert` : une ligne que la section liste (et que la fiche du livre compte).
+export const KINDS_IMPORT = Object.freeze(['recette', 'index']);
+export const IMPORTS_OUVERTS = Object.freeze(STATUTS_IMPORT.filter((s) => !IMPORTS_TERMINES.includes(s)));
+export const importOuvert = (i) => !!i && typeof i === 'object' && typeof i.id === 'string' && !!i.id && KINDS_IMPORT.includes(i.kind) && IMPORTS_OUVERTS.includes(i.status);
+
+// Où « Reprendre » mène, par sorte (spec § 4.5) : une recette ciblée → son écran (#/recipes/<id>/importer, photos en place) ; une recette sans
+// référence (« Regrouper en recette ») → l'éditeur prérempli (#/recipes/new?import=) ; un index → le panneau d'index de sa séance
+// (#/import?session=…&import=). Identifiants encodés (une fiche reçue d'ailleurs peut porter « & » ou « / ») ; un index sans séance, une sorte
+// inconnue ou une ligne sans identifiant → null (rien où reprendre).
+const chaine = (v) => (typeof v === 'string' && v ? v : null);
+export function cibleReprise(ligne) {
+  const id = chaine(ligne?.id);
+  if (!id) return null;
+  if (ligne.kind === 'recette') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/importer` : `/recipes/new?import=${encodeURIComponent(id)}`;
+  if (ligne.kind === 'index') return chaine(ligne.scan_session_id) ? `/import?session=${encodeURIComponent(ligne.scan_session_id)}&import=${encodeURIComponent(id)}` : null;
+  return null;
+}
+
+// Les lignes de la section (PURE ; l'écran traduit par t()) : une par import OUVERT, la plus récente d'abord, puis une par séance OUVERTE qui
+// n'est pas celle d'un import ciblé non terminé (« Photos conservées », N3 : les séances de « Regrouper en recette » et du panneau d'index
+// restent listées). ctx : { imports, scan_sessions, recipesById, editionsById, booksById } ; documentId : le document (onglet) courant ;
+// deviceId : cet appareil. Gestes (spec § 4.5) :
+//   a_lancer → reprendre, ignorer · en_cours → annuler si CE document tient le vol (document_id_vol), sinon aucun (« ailleurs ») ·
+//   a_verifier → reprendre, ignorer · echec → relancer, ignorer ;
+//   ligne d'un AUTRE appareil (« Photos sur un autre appareil ») : reprendre seulement si un résultat est là, jamais relancer → ignorer seul sinon ;
+//   référence pas encore reçue (recipe_id inconnu ici) → aucun geste ; rien où reprendre (index sans séance) → pas de « reprendre ».
+// Rend [{ id, kind, titre: { type: reference | index | regrouper | seance, texte, livre }, etat, age: { n, unite }, raison, gestes, cible,
+// ailleurs, autreAppareil, referenceAbsente, pages }].
+const parRecence = (champ) => (a, b) => String(b[champ] || '').localeCompare(String(a[champ] || ''));
+export function lignesImports(ctx, { maintenant = null, documentId = null, deviceId = null } = {}) {
+  const imports = Array.isArray(ctx?.imports) ? ctx.imports : [];
+  const seances = Array.isArray(ctx?.scan_sessions) ? ctx.scan_sessions : [];
+  const carte = (m) => (m instanceof Map ? m : new Map());
+  const recettes = carte(ctx?.recipesById), editions = carte(ctx?.editionsById), livres = carte(ctx?.booksById);
+  const livreDe = (editionId) => { const ed = editionId ? editions.get(editionId) : null; return chaine(ed ? livres.get(ed.book_id)?.title : null); };
+  const nbPages = (x) => (Array.isArray(x?.page_ids) ? x.page_ids.length : 0);
+  const autre = (x) => !!deviceId && typeof x?.device_id === 'string' && x.device_id !== deviceId;
+  const lignes = imports.filter(importOuvert).sort(parRecence('updated_at')).map((i) => {
+    const autreAppareil = autre(i);
+    const tenu = i.status === 'en_cours' && !!documentId && i.document_id_vol === documentId;
+    const ailleurs = i.status === 'en_cours' && !tenu;
+    const recetteId = i.kind === 'recette' ? chaine(i.recipe_id) : null;
+    const recette = recetteId ? recettes.get(recetteId) ?? null : null;
+    const referenceAbsente = !!recetteId && !recette;
+    const type = i.kind === 'index' ? 'index' : recetteId ? 'reference' : 'regrouper';
+    const cible = cibleReprise(i);
+    let gestes;
+    if (referenceAbsente) gestes = [];
+    else if (i.status === 'en_cours') gestes = tenu ? ['annuler'] : [];
+    else if (autreAppareil) gestes = i.status === 'a_verifier' && i.resultat != null ? ['reprendre', 'ignorer'] : ['ignorer'];
+    else gestes = i.status === 'echec' ? ['relancer', 'ignorer'] : ['reprendre', 'ignorer'];
+    if (!cible) gestes = gestes.filter((g) => g !== 'reprendre');
+    return {
+      id: i.id, kind: i.kind, titre: { type, texte: recette ? chaine(recette.original_title) : null, livre: livreDe(recette?.edition_id ?? i.edition_id) },
+      etat: i.status, age: ageDepuis(i.updated_at, maintenant), raison: i.status === 'echec' ? chaine(i.erreur?.raison) : null,
+      gestes, cible, ailleurs, autreAppareil, referenceAbsente, pages: nbPages(i),
+    };
+  });
+  const photos = seances.filter((s) => s && typeof s === 'object' && chaine(s.id) && s.status === 'open' && !seanceDUnImportCible(s, imports)).sort(parRecence('started_at')).map((s) => ({
+    id: s.id, kind: 'seance', titre: { type: 'seance', texte: null, livre: livreDe(s.edition_id) }, etat: 'open', age: ageDepuis(s.updated_at ?? s.started_at, maintenant), raison: null,
+    gestes: ['ouvrir_seance'], cible: `/import?session=${encodeURIComponent(s.id)}`, ailleurs: false, autreAppareil: autre(s), referenceAbsente: false, pages: nbPages(s),
+  }));
+  return [...lignes, ...photos];
 }

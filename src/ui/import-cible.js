@@ -17,7 +17,7 @@ import { TransitionRefusee } from '../core/db.js';
 import { safeDisplayType } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
 import { IMPORTS_TERMINES } from '../model/schema.js';
-import { PasserelleProvider, extraireRecette, validateParsedRecipe, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION } from '../domain/llm.js';
+import { PasserelleProvider, extraireRecette, extraireIndex, validateParsedRecipe, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION } from '../domain/llm.js';
 import { discordance, deplacerPage, retirerPage, fabriquerExtraction, RAISONS_ECHEC } from '../domain/import-cible.js';
 import { getConvention } from '../domain/units.js';
 import { section, sessionAssistant, carteConnexion, texteEchecAssistant } from './components.js';
@@ -86,6 +86,8 @@ async function imagesDe(repo, pageIds) {
 // la réponse validée est écrite dans le journal (a_verifier) AVANT tout rendu ou toute écriture de recette (I-3). Rend { issue, raison } :
 // 'refuse' (vol_tenu | inconnu | hors_ligne | non_connecte | sans_page | image | octets_absents | transition), 'echec' (raison § 4.4),
 // 'a_verifier'. Ne lève jamais vers l'écran pour une raison attendue. `vol` est libéré en finally, quoi qu'il arrive.
+// Tâche 6 : le même vol lit aussi une ligne `kind: 'index'` (panneau d'index, « Relancer » de la section « Imports ») — extraireIndex, et le
+// résultat écrit est { entries, uncertain } ; tout le reste (gardes, battement, appels, signal, Annuler, I-3, I-4) est commun aux deux sortes.
 export async function lancerExtraction(importId, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS } = {}) {
   if (vol) return refus('vol_tenu');
   const tenue = { importId, controller: new AbortController(), repo };
@@ -126,7 +128,7 @@ export async function lancerExtraction(importId, { ctx, repo = repoModule, fetch
     const t0 = Date.now();
     let reponse;
     try {
-      reponse = await extraireRecette(provider, images, { signal: tenue.controller.signal, maxTokens: MAX_TOKENS_EXTRACTION });
+      reponse = ligne.kind === 'index' ? await extraireIndex(provider, images, { signal: tenue.controller.signal }) : await extraireRecette(provider, images, { signal: tenue.controller.signal, maxTokens: MAX_TOKENS_EXTRACTION });
     } catch (e) {
       // Échec de l'appel ou refus de la lecture : en_cours → echec(raison) ; une ErreurExtraction garde la réponse brute (diagnostic, bornée).
       // Un `annule` arrive aussi par annulerVol, qui écrit la même chose : la première écriture gagne, la seconde est refusée sans bruit.
@@ -139,7 +141,7 @@ export async function lancerExtraction(importId, { ctx, repo = repoModule, fetch
     const duree_ms = Date.now() - t0;
     // I-3 : le résultat vit dans le journal AVANT tout rendu ou toute écriture de recette. Patch-OBJET (son statut est lu par les espions des tests).
     try {
-      await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: { status: 'a_verifier', resultat: reponse.recette, reponse_brute: brute(reponse.texteBrut), model: reponse.modele ?? null, duree_ms, document_id_vol: null, erreur: null } });
+      await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: { status: 'a_verifier', resultat: ligne.kind === 'index' ? reponse.index : reponse.recette, reponse_brute: brute(reponse.texteBrut), model: reponse.modele ?? null, duree_ms, document_id_vol: null, erreur: null } });
     } catch (e) {
       if (estRefus(e)) {
         // Réponse arrivée APRÈS « Annuler » ou un interrompu (spec § 3.1, Review Focus 4) : echec → a_verifier n'existe pas ; reponse_brute seule
@@ -176,8 +178,9 @@ export async function annulerVol(importId) {
 
 // Le texte d'une ligne echec (spec § 4.4) : les raisons de l'extraction et du journal ont leur phrase ici ; les raisons de la passerelle gardent
 // les textes existants (texteEchecAssistant : refus en clair avec son nombre, texte générique + « Code : … » sinon). I-4 : interrompu, annule et
-// incertain disent la même phrase. Rend { texte, code } ; `code` n'est posé que pour illisible / hors_bornes.
-function texteEchec(erreur) {
+// incertain disent la même phrase. Rend { texte, code } ; `code` n'est posé que pour illisible / hors_bornes. Exportée (tâche 6) : la section
+// « Imports », l'éditeur et le panneau d'index disent la même phrase pour la même raison.
+export function texteEchec(erreur) {
   const raison = typeof erreur?.raison === 'string' ? erreur.raison : 'interne';
   const extra = erreur?.extra && typeof erreur.extra === 'object' ? erreur.extra : {};
   if (raison === 'annule') return { texte: t('Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.'), code: null };

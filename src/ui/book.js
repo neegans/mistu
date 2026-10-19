@@ -12,12 +12,15 @@ import { startScanSession, indexEntriesPanel } from './import.js';
 import { accueilLivreModel, renderAccueilLivre } from './accueil-livre.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes, motsClesExistants } from './puces.js';
 import { tagsDe } from '../domain/search.js';
+import { seanceDUnImportCible, importOuvert } from '../domain/import-cible.js';
 import { ACCEPT_PHOTOS, ACCEPT_FICHIERS } from './add.js';
 
 // C8 : la plus RÉCENTE d'abord. La fiche ne rappelle qu'UNE séance et « Reprendre » doit mener à celle qu'on vient
 // de laisser, pas à la plus vieille restée ouverte (l'ordre de la base est celui des clés, pas du temps).
+// Import ciblé (spec import-cible § 4.1, N3) : la séance d'un import CIBLÉ non terminé n'est pas rappelée ici — elle se reprend par la section
+// « Imports » d'Ajouter ; elle revient après ignore. Les séances de « Regrouper en recette » et du panneau d'index restent rappelées.
 export const seancesOuvertes = (ctx, editionId) => (ctx.scan_sessions || [])
-  .filter((s) => s.status === 'open' && s.edition_id === editionId)
+  .filter((s) => s.status === 'open' && s.edition_id === editionId && !seanceDUnImportCible(s, ctx.imports))
   .sort((a, b) => String(b.started_at || '').localeCompare(String(a.started_at || '')));
 
 // « + Pages d'index » / « + Recette » : un <details> dont le résumé est le bouton, les sources dessous (spec § 9).
@@ -69,6 +72,10 @@ export async function renderBook(params, query, ctx) {
     plusTard: () => navigate('/library'),
     fermer: () => remplacerAdresse(`#/books/${encodeURIComponent(edition.id)}`),
   }));
+  // Spec import-cible § 4.5 : les imports ouverts de CE livre se reprennent dans la section « Imports » d'Ajouter (rendue en premier, avec le focus).
+  const aReprendre = (ctx.imports || []).filter((i) => importOuvert(i) && i.edition_id === edition.id).length;
+  if (aReprendre) root.append(el('div', { class: 'row', dataset: { role: 'imports-a-reprendre' }, style: { marginBottom: '.8rem' } },
+    el('a', { class: 'btn small', href: '#/add?section=imports' }, aReprendre === 1 ? t('{n} import à reprendre', { n: aReprendre }) : t('{n} imports à reprendre', { n: aReprendre }))));
   const ouvertes = seancesOuvertes(ctx, edition.id);
   if (ouvertes.length) root.append(el('div', { class: 'card flat row between' },
     el('span', null, t('Séance en cours : {n} page(s)', { n: (ouvertes[0].page_ids || []).length })),

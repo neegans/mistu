@@ -152,16 +152,21 @@ export async function extraireIndex(provider, images, { signal } = {}) {
   if (contexte.stopReason === 'max_tokens') throw new ErreurExtraction('coupe', contexte);
   let data;
   try { data = parseJsonLoose(raw); } catch { throw new ErreurExtraction('illisible', contexte); }
-  if (!Array.isArray(data?.entries)) throw new ErreurExtraction('illisible', contexte);
-  // Ronde 1 : les entrées deviennent des fiches (« Créer les références ») — typées et bornées comme la recette (titre ≤ 200 points de code sinon
-  // hors_bornes, Cc/Cf retirés, page entier ≤ 9 999, section chaîne ou null, mentions chaînes seulement) ; une entrée au titre vide est écartée.
-  try {
-    const entries = data.entries.filter((e) => e && typeof e.title === 'string')
-      .map((e) => ({ title: texteBorne(e.title, BORNES_EXTRACTION.titre), printed_page: entierBorne(e.printed_page, BORNES_NOMBRES.page), section: texteBorne(e.section, BORNES_EXTRACTION.titre), ingredients_mentioned: (Array.isArray(e.ingredients_mentioned) ? e.ingredients_mentioned : []).map((m) => texteBorne(m, BORNES_EXTRACTION.ligne)).filter(Boolean) }))
-      .filter((e) => e.title);
-    const uncertain = (Array.isArray(data.uncertain) ? data.uncertain : []).map((u) => texteBorne(u, BORNES_EXTRACTION.champIncertain)).filter(Boolean);
-    return { index: { entries, uncertain }, ...contexte };
-  } catch (e) { if (e instanceof ErreurExtraction) Object.assign(e, contexte); throw e; }
+  try { return { index: validerIndex(data), ...contexte }; }
+  catch (e) { if (e instanceof ErreurExtraction) Object.assign(e, contexte); throw e; }
+}
+
+// La forme d'un index (ronde 1 de la tâche 3) : les entrées deviennent des fiches (« Créer les références ») — typées et bornées comme la recette
+// (titre ≤ 200 points de code sinon hors_bornes, Cc/Cf retirés, page entier ≤ 9 999, section chaîne ou null, mentions chaînes seulement) ; une
+// entrée au titre vide est écartée ; pas de liste d'entrées → illisible. Exportée (tâche 6) : UNE définition, pour la réponse du modèle ET pour un
+// résultat relu du journal (synchro, archive), REVALIDÉ avant tout usage par le panneau d'index (I-1), comme validateParsedRecipe pour une recette.
+export function validerIndex(data) {
+  if (!data || typeof data !== 'object' || !Array.isArray(data.entries)) throw new ErreurExtraction('illisible');
+  const entries = data.entries.filter((e) => e && typeof e.title === 'string')
+    .map((e) => ({ title: texteBorne(e.title, BORNES_EXTRACTION.titre), printed_page: entierBorne(e.printed_page, BORNES_NOMBRES.page), section: texteBorne(e.section, BORNES_EXTRACTION.titre), ingredients_mentioned: (Array.isArray(e.ingredients_mentioned) ? e.ingredients_mentioned : []).map((m) => texteBorne(m, BORNES_EXTRACTION.ligne)).filter(Boolean) }))
+    .filter((e) => e.title);
+  const uncertain = (Array.isArray(data.uncertain) ? data.uncertain : []).map((u) => texteBorne(u, BORNES_EXTRACTION.champIncertain)).filter(Boolean);
+  return { entries, uncertain };
 }
 
 // Enveloppe compatible (m5) : { entries, uncertain } seuls (ce que le panneau d'index lit aujourd'hui).
