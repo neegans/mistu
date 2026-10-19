@@ -288,8 +288,9 @@ export async function runImportCibleTests({ eq, ok }) {
   await run('domaine import-cible : transitions, discordance, ordre, âge', async () => {
     const D = await import('../src/domain/import-cible.js');
     for (const de of Object.keys(D.TRANSITIONS)) for (const vers of Object.keys(D.TRANSITIONS)) eq(D.transitionPermise(de, vers), D.TRANSITIONS[de].includes(vers), `transitions : ${de} → ${vers}`);
-    eq(D.TRANSITIONS, { a_lancer: ['en_cours', 'ignore'], en_cours: ['a_verifier', 'echec'], a_verifier: ['enregistre', 'a_lancer', 'ignore'], echec: ['en_cours', 'a_lancer', 'ignore'], enregistre: [], ignore: [] }, 'transitions : la table exacte de la spec');
+    eq(D.TRANSITIONS, { a_lancer: ['en_cours', 'ignore'], en_cours: ['a_verifier', 'echec'], a_verifier: ['enregistre', 'a_lancer', 'ignore', 'echec'], echec: ['en_cours', 'a_lancer', 'ignore'], enregistre: [], ignore: [] }, 'transitions : la table exacte de la spec (T4-R1 : a_verifier → echec(illisible), résultat relu invalide)');
     eq([D.transitionPermise('inconnu', 'en_cours'), D.transitionPermise('a_lancer', 'inconnu'), D.transitionPermise(undefined, 'ignore'), D.transitionPermise('constructor', 'ignore')], [false, false, false, false], 'transitions : un état inconnu (ou une clé héritée) ne permet rien');
+    eq(t('“{x}” ; “{y}” (p. {n})', { x: '{y}', y: 'Tarte aux pommes', n: 132 }), '“{y}” ; “Tarte aux pommes” (p. 132)', 'i18n (T4-R1) : t() remplace en UNE passe \u2014 une valeur insérée (un titre lu « {y} ») n’est jamais relue comme un gabarit : la discordance ne se maquille pas en concordance');
     eq([Object.isFrozen(D.TRANSITIONS), Object.values(D.TRANSITIONS).every((v) => Object.isFrozen(v))], [true, true], 'transitions (ronde 1) : la table ET chacun de ses tableaux sont gelés \u2014 un push sur a_lancer lève au lieu de changer les transitions de toute l’app');
     eq(D.MOTS_VIDES, ['le', 'la', 'les', 'l', 'de', 'du', 'des', 'd', 'au', 'aux', 'à', 'et', 'en', 'un', 'une', 'ma', 'mon', 'mes', 'ta', 'ton', 'tes', 'sa', 'son', 'ses', 'notre', 'nos', 'votre', 'vos', 'leur', 'leurs', 'the', 'of', 'and', 'with', 'a', 'an', 'my', 'your', 'our'], 'discordance : la liste fermée des mots vides de la spec § 4.3.3, possessifs compris');
     eq(D.motsDistinctifs('Tarte aux pommes de ma grand-mère'), ['tarte', 'pommes', 'grand', 'mere'], 'discordance : mots vides et possessifs retirés, accents aplatis, trait d’union coupé');
@@ -514,14 +515,16 @@ export async function runImportCibleTests({ eq, ok }) {
     const edition = { id: 'ed1', book_id: 'b1', language: 'fr', updated_at: DATE };
     const fiche = (id, over = {}) => ({ id, edition_id: 'ed1', original_title: 'Tarte aux pommes', original_language: 'fr', availability: 'reference_only', verification_state: 'unverified', printed_page: 132, source_page_ids: [], current_version_id: null, tags: [], cuisines: [], favorite: false, ingredient_ids: [], created_at: DATE, updated_at: DATE, ...over });
     const versionDe = (id, recipe_id, generated_by) => ({ id, recipe_id, kind: 'extraction', status: null, servings: 4, ingredients: [{ id: 'ri_' + id, source_text: '1 pomme', name_text: 'pomme', quantity: { value: 1, raw: '1' }, verification_state: 'verified' }], steps: [{ id: 'st_' + id, position: 1, text: 'Cuire.' }], provenance: { generated_by, source_page_ids: [] }, verification_state: 'verified', created_at: DATE, updated_at: DATE });
-    const recettes = ['rc_a', 'rc_b', 'rc_c', 'rc_d', 'rc_f', 'rc_g', 'rc_h', 'rc_i', 'rc_j', 'rc_k', 'rc_ref'].map((id) => fiche(id)).concat([
+    const recettes = ['rc_a', 'rc_b', 'rc_c', 'rc_d', 'rc_f', 'rc_g', 'rc_h', 'rc_i', 'rc_j', 'rc_k', 'rc_l', 'rc_o', 'rc_p', 'rc_q', 'rc_r', 'rc_s', 'rc_ref'].map((id) => fiche(id)).concat([
       fiche('rc_dispo', { availability: 'available', verification_state: 'verified', current_version_id: 'rv_dispo' }),
       fiche('rc_signet', { edition_id: null, source_url: 'https://exemple.test/x', printed_page: null }),
+      fiche('rc_sigpart', { availability: 'partial', source_url: 'https://exemple.test/y', printed_page: null }), // un signet devenu partial (texte saisi à la main)
       fiche('rc_e', { availability: 'partial', verification_state: 'verified', current_version_id: 'rv_e_main', ingredient_ids: ['ing_x'] }),
       fiche('rc_m', { availability: 'partial', verification_state: 'verified', current_version_id: 'rv_m_main' }),
+      fiche('rc_n', { availability: 'partial', verification_state: 'verified', current_version_id: 'rv_n_main' }),
       fiche('rc_part', { availability: 'partial', verification_state: 'to_verify', current_version_id: 'rv_part' }),
     ]);
-    const versions = [versionDe('rv_dispo', 'rc_dispo', 'ai'), versionDe('rv_e_main', 'rc_e', 'manual'), versionDe('rv_m_main', 'rc_m', 'manual'), versionDe('rv_part', 'rc_part', 'ai')];
+    const versions = [versionDe('rv_dispo', 'rc_dispo', 'ai'), versionDe('rv_e_main', 'rc_e', 'manual'), versionDe('rv_m_main', 'rc_m', 'manual'), versionDe('rv_n_main', 'rc_n', 'manual'), versionDe('rv_part', 'rc_part', 'ai')];
     await db.mutate({ puts: { books: [livre], book_editions: [edition], recipes: recettes, recipe_versions: versions }, origin: 'device' });
     const JETON = 'jeton-import-sentinelle';
     const SESSION = { access_token: JETON, user: { id: 'u1', email: 'a@exemple.invalid' } };
@@ -561,7 +564,11 @@ export async function runImportCibleTests({ eq, ok }) {
     // Les pages d'un import, posées directement (repo.ajouterPages, chemin de la tâche 3) : l'écran les REPREND (I-2).
     const preparer = async (recipeId, n = 1) => { const files = []; for (let i = 0; i < n; i += 1) files.push(await imageDe(`${recipeId}-${i}.jpg`, ['#811', '#181', '#118'][i % 3])); return (await repo.ajouterPages(files, { edition_id: 'ed1', import: { id: repo.newId('imp'), kind: 'recette', recipe_id: recipeId } })).importId; };
     // Chaque bloc part d'une scène vide (les racines des blocs précédents n'écoutent plus) et de journaux de gestes vides.
-    const bloc = (nom, fn) => run('écran — ' + nom, async () => { scene.replaceChildren(); navs.length = 0; dits.length = 0; await fn(); });
+    const bloc = (nom, fn) => run('écran — ' + nom, async () => {
+      scene.replaceChildren(); navs.length = 0; dits.length = 0;
+      try { await fn(); }
+      catch (e) { if (UI.volEnCours()) UI.reinitialiserImportCible(); throw e; } // un bloc qui échoue en plein vol ne fait pas tomber les suivants en vol_tenu
+    });
     let p1, p2, p3, shaPhoto;
     try {
       eq([typeof UI.DOCUMENT_ID, /^[0-9a-f-]{36}$/.test(UI.DOCUMENT_ID), UI.BATTEMENT_MS, typeof UI.lancerExtraction, typeof UI.annulerVol], ['string', true, 15000, 'function', 'function'], 'module : DOCUMENT_ID (uuid à l’import), BATTEMENT_MS 15000, lancerExtraction et annulerVol exportés pour la tâche 6');
@@ -628,6 +635,10 @@ export async function runImportCibleTests({ eq, ok }) {
         await attendre(() => root.etatRoute().pageIds.length === 2, 'troisième page');
         const relue = await ligneDe('rc_a'); p3 = relue.page_ids[1];
         eq([relue.id === ligne.id, relue.page_ids[0], (await db.byIndex('imports', 'recipe_id', 'rc_a')).length, (await db.get('scan_sessions', ligne.scan_session_id)).page_ids.length], [true, p2, 1, 3], 'pages : une page de plus va à la MÊME ligne (un seul import, I-2), en fin de page_ids, dans la même séance');
+        const champ0 = root.querySelector('.thumbs figure input[type="number"]'); // la vignette de p2 (133), redessinée
+        champ0.value = '0'; champ0.dispatchEvent(new Event('change', { bubbles: true })); // T4-R1 : une saisie illisible (vide, « 0 », hors 1..9999) n'écrit rien
+        await attendre(() => champ0.value === '133', 'champ remis à la valeur courante');
+        eq([(await db.get('source_pages', p2)).printed_page, champ0.value], [133, '133'], 'pages (T4-R1) : une saisie illisible (« 0 ») n’efface pas le numéro — rien d’écrit, le champ reprend la valeur courante');
       });
 
       await bloc('photo du plat', async () => {
@@ -668,10 +679,12 @@ export async function runImportCibleTests({ eq, ok }) {
 
       await bloc('extraire et enregistrer', async () => {
         const vus = []; const capture = db.onMutate;
-        db.onMutate = (m) => { vus.push([Object.keys(m.puts).sort(), m.puts.imports?.[0]?.status ?? null]); return capture ? capture(m) : {}; };
+        db.onMutate = (m) => { vus.push([Object.keys(m.puts).sort(), m.puts.imports?.[0]?.status ?? null, m.puts.imports?.[0]?.appels ?? null]); return capture ? capture(m) : {}; };
         try {
           const ff = fauxFetch();
-          const root = await monter('rc_a', { deps: { fetch: ff.fetch } });
+          let appelsAuFetch = null; // la ligne RELUE par le fetch factice au moment de l'appel (T4-R1)
+          const fetchLisant = async (u, o) => { appelsAuFetch = (await ligneDe('rc_a')).appels; return ff.fetch(u, o); };
+          const root = await monter('rc_a', { deps: { fetch: fetchLisant } });
           const ligne = await ligneDe('rc_a');
           const b = bouton(root, 'Extraire et enregistrer');
           eq(b.disabled, false, 'extraction : avec des pages et une session, le bouton est allumé');
@@ -685,8 +698,10 @@ export async function runImportCibleTests({ eq, ok }) {
           const attendues = await Promise.all([p2, p3].map(async (id) => (await L.pagePourEnvoi((await db.get('files', (await db.get('source_pages', id)).sha256)).blob)).base64));
           eq([ff.appels.length, corps.outil, corps.corps.max_tokens, images.length, images[0] === attendues[0] && images[1] === attendues[1], ff.appels[0].options.headers.authorization, ff.appels[0].options.signal instanceof AbortSignal], [1, 'extraction', 6000, 2, true, 'Bearer ' + JETON, true], 'extraction : UN POST (double clic compris), outil extraction, max_tokens 6000, les images dans l’ordre de page_ids, la session en Bearer, un signal');
           eq([enVol.status, enVol.appels, enVol.document_id_vol, typeof enVol.started_at, typeof enVol.battement_at, enVol.erreur], ['en_cours', 1, UI.DOCUMENT_ID, 'string', 'string', null], 'extraction : la ligne est en_cours, appels 1 au départ du fetch, document_id_vol = DOCUMENT_ID, started_at et battement_at posés');
+          eq([vus.filter((v) => v[1] === 'en_cours').map((v) => v[2]), appelsAuFetch], [[0, 1], 1], 'extraction (T4-R1) : l’écriture en_cours laisse appels à 0 ; une écriture SÉPARÉE le porte à 1 juste avant l’appel (la ligne relue par le fetch au moment de l’appel dit 1)');
           const statut = root.querySelector('.status[role="status"]');
           eq([statut?.textContent, statut?.nextElementSibling?.classList.contains('row'), !!bouton(statut?.nextElementSibling, 'Annuler'), root.etatRoute().vol, root.etatRoute().status, bouton(root, 'Extraire et enregistrer')?.disabled], ['Lecture des pages par l’assistant…', true, true, true, 'en_cours', true], 'extraction (R-VIS-8) : pendant le vol, .status[role=status] puis une .row avec « Annuler » ; etatRoute().vol vrai ; le primaire est éteint');
+          eq([root.querySelectorAll('[data-role="monter"], [data-role="descendre"], [data-role="retirer"]').length, bouton(root, 'Photographier'), bouton(root, 'Choisir des photos'), bouton(root, 'Remplacer')?.disabled, bouton(root, 'Retirer')?.disabled], [0, null, null, true, true], 'extraction (T4-R1, décision 5) : pendant le vol, les pages sont figées (ni Monter/Descendre/Retirer, ni ajout) et la photo du plat aussi (« Remplacer » / « Retirer » éteints)');
           eq(await UI.lancerExtraction(ligne.id, { ctx: await ctxDe(), repo, fetch: ff.fetch }), { issue: 'refuse', raison: 'vol_tenu' }, 'extraction (I-7) : lancerExtraction refuse tant qu’un vol est tenu par ce document');
           eq(UI.volEnCours(), { importId: ligne.id }, 'extraction : volEnCours() nomme l’import du vol');
           ff.rendre[0](200, corpsOk());
@@ -754,13 +769,15 @@ export async function runImportCibleTests({ eq, ok }) {
         let deux = 2;
         espion.transitionner = async (store, key, opts) => { if (['a_verifier', 'echec'].includes(opts?.patch?.status) && deux > 0) { deux -= 1; throw new Error('disque plein'); } return repo.transitionner(store, key, opts); };
         const erreurs = []; const vraiErreur = console.error; console.error = (...a) => { erreurs.push(String(a[0])); };
+        const rejets = []; const surRejet = (e) => { rejets.push(String(e.reason?.message ?? e.reason)); e.preventDefault(); }; // T4-R1 : « ne plante pas » = aucune promesse rejetée sans gestionnaire
+        window.addEventListener('unhandledrejection', surRejet);
         try {
           bouton(root, 'Relancer').click();
           await attendre(() => ff.appels.length === 2, 'relance partie');
           await attendre(() => UI.volEnCours() === null, 'vol libéré');
-          await tick(); await tick();
-        } finally { console.error = vraiErreur; }
-        eq([(await db.get('imports', impD)).status, deux, erreurs.some((e) => e.includes('import_cible')), root.isConnected && root.querySelectorAll('button').length > 0, root.etatRoute().vol], ['en_cours', 0, true, true, false], 'incertain : rejetée DEUX fois → la ligne reste en_cours (interrompu au prochain démarrage), l’erreur est journalisée, l’écran ne plante pas');
+          await tick(); await tick(); await tick();
+        } finally { console.error = vraiErreur; window.removeEventListener('unhandledrejection', surRejet); }
+        eq([(await db.get('imports', impD)).status, deux, erreurs.some((e) => e.includes('import_cible')), rejets, root.etatRoute().status, root.etatRoute().vol, root.textContent.includes('En cours sur un autre écran')], ['en_cours', 0, true, [], 'en_cours', false, true], 'incertain : rejetée DEUX fois → la ligne reste en_cours (interrompu au prochain démarrage), l’erreur est journalisée, aucun rejet non géré, l’écran redessiné dit l’état réel (en_cours sans vol tenu)');
         await db.put('imports', { ...(await db.get('imports', impD)), status: 'ignore' }); // rangement : plus d’import ouvert sur rc_d
       });
 
@@ -774,6 +791,7 @@ export async function runImportCibleTests({ eq, ok }) {
         const avantRc = await db.get('recipes', 'rc_b');
         bouton(root, 'Extraire et enregistrer').click();
         await attendre(() => root.etatRoute().status === 'a_verifier' && !!root.etatRoute().discordance, 'a_verifier avec verdict');
+        eq([root.querySelectorAll('[data-role="monter"], [data-role="descendre"], [data-role="retirer"]').length, bouton(root, 'Photographier'), bouton(root, 'Choisir des photos'), bouton(root, 'Prendre une photo')?.disabled], [0, null, null, false], 'discordance (T4-R1, décision 5) : en a_verifier les pages sont figées (ni Monter/Descendre/Retirer, ni ajout) ; la photo du plat reste modifiable (lue à l’enregistrement)');
         const l = await db.get('imports', impB);
         eq([l.status, Array.from(l.reponse_brute).length, l.resultat?.title, l.resultat?.ingredients?.length, JSON.stringify(l).length < 512 * 1024], ['a_verifier', 16000, 'Tarte aux poires', 2, true], 'reponse_brute : coupée à 16 000 points de code, resultat intact, la ligne tient sous 512 Kio');
         eq(root.etatRoute().discordance, { ok: false, raison: 'titre', titreLu: 'Tarte aux poires', pageLue: 133 }, 'discordance (Review Focus 2) : « Tarte aux poires » lue pour « Tarte aux pommes » → verdict titre, avant toute écriture');
@@ -833,16 +851,18 @@ export async function runImportCibleTests({ eq, ok }) {
         await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_f?v=')), 'enregistrée');
         const rc = await db.get('recipes', 'rc_f');
         eq([rc.original_title, rc.tags, rc.availability, (await db.get('imports', impF)).status], ['Tarte de grand-mère', ['neuf'], 'available', 'enregistre'], 'relecture (C4) : la fiche écrite porte la valeur RÉCENTE de la référence (relue juste avant la transaction), pas celle du rendu');
+        navs.length = 0; dits.length = 0;
         const impG = await preparer('rc_g', 1);
         const ff2 = fauxFetch();
         const root2 = await monter('rc_g', { deps: { fetch: ff2.fetch } });
-        const vus = []; const capture = db.onMutate; db.onMutate = (m) => { vus.push(Object.keys(m.puts)); return capture ? capture(m) : {}; };
+        let parLAutre = false; // les écritures jouées par « l'autre onglet » ne comptent pas parmi les puts de l'écran
+        const vus = []; const capture = db.onMutate; db.onMutate = (m) => { if (!parLAutre) vus.push(Object.keys(m.puts)); return capture ? capture(m) : {}; };
         try {
           await db.put('imports', { ...(await db.get('imports', impG)), status: 'enregistre' }); // un autre onglet a enregistré
           vus.length = 0;
           bouton(root2, 'Extraire et enregistrer').click();
           await attendre(() => root2.etatRoute().importId === null, 'écran redessiné sans import ouvert');
-          eq([ff2.appels.length, vus, (await db.get('imports', impG)).status, root2.etatRoute().status, UI.volEnCours()], [0, [], 'enregistre', null, null], 'autre onglet (I-10) : import déjà enregistre au clic → TransitionRefusee, aucun fetch, aucun put, écran redessiné');
+          eq([ff2.appels.length, vus, (await db.get('imports', impG)).status, root2.etatRoute().status, UI.volEnCours(), [...dits], [...navs]], [0, [], 'enregistre', null, null, [], []], 'autre onglet (I-10) : import déjà enregistre au clic → TransitionRefusee, aucun fetch, aucun put, écran redessiné, ni toast ni navigation');
           const impH = await preparer('rc_h', 1);
           await db.put('imports', { ...(await db.get('imports', impH)), status: 'a_verifier', resultat: RECETTE, model: 'claude-x', reponse_brute: 'x' });
           const root3 = await monter('rc_h', { deps: { fetch: interdit } });
@@ -851,8 +871,109 @@ export async function runImportCibleTests({ eq, ok }) {
           vus.length = 0;
           bouton(root3, 'Enregistrer cette lecture').click();
           await attendre(() => root3.etatRoute().importId === null, 'redessiné');
-          eq([vus, await db.byIndex('recipe_versions', 'recipe_id', 'rc_h'), (await db.get('recipes', 'rc_h')).availability, reseau], [[], [], 'reference_only', 0], 'autre onglet (I-10) : enregistre juste avant « Enregistrer cette lecture » → aucun put, rien sur la recette, aucun appel');
+          eq([vus, await db.byIndex('recipe_versions', 'recipe_id', 'rc_h'), (await db.get('recipes', 'rc_h')).availability, reseau, [...dits], [...navs]], [[], [], 'reference_only', 0, [], []], 'autre onglet (I-10) : enregistre juste avant « Enregistrer cette lecture » → aucun put, rien sur la recette, aucun appel, ni « Recette importée » ni navigation');
+          // T4-R1 : l'autre onglet enregistre ENTRE la relecture de la ligne et la transaction (l'espion le joue juste avant l'écriture `enregistre`) :
+          // la transaction est refusée, et rien ne dit « importé » (un « sauvegardé » sans écriture est interdit).
+          const impP = await preparer('rc_p', 1);
+          await db.put('imports', { ...(await db.get('imports', impP)), status: 'a_verifier', resultat: RECETTE, model: 'claude-x', reponse_brute: 'x' });
+          const espionP = { ...repo, transitionner: async (store, key, opts) => { if (opts?.patch?.status === 'enregistre') { parLAutre = true; await db.put('imports', { ...(await db.get('imports', key)), status: 'enregistre' }); parLAutre = false; } return repo.transitionner(store, key, opts); } };
+          const root4 = await monter('rc_p', { deps: { fetch: interdit, repo: espionP } });
+          vus.length = 0; dits.length = 0; navs.length = 0;
+          bouton(root4, 'Enregistrer cette lecture').click();
+          await attendre(() => root4.etatRoute().importId === null, 'redessiné sans import ouvert');
+          eq([vus, [...dits], [...navs], await db.byIndex('recipe_versions', 'recipe_id', 'rc_p'), (await db.get('recipes', 'rc_p')).availability, (await db.get('imports', impP)).status], [[], [], [], [], 'reference_only', 'enregistre'], 'autre onglet (I-10, T4-R1) : enregistre ENTRE la relecture et la transaction → TransitionRefusee, aucun put, ni « Recette importée » ni navigation vers une version qui n’existe pas');
         } finally { db.onMutate = capture; }
+      });
+
+      await bloc('I-1 : un résultat relu du journal est revalidé (T4-R1)', async () => {
+        const impL = await preparer('rc_l', 1);
+        const HOSTILE = { ...RECETTE, title: 'HOSTILE-' + 'x'.repeat(201) };
+        await db.put('imports', { ...(await db.get('imports', impL)), status: 'a_verifier', resultat: HOSTILE, model: 'claude-x', reponse_brute: 'x' });
+        const enFile = async () => (await db.getAll('outbox')).filter((e) => e.store === 'imports' && e.id === impL).length;
+        const n0 = await enFile();
+        const root = await monter('rc_l', { deps: { fetch: interdit } });
+        const l1 = await db.get('imports', impL);
+        eq([l1.status, l1.erreur?.raison, l1.resultat, root.textContent.includes('HOSTILE-'), root.etatRoute().status, !!bouton(root, 'Relancer'), bouton(root, 'Enregistrer cette lecture'), (await enFile()) - n0, reseau], ['echec', 'illisible', null, false, 'echec', true, null, 1, 0], 'I-1 au montage : un resultat hors bornes (titre de 201 points de code) → a_verifier → echec(illisible) (ratifiée T4-R1), resultat null, rien du texte à l’écran, « Relancer » ; UNE entrée d’outbox (origine local : la seule écriture d’une visite), aucun appel');
+        await db.put('imports', { ...(await db.get('imports', impL)), status: 'a_verifier', resultat: 'pas une recette', erreur: null });
+        const root2 = await monter('rc_l', { deps: { fetch: interdit } });
+        eq([(await db.get('imports', impL)).status, (await db.get('imports', impL)).erreur?.raison, (await db.get('imports', impL)).resultat, root2.etatRoute().status], ['echec', 'illisible', null, 'echec'], 'I-1 au montage : un resultat qui n’est pas une recette (chaîne) → echec(illisible), resultat null');
+        // Au clic : la ligne redevient a_verifier VALIDE ; sans session, aucune carte « Connecte-toi » (« Enregistrer cette lecture » n'appelle rien, T4-R1) ;
+        // puis un autre appareil y dépose un résultat hostile avant le clic.
+        await db.put('imports', { ...(await db.get('imports', impL)), status: 'a_verifier', resultat: RECETTE, erreur: null });
+        const rootSans = await monter('rc_l', { session: null, deps: { fetch: interdit } });
+        eq([rootSans.querySelector('[data-role="connexion-ia"]'), rootSans.textContent.includes('Connecte-toi pour utiliser l’assistant.'), bouton(rootSans, 'Enregistrer cette lecture')?.disabled], [null, false, false], 'a_verifier sans session (T4-R1) : pas de carte « Connecte-toi » — « Enregistrer cette lecture » reste allumé et n’appelle rien');
+        const root3 = await monter('rc_l', { deps: { fetch: interdit } });
+        eq(!!bouton(root3, 'Enregistrer cette lecture'), true, 'I-1 : résultat valide → mode « Enregistrer cette lecture »');
+        await db.put('imports', { ...(await db.get('imports', impL)), resultat: HOSTILE });
+        const vus = []; const capture = db.onMutate; db.onMutate = (m) => { vus.push(Object.keys(m.puts).sort()); return capture ? capture(m) : {}; };
+        try {
+          bouton(root3, 'Enregistrer cette lecture').click();
+          await attendre(async () => (await db.get('imports', impL)).status === 'echec' && root3.etatRoute().status === 'echec', 'echec');
+        } finally { db.onMutate = capture; }
+        eq([vus, await db.byIndex('recipe_versions', 'recipe_id', 'rc_l'), (await db.get('recipes', 'rc_l')).availability, (await db.get('imports', impL)).erreur?.raison, (await db.get('imports', impL)).resultat, root3.textContent.includes('HOSTILE-'), [...dits], [...navs], reseau], [[['imports']], [], 'reference_only', 'illisible', null, false, [], [], 0], 'I-1 au clic : une ligne devenue hostile entre-temps → echec(illisible) écrit SEUL ; ni recipes ni recipe_versions, rien du texte à l’écran, aucun toast, aucune navigation');
+        // Deux champs relus du journal passent dans la fiche : bornés avant (model ≤ 80 points de code, photo_sha256 = empreinte hexadécimale de 64).
+        const impS = await preparer('rc_s', 1);
+        await db.put('imports', { ...(await db.get('imports', impS)), status: 'a_verifier', resultat: RECETTE, model: 'm'.repeat(81), photo_sha256: '../x', photo_origin: 'image', reponse_brute: 'x' });
+        const rootS = await monter('rc_s', { deps: { fetch: interdit } });
+        bouton(rootS, 'Enregistrer cette lecture').click();
+        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_s?v=')), 'enregistrée');
+        const [vS] = await db.byIndex('recipe_versions', 'recipe_id', 'rc_s'); const rS = await db.get('recipes', 'rc_s');
+        eq([vS?.provenance?.model, rS.photo_sha256, rS.photo_origin, rS.availability, (await db.get('imports', impS)).status], [null, null, null, 'available', 'enregistre'], 'T4-R1 : un model de 81 points de code et un photo_sha256 qui n’est pas une empreinte de 64 hexadécimales sont relus comme nuls — la version et la fiche n’en portent rien');
+      });
+
+      await bloc('rattacher lié à LA lecture (D-6, deux onglets ; T4-R1)', async () => {
+        const impN = await preparer('rc_n', 1);
+        const ff = fauxFetch([200, corpsOk({ ...RECETTE, title: 'Tarte aux poires' })]);
+        const root = await monter('rc_n', { deps: { fetch: ff.fetch } });
+        bouton(root, 'Extraire et enregistrer').click();
+        await attendre(() => !!root.querySelector('[data-role="discordance"]'), 'discordance');
+        bouton(root.querySelector('[data-role="discordance"]'), 'Rattacher').click();
+        await attendre(() => !!root.querySelector('[data-role="remplacer"]'), 'question « Remplacer ? » (version manuelle)');
+        // L'autre onglet : « Changer les pages », d'autres photos, « Extraire » → une NOUVELLE lecture sur la même ligne (même id, même statut a_verifier).
+        await db.put('imports', { ...(await db.get('imports', impN)), started_at: '2026-10-19T12:05:00.000Z', resultat: { ...RECETTE, title: 'Gratin de courgettes' }, reponse_brute: 'y' });
+        const vus = []; const capture = db.onMutate; db.onMutate = (m) => { vus.push(Object.keys(m.puts)); return capture ? capture(m) : {}; };
+        try {
+          bouton(root.querySelector('[data-role="remplacer"]'), 'Garder ma version').click();
+          await attendre(() => !!root.querySelector('[data-role="discordance"]') || navs.length > 0, 'décision rendue');
+          await tick();
+        } finally { db.onMutate = capture; }
+        const panneau = root.querySelector('[data-role="discordance"]');
+        eq([!!panneau, panneau?.textContent.includes('Gratin de courgettes'), vus, [...navs], (await db.get('imports', impN)).status, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_n')).map((v) => v.id), (await db.get('recipes', 'rc_n')).current_version_id], [true, true, [], [], 'a_verifier', ['rv_n_main'], 'rv_n_main'], 'D-6 (T4-R1) : « Rattacher » répondu pour « Tarte aux poires » ne vaut pas pour « Gratin de courgettes » arrivée entre-temps — la discordance est redemandée, rien n’est écrit');
+        await db.put('imports', { ...(await db.get('imports', impN)), status: 'ignore' });
+      });
+
+      await bloc('fiche supprimée entre le rendu et l’enregistrement (R57 ; T4-R1)', async () => {
+        const impO = await preparer('rc_o', 1);
+        await db.put('imports', { ...(await db.get('imports', impO)), status: 'a_verifier', resultat: RECETTE, model: 'claude-x', reponse_brute: 'x' });
+        const root = await monter('rc_o', { deps: { fetch: interdit } });
+        await repo.remove('recipes', 'rc_o'); // supprimée sur un autre appareil (tombale synchronisée)
+        const vus = []; const capture = db.onMutate; db.onMutate = (m) => { vus.push(Object.keys(m.puts)); return capture ? capture(m) : {}; };
+        try {
+          bouton(root, 'Enregistrer cette lecture').click();
+          await attendre(() => dits.length > 0 || navs.length > 0, 'réponse de l’écran');
+          await tick(); await tick();
+        } finally { db.onMutate = capture; }
+        eq([[...dits], [...navs], vus, await db.get('recipes', 'rc_o'), await db.byIndex('recipe_versions', 'recipe_id', 'rc_o'), (await db.get('imports', impO)).status], [['Recette introuvable.'], ['/library'], [], undefined, [], 'a_verifier'], 'fiche supprimée (T4-R1) : « Enregistrer cette lecture » n’écrit RIEN (la copie du ctx ne ressuscite pas la fiche), dit « Recette introuvable. » et ramène à la bibliothèque');
+        await db.put('imports', { ...(await db.get('imports', impO)), status: 'ignore' });
+      });
+
+      await bloc('vol tenu pour un autre import ; écran quitté pendant le vol (T4-R1)', async () => {
+        const impQ = await preparer('rc_q', 1); const impR = await preparer('rc_r', 1);
+        const ff = fauxFetch();
+        const rootQ = await monter('rc_q', { deps: { fetch: ff.fetch } });
+        const rootR = await monter('rc_r', { deps: { fetch: ff.fetch } });
+        bouton(rootQ, 'Extraire et enregistrer').click();
+        bouton(rootR, 'Extraire et enregistrer').click(); // dans le même tour : le vol de rc_q est déjà tenu (posé avant tout await), rc_r pas encore redessinée
+        await attendre(() => ff.appels.length === 1, 'vol sur rc_q');
+        await tick(); await tick();
+        eq([dits.at(-1), ff.appels.length, (await db.get('imports', impR)).status, (await db.get('imports', impR)).appels, (await db.get('imports', impQ)).status], ['Une lecture est déjà en cours : annule-la d’abord.', 1, 'a_lancer', 0, 'en_cours'], 'vol tenu pour un AUTRE import (I-7) : « Une lecture est déjà en cours : annule-la d’abord. », aucun POST de plus, rc_r intacte');
+        // La personne quitte l'écran pendant le vol : la lecture arrive, l'enregistrement (demandé) se fait, mais ni toast ni navigation ne l'arrachent à l'écran où elle est.
+        rootQ.remove(); rootR.remove(); dits.length = 0; navs.length = 0;
+        ff.rendre[0](200, corpsOk());
+        await attendre(async () => (await db.get('imports', impQ)).status === 'enregistre', 'enregistrée');
+        await tick(); await tick();
+        eq([[...dits], [...navs], (await db.get('recipes', 'rc_q')).availability, UI.volEnCours()], [[], [], 'available', null], 'écran quitté pendant le vol (T4-R1) : la recette est enregistrée, aucun « Recette importée », aucune navigation');
+        await db.put('imports', { ...(await db.get('imports', impR)), status: 'ignore' });
       });
 
       await bloc('raisons → textes et gestes', async () => {
@@ -915,6 +1036,18 @@ export async function runImportCibleTests({ eq, ok }) {
         window.dispatchEvent(new Event('online'));
         await tick();
         eq([bouton(root, 'Extraire et enregistrer').disabled, root.textContent.includes('Tu es hors ligne.')], [false, false], 'hors ligne : online rallume le bouton');
+        // T4-R1 : une page dont les octets ne sont pas sur cet appareil (synchro L4 non faite, octets purgés) fait refuser l'envoi — rien n'est lu à moitié.
+        dits.length = 0;
+        const pageJ = (await db.get('imports', impJ)).page_ids[0]; const fichierJ = await db.get('files', (await db.get('source_pages', pageJ)).sha256);
+        await db.delete('files', fichierJ.sha256);
+        bouton(root, 'Extraire et enregistrer').click();
+        await attendre(() => dits.length === 1, 'refus dit');
+        eq([dits[0], ff.appels.length, (await db.get('imports', impJ)).status, (await db.get('imports', impJ)).appels, root.etatRoute().vol, UI.volEnCours()], ['Les photos de cette recette ne sont pas sur cet appareil.', 0, 'a_lancer', 0, false, null], 'octets absents (T4-R1) : toast « Les photos de cette recette ne sont pas sur cet appareil. », zéro POST, la ligne reste a_lancer, appels 0, aucun vol tenu');
+        await db.put('files', { ...fichierJ, blob: new Blob(['pas une image'], { type: 'image/jpeg' }) });
+        bouton(root, 'Extraire et enregistrer').click();
+        await attendre(() => dits.length === 2, 'refus dit');
+        eq([dits[1], ff.appels.length, (await db.get('imports', impJ)).status, (await db.get('imports', impJ)).appels], ['Cette image ne peut pas être lue ici. Essaie une autre photo.', 0, 'a_lancer', 0], 'page indécodable (T4-R1) : le toast de messageErreurImage, zéro POST, la ligne reste a_lancer');
+        await db.put('files', fichierJ);
         eq(await UI.lancerExtraction(impJ, { ctx: await ctxDe(null), repo, fetch: ff.fetch }), { issue: 'refuse', raison: 'non_connecte' }, 'lancerExtraction : sans session → refus non_connecte, aucun appel');
         eq(await UI.lancerExtraction('imp_inconnu', { ctx: await ctxDe(), repo, fetch: ff.fetch }), { issue: 'refuse', raison: 'inconnu' }, 'lancerExtraction : import inconnu → refus');
         await db.put('imports', { ...(await db.get('imports', impJ)), page_ids: [] });
@@ -932,7 +1065,9 @@ export async function runImportCibleTests({ eq, ok }) {
       await bloc('battement', async () => {
         const impK = await preparer('rc_k', 1);
         const ff = fauxFetch();
-        const root = await monter('rc_k', { deps: { fetch: ff.fetch, battementMs: 20, maintenant: () => new Date().toISOString() } });
+        let battements = 0; // T4-R1 : les APPELS de battement sont comptés (une fois en echec, l'écriture est refusée par le mur et la fiche ne bouge plus, intervalle vivant ou mort)
+        const espion = { ...repo, transitionner: async (store, key, opts) => { if (opts?.patch && typeof opts.patch === 'object' && 'battement_at' in opts.patch && !('status' in opts.patch)) battements += 1; return repo.transitionner(store, key, opts); } };
+        const root = await monter('rc_k', { deps: { fetch: ff.fetch, repo: espion, battementMs: 20, maintenant: () => new Date().toISOString() } });
         bouton(root, 'Extraire et enregistrer').click();
         await attendre(() => ff.appels.length === 1, 'fetch parti');
         const l0 = await db.get('imports', impK);
@@ -943,10 +1078,11 @@ export async function runImportCibleTests({ eq, ok }) {
         eq([l1.status, l1.battement_at > l0.battement_at, l1.document_id_vol, await enFile()], ['en_cours', true, UI.DOCUMENT_ID, n0], 'battement : battement_at réécrit pendant le vol, même statut, origine device (rien de plus en file)');
         await UI.annulerVol(impK);
         await attendre(async () => (await db.get('imports', impK)).status === 'echec', 'annulé');
-        await new Promise((r) => setTimeout(r, 60));
-        const b2 = (await db.get('imports', impK)).battement_at;
-        await new Promise((r) => setTimeout(r, 60));
-        eq([(await db.get('imports', impK)).battement_at, (await db.get('imports', impK)).status], [b2, 'echec'], 'battement : nettoyé à la fin du vol (plus aucune écriture après Annuler)');
+        await attendre(() => UI.volEnCours() === null, 'vol libéré (finally joué)');
+        await new Promise((r) => setTimeout(r, 60)); // 3 × battementMs
+        const nApres = battements;
+        await new Promise((r) => setTimeout(r, 60)); // 3 × battementMs de plus : un intervalle survivant appellerait encore
+        eq([battements, nApres >= 1, (await db.get('imports', impK)).status, (await db.get('imports', impK)).battement_at >= l1.battement_at], [nApres, true, 'echec', true], 'battement : nettoyé à la fin du vol — plus AUCUN appel de battement après Annuler (les appels sont comptés, pas la fiche ; au moins un pendant le vol)');
       });
 
       await bloc('entrées (fiche, livre, éditeur, routes)', async () => {
@@ -963,10 +1099,12 @@ export async function runImportCibleTests({ eq, ok }) {
         eq([lien(partielle, 'Relire les pages')?.getAttribute('href'), partielle.textContent.includes('Scanner cette recette'), lien(partielle, 'Importer cette recette')], ['#/recipes/rc_part/importer', false, null], 'fiche partial : « Relire les pages » (secondaire) → même route');
         const dispo = await renderRecipe({ id: 'rc_dispo' }, {}, ctxFiche);
         eq([lien(dispo, 'Relire les pages'), lien(dispo, 'Importer cette recette')], [null, null], 'fiche available : aucune entrée vers l’import (D-11)');
-        const fiche = await renderBook({ id: 'ed1' }, {}, { ...ctxFiche, recipes: ctx.recipes.filter((r) => ['rc_ref', 'rc_part', 'rc_dispo'].includes(r.id)) });
+        const sigpart = await renderRecipe({ id: 'rc_sigpart' }, {}, ctxFiche);
+        eq([lien(sigpart, 'Relire les pages'), lien(sigpart, 'Importer cette recette')], [null, null], 'fiche d’un signet devenu partial : aucune entrée vers l’import (un lien web s’importe au lot suivant)');
+        const fiche = await renderBook({ id: 'ed1' }, {}, { ...ctxFiche, recipes: ctx.recipes.filter((r) => ['rc_ref', 'rc_part', 'rc_dispo', 'rc_sigpart'].includes(r.id)) });
         const importers = [...fiche.querySelectorAll('a, button')].filter((n) => n.textContent === 'Importer');
         const saisies = [...fiche.querySelectorAll('a, button')].filter((n) => n.textContent === 'Saisir à la main');
-        eq([importers.length, importers.every((n) => !n.parentElement.closest('a')), importers.map((n) => n.getAttribute('href')).sort(), saisies.length, saisies.every((n) => !n.parentElement.closest('a')), fiche.textContent.includes('Scanner cette recette')], [2, true, ['#/recipes/rc_part/importer', '#/recipes/rc_ref/importer'], 3, true, false], 'fiche du livre (m4) : « Importer » sous la carte de la référence et de la partielle (jamais descendant d’un <a>), vers la route ciblée ; « Saisir à la main » (menu + deux rangées) hors de tout <a> ; « Scanner cette recette » absent');
+        eq([importers.length, importers.every((n) => !n.parentElement.closest('a')), importers.map((n) => n.getAttribute('href')).sort(), saisies.length, saisies.every((n) => !n.parentElement.closest('a')), fiche.textContent.includes('Scanner cette recette')], [2, true, ['#/recipes/rc_part/importer', '#/recipes/rc_ref/importer'], 3, true, false], 'fiche du livre (m4, T4-R1) : « Importer » sous la carte de la référence et de la partielle SEULEMENT (pas sous le signet devenu partial : même règle que « Relire les pages »), jamais descendant d’un <a>, vers la route ciblée ; « Saisir à la main » (menu + deux rangées) hors de tout <a> ; « Scanner cette recette » absent');
         ok(importers.every((n) => n.classList.contains('btn') && n.classList.contains('small')), 'fiche du livre : « Importer » est un .btn.small');
         sessionStorage.setItem('cuisineos.pending_recipe', 'rc_ref');
         let editeur;

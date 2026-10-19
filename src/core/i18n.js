@@ -15,8 +15,9 @@ export const getUiLocale = () => uiLocale;
 
 export function t(fr, vars = null) {
   let s = uiLocale === 'en' ? (EN[fr] ?? fr) : fr;
-  // Remplacement par FONCTION : une chaîne de remplacement interpréterait $&, $$, $` et $' venus d'une valeur (V-C2).
-  if (vars) for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, () => String(v));
+  // Remplacement par FONCTION : une chaîne de remplacement interpréterait $&, $$, $` et $' venus d'une valeur (V-C2). En UNE passe (T4-R1) :
+  // une valeur insérée n'est jamais relue comme un gabarit — un titre lu « {y} » ne devient pas le titre de la référence au tour suivant.
+  if (vars) s = s.replace(/\{(\w+)\}/g, (m, k) => (Object.hasOwn(vars, k) ? String(vars[k]) : m));
   return s;
 }
 

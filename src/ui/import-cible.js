@@ -17,7 +17,7 @@ import { TransitionRefusee } from '../core/db.js';
 import { safeDisplayType } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
 import { IMPORTS_TERMINES } from '../model/schema.js';
-import { PasserelleProvider, extraireRecette, validateParsedRecipe, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION, REPONSE_BRUTE_MAX } from '../domain/llm.js';
+import { PasserelleProvider, extraireRecette, validateParsedRecipe, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION } from '../domain/llm.js';
 import { discordance, deplacerPage, retirerPage, fabriquerExtraction, RAISONS_ECHEC } from '../domain/import-cible.js';
 import { getConvention } from '../domain/units.js';
 import { section, sessionAssistant, carteConnexion, texteEchecAssistant } from './components.js';
@@ -46,12 +46,24 @@ function notifier() { for (const v of [...vues]) { if (!v.root.isConnected) { vu
 function majEnLigneToutes() { for (const v of [...vues]) { if (!v.root.isConnected) { vues.delete(v); continue; } v.majEnLigne(); } }
 
 const refus = (raison) => ({ issue: 'refuse', raison });
-const tronquer = (s) => (typeof s === 'string' ? (Array.from(s).length > REPONSE_BRUTE_MAX ? Array.from(s).slice(0, REPONSE_BRUTE_MAX).join('') : s) : null);
+// La réponse brute vient d'extraireRecette DÉJÀ coupée à REPONSE_BRUTE_MAX (contexteDe, llm.js), sur une réponse comme sur une ErreurExtraction :
+// l'écran l'écrit telle quelle (T4-R1 : une seule borne, un seul lieu) ; pas une chaîne → null.
+const brute = (s) => (typeof s === 'string' ? s : null);
 // La raison d'un échec de l'appel : celle d'une ErreurExtraction (coupe, illisible, hors_bornes, vide), sinon le message de l'Error de la
 // passerelle quand c'est une raison connue (le classement des écrans, echecDomaine) ; tout le reste est `interne` — jamais un texte libre.
 const raisonDe = (e) => { const r = e instanceof ErreurExtraction ? e.raison : (typeof e?.message === 'string' ? e.message : ''); return RAISONS_ECHEC.includes(r) ? r : 'interne'; };
 const extraDe = (e) => ({ ...(Number.isInteger(e?.quota) || e?.quota === null ? { quota: e.quota } : {}), ...(e?.trop_lourd === true ? { trop_lourd: true } : {}) });
 const estRefus = (e) => e instanceof TransitionRefusee;
+// « Rattacher » (D-6) vaut pour LA lecture à laquelle il a été répondu : la ligne, le départ de son vol et son résultat. Une lecture arrivée d'un
+// autre onglet entre-temps (même id, même statut a_verifier) a une autre clé → la discordance est redemandée (T4-R1).
+const cleLecture = (L) => JSON.stringify([L.id, L.started_at ?? null, L.resultat ?? null]);
+// Deux champs relus du journal, bornés avant d'entrer dans la fiche (T4-R1) : le modèle ≤ 80 points de code (la borne de PasserelleProvider), la
+// photo du plat = une empreinte hexadécimale de 64 (la clé de files) ; tout le reste vaut null.
+const modeleBorne = (m) => (typeof m === 'string' && Array.from(m).length <= 80 ? m : null);
+const photoBornee = (L) => (typeof L?.photo_sha256 === 'string' && /^[0-9a-f]{64}$/.test(L.photo_sha256) ? { sha256: L.photo_sha256, origin: L.photo_origin ?? null } : null);
+// La question à poser avant d'écrire (pure) : la discordance tant que « Rattacher » n'a pas été répondu pour CETTE lecture, puis « Remplacer par
+// cette lecture ? » (I-5) tant qu'elle n'a pas de réponse ; null = écrire.
+const questionAPoser = ({ ok, rattachee, remplacement, remplacer }) => (!ok && !rattachee ? 'discordance' : (remplacement && remplacer === null ? 'remplacer' : null));
 
 // Les images qui PARTENT, dans l'ordre de page_ids (seule source de vérité de l'ordre), réduites par pagePourEnvoi (F-3). Une page absente
 // est ignorée (pointeur souple, § 3.1) ; une page dont les octets ne sont pas sur cet appareil fait refuser l'envoi (rien n'est lu à moitié).
@@ -118,7 +130,7 @@ export async function lancerExtraction(importId, { ctx, repo = repoModule, fetch
       // Échec de l'appel ou refus de la lecture : en_cours → echec(raison) ; une ErreurExtraction garde la réponse brute (diagnostic, bornée).
       // Un `annule` arrive aussi par annulerVol, qui écrit la même chose : la première écriture gagne, la seconde est refusée sans bruit.
       const raison = raisonDe(e);
-      const patch = { status: 'echec', erreur: { raison, extra: extraDe(e) }, document_id_vol: null, duree_ms: Date.now() - t0, ...(typeof e?.texteBrut === 'string' ? { reponse_brute: tronquer(e.texteBrut) } : {}), ...(typeof e?.modele === 'string' ? { model: e.modele } : {}) };
+      const patch = { status: 'echec', erreur: { raison, extra: extraDe(e) }, document_id_vol: null, duree_ms: Date.now() - t0, ...(typeof e?.texteBrut === 'string' ? { reponse_brute: e.texteBrut } : {}), ...(typeof e?.modele === 'string' ? { model: e.modele } : {}) };
       try { await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch }); }
       catch (err) { if (!estRefus(err)) logError('import_cible.echec', { error: err, id: importId }); }
       return { issue: 'echec', raison };
@@ -126,12 +138,12 @@ export async function lancerExtraction(importId, { ctx, repo = repoModule, fetch
     const duree_ms = Date.now() - t0;
     // I-3 : le résultat vit dans le journal AVANT tout rendu ou toute écriture de recette. Patch-OBJET (son statut est lu par les espions des tests).
     try {
-      await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: { status: 'a_verifier', resultat: reponse.recette, reponse_brute: tronquer(reponse.texteBrut), model: reponse.modele ?? null, duree_ms, document_id_vol: null, erreur: null } });
+      await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: { status: 'a_verifier', resultat: reponse.recette, reponse_brute: brute(reponse.texteBrut), model: reponse.modele ?? null, duree_ms, document_id_vol: null, erreur: null } });
     } catch (e) {
       if (estRefus(e)) {
         // Réponse arrivée APRÈS « Annuler » ou un interrompu (spec § 3.1, Review Focus 4) : echec → a_verifier n'existe pas ; reponse_brute seule
         // est gardée (diagnostic), rien n'est écrit sur la recette, l'état reste echec.
-        try { await repo.transitionner('imports', importId, { attendus: ['echec'], patch: { reponse_brute: tronquer(reponse.texteBrut) } }); }
+        try { await repo.transitionner('imports', importId, { attendus: ['echec'], patch: { reponse_brute: brute(reponse.texteBrut) } }); }
         catch (err) { if (!estRefus(err)) logError('import_cible.tardive', { error: err, id: importId }); }
         return { issue: 'echec', raison: 'annule' };
       }
@@ -181,9 +193,9 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
   const recipe = ctx?.recipesById?.get(params?.id);
   const root = el('div', null);
   // ligne : l'import NON TERMINÉ de cette recette (un seul, I-2) ; pages : ses source_pages par id ; question : 'discordance' | 'remplacer' | null ;
-  // rattache : « Rattacher » a été répondu pour cette lecture ; verdict : la discordance calculée par decider() ; focus : le bouton à focaliser après
-  // un déplacement ; occupe : une écriture est en cours (aucune double pose).
-  const etat = { ligne: null, pages: new Map(), question: null, rattache: false, verdict: null, focus: null, occupe: false };
+  // rattache : la clé (cleLecture) de LA lecture pour laquelle « Rattacher » a été répondu, sinon null ; verdict : la discordance calculée par
+  // decider() ; focus : le bouton à focaliser après un déplacement ; occupe : une écriture est en cours (aucune double pose).
+  const etat = { ligne: null, pages: new Map(), question: null, rattache: null, verdict: null, focus: null, occupe: false };
   root.etatRoute = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, pageIds: [...(Array.isArray(etat.ligne?.page_ids) ? etat.ligne.page_ids : [])], vol: !!vol && !!etat.ligne && vol.importId === etat.ligne.id, discordance: etat.verdict });
   if (!recipe) { root.append(el('div', { class: 'card' }, t('Recette introuvable.'))); return root; }
   // D-11 : un signet web ou une recette qui a déjà son texte n'a pas d'entrée ici — le dire, revenir à la fiche.
@@ -201,9 +213,10 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
   const resultatValide = (ligne) => { try { return validateParsedRecipe(ligne?.resultat); } catch { return null; } };
   async function charger() {
     let ouverte = await ligneOuverte();
-    // I-1 : un résultat revenu du journal (synchro, archive) est REVALIDÉ avant tout usage ; hostile → echec(illisible), rien n'atteint l'écran (spec § 4.5).
+    // I-1 : un résultat revenu du journal (synchro, archive) est REVALIDÉ avant tout usage ; hostile → a_verifier → echec(illisible) (transition ratifiée
+    // T4-R1, § 3.1), rien n'atteint l'écran (spec § 4.5). C'est la seule écriture que le simple montage de l'écran peut faire (origine local : en file).
     if (ouverte?.status === 'a_verifier' && !resultatValide(ouverte)) { await illisible(ouverte); ouverte = await ligneOuverte(); }
-    if (ouverte?.id !== etat.ligne?.id || ouverte?.status !== 'a_verifier') { etat.question = null; etat.rattache = false; etat.verdict = null; }
+    if (ouverte?.id !== etat.ligne?.id || ouverte?.status !== 'a_verifier') { etat.question = null; etat.rattache = null; etat.verdict = null; }
     const ids = Array.isArray(ouverte?.page_ids) ? ouverte.page_ids : [];
     const manquantes = ids.filter((id) => !etat.pages.has(id));
     if (manquantes.length) for (const p of await Promise.all(manquantes.map((id) => repo.get('source_pages', id)))) if (p) etat.pages.set(p.id, p);
@@ -215,7 +228,8 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
     try { await repo.transitionner('imports', ligne.id, { attendus: ['a_verifier'], patch: { status: 'echec', erreur: { raison: 'illisible', extra: {} }, resultat: null } }); }
     catch (e) { if (!estRefus(e)) logError('import_cible.revalidation', { error: e, id: ligne.id }); }
   }
-  const transitionPages = async (patch) => {
+  // Une transition SUR PLACE (même statut, sous ATTENDUS_PAGES) : l'ordre des pages, le retrait d'une page, le pointeur de la photo du plat.
+  const transitionSurPlace = async (patch) => {
     try { await repo.transitionner('imports', etat.ligne.id, { attendus: ATTENDUS_PAGES, patch }); }
     catch (e) { if (!estRefus(e)) logError('import_cible.pages', { error: e, id: etat.ligne?.id }); }
   };
@@ -241,21 +255,25 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
     const ids = Array.isArray(L.page_ids) ? L.page_ids : [];
     if (JSON.stringify(deplacerPage(ids, id, sens)) === JSON.stringify(ids)) return; // en tête ou en queue : sans effet, le bouton reste
     etat.focus = { role, page: id }; // le focus suit la page déplacée (spec § 4.2.2)
-    await transitionPages((c) => ({ page_ids: deplacerPage(Array.isArray(c.page_ids) ? c.page_ids : [], id, sens) }));
+    await transitionSurPlace((c) => ({ page_ids: deplacerPage(Array.isArray(c.page_ids) ? c.page_ids : [], id, sens) }));
     await redessiner();
   }
   async function retirerLaPage(id) {
     if (!etat.ligne) return;
-    await transitionPages((c) => ({ page_ids: retirerPage(Array.isArray(c.page_ids) ? c.page_ids : [], id) })); // la ligne source_pages et l'octet restent (règle actuelle)
+    await transitionSurPlace((c) => ({ page_ids: retirerPage(Array.isArray(c.page_ids) ? c.page_ids : [], id) })); // la ligne source_pages et l'octet restent (règle actuelle)
     await redessiner();
   }
   // Le champ « p. imprimée » d'une vignette écrit source_pages.printed_page (relue avant d'écrire, leçon C4) ; sans redessin : la saisie garde le focus.
-  async function ecrirePageImprimee(pageId, valeur) {
-    const s = String(valeur ?? '').trim();
-    const n = /^\d{1,4}$/.test(s) ? parseInt(s, 10) : null;
+  // Une saisie illisible (vide — ce qu'un champ nombre rend pour « 13a » —, « 0 », hors 1..9999) n'écrit RIEN et le champ reprend la valeur courante
+  // (T4-R1 : jamais un numéro effacé sans le dire).
+  async function ecrirePageImprimee(pageId, champ) {
+    const s = String(champ.value ?? '').trim();
+    const p = etat.pages.get(pageId);
+    if (!/^[1-9]\d{0,3}$/.test(s)) { champ.value = p?.printed_page ?? ''; return; }
+    const n = parseInt(s, 10);
     try { const courante = await repo.get('source_pages', pageId); if (courante) await repo.save('source_pages', { ...courante, printed_page: n }); }
     catch (e) { logError('import_cible.page_imprimee', { error: e, id: pageId }); }
-    const p = etat.pages.get(pageId); if (p) p.printed_page = n;
+    if (p) p.printed_page = n;
   }
 
   // --- Gestes : photo du plat (spec § 4.2.3, D-4, I-6) : le MÊME mur qu'une couverture (preparerPhotoLocale), octets dans files, pointeur sur la ligne.
@@ -279,7 +297,7 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
   async function retirerPhoto() {
     if (etat.occupe || !etat.ligne) return;
     etat.occupe = true;
-    try { await transitionPages({ photo_sha256: null, photo_origin: null }); } // le pointeur seul : les octets restent dans files
+    try { await transitionSurPlace({ photo_sha256: null, photo_origin: null }); } // le pointeur seul : les octets restent dans files
     finally { etat.occupe = false; }
     await redessiner();
   }
@@ -298,7 +316,7 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
   async function lancer() {
     if (vol) { if (vol.importId !== etat.ligne?.id) toast(t('Une lecture est déjà en cours : annule-la d’abord.')); return; } // double tape : muette
     const L = etat.ligne; if (!L) return;
-    etat.question = null; etat.rattache = false;
+    etat.question = null; etat.rattache = null;
     const r = await lancerExtraction(L.id, { ctx, repo, fetch: fetchInjecte, maintenant, enLigne: () => enLigneFlag, battementMs });
     if (r.issue === 'refuse') {
       if (r.raison === 'image') toast(messageErreurImage({ code: r.code }));
@@ -311,7 +329,7 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
   async function annuler() { const L = etat.ligne; if (!L) return; await annulerVol(L.id); await redessiner(); }
   async function changerLesPages() {
     const L = etat.ligne; if (!L || etat.occupe) return;
-    etat.question = null; etat.rattache = false;
+    etat.question = null; etat.rattache = null;
     try { await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: { status: 'a_lancer', resultat: null } }); }
     catch (e) { if (!estRefus(e)) logError('import_cible.changer_pages', { error: e, id: L.id }); }
     await redessiner();
@@ -329,33 +347,25 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
       etat.ligne = L;
       const resultat = resultatValide(L);
       if (!resultat) { await illisible(L); etat.question = null; apres = 'redessiner'; return; }
-      const reference = (await repo.get('recipes', recipe.id)) || recipe;
+      // T4-R1 : la fiche supprimée entre le rendu et le clic (tombale d'un autre appareil, R57) n'est jamais ressuscitée par la copie du ctx : rien n'est écrit.
+      const reference = await repo.get('recipes', recipe.id);
+      if (!reference) { etat.question = null; apres = 'redessiner'; if (root.isConnected) { toast(t('Recette introuvable.')); navigate('/library'); } return; }
+      const cle = cleLecture(L);
+      if (rattache) etat.rattache = cle;
+      const rattachee = etat.rattache === cle; // « Rattacher » répondu pour CETTE lecture, pas pour une autre arrivée entre-temps (D-6)
       const verdict = discordance(resultat, reference);
       etat.verdict = verdict;
-      if (rattache) etat.rattache = true;
-      if (!verdict.ok && !etat.rattache) { etat.question = 'discordance'; return; }
       const versions = await repo.byIndex('recipe_versions', 'recipe_id', recipe.id);
       const pageIds = Array.isArray(L.page_ids) ? L.page_ids : [];
       const pages = (await Promise.all(pageIds.map((id) => repo.get('source_pages', id)))).filter(Boolean);
       const ed = reference.edition_id ? (ctx.editionsById?.get(reference.edition_id) ?? (await repo.get('book_editions', reference.edition_id)) ?? null) : null;
       const conventionId = typeof ctx.conventionFor === 'function' ? ctx.conventionFor(reference) : (ed?.unit_convention_id ?? null);
-      const options = { reference, versions, pages, pageIds, edition: ed, convention: conventionId ? getConvention(conventionId) : null, importId: L.id, modele: L.model ?? null, photo: L.photo_sha256 ? { sha256: L.photo_sha256, origin: L.photo_origin ?? null } : null, maintenant: maintenant() };
+      const options = { reference, versions, pages, pageIds, edition: ed, convention: conventionId ? getConvention(conventionId) : null, importId: L.id, modele: modeleBorne(L.model), photo: photoBornee(L), maintenant: maintenant() };
       const sonde = fabriquerExtraction(resultat, options); // pur : lu pour `remplacement` (I-5) avant la décision
-      if (sonde.remplacement && remplacer === null) { etat.question = 'remplacer'; return; }
-      const fab = remplacer === false ? fabriquerExtraction(resultat, { ...options, remplacer: false }) : sonde;
-      const seance = L.scan_session_id ? await repo.get('scan_sessions', L.scan_session_id) : null;
-      const puts = { recipes: [fab.recipe], recipe_versions: [fab.version], source_pages: fab.pageUpdates };
-      if (seance) puts.scan_sessions = [{ ...seance, status: 'done', recipe_ids: [...new Set([...(Array.isArray(seance.recipe_ids) ? seance.recipe_ids : []), recipe.id])] }];
+      etat.question = questionAPoser({ ok: verdict.ok, rattachee, remplacement: sonde.remplacement, remplacer });
+      if (etat.question) return;
       apres = 'redessiner';
-      try {
-        await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: { status: 'enregistre', reponse_brute: null, finished_at: maintenant() }, puts });
-      } catch (e) {
-        if (!estRefus(e)) { logError('import_cible.enregistrer', { error: e, id: L.id }); toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); }
-        etat.question = null; return; // refusé : un autre onglet a enregistré juste avant → rien n'est écrit, l'écran se redessine (I-10)
-      }
-      etat.question = null;
-      toast(t('Recette importée'));
-      navigate(`/recipes/${encodeURIComponent(recipe.id)}?v=${encodeURIComponent(fab.version.id)}`);
+      await enregistrer(L, remplacer === false ? fabriquerExtraction(resultat, { ...options, remplacer: false }) : sonde);
     } catch (e) {
       logError('import_cible.decider', { error: e });
       apres = 'redessiner';
@@ -363,6 +373,23 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
       etat.occupe = false;
       if (apres === 'redessiner') await redessiner(); else dessiner(); // une question posée se dessine tout de suite, avec son verdict
     }
+  }
+  // L'enregistrement (§ 4.3.5) : UNE transaction conditionnée a_verifier → enregistre avec la fiche, la version, les pages et la séance. Refusée (un
+  // autre onglet a tranché juste avant, I-10) → rien n'est écrit et rien n'est dit « importé » ; réussie → toast et navigation SEULEMENT si l'écran est
+  // encore monté (T4-R1 : une lecture qui arrive après avoir quitté l'écran n'arrache pas la personne à sa saisie ; la fiche montre la version).
+  async function enregistrer(L, fab) {
+    const seance = L.scan_session_id ? await repo.get('scan_sessions', L.scan_session_id) : null;
+    const puts = { recipes: [fab.recipe], recipe_versions: [fab.version], source_pages: fab.pageUpdates };
+    if (seance) puts.scan_sessions = [{ ...seance, status: 'done', recipe_ids: [...new Set([...(Array.isArray(seance.recipe_ids) ? seance.recipe_ids : []), recipe.id])] }];
+    try {
+      await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: { status: 'enregistre', reponse_brute: null, finished_at: maintenant() }, puts });
+    } catch (e) {
+      if (!estRefus(e)) { logError('import_cible.enregistrer', { error: e, id: L.id }); toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); }
+      return;
+    }
+    if (!root.isConnected) return;
+    toast(t('Recette importée'));
+    navigate(`/recipes/${encodeURIComponent(recipe.id)}?v=${encodeURIComponent(fab.version.id)}`);
   }
 
   // --- Dessin -----------------------------------------------------------------------------------------------------------------------------------
@@ -380,7 +407,7 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
       el('div', null, el('h1', null, recipe.original_title), sousTitre() ? el('p', { class: 'muted' }, sousTitre()) : null),
       recipe.availability === 'partial' ? el('span', { class: 'badge partial' }, t('Partiellement disponible')) : el('span', { class: 'badge reference' }, t('Repérée dans ton livre'))));
 
-  function sectionPages(L, pageIds, figees) {
+  function sectionPages(pageIds, figees) {
     const n = pageIds.length;
     const vignettes = el('div', { class: 'thumbs' });
     pageIds.forEach((id, i) => {
@@ -389,7 +416,7 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
       const rang = i + 1;
       const img = el('img', { alt: t('Page {n}', { n: rang }), loading: 'lazy' });
       poserImage(img, p.sha256);
-      const champ = el('input', { type: 'number', min: 1, max: 9999, placeholder: t('p. imprimée'), 'aria-label': t('p. imprimée'), value: p.printed_page ?? '', onChange: (e) => ecrirePageImprimee(p.id, e.target.value) });
+      const champ = el('input', { type: 'number', min: 1, max: 9999, placeholder: t('p. imprimée'), 'aria-label': t('p. imprimée'), value: p.printed_page ?? '', onChange: (e) => ecrirePageImprimee(p.id, e.target) });
       const bouton = (role, libelle, onClick) => el('button', { type: 'button', class: 'btn', dataset: { role, page: id }, onClick }, libelle);
       vignettes.append(el('figure', null, el('span', { class: 'num' }, String(rang)), img,
         el('figcaption', { class: 'stack' }, champ,
@@ -437,7 +464,7 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
       el('p', { style: { margin: 0 } }, texte),
       el('div', { class: 'row' },
         el('button', { type: 'button', class: 'btn primary', onClick: () => decider({ rattache: true }) }, t('Rattacher')),
-        el('button', { type: 'button', class: 'btn', onClick: () => { etat.question = null; etat.rattache = false; dessiner(); } }, t('Garder la lecture sans l’enregistrer')),
+        el('button', { type: 'button', class: 'btn', onClick: () => { etat.question = null; etat.rattache = null; dessiner(); } }, t('Garder la lecture sans l’enregistrer')),
         el('button', { type: 'button', class: 'btn', onClick: changerLesPages }, t('Changer les pages'))));
   }
   const panneauRemplacer = () => el('div', { class: 'card warn stack', dataset: { role: 'remplacer' } },
@@ -453,7 +480,6 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
 
   function zoneAction(L, statut, enVol) {
     const bloc = el('div', { class: 'card stack', dataset: { role: 'action' } });
-    if (!session) bloc.append(carteConnexion(connecter, ctx)); // R-T4-4 : sans session, la phrase et le geste ; les photos s'ajoutent quand même
     if (statut === 'en_cours') {
       if (enVol) {
         // R-VIS-8 : la .status[role=status] puis la .row — « Annuler » se range à droite ; le primaire reste, éteint, à sa place.
@@ -473,6 +499,9 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
       return bloc;
     }
     if (statut === 'echec') bloc.append(blocEchec(L.erreur));
+    // R-T4-4 : sans session, la phrase et le geste — ici seulement, où le primaire appelle l'assistant (T4-R1 : « Enregistrer cette lecture » n'appelle
+    // rien, la carte y annoncerait un faux besoin) ; les photos s'ajoutent quand même.
+    if (!session) bloc.append(carteConnexion(connecter, ctx));
     bloc.append(el('div', { dataset: { role: 'hors-ligne' } }), // rempli par majEnLigne (écoute online/offline)
       el('div', { class: 'row' },
         el('button', { type: 'button', class: 'btn primary', dataset: { role: 'extraire' }, disabled: !pretALancer(), onClick: lancer }, statut === 'echec' ? t('Relancer') : t('Extraire et enregistrer')),
@@ -486,7 +515,7 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
     const statut = L?.status ?? null;
     const pageIds = Array.isArray(L?.page_ids) ? L.page_ids : [];
     const enVol = !!vol && !!L && vol.importId === L.id;
-    root.replaceChildren(enTete(), sectionPages(L, pageIds, statut === 'en_cours' || statut === 'a_verifier'), sectionPhoto(L, statut === 'en_cours'), zoneAction(L, statut, enVol));
+    root.replaceChildren(enTete(), sectionPages(pageIds, statut === 'en_cours' || statut === 'a_verifier'), sectionPhoto(L, statut === 'en_cours'), zoneAction(L, statut, enVol));
     majEnLigne();
     if (etat.focus) { const { role, page } = etat.focus; etat.focus = null; root.querySelector(`button[data-role="${role}"][data-page="${CSS.escape(page)}"]`)?.focus(); }
   }

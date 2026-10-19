@@ -102,7 +102,10 @@ supprimée ne bloquent pas une archive ; la fabrication ignore une page absente.
 `a_lancer → en_cours | ignore` · `en_cours → a_verifier | echec` · `a_verifier → enregistre | a_lancer (changer les pages) | ignore` ·
 `echec → en_cours (relancer) | a_lancer (changer les pages) | ignore` · `en_cours → echec(annule)` par le document qui tient le vol ·
 `en_cours → echec(interrompu)` au démarrage, **pour les lignes de cet appareil seulement** (le battement, d'origine `device`, n'est pas visible ailleurs) et **seulement si `battement_at` a plus de 90 s** (le vol bat toutes les 15 s, écriture d'origine
-`device` : jamais en file de synchro, m2) · aucune autre.
+`device` : jamais en file de synchro, m2) · `a_verifier → echec(illisible)` (T4-R1, ratifiée) pour **un seul cas** : un `resultat` relu du
+journal (synchro, archive) qui ne passe plus `validateParsedRecipe` — au montage de l'écran ciblé ou au clic « Enregistrer cette lecture » (I-1,
+§ 4.5) ; le résultat est effacé (`resultat: null`), rien n'atteint l'écran, et c'est la **seule écriture qu'un simple montage de l'écran peut
+faire** (origine `local` : elle part en file, comme toute transition du journal) · aucune autre.
 Une réponse qui arrive après un `annule`/`interrompu` tente `echec → a_verifier`, qui n'existe pas : elle est **écrite dans
 `reponse_brute` seulement** (diagnostic), l'état reste `echec` ; c'est le prix assumé de I-4.
 
@@ -429,3 +432,19 @@ sans numéro seulement (§ 3.2) · **T3-R1-f** `RAISONS_ECHEC` sans `trop_lourd`
 images (`COVER_INPUT_MIME` + HEIC), un PDF est refusé par `type` · **T3-R1-i** `parseStepsBlock` ne normalise que CRLF · **T3-R1-j** `issuesPourImage`
 (repo) partagé avec `replacePage`, entrée `en.js` · refusé : rendre `{ texte, stopReason, modele }` par `complete` (le brief fixe `this.stopReason`) —
 remise à zéro des deux champs avant l'appel et test « deux appels sur la même instance » à la place.
+**Tâche 4, ronde 1 (revue adverse, trois lentilles — rapport `task-4-report.md` § Ronde 1).** **T4-R1-a** `a_verifier → echec(illisible)` ratifiée
+(§ 3.1 ; table `TRANSITIONS` + test de domaine) : résultat relu invalide au montage ou au clic, résultat effacé, la seule écriture d'une visite ·
+**T4-R1-b** « Rattacher » (D-6) vaut pour LA lecture à laquelle il a été répondu (clé = ligne, `started_at`, `resultat`) : une lecture arrivée d'un
+autre onglet entre-temps redemande la discordance · **T4-R1-c** une fiche supprimée entre le rendu et « Enregistrer cette lecture » n'est jamais
+ressuscitée par la copie du contexte : rien n'est écrit, « Recette introuvable. », retour à la bibliothèque · **T4-R1-d** `model` et `photo_sha256`
+relus du journal sont bornés avant la fiche (≤ 80 points de code ; empreinte hexadécimale de 64) · **T4-R1-e** `t()` remplace en une passe (une valeur
+insérée n'est jamais relue comme un gabarit) · **T4-R1-f** le toast « Recette importée » et la navigation n'ont lieu que si l'écran est encore monté
+(une lecture arrivée après avoir quitté l'écran n'arrache pas la personne à sa saisie ; la recette est enregistrée quand même) · **T4-R1-g** la carte
+« Connecte-toi » n'est rendue que là où le primaire appelle l'assistant (jamais en `a_verifier`) · **T4-R1-h** « p. imprimée » : `1..9999` seulement ;
+une saisie illisible n'écrit rien et le champ reprend la valeur courante · **T4-R1-i** la fiche du livre offre « Importer » sous une `partial`
+seulement sans `source_url` (même règle que « Relire les pages ») · **T4-R1-j** la réponse brute n'est bornée qu'en un lieu (`contexteDe`, llm.js) ;
+l'écran l'écrit telle quelle · tests ajoutés : I-1 hostile au montage et au clic, octets absents et page indécodable, battement par les APPELS,
+« autre onglet » entre la relecture et la transaction (ni toast ni navigation), vol tenu pour un autre import, écran quitté pendant le vol, pages
+figées en `a_verifier` et en `en_cours`, `appels` écrit séparément et relu par le `fetch`, rejets non gérés, signet devenu `partial` ·
+différé (à ratifier) : ligne `en_cours` dont `document_id_vol` est ce document sans vol tenu (après deux écritures impossibles) : « En cours sur un
+autre écran » sans geste jusqu'à la passe `interrompu` de la tâche 6.

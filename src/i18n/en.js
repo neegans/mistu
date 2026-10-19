@@ -47,7 +47,7 @@ export const EN = {
   'Commencer à cuisiner': 'Start cooking', 'Liste d’épicerie': 'Grocery list', 'Autres recettes de ce plat': 'Other recipes for this dish', 'Rattacher à un plat': 'Attach to a dish', 'Créer ma version': 'Create my version', 'Corriger': 'Fix',
   'Portions': 'Servings', 'Unités': 'Units', 'Métrique': 'Metric', 'Langue de lecture': 'Reading language', 'Rapide': 'Quick', 'On se gâte': 'Treat', 'Meal prep': 'Meal prep',
   'Ingrédients': 'Ingredients', 'Préparation': 'Method', 'Versions': 'Versions', 'Mémoire culinaire': 'Cooking memory', 'Remplacer': 'Replace', 'Afficher': 'Show', 'affichée': 'shown', 'Marquer testée': 'Mark as tested',
-  'Exporter JSON-LD': 'Export JSON-LD', 'Exporter YAML (Paprika)': 'Export YAML (Paprika)', 'Scanner cette recette': 'Scan this recipe', 'Saisir à la main': 'Type it in', 'facultatif': 'optional', 'À vérifier': 'To check',
+  'Exporter JSON-LD': 'Export JSON-LD', 'Exporter YAML (Paprika)': 'Export YAML (Paprika)', 'Saisir à la main': 'Type it in', 'facultatif': 'optional', 'À vérifier': 'To check',
   'Texte source': 'Source text', 'Minuterie': 'Timer', 'Lancer la minuterie système': 'Start system timer', 'Ou dis à Siri': 'Or tell Siri', 'J’ai demandé à Siri': 'I asked Siri', 'Ça n’a pas démarré': 'It did not start',
   'Étape': 'Step', 'Précédent': 'Previous', 'Suivant': 'Next', 'Terminer': 'Finish', 'Fiche': 'Recipe', 'Avant de commencer': 'Before you start', 'Lire à voix haute': 'Read aloud', 'Plan commun': 'Shared plan', 'Indicatif': 'Indicative',
   'Cuisson terminée — à refaire ?': 'Done cooking — make it again?', 'Oui, à refaire': 'Yes, again', 'Non': 'No', 'Enregistrer': 'Save', 'Annuler': 'Cancel', 'Cuisson enregistrée': 'Cooking saved',

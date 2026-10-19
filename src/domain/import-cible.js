@@ -9,12 +9,14 @@ import { newId } from '../core/ids.js';
 import { IMPORTS_TERMINES } from '../model/schema.js';
 
 // --- Transitions du journal (spec § 3.1) : toutes par repo.transitionner (I-10) ; aucune autre. `en_cours → echec` couvre annule,
-// interrompu et incertain (la raison est dans `erreur`). Les deux états terminaux n'en permettent aucune. Gelée en PROFONDEUR (ronde 1) :
+// interrompu et incertain (la raison est dans `erreur`). `a_verifier → echec` (T4-R1, ratifiée) couvre UN seul cas : un `resultat` relu du
+// journal (synchro, archive) qui ne passe plus validateParsedRecipe → echec(illisible), résultat effacé (I-1, § 4.5) ; c'est la seule écriture
+// que le simple montage de l'écran peut faire. Les deux états terminaux n'en permettent aucune. Gelée en PROFONDEUR (ronde 1) :
 // un module qui pousserait dans un tableau lèverait au lieu de changer les transitions de toute l'app.
 export const TRANSITIONS = Object.freeze({
   a_lancer: Object.freeze(['en_cours', 'ignore']),
   en_cours: Object.freeze(['a_verifier', 'echec']),
-  a_verifier: Object.freeze(['enregistre', 'a_lancer', 'ignore']),
+  a_verifier: Object.freeze(['enregistre', 'a_lancer', 'ignore', 'echec']),
   echec: Object.freeze(['en_cours', 'a_lancer', 'ignore']),
   enregistre: Object.freeze([]),
   ignore: Object.freeze([]),
