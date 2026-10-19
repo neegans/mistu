@@ -34,12 +34,7 @@ export async function renderRecipeEdit(params, query, ctx) {
   const pages = pageIds.map((id) => ctx.pagesById.get(id)).filter(Boolean);
   const doc = query.doc ? ctx.source_documents.find((d) => d.id === query.doc) : null;
   const provider = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) }); // la passerelle (R-T3-1) : la session décide
-
-  // Référence en attente (bouton « Scanner cette recette » depuis la fiche du livre)
-  let pendingRef = null;
-  const pendingId = sessionStorage.getItem('cuisineos.pending_recipe');
-  if (!recipe && pendingId) { const r = ctx.recipesById.get(pendingId); if (r && r.edition_id === editionId && r.availability === 'reference_only') pendingRef = r; }
-  let attachToPending = !!pendingRef;
+  // D-8 (lot import ciblé) : plus de « référence en attente » posée par la fiche du livre — une référence s'importe par #/recipes/<id>/importer.
 
   const f = {
     title: recipe?.original_title || '', language: recipe?.original_language || edition?.language || 'fr', type: recipe?.type || '', cuisines: [...(recipe?.cuisines || [])],
@@ -57,10 +52,6 @@ export async function renderRecipeEdit(params, query, ctx) {
     subtitle: [book ? book.title : t('Sans livre'), base ? `${t('à partir de')} : ${label('version_kind', base.kind)} ${base.created_at ? new Date(base.created_at).toLocaleDateString() : ''}` : null].filter(Boolean).join(' · '),
     back: recipe ? { href: `/recipes/${recipe.id}`, label: t('Fiche recette') } : { href: '/add', label: t('Ajouter') },
   }));
-  if (pendingRef) root.append(el('div', { class: 'card sage row between' },
-    el('span', null, t('Ces pages complètent la référence « {t} »{p} ?', { t: pendingRef.original_title, p: pendingRef.printed_page ? ` (${t('page')} ${pendingRef.printed_page})` : '' })),
-    el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: true, onChange: (e) => { attachToPending = e.target.checked; if (attachToPending && !f.title) { f.title = pendingRef.original_title; titleInput.value = f.title; } } }), t('Oui, rattacher'))));
-  if (!f.title && pendingRef) { f.title = pendingRef.original_title; f.printed_page = pendingRef.printed_page ?? f.printed_page; }
 
   // Colonne gauche : original (pages ou PDF)
   const left = el('div', { class: 'stack' });
@@ -208,7 +199,7 @@ export async function renderRecipeEdit(params, query, ctx) {
     reparse();
     const steps = parseStepsBlock(f.stepsText);
     const n = (v) => (v === '' || v === null || v === undefined ? null : Number(v));
-    const targetRecipe = recipe || (attachToPending && pendingRef) || null;
+    const targetRecipe = recipe || null;
     const recipeId = targetRecipe?.id || repo.newId('rc');
     const hasIng = parsedLines.length > 0, hasSteps = steps.length > 0;
     const availability = hasIng && hasSteps ? 'available' : (hasIng || hasSteps) ? 'partial' : 'reference_only';
@@ -240,7 +231,6 @@ export async function renderRecipeEdit(params, query, ctx) {
     const pageUpdates = pages.map((p) => ({ ...p, kind: 'recipe', printed_page: p.printed_page ?? n(f.printed_page) }));
     assertVocabulaire(rec, 'recipes'); // D-12 : vocabulaire fermé vérifié avant l'écriture
     await repo.saveBatch({ recipes: [rec], recipe_versions: [version], source_pages: pageUpdates });
-    sessionStorage.removeItem('cuisineos.pending_recipe');
     if (query.session) { const s = ctx.scan_sessions.find((x) => x.id === query.session); if (s) { s.recipe_ids = [...new Set([...(s.recipe_ids || []), recipeId])]; await repo.save('scan_sessions', s); } }
     toast(kind === 'adaptation' ? t('Ma version enregistrée') : t('Recette enregistrée'));
     navigate(`/recipes/${recipeId}?v=${version.id}`);

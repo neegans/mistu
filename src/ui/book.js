@@ -101,10 +101,12 @@ export async function renderBook(params, query, ctx) {
     if (!rows.length) { list.append(emptyState('📖', t('Aucune recette dans cette vue. Photographie l’index ou une recette pour commencer.'))); return; }
     for (const r of rows) {
       const doc = ctx.docsByRecipe.get(r.id);
-      const extra = r.availability === 'reference_only' ? el('div', { class: 'row', style: { marginTop: '.4rem' } },
-        el('button', { class: 'btn small', onClick: async (e) => { e.preventDefault(); const f = await pickFiles({ accept: 'image/*', capture: 'environment' }); if (f.length) { const s = await startScanSession(f, { edition_id: edition.id }); sessionStorage.setItem('cuisineos.pending_recipe', r.id); } } }, t('Scanner cette recette')),
-        el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(r.id)}/edit?kind=extraction`, onClick: (e) => e.stopPropagation() }, t('Saisir à la main'))) : null;
-      list.append(recipeCard(doc || { recipe: r, version: null, book, edition }, { extra }));
+      list.append(recipeCard(doc || { recipe: r, version: null, book, edition }));
+      // Import ciblé (spec import-cible § 4.1, m4 ; D-8) : la rangée est SOUS la carte, hors du <a> — recipeCard met `extra` à l'intérieur, ce qui
+      // faisait un lien dans un lien. Une référence sans lien web, ou une recette partielle, s'importe par l'écran déjà rattaché ; « Saisir à la main » reste.
+      if ((r.availability === 'reference_only' && !r.source_url) || r.availability === 'partial') list.append(el('div', { class: 'row', style: { margin: '-.4rem 0 .8rem' } },
+        el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(r.id)}/importer` }, t('Importer')),
+        el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(r.id)}/edit?kind=extraction` }, t('Saisir à la main'))));
     }
   };
   const q = el('input', { type: 'search', placeholder: t('Filtrer les recettes de ce livre'), onInput: (e) => { filterState.q = e.target.value; drawList(); } });

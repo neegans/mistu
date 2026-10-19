@@ -1,5 +1,20 @@
 // Tests du lot « page Ajouter et flux des livres » (spec docs/superpowers/specs/2026-10-13-ajouter-et-livres-ux-design.md).
 // Modèles purs et rendus DOM à gestes injectés ; bases jetables seulement ; aucun réseau ; aucun history.* réel.
+
+// Filet i18n (F13) : chaque t('…') de ces modules doit avoir son entrée en.js. Exportées : tests/import-cible.js vérifie que son module y figure.
+// MODULES_NEUFS : les modules créés par les lots (lien.js de R-UX-11 et isbn.js inclus) + add.js réécrit + l'écran d'import ciblé (lot A, tâche 4).
+export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js', '../src/ui/import-cible.js'];
+// CHAINES_NEUVES_AILLEURS reconstituée depuis le code réel (git diff main...HEAD, ensemble main vs HEAD des clés t(),
+// pas seulement les lignes ajoutées : une ligne réécrite pour une autre raison peut porter une chaîne déjà sur main —
+// book.js:'Cuisines', recipe-edit.js:'Cuisines / régions' et import.js:'— Aucun livre (à associer plus tard) —'
+// existaient déjà mot pour mot sur main, donc ÉCARTÉES d'ici malgré une ligne « + » dans le diff). Lot A, tâche 4 : les entrées de l'import ciblé
+// sur la fiche du livre (« Importer ») et la fiche recette (« Importer cette recette », « Relire les pages »).
+export const CHAINES_NEUVES_AILLEURS = {
+  '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', '+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer'],
+  '../src/ui/recipe.js': ['Lien web gardé.', 'L’app n’a pas lu la page : ouvre-la pour cuisiner.', 'Ouvrir le lien', 'Adresse non reconnue : ', 'Importer cette recette', 'Relire les pages'],
+  '../src/ui/components.js': ['Lien web', 'Adresse non reconnue'],
+};
+
 export async function runAjouterTests({ eq, ok }) {
   // Attendre un FAIT, jamais un délai (F4) : rend true dès que la condition tient, false au bout de 3 s — l'appelant
   // affirme ensuite, pour qu'un dépassement soit une assertion rouge nommée et non une suite interrompue.
@@ -170,13 +185,16 @@ export async function runAjouterTests({ eq, ok }) {
     };
     const grille = await renderAdd({}, {}, ctxAdd);
     eq([grille.querySelectorAll('button.carte').length, grille.querySelector('.selecteur-scan')], [6, null], 'page Ajouter : sans ?edition, la grille des six cartes et aucun sélecteur');
+    // Lot A (import ciblé), D-8 : « Scanner cette recette » — le seul appelant de `#/add?edition=` — a disparu ; R-UX-16 est retiré et
+    // l'adresse n'impose plus de livre (test RETOURNÉ : il affirmait le sélecteur ouvert d'office, livre fixé).
     const impose = await renderAdd({}, { edition: 'e1' }, ctxAdd);
+    eq([impose.querySelectorAll('button.carte').length, impose.querySelector('.selecteur-scan')], [6, null], 'page Ajouter : un ?edition connu n’impose plus de livre — la grille, comme sans adresse (D-8 du lot import ciblé, R-UX-16 retiré)');
+    [...impose.querySelectorAll('button.carte')][1].click(); // « Photographier ou importer des pages »
     const sel = impose.querySelector('.selecteur-scan select');
-    eq([!!impose.querySelector('.selecteur-scan'), impose.querySelectorAll('button.carte').length, sel.disabled, sel.value], [true, 0, true, 'e1'],
-      'page Ajouter : un ?edition connu ouvre DIRECTEMENT le sélecteur, livre fixé — plus de grille à traverser (C5, R-UX-16)');
+    eq([!!sel, sel?.disabled, sel?.value], [true, false, ''], 'page Ajouter : le sélecteur ouvert depuis la grille n’a aucun livre fixé — le ?edition de l’adresse n’est plus lu');
     [...impose.querySelectorAll('button')].find((b) => b.textContent === '← Retour').click();
     eq([impose.querySelectorAll('button.carte').length, impose.querySelector('.selecteur-scan')], [6, null], 'page Ajouter : « ← Retour » ramène à la grille, pour qui voulait autre chose');
-    eq((await renderAdd({}, { edition: 'jamais vue' }, ctxAdd)).querySelectorAll('button.carte').length, 6, 'page Ajouter : un ?edition inconnu est traité comme absent — la grille, pas un sélecteur sur un livre fantôme (S9)');
+    eq((await renderAdd({}, { edition: 'jamais vue' }, ctxAdd)).querySelectorAll('button.carte').length, 6, 'page Ajouter : un ?edition inconnu aussi — la grille, jamais un sélecteur sur un livre fantôme (S9)');
     // C8 : deux ouvertures de janvier ne passent plus devant une ouverture d'hier, et une date illisible ne vaut
     // pas « 1970 » — elle ne compte pas du tout.
     const grille2 = await renderAdd({}, {}, ctxAdd);
@@ -1814,17 +1832,7 @@ export async function runAjouterTests({ eq, ok }) {
     eq(csp.split(';').map((d) => d.trim().split(' ')[0]).filter(Boolean).sort(), ['base-uri', 'connect-src', 'default-src', 'form-action', 'frame-src', 'img-src', 'object-src', 'script-src', 'style-src'],
       `CSP ${page} : la liste des directives est épinglée — aucune ne peut être ajoutée ou retirée sans qu’un test tombe (D-T10)`);
   }
-  // MODULES_NEUFS : les neuf modules créés par les lots (lien.js de R-UX-11 et isbn.js inclus) + add.js réécrit.
-  const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js'];
-  // CHAINES_NEUVES_AILLEURS reconstituée depuis le code réel (git diff main...HEAD, ensemble main vs HEAD des clés t(),
-  // pas seulement les lignes ajoutées : une ligne réécrite pour une autre raison peut porter une chaîne déjà sur main —
-  // book.js:'Cuisines', recipe-edit.js:'Cuisines / régions' et import.js:'— Aucun livre (à associer plus tard) —'
-  // existaient déjà mot pour mot sur main, donc ÉCARTÉES d'ici malgré une ligne « + » dans le diff).
-  const CHAINES_NEUVES_AILLEURS = {
-    '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', '+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier'],
-    '../src/ui/recipe.js': ['Lien web gardé.', 'L’app n’a pas lu la page : ouvre-la pour cuisiner.', 'Ouvrir le lien', 'Adresse non reconnue : '],
-    '../src/ui/components.js': ['Lien web', 'Adresse non reconnue'],
-  };
+  // MODULES_NEUFS et CHAINES_NEUVES_AILLEURS : en tête de ce fichier (exportées, lot A tâche 4).
   {
     const { EN } = await import('../src/i18n/en.js');
     const manquantes = [];

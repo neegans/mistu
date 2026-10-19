@@ -79,11 +79,12 @@ export async function renderAdd(params, query, ctx) {
     if (quand > (recence.get(a.edition_id) || 0)) recence.set(a.edition_id, quand);
   }
   const livres = ctx.book_editions.map((edition) => ({ edition, book: ctx.booksById.get(edition.book_id), recence: recence.get(edition.id) || 0 }));
-  const editionImposee = query.edition && ctx.editionsById.has(query.edition) ? query.edition : null; // S9
-  const etat = { livreChoisi: editionImposee || '', genre: 'recette' };
+  // D-8 (lot import ciblé) : plus de `?edition` lu dans l'adresse — son seul appelant, « Scanner cette recette », a disparu (R-UX-16 retiré) ;
+  // le livre se choisit dans le sélecteur. `/recipes/new?edition=` (saisie à la main depuis la fiche du livre) reste.
+  const etat = { livreChoisi: '', genre: 'recette' };
   const lancer = async (accept, capture) => {
     const files = await pickFiles({ accept, multiple: true, capture });
-    if (files.length) await startScanSession(files, parametresDeScan({ livres, editionImposee, livreChoisi: etat.livreChoisi, genre: etat.genre }));
+    if (files.length) await startScanSession(files, parametresDeScan({ livres, livreChoisi: etat.livreChoisi, genre: etat.genre }));
   };
   const gestesScan = {
     changerLivre: (v) => { etat.livreChoisi = v; dessinerSelecteur(); },
@@ -92,18 +93,15 @@ export async function renderAdd(params, query, ctx) {
     choisir: () => lancer(ACCEPT_FICHIERS, null),
     retour: () => dessinerGrille(),
   };
-  const dessinerSelecteur = () => zone.replaceChildren(renderSelecteurScan(selecteurScanModel({ livres, editionImposee, livreChoisi: etat.livreChoisi, genre: etat.genre }), gestesScan));
+  const dessinerSelecteur = () => zone.replaceChildren(renderSelecteurScan(selecteurScanModel({ livres, livreChoisi: etat.livreChoisi, genre: etat.genre }), gestesScan));
   const dessinerGrille = () => zone.replaceChildren(renderGrille(grilleModel(), {
     ajouterLivre: () => navigate('/add/livre'),
     pages: () => dessinerSelecteur(),
-    saisir: () => navigate('/recipes/new' + (editionImposee ? `?edition=${encodeURIComponent(editionImposee)}` : '')), // S9
+    saisir: () => navigate('/recipes/new'),
     signet: () => navigate('/add/signet'),
     creerIA: () => navigate('/recipes/creer'),
     congelateur: () => navigate('/kitchen?tab=inventory&add=1'),
   }));
-  // C5 / R-UX-16 : un ?edition connu arrive de « Scanner cette recette » — le livre est DÉJÀ décidé. L'écran ouvre
-  // donc directement le MÊME sélecteur, livre fixé (select désactivé, genre « recette ») : « Photographier » est à
-  // une tape, sans grille à traverser. « ← Retour » ramène à la grille, pour qui voulait autre chose.
-  if (editionImposee) dessinerSelecteur(); else dessinerGrille();
+  dessinerGrille();
   return root;
 }

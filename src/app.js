@@ -31,6 +31,7 @@ import { renderAdd } from './ui/add.js';
 import { renderLivreAjoutRoute } from './ui/livre-ajout.js';
 import { renderSignetRoute } from './ui/signet.js';
 import { renderCreerIA } from './ui/creer-ia.js';
+import { renderImportCible } from './ui/import-cible.js';
 import { porteEntreeModel, renderPorteEntree } from './ui/porte-entree.js';
 
 const NAV = [
@@ -101,6 +102,7 @@ function registerRoutes() {
   route('/recipes/creer', renderCreerIA); // AVANT /recipes/:id (F1) : sinon « creer » serait lu comme un identifiant de fiche
   route('/recipes/:id', renderRecipe);
   route('/recipes/:id/edit', renderRecipeEdit);
+  route('/recipes/:id/importer', renderImportCible); // import ciblé (lot A, spec § 4.1) : regex ancrée, l'ordre n'importe pas
   route('/cook/:id', renderCook);
   route('/import', renderImport);
   route('/meals', renderMeals);

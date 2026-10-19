@@ -492,4 +492,506 @@ export async function runImportCibleTests({ eq, ok }) {
     let codeCouv = null; try { await LA.poserCouverture(new Blob(['<html>'], { type: 'text/html' }), { origine: 'locale', repo: repoCompteur }); } catch (e) { codeCouv = e.code; }
     eq([codeCouv, ecritures], ['type', 1], 'poserCouverture (locale) : refus `type` sans écriture, comme avant');
   });
+
+  // =====================================================================================================================================
+  // Tâche 4 — l'écran #/recipes/<id>/importer (spec § 4.1, § 4.2, § 4.3, § 4.4 ; Review Focus 2 et 4). Gestes injectés { repo, navigate, toast,
+  // fetch, pickFiles, maintenant } ; base jetable (withRepo) ; fausse fetch qui honore le signal ; aucune écriture dans la bibliothèque.
+  await run('écran import ciblé', () => withRepo(async (repo, db) => {
+    const UI = await import('../src/ui/import-cible.js');
+    const L = await import('../src/domain/llm.js');
+    const IM = await import('../src/core/image.js');
+    const { sha256Hex } = await import('../src/core/hash.js');
+    const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
+    const localeAvant = getUiLocale();
+    setUiLocale('fr'); // des textes français sont affirmés ; une suite antérieure a pu basculer l'interface
+    // La scène est HORS ÉCRAN mais visible : le focus (« Descendre la page n ») ne se pose pas dans un conteneur hidden.
+    const scene = document.createElement('div'); scene.style.cssText = 'position:absolute;left:-10000px;top:0;width:900px'; document.body.append(scene);
+    const vraiFetch = globalThis.fetch;
+    let reseau = 0;
+    globalThis.fetch = async (u) => { reseau += 1; throw new Error('aucun reseau attendu : ' + u); }; // la fetch des écrans est TOUJOURS injectée
+    const NOW = '2026-10-19T12:00:00.000Z';
+    const livre = { id: 'b1', title: 'Mon livre', author: 'A. B.', updated_at: DATE };
+    const edition = { id: 'ed1', book_id: 'b1', language: 'fr', updated_at: DATE };
+    const fiche = (id, over = {}) => ({ id, edition_id: 'ed1', original_title: 'Tarte aux pommes', original_language: 'fr', availability: 'reference_only', verification_state: 'unverified', printed_page: 132, source_page_ids: [], current_version_id: null, tags: [], cuisines: [], favorite: false, ingredient_ids: [], created_at: DATE, updated_at: DATE, ...over });
+    const versionDe = (id, recipe_id, generated_by) => ({ id, recipe_id, kind: 'extraction', status: null, servings: 4, ingredients: [{ id: 'ri_' + id, source_text: '1 pomme', name_text: 'pomme', quantity: { value: 1, raw: '1' }, verification_state: 'verified' }], steps: [{ id: 'st_' + id, position: 1, text: 'Cuire.' }], provenance: { generated_by, source_page_ids: [] }, verification_state: 'verified', created_at: DATE, updated_at: DATE });
+    const recettes = ['rc_a', 'rc_b', 'rc_c', 'rc_d', 'rc_f', 'rc_g', 'rc_h', 'rc_i', 'rc_j', 'rc_k', 'rc_ref'].map((id) => fiche(id)).concat([
+      fiche('rc_dispo', { availability: 'available', verification_state: 'verified', current_version_id: 'rv_dispo' }),
+      fiche('rc_signet', { edition_id: null, source_url: 'https://exemple.test/x', printed_page: null }),
+      fiche('rc_e', { availability: 'partial', verification_state: 'verified', current_version_id: 'rv_e_main', ingredient_ids: ['ing_x'] }),
+      fiche('rc_m', { availability: 'partial', verification_state: 'verified', current_version_id: 'rv_m_main' }),
+      fiche('rc_part', { availability: 'partial', verification_state: 'to_verify', current_version_id: 'rv_part' }),
+    ]);
+    const versions = [versionDe('rv_dispo', 'rc_dispo', 'ai'), versionDe('rv_e_main', 'rc_e', 'manual'), versionDe('rv_m_main', 'rc_m', 'manual'), versionDe('rv_part', 'rc_part', 'ai')];
+    await db.mutate({ puts: { books: [livre], book_editions: [edition], recipes: recettes, recipe_versions: versions }, origin: 'device' });
+    const JETON = 'jeton-import-sentinelle';
+    const SESSION = { access_token: JETON, user: { id: 'u1', email: 'a@exemple.invalid' } };
+    const ctxDe = async (session = SESSION) => {
+      const recipes = await db.getAll('recipes'); const vs = await db.getAll('recipe_versions');
+      return { recipes, recipesById: new Map(recipes.map((r) => [r.id, r])), recipe_versions: vs, versionsByRecipe: repo.groupBy(vs, 'recipe_id'), versionsById: new Map(vs.map((v) => [v.id, v])), editionsById: new Map([['ed1', edition]]), booksById: new Map([['b1', livre]]), books: [livre], book_editions: [edition], pagesById: new Map(), imports: await db.getAll('imports'), settings: { llm: { provider: 'none' }, units: 'original', reading_locale: 'original' }, sync: { user: session ? { id: 'u1', email: 'a@exemple.invalid' } : null, auth: { jeton: async () => session } }, conventionFor: () => null };
+    };
+    const RECETTE = { title: 'Tarte aux pommes', servings: 6, prep_minutes: 20, cook_minutes: 45, ingredients: [{ source_text: '4 pommes', uncertain: false }, { source_text: '? g de sucre', uncertain: true }], steps: [{ text: 'Peler les pommes.' }, { text: 'Cuire 45 min.' }], printed_page: 132, sub_recipes: [], uncertain_fields: [], notes: null, incomplete: false, missing_page: false };
+    const reponse = (status, corps) => ({ ok: status >= 200 && status < 300, status, headers: new Headers(), text: async () => (typeof corps === 'string' ? corps : JSON.stringify(corps)) });
+    const corpsOk = (recette = RECETTE, extra = {}) => ({ model: 'claude-x', stop_reason: 'end_turn', content: [{ type: 'text', text: typeof recette === 'string' ? recette : JSON.stringify(recette) }], ...extra });
+    // Une fausse fetch qui HONORE le signal (rejet AbortError) et se résout à la main (a.rendre[i](statut, corps)) ou toute seule (a.auto :
+    // [statut, corps] ou une fonction, qui peut lever pour simuler le réseau coupé).
+    const fauxFetch = (auto = null) => {
+      const a = { appels: [], rendre: [], auto };
+      a.fetch = (url, options) => new Promise((resolve, reject) => {
+        const appel = { url, options }; a.appels.push(appel);
+        const abandon = () => reject(Object.assign(new Error('abandon'), { name: 'AbortError' }));
+        if (options?.signal?.aborted) { abandon(); return; }
+        options?.signal?.addEventListener('abort', abandon, { once: true });
+        const fin = (status, corps) => { options?.signal?.removeEventListener('abort', abandon); resolve(reponse(status, corps)); };
+        if (a.auto) { let d; try { d = typeof a.auto === 'function' ? a.auto(appel) : a.auto; } catch (e) { reject(e); return; } fin(d[0], d[1]); } else a.rendre.push(fin);
+      });
+      return a;
+    };
+    const interdit = async () => { reseau += 1; throw new Error('aucun appel attendu'); };
+    // Des IMAGES réelles (pagePourEnvoi décode) : couleur différente → octets et empreinte différents.
+    const imageDe = async (nom, couleur, l = 320, h = 240) => { const c = new OffscreenCanvas(l, h); const cx = c.getContext('2d'); cx.fillStyle = couleur; cx.fillRect(0, 0, l, h); cx.fillStyle = '#fff'; cx.fillRect(10, 10, Math.round(l / 2), Math.round(h / 2)); return new File([await c.convertToBlob({ type: 'image/jpeg', quality: 0.9 })], nom, { type: 'image/jpeg' }); };
+    const pick = { appels: [], suivant: [] };
+    pick.fn = async (opts) => { pick.appels.push(opts); return pick.suivant.length ? pick.suivant.shift() : []; };
+    const navs = [], dits = [];
+    const monter = async (id, { session = SESSION, deps = {} } = {}) => { const root = await UI.renderImportCible({ id }, {}, await ctxDe(session), { repo, navigate: (p) => navs.push(p), toast: (m) => dits.push(m), fetch: interdit, pickFiles: pick.fn, maintenant: () => NOW, ...deps }); scene.append(root); return root; };
+    const bouton = (root, texte) => (root ? [...root.querySelectorAll('button')].find((b) => b.textContent === texte) || null : null);
+    const lien = (root, texte) => (root ? [...root.querySelectorAll('a')].find((a) => a.textContent === texte) || null : null);
+    const attendre = async (cond, quoi) => { for (let i = 0; i < 300; i += 1) { if (await cond()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error('attente dépassée (3 s) : ' + quoi); };
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    const ligneDe = async (recipeId) => (await db.byIndex('imports', 'recipe_id', recipeId)).find((i) => !['enregistre', 'ignore'].includes(i.status)) || null;
+    // Les pages d'un import, posées directement (repo.ajouterPages, chemin de la tâche 3) : l'écran les REPREND (I-2).
+    const preparer = async (recipeId, n = 1) => { const files = []; for (let i = 0; i < n; i += 1) files.push(await imageDe(`${recipeId}-${i}.jpg`, ['#811', '#181', '#118'][i % 3])); return (await repo.ajouterPages(files, { edition_id: 'ed1', import: { id: repo.newId('imp'), kind: 'recette', recipe_id: recipeId } })).importId; };
+    // Chaque bloc part d'une scène vide (les racines des blocs précédents n'écoutent plus) et de journaux de gestes vides.
+    const bloc = (nom, fn) => run('écran — ' + nom, async () => { scene.replaceChildren(); navs.length = 0; dits.length = 0; await fn(); });
+    let p1, p2, p3, shaPhoto;
+    try {
+      eq([typeof UI.DOCUMENT_ID, /^[0-9a-f-]{36}$/.test(UI.DOCUMENT_ID), UI.BATTEMENT_MS, typeof UI.lancerExtraction, typeof UI.annulerVol], ['string', true, 15000, 'function', 'function'], 'module : DOCUMENT_ID (uuid à l’import), BATTEMENT_MS 15000, lancerExtraction et annulerVol exportés pour la tâche 6');
+
+      await bloc('ouverture', async () => {
+        const root = await monter('rc_a');
+        const texte = root.textContent;
+        ok(texte.includes('Importer une recette') && texte.includes('Tarte aux pommes') && texte.includes('Mon livre · p. 132'), 'ouverture : sur-titre « Importer une recette », titre de la référence, « {livre} · p. 132 »');
+        eq([...root.querySelectorAll('.badge')].map((b) => b.textContent), ['Repérée dans ton livre'], 'ouverture : badge « Repérée dans ton livre »');
+        ok(texte.includes('0 photo ajoutée'), 'ouverture : « 0 photo ajoutée »');
+        eq(await db.count('imports'), 0, 'ouverture : aucune ligne imports écrite tant qu’aucune photo n’est ajoutée (spec § 4.1)');
+        const primaire = bouton(root, 'Extraire et enregistrer');
+        eq([!!primaire, primaire?.disabled, primaire?.classList.contains('primary'), lien(root, 'Retour à la fiche')?.getAttribute('href'), texte.includes('Les pages et la photo seront liées à cette recette.')], [true, true, true, '#/recipes/rc_a', true], 'ouverture : bouton primaire éteint, « Retour à la fiche » à côté, la phrase sous le bouton');
+        eq(root.etatRoute(), { importId: null, status: null, pageIds: [], vol: false, discordance: null }, 'ouverture : etatRoute() vide');
+        eq([...root.querySelectorAll('button')].filter((b) => ['Prendre une photo', 'Choisir une image'].includes(b.textContent)).map((b) => b.disabled), [true, true], 'ouverture : la photo du plat attend une première page (une visite sans photo n’écrit rien)');
+        await monter('rc_dispo');
+        eq([dits, navs], [['Cette recette a déjà son texte.'], ['/recipes/rc_dispo']], 'ouverture : une recette available → toast « Cette recette a déjà son texte. » + retour à la fiche (D-11)');
+        navs.length = 0; dits.length = 0;
+        await monter('rc_signet');
+        eq([dits, navs], [['Un lien web s’importe au lot suivant.'], ['/recipes/rc_signet']], 'ouverture : un signet → toast du lot suivant + retour à la fiche');
+        navs.length = 0; dits.length = 0;
+        ok((await monter('rc_inconnue')).textContent.includes('Recette introuvable.'), 'ouverture : une fiche inconnue le dit, sans lever');
+        eq([navs, dits, reseau, await db.count('imports')], [[], [], 0, 0], 'ouverture : rien d’autre (ni navigation, ni réseau, ni écriture)');
+      });
+
+      await bloc('pages', async () => {
+        const root = await monter('rc_a');
+        pick.suivant.push([await imageDe('a.jpg', '#c33'), await imageDe('b.jpg', '#3c3')]);
+        bouton(root, 'Choisir des photos').click();
+        await attendre(() => root.etatRoute().pageIds.length === 2, 'deux pages ajoutées');
+        eq(pick.appels.at(-1), { accept: 'image/*', multiple: true }, 'pages : « Choisir des photos » appelle pickFiles SANS capture');
+        const ligne = await ligneDe('rc_a');
+        [p1, p2] = ligne.page_ids;
+        eq([ligne.status, ligne.kind, ligne.recipe_id, ligne.edition_id, typeof ligne.scan_session_id, (await db.getMany('source_pages', [p1, p2])).filter(Boolean).length, (await db.get('scan_sessions', ligne.scan_session_id))?.page_ids, reseau, ligne.appels], ['a_lancer', 'recette', 'rc_a', 'ed1', 'string', 2, [p1, p2], 0, 0], 'pages : AVANT tout appel, une ligne imports a_lancer avec page_ids [p1, p2], la séance liée, deux source_pages, appels 0');
+        eq(root.etatRoute(), { importId: ligne.id, status: 'a_lancer', pageIds: [p1, p2], vol: false, discordance: null }, 'pages : etatRoute() reflète la ligne');
+        ok(root.textContent.includes('2 photos ajoutées'), 'pages : « 2 photos ajoutées »');
+        eq(root.querySelectorAll('.thumbs figure').length, 2, 'pages : deux vignettes, dans l’ordre');
+        pick.suivant.push([]);
+        bouton(root, 'Photographier').click();
+        await attendre(() => pick.appels.length >= 2, 'pickFiles appelé');
+        eq(pick.appels.at(-1), { accept: 'image/*', capture: 'environment', multiple: true }, 'pages : « Photographier » appelle pickFiles avec capture environment et multiple');
+        eq(root.etatRoute().pageIds, [p1, p2], 'pages : un sélecteur refermé sans fichier n’écrit rien');
+        bouton(root, 'Descendre la page 1').click();
+        await attendre(() => root.etatRoute().pageIds[0] === p2, 'page descendue et écran redessiné');
+        const actif = document.activeElement;
+        eq([(await ligneDe('rc_a')).page_ids, actif?.dataset?.page, actif?.dataset?.role], [[p2, p1], p1, 'descendre'], 'pages : « Descendre la page 1 » → page_ids [p2, p1] ; document.activeElement = le bouton Descendre de la page déplacée');
+        bouton(root, 'Monter la page 2').click();
+        await attendre(() => root.etatRoute().pageIds[0] === p1, 'page remontée');
+        eq([(await ligneDe('rc_a')).page_ids, document.activeElement?.dataset?.page, document.activeElement?.dataset?.role], [[p1, p2], p1, 'monter'], 'pages : « Monter la page 2 » → [p1, p2], le focus suit (Monter de la page déplacée)');
+        bouton(root, 'Monter la page 1').click(); await tick(); await tick();
+        eq((await ligneDe('rc_a')).page_ids, [p1, p2], 'pages : monter la première ne change rien (bouton toujours présent, sans effet)');
+        bouton(root, 'Descendre la page 1').click();
+        await attendre(() => root.etatRoute().pageIds[0] === p2, 'descendue à nouveau');
+        bouton(root, 'Retirer la page 2').click();
+        await attendre(() => root.etatRoute().pageIds.length === 1, 'page retirée');
+        eq([(await ligneDe('rc_a')).page_ids, await db.count('source_pages'), (await db.get('scan_sessions', ligne.scan_session_id)).page_ids, (await ligneDe('rc_a')).status], [[p2], 2, [p1, p2], 'a_lancer'], 'pages : « Retirer la page 2 » détache p1 de l’import ([p2]) — la ligne source_pages et la séance restent (règle actuelle), même statut');
+        ok(root.textContent.includes('1 photo ajoutée') && !root.textContent.includes('photos ajoutées'), 'pages : « 1 photo ajoutée » au singulier');
+        const champ = root.querySelector('.thumbs figure input[type="number"]');
+        champ.value = '133'; champ.dispatchEvent(new Event('change', { bubbles: true }));
+        await attendre(async () => (await db.get('source_pages', p2)).printed_page === 133, 'p. imprimée écrite');
+        eq((await db.get('source_pages', p2)).printed_page, 133, 'pages : le champ « p. imprimée » d’une vignette écrit source_pages.printed_page');
+        pick.suivant.push([await imageDe('c.jpg', '#33c')]);
+        bouton(root, 'Choisir des photos').click();
+        await attendre(() => root.etatRoute().pageIds.length === 2, 'troisième page');
+        const relue = await ligneDe('rc_a'); p3 = relue.page_ids[1];
+        eq([relue.id === ligne.id, relue.page_ids[0], (await db.byIndex('imports', 'recipe_id', 'rc_a')).length, (await db.get('scan_sessions', ligne.scan_session_id)).page_ids.length], [true, p2, 1, 3], 'pages : une page de plus va à la MÊME ligne (un seul import, I-2), en fin de page_ids, dans la même séance');
+      });
+
+      await bloc('photo du plat', async () => {
+        const root = await monter('rc_a');
+        const ligne = await ligneDe('rc_a');
+        eq(root.etatRoute().importId, ligne.id, 'second passage : la même ligne imports est reprise (un seul a_lancer)');
+        const img1 = await imageDe('plat.jpg', '#a52', 600, 400);
+        pick.suivant.push([img1]);
+        bouton(root, 'Choisir une image').click();
+        await attendre(async () => !!(await ligneDe('rc_a')).photo_sha256, 'photo posée');
+        eq(pick.appels.at(-1), { accept: 'image/*', multiple: false }, 'photo : « Choisir une image » → pickFiles sans capture, une seule image');
+        const l1 = await ligneDe('rc_a');
+        eq([l1.photo_sha256, l1.photo_origin, (await db.get('files', l1.photo_sha256))?.blob instanceof Blob, (await db.get('files', l1.photo_sha256))?.mime], [await sha256Hex(await IM.preparerPhotoLocale(img1)), 'image', true, 'image/jpeg'], 'photo : imports.photo_sha256 = empreinte du JPEG ré-encodé (le même mur qu’une couverture), photo_origin image, octets dans files');
+        await attendre(() => !!root.querySelector('[data-role="apercu-plat"]')?.getAttribute('src'), 'aperçu');
+        ok(root.querySelector('[data-role="apercu-plat"]').getAttribute('src').startsWith('blob:'), 'photo : un aperçu blob:');
+        eq([!!bouton(root, 'Remplacer'), !!bouton(root, 'Retirer'), bouton(root, 'Prendre une photo'), bouton(root, 'Choisir une image')], [true, true, null, null], 'photo : avec une photo, « Remplacer » et « Retirer » remplacent les deux boutons d’ajout');
+        bouton(root, 'Retirer').click();
+        await attendre(async () => (await ligneDe('rc_a')).photo_sha256 === null, 'photo retirée');
+        eq([(await ligneDe('rc_a')).photo_sha256, (await ligneDe('rc_a')).photo_origin, (await db.get('files', l1.photo_sha256))?.blob instanceof Blob], [null, null, true], 'photo : « Retirer » → null (le pointeur ; les octets restent)');
+        await attendre(() => !!bouton(root, 'Prendre une photo'), 'boutons d’ajout revenus');
+        pick.suivant.push([await imageDe('plat2.jpg', '#25a', 600, 400)]);
+        bouton(root, 'Prendre une photo').click();
+        await attendre(async () => !!(await ligneDe('rc_a')).photo_sha256, 'photo prise');
+        eq([pick.appels.at(-1), (await ligneDe('rc_a')).photo_origin], [{ accept: 'image/*', capture: 'environment', multiple: false }, 'photo'], 'photo : « Prendre une photo » → capture environment, photo_origin photo');
+        const sha2 = (await ligneDe('rc_a')).photo_sha256;
+        await attendre(() => !!bouton(root, 'Remplacer'), 'Remplacer offert');
+        pick.suivant.push([await imageDe('plat3.jpg', '#5a2', 600, 400)]);
+        bouton(root, 'Remplacer').click();
+        await attendre(async () => (await ligneDe('rc_a')).photo_sha256 !== sha2, 'photo remplacée');
+        shaPhoto = (await ligneDe('rc_a')).photo_sha256;
+        eq([shaPhoto !== sha2, typeof shaPhoto, (await ligneDe('rc_a')).photo_origin, pick.appels.at(-1)], [true, 'string', 'image', { accept: 'image/*', multiple: false }], 'photo : « Remplacer » → un nouveau sha256 (image choisie, sans capture)');
+        pick.suivant.push([new File(['%PDF-1.4'], 'x.pdf', { type: 'application/pdf' })]);
+        bouton(root, 'Remplacer').click();
+        await attendre(() => dits.length === 1, 'refus dit');
+        eq([(await ligneDe('rc_a')).photo_sha256, dits[0]], [shaPhoto, 'Cette image ne peut pas être lue ici. Essaie une autre photo.'], 'photo : un PDF est refusé par le mur (toast), la photo en place reste');
+        eq([(await ligneDe('rc_a')).status, reseau], ['a_lancer', 0], 'photo : la ligne reste a_lancer, aucun réseau');
+      });
+
+      await bloc('extraire et enregistrer', async () => {
+        const vus = []; const capture = db.onMutate;
+        db.onMutate = (m) => { vus.push([Object.keys(m.puts).sort(), m.puts.imports?.[0]?.status ?? null]); return capture ? capture(m) : {}; };
+        try {
+          const ff = fauxFetch();
+          const root = await monter('rc_a', { deps: { fetch: ff.fetch } });
+          const ligne = await ligneDe('rc_a');
+          const b = bouton(root, 'Extraire et enregistrer');
+          eq(b.disabled, false, 'extraction : avec des pages et une session, le bouton est allumé');
+          vus.length = 0;
+          b.click(); b.click(); // double clic
+          await attendre(() => ff.appels.length >= 1, 'fetch parti');
+          await tick();
+          const enVol = await ligneDe('rc_a');
+          const corps = JSON.parse(ff.appels[0].options.body);
+          const images = corps.corps.messages[0].content.filter((c) => c.type === 'image').map((c) => c.source.data);
+          const attendues = await Promise.all([p2, p3].map(async (id) => (await L.pagePourEnvoi((await db.get('files', (await db.get('source_pages', id)).sha256)).blob)).base64));
+          eq([ff.appels.length, corps.outil, corps.corps.max_tokens, images.length, images[0] === attendues[0] && images[1] === attendues[1], ff.appels[0].options.headers.authorization, ff.appels[0].options.signal instanceof AbortSignal], [1, 'extraction', 6000, 2, true, 'Bearer ' + JETON, true], 'extraction : UN POST (double clic compris), outil extraction, max_tokens 6000, les images dans l’ordre de page_ids, la session en Bearer, un signal');
+          eq([enVol.status, enVol.appels, enVol.document_id_vol, typeof enVol.started_at, typeof enVol.battement_at, enVol.erreur], ['en_cours', 1, UI.DOCUMENT_ID, 'string', 'string', null], 'extraction : la ligne est en_cours, appels 1 au départ du fetch, document_id_vol = DOCUMENT_ID, started_at et battement_at posés');
+          const statut = root.querySelector('.status[role="status"]');
+          eq([statut?.textContent, statut?.nextElementSibling?.classList.contains('row'), !!bouton(statut?.nextElementSibling, 'Annuler'), root.etatRoute().vol, root.etatRoute().status, bouton(root, 'Extraire et enregistrer')?.disabled], ['Lecture des pages par l’assistant…', true, true, true, 'en_cours', true], 'extraction (R-VIS-8) : pendant le vol, .status[role=status] puis une .row avec « Annuler » ; etatRoute().vol vrai ; le primaire est éteint');
+          eq(await UI.lancerExtraction(ligne.id, { ctx: await ctxDe(), repo, fetch: ff.fetch }), { issue: 'refuse', raison: 'vol_tenu' }, 'extraction (I-7) : lancerExtraction refuse tant qu’un vol est tenu par ce document');
+          eq(UI.volEnCours(), { importId: ligne.id }, 'extraction : volEnCours() nomme l’import du vol');
+          ff.rendre[0](200, corpsOk());
+          await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_a?v=')), 'navigation vers la fiche');
+          const iVerif = vus.findIndex((v) => v[1] === 'a_verifier');
+          const iEnr = vus.findIndex((v) => v[1] === 'enregistre');
+          eq([iVerif >= 0, iEnr > iVerif, vus[iVerif]?.[0], vus[iEnr]?.[0]], [true, true, ['imports'], ['imports', 'recipe_versions', 'recipes', 'scan_sessions', 'source_pages']], 'extraction (I-3) : imports → a_verifier écrit SEUL, puis UNE transaction recipes + recipe_versions + source_pages + scan_sessions + imports(enregistre)');
+          ok(!vus.slice(0, iVerif + 1).some((v) => v[0].includes('recipes') || v[0].includes('recipe_versions')), 'extraction (I-3) : aucune écriture recipes ni recipe_versions avant (ou avec) a_verifier');
+          const fin = await db.get('imports', ligne.id);
+          const rc = await db.get('recipes', 'rc_a');
+          const vs = await db.byIndex('recipe_versions', 'recipe_id', 'rc_a');
+          const pg = await db.getMany('source_pages', [p2, p3]);
+          const ss = await db.get('scan_sessions', ligne.scan_session_id);
+          eq([fin.status, fin.reponse_brute, typeof fin.finished_at, fin.resultat?.title, fin.model, fin.document_id_vol, typeof fin.duree_ms], ['enregistre', null, 'string', 'Tarte aux pommes', 'claude-x', null, 'number'], 'extraction : imports enregistre, reponse_brute null, finished_at posé, resultat et modèle gardés, vol libéré sur la ligne');
+          eq([rc.id, rc.original_title, rc.availability, rc.verification_state, rc.photo_sha256, rc.photo_origin, rc.current_version_id === vs[0]?.id, rc.source_page_ids, rc.printed_page], ['rc_a', 'Tarte aux pommes', 'available', 'to_verify', shaPhoto, 'image', true, [p2, p3], 132], 'extraction (I-2) : la recette garde id et original_title, devient available / to_verify, photo du plat posée, pages liées, la version devient courante');
+          eq([vs.length, vs[0].kind, vs[0].provenance.generated_by, vs[0].provenance.import_id, vs[0].provenance.model, vs[0].provenance.source_page_ids, vs[0].ingredients.length, vs[0].steps.length, vs[0].ingredients[1].uncertain], [1, 'extraction', 'ai', ligne.id, 'claude-x', [p2, p3], 2, 2, true], 'extraction : une version extraction, provenance ai / import_id / modèle du serveur / pages, lignes et étapes du modèle, uncertain recopié');
+          eq(pg.map((p) => [p.kind, p.position, p.printed_page]), [['recipe', 1, 133], ['recipe', 2, null]], 'extraction : source_pages kind recipe, position 1..n, printed_page gardé (133 tapé) ; rien d’inventé sur la seconde');
+          eq([ss.status, ss.recipe_ids], ['done', ['rc_a']], 'extraction : la séance passe done avec recipe_ids');
+          eq([dits.at(-1), navs.at(-1)], ['Recette importée', `/recipes/rc_a?v=${vs[0].id}`], 'extraction : toast « Recette importée » et navigation vers la fiche sur la version');
+          eq([UI.volEnCours(), root.etatRoute().vol, reseau], [null, false, 0], 'extraction : le vol est libéré, aucun réseau réel');
+        } finally { db.onMutate = capture; }
+      });
+
+      await bloc('annuler pendant le vol (Review Focus 4)', async () => {
+        const impC = await preparer('rc_c', 1);
+        const ff = fauxFetch();
+        const root = await monter('rc_c', { deps: { fetch: ff.fetch } });
+        bouton(root, 'Extraire et enregistrer').click();
+        await attendre(() => ff.appels.length === 1 && !!bouton(root, 'Annuler'), 'fetch parti, Annuler affiché');
+        bouton(root, 'Annuler').click();
+        await attendre(async () => (await db.get('imports', impC)).status === 'echec' && root.etatRoute().status === 'echec', 'echec écrit et écran redessiné');
+        const l = await db.get('imports', impC);
+        eq([ff.appels[0].options.signal.aborted, l.status, l.erreur?.raison, l.document_id_vol, root.etatRoute().vol, UI.volEnCours(), l.appels], [true, 'echec', 'annule', null, false, null, 1], 'Annuler : le fetch est abandonné (signal), echec(annule), document_id_vol libéré, plus de vol, l’appel reste compté');
+        ok(root.textContent.includes('Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.'), 'Annuler (I-4) : « Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre. »');
+        eq([!!bouton(root, 'Relancer'), bouton(root, 'Annuler'), await db.byIndex('recipe_versions', 'recipe_id', 'rc_c'), (await db.get('recipes', 'rc_c')).availability], [true, null, [], 'reference_only'], 'Annuler : « Relancer » offert, plus d’« Annuler », rien sur la recette');
+        // La réponse TARDIVE (spec § 3.1) : l'écriture a_verifier attend une porte ; « Annuler » passe entre la réponse reçue et l'écriture.
+        let ouvrir; const porte = new Promise((r) => { ouvrir = r; });
+        const espion = { ...repo, transitionner: async (store, key, opts) => { if (opts?.patch?.status === 'a_verifier') await porte; return repo.transitionner(store, key, opts); } };
+        const ff2 = fauxFetch();
+        const root2 = await monter('rc_c', { deps: { fetch: ff2.fetch, repo: espion } });
+        bouton(root2, 'Relancer').click();
+        await attendre(() => ff2.appels.length === 1, 'relance partie');
+        const texteTardif = JSON.stringify(RECETTE);
+        ff2.rendre[0](200, corpsOk(texteTardif));
+        await new Promise((r) => setTimeout(r, 60)); // la réponse est lue et validée ; l'écriture a_verifier attend à la porte
+        eq((await db.get('imports', impC)).status, 'en_cours', 'réponse tardive : la ligne est encore en_cours quand « Annuler » arrive');
+        bouton(root2, 'Annuler').click();
+        await attendre(async () => (await db.get('imports', impC)).status === 'echec', 'annulé');
+        ouvrir();
+        await attendre(async () => (await db.get('imports', impC)).reponse_brute !== null, 'reponse_brute posée');
+        const tard = await db.get('imports', impC);
+        eq([tard.status, tard.erreur?.raison, tard.reponse_brute, tard.resultat, (await db.get('recipes', 'rc_c')).availability, await db.byIndex('recipe_versions', 'recipe_id', 'rc_c'), root2.etatRoute().status], ['echec', 'annule', texteTardif, null, 'reference_only', [], 'echec'], 'réponse tardive (Review Focus 4) : aucune recette écrite, reponse_brute seule est gardée, l’état reste echec(annule)');
+      });
+
+      await bloc('incertain', async () => {
+        const impD = await preparer('rc_d', 1);
+        let refus = 1;
+        const espion = { ...repo, transitionner: async (store, key, opts) => { if (opts?.patch?.status === 'a_verifier' && refus > 0) { refus -= 1; throw new Error('disque plein'); } return repo.transitionner(store, key, opts); } };
+        const ff = fauxFetch([200, corpsOk()]);
+        const root = await monter('rc_d', { deps: { fetch: ff.fetch, repo: espion } });
+        bouton(root, 'Extraire et enregistrer').click();
+        await attendre(async () => (await db.get('imports', impD)).status === 'echec' && root.etatRoute().status === 'echec', 'echec incertain');
+        const l = await db.get('imports', impD);
+        eq([l.erreur?.raison, root.textContent.includes('L’appel a peut-être été compté ; relancer en coûtera un autre.'), !!bouton(root, 'Relancer'), await db.byIndex('recipe_versions', 'recipe_id', 'rc_d'), UI.volEnCours()], ['incertain', true, true, [], null], 'incertain : l’écriture a_verifier rejetée UNE fois → echec(incertain), phrase I-4, « Relancer », rien sur la recette, vol libéré');
+        let deux = 2;
+        espion.transitionner = async (store, key, opts) => { if (['a_verifier', 'echec'].includes(opts?.patch?.status) && deux > 0) { deux -= 1; throw new Error('disque plein'); } return repo.transitionner(store, key, opts); };
+        const erreurs = []; const vraiErreur = console.error; console.error = (...a) => { erreurs.push(String(a[0])); };
+        try {
+          bouton(root, 'Relancer').click();
+          await attendre(() => ff.appels.length === 2, 'relance partie');
+          await attendre(() => UI.volEnCours() === null, 'vol libéré');
+          await tick(); await tick();
+        } finally { console.error = vraiErreur; }
+        eq([(await db.get('imports', impD)).status, deux, erreurs.some((e) => e.includes('import_cible')), root.isConnected && root.querySelectorAll('button').length > 0, root.etatRoute().vol], ['en_cours', 0, true, true, false], 'incertain : rejetée DEUX fois → la ligne reste en_cours (interrompu au prochain démarrage), l’erreur est journalisée, l’écran ne plante pas');
+        await db.put('imports', { ...(await db.get('imports', impD)), status: 'ignore' }); // rangement : plus d’import ouvert sur rc_d
+      });
+
+      await bloc('discordance et reponse_brute (Review Focus 2)', async () => {
+        const impB = await preparer('rc_b', 1);
+        const json = JSON.stringify({ ...RECETTE, title: 'Tarte aux poires', printed_page: 133 });
+        const texteLong = json + '😀'.repeat(20000 - Array.from(json).length);
+        eq(Array.from(texteLong).length, 20000, 'fixture : une réponse de 20 000 points de code (emoji : deux unités UTF-16 chacun)');
+        const ff = fauxFetch([200, corpsOk(texteLong)]);
+        const root = await monter('rc_b', { deps: { fetch: ff.fetch } });
+        const avantRc = await db.get('recipes', 'rc_b');
+        bouton(root, 'Extraire et enregistrer').click();
+        await attendre(() => root.etatRoute().status === 'a_verifier' && !!root.etatRoute().discordance, 'a_verifier avec verdict');
+        const l = await db.get('imports', impB);
+        eq([l.status, Array.from(l.reponse_brute).length, l.resultat?.title, l.resultat?.ingredients?.length, JSON.stringify(l).length < 512 * 1024], ['a_verifier', 16000, 'Tarte aux poires', 2, true], 'reponse_brute : coupée à 16 000 points de code, resultat intact, la ligne tient sous 512 Kio');
+        eq(root.etatRoute().discordance, { ok: false, raison: 'titre', titreLu: 'Tarte aux poires', pageLue: 133 }, 'discordance (Review Focus 2) : « Tarte aux poires » lue pour « Tarte aux pommes » → verdict titre, avant toute écriture');
+        const panneau = root.querySelector('[data-role="discordance"]');
+        eq([!!panneau, [...(panneau?.querySelectorAll('button') ?? [])].map((b) => b.textContent), panneau?.textContent.includes('Tarte aux poires') && panneau?.textContent.includes('Tarte aux pommes') && panneau?.textContent.includes('p. 132')], [true, ['Rattacher', 'Garder la lecture sans l’enregistrer', 'Changer les pages'], true], 'discordance : panneau à trois boutons, qui nomme les deux titres et la page de la référence');
+        eq([await db.get('recipes', 'rc_b'), await db.byIndex('recipe_versions', 'recipe_id', 'rc_b'), bouton(root, 'Enregistrer cette lecture')], [avantRc, [], null], 'discordance : rien n’est écrit sur la recette ; la question remplace la rangée d’enregistrement');
+        bouton(panneau, 'Garder la lecture sans l’enregistrer').click();
+        await attendre(() => !root.querySelector('[data-role="discordance"]'), 'panneau fermé');
+        eq([(await db.get('imports', impB)).status, !!bouton(root, 'Enregistrer cette lecture'), !!bouton(root, 'Changer les pages'), root.textContent.includes('Lecture reçue le'), bouton(root, 'Extraire et enregistrer'), !!lien(root, 'Retour à la fiche')], ['a_verifier', true, true, true, null, true], 'discordance → « Garder la lecture sans l’enregistrer » : reste a_verifier ; l’écran offre « Enregistrer cette lecture », « Changer les pages », « Lecture reçue le {d} »');
+        bouton(root, 'Enregistrer cette lecture').click();
+        await attendre(() => !!root.querySelector('[data-role="discordance"]'), 'la question revient');
+        eq([(await db.get('imports', impB)).status, ff.appels.length], ['a_verifier', 1], '« Enregistrer cette lecture » : la discordance est redemandée (jamais de rattachement silencieux), aucun appel de plus');
+        bouton(root.querySelector('[data-role="discordance"]'), 'Changer les pages').click();
+        await attendre(async () => (await db.get('imports', impB)).status === 'a_lancer' && root.etatRoute().status === 'a_lancer', 'a_lancer');
+        eq([(await db.get('imports', impB)).resultat, !!bouton(root, 'Extraire et enregistrer'), root.etatRoute().discordance], [null, true, null], '« Changer les pages » → a_lancer, résultat effacé, le primaire revient');
+        bouton(root, 'Extraire et enregistrer').click();
+        await attendre(() => !!root.querySelector('[data-role="discordance"]'), 'discordance à nouveau');
+        bouton(root.querySelector('[data-role="discordance"]'), 'Rattacher').click();
+        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_b?v=')), 'enregistrée');
+        const rc = await db.get('recipes', 'rc_b'); const [v] = await db.byIndex('recipe_versions', 'recipe_id', 'rc_b');
+        eq([rc.original_title, rc.availability, v?.provenance?.titre_lu, (await db.get('imports', impB)).status, ff.appels.length, dits.at(-1)], ['Tarte aux pommes', 'available', 'Tarte aux poires', 'enregistre', 2, 'Recette importée'], '« Rattacher » : la fiche garde SON titre, le titre lu va en provenance.titre_lu, import enregistre');
+      });
+
+      await bloc('I-5 remplacer ?', async () => {
+        const impE = await preparer('rc_e', 1);
+        await db.put('imports', { ...(await db.get('imports', impE)), photo_sha256: shaPhoto, photo_origin: 'photo' });
+        const ff = fauxFetch([200, corpsOk()]);
+        const root = await monter('rc_e', { deps: { fetch: ff.fetch } });
+        eq([...root.querySelectorAll('.badge')].map((b) => b.textContent), ['Partiellement disponible'], 'I-5 : une partial porte son badge');
+        bouton(root, 'Extraire et enregistrer').click();
+        await attendre(() => !!root.querySelector('[data-role="remplacer"]'), 'question « Remplacer ? »');
+        const q = root.querySelector('[data-role="remplacer"]');
+        eq([q.textContent.includes('Remplacer par cette lecture ?'), [...q.querySelectorAll('button')].map((b) => b.textContent), (await db.get('imports', impE)).status, root.etatRoute().discordance?.ok, root.querySelector('[data-role="discordance"]')], [true, ['Garder ma version', 'Remplacer'], 'a_verifier', true, null], 'I-5 (N4) : version courante saisie à la main → « Remplacer par cette lecture ? », « Garder ma version » d’abord (défaut non), reste a_verifier ; titre concordant, pas de discordance');
+        bouton(q, 'Garder ma version').click();
+        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_e?v=')), 'enregistrée');
+        const rc = await db.get('recipes', 'rc_e'); const vs = await db.byIndex('recipe_versions', 'recipe_id', 'rc_e'); const neuve = vs.find((v) => v.id !== 'rv_e_main');
+        const pages = await db.getMany('source_pages', (await db.get('imports', impE)).page_ids);
+        eq([rc.current_version_id, rc.availability, rc.verification_state, rc.ingredient_ids, rc.source_page_ids, rc.photo_sha256, rc.photo_origin, neuve?.kind, neuve?.parent_version_id, pages.map((p) => p.kind), (await db.get('imports', impE)).status], ['rv_e_main', 'partial', 'verified', ['ing_x'], pages.map((p) => p.id), shaPhoto, 'photo', 'extraction', 'rv_e_main', ['recipe'], 'enregistre'], 'I-5 « non » : la version est ajoutée sans devenir courante ; current_version_id, availability, verification_state, ingredient_ids intacts ; source_page_ids (union), kind recipe et photo posés quand même');
+        eq(navs.at(-1), `/recipes/rc_e?v=${neuve.id}`, 'I-5 « non » : la fiche s’ouvre sur la version ajoutée');
+        // « Remplacer » : la lecture devient courante
+        const impM = await preparer('rc_m', 1);
+        const rootM = await monter('rc_m', { deps: { fetch: ff.fetch } });
+        bouton(rootM, 'Extraire et enregistrer').click();
+        await attendre(() => !!rootM.querySelector('[data-role="remplacer"]'), 'question');
+        bouton(rootM.querySelector('[data-role="remplacer"]'), 'Remplacer').click();
+        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_m?v=')), 'enregistrée');
+        const rcM = await db.get('recipes', 'rc_m'); const neuveM = (await db.byIndex('recipe_versions', 'recipe_id', 'rc_m')).find((v) => v.id !== 'rv_m_main');
+        eq([rcM.current_version_id === neuveM?.id, rcM.availability, rcM.verification_state, neuveM?.parent_version_id, (await db.get('imports', impM)).status], [true, 'available', 'to_verify', 'rv_m_main', 'enregistre'], 'I-5 « oui » : « Remplacer » → la lecture devient courante (parent = l’ancienne courante), fiche recomposée');
+      });
+
+      await bloc('relecture et autre onglet', async () => {
+        const impF = await preparer('rc_f', 1);
+        const ff = fauxFetch([200, corpsOk({ ...RECETTE, title: 'Tarte aux pommes de ma grand-mère' })]);
+        const root = await monter('rc_f', { deps: { fetch: ff.fetch } });
+        await db.put('recipes', { ...(await db.get('recipes', 'rc_f')), original_title: 'Tarte de grand-mère', tags: ['neuf'] }); // modifiée entre l’ouverture et le clic
+        bouton(root, 'Extraire et enregistrer').click();
+        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_f?v=')), 'enregistrée');
+        const rc = await db.get('recipes', 'rc_f');
+        eq([rc.original_title, rc.tags, rc.availability, (await db.get('imports', impF)).status], ['Tarte de grand-mère', ['neuf'], 'available', 'enregistre'], 'relecture (C4) : la fiche écrite porte la valeur RÉCENTE de la référence (relue juste avant la transaction), pas celle du rendu');
+        const impG = await preparer('rc_g', 1);
+        const ff2 = fauxFetch();
+        const root2 = await monter('rc_g', { deps: { fetch: ff2.fetch } });
+        const vus = []; const capture = db.onMutate; db.onMutate = (m) => { vus.push(Object.keys(m.puts)); return capture ? capture(m) : {}; };
+        try {
+          await db.put('imports', { ...(await db.get('imports', impG)), status: 'enregistre' }); // un autre onglet a enregistré
+          vus.length = 0;
+          bouton(root2, 'Extraire et enregistrer').click();
+          await attendre(() => root2.etatRoute().importId === null, 'écran redessiné sans import ouvert');
+          eq([ff2.appels.length, vus, (await db.get('imports', impG)).status, root2.etatRoute().status, UI.volEnCours()], [0, [], 'enregistre', null, null], 'autre onglet (I-10) : import déjà enregistre au clic → TransitionRefusee, aucun fetch, aucun put, écran redessiné');
+          const impH = await preparer('rc_h', 1);
+          await db.put('imports', { ...(await db.get('imports', impH)), status: 'a_verifier', resultat: RECETTE, model: 'claude-x', reponse_brute: 'x' });
+          const root3 = await monter('rc_h', { deps: { fetch: interdit } });
+          eq([!!bouton(root3, 'Enregistrer cette lecture'), bouton(root3, 'Extraire et enregistrer'), root3.textContent.includes('Lecture reçue le')], [true, null, true], 'reprise : une ligne a_verifier ouvre l’écran en mode « Enregistrer cette lecture » (sans appel)');
+          await db.put('imports', { ...(await db.get('imports', impH)), status: 'enregistre' });
+          vus.length = 0;
+          bouton(root3, 'Enregistrer cette lecture').click();
+          await attendre(() => root3.etatRoute().importId === null, 'redessiné');
+          eq([vus, await db.byIndex('recipe_versions', 'recipe_id', 'rc_h'), (await db.get('recipes', 'rc_h')).availability, reseau], [[], [], 'reference_only', 0], 'autre onglet (I-10) : enregistre juste avant « Enregistrer cette lecture » → aucun put, rien sur la recette, aucun appel');
+        } finally { db.onMutate = capture; }
+      });
+
+      await bloc('raisons → textes et gestes', async () => {
+        const impI = await preparer('rc_i', 1);
+        const GEN = 'L’assistant n’a pas répondu. Réessaie.';
+        const CAS = [
+          [403, { erreur: 'non_admis' }, 'non_admis', 'Ce compte n’a pas accès à l’assistant.'],
+          [413, { erreur: 'trop_lourd' }, 'requete', 'La demande est trop lourde : choisis moins de pages.'],
+          [413, 'pas du json', 'requete', 'La demande est trop lourde : choisis moins de pages.'],
+          [429, { erreur: 'quota', quota: 60 }, 'quota', 'Tu as atteint la limite du jour pour l’assistant (60 appels).'],
+          [429, { erreur: 'quota' }, 'quota', 'Tu as atteint la limite du jour pour l’assistant.'],
+          [429, {}, 'trop_de_demandes', 'Trop de demandes pour l’instant. Réessaie dans une minute.'],
+          [401, { erreur: 'non_connecte' }, 'non_connecte', 'Connecte-toi pour utiliser l’assistant.'],
+          [502, { erreur: 'serveur' }, 'serveur', GEN + ' Code : serveur'],
+          [504, {}, 'delai', GEN + ' Code : delai'],
+          [200, corpsOk(RECETTE, { stop_reason: 'max_tokens' }), 'coupe', 'La lecture a été coupée : essaie avec moins de pages.'],
+          [200, corpsOk('pas du json'), 'illisible', 'L’assistant n’a pas répondu lisiblement. Réessaie.'],
+          [200, corpsOk({ ...RECETTE, title: 'x'.repeat(201) }), 'hors_bornes', 'L’assistant n’a pas répondu lisiblement. Réessaie.'],
+          [200, corpsOk({ ...RECETTE, ingredients: [], steps: [] }), 'vide', 'Aucun ingrédient ni étape lus sur ces pages.'],
+          [200, 'x', 'reponse_illisible', GEN + ' Code : reponse_illisible'],
+          ['reseau', null, 'reseau', GEN + ' Code : reseau'],
+        ];
+        const ff = fauxFetch();
+        const root = await monter('rc_i', { deps: { fetch: ff.fetch } });
+        let n = 0;
+        for (const [statut, corps, raison, attendu] of CAS) {
+          ff.auto = statut === 'reseau' ? () => { throw new TypeError('reseau coupe'); } : [statut, corps]; n += 1;
+          (bouton(root, 'Extraire et enregistrer') || bouton(root, 'Relancer')).click();
+          await attendre(async () => ff.appels.length === n && (await db.get('imports', impI)).erreur?.raison === raison && root.etatRoute().status === 'echec', `cas ${raison}`);
+          const l = await db.get('imports', impI);
+          const code = raison === 'illisible' || raison === 'hors_bornes';
+          eq([l.status, l.erreur?.raison, root.textContent.includes(attendu), code ? root.textContent.includes('Code : ' + raison) : true, !!bouton(root, 'Relancer'), bouton(root, 'Annuler'), l.appels, l.document_id_vol], ['echec', raison, true, true, true, null, n, null], `raison ${raison} (${statut}) : echec(${raison}), « ${attendu} »${code ? ' + « Code : ' + raison + ' »' : ''}, « Relancer », pas d’« Annuler », appels ${n}`);
+          ok(!root.textContent.includes(JETON) && !/Échec :/.test(root.textContent) && (raison !== 'trop_de_demandes' || !root.textContent.includes('limite du jour')), `raison ${raison} : ni le jeton, ni « Échec : », ni « limite du jour » pour un 429 relayé`);
+        }
+        eq([(await db.get('imports', impI)).reponse_brute !== null, Array.from((await db.get('imports', impI)).reponse_brute ?? '').length <= 16000], [true, true], 'raisons : un refus de l’extraction garde la réponse brute (diagnostic, bornée)');
+        for (const raison of ['interrompu', 'incertain']) {
+          await db.put('imports', { ...(await db.get('imports', impI)), status: 'echec', erreur: { raison, extra: {} } });
+          const r2 = await monter('rc_i', { deps: { fetch: interdit } });
+          eq([r2.textContent.includes(raison === 'interrompu' ? 'La lecture a été interrompue. L’appel a peut-être été compté ; relancer en coûtera un autre.' : 'L’appel a peut-être été compté ; relancer en coûtera un autre.'), !!bouton(r2, 'Relancer'), bouton(r2, 'Relancer')?.disabled], [true, true, false], `raison ${raison} (posée au démarrage ou par une écriture impossible) : phrase I-4 + « Relancer »`);
+        }
+        await db.put('imports', { ...(await db.get('imports', impI)), status: 'en_cours', document_id_vol: 'autre-document', battement_at: NOW, erreur: null });
+        const r3 = await monter('rc_i', { deps: { fetch: interdit } });
+        eq([r3.textContent.includes('En cours sur un autre écran'), bouton(r3, 'Annuler'), r3.etatRoute().vol, r3.etatRoute().status, bouton(r3, 'Extraire et enregistrer')], [true, null, false, 'en_cours', null], 'en_cours tenu par un autre document (I-7) : « En cours sur un autre écran », sans « Annuler », rien à lancer');
+        eq([await UI.annulerVol(impI), (await db.get('imports', impI)).status, (await db.get('imports', impI)).document_id_vol], [false, 'en_cours', 'autre-document'], 'annulerVol : un import que ce document ne tient pas → false, rien d’écrit');
+        await db.put('imports', { ...(await db.get('imports', impI)), status: 'ignore' });
+      });
+
+      await bloc('hors ligne, session absente, gardes', async () => {
+        const impJ = await preparer('rc_j', 1);
+        const ff = fauxFetch([200, corpsOk()]);
+        const root = await monter('rc_j', { deps: { fetch: ff.fetch } });
+        eq(bouton(root, 'Extraire et enregistrer').disabled, false, 'hors ligne : au rendu (en ligne), le bouton est allumé');
+        window.dispatchEvent(new Event('offline'));
+        await tick();
+        const bOff = bouton(root, 'Extraire et enregistrer');
+        eq([bOff.disabled, root.textContent.includes('Tu es hors ligne.')], [true, true], 'hors ligne : l’événement offline APRÈS le rendu éteint le bouton et le dit');
+        bOff.click(); await tick(); await tick();
+        eq([ff.appels.length, (await db.get('imports', impJ)).status, (await db.get('imports', impJ)).appels], [0, 'a_lancer', 0], 'hors ligne : zéro POST, la ligne reste a_lancer, appels 0');
+        eq(await UI.lancerExtraction(impJ, { ctx: await ctxDe(), repo, fetch: ff.fetch, enLigne: () => false }), { issue: 'refuse', raison: 'hors_ligne' }, 'lancerExtraction : hors ligne → refus nommé, avant toute écriture');
+        window.dispatchEvent(new Event('online'));
+        await tick();
+        eq([bouton(root, 'Extraire et enregistrer').disabled, root.textContent.includes('Tu es hors ligne.')], [false, false], 'hors ligne : online rallume le bouton');
+        eq(await UI.lancerExtraction(impJ, { ctx: await ctxDe(null), repo, fetch: ff.fetch }), { issue: 'refuse', raison: 'non_connecte' }, 'lancerExtraction : sans session → refus non_connecte, aucun appel');
+        eq(await UI.lancerExtraction('imp_inconnu', { ctx: await ctxDe(), repo, fetch: ff.fetch }), { issue: 'refuse', raison: 'inconnu' }, 'lancerExtraction : import inconnu → refus');
+        await db.put('imports', { ...(await db.get('imports', impJ)), page_ids: [] });
+        eq(await UI.lancerExtraction(impJ, { ctx: await ctxDe(), repo, fetch: ff.fetch }), { issue: 'refuse', raison: 'sans_page' }, 'lancerExtraction : sans page → refus');
+        eq([ff.appels.length, (await db.get('imports', impJ)).status, (await db.get('imports', impJ)).appels, reseau], [0, 'a_lancer', 0, 0], 'lancerExtraction : les refus n’écrivent rien et n’appellent rien');
+        await db.put('imports', { ...(await db.get('imports', impJ)), status: 'ignore' });
+        const rootS = await monter('rc_j', { session: null, deps: { fetch: ff.fetch } });
+        eq([!!rootS.querySelector('[data-role="connexion-ia"]'), rootS.textContent.includes('Connecte-toi pour utiliser l’assistant.'), bouton(rootS, 'Extraire et enregistrer')?.disabled], [true, true, true], 'session absente : la carte « Connecte-toi » et le bouton éteint');
+        pick.suivant.push([await imageDe('s.jpg', '#876')]);
+        bouton(rootS, 'Choisir des photos').click();
+        await attendre(() => rootS.etatRoute().pageIds.length === 1, 'page ajoutée sans session');
+        eq([rootS.etatRoute().status, bouton(rootS, 'Extraire et enregistrer')?.disabled, ff.appels.length, (await db.byIndex('imports', 'recipe_id', 'rc_j')).filter((i) => i.status === 'a_lancer').length], ['a_lancer', true, 0, 1], 'session absente : les photos s’ajoutent quand même (une ligne a_lancer), zéro POST');
+      });
+
+      await bloc('battement', async () => {
+        const impK = await preparer('rc_k', 1);
+        const ff = fauxFetch();
+        const root = await monter('rc_k', { deps: { fetch: ff.fetch, battementMs: 20, maintenant: () => new Date().toISOString() } });
+        bouton(root, 'Extraire et enregistrer').click();
+        await attendre(() => ff.appels.length === 1, 'fetch parti');
+        const l0 = await db.get('imports', impK);
+        const enFile = () => db.getAll('outbox').then((es) => es.filter((e) => e.store === 'imports' && e.id === impK).length);
+        const n0 = await enFile();
+        await attendre(async () => (await db.get('imports', impK)).battement_at !== l0.battement_at, 'battement écrit');
+        const l1 = await db.get('imports', impK);
+        eq([l1.status, l1.battement_at > l0.battement_at, l1.document_id_vol, await enFile()], ['en_cours', true, UI.DOCUMENT_ID, n0], 'battement : battement_at réécrit pendant le vol, même statut, origine device (rien de plus en file)');
+        await UI.annulerVol(impK);
+        await attendre(async () => (await db.get('imports', impK)).status === 'echec', 'annulé');
+        await new Promise((r) => setTimeout(r, 60));
+        const b2 = (await db.get('imports', impK)).battement_at;
+        await new Promise((r) => setTimeout(r, 60));
+        eq([(await db.get('imports', impK)).battement_at, (await db.get('imports', impK)).status], [b2, 'echec'], 'battement : nettoyé à la fin du vol (plus aucune écriture après Annuler)');
+      });
+
+      await bloc('entrées (fiche, livre, éditeur, routes)', async () => {
+        const { renderRecipe } = await import('../src/ui/recipe.js');
+        const { renderBook } = await import('../src/ui/book.js');
+        const { renderRecipeEdit } = await import('../src/ui/recipe-edit.js');
+        const { ROUTES_DE_SAISIE, estRouteDeSaisie } = await import('../src/ui/state.js');
+        const ctx = await ctxDe();
+        const ctxFiche = { ...ctx, dishesById: new Map(), cook_history: [], dish_recipe_links: [], recipe_translations: [], ingredients: [], ingredientsById: new Map(), dishes: [], source_documents: [], source_pages: [], rediscovery_prefs: [], docsByRecipe: new Map(), scan_sessions: [] };
+        const page = await renderRecipe({ id: 'rc_ref' }, {}, ctxFiche);
+        const importer = lien(page, 'Importer cette recette');
+        eq([importer?.getAttribute('href'), importer?.classList.contains('primary'), !!lien(page, 'Saisir à la main'), page.textContent.includes('Scanner cette recette'), lien(page, 'Relire les pages')], ['#/recipes/rc_ref/importer', true, true, false, null], 'fiche d’une référence : « Importer cette recette » (primaire) → /recipes/<id>/importer ; « Saisir à la main » toujours là ; « Scanner cette recette » absent');
+        const partielle = await renderRecipe({ id: 'rc_part' }, {}, ctxFiche);
+        eq([lien(partielle, 'Relire les pages')?.getAttribute('href'), partielle.textContent.includes('Scanner cette recette'), lien(partielle, 'Importer cette recette')], ['#/recipes/rc_part/importer', false, null], 'fiche partial : « Relire les pages » (secondaire) → même route');
+        const dispo = await renderRecipe({ id: 'rc_dispo' }, {}, ctxFiche);
+        eq([lien(dispo, 'Relire les pages'), lien(dispo, 'Importer cette recette')], [null, null], 'fiche available : aucune entrée vers l’import (D-11)');
+        const fiche = await renderBook({ id: 'ed1' }, {}, { ...ctxFiche, recipes: ctx.recipes.filter((r) => ['rc_ref', 'rc_part', 'rc_dispo'].includes(r.id)) });
+        const importers = [...fiche.querySelectorAll('a, button')].filter((n) => n.textContent === 'Importer');
+        const saisies = [...fiche.querySelectorAll('a, button')].filter((n) => n.textContent === 'Saisir à la main');
+        eq([importers.length, importers.every((n) => !n.parentElement.closest('a')), importers.map((n) => n.getAttribute('href')).sort(), saisies.length, saisies.every((n) => !n.parentElement.closest('a')), fiche.textContent.includes('Scanner cette recette')], [2, true, ['#/recipes/rc_part/importer', '#/recipes/rc_ref/importer'], 3, true, false], 'fiche du livre (m4) : « Importer » sous la carte de la référence et de la partielle (jamais descendant d’un <a>), vers la route ciblée ; « Saisir à la main » (menu + deux rangées) hors de tout <a> ; « Scanner cette recette » absent');
+        ok(importers.every((n) => n.classList.contains('btn') && n.classList.contains('small')), 'fiche du livre : « Importer » est un .btn.small');
+        sessionStorage.setItem('cuisineos.pending_recipe', 'rc_ref');
+        let editeur;
+        try { editeur = await renderRecipeEdit({ id: null }, { edition: 'ed1' }, ctxFiche); } finally { sessionStorage.removeItem('cuisineos.pending_recipe'); }
+        eq([editeur.textContent.includes('Oui, rattacher'), editeur.textContent.includes('Ces pages complètent la référence')], [false, false], 'éditeur (D-8) : plus aucune case « Oui, rattacher », même avec une ancienne clé pending_recipe en sessionStorage');
+        eq([ROUTES_DE_SAISIE.includes('/recipes/*/importer'), estRouteDeSaisie('/recipes/rc_a/importer'), estRouteDeSaisie('/recipes/rc_a')], [true, true, false], 'ROUTES_DE_SAISIE (I16) : /recipes/*/importer — une passe de synchro ne reconstruit pas l’écran en plein vol');
+      });
+    } finally {
+      UI.reinitialiserImportCible?.();
+      globalThis.fetch = vraiFetch; scene.remove(); setUiLocale(localeAvant);
+    }
+  }));
+
+  // Statique (admis par le brief) : le fournisseur et la base ne sont jamais nommés ; pending_recipe a disparu de tout src/ ; SHELL ; filet i18n.
+  await run('écran import ciblé : statique', async () => {
+    const src = await lire('../src/ui/import-cible.js');
+    ok(src.length > 1000 && /export async function renderImportCible/.test(src), 'statique : src/ui/import-cible.js est lu et exporte renderImportCible (garde contre un source vide)');
+    eq(/Anthropic|Supabase/.test(src), false, 'statique (I-9) : aucun texte ne nomme le fournisseur ni la base dans src/ui/import-cible.js');
+    const sw = await lire('../sw.js');
+    ok(sw.includes("'./src/ui/import-cible.js'"), 'SHELL : ./src/ui/import-cible.js');
+    const modules = [...sw.matchAll(/'\.\/(src\/[^']+\.js)'/g)].map((m) => m[1]);
+    const porteurs = [];
+    for (const m of modules) if ((await lire('../' + m)).includes('pending_recipe')) porteurs.push(m);
+    eq([modules.length > 30, porteurs], [true, []], 'régression (D-8) : pending_recipe a disparu de tout src/ (poseurs et lecteur)');
+    const { MODULES_NEUFS } = await import('./ajouter.js');
+    ok(Array.isArray(MODULES_NEUFS) && MODULES_NEUFS.includes('../src/ui/import-cible.js'), 'filet i18n : MODULES_NEUFS (tests/ajouter.js) contient src/ui/import-cible.js');
+  });
 }

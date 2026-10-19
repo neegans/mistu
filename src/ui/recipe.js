@@ -79,7 +79,9 @@ export async function renderRecipe(params, query, ctx) {
       versionOptions.length > 1 ? select(versionOptions, version.id, selectVersion) : etiquetteCreationIA(version, recipe) ? versionBadge(version, recipe) : el('span', { class: 'badge original' }, t('Original')),
       el('div', { class: 'row' },
         el('a', { class: 'btn small', href: `#/recipes/${recipe.id}/edit?kind=adaptation&v=${version.id}` }, t('Créer ma version')),
-        el('a', { class: 'btn small', href: `#/recipes/${recipe.id}/edit?kind=correction&v=${version.id}` }, t('Corriger')))),
+        el('a', { class: 'btn small', href: `#/recipes/${recipe.id}/edit?kind=correction&v=${version.id}` }, t('Corriger')),
+        // Import ciblé (spec import-cible § 4.1, D-11) : une recette partielle se relit par l'écran déjà rattaché (import à refaire) ; une recette complète n'a pas d'entrée.
+        recipe.availability === 'partial' && !recipe.source_url ? el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(recipe.id)}/importer` }, t('Relire les pages')) : null)),
     el('div', { class: 'row' },
       el('label', { class: 'field' }, el('span', null, t('Portions')), el('div', { class: 'row' },
         el('button', { class: 'btn small', onClick: () => setServings((state.servings || 1) - 1) }, '−'),
@@ -238,7 +240,8 @@ export async function renderRecipe(params, query, ctx) {
         el('h2', null, recipe.printed_page ? t('Repérée dans ton livre — page {p}', { p: recipe.printed_page }) : t('Repérée dans l’index de ton livre')),
         el('p', null, t('Cette référence vient de l’index : ingrédients, durées et compatibilités alimentaires sont inconnus tant que la recette n’est pas numérisée. Ouvre le livre à cette page pour cuisiner, ou scanne la recette.')),
         el('div', { class: 'row' },
-          el('a', { class: 'btn primary', href: `#/add?edition=${recipe.edition_id || ''}`, onClick: () => sessionStorage.setItem('cuisineos.pending_recipe', recipe.id) }, t('Scanner cette recette')),
+          // D-8 : la voie « Scanner cette recette » (Ajouter + clé de session) est remplacée par l'écran d'import ciblé, déjà rattaché à la référence.
+          el('a', { class: 'btn primary', href: `#/recipes/${encodeURIComponent(recipe.id)}/importer` }, t('Importer cette recette')),
           el('a', { class: 'btn', href: `#/recipes/${recipe.id}/edit?kind=extraction` }, t('Saisir à la main')),
           dish ? el('a', { class: 'btn', href: `#/dishes/${dish.id}` }, t('Autres recettes de ce plat')) : el('button', { class: 'btn', onClick: attachDish }, t('Rattacher à un plat')))),
       pages.length ? section(t('Pages d’index'), el('div', { class: 'thumbs' }, ...pages.map((p) => { const img = el('img', { loading: 'lazy' }); repo.getFile(p.sha256).then((f) => { const u = displayUrl(f); if (u) img.src = u; }); return el('figure', null, img); }))) : null);

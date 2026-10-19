@@ -1235,7 +1235,7 @@ export async function runCreerIaTests({ eq, ok }) {
     const tranche = (src, debut, fin) => { const i = src.indexOf(debut); const j = src.indexOf(fin, i + debut.length); return i >= 0 && j > i ? src.slice(i, j) : ''; };
     const components = await lire('../src/ui/components.js');
     const settings = await lire('../src/ui/settings.js');
-    const sources = { 'creer-ia.js': await lire('../src/ui/creer-ia.js'), 'add.js': await lire('../src/ui/add.js'), 'search.js': await lire('../src/ui/search.js'),
+    const sources = { 'creer-ia.js': await lire('../src/ui/creer-ia.js'), 'add.js': await lire('../src/ui/add.js'), 'search.js': await lire('../src/ui/search.js'), 'import-cible.js': await lire('../src/ui/import-cible.js'),
       'components.js (assistant)': tranche(components, '// === Assistant sans session', '// === fin Assistant'), 'settings.js (assistant)': tranche(settings, '// === Assistant IA (section de Réglages)', '// === fin Assistant IA') };
     // Antérieures au lot et hors périmètre (gelées ici pour ne rien cacher d'autre) : quatre chaînes de search.js sans entrée.
     const ANTERIEURES = ['search.js : Préciser : concombre, sans gluten, 15 minutes…', 'search.js : Ex. : une salade avec du concombre, sans gluten, en quinze minutes', 'search.js : Références d’index : ingrédients, durées et compatibilités inconnus tant que la recette n’est pas scannée.', 'search.js : {n} recette(s) écartée(s) par une restriction alimentaire.'];
