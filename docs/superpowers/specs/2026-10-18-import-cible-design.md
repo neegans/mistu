@@ -123,8 +123,10 @@ jour-là, « À envoyer » et la pastille montent d'autant sans geste de la pers
 ### 3.3 Vocabulaire (D-12)
 
 `assertVocabulaire(fiche, magasin)` (`src/domain/vocabulaire.js`, pur) : pour `recipes`, `availability` **présent et** ∉ `AVAILABILITY` ou
-`verification_state` **présent et** ∉ `VERIFICATION` → lève, nommée ; champ absent toléré. Pour `imports`, `status` ∉ liste → lève. Appelée
-par `fabriquerExtraction`, `fabriquerRecetteIA`, `fabriquerSignet` et le `save()` de l'éditeur ; un test de source épingle les appelants.
+`verification_state` **présent et** ∉ `VERIFICATION` → lève, nommée ; champ absent **ou `null`** toléré (`null` vaut absent : fiche
+ancienne, chemin adaptation — ronde 1 de la tâche 1). Pour `imports`, `status` ∉ liste → lève. Appelée par `fabriquerExtraction`,
+`fabriquerRecetteIA`, `fabriquerSignet`, le `save()` de l'éditeur et « Créer les références » du panneau d'index (`src/ui/import.js`,
+cinquième fabricant, ronde 1) ; un test de source épingle les appelants, hors commentaire.
 
 ### 3.4 Sortie de l'extraction (contrat avec le modèle, côté app)
 

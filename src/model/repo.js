@@ -259,19 +259,24 @@ export async function save(store, record) {
   return r;
 }
 
+// Fiches prêtes à écrire : nettoyées (R-L3-25, comme save() — même raison, et un seul endroit qui en décide : `propre`), created_at
+// conservé ou posé, updated_at = `now`. Les deux chemins d'écriture en lot (saveBatch, transitionner) passent ici.
+const horodater = (store, rows, now) => rows.map((r) => ({ ...propre(store, r), created_at: r.created_at || now, updated_at: now }));
+
 // `origin` : 'local' par défaut (écriture de la personne, donc capturée) ; 'device' pour ce qui ne part jamais au
 // serveur (amorçage des références, rattrapages) — c'est la capture qui tranche, d'après l'origine (src/sync/outbox.js).
 // `conditions` (spec import-cible § 3.6) : le lot n'est écrit que si chaque fiche conditionnée porte un statut attendu, dans la même
-// transaction ; condition fausse → TransitionRefusee, rien d'écrit (c'est transitionner sans patch).
+// transaction ; condition fausse → TransitionRefusee, rien d'écrit. VÉRIFICATION SEULE : la fiche conditionnée n'est ni réécrite ni
+// recapturée (à la différence de transitionner, qui la réécrit avec un updated_at neuf) ; un `patch` ici contournerait `propre` et
+// l'horodatage, il est refusé : passer par repo.transitionner.
 export async function saveBatch(batch, { origin = 'local', conditions = null } = {}) {
   const now = syncNow();
   const stamped = {};
-  for (const [store, rows] of Object.entries(batch)) {
-    // R-L3-25 : nettoyé à l'écriture, comme save() — même raison, et un seul endroit qui en décide (`propre`).
-    stamped[store] = rows.map((r) => ({ ...propre(store, r), created_at: r.created_at || now, updated_at: now }));
-  }
-  if (conditions) await db.mutate({ puts: stamped, origin, conditions });
-  else await db.putBatch(stamped, { origin });
+  for (const [store, rows] of Object.entries(batch)) stamped[store] = horodater(store, rows, now);
+  if (conditions) {
+    for (const [store, items] of Object.entries(conditions)) for (const c of (Array.isArray(items) ? items : [])) if (c?.patch != null) throw new TypeError('saveBatch ne porte pas de patch (' + store + ') : passer par repo.transitionner');
+    await db.mutate({ puts: stamped, origin, conditions });
+  } else await db.putBatch(stamped, { origin });
   for (const store of Object.keys(stamped)) emit('change', { store });
   return stamped;
 }
@@ -280,15 +285,20 @@ export async function saveBatch(batch, { origin = 'local', conditions = null } =
 // le patch (objet, ou fonction du courant) fusionné, puis TOUT — la fiche, les puts, les deletes et la capture — est écrit dans UNE
 // transaction par db.mutate({ conditions }). Condition fausse : TransitionRefusee { store, key, statut }, rien d'écrit. Enveloppe de
 // repo : nettoyage des chaînes (R61 : un `resultat` ou une `reponse_brute` du modèle porte des caractères de contrôle), `updated_at =
-// syncNow()` sur chaque fiche écrite (created_at conservé), puis UN `change`. Tous les écrans passent par elle, jamais par db.mutate
-// (test statique : « transitionner( » n'existe que sous la forme repo.transitionner( hors de ce fichier).
-export async function transitionner(store, key, { attendus, patch = null, puts = {}, deletes = {}, origin = 'local' } = {}) {
+// syncNow()` sur chaque fiche écrite (created_at conservé), puis un `change` pour la fiche conditionnée et un par autre magasin touché
+// (puts, deletes), comme saveBatch. `payloads` ({ [store]: { [key]: copie } }) accompagne `deletes` : la capture a besoin de la copie
+// d'une fiche supprimée (spec § 5.1), et c'est l'appelant qui l'a lue. Rend la fiche ÉCRITE (fusionnée, nettoyée, horodatée) : l'écran
+// n'a pas à relire la base dans une seconde transaction. Tous les écrans passent par elle, jamais par db.mutate (test statique :
+// « transitionner( » n'existe que sous la forme repo.transitionner( hors de ce fichier).
+export async function transitionner(store, key, { attendus, patch = null, puts = {}, deletes = {}, payloads = {}, origin = 'local' } = {}) {
   const now = syncNow();
   const stamped = {};
-  for (const [s, rows] of Object.entries(puts)) stamped[s] = rows.map((r) => ({ ...propre(s, r), created_at: r.created_at || now, updated_at: now }));
+  for (const [s, rows] of Object.entries(puts)) stamped[s] = horodater(s, rows, now);
   const modif = (courant) => ({ ...propre(store, typeof patch === 'function' ? patch(courant) : (patch || {})), updated_at: now });
-  await db.mutate({ puts: stamped, deletes, origin, conditions: { [store]: [{ key, attendus, patch: modif }] } });
+  const ecrites = await db.mutate({ puts: stamped, deletes, payloads, origin, conditions: { [store]: [{ key, attendus, patch: modif }] } });
   emit('change', { store, id: key });
+  for (const s of new Set([...Object.keys(stamped), ...Object.keys(deletes)])) if (s !== store) emit('change', { store: s });
+  return ecrites[store][0]; // une seule condition ici : la fiche de store/key
 }
 
 // La fiche est relue avant sa suppression : la capture a besoin de sa copie pour l'envoyer (spec § 5.1).

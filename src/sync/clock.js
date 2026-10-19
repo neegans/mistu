@@ -5,6 +5,9 @@ let floorIso = '';
 
 export const setClockOffset = (ms) => { offsetMs = Number.isFinite(ms) ? ms : 0; };
 export const getClockOffset = () => offsetMs;
+// Réservé aux tests (comme bindDatabase) : remet le décalage ET le plancher à zéro, pour qu'une suite ne lègue pas à la suivante un
+// plancher poussé de plusieurs jours par une heure serveur future. Jamais appelé par l'app.
+export const resetClock = () => { offsetMs = 0; floorIso = ''; };
 
 // Jamais une valeur inférieure à la dernière rendue, et jamais deux fois la même : sous une horloge reculée,
 // le plancher avance d'une milliseconde, sinon deux écritures successives porteraient le même updated_at.

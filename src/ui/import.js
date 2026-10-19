@@ -7,6 +7,7 @@ import * as repo from '../model/repo.js';
 import { displayUrl } from '../sync/mime.js';
 import { sha256Hex } from '../core/hash.js';
 import { normalizeText } from '../domain/units.js';
+import { assertVocabulaire } from '../domain/vocabulaire.js';
 import { providerFrom, extractIndexFromImages, pagePourEnvoi } from '../domain/llm.js';
 import { pageHeader, section, emptyState, select, field, carteConnexion, texteEchecAssistant, pdfFrame, libelleLivre, sessionAssistant } from './components.js';
 import { demarrerConnexion } from './settings.js';
@@ -252,7 +253,9 @@ export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId 
       const k = key(e.title, e.printed_page);
       if (seen.has(k)) { dupes++; continue; }
       seen.add(k);
-      created.push({ id: repo.newId('rc'), edition_id: edId, original_title: e.title, original_language: edition?.language || null, availability: 'reference_only', verification_state: 'unverified', printed_page: e.printed_page, section: e.section || null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: pageIds, current_version_id: null, ingredient_ids: [] });
+      const fiche = { id: repo.newId('rc'), edition_id: edId, original_title: e.title, original_language: edition?.language || null, availability: 'reference_only', verification_state: 'unverified', printed_page: e.printed_page, section: e.section || null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: pageIds, current_version_id: null, ingredient_ids: [] };
+      assertVocabulaire(fiche, 'recipes'); // D-12 : « Créer les références » est un fabricant de recipes comme les autres (spec import-cible § 3.3)
+      created.push(fiche);
     }
     if (pageIds.length) await repo.saveBatch({ source_pages: pageIds.map((id) => ({ ...ctx.pagesById.get(id), kind: 'index' })) });
     if (created.length) await repo.saveBatch({ recipes: created });

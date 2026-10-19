@@ -103,7 +103,7 @@ export async function createArchive(db, { deviceName = '' } = {}) {
   // Les magasins internes (spec § 5.1) n'existent pas forcément sur une base plus ancienne : lire ceux de la base, pas du schéma courant.
   const snapshot = await db.getSnapshot(Object.keys(db.stores));
   // Une base plus ancienne (ouverte avec un STORES d'avant) n'a pas forcément un magasin ajouté après le format 1 : il vaut [] (C1).
-  const lignes = (name) => snapshot[name] ?? (MAGASINS_AJOUTES_APRES_V1.includes(name) ? [] : snapshot[name]);
+  const lignes = (name) => (MAGASINS_AJOUTES_APRES_V1.includes(name) ? (snapshot[name] ?? []) : snapshot[name]);
   const stores = Object.fromEntries(DATA_STORES.map((name) => [
     name, JSON.parse(JSON.stringify(name === 'settings' ? publicSettings(lignes(name)) : lignes(name))),
   ]));
@@ -230,10 +230,11 @@ function requireInspection(inspection, mode) {
   if (errors.length) throw new Error('Archive non validée : ' + errors.slice(0, 10).join(' · '));
 }
 
-// C1 (spec import-cible § 3.7) : un magasin ajouté après le format 1 et absent de l'archive vaut [] — en remplacement, il est donc vidé.
+// C1 (spec import-cible § 3.7) : SEUL un magasin ajouté après le format 1 peut manquer à l'archive (validateRows, par requireInspection,
+// exige tous les autres) ; absent, il vaut [] — en remplacement, il est donc vidé.
 function restoredStores(inspection) {
   return Object.fromEntries(DATA_STORES.map((name) => [name,
-    name === 'settings' ? publicSettings(inspection.payload.stores[name]) : (inspection.payload.stores[name] ?? []),
+    name === 'settings' ? publicSettings(inspection.payload.stores[name]) : (MAGASINS_AJOUTES_APRES_V1.includes(name) ? (inspection.payload.stores[name] ?? []) : inspection.payload.stores[name]),
   ]));
 }
 

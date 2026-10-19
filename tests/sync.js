@@ -71,8 +71,9 @@ export async function runSyncTests({ eq, ok }) {
   eq(schema.STORES.outbox, { keyPath: 'seq', autoIncrement: true, indexes: [['store_id', ['store', 'id']]] }, 'outbox autoIncrement');
   ok(schema.STORES.sync_state.keyPath === 'key' && schema.STORES.sync_conflicts.keyPath === 'id', 'sync_state et sync_conflicts');
   ok(schema.SYNC_INTERNAL_STORES.every((s) => !schema.ARCHIVE_DATA_STORES.includes(s)), 'internes hors archive');
-  // Archive v1 d'avant le lot : produite par une base v1 (sans magasins internes), restaurée dans une base v2.
-  const V1_STORES = Object.fromEntries(Object.entries(schema.STORES).filter(([n]) => !schema.SYNC_INTERNAL_STORES.includes(n)));
+  // Archive v1 d'avant les lots : produite par une base v1 (sans magasins internes ni magasin ajouté après le format 1 — `imports`, lot A :
+  // createArchive doit donc tolérer une base qui n'a pas ce magasin), restaurée dans une base courante.
+  const V1_STORES = Object.fromEntries(Object.entries(schema.STORES).filter(([n]) => !schema.SYNC_INTERNAL_STORES.includes(n) && !schema.MAGASINS_AJOUTES_APRES_V1.includes(n)));
   const archiveV1 = await withDatabase(async (db) => {
     await db.putBatch({ books: [{ id: 'b1', title: 'V1' }], unit_definitions: [{ id: 'g' }], unit_conventions: [{ id: 'uc' }], ingredients: [{ id: 'ing' }] });
     return (await createArchive(db)).blob.arrayBuffer();
@@ -215,7 +216,7 @@ export async function runSyncTests({ eq, ok }) {
   // --- Montée de version 1 → 2 sur une base peuplée (spec § 7.1)
   // Le seul chemin du lot capable de rendre une bibliothèque existante ILLISIBLE : si onupgradeneeded lève,
   // db.open() rejette, boot() tombe dans son catch et l'app entière ne s'ouvre plus. Il faut donc une base
-  // réellement ouverte EN VERSION 1 avec les 26 magasins d'avant le lot, puis rouverte par le chemin normal du
+  // réellement ouverte EN VERSION 1 avec les magasins d'avant les lots (ni internes, ni assistant_config, ni imports), puis rouverte par le chemin normal du
   // démarrage (Database v2 + bindDatabase + repo.init()). Aucun test ne l'exerçait : withDatabase ouvrait toujours
   // une base NEUVE directement en v2, ce qui ne touche ni la branche « magasin déjà là » de db.js:65, ni la
   // création de l'index composé ['store','id'] au sein d'une transaction versionchange.
@@ -223,7 +224,7 @@ export async function runSyncTests({ eq, ok }) {
     const repoModule = await import('../src/model/repo.js');
     const baseOrigine = repoModule.db;
     const ancienneCle = localStorage.getItem('cuisineos.device');
-    const V1_SEULEMENT = Object.fromEntries(Object.entries(STORES).filter(([n]) => !SYNC_INTERNAL_STORES.includes(n) && n !== 'assistant_config'));
+    const V1_SEULEMENT = Object.fromEntries(Object.entries(STORES).filter(([n]) => !SYNC_INTERNAL_STORES.includes(n) && n !== 'assistant_config' && !schema.MAGASINS_AJOUTES_APRES_V1.includes(n)));
     const avant = {
       recipes: { id: 'r_v1', original_title: 'Avant le lot', availability: 'available', type: 'salade', created_at: '2026-01-02T03:04:05Z' },
       ingredients: { id: 'ing_corrige_a_la_main', labels: { fr: { label: 'sel fin', aliases: [] } } },
@@ -234,7 +235,7 @@ export async function runSyncTests({ eq, ok }) {
       await withDatabase(async (v1) => {
         await v1.mutate({ puts: { recipes: [avant.recipes], ingredients: [avant.ingredients], settings: [avant.settings] } });
         eq([v1.idb.version, v1.idb.objectStoreNames.contains('outbox')], [1, false], 'montée : la base de départ est bien en v1, sans magasin interne');
-        eq(v1.idb.objectStoreNames.contains('assistant_config'), false, 'montée : la base de départ n’a pas encore le magasin assistant_config (l’assertion après la montée n’est pas vide)');
+        eq([v1.idb.objectStoreNames.contains('assistant_config'), v1.idb.objectStoreNames.contains('imports')], [false, false], 'montée : la base de départ n’a encore ni assistant_config ni imports (les assertions après la montée ne sont pas vides)');
         v1.idb.close(); v1.idb = null; // la montée a besoin de la base libre
         localStorage.setItem('cuisineos.device', 'dev-avant-le-lot');
         const v2 = new Database(v1.name, schema.DB_VERSION, STORES);
@@ -243,7 +244,8 @@ export async function runSyncTests({ eq, ok }) {
           await repoModule.init(); // chemin normal du démarrage : montée, identité, amorçage, horodatage
           eq(v2.idb.version, schema.DB_VERSION, 'montée : la base est passée à la version courante sans rejet');
           eq(SYNC_INTERNAL_STORES.filter((n) => !v2.idb.objectStoreNames.contains(n)), [], 'les trois magasins internes sont créés par la montée');
-          ok(v2.idb.objectStoreNames.contains('assistant_config'), 'montée de la base v1 à la version courante (3) : le magasin assistant_config est créé');
+          ok(v2.idb.objectStoreNames.contains('assistant_config'), 'montée de la base v1 à la version courante (4) : le magasin assistant_config est créé');
+          eq([...v2.idb.transaction('imports').objectStore('imports').indexNames].sort(), ['edition_id', 'recipe_id', 'status'], 'montée de la base v1 à la version courante (4) : le magasin imports (lot A) est créé avec ses trois index');
           eq(await v2.byIndex('outbox', 'store_id', ['books', 'b1']), [], 'l’index composé store_id du magasin neuf est utilisable');
           // Aucune fiche perdue, aucun champ perdu : les objets sont comparés en entier, pas comptés.
           eq(sansHorodatage(await v2.get('recipes', 'r_v1')), avant.recipes, 'la recette d’avant le lot est intacte, champ pour champ');
