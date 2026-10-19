@@ -6,8 +6,8 @@ import { logError } from '../core/log.js';
 import { navigate } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { sha256Hex } from '../core/hash.js';
-import { COVER_INPUT_MIME, ALLOWED_MIME } from '../sync/mime.js';
-import { LIMITES_COUVERTURE, dimensionsImage, reduireImage, ErreurImage } from '../core/image.js';
+import { COVER_INPUT_MIME } from '../sync/mime.js';
+import { LIMITES_COUVERTURE, dimensionsImage, reduireImage, preparerPhotoLocale, ErreurImage } from '../core/image.js';
 import { urlDeBlob } from '../core/blob-urls.js';
 import { listConventions } from '../domain/units.js';
 import { pageHeader, field, select } from './components.js';
@@ -212,19 +212,16 @@ export async function recupererCouvertureParIsbn(isbn, { fetch = globalThis.fetc
 }
 
 // Toute couverture est ré-encodée (S5/F11) puis écrite par putFile (idempotent, hors file : R58).
+// Une couverture choisie ICI passe par preparerPhotoLocale (src/core/image.js) : le mur commun des photos locales — 25 Mo, liste blanche des
+// types, 16 Mpx lus dans l'en-tête AVANT tout décodage (S2), JPEG 1 200 px —, partagé avec la photo du plat de l'import ciblé (spec
+// import-cible § 4.2.3). Une couverture REÇUE (recupererCouvertureParIsbn a déjà posé son type et son mur de pixels) garde sa borne de 5 Mo.
 export async function poserCouverture(blob, { origine = 'locale', repo: r = repo, sha256 = sha256Hex } = {}) {
-  const borne = origine === 'distante' ? LIMITES_COUVERTURE.octetsDistants : LIMITES_COUVERTURE.octetsLocaux;
-  if (blob.size > borne) throw new ErreurImage('trop_lourde');
-  if (origine === 'locale' && blob.type && !ALLOWED_MIME.includes(blob.type)) throw new ErreurImage('type');
-  // S2 : le mur de pixels valait pour une couverture REÇUE (recupererCouvertureParIsbn le pose avant de rendre le
-  // blob), pas pour une image choisie ici — une bombe de décompression de 20 000 × 20 000 allait droit à
-  // createImageBitmap. Les dimensions sont lues dans l'EN-TÊTE, sans décodage. Un en-tête illisible (HEIC, que
-  // Safari décode et que ce lecteur ne connaît pas) ne bloque rien : le ré-encodage tranchera.
-  if (origine === 'locale') {
-    const dims = await dimensionsImage(blob);
-    if (dims && dims.largeur * dims.hauteur > LIMITES_COUVERTURE.pixels) throw new ErreurImage('trop_grande');
+  let jpeg;
+  if (origine === 'locale') jpeg = await preparerPhotoLocale(blob);
+  else {
+    if (blob.size > LIMITES_COUVERTURE.octetsDistants) throw new ErreurImage('trop_lourde');
+    jpeg = await reduireImage(blob);
   }
-  const jpeg = await reduireImage(blob);
   const empreinte = await sha256(jpeg);
   await r.putFile(empreinte, jpeg, { mime: 'image/jpeg' });
   return { sha256: empreinte, taille: jpeg.size };

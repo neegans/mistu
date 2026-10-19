@@ -6,6 +6,8 @@
 // PNG, WebP) : un en-tête illisible (HEIC, que Safari décode) passe, et c'est le ré-encodage qui tranche.
 // 16 Mpx (S6) = 4 000 × 4 000 : au-delà, aucune couverture de livre n'a de raison d'être, et le canvas d'un téléphone
 // renonce bien avant (une photo de 48 Mpx est un cas réel, pas une couverture).
+import { ALLOWED_MIME } from '../sync/mime.js';
+
 export const LIMITES_COUVERTURE = { octetsDistants: 5 * 1024 * 1024, octetsLocaux: 25 * 1024 * 1024, pixels: 16_000_000, maxCote: 1200, qualite: 0.85 };
 
 export class ErreurImage extends Error {
@@ -66,4 +68,18 @@ export async function reduireImage(blob, { maxCote = LIMITES_COUVERTURE.maxCote,
     if (!sortie || sortie.type !== 'image/jpeg') throw new ErreurImage('indecodable');
     return sortie;
   } finally { bmp.close?.(); }
+}
+
+// Une photo choisie ou prise ICI (une couverture : poserCouverture ; la photo du plat : spec import-cible § 4.2.3), passée au MÊME mur,
+// dans cet ordre : ≤ 25 Mo avant toute lecture ; type de la liste blanche quand le navigateur en déclare un ; ≤ 16 Mpx lus dans l'EN-TÊTE
+// avant tout décodage (S2 : une bombe de décompression n'atteint jamais createImageBitmap ; un en-tête illisible, HEIC, passe et c'est le
+// ré-encodage qui tranche) ; puis ré-encodage en JPEG de 1 200 px de grand côté au plus (type prouvé par le décodage, métadonnées retirées).
+// Rend le Blob JPEG ; lève ErreurImage('trop_lourde' | 'type' | 'trop_grande' | 'indecodable'). N'écrit rien : l'appelant pose les octets.
+export async function preparerPhotoLocale(blob) {
+  if (!(blob instanceof Blob)) throw new ErreurImage('indecodable');
+  if (blob.size > LIMITES_COUVERTURE.octetsLocaux) throw new ErreurImage('trop_lourde');
+  if (blob.type && !ALLOWED_MIME.includes(blob.type)) throw new ErreurImage('type');
+  const dims = await dimensionsImage(blob);
+  if (dims && dims.largeur * dims.hauteur > LIMITES_COUVERTURE.pixels) throw new ErreurImage('trop_grande');
+  return reduireImage(blob);
 }

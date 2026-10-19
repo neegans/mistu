@@ -197,6 +197,93 @@ export async function runPasserelleTests({ eq, ok }) {
     const sortie = await p.complete([{ role: 'user', content: 'U' }], { maxTokens: 5 });
     eq([sortie.startsWith('{"title"'), JSON.parse(journal[1].options.body).corps.max_tokens], [true, 5], 'complete : rend le texte des blocs text ; max_tokens transmis');
     ok(journal.every((x) => new URL(x.url).host.endsWith('.supabase.co')), 'extraction : toutes les requêtes vont à …supabase.co');
+    // --- Lot A « Importer une recette repérée », tâche 3 : extraction amendée (spec import-cible § 3.4, D-5)
+    {
+      eq([corps.corps.system.includes('"incomplete"'), corps.corps.system.includes('"missing_page"'), corps.corps.system.includes('garde-la entière'), corps.corps.system.includes('"language"'), corps.corps.max_tokens, L.MAX_TOKENS_EXTRACTION], [true, true, true, false, 6000, 6000], 'extraction amendée : la consigne demande "incomplete" et "missing_page", « garde-la entière », ne demande plus "language" ; max_tokens vaut 6000');
+      ok(corps.corps.system.includes('Si une page semble manquer (étapes qui commencent au milieu, ingrédients sans étapes, renvoi à une page absente), mets "missing_page": true ; si la recette est visiblement partielle, mets "incomplete": true ; une étape peut tenir sur plusieurs lignes : garde-la entière dans un seul "text".'), 'extraction amendée : la phrase de la spec, mot pour mot');
+      eq([L.REPONSE_BRUTE_MAX, L.BORNES_EXTRACTION], [16000, { titre: 200, ligne: 300, etape: 2000, notes: 2000, lignes: 80, etapes: 60, sousRecettes: 20, sousRecetteTitre: 200, sousRecetteRenvoi: 40, champsIncertains: 40, champIncertain: 200 }], 'extraction amendée : REPONSE_BRUTE_MAX 16 000 points de code ; la table des bornes de la spec');
+      // Un signal déjà levé : aucun POST, Error(annule).
+      { const ctl = new AbortController(); ctl.abort(); let n = 0; let e = null;
+        try { await L.extraireRecette(new L.PasserelleProvider({}, { session: SESSION, fetch: async () => { n += 1; return reponse(200, {}); } }), images, { signal: ctl.signal }); } catch (x) { e = x; }
+        eq([e?.message, n], ['annule', 0], 'extraireRecette : un signal déjà levé → aucun POST, Error(annule)'); }
+      // Le signal est RELAYÉ au fetch (mutant « signal non relayé ») : abandonner pendant l'appel coupe le fetch et rend annule.
+      { const ctl = new AbortController(); let vuSignal = null;
+        const lent = (url, options) => new Promise((_, reject) => { vuSignal = options.signal; options.signal.addEventListener('abort', () => reject(new DOMException('abandon', 'AbortError')), { once: true }); });
+        const p = L.extraireRecette(new L.PasserelleProvider({}, { session: SESSION, fetch: lent }), images, { signal: ctl.signal });
+        await Promise.resolve(); ctl.abort();
+        let e = null; try { await p; } catch (x) { e = x; }
+        eq([e?.message, vuSignal instanceof AbortSignal, vuSignal?.aborted], ['annule', true, true], 'extraireRecette : « Annuler » pendant le vol → le signal du fetch est levé, Error(annule)'); }
+      const texte = (t, extra = {}) => ({ model: 'claude-x', stop_reason: 'end_turn', content: [{ type: 'text', text: t }], ...extra });
+      const avecCorps = (corpsRep) => new L.PasserelleProvider({}, { session: SESSION, fetch: async () => reponse(200, corpsRep) });
+      const echec = async (corpsRep, fn = L.extraireRecette) => { try { await fn(avecCorps(corpsRep), images); return 'acceptée'; } catch (e) { return [e.name, e.raison ?? e.message]; } };
+      const RECETTE_OK = '{"title":"x","ingredients":[{"source_text":"a"}],"steps":[{"text":"s"}]}';
+      eq(await echec(texte(RECETTE_OK, { stop_reason: 'max_tokens' })), ['ErreurExtraction', 'coupe'], 'extraireRecette : stop_reason max_tokens → ErreurExtraction(coupe), même si le JSON est entier');
+      eq(await echec(texte('{"title":"x","ingredients":[],"steps":[]}')), ['ErreurExtraction', 'vide'], 'extraireRecette : zéro ligne ET zéro étape → vide');
+      eq([await echec(texte('pas du json')), await echec(texte('[1,2]')), await echec(texte('{"title": "ouvert"')), await echec({ model: 'claude-x', stop_reason: 'end_turn', content: [] })], [['ErreurExtraction', 'illisible'], ['ErreurExtraction', 'illisible'], ['ErreurExtraction', 'illisible'], ['ErreurExtraction', 'illisible']], 'extraireRecette : prose sans JSON, tableau, JSON tronqué ou réponse sans texte → illisible');
+      eq(await echec(texte('{"title":"x","ingredients":[{"source_text":"  "}],"steps":[{"text":""}]}')), ['ErreurExtraction', 'vide'], 'extraireRecette : des lignes et des étapes blanches ne comptent pas (vide)');
+      // Table des bornes : pour chaque entrée, juste au-dessus → hors_bornes, juste à la borne → acceptée. Comptées en points de code.
+      const B = L.BORNES_EXTRACTION;
+      const base = { title: 't', ingredients: [{ source_text: 'a' }], steps: [{ text: 's' }] };
+      const cas = {
+        titre: (n) => ({ ...base, title: 'x'.repeat(n) }),
+        ligne: (n) => ({ ...base, ingredients: [{ source_text: 'x'.repeat(n) }] }),
+        etape: (n) => ({ ...base, steps: [{ text: 'x'.repeat(n) }] }),
+        notes: (n) => ({ ...base, notes: 'x'.repeat(n) }),
+        lignes: (n) => ({ ...base, ingredients: Array.from({ length: n }, (_, i) => ({ source_text: 'l' + i })) }),
+        etapes: (n) => ({ ...base, steps: Array.from({ length: n }, (_, i) => ({ text: 's' + i })) }),
+        sousRecettes: (n) => ({ ...base, sub_recipes: Array.from({ length: n }, (_, i) => ({ title: 'sr' + i, page_reference: null })) }),
+        sousRecetteTitre: (n) => ({ ...base, sub_recipes: [{ title: 'x'.repeat(n), page_reference: null }] }),
+        sousRecetteRenvoi: (n) => ({ ...base, sub_recipes: [{ title: 'sr', page_reference: 'x'.repeat(n) }] }),
+        champsIncertains: (n) => ({ ...base, uncertain_fields: Array.from({ length: n }, (_, i) => 'u' + i) }),
+        champIncertain: (n) => ({ ...base, uncertain_fields: ['x'.repeat(n)] }),
+      };
+      eq(Object.keys(cas).sort(), Object.keys(B).sort(), 'bornes : la table de tests couvre chaque entrée de BORNES_EXTRACTION, ni plus ni moins');
+      for (const [nom, fab] of Object.entries(cas)) {
+        eq([await echec(texte(JSON.stringify(fab(B[nom] + 1)))), await echec(texte(JSON.stringify(fab(B[nom]))))], [['ErreurExtraction', 'hors_bornes'], 'acceptée'], `bornes : ${nom} à ${B[nom] + 1} → hors_bornes, à ${B[nom]} → acceptée`);
+      }
+      eq([await echec(texte(JSON.stringify({ ...base, title: '😀'.repeat(200) }))), await echec(texte(JSON.stringify({ ...base, title: '😀'.repeat(201) })))], ['acceptée', ['ErreurExtraction', 'hors_bornes']], 'bornes : comptées en POINTS DE CODE (200 emoji = 400 unités UTF-16 passent, 201 non)');
+      eq(await echec(texte(JSON.stringify({ ...base, title: ' ' + 'x'.repeat(200) + ' ' }))), 'acceptée', 'bornes : le titre est mesuré après trim');
+      // Typage champ par champ (validateParsedRecipe, exporté) : entiers finis ≥ 0 ou null ; booléens stricts ; language retiré ; formes hostiles écartées.
+      const v = L.validateParsedRecipe({ ...base, servings: -1, prep_minutes: NaN, cook_minutes: '12', printed_page: 4.5, incomplete: 'oui', missing_page: 1, language: 'fr' });
+      eq([v.servings, v.prep_minutes, v.cook_minutes, v.printed_page, v.incomplete, v.missing_page, 'language' in v], [null, null, null, null, false, false, false], 'validateParsedRecipe : -1, NaN, "12" et 4,5 → null ; "incomplete":"oui" et missing_page 1 → false ; plus de language');
+      eq(L.validateParsedRecipe({ ...base, servings: 4, prep_minutes: 0, cook_minutes: 30, printed_page: 132, incomplete: true, missing_page: true, notes: ' n ', sub_recipes: [{ title: ' sr ', page_reference: ' p. 12 ' }, null, { title: 7 }, { title: 'sans renvoi', page_reference: 9 }], uncertain_fields: ['u', 3, null, ' '], ingredients: [{ source_text: ' a ', uncertain: 'oui' }, { source_text: 'b' }, null, { source_text: 5 }], steps: [{ text: ' l1\nl2 ' }, { text: 9 }, 'x'] }),
+        { title: 't', servings: 4, prep_minutes: 0, cook_minutes: 30, ingredients: [{ source_text: 'a', uncertain: true }, { source_text: 'b', uncertain: false }], steps: [{ text: 'l1\nl2' }], printed_page: 132, sub_recipes: [{ title: 'sr', page_reference: 'p. 12' }, { title: 'sans renvoi', page_reference: null }], uncertain_fields: ['u'], notes: 'n', incomplete: true, missing_page: true },
+        'validateParsedRecipe : typé champ par champ — textes trim, saut de ligne d’une étape gardé, entrées mal formées écartées, sous-recettes typées, booléens, rien d’autre');
+      eq([L.validateParsedRecipe({ ...base, title: null, notes: 7, servings: 2 }).title, L.validateParsedRecipe({ ...base, title: '  ' }).title, L.validateParsedRecipe({ ...base, notes: 7 }).notes, L.validateParsedRecipe({ ...base, ingredients: 'non' }).ingredients], [null, null, null, []], 'validateParsedRecipe : titre nul ou blanc → null, notes non chaîne → null, liste non tableau → vide');
+      for (const hostile of [null, 'x', 7, [], undefined]) { let e = null; try { L.validateParsedRecipe(hostile); } catch (x) { e = x; } eq([e?.name, e?.raison], ['ErreurExtraction', 'illisible'], `validateParsedRecipe : ${JSON.stringify(hostile) ?? 'undefined'} → illisible`); }
+      { let e = null; try { L.validateParsedRecipe({ ...base, ingredients: 'non', steps: { x: 1 } }); } catch (x) { e = x; } eq(e?.raison, 'vide', 'validateParsedRecipe : listes non tableaux → vide'); }
+      // extraireRecette rend { recette, stopReason, modele, texteBrut } ; l'enveloppe extractRecipeFromImages rend la recette seule.
+      { const brut = '{"title":"Tarte","ingredients":[{"source_text":"2 oeufs"}],"steps":[{"text":"Cuire."}],"incomplete":true}';
+        const p2 = avecCorps(texte(brut));
+        const r = await L.extraireRecette(p2, images);
+        eq([Object.keys(r).sort(), r.stopReason, r.modele, r.texteBrut, r.recette.title, r.recette.incomplete, p2.stopReason, p2.modele], [['modele', 'recette', 'stopReason', 'texteBrut'], 'end_turn', 'claude-x', brut, 'Tarte', true, 'end_turn', 'claude-x'], 'extraireRecette : { recette, stopReason, modele, texteBrut } ; complete pose this.stopReason et this.modele');
+        eq(await L.extractRecipeFromImages(p2, images), r.recette, 'extractRecipeFromImages(provider, images) : enveloppe compatible, la recette seule');
+        const p3 = avecCorps({ model: 7, content: [{ type: 'text', text: brut }] });
+        eq([(await L.extraireRecette(p3, images)).stopReason, (await L.extraireRecette(p3, images)).modele, p3.stopReason], [null, null, null], 'extraireRecette : sans stop_reason ni model lisibles → null (rien d’inventé)'); }
+      // La réponse brute est bornée à 16 000 points de code, et une réponse refusée la porte sur l'erreur (diagnostic du journal, Review Focus 4).
+      { const long = '{"title":"t","ingredients":[{"source_text":"a"}],"steps":[{"text":"s"}],"notes":"' + 'n'.repeat(20000) + '"}';
+        let e = null; try { await L.extraireRecette(avecCorps(texte(long)), images); } catch (x) { e = x; }
+        eq([e?.name, e?.raison, Array.from(e?.texteBrut ?? '').length, e?.texteBrut?.startsWith('{"title":"t"'), e?.stopReason, e?.modele], ['ErreurExtraction', 'hors_bornes', 16000, true, 'end_turn', 'claude-x'], 'extraireRecette : une réponse refusée porte texteBrut (coupé à REPONSE_BRUTE_MAX), stopReason et modele sur l’erreur');
+        const r = await L.extraireRecette(avecCorps(texte(RECETTE_OK + ' '.repeat(20000))), images);
+        eq(Array.from(r.texteBrut).length, 16000, 'extraireRecette : texteBrut d’un succès est coupé à 16 000 points de code aussi');
+        let c = null; try { await L.extraireRecette(avecCorps(texte('{"title":"x"', { stop_reason: 'max_tokens' })), images); } catch (x) { c = x; }
+        eq([c?.raison, c?.texteBrut, c?.stopReason], ['coupe', '{"title":"x"', 'max_tokens'], 'extraireRecette : une coupure garde le texte reçu et stopReason sur l’erreur'); }
+      // extraireIndex : { index: { entries, uncertain }, stopReason, modele, texteBrut } ; extractIndexFromImages rend les entrées seules.
+      { const brutIndex = '{"entries":[{"title":" Tarte ","printed_page":12,"section":null,"ingredients_mentioned":["pomme"]},{"title":5},{"title":"Soupe","printed_page":"9"}],"uncertain":["x",4]}';
+        const pi = avecCorps(texte(brutIndex));
+        const r = await L.extraireIndex(pi, images);
+        eq(r, { index: { entries: [{ title: 'Tarte', printed_page: 12, section: null, ingredients_mentioned: ['pomme'] }, { title: 'Soupe', printed_page: null, section: null, ingredients_mentioned: [] }], uncertain: ['x'] }, stopReason: 'end_turn', modele: 'claude-x', texteBrut: brutIndex }, 'extraireIndex : { index: { entries, uncertain }, stopReason, modele, texteBrut } — entrées typées, incertitudes chaînes seulement');
+        eq(await L.extractIndexFromImages(pi, images), r.index, 'extractIndexFromImages(provider, images) : enveloppe compatible, { entries, uncertain } seuls');
+        eq([await echec(texte(brutIndex, { stop_reason: 'max_tokens' }), L.extraireIndex), await echec(texte('pas du json'), L.extraireIndex), await echec(texte('{"x":1}'), L.extraireIndex)], [['ErreurExtraction', 'coupe'], ['ErreurExtraction', 'illisible'], ['ErreurExtraction', 'illisible']], 'extraireIndex : coupure → coupe ; prose ou JSON sans entries → illisible');
+        { const ctl = new AbortController(); ctl.abort(); let n = 0; let e = null;
+          try { await L.extraireIndex(new L.PasserelleProvider({}, { session: SESSION, fetch: async () => { n += 1; return reponse(200, {}); } }), images, { signal: ctl.signal }); } catch (x) { e = x; }
+          eq([e?.message, n], ['annule', 0], 'extraireIndex : un signal déjà levé → aucun POST, Error(annule)'); } }
+      // parseStepsBlock(texte, { parParagraphe }) : une étape par paragraphe (ligne vide), sauts de ligne internes gardés ; sans option, comme avant.
+      const { parseStepsBlock } = await import('../src/domain/lines.js');
+      eq([parseStepsBlock('a\nb\n\nc', { parParagraphe: true }).map((s) => s.text), parseStepsBlock('a\nb\n\nc').map((s) => s.text), parseStepsBlock('a\nb\n\nc', {}).map((s) => s.text)], [['a\nb', 'c'], ['a', 'b', 'c'], ['a', 'b', 'c']], 'parseStepsBlock : deux étapes par paragraphe, trois sans option (ou avec un sac vide)');
+      eq(parseStepsBlock('1. Peler les pommes\r\nles couper.\r\n\r\n2. Cuire 10 min\n\n\n', { parParagraphe: true }).map((s) => [s.position, s.text, s.timers?.[0]?.seconds]), [[1, 'Peler les pommes\nles couper.', undefined], [2, 'Cuire 10 min', 600]], 'parseStepsBlock par paragraphe : numérotation retirée en tête de paragraphe, CRLF normalisé, paragraphes vides ignorés, minuteurs détectés sur le texte entier');
+      eq(parseStepsBlock('1. a\r\n2. b').map((s) => s.text), ['a', 'b'], 'parseStepsBlock sans option : CRLF coupe toujours une étape par ligne (inchangé)');
+    }
     // Échecs : la raison devient le message de l'Error ; le corps de la réponse n'y est pas
     for (const [s, corpsErr, message] of [[401, { erreur: 'non_connecte' }, 'non_connecte'], [403, { erreur: 'non_admis' }, 'non_admis'], [429, { erreur: 'quota', quota: 60 }, 'quota'], [502, { erreur: 'serveur', detail: 'CORPS-SENTINELLE' }, 'serveur']]) {
       let erreur = null; try { await new L.PasserelleProvider({}, { session: SESSION, fetch: async () => reponse(s, corpsErr) }).complete([{ role: 'user', content: 'U' }]); } catch (e) { erreur = e; }

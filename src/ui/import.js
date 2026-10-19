@@ -12,7 +12,7 @@ import { providerFrom, extractIndexFromImages, pagePourEnvoi } from '../domain/l
 import { pageHeader, section, emptyState, select, field, carteConnexion, texteEchecAssistant, pdfFrame, libelleLivre, sessionAssistant } from './components.js';
 import { demarrerConnexion } from './settings.js';
 
-const SMALL_IMAGE_BYTES = 80 * 1024;
+const { SMALL_IMAGE_BYTES } = repo; // une seule définition (repo.ajouterPages signale l'image très légère ; replacePage aussi)
 
 const INTENTIONS = ['index', 'recette'];
 // L'intention (spec § 10) voyage dans l'adresse, pas dans la base : consommée au premier rendu, puis retirée.
@@ -29,31 +29,12 @@ export function appliquerIntention({ intention, pageIds = [] } = {}) {
 // l'adresse à ce moment-là remplacerait celle de l'écran SUIVANT par celle d'une séance qu'on vient de quitter.
 export const peutRetirerIntention = (applique, sessionId, queryCourante) => !!applique?.consommee && queryCourante?.session === sessionId;
 
-export async function startScanSession(files, { edition_id = null, session_id = null, intention = null } = {}) {
-  let session = session_id ? await repo.get('scan_sessions', session_id) : null;
-  if (!session) session = { id: repo.newId('ss'), status: 'open', edition_id, started_at: repo.nowIso(), page_ids: [], document_ids: [], device_id: deviceId() };
-  const docs = [], pages = [];
-  let position = session.page_ids.length;
-  for (const file of files) {
-    const sha256 = await sha256Hex(file);
-    await repo.putFile(sha256, file, { original_filename: file.name });
-    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
-    const isEpub = file.type === 'application/epub+zip' || /\.epub$/i.test(file.name);
-    const doc = { id: repo.newId('doc'), edition_id: session.edition_id || edition_id || null, source_type: isPdf ? 'pdf' : isEpub ? 'epub' : 'photo', original_filename: file.name, blob_path: `files/${sha256}`, sha256, size: file.size, mime: file.type, scan_session_id: session.id, captured_at: repo.nowIso() };
-    docs.push(doc);
-    session.document_ids.push(doc.id);
-    if (!isPdf && !isEpub) {
-      const issues = [];
-      if (file.size < SMALL_IMAGE_BYTES) issues.push(t('Image très légère : possiblement floue ou trop petite'));
-      const page = { id: repo.newId('pg'), document_id: doc.id, edition_id: doc.edition_id, sha256, printed_page: null, file_position: null, locator: null, position: ++position, issues, kind: null };
-      pages.push(page);
-      session.page_ids.push(page.id);
-    }
-  }
-  session.status = 'open';
-  await repo.saveBatch({ source_documents: docs, source_pages: pages, scan_sessions: [session] });
-  toast(t('{n} fichier(s) conservé(s) sur cet appareil', { n: files.length }));
-  navigate(adresseSeance(session.id, intention));
+// Les écritures vivent dans repo.ajouterPages (spec import-cible § 3.6 : octets, séance, pages, documents — et la ligne du journal pour l'écran
+// ciblé) ; ici seulement ce qui est propre à cet écran : le toast et la navigation vers la séance. `naviguer` et `notifier` sont injectables (tests).
+export async function startScanSession(files, { edition_id = null, session_id = null, intention = null, naviguer = navigate, notifier = toast } = {}) {
+  const { session } = await repo.ajouterPages(files, { edition_id, session_id });
+  notifier(t('{n} fichier(s) conservé(s) sur cet appareil', { n: files.length }));
+  naviguer(adresseSeance(session.id, intention));
   return session;
 }
 

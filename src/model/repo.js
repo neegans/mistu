@@ -8,6 +8,9 @@ import { syncNow } from '../sync/clock.js';
 import { nettoyerChaines, porteDesCaracteresDeControle } from '../sync/lots.js';
 import { resolveMime } from '../sync/mime.js';
 import { normaliserConfigAssistant, LIGNE_ASSISTANT } from '../domain/assistant-config.js';
+import { assertVocabulaire } from '../domain/vocabulaire.js';
+import { sha256Hex } from '../core/hash.js';
+import { t } from '../core/i18n.js';
 
 // Base de l'application. Liaison vivante : bindDatabase ne sert qu'aux tests, pour travailler sur une base jetable.
 export let db = new Database(DB_NAME, DB_VERSION, STORES);
@@ -399,6 +402,61 @@ export const getFile = (sha256) => db.get('files', sha256);
 export async function getFiles(sha256s) {
   const rows = await db.getMany('files', [...new Set(sha256s.filter(Boolean))]);
   return new Map(rows.filter(Boolean).map((r) => [r.sha256, r]));
+}
+
+// --- Pages d'une séance de scan (spec import-cible § 3.6) ------------------------------------------------------
+// Comme startScanSession (src/ui/import.js) SANS navigation ni toast : les octets de chaque fichier par putFile d'abord (idempotent, hors
+// file : R58), puis les lignes de séance (source_documents, source_pages, scan_sessions) en UN lot. Trois chemins :
+// - `import_id` : UN repo.transitionner sur la ligne du journal (attendus a_lancer | a_verifier | echec ; patch-FONCTION : les page_ids neufs
+//   s'ajoutent EN FIN de ceux LUS DANS LA TRANSACTION, jamais d'une copie périmée), les lignes de séance dans la même transaction. Un import
+//   terminé (enregistre, ignore) ou en vol refuse (TransitionRefusee) et RIEN de la séance n'est écrit — la ligne files posée avant reste (assumé).
+// - `import: { id, kind, recipe_id, edition_id, device_id }` (première photo : la ligne n'existe pas encore, spec § 4.1 — une visite sans photo
+//   n'écrit rien) : un saveBatch qui écrit la ligne a_lancer (scan_session_id, page_ids) AVEC les lignes de séance.
+// - ni l'un ni l'autre : le saveBatch existant.
+// Rend { session, pages, docs, importId } ; startScanSession navigue et notifie, lui. Une image très légère garde son signalement (issues).
+export const SMALL_IMAGE_BYTES = 80 * 1024;
+const estPdf = (file) => file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+const estEpub = (file) => file.type === 'application/epub+zip' || /\.epub$/i.test(file.name);
+export async function ajouterPages(files, { edition_id = null, session_id = null, import_id = null, import: nouvelImport = null } = {}) {
+  const existante = session_id ? await db.get('scan_sessions', session_id) : null;
+  const session = existante
+    ? { ...existante, page_ids: [...(existante.page_ids || [])], document_ids: [...(existante.document_ids || [])] }
+    : { id: newId('ss'), status: 'open', edition_id, started_at: nowIso(), page_ids: [], document_ids: [], device_id: deviceId() };
+  const docs = [], pages = [];
+  let position = session.page_ids.length;
+  for (const file of files) {
+    const sha256 = await sha256Hex(file);
+    await putFile(sha256, file, { original_filename: file.name });
+    const pdf = estPdf(file), epub = estEpub(file);
+    const doc = { id: newId('doc'), edition_id: session.edition_id || edition_id || null, source_type: pdf ? 'pdf' : epub ? 'epub' : 'photo', original_filename: file.name, blob_path: `files/${sha256}`, sha256, size: file.size, mime: file.type, scan_session_id: session.id, captured_at: nowIso() };
+    docs.push(doc);
+    session.document_ids.push(doc.id);
+    if (!pdf && !epub) {
+      const issues = file.size < SMALL_IMAGE_BYTES ? [t('Image très légère : possiblement floue ou trop petite')] : [];
+      const page = { id: newId('pg'), document_id: doc.id, edition_id: doc.edition_id, sha256, printed_page: null, file_position: null, locator: null, position: ++position, issues, kind: null };
+      pages.push(page);
+      session.page_ids.push(page.id);
+    }
+  }
+  session.status = 'open';
+  const lignes = { source_documents: docs, source_pages: pages, scan_sessions: [session] };
+  const neufs = pages.map((p) => p.id);
+  if (import_id) {
+    await transitionner('imports', import_id, { attendus: ['a_lancer', 'a_verifier', 'echec'], patch: (c) => ({ page_ids: [...(c.page_ids || []), ...neufs] }), puts: lignes });
+    return { session, pages, docs, importId: import_id };
+  }
+  if (nouvelImport) {
+    const ligne = {
+      id: nouvelImport.id, kind: nouvelImport.kind, edition_id: nouvelImport.edition_id ?? session.edition_id ?? null, recipe_id: nouvelImport.recipe_id ?? null,
+      scan_session_id: session.id, page_ids: neufs, photo_sha256: null, status: 'a_lancer', erreur: null, resultat: null, reponse_brute: null,
+      appels: 0, model: null, duree_ms: null, device_id: nouvelImport.device_id ?? deviceId(), document_id_vol: null, battement_at: null, started_at: null, finished_at: null,
+    };
+    assertVocabulaire(ligne, 'imports'); // D-12 : la ligne du journal naît ici, dans son vocabulaire fermé
+    await saveBatch({ ...lignes, imports: [ligne] });
+    return { session, pages, docs, importId: ligne.id };
+  }
+  await saveBatch(lignes);
+  return { session, pages, docs, importId: null };
 }
 
 // --- Journal de consultation (spec §32) : seules les ouvertures volontaires comptent ------------
