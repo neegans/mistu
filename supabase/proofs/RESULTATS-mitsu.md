@@ -298,3 +298,27 @@ Code : `supabase/functions/assistant/` (spec `docs/superpowers/specs/2026-10-18-
 | S12 | corps avec les bons noms (`p_owner`, `p_outil`, `p_quota`, `p_octets`) | 401 | `{"code":"42501","message":"permission denied for function assistant_reserver"}` | `anon` est refusé par l'API aussi (le verdict 2.04 vaut par la voie HTTP) ; seule `service_role`, donc la fonction `assistant`, peut réserver |
 
 Reste non prouvé côté SQL : la concurrence réelle (deux appels simultanés sous le verrou), qui ne se joue pas dans l'éditeur.
+
+## Preuve `0005_imports.sql` — à jouer
+
+Section préparée le 18 octobre 2026 (lot A « importer une recette repérée », spec
+`docs/superpowers/specs/2026-10-18-import-cible-design.md` § 3.5 ; procédure : étape 11 du README). **À jouer par Neegan avant
+toute fusion et tout `push` du code de ce lot**, après `0003` (jouée le 18 octobre, ci-dessus) ; indépendante de `0004`. Jetons
+`A_EMAIL` / `A_UUID` remis ; la preuve n'affiche jamais la colonne `data` (compteurs, motifs et verdicts « conforme / différente »
+seulement) ; aucune clé n'est en jeu (`imports` n'en porte pas). La migration `0005` est rendue depuis le `SYNC_STORES` vivant tant
+qu'elle n'est pas appliquée : une fois collée, la figer (`SYNC_STORES_0005` + empreinte épinglée, fin de l'étape 11).
+
+| Heure | Collage | Résultat |
+| --- | --- | --- |
+| … | `insert into private.allowed_users …` (1 adresse de preuve `exemple.invalid`) | … |
+| … | `migrations/0005_imports.sql` | … (attendu `Success. No rows returned`) |
+| … | empreinte du `0005` collé : `shasum -a 256 supabase/migrations/0005_imports.sql` | … |
+| … | `notify pgrst, 'reload schema';` (collée seule) | … |
+| … | preuve `0005` (« Run without RLS ») | `999 BILAN : … faux sur …` |
+| … | retrait de l'adresse de preuve | … |
+
+Tableau des verdicts (ordre, etape, attendu, obtenu, ok), tel que rendu par l'éditeur SQL :
+
+| ordre | etape | attendu | obtenu | ok |
+| --- | --- | --- | --- | --- |
+| … | … | … | … | … |

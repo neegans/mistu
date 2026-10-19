@@ -7,7 +7,7 @@ import { SYNC_STORES_0001, SYNC_STORES_0003, TABLES } from '../src/sync/tables.j
 import { SYNC_STORES } from '../src/model/schema.js';
 import { ALLOWED_MIME } from '../src/sync/mime.js';
 
-const { tables: sql, storage, delta } = renderMigrations();
+const { tables: sql, storage, delta, imports } = renderMigrations();
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 
 // Corps d'une fonction, borne au premier « $$; » qui suit sa declaration : une assertion portant sur UNE fonction ne
@@ -187,9 +187,9 @@ test('N1 : un echec non imputable a l element remonte au lieu de devenir un reje
   assert.ok(iForme > iListe, 'les classes remontent avant que « forme » ne soit pose');
 });
 test('aucune donnee personnelle, determinisme', () => {
-  assert.doesNotMatch(sql + storage + delta, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+  assert.doesNotMatch(sql + storage + delta + imports, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
   const again = renderMigrations();
-  assert.equal(again.tables, sql); assert.equal(again.storage, storage); assert.equal(again.delta, delta);
+  assert.equal(again.tables, sql); assert.equal(again.storage, storage); assert.equal(again.delta, delta); assert.equal(again.imports, imports);
 });
 
 // --- Assistant par le compte, tache 8 : migration 0003 a ajout seul (spec assistant-par-le-compte § 6.1-6.2) -------
@@ -268,8 +268,16 @@ const lire = (chemin) => readFileSync(new URL('../' + chemin, import.meta.url), 
 const RACINE_MIG = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const SCRIPT_MIG = path.join(RACINE_MIG, 'tools', 'generer-migrations.mjs');
 const MIGRATIONS = path.join(RACINE_MIG, 'supabase', 'migrations');
-const NOMS = ['0001_tables_et_regles.sql', '0002_stockage.sql', '0003_assistant_config.sql'];
+const NOMS = ['0001_tables_et_regles.sql', '0002_stockage.sql', '0003_assistant_config.sql', '0005_imports.sql'];
 const instructions = (texte) => texte.split('\n').map((l) => l.trim()).filter((l) => l !== '');
+// Une rubrique du README : du titre donne a la prochaine rubrique (## ou ###), pas seulement au prochain « ## » — depuis la tache 2 du
+// lot A, l'etape 10 est suivie de l'etape 11 (###), et une tranche ouverte jusqu'au « ## » suivant compterait deux fois `notify pgrst`.
+const rubrique = (texte, titre) => {
+  const debut = texte.indexOf(titre);
+  assert.notEqual(debut, -1, 'rubrique : ' + titre);
+  const fins = [texte.indexOf('\n## ', debut), texte.indexOf('\n### ', debut)].filter((i) => i !== -1);
+  return texte.slice(debut, fins.length ? Math.min(...fins) : undefined);
+};
 
 test('preuve 0001 : les cinq motifs, les privileges, R12, rollback final, aucune adresse reelle', () => {
   const p = lire('supabase/proofs/0001_tables_et_regles.sql');
@@ -401,6 +409,7 @@ test('F1 : --check --dir rend 0 sur une copie conforme, 1 des quun fichier est a
     assert.match(rouge.stderr, /0001_tables_et_regles\.sql/);
     assert.doesNotMatch(rouge.stderr, /0002_stockage\.sql/, 'seul le fichier altere est nomme');
     assert.doesNotMatch(rouge.stderr, /0003_assistant_config\.sql/, 'seul le fichier altere est nomme');
+    assert.doesNotMatch(rouge.stderr, /0005_imports\.sql/, 'seul le fichier altere est nomme');
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 test('F1 : --dir vaut aussi pour lecriture, et le depot nest pas touche', () => {
@@ -587,8 +596,9 @@ test('0004 (P-8) : le commentaire dit l hypothese READ COMMITTED juste au-dessus
   assert.equal(avant.at(-1), '', 'la fonction commence en debut de ligne');
   assert.equal(avant.at(-2), "-- Le motif verrou-puis-comptage suppose READ COMMITTED (défaut de PostgREST) : en REPEATABLE READ l'instantané précéderait le verrou.");
 });
-test('0004 : hors du generateur — NOMS inchange, le dossier de migrations la contient', () => {
-  assert.deepEqual(NOMS, ['0001_tables_et_regles.sql', '0002_stockage.sql', '0003_assistant_config.sql']);
+test('0004 : hors du generateur — absente de NOMS (qui porte les quatre generees), le dossier de migrations la contient', () => {
+  assert.deepEqual(NOMS, ['0001_tables_et_regles.sql', '0002_stockage.sql', '0003_assistant_config.sql', '0005_imports.sql']);
+  assert.ok(!NOMS.some((n) => n.startsWith('0004')), '0004 n est pas generee');
   assert.ok(readFileSync(path.join(MIGRATIONS, '0004_assistant_journal.sql'), 'utf8').length > 0);
 });
 
@@ -728,7 +738,7 @@ test('README : etape 10 (secrets, deploiement --no-verify-jwt, 0004 et sa preuve
   const debut = r.indexOf("### 10. La passerelle de l'assistant : secret, fonction, `0004` et sa preuve");
   assert.notEqual(debut, -1, 'etape 10');
   assert.ok(r.indexOf('### 9. Fermer les autres portes') < debut && debut < r.indexOf('## Où coller les sorties'), '10 apres 9, avant « Où coller les sorties »');
-  const etape = r.slice(debut, r.indexOf('\n## ', debut));
+  const etape = rubrique(r, "### 10. La passerelle de l'assistant : secret, fonction, `0004` et sa preuve");
   for (const m of ['--no-verify-jwt', 'ANTHROPIC_API_KEY', 'OPTIONS', '0004', 'ASSISTANT_MODELE', 'ASSISTANT_QUOTA_JOUR', 'ASSISTANT_ORIGINES',
     'Edge Functions', 'Secrets', 'supabase login', 'supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt',
     'migrations/0004_assistant_journal.sql', 'proofs/0004_assistant_journal.sql', 'Run without RLS', '999 BILAN',
@@ -770,8 +780,7 @@ test('README racine (F-2) : plus de cle ni de fournisseur a configurer — l ass
 
 test('README etape 10 (F-14) : deploiement avec --use-api, exemple d origine locale sur 8086', () => {
   const r = lire('supabase/README.md');
-  const debut = r.indexOf("### 10. La passerelle de l'assistant");
-  const etape = r.slice(debut, r.indexOf('\n## ', debut));
+  const etape = rubrique(r, "### 10. La passerelle de l'assistant");
   assert.ok(etape.includes('supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api'), 'commande avec --use-api');
   assert.ok(/--use-api[^\n]*\n|`--use-api`/.test(etape) && /Docker/.test(etape), '--use-api est expliqué : sans Docker');
   assert.ok(!etape.includes('8083') && etape.includes('http://localhost:8086'), 'exemple d origine locale : le port 8086, plus 8083');
@@ -779,8 +788,7 @@ test('README etape 10 (F-14) : deploiement avec --use-api, exemple d origine loc
 
 test('README etape 10 (F-1) : la sonde GET montre { modele, quotaJour, cles } — le repere des cles, jamais une cle', () => {
   const r = lire('supabase/README.md');
-  const debut = r.indexOf("### 10. La passerelle de l'assistant");
-  const etape = r.slice(debut, r.indexOf('\n## ', debut));
+  const etape = rubrique(r, "### 10. La passerelle de l'assistant");
   assert.ok(etape.includes('"modele":"claude-sonnet-5-5","quotaJour":60,"cles":') , 'le GET montre cles');
   for (const m of ['nouvelles', 'legacy', 'mixte', 'sb_publishable_', 'sb_secret_']) assert.ok(etape.includes(m), 'cles : ' + m);
   assert.doesNotMatch(etape, /sb_(publishable|secret)_[A-Za-z0-9]{6,}/, 'aucune cle reelle : les prefixes seulement');
@@ -788,8 +796,7 @@ test('README etape 10 (F-1) : la sonde GET montre { modele, quotaJour, cles } �
 
 test('README etape 10 (F-9) : un geste FACULTATIF pour vider cote serveur toute ligne qui porterait encore une cle', () => {
   const r = lire('supabase/README.md');
-  const debut = r.indexOf("### 10. La passerelle de l'assistant");
-  const etape = r.slice(debut, r.indexOf('\n## ', debut));
+  const etape = rubrique(r, "### 10. La passerelle de l'assistant");
   const sql = `update public.assistant_config set data = data || '{"provider":"none","model":"","base_url":"","api_key":""}'::jsonb, updated_at = now() where coalesce(data->>'api_key','') <> '' or coalesce(data->>'provider','none') <> 'none';`;
   assert.ok(etape.includes(sql), 'la commande SQL exacte');
   const i = etape.indexOf(sql);
@@ -807,4 +814,254 @@ test('RESULTATS-mitsu (F-1) : la note de S5 ne dit plus « cle publique nouvelle
   assert.ok(s5, 'ligne S5');
   assert.ok(s5.includes('donc `createClient` a reçu une clé publique valide — nouvelle ou legacy, cette sonde ne les distingue pas ; le GET avec une session réelle le dira (`cles`)'), s5);
   assert.ok(!s5.includes('a bien reçu') && !s5.includes('SUPABASE_PUBLISHABLE_KEYS` lu'), 'ancienne affirmation retiree');
+});
+
+// --- Lot A (import cible), tache 2 : migration 0005 a ajout seul, sa preuve, README etape 11, RESULTATS (spec import-cible § 3.5, § 7) ------
+// 0005 est rendue pour les magasins de SYNC_STORES absents de la liste FIGEE SYNC_STORES_0003 (aujourd'hui : imports, le dernier, K-9), avec
+// les quatre fonctions recreees sur les 27 noms. 0001, 0002 et 0003 ne bougent pas d'un octet (empreintes plus haut). Les tests relisent le
+// SQL PRODUIT (renderMigrations) puis le fichier commite, la preuve, le README et RESULTATS, comme pour 0003.
+const corpsDe = (texte, nom) => {
+  const debut = texte.indexOf(`create or replace function public.${nom}(`);
+  assert.notEqual(debut, -1, 'declaration de ' + nom);
+  const fin = texte.indexOf('$$;', debut);
+  assert.notEqual(fin, -1, 'fin du corps de ' + nom);
+  return texte.slice(debut, fin + 3);
+};
+const QUATRE = ['sync_push', 'sync_purge', 'sync_purge_all', 'purge_tombstones'];
+const litteralDe = (stores) => 'array[' + stores.map((s) => `'${s}'`).join(', ') + ']';
+const sansCommentairesSql = (texte) => texte.split('\n').filter((ligne) => !/^\s*--/.test(ligne)).join('\n');
+
+test('SYNC_STORES : 27 noms, les 26 figes de 0003 puis imports, le dernier (K-9) ; 0005 ne porte qu imports', () => {
+  assert.equal(SYNC_STORES.length, 27);
+  assert.deepEqual(SYNC_STORES.slice(0, 26), [...SYNC_STORES_0003]);
+  assert.equal(SYNC_STORES.at(-1), 'imports');
+  assert.deepEqual(SYNC_STORES.filter((s) => !SYNC_STORES_0003.includes(s)), ['imports']);
+});
+test('0005 : une seule table neuve, public.imports, du gabarit (cle composee, RLS, quatre regles, declencheur, cascade)', () => {
+  assert.equal(typeof imports, 'string', 'renderMigrations rend une quatrieme cible : imports');
+  assert.equal((imports.match(/create table public\./g) || []).length, 1);
+  assert.match(imports, /create table public\.imports \(/);
+  assert.doesNotMatch(imports, /create table public\.(assistant_config|books|files)/);
+  assert.equal((imports.match(/primary key \(owner_id, id\)/g) || []).length, 1);
+  assert.equal((imports.match(/references auth\.users\(id\) on delete cascade/g) || []).length, 1);
+  assert.match(imports, /alter table public\.imports enable row level security;/);
+  const policies = imports.match(/create policy[^;]+;/g) || [];
+  assert.equal(policies.length, 4);
+  for (const p of policies) { assert.match(p, /on public\.imports for /); assert.match(p, /to authenticated/); assert.match(p, /public\.is_allowed\(\) and owner_id = auth\.uid\(\)/); }
+  assert.deepEqual(policies.map((p) => p.match(/ for (\w+) /)[1]), ['select', 'insert', 'update', 'delete']);
+  assert.match(policies[3], /current_setting\('app\.purge', true\) = 'on'/);
+  assert.match(imports, /create trigger imports_seq before insert or update on public\.imports for each row execute function public\.touch_server_seq\(\);/);
+  assert.equal((imports.match(/execute function public\.touch_server_seq\(\)/g) || []).length, 1);
+});
+test('0005 : colonnes generees edition_id, recipe_id, status (text, (data->>…) stored), DANS le bloc create table', () => {
+  const debut = imports.indexOf('create table public.imports (');
+  assert.notEqual(debut, -1);
+  const bloc = imports.slice(debut, imports.indexOf('\n);', debut));
+  for (const c of ['edition_id', 'recipe_id', 'status']) {
+    assert.match(bloc, new RegExp(`\\n  ${c} text generated always as \\(data->>'${c}'\\) stored`), c);
+  }
+  assert.equal((bloc.match(/generated always as/g) || []).length, 3, 'trois colonnes generees, pas une de plus');
+  assert.doesNotMatch(bloc, /check \(not \(data \? 'blob'\)\)/, 'la contrainte de files ne deborde pas sur imports');
+  // Celles du schema : les trois index declares de STORES.imports, ni plus ni moins ; cle id ; aucun champ requis (recipe_id est nul pour un index).
+  assert.deepEqual(TABLES.imports.generated.map((g) => g.name), ['edition_id', 'recipe_id', 'status']);
+  assert.equal(TABLES.imports.key, 'id');
+  assert.deepEqual(TABLES.imports.required, []);
+});
+test('0005 : index imports_recv (owner_id, server_seq) et un index par colonne generee ; revoke anon une fois, entre la table et les fonctions', () => {
+  assert.match(imports, /create index imports_recv on public\.imports \(owner_id, server_seq\);/);
+  for (const c of ['edition_id', 'recipe_id', 'status']) assert.match(imports, new RegExp(`create index imports_${c} on public\\.imports \\(owner_id, ${c}\\);`), c);
+  assert.equal((imports.match(/create index /g) || []).length, 4, 'quatre index : recv + trois colonnes');
+  assert.match(imports, /revoke all on public\.imports from anon;/);
+  assert.equal((imports.match(/revoke all on public\./g) || []).length, 1, 'un seul revoke de table');
+  assert.doesNotMatch(imports, /revoke all on all tables/);
+  assert.ok(imports.indexOf('create table public.imports (') < imports.indexOf('revoke all on public.imports from anon;'), 'revoke apres la table');
+  assert.ok(imports.indexOf('revoke all on public.imports from anon;') < imports.indexOf('create or replace function public.sync_push('), 'revoke avant les fonctions');
+});
+test('0005 : quatre fonctions recreees avec les 27 magasins ; imports present dans CHACUNE, en dernier ; keys et required le connaissent', () => {
+  assert.equal((imports.match(/create or replace function public\.(\w+)\(/g) || []).length, 4);
+  assert.equal(imports.split(litteralDe(SYNC_STORES)).length - 1, 4, 'sync_push, sync_purge, sync_purge_all, purge_tombstones');
+  assert.equal(imports.split(litteralDe(SYNC_STORES_0003)).length - 1, 0, 'plus aucune liste a 26');
+  for (const f of QUATRE) {
+    const c = corpsDe(imports, f);
+    assert.ok(c.includes("'imports'"), f + ' connait imports');
+    assert.ok(c.includes("'assistant_config', 'imports']"), f + ' : imports est le dernier, apres assistant_config (K-9)');
+  }
+  const push = corpsDe(imports, 'sync_push');
+  assert.ok(push.includes('"assistant_config":"id","imports":"id"}'), 'keys : imports dernier, cle id');
+  assert.ok(push.includes('"assistant_config":[],"imports":[]}'), 'required : imports dernier, vide');
+  for (const f of ['sync_push(jsonb)', 'sync_purge(text, text)', 'sync_purge_all()']) {
+    assert.match(imports, new RegExp(`revoke execute on function public\\.${f.replace(/[()]/g, '\\$&')} from public, anon;`), f);
+    assert.match(imports, new RegExp(`grant execute on function public\\.${f.replace(/[()]/g, '\\$&')} to authenticated;`), f);
+  }
+  assert.match(imports, /revoke execute on function public\.purge_tombstones\(\) from public, anon, authenticated;/);
+  assert.doesNotMatch(imports, /cron\.schedule/);
+});
+test('0005 : les quatre fonctions recreees sont celles de 0001, aux trois listes pres ; rien d autre n est touche', () => {
+  const debutDe = (texte) => texte.indexOf('-- Envoi (spec § 3.4)');
+  assert.notEqual(debutDe(imports), -1);
+  const bloc0001 = sql.slice(debutDe(sql), sql.indexOf("select cron.schedule('cuisine-os-tombales'"));
+  const enJson = (stores, champ) => JSON.stringify(Object.fromEntries(stores.map((s) => [s, TABLES[s][champ]]))).replace(/'/g, "''");
+  const ramene = imports.slice(debutDe(imports))
+    .split(litteralDe(SYNC_STORES)).join(litteralDe(SYNC_STORES_0001))
+    .split(enJson(SYNC_STORES, 'key')).join(enJson(SYNC_STORES_0001, 'key'))
+    .split(enJson(SYNC_STORES, 'required')).join(enJson(SYNC_STORES_0001, 'required'));
+  assert.equal(ramene, bloc0001);
+  for (const autre of ['touch_server_seq() returns', 'is_allowed() returns', 'before_user_created(', 'enforce_allowed_user() returns', 'storage.objects', 'storage.buckets', 'create schema', 'create sequence', 'create extension', 'private.allowed_users (', 'revoke all on all tables', 'assistant_journal', 'assistant_reserver']) {
+    assert.ok(!imports.includes(autre), autre);
+  }
+});
+test('0005 : en-tete (spec import-cible § 3.5, 27 magasins, apres 0001-0003), 0003 intacte, commitee = generee', () => {
+  const tete = imports.slice(0, imports.indexOf('create table public.imports ('));
+  assert.ok(tete.startsWith('-- 0005_imports.sql — généré par tools/generer-migrations.mjs ; ne pas éditer à la main.'), 'premiere ligne');
+  assert.ok(tete.includes('docs/superpowers/specs/2026-10-18-import-cible-design.md'), 'la spec du lot A');
+  assert.ok(tete.includes('À AJOUT SEUL : 1 table(s) neuve(s) et les quatre fonctions recréées avec la liste des 27 magasins.'), 'le compte des magasins');
+  assert.ok(tete.includes('APRÈS 0001, 0002 et 0003'), 'ordre des collages');
+  assert.doesNotMatch(tete, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+  // 0003 ne bouge pas quand 0005 existe (empreinte deja epinglee plus haut : relue ici, a cote de 0005).
+  assert.equal(sha(delta), '37f9f80d62cf82457b177f35979892ce7deeaf2067567a506228e145ad8efd39');
+  assert.ok(!delta.includes("'imports'"), '0003 ne connait pas imports');
+  assert.equal(imports, lire('supabase/migrations/0005_imports.sql'), '0005 commitee = generee');
+});
+test('0005 : --check rend 0 sur le depot, 1 (en nommant 0005 seule) sur une copie sans 0005', () => {
+  const depot = spawnSync(process.execPath, [SCRIPT_MIG, '--check'], { cwd: RACINE_MIG, encoding: 'utf8' });
+  assert.equal(depot.status, 0, 'depot : ' + depot.stderr);
+  const tmp = mkdtempSync(path.join(tmpdir(), 'cuisine-os-migrations-sans-0005-'));
+  try {
+    for (const nom of NOMS.filter((n) => n !== '0005_imports.sql')) copyFileSync(path.join(MIGRATIONS, nom), path.join(tmp, nom));
+    const rouge = spawnSync(process.execPath, [SCRIPT_MIG, '--check', '--dir', tmp], { cwd: RACINE_MIG, encoding: 'utf8' });
+    assert.equal(rouge.status, 1, 'copie sans 0005 : code 1 attendu');
+    assert.match(rouge.stderr, /0005_imports\.sql/);
+    for (const autre of ['0001_tables_et_regles', '0002_stockage', '0003_assistant_config']) assert.doesNotMatch(rouge.stderr, new RegExp(autre), 'seule 0005 est nommee');
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+// La preuve 0005 est ecrite a la main (gabarit : la preuve 0003) et jouee par Neegan ; sa sortie va dans un depot PUBLIC. Memes filets que
+// 0003 : rollback dernier, une transaction, aucune adresse, jamais la colonne data (ici par les colonnes generees et des comparaisons
+// « conforme / different »), reponse de sync_push jamais affichee telle quelle, lectures de la table sous RLS seulement, les verdicts du brief.
+test('preuve 0005 : rollback final, une transaction, BILAN, jeton A seul, aucune adresse, jamais la colonne data, lectures sous RLS', () => {
+  const p = lire('supabase/proofs/0005_imports.sql');
+  const code = sansCommentairesSql(p);
+  const l = instructions(code);
+  assert.equal(instructions(p).at(-1), 'rollback;', 'rollback est la derniere ligne non vide, commentaires compris');
+  assert.equal(l[l.length - 1], 'rollback;');
+  assert.equal(l[l.length - 2], 'select ordre, etape, attendu, obtenu, ok from pg_temp.preuve order by ordre;');
+  assert.equal(l.filter((x) => x === 'begin;').length, 1, 'une seule transaction');
+  assert.match(p, /select 999, 'BILAN'/);
+  const sansJetons = p.replace(/A_EMAIL|@>/g, '');
+  assert.doesNotMatch(sansJetons, /@/, 'aucune adresse : seul le jeton A_EMAIL');
+  for (const j of ["'A_UUID'", "'A_EMAIL'"]) assert.ok(p.includes(j), j);
+  assert.doesNotMatch(p, /B_UUID|B_EMAIL/, 'un seul compte de preuve');
+  // Liste BLANCHE des formes du mot « data » hors commentaires : la cle « data » du JSON pousse, la fiche entiere comparee sans etre affichee.
+  const AUTORISEES = ['"data":{', "bool_and(data = '"];
+  for (const a of AUTORISEES) assert.ok(code.includes(a), 'forme autorisee presente : ' + a);
+  const reste = AUTORISEES.reduce((t, a) => t.split(a).join(''), code);
+  assert.deepEqual(reste.match(/.{0,40}\bdata\b.{0,40}/gi) || [], [], 'data hors des formes autorisees');
+  for (const interdit of ['select *', '.*', 'to_jsonb(', 'row_to_json', 'jsonb_agg(', 'json_agg(', 'array_agg(', 'jsonb_pretty(']) {
+    assert.ok(!code.toLowerCase().includes(interdit), interdit);
+  }
+  // Toute lecture de public.imports se fait sous authenticated (RLS) : aucune sous postgres.
+  let role = 'postgres';
+  let sousRls = 0;
+  for (const instr of code.split(';').map((x) => x.trim())) {
+    if (instr === 'set local role authenticated') role = 'authenticated';
+    else if (instr === 'reset role') role = 'postgres';
+    else if (/from public\.imports\b/.test(instr)) { assert.equal(role, 'authenticated', 'lecture hors RLS : ' + instr.slice(0, 120)); sousRls += 1; }
+  }
+  assert.ok(sousRls >= 5, 'les relectures 3.02, 3.03, 3.05, 3.07, 4.01 et 4.02 sont lues sous RLS : ' + sousRls);
+  const sets = (code.match(/set local role authenticated;/g) || []).length;
+  assert.ok(sets >= 1 && sets === (code.match(/reset role;/g) || []).length, 'set local role / reset role en nombre egal');
+  // Les reponses de sync_push : trois envois nommes « reponse », jamais convertis en texte.
+  const appels = (p.match(/public\.sync_push\('\[/g) || []).length;
+  assert.equal(appels, 3, 'trois envois : 3.01, 3.04, 3.06');
+  assert.equal((p.match(/\) as reponse\) t;/g) || []).length, appels, 'chaque envoi est nomme reponse');
+  assert.ok(!p.includes('reponse::text') && !p.includes("reponse->'rejected'->0->'server'"), 'reponse jamais affichee');
+  assert.ok(!p.includes('sk-'), 'aucune cle, meme factice : imports n en porte pas');
+  assert.ok(p.includes('« Run without RLS »'), 'le piege du tableau de bord est rappele');
+});
+test('preuve 0005 : gardes, table et RLS, colonnes generees, privileges des 27, envoi imports accepte puis relu, delete sous app.purge, les quatre fonctions a 27', () => {
+  const p = lire('supabase/proofs/0005_imports.sql');
+  const code = sansCommentairesSql(p);
+  // Gardes 0 : 0005 collee (la table ET sync_push), adresse listee, sans compte.
+  assert.ok(code.includes("to_regclass('public.imports') is null"), 'garde : table');
+  assert.ok(code.includes("position('''imports''' in pg_get_functiondef('public.sync_push(jsonb)'::regprocedure)) = 0"), 'garde : sync_push connait imports');
+  assert.ok(code.includes("from private.allowed_users where email = 'A_EMAIL'"), 'garde : adresse listee');
+  assert.ok(code.includes("from auth.users where email = 'A_EMAIL'"), 'garde : pas de compte');
+  for (const n of ['0.01', '0.02', '1.01', '1.02', '1.03', '1.04', '1.05', '1.06', '1.07', '1.08', '2.01', '2.02', '2.03', '2.04', '2.05', '2.06', '2.07', '2.08', '2.09', '2.10', '2.11',
+    '3.01', '3.02', '3.03', '3.04', '3.05', '3.06', '3.07', '4.01', '4.02', '5.01', '5.02', '5.03', '5.04', '5.05']) assert.ok(code.includes(`${n},`), 'verdict ' + n);
+  // 1. Table : RLS, quatre regles (delete sous app.purge), declencheur, index recv, cle primaire, cascade, colonnes generees, leurs index.
+  assert.ok(code.includes("relrowsecurity from pg_class where oid = to_regclass('public.imports')"), '1.01 RLS');
+  assert.ok(code.includes("tablename = 'imports'") && code.includes("qual like '%app.purge%'"), '1.02 regles');
+  assert.ok(code.includes("tgname = 'imports_seq'") && code.includes("tgfoid = 'public.touch_server_seq()'::regprocedure"), '1.03 declencheur');
+  assert.ok(code.includes("indexname = 'imports_recv'") && code.includes("indexdef like '%(owner_id, server_seq)'"), '1.04 index recv');
+  assert.ok(code.includes("indexname = 'imports_pkey'") && code.includes("indexdef like 'CREATE UNIQUE INDEX%(owner_id, id)'"), '1.05 cle primaire');
+  assert.ok(code.includes("confrelid = 'auth.users'::regclass and confdeltype = 'c'"), '1.06 cascade');
+  assert.ok(code.includes("attname in ('edition_id', 'recipe_id', 'status')") && code.includes("attgenerated = 's'") && code.includes("atttypid = 'text'::regtype") && code.includes('not attisdropped'), '1.07 colonnes generees stockees, text');
+  assert.ok(code.includes("indexname in ('imports_edition_id', 'imports_recipe_id', 'imports_status')"), '1.08 index des colonnes generees');
+  // 2. Privileges : authenticated sur imports ; anon sur aucune table de public, les 27 synchronisees nommees ; execute des quatre ; RLS des 27.
+  for (const priv of ['select', 'insert', 'update']) assert.ok(code.includes(`has_table_privilege('authenticated', 'public.imports', '${priv}')`), '2.01 ' + priv);
+  const d202 = code.indexOf('select 2.02,');
+  assert.notEqual(d202, -1, 'verdict 2.02');
+  const v202 = code.slice(d202, code.indexOf('insert into pg_temp.preuve', d202));
+  assert.ok(v202.includes(litteralDe(SYNC_STORES)), '2.02 : la liste des 27 magasins, dans l ordre de SYNC_STORES');
+  assert.ok(v202.includes('from pg_tables') && v202.includes("schemaname = 'public'"), '2.02 : toutes les tables de public');
+  for (const priv of ['select', 'insert', 'update', 'delete']) assert.ok(v202.includes(`not has_table_privilege('anon', 'public.' || tablename, '${priv}')`), '2.02 ' + priv);
+  assert.ok(v202.includes('= 27'), '2.02 : 27 synchronisees presentes');
+  for (const f of ['sync_push(jsonb)', 'sync_purge(text, text)', 'sync_purge_all()', 'purge_tombstones()']) {
+    assert.ok(code.includes(`has_function_privilege('anon', 'public.${f}', 'execute'), false`), 'anon sans execute : ' + f);
+    assert.ok(code.includes(`has_function_privilege('authenticated', 'public.${f}', 'execute'), ${f === 'purge_tombstones()' ? 'false' : 'true'}`), 'authenticated : ' + f);
+  }
+  const d211 = code.indexOf('select 2.11,');
+  assert.notEqual(d211, -1, 'verdict 2.11');
+  const v211 = code.slice(d211, code.indexOf('insert into pg_temp.preuve', d211));
+  assert.ok(v211.includes('relrowsecurity') && v211.includes(litteralDe(SYNC_STORES)) && v211.includes('= 27'), '2.11 : RLS sur les 27');
+  // 3. Envoi : une ligne imports (a_lancer) acceptee, relue par ses colonnes generees ; transition a_verifier plus recente acceptee ; import d index sans recipe_id.
+  assert.ok(code.includes('"store":"imports","id":"imp_preuve","data":{"id":"imp_preuve"'), '3.01 : la fiche poussee porte sa cle');
+  assert.ok(code.includes(`reponse->'accepted' @> '[{"store":"imports","id":"imp_preuve"}]'::jsonb`), '3.01 : accepted nomme la ligne');
+  assert.ok(code.includes("edition_id = 'ed_preuve' and recipe_id = 'rc_preuve' and status = 'a_lancer'"), '3.02 : colonnes generees relues (comparees, pas affichees)');
+  assert.ok(code.includes("status = 'a_verifier'"), '3.05 : la colonne generee suit la fiche');
+  assert.ok(code.includes('"id":"imp_index"') && code.includes('"recipe_id":null'), '3.06 : import d index sans recipe_id');
+  assert.ok(code.includes('recipe_id is null'), '3.07 : colonne generee nulle');
+  assert.ok(code.includes('set local request.jwt.claims = \'{"sub":"A_UUID","email":"A_EMAIL","role":"authenticated"}\''), 'session de A');
+  // 4. Delete direct sans app.purge : rien, sans erreur.
+  assert.ok(code.includes("set_config('app.purge', '', true)"), 'drapeau remis a vide');
+  assert.match(code, /with d as \(delete from public\.imports where id = 'imp_preuve' returning 1\)/);
+  // 5. Les quatre fonctions : 27 magasins, liste finissant par assistant_config, imports ; keys et required.
+  for (const f of ['public.sync_push(jsonb)', 'public.sync_purge(text, text)', 'public.sync_purge_all()', 'public.purge_tombstones()']) assert.ok(code.includes(`'${f}')`), 'definition relue : ' + f);
+  assert.ok(code.includes('pg_get_functiondef(to_regprocedure(f))'), 'les quatre corps sont relus');
+  assert.ok(code.includes("position('''assistant_config'', ''imports'']' in y.d) > 0"), 'imports dernier (K-9)');
+  assert.ok(code.includes('nb = 27'), '27 magasins');
+  assert.ok(code.includes(`position('"imports":"id"' in d) > 0 and position('"imports":[]' in d) > 0`), '5.05 keys et required');
+});
+test('README : etape 11 (0005, notify seule, preuve, RESULTATS) entre 10 et « Où coller les sorties » ; un ancien client refuse une archive plus recente', () => {
+  const r = lire('supabase/README.md');
+  const titre = '### 11. Coller `0005_imports.sql`, puis jouer sa preuve';
+  const debut = r.indexOf(titre);
+  assert.notEqual(debut, -1, 'etape 11');
+  assert.ok(r.indexOf("### 10. La passerelle de l'assistant") < debut && debut < r.indexOf('## Où coller les sorties'), '11 apres 10, avant « Où coller les sorties »');
+  const etape = rubrique(r, titre);
+  for (const m of ['migrations/0005_imports.sql', 'proofs/0005_imports.sql', "notify pgrst, 'reload schema';", 'Run without RLS', 'exemple.invalid', 'A_UUID', 'A_EMAIL',
+    'push', 'RESULTATS-mitsu.md', 'SYNC_STORES_0003', 'SYNC_STORES_0005', 'shasum -a 256 supabase/migrations/0005_imports.sql', 'edition_id', 'recipe_id', 'status', '27',
+    'sync_push', 'sync_purge', 'sync_purge_all', 'purge_tombstones', 'Description de magasin absente ou inconnue', 'Décompte de magasin inconnu : imports',
+    "mets l'app à jour", 'Ensuite seulement : fusion et `push`.', 'quarantaine']) assert.ok(etape.includes(m), m);
+  // Ordre des gestes : adresse de preuve, 0005, notify (collee seule), preuve, retrait de l'adresse, RESULTATS.
+  const i = ['insert into private.allowed_users', 'migrations/0005_imports.sql', "notify pgrst, 'reload schema';", 'proofs/0005_imports.sql', 'delete from private.allowed_users', 'RESULTATS-mitsu.md'].map((m) => etape.indexOf(m));
+  assert.ok(i.every((x) => x !== -1), 'six gestes presents : ' + i.join(','));
+  assert.deepEqual([...i].sort((a, b) => a - b), i, 'dans l ordre : ' + i.join(','));
+  assert.equal(etape.split("notify pgrst, 'reload schema';").length - 1, 1, 'notify donnee une fois');
+  assert.match(etape.slice(etape.indexOf('notify pgrst') - 200, etape.indexOf('notify pgrst')), /seule/, 'collee seule');
+  assert.doesNotMatch(etape, /B_UUID|B_EMAIL/, 'un seul compte de preuve');
+  assert.doesNotMatch(etape, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+  // L'arbre du README nomme les deux fichiers neufs, et l'intro compte quatre migrations generees.
+  const arbre = r.slice(0, r.indexOf('## Un seul projet'));
+  for (const f of ['migrations/0005_imports.sql', 'proofs/0005_imports.sql']) assert.ok(arbre.includes(f), 'arbre : ' + f);
+  assert.ok(arbre.includes('quatre migrations générées'), 'intro : quatre generees');
+});
+test('RESULTATS-mitsu : section « Preuve 0005_imports.sql — à jouer » preparee, sans cle ni adresse', () => {
+  const res = lire('supabase/proofs/RESULTATS-mitsu.md');
+  const debut = res.indexOf('## Preuve `0005_imports.sql` — ');
+  assert.notEqual(debut, -1, 'section 0005');
+  const section = res.slice(debut);
+  for (const m of ['étape 11', 'migrations/0005_imports.sql', 'shasum -a 256 supabase/migrations/0005_imports.sql', "notify pgrst, 'reload schema';", 'Run without RLS', '999 BILAN', 'A_EMAIL', 'A_UUID', '| ordre | etape | attendu | obtenu | ok |']) assert.ok(section.includes(m), m);
+  assert.doesNotMatch(res, /sk-(?!…)[A-Za-z0-9_-]{4,}/, 'aucune cle dans RESULTATS');
+  assert.doesNotMatch(section, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i, 'aucune adresse');
 });

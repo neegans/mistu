@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-// Génère les migrations SQL du lot « compte et stockage distant » depuis src/sync/tables.js (spec § 3.1-3.7), et la
-// migration à ajout seul 0003 du lot « assistant par le compte » (spec 2026-10-17-assistant-par-le-compte § 6).
-// Usage : node tools/generer-migrations.mjs            → écrit supabase/migrations/0001_*.sql, 0002_*.sql et 0003_*.sql
+// Génère les migrations SQL du lot « compte et stockage distant » depuis src/sync/tables.js (spec § 3.1-3.7), la
+// migration à ajout seul 0003 du lot « assistant par le compte » (spec 2026-10-17-assistant-par-le-compte § 6) et la
+// migration à ajout seul 0005 du lot A « import ciblé » (spec 2026-10-18-import-cible § 3.5). 0004 est écrite à la main, hors d'ici.
+// Usage : node tools/generer-migrations.mjs            → écrit supabase/migrations/0001_*.sql, 0002_*.sql, 0003_*.sql et 0005_*.sql
 //         node tools/generer-migrations.mjs --check    → code 1 si les fichiers commités diffèrent du généré
 //         … --dir <chemin>                             → autre répertoire (écriture ET --check) ; code 2 sans chemin
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { TABLES, SYNC_STORES_0001, SYNC_STORES_0003 } from '../src/sync/tables.js';
+import { SYNC_STORES } from '../src/model/schema.js';
 import { ALLOWED_MIME } from '../src/sync/mime.js';
 
 // En-tête volontairement sans date : la sortie doit être déterministe (le test le vérifie, et --check sert de garde).
@@ -48,7 +50,7 @@ create trigger ${store}_seq before insert or update on public.${store} for each 
 }
 
 // Les quatre fonctions qui portent la liste littérale des magasins (sync_push, sync_purge, sync_purge_all,
-// purge_tombstones), rendues pour UNE liste : 0001 avec les 25 d'origine, 0003 avec les 26. Le texte est celui de 0001,
+// purge_tombstones), rendues pour UNE liste : 0001 avec les 25 d'origine, 0003 avec les 26, 0005 avec les 27. Le texte est celui de 0001,
 // déplacé tel quel : --check et l'empreinte SHA-256 du test prouvent qu'il n'a pas bougé d'un octet.
 function fonctions(stores) {
   const keys = JSON.stringify(Object.fromEntries(stores.map((s) => [s, TABLES[s].key])));
@@ -306,7 +308,18 @@ revoke all on private.storage_usage from anon, authenticated;
 ${nouvelles.map(table).join('\n')}-- S4 : la révocation générale pour anon, en 0001, n'a couvert que les tables d'alors ; chaque table neuve est révoquée ici.
 ${nouvelles.map((s) => `revoke all on public.${s} from anon;\n`).join('')}
 ` + fonctions(SYNC_STORES_0003);
-  return { tables, storage, delta };
+  // 0005, à ajout seul (lot A « import ciblé », spec 2026-10-18-import-cible § 3.5) : les magasins de SYNC_STORES absents de la liste FIGÉE
+  // SYNC_STORES_0003 (aujourd'hui imports, le dernier : K-9), leur révocation pour anon, puis les quatre fonctions recréées avec les 27 noms.
+  // Tant que 0005 n'est pas appliquée sur mitsu, elle suit le SYNC_STORES vivant ; une fois collée, la figer comme 0003 (SYNC_STORES_0005 +
+  // empreinte épinglée) et rendre le magasin suivant dans une 0006 (README, étape 11).
+  const nouvelles0005 = SYNC_STORES.filter((s) => !SYNC_STORES_0003.includes(s));
+  const imports = ENTETE('0005_imports.sql', 'docs/superpowers/specs/2026-10-18-import-cible-design.md (rév. 3.1, § 3.5)') + `-- Migration À AJOUT SEUL : ${nouvelles0005.length} table(s) neuve(s) et les quatre fonctions recréées avec la liste des ${SYNC_STORES.length} magasins.
+-- À coller APRÈS 0001, 0002 et 0003 (0004 est indépendante), une seule fois. Les droits des fonctions sont rejoués (idempotents).
+
+${nouvelles0005.map(table).join('\n')}-- S4 : la révocation générale pour anon, en 0001, n'a couvert que les tables d'alors ; chaque table neuve est révoquée ici.
+${nouvelles0005.map((s) => `revoke all on public.${s} from anon;\n`).join('')}
+` + fonctions(SYNC_STORES);
+  return { tables, storage, delta, imports };
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -328,8 +341,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const args = process.argv.slice(2);
   const dir = dossierDemande(args);
   if (!dir) { console.error('--dir : chemin du répertoire des migrations manquant.'); process.exit(2); }
-  const { tables, storage, delta } = renderMigrations();
-  const targets = [['0001_tables_et_regles.sql', tables], ['0002_stockage.sql', storage], ['0003_assistant_config.sql', delta]];
+  const { tables, storage, delta, imports } = renderMigrations();
+  const targets = [['0001_tables_et_regles.sql', tables], ['0002_stockage.sql', storage], ['0003_assistant_config.sql', delta], ['0005_imports.sql', imports]];
   if (args.includes('--check')) {
     let differ = false;
     for (const [name, content] of targets) {

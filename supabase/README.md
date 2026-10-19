@@ -1,7 +1,7 @@
 # Supabase — comment appliquer et prouver le serveur de synchronisation
 
-Ce dossier contient **tout le serveur** de Cuisine OS : trois migrations générées et une quatrième écrite à la main
-(`migrations/`), les preuves à jouer après les avoir appliquées (`proofs/`) et la fonction de la passerelle de l'assistant
+Ce dossier contient **tout le serveur** de Cuisine OS : quatre migrations générées (`0001`, `0002`, `0003`, `0005`) et une
+écrite à la main (`0004`) (`migrations/`), les preuves à jouer après les avoir appliquées (`proofs/`) et la fonction de la passerelle de l'assistant
 (`functions/`). Rien n'est appliqué automatiquement : chaque étape est un geste de
 Neegan dans l'éditeur SQL du tableau de bord Supabase. Spec de référence :
 `docs/spec-compte-et-stockage-distant.md` (§ 3 pour le serveur, § 7.2 pour les preuves).
@@ -16,6 +16,8 @@ supabase/
   proofs/0003_assistant_config.sql       à coller après 0003 ; jetons à remplacer ; n'écrit rien (rollback final)
   migrations/0004_assistant_journal.sql  écrite à la main, hors du générateur (lot « passerelle de l'assistant », étape 10)
   proofs/0004_assistant_journal.sql      à coller après 0004 ; rien à remplacer ; n'écrit rien (rollback final)
+  migrations/0005_imports.sql            généré par tools/generer-migrations.mjs ; à ajout seul (lot A « importer une recette repérée », étape 11)
+  proofs/0005_imports.sql                à coller après 0005 ; jetons à remplacer ; n'écrit rien (rollback final)
   functions/assistant/                   la fonction de la passerelle (index.ts, logique.js, deno.json) ; déployée par le CLI, étape 10
   proofs/0001_hook.md                    gabarit : capture du crochet « Before User Created »
   proofs/0001_providers.md               gabarit : capture des fournisseurs de connexion
@@ -28,8 +30,10 @@ La spec prévoyait deux projets (D8 : `mistu-dev` puis `mistu`). Neegan a révoq
 coûte 10 $ par mois sur l'organisation Pro, pour un usage personnel. **Tout se joue sur `mitsu`**, le projet réel —
 d'où deux règles : la preuve `0001` se joue **avant la première connexion réelle** (elle insère deux comptes et les
 annule), et `localhost` reste autorisé (Redirect URLs, entrée `dev` de `config.js`) sur ce projet. Les neuf étapes
-ci-dessous ont été jouées le 13 octobre ; sorties dans `proofs/RESULTATS-mitsu.md`. L'étape **8 bis** (migration
-`0003`, lot « la configuration de l'assistant suit le compte ») s'y ajoute et reste **à jouer**, ainsi que l'étape **10** (fonction `assistant` et migration `0004`, lot « passerelle de l'assistant »). Pour un projet neuf (changement
+ci-dessous ont été jouées le 13 octobre ; sorties dans `proofs/RESULTATS-mitsu.md`. Les étapes **8 bis** (migration
+`0003`, lot « la configuration de l'assistant suit le compte ») et **10** (fonction `assistant` et migration `0004`, lot « passerelle de
+l'assistant ») s'y sont ajoutées et ont été jouées le 18 octobre ; l'étape **11** (migration `0005`, lot A « importer une recette
+repérée ») s'y ajoute et reste **à jouer**. Pour un projet neuf (changement
 d'hébergement, retour à deux projets), elles sont à refaire en entier : les migrations ne « voyagent » pas d'un
 projet à l'autre.
 
@@ -289,6 +293,57 @@ appelle la fonction. Aucun des gestes ci-dessous n'appelle Anthropic ni ne dépe
    (La table est celle de `0003` : `data` est la colonne jsonb de la ligne, `updated_at` son horodatage ; le déclencheur
    `touch_server_seq` pose le numéro de séquence, donc les appareils la reçoivent à leur prochaine passe. La clé, elle, reste
    valide chez Anthropic tant qu'on ne l'a pas révoquée : voir le point 6.)
+
+### 11. Coller `0005_imports.sql`, puis jouer sa preuve
+
+Lot A « importer une recette repérée » (spec `docs/superpowers/specs/2026-10-18-import-cible-design.md`, § 3.5) : le journal des
+imports (magasin `imports`, 27e magasin synchronisé, le dernier, K-9) a sa table sur le serveur. Cette étape se joue **une fois**,
+après `0003` (elle ne dépend pas de `0004`), et **avant tout `push` du code de ce lot** : un client neuf contre un serveur sans
+`0005` verrait `sync_push` refuser son lot (`store inconnu`) et mettrait ses lignes `imports` en quarantaine (`refus`, bruyante, non
+destructive : Réglages → Synchronisation → « Réessayer » sur l'entrée, une fois `0005` collée).
+
+`0005` est **à ajout seul**, générée par `tools/generer-migrations.mjs` pour les magasins de `SYNC_STORES` absents de la liste figée
+`SYNC_STORES_0003` (aujourd'hui `imports`, seul) : elle crée `public.imports` (même gabarit que les 26 autres tables, plus trois
+colonnes générées `edition_id`, `recipe_id` et `status`, lues dans la fiche, chacune avec son index), la révoque pour `anon` (la
+révocation générale de `0001` ne couvrait que les tables d'alors), et **recrée** les quatre fonctions qui portent la liste des
+magasins — `sync_push`, `sync_purge`, `sync_purge_all`, `purge_tombstones` — avec les 27 noms ; leurs `revoke`/`grant` sont rejoués,
+sans effet. `0001`, `0002` et `0003` ne changent pas d'un octet (empreintes SHA-256 épinglées dans `tools/generer-migrations.test.mjs`).
+Comme `0003`, elle n'est **pas rejouable** : un second collage échoue sur le `create table` et n'applique rien. Pas de `cron.schedule`
+ici non plus.
+
+1. **Une adresse de preuve**, tapée à la main : une adresse inventée du domaine réservé `exemple.invalid` (rien ne lui est envoyé),
+   sans compte dans `auth.users` — une de celles de `0003` convient, puisqu'elles ont été retirées :
+   ```sql
+   insert into private.allowed_users (email) values (lower('...')) on conflict do nothing;
+   ```
+2. **Coller `migrations/0005_imports.sql`** en entier, depuis l'éditeur SQL, sous `postgres` (comme `0001` et `0003` : c'est ce qui
+   donne à `authenticated` ses droits sur la table neuve — verdict 2.01 de la preuve). Attendu : `Success. No rows returned`.
+3. Puis, **collée seule** dans l'éditeur, la ligne
+   ```sql
+   notify pgrst, 'reload schema';
+   ```
+   (le cache de schéma de PostgREST doit connaître `public.imports` et la nouvelle `sync_push` ; sans elle, une lecture de la table
+   ou un envoi peut répondre 404 jusqu'au prochain rechargement).
+4. **Jouer `proofs/0005_imports.sql`** : remplacer les deux jetons (`A_UUID` : un `select gen_random_uuid();` ; `A_EMAIL` : l'adresse
+   de l'étape 1, en minuscules), coller le tout, exécuter, et choisir **« Run without RLS »** au dialogue du tableau de bord (voir
+   l'étape 5, « Jouer la preuve `0001` »). Lire d'abord la ligne `999 BILAN` : `0 faux`, c'est vert. La preuve pousse deux lignes
+   `imports` factices par `sync_push` (un import de recette qu'elle fait passer à `a_verifier`, un import d'index sans `recipe_id`), les
+   relit par leurs colonnes générées, essaie un `delete` direct (refusé sans `app.purge`), relit les quatre fonctions, puis annule tout
+   (`rollback;`) ; elle n'affiche jamais la colonne `data` (seulement des compteurs et des verdicts « conforme / différente »).
+5. **Retirer l'adresse de preuve** : `delete from private.allowed_users where email = lower('...');`, puis contrôle
+   `select count(*) from private.allowed_users;` (le nombre d'avant l'étape 1).
+6. **Consigner** la sortie dans `proofs/RESULTATS-mitsu.md`, section « Preuve `0005_imports.sql` — à jouer » déjà préparée : jetons
+   remis, aucune adresse. Ensuite seulement : fusion et `push`.
+
+**Archives et clients plus anciens.** Une archive ZIP faite par l'app à jour porte `data/imports.json` et son décompte. Un client
+**plus ancien** (0.8.x) qui la lit la refuse déjà, par ses contrôles d'archive — « Description de magasin absente ou inconnue » et
+« Décompte de magasin inconnu : imports » — : le remède est simple, **mets l'app à jour** sur cet appareil (recharge la page ou relance
+l'app installée), puis restaure ; ne retouche pas l'archive. L'inverse — une archive d'avant le lot lue par l'app à jour — se restaure
+en fusion comme en remplacement : `imports` y vaut une liste vide.
+
+Une fois `0005` appliquée, la figer : liste `SYNC_STORES_0005` + empreinte SHA-256 épinglée (même logique que `SYNC_STORES_0003`), au
+prochain lot qui touche le générateur. L'empreinte du fichier collé se relit par `shasum -a 256 supabase/migrations/0005_imports.sql`
+et se consigne dans `RESULTATS-mitsu.md`.
 
 ## Où coller les sorties
 
