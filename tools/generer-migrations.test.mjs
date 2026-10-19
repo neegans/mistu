@@ -999,8 +999,9 @@ test('preuve 0005 : toute lecture de public.imports se fait sous authenticated (
 // LISTE BLANCHE des reponses de sync_push : « reponse » n'existe que nommee en sortie d'un envoi, COMPTEE par jsonb_array_length sur
 // accepted / adjusted / rejected, ou COMPAREE par @> a la cle de la fiche. Jamais convertie (::text, ->>, #>>), jamais parcourue
 // (->0->'server' porterait la ligne du serveur dans un conflit). Le mot hors de ces formes rougit.
-const FORMES_REPONSE = ["jsonb_array_length(reponse->'accepted')", "jsonb_array_length(reponse->'adjusted')", "jsonb_array_length(reponse->'rejected')",
-  `reponse->'accepted' @> '[{"store":"imports","id":"imp_preuve"}]'::jsonb`, ') as reponse) t;'];
+const COMPTES_REPONSE = ["jsonb_array_length(reponse->'accepted')", "jsonb_array_length(reponse->'adjusted')", "jsonb_array_length(reponse->'rejected')",
+  `reponse->'accepted' @> '[{"store":"imports","id":"imp_preuve"}]'::jsonb`];
+const FORMES_REPONSE = [...COMPTES_REPONSE, ') as reponse) t;'];
 test('preuve 0005 : trois envois sync_push nommes reponse, comptes ou compares, jamais convertis ni parcourus', () => {
   const { p, code } = preuve0005();
   const appels = (p.match(/public\.sync_push\('\[/g) || []).length;
@@ -1008,6 +1009,31 @@ test('preuve 0005 : trois envois sync_push nommes reponse, comptes ou compares, 
   assert.equal((p.match(/\) as reponse\) t;/g) || []).length, appels, 'chaque envoi est nomme reponse');
   const reste = FORMES_REPONSE.reduce((t, f) => t.split(f).join(' '), code);
   assert.deepEqual(reste.match(/.{0,30}\breponse\b.{0,30}/g) || [], [], 'reponse hors des formes admises');
+});
+// Ronde 2 (Important) : la liste ci-dessus ne garde que le MOT reponse ; l'alias `t` de la sous-requete « from (select public.sync_push(…)
+// as reponse) t » restait une porte — ` || t::text`, ` || row_to_json(t)::text`, ` || to_jsonb(t)::text`, ` || to_json(t)::text` dans l'obtenu
+// de 3.01 collent la reponse ENTIERE dans RESULTATS-mitsu.md (en cas de conflit, rejected[0].server porte la ligne du serveur, data
+// comprise). Mesure sur une copie : 4 mutants sur 4 survivaient (73/73). Meme discipline que pour public.imports : exactement trois
+// instructions envoient ; dans chacune, une fois les comptes et la comparaison retires, les litteraux vides et la sous-requete nommee
+// retiree AVEC son alias, il ne reste ni conversion, ni etoile, ni chemin json, ni identifiant hors de la plomberie de l'insertion dans
+// pg_temp.preuve (`t`, `row_to_json`, `to_json`, `to_jsonb`, `json_agg`, `format`, `string_agg` rougissent avec leur instruction).
+const ENVOI = "from (select public.sync_push(''::jsonb) as reponse) t";
+const MOTS_ENVOI = new Set(['insert', 'into', 'pg_temp', 'preuve', 'select', 'and', 'or', 'not', 'true', 'false', 'null', 'coalesce', 'case', 'when', 'then', 'else', 'end']);
+const viderLitteraux = (instr) => instr.replace(/'(?:[^']|'')*'/g, "''");
+const instructionsEnvoi = (code) => code.split(';').map((x) => x.trim()).filter((x) => viderLitteraux(x).includes("public.sync_push(''::jsonb)"));
+test('preuve 0005 : chaque envoi sync_push ne porte que ses comptes et sa comparaison — ni l alias t de la sous-requete, ni conversion, ni identifiant de plus', () => {
+  const { code } = preuve0005();
+  const envois = instructionsEnvoi(code);
+  assert.equal(envois.length, 3, 'trois instructions envoient : 3.01, 3.04, 3.06');
+  for (const instr of envois) {
+    const ou = instr.replace(/\s+/g, ' ').slice(0, 70);
+    const vide = viderLitteraux(COMPTES_REPONSE.reduce((t, f) => t.split(f).join(' '), instr));
+    assert.ok(vide.includes(ENVOI), 'la sous-requete nommee reponse, alias t compris, est exactement celle attendue : ' + ou);
+    const reste = vide.split(ENVOI).join(' ');
+    assert.doesNotMatch(reste, /::|\*|->|#>/, 'conversion, etoile ou chemin json hors des formes admises : ' + ou);
+    const inconnus = (reste.match(/\b[a-z_][a-z0-9_]*\b/gi) || []).filter((m) => !MOTS_ENVOI.has(m.toLowerCase()));
+    assert.deepEqual(inconnus, [], 'identifiants hors liste blanche dans : ' + ou);
+  }
 });
 test('preuve 0005 § 0 : gardes de lecture (table, sync_push connait imports, adresse listee, sans compte) et les 35 verdicts numerotes', () => {
   const { code } = preuve0005();
