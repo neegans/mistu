@@ -4,7 +4,7 @@ import { DB_NAME, DB_VERSION, STORES, SYNC_STORES, SECRET_SETTING_KEYS, IMPORTS_
 import { UNIT_DEFINITIONS, UNIT_CONVENTIONS, INGREDIENTS } from './seed.js';
 import { newId, nowIso } from '../core/ids.js';
 import { emit } from '../core/bus.js';
-import { syncNow } from '../sync/clock.js';
+import { syncNow, getClockOffset } from '../sync/clock.js';
 import { nettoyerChaines, porteDesCaracteresDeControle } from '../sync/lots.js';
 import { resolveMime } from '../sync/mime.js';
 import { normaliserConfigAssistant, LIGNE_ASSISTANT } from '../domain/assistant-config.js';
@@ -81,11 +81,12 @@ export async function init() {
 }
 
 // --- Journal des imports au démarrage (spec import-cible § 3.1, Review Focus 3 ; tâche 6) ----------------------------------------------------
-// Passe `interrompu` : une ligne en_cours DE CET APPAREIL (le battement, d'origine device, n'est visible nulle part ailleurs) dont le battement a
-// plus de 90 s n'a plus de vol vivant (l'app a été fermée en route, ou deux écritures ont échoué) : en_cours → echec(interrompu), vol libéré
-// (I-4 : « L'appel a peut-être été compté… »). Le battement est RELU DANS LA TRANSACTION (patch qui refuse) : un autre onglet qui l'a rafraîchi
-// entre la lecture et l'écriture garde son vol (deux onglets, Review Focus 3). Un battement illisible ne prouve aucun vol vivant : il compte comme
-// vieux. Origine 'local' (une transition du journal part en file, comme les autres). Rejouable : une ligne passée echec n'est plus en_cours.
+// Passe `interrompu` : une ligne en_cours DE CET APPAREIL (le battement, interne et d'origine device, n'est visible nulle part ailleurs) dont le
+// battement — la ligne interne `battement:<id>` de sync_state, ou à défaut `battement_at` posé au départ du vol — a plus de 90 s n'a plus de vol
+// vivant (l'app a été fermée en route, ou deux écritures ont échoué) : en_cours → echec(interrompu), vol libéré (I-4 : « L'appel a peut-être été
+// compté… »). Le battement est RELU DANS LA TRANSACTION (conditions qui refusent) : un autre onglet qui l'a rafraîchi entre la lecture et l'écriture
+// garde son vol (deux onglets, Review Focus 3). Un battement illisible ne prouve aucun vol vivant : il compte comme vieux. Origine 'local' (une
+// transition du journal part en file, comme les autres). Rejouable : une ligne passée echec n'est plus en_cours.
 // Ronde 1 de la tâche 6 : une ligne en_cours d'un AUTRE appareil (ou d'un appareil perdu, d'une PWA réinstallée, d'une archive restaurée ailleurs)
 // n'avait aucune issue : son battement n'est jamais vu ici. Au-delà de VOL_MORT_MS depuis le départ du vol tel qu'il a été synchronisé
 // (battement_at posé au départ, ou started_at), bien au-delà du délai client de 135 s, aucun vol ne vit plus nulle part : elle est interrompue
@@ -93,19 +94,44 @@ export async function init() {
 // (un rechargement dans les 90 s ne laisse plus la ligne bloquée jusqu'au démarrage suivant).
 export const BATTEMENT_MORT_MS = 90 * 1000;
 export const VOL_MORT_MS = 10 * 60 * 1000;
-const recent = (iso, maintenant, borne) => { const quand = Date.parse(typeof iso === 'string' ? iso : ''); return Number.isFinite(quand) && maintenant - quand <= borne; };
-const volVivant = (l, moi, maintenant) => (l.device_id === moi ? recent(l.battement_at, maintenant, BATTEMENT_MORT_MS) : recent(l.battement_at, maintenant, VOL_MORT_MS) || recent(l.started_at, maintenant, VOL_MORT_MS));
+// Vague finale (horloges) : un horodatage trop loin dans le FUTUR (au-delà de VOL_MORT_MS : horloge avancée, ligne hostile datée de 9999) ne prouve
+// aucun vol vivant — sinon la ligne restait « vivante » pour toujours, sans geste. En deçà, une horloge un peu reculée garde son vol (décision 6).
+const recent = (iso, maintenant, borne) => { const quand = Date.parse(typeof iso === 'string' ? iso : ''); return Number.isFinite(quand) && maintenant - quand <= borne && quand - maintenant <= VOL_MORT_MS; };
+// Le battement de CET appareil (`hb`, ligne interne de sync_state) ou celui posé au départ sur la ligne ; une ligne d'un AUTRE appareil se juge sur ses
+// horodatages synchronisés, comparés à l'heure corrigée par le décalage serveur (getClockOffset : un Mac en avance n'interrompt pas un vol vivant ailleurs).
+const volVivant = (l, hb, moi, maintenant) => recent(hb?.value, maintenant, BATTEMENT_MORT_MS) || (l.device_id === moi
+  ? recent(l.battement_at, maintenant, BATTEMENT_MORT_MS)
+  : recent(l.battement_at, maintenant + getClockOffset(), VOL_MORT_MS) || recent(l.started_at, maintenant + getClockOffset(), VOL_MORT_MS));
+// Vague finale (Important) : le battement n'est PLUS écrit dans la ligne synchronisée. Réécrire `imports` toutes les 15 s posait un updated_at neuf et
+// émettait `change` (une passe de synchro complète à chaque battement), et l'écho d'une version plus ancienne revenait en « conflit renvoyé » qui
+// remettait le battement en file (contraire à m2). Il vit dans une ligne INTERNE de sync_state (`battement:<id>`, origine device : jamais capturée,
+// jamais envoyée, aucun `change`). `status: 'vol'` est la forme qu'une condition de db.mutate sait relire dans une transaction (marquerInterrompus).
+const cleBattement = (importId) => 'battement:' + importId;
+export async function battre(importId, quand) {
+  await db.mutate({ puts: { sync_state: [{ key: cleBattement(importId), status: 'vol', value: quand }] }, origin: 'device' });
+}
+export async function oublierBattement(importId) {
+  await db.mutate({ deletes: { sync_state: [cleBattement(importId)] }, origin: 'device' });
+}
 export async function marquerInterrompus(maintenant = Date.now()) {
   const moi = deviceId();
   if (!moi) return 0;
+  if (!Number.isFinite(maintenant)) maintenant = Date.now(); // une horloge illisible ne rend jamais tous les vols « morts »
   let n = 0;
   for (const ligne of await db.byIndex('imports', 'status', 'en_cours')) {
-    if (!ligne || volVivant(ligne, moi, maintenant)) continue;
+    if (!ligne) continue;
+    const cle = cleBattement(ligne.id);
+    const hb = await db.get('sync_state', cle);
+    if (volVivant(ligne, hb, moi, maintenant)) continue;
     const patch = (c) => {
-      if (volVivant(c, moi, maintenant)) throw new TransitionRefusee('imports', ligne.id, c.status); // relu dans la transaction
+      if (volVivant(c, null, moi, maintenant)) throw new TransitionRefusee('imports', ligne.id, c.status); // relu dans la transaction
       return { status: 'echec', erreur: { raison: 'interrompu', extra: {} }, document_id_vol: null };
     };
-    try { await transitionner('imports', ligne.id, { attendus: ['en_cours'], patch }); n += 1; }
+    // Le battement est relu DANS la même transaction (deux onglets, Review Focus 3) : un battement rafraîchi entre la lecture et l'écriture garde le vol ;
+    // absent à la lecture, il doit l'être encore. Le battement d'un vol interrompu est effacé avec lui.
+    const vif = (h) => { if (recent(h?.value, maintenant, BATTEMENT_MORT_MS)) throw new TransitionRefusee('imports', ligne.id, 'en_cours'); return {}; };
+    const autres = { sync_state: [hb ? { key: cle, attendus: ['vol'], patch: vif } : { key: cle, absente: true }] };
+    try { await transitionner('imports', ligne.id, { attendus: ['en_cours'], patch, autres, deletes: hb ? { sync_state: [cle] } : {} }); n += 1; }
     catch (e) { if (!(e instanceof TransitionRefusee)) throw e; }
   }
   return n;
@@ -349,12 +375,15 @@ export async function saveBatch(batch, { origin = 'local', conditions = null } =
 // d'une fiche supprimée (spec § 5.1), et c'est l'appelant qui l'a lue. Rend la fiche ÉCRITE (fusionnée, nettoyée, horodatée) : l'écran
 // n'a pas à relire la base dans une seconde transaction. Tous les écrans passent par elle, jamais par db.mutate (test statique :
 // « transitionner( » n'existe que sous la forme repo.transitionner( hors de ce fichier).
-export async function transitionner(store, key, { attendus, patch = null, puts = {}, deletes = {}, payloads = {}, origin = 'local' } = {}) {
+// `autres` (vague finale) : des conditions de plus, sur d'AUTRES magasins, vérifiées dans la même transaction et passées telles quelles (ni nettoyées ni
+// horodatées : marquerInterrompus y relit le battement interne de sync_state) ; une condition sur le magasin de la transition est refusée (TypeError).
+export async function transitionner(store, key, { attendus, patch = null, puts = {}, deletes = {}, payloads = {}, origin = 'local', autres = {} } = {}) {
+  if (Object.hasOwn(autres, store)) throw new TypeError('transitionner : `autres` ne porte pas de condition sur ' + store);
   const now = syncNow();
   const stamped = {};
   for (const [s, rows] of Object.entries(puts)) stamped[s] = horodater(s, rows, now);
   const modif = (courant) => ({ ...propre(store, typeof patch === 'function' ? patch(courant) : (patch || {})), updated_at: now });
-  const ecrites = await db.mutate({ puts: stamped, deletes, payloads, origin, conditions: { [store]: [{ key, attendus, patch: modif }] } });
+  const ecrites = await db.mutate({ puts: stamped, deletes, payloads, origin, conditions: { ...autres, [store]: [{ key, attendus, patch: modif }] } });
   emit('change', { store, id: key });
   for (const s of new Set([...Object.keys(stamped), ...Object.keys(deletes)])) if (s !== store) emit('change', { store: s });
   return ecrites[store][0]; // une seule condition ici : la fiche de store/key
@@ -508,6 +537,10 @@ export async function ouvrirImport({ id = newId('imp'), kind, recipe_id = null, 
 export async function ajouterPages(files, { edition_id = null, session_id = null, import_id = null, import: nouvelImport = null } = {}) {
   if (import_id && nouvelImport) throw new TypeError('ajouterPages : import_id et import ne se donnent pas ensemble');
   if (nouvelImport && !KINDS_IMPORT.includes(nouvelImport.kind)) throw new TypeError('ajouterPages : kind d’import inconnu (' + String(nouvelImport.kind) + ')');
+  // Vague finale (Important, « Relire les pages ») : `import.page_ids` = les pages DÉJÀ liées à la recette (celles de sa version courante), placées en
+  // tête de la ligne neuve, dans leur ordre ; les photos du geste suivent. Sans elles, une relecture d'une fiche partial ne lisait que la page neuve.
+  const deja = nouvelImport?.page_ids ?? [];
+  if (!Array.isArray(deja) || deja.some((p) => typeof p !== 'string' || !p)) throw new TypeError('ajouterPages : import.page_ids doit être une liste d’identifiants');
   if (import_id) {
     const lue = await db.get('imports', import_id);
     if (!lue || !ATTENDUS_AJOUT.includes(lue.status)) throw new TransitionRefusee('imports', import_id, lue?.status);
@@ -553,7 +586,7 @@ export async function ajouterPages(files, { edition_id = null, session_id = null
   }
   if (nouvelImport) {
     // Le mur (dans la transaction, I-10 et I-2) : la ligne n'existe pas, et aucun import ouvert ne porte cette recette (sans recipe_id — un index —, I-2 ne joue pas).
-    const { ligne, conditions } = nouvelleLigneImport({ id: nouvelImport.id, kind: nouvelImport.kind, recipe_id: nouvelImport.recipe_id, edition_id: nouvelImport.edition_id ?? session.edition_id, scan_session_id: session.id, page_ids: neufs, device_id: nouvelImport.device_id });
+    const { ligne, conditions } = nouvelleLigneImport({ id: nouvelImport.id, kind: nouvelImport.kind, recipe_id: nouvelImport.recipe_id, edition_id: nouvelImport.edition_id ?? session.edition_id, scan_session_id: session.id, page_ids: [...new Set([...deja, ...neufs])], device_id: nouvelImport.device_id });
     await saveBatch({ ...lignes, imports: [ligne] }, { conditions });
     return { session, pages, docs, importId: ligne.id };
   }

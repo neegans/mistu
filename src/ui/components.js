@@ -77,21 +77,29 @@ export const INCERTAIN_MAX = 300;
 const CONTROLES_INCERTAIN = /[\p{Cc}\p{Cf}]/gu;
 // Une date ISO lisible (chaîne que Date.parse comprend), sinon null — pour une valeur reçue, restaurée ou héritée.
 export const isoLisible = (d) => (typeof d === 'string' && Number.isFinite(Date.parse(d)) ? d : null);
+// Vague finale (m6) : une LECTURE seulement — une extraction ou une correction, de l'assistant (generated_by ai) ou héritière d'une lecture (lu_le) ;
+// jamais une adaptation qui recopie la provenance (« Ma version », remplacement d'ingrédient). Importée (import_id), ou portant ce que la lecture a dit
+// d'incomplet : une lecture de l'éditeur détachée de sa ligne (T6-R1-e) montre quand même « page possiblement manquante » / « lecture incomplète » (I-1).
+// « Incertain » : la ligne du journal d'abord, puis les incertitudes gardées dans la version (m8 : la ligne peut avoir été purgée à 30 jours).
 export function banniereLecture(version, ligne = null) {
   const p = version?.provenance;
-  if (!p || typeof p.import_id !== 'string' || !p.import_id) return null;
+  if (!p || typeof p !== 'object') return null;
+  const lecture = (version.kind === 'extraction' || version.kind === 'correction') && (p.generated_by === 'ai' || Object.hasOwn(p, 'lu_le'));
+  if (!lecture || !((typeof p.import_id === 'string' && p.import_id) || p.incomplete === true || p.missing_page === true)) return null;
   const date = Object.hasOwn(p, 'lu_le') ? isoLisible(p.lu_le) : isoLisible(version.created_at);
   const incertaines = (Array.isArray(version.ingredients) ? version.ingredients : []).filter((l) => l?.uncertain === true).length;
-  return { date, incertaines, missing_page: p.missing_page === true, incomplete: p.incomplete === true, incertain: texteIncertain(ligne, p.import_id) };
+  return { date, incertaines, missing_page: p.missing_page === true, incomplete: p.incomplete === true, incertain: texteIncertain(ligne, p.import_id) ?? texteDesChamps(p.uncertain_fields) };
 }
 
 // texteIncertain(ligne, importId) : PURE (ronde 1, extraite de banniereLecture). Le « Incertain : … » d'une lecture = resultat.uncertain_fields de la
 // ligne du journal de CET import (pointeur souple : null quand la ligne est absente, purgée, ou celle d'un autre import) — une DONNÉE HOSTILE (reçue,
 // restaurée) : chaînes seulement, Cc/Cf retirés, espaces repliées, jointes par « ; », bornée à INCERTAIN_MAX points de code (coupée avec « … »,
-// total ≤ INCERTAIN_MAX), null quand il ne reste rien. Rendue en nœud texte par l'appelant.
+// total ≤ INCERTAIN_MAX), null quand il ne reste rien. Rendue en nœud texte par l'appelant. texteDesChamps : la même règle sur une liste (m8).
 export function texteIncertain(ligne, importId) {
   if (typeof importId !== 'string' || !importId) return null;
-  const champs = ligne && ligne.id === importId && ligne.resultat && typeof ligne.resultat === 'object' ? ligne.resultat.uncertain_fields : null;
+  return texteDesChamps(ligne && ligne.id === importId && ligne.resultat && typeof ligne.resultat === 'object' ? ligne.resultat.uncertain_fields : null);
+}
+export function texteDesChamps(champs) {
   if (!Array.isArray(champs)) return null;
   const texte = champs.filter((c) => typeof c === 'string').map((c) => c.replace(CONTROLES_INCERTAIN, '').replace(/\s+/g, ' ').trim()).filter(Boolean).join(' ; ');
   const points = Array.from(texte);

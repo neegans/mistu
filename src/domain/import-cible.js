@@ -107,6 +107,9 @@ export function fabriquerExtraction(resultat, { reference, versions = [], pages 
       source_page_ids: presentes, source_document_id: presentes.length ? (parId.get(presentes[0]).document_id ?? null) : null, generated_by: 'ai', model: modele ?? null,
       edition_id: edition?.id ?? reference.edition_id ?? null, convention_snapshot: convention ? { id: convention.id, revision: convention.revision, values: convention.values } : null,
       import_id: importId ?? null, incomplete, missing_page, titre_lu: typeof resultat.title === 'string' ? resultat.title : null,
+      // Vague finale (m8) : les incertitudes dites par le modèle (déjà bornées par validateParsedRecipe : ≤ 40 × 200 points de code) vivent AUSSI dans la
+      // version — la purge à 30 jours de la ligne du journal n'efface plus « Incertain : … » d'une fiche toujours à vérifier.
+      uncertain_fields: Array.isArray(resultat.uncertain_fields) ? resultat.uncertain_fields.filter((u) => typeof u === 'string') : [],
     },
     verification_state: 'to_verify',
     ...(maintenant ? { created_at: maintenant } : {}),
@@ -125,7 +128,10 @@ export function fabriquerExtraction(resultat, { reference, versions = [], pages 
   };
   assertVocabulaire(recipe, 'recipes'); // D-12 : le fabricant vérifie le vocabulaire fermé avant toute écriture
   const pageUpdates = presentes.map((id, i) => ({ ...parId.get(id), kind: 'recipe', position: i + 1, printed_page: parId.get(id).printed_page ?? (i === 0 ? recipe.printed_page ?? null : null) }));
-  const remplacement = versions.some((v) => v?.provenance?.generated_by !== 'ai');
+  // I-5 (vague finale, m5) : ce que la personne a ÉCRIT et qui peut être courant — une saisie à la main (extraction) ou une correction — jamais une
+  // adaptation (« Ma version », un remplacement d'ingrédient) ni une traduction, qui ne deviennent pas courantes : sinon « Garder ma version » gardait
+  // courante l'ancienne lecture partielle de l'assistant.
+  const remplacement = versions.some((v) => v?.provenance?.generated_by !== 'ai' && (v?.kind === 'extraction' || v?.kind === 'correction'));
   return { recipe, version, pageUpdates, remplacement };
 }
 
@@ -140,10 +146,21 @@ export function ageDepuis(iso, maintenant) {
   return { n: Math.floor(minutes / 1440), unite: 'j' };
 }
 
+// --- Date de réception d'une lecture (« Lecture reçue le {d} », spec § 4.2.6 et § 4.5 ; vague finale, m7) : le départ du vol plus sa durée — jamais
+// updated_at, qui bouge à chaque transition sur place (photo du plat posée ou retirée en a_verifier). Sans départ ni durée lisibles (ligne d'avant, ou
+// reçue), updated_at comme avant. Une durée hors 0..24 h n'est pas une durée de vol (rien d'inventé : repli).
+export function dateReception(ligne) {
+  const depart = Date.parse(typeof ligne?.started_at === 'string' ? ligne.started_at : '');
+  const duree = ligne?.duree_ms;
+  return Number.isFinite(depart) && Number.isInteger(duree) && duree >= 0 && duree <= 86400000 ? new Date(depart + duree).toISOString() : (ligne?.updated_at ?? null);
+}
+
 // --- Séance de l'écran ciblé (spec § 4.1, N3) : SEULE la séance d'un import `kind: 'recette'` AVEC `recipe_id`, non terminé, est exclue des
 // rappels génériques (« Séances à reprendre », « Séance en cours », « Photos conservées ») ; elle y réapparaît sur enregistre / ignore.
+// Vague finale (m10) : « non terminé » = importOuvert (une seule définition) — une ligne reçue hors vocabulaire (statut inconnu ou nul) ne masque plus
+// sa séance, comme elle n'est ni listée, ni reprise, ni bloquante (I-2 ne couvre que le vocabulaire connu).
 export function seanceDUnImportCible(seance, imports) {
-  return (Array.isArray(imports) ? imports : []).some((i) => i && i.kind === 'recette' && !!i.recipe_id && i.scan_session_id === seance?.id && !IMPORTS_TERMINES.includes(i.status));
+  return (Array.isArray(imports) ? imports : []).some((i) => importOuvert(i) && i.kind === 'recette' && !!i.recipe_id && i.scan_session_id === seance?.id);
 }
 
 // --- Section « Imports » d'Ajouter (spec § 4.5, tâche 6) ---------------------------------------------------------------------------------------
@@ -161,7 +178,8 @@ const chaine = (v) => (typeof v === 'string' && v ? v : null);
 export function cibleReprise(ligne) {
   const id = chaine(ligne?.id);
   if (!id) return null;
-  if (ligne.kind === 'recette') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/importer` : `/recipes/new?import=${encodeURIComponent(id)}`;
+  // Vague finale (m4) : l'écran ciblé reçoit aussi LA ligne (?import=) — après synchro, une recette peut avoir un import ouvert par appareil.
+  if (ligne.kind === 'recette') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/importer?import=${encodeURIComponent(id)}` : `/recipes/new?import=${encodeURIComponent(id)}`;
   if (ligne.kind === 'index') return chaine(ligne.scan_session_id) ? `/import?session=${encodeURIComponent(ligne.scan_session_id)}&import=${encodeURIComponent(id)}` : null;
   return null;
 }

@@ -15,7 +15,7 @@ import { assertVocabulaire } from '../domain/vocabulaire.js';
 import { pageHeader, field, select, carteConnexion, texteEchecAssistant, section, pdfFrame, sessionAssistant, isoLisible } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
-import { lireDansLeJournal, relireDuJournal, phraseEchec, cleLecture, volEnCours } from './import-cible.js';
+import { lireDansLeJournal, relireDuJournal, phraseEchec, cleLecture, tenirVol, libererVol } from './import-cible.js';
 
 const SUBRECIPE_RE = /(?:voir|see|cf\.?)\s+(?:la\s+)?(?:page|p\.)\s*(\d{1,4})|\bp\.\s*(\d{1,4})\b/gi;
 
@@ -34,8 +34,13 @@ export async function renderRecipeEdit(params, query, ctx) {
   // Import ciblé (spec § 4.3.7, N5) : une étape de la version de départ qui porte un saut de ligne a été lue ENTIÈRE par l'assistant ; l'éditeur
   // passe alors en « une étape par paragraphe » (zone jointe par une ligne vide, aide adaptée, aperçu et save() par parseStepsBlock parParagraphe) ;
   // sinon rien ne change (une étape par ligne ou par paragraphe, aide actuelle : une étape ajoutée sur une nouvelle ligne reste une étape).
-  const parParagraphe = (base?.steps || []).some((s) => typeof s?.text === 'string' && s.text.includes('\n'));
-  const aideEtapes = parParagraphe ? t('Une étape par paragraphe (ligne vide entre deux étapes).') : t('Une étape par ligne ou par paragraphe.');
+  // Vague finale (Important) : le mode dépend aussi de la LECTURE posée ensuite (?import=, « Extraire avec l'assistant IA ») — remplir() le bascule dès
+  // qu'une étape lue porte un saut de ligne (§ 3.4 : une étape gardée entière dans un seul text), pour que l'éditeur et l'écran ciblé (I5) enregistrent
+  // le même nombre d'étapes.
+  const porteUnSaut = (liste) => (liste || []).some((s) => typeof s?.text === 'string' && s.text.includes('\n'));
+  let parParagraphe = porteUnSaut(base?.steps);
+  const aideDe = () => (parParagraphe ? t('Une étape par paragraphe (ligne vide entre deux étapes).') : t('Une étape par ligne ou par paragraphe.'));
+  const aideEtapes = aideDe();
   // En « par paragraphe », une ligne vide INTERNE d'une étape (sous-titre puis texte) est repliée en un saut de ligne : sinon parseStepsBlock la
   // couperait en deux au save() (ronde 1). Sert aussi au remplissage par l'assistant, pour que ses étapes restent séparées par une ligne vide.
   const joindreEtapes = (liste) => (parParagraphe
@@ -93,6 +98,7 @@ export async function renderRecipeEdit(params, query, ctx) {
   const titleInput = el('input', { type: 'text', value: f.title, onInput: (e) => { f.title = e.target.value; } });
   const ingTa = el('textarea', { rows: 10, value: f.ingredientsText, placeholder: '2 c. à soupe d’huile d’olive\n400 g de spaghetti\n1 boîte (400 g) de tomates italiennes\nsel, au goût', onInput: (e) => { f.ingredientsText = e.target.value; } });
   const stepsTa = el('textarea', { rows: 10, value: f.stepsText, placeholder: aideEtapes, onInput: (e) => { f.stepsText = e.target.value; } });
+  const champEtapes = field(t('Étapes'), stepsTa, parParagraphe ? aideEtapes : null);
   const linesPreview = el('div', null);
   const stepsPreview = el('div', null);
   const num = (k) => el('input', { type: 'number', min: 0, value: f[k], onInput: (e) => { f[k] = e.target.value; } });
@@ -164,6 +170,10 @@ export async function renderRecipeEdit(params, query, ctx) {
   const remplir = (r, modele) => {
     if (r.title && !f.title) { f.title = r.title; titleInput.value = r.title; }
     if (r.servings != null) f.servings = r.servings; if (r.prep_minutes != null) f.prep = r.prep_minutes; if (r.cook_minutes != null) f.cook = r.cook_minutes; if (r.printed_page != null && !f.printed_page) f.printed_page = r.printed_page;
+    if (!parParagraphe && porteUnSaut(r.steps)) { // bascule (vague finale) : zone jointe par une ligne vide, aide et placeholder alignés, aperçu et save() par paragraphe
+      parParagraphe = true; stepsTa.placeholder = aideDe();
+      if (!champEtapes.querySelector('small')) champEtapes.append(el('small', null, aideDe()));
+    }
     f.ingredientsText = r.ingredients.map((i) => i.source_text).join('\n'); ingTa.value = f.ingredientsText;
     f.stepsText = joindreEtapes(r.steps); stepsTa.value = f.stepsText;
     f.aiUsed = true; f.aiModel = modele ?? null;
@@ -185,15 +195,21 @@ export async function renderRecipeEdit(params, query, ctx) {
         importCourant = r.importId;
         if (!r.connecte) configure = false;
         if (r.resultat) { remplir(r.resultat, r.modele); lecturePosee = { cle: r.cle, resultat: r.resultat }; } else aiStatus.textContent = r.texte;
-      } else if (volEnCours()) {
-        aiStatus.textContent = t('Une lecture est déjà en cours : annule-la d’abord.'); // I-7 (ronde 1) : un seul appel en vol par document, même hors journal
       } else {
         // Une relecture depuis « Corriger » (recette existante) reste hors journal : sa cible est la fiche ouverte, pas une ligne « à regrouper ».
-        const images = [];
-        for (const p of pages) { const fl = await repo.getFile(p.sha256); images.push(await pagePourEnvoi(fl.blob)); } // F-3 : la copie envoyée est réduite
-        const courant = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) }); // relue au clic : un jeton expiré se rafraîchit
-        configure = courant.configured;
-        remplir(await extractRecipeFromImages(courant, images), courant.modele || courant.name);
+        // I-7 dans les deux sens (vague finale) : elle TIENT le vol du document le temps de son appel (tenirVol, sans ligne) — refusée si un vol est
+        // tenu (ronde 1), et tant qu'elle court, aucun vol du journal ne part de ce document (lancerExtraction rend vol_tenu).
+        const jeton = tenirVol();
+        if (!jeton) aiStatus.textContent = t('Une lecture est déjà en cours : annule-la d’abord.');
+        else {
+          try {
+            const images = [];
+            for (const p of pages) { const fl = await repo.getFile(p.sha256); images.push(await pagePourEnvoi(fl.blob)); } // F-3 : la copie envoyée est réduite
+            const courant = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) }); // relue au clic : un jeton expiré se rafraîchit
+            configure = courant.configured;
+            remplir(await extractRecipeFromImages(courant, images), courant.modele || courant.name);
+          } finally { libererVol(jeton); }
+        }
       }
     } catch (e) { aiStatus.textContent = texteEchecAssistant(e); }
     aiBtn.disabled = !configure; // une session disparue au clic : le bouton reste éteint, la phrase « Connecte-toi » est à l'écran
@@ -224,7 +240,7 @@ export async function renderRecipeEdit(params, query, ctx) {
       field(t('Portions'), numInputs.servings), field(t('Préparation (min)'), numInputs.prep), field(t('Cuisson (min)'), numInputs.cook), field(t('Actif (min)'), numInputs.active), field(t('Total (min)'), numInputs.total)),
     field(t('Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)'), ingTa),
     el('button', { class: 'btn small', onClick: reparse }, t('Analyser les lignes')), linesPreview,
-    field(t('Étapes'), stepsTa, parParagraphe ? aideEtapes : null), stepsPreview, // l'aide « par paragraphe » reste visible : une zone préremplie cache son placeholder
+    champEtapes, stepsPreview, // l'aide « par paragraphe » reste visible : une zone préremplie cache son placeholder
     kind === 'adaptation' ? field(t('Résumé des changements, raisons et compromis *'), el('textarea', { rows: 3, value: f.changes, onInput: (e) => { f.changes = e.target.value; } })) : null,
     kind === 'adaptation' ? field(t('Statut'), select([{ value: 'proposed', label: t('Proposée') }, { value: 'tested', label: t('Testée par Neegan') }], f.status, (v) => { f.status = v; })) : null,
     field(t('Notes'), el('textarea', { rows: 2, value: f.notes, onInput: (e) => { f.notes = e.target.value; } })),
@@ -260,17 +276,19 @@ export async function renderRecipeEdit(params, query, ctx) {
     // rien hors d'une lecture (une parente sans import_id ne lègue rien), rien pour une adaptation, et RIEN pour une relecture par l'assistant faite
     // ici (f.aiUsed : ce n'est pas cette lecture-là ; ronde 1). Revalidé à l'héritage (I-1) : titre_lu ≤ 200 points de code, lu_le lisible.
     const parente = base?.provenance;
+    // Les incertitudes de la lecture (vague finale, m8) : revalidées aux bornes de validateParsedRecipe (≤ 40 × 200 points de code), sinon aucune.
+    const champsIncertains = (x) => (Array.isArray(x) && x.length <= BORNES_EXTRACTION.champsIncertains && x.every((u) => typeof u === 'string' && Array.from(u).length <= BORNES_EXTRACTION.champIncertain) ? [...x] : []);
     const heritageLecture = kindVersion === 'correction' && !f.aiUsed && typeof parente?.import_id === 'string' && parente.import_id
       ? { import_id: parente.import_id, incomplete: parente.incomplete === true, missing_page: parente.missing_page === true,
         titre_lu: typeof parente.titre_lu === 'string' && Array.from(parente.titre_lu).length <= BORNES_EXTRACTION.titre ? parente.titre_lu : null,
-        lu_le: Object.hasOwn(parente, 'lu_le') ? isoLisible(parente.lu_le) : isoLisible(base.created_at) }
+        lu_le: Object.hasOwn(parente, 'lu_le') ? isoLisible(parente.lu_le) : isoLisible(base.created_at), uncertain_fields: champsIncertains(parente.uncertain_fields) }
       : {};
     // Une lecture du JOURNAL posée dans ce formulaire (ronde 1, I-1) : la version garde ce qu'elle a dit d'incomplet (titre lu compris), et la fiche reste
     // partial au plus (comme fabriquerExtraction) ; elle nomme la ligne (import_id, pointeur souple) seulement quand c'est CETTE lecture qui est close.
     const lu = !targetRecipe && f.aiUsed && lecturePosee ? lecturePosee.resultat : null;
     const ligneLue = lu && importCourant && lecturePosee.cle ? await repo.get('imports', importCourant) : null;
     const fermer = ligneLue?.status === 'a_verifier' && ligneLue.kind === 'recette' && ligneLue.recipe_id == null && cleLecture(ligneLue) === lecturePosee.cle;
-    const lectureJournal = lu ? { ...(fermer ? { import_id: ligneLue.id } : {}), incomplete: lu.incomplete === true, missing_page: lu.missing_page === true, titre_lu: typeof lu.title === 'string' ? lu.title : null } : {};
+    const lectureJournal = lu ? { ...(fermer ? { import_id: ligneLue.id } : {}), incomplete: lu.incomplete === true, missing_page: lu.missing_page === true, titre_lu: typeof lu.title === 'string' ? lu.title : null, uncertain_fields: champsIncertains(lu.uncertain_fields) } : {};
     const version = {
       id: repo.newId('rv'), recipe_id: recipeId, kind: kindVersion, parent_version_id: base?.id || null,
       status: kind === 'adaptation' ? f.status : null, servings: n(f.servings), prep_minutes: n(f.prep), cook_minutes: n(f.cook), active_minutes: n(f.active), total_minutes: n(f.total),

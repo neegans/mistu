@@ -9,7 +9,7 @@ import { on } from '../core/bus.js';
 import { logError } from '../core/log.js';
 import { TransitionRefusee } from '../core/db.js';
 import * as repoModule from '../model/repo.js';
-import { lignesImports } from '../domain/import-cible.js';
+import { lignesImports, dateReception } from '../domain/import-cible.js';
 import { pageHeader, carte, libelleLivre, field, select } from './components.js';
 import { startScanSession } from './import.js';
 import { DOCUMENT_ID, lancerExtraction, annulerVol, phraseEchec, texteRefus, cleLecture } from './import-cible.js';
@@ -89,7 +89,7 @@ function etatLigne(l, brute) {
   if (l.kind === 'seance') return null;
   if (l.etat === 'a_lancer') return l.pages <= 1 ? t('{n} photo ajoutée', { n: l.pages }) : t('{n} photos ajoutées', { n: l.pages });
   if (l.etat === 'en_cours') return l.ailleurs ? t('En cours sur un autre écran') : t('Lecture des pages par l’assistant…');
-  if (l.etat === 'a_verifier') return t('Lecture reçue le {d}', { d: formatDate(brute?.updated_at, { withTime: true }) });
+  if (l.etat === 'a_verifier') return t('Lecture reçue le {d}', { d: formatDate(dateReception(brute), { withTime: true }) }); // vague finale (m7) : jamais updated_at
   if (l.etat === 'echec') return phraseEchec(brute?.erreur ?? { raison: l.raison });
   return null;
 }
@@ -152,7 +152,7 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
   return { hote, redessiner, dessiner };
 }
 
-export async function renderAdd(params, query, ctx, { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch = undefined, maintenant = () => new Date().toISOString(), battementMs = undefined } = {}) {
+export async function renderAdd(params, query, ctx, { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch = undefined, maintenant = () => new Date().toISOString(), battementMs = undefined, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000 } = {}) {
   const root = el('div', null, pageHeader(t('Ajouter')));
   const zone = el('div', null);
   const imports = sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, battementMs });
@@ -168,7 +168,10 @@ export async function renderAdd(params, query, ctx, { repo = repoModule, navigat
   // Ronde 1 : la passe `interrompu` du démarrage est rejouée à l'affichage quand le journal porte un vol (repo.marquerInterrompus, mêmes règles) : un
   // rechargement dans les 90 s, ou une ligne d'un appareil perdu, ne reste plus bloqué « En cours… » sans geste jusqu'au prochain démarrage.
   // Le redessin suit la passe elle-même (et pas seulement le bus) : finie avant que la page soit montée, elle serait sinon perdue.
-  if ((ctx?.imports || []).some((i) => i?.status === 'en_cours') && typeof repo.marquerInterrompus === 'function') repo.marquerInterrompus().then((n) => { if (n) imports.redessiner(); }).catch((e) => logError('add.interrompus', { error: e }));
+  // Vague finale (m1) : puis une fois encore après BATTEMENT_MORT_MS (+ 1 s) si la page est toujours montée — une ligne dont le document vient de mourir
+  // (battement de moins de 90 s à l'affichage : PWA tuée puis relancée) est levée sans quitter la page.
+  const passeInterrompus = () => repo.marquerInterrompus().then((n) => { if (n) imports.redessiner(); }).catch((e) => logError('add.interrompus', { error: e }));
+  if ((ctx?.imports || []).some((i) => i?.status === 'en_cours') && typeof repo.marquerInterrompus === 'function') { passeInterrompus(); setTimeout(() => { if (root.isConnected) passeInterrompus(); }, veilleMs); }
   // ?section=imports (fiche du livre, « {n} imports à reprendre » ; parseHash ne porte pas d'ancre, m3) : la section reçoit le focus une fois montée.
   setTimeout(() => {
     if (!root.isConnected) { desabonner(); return; }

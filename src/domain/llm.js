@@ -4,7 +4,7 @@
 // autre fournisseur (le fournisseur compatible OpenAI, configurable par une clé locale, est retiré : Passerelle T4).
 import { appelerAssistant, echecDomaine, sessionValide, LIMITES_PASSERELLE } from './passerelle.js';
 import { borner } from '../core/bornes.js';
-import { reduireImage } from '../core/image.js';
+import { reduireImage, dimensionsImage, ErreurImage } from '../core/image.js';
 
 export class LLMProvider {
   constructor(config = {}) { this.config = config; }
@@ -221,7 +221,14 @@ export function validateParsedRecipe(data) {
 // 1568 px est la taille au-delà de laquelle le fournisseur réduit lui-même l'image : rien n'est perdu à l'envoyer plus petite. La page STOCKÉE
 // n'est jamais touchée. Une page qui ne se décode pas lève (ErreurImage « indecodable ») : jamais envoyée telle quelle, elle contournerait la borne.
 export const COTE_MAX_ENVOI = 1568;
+// Vague finale (m12) : le mur d'une page AVANT tout décodage, comme celui d'une couverture (S2) mais à la mesure d'une page photographiée — une photo de
+// 48 Mpx d'iPhone est un cas réel : ≤ 50 Mo et ≤ 50 Mpx lus dans l'en-tête ; au-delà, ErreurImage('trop_grande') (« Cette image est trop grande. ») :
+// une archive restaurée ou un fichier choisi de 30 000 × 30 000 ne fait plus tomber l'onglet en plein vol.
+export const LIMITES_ENVOI = Object.freeze({ octets: 50 * 1024 * 1024, pixels: 50_000_000 });
 export async function pagePourEnvoi(blob) {
+  if (blob instanceof Blob && blob.size > LIMITES_ENVOI.octets) throw new ErreurImage('trop_grande');
+  const dims = await dimensionsImage(blob);
+  if (dims && dims.largeur * dims.hauteur > LIMITES_ENVOI.pixels) throw new ErreurImage('trop_grande');
   const reduite = await reduireImage(blob, { maxCote: COTE_MAX_ENVOI });
   return { mime: reduite.type, base64: await blobToBase64(reduite) };
 }
