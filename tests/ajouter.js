@@ -17,8 +17,12 @@ export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', 
 // « Imports » vit dans add.js, déjà scanné en entier (MODULES_NEUFS). Tâche 6, ronde 1 : la plomberie du journal (et ses phrases de refus) a rejoint
 // src/ui/import-cible.js, scanné en entier ; l'éditeur dit en plus le vol tenu et ce que la lecture a dit d'incomplet (chaînes déjà traduites).
 export const CHAINES_NEUVES_AILLEURS = {
-  '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', '+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer', '{n} import à reprendre', '{n} imports à reprendre'],
-  '../src/ui/import.js': ['Les références n’ont pas pu être créées. Réessaie.'],
+  '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', '+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer', '{n} import à reprendre', '{n} imports à reprendre',
+    // Lot G, tâche 6 : la couverture par état (§ 4.2).
+    'La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.', 'La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.', 'Fichier illisible reçu du serveur.', 'Le téléchargement n’a pas abouti.'],
+  '../src/ui/import.js': ['Les références n’ont pas pu être créées. Réessaie.',
+    // Lot G, tâche 6 : la phrase de séance (§ 4.3, F-21).
+    'Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages', '{n}/{m} photos de cette séance envoyées au serveur'],
   '../src/ui/recipe.js': ['Lien web gardé.', 'Ouvrir le lien', 'Adresse non reconnue : ', 'Importer cette recette', 'Relire les pages',
     // Lot B, tâche 5 : la fiche d'un lien gardé (blocSignet), le bandeau d'une version lue sur le web, la relecture (B-27 : l'ancienne phrase est retirée).
     'L’app n’a pas encore lu la page.', 'Lecture de la page en cours…', 'Voir', 'Lecture reçue : vérifie-la et enregistre.', 'Vérifier et enregistrer', 'Contenu non récupéré : ouvre la page.',
@@ -27,7 +31,9 @@ export const CHAINES_NEUVES_AILLEURS = {
     'Lue par l’assistant le {d}', 'Lue par l’assistant', '{n} ligne(s) incertaine(s)', 'page possiblement manquante', 'lecture incomplète', 'Incertain : {t}', 'Vérifiée', 'À vérifier', '1 ligne à vérifier', '{n} lignes à vérifier', 'Photo du plat'],
   '../src/ui/components.js': ['Lien web', 'Adresse non reconnue', 'incertain', 'Ligne incertaine selon l’assistant',
     // Lot B, tâche 4 : la ligne de repères déménagée de search.js (ligneReperes, mêmes textes).
-    '≈ {n} min', '≈ {h} h', '≈ {h} h {m}', 'facile', 'moyen', 'exigeant', '1 ingrédient', '{n} ingrédients'],
+    '≈ {n} min', '≈ {h} h', '≈ {h} h {m}', 'facile', 'moyen', 'exigeant', '1 ingrédient', '{n} ingrédients',
+    // Lot G, tâche 6 : vignettePage, gesteTelechargement, boutonTelechargerPages, pdfFrame (§ 4.3-4.5).
+    'Page', 'Télécharger', 'Téléchargement…', 'Télécharger les {n} pages', 'Le téléchargement n’a pas abouti.', 'Pas encore sur cet appareil', 'Connecte-toi pour la télécharger', 'Pas encore envoyée par l’appareil qui l’a prise', 'Pas encore reçue', 'Fichier illisible reçu du serveur.'],
   // Lot B, tâche 4 : « Garder et lire » et le doublon sur une carte de l'onglet Web.
   '../src/ui/search.js': ['Garder et lire', 'Tu as déjà gardé cette adresse.', 'Ouvrir la fiche', 'Adresse non reconnue.', 'Le lien n’a pas pu être gardé. Réessaie.'],
   '../src/ui/cook.js': ['Lue par l’assistant, non relue'],

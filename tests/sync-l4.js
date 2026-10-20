@@ -2974,4 +2974,292 @@ export async function runSyncL4Tests({ eq, ok }) {
     });
     await etat.relireReglages(); // la base de l'app reprend la main
   });
+
+  // === Tâche 6 — écrans (§ 4.2-4.5)
+  const K = await import('../src/ui/components.js');
+  // Une image `loading: 'lazy'` détachée ou dans une scène cachée ne se charge jamais (Chrome) : passée en `eager` avant d'attendre (rejeu, mesuré).
+  const finDesImages = (racine) => Promise.all([...racine.querySelectorAll('img')].map((i) => { if (i.complete) return null; i.loading = 'eager'; return new Promise((r) => { i.onload = r; i.onerror = r; }); }));
+  const pngMinuscule = async () => { const toile = new OffscreenCanvas(2, 2); toile.getContext('2d').fillRect(0, 0, 2, 2); return toile.convertToBlob({ type: 'image/png' }); };
+
+  await run('vignettePage : les états d’une page (§ 4.3)', async () => {
+    const page = { id: 'p1', sha256: H('7') };
+    const distant = { sha256: H('7'), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: R() };
+    const vus = [];
+    const telecharger = async (sha, o) => { vus.push([sha, !!o?.reessayer]); };
+    const img = K.vignettePage(page, { ...distant, mime: 'image/png', blob: await pngMinuscule() }, { connecte: true, uid: 'u1', telecharger });
+    const etat = (f, o) => K.vignettePage(page, f, { uid: 'u1', telecharger, ...o });
+    const v = [
+      etat(distant, { connecte: true }),
+      etat(distant, { connecte: false }),
+      etat({ ...distant, remote: null }, { connecte: true }),
+      etat({ ...distant, remote: R({ owner: 'u2' }) }, { connecte: true }),
+      etat(undefined, { connecte: true }),
+      etat(distant, { connecte: true, erreurs: new Set([H('7')]) }),
+    ];
+    const decrire = (n) => [n.tagName, n.dataset.etat, n.querySelector('small')?.textContent ?? null, [...n.querySelectorAll('button')].map((b) => b.textContent)];
+    eq([img.tagName, ...v.map(decrire)], ['IMG',
+      ['FIGURE', 'distant', 'Pas encore sur cet appareil', ['Télécharger']],
+      ['FIGURE', 'distant', 'Connecte-toi pour la télécharger', []],
+      ['FIGURE', 'absent', 'Pas encore envoyée par l’appareil qui l’a prise', []],
+      ['FIGURE', 'absent', 'Pas encore envoyée par l’appareil qui l’a prise', []],
+      ['FIGURE', 'pas_recue', 'Pas encore reçue', []],
+      ['FIGURE', 'erreur', 'Fichier illisible reçu du serveur.', ['Réessayer']]],
+      'vignettePage : avec octets → <img> ; distante (compte : « Télécharger » ; sans compte : « Connecte-toi ») ; absente ; d’un autre compte → absente (R-G-2) ; sans ligne → « Pas encore reçue » ; erreur → « Réessayer »');
+    ok(v.every((n) => n.classList.contains('fichier-absent')), 'vignettePage : figure.fichier-absent, le gabarit 110 × 140 des miniatures');
+    v[0].querySelector('button').click(); v[5].querySelector('button').click();
+    await new Promise((r) => setTimeout(r, 0));
+    eq(vus, [[H('7'), false], [H('7'), true]], 'vignettePage : « Télécharger » et « Réessayer » appellent telecharger(sha256, { reessayer }) — sur une tape seulement (R-G-1)');
+    if (!img.complete) { img.loading = 'eager'; await new Promise((r) => { img.onload = r; img.onerror = r; }); } // lazy détachée : jamais chargée sinon
+    URL.revokeObjectURL(img.src);
+  });
+
+  await run('pdfFrame : conteneur tout de suite, cadre ou bouton à la résolution (§ 4.5, B-24)', async () => {
+    await withRepo(async (repo, db) => {
+      const pdf = octets('%PDF-1.4 cadre', 'application/pdf'); const shaPdf = await sha256Hex(pdf);
+      await repo.putFile(shaPdf, pdf, { original_filename: 'c.pdf' });
+      await db.mutate({ puts: { files: [{ sha256: H('7'), mime: 'application/pdf', size: 9, updated_at: DATE, remote: R({ mime: 'application/pdf' }) }] }, origin: 'remote' });
+      const vus = [];
+      const sans = K.pdfFrame({ sha256: H('7'), filename: 'x.pdf', connecte: true, telecharger: async (sha) => { vus.push(sha); } });
+      const avec = K.pdfFrame({ sha256: shaPdf, filename: 'c.pdf' });
+      const immediat = [sans.classList.contains('stack'), sans.querySelector('iframe'), avec.querySelector('iframe')];
+      for (let i = 0; i < 100 && !(sans.querySelector('button') && avec.querySelector('iframe')); i += 1) await new Promise((r) => setTimeout(r, 10));
+      eq([immediat, sans.querySelector('iframe'), [...sans.querySelectorAll('button')].map((b) => b.textContent), sans.textContent.includes('Ce fichier n’est pas encore sur cet appareil.'), !!avec.querySelector('iframe.pdf[sandbox]'), [...avec.querySelectorAll('button')].map((b) => b.textContent)],
+        [[true, null, null], null, ['Télécharger'], true, true, ['Télécharger le fichier']], 'pdfFrame : conteneur rendu de suite et vide ; sans octets → la phrase et « Télécharger », jamais un cadre vide ; avec octets → le cadre sandbox et « Télécharger le fichier » (mutant : cadre rendu avant la résolution)');
+      const pdf2 = octets('%PDF-1.4 recu', 'application/pdf');
+      const apres = K.pdfFrame({ sha256: H('7'), filename: 'x.pdf', connecte: true, telecharger: async (sha) => { vus.push(sha); await db.mutate({ puts: { files: [{ ...(await db.get('files', sha)), blob: pdf2 }] }, origin: 'remote' }); } });
+      for (let i = 0; i < 100 && !apres.querySelector('button'); i += 1) await new Promise((r) => setTimeout(r, 10));
+      apres.querySelector('button').click();
+      for (let i = 0; i < 100 && !apres.querySelector('iframe'); i += 1) await new Promise((r) => setTimeout(r, 10));
+      eq([vus, !!apres.querySelector('iframe.pdf[sandbox]')], [[H('7')], true], 'pdfFrame : « Télécharger » appelle telecharger(sha256), puis le cadre remplace le bouton');
+    });
+  });
+
+  await run('fiche du livre : couverture distante, sans compte, absente, en erreur, échec dit (§ 4.2)', async () => {
+    const { renderBook } = await import('../src/ui/book.js');
+    await withRepo(async (repo, db) => {
+      const toile = new OffscreenCanvas(4, 6); toile.getContext('2d').fillRect(0, 0, 4, 6);
+      const jpeg = await toile.convertToBlob({ type: 'image/jpeg' }); const shaJ = await sha256Hex(jpeg);
+      const eD = { id: 'eD', book_id: 'bD', year: 2020, cover_sha256: H('7') };
+      const eA = { id: 'eA', book_id: 'bD', year: 2021, cover_sha256: H('8') };
+      const eE = { id: 'eE', book_id: 'bD', year: 2022, cover_sha256: H('9') };
+      const livre = { id: 'bD', title: 'Distant', author: 'A', cuisines: [] };
+      await db.mutate({ puts: { files: [{ sha256: H('7'), mime: 'image/jpeg', size: jpeg.size, updated_at: DATE, remote: R({ sha256: shaJ, size: jpeg.size }) }, { sha256: H('8'), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: null }, { sha256: H('9'), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: R({ sha256: H('c'), size: 5 }) }], sync_state: [{ key: 'user_id', value: 'u1' }, { key: 'file_error:' + H('9'), value: { motif: 'empreinte', sens: 'reception', at: DATE } }] }, origin: 'device' });
+      const appels = [];
+      const moteur = { telecharger: async (shas) => { appels.push(shas); const l = await db.get('files', shas[0]); await db.mutate({ puts: { files: [{ ...l, blob: jpeg }] }, origin: 'remote' }); return { recus: 1, erreurs: 0, erreur: null }; }, onEtat: () => () => {} };
+      const ctx = (sync) => ({ book_editions: [eD, eA, eE], recipes: [], recipe_versions: [], source_documents: [], source_pages: [], rediscovery_prefs: [], dishes: [], dish_recipe_links: [], recipesById: new Map(), docsByRecipe: new Map(), scan_sessions: [], settings: {}, books: [livre], booksById: new Map([['bD', livre]]), editionsById: new Map([['eD', eD], ['eA', eA], ['eE', eE]]), editionLabel: () => livre.title, sync });
+      const bloc = (n) => [...n.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Couverture');
+      const textesBoutons = (n) => [...(bloc(n)?.querySelectorAll('button') || [])].map((b) => b.textContent);
+      const sansCompte = await renderBook({ id: 'eD' }, {}, ctx({}));
+      const absente = await renderBook({ id: 'eA' }, {}, ctx({ user: { id: 'u1' }, moteur }));
+      eq([bloc(sansCompte)?.querySelector('small')?.textContent, textesBoutons(sansCompte).includes('Télécharger'), bloc(absente)?.querySelector('small')?.textContent, textesBoutons(absente).includes('Télécharger')],
+        ['La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.', false, 'La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.', false], 'couverture : distante sans compte → « Connecte-toi … », aucun bouton ; absente → « … ne l’a pas encore envoyée »');
+      // Erreur et échec (faux-vert de la rév. 1) : une couverture en file_error offre « Réessayer », qui passe par reessayerFichier ; un
+      // téléchargement qui n'aboutit pas (recus: 0) se DIT (toast) et laisse la zone telle quelle. Joué AVANT le succès : il donne ses octets à H('7').
+      const reessais = [];
+      const moteurEchec = { telecharger: async (shas) => ({ recus: 0, erreurs: 1, erreur: null, shas }), reessayerFichier: async (sha) => { reessais.push(sha); return { recus: 0, erreurs: 1, erreur: null }; }, onEtat: () => () => {} };
+      const toastDit = () => document.querySelector('.toast')?.textContent ?? null;
+      const viderToast = () => { const n = document.querySelector('.toast'); if (n) n.textContent = ''; };
+      viderToast();
+      const enErreur = await renderBook({ id: 'eE' }, {}, ctx({ user: { id: 'u1' }, moteur: moteurEchec }));
+      const zoneE = bloc(enErreur);
+      eq([zoneE?.querySelector('small')?.textContent, textesBoutons(enErreur).includes('Réessayer'), textesBoutons(enErreur).includes('Télécharger')], ['Fichier illisible reçu du serveur.', true, false], 'couverture en erreur : la phrase et « Réessayer », jamais « Télécharger »');
+      [...zoneE.querySelectorAll('button')].find((b) => b.textContent === 'Réessayer').click();
+      for (let i = 0; i < 100 && toastDit() !== 'Le téléchargement n’a pas abouti.'; i += 1) await new Promise((r) => setTimeout(r, 10));
+      eq([reessais, toastDit(), !!zoneE.querySelector('img')], [[H('9')], 'Le téléchargement n’a pas abouti.', false], 'couverture : « Réessayer » appelle moteur.reessayerFichier(sha) ; sans octets reçus, l’échec est DIT et aucune image n’apparaît (mutants : Réessayer → telecharger ; toast retiré)');
+      viderToast();
+      const echec = await renderBook({ id: 'eD' }, {}, ctx({ user: { id: 'u1' }, moteur: moteurEchec }));
+      const zoneEchec = bloc(echec);
+      [...zoneEchec.querySelectorAll('button')].find((b) => b.textContent === 'Télécharger').click();
+      for (let i = 0; i < 100 && toastDit() !== 'Le téléchargement n’a pas abouti.'; i += 1) await new Promise((r) => setTimeout(r, 10));
+      eq([toastDit(), zoneEchec.querySelector('small')?.textContent, textesBoutons(echec).includes('Télécharger'), !!zoneEchec.querySelector('img')], ['Le téléchargement n’a pas abouti.', 'La couverture n’est pas sur cet appareil.', true, false], 'couverture : un téléchargement qui rend recus: 0 se dit (toast), la zone reste la même avec « Télécharger » (mutant : échec muet)');
+      const fiche = await renderBook({ id: 'eD' }, {}, ctx({ user: { id: 'u1' }, moteur }));
+      const zone = bloc(fiche);
+      eq([zone?.querySelector('small')?.textContent, textesBoutons(fiche).includes('Télécharger')], ['La couverture n’est pas sur cet appareil.', true], 'couverture distante avec compte : le texte existant et « Télécharger »');
+      [...zone.querySelectorAll('button')].find((b) => b.textContent === 'Télécharger').click();
+      for (let i = 0; i < 100 && !zone.querySelector('img'); i += 1) await new Promise((r) => setTimeout(r, 10));
+      eq([appels, !!zone.querySelector('img'), zone.querySelector('small')], [[[H('7')]], true, null], 'couverture : « Télécharger » → moteur.telecharger([sha]) puis la zone se redessine avec l’image (invalidate + refresh pour la fiche entière)');
+      await finDesImages(fiche);
+      (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob();
+    });
+  });
+
+  await run('séance de scan : vignettes et phrase abonnée (§ 4.3, F-21)', async () => {
+    const { renderImport } = await import('../src/ui/import.js');
+    await withRepo(async (repo, db) => {
+      const photo = new Blob([await pngMinuscule()], { type: 'image/png' }); const s1 = await sha256Hex(photo);
+      await repo.putFile(s1, photo, {});
+      await db.mutate({ puts: { files: [{ ...(await db.get('files', s1)), remote: R({ sha256: s1, size: photo.size, mime: 'image/png' }) }, { sha256: H('2'), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: R() }, { sha256: H('3'), mime: 'image/jpeg', size: 5, updated_at: DATE }] }, origin: 'remote' });
+      const pages = [{ id: 'q1', document_id: 'dq', sha256: s1, position: 1 }, { id: 'q2', document_id: 'dq', sha256: H('2'), position: 2 }, { id: 'q3', document_id: 'dq', sha256: H('3'), position: 3 }];
+      const seance = { id: 'ss1', status: 'open', started_at: DATE, page_ids: ['q1', 'q2', 'q3'], document_ids: [] };
+      const abonnes = new Set();
+      const moteur = { onEtat: (fn) => { abonnes.add(fn); return () => abonnes.delete(fn); }, telecharger: async () => ({ recus: 0, erreurs: 0, erreur: null }) };
+      const ctx = { scan_sessions: [seance], pagesById: new Map(pages.map((p) => [p.id, p])), source_documents: [], book_editions: [], booksById: new Map(), editionsById: new Map(), editionLabel: () => '', recipes: [], settings: {}, sync: { user: { id: 'u1' }, moteur } };
+      const scene = document.createElement('div'); scene.hidden = true; document.body.append(scene);
+      try {
+        const root = await renderImport({}, { session: 'ss1' }, ctx);
+        scene.append(root);
+        const phrase = () => root.querySelector('[data-role="phrase-seance"]')?.textContent;
+        const etats = [...root.querySelectorAll('.thumbs .fichier-absent')].map((f) => f.dataset.etat);
+        const avant = phrase();
+        await db.mutate({ puts: { files: [{ sha256: H('3'), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: R({ sha256: H('3'), size: 5 }) }] }, origin: 'remote' });
+        for (const fn of abonnes) fn({ enCours: false });
+        for (let i = 0; i < 100 && phrase() === avant; i += 1) await new Promise((r) => setTimeout(r, 10));
+        eq([avant, phrase(), etats, root.querySelectorAll('.thumbs img').length], ['2/3 photos de cette séance envoyées au serveur', '3/3 photos de cette séance envoyées au serveur', ['distant', 'absent'], 1],
+          'séance : « {n}/{m} photos … envoyées au serveur » compte les remote de CE compte — la page distante aussi, ses octets sont au serveur (I5 ; mutant : compte sur blob → 1/3) — et se redessine sur onEtat SANS re-rendu de la route (mutant : phrase non abonnée) ; vignettes : image, distante, absente');
+        await finDesImages(root);
+      } finally { scene.remove(); }
+      const sansCompte = await renderImport({}, { session: 'ss1' }, { ...ctx, sync: {} });
+      eq(sansCompte.querySelector('[data-role="phrase-seance"]')?.textContent, 'Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages', 'séance sans compte : la phrase de la sauvegarde (« Aucune synchronisation serveur configurée » était faux dès qu’un compte existe)');
+      await finDesImages(sansCompte);
+      (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob();
+    });
+  });
+
+  await run('fiche recette : « Original » groupé et photo du plat distante (§ 4.4)', async () => {
+    const { renderRecipe } = await import('../src/ui/recipe.js');
+    const { INGREDIENTS } = await import('../src/model/seed.js');
+    await withRepo(async (repo, db) => {
+      await db.mutate({ puts: { files: [{ sha256: H('1'), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: R({ sha256: H('a'), size: 5 }) }, { sha256: H('2'), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: R({ sha256: H('b'), size: 5 }) }, { sha256: H('3'), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: R({ sha256: H('c'), size: 5 }) }] }, origin: 'remote' });
+      const pages = [{ id: 'o1', sha256: H('1'), printed_page: 10 }, { id: 'o2', sha256: H('2'), printed_page: 11 }];
+      const recette = { id: 'rO', edition_id: null, original_title: 'Compote', availability: 'available', verification_state: 'verified', source_page_ids: ['o1', 'o2'], current_version_id: 'vO', photo_sha256: H('3'), tags: [], cuisines: [], favorite: false, ingredient_ids: [], created_at: DATE, updated_at: DATE };
+      const version = { id: 'vO', recipe_id: 'rO', kind: 'extraction', servings: 2, ingredients: [], steps: [{ id: 's1', position: 1, text: 'Cuire.' }], constraints: {}, changes: '', notes: '', provenance: { source_page_ids: ['o1', 'o2'], generated_by: 'manual', model: null }, verification_state: 'verified', created_at: DATE, updated_at: DATE };
+      const appels = [];
+      const moteur = { telecharger: async (shas) => { appels.push(shas); return { recus: 0, erreurs: 0, erreur: null }; }, onEtat: () => () => {} };
+      const ctx = { recipes: [recette], recipesById: new Map([['rO', recette]]), recipe_versions: [version], versionsByRecipe: new Map([['rO', [version]]]), versionsById: new Map([['vO', version]]), editionsById: new Map(), booksById: new Map(), books: [], book_editions: [], pagesById: new Map(pages.map((p) => [p.id, p])), imports: [], dishesById: new Map(), dishes: [], cook_history: [], dish_recipe_links: [], recipe_translations: [], ingredients: INGREDIENTS, ingredientsById: new Map(INGREDIENTS.map((i) => [i.id, i])), source_documents: [], source_pages: pages, scan_sessions: [], settings: { units: 'original', reading_locale: 'original', ui_locale: 'fr', llm: { provider: 'none' } }, conventionFor: () => null, sync: { user: { id: 'u1' }, moteur } };
+      const page = await renderRecipe({ id: 'rO' }, {}, ctx);
+      const original = [...page.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Original');
+      const groupe = [...(original?.querySelectorAll('button') || [])].find((b) => b.textContent === 'Télécharger les 2 pages');
+      eq([!!groupe, original?.querySelectorAll('.fichier-absent').length, [...(page.querySelector('[data-role="photo-plat"]')?.querySelectorAll('button') || [])].map((b) => b.textContent)], [true, 2, ['Télécharger']],
+        'fiche recette : deux pages distantes → deux vignettes et « Télécharger les 2 pages » sous le titre ; la photo du plat distante suit la règle de la couverture (« Télécharger »)');
+      groupe.click();
+      for (let i = 0; i < 100 && !appels.length; i += 1) await new Promise((r) => setTimeout(r, 10));
+      eq(appels[0], [H('1'), H('2')], 'fiche recette : le bouton groupé passe les deux clés à telecharger, dans l’ordre des pages');
+      // F-9 sur la photo du plat (rév. 3, P1) : la fixture SÉPARE la garde de photoDuPlat du retypage de displayUrl. Sous une ligne image/heic
+      // (rév. 2), le mutant « photoDuPlat garde safeDisplayType(fichier.mime) » passait la garde (heic est une image de la liste) et displayUrl
+      // retypait quand même en image/jpeg : sortie identique, mutant vivant (rejoué sous Node). Ici la ligne dit application/pdf (dans la liste,
+      // PAS une image) et les octets sont un vrai JPEG : le vrai code (typeAffichage, le type du blob gagne) montre la photo, le mutant ne montre
+      // rien. Vert à l'écriture (la règle est posée en tâche 1) ; le mutant le rougit (rejoué à la clôture). Le Blob affiché se lit par l'espion
+      // de URL.createObjectURL, jamais par fetch (CSP).
+      const toileP = new OffscreenCanvas(2, 2); toileP.getContext('2d').fillRect(0, 0, 2, 2);
+      const jpegP = await toileP.convertToBlob({ type: 'image/jpeg' }); // un vrai JPEG, décodable, typé image/jpeg
+      await db.mutate({ puts: { files: [{ sha256: H('5'), mime: 'application/pdf', size: 999, blob: jpegP, syncable: true, created_at: DATE, updated_at: DATE }] }, origin: 'remote' });
+      const recetteP = { ...recette, id: 'rP', photo_sha256: H('5'), source_page_ids: [], current_version_id: 'vP' };
+      const versionP = { ...version, id: 'vP', recipe_id: 'rP', provenance: { ...version.provenance, source_page_ids: [] } };
+      const ctxP = { ...ctx, recipes: [recetteP], recipesById: new Map([['rP', recetteP]]), recipe_versions: [versionP], versionsByRecipe: new Map([['rP', [versionP]]]), versionsById: new Map([['vP', versionP]]) };
+      const remis = []; const vraiCreer = URL.createObjectURL;
+      URL.createObjectURL = (b) => { remis.push(b); return vraiCreer.call(URL, b); };
+      let pageP = null;
+      try { pageP = await renderRecipe({ id: 'rP' }, {}, ctxP); } finally { URL.createObjectURL = vraiCreer; }
+      eq([!!pageP.querySelector('[data-role="photo-plat"] img'), remis.some((b) => b.type === 'image/jpeg'), remis.some((b) => b.type === 'application/pdf')], [true, true, false], 'photo du plat (F-9, P1) : des octets JPEG sous une ligne application/pdf s’affichent, le Blob affiché est image/jpeg (mutant : safeDisplayType(fichier.mime) gardé dans photoDuPlat → application/pdf n’est pas une image → aucune photo, rouge)');
+      (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob();
+    });
+  });
+
+  await run('statique tâche 6', async () => {
+    const sw = await lire('../sw.js');
+    ok(/VERSION = 'cuisine-os-v0\.11\.0-\d+'/.test(sw), 'sw.js : VERSION 0.11.0 (au moins -6 à la clôture des écrans)');
+    const { EN } = await import('../src/i18n/en.js');
+    const neuves = ['Page', 'Télécharger', 'Télécharger les {n} pages', 'Téléchargement…', 'Le téléchargement n’a pas abouti.', 'Pas encore sur cet appareil', 'Connecte-toi pour la télécharger', 'Pas encore envoyée par l’appareil qui l’a prise', 'Pas encore reçue', 'La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.', 'La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.', 'Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages', '{n}/{m} photos de cette séance envoyées au serveur'];
+    eq(neuves.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'en.js : chaque chaîne neuve des écrans a sa traduction (dont « Page », l’alt de vignettePage)');
+    eq(neuves.filter((k) => /supabase/i.test(k) || /supabase/i.test(EN[k] || '')), [], 'I-G8 : aucune chaîne neuve des écrans ne nomme le fournisseur de stockage, ni en français ni en anglais');
+  });
+
+  // Tâche 6 — épingles hors brief (à ratifier) : des chemins que le brief prescrit et que ses tests n'exercent pas (survivants de la série 1 des mutants,
+  // rejoués sur une copie). Chaque assertion nomme le mutant qu'elle tue.
+  await run('écrans (épingles) : bouton groupé à partir de deux pages, geste par le moteur et échec dit, compte sans moteur, libellé pendant', async () => {
+    const rien = async () => {};
+    const groupe = (d, o) => K.boutonTelechargerPages(d, o);
+    eq([groupe([H('1')], { connecte: true, telecharger: rien }), groupe([H('1'), H('2')], { connecte: false, telecharger: rien }), groupe([H('1'), H('2')], { connecte: true }), groupe([H('1'), H('2')], { connecte: true, telecharger: rien })?.querySelector('button')?.textContent],
+      [null, null, null, 'Télécharger les 2 pages'], 'boutonTelechargerPages (§ 4.3) : rien pour UNE page, sans compte ou sans geste ; « Télécharger les 2 pages » à partir de deux (mutant : seuil à une page)');
+    const appels = []; const redessins = []; const dits = [];
+    const moteur = { telecharger: async (l) => { appels.push(['telecharger', l]); return { recus: 2, erreurs: 0, erreur: null }; }, reessayerFichier: async (s) => { appels.push(['reessayerFichier', s]); return { recus: 0, erreurs: 1, erreur: null }; } };
+    const geste = K.gesteTelechargement({ moteur, redessiner: async (l) => { redessins.push(l); }, dire: (x) => dits.push(x) });
+    await geste([H('1'), H('2')]);
+    await geste(H('3'), { reessayer: true });
+    await K.gesteTelechargement({ moteur: { telecharger: async () => { throw new Error('réseau'); } }, redessiner: async (l) => { redessins.push(l); }, dire: (x) => dits.push(x) })(H('4'));
+    await K.gesteTelechargement({ moteur: null, dire: (x) => dits.push(x) })(H('5'));
+    eq([appels, redessins, dits], [[['telecharger', [H('1'), H('2')]], ['reessayerFichier', H('3')]], [[H('1'), H('2')], [H('3')], [H('4')]], ['Le téléchargement n’a pas abouti.', 'Le téléchargement n’a pas abouti.', 'Le téléchargement n’a pas abouti.']],
+      'gesteTelechargement (R-G-1, § 4.2) : « Télécharger » → moteur.telecharger(liste), « Réessayer » → moteur.reessayerFichier(sha), puis le redessin de ce qui a été demandé ; sans octets reçus, une levée ou sans moteur, l’échec est DIT, un succès ne dit rien (mutants : échec muet ; « Réessayer » par telecharger)');
+    await withRepo(async (repo, db) => {
+      await db.mutate({ puts: { sync_state: [{ key: 'user_id', value: 'u9' }, { key: 'file_error:' + H('6'), value: { motif: 'empreinte', sens: 'reception', at: DATE } }] }, origin: 'device' });
+      const m = { telecharger: rien, onEtat: () => () => {} };
+      const sansMoteur = await K.contexteFichiers({ sync: { user: { id: 'u1' } } });
+      const avec = await K.contexteFichiers({ sync: { user: { id: 'u1' }, moteur: m } });
+      const connu = await K.contexteFichiers({ sync: { moteur: m } });
+      eq([[sansMoteur.connecte, sansMoteur.uid, sansMoteur.moteur], [avec.connecte, avec.uid, avec.moteur === m, [...avec.erreurs]], [connu.connecte, connu.uid]],
+        [[false, 'u1', null], [true, 'u1', true, [H('6')]], [false, 'u9']], 'contexteFichiers : « connecté » exige le compte ET le moteur (seul le moteur télécharge, R53) ; sans session, le compte que l’appareil a connu (sync_state.user_id) ; les file_error lues (mutant : connecte sans moteur)');
+    });
+    const { renderZoneCouverture } = await import('../src/ui/livre-ajout.js');
+    const boutons = (etat) => [...renderZoneCouverture({ sha256: H('7'), ...etat }, {}).querySelectorAll('button')].map((b) => [b.textContent, b.disabled]);
+    eq([boutons({ telechargeable: true }), boutons({ telechargeable: true, telechargement: true }), boutons({ reessayable: true, telechargement: true }).slice(0, 1)],
+      [[['Télécharger', false], ['Photographier', false], ['Choisir une image', false], ['Retirer', false]], [['Téléchargement…', true], ['Photographier', false], ['Choisir une image', false], ['Retirer', false]], [['Réessayer', true]]],
+      'renderZoneCouverture (§ 4.2) : « Télécharger » en tête ; pendant, « Téléchargement… » éteint ; « Réessayer » éteint pendant (mutant : libellé jamais changé)');
+  });
+
+  await run('écrans (épingles) : miniatures de la fiche du livre, rendu entier après la couverture, cadre PDF de la séance, pages d’index, erreurs relues', async () => {
+    const { renderBook } = await import('../src/ui/book.js');
+    const { renderImport } = await import('../src/ui/import.js');
+    const { renderRecipe } = await import('../src/ui/recipe.js');
+    const { INGREDIENTS } = await import('../src/model/seed.js');
+    await withRepo(async (repo, db) => {
+      const jpeg = await pngMinuscule();
+      await db.mutate({ puts: { files: [1, 2, 3].map((i) => ({ sha256: H(String(i)), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: R() })).concat([{ sha256: H('4'), mime: 'application/pdf', size: 9, updated_at: DATE, remote: R({ mime: 'application/pdf' }) }]) }, origin: 'remote' });
+      const appels = [];
+      const moteur = { onEtat: () => () => {}, telecharger: async (shas) => {
+        appels.push(shas);
+        if (shas[0] === H('3')) { await db.mutate({ puts: { files: [{ ...(await db.get('files', H('3'))), blob: jpeg }] }, origin: 'remote' }); return { recus: 1, erreurs: 0, erreur: null }; }
+        if (shas[0] === H('4')) { await db.mutate({ puts: { files: [{ ...(await db.get('files', H('4'))), blob: octets('%PDF-1.4 x', 'application/pdf') }] }, origin: 'remote' }); return { recus: 1, erreurs: 0, erreur: null }; }
+        return { recus: 0, erreurs: 0, erreur: null };
+      } };
+      // Fiche du livre : deux pages distantes (p. 2 puis p. 1 dans la base) et une couverture distante.
+      const ed = { id: 'eP', book_id: 'bP', year: 2020, cover_sha256: H('3') };
+      const livre = { id: 'bP', title: 'Pages', author: 'A', cuisines: [] };
+      const doc = { id: 'dP', edition_id: 'eP', source_type: 'photo', sha256: H('1'), original_filename: 'a.jpg' };
+      const pages = [{ id: 'pP1', edition_id: 'eP', document_id: 'dP', sha256: H('1'), printed_page: 2 }, { id: 'pP2', edition_id: 'eP', document_id: 'dP', sha256: H('2'), printed_page: 1 }];
+      const ctxLivre = { book_editions: [ed], recipes: [], recipe_versions: [], source_documents: [doc], source_pages: pages, rediscovery_prefs: [], dishes: [], dish_recipe_links: [], recipesById: new Map(), docsByRecipe: new Map(), scan_sessions: [], settings: {}, books: [livre], booksById: new Map([['bP', livre]]), editionsById: new Map([['eP', ed]]), editionLabel: () => livre.title, sync: { user: { id: 'u1' }, moteur } };
+      let rendus = 0;
+      const compter = () => { rendus += 1; };
+      window.addEventListener('cuisineos:refresh', compter);
+      try {
+        const fiche = await renderBook({ id: 'eP' }, {}, ctxLivre);
+        const sources = [...fiche.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Pages et fichiers sources');
+        const groupe = [...(sources?.querySelectorAll('button') || [])].find((b) => b.textContent === 'Télécharger les 2 pages');
+        eq([[...(sources?.querySelectorAll('.thumbs .fichier-absent') || [])].map((f) => f.dataset.etat), !!groupe], [['distant', 'distant'], true], 'fiche du livre (§ 4.3) : « Pages et fichiers sources » rend chaque page par vignettePage (distante) et offre « Télécharger les 2 pages » (mutant : miniatures sans vignettePage)');
+        groupe.click();
+        for (let i = 0; i < 100 && appels.length < 1; i += 1) await new Promise((r) => setTimeout(r, 10));
+        const couv = [...fiche.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Couverture');
+        [...couv.querySelectorAll('button')].find((b) => b.textContent === 'Télécharger').click();
+        for (let i = 0; i < 100 && !couv.querySelector('img'); i += 1) await new Promise((r) => setTimeout(r, 10));
+        eq([appels, !!couv.querySelector('img'), rendus], [[[H('2'), H('1')], [H('3')]], true, 1], 'fiche du livre : le bouton groupé suit l’ordre AFFICHÉ (p. 1 puis p. 2) sans rendre la route ; une couverture reçue rend la fiche entière UNE fois (refresh, § 4.2 : l’en-tête porte bookCover) — mutant : refresh retiré');
+        await finDesImages(fiche);
+      } finally { window.removeEventListener('cuisineos:refresh', compter); }
+      // Séance : le cadre PDF d'un document distant offre « Télécharger », par le moteur (§ 4.5).
+      const seance = { id: 'sP', status: 'open', started_at: DATE, page_ids: [], document_ids: ['dq'] };
+      const ctxSeance = { scan_sessions: [seance], pagesById: new Map(), source_documents: [{ id: 'dq', source_type: 'pdf', sha256: H('4'), original_filename: 'm.pdf' }], book_editions: [], booksById: new Map(), editionsById: new Map(), editionLabel: () => '', recipes: [], settings: {}, sync: { user: { id: 'u1' }, moteur } };
+      const vue = await renderImport({}, { session: 'sP' }, ctxSeance);
+      const fichiers = [...vue.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Fichiers');
+      const boutonTele = () => [...(fichiers?.querySelectorAll('button') || [])].find((x) => x.textContent === 'Télécharger');
+      for (let i = 0; i < 100 && !boutonTele(); i += 1) await new Promise((r) => setTimeout(r, 10));
+      const tele = boutonTele();
+      tele?.click();
+      for (let i = 0; i < 100 && !fichiers?.querySelector('iframe.pdf'); i += 1) await new Promise((r) => setTimeout(r, 10));
+      eq([!!tele, appels.at(-1), !!fichiers?.querySelector('iframe.pdf[sandbox]')], [true, [H('4')], true], 'séance (§ 4.5) : le cadre PDF d’un document distant offre « Télécharger » avec un compte, par moteur.telecharger, puis le cadre remplace le bouton (mutant : pdfFrame de la séance sans telecharger)');
+      // Fiche d'une référence d'index : ses pages par vignettePage, et le bouton groupé (§ 4.4).
+      const ref = { id: 'rR', edition_id: null, original_title: 'Repérée', availability: 'reference_only', source_page_ids: ['pP1', 'pP2'], tags: [], cuisines: [], favorite: false, ingredient_ids: [], created_at: DATE, updated_at: DATE };
+      const ctxRef = { recipes: [ref], recipesById: new Map([['rR', ref]]), recipe_versions: [], versionsByRecipe: new Map(), versionsById: new Map(), editionsById: new Map(), booksById: new Map(), books: [], book_editions: [], pagesById: new Map(pages.map((p) => [p.id, p])), imports: [], dishesById: new Map(), dishes: [], cook_history: [], dish_recipe_links: [], recipe_translations: [], ingredients: INGREDIENTS, ingredientsById: new Map(INGREDIENTS.map((i) => [i.id, i])), source_documents: [], source_pages: pages, scan_sessions: [], settings: { units: 'original', reading_locale: 'original', ui_locale: 'fr', llm: { provider: 'none' } }, conventionFor: () => null, sync: { user: { id: 'u1' }, moteur } };
+      const pageRef = await renderRecipe({ id: 'rR' }, {}, ctxRef);
+      const index = [...pageRef.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Pages d’index');
+      eq([index?.querySelectorAll('.thumbs .fichier-absent').length, [...(index?.querySelectorAll('button') || [])].map((b) => b.textContent).includes('Télécharger les 2 pages')], [2, true], 'référence d’index (§ 4.4) : « Pages d’index » rend chaque page par vignettePage et offre « Télécharger les 2 pages » (mutant : pages d’index sans vignettes)');
+      // vignettesDePages : après un téléchargement qui pose un file_error, la place se redessine EN ERREUR (« Réessayer ») — les erreurs sont relues.
+      const ctxF = { connecte: true, uid: 'u1', erreurs: new Set(), moteur: { telecharger: async () => {
+        await db.mutate({ puts: { sync_state: [{ key: 'file_error:' + H('1'), value: { motif: 'empreinte', sens: 'reception', at: DATE } }] }, origin: 'device' });
+        return { recus: 0, erreurs: 1, erreur: null };
+      } } };
+      const v = await K.vignettesDePages([pages[0]], ctxF);
+      v.places.get('pP1').querySelector('button').click();
+      for (let i = 0; i < 100 && v.places.get('pP1').querySelector('figure')?.dataset.etat !== 'erreur'; i += 1) await new Promise((r) => setTimeout(r, 10));
+      eq([v.places.get('pP1').querySelector('figure')?.dataset.etat, [...v.places.get('pP1').querySelectorAll('button')].map((b) => b.textContent)], ['erreur', ['Réessayer']], 'vignettesDePages : un téléchargement qui pose un file_error redessine la page en erreur, avec « Réessayer » (mutant : erreurs non relues)');
+      (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob();
+    });
+  });
 }

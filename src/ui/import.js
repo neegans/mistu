@@ -1,18 +1,19 @@
 // Séance de scan continue (spec §16) : photos et fichiers conservés sur l'appareil, miniatures numérotées, regroupement,
-// remplacement d'une page, entrées d'index, états fondés sur des événements réels. Aucune page n'est annoncée « sur le serveur ».
+// remplacement d'une page, entrées d'index, états fondés sur des événements réels. Aucune page n'est annoncée « sur le serveur » sans un remote
+// de ce compte sur sa ligne files (lot G, § 4.3, I5).
 import { el, toast, pickFiles, confirmDialog, formatDate } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { navigate, buildQuery, refresh, remplacerAdresse, parseHash } from '../core/router.js';
 import { logError } from '../core/log.js';
 import { TransitionRefusee } from '../core/db.js';
 import * as repo from '../model/repo.js';
-import { displayUrl } from '../sync/mime.js';
+import { remoteDeCeCompte } from '../sync/tables.js';
 import { sha256Hex } from '../core/hash.js';
 import { normalizeText } from '../domain/units.js';
 import { assertVocabulaire } from '../domain/vocabulaire.js';
 import { providerFrom } from '../domain/llm.js';
 import { seanceDUnImportCible, importOuvert } from '../domain/import-cible.js';
-import { pageHeader, section, emptyState, select, field, carteConnexion, texteEchecAssistant, pdfFrame, libelleLivre, sessionAssistant } from './components.js';
+import { pageHeader, section, emptyState, select, field, carteConnexion, texteEchecAssistant, pdfFrame, libelleLivre, sessionAssistant, contexteFichiers, vignettesDePages, boutonTelechargerPages, gesteTelechargement } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { lireDansLeJournal, relireDuJournal, phraseEchec, cleLecture } from './import-cible.js';
 
@@ -67,7 +68,8 @@ function sessionsList(ctx) {
   return root;
 }
 
-function sessionView(session, ctx, query = {}, { historique = { remplacer: remplacerAdresse } } = {}) {
+async function sessionView(session, ctx, query = {}, { historique = { remplacer: remplacerAdresse } } = {}) {
+  const ctxF = await contexteFichiers(ctx);
   const pages = session.page_ids.map((id) => ctx.pagesById.get(id)).filter(Boolean);
   const docs = session.document_ids.map((id) => ctx.source_documents.find((d) => d.id === id)).filter(Boolean);
   const fileDocs = docs.filter((d) => d.source_type !== 'photo');
@@ -84,11 +86,29 @@ function sessionView(session, ctx, query = {}, { historique = { remplacer: rempl
   const root = el('div', null);
   root.append(pageHeader(t('Séance de scan'), { subtitle: `${t('Débutée le')} ${formatDate(session.started_at, { withTime: true })}`, back: { href: '/import', label: t('Séances') } }));
 
+  // Lot G (§ 4.3, I5, F-21) : la phrase de séance dit un FAIT — les pages dont la ligne a un remote de ce compte. /import est une route de saisie :
+  // doitRendreApresPasse refuse le rendu, donc cette ligne SEULE se redessine sur onEtat (jusqu'à ce que l'écran soit quitté).
+  const phraseSeance = el('span', { class: 'status info', dataset: { role: 'phrase-seance' } });
+  const majPhrase = async () => {
+    if (!ctx.sync?.user) { phraseSeance.textContent = t('Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages'); return; }
+    const fs = await repo.getFiles(pages.map((p) => p.sha256));
+    const n = pages.filter((p) => remoteDeCeCompte(fs.get(p.sha256)?.remote, ctxF.uid)).length;
+    phraseSeance.textContent = t('{n}/{m} photos de cette séance envoyées au serveur', { n, m: pages.length });
+  };
+  await majPhrase();
+  if (typeof ctxF.moteur?.onEtat === 'function') {
+    let montee = false;
+    const retirer = ctxF.moteur.onEtat(() => {
+      if (!phraseSeance.isConnected) { if (montee) retirer(); return; }
+      montee = true;
+      majPhrase().catch((error) => logError('seance.phrase', { error }));
+    });
+  }
   // États fondés sur des événements réels : ce qui est effectivement écrit dans la base locale.
   root.append(el('div', { class: 'row', style: { marginBottom: '.8rem' } },
     el('span', { class: 'status ok' }, t('{n} page(s) conservée(s) sur cet appareil', { n: pages.length })),
     fileDocs.length ? el('span', { class: 'status info' }, t('{n} fichier(s) PDF/EPUB', { n: fileDocs.length })) : null,
-    el('span', { class: 'status info' }, t('Aucune synchronisation serveur configurée : sauvegarde via Réglages'))));
+    phraseSeance));
 
   // Livre associé
   const editionOptions = [{ value: '', label: t('— Aucun livre (à associer plus tard) —') }, ...ctx.book_editions.map((e) => ({ value: e.id, label: libelleLivre(e, ctx.booksById.get(e.book_id)) }))];
@@ -121,15 +141,17 @@ function sessionView(session, ctx, query = {}, { historique = { remplacer: rempl
         el('button', { class: 'btn danger', onClick: () => removePages([...selected]) }, t('Retirer')));
     }
   };
+  // Lot G (§ 4.3) : chaque miniature par vignettePage (image, ou l'état et son geste) ; « Télécharger les {n} pages » au-dessus, à partir de deux.
+  const vignettes = await vignettesDePages(pages, ctxF);
   for (const p of pages) {
-    const img = el('img', { alt: `${t('Page')} ${p.position}`, loading: 'lazy' });
-    repo.getFile(p.sha256).then((f) => { const u = displayUrl(f); if (u) img.src = u; });
     const check = el('input', { type: 'checkbox', checked: selected.has(p.id), onChange: (e) => { if (e.target.checked) selected.add(p.id); else selected.delete(p.id); drawActions(); } });
     const pageInput = el('input', { type: 'number', placeholder: t('p. imprimée'), value: p.printed_page ?? '', style: { minHeight: '30px', padding: '.2rem .4rem', fontSize: '.8rem' }, onChange: async (e) => { p.printed_page = e.target.value ? parseInt(e.target.value, 10) : null; await repo.save('source_pages', p); } });
-    thumbs.append(el('figure', null, el('span', { class: 'num' }, String(p.position)), img,
+    thumbs.append(el('figure', null, el('span', { class: 'num' }, String(p.position)), vignettes.places.get(p.id),
       el('figcaption', null, el('label', { class: 'check' }, check, p.kind ? t(p.kind === 'index' ? 'Index' : 'Recette') : t('Sélectionner')), pageInput,
         ...(p.issues || []).map((i) => el('div', { class: 'chip warn' }, i)))));
   }
+  const groupe = boutonTelechargerPages(vignettes.distantes, { connecte: ctxF.connecte, telecharger: vignettes.telecharger });
+  if (groupe) root.append(groupe); // jamais root.append(null) : le DOM natif écrirait le nœud texte « null »
   root.append(thumbs, actions);
   drawActions();
 
@@ -142,7 +164,7 @@ function sessionView(session, ctx, query = {}, { historique = { remplacer: rempl
           el('a', { class: 'btn primary', href: `#/recipes/new${buildQuery({ doc: d.id, edition: session.edition_id || '', session: session.id })}` }, t('Créer une recette depuis ce fichier')),
           el('button', { class: 'btn', onClick: () => { indexPanel.hidden = false; indexPanel.dataset.doc = d.id; indexPanel.scrollIntoView({ behavior: 'smooth' }); } }, t('Indexer le livre'))));
       if (d.source_type === 'pdf') {
-        box.append(pdfFrame({ sha256: d.sha256, filename: d.original_filename }));
+        box.append(pdfFrame({ sha256: d.sha256, filename: d.original_filename, connecte: ctxF.connecte, telecharger: gesteTelechargement({ moteur: ctxF.moteur }) }));
       } else box.append(el('p', { class: 'muted' }, t('EPUB conservé. La lecture intégrée n’est pas encore disponible : indexe les recettes à la main ou exporte les pages en images.')));
       return box;
     })));
