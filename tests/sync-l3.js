@@ -1700,12 +1700,12 @@ export async function runSyncL3Tests({ eq, ok }) {
     const tf = creerTransportFactice({ lire: { books: [[recue], []] } });
     const moteur = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: tf, fenetre: fenetreMuette(), bus: busMuet });
     const e = await moteur.executer('t');
-    eq(e.derniersEffets, { recues: 1, supprimees: 0, ajustes: 0, conflits: 0 }, 'moteur (R-L3-16) : la fin d’une passe dit ce qu’elle a écrit');
+    eq(e.derniersEffets, { recues: 1, supprimees: 0, ajustes: 0, conflits: 0, fichiersRecus: 0 }, 'moteur (R-L3-16) : la fin d’une passe dit ce qu’elle a écrit');
     ok(Object.isFrozen(e.derniersEffets), 'moteur (R-L3-16) : … et ce bilan sort figé comme le reste de l’état');
     await moteur.arreter();
     const vide = creerTransportFactice({ lire: {} });
     const m2 = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: vide, fenetre: fenetreMuette(), bus: busMuet });
-    eq((await m2.executer('t')).derniersEffets, { recues: 0, supprimees: 0, ajustes: 0, conflits: 0 }, 'moteur (R-L3-16) : une passe qui n’écrit rien le dit aussi — zéro partout');
+    eq((await m2.executer('t')).derniersEffets, { recues: 0, supprimees: 0, ajustes: 0, conflits: 0, fichiersRecus: 0 }, 'moteur (R-L3-16) : une passe qui n’écrit rien le dit aussi — zéro partout');
     await m2.arreter();
   });
 

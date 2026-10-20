@@ -1783,4 +1783,338 @@ export async function runSyncL4Tests({ eq, ok }) {
     });
     eq([...F.MAGASINS_FICHIERS], MAGASINS_SNAPSHOT, 'MAGASINS_FICHIERS (ronde 1) : les sept magasins du snapshot de la passe — la copie de ce test est épinglée sur l’export (mutant : un magasin retiré)');
   });
+
+  // === Tâche 4 — moteur (D-G13, § 3.6, § 4.7)
+  const { createMoteur } = await import('../src/sync/moteur.js');
+  const fenetreMuette = () => ({ addEventListener() {}, removeEventListener() {}, document: { visibilityState: 'visible' } });
+  const busMuet = { on: () => () => {} };
+  // Toutes les tables marquées « fait » : la file ne porte que ce que le test écrit (comme tests/sync-l3.js).
+  const toutDejaEnvoye = (db) => db.mutate({ puts: { sync_state: SYNC_STORES.map((t) => ({ key: `backfill:${t}`, value: 'fait' })) }, origin: 'device' });
+  const moteurDe = (db, sur = {}) => createMoteur({ db, getUserId: () => 'u1', transport: creerTransportFactice({ lire: {} }), fenetre: fenetreMuette(), bus: busMuet, ...sur });
+  const ligneDistanteDe = async (db, texte, cle = H('7')) => {
+    const copie = octets(texte); const shaC = await sha256Hex(copie);
+    await db.mutate({ puts: { files: [{ sha256: cle, mime: 'image/jpeg', size: 9, updated_at: DATE, remote: R({ sha256: shaC, size: copie.size }) }] }, origin: 'remote' });
+    return { copie, chemin: 'u1/' + shaC };
+  };
+
+  await run('moteur sans stockage : L3 telle quelle, clés L4 au repos', async () => {
+    await withRepo(async (repo, db) => {
+      const m = moteurDe(db);
+      const phases = []; m.onEtat((e) => phases.push(e.phase));
+      const e0 = m.etat();
+      const fin = await m.executer('t');
+      eq([e0.fichiers, e0.progressionFichiers, e0.espaceServeur, e0.telechargementGlobal, e0.pauseFichiers, fin.derniersEffets.fichiersRecus, phases.includes('fichiers'), Object.isFrozen(fin.fichiers), await m.telecharger([H('a')])],
+        [{ aEnvoyer: 0, aTelecharger: 0, octetsATelecharger: 0, enErreur: 0, typeInconnu: 0, copiesPerimees: 0, copiesSansServeur: 0, aRenvoyer: 0 }, null, null, false, null, 0, false, true, { rien: true }],
+        'moteur sans stockage : les clés L4 existent à leur valeur de repos, figées ; aucune phase fichiers ; fichiersRecus toujours présent (§ 3.6) ; une tape ne fait rien');
+      await m.arreter();
+    });
+  });
+
+  await run('moteur avec stockage : phases, compte final, espace, planifier', async () => {
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const s = await poserPhoto(repo, db, 'moteur-1');
+      const tf = creerTransportFactice({ serveur: true });
+      const m = moteurDe(db, { transport: tf, stockage: creerStockageFactice(), reduire: reducteur().reduire, delaiRegroupementMs: 1 });
+      const phases = []; m.onEtat((e) => { if (e.phase && phases.at(-1) !== e.phase) phases.push(e.phase); });
+      const fin = await m.executer('t');
+      const phasesDeLaPasse = [...phases]; // relevées AVANT tout await : la passe suivante (planifier, 1 ms) en ajouterait
+      eq([phasesDeLaPasse, fin.fichiers.aEnvoyer, fin.espaceServeur?.objets, (await db.get('sync_state', 'storage_usage'))?.value?.objets, fin.progressionFichiers], [['envoi_initial', 'envoi', 'reception', 'fichiers'], 0, 1, 1, null],
+        'moteur : envoi initial → envoi → réception → fichiers ; fin.fichiers recompté (le snapshot mis à jour) ; espace mesuré après une confirmation ; progression retirée en fin de passe');
+      let partie = false;
+      for (let i = 0; i < 300 && !(partie = (await db.count('outbox')) === 0 && !!tf.ligne('files', s)); i += 1) await new Promise((r) => setTimeout(r, 10));
+      eq([partie, tf.ligne('files', s)?.data?.remote?.sha256, 'blob' in (tf.ligne('files', s)?.data || {})], [true, await empreinte('jpeg-1'), false], 'moteur : confirmes > 0 → planifier() — la ligne files part à la passe suivante, sans blob (mutant : planifier non appelé → l’entrée attend)');
+      await m.arreter();
+    });
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      for (let i = 0; i < 21; i += 1) await poserPhoto(repo, db, 'reprise' + i);
+      const minuteries = []; const vrai = globalThis.setTimeout;
+      globalThis.setTimeout = (fn, ms, ...reste) => { minuteries.push(ms); return vrai(fn, ms, ...reste); };
+      let m = null;
+      try { m = moteurDe(db, { stockage: creerStockageFactice(), reduire: reducteur().reduire, delaiRegroupementMs: 50000 }); await m.executer('t'); }
+      finally { globalThis.setTimeout = vrai; }
+      ok(minuteries.includes(1000), 'moteur : restants > 0 sans erreur, page visible → reprise programmée à 1 s (mutant : pas de reprise)');
+      await m.arreter();
+    });
+  });
+
+  await run('moteur : arrêt pendant la passe, pauses, sans compte', async () => {
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      for (let i = 0; i < 3; i += 1) await poserPhoto(repo, db, 'arret' + i);
+      let m = null;
+      const sf = creerStockageFactice({ avant: async (methode) => { if (methode === 'envoyer') m.arreter(); } }); // jamais attendu ici : arreter() attend la passe
+      m = moteurDe(db, { stockage: sf, reduire: reducteur().reduire });
+      await m.executer('t');
+      eq(sf.journal.filter((j) => j.methode === 'envoyer').length, 1, 'moteur : arreter() pendant la passe → stop() vrai, aucun envoi de plus');
+    });
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await poserPhoto(repo, db, 'en-pause');
+      await repo.save('books', { id: 'bP', title: 'Part quand même' });
+      await db.mutate({ puts: { sync_state: [{ key: 'pause_fichiers', value: { raison: 'stockage', at: DATE } }] }, origin: 'device' });
+      const tf = creerTransportFactice({ serveur: true }); const sf = creerStockageFactice();
+      const m = moteurDe(db, { transport: tf, stockage: sf, reduire: reducteur().reduire });
+      const fin = await m.executer('t');
+      eq([tf.journal.some((j) => j.appel === 'pousser' && j.rows.some((r) => r.id === 'bP')), sf.journal.length, fin.pauseFichiers?.raison], [true, 0, 'stockage'], 'moteur (B-5, S-4) : pause_fichiers posée → les fiches partent, la passe fichiers n’est pas tentée (mutant : passe fichiers tentée)');
+      await db.mutate({ puts: { sync_state: [{ key: 'pause', value: { raison: 'quota', at: DATE } }] }, origin: 'device' });
+      await m.envoyerMaintenant();
+      eq([await db.get('sync_state', 'pause'), await db.get('sync_state', 'pause_fichiers'), m.etat().pause, m.etat().pauseFichiers], [undefined, undefined, null, null], 'envoyerMaintenant : lève pause ET pause_fichiers');
+      await m.arreter();
+    });
+    await withRepo(async (repo, db) => {
+      // § 7 « pause (L3) posée » avec un stockage : l'envoi des fiches est sauté comme en L3 ; la passe fichiers, elle, tourne — le seau a son
+      // propre quota (D-G4) : les octets montent, la ligne confirmée attend en file la levée de la pause (doute 14, ratifié par P3 : le stockage
+      // n'est pas le quota des fiches).
+      await toutDejaEnvoye(db);
+      const s = await poserPhoto(repo, db, 'pause-l3');
+      await db.mutate({ puts: { sync_state: [{ key: 'pause', value: { raison: 'quota', at: DATE } }] }, origin: 'device' });
+      const tf = creerTransportFactice({ serveur: true }); const sf = creerStockageFactice();
+      const m = moteurDe(db, { transport: tf, stockage: sf, reduire: reducteur().reduire });
+      const fin = await m.executer('t');
+      eq([tf.journal.filter((j) => j.appel === 'pousser').length, sf.journal.filter((j) => j.methode === 'envoyer').length, !!(await db.get('files', s)).remote, (await db.getAll('outbox')).filter((e) => e.store === 'files').map((e) => e.id), fin.pause?.raison],
+        [0, 1, true, [s], 'quota'], 'moteur (pause L3 + stockage, P3 ratifié) : aucun pousser (comme en L3) ; la passe fichiers envoie et confirme ; la ligne files attend en file la levée de la pause (mutants : push appelé malgré la pause ; passe fichiers sautée sous pause)');
+      await m.arreter();
+    });
+    await withRepo(async (repo, db) => {
+      await poserPhoto(repo, db, 'sans-compte');
+      const sf = creerStockageFactice();
+      const m = moteurDe(db, { getUserId: () => null, stockage: sf, reduire: reducteur().reduire });
+      await m.executer('t');
+      eq(sf.journal.length, 0, 'moteur : sans compte, la passe fichiers ne tente rien');
+      await m.arreter();
+    });
+  });
+
+  await run('moteur : vols tenus — tape puis arrêt (D-G13, B-9)', async () => {
+    await withRepo(async (repo, db) => {
+      const { copie, chemin } = await ligneDistanteDe(db, 'copie-tape');
+      let lacher = null; const tenu = new Promise((r) => { lacher = r; });
+      const sf = creerStockageFactice({ objets: { [chemin]: copie }, avant: async (methode) => { if (methode === 'recevoir') await tenu; } });
+      const m = moteurDe(db, { stockage: sf });
+      const tape = m.telecharger([H('7')]);
+      await new Promise((r) => setTimeout(r, 0));
+      let arretFini = false;
+      const arret = m.arreter().then(() => { arretFini = true; });
+      await new Promise((r) => setTimeout(r, 20));
+      const avantLacher = arretFini;
+      lacher();
+      await arret;
+      const ecrite = await db.get('files', H('7'));
+      const apres = await m.telecharger([H('7')]);
+      eq([avantLacher, (await tape).recus, ecrite.blob instanceof Blob, apres, sf.journal.filter((j) => j.methode === 'recevoir').length], [false, 1, true, { erreur: { type: 'arrete' } }, 1],
+        'D-G13 : arreter() ne se résout qu’après le téléchargement lancé par une tape ; après l’arrêt, telecharger rend { erreur: arrete } sans appel (mutant : vol non tenu → arreter() rendu avant l’écriture)');
+      eq([await m.actualiserEspace(), await m.telechargerTout(), await m.reessayerFichier(H('7'))], [{ erreur: { type: 'arrete' } }, { erreur: { type: 'arrete' } }, { erreur: { type: 'arrete' } }], 'D-G13 : après l’arrêt, actualiserEspace, telechargerTout et reessayerFichier ne font rien');
+    });
+  });
+
+  await run('moteur : une lecture de files par passe (S-12)', async () => {
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await poserPhoto(repo, db, 'snap');
+      const m = moteurDe(db, { stockage: creerStockageFactice(), reduire: reducteur().reduire });
+      const lectures = []; const vrai = db.getSnapshot;
+      db.getSnapshot = function (noms) { lectures.push(noms); return vrai.call(this, noms); };
+      try { await m.executer('t'); } finally { delete db.getSnapshot; }
+      eq(lectures.filter((n) => (n || []).includes('files')).length, 1, 'S-12 : UNE lecture de files par passe, réutilisée par envoyer, telechargerTout et le compte final (mutant : compter relit)');
+      await m.arreter();
+    });
+  });
+
+  await run('moteur : gestes des fichiers (réessayer, télécharger tout, espace, dernier échange)', async () => {
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const { copie, chemin } = await ligneDistanteDe(db, 'copie-reessai');
+      await db.mutate({ puts: { sync_state: [{ key: 'file_error:' + H('7'), value: { motif: 'introuvable', sens: 'reception', at: DATE } }] }, origin: 'device' });
+      const sf = creerStockageFactice({ objets: { [chemin]: copie } });
+      const m = moteurDe(db, { stockage: sf, reduire: reducteur().reduire });
+      const r = await m.reessayerFichier(H('7'));
+      eq([r.recus, await db.get('sync_state', 'file_error:' + H('7')), (await db.get('files', H('7'))).blob instanceof Blob, !!m.etat().dernierEchange], [1, undefined, true, true], 'reessayerFichier (réception) : la clé retirée, puis le téléchargement ; un téléchargement abouti compte pour « Dernier échange » (I5 ; mutant : stockage hors du compteur)');
+      const s = await poserPhoto(repo, db, 'reessai-envoi');
+      await db.mutate({ puts: { sync_state: [{ key: 'file_error:' + s, value: { motif: 'type', sens: 'envoi', at: DATE } }] }, origin: 'device' });
+      await m.reessayerFichier(s);
+      eq([await db.get('sync_state', 'file_error:' + s), !!(await db.get('files', s)).remote], [undefined, true], 'reessayerFichier (envoi) : la clé retirée, puis une passe — la photo part');
+      await m.arreter();
+    });
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const objets = {}; const pages = [];
+      for (let i = 0; i < 3; i += 1) {
+        const { copie, chemin } = await ligneDistanteDe(db, 'tout-' + i, H(String(i + 1)));
+        objets[chemin] = copie; pages.push({ id: 'pt' + i, sha256: H(String(i + 1)), updated_at: DATE });
+      }
+      await db.mutate({ puts: { source_pages: pages }, origin: 'device' });
+      let m = null;
+      const sf = creerStockageFactice({ objets, avant: async (methode) => { if (methode === 'recevoir' && sf.journal.filter((j) => j.methode === 'recevoir').length === 1) await m.arreterTelechargement(); } });
+      m = moteurDe(db, { stockage: sf, reduire: reducteur().reduire });
+      await m.telechargerTout();
+      eq([sf.journal.filter((j) => j.methode === 'recevoir').length, await db.get('sync_state', 'telecharger_tout'), m.etat().telechargementGlobal], [1, undefined, false], 'telechargerTout puis « Arrêter le téléchargement » pendant : arrêt au fichier suivant, clé retirée');
+      await m.telechargerTout();
+      eq([sf.journal.filter((j) => j.methode === 'recevoir').length, (await Promise.all([H('1'), H('2'), H('3')].map((k) => db.get('files', k)))).every((l) => l.blob instanceof Blob), await db.get('sync_state', 'telecharger_tout'), m.etat().derniersEffets.fichiersRecus], [3, true, undefined, 2], 'telechargerTout : la reprise télécharge le reste, la clé tombe quand plus rien ne manque ; derniersEffets.fichiersRecus compte les pages arrivées');
+      await m.arreter();
+    });
+    await withRepo(async (repo, db) => {
+      const sf = creerStockageFactice({ objets: { ['u1/' + H('a')]: octets('abc') } });
+      const m = moteurDe(db, { stockage: sf });
+      const vues = []; const vrai = db.mutate;
+      db.mutate = function (a) { vues.push(a); return vrai.call(this, a); };
+      try { await m.actualiserEspace(); } finally { delete db.mutate; }
+      eq([m.etat().espaceServeur?.octets, (await db.get('sync_state', 'storage_usage'))?.value?.objets, vues.find((v) => (v.puts?.sync_state || []).some((l) => l.key === 'storage_usage'))?.origin], [3, 1, 'device'], 'actualiserEspace : storage_usage écrit (origine device), espaceServeur posé');
+      const m2 = moteurDe(db, { stockage: { ...sf, lister: async () => ({ objets: [], erreur: { type: 'reseau', status: 0, statusCode: null, code: null, message: 'x' } }) } });
+      await sansConsole(() => m2.actualiserEspace());
+      eq((await db.get('sync_state', 'storage_usage'))?.value?.objets, 1, 'actualiserEspace : une erreur reseau laisse storage_usage inchangé');
+      await m.arreter(); await m2.arreter();
+    });
+  });
+
+  await run('rendu après une passe et câblage de app.js', async () => {
+    const S = await import('../src/ui/state.js');
+    const effets = (fichiersRecus) => ({ enCours: false, derniersEffets: { recues: 0, supprimees: 0, ajustes: 0, conflits: 0, fichiersRecus } });
+    eq([S.passeAEcrit({ avant: true, etat: effets(2) }), S.passeAEcrit({ avant: true, etat: effets(0) })], [true, false], 'passeAEcrit : une page arrivée redessine la fiche affichée (fichiersRecus)');
+    const app = await lire('../src/app.js');
+    ok(app.length > 1000 && /stockage: createStockage\(client\)/.test(app) && /qualite: qualiteEnvoi/.test(app), 'app.js (lu au source, admis : jamais importé) : le moteur reçoit stockage: createStockage(client) et qualite: qualiteEnvoi');
+  });
+
+  // Hors brief, à ratifier (spec § 4.8 « Arrêt » : « telechargerTout par tape » entre dans `vols` ; D-G13 : « rien n'est écrit après ») : un geste
+  // lancé juste AVANT arreter() — une tape suivie de « Effacer les données de cet appareil » — ne lance ni passe, ni appel, ni écriture APRÈS
+  // l'arrêt, et arreter() attend l'écriture que le geste avait déjà lancée. Sur le bloc du brief, telechargerTout, renvoyerEnOriginale et
+  // reessayerFichier lançaient une passe derrière l'arrêt (la classe de défaut que B-9 a fermée pour telecharger).
+  await run('moteur : un geste lancé juste avant l’arrêt ne lance rien après lui (D-G13, § 4.8, hors brief)', async () => {
+    const scenario = async (preparer, geste, cleApres) => {
+      let sortie = null;
+      await withRepo(async (repo, db) => {
+        await toutDejaEnvoye(db);
+        const { copie, chemin } = await ligneDistanteDe(db, 'copie-arret');
+        await db.mutate({ puts: { source_pages: [{ id: 'pg-arret', sha256: H('7'), updated_at: DATE }] }, origin: 'device' });
+        await preparer(db);
+        const tf = creerTransportFactice({ lire: {} });
+        const sf = creerStockageFactice({ objets: { [chemin]: copie } });
+        const m = moteurDe(db, { transport: tf, stockage: sf });
+        let ecrites = 0; const vrai = db.mutate; // écritures ABOUTIES, comptées dans l'ordre où elles finissent
+        db.mutate = function (a) { const p = vrai.call(this, a); p.then(() => { ecrites += 1; }, () => {}); return p; };
+        let aLArret = null; let r = null;
+        try {
+          const lance = geste(m); // pas attendu : l'arrêt arrive pendant sa première attente
+          await m.arreter();
+          aLArret = [tf.journal.length, sf.journal.length, ecrites];
+          r = await lance;
+          await new Promise((res) => setTimeout(res, 30));
+        } finally { delete db.mutate; }
+        sortie = [aLArret, [tf.journal.length, sf.journal.length, ecrites], !!(await db.get('sync_state', cleApres)), (await db.get('files', H('7'))).blob instanceof Blob, r?.erreur?.type ?? null];
+      });
+      return sortie;
+    };
+    const rien = async () => {};
+    eq(await scenario(rien, (m) => m.telechargerTout(), 'telecharger_tout'), [[0, 0, 1], [0, 0, 1], true, false, 'arrete'],
+      'telechargerTout puis arrêt : arreter() attend l’écriture de la clé, aucune passe ensuite (aucun appel, aucune écriture, aucune page reçue), réponse arrete (mutants : geste hors de vols ; arrete non relu avant executer)');
+    eq(await scenario(rien, (m) => m.renvoyerEnOriginale(), 'renvoi_originale'), [[0, 0, 1], [0, 0, 1], true, false, 'arrete'],
+      'renvoyerEnOriginale puis arrêt : arreter() attend l’écriture de la clé, aucune passe ensuite, réponse arrete');
+    const erreurEnvoi = (db) => db.mutate({ puts: { sync_state: [{ key: 'file_error:' + H('9'), value: { motif: 'type', sens: 'envoi', at: DATE } }] }, origin: 'device' });
+    eq(await scenario(erreurEnvoi, (m) => m.reessayerFichier(H('9')), 'file_error:' + H('9')), [[0, 0, 0], [0, 0, 0], true, false, 'arrete'],
+      'reessayerFichier (envoi) puis arrêt : rien n’est écrit après l’arrêt (la clé reste), aucune passe, réponse arrete');
+    const global = (db) => db.mutate({ puts: { sync_state: [{ key: 'telecharger_tout', value: { at: DATE } }] }, origin: 'device' });
+    eq(await scenario(global, (m) => m.arreterTelechargement(), 'telecharger_tout'), [[0, 0, 1], [0, 0, 1], false, false, 'arrete'],
+      'arreterTelechargement puis arrêt : arreter() attend le retrait de la clé (geste tenu), réponse arrete');
+  });
+
+  // Épingles hors brief : des chemins du moteur que les tests du brief n'exercent pas (mutants survivants sur une copie, voir le rapport de la
+  // tâche 4). Elles affirment un comportement déjà juste ; chacune nomme le mutant qu'elle tue.
+  await run('moteur (épingle) : arreter() attend la mesure d’espace en vol (D-G13, Review Focus 5)', async () => {
+    await withRepo(async (repo, db) => {
+      let lacher = null; const tenu = new Promise((r) => { lacher = r; });
+      const sf = creerStockageFactice({ objets: { ['u1/' + H('a')]: octets('abc') }, avant: async (methode) => { if (methode === 'lister') await tenu; } });
+      const m = moteurDe(db, { stockage: sf });
+      const mesure = m.actualiserEspace();
+      await new Promise((r) => setTimeout(r, 0));
+      let arretFini = false;
+      const arret = m.arreter().then(() => { arretFini = true; });
+      await new Promise((r) => setTimeout(r, 20));
+      const avantLacher = arretFini;
+      lacher();
+      await arret;
+      eq([avantLacher, await mesure, await db.get('sync_state', 'storage_usage'), m.etat().espaceServeur, sf.journal.filter((j) => j.methode === 'lister').length], [false, { erreur: { type: 'arrete' } }, undefined, null, 1],
+        'D-G13 (épingle) : arreter() ne se résout qu’après la mesure en vol ; revenue après l’arrêt, elle n’écrit rien (storage_usage absent, espaceServeur nul) et rend arrete (mutants : actualiserEspace hors de vols ; appliquerEspace sans garde d’arrêt)');
+    });
+  });
+
+  await run('moteur (épingle) : charger() pose les clés L4 connues avant tout appel (§ 3.6)', async () => {
+    await withRepo(async (repo, db) => {
+      await poserPhoto(repo, db, 'charger');
+      const usage = { octets: 7, objets: 2, at: DATE, tronque: false };
+      await db.mutate({ puts: { sync_state: [{ key: 'pause_fichiers', value: { raison: 'stockage', at: DATE } }, { key: 'storage_usage', value: usage }, { key: 'telecharger_tout', value: { at: DATE } }] }, origin: 'device' });
+      const sf = creerStockageFactice();
+      const m = moteurDe(db, { getUserId: () => null, stockage: sf }); // sans compte : la passe du démarrage ne touche à rien de L4
+      const e = await m.demarrer();
+      eq([e.pauseFichiers, e.espaceServeur, e.telechargementGlobal, e.fichiers.aEnvoyer, Object.isFrozen(e.fichiers), sf.journal.length], [{ raison: 'stockage', at: DATE }, usage, true, 1, true, 0],
+        '§ 3.6 (épingle) : charger() lit pause_fichiers, storage_usage et telecharger_tout, et compte les fichiers, sans aucun appel au seau (mutant : charger ne pose pas les clés L4)');
+      await m.arreter();
+    });
+  });
+
+  await run('moteur (épingle) : effets d’un envoi de fichiers arrêté — auth, réseau, quota (§ 4.7)', async () => {
+    const panne = (type, status) => ({ methode: 'envoyer', erreur: { type, status, statusCode: String(status), code: null, message: 'x' } });
+    const passeEnPanne = async (type, status) => {
+      let sortie = null;
+      await withRepo(async (repo, db) => {
+        await toutDejaEnvoye(db);
+        await poserPhoto(repo, db, 'effet-' + type);
+        const minuteries = []; const vrai = globalThis.setTimeout;
+        globalThis.setTimeout = (fn, ms, ...reste) => { minuteries.push(ms); return vrai(fn, ms, ...reste); };
+        let m = null; let fin = null;
+        try { m = moteurDe(db, { stockage: creerStockageFactice({ pannes: [panne(type, status)] }), reduire: reducteur().reduire }); fin = await sansConsole(() => m.executer('t')); } // réseau : un logError est attendu, gardé hors de la console
+        finally { globalThis.setTimeout = vrai; }
+        sortie = [fin.attenteConnexion, fin.derniereErreur?.type ?? null, fin.pauseFichiers?.raison ?? null, minuteries.includes(2000), minuteries.includes(1000)];
+        await m.arreter();
+      });
+      return sortie;
+    };
+    eq(await passeEnPanne('auth', 401), [true, 'auth', null, false, false], 'fichiers (épingle) : auth → attenteConnexion et derniereErreur auth, aucune reprise (mutants : attenteConnexion des fichiers non dite ; erreur non dite)');
+    eq(await passeEnPanne('reseau', 503), [false, 'reseau', null, true, false], 'fichiers (épingle) : réseau → derniereErreur reseau et reprise au recul de 2 s, jamais à 1 s (mutants : recul ignoré ; erreur non dite)');
+    eq(await passeEnPanne('quota', 413), [false, null, 'stockage', false, false], 'fichiers (épingle) : quota → pauseFichiers relue dans l’état, aucune erreur dite, aucune reprise (mutant : pause_fichiers relue après la passe ignorée)');
+  });
+
+  await run('moteur (épingle) : page cachée, aucune reprise à 1 s (§ 4.7)', async () => {
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      for (let i = 0; i < 21; i += 1) await poserPhoto(repo, db, 'cachee' + i);
+      const minuteries = []; const vrai = globalThis.setTimeout;
+      globalThis.setTimeout = (fn, ms, ...reste) => { minuteries.push(ms); return vrai(fn, ms, ...reste); };
+      let m = null;
+      try { m = moteurDe(db, { fenetre: { ...fenetreMuette(), document: { visibilityState: 'hidden' } }, stockage: creerStockageFactice(), reduire: reducteur().reduire, delaiRegroupementMs: 50000 }); await m.executer('t'); }
+      finally { globalThis.setTimeout = vrai; }
+      ok(!minuteries.includes(1000), 'moteur (épingle) : restants > 0 mais page cachée → aucune reprise à 1 s (mutant : visibilité ignorée)');
+      await m.arreter();
+    });
+  });
+
+  await run('moteur (épingle) : une tape recompte les fichiers ; l’espace se mesure quand storage_usage manque', async () => {
+    await withRepo(async (repo, db) => {
+      const a = await ligneDistanteDe(db, 'recompte-1', H('1'));
+      const b = await ligneDistanteDe(db, 'recompte-2', H('2'));
+      await db.mutate({ puts: { source_pages: [{ id: 'rc1', sha256: H('1'), updated_at: DATE }, { id: 'rc2', sha256: H('2'), updated_at: DATE }] }, origin: 'device' });
+      const m = moteurDe(db, { stockage: creerStockageFactice({ objets: { [a.chemin]: a.copie, [b.chemin]: b.copie } }) });
+      await m.telecharger([H('1')]);
+      const e = m.etat();
+      eq([e.fichiers.aTelecharger, e.fichiers.octetsATelecharger, Object.isFrozen(e.fichiers)], [1, b.copie.size, true], 'tape (épingle) : après un téléchargement par tape, les compteurs sont recomptés et figés — une page reste à télécharger (mutants : recompte retiré ; fichiers non figé)');
+      await m.arreter();
+    });
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const sf = creerStockageFactice({ objets: { ['u1/' + H('a')]: octets('abcd') } });
+      const m = moteurDe(db, { stockage: sf });
+      const listes = () => sf.journal.filter((j) => j.methode === 'lister').length;
+      const f1 = await m.executer('t');
+      const apres1 = listes();
+      await m.executer('t');
+      eq([apres1, f1.espaceServeur?.octets, f1.espaceServeur?.objets, Object.isFrozen(f1.espaceServeur), Object.isFrozen(f1.fichiers), listes()], [1, 4, 1, true, true, 1],
+        'moteur (épingle) : storage_usage absent → mesuré à la passe même sans confirmation ; présent → pas remesuré ; espaceServeur et fichiers figés (mutants : mesure seulement après une confirmation ; mesure à chaque passe ; fichiers non figé)');
+      await m.arreter();
+    });
+  });
+
+  await run('app.js (épingle) : câblage lu sans commentaires', async () => {
+    const app = (await lire('../src/app.js')).replace(/\/\/[^\n]*/g, '');
+    ok(/stockage: createStockage\(client\)/.test(app) && /qualite: qualiteEnvoi/.test(app), 'app.js (épingle, source admis) : les deux options restent hors de tout commentaire — une ligne commentée ne passe plus (mutant : stockage commenté)');
+  });
 }

@@ -6,8 +6,14 @@ import { fileDe } from './outbox.js';
 import { createPush } from './push.js';
 import { createPull } from './pull.js';
 import { purgerAnciens } from './conflits.js';
+import { createFichiers, compterFichiers, lireErreursFichiers, MAGASINS_FICHIERS } from './fichiers.js';
 import { setClockOffset } from './clock.js';
 import { logError } from '../core/log.js';
+
+// Lot G (§ 3.6) : les compteurs de fichiers au repos — toujours présents, à zéro tant qu'aucune passe n'a compté.
+const FICHIERS_AU_REPOS = Object.freeze({ aEnvoyer: 0, aTelecharger: 0, octetsATelecharger: 0, enErreur: 0, typeInconnu: 0, copiesPerimees: 0, copiesSansServeur: 0, aRenvoyer: 0 });
+// D-G13 : la réponse de toute API de fichiers appelée après arreter() — sans appel, sans écriture.
+const ARRETE = Object.freeze({ erreur: Object.freeze({ type: 'arrete' }) });
 
 // L'état au repos : rien n'est affiché avant qu'un fait l'ait posé (I5). Les noms sont ceux que Réglages et la
 // pastille liront ; aucune chaîne d'interface ici, le moteur ne rend que des faits.
@@ -27,6 +33,12 @@ const AU_REPOS = {
   // de redemander un rendu quand (et seulement quand) quelque chose est arrivé de l'autre appareil. Null au repos :
   // aucune passe n'a encore eu lieu, donc rien n'est affirmé.
   derniersEffets: null,
+  // Lot G (§ 3.6) : toujours présentes, à leur valeur de repos tant qu'aucun fait ne les a posées.
+  fichiers: FICHIERS_AU_REPOS,
+  progressionFichiers: null,
+  espaceServeur: null,
+  telechargementGlobal: false,
+  pauseFichiers: null,
 };
 
 // Le seuil au-delà duquel une horloge faussée se dit à la personne. Il est tenu par `appliquerHeureServeur`
@@ -44,6 +56,9 @@ export function createMoteur({
   bus = null,
   maintenant = Date.now,
   delaiRegroupementMs = 2000,
+  stockage = null,
+  qualite = () => 'reduite',
+  reduire = null,
 }) {
   let etat = { ...AU_REPOS };
   const abonnes = new Set();
@@ -67,6 +82,10 @@ export function createMoteur({
     horloge: fige(etat.horloge),
     derniereErreur: fige(etat.derniereErreur),
     derniersEffets: fige(etat.derniersEffets),
+    fichiers: fige(etat.fichiers),
+    progressionFichiers: fige(etat.progressionFichiers),
+    espaceServeur: fige(etat.espaceServeur),
+    pauseFichiers: fige(etat.pauseFichiers),
   });
 
   function poser(partiel) {
@@ -95,6 +114,36 @@ export function createMoteur({
       return r;
     },
   };
+
+  // Le stockage passe par le même compteur que le transport : un envoi ou un téléchargement abouti date « Dernier échange » (I5).
+  const compteStockage = stockage ? {
+    async envoyer(chemin, blob, options) { const r = await stockage.envoyer(chemin, blob, options); if (!r.erreur) appelsReussis += 1; return r; },
+    async recevoir(chemin) { const r = await stockage.recevoir(chemin); if (!r.erreur) appelsReussis += 1; return r; },
+    async lister(prefixe, options) { const r = await stockage.lister(prefixe, options); if (!r.erreur) appelsReussis += 1; return r; },
+  } : null;
+  // Sans stockage (suites L3, appareil sans client), aucune passe fichiers : le moteur est exactement celui de L3.
+  const fichiers = compteStockage ? createFichiers({ db, stockage: compteStockage, getUserId, qualite, maintenant, ...(reduire ? { reduire } : {}) }) : null;
+  const vols = new Set(); // D-G13 : téléchargements par tape et mesures d'espace — arreter() les attend tous, avec la passe
+  let generationTelechargement = 0; // « Arrêter le téléchargement » : la passe en vol s'arrête à son prochain fichier
+
+  const lirePauseFichiers = async () => (await db.get('sync_state', 'pause_fichiers'))?.value || null;
+  async function etatFichiers(snapshot = null) {
+    const snap = snapshot ?? await db.getSnapshot(MAGASINS_FICHIERS);
+    return compterFichiers(snap, { uid: getUserId(), erreurs: await lireErreursFichiers(db) });
+  }
+  async function appliquerEspace(r) {
+    if (!r || r.erreur) { if (r?.erreur) logError('sync.fichiers.espace', { reason: r.erreur.type, status: r.erreur.status }); return r; }
+    if (arrete) return ARRETE; // rien ne s'écrit après l'arrêt
+    const valeur = { octets: r.octets, objets: r.objets, at: r.at, tronque: r.tronque };
+    await db.mutate({ puts: { sync_state: [{ key: 'storage_usage', value: valeur }] }, origin: 'device' });
+    poser({ espaceServeur: valeur });
+    return valeur;
+  }
+  function tenir(promesse) {
+    vols.add(promesse);
+    promesse.then(() => vols.delete(promesse), () => vols.delete(promesse));
+    return promesse;
+  }
 
   const push = createPush({ db, transport: compte, getUserId, maintenant, surHeure: (h) => { heureVue = h; } });
   const pull = createPull({
@@ -150,11 +199,19 @@ export function createMoteur({
     if (Number.isFinite(decalage)) setClockOffset(decalage);
     const marque = await db.get('sync_state', 'clock_warned_at');
     const avertir = !!marque && Number.isFinite(decalage) && Math.abs(decalage) > SEUIL_HORLOGE_MS;
+    // Lot G (§ 3.6) : la pause du seau, la dernière mesure d'espace, le téléchargement global demandé et les compteurs de fichiers.
+    const fichiersConnus = fichiers ? {
+      pauseFichiers: await lirePauseFichiers(),
+      espaceServeur: (await db.get('sync_state', 'storage_usage'))?.value || null,
+      telechargementGlobal: !!(await db.get('sync_state', 'telecharger_tout')),
+      fichiers: await etatFichiers(),
+    } : {};
     poser({
       pause,
       dernierEchange: dernier,
       horloge: avertir ? { minutes: Math.round(Math.abs(decalage) / 60000) } : null,
       ...(await compter()),
+      ...fichiersConnus,
     });
   }
 
@@ -172,6 +229,9 @@ export function createMoteur({
     // Déclarés hors du `try` : le `finally` les lit pour annoncer ce que la passe a écrit, même quand elle a jeté.
     let bilanEnvoi = null;
     let bilanReception = null;
+    let bilanFichiers = null;
+    let bilanTelechargement = null;
+    let snapshotFichiers = null;
     try {
       if (!pause) {
         await envoiInitial({
@@ -199,6 +259,31 @@ export function createMoteur({
         bilanReception = await pull.recevoir();
         if (bilanReception.erreur) poser({ derniereErreur: { type: bilanReception.erreur.type } });
       }
+      // Lot G (§ 4.7) : après la réception, seulement avec un stockage, hors pause_fichiers et sans envoi bloqué. Les fiches sont parties AVANT.
+      if (fichiers && !envoiBloque && !arrete) {
+        const pauseF = await lirePauseFichiers();
+        poser({ pauseFichiers: pauseF });
+        if (!pauseF) {
+          poser({ phase: 'fichiers', progression: null });
+          snapshotFichiers = await db.getSnapshot(MAGASINS_FICHIERS); // UNE lecture par passe (S-12)
+          const surProgression = (p) => poser({ progressionFichiers: p });
+          bilanFichiers = await fichiers.envoyer({ stop: () => arrete, surProgression, snapshot: snapshotFichiers });
+          const bloque = bilanFichiers.attenteConnexion || bilanFichiers.pauseFichiers || !!bilanFichiers.erreur;
+          if (!bloque && !arrete && await db.get('sync_state', 'telecharger_tout')) {
+            const g = generationTelechargement;
+            bilanTelechargement = await fichiers.telechargerTout({ stop: () => arrete || g !== generationTelechargement, surProgression, snapshot: snapshotFichiers });
+          }
+          poser({ progressionFichiers: null });
+          if (!arrete && (bilanFichiers.confirmes > 0 || !(await db.get('sync_state', 'storage_usage')))) await appliquerEspace(await fichiers.mesurerEspace());
+          const erreurFichiers = bilanFichiers.erreur || bilanTelechargement?.erreur || null;
+          if (bilanFichiers.attenteConnexion) poser({ attenteConnexion: true });
+          if (bilanFichiers.pauseFichiers) poser({ pauseFichiers: await lirePauseFichiers() });
+          else if (erreurFichiers) poser({ derniereErreur: { type: erreurFichiers.type } });
+          if (bilanFichiers.recul) programmerReprise(bilanFichiers.recul);
+          else if (!erreurFichiers && (bilanFichiers.restants > 0 || bilanTelechargement?.restants > 0) && fenetre.document?.visibilityState !== 'hidden') programmerReprise(1000);
+          if (bilanFichiers.confirmes > 0) planifier(); // les lignes confirmées partent à la passe suivante
+        }
+      }
       // UN seul « Dernier échange » par passe, et seulement si un appel a RÉELLEMENT abouti (I5).
       if (appelsReussis > avantPasse) await toucherEchange();
       await purgerAnciens(db, maintenant());
@@ -210,6 +295,13 @@ export function createMoteur({
       // transformer la fin d'une passe en rejet silencieux.
       let fin = {};
       try { fin = await compter(); } catch (error) { logError('sync.passe', { error, reason: 'file illisible' }); }
+      if (fichiers) {
+        try {
+          fin.fichiers = await etatFichiers(snapshotFichiers); // le snapshot de la passe, mis à jour par envoyer/telechargerTout ; lu une fois sinon
+          fin.telechargementGlobal = !!(await db.get('sync_state', 'telecharger_tout'));
+          fin.progressionFichiers = null;
+        } catch (error) { logError('sync.passe', { error, reason: 'fichiers illisibles' }); }
+      }
       // R-L3-16 : ce que la passe a écrit, compté depuis les bilans de l'envoi et de la réception — jamais depuis
       // une réponse brute. Une passe interrompue annonce ce qu'elle avait écrit avant de s'arrêter, pas zéro.
       const derniersEffets = {
@@ -217,6 +309,7 @@ export function createMoteur({
         supprimees: bilanReception?.supprimees || 0,
         ajustes: bilanEnvoi?.ajustes || 0,
         conflits: (bilanEnvoi?.conflits || 0) + (bilanReception?.conflits || 0),
+        fichiersRecus: bilanTelechargement?.recus || 0, // § 3.6 : toujours présent, forme fixe
       };
       poser({ enCours: false, phase: null, progression: null, derniersEffets, ...fin });
     }
@@ -267,12 +360,77 @@ export function createMoteur({
   // relue dans sync_state (un autre onglet a pu la poser) et un vol en cours est ATTENDU, pas rejoint : il a pu être
   // court-circuité par la pause, le rejoindre ne ferait donc rien partir.
   async function envoyerMaintenant() {
-    if (await lirePause()) {
-      await db.mutate({ deletes: { sync_state: ['pause'] }, origin: 'device' });
-      poser({ pause: null });
-    }
+    const aLever = [];
+    if (await lirePause()) aLever.push('pause');
+    if (await lirePauseFichiers()) aLever.push('pause_fichiers'); // B-5 : le geste lève aussi la pause du seau
+    if (aLever.length) { await db.mutate({ deletes: { sync_state: aLever }, origin: 'device' }); poser({ pause: null, pauseFichiers: null }); }
     if (vol) await vol;
     return executer('manuel');
+  }
+
+  // D-G13 : tout ce qu'une tape lance entre dans `vols` ; après arreter(), rien n'appelle et rien n'écrit. Hors brief (§ 4.8 « Arrêt »,
+  // à ratifier) : les gestes qui écrivent une clé puis lancent une passe sont tenus eux aussi, et relisent `arrete` après chaque attente — un
+  // geste lancé juste avant l'arrêt (« Effacer les données » derrière une tape) ne lance plus de passe derrière lui, et arreter() attend sa clé.
+  function telecharger(shas) {
+    if (arrete) return Promise.resolve(ARRETE);
+    if (!fichiers) return Promise.resolve({ rien: true });
+    return tenir((async () => {
+      const avant = appelsReussis;
+      const r = await fichiers.telecharger(Array.isArray(shas) ? shas : [], { stop: () => arrete });
+      if (!arrete) {
+        if (appelsReussis > avant) await toucherEchange();
+        poser({ fichiers: await etatFichiers() });
+      }
+      return r;
+    })());
+  }
+  function telechargerTout() {
+    if (arrete) return Promise.resolve(ARRETE);
+    if (!fichiers) return Promise.resolve({ rien: true });
+    return tenir((async () => {
+      await db.mutate({ puts: { sync_state: [{ key: 'telecharger_tout', value: { at: new Date(maintenant()).toISOString() } }] }, origin: 'device' });
+      if (arrete) return ARRETE;
+      poser({ telechargementGlobal: true });
+      if (vol) await vol; // une passe déjà en vol a pu lire la clé avant qu'elle existe : la suivante la lira
+      return arrete ? ARRETE : executer('telechargement');
+    })());
+  }
+  function arreterTelechargement() {
+    generationTelechargement += 1; // la passe en vol s'arrête à son prochain fichier (stop relit la génération)
+    if (arrete) return Promise.resolve(ARRETE);
+    return tenir((async () => {
+      await db.mutate({ deletes: { sync_state: ['telecharger_tout'] }, origin: 'device' });
+      if (arrete) return ARRETE;
+      poser({ telechargementGlobal: false });
+      return instantane();
+    })());
+  }
+  function actualiserEspace() {
+    if (arrete) return Promise.resolve(ARRETE);
+    if (!fichiers) return Promise.resolve({ rien: true });
+    return tenir((async () => appliquerEspace(await fichiers.mesurerEspace()))()); // hors passe : lister ne touche pas la base avant la fin
+  }
+  function renvoyerEnOriginale() {
+    if (arrete) return Promise.resolve(ARRETE);
+    if (!fichiers) return Promise.resolve({ rien: true });
+    return tenir((async () => {
+      await db.mutate({ puts: { sync_state: [{ key: 'renvoi_originale', value: { at: new Date(maintenant()).toISOString() } }] }, origin: 'device' });
+      if (vol) await vol;
+      return arrete ? ARRETE : executer('renvoi');
+    })());
+  }
+  function reessayerFichier(sha256) {
+    if (arrete) return Promise.resolve(ARRETE);
+    const cle = 'file_error:' + sha256;
+    return tenir((async () => {
+      const ligne = await db.get('sync_state', cle);
+      if (arrete) return ARRETE; // la clé n'est pas retirée après l'arrêt
+      if (!ligne) return { rien: true };
+      await db.mutate({ deletes: { sync_state: [cle] }, origin: 'device' });
+      if (ligne.value?.sens === 'reception') return telecharger([sha256]); // tenu lui aussi ; rend arrete si l'arrêt est arrivé entre-temps
+      if (vol) await vol;
+      return arrete ? ARRETE : executer('reessai');
+    })());
   }
 
   function demarrer() {
@@ -292,15 +450,15 @@ export function createMoteur({
     return demarrage;
   }
 
-  // L'arrêt retire tout ce qui pourrait relancer une passe, et rend la passe en vol : l'appelant peut attendre
-  // qu'elle soit terminée avant de fermer la base.
+  // L'arrêt retire tout ce qui pourrait relancer une passe, et rend la passe en vol avec les vols des gestes (D-G13) : l'appelant
+  // peut attendre qu'ils soient tous terminés avant de fermer la base.
   function arreter() {
     actif = false;
     arrete = true; // m2 : ce qui est encore en vol ne reposera plus de minuterie derrière l'arrêt
     for (const d of desabonner.splice(0)) d();
     if (minuterie) { clearTimeout(minuterie); minuterie = null; }
     if (reprise) { clearTimeout(reprise); reprise = null; }
-    return vol || Promise.resolve(instantane());
+    return Promise.allSettled([vol, ...vols].filter(Boolean)).then(() => instantane()); // D-G13 : la passe ET les vols
   }
 
   return {
@@ -309,6 +467,12 @@ export function createMoteur({
     executer,
     planifier,
     envoyerMaintenant,
+    telecharger,
+    telechargerTout,
+    arreterTelechargement,
+    actualiserEspace,
+    renvoyerEnOriginale,
+    reessayerFichier,
     etat: instantane,
     onEtat: (fn) => { abonnes.add(fn); return () => abonnes.delete(fn); },
   };
