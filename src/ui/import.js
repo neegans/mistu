@@ -91,19 +91,12 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   const phraseSeance = el('span', { class: 'status info', dataset: { role: 'phrase-seance' } });
   const majPhrase = async () => {
     if (!ctx.sync?.user) { phraseSeance.textContent = t('Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages'); return; }
+    if (!pages.length) { phraseSeance.hidden = true; return; } // ronde 1 : une séance de documents seuls n'a pas de phrase « 0/0 photos »
     const fs = await repo.getFiles(pages.map((p) => p.sha256));
     const n = pages.filter((p) => remoteDeCeCompte(fs.get(p.sha256)?.remote, ctxF.uid)).length;
     phraseSeance.textContent = t('{n}/{m} photos de cette séance envoyées au serveur', { n, m: pages.length });
   };
-  await majPhrase();
-  if (typeof ctxF.moteur?.onEtat === 'function') {
-    let montee = false;
-    const retirer = ctxF.moteur.onEtat(() => {
-      if (!phraseSeance.isConnected) { if (montee) retirer(); return; }
-      montee = true;
-      majPhrase().catch((error) => logError('seance.phrase', { error }));
-    });
-  }
+  await majPhrase(); // l'abonnement à onEtat est pris en fin de rendu (ronde 1, plus bas)
   // États fondés sur des événements réels : ce qui est effectivement écrit dans la base locale.
   root.append(el('div', { class: 'row', style: { marginBottom: '.8rem' } },
     el('span', { class: 'status ok' }, t('{n} page(s) conservée(s) sur cet appareil', { n: pages.length })),
@@ -142,7 +135,7 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
     }
   };
   // Lot G (§ 4.3) : chaque miniature par vignettePage (image, ou l'état et son geste) ; « Télécharger les {n} pages » au-dessus, à partir de deux.
-  const vignettes = await vignettesDePages(pages, ctxF);
+  const vignettes = await vignettesDePages(pages, ctxF, { alt: (p) => `${t('Page')} ${p.position}` });
   for (const p of pages) {
     const check = el('input', { type: 'checkbox', checked: selected.has(p.id), onChange: (e) => { if (e.target.checked) selected.add(p.id); else selected.delete(p.id); drawActions(); } });
     const pageInput = el('input', { type: 'number', placeholder: t('p. imprimée'), value: p.printed_page ?? '', style: { minHeight: '30px', padding: '.2rem .4rem', fontSize: '.8rem' }, onChange: async (e) => { p.printed_page = e.target.value ? parseInt(e.target.value, 10) : null; await repo.save('source_pages', p); } });
@@ -164,7 +157,7 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
           el('a', { class: 'btn primary', href: `#/recipes/new${buildQuery({ doc: d.id, edition: session.edition_id || '', session: session.id })}` }, t('Créer une recette depuis ce fichier')),
           el('button', { class: 'btn', onClick: () => { indexPanel.hidden = false; indexPanel.dataset.doc = d.id; indexPanel.scrollIntoView({ behavior: 'smooth' }); } }, t('Indexer le livre'))));
       if (d.source_type === 'pdf') {
-        box.append(pdfFrame({ sha256: d.sha256, filename: d.original_filename, connecte: ctxF.connecte, telecharger: gesteTelechargement({ moteur: ctxF.moteur }) }));
+        box.append(pdfFrame({ sha256: d.sha256, filename: d.original_filename, connecte: ctxF.connecte, uid: ctxF.uid, telecharger: gesteTelechargement({ moteur: ctxF.moteur }) }));
       } else box.append(el('p', { class: 'muted' }, t('EPUB conservé. La lecture intégrée n’est pas encore disponible : indexe les recettes à la main ou exporte les pages en images.')));
       return box;
     })));
@@ -203,6 +196,17 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
     await repo.removeMany('source_pages', ids);
     await repo.save('scan_sessions', session);
     refresh();
+  }
+  // Lot G (§ 4.3, F-21) : la phrase SEULE suit onEtat. Ronde 1 : l'abonné ne survit jamais à l'écran. Il est pris en FIN de rendu ; au tour qui
+  // suit (app.js insère le nœud dans la même suite de micro-tâches que la fin du rendu), un rendu jamais monté — dépassé par une navigation —
+  // se désabonne aussitôt ; un écran monté puis quitté se désabonne au premier onEtat qui le trouve détaché, même s'il n'en a reçu aucun monté.
+  if (typeof ctxF.moteur?.onEtat === 'function') {
+    let vu = false;
+    const retirer = ctxF.moteur.onEtat(() => {
+      if (!phraseSeance.isConnected) { if (vu) retirer(); return; }
+      majPhrase().catch((error) => logError('seance.phrase', { error }));
+    });
+    setTimeout(() => { vu = true; if (!phraseSeance.isConnected) retirer(); }, 0);
   }
   return root;
 }

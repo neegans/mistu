@@ -4,7 +4,7 @@ import { el, toast, chooseDialog, promptDialog, confirmDialog, formatDate, downl
 import { t, label } from '../core/i18n.js';
 import { navigate, buildQuery, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
-import { displayUrl, typeAffichage } from '../sync/mime.js';
+import { displayUrl, typeAffichage, safeDisplayType } from '../sync/mime.js';
 import { urlDeBlob } from '../core/blob-urls.js';
 import { currentVersion } from '../domain/search.js';
 import { scaleVersion } from '../domain/scaling.js';
@@ -14,8 +14,7 @@ import { DIET_TAGS } from '../model/schema.js';
 import { reperesDe } from '../domain/recherche-web.js';
 import { lirePage, relireResultat } from '../domain/lecture-web.js';
 import { logError } from '../core/log.js';
-import { pageHeader, section, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture, sessionAssistant, carteConnexion, ligneReperes, contexteFichiers, vignettesDePages, boutonTelechargerPages, vignettePage, gesteTelechargement } from './components.js';
-import { lireErreursFichiers } from '../sync/fichiers.js';
+import { pageHeader, section, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture, sessionAssistant, carteConnexion, ligneReperes, contexteFichiers, vignettesDePages, boutonTelechargerPages, vignettePage, gesteTelechargement, relireErreurs } from './components.js';
 import { demarrerLectureWeb, texteEchecLecture, enLigneLecture, ligneWebOuverte } from './import-web.js';
 import { demarrerConnexion } from './settings.js';
 import { estCreationIA, etiquetteCreationIA, lireCreation, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
@@ -165,7 +164,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
 
   // Pages originales
   if (pages.length) {
-    const vignettes = await vignettesDePages(pages, ctxF);
+    const vignettes = await vignettesDePages(pages, ctxF, { alt: () => t('Page originale') }); // ronde 1 : l'alt d'avant le lot G
     root.append(section(t('Original'), el('p', { class: 'muted' }, t('Pages du livre telles que photographiées. Une adaptation n’est jamais présentée comme le texte original.')),
       boutonTelechargerPages(vignettes.distantes, { connecte: ctxF.connecte, telecharger: vignettes.telecharger }),
       el('div', { class: 'thumbs' }, ...pages.map((p) => el('figure', null, vignettes.places.get(p.id), el('figcaption', null, p.printed_page ? `${t('p.')} ${p.printed_page}` : ''))))));
@@ -405,6 +404,9 @@ async function photoDuPlat(recipe, ctxF) {
   let fichier = null;
   try { fichier = await repo.getFile(recipe.photo_sha256); } catch { fichier = null; }
   if (!fichier) return null;
+  // Ronde 1 : sans octets, rien n'est offert si ce qui arrivera ne s'affichera pas — le type que portera le blob reçu (remote.mime), sinon celui
+  // de la ligne (typeAffichage) ; une ligne distante application/pdf réussissait chaque tape sans que rien ne change (boucle muette).
+  if (!(fichier.blob instanceof Blob) && !(safeDisplayType(fichier.remote?.mime) ?? safeDisplayType(fichier.mime))?.startsWith('image/')) return null;
   const figure = el('figure', { class: 'photo-plat', dataset: { role: 'photo-plat' }, style: { margin: '0 0 .8rem' } });
   const dessiner = (f) => {
     if (f?.blob instanceof Blob) {
@@ -417,7 +419,7 @@ async function photoDuPlat(recipe, ctxF) {
     return true;
   };
   const telecharger = gesteTelechargement({ moteur: ctxF.moteur, redessiner: async () => {
-    try { ctxF.erreurs = new Set((await lireErreursFichiers(repo.db)).keys()); } catch { /* garde les erreurs connues */ }
+    await relireErreurs(ctxF);
     dessiner(await repo.getFile(recipe.photo_sha256));
   } });
   return dessiner(fichier) ? figure : null;

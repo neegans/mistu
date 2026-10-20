@@ -3,7 +3,7 @@
 ## Choix
 
 - **PWA sans étape de build** : modules ES natifs, aucune dépendance npm. Un serveur statique suffit. Choix guidé par « éviter la surarchitecture » (spec §15) et par la possibilité de tout vérifier en ouvrant l'app.
-- **Local-first** : IndexedDB comme base unique (un magasin par entité), blobs (photos, PDF) stockés dédupliqués par SHA-256 dans le magasin `files`. La sauvegarde complète (ZIP) reste un mécanisme de durabilité et de transfert entre appareils, utilisable sans compte. Depuis le lot L3, **les fiches** peuvent aussi voyager par un serveur Supabase quand un compte est connecté (voir « Synchronisation (L3) ») ; les **octets des fichiers**, eux, ne partent pas encore (L4) (depuis le lot G : voir “Fichiers (L4)”). L'app reste utilisable sans compte, sur un appareil seul.
+- **Local-first** : IndexedDB comme base unique (un magasin par entité), blobs (photos, PDF) stockés dédupliqués par SHA-256 dans le magasin `files`. La sauvegarde complète (ZIP) reste un mécanisme de durabilité et de transfert entre appareils, utilisable sans compte. Depuis le lot L3, **les fiches** peuvent aussi voyager par un serveur Supabase quand un compte est connecté (voir « Synchronisation (L3) ») ; depuis le lot G, les **octets des fichiers** voyagent aussi (L4 : voir « Fichiers (L4, lot G) »). L'app reste utilisable sans compte, sur un appareil seul.
 - **Déterministe avant IA** : unités, portions, courses, régimes, sauvegarde et recherche sont du code sans LLM. L'IA est une abstraction `LLMProvider` (aucun, ou la passerelle `assistant` ; depuis le 18 octobre, plus de fournisseur compatible OpenAI ni de clé dans l'app) branchée sur l'extraction de pages et d'index, et sur la recherche web (Anthropic seulement), où le texte de l'assistant ne peut qu'étiqueter des pages que le serveur a réellement rapportées ; la lecture de la réponse et le choix des liens sont du code sans LLM ; et, depuis le 18 octobre, sur la création d'une recette (Anthropic seulement), dont la sortie est une donnée validée champ par champ par du code sans LLM. Ses résultats sont toujours « à vérifier ».
 
 ## Carte des modules
@@ -176,7 +176,7 @@ Une troisième migration, `0003_assistant_config.sql`, à ajout seul, est géné
 Spec : `docs/spec-compte-et-stockage-distant.md` § 5.3 (envoi), § 5.5 (réception et conflits), § 5.2 (envoi
 initial), § 4.2 (interface), § 11 (amendements R37 à R56). Livré ici : **les fiches** voyagent entre les appareils
 d'un même compte — envoi, envoi initial, réception, conflits, quarantaine, pause, et un moteur qui décide quand.
-Pas les **octets** des fichiers (L4) (depuis le lot G : voir “Fichiers (L4)”), pas la purge du serveur (L5).
+Les **octets** des fichiers ne sont pas de L3 : ils voyagent depuis le lot G (L4, voir « Fichiers (L4, lot G) ») ; la purge du serveur reste L5.
 
 ### Modules (huit, un rôle chacun)
 
@@ -1274,7 +1274,7 @@ Le format reste v1 : les archives complètes produites précédemment restent li
 ## Limites connues de V0
 
 - Échange de données entre appareils : **les fiches** voyagent depuis le lot L3, avec un compte connecté (voir
-  « Synchronisation (L3) ») ; les **octets des fichiers** (photos, PDF) ne partent pas encore (depuis le lot G : voir “Fichiers (L4)”) — pour eux, et pour
+  « Synchronisation (L3) ») ; les **octets des fichiers** (photos, PDF) voyagent depuis le lot G (voir « Fichiers (L4, lot G) ») ; pour
   tout appareil sans compte, le transfert reste l'archive ZIP. Aucune passe réelle n'a encore été mesurée sur deux
   appareils.
 - Pas de reconnaissance vocale; minuterie confiée au système (Siri / raccourci).

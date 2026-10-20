@@ -5,7 +5,7 @@ import { navigate, refresh, remplacerAdresse } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { etatFichier } from '../sync/fichiers.js';
 import { listConventions } from '../domain/units.js';
-import { pageHeader, section, field, select, recipeCard, emptyState, bookCover, contexteFichiers, vignettesDePages, boutonTelechargerPages } from './components.js';
+import { pageHeader, section, field, select, recipeCard, emptyState, bookCover, contexteFichiers, vignettesDePages, boutonTelechargerPages, relireErreurs, texteErreurFichier } from './components.js';
 import { invalidate } from './state.js';
 import { urlDeBlob } from '../core/blob-urls.js';
 import { poserCouverture, renderZoneCouverture, messageErreurImage } from './livre-ajout.js';
@@ -52,7 +52,9 @@ export async function renderBook(params, query, ctx) {
     if (!edition.cover_sha256 || fichier?.blob instanceof Blob) return rien;
     if (!fichier) return { ...rien, message: t('La couverture n’est pas sur cet appareil.') };
     const etat = etatFichier(fichier, ctxF);
-    if (etat === 'erreur') return { ...rien, message: t('Fichier illisible reçu du serveur.'), reessayable: !!ctxF.moteur };
+    // Ronde 1 : la phrase du motif (un 404 n'est pas « illisible reçu ») ; « Réessayer » avec un compte ET le moteur (sans compte, la tape effaçait
+    // le diagnostic sans rien retenter, R52 ; sans moteur, elle ne pouvait rien).
+    if (etat === 'erreur') return { ...rien, message: texteErreurFichier(edition.cover_sha256, ctxF.erreurs), reessayable: ctxF.connecte };
     if (etat === 'distant') return ctxF.connecte ? { ...rien, message: t('La couverture n’est pas sur cet appareil.'), telechargeable: true } : { ...rien, message: t('La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.') };
     return { ...rien, message: t('La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.') };
   };
@@ -182,11 +184,12 @@ export async function renderBook(params, query, ctx) {
       if (etatCouv.telechargement) return;
       etatCouv.telechargement = true; dessinerCouv();
       try { if (reessayer) await ctxF.moteur?.reessayerFichier(edition.cover_sha256); else await ctxF.moteur?.telecharger([edition.cover_sha256]); } catch { /* dit plus bas */ }
+      // Ronde 1 : une relecture qui lève (base fermée, quota) ne laisse plus la zone figée sur « Téléchargement… » : l'état d'avant, et l'échec dit.
+      let f = null; let lu = true;
+      try { f = await repo.getFile(edition.cover_sha256); } catch { lu = false; }
       etatCouv.telechargement = false;
-      const f = await repo.getFile(edition.cover_sha256);
-      if (f?.blob instanceof Blob) { invalidate(); Object.assign(etatCouv, { apercu: urlDeBlob(f.blob) }, decrireCouverture(f)); dessinerCouv(); refresh(); return; }
-      Object.assign(ctxF, await contexteFichiers(ctx));
-      Object.assign(etatCouv, decrireCouverture(f));
+      if (lu && f?.blob instanceof Blob) { invalidate(); Object.assign(etatCouv, { apercu: urlDeBlob(f.blob) }, decrireCouverture(f)); dessinerCouv(); refresh(); return; }
+      if (lu) { await relireErreurs(ctxF); Object.assign(etatCouv, decrireCouverture(f)); }
       dessinerCouv();
       toast(t('Le téléchargement n’a pas abouti.'));
     },

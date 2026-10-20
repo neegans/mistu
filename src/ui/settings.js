@@ -17,7 +17,7 @@ import { extFor } from '../domain/backup.js';
 import { etatAssistant, sessionValide } from '../domain/passerelle.js';
 import { shortcutUrl, SHORTCUT_NAME, isAppleTouchDevice } from '../domain/timers.js';
 import { STORES, SYNC_INTERNAL_STORES, APP_VERSION, ARCHIVE_FORMAT_VERSION } from '../model/schema.js';
-import { pageHeader, section, field, segmented, majPastille, sessionAssistant, TEXTE_CONNEXION, boutonSeConnecter, messageGardeRefusee } from './components.js';
+import { pageHeader, section, field, segmented, majPastille, sessionAssistant, TEXTE_CONNEXION, boutonSeConnecter, messageGardeRefusee, motifFichier } from './components.js';
 import { invalidate, setSyncState, getSyncState, relireReglages, SYNC_ROUTE_KEY } from './state.js';
 
 // Évite deux opérations d’archive concurrentes, même après un changement d’écran.
@@ -841,23 +841,9 @@ function phraseEspace(e) {
   return e.tronque ? t('au moins {x} Mo ({n} fichiers)', v) : t('Tes photos sur le serveur : {x} Mo ({n} fichiers)', v);
 }
 
-// Motifs d'un fichier refusé (§ 4.10) : le motif ET le sens décident la phrase (« type » à l'envoi = refusé par le serveur ; à la réception =
-// illisible). Lus par hasOwn : un jeton inconnu ou hostile retombe sur « Fichier refusé », jamais sur le jeton.
-const MOTIFS_FICHIER = {
-  'envoi:trop_gros': 'Plus de 50 Mo : ce fichier reste sur cet appareil seulement.',
-  'envoi:type': 'Type de fichier refusé par le serveur.',
-  'envoi:verification': 'Empreinte différente après envoi.',
-  // Ronde 1 (à ratifier : textes hors spec § 5) : `forme` à l'envoi (T3-R1 : un fichier vide ne porte aucun remote valide) et `illisible` (T4-R1 :
-  // un blob que le navigateur ne relit plus) sont posés par la passe depuis le plan ; sans phrase, ils retombaient sur « Fichier refusé ».
-  'envoi:forme': 'Fichier vide ou mal formé : il reste sur cet appareil seulement.',
-  'envoi:illisible': 'Fichier illisible sur cet appareil.',
-  'reception:forme': 'Ligne de fichier mal formée reçue du serveur.',
-  'reception:introuvable': 'Ce fichier n’est plus sur le serveur.',
-  'reception:empreinte': 'Fichier illisible reçu du serveur.',
-  'reception:taille': 'Fichier illisible reçu du serveur.',
-  'reception:type': 'Fichier illisible reçu du serveur.',
-};
-export const motifFichier = (motif, sens) => { const cle = `${sens}:${motif}`; return t(Object.hasOwn(MOTIFS_FICHIER, cle) ? MOTIFS_FICHIER[cle] : 'Fichier refusé'); };
+// Motifs d'un fichier refusé (§ 4.10) : la table et `motifFichier` vivent dans components.js depuis la tâche 6, ronde 1 (UNE définition pour
+// Réglages et les écrans : vignettes, couverture, cadre PDF) ; réexportés ici, la signature d'avant tient.
+export { motifFichier };
 // B-22 : pas de « Réessayer » qui échouera pareil — trop_gros (les mêmes octets restent trop gros) et, ronde 1, forme à l'envoi (les mêmes octets
 // ne porteraient pas plus de remote valide : la passe reposerait la même clé). `illisible` garde le sien : le blob peut redevenir lisible.
 const sansReessai = (motif, sens) => motif === 'trop_gros' || (sens === 'envoi' && motif === 'forme');

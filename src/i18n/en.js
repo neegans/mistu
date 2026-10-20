@@ -584,4 +584,5 @@ export const EN = {
   "La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.": "The cover is not on this device: the device that took it has not sent it yet.",
   "Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages": "Without an account these photos stay on this device: back up from Settings",
   "{n}/{m} photos de cette séance envoyées au serveur": "{n}/{m} photos of this session uploaded to the server",
+  "Page originale": "Original page", // ronde 1 : l'alt d'« Original » (antérieur au lot, sans entrée jusqu'ici)
 };
