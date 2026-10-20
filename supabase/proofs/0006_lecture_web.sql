@@ -1,7 +1,7 @@
 -- Preuve 0006 — spec du lot B (2026-10-19-recette-web § 6.4). À coller dans l'éditeur SQL de Supabase APRÈS
 -- `migrations/0006_lecture_web.sql` (étape 12 de `supabase/README.md`).
 --
--- AUCUN jeton à remplacer et AUCUNE adresse à ajouter. Pour les verdicts 2.01, 2.03 et 2.03 bis, elle EMPRUNTE le compte le plus ancien de
+-- AUCUN jeton à remplacer et AUCUNE adresse à ajouter. Pour les verdicts 2.01 à 2.03 bis et 3.01, elle EMPRUNTE le compte le plus ancien de
 -- `auth.users` — sans jamais le nommer ni l'afficher ; si `auth.users` est vide, ces verdicts sont sautés (« aucun compte : etape sautee »,
 -- vert). Tout est annulé à la dernière instruction : rejouable telle quelle.
 --
@@ -77,13 +77,23 @@ begin
   exception when others then v := sqlstate;
   end;
   insert into pg_temp.preuve values (2.02, 'un outil hors liste est toujours refuse par le check', '23514', v, v = '23514');
+  -- 2.03 et 2.03 bis : chaque appel dans un bloc exception, comme 2.01 et 2.02 — un refus du check (23514 : une 0006 collée sans image-web) devient
+  -- un verdict rouge lisible au BILAN, au lieu d'annuler le collage entier sans rien afficher.
   select count(*) into c from public.assistant_journal where owner_id = uid and jour = (now() at time zone 'utc')::date;
-  r := public.assistant_reserver(uid, 'lecture-web', 1, c::integer + 1);
-  insert into pg_temp.preuve values (2.03, 'assistant_reserver accepte lecture-web : un id non nul', 'id non nul', case when r is null then 'null' else 'id non nul' end, r is not null);
+  begin
+    r := public.assistant_reserver(uid, 'lecture-web', 1, c::integer + 1);
+    v := case when r is null then 'null' else 'id non nul' end;
+  exception when others then v := sqlstate;
+  end;
+  insert into pg_temp.preuve values (2.03, 'assistant_reserver accepte lecture-web : un id non nul', 'id non nul', v, v = 'id non nul');
   -- 2.03 bis (R-B-6 = R-F-1) : la valeur du lot F, admise dès 0006 ; c recompté (2.03 vient d'écrire une ligne du jour : le quota c + 1 vaut pour lui).
   select count(*) into c from public.assistant_journal where owner_id = uid and jour = (now() at time zone 'utc')::date;
-  r := public.assistant_reserver(uid, 'image-web', 1, c::integer + 1);
-  insert into pg_temp.preuve values (2.031, '2.03 bis : assistant_reserver(uid, ''image-web'', 1, c + 1) -> id non nul (la valeur du lot F)', 'id non nul', case when r is null then 'null' else 'id non nul' end, r is not null);
+  begin
+    r := public.assistant_reserver(uid, 'image-web', 1, c::integer + 1);
+    v := case when r is null then 'null' else 'id non nul' end;
+  exception when others then v := sqlstate;
+  end;
+  insert into pg_temp.preuve values (2.031, '2.03 bis : assistant_reserver(uid, ''image-web'', 1, c + 1) -> id non nul (la valeur du lot F)', 'id non nul', v, v = 'id non nul');
   begin
     insert into public.assistant_journal (owner_id, outil, statut, jour) values (uid, 'recherche-web', 200, date '2000-01-01'), (uid, 'creation', 200, date '2000-01-01'), (uid, 'extraction', 200, date '2000-01-01');
     v := 'acceptes';

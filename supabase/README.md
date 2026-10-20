@@ -370,10 +370,15 @@ aussi `image-web` (lot F, à venir), qu'aucun code de ce lot n'écrit.
 4. **Consigner** la sortie dans `proofs/RESULTATS-mitsu.md`, section « Preuve `0006_lecture_web.sql` — à jouer » déjà préparée.
 5. **Ordre, sans exception** : `0006` → redéploiement de la fonction (la commande du point 2 de l'étape 10 :
    `supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api`) → les sondes sans dépense
-   S13-S16 et les neuf de l'étape 10 rejouées → S17-S18, un appel du quota chacune, sans dépense Anthropic (zéro jeton) : S17, une adresse
+   S13-S16 et les neuf sondes S1-S9 du lot 4 rejouées (leur liste : `RESULTATS-mitsu.md`, section « Passerelle `assistant` ») → S17-S18, un
+   appel du quota chacune, sans dépense Anthropic (zéro jeton) : S17, une adresse
    `https` en 301 / 302 vers une page à JSON-LD `Recipe` complet — attendu une lecture `jsonld` sans appel au modèle, ou un refus propre et
    nommé ; une redirection opaque (502 `inaccessible` sur une chaîne que `curl` suit) impose une ronde sur `telechargerPage` avant d'aller
    plus loin → fusion → `push`. Les sondes se consignent dans la section « Sondes `lecture-web` » de `RESULTATS-mitsu.md`.
+   S13-S15 et S17-S18 passent la session et la liste admise : elles se jouent avec la session lue comme au point 4 de l'étape 10
+   (`read -rs JETON`, jamais le jeton dans une commande, `unset JETON` à la fin) ; S16 se joue sans jeton. S17 se vérifie d'abord sans la
+   fonction, avec SON `User-Agent` (un site peut rediriger selon l'agent) : `curl -sI -A 'Mitsu/0.10 (+https://neegans.github.io/mistu/)'`
+   sur l'adresse pour la redirection, puis `curl -s` sur la cible pour le bloc JSON-LD.
 
 ## Où coller les sorties
 

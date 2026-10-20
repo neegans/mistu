@@ -1,6 +1,6 @@
 // Test COMPORTEMENTAL de supabase/functions/assistant/index.ts sous Node (spec 2026-10-18-passerelle-assistant § 5).
-// Principe : on retire les types d'index.ts (node:module.stripTypeScriptTypes), on remplace ses deux imports par le vrai
-// logique.js et par un faux supabase-js (tools/faux/supabase.mjs), on pose un faux `Deno` et un faux `fetch`, puis on
+// Principe : on retire les types d'index.ts (node:module.stripTypeScriptTypes), on remplace ses trois imports par les vrais
+// logique.js et lecture-web.js et par un faux supabase-js (tools/faux/supabase.mjs), on pose un faux `Deno` et un faux `fetch`, puis on
 // appelle le gestionnaire passe a Deno.serve avec de vraies `Request`. Aucun reseau, aucune cle reelle (ANTHROPIC_API_KEY
 // de test = valeur FACTICE). Chaque cas affirme aussi le nombre d'appels sortants vers Anthropic.
 // INDEX_TS (variable d'environnement) designe un autre index.ts : c'est ainsi que les mutants sont rejoues sur une copie.
@@ -593,6 +593,9 @@ const appelsModele = () => appelsFetch.filter((a) => a.url === ANTHROPIC_URL);
 const page = (routes) => { reponseFetch = async (url, options) => (url === ANTHROPIC_URL ? (routes.anthropic ?? (async () => jsonReponse(200, REPONSE_OK)))(url, options) : routes.page(url, options)); };
 // Une réponse qui ne vient qu'à l'abandon du signal (pour les délais et l'abandon du client).
 const sourde = (url, options) => new Promise((_, rejeter) => { options.signal.addEventListener('abort', () => rejeter(new DOMException('Aborted', 'AbortError'))); });
+// Ronde 1 : un corps qui envoie « <main> » puis cale (en-têtes déjà reçus) ; comme le vrai fetch, il est rompu par une AbortError quand le signal de
+// la requête tombe. `entame` est appelé dès que la lecture a pris le premier morceau.
+const corpsQuiCale = (signal, entame) => new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('<main>')); signal.addEventListener('abort', () => c.error(new DOMException('Aborted', 'AbortError'))); }, pull() { entame(); } });
 const vider = () => new Promise((fini) => setImmediate(fini));
 
 test('t1. lecture-web : http:// → 422 interdit AVANT toute reservation, aucun fetch ; t1bis : l hote de SUPABASE_URL → 422 interdit (S-12)', async () => {
@@ -621,6 +624,7 @@ test('t2. page avec JSON-LD Recipe : reservation lecture-web, UN fetch (la page)
   assert.deepEqual([f.options.method, f.options.redirect, f.options.credentials], ['GET', 'manual', 'omit']);
   assert.deepEqual(Object.keys(f.options.headers).sort(), ['accept', 'accept-language', 'user-agent'], 'exactement trois en-tetes poses par le code');
   assert.ok(f.options.headers['user-agent'].startsWith('Mitsu/'));
+  assert.deepEqual(f.options.headers, { 'user-agent': 'Mitsu/0.10 (+https://neegans.github.io/mistu/)', accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1', 'accept-language': 'fr-CA,fr;q=0.9,en;q=0.5' }, 'ronde 1 : les VALEURS des trois en-tetes (spec § 6.3)');
   for (const k of ['authorization', 'apikey', 'cookie', 'x-api-key']) assert.ok(!Object.keys(f.options.headers).some((h) => h.toLowerCase() === k), 'jamais ' + k);
   assert.equal(corps.source_kind, 'jsonld');
   assert.deepEqual(Object.keys(corps).sort(), ['model', 'page', 'recette', 'source_kind', 'stop_reason', 'usage']);
@@ -657,8 +661,15 @@ test('t3. page sans JSON-LD : deux fetch (page, puis Anthropic : modele du serve
   assert.ok(!message.includes('<main>') && !message.includes('JS-SENTINELLE') && !message.includes('Menu'), 'ni le HTML, ni le script, ni la navigation');
   assert.ok(!message.includes('infolettre') && !message.includes('commentaires'), 'ni le reste du body hors de <main>');
   assert.deepEqual({ ...corps, page: undefined }, { source_kind: 'modele', page: undefined, recette: 'texte des blocs text concaténé', usage: { input_tokens: 1, output_tokens: 2 }, stop_reason: 'end_turn', model: 'claude-sonnet-5-5' });
-  assert.deepEqual([corps.page.hote, corps.page.titre_page, corps.page.texte_coupe], ['site.test', 'Blogue', false]);
+  // Ronde 1 : l'objet page ENTIER, comme t2 — lue_le compris (spec § 3.5 ; la tâche 3 le relit pour source_fetched_at).
+  assert.deepEqual({ ...corps.page, lue_le: typeof corps.page.lue_le }, { url_finale: 'https://site.test/r/3', hote: 'site.test', titre_page: 'Blogue', auteur: null, site: null, lue_le: 'string', autres_recettes: 0, texte_coupe: false });
+  assert.ok(Number.isFinite(Date.parse(corps.page.lue_le)), 'lue_le : ISO, sur le chemin modele aussi');
   assert.deepEqual([faux.MAJ[0].v.statut, faux.MAJ[0].v.jetons_entree, faux.MAJ[0].v.jetons_sortie], [200, 1, 2]);
+  // Ronde 1 : stop_reason et model non textuels → null (chaineOuNul), jamais relayés tels quels.
+  remise();
+  page({ page: async () => htmlReponse(PAGE_TEXTE), anthropic: async () => jsonReponse(200, { model: {}, stop_reason: 7, usage: { input_tokens: 1, output_tokens: 2 }, content: [{ type: 'text', text: '{}' }] }) });
+  const hostile = await lire(await handler(requete('POST', { texte: corpsLecture('https://site.test/r/3') })));
+  assert.deepEqual([hostile.source_kind, hostile.stop_reason, hostile.model], ['modele', null, null], 'stop_reason 7 et model {} → null');
 });
 
 test('t3bis. B-9 : une page de 50 000 points de code de texte → le message au modele en porte 40 000, page.texte_coupe vrai', async () => {
@@ -671,14 +682,24 @@ test('t3bis. B-9 : une page de 50 000 points de code de texte → le message au 
   assert.deepEqual([Array.from(texte).length, corps.page.texte_coupe], [40000, true]);
 });
 
-test('t4. redirections : suivies et revalidees, corps du 3xx annule ; http, IP, localhost, SUPABASE_URL → 422 interdit (apres reservation) ; sans location ou illisible → 502 ; quatre sauts → 502 ; relative resolue', async () => {
-  remise();
-  let annule = false;
-  page({ page: async (url) => (url === 'https://site.test/a' ? new Response(new ReadableStream({ cancel() { annule = true; } }), { status: 301, headers: { location: 'https://site.test/b' } }) : htmlReponse(PAGE_LD)) });
-  const r = await handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
-  await vider();
-  const corps = await lire(r);
-  assert.deepEqual([r.status, corps.page.url_finale, appelsPage().map((a) => a.url), annule], [200, 'https://site.test/b', ['https://site.test/a', 'https://site.test/b'], true]);
+test('t4. redirections : 301 / 302 / 303 / 307 / 308 suivies et revalidees, corps du 3xx annule ; 300 et 304 ni suivis ni lus → 502 ; http, IP, localhost, SUPABASE_URL → 422 interdit (apres reservation) ; sans location ou illisible → 502 ; quatre sauts → 502 ; relative resolue', async () => {
+  // Ronde 1 : les cinq statuts de la spec § 6.3, chacun joué (un 303 ou un 308 retiré de la liste deviendrait `inaccessible`).
+  for (const s of [301, 302, 303, 307, 308]) {
+    remise();
+    let annule = false;
+    page({ page: async (url) => (url === 'https://site.test/a' ? new Response(new ReadableStream({ cancel() { annule = true; } }), { status: s, headers: { location: 'https://site.test/b' } }) : htmlReponse(PAGE_LD)) });
+    const r = await handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
+    await vider();
+    const corps = await lire(r);
+    assert.deepEqual([r.status, corps.page.url_finale, appelsPage().map((a) => a.url), annule], [200, 'https://site.test/b', ['https://site.test/a', 'https://site.test/b'], true], 'statut ' + s);
+  }
+  // Ronde 1 : un 3xx hors de la liste n'est ni une redirection ni une page (hors 2xx → inaccessible), même avec un corps HTML et une location.
+  for (const s of [300, 304]) {
+    remise();
+    page({ page: async () => new Response(s === 304 ? null : PAGE_LD, { status: s, headers: { 'content-type': 'text/html', location: 'https://site.test/b' } }) });
+    const x = await handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
+    assert.deepEqual([x.status, await lire(x), appelsPage().length, appelsModele().length], [502, { erreur: 'inaccessible' }, 1, 0], 'statut ' + s);
+  }
   for (const cible of ['http://site.test/b', 'https://127.0.0.1/', 'https://localhost/', 'https://projet.test/x']) {
     remise(); ENV.SUPABASE_URL = 'https://projet.test';
     page({ page: async () => new Response(null, { status: 302, headers: { location: cible } }) });
@@ -704,12 +725,27 @@ test('t4. redirections : suivies et revalidees, corps du 3xx annule ; http, IP, 
   assert.deepEqual([rel.status, appelsPage().map((a) => a.url)], [200, ['https://site.test/x/a', 'https://site.test/c']], 'location relative resolue contre l adresse courante');
 });
 
-test('t5. statuts et delais : 404 / 500 / 403 / DNS → 502 inaccessible ; 15 s d un saut → 502 ; 30 s en tout → 502 ; un abandon deja porte par ctl est relance → 504 delai', async () => {
-  for (const s of [404, 500, 403]) {
-    remise(); page({ page: async () => htmlReponse('x', { statut: s }) });
-    const r = await handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
-    assert.deepEqual([r.status, await lire(r), faux.MAJ[0].v.statut], [502, { erreur: 'inaccessible' }, 502], 'statut ' + s);
-  }
+test('t5. statuts et delais : 404 / 500 / 403 / DNS → 502 inaccessible, corps annule, aucune minuterie laissee ; 15 s d un saut → 502 ; 30 s en tout → 502, pendant les en-tetes ET pendant la lecture du corps ; corps rompu → 502 ; un abandon deja porte par ctl est relance → 504 delai', async () => {
+  // Ronde 1 : le corps d'un non-2xx est annulé (spec § 6.3), et une réponse rendue ne laisse aucune minuterie en vol (saut 15 s, total 30 s,
+  // budget 120 s : retirées en `finally`) — vraies minuteries, comptées par une enveloppe le temps des trois appels.
+  const st = globalThis.setTimeout; const ct = globalThis.clearTimeout; const enVol = new Map();
+  globalThis.setTimeout = (f, ms, ...a) => { const h = st(f, ms, ...a); enVol.set(h, ms); return h; };
+  globalThis.clearTimeout = (h) => { enVol.delete(h); return ct(h); };
+  try {
+    for (const s of [404, 500, 403]) {
+      remise();
+      let annule = false;
+      page({ page: async () => new Response(new ReadableStream({ cancel() { annule = true; } }), { status: s, headers: { 'content-type': 'text/html' } }) });
+      const r = await handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
+      await vider();
+      assert.deepEqual([r.status, await lire(r), faux.MAJ[0].v.statut, annule], [502, { erreur: 'inaccessible' }, 502, true], 'statut ' + s);
+      assert.deepEqual([...enVol.values()], [], 'statut ' + s + ' : aucune minuterie laissee en vol');
+    }
+  } finally { globalThis.setTimeout = st; globalThis.clearTimeout = ct; }
+  remise();
+  page({ page: async () => htmlReponse(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('<main>')); }, pull(c) { c.error(new TypeError('connexion rompue')); } })) });
+  const rompu = await handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
+  assert.deepEqual([rompu.status, await lire(rompu), faux.MAJ[0].v.statut], [502, { erreur: 'inaccessible' }, 502], 'corps rompu en route : inaccessible, jamais serveur');
   remise(); page({ page: async () => { throw new TypeError('getaddrinfo ENOTFOUND'); } });
   assert.equal((await handler(requete('POST', { texte: corpsLecture('https://site.test/a') }))).status, 502, 'DNS');
   mock.timers.enable({ apis: ['setTimeout'] });
@@ -742,8 +778,63 @@ test('t5. statuts et delais : 404 / 500 / 403 / DNS → 502 inaccessible ; 15 s 
     assert.equal(signaux[2].aborted, false, 'troisieme saut : pas encore abandonne a 29,999 s');
     mock.timers.tick(1);
     assert.equal(signaux[2].aborted, true, 'D-B26 : abandonne a 30 s en tout');
+    // Ronde 1 : les sauts finis ne sont plus touchés — leur minuterie de 15 s et leurs écouteurs sont retirés en `finally`.
+    assert.deepEqual([signaux[0].aborted, signaux[1].aborted], [false, false], 'sauts finis : ni minuterie ni ecouteur laisses');
     const r = await enCours;
     assert.deepEqual([r.status, await lire(r), signaux.length], [502, { erreur: 'inaccessible' }, 3]);
+  } finally { mock.timers.reset(); }
+  // Ronde 1 (D-B26) : les bornes de temps valent aussi PENDANT LA LECTURE DU CORPS — une page qui envoie ses en-têtes tout de suite puis distille
+  // son corps est coupée à 15 s du saut, et à 30 s en tout après deux sauts de 12 s.
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    remise();
+    let signalPage = null; let entame; const corpsEntame = new Promise((res) => { entame = res; });
+    page({ page: async (url, options) => { signalPage = options.signal; return htmlReponse(corpsQuiCale(options.signal, entame)); } });
+    const enCours = handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
+    await corpsEntame;
+    mock.timers.tick(LIMITES_LECTURE.delaiSautMs - 1);
+    assert.equal(signalPage.aborted, false, 'corps qui cale : pas encore a 14,999 s');
+    mock.timers.tick(1);
+    assert.equal(signalPage.aborted, true, 'corps qui cale : abandonne a 15 s du saut, pendant la lecture');
+    const r = await enCours;
+    assert.deepEqual([r.status, await lire(r), faux.MAJ[0].v.statut], [502, { erreur: 'inaccessible' }, 502], 'corps qui cale : 502 inaccessible');
+  } finally { mock.timers.reset(); }
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    remise();
+    const signaux = []; let prochain; const attendre = () => new Promise((res) => { prochain = res; });
+    let etape = attendre();
+    page({ page: (url, options) => {
+      signaux.push(options.signal);
+      if (signaux.length === 3) return Promise.resolve(htmlReponse(corpsQuiCale(options.signal, prochain)));
+      prochain();
+      return new Promise((resoudre, rejeter) => {
+        options.signal.addEventListener('abort', () => rejeter(new DOMException('Aborted', 'AbortError')));
+        setTimeout(() => resoudre(new Response(null, { status: 301, headers: { location: `https://site.test/m${signaux.length}` } })), 12000);
+      });
+    } });
+    const enCours = handler(requete('POST', { texte: corpsLecture('https://site.test/m0') }));
+    await etape; etape = attendre(); mock.timers.tick(12000); await etape;
+    etape = attendre(); mock.timers.tick(12000); await etape; // le troisième saut répond tout de suite ; son corps est entamé, puis cale
+    mock.timers.tick(5999);
+    assert.equal(signaux[2].aborted, false, 'corps du troisieme saut : pas encore abandonne a 29,999 s');
+    mock.timers.tick(1);
+    assert.equal(signaux[2].aborted, true, 'D-B26 : corps abandonne a 30 s en tout');
+    assert.deepEqual([signaux[0].aborted, signaux[1].aborted], [false, false]);
+    const r = await enCours;
+    assert.deepEqual([r.status, await lire(r), signaux.length], [502, { erreur: 'inaccessible' }, 3]);
+  } finally { mock.timers.reset(); }
+  // Ronde 1 : le budget de ctl tombé PENDANT la lecture du corps est relancé lui aussi (second `catch` de telechargerPage) → 504, jamais inaccessible.
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    remise();
+    let entame; const corpsEntame = new Promise((res) => { entame = res; });
+    page({ page: async (url, options) => htmlReponse(corpsQuiCale(options.signal, entame)) });
+    const enCours = handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
+    await corpsEntame;
+    mock.timers.tick(LIMITES.attenteMs);
+    const r = await enCours;
+    assert.deepEqual([r.status, await lire(r), faux.MAJ[0].v.statut], [504, { erreur: 'delai' }, 504], 'pendant la lecture du corps : un abandon par ctl est 504');
   } finally { mock.timers.reset(); }
   mock.timers.enable({ apis: ['setTimeout'] });
   try {
@@ -789,23 +880,40 @@ test('t7. page de 2 Mio + 1 : content-length declare, puis flux sans content-len
   assert.deepEqual([r2.status, await lire(r2), annule, tires <= 5], [413, { erreur: 'trop_lourde' }, true, true], 'coupee apres ' + tires + ' morceaux de 1 Mio sur 8');
 });
 
-test('t8. page sans texte utile → 422 vide, aucun fetch Anthropic, journal 422', async () => {
+test('t8. page sans texte utile → 422 vide, aucun fetch Anthropic, journal 422 ; borne texteMin en POINTS DE CODE : 39 → vide, 40 → modele, 20 emojis (40 unites UTF-16) → vide', async () => {
   remise();
   page({ page: async () => htmlReponse('<html><body><nav>Accueil · Recettes · Contact</nav></body></html>') });
   const r = await handler(requete('POST', { texte: corpsLecture('https://site.test/vide') }));
   assert.deepEqual([r.status, await lire(r), appelsModele().length, faux.MAJ[0].v.statut, faux.MAJ[0].v.jetons_entree], [422, { erreur: 'vide' }, 0, 422, null]);
+  // Ronde 1 : la borne exacte (spec § 6.3 : moins de 40 points de code → vide) et son unité.
+  assert.equal(LIMITES_LECTURE.texteMin, 40);
+  const tomate = String.fromCodePoint(0x1F345);
+  for (const [texte, statut, modele] of [['a'.repeat(39), 422, 0], ['a'.repeat(40), 200, 1], [tomate.repeat(20), 422, 0]]) {
+    remise(); page({ page: async () => htmlReponse(`<main><p>${texte}</p></main>`) });
+    const x = await handler(requete('POST', { texte: corpsLecture('https://site.test/borne') }));
+    assert.deepEqual([x.status, appelsModele().length], [statut, modele], Array.from(texte).length + ' points de code, ' + texte.length + ' unites UTF-16');
+  }
 });
 
-test('t9. abandon du client pendant le telechargement → fetch de la page abandonne, 499 sans corps, journal 499 ; pendant l appel au modele → 499', { timeout: 8000 }, async () => {
+test('t9. abandon du client pendant le telechargement → fetch de la page abandonne, 499 sans corps, journal 499 ; pendant l appel au modele → 499 ; deja parti pendant la reservation → aucune page demandee', { timeout: 8000 }, async () => {
+  // Ronde 1 (s3 rejoué sur lecture-web) : un client parti pendant la réservation ne fait demander AUCUNE page (un écouteur posé sur un signal déjà
+  // levé ne se déclenche jamais : c'est la pré-vérification de chaque saut qui le dit).
   remise();
-  let signalPage = null; let appele; const parti = new Promise((res) => { appele = res; });
-  page({ page: (url, options) => { signalPage = options.signal; appele(); return sourde(url, options); } });
+  const parti0 = new AbortController();
+  faux.REPONSES.rpc = async (nom) => { if (nom === 'assistant_reserver') parti0.abort(); return nom === 'is_allowed' ? { data: true, error: null } : { data: 7, error: null }; };
+  page({ page: async () => htmlReponse(PAGE_LD) });
+  const r0 = await handler(requete('POST', { texte: corpsLecture('https://site.test/a'), signal: parti0.signal }));
+  assert.deepEqual([r0.status, await r0.text(), appelsPage().length, appelsModele().length, faux.MAJ.at(-1).v.statut], [499, '', 0, 0, 499]);
+  remise();
+  // Ronde 1 : un premier saut (301) fini AVANT l'abandon ; son écouteur sur le signal du client a été retiré : seul le saut en cours tombe.
+  const signaux = []; let appele; const parti = new Promise((res) => { appele = res; });
+  page({ page: (url, options) => { signaux.push(options.signal); if (url === 'https://site.test/a') return Promise.resolve(new Response(null, { status: 301, headers: { location: 'https://site.test/b' } })); appele(); return sourde(url, options); } });
   const client = new AbortController();
   const enCours = handler(requete('POST', { texte: corpsLecture('https://site.test/a'), signal: client.signal }));
   await parti;
   client.abort();
   const r = await enCours;
-  assert.deepEqual([signalPage.aborted, r.status, await r.text(), faux.MAJ[0].v.statut, appelsModele().length], [true, 499, '', 499, 0]);
+  assert.deepEqual([signaux.map((s) => s.aborted), r.status, await r.text(), faux.MAJ[0].v.statut, appelsModele().length], [[false, true], 499, '', 499, 0]);
   remise();
   let appeleModele; const modeleParti = new Promise((res) => { appeleModele = res; });
   page({ page: async () => htmlReponse(PAGE_TEXTE), anthropic: (url, options) => { appeleModele(); return sourde(url, options); } });

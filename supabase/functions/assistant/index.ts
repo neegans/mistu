@@ -1,4 +1,4 @@
-// Passerelle de l'assistant (spec 2026-10-18-passerelle-assistant). Ordre des gardes : OPTIONS → origine → méthode → session → liste admise → corps → quota → Anthropic.
+// Passerelle de l'assistant (spec 2026-10-18-passerelle-assistant). Ordre des gardes : OPTIONS → origine → méthode → session → liste admise → corps → quota → (lecture-web : téléchargement de la page →) Anthropic.
 // Lot B (spec 2026-10-19-recette-web § 6.3) : pour `lecture-web`, après la réservation, la page est téléchargée (telechargerPage), lue (lirePageHtml)
 // et, SEULEMENT sans JSON-LD lisible, son texte est confié au modèle ; un seul point d'appel au modèle et un seul point d'écriture du journal.
 // Jamais : la clé dans une réponse ou un journal ; un corps de demande, de réponse ou de PAGE dans le journal ; un appel Anthropic avant la dernière garde.
@@ -21,7 +21,9 @@ const modele = () => env('ASSISTANT_MODELE') || 'claude-sonnet-5-5';
 // p_quota est un `integer` SQL (int4) : au-delà de 2147483647 la réservation échouerait en 502 pour tous ; on retombe sur le défaut.
 const INT4_MAX = 2147483647;
 const quotaJour = (): number => { const brut = Number.parseInt(env('ASSISTANT_QUOTA_JOUR') || '', 10); return Number.isInteger(brut) && brut > 0 && brut <= INT4_MAX ? brut : LIMITES.quotaJour; };
-// S-12 : l'hôte du projet (PostgREST, les fonctions) n'est jamais une page à lire — ni l'adresse tapée, ni la cible d'une redirection.
+// S-12 : l'hôte de SUPABASE_URL (PostgREST, et les fonctions sous /functions/v1) et ses sous-domaines ne sont jamais une page à lire — ni l'adresse
+// tapée, ni la cible d'une redirection. L'alias `<ref>.functions.supabase.co` n'est PAS refusé (spec § 6.1 : le seul hôte de SUPABASE_URL) : dette
+// nommée à la ronde 1 de la tâche 2 (il répondrait 403 `origine`, classé `inaccessible` ; aucune identité envoyée).
 const hotesRefuses = (): string[] => { try { const u = env('SUPABASE_URL'); return u ? [new URL(u).hostname.toLowerCase()] : []; } catch { return []; } };
 // Les clés Supabase injectées dans la fonction (SUPABASE_PUBLISHABLE_KEYS, SUPABASE_SECRET_KEYS) n'ont pas une forme garantie : une liste
 // d'objets { api_key }, une liste de chaînes, un objet ({ default: … }), ou la clé nue. Le lecteur est tolérant sur la FORME, jamais sur le
@@ -90,16 +92,16 @@ async function telechargerPage(href: string, { signal, hotesRefuses: refuses }: 
   let courant = href;
   try {
     for (let saut = 0; ; saut += 1) {
-      const page = new AbortController();
-      const couper = () => page.abort();
+      const ctlSaut = new AbortController();
+      const couper = () => ctlSaut.abort();
       const minuterieSaut = setTimeout(couper, LIMITES_LECTURE.delaiSautMs);
       signal.addEventListener('abort', couper, { once: true });
       total.signal.addEventListener('abort', couper, { once: true });
-      if (signal.aborted || total.signal.aborted) page.abort();
+      if (signal.aborted || total.signal.aborted) ctlSaut.abort(); // un écouteur posé sur un signal déjà levé ne se déclenche jamais
       try {
         let r: Response;
         try {
-          r = await fetch(courant, { method: 'GET', redirect: 'manual', credentials: 'omit', signal: page.signal, headers: { 'user-agent': 'Mitsu/0.10 (+https://neegans.github.io/mistu/)', accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1', 'accept-language': 'fr-CA,fr;q=0.9,en;q=0.5' } });
+          r = await fetch(courant, { method: 'GET', redirect: 'manual', credentials: 'omit', signal: ctlSaut.signal, headers: { 'user-agent': 'Mitsu/0.10 (+https://neegans.github.io/mistu/)', accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1', 'accept-language': 'fr-CA,fr;q=0.9,en;q=0.5' } });
         } catch (e) { if (signal.aborted) throw e; return inaccessible; }
         if (REDIRECTIONS.includes(r.status)) {
           void r.body?.cancel().catch(() => {}); // S-9 : le corps d'une redirection n'est jamais lu
@@ -138,15 +140,15 @@ async function appelerAnthropic(corps: unknown, ctl: AbortController): Promise<{
   if (brut === null) return { statut: 502, corpsReponse: '', usage: null, json: null };
   const corpsReponse = new TextDecoder().decode(brut);
   if (r.status === 200) {
-    try { const json = JSON.parse(corpsReponse); return { statut, corpsReponse, usage: json?.usage ?? null, json }; }
+    try { const reponseJson = JSON.parse(corpsReponse); return { statut, corpsReponse, usage: reponseJson?.usage ?? null, json: reponseJson }; }
     catch { return { statut: 502, corpsReponse: '', usage: null, json: null }; }
   }
   if (statut === 502 || statut === 503) return { statut, corpsReponse: '', usage: null, json: null }; // jamais le message brut d'une panne (il peut nommer la clé)
   return { statut, corpsReponse, usage: null, json: null };
 }
 // Le texte des blocs `text` d'une réponse du modèle, concaténé ; la sortie n'est PAS validée ici (le client le fait : donnée hostile).
-const texteDesBlocs = (json: unknown): string => {
-  const contenu = (json as { content?: unknown })?.content;
+const texteDesBlocs = (reponse: unknown): string => {
+  const contenu = (reponse as { content?: unknown })?.content;
   return (Array.isArray(contenu) ? contenu : []).filter((b) => b && typeof b === 'object' && (b as { type?: unknown }).type === 'text' && typeof (b as { text?: unknown }).text === 'string').map((b) => (b as { text: string }).text).join('');
 };
 const chaineOuNul = (v: unknown): string | null => (typeof v === 'string' ? v : null);

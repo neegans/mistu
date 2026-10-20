@@ -1203,6 +1203,17 @@ test('preuve 0006 : rollback final, une transaction, BILAN, gardes, verdicts nom
     'les cinq outils, dans l ordre d OUTILS_0006', "public.assistant_reserver(uid, 'image-web', 1, c::integer + 1)", "'image-web'", "2.03 bis : assistant_reserver(uid, ''image-web'', 1, c + 1) -> id non nul",
     "conname = 'assistant_journal_outil_check'", "string_agg(conname, ', ')", "contype = 'c'"]) assert.ok(code.includes(m), m);
   for (const outil of OUTILS_0006) assert.ok(code.includes(`'''${outil}'''`), '1.01 cherche ' + outil);
+  // Ronde 1 (spec § 6.4) : c RECOMPTÉ entre 2.03 et l'appel image-web (sinon le quota c + 1 est atteint par la ligne de 2.03 : faux rouge) ; chaque
+  // appel d'assistant_reserver dans un bloc exception, comme 2.01 et 2.02 (une 0006 collée sans image-web : 2.031 rend 23514 en verdict lisible au
+  // BILAN, au lieu d'annuler le collage entier) ; les verdicts 2.03 et 2.031 portent sur l'id rendu.
+  const plat = code.replace(/\s+/g, ' ');
+  const entre = plat.slice(plat.lastIndexOf("(2.03, 'assistant_reserver accepte"), plat.indexOf("r := public.assistant_reserver(uid, 'image-web'"));
+  assert.ok(entre.includes("select count(*) into c from public.assistant_journal where owner_id = uid and jour = (now() at time zone 'utc')::date;"), 'c RECOMPTE entre 2.03 et 2.031');
+  for (const outil of ['lecture-web', 'image-web']) {
+    assert.ok(plat.includes(`begin r := public.assistant_reserver(uid, '${outil}', 1, c::integer + 1); v := case when r is null then 'null' else 'id non nul' end; exception when others then v := sqlstate; end;`), outil + ' : appel dans un bloc exception');
+  }
+  assert.ok(plat.includes("(2.03, 'assistant_reserver accepte lecture-web : un id non nul', 'id non nul', v, v = 'id non nul');"), 'verdict 2.03 sur l id');
+  assert.ok(plat.includes("(2.031, '2.03 bis : assistant_reserver(uid, ''image-web'', 1, c + 1) -> id non nul (la valeur du lot F)', 'id non nul', v, v = 'id non nul');"), 'verdict 2.031 sur l id');
   assert.ok(!p.includes('@'), 'aucun arobase'); assert.doesNotMatch(p, /A_UUID|B_UUID|A_EMAIL|B_EMAIL/, 'aucun jeton a remplacer');
   assert.doesNotMatch(code, /\bemail\b/i, 'aucune adresse lue'); assert.ok(!p.includes('sk-'), 'aucune cle');
   assert.ok(code.includes('from auth.users order by created_at limit 1'), 'compte emprunte, jamais affiche');
@@ -1218,6 +1229,11 @@ test('README : etape 12 (0006, preuve, ordre 0006 → redeploiement → sondes �
     'un code servi avant `0006` : chaque lecture web répond 502 `serveur` (la réservation refuse l\'outil), rien d\'autre ne change.',
     'supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api', 'S13', 'S17', 'Facultatif',
     'la contrainte admet aussi `image-web` (lot F, à venir)', '2.03 bis', 'JSON-LD `Recipe` complet', 'ronde sur `telechargerPage`']) assert.ok(etape.includes(m), m);
+  // Ronde 1 (spec § 10, 2 et 2 bis) : les neuf sondes S1-S9 nommées là où elles vivent ; la session lue par `read -rs JETON` ; S17 vérifiée par
+  // `curl -sI` avec LE User-Agent de la fonction (relu dans index.ts : un site qui redirige selon l'agent montrerait autre chose à curl).
+  const ua = (sansCommentaires(lire(`${FONCTION}/index.ts`)).match(/'user-agent': '([^']+)'/) || [])[1];
+  assert.ok(ua && ua.startsWith('Mitsu/'), 'User-Agent relu dans index.ts');
+  for (const m of ['S1-S9 du lot 4', 'section « Passerelle `assistant` »', 'read -rs JETON', `curl -sI -A '${ua}'`]) assert.ok(etape.includes(m), m);
   const i = ['migrations/0006_lecture_web.sql', 'proofs/0006_lecture_web.sql', 'supabase functions deploy assistant', 'S13', 'S17', 'fusion', '`push`'].map((m) => etape.lastIndexOf(m) === -1 ? -1 : etape.indexOf(m));
   assert.ok(i.every((x) => x !== -1), 'gestes presents : ' + i.join(','));
   assert.deepEqual([...i].sort((a, b) => a - b), i, 'dans l ordre : ' + i.join(','));
@@ -1234,6 +1250,10 @@ test('RESULTATS-mitsu : sections « Preuve 0006_lecture_web.sql — à jouer » 
   const section = res.slice(debut);
   for (const m of ['étape 12', 'migrations/0006_lecture_web.sql', 'Run without RLS', '999 BILAN', '| ordre | etape | attendu | obtenu | ok |', '## Sondes `lecture-web`', 'S13', 'S14', 'S15', 'S16', 'S17', 'S18',
     '2.03 bis', '`image-web`', 'JSON-LD `Recipe` complet', 'sans dépense Anthropic']) assert.ok(section.includes(m), m);
+  // Ronde 1 : la session des sondes et le User-Agent de S17, comme au README ; et aucune ligne vide en fin de fichier (`git diff --check`).
+  const ua = (sansCommentaires(lire(`${FONCTION}/index.ts`)).match(/'user-agent': '([^']+)'/) || [])[1];
+  for (const m of ['read -rs JETON', `curl -sI -A '${ua}'`]) assert.ok(section.includes(m), m);
+  assert.ok(res.endsWith('\n') && !res.endsWith('\n\n'), 'une seule fin de ligne en fin de fichier');
   assert.doesNotMatch(section, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i, 'aucune adresse');
   assert.doesNotMatch(res, /sk-(?!…)[A-Za-z0-9_-]{4,}/, 'aucune cle');
 });
