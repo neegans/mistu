@@ -732,6 +732,40 @@ test('t4. redirections : 301 / 302 / 303 / 307 / 308 suivies et revalidees, corp
   assert.deepEqual([rel.status, appelsPage().map((a) => a.url)], [200, ['https://site.test/x/a', 'https://site.test/c']], 'location relative resolue contre l adresse courante');
 });
 
+test('t4bis. R-B-23 : l alias <ref>.functions.supabase.co derive de SUPABASE_URL est refuse — tape : 422 avant reservation ; cible de redirection : 422 apres reservation, jamais demandee, journal 422 ; <ref>.functions.supabase.co.evil.test reste admis par la regle de l hote', async () => {
+  const ALIAS = 'https://abc123.functions.supabase.co/x';
+  // (a) l'alias tapé, et ses variantes (casse, point final, sous-domaine) : refusés par lireDemande, avant la réservation (rien ne coûte).
+  for (const u of [ALIAS, 'https://ABC123.Functions.Supabase.CO/x', 'https://abc123.functions.supabase.co./x', 'https://x.abc123.functions.supabase.co/x']) {
+    remise(); ENV.SUPABASE_URL = 'https://abc123.supabase.co';
+    const r = await handler(requete('POST', { texte: corpsLecture(u) }));
+    assert.deepEqual([r.status, await lire(r), reserves().length, appelsFetch.length, faux.MAJ.length], [422, { erreur: 'interdit' }, 0, 0, 0], 'tape : ' + u);
+  }
+  // (b) l'alias en cible d'une redirection : la page est demandée, la cible JAMAIS (son corps n'est jamais téléchargé), 422 interdit, journal 422.
+  remise(); ENV.SUPABASE_URL = 'https://abc123.supabase.co';
+  let demandee = false;
+  page({ page: async (url) => { if (url !== 'https://site.test/a') { demandee = true; return htmlReponse(PAGE_LD); } return new Response(null, { status: 302, headers: { location: ALIAS } }); } });
+  const b = await handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
+  assert.deepEqual([b.status, await lire(b), reserves().length, appelsPage().map((a) => a.url), demandee, appelsModele().length, faux.MAJ[0].v.statut], [422, { erreur: 'interdit' }, 1, ['https://site.test/a'], false, 0, 422], 'redirection vers l alias');
+  // (c) l'hôte du projet lui-même reste refusé (S-12, inchangé).
+  remise(); ENV.SUPABASE_URL = 'https://abc123.supabase.co';
+  const c = await handler(requete('POST', { texte: corpsLecture('https://abc123.supabase.co/rest/v1/') }));
+  assert.deepEqual([c.status, await lire(c), reserves().length, appelsFetch.length], [422, { erreur: 'interdit' }, 0, 0], 'hote de SUPABASE_URL');
+  // (d) admis par la règle de l'hôte, et lus (aucune autre règle ne les refuse : https, nom public à points, ni IP ni suffixe interne) :
+  // l'alias suivi d'un autre domaine (ce n'est ni l'alias ni un de ses sous-domaines), l'alias d'un AUTRE projet, et un nom voisin.
+  for (const u of ['https://abc123.functions.supabase.co.evil.test/', 'https://autre.functions.supabase.co/x', 'https://abc1234.functions.supabase.co/x']) {
+    remise(); ENV.SUPABASE_URL = 'https://abc123.supabase.co';
+    page({ page: async () => htmlReponse(PAGE_LD) });
+    const d = await handler(requete('POST', { texte: corpsLecture(u) }));
+    const corps = await lire(d);
+    assert.deepEqual([d.status, corps.source_kind, reserves().length, appelsPage().map((a) => a.url)], [200, 'jsonld', 1, [u]], 'admis : ' + u);
+  }
+  // (e) aucun alias n'est dérivé d'un SUPABASE_URL qui n'a pas la forme <ref>.supabase.co (domaine propre) : seul l'hôte lui-même est refusé.
+  remise(); ENV.SUPABASE_URL = 'https://projet.test';
+  page({ page: async () => htmlReponse(PAGE_LD) });
+  const e = await handler(requete('POST', { texte: corpsLecture('https://projet.functions.supabase.co/x') }));
+  assert.deepEqual([e.status, reserves().length], [200, 1], 'SUPABASE_URL hors supabase.co : aucun alias derive');
+});
+
 test('t5. statuts et delais : 404 / 500 / 403 / DNS → 502 inaccessible, corps annule, aucune minuterie laissee ; 15 s d un saut → 502 ; 30 s en tout → 502, pendant les en-tetes ET pendant la lecture du corps ; corps rompu → 502 ; un abandon deja porte par ctl est relance → 504 delai', async () => {
   // Ronde 1 : le corps d'un non-2xx est annulé (spec § 6.3), et une réponse rendue ne laisse aucune minuterie en vol (saut 15 s, total 30 s,
   // budget 120 s : retirées en `finally`) — vraies minuteries, comptées par une enveloppe le temps des trois appels.

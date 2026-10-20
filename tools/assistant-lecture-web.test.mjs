@@ -172,6 +172,49 @@ test('recetteDepuisJsonLd : table', () => {
   const profonde = JSON.parse('{"@type":"Recipe","name":"T","recipeIngredient":["a"],"recipeInstructions":' + chaine + '}');
   assert.deepEqual(L.recetteDepuisJsonLd(profonde).recette.steps, [], '5 000 sections imbriquées en objets : rien de lu, aucune levée');
 });
+// R-B-22 (ronde finale 2, invariant « rien d'inventé ») : `portionsDe` ne prend un entier que d'un nombre nu, d'un intervalle (borne basse) ou d'un
+// nombre accompagné d'un mot de portion ; sinon null. Éprouvé par recetteDepuisJsonLd (portionsDe n'est pas exportée : le module garde son contrat).
+const portionsLues = (y) => L.recetteDepuisJsonLd({ '@type': 'Recipe', name: 'T', recipeIngredient: ['a'], recipeInstructions: 'Faire.', recipeYield: y }).recette.servings;
+test('portionsDe (R-B-22) : table du chef d orchestre', () => {
+  const table = [['750 ml', null], ['2 litres', null], ['9x13 pan', null], ['4 portions', 4], ['Pour 6', 6], ['4-6', 4], ['4 à 6 personnes', 4],
+    [['4', '4 portions'], 4], [['750 ml', '6 parts'], 6], ['', null], [0, null], [-3, null], [12, 12], ['Serves 8', 8], ['4.5', null]];
+  for (const [y, attendu] of table) assert.equal(portionsLues(y), attendu, JSON.stringify(y));
+});
+test('portionsDe (R-B-22) : formes admises, casse, blancs, intervalles, tableaux, bornes', () => {
+  const admis = [['12', 12], [' 4 ', 4], ['4–6', 4], ['4 – 6', 4], ['4 - 6 servings', 4], ['4 a 6', 4], ['4 A 6 PERSONNES', 4], ['Pour 4 à 6 personnes', 4],
+    ['  POUR   4   PERSONNES  ', 4], ['4\t\nportions', 4], ['1 portion', 1], ['1 personne', 1], ['1 part', 1], ['2 parts', 2], ['1 serving', 1], ['4 Servings', 4],
+    ['serves 2', 2], ['Makes 12', 12], ['yield 4', 4], ['Yields 6', 6], ['6-4', 4], ['04', 4], ['00012 portions', 12], ['9999', 9999], [9999, 9999], [1, 1], ['4&nbsp;portions', 4],
+    ['<b>4</b> portions', 4], ['4 &agrave; 6 personnes', 4], ['4 a' + String.fromCodePoint(0x300) + ' 6 personnes', 4]];
+  for (const [y, attendu] of admis) assert.equal(portionsLues(y), attendu, 'admis : ' + JSON.stringify(y));
+  const refuses = ['Pour 4 gourmands', '12 cookies', '1 loaf', '4 portions (2 tasses)', '4,5', '4.5 portions', '4 1/2', '0', '0 portions', '-3', '-3 portions',
+    '4-0', '0-6', '4-', '-', 'portions', 'pour', '4 portions 6', 'pour pour 4', '4 portions portions', '4 to 6', '4—6', '4 à', '10000', '12345 portions', 'quatre',
+    '4x', '½', '٤', '４', '4 ml', ' ', null, undefined, true, {}, { value: 4 }, 0, -3, 4.5, NaN, Infinity, -Infinity, 10000, 1e300, [], ['', 0, '750 ml'],
+    [['4']], [[4], 'x']];
+  for (const y of refuses) assert.equal(portionsLues(y), null, 'refusé : ' + (typeof y === 'string' ? JSON.stringify(y) : String(y)));
+  assert.equal(portionsLues([null, '', 'Serves 3', '5']), 3, 'tableau : la PREMIÈRE valeur qui donne un entier');
+  assert.equal(portionsLues([0, '4']), 4, 'tableau : zéro ne compte pas, la suivante est prise');
+});
+test('portionsDe (R-B-22) : une portion inconnue ne rejette pas la recette JSON-LD (servings null, le reste gardé)', () => {
+  const attendu = L.recetteDepuisJsonLd(RICARDO).recette;
+  const lu = L.recetteDepuisJsonLd({ ...RICARDO, recipeYield: '750 ml' });
+  assert.equal(lu.lisible, true);
+  assert.deepEqual(lu.recette, { ...attendu, servings: null }, 'seul servings change');
+  assert.equal(attendu.servings, 4, 'témoin : « 4 portions » → 4');
+  const page = L.lirePageHtml({ html: script({ ...RICARDO, recipeYield: '750 ml' }), urlFinale: 'https://a.test/' });
+  assert.deepEqual([page.jsonld?.recette.title, page.jsonld?.recette.servings, page.jsonld?.recette.ingredients.length, page.texte], ['Pâtes puttanesca', null, 7, null], 'lirePageHtml : lecture jsonld gardée, aucun texte confié au modèle');
+});
+test('portionsDe (R-B-22) : linéaire — 100 000 chiffres, 100 000 espaces et autres formes hostiles, chacune sous 50 ms', () => {
+  const hostiles = { chiffres: '7'.repeat(100000), espaces: ' '.repeat(100000), chiffresPortions: '7'.repeat(100000) + ' portions', tirets: '4-'.repeat(50000),
+    mots: 'pour '.repeat(20000), alternes: '1 '.repeat(50000), entites: '&nbsp;'.repeat(20000) + '4' };
+  portionsLues('4 portions'); // une passe à blanc : le premier appel ne compte pas la compilation
+  for (const [nom, y] of Object.entries(hostiles)) {
+    const t0 = performance.now();
+    const n = portionsLues(y);
+    const duree = performance.now() - t0;
+    assert.equal(n, nom === 'entites' ? 4 : null, nom);
+    assert.ok(duree < 50, `${nom} : ${duree.toFixed(1)} ms`);
+  }
+});
 test('decouperEtape', () => {
   const t1500 = 'a'.repeat(1500);
   assert.deepEqual(L.decouperEtape(t1500, 2000), [t1500]);

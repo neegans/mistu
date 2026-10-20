@@ -213,9 +213,49 @@ function etapesDe(v) {
   visiter(v, 0);
   return sortie;
 }
+// Portions (R-B-22, « rien d'inventé ») : un entier n'est pris que d'un nombre nu (`4`, nombre JSON `12`), d'un intervalle (`4-6`, `4–6`, `4 à 6`,
+// `4 a 6` → la borne basse) ou d'un nombre accompagné d'UN mot de portion avant et / ou après (`portion(s)`, `personne(s)`, `part(s)`, `serving(s)`,
+// `serves`, `pour`, `makes`, `yield(s)`), casse libre, blancs multiples admis ; toute autre forme → null (`750 ml`, `9x13 pan`, `Pour 4 gourmands`).
+// Entier de 1 à 9 999 (la borne haute des quatre chiffres d'avant) ; zéro, négatif, non fini, non entier (`4.5`) → null. Un tableau : la première
+// valeur qui donne un entier. Lecture LINÉAIRE : la chaîne nettoyée (nettoyerChaineJsonLd : entités, balises, blancs) est découpée en mots d'un seul
+// balayage (« - » et « – » sont des mots à eux seuls), puis la grammaire [mot] nombre [séparateur nombre] [mot] est lue mot à mot : aucune regex de
+// plus que celles, linéaires, de nettoyerChaineJsonLd (mesuré : 100 000 chiffres ou espaces en quelques millisecondes).
+const MOTS_DE_PORTION = new Set(['portion', 'portions', 'personne', 'personnes', 'part', 'parts', 'serving', 'servings', 'serves', 'pour', 'makes', 'yield', 'yields']);
+const SEPARATEURS_INTERVALLE = new Set(['-', '\u{2013}', 'à', 'a']);
+const PORTIONS_MAX = 9999;
+const portionsAdmises = (n) => (Number.isInteger(n) && n >= 1 && n <= PORTIONS_MAX ? n : null);
+function motsDe(s) {
+  const mots = []; let debut = 0;
+  for (let k = 0; k <= s.length; k += 1) {
+    const c = k < s.length ? s.charCodeAt(k) : 32;
+    const tiret = c === 45 || c === 0x2013;
+    if (c === 32 || tiret) { if (k > debut) mots.push(s.slice(debut, k)); if (tiret) mots.push(s[k]); debut = k + 1; }
+  }
+  return mots;
+}
+function nombreNu(mot) {
+  if (typeof mot !== 'string' || mot.length < 1) return null;
+  for (let k = 0; k < mot.length; k += 1) { const c = mot.charCodeAt(k); if (c < 48 || c > 57) return null; }
+  return portionsAdmises(Number(mot));
+}
+function portionsDeTexte(s) {
+  const mots = motsDe(nettoyerChaineJsonLd(s).normalize('NFC').toLowerCase());
+  let i = 0;
+  if (MOTS_DE_PORTION.has(mots[i])) i += 1;
+  let n = nombreNu(mots[i]);
+  if (n === null) return null;
+  i += 1;
+  if (SEPARATEURS_INTERVALLE.has(mots[i])) {
+    const haut = nombreNu(mots[i + 1]);
+    if (haut === null) return null;
+    n = Math.min(n, haut); i += 2;
+  }
+  if (MOTS_DE_PORTION.has(mots[i])) i += 1;
+  return i === mots.length ? n : null;
+}
 function portionsDe(v, profondeur = 0) {
-  if (Number.isInteger(v) && v >= 0) return v;
-  if (typeof v === 'string') { const m = /\d{1,4}/.exec(v); return m ? Number(m[0]) : null; }
+  if (typeof v === 'number') return portionsAdmises(v);
+  if (typeof v === 'string') return portionsDeTexte(v);
   if (Array.isArray(v) && profondeur === 0) for (const x of v) { const n = portionsDe(x, 1); if (n !== null) return n; }
   return null;
 }

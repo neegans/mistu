@@ -22,9 +22,19 @@ const modele = () => env('ASSISTANT_MODELE') || 'claude-sonnet-5-5';
 const INT4_MAX = 2147483647;
 const quotaJour = (): number => { const brut = Number.parseInt(env('ASSISTANT_QUOTA_JOUR') || '', 10); return Number.isInteger(brut) && brut > 0 && brut <= INT4_MAX ? brut : LIMITES.quotaJour; };
 // S-12 : l'hôte de SUPABASE_URL (PostgREST, et les fonctions sous /functions/v1) et ses sous-domaines ne sont jamais une page à lire — ni l'adresse
-// tapée, ni la cible d'une redirection. L'alias `<ref>.functions.supabase.co` n'est PAS refusé (spec § 6.1 : le seul hôte de SUPABASE_URL) : dette
-// nommée à la ronde 1 de la tâche 2 (il répondrait 403 `origine`, classé `inaccessible` ; aucune identité envoyée).
-const hotesRefuses = (): string[] => { try { const u = env('SUPABASE_URL'); return u ? [new URL(u).hostname.toLowerCase()] : []; } catch { return []; } };
+// tapée, ni la cible d'une redirection. R-B-23 (ronde finale 2, § 6.1 amendé) : quand cet hôte a la forme `<ref>.supabase.co`, l'alias historique
+// `<ref>.functions.supabase.co` (la même fonction, par un autre nom) est refusé lui aussi, avec ses sous-domaines (hoteAdmis). Un domaine propre
+// (hôte hors `.supabase.co`) n'a pas d'alias dérivé : seul l'hôte lui-même est refusé.
+const ALIAS_FONCTIONS = /^([a-z0-9-]+)\.supabase\.co$/;
+const hotesRefuses = (): string[] => {
+  try {
+    const u = env('SUPABASE_URL');
+    if (!u) return [];
+    const hote = new URL(u).hostname.toLowerCase().replace(/\.$/, '');
+    const ref = ALIAS_FONCTIONS.exec(hote);
+    return ref ? [hote, `${ref[1]}.functions.supabase.co`] : [hote];
+  } catch { return []; }
+};
 // Les clés Supabase injectées dans la fonction (SUPABASE_PUBLISHABLE_KEYS, SUPABASE_SECRET_KEYS) n'ont pas une forme garantie : une liste
 // d'objets { api_key }, une liste de chaînes, un objet ({ default: … }), ou la clé nue. Le lecteur est tolérant sur la FORME, jamais sur le
 // PRÉFIXE : une clé n'est prise que si elle commence par le sien (`sb_publishable_` / `sb_secret_`), si bien qu'une clé secrète posée dans la
