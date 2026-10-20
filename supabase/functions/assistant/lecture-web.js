@@ -19,17 +19,19 @@ const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 const SUFFIXES_REFUSES = ['.local', '.internal', '.localhost'];
 const sansPointFinal = (h) => (h.endsWith('.') ? h.slice(0, -1) : h).toLowerCase();
 // La règle d'hôte seule : un nom de domaine public (au moins un point), jamais localhost ni un suffixe interne, jamais une adresse IP littérale
-// (IPv4, ou IPv6 entre crochets), jamais un hôte de `hotesRefuses` (l'hôte du projet : la fonction ne se rappelle jamais elle-même).
+// (IPv4, ou IPv6 entre crochets), jamais un hôte de `hotesRefuses` NI un de ses sous-domaines (l'hôte du projet : la fonction ne se rappelle
+// jamais elle-même).
 export function hoteAdmis(hostname, hotesRefuses = []) {
   if (typeof hostname !== 'string') return false;
   const h = sansPointFinal(hostname);
   if (!h || !h.includes('.') || h === 'localhost' || h.startsWith('[') || IPV4.test(h)) return false;
   if (SUFFIXES_REFUSES.some((s) => h.endsWith(s))) return false;
-  const refuses = (Array.isArray(hotesRefuses) ? hotesRefuses : []).filter((x) => typeof x === 'string').map(sansPointFinal);
-  return !refuses.includes(h);
+  const refuses = (Array.isArray(hotesRefuses) ? hotesRefuses : []).filter((x) => typeof x === 'string').map(sansPointFinal).filter(Boolean);
+  return !refuses.some((x) => h === x || h.endsWith('.' + x));
 }
 // Une adresse lisible par la fonction : ASCII visible seulement (refusé AVANT new URL : un U+2028 ou un caractère de format ne passe jamais),
-// au plus 2 048 points de code, https, sans identifiants, sans port explicite, hôte admis. `href` sans fragment.
+// au plus 2 048 points de code AVANT et APRÈS normalisation (`href` encode « " » en %22 : ce qui est rendu se relit admis), https, sans
+// identifiants, sans port explicite, hôte admis. `href` sans fragment.
 export function valideAdresse(url, { hotesRefuses = [] } = {}) {
   const refus = { ok: false, raison: 'interdit' };
   if (typeof url !== 'string' || url.length > LIMITES_LECTURE.url || !/^[\x21-\x7e]+$/.test(url)) return refus;
@@ -38,6 +40,7 @@ export function valideAdresse(url, { hotesRefuses = [] } = {}) {
   if (u.protocol !== 'https:' || u.username !== '' || u.password !== '' || u.port !== '') return refus;
   if (!hoteAdmis(u.hostname, hotesRefuses)) return refus;
   u.hash = '';
+  if (u.href.length > LIMITES_LECTURE.url) return refus;
   return { ok: true, href: u.href, hote: sansPointFinal(u.hostname) };
 }
 
@@ -69,7 +72,8 @@ export function lireCharset(contentType, octets) {
 
 // --- Texte : entités, balises, espaces -----------------------------------------------------------------------------------------------------------
 // Table FERMÉE d'entités nommées (B-19) ; une entité inconnue reste telle quelle. Les entités numériques ne rendent qu'un point de code valide,
-// hors surrogates, hors Cc, hors Cf, hors U+2028 / U+2029 (S-10) : sinon l'entité est retirée.
+// hors surrogates, hors Cc, hors Cf, hors U+2028 / U+2029 (S-10) : sinon l'entité est retirée. Exception : les blancs de contrôle (&#9; &#10;
+// &#11; &#12; &#13;) sont rendus tels quels, et la normalisation qui suit en fait une espace ou un saut de ligne — jamais deux mots collés.
 const ENTITES = Object.freeze({
   amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u{00A0}', eacute: 'é', egrave: 'è', ecirc: 'ê', agrave: 'à', acirc: 'â', ccedil: 'ç',
   ugrave: 'ù', ucirc: 'û', ocirc: 'ô', icirc: 'î', iuml: 'ï', euml: 'ë', deg: '°', frac12: '½', frac14: '¼', frac34: '¾', frac13: '⅓', frac23: '⅔',
@@ -78,14 +82,18 @@ const ENTITES = Object.freeze({
   Eacute: 'É', Egrave: 'È', Ecirc: 'Ê', Agrave: 'À', Acirc: 'Â', Ccedil: 'Ç', Ugrave: 'Ù', Ucirc: 'Û', Ocirc: 'Ô', Icirc: 'Î', OElig: 'Œ',
   Auml: 'Ä', Ouml: 'Ö', Uuml: 'Ü',
 });
-const INVISIBLE = /[\p{Cc}\p{Cf}\u{2028}\u{2029}]/u;
-const caractereAdmis = (cp) => Number.isInteger(cp) && cp >= 0 && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff) && !INVISIBLE.test(String.fromCodePoint(cp));
+// La classe des invisibles retirés (S-10), écrite UNE fois : Cc, Cf, surrogates isolés (Cs : jsonb les refuse), U+2028 / U+2029. Toujours
+// employée APRÈS que les blancs de contrôle (\t \n \v \f \r) sont devenus une espace ou un saut de ligne.
+const INVISIBLES = /[\p{Cc}\p{Cf}\p{Cs}\u{2028}\u{2029}]/gu;
+const BLANCS_DE_CONTROLE = new Set([9, 10, 11, 12, 13]);
+// Hors surrogates : \p{Cs} de INVISIBLES les refuse (String.fromCodePoint rend le surrogate isolé).
+const caractereAdmis = (cp) => Number.isInteger(cp) && cp >= 0 && cp <= 0x10ffff && String.fromCodePoint(cp).search(INVISIBLES) === -1;
 export function decoderEntites(s) {
   if (typeof s !== 'string') return '';
   return s.replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|[a-z][a-z0-9]{1,8});/gi, (m, corps) => {
     if (corps[0] === '#') {
       const cp = corps[1] === 'x' || corps[1] === 'X' ? parseInt(corps.slice(2), 16) : parseInt(corps.slice(1), 10);
-      return caractereAdmis(cp) ? String.fromCodePoint(cp) : '';
+      return BLANCS_DE_CONTROLE.has(cp) || caractereAdmis(cp) ? String.fromCodePoint(cp) : '';
     }
     return Object.hasOwn(ENTITES, corps) ? ENTITES[corps] : m;
   });
@@ -102,34 +110,49 @@ function minusculesAscii(s) {
   return morceaux.join('');
 }
 const BLOCS = new Set(['br', 'p', 'li', 'div', 'section', 'tr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
-// Le nom d'une balise `<…>` (sa tranche, bornée par ses deux chevrons) et si elle ferme : « </p> » → { nom: 'p', fermante: true }.
-const balise = (tranche) => { const m = /^<(\/?)\s*([a-z0-9]+)/i.exec(tranche); return m ? { nom: m[2].toLowerCase(), fermante: m[1] === '/' } : null; };
+// LE lecteur de balise (sansBalises et balayer), comme un navigateur : une balise commence par « < » suivi d'une lettre ASCII, de « / », de « ! »
+// ou de « ? » (« a < b », « 3 <4 » sont du texte) ; son nom (au plus 16 lettres ou chiffres, minuscules) ne compte que s'il finit sur une espace,
+// « / » ou « > » : `<main-banner>`, `<article-card>` et `<svg:rect/>` ne sont pas `main`, `article` ni `svg` (nom vide : balise inconnue).
+const lettre = (c) => (c >= 97 && c <= 122) || (c >= 65 && c <= 90);
+const finDeNom = (c) => Number.isNaN(c) || c === 32 || c === 9 || c === 10 || c === 12 || c === 13 || c === 47 || c === 62;
+const debutDeBalise = (s, a) => { const c = s.charCodeAt(a + 1); return lettre(c) || c === 47 || c === 33 || c === 63; };
+function nomEn(s, a) {
+  let j = a + 1; const fermante = s.charCodeAt(j) === 47;
+  if (fermante) j += 1;
+  const debut = j;
+  while (j < s.length && j - debut < 16) { const c = s.charCodeAt(j); if (lettre(c) || (c >= 48 && c <= 57)) j += 1; else break; }
+  return { nom: j > debut && lettre(s.charCodeAt(debut)) && finDeNom(s.charCodeAt(j)) ? s.slice(debut, j).toLowerCase() : '', fermante };
+}
 // Retire les balises en une passe (indexOf '<' puis '>') : `<br>` et la FIN d'un bloc (p, li, div, section, tr, h1-h6) deviennent `separateur`,
-// toute autre balise disparaît ; un « < » sans « > » reste du texte (et arrête la passe).
+// toute autre balise disparaît ; un « < » qui n'ouvre pas de balise reste du texte ; une balise sans « > » reste du texte (et arrête la passe).
 function sansBalises(s, separateur) {
-  const sortie = []; let i = 0;
+  const sortie = []; let i = 0; let j = 0;
   for (;;) {
-    const a = s.indexOf('<', i);
-    if (a === -1) { sortie.push(s.slice(i)); break; }
+    const a = s.indexOf('<', j);
+    if (a === -1) break;
+    if (!debutDeBalise(s, a)) { j = a + 1; continue; }
     const b = s.indexOf('>', a + 1);
-    if (b === -1) { sortie.push(s.slice(i)); break; }
+    if (b === -1) break;
     sortie.push(s.slice(i, a));
-    const x = balise(s.slice(a, Math.min(b + 1, a + 64)));
-    if (x && BLOCS.has(x.nom) && (x.fermante || x.nom === 'br')) sortie.push(separateur);
-    i = b + 1;
+    const { nom, fermante } = nomEn(s, a);
+    if (BLOCS.has(nom) && (fermante || nom === 'br')) sortie.push(separateur);
+    i = b + 1; j = i;
   }
+  sortie.push(s.slice(i));
   return sortie.join('');
 }
 const espaces = (s) => s.replace(/[\s\u{00A0}]+/gu, ' ').trim();
-// Pour TOUTE chaîne lue d'un JSON-LD (B-7) : entités décodées, balises retirées, espaces normalisés, rognée ; pas une chaîne → ''.
+// Pour TOUTE chaîne lue d'un JSON-LD (B-7) : entités décodées, balises retirées, blancs de contrôle → espace, invisibles retirés, espaces
+// normalisés, rognée ; pas une chaîne → ''.
 export function nettoyerChaineJsonLd(s) {
   if (typeof s !== 'string') return '';
-  return espaces(sansBalises(decoderEntites(s), ' ').replace(/(?!\n)[\p{Cc}\p{Cf}\u{2028}\u{2029}]/gu, ''));
+  return espaces(sansBalises(decoderEntites(s), ' ').replace(/[\t\n\v\f\r]/g, ' ').replace(INVISIBLES, ''));
 }
-// Les lignes d'une chaîne d'instructions : la fin d'un bloc HTML et un saut de ligne coupent ; chaque ligne nettoyée ; les vides écartées.
+// Les lignes d'une chaîne d'instructions : la fin d'un bloc HTML et un saut de ligne (LF, CR LF ou CR seul) coupent ; chaque ligne nettoyée
+// (\t \v \f → espace, invisibles retirés) ; les vides écartées.
 function lignesDe(s) {
   if (typeof s !== 'string') return [];
-  return sansBalises(decoderEntites(s), '\n').split('\n').map((l) => espaces(l.replace(/[\p{Cc}\p{Cf}\u{2028}\u{2029}]/gu, ''))).filter(Boolean);
+  return sansBalises(decoderEntites(s), '\n').replace(/\r\n?/g, '\n').split('\n').map((l) => espaces(l.replace(/[\t\v\f]/g, ' ').replace(INVISIBLES, ''))).filter(Boolean);
 }
 const couperPoints = (s, max) => { let i = 0; for (let k = 0; k < max && i < s.length; k += 1) i += s.codePointAt(i) > 0xffff ? 2 : 1; return i; };
 const borne = (s, max) => (s ? s.slice(0, couperPoints(s, max)) : '');
@@ -144,9 +167,10 @@ function auMot(s, max) {
 // --- Étapes et durées (D-B25, B-8) ---------------------------------------------------------------------------------------------------------------
 const FINS_DE_PHRASE = ['. ', '! ', '? ', '; '];
 // Une étape de plus de `max` points de code est DÉCOUPÉE, rien n'est perdu : à la dernière fin de phrase avant `max`, sinon à la dernière espace,
-// sinon net à `max` ; chaque morceau rogné, les vides écartés.
+// sinon net à `max` ; chaque morceau rogné, les vides écartés. Un `max` qui n'est pas un entier ≥ 1 rend [] (jamais de boucle sans fin).
 export function decouperEtape(texte, max) {
   const sortie = [];
+  if (!Number.isInteger(max) || max < 1) return sortie;
   let reste = typeof texte === 'string' ? texte.trim() : '';
   while (reste) {
     const limite = couperPoints(reste, max);
@@ -169,14 +193,17 @@ export function dureeIsoEnMinutes(s) {
 }
 const aType = (o, type) => { const t = propre(o, '@type'); return t === type || (Array.isArray(t) && t.includes(type)); };
 // Les étapes d'un recipeInstructions : une chaîne (une étape par ligne), un tableau de chaînes, de HowToStep (text, sinon name) ou de HowToSection
-// (itemListElement aplatis, profondeur 2) ; chaque étape découpée à `etape` ; la liste coupée à `etapes + 1` (assez pour un refus côté client).
+// (itemListElement aplatis, sur DEUX niveaux de sections : une section dans une section est lue, pas une troisième) ; chaque étape découpée à
+// `etape` ; la liste coupée à `etapes + 1` (assez pour un refus côté client). La profondeur compte chaque tableau ET chaque section, et elle est
+// bornée pour TOUS (au-delà de PROFONDEUR_ETAPES, rien n'est lu) : une chaîne de sections imbriquées en objets ne remplit jamais la pile.
+const PROFONDEUR_ETAPES = 5;
 function etapesDe(v) {
   const L = LIMITES_LECTURE; const sortie = [];
   const pousser = (texte) => { for (const morceau of decouperEtape(texte, L.etape)) if (sortie.length <= L.etapes) sortie.push(morceau); };
   const visiter = (x, profondeur) => {
-    if (sortie.length > L.etapes) return;
+    if (sortie.length > L.etapes || profondeur > PROFONDEUR_ETAPES) return;
     if (typeof x === 'string') { for (const l of lignesDe(x)) pousser(l); return; }
-    if (Array.isArray(x)) { if (profondeur <= 2) for (const y of x) visiter(y, profondeur + 1); return; }
+    if (Array.isArray(x)) { for (const y of x) visiter(y, profondeur + 1); return; }
     if (!objetNu(x)) return;
     if (aType(x, 'HowToSection')) { visiter(propre(x, 'itemListElement'), profondeur + 1); return; }
     const texte = nettoyerChaineJsonLd(propre(x, 'text')) || nettoyerChaineJsonLd(propre(x, 'name'));
@@ -193,24 +220,26 @@ function portionsDe(v, profondeur = 0) {
 }
 
 // --- Le balayage du HTML (D-B12, S-4) ---------------------------------------------------------------------------------------------------------------
-// UNE passe linéaire : chaque balise est trouvée par indexOf('<') puis indexOf('>') et son nom lu sur place (au plus 16 caractères, minuscules ASCII) ;
-// la copie en minuscules (même longueur) sert aux recherches insensibles à la casse. Un « < » sans « > » est du texte et ARRÊTE le balayage ;
-// un commentaire, un CDATA ou un élément sauté (script, style, noscript, svg, template) sans fermeture aussi. Rien n'est relu deux fois : la seule
-// recherche en avant (la fermeture d'un élément sauté) reprend après elle. Rend :
+// UNE passe linéaire : chaque balise est trouvée par indexOf('<') puis indexOf('>') et son nom lu sur place par `nomEn` (le lecteur commun) ;
+// la copie en minuscules (même longueur) sert aux recherches insensibles à la casse. Un « < » qui n'ouvre pas de balise est du texte ; une balise
+// sans « > » est du texte et ARRÊTE le balayage ; un commentaire, un CDATA ou un élément sauté (script, style, noscript, svg, template) sans
+// fermeture aussi. Rien n'est relu deux fois. Deux recherches en avant, chacune linéaire : la fermeture d'un élément sauté (le balayage reprend
+// après elle) et celle du premier <title> (faite une seule fois, sa lecture est bornée à 4 096 caractères sans fermeture). Rend :
 //   texte : le HTML sans balises (la fin d'un bloc et <br> → \n), entités NON décodées ; zones : main / article / body → [début, fin] dans `texte`
-//   (le premier de chaque nom ; fin nulle = jusqu'au bout) ; horsTexte : les tranches de `texte` couvertes par nav, header, footer, aside, form
-//   (profondeur 1 par nom : un élément imbriqué dans un autre du même nom est coupé au premier « </nom ») ; blocs : le contenu brut de chaque
+//   (le premier de chaque nom, fermé au « </nom> » qui équilibre son ouvrant ; fin nulle = jusqu'au bout) ; horsTexte : [début, fin, nom], les
+//   tranches de `texte` couvertes par un nav, header, footer, aside ou form FERMÉ (profondeur 1 par nom : un élément imbriqué dans un autre du même
+//   nom est coupé au premier « </nom » ; un élément jamais fermé n'est pas une tranche, son étendue est inconnue) ; blocs : le contenu brut de chaque
 //   <script type="application/ld+json"> fermé (≤ 512 Kio) ; titre : le contenu brut du premier <title> ; metas : og:site_name et author → content brut.
 const SAUTES = new Set(['script', 'style', 'noscript', 'svg', 'template']);
 const HORS_TEXTE = new Set(['nav', 'header', 'footer', 'aside', 'form']);
 const ZONES = new Set(['main', 'article', 'body']);
 const TYPE_JSONLD = /\btype\s*=\s*["']?\s*application\/ld\+json/;
-function nomEn(bas, a) {
-  let j = a + 1; const fermante = bas.charCodeAt(j) === 47;
-  if (fermante) j += 1;
-  const debut = j;
-  while (j < bas.length && j - debut < 16) { const c = bas.charCodeAt(j); if ((c >= 97 && c <= 122) || (c >= 48 && c <= 57)) j += 1; else break; }
-  return { nom: bas.slice(debut, j), fermante };
+// La fermeture « </nom » d'un élément, suivie d'une espace, de « / » ou de « > » (« </scriptx » n'en est pas une), à partir de `depuis` ; -1 sinon.
+// Linéaire : chaque candidat écarté fait repartir la recherche après lui.
+function fermetureEn(bas, nom, depuis) {
+  const motif = '</' + nom;
+  for (let f = bas.indexOf(motif, depuis); f !== -1; f = bas.indexOf(motif, f + motif.length)) if (finDeNom(bas.charCodeAt(f + motif.length))) return f;
+  return -1;
 }
 function lireMetaTranche(html, bas, a, b, metas) {
   if (b - a > 2048) return;
@@ -226,35 +255,40 @@ function balayer(html) {
   const bas = minusculesAscii(html);
   const sortie = []; let n = 0;
   const emettre = (x) => { if (x) { sortie.push(x); n += x.length; } };
-  const zones = new Map(); const ouverts = new Map(); const horsTexte = []; const blocs = []; const metas = new Map();
-  let titre = null; let i = 0;
+  const zones = new Map(); const profondeurs = new Map(); const ouverts = new Map(); const horsTexte = []; const blocs = []; const metas = new Map();
+  let titre = null; let i = 0; let j = 0; // i : début du texte pas encore émis ; j : où chercher le prochain « < »
   for (;;) {
-    const a = html.indexOf('<', i);
+    const a = html.indexOf('<', j);
     if (a === -1) { emettre(html.slice(i)); break; }
+    if (!debutDeBalise(bas, a)) { j = a + 1; continue; } // « a < b » : du texte
     emettre(html.slice(i, a));
     if (bas.charCodeAt(a + 1) === 33) { // « <! » : commentaire, CDATA (sautés jusqu'à leur fin), ou doctype (une balise ordinaire)
-      if (bas.startsWith('<!--', a)) { const f = bas.indexOf('-->', a + 4); if (f === -1) break; i = f + 3; continue; }
-      if (bas.startsWith('<![cdata[', a)) { const f = bas.indexOf(']]>', a + 9); if (f === -1) break; i = f + 3; continue; }
+      if (bas.startsWith('<!--', a)) { const f = bas.indexOf('-->', a + 4); if (f === -1) break; i = j = f + 3; continue; }
+      if (bas.startsWith('<![cdata[', a)) { const f = bas.indexOf(']]>', a + 9); if (f === -1) break; i = j = f + 3; continue; }
     }
     const b = html.indexOf('>', a + 1);
     if (b === -1) { emettre(html.slice(a)); break; }
     const { nom, fermante } = nomEn(bas, a);
-    i = b + 1;
-    if (!fermante && SAUTES.has(nom)) {
-      const f = bas.indexOf('</' + nom, b + 1);
+    i = j = b + 1;
+    // Un élément sauté est lu jusqu'à sa fermeture ; `<svg …/>` auto-fermant (honoré par HTML pour svg seulement) est fermé sur place.
+    if (!fermante && SAUTES.has(nom) && !(nom === 'svg' && bas.charCodeAt(b - 1) === 47)) {
+      const f = fermetureEn(bas, nom, b + 1);
       if (f === -1) break;
       if (nom === 'script' && b - a <= 2048 && f - (b + 1) <= LIMITES_LECTURE.blocJsonLd && TYPE_JSONLD.test(bas.slice(a, b + 1))) blocs.push(html.slice(b + 1, f));
       const g = bas.indexOf('>', f);
       if (g === -1) break;
-      i = g + 1; continue;
+      i = j = g + 1; continue;
     }
-    if (!fermante && nom === 'title' && titre === null) { const f = bas.indexOf('</title', b + 1); titre = html.slice(b + 1, f === -1 ? Math.min(html.length, b + 1 + 4096) : f); }
+    if (!fermante && nom === 'title' && titre === null) { const f = fermetureEn(bas, 'title', b + 1); titre = html.slice(b + 1, f === -1 ? Math.min(html.length, b + 1 + 4096) : f); }
     if (!fermante && nom === 'meta') lireMetaTranche(html, bas, a, b, metas);
-    if (ZONES.has(nom)) { if (!fermante && !zones.has(nom)) zones.set(nom, [n, null]); else if (fermante && zones.get(nom)?.[1] === null) zones.get(nom)[1] = n; }
-    if (HORS_TEXTE.has(nom)) { if (!fermante && !ouverts.has(nom)) ouverts.set(nom, n); else if (fermante && ouverts.has(nom)) { horsTexte.push([ouverts.get(nom), n]); ouverts.delete(nom); } }
+    if (ZONES.has(nom)) { // la zone se ferme au « </nom> » qui équilibre son ouvrant (un <article> imbriqué ne la coupe pas)
+      const z = zones.get(nom);
+      if (!fermante) { if (!z) { zones.set(nom, [n, null]); profondeurs.set(nom, 1); } else if (z[1] === null) profondeurs.set(nom, profondeurs.get(nom) + 1); }
+      else if (z && z[1] === null) { profondeurs.set(nom, profondeurs.get(nom) - 1); if (profondeurs.get(nom) === 0) z[1] = n; }
+    }
+    if (HORS_TEXTE.has(nom)) { if (!fermante && !ouverts.has(nom)) ouverts.set(nom, n); else if (fermante && ouverts.has(nom)) { horsTexte.push([ouverts.get(nom), n, nom]); ouverts.delete(nom); } }
     if (fermante ? BLOCS.has(nom) : nom === 'br') emettre('\n');
   }
-  for (const d of ouverts.values()) horsTexte.push([d, n]);
   return { texte: sortie.join(''), zones, horsTexte, blocs, titre, metas };
 }
 
@@ -332,24 +366,35 @@ export function titreDe(html) {
 
 // --- Texte principal (D-B2, B-9, S-10) ------------------------------------------------------------------------------------------------------------
 // La zone : le premier <main>, sinon le premier <article>, sinon <body>, sinon tout ; les tranches nav / header / footer / aside / form qui
-// COMMENCENT dans la zone en sont retirées (un <form> qui enveloppe toute la page, comme sur un vieux site, ne l'efface donc pas).
-function texteDuBalayage({ texte, zones, horsTexte }, max) {
-  const z = zones.get('main') ?? zones.get('article') ?? zones.get('body') ?? [0, null];
-  const debut = z[0]; const fin = z[1] ?? texte.length;
+// COMMENCENT dans la zone en sont retirées (une tranche ouverte avant la zone, comme un <form> qui enveloppe un <main>, ne l'efface donc pas).
+// Un <form> n'est retiré que d'une zone <main> ou <article> (infolettre, commentaires) : sur un vieux site sans eux, il enveloppe souvent tout le
+// <body> (ASP.NET). Et si le retrait des <form> laisse moins de `texteMin` points de code, ils restent : un <form> ne vide jamais la zone.
+const peuDeTexte = (s) => couperPoints(s, LIMITES_LECTURE.texteMin - 1) >= s.length;
+function zoneSans(texte, debut, fin, tranches) {
   const morceaux = []; let k = debut;
-  for (const [d, f] of [...horsTexte].sort((x, y) => x[0] - y[0])) {
+  for (const [d, f] of tranches) {
     if (d < debut || d >= fin) continue;
     if (d > k) morceaux.push(texte.slice(k, d));
     k = Math.max(k, Math.min(f, fin));
   }
   if (k < fin) morceaux.push(texte.slice(k, fin));
-  const brut = decoderEntites(morceaux.join(''))
-    .replace(/\r/g, '')
+  // Entités décodées ; CR LF et CR seul → saut ; \t \v \f et insécable → espace ; invisibles retirés ; lignes rognées ; trois sauts et plus → deux.
+  return decoderEntites(morceaux.join(''))
+    .replace(/\r\n?/g, '\n')
     .replace(/[ \t\f\v\u{00A0}]+/gu, ' ')
-    .split('\n').map((l) => l.trim()).join('\n')
+    .replace(INVISIBLES, (c) => (c === '\n' ? c : ''))
+    .split('\n').map((l) => l.replace(/ {2,}/g, ' ').trim()).join('\n')
     .replace(/\n{3,}/g, '\n\n')
-    .replace(/(?!\n)[\p{Cc}\p{Cf}\u{2028}\u{2029}]/gu, '')
     .trim();
+}
+function texteDuBalayage({ texte, zones, horsTexte }, max) {
+  const z = zones.get('main') ?? zones.get('article') ?? zones.get('body') ?? [0, null];
+  const debut = z[0]; const fin = z[1] ?? texte.length;
+  const tranches = [...horsTexte].sort((x, y) => x[0] - y[0]);
+  const sansForm = tranches.filter((t) => t[2] !== 'form');
+  const formRetire = zones.has('main') || zones.has('article');
+  let brut = zoneSans(texte, debut, fin, formRetire ? tranches : sansForm);
+  if (formRetire && sansForm.length < tranches.length && peuDeTexte(brut)) brut = zoneSans(texte, debut, fin, sansForm);
   const n = couperPoints(brut, max);
   return n >= brut.length ? { texte: brut, coupe: false } : { texte: brut.slice(0, n), coupe: true };
 }
