@@ -1196,9 +1196,10 @@ quadratique (borne temporelle) · `borner` retiré d'un champ de `lirePage` (tes
 plus une extraction photo) · `original_title` conservé à la première lecture (D-B24) · `totalTime` ignoré · « Ajouter sans remplacer » en seconde option du dialogue
 (R-B-12) · garde `cleLecture` retirée sur `marquerIllisible` (R-B-10) · `device_id` non réattribué à la relance (R-B-8) · le second `catch` de
 `telechargerPage` qui classe un abandon de `ctl` en `inaccessible` (R-B-11 ; la rév. 4 le disait sans test qui le tue — **construction, R-B-28** :
-tué par t5 depuis la ronde 1 de la tâche 2, `8df4f15`, § 7.2). **Bilan de la Clôture (R-B-28, compte du chef d'orchestre) : 65 mutants nommés,
-65 rouges, aucun survivant** (rejoués sur des copies, jamais en place ; le mutant « « Annuler » web par `annulerVol` » de la tâche 6 est ÉQUIVALENT — même vol,
-mêmes écritures, R-B-25 —, pas un survivant).
+tué par t5 depuis la ronde 1 de la tâche 2, `8df4f15`, § 7.2). **Bilan de la Clôture (R-B-28) : tous les mutants nommés par cette section et par le plan (C1 à C24, B1 à B8,
+T6a à T6j) ont été rejoués rouges, aux tâches, aux rondes, à la vague et à la ronde finale 2 ; aucun survivant** (rejoués sur des copies, jamais en place ; les deux
+mutants ÉQUIVALENTS déclarés — M30r de la tâche 4 et le mutant « « Annuler » web par `annulerVol` » de la tâche 6 est ÉQUIVALENT — même vol,
+mêmes écritures, R-B-25 — ne sont pas des survivants).
 
 ## 8. Hors périmètre (nommé pour ne pas y glisser)
 
@@ -1633,7 +1634,7 @@ Rendus du Départ (19 octobre 2026) à la Clôture (20 octobre 2026), après la 
 (`d8163be`, `ebbcf10`) et la ronde finale 2 ; chacun dit la décision, le pourquoi et le coût si faux. Le corps de la spec porte, à chaque retouche,
 la marque « (construction, R-B-nn) » ; chaque fait a été relu dans le code commis (`src/`, `supabase/functions/assistant/`, `tests/`, `tools/`).
 
-**Départ : le rejeu sur la tête finale du lot A (R-B-17 à R-B-20).** Départ du 19 octobre (20 h 16) : le plan rév. 3 rejoué sur `2b6a2fd`, la tête
+**Départ : le rejeu sur la tête finale du lot A (R-B-17 à R-B-20).** Départ du 19 octobre (20 h 18, mesure de `progress.md`) : le plan rév. 3 rejoué sur `2b6a2fd`, la tête
 finale du lot A (voie (a), `git merge-file` par fichier, R-B-16). Le plan avait été écrit et simulé sur `4cb99a0` ; le rejeu a laissé quatre écarts
 d'INTENTION avec le code commis d'A, tous tranchés en faveur de ce code. Base mesurée (R-E-18 appliquée à B) : `APP_VERSION 0.9.0`, `sw.js`
 `cuisine-os-v0.9.0-13`, épingle 3693 (suite 3694/3694), Node 125/125, `--check` 0 ; le lot passe `APP_VERSION` à `0.10.0` et `sw.js` à
@@ -1693,6 +1694,11 @@ la génère.
   4. Construit à la ronde finale 2 (`51bad50`), avec trois choix d'interprétation que le code porte : borne 1..9 999 appliquée aussi au
   nombre JSON ; chaîne nettoyée par `nettoyerChaineJsonLd` avant la grammaire ; mot de portion admis avant ET / OU après, intervalle inversé →
   borne basse. Amendés : § 6.2, § 7.1.
+- **R-B-22 bis (précisions ratifiées après la ronde finale 2, `51bad50`).** La borne 1..9 999 s'applique aussi à un nombre JSON ; chaque chaîne
+  passe par `nettoyerChaineJsonLd` et NFC avant la grammaire (`4&nbsp;portions`, `<b>4</b> portions`, `4 &agrave; 6` → 4 ; esprit de B-7) ; le mot de
+  portion est admis avant ou après le nombre ; un intervalle inversé rend la borne basse (`6-4` → 4), une borne nulle rend `null` ; `00012 portions` → 12.
+  Formes qui rendent `null`, coût nommé et assumé : `Yield: 4`, `Serves 4 people`, `6 pers.`, `Pour 4 personnes.`, `4 to 6`, `4.0`, `12 cookies`, `1 loaf`.
+  Sonde sans dépense ajoutée au redéploiement (S19, R-B-23) : une lecture vers `https://<ref>.functions.supabase.co/` → 422 `interdit`.
 - **R-B-23 (alias de la fonction).** Décision : `hotesRefuses()` d'`index.ts` refuse aussi l'alias historique `<ref>.functions.supabase.co`, dérivé
   de l'hôte de `SUPABASE_URL` (`<ref>.supabase.co`), en plus de l'hôte et de ses sous-domaines (ronde 1 de la tâche 1) ; § 6.1 amendé ; un cas de
   test Node (t4 bis) l'épingle. Pourquoi : l'alias n'est pas un sous-domaine de `<ref>.supabase.co`, la règle des sous-domaines ne le couvrait
@@ -1754,7 +1760,7 @@ la génère.
   deux machines A et B), ou reste une limite du balayage sans défaut mesuré sur une vraie page. Coût si faux : nommé ligne par ligne en § 11 (les
   limites) et en § 13 (les dettes à reprendre).
 - **R-B-28 (docs de la spec, Clôture).** R-B-11 n'est PLUS un survivant : il est tué par t5 depuis la ronde 1 de la tâche 2 (`8df4f15`) ; § 7.5 :
-  65 mutants nommés, 65 rouges. § 7.1 : le compte des ouvrantes `<script …>` de la page (a) devient « environ 58 000 » (2 Mio ; celui de la
+  tous les mutants nommés (spec et plan) rouges, deux équivalents déclarés, aucun survivant. § 7.1 : le compte des ouvrantes `<script …>` de la page (a) devient « environ 58 000 » (2 Mio ; celui de la
   rév. 4 était faux). La phrase qui prêtait la prochaine migration générée au lot G (D-B11 et les passages qui la répètent : § 9, § 11, § 12)
   devient « le prochain lot qui ajoute un magasin génère `0007` et fige `0005` d'abord ; G rév. 4 n'en a pas ». `cloture.md` (registre), geste 3 :
   les chiffres par la mesure finale. Pourquoi : la spec disait des choses que la construction a rendues fausses. Coût si faux : aucun sur le code.
