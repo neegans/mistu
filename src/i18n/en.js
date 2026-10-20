@@ -526,4 +526,15 @@ export const EN = {
   "Couverture · {livre}": "Cover · {livre}",
   "Photo du plat · {titre}": "Dish photo · {titre}",
   "Photo importée · {date}": "Imported photo · {date}",
+  // Lot G : archive (§ 4.6).
+  "{n} pages ne sont pas encore téléchargées sur cet appareil et ne sont pas dans l’archive.": "{n} pages are not downloaded on this device yet and are not in the archive.",
+  "1 page n’est pas encore téléchargée sur cet appareil et n’est pas dans l’archive.": "1 page is not downloaded on this device yet and is not in the archive.",
+  "{n} fichier(s) archivé(s) sont des copies du serveur, pas l’original.": "{n} archived file(s) are server copies, not the original.",
+  "{n} fichier(s) archivé(s) ont des octets qui ne sont ni l’original ni la copie du serveur connue : archivés tels quels.": "{n} archived file(s) have bytes that are neither the original nor the known server copy: archived as is.",
+  "pages manquantes : {n}": "missing pages: {n}",
+  "copies du serveur : {n}": "server copies: {n}",
+  "Cette archive renvoie à {n} pages qui ne sont pas dedans : celles qui sont sur le serveur pourront être téléchargées (sur la fiche, ou Réglages → Télécharger toutes les pages).": "This archive refers to {n} pages that are not in it: those on the server can be downloaded (from the page, or Settings → Download all pages).",
+  "Les pages de cet appareil absentes de l’archive seront retirées d’ici.": "Pages on this device that are not in the archive will be removed from here.",
+  "{n} originaux de cet appareil conservés (l’archive portait des copies).": "{n} originals of this device kept (the archive carried copies).",
+  "1 original de cet appareil conservé (l’archive portait une copie).": "1 original of this device kept (the archive carried a copy).",
 };

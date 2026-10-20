@@ -8,7 +8,7 @@ import { logError } from '../core/log.js';
 import { reprendreEnvoi, retirerEnvoi, fileDe } from '../sync/outbox.js';
 import { garderIci, garderAilleurs, ignorerRenvoye } from '../sync/conflits.js';
 import { retirerMarqueur } from '../sync/backfill.js';
-import { createArchive, inspectArchive, applyArchive, verifyRestored, compterFichesSynchronisees } from '../domain/backup.js';
+import { createArchive as createArchiveReel, inspectArchive, applyArchive, verifyRestored, compterFichesSynchronisees } from '../domain/backup.js';
 import { syncNow } from '../sync/clock.js';
 import { toJsonLd, toPaprikaYaml, toReadableSite } from '../domain/exporters.js';
 import { createZip } from '../core/zip.js';
@@ -31,7 +31,9 @@ export const archiveEnCours = () => archiveOperation;
 // Posée par le bouton d’archive de cette page, jamais déduite d’un réglage ni d’une date.
 const ARCHIVE_FLAG = 'cuisineos.archive_created';
 
-export async function renderSettings(params, query, ctx, { fetch } = {}) {
+// Injections (lot G, tâche 2) : createArchive, pickFiles (le choix de l’archive à restaurer) et telechargerArchive (l’enregistrement de l’archive
+// créée) — le bilan de création et le vrai rapport d’inspection s’éprouvent sans téléchargement réel dans le Chrome sans tête.
+export async function renderSettings(params, query, ctx, { fetch, createArchive = createArchiveReel, pickFiles: choisirArchive = pickFiles, telechargerArchive = downloadBlob } = {}) {
   const s = ctx.settings;
   const root = el('div', null, pageHeader(t('Réglages'), { subtitle: `Cuisine OS ${APP_VERSION}` }));
 
@@ -100,8 +102,8 @@ export async function renderSettings(params, query, ctx, { fetch } = {}) {
       button.textContent = t('Préparation de l’archive…');
       let generated = false;
       try {
-        const { blob, manifest, bytes, warnings } = await createArchive(repo.db, { deviceName: s.device_name });
-        downloadBlob(blob, 'cuisine-os-' + manifest.created_at.slice(0, 19).replace(/[:T]/g, '-') + '.zip');
+        const { blob, manifest, bytes, warnings, missingFiles = 0, copies } = await createArchive(repo.db, { deviceName: s.device_name });
+        telechargerArchive(blob, 'cuisine-os-' + manifest.created_at.slice(0, 19).replace(/[:T]/g, '-') + '.zip');
         generated = true;
         // Une archive existe pour cette session : « Changer de compte sur cet appareil » l’exige.
         try { sessionStorage.setItem(ARCHIVE_FLAG, manifest.created_at); } catch { /* stockage indisponible */ }
@@ -109,6 +111,10 @@ export async function renderSettings(params, query, ctx, { fetch } = {}) {
         await repo.setSetting('last_backup', { at: manifest.created_at, counts: manifest.counts, files: manifest.files.length, bytes, state: 'generated', warnings });
         backupStatus.firstChild.replaceWith(el('div', { class: 'status info' }, t('Dernière archive générée') + ' : ' + formatDate(manifest.created_at, { withTime: true }) + ' — ' + (bytes / 1048576).toFixed(1) + ' Mo'));
         toast(t('Archive générée ({n} Mo). Vérifie qu’elle est bien enregistrée.', { n: (bytes / 1048576).toFixed(1) }));
+        // § 4.6 : le bilan de création, une phrase par cas (pages manquantes, copies du serveur, octets inconnus) ; rien à dire, rien de dit.
+        backupStatus.querySelector('[data-role="bilan-archive"]')?.remove();
+        const bilanArchive = messagesArchive({ missingFiles, copies });
+        if (bilanArchive.length) backupStatus.append(el('div', { class: 'status warn', dataset: { role: 'bilan-archive' } }, ...bilanArchive.map((p) => el('p', null, p))));
       } catch (err) {
         toast((generated ? t('Archive générée, mais son suivi n’a pas pu être enregistré.') : t('Échec de la sauvegarde')) + ' : ' + err.message);
       } finally {
@@ -118,7 +124,7 @@ export async function renderSettings(params, query, ctx, { fetch } = {}) {
     } }, t('Sauvegarder toute ma bibliothèque')),
     el('button', { class: 'btn', onClick: async () => {
       if (archiveOperation) { toast(t('Une opération d’archive est déjà en cours.')); return; }
-      const files = await pickFiles({ accept: '.zip,application/zip', multiple: false });
+      const files = await choisirArchive({ accept: '.zip,application/zip', multiple: false });
       if (!files.length) return;
       if (archiveOperation) { toast(t('Une opération d’archive est déjà en cours.')); return; }
       setArchiveBusy(true);
@@ -208,9 +214,13 @@ export async function renderSettings(params, query, ctx, { fetch } = {}) {
     if (!insp.manifest) { box.append(el('div', { class: 'status danger' }, insp.errors.join(' · '))); return box; }
     const m = insp.manifest;
     box.append(el('div', null, el('strong', null, t('Archive du {d}', { d: formatDate(m.created_at, { withTime: true }) })), ' · ' + t('format') + ' v' + m.format_version));
+    // § 4.6 (lot G) : pages manquantes et copies du serveur, en puces ; la phrase dessous ne promet aucun téléchargement (B-8).
+    const ins = phrasesInspection(insp.summary || {});
     if (insp.summary) box.append(el('div', { class: 'chips' },
       ...Object.entries(insp.summary.counts).filter(([, count]) => count).map(([name, count]) => el('span', { class: 'chip neutral' }, name + ' : ' + count)),
-      el('span', { class: 'chip neutral' }, t('fichiers vérifiés') + ' : ' + insp.summary.files_ok)));
+      el('span', { class: 'chip neutral' }, t('fichiers vérifiés') + ' : ' + insp.summary.files_ok),
+      ...ins.puces.map((p) => el('span', { class: 'chip neutral' }, p))));
+    for (const phrase of ins.phrases) box.append(el('div', { class: 'status info' }, phrase));
     // Avec un compte, une restauration n’est pas seulement locale : tout ce qu’elle écrit repart au serveur, donc
     // sur les autres appareils. La personne doit le savoir AVANT le geste, et avec un nombre, pas une allusion.
     const renvoi = getSyncState().user ? messageRenvoi(compterFichesSynchronisees(insp)) : null;
@@ -245,7 +255,7 @@ export async function renderSettings(params, query, ctx, { fetch } = {}) {
         // comme en remplacement — sinon le serveur garderait sa version (I7) et rien ne se verrait ailleurs.
         // Le compte est relu AU MOMENT du geste : la session a pu changer depuis le rendu de la page.
         const reHorodatage = !!getSyncState().user;
-        await applyArchive(repo.db, insp, { mode, horodater: reHorodatage ? syncNow : null });
+        const bilanRestauration = await applyArchive(repo.db, insp, { mode, horodater: reHorodatage ? syncNow : null });
         committed = true;
         appliedOnce = true;
         controls.remove();
@@ -262,6 +272,9 @@ export async function renderSettings(params, query, ctx, { fetch } = {}) {
           : el('div', { class: 'status danger' }, t('La restauration a été écrite, mais des écarts subsistent. Conserve l’archive et ce bilan.')));
         if (!check.ok) result.append(el('ul', null, ...check.diffs.slice(0, 30).map((diff) => el('li', null, diff))));
         else if (mode === 'merge') result.append(el('small', { class: 'muted' }, t('Les fiches supplémentaires déjà présentes ont été conservées.')));
+        // R-G-6 : les originaux de cet appareil gardés (l’archive portait des copies), dits après le statut de verifyRestored.
+        const conserves = messageOriginauxConserves(bilanRestauration?.originauxConserves);
+        if (conserves) result.append(el('p', { class: 'muted' }, conserves));
       } catch (err) {
         result.replaceChildren(el('div', { class: 'status danger' },
           (committed ? t('Données restaurées, mais la vérification n’a pas pu se terminer. Conserve l’archive.') : t('Restauration annulée : aucune écriture de cet import n’a été conservée.')) + ' ' + err.message));
@@ -286,6 +299,8 @@ export async function renderSettings(params, query, ctx, { fetch } = {}) {
     // bouton qui en décide, et pas dans le bilan — celui-ci est commun aux deux modes.
     const horsArchive = empty ? null : messageRemplacementServeur(!!getSyncState().user);
     if (horsArchive) box.append(el('small', { class: 'muted' }, horsArchive));
+    // B-28 (lot G) : un remplacement vide `files` puis réécrit — les octets locaux des pages absentes de l’archive (ou manquantes) partent d’ici.
+    if (!empty) box.append(el('small', { class: 'muted' }, t('Les pages de cet appareil absentes de l’archive seront retirées d’ici.')));
     box.append(result);
     return box;
   }
@@ -315,6 +330,33 @@ const messageRemplacementRefuse = (n) => (n === 1
 export const messageRenvoi = (n) => {
   if (!(n > 0)) return null;
   return n === 1 ? t('1 fiche sera renvoyée au serveur.') : t('{n} fiches seront renvoyées au serveur.', { n });
+};
+
+// Bilan de création (§ 4.6) : une phrase par cas, jamais un pluriel calculé sur une chaîne traduite. Rien à dire → rien de dit.
+export function messagesArchive({ missingFiles = 0, copies = { serveur: 0, inconnues: 0 } } = {}) {
+  const sortie = [];
+  if (missingFiles === 1) sortie.push(t('1 page n’est pas encore téléchargée sur cet appareil et n’est pas dans l’archive.'));
+  else if (missingFiles > 1) sortie.push(t('{n} pages ne sont pas encore téléchargées sur cet appareil et ne sont pas dans l’archive.', { n: missingFiles }));
+  if (copies?.serveur > 0) sortie.push(t('{n} fichier(s) archivé(s) sont des copies du serveur, pas l’original.', { n: copies.serveur }));
+  if (copies?.inconnues > 0) sortie.push(t('{n} fichier(s) archivé(s) ont des octets qui ne sont ni l’original ni la copie du serveur connue : archivés tels quels.', { n: copies.inconnues }));
+  return sortie;
+}
+
+// Inspection (§ 4.6, B-8) : rien n'est promis comme « se téléchargera » — une entrée sans remote ne viendra de nulle part (I5).
+export function phrasesInspection(summary = {}) {
+  const puces = []; const phrases = [];
+  if (summary.files_distants > 0) {
+    puces.push(t('pages manquantes : {n}', { n: summary.files_distants }));
+    phrases.push(t('Cette archive renvoie à {n} pages qui ne sont pas dedans : celles qui sont sur le serveur pourront être téléchargées (sur la fiche, ou Réglages → Télécharger toutes les pages).', { n: summary.files_distants }));
+  }
+  if (summary.files_copies > 0) puces.push(t('copies du serveur : {n}', { n: summary.files_copies }));
+  return { puces, phrases };
+}
+
+// R-G-6 : le bilan de restauration dit les originaux gardés (l'archive portait des copies). Singulier sur le gabarit de messageRenvoi.
+export const messageOriginauxConserves = (n) => {
+  if (!(n > 0)) return null;
+  return n === 1 ? t('1 original de cet appareil conservé (l’archive portait une copie).') : t('{n} originaux de cet appareil conservés (l’archive portait des copies).', { n });
 };
 
 // Ce qu’un remplacement ne fait pas (R-L3-18) : il vide cet appareil, jamais le serveur. Rien à dire sans compte.

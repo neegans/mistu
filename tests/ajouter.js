@@ -33,6 +33,8 @@ export const CHAINES_NEUVES_AILLEURS = {
   '../src/ui/cook.js': ['Lue par l’assistant, non relue'],
   '../src/ui/grocery.js': ['Lue par l’assistant, non relue'],
   '../src/ui/recipe-edit.js': ['Une étape par paragraphe (ligne vide entre deux étapes).', 'La recette n’a pas pu être enregistrée. Réessaie.', 'Une lecture est déjà en cours : annule-la d’abord.', 'page possiblement manquante', 'lecture incomplète'],
+  // Lot G, tâche 2 : bilans d'archive (création, inspection, restauration — § 4.6).
+  '../src/ui/settings.js': ['{n} pages ne sont pas encore téléchargées sur cet appareil et ne sont pas dans l’archive.', '1 page n’est pas encore téléchargée sur cet appareil et n’est pas dans l’archive.', '{n} fichier(s) archivé(s) sont des copies du serveur, pas l’original.', '{n} fichier(s) archivé(s) ont des octets qui ne sont ni l’original ni la copie du serveur connue : archivés tels quels.', 'pages manquantes : {n}', 'copies du serveur : {n}', 'Cette archive renvoie à {n} pages qui ne sont pas dedans : celles qui sont sur le serveur pourront être téléchargées (sur la fiche, ou Réglages → Télécharger toutes les pages).', 'Les pages de cet appareil absentes de l’archive seront retirées d’ici.', '{n} originaux de cet appareil conservés (l’archive portait des copies).', '1 original de cet appareil conservé (l’archive portait une copie).'],
 };
 
 export async function runAjouterTests({ eq, ok }) {
