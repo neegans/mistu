@@ -144,6 +144,9 @@ test('recetteDepuisJsonLd : table', () => {
   assert.equal(r({ recipeInstructions: Array.from({ length: 70 }, (_, i) => 'Étape ' + i + '.') }).steps.length, 61, 'S-16 : 70 étapes → 61');
   assert.equal(r({ recipeYield: -4 }).servings, null, 'recipeYield négatif → null');
   assert.equal(r({ description: 'a'.repeat(1990) + ' ' + 'motlong'.repeat(5) }).notes, 'a'.repeat(1990) + '…', 'I-B2 : coupée AU MOT (le dernier mot entier, puis …), jamais en plein mot');
+  // Vague finale : la borne exacte de 2 000 POINTS DE CODE (le client refuse notes > 2 000 → hors_bornes, et la recette JSON-LD entière avec elle).
+  const [n2000, n2001, astral] = ['a'.repeat(2000), 'a'.repeat(2001), '😀'.repeat(2001)].map((d) => r({ description: d }).notes);
+  assert.deepEqual([n2000 === 'a'.repeat(2000), Array.from(n2001).length, n2001.endsWith('…'), Array.from(astral).length, astral.endsWith('…')], [true, 2000, true, 2000, true], 'description de 2 000 → identique ; 2 001 → coupée (≤ 2 000, « … ») ; 2 001 caractères astraux → coupée aussi');
   // Les blancs de contrôle, littéraux ou en entités, deviennent une espace (un saut de ligne coupe une étape) : jamais deux mots collés, jamais
   // « 2<tab>1/2 » lu « 21/2 ».
   const [TAB, VT, FF, CR] = [9, 11, 12, 13].map((c) => String.fromCharCode(c));

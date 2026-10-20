@@ -103,6 +103,9 @@ async function telechargerPage(href: string, { signal, hotesRefuses: refuses }: 
         try {
           r = await fetch(courant, { method: 'GET', redirect: 'manual', credentials: 'omit', signal: ctlSaut.signal, headers: { 'user-agent': 'Mitsu/0.10 (+https://neegans.github.io/mistu/)', accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1', 'accept-language': 'fr-CA,fr;q=0.9,en;q=0.5' } });
         } catch (e) { if (signal.aborted) throw e; return inaccessible; }
+        // Vague finale (SSRF, défense en profondeur) : le mur des redirections (valideAdresse sur chaque cible) suppose que le runtime honore
+        // redirect: 'manual'. Une réponse SUIVIE quand même (r.redirected) vient d'une adresse jamais revalidée : refusée, son corps jamais lu.
+        if (r.redirected) { void r.body?.cancel().catch(() => {}); return { erreur: 'interdit', statut: 422 }; }
         if (REDIRECTIONS.includes(r.status)) {
           void r.body?.cancel().catch(() => {}); // S-9 : le corps d'une redirection n'est jamais lu
           const loc = r.headers.get('location');

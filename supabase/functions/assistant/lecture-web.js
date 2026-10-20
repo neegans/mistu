@@ -156,9 +156,10 @@ function lignesDe(s) {
 }
 const couperPoints = (s, max) => { let i = 0; for (let k = 0; k < max && i < s.length; k += 1) i += s.codePointAt(i) > 0xffff ? 2 : 1; return i; };
 const borne = (s, max) => (s ? s.slice(0, couperPoints(s, max)) : '');
-// Coupé AU MOT (la seule troncature d'un contenu, dite par « … ») : la description d'une recette (I-B2).
+// Coupé AU MOT (la seule troncature d'un contenu, dite par « … ») : la description d'une recette (I-B2). Vague finale : la garde laissait passer
+// max + 1 points de code (le client refuse notes > 2 000 : la recette JSON-LD entière était perdue) ; gardée telle quelle à max points au plus.
 function auMot(s, max) {
-  if (s.length <= max || couperPoints(s, max + 1) >= s.length) return s;
+  if (couperPoints(s, max) >= s.length) return s;
   const garde = s.slice(0, couperPoints(s, max - 1));
   const espace = garde.lastIndexOf(' ');
   return (espace >= Math.floor(garde.length / 2) ? garde.slice(0, espace) : garde).trimEnd() + '…';

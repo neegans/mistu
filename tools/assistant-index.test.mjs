@@ -17,7 +17,14 @@ import { LIMITES_LECTURE } from '../supabase/functions/assistant/lecture-web.js'
 
 const ICI = path.dirname(fileURLToPath(import.meta.url));
 const RACINE = path.dirname(ICI);
-const INDEX_TS = process.env.INDEX_TS || path.join(RACINE, 'supabase', 'functions', 'assistant', 'index.ts');
+// Vague finale du lot B (comme LECTURE_WEB_JS, ronde 1 de la tache 1) : une copie n'est eprouvee que par un chemin ABSOLU HORS du depot (jamais un
+// module mute en place), et le chemin eprouve est imprime — une variable restee exportee ne fait jamais eprouver une copie en silence.
+const COPIE_INDEX = process.env.INDEX_TS;
+if (COPIE_INDEX !== undefined) {
+  if (!path.isAbsolute(COPIE_INDEX) || !path.relative(RACINE, COPIE_INDEX).startsWith('..')) throw new Error('INDEX_TS : chemin absolu hors du depot seulement : ' + COPIE_INDEX);
+  console.log('# INDEX_TS : module eprouve = ' + COPIE_INDEX);
+}
+const INDEX_TS = COPIE_INDEX || path.join(RACINE, 'supabase', 'functions', 'assistant', 'index.ts');
 const URL_LOGIQUE = pathToFileURL(path.join(RACINE, 'supabase', 'functions', 'assistant', 'logique.js')).href;
 const URL_LECTURE = pathToFileURL(path.join(RACINE, 'supabase', 'functions', 'assistant', 'lecture-web.js')).href;
 const URL_FAUX = pathToFileURL(path.join(ICI, 'faux', 'supabase.mjs')).href;
@@ -952,4 +959,18 @@ test('t12. Anthropic pendant une lecture : 429 et 400 relayes tels quels ; 500 �
     assert.deepEqual([r.status, JSON.parse(texte), faux.MAJ[0].v.statut], [rendu, corpsAttendu, rendu], 'Anthropic ' + recu);
     assert.ok(!texte.includes('sk-factice-serveur'));
   }
+});
+
+test('t13. vague finale (SSRF, defense en profondeur) : une reponse SUIVIE malgre redirect manual (r.redirected) → 422 interdit, corps annule, jamais lu, aucun appel au modele, journal 422', async () => {
+  remise();
+  let annule = false; let lu = false;
+  page({ page: async () => {
+    const r = new Response(new ReadableStream({ pull(c) { lu = true; c.enqueue(new TextEncoder().encode(PAGE_LD)); c.close(); }, cancel() { annule = true; } }, { highWaterMark: 0 }), { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } }); // highWaterMark 0 : pull seulement sur une lecture
+    Object.defineProperty(r, 'redirected', { value: true }); // un runtime qui aurait suivi la redirection (vers une adresse jamais revalidee)
+    return r;
+  } });
+  const r = await handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
+  await vider();
+  assert.deepEqual([r.status, await lire(r), annule, appelsPage().length, appelsModele().length, faux.MAJ[0].v.statut], [422, { erreur: 'interdit' }, true, 1, 0, 422]);
+  assert.equal(lu, false, 'le corps d une reponse suivie n est jamais lu');
 });
