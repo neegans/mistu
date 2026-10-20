@@ -29,3 +29,23 @@ export function libelleSource(recipe) {
   if (recipe?.source_url) { const lien = lienSignet(recipe.source_url); return lien.ok ? lien.hote : ''; }
   return recipe?.source_label || '';
 }
+
+// Doublon d'adresse (lot B, D-B7) : deux adresses désignent la même page quand elles sont égales une fois NORMALISÉES — schéma et hôte en
+// minuscules (URL le fait), identifiants et fragment retirés, paramètres de suivi retirés (utm_*, fbclid, gclid, casse libre ; l'ordre des
+// autres est gardé), barre finale indifférente (la racine « / » devient vide), port gardé s'il est explicite. http: et https: seulement ;
+// autre chose → null. Pur. Jamais une fusion : l'écran le dit et n'écrit rien.
+export function adresseNormalisee(href) {
+  let u;
+  try { u = new URL(String(href ?? '')); } catch { return null; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  u.username = ''; u.password = ''; u.hash = '';
+  for (const cle of [...u.searchParams.keys()]) { const c = cle.toLowerCase(); if (c.startsWith('utm_') || c === 'fbclid' || c === 'gclid') u.searchParams.delete(cle); }
+  return u.origin + u.pathname.replace(/\/+$/, '') + u.search;
+}
+// La première fiche dont l'adresse normalisée égale celle de `href` (une fiche sans source_url, ou à adresse illisible, est ignorée), sinon null.
+export function doublonDAdresse(recipes, href) {
+  const cible = adresseNormalisee(href);
+  if (!cible) return null;
+  return (Array.isArray(recipes) ? recipes : []).find((r) => typeof r?.source_url === 'string' && r.source_url !== '' && adresseNormalisee(r.source_url) === cible) || null;
+}
+

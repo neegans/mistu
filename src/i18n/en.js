@@ -464,4 +464,10 @@ export const EN = {
   "{n} imports à reprendre": "{n} imports to resume",
   "Sans livre": "No book",
   "Les références n’ont pas pu être créées. Réessaie.": "The references could not be created. Try again.",
+  // Lot B « Recette web complète », tâche 3 (spec § 3.5, § 3.5 bis) : ce que la lecture d'une page dit d'elle-même.
+  "La page était longue : la fin n’a pas été lue.": "The page was long: the end was not read.",
+  "[adresse retirée]": "[address removed]",
+  "adresse retirée dans la ligne {n}": "address removed from line {n}",
+  "adresse retirée dans l’étape {n}": "address removed from step {n}",
+  "adresse retirée dans les notes": "address removed from the notes",
 };

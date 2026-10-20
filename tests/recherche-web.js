@@ -66,10 +66,10 @@ export async function runRechercheWebTests({ eq, ok }) {
   // --- § 8 : version 0.9.0 (lot A, import ciblé ; 0.8.1 à la présentation du serveur), SHELL
   {
     const sw = await lire('../sw.js');
-    ok(/VERSION = 'cuisine-os-v0\.9\.0-\d+'/.test(sw), 'sw.js : VERSION 0.9.0');
+    ok(/VERSION = 'cuisine-os-v0\.10\.0-\d+'/.test(sw), 'sw.js : VERSION 0.10.0');
     ok(sw.includes("'./src/core/bornes.js'"), 'SHELL : ./src/core/bornes.js');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.9.0', 'APP_VERSION 0.9.0');
+    eq(APP_VERSION, '0.10.0', 'APP_VERSION 0.10.0');
   }
 
   // --- § 7.1 : supportsWebSearch lu par l'écran (F6) — seule la passerelle (une SESSION) cherche sur le web

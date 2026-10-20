@@ -21,9 +21,10 @@ export const MOTIF_ADRESSE = /(https?:\/\/|www\.|[a-z0-9-]+\.[a-z]{2,}\/)/iu;
 // CONNU et assumé : « Le sel.Ca y est » (point collé et « ca ») est écarté ; « 15 min. Le », « aneth.Tu », « 2.0 » ne le sont pas.
 export const MOTIF_HOTE = /(?<![\p{L}\p{N}@._-])[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9-]+)*\.(?:com|net|org|ca|quebec|fr|be|ch|io|co|info|app|blog|xyz|site|online|shop|me|tv|us|uk|ly|gl)(?![\p{L}\p{N}-])/iu;
 // Le texte est normalisé POUR LE TEST seulement (NFKC, puis « 。 » U+3002 et « ｡ » U+FF61 → « . », « ∕ » U+2215 et « ⁄ » U+2044 → « / ») : le texte affiché
-// n'est jamais modifié.
-function porteUneAdresse(texte) {
-  const n = texte.normalize('NFKC').replace(/[\u{3002}\u{FF61}]/gu, '.').replace(/[\u{2215}\u{2044}]/gu, '/');
+// n'est jamais modifié. Exportés (lot B) : la lecture d'une page web applique la même convention à son contenu (src/domain/lecture-web.js).
+export const normaliserPourAdresse = (texte) => texte.normalize('NFKC').replace(/[\u{3002}\u{FF61}]/gu, '.').replace(/[\u{2215}\u{2044}]/gu, '/');
+export function porteUneAdresse(texte) {
+  const n = normaliserPourAdresse(texte);
   return MOTIF_ADRESSE.test(n) || MOTIF_HOTE.test(n);
 }
 
@@ -144,7 +145,7 @@ export function dateLisible(texte, langue) {
 const SANS_FICHE = Object.freeze({ presentation: null, temps_min: null, difficulte: null, ingredients: null });
 const propre = (o, cle) => (Object.hasOwn(o, cle) ? o[cle] : undefined);
 const entierDe = (x, max) => (Number.isInteger(x) && x >= 1 && x <= max ? x : null);
-function ficheDe(c) {
+export function ficheDe(c) {
   const p = propre(c, 'presentation');
   const d = propre(c, 'difficulte');
   const jeton = typeof d === 'string' ? d.trim().toLowerCase() : ''; // pas de String(d) : un objet à toString hostile lèverait
@@ -155,6 +156,13 @@ function ficheDe(c) {
     difficulte: DIFFICULTES.includes(jeton) ? jeton : null,
     ingredients: entierDe(propre(c, 'ingredients'), LIMITES_WEB.ingredientsMax),
   };
+}
+// Lot B (D-B6) : les repères d'une CARTE de résultat (ses quatre champs, déjà lus par ficheDe mais revenus de la mémoire de l'écran) REVALIDÉS par
+// ficheDe ; null si les quatre valent null. « Garder et lire » les garde sur le signet (web_reperes).
+export function reperesDe(lien) {
+  if (!lien || typeof lien !== 'object') return null;
+  const f = ficheDe(lien);
+  return f.presentation === null && f.temps_min === null && f.difficulte === null && f.ingredients === null ? null : f;
 }
 export function choisirLiens(lu, { max = LIMITES_WEB.liens } = {}) {
   const resultats = Array.isArray(lu?.resultats) ? lu.resultats : [];

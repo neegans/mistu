@@ -74,7 +74,7 @@ export const MAX_TOKENS_EXTRACTION = 6000;
 export const REPONSE_BRUTE_MAX = 16000;
 
 // Un refus d'extraction nommé : raison ∈ coupe (stop_reason max_tokens) | illisible (aucun JSON, forme impossible) | hors_bornes | vide (zéro ligne
-// ET zéro étape). Porte la réponse brute (coupée), le stopReason et le modèle quand l'appel les a donnés : le journal les garde sur echec
+// ET zéro étape) | lien (lot B, R-B-2 : une adresse web dans le TITRE d'une recette lue sur le web — src/domain/lecture-web.js). Porte la réponse brute (coupée), le stopReason et le modèle quand l'appel les a donnés : le journal les garde sur echec
 // (reponse_brute seule, Review Focus 4). Le message est la raison, comme les Error de complete : texteEchecAssistant les lit de la même façon.
 export class ErreurExtraction extends Error {
   constructor(raison, { texteBrut = null, stopReason = null, modele = null } = {}) {

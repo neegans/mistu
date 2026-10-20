@@ -30,7 +30,9 @@ export const transitionPermise = (de, vers) => typeof de === 'string' && Object.
 // celles de l'extraction et du journal. Un 413 n'est PAS une raison : echecDomaine l'écrit `requete` + extra `trop_lourd` (ronde 1 : plus de valeur
 // morte dans la liste). `non_connecte` y figure (la session peut disparaître entre le rendu et le clic : complete() le lève).
 export const RAISONS_ECHEC = Object.freeze(['non_connecte', 'non_admis', 'quota', 'trop_de_demandes', 'requete', 'serveur', 'delai', 'reseau', 'interne', 'reponse_illisible',
-  'annule', 'coupe', 'illisible', 'hors_bornes', 'vide', 'interrompu', 'incertain']);
+  'annule', 'coupe', 'illisible', 'hors_bornes', 'vide', 'interrompu', 'incertain',
+  // Lot B (D-B14) : les refus d'une lecture web (passerelle) et `lien` (une adresse dans le TITRE lu, R-B-2).
+  'interdit', 'inaccessible', 'pas_une_page', 'page_trop_lourde', 'page_vide', 'lien']);
 
 // --- Discordance (spec D-6, § 4.3.3, Review Focus 2). Mots vides : la liste FERMÉE fr/en de la spec, possessifs compris.
 export const MOTS_VIDES = Object.freeze(['le', 'la', 'les', 'l', 'de', 'du', 'des', 'd', 'au', 'aux', 'à', 'et', 'en', 'un', 'une', 'ma', 'mon', 'mes', 'ta', 'ton', 'tes', 'sa', 'son', 'ses',

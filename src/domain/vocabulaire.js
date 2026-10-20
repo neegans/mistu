@@ -2,7 +2,7 @@
 // création IA, signet, éditeur) AVANT toute écriture — jamais un mur dans db.mutate : la restauration, la réception et les passes du
 // démarrage restent tolérantes. Une valeur hors liste lève une erreur nommée (magasin, champ, valeur). Pour une recette, un champ absent
 // (ou nul) est toléré : une fiche ancienne peut ne pas le porter. Pour un import, le statut est obligatoire : un journal sans état n'existe pas.
-import { AVAILABILITY, VERIFICATION, STATUTS_IMPORT } from '../model/schema.js';
+import { AVAILABILITY, VERIFICATION, STATUTS_IMPORT, SOURCE_KINDS } from '../model/schema.js';
 
 // Le message ne recopie jamais une valeur hostile en entier : une chaîne est coupée à 80 points de code, le reste est décrit par son type.
 const decrire = (valeur) => (typeof valeur === 'string' ? [...valeur].slice(0, 80).join('') : (valeur === null || ['number', 'boolean', 'undefined'].includes(typeof valeur) ? String(valeur) : typeof valeur));
@@ -22,6 +22,7 @@ const VOCABULAIRE = {
   recipes: {
     availability: { liste: AVAILABILITY, obligatoire: false },
     verification_state: { liste: VERIFICATION, obligatoire: false },
+    source_kind: { liste: SOURCE_KINDS, obligatoire: false }, // lot B (D-B6) : absent ou nul sur toute fiche d'avant le lot
   },
   imports: {
     status: { liste: STATUTS_IMPORT, obligatoire: true },
