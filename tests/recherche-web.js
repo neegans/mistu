@@ -63,7 +63,7 @@ export async function runRechercheWebTests({ eq, ok }) {
     ok(!(await lire('../src/domain/pairing.js')).includes('notice'), 'domaine : pairing.js ne propage plus de notice');
   }
 
-  // --- § 8 : version 0.9.0 (lot A, import ciblé ; 0.8.1 à la présentation du serveur), SHELL
+  // --- § 8 : version 0.10.0 (lot B, recette web ; 0.9.0 au lot A, 0.8.1 à la présentation du serveur), SHELL
   {
     const sw = await lire('../sw.js');
     ok(/VERSION = 'cuisine-os-v0\.10\.0-\d+'/.test(sw), 'sw.js : VERSION 0.10.0');

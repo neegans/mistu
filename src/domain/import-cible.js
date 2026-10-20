@@ -130,12 +130,13 @@ export function fabriquerExtraction(resultat, { reference, versions = [], pages 
   };
   assertVocabulaire(recipe, 'recipes'); // D-12 : le fabricant vérifie le vocabulaire fermé avant toute écriture
   const pageUpdates = presentes.map((id, i) => ({ ...parId.get(id), kind: 'recipe', position: i + 1, printed_page: parId.get(id).printed_page ?? (i === 0 ? recipe.printed_page ?? null : null) }));
-  // I-5 (vague finale, m5) : ce que la personne a ÉCRIT et qui peut être courant — une saisie à la main (extraction) ou une correction — jamais une
-  // adaptation (« Ma version », un remplacement d'ingrédient) ni une traduction, qui ne deviennent pas courantes : sinon « Garder ma version » gardait
-  // courante l'ancienne lecture partielle de l'assistant.
-  const remplacement = versions.some((v) => v?.provenance?.generated_by !== 'ai' && (v?.kind === 'extraction' || v?.kind === 'correction'));
+  const remplacement = versions.some(versionEcrite);
   return { recipe, version, pageUpdates, remplacement };
 }
+// I-5 (vague finale, m5) : ce que la personne a ÉCRIT et qui peut être courant — une saisie à la main (extraction) ou une correction — jamais une
+// adaptation (« Ma version », un remplacement d'ingrédient) ni une traduction, qui ne deviennent pas courantes : sinon « Garder ma version » gardait
+// courante l'ancienne lecture partielle de l'assistant. Exportée (lot B, ronde 1 de la tâche 3) : la lecture web (versionHumaine, R-B-19) lit la même.
+export const versionEcrite = (v) => v?.provenance?.generated_by !== 'ai' && (v?.kind === 'extraction' || v?.kind === 'correction');
 
 // --- Couverture d'une relecture (ronde finale 2, I-5) : les pages de la version COURANTE (provenance.source_page_ids, identifiants seulement,
 // dédoublonnés, dans leur ordre) qu'une lecture ne relit pas (`lues` : les pages de la nouvelle version). Tant qu'il en reste, l'écran demande

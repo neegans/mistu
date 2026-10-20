@@ -1884,7 +1884,7 @@ export async function runAjouterTests({ eq, ok }) {
   {
     const sw = await lire('../sw.js');
     ok(sw.length > 300 && sw.includes('SHELL'), `statique sw.js : le source est bien lu (${sw.length} caractères, SHELL présent) — sans quoi les inclusions ci-dessous ne prouveraient rien (S4)`);
-    for (const m of ['./src/ui/puces.js', './src/ui/livre-ajout.js', './src/ui/accueil-livre.js', './src/ui/signet.js', './src/core/image.js', './src/core/blob-urls.js', './src/core/lien.js', './src/core/isbn.js']) ok(sw.includes(`'${m}'`), `SHELL : ${m}`);
+    for (const m of ['./src/ui/puces.js', './src/ui/livre-ajout.js', './src/ui/accueil-livre.js', './src/ui/signet.js', './src/core/image.js', './src/core/blob-urls.js', './src/core/lien.js', './src/core/isbn.js', './src/domain/lecture-web.js']) ok(sw.includes(`'${m}'`), `SHELL : ${m}`);
     ok(/VERSION = 'cuisine-os-v0\.10\.0-\d+'/.test(sw), 'sw.js : VERSION 0.10.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
     eq(APP_VERSION, '0.10.0', 'APP_VERSION 0.10.0');

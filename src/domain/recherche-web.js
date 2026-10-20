@@ -15,7 +15,10 @@ export const OUTIL_RECHERCHE = 'web_search_20250305';
 export const DIFFICULTES = Object.freeze(['facile', 'moyen', 'exigeant']); // les trois jetons de difficulté, en français dans les deux langues
 // Une adresse web dans une présentation (I2) : schéma, « www. » ou hôte suivi d'un chemin. La présentation est la voix de l'assistant,
 // pas une source : une adresse n'y a pas sa place (les liens sont les résultats bruts, I-A). Testé sur le texte NFKC (pleine chasse).
-export const MOTIF_ADRESSE = /(https?:\/\/|www\.|[a-z0-9-]+\.[a-z]{2,}\/)/iu;
+// Lot B, ronde 1 de la tâche 3 : le départ hôte n'est tenté qu'au DÉBUT d'une suite de [a-z0-9-] (lookbehind) — mêmes verdicts (une correspondance
+// au milieu d'une suite en a toujours une au début), mais linéaire : sans lui, une longue suite sans point coûtait un temps quadratique, payé à
+// chaque ligne, étape et note d'une lecture web (src/domain/lecture-web.js), à chaque relecture.
+export const MOTIF_ADRESSE = /(https?:\/\/|www\.|(?<![a-z0-9-])[a-z0-9-]+\.[a-z]{2,}\/)/iu;
 // L'HÔTE NU (« la recette est sur evil.com ») : un nom de domaine dont le dernier segment est dans une liste FERMÉE de domaines de premier
 // niveau, ni précédé d'une lettre, d'un chiffre, de « @ », « . », « _ » ou « - », ni suivi d'une lettre, d'un chiffre ou d'un tiret. Faux positif
 // CONNU et assumé : « Le sel.Ca y est » (point collé et « ca ») est écarté ; « 15 min. Le », « aneth.Tu », « 2.0 » ne le sont pas.
