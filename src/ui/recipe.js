@@ -4,7 +4,7 @@ import { el, toast, chooseDialog, promptDialog, confirmDialog, formatDate, downl
 import { t, label } from '../core/i18n.js';
 import { navigate, buildQuery, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
-import { displayUrl, safeDisplayType } from '../sync/mime.js';
+import { displayUrl, typeAffichage } from '../sync/mime.js';
 import { urlDeBlob } from '../core/blob-urls.js';
 import { currentVersion } from '../domain/search.js';
 import { scaleVersion } from '../domain/scaling.js';
@@ -396,7 +396,7 @@ async function photoDuPlat(recipe) {
   if (typeof recipe?.photo_sha256 !== 'string' || !recipe.photo_sha256) return null;
   let fichier = null;
   try { fichier = await repo.getFile(recipe.photo_sha256); } catch { fichier = null; }
-  if (!safeDisplayType(fichier?.mime)?.startsWith('image/')) return null;
+  if (!typeAffichage(fichier)?.startsWith('image/')) return null;
   const src = displayUrl(fichier, urlDeBlob);
   if (!src) return null;
   return el('figure', { class: 'photo-plat', dataset: { role: 'photo-plat' }, style: { margin: '0 0 .8rem' } },

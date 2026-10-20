@@ -5,6 +5,7 @@
 // `conflit` sur assistant_config ne produit JAMAIS d'entrée `conflits` — retirer, et réécrire la version du compte
 // seulement aux conditions écrites dans la branche `conflit` ci-dessous.
 import { cleDe } from './lots.js';
+import { fusionnerFichier } from './fichiers.js';
 
 export function appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales = {}, conflitsRenvoyes = new Set() }) {
   const seqsParCle = new Map();
@@ -41,6 +42,14 @@ export function appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales = 
     rangerSiRenvoye(k); // le serveur a bien pris cette version, seule son heure a changé
     const element = lot.elements.find((e) => cleDe(e) === k);
     if (!element || !element.data || element.deleted) continue;
+    if (a.store === 'files') {
+      // D-G16 : `element.data` est la projection, sans blob — un { ...data } remplacerait la ligne et perdrait l'original. Sans fiche locale
+      // connue (appel sans contexte), rien n'est réécrit pour files.
+      const locale = fichesLocales[k];
+      if (!Object.hasOwn(fichesLocales, k) || !locale || locale.updated_at !== element.updated_at) continue;
+      (reecrire.files ||= []).push(fusionnerFichier(locale, element.data, a.updated_at));
+      continue;
+    }
     // R-L3-7 : l'ajustement ne réécrit la fiche que si elle n'a pas bougé ICI pendant l'aller-retour. Si la personne
     // l'a modifiée (updated_at différent) ou supprimée (null), rien n'est réécrit : cette version-là a sa propre
     // entrée de file et repartira. Un appel sans contexte (la clé n'est pas dans fichesLocales) réécrit comme avant.

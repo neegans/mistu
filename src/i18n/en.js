@@ -518,4 +518,12 @@ export const EN = {
   "Le titre lu contenait une adresse web : lecture refusée. Ouvre la page.": "The title read contained a web address: reading refused. Open the page.",
   // Lot B, tâche 6 (spec § 4.7) : une lecture web dans la section « Imports » d'Ajouter.
   "Lien web · {h}": "Web link · {h}",
+  // Lot G : nom d'un fichier dans Réglages (nomFichier).
+  "Page {p} · {livre}": "Page {p} · {livre}",
+  "page non numérotée · {livre}": "unnumbered page · {livre}",
+  "Page {p}": "Page {p}",
+  "page non numérotée": "unnumbered page",
+  "Couverture · {livre}": "Cover · {livre}",
+  "Photo du plat · {titre}": "Dish photo · {titre}",
+  "Photo importée · {date}": "Imported photo · {date}",
 };

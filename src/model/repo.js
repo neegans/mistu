@@ -7,6 +7,7 @@ import { emit } from '../core/bus.js';
 import { syncNow, getClockOffset } from '../sync/clock.js';
 import { nettoyerChaines, porteDesCaracteresDeControle } from '../sync/lots.js';
 import { resolveMime } from '../sync/mime.js';
+import { fusionnerOctetsRecus } from '../sync/fichiers.js';
 import { normaliserConfigAssistant, LIGNE_ASSISTANT } from '../domain/assistant-config.js';
 import { assertVocabulaire } from '../domain/vocabulaire.js';
 import { IMPORTS_OUVERTS, KINDS_PAGES } from '../domain/import-cible.js'; // une définition (lot A, tâche 6, ronde 1) : I-2 et les sortes que le chemin photo écrit (lot B : « web » exclue, P-1)
@@ -76,6 +77,7 @@ export async function init() {
   await migrerConfigAssistant();
   await effacerCleLocale();
   await purgerFilesEnFile();
+  await convertirRemoteBooleen();
   await marquerInterrompus();
   await purgerImportsAnciens();
 }
@@ -251,6 +253,18 @@ async function purgerFilesEnFile() {
   return seqs.length;
 }
 
+// Passe unique (lot G, D-G12) : `remote` change de nature — le booléen `true` de L3 (« ligne reçue sans octets ») est retiré des lignes files.
+// Garde dans la même transaction, updated_at conservé, origine 'device' (rien en file). Une bibliothèque saine ne réécrit aucune ligne.
+const REMOTE_V2_GUARD = 'files_remote_v2';
+export async function convertirRemoteBooleen() {
+  if ((await db.get('sync_state', REMOTE_V2_GUARD))?.value === 1) return 0;
+  const lignes = (await db.getAll('files')).filter((r) => r?.remote === true);
+  const puts = { sync_state: [{ key: REMOTE_V2_GUARD, value: 1 }] };
+  if (lignes.length) puts.files = lignes.map(({ remote: _booleen, ...reste }) => reste);
+  await db.mutate({ puts, origin: 'device' });
+  return lignes.length;
+}
+
 // Rattrapage unique (R26) : les fiches écrites AVANT ce lot n'ont pas d'updated_at ; sans lui, chacune serait
 // rejetée par sync_push et mise en quarantaine immédiate (spec § 5.3). Elles sont horodatées une fois, à la montée.
 // Origine 'device' : la capture ne retient que 'local' (src/sync/outbox.js) — un rattrapage n'est pas une écriture
@@ -283,6 +297,7 @@ const DEFAULT_SETTINGS = {
   sync_activity: false,       // historique de consultation envoyé au serveur : jamais sans ce geste (spec § 4.2)
   last_backup: null,          // { at, counts, files, bytes }
   device_name: '',
+  upload_quality: 'reduite', // qualité d'envoi des photos (lot G, D-G3) : par appareil, jamais synchronisée
   // `llm` n'est plus un réglage (K-1) : la configuration de l'assistant vit dans assistant_config, composée par getSettings.
 };
 
@@ -470,9 +485,16 @@ export function groupBy(rows, key) {
 export async function putFile(sha256, blob, meta = {}) {
   const existing = await db.get('files', sha256);
   if (existing && existing.blob instanceof Blob) return existing;
-  const { origin, ...rest } = meta;
+  const { origin, ...brut } = meta;
+  const rest = nettoyerChaines(brut); // B-27 : un original_filename à caractère de contrôle faisait un conflit perpétuel dès que la ligne part
+  if (origin === 'remote' && existing) {
+    // Lot G (§ 3.1, F-20) : des octets reçus du serveur ne touchent ni size, ni mime, ni updated_at — la règle de la passe, la même fonction.
+    const row = fusionnerOctetsRecus(existing, blob);
+    await db.mutate({ puts: { files: [row] }, origin: 'remote' });
+    return row;
+  }
   // Le type connu de la ligne existante compte aussi : une ligne reçue du serveur porte son mime sans octets.
-  const { mime, syncable } = resolveMime(blob.type || meta.mime || existing?.mime, meta.original_filename || existing?.original_filename);
+  const { mime, syncable } = resolveMime(blob.type || rest.mime || existing?.mime, rest.original_filename || existing?.original_filename);
   const now = syncNow();
   // Les champs calculés passent après meta : ni le type résolu ni la taille réelle ne se font écraser.
   const row = { ...(existing || {}), ...rest, sha256, blob, mime, syncable, size: blob.size, created_at: existing?.created_at || now, updated_at: now };

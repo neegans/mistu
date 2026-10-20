@@ -125,11 +125,8 @@ export async function createArchive(db, { deviceName = '' } = {}) {
   let bytesTotal = 0, missingFiles = 0;
   for (const file of snapshot.files) {
     if (!HASH.test(file.sha256)) throw new Error('Fichier source invalide : ' + file.sha256);
-    if (!(file.blob instanceof Blob)) {
-      // Page référencée mais pas encore téléchargée (spec § 5.4) : comptée, absente de l'archive.
-      if (file.remote) { missingFiles++; continue; }
-      throw new Error('Fichier source invalide : ' + file.sha256);
-    }
+    // Page référencée mais pas encore téléchargée (spec § 5.4) : comptée, absente de l'archive.
+    if (!(file.blob instanceof Blob)) { missingFiles++; continue; } // D-G12 : sans octets ici = manquante, quelle que soit remote
     const data = new Uint8Array(await file.blob.arrayBuffer());
     if (await sha256Hex(data) !== file.sha256) throw new Error('Fichier source endommagé : ' + file.sha256);
     const mime = file.mime || file.blob.type || 'application/octet-stream';
@@ -355,8 +352,9 @@ export async function verifyRestored(db, inspection, { mode = 'merge', horodate 
     }
   }
   const filesBySha = new Map(snapshot.files.map((row) => [row.sha256, row]));
-  // Une page référencée sans octets (remote, jamais téléchargée) n'entre pas dans le décompte (spec § 5.4).
-  const comparableFiles = snapshot.files.filter((row) => row.blob instanceof Blob || !row.remote);
+  // Une page référencée sans octets (jamais téléchargée ici) n'entre pas dans le décompte (spec § 5.4) — la présence du blob, quelle que soit
+  // remote (D-G12, lot G).
+  const comparableFiles = snapshot.files.filter((row) => row.blob instanceof Blob);
   if (mode === 'replace' && comparableFiles.length !== inspection.payload.files.length) diffs.push('files : décompte différent après restauration');
   for (const file of inspection.payload.files) {
     const row = filesBySha.get(file.sha256);

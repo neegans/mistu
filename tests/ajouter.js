@@ -2,8 +2,9 @@
 // Modèles purs et rendus DOM à gestes injectés ; bases jetables seulement ; aucun réseau ; aucun history.* réel.
 
 // Filet i18n (F13) : chaque t('…') de ces modules doit avoir son entrée en.js. Exportées : tests/import-cible.js vérifie que son module y figure.
-// MODULES_NEUFS : les modules créés par les lots (lien.js de R-UX-11 et isbn.js inclus) + add.js réécrit + l'écran d'import ciblé (lot A, tâche 4).
-export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js', '../src/ui/import-cible.js', '../src/domain/lecture-web.js', '../src/ui/import-web.js', '../src/ui/vol.js'];
+// MODULES_NEUFS : les modules créés par les lots (lien.js de R-UX-11 et isbn.js inclus) + add.js réécrit + l'écran d'import ciblé (lot A, tâche 4)
+// + le module des fichiers du lot G.
+export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js', '../src/ui/import-cible.js', '../src/domain/lecture-web.js', '../src/ui/import-web.js', '../src/ui/vol.js', '../src/sync/fichiers.js'];
 // CHAINES_NEUVES_AILLEURS reconstituée depuis le code réel (git diff main...HEAD, ensemble main vs HEAD des clés t(),
 // pas seulement les lignes ajoutées : une ligne réécrite pour une autre raison peut porter une chaîne déjà sur main —
 // book.js:'Cuisines', recipe-edit.js:'Cuisines / régions' et import.js:'— Aucun livre (à associer plus tard) —'
@@ -1925,9 +1926,9 @@ export async function runAjouterTests({ eq, ok }) {
     const sw = await lire('../sw.js');
     ok(sw.length > 300 && sw.includes('SHELL'), `statique sw.js : le source est bien lu (${sw.length} caractères, SHELL présent) — sans quoi les inclusions ci-dessous ne prouveraient rien (S4)`);
     for (const m of ['./src/ui/puces.js', './src/ui/livre-ajout.js', './src/ui/accueil-livre.js', './src/ui/signet.js', './src/core/image.js', './src/core/blob-urls.js', './src/core/lien.js', './src/core/isbn.js', './src/domain/lecture-web.js']) ok(sw.includes(`'${m}'`), `SHELL : ${m}`);
-    ok(/VERSION = 'cuisine-os-v0\.10\.0-\d+'/.test(sw), 'sw.js : VERSION 0.10.0');
+    ok(/VERSION = 'cuisine-os-v0\.11\.0-\d+'/.test(sw), 'sw.js : VERSION 0.11.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.10.0', 'APP_VERSION 0.10.0');
+    eq(APP_VERSION, '0.11.0', 'APP_VERSION 0.11.0');
     const { GOOGLE_BOOKS } = await import('../src/sync/config.js');
     ok(typeof GOOGLE_BOOKS?.key === 'string' && (GOOGLE_BOOKS.key === '' || /^AIza[0-9A-Za-z_-]{35}$/.test(GOOGLE_BOOKS.key)), 'config : la clé Google Books est vide ou au format d’une clé d’API publique — un test de forme, jamais de valeur (S2/F2)');
   }

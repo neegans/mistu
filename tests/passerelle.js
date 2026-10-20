@@ -669,8 +669,8 @@ export async function runPasserelleTests({ eq, ok }) {
     const passerelle = lus.find(([m]) => m === 'src/domain/passerelle.js')?.[1] ?? '';
     ok(!/from '\.\.\/ui\//.test(passerelle), 'passerelle.js : n’importe rien de src/ui/ (couche domaine)');
     ok(sw.includes("'./src/domain/passerelle.js'"), 'SHELL : ./src/domain/passerelle.js');
-    ok(/VERSION = 'cuisine-os-v0\.10\.0-\d+'/.test(sw), 'sw.js : VERSION 0.10.0');
+    ok(/VERSION = 'cuisine-os-v0\.11\.0-\d+'/.test(sw), 'sw.js : VERSION 0.11.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.10.0', 'APP_VERSION 0.10.0');
+    eq(APP_VERSION, '0.11.0', 'APP_VERSION 0.11.0');
   }
 }

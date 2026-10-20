@@ -1,18 +1,14 @@
 // Capture des écritures dans la même transaction que la donnée (spec § 5.2) : une seule porte, db.mutate.
 // Aucun envoi ici : la file est seulement remplie ; la vider est le travail de L3 (src/sync/push.js).
 import { SYNC_STORES } from '../model/schema.js';
-import { keyOf } from './tables.js';
+import { keyOf, remoteDeCeCompte } from './tables.js';
 import { syncNow } from './clock.js';
 
-// R-L3-22 : en L3, AUCUNE ligne « files » n'entre en file — ni une image parfaitement synchronisable, ni un type
-// hors liste. Les octets des fichiers sont L4 (R55), donc rien ne pouvait envoyer ces entrées avant L4 : dès la
-// première photo, « À envoyer : N » et la pastille affichaient en permanence un nombre qui ne redescendait plus, et
-// le motif « fichier en attente » posé par `push.js` n'était affiché nulle part. C'est exactement l'attente que
-// personne ne tient que R52 a voulu éviter — et c'est le compteur que le parcours § 7.3 n° 1 demande de regarder.
-// L4 remettra `files` en file, avec son envoi initial (dont le marqueur n'est volontairement pas posé ici) et la
-// liste blanche de types de `src/sync/mime.js`, qui décide ce qui part vers le serveur.
-// Les entrées `files` DÉJÀ en file, capturées par L2, sont retirées une fois par `repo.init()` (même ruling).
-const SYNCHRONISEES = SYNC_STORES.filter((store) => store !== 'files');
+// L4 (D-G8) : une ligne files n'entre en file QUE quand ses octets sont confirmés — remote valide de ce compte — et jamais une
+// suppression. (R-L3-22, L3 : aucune ligne « files » n'entrait en file, faute d'octets à envoyer — « À envoyer : N » ne redescendait
+// plus ; la capture ne retient toujours pas une photo posée sans copie serveur, ni un type hors liste — syncable faux.) Les entrées
+// `files` capturées par L2 restent retirées une fois par `repo.init()` (même ruling).
+const SYNCHRONISEES = SYNC_STORES;
 
 // Copie de la fiche au moment de la suppression, sans laisser une clé héritée du prototype passer pour un payload.
 function payloadFor(payloads, store, key) {
@@ -29,12 +25,14 @@ export function installCapture(db, { getUserId = () => null, isActivitySynced = 
     const wanted = (store) => SYNCHRONISEES.includes(store) && (store !== 'library_activity' || isActivitySynced()) && (store !== 'assistant_config' || configSuitLeCompte());
     for (const [store, list] of Object.entries(puts)) {
       if (!wanted(store)) continue;
+      if (store === 'files') { for (const r of list) if (r?.syncable !== false && remoteDeCeCompte(r?.remote, user_id)) rows.push({ user_id, store, id: keyOf(store, r), op: 'put', updated_at: r.updated_at || null, tries: 0 }); continue; }
       for (const r of list) {
         rows.push({ user_id, store, id: keyOf(store, r), op: 'put', updated_at: r.updated_at || null, tries: 0 });
       }
     }
     for (const [store, keys] of Object.entries(deletes)) {
       if (!wanted(store)) continue;
+      if (store === 'files') continue; // D-G15 : une suppression locale de files n'est JAMAIS capturée
       for (const k of keys) {
         const payload = payloadFor(payloads, store, k);
         // R-L3-21 : une suppression est un ÉVÉNEMENT, et sa tombale porte l'instant de SON GESTE — jamais l'heure de

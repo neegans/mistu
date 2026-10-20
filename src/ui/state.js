@@ -194,6 +194,8 @@ export async function relireReglages() {
 }
 
 export const isActivitySynced = () => reglages.sync_activity === true;
+// Qualité d'envoi des photos (lot G, § 3.3) : relue à CHAQUE fichier par la passe (B-16) ; une valeur inconnue vaut Réduite.
+export const qualiteEnvoi = () => (reglages.upload_quality === 'originale' ? 'originale' : 'reduite');
 
 // Relecture demandée par le BUS (par opposition aux appels explicites, que leur appelant attend) : différée d'un
 // tour de boucle, puis abandonnée si plus aucune base n'est ouverte. Raison (R-L3-17) : `Database.open()` rouvre

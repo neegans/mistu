@@ -46,6 +46,7 @@ function creerServeur() {
     if (u === null) return { store, id, reason: 'updated_at' };
     // La clé primaire portée par `data` doit valoir `id`, comme `d->>(keys->>s) is distinct from i`.
     if (data && data[clePrimaire(store)] !== id) return { store, id, reason: 'cle' };
+    if (store === 'files' && data && Object.hasOwn(data, 'blob')) return { store, id, reason: 'forme' }; // check (not (data ? 'blob')) de 0001 : les octets ne voyagent jamais dans data
     const table = (lignes[store] ||= {});
     const courante = table[id];
     if (!courante) {

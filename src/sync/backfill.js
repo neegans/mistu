@@ -2,18 +2,18 @@
 // par des marqueurs — pas par user_id. Reprenable : une table interrompue est rejouée en entier (le dédoublonnage de
 // l'envoi absorbe les doublons) ; le marqueur part dans la MÊME transaction que le dernier morceau.
 import { SYNC_STORES } from '../model/schema.js';
-import { keyOf } from './tables.js';
+import { keyOf, remoteDeCeCompte } from './tables.js';
 
 const MARQUEUR = (table) => `backfill:${table}`;
 
-// R-L3-22 : `files` est écartée de l'envoi initial en L3 — ses octets sont L4 (R55), et mettre une bibliothèque
-// entière de photos en file aurait figé « À envoyer : N » sur un nombre que rien ne pouvait faire redescendre.
-// Son marqueur `backfill:files` n'est donc PAS posé : L4 trouvera la table entière à envoyer, sans rattrapage.
-// Les tables candidates sont nommées une fois, et c'est aussi elles que compte la progression affichée.
+// L4 (D-G8) : `files` est candidate — mais seules ses lignes syncables à remote valide de CE compte entrent en file (les
+// octets sont déjà au serveur) ; son marqueur `backfill:files` est posé comme les autres. (R-L3-22, L3 : `files` en était
+// écartée, faute d'octets à envoyer.) Les tables candidates sont nommées une fois, et c'est aussi elles que compte la
+// progression affichée.
 // Spec assistant-par-le-compte K-3 : `assistant_config` n'est candidate que sur un appareil de production
 // (`configSuitLeCompte`, faux par défaut — R-CPT-1).
 export function tablesCandidates({ isActivitySynced = () => false, configSuitLeCompte = () => false } = {}) {
-  return SYNC_STORES.filter((t) => t !== 'files' && (t !== 'library_activity' || isActivitySynced()) && (t !== 'assistant_config' || configSuitLeCompte()));
+  return SYNC_STORES.filter((t) => (t !== 'library_activity' || isActivitySynced()) && (t !== 'assistant_config' || configSuitLeCompte()));
 }
 
 export function tablesAEnvoyer({ marqueurs = {}, isActivitySynced = () => false, configSuitLeCompte = () => false }) {
@@ -36,7 +36,7 @@ export async function envoiInitial({ db, getUserId, isActivitySynced = () => fal
   const user_id = getUserId();
   for (const [i, table] of tables.entries()) {
     surProgression({ phase: 'envoi_initial', table, n: i + 1, total });
-    const lignes = await db.getAll(table);
+    const lignes = (await db.getAll(table)).filter((r) => table !== 'files' || (r?.syncable !== false && remoteDeCeCompte(r?.remote, user_id)));
     for (let debut = 0; debut < Math.max(lignes.length, 1); debut += tailleMorceau) {
       const morceau = lignes.slice(debut, debut + tailleMorceau);
       const dernier = debut + tailleMorceau >= lignes.length;

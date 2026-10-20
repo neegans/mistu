@@ -8,6 +8,7 @@
 // clic — et « Garder celle d'ailleurs » écrirait alors la version qui vient de PERDRE l'arbitrage I7.
 import { syncNow } from './clock.js';
 import { nettoyerChaines } from './lots.js';
+import { fusionnerFichier } from './fichiers.js';
 
 // Rend `true` si le geste a été appliqué. `garderIci` écrit avec origin 'local' EXPRÈS : c'est la capture qui remet
 // la fiche en file, et c'est précisément le renvoi voulu. Le retrait du conflit voyage dans la même transaction et
@@ -55,7 +56,12 @@ export async function garderAilleurs(db, conflit) {
   const deletes = { sync_conflicts: [conflit.id] };
   // Tombale : la suppression du serveur est appliquée ici. Sinon la version du serveur est écrite avec EXACTEMENT
   // son updated_at. Origine 'remote' dans les deux cas : rien ne repart (le serveur a déjà cette version).
-  if (serveur.deleted_at) deletes[conflit.store] = [conflit.record_id];
+  if (conflit.store === 'files') {
+    // D-G15 / D-G16 : ni la version d'ailleurs ni sa tombale ne remplacent la ligne d'ici — le blob local reste, remote suit le serveur.
+    const ici = (await db.get('files', conflit.record_id)) ?? conflit.local ?? null;
+    if (serveur.deleted_at) { if (ici) puts.files = [fusionnerFichier(ici, { remote: null }, serveur.updated_at)]; }
+    else puts.files = [fusionnerFichier(ici, serveur.data, serveur.updated_at)];
+  } else if (serveur.deleted_at) deletes[conflit.store] = [conflit.record_id];
   else puts[conflit.store] = [{ ...serveur.data, updated_at: serveur.updated_at }];
   await db.mutate({ puts, deletes, origin: 'remote' });
   return true;

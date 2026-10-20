@@ -6,7 +6,7 @@ import { urlDeBlob } from '../core/blob-urls.js';
 import { displayQuantity, REASON_LABELS } from '../domain/units.js';
 import { shortcutUrl, siriPhrase, describeDuration, isAppleTouchDevice } from '../domain/timers.js';
 import { navigate } from '../core/router.js';
-import { displayUrl, safeDisplayType } from '../sync/mime.js';
+import { displayUrl, typeAffichage } from '../sync/mime.js';
 import * as repo from '../model/repo.js';
 import { pastilleModel } from './state.js';
 import { estCreationIA, etiquetteCreationIA } from '../domain/creation-ia.js';
@@ -181,9 +181,10 @@ export function recipeCard(doc, { extra = null, href = null, reasons = null } = 
 export function bookCover(edition, book, { href = null, fichier = null } = {}) {
   // S3 : une ligne `files` peut venir d'une archive ou du serveur et porter n'importe quel `mime` sur n'importe quel
   // blob. Le type d'affichage passe par la liste blanche et DOIT être une image ; le blob est retypé avec lui (un
-  // blob text/html dans un <img> ne s'afficherait pas, mais l'URL existerait quand même). Hors liste : vignette texte.
-  const type = safeDisplayType(fichier?.mime);
-  const affichable = fichier?.blob instanceof Blob && !!type && type.startsWith('image/');
+  // blob text/html dans un <img> ne s'afficherait pas, mais l'URL existerait quand même). Hors liste : vignette texte. La règle de displayUrl
+  // (F-9, lot G) : le type du blob, dans la liste blanche, gagne — une copie JPEG reçue sous une ligne image/heic s'affiche.
+  const type = typeAffichage(fichier);
+  const affichable = !!type && type.startsWith('image/');
   const image = affichable
     ? el('img', { class: 'cover-img', alt: book?.title || '', src: urlDeBlob(fichier.blob.type === type ? fichier.blob : new Blob([fichier.blob], { type })) })
     : null;
