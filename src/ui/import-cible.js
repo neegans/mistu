@@ -24,7 +24,7 @@ import { section, sessionAssistant, carteConnexion, texteEchecAssistant, TEXTE_C
 import { demarrerConnexion } from './settings.js';
 import { messageErreurImage } from './livre-ajout.js';
 import { DOCUMENT_ID, BATTEMENT_MS, prendreVol, libererVol as libererTenue, volEnCours, volTenu, reinitialiserVol } from './vol.js';
-import { renderImportWeb } from './import-web.js'; // sens unique (D-B13) : import-web.js n'importe jamais ce module
+import { renderImportWeb, texteEchecLecture } from './import-web.js'; // sens unique (D-B13) : import-web.js n'importe jamais ce module
 
 // --- État du module (I-7) ----------------------------------------------------------------------------------------------------------------------
 // Le vol (DOCUMENT_ID, BATTEMENT_MS, la tenue) vit dans ./vol.js depuis le lot B (D-B13) : UN vol par document, partagé avec la lecture de page
@@ -246,6 +246,7 @@ export function texteRefus(r) {
   if (r?.raison === 'non_connecte') return t(TEXTE_CONNEXION);
   if (r?.raison === 'octets_absents') return t('Les photos de cette recette ne sont pas sur cet appareil.');
   if (r?.raison === 'image') return messageErreurImage({ code: r.code });
+  if (r?.raison === 'interdit') return texteEchecLecture({ raison: 'interdit' }).texte; // lot B : « Réessayer » d'un signet relu hors https, rien n'est parti
   return null;
 }
 

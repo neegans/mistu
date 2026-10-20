@@ -516,4 +516,6 @@ export const EN = {
   "La recette de cette page dépasse ce que l’app peut lire (plus de 80 ingrédients ou 60 étapes, ou une ligne trop longue). Ouvre la page.": "This page’s recipe exceeds what the app can read (more than 80 ingredients or 60 steps, or a line too long). Open the page.",
   "Aucun ingrédient ni étape lus sur cette page.": "No ingredient or step was read on this page.",
   "Le titre lu contenait une adresse web : lecture refusée. Ouvre la page.": "The title read contained a web address: reading refused. Open the page.",
+  // Lot B, tâche 6 (spec § 4.7) : une lecture web dans la section « Imports » d'Ajouter.
+  "Lien web · {h}": "Web link · {h}",
 };

@@ -38,13 +38,12 @@ export function reinitialiserLectureWeb() { abonnes.clear(); enLigneFlag = typeo
 export const abonnesLecture = () => abonnes.size; // tests seulement (ronde 1 de la tâche 5 : une racine retirée ne reste pas abonnée)
 
 // R-B-18 : « ouvert » a UNE définition, importOuvert (src/domain/import-cible.js, m10 / VF-11 du lot A), APPELÉE ici (ronde 1 : plus de copie de sa
-// règle) — jamais la négation des statuts terminés : une ligne reçue au statut inconnu ou nul ne masque pas la fiche. importOuvert ne liste la sorte
-// 'web' qu'à la tâche 6 (KINDS_IMPORT + 'web', P-1) : d'ici là, une ligne déjà reconnue web lui est présentée sous une sorte qu'elle liste (seule la
-// sorte est substituée) ; à la tâche 6, ce prédicat devient importOuvert(i) && i.kind === 'web' && i.recipe_id === recipeId (même résultat).
+// règle) — jamais la négation des statuts terminés : une ligne reçue au statut inconnu ou nul ne masque pas la fiche. Depuis la tâche 6, importOuvert
+// liste la sorte 'web' (KINDS_IMPORT + 'web', P-1) : la substitution de sorte des tâches 4 et 5 a disparu, le prédicat l'appelle tel quel.
 // Ronde 1 de la tâche 5 : UN prédicat et UN choix de ligne (R-B-20, l'ordre de VF-6 du lot A), exportés et partagés par demarrerLectureWeb, l'écran et
 // la fiche (recipe.js, blocSignet) — plus de seconde copie : `prefere` (la ligne affichée, puis ?import=), puis une lecture reçue (a_verifier), puis
 // celle de cet appareil (`moi`), puis la première. La fiche montre ainsi la ligne que l'écran ouvrira et que « Réessayer » reprendra.
-export const ouverteWeb = (i, recipeId) => i?.kind === 'web' && i.recipe_id === recipeId && importOuvert({ ...i, kind: 'recette' });
+export const ouverteWeb = (i, recipeId) => importOuvert(i) && i.kind === 'web' && i.recipe_id === recipeId;
 export function ligneWebOuverte(imports, recipeId, { prefere = null, moi = null } = {}) {
   const ouvertes = (Array.isArray(imports) ? imports : []).filter((i) => ouverteWeb(i, recipeId));
   return ouvertes.find((i) => prefere && i.id === prefere) || ouvertes.find((i) => i.status === 'a_verifier') || ouvertes.find((i) => moi && i.device_id === moi) || ouvertes[0] || null;
@@ -79,7 +78,12 @@ export async function lancerLecture(importId, { ctx, repo = repoModule, fetch: f
     // Ronde 1 : le départ en UNE transaction (comme T6-R1-a du lot A) — « Relire la page » passe a_verifier → en_cours sans a_lancer intermédiaire (la
     // lecture payée n'est jamais effacée avant que le départ soit acquis) ; la lecture précédente (résultat, réponse brute, modèle, durée) est effacée
     // AU départ : un échec de ce vol ne porte jamais le diagnostic d'un autre.
-    const patchDepart = { status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, resultat: null, reponse_brute: null, model: null, duree_ms: null };
+    // Tâche 6 (§ 4.7, P-5 / R-B-8) : une ligne d'un AUTRE appareil relancée ici devient celle de CET appareil — son battement (la ligne interne de
+    // sync_state, origine device, R-B-17) n'est visible qu'ici. Sans cela, l'appareil d'origine, qui ne voit jamais ce battement, la jugerait sienne
+    // (BATTEMENT_MORT_MS, 90 s, sur le battement_at du départ) et la dirait interrompue pendant un vol vivant ; réattribuée, elle relève pour lui de
+    // VOL_MORT_MS (10 min depuis le départ synchronisé, bien au-delà du délai client de 135 s ; repo.marquerInterrompus).
+    const moi = moiDe(repo);
+    const patchDepart = { status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, resultat: null, reponse_brute: null, model: null, duree_ms: null, ...(moi ? { device_id: moi } : {}) };
     const patch = cle === null ? patchDepart : (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', importId, c.status); return patchDepart; };
     try {
       await repo.transitionner('imports', importId, { attendus: relire ? ['a_lancer', 'echec', 'a_verifier'] : ['a_lancer', 'echec'], patch });

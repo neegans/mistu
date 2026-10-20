@@ -1893,7 +1893,7 @@ export async function runImportCibleTests({ eq, ok }) {
         eq([r1.id, r1.kind, r1.titre, r1.age, r1.pages], ['i1', 'recette', { type: 'reference', texte: 'Tarte aux pommes', livre: 'Mon livre' }, { n: 5, unite: 'min' }, 2], 'lignesImports : id, sorte, titre de la référence et son livre, âge, nombre de pages');
         eq([un(lig('i6', { recipe_id: null })).titre, un(lig('i7', { kind: 'index', recipe_id: null, edition_id: null })).titre, un(lig('j6', { recipe_id: 'rc_inconnue' })).titre], [{ type: 'regrouper', texte: null, livre: 'Mon livre' }, { type: 'index', texte: null, livre: null }, { type: 'reference', texte: null, livre: 'Mon livre' }], 'lignesImports : « Recette à regrouper » et « Index » portent le livre (null sans livre) ; une référence absente n’a pas de titre');
         eq([un(lig('k1', { updated_at: ilYa(3 * 60 + 5) })).age, un(lig('k2', { updated_at: ilYa(2 * 1440 + 30) })).age, un(lig('k3', { updated_at: 'pas une date' })).age], [{ n: 3, unite: 'h' }, { n: 2, unite: 'j' }, { n: 0, unite: 'min' }], 'lignesImports : âge en min / h / j ; une date illisible vaut 0 min');
-        eq(D.lignesImports(ctxL([lig('t1', { status: 'enregistre' }), lig('t2', { status: 'ignore' }), lig('t3', { status: 'bizarre' }), lig('t4', { kind: 'web' }), null, 'x', lig('t5', { id: 7 })]), opts), [], 'lignesImports : enregistre, ignore, un statut inconnu, une sorte réservée (web), une ligne mal formée ne sont pas listés (rien d’inventé)');
+        eq(D.lignesImports(ctxL([lig('t1', { status: 'enregistre' }), lig('t2', { status: 'ignore' }), lig('t3', { status: 'bizarre' }), lig('t4', { kind: 'couverture' }), null, 'x', lig('t5', { id: 7 })]), opts), [], 'lignesImports : enregistre, ignore, un statut inconnu, une sorte réservée (couverture ; « web » est listée depuis le lot B), une ligne mal formée ne sont pas listés (rien d’inventé)');
         eq(D.lignesImports(ctxL([lig('o1', { updated_at: ilYa(30) }), lig('o2', { updated_at: ilYa(2) }), lig('o3', { updated_at: ilYa(10) })]), opts).map((r) => r.id), ['o2', 'o3', 'o1'], 'lignesImports : la plus récente d’abord');
         eq([D.lignesImports(null, opts), D.lignesImports({}, opts)], [[], []], 'lignesImports : un contexte vide ou absent ne lève pas');
         // Séances (spec § 4.1, N3) : une ligne par séance OUVERTE, sauf celle d'un import CIBLÉ non terminé (de retour après ignore) ; une séance où
@@ -2518,6 +2518,185 @@ export async function runImportCibleTests({ eq, ok }) {
     } finally {
       UI.reinitialiserImportCible?.();
       globalThis.fetch = vraiFetch; scene.remove(); setUiLocale(localeAvant); if (location.href !== adresseAvant) history.replaceState(null, '', adresseAvant);
+    }
+  }));
+
+  // =====================================================================================================================================
+  // Lot B « Recette web complète », tâche 6 (spec docs/superpowers/specs/2026-10-19-recette-web-design.md § 4.7, § 7.4 « Imports » et
+  // « Régression ») : une lecture web dans la section « Imports » d'Ajouter — titre « {texte} — Lien web · {hôte} », « Réessayer » (le geste
+  // relancer) offert AUSSI pour une ligne d'un autre appareil, jamais « Photos sur un autre appareil » —, sa reprise (#/recipes/<id>/importer),
+  // le démarrage (interrompu, purge à 30 jours) et la fiche du livre (D-B17 : un import web n'y compte pas). Base jetable, fetch injectée, aucun
+  // réseau réel, jamais le routeur de l'app (navigations injectées).
+  await run('lot B — lectures web dans la section Imports (tâche 6)', () => withRepo(async (repo, db) => {
+    const D = await import('../src/domain/import-cible.js');
+    const A = await import('../src/ui/add.js');
+    const B = await import('../src/ui/book.js');
+    const S = await import('../src/ui/signet.js');
+    const V = await import('../src/ui/vol.js');
+    const LW = await import('../src/domain/lecture-web.js');
+    const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
+    const localeAvant = getUiLocale(); setUiLocale('fr'); // des textes français sont affirmés
+    const scene = document.createElement('div'); scene.style.cssText = 'position:absolute;left:-10000px;top:0;width:900px'; document.body.append(scene);
+    const attendre = async (cond, quoi) => { for (let i = 0; i < 300; i += 1) { if (await cond()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error('attente dépassée (3 s) : ' + quoi); };
+    const bouton = (root, nom) => (root ? [...root.querySelectorAll('button')].find((b) => b.textContent === nom) || null : null);
+    const boutons = (root) => (root ? [...root.querySelectorAll('button')].map((b) => b.textContent) : null);
+    const NOW = '2026-10-19T12:00:00.000Z';
+    const JETON = 'jeton-b6-sentinelle';
+    const SESSION = { access_token: JETON, user: { id: 'u1', email: 'a@exemple.invalid' } };
+    const reponse = (status, corps) => ({ ok: status >= 200 && status < 300, status, headers: new Headers(), text: async () => JSON.stringify(corps) });
+    // La fausse fetch : elle HONORE le signal et se résout à la main (a.rendre[i]).
+    const fauxFetch = () => {
+      const a = { appels: [], rendre: [] };
+      a.fetch = (url, options) => new Promise((resolve, reject) => {
+        a.appels.push({ url, options });
+        const abandon = () => reject(Object.assign(new Error('abandon'), { name: 'AbortError' }));
+        if (options?.signal?.aborted) { abandon(); return; }
+        options?.signal?.addEventListener('abort', abandon, { once: true });
+        a.rendre.push((status, corps) => { options?.signal?.removeEventListener('abort', abandon); resolve(reponse(status, corps)); });
+      });
+      return a;
+    };
+    let reseau = 0;
+    const interdit = async () => { reseau += 1; throw new Error('aucun appel attendu'); };
+    const PAGE = { url_finale: 'https://c.test/tarte', hote: 'c.test', titre_page: 'Tarte', auteur: null, site: null, lue_le: NOW, autres_recettes: 0, texte_coupe: false };
+    const LUE = { source_kind: 'jsonld', page: PAGE, recette: { title: 'Tarte lue', ingredients: [{ source_text: '3 pommes' }], steps: [{ text: 'Cuire.' }] }, usage: { input_tokens: 0, output_tokens: 0 }, stop_reason: null, model: null };
+    const ed8 = { id: 'ed8', book_id: 'b8', language: 'fr', updated_at: DATE }, b8 = { id: 'b8', title: 'Livre huit', author: 'A. B.', updated_at: DATE };
+    // Des signets par le fabricant réel (ui/signet.js), dont un rangé dans un livre ; leurs imports par fabriquerImportWeb (domaine du lot B).
+    const signetDe = (adresse, titre, editionId = '') => S.fabriquerSignet(S.signetModel({ adresse, titre, editionId }), { newId: repo.newId, langue: 'fr' });
+    const sA = signetDe('https://www.ricardocuisine.com/recettes/puttanesca?utm_source=x', 'Pâtes puttanesca', 'ed8');
+    const sB = signetDe('https://b.test/soupe', 'Soupe');
+    const sC = signetDe('https://c.test/tarte', 'Tarte');
+    const sD = signetDe('https://d.test/gratin', 'Gratin');
+    const sE = signetDe('http://e.test/clair', 'Page en clair');
+    await db.mutate({ puts: { books: [b8], book_editions: [ed8], recipes: [sA, sB, sC, sD, sE] }, origin: 'device' });
+    const moi = repo.deviceId();
+    const ligne = (s, over = {}) => ({ ...LW.fabriquerImportWeb({ id: 'imp_' + s.id, signet: s, deviceId: moi }), updated_at: new Date().toISOString(), ...over });
+    const ctxDe = async () => {
+      const recipes = await db.getAll('recipes');
+      return { recipes, recipesById: new Map(recipes.map((r) => [r.id, r])), recipe_versions: [], versionsByRecipe: new Map(), versionsById: new Map(),
+        books: [b8], book_editions: [ed8], editionsById: new Map([['ed8', ed8]]), booksById: new Map([['b8', b8]]), library_activity: [],
+        imports: await db.getAll('imports'), scan_sessions: await db.getAll('scan_sessions'), source_pages: [], pagesById: new Map(), source_documents: [],
+        ingredients: [], ingredientsById: new Map(), settings: { llm: { provider: 'none' }, units: 'original', reading_locale: 'original' }, rediscovery_prefs: [], docsByRecipe: new Map(),
+        sync: { user: { id: 'u1', email: 'a@exemple.invalid' }, auth: { jeton: async () => SESSION } }, conventionFor: () => null, editionLabel: (e) => (e?.id === 'ed8' ? 'Livre huit' : '') };
+    };
+    const navs = [], dits = [];
+    const monterAdd = async (deps = {}) => { const root = await A.renderAdd({}, {}, await ctxDe(), { repo, navigate: (p) => navs.push(p), toast: (m) => dits.push(m), fetch: interdit, maintenant: () => new Date().toISOString(), ...deps }); scene.append(root); return root; };
+    const ligneDe = (root, id) => root.querySelector(`[data-role="ligne-import"][data-id="${CSS.escape(id)}"]`);
+    try {
+      // --- 1. Domaine PUR (§ 4.7) : une lecture web est listée, avec ses gestes ; la table entière.
+      eq(D.KINDS_IMPORT, ['recette', 'index', 'web'], 'lot B : KINDS_IMPORT connaît « web » (« couverture » reste réservée)');
+      eq(D.KINDS_PAGES, ['recette', 'index'], 'lot B (P-1) : KINDS_PAGES — les sortes à pages, seules ouvertes par le chemin photo (« web » listée, jamais ouverte par lui)');
+      const ICI = 'doc-ici', MOI = 'dev-ici', AUTRE = 'dev-ailleurs';
+      const ilYa = (min) => new Date(Date.parse(NOW) - min * 60000).toISOString();
+      const SIG = { id: 'rc_w', edition_id: 'ed1', original_title: 'Pâtes puttanesca', source_url: 'https://www.ricardocuisine.com/recettes/123?utm_source=x' };
+      const HOSTILE = { id: 'rc_h', edition_id: null, original_title: 'Page hostile', source_url: 'javascript:alert(1)' };
+      const LUE_DEJA = { id: 'rc_d', edition_id: null, original_title: 'Pâtes lues', source_url: 'https://www.ricardocuisine.com/recettes/456', availability: 'available' }; // relecture D-B18
+      const ctxL = (imports) => ({ imports, scan_sessions: [], recipesById: new Map([[SIG.id, SIG], [HOSTILE.id, HOSTILE], [LUE_DEJA.id, LUE_DEJA]]), editionsById: new Map([['ed1', { id: 'ed1', book_id: 'b1' }]]), booksById: new Map([['b1', { id: 'b1', title: 'Mon livre' }]]) });
+      const opts = { maintenant: NOW, documentId: ICI, deviceId: MOI };
+      const lw = (id, over = {}) => ({ id, kind: 'web', recipe_id: 'rc_w', edition_id: null, scan_session_id: null, page_ids: [], status: 'a_lancer', erreur: null, resultat: null, device_id: MOI, document_id_vol: null, updated_at: ilYa(5), ...over });
+      const un = (l) => { const r = D.lignesImports(ctxL([l]), opts); return r.length === 1 ? r[0] : { rien: r }; };
+      const resume = (r) => [r.etat, r.titre?.type, r.gestes, r.ailleurs, r.autreAppareil, r.referenceAbsente, r.raison, r.cible];
+      const CIBLE = (id, rc = 'rc_w') => `/recipes/${rc}/importer?import=${id}`; // R-B-20 (VF-6 du lot A) : la reprise d’une lecture web porte LA ligne
+      for (const [nom, l, attendu] of [
+        ['a_lancer → Reprendre (l’écran de la fiche), Ignorer', lw('w1'), ['a_lancer', 'web', ['reprendre', 'ignorer'], false, false, false, null, CIBLE('w1')]],
+        ['en_cours tenu par CE document → Annuler seulement', lw('w2', { status: 'en_cours', document_id_vol: ICI }), ['en_cours', 'web', ['annuler'], false, false, false, null, CIBLE('w2')]],
+        ['en_cours tenu par un autre document → « ailleurs », aucun geste', lw('w3', { status: 'en_cours', document_id_vol: 'doc-autre' }), ['en_cours', 'web', [], true, false, false, null, CIBLE('w3')]],
+        ['a_verifier avec résultat → Reprendre, Ignorer', lw('w4', { status: 'a_verifier', resultat: LUE }), ['a_verifier', 'web', ['reprendre', 'ignorer'], false, false, false, null, CIBLE('w4')]],
+        ['a_verifier SANS résultat → Ignorer seulement (« Reprendre » exige un résultat)', lw('w5', { status: 'a_verifier' }), ['a_verifier', 'web', ['ignorer'], false, false, false, null, CIBLE('w5')]],
+        ['echec(inaccessible), sans page (une lecture web n’en porte jamais, P-10) → Relancer (« Réessayer » à l’écran), Ignorer ; la raison est rendue', lw('w6', { status: 'echec', erreur: { raison: 'inaccessible', extra: {} } }), ['echec', 'web', ['relancer', 'ignorer'], false, false, false, 'inaccessible', CIBLE('w6')]],
+        ['AUTRE appareil, echec → Relancer QUAND MÊME (aucune photo requise : l’adresse est dans le signet)', lw('x1', { device_id: AUTRE, status: 'echec', erreur: { raison: 'serveur', extra: {} } }), ['echec', 'web', ['relancer', 'ignorer'], false, true, false, 'serveur', CIBLE('x1')]],
+        ['AUTRE appareil, a_lancer → Reprendre, Ignorer', lw('x2', { device_id: AUTRE }), ['a_lancer', 'web', ['reprendre', 'ignorer'], false, true, false, null, CIBLE('x2')]],
+        ['AUTRE appareil, a_verifier sans résultat → Ignorer seulement', lw('x3', { device_id: AUTRE, status: 'a_verifier' }), ['a_verifier', 'web', ['ignorer'], false, true, false, null, CIBLE('x3')]],
+        ['AUTRE appareil, a_verifier avec résultat → Reprendre, Ignorer', lw('x4', { device_id: AUTRE, status: 'a_verifier', resultat: LUE }), ['a_verifier', 'web', ['reprendre', 'ignorer'], false, true, false, null, CIBLE('x4')]],
+        ['AUTRE appareil, en_cours → « ailleurs », aucun geste', lw('x5', { device_id: AUTRE, status: 'en_cours', document_id_vol: 'doc-x' }), ['en_cours', 'web', [], true, true, false, null, CIBLE('x5')]],
+        ['signet pas encore reçu → referenceAbsente, aucun geste', lw('x6', { recipe_id: 'rc_inconnue' }), ['a_lancer', 'web', [], false, false, true, null, CIBLE('x6', 'rc_inconnue')]],
+        ['relecture d’une fiche déjà lue (available), a_verifier avec résultat → Reprendre, Ignorer (P-10 : la règle « available » du lot A ne vaut pas pour le web)', lw('d1', { recipe_id: 'rc_d', status: 'a_verifier', resultat: LUE }), ['a_verifier', 'web', ['reprendre', 'ignorer'], false, false, false, null, CIBLE('d1', 'rc_d')]],
+        ['relecture d’une fiche déjà lue (available), echec → Relancer, Ignorer (P-10)', lw('d2', { recipe_id: 'rc_d', status: 'echec', erreur: { raison: 'inaccessible', extra: {} } }), ['echec', 'web', ['relancer', 'ignorer'], false, false, false, 'inaccessible', CIBLE('d2', 'rc_d')]],
+      ]) eq(resume(un(l)), attendu, `lignesImports (lot B) — ${nom}`);
+      eq([un(lw('w1')).titre, un(lw('w1')).pages, un(lw('x6', { recipe_id: 'rc_inconnue' })).titre, un(lw('h1', { recipe_id: 'rc_h' })).titre],
+        [{ type: 'web', texte: 'Pâtes puttanesca', livre: 'www.ricardocuisine.com' }, 0, { type: 'web', texte: null, livre: null }, { type: 'web', texte: 'Page hostile', livre: null }],
+        'lignesImports (lot B) : titre = celui du signet, « livre » = l’hôte RECALCULÉ de son adresse (jamais le livre du signet) ; signet absent → rien ; adresse illisible → hôte nul ; aucune page');
+      eq([D.cibleReprise({ id: 'imp&w', kind: 'web', recipe_id: 'rc/w' }), D.cibleReprise({ id: 'imp_w', kind: 'web', recipe_id: null }), D.cibleReprise({ id: 'imp_c', kind: 'couverture', recipe_id: 'rc1' })],
+        ['/recipes/rc%2Fw/importer?import=imp%26w', null, null], 'cibleReprise (lot B, R-B-20) : web → l’écran de la fiche avec LA ligne (?import=, comme VF-6 du lot A ; identifiants encodés) ; sans recipe_id → null ; « couverture » (réservée) → null');
+      eq(D.lignesImports(ctxL([lw('t1', { status: 'enregistre' }), lw('t2', { status: 'ignore' }), lw('t3', { kind: 'couverture' })]), opts), [], 'lignesImports (lot B) : une lecture web enregistree ou ignorée n’est pas listée ; « couverture » reste réservée');
+
+      let ouvreWeb = null; try { await repo.ouvrirImport({ kind: 'web', recipe_id: sA.id }); } catch (e) { ouvreWeb = e; }
+      eq([ouvreWeb?.name, (await db.byIndex('imports', 'recipe_id', sA.id)).length], ['TypeError', 0], 'repo.ouvrirImport({ kind: web }) → TypeError, rien d’écrit : une lecture web naît par demarrerLectureWeb, jamais par le chemin photo (P-1)');
+
+      // --- 2. Page Ajouter (§ 4.7) : textes, gestes, « Reprendre ».
+      const lA = ligne(sA);
+      const lB = ligne(sB, { status: 'echec', erreur: { raison: 'inaccessible', extra: {} }, appels: 1 });
+      const lC = ligne(sC, { status: 'echec', erreur: { raison: 'serveur', extra: {} }, appels: 1, device_id: 'dev-ailleurs' });
+      const lD = ligne(sD, { status: 'en_cours', document_id_vol: 'doc-ailleurs', battement_at: new Date().toISOString(), started_at: new Date().toISOString() });
+      const lE = ligne(sE, { status: 'echec', erreur: { raison: 'serveur', extra: {} }, appels: 1 });
+      await db.mutate({ puts: { imports: [lA, lB, lC, lD, lE] }, origin: 'device' });
+      const root = await monterAdd();
+      const [nA, nB, nC, nD] = [lA, lB, lC, lD].map((l) => ligneDe(root, l.id));
+      eq([!!nA, !!nB, !!nC, !!nD], [true, true, true, true], 'Ajouter (lot B) : une ligne par lecture web ouverte');
+      eq(nA.querySelector('strong')?.textContent, 'Pâtes puttanesca — Lien web · www.ricardocuisine.com', 'Ajouter (lot B) : titre « {texte} — Lien web · {hôte} » (l’hôte recalculé, pas « Livre huit »)');
+      eq([nA.textContent.includes('L’app n’a pas encore lu la page.'), nA.textContent.includes('photo'), boutons(nA)], [true, false, ['Reprendre', 'Ignorer']], 'Ajouter (lot B) : a_lancer → « L’app n’a pas encore lu la page. » (aucune photo), Reprendre et Ignorer');
+      eq([nB.textContent.includes('La page n’a pas pu être téléchargée (site injoignable, trop lent, ou qui refuse les robots). Ouvre-la toi-même.'), boutons(nB)], [true, ['Réessayer', 'Ignorer']], 'Ajouter (lot B) : echec(inaccessible) → la phrase de l’écran de lecture, « Réessayer » (pas « Relancer ») et Ignorer');
+      eq([boutons(nC), nC.textContent.includes('Photos sur un autre appareil')], [['Réessayer', 'Ignorer'], false], 'Ajouter (lot B) : une ligne d’un AUTRE appareil → « Réessayer » offert quand même, jamais « Photos sur un autre appareil »');
+      eq([nD.textContent.includes('En cours sur un autre écran'), boutons(nD)], [true, []], 'Ajouter (lot B) : un vol tenu ailleurs → « En cours sur un autre écran », aucun geste');
+      bouton(nA, 'Reprendre').click();
+      eq(navs.at(-1), `/recipes/${encodeURIComponent(sA.id)}/importer?import=${encodeURIComponent(lA.id)}`, 'Ajouter (lot B, R-B-20) : « Reprendre » → l’écran de la fiche (variante web), avec LA ligne (?import=)');
+
+      // --- 3. « Réessayer » → UN POST lecture-web ; « Annuler » ; une ligne d'un autre appareil devient celle d'ici ; un signet en http est refusé.
+      const ff = fauxFetch();
+      const rR = await monterAdd({ fetch: ff.fetch, battementMs: 20 });
+      bouton(ligneDe(rR, lB.id), 'Réessayer').click();
+      await attendre(() => ff.appels.length === 1 && !!bouton(ligneDe(rR, lB.id), 'Annuler'), 'POST parti, « Annuler » offert');
+      const enVol = await db.get('imports', lB.id);
+      eq([JSON.parse(ff.appels[0].options.body), ff.appels[0].options.headers.authorization, enVol.status, enVol.document_id_vol, enVol.appels, ligneDe(rR, lB.id).textContent.includes('Lecture de la page par l’assistant…')],
+        [{ outil: 'lecture-web', corps: { url: 'https://b.test/soupe' } }, 'Bearer ' + JETON, 'en_cours', V.DOCUMENT_ID, 2, true],
+        'Réessayer (lot B) : UN POST lecture-web avec l’adresse du signet, la ligne en_cours tenue par ce document, appels + 1, « Lecture de la page par l’assistant… »');
+      bouton(ligneDe(rR, lB.id), 'Annuler').click();
+      await attendre(async () => (await db.get('imports', lB.id)).status === 'echec' && !!bouton(ligneDe(rR, lB.id), 'Réessayer'), 'annulé');
+      eq([ff.appels[0].options.signal.aborted, (await db.get('imports', lB.id)).erreur?.raison, ligneDe(rR, lB.id).textContent.includes('Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.'), V.volEnCours()],
+        [true, 'annule', true, null], 'Annuler (lot B) : le fetch est abandonné par annulerLecture, echec(annule), la phrase I-B7, le vol est libéré');
+      const ff2 = fauxFetch();
+      const rC = await monterAdd({ fetch: ff2.fetch });
+      bouton(ligneDe(rC, lC.id), 'Réessayer').click();
+      await attendre(() => ff2.appels.length === 1, 'POST de la ligne d’un autre appareil');
+      eq([(await db.get('imports', lC.id)).status, (await db.get('imports', lC.id)).device_id], ['en_cours', moi], 'Réessayer (lot B, P-5) : une ligne d’un AUTRE appareil relancée ici devient celle de CET appareil (l’appareil d’origine ne la juge plus sur 90 s de battement, mais sur VOL_MORT_MS)');
+      ff2.rendre[0](200, LUE);
+      await attendre(async () => (await db.get('imports', lC.id)).status === 'a_verifier' && !!bouton(ligneDe(rC, lC.id), 'Reprendre'), 'lecture reçue');
+      eq([boutons(ligneDe(rC, lC.id)), ligneDe(rC, lC.id).textContent.includes('Lecture reçue le'), (await db.get('imports', lC.id)).resultat?.recette?.title, ff2.appels.length],
+        [['Reprendre', 'Ignorer'], true, 'Tarte lue', 1], 'Réessayer (lot B) : la réponse est écrite a_verifier → « Lecture reçue le … », Reprendre et Ignorer ; un seul POST');
+      bouton(ligneDe(rC, lC.id), 'Ignorer').click();
+      await attendre(async () => (await db.get('imports', lC.id)).status === 'ignore' && !ligneDe(rC, lC.id), 'ignoré');
+      eq([(await db.get('imports', lC.id)).status, typeof (await db.get('imports', lC.id)).finished_at], ['ignore', 'string'], 'Ignorer (lot B) : une lecture web → ignore (finished_at posé), la ligne disparaît');
+      const ff3 = fauxFetch();
+      const rE = await monterAdd({ fetch: ff3.fetch });
+      const ditsAvant = dits.length;
+      bouton(ligneDe(rE, lE.id), 'Réessayer').click();
+      await attendre(() => dits.length > ditsAvant, 'refus dit');
+      eq([dits.at(-1), ff3.appels.length, (await db.get('imports', lE.id)).status], ['Cette adresse ne peut pas être lue par l’assistant : seule une page publique en https est admise. Ouvre-la toi-même.', 0, 'echec'],
+        'Réessayer (lot B) : un signet en http → refus « interdit » dit par la phrase de l’écran de lecture, zéro POST, rien d’écrit');
+      eq(reseau, 0, 'lot B (tâche 6) : aucun appel hors des fausses fetch des blocs');
+
+      // --- 4. Démarrage (§ 7.4) : une lecture web en_cours de CET appareil au battement de −120 s → interrompu ; enregistrée il y a 31 jours → purgée.
+      const T = Date.now(); const avant = (ms) => new Date(T - ms).toISOString(); const J = 24 * 3600 * 1000;
+      const sF = signetDe('https://f.test/x', 'F'); const sG = signetDe('https://g.test/x', 'G');
+      await db.mutate({ puts: { recipes: [sF, sG], imports: [ligne(sF, { status: 'en_cours', document_id_vol: 'doc-ferme', battement_at: avant(120000), started_at: avant(130000), updated_at: avant(120000) }), ligne(sG, { status: 'enregistre', finished_at: avant(31 * J), updated_at: avant(31 * J) })] }, origin: 'device' });
+      await repo.init();
+      const mort = await db.get('imports', 'imp_' + sF.id);
+      eq([mort?.status, mort?.erreur, mort?.document_id_vol, await db.get('imports', 'imp_' + sG.id), (await db.get('imports', lD.id))?.status], ['echec', { raison: 'interrompu', extra: {} }, null, undefined, 'en_cours'],
+        'démarrage (lot B) : lecture web en_cours de CET appareil à −120 s → echec(interrompu), vol libéré ; enregistrée il y a 31 jours → purgée ; un battement frais reste en_cours');
+
+      // --- 5. Fiche du livre (D-B17) : le signet est rangé dans le livre, son import web (edition_id nul) ne compte pas.
+      const ctxB = (imports) => ({ editionsById: new Map([['ed8', ed8]]), booksById: new Map([['b8', b8]]), books: [b8], recipes: [sA], recipe_versions: [], source_documents: [], source_pages: [], rediscovery_prefs: [], book_editions: [ed8], docsByRecipe: new Map(), scan_sessions: [], imports, settings: {}, pagesById: new Map(), recipesById: new Map([[sA.id, sA]]), editionLabel: (e) => (e?.id === 'ed8' ? 'Livre huit' : '') });
+      const liens = (r) => [...r.querySelectorAll('a')].filter((a) => a.getAttribute('href') === '#/add?section=imports').map((a) => a.textContent);
+      const ciblee = { id: 'k8', kind: 'recette', recipe_id: null, edition_id: 'ed8', scan_session_id: null, page_ids: [], status: 'a_lancer' };
+      eq([sA.edition_id, lA.edition_id, liens(await B.renderBook({ id: 'ed8' }, {}, ctxB([lA, ciblee])))], ['ed8', null, ['1 import à reprendre']],
+        'fiche du livre (D-B17) : un signet rangé dans le livre, mais son import web (edition_id nul) ne compte pas — seul l’import de pages compte');
+
+      // --- 6. Régression : « lot suivant » a disparu de l'écran ciblé.
+      const srcIC = await lire('../src/ui/import-cible.js');
+      eq([srcIC.length > 1000, srcIC.includes('lot suivant')], [true, false], 'régression (lot B) : « lot suivant » a disparu de src/ui/import-cible.js (source lu, non vide)');
+    } finally {
+      V.reinitialiserVol();
+      scene.remove(); setUiLocale(localeAvant);
     }
   }));
 
