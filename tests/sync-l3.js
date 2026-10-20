@@ -1234,7 +1234,7 @@ export async function runSyncL3Tests({ eq, ok }) {
   eq(syncSectionModel({ ...base, moteur: etatMoteur({ enCours: false, phase: 'reception', progression: { table: 'books', n: 1, total: 24 } }) }).progression,
     null, 'réglages L3 : une passe terminée n’affiche plus de progression');
   const m4 = syncSectionModel({ ...base, moteur: etatMoteur({ pause: { raison: 'quota', at: 't' }, horloge: { minutes: 12 } }) });
-  ok(m4.pause && m4.pause.includes('1 Go'), 'réglages L3 : pause quota nommée (rien n’est perdu)');
+  eq(m4.pause, 'Espace serveur plein — rien n’est perdu, tout reste sur cet appareil.', 'réglages L3 : pause quota nommée (rien n’est perdu), sans palier ni plan : l’app ne connaît pas le plan du projet (R-G-5, lot G)');
   ok(m4.lines.some((l) => l.includes('12')), 'réglages L3 : avertissement d’horloge avec les minutes');
   eq(syncSectionModel({ ...base, moteur: etatMoteur({ pause: { raison: 'autre', at: 't' } }) }).pause, null, 'réglages L3 : seule la pause de quota a une phrase');
   const m5 = syncSectionModel({ ...base, moteur: etatMoteur({ attenteConnexion: true }) });
@@ -1323,7 +1323,7 @@ export async function runSyncL3Tests({ eq, ok }) {
   {
     const boite = document.createElement('div');
     for (const n of syncSectionL3(m4, {})) boite.append(n);
-    ok(boite.querySelector('.warn')?.textContent.includes('1 Go'), 'rendu L3 : la pause de quota est un avertissement visible');
+    eq(boite.querySelector('.warn')?.textContent, 'Espace serveur plein — rien n’est perdu, tout reste sur cet appareil.', 'rendu L3 : la pause de quota est un avertissement visible, sans palier (R-G-5, lot G)');
     const boite2 = document.createElement('div');
     for (const n of syncSectionL3(m2, {})) boite2.append(n);
     eq(boite2.textContent, 'Envoi initial : recipes 8/24', 'rendu L3 : la progression seule, sans liste vide ni titre orphelin');

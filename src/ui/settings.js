@@ -1,13 +1,14 @@
 // Réglages : préférences (langue de l'interface, langue de lecture, unités), sauvegarde complète et restauration vérifiée,
 // exports d'échange, assistant IA, minuterie système, données locales (spec §29.1, §31, §33).
 import { el, toast, confirmDialog, promptDialog, pickFiles, downloadBlob, formatDate } from '../core/dom.js';
-import { t } from '../core/i18n.js';
+import { t, getUiLocale } from '../core/i18n.js';
 import { refresh, currentPath } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { logError } from '../core/log.js';
 import { reprendreEnvoi, retirerEnvoi, fileDe } from '../sync/outbox.js';
 import { garderIci, garderAilleurs, ignorerRenvoye } from '../sync/conflits.js';
 import { retirerMarqueur } from '../sync/backfill.js';
+import { referencesFichiers, nomFichier, lireErreursFichiers, MAGASINS_FICHIERS } from '../sync/fichiers.js';
 import { createArchive as createArchiveReel, inspectArchive, applyArchive, verifyRestored, compterFichesSynchronisees } from '../domain/backup.js';
 import { syncNow } from '../sync/clock.js';
 import { toJsonLd, toPaprikaYaml, toReadableSite } from '../domain/exporters.js';
@@ -60,6 +61,10 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
   // Le moteur est posé par le démarrage (L3, tâche 9) : tant qu'il n'est pas là, rien de L3 n'est affiché.
   const moteur = getSyncState().moteur || null;
   suivreMoteurDeLaPage(moteur);
+  // Lot G (§ 4.1) : les erreurs de fichiers et le snapshot (pour nomFichier) sont lus au rendu, comme la quarantaine — seulement s'il y a un moteur.
+  const etatMoteur = moteur?.etat() || null;
+  const fichiersErreurs = etatMoteur ? [...(await lireErreursFichiers(repo.db))].map(([sha256, v]) => ({ sha256, motif: v?.motif, sens: v?.sens })) : [];
+  const snapshotFichiers = etatMoteur ? await repo.db.getSnapshot(MAGASINS_FICHIERS) : null;
   root.append(syncSection({
     available: !!auth?.available,
     reason: auth ? auth.reason : 'config',
@@ -68,9 +73,12 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
     retour: sync.retour || null,
     pending: file.length,
     enAttente: sync.enAttente === true, // R28 : le démarrage n’a pas abouti dans sa borne de temps
-    moteur: moteur?.etat() || null,
+    moteur: etatMoteur,
     quarantaine,
     conflits,
+    fichiersErreurs,
+    qualite: s.upload_quality,
+    snapshot: snapshotFichiers,
   }, auth, s));
 
   // Le navigateur ne confirme pas que le téléchargement a été enregistré dans Fichiers.
@@ -400,13 +408,15 @@ const messagePerte = (n) => (n > 1
 // jamais dire par où sortir.
 // `arreterSync` est appelé juste AVANT l’effacement, et seulement si le geste va au bout : une passe déclenchée
 // entre le vidage et le rechargement écrirait dans une base qu’on vient d’effacer, ou enverrait ce qui n’existe plus.
-export async function effacerDonnees({ user = null, pending, enQuarantaine = async () => 0, confirm, demanderMot, toast: dire, clearDevice, signOut = null, reload, arreterSync = arreterMoteur }) {
+export async function effacerDonnees({ user = null, pending, enQuarantaine = async () => 0, confirm, demanderMot, toast: dire, clearDevice, signOut = null, reload, arreterSync = arreterMoteur, transfertEnCours = () => !!getSyncState().moteur?.etat?.()?.progressionFichiers }) {
   // La file est relue au moment du geste : elle a pu bouger depuis le rendu de la page.
   const enAttente = await pending();
   if (user && enAttente > 0) { dire(messageEnAttente(enAttente, await enQuarantaine())); return false; }
   if (!(await confirm(t('Effacer les données de cet appareil ? Fais d’abord une sauvegarde.'), { danger: true, okLabel: t('Continuer') }))) return false;
   const mot = await demanderMot(t('Tape EFFACER pour confirmer'));
   if (mot !== 'EFFACER') { dire(t('Annulé')); return false; }
+  // S-11 / F-24 : upload() et download() ne prennent pas de signal ; arreter() attend le fichier en cours — on le dit avant d'attendre.
+  if (transfertEnCours()) dire(t('Envoi en cours…'));
   await arreterSync();
   await clearDevice({ signOut });
   dire(t('Données effacées'));
@@ -436,7 +446,7 @@ export async function restaurerArchive({ mode, pending, toast: dire, appliquer }
 // échec fermé, cohérent avec le reste du lot.
 // `arreterSync` est appelé juste AVANT l’effacement, et seulement si le geste est allé au bout : un refus (archive
 // manquante, confirmation annulée) ne doit pas laisser la synchronisation arrêtée sur un appareil qui reste en place.
-export async function changerDeCompte({ confirm, toast: dire, pending, archiveCreated, clearDevice, signOut = null, reload, arreterSync = arreterMoteur }) {
+export async function changerDeCompte({ confirm, toast: dire, pending, archiveCreated, clearDevice, signOut = null, reload, arreterSync = arreterMoteur, transfertEnCours = () => !!getSyncState().moteur?.etat?.()?.progressionFichiers }) {
   let archive = null;
   try { archive = archiveCreated(); }
   catch { dire(t('Le stockage de session est inaccessible : ce geste n’est pas possible ici.')); return false; }
@@ -444,6 +454,8 @@ export async function changerDeCompte({ confirm, toast: dire, pending, archiveCr
   if (!(await confirm(t('Changer de compte sur cet appareil ? Toutes les données de cet appareil seront effacées.'), { danger: true, okLabel: t('Continuer') }))) return false;
   const enAttente = await pending(); // compté au moment du geste : la file a pu bouger depuis le rendu
   if (!(await confirm(messagePerte(enAttente), { danger: true, okLabel: t('Changer de compte') }))) return false;
+  // S-11 / F-24 : upload() et download() ne prennent pas de signal ; arreter() attend le fichier en cours — on le dit avant d'attendre.
+  if (transfertEnCours()) dire(t('Envoi en cours…'));
   await arreterSync();
   await clearDevice({ signOut });
   reload();
@@ -676,6 +688,7 @@ export async function demarrerConnexion(auth, hash = location.hash) {
 function syncSection(state, auth, settings) {
   const model = syncSectionModel(state);
   const gestesL3 = gestesL3Pour();
+  const gestesL4 = gestesL4Pour();
   const gestes = {
     signIn: () => demarrerConnexion(auth),
     signOut: async () => {
@@ -708,6 +721,7 @@ function syncSection(state, auth, settings) {
       ? el('div', { class: 'row' }, ...boutons.map((b) => el('button', { class: 'btn' + (b.tone ? ' ' + b.tone : ''), onClick: gestes[b.action] }, b.label)))
       : null,
     ...syncSectionL3(model, gestesL3),
+    ...syncSectionL4(model, gestesL4),
     field(t('Historique de consultation'),
       el('label', { class: 'check' },
         el('input', { type: 'checkbox', checked: settings.sync_activity === true, onChange: async (e) => { await reglerHistorique(e.target.checked); refresh(); } }),
@@ -784,6 +798,102 @@ const PHRASES_CONFLIT = {
 
 const phraseConflit = (kind) => t(Object.hasOwn(PHRASES_CONFLIT, kind) ? PHRASES_CONFLIT[kind] : 'Deux versions existent pour cette fiche.');
 
+// Lot G (§ 4.1) : des mégaoctets arrondis au dixième, dans la langue de l'interface (« 1,6 », « 850 ») — une MESURE, jamais un plafond (R-G-5).
+const enMo = (octets) => new Intl.NumberFormat(getUiLocale() === 'en' ? 'en-CA' : 'fr-CA', { maximumFractionDigits: 1 }).format(Math.round((Number(octets) || 0) / 104857.6) / 10);
+const compte = (v) => (Number.isSafeInteger(v) && v > 0 ? v : 0);
+
+function modeleFichiers(moteur, { qualite, refuses }) {
+  const f = moteur.fichiers || {};
+  const prog = moteur.progressionFichiers;
+  const aTelecharger = compte(f.aTelecharger);
+  const mo = enMo(f.octetsATelecharger);
+  return {
+    aEnvoyer: t('Photos à envoyer : {n}', { n: compte(f.aEnvoyer) }),
+    envoi: prog?.sens === 'envoi' ? t('Envoi des photos : {n}/{m}', { n: prog.n, m: prog.total }) : null,
+    pause: moteur.pauseFichiers ? t('Espace photos plein sur le serveur : les photos attendent sur cet appareil, les fiches continuent de partir.') : null,
+    aTelecharger: aTelecharger ? t('Pages à télécharger : {n} (~{m} Mo)', { n: aTelecharger, m: mo }) : null,
+    telechargerTout: aTelecharger && moteur.telechargementGlobal !== true ? t('Télécharger toutes les pages ({n} fichiers, ~{m} Mo)', { n: aTelecharger, m: mo }) : null,
+    reception: prog?.sens === 'reception' ? t('Téléchargement des pages : {n}/{m}', { n: prog.n, m: prog.total }) : null,
+    arreter: moteur.telechargementGlobal === true,
+    renvoi: qualite === 'originale' && compte(f.aRenvoyer) ? t('Renvoyer en originale les {n} photos de cet appareil envoyées en réduite', { n: f.aRenvoyer }) : null,
+    refuses: refuses ? t('Fichiers refusés : {n}', { n: refuses }) : null,
+    typeInconnu: compte(f.typeInconnu) ? t('{n} fichier(s) de type inconnu ne seront pas synchronisés.', { n: f.typeInconnu }) : null,
+    copiesSansServeur: compte(f.copiesSansServeur) ? t('{n} copie(s) de photos ici dont le serveur n’a plus trace : l’appareil qui a l’original les renverra.', { n: f.copiesSansServeur }) : null,
+    copiesPerimees: compte(f.copiesPerimees) ? t('{n} photo(s) ici sont une copie plus ancienne que celle du serveur.', { n: f.copiesPerimees }) : null,
+  };
+}
+
+function phraseEspace(e) {
+  if (!e || !Number.isFinite(e.octets) || !Number.isFinite(e.objets)) return t('Espace serveur : pas encore mesuré.');
+  const v = { x: enMo(e.octets), n: e.objets };
+  return e.tronque ? t('au moins {x} Mo ({n} fichiers)', v) : t('Tes photos sur le serveur : {x} Mo ({n} fichiers)', v);
+}
+
+// Motifs d'un fichier refusé (§ 4.10) : le motif ET le sens décident la phrase (« type » à l'envoi = refusé par le serveur ; à la réception =
+// illisible). Lus par hasOwn : un jeton inconnu ou hostile retombe sur « Fichier refusé », jamais sur le jeton.
+const MOTIFS_FICHIER = {
+  'envoi:trop_gros': 'Plus de 50 Mo : ce fichier reste sur cet appareil seulement.',
+  'envoi:type': 'Type de fichier refusé par le serveur.',
+  'envoi:verification': 'Empreinte différente après envoi.',
+  'reception:forme': 'Ligne de fichier mal formée reçue du serveur.',
+  'reception:introuvable': 'Ce fichier n’est plus sur le serveur.',
+  'reception:empreinte': 'Fichier illisible reçu du serveur.',
+  'reception:taille': 'Fichier illisible reçu du serveur.',
+  'reception:type': 'Fichier illisible reçu du serveur.',
+};
+export const motifFichier = (motif, sens) => { const cle = `${sens}:${motif}`; return t(Object.hasOwn(MOTIFS_FICHIER, cle) ? MOTIFS_FICHIER[cle] : 'Fichier refusé'); };
+
+export const SYNC_L4_ACTIONS = ['telechargerTout', 'arreterTelechargement', 'actualiserEspace', 'renvoyerOriginale', 'reessayerFichier'];
+
+// Le câblage des gestes L4 (§ 4.1), protégé comme gestesL3Pour : l'écran n'a ni le client ni le stockage (R53), tout passe par le moteur.
+export function gestesL4Pour({ obtenirMoteur = () => getSyncState().moteur, dire = toast, rafraichir = refresh, journaliser = logError } = {}) {
+  const protege = (nom, fn) => async (cle) => {
+    try { await fn(cle); }
+    catch (error) { journaliser('sync.geste.' + nom, { error }); dire(t('Ce geste n’a pas abouti.')); }
+  };
+  return {
+    telechargerTout: protege('telecharger_tout', async () => { await obtenirMoteur()?.telechargerTout(); rafraichir(); }),
+    arreterTelechargement: protege('arreter_telechargement', async () => { await obtenirMoteur()?.arreterTelechargement(); rafraichir(); }),
+    actualiserEspace: protege('actualiser_espace', async () => { await obtenirMoteur()?.actualiserEspace(); rafraichir(); }),
+    renvoyerOriginale: protege('renvoyer_originale', async () => { await obtenirMoteur()?.renvoyerEnOriginale(); rafraichir(); }),
+    reessayerFichier: protege('reessayer_fichier', async (sha256) => { await obtenirMoteur()?.reessayerFichier(sha256); rafraichir(); }),
+  };
+}
+
+const choisirQualiteReelle = async (valeur) => { await repo.setSetting('upload_quality', valeur); refresh(); };
+
+// Rendu de l'ensemble L4 (§ 4.1), exporté pour être éprouvé tel quel. Un bouton n'existe que si son geste est câblé (la règle de L3).
+export function syncSectionL4(model, gestes = {}, { choisirQualite = choisirQualiteReelle } = {}) {
+  const f = model?.fichiers;
+  if (!f) return [];
+  const bouton = (action, libelle, cle) => (Object.hasOwn(gestes, action) ? el('button', { class: 'btn', onClick: () => gestes[action](cle) }, libelle) : null);
+  const rangee = (...b) => { const vus = b.filter(Boolean); return vus.length ? el('div', { class: 'row' }, ...vus) : null; };
+  const bloc = el('div', { class: 'stack', dataset: { role: 'sync-l4' } }, el('p', { class: 'muted' }, f.aEnvoyer));
+  if (f.envoi) bloc.append(el('p', { class: 'muted' }, f.envoi));
+  if (f.pause) bloc.append(el('div', { class: 'card warn' }, f.pause));
+  if (f.aTelecharger) bloc.append(el('p', { class: 'muted' }, f.aTelecharger));
+  if (f.reception) bloc.append(el('p', { class: 'muted' }, f.reception));
+  const telechargement = rangee(f.telechargerTout ? bouton('telechargerTout', f.telechargerTout) : null, f.arreter ? bouton('arreterTelechargement', t('Arrêter le téléchargement')) : null);
+  if (telechargement) bloc.append(telechargement);
+  bloc.append(el('p', { class: 'muted' }, model.espace));
+  const actualiser = rangee(bouton('actualiserEspace', t('Actualiser')));
+  if (actualiser) bloc.append(actualiser);
+  // R-UX-8 / B-15 : le segmented n'est JAMAIS dans un <label> (field() en rend un) : même habillage .field, par un div.
+  bloc.append(el('div', { class: 'field' }, el('span', null, t('Qualité d’envoi des photos')),
+    segmented([{ value: 'reduite', label: t('Réduite (≈ 400 Ko, 2 000 px)') }, { value: 'originale', label: t('Originale') }], model.qualite, (v) => choisirQualite(v)),
+    el('small', null, t('L’original reste toujours sur l’appareil qui a pris la photo. Réduite : JPEG de 2 000 px au plus, environ 400 Ko par page, métadonnées retirées. Originale : le fichier tel quel, avec ses métadonnées (dont la position GPS si la photo en porte).'))));
+  const renvoi = f.renvoi ? rangee(bouton('renvoyerOriginale', f.renvoi)) : null;
+  if (renvoi) bloc.append(renvoi);
+  if (f.refuses) {
+    bloc.append(el('p', null, f.refuses));
+    for (const e of model.erreursFichiers || []) {
+      bloc.append(el('div', { class: 'status warn', dataset: { fichier: e.sha256 } }, el('p', null, e.texte), e.reessayer ? rangee(bouton('reessayerFichier', t('Réessayer'), e.sha256)) : null));
+    }
+  }
+  for (const phrase of [f.typeInconnu, f.copiesSansServeur, f.copiesPerimees]) if (phrase) bloc.append(el('p', { class: 'muted' }, phrase));
+  return [bloc];
+}
+
 // Câblage du geste « Changer de compte sur cet appareil » : la décision et les effets vivent dans changerDeCompte().
 async function changeAccount(auth) {
   if (archiveOperation) { toast(t('Une opération d’archive est déjà en cours.')); return; }
@@ -805,7 +915,7 @@ async function changeAccount(auth) {
 // conflits. Rien de L3 n'apparaît hors de l'état « connectée + garde ok » — avant lui le compte n'est pas établi —
 // et SANS moteur le modèle est exactement celui de L2, pas même une clé de plus : la section de L2 reste intacte
 // tant que le moteur n'est pas branché.
-export function syncSectionModel({ available = false, reason = null, user = null, pending = 0, guard = null, retour = null, enAttente = false, moteur = null, quarantaine: enQuarantaine = [], conflits: aTrancher = [] } = {}) {
+export function syncSectionModel({ available = false, reason = null, user = null, pending = 0, guard = null, retour = null, enAttente = false, moteur = null, quarantaine: enQuarantaine = [], conflits: aTrancher = [], fichiersErreurs = [], qualite = 'reduite', snapshot = null } = {}) {
   const lines = [];
   const buttons = [];
   let connectee = false;
@@ -859,6 +969,11 @@ export function syncSectionModel({ available = false, reason = null, user = null
   const avancement = moteur.enCours && moteur.progression
     ? { t: moteur.progression.table, n: moteur.progression.n, total: moteur.progression.total }
     : null;
+  // Lot G (§ 4.1, I-G8) : une erreur de fichier n'est dite que pour une ligne RÉFÉRENCÉE (un orphelin n'est pas nommé), par le nom que la
+  // personne reconnaît (nomFichier) et son motif en phrase ; trop_gros n'offre pas « Réessayer » (B-22).
+  const refsFichiers = snapshot ? referencesFichiers(snapshot) : new Set();
+  const erreursReferencees = (fichiersErreurs || []).filter((e) => refsFichiers.has(e?.sha256))
+    .map((e) => ({ sha256: e.sha256, texte: `${nomFichier(e.sha256, snapshot)} — ${motifFichier(e.motif, e.sens)}`, reessayer: e.motif !== 'trop_gros' }));
   return {
     title,
     lines,
@@ -890,8 +1005,13 @@ export function syncSectionModel({ available = false, reason = null, user = null
       ? (moteur.phase === 'reception' ? t('Réception : {t} {n}/{total}', avancement) : t('Envoi initial : {t} {n}/{total}', avancement))
       : null,
     pause: moteur.pause?.raison === 'quota'
-      ? t('Espace serveur plein (1 Go au palier gratuit) — rien n’est perdu, tout reste sur cet appareil.')
+      ? t('Espace serveur plein — rien n’est perdu, tout reste sur cet appareil.')
       : null,
+    // Lot G (§ 4.1) : l'ensemble L4 — des faits du moteur, des phrases ici ; aucun plan, palier ni prix (R-G-5).
+    fichiers: modeleFichiers(moteur, { qualite, refuses: erreursReferencees.length }),
+    espace: phraseEspace(moteur.espaceServeur),
+    qualite: qualite === 'originale' ? 'originale' : 'reduite',
+    erreursFichiers: erreursReferencees,
   };
 }
 

@@ -36,7 +36,37 @@ export const CHAINES_NEUVES_AILLEURS = {
   // Lot G, tâche 2 : bilans d'archive (création, inspection, restauration — § 4.6).
   '../src/ui/settings.js': ['{n} pages ne sont pas encore téléchargées sur cet appareil et ne sont pas dans l’archive.', '1 page n’est pas encore téléchargée sur cet appareil et n’est pas dans l’archive.', '{n} fichier(s) archivé(s) sont des copies du serveur, pas l’original.', '{n} fichier(s) archivé(s) ont des octets qui ne sont ni l’original ni la copie du serveur connue : archivés tels quels.', 'pages manquantes : {n}', 'copies du serveur : {n}', 'Cette archive renvoie à {n} pages qui ne sont pas dedans : celles qui sont sur le serveur pourront être téléchargées (sur la fiche, ou Réglages → Télécharger toutes les pages).', 'Les pages de cet appareil absentes de l’archive seront retirées d’ici.', '{n} originaux de cet appareil conservés (l’archive portait des copies).', '1 original de cet appareil conservé (l’archive portait une copie).',
     // Lot G, tâche 2, ronde 1 (#35) : le singulier de la phrase d'inspection.
-    'Cette archive renvoie à 1 page qui n’est pas dedans : si elle est sur le serveur, elle pourra être téléchargée (sur la fiche, ou Réglages → Télécharger toutes les pages).'],
+    'Cette archive renvoie à 1 page qui n’est pas dedans : si elle est sur le serveur, elle pourra être téléchargée (sur la fiche, ou Réglages → Télécharger toutes les pages).',
+    // Lot G, tâche 5 ; pause L3 sans palier, P2.
+    'Photos à envoyer : {n}',
+    'Envoi des photos : {n}/{m}',
+    'Pages à télécharger : {n} (~{m} Mo)',
+    'Télécharger toutes les pages ({n} fichiers, ~{m} Mo)',
+    'Arrêter le téléchargement',
+    'Téléchargement des pages : {n}/{m}',
+    'Tes photos sur le serveur : {x} Mo ({n} fichiers)',
+    'Espace serveur : pas encore mesuré.',
+    'au moins {x} Mo ({n} fichiers)',
+    'Actualiser',
+    'Espace photos plein sur le serveur : les photos attendent sur cet appareil, les fiches continuent de partir.',
+    'Qualité d’envoi des photos',
+    'Réduite (≈ 400 Ko, 2 000 px)',
+    'Originale',
+    'L’original reste toujours sur l’appareil qui a pris la photo. Réduite : JPEG de 2 000 px au plus, environ 400 Ko par page, métadonnées retirées. Originale : le fichier tel quel, avec ses métadonnées (dont la position GPS si la photo en porte).',
+    'Renvoyer en originale les {n} photos de cet appareil envoyées en réduite',
+    'Fichiers refusés : {n}',
+    '{n} fichier(s) de type inconnu ne seront pas synchronisés.',
+    '{n} copie(s) de photos ici dont le serveur n’a plus trace : l’appareil qui a l’original les renverra.',
+    '{n} photo(s) ici sont une copie plus ancienne que celle du serveur.',
+    'Plus de 50 Mo : ce fichier reste sur cet appareil seulement.',
+    'Type de fichier refusé par le serveur.',
+    'Empreinte différente après envoi.',
+    'Ligne de fichier mal formée reçue du serveur.',
+    'Ce fichier n’est plus sur le serveur.',
+    'Fichier illisible reçu du serveur.',
+    'Fichier refusé',
+    'Envoi en cours…',
+    'Espace serveur plein — rien n’est perdu, tout reste sur cet appareil.'],
 };
 
 export async function runAjouterTests({ eq, ok }) {

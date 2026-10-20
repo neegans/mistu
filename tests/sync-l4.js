@@ -2652,4 +2652,161 @@ export async function runSyncL4Tests({ eq, ok }) {
       await m.arreter();
     });
   });
+
+  // === Tâche 5 — Réglages, ensemble L4 (§ 4.1, § 4.10, R-G-5)
+  const SR = await import('../src/ui/settings.js');
+  const baseL4 = { available: true, user: { id: 'u1', email: 'x@exemple.invalid' }, guard: { ok: true }, pending: 0 };
+  const fichiersL4 = (sur = {}) => ({ aEnvoyer: 0, aTelecharger: 0, octetsATelecharger: 0, enErreur: 0, typeInconnu: 0, copiesPerimees: 0, copiesSansServeur: 0, aRenvoyer: 0, ...sur });
+  const moteurL4 = (sur = {}) => ({ enCours: false, phase: null, progression: null, dernierEchange: null, aEnvoyer: 0, enQuarantaine: 0, conflits: 0, pause: null, attenteConnexion: false, horloge: null, derniereErreur: null, derniersEffets: null, fichiers: fichiersL4(), progressionFichiers: null, espaceServeur: null, telechargementGlobal: false, pauseFichiers: null, ...sur });
+  const modele = (moteur, sur = {}) => SR.syncSectionModel({ ...baseL4, moteur, ...sur });
+  const rendre = (model, gestes = {}, options = {}) => { const boite = document.createElement('div'); for (const n of SR.syncSectionL4(model, gestes, options)) boite.append(n); return boite; };
+  const boutons = (boite) => [...boite.querySelectorAll('button')].map((b) => b.textContent);
+  const snapNoms = { books: [{ id: 'b1', title: 'Mon livre' }], book_editions: [{ id: 'e1', book_id: 'b1', cover_sha256: H('3') }], source_documents: [{ id: 'd1', edition_id: 'e1', sha256: H('1') }], source_pages: [{ id: 'p1', document_id: 'd1', sha256: H('1'), printed_page: 12 }], recipes: [{ id: 'r1', original_title: 'Tarte', photo_sha256: H('4') }], imports: [], files: [] };
+
+  await run('Réglages L4 : rendu réel (§ 4.1)', async () => {
+    eq(Object.keys(modele(null, { fichiersErreurs: [{ sha256: H('1'), motif: 'type', sens: 'envoi' }], qualite: 'originale', snapshot: snapNoms })).sort(), ['buttons', 'lines', 'title'], 'Réglages L4 : sans moteur, le modèle est celui de L2/L3 — pas une clé de plus');
+    eq([SR.syncSectionL4(modele(null)), SR.syncSectionL4(SR.syncSectionModel({ available: true, guard: { ok: false, message: 'x' }, moteur: moteurL4() }))], [[], []], 'Réglages L4 : sans moteur ou sans compte établi, rien de rendu');
+    const b1 = rendre(modele(moteurL4({ fichiers: fichiersL4({ aEnvoyer: 3 }), progressionFichiers: { sens: 'envoi', n: 2, total: 3 } })));
+    ok(b1.textContent.includes('Photos à envoyer : 3') && b1.textContent.includes('Envoi des photos : 2/3'), 'L4 : « Photos à envoyer : 3 » et la progression d’envoi');
+    const b2 = rendre(modele(moteurL4({ pauseFichiers: { raison: 'stockage', at: DATE } })));
+    eq(b2.querySelector('.card.warn')?.textContent, 'Espace photos plein sur le serveur : les photos attendent sur cet appareil, les fiches continuent de partir.', 'L4 : seau plein → la phrase en card warn, sans aucun chiffre de plan (R-G-5)');
+    const quatre = 4 * 419430; // 1 677 720 octets → « 1,6 Mo »
+    const b3 = rendre(modele(moteurL4({ fichiers: fichiersL4({ aTelecharger: 4, octetsATelecharger: quatre }) })), { telechargerTout: () => {} });
+    eq([b3.textContent.includes('Pages à télécharger : 4 (~1,6 Mo)'), boutons(b3).includes('Télécharger toutes les pages (4 fichiers, ~1,6 Mo)')], [true, true], 'L4 : 4 pages, ~1,6 Mo → la ligne et le bouton');
+    const b4 = rendre(modele(moteurL4({ fichiers: fichiersL4({ aTelecharger: 4, octetsATelecharger: quatre }), telechargementGlobal: true, progressionFichiers: { sens: 'reception', n: 1, total: 4 } })), { telechargerTout: () => {}, arreterTelechargement: () => {} });
+    eq([boutons(b4).includes('Arrêter le téléchargement'), boutons(b4).some((b) => b.startsWith('Télécharger toutes')), b4.textContent.includes('Téléchargement des pages : 1/4')], [true, false, true], 'L4 : pendant le téléchargement global → « Arrêter le téléchargement » et la progression');
+    const espace = { octets: 850 * 1048576, objets: 312, at: DATE, tronque: false };
+    const b5 = rendre(modele(moteurL4({ espaceServeur: espace })), { actualiserEspace: () => {} });
+    eq([b5.textContent.includes('Tes photos sur le serveur : 850 Mo (312 fichiers)'), b5.querySelectorAll('progress').length, /Go|palier|\$/.test(b5.textContent), boutons(b5).includes('Actualiser')], [true, 0, false, true],
+      'L4 (R-G-5) : « Tes photos sur le serveur : 850 Mo (312 fichiers) », aucun <progress>, ni « Go », ni « palier », ni « $ » (mutants : barre ou phrase de palier réintroduite ; objets ignoré → « (0 fichiers) »)');
+    eq([rendre(modele(moteurL4({ espaceServeur: { ...espace, tronque: true } }))).textContent.includes('au moins 850 Mo (312 fichiers)'), rendre(modele(moteurL4())).textContent.includes('Espace serveur : pas encore mesuré.')], [true, true], 'L4 : tronque → « au moins … » ; sans mesure → « pas encore mesuré »');
+    const choix = [];
+    const b6 = rendre(modele(moteurL4()), {}, { choisirQualite: (v) => choix.push(v) });
+    const seg = b6.querySelector('.segmented');
+    const actif = seg?.querySelector('button.active')?.textContent;
+    [...seg.querySelectorAll('button')].find((b) => b.textContent === 'Originale').click();
+    eq([actif, seg.closest('label'), !!seg.closest('.field'), choix], ['Réduite (≈ 400 Ko, 2 000 px)', null, true, ['originale']], 'L4 : segmented « Réduite » actif, HORS de tout <label> (R-UX-8, B-15), habillé .field ; un clic sur « Originale » choisit originale');
+    const r1 = rendre(modele(moteurL4({ fichiers: fichiersL4({ aRenvoyer: 2 }) }), { qualite: 'originale' }), { renvoyerOriginale: () => {} });
+    const r2 = rendre(modele(moteurL4({ fichiers: fichiersL4({ aRenvoyer: 2 }) }), { qualite: 'reduite' }), { renvoyerOriginale: () => {} });
+    eq([boutons(r1).includes('Renvoyer en originale les 2 photos de cet appareil envoyées en réduite'), boutons(r2).some((b) => b.startsWith('Renvoyer'))], [true, false], 'L4 : « Renvoyer en originale … » seulement en Originale avec des candidates (B-21)');
+    const errs = [{ sha256: H('1'), motif: 'introuvable', sens: 'reception' }, { sha256: H('3'), motif: 'trop_gros', sens: 'envoi' }, { sha256: H('4'), motif: 'nouveau-motif', sens: 'envoi' }, { sha256: H('9'), motif: 'type', sens: 'envoi' }];
+    const vus = [];
+    const b8 = rendre(modele(moteurL4({ fichiers: fichiersL4({ enErreur: 3 }) }), { fichiersErreurs: errs, snapshot: snapNoms }), { reessayerFichier: (sha) => vus.push(sha) });
+    const lignes = [...b8.querySelectorAll('[data-fichier]')];
+    eq([b8.textContent.includes('Fichiers refusés : 3'), lignes.map((l) => l.querySelector('p').textContent), lignes.map((l) => l.querySelectorAll('button').length)],
+      [true, ['Page 12 · Mon livre — Ce fichier n’est plus sur le serveur.', 'Couverture · Mon livre — Plus de 50 Mo : ce fichier reste sur cet appareil seulement.', 'Photo du plat · Tarte — Fichier refusé'], [1, 0, 1]],
+      'L4 : une ligne par file_error d’une ligne RÉFÉRENCÉE (H9, orpheline, n’est pas dite), nommée par nomFichier (I-G8), motif en phrase, motif inconnu → « Fichier refusé » ; trop_gros sans « Réessayer » (B-22 ; mutant : bouton rendu)');
+    lignes[0].querySelector('button').click();
+    eq(vus, [H('1')], 'L4 : « Réessayer » appelle gestes.reessayerFichier(sha256)');
+    const b9 = rendre(modele(moteurL4({ fichiers: fichiersL4({ typeInconnu: 1, copiesSansServeur: 1, copiesPerimees: 1 }) })));
+    ok(['1 fichier(s) de type inconnu ne seront pas synchronisés.', '1 copie(s) de photos ici dont le serveur n’a plus trace : l’appareil qui a l’original les renverra.', '1 photo(s) ici sont une copie plus ancienne que celle du serveur.'].every((p) => b9.textContent.includes(p)), 'L4 : type inconnu, copies sans serveur, copies périmées — leurs phrases (§ 4.1 items 7 et 8)');
+    eq([SR.motifFichier('type', 'envoi'), SR.motifFichier('type', 'reception'), SR.motifFichier('forme', 'reception'), SR.motifFichier('__proto__', 'envoi')], ['Type de fichier refusé par le serveur.', 'Fichier illisible reçu du serveur.', 'Ligne de fichier mal formée reçue du serveur.', 'Fichier refusé'], 'motifFichier (§ 4.10) : le motif ET le sens décident la phrase ; un jeton inconnu ou hostile → « Fichier refusé », jamais le jeton');
+    // R-G-5 et I-G8 sur un rendu où TOUTES les branches sont actives (pause, à télécharger, téléchargement global, renvoi, refusés, phrases),
+    // pas sur le seul rendu de l'espace : une phrase de palier dans la carte pause ou le renvoi resterait verte sinon.
+    const toutes = rendre(modele(moteurL4({ fichiers: fichiersL4({ aEnvoyer: 2, aTelecharger: 4, octetsATelecharger: quatre, aRenvoyer: 2, enErreur: 3, typeInconnu: 1, copiesSansServeur: 1, copiesPerimees: 1 }), progressionFichiers: { sens: 'reception', n: 1, total: 4 }, telechargementGlobal: true, pauseFichiers: { raison: 'stockage', at: DATE }, espaceServeur: { ...espace, tronque: true } }), { qualite: 'originale', fichiersErreurs: errs, snapshot: snapNoms }),
+      { telechargerTout: () => {}, arreterTelechargement: () => {}, actualiserEspace: () => {}, renvoyerOriginale: () => {}, reessayerFichier: () => {} });
+    const texteToutes = toutes.textContent;
+    eq([texteToutes.includes('Espace photos plein'), texteToutes.includes('Pages à télécharger : 4'), boutons(toutes).includes('Arrêter le téléchargement'), boutons(toutes).some((b) => b.startsWith('Renvoyer en originale')), toutes.querySelectorAll('[data-fichier]').length, /Go|palier|\$/.test(texteToutes), /supabase/i.test(texteToutes), toutes.querySelectorAll('progress').length],
+      [true, true, true, true, 3, false, false, 0], 'L4 (R-G-5, I-G8) : sur un rendu où toutes les branches sont actives — pause, pages à télécharger, téléchargement global, renvoi, refusés, phrases —, ni « Go », ni « palier », ni « $ », ni le nom du fournisseur, aucun <progress> (mutants : phrase de palier dans la carte pause ou le renvoi ; fournisseur nommé)');
+  });
+
+  await run('Réglages L4 : gestes câblés, protégés ; qualité écrite ; « Envoi en cours… »', async () => {
+    eq(SR.SYNC_L4_ACTIONS, ['telechargerTout', 'arreterTelechargement', 'actualiserEspace', 'renvoyerOriginale', 'reessayerFichier'], 'L4 : les cinq gestes nommés');
+    const appels = [];
+    const moteurFactice = Object.fromEntries(['telechargerTout', 'arreterTelechargement', 'actualiserEspace', 'renvoyerEnOriginale', 'reessayerFichier'].map((nom) => [nom, async (x) => { appels.push(nom + (x ? ':' + x : '')); }]));
+    const gestes = SR.gestesL4Pour({ obtenirMoteur: () => moteurFactice, dire: () => {}, rafraichir: () => {}, journaliser: () => {} });
+    eq(Object.keys(gestes).sort(), [...SR.SYNC_L4_ACTIONS].sort(), 'gestesL4Pour : exactement les cinq gestes');
+    const tout = rendre(modele(moteurL4({ fichiers: fichiersL4({ aTelecharger: 1, octetsATelecharger: 10, aRenvoyer: 1, enErreur: 1 }) }), { qualite: 'originale', fichiersErreurs: [{ sha256: H('1'), motif: 'introuvable', sens: 'reception' }], snapshot: snapNoms }), gestes);
+    for (const b of tout.querySelectorAll('button')) if (!b.closest('.segmented')) b.click();
+    const arret = rendre(modele(moteurL4({ fichiers: fichiersL4({ aTelecharger: 1 }), telechargementGlobal: true })), gestes);
+    [...arret.querySelectorAll('button')].find((b) => b.textContent === 'Arrêter le téléchargement').click();
+    await new Promise((r) => setTimeout(r, 0));
+    eq(appels.sort(), ['actualiserEspace', 'arreterTelechargement', 'reessayerFichier:' + H('1'), 'renvoyerEnOriginale', 'telechargerTout'], 'L4 : chaque bouton appelle SON geste, chaque geste son API du moteur (mutant : action renommée → bouton manquant)');
+    const dits = [];
+    await SR.gestesL4Pour({ obtenirMoteur: () => ({ actualiserEspace: async () => { throw new Error('x'); } }), dire: (m) => dits.push(m), rafraichir: () => {}, journaliser: () => {} }).actualiserEspace();
+    eq(dits, ['Ce geste n’a pas abouti.'], 'gestesL4Pour : un geste qui rejette est dit, jamais un rejet non traité');
+    await withRepo(async (repo) => {
+      const b = rendre(modele(moteurL4()));
+      [...b.querySelectorAll('.segmented button')].find((x) => x.textContent === 'Originale').click();
+      let lu = null;
+      for (let i = 0; i < 100 && (lu = await repo.getSetting('upload_quality')) !== 'originale'; i += 1) await new Promise((r) => setTimeout(r, 10));
+      eq(lu, 'originale', 'L4 : le câblage par défaut écrit repo.setSetting(upload_quality, originale) (§ 3.3)');
+      await (await import('../src/ui/state.js')).relectureEnCours();
+    });
+    await (await import('../src/ui/state.js')).relireReglages(); // la base de l'app reprend la main (même hygiène qu'en tâche 1)
+    const ditsE = [];
+    await SR.effacerDonnees({ user: null, pending: async () => 0, confirm: async () => true, demanderMot: async () => 'EFFACER', toast: (m) => ditsE.push(m), clearDevice: async () => {}, reload: () => {}, arreterSync: async () => {}, transfertEnCours: () => true });
+    const ditsC = [];
+    await SR.changerDeCompte({ confirm: async () => true, toast: (m) => ditsC.push(m), pending: async () => 0, archiveCreated: () => 'oui', clearDevice: async () => {}, reload: () => {}, arreterSync: async () => {}, transfertEnCours: () => true });
+    eq([ditsE, ditsC], [['Envoi en cours…', 'Données effacées'], ['Envoi en cours…']], 'effacerDonnees et changerDeCompte : un envoi ou un téléchargement en vol se dit « Envoi en cours… » avant d’attendre l’arrêt (S-11/F-24 : non annulable)');
+  });
+
+  // Tâche 5 — épingles hors brief : chemins que le brief prescrit mais que ses tests n'exercent pas (mutants survivants de la série 1, rejoués
+  // sur une copie) : la page entière (renderSettings → syncSection), l'ordre « dit, puis arrêt » de S-11, le défaut de transfertEnCours, le sens
+  // de la progression, les valeurs hors forme et le rafraîchissement après chaque geste.
+  await run('Réglages L4 (hors brief) : la page entière lit les file_error et le snapshot, passe la qualité du réglage, rend L4 avant l’historique', async () => {
+    const etat = await import('../src/ui/state.js');
+    await withRepo(async (repo, db) => {
+      await db.mutate({ puts: {
+        books: [{ id: 'b1', title: 'Mon livre', updated_at: DATE }],
+        book_editions: [{ id: 'e1', book_id: 'b1', updated_at: DATE }],
+        source_documents: [{ id: 'd1', edition_id: 'e1', updated_at: DATE }],
+        source_pages: [{ id: 'p1', document_id: 'd1', sha256: H('1'), printed_page: 12, updated_at: DATE }],
+        sync_state: [{ key: 'file_error:' + H('1'), value: { motif: 'introuvable', sens: 'reception', at: DATE } }, { key: 'file_error:' + H('9'), value: { motif: 'type', sens: 'envoi', at: DATE } }],
+      }, origin: 'device' });
+      await repo.setSetting('upload_quality', 'originale');
+      const avant = etat.getSyncState().moteur;
+      let page = null;
+      try {
+        etat.setSyncState({ moteur: { etat: () => moteurL4({ fichiers: fichiersL4({ enErreur: 2 }) }) } });
+        page = await SR.renderSettings({}, {}, { settings: await repo.getSettings(), sync: { auth: { available: true, reason: null }, user: { id: 'u1', email: 'x@exemple.invalid' }, guard: { ok: true } } }, {});
+      } finally { etat.setSyncState({ moteur: avant }); }
+      const l4 = page.querySelector('[data-role="sync-l4"]');
+      const historique = [...page.querySelectorAll('label.field > span')].find((s) => s.textContent === 'Historique de consultation');
+      const lignes = [...page.querySelectorAll('[data-fichier]')];
+      eq([!!l4, !!(l4 && historique && (l4.compareDocumentPosition(historique) & Node.DOCUMENT_POSITION_FOLLOWING)), lignes.map((l) => l.querySelector('p').textContent),
+        lignes.map((l) => [...l.querySelectorAll('button')].map((b) => b.textContent)), l4?.querySelector('.segmented button.active')?.textContent],
+      [true, true, ['Page 12 · Mon livre — Ce fichier n’est plus sur le serveur.'], [['Réessayer']], 'Originale'],
+      'renderSettings (hors brief, § 4.1) : avec un compte et un moteur, la page rend l’ensemble L4 avant « Historique de consultation », nomme la file_error d’une page référencée lue EN BASE (H9, orpheline, tue), câble « Réessayer » et montre la qualité du réglage (mutants : L4 non rendu ; file_error, snapshot ou qualité non passés)');
+      await etat.relectureEnCours();
+    });
+    await etat.relireReglages(); // la base de l'app reprend la main (même hygiène que le bloc du brief)
+  });
+
+  await run('Réglages L4 (hors brief) : « Envoi en cours… » dit AVANT l’arrêt, seulement pendant un transfert ; le défaut lit progressionFichiers du moteur (S-11/F-24)', async () => {
+    const etat = await import('../src/ui/state.js');
+    const effacer = (dits, sur = {}) => SR.effacerDonnees({ user: null, pending: async () => 0, confirm: async () => true, demanderMot: async () => 'EFFACER', toast: (m) => dits.push(m), clearDevice: async () => {}, reload: () => {}, arreterSync: async () => { dits.push('<arrêt>'); }, ...sur });
+    const changer = (dits, sur = {}) => SR.changerDeCompte({ confirm: async () => true, toast: (m) => dits.push(m), pending: async () => 0, archiveCreated: () => 'oui', clearDevice: async () => {}, reload: () => {}, arreterSync: async () => { dits.push('<arrêt>'); }, ...sur });
+    const vu = { effacerEnVol: [], effacerAuRepos: [], changerAuRepos: [], effacerDefaut: [], changerDefaut: [], effacerDefautRepos: [] };
+    await effacer(vu.effacerEnVol, { transfertEnCours: () => true });
+    await effacer(vu.effacerAuRepos, { transfertEnCours: () => false });
+    await changer(vu.changerAuRepos, { transfertEnCours: () => false });
+    const avant = etat.getSyncState().moteur;
+    try {
+      etat.setSyncState({ moteur: { etat: () => moteurL4({ progressionFichiers: { sens: 'reception', n: 1, total: 2 } }) } });
+      await effacer(vu.effacerDefaut);
+      await changer(vu.changerDefaut);
+      etat.setSyncState({ moteur: { etat: () => moteurL4() } });
+      await effacer(vu.effacerDefautRepos);
+    } finally { etat.setSyncState({ moteur: avant }); }
+    eq(vu, { effacerEnVol: ['Envoi en cours…', '<arrêt>', 'Données effacées'], effacerAuRepos: ['<arrêt>', 'Données effacées'], changerAuRepos: ['<arrêt>'], effacerDefaut: ['Envoi en cours…', '<arrêt>', 'Données effacées'], changerDefaut: ['Envoi en cours…', '<arrêt>'], effacerDefautRepos: ['<arrêt>', 'Données effacées'] },
+      'effacerDonnees et changerDeCompte (hors brief, S-11/F-24) : la phrase précède l’attente de l’arrêt, rien n’est dit sans transfert, et le défaut lit progressionFichiers du moteur posé (mutants : dit après l’arrêt ; dit toujours ; défaut jamais vrai)');
+  });
+
+  await run('Réglages L4 (hors brief) : progression selon son sens, valeurs hors forme tues, chaque geste rafraîchit après son appel', async () => {
+    const avecPages = (sens) => rendre(modele(moteurL4({ fichiers: fichiersL4({ aTelecharger: 2, octetsATelecharger: 10 }), progressionFichiers: { sens, n: 1, total: 2 } }))).textContent;
+    const enEnvoi = avecPages('envoi');
+    const enReception = avecPages('reception');
+    eq([enEnvoi.includes('Envoi des photos : 1/2'), enEnvoi.includes('Téléchargement des pages'), enReception.includes('Téléchargement des pages : 1/2'), enReception.includes('Envoi des photos')], [true, false, true, false],
+      'L4 (hors brief, § 4.1 items 1 et 2) : la progression d’envoi et celle du téléchargement ne se disent que dans leur sens (mutants : sens ignoré)');
+    const hors = modele(moteurL4({ fichiers: fichiersL4({ aEnvoyer: -1, aTelecharger: Number.NaN, typeInconnu: 1.5, copiesPerimees: '2' }), espaceServeur: { octets: '850', objets: 312, at: DATE, tronque: false } }));
+    eq([hors.fichiers.aEnvoyer, hors.fichiers.aTelecharger, hors.fichiers.typeInconnu, hors.fichiers.copiesPerimees, hors.espace], ['Photos à envoyer : 0', null, null, null, 'Espace serveur : pas encore mesuré.'],
+      'L4 (hors brief) : un compteur qui n’est pas un entier positif vaut 0, une mesure dont les octets ne sont pas un nombre n’est pas dite (mutants : compteurs non bornés ; mesure non typée)');
+    const journal = [];
+    const moteurJ = Object.fromEntries(['telechargerTout', 'arreterTelechargement', 'actualiserEspace', 'renvoyerEnOriginale', 'reessayerFichier'].map((nom) => [nom, async () => { journal.push(nom); }]));
+    const g = SR.gestesL4Pour({ obtenirMoteur: () => moteurJ, dire: () => {}, rafraichir: () => journal.push('rendu'), journaliser: () => {} });
+    for (const a of SR.SYNC_L4_ACTIONS) await g[a](H('1'));
+    eq(journal, ['telechargerTout', 'rendu', 'arreterTelechargement', 'rendu', 'actualiserEspace', 'rendu', 'renvoyerEnOriginale', 'rendu', 'reessayerFichier', 'rendu'],
+      'gestesL4Pour (hors brief) : chaque geste rafraîchit l’écran APRÈS l’appel du moteur, comme gestesL3Pour (mutant : rafraîchissement retiré)');
+  });
 }
