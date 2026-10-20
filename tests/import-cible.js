@@ -1906,8 +1906,8 @@ export async function runImportCibleTests({ eq, ok }) {
           seances([lig('g1', { recipe_id: null, scan_session_id: 's4', status: 'a_verifier', resultat: {} })], [seance('s4')]), seances([lig('x1', { kind: 'index', recipe_id: null, scan_session_id: 's5' })], [seance('s5')])],
         [[], [], ['s3'], ['s4'], ['s5']], 'séances : terminée → absente ; celle d’un import CIBLÉ non terminé → absente, de retour après ignore ; celle où « Regrouper en recette » ou le panneau d’index a écrit un import → toujours listée');
         eq(D.lignesImports(ctxL([lig('a1')], [seance('s1', { page_ids: undefined })]), opts).map((r) => [r.kind, r.pages]), [['recette', 2], ['seance', 0]], 'lignesImports : les imports d’abord, puis les séances ; une séance sans page_ids compte 0 page');
-        eq([D.cibleReprise({ id: 'imp a', kind: 'recette', recipe_id: 'rc/1' }), D.cibleReprise({ id: 'imp_b', kind: 'recette', recipe_id: null }), D.cibleReprise({ id: 'imp&c', kind: 'index', scan_session_id: 'ss&1' }), D.cibleReprise({ id: 'imp_d', kind: 'index', scan_session_id: null }), D.cibleReprise({ id: 'imp_e', kind: 'web' }), D.cibleReprise(null)],
-          ['/recipes/rc%2F1/importer?import=imp%20a', '/recipes/new?import=imp_b', '/import?session=ss%261&import=imp%26c', null, null, null], 'cibleReprise : recette ciblée → l’écran ciblé ; recette sans recipe_id → l’éditeur ?import= ; index → le panneau de sa séance ; identifiants encodés ; sans séance ou sorte inconnue → null');
+        eq([D.cibleReprise({ id: 'imp a', kind: 'recette', recipe_id: 'rc/1' }), D.cibleReprise({ id: 'imp_b', kind: 'recette', recipe_id: null }), D.cibleReprise({ id: 'imp&c', kind: 'index', scan_session_id: 'ss&1' }), D.cibleReprise({ id: 'imp_d', kind: 'index', scan_session_id: null }), D.cibleReprise({ id: 'imp_e', kind: 'couverture', recipe_id: 'rc1' }), D.cibleReprise(null)],
+          ['/recipes/rc%2F1/importer?import=imp%20a', '/recipes/new?import=imp_b', '/import?session=ss%261&import=imp%26c', null, null, null], 'cibleReprise : recette ciblée → l’écran ciblé ; recette sans recipe_id → l’éditeur ?import= ; index → le panneau de sa séance ; identifiants encodés ; index sans séance, ou sorte inconnue (couverture, même avec une recipe_id) → null');
         // Ronde 1 (mineur) : validerIndex borne aussi le NOMBRE d'entrées, d'incertitudes et de mentions — un index relu du journal (synchro, archive) en
         // porterait 20 000 sous la borne de 512 Kio, et « Créer les références » écrirait autant de fiches.
         const L = await import('../src/domain/llm.js');
@@ -2612,6 +2612,7 @@ export async function runImportCibleTests({ eq, ok }) {
         ['signet pas encore reçu → referenceAbsente, aucun geste', lw('x6', { recipe_id: 'rc_inconnue' }), ['a_lancer', 'web', [], false, false, true, null, CIBLE('x6', 'rc_inconnue')]],
         ['relecture d’une fiche déjà lue (available), a_verifier avec résultat → Reprendre, Ignorer (P-10 : la règle « available » du lot A ne vaut pas pour le web)', lw('d1', { recipe_id: 'rc_d', status: 'a_verifier', resultat: LUE }), ['a_verifier', 'web', ['reprendre', 'ignorer'], false, false, false, null, CIBLE('d1', 'rc_d')]],
         ['relecture d’une fiche déjà lue (available), echec → Relancer, Ignorer (P-10)', lw('d2', { recipe_id: 'rc_d', status: 'echec', erreur: { raison: 'inaccessible', extra: {} } }), ['echec', 'web', ['relancer', 'ignorer'], false, false, false, 'inaccessible', CIBLE('d2', 'rc_d')]],
+        ['SANS recipe_id (forme reçue hostile : synchro, archive), echec → Ignorer seulement : aucun signet à relire, « Réessayer » ne pourrait jamais aboutir (ronde 1)', lw('n1', { recipe_id: null, status: 'echec', erreur: { raison: 'serveur', extra: {} } }), ['echec', 'web', ['ignorer'], false, false, false, 'serveur', null]],
       ]) eq(resume(un(l)), attendu, `lignesImports (lot B) — ${nom}`);
       eq([un(lw('w1')).titre, un(lw('w1')).pages, un(lw('x6', { recipe_id: 'rc_inconnue' })).titre, un(lw('h1', { recipe_id: 'rc_h' })).titre],
         [{ type: 'web', texte: 'Pâtes puttanesca', livre: 'www.ricardocuisine.com' }, 0, { type: 'web', texte: null, livre: null }, { type: 'web', texte: 'Page hostile', livre: null }],
@@ -2622,6 +2623,14 @@ export async function runImportCibleTests({ eq, ok }) {
 
       let ouvreWeb = null; try { await repo.ouvrirImport({ kind: 'web', recipe_id: sA.id }); } catch (e) { ouvreWeb = e; }
       eq([ouvreWeb?.name, (await db.byIndex('imports', 'recipe_id', sA.id)).length], ['TypeError', 0], 'repo.ouvrirImport({ kind: web }) → TypeError, rien d’écrit : une lecture web naît par demarrerLectureWeb, jamais par le chemin photo (P-1)');
+      // Ronde 1 : une ligne web SANS recipe_id (forme reçue : required.imports = [] l'admet) — lancerLecture la refuse « inconnu » AVANT de lire la base
+      // (repo.get('recipes', null) levait une DataError non gérée), zéro POST, rien d'écrit.
+      const W = await import('../src/ui/import-web.js');
+      const lN = ligne(sB, { id: 'imp_sans_signet', recipe_id: null, status: 'echec', erreur: { raison: 'serveur', extra: {} }, appels: 1 });
+      await db.mutate({ puts: { imports: [lN] }, origin: 'device' });
+      const lNavant = await db.get('imports', lN.id), ffN = fauxFetch();
+      let rN; try { rN = await W.lancerLecture(lN.id, { ctx: await ctxDe(), repo, fetch: ffN.fetch, enLigne: () => true }); } catch (e) { rN = { leve: e?.name ?? String(e) }; }
+      eq([rN, ffN.appels.length, await db.get('imports', lN.id), V.volEnCours()], [{ issue: 'refuse', raison: 'inconnu' }, 0, lNavant, null], 'lancerLecture (lot B, ronde 1) : une ligne web sans recipe_id → refus « inconnu » sans lever, zéro POST, la ligne intacte, le vol libéré');
 
       // --- 2. Page Ajouter (§ 4.7) : textes, gestes, « Reprendre ».
       const lA = ligne(sA);
@@ -2630,6 +2639,10 @@ export async function runImportCibleTests({ eq, ok }) {
       const lD = ligne(sD, { status: 'en_cours', document_id_vol: 'doc-ailleurs', battement_at: new Date().toISOString(), started_at: new Date().toISOString() });
       const lE = ligne(sE, { status: 'echec', erreur: { raison: 'serveur', extra: {} }, appels: 1 });
       await db.mutate({ puts: { imports: [lA, lB, lC, lD, lE] }, origin: 'device' });
+      // Ronde 1 (P-1, défense en profondeur) : le chemin photo n'AJOUTE pas non plus de page à une lecture web — refus avant tout octet, ligne intacte.
+      const filesAvantW = await db.count('files'), pagesAvantW = await db.count('source_pages'), lAavant = await db.get('imports', lA.id);
+      let pagesWeb = null; try { await repo.ajouterPages([new File([new Uint8Array([1, 2, 3, 4])], 'w.jpg', { type: 'image/jpeg' })], { import_id: lA.id }); } catch (e) { pagesWeb = e; }
+      eq([pagesWeb?.name, await db.get('imports', lA.id), await db.count('files'), await db.count('source_pages')], ['TypeError', lAavant, filesAvantW, pagesAvantW], 'repo.ajouterPages({ import_id: <ligne web> }) → TypeError avant tout octet ; la ligne web garde page_ids vide et aucune séance (P-1, ronde 1)');
       const root = await monterAdd();
       const [nA, nB, nC, nD] = [lA, lB, lC, lD].map((l) => ligneDe(root, l.id));
       eq([!!nA, !!nB, !!nC, !!nD], [true, true, true, true], 'Ajouter (lot B) : une ligne par lecture web ouverte');
@@ -2640,6 +2653,25 @@ export async function runImportCibleTests({ eq, ok }) {
       eq([nD.textContent.includes('En cours sur un autre écran'), boutons(nD)], [true, []], 'Ajouter (lot B) : un vol tenu ailleurs → « En cours sur un autre écran », aucun geste');
       bouton(nA, 'Reprendre').click();
       eq(navs.at(-1), `/recipes/${encodeURIComponent(sA.id)}/importer?import=${encodeURIComponent(lA.id)}`, 'Ajouter (lot B, R-B-20) : « Reprendre » → l’écran de la fiche (variante web), avec LA ligne (?import=)');
+
+      // --- 2 bis (ronde 1). Les textes de la section que la tâche ne fixait qu'au domaine : signet pas encore reçu, adresse illisible, échec
+      // illisible (« Code : … ») et JSON-LD hors bornes (l'`extra` de l'erreur), ligne sans recipe_id ; le titre reçu isolé de l'hôte recalculé.
+      const sH = { ...signetDe('https://h.test/x', 'Page hostile'), source_url: 'javascript:alert(1)' }; // adresse illisible, posée telle quelle (reçue)
+      const sJ = signetDe('https://j.test/gros', 'Gros gâteau');
+      await db.mutate({ puts: { recipes: [sH, sJ] }, origin: 'device' });
+      const lZ = ligne(sA, { id: 'imp_pas_recu', recipe_id: 'rc_pas_recu' });
+      const lH = ligne(sH, { status: 'echec', erreur: { raison: 'illisible', extra: {} }, appels: 1 });
+      const lJ = ligne(sJ, { status: 'echec', erreur: { raison: 'hors_bornes', extra: { source_kind: 'jsonld' } }, appels: 1 });
+      await db.mutate({ puts: { imports: [lZ, lH, lJ] }, origin: 'device' });
+      const r2 = await monterAdd();
+      const titreDe = (id) => ligneDe(r2, id)?.querySelector('strong')?.textContent ?? null, etatDe = (id) => ligneDe(r2, id)?.querySelector('.status')?.textContent ?? null;
+      eq([titreDe(lZ.id), boutons(ligneDe(r2, lZ.id))], ['(référence pas encore reçue)', []], 'Ajouter (lot B, ronde 1) : signet pas encore reçu → « (référence pas encore reçue) », aucun geste (spec § 4.7)');
+      eq([titreDe(lH.id), etatDe(lH.id)], ['Page hostile — Lien web', 'L’assistant n’a pas répondu lisiblement. Réessaie. Code : illisible'], 'Ajouter (lot B, ronde 1) : adresse illisible → « … — Lien web » sans hôte ; échec illisible → le texte suivi de « Code : illisible »');
+      eq(etatDe(lJ.id), 'La recette de cette page dépasse ce que l’app peut lire (plus de 80 ingrédients ou 60 étapes, ou une ligne trop longue). Ouvre la page.', 'Ajouter (lot B, ronde 1) : echec(hors_bornes) d’un JSON-LD → le texte dépend de l’extra de l’erreur (source_kind), pas de la seule raison');
+      eq([titreDe(lN.id), boutons(ligneDe(r2, lN.id))], ['Sans titre — Lien web', ['Ignorer']], 'Ajouter (lot B, ronde 1) : une ligne web sans recipe_id → « Sans titre — Lien web », « Ignorer » seul (jamais « Réessayer »)');
+      const strongA = ligneDe(r2, lA.id)?.querySelector('strong'), bdiA = strongA?.querySelector(':scope > bdi') ?? null;
+      eq([bdiA?.textContent ?? null, strongA ? [...strongA.childNodes].filter((n) => n !== bdiA).map((n) => n.textContent).join('') : null], ['Pâtes puttanesca', ' — Lien web · www.ricardocuisine.com'],
+        'Ajouter (lot B, ronde 1) : le titre du signet (donnée reçue) est isolé dans un <bdi>, l’hôte recalculé hors de lui — un U+202E du titre ne peut pas réordonner « — Lien web · {hôte} »');
 
       // --- 3. « Réessayer » → UN POST lecture-web ; « Annuler » ; une ligne d'un autre appareil devient celle d'ici ; un signet en http est refusé.
       const ff = fauxFetch();
@@ -2653,7 +2685,7 @@ export async function runImportCibleTests({ eq, ok }) {
       bouton(ligneDe(rR, lB.id), 'Annuler').click();
       await attendre(async () => (await db.get('imports', lB.id)).status === 'echec' && !!bouton(ligneDe(rR, lB.id), 'Réessayer'), 'annulé');
       eq([ff.appels[0].options.signal.aborted, (await db.get('imports', lB.id)).erreur?.raison, ligneDe(rR, lB.id).textContent.includes('Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.'), V.volEnCours()],
-        [true, 'annule', true, null], 'Annuler (lot B) : le fetch est abandonné par annulerLecture, echec(annule), la phrase I-B7, le vol est libéré');
+        [true, 'annule', true, null], 'Annuler (lot B) : le fetch est abandonné, echec(annule), la phrase I-B7, le vol est libéré (annulerVol et annulerLecture agissent sur le même vol de vol.js : l’aiguillage par sorte n’est pas observable ici)');
       const ff2 = fauxFetch();
       const rC = await monterAdd({ fetch: ff2.fetch });
       bouton(ligneDe(rC, lC.id), 'Réessayer').click();
@@ -2669,10 +2701,15 @@ export async function runImportCibleTests({ eq, ok }) {
       const ff3 = fauxFetch();
       const rE = await monterAdd({ fetch: ff3.fetch });
       const ditsAvant = dits.length;
-      bouton(ligneDe(rE, lE.id), 'Réessayer').click();
-      await attendre(() => dits.length > ditsAvant, 'refus dit');
-      eq([dits.at(-1), ff3.appels.length, (await db.get('imports', lE.id)).status], ['Cette adresse ne peut pas être lue par l’assistant : seule une page publique en https est admise. Ouvre-la toi-même.', 0, 'echec'],
-        'Réessayer (lot B) : un signet en http → refus « interdit » dit par la phrase de l’écran de lecture, zéro POST, rien d’écrit');
+      // Ronde 1 : « rien d'écrit » se MESURE — la ligne relue ENTIÈRE avant et après, et chaque db.mutate pendant le geste compté.
+      const lEavant = await db.get('imports', lE.id), mutateAvant = db.mutate; let ecrituresE = 0;
+      db.mutate = function (...a) { ecrituresE += 1; return mutateAvant.apply(this, a); };
+      try {
+        bouton(ligneDe(rE, lE.id), 'Réessayer').click();
+        await attendre(() => dits.length > ditsAvant, 'refus dit');
+      } finally { db.mutate = mutateAvant; }
+      eq([dits.at(-1), ff3.appels.length, await db.get('imports', lE.id), ecrituresE], ['Cette adresse ne peut pas être lue par l’assistant : seule une page publique en https est admise. Ouvre-la toi-même.', 0, lEavant, 0],
+        'Réessayer (lot B) : un signet en http → refus « interdit » dit par la phrase de l’écran de lecture, zéro POST, rien d’écrit (ligne relue entière identique, aucun db.mutate pendant le geste)');
       eq(reseau, 0, 'lot B (tâche 6) : aucun appel hors des fausses fetch des blocs');
 
       // --- 4. Démarrage (§ 7.4) : une lecture web en_cours de CET appareil au battement de −120 s → interrompu ; enregistrée il y a 31 jours → purgée.

@@ -257,7 +257,9 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     else if (autreAppareil) gestes = i.status === 'a_verifier' && i.resultat != null ? ['reprendre', 'ignorer'] : ['ignorer'];
     else gestes = i.status === 'echec' ? ['relancer', 'ignorer'] : ['reprendre', 'ignorer'];
     if (!cible) gestes = gestes.filter((g) => g !== 'reprendre');
-    if (!web && !nbPages(i)) gestes = gestes.filter((g) => g !== 'relancer'); // un vol sans page serait refusé (sans_page) sans rien dire ; une lecture web n'a jamais de page (P-10)
+    // Un vol sans page serait refusé (sans_page) sans rien dire ; une lecture web n'a jamais de page (P-10), mais sans recipe_id (forme reçue) elle
+    // n'a aucun signet à relire : « Réessayer » ne pourrait jamais aboutir (ronde 1 ; lancerLecture la refuse `inconnu`) — « Ignorer » seul reste.
+    if (web ? !recetteId : !nbPages(i)) gestes = gestes.filter((g) => g !== 'relancer');
     return {
       id: i.id, kind: i.kind, titre: { type, texte: recette ? chaine(recette.original_title) : null, livre: web ? (recette ? lienSignet(recette.source_url).hote : null) : livreDe(recette?.edition_id ?? i.edition_id) },
       etat: i.status, age: ageDepuis(i.updated_at, maintenant), raison: i.status === 'echec' ? chaine(i.erreur?.raison) : null,

@@ -544,6 +544,8 @@ export async function ajouterPages(files, { edition_id = null, session_id = null
   if (import_id) {
     const lue = await db.get('imports', import_id);
     if (!lue || !ATTENDUS_AJOUT.includes(lue.status)) throw new TransitionRefusee('imports', import_id, lue?.status);
+    // P-1 (lot B, ronde 1 de la tâche 6) : une lecture web ne reçoit jamais de pages (page_ids: [] toujours) — refus avant tout octet, comme à l'ouverture.
+    if (!KINDS_PAGES.includes(lue.kind)) throw new TypeError('ajouterPages : l’import ' + import_id + ' n’est pas une lecture de pages (' + String(lue.kind) + ')');
     if (session_id && lue.scan_session_id && lue.scan_session_id !== session_id) throw new TypeError('ajouterPages : l’import ' + import_id + ' pointe la séance ' + String(lue.scan_session_id) + ', pas ' + String(session_id));
     session_id = session_id ?? lue.scan_session_id ?? null;
   }

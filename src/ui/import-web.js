@@ -65,7 +65,8 @@ export async function lancerLecture(importId, { ctx, repo = repoModule, fetch: f
   let battement = null;
   try {
     const ligne = await repo.get('imports', importId);
-    if (!ligne || ligne.kind !== 'web') { liberer(); return refus('inconnu'); }
+    // Ronde 1 de la tâche 6 : une ligne web sans recipe_id (forme reçue, required.imports = []) n'a aucun signet — refusée avant toute lecture de la base.
+    if (!ligne || ligne.kind !== 'web' || typeof ligne.recipe_id !== 'string' || !ligne.recipe_id) { liberer(); return refus('inconnu'); }
     if (!(ligne.status === 'a_lancer' || ligne.status === 'echec' || (relire && ligne.status === 'a_verifier'))) { liberer(); return refus('statut'); }
     if (!enLigne()) { liberer(); return refus('hors_ligne'); }
     const session = await sessionAssistant(ctx);

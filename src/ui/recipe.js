@@ -325,7 +325,7 @@ export function blocSignet(recipe, ctx = null, { lire = null, connecter = () => 
     return bloc;
   }
   // R-B-18 : « ouvert » = importOuvert (une définition, jamais la négation des statuts terminés : une ligne reçue au statut inconnu ou nul ne compte
-  // pas) — par ouverteWeb d'import-web.js, seule copie de la substitution de sorte (la tâche 6 n'a qu'elle à changer).
+  // pas) — par ouverteWeb d'import-web.js : importOuvert(i) && kind 'web' && même recipe_id, sans substitution de sorte depuis la tâche 6.
   const ligne = ligneWebOuverte(ctx?.imports, recipe.id, { moi });
   const statut = ligne?.status ?? null;
   const carte = carteConnexion(connecter, ctx); carte.hidden = true; carte.dataset.bascule = 'carte';

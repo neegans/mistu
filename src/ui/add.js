@@ -83,7 +83,8 @@ function titreLigne(l) {
   if (l.titre.type === 'seance') return t('Photos conservées : {n} page(s)', { n: l.pages }) + (l.titre.livre ? ` · ${l.titre.livre}` : '');
   if (l.titre.type === 'index') return t('Index · {l}', { l: livre });
   if (l.titre.type === 'regrouper') return t('Recette à regrouper · {l}', { l: livre });
-  if (l.titre.type === 'web' && !l.referenceAbsente) return `${l.titre.texte ?? t('Sans titre')} — ${l.titre.livre ? t('Lien web · {h}', { h: l.titre.livre }) : t('Lien web')}`;
+  // Ronde 1 : le titre du signet (donnée reçue : ses Cf peuvent rester) est isolé dans un <bdi> — un U+202E n'y réordonne pas l'hôte recalculé (I-B5).
+  if (l.titre.type === 'web' && !l.referenceAbsente) return [el('bdi', null, l.titre.texte ?? t('Sans titre')), ` — ${l.titre.livre ? t('Lien web · {h}', { h: l.titre.livre }) : t('Lien web')}`];
   return l.referenceAbsente ? t('(référence pas encore reçue)') : (l.titre.texte ?? t('Sans titre'));
 }
 // L'état dit en clair ; `brute` : la ligne du journal (sa date et son erreur, avec le nombre du quota ou « trop lourd » — que la ligne du domaine ne
@@ -104,6 +105,9 @@ function etatLigne(l, brute) {
 const LIBELLES = { reprendre: () => t('Reprendre'), relancer: () => t('Relancer'), annuler: () => t('Annuler'), ignorer: () => t('Ignorer'), ouvrir_seance: () => t('Ouvrir la séance') };
 // Lot B (spec recette-web § 4.7) : pour une lecture web, le geste « relancer » s'appelle « Réessayer ».
 const libelle = (g, l) => (g === 'relancer' && l.kind === 'web' ? t('Réessayer') : LIBELLES[g]());
+// Le vol d'une ligne, par sorte (ronde 1) : une lecture web part et s'annule par import-web.js, une lecture de pages par import-cible.js (lot A). Les
+// deux « annuler » agissent sur LE vol partagé de vol.js (seuls l'étiquette du journal et les abonnés notifiés diffèrent : non observable ici).
+const volDe = (l) => (l.kind === 'web' ? { lancer: lancerLecture, annuler: annulerLecture } : { lancer: lancerExtraction, annuler: annulerVol });
 // Ce qu'un « Relancer » (ou « Réessayer ») refusé dit : texteRefus (src/ui/import-cible.js, une définition, le refus `interdit` d'une lecture
 // web compris) ; un refus sans phrase (ligne changée ailleurs) se voit au redessin.
 
@@ -126,7 +130,7 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
   const redessiner = () => { file = file.then(async () => dessiner(await lireBase())).catch((e) => logError('add.imports', { error: e })); return file; };
   async function agir(geste, l, brute) {
     if (geste === 'reprendre' || geste === 'ouvrir_seance') { if (l.cible) navigate(l.cible); return; }
-    if (geste === 'annuler') await (l.kind === 'web' ? annulerLecture(l.id) : annulerVol(l.id)); // rien si ce document ne tient pas ce vol : le redessin dit l'état réel
+    if (geste === 'annuler') await volDe(l).annuler(l.id); // rien si ce document ne tient pas ce vol : le redessin dit l'état réel
     else if (geste === 'ignorer') {
       // « Ignorer » vaut pour LA lecture affichée (T4-R2, ronde 1) : une ligne relancée ailleurs depuis le dessin (autre lecture, autre départ) n'est pas
       // ignorée sans avoir été vue — le redessin la montre, et un second « Ignorer » vaudra pour elle.
@@ -137,7 +141,7 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
     } else if (geste === 'relancer') {
       // UN appel par le vol de l'écran ciblé (spec § 4.5) : aucune page ni séance n'est écrite ; la ligne s'arrête à a_verifier (« Reprendre » ensuite).
       // Lot B : une lecture web repart par lancerLecture (même forme de retour), aussi depuis une ligne d'un autre appareil (§ 4.7).
-      const r = await (l.kind === 'web' ? lancerLecture(l.id, { ctx, repo, fetch, maintenant, battementMs }) : lancerExtraction(l.id, { ctx, repo, fetch, maintenant, battementMs }));
+      const r = await volDe(l).lancer(l.id, { ctx, repo, fetch, maintenant, battementMs });
       const dit = r.issue === 'refuse' ? texteRefus(r) : null;
       if (dit) toast(dit);
     }
