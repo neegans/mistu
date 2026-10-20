@@ -177,6 +177,11 @@ export function seanceDUnImportCible(seance, imports) {
   return (Array.isArray(imports) ? imports : []).some((i) => importOuvert(i) && i.kind === 'recette' && !!i.recipe_id && i.scan_session_id === seance?.id);
 }
 
+// La clé d'UNE lecture (T4-R2 du lot A) : la ligne, le départ de son vol et son résultat. Une clôture (Ignorer, Enregistrer, echec(illisible)) ne
+// vaut que pour la lecture AFFICHÉE : une lecture arrivée d'un autre onglet entre-temps (même id, même statut) a une autre clé. Une définition, ici
+// (pure) : l'écran ciblé, l'éditeur, le panneau d'index et la section « Imports » (lot A, par src/ui/import-cible.js) et la variante web (lot B).
+export const cleLecture = (L) => JSON.stringify([L?.id ?? null, L?.started_at ?? null, L?.resultat ?? null]);
+
 // --- Section « Imports » d'Ajouter (spec § 4.5, tâche 6) ---------------------------------------------------------------------------------------
 // Les sortes que ce lot écrit (« couverture » et « web » sont réservées aux lots E et B : une ligne d'une autre sorte n'est pas listée, rien
 // d'inventé) et les statuts NON terminés. `importOuvert` : une ligne que la section liste (et que la fiche du livre compte).

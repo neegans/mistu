@@ -11,7 +11,10 @@ import { scaleVersion } from '../domain/scaling.js';
 import { assessVersion } from '../domain/diet.js';
 import { toJsonLd, toPaprikaYaml } from '../domain/exporters.js';
 import { DIET_TAGS } from '../model/schema.js';
-import { pageHeader, section, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture } from './components.js';
+import { importOuvert } from '../domain/import-cible.js';
+import { pageHeader, section, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture, sessionAssistant, carteConnexion, ligneReperes } from './components.js';
+import { demarrerLectureWeb, texteEchecLecture, enLigneLecture } from './import-web.js';
+import { demarrerConnexion } from './settings.js';
 import { estCreationIA, etiquetteCreationIA, lireCreation, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
 import { addToMealFlow } from './meals.js';
 import { deviceId } from './import.js';
@@ -23,9 +26,24 @@ import { capitaliser } from './puces.js';
 // serveur peut en porter 100 000 caractères, qui pousseraient la fiche entière hors de l'écran.
 export const adresseInerte = (u) => { const s = String(u ?? ''); return s.length > 200 ? s.slice(0, 200) + '…' : s; };
 
-export async function renderRecipe(params, query, ctx) {
+// `deps` (lot B, facultatif : le routeur n'en passe pas) : les gestes de la lecture web { repo, navigate, fetch, maintenant, enLigne } — la suite
+// n'ouvre ni réseau ni navigation réelle.
+export async function renderRecipe(params, query, ctx, deps = {}) {
   const recipe = ctx.recipesById.get(params.id);
   if (!recipe) return el('div', { class: 'card' }, t('Recette introuvable.'));
+  // Lot B (§ 4.1, § 4.5) : une fiche à adresse lisible porte « Ouvrir le lien » partout (I-B5) ; la lecture par l'assistant a besoin de la session.
+  const lienFiche = recipe.source_url ? lienSignet(recipe.source_url) : null;
+  const lisibleParLAssistant = !!lienFiche?.ok && lienFiche.href.startsWith('https:');
+  const sessionWeb = lisibleParLAssistant ? await sessionAssistant(ctx) : null;
+  const gestesLecture = { repo: deps.repo ?? repo, fetch: deps.fetch, maintenant: deps.maintenant, enLigne: deps.enLigne };
+  const naviguer = deps.navigate ?? navigate;
+  const enLigneWeb = () => (deps.enLigne ?? enLigneLecture)();
+  const lireWeb = async () => {
+    const r = await demarrerLectureWeb({ recipe: (await gestesLecture.repo.get('recipes', recipe.id)) ?? recipe, ctx }, gestesLecture);
+    if (r.issue === 'ok') naviguer(`/recipes/${encodeURIComponent(recipe.id)}/importer`);
+    else if (r.issue === 'refuse') toast(texteEchecLecture({ raison: r.raison === 'adresse' ? 'interdit' : r.raison }).texte);
+  };
+  const connecterWeb = () => demarrerConnexion(ctx?.sync?.auth);
   await repo.recordActivity(recipe.edition_id, 'open_recipe', { recipe_id: recipe.id });
   const versions = [...(ctx.versionsByRecipe.get(recipe.id) || [])].sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
   const edition = recipe.edition_id ? ctx.editionsById.get(recipe.edition_id) : null;
@@ -62,13 +80,23 @@ export async function renderRecipe(params, query, ctx) {
   }
   // Import ciblé (spec § 4.3.6-4.3.7) : ce que l'assistant a lu — l'état de vérification de la VERSION AFFICHÉE, le bandeau de lecture (daté de
   // la lecture, « Incertain : … » lu dans la ligne du journal par import_id, pointeur souple) et la photo du plat. `lecture` est null hors import.
-  const lecture = banniereLecture(version, (ctx.imports || []).find((i) => i?.id === version?.provenance?.import_id) || null);
+  // Lot B : la ligne d'une lecture WEB porte sa recette sous resultat.recette (resultat = { source_kind, page, recette }) — la bannière lit ses champs incertains là.
+  const ligneLue = (ctx.imports || []).find((i) => i?.id === version?.provenance?.import_id) || null;
+  const lecture = banniereLecture(version, ligneLue?.kind === 'web' ? { ...ligneLue, resultat: ligneLue.resultat?.recette ?? null } : ligneLue);
   root.append(el('div', { class: 'row', style: { marginBottom: '.8rem' } }, availabilityBadge(recipe), versionBadge(version, recipe), lecture ? etatVerification(version) : null, recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, capitaliser(c)))));
+  const web = bandeauWeb(version);
+  if (web) root.append(web); // lot B (§ 4.5) : la source d'une version lue sur le web, d'abord — puis la bannière du lot A
   if (lecture) root.append(bandeauLecture(lecture));
   const photo = await photoDuPlat(recipe); // ronde 1 : jamais root.append(null) — le DOM natif écrirait le nœud texte « null »
   if (photo) root.append(photo);
 
-  if (!version) { root.append(referenceOnly()); return root; }
+  if (!version) {
+    root.append(referenceOnly());
+    // F-9 : la carte « Connecte-toi » et le bouton de lecture sont rendus cachée / éteint ; la session (déjà lue plus haut) les bascule ici —
+    // jamais de flash « Connecte-toi » pour une personne connectée, jamais de carte retirée (le motif d'import.js).
+    basculerSessionSignet(root, sessionWeb, enLigneWeb());
+    return root;
+  }
 
   // Sélecteur Original / Ma version — C-2 : sur une création IA (ou une fiche origine 'ia'), chaque version porte son étiquette, jamais
   // « Original » ; une version manuelle d'une fiche IA garde son statut.
@@ -91,7 +119,9 @@ export async function renderRecipe(params, query, ctx) {
         el('a', { class: 'btn small', href: `#/recipes/${recipe.id}/edit?kind=adaptation&v=${version.id}` }, t('Créer ma version')),
         el('a', { class: 'btn small', href: `#/recipes/${recipe.id}/edit?kind=correction&v=${version.id}` }, t('Corriger')),
         // Import ciblé (spec import-cible § 4.1, D-11) : une recette partielle se relit par l'écran déjà rattaché (import à refaire) ; une recette complète n'a pas d'entrée.
-        recipe.availability === 'partial' && !recipe.source_url ? el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(recipe.id)}/importer` }, t('Relire les pages')) : null)),
+        recipe.availability === 'partial' && !recipe.source_url ? el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(recipe.id)}/importer` }, t('Relire les pages')) : null,
+        // Lot B (D-B18) : une fiche à adresse https qui a déjà une version se relit par l'assistant — absent sans session.
+        lisibleParLAssistant && sessionWeb ? el('button', { type: 'button', class: 'btn small', dataset: { role: 'relire-web' }, onClick: lireWeb }, t('Relire la page avec l’assistant')) : null)),
     el('div', { class: 'row' },
       el('label', { class: 'field' }, el('span', null, t('Portions')), el('div', { class: 'row' },
         el('button', { class: 'btn small', onClick: () => setServings((state.servings || 1) - 1) }, '−'),
@@ -112,7 +142,9 @@ export async function renderRecipe(params, query, ctx) {
     el('a', { class: 'btn', href: `#/search${buildQuery({ for: recipe.id, role: 'salade', mode: 'all' })}` }, t('Avec quoi on mange ça ?')),
     el('button', { class: 'btn', onClick: () => addToMealFlow(ctx, { recipe, version, book, edition }, { role: recipe.type === 'salade' || recipe.type === 'soupe' || recipe.type === 'legumes' || recipe.type === 'feculent' ? 'accompagnement' : 'plat_principal' }) }, t('Ajouter à mon repas')),
     el('button', { class: 'btn', onClick: makeList }, t('Liste d’épicerie')),
-    dish ? el('a', { class: 'btn', href: `#/dishes/${dish.id}` }, t('Autres recettes de ce plat')) : el('button', { class: 'btn', onClick: attachDish }, t('Rattacher à un plat'))));
+    dish ? el('a', { class: 'btn', href: `#/dishes/${dish.id}` }, t('Autres recettes de ce plat')) : el('button', { class: 'btn', onClick: attachDish }, t('Rattacher à un plat')),
+    // I-B5 (lot B) : « Ouvrir le lien » reste sur TOUTE fiche à adresse lisible (l'audit § 1.4 notait sa perte dès qu'une version existe).
+    lienFiche?.ok ? el('a', { class: 'btn', href: lienFiche.href, target: '_blank', rel: 'noopener noreferrer', dataset: { role: 'ouvrir-lien' } }, t('Ouvrir le lien')) : null));
 
   const body = el('div', { class: 'recipe-body' }); // C-7 : overflow-wrap (styles.css)
   root.append(body);
@@ -244,7 +276,7 @@ export async function renderRecipe(params, query, ctx) {
 
   function referenceOnly() {
     // Un signet web n'est pas une référence d'index : il n'y a pas de page de livre à ouvrir, il y a un lien (F8).
-    if (recipe.source_url) return el('div', null, blocSignet(recipe));
+    if (recipe.source_url) return el('div', null, blocSignet(recipe, ctx, { lire: lireWeb, connecter: connecterWeb }));
     return el('div', null,
       el('div', { class: 'card warn stack' },
         el('h2', null, recipe.printed_page ? t('Repérée dans ton livre — page {p}', { p: recipe.printed_page }) : t('Repérée dans l’index de ton livre')),
@@ -258,16 +290,68 @@ export async function renderRecipe(params, query, ctx) {
   }
 }
 
-// Signet web (spec § 11) : revalidé AU RENDU — une fiche venue d'une archive peut porter n'importe quoi (S6) ; l'hôte
-// affiché vient de l'adresse, jamais de source_label (S7). Aucun geste de scan : ce n'est pas une référence d'index (F8).
-export function blocSignet(recipe) {
+// Signet web (spec § 11 ; lot B § 4.1 a) : revalidé AU RENDU — une fiche venue d'une archive peut porter n'importe quoi (S6) ; l'hôte affiché
+// vient de l'adresse, jamais de source_label (S7). Aucun geste de scan (F8). Selon l'import web OUVERT de la fiche (au plus un, I-2) : « Lire la
+// recette avec l’assistant » (aucun, ou a_lancer), « Voir » (en_cours), « Vérifier et enregistrer » (a_verifier), « Réessayer » (echec, avec la
+// phrase du cas). Synchrone (F-9) : la carte « Connecte-toi » est rendue CACHÉE et le bouton de lecture ÉTEINT — basculerSessionSignet les règle
+// une fois la session lue. Une adresse en http: n'a aucun bouton de lecture (B-20). « Ouvrir le lien » est toujours là.
+export function blocSignet(recipe, ctx = null, { lire = null, connecter = () => {} } = {}) {
   const lien = lienSignet(recipe.source_url);
-  return el('div', { class: 'card warn stack' },
-    el('h2', null, t('Lien web gardé.')),
-    el('p', null, t('L’app n’a pas lu la page : ouvre-la pour cuisiner.')),
-    lien.ok
-      ? el('div', { class: 'row' }, el('a', { class: 'btn primary', href: lien.href, target: '_blank', rel: 'noopener noreferrer' }, t('Ouvrir le lien')), el('span', { class: 'muted' }, lien.hote))
-      : el('p', { class: 'muted' }, t('Adresse non reconnue : '), adresseInerte(recipe.source_url)));
+  const bloc = el('div', { class: 'card warn stack', dataset: { role: 'bloc-signet' } }, el('h2', null, t('Lien web gardé.')));
+  if (!lien.ok) { bloc.append(el('p', { class: 'muted' }, t('Adresse non reconnue : '), adresseInerte(recipe.source_url))); return bloc; }
+  const id = encodeURIComponent(recipe.id);
+  const ouvrir = (classe) => el('a', { class: classe, href: lien.href, target: '_blank', rel: 'noopener noreferrer' }, t('Ouvrir le lien'));
+  const hote = el('span', { class: 'muted' }, lien.hote);
+  const reperes = recipe.web_reperes && typeof recipe.web_reperes === 'object' ? recipe.web_reperes : null;
+  const presentation = typeof reperes?.presentation === 'string' && reperes.presentation ? reperes.presentation : null;
+  const ligneR = reperes ? ligneReperes(reperes) : '';
+  const extraits = [presentation ? el('p', { dataset: { role: 'presentation-web' } }, t('Lors de la recherche, l’assistant disait : {p}', { p: presentation })) : null,
+    ligneR ? el('p', { class: 'muted', dataset: { role: 'reperes-web' } }, t('Estimé par l’assistant : {r}', { r: ligneR })) : null].filter(Boolean);
+  if (!lien.href.startsWith('https:')) {
+    bloc.append(el('p', null, t('L’app n’a pas encore lu la page.')), el('div', { class: 'row' }, ouvrir('btn primary'), hote),
+      el('div', { class: 'status warn', dataset: { role: 'interdit' } }, texteEchecLecture({ raison: 'interdit' }).texte), ...extraits);
+    return bloc;
+  }
+  // R-B-18 : « ouvert » = importOuvert (une définition, jamais la négation des statuts terminés : une ligne reçue au statut inconnu ou nul ne compte
+  // pas). importOuvert ne liste la sorte 'web' qu'à la tâche 6 (KINDS_IMPORT + 'web', P-1) : d'ici là, la ligne déjà reconnue web lui est présentée
+  // sous une sorte qu'elle liste (même substitution qu'ouvertDe d'import-web.js) ; à la tâche 6 : importOuvert(i) && i.kind === 'web' && … .
+  const ligne = (Array.isArray(ctx?.imports) ? ctx.imports : []).find((i) => i?.kind === 'web' && i.recipe_id === recipe.id && importOuvert({ ...i, kind: 'recette' })) || null;
+  const statut = ligne?.status ?? null;
+  const carte = carteConnexion(connecter, ctx); carte.hidden = true; carte.dataset.bascule = 'carte';
+  const boutonLire = (libelle, classe) => el('button', { type: 'button', class: classe, disabled: true, dataset: { role: 'lire-web', bascule: 'bouton' }, onClick: () => lire?.() }, libelle);
+  if (statut === 'en_cours') bloc.append(el('p', null, t('Lecture de la page en cours…')), el('div', { class: 'row' }, el('a', { class: 'btn', href: `#/recipes/${id}/importer` }, t('Voir')), ouvrir('btn'), hote));
+  else if (statut === 'a_verifier') bloc.append(el('p', null, t('Lecture reçue : vérifie-la et enregistre.')), el('div', { class: 'row' }, el('a', { class: 'btn primary', href: `#/recipes/${id}/importer` }, t('Vérifier et enregistrer')), ouvrir('btn'), hote));
+  else if (statut === 'echec') bloc.append(el('p', null, t('Contenu non récupéré : ouvre la page.')), el('div', { class: 'row' }, ouvrir('btn primary'), boutonLire(t('Réessayer'), 'btn'), hote),
+    el('small', { class: 'muted', dataset: { role: 'raison' } }, texteEchecLecture(ligne.erreur).texte), carte, el('div', { dataset: { bascule: 'hors-ligne' } }));
+  else bloc.append(el('p', null, t('L’app n’a pas encore lu la page.')), el('div', { class: 'row' }, boutonLire(t('Lire la recette avec l’assistant'), 'btn primary'), ouvrir('btn'), hote),
+    el('small', { class: 'muted' }, t('Une lecture = un appel à l’assistant, compté dans ton quota du jour.')), carte, el('div', { dataset: { bascule: 'hors-ligne' } }));
+  bloc.append(...extraits);
+  return bloc;
+}
+// La bascule de F-9 : session → bouton allumé (si en ligne), carte cachée ; sans session → carte montrée, bouton éteint ; hors ligne → bouton
+// éteint et « Tu es hors ligne. ».
+export function basculerSessionSignet(racine, session, enLigne = true) {
+  const bouton = racine.querySelector('[data-bascule="bouton"]');
+  const carte = racine.querySelector('[data-bascule="carte"]');
+  const zone = racine.querySelector('[data-bascule="hors-ligne"]');
+  if (bouton) bouton.disabled = !session || !enLigne;
+  if (carte) carte.hidden = !!session;
+  if (zone) zone.replaceChildren(...(enLigne ? [] : [el('div', { class: 'status warn' }, t('Tu es hors ligne.'))]));
+}
+
+// La source d'une version lue sur le web (lot B § 4.5, I-B5, S-2, B-25) : lue dans la PROVENANCE de CETTE version, jamais dans les champs
+// source_* de la fiche ; l'hôte recalculé d'abord, le site et l'auteur déclarés ensuite, étiquetés « Selon la page ». null hors lecture web.
+function bandeauWeb(version) {
+  const p = version?.provenance;
+  if (!p || typeof p.source_url !== 'string' || !p.source_url) return null;
+  const lien = lienSignet(p.url_finale ?? p.source_url);
+  if (!lien.ok) return null;
+  const mode = p.source_kind === 'jsonld' ? t('données de la page') : t('texte lu par l’assistant');
+  const quand = typeof p.lue_le === 'string' && p.lue_le ? formatDate(p.lue_le) : '';
+  const declares = [p.site, p.auteur].filter((x) => typeof x === 'string' && x).join(' · ');
+  return el('div', { class: 'stack', style: { marginBottom: '.8rem' }, dataset: { role: 'bandeau-web' } },
+    el('div', { class: 'status' }, t('Lue sur {h} le {d} · {m} — vérifie.', { h: lien.hote, d: quand, m: mode })),
+    declares ? el('div', { class: 'muted', dataset: { role: 'selon-la-page' } }, t('Selon la page : {s}', { s: declares })) : null);
 }
 
 // État de vérification de la VERSION AFFICHÉE (spec § 4.3.6 ; I3 de la revue : jamais celui de la fiche) : « Vérifiée », ou le nombre de lignes à vérifier.

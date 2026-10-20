@@ -521,5 +521,372 @@ export async function runLectureWebTests({ eq, ok }) {
       } finally { globalThis.fetch = vraiFetch; V.reinitialiserVol(); }
     }));
 
+    // =================================================================================================================================
+    // Tâche 5 — l'écran #/recipes/<id>/importer en variante web, « Enregistrer », la fiche (spec § 4.1 a/c, § 4.2, § 4.3.4, § 4.4, § 4.5)
+    await run('écran et fiche', () => withRepo(async (repo, db) => {
+      const IC = await import('../src/ui/import-cible.js');
+      const W = await import('../src/ui/import-web.js');
+      const V = await import('../src/ui/vol.js');
+      const { renderRecipe, blocSignet } = await import('../src/ui/recipe.js');
+      V.reinitialiserVol(); W.reinitialiserLectureWeb();
+      const [srcRecette, srcEn, srcWeb, srcVol, srcDomaine] = await Promise.all(['../src/ui/recipe.js', '../src/i18n/en.js', '../src/ui/import-web.js', '../src/ui/vol.js', '../src/domain/lecture-web.js'].map(lire)); // lus AVANT de couper le réseau
+      const vraiFetch = globalThis.fetch; let reseau = 0;
+      globalThis.fetch = async (u) => { reseau += 1; throw new Error('aucun reseau attendu : ' + u); };
+      const scene = document.createElement('div'); scene.style.cssText = 'position:absolute;left:-10000px;top:0;width:900px'; document.body.append(scene);
+      try {
+        const NOW = '2026-10-19T12:00:00.000Z'; const DATE = '2026-10-19T00:00:00.000Z';
+        const SESSION = { access_token: 'jeton-ecran-web-sentinelle', user: { id: 'u1', email: 'a@exemple.invalid' } };
+        const signet = (id, url, over = {}) => ({ id, edition_id: null, original_title: 'ricardocuisine.com', original_language: 'fr', availability: 'reference_only', verification_state: 'unverified', printed_page: null, section: null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: [], current_version_id: null, ingredient_ids: [], source_url: url, source_label: 'x', created_at: DATE, updated_at: DATE, ...over });
+        const versionDe = (id, recipe_id, provenance, over = {}) => ({ id, recipe_id, kind: 'extraction', status: null, servings: 4, ingredients: [{ id: 'ri_' + id, source_text: '1 pomme', name_text: 'pomme', verification_state: 'verified' }], steps: [{ id: 'st_' + id, position: 1, text: 'Cuire.' }], provenance, verification_state: 'to_verify', created_at: DATE, updated_at: DATE, ...over });
+        const fiches = ['rc_e1', 'rc_e2', 'rc_e3', 'rc_e4', 'rc_e5', 'rc_e6', 'rc_e7', 'rc_e8', 'rc_e9', 'rc_f1', 'rc_f2', 'rc_f3', 'rc_f4', 'rc_f5'].map((id) => signet(id, `https://ricardocuisine.com/${id}`));
+        fiches.push(signet('rc_http', 'http://ricardocuisine.com/h'), signet('rc_hostile', 'javascript:alert(1)'),
+          signet('rc_main', 'https://ricardocuisine.com/main', { availability: 'available', verification_state: 'verified', current_version_id: 'rv_main', original_title: 'Pâtes de Mamie' }),
+          signet('rc_ia', 'https://ricardocuisine.com/ia', { availability: 'available', verification_state: 'to_verify', current_version_id: 'rv_ia', original_title: 'Pâtes lues' }),
+          signet('rc_corr', 'https://ricardocuisine.com/corr', { availability: 'available', verification_state: 'to_verify', current_version_id: 'rv_corr', original_title: 'Pâtes corrigées' }),
+          signet('rc_rep', 'https://ricardocuisine.com/rep', { web_reperes: { presentation: '<b>Un classique</b> du garde-manger.', temps_min: 30, difficulte: 'facile', ingredients: 7 } }));
+        const versions = [versionDe('rv_main', 'rc_main', { generated_by: 'manual' }, { verification_state: 'verified' }),
+          versionDe('rv_ia', 'rc_ia', { generated_by: 'ai', source_url: 'https://ricardocuisine.com/ia', url_finale: 'https://www.ricardocuisine.com/ia', source_kind: 'jsonld', lue_le: DATE, auteur: 'Auteur Ancien', site: 'Ricardo', import_id: 'imp_ancien' }),
+          versionDe('rv_corr', 'rc_corr', { generated_by: 'ai' }, { kind: 'correction' })];
+        await db.mutate({ puts: { recipes: fiches, recipe_versions: versions }, origin: 'device' });
+        const ctxDe = async (session = SESSION) => {
+          const recipes = await db.getAll('recipes'); const vs = await db.getAll('recipe_versions');
+          return { recipes, recipesById: new Map(recipes.map((r) => [r.id, r])), recipe_versions: vs, versionsByRecipe: repo.groupBy(vs, 'recipe_id'), versionsById: new Map(vs.map((v) => [v.id, v])), editionsById: new Map(), booksById: new Map(), books: [], book_editions: [], pagesById: new Map(), imports: await db.getAll('imports'), settings: { llm: { provider: 'none' }, units: 'original', reading_locale: 'original' }, sync: { user: session ? { id: 'u1', email: 'a@exemple.invalid' } : null, auth: { jeton: async () => session } }, conventionFor: () => null,
+            dishesById: new Map(), cook_history: [], dish_recipe_links: [], recipe_translations: [], ingredients: [], ingredientsById: new Map(), dishes: [], source_documents: [], source_pages: [], rediscovery_prefs: [], docsByRecipe: new Map(), scan_sessions: [] };
+        };
+        const reponse = (status, corps) => ({ ok: status >= 200 && status < 300, status, headers: new Headers(), text: async () => (typeof corps === 'string' ? corps : JSON.stringify(corps)) });
+        const PAGE = { url_finale: 'https://www.ricardocuisine.com/r', hote: 'evil.test', titre_page: 'P', auteur: 'Ricardo', site: 'Ricardo Cuisine', lue_le: NOW, autres_recettes: 0, texte_coupe: false };
+        const RECETTE = { title: 'Pâtes puttanesca', servings: 4, prep_minutes: 20, cook_minutes: 60, total_minutes: 80, ingredients: ['250 g de spaghettis', '30 ml d’huile', '2 gousses d’ail', '1 boîte de tomates', '60 ml d’olives', '15 ml de câpres', '4 filets d’anchois'].map((x, i) => ({ source_text: x, uncertain: i === 2 })), steps: [{ text: 'Cuire.' }, { text: 'Chauffer.' }, { text: 'Ajouter.\nRemuer.' }, { text: 'Servir.' }], notes: 'Un classique.', incomplete: false };
+        const ld = (page = {}, recette = {}) => ({ source_kind: 'jsonld', page: { ...PAGE, ...page }, recette: { ...RECETTE, ...recette }, usage: { input_tokens: 0, output_tokens: 0 }, stop_reason: null, model: null });
+        const fauxFetch = (auto = null) => {
+          const a = { appels: [], rendre: [] };
+          a.fetch = (url, options) => new Promise((resolve, reject) => {
+            a.appels.push({ url, options });
+            const abandon = () => reject(Object.assign(new Error('abandon'), { name: 'AbortError' }));
+            if (options?.signal?.aborted) { abandon(); return; }
+            options?.signal?.addEventListener('abort', abandon, { once: true });
+            const fin = (st, c) => { options?.signal?.removeEventListener('abort', abandon); resolve(reponse(st, c)); };
+            if (auto) fin(auto[0], auto[1]); else a.rendre.push(fin);
+          });
+          return a;
+        };
+        const navs = []; const dits = []; const choix = { suivant: [], appels: 0, vus: [] };
+        const choisir = async (message, options) => {
+          choix.appels += 1; choix.vus.push({ message, options: (options || []).map((o) => [o.value, o.label]) });
+          const r = choix.suivant.length ? choix.suivant.shift() : null;
+          return typeof r === 'function' ? r(message, options) : r;
+        };
+        const parLibelle = (libelle) => (message, options) => options.find((o) => o.label === libelle)?.value ?? null; // le choix d'une personne : ce qu'elle LIT
+        let enLigneTest = true;
+        const gestes = (deps = {}) => ({ repo, navigate: (x) => navs.push(x), toast: (m) => dits.push(m), fetch: async () => { throw new Error('aucun fetch attendu'); }, maintenant: () => NOW, enLigne: () => enLigneTest, choisir, ...deps });
+        const monter = async (id, { session = SESSION, deps = {} } = {}) => { const root = await IC.renderImportCible({ id }, {}, await ctxDe(session), gestes(deps)); scene.append(root); return root; };
+        const bouton = (root, texte) => [...root.querySelectorAll('button')].find((b) => b.textContent === texte) || null;
+        const lien = (root, texte) => [...root.querySelectorAll('a')].find((a) => a.textContent === texte) || null;
+        const attendre = async (cond, quoi) => { for (let i = 0; i < 300; i += 1) { if (await cond()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error('attente dépassée (3 s) : ' + quoi); };
+        const ligneDe = async (recipeId) => (await db.byIndex('imports', 'recipe_id', recipeId)).find((i) => !['enregistre', 'ignore'].includes(i.status)) || null;
+        const LW = await import('../src/domain/lecture-web.js');
+        const importWeb = (id, recipeId, sur = {}) => ({ ...LW.fabriquerImportWeb({ id, signet: { id: recipeId }, deviceId: repo.deviceId() }), created_at: NOW, updated_at: NOW, ...sur }); // forme § 3.1
+        const lireEtAttendre = async (root, ff, corps, recipeId) => { bouton(root, 'Lire la recette avec l’assistant').click(); await attendre(() => ff.appels.length > 0, 'POST parti'); ff.rendre.at(-1)(200, corps); await attendre(async () => (await ligneDe(recipeId))?.status === 'a_verifier' && root.etatRouteWeb().status === 'a_verifier', 'lecture reçue et rendue'); };
+
+        // --- Ouverture
+        let root = await monter('rc_e1');
+        eq([root.textContent.includes('Lire une recette web'), bouton(root, 'Choisir des photos'), lien(root, 'Ouvrir le lien')?.getAttribute('href'), root.querySelector('[data-role="hote"]').textContent, root.etatRouteWeb()], [true, null, 'https://ricardocuisine.com/rc_e1', 'ricardocuisine.com', { importId: null, status: null, vol: false, remplacement: null }], 'écran : la route d’un signet ouvre la variante web — aucun « Choisir des photos », « Ouvrir le lien », sous-titre = hôte recalculé');
+        eq([bouton(root, 'Lire la recette avec l’assistant').disabled, root.textContent.includes('Une lecture = un appel à l’assistant, compté dans ton quota du jour.'), await db.count('imports')], [false, true, 0], 'écran : « Lire la recette avec l’assistant » allumé ; la phrase du quota ; rien d’écrit à l’ouverture');
+        root = await monter('rc_e1', { session: null });
+        eq([root.querySelector('[data-role="connexion-ia"]')?.textContent.includes('Connecte-toi pour utiliser l’assistant.'), bouton(root, 'Lire la recette avec l’assistant').disabled, reseau], [true, true, 0], 'écran : sans session → carte « Connecte-toi », bouton éteint, zéro POST');
+        root = await monter('rc_http');
+        eq([bouton(root, 'Lire la recette avec l’assistant').disabled, root.querySelector('[data-role="interdit"]')?.textContent, await db.count('imports')], [true, 'Cette adresse ne peut pas être lue par l’assistant : seule une page publique en https est admise. Ouvre-la toi-même.', 0], 'écran (B-20) : signet en http: → bouton éteint, texte interdit, zéro écriture');
+
+        // --- Lire : vol, puis aperçu
+        let ff = fauxFetch();
+        root = await monter('rc_e1', { deps: { fetch: ff.fetch } });
+        bouton(root, 'Lire la recette avec l’assistant').click();
+        await attendre(() => ff.appels.length === 1 && !!bouton(root, 'Annuler'), 'vol affiché');
+        const statut = root.querySelector('.status[role="status"]');
+        eq([statut?.textContent, statut?.nextElementSibling?.classList.contains('row'), !!statut?.nextElementSibling?.querySelector('button[data-role="annuler"]'), root.etatRouteWeb().vol], ['Lecture de la page par l’assistant…', true, true, true], 'écran : pendant le vol, .status[role=status] puis une .row avec « Annuler » (R-VIS-8)');
+        await db.mutate({ puts: { imports: [importWeb('imp_ailleurs', 'rc_e7', { status: 'en_cours', document_id_vol: 'un-autre-document', appels: 1, started_at: NOW, battement_at: NOW })] }, origin: 'device' });
+        const ailleurs = await monter('rc_e7');
+        eq([ailleurs.textContent.includes('En cours sur un autre écran'), bouton(ailleurs, 'Annuler'), ailleurs.etatRouteWeb().vol], [true, null, false], 'écran : en_cours tenu par un autre document → « En cours sur un autre écran », sans « Annuler » (I-B3)');
+        ailleurs.remove();
+        ff.rendre[0](200, ld({ autres_recettes: 1 }));
+        await attendre(async () => (await ligneDe('rc_e1'))?.status === 'a_verifier', 'a_verifier écrit');
+        root = await monter('rc_e1');
+        const txt = root.textContent;
+        eq([root.querySelector('[data-role="bandeau-web"]').textContent, root.querySelector('[data-role="selon-la-page"]').textContent.startsWith('Selon la page : Ricardo Cuisine · Ricardo · '), root.querySelector('[data-role="mode"]').textContent], ['Lue sur www.ricardocuisine.com — vérifie avant d’enregistrer.', true, 'Lue dans les données de la page : aucun jeton dépensé.'], 'aperçu : « Lue sur {hôte RECALCULÉ} — vérifie… » (jamais evil.test, le page.hote du serveur), « Selon la page : Site · Auteur · {d} », « Lue dans les données… » (B-4)');
+        eq([root.querySelectorAll('ul.list.plain li').length, root.querySelectorAll('ol.list.steps li').length, root.querySelector('[data-role="portions-temps"]').textContent, [...root.querySelectorAll('ul.list.plain li')].map((li) => !!li.querySelector('.chip.warn'))], [7, 4, '4 portions · préparation 20 min · cuisson 60 min · total 80 min', [false, false, true, false, false, false, false]], 'aperçu : 7 lignes, 4 étapes, « total 80 min » (B-8), la puce « incertain » sur la ligne incertaine seulement');
+        eq([root.querySelector('[data-role="titre-lu"]')?.textContent, txt.includes('D’autres recettes étaient sur cette page : ouvre-la.'), txt.includes('La page était longue')], ['Titre lu : Pâtes puttanesca — ce sera le titre de la fiche.', true, false], 'aperçu : « Titre lu : … — ce sera le titre de la fiche. » (première lecture, titre différent, D-B24) ; « D’autres recettes… » (autres_recettes > 0) ; pas de « La page était longue » sans coupe');
+        eq([bouton(root, 'Enregistrer')?.classList.contains('primary'), !!bouton(root, 'Relire la page'), !!bouton(root, 'Ignorer'), txt.includes('Toutes les lignes restent à vérifier : « Corriger » sur la fiche.')], [true, true, true, true], 'aperçu : « Enregistrer » (primaire), « Relire la page », « Ignorer », et la phrase « Toutes les lignes restent à vérifier »');
+
+        // --- Enregistrer (première lecture) : UNE transaction, fiche recomposée, navigation et toast.
+        const appels = []; const mutate = db.mutate.bind(db);
+        db.mutate = (o) => { appels.push(Object.keys(o.puts || {}).concat(Object.keys(o.conditions || {})).sort()); return mutate(o); };
+        try { bouton(root, 'Enregistrer').click(); await attendre(() => navs.length > 0, 'navigation'); } finally { db.mutate = mutate; }
+        const e1 = await db.get('recipes', 'rc_e1'); const v1 = await db.get('recipe_versions', e1.current_version_id); const i1 = (await db.byIndex('imports', 'recipe_id', 'rc_e1'))[0];
+        eq(appels, [['imports', 'recipe_versions', 'recipes']], 'Enregistrer : UNE transaction — la condition sur imports (a_verifier → enregistre), les puts recipes et recipe_versions');
+        eq([e1.availability, e1.verification_state, e1.original_title, e1.source_author, e1.source_site, e1.source_fetched_at, e1.source_kind, e1.source_url], ['available', 'to_verify', 'Pâtes puttanesca', 'Ricardo', 'Ricardo Cuisine', NOW, 'jsonld', 'https://ricardocuisine.com/rc_e1'], 'Enregistrer : fiche available, to_verify, titre lu (D-B24), source_* ; source_url du signet jamais retapée depuis url_finale');
+        eq([v1.kind, v1.provenance.url_finale, v1.provenance.titre_signet, i1.status, i1.reponse_brute, i1.finished_at, navs.at(-1), dits.at(-1)], ['extraction', 'https://www.ricardocuisine.com/r', 'ricardocuisine.com', 'enregistre', null, NOW, `/recipes/rc_e1?v=${v1.id}`, 'Recette enregistrée'], 'Enregistrer : version et provenance, import enregistre (reponse_brute null, finished_at), navigation vers la version, toast « Recette enregistrée »');
+
+        // --- La fiche après « Enregistrer » : bandeau web (hôte réel d'abord, S-2), « Ouvrir le lien » dans les actions, « Relire la page avec l’assistant ».
+        let fiche = await renderRecipe({ id: 'rc_e1' }, { v: v1.id }, await ctxDe(), gestes()); scene.append(fiche);
+        const bw = fiche.querySelector('[data-role="bandeau-web"]');
+        eq([bw?.firstChild.textContent.startsWith('Lue sur www.ricardocuisine.com le '), bw?.firstChild.textContent.endsWith(' · données de la page — vérifie.'), bw?.querySelector('[data-role="selon-la-page"]')?.textContent], [true, true, 'Selon la page : Ricardo Cuisine · Ricardo'], 'fiche : « Lue sur {hôte réel} le {d} · données de la page — vérifie. » puis « Selon la page : Site · Auteur » (S-2 ; mutant « site à la place de l’hôte » : rouge)');
+        eq([fiche.querySelector('[data-role="ouvrir-lien"]')?.getAttribute('href'), fiche.querySelector('[data-role="ouvrir-lien"]')?.getAttribute('rel'), !!fiche.querySelector('[data-role="relire-web"]')], ['https://ricardocuisine.com/rc_e1', 'noopener noreferrer', true], 'fiche (I-B5, D-B18) : « Ouvrir le lien » dans les actions d’une fiche lue, et « Relire la page avec l’assistant »');
+        fiche.remove();
+        fiche = await renderRecipe({ id: 'rc_e1' }, {}, await ctxDe(null), gestes()); scene.append(fiche);
+        eq([!!fiche.querySelector('[data-role="relire-web"]'), !!fiche.querySelector('[data-role="ouvrir-lien"]')], [false, true], 'fiche : sans session, « Relire la page avec l’assistant » est absent ; « Ouvrir le lien » reste');
+        fiche.remove();
+        fiche = await renderRecipe({ id: 'rc_corr' }, {}, await ctxDe(), gestes()); scene.append(fiche);
+        eq([fiche.querySelector('[data-role="bandeau-web"]'), !!fiche.querySelector('[data-role="ouvrir-lien"]')], [null, true], 'fiche : aucun bandeau web sur une correction (la provenance de la version n’a pas d’adresse) ; « Ouvrir le lien » reste');
+        fiche.remove();
+
+        // --- Relecture d'une fiche déjà lue par l'assistant (D-B8) : pas de dialogue, nouvelle version courante, l'ancienne reste, titre conservé ;
+        //     l'ANCIENNE version garde SON auteur (B-25).
+        ff = fauxFetch();
+        root = await monter('rc_ia', { deps: { fetch: ff.fetch } });
+        eq([root.etatRouteWeb().remplacement, root.querySelector('[data-role="remplacement"]')?.textContent], [false, 'La lecture remplacera la version lue par l’assistant.'], 'relecture (B-14) : fiche lue par l’assistant → « La lecture remplacera la version lue par l’assistant. »');
+        await lireEtAttendre(root, ff, ld({ auteur: 'Auteur Nouveau' }), 'rc_ia');
+        eq(root.querySelector('[data-role="titre-lu"]')?.textContent, 'Titre lu : Pâtes puttanesca', 'relecture (D-B24) : « Titre lu : … » sans « ce sera le titre de la fiche » (la fiche garde le sien)');
+        choix.appels = 0;
+        bouton(root, 'Enregistrer').click();
+        await attendre(async () => (await db.get('recipes', 'rc_ia')).current_version_id !== 'rv_ia', 'nouvelle version courante');
+        const ia = await db.get('recipes', 'rc_ia');
+        eq([choix.appels, ia.original_title, !!(await db.get('recipe_versions', 'rv_ia')), (await db.get('recipe_versions', ia.current_version_id)).parent_version_id, root.isConnected], [0, 'Pâtes lues', true, 'rv_ia', true], 'relecture : pas de dialogue, nouvelle version courante (parent = l’ancienne, qui reste), titre conservé');
+        fiche = await renderRecipe({ id: 'rc_ia' }, { v: 'rv_ia' }, await ctxDe(), gestes()); scene.append(fiche);
+        eq(fiche.querySelector('[data-role="selon-la-page"]')?.textContent, 'Selon la page : Ricardo · Auteur Ancien', 'fiche (B-25) : l’ANCIENNE version affichée (?v=) montre SON auteur, jamais celui de la fiche');
+        fiche.remove();
+
+        // --- Version humaine (D-B8, B-13, B-24) : dialogue ; fermé → rien ; « Ajouter sans remplacer » → aucun put recipes ; « Remplacer » → courante.
+        root = await monter('rc_main', { deps: { fetch: (ff = fauxFetch()).fetch } });
+        eq([root.etatRouteWeb().remplacement, root.querySelector('[data-role="remplacement"]')?.textContent], [true, 'Ta version écrite à la main n’est jamais remplacée sans question.'], 'remplacement (B-14) : une version écrite à la main → « Ta version écrite à la main n’est jamais remplacée sans question. »');
+        await lireEtAttendre(root, ff, ld(), 'rc_main');
+        const avantMain = await db.get('recipes', 'rc_main');
+        choix.suivant.push(null);
+        bouton(root, 'Enregistrer').click();
+        await attendre(() => choix.appels > 0 && !!bouton(root, 'Enregistrer') && !bouton(root, 'Enregistrer').disabled, 'dialogue fermé');
+        eq([(await ligneDe('rc_main')).status, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_main')).length, await db.get('recipes', 'rc_main')], ['a_verifier', 1, avantMain], 'remplacement (B-13) : dialogue fermé (null) → rien d’écrit, import a_verifier, écran inchangé');
+        eq(choix.vus.at(-1), { message: 'Remplacer par cette lecture ?', options: [['ajouter', 'Ajouter sans remplacer'], ['remplacer', 'Remplacer']] }, 'remplacement (D-B8) : « Remplacer par cette lecture ? », options « Ajouter sans remplacer » (la première, présélectionnée : la sûre) puis « Remplacer »');
+        choix.suivant.push(parLibelle('Ajouter sans remplacer'));
+        const puts = []; db.mutate = (o) => { puts.push(Object.keys(o.puts || {}).sort()); return mutate(o); };
+        try { bouton(root, 'Enregistrer').click(); await attendre(async () => (await db.byIndex('recipe_versions', 'recipe_id', 'rc_main')).length === 2, 'version ajoutée'); } finally { db.mutate = mutate; }
+        const apresMain = await db.get('recipes', 'rc_main');
+        eq([puts, apresMain.current_version_id, apresMain.updated_at, apresMain.source_kind], [[['recipe_versions']], 'rv_main', avantMain.updated_at, undefined], '« Ajouter sans remplacer » (B-24, F-3) : la version est écrite NON courante, aucun put recipes (seuls imports, en condition, et recipe_versions), updated_at de la fiche inchangé (mutant « remplacer: false ignoré » : rouge)');
+        ff = fauxFetch();
+        root = await monter('rc_main', { deps: { fetch: ff.fetch } });
+        await lireEtAttendre(root, ff, ld(), 'rc_main');
+        const avantCourse = await db.get('recipes', 'rc_main'); const idCourse = (await ligneDe('rc_main')).id;
+        choix.suivant.push(async () => { await repo.transitionner('imports', idCourse, { attendus: ['a_verifier'], patch: { status: 'enregistre' } }); return 'remplacer'; }); // l'autre onglet, pendant la question
+        bouton(root, 'Enregistrer').click();
+        await attendre(() => root.etatRouteWeb().status === null, 'redessiné');
+        eq([(await db.byIndex('recipe_versions', 'recipe_id', 'rc_main')).length, await db.get('recipes', 'rc_main'), (await db.get('imports', idCourse)).status], [2, avantCourse, 'enregistre'], 'Enregistrer (I-10, § 4.3.4) : un autre onglet enregistre PENDANT le dialogue → « Remplacer » n’écrit rien (aucune version de plus, fiche intacte), écran redessiné');
+        ff = fauxFetch();
+        root = await monter('rc_main', { deps: { fetch: ff.fetch } });
+        await lireEtAttendre(root, ff, ld(), 'rc_main');
+        choix.suivant.push('remplacer');
+        bouton(root, 'Enregistrer').click();
+        await attendre(async () => (await db.get('recipes', 'rc_main')).current_version_id !== 'rv_main', 'remplacée');
+        eq([(await db.get('recipes', 'rc_main')).source_kind, (await db.get('recipes', 'rc_main')).original_title], ['jsonld', 'Pâtes de Mamie'], '« Remplacer » : la lecture devient courante (titre conservé : la fiche avait déjà une version)');
+
+        // --- Annuler, Réessayer, Relire la page, Ignorer
+        ff = fauxFetch();
+        root = await monter('rc_e2', { deps: { fetch: ff.fetch } });
+        bouton(root, 'Lire la recette avec l’assistant').click();
+        await attendre(() => ff.appels.length === 1 && !!bouton(root, 'Annuler'), 'vol');
+        bouton(root, 'Annuler').click();
+        await attendre(async () => (await ligneDe('rc_e2'))?.status === 'echec' && root.etatRouteWeb().status === 'echec', 'echec(annule) rendu');
+        eq([ff.appels[0].options.signal.aborted, root.querySelector('[data-role="echec"]').textContent, root.querySelector('[data-role="action"] a')?.classList.contains('primary'), !!bouton(root, 'Réessayer'), !!bouton(root, 'Ignorer'), !!lien(root, 'Retour à la fiche')], [true, 'Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.', true, true, true, true], 'Annuler : fetch abandonné, echec(annule), texte I-B7 ; « Ouvrir le lien » (primaire), « Réessayer », « Ignorer », « Retour à la fiche »');
+        bouton(root, 'Réessayer').click();
+        await attendre(() => ff.appels.length === 2, 'un POST de plus');
+        eq((await ligneDe('rc_e2')).status, 'en_cours', '« Réessayer » : echec → en_cours, un POST');
+        ff.rendre[1](200, ld());
+        await attendre(async () => root.etatRouteWeb().status === 'a_verifier', 'lue');
+        bouton(root, 'Relire la page').click();
+        await attendre(() => ff.appels.length === 3, 'relecture');
+        eq([(await ligneDe('rc_e2')).status, (await ligneDe('rc_e2')).appels], ['en_cours', 3], '« Relire la page » : a_verifier → a_lancer → en_cours, un POST');
+        ff.rendre[2](200, ld());
+        await attendre(async () => root.etatRouteWeb().status === 'a_verifier', 'relue');
+        const navsAvant = navs.length;
+        bouton(root, 'Ignorer').click();
+        await attendre(() => navs.length > navsAvant, 'retour');
+        eq([(await db.byIndex('imports', 'recipe_id', 'rc_e2'))[0].status, navs.at(-1), (await db.get('recipes', 'rc_e2')).availability], ['ignore', '/recipes/rc_e2', 'reference_only'], '« Ignorer » : ignore, retour à la fiche, le signet reste un lien (I-B9)');
+
+        // --- Hors ligne après le rendu : bouton éteint, « Tu es hors ligne. », zéro POST.
+        ff = fauxFetch();
+        root = await monter('rc_e3', { deps: { fetch: ff.fetch } });
+        enLigneTest = false; window.dispatchEvent(new Event('offline'));
+        await attendre(() => bouton(root, 'Lire la recette avec l’assistant')?.disabled === true, 'bouton éteint');
+        bouton(root, 'Lire la recette avec l’assistant').click();
+        await new Promise((r) => setTimeout(r, 30));
+        eq([root.querySelector('[data-role="hors-ligne"]')?.textContent, ff.appels.length], ['Tu es hors ligne.', 0], 'hors ligne (événement après le rendu) : bouton éteint, « Tu es hors ligne. », zéro POST');
+        enLigneTest = true; window.dispatchEvent(new Event('online'));
+
+        // --- Un résultat hostile revenu du journal est REVALIDÉ au montage → echec(illisible), jamais rendu (I-B2).
+        await db.mutate({ puts: { imports: [importWeb('imp_hostile', 'rc_e4', { status: 'a_verifier', appels: 1, resultat: { source_kind: 'jsonld', page: PAGE, recette: { title: 'x'.repeat(500), ingredients: [], steps: [] } } })] }, origin: 'device' });
+        root = await monter('rc_e4');
+        eq([(await db.get('imports', 'imp_hostile')).status, (await db.get('imports', 'imp_hostile')).erreur?.raison, root.querySelector('[data-role="echec"] small')?.textContent], ['echec', 'illisible', 'Code : illisible'], 'revalidation : un resultat hostile → echec(illisible), rendu comme un échec');
+
+        // --- TransitionRefusee à l'enregistrement (un autre onglet a tranché) : rien d'écrit, redessin.
+        ff = fauxFetch();
+        root = await monter('rc_e5', { deps: { fetch: ff.fetch } });
+        await lireEtAttendre(root, ff, ld(), 'rc_e5');
+        await repo.transitionner('imports', (await ligneDe('rc_e5')).id, { attendus: ['a_verifier'], patch: { status: 'ignore' } });
+        bouton(root, 'Enregistrer').click();
+        await attendre(() => root.etatRouteWeb().status === null, 'redessiné');
+        eq([(await db.get('recipes', 'rc_e5')).availability, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_e5')).length], ['reference_only', 0], 'Enregistrer, relecture préalable : import déjà ignoré (un autre onglet) → rien d’écrit, écran redessiné');
+
+        // --- Lecture par le MODÈLE (B-4 : ce que la lecture a coûté se dit) : ni site ni auteur → « Lue le … » ; lecture incomplète ; une adresse dans
+        //     une ligne retirée et dite (R-B-2) ; « Notes » ; puis la fiche dit « texte lu par l’assistant ».
+        ff = fauxFetch();
+        root = await monter('rc_e9', { deps: { fetch: ff.fetch } });
+        const MODELE = { ...RECETTE, incomplete: true, ingredients: [{ source_text: '250 g de spaghettis (voir https://evil.test/x)', uncertain: false }, ...RECETTE.ingredients.slice(1)] };
+        await lireEtAttendre(root, ff, { source_kind: 'modele', page: { ...PAGE, auteur: null, site: null }, recette: JSON.stringify(MODELE), usage: { input_tokens: 10, output_tokens: 20 }, stop_reason: 'end_turn', model: 'claude-x' }, 'rc_e9');
+        const notes = [...root.querySelectorAll('h2, h3')].find((h) => h.textContent === 'Notes');
+        eq([root.querySelector('[data-role="mode"]')?.textContent, root.querySelector('[data-role="selon-la-page"]')?.textContent.startsWith('Lue le '), [...root.querySelectorAll('.chip.warn')].some((c) => c.textContent === 'lecture incomplète'), root.querySelector('[data-role="incertain"]')?.textContent, root.querySelector('ul.list.plain li')?.firstChild?.textContent, !!notes, root.textContent.includes('Un classique.')],
+          ['Texte de la page lu par l’assistant.', true, true, 'Incertain : adresse retirée dans la ligne 1', '250 g de spaghettis (voir [adresse retirée])', true, true], 'aperçu, lecture par le modèle : « Texte de la page lu par l’assistant. », « Lue le … » (ni site ni auteur), « lecture incomplète », « Incertain : adresse retirée dans la ligne 1 » et le marqueur dans la ligne (R-B-2), « Notes »');
+        const navsModele = navs.length;
+        bouton(root, 'Enregistrer').click();
+        await attendre(() => navs.length > navsModele, 'enregistrée');
+        const e9 = await db.get('recipes', 'rc_e9');
+        fiche = await renderRecipe({ id: 'rc_e9' }, { v: e9.current_version_id }, await ctxDe(), gestes()); scene.append(fiche);
+        eq([e9.source_kind, e9.availability, fiche.querySelector('[data-role="bandeau-web"]')?.firstChild.textContent.endsWith(' · texte lu par l’assistant — vérifie.')], ['modele', 'partial', true], 'fiche d’une lecture par le modèle : source_kind modele, partial (lecture incomplète), « … · texte lu par l’assistant — vérifie. »');
+        fiche.remove();
+
+        // --- Deux onglets (T4-R2 du lot A) : la lecture AFFICHÉE a été remplacée par une autre (même id, même statut, autre départ, autre résultat) entre
+        //     le rendu et le clic → ni « Enregistrer » ni « Ignorer » ne valent pour elle : rien d'écrit, l'écran montre la nouvelle.
+        ff = fauxFetch();
+        root = await monter('rc_e8', { deps: { fetch: ff.fetch } });
+        await lireEtAttendre(root, ff, ld(), 'rc_e8');
+        const ailleurs8 = async (titre, minute) => { const l = await ligneDe('rc_e8'); await repo.transitionner('imports', l.id, { attendus: ['a_verifier'], patch: { started_at: `2026-10-19T12:${minute}:00.000Z`, resultat: { ...l.resultat, recette: { ...l.resultat.recette, title: titre } } } }); };
+        await ailleurs8('Autre lecture', '05');
+        bouton(root, 'Enregistrer').click();
+        await attendre(() => (root.querySelector('[data-role="titre-lu"]')?.textContent || '').includes('Autre lecture'), 'redessiné sur la nouvelle lecture');
+        eq([(await db.get('recipes', 'rc_e8')).availability, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_e8')).length, (await ligneDe('rc_e8'))?.status], ['reference_only', 0, 'a_verifier'], 'deux onglets : « Enregistrer » d’une lecture remplacée entre le rendu et le clic → rien d’écrit, l’écran montre la nouvelle');
+        await ailleurs8('Troisième lecture', '06');
+        const navsIgnorer = navs.length;
+        bouton(root, 'Ignorer').click();
+        await attendre(() => (root.querySelector('[data-role="titre-lu"]')?.textContent || '').includes('Troisième lecture'), 'redessiné');
+        eq([(await ligneDe('rc_e8'))?.status, navs.length], ['a_verifier', navsIgnorer], 'deux onglets : « Ignorer » d’une lecture remplacée → rien d’écrit, aucun retour, l’écran montre la nouvelle');
+
+        // --- Deux onglets sur « Illisible » (R-B-10, P-12) : marquerIllisible de la variante web ne vaut que pour LA lecture relue illisible (cleLecture).
+        //     Un autre onglet écrit SA lecture (lisible) entre la relecture et la transition : rien n'est marqué, la nouvelle reste a_verifier. Deux chemins :
+        //     le montage de l'écran (charger) et « Enregistrer » (enregistrerLecture relit la ligne). L'autre onglet passe par un repo espion, une seule fois.
+        const autreOnglet = (titre, minute) => {
+          let fait = false;
+          return { ...repo, transitionner: async (store, key, opts) => {
+            if (!fait && store === 'imports' && typeof opts?.patch === 'function' && opts?.attendus?.join() === 'a_verifier') {
+              fait = true;
+              await repo.transitionner('imports', key, { attendus: ['a_verifier'], patch: { started_at: `2026-10-19T12:${minute}:00.000Z`, resultat: LW.relireResultat({ source_kind: 'jsonld', page: PAGE, recette: { ...RECETTE, title: titre } }) } });
+            }
+            return repo.transitionner(store, key, opts);
+          } };
+        };
+        const illisible = { source_kind: 'jsonld', page: PAGE, recette: { title: 'x'.repeat(500), ingredients: [], steps: [] } };
+        await db.mutate({ puts: { imports: [importWeb('imp_ill1', 'rc_f3', { status: 'a_verifier', appels: 1, started_at: NOW, resultat: illisible }), importWeb('imp_ill2', 'rc_f4', { status: 'a_verifier', appels: 1, started_at: NOW, resultat: illisible })] }, origin: 'device' });
+        root = await monter('rc_f3', { deps: { repo: autreOnglet('Lecture d’un autre onglet', '07') } });
+        const ill1 = await db.get('imports', 'imp_ill1');
+        eq([ill1.status, ill1.erreur, ill1.resultat?.recette?.title, root.etatRouteWeb().status, root.querySelector('[data-role="titre-lu"]')?.textContent], ['a_verifier', null, 'Lecture d’un autre onglet', 'a_verifier', 'Titre lu : Lecture d’un autre onglet — ce sera le titre de la fiche.'], 'deux onglets sur « Illisible » (R-B-10) : la lecture relue illisible au montage, une autre écrite entre-temps par un autre onglet → marquerIllisible n’écrit rien (garde cleLecture), la nouvelle reste a_verifier et l’écran la montre (mutant « garde retirée sur marquerIllisible » : rouge)');
+        await W.enregistrerLecture('imp_ill2', { repo: autreOnglet('Lecture arrivée pendant Enregistrer', '08'), maintenant: () => NOW, choisir });
+        const ill2 = await db.get('imports', 'imp_ill2');
+        eq([ill2.status, ill2.erreur, ill2.resultat?.recette?.title, (await db.get('recipes', 'rc_f4')).availability, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_f4')).length], ['a_verifier', null, 'Lecture arrivée pendant Enregistrer', 'reference_only', 0], 'deux onglets sur « Illisible » (R-B-10) : « Enregistrer » relit une lecture illisible, une autre arrive avant l’écriture → rien n’est marqué ni enregistré, la nouvelle reste a_verifier');
+
+        // Hors brief (I-B2, données hostiles) : la lecture relue illisible au montage est remplacée entre-temps par une AUTRE lecture, ELLE AUSSI illisible
+        // (un autre onglet, une réception). (a) une fois : la seconde est relue et marquée à son tour → echec(illisible), rendu comme un échec ; (b) à
+        // chaque écriture : rien n'est marqué (cleLecture), et l'écran ne la rend JAMAIS comme une lecture ni ne lève — il dit l'échec sans l'écrire.
+        const illisibleAilleurs = (toujours) => {
+          let n = 0;
+          return { ...repo, transitionner: async (store, key, opts) => {
+            if ((toujours || n === 0) && store === 'imports' && typeof opts?.patch === 'function' && opts?.attendus?.join() === 'a_verifier') {
+              n += 1;
+              await repo.transitionner('imports', key, { attendus: ['a_verifier'], patch: { started_at: `2026-10-19T12:1${n}:00.000Z`, resultat: { ...illisible, recette: { ...illisible.recette, title: 'y'.repeat(400 + n) } } } });
+            }
+            return repo.transitionner(store, key, opts);
+          } };
+        };
+        await db.mutate({ puts: { recipes: [signet('rc_g1', 'https://ricardocuisine.com/rc_g1'), signet('rc_g2', 'https://ricardocuisine.com/rc_g2')], imports: [importWeb('imp_ill3', 'rc_g1', { status: 'a_verifier', appels: 1, started_at: NOW, resultat: illisible }), importWeb('imp_ill4', 'rc_g2', { status: 'a_verifier', appels: 1, started_at: NOW, resultat: illisible })] }, origin: 'device' });
+        const monterSans = async (id, r) => { try { return { root: await IC.renderImportCible({ id }, {}, await ctxDe(), gestes({ repo: r })) }; } catch (e) { return { leve: String(e?.name) }; } };
+        const g1 = await monterSans('rc_g1', illisibleAilleurs(false)); const ill3 = await db.get('imports', 'imp_ill3');
+        eq([g1.leve ?? null, ill3.status, ill3.erreur?.raison, ill3.resultat, g1.root?.etatRouteWeb().status, g1.root?.querySelector('[data-role="echec"] small')?.textContent], [null, 'echec', 'illisible', null, 'echec', 'Code : illisible'], 'hors brief (I-B2) : une seconde lecture illisible arrivée pendant la revalidation est relue et marquée à son tour (echec(illisible)), rendue comme un échec');
+        const g2 = await monterSans('rc_g2', illisibleAilleurs(true)); const ill4 = await db.get('imports', 'imp_ill4');
+        eq([g2.leve ?? null, ill4.status, g2.root?.etatRouteWeb().status, g2.root?.querySelector('[data-role="echec"] small')?.textContent, !!g2.root?.querySelector('[data-role="enregistrer-lecture"]')], [null, 'a_verifier', 'a_verifier', 'Code : illisible', false], 'hors brief (I-B2) : des lectures illisibles écrites sans cesse par un autre onglet → rien n’est marqué, l’écran ne lève pas et ne rend jamais une lecture illisible (l’échec est dit, pas écrit ; aucun « Enregistrer »)');
+
+        // --- Raison → texte (§ 4.4) : une table complète, chaque raison posée sur une ligne echec et rendue.
+        const TEXTES = [['interdit', {}, 'Cette adresse ne peut pas être lue par l’assistant : seule une page publique en https est admise. Ouvre-la toi-même.'],
+          ['inaccessible', {}, 'La page n’a pas pu être téléchargée (site injoignable, trop lent, ou qui refuse les robots). Ouvre-la toi-même.'],
+          ['pas_une_page', {}, 'Cette adresse n’est pas une page web (PDF, image…) : l’assistant ne la lit pas.'],
+          ['page_trop_lourde', {}, 'Cette page est trop lourde pour être lue.'], ['page_vide', {}, 'Aucun texte lisible sur cette page. Ouvre-la toi-même.'],
+          ['annule', {}, 'Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.'],
+          ['interrompu', {}, 'La lecture a été interrompue. L’appel a peut-être été compté ; relancer en coûtera un autre.'],
+          ['incertain', {}, 'L’appel a peut-être été compté ; relancer en coûtera un autre.'],
+          ['coupe', {}, 'La lecture a été coupée : la page est trop longue pour l’assistant.'],
+          ['hors_bornes', { source_kind: 'jsonld' }, 'La recette de cette page dépasse ce que l’app peut lire (plus de 80 ingrédients ou 60 étapes, ou une ligne trop longue). Ouvre la page.'],
+          ['hors_bornes', { source_kind: 'modele' }, 'L’assistant n’a pas répondu lisiblement. Réessaie.Code : hors_bornes'],
+          ['illisible', {}, 'L’assistant n’a pas répondu lisiblement. Réessaie.Code : illisible'],
+          ['vide', {}, 'Aucun ingrédient ni étape lus sur cette page.'], ['lien', {}, 'Le titre lu contenait une adresse web : lecture refusée. Ouvre la page.'],
+          ['non_admis', {}, 'Ce compte n’a pas accès à l’assistant.'], ['quota', { quota: 60 }, 'Tu as atteint la limite du jour pour l’assistant (60 appels).'],
+          ['trop_de_demandes', {}, 'Trop de demandes pour l’instant. Réessaie dans une minute.'], ['requete', {}, 'L’assistant n’a pas répondu. Réessaie. Code : requete'],
+          ['serveur', {}, 'L’assistant n’a pas répondu. Réessaie. Code : serveur'], ['delai', {}, 'L’assistant n’a pas répondu. Réessaie. Code : delai'],
+          ['reseau', {}, 'L’assistant n’a pas répondu. Réessaie. Code : reseau'], ['interne', {}, 'L’assistant n’a pas répondu. Réessaie. Code : interne'],
+          ['reponse_illisible', {}, 'L’assistant n’a pas répondu. Réessaie. Code : reponse_illisible'], ['non_connecte', {}, 'Connecte-toi pour utiliser l’assistant.']];
+        const obtenus = [];
+        for (const [raison, extra] of TEXTES) {
+          await db.mutate({ puts: { imports: [importWeb('imp_txt', 'rc_e6', { status: 'echec', appels: 1, erreur: { raison, extra } })] }, origin: 'device' });
+          const r = await monter('rc_e6'); obtenus.push(r.querySelector('[data-role="echec"]').textContent); r.remove();
+        }
+        eq(obtenus, TEXTES.map(([, , texte]) => texte), 'raison → texte : la table § 4.4 complète (les six raisons web, coupe, illisible, hors_bornes jsonld ET modele, vide, lien, interrompu, incertain, et les raisons de la passerelle) — mutant « vide serveur mappé sur vide client » : rouge');
+
+        // --- R-B-20 (VF-6 du lot A) : après synchro, une fiche peut avoir un import web ouvert par appareil (I-2 ne vaut que par appareil) — l'écran prend
+        //     la ligne AFFICHÉE (un redessin la garde), puis ?import= (« Reprendre » de la section), puis une lecture reçue (a_verifier), puis celle de cet appareil.
+        // R-B-18 : « ouvert » = importOuvert (une définition) — une ligne web reçue au statut inconnu (« zzz ») ou nul n'est pas l'import de l'écran.
+        await db.mutate({ puts: { imports: [importWeb('imp_r20_a', 'rc_f5', { status: 'zzz' }), importWeb('imp_r20_b', 'rc_f5', { status: null })] }, origin: 'device' });
+        const r18 = await IC.renderImportCible({ id: 'rc_f5' }, {}, await ctxDe(), gestes());
+        eq([r18.etatRouteWeb(), !!r18.querySelector('[data-role="lire-web"]')], [{ importId: null, status: null, vol: false, remplacement: null }, true], 'R-B-18 (écran) : une ligne web au statut inconnu (« zzz ») ou nul n’est pas un import ouvert — l’écran offre la lecture, sans ligne');
+        await db.mutate({ puts: { imports: [importWeb('imp_r20_ici', 'rc_f5', { status: 'echec', appels: 1, erreur: { raison: 'inaccessible', extra: {} } }), importWeb('imp_r20_ailleurs', 'rc_f5', { status: 'echec', appels: 1, device_id: 'un-autre-appareil', erreur: { raison: 'pas_une_page', extra: {} } })] }, origin: 'device' });
+        const monterAvec = async (id, query) => { const r = await IC.renderImportCible({ id }, query, await ctxDe(), gestes()); scene.append(r); return r; };
+        const r20 = await monterAvec('rc_f5', {});
+        const r20b = await monterAvec('rc_f5', { import: 'imp_r20_ailleurs' });
+        const vus20 = [r20.etatRouteWeb().importId, r20b.etatRouteWeb().importId];
+        r20b.remove();
+        await db.mutate({ puts: { imports: [importWeb('imp_r20_lue', 'rc_f5', { status: 'a_verifier', appels: 1, device_id: 'un-autre-appareil', started_at: NOW, resultat: LW.relireResultat(ld()) })] }, origin: 'device' });
+        const avant20 = r20.querySelector('[data-role="action"]');
+        window.dispatchEvent(new Event('online')); // un redessin par ecouterLecture : la ligne AFFICHÉE reste, la lecture reçue entre-temps ne la remplace pas
+        await attendre(() => r20.querySelector('[data-role="action"]') !== avant20, 'redessiné (R-B-20)');
+        vus20.push(r20.etatRouteWeb().importId);
+        r20.remove();
+        const r20c = await monterAvec('rc_f5', {}); vus20.push(r20c.etatRouteWeb().importId); r20c.remove();
+        const r20d = await monterAvec('rc_f5', { import: 'imp_r20_ici' }); vus20.push(r20d.etatRouteWeb().importId); r20d.remove();
+        eq(vus20, ['imp_r20_ici', 'imp_r20_ailleurs', 'imp_r20_ici', 'imp_r20_lue', 'imp_r20_ici'], 'R-B-20 (VF-6 du lot A) : plusieurs imports web ouverts sur une fiche (un par appareil) → l’écran prend la ligne affichée (un redessin la garde), puis ?import=, puis une lecture reçue, puis celle de cet appareil');
+
+        // --- La fiche d'un signet : états, bascule de session (F-9), lire, http, hostile, repères.
+        const seul = blocSignet((await ctxDe()).recipesById.get('rc_f1'), await ctxDe());
+        eq([seul.querySelector('[data-role="lire-web"]').disabled, seul.querySelector('[data-role="connexion-ia"]').hidden, seul.querySelector('a').textContent], [true, true, 'Ouvrir le lien'], 'blocSignet (F-9) : rendu synchrone — bouton éteint, carte cachée, « Ouvrir le lien »');
+        fiche = await renderRecipe({ id: 'rc_f1' }, {}, await ctxDe(), gestes({ fetch: (ff = fauxFetch()).fetch })); scene.append(fiche);
+        eq([fiche.querySelector('[data-role="lire-web"]').disabled, fiche.querySelector('[data-role="connexion-ia"]').hidden, fiche.textContent.includes('L’app n’a pas encore lu la page.')], [false, true, true], 'fiche : avec session, le bouton s’allume et la carte reste cachée (aucun flash « Connecte-toi »)');
+        const sansSession = await renderRecipe({ id: 'rc_f1' }, {}, await ctxDe(null), gestes()); scene.append(sansSession);
+        eq([sansSession.querySelector('[data-role="lire-web"]').disabled, sansSession.querySelector('[data-role="connexion-ia"]').hidden, !!lien(sansSession, 'Ouvrir le lien')], [true, false, true], 'fiche : sans session, la carte est montrée, le bouton reste éteint, « Ouvrir le lien » reste');
+        sansSession.remove();
+        fiche.querySelector('[data-role="lire-web"]').click();
+        await attendre(() => ff.appels.length === 1 && navs.at(-1) === '/recipes/rc_f1/importer', 'lu et navigué');
+        eq([(await ligneDe('rc_f1')).status, JSON.parse(ff.appels[0].options.body).corps.url], ['en_cours', 'https://ricardocuisine.com/rc_f1'], 'fiche : « Lire la recette avec l’assistant » crée l’import, lance (un POST) et navigue vers l’écran');
+        fiche.remove();
+        const ctxEnCours = await ctxDe();
+        const enCours = blocSignet(ctxEnCours.recipesById.get('rc_f1'), ctxEnCours);
+        eq([enCours.textContent.includes('Lecture de la page en cours…'), lien(enCours, 'Voir')?.getAttribute('href'), enCours.querySelector('[data-role="lire-web"]')], [true, '#/recipes/rc_f1/importer', null], 'blocSignet : en_cours → « Lecture de la page en cours… » + « Voir », sans bouton de lecture');
+        ff.rendre[0](200, ld()); await attendre(async () => (await ligneDe('rc_f1'))?.status === 'a_verifier', 'lu');
+        const ctxLu = await ctxDe();
+        const aVerifier = blocSignet(ctxLu.recipesById.get('rc_f1'), ctxLu);
+        eq([aVerifier.textContent.includes('Lecture reçue : vérifie-la et enregistre.'), lien(aVerifier, 'Vérifier et enregistrer')?.classList.contains('primary')], [true, true], 'blocSignet : a_verifier → « Lecture reçue… » + « Vérifier et enregistrer » (primaire)');
+        await db.mutate({ puts: { imports: [importWeb('imp_ech', 'rc_f2', { status: 'echec', appels: 1, erreur: { raison: 'inaccessible', extra: {} } })] }, origin: 'device' });
+        const ctxE = await ctxDe();
+        const echec = blocSignet(ctxE.recipesById.get('rc_f2'), ctxE);
+        eq([echec.textContent.includes('Contenu non récupéré : ouvre la page.'), lien(echec, 'Ouvrir le lien').classList.contains('primary'), echec.querySelector('[data-role="lire-web"]')?.textContent, echec.querySelector('[data-role="raison"]').textContent], [true, true, 'Réessayer', 'La page n’a pas pu être téléchargée (site injoignable, trop lent, ou qui refuse les robots). Ouvre-la toi-même.'], 'blocSignet : echec → « Contenu non récupéré… », « Ouvrir le lien » (primaire), « Réessayer », la phrase du cas dessous');
+        const http = blocSignet((await ctxDe()).recipesById.get('rc_http'), await ctxDe());
+        eq([http.querySelector('[data-role="lire-web"]'), http.querySelector('[data-role="interdit"]')?.textContent.startsWith('Cette adresse ne peut pas être lue'), !!lien(http, 'Ouvrir le lien')], [null, true, true], 'blocSignet (B-20) : signet en http: → aucun bouton de lecture, texte interdit, « Ouvrir le lien »');
+        const hostile = blocSignet((await ctxDe()).recipesById.get('rc_hostile'), await ctxDe());
+        eq([hostile.querySelectorAll('a').length, hostile.querySelector('[data-role="lire-web"]'), hostile.textContent.includes('javascript:alert(1)')], [0, null, true], 'blocSignet : adresse hostile → adresseInerte, aucun lien, aucun bouton de lecture');
+        const rep = blocSignet((await ctxDe()).recipesById.get('rc_rep'), await ctxDe());
+        eq([rep.querySelectorAll('b').length, rep.querySelector('[data-role="presentation-web"]').textContent, rep.querySelector('[data-role="reperes-web"]').textContent], [0, 'Lors de la recherche, l’assistant disait : <b>Un classique</b> du garde-manger.', 'Estimé par l’assistant : ≈ 30 min · facile · 7 ingrédients'], 'blocSignet : web_reperes rendus en TEXTE (une présentation à <b> reste du texte), avec la ligne de repères (ligneReperes)');
+        eq([srcRecette.includes('L’app n’a pas lu la page'), srcEn.includes('L’app n’a pas lu la page'), srcEn.includes('lot suivant')], [false, false, false], 'B-27 : « L’app n’a pas lu la page » ni dans recipe.js ni dans en.js ; le toast « lot suivant » retiré du dictionnaire');
+        eq([/Anthropic|Supabase/.test(srcWeb), /Anthropic|Supabase/.test(srcVol), /Anthropic|Supabase/.test(srcDomaine), /\bconst TEXTES_/.test(srcWeb)], [false, false, false, false], 'I-B6 (test de source) : aucun texte ne nomme le fournisseur ni la base ; aucune table TEXTES_ dans import-web.js (F-11)');
+        eq(reseau, 0, 'aucun réseau réel');
+      } finally { globalThis.fetch = vraiFetch; scene.remove(); V.reinitialiserVol(); W.reinitialiserLectureWeb(); IC.reinitialiserImportCible(); }
+    }));
   } finally { setUiLocale(localeAvant); }
 }

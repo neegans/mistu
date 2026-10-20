@@ -17,13 +17,14 @@ import { TransitionRefusee } from '../core/db.js';
 import { safeDisplayType } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
 import { PasserelleProvider, extraireRecette, extraireIndex, validateParsedRecipe, validerIndex, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION } from '../domain/llm.js';
-import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception } from '../domain/import-cible.js';
+import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception, cleLecture } from '../domain/import-cible.js';
 import { getConvention } from '../domain/units.js';
 import { currentVersion } from '../domain/search.js';
 import { section, sessionAssistant, carteConnexion, texteEchecAssistant, TEXTE_CONNEXION } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { messageErreurImage } from './livre-ajout.js';
 import { DOCUMENT_ID, BATTEMENT_MS, prendreVol, libererVol as libererTenue, volEnCours, volTenu, reinitialiserVol } from './vol.js';
+import { renderImportWeb } from './import-web.js'; // sens unique (D-B13) : import-web.js n'importe jamais ce module
 
 // --- État du module (I-7) ----------------------------------------------------------------------------------------------------------------------
 // Le vol (DOCUMENT_ID, BATTEMENT_MS, la tenue) vit dans ./vol.js depuis le lot B (D-B13) : UN vol par document, partagé avec la lecture de page
@@ -63,7 +64,7 @@ const estRefus = (e) => e instanceof TransitionRefusee;
 // résultat (etat.cleQuestion). Une lecture arrivée d'un autre onglet entre-temps (même id, même statut a_verifier) a une autre clé → la réponse est
 // ignorée et la question redemandée pour la nouvelle lecture (T4-R1, puis T4-R2 : jamais la clé de la ligne RELUE au clic). Exportée (tâche 6, ronde 1) :
 // la clôture d'une lecture par l'éditeur ou le panneau d'index, « Ignorer » de la section et la revalidation ne valent que pour LA lecture affichée.
-export const cleLecture = (L) => JSON.stringify([L?.id ?? null, L?.started_at ?? null, L?.resultat ?? null]);
+export { cleLecture }; // définie dans src/domain/import-cible.js depuis le lot B (la variante web la partage sans importer cet écran)
 // Deux champs relus du journal, bornés avant d'entrer dans la fiche (T4-R1) : le modèle ≤ 80 points de code (la borne de PasserelleProvider), la
 // photo du plat = une empreinte hexadécimale de 64 (la clé de files) ; tout le reste vaut null. Une seule définition du modèle borné (ronde 1 de la
 // tâche 6 : l'éditeur et le panneau la partagent ; une chaîne vide vaut null).
@@ -300,8 +301,12 @@ export async function lireDansLeJournal({ kind, importId = null, pageIds = [], e
 }
 
 // --- L'écran ------------------------------------------------------------------------------------------------------------------------------------
-export async function renderImportCible(params, query, ctx, { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch: fetchInjecte = undefined, pickFiles = pickDom, maintenant = horloge, battementMs = BATTEMENT_MS, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000 } = {}) {
+export async function renderImportCible(params, query, ctx, deps = {}) {
+  const { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch: fetchInjecte = undefined, pickFiles = pickDom, maintenant = horloge, battementMs = BATTEMENT_MS, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000 } = deps;
   const recipe = ctx?.recipesById?.get(params?.id);
+  // Lot B (§ 4.1, D-B13) : une fiche qui porte une adresse (signet, recette lue sur le web) s'ouvre dans la variante web de l'écran — mêmes gestes
+  // injectés. Une fiche disponible à adresse y est admise (relecture, D-B18).
+  if (typeof recipe?.source_url === 'string' && recipe.source_url) return renderImportWeb(params, query, ctx, deps);
   const root = el('div', null);
   // ligne : l'import NON TERMINÉ de cette recette (un seul, I-2) ; pages : ses source_pages par id ; question : 'discordance' | 'remplacer' | null ;
   // cleQuestion : la clé (cleLecture) de LA lecture pour laquelle `question` a été posée (T4-R2 : toute réponse s'y rapporte) ; rattache : la clé de
@@ -312,8 +317,7 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
   const oublierQuestion = () => { etat.question = null; etat.cleQuestion = null; etat.rattache = null; etat.verdict = null; etat.ecriteMain = false; };
   root.etatRoute = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, pageIds: [...(Array.isArray(etat.ligne?.page_ids) ? etat.ligne.page_ids : [])], vol: !!etat.ligne && volEnCours()?.importId === etat.ligne.id, discordance: etat.verdict });
   if (!recipe) { root.append(el('div', { class: 'card' }, t('Recette introuvable.'))); return root; }
-  // D-11 : un signet web ou une recette qui a déjà son texte n'a pas d'entrée ici — le dire, revenir à la fiche.
-  if (recipe.source_url) { toast(t('Un lien web s’importe au lot suivant.')); navigate(`/recipes/${encodeURIComponent(recipe.id)}`); return root; }
+  // D-11 : une recette qui a déjà son texte (et pas d'adresse : voir plus haut) n'a pas d'entrée ici — le dire, revenir à la fiche.
   if (recipe.availability === 'available') { toast(t('Cette recette a déjà son texte.')); navigate(`/recipes/${encodeURIComponent(recipe.id)}`); return root; }
 
   const edition = recipe.edition_id ? ctx.editionsById?.get(recipe.edition_id) ?? null : null;
