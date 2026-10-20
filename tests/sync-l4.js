@@ -2743,44 +2743,85 @@ export async function runSyncL4Tests({ eq, ok }) {
 
   // Tâche 5 — épingles hors brief : chemins que le brief prescrit mais que ses tests n'exercent pas (mutants survivants de la série 1, rejoués
   // sur une copie) : la page entière (renderSettings → syncSection), l'ordre « dit, puis arrêt » de S-11, le défaut de transfertEnCours, le sens
-  // de la progression, les valeurs hors forme et le rafraîchissement après chaque geste.
-  await run('Réglages L4 (hors brief) : la page entière lit les file_error et le snapshot, passe la qualité du réglage, rend L4 avant l’historique', async () => {
+  // de la progression, les valeurs hors forme et le rafraîchissement après chaque geste. Ronde 1 (revue adverse) : la page entière clique aussi
+  // ses cinq boutons sur le moteur posé (R3, R3b, R16), place L4 entre L3 et l'historique (R5), nomme une erreur d'ENVOI référencée (R13) et
+  // compte les refus sur les lignes (R10) ; S-11 journalise les confirmations et leurs refus (R11, R12) ; `objets` est typé (R9).
+  await run('Réglages L4 (hors brief) : la page entière lit les file_error et le snapshot, passe la qualité du réglage, rend L4 entre L3 et l’historique, câble ses cinq boutons au moteur posé', async () => {
     const etat = await import('../src/ui/state.js');
     await withRepo(async (repo, db) => {
       await db.mutate({ puts: {
         books: [{ id: 'b1', title: 'Mon livre', updated_at: DATE }],
-        book_editions: [{ id: 'e1', book_id: 'b1', updated_at: DATE }],
+        book_editions: [{ id: 'e1', book_id: 'b1', cover_sha256: H('3'), updated_at: DATE }],
         source_documents: [{ id: 'd1', edition_id: 'e1', updated_at: DATE }],
         source_pages: [{ id: 'p1', document_id: 'd1', sha256: H('1'), printed_page: 12, updated_at: DATE }],
-        sync_state: [{ key: 'file_error:' + H('1'), value: { motif: 'introuvable', sens: 'reception', at: DATE } }, { key: 'file_error:' + H('9'), value: { motif: 'type', sens: 'envoi', at: DATE } }],
+        sync_state: [
+          { key: 'file_error:' + H('1'), value: { motif: 'introuvable', sens: 'reception', at: DATE } },
+          { key: 'file_error:' + H('3'), value: { motif: 'type', sens: 'envoi', at: DATE } },
+          { key: 'file_error:' + H('9'), value: { motif: 'type', sens: 'envoi', at: DATE } },
+        ],
+        sync_conflicts: [{ id: 'c1', store: 'recipes', record_id: 'r9', kind: 'donnees', at: DATE, local: { id: 'r9', title: 'Tarte', updated_at: DATE }, server: { id: 'r9', title: 'Tarte bis', updated_at: DATE } }],
       }, origin: 'device' });
       await repo.setSetting('upload_quality', 'originale');
+      const appels = [];
+      let global = false;
+      // Le moteur posé dans state.js porte les cinq API espionnées : le câblage PAR DÉFAUT de la page (gestesL4Pour() sans argument) est cliqué.
+      const moteurPose = {
+        etat: () => moteurL4({ fichiers: fichiersL4({ aTelecharger: 1, octetsATelecharger: 10, aRenvoyer: 1, enErreur: 5 }), telechargementGlobal: global }),
+        ...Object.fromEntries(['telechargerTout', 'arreterTelechargement', 'actualiserEspace', 'renvoyerEnOriginale', 'reessayerFichier'].map((nom) => [nom, async (x) => { appels.push(nom + (x ? ':' + x : '')); return {}; }])),
+      };
+      const contexte = { settings: await repo.getSettings(), sync: { auth: { available: true, reason: null }, user: { id: 'u1', email: 'x@exemple.invalid' }, guard: { ok: true } } };
       const avant = etat.getSyncState().moteur;
+      let rafraichis = 0;
+      const compter = () => { rafraichis += 1; };
       let page = null;
+      window.addEventListener('cuisineos:refresh', compter);
       try {
-        etat.setSyncState({ moteur: { etat: () => moteurL4({ fichiers: fichiersL4({ enErreur: 2 }) }) } });
-        page = await SR.renderSettings({}, {}, { settings: await repo.getSettings(), sync: { auth: { available: true, reason: null }, user: { id: 'u1', email: 'x@exemple.invalid' }, guard: { ok: true } } }, {});
-      } finally { etat.setSyncState({ moteur: avant }); }
+        etat.setSyncState({ moteur: moteurPose });
+        page = await SR.renderSettings({}, {}, contexte, {});
+        for (const b of page.querySelectorAll('[data-role="sync-l4"] button')) if (!b.closest('.segmented')) b.click();
+        global = true;
+        const pageGlobale = await SR.renderSettings({}, {}, contexte, {});
+        [...pageGlobale.querySelectorAll('[data-role="sync-l4"] button')].find((b) => b.textContent === 'Arrêter le téléchargement')?.click();
+        for (let i = 0; i < 100 && (appels.length < 6 || rafraichis < 6); i += 1) await new Promise((r) => setTimeout(r, 10));
+      } finally {
+        window.removeEventListener('cuisineos:refresh', compter);
+        etat.setSyncState({ moteur: avant });
+      }
       const l4 = page.querySelector('[data-role="sync-l4"]');
+      const conflit = page.querySelector('[data-conflit]');
       const historique = [...page.querySelectorAll('label.field > span')].find((s) => s.textContent === 'Historique de consultation');
+      const suit = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
       const lignes = [...page.querySelectorAll('[data-fichier]')];
-      eq([!!l4, !!(l4 && historique && (l4.compareDocumentPosition(historique) & Node.DOCUMENT_POSITION_FOLLOWING)), lignes.map((l) => l.querySelector('p').textContent),
-        lignes.map((l) => [...l.querySelectorAll('button')].map((b) => b.textContent)), l4?.querySelector('.segmented button.active')?.textContent],
-      [true, true, ['Page 12 · Mon livre — Ce fichier n’est plus sur le serveur.'], [['Réessayer']], 'Originale'],
-      'renderSettings (hors brief, § 4.1) : avec un compte et un moteur, la page rend l’ensemble L4 avant « Historique de consultation », nomme la file_error d’une page référencée lue EN BASE (H9, orpheline, tue), câble « Réessayer » et montre la qualité du réglage (mutants : L4 non rendu ; file_error, snapshot ou qualité non passés)');
+      eq([!!l4, suit(conflit, l4), suit(l4, historique), lignes.map((l) => l.querySelector('p').textContent), lignes.map((l) => [...l.querySelectorAll('button')].map((b) => b.textContent)),
+        !!l4?.textContent.includes('Fichiers refusés : 2'), l4?.querySelector('.segmented button.active')?.textContent],
+      [true, true, true, ['Page 12 · Mon livre — Ce fichier n’est plus sur le serveur.', 'Couverture · Mon livre — Type de fichier refusé par le serveur.'], [['Réessayer'], ['Réessayer']], true, 'Originale'],
+      'renderSettings (hors brief, § 4.1) : avec un compte et un moteur, la page rend l’ensemble L4 APRÈS L3 (un conflit) et AVANT « Historique de consultation », nomme les file_error de lignes référencées lues EN BASE, chacune selon SON sens (H9, orpheline, tue), compte « Fichiers refusés » sur ces lignes et non sur enErreur du moteur (5), montre la qualité du réglage (mutants : L4 non rendu ou avant L3 ; file_error, snapshot ou qualité non passés ; sens figé ; refuses lu dans le moteur)');
+      eq([[...appels].sort(), rafraichis], [['actualiserEspace', 'arreterTelechargement', 'reessayerFichier:' + H('1'), 'reessayerFichier:' + H('3'), 'renvoyerEnOriginale', 'telechargerTout'], 6],
+        'renderSettings (ronde 1, R3/R3b/R16) : dans la page réelle, les cinq boutons L4 existent, chacun appelle SON API sur le moteur posé dans state.js et redessine la page (cuisineos:refresh) — mutants : obtenirMoteur ou rafraichir par défaut muets, syncSection qui ne câble qu’un geste');
       await etat.relectureEnCours();
     });
     await etat.relireReglages(); // la base de l'app reprend la main (même hygiène que le bloc du brief)
   });
 
-  await run('Réglages L4 (hors brief) : « Envoi en cours… » dit AVANT l’arrêt, seulement pendant un transfert ; le défaut lit progressionFichiers du moteur (S-11/F-24)', async () => {
+  await run('Réglages L4 (hors brief) : « Envoi en cours… » dit APRÈS les confirmations et AVANT l’arrêt, seulement pendant un transfert ; le défaut lit progressionFichiers du moteur (S-11/F-24)', async () => {
     const etat = await import('../src/ui/state.js');
-    const effacer = (dits, sur = {}) => SR.effacerDonnees({ user: null, pending: async () => 0, confirm: async () => true, demanderMot: async () => 'EFFACER', toast: (m) => dits.push(m), clearDevice: async () => {}, reload: () => {}, arreterSync: async () => { dits.push('<arrêt>'); }, ...sur });
-    const changer = (dits, sur = {}) => SR.changerDeCompte({ confirm: async () => true, toast: (m) => dits.push(m), pending: async () => 0, archiveCreated: () => 'oui', clearDevice: async () => {}, reload: () => {}, arreterSync: async () => { dits.push('<arrêt>'); }, ...sur });
-    const vu = { effacerEnVol: [], effacerAuRepos: [], changerAuRepos: [], effacerDefaut: [], changerDefaut: [], effacerDefautRepos: [] };
-    await effacer(vu.effacerEnVol, { transfertEnCours: () => true });
+    // Ronde 1 : les confirmations écrivent dans le même journal — la phrase ne vient qu'une fois le geste décidé, jamais pour un arrêt qui n'a pas lieu.
+    const oui = (dits) => async () => { dits.push('<confirmé>'); return true; };
+    const non = (dits) => async () => { dits.push('<refusé>'); return false; };
+    const effacer = (dits, sur = {}) => SR.effacerDonnees({ user: null, pending: async () => 0, confirm: oui(dits), demanderMot: async () => { dits.push('<mot>'); return 'EFFACER'; }, toast: (m) => dits.push(m), clearDevice: async () => {}, reload: () => {}, arreterSync: async () => { dits.push('<arrêt>'); }, ...sur });
+    const changer = (dits, sur = {}) => SR.changerDeCompte({ confirm: oui(dits), toast: (m) => dits.push(m), pending: async () => 0, archiveCreated: () => 'oui', clearDevice: async () => {}, reload: () => {}, arreterSync: async () => { dits.push('<arrêt>'); }, ...sur });
+    const vu = { effacerEnVol: [], effacerAuRepos: [], changerEnVol: [], changerAuRepos: [], effacerDefaut: [], changerDefaut: [], effacerDefautRepos: [], effacerRefuse: [], effacerMotFaux: [], changerSansArchive: [], changerRefuse: [], changerPerteRefusee: [] };
+    const enVol = { transfertEnCours: () => true };
+    await effacer(vu.effacerEnVol, enVol);
     await effacer(vu.effacerAuRepos, { transfertEnCours: () => false });
+    await changer(vu.changerEnVol, enVol);
     await changer(vu.changerAuRepos, { transfertEnCours: () => false });
+    await effacer(vu.effacerRefuse, { ...enVol, confirm: non(vu.effacerRefuse) });
+    await effacer(vu.effacerMotFaux, { ...enVol, demanderMot: async () => { vu.effacerMotFaux.push('<mot>'); return 'non'; } });
+    await changer(vu.changerSansArchive, { ...enVol, archiveCreated: () => null });
+    await changer(vu.changerRefuse, { ...enVol, confirm: non(vu.changerRefuse) });
+    let question = 0;
+    await changer(vu.changerPerteRefusee, { ...enVol, confirm: async () => { question += 1; vu.changerPerteRefusee.push(question === 1 ? '<confirmé>' : '<refusé>'); return question === 1; } });
     const avant = etat.getSyncState().moteur;
     try {
       etat.setSyncState({ moteur: { etat: () => moteurL4({ progressionFichiers: { sens: 'reception', n: 1, total: 2 } }) } });
@@ -2789,8 +2830,20 @@ export async function runSyncL4Tests({ eq, ok }) {
       etat.setSyncState({ moteur: { etat: () => moteurL4() } });
       await effacer(vu.effacerDefautRepos);
     } finally { etat.setSyncState({ moteur: avant }); }
-    eq(vu, { effacerEnVol: ['Envoi en cours…', '<arrêt>', 'Données effacées'], effacerAuRepos: ['<arrêt>', 'Données effacées'], changerAuRepos: ['<arrêt>'], effacerDefaut: ['Envoi en cours…', '<arrêt>', 'Données effacées'], changerDefaut: ['Envoi en cours…', '<arrêt>'], effacerDefautRepos: ['<arrêt>', 'Données effacées'] },
-      'effacerDonnees et changerDeCompte (hors brief, S-11/F-24) : la phrase précède l’attente de l’arrêt, rien n’est dit sans transfert, et le défaut lit progressionFichiers du moteur posé (mutants : dit après l’arrêt ; dit toujours ; défaut jamais vrai)');
+    eq(vu, {
+      effacerEnVol: ['<confirmé>', '<mot>', 'Envoi en cours…', '<arrêt>', 'Données effacées'],
+      effacerAuRepos: ['<confirmé>', '<mot>', '<arrêt>', 'Données effacées'],
+      changerEnVol: ['<confirmé>', '<confirmé>', 'Envoi en cours…', '<arrêt>'],
+      changerAuRepos: ['<confirmé>', '<confirmé>', '<arrêt>'],
+      effacerDefaut: ['<confirmé>', '<mot>', 'Envoi en cours…', '<arrêt>', 'Données effacées'],
+      changerDefaut: ['<confirmé>', '<confirmé>', 'Envoi en cours…', '<arrêt>'],
+      effacerDefautRepos: ['<confirmé>', '<mot>', '<arrêt>', 'Données effacées'],
+      effacerRefuse: ['<refusé>'],
+      effacerMotFaux: ['<confirmé>', '<mot>', 'Annulé'],
+      changerSansArchive: ['Fais d’abord une archive sur cette page.'],
+      changerRefuse: ['<refusé>'],
+      changerPerteRefusee: ['<confirmé>', '<refusé>'],
+    }, 'effacerDonnees et changerDeCompte (hors brief, S-11/F-24 ; ronde 1, R11/R12) : la phrase vient APRÈS les confirmations et AVANT l’attente de l’arrêt, rien n’est dit sans transfert, et un geste refusé (confirmation, mot, archive, perte) ne dit jamais « Envoi en cours… » pour un arrêt qui n’a pas lieu ; le défaut lit progressionFichiers du moteur posé (mutants : dit avant les confirmations ou après l’arrêt ; dit toujours ; défaut jamais vrai)');
   });
 
   await run('Réglages L4 (hors brief) : progression selon son sens, valeurs hors forme tues, chaque geste rafraîchit après son appel', async () => {
@@ -2802,11 +2855,123 @@ export async function runSyncL4Tests({ eq, ok }) {
     const hors = modele(moteurL4({ fichiers: fichiersL4({ aEnvoyer: -1, aTelecharger: Number.NaN, typeInconnu: 1.5, copiesPerimees: '2' }), espaceServeur: { octets: '850', objets: 312, at: DATE, tronque: false } }));
     eq([hors.fichiers.aEnvoyer, hors.fichiers.aTelecharger, hors.fichiers.typeInconnu, hors.fichiers.copiesPerimees, hors.espace], ['Photos à envoyer : 0', null, null, null, 'Espace serveur : pas encore mesuré.'],
       'L4 (hors brief) : un compteur qui n’est pas un entier positif vaut 0, une mesure dont les octets ne sont pas un nombre n’est pas dite (mutants : compteurs non bornés ; mesure non typée)');
+    const mesure = { octets: 850 * 1048576, at: DATE, tronque: false };
+    eq([modele(moteurL4({ espaceServeur: { ...mesure, objets: '312' } })).espace, modele(moteurL4({ espaceServeur: mesure })).espace], ['Espace serveur : pas encore mesuré.', 'Espace serveur : pas encore mesuré.'],
+      'L4 (ronde 1, R9) : une mesure dont le nombre d’objets n’est pas un nombre (chaîne, absent) n’est pas dite (mutant : objets non typé → « (312 fichiers) », « (undefined fichiers) »)');
     const journal = [];
     const moteurJ = Object.fromEntries(['telechargerTout', 'arreterTelechargement', 'actualiserEspace', 'renvoyerEnOriginale', 'reessayerFichier'].map((nom) => [nom, async () => { journal.push(nom); }]));
     const g = SR.gestesL4Pour({ obtenirMoteur: () => moteurJ, dire: () => {}, rafraichir: () => journal.push('rendu'), journaliser: () => {} });
     for (const a of SR.SYNC_L4_ACTIONS) await g[a](H('1'));
     eq(journal, ['telechargerTout', 'rendu', 'arreterTelechargement', 'rendu', 'actualiserEspace', 'rendu', 'renvoyerEnOriginale', 'rendu', 'reessayerFichier', 'rendu'],
       'gestesL4Pour (hors brief) : chaque geste rafraîchit l’écran APRÈS l’appel du moteur, comme gestesL3Pour (mutant : rafraîchissement retiré)');
+  });
+
+  // Ronde 1 de la tâche 5 (revue adverse) : la table de § 4.10 entière, les motifs d'envoi posés depuis le plan (forme : T3-R1 ; illisible : T4-R1),
+  // un libellé borné, « Fichiers refusés » compté sur les lignes référencées, l'ordre des items, l'aide de la qualité (exceptions de R-G-4 nommées),
+  // le seau plein sans « Télécharger toutes les pages », la pause L3 hors de L4, aucun bouton sans geste, l'interface anglaise.
+  const HINT_QUALITE = 'L’original reste toujours sur l’appareil qui a pris la photo. Réduite : JPEG de 2 000 px au plus, environ 400 Ko par page, métadonnées retirées, quand la réduction est possible et utile ; sinon le fichier part tel quel, métadonnées comprises : une image déjà petite (2 000 px et 600 Ko au plus), une photo de plus de 16 Mpx ou que ce navigateur ne sait pas lire, un PDF ou un EPUB. Originale : le fichier tel quel, avec ses métadonnées (dont la position GPS si la photo en porte).';
+  const horsSegments = (boite) => [...boite.querySelectorAll('button')].filter((b) => !b.closest('.segmented')).map((b) => b.textContent);
+
+  await run('Réglages L4 (ronde 1) : motifs, libellés bornés, refus comptés, ordre des items, aide de la qualité, pauses, boutons sans geste, anglais', async () => {
+    const couples = [['trop_gros', 'envoi'], ['type', 'envoi'], ['verification', 'envoi'], ['forme', 'envoi'], ['illisible', 'envoi'], ['forme', 'reception'], ['introuvable', 'reception'], ['empreinte', 'reception'], ['taille', 'reception'], ['type', 'reception'],
+      ['illisible', 'reception'], ['trop_gros', 'reception'], ['inconnu', 'envoi'], ['__proto__', 'envoi'], ['constructor', 'reception'], ['type', undefined], [undefined, undefined]];
+    eq(couples.map(([m, s]) => SR.motifFichier(m, s)), ['Plus de 50 Mo : ce fichier reste sur cet appareil seulement.', 'Type de fichier refusé par le serveur.', 'Empreinte différente après envoi.', 'Fichier vide ou mal formé : il reste sur cet appareil seulement.', 'Fichier illisible sur cet appareil.',
+      'Ligne de fichier mal formée reçue du serveur.', 'Ce fichier n’est plus sur le serveur.', 'Fichier illisible reçu du serveur.', 'Fichier illisible reçu du serveur.', 'Fichier illisible reçu du serveur.',
+      'Fichier refusé', 'Fichier refusé', 'Fichier refusé', 'Fichier refusé', 'Fichier refusé', 'Fichier refusé', 'Fichier refusé'],
+    'motifFichier (ronde 1, § 4.10) : les DIX couples sens:motif de MOTIFS_FICHIER mot pour mot — envoi:forme (fichier vide, T3-R1) et envoi:illisible (T4-R1) compris —, et tout autre couple (inconnu, sans sens, hostile) → « Fichier refusé » (mutants : une entrée retirée, reception:taille ou envoi:verification compris)');
+    const errsEnvoi = [{ sha256: H('1'), motif: 'forme', sens: 'envoi' }, { sha256: H('3'), motif: 'illisible', sens: 'envoi' }, { sha256: H('4'), motif: 'trop_gros', sens: 'envoi' }];
+    const bE = rendre(modele(moteurL4(), { fichiersErreurs: errsEnvoi, snapshot: snapNoms }), { reessayerFichier: () => {} });
+    eq([...bE.querySelectorAll('[data-fichier]')].map((l) => [l.querySelector('p').textContent, l.querySelectorAll('button').length]),
+      [['Page 12 · Mon livre — Fichier vide ou mal formé : il reste sur cet appareil seulement.', 0], ['Couverture · Mon livre — Fichier illisible sur cet appareil.', 1], ['Photo du plat · Tarte — Plus de 50 Mo : ce fichier reste sur cet appareil seulement.', 0]],
+      'L4 (ronde 1, B-22) : un fichier vide ou mal formé à l’envoi n’offre pas « Réessayer » (les mêmes octets reposeraient la même clé, comme trop_gros) ; un fichier illisible ici l’offre (T4-R1 : « Réessayer » le retente)');
+    const snapLong = { ...snapNoms, books: [{ id: 'b1', title: 'T'.repeat(400) }] };
+    eq(modele(moteurL4(), { fichiersErreurs: [{ sha256: H('1'), motif: 'introuvable', sens: 'reception' }], snapshot: snapLong }).erreursFichiers.map((e) => e.texte), ['Page 12 · ' + 'T'.repeat(30) + '… — Ce fichier n’est plus sur le serveur.'],
+      'L4 (ronde 1) : le libellé d’un fichier refusé vient de fiches reçues : il est BORNÉ comme ceux de L3 (NOM_MAX, la coupe se voit) — mutant : nomFichier brut');
+    const seule = rendre(modele(moteurL4({ fichiers: fichiersL4({ enErreur: 0 }) }), { fichiersErreurs: [{ sha256: H('1'), motif: 'forme', sens: 'reception' }], snapshot: snapNoms }), { reessayerFichier: () => {} });
+    eq([seule.textContent.includes('Fichiers refusés : 1'), seule.querySelectorAll('[data-fichier]').length], [true, 1],
+      'L4 (ronde 1, R10) : « Fichiers refusés » compte les file_error RÉFÉRENCÉES, même sans ligne files (enErreur du moteur vaut 0 : une réception « forme » d’une page jamais arrivée) — mutant : refuses lu dans moteur.fichiers.enErreur');
+    const quatre = 4 * 419430;
+    const errs = [{ sha256: H('1'), motif: 'introuvable', sens: 'reception' }, { sha256: H('3'), motif: 'trop_gros', sens: 'envoi' }, { sha256: H('4'), motif: 'nouveau-motif', sens: 'envoi' }, { sha256: H('9'), motif: 'type', sens: 'envoi' }];
+    const toutesModele = () => modele(moteurL4({ fichiers: fichiersL4({ aEnvoyer: 2, aTelecharger: 4, octetsATelecharger: quatre, aRenvoyer: 2, enErreur: 3, typeInconnu: 1, copiesSansServeur: 1, copiesPerimees: 1 }), progressionFichiers: { sens: 'reception', n: 1, total: 4 }, telechargementGlobal: true, pauseFichiers: { raison: 'stockage', at: DATE }, espaceServeur: { octets: 850 * 1048576, objets: 312, at: DATE, tronque: true } }), { qualite: 'originale', fichiersErreurs: errs, snapshot: snapNoms });
+    const texte = rendre(toutesModele(), { telechargerTout: () => {}, arreterTelechargement: () => {}, actualiserEspace: () => {}, renvoyerOriginale: () => {}, reessayerFichier: () => {} }).textContent;
+    const reperes = ['Photos à envoyer : 2', 'Espace photos plein', 'Pages à télécharger : 4', 'Téléchargement des pages : 1/4', 'Arrêter le téléchargement', 'au moins 850 Mo', 'Actualiser', 'Qualité d’envoi des photos', 'Réduite (≈ 400 Ko', 'L’original reste toujours',
+      'Renvoyer en originale', 'Fichiers refusés : 3', 'Page 12 · Mon livre', '1 fichier(s) de type inconnu', '1 copie(s) de photos ici', '1 photo(s) ici sont une copie'];
+    const positions = reperes.map((r) => texte.indexOf(r));
+    eq(reperes.filter((r, i) => !(positions[i] >= 0 && (i === 0 || positions[i] > positions[i - 1]))), [],
+      'L4 (ronde 1, § 4.1 « dans cet ordre ») : sur un rendu à toutes branches, les items 1 à 8 se suivent dans l’ordre de la spec (mutants : ligne d’espace et « Actualiser » en fin de bloc ; refus avant la qualité)');
+    eq(rendre(modele(moteurL4())).querySelector('.segmented')?.closest('.field')?.querySelector('small')?.textContent, HINT_QUALITE,
+      'L4 (ronde 1, S-9, R-G-4) : l’aide de la qualité est là, mot pour mot, et nomme ce qui part TEL QUEL en « Réduite », métadonnées comprises (petite image, plus de 16 Mpx, illisible ici, PDF ou EPUB) — mutants : aide retirée ; « métadonnées retirées » promis sans exception');
+    const pleine = (sur = {}) => modele(moteurL4({ fichiers: fichiersL4({ aTelecharger: 4, octetsATelecharger: quatre }), pauseFichiers: { raison: 'stockage', at: DATE }, ...sur }));
+    const gestesTelechargement = { telechargerTout: () => {}, arreterTelechargement: () => {} };
+    const bp = rendre(pleine(), gestesTelechargement);
+    eq([bp.textContent.includes('Pages à télécharger : 4 (~1,6 Mo)'), horsSegments(bp), horsSegments(rendre(pleine({ telechargementGlobal: true }), gestesTelechargement))], [true, [], ['Arrêter le téléchargement']],
+      'L4 (ronde 1, § 3.2) : seau plein → la passe fichiers entière est suspendue, téléchargement global compris : « Télécharger toutes les pages » n’est pas offert (il ne ferait rien descendre) ; « Arrêter le téléchargement » reste si le global était demandé');
+    const sousQuotaL3 = rendre(modele(moteurL4({ pause: { raison: 'quota', at: DATE } })));
+    eq([sousQuotaL3.querySelectorAll('.card.warn').length, sousQuotaL3.textContent.includes('Espace photos plein')], [0, false],
+      'L4 (ronde 1, B-5) : la pause de quota des FICHES (L3) n’est pas celle du seau : aucune carte L4 ne dit « les fiches continuent de partir » sous une pause qui les arrête (mutant : pause || pauseFichiers)');
+    eq(horsSegments(rendre(toutesModele())), [], 'L4 (ronde 1, R4) : sans geste câblé, aucun bouton — un bouton n’existe que si son geste existe (mutant : bouton toujours rendu, muet)');
+    const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
+    const langue = getUiLocale();
+    let en = null;
+    try {
+      setUiLocale('en');
+      en = rendre(modele(moteurL4({ fichiers: fichiersL4({ aTelecharger: 4, octetsATelecharger: quatre }), espaceServeur: { octets: 850 * 1048576 + 3 * 104858, objets: 312, at: DATE, tronque: false } })), { telechargerTout: () => {} });
+    } finally { setUiLocale(langue); }
+    eq([en.textContent.includes('Pages to download: 4 (~1.6 MB)'), horsSegments(en), en.textContent.includes('Your photos on the server: 850.3 MB (312 files)')], [true, ['Download all pages (4 files, ~1.6 MB)'], true],
+      'L4 (ronde 1, R8) : en interface anglaise, les mégaoctets portent le point décimal — enMo suit la langue de l’interface (mutant : enMo figé en fr-CA)');
+  });
+
+  await run('Réglages L4 (ronde 1) : un échec rendu EN VALEUR par le moteur est dit, un moteur absent aussi ; la qualité est écrite PUIS redessinée, et protégée', async () => {
+    const API = ['telechargerTout', 'arreterTelechargement', 'actualiserEspace', 'renvoyerEnOriginale', 'reessayerFichier'];
+    const ko = 'Ce geste n’a pas abouti.';
+    const essayer = async (rendu) => {
+      const journal = [];
+      const m = rendu === null ? null : Object.fromEntries(API.map((nom) => [nom, async () => rendu]));
+      const g = SR.gestesL4Pour({ obtenirMoteur: () => m, dire: (x) => journal.push(x), rafraichir: () => journal.push('rendu'), journaliser: (nom) => journal.push(nom) });
+      for (const a of SR.SYNC_L4_ACTIONS) await g[a](H('1'));
+      return journal;
+    };
+    eq([await essayer({ erreur: { type: 'reseau', status: null } }), await essayer({ recus: 1, erreurs: 0, erreur: null }), await essayer(null)], [
+      ['rendu', ko, 'rendu', ko, 'rendu', ko, 'rendu', ko, 'rendu', ko],
+      ['rendu', 'rendu', 'rendu', 'rendu', 'rendu'],
+      ['sync.geste.telecharger_tout', ko, 'sync.geste.arreter_telechargement', ko, 'sync.geste.actualiser_espace', ko, 'sync.geste.renvoyer_originale', ko, 'sync.geste.reessayer_fichier', ko],
+    ], 'gestesL4Pour (ronde 1) : l’API du moteur rend ses échecs EN VALEUR ({ erreur }, ARRETE) — ils sont dits après le redessin (un « Réessayer » hors réseau ne se lit plus comme un succès) ; un succès ne dit rien ; un moteur absent est journalisé et dit, jamais avalé par « ?. » (mutants : résultat ignoré ; moteur absent muet)');
+    const jq = [];
+    const deps = { rafraichir: () => jq.push('rendu'), dire: (x) => jq.push(x), journaliser: (nom) => jq.push(nom) };
+    await SR.choisirQualitePour({ ...deps, ecrire: async (v) => { await new Promise((r) => setTimeout(r, 5)); jq.push('écrit:' + v); } })('originale');
+    await SR.choisirQualitePour({ ...deps, ecrire: async () => { throw new Error('base fermée'); } })('reduite');
+    eq(jq, ['écrit:originale', 'rendu', 'sync.geste.qualite', ko],
+      'choisirQualitePour (ronde 1, § 4.1 item 4) : le réglage est écrit PUIS l’écran redessiné (le segmented n’a pas d’état propre) ; une écriture refusée est journalisée et dite, sans redessin (mutants : refresh retiré, ou avant l’écriture ; bascule non protégée)');
+    await withRepo(async (repo) => {
+      let rafraichis = 0;
+      const compter = () => { rafraichis += 1; };
+      let lu = null;
+      window.addEventListener('cuisineos:refresh', compter);
+      try {
+        const b = rendre(modele(moteurL4()));
+        [...b.querySelectorAll('.segmented button')].find((x) => x.textContent === 'Originale').click();
+        for (let i = 0; i < 100 && ((lu = await repo.getSetting('upload_quality')) !== 'originale' || rafraichis < 1); i += 1) await new Promise((r) => setTimeout(r, 10));
+      } finally { window.removeEventListener('cuisineos:refresh', compter); }
+      eq([lu, rafraichis], ['originale', 1], 'L4 (ronde 1, R1) : le câblage PAR DÉFAUT de la bascule écrit upload_quality ET redessine la page une fois (cuisineos:refresh) — mutant : refresh() retiré du défaut');
+      await (await import('../src/ui/state.js')).relectureEnCours();
+    });
+    await (await import('../src/ui/state.js')).relireReglages(); // la base de l'app reprend la main
+  });
+
+  await run('Réglages L4 (ronde 1) : sans erreur de fichier à nommer, un rendu de Réglages ne lit pas le snapshot des sept magasins', async () => {
+    const etat = await import('../src/ui/state.js');
+    await withRepo(async (repo, db) => {
+      const vraiGetSnapshot = db.getSnapshot;
+      const lus = [];
+      db.getSnapshot = function (magasins) { lus.push(magasins); return vraiGetSnapshot.call(this, magasins); };
+      const avant = etat.getSyncState().moteur;
+      try {
+        etat.setSyncState({ moteur: { etat: () => moteurL4({ progressionFichiers: { sens: 'reception', n: 1, total: 9 } }) } });
+        await SR.renderSettings({}, {}, { settings: await repo.getSettings(), sync: { auth: { available: true, reason: null }, user: { id: 'u1', email: 'x@exemple.invalid' }, guard: { ok: true } } }, {});
+      } finally { etat.setSyncState({ moteur: avant }); delete db.getSnapshot; }
+      eq(lus, [], 'renderSettings (ronde 1) : sans file_error, aucun getSnapshot — le snapshot ne sert qu’à nommer un fichier refusé ; Réglages se redessine pendant une passe et relirait sinon `files` entier à chaque fois (S-12) — mutant : snapshot lu à chaque rendu');
+      await etat.relectureEnCours();
+    });
+    await etat.relireReglages(); // la base de l'app reprend la main
   });
 }

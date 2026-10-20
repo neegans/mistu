@@ -62,9 +62,11 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
   const moteur = getSyncState().moteur || null;
   suivreMoteurDeLaPage(moteur);
   // Lot G (§ 4.1) : les erreurs de fichiers et le snapshot (pour nomFichier) sont lus au rendu, comme la quarantaine — seulement s'il y a un moteur.
+  // Ronde 1 : le snapshot (sept magasins, `files` entier) n'est lu que s'il y a une erreur à nommer — c'est son seul usage. Réglages se redessine
+  // au plus toutes les 300 ms pendant une passe : sans cette garde, l'écran relirait `files` à chaque fois (S-12 contournée par l'écran).
   const etatMoteur = moteur?.etat() || null;
   const fichiersErreurs = etatMoteur ? [...(await lireErreursFichiers(repo.db))].map(([sha256, v]) => ({ sha256, motif: v?.motif, sens: v?.sens })) : [];
-  const snapshotFichiers = etatMoteur ? await repo.db.getSnapshot(MAGASINS_FICHIERS) : null;
+  const snapshotFichiers = fichiersErreurs.length ? await repo.db.getSnapshot(MAGASINS_FICHIERS) : null;
   root.append(syncSection({
     available: !!auth?.available,
     reason: auth ? auth.reason : 'config',
@@ -398,6 +400,10 @@ const messagePerte = (n) => (n > 1
   ? t('{n} envois en attente seront perdus — ils sont dans l’archive.', { n })
   : t('{n} envoi en attente sera perdu — il est dans l’archive.', { n }));
 
+// S-11 / F-24 (lot G) : un envoi ou un téléchargement de fichier est en vol tant que `progressionFichiers` est non nul. Une seule définition,
+// défaut des deux gestes destructeurs ci-dessous (ronde 1 : elle était écrite deux fois).
+const transfertEnVol = () => !!getSyncState().moteur?.etat?.()?.progressionFichiers;
+
 // « Effacer les données de cet appareil » (spec § 4.2) : décision et effets, sans DOM ni base — toutes les
 // dépendances sont injectées, pour que le geste le plus destructeur de l'app soit éprouvé plutôt que relu.
 // R24 : le refus pour file non vide ne vaut QUE s'il existe un compte. Sans compte rien n'envoie, donc rien ne
@@ -408,7 +414,7 @@ const messagePerte = (n) => (n > 1
 // jamais dire par où sortir.
 // `arreterSync` est appelé juste AVANT l’effacement, et seulement si le geste va au bout : une passe déclenchée
 // entre le vidage et le rechargement écrirait dans une base qu’on vient d’effacer, ou enverrait ce qui n’existe plus.
-export async function effacerDonnees({ user = null, pending, enQuarantaine = async () => 0, confirm, demanderMot, toast: dire, clearDevice, signOut = null, reload, arreterSync = arreterMoteur, transfertEnCours = () => !!getSyncState().moteur?.etat?.()?.progressionFichiers }) {
+export async function effacerDonnees({ user = null, pending, enQuarantaine = async () => 0, confirm, demanderMot, toast: dire, clearDevice, signOut = null, reload, arreterSync = arreterMoteur, transfertEnCours = transfertEnVol }) {
   // La file est relue au moment du geste : elle a pu bouger depuis le rendu de la page.
   const enAttente = await pending();
   if (user && enAttente > 0) { dire(messageEnAttente(enAttente, await enQuarantaine())); return false; }
@@ -446,7 +452,7 @@ export async function restaurerArchive({ mode, pending, toast: dire, appliquer }
 // échec fermé, cohérent avec le reste du lot.
 // `arreterSync` est appelé juste AVANT l’effacement, et seulement si le geste est allé au bout : un refus (archive
 // manquante, confirmation annulée) ne doit pas laisser la synchronisation arrêtée sur un appareil qui reste en place.
-export async function changerDeCompte({ confirm, toast: dire, pending, archiveCreated, clearDevice, signOut = null, reload, arreterSync = arreterMoteur, transfertEnCours = () => !!getSyncState().moteur?.etat?.()?.progressionFichiers }) {
+export async function changerDeCompte({ confirm, toast: dire, pending, archiveCreated, clearDevice, signOut = null, reload, arreterSync = arreterMoteur, transfertEnCours = transfertEnVol }) {
   let archive = null;
   try { archive = archiveCreated(); }
   catch { dire(t('Le stockage de session est inaccessible : ce geste n’est pas possible ici.')); return false; }
@@ -539,6 +545,13 @@ export async function garderVersionDAilleurs({ db, id, appliquer = garderAilleur
   return applique;
 }
 
+// Un geste de Réglages protégé (L3, L4, bascule de qualité) : une levée est journalisée (`sync.geste.<nom>`) et dite, jamais un rejet non
+// traité. Ronde 1 de la tâche 5 : une seule définition (elle était copiée à l'octet dans gestesL3Pour et gestesL4Pour).
+const protegerGeste = (dire, journaliser) => (nom, fn) => async (cle) => {
+  try { await fn(cle); }
+  catch (error) { journaliser('sync.geste.' + nom, { error }); dire(t('Ce geste n’a pas abouti.')); }
+};
+
 // Le câblage des gestes L3 (spec § 4.2) : une fonction par geste NOMMÉ, toutes les dépendances injectées — c'est
 // cet objet que le rendu reçoit, et c'est lui que le test éprouve (sans quoi le fil entre les décisions et les
 // boutons ne serait vérifié par personne). `obtenirMoteur` est une fonction : le moteur est posé par le démarrage,
@@ -555,10 +568,7 @@ export function gestesL3Pour({
   invalider = invalidate,
   journaliser = logError,
 } = {}) {
-  const protege = (nom, fn) => async (cle) => {
-    try { await fn(cle); }
-    catch (error) { journaliser('sync.geste.' + nom, { error }); dire(t('Ce geste n’a pas abouti.')); }
-  };
+  const protege = protegerGeste(dire, journaliser);
   return {
     envoyerMaintenant: protege('envoyer_maintenant', async () => { await obtenirMoteur()?.envoyerMaintenant(); rafraichir(); }),
     reessayer: protege('reessayer', async (seq) => { await reessayerEnvoi({ db, seq, moteur: obtenirMoteur() }); rafraichir(); }),
@@ -812,7 +822,9 @@ function modeleFichiers(moteur, { qualite, refuses }) {
     envoi: prog?.sens === 'envoi' ? t('Envoi des photos : {n}/{m}', { n: prog.n, m: prog.total }) : null,
     pause: moteur.pauseFichiers ? t('Espace photos plein sur le serveur : les photos attendent sur cet appareil, les fiches continuent de partir.') : null,
     aTelecharger: aTelecharger ? t('Pages à télécharger : {n} (~{m} Mo)', { n: aTelecharger, m: mo }) : null,
-    telechargerTout: aTelecharger && moteur.telechargementGlobal !== true ? t('Télécharger toutes les pages ({n} fichiers, ~{m} Mo)', { n: aTelecharger, m: mo }) : null,
+    // Ronde 1 (§ 3.2) : sous `pause_fichiers`, la passe fichiers entière est suspendue, téléchargement global compris — le bouton ne ferait rien
+    // descendre : il n'est pas offert (« Arrêter le téléchargement » reste si le global était demandé ; la tape sur une page, elle, marche).
+    telechargerTout: aTelecharger && moteur.telechargementGlobal !== true && !moteur.pauseFichiers ? t('Télécharger toutes les pages ({n} fichiers, ~{m} Mo)', { n: aTelecharger, m: mo }) : null,
     reception: prog?.sens === 'reception' ? t('Téléchargement des pages : {n}/{m}', { n: prog.n, m: prog.total }) : null,
     arreter: moteur.telechargementGlobal === true,
     renvoi: qualite === 'originale' && compte(f.aRenvoyer) ? t('Renvoyer en originale les {n} photos de cet appareil envoyées en réduite', { n: f.aRenvoyer }) : null,
@@ -835,6 +847,10 @@ const MOTIFS_FICHIER = {
   'envoi:trop_gros': 'Plus de 50 Mo : ce fichier reste sur cet appareil seulement.',
   'envoi:type': 'Type de fichier refusé par le serveur.',
   'envoi:verification': 'Empreinte différente après envoi.',
+  // Ronde 1 (à ratifier : textes hors spec § 5) : `forme` à l'envoi (T3-R1 : un fichier vide ne porte aucun remote valide) et `illisible` (T4-R1 :
+  // un blob que le navigateur ne relit plus) sont posés par la passe depuis le plan ; sans phrase, ils retombaient sur « Fichier refusé ».
+  'envoi:forme': 'Fichier vide ou mal formé : il reste sur cet appareil seulement.',
+  'envoi:illisible': 'Fichier illisible sur cet appareil.',
   'reception:forme': 'Ligne de fichier mal formée reçue du serveur.',
   'reception:introuvable': 'Ce fichier n’est plus sur le serveur.',
   'reception:empreinte': 'Fichier illisible reçu du serveur.',
@@ -842,28 +858,43 @@ const MOTIFS_FICHIER = {
   'reception:type': 'Fichier illisible reçu du serveur.',
 };
 export const motifFichier = (motif, sens) => { const cle = `${sens}:${motif}`; return t(Object.hasOwn(MOTIFS_FICHIER, cle) ? MOTIFS_FICHIER[cle] : 'Fichier refusé'); };
+// B-22 : pas de « Réessayer » qui échouera pareil — trop_gros (les mêmes octets restent trop gros) et, ronde 1, forme à l'envoi (les mêmes octets
+// ne porteraient pas plus de remote valide : la passe reposerait la même clé). `illisible` garde le sien : le blob peut redevenir lisible.
+const sansReessai = (motif, sens) => motif === 'trop_gros' || (sens === 'envoi' && motif === 'forme');
 
 export const SYNC_L4_ACTIONS = ['telechargerTout', 'arreterTelechargement', 'actualiserEspace', 'renvoyerOriginale', 'reessayerFichier'];
 
 // Le câblage des gestes L4 (§ 4.1), protégé comme gestesL3Pour : l'écran n'a ni le client ni le stockage (R53), tout passe par le moteur.
+// Ronde 1 : l'API du moteur rend ses échecs EN VALEUR (`{ erreur }`, ARRETE après l'arrêt), jamais en levée : ils sont dits après le redessin —
+// sinon un « Réessayer » hors réseau retire la ligne de refus sans un mot et se lit comme un succès. Un moteur absent (arrêté entre le rendu et la
+// tape) n'est plus avalé par `?.` : il lève, donc il est journalisé et dit.
 export function gestesL4Pour({ obtenirMoteur = () => getSyncState().moteur, dire = toast, rafraichir = refresh, journaliser = logError } = {}) {
-  const protege = (nom, fn) => async (cle) => {
-    try { await fn(cle); }
-    catch (error) { journaliser('sync.geste.' + nom, { error }); dire(t('Ce geste n’a pas abouti.')); }
-  };
+  const protege = protegerGeste(dire, journaliser);
+  const appeler = (nom, api) => protege(nom, async (cle) => {
+    const moteur = obtenirMoteur();
+    if (!moteur) throw new Error('moteur absent');
+    const r = await moteur[api](cle);
+    rafraichir();
+    if (r?.erreur) dire(t('Ce geste n’a pas abouti.'));
+  });
   return {
-    telechargerTout: protege('telecharger_tout', async () => { await obtenirMoteur()?.telechargerTout(); rafraichir(); }),
-    arreterTelechargement: protege('arreter_telechargement', async () => { await obtenirMoteur()?.arreterTelechargement(); rafraichir(); }),
-    actualiserEspace: protege('actualiser_espace', async () => { await obtenirMoteur()?.actualiserEspace(); rafraichir(); }),
-    renvoyerOriginale: protege('renvoyer_originale', async () => { await obtenirMoteur()?.renvoyerEnOriginale(); rafraichir(); }),
-    reessayerFichier: protege('reessayer_fichier', async (sha256) => { await obtenirMoteur()?.reessayerFichier(sha256); rafraichir(); }),
+    telechargerTout: appeler('telecharger_tout', 'telechargerTout'),
+    arreterTelechargement: appeler('arreter_telechargement', 'arreterTelechargement'),
+    actualiserEspace: appeler('actualiser_espace', 'actualiserEspace'),
+    renvoyerOriginale: appeler('renvoyer_originale', 'renvoyerEnOriginale'),
+    reessayerFichier: appeler('reessayer_fichier', 'reessayerFichier'),
   };
 }
 
-const choisirQualiteReelle = async (valeur) => { await repo.setSetting('upload_quality', valeur); refresh(); };
+// La bascule de qualité (§ 4.1 item 4) : écrit le réglage PUIS redessine — le segmented n'a pas d'état propre (sa classe active est celle du
+// rendu) et la relecture des réglages par le bus ne redessine pas Réglages. Ronde 1 : protégée comme les gestes L4 ; une écriture refusée est
+// journalisée et dite, et l'écran reste sur la valeur réellement écrite (aucun redessin). Dépendances injectables pour être éprouvée.
+export function choisirQualitePour({ ecrire = (valeur) => repo.setSetting('upload_quality', valeur), rafraichir = refresh, dire = toast, journaliser = logError } = {}) {
+  return protegerGeste(dire, journaliser)('qualite', async (valeur) => { await ecrire(valeur); rafraichir(); });
+}
 
 // Rendu de l'ensemble L4 (§ 4.1), exporté pour être éprouvé tel quel. Un bouton n'existe que si son geste est câblé (la règle de L3).
-export function syncSectionL4(model, gestes = {}, { choisirQualite = choisirQualiteReelle } = {}) {
+export function syncSectionL4(model, gestes = {}, { choisirQualite = choisirQualitePour() } = {}) {
   const f = model?.fichiers;
   if (!f) return [];
   const bouton = (action, libelle, cle) => (Object.hasOwn(gestes, action) ? el('button', { class: 'btn', onClick: () => gestes[action](cle) }, libelle) : null);
@@ -881,7 +912,10 @@ export function syncSectionL4(model, gestes = {}, { choisirQualite = choisirQual
   // R-UX-8 / B-15 : le segmented n'est JAMAIS dans un <label> (field() en rend un) : même habillage .field, par un div.
   bloc.append(el('div', { class: 'field' }, el('span', null, t('Qualité d’envoi des photos')),
     segmented([{ value: 'reduite', label: t('Réduite (≈ 400 Ko, 2 000 px)') }, { value: 'originale', label: t('Originale') }], model.qualite, (v) => choisirQualite(v)),
-    el('small', null, t('L’original reste toujours sur l’appareil qui a pris la photo. Réduite : JPEG de 2 000 px au plus, environ 400 Ko par page, métadonnées retirées. Originale : le fichier tel quel, avec ses métadonnées (dont la position GPS si la photo en porte).'))));
+    // Ronde 1 (S-9, R-G-4 ; à ratifier, spec § 4.1 item 4, § 5 et § 11 à amender) : « Réduite » n'est pas toujours réduite — octetsAEnvoyer envoie
+    // tel quel une image petite et légère, une photo au-delà du mur de pixels ou que ce navigateur ne décode pas, une réduction qui serait plus lourde,
+    // un PDF ou un EPUB. L'aide le dit au lieu de promettre « métadonnées retirées » sans exception.
+    el('small', null, t('L’original reste toujours sur l’appareil qui a pris la photo. Réduite : JPEG de 2 000 px au plus, environ 400 Ko par page, métadonnées retirées, quand la réduction est possible et utile ; sinon le fichier part tel quel, métadonnées comprises : une image déjà petite (2 000 px et 600 Ko au plus), une photo de plus de 16 Mpx ou que ce navigateur ne sait pas lire, un PDF ou un EPUB. Originale : le fichier tel quel, avec ses métadonnées (dont la position GPS si la photo en porte).'))));
   const renvoi = f.renvoi ? rangee(bouton('renvoyerOriginale', f.renvoi)) : null;
   if (renvoi) bloc.append(renvoi);
   if (f.refuses) {
@@ -970,10 +1004,11 @@ export function syncSectionModel({ available = false, reason = null, user = null
     ? { t: moteur.progression.table, n: moteur.progression.n, total: moteur.progression.total }
     : null;
   // Lot G (§ 4.1, I-G8) : une erreur de fichier n'est dite que pour une ligne RÉFÉRENCÉE (un orphelin n'est pas nommé), par le nom que la
-  // personne reconnaît (nomFichier) et son motif en phrase ; trop_gros n'offre pas « Réessayer » (B-22).
+  // personne reconnaît (nomFichier) et son motif en phrase ; trop_gros et forme à l'envoi n'offrent pas « Réessayer » (B-22). Ronde 1 : le nom
+  // vient de fiches reçues (titre du livre, de la recette, nom de fichier) : il est BORNÉ comme les libellés de L3 (NOM_MAX, la coupe se voit).
   const refsFichiers = snapshot ? referencesFichiers(snapshot) : new Set();
   const erreursReferencees = (fichiersErreurs || []).filter((e) => refsFichiers.has(e?.sha256))
-    .map((e) => ({ sha256: e.sha256, texte: `${nomFichier(e.sha256, snapshot)} — ${motifFichier(e.motif, e.sens)}`, reessayer: e.motif !== 'trop_gros' }));
+    .map((e) => ({ sha256: e.sha256, texte: `${tronquer(nomFichier(e.sha256, snapshot), NOM_MAX)} — ${motifFichier(e.motif, e.sens)}`, reessayer: !sansReessai(e.motif, e.sens) }));
   return {
     title,
     lines,

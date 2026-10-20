@@ -553,7 +553,7 @@ export const EN = {
   "Qualité d’envoi des photos": "Photo upload quality",
   "Réduite (≈ 400 Ko, 2 000 px)": "Reduced (≈ 400 KB, 2,000 px)",
   "Originale": "Original",
-  "L’original reste toujours sur l’appareil qui a pris la photo. Réduite : JPEG de 2 000 px au plus, environ 400 Ko par page, métadonnées retirées. Originale : le fichier tel quel, avec ses métadonnées (dont la position GPS si la photo en porte).": "The original always stays on the device that took the photo. Reduced: JPEG of at most 2,000 px, about 400 KB per page, metadata removed. Original: the file as is, with its metadata (including GPS position if the photo has one).",
+  "L’original reste toujours sur l’appareil qui a pris la photo. Réduite : JPEG de 2 000 px au plus, environ 400 Ko par page, métadonnées retirées, quand la réduction est possible et utile ; sinon le fichier part tel quel, métadonnées comprises : une image déjà petite (2 000 px et 600 Ko au plus), une photo de plus de 16 Mpx ou que ce navigateur ne sait pas lire, un PDF ou un EPUB. Originale : le fichier tel quel, avec ses métadonnées (dont la position GPS si la photo en porte).": "The original always stays on the device that took the photo. Reduced: JPEG of at most 2,000 px, about 400 KB per page, metadata removed, when reducing is possible and useful; otherwise the file goes as is, metadata included: an image that is already small (2,000 px and 600 KB at most), a photo over 16 MP or that this browser cannot read, a PDF or an EPUB. Original: the file as is, with its metadata (including GPS position if the photo has one).",
   "Renvoyer en originale les {n} photos de cet appareil envoyées en réduite": "Re-upload as original the {n} photos of this device sent reduced",
   "Fichiers refusés : {n}": "Rejected files: {n}",
   "{n} fichier(s) de type inconnu ne seront pas synchronisés.": "{n} file(s) of unknown type will not be synchronized.",
@@ -565,6 +565,9 @@ export const EN = {
   "Ligne de fichier mal formée reçue du serveur.": "Malformed file row received from the server.",
   "Ce fichier n’est plus sur le serveur.": "This file is no longer on the server.",
   "Fichier illisible reçu du serveur.": "Unreadable file received from the server.",
+  // Lot G, ronde 1 de la tâche 5 (à ratifier) : motifs d’envoi posés depuis le plan (forme : T3-R1 ; illisible : T4-R1).
+  "Fichier vide ou mal formé : il reste sur cet appareil seulement.": "Empty or malformed file: it stays on this device only.",
+  "Fichier illisible sur cet appareil.": "Unreadable file on this device.",
   "Fichier refusé": "File refused",
   "Envoi en cours…": "Upload in progress…",
 };

@@ -52,7 +52,7 @@ export const CHAINES_NEUVES_AILLEURS = {
     'Qualité d’envoi des photos',
     'Réduite (≈ 400 Ko, 2 000 px)',
     'Originale',
-    'L’original reste toujours sur l’appareil qui a pris la photo. Réduite : JPEG de 2 000 px au plus, environ 400 Ko par page, métadonnées retirées. Originale : le fichier tel quel, avec ses métadonnées (dont la position GPS si la photo en porte).',
+    'L’original reste toujours sur l’appareil qui a pris la photo. Réduite : JPEG de 2 000 px au plus, environ 400 Ko par page, métadonnées retirées, quand la réduction est possible et utile ; sinon le fichier part tel quel, métadonnées comprises : une image déjà petite (2 000 px et 600 Ko au plus), une photo de plus de 16 Mpx ou que ce navigateur ne sait pas lire, un PDF ou un EPUB. Originale : le fichier tel quel, avec ses métadonnées (dont la position GPS si la photo en porte).',
     'Renvoyer en originale les {n} photos de cet appareil envoyées en réduite',
     'Fichiers refusés : {n}',
     '{n} fichier(s) de type inconnu ne seront pas synchronisés.',
@@ -66,7 +66,10 @@ export const CHAINES_NEUVES_AILLEURS = {
     'Fichier illisible reçu du serveur.',
     'Fichier refusé',
     'Envoi en cours…',
-    'Espace serveur plein — rien n’est perdu, tout reste sur cet appareil.'],
+    'Espace serveur plein — rien n’est perdu, tout reste sur cet appareil.',
+    // Lot G, ronde 1 de la tâche 5 : motifs d’envoi forme et illisible (l’aide de la qualité, réécrite, est à sa place ci-dessus).
+    'Fichier vide ou mal formé : il reste sur cet appareil seulement.',
+    'Fichier illisible sur cet appareil.'],
 };
 
 export async function runAjouterTests({ eq, ok }) {
