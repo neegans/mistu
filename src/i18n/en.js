@@ -534,6 +534,7 @@ export const EN = {
   "pages manquantes : {n}": "missing pages: {n}",
   "copies du serveur : {n}": "server copies: {n}",
   "Cette archive renvoie à {n} pages qui ne sont pas dedans : celles qui sont sur le serveur pourront être téléchargées (sur la fiche, ou Réglages → Télécharger toutes les pages).": "This archive refers to {n} pages that are not in it: those on the server can be downloaded (from the page, or Settings → Download all pages).",
+  "Cette archive renvoie à 1 page qui n’est pas dedans : si elle est sur le serveur, elle pourra être téléchargée (sur la fiche, ou Réglages → Télécharger toutes les pages).": "This archive refers to 1 page that is not in it: if it is on the server, it can be downloaded (from the page, or Settings → Download all pages).",
   "Les pages de cet appareil absentes de l’archive seront retirées d’ici.": "Pages on this device that are not in the archive will be removed from here.",
   "{n} originaux de cet appareil conservés (l’archive portait des copies).": "{n} originals of this device kept (the archive carried copies).",
   "1 original de cet appareil conservé (l’archive portait une copie).": "1 original of this device kept (the archive carried a copy).",

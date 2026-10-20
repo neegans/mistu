@@ -105,16 +105,17 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
         const { blob, manifest, bytes, warnings, missingFiles = 0, copies } = await createArchive(repo.db, { deviceName: s.device_name });
         telechargerArchive(blob, 'cuisine-os-' + manifest.created_at.slice(0, 19).replace(/[:T]/g, '-') + '.zip');
         generated = true;
+        // § 4.6 : le bilan de création, une phrase par cas (pages manquantes, copies du serveur, octets inconnus) ; rien à dire, rien de dit. Posé
+        // juste après le téléchargement (ronde 1, #16) : un suivi qui échoue plus bas ne le fait pas taire ; l'ancien bilan part d'abord.
+        backupStatus.querySelector('[data-role="bilan-archive"]')?.remove();
+        const bilanArchive = messagesArchive({ missingFiles, copies });
+        if (bilanArchive.length) backupStatus.append(el('div', { class: 'status warn', dataset: { role: 'bilan-archive' } }, ...bilanArchive.map((p) => el('p', null, p))));
         // Une archive existe pour cette session : « Changer de compte sur cet appareil » l’exige.
         try { sessionStorage.setItem(ARCHIVE_FLAG, manifest.created_at); } catch { /* stockage indisponible */ }
         showExportWarnings(warnings);
         await repo.setSetting('last_backup', { at: manifest.created_at, counts: manifest.counts, files: manifest.files.length, bytes, state: 'generated', warnings });
         backupStatus.firstChild.replaceWith(el('div', { class: 'status info' }, t('Dernière archive générée') + ' : ' + formatDate(manifest.created_at, { withTime: true }) + ' — ' + (bytes / 1048576).toFixed(1) + ' Mo'));
         toast(t('Archive générée ({n} Mo). Vérifie qu’elle est bien enregistrée.', { n: (bytes / 1048576).toFixed(1) }));
-        // § 4.6 : le bilan de création, une phrase par cas (pages manquantes, copies du serveur, octets inconnus) ; rien à dire, rien de dit.
-        backupStatus.querySelector('[data-role="bilan-archive"]')?.remove();
-        const bilanArchive = messagesArchive({ missingFiles, copies });
-        if (bilanArchive.length) backupStatus.append(el('div', { class: 'status warn', dataset: { role: 'bilan-archive' } }, ...bilanArchive.map((p) => el('p', null, p))));
       } catch (err) {
         toast((generated ? t('Archive générée, mais son suivi n’a pas pu être enregistré.') : t('Échec de la sauvegarde')) + ' : ' + err.message);
       } finally {
@@ -214,8 +215,9 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
     if (!insp.manifest) { box.append(el('div', { class: 'status danger' }, insp.errors.join(' · '))); return box; }
     const m = insp.manifest;
     box.append(el('div', null, el('strong', null, t('Archive du {d}', { d: formatDate(m.created_at, { withTime: true }) })), ' · ' + t('format') + ' v' + m.format_version));
-    // § 4.6 (lot G) : pages manquantes et copies du serveur, en puces ; la phrase dessous ne promet aucun téléchargement (B-8).
-    const ins = phrasesInspection(insp.summary || {});
+    // § 4.6 (lot G) : pages manquantes et copies du serveur, en puces ; la phrase dessous ne promet aucun téléchargement (B-8). Sur une archive
+    // REFUSÉE, ni l'une ni l'autre (ronde 1, #15 : I5, rien n'est annoncé sans fait).
+    const ins = insp.ok ? phrasesInspection(insp.summary || {}) : { puces: [], phrases: [] };
     if (insp.summary) box.append(el('div', { class: 'chips' },
       ...Object.entries(insp.summary.counts).filter(([, count]) => count).map(([name, count]) => el('span', { class: 'chip neutral' }, name + ' : ' + count)),
       el('span', { class: 'chip neutral' }, t('fichiers vérifiés') + ' : ' + insp.summary.files_ok),
@@ -299,7 +301,8 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
     // bouton qui en décide, et pas dans le bilan — celui-ci est commun aux deux modes.
     const horsArchive = empty ? null : messageRemplacementServeur(!!getSyncState().user);
     if (horsArchive) box.append(el('small', { class: 'muted' }, horsArchive));
-    // B-28 (lot G) : un remplacement vide `files` puis réécrit — les octets locaux des pages absentes de l’archive (ou manquantes) partent d’ici.
+    // B-28 (lot G) : un remplacement vide `files` puis réécrit — les octets locaux des pages absentes de l’archive partent d’ici ; une page que
+    // l’archive nomme sans ses octets (missing_files) garde ceux d’ici (ronde 1, #4, #8 : decisionManquante), la phrase reste donc exacte.
     if (!empty) box.append(el('small', { class: 'muted' }, t('Les pages de cet appareil absentes de l’archive seront retirées d’ici.')));
     box.append(result);
     return box;
@@ -347,7 +350,9 @@ export function phrasesInspection(summary = {}) {
   const puces = []; const phrases = [];
   if (summary.files_distants > 0) {
     puces.push(t('pages manquantes : {n}', { n: summary.files_distants }));
-    phrases.push(t('Cette archive renvoie à {n} pages qui ne sont pas dedans : celles qui sont sur le serveur pourront être téléchargées (sur la fiche, ou Réglages → Télécharger toutes les pages).', { n: summary.files_distants }));
+    phrases.push(summary.files_distants === 1 // ronde 1 (#35) : jamais « 1 pages »
+      ? t('Cette archive renvoie à 1 page qui n’est pas dedans : si elle est sur le serveur, elle pourra être téléchargée (sur la fiche, ou Réglages → Télécharger toutes les pages).')
+      : t('Cette archive renvoie à {n} pages qui ne sont pas dedans : celles qui sont sur le serveur pourront être téléchargées (sur la fiche, ou Réglages → Télécharger toutes les pages).', { n: summary.files_distants }));
   }
   if (summary.files_copies > 0) puces.push(t('copies du serveur : {n}', { n: summary.files_copies }));
   return { puces, phrases };

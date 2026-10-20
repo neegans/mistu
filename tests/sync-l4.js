@@ -760,9 +760,9 @@ export async function runSyncL4Tests({ eq, ok }) {
   });
 
   // R-G-6 : une archive dont l'entrée est une COPIE (bytes_*) ne remplace jamais l'original local, ni en fusion ni en remplacement.
-  const archiveDeCopie = async (shaO, tailleO, copie, remote) => {
+  const archiveDeCopie = async (shaO, tailleO, copie, remote, mime = 'image/jpeg') => {
     let a = null;
-    await withDatabase(async (db) => { await db.putBatch({ files: [{ sha256: shaO, mime: 'image/jpeg', size: tailleO, blob: copie, updated_at: DATE, remote }] }); a = await B.createArchive(db); });
+    await withDatabase(async (db) => { await db.putBatch({ files: [{ sha256: shaO, mime, size: tailleO, blob: copie, updated_at: DATE, remote }] }); a = await B.createArchive(db); });
     return a;
   };
   for (const mode of ['merge', 'replace']) {
@@ -770,14 +770,15 @@ export async function runSyncL4Tests({ eq, ok }) {
       const orig = await original('original-e4-de-cette-page');
       const copie = octets('copie-e4'); const shaC = await sha256Hex(copie);
       const R1 = R({ sha256: H('d'), size: 7 }); const R2 = R({ sha256: shaC, size: copie.size });
-      const insp = await ouvrir(await archiveDeCopie(orig.sha256, orig.size, copie, R2));
+      // Ronde 1 (#26) : la ligne de l'archive dit image/heic, l'original d'ici image/jpeg — la source du type gardé se lit.
+      const insp = await ouvrir(await archiveDeCopie(orig.sha256, orig.size, copie, R2, 'image/heic'));
       await withDatabase(async (db) => {
         await db.putBatch({ files: [{ ...orig, remote: R1 }] });
         const bilan = await B.applyArchive(db, insp, { mode });
         const row = await db.get('files', orig.sha256);
         const v = await B.verifyRestored(db, insp, { mode });
         eq([await sha256Hex(row.blob), row.blob.size, row.remote, row.mime, row.size, bilan.originauxConserves, F.estOriginalIci(row), v.ok, v.diffs],
-          [orig.sha256, orig.size, R2, 'image/jpeg', orig.size, 1, true, true, []], `R-G-6 (${mode}) : blob INCHANGÉ (l’original), remote et métadonnées pris de l’archive, originauxConserves 1, verifyRestored vert (mutants : « blob tel quel » ; comparaison brute bytes_sha256 ?? sha256 dans verifyRestored ; existingFiles vide en remplacement)`);
+          [orig.sha256, orig.size, R2, 'image/jpeg', orig.size, 1, true, true, []], `R-G-6 (${mode}) : blob INCHANGÉ (l’original), avec sa taille et son type d’ici (ronde 1, #6) ; remote pris de l’archive ; originauxConserves 1, verifyRestored vert (mutants : « blob tel quel » ; comparaison brute bytes_sha256 ?? sha256 dans verifyRestored ; existingFiles vide en remplacement ; mime de l’archive écrit sur l’original gardé)`);
       });
     });
   }
@@ -806,6 +807,7 @@ export async function runSyncL4Tests({ eq, ok }) {
       [['1 page n’est pas encore téléchargée sur cet appareil et n’est pas dans l’archive.'], []], 'messagesArchive : le singulier à 1 page ; rien à dire, rien de dit');
     eq(S.phrasesInspection({ files_distants: 3, files_copies: 2 }), { puces: ['pages manquantes : 3', 'copies du serveur : 2'], phrases: ['Cette archive renvoie à 3 pages qui ne sont pas dedans : celles qui sont sur le serveur pourront être téléchargées (sur la fiche, ou Réglages → Télécharger toutes les pages).'] }, 'phrasesInspection (§ 4.6, B-8) : puces et phrase d’inspection ; rien n’est promis comme « se téléchargera »');
     eq(S.phrasesInspection({ files_distants: 0, files_copies: 0 }), { puces: [], phrases: [] }, 'phrasesInspection : une archive complète ne dit rien de plus');
+    eq(S.phrasesInspection({ files_distants: 1, files_copies: 0 }).phrases, ['Cette archive renvoie à 1 page qui n’est pas dedans : si elle est sur le serveur, elle pourra être téléchargée (sur la fiche, ou Réglages → Télécharger toutes les pages).'], 'phrasesInspection (ronde 1, #35) : le singulier à 1 page — jamais « 1 pages »');
     eq(B.compterFichesSynchronisees({ payload: { stores: { books: [{ id: 'a' }] }, files: [{ sha256: H('1') }], missing: [{ sha256: H('2') }, { sha256: H('3') }] } }), 4, 'compterFichesSynchronisees (B-25, g) : files + missing (mutant : missing oublié)');
     let archive = null;
     await withDatabase(async (db) => { archive = await B.createArchive(db); });
@@ -814,7 +816,7 @@ export async function runSyncL4Tests({ eq, ok }) {
     const S0 = await import('../src/ui/state.js');
     const scene = document.createElement('div'); scene.hidden = true; document.body.append(scene);
     try {
-      await withRepo(async (repo) => {
+      await withRepo(async (repo, dbRepo) => {
         const faux = async () => ({ blob: new Blob(['zip'], { type: 'application/zip' }), manifest: { created_at: DATE, counts: {}, files: [] }, bytes: 3, filesBytes: 0, warnings: [], missingFiles: 2, copies: { serveur: 1, inconnues: 1 } });
         const enregistres = [];
         const page = await S.renderSettings({}, {}, { settings: await repo.getSettings(), sync: {} }, { createArchive: faux, telechargerArchive: (blob, nom) => enregistres.push(nom) });
@@ -825,6 +827,19 @@ export async function runSyncL4Tests({ eq, ok }) {
         eq([...(bilan?.querySelectorAll('p') || [])].map((p) => p.textContent), ['2 pages ne sont pas encore téléchargées sur cet appareil et ne sont pas dans l’archive.', '1 fichier(s) archivé(s) sont des copies du serveur, pas l’original.', '1 fichier(s) archivé(s) ont des octets qui ne sont ni l’original ni la copie du serveur connue : archivés tels quels.'],
           'Réglages (f, F-15) : avec createArchive injecté, le bilan de création dit les pages manquantes, les copies du serveur et les octets inconnus — une phrase chacun');
         eq(enregistres.length, 1, 'Réglages (f) : l’archive passe par telechargerArchive injecté — aucun téléchargement réel dans le Chrome sans tête (doute 12 de la rév. 1, tranché)');
+        // Ronde 1 (#16, #21, #31) : un second clic ne pose qu'UN bilan ; un suivi impossible (setSetting qui lève) ne fait pas taire le bilan.
+        const pause = () => new Promise((r) => setTimeout(r, 10));
+        const sauvegarder = async () => {
+          for (let i = 0; i < 300 && S.archiveEnCours(); i += 1) await pause();
+          [...page.querySelectorAll('button')].find((b) => b.textContent === 'Sauvegarder toute ma bibliothèque').click();
+          for (let i = 0; i < 300 && S.archiveEnCours(); i += 1) await pause();
+        };
+        await sauvegarder();
+        eq([enregistres.length, page.querySelectorAll('[data-role="bilan-archive"]').length], [2, 1], 'Réglages (f, #16) : deux archives de suite → un seul bilan (mutant : l’ancien bilan jamais retiré)');
+        page.querySelector('[data-role="bilan-archive"]').remove();
+        dbRepo.mutate = async () => { throw new Error('quota simulé'); }; // repo.setSetting('last_backup') passe par db.mutate : le suivi échoue
+        try { await sauvegarder(); } finally { delete dbRepo.mutate; }
+        eq([enregistres.length, page.querySelectorAll('[data-role="bilan-archive"]').length], [3, 1], 'Réglages (f, #16, #21) : l’archive est téléchargée mais son suivi ne s’écrit pas → le bilan est dit quand même (posé juste après le téléchargement)');
         // (f2) Le VRAI rapport d'inspection (restoreReport n'est pas exporté) : pickFiles injecté rend une archive à pages manquantes et à copie.
         let archiveF2 = null;
         await withDatabase(async (db2) => {
@@ -841,8 +856,254 @@ export async function runSyncL4Tests({ eq, ok }) {
         const textesPuces = [...(puces?.querySelectorAll('.chip') || [])].map((c) => c.textContent);
         eq([textesPuces.includes('pages manquantes : 2'), textesPuces.includes('copies du serveur : 1'), page2.textContent.includes('Cette archive renvoie à 2 pages qui ne sont pas dedans'), page2.textContent.includes('Les pages de cet appareil absentes de l’archive seront retirées d’ici.')], [true, true, true, true],
           'Réglages (f2) : le vrai rapport d’inspection (pickFiles injecté) porte les puces « pages manquantes : 2 » et « copies du serveur : 1 », la phrase de § 4.6 et, le remplacement offert (base non vide), la phrase de B-28 (mutants : puces non rendues ; phrase de remplacement retirée)');
+        // Ronde 1 : un rapport rendu par une page neuve de Réglages, pickFiles injecté ; rend la page une fois `attendu(page)` vrai.
+        const rapport = async (zip, attendu) => {
+          const p = await S.renderSettings({}, {}, { settings: await repo.getSettings(), sync: {} }, { pickFiles: async () => [zip] });
+          scene.append(p);
+          [...p.querySelectorAll('button')].find((b) => b.textContent === 'Restaurer une sauvegarde…').click();
+          for (let i = 0; i < 300 && !attendu(p); i += 1) await pause();
+          return p;
+        };
+        // (#15, #22, #32) Une archive REFUSÉE ne promet rien : ni la phrase « pourront être téléchargées », ni la puce « pages manquantes ».
+        const refusee = new File([await rewriteArchive(archiveF2.blob, ({ manifest }) => { manifest.files[0].remote = true; })], 'refusee.zip', { type: 'application/zip' });
+        const pageRefus = await rapport(refusee, (p) => p.textContent.includes('Archive refusée'));
+        eq([pageRefus.textContent.includes('Archive refusée'), pageRefus.textContent.includes('Cette archive renvoie à'), pageRefus.textContent.includes('pages manquantes :')], [true, false, false],
+          'Réglages (#15, #22, #32) : sur une archive refusée, ni la phrase d’inspection ni ses puces (I5 : rien n’est annoncé sans fait)');
+        // (#31, S2) Base vide : le remplacement n'est pas offert, la phrase B-28 n'est pas dite.
+        dbRepo.isEmpty = async () => true;
+        let pageVide = null;
+        try { pageVide = await rapport(zipF2, (p) => p.textContent.includes('Restaurer dans cette base vide')); } finally { delete dbRepo.isEmpty; }
+        eq([pageVide.textContent.includes('Restaurer dans cette base vide'), pageVide.textContent.includes('Les pages de cet appareil absentes de l’archive seront retirées d’ici.')], [true, false],
+          'Réglages (#31) : base vide → « Restaurer dans cette base vide » seul, sans la phrase B-28 (mutant : phrase dite aussi sur base vide)');
+        // (#30, S3) Le câblage de messageOriginauxConserves : une vraie fusion, confirmDialog cliqué, sur un original d'ici face à une copie d'archive.
+        const origW = await original('original-r1-cablage');
+        const copieW = octets('copie-r1-cablage');
+        await dbRepo.putBatch({ files: [origW] });
+        const archiveW = await archiveDeCopie(origW.sha256, origW.size, copieW, R({ sha256: await sha256Hex(copieW), size: copieW.size }));
+        const pageW = await rapport(new File([await archiveW.blob.arrayBuffer()], 'w.zip', { type: 'application/zip' }), (p) => [...p.querySelectorAll('button')].some((b) => b.textContent === 'Fusionner avec la bibliothèque actuelle'));
+        [...pageW.querySelectorAll('button')].find((b) => b.textContent === 'Fusionner avec la bibliothèque actuelle').click();
+        let dialogue = null;
+        for (let i = 0; i < 300 && !(dialogue = document.querySelector('dialog[open]')); i += 1) await pause();
+        [...(dialogue?.querySelectorAll('button') || [])].find((b) => b.textContent === 'Restaurer')?.click();
+        for (let i = 0; i < 300 && !pageW.textContent.includes('Recharge l’application'); i += 1) await pause();
+        eq([pageW.textContent.includes('Restauration vérifiée'), pageW.textContent.includes('1 original de cet appareil conservé (l’archive portait une copie).'), await sha256Hex((await dbRepo.get('files', origW.sha256)).blob)], [true, true, origW.sha256],
+          'Réglages (#30) : après une vraie fusion, le bilan dit « 1 original de cet appareil conservé » sous « Restauration vérifiée », et l’original est là (mutant : câblage de messageOriginauxConserves retiré)');
         await S0.relectureEnCours(); // le clic a écrit last_backup : la relecture différée par le bus finit AVANT la fermeture de la base jetable (R-L3-17)
       });
     } finally { scene.remove(); try { sessionStorage.removeItem('cuisineos.archive_created'); } catch { /* stockage indisponible */ } await S0.relireReglages(); }
+  });
+
+  // === Tâche 2, ronde 1 — constats de la revue adverse (numéros du rapport, section « Ronde 1 »)
+
+  await run('ronde 1 — remplacement : la ligne d’ici ne sert qu’à la décision ; les octets d’une page manquante restent (#1, #4, #8, #10)', async () => {
+    const VIEUX = '2001-01-01T00:00:00.000Z';
+    const orig = await original('original-r1-remplacement');
+    const origM = await original('original-r1-page-manquante');
+    const copieM = octets('copie-r1-page-manquante');
+    const RM = R({ sha256: H('d'), size: 5 });
+    let archive = null; // faite AVANT l'envoi : l'original sans remote ; deux pages sans octets là-bas (H('1') à remote, origM sans)
+    await withDatabase(async (db) => { await db.putBatch({ files: [orig, { sha256: H('1'), mime: 'image/jpeg', size: 10, updated_at: DATE, remote: RM }, sansBlob(origM)] }); archive = await B.createArchive(db); });
+    const insp = await ouvrir(archive);
+    await withDatabase(async (db) => {
+      const local = { created_at: VIEUX, original_filename: 'local.jpg', syncable: false };
+      await db.putBatch({ files: [
+        { ...orig, ...local, remote: R({ sha256: orig.sha256, size: orig.size }) },
+        { sha256: H('1'), mime: 'image/jpeg', size: 10, blob: copieM, updated_at: DATE, ...local, remote: R({ sha256: H('c'), size: 3 }) },
+        { ...origM, ...local, remote: R({ sha256: origM.sha256, size: origM.size }) },
+        await original('page-absente-de-l-archive'),
+      ] });
+      const bilan = await B.applyArchive(db, insp, { mode: 'replace' });
+      const o = await db.get('files', orig.sha256); const p = await db.get('files', H('1')); const m = await db.get('files', origM.sha256);
+      const empreinte = async (r) => (r?.blob instanceof Blob ? sha256Hex(r.blob) : null);
+      eq([o.remote, o.created_at === VIEUX, 'original_filename' in o, o.syncable, await empreinte(o)], [null, false, false, true, orig.sha256],
+        'remplacement (#1, #10) : entrée sans remote → remote null (jamais celui d’ici), created_at neuf, aucun champ local, syncable selon le type (#24) (mutants : ...existing, existing.remote, existing.created_at gardés en remplacement)');
+      eq([await empreinte(p), p.remote, p.created_at === VIEUX, 'original_filename' in p, p.size, p.mime], [await sha256Hex(copieM), RM, false, false, 10, 'image/jpeg'],
+        'remplacement (#4, #10, ruling à ratifier) : une page de missing_files garde les octets d’ici ; remote de l’archive, created_at neuf, aucun champ local (mutant : existing.remote gardé pour missing_files)');
+      eq([await empreinte(m), F.estOriginalIci(m), m.remote, bilan.originauxConserves], [origM.sha256, true, null, 0],
+        'remplacement (#8, I-G3) : l’original d’ici d’une page que l’archive nomme sans ses octets n’est pas effacé et reste un original ; aucun remote gardé d’ici ; rien de « conservé » au sens de R-G-6 (l’archive ne portait pas de copie)');
+      eq([(await db.getAll('files')).length, (await B.verifyRestored(db, insp, { mode: 'replace' })).diffs], [3, []],
+        'remplacement : la page absente de l’archive est retirée d’ici ; verifyRestored vert (le décompte ne compte pas le blob gardé d’une page manquante)');
+    });
+  });
+
+  await run('ronde 1 — une page manquante ne fait jamais d’un original une « copie » (#5, P1)', async () => {
+    const orig = await original('original-r1-p1-de-cette-page');
+    let sansTaille = null; // B a reçu la ligne sans `size` : createArchive l'écrit dans missing_files avec size 0 (et un type faux)
+    await withDatabase(async (db) => { await db.putBatch({ files: [{ sha256: orig.sha256, mime: 'image/png', updated_at: DATE, remote: R({ sha256: orig.sha256, size: orig.size }) }] }); sansTaille = await B.createArchive(db); });
+    const insp1 = await ouvrir(sansTaille);
+    const copie = octets('copie-r1-p1');
+    const insp2 = await ouvrir(await archiveDeCopie(orig.sha256, orig.size, copie, R({ sha256: await sha256Hex(copie), size: copie.size })));
+    for (const mode of ['merge', 'replace']) {
+      await withDatabase(async (db) => {
+        await db.putBatch({ files: [orig] });
+        await B.applyArchive(db, insp1, { mode });
+        const apres1 = await db.get('files', orig.sha256);
+        const v1 = await B.verifyRestored(db, insp1, { mode });
+        const bilan2 = await B.applyArchive(db, insp2, { mode: 'merge' });
+        const apres2 = await db.get('files', orig.sha256);
+        eq([sansTaille.manifest.missing_files[0]?.size, apres1.size, apres1.mime, F.estOriginalIci(apres1), v1.ok, bilan2.originauxConserves, await sha256Hex(apres2.blob)], [0, orig.size, 'image/jpeg', true, true, 1, orig.sha256],
+          `#5 (${mode}) : le blob d’ici gardé pour une page manquante garde sa taille et son type ; l’original le reste, et une copie d’archive restaurée ensuite ne le remplace pas (mutant : size et mime pris de l’archive)`);
+      });
+    }
+  });
+
+  await run('ronde 1 — une taille d’archive menteuse ne fait pas d’un original une copie (#6, #33 ; P2, P4)', async () => {
+    const orig = await original('original-r1-p2-de-cette-page');
+    const copie = octets('copie-r1-p2');
+    const archive = await archiveDeCopie(orig.sha256, orig.size, copie, R({ sha256: await sha256Hex(copie), size: copie.size }));
+    const menteuse = await B.inspectArchive(await rewriteArchive(archive.blob, ({ manifest }) => { manifest.files[0].size = 7; }));
+    await withDatabase(async (db) => {
+      await db.putBatch({ files: [orig] });
+      const bilan = await B.applyArchive(db, menteuse, { mode: 'merge' });
+      const row = await db.get('files', orig.sha256);
+      eq([menteuse.ok, bilan.originauxConserves, row.size, F.estOriginalIci(row), (await B.verifyRestored(db, menteuse, { mode: 'merge' })).ok], [true, 1, orig.size, true, true],
+        'P2 : original gardé → la taille de SES octets, jamais celle que l’archive écrit ; il reste un original, verifyRestored vert (mutant : size de l’archive écrite sur l’original gardé)');
+    });
+    let archiveO = null;
+    await withDatabase(async (db) => { await db.putBatch({ files: [orig] }); archiveO = await B.createArchive(db); });
+    const p4 = await B.inspectArchive(await rewriteArchive(archiveO.blob, ({ manifest }) => { Object.assign(manifest.files[0], { bytes_sha256: orig.sha256, bytes_size: orig.size, bytes_mime: 'image/jpeg', size: 3 }); }));
+    eq([p4.ok, p4.errors.includes('Description de fichier invalide')], [false, true], 'P4 : une entrée qui se dit l’original (bytes_sha256 === sha256) et dont la taille n’est pas celle de ses octets est refusée');
+  });
+
+  await run('ronde 1 — une copie sans taille valide ne passe jamais pour l’original (#7, P3)', async () => {
+    const copie = octets('copie-r1-p3-sans-taille');
+    let archive = null;
+    await withDatabase(async (db) => { await db.putBatch({ files: [{ sha256: H('8'), mime: 'image/jpeg', blob: copie, updated_at: DATE }] }); archive = await B.createArchive(db); });
+    const e = archive.manifest.files[0];
+    const insp = await ouvrir(archive);
+    await withDatabase(async (db) => {
+      await B.applyArchive(db, insp, { mode: 'merge' });
+      const row = await db.get('files', H('8'));
+      const v = await B.verifyRestored(db, insp, { mode: 'merge' });
+      eq([e.size, e.bytes_size, F.estOriginalIci(row), v.ok, v.diffs], [0, copie.size, false, true, []], 'P3 : l’entrée d’une copie sans taille valide porte size 0, jamais la longueur des octets ; restaurée, elle reste une copie et le bilan est vert');
+    });
+  });
+
+  await run('ronde 1 — un original arrivé pendant la restauration n’est jamais remplacé (#9, P6)', async () => {
+    const orig = await original('original-r1-p6-de-cette-page');
+    const copie = octets('copie-r1-p6');
+    const insp = await ouvrir(await archiveDeCopie(orig.sha256, orig.size, copie, R({ sha256: await sha256Hex(copie), size: copie.size })));
+    await withDatabase(async (db) => {
+      // Un autre onglet importe l'original ENTRE toute lecture d'applyArchive et son écriture : la décision doit se prendre sur la ligne relue.
+      const entrelace = { stores: db.stores, getSnapshot: (n) => db.getSnapshot(n), getAll: (s) => db.getAll(s),
+        putBatch: (batch, o = {}) => entrelace.mutate({ ...o, puts: batch }),
+        mutate: async (args) => { await db.putBatch({ files: [orig] }); return db.mutate(args); } };
+      const bilan = await B.applyArchive(entrelace, insp, { mode: 'merge' });
+      const row = await db.get('files', orig.sha256);
+      eq([await sha256Hex(row.blob), bilan.originauxConserves, F.estOriginalIci(row)], [orig.sha256, 1, true], 'P6 : la décision R-G-6 se prend DANS la transaction d’écriture (condition fusion de db.mutate) : l’original importé entre-temps reste (mutant : décision sur un instantané lu avant)');
+    });
+  });
+
+  await run('ronde 1 — verifyRestored relit chaque page manquante (#2, #14)', async () => {
+    const RM = R({ sha256: H('d'), size: 5 });
+    let archive = null;
+    await withDatabase(async (db) => { await db.putBatch({ files: [{ sha256: H('1'), mime: 'image/jpeg', size: 10, updated_at: DATE, remote: RM }] }); archive = await B.createArchive(db); });
+    const insp = await ouvrir(archive);
+    for (const mode of ['merge', 'replace']) {
+      await withDatabase(async (db) => {
+        await B.applyArchive(db, insp, { mode });
+        const vert = await B.verifyRestored(db, insp, { mode });
+        const ecrite = await db.get('files', H('1'));
+        await db.putBatch({ files: [{ ...ecrite, remote: R({ sha256: H('c'), size: 5 }) }] });
+        const autreCopie = await B.verifyRestored(db, insp, { mode });
+        await db.putBatch({ files: [{ ...ecrite, mime: 'image/png' }] });
+        const autreType = await B.verifyRestored(db, insp, { mode });
+        await db.delete('files', H('1'));
+        const absente = await B.verifyRestored(db, insp, { mode });
+        eq([vert.diffs, autreCopie.diffs, autreType.diffs, absente.diffs], [[], ['Copie serveur différente : ' + H('1')], ['Métadonnées de fichier différentes : ' + H('1')], ['Fichier absent : ' + H('1')]],
+          `verifyRestored (${mode}) : une page manquante est relue — remote écrit ≠ celui de l’archive, type changé, ligne absente (mutants : comparaison du remote retirée ; « Fichier absent » muet ; taille et type non relus)`);
+      });
+    }
+  });
+
+  await run('ronde 1 — formes du manifeste (#3, #12, #13, #29)', async () => {
+    const orig = await original('original-r1-formes');
+    let archive = null;
+    await withDatabase(async (db) => { await db.putBatch({ files: [{ ...orig, remote: true }, { sha256: H('7'), mime: '', size: 4, updated_at: DATE, remote: { sha256: 'court' } }] }); archive = await B.createArchive(db); });
+    const eo = archive.manifest.files.find((f) => f.sha256 === orig.sha256);
+    const em = archive.manifest.missing_files.find((f) => f.sha256 === H('7'));
+    eq(['remote' in eo, 'remote' in em, em.mime, (await ouvrir(archive)).ok], [false, false, 'application/octet-stream', true],
+      'createArchive : un remote invalide n’entre pas dans le manifeste (avec ou sans blob), un type absent devient application/octet-stream, et l’archive reste restaurable (mutants : file.remote || undefined ; mime brut)');
+    const copie = octets('copie-r1-formes');
+    const archiveC = await archiveDeCopie(H('4'), 900, copie, R({ sha256: await sha256Hex(copie), size: copie.size }));
+    const formes = [
+      [({ manifest }) => { manifest.files[0].bytes_size += 1; }, 'Taille différente : ' + archiveC.manifest.files[0].path],
+      [({ manifest }) => { manifest.files[0].remote = true; }, 'Description de fichier invalide'],
+      [({ manifest }) => { manifest.files[0].remote = { sha256: 'court' }; }, 'Description de fichier invalide'],
+      [({ manifest }) => { manifest.missing_files = {}; }, 'Description de fichier invalide'],
+    ];
+    const issues = [];
+    for (const [edit, attendue] of formes) { const r = await B.inspectArchive(await rewriteArchive(archiveC.blob, edit)); issues.push([r.ok, r.errors.includes(attendue)]); }
+    eq(issues, formes.map(() => [false, true]), 'inspectArchive : bytes_size menteur → « Taille différente » ; remote true ou tronqué dans files → « Description de fichier invalide » ; missing_files qui n’est pas un tableau → refusé (mutants : taille non comparée ; remote des files non validé ; missing_files non-tableau admis)');
+  });
+
+  await run('ronde 1 — requireInspection revalide une inspection fabriquée (#18, #25, #28)', async () => {
+    const copie = octets('copie-r1-forgee');
+    let archive = null;
+    await withDatabase(async (db) => { await db.putBatch({ files: [{ sha256: H('4'), mime: 'image/jpeg', size: 900, blob: copie, updated_at: DATE }, { sha256: H('1'), mime: 'image/jpeg', size: 10, updated_at: DATE, remote: R({ sha256: H('d'), size: 5 }) }] }); archive = await B.createArchive(db); });
+    const insp = await ouvrir(archive);
+    const forger = (change) => ({ ...insp, payload: { ...insp.payload, ...change(insp.payload) } });
+    const f0 = insp.payload.files[0];
+    const forgees = [
+      forger((p) => ({ missing: [{ ...p.missing[0], remote: true }] })),
+      forger((p) => ({ missing: [...p.missing, { sha256: H('4'), mime: 'image/jpeg', size: 1 }] })),
+      forger(() => ({ files: [{ ...f0, remote: { sha256: 'court' } }] })),
+      forger(() => ({ files: [{ ...f0, bytes_mime: '' }] })),
+      forger(() => ({ missing: 'abc' })),
+      forger(() => ({ missing: {} })),
+    ];
+    const refus = [];
+    for (const f of forgees) {
+      await withDatabase(async (db) => {
+        let message = null;
+        try { await B.applyArchive(db, f, { mode: 'merge' }); } catch (e) { message = e.message; }
+        refus.push([String(message).startsWith('Archive non validée'), (await db.getAll('files')).length]);
+      });
+    }
+    eq(refus, forgees.map(() => [true, 0]), 'requireInspection : remote invalide ou empreinte commune dans missing, remote ou bytes_mime invalide dans files, missing qui n’est pas un tableau → « Archive non validée », rien d’écrit (mutants : missing ou files non revalidés)');
+  });
+
+  await run('ronde 1 — des octets modifiés après l’inspection ne sont jamais écrits (#27)', async () => {
+    const orig = await original('original-r1-modifie');
+    let archive = null;
+    await withDatabase(async (db) => { await db.putBatch({ files: [orig] }); archive = await B.createArchive(db); });
+    const insp = await ouvrir(archive);
+    insp.payload.files[0].bytes[0] ^= 1;
+    await withDatabase(async (db) => {
+      let message = null;
+      try { await B.applyArchive(db, insp, { mode: 'merge' }); } catch (e) { message = e.message; }
+      eq([message, (await db.getAll('files')).length], ['Fichier modifié depuis la validation : ' + orig.sha256, 0], 'applyArchive : un octet changé entre l’inspection et l’application → refus nommé, rien d’écrit (mutant : contrôle retiré)');
+    });
+  });
+
+  await run('ronde 1 — le blob d’une copie restaurée a le type de ses octets (#11, #19)', async () => {
+    const copie = octets('copie-r1-type');
+    const insp = await ouvrir(await archiveDeCopie(H('4'), 99999, copie, R({ sha256: await sha256Hex(copie), size: copie.size }), 'image/heic'));
+    await withDatabase(async (db) => {
+      await B.applyArchive(db, insp, { mode: 'merge' });
+      const row = await db.get('files', H('4'));
+      eq([row.mime, row.blob.type], ['image/heic', 'image/jpeg'], 'copie restaurée : la ligne garde le type de l’original (image/heic), le blob celui de ses octets (bytes_mime, image/jpeg) — F-9 sert le blob (mutant : type: entry.mime)');
+    });
+  });
+
+  await run('ronde 1 — les lignes files restaurées sont normalisées comme toute fiche synchronisée (R61, R-L3-10, R-L3-18)', async () => {
+    const orig = await original('original-r1-normalise');
+    let archive = null; // une entrée avec octets (l'original) et une page manquante
+    await withDatabase(async (db) => { await db.putBatch({ files: [orig, { sha256: H('1'), mime: 'image/jpeg', size: 10, updated_at: DATE, remote: R({ sha256: H('d'), size: 5 }) }] }); archive = await B.createArchive(db); });
+    const insp = await ouvrir(archive);
+    const HEURE = '2030-01-02T03:04:05.000Z';
+    const sale = 'page' + String.fromCharCode(0) + '.jpg';
+    await withDatabase(async (db) => {
+      await db.putBatch({ files: [{ ...orig, original_filename: sale }, { sha256: H('1'), mime: 'image/jpeg', size: 10, updated_at: DATE, original_filename: sale }] });
+      await B.applyArchive(db, insp, { mode: 'merge', horodater: () => HEURE });
+      const o = await db.get('files', orig.sha256); const p = await db.get('files', H('1'));
+      eq([o.updated_at, p.updated_at, o.original_filename, p.original_filename, (await B.verifyRestored(db, insp, { mode: 'merge', horodate: true })).ok], [HEURE, HEURE, 'page.jpg', 'page.jpg', true],
+        'fusion, compte connecté : chaque ligne files écrite (avec ou sans octets) reçoit l’heure du renvoi et ses chaînes sont nettoyées (R61) (mutant : lignes files non normalisées dans la transaction)');
+    });
+    await withDatabase(async (db) => {
+      await B.applyArchive(db, insp, { mode: 'replace' });
+      const lignes = await db.getAll('files');
+      eq([lignes.length, lignes.every((r) => typeof r.updated_at === 'string' && r.updated_at.length > 0)], [2, true], 'remplacement sans compte : une ligne files restaurée sans heure en reçoit une (R-L3-10) (même mutant)');
+    });
   });
 }
