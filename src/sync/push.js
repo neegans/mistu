@@ -4,6 +4,7 @@
 import { composerLots, cleDe } from './lots.js';
 import { fileDe } from './outbox.js';
 import { appliquerReponse } from './reponses.js';
+import { conditionFichier } from './fichiers.js';
 import { appliquerHeureServeur } from './clock.js';
 import { logError } from '../core/log.js';
 
@@ -75,6 +76,14 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     const conflitsRenvoyes = new Set((await db.getAll('sync_conflicts')).filter((c) => c?.renvoye).map((c) => c.id));
     const effets = appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales, conflitsRenvoyes });
     const puts = { ...effets.reecrire };
+    // Lot G, ronde 1 (#4, I-G3) : une ligne files ajustée n'est pas écrite telle que calculée sur `fichesLocales` (lues plus haut, hors
+    // transaction) mais refondue sur la ligne RELUE dans la transaction : une copie téléchargée pendant l'aller-retour reste ; une ligne qui a
+    // bougé ici depuis (R-L3-7) n'est pas réécrite.
+    let conditions = null;
+    if (puts.files) {
+      conditions = { files: puts.files.map((ligne) => conditionFichier(ligne.sha256, fichesLocales[cleDe({ store: 'files', id: ligne.sha256 })] ?? null, ligne, ligne.updated_at)) };
+      delete puts.files;
+    }
     if (effets.conflits.length) puts.sync_conflicts = effets.conflits;
     if (effets.quarantaine.length) {
       puts.outbox = effets.quarantaine.map(({ seq, motif }) => ({ ...entreesParSeq.get(seq), quarantined_at: new Date(maintenant()).toISOString(), last_error: motif }));
@@ -83,7 +92,7 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     const deletes = {};
     if (effets.retirer.length) deletes.outbox = effets.retirer;
     if (effets.retirerConflits.length) deletes.sync_conflicts = effets.retirerConflits; // R-L3-29, même transaction
-    await db.mutate({ puts, deletes, origin: 'remote' });
+    await db.mutate({ puts, deletes, origin: 'remote', conditions });
     return effets;
   }
 

@@ -186,7 +186,7 @@ export function bookCover(edition, book, { href = null, fichier = null } = {}) {
   const type = typeAffichage(fichier);
   const affichable = !!type && type.startsWith('image/');
   const image = affichable
-    ? el('img', { class: 'cover-img', alt: book?.title || '', src: urlDeBlob(fichier.blob.type === type ? fichier.blob : new Blob([fichier.blob], { type })) })
+    ? el('img', { class: 'cover-img', alt: book?.title || '', src: displayUrl(fichier, urlDeBlob) }) // retypage : une copie de la règle (displayUrl)
     : null;
   // D-T9 : sans titre connu, l'image reste décorative (alt vide, jamais un nom inventé) — mais le texte passe en
   // display:none quand l'image est là, et le lien n'aurait alors plus aucun nom. L'ancre le porte donc toujours.

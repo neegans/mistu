@@ -39,7 +39,10 @@ export class TransitionRefusee extends Error {
 //   laisserait passer une ligne SANS statut, reçue ou restaurée) ; `patch` est un objet ou une fonction du courant ; absent, la fiche est
 //   seulement vérifiée (pas réécrite) ;
 // - { key, absente: true } : la fiche N'EXISTE PAS (une création ne doit jamais écraser une ligne, quel que soit son statut) ;
-// - { index, valeur, exclus } : AUCUNE fiche de l'index `index` à cette `valeur` n'a un statut parmi `exclus` (chaînes non vides, au moins une).
+// - { index, valeur, exclus } : AUCUNE fiche de l'index `index` à cette `valeur` n'a un statut parmi `exclus` (chaînes non vides, au moins une) ;
+// - { key, fusion } (lot G, ronde 1 de la tâche 1) : la fiche est relue DANS la transaction et `fusion(courant)` (courant : la fiche, ou null si
+//   elle n'existe pas) rend la fiche à écrire, sous la même clé, ou null (rien d'écrit pour elle) ; aucun statut (une ligne `files` n'en a pas) :
+//   une écriture calculée sur une lecture antérieure ne perd jamais ce qui est arrivé depuis (un blob local, I-G3).
 // Deux conditions sur la même fiche (ou le même index/valeur) sont refusées (la seconde écraserait la première en silence). `null` ou absent :
 // aucune condition.
 const statutsValides = (xs) => Array.isArray(xs) && xs.length > 0 && xs.every((a) => typeof a === 'string' && a);
@@ -61,6 +64,11 @@ function listeConditions(conditions) {
       }
       if (c.key == null) throw new TypeError('Condition sans clé sur ' + store);
       unique(store + '/' + String(c.key));
+      if (c.fusion != null) {
+        if (typeof c.fusion !== 'function' || c.attendus != null || c.patch != null || c.absente != null) throw new TypeError('Une condition de fusion porte une clé et une fonction, sans statuts, patch ni « absente » (' + store + ')');
+        liste.push({ store, key: c.key, fusion: c.fusion });
+        continue;
+      }
       if (c.absente === true) {
         if (c.attendus != null || c.patch != null) throw new TypeError('Une condition « absente » ne porte ni attendus ni patch (' + store + ')');
         liste.push({ store, key: c.key, absente: true });
@@ -99,6 +107,15 @@ async function ecrireConditionne(db, { puts, deletes, clearStores, origin, paylo
           if (c.index) { // aucune fiche de l'index à cette valeur n'a un statut exclu (I-2 : un seul import ouvert par recette)
             const fautive = (Array.isArray(courant) ? courant : []).find((r) => r && c.exclus.includes(r.status));
             if (fautive) { refus = new TransitionRefusee(c.store, c.index + '=' + String(c.valeur), fautive.status); tx.abort(); return; }
+            continue;
+          }
+          if (c.fusion) { // la fiche à écrire est calculée sur la fiche RELUE ici ; null : rien pour elle
+            const fiche = c.fusion(courant ?? null);
+            if (fiche == null) continue;
+            const keyPath = db.stores[c.store].keyPath;
+            if (fiche[keyPath] !== c.key) throw new TypeError('La fusion de ' + c.store + '/' + String(c.key) + ' change la clé ' + keyPath);
+            allPuts[c.store] = [...(allPuts[c.store] || []), fiche];
+            fusionnees[c.store] = [...(fusionnees[c.store] || []), fiche];
             continue;
           }
           if (c.absente) { // la fiche n'existe pas : une création n'écrase jamais une ligne, quel que soit son statut
@@ -284,7 +301,8 @@ export class Database {
   // ajouter des lignes (capture d'outbox) écrites dans la même transaction. origin : 'local' | 'remote' | 'device'.
   // `conditions` (spec import-cible § 3.6) : { [store]: [{ key, attendus, patch }] } — la fiche est lue, son statut vérifié et le
   // patch fusionné dans la MÊME transaction que tout le reste ; condition fausse → TransitionRefusee, rien d'écrit (ecrireConditionne) ;
-  // ce chemin rend les fiches fusionnées par magasin. `null` ou absent : aucune condition, et le chemin ordinaire ne rend rien.
+  // ce chemin rend les fiches fusionnées par magasin. `null` ou absent : aucune condition, et le chemin ordinaire ne rend rien. Les quatre
+  // formes (dont `{ key, fusion }`, lot G) sont décrites au-dessus de listeConditions.
   async mutate({ puts = {}, deletes = {}, clearStores = [], origin = 'local', payloads = {}, conditions = null } = {}) {
     for (const [name, rows] of Object.entries(puts)) if (!Array.isArray(rows)) throw new TypeError('Les données de ' + name + ' doivent être un tableau');
     for (const [name, keys] of Object.entries(deletes)) if (!Array.isArray(keys)) throw new TypeError('Les clés de ' + name + ' doivent être un tableau');

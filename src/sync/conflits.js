@@ -8,7 +8,7 @@
 // clic — et « Garder celle d'ailleurs » écrirait alors la version qui vient de PERDRE l'arbitrage I7.
 import { syncNow } from './clock.js';
 import { nettoyerChaines } from './lots.js';
-import { fusionnerFichier } from './fichiers.js';
+import { fusionnerFichier, memeRemote, HASH_FICHIER } from './fichiers.js';
 
 // Rend `true` si le geste a été appliqué. `garderIci` écrit avec origin 'local' EXPRÈS : c'est la capture qui remet
 // la fiche en file, et c'est précisément le renvoi voulu. Le retrait du conflit voyage dans la même transaction et
@@ -16,6 +16,7 @@ import { fusionnerFichier } from './fichiers.js';
 export async function garderIci(db, conflit) {
   if (conflit?.store === 'assistant_config') return false; // K-5 : ce magasin n'a jamais de conflit à trancher
   if (conflit?.renvoye === true) return false; // R-L3-30 : la version d'ici part déjà, rien à trancher ici
+  if (conflit?.store === 'files') return garderIciFichier(db, conflit);
   // Version locale nulle : la fiche a été supprimée ici pendant l'aller-retour. « Garder celle d'ici » veut alors
   // dire garder la suppression — jamais écrire une fiche sans clé, que la base refuserait. Le payload porte un
   // updated_at NEUF : sans lui, la capture mettrait en file une tombale sans heure, que le serveur refuserait
@@ -54,16 +55,38 @@ export async function garderAilleurs(db, conflit) {
   if (!serveur || (!serveur.deleted_at && (!serveur.data || typeof serveur.data !== 'object'))) return false;
   const puts = {};
   const deletes = { sync_conflicts: [conflit.id] };
+  let conditions = null;
   // Tombale : la suppression du serveur est appliquée ici. Sinon la version du serveur est écrite avec EXACTEMENT
   // son updated_at. Origine 'remote' dans les deux cas : rien ne repart (le serveur a déjà cette version).
   if (conflit.store === 'files') {
-    // D-G15 / D-G16 : ni la version d'ailleurs ni sa tombale ne remplacent la ligne d'ici — le blob local reste, remote suit le serveur.
-    const ici = (await db.get('files', conflit.record_id)) ?? conflit.local ?? null;
-    if (serveur.deleted_at) { if (ici) puts.files = [fusionnerFichier(ici, { remote: null }, serveur.updated_at)]; }
-    else puts.files = [fusionnerFichier(ici, serveur.data, serveur.updated_at)];
+    // D-G15 / D-G16 : ni la version d'ailleurs ni sa tombale ne remplacent la ligne d'ici — remote suit le serveur. Ronde 1 (I-G3) : la fusion
+    // porte sur la ligne RELUE dans la transaction (un blob arrivé depuis le conflit reste), à défaut sur l'instantané ; une tombale sans
+    // ligne n'écrit rien. F-7 (§ 3.2) : un remote qui change lève l'erreur de réception, dans la même transaction.
+    const data = serveur.deleted_at ? { remote: null } : serveur.data;
+    conditions = { files: [{ key: conflit.record_id, fusion: (courant) => {
+      const ici = courant ?? conflit.local ?? null;
+      return ici || !serveur.deleted_at ? fusionnerFichier(ici, data, serveur.updated_at) : null;
+    } }] };
+    const avant = (await db.get('files', conflit.record_id)) ?? conflit.local ?? null;
+    const cle = 'file_error:' + conflit.record_id;
+    if (HASH_FICHIER.test(conflit.record_id) && !memeRemote(avant?.remote, data.remote) && (await db.get('sync_state', cle))?.value?.sens === 'reception') deletes.sync_state = [cle];
   } else if (serveur.deleted_at) deletes[conflit.store] = [conflit.record_id];
   else puts[conflit.store] = [{ ...serveur.data, updated_at: serveur.updated_at }];
-  await db.mutate({ puts, deletes, origin: 'remote' });
+  await db.mutate({ puts, deletes, origin: 'remote', conditions });
+  return true;
+}
+
+// Lot G, ronde 1 (D-G15, I-G3) : « Garder celle d'ici » sur une ligne files. Jamais une suppression locale de files — une version d'ici nulle
+// est refusée (le conflit reste) ; sinon la version d'ici est réécrite SUR la ligne relue dans la transaction : un blob arrivé depuis le conflit
+// (copie téléchargée, original importé) reste. Origine 'local' : la capture remet la ligne en file si son remote est de ce compte (D-G8).
+async function garderIciFichier(db, conflit) {
+  if (!conflit.local || typeof conflit.local !== 'object') return false;
+  const fiche = nettoyerChaines({ ...conflit.local, updated_at: syncNow() });
+  await db.mutate({
+    conditions: { files: [{ key: conflit.record_id, fusion: (courant) => (courant?.blob instanceof Blob ? { ...fiche, blob: courant.blob } : fiche) }] },
+    deletes: { sync_conflicts: [conflit.id] },
+    origin: 'local',
+  });
   return true;
 }
 

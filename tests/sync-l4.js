@@ -45,8 +45,11 @@ export async function runSyncL4Tests({ eq, ok }) {
       [R(), true], [{ ...R(), version: 2 }, true], [true, false], [null, false], [etranger, false], [R({ sha256: 'abc' }), false],
       [R({ size: 0 }), false], [R({ size: 52428801 }), false], [R({ mime: 'image/svg+xml' }), false], [R({ quality: 'haute' }), false],
       [R({ owner: '' }), false], [R({ uploaded_at: 5 }), false], [[R()], false], ['remote', false],
+      // Ronde 1 : owner de 65, taille non entière, uploaded_at de 41 points de code, remote gonflé au-delà de 4 Kio (sinon renvoyé dans la projection).
+      [R({ owner: 'o'.repeat(64) }), true], [R({ owner: 'o'.repeat(65) }), false], [R({ size: 1.5 }), false], [R({ uploaded_at: 'x'.repeat(40) }), true],
+      [R({ uploaded_at: 'x'.repeat(41) }), false], [{ ...R(), note: 'n'.repeat(3800) }, true], [{ ...R(), note: 'n'.repeat(5000) }, false],
     ];
-    eq(formes.map(([r]) => T.remoteValide(r)), formes.map(([, v]) => v), 'remoteValide : 14 formes — valide ; champ en plus ignoré (F-23) ; true, null, prototype étranger, empreinte courte, taille 0 et 52 428 801, svg, qualité inconnue, owner vide, uploaded_at nombre, tableau, chaîne refusés (mutants : borne de taille retirée ; champ en plus refusé)');
+    eq(formes.map(([r]) => T.remoteValide(r)), formes.map(([, v]) => v), 'remoteValide : 21 formes — valide ; champ en plus ignoré (F-23) ; true, null, prototype étranger, empreinte courte, taille 0 et 52 428 801, svg, qualité inconnue, owner vide, uploaded_at nombre, tableau, chaîne refusés ; ronde 1 : owner de 64 admis et de 65 refusé, taille 1,5 refusée, uploaded_at ≤ 40 points de code, remote sérialisé ≤ 4 Kio (mutants : borne de taille retirée ; champ en plus refusé ; borne owner retirée ; typeof size number ; uploaded_at ou taille totale non bornés)');
     eq([T.remoteDeCeCompte(R(), 'u1'), T.remoteDeCeCompte(R(), 'u2'), T.remoteDeCeCompte(R(), null)], [true, false, false], 'remoteDeCeCompte : même owner, autre owner, uid nul');
     eq([F.remoteValide === T.remoteValide, F.remoteDeCeCompte === T.remoteDeCeCompte], [true, true], 'I-G10 : fichiers.js réexporte les définitions de tables.js, il n’en écrit pas d’autres');
   });
@@ -58,7 +61,7 @@ export async function runSyncL4Tests({ eq, ok }) {
     const partieTelleQuelle = { ...orig, remote: R({ sha256: orig.sha256, size: orig.size }) };
     eq([F.estOriginalIci(orig), F.estOriginalIci(reduite), F.estOriginalIci(fausseOriginale), F.estOriginalIci(sansBlob(orig)), F.estOriginalIci(partieTelleQuelle)],
       [true, false, false, false, true], 'estOriginalIci : original ; copie réduite ; copie de la taille de remote dont remote.sha256 = clé (faux : la disjonction de la rév. 1 retirée, S-3) ; sans blob ; parti tel quel');
-    eq([F.copiePerimee({ ...orig, blob: octets('vieille'), remote: R({ size: 3 }) }), F.copiePerimee(reduite), F.copiePerimee(orig)], [true, false, false], 'copiePerimee : copie dont la taille n’est plus celle du serveur ; copie fidèle ; original');
+    eq([F.copiePerimee({ ...orig, blob: octets('vieille'), remote: R({ size: 3 }) }), F.copiePerimee(reduite), F.copiePerimee(orig), F.copiePerimee({ ...orig, blob: octets('vieille'), remote: null })], [true, false, false, false], 'copiePerimee : copie dont la taille n’est plus celle du serveur ; copie fidèle ; original ; copie sans remote → faux sans lever (ronde 1, mutant : garde remoteValide retirée → TypeError)');
     const snap = { source_pages: [{ id: 'p1', sha256: H('1') }], source_documents: [{ id: 'd1', sha256: H('2') }], book_editions: [{ id: 'e1', cover_sha256: H('3') }], recipes: [{ id: 'r1', photo_sha256: H('4') }], imports: [{ id: 'i1', photo_sha256: H('5') }, { id: 'i2', photo_sha256: 'pas-une-empreinte' }], files: [{ sha256: H('6') }] };
     eq([...F.referencesFichiers(snap)].sort(), [H('1'), H('2'), H('3'), H('4'), H('5')], 'referencesFichiers : les cinq pointeurs, une valeur non HASH ignorée, l’orphelin exclu (mutant : imports.photo_sha256 retiré de la liste)');
     const distant = { sha256: H('7'), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: R() };
@@ -100,6 +103,7 @@ export async function runSyncL4Tests({ eq, ok }) {
     const recue = octets('octets-recus');
     const fo = F.fusionnerOctetsRecus(existante, recue);
     eq([fo.blob === recue, fo.size, fo.mime, fo.updated_at, fo.syncable, fo.remote], [true, 999, 'image/heic', DATE, true, R({ mime: 'image/jpeg' })], 'fusionnerOctetsRecus : size, mime, updated_at et remote de la ligne intacts ; syncable résolu par la liste blanche');
+    eq(F.fusionnerOctetsRecus({ ...existante, mime: 'application/octet-stream', syncable: true }, recue).syncable, false, 'fusionnerOctetsRecus : un mime hors liste → syncable faux (ronde 1, mutant : syncable: true en dur)');
     const avant = { ...a };
     const garde = { h: H('e'), uid: 'u1' };
     eq([
@@ -122,21 +126,34 @@ export async function runSyncL4Tests({ eq, ok }) {
         { sha256: H('a'), mime: 'image/jpeg', size: 1, remote: true, updated_at: '2026-10-01T00:00:00.000Z' },
         { sha256: H('b'), mime: 'image/png', size: 2, remote: true, updated_at: '2026-10-02T00:00:00.000Z' },
         { sha256: H('c'), mime: 'image/jpeg', size: 3, updated_at: '2026-10-03T00:00:00.000Z' },
-      ] }, origin: 'device' });
+        { sha256: H('d'), mime: 'image/jpeg', size: 4, remote: R({ sha256: H('d'), size: 4 }), updated_at: '2026-10-04T00:00:00.000Z' }, // ronde 1 : un remote objet reste
+      ], sync_state: [{ key: 'cursor:files', value: 12 }] }, origin: 'device' });
       await db.mutate({ deletes: { sync_state: ['files_remote_v2'] }, origin: 'device' }); // la fixture a déjà joué init() : la garde est retirée pour rejouer
       const vues = [];
       const vrai = db.mutate;
       db.mutate = function (args) { vues.push(args); return vrai.call(this, args); };
+      // Ronde 1 (#4) : des octets arrivent sur H('b') ENTRE la lecture des lignes et l'écriture de la passe — la réécriture se fait sur la ligne relue
+      // DANS la transaction : le blob survit (mutant : lignes lues hors transaction réécrites telles quelles → blob perdu).
+      const vraiGetAll = db.getAll;
+      const recu = octets('octets-arrives-pendant-la-passe');
+      db.getAll = async function (store, ...reste) {
+        const r = await vraiGetAll.call(this, store, ...reste);
+        if (store === 'files' && !recu.vu) { recu.vu = true; await vrai.call(this, { puts: { files: [{ ...(await this.get('files', H('b'))), blob: recu }] }, origin: 'remote' }); }
+        return r;
+      };
       try {
         await repo.init();
-        const [la, lb, lc] = await Promise.all([H('a'), H('b'), H('c')].map((s) => db.get('files', s)));
+        const [la, lb, lc, ld] = await Promise.all([H('a'), H('b'), H('c'), H('d')].map((s) => db.get('files', s)));
         eq(['remote' in la, 'remote' in lb, la.updated_at, lb.updated_at, lc.updated_at], [false, false, '2026-10-01T00:00:00.000Z', '2026-10-02T00:00:00.000Z', '2026-10-03T00:00:00.000Z'], 'passe unique : le booléen retiré des deux lignes de L3, updated_at conservé (mutant : updated_at réécrit)');
-        const ecritures = vues.filter((m) => m.puts?.files);
-        eq([ecritures.length, ecritures[0]?.origin, (ecritures[0]?.puts.files || []).map((l) => l.sha256).sort(), (ecritures[0]?.puts.sync_state || []).some((l) => l.key === 'files_remote_v2'), (await db.get('sync_state', 'files_remote_v2'))?.value, await db.count('outbox')], [1, 'device', [H('a'), H('b')], true, 1, 0], 'passe unique : UNE transaction d’origine device, la garde DANS la même transaction que les lignes, la ligne saine non réécrite, rien en file (mutant : garde écrite par un second mutate)');
+        eq([ld.remote, ld.updated_at, lb.blob instanceof Blob && lb.blob.size === recu.size], [R({ sha256: H('d'), size: 4 }), '2026-10-04T00:00:00.000Z', true], 'passe unique (ronde 1) : un remote objet valide reste intact (mutant : tout remote non vide retiré) ; un blob arrivé pendant la passe survit (relecture en transaction)');
+        const ecritures = vues.filter((m) => m.conditions?.files || m.puts?.files);
+        const passe = ecritures[0];
+        eq([ecritures.length, passe?.origin, (passe?.conditions?.files || []).map((c) => c.key).sort(), (passe?.puts?.sync_state || []).some((l) => l.key === 'files_remote_v2'), (passe?.deletes?.sync_state || []).includes('cursor:files'), (await db.get('sync_state', 'files_remote_v2'))?.value, await db.get('sync_state', 'cursor:files'), await db.count('outbox')],
+          [1, 'device', [H('a'), H('b')], true, true, 1, undefined, 0], 'passe unique : UNE transaction d’origine device, la garde DANS la même transaction que les lignes, la ligne saine non réécrite, rien en file (mutant : garde écrite par un second mutate) ; ronde 1 (#2) : cursor:files retiré dans la MÊME transaction — toute ligne files reçue par un client d’avant G est relue (mutant : curseur gardé)');
         vues.length = 0;
         await repo.init();
-        eq(vues.filter((m) => m.puts?.files || (m.puts?.sync_state || []).some((l) => l.key === 'files_remote_v2')).length, 0, 'passe unique : au second démarrage, aucune transaction (garde)');
-      } finally { delete db.mutate; }
+        eq(vues.filter((m) => m.conditions?.files || m.puts?.files || (m.puts?.sync_state || []).some((l) => l.key === 'files_remote_v2') || (m.deletes?.sync_state || []).includes('cursor:files')).length, 0, 'passe unique : au second démarrage, aucune transaction (garde)');
+      } finally { delete db.mutate; delete db.getAll; }
     });
   });
 
@@ -150,8 +167,20 @@ export async function runSyncL4Tests({ eq, ok }) {
       const recue = octets('octets-recus');
       await repo.putFile(H('7'), recue, { origin: 'remote' });
       const ecrite = await db.get('files', H('7'));
-      const attendue = F.fusionnerOctetsRecus(existante, recue);
-      eq([ecrite.size, ecrite.mime, ecrite.updated_at, ecrite.syncable, ecrite.remote, ecrite.blob instanceof Blob, ecrite.blob.size, await db.count('outbox')], [attendue.size, attendue.mime, attendue.updated_at, attendue.syncable, attendue.remote, true, recue.size, 0], 'putFile origin remote = fusionnerOctetsRecus (F-20 : une règle, deux appelants ; mutant : putFile ordinaire → size réécrit)');
+      eq([ecrite.size, ecrite.mime, ecrite.updated_at, ecrite.syncable, ecrite.remote, ecrite.blob instanceof Blob && ecrite.blob.size === recue.size, await db.count('outbox')], [999, 'image/heic', DATE, true, R({ mime: 'image/jpeg' }), true, 0], 'putFile origin remote = fusionnerOctetsRecus (F-20 : une règle, deux appelants ; valeurs littérales, ronde 1 ; mutant : putFile ordinaire → size réécrit)');
+      // Ronde 1 (#4) : un original importé ici ENTRE la lecture de putFile et son écriture n'est jamais remplacé par la copie reçue (I-G3 : le serveur ne
+      // réécrit jamais un blob local) — l'écriture d'origine remote relit la ligne DANS sa transaction.
+      const copie = octets('copie-reduite'); const shaO = H('8');
+      await db.mutate({ puts: { files: [{ sha256: shaO, mime: 'image/jpeg', size: 30, updated_at: DATE, remote: R({ sha256: H('e'), size: copie.size }) }] }, origin: 'remote' });
+      const originalImporte = octets('x'.repeat(30));
+      const vraiGet = db.get;
+      db.get = async function (store, cle) {
+        const r = await vraiGet.call(this, store, cle);
+        if (store === 'files' && cle === shaO && !originalImporte.vu) { originalImporte.vu = true; await this.mutate({ puts: { files: [{ ...r, blob: originalImporte, syncable: true }] }, origin: 'local' }); }
+        return r;
+      };
+      try { await repo.putFile(shaO, copie, { origin: 'remote' }); } finally { delete db.get; }
+      eq([(await db.get('files', shaO))?.blob?.size, originalImporte.size !== copie.size], [originalImporte.size, true], 'putFile origin remote (ronde 1) : un original arrivé entre la lecture et l’écriture reste — la copie reçue ne le remplace pas (mutant : écriture hors transaction → copie écrite sur l’original)');
     });
   });
 
@@ -300,7 +329,29 @@ export async function runSyncL4Tests({ eq, ok }) {
       const vrai = db.mutate;
       db.mutate = function (args) { vues.push(args); return vrai.call(this, args); };
       try { await createPull({ db, transport: tf, getUserId: () => 'u1' }).recevoir(); } finally { delete db.mutate; }
-      eq([await db.get('sync_state', 'file_error:' + H('7')), vues.filter((m) => m.puts?.files && (m.deletes?.sync_state || []).includes('file_error:' + H('7'))).length], [undefined, 1], 'F-7 : remote changé → la clé file_error de réception retirée dans la MÊME transaction (mutant : clé gardée)');
+      eq([await db.get('sync_state', 'file_error:' + H('7')), vues.filter((m) => (m.conditions?.files || m.puts?.files) && (m.deletes?.sync_state || []).includes('file_error:' + H('7'))).length], [undefined, 1], 'F-7 : remote changé → la clé file_error de réception retirée dans la MÊME transaction (mutant : clé gardée)');
+    });
+    // Ronde 1 : les deux conditions de F-7 (remote INCHANGÉ → clé gardée ; sens « envoi » → clé gardée) et la tombale (remote → null : levée aussi).
+    await withRepo(async (repo, db) => {
+      const T2 = '2030-01-01T00:00:00.000Z';
+      const err = (sens) => ({ motif: sens === 'envoi' ? 'trop_gros' : 'introuvable', sens, at: DATE });
+      await db.mutate({ puts: {
+        files: [
+          { sha256: H('1'), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: R({ sha256: H('1'), size: 5 }) }, // remote reçu identique
+          { sha256: H('2'), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: R() }, // remote change, mais erreur d'ENVOI
+          { sha256: H('3'), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: R() }, // tombale : remote → null
+          { sha256: H('4'), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: R() }, // tombale, erreur d'envoi
+        ],
+        sync_state: [{ key: 'file_error:' + H('1'), value: err('reception') }, { key: 'file_error:' + H('2'), value: err('envoi') }, { key: 'file_error:' + H('3'), value: err('reception') }, { key: 'file_error:' + H('4'), value: err('envoi') }],
+      }, origin: 'device' });
+      const ligne = (sha, sur, seq) => ({ id: sha, data: { sha256: sha, mime: 'image/jpeg', size: 5, updated_at: T2, ...sur }, updated_at: T2, deleted_at: null, server_seq: seq });
+      const tombale = (sha, seq) => ({ id: sha, data: null, updated_at: T2, deleted_at: T2, server_seq: seq });
+      const tf = creerTransportFactice({ lire: { files: [[ligne(H('1'), { original_filename: 'nouveau-nom.jpg', remote: R({ sha256: H('1'), size: 5 }) }, 1), ligne(H('2'), { remote: R({ sha256: H('d') }) }, 2), tombale(H('3'), 3), tombale(H('4'), 4)], []] } });
+      const vraiConsole = console.error; console.error = () => {};
+      try { await createPull({ db, transport: tf, getUserId: () => 'u1' }).recevoir(); } finally { console.error = vraiConsole; }
+      const cles = await Promise.all([1, 2, 3, 4].map(async (i) => !!(await db.get('sync_state', 'file_error:' + H(String(i))))));
+      eq([cles, (await db.get('files', H('1')))?.original_filename, (await db.get('files', H('3')))?.remote], [[true, true, false, true], 'nouveau-nom.jpg', null],
+        'F-7 (ronde 1) : remote reçu identique → clé de réception GARDÉE (mutant : levée toujours) ; clé de sens « envoi » gardée même si remote change (mutant : sens ignoré) ; tombale qui met remote à null → clé de réception levée (§ 3.2), clé d’envoi gardée');
     });
   });
 
@@ -404,5 +455,200 @@ export async function runSyncL4Tests({ eq, ok }) {
     eq([APP_VERSION, DB_VERSION], ['0.11.0', 4], 'D-G11 : APP_VERSION 0.11.0, DB_VERSION inchangée');
     const { MODULES_NEUFS } = await import('./ajouter.js');
     ok(MODULES_NEUFS.includes('../src/sync/fichiers.js'), 'filet i18n : MODULES_NEUFS contient src/sync/fichiers.js');
+  });
+
+  // === Tâche 1, ronde 1 — constats de la revue adverse. Un comportement neuf rougissait sur 84ab222 ; une épingle nomme le mutant qu'elle tue.
+
+  await run('ronde 1 — db.mutate : condition « fusion » (la ligne relue DANS la transaction)', async () => {
+    await withRepo(async (repo, db) => {
+      await db.mutate({ puts: { files: [{ sha256: H('a'), mime: 'image/jpeg', size: 1, updated_at: DATE }] }, origin: 'device' });
+      const lus = [];
+      const rendu = await db.mutate({ conditions: { files: [
+        { key: H('a'), fusion: (courant) => { lus.push(courant?.sha256 ?? null); return { ...courant, original_filename: 'relue.jpg' }; } },
+        { key: H('b'), fusion: (courant) => { lus.push(courant ?? null); return null; } },
+      ] }, origin: 'device' });
+      eq([lus, (await db.get('files', H('a')))?.original_filename, await db.get('files', H('b')), (rendu?.files || []).map((f) => f.sha256)], [[H('a'), null], 'relue.jpg', undefined, [H('a')]],
+        'fusion : la fiche courante est remise à la fonction (null si absente) ; la fiche rendue est écrite et rendue ; null → rien d’écrit pour elle');
+      const formes = [];
+      for (const c of [{ key: H('a'), fusion: 'pas une fonction' }, { key: H('a'), fusion: () => null, attendus: ['x'] }, { key: H('a'), fusion: () => null, patch: {} }, { key: H('a'), fusion: () => null, absente: true }, { key: H('a'), fusion: (courant) => ({ ...courant, sha256: H('c') }) }]) {
+        try { await db.mutate({ conditions: { files: [c] }, origin: 'device' }); formes.push('écrit'); } catch (e) { formes.push(e.name); }
+      }
+      eq([formes, await db.get('files', H('c')), (await db.get('files', H('a')))?.original_filename], [['TypeError', 'TypeError', 'TypeError', 'TypeError', 'TypeError'], undefined, 'relue.jpg'],
+        'fusion : une fonction seule (ni attendus, ni patch, ni absente) ; une fiche rendue sous une autre clé → TypeError, rien d’écrit');
+    });
+  });
+
+  await run('ronde 1 — mise à jour mêlée (#2) : la passe unique fait relire files, un remote serveur valide est adopté à instant égal', async () => {
+    const { createPull, decider } = await import('../src/sync/pull.js');
+    const T0 = '2026-10-19T03:00:00.000Z';
+    const loc = (remote, sur = {}) => ({ sha256: H('a'), mime: 'image/jpeg', size: 3, updated_at: T0, ...(remote === undefined ? {} : { remote }), ...sur });
+    const dist = (remote) => ({ id: H('a'), data: { sha256: H('a'), mime: 'image/jpeg', size: 3, remote, updated_at: '2026-10-19T03:00:00+00:00' }, updated_at: '2026-10-19T03:00:00+00:00', deleted_at: null });
+    eq([decider({ locale: loc(undefined), distante: dist(R()), table: 'files' }), decider({ locale: loc(true), distante: dist(R()), table: 'files' }), decider({ locale: loc(null, { blob: octets('abc') }), distante: dist(R()), table: 'files' }),
+      decider({ locale: loc(R({ sha256: H('d') })), distante: dist(R()), table: 'files' }), decider({ locale: loc(null, { original_filename: 'x' }), distante: dist(null), table: 'files' }), decider({ locale: loc(undefined), distante: dist(R()) })],
+      ['ecrire', 'ecrire', 'ecrire', 'conflit', 'conflit', 'conflit'], 'decider (files, instant égal) : remote local absent, true ou nul et remote serveur valide → écrire, jamais « conflit » (mutant : règle retirée → conflit sur chaque ligne relue) ; remote local valide différent → conflit (I7) ; deux remotes invalides et une autre différence → conflit ; sans table, rien ne change');
+    await withRepo(async (repo, db) => {
+      // Ce qu'un client d'avant G (ficheFichier de L3) a écrit en recevant deux lignes envoyées par un appareil déjà en 0.11.0 : sans blob → remote: true ;
+      // avec blob (l'original est ici aussi) → remote effacé ; l'updated_at du serveur, tel quel ; et le curseur est déjà passé.
+      const photo = octets('original-des-deux-cotes'); const shaY = await sha256Hex(photo);
+      await repo.putFile(shaY, photo, {});
+      const y = await db.get('files', shaY);
+      const TS = '2026-10-19T04:00:00.000Z';
+      await db.mutate({ puts: {
+        files: [{ sha256: H('7'), mime: 'image/jpeg', size: 5, remote: true, updated_at: TS }, { ...y, updated_at: TS }],
+        source_pages: [{ id: 'pgY', document_id: 'dY', sha256: shaY, updated_at: DATE }],
+        sync_state: [{ key: 'cursor:files', value: 12 }],
+      }, origin: 'device' });
+      await db.mutate({ deletes: { sync_state: ['files_remote_v2'] }, origin: 'device' }); // la passe se rejoue : c'est le premier démarrage en 0.11.0
+      await repo.init();
+      const rX = R({ sha256: H('e'), size: 4 }), rY = R({ sha256: shaY, size: photo.size, quality: 'originale' });
+      const ts = '2026-10-19T04:00:00+00:00';
+      const tf = creerTransportFactice({ lire: { files: [[
+        { id: H('7'), data: { sha256: H('7'), mime: 'image/jpeg', size: 5, remote: rX, updated_at: ts }, updated_at: ts, deleted_at: null, server_seq: 3 },
+        { id: shaY, data: { sha256: shaY, mime: 'image/jpeg', size: photo.size, remote: rY, updated_at: ts }, updated_at: ts, deleted_at: null, server_seq: 11 },
+      ], []] } });
+      const bilan = await createPull({ db, transport: tf, getUserId: () => 'u1' }).recevoir();
+      const [x2, y2] = [await db.get('files', H('7')), await db.get('files', shaY)];
+      eq([tf.journal.find((a) => a.appel === 'lire' && a.table === 'files')?.apres, x2?.remote, F.etatFichier(x2, { uid: 'u1' }), y2?.blob instanceof Blob, y2?.remote, F.candidatsEnvoi(await db.getSnapshot(MAGASINS_SNAPSHOT), { uid: 'u1' }).length, bilan.conflits, await db.count('sync_conflicts')],
+        [0, rX, 'distant', true, rY, 0, 0, 0], 'mise à jour mêlée (#2) : après la passe, files est relue depuis 0 ; la ligne qui avait perdu son remote (true) le retrouve et redevient distante ; celle dont l’original est ici garde son blob ET le remote — plus candidate, aucun conflit (mutants : curseur gardé ; règle d’adoption retirée)');
+    });
+  });
+
+  await run('ronde 1 — fusionnerFichier ne prend de data que les champs du serveur (#3, #9, #10, #15)', async () => {
+    const orig = await original('fusion-bornee', { original_filename: 'ici.jpg' });
+    const hostile = { sha256: H('b'), size: 999999, mime: 'image/png', original_filename: 'ailleurs.jpg', syncable: false, created_at: '1970-01-01T00:00:00.000Z', blob: { faux: 1 }, remote: true, updated_at: 'corps' };
+    const f = F.fusionnerFichier(orig, hostile, '2030-01-01T00:00:00.000Z');
+    eq([f.blob === orig.blob, f.sha256, f.size, f.mime, f.syncable, f.created_at, f.original_filename, f.remote, f.updated_at, F.estOriginalIci(f)],
+      [true, orig.sha256, orig.size, 'image/jpeg', true, DATE, 'ailleurs.jpg', null, '2030-01-01T00:00:00.000Z', true],
+      'avec blob local : clé, taille et type locaux gardés (l’original reste un original), syncable et created_at locaux, nom d’origine du serveur, remote true → nul, jamais un blob de data (mutants : spread nu ; { ...data, ...meta })');
+    const sans = F.fusionnerFichier(sansBlob(orig), { ...hostile, sha256: orig.sha256, remote: R() }, DATE);
+    eq([sans.sha256, sans.mime, sans.size, sans.original_filename, sans.syncable, sans.created_at, 'blob' in sans, sans.remote], [orig.sha256, 'image/png', 999999, 'ailleurs.jpg', true, DATE, false, R()],
+      'sans blob local : type, taille et nom du serveur gagnent (D-G16, l’ordre épinglé) ; syncable et created_at locaux ; aucun blob venu de data');
+    const neuve = F.fusionnerFichier(null, { ...hostile, sha256: H('b'), remote: R() }, DATE);
+    eq(Object.keys(neuve).sort(), ['mime', 'original_filename', 'remote', 'sha256', 'size', 'updated_at'], 'ligne neuve : exactement les champs du serveur (ni syncable, ni created_at, ni blob reçus)');
+  });
+
+  await run('ronde 1 — réception : un blob écrit pendant la page n’est jamais effacé (#4)', async () => {
+    const { createPull } = await import('../src/sync/pull.js');
+    await withRepo(async (repo, db) => {
+      // (a) B importe la même photo que A pendant qu'une page qui porte la ligne de A est appliquée : la ligne n'existait pas à la lecture.
+      const photo = octets('meme-photo-pendant-la-page'); const shaB = await sha256Hex(photo);
+      // (b) la copie d'une ligne distante est téléchargée pendant la page (putFile d'origine remote : updated_at inchangé).
+      const copie = octets('copie-pendant-la-page'); const shaC = H('c');
+      await db.mutate({ puts: { files: [{ sha256: shaC, mime: 'image/jpeg', size: 99, updated_at: DATE, remote: R({ sha256: H('e'), size: copie.size }) }] }, origin: 'remote' });
+      const vraiGet = db.get;
+      const faits = new Set();
+      db.get = async function (store, cle) {
+        const r = await vraiGet.call(this, store, cle);
+        if (store === 'files' && !faits.has(cle)) {
+          faits.add(cle);
+          if (cle === shaB) await repo.putFile(shaB, photo, { original_filename: 'b.jpg' });
+          if (cle === shaC) await repo.putFile(shaC, copie, { origin: 'remote' });
+        }
+        return r;
+      };
+      const T2 = '2030-01-01T00:00:00.000Z';
+      const rA = R({ sha256: H('a'), size: 7 }), rC = R({ sha256: H('d'), size: 5 });
+      const tf = creerTransportFactice({ lire: { files: [[
+        { id: shaB, data: { sha256: shaB, mime: 'image/jpeg', size: photo.size, remote: rA, updated_at: T2 }, updated_at: T2, deleted_at: null, server_seq: 1 },
+        { id: shaC, data: { sha256: shaC, mime: 'image/jpeg', size: 99, remote: rC, updated_at: T2 }, updated_at: T2, deleted_at: null, server_seq: 2 },
+      ], []] } });
+      try { await createPull({ db, transport: tf, getUserId: () => 'u1' }).recevoir(); } finally { delete db.get; }
+      const [b, c] = [await db.get('files', shaB), await db.get('files', shaC)];
+      eq([b?.blob instanceof Blob && b.blob.size === photo.size, b?.remote, F.estOriginalIci(b), c?.blob instanceof Blob && c.blob.size === copie.size, c?.remote, c?.size],
+        [true, rA, true, true, rC, 99], 'réception (#4) : la fusion se fait sur la ligne relue DANS la transaction — un original importé et une copie téléchargée pendant la page restent, le remote reçu est posé (mutant : fusion sur l’instantané → blobs effacés)');
+    });
+  });
+
+  await run('ronde 1 — adjusted : un blob arrivé pendant l’aller-retour survit (#4)', async () => {
+    const { createPush } = await import('../src/sync/push.js');
+    await withRepo(async (repo, db) => {
+      const copie = octets('copie-pendant-envoi'); const sha = H('5');
+      const remote = R({ sha256: H('e'), size: copie.size });
+      await db.mutate({ puts: { files: [{ sha256: sha, mime: 'image/jpeg', size: 77, updated_at: '2026-10-19T02:00:00.000Z', remote }] }, origin: 'local' }); // capturée : une entrée files
+      const tf = creerTransportFactice({ pousser: [{ reponse: { server_time: '2026-10-19T02:00:01.000Z', accepted: [], adjusted: [{ store: 'files', id: sha, updated_at: '2026-10-19T02:00:00.500Z' }], rejected: [] } }] });
+      const vraiGetAll = db.getAll;
+      let fait = false;
+      db.getAll = async function (store, ...reste) {
+        if (store === 'sync_conflicts' && !fait) { fait = true; await repo.putFile(sha, copie, { origin: 'remote' }); } // après la lecture des fiches locales
+        return vraiGetAll.call(this, store, ...reste);
+      };
+      try { await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer(); } finally { delete db.getAll; }
+      const apres = await db.get('files', sha);
+      eq([fait, apres?.blob instanceof Blob && apres.blob.size === copie.size, apres?.updated_at, apres?.remote], [true, true, '2026-10-19T02:00:00.500Z', remote], 'adjusted (#4) : la réécriture relit la ligne DANS la transaction — la copie téléchargée pendant l’aller-retour reste, l’updated_at du serveur est posé (mutant : reecrire.files écrit tel quel → blob perdu)');
+    });
+  });
+
+  await run('ronde 1 — adjusted sur files : garde R-L3-7 et contexte (#5, #8, #11)', async () => {
+    const { appliquerReponse } = await import('../src/sync/reponses.js');
+    const orig = await original('ajuste-garde', { remote: R() });
+    const element = { store: 'files', id: orig.sha256, data: T.projectionFichier(orig), updated_at: orig.updated_at, deleted: false };
+    const k = 'files:' + orig.sha256;
+    const appel = (contexte) => appliquerReponse({ lot: { seqs: [1], elements: [element] }, reponse: { accepted: [], adjusted: [{ store: 'files', id: orig.sha256, updated_at: '2026-10-19T05:00:00.000Z' }], rejected: [] },
+      entreesParSeq: new Map([[1, { seq: 1, store: 'files', id: orig.sha256, op: 'put', updated_at: orig.updated_at, tries: 0 }]]), ...contexte }).reecrire.files || [];
+    const inchangee = appel({ fichesLocales: { [k]: orig } });
+    eq([inchangee.length, inchangee[0]?.blob === orig.blob, inchangee[0]?.updated_at, appel({ fichesLocales: { [k]: { ...orig, remote: R({ sha256: H('d') }), updated_at: '2026-10-19T04:00:00.000Z' } } }).length, appel({ fichesLocales: { [k]: null } }).length, appel({}).length],
+      [1, true, '2026-10-19T05:00:00.000Z', 0, 0, 0], 'adjusted files : ligne inchangée → réécrite, blob gardé ; ligne réécrite ici pendant l’aller-retour (nouveau remote, nouvel updated_at) → rien (mutant : garde updated_at retirée → l’ancien remote revient) ; ligne disparue → rien ; sans contexte fichesLocales → rien');
+  });
+
+  await run('ronde 1 — R56 de bout en bout : l’écho d’une ligne files envoyée ne fait jamais de conflit (#6)', async () => {
+    const { createPull } = await import('../src/sync/pull.js');
+    await withRepo(async (repo, db) => {
+      const photo = octets('echo-r56'); const sha = await sha256Hex(photo);
+      await repo.putFile(sha, photo, { original_filename: 'e.jpg' });
+      const ligne = await db.get('files', sha);
+      const remote = R({ sha256: sha, size: photo.size, quality: 'originale' });
+      await db.mutate({ puts: { files: [{ ...ligne, remote, updated_at: '2026-10-19T07:00:00.000Z' }] }, origin: 'device' });
+      const ts = '2026-10-19T07:00:00.000000+00:00';
+      const tf = creerTransportFactice({ lire: { files: [[{ id: sha, data: { ...T.projectionFichier({ ...ligne, remote }), updated_at: ts }, updated_at: ts, deleted_at: null, server_seq: 5 }], []] } });
+      const bilan = await createPull({ db, transport: tf, getUserId: () => 'u1' }).recevoir();
+      const apres = await db.get('files', sha);
+      eq([bilan.conflits, await db.count('sync_conflicts'), apres.blob instanceof Blob, apres.syncable, apres.created_at, apres.updated_at, apres.remote, (await db.get('sync_state', 'cursor:files'))?.value],
+        [0, 0, true, true, ligne.created_at, '2026-10-19T07:00:00.000Z', remote, 5], 'R56 (#6) : la fiche d’ici porte blob, syncable, created_at et remote ; le serveur rend sa projection au même instant (« +00:00 », microsecondes) → ni conflit ni réécriture, curseur avancé (mutant : appliquerPage sans `table` vers decider → un conflit par photo)');
+    });
+  });
+
+  await run('ronde 1 — conflits files : la ligne relue gagne sur l’instantané (#1, #7, #16, #23, #33) et F-7 (#14)', async () => {
+    const { garderAilleurs, garderIci } = await import('../src/sync/conflits.js');
+    await withRepo(async (repo, db) => {
+      const photo = octets('arrivee-apres-le-conflit'); const sha = await sha256Hex(photo);
+      const remoteIci = R({ sha256: sha, size: photo.size, quality: 'originale' });
+      const instantane = { sha256: sha, mime: 'image/jpeg', size: photo.size, updated_at: DATE, remote: remoteIci }; // le conflit est noté SANS blob
+      await db.mutate({ puts: { files: [instantane], sync_state: [{ key: 'file_error:' + sha, value: { motif: 'introuvable', sens: 'reception', at: DATE } }] }, origin: 'remote' });
+      await repo.putFile(sha, photo, { origin: 'remote' }); // puis les octets arrivent (updated_at inchangé)
+      const conflit = (id, server, sur = {}) => ({ id, store: 'files', record_id: sha, local: instantane, server, at: DATE, kind: 'donnees', ...sur });
+      const poser = async (c) => { await db.mutate({ puts: { sync_conflicts: [c] }, origin: 'remote' }); return c; };
+      const remoteAilleurs = R({ sha256: H('d'), size: 9 });
+      const donnees = { data: { sha256: sha, mime: 'image/jpeg', size: photo.size, remote: remoteAilleurs, updated_at: DATE }, updated_at: DATE, deleted_at: null };
+      const tombale = { data: null, updated_at: '2030-01-01T00:00:00.000Z', deleted_at: '2030-01-01T00:00:00.000Z' };
+      const okA = await garderAilleurs(db, await poser(conflit('files:a', donnees)));
+      const a = await db.get('files', sha);
+      eq([okA, a.blob instanceof Blob && a.blob.size === photo.size, a.remote, await db.get('sync_state', 'file_error:' + sha)], [true, true, remoteAilleurs, undefined],
+        'garderAilleurs (données) : instantané SANS blob, ligne en base AVEC → blob gardé (mutant : ici = conflit.local) ; remote changé → file_error de réception levée (F-7, § 3.2)');
+      await garderAilleurs(db, await poser(conflit('files:t', tombale, { renvoye: true })));
+      const t2 = await db.get('files', sha);
+      eq([t2.blob instanceof Blob && t2.blob.size === photo.size, t2.remote], [true, null], 'garderAilleurs (tombale) : instantané sans blob → le blob en base reste, remote nul');
+      const okI = await garderIci(db, await poser(conflit('files:i', donnees)));
+      const i = await db.get('files', sha);
+      eq([okI, i.blob instanceof Blob && i.blob.size === photo.size, i.remote], [true, true, remoteIci], 'garderIci : l’instantané (sans blob) est réécrit SUR la ligne relue — le blob arrivé depuis reste (mutant : instantané écrit tel quel → blob perdu)');
+      const okN = await garderIci(db, await poser(conflit('files:n', tombale, { local: null })));
+      eq([okN, (await db.get('files', sha))?.blob instanceof Blob, !!(await db.get('sync_conflicts', 'files:n'))], [false, true, true], 'garderIci, local nul sur files : refusé — aucune suppression locale de files (D-G15) ; ligne et blob intacts, le conflit reste (mutant : deletes[files] → blob perdu)');
+      let leve = null; let okV = null;
+      try { okV = await garderAilleurs(db, await poser({ id: 'files:v', store: 'files', record_id: H('9'), local: null, server: tombale, at: DATE, kind: 'donnees' })); } catch (e) { leve = e; }
+      eq([leve, okV, await db.get('files', H('9')), await db.get('sync_conflicts', 'files:v')], [null, true, undefined, undefined], 'garderAilleurs, tombale sans ligne ni instantané : conflit retiré, rien d’écrit, aucune levée (mutant : garde de ligne retirée)');
+    });
+  });
+
+  await run('ronde 1 — lots : projection relue nettoyée, updated_at de la fiche (#13, #32)', async () => {
+    const { composerLots } = await import('../src/sync/lots.js');
+    const fiche = { sha256: H('a'), mime: 'image/jpeg', size: 3, original_filename: 'p' + String.fromCharCode(0) + 'q.jpg', blob: octets('abc'), syncable: true, created_at: DATE, updated_at: '2026-10-19T06:00:00.000Z', remote: R({ sha256: H('a'), size: 3 }) };
+    const c = await composerLots([{ seq: 1, user_id: 'u1', store: 'files', id: H('a'), op: 'put', updated_at: DATE, tries: 0 }], async () => fiche);
+    const el = c.lots[0]?.elements[0];
+    eq([el?.data.original_filename, el?.updated_at, el?.data.updated_at], ['pq.jpg', '2026-10-19T06:00:00.000Z', '2026-10-19T06:00:00.000Z'], 'lots : la projection d’une entrée files passe par nettoyerChaines (U+0000 retiré) et l’élément porte l’updated_at de la fiche relue, pas celui de l’entrée (mutants : nettoyerChaines retiré ; updated_at de l’entrée)');
+  });
+
+  await run('ronde 1 — une définition (#19, #20)', async () => {
+    eq(F.HASH_FICHIER === T.HASH_FICHIER && F.HASH_FICHIER instanceof RegExp, true, 'I-G10 : HASH_FICHIER défini une fois (tables.js), réexporté par fichiers.js');
+    const snap = { books: [{ id: 'b1', title: 'L' }], book_editions: [{ id: 'e1', book_id: 'b1' }], source_documents: [{ id: 'd1', edition_id: 'e1', sha256: H('1') }], source_pages: [{ id: 'p1', document_id: 'd1', sha256: H('1'), printed_page: 12 }, { id: 'p2', document_id: 'd1', sha256: H('1'), printed_page: 99 }] };
+    eq([F.nomFichier(H('1'), snap), F.nomFichier(H('1'), snap), F.nomFichier(H('2'), snap)], ['Page 12 · L', 'Page 12 · L', H('2').slice(0, 12)], 'nomFichier : la PREMIÈRE page de l’empreinte nomme le fichier (comme find), deux appels sur le même snapshot rendent le même nom (index par snapshot)');
   });
 }

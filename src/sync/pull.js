@@ -4,8 +4,8 @@
 // ici = remise en file, sans journal non plus). Tout ce qui s'écrit ici porte origin 'remote' : jamais recapturé.
 import { SYNC_STORES, STORES } from '../model/schema.js';
 import { logError } from '../core/log.js';
-import { projectionFichier } from './tables.js';
-import { fusionnerFichier, HASH_FICHIER } from './fichiers.js';
+import { projectionFichier, remoteValide } from './tables.js';
+import { conditionFichier, memeRemote, HASH_FICHIER } from './fichiers.js';
 
 // R-L3-12 : les versions AVANT les recettes. Le pointeur d'une recette reçue désigne presque toujours une version
 // créée par le même geste, sur l'autre appareil : lue après la recette, elle serait encore inconnue ici et chaque
@@ -62,6 +62,10 @@ export function decider({ locale, distante, table = null }) {
   if (distante.deleted_at) return plusRecentIci ? 'conflit_renvoyer' : 'supprimer';
   if (plusRecentAilleurs) return 'ecrire';
   if (plusRecentIci) return 'conflit_renvoyer';
+  // Lot G, ronde 1 (#2) : à instant égal, une ligne files d'ici SANS remote valide (true de L3, absent, nul) adopte le remote valide du serveur —
+  // jamais un « conflit ». C'est le cas d'une ligne reçue par un client d'avant G (ficheFichier écrivait `true` ou effaçait remote, l'updated_at
+  // du serveur verbatim), relue après la passe unique (D-G12) ; une ligne d'ici sans copie serveur confirmée n'a rien à défendre (I-G2).
+  if (table === 'files' && !remoteValide(locale.remote) && remoteValide(distante.data?.remote)) return 'ecrire';
   return identiques(locale, distante.data, table) ? 'ignorer' : 'conflit';
 }
 
@@ -136,6 +140,17 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
 
   async function appliquerPage(table, lignes, bilan, curseur) {
     const puts = {}; const deletes = {}; const conflits = []; const refile = [];
+    // Lot G, ronde 1 (#4, I-G3) : les lignes files ne s'écrivent pas depuis l'instantané lu plus haut (`locale`, hors transaction) mais par une
+    // condition `fusion` refaite sur la ligne RELUE dans la transaction de la page (conditionFichier) : une copie téléchargée ou un original
+    // importé pendant la page n'est jamais effacé. Une clé par fiche (la dernière ligne reçue d'une même clé gagne, comme un put).
+    const fusions = new Map();
+    // F-7 (§ 3.2) : un remote qui CHANGE — ligne écrite ou tombale — lève l'erreur de réception posée sur l'ancien, dans la même transaction ;
+    // une erreur d'ENVOI reste (trop_gros, type : la renvoyer échouerait encore). Remotes comparés validés (memeRemote : true, absent → aucun).
+    async function leverErreurReception(id, avant, apres) {
+      if (!HASH_FICHIER.test(id) || memeRemote(avant, apres)) return;
+      const cle = 'file_error:' + id;
+      if ((await db.get('sync_state', cle))?.value?.sens === 'reception') (deletes.sync_state ||= []).push(cle);
+    }
     const clePrimaire = STORES[table].keyPath;
     let supprimees = 0; let recues = 0;
     for (const ligne of lignes) {
@@ -151,7 +166,8 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
         if (table === 'files') {
           // D-G15 / N-4 : une tombale files dit « cette copie serveur n'existe plus », jamais « efface l'original » : ligne et blob restent,
           // remote passe à null. Comptée en recues, jamais en supprimees ; rien ne repart (origine remote).
-          (puts.files ||= []).push(fusionnerFichier(locale, { remote: null }, ligne.updated_at));
+          fusions.set(ligne.id, conditionFichier(ligne.id, locale, { remote: null }, ligne.updated_at));
+          await leverErreurReception(ligne.id, locale?.remote, null);
           recues += 1;
           logError('sync.pull.tombale_files', { table });
           continue;
@@ -163,14 +179,11 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
         // L'updated_at du serveur est stocké VERBATIM (R-L3-11) : microsecondes et décalage compris. Un renvoi doit
         // être égal, côté serveur, à la microseconde — et le serveur a pu ajuster l'heure à l'écriture (R25).
         if (table === 'files') {
-          // D-G16 : une ligne files n'apporte JAMAIS d'octets ici — une seule règle de fusion (fusionnerFichier) : blob, syncable et
-          // created_at locaux gardés, remote tel que la ligne reçue le porte (D-G12 : jamais `true`, jamais effacé sous un blob local).
-          (puts.files ||= []).push(fusionnerFichier(locale, ligne.data, ligne.updated_at));
-          // F-7 : un remote qui CHANGE lève l'erreur de réception posée sur l'ancien, dans la même transaction.
-          if (HASH_FICHIER.test(ligne.id) && JSON.stringify(stable(locale?.remote ?? null)) !== JSON.stringify(stable(ligne.data?.remote ?? null))) {
-            const cle = 'file_error:' + ligne.id;
-            if ((await db.get('sync_state', cle))?.value?.sens === 'reception') (deletes.sync_state ||= []).push(cle);
-          }
+          // D-G16 : une ligne files n'apporte JAMAIS d'octets ici — une seule règle de fusion (fusionnerFichier, refaite sur la ligne relue en
+          // transaction : conditionFichier) : blob, syncable et created_at locaux gardés, remote tel que la ligne reçue le porte (D-G12 : jamais
+          // `true`, jamais effacé sous un blob local).
+          fusions.set(ligne.id, conditionFichier(ligne.id, locale ?? null, ligne.data, ligne.updated_at));
+          await leverErreurReception(ligne.id, locale?.remote, ligne.data?.remote);
         } else (puts[table] ||= []).push({ ...ligne.data, updated_at: ligne.updated_at });
         recues += 1;
         if (table === 'recipes') {
@@ -202,7 +215,7 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
     // arrière, sinon tout ce qui est déjà reçu repartirait en boucle.
     const dernier = Math.max(...lignes.map((l) => l.server_seq));
     puts.sync_state = [{ key: `cursor:${table}`, value: Math.max(curseur, dernier) }];
-    await db.mutate({ puts, deletes, origin: 'remote' });
+    await db.mutate({ puts, deletes, origin: 'remote', conditions: fusions.size ? { files: [...fusions.values()] } : null });
     bilan.recues += recues;
     bilan.supprimees += supprimees;
     bilan.conflits += conflits.length;

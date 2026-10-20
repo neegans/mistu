@@ -14,7 +14,7 @@ import { urlDeBlob } from '../core/blob-urls.js';
 import { sha256Hex } from '../core/hash.js';
 import { preparerPhotoLocale } from '../core/image.js';
 import { TransitionRefusee } from '../core/db.js';
-import { typeAffichage } from '../sync/mime.js';
+import { typeAffichage, displayUrl } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
 import { PasserelleProvider, extraireRecette, extraireIndex, validateParsedRecipe, validerIndex, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION } from '../domain/llm.js';
 import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception, cleLecture, modeleBorne } from '../domain/import-cible.js';
@@ -454,7 +454,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     repo.getFile(sha).then((f) => {
       const type = typeAffichage(f); // F-9 (lot G) : le type du blob, dans la liste blanche, gagne — la règle de displayUrl
       if (!type || !type.startsWith('image/')) return;
-      const u = urlDeBlob(f.blob.type === type ? f.blob : new Blob([f.blob], { type }));
+      const u = displayUrl(f, urlDeBlob); // le retypage : une copie de la règle (displayUrl), ronde 1
       urls.set(sha, u); img.src = u;
     }).catch(() => {});
   }

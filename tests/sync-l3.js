@@ -521,8 +521,8 @@ export async function runSyncL3Tests({ eq, ok }) {
   const { SYNC_STORES } = await import('../src/model/schema.js');
   // L4 (D-G8) : `files` est de l'envoi initial, filtrée par remote de ce compte ; son marqueur est posé.
   // Assistant par le compte (K-3, R-CPT-1) : `assistant_config` est dans SYNC_STORES mais n'est candidate que sur un
-  // appareil de production (`configSuitLeCompte`, faux par défaut) : ces décomptes restent 23/24 sans lui ; les
-  // 24/25 avec lui sont éprouvés dans tests/assistant-compte.js.
+  // appareil de production (`configSuitLeCompte`, faux par défaut) : ces décomptes valent 25/26 sans lui (`files`
+  // comprise depuis L4) ; les 26/27 avec lui sont éprouvés dans tests/assistant-compte.js.
   eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false }).length, 25, 'envoi initial : 25 tables (imports et files comprises ; files depuis L4) sans l’historique ni assistant_config (hors production par défaut)');
   eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true }).length, 26, 'envoi initial : 26 tables avec l’historique');
   eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true }).includes('files'), true, 'L4 (D-G8) : « files » est de l’envoi initial, filtrée par remote de ce compte');

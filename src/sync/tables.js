@@ -36,23 +36,27 @@ export const keyOf = (store, record) => record[STORES[store].keyPath];
 
 // Lot G (spec § 3.1, D-G8) : les champs d'une ligne `files` que le serveur porte — ce que lots.js envoie, ce que `identiques` compare.
 export const CHAMPS_FILES_SERVEUR = Object.freeze(['sha256', 'mime', 'size', 'original_filename', 'remote', 'updated_at']);
-const HASH = /^[a-f0-9]{64}$/;
+export const HASH_FICHIER = /^[a-f0-9]{64}$/; // une définition (I-G10), réexportée par fichiers.js
 const QUALITES = ['reduite', 'originale'];
 const OCTETS_MAX = 52428800; // file_size_limit du seau `pages` (0002)
+const REMOTE_MAX = 4096; // ronde 1 : un remote gonflé de champs repartirait à l'écho dans la projection (élément > 512 Kio → quarantaine)
+const longueurJson = (v) => { try { return JSON.stringify(v).length; } catch { return Infinity; } };
 
 // La copie serveur d'une ligne `files` (D-G12) : objet nu, lu par Object.hasOwn ; un champ en plus est ignoré (F-23 : une version future qui
-// enrichit `remote` ne fait pas renvoyer chaque photo) ; tout le reste — dont le booléen `true` de L3 — vaut « aucune copie serveur connue ».
-// Une ligne reçue est une donnée hostile : rien ne se télécharge sur un remote invalide. `uploaded_at` n'est jamais interprété.
+// enrichit `remote` ne fait pas renvoyer chaque photo) — dans la limite de 4 Kio sérialisés ; tout le reste — dont le booléen `true` de L3 —
+// vaut « aucune copie serveur connue ». Une ligne reçue est une donnée hostile : rien ne se télécharge sur un remote invalide. `uploaded_at`
+// n'est jamais interprété (borné à 40 points de code).
 export function remoteValide(remote) {
   if (!remote || typeof remote !== 'object' || Array.isArray(remote)) return false;
   const proto = Object.getPrototypeOf(remote);
   if (proto !== Object.prototype && proto !== null) return false;
   const lu = (cle) => (Object.hasOwn(remote, cle) ? remote[cle] : undefined);
   const sha = lu('sha256'), size = lu('size'), mime = lu('mime'), quality = lu('quality'), uploaded = lu('uploaded_at'), owner = lu('owner');
-  return typeof sha === 'string' && HASH.test(sha)
+  return typeof sha === 'string' && HASH_FICHIER.test(sha)
     && Number.isSafeInteger(size) && size >= 1 && size <= OCTETS_MAX
-    && ALLOWED_MIME.includes(mime) && QUALITES.includes(quality) && typeof uploaded === 'string'
-    && typeof owner === 'string' && owner.length > 0 && owner.length <= 64;
+    && ALLOWED_MIME.includes(mime) && QUALITES.includes(quality) && typeof uploaded === 'string' && uploaded.length <= 80 && [...uploaded].length <= 40
+    && typeof owner === 'string' && owner.length > 0 && owner.length <= 64
+    && longueurJson(remote) <= REMOTE_MAX;
 }
 
 // R-G-2 : un remote d'un autre compte vaut « aucune copie serveur connue » (ses octets sont dans un dossier que pages_select interdit).

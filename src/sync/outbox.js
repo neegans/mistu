@@ -7,8 +7,7 @@ import { syncNow } from './clock.js';
 // L4 (D-G8) : une ligne files n'entre en file QUE quand ses octets sont confirmés — remote valide de ce compte — et jamais une
 // suppression. (R-L3-22, L3 : aucune ligne « files » n'entrait en file, faute d'octets à envoyer — « À envoyer : N » ne redescendait
 // plus ; la capture ne retient toujours pas une photo posée sans copie serveur, ni un type hors liste — syncable faux.) Les entrées
-// `files` capturées par L2 restent retirées une fois par `repo.init()` (même ruling).
-const SYNCHRONISEES = SYNC_STORES;
+// `files` capturées par L2 restent retirées une fois par `repo.init()` (même ruling). La liste lue est SYNC_STORES elle-même (ronde 1).
 
 // Copie de la fiche au moment de la suppression, sans laisser une clé héritée du prototype passer pour un payload.
 function payloadFor(payloads, store, key) {
@@ -22,7 +21,7 @@ export function installCapture(db, { getUserId = () => null, isActivitySynced = 
     if (origin !== 'local') return null;
     const rows = [];
     const user_id = getUserId();
-    const wanted = (store) => SYNCHRONISEES.includes(store) && (store !== 'library_activity' || isActivitySynced()) && (store !== 'assistant_config' || configSuitLeCompte());
+    const wanted = (store) => SYNC_STORES.includes(store) && (store !== 'library_activity' || isActivitySynced()) && (store !== 'assistant_config' || configSuitLeCompte());
     for (const [store, list] of Object.entries(puts)) {
       if (!wanted(store)) continue;
       if (store === 'files') { for (const r of list) if (r?.syncable !== false && remoteDeCeCompte(r?.remote, user_id)) rows.push({ user_id, store, id: keyOf(store, r), op: 'put', updated_at: r.updated_at || null, tries: 0 }); continue; }

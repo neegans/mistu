@@ -255,13 +255,21 @@ async function purgerFilesEnFile() {
 
 // Passe unique (lot G, D-G12) : `remote` change de nature — le booléen `true` de L3 (« ligne reçue sans octets ») est retiré des lignes files.
 // Garde dans la même transaction, updated_at conservé, origine 'device' (rien en file). Une bibliothèque saine ne réécrit aucune ligne.
+// Ronde 1 (#2) : un client d'avant G (code encore en mémoire pendant la mise à jour) a pu recevoir des lignes files envoyées par un appareil déjà
+// en 0.11.0 — `true` posé sans blob, remote effacé avec blob — puis avancer le curseur : `cursor:files` est retiré DANS la même transaction,
+// toute la table est relue à la passe suivante (decider adopte alors un remote serveur valide à instant égal). Chaque ligne est réécrite sur
+// sa version RELUE dans la transaction (#4 : un blob arrivé entre la lecture et l'écriture reste).
 const REMOTE_V2_GUARD = 'files_remote_v2';
 export async function convertirRemoteBooleen() {
   if ((await db.get('sync_state', REMOTE_V2_GUARD))?.value === 1) return 0;
   const lignes = (await db.getAll('files')).filter((r) => r?.remote === true);
-  const puts = { sync_state: [{ key: REMOTE_V2_GUARD, value: 1 }] };
-  if (lignes.length) puts.files = lignes.map(({ remote: _booleen, ...reste }) => reste);
-  await db.mutate({ puts, origin: 'device' });
+  const sansBooleen = (courant) => { if (courant?.remote !== true) return null; const { remote: _booleen, ...reste } = courant; return reste; };
+  await db.mutate({
+    puts: { sync_state: [{ key: REMOTE_V2_GUARD, value: 1 }] },
+    deletes: { sync_state: ['cursor:files'] },
+    conditions: lignes.length ? { files: lignes.map((l) => ({ key: l.sha256, fusion: sansBooleen })) } : null,
+    origin: 'device',
+  });
   return lignes.length;
 }
 
@@ -489,9 +497,9 @@ export async function putFile(sha256, blob, meta = {}) {
   const rest = nettoyerChaines(brut); // B-27 : un original_filename à caractère de contrôle faisait un conflit perpétuel dès que la ligne part
   if (origin === 'remote' && existing) {
     // Lot G (§ 3.1, F-20) : des octets reçus du serveur ne touchent ni size, ni mime, ni updated_at — la règle de la passe, la même fonction.
-    const row = fusionnerOctetsRecus(existing, blob);
-    await db.mutate({ puts: { files: [row] }, origin: 'remote' });
-    return row;
+    // Ronde 1 (I-G3) : la ligne est relue DANS la transaction — un blob arrivé depuis la lecture (original importé) n'est jamais remplacé.
+    const ecrites = await db.mutate({ conditions: { files: [{ key: sha256, fusion: (courant) => (courant && !(courant.blob instanceof Blob) ? fusionnerOctetsRecus(courant, blob) : null) }] }, origin: 'remote' });
+    return ecrites?.files?.[0] ?? (await db.get('files', sha256));
   }
   // Le type connu de la ligne existante compte aussi : une ligne reçue du serveur porte son mime sans octets.
   const { mime, syncable } = resolveMime(blob.type || rest.mime || existing?.mime, rest.original_filename || existing?.original_filename);
