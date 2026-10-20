@@ -232,6 +232,11 @@ export async function runLectureWebTests({ eq, ok }) {
       eq([IC.DOCUMENT_ID === V.DOCUMENT_ID, /^[0-9a-f-]{36}$/.test(V.DOCUMENT_ID), IC.BATTEMENT_MS, V.BATTEMENT_MS, IC.volEnCours === V.volEnCours], [true, true, 15000, 15000, true], 'vol.js : DOCUMENT_ID, BATTEMENT_MS et volEnCours d’import-cible.js sont ceux de vol.js (ré-exports : tests/import-cible.js inchangé)');
       const [srcVol, srcWeb, srcCible] = await Promise.all(['../src/ui/vol.js', '../src/ui/import-web.js', '../src/ui/import-cible.js'].map(lire));
       eq([/^\s*import\b/m.test(srcVol), /from '\.\/import-cible\.js'/.test(srcWeb), /\blet vol\w*\s*=/.test(srcCible), /\blet vol\w*\s*=/.test(srcWeb)], [false, false, false, false], 'sens unique (D-B13, test de source) : vol.js n’importe rien, import-web.js n’importe pas import-cible.js, et aucun des deux écrans n’a sa propre variable de vol');
+      // Ronde 1 : l'aide de test du lot A (reinitialiserImportCible, appelée dans les finally de tests/import-cible.js) libère LE vol de vol.js et
+      // l'abandonne : un vol laissé tenu par un test interrompu ne fuit pas dans les suites suivantes (mutant « reinitialiserVol retiré » : rouge).
+      const laisse = { importId: 'laisse', controller: new AbortController() };
+      V.prendreVol(laisse); IC.reinitialiserImportCible();
+      eq([V.volEnCours(), laisse.controller.signal.aborted], [null, true], 'reinitialiserImportCible (lot A) appelle reinitialiserVol : le vol tenu est abandonné et libéré');
     });
 
     await run('démarrer, lancer, annuler', () => withRepo(async (repo, db) => {
@@ -245,7 +250,7 @@ export async function runLectureWebTests({ eq, ok }) {
         const NOW = '2026-10-19T12:00:00.000Z'; const DATE = '2026-10-19T00:00:00.000Z';
         const SESSION = { access_token: 'jeton-web-sentinelle', user: { id: 'u1', email: 'a@exemple.invalid' } };
         const signet = (id, url) => ({ id, edition_id: null, original_title: 'Signet ' + id, original_language: 'fr', availability: 'reference_only', verification_state: 'unverified', printed_page: null, section: null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: [], current_version_id: null, ingredient_ids: [], source_url: url, source_label: 'a.test', created_at: DATE, updated_at: DATE });
-        const ids = ['rc_w1', 'rc_w2', 'rc_w3', 'rc_w4', 'rc_w5', 'rc_w6', 'rc_w7', 'rc_w8', 'rc_w9', 'rc_w10'];
+        const ids = ['rc_w1', 'rc_w2', 'rc_w3', 'rc_w4', 'rc_w5', 'rc_w6', 'rc_w7', 'rc_w8', 'rc_w9', 'rc_w10', 'rc_w12', 'rc_w13', 'rc_w14', 'rc_w15', 'rc_w16'];
         await db.mutate({ puts: { recipes: [...ids.map((id) => signet(id, `https://a.test/${id}`)), signet('rc_http', 'http://a.test/h')] }, origin: 'device' });
         const ctxDe = async (session = SESSION, { imports } = {}) => ({ recipes: await db.getAll('recipes'), imports: imports ?? await db.getAll('imports'), sync: { user: session ? { id: 'u1' } : null, auth: { jeton: async () => session } } });
         const fiche = async (id) => db.get('recipes', id);
@@ -270,7 +275,7 @@ export async function runLectureWebTests({ eq, ok }) {
         const importWeb = (id, recipeId, sur = {}) => ({ ...LW.fabriquerImportWeb({ id, signet: { id: recipeId }, deviceId: repo.deviceId() }), created_at: NOW, updated_at: NOW, ...sur });
         // La capture d'outbox de withRepo (db.onMutate) reste VIVANTE tout le bloc : l'espion l'enveloppe et la rend, jamais null (sans elle,
         // « aucune entrée de plus en file », au cas 9, serait vrai quoi que fasse le code).
-        ok(typeof db.onMutate === 'function', 'withRepo pose la capture d’outbox : le bloc la garde vivante');
+        ok(typeof db.onMutate === 'function', 'précondition du montage (pas une garde du code) : withRepo pose la capture d’outbox, que le bloc garde vivante');
         const touches = [];
         // R-B-17 : l'espion compte les magasins ÉCRITS ET EFFACÉS (en fin de vol, la ligne interne du battement est une suppression dans sync_state).
         const espionner = () => { const avant = db.onMutate; db.onMutate = (x) => { touches.push([...Object.keys(x.puts || {}), ...Object.keys(x.deletes || {})].sort().join('+')); return avant ? avant(x) : {}; }; return () => { db.onMutate = avant; }; };
@@ -289,7 +294,7 @@ export async function runLectureWebTests({ eq, ok }) {
         eq(await r1.lancement, { issue: 'a_verifier' }, 'lancer : la réponse lue → a_verifier');
         finEspion();
         const lue = await db.get('imports', r1.importId);
-        eq([lue.status, lue.resultat?.source_kind, lue.resultat?.recette?.title, lue.resultat?.recette?.total_minutes, typeof lue.reponse_brute, lue.reponse_brute.length <= 16000, lue.document_id_vol, Number.isInteger(lue.duree_ms), lue.model], ['a_verifier', 'jsonld', 'Pâtes', 30, 'string', true, null, true, null], 'lancer (I-B4) : le résultat relu vit dans le journal (a_verifier, resultat, reponse_brute ≤ 16 000), vol libéré');
+        eq([lue.status, lue.resultat?.source_kind, lue.resultat?.recette?.title, lue.resultat?.recette?.total_minutes, typeof lue.reponse_brute, lue.reponse_brute === JSON.stringify(LD.recette), lue.document_id_vol, Number.isInteger(lue.duree_ms), lue.model], ['a_verifier', 'jsonld', 'Pâtes', 30, 'string', true, null, true, null], 'lancer (I-B4) : le résultat relu vit dans le journal (a_verifier, resultat, reponse_brute = la recette reçue telle quelle — sa borne : cas 16), vol libéré');
         eq([[...new Set(touches)], (await fiche('rc_w1')).availability], [['imports', 'sync_state'], 'reference_only'], 'lancer (I-B9) : seul le journal est écrit pendant une lecture, plus l’effacement de la ligne interne du battement en fin de vol (sync_state, origine device, R-B-17) — le signet reste reference_only');
         eq(V.volEnCours(), null, 'lancer : le vol est libéré en finally');
 
@@ -339,11 +344,16 @@ export async function runLectureWebTests({ eq, ok }) {
         const rZ = await W.demarrerLectureWeb({ recipe: await fiche('rc_w10'), ctx: await ctxDe() }, { repo, fetch: ffZ.fetch, enLigne: () => false });
         eq([rZ.issue, ['imp_zzz', 'imp_nul'].includes(rZ.importId), (await db.get('imports', rZ.importId))?.status, (await rZ.lancement)?.raison, (await db.byIndex('imports', 'recipe_id', 'rc_w10')).length, ffZ.appels.length], ['ok', false, 'a_lancer', 'hors_ligne', 3, 0], 'R-B-18 : une ligne web au statut inconnu (« zzz ») ou nul n’est pas un import ouvert — un import neuf naît (a_lancer ; ici hors ligne : rien ne part)');
 
-        // (5) « Relire la page » : a_verifier → a_lancer → en_cours, un POST.
-        const ff5 = fauxFetch();
-        const relire = W.lancerLecture(r1.importId, { ctx: await ctxDe(), repo, fetch: ff5.fetch, relire: true });
+        // (5) « Relire la page » (ronde 1) : a_verifier → en_cours en UNE transaction (comme T6-R1-a du lot A) — jamais un a_lancer intermédiaire qui
+        // effacerait la lecture payée avant que le départ soit acquis ; la lecture précédente (résultat, réponse brute, modèle, durée) est effacée AU
+        // départ, pour qu'un échec de ce vol ne porte jamais le diagnostic d'un autre. Un POST.
+        await db.mutate({ puts: { imports: [{ ...(await db.get('imports', r1.importId)), model: 'modele-ancien' }] }, origin: 'device' });
+        const ff5 = fauxFetch(); const ecritures5 = [];
+        const espion5 = { ...repo, transitionner: async (store, key, opts) => { ecritures5.push([opts?.attendus, opts?.patch?.status ?? null]); return repo.transitionner(store, key, opts); } };
+        const relire = W.lancerLecture(r1.importId, { ctx: await ctxDe(), repo: espion5, fetch: ff5.fetch, relire: true });
         await attendre(() => ff5.appels.length === 1, 'relecture partie');
-        eq([(await db.get('imports', r1.importId)).status, (await db.get('imports', r1.importId)).resultat, (await db.get('imports', r1.importId)).appels], ['en_cours', null, 2], 'relire : a_verifier → a_lancer → en_cours, résultat effacé, un appel de plus');
+        const l5 = await db.get('imports', r1.importId);
+        eq([l5.status, l5.resultat, l5.reponse_brute, l5.model, l5.duree_ms, l5.appels, ecritures5[0]?.[1], !!ecritures5[0]?.[0]?.includes('a_verifier'), ecritures5.filter(([, s]) => s === 'a_lancer').length], ['en_cours', null, null, null, null, 2, 'en_cours', true, 0], 'relire : a_verifier → en_cours en UNE transition (aucun a_lancer intermédiaire), résultat, réponse brute, modèle et durée effacés au départ, un appel de plus');
         ff5.rendre[0](200, LD); await relire;
 
         // (6) « Annuler » : le fetch est abandonné, en_cours → echec(annule), le vol libéré ; un document qui ne tient pas le vol ne peut rien.
@@ -368,12 +378,13 @@ export async function runLectureWebTests({ eq, ok }) {
 
         // (7) Réponse tardive (I-B7) : l'écriture a_verifier attend une porte ; « Annuler » passe entre la réponse lue et l'écriture → reponse_brute seule.
         let ouvrir; const porte = new Promise((r) => { ouvrir = r; });
-        const espion = { ...repo, transitionner: async (store, key, opts) => { if (opts?.patch?.status === 'a_verifier') await porte; return repo.transitionner(store, key, opts); } };
+        let arrivee; const arrive = new Promise((r) => { arrivee = r; }); // ronde 1 : un FAIT (la réponse est lue, l'écriture a_verifier attend), jamais un délai
+        const espion = { ...repo, transitionner: async (store, key, opts) => { if (opts?.patch?.status === 'a_verifier') { arrivee(); await porte; } return repo.transitionner(store, key, opts); } };
         const ff7 = fauxFetch();
         const r7 = await W.demarrerLectureWeb({ recipe: await fiche('rc_w7'), ctx: await ctxDe() }, { repo: espion, fetch: ff7.fetch });
         await attendre(() => ff7.appels.length === 1, 'parti');
         ff7.rendre[0](200, LD);
-        await new Promise((r) => setTimeout(r, 60));
+        await arrive;
         await W.annulerLecture(r7.importId);
         ouvrir();
         eq(await r7.lancement, { issue: 'echec', raison: 'annule' }, 'réponse tardive : l’issue reste annule');
@@ -386,6 +397,8 @@ export async function runLectureWebTests({ eq, ok }) {
         const r8 = await W.demarrerLectureWeb({ recipe: await fiche('rc_w8'), ctx: await ctxDe() }, { repo: rejette(false), fetch: ff8.fetch });
         await attendre(() => ff8.appels.length === 1, 'parti'); ff8.rendre[0](200, LD);
         eq([await r8.lancement, (await db.get('imports', r8.importId)).erreur?.raison], [{ issue: 'echec', raison: 'incertain' }, 'incertain'], 'incertain : une écriture rejetée → echec(incertain)');
+        const l8 = await db.get('imports', r8.importId);
+        eq([l8.status, l8.document_id_vol, Number.isInteger(l8.duree_ms)], ['echec', null, true], 'incertain : la ligne echec(incertain) libère le vol (document_id_vol nul) et porte la durée');
         const ff9 = fauxFetch();
         const erreurs = []; const vraiErreur = console.error; console.error = (...a) => { erreurs.push(String(a[0])); }; // l'incident est journalisé (attendu)
         let r9, issue9;
@@ -414,6 +427,96 @@ export async function runLectureWebTests({ eq, ok }) {
         eq(await enFile(), n0 + 1, 'battement (témoin) : une transition LOCALE de la même ligne entre en file — la capture est vivante, l’assertion précédente n’est pas creuse');
         ff10.rendre[0](200, LD); await r10.lancement;
         eq(await attendre(async () => !(await db.get('sync_state', cleHb)), 'la ligne interne effacée'), true, 'battement (R-B-17) : la ligne interne est effacée en fin de vol (repo.oublierBattement)');
+        // --- Ronde 1 de la tâche 4 ---------------------------------------------------------------------------------------------------------------------
+        let postsImmediats = 0; const fetchImmediat = async () => { postsImmediats += 1; return reponse(502, { erreur: 'inaccessible' }); };
+
+        // (10) D-B4 : l'adresse lue est celle du signet RELU en base au lancement, jamais celle de l'écran. La fiche passée et ctx.recipes portent une
+        // adresse ancienne (changée entre le rendu et la tape, dans un autre onglet ou par la synchronisation), la base la neuve : le POST porte la
+        // neuve (mutant « adresse lue dans l'instantané de l'écran d'abord » : rouge).
+        const ancienne = signet('rc_w11', 'https://a.test/ancienne');
+        await db.mutate({ puts: { recipes: [signet('rc_w11', 'https://a.test/neuve')] }, origin: 'device' });
+        const ctxAncien = { ...(await ctxDe()), recipes: [...(await db.getAll('recipes')).filter((r) => r.id !== 'rc_w11'), ancienne] };
+        const ffAdr = fauxFetch();
+        const rAdr = await W.demarrerLectureWeb({ recipe: ancienne, ctx: ctxAncien }, { repo, fetch: ffAdr.fetch });
+        await attendre(() => ffAdr.appels.length === 1, 'parti');
+        eq(JSON.parse(ffAdr.appels[0].options.body), { outil: 'lecture-web', corps: { url: 'https://a.test/neuve' } }, 'D-B4 : la fiche affichée et ctx.recipes portent l’adresse ancienne, la base la neuve → le POST porte l’adresse du signet RELU en base');
+        ffAdr.rendre[0](502, { erreur: 'inaccessible' }); await rAdr.lancement;
+
+        // (11) Le doublon a UNE porte, demarrerLectureWeb (§ 4.3.1) ; « Garder et lire » (search.js) lui délègue : une adresse déjà gardée, sous une autre
+        // forme (hôte en capitales, utm_*), → { issue: 'doublon', recette }, rien d'écrit, zéro appel.
+        const nRec = await db.count('recipes'); const nImp = await db.count('imports'); const ffDbl = fauxFetch();
+        const dbl = await W.demarrerLectureWeb({ adresse: 'https://A.test/rc_w1?utm_source=x', titre: 'T', ctx: await ctxDe() }, { repo, fetch: ffDbl.fetch });
+        eq([dbl.issue, dbl.recette?.id, await db.count('recipes') - nRec, await db.count('imports') - nImp, ffDbl.appels.length], ['doublon', 'rc_w1', 0, 0, 0], 'demarrerLectureWeb({ adresse }) : une adresse déjà gardée → doublon (la fiche existante), rien d’écrit, zéro appel');
+
+        // (12) I-2 du lot A tient par STATUT, toutes sortes confondues : un import ouvert d'une AUTRE sorte (« recette », a_lancer) sur la fiche du signet
+        // n'est pas repris (R-B-18 : « ouvert » ici = une ligne web) et le mur refuse la création → un refus NOMMÉ (transition), jamais une exception
+        // non gérée ; rien d'écrit, zéro appel. lancerLecture sur cette ligne → inconnu (ce n'est pas une lecture web).
+        await db.mutate({ puts: { imports: [{ ...importWeb('imp_rec', 'rc_w12'), kind: 'recette' }] }, origin: 'device' });
+        const rSorte = await W.demarrerLectureWeb({ recipe: await fiche('rc_w12'), ctx: await ctxDe() }, { repo, fetch: fetchImmediat }).catch((e) => ({ leve: e?.name ?? String(e) }));
+        eq([rSorte, (await db.byIndex('imports', 'recipe_id', 'rc_w12')).map((i) => i.id), postsImmediats], [{ issue: 'refuse', raison: 'transition', statut: 'a_lancer' }, ['imp_rec'], 0], 'demarrerLectureWeb : un import ouvert d’une autre sorte tient la fiche → refus nommé (transition), aucune ligne web, zéro appel (mutant « ouvertDe toutes sortes » : rouge)');
+        eq([(await W.lancerLecture('imp_rec', { ctx: await ctxDe(), repo, fetch: fetchImmediat })).raison, (await db.get('imports', 'imp_rec')).status, postsImmediats], ['inconnu', 'a_lancer', 0], 'lancerLecture : une ligne d’une autre sorte (recette) → inconnu, rien d’écrit, zéro appel (mutant « sorte non vérifiée » : rouge)');
+
+        // (13) Le signet effacé entre le démarrage et le lancement (fiche supprimée ailleurs, tombale reçue) → inconnu : la fiche n'existe plus — jamais
+        // « interdit », qui dirait qu'une adresse a été refusée. Rien d'écrit, zéro appel.
+        await db.mutate({ puts: { imports: [importWeb('imp_orphelin', 'rc_efface')] }, origin: 'device' });
+        eq([(await W.lancerLecture('imp_orphelin', { ctx: await ctxDe(), repo, fetch: fetchImmediat })).raison, (await db.get('imports', 'imp_orphelin')).status, postsImmediats], ['inconnu', 'a_lancer', 0], 'lancerLecture : signet effacé (aucune fiche) → inconnu, pas interdit ; rien d’écrit, zéro appel');
+
+        // (14) Une erreur qui n'est pas un refus pendant le lancement non attendu (base indisponible à la transition en_cours) : la promesse `lancement`
+        // ne rejette jamais (aucun rejet sans gestionnaire) — l'incident est journalisé (import_web.lancer), l'issue est echec(interne) ; la ligne
+        // reste a_lancer, zéro appel, le vol libéré.
+        const panne = { ...repo, transitionner: async (store, key, opts) => { if (opts?.patch?.status === 'en_cours') throw new Error('base fermée'); return repo.transitionner(store, key, opts); } };
+        const erreurs14 = []; const vraiErreur14 = console.error; console.error = (...a) => { erreurs14.push(String(a[0])); };
+        let r14, issue14;
+        try {
+          r14 = await W.demarrerLectureWeb({ recipe: await fiche('rc_w13'), ctx: await ctxDe() }, { repo: panne, fetch: fetchImmediat });
+          issue14 = await r14.lancement.catch((e) => ({ rejet: e?.message ?? String(e) }));
+        } finally { console.error = vraiErreur14; }
+        eq([issue14, (await db.get('imports', r14.importId)).status, postsImmediats, erreurs14.some((e) => e.includes('import_web.lancer')), V.volEnCours()], [{ issue: 'echec', raison: 'interne' }, 'a_lancer', 0, true, null], 'lancement non attendu : une erreur de base → echec(interne) journalisé, jamais un rejet sans gestionnaire ; la ligne reste a_lancer, zéro appel, vol libéré');
+
+        // (15) Un refus de LECTURE (le serveur a répondu, § 4.3.3 : coupe, illisible, hors_bornes, vide, lien) garde la réponse brute et le modèle sur
+        // la ligne echec — diagnostic, jamais rendu ; le vol est libéré (document_id_vol nul) et la durée écrite. (Un refus de la passerelle n'en a pas :
+        // cas 3.)
+        const ffIll = fauxFetch();
+        const rIll = await W.demarrerLectureWeb({ recipe: await fiche('rc_w14'), ctx: await ctxDe() }, { repo, fetch: ffIll.fetch });
+        await attendre(() => ffIll.appels.length === 1, 'parti');
+        ffIll.rendre[0](200, { source_kind: 'modele', page: PAGE, recette: 'pas de recette ici', usage: { input_tokens: 1, output_tokens: 1 }, stop_reason: 'end_turn', model: 'modele-test' });
+        const issueIll = await rIll.lancement; const lIll = await db.get('imports', rIll.importId);
+        eq([issueIll, lIll.status, lIll.erreur?.raison, lIll.reponse_brute, lIll.model, lIll.document_id_vol, Number.isInteger(lIll.duree_ms)], [{ issue: 'echec', raison: 'illisible' }, 'echec', 'illisible', 'pas de recette ici', 'modele-test', null, true], 'echec(illisible) : la réponse brute et le modèle sont gardés sur la ligne (§ 4.3.3), document_id_vol nul, durée écrite');
+
+        // (16) La réponse brute gardée est bornée à 16 000 points de code (REPONSE_BRUTE_MAX) : une lecture admise dont le texte du modèle est plus long
+        // est gardée coupée à 16 000 exactement ; la recette lue reste entière.
+        const ffLong = fauxFetch();
+        const rLong = await W.demarrerLectureWeb({ recipe: await fiche('rc_w15'), ctx: await ctxDe() }, { repo, fetch: ffLong.fetch });
+        await attendre(() => ffLong.appels.length === 1, 'parti');
+        ffLong.rendre[0](200, { source_kind: 'modele', page: PAGE, recette: JSON.stringify({ title: 'Pâtes', ingredients: [{ source_text: '250 g de pâtes' }], steps: [{ text: 'Cuire.' }] }) + ' '.repeat(17000), usage: { input_tokens: 1, output_tokens: 1 }, stop_reason: 'end_turn', model: 'modele-test' });
+        await rLong.lancement; const lLong = await db.get('imports', rLong.importId);
+        eq([lLong.status, Array.from(lLong.reponse_brute ?? '').length, lLong.resultat?.recette?.title, lLong.model], ['a_verifier', 16000, 'Pâtes', 'modele-test'], 'réponse brute d’une lecture admise : coupée à 16 000 points de code exactement, la recette lue entière');
+
+        // (17) Les abonnés (les écrans) : rappelés au départ du vol (en_cours) puis à sa fin ; un abonné désabonné ne l'est plus ; un VRAI événement
+        // `offline` de la fenêtre éteint enLigneLecture() et rappelle les abonnés, `online` le rallume (mutants « notifier muet », « notifier du départ
+        // retiré », « désabonnement inopérant », « écouteur offline retiré » : rouges).
+        let vus = 0; const desabonner = W.ecouterLecture(() => { vus += 1; });
+        const ffAb = fauxFetch();
+        const rAb = await W.demarrerLectureWeb({ recipe: await fiche('rc_w16'), ctx: await ctxDe() }, { repo, fetch: ffAb.fetch });
+        await attendre(() => ffAb.appels.length === 1, 'parti');
+        const auDepart = vus;
+        ffAb.rendre[0](502, { erreur: 'inaccessible' }); await rAb.lancement;
+        const aLaFin = vus;
+        desabonner();
+        let vus2 = 0; const desabonner2 = W.ecouterLecture(() => { vus2 += 1; });
+        let pendantOffline;
+        try {
+          window.dispatchEvent(new Event('offline'));
+          pendantOffline = W.enLigneLecture();
+        } finally { window.dispatchEvent(new Event('online')); desabonner2(); }
+        eq([auDepart, aLaFin, vus, vus2, pendantOffline, W.enLigneLecture()], [1, 2, 2, 2, false, true], 'ecouterLecture : un abonné rappelé au départ (en_cours) puis à la fin du vol ; désabonné, plus rien ; offline → enLigneLecture() faux et abonnés rappelés, online → vrai');
+
+        // (18) Le titre d'un « Garder et lire » est borné à LIMITES_SIGNET.titre (300 points de code) par demarrerLectureWeb, désormais la seule porte :
+        // un titre de résultat plus long donne un signet au titre coupé, jamais une adresse refusée (mutant « titre non borné » : rouge).
+        const rTitre = await W.demarrerLectureWeb({ adresse: 'https://a.test/titre-long', titre: 'é'.repeat(400), ctx: await ctxDe() }, { repo, fetch: fetchImmediat, enLigne: () => false });
+        const sTitre = typeof rTitre.recipeId === 'string' ? await fiche(rTitre.recipeId) : null; // un refus n'a pas de fiche : l'assertion rougit, sans lever
+        eq([rTitre.issue, Array.from(sTitre?.original_title ?? '').length, await rTitre.lancement, postsImmediats], ['ok', 300, { issue: 'refuse', raison: 'hors_ligne' }, 0], 'demarrerLectureWeb({ adresse, titre }) : un titre de 400 points de code → signet au titre borné à 300, l’import créé (hors ligne : rien ne part)');
+
         eq(reseau, 0, 'aucun réseau réel');
       } finally { globalThis.fetch = vraiFetch; V.reinitialiserVol(); }
     }));

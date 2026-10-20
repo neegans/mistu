@@ -1205,11 +1205,11 @@ export async function runRechercheWebTests({ eq, ok }) {
         const posts = []; const fetchLecture = async (url, options) => { posts.push(JSON.parse(options.body)); return reponse(200, LD); };
         const lien = (href, champs = {}) => ({ href, hote: new URL(href).host, titre: 'Pâtes du garde-manger', date: null, presentation: 'Un plat rapide.', temps_min: 20, difficulte: 'facile', ingredients: 7, ...champs });
         const trouve = (liens) => ({ etat: 'trouve', raison: null, liens, autres: [], repli: false, recherches: 1, modele: 'm' });
-        const navs = [];
+        const navs = []; const toasts = [];
         const monter = async (liens, lecture = {}) => {
           S.reinitialiserWeb();
           let rendre; const chercher = async () => new Promise((r) => { rendre = r; });
-          const root = await S.renderSearch({}, { mode: 'web', q: 'pâtes' }, await ctxDe(), { chercher, navigate: (p) => navs.push(p), remplacerAdresse: () => {}, toast: () => {}, lecture: { repo, fetch: fetchLecture, ...lecture } });
+          const root = await S.renderSearch({}, { mode: 'web', q: 'pâtes' }, await ctxDe(), { chercher, navigate: (p) => navs.push(p), remplacerAdresse: () => {}, toast: (m) => toasts.push(m), lecture: { repo, fetch: fetchLecture, ...lecture } });
           scene.append(root);
           [...root.querySelectorAll('button')].find((b) => b.textContent === 'Chercher sur le web avec l’assistant').click();
           await new Promise((r) => setTimeout(r, 0)); rendre(trouve(liens)); await new Promise((r) => setTimeout(r, 0));
@@ -1266,6 +1266,19 @@ export async function runRechercheWebTests({ eq, ok }) {
         [...carteDe(root).querySelectorAll('button')].find((x) => x.textContent === 'Garder ce lien').click();
         const q = new URLSearchParams(navs.at(-1).split('?')[1]);
         eq([navs.at(-1).startsWith('/add/signet?'), q.get('adresse'), q.get('titre'), [...q.keys()].sort()], [true, 'https://r.test/hors', 'Pâtes du garde-manger', ['adresse', 'titre']], 'régression : « Garder ce lien » mène toujours au formulaire, adresse et titre seulement');
+        // Ronde 1 : une écriture impossible (quota, base fermée) est journalisée (search.garder_et_lire) et dite « Le lien n’a pas pu être gardé.
+        // Réessaie. » — jamais « Adresse non reconnue. » pour une adresse valide — ; le bouton se rallume ; rien d'écrit, zéro POST, aucune navigation.
+        const nPosts = posts.length; const nNavs = navs.length;
+        const erreursG = []; const vraiErreurG = console.error; console.error = (...a) => { erreursG.push(String(a[0])); };
+        let bPanne;
+        try {
+          root = await monter([lien('https://r.test/panne')], { repo: { ...repo, saveBatch: async () => { throw new Error('disque plein'); } } });
+          bPanne = garderEtLire(carteDe(root)); const nToasts = toasts.length;
+          bPanne.click();
+          await attendre(() => toasts.length > nToasts, 'le refus dit');
+        } finally { console.error = vraiErreurG; }
+        eq([toasts.at(-1), bPanne.disabled, erreursG.some((e) => e.includes('search.garder_et_lire')), (await db.getAll('recipes')).some((r) => r.source_url === 'https://r.test/panne'), posts.length - nPosts, navs.length - nNavs], ['Le lien n’a pas pu être gardé. Réessaie.', false, true, false, 0, 0], '« Garder et lire » : une écriture impossible → journalisée, « Le lien n’a pas pu être gardé. Réessaie. », bouton rallumé ; rien d’écrit, zéro POST, aucune navigation');
+
         eq(reseau, 0, 'aucun réseau réel');
       });
     } finally { globalThis.fetch = vraiFetch; scene.remove(); S.reinitialiserWeb(); setUiLocale(localeAvant); }

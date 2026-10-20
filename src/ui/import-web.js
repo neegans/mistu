@@ -10,7 +10,7 @@ import { lienSignet, doublonDAdresse } from '../core/lien.js';
 import { TransitionRefusee } from '../core/db.js';
 import * as repoModule from '../model/repo.js';
 import { LIMITES_PASSERELLE } from '../domain/passerelle.js';
-import { RAISONS_ECHEC, IMPORTS_OUVERTS } from '../domain/import-cible.js';
+import { RAISONS_ECHEC, IMPORTS_OUVERTS, importOuvert } from '../domain/import-cible.js';
 import { lireRecetteWeb, fabriquerImportWeb } from '../domain/lecture-web.js';
 import { sessionAssistant } from './components.js';
 import { signetModel, fabriquerSignet, LIMITES_SIGNET } from './signet.js';
@@ -33,17 +33,17 @@ export const enLigneLecture = () => enLigneFlag;
 export function ecouterLecture(f) { abonnes.add(f); return () => abonnes.delete(f); }
 export function reinitialiserLectureWeb() { abonnes.clear(); enLigneFlag = typeof navigator === 'undefined' ? true : navigator.onLine !== false; } // tests seulement
 
-// R-B-18 : « ouvert » a UNE définition, celle d'importOuvert (src/domain/import-cible.js, m10 / VF-11 du lot A) — un statut d'IMPORTS_OUVERTS, la liste
-// que le mur de création relit en transaction ; jamais la négation des statuts terminés : une ligne reçue au statut inconnu ou nul ne masque pas la fiche.
-// importOuvert ne connaît la sorte 'web' qu'à la tâche 6 (KINDS_IMPORT + 'web', P-1) : d'ici là, sa règle (id non vide, statut ouvert) est appliquée
-// ici aux seules lignes 'web' ; à la tâche 6, ce prédicat vaut importOuvert(i) && i.kind === 'web' && i.recipe_id === recipeId.
-const ouvertDe = (imports, recipeId) => (Array.isArray(imports) ? imports : []).find((i) => !!i && typeof i === 'object' && typeof i.id === 'string' && !!i.id && i.kind === 'web' && i.recipe_id === recipeId && IMPORTS_OUVERTS.includes(i.status)) || null;
+// R-B-18 : « ouvert » a UNE définition, importOuvert (src/domain/import-cible.js, m10 / VF-11 du lot A), APPELÉE ici (ronde 1 : plus de copie de sa
+// règle) — jamais la négation des statuts terminés : une ligne reçue au statut inconnu ou nul ne masque pas la fiche. importOuvert ne liste la sorte
+// 'web' qu'à la tâche 6 (KINDS_IMPORT + 'web', P-1) : d'ici là, une ligne déjà reconnue web lui est présentée sous une sorte qu'elle liste (seule la
+// sorte est substituée) ; à la tâche 6, ce prédicat devient importOuvert(i) && i.kind === 'web' && i.recipe_id === recipeId (même résultat).
+const ouvertDe = (imports, recipeId) => (Array.isArray(imports) ? imports : []).find((i) => i?.kind === 'web' && i.recipe_id === recipeId && importOuvert({ ...i, kind: 'recette' })) || null;
 
 // --- Lancer (§ 4.3.2) -----------------------------------------------------------------------------------------------------------------------------
 // MÊME forme de retour que lancerExtraction (lot A, F-8) : { issue: 'refuse', raison } (vol_tenu, inconnu, statut, hors_ligne, non_connecte,
 // interdit, transition), { issue: 'echec', raison, ecrit? }, { issue: 'a_verifier' }. Le vol est pris AVANT tout await et libéré en finally ;
 // `appels + 1` au moment où le fetch part ; la réponse lue est écrite dans le journal (a_verifier) avant tout rendu (I-B4). `relire` : un
-// import a_verifier repart (a_verifier → a_lancer → en_cours, « Relire la page »). Le battement vit HORS de la ligne synchronisée (R-B-17).
+// import a_verifier repart (a_verifier → en_cours en UNE transaction, « Relire la page »). Le battement vit HORS de la ligne synchronisée (R-B-17).
 export async function lancerLecture(importId, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, relire = false } = {}) {
   const tenue = { importId, controller: new AbortController(), repo };
   if (!prendreVol(tenue)) return refus('vol_tenu'); // y compris quand c'est une extraction de pages qui tient le document
@@ -57,12 +57,15 @@ export async function lancerLecture(importId, { ctx, repo = repoModule, fetch: f
     const session = await sessionAssistant(ctx);
     if (!session) { liberer(); return refus('non_connecte'); }
     const signet = await repo.get('recipes', ligne.recipe_id);
-    const lien = lienSignet(signet?.source_url);
+    if (!signet) { liberer(); return refus('inconnu'); } // ronde 1 : la fiche a été effacée entre-temps (tombale reçue) — elle n'existe plus, rien n'est « interdit »
+    const lien = lienSignet(signet.source_url);
     if (!lien.ok || !lien.href.startsWith('https:')) { liberer(); return refus('interdit'); } // B-20 : rien ne part, zéro réseau
     const depart = maintenant();
+    // Ronde 1 : le départ en UNE transaction (comme T6-R1-a du lot A) — « Relire la page » passe a_verifier → en_cours sans a_lancer intermédiaire (la
+    // lecture payée n'est jamais effacée avant que le départ soit acquis) ; la lecture précédente (résultat, réponse brute, modèle, durée) est effacée
+    // AU départ : un échec de ce vol ne porte jamais le diagnostic d'un autre.
     try {
-      if (ligne.status === 'a_verifier') await repo.transitionner('imports', importId, { attendus: ['a_verifier'], patch: { status: 'a_lancer', resultat: null } });
-      await repo.transitionner('imports', importId, { attendus: ['a_lancer', 'echec'], patch: { status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null } });
+      await repo.transitionner('imports', importId, { attendus: relire ? ['a_lancer', 'echec', 'a_verifier'] : ['a_lancer', 'echec'], patch: { status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, resultat: null, reponse_brute: null, model: null, duree_ms: null } });
     } catch (e) {
       liberer();
       if (estRefus(e)) return { issue: 'refuse', raison: 'transition', statut: e.statut }; // un autre onglet a tranché entre-temps (I-10)
@@ -127,8 +130,8 @@ export async function annulerLecture(importId) {
 // en UNE transaction conditionnée, D-B21). L'adresse doit être lisible ET en https (sinon refus, rien d'écrit, zéro réseau). Un import ouvert de
 // la fiche est REPRIS (un a_verifier ou un en_cours ne relance rien, B-12) ; la création est un mur EN TRANSACTION (I-2 : absente + aucun import
 // ouvert sur cette recipe_id) ; refusée (un autre onglet, une réception synchro), l'import ouvert est relu et repris. Puis lancerLecture SANS
-// l'attendre quand la ligne est a_lancer ou echec. Rend { issue: 'ok', recipeId, importId, lancement } (lancement : la promesse du vol, ou null),
-// { issue: 'doublon', recette } ou { issue: 'refuse', raison: 'adresse' | 'interdit' }.
+// l'attendre quand la ligne est a_lancer ou echec. Rend { issue: 'ok', recipeId, importId, lancement } (lancement : la promesse du vol, ou null ;
+// elle ne rejette jamais, ronde 1), { issue: 'doublon', recette } ou { issue: 'refuse', raison: 'adresse' | 'interdit' | 'transition', statut? }.
 export async function demarrerLectureWeb({ recipe = null, adresse = null, titre = null, reperes = null, ctx } = {}, { repo = repoModule, fetch, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, langue = getUiLocale() } = {}) {
   const brute = recipe ? recipe.source_url : adresse;
   const lien = lienSignet(typeof brute === 'string' ? brute.trim() : '');
@@ -146,7 +149,9 @@ export async function demarrerLectureWeb({ recipe = null, adresse = null, titre 
       } catch (e) {
         if (!estRefus(e)) throw e;
         ligne = ouvertDe(await repo.byIndex('imports', 'recipe_id', recipe.id), recipe.id); // créé entre le rendu et la tape : repris, zéro appel de trop
-        if (!ligne) throw e;
+        // Ronde 1 : aucun import WEB ouvert, et le mur a refusé — un import ouvert d'une AUTRE sorte tient la fiche (I-2 du lot A tient par statut,
+        // toutes sortes confondues ; passation « à trancher par B ») : un refus NOMMÉ, jamais une exception non gérée ; rien d'écrit.
+        if (!ligne) return { issue: 'refuse', raison: 'transition', statut: e.statut };
       }
     }
   } else {
@@ -159,6 +164,11 @@ export async function demarrerLectureWeb({ recipe = null, adresse = null, titre 
     await repo.saveBatch({ recipes: [signet], imports: [neuve] }, { conditions: { recipes: [{ key: signet.id, absente: true }], imports: [{ key: neuve.id, absente: true }, { index: 'recipe_id', valeur: signet.id, exclus: IMPORTS_OUVERTS }] } });
     recipeId = signet.id; ligne = neuve;
   }
-  const lancement = ligne.status === 'a_lancer' || ligne.status === 'echec' ? lancerLecture(ligne.id, { ctx, repo, fetch, maintenant, enLigne, battementMs }) : null;
-  return { issue: 'ok', recipeId, importId: ligne.id, lancement };
+  // Ronde 1 : la promesse rendue ne rejette jamais — une erreur qui n'est pas un refus (base indisponible, quota) est journalisée et devient
+  // echec(interne) : l'appelant qui ne l'attend pas (« Garder et lire », la fiche) ne laisse aucun rejet sans gestionnaire.
+  const importId = ligne.id;
+  const lancement = ligne.status === 'a_lancer' || ligne.status === 'echec'
+    ? lancerLecture(importId, { ctx, repo, fetch, maintenant, enLigne, battementMs }).catch((e) => { logError('import_web.lancer', { error: e, id: importId }); return { issue: 'echec', raison: 'interne' }; })
+    : null;
+  return { issue: 'ok', recipeId, importId, lancement };
 }

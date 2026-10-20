@@ -24,7 +24,7 @@ export const CHAINES_NEUVES_AILLEURS = {
     // Lot B, tâche 4 : la ligne de repères déménagée de search.js (ligneReperes, mêmes textes).
     '≈ {n} min', '≈ {h} h', '≈ {h} h {m}', 'facile', 'moyen', 'exigeant', '1 ingrédient', '{n} ingrédients'],
   // Lot B, tâche 4 : « Garder et lire » et le doublon sur une carte de l'onglet Web.
-  '../src/ui/search.js': ['Garder et lire', 'Tu as déjà gardé cette adresse.', 'Ouvrir la fiche', 'Adresse non reconnue.'],
+  '../src/ui/search.js': ['Garder et lire', 'Tu as déjà gardé cette adresse.', 'Ouvrir la fiche', 'Adresse non reconnue.', 'Le lien n’a pas pu être gardé. Réessaie.'],
   '../src/ui/cook.js': ['Lue par l’assistant, non relue'],
   '../src/ui/grocery.js': ['Lue par l’assistant, non relue'],
   '../src/ui/recipe-edit.js': ['Une étape par paragraphe (ligne vide entre deux étapes).', 'La recette n’a pas pu être enregistrée. Réessaie.', 'Une lecture est déjà en cours : annule-la d’abord.', 'page possiblement manquante', 'lecture incomplète'],
@@ -937,13 +937,17 @@ export async function runAjouterTests({ eq, ok }) {
         let refus = null; try { await S.enregistrerSignet({ adresse: 'https://a.test/x?utm_source=y', titre: 'T' }, { repo, langue: 'fr', existantes: [existante] }); } catch (e) { refus = e.message; }
         eq([refus, (await db.getAll('recipes')).length], ['signet_doublon', 1], 'enregistrerSignet (D-B7, seconde porte) : une adresse déjà gardée → signet_doublon, rien d’écrit');
         const navs = [];
-        const root = await S.renderSignetRoute({}, { adresse: 'https://A.test/x', titre: 'T' }, { book_editions: [], booksById: new Map(), books: [], recipes: [existante] }, { repo, navigate: (p) => navs.push(p), toast: () => {} });
+        const autre = { id: 'rc_garde_b', original_title: 'Autre', availability: 'reference_only', source_url: 'https://a.test/y' };
+        const root = await S.renderSignetRoute({}, { adresse: 'https://A.test/x', titre: 'T' }, { book_editions: [], booksById: new Map(), books: [], recipes: [existante, autre] }, { repo, navigate: (p) => navs.push(p), toast: () => {} });
         const banniere = () => root.querySelector('[data-role="doublon-adresse"]');
         const garder = () => root.querySelector('[data-role="enregistrer"]');
         eq([banniere().hidden, banniere().textContent.includes('Tu as déjà gardé cette adresse.'), banniere().querySelector('a').getAttribute('href'), banniere().querySelector('a').textContent, garder().disabled], [false, true, '#/recipes/rc_garde', 'Ouvrir la fiche', true], 'route (D-B7) : adresse préremplie déjà gardée → bannière doublon-adresse, « Garder le lien » éteint, « Ouvrir la fiche » mène à la fiche');
         const champ = [...root.querySelectorAll('label.field')].find((f) => f.querySelector('span')?.textContent === 'Adresse *').querySelector('input');
         champ.value = 'https://a.test/libre'; champ.dispatchEvent(new Event('input'));
         eq([banniere().hidden, garder().disabled], [true, false], 'route (D-B7) : frappe vers une adresse libre → bannière cachée, bouton rallumé (sur place)');
+        // Ronde 1 : vers une AUTRE adresse gardée → la bannière mène à CETTE fiche (majSignet réécrit l'href sur place).
+        champ.value = 'https://a.test/y'; champ.dispatchEvent(new Event('input'));
+        eq([banniere().hidden, banniere().querySelector('a').getAttribute('href'), garder().disabled], [false, '#/recipes/rc_garde_b', true], 'route (D-B7) : frappe vers une autre adresse gardée → « Ouvrir la fiche » mène à cette fiche-là (href mis à jour sur place), bouton éteint');
         champ.value = 'https://a.test/x#ancre'; champ.dispatchEvent(new Event('input'));
         eq([banniere().hidden, garder().disabled, navs], [false, true, []], 'route (D-B7) : retour vers l’adresse gardée → de nouveau, rien d’écrit ni de navigation');
       });

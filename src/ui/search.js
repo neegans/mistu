@@ -3,7 +3,8 @@ import { el, toast as toastDom } from '../core/dom.js';
 import { t, label, getUiLocale } from '../core/i18n.js';
 import { navigate, buildQuery, remplacerAdresse } from '../core/router.js';
 import { borner } from '../core/bornes.js';
-import { lienSignet, doublonDAdresse } from '../core/lien.js';
+import { lienSignet } from '../core/lien.js';
+import { logError } from '../core/log.js';
 import { parseQuery, searchDocs, chipsFor } from '../domain/search.js';
 import { findAccompaniments } from '../domain/pairing.js';
 import { providerFrom } from '../domain/llm.js';
@@ -11,7 +12,6 @@ import { chercherRecettesWeb, construireDemande, dateLisible, reperesDe } from '
 import { RECIPE_TYPES, DIET_TAGS } from '../model/schema.js';
 import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select, sessionAssistant, carteConnexion, texteRefusAssistant, ligneReperes } from './components.js';
 import { demarrerLectureWeb } from './import-web.js';
-import { LIMITES_SIGNET } from './signet.js';
 import { addToMealFlow } from './meals.js';
 import { demarrerConnexion } from './settings.js';
 
@@ -56,15 +56,11 @@ function garderAjoutsDesListes(affiches, ancienTexte, analyse) {
 }
 
 // « Garder et lire » (lot B, D-B5 b, § 4.1 b) : le signet SANS formulaire — l'adresse et le titre du résultat (ceux que « Garder ce lien » préremplit),
-// les repères de la carte revalidés — et l'import, en UNE transaction, puis la lecture. Une adresse déjà gardée ne réécrit rien (D-B7). `deps` :
-// les gestes de demarrerLectureWeb (repo, fetch, maintenant, enLigne). Rend l'issue de demarrerLectureWeb, ou { issue: 'doublon', recette }.
+// les repères de la carte revalidés — et l'import, en UNE transaction, puis la lecture. Une adresse déjà gardée ne réécrit rien (D-B7). Ronde 1 : UNE
+// porte — l'adresse (lisible, en https), le titre (borné, l'hôte à défaut) et le doublon sont vérifiés par demarrerLectureWeb seule, à qui cette
+// fonction délègue. `deps` : les gestes de demarrerLectureWeb (repo, fetch, maintenant, enLigne). Rend son issue (ok, doublon ou refuse).
 export async function garderEtLire(lien, { ctx, ...deps } = {}) {
-  const l = lienSignet(lien?.href);
-  if (!l.ok) return { issue: 'refuse', raison: 'adresse' };
-  const doublon = doublonDAdresse(ctx?.recipes, l.href);
-  if (doublon) return { issue: 'doublon', recette: doublon };
-  const titre = borner(typeof lien.titre === 'string' && lien.titre.trim() ? lien.titre : l.hote, LIMITES_SIGNET.titre);
-  return demarrerLectureWeb({ adresse: l.href, titre, reperes: reperesDe(lien), ctx }, deps);
+  return demarrerLectureWeb({ adresse: lien?.href, titre: lien?.titre, reperes: reperesDe(lien), ctx }, deps);
 }
 
 export async function renderSearch(params, query, ctx, deps = {}) {
@@ -307,7 +303,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     bouton.disabled = true;
     let r;
     try { r = await garderEtLire(lien, { ctx, ...lecture }); }
-    catch (e) { r = null; }
+    catch (e) { logError('search.garder_et_lire', { error: e }); r = null; } // ronde 1 : une écriture impossible (quota, base fermée) laisse une trace
     if (r?.issue === 'ok') { nav(`/recipes/${encodeURIComponent(r.recipeId)}/importer`); return; }
     if (r?.issue === 'doublon') {
       const carteNoeud = bouton.closest('.card');
@@ -317,7 +313,9 @@ export async function renderSearch(params, query, ctx, deps = {}) {
       return;
     }
     bouton.disabled = false;
-    toast(t('Adresse non reconnue.'));
+    // Ronde 1 : « Adresse non reconnue. » pour une adresse refusée seulement ; toute autre issue (écriture impossible, refus de transition) dit que le
+    // lien n'a pas été gardé — une adresse valide n'est jamais accusée.
+    toast(r?.issue === 'refuse' && (r.raison === 'adresse' || r.raison === 'interdit') ? t('Adresse non reconnue.') : t('Le lien n’a pas pu être gardé. Réessaie.'));
   }
   render();
   return root;

@@ -129,7 +129,7 @@ export async function renderSignetRoute(params, query, ctx, { repo: r = repo, na
   const etat = { adresse: recue ? query.adresse : '', titre: borner(typeof query?.titre === 'string' ? query.titre : '', LIMITES_SIGNET.titre), editionId: '', cuisines: [], enCours: false };
   const livres = [{ value: '', label: t('Aucun — recette indépendante') },
     ...(ctx?.book_editions || []).map((e) => ({ value: e.id, label: libelleLivre(e, ctx?.booksById?.get(e.book_id)) }))];
-  const existantes = cuisinesExistantes(ctx);
+  const cuisinesConnues = cuisinesExistantes(ctx); // ronde 1 : les CUISINES déjà employées (puces) — pas les fiches que reçoit enregistrerSignet
   const root = el('div', null, pageHeader(t('Garder un lien web'), { back: { href: '/add', label: t('Ajouter') } }));
   if (recue) {
     // R-WEB-8 : l'hôte vient de la MÊME décision que l'enregistrement (signetModel rogne par trim(), que l'analyseur d'URL ne
@@ -149,7 +149,7 @@ export async function renderSignetRoute(params, query, ctx, { repo: r = repo, na
     const m = signetModel({ ...etat, doublon: doublonDe() });
     const erreurs = {};
     for (const cle of ['adresse', 'titre']) if (String(etat[cle] ?? '').trim() && m.erreurs[cle]) erreurs[cle] = m.erreurs[cle];
-    return { ...m, erreurs, adresse: etat.adresse, livres, existantes };
+    return { ...m, erreurs, adresse: etat.adresse, livres, existantes: cuisinesConnues };
   };
   const dessiner = () => zone.replaceChildren(renderSignet(modelVu(), gestes));
   const gestes = {
