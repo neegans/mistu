@@ -5,12 +5,11 @@ import { composerLots, cleDe } from './lots.js';
 import { fileDe } from './outbox.js';
 import { appliquerReponse } from './reponses.js';
 import { conditionFichier } from './fichiers.js';
-import { appliquerHeureServeur } from './clock.js';
+import { appliquerHeureServeur, reculMs } from './clock.js';
 import { logError } from '../core/log.js';
 
-// Recul exponentiel (spec § 5.3) : 2 s, 4 s, 8 s … plafonné à 5 min. `tries` = essais DÉJÀ comptés, donc le premier
-// échec (tries = 0) attend 2 s. Le plafond borne l'attente : un serveur longtemps absent n'enterre pas la file.
-export const reculMs = (tries) => Math.min(2000 * 2 ** Math.max(0, tries), 300000);
+// Recul exponentiel (spec § 5.3) : défini dans clock.js (module feuille, lot G tâche 3 ronde 1), réexporté ici pour ses lecteurs.
+export { reculMs };
 
 // Le bilan se compte depuis les EFFETS, jamais depuis la réponse brute (R-L3-8) : ce que le serveur annonce pour
 // une clé hors du lot ne produit rien et ne compte donc pour rien. « envoyés » = clés réellement retirées de la

@@ -29,3 +29,9 @@ export function appliquerHeureServeur(serverIso, localMs = Date.now()) {
   const minutes = Math.round(Math.abs(offsetMs) / 60000);
   return { decalageMs: offsetMs, avertir: Math.abs(offsetMs) > 5 * 60000, minutes };
 }
+
+// Recul exponentiel (spec § 5.3) : 2 s, 4 s, 8 s … plafonné à 5 min. `tries` = essais DÉJÀ comptés, donc le premier
+// échec (tries = 0) attend 2 s. Le plafond borne l'attente : un serveur longtemps absent n'enterre pas la file.
+// Ici, dans ce module feuille, depuis la ronde 1 de la tâche 3 du lot G : push.js (qui le réexporte) et fichiers.js le
+// lisent sans cycle d'imports.
+export const reculMs = (tries) => Math.min(2000 * 2 ** Math.max(0, tries), 300000);

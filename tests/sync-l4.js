@@ -1199,9 +1199,12 @@ export async function runSyncL4Tests({ eq, ok }) {
       const sf = creerStockageFactice();
       const red = reducteur();
       let lectures = 0;
-      const bilan = await passe(db, sf, { reduire: red.reduire, qualite: () => { lectures += 1; return 'reduite'; } }).envoyer({ snapshot: await snapshot(db) });
+      const progres = [];
+      const snapA = await snapshot(db);
+      const bilan = await passe(db, sf, { reduire: red.reduire, qualite: () => { lectures += 1; return 'reduite'; } }).envoyer({ snapshot: snapA, surProgression: (p) => progres.push(p) });
       const h = await Promise.all([1, 2, 3].map((n) => empreinte('jpeg-' + n)));
       eq([sf.journal.filter((j) => j.methode === 'envoyer').map((j) => [j.chemin, j.type, j.upsert]), bilan.confirmes, bilan.restants, lectures], [h.map((x) => ['u1/' + x, 'image/jpeg', false]), 3, 0, 3], 'passe (a) : trois envois dans l’ordre created_at, le Blob envoyé typé image/jpeg (S-2), qualite() appelée à CHAQUE fichier (B-16)');
+      eq([progres, F.compterFichiers(snapA, { uid: 'u1' }).aEnvoyer], [[1, 2, 3].map((n) => ({ sens: 'envoi', n, total: 3 })), 0], 'passe (a, ronde 1) : surProgression reçoit { sens: envoi, n, total } à chaque fichier (garde transfertEnCours de la tâche 5) ; les lignes écrites sont remplacées dans le snapshot de la passe, le compte final y lit 0 à envoyer (S-12 ; mutants : surProgression retiré ; snapshot non remplacé)');
       const lignes = await Promise.all([s1, s2, s3].map((s) => db.get('files', s)));
       eq(lignes.map((l) => ({ ...l.remote, uploaded_at: typeof l.remote?.uploaded_at })), h.map((x, i) => ({ sha256: x, size: ('jpeg-' + (i + 1)).length, mime: 'image/jpeg', quality: 'reduite', uploaded_at: 'string', owner: 'u1' })), 'passe (a) : remote = { empreinte et taille des octets envoyés, image/jpeg, quality — le FAIT —, uploaded_at, owner }');
       eq([(await db.getAll('outbox')).filter((e) => e.store === 'files').map((e) => e.id).sort(), (await db.get('files', orpheline)).remote, (await db.get('files', inconnue)).remote], [[s1, s2, s3].sort(), undefined, undefined], 'passe (a) : trois entrées files en file (capture D-G8) ; l’orpheline et le type inconnu intacts (mutant : orpheline envoyée)');
@@ -1274,18 +1277,27 @@ export async function runSyncL4Tests({ eq, ok }) {
         [1, 2, 2000, 'reseau', 2, true, undefined, undefined, 0], 'passe (g) : réseau au deuxième → arrêt, recul 2 s, le premier confirmé, deux restants, rien de marqué (mutant : la passe continue après reseau)');
     });
     await withRepo(async (repo, db) => {
-      await poserPhoto(repo, db, 'h1');
+      for (const g of ['h1', 'h2', 'h3']) await poserPhoto(repo, db, g);
       const sf = creerStockageFactice({ pannes: [{ methode: 'envoyer', erreur: { type: 'auth', status: 401, statusCode: '401', code: null, message: 'x' } }] });
       const bilan = await passe(db, sf, { reduire: reducteur().reduire }).envoyer({ snapshot: await snapshot(db) });
-      eq([bilan.attenteConnexion, bilan.confirmes, bilan.pauseFichiers, (await lireCles(db, 'file_error:')).length, await db.get('sync_state', 'pause_fichiers')], [true, 0, false, 0, undefined], 'passe (h) : auth → attenteConnexion, rien d’autre');
+      eq([bilan.attenteConnexion, bilan.confirmes, bilan.pauseFichiers, (await lireCles(db, 'file_error:')).length, await db.get('sync_state', 'pause_fichiers'), sf.journal.length, bilan.restants], [true, 0, false, 0, undefined, 1, 3], 'passe (h) : auth → attenteConnexion, rien d’autre — ARRÊT : trois photos, un seul envoi tenté, les trois restent (ronde 1 ; mutant : break → continue, les deux suivantes partiraient)');
     });
     await withRepo(async (repo, db) => {
-      await poserPhoto(repo, db, 'i1');
+      // Ronde 1 (B-3) : le refus d'accès de storage-api arrive en HTTP 400 + statusCode « 403 » — par le VRAI createStockage, jamais une erreur
+      // déjà classée par le factice : il doit attendre la connexion, jamais marquer chaque photo « Type de fichier refusé ».
+      for (const g of ['h403-1', 'h403-2', 'h403-3']) await poserPhoto(repo, db, g);
+      const appels = [];
+      const seau = { upload: async (chemin) => { appels.push(chemin); return { data: null, error: { status: 400, statusCode: '403', code: 'AccessDenied', message: 'new row violates row-level security policy' } }; } };
+      const bilan = await passe(db, TR.createStockage({ storage: { from: () => seau } }), { reduire: reducteur().reduire }).envoyer({ snapshot: await snapshot(db) });
+      eq([bilan.attenteConnexion, bilan.erreur?.type, appels.length, (await lireCles(db, 'file_error:')).length, bilan.restants], [true, 'auth', 1, 0, 3], 'passe (h, ronde 1) : 400 + statusCode « 403 » (RLS de storage-api) → attenteConnexion, un seul envoi, aucune file_error (mutant : statut HTTP seul → refus → trois « type »)');
+    });
+    await withRepo(async (repo, db) => {
+      for (const g of ['i1', 'i2', 'i3']) await poserPhoto(repo, db, g);
       const sf = creerStockageFactice({ pannes: [{ methode: 'envoyer', erreur: { type: 'quota', status: 413, statusCode: '413', code: null, message: 'exceeded' } }] });
       const p = passe(db, sf, { reduire: reducteur().reduire });
       const bilan = await p.envoyer({ snapshot: await snapshot(db) });
       const encore = await p.envoyer({ snapshot: await snapshot(db) });
-      eq([bilan.pauseFichiers, (await db.get('sync_state', 'pause_fichiers'))?.value?.raison, await db.get('sync_state', 'pause'), encore.pause, sf.journal.length], [true, 'stockage', undefined, true, 1], 'passe (i, B-5/S-4) : quota → sync_state.pause_fichiers posé, sync_state.pause ABSENT ; la passe suivante ne tente rien (mutant : clé pause posée)');
+      eq([bilan.pauseFichiers, (await db.get('sync_state', 'pause_fichiers'))?.value?.raison, await db.get('sync_state', 'pause'), encore.pause, sf.journal.length, bilan.confirmes, bilan.restants], [true, 'stockage', undefined, true, 1, 0, 3], 'passe (i, B-5/S-4) : quota → sync_state.pause_fichiers posé, sync_state.pause ABSENT ; la passe suivante ne tente rien ; ARRÊT : trois photos, un seul envoi (mutants : clé pause posée ; break → continue, ronde 1)');
     });
   });
 
@@ -1333,7 +1345,7 @@ export async function runSyncL4Tests({ eq, ok }) {
       const sf = creerStockageFactice({ objets: { ['u1/' + H('d')]: octets('ancien') } });
       await passe(db, sf, { qualite: () => 'originale' }).envoyer({ snapshot: await snapshot(db) });
       const l = await db.get('files', s);
-      eq([l.remote.sha256, l.remote.quality, l.remote.size, !!sf.octets('u1/' + H('d'))], [s, 'originale', ligne.size, true], 'passe (l3) : renvoi en originale → remote originale écrit, l’ancienne copie reste au serveur (orphelin, L5) (mutant : garde de la rév. 2 « autre empreinte → rien » → jamais écrit)');
+      eq([l.remote.sha256, l.remote.quality, l.remote.size, !!sf.octets('u1/' + H('d'))], [s, 'originale', ligne.size, true], 'passe (l3) : renvoi en originale → remote originale écrit (mutant : garde de la rév. 2 « autre empreinte → rien » → jamais écrit) ; « l’ancienne copie reste au serveur » est DIT, pas éprouvé : le factice n’a aucune suppression, la garantie est le test de source I-G6 (ronde 1)');
     });
     await withRepo(async (repo, db) => {
       const s = await poserPhoto(repo, db, 'autre-compte');
@@ -1387,11 +1399,12 @@ export async function runSyncL4Tests({ eq, ok }) {
     const ligneDistante = (sha256, sur = {}) => ({ sha256, mime: 'image/heic', size: 999, updated_at: DATE, remote: R({ sha256: shaC, size: copie.size }), ...sur });
     await withRepo(async (repo, db) => {
       await db.mutate({ puts: { files: [ligneDistante(H('7'))] }, origin: 'remote' });
-      const sf = creerStockageFactice({ objets: { ['u1/' + shaC]: copie } });
+      // Ronde 1 : le seau rend des octets typés application/octet-stream (comme le Storage réel peut le faire) : le blob écrit est RETYPÉ par remote.mime.
+      const sf = creerStockageFactice({ objets: { ['u1/' + shaC]: new Blob([copie], { type: 'application/octet-stream' }) } });
       const r = await passe(db, sf).telecharger([H('7')]);
       const l = await db.get('files', H('7'));
       eq([r.recus, sf.journal.map((j) => [j.methode, j.chemin]), l.blob.type, await sha256Hex(l.blob), l.size, l.mime, l.updated_at, l.syncable, await db.count('outbox')],
-        [1, [['recevoir', 'u1/' + shaC]], 'image/jpeg', shaC, 999, 'image/heic', DATE, true, 0], 'télécharger : recevoir(u1/remote.sha256), blob écrit typé remote.mime ; size, mime, updated_at de la ligne inchangés ; origine remote (mutant : putFile ordinaire → size réécrit)');
+        [1, [['recevoir', 'u1/' + shaC]], 'image/jpeg', shaC, 999, 'image/heic', DATE, true, 0], 'télécharger : recevoir(u1/remote.sha256), blob écrit typé remote.mime alors que le seau rend application/octet-stream ; size, mime, updated_at de la ligne inchangés ; origine remote (mutants : putFile ordinaire → size réécrit ; octets reçus non retypés, ronde 1)');
       eq([(await passe(db, sf).telecharger([H('7')])).recus, sf.journal.length], [0, 1], 'télécharger : blob déjà là → aucun appel');
     });
     await withRepo(async (repo, db) => {
@@ -1496,5 +1509,278 @@ export async function runSyncL4Tests({ eq, ok }) {
       if (m.startsWith('src/sync/') && s.includes('navigator.onLine')) lisentEnLigne.push(m);
     }
     eq([modules.length > 30, porteurs.sort(), lisentEnLigne], [true, ['src/app.js', 'src/sync/auth.js'], []], 'R53 : getClient n’est nommé que par auth.js (définition) et app.js (seul appelant) ; I-G4 : navigator.onLine n’est lu nulle part dans src/sync/');
+  });
+
+  // === Tâche 3, ronde 1 — un test par constat de la revue adverse (rouge d'abord pour un comportement changé ; sinon le mutant nommé, rejoué sur copie)
+  const reseau = () => ({ type: 'reseau', status: 0, statusCode: null, code: null, message: 'x' });
+  const envois = (sf) => sf.journal.filter((j) => j.methode === 'envoyer');
+  const copieR1 = octets('copie-ronde-1'); const shaR1 = await sha256Hex(copieR1);
+  const distante = (sha256, sur = {}) => ({ sha256, mime: 'image/jpeg', size: 999, updated_at: DATE, remote: R({ sha256: shaR1, size: copieR1.size }), ...sur });
+  // Une écriture d'origine remote glissée JUSTE AVANT l'écriture de la passe sur `sha256` (espion sur db.mutate) ; l'appelant le retire en finally.
+  const glisser = (db, sha256, sur) => {
+    const vrai = db.mutate; let fait = false;
+    db.mutate = async function (args) {
+      const visees = [...(args?.conditions?.files || []).map((c) => c?.key), ...(args?.puts?.files || []).map((l) => l?.sha256)];
+      if (!fait && visees.includes(sha256)) {
+        fait = true;
+        const l = await this.get('files', sha256);
+        await vrai.call(this, { puts: { files: [{ ...l, ...sur }] }, origin: 'remote' });
+      }
+      return vrai.call(this, args);
+    };
+    return () => { delete db.mutate; };
+  };
+
+  await run('ronde 1 — la garde de relecture est relue DANS la transaction (envoi et réception ; sonde de la revue)', async () => {
+    const neuf = R({ sha256: H('c'), size: 9 });
+    const tard = '2030-01-01T00:00:00.000Z';
+    await withRepo(async (repo, db) => {
+      const s = await poserPhoto(repo, db, 'glisse-envoi');
+      const snap = await snapshot(db);
+      const retirer = glisser(db, s, { remote: neuf, updated_at: tard });
+      let bilan = null;
+      try { bilan = await passe(db, creerStockageFactice(), { reduire: reducteur().reduire }).envoyer({ snapshot: snap }); } finally { retirer(); }
+      const l = await db.get('files', s);
+      eq([l.remote, l.updated_at, bilan.confirmes, await db.count('outbox')], [neuf, tard, 0, 0], 'passe (ronde 1) : une réception écrite entre la relecture et l’écriture de l’envoi n’est jamais écrasée — la garde est relue DANS la transaction (condition fusion) (mutant R9 : « db.get puis puts » du brief → remote et updated_at remplacés, ligne repartie en local)');
+    });
+    await withRepo(async (repo, db) => {
+      await db.mutate({ puts: { files: [distante(H('7'))] }, origin: 'remote' });
+      const retirer = glisser(db, H('7'), { remote: neuf, updated_at: tard });
+      let r = null;
+      try { r = await passe(db, creerStockageFactice({ objets: { ['u1/' + shaR1]: copieR1 } })).telecharger([H('7')]); } finally { retirer(); }
+      const l = await db.get('files', H('7'));
+      eq([r.recus, l.blob, l.remote, l.updated_at], [0, undefined, neuf, tard], 'télécharger (ronde 1) : une réception écrite juste avant l’écriture des octets n’est pas écrasée par la ligne périmée (même mutant R9, à la réception)');
+    });
+  });
+
+  await run('ronde 1 — « déjà présent » puis une liste qui échoue : une erreur d’envoi, jamais un upsert ni une « vérification » (§ 4.10)', async () => {
+    const cas = [[reseau(), ['reseau', false, 2000]], [{ type: 'auth', status: 401, statusCode: '401', code: null, message: 'x' }, ['auth', true, null]], [{ type: 'refus', status: 400, statusCode: '400', code: null, message: 'x' }, ['inconnu', false, 2000]]];
+    for (const [panne, attendu] of cas) {
+      await withRepo(async (repo, db) => {
+        const s = await poserPhoto(repo, db, 'liste-' + panne.type);
+        const h = await empreinte('jpeg-1');
+        const sf = creerStockageFactice({ objets: { ['u1/' + h]: octets('jpeg-1') }, pannes: [{ methode: 'lister', erreur: panne }, { methode: 'lister', erreur: panne }] });
+        const bilan = await sansConsole(async () => passe(db, sf, { reduire: reducteur().reduire }).envoyer({ snapshot: await snapshot(db) }));
+        eq([sf.journal.map((j) => [j.methode, j.methode === 'lister' ? j.options.search : j.upsert]), [bilan.erreur?.type, bilan.attenteConnexion, bilan.recul], bilan.erreurs, bilan.confirmes, await db.get('sync_state', 'file_error:' + s), (await db.get('files', s)).remote],
+          [[['envoyer', false], ['lister', h]], attendu, 0, 0, undefined, undefined], `passe (ronde 1, liste en ${panne.type}) : 409 puis lister en échec → arrêt (${attendu[0]}), ni upsert ni file_error « verification » ; une liste n’est qu’une lecture : seul auth y garde son sens, le reste est passager (mutant : verifierDistant rend « faux » sur une erreur)`);
+      });
+    }
+  });
+
+  await run('ronde 1 — createStockage : le vrai code sous l’enveloppe 400, upsert, offset, Blob rendu, sans client (B-3, § 6)', async () => {
+    const formes = [
+      [{ status: 400, statusCode: '403', code: 'AccessDenied', message: 'new row violates row-level security policy' }, 'auth'],
+      [{ status: 400, statusCode: '403', message: 'new row violates row-level security policy' }, 'auth'],
+      [{ status: 400, statusCode: '400', code: 'InvalidJWT', message: 'jwt expired' }, 'auth'],
+      [{ status: 400, statusCode: '401' }, 'auth'], [{ status: 403, statusCode: '403' }, 'auth'],
+      [{ status: 400, statusCode: '544', code: 'DatabaseTimeout' }, 'reseau'], [{ status: 400, statusCode: '503' }, 'reseau'], [{ status: 400, statusCode: '429' }, 'reseau'],
+      [{ status: 400, statusCode: '413', code: 'EntityTooLarge' }, 'quota'],
+      [{ status: 400, statusCode: '415', code: 'InvalidMimeType' }, 'refus'], [{ status: 400, statusCode: '400' }, 'refus'], [{ status: 400, statusCode: '409', code: 'Duplicate' }, 'refus'],
+      [{ status: 400, statusCode: 'abc' }, 'refus'],
+    ];
+    const obtenus = [];
+    for (const [error] of formes) obtenus.push((await TR.createStockage({ storage: { from: () => ({ upload: async () => ({ data: null, error }) }) } }).envoyer('u1/' + H('a'), octets('a'))).erreur);
+    eq(obtenus.map((e) => e.type), formes.map(([, t]) => t), 'createStockage (ronde 1) : sous HTTP 400, un statusCode numérique classe (403/401 → auth, 544/503/429 → reseau, 413 → quota, 415/400 → refus) ; codes InvalidJWT et AccessDenied → auth ; 409 reste refus, lu par dejaPresent avant le type (mutant : statut HTTP seul → tout en refus)');
+    eq([obtenus[0].status, obtenus[0].statusCode, obtenus[0].code, TR.dejaPresent(obtenus[11])], [400, '403', 'AccessDenied', true], 'createStockage (ronde 1) : statut HTTP, statusCode et code recopiés tels quels (mutant : code non recopié)');
+    const appels = [];
+    const rendu = octets('octets-du-seau', 'image/png');
+    const seau = {
+      upload: async (chemin, corps, opts) => { appels.push(['upload', opts]); return { data: { path: chemin }, error: null }; },
+      download: async (chemin) => { appels.push(['download', chemin]); return { data: rendu, error: null }; },
+      list: async (prefixe, opts) => { appels.push(['list', prefixe, opts]); return { data: null, error: { status: 500, message: 'panne' } }; },
+    };
+    const st = TR.createStockage({ storage: { from: () => seau } });
+    const e = await st.envoyer('u1/x', octets('a'), { upsert: true });
+    const r = await st.recevoir('u1/x');
+    const l = await st.lister('u1', { limit: 1000, offset: 1000 });
+    const nonBlob = await TR.createStockage({ storage: { from: () => ({ download: async () => ({ data: 'pas un blob', error: null }) }) } }).recevoir('u1/x');
+    const sans = TR.createStockage(null);
+    const [sr, sl] = [await sans.recevoir('u1/x'), await sans.lister('u1')];
+    eq([e.erreur, appels[0][1], r.blob === rendu, r.erreur, appels[2][2].limit, appels[2][2].offset, l.objets, l.erreur?.type, nonBlob.blob, nonBlob.erreur?.type, [sr.blob, sr.erreur?.type], [sl.objets, sl.erreur?.type]],
+      [null, { upsert: true }, true, null, 1000, 1000, [], 'reseau', null, 'inconnu', [null, 'auth'], [[], 'auth']], 'createStockage (ronde 1) : upsert: true transmis ; download rend le Blob du seau tel quel ; list reçoit limit ET offset ; une erreur de list est classée ; un corps qui n’est pas un Blob → inconnu ; sans client, recevoir et lister → auth sans appel (mutants : upsert toujours faux ; blob toujours nul ; contrôle Blob retiré ; offset perdu ; recevoir sans garde de client)');
+  });
+
+  await run('ronde 1 — un remote invalide ne s’écrit jamais : un original de 0 octet ne part pas, une fois marqué il ne repart plus', async () => {
+    await withRepo(async (repo, db) => {
+      const vide = new Blob([], { type: 'image/jpeg' }); const sha = await sha256Hex(vide);
+      await repo.putFile(sha, vide, { original_filename: 'vide.jpg' });
+      await db.mutate({ puts: { source_pages: [{ id: 'pg_vide', document_id: 'd', sha256: sha, updated_at: DATE }] }, origin: 'device' });
+      const sf = creerStockageFactice();
+      const p = passe(db, sf, { qualite: () => 'originale' });
+      const b1 = await p.envoyer({ snapshot: await snapshot(db) });
+      const b2 = await p.envoyer({ snapshot: await snapshot(db) });
+      const e = (await db.get('sync_state', 'file_error:' + sha))?.value;
+      eq([sf.journal.length, b1.confirmes, b1.erreurs, e?.motif, e?.sens, (await db.get('files', sha)).remote, b2.confirmes + b2.erreurs, await db.count('outbox')],
+        [0, 0, 1, 'forme', 'envoi', undefined, 0, 0], 'passe (ronde 1, sonde P2) : un fichier vide ne peut porter aucun remote valide (remoteValide : size ≥ 1) → aucun envoi, file_error forme (envoi) posée une fois, la passe suivante ne le reprend plus (mutant : remote non validé → envoyé et réécrit à chaque passe, à vie)');
+    });
+  });
+
+  await run('ronde 1 — réception : panne passagère, nouvel essai, refus du seau, arrêt (§ 4.8)', async () => {
+    await withRepo(async (repo, db) => {
+      await db.mutate({ puts: { files: [distante(H('1')), distante(H('2')), distante(H('3'))] }, origin: 'remote' });
+      const sf = creerStockageFactice({ objets: { ['u1/' + shaR1]: copieR1 }, pannes: [{ methode: 'recevoir', erreur: reseau() }] });
+      const p = passe(db, sf);
+      const r = await sansConsole(() => p.telecharger([H('1'), H('2')]));
+      eq([r.erreur?.type, r.recus, r.erreurs, (await lireCles(db, 'file_error:')).length, sf.journal.length], ['reseau', 0, 0, 0, 1], 'télécharger (ronde 1) : une panne réseau → arrêt avec erreur, rien de marqué, le second jamais demandé (mutants : réseau classé introuvable ; pas d’arrêt après reseau)');
+      const r2 = await p.telecharger([H('1')]);
+      eq([r2.recus, sf.journal.length, (await db.get('files', H('1'))).blob instanceof Blob], [1, 2, true], 'télécharger (ronde 1) : la même instance retente la même clé après un échec — enVol est vidé en finally (mutant : enVol jamais vidé → second appel sauté en silence jusqu’au redémarrage)');
+      const r3 = await p.telecharger([H('2'), H('3')], { stop: () => sf.journal.length >= 3 });
+      eq([r3.recus, sf.journal.length], [1, 3], 'télécharger (ronde 1) : stop() relu avant chaque clé (mutant : stop de telecharger ignoré)');
+    });
+    await withRepo(async (repo, db) => {
+      await db.mutate({ puts: { files: [distante(H('4'))] }, origin: 'remote' });
+      const sf = creerStockageFactice({ objets: { ['u1/' + shaR1]: copieR1 }, pannes: [{ methode: 'recevoir', erreur: { type: 'refus', status: 400, statusCode: '400', code: null, message: 'x' } }] });
+      const r = await sansConsole(() => passe(db, sf).telecharger([H('4')]));
+      eq([r.erreurs, r.erreur, (await db.get('sync_state', 'file_error:' + H('4')))?.value?.motif], [1, null, 'introuvable'], 'télécharger (ronde 1) : un refus du seau (400 sans 404) → file_error introuvable, pas un arrêt (mutant : bras refus retiré)');
+    });
+    await withRepo(async (repo, db) => {
+      await db.mutate({ puts: { files: [distante(H('5')), distante(H('6'))], source_pages: [{ id: 'pr5', sha256: H('5'), updated_at: DATE }, { id: 'pr6', sha256: H('6'), updated_at: DATE }], sync_state: [{ key: 'telecharger_tout', value: { at: DATE } }] }, origin: 'device' });
+      const sf = creerStockageFactice({ objets: { ['u1/' + shaR1]: copieR1 }, pannes: [{ methode: 'recevoir', erreur: reseau() }] });
+      const b = await sansConsole(async () => passe(db, sf).telechargerTout({ snapshot: await snapshot(db) }));
+      eq([b.erreur?.type, b.recus, b.restants, !!(await db.get('sync_state', 'telecharger_tout')), sf.journal.length, (await lireCles(db, 'file_error:')).length], ['reseau', 0, 2, true, 1, 0], 'telechargerTout (ronde 1) : une panne réseau arrête le téléchargement global, la clé telecharger_tout RESTE, rien de marqué (mutant : clé retirée malgré l’erreur)');
+    });
+  });
+
+  await run('ronde 1 — envoi : file_error posée, renvoi forcé en originale, recul, upsert en échec, nom vérifié, chaînes nettoyées, levée de reduire', async () => {
+    await withRepo(async (repo, db) => {
+      const s = await poserPhoto(repo, db, 'deja-marquee');
+      await db.mutate({ puts: { sync_state: [{ key: 'file_error:' + s, value: { motif: 'type', sens: 'envoi', at: DATE } }] }, origin: 'device' });
+      const sf = creerStockageFactice();
+      const bilan = await passe(db, sf, { reduire: reducteur().reduire }).envoyer({ snapshot: await snapshot(db) });
+      eq([sf.journal.length, bilan.confirmes, bilan.restants, (await db.get('files', s)).remote], [0, 0, 0, undefined], 'passe (ronde 1) : une photo déjà marquée (file_error type) n’est pas renvoyée à chaque passe — envoyer lit les clés file_error (mutant : erreurs: new Map() dans envoyer)');
+    });
+    await withRepo(async (repo, db) => {
+      const s = await poserPhoto(repo, db, 'renvoi-reduite');
+      const ligne = await db.get('files', s);
+      await db.mutate({ puts: { files: [{ ...ligne, remote: R({ sha256: H('d'), size: 6 }) }], sync_state: [{ key: 'renvoi_originale', value: { at: DATE } }] }, origin: 'device' });
+      const sf = creerStockageFactice();
+      const red = reducteur();
+      await passe(db, sf, { qualite: () => 'reduite', reduire: red.reduire }).envoyer({ snapshot: await snapshot(db) });
+      const l = await db.get('files', s);
+      eq([envois(sf).map((j) => j.chemin), l.remote.sha256, l.remote.quality, red.appels.length], [['u1/' + s], s, 'originale', 0], 'passe (ronde 1) : « Renvoyer en originale » sous le réglage Réduite → l’original part quand même (mutant : le renvoi suit le réglage → une réduction renvoyée, 409, boucle)');
+    });
+    await withRepo(async (repo, db) => {
+      await poserPhoto(repo, db, 'recul');
+      const sf = creerStockageFactice({ pannes: [{ methode: 'envoyer', erreur: reseau() }, { methode: 'envoyer', erreur: reseau() }] });
+      const p = passe(db, sf, { reduire: reducteur().reduire });
+      const b1 = await sansConsole(async () => p.envoyer({ snapshot: await snapshot(db) }));
+      const b2 = await sansConsole(async () => p.envoyer({ snapshot: await snapshot(db) }));
+      const b3 = await p.envoyer({ snapshot: await snapshot(db) });
+      eq([b1.recul, b2.recul, b3.confirmes, b3.recul], [2000, 4000, 1, null], 'passe (ronde 1) : deux échecs réseau consécutifs → recul 2 s puis 4 s ; la confirmation suivante l’efface (mutant : tentatives jamais incrémentées)');
+    });
+    await withRepo(async (repo, db) => {
+      const s = await poserPhoto(repo, db, 'upsert-panne');
+      const h = await empreinte('jpeg-1');
+      const sf = creerStockageFactice({ objets: { ['u1/' + h]: octets('ancien-plus-long') } }); // une autre taille que jpeg-1 (6 octets)
+      const st = { ...sf, envoyer: async (chemin, corps, opts) => { if (!opts?.upsert) return sf.envoyer(chemin, corps, opts); sf.journal.push({ methode: 'envoyer', chemin, upsert: true }); return { erreur: reseau() }; } };
+      const bilan = await sansConsole(async () => passe(db, st, { reduire: reducteur().reduire }).envoyer({ snapshot: await snapshot(db) }));
+      eq([sf.journal.map((j) => [j.methode, j.methode === 'lister' ? j.options.search : j.upsert]), bilan.erreur?.type, bilan.recul, bilan.erreurs, await db.get('sync_state', 'file_error:' + s)], [[['envoyer', false], ['lister', h], ['envoyer', true]], 'reseau', 2000, 0, undefined], 'passe (ronde 1) : déjà présent, taille différente, puis l’upsert échoue en réseau → recul, jamais une file_error « verification » (mutant : upsert en échec classé verification)');
+    });
+    await withRepo(async (repo, db) => {
+      const s = await poserPhoto(repo, db, 'autre-nom');
+      const h = await empreinte('jpeg-1');
+      const sf = creerStockageFactice({ objets: { ['u1/' + h]: octets('jpeg-1') } });
+      const st = { ...sf, lister: async (prefixe, options) => { const r = await sf.lister(prefixe, options); return { ...r, objets: r.objets.map((o) => ({ ...o, name: o.name + '.bak' })) }; } };
+      const bilan = await passe(db, st, { reduire: reducteur().reduire }).envoyer({ snapshot: await snapshot(db) });
+      eq([bilan.confirmes, (await db.get('sync_state', 'file_error:' + s))?.value?.motif], [0, 'verification'], 'passe (ronde 1) : un objet de même taille mais d’un AUTRE nom ne confirme rien (mutant : nom non vérifié dans verifierDistant)');
+    });
+    await withRepo(async (repo, db) => {
+      const s = await poserPhoto(repo, db, 'controle');
+      const l = await db.get('files', s);
+      await db.mutate({ puts: { files: [{ ...l, original_filename: 'p' + String.fromCharCode(7) + '.png' }] }, origin: 'device' });
+      await passe(db, creerStockageFactice(), { reduire: reducteur().reduire }).envoyer({ snapshot: await snapshot(db) });
+      eq((await db.get('files', s)).original_filename, 'p.png', 'passe (ronde 1) : la ligne écrite après confirmation est nettoyée des caractères de contrôle (R61 : sinon conflit perpétuel ; mutant : nettoyerChaines retiré)');
+    });
+    await withRepo(async (repo, db) => {
+      for (const g of ['mpx-1', 'mpx-2']) await poserPhoto(repo, db, g, { largeur: 5000, hauteur: 4000 });
+      const vus = []; const vrai = console.error;
+      console.error = (...a) => { vus.push(a); };
+      try { await passe(db, creerStockageFactice(), { reduire: reducteur().reduire }).envoyer({ snapshot: await snapshot(db) }); } finally { console.error = vrai; }
+      eq(vus.filter((a) => String(a[0]).includes('sync.fichiers.trop_grande')).map((a) => a[1]), [{ count: '20000000' }], 'passe (ronde 1) : deux pages de 20 Mpx → logError trop_grande UNE fois par passe, le nombre de pixels seul (mutant : tropGrandeDite retiré)');
+    });
+    await withRepo(async (repo, db) => {
+      const s1 = await poserPhoto(repo, db, 'leve-1');
+      const s2 = await poserPhoto(repo, db, 'leve-2');
+      let n = 0;
+      const reduire = async () => { n += 1; if (n === 1) throw new DOMException('canvas', 'EncodingError'); return octets('jpeg-ok'); };
+      const sf = creerStockageFactice();
+      const bilan = await sansConsole(async () => passe(db, sf, { reduire }).envoyer({ snapshot: await snapshot(db) }));
+      eq([bilan.confirmes, envois(sf).length, (await db.get('files', s1)).remote?.quality, (await db.get('files', s2)).remote?.quality], [2, 2, 'originale', 'reduite'], 'passe (ronde 1, sonde P5) : une levée de reduire qui n’est pas une ErreurImage (EncodingError, contexte 2D nul) n’arrête plus la passe : la photo part telle quelle, la suivante est réduite (mutant : levée relancée → envoyer rejette, plus rien ne part)');
+    });
+  });
+
+  await run('ronde 1 — octetsAEnvoyer : le GRAND côté décide (portrait)', async () => {
+    const r = reducteur();
+    const portrait = entetePng(800, 3000, { graine: 'portrait' });
+    const o = await F.octetsAEnvoyer({ sha256: H('a'), mime: 'image/png', size: portrait.size, blob: portrait }, { qualite: 'reduite', reduire: r.reduire });
+    eq([o.mime, r.appels.length], ['image/jpeg', 1], 'octetsAEnvoyer (ronde 1) : une page portrait de 800 × 3 000 sous 600 Ko est réduite — le grand côté, pas la largeur (mutant : largeur seule)');
+  });
+
+  await run('ronde 1 — télécharger toutes les pages : ordre, borne de temps, progression, snapshot, pages encore manquantes', async () => {
+    const poserDistantes = async (db, cles) => {
+      const objets = {}; const lignes = [];
+      for (const [i, cle] of cles.entries()) {
+        const copie = octets('tout-r1-' + i); const sha = await sha256Hex(copie);
+        objets['u1/' + sha] = copie;
+        lignes.push({ sha256: cle, mime: 'image/jpeg', size: 5000, updated_at: DATE, created_at: '2026-10-19T00:00:0' + (cles.length - i) + '.000Z', remote: R({ sha256: sha, size: copie.size }) });
+      }
+      await db.mutate({ puts: { files: lignes, source_pages: cles.map((cle, i) => ({ id: 'ptr' + i, sha256: cle, updated_at: DATE })), sync_state: [{ key: 'telecharger_tout', value: { at: DATE } }] }, origin: 'device' });
+      return { objets, lignes };
+    };
+    await withRepo(async (repo, db) => {
+      const { objets, lignes } = await poserDistantes(db, [H('1'), H('2'), H('3')]);
+      const snap = await snapshot(db);
+      const avant = F.compterFichiers(snap, { uid: 'u1' }).aTelecharger;
+      const progres = [];
+      const sf = creerStockageFactice({ objets });
+      const b = await passe(db, sf).telechargerTout({ snapshot: snap, surProgression: (p) => progres.push(p) });
+      eq([avant, b.recus, b.restants, F.compterFichiers(snap, { uid: 'u1' }).aTelecharger, sf.journal.map((j) => j.chemin), progres],
+        [3, 3, 0, 0, [...lignes].reverse().map((l) => 'u1/' + l.remote.sha256), [1, 2, 3].map((n) => ({ sens: 'reception', n, total: 3 }))], 'telechargerTout (ronde 1) : dans l’ordre created_at (pas celui des clés), surProgression en sens reception, et les lignes reçues remplacées dans le snapshot — le compte final y lit 0 à télécharger (mutants : tri retiré ; surProgression retiré ; snapshot non remplacé, S-12)');
+    });
+    await withRepo(async (repo, db) => {
+      const { objets } = await poserDistantes(db, [H('1'), H('2'), H('3')]);
+      let horloge = 0;
+      const sf = creerStockageFactice({ objets, avant: async (methode) => { if (methode === 'recevoir') horloge += 61000; } });
+      const b = await passe(db, sf, { maintenant: () => horloge }).telechargerTout({ snapshot: await snapshot(db) });
+      eq([b.recus, b.restants, !!(await db.get('sync_state', 'telecharger_tout'))], [1, 2, true], 'telechargerTout (ronde 1) : maintenant() saute de 61 s → un seul fichier, deux restants, la clé reste (mutant : borne dureeMs retirée)');
+    });
+    await withRepo(async (repo, db) => {
+      const { objets } = await poserDistantes(db, [H('9')]);
+      const sf = creerStockageFactice({ objets, avant: async (methode) => {
+        if (methode !== 'recevoir') return;
+        const l = await db.get('files', H('9'));
+        await db.mutate({ puts: { files: [{ ...l, updated_at: '2030-01-01T00:00:00.000Z' }] }, origin: 'remote' });
+      } });
+      const b = await passe(db, sf).telechargerTout({ snapshot: await snapshot(db) });
+      eq([b.recus, b.restants, !!(await db.get('sync_state', 'telecharger_tout')), (await db.get('files', H('9'))).blob], [0, 1, true, undefined], 'telechargerTout (ronde 1, sonde P4) : la seule page manquante change pendant la descente (garde N-2) → elle manque ENCORE : restants 1, la clé « Télécharger toutes les pages » reste (mutant : candidate refusée comptée comme traitée → clé retirée, page absente)');
+    });
+    await withRepo(async (repo, db) => {
+      const { objets } = await poserDistantes(db, [H('8')]);
+      let lacher = null; const tenu = new Promise((r) => { lacher = r; });
+      let recus = 0; // seul le PREMIER recevoir (celui de la tape) est tenu : sous un mutant, le second ne bloque rien (pas d'interblocage)
+      const sf = creerStockageFactice({ objets, avant: async (methode) => { if (methode === 'recevoir' && (recus += 1) === 1) await tenu; } });
+      const p = passe(db, sf);
+      const tape = p.telecharger([H('8')]);
+      const b = await p.telechargerTout({ snapshot: await snapshot(db) });
+      const cle = !!(await db.get('sync_state', 'telecharger_tout'));
+      lacher();
+      const t = await tape;
+      eq([b.recus, b.restants, cle, t.recus, sf.journal.length], [0, 1, true, 1, 1], 'telechargerTout (ronde 1) : une page déjà en vol pour une tape (enVol) n’est pas comptée comme traitée — la clé reste tant qu’elle n’est pas arrivée (mutant : candidate sautée comptée)');
+    });
+  });
+
+  await run('ronde 1 — sans compte, garde S-13, magasins du snapshot', async () => {
+    await withRepo(async (repo, db) => {
+      await poserPhoto(repo, db, 'sans-compte');
+      await db.mutate({ puts: { files: [distante(H('7'))] }, origin: 'remote' });
+      const sf = creerStockageFactice({ objets: { ['u1/' + shaR1]: copieR1 } });
+      const p = F.createFichiers({ db, stockage: sf, getUserId: () => null });
+      const snap = await snapshot(db);
+      eq([(await p.envoyer({ snapshot: snap })).rien, (await p.telecharger([H('7')])).rien, (await p.telechargerTout({ snapshot: snap })).rien, (await p.mesurerEspace()).erreur?.type, sf.journal.length], [true, true, true, 'auth', 0], 'sans compte (ronde 1) : envoyer, telecharger et telechargerTout rendent { rien: true }, mesurerEspace une erreur auth — aucun appel au seau (mutants : garde de compte retirée)');
+      await db.mutate({ puts: { files: [{ sha256: 'pas-une-empreinte', mime: 'image/jpeg', size: 5, updated_at: DATE, remote: true }] }, origin: 'remote' });
+      const r = await sansConsole(() => passe(db, sf).telecharger(['pas-une-empreinte']));
+      eq([r.erreurs, await db.get('sync_state', 'file_error:pas-une-empreinte'), sf.journal.length], [1, undefined, 0], 'S-13 (ronde 1) : une clé files qui n’est pas une empreinte ne devient jamais une clé sync_state file_error (mutant : garde de forme de poserErreur retirée)');
+    });
+    eq([...F.MAGASINS_FICHIERS], MAGASINS_SNAPSHOT, 'MAGASINS_FICHIERS (ronde 1) : les sept magasins du snapshot de la passe — la copie de ce test est épinglée sur l’export (mutant : un magasin retiré)');
   });
 }
