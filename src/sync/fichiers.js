@@ -5,6 +5,13 @@
 import { remoteValide, remoteDeCeCompte, HASH_FICHIER, CHAMPS_FILES_SERVEUR } from './tables.js';
 import { isAllowed } from './mime.js';
 import { t } from '../core/i18n.js';
+import { reduireImage, dimensionsImage, LIMITES_COUVERTURE, ErreurImage } from '../core/image.js';
+import { sha256Hex } from '../core/hash.js';
+import { dejaPresent, introuvable } from './transport.js';
+import { reculMs } from './push.js'; // cycle bénin fichiers → push → reponses → fichiers : aucun des deux n'utilise l'autre à l'évaluation
+import { nettoyerChaines } from './lots.js';
+import { syncNow } from './clock.js';
+import { logError } from '../core/log.js';
 
 export { remoteValide, remoteDeCeCompte, HASH_FICHIER };
 
@@ -128,3 +135,217 @@ export function peutEcrireRemote(avant, relue, { h, uid } = {}) {
 
 // Même forme à la réception (§ 4.8) : rien si un blob est déjà là ou si la ligne a bougé pendant la descente.
 export const peutEcrireOctets = (avant, relue) => !!relue && !(relue.blob instanceof Blob) && (relue.updated_at ?? null) === (avant?.updated_at ?? null);
+
+export const LIMITES_FICHIERS = Object.freeze({
+  parPasse: 20, dureeMs: 60000, octetsMax: 52428800,
+  pixelsMax: LIMITES_COUVERTURE.pixels, // 16 Mpx : une seule borne dans l'app (R-G-4 : hauteur à relever après mesure, § 10 geste 8)
+  reduite: Object.freeze({ maxCote: 2000, qualite: 0.8, octetsTelQuel: 614400 }),
+});
+// Le snapshot de la passe : pris UNE fois (S-12) et relu par envoyer, telechargerTout et compterFichiers.
+export const MAGASINS_FICHIERS = Object.freeze(['source_pages', 'source_documents', 'book_editions', 'recipes', 'imports', 'files', 'books']);
+const PREFIXE_ERREUR = 'file_error:';
+
+export async function lireErreursFichiers(db) {
+  return new Map((await db.getAll('sync_state')).filter((l) => String(l?.key).startsWith(PREFIXE_ERREUR)).map((l) => [l.key.slice(PREFIXE_ERREUR.length), l.value]));
+}
+
+// Les compteurs de Réglages (§ 3.6, § 4.1) : des lignes RÉFÉRENCÉES seulement ; un remote d'un autre compte n'est jamais « à télécharger ».
+export function compterFichiers(snapshot, { uid = null, erreurs = new Map() } = {}) {
+  const refs = referencesFichiers(snapshot);
+  const c = { aEnvoyer: 0, aTelecharger: 0, octetsATelecharger: 0, enErreur: 0, typeInconnu: 0, copiesPerimees: 0, copiesSansServeur: 0, aRenvoyer: 0 };
+  for (const row of snapshot?.files || []) {
+    if (!row || !refs.has(row.sha256)) continue;
+    if (erreurs.has(row.sha256)) { c.enErreur += 1; continue; }
+    if (row.syncable === false) { c.typeInconnu += 1; continue; }
+    const deCeCompte = remoteDeCeCompte(row.remote, uid);
+    if (estOriginalIci(row)) {
+      if (!deCeCompte) c.aEnvoyer += 1;
+      else if (row.remote.sha256 !== row.sha256) c.aRenvoyer += 1;
+    } else if (row.blob instanceof Blob) {
+      if (!deCeCompte) c.copiesSansServeur += 1;
+      else if (copiePerimee(row)) c.copiesPerimees += 1;
+    } else if (deCeCompte) { c.aTelecharger += 1; c.octetsATelecharger += row.remote.size; }
+  }
+  return c;
+}
+
+// Les octets qui partent (§ 4.7 a, D-G3, R-G-4) : Originale ou non-image → tels quels ; au-dessus du mur de pixels → tels quels SANS décodage ;
+// petite et légère → telle quelle ; sinon réduite en JPEG — indécodable (HEIC hors Safari) ou plus grosse que l'original → l'original.
+export async function octetsAEnvoyer(row, { qualite = 'reduite', reduire = reduireImage, limites = LIMITES_FICHIERS } = {}) {
+  const telQuel = { blob: row.blob, mime: row.mime, tropGrande: false, pixels: null };
+  if (qualite === 'originale' || !String(row.mime).startsWith('image/')) return telQuel;
+  const dims = await dimensionsImage(row.blob);
+  const pixels = dims ? dims.largeur * dims.hauteur : null;
+  if (pixels !== null && pixels > limites.pixelsMax) return { ...telQuel, tropGrande: true, pixels };
+  if (dims && Math.max(dims.largeur, dims.hauteur) <= limites.reduite.maxCote && row.blob.size <= limites.reduite.octetsTelQuel) return telQuel;
+  let reduite;
+  try { reduite = await reduire(row.blob, { maxCote: limites.reduite.maxCote, qualite: limites.reduite.qualite }); }
+  catch (error) { if (error instanceof ErreurImage) return telQuel; throw error; }
+  if (!(reduite instanceof Blob) || reduite.size > row.blob.size) return telQuel;
+  return { blob: reduite, mime: 'image/jpeg', tropGrande: false, pixels };
+}
+
+export function createFichiers({ db, stockage, getUserId, qualite = () => 'reduite', reduire = reduireImage, hacher = sha256Hex, maintenant = Date.now, limites = LIMITES_FICHIERS }) {
+  let tentatives = 0; // échecs passagers consécutifs de l'envoi (recul), remis à zéro à la première confirmation
+  const enVol = new Set(); // une seule descente à la fois par clé
+  const iso = () => new Date(maintenant()).toISOString();
+  // Une clé file_error n'est posée que sur une empreinte de forme valide (S-13) : une clé venue du serveur ne devient jamais une clé sync_state.
+  async function poserErreur(sha256, motif, sens) {
+    if (!HASH_FICHIER.test(String(sha256))) { logError('sync.fichiers.forme', { reason: motif }); return; }
+    await db.mutate({ puts: { sync_state: [{ key: PREFIXE_ERREUR + sha256, value: { motif, sens, at: iso() } }] }, origin: 'device' });
+  }
+  const remplacer = (snapshot, ligne) => {
+    const liste = snapshot?.files;
+    const i = Array.isArray(liste) ? liste.findIndex((r) => r?.sha256 === ligne.sha256) : -1;
+    if (i >= 0) liste[i] = ligne;
+  };
+  // « Déjà présent » vérifié par la taille (D-G2) : list(search = h), l'objet nommé h, metadata.size égale.
+  async function verifierDistant(uid, h, taille) {
+    const r = await stockage.lister(uid, { search: h, limit: 1 });
+    if (r.erreur) return false;
+    const objet = r.objets.find((o) => o?.name === h);
+    return !!objet && Number(objet.metadata?.size) === taille;
+  }
+
+  async function envoyer({ stop = () => false, surProgression = () => {}, snapshot } = {}) {
+    const bilan = { confirmes: 0, erreurs: 0, restants: 0, attenteConnexion: false, pauseFichiers: false, erreur: null, recul: null };
+    const uid = getUserId();
+    if (!uid) return { ...bilan, rien: true };
+    if ((await db.get('sync_state', 'pause_fichiers'))?.value) return { ...bilan, pause: true };
+    const renvoi = !!(await db.get('sync_state', 'renvoi_originale'))?.value;
+    const candidats = candidatsEnvoi(snapshot, { uid, renvoi, erreurs: await lireErreursFichiers(db) });
+    if (renvoi && !candidats.some((r) => remoteDeCeCompte(r.remote, uid))) await db.mutate({ deletes: { sync_state: ['renvoi_originale'] }, origin: 'device' });
+    const debut = maintenant();
+    let tropGrandeDite = false;
+    let i = 0;
+    for (; i < candidats.length; i += 1) {
+      if (i >= limites.parPasse || maintenant() - debut >= limites.dureeMs || stop()) break;
+      const row = candidats[i];
+      surProgression({ sens: 'envoi', n: i + 1, total: candidats.length });
+      const choisie = qualite(); // relue à CHAQUE fichier : le réglage peut changer pendant la passe (B-16)
+      // Un renvoi (la ligne porte déjà un remote de ce compte) part toujours en originale : c'est ce que le geste demande.
+      const octets = await octetsAEnvoyer(row, { qualite: remoteDeCeCompte(row.remote, uid) ? 'originale' : choisie, reduire, limites });
+      if (octets.tropGrande && !tropGrandeDite) { tropGrandeDite = true; logError('sync.fichiers.trop_grande', { count: octets.pixels }); }
+      if (octets.blob.size > limites.octetsMax) { await poserErreur(row.sha256, 'trop_gros', 'envoi'); bilan.erreurs += 1; continue; }
+      const h = await hacher(octets.blob);
+      const quality = h === row.sha256 ? 'originale' : 'reduite'; // le FAIT, jamais le réglage (D-G3, S-3)
+      const chemin = `${uid}/${h}`;
+      const corps = new Blob([octets.blob], { type: octets.mime }); // la copie retypée est la règle (S-2)
+      let r = await stockage.envoyer(chemin, corps, { upsert: false });
+      let confirme = !r.erreur;
+      if (r.erreur && dejaPresent(r.erreur)) {
+        confirme = await verifierDistant(uid, h, corps.size);
+        if (!confirme) {
+          r = await stockage.envoyer(chemin, corps, { upsert: true });
+          confirme = !r.erreur && await verifierDistant(uid, h, corps.size);
+          if (!confirme && !r.erreur) { await poserErreur(row.sha256, 'verification', 'envoi'); bilan.erreurs += 1; continue; }
+        }
+      }
+      if (!confirme) {
+        const e = r.erreur;
+        if (e.type === 'auth') { bilan.attenteConnexion = true; bilan.erreur = e; break; }
+        if (e.type === 'quota') {
+          await db.mutate({ puts: { sync_state: [{ key: 'pause_fichiers', value: { raison: 'stockage', at: iso() } }] }, origin: 'device' }); // jamais `pause` (D-G4)
+          bilan.pauseFichiers = true; bilan.erreur = e; break;
+        }
+        if (e.type === 'refus') { await poserErreur(row.sha256, 'type', 'envoi'); bilan.erreurs += 1; continue; }
+        logError('sync.fichiers.envoi', { reason: e.type, status: e.status });
+        bilan.erreur = e; bilan.recul = reculMs(tentatives); tentatives += 1; break;
+      }
+      tentatives = 0;
+      // Garde de relecture (N-2, S-10) relue DANS la transaction d'écriture (condition `fusion` de db.mutate, I-G3 ; décision de la tâche 3) :
+      // aucune fenêtre entre la relecture et l'écriture — une réception arrivée pendant l'envoi n'est jamais écrasée. null : rien d'écrit.
+      const remote = { sha256: h, size: corps.size, mime: octets.mime, quality, uploaded_at: syncNow(), owner: uid };
+      const updated_at = syncNow();
+      const ecrites = await db.mutate({ conditions: { files: [{ key: row.sha256, fusion: (relue) => (peutEcrireRemote(row, relue, { h, uid }) ? nettoyerChaines({ ...relue, remote, updated_at }) : null) }] }, origin: 'local' }); // capturée : la ligne part à la passe suivante (D-G8)
+      const ecrite = ecrites?.files?.[0];
+      if (!ecrite) continue;
+      remplacer(snapshot, ecrite);
+      bilan.confirmes += 1;
+    }
+    bilan.restants = candidats.length - i;
+    return bilan;
+  }
+
+  async function telechargerUn(sha256, uid) {
+    const ligne = await db.get('files', sha256);
+    if (!ligne || ligne.blob instanceof Blob) return 'rien';
+    if (await db.get('sync_state', PREFIXE_ERREUR + sha256)) return 'rien'; // « Réessayer » retire la clé d'abord
+    if (!remoteValide(ligne.remote)) { await poserErreur(sha256, 'forme', 'reception'); return 'erreur'; }
+    if (ligne.remote.owner !== uid) return 'rien'; // ses octets ne sont pas dans ce dossier (B-4) : aucun appel, aucune erreur
+    const r = await stockage.recevoir(`${uid}/${ligne.remote.sha256}`);
+    if (r.erreur) {
+      if (introuvable(r.erreur) || r.erreur.type === 'refus') { await poserErreur(sha256, 'introuvable', 'reception'); return 'erreur'; }
+      logError('sync.fichiers.reception', { reason: r.erreur.type, status: r.erreur.status });
+      return { erreur: r.erreur };
+    }
+    // I-G7 : ce qui s'écrit est vérifié contre remote — taille, empreinte, type de la liste blanche (défense en profondeur : remoteValide l'a déjà lu).
+    if (r.blob.size !== ligne.remote.size) { await poserErreur(sha256, 'taille', 'reception'); return 'erreur'; }
+    if (await hacher(r.blob) !== ligne.remote.sha256) { await poserErreur(sha256, 'empreinte', 'reception'); return 'erreur'; }
+    if (!isAllowed(ligne.remote.mime)) { await poserErreur(sha256, 'type', 'reception'); return 'erreur'; }
+    // Même garde, relue DANS la transaction (condition `fusion`) : rien si un blob est arrivé ou si la ligne a bougé pendant la descente.
+    const blob = new Blob([r.blob], { type: ligne.remote.mime });
+    const ecrites = await db.mutate({ conditions: { files: [{ key: sha256, fusion: (relue) => (peutEcrireOctets(ligne, relue) ? fusionnerOctetsRecus(relue, blob) : null) }] }, origin: 'remote' });
+    return ecrites?.files?.length ? 'recu' : 'rien';
+  }
+
+  async function telecharger(shas, { stop = () => false } = {}) {
+    const bilan = { recus: 0, erreurs: 0, erreur: null };
+    const uid = getUserId();
+    if (!uid) return { ...bilan, rien: true };
+    for (const sha256 of shas) {
+      if (stop()) break;
+      if (enVol.has(sha256)) continue;
+      enVol.add(sha256);
+      try {
+        const r = await telechargerUn(sha256, uid);
+        if (r === 'recu') bilan.recus += 1;
+        else if (r === 'erreur') bilan.erreurs += 1;
+        else if (r?.erreur) { bilan.erreur = r.erreur; break; }
+      } finally { enVol.delete(sha256); }
+    }
+    return bilan;
+  }
+
+  async function telechargerTout({ stop = () => false, surProgression = () => {}, snapshot } = {}) {
+    const uid = getUserId();
+    if (!uid) return { recus: 0, restants: 0, erreur: null, rien: true };
+    const erreurs = await lireErreursFichiers(db);
+    const refs = referencesFichiers(snapshot);
+    const candidats = (snapshot?.files || [])
+      .filter((row) => row && refs.has(row.sha256) && !(row.blob instanceof Blob) && remoteDeCeCompte(row.remote, uid) && !erreurs.has(row.sha256))
+      .sort((a, b) => (dateDe(a) < dateDe(b) ? -1 : dateDe(a) > dateDe(b) ? 1 : 0));
+    const bilan = { recus: 0, restants: 0, erreur: null };
+    const debut = maintenant();
+    let i = 0;
+    for (; i < candidats.length; i += 1) {
+      if (i >= limites.parPasse || maintenant() - debut >= limites.dureeMs || stop()) break;
+      surProgression({ sens: 'reception', n: i + 1, total: candidats.length });
+      const r = await telecharger([candidats[i].sha256], { stop });
+      if (r.recus) { bilan.recus += r.recus; const ecrite = await db.get('files', candidats[i].sha256); if (ecrite) remplacer(snapshot, ecrite); }
+      if (r.erreur) { bilan.erreur = r.erreur; break; }
+    }
+    bilan.restants = candidats.length - i;
+    if (!bilan.restants && !bilan.erreur) await db.mutate({ deletes: { sync_state: ['telecharger_tout'] }, origin: 'device' });
+    return bilan;
+  }
+
+  // L'espace du dossier de CE compte (D-G6, R-G-5) : une mesure, jamais un plafond ; 20 pages de 1 000 au plus (tronque).
+  async function mesurerEspace() {
+    const uid = getUserId();
+    if (!uid) return { erreur: SANS_COMPTE };
+    let offset = 0; let octets = 0; let objets = 0; let tronque = true;
+    for (let page = 0; page < 20; page += 1) {
+      const r = await stockage.lister(uid, { limit: 1000, offset });
+      if (r.erreur) return { erreur: r.erreur };
+      objets += r.objets.length;
+      for (const o of r.objets) octets += Number(o?.metadata?.size) || 0;
+      if (r.objets.length < 1000) { tronque = false; break; }
+      offset += 1000;
+    }
+    return { octets, objets, at: syncNow(), tronque };
+  }
+
+  return { envoyer, telecharger, telechargerTout, mesurerEspace };
+}
+const SANS_COMPTE = Object.freeze({ type: 'auth', status: null, statusCode: null, code: null, message: 'sans compte' });

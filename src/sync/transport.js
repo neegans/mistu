@@ -50,3 +50,51 @@ export function createTransport(client) {
     },
   };
 }
+
+// Lot G (§ 6, D-G9) : le client Storage, INJECTÉ — seul module qui tient client.storage, comme pour sync_push. Trois appels, sur le seau privé
+// `pages` : upload (upsert explicite), download, list. Jamais d'URL publique ni signée, jamais de suppression (L5). Chaque erreur est classée
+// par classerErreur, puis statusCode et code de StorageApiError sont recopiés : « déjà présent » et « introuvable » ont deux formes chez le
+// fournisseur (B-3), lues par dejaPresent et introuvable.
+const SEAU = 'pages';
+function erreurStockage(e) {
+  const classee = classerErreur({ status: Number.isFinite(e?.status) ? e.status : null, code: e?.code ?? null, message: e?.message ?? '' });
+  return { type: classee.type, status: classee.status, statusCode: e?.statusCode != null ? String(e.statusCode) : null, code: e?.code != null ? String(e.code) : null, message: classee.message };
+}
+const SANS_SEAU = () => ({ type: 'auth', status: null, statusCode: null, code: null, message: 'client absent' });
+
+export function createStockage(client) {
+  const seau = () => client?.storage?.from?.(SEAU) ?? null;
+  return {
+    async envoyer(chemin, blob, { upsert = false } = {}) {
+      const s = seau();
+      if (!s) return { erreur: SANS_SEAU() };
+      try {
+        const { error } = await s.upload(chemin, blob, { upsert: upsert === true }); // le type part comme blob.type (S-2)
+        return { erreur: error ? erreurStockage(error) : null };
+      } catch (error) { return { erreur: erreurStockage({ status: 0, message: error?.message }) }; }
+    },
+    async recevoir(chemin) {
+      const s = seau();
+      if (!s) return { blob: null, erreur: SANS_SEAU() };
+      try {
+        const { data, error } = await s.download(chemin);
+        if (error) return { blob: null, erreur: erreurStockage(error) };
+        if (!(data instanceof Blob)) return { blob: null, erreur: { type: 'inconnu', status: null, statusCode: null, code: null, message: 'corps absent' } };
+        return { blob: data, erreur: null };
+      } catch (error) { return { blob: null, erreur: erreurStockage({ status: 0, message: error?.message }) }; }
+    },
+    async lister(prefixe, { limit = 100, offset = 0, search = '' } = {}) {
+      const s = seau();
+      if (!s) return { objets: [], erreur: SANS_SEAU() };
+      try {
+        const { data, error } = await s.list(prefixe, { limit, offset, search, sortBy: { column: 'name', order: 'asc' } });
+        if (error) return { objets: [], erreur: erreurStockage(error) };
+        return { objets: Array.isArray(data) ? data : [], erreur: null };
+      } catch (error) { return { objets: [], erreur: erreurStockage({ status: 0, message: error?.message }) }; }
+    },
+  };
+}
+
+// Testés AVANT le type (F-13 : classerErreur range un 404 en « inconnu », un 400 en « refus »).
+export const dejaPresent = (e) => !!e && (e.statusCode === '409' || e.status === 409 || e.code === 'Duplicate');
+export const introuvable = (e) => !!e && (e.statusCode === '404' || e.status === 404 || ['KeyNotFound', 'NoSuchKey', 'not_found'].includes(e.code));
