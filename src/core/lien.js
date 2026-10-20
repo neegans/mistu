@@ -42,16 +42,25 @@ const SUIVI = (paire) => {
   cle = cle.toLowerCase();
   return cle.startsWith('utm_') || cle === 'fbclid' || cle === 'gclid';
 };
+// Vague finale (sécurité) : les barres finales sont retirées par une boucle LINÉAIRE — /\/+$/ était quadratique sur « //…//a » (≈ 6 s pour
+// 100 000 barres sous Node), et une fiche reçue peut en porter autant.
+const sansBarresFinales = (s) => { let k = s.length; while (k > 0 && s.charCodeAt(k - 1) === 47) k -= 1; return s.slice(0, k); };
 export function adresseNormalisee(href) {
   let u;
   try { u = new URL(String(href ?? '')); } catch { return null; }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
   const paires = u.search.slice(1).split('&').filter((p) => p !== '' && !SUIVI(p));
-  return u.origin + u.pathname.replace(/\/+$/, '') + (paires.length ? '?' + paires.join('&') : '');
+  return u.origin + sansBarresFinales(u.pathname) + (paires.length ? '?' + paires.join('&') : '');
 }
-// La première fiche dont l'adresse normalisée égale celle de `href` (une fiche sans source_url, ou à adresse illisible, est ignorée), sinon null.
+// ADRESSE_MAX = LIMITES_SIGNET.adresse (src/ui/signet.js : un module de vue, sous lequel lien.js vit — égalité épinglée par tests/lecture-web.js).
+// signetModel n'écrit jamais une adresse plus longue : un source_url au-delà (fiche reçue, archive) ne peut être le doublon d'aucun signet, et il
+// n'est même pas analysé (vague finale, sécurité).
+export const ADRESSE_MAX = 2048;
+// La première fiche dont l'adresse normalisée égale celle de `href` (une fiche sans source_url, ou à adresse illisible ou trop longue, est
+// ignorée), sinon null.
 export function doublonDAdresse(recipes, href) {
+  if (typeof href === 'string' && href.length > ADRESSE_MAX) return null;
   const cible = adresseNormalisee(href);
   if (!cible) return null;
-  return (Array.isArray(recipes) ? recipes : []).find((r) => typeof r?.source_url === 'string' && r.source_url !== '' && adresseNormalisee(r.source_url) === cible) || null;
+  return (Array.isArray(recipes) ? recipes : []).find((r) => typeof r?.source_url === 'string' && r.source_url !== '' && r.source_url.length <= ADRESSE_MAX && adresseNormalisee(r.source_url) === cible) || null;
 }

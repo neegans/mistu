@@ -277,9 +277,9 @@ export async function enregistrerLecture(importId, { repo = repoModule, remplace
 
 // --- L'écran #/recipes/<id>/importer, variante web (§ 4.2) ---------------------------------------------------------------------------------------
 // Ouvert par renderImportCible quand la fiche porte une adresse (sens unique). Gestes injectables { repo, navigate, toast, fetch, maintenant,
-// enLigne, battementMs, choisir }. L'état est relu dans la base à chaque redessin ; le résultat d'une lecture est revalidé à chaque rendu (I-B2) ;
+// enLigne, battementMs, choisir, veilleMs }. L'état est relu dans la base à chaque redessin ; le résultat d'une lecture est revalidé à chaque rendu (I-B2) ;
 // tout texte lu est rendu en nœud texte ; l'hôte RECALCULÉ est toujours dit en premier (I-B5).
-export async function renderImportWeb(params, query, ctx, { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, choisir = chooseDialog } = {}) {
+export async function renderImportWeb(params, query, ctx, { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, choisir = chooseDialog, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000 } = {}) {
   const recipe = ctx?.recipesById?.get(params?.id);
   const root = el('div', null);
   // lu : la lecture relue (relireResultat) de la ligne a_verifier, calculée UNE fois par chargement (ronde 1) — null = illisible ou pas de lecture.
@@ -429,11 +429,23 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
       el('button', { type: 'button', class: 'btn', dataset: { role: 'ignorer' }, onClick: ignorer }, t('Ignorer')), retour()));
     return bloc;
   }
+  // Vague finale (VF-15 du lot A, transposé) : une ligne en_cours que CE document ne tient pas (onglet rechargé, PWA tuée puis rouverte dans les 90 s)
+  // n'attend plus un redémarrage : la passe `interrompu` (repo.marquerInterrompus, mêmes règles, horloge de l'écran) est rejouée à l'affichage, puis
+  // toutes les BATTEMENT_MORT_MS + 1 s tant que la ligne reste en vol ailleurs et l'écran monté ; une passe qui interrompt redessine (I-B7, « Réessayer »).
+  let veille = null;
+  function veiller(maintenantAussi = true) {
+    const L = etat.ligne;
+    if (veille || L?.status !== 'en_cours' || volEnCours()?.importId === L.id || typeof repo.marquerInterrompus !== 'function') return;
+    const passe = () => { const m = Date.parse(maintenant()); return repo.marquerInterrompus(Number.isFinite(m) ? m : undefined).then((n) => (n ? redessiner() : null)).catch((e) => logError('import_web.interrompus', { error: e })); };
+    if (maintenantAussi) passe();
+    veille = setTimeout(() => { veille = null; if (root.isConnected) passe().then(() => veiller(false)); }, veilleMs);
+  }
   function dessiner() {
     const L = etat.ligne; const statut = L?.status ?? null;
     const illisible = statut === 'a_verifier' && !etat.lu; // voir charger() : jamais rendue comme une lecture, jamais une levée
     const zone = statut === 'en_cours' ? zoneVol(L) : illisible ? zoneEchec(L, { raison: 'illisible', extra: {} }) : statut === 'a_verifier' ? zoneLue(etat.lu) : statut === 'echec' ? zoneEchec(L) : zoneLancer();
     root.replaceChildren(enTete(), zone);
+    veiller();
   }
   await charger();
   dessiner();

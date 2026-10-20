@@ -26,6 +26,17 @@ export async function runLectureWebTests({ eq, ok }) {
       const fiches = [{ id: 'sans' }, { id: 'hostile', source_url: 'pas une adresse' }, { id: 'vide', source_url: '' }, { id: 'rc_1', source_url: 'https://a.test/r/?utm_medium=y' }, { id: 'rc_2', source_url: 'https://a.test/r' }];
       eq(doublonDAdresse(fiches, 'https://A.test/r#haut')?.id, 'rc_1', 'doublonDAdresse : la première fiche à la même adresse normalisée');
       eq([doublonDAdresse(fiches, 'https://a.test/autre'), doublonDAdresse(fiches, 'pas une adresse'), doublonDAdresse(null, 'https://a.test/r')], [null, null, null], 'doublonDAdresse : null sans doublon, pour une adresse illisible ou sans liste ; une fiche sans source_url ou à adresse hostile est ignorée');
+      // Vague finale (sécurité, déni de service) : une fiche REÇUE (synchro, archive) peut porter un source_url de 100 000 barres. Le retrait de la
+      // barre finale par /\/+$/ était quadratique (≈ 6 s pour UN appel sous Node, rejoué à chaque frappe du signet et à chaque « Garder et lire ») :
+      // retrait linéaire ; et un source_url plus long qu'ADRESSE_MAX (= LIMITES_SIGNET.adresse : signetModel n'écrit jamais plus long) n'est jamais un
+      // doublon. La DURÉE n'est pas affirmée ici : Chrome bascule sur un moteur linéaire quand une regex revient trop en arrière (le défaut y est
+      // invisible, mesuré : vert sur l'ancien code) — elle l'est sous Node, sans ce repli (tools/lien.test.mjs).
+      const { ADRESSE_MAX } = await import('../src/core/lien.js');
+      const { LIMITES_SIGNET } = await import('../src/ui/signet.js');
+      const barres = 'https://a.test/' + '/'.repeat(100000) + 'a';
+      eq([adresseNormalisee(barres) === barres, adresseNormalisee('https://a.test/x' + '/'.repeat(100000))], [true, 'https://a.test/x'], 'adresseNormalisee (vague finale) : 100 000 barres suivies d’un caractère → intactes ; 100 000 barres finales → retirées');
+      eq(doublonDAdresse([{ id: 'rc_barres', source_url: barres }], 'https://b.test/recette'), null, 'doublonDAdresse (vague finale, sécurité) : une fiche reçue de 100 000 barres n’est le doublon de rien');
+      eq([ADRESSE_MAX,doublonDAdresse([{ id: 'court', source_url: 'https://a.test/r' + '/'.repeat(10) }], 'https://a.test/r')?.id, doublonDAdresse([{ id: 'long', source_url: 'https://a.test/r' + '/'.repeat(ADRESSE_MAX) }], 'https://a.test/r'), doublonDAdresse([{ id: 'court', source_url: 'https://a.test/r' }], 'https://a.test/r' + '/'.repeat(ADRESSE_MAX))], [LIMITES_SIGNET.adresse, 'court', null, null], 'doublonDAdresse (vague finale) : ADRESSE_MAX = LIMITES_SIGNET.adresse ; un source_url plus long est ignoré (aucun signet ne peut le porter), en deçà la même page reste un doublon ; une adresse cherchée plus longue n’a pas de doublon (signetModel la refuse)');
     });
 
     await run('page', async () => {
@@ -592,7 +603,7 @@ export async function runLectureWebTests({ eq, ok }) {
         // --- Ouverture
         let root = await monter('rc_e1');
         eq([root.textContent.includes('Lire une recette web'), bouton(root, 'Choisir des photos'), lien(root, 'Ouvrir le lien')?.getAttribute('href'), root.querySelector('[data-role="hote"]').textContent, root.etatRouteWeb()], [true, null, 'https://ricardocuisine.com/rc_e1', 'ricardocuisine.com', { importId: null, status: null, vol: false, remplacement: null }], 'écran : la route d’un signet ouvre la variante web — aucun « Choisir des photos », « Ouvrir le lien », sous-titre = hôte recalculé');
-        eq([bouton(root, 'Lire la recette avec l’assistant').disabled, root.textContent.includes('Une lecture = un appel à l’assistant, compté dans ton quota du jour.'), await db.count('imports')], [false, true, 0], 'écran : « Lire la recette avec l’assistant » allumé ; la phrase du quota ; rien d’écrit à l’ouverture');
+        eq([bouton(root, 'Lire la recette avec l’assistant').disabled, root.textContent.includes('Une lecture = un appel à l’assistant, compté dans ton quota du jour.'), await db.count('imports'), root.querySelector('[data-role="remplacement"]')], [false, true, 0, null], 'écran : « Lire la recette avec l’assistant » allumé ; la phrase du quota ; rien d’écrit à l’ouverture ; un signet jamais lu (aucune version) ne dit rien d’un remplacement (vague finale)');
         root = await monter('rc_e1', { session: null });
         eq([root.querySelector('[data-role="connexion-ia"]')?.textContent.includes('Connecte-toi pour utiliser l’assistant.'), bouton(root, 'Lire la recette avec l’assistant').disabled, reseau], [true, true, 0], 'écran : sans session → carte « Connecte-toi », bouton éteint, zéro POST');
         root = await monter('rc_http');
@@ -786,7 +797,7 @@ export async function runLectureWebTests({ eq, ok }) {
         await attendre(async () => root.etatRouteWeb().status === 'a_verifier', 'lue');
         bouton(root, 'Relire la page').click();
         await attendre(() => ff.appels.length === 3, 'relecture');
-        eq([(await ligneDe('rc_e2')).status, (await ligneDe('rc_e2')).appels], ['en_cours', 3], '« Relire la page » : a_verifier → a_lancer → en_cours, un POST');
+        eq([(await ligneDe('rc_e2')).status, (await ligneDe('rc_e2')).appels], ['en_cours', 3], '« Relire la page » : a_verifier → en_cours en UNE transition (depuis T4-R1), un POST');
         ff.rendre[2](200, ld());
         await attendre(async () => root.etatRouteWeb().status === 'a_verifier', 'relue');
         const navsAvant = navs.length;
@@ -805,6 +816,36 @@ export async function runLectureWebTests({ eq, ok }) {
         eq([vueRel, ff.appels.length, rel.status, rel.resultat?.recette?.title], [true, 0, 'a_verifier', 'Lecture d’un autre onglet'], '« Relire la page » (P-12, ronde 1) : une autre lecture arrivée entre le rendu et la tape → rien d’écrit, aucun POST, l’écran montre la nouvelle');
         for (const r of ff.rendre) r(200, ld());
         await fini(() => !V.volEnCours());
+        root.remove();
+        // Vague finale : « Ignorer » depuis la zone d'ÉCHEC (echec → ignore), pas seulement depuis l'aperçu — retour à la fiche, le signet reste un lien.
+        await db.mutate({ puts: { recipes: [signet('rc_ign', 'https://ricardocuisine.com/rc_ign')], imports: [importWeb('imp_ign', 'rc_ign', { status: 'echec', appels: 1, erreur: { raison: 'inaccessible', extra: {} } })] }, origin: 'device' });
+        root = await monter('rc_ign');
+        const navsIgn = navs.length;
+        root.querySelector('[data-role="echec"]')?.closest('[data-role="action"]')?.querySelector('[data-role="ignorer"]')?.click();
+        const ignoreEchec = await fini(() => navs.length > navsIgn);
+        eq([ignoreEchec, (await db.get('imports', 'imp_ign')).status, navs.at(-1), (await db.get('recipes', 'rc_ign')).availability], [true, 'ignore', '/recipes/rc_ign', 'reference_only'], '« Ignorer » depuis la zone d’échec (vague finale) : echec → ignore, retour à la fiche, le signet reste un lien');
+        root.remove();
+
+        // --- Vague finale (VF-15 du lot A transposé) : une ligne en_cours de CET appareil dont le document est mort (onglet rechargé, PWA tuée puis
+        //     rouverte) n'attend plus un redémarrage : la passe `interrompu` (repo.marquerInterrompus, horloge de l'écran) est rejouée à l'affichage,
+        //     puis toutes les BATTEMENT_MORT_MS + 1 s (veilleMs injecté) tant que l'écran est monté et que la ligne vole ailleurs.
+        const vieux = new Date(Date.parse(NOW) - 120000).toISOString();
+        await db.mutate({ puts: { recipes: [signet('rc_mort', 'https://ricardocuisine.com/rc_mort'), signet('rc_mort2', 'https://ricardocuisine.com/rc_mort2')], imports: [importWeb('imp_mort', 'rc_mort', { status: 'en_cours', document_id_vol: 'document-mort', appels: 1, started_at: vieux, battement_at: vieux })] }, origin: 'device' });
+        root = await monter('rc_mort');
+        const leveMort = await fini(async () => (await db.get('imports', 'imp_mort')).status === 'echec' && root.etatRouteWeb().status === 'echec');
+        eq([leveMort, (await db.get('imports', 'imp_mort')).erreur, root.querySelector('[data-role="echec"]')?.textContent, !!bouton(root, 'Réessayer'), root.textContent.includes('En cours sur un autre écran')], [true, { raison: 'interrompu', extra: {} }, 'La lecture a été interrompue. L’appel a peut-être été compté ; relancer en coûtera un autre.', true, false], 'écran web (vague finale, VF-15) : une lecture en_cours de CET appareil au battement mort (120 s, aucune ligne battement:<id>) est levée dès l’affichage — echec(interrompu), texte I-B7, « Réessayer » ; plus de « En cours sur un autre écran » sans geste');
+        root.remove();
+        await db.mutate({ puts: { imports: [importWeb('imp_mort2', 'rc_mort2', { status: 'en_cours', document_id_vol: 'document-mort', appels: 1, started_at: vieux, battement_at: new Date(Date.parse(NOW) - 30000).toISOString() })] }, origin: 'device' });
+        let passes = 0; // espion : les passes réellement jouées (une ligne vivante n'est jamais levée, quel que soit leur nombre)
+        const repoVeille = { ...repo, marquerInterrompus: (m) => { passes += 1; return repo.marquerInterrompus(m); } };
+        root = await monter('rc_mort2', { deps: { repo: repoVeille, veilleMs: 40 } });
+        const plusieursPasses = await fini(() => passes >= 3);
+        const attendMort2 = [plusieursPasses, (await db.get('imports', 'imp_mort2')).status, root.textContent.includes('En cours sur un autre écran')];
+        await db.mutate({ puts: { imports: [{ ...(await db.get('imports', 'imp_mort2')), battement_at: vieux }] }, origin: 'device' }); // le temps passe : plus aucun battement
+        const leveMort2 = await fini(async () => (await db.get('imports', 'imp_mort2')).status === 'echec' && root.etatRouteWeb().status === 'echec' && !!bouton(root, 'Réessayer'));
+        const passesALaLevee = passes;
+        await new Promise((r) => setTimeout(r, 200));
+        eq([...attendMort2, leveMort2, (await db.get('imports', 'imp_mort2')).erreur, passes === passesALaLevee], [true, 'en_cours', true, true, { raison: 'interrompu', extra: {} }, true], 'écran web (vague finale, VF-15) : battement de 30 s à l’affichage → la ligne attend (« En cours sur un autre écran »), même après plusieurs passes ; la VEILLE rejoue la passe tant que l’écran est monté — levée sans quitter l’écran, « Réessayer » — puis s’arrête (plus aucune passe une fois la ligne levée)');
         root.remove();
 
         // --- Hors ligne après le rendu : bouton éteint, « Tu es hors ligne. », zéro POST.
@@ -854,6 +895,10 @@ export async function runLectureWebTests({ eq, ok }) {
         const e9 = await db.get('recipes', 'rc_e9');
         fiche = await renderRecipe({ id: 'rc_e9' }, { v: e9.current_version_id }, await ctxDe(), gestes()); scene.append(fiche);
         eq([e9.source_kind, e9.availability, fiche.querySelector('[data-role="bandeau-web"]')?.firstChild.textContent.endsWith(' · texte lu par l’assistant — vérifie.')], ['modele', 'partial', true], 'fiche d’une lecture par le modèle : source_kind modele, partial (lecture incomplète), « … · texte lu par l’assistant — vérifie. »');
+        // Vague finale (§ 4.5) : sur une fiche lue sur le web, la bannière du lot A (« Lue par l’assistant le … · lecture incomplète ») COEXISTE avec le
+        // bandeau web, et le bandeau web vient D'ABORD.
+        const bandeauE9 = fiche.querySelector('[data-role="bandeau-web"]'); const banniereE9 = fiche.querySelector('[data-role="bandeau-lecture"]');
+        eq([banniereE9?.querySelector('[data-role="ligne-lecture"]')?.textContent.startsWith('Lue par l’assistant le '), banniereE9?.textContent.includes('lecture incomplète'), !!(bandeauE9 && banniereE9 && (bandeauE9.compareDocumentPosition(banniereE9) & Node.DOCUMENT_POSITION_FOLLOWING))], [true, true, true], 'fiche (§ 4.5, vague finale) : la bannière du lot A est là (« Lue par l’assistant le … », « lecture incomplète ») et suit le bandeau web');
         fiche.remove();
 
         // --- Ronde 1 (I-B2, I-B5) : une lecture relue du journal telle qu'elle a été REÇUE (synchro, archive : rien n'est passé par relireResultat) —
@@ -874,6 +919,12 @@ export async function runLectureWebTests({ eq, ok }) {
         await db.mutate({ puts: { recipes: [signet('rc_meme', 'https://ricardocuisine.com/rc_meme', { original_title: 'Pâtes puttanesca' })], imports: [importWeb('imp_meme', 'rc_meme', { status: 'a_verifier', appels: 1, started_at: NOW, resultat: LW.relireResultat(ld()) })] }, origin: 'device' });
         root = await monter('rc_meme');
         eq([root.etatRouteWeb().status, root.querySelector('[data-role="titre-lu"]')], ['a_verifier', null], 'aperçu (D-B24, ronde 1) : un titre lu identique au titre de la fiche → pas de « Titre lu »');
+        root.remove();
+        // Vague finale (faux-verts) : les avertissements de l'aperçu ne s'affichent que quand ils le doivent — une lecture SANS drapeau (autres_recettes 0,
+        // incomplete faux, uncertain_fields vides, notes nulles) ne montre ni « D’autres recettes… », ni « lecture incomplète », ni « Incertain : », ni « Notes ».
+        await db.mutate({ puts: { recipes: [signet('rc_sans', 'https://ricardocuisine.com/rc_sans')], imports: [importWeb('imp_sans', 'rc_sans', { status: 'a_verifier', appels: 1, started_at: NOW, resultat: LW.relireResultat(ld({ autres_recettes: 0, texte_coupe: false }, { notes: null, incomplete: false, uncertain_fields: [] })) })] }, origin: 'device' });
+        root = await monter('rc_sans');
+        eq([root.etatRouteWeb().status, root.textContent.includes('D’autres recettes'), [...root.querySelectorAll('.chip.warn')].some((c) => c.textContent === 'lecture incomplète'), root.querySelector('[data-role="incertain"]'), [...root.querySelectorAll('h2, h3')].some((h) => h.textContent === 'Notes')], ['a_verifier', false, false, null, false], 'aperçu (vague finale, § 7.4) : une lecture sans drapeau → ni « D’autres recettes… » (autres_recettes 0), ni « lecture incomplète », ni « Incertain : », ni section « Notes » (notes nulles)');
         root.remove();
 
         // --- Deux onglets (T4-R2 du lot A) : la lecture AFFICHÉE a été remplacée par une autre (même id, même statut, autre départ, autre résultat) entre
@@ -1085,6 +1136,19 @@ export async function runLectureWebTests({ eq, ok }) {
         const corrMain = await monter('rc_m12');
         eq([corrMain.etatRouteWeb().remplacement, corrMain.querySelector('[data-role="remplacement"]')?.textContent], [true, 'Ta version écrite à la main n’est jamais remplacée sans question.'], 'remplacement (B-14, § 7.4, ronde 1) : une correction écrite à la main → « Ta version écrite à la main n’est jamais remplacée sans question. »');
         corrMain.remove();
+        // Vague finale (I-B2, S-7) : la fiche lit le « Incertain : » d'une lecture web dans le résultat RELU de la ligne du journal (relireResultat, comme
+        // l'écran) — une entrée qui porte une adresse est écartée — et ce sont les champs de la LIGNE (« b »), pas ceux de la provenance (« a »).
+        // Puis la garde « hôte illisible » du bandeau web : une provenance dont l'adresse ne se lit pas ne rend aucun bandeau « Lue sur … ».
+        await db.mutate({ puts: {
+          recipes: [dispo('rc_s7', 'https://ricardocuisine.com/s7'), dispo('rc_sh', 'https://ricardocuisine.com/sh')],
+          recipe_versions: [versionDe('rv_rc_s7', 'rc_s7', provWeb('s7', { import_id: 'imp_s7', uncertain_fields: ['a'] })), versionDe('rv_rc_sh', 'rc_sh', { generated_by: 'ai', source_url: 'pas une adresse', source_kind: 'jsonld' })],
+          imports: [importWeb('imp_s7', 'rc_s7', { status: 'enregistre', appels: 1, started_at: NOW, resultat: { ...ld(), recette: { ...RECETTE, uncertain_fields: ['voir https://evil.test/promo', 'b'] } } })] }, origin: 'device' });
+        const ficheS7 = await renderRecipe({ id: 'rc_s7' }, {}, await ctxDe(), gestes()); scene.append(ficheS7);
+        eq([ficheS7.querySelector('[data-role="incertain-lecture"]')?.textContent, ficheS7.textContent.includes('https://evil.test/promo')], ['Incertain : b', false], 'fiche (vague finale, I-B2, S-7) : « Incertain : » lu dans le résultat RELU de la ligne web — l’entrée à adresse écartée, les champs de la ligne et non ceux de la provenance');
+        ficheS7.remove();
+        const ficheSH = await renderRecipe({ id: 'rc_sh' }, {}, await ctxDe(), gestes()); scene.append(ficheSH);
+        eq([ficheSH.querySelector('[data-role="bandeau-web"]'), !!ficheSH.querySelector('[data-role="ouvrir-lien"]')], [null, true], 'fiche (vague finale) : une provenance web dont l’adresse ne se lit pas (« pas une adresse », sans url_finale) → aucun bandeau « Lue sur … » ; la fiche est rendue (« Ouvrir le lien »)');
+        ficheSH.remove();
         eq([srcRecette.includes('L’app n’a pas lu la page'), srcEn.includes('L’app n’a pas lu la page'), srcEn.includes('lot suivant')], [false, false, false], 'B-27 : « L’app n’a pas lu la page » ni dans recipe.js ni dans en.js ; le toast « lot suivant » retiré du dictionnaire');
         eq([/Anthropic|Supabase/.test(srcWeb), /Anthropic|Supabase/.test(srcVol), /Anthropic|Supabase/.test(srcDomaine), /\bconst TEXTES_/.test(srcWeb)], [false, false, false, false], 'I-B6 (test de source) : aucun texte ne nomme le fournisseur ni la base ; aucune table TEXTES_ dans import-web.js (F-11)');
         eq(reseau, 0, 'aucun réseau réel');

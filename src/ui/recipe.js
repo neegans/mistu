@@ -12,7 +12,7 @@ import { assessVersion } from '../domain/diet.js';
 import { toJsonLd, toPaprikaYaml } from '../domain/exporters.js';
 import { DIET_TAGS } from '../model/schema.js';
 import { reperesDe } from '../domain/recherche-web.js';
-import { lirePage } from '../domain/lecture-web.js';
+import { lirePage, relireResultat } from '../domain/lecture-web.js';
 import { logError } from '../core/log.js';
 import { pageHeader, section, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture, sessionAssistant, carteConnexion, ligneReperes } from './components.js';
 import { demarrerLectureWeb, texteEchecLecture, enLigneLecture, ligneWebOuverte } from './import-web.js';
@@ -90,8 +90,10 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // Import ciblé (spec § 4.3.6-4.3.7) : ce que l'assistant a lu — l'état de vérification de la VERSION AFFICHÉE, le bandeau de lecture (daté de
   // la lecture, « Incertain : … » lu dans la ligne du journal par import_id, pointeur souple) et la photo du plat. `lecture` est null hors import.
   // Lot B : la ligne d'une lecture WEB porte sa recette sous resultat.recette (resultat = { source_kind, page, recette }) — la bannière lit ses champs incertains là.
+  // Vague finale (I-B2, S-7) : ce résultat revenu du journal (synchro, archive) est RELU par relireResultat avant tout usage, comme à l'écran — une entrée
+  // d'uncertain_fields qui porte une adresse est écartée ; illisible, il vaut null (la bannière retombe sur provenance.uncertain_fields).
   const ligneLue = (ctx.imports || []).find((i) => i?.id === version?.provenance?.import_id) || null;
-  const lecture = banniereLecture(version, ligneLue?.kind === 'web' ? { ...ligneLue, resultat: ligneLue.resultat?.recette ?? null } : ligneLue);
+  const lecture = banniereLecture(version, ligneLue?.kind === 'web' ? { ...ligneLue, resultat: relireResultat(ligneLue.resultat)?.recette ?? null } : ligneLue);
   root.append(el('div', { class: 'row', style: { marginBottom: '.8rem' } }, availabilityBadge(recipe), versionBadge(version, recipe), lecture ? etatVerification(version) : null, recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, capitaliser(c)))));
   const web = bandeauWeb(version);
   if (web) root.append(web); // lot B (§ 4.5) : la source d'une version lue sur le web, d'abord — puis la bannière du lot A
