@@ -250,11 +250,20 @@ export function createFichiers({ db, stockage, getUserId, qualite = () => 'redui
       const row = candidats[i];
       surProgression({ sens: 'envoi', n: i + 1, total: candidats.length });
       const choisie = qualite(); // relue à CHAQUE fichier : le réglage peut changer pendant la passe (B-16)
-      // Un renvoi (la ligne porte déjà un remote de ce compte) part toujours en originale : c'est ce que le geste demande.
-      const octets = await octetsAEnvoyer(row, { qualite: remoteDeCeCompte(row.remote, uid) ? 'originale' : choisie, reduire, limites });
+      // Ronde 1 de la tâche 4 (REVUE B) : les deux lectures du blob local — l'en-tête (dimensionsImage) puis l'empreinte — peuvent lever (un
+      // blob IndexedDB que WebKit ne relit plus : NotReadableError). Sans filet, la ligne restait première candidate (tri par date) et bloquait à
+      // vie celles qui la suivent : elle est marquée UNE fois (`illisible`, envoi ; « Réessayer » la retente), la passe continue.
+      let octets = null; let h = null;
+      try {
+        // Un renvoi (la ligne porte déjà un remote de ce compte) part toujours en originale : c'est ce que le geste demande.
+        octets = await octetsAEnvoyer(row, { qualite: remoteDeCeCompte(row.remote, uid) ? 'originale' : choisie, reduire, limites });
+        if (octets.blob.size <= limites.octetsMax) h = await hacher(octets.blob);
+      } catch (error) {
+        logError('sync.fichiers.illisible', { error });
+        await poserErreur(row.sha256, 'illisible', 'envoi'); bilan.erreurs += 1; continue;
+      }
       if (octets.tropGrande && !tropGrandeDite) { tropGrandeDite = true; logError('sync.fichiers.trop_grande', { count: octets.pixels }); }
       if (octets.blob.size > limites.octetsMax) { await poserErreur(row.sha256, 'trop_gros', 'envoi'); bilan.erreurs += 1; continue; }
-      const h = await hacher(octets.blob);
       const corps = new Blob([octets.blob], { type: octets.mime }); // la copie retypée est la règle (S-2)
       // `quality` est le FAIT, jamais le réglage (D-G3, S-3). Ronde 1 : le remote est validé AVANT l'envoi — un fichier vide ou d'un type hors
       // liste ne peut porter aucun remote valide (il repartirait à chaque passe, à vie) : rien ne part, la ligne est marquée une fois.

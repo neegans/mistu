@@ -2052,6 +2052,8 @@ export async function runSyncL4Tests({ eq, ok }) {
     });
   });
 
+  // Ronde 1 : delaiRegroupementMs à 50 s — sans lui, la minuterie de planifier() (2 s par défaut) valait celle du recul de 2 s, et un mutant
+  // « programmerReprise(recul) remplacé par planifier() » restait vert.
   await run('moteur (épingle) : effets d’un envoi de fichiers arrêté — auth, réseau, quota (§ 4.7)', async () => {
     const panne = (type, status) => ({ methode: 'envoyer', erreur: { type, status, statusCode: String(status), code: null, message: 'x' } });
     const passeEnPanne = async (type, status) => {
@@ -2062,7 +2064,7 @@ export async function runSyncL4Tests({ eq, ok }) {
         const minuteries = []; const vrai = globalThis.setTimeout;
         globalThis.setTimeout = (fn, ms, ...reste) => { minuteries.push(ms); return vrai(fn, ms, ...reste); };
         let m = null; let fin = null;
-        try { m = moteurDe(db, { stockage: creerStockageFactice({ pannes: [panne(type, status)] }), reduire: reducteur().reduire }); fin = await sansConsole(() => m.executer('t')); } // réseau : un logError est attendu, gardé hors de la console
+        try { m = moteurDe(db, { stockage: creerStockageFactice({ pannes: [panne(type, status)] }), reduire: reducteur().reduire, delaiRegroupementMs: 50000 }); fin = await sansConsole(() => m.executer('t')); } // réseau : un logError est attendu, gardé hors de la console
         finally { globalThis.setTimeout = vrai; }
         sortie = [fin.attenteConnexion, fin.derniereErreur?.type ?? null, fin.pauseFichiers?.raison ?? null, minuteries.includes(2000), minuteries.includes(1000)];
         await m.arreter();
@@ -2113,8 +2115,541 @@ export async function runSyncL4Tests({ eq, ok }) {
     });
   });
 
+  // Remplaçant renforcé de l'assertion du brief (« rendu après une passe et câblage de app.js », qui reste : le brief l'exige). Ronde 1 : les
+  // commentaires de bloc sont retirés aussi, et les deux expressions sont ancrées — `qualite: qualiteEnvoi()` (une chaîne passée au moteur :
+  // chaque envoi lèverait) ne passe plus.
   await run('app.js (épingle) : câblage lu sans commentaires', async () => {
-    const app = (await lire('../src/app.js')).replace(/\/\/[^\n]*/g, '');
-    ok(/stockage: createStockage\(client\)/.test(app) && /qualite: qualiteEnvoi/.test(app), 'app.js (épingle, source admis) : les deux options restent hors de tout commentaire — une ligne commentée ne passe plus (mutant : stockage commenté)');
+    const app = (await lire('../src/app.js')).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    ok(/stockage: createStockage\(client\)\s*[,}\n]/.test(app) && /qualite: qualiteEnvoi\s*[,}\n]/.test(app), 'app.js (épingle, source admis) : les deux options restent hors de tout commentaire (// et /* */), la fonction qualiteEnvoi passée sans être appelée (mutants : stockage commenté ; qualite: qualiteEnvoi() — X29)');
+  });
+
+  // === Tâche 4, ronde 1 — constats de la revue adverse (spec, sécurité, faux-vert). Chaque assertion nomme le constat et le mutant qu'elle tue.
+  const attendre = (ms) => new Promise((r) => setTimeout(r, ms));
+  const tenue = () => { let lacher = null; const p = new Promise((r) => { lacher = r; }); return { p, lacher: () => lacher() }; };
+  const jusqua = async (cond) => { for (let i = 0; i < 300 && !(await cond()); i += 1) await attendre(10); return cond(); };
+  const compteDe = (sf, methode) => sf.journal.filter((j) => j.methode === methode).length;
+  // Les délais passés à setTimeout pendant `fn` (remis en finally) ; `attendre` n'y est jamais appelé.
+  const espionMinuteries = async (fn) => {
+    const ms = []; const vrai = globalThis.setTimeout;
+    globalThis.setTimeout = (f, d, ...reste) => { ms.push(d); return vrai(f, d, ...reste); };
+    try { await fn(); } finally { globalThis.setTimeout = vrai; }
+    return ms;
+  };
+  // Les codes journalisés pendant `fn` (console.error remise en finally) : logError écrit « [cuisine-os] <code> ».
+  const codesJournal = async (fn) => {
+    const codes = []; const vrai = console.error;
+    console.error = (premier) => codes.push(String(premier).replace('[cuisine-os] ', ''));
+    let r = null;
+    try { r = await fn(); } finally { console.error = vrai; }
+    return { r, codes };
+  };
+  const ARR = { erreur: { type: 'arrete' } };
+  const enPanne = { pousser: async () => ({ reponse: null, erreur: reseau() }), lire: async () => ({ lignes: null, erreur: reseau() }) };
+  const pagesDe = (cles) => cles.map((sha256, i) => ({ id: 'pg-r1-' + sha256.slice(0, 8) + i, sha256, updated_at: DATE }));
+
+  await run('ronde 1 — une tape terminée pendant la passe compte dans le compte final (spec I5, sonde P2)', async () => {
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const a = await ligneDistanteDe(db, 'course-1', H('1'));
+      const b = await ligneDistanteDe(db, 'course-2', H('2'));
+      await db.mutate({ puts: { source_pages: pagesDe([H('1'), H('2')]) }, origin: 'device' });
+      await poserPhoto(repo, db, 'course-envoi');
+      let m = null; let tape = null;
+      const sf = creerStockageFactice({ objets: { [a.chemin]: a.copie, [b.chemin]: b.copie }, avant: async (methode) => { if (methode === 'envoyer' && !tape) { tape = m.telecharger([H('1')]); await tape; } } });
+      m = moteurDe(db, { stockage: sf, reduire: reducteur().reduire, delaiRegroupementMs: 50000 });
+      const fin = await m.executer('t');
+      eq([(await tape).recus, (await db.get('files', H('1'))).blob instanceof Blob, fin.fichiers.aTelecharger, m.etat().fichiers.aTelecharger, fin.fichiers.aEnvoyer], [1, true, 1, 1, 0],
+        'I5 (ronde 1, sonde P2) : une page reçue par une tape PENDANT la passe n’est plus recomptée « à télécharger » par le compte final — le snapshot de la passe, périmé pour elle, cède à une relecture (mutant : compte final sur le seul snapshot)');
+      await m.arreter();
+    });
+  });
+
+  await run('ronde 1 — après l’arrêt, aucune API ne fait d’appel ni d’écriture (D-G13 ; MA, MB, X13 à X16)', async () => {
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const { copie, chemin } = await ligneDistanteDe(db, 'apres-arret');
+      await db.mutate({ puts: { source_pages: pagesDe([H('7')]), sync_state: [
+        { key: 'file_error:' + H('9'), value: { motif: 'type', sens: 'envoi', at: DATE } },
+        { key: 'file_error:' + H('8'), value: { motif: 'introuvable', sens: 'reception', at: DATE } },
+        { key: 'telecharger_tout', value: { at: DATE } }, { key: 'pause', value: { raison: 'quota', at: DATE } }] }, origin: 'device' });
+      const tf = creerTransportFactice({ lire: {} }); const sf = creerStockageFactice({ objets: { [chemin]: copie } });
+      const m = moteurDe(db, { transport: tf, stockage: sf });
+      await m.arreter();
+      let ecritures = 0; const vrai = db.mutate;
+      db.mutate = function (a) { ecritures += 1; return vrai.call(this, a); };
+      try {
+        const reponses = [await m.telecharger([H('7')]), await m.telechargerTout(), await m.arreterTelechargement(), await m.actualiserEspace(), await m.renvoyerEnOriginale(), await m.reessayerFichier(H('9')), await m.reessayerFichier(H('8'))];
+        eq([reponses, ecritures, tf.journal.length, sf.journal.length, (await db.get('sync_state', 'telecharger_tout'))?.value?.at, !!(await db.get('sync_state', 'file_error:' + H('9'))), !!(await db.get('sync_state', 'file_error:' + H('8'))), await db.get('sync_state', 'renvoi_originale')],
+          [[ARR, ARR, ARR, ARR, ARR, ARR, ARR], 0, 0, 0, DATE, true, true, undefined],
+          'D-G13 (ronde 1) : après l’arrêt, telecharger, telechargerTout, arreterTelechargement, actualiserEspace, renvoyerEnOriginale et reessayerFichier rendent arrete sans aucun db.mutate ni appel (mutants : garde de tête retirée d’un geste)');
+        ecritures = 0;
+        const r = await m.envoyerMaintenant();
+        eq([r, ecritures, tf.journal.length, (await db.get('sync_state', 'pause'))?.value?.raison], [ARR, 0, 0, 'quota'],
+          'D-G13 (ronde 1, envoyerMaintenant) : après l’arrêt, « Envoyer maintenant » ne lève aucune pause et ne lance aucune passe (mutant : geste hors des gardes)');
+      } finally { delete db.mutate; }
+    });
+  });
+
+  await run('ronde 1 — un geste lancé juste avant l’arrêt : envoyerMaintenant tenu comme les autres (D-G13)', async () => {
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await repo.save('books', { id: 'bE', title: 'E' });
+      await db.mutate({ puts: { sync_state: [{ key: 'pause', value: { raison: 'quota', at: DATE } }, { key: 'pause_fichiers', value: { raison: 'stockage', at: DATE } }] }, origin: 'device' });
+      const tf = creerTransportFactice({ lire: {} }); const sf = creerStockageFactice();
+      const m = moteurDe(db, { transport: tf, stockage: sf });
+      let ecrites = 0; const vrai = db.mutate;
+      db.mutate = function (a) { const p = vrai.call(this, a); p.then(() => { ecrites += 1; }, () => {}); return p; };
+      let aLArret = null; let r = null;
+      try {
+        const lance = m.envoyerMaintenant();
+        let regle = false; lance.then(() => { regle = true; });
+        await m.arreter();
+        aLArret = [tf.journal.length, sf.journal.length, ecrites, regle];
+        r = await lance;
+        await attendre(30);
+      } finally { delete db.mutate; }
+      eq([aLArret, [tf.journal.length, sf.journal.length, ecrites], !!(await db.get('sync_state', 'pause')), !!(await db.get('sync_state', 'pause_fichiers')), r?.erreur?.type ?? null], [[0, 0, 0, true], [0, 0, 0], true, true, 'arrete'],
+        'D-G13 (ronde 1) : « Envoyer maintenant » touché juste avant « Effacer les données » est attendu par arreter() (déjà réglé quand l’arrêt rend la main), ne retire aucune pause et ne lance aucune passe après l’arrêt ; réponse arrete (mutants EM1 : geste hors de vols ; EM2 : arrete non relu)');
+    });
+  });
+
+  await run('ronde 1 — l’arrêt pendant une passe ou une tape : rien de plus ensuite (MN, MO, X02, X11, X12, X30)', async () => {
+    // Arrêt pendant l'envoi d'un fichier : ni mesure d'espace, ni téléchargement global, ni écriture d'espace ensuite.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      for (let i = 0; i < 2; i += 1) await poserPhoto(repo, db, 'arret-mesure' + i);
+      const { copie, chemin } = await ligneDistanteDe(db, 'arret-global');
+      await db.mutate({ puts: { source_pages: pagesDe([H('7')]), sync_state: [{ key: 'telecharger_tout', value: { at: DATE } }] }, origin: 'device' });
+      let m = null;
+      const sf = creerStockageFactice({ objets: { [chemin]: copie }, avant: async (methode) => { if (methode === 'envoyer') m.arreter(); } });
+      m = moteurDe(db, { stockage: sf, reduire: reducteur().reduire, delaiRegroupementMs: 50000 });
+      await m.executer('t');
+      eq([compteDe(sf, 'envoyer'), compteDe(sf, 'lister'), compteDe(sf, 'recevoir'), await db.get('sync_state', 'storage_usage')], [1, 0, 0, undefined],
+        'D-G13 (ronde 1) : arrêt pendant l’envoi → aucun lister (mesure d’espace) ni recevoir (téléchargement global) ensuite, storage_usage jamais écrit (mutant MN : mesure lancée après l’arrêt)');
+    });
+    // Arrêt pendant l'envoi des FICHES : la phase fichiers n'est pas même ouverte.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await poserPhoto(repo, db, 'arret-fiches');
+      await repo.save('books', { id: 'bA', title: 'A' });
+      const tf = creerTransportFactice({ serveur: true }); const sf = creerStockageFactice();
+      let m = null;
+      const transport = { pousser: async (rows) => { m.arreter(); return tf.pousser(rows); }, lire: (t, apres, limite) => tf.lire(t, apres, limite) };
+      m = moteurDe(db, { transport, stockage: sf, reduire: reducteur().reduire, delaiRegroupementMs: 50000 });
+      const phases = []; m.onEtat((e) => phases.push(e.phase));
+      await m.executer('t');
+      eq([tf.journal.some((j) => j.appel === 'pousser'), sf.journal.length, phases.includes('fichiers')], [true, 0, false],
+        'D-G13 (ronde 1) : arrêt pendant l’envoi des fiches → la phase fichiers n’est pas ouverte, aucun appel au seau (mutant X02 : garde d’arrêt de la phase retirée)');
+    });
+    // Une tape de deux empreintes arrêtée pendant la première : la seconde ne part pas ; « Dernier échange » n'est pas écrit derrière l'arrêt.
+    await withRepo(async (repo, db) => {
+      const a = await ligneDistanteDe(db, 'deux-1', H('1'));
+      const b = await ligneDistanteDe(db, 'deux-2', H('2'));
+      const t1 = tenue();
+      const sf = creerStockageFactice({ objets: { [a.chemin]: a.copie, [b.chemin]: b.copie }, avant: async (methode) => { if (methode === 'recevoir' && compteDe(sf, 'recevoir') === 1) await t1.p; } });
+      const m = moteurDe(db, { stockage: sf });
+      const tape = m.telecharger([H('1'), H('2')]);
+      await jusqua(() => compteDe(sf, 'recevoir') === 1);
+      const arret = m.arreter();
+      t1.lacher();
+      await arret;
+      eq([compteDe(sf, 'recevoir'), (await tape).recus, (await db.get('files', H('2'))).blob instanceof Blob, await db.get('sync_state', 'last_exchange_at'), m.etat().dernierEchange], [1, 1, false, undefined, null],
+        'D-G13 (ronde 1) : une tape de deux pages arrêtée pendant la première ne télécharge pas la seconde, et n’écrit pas « Dernier échange » après l’arrêt (mutants MO/X11 : tape sans stop ; X12 : tape sans garde d’arrêt)');
+    });
+    // arreter() attend la PASSE en vol (Review Focus 5) : retenue dans la réception, elle tient l'arrêt jusqu'à sa fin.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const t1 = tenue(); let lus = 0;
+      const tf = creerTransportFactice({ lire: {} });
+      const transport = { pousser: (rows) => tf.pousser(rows), lire: async (t, apres, limite) => { lus += 1; await t1.p; return tf.lire(t, apres, limite); } };
+      const m = moteurDe(db, { transport, stockage: creerStockageFactice() });
+      const passe = m.executer('t');
+      await jusqua(() => lus > 0);
+      let arretFini = false;
+      const arret = m.arreter().then(() => { arretFini = true; });
+      await attendre(20);
+      const avantLacher = arretFini;
+      t1.lacher();
+      await arret; await passe;
+      eq([avantLacher, arretFini], [false, true], 'D-G13 (ronde 1, Review Focus 5) : arreter() ne se résout qu’après la passe en vol (mutant X30 : la passe retirée de Promise.allSettled)');
+    });
+  });
+
+  await run('ronde 1 — « Dernier échange » seulement sur un appel abouti du seau (I5 ; ME, MF, MI, X07 à X10)', async () => {
+    // Pause L3 et lecture en panne : seul l'envoi au seau aboutit (la mesure d'espace échoue) → il date l'échange.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await poserPhoto(repo, db, 'i5-envoi');
+      await db.mutate({ puts: { sync_state: [{ key: 'pause', value: { raison: 'quota', at: DATE } }] }, origin: 'device' });
+      const sf = creerStockageFactice({ pannes: [{ methode: 'lister', erreur: reseau() }] });
+      const m = moteurDe(db, { transport: enPanne, stockage: sf, reduire: reducteur().reduire, delaiRegroupementMs: 50000 });
+      const fin = await sansConsole(() => m.executer('t'));
+      eq([compteDe(sf, 'envoyer'), compteDe(sf, 'lister'), !!fin.dernierEchange, !!(await db.get('sync_state', 'last_exchange_at'))], [1, 1, true, true],
+        'I5 (ronde 1) : un envoi au seau abouti date « Dernier échange » même quand tout le reste échoue (mutant ME/X07 : envoyer hors du compteur)');
+      await m.arreter();
+    });
+    // Rien à envoyer, lecture en panne : seule la mesure d'espace aboutit → elle date l'échange.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const sf = creerStockageFactice({ objets: { ['u1/' + H('a')]: octets('abc') } });
+      const m = moteurDe(db, { transport: enPanne, stockage: sf, delaiRegroupementMs: 50000 });
+      const fin = await sansConsole(() => m.executer('t'));
+      eq([compteDe(sf, 'lister'), !!fin.dernierEchange], [1, true], 'I5 (ronde 1) : une mesure d’espace aboutie date « Dernier échange » (mutant MF/X08 : lister hors du compteur)');
+      await m.arreter();
+    });
+    // Une tape sans appel abouti : réception en panne, puis une ligne d'un autre compte (aucun appel) — « Dernier échange » reste nul.
+    await withRepo(async (repo, db) => {
+      const { copie, chemin } = await ligneDistanteDe(db, 'i5-tape');
+      await db.mutate({ puts: { files: [{ sha256: H('6'), mime: 'image/jpeg', size: 9, updated_at: DATE, remote: R({ owner: 'u2' }) }] }, origin: 'remote' });
+      const sf = creerStockageFactice({ objets: { [chemin]: copie }, pannes: [{ methode: 'recevoir', erreur: { ...reseau(), code: 'ECONNRESET', message: 'texte-du-fournisseur' } }] });
+      const m = moteurDe(db, { stockage: sf });
+      const r = await sansConsole(() => m.telecharger([H('7')]));
+      await m.telecharger([H('6')]);
+      eq([compteDe(sf, 'recevoir'), m.etat().dernierEchange, await db.get('sync_state', 'last_exchange_at')], [1, null, undefined],
+        'I5 (ronde 1) : une tape dont la réception échoue, puis une tape sans appel (autre compte), ne datent aucun échange (mutants X09 : échec compté ; MI/X10 : toucherEchange sans condition)');
+      eq(r.erreur, { type: 'reseau', status: 0 }, 'ronde 1 (sécurité) : l’erreur rendue par une tape est réduite à { type, status } — ni code ni texte du fournisseur (mutant : erreur brute)');
+      await m.arreter();
+    });
+  });
+
+  await run('ronde 1 — une levée dans la phase fichiers ne coûte rien à L3 (sécurité)', async () => {
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await poserPhoto(repo, db, 'leve');
+      await repo.save('books', { id: 'bL', title: 'L' });
+      await db.mutate({ puts: { sync_conflicts: [{ id: 'c-vieux', store: 'books', key: 'x', at: '2020-01-01T00:00:00.000Z' }] }, origin: 'remote' });
+      const tf = creerTransportFactice({ serveur: true });
+      const casse = { ...creerStockageFactice(), envoyer: async () => { throw new TypeError('stockage cassé'); } };
+      const m = moteurDe(db, { transport: tf, stockage: casse, reduire: reducteur().reduire, delaiRegroupementMs: 50000 });
+      const { r: fin, codes } = await codesJournal(() => m.executer('t'));
+      eq([!!(await db.get('sync_state', 'last_exchange_at')), await db.get('sync_conflicts', 'c-vieux'), fin.derniereErreur, fin.progressionFichiers, codes.includes('sync.fichiers'), codes.includes('sync.passe')],
+        [true, undefined, null, null, true, false],
+        'ronde 1 (sécurité) : une levée dans la phase fichiers est journalisée (sync.fichiers) ; « Dernier échange » et la purge des conflits de 30 jours ont lieu, aucune « erreur inconnue » n’est dite (mutant : un seul try pour L3 et les fichiers)');
+      await m.arreter();
+    });
+  });
+
+  await run('ronde 1 — envoi : un original illisible ici est marqué une fois et ne bloque plus ceux qui le suivent (REVUE B)', async () => {
+    const vieuxDabord = async (db, sha256) => db.mutate({ puts: { files: [{ ...(await db.get('files', sha256)), created_at: '2020-01-01T00:00:00.000Z' }] }, origin: 'device' });
+    // (a) l'empreinte des octets lève (hacher).
+    await withRepo(async (repo, db) => {
+      const vieux = await poserPhoto(repo, db, 'illisible-a', { taille: 80 });
+      const neuf = await poserPhoto(repo, db, 'lisible-a');
+      await vieuxDabord(db, vieux);
+      const sf = creerStockageFactice();
+      const hacher = async (b) => { if (b.size === 80) throw new DOMException('illisible', 'NotReadableError'); return sha256Hex(b); };
+      const bilan = await sansConsole(async () => passe(db, sf, { qualite: () => 'originale', hacher }).envoyer({ snapshot: await snapshot(db) }));
+      eq([bilan.confirmes, bilan.erreurs, (await db.get('sync_state', 'file_error:' + vieux))?.value?.motif, (await db.get('sync_state', 'file_error:' + vieux))?.value?.sens, !!(await db.get('files', neuf)).remote, envois(sf).length],
+        [1, 1, 'illisible', 'envoi', true, 1], 'REVUE B (a) : une empreinte qui lève sur l’original le marque illisible (envoi) et la photo suivante part (mutant : levée par fichier non attrapée)');
+    });
+    // (b) la lecture de l'en-tête lève (dimensionsImage : arrayBuffer rejeté, comme un blob IndexedDB illisible sous WebKit), sur deux passes.
+    await withRepo(async (repo, db) => {
+      const vieux = await poserPhoto(repo, db, 'illisible-b', { taille: 80 });
+      const neuf = await poserPhoto(repo, db, 'lisible-b');
+      await vieuxDabord(db, vieux);
+      const sf = creerStockageFactice();
+      const p = passe(db, sf, { reduire: reducteur().reduire });
+      const vrai = Blob.prototype.arrayBuffer;
+      Blob.prototype.arrayBuffer = function () { return this.size === 80 ? Promise.reject(new DOMException('illisible', 'NotReadableError')) : vrai.call(this); };
+      let b1 = null; let b2 = null;
+      try {
+        b1 = await sansConsole(async () => p.envoyer({ snapshot: await snapshot(db) }));
+        b2 = await sansConsole(async () => p.envoyer({ snapshot: await snapshot(db) }));
+      } finally { Blob.prototype.arrayBuffer = vrai; }
+      eq([b1.confirmes, b1.erreurs, (await db.get('sync_state', 'file_error:' + vieux))?.value?.motif, !!(await db.get('files', neuf)).remote, b2.confirmes, b2.erreurs, envois(sf).length],
+        [1, 1, 'illisible', true, 0, 0, 1], 'REVUE B (b) : un en-tête illisible marque l’original une fois ; la photo suivante part ; la passe suivante ne retente rien (mutant : la ligne fautive reste première candidate)');
+    });
+  });
+
+  await run('ronde 1 — « Arrêter le téléchargement » pendant la lecture de la clé ; aucune reprise derrière l’arrêt (REVUE A, P1)', async () => {
+    const troisDistantes = async (db, prefixe) => {
+      const objets = {}; const cles = [];
+      for (let i = 0; i < 3; i += 1) { const cle = H(String(i + 1)); const { copie, chemin } = await ligneDistanteDe(db, prefixe + i, cle); objets[chemin] = copie; cles.push(cle); }
+      await db.mutate({ puts: { source_pages: pagesDe(cles) }, origin: 'device' });
+      return objets;
+    };
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const objets = await troisDistantes(db, 'revue-a-');
+      await db.mutate({ puts: { sync_state: [{ key: 'telecharger_tout', value: { at: DATE } }] }, origin: 'device' });
+      const sf = creerStockageFactice({ objets });
+      const m = moteurDe(db, { stockage: sf, delaiRegroupementMs: 50000 });
+      let touche = false; let fin = null; const vrai = db.get;
+      // La lecture est DEMANDÉE avant le geste (sa transaction précède la suppression de la clé), puis « Arrêter » est touché pendant qu'elle court.
+      db.get = function (store, cle) { const p = vrai.call(this, store, cle); if (!touche && store === 'sync_state' && cle === 'telecharger_tout') { touche = true; m.arreterTelechargement(); } return p; };
+      const minuteries = await espionMinuteries(async () => { try { fin = await m.executer('t'); } finally { delete db.get; } });
+      eq([touche, compteDe(sf, 'recevoir'), fin.telechargementGlobal], [true, 0, false], 'REVUE A (ronde 1) : « Arrêter le téléchargement » touché pendant la lecture de la clé arrête la passe — la génération est lue AVANT l’attente (mutant : génération lue après)');
+      ok(!minuteries.includes(1000), 'P1 (ronde 1) : un téléchargement arrêté par la personne ne programme aucune reprise à 1 s (mutant : restants comptés malgré la génération changée)');
+      await m.arreter();
+    });
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const objets = await troisDistantes(db, 'sonde-p1-');
+      let m = null;
+      const sf = creerStockageFactice({ objets, avant: async (methode) => { if (methode === 'recevoir' && compteDe(sf, 'recevoir') === 1) await m.arreterTelechargement(); } });
+      m = moteurDe(db, { stockage: sf, delaiRegroupementMs: 50000 });
+      const minuteries = await espionMinuteries(() => m.telechargerTout());
+      eq([compteDe(sf, 'recevoir'), minuteries.includes(1000)], [1, false], 'P1 (ronde 1, sonde) : telechargerTout puis « Arrêter » au premier recevoir → aucune passe relancée à 1 s (mutant MH : restants du téléchargement comptés)');
+      await m.arreter();
+    });
+  });
+
+  await run('ronde 1 — envoi des fiches bloqué : la phase fichiers ne touche pas au seau (§ 4.7 ; X01, MM)', async () => {
+    const bloque = async (erreur) => {
+      let sortie = null;
+      await withRepo(async (repo, db) => {
+        await toutDejaEnvoye(db);
+        await poserPhoto(repo, db, 'bloque-' + erreur.type);
+        await repo.save('books', { id: 'bB', title: 'B' });
+        const tf = creerTransportFactice({ pousser: [{ erreur }] }); const sf = creerStockageFactice();
+        let m = null;
+        const minuteries = await espionMinuteries(async () => { m = moteurDe(db, { transport: tf, stockage: sf, reduire: reducteur().reduire, delaiRegroupementMs: 50000 }); await sansConsole(() => m.executer('t')); });
+        sortie = [tf.journal.some((j) => j.appel === 'pousser'), sf.journal.length, minuteries.includes(1000)];
+        await m.arreter();
+      });
+      return sortie;
+    };
+    eq(await bloque({ type: 'auth', status: 401, message: '' }), [true, 0, false], '§ 4.7 (ronde 1) : envoi des fiches en auth → aucun appel au seau, aucune reprise à 1 s (mutant X01/MM : !envoiBloque retiré)');
+    eq(await bloque({ type: 'reseau', status: 0, message: '' }), [true, 0, false], '§ 4.7 (ronde 1) : envoi des fiches en recul réseau → aucun appel au seau, le recul de l’envoi n’est pas remplacé par 1 s (même mutant)');
+  });
+
+  await run('ronde 1 — téléchargement global dans la passe : reprise, erreur, envoi bloqué, snapshot (§ 4.7, S-12 ; X03 à X06, MG)', async () => {
+    const global = { key: 'telecharger_tout', value: { at: DATE } };
+    // 21 pages distantes : 20 par passe, une reprise à 1 s pour la dernière.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const objets = {}; const cles = [];
+      for (let i = 0; i < 21; i += 1) { const cle = await empreinte('cle-global-' + i); const { copie, chemin } = await ligneDistanteDe(db, 'global-' + i, cle); objets[chemin] = copie; cles.push(cle); }
+      await db.mutate({ puts: { source_pages: pagesDe(cles), sync_state: [global] }, origin: 'device' });
+      const sf = creerStockageFactice({ objets });
+      let m = null; let fin = null;
+      const minuteries = await espionMinuteries(async () => { m = moteurDe(db, { stockage: sf, delaiRegroupementMs: 50000 }); fin = await m.executer('t'); });
+      eq([compteDe(sf, 'recevoir'), fin.derniersEffets.fichiersRecus, fin.fichiers.aTelecharger, minuteries.includes(1000), !!(await db.get('sync_state', 'telecharger_tout'))], [20, 20, 1, true, true],
+        '§ 4.7 (ronde 1) : téléchargement global de 21 pages → 20 reçues, une reste comptée, reprise à 1 s, la clé reste (mutant X05 : restants du global ignorés)');
+      await m.arreter();
+    });
+    // Réception en panne réseau : l'erreur est dite, aucune reprise à 1 s.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const { copie, chemin } = await ligneDistanteDe(db, 'global-panne');
+      await db.mutate({ puts: { source_pages: pagesDe([H('7')]), sync_state: [global] }, origin: 'device' });
+      const sf = creerStockageFactice({ objets: { [chemin]: copie }, pannes: [{ methode: 'recevoir', erreur: reseau() }] });
+      let m = null; let fin = null;
+      const minuteries = await espionMinuteries(async () => { m = moteurDe(db, { stockage: sf, delaiRegroupementMs: 50000 }); fin = await sansConsole(() => m.executer('t')); });
+      eq([compteDe(sf, 'recevoir'), fin.derniereErreur?.type ?? null, minuteries.includes(1000)], [1, 'reseau', false], '§ 4.7 (ronde 1) : téléchargement global en panne réseau → derniereErreur reseau, aucune reprise à 1 s (mutant X04 : erreur du global ignorée)');
+      await m.arreter();
+    });
+    // Envoi au seau en auth : le téléchargement global n'est pas tenté.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await poserPhoto(repo, db, 'global-auth');
+      const { copie, chemin } = await ligneDistanteDe(db, 'global-auth-copie');
+      await db.mutate({ puts: { source_pages: pagesDe([H('7')]), sync_state: [global] }, origin: 'device' });
+      const sf = creerStockageFactice({ objets: { [chemin]: copie }, pannes: [{ methode: 'envoyer', erreur: { type: 'auth', status: 401, statusCode: '401', code: null, message: 'x' } }] });
+      const m = moteurDe(db, { stockage: sf, reduire: reducteur().reduire, delaiRegroupementMs: 50000 });
+      const fin = await m.executer('t');
+      eq([compteDe(sf, 'envoyer'), compteDe(sf, 'recevoir'), fin.attenteConnexion], [1, 0, true], '§ 4.7 (ronde 1) : envoi au seau en auth → aucun recevoir du téléchargement global (mutants X03/MG : téléchargement tenté après un envoi bloqué)');
+      await m.arreter();
+    });
+    // S-12 avec la clé posée : une lecture de files, et le compte final voit la page reçue.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const { copie, chemin } = await ligneDistanteDe(db, 'global-snap');
+      await db.mutate({ puts: { source_pages: pagesDe([H('7')]), sync_state: [global] }, origin: 'device' });
+      const sf = creerStockageFactice({ objets: { [chemin]: copie } });
+      const m = moteurDe(db, { stockage: sf, delaiRegroupementMs: 50000 });
+      const lectures = []; const vrai = db.getSnapshot;
+      db.getSnapshot = function (noms) { lectures.push(noms); return vrai.call(this, noms); };
+      let fin = null;
+      try { fin = await m.executer('t'); } finally { delete db.getSnapshot; }
+      eq([lectures.filter((n) => (n || []).includes('files')).length, compteDe(sf, 'recevoir'), fin.fichiers.aTelecharger, fin.derniersEffets.fichiersRecus], [1, 1, 0, 1],
+        'S-12 (ronde 1) : avec le téléchargement global, UNE lecture de files ; le compte final voit la page reçue (mutant X06 : telechargerTout sur un autre snapshot)');
+      await m.arreter();
+    });
+  });
+
+  await run('ronde 1 — un geste pendant une passe déjà au-delà de sa clé attend cette passe, puis en lance une (X18 à X20)', async () => {
+    // La passe est retenue dans sa mesure d'espace (storage_usage absent) : elle a déjà lu telecharger_tout, renvoi_originale et les file_error.
+    // Une retenue neuve à chaque `tenir()` : une promesse déjà résolue ne retiendrait plus rien.
+    const retenueALaMesure = () => {
+      let t = null;
+      return { avant: async (methode) => { if (methode === 'lister' && t) await t.p; }, tenir: () => { t = tenue(); }, lacher: () => { const x = t; t = null; x?.lacher(); } };
+    };
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const { copie, chemin } = await ligneDistanteDe(db, 'vol-global');
+      await db.mutate({ puts: { source_pages: pagesDe([H('7')]) }, origin: 'device' });
+      const ret = retenueALaMesure(); ret.tenir();
+      const sf = creerStockageFactice({ objets: { [chemin]: copie }, avant: ret.avant });
+      const m = moteurDe(db, { stockage: sf, delaiRegroupementMs: 50000 });
+      const enVol = m.executer('t');
+      await jusqua(() => compteDe(sf, 'lister') === 1);
+      const g = m.telechargerTout();
+      await jusqua(async () => !!(await db.get('sync_state', 'telecharger_tout')));
+      ret.lacher();
+      await enVol; await g;
+      eq([compteDe(sf, 'recevoir'), (await db.get('files', H('7'))).blob instanceof Blob], [1, true], 'telechargerTout (ronde 1) : touché pendant une passe qui a déjà lu la clé, il attend cette passe puis en lance une qui télécharge (mutant X18 : la passe en vol rejointe)');
+      await m.arreter();
+    });
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const s = await poserPhoto(repo, db, 'vol-renvoi');
+      const ret = retenueALaMesure();
+      const sf = creerStockageFactice({ avant: ret.avant });
+      const m = moteurDe(db, { stockage: sf, reduire: reducteur().reduire, delaiRegroupementMs: 50000 });
+      await m.executer('t'); // la photo part réduite (aucune retenue)
+      await db.mutate({ deletes: { sync_state: ['storage_usage'] }, origin: 'device' });
+      ret.tenir();
+      const enVol = m.executer('t');
+      await jusqua(() => compteDe(sf, 'lister') === 2);
+      const g = m.renvoyerEnOriginale();
+      await jusqua(async () => !!(await db.get('sync_state', 'renvoi_originale')));
+      ret.lacher();
+      await enVol; await g;
+      eq([(await db.get('files', s)).remote?.quality, envois(sf).length], ['originale', 2], 'renvoyerEnOriginale (ronde 1) : touché pendant une passe qui a déjà lu la clé, il attend cette passe puis en lance une qui renvoie l’original (mutant X19 : la passe en vol rejointe)');
+      await m.arreter();
+    });
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const s = await poserPhoto(repo, db, 'vol-reessai');
+      await db.mutate({ puts: { sync_state: [{ key: 'file_error:' + s, value: { motif: 'type', sens: 'envoi', at: DATE } }] }, origin: 'device' });
+      const ret = retenueALaMesure(); ret.tenir();
+      const sf = creerStockageFactice({ avant: ret.avant });
+      const m = moteurDe(db, { stockage: sf, reduire: reducteur().reduire, delaiRegroupementMs: 50000 });
+      const enVol = m.executer('t');
+      await jusqua(() => compteDe(sf, 'lister') === 1);
+      const g = m.reessayerFichier(s);
+      await jusqua(async () => !(await db.get('sync_state', 'file_error:' + s)));
+      ret.lacher();
+      await enVol; await g;
+      eq([envois(sf).length, !!(await db.get('files', s)).remote], [1, true], 'reessayerFichier (envoi, ronde 1) : touché pendant une passe qui a déjà lu les erreurs, il attend cette passe puis en lance une — la photo part (mutant X20 : la passe en vol rejointe)');
+      await m.arreter();
+    });
+  });
+
+  await run('ronde 1 — compte final et mesure d’espace non triviaux (X33, X34, X36)', async () => {
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      for (let i = 0; i < 21; i += 1) await poserPhoto(repo, db, 'compte-final' + i);
+      const { copie, chemin } = await ligneDistanteDe(db, 'compte-final-copie');
+      await db.mutate({ puts: { source_pages: pagesDe([H('7')]), sync_state: [{ key: 'storage_usage', value: { octets: 1, objets: 1, at: DATE, tronque: false } }] }, origin: 'device' });
+      const sf = creerStockageFactice({ objets: { [chemin]: copie } });
+      const m = moteurDe(db, { stockage: sf, reduire: reducteur().reduire, delaiRegroupementMs: 50000 });
+      const fin = await m.executer('t');
+      eq([fin.fichiers.aEnvoyer, fin.fichiers.aTelecharger, envois(sf).length, compteDe(sf, 'lister'), fin.espaceServeur?.objets, (await db.get('sync_state', 'storage_usage'))?.value?.objets], [1, 1, 20, 1, 21, 21],
+        '§ 3.6 (ronde 1) : le compte final de la passe est celui des fichiers (une photo encore à envoyer, une page à télécharger), pas le repos ; storage_usage déjà là → l’espace est quand même remesuré après une confirmation (mutants X33/X34 : compte final au repos ou périmé ; X36 : mesure seulement sans storage_usage)');
+      await m.arreter();
+    });
+  });
+
+  await run('ronde 1 — progression vue pendant la phase ; pause du seau, progression et ARRETE figés (X35, X25, X26, X37)', async () => {
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await poserPhoto(repo, db, 'progression');
+      const m = moteurDe(db, { stockage: creerStockageFactice(), reduire: reducteur().reduire, delaiRegroupementMs: 50000 });
+      const vues = []; m.onEtat((e) => { if (e.progressionFichiers) vues.push(e.progressionFichiers); });
+      const fin = await m.executer('t');
+      eq([vues[0] ?? null, vues.length > 0 && vues.every((v) => Object.isFrozen(v)), fin.progressionFichiers], [{ sens: 'envoi', n: 1, total: 1 }, true, null],
+        '§ 3.6 (ronde 1) : progressionFichiers est posée pendant la phase ({ sens, n, total }), figée, puis retirée (mutants X35 : progression muette ; X25 : non figée)');
+      await m.arreter();
+    });
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await db.mutate({ puts: { sync_state: [{ key: 'pause_fichiers', value: { raison: 'stockage', at: DATE } }] }, origin: 'device' });
+      const m = moteurDe(db, { stockage: creerStockageFactice() });
+      const fin = await m.executer('t');
+      await m.arreter();
+      const r = await m.telecharger([H('1')]);
+      eq([fin.pauseFichiers?.raison, Object.isFrozen(fin.pauseFichiers), Object.isFrozen(r), Object.isFrozen(r.erreur)], ['stockage', true, true, true],
+        '§ 3.6 (ronde 1) : pauseFichiers rendue figée ; la réponse arrete et son erreur sont figées (mutants X26, X37)');
+    });
+  });
+
+  await run('ronde 1 — poses immédiates de telechargementGlobal (X21, X22)', async () => {
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const { copie, chemin } = await ligneDistanteDe(db, 'pose-global');
+      await db.mutate({ puts: { source_pages: pagesDe([H('7')]) }, origin: 'device' });
+      const m = moteurDe(db, { stockage: creerStockageFactice({ objets: { [chemin]: copie } }), delaiRegroupementMs: 50000 });
+      const vus = []; m.onEtat((e) => vus.push([e.phase, e.telechargementGlobal]));
+      const fin = await m.telechargerTout();
+      eq([vus.find(([phase]) => phase === 'envoi_initial')?.[1] ?? null, fin.telechargementGlobal], [true, false],
+        'telechargerTout (ronde 1) : « Arrêter le téléchargement » est offert dès la tape, avant la phase fichiers ; la clé retirée une fois tout reçu (mutant X21 : pose immédiate retirée)');
+      await m.arreter();
+    });
+    await withRepo(async (repo, db) => {
+      await db.mutate({ puts: { sync_state: [{ key: 'telecharger_tout', value: { at: DATE } }] }, origin: 'device' });
+      const m = moteurDe(db, { getUserId: () => null, stockage: creerStockageFactice() });
+      const e0 = await m.demarrer();
+      const e1 = await m.arreterTelechargement();
+      eq([e0.telechargementGlobal, e1.telechargementGlobal, m.etat().telechargementGlobal, await db.get('sync_state', 'telecharger_tout')], [true, false, false, undefined],
+        'arreterTelechargement (ronde 1) : hors passe, l’état passe à faux aussitôt (mutant X22 : pose immédiate retirée)');
+      await m.arreter();
+    });
+  });
+
+  await run('ronde 1 — qualité et réducteur transmis à la passe (X27, X28)', async () => {
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const s = await poserPhoto(repo, db, 'qualite-originale');
+      const red = reducteur();
+      const m = moteurDe(db, { stockage: creerStockageFactice(), qualite: () => 'originale', reduire: red.reduire, delaiRegroupementMs: 50000 });
+      await m.executer('t');
+      eq([(await db.get('files', s)).remote?.quality, red.appels.length], ['originale', 0], 'moteur (ronde 1) : qualite: () => originale part telle quelle, sans réduction (mutant X28 : qualite non transmise)');
+      await m.arreter();
+    });
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const s = await poserPhoto(repo, db, 'sans-reducteur'); // l'en-tête PNG seul : indécodable → ErreurImage du réducteur par défaut, journal muet
+      const m = moteurDe(db, { stockage: creerStockageFactice(), delaiRegroupementMs: 50000 });
+      const { codes } = await codesJournal(() => m.executer('t'));
+      eq([(await db.get('files', s)).remote?.quality, codes.filter((c) => c === 'sync.fichiers.reduction').length], ['originale', 0], 'moteur (ronde 1) : sans reduire injecté, le réducteur par défaut est celui de fichiers.js — une image indécodable part telle quelle sans journal (mutant X27 : reduire null transmis)');
+      await m.arreter();
+    });
+  });
+
+  await run('ronde 1 — envoyerMaintenant lève pause_fichiers seule, même quand la passe suivante est bloquée (B-5 ; X32, X24)', async () => {
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      await repo.save('books', { id: 'bQ', title: 'Q' });
+      await db.mutate({ puts: { sync_state: [{ key: 'pause_fichiers', value: { raison: 'stockage', at: DATE } }] }, origin: 'device' });
+      const auth = { erreur: { type: 'auth', status: 401, message: '' } };
+      const tf = creerTransportFactice({ pousser: [auth, auth, auth] });
+      const m = moteurDe(db, { transport: tf, stockage: creerStockageFactice(), delaiRegroupementMs: 50000 });
+      const e0 = await sansConsole(() => m.demarrer());
+      await sansConsole(() => m.envoyerMaintenant());
+      eq([e0.pauseFichiers?.raison, await db.get('sync_state', 'pause_fichiers'), m.etat().pauseFichiers, m.etat().attenteConnexion], ['stockage', undefined, null, true],
+        'envoyerMaintenant (ronde 1) : pause_fichiers seule est retirée de sync_state ET de l’état, même si la passe qui suit bute sur la connexion (mutants X32 : levée seulement sous pause ; X24 : état non remis à nul)');
+      await m.arreter();
+    });
+  });
+
+  await run('ronde 1 — réponses des gestes : erreur réduite, sans clé, pause relue (sécurité ; X23, REVUE D)', async () => {
+    await withRepo(async (repo, db) => {
+      const sf = creerStockageFactice({ pannes: [{ methode: 'lister', erreur: { ...reseau(), code: 'ECONNRESET', message: 'texte-du-fournisseur' } }] });
+      const m = moteurDe(db, { stockage: sf });
+      const r = await sansConsole(() => m.actualiserEspace());
+      eq(r, { erreur: { type: 'reseau', status: 0 } }, 'actualiserEspace (ronde 1, sécurité) : une mesure en échec rend { erreur: { type, status } } — jamais le code ni le texte du fournisseur (mutant : erreur brute)');
+      let ecritures = 0; const vrai = db.mutate;
+      db.mutate = function (a) { ecritures += 1; return vrai.call(this, a); };
+      let rien = null;
+      try { rien = await m.reessayerFichier(H('5')); } finally { delete db.mutate; }
+      eq([rien, ecritures, compteDe(sf, 'envoyer') + compteDe(sf, 'recevoir')], [{ rien: true }, 0, 0], 'reessayerFichier (ronde 1) : une empreinte sans clé file_error rend { rien: true } sans écriture ni appel (mutant X23 : garde retirée)');
+      await m.arreter();
+    });
+    // REVUE D : pause_fichiers posée entre la lecture du moteur et celle de l'envoi (un autre onglet) — la passe fichiers entière est suspendue.
+    await withRepo(async (repo, db) => {
+      await toutDejaEnvoye(db);
+      const { copie, chemin } = await ligneDistanteDe(db, 'revue-d');
+      await db.mutate({ puts: { source_pages: pagesDe([H('7')]), sync_state: [{ key: 'telecharger_tout', value: { at: DATE } }, { key: 'pause_fichiers', value: { raison: 'stockage', at: DATE } }] }, origin: 'device' });
+      const sf = creerStockageFactice({ objets: { [chemin]: copie } });
+      const m = moteurDe(db, { stockage: sf, delaiRegroupementMs: 50000 });
+      let lectures = 0; const vrai = db.get;
+      db.get = function (store, cle) { if (store === 'sync_state' && cle === 'pause_fichiers' && (lectures += 1) === 1) return Promise.resolve(undefined); return vrai.call(this, store, cle); };
+      let fin = null;
+      try { fin = await m.executer('t'); } finally { delete db.get; }
+      eq([compteDe(sf, 'recevoir'), fin.pauseFichiers?.raison ?? null], [0, 'stockage'], 'REVUE D (ronde 1) : envoyer() qui rend { pause: true } suspend aussi le téléchargement global, et la pause est dite (§ 3.2 ; mutant : réponse pause ignorée)');
+      await m.arreter();
+    });
   });
 }

@@ -125,14 +125,18 @@ export function createMoteur({
   const fichiers = compteStockage ? createFichiers({ db, stockage: compteStockage, getUserId, qualite, maintenant, ...(reduire ? { reduire } : {}) }) : null;
   const vols = new Set(); // D-G13 : téléchargements par tape et mesures d'espace — arreter() les attend tous, avec la passe
   let generationTelechargement = 0; // « Arrêter le téléchargement » : la passe en vol s'arrête à son prochain fichier
+  let ecrituresDesTapes = 0; // ronde 1 (sonde P2) : une tape qui a écrit des octets rend périmé le snapshot d'une passe en vol
 
   const lirePauseFichiers = async () => (await db.get('sync_state', 'pause_fichiers'))?.value || null;
   async function etatFichiers(snapshot = null) {
     const snap = snapshot ?? await db.getSnapshot(MAGASINS_FICHIERS);
     return compterFichiers(snap, { uid: getUserId(), erreurs: await lireErreursFichiers(db) });
   }
+  // Ronde 1 (sécurité) : aux frontières des API, une erreur du stockage sort réduite à { type, status }, comme derniereErreur ; son code et le
+  // texte du fournisseur restent au journal (transport.js : « jamais rendues brutes à l'interface »).
+  const erreurDite = (e) => (e ? { type: e.type, status: e.status ?? null } : null);
   async function appliquerEspace(r) {
-    if (!r || r.erreur) { if (r?.erreur) logError('sync.fichiers.espace', { reason: r.erreur.type, status: r.erreur.status }); return r; }
+    if (!r || r.erreur) { if (r?.erreur) logError('sync.fichiers.espace', { reason: r.erreur.type, status: r.erreur.status }); return r?.erreur ? { erreur: erreurDite(r.erreur) } : r; }
     if (arrete) return ARRETE; // rien ne s'écrit après l'arrêt
     const valeur = { octets: r.octets, objets: r.objets, at: r.at, tronque: r.tronque };
     await db.mutate({ puts: { sync_state: [{ key: 'storage_usage', value: valeur }] }, origin: 'device' });
@@ -232,6 +236,7 @@ export function createMoteur({
     let bilanFichiers = null;
     let bilanTelechargement = null;
     let snapshotFichiers = null;
+    let tapesAuSnapshot = 0;
     try {
       if (!pause) {
         await envoiInitial({
@@ -260,28 +265,43 @@ export function createMoteur({
         if (bilanReception.erreur) poser({ derniereErreur: { type: bilanReception.erreur.type } });
       }
       // Lot G (§ 4.7) : après la réception, seulement avec un stockage, hors pause_fichiers et sans envoi bloqué. Les fiches sont parties AVANT.
+      // Ronde 1 (sécurité) : la phase a son propre filet — une levée ici (un quota d'écriture, un stockage qui jette) ne coûte jamais à L3
+      // « Dernier échange » ni la purge des conflits, et ne dit pas une « erreur inconnue » à chaque passe : elle est journalisée (sync.fichiers).
       if (fichiers && !envoiBloque && !arrete) {
-        const pauseF = await lirePauseFichiers();
-        poser({ pauseFichiers: pauseF });
-        if (!pauseF) {
-          poser({ phase: 'fichiers', progression: null });
-          snapshotFichiers = await db.getSnapshot(MAGASINS_FICHIERS); // UNE lecture par passe (S-12)
-          const surProgression = (p) => poser({ progressionFichiers: p });
-          bilanFichiers = await fichiers.envoyer({ stop: () => arrete, surProgression, snapshot: snapshotFichiers });
-          const bloque = bilanFichiers.attenteConnexion || bilanFichiers.pauseFichiers || !!bilanFichiers.erreur;
-          if (!bloque && !arrete && await db.get('sync_state', 'telecharger_tout')) {
+        try {
+          const pauseF = await lirePauseFichiers();
+          poser({ pauseFichiers: pauseF });
+          if (!pauseF) {
+            poser({ phase: 'fichiers', progression: null });
+            tapesAuSnapshot = ecrituresDesTapes;
+            snapshotFichiers = await db.getSnapshot(MAGASINS_FICHIERS); // UNE lecture par passe (S-12)
+            const surProgression = (p) => poser({ progressionFichiers: p });
+            bilanFichiers = await fichiers.envoyer({ stop: () => arrete, surProgression, snapshot: snapshotFichiers });
+            // Ronde 1 (REVUE D) : `pause` = pause_fichiers posée (un autre onglet) entre la lecture ci-dessus et celle de l'envoi — la passe
+            // fichiers entière est alors suspendue, téléchargement global compris (§ 3.2), et la pause est dite.
+            const enPause = bilanFichiers.pauseFichiers || !!bilanFichiers.pause;
+            const bloque = bilanFichiers.attenteConnexion || enPause || !!bilanFichiers.erreur;
+            // Ronde 1 (REVUE A) : la génération est lue AVANT l'attente de la clé — un « Arrêter le téléchargement » touché pendant cette lecture
+            // (dont la transaction précède la suppression de la clé) arrête quand même la passe.
             const g = generationTelechargement;
-            bilanTelechargement = await fichiers.telechargerTout({ stop: () => arrete || g !== generationTelechargement, surProgression, snapshot: snapshotFichiers });
+            if (!bloque && !arrete && await db.get('sync_state', 'telecharger_tout')) {
+              bilanTelechargement = await fichiers.telechargerTout({ stop: () => arrete || g !== generationTelechargement, surProgression, snapshot: snapshotFichiers });
+            }
+            poser({ progressionFichiers: null });
+            if (!arrete && (bilanFichiers.confirmes > 0 || !(await db.get('sync_state', 'storage_usage')))) await appliquerEspace(await fichiers.mesurerEspace());
+            const erreurFichiers = bilanFichiers.erreur || bilanTelechargement?.erreur || null;
+            if (bilanFichiers.attenteConnexion) poser({ attenteConnexion: true });
+            if (enPause) poser({ pauseFichiers: await lirePauseFichiers() });
+            else if (erreurFichiers) poser({ derniereErreur: { type: erreurFichiers.type } });
+            // Ronde 1 (P1) : les pages restantes d'un téléchargement que la personne a arrêté (génération changée) ne relancent aucune passe.
+            const restants = bilanFichiers.restants > 0 || (bilanTelechargement?.restants > 0 && g === generationTelechargement);
+            if (bilanFichiers.recul) programmerReprise(bilanFichiers.recul);
+            else if (!erreurFichiers && restants && fenetre.document?.visibilityState !== 'hidden') programmerReprise(1000);
+            if (bilanFichiers.confirmes > 0) planifier(); // les lignes confirmées partent à la passe suivante
           }
+        } catch (error) {
+          logError('sync.fichiers', { error, reason: raison });
           poser({ progressionFichiers: null });
-          if (!arrete && (bilanFichiers.confirmes > 0 || !(await db.get('sync_state', 'storage_usage')))) await appliquerEspace(await fichiers.mesurerEspace());
-          const erreurFichiers = bilanFichiers.erreur || bilanTelechargement?.erreur || null;
-          if (bilanFichiers.attenteConnexion) poser({ attenteConnexion: true });
-          if (bilanFichiers.pauseFichiers) poser({ pauseFichiers: await lirePauseFichiers() });
-          else if (erreurFichiers) poser({ derniereErreur: { type: erreurFichiers.type } });
-          if (bilanFichiers.recul) programmerReprise(bilanFichiers.recul);
-          else if (!erreurFichiers && (bilanFichiers.restants > 0 || bilanTelechargement?.restants > 0) && fenetre.document?.visibilityState !== 'hidden') programmerReprise(1000);
-          if (bilanFichiers.confirmes > 0) planifier(); // les lignes confirmées partent à la passe suivante
         }
       }
       // UN seul « Dernier échange » par passe, et seulement si un appel a RÉELLEMENT abouti (I5).
@@ -297,8 +317,15 @@ export function createMoteur({
       try { fin = await compter(); } catch (error) { logError('sync.passe', { error, reason: 'file illisible' }); }
       if (fichiers) {
         try {
-          fin.fichiers = await etatFichiers(snapshotFichiers); // le snapshot de la passe, mis à jour par envoyer/telechargerTout ; lu une fois sinon
           fin.telechargementGlobal = !!(await db.get('sync_state', 'telecharger_tout'));
+          // Le snapshot de la passe, mis à jour par envoyer/telechargerTout (UNE lecture de files, S-12). Ronde 1 (sonde P2) : une tape qui a
+          // écrit des octets depuis qu'il a été lu le rend périmé pour ses pages — la base est alors relue. Aucune attente entre le dernier
+          // contrôle et la pose : une tape qui écrirait ensuite pose elle-même son compte, après celui-ci (trois lectures au plus).
+          for (let essai = 0; essai < 3; essai += 1) {
+            const tapes = ecrituresDesTapes;
+            fin.fichiers = await etatFichiers(snapshotFichiers && tapes === tapesAuSnapshot ? snapshotFichiers : null);
+            if (tapes === ecrituresDesTapes) break;
+          }
           fin.progressionFichiers = null;
         } catch (error) { logError('sync.passe', { error, reason: 'fichiers illisibles' }); }
       }
@@ -356,81 +383,76 @@ export function createMoteur({
     }, delaiRegroupementMs);
   }
 
-  // Le geste « Envoyer maintenant » : la seule façon de lever une pause de quota, et elle est explicite. La pause est
-  // relue dans sync_state (un autre onglet a pu la poser) et un vol en cours est ATTENDU, pas rejoint : il a pu être
-  // court-circuité par la pause, le rejoindre ne ferait donc rien partir.
-  async function envoyerMaintenant() {
-    const aLever = [];
-    if (await lirePause()) aLever.push('pause');
-    if (await lirePauseFichiers()) aLever.push('pause_fichiers'); // B-5 : le geste lève aussi la pause du seau
-    if (aLever.length) { await db.mutate({ deletes: { sync_state: aLever }, origin: 'device' }); poser({ pause: null, pauseFichiers: null }); }
-    if (vol) await vol;
-    return executer('manuel');
+  // Le geste « Envoyer maintenant » : la seule façon de lever une pause de quota, et elle est explicite ; il lève aussi la pause du seau (B-5).
+  // Les pauses sont relues dans sync_state (un autre onglet a pu les poser) et un vol en cours est ATTENDU, pas rejoint : il a pu être
+  // court-circuité par la pause, le rejoindre ne ferait donc rien partir. Ronde 1 : tenu comme les autres gestes (D-G13) — touché juste avant
+  // « Effacer les données de cet appareil », il ne retire aucune pause et ne lance aucune passe derrière l'arrêt.
+  function envoyerMaintenant() {
+    return geste(async () => {
+      const aLever = [];
+      if (await lirePause()) aLever.push('pause');
+      if (await lirePauseFichiers()) aLever.push('pause_fichiers');
+      if (arrete) return ARRETE;
+      return ecrireEtRelancer(aLever.length ? { deletes: { sync_state: aLever } } : null, 'manuel', () => poser({ pause: null, pauseFichiers: null }));
+    }, { exigeStockage: false });
   }
 
-  // D-G13 : tout ce qu'une tape lance entre dans `vols` ; après arreter(), rien n'appelle et rien n'écrit. Hors brief (§ 4.8 « Arrêt »,
-  // à ratifier) : les gestes qui écrivent une clé puis lancent une passe sont tenus eux aussi, et relisent `arrete` après chaque attente — un
-  // geste lancé juste avant l'arrêt (« Effacer les données » derrière une tape) ne lance plus de passe derrière lui, et arreter() attend sa clé.
-  function telecharger(shas) {
+  // D-G13 : le prologue commun des gestes. Après arreter(), la réponse est ARRETE, sans appel ni écriture ; sans stockage, { rien: true } (sauf
+  // un geste qui vaut sans lui) ; sinon le corps entre dans `vols` — arreter() l'attend — et relit `arrete` après chaque attente. Hors brief,
+  // à ratifier (§ 4.8 « Arrêt ») : les gestes qui écrivent une clé puis lancent une passe sont tenus eux aussi — un geste lancé juste avant
+  // l'arrêt (« Effacer les données » derrière une tape) ne lance plus de passe derrière lui, et arreter() attend sa clé.
+  function geste(corps, { exigeStockage = true } = {}) {
     if (arrete) return Promise.resolve(ARRETE);
-    if (!fichiers) return Promise.resolve({ rien: true });
-    return tenir((async () => {
+    if (exigeStockage && !fichiers) return Promise.resolve({ rien: true });
+    return tenir(corps());
+  }
+  // Écrire une clé (ou rien), puis lancer la passe qui la lira. La passe déjà en vol a pu lire avant la clé : elle est ATTENDUE, pas rejointe ;
+  // `arrete` est relu après l'écriture et après l'attente — rien n'est posé ni lancé derrière un arrêt.
+  async function ecrireEtRelancer(mutation, raison, apresEcriture = null) {
+    if (mutation) {
+      await db.mutate({ ...mutation, origin: 'device' });
+      if (arrete) return ARRETE;
+      apresEcriture?.();
+    }
+    if (vol) await vol;
+    return arrete ? ARRETE : executer(raison);
+  }
+  const cleDatee = (key) => ({ puts: { sync_state: [{ key, value: { at: new Date(maintenant()).toISOString() } }] } });
+
+  function telecharger(shas) {
+    return geste(async () => {
       const avant = appelsReussis;
       const r = await fichiers.telecharger(Array.isArray(shas) ? shas : [], { stop: () => arrete });
+      if (r.recus > 0) ecrituresDesTapes += 1; // une passe en vol relira la base pour son compte final (sonde P2)
       if (!arrete) {
         if (appelsReussis > avant) await toucherEchange();
         poser({ fichiers: await etatFichiers() });
       }
-      return r;
-    })());
+      return { ...r, erreur: erreurDite(r.erreur) };
+    });
   }
-  function telechargerTout() {
-    if (arrete) return Promise.resolve(ARRETE);
-    if (!fichiers) return Promise.resolve({ rien: true });
-    return tenir((async () => {
-      await db.mutate({ puts: { sync_state: [{ key: 'telecharger_tout', value: { at: new Date(maintenant()).toISOString() } }] }, origin: 'device' });
-      if (arrete) return ARRETE;
-      poser({ telechargementGlobal: true });
-      if (vol) await vol; // une passe déjà en vol a pu lire la clé avant qu'elle existe : la suivante la lira
-      return arrete ? ARRETE : executer('telechargement');
-    })());
-  }
+  const telechargerTout = () => geste(() => ecrireEtRelancer(cleDatee('telecharger_tout'), 'telechargement', () => poser({ telechargementGlobal: true })));
   function arreterTelechargement() {
-    generationTelechargement += 1; // la passe en vol s'arrête à son prochain fichier (stop relit la génération)
-    if (arrete) return Promise.resolve(ARRETE);
-    return tenir((async () => {
+    generationTelechargement += 1; // synchrone, en premier : la passe en vol s'arrête à son prochain fichier (stop relit la génération)
+    return geste(async () => {
       await db.mutate({ deletes: { sync_state: ['telecharger_tout'] }, origin: 'device' });
       if (arrete) return ARRETE;
       poser({ telechargementGlobal: false });
       return instantane();
-    })());
+    }, { exigeStockage: false });
   }
-  function actualiserEspace() {
-    if (arrete) return Promise.resolve(ARRETE);
-    if (!fichiers) return Promise.resolve({ rien: true });
-    return tenir((async () => appliquerEspace(await fichiers.mesurerEspace()))()); // hors passe : lister ne touche pas la base avant la fin
-  }
-  function renvoyerEnOriginale() {
-    if (arrete) return Promise.resolve(ARRETE);
-    if (!fichiers) return Promise.resolve({ rien: true });
-    return tenir((async () => {
-      await db.mutate({ puts: { sync_state: [{ key: 'renvoi_originale', value: { at: new Date(maintenant()).toISOString() } }] }, origin: 'device' });
-      if (vol) await vol;
-      return arrete ? ARRETE : executer('renvoi');
-    })());
-  }
+  const actualiserEspace = () => geste(async () => appliquerEspace(await fichiers.mesurerEspace())); // hors passe : lister ne touche pas la base avant la fin
+  const renvoyerEnOriginale = () => geste(() => ecrireEtRelancer(cleDatee('renvoi_originale'), 'renvoi'));
   function reessayerFichier(sha256) {
-    if (arrete) return Promise.resolve(ARRETE);
     const cle = 'file_error:' + sha256;
-    return tenir((async () => {
+    return geste(async () => {
       const ligne = await db.get('sync_state', cle);
       if (arrete) return ARRETE; // la clé n'est pas retirée après l'arrêt
       if (!ligne) return { rien: true };
+      if (ligne.value?.sens !== 'reception') return ecrireEtRelancer({ deletes: { sync_state: [cle] } }, 'reessai');
       await db.mutate({ deletes: { sync_state: [cle] }, origin: 'device' });
-      if (ligne.value?.sens === 'reception') return telecharger([sha256]); // tenu lui aussi ; rend arrete si l'arrêt est arrivé entre-temps
-      if (vol) await vol;
-      return arrete ? ARRETE : executer('reessai');
-    })());
+      return telecharger([sha256]); // tenu lui aussi ; rend ARRETE si l'arrêt est arrivé entre-temps
+    }, { exigeStockage: false });
   }
 
   function demarrer() {
