@@ -51,7 +51,7 @@ from (select (select 'security_invoker=true' = any (reloptions) from pg_class
               where oid = to_regclass('public.assistant_usage_jour') and relkind = 'v') as v) t;
 
 -- 2. LE QUATRIÈME OUTIL, VU DE `postgres` (propriétaire de la table), et la cinquième valeur, image-web, admise dès 0006 pour le lot F (2.03 bis,
--- R-B-6). Compte emprunté jamais affiché ; jour 2000-01-01 ; tout est annulé.
+-- R-B-6). Compte emprunté jamais affiché ; lignes insérées au jour 2000-01-01, 2.03 et 2.031 réservent sur le jour UTC courant ; tout est annulé.
 do $$
 declare uid uuid; v text; c bigint; r bigint;
 begin

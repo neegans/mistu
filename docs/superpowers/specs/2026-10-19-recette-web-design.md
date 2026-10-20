@@ -1197,8 +1197,8 @@ plus une extraction photo) · `original_title` conservé à la première lecture
 (R-B-12) · garde `cleLecture` retirée sur `marquerIllisible` (R-B-10) · `device_id` non réattribué à la relance (R-B-8) · le second `catch` de
 `telechargerPage` qui classe un abandon de `ctl` en `inaccessible` (R-B-11 ; la rév. 4 le disait sans test qui le tue — **construction, R-B-28** :
 tué par t5 depuis la ronde 1 de la tâche 2, `8df4f15`, § 7.2). **Bilan de la Clôture (R-B-28) : tous les mutants nommés par cette section et par le plan (C1 à C24, B1 à B8,
-T6a à T6j) ont été rejoués rouges, aux tâches, aux rondes, à la vague et à la ronde finale 2 ; aucun survivant** (rejoués sur des copies, jamais en place ; les deux
-mutants ÉQUIVALENTS déclarés — M30r de la tâche 4 et le mutant « « Annuler » web par `annulerVol` » de la tâche 6 est ÉQUIVALENT — même vol,
+T6a à T6j) ont été rejoués rouges, aux tâches, aux rondes, à la vague et à la ronde finale 2 ; aucun survivant** (rejoués sur des copies, jamais en place ; les trois
+mutants ÉQUIVALENTS déclarés — R18b de la tâche 4, M30r de sa ronde 1 et le mutant « « Annuler » web par `annulerVol` » de la tâche 6 est ÉQUIVALENT — même vol,
 mêmes écritures, R-B-25 — ne sont pas des survivants).
 
 ## 8. Hors périmètre (nommé pour ne pas y glisser)
@@ -1760,7 +1760,7 @@ la génère.
   deux machines A et B), ou reste une limite du balayage sans défaut mesuré sur une vraie page. Coût si faux : nommé ligne par ligne en § 11 (les
   limites) et en § 13 (les dettes à reprendre).
 - **R-B-28 (docs de la spec, Clôture).** R-B-11 n'est PLUS un survivant : il est tué par t5 depuis la ronde 1 de la tâche 2 (`8df4f15`) ; § 7.5 :
-  tous les mutants nommés (spec et plan) rouges, deux équivalents déclarés, aucun survivant. § 7.1 : le compte des ouvrantes `<script …>` de la page (a) devient « environ 58 000 » (2 Mio ; celui de la
+  tous les mutants nommés (spec et plan) rouges, trois équivalents déclarés (R18b, M30r, « Annuler » web par `annulerVol`), aucun survivant. § 7.1 : le compte des ouvrantes `<script …>` de la page (a) devient « environ 58 000 » (2 Mio ; celui de la
   rév. 4 était faux). La phrase qui prêtait la prochaine migration générée au lot G (D-B11 et les passages qui la répètent : § 9, § 11, § 12)
   devient « le prochain lot qui ajoute un magasin génère `0007` et fige `0005` d'abord ; G rév. 4 n'en a pas ». `cloture.md` (registre), geste 3 :
   les chiffres par la mesure finale. Pourquoi : la spec disait des choses que la construction a rendues fausses. Coût si faux : aucun sur le code.

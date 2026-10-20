@@ -344,7 +344,7 @@ Tableau des verdicts (ordre, etape, attendu, obtenu, ok), tel que rendu par l'é
 
 ## Sondes `lecture-web` — à jouer après le redéploiement
 
-À remplir par le contrôleur (étape 12, point 5), version déployée et `ezbr_sha256` notés. S13-S16 ne dépensent rien (elles s'arrêtent avant
+À remplir par le contrôleur (étape 12, point 5), version déployée et `ezbr_sha256` notés. S13-S16 et S19 ne dépensent rien (elles s'arrêtent avant
 la réservation) ; S17-S18 coûtent un appel du quota chacune, sans dépense Anthropic : zéro jeton attendu (R-B-14). S13-S15 et S17-S18 se jouent
 avec la session de Neegan lue par `read -rs JETON` (README, étape 10, point 4 ; jamais le jeton dans une commande) ; S16 sans jeton.
 
@@ -356,3 +356,4 @@ avec la session de Neegan lue par `read -rs JETON` (README, étape 10, point 4 ;
 | S16 | sans jeton | 401 `non_connecte` | … | la session d'abord |
 | S17 | une adresse `https` en 301 / 302 vers une page à JSON-LD `Recipe` complet (vérifiée d'abord sans la fonction : `curl -sI -A 'Mitsu/0.10 (+https://neegans.github.io/mistu/)'`, puis `curl -s` sur la cible) | 200 `jsonld`, `usage` 0 / 0 — ou un refus propre et nommé | … | `redirect: 'manual'` sous le runtime : lecture `jsonld` sans appel au modèle, `page.url_finale` ≠ l'adresse envoyée ; opaque (502 `inaccessible` sur une chaîne que `curl` suit) → ronde sur `telechargerPage` avant la fusion |
 | S18 | une adresse publique en `https` qui redirige vers `http://` | 422 `interdit` | … | la cible d'une redirection est revalidée (« non mesurée » si aucun hôte connu) |
+| S19 | `https://ybdooerfeziiabsbfxtb.functions.supabase.co/` | 422 `interdit` | … | l'alias de la fonction est refusé avant toute réservation (R-B-23, ronde finale 2 `51bad50`) |
