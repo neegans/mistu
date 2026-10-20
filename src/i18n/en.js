@@ -470,4 +470,7 @@ export const EN = {
   "adresse retirée dans la ligne {n}": "address removed from line {n}",
   "adresse retirée dans l’étape {n}": "address removed from step {n}",
   "adresse retirée dans les notes": "address removed from the notes",
+  // Lot B, tâche 4 (spec § 4.1 b, § 4.6, § 5) : « Garder et lire » et le doublon d'adresse.
+  "Garder et lire": "Keep and read",
+  "Tu as déjà gardé cette adresse.": "You already kept this address.",
 };

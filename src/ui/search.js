@@ -1,15 +1,17 @@
 // Recherche universelle et accompagnements (spec §4, §26) : source active visible, pastilles modifiables, groupes distincts.
-import { el } from '../core/dom.js';
+import { el, toast as toastDom } from '../core/dom.js';
 import { t, label, getUiLocale } from '../core/i18n.js';
 import { navigate, buildQuery, remplacerAdresse } from '../core/router.js';
 import { borner } from '../core/bornes.js';
-import { lienSignet } from '../core/lien.js';
+import { lienSignet, doublonDAdresse } from '../core/lien.js';
 import { parseQuery, searchDocs, chipsFor } from '../domain/search.js';
 import { findAccompaniments } from '../domain/pairing.js';
 import { providerFrom } from '../domain/llm.js';
-import { chercherRecettesWeb, construireDemande, dateLisible, DIFFICULTES, LIMITES_WEB } from '../domain/recherche-web.js';
+import { chercherRecettesWeb, construireDemande, dateLisible, reperesDe } from '../domain/recherche-web.js';
 import { RECIPE_TYPES, DIET_TAGS } from '../model/schema.js';
-import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select, sessionAssistant, carteConnexion, texteRefusAssistant } from './components.js';
+import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select, sessionAssistant, carteConnexion, texteRefusAssistant, ligneReperes } from './components.js';
+import { demarrerLectureWeb } from './import-web.js';
+import { LIMITES_SIGNET } from './signet.js';
 import { addToMealFlow } from './meals.js';
 import { demarrerConnexion } from './settings.js';
 
@@ -37,24 +39,6 @@ const TEXTES_INDISPONIBLE = {
   pas_cherche: 'L’assistant n’a pas cherché sur le web. Réessaie.',
 };
 const SANS_REESSAI = ['refus', 'non_admis', 'quota'];
-// La ligne de repères d'une carte (présentation du serveur) : temps estimé, difficulté, nombre d'ingrédients — les parties
-// PRÉSENTES, jointes par « · », dans cet ordre ; '' s'il n'y en a aucune. Chaque partie est revalidée ici (l'issue vient de la
-// mémoire de l'écran) : une valeur illisible ou hors des bornes du domaine (1440 min, 99 ingrédients) ne fait rien paraître.
-function reperes(lien) {
-  const parties = [];
-  const n = lien.temps_min;
-  if (Number.isInteger(n) && n >= 1 && n <= LIMITES_WEB.tempsMax) {
-    if (n < 60) parties.push(t('≈ {n} min', { n }));
-    else {
-      const h = Math.floor(n / 60); const m = n % 60;
-      parties.push(m === 0 ? t('≈ {h} h', { h }) : t('≈ {h} h {m}', { h, m: String(m).padStart(2, '0') }));
-    }
-  }
-  if (DIFFICULTES.includes(lien.difficulte)) parties.push({ facile: t('facile'), moyen: t('moyen'), exigeant: t('exigeant') }[lien.difficulte]);
-  const k = lien.ingredients;
-  if (Number.isInteger(k) && k >= 1 && k <= LIMITES_WEB.ingredientsMax) parties.push(k === 1 ? t('1 ingrédient') : t('{n} ingrédients', { n: k }));
-  return parties.join(' · ');
-}
 // R-WEB-10 (corrige R-WEB-9, amende § 5.4.1) : à la TAPE, un champ changé est relu ; ne survivent que les puces que les
 // LISTES « + type » / « + restriction » ont ajoutées = affichées MOINS ce que l'analyse de l'ancien texte avait donné
 // (régimes, et le type si le nouveau texte n'en dit pas). Une puce retirée à la main n'est plus affichée : elle ne revient
@@ -71,9 +55,21 @@ function garderAjoutsDesListes(affiches, ancienTexte, analyse) {
   return analyse;
 }
 
+// « Garder et lire » (lot B, D-B5 b, § 4.1 b) : le signet SANS formulaire — l'adresse et le titre du résultat (ceux que « Garder ce lien » préremplit),
+// les repères de la carte revalidés — et l'import, en UNE transaction, puis la lecture. Une adresse déjà gardée ne réécrit rien (D-B7). `deps` :
+// les gestes de demarrerLectureWeb (repo, fetch, maintenant, enLigne). Rend l'issue de demarrerLectureWeb, ou { issue: 'doublon', recette }.
+export async function garderEtLire(lien, { ctx, ...deps } = {}) {
+  const l = lienSignet(lien?.href);
+  if (!l.ok) return { issue: 'refuse', raison: 'adresse' };
+  const doublon = doublonDAdresse(ctx?.recipes, l.href);
+  if (doublon) return { issue: 'doublon', recette: doublon };
+  const titre = borner(typeof lien.titre === 'string' && lien.titre.trim() ? lien.titre : l.hote, LIMITES_SIGNET.titre);
+  return demarrerLectureWeb({ adresse: l.href, titre, reperes: reperesDe(lien), ctx }, deps);
+}
+
 export async function renderSearch(params, query, ctx, deps = {}) {
   const root = el('div', null);
-  const { chercher = chercherRecettesWeb, enLigne, navigate: nav = navigate, remplacerAdresse: remplacer = remplacerAdresse } = deps;
+  const { chercher = chercherRecettesWeb, enLigne, navigate: nav = navigate, remplacerAdresse: remplacer = remplacerAdresse, toast = toastDom, lecture = {} } = deps;
   const state = { q: query.q || '', mode: query.mode || 'all', favorites: query.fav === '1', cooked: query.cooked === '1', requireAll: query.any !== '1', parsed: parseQuery(query.q || '') };
   // La session de l'assistant (R-T3-1) : lue ICI pour les gardes de l'écran, relue à chaque appel (un jeton expiré se rafraîchit).
   // Attendue en mode web SEULEMENT : jeton() peut rafraîchir le jeton par le réseau, et les autres modes de recherche n'en ont pas
@@ -269,16 +265,18 @@ export async function renderSearch(params, query, ctx, deps = {}) {
       const titre = lien.titre || l.hote;
       const date = dateLisible(lien.date, getUiLocale()); // lisible et mise en forme, sinon masquée (confort après preuve)
       const presentation = typeof lien.presentation === 'string' && lien.presentation ? lien.presentation : null; // un NŒUD TEXTE, jamais du HTML
-      const ligneReperes = reperes(lien);
+      const reperes = ligneReperes(lien);
       return el('div', { class: 'card flat stack' },
         el('a', { class: 'btn', href: l.href, target: '_blank', rel: 'noopener noreferrer' }, titre),
         el('div', { class: 'muted', style: { fontSize: '.85rem' } }, date ? `${l.hote} · ${date}` : l.hote),
         presentation ? el('div', null, presentation) : null,
         // C'est une ESTIMATION de l'assistant, pas une donnée de la page : la ligne le dit (I1).
-        ligneReperes ? el('div', { class: 'muted', style: { fontSize: '.9rem' } }, t('Estimé par l’assistant : {r}', { r: ligneReperes })) : null,
+        reperes ? el('div', { class: 'muted', style: { fontSize: '.9rem' } }, t('Estimé par l’assistant : {r}', { r: reperes })) : null,
         el('div', { class: 'row' },
           el('a', { class: 'btn small', href: l.href, target: '_blank', rel: 'noopener noreferrer' }, t('Voir la recette')),
-          el('button', { class: 'btn small', onClick: () => nav('/add/signet' + buildQuery({ adresse: l.href, titre })) }, t('Garder ce lien'))));
+          el('button', { class: 'btn small', onClick: () => nav('/add/signet' + buildQuery({ adresse: l.href, titre })) }, t('Garder ce lien'))),
+        // Lot B (D-B5 b, B-29) : une rangée DÉDIÉE, un primaire de 44 px ; jamais pour une adresse en http (la fonction ne la lirait pas, B-20).
+        l.href.startsWith('https:') ? el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn primary', dataset: { role: 'garder-et-lire' }, onClick: (e) => garderEtLireCarte(e.currentTarget, lien) }, t('Garder et lire'))) : null);
     };
     const cartes = (Array.isArray(issue.liens) ? issue.liens : []).map(carte).filter(Boolean);
     const autres = (Array.isArray(issue.autres) ? issue.autres : []).map(carte).filter(Boolean); // K2 : repliées, jamais mêlées aux choix
@@ -301,6 +299,25 @@ export async function renderSearch(params, query, ctx, deps = {}) {
       issue.recherches != null ? el('small', { class: 'muted' }, t('Recherches faites par l’assistant : {n}', { n: issue.recherches })) : null,
       issue.repli ? el('small', { class: 'muted' }, t('Liens tels que trouvés, sans tri de l’assistant.')) : null,
       chercherANouveau());
+  }
+  // La tape « Garder et lire » : le bouton s'éteint pendant l'écriture (deux tapes = un signet) ; un doublon remplace les deux rangées par la phrase et
+  // « Ouvrir la fiche » (rien d'écrit, zéro appel) ; sinon la route de lecture (l'écran y dit « Tu es hors ligne. » si la lecture n'a pas pu partir).
+  async function garderEtLireCarte(bouton, lien) {
+    if (bouton.disabled) return;
+    bouton.disabled = true;
+    let r;
+    try { r = await garderEtLire(lien, { ctx, ...lecture }); }
+    catch (e) { r = null; }
+    if (r?.issue === 'ok') { nav(`/recipes/${encodeURIComponent(r.recipeId)}/importer`); return; }
+    if (r?.issue === 'doublon') {
+      const carteNoeud = bouton.closest('.card');
+      for (const rangee of [...carteNoeud.querySelectorAll(':scope > .row')]) rangee.remove();
+      carteNoeud.append(el('div', { class: 'status', dataset: { role: 'doublon-adresse' } }, el('span', null, t('Tu as déjà gardé cette adresse.')), ' ',
+        el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(r.recette.id)}` }, t('Ouvrir la fiche'))));
+      return;
+    }
+    bouton.disabled = false;
+    toast(t('Adresse non reconnue.'));
   }
   render();
   return root;
