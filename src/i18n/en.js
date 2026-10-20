@@ -503,6 +503,7 @@ export const EN = {
   "Recette enregistrée": "Recipe saved",
   "Lors de la recherche, l’assistant disait : {p}": "During the search, the assistant said: {p}",
   "Lue sur {h} le {d} · {m} — vérifie.": "Read on {h} on {d} · {m} — check.",
+  "Lue sur {h} · {m} — vérifie.": "Read on {h} · {m} — check.",
   "données de la page": "page data",
   "texte lu par l’assistant": "text read by the assistant",
   "Relire la page avec l’assistant": "Read the page again with the assistant",

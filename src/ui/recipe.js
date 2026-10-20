@@ -11,9 +11,11 @@ import { scaleVersion } from '../domain/scaling.js';
 import { assessVersion } from '../domain/diet.js';
 import { toJsonLd, toPaprikaYaml } from '../domain/exporters.js';
 import { DIET_TAGS } from '../model/schema.js';
-import { importOuvert } from '../domain/import-cible.js';
+import { reperesDe } from '../domain/recherche-web.js';
+import { lirePage } from '../domain/lecture-web.js';
+import { logError } from '../core/log.js';
 import { pageHeader, section, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture, sessionAssistant, carteConnexion, ligneReperes } from './components.js';
-import { demarrerLectureWeb, texteEchecLecture, enLigneLecture } from './import-web.js';
+import { demarrerLectureWeb, texteEchecLecture, enLigneLecture, ligneWebOuverte } from './import-web.js';
 import { demarrerConnexion } from './settings.js';
 import { estCreationIA, etiquetteCreationIA, lireCreation, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
 import { addToMealFlow } from './meals.js';
@@ -26,8 +28,8 @@ import { capitaliser } from './puces.js';
 // serveur peut en porter 100 000 caractères, qui pousseraient la fiche entière hors de l'écran.
 export const adresseInerte = (u) => { const s = String(u ?? ''); return s.length > 200 ? s.slice(0, 200) + '…' : s; };
 
-// `deps` (lot B, facultatif : le routeur n'en passe pas) : les gestes de la lecture web { repo, navigate, fetch, maintenant, enLigne } — la suite
-// n'ouvre ni réseau ni navigation réelle.
+// `deps` (lot B, facultatif : le routeur n'en passe pas) : les gestes de la lecture web { repo, navigate, toast, fetch, maintenant, enLigne } — la
+// suite n'ouvre ni réseau ni navigation réelle.
 export async function renderRecipe(params, query, ctx, deps = {}) {
   const recipe = ctx.recipesById.get(params.id);
   if (!recipe) return el('div', { class: 'card' }, t('Recette introuvable.'));
@@ -37,11 +39,18 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   const sessionWeb = lisibleParLAssistant ? await sessionAssistant(ctx) : null;
   const gestesLecture = { repo: deps.repo ?? repo, fetch: deps.fetch, maintenant: deps.maintenant, enLigne: deps.enLigne };
   const naviguer = deps.navigate ?? navigate;
+  const dire = deps.toast ?? toast;
   const enLigneWeb = () => (deps.enLigne ?? enLigneLecture)();
+  // Ronde 1 : l'état en ligne est RELU à la tape (la fiche n'écoute pas online / offline : le bouton peut être resté allumé) — hors ligne, rien
+  // n'est écrit (§ 4.4 : « Journal : rien ») ; une erreur qui n'est pas un refus (base indisponible, quota) est journalisée et dite, jamais un rejet
+  // sans gestionnaire depuis un onClick.
   const lireWeb = async () => {
-    const r = await demarrerLectureWeb({ recipe: (await gestesLecture.repo.get('recipes', recipe.id)) ?? recipe, ctx }, gestesLecture);
-    if (r.issue === 'ok') naviguer(`/recipes/${encodeURIComponent(recipe.id)}/importer`);
-    else if (r.issue === 'refuse') toast(texteEchecLecture({ raison: r.raison === 'adresse' ? 'interdit' : r.raison }).texte);
+    if (!enLigneWeb()) { dire(t('Tu es hors ligne.')); return; }
+    try {
+      const r = await demarrerLectureWeb({ recipe: (await gestesLecture.repo.get('recipes', recipe.id)) ?? recipe, ctx }, gestesLecture);
+      if (r.issue === 'ok') naviguer(`/recipes/${encodeURIComponent(recipe.id)}/importer`);
+      else if (r.issue === 'refuse') dire(texteEchecLecture({ raison: r.raison === 'adresse' ? 'interdit' : r.raison }).texte);
+    } catch (e) { logError('recipe.lire_web', { error: e, id: recipe.id }); dire(texteEchecLecture({ raison: 'interne' }).texte); }
   };
   const connecterWeb = () => demarrerConnexion(ctx?.sync?.auth);
   await repo.recordActivity(recipe.edition_id, 'open_recipe', { recipe_id: recipe.id });
@@ -276,7 +285,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
 
   function referenceOnly() {
     // Un signet web n'est pas une référence d'index : il n'y a pas de page de livre à ouvrir, il y a un lien (F8).
-    if (recipe.source_url) return el('div', null, blocSignet(recipe, ctx, { lire: lireWeb, connecter: connecterWeb }));
+    if (recipe.source_url) return el('div', null, blocSignet(recipe, ctx, { lire: lireWeb, connecter: connecterWeb, moi: gestesLecture.repo.deviceId?.() ?? null }));
     return el('div', null,
       el('div', { class: 'card warn stack' },
         el('h2', null, recipe.printed_page ? t('Repérée dans ton livre — page {p}', { p: recipe.printed_page }) : t('Repérée dans l’index de ton livre')),
@@ -294,16 +303,19 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
 // vient de l'adresse, jamais de source_label (S7). Aucun geste de scan (F8). Selon l'import web OUVERT de la fiche (au plus un, I-2) : « Lire la
 // recette avec l’assistant » (aucun, ou a_lancer), « Voir » (en_cours), « Vérifier et enregistrer » (a_verifier), « Réessayer » (echec, avec la
 // phrase du cas). Synchrone (F-9) : la carte « Connecte-toi » est rendue CACHÉE et le bouton de lecture ÉTEINT — basculerSessionSignet les règle
-// une fois la session lue. Une adresse en http: n'a aucun bouton de lecture (B-20). « Ouvrir le lien » est toujours là.
-export function blocSignet(recipe, ctx = null, { lire = null, connecter = () => {} } = {}) {
+// une fois la session lue. Une adresse en http: n'a aucun bouton de lecture (B-20). « Ouvrir le lien » est toujours là. Ronde 1 : `web_reperes` est
+// RELU au rendu par reperesDe (ficheDe : présentation bornée au mot à 400, écartée si elle porte une adresse, Cc/Cf retirés ; repères typés) — une
+// fiche reçue ou restaurée peut porter n'importe quoi ; la ligne ouverte est choisie par ligneWebOuverte (import-web.js : la même règle que l'écran,
+// R-B-18 et R-B-20 ; `moi` = l'appareil d'ici).
+export function blocSignet(recipe, ctx = null, { lire = null, connecter = () => {}, moi = null } = {}) {
   const lien = lienSignet(recipe.source_url);
   const bloc = el('div', { class: 'card warn stack', dataset: { role: 'bloc-signet' } }, el('h2', null, t('Lien web gardé.')));
   if (!lien.ok) { bloc.append(el('p', { class: 'muted' }, t('Adresse non reconnue : '), adresseInerte(recipe.source_url))); return bloc; }
   const id = encodeURIComponent(recipe.id);
   const ouvrir = (classe) => el('a', { class: classe, href: lien.href, target: '_blank', rel: 'noopener noreferrer' }, t('Ouvrir le lien'));
   const hote = el('span', { class: 'muted' }, lien.hote);
-  const reperes = recipe.web_reperes && typeof recipe.web_reperes === 'object' ? recipe.web_reperes : null;
-  const presentation = typeof reperes?.presentation === 'string' && reperes.presentation ? reperes.presentation : null;
+  const reperes = reperesDe(recipe.web_reperes);
+  const presentation = reperes?.presentation ?? null;
   const ligneR = reperes ? ligneReperes(reperes) : '';
   const extraits = [presentation ? el('p', { dataset: { role: 'presentation-web' } }, t('Lors de la recherche, l’assistant disait : {p}', { p: presentation })) : null,
     ligneR ? el('p', { class: 'muted', dataset: { role: 'reperes-web' } }, t('Estimé par l’assistant : {r}', { r: ligneR })) : null].filter(Boolean);
@@ -313,9 +325,8 @@ export function blocSignet(recipe, ctx = null, { lire = null, connecter = () => 
     return bloc;
   }
   // R-B-18 : « ouvert » = importOuvert (une définition, jamais la négation des statuts terminés : une ligne reçue au statut inconnu ou nul ne compte
-  // pas). importOuvert ne liste la sorte 'web' qu'à la tâche 6 (KINDS_IMPORT + 'web', P-1) : d'ici là, la ligne déjà reconnue web lui est présentée
-  // sous une sorte qu'elle liste (même substitution qu'ouvertDe d'import-web.js) ; à la tâche 6 : importOuvert(i) && i.kind === 'web' && … .
-  const ligne = (Array.isArray(ctx?.imports) ? ctx.imports : []).find((i) => i?.kind === 'web' && i.recipe_id === recipe.id && importOuvert({ ...i, kind: 'recette' })) || null;
+  // pas) — par ouverteWeb d'import-web.js, seule copie de la substitution de sorte (la tâche 6 n'a qu'elle à changer).
+  const ligne = ligneWebOuverte(ctx?.imports, recipe.id, { moi });
   const statut = ligne?.status ?? null;
   const carte = carteConnexion(connecter, ctx); carte.hidden = true; carte.dataset.bascule = 'carte';
   const boutonLire = (libelle, classe) => el('button', { type: 'button', class: classe, disabled: true, dataset: { role: 'lire-web', bascule: 'bouton' }, onClick: () => lire?.() }, libelle);
@@ -341,16 +352,18 @@ export function basculerSessionSignet(racine, session, enLigne = true) {
 
 // La source d'une version lue sur le web (lot B § 4.5, I-B5, S-2, B-25) : lue dans la PROVENANCE de CETTE version, jamais dans les champs
 // source_* de la fiche ; l'hôte recalculé d'abord, le site et l'auteur déclarés ensuite, étiquetés « Selon la page ». null hors lecture web.
+// Ronde 1 (I-B2, S-2) : la provenance d'une version reçue ou restaurée est RELUE au rendu par la règle de la page (lirePage : hôte recalculé, site et
+// auteur bornés à 200, Cc/Cf retirés, mis à null s'ils portent une adresse ; une date qui n'est pas la forme ISO du serveur → null) ; sans date
+// lisible, la phrase la tait (« Lue sur {h} · {m} — vérifie. », jamais un « le » orphelin).
 function bandeauWeb(version) {
   const p = version?.provenance;
   if (!p || typeof p.source_url !== 'string' || !p.source_url) return null;
-  const lien = lienSignet(p.url_finale ?? p.source_url);
-  if (!lien.ok) return null;
+  const { page } = lirePage({ page: { url_finale: p.url_finale ?? p.source_url, site: p.site, auteur: p.auteur, lue_le: p.lue_le } });
+  if (!page.hote) return null;
   const mode = p.source_kind === 'jsonld' ? t('données de la page') : t('texte lu par l’assistant');
-  const quand = typeof p.lue_le === 'string' && p.lue_le ? formatDate(p.lue_le) : '';
-  const declares = [p.site, p.auteur].filter((x) => typeof x === 'string' && x).join(' · ');
+  const declares = [page.site, page.auteur].filter(Boolean).join(' · ');
   return el('div', { class: 'stack', style: { marginBottom: '.8rem' }, dataset: { role: 'bandeau-web' } },
-    el('div', { class: 'status' }, t('Lue sur {h} le {d} · {m} — vérifie.', { h: lien.hote, d: quand, m: mode })),
+    el('div', { class: 'status' }, page.lue_le ? t('Lue sur {h} le {d} · {m} — vérifie.', { h: page.hote, d: formatDate(page.lue_le), m: mode }) : t('Lue sur {h} · {m} — vérifie.', { h: page.hote, m: mode })),
     declares ? el('div', { class: 'muted', dataset: { role: 'selon-la-page' } }, t('Selon la page : {s}', { s: declares })) : null);
 }
 

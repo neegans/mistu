@@ -22,7 +22,7 @@ export const CHAINES_NEUVES_AILLEURS = {
     // Lot B, tâche 5 : la fiche d'un lien gardé (blocSignet), le bandeau d'une version lue sur le web, la relecture (B-27 : l'ancienne phrase est retirée).
     'L’app n’a pas encore lu la page.', 'Lecture de la page en cours…', 'Voir', 'Lecture reçue : vérifie-la et enregistre.', 'Vérifier et enregistrer', 'Contenu non récupéré : ouvre la page.',
     'Lire la recette avec l’assistant', 'Réessayer', 'Une lecture = un appel à l’assistant, compté dans ton quota du jour.', 'Lors de la recherche, l’assistant disait : {p}', 'Estimé par l’assistant : {r}',
-    'Tu es hors ligne.', 'Lue sur {h} le {d} · {m} — vérifie.', 'données de la page', 'texte lu par l’assistant', 'Selon la page : {s}', 'Relire la page avec l’assistant',
+    'Tu es hors ligne.', 'Lue sur {h} le {d} · {m} — vérifie.', 'Lue sur {h} · {m} — vérifie.', 'données de la page', 'texte lu par l’assistant', 'Selon la page : {s}', 'Relire la page avec l’assistant',
     'Lue par l’assistant le {d}', 'Lue par l’assistant', '{n} ligne(s) incertaine(s)', 'page possiblement manquante', 'lecture incomplète', 'Incertain : {t}', 'Vérifiée', 'À vérifier', '1 ligne à vérifier', '{n} lignes à vérifier', 'Photo du plat'],
   '../src/ui/components.js': ['Lien web', 'Adresse non reconnue', 'incertain', 'Ligne incertaine selon l’assistant',
     // Lot B, tâche 4 : la ligne de repères déménagée de search.js (ligneReperes, mêmes textes).

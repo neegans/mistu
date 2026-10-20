@@ -17,7 +17,7 @@ import { TransitionRefusee } from '../core/db.js';
 import { safeDisplayType } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
 import { PasserelleProvider, extraireRecette, extraireIndex, validateParsedRecipe, validerIndex, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION } from '../domain/llm.js';
-import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception, cleLecture } from '../domain/import-cible.js';
+import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception, cleLecture, modeleBorne } from '../domain/import-cible.js';
 import { getConvention } from '../domain/units.js';
 import { currentVersion } from '../domain/search.js';
 import { section, sessionAssistant, carteConnexion, texteEchecAssistant, TEXTE_CONNEXION } from './components.js';
@@ -67,8 +67,7 @@ const estRefus = (e) => e instanceof TransitionRefusee;
 export { cleLecture }; // définie dans src/domain/import-cible.js depuis le lot B (la variante web la partage sans importer cet écran)
 // Deux champs relus du journal, bornés avant d'entrer dans la fiche (T4-R1) : le modèle ≤ 80 points de code (la borne de PasserelleProvider), la
 // photo du plat = une empreinte hexadécimale de 64 (la clé de files) ; tout le reste vaut null. Une seule définition du modèle borné (ronde 1 de la
-// tâche 6 : l'éditeur et le panneau la partagent ; une chaîne vide vaut null).
-const modeleBorne = (m) => (typeof m === 'string' && m && Array.from(m).length <= 80 ? m : null);
+// tâche 6 : l'éditeur et le panneau la partagent ; une chaîne vide vaut null) — dans le domaine depuis le lot B (modeleBorne, la variante web la partage).
 const photoBornee = (L) => (typeof L?.photo_sha256 === 'string' && /^[0-9a-f]{64}$/.test(L.photo_sha256) ? { sha256: L.photo_sha256, origin: L.photo_origin ?? null } : null);
 // La question à poser avant d'écrire (pure) : la discordance tant que « Rattacher » n'a pas été répondu pour CETTE lecture, puis « Remplacer par
 // cette lecture ? » (I-5) tant qu'elle n'a pas de réponse ; null = écrire.

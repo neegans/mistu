@@ -12,7 +12,7 @@ import { lienSignet, doublonDAdresse } from '../core/lien.js';
 import { TransitionRefusee } from '../core/db.js';
 import * as repoModule from '../model/repo.js';
 import { LIMITES_PASSERELLE } from '../domain/passerelle.js';
-import { RAISONS_ECHEC, IMPORTS_OUVERTS, importOuvert, motsDistinctifs, cleLecture } from '../domain/import-cible.js';
+import { RAISONS_ECHEC, IMPORTS_OUVERTS, importOuvert, motsDistinctifs, cleLecture, modeleBorne } from '../domain/import-cible.js';
 import { lireRecetteWeb, fabriquerImportWeb, fabriquerLectureWeb, relireResultat, versionHumaine } from '../domain/lecture-web.js';
 import { sessionAssistant, carteConnexion, texteRefusAssistant, texteEchecAssistant, availabilityBadge, section, INCERTAIN_MAX } from './components.js';
 import { demarrerConnexion } from './settings.js';
@@ -35,21 +35,31 @@ if (typeof window !== 'undefined') {
 export const enLigneLecture = () => enLigneFlag;
 export function ecouterLecture(f) { abonnes.add(f); return () => abonnes.delete(f); }
 export function reinitialiserLectureWeb() { abonnes.clear(); enLigneFlag = typeof navigator === 'undefined' ? true : navigator.onLine !== false; } // tests seulement
+export const abonnesLecture = () => abonnes.size; // tests seulement (ronde 1 de la tâche 5 : une racine retirée ne reste pas abonnée)
 
 // R-B-18 : « ouvert » a UNE définition, importOuvert (src/domain/import-cible.js, m10 / VF-11 du lot A), APPELÉE ici (ronde 1 : plus de copie de sa
 // règle) — jamais la négation des statuts terminés : une ligne reçue au statut inconnu ou nul ne masque pas la fiche. importOuvert ne liste la sorte
 // 'web' qu'à la tâche 6 (KINDS_IMPORT + 'web', P-1) : d'ici là, une ligne déjà reconnue web lui est présentée sous une sorte qu'elle liste (seule la
 // sorte est substituée) ; à la tâche 6, ce prédicat devient importOuvert(i) && i.kind === 'web' && i.recipe_id === recipeId (même résultat).
-// Tâche 5 : un seul prédicat pour demarrerLectureWeb ET l'écran (ligneOuverte, R-B-20) ; recipe.js applique la même règle par importOuvert (R-B-18).
-const ouverteWeb = (i, recipeId) => i?.kind === 'web' && i.recipe_id === recipeId && importOuvert({ ...i, kind: 'recette' });
-const ouvertDe = (imports, recipeId) => (Array.isArray(imports) ? imports : []).find((i) => ouverteWeb(i, recipeId)) || null;
+// Ronde 1 de la tâche 5 : UN prédicat et UN choix de ligne (R-B-20, l'ordre de VF-6 du lot A), exportés et partagés par demarrerLectureWeb, l'écran et
+// la fiche (recipe.js, blocSignet) — plus de seconde copie : `prefere` (la ligne affichée, puis ?import=), puis une lecture reçue (a_verifier), puis
+// celle de cet appareil (`moi`), puis la première. La fiche montre ainsi la ligne que l'écran ouvrira et que « Réessayer » reprendra.
+export const ouverteWeb = (i, recipeId) => i?.kind === 'web' && i.recipe_id === recipeId && importOuvert({ ...i, kind: 'recette' });
+export function ligneWebOuverte(imports, recipeId, { prefere = null, moi = null } = {}) {
+  const ouvertes = (Array.isArray(imports) ? imports : []).filter((i) => ouverteWeb(i, recipeId));
+  return ouvertes.find((i) => prefere && i.id === prefere) || ouvertes.find((i) => i.status === 'a_verifier') || ouvertes.find((i) => moi && i.device_id === moi) || ouvertes[0] || null;
+}
+const moiDe = (repo) => (typeof repo?.deviceId === 'function' ? repo.deviceId() : null);
+const ouvertDe = (imports, recipeId, repo) => ligneWebOuverte(imports, recipeId, { moi: moiDe(repo) });
 
 // --- Lancer (§ 4.3.2) -----------------------------------------------------------------------------------------------------------------------------
 // MÊME forme de retour que lancerExtraction (lot A, F-8) : { issue: 'refuse', raison } (vol_tenu, inconnu, statut, hors_ligne, non_connecte,
 // interdit, transition), { issue: 'echec', raison, ecrit? }, { issue: 'a_verifier' }. Le vol est pris AVANT tout await et libéré en finally ;
 // `appels + 1` au moment où le fetch part ; la réponse lue est écrite dans le journal (a_verifier) avant tout rendu (I-B4). `relire` : un
 // import a_verifier repart (a_verifier → en_cours en UNE transaction, « Relire la page »). Le battement vit HORS de la ligne synchronisée (R-B-17).
-export async function lancerLecture(importId, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, relire = false } = {}) {
+// `cle` (ronde 1 de la tâche 5, P-12) : la cleLecture de la ligne AFFICHÉE — le départ ne vaut que pour elle ; une autre lecture arrivée entre le rendu
+// et la tape (un autre onglet) n'est jamais effacée sans avoir été vue (TransitionRefusee dans la transaction de départ → refus `transition`).
+export async function lancerLecture(importId, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, relire = false, cle = null } = {}) {
   const tenue = { importId, controller: new AbortController(), repo };
   if (!prendreVol(tenue)) return refus('vol_tenu'); // y compris quand c'est une extraction de pages qui tient le document
   const liberer = () => libererVol(tenue);
@@ -69,8 +79,10 @@ export async function lancerLecture(importId, { ctx, repo = repoModule, fetch: f
     // Ronde 1 : le départ en UNE transaction (comme T6-R1-a du lot A) — « Relire la page » passe a_verifier → en_cours sans a_lancer intermédiaire (la
     // lecture payée n'est jamais effacée avant que le départ soit acquis) ; la lecture précédente (résultat, réponse brute, modèle, durée) est effacée
     // AU départ : un échec de ce vol ne porte jamais le diagnostic d'un autre.
+    const patchDepart = { status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, resultat: null, reponse_brute: null, model: null, duree_ms: null };
+    const patch = cle === null ? patchDepart : (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', importId, c.status); return patchDepart; };
     try {
-      await repo.transitionner('imports', importId, { attendus: relire ? ['a_lancer', 'echec', 'a_verifier'] : ['a_lancer', 'echec'], patch: { status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, resultat: null, reponse_brute: null, model: null, duree_ms: null } });
+      await repo.transitionner('imports', importId, { attendus: relire ? ['a_lancer', 'echec', 'a_verifier'] : ['a_lancer', 'echec'], patch });
     } catch (e) {
       liberer();
       if (estRefus(e)) return { issue: 'refuse', raison: 'transition', statut: e.statut }; // un autre onglet a tranché entre-temps (I-10)
@@ -145,7 +157,7 @@ export async function demarrerLectureWeb({ recipe = null, adresse = null, titre 
   let ligne = null; let recipeId = null;
   if (recipe) {
     recipeId = recipe.id;
-    ligne = ouvertDe(ctx?.imports, recipe.id);
+    ligne = ouvertDe(ctx?.imports, recipe.id, repo);
     if (!ligne) {
       const neuve = fabriquerImportWeb({ id: repo.newId('imp'), signet: recipe, deviceId: repo.deviceId() });
       try {
@@ -153,7 +165,7 @@ export async function demarrerLectureWeb({ recipe = null, adresse = null, titre 
         ligne = neuve;
       } catch (e) {
         if (!estRefus(e)) throw e;
-        ligne = ouvertDe(await repo.byIndex('imports', 'recipe_id', recipe.id), recipe.id); // créé entre le rendu et la tape : repris, zéro appel de trop
+        ligne = ouvertDe(await repo.byIndex('imports', 'recipe_id', recipe.id), recipe.id, repo); // créé entre le rendu et la tape : repris, zéro appel de trop
         // Ronde 1 : aucun import WEB ouvert, et le mur a refusé — un import ouvert d'une AUTRE sorte tient la fiche (I-2 du lot A tient par statut,
         // toutes sortes confondues ; passation « à trancher par B ») : un refus NOMMÉ, jamais une exception non gérée ; rien d'écrit.
         if (!ligne) return { issue: 'refuse', raison: 'transition', statut: e.statut };
@@ -199,6 +211,9 @@ export function texteEchecLecture(erreur) {
     case 'illisible': return { texte: t('L’assistant n’a pas répondu lisiblement. Réessaie.'), code: t('Code : {c}', { c: raison }) };
     case 'vide': return { texte: t('Aucun ingrédient ni étape lus sur cette page.'), code: null };
     case 'lien': return { texte: t('Le titre lu contenait une adresse web : lecture refusée. Ouvre la page.'), code: null };
+    // Ronde 1 : un REFUS (jamais une raison du journal) — un import ouvert d'une autre sorte tient la fiche (demarrerLectureWeb, I-2 du lot A) ; la
+    // phrase du lot A pour un vol tenu, jamais « L’assistant n’a pas répondu » (aucun appel n'est parti).
+    case 'transition': return { texte: t('Une lecture est déjà en cours : annule-la d’abord.'), code: null };
     default: return { texte: texteRefusAssistant({ raison, quota: extra.quota, trop_lourd: extra.trop_lourd }) ?? texteEchecAssistant({ message: raison, quota: extra.quota, trop_lourd: extra.trop_lourd }), code: null };
   }
 }
@@ -208,8 +223,11 @@ export function texteEchecLecture(erreur) {
 // juste avant. Une version humaine existante (D-B8) → « Remplacer par cette lecture ? » ; fermer le dialogue n'écrit rien (B-13). Rend
 // { issue: 'enregistre', recipeId, versionId } | { issue: 'annule' } | { issue: 'refuse', raison } | { issue: 'echec', raison: 'illisible' }. `cle` (cleLecture
 // de la ligne AFFICHÉE) : une autre lecture arrivée entre le rendu et le clic, ou pendant le dialogue, n'est jamais enregistrée sans avoir été vue
-// (refus `lecture` avant, TransitionRefusee dans la transaction).
-const modeleBorne = (m) => (typeof m === 'string' && Array.from(m).length <= LIMITES_PASSERELLE.modele ? m : null);
+// (refus `lecture` avant, TransitionRefusee dans la transaction). Ronde 1 : le signet et ses versions sont RELUS APRÈS le dialogue — la fiche reçue
+// modifiée pendant la question (favori, mots-clés, cuisines, titre) est celle qu'on recompose ; supprimée, elle n'est jamais ressuscitée et aucune
+// version orpheline n'est écrite (refus `inconnu`, T4-R1-c du lot A) ; si ce qui fonde la question a changé (version courante, version écrite à la
+// main), la question est reposée. Il reste la fenêtre sans dialogue entre la dernière relecture et la transaction (celle de decider() du lot A) :
+// db.mutate ne sait conditionner qu'un statut, et une fiche n'en a pas.
 // a_verifier → echec(illisible), pour LA lecture relue et jugée illisible, jamais pour une autre arrivée entre-temps (cleLecture, T4-R2 du lot A).
 async function marquerIllisible(repo, ligne) {
   const cle = cleLecture(ligne);
@@ -223,19 +241,24 @@ export async function enregistrerLecture(importId, { repo = repoModule, remplace
   if (cle !== null && cleLecture(ligne) !== cle) return refus('lecture'); // la lecture affichée a été remplacée : rien d'écrit, l'écran se redessine
   const lu = relireResultat(ligne.resultat);
   if (!lu) { await marquerIllisible(repo, ligne); return { issue: 'echec', raison: 'illisible' }; }
-  const signet = await repo.get('recipes', ligne.recipe_id);
-  if (!signet) return refus('inconnu'); // supprimé entre-temps : jamais ressuscité
-  const versions = await repo.byIndex('recipe_versions', 'recipe_id', signet.id);
-  const options = { signet, versions, page: lu.page, sourceKind: lu.source_kind, importId: ligne.id, modele: modeleBorne(ligne.model), maintenant: maintenant() };
-  let fab = fabriquerLectureWeb(lu.recette, options);
+  const relire = async () => {
+    const signet = await repo.get('recipes', ligne.recipe_id);
+    return signet ? { signet, versions: await repo.byIndex('recipe_versions', 'recipe_id', signet.id) } : null; // supprimé : jamais ressuscité
+  };
+  const fondement = (f) => JSON.stringify([f.signet.current_version_id ?? null, versionHumaine(f.versions)]);
+  let fiche = await relire();
+  if (!fiche) return refus('inconnu');
   let choix = remplacer;
-  if (fab.remplacement && choix === null) {
+  while (choix === null && versionHumaine(fiche.versions)) {
     // Défaut « non » (comme I-5 du lot A) : la première option est « Ajouter sans remplacer ».
+    const avant = fondement(fiche);
     const r = await choisir(t('Remplacer par cette lecture ?'), [{ value: 'ajouter', label: t('Ajouter sans remplacer') }, { value: 'remplacer', label: t('Remplacer') }]);
     if (r !== 'ajouter' && r !== 'remplacer') return { issue: 'annule' };
-    choix = r === 'remplacer';
+    fiche = await relire();
+    if (!fiche) return refus('inconnu');
+    if (fondement(fiche) === avant) choix = r === 'remplacer'; // sinon la question est reposée (ou n'a plus lieu d'être)
   }
-  if (choix === false) fab = fabriquerLectureWeb(lu.recette, { ...options, remplacer: false });
+  const fab = fabriquerLectureWeb(lu.recette, { signet: fiche.signet, versions: fiche.versions, page: lu.page, sourceKind: lu.source_kind, importId: ligne.id, modele: modeleBorne(ligne.model), maintenant: maintenant(), ...(choix === false ? { remplacer: false } : {}) });
   const cleLue = cleLecture(ligne);
   const cloture = (c) => { if (cleLecture(c) !== cleLue) throw new TransitionRefusee('imports', ligne.id, c.status); return { status: 'enregistre', reponse_brute: null, finished_at: maintenant() }; };
   try {
@@ -244,7 +267,7 @@ export async function enregistrerLecture(importId, { repo = repoModule, remplace
     if (estRefus(e)) return refus('transition'); // enregistré, ignoré ou relu par un autre onglet juste avant : rien d'écrit
     throw e;
   }
-  return { issue: 'enregistre', recipeId: signet.id, versionId: fab.version.id };
+  return { issue: 'enregistre', recipeId: fiche.signet.id, versionId: fab.version.id };
 }
 
 // --- L'écran #/recipes/<id>/importer, variante web (§ 4.2) ---------------------------------------------------------------------------------------
@@ -254,7 +277,8 @@ export async function enregistrerLecture(importId, { repo = repoModule, remplace
 export async function renderImportWeb(params, query, ctx, { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, choisir = chooseDialog } = {}) {
   const recipe = ctx?.recipesById?.get(params?.id);
   const root = el('div', null);
-  const etat = { ligne: null, versions: [], occupe: false };
+  // lu : la lecture relue (relireResultat) de la ligne a_verifier, calculée UNE fois par chargement (ronde 1) — null = illisible ou pas de lecture.
+  const etat = { ligne: null, lu: null, versions: [], occupe: false };
   root.etatRouteWeb = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, vol: !!etat.ligne && volEnCours()?.importId === etat.ligne.id, remplacement: etat.versions.length ? versionHumaine(etat.versions) : null });
   if (!recipe) { root.append(el('div', { class: 'card' }, t('Recette introuvable.'))); return root; }
   const lien = lienSignet(recipe.source_url);
@@ -265,28 +289,29 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
   // L'import web OUVERT de cette fiche : « ouvert » = importOuvert (R-B-18, par ouverteWeb). Après synchro, plusieurs appareils peuvent en avoir chacun
   // un (I-2 ne vaut que par appareil) : R-B-20, comme VF-6 du lot A — `prefere` (la ligne affichée, puis ?import= de « Reprendre ») d'abord, puis une
   // lecture reçue (a_verifier), puis celle de cet appareil.
-  const ligneOuverte = async (prefere = null) => {
-    const ouvertes = (await repo.byIndex('imports', 'recipe_id', recipe.id)).filter((i) => ouverteWeb(i, recipe.id));
-    const moi = typeof repo.deviceId === 'function' ? repo.deviceId() : null;
-    return ouvertes.find((i) => prefere && i.id === prefere) || ouvertes.find((i) => i.status === 'a_verifier') || ouvertes.find((i) => moi && i.device_id === moi) || ouvertes[0] || null;
-  };
+  const ligneOuverte = async (prefere = null) => ligneWebOuverte(await repo.byIndex('imports', 'recipe_id', recipe.id), recipe.id, { prefere, moi: moiDe(repo) });
+  const lecture = (L) => (L?.status === 'a_verifier' ? relireResultat(L.resultat) : null);
   // L'état est posé d'UN coup, après la dernière lecture : etatRouteWeb() ne montre jamais une ligne que l'écran n'a pas encore dessinée.
   async function charger() {
     const prefere = etat.ligne?.id ?? (typeof query?.import === 'string' ? query.import : null);
     let L = await ligneOuverte(prefere);
+    let lu = lecture(L);
     // I-B2 : un résultat illisible n'est jamais rendu comme une lecture ; il est marqué echec(illisible) pour LA lecture relue (cleLecture, R-B-10).
     // Une autre lecture arrivée entre-temps (un autre onglet, une réception) est relue et jugée à son tour : deux passes au plus — au-delà, dessiner()
-    // la montre comme un échec sans l'écrire (hors brief : jamais une levée sur une donnée hostile).
-    for (let passe = 0; passe < 2 && L?.status === 'a_verifier' && !relireResultat(L.resultat); passe += 1) { await marquerIllisible(repo, L); L = await ligneOuverte(prefere); }
+    // la montre comme un échec sans l'écrire (hors brief : jamais une levée sur une donnée hostile ; status reste celui de la base, a_verifier).
+    // Ronde 1 : jamais pendant que CE document relance cette ligne (« Réessayer » d'une lecture illisible, relire) — le départ du vol l'efface déjà.
+    for (let passe = 0; passe < 2 && L?.status === 'a_verifier' && !lu && volEnCours()?.importId !== L.id; passe += 1) { await marquerIllisible(repo, L); L = await ligneOuverte(prefere); lu = lecture(L); }
     const versions = await repo.byIndex('recipe_versions', 'recipe_id', recipe.id);
-    etat.ligne = L; etat.versions = versions;
+    etat.ligne = L; etat.lu = lu; etat.versions = versions;
   }
   let file = Promise.resolve();
   const redessiner = () => { file = file.then(async () => { await charger(); dessiner(); }).catch((e) => logError('import_web.rendu', { error: e })); return file; };
-  // Redessinée à chaque transition d'un vol de lecture (et au passage en ligne / hors ligne). Le routeur insère la racine APRÈS la fin de la route :
-  // une notification arrivée avant le montage est ignorée sans désabonner ; une racine qui a été montée puis retirée se désabonne.
-  let montee = false;
-  const desabonner = ecouterLecture(() => { if (root.isConnected) { montee = true; redessiner(); } else if (montee) desabonner(); });
+  // Redessinée à chaque transition d'un vol de lecture (et au passage en ligne / hors ligne) — une fois MONTÉE (ronde 1, comme l'écran du lot A) : le
+  // routeur insère la racine APRÈS la fin de la route ; au tour suivant, une racine dans le document s'abonne et se redessine (une transition notifiée
+  // avant le montage n'est pas perdue), une racine jamais montée ne s'abonne pas ; une racine retirée se désabonne à la première notification qui la
+  // trouve détachée.
+  let desabonner = null;
+  const rappel = () => { if (root.isConnected) redessiner(); else if (desabonner) { desabonner(); desabonner = null; } };
 
   // --- Gestes
   async function lire() {
@@ -303,7 +328,8 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
   }
   async function relancer({ relire = false } = {}) {
     const L = etat.ligne; if (!L || etat.occupe || volEnCours()) return;
-    const promesse = lancerLecture(L.id, { ctx, ...gestes, relire });
+    // « Relire la page » ne vaut que pour LA lecture affichée (P-12, ronde 1) : une autre arrivée entre-temps → refus, redessin.
+    const promesse = lancerLecture(L.id, { ctx, ...gestes, relire, cle: relire ? cleLecture(L) : null });
     await redessiner();
     const issue = await promesse;
     if (issue.raison === 'non_connecte') session = null;
@@ -359,8 +385,7 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
     else bloc.append(el('div', { class: 'status warn' }, t('En cours sur un autre écran')), el('div', { class: 'row' }, retour())); // I-B3 : sans « Annuler »
     return bloc;
   }
-  function zoneLue(L) {
-    const lu = relireResultat(L.resultat);
+  function zoneLue(lu) {
     const { page, recette } = lu;
     const hote = page.hote ?? (lien.ok ? lien.hote : '');
     const quand = page.lue_le ? formatDate(page.lue_le, { withTime: true }) : null;
@@ -392,18 +417,21 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
     const bloc = el('div', { class: 'card stack', dataset: { role: 'action' } },
       el('div', { class: 'status warn', role: 'status', dataset: { role: 'echec' } }, el('span', null, texte), code ? el('small', { class: 'muted' }, code) : null));
     if (!session) bloc.append(carteConnexion(connecter, ctx));
+    // Ronde 1 : une lecture illisible restée a_verifier (dessiner(), cas non écrit) se relance comme « Relire la page » — jamais un geste refusé en silence.
+    const relire = L.status === 'a_verifier';
     bloc.append(...[horsLigne()].filter(Boolean), el('div', { class: 'row' }, ouvrir('btn primary'),
-      el('button', { type: 'button', class: 'btn', dataset: { role: 'reessayer' }, disabled: !peutLire(), onClick: () => relancer() }, t('Réessayer')),
+      el('button', { type: 'button', class: 'btn', dataset: { role: 'reessayer' }, disabled: !peutLire(), onClick: () => relancer({ relire }) }, t('Réessayer')),
       el('button', { type: 'button', class: 'btn', dataset: { role: 'ignorer' }, onClick: ignorer }, t('Ignorer')), retour()));
     return bloc;
   }
   function dessiner() {
     const L = etat.ligne; const statut = L?.status ?? null;
-    const illisible = statut === 'a_verifier' && !relireResultat(L.resultat); // voir charger() : jamais rendue comme une lecture, jamais une levée
-    const zone = statut === 'en_cours' ? zoneVol(L) : illisible ? zoneEchec(L, { raison: 'illisible', extra: {} }) : statut === 'a_verifier' ? zoneLue(L) : statut === 'echec' ? zoneEchec(L) : zoneLancer();
+    const illisible = statut === 'a_verifier' && !etat.lu; // voir charger() : jamais rendue comme une lecture, jamais une levée
+    const zone = statut === 'en_cours' ? zoneVol(L) : illisible ? zoneEchec(L, { raison: 'illisible', extra: {} }) : statut === 'a_verifier' ? zoneLue(etat.lu) : statut === 'echec' ? zoneEchec(L) : zoneLancer();
     root.replaceChildren(enTete(), zone);
   }
   await charger();
   dessiner();
+  setTimeout(() => { if (root.isConnected && !desabonner) { desabonner = ecouterLecture(rappel); redessiner(); } }, 0); // abonnement après le montage
   return root;
 }

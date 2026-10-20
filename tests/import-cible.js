@@ -651,7 +651,7 @@ export async function runImportCibleTests({ eq, ok }) {
         eq([dits, navs], [['Cette recette a déjà son texte.'], ['/recipes/rc_dispo']], 'ouverture : une recette available → toast « Cette recette a déjà son texte. » + retour à la fiche (D-11)');
         navs.length = 0; dits.length = 0;
         const variante = await monter('rc_signet');
-        eq([dits, navs, variante.textContent.includes('Lire une recette web'), typeof variante.etatRouteWeb], [[], [], true, 'function'], 'ouverture (lot B) : un signet → la variante web de l’écran (renderImportWeb), ni toast ni retour');
+        eq([dits, navs, variante.textContent.includes('Lire une recette web'), !!variante.querySelector('[data-role="lire-web"]')], [[], [], true, true], 'ouverture (lot B) : un signet → la variante web de l’écran (renderImportWeb, son bouton « Lire la recette avec l’assistant »), ni toast ni retour');
         navs.length = 0; dits.length = 0;
         ok((await monter('rc_inconnue')).textContent.includes('Recette introuvable.'), 'ouverture : une fiche inconnue le dit, sans lever');
         eq([navs, dits, reseau, await db.count('imports')], [[], [], 0, 0], 'ouverture : rien d’autre (ni navigation, ni réseau, ni écriture)');
