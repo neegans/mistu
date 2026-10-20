@@ -322,3 +322,37 @@ Tableau des verdicts (ordre, etape, attendu, obtenu, ok), tel que rendu par l'é
 | ordre | etape | attendu | obtenu | ok |
 | --- | --- | --- | --- | --- |
 | … | … | … | … | … |
+
+## Preuve `0006_lecture_web.sql` — à jouer
+
+Section préparée le 19 octobre 2026 (lot B « recette web complète », spec `docs/superpowers/specs/2026-10-19-recette-web-design.md` § 6.4 ;
+procédure : étape 12 du README). **À jouer par Neegan après `0005`, avant le redéploiement de la fonction et avant tout `push`.** Rien à
+remplacer ; la preuve n'affiche aucune adresse ni aucun identifiant (compte emprunté jamais nommé) ; aucune clé n'est en jeu. Lire en
+particulier 1.01 (les cinq outils, dans l'ordre d'`OUTILS_0006` : `image-web` comprise, pour le lot F) et 2.03 bis (`image-web` accepté par
+`assistant_reserver`).
+
+| Heure | Collage | Résultat |
+| --- | --- | --- |
+| … | `migrations/0006_lecture_web.sql` | … (attendu `Success. No rows returned`) |
+| … | preuve `0006` (« Run without RLS ») | `999 BILAN : … faux sur …` |
+
+Tableau des verdicts (ordre, etape, attendu, obtenu, ok), tel que rendu par l'éditeur SQL :
+
+| ordre | etape | attendu | obtenu | ok |
+| --- | --- | --- | --- | --- |
+| … | … | … | … | … |
+
+## Sondes `lecture-web` — à jouer après le redéploiement
+
+À remplir par le contrôleur (étape 12, point 5), version déployée et `ezbr_sha256` notés. S13-S16 ne dépensent rien (elles s'arrêtent avant
+la réservation) ; S17-S18 coûtent un appel du quota chacune, sans dépense Anthropic : zéro jeton attendu (R-B-14).
+
+| Sonde | Requête | Statut attendu | Statut obtenu | Ce que ça prouve |
+| --- | --- | --- | --- | --- |
+| S13 | `{ outil: 'lecture-web', corps: { url: 'http://exemple.test/' } }` | 422 `interdit` | … | refus avant toute réservation (`assistant_usage_jour` inchangé) |
+| S14 | `https://127.0.0.1/` | 422 `interdit` | … | adresse IP refusée |
+| S15 | `https://localhost/` | 422 `interdit` | … | hôte local refusé |
+| S16 | sans jeton | 401 `non_connecte` | … | la session d'abord |
+| S17 | une adresse `https` en 301 / 302 vers une page à JSON-LD `Recipe` complet (vérifiée d'abord : `curl -sI`, puis `curl -s` sur la cible) | 200 `jsonld`, `usage` 0 / 0 — ou un refus propre et nommé | … | `redirect: 'manual'` sous le runtime : lecture `jsonld` sans appel au modèle, `page.url_finale` ≠ l'adresse envoyée ; opaque (502 `inaccessible` sur une chaîne que `curl` suit) → ronde sur `telechargerPage` avant la fusion |
+| S18 | une adresse publique en `https` qui redirige vers `http://` | 422 `interdit` | … | la cible d'une redirection est revalidée (« non mesurée » si aucun hôte connu) |
+

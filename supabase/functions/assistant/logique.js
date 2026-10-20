@@ -1,7 +1,8 @@
 // Logique pure de la passerelle de l'assistant (spec 2026-10-18-passerelle-assistant § 2-5). Tourne sous Node (tests) et sous Deno (index.ts).
 // Le client est une DONNÉE HOSTILE : liste blanche par outil, modèle forcé, plafonds, propriétés propres seulement. Le journal ne porte que des compteurs.
 // Lot B (spec 2026-10-19-recette-web § 6.1) : le quatrième outil, `lecture-web`, ne reçoit qu'une adresse ; sa validation et ses bornes vivent dans
-// ./lecture-web.js (feuille, un seul sens d'import : F-1). La contrainte `check` de 0006 liste exactement OUTILS, dans cet ordre.
+// ./lecture-web.js (feuille, un seul sens d'import : F-1). La contrainte `check` de 0006 liste OUTILS dans cet ordre, puis `image-web` (la
+// valeur du lot F, R-B-6) : OUTILS reste à quatre, une valeur admise de plus dans un check est inoffensive tant qu'OUTILS ne la porte pas.
 import { valideAdresse, LIMITES_LECTURE } from './lecture-web.js';
 export const OUTILS = Object.freeze(['recherche-web', 'creation', 'extraction', 'lecture-web']);
 export const LIMITES = Object.freeze({ corps: 512 * 1024, corpsExtraction: 8 * 1024 * 1024, maxTokens: 16000, quotaJour: 60, attenteMs: 120000, reponse: 2 * 1024 * 1024, system: 20000, messages: 20, maxUses: 5 });

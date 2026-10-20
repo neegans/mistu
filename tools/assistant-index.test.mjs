@@ -13,11 +13,13 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as faux from './faux/supabase.mjs';
 import { LIMITES } from '../supabase/functions/assistant/logique.js';
+import { LIMITES_LECTURE } from '../supabase/functions/assistant/lecture-web.js';
 
 const ICI = path.dirname(fileURLToPath(import.meta.url));
 const RACINE = path.dirname(ICI);
 const INDEX_TS = process.env.INDEX_TS || path.join(RACINE, 'supabase', 'functions', 'assistant', 'index.ts');
 const URL_LOGIQUE = pathToFileURL(path.join(RACINE, 'supabase', 'functions', 'assistant', 'logique.js')).href;
+const URL_LECTURE = pathToFileURL(path.join(RACINE, 'supabase', 'functions', 'assistant', 'lecture-web.js')).href;
 const URL_FAUX = pathToFileURL(path.join(ICI, 'faux', 'supabase.mjs')).href;
 const URL_FONCTION = 'https://x.supabase.co/functions/v1/assistant';
 const ORIGINE = 'https://neegans.github.io';
@@ -53,8 +55,9 @@ before(async () => {
   const source = retirerLesTypes(readFileSync(INDEX_TS, 'utf8'));
   const code = source
     .replace(/from\s+'@supabase\/supabase-js'/, `from ${JSON.stringify(URL_FAUX)}`)
-    .replace(/from\s+'\.\/logique\.js'/, `from ${JSON.stringify(URL_LOGIQUE)}`);
-  assert.ok(code.includes(URL_FAUX) && code.includes(URL_LOGIQUE), 'les deux imports ont ete remplaces');
+    .replace(/from\s+'\.\/logique\.js'/, `from ${JSON.stringify(URL_LOGIQUE)}`)
+    .replace(/from\s+'\.\/lecture-web\.js'/, `from ${JSON.stringify(URL_LECTURE)}`);
+  assert.ok(code.includes(URL_FAUX) && code.includes(URL_LOGIQUE) && code.includes(URL_LECTURE), 'les trois imports ont ete remplaces');
   dossier = mkdtempSync(path.join(tmpdir(), 'assistant-index-'));
   const fichier = path.join(dossier, 'index.mjs');
   writeFileSync(fichier, code);
@@ -573,4 +576,272 @@ test('s4. F-5 : sans abandon, rien ne change — 200 relaye, signal propre intac
     assert.equal(r.status, 504, 'le delai du serveur n est pas un abandon du client');
     assert.equal(faux.MAJ.at(-1).v.statut, 504);
   } finally { mock.timers.reset(); }
+});
+
+// --- Lot B « Recette web complète » (spec 2026-10-19-recette-web § 6.3, § 7.2) : l'outil lecture-web ----------------------------------------------------
+// Le faux fetch distingue la page (https://site.test/…) d'Anthropic ; `appelsFetch` les garde dans l'ordre. La page est une DONNÉE HOSTILE : jamais relayée
+// dans une erreur, jamais journalisée (le journal ne porte que des compteurs).
+const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
+const corpsLecture = (url) => JSON.stringify({ outil: 'lecture-web', corps: { url } });
+const htmlReponse = (html, { statut = 200, type = 'text/html; charset=utf-8', entetes = {} } = {}) => new Response(html, { status: statut, headers: { 'content-type': type, ...entetes } });
+const RECETTE_LD = { '@context': 'https://schema.org', '@type': 'Recipe', name: 'Pâtes puttanesca', recipeIngredient: ['250 g de spaghettis', '2 gousses d’ail'], recipeInstructions: [{ '@type': 'HowToStep', text: 'Cuire.' }, { '@type': 'HowToStep', text: 'Servir.' }], totalTime: 'PT30M', author: { name: 'Ricardo' }, publisher: { name: 'Ricardo Cuisine' } };
+const PAGE_LD = `<html><head><title>Puttanesca</title><script type="application/ld+json">${JSON.stringify(RECETTE_LD)}</script></head><body><main><p>Texte.</p></main></body></html>`;
+const TEXTE_RECETTE = 'Pâtes du garde-manger. Ingrédients : 250 g de spaghettis, 2 gousses d’ail. Étapes : cuire les pâtes, puis servir chaud.';
+const PAGE_TEXTE = `<html><head><title>Blogue</title></head><body><nav>Menu</nav><div>Inscris-toi à l’infolettre</div><main><h1>Pâtes</h1><p>${TEXTE_RECETTE}</p><script>var secret = 'JS-SENTINELLE';</script></main><div>12 commentaires</div></body></html>`;
+const appelsPage = () => appelsFetch.filter((a) => a.url !== ANTHROPIC_URL);
+const appelsModele = () => appelsFetch.filter((a) => a.url === ANTHROPIC_URL);
+const page = (routes) => { reponseFetch = async (url, options) => (url === ANTHROPIC_URL ? (routes.anthropic ?? (async () => jsonReponse(200, REPONSE_OK)))(url, options) : routes.page(url, options)); };
+// Une réponse qui ne vient qu'à l'abandon du signal (pour les délais et l'abandon du client).
+const sourde = (url, options) => new Promise((_, rejeter) => { options.signal.addEventListener('abort', () => rejeter(new DOMException('Aborted', 'AbortError'))); });
+const vider = () => new Promise((fini) => setImmediate(fini));
+
+test('t1. lecture-web : http:// → 422 interdit AVANT toute reservation, aucun fetch ; t1bis : l hote de SUPABASE_URL → 422 interdit (S-12)', async () => {
+  remise();
+  const r = await handler(requete('POST', { texte: corpsLecture('http://site.test/') }));
+  assert.equal(r.status, 422); assert.deepEqual(await lire(r), { erreur: 'interdit' });
+  assert.equal(reserves().length, 0); assert.equal(appelsFetch.length, 0); assert.equal(faux.MAJ.length, 0);
+  remise(); ENV.SUPABASE_URL = 'https://projet.test';
+  const r2 = await handler(requete('POST', { texte: corpsLecture('https://projet.test/x') }));
+  assert.equal(r2.status, 422); assert.deepEqual(await lire(r2), { erreur: 'interdit' });
+  assert.equal(reserves().length, 0); assert.equal(appelsFetch.length, 0);
+});
+
+test('t2. page avec JSON-LD Recipe : reservation lecture-web, UN fetch (la page) sans identite, AUCUN fetch Anthropic, 200 jsonld, journal 0/0', async () => {
+  remise();
+  page({ page: async () => htmlReponse(PAGE_LD) });
+  const texte = corpsLecture('https://site.test/r/1');
+  const r = await handler(requete('POST', { texte }));
+  assert.equal(r.status, 200);
+  const corps = await lire(r);
+  assert.deepEqual(reserves()[0].args, { p_owner: 'compte-1', p_outil: 'lecture-web', p_octets: Buffer.byteLength(texte), p_quota: 2 });
+  assert.equal(reserves()[0].cle, 'sb_secret_factice');
+  assert.equal(appelsFetch.length, 1, 'un seul fetch : la page'); assert.equal(appelsModele().length, 0, 'aucun appel au modele');
+  const f = appelsPage()[0];
+  assert.equal(f.url, 'https://site.test/r/1');
+  assert.deepEqual([f.options.method, f.options.redirect, f.options.credentials], ['GET', 'manual', 'omit']);
+  assert.deepEqual(Object.keys(f.options.headers).sort(), ['accept', 'accept-language', 'user-agent'], 'exactement trois en-tetes poses par le code');
+  assert.ok(f.options.headers['user-agent'].startsWith('Mitsu/'));
+  for (const k of ['authorization', 'apikey', 'cookie', 'x-api-key']) assert.ok(!Object.keys(f.options.headers).some((h) => h.toLowerCase() === k), 'jamais ' + k);
+  assert.equal(corps.source_kind, 'jsonld');
+  assert.deepEqual(Object.keys(corps).sort(), ['model', 'page', 'recette', 'source_kind', 'stop_reason', 'usage']);
+  assert.deepEqual([corps.usage, corps.stop_reason, corps.model], [{ input_tokens: 0, output_tokens: 0 }, null, null]);
+  assert.deepEqual({ ...corps.page, lue_le: typeof corps.page.lue_le }, { url_finale: 'https://site.test/r/1', hote: 'site.test', titre_page: 'Puttanesca', auteur: 'Ricardo', site: 'Ricardo Cuisine', lue_le: 'string', autres_recettes: 0, texte_coupe: false });
+  assert.ok(Number.isFinite(Date.parse(corps.page.lue_le)), 'lue_le : ISO');
+  assert.deepEqual([corps.recette.title, corps.recette.ingredients.length, corps.recette.steps.length, corps.recette.total_minutes], ['Pâtes puttanesca', 2, 2, 30]);
+  assert.deepEqual(faux.MAJ[0].v, { statut: 200, jetons_entree: 0, jetons_sortie: 0, duree_ms: faux.MAJ[0].v.duree_ms });
+  assert.deepEqual(faux.evenements, ['rpc:is_allowed', 'rpc:assistant_reserver', 'fetch', 'update']);
+});
+
+test('t2bis. B-2 : la seule Recipe n a ni ligne ni etape → elle n est pas trouvee : deux fetch (page, Anthropic), 200 modele, autres_recettes 0', async () => {
+  remise();
+  const vide = { '@type': 'Recipe', name: 'Sans contenu', image: 'x.jpg' };
+  page({ page: async () => htmlReponse(`<script type="application/ld+json">${JSON.stringify(vide)}</script><main><p>${TEXTE_RECETTE}</p></main>`), anthropic: async () => jsonReponse(200, { model: 'claude-sonnet-5-5', stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 2 }, content: [{ type: 'text', text: '{}' }] }) });
+  const r = await handler(requete('POST', { texte: corpsLecture('https://site.test/r/2') }));
+  const corps = await lire(r);
+  assert.deepEqual([r.status, corps.source_kind, corps.page.autres_recettes, appelsPage().length, appelsModele().length], [200, 'modele', 0, 1, 1]);
+});
+
+test('t3. page sans JSON-LD : deux fetch (page, puis Anthropic : modele du serveur, CONSIGNE_LECTURE_WEB, 6000, le texte entre delimiteurs, jamais le HTML ni le script) → 200 modele, journal avec jetons', async () => {
+  remise();
+  const { CONSIGNE_LECTURE_WEB } = await import(URL_LOGIQUE);
+  page({ page: async () => htmlReponse(PAGE_TEXTE), anthropic: async () => jsonReponse(200, { model: 'claude-sonnet-5-5', stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 2 }, content: [{ type: 'text', text: 'texte des blocs ' }, { type: 'tool_use', id: 'x' }, { type: 'text', text: 'text concaténé' }] }) });
+  const r = await handler(requete('POST', { texte: corpsLecture('https://site.test/r/3') }));
+  assert.equal(r.status, 200);
+  const corps = await lire(r);
+  assert.deepEqual(appelsFetch.map((a) => a.url), ['https://site.test/r/3', ANTHROPIC_URL]);
+  const envoye = JSON.parse(appelsModele()[0].options.body);
+  assert.deepEqual(Object.keys(envoye).sort(), ['max_tokens', 'messages', 'model', 'system']);
+  assert.deepEqual([envoye.model, envoye.system, envoye.max_tokens, envoye.messages.length, envoye.messages[0].role], ['claude-sonnet-5-5', CONSIGNE_LECTURE_WEB, 6000, 1, 'user']);
+  const message = envoye.messages[0].content;
+  assert.ok(message.includes('<<<PAGE>>>\nPâtes\n' + TEXTE_RECETTE + '\n<<<FIN>>>'), 'le texte de la page, entre les delimiteurs');
+  assert.ok(!message.includes('<main>') && !message.includes('JS-SENTINELLE') && !message.includes('Menu'), 'ni le HTML, ni le script, ni la navigation');
+  assert.ok(!message.includes('infolettre') && !message.includes('commentaires'), 'ni le reste du body hors de <main>');
+  assert.deepEqual({ ...corps, page: undefined }, { source_kind: 'modele', page: undefined, recette: 'texte des blocs text concaténé', usage: { input_tokens: 1, output_tokens: 2 }, stop_reason: 'end_turn', model: 'claude-sonnet-5-5' });
+  assert.deepEqual([corps.page.hote, corps.page.titre_page, corps.page.texte_coupe], ['site.test', 'Blogue', false]);
+  assert.deepEqual([faux.MAJ[0].v.statut, faux.MAJ[0].v.jetons_entree, faux.MAJ[0].v.jetons_sortie], [200, 1, 2]);
+});
+
+test('t3bis. B-9 : une page de 50 000 points de code de texte → le message au modele en porte 40 000, page.texte_coupe vrai', async () => {
+  remise();
+  page({ page: async () => htmlReponse('<main><p>' + 'é'.repeat(50000) + '</p></main>'), anthropic: async () => jsonReponse(200, { model: 'm', stop_reason: 'end_turn', usage: {}, content: [{ type: 'text', text: '{}' }] }) });
+  const r = await handler(requete('POST', { texte: corpsLecture('https://site.test/long') }));
+  const corps = await lire(r);
+  const message = JSON.parse(appelsModele()[0].options.body).messages[0].content;
+  const texte = message.slice(message.indexOf('<<<PAGE>>>\n') + 11, message.lastIndexOf('\n<<<FIN>>>'));
+  assert.deepEqual([Array.from(texte).length, corps.page.texte_coupe], [40000, true]);
+});
+
+test('t4. redirections : suivies et revalidees, corps du 3xx annule ; http, IP, localhost, SUPABASE_URL → 422 interdit (apres reservation) ; sans location ou illisible → 502 ; quatre sauts → 502 ; relative resolue', async () => {
+  remise();
+  let annule = false;
+  page({ page: async (url) => (url === 'https://site.test/a' ? new Response(new ReadableStream({ cancel() { annule = true; } }), { status: 301, headers: { location: 'https://site.test/b' } }) : htmlReponse(PAGE_LD)) });
+  const r = await handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
+  await vider();
+  const corps = await lire(r);
+  assert.deepEqual([r.status, corps.page.url_finale, appelsPage().map((a) => a.url), annule], [200, 'https://site.test/b', ['https://site.test/a', 'https://site.test/b'], true]);
+  for (const cible of ['http://site.test/b', 'https://127.0.0.1/', 'https://localhost/', 'https://projet.test/x']) {
+    remise(); ENV.SUPABASE_URL = 'https://projet.test';
+    page({ page: async () => new Response(null, { status: 302, headers: { location: cible } }) });
+    const x = await handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
+    assert.equal(x.status, 422, cible); assert.deepEqual(await lire(x), { erreur: 'interdit' });
+    assert.deepEqual([reserves().length, appelsPage().length, faux.MAJ[0].v.statut], [1, 1, 422], cible + ' : reservation faite, cible jamais demandee, journal 422');
+  }
+  for (const entetes of [{}, { location: 'https://' }]) {
+    remise();
+    page({ page: async () => new Response(null, { status: 301, headers: entetes }) });
+    const x = await handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
+    assert.equal(x.status, 502, JSON.stringify(entetes)); assert.deepEqual(await lire(x), { erreur: 'inaccessible' });
+    assert.deepEqual([appelsPage().length, reserves().length], [1, 1], JSON.stringify(entetes) + ' : refus au premier saut, aucune cible suivie');
+  }
+  remise();
+  let n = 0;
+  page({ page: async () => { n += 1; return new Response(null, { status: 301, headers: { location: `https://site.test/s${n}` } }); } });
+  const chaine = await handler(requete('POST', { texte: corpsLecture('https://site.test/s0') }));
+  assert.deepEqual([chaine.status, await lire(chaine), appelsPage().length], [502, { erreur: 'inaccessible' }, 4], 'quatre 301 en chaine : trois suivis, le quatrieme refuse');
+  remise();
+  page({ page: async (url) => (url === 'https://site.test/x/a' ? new Response(null, { status: 307, headers: { location: '/c' } }) : htmlReponse(PAGE_LD)) });
+  const rel = await handler(requete('POST', { texte: corpsLecture('https://site.test/x/a') }));
+  assert.deepEqual([rel.status, appelsPage().map((a) => a.url)], [200, ['https://site.test/x/a', 'https://site.test/c']], 'location relative resolue contre l adresse courante');
+});
+
+test('t5. statuts et delais : 404 / 500 / 403 / DNS → 502 inaccessible ; 15 s d un saut → 502 ; 30 s en tout → 502 ; un abandon deja porte par ctl est relance → 504 delai', async () => {
+  for (const s of [404, 500, 403]) {
+    remise(); page({ page: async () => htmlReponse('x', { statut: s }) });
+    const r = await handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
+    assert.deepEqual([r.status, await lire(r), faux.MAJ[0].v.statut], [502, { erreur: 'inaccessible' }, 502], 'statut ' + s);
+  }
+  remise(); page({ page: async () => { throw new TypeError('getaddrinfo ENOTFOUND'); } });
+  assert.equal((await handler(requete('POST', { texte: corpsLecture('https://site.test/a') }))).status, 502, 'DNS');
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    remise();
+    let signalPage = null; let appele; const parti = new Promise((res) => { appele = res; });
+    page({ page: (url, options) => { signalPage = options.signal; appele(); return sourde(url, options); } });
+    const enCours = handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
+    await parti;
+    mock.timers.tick(LIMITES_LECTURE.delaiSautMs - 1);
+    assert.equal(signalPage.aborted, false, 'pas encore a 14,999 s');
+    mock.timers.tick(1);
+    assert.equal(signalPage.aborted, true, 'abandonne a 15 s');
+    const r = await enCours;
+    assert.deepEqual([r.status, await lire(r), faux.MAJ[0].v.statut], [502, { erreur: 'inaccessible' }, 502]);
+  } finally { mock.timers.reset(); }
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    remise();
+    const signaux = []; let prochain; const attendreAppel = () => new Promise((res) => { prochain = res; });
+    let appel = attendreAppel();
+    page({ page: (url, options) => { signaux.push(options.signal); prochain(); return new Promise((resoudre, rejeter) => {
+      options.signal.addEventListener('abort', () => rejeter(new DOMException('Aborted', 'AbortError')));
+      setTimeout(() => resoudre(new Response(null, { status: 301, headers: { location: `https://site.test/n${signaux.length}` } })), 12000);
+    }); } });
+    const enCours = handler(requete('POST', { texte: corpsLecture('https://site.test/n0') }));
+    await appel; appel = attendreAppel(); mock.timers.tick(12000); await appel;
+    appel = attendreAppel(); mock.timers.tick(12000); await appel;
+    mock.timers.tick(5999);
+    assert.equal(signaux[2].aborted, false, 'troisieme saut : pas encore abandonne a 29,999 s');
+    mock.timers.tick(1);
+    assert.equal(signaux[2].aborted, true, 'D-B26 : abandonne a 30 s en tout');
+    const r = await enCours;
+    assert.deepEqual([r.status, await lire(r), signaux.length], [502, { erreur: 'inaccessible' }, 3]);
+  } finally { mock.timers.reset(); }
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    remise();
+    let appele; const parti = new Promise((res) => { appele = res; });
+    page({ page: (url, options) => { appele(); return sourde(url, options); } });
+    const enCours = handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
+    await parti;
+    // Le saut (15 s), le total (30 s) et le budget (120 s) tombent dans le même tour : l'abandon que ctl porte déjà est RELANCÉ par le catch, jamais
+    // classé inaccessible. (En vrai, ctl ne tombe jamais PENDANT le téléchargement, coupé à 30 s au plus : ce cas prouve le relancement, rien de plus.)
+    mock.timers.tick(LIMITES.attenteMs);
+    const r = await enCours;
+    assert.deepEqual([r.status, await lire(r), faux.MAJ[0].v.statut], [504, { erreur: 'delai' }, 504], 'D-B26 : un abandon par ctl est 504, jamais inaccessible');
+  } finally { mock.timers.reset(); }
+});
+
+test('t6. content-type pdf → 422 pas_une_page, corps annule, aucun fetch Anthropic ; charset iso-8859-1 decode', async () => {
+  remise();
+  let annule = false;
+  page({ page: async () => new Response(new ReadableStream({ cancel() { annule = true; } }), { status: 200, headers: { 'content-type': 'application/pdf' } }) });
+  const r = await handler(requete('POST', { texte: corpsLecture('https://site.test/doc.pdf') }));
+  await vider();
+  assert.deepEqual([r.status, await lire(r), annule, appelsModele().length, faux.MAJ[0].v.statut], [422, { erreur: 'pas_une_page' }, true, 0, 422]);
+  remise();
+  const LD_ASCII = { '@type': 'Recipe', name: 'Creme', recipeIngredient: ['1 l de creme'], recipeInstructions: 'Cuire.' }; // tout en ASCII : seul le titre porte des octets latin-1
+  const latin1 = Uint8Array.from(`<title>Cr\u{00E8}me br\u{00FB}l\u{00E9}e</title><script type="application/ld+json">${JSON.stringify(LD_ASCII)}</script>`, (c) => c.charCodeAt(0));
+  assert.equal(latin1[9], 0xe8, 'le è est bien l octet 0xE8');
+  page({ page: async () => new Response(latin1, { status: 200, headers: { 'content-type': 'text/html; charset=iso-8859-1' } }) });
+  const r2 = await handler(requete('POST', { texte: corpsLecture('https://site.test/latin') }));
+  assert.equal((await lire(r2)).page.titre_page, 'Crème brûlée');
+});
+
+test('t7. page de 2 Mio + 1 : content-length declare, puis flux sans content-length → 413 trop_lourde, flux annule, lecture coupee', async () => {
+  remise();
+  page({ page: async () => htmlReponse('x', { entetes: { 'content-length': String(LIMITES_LECTURE.page + 1) } }) });
+  const r1 = await handler(requete('POST', { texte: corpsLecture('https://site.test/gros') }));
+  assert.deepEqual([r1.status, await lire(r1), faux.MAJ[0].v.statut], [413, { erreur: 'trop_lourde' }, 413]);
+  remise();
+  let tires = 0; let annule = false;
+  page({ page: async () => new Response(new ReadableStream({ pull(c) { if (tires >= 8) { c.close(); return; } tires += 1; c.enqueue(new Uint8Array(MIO)); }, cancel() { annule = true; } }), { status: 200, headers: { 'content-type': 'text/html' } }) });
+  const r2 = await handler(requete('POST', { texte: corpsLecture('https://site.test/gros') }));
+  await vider();
+  assert.deepEqual([r2.status, await lire(r2), annule, tires <= 5], [413, { erreur: 'trop_lourde' }, true, true], 'coupee apres ' + tires + ' morceaux de 1 Mio sur 8');
+});
+
+test('t8. page sans texte utile → 422 vide, aucun fetch Anthropic, journal 422', async () => {
+  remise();
+  page({ page: async () => htmlReponse('<html><body><nav>Accueil · Recettes · Contact</nav></body></html>') });
+  const r = await handler(requete('POST', { texte: corpsLecture('https://site.test/vide') }));
+  assert.deepEqual([r.status, await lire(r), appelsModele().length, faux.MAJ[0].v.statut, faux.MAJ[0].v.jetons_entree], [422, { erreur: 'vide' }, 0, 422, null]);
+});
+
+test('t9. abandon du client pendant le telechargement → fetch de la page abandonne, 499 sans corps, journal 499 ; pendant l appel au modele → 499', { timeout: 8000 }, async () => {
+  remise();
+  let signalPage = null; let appele; const parti = new Promise((res) => { appele = res; });
+  page({ page: (url, options) => { signalPage = options.signal; appele(); return sourde(url, options); } });
+  const client = new AbortController();
+  const enCours = handler(requete('POST', { texte: corpsLecture('https://site.test/a'), signal: client.signal }));
+  await parti;
+  client.abort();
+  const r = await enCours;
+  assert.deepEqual([signalPage.aborted, r.status, await r.text(), faux.MAJ[0].v.statut, appelsModele().length], [true, 499, '', 499, 0]);
+  remise();
+  let appeleModele; const modeleParti = new Promise((res) => { appeleModele = res; });
+  page({ page: async () => htmlReponse(PAGE_TEXTE), anthropic: (url, options) => { appeleModele(); return sourde(url, options); } });
+  const client2 = new AbortController();
+  const enCours2 = handler(requete('POST', { texte: corpsLecture('https://site.test/b'), signal: client2.signal }));
+  await modeleParti;
+  client2.abort();
+  const r2 = await enCours2;
+  assert.deepEqual([r2.status, await r2.text(), faux.MAJ[0].v.statut], [499, '', 499]);
+});
+
+test('t10. jamais le corps de la page dans une reponse d erreur ni dans le journal', async () => {
+  remise();
+  page({ page: async () => htmlReponse('<p>PAGE-SENTINELLE</p>', { statut: 500 }) });
+  const r = await handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
+  const texte = await r.text();
+  assert.equal(r.status, 502);
+  assert.ok(!texte.includes('PAGE-SENTINELLE'), 'reponse');
+  assert.ok(!JSON.stringify(faux.MAJ).includes('PAGE-SENTINELLE') && !JSON.stringify(faux.RPC).includes('PAGE-SENTINELLE'), 'journal et reservation');
+});
+
+test('t11. bornes relayees : titre_page 300, notes ≤ 2 000, 100 recipeIngredient → 81', async () => {
+  remise();
+  const ld = { '@type': 'Recipe', name: 'B', description: 'mot '.repeat(1500), recipeIngredient: Array.from({ length: 100 }, (_, i) => 'ligne ' + i), recipeInstructions: 'Faire.' };
+  page({ page: async () => htmlReponse(`<title>${'t'.repeat(1000)}</title><script type="application/ld+json">${JSON.stringify(ld)}</script>`) });
+  const corps = await lire(await handler(requete('POST', { texte: corpsLecture('https://site.test/b') })));
+  assert.deepEqual([corps.page.titre_page.length, Array.from(corps.recette.notes).length <= 2000, corps.recette.ingredients.length], [300, true, 81]);
+});
+
+test('t12. Anthropic pendant une lecture : 429 et 400 relayes tels quels ; 500 → 502 serveur sans corps ; journal au statut rendu', async () => {
+  for (const [recu, rendu, corpsAttendu] of [[429, 429, { type: 'error', error: { type: 'rate_limit_error', message: 'x' } }], [400, 400, { type: 'error', error: { type: 'invalid_request_error', message: 'x' } }], [500, 502, { erreur: 'serveur' }]]) {
+    remise();
+    page({ page: async () => htmlReponse(PAGE_TEXTE), anthropic: async () => jsonReponse(recu, recu === 500 ? { error: { message: 'panne sk-factice-serveur' } } : corpsAttendu) });
+    const r = await handler(requete('POST', { texte: corpsLecture('https://site.test/a') }));
+    const texte = await r.text();
+    assert.deepEqual([r.status, JSON.parse(texte), faux.MAJ[0].v.statut], [rendu, corpsAttendu, rendu], 'Anthropic ' + recu);
+    assert.ok(!texte.includes('sk-factice-serveur'));
+  }
 });

@@ -1,7 +1,7 @@
 # Supabase — comment appliquer et prouver le serveur de synchronisation
 
-Ce dossier contient **tout le serveur** de Cuisine OS : quatre migrations générées (`0001`, `0002`, `0003`, `0005`) et une
-écrite à la main (`0004`), dans `migrations/` ; les preuves à jouer après les avoir appliquées (`proofs/`) et la fonction de la passerelle de l'assistant
+Ce dossier contient **tout le serveur** de Cuisine OS : quatre migrations générées (`0001`, `0002`, `0003`, `0005`) et deux
+écrites à la main (`0004`, `0006`), dans `migrations/` ; les preuves à jouer après les avoir appliquées (`proofs/`) et la fonction de la passerelle de l'assistant
 (`functions/`). Rien n'est appliqué automatiquement : chaque étape est un geste de
 Neegan dans l'éditeur SQL du tableau de bord Supabase. Spec de référence :
 `docs/spec-compte-et-stockage-distant.md` (§ 3 pour le serveur, § 7.2 pour les preuves).
@@ -18,7 +18,9 @@ supabase/
   proofs/0004_assistant_journal.sql      à coller après 0004 ; rien à remplacer ; n'écrit rien (rollback final)
   migrations/0005_imports.sql            généré par tools/generer-migrations.mjs ; à ajout seul (lot A « importer une recette repérée », étape 11)
   proofs/0005_imports.sql                à coller après 0005 ; jetons à remplacer ; n'écrit rien (rollback final)
-  functions/assistant/                   la fonction de la passerelle (index.ts, logique.js, deno.json) ; déployée par le CLI, étape 10
+  migrations/0006_lecture_web.sql        écrite à la main, hors du générateur (lot B « recette web complète », étape 12)
+  proofs/0006_lecture_web.sql            à coller après 0006 ; rien à remplacer ; n'écrit rien (rollback final)
+  functions/assistant/                   la fonction de la passerelle (index.ts, logique.js, lecture-web.js, deno.json) ; déployée par le CLI, étape 10
   proofs/0001_hook.md                    gabarit : capture du crochet « Before User Created »
   proofs/0001_providers.md               gabarit : capture des fournisseurs de connexion
   proofs/RESULTATS-<projet>.md           tes sorties, collées (à créer : un fichier par projet)
@@ -348,6 +350,30 @@ en fusion comme en remplacement : `imports` y vaut une liste vide.
 Une fois `0005` appliquée, la figer : liste `SYNC_STORES_0005` + empreinte SHA-256 épinglée (même logique que `SYNC_STORES_0003`), au
 prochain lot qui touche le générateur. L'empreinte du fichier collé se relit par `shasum -a 256 supabase/migrations/0005_imports.sql`
 et se consigne dans `RESULTATS-mitsu.md`.
+
+### 12. Coller `0006_lecture_web.sql`, puis jouer sa preuve
+
+Lot B « recette web complète » (spec `docs/superpowers/specs/2026-10-19-recette-web-design.md`, § 3.7 et § 6.4) : la passerelle gagne
+un quatrième outil, `lecture-web` — la fonction télécharge elle-même la page d'un lien gardé et la lit (les données que le site publie
+d'abord, le modèle seulement sinon). Le `check` de colonne du journal (`0004`) ne connaît que trois outils : **un code servi avant `0006` :
+chaque lecture web répond 502 `serveur` (la réservation refuse l'outil), rien d'autre ne change.** `0006` est écrite à la main, comme
+`0004` (hors du générateur et de `--check`), et ne touche qu'à cette contrainte : ni table, ni fonction, ni privilège ; la contrainte admet
+aussi `image-web` (lot F, à venir), qu'aucun code de ce lot n'écrit.
+
+1. **Coller `migrations/0006_lecture_web.sql`** en entier, sous `postgres` (un collage = une transaction). Attendu :
+   `Success. No rows returned`. Si la contrainte porte un autre nom sur ce projet, le collage échoue sans rien appliquer : la garde 0
+   de la preuve nomme alors les contraintes `check` réelles, à relever avant de corriger.
+2. Facultatif : `notify pgrst, 'reload schema';` collée seule — aucune table ni fonction neuve, le cache de PostgREST n'a rien à apprendre.
+3. **Jouer `proofs/0006_lecture_web.sql`** (rien à remplacer, aucune adresse à ajouter ; « Run without RLS »). Lire la ligne
+   `999 BILAN` : `0 faux`, c'est vert — dont 1.01 (les cinq outils, dans l'ordre d'`OUTILS_0006`) et 2.03 bis (`image-web` accepté par
+   `assistant_reserver`).
+4. **Consigner** la sortie dans `proofs/RESULTATS-mitsu.md`, section « Preuve `0006_lecture_web.sql` — à jouer » déjà préparée.
+5. **Ordre, sans exception** : `0006` → redéploiement de la fonction (la commande du point 2 de l'étape 10 :
+   `supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api`) → les sondes sans dépense
+   S13-S16 et les neuf de l'étape 10 rejouées → S17-S18, un appel du quota chacune, sans dépense Anthropic (zéro jeton) : S17, une adresse
+   `https` en 301 / 302 vers une page à JSON-LD `Recipe` complet — attendu une lecture `jsonld` sans appel au modèle, ou un refus propre et
+   nommé ; une redirection opaque (502 `inaccessible` sur une chaîne que `curl` suit) impose une ronde sur `telechargerPage` avant d'aller
+   plus loin → fusion → `push`. Les sondes se consignent dans la section « Sondes `lecture-web` » de `RESULTATS-mitsu.md`.
 
 ## Où coller les sorties
 
