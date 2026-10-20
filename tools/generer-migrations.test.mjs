@@ -545,6 +545,9 @@ test('README : etape 8 bis (0003 et sa preuve) et procedure « appareil perdu ou
 // prouve par les sondes du deploiement (README, etape 10), pas ici.
 import { OUTILS as OUTILS_PASSERELLE } from '../supabase/functions/assistant/logique.js';
 const FONCTION = 'supabase/functions/assistant';
+// F-2 (lot B) : 0004 est APPLIQUÉE et figée ; sa liste d'outils est un littéral (comme SYNC_STORES_0001). OUTILS ne fait que croître : ses trois
+// premiers sont ceux de 0004 ; le quatrième (lecture-web) entre par 0006.
+const OUTILS_0004 = ['recherche-web', 'creation', 'extraction'];
 
 test('0004 : une transaction a ajout seul, journal de compteurs sans contenu, RLS sans regle, aucun privilege client', () => {
   const m = lire('supabase/migrations/0004_assistant_journal.sql');
@@ -563,8 +566,9 @@ test('0004 : une transaction a ajout seul, journal de compteurs sans contenu, RL
   const bloc = code.slice(code.indexOf('create table public.assistant_journal ('), code.indexOf('\n);', code.indexOf('create table public.assistant_journal (')));
   assert.equal((bloc.match(/\btext\b/g) || []).length, 1, 'une seule colonne texte dans la table : l outil');
   assert.doesNotMatch(code, /\b(jsonb?|bytea|varchar|char)\b/);
-  // La liste blanche des outils du journal est celle de la logique pure.
-  assert.ok(code.includes(`check (outil in (${OUTILS_PASSERELLE.map((o) => `'${o}'`).join(', ')}))`), 'outils du journal = OUTILS');
+  // La liste blanche des outils du journal est celle de 0004, figée ; OUTILS la prolonge sans la changer (F-2).
+  assert.ok(code.includes(`check (outil in (${OUTILS_0004.map((o) => `'${o}'`).join(', ')}))`), 'outils du journal de 0004 = OUTILS_0004');
+  assert.deepEqual(OUTILS_PASSERELLE.slice(0, 3), OUTILS_0004, 'OUTILS commence par les trois outils de 0004');
   // RLS activee SANS aucune regle, et plus aucun privilege pour les roles clients (table, sequence, vue).
   assert.doesNotMatch(code, /create policy/);
   assert.ok(code.includes('alter table public.assistant_journal enable row level security;'));
