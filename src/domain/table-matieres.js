@@ -3,7 +3,7 @@
 // photo ↔ page ENVOYÉE, la revalidation d'un résultat revenu du journal (synchro, archive), l'ordre proposé, le tableau d'entrées, le plan de création
 // et la fabrication des références. Une seule direction d'import : table-matieres.js → llm.js, jamais l'inverse (F-6). Aucun objet du modèle n'est
 // recopié tel quel : chaque objet rendu est construit champ par champ (I-C2).
-import { validerLectureIndex, extraireTableMatieres, ErreurExtraction, BORNES_INDEX, MAX_TOKENS_INDEX } from './llm.js';
+import { validerLectureIndex, extraireTableMatieres, ErreurExtraction, BORNES_INDEX, MAX_TOKENS_INDEX, nettoyer } from './llm.js';
 import { normalizeText } from './units.js';
 import { assertVocabulaire } from './vocabulaire.js';
 import { borner } from '../core/bornes.js';
@@ -156,20 +156,24 @@ export const compteur = (lignes) => ({ lues: liste(lignes).length, dejaDans: lis
 // --- Fabrication (D-C3, D-C5, D-C11, D-C14, R-C-2, I-C11) : des fiches NEUVES seulement (une ligne non créable, même forcée dans le plan, ne produit
 // rien) ; index_page_id = la photo si sa page est dans `pagesParId` (pointeur souple), sinon null ; source_page_ids jamais vers une page absente ;
 // raw_entry = « titre — page » TELS QUE LUS ; pages : kind posé s'il est nul, role 'index' si le kind résultant est index, plage citée ; printed_page
-// jamais écrit (D-C14). assertVocabulaire sur chaque fiche (D-12 du lot A).
+// jamais écrit (D-C14). assertVocabulaire sur chaque fiche (D-12 du lot A). Ronde 1 : dernier mur avant `recipes`, le fabricant nettoie titre et section
+// par `nettoyer` (Cc, Cf ET Cs : une demi-paire de substitution ferait refuser la fiche par le jsonb, S-11) avant de les borner, et ramène une
+// printed_page hors 1..9 999 ou non entière à null (§ 4.4) — une ligne éditée dans le tableau ou forgée passe les MÊMES bornes que la lecture.
 export function fabriquerReferences(plan, { edition, pagesParId, resultat, pageIdsLigne = [], newId }) {
   const pages = pagesParId instanceof Map ? pagesParId : new Map();
   const recipes = [];
   for (const l of liste(plan?.aCreer)) {
     if (!l || !l.creable || l.dejaReperee || l.enDouble) continue; // R-C-2 : jamais une référence qui existe déjà
-    const titre = borner(titreDe(l), BORNES_INDEX.titre);
+    const titre = borner(nettoyer(titreDe(l)) ?? '', BORNES_INDEX.titre);
     if (!titre) continue;
     const inconnue = l.photo?.page_id == null;
     const indexPageId = !inconnue && pages.has(l.photo.page_id) ? l.photo.page_id : null;
-    const section = typeof l.section === 'string' && l.section.trim() ? borner(l.section.trim(), BORNES_INDEX.section) : null;
+    const sectionLue = nettoyer(l.section);
+    const section = sectionLue ? (borner(sectionLue, BORNES_INDEX.section) || null) : null;
+    const page = Number.isInteger(l.printed_page) && l.printed_page >= 1 && l.printed_page <= BORNES_INDEX.page ? l.printed_page : null;
     const fiche = {
       id: newId('rc'), edition_id: edition?.id ?? null, original_title: titre, original_language: edition?.language || null,
-      availability: 'reference_only', verification_state: 'unverified', printed_page: Number.isInteger(l.printed_page) ? l.printed_page : null, section,
+      availability: 'reference_only', verification_state: 'unverified', printed_page: page, section,
       type: null, tags: [], cuisines: [], favorite: false,
       source_page_ids: inconnue ? liste(pageIdsLigne).filter((id) => pages.has(id)) : (indexPageId ? [indexPageId] : []),
       current_version_id: null, ingredient_ids: [], index_page_id: indexPageId,

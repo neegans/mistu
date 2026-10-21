@@ -401,9 +401,11 @@ export async function saveBatch(batch, { origin = 'local', conditions = null } =
 // `autres` (vague finale) : des conditions de plus, sur d'AUTRES magasins, vérifiées dans la même transaction et passées telles quelles (ni nettoyées ni
 // horodatées : marquerInterrompus y relit le battement interne de sync_state) ; une condition sur le magasin de la transition est refusée (TypeError).
 // `conditions` (lot C, spec § 4.5) : { [autreMagasin]: [{ key, attendus, patch? }] } — d'autres fiches vérifiées et patchées dans la MÊME transaction,
-// chaque patch enveloppé comme celui de la ligne (nettoyé, horodaté : à la différence d'`autres`) ; la valeur rendue reste la fiche de `store`/`key`.
+// chaque patch enveloppé comme celui de la ligne (nettoyé, horodaté : à la différence d'`autres`) ; une condition sans patch vérifie seulement ; comme
+// `autres`, jamais une condition sur le magasin de la transition (TypeError, ronde 1) ; la valeur rendue reste la fiche de `store`/`key`.
 export async function transitionner(store, key, { attendus, patch = null, puts = {}, deletes = {}, payloads = {}, origin = 'local', autres = {}, conditions = {} } = {}) {
   if (Object.hasOwn(autres, store)) throw new TypeError('transitionner : `autres` ne porte pas de condition sur ' + store);
+  if (Object.hasOwn(conditions ?? {}, store)) throw new TypeError('transitionner : `conditions` ne porte pas de condition sur ' + store);
   const now = syncNow();
   const stamped = {};
   for (const [s, rows] of Object.entries(puts)) stamped[s] = horodater(s, rows, now);

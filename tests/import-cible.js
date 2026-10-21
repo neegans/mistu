@@ -271,7 +271,8 @@ export async function runImportCibleTests({ eq, ok }) {
     eq(V.assertVocabulaire({ status: 'a_lancer' }, 'imports'), true, 'vocabulaire : statut d’import de la liste accepté');
     eq(V.assertVocabulaire({ status: 'nimporte' }, 'books'), true, 'vocabulaire : magasin sans vocabulaire fermé → rien à vérifier');
     // Test de source (faible, admis) : chaque fabricant de `recipes` appelle assertVocabulaire( HORS commentaire \u2014 un appel commenté ne compte
-    // pas (ronde 1). Quatre fabricants aujourd'hui : création IA, signet, éditeur, « Créer les références » du panneau d'index.
+    // pas (ronde 1). Six fabricants (lot C, tâche 1) : création IA, signet, éditeur, « Créer les références » du panneau d'index (import.js),
+    // fabriquerExtraction (domain/import-cible.js), fabriquerReferences (domain/table-matieres.js).
     // Vague finale (m14) : les commentaires EN BLOC sont retirés aussi (un appel neutralisé par /* … */ ne compte plus) ; un appel neutralisé autrement
     // (if (false) …) ne se voit qu'au comportement : fabriquerExtraction et le save() de l'éditeur ont chacun leur test de vocabulaire hostile.
     const sansCommentaires = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
@@ -2800,12 +2801,20 @@ export async function runImportCibleTests({ eq, ok }) {
         const v4 = UI.lancerVol(p4.id, async () => { await tenu; return { resultat: { y: 1 }, texteBrut: '', modele: null }; }, { ctx, repo, fetch: fetchOk });
         await attendre(() => UI.volEnCours()?.importId === p4.id, 'vol d’index tenu');
         eq([await UI.lancerExtraction(pr.id, { ctx, repo, fetch: fetchOk }), await UI.lancerVol(p5.id, async () => ({ resultat: {}, texteBrut: '', modele: null }), { ctx, repo, fetch: fetchOk })], [{ issue: 'refuse', raison: 'vol_tenu' }, { issue: 'refuse', raison: 'vol_tenu' }], 'T-C25 (M90) : pendant un vol d’index, l’extraction d’une recette ET un autre lancerVol sont refusés (vol_tenu)');
+        const VOL = await import('../src/ui/vol.js'); const IW = await import('../src/ui/import-web.js');
+        const webPendantIndex = await IW.lancerLecture('imp_web_c25', { ctx, repo, fetch: fetchOk }); // R-C-9 (ronde 1) : une lecture web pendant le vol d'index
         lacher(); await v4;
         let rendre = null; const fetchLent = () => new Promise((res) => { rendre = () => res(rep(502, { erreur: 'serveur' })); });
         const v6 = UI.lancerExtraction(pr.id, { ctx, repo, fetch: fetchLent });
         await attendre(() => typeof rendre === 'function', 'fetch de la recette parti');
         eq(await UI.lancerVol(p5.id, async () => ({ resultat: {}, texteBrut: '', modele: null }), { ctx, repo, fetch: fetchOk }), { issue: 'refuse', raison: 'vol_tenu' }, 'T-C25 (M90) : … et l’inverse : pendant l’extraction d’une recette, une lecture d’index est refusée');
-        rendre(); await v6; }
+        rendre(); await v6;
+        // R-C-9 (I-C4 élargi, ronde 1) : la tenue d'une lecture web (celle que lancerLecture pose avant tout await) refuse une lecture d'index.
+        const tenueWeb = { importId: 'imp_web_c25', controller: new AbortController(), repo };
+        const pris = VOL.prendreVol(tenueWeb);
+        let indexPendantWeb;
+        try { indexPendantWeb = await UI.lancerVol(p5.id, async () => ({ resultat: {}, texteBrut: '', modele: null }), { ctx, repo, fetch: fetchOk }); } finally { VOL.libererVol(tenueWeb); }
+        eq([webPendantIndex, pris, indexPendantWeb, UI.volEnCours()], [{ issue: 'refuse', raison: 'vol_tenu' }, true, { issue: 'refuse', raison: 'vol_tenu' }, null], 'T-C25 (R-C-9, I-C4 élargi, ronde 1) : pendant un vol d’index, une lecture web (lancerLecture) est refusée vol_tenu ; et la tenue d’une lecture web refuse une lecture d’index — une seule tenue par document (src/ui/vol.js), libérée ensuite'); }
       // 5) Battement face à la passe `interrompu` de repo.init() (T6 du lot A ; Review Focus 1) et section Imports. La tête finale du lot A bat HORS de
       //    la ligne (vague finale : repo.battre, ligne interne battement:<id> de sync_state) : l'espion compte les appels de repo.battre et l'attente lit
       //    cette ligne (le repli de l'étape 5 ; modèle : le bloc « battement » de tests/import-cible.js).
@@ -2836,6 +2845,12 @@ export async function runImportCibleTests({ eq, ok }) {
         const r6 = await UI.lancerVol(null, async (args) => { vu = [args.kind, args.pageIds]; return { resultat: { w: 1 }, texteBrut: 'b', modele: 'claude-x' }; }, { ctx, repo, fetch: fetchOk, lecture });
         const l6 = await db.get('imports', r6.importId);
         eq([r6.issue, typeof r6.importId, vu, l6.kind, l6.recipe_id, l6.scan_session_id, l6.page_ids, l6.status, l6.resultat, UI.volEnCours()], ['a_verifier', 'string', ['index', pg], 'index', null, 'ss_vol', pg, 'a_verifier', { w: 1 }, null], 'T-C25 (lecture) : la ligne naît par repo.ouvrirImport sur ces pages, l’exécutant reçoit la sorte et les pages envoyées, le résultat rendu est écrit ; lancerVol rend l’importId'); }
+      // 7) Ronde 1 : des page_ids DOUBLÉS (donnée de synchro ou d'archive) — chaque page ne part qu'UNE fois (une image en double est un appel payé
+      //    pour rien, et un résultat à deux blocs pour la même page serait aussitôt refusé par revaliderResultatIndex).
+      { const p7 = await preparer(); const l7 = await db.get('imports', p7.id);
+        await db.put('imports', { ...l7, page_ids: [p7.pages[0], p7.pages[1], p7.pages[0]] });
+        let vu7 = null;
+        eq([await UI.lancerVol(p7.id, async (args) => { vu7 = [args.pageIds, args.images.length]; return { resultat: {}, texteBrut: '', modele: null }; }, { ctx, repo, fetch: fetchOk }), vu7], [{ issue: 'a_verifier' }, [p7.pages, 2]], 'T-C25 (ronde 1) : page_ids doublés [a, b, a] → executer reçoit [a, b] et deux images (chaque page envoyée une fois, dans l’ordre de sa première place)'); }
     } finally {
       UI.reinitialiserImportCible?.();
       globalThis.fetch = vraiFetch;

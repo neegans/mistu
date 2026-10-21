@@ -245,7 +245,8 @@ export function validerLectureIndex(data, { nbPhotos = 0 } = {}) {
   if (total > B.entrees) throw new ErreurExtraction('hors_bornes');
   const uncertain = [];
   const incertitudes = proprio(data, 'uncertain');
-  for (const u of Array.isArray(incertitudes) ? incertitudes : []) { const s = nettoyer(u); if (s && longueur(s) <= B.incertitude) uncertain.push(s); } // > 200 : écartée sans compte (pas une entrée)
+  // > 200, ou porteuse d'une adresse web (ronde 1 de la tâche 1, I-C2 : elle irait en tête de « Incertain : … ») : écartée sans compte (pas une entrée).
+  for (const u of Array.isArray(incertitudes) ? incertitudes : []) { const s = nettoyer(u); if (s && longueur(s) <= B.incertitude && !porteUneAdresse(s)) uncertain.push(s); }
   if (uncertain.length > B.incertitudes) throw new ErreurExtraction('hors_bornes');
   if (ecartees.trop_longues > B.ecartees || ecartees.adresse > B.ecartees) throw new ErreurExtraction('hors_bornes');
   if (total === 0) throw new ErreurExtraction('vide'); // rien à créer : aucune entrée lue, ou toutes écartées

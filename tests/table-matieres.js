@@ -47,6 +47,8 @@ export async function runTableMatieresTests({ eq, ok }) {
     catch (error) { ok(false, `Table des matières — ${nom} : ${error?.name || 'Erreur'} — ${error?.message || String(error)}`); }
   };
   const raison = (fn) => { try { fn(); return 'acceptée'; } catch (e) { return [e?.name, e?.raison ?? e?.message]; } };
+  // Ronde 1 : la valeur rendue, ou la levée NOMMÉE — un mutant qui fait lever n'interrompt pas le reste du bloc (une ligne rouge, pas un bloc perdu).
+  const essai = (fn) => { try { return fn(); } catch (e) { return ['levée', e?.name, e?.raison ?? e?.message]; } };
   try {
     const L = await import('../src/domain/llm.js');
     const D = await import('../src/domain/table-matieres.js');
@@ -65,15 +67,22 @@ export async function runTableMatieresTests({ eq, ok }) {
       eq([Object.isFrozen(L.BORNES_INDEX), L.MAX_TOKENS_INDEX], [true, 8000], 'T-C1 : BORNES_INDEX gelée, MAX_TOKENS_INDEX 8000');
       eq([raison(() => V('x')), raison(() => V([])), raison(() => V({})), raison(() => V({ photos: 'x' }))], [['ErreurExtraction', 'illisible'], ['ErreurExtraction', 'illisible'], ['ErreurExtraction', 'illisible'], ['ErreurExtraction', 'illisible']], 'T-C1 : racine non objet, tableau, sans photos, photos non tableau → illisible');
       eq(raison(() => V({ photos: [bloc(7, [entree('a')])] })), ['ErreurExtraction', 'hors_bornes'], 'T-C1 (M1) : un bloc « photo 7 » sur 5 photos → hors_bornes (un compte, pas une entrée)');
+      eq([raison(() => V({ photos: [bloc(0, [entree('a')])] })), raison(() => V({ photos: [bloc(-1, [entree('a')])] })), raison(() => V({ photos: [bloc(6, [entree('a')])] })), raison(() => V({ photos: [bloc(5, [entree('a')])] })), raison(() => V({ photos: [bloc(0, [entree('A')]), bloc(1, [entree('B')])] }, 2))],
+        [['ErreurExtraction', 'hors_bornes'], ['ErreurExtraction', 'hors_bornes'], ['ErreurExtraction', 'hors_bornes'], 'acceptée', ['ErreurExtraction', 'hors_bornes']], 'T-C1 (M1, A2, A3, ronde 1) : photo 0, photo −1 et photo N + 1 (6 sur 5) → hors_bornes ; photo N (5 sur 5) → acceptée ; des photos numérotées 0..N−1 → hors_bornes (jamais une entrée perdue sans compte ni une photo décalée)');
       eq(raison(() => V({ photos: [{ photo: '2', entries: [entree('a')] }] })), ['ErreurExtraction', 'illisible'], 'T-C1 (M2) : un numéro de photo non entier (« 2 ») → illisible');
       eq([V(un([entree('a')])).photos[0].printed_page_range, V({ photos: [bloc(1, [entree('a')], [64, 8])] }).photos[0].printed_page_range, V({ photos: [bloc(1, [entree('a')], [1, 10000])] }).photos[0].printed_page_range, V({ photos: [bloc(1, [entree('a')], [8])] }).photos[0].printed_page_range, V({ photos: [bloc(1, [entree('a')], [8, 94])] }).photos[0].printed_page_range],
         [null, null, null, null, [8, 94]], 'T-C1 (M3, M4) : plage absente, inversée [64, 8], bornée au-delà de 9 999, à un seul nombre → null ; [8, 94] gardée');
+      eq([V({ photos: [bloc(1, [entree('a')], [54, 54])] }).photos[0].printed_page_range, V({ photos: [bloc(1, [entree('a')], [1, 9999])] }).photos[0].printed_page_range, V({ photos: [bloc(1, [entree('a')], [8, 94, 3])] }).photos[0].printed_page_range],
+        [[54, 54], [1, 9999], null], 'T-C1 (M3, M4, A4, ronde 1) : une plage d’une seule page [54, 54] gardée (de ≤ a, bornes comprises) ; [1, 9 999] gardée ; une plage à trois nombres [8, 94, 3] → null (deux entiers exactement)');
       const long201 = 'é'.repeat(201); const long200 = 'é'.repeat(200);
       const r201 = V(un([entree(long201, 3), entree('Gaspacho', 76)]));
       eq([r201.photos[0].entries.map((e) => e.title), r201.ecartees, r201.uncertain], [['Gaspacho'], { trop_longues: 1, adresse: 0 }, []], 'T-C1 (M5, Q1) : un titre de 201 points de code → CETTE entrée écartée, les autres gardées, ecartees.trop_longues = 1, aucune chaîne de compte dans uncertain');
       ok(!r201.photos.some((p) => p.entries.some((e) => e.title.startsWith(long200))), 'T-C1 (M5b) : aucune entrée tronquée à 200 (aucun titre ne commence par les 200 premiers points de code de l’entrée longue)');
       eq(V(un([entree(long200, 3)])).photos[0].entries[0].title, long200, 'T-C1 : un titre de 200 points de code exactement est gardé');
-      eq(V(un([entree('Soupe', 3, long201), entree('Gaspacho', 76)])).ecartees, { trop_longues: 1, adresse: 0 }, 'T-C1 (M5c) : une section de 201 points de code → l’entrée écartée et comptée');
+      eq(essai(() => { const r = V(un([entree('Soupe', 3, long201), entree('Gaspacho', 76)])); return [r.photos[0].entries.map((e) => e.title), r.ecartees]; }), [['Gaspacho'], { trop_longues: 1, adresse: 0 }], 'T-C1 (M5c, A1) : une section de 201 points de code → l’entrée écartée (seule « Gaspacho » reste) ET comptée');
+      eq(essai(() => { const r = V(un([entree('   '), entree(''), { title: 7, printed_page: 1 }, entree('Gaspacho', 76)])); return [r.photos[0].entries.map((e) => e.title), r.ecartees]; }), [['Gaspacho'], { trop_longues: 0, adresse: 0 }], 'T-C1 (A6, ronde 1) : un titre blanc, vide ou qui n’est pas une chaîne → entrée écartée SANS compte (rien n’était lisible : ecartees reste à 0)');
+      eq(essai(() => { const r = V({ photos: [null, 'x', 7, [bloc(1, [entree('Volée')])], bloc(1, [null, 7, 'x', [entree('Volée')], entree('Gaspacho', 76)])], uncertain: [] }, 1); return [r.photos, r.ecartees]; }),
+        [[{ photo: 1, printed_page_range: null, entries: [{ title: 'Gaspacho', printed_page: 76, section: null, uncertain: false }] }], { trop_longues: 0, adresse: 0 }], 'T-C1 (A18, ronde 1) : un bloc qui n’est pas un objet nu (null, « x », 7, un tableau) et une entrée qui n’en est pas un sont ÉCARTÉS sans compte — la lecture est gardée avec la seule entrée valide (jamais illisible, jamais une exception)');
       const adr = V(un([entree('voir www.exemple.test/x', 3), entree('Gaspacho', 76, 'sur evil.com/x')]));
       eq([adr.photos[0].entries, adr.ecartees], [[{ title: 'Gaspacho', printed_page: 76, section: null, uncertain: false }], { trop_longues: 0, adresse: 1 }], 'T-C1 (M6, M6b) : une adresse dans le titre → entrée écartée, ecartees.adresse = 1 ; une adresse dans la section → section null, entrée gardée');
       eq(V(un([{ title: 'Soupe', printed_page: '9', section: { a: 1 }, uncertain: 'oui' }])).photos[0].entries[0], { title: 'Soupe', printed_page: null, section: null, uncertain: false }, 'T-C1 (M7, M8) : page « 9 » (chaîne) → null ; section objet → null ; uncertain « oui » → false (vrai seulement si === true)');
@@ -82,6 +91,11 @@ export async function runTableMatieresTests({ eq, ok }) {
       eq([raison(() => V(un(n(401)))), raison(() => V(un(n(400))))], [['ErreurExtraction', 'hors_bornes'], 'acceptée'], 'T-C1 (M9) : 401 entrées gardées → hors_bornes ; 400 → acceptée');
       const dup = V({ photos: [bloc(1, [entree('A', 1)]), bloc(1, [entree('B', 2)], [1, 2]), bloc(2, [entree('C', 3)])] }, 3);
       eq([dup.photos.length, dup.photos[0].entries.map((e) => e.title), dup.photos[0].printed_page_range, dup.photos[2]], [3, ['A', 'B'], [1, 2], { photo: 3, printed_page_range: null, entries: [] }], 'T-C1 (M10, M11) : deux blocs « photo 1 » → entrées concaténées dans l’ordre, première plage non nulle gardée ; la photo 3 sans bloc → bloc vide ; photos.length = N');
+      eq(V({ photos: [bloc(1, [entree('A', 8)], [8, 94]), bloc(1, [entree('B', 98)], [98, 158])] }, 1).photos[0].printed_page_range, [8, 94], 'T-C1 (M11, A5, ronde 1) : deux blocs « photo 1 » à plages non nulles DISTINCTES → la PREMIÈRE est gardée ([8, 94], jamais [98, 158])');
+      const tropLongues = (k) => Array.from({ length: k }, () => entree(long201));
+      const adresses = (k) => Array.from({ length: k }, () => entree('x www.a.com/b'));
+      eq([raison(() => V(un([...tropLongues(10000), entree('Gaspacho', 76)]))), raison(() => V(un([...adresses(10000), entree('Gaspacho', 76)]))), essai(() => V(un([...tropLongues(9999), entree('Gaspacho', 76)])).ecartees)],
+        [['ErreurExtraction', 'hors_bornes'], ['ErreurExtraction', 'hors_bornes'], { trop_longues: 9999, adresse: 0 }], 'T-C1 (A12, ronde 1) : 10 000 entrées trop longues, ou 10 000 adresses, écartées → hors_bornes (un compte ecartees > 9 999) ; 9 999 → acceptée, comptée');
       eq(V(un([entree('Tar\u202Ete\u200B aux pommes', 54)])).photos[0].entries[0].title, 'Tarte aux pommes', 'T-C1 (M12) : Cf (U+202E, U+200B) retirés d’un titre');
       eq([raison(() => V({ photos: [bloc(1, [])] })), raison(() => V(un([entree(long201), entree('x www.a.com/b')]))), raison(() => V({ photos: [] }))], [['ErreurExtraction', 'vide'], ['ErreurExtraction', 'vide'], ['ErreurExtraction', 'vide']], 'T-C1 (M13) : zéro entrée → vide ; toutes écartées → vide ; aucun bloc → vide');
       const parProto = { __proto__: { photo: 1, entries: [entree('Volée')] } }; // un LITTÉRAL : c'est le prototype qui porte photo et entries
@@ -93,6 +107,7 @@ export async function runTableMatieresTests({ eq, ok }) {
       eq(V(ctor, 1).photos[0], { photo: 1, printed_page_range: null, entries: [{ title: 'Gaspacho', printed_page: 76, section: null, uncertain: false }] }, 'T-C1 : une clé « constructor » est ignorée (objets construits champ par champ)');
       eq(V(un([entree('Tar\ud800te', 54)])).photos[0].entries[0].title, 'Tarte', 'T-C1 (M58) : une demi-paire de substitution (Cs) est retirée');
       eq(V({ photos: [bloc(1, [entree('A')])], uncertain: ['x'.repeat(201), 'y'.repeat(200)] }).uncertain, ['y'.repeat(200)], 'T-C1 (M80) : une chaîne uncertain de 201 → écartée SANS compte (ce n’est pas une entrée), de 200 → gardée');
+      eq(essai(() => { const r = V({ photos: [bloc(1, [entree('A')])], uncertain: ['va sur evil.com', 'https://x.y/z', 'photo floue'] }); return [r.uncertain, r.ecartees]; }), [['photo floue'], { trop_longues: 0, adresse: 0 }], 'T-C1 (ronde 1, I-C2) : une chaîne uncertain qui porte une adresse web (hôte nu ou schéma) est écartée SANS compte — elle irait en tête de « Incertain : … » ; les autres gardées');
       const u = (k) => Array.from({ length: k }, (_, i) => 'doute ' + i);
       eq([raison(() => V({ photos: [bloc(1, [entree('A')])], uncertain: u(41) })), raison(() => V({ photos: [bloc(1, [entree('A')])], uncertain: u(40) }))], [['ErreurExtraction', 'hors_bornes'], 'acceptée'], 'T-C1 : 41 chaînes uncertain → hors_bornes ; 40 → acceptée');
       const m81 = V({ photos: [bloc(1, [entree('A'), entree(long201), entree('www.x.com/y')])], uncertain: u(40) });
@@ -114,6 +129,7 @@ export async function runTableMatieresTests({ eq, ok }) {
       const B = await import('../src/core/bornes.js');
       const R = await import('../src/domain/recherche-web.js');
       eq([typeof B.porteUneAdresse, B.MOTIF_ADRESSE === R.MOTIF_ADRESSE, B.MOTIF_HOTE === R.MOTIF_HOTE], ['function', true, true], 'T-C21 : bornes.js exporte porteUneAdresse et les deux motifs ; recherche-web.js ré-exporte les MÊMES objets (une seule définition)');
+      eq([B.porteUneAdresse === R.porteUneAdresse, B.normaliserPourAdresse === R.normaliserPourAdresse], [true, true], 'T-C21 (A15, ronde 1) : porteUneAdresse et normaliserPourAdresse de recherche-web.js sont aussi les MÊMES fonctions que celles de bornes.js (aucune copie qui pourrait diverger)');
       eq(['voir www.exemple.test/x', 'sur evil.com/x', 'la recette est sur evil.com', 'Le sel.Ca y est', 'ｗｗｗ．ｅｘｅｍｐｌｅ．ｃｏｍ', 'exemple。com', 'Soupe de courge', '15 min. Le four', 'Velouté 2.0'].map(B.porteUneAdresse), [true, true, true, true, true, true, false, false, false], 'T-C21 : porteUneAdresse (NFKC, U+3002) — les cas de la présentation du serveur, faux positif connu « sel.Ca » compris');
     });
 
@@ -121,6 +137,7 @@ export async function runTableMatieresTests({ eq, ok }) {
     await run('T-C2 resultatIndex', async () => {
       eq(C.photos.map((p) => [p.page_id, p.printed_page_range?.[0] ?? null, p.entries.length]), [['p3', 164, 4], ['p1', 8, 9], ['p5', null, 0], ['p2', 98, 6], ['p4', 182, 4]], 'T-C2 (M14) : page_id = pageIds[photo − 1] sur l’ordre d’envoi 3,1,5,2,4');
       eq([Object.keys(C), Object.keys(C.photos[0]), C.ecartees, C.uncertain], [['photos', 'ecartees', 'uncertain'], ['page_id', 'printed_page_range', 'entries'], { trop_longues: 0, adresse: 0 }, []], 'T-C2 : la forme stockée (§ 3.2) — page_id au lieu du numéro de photo ; ecartees et uncertain repris');
+      eq(D.resultatIndex({ ...LU_5, ecartees: { trop_longues: 2, adresse: 1 } }, ENVOI).ecartees, { trop_longues: 2, adresse: 1 }, 'T-C2 (A8, ronde 1) : les comptes ecartees de la lecture validée sont rendus TELS QUELS ({ 2, 1 }, jamais remis à 0 : le « {k} entrées écartées » de l’écran en dépend)');
       const melange = { photos: [LU_5.photos[2], LU_5.photos[0], LU_5.photos[4], LU_5.photos[1], LU_5.photos[3]], ecartees: LU_5.ecartees, uncertain: [] };
       eq(D.resultatIndex(melange, ENVOI).photos.map((p) => p.page_id), ENVOI, 'T-C2 (M15) : blocs rendus dans l’ordre 1..N quel que soit l’ordre de la lecture');
       const court = D.resultatIndex(L.validerLectureIndex({ photos: LECTURE_5.photos.slice(0, 2), uncertain: ['flou'] }, { nbPhotos: 2 }), ['p3', 'p1']);
@@ -137,6 +154,12 @@ export async function runTableMatieresTests({ eq, ok }) {
       injecte.photos[1].entries.push({ title: 'x'.repeat(201), printed_page: 3, section: null, uncertain: false });
       const rv = D.revaliderResultatIndex(injecte, ENVOI);
       eq([rv?.photos[1].entries.length, rv?.ecartees, rv?.uncertain, rv?.photos[0]], [9, { trop_longues: 1, adresse: 0 }, [], C.photos[0]], 'T-C3 (M16b) : un titre de 201 injecté en base → l’entrée perdue, ecartees.trop_longues gagne 1 SUR le compte stocké, le reste intact');
+      const avecNuls = JSON.parse(JSON.stringify(C));
+      avecNuls.photos[1].entries.unshift(null, 7);
+      eq(essai(() => D.revaliderResultatIndex(avecNuls, ENVOI)), C, 'T-C3 (ronde 1) : une forme C relue du journal dont entries porte null et 7 → revalidée SANS ces deux entrées et sans exception (le reste identique, rien compté) — jamais une levée hors de revaliderResultatIndex');
+      const plein = JSON.parse(JSON.stringify(C)); plein.ecartees = { trop_longues: 9999, adresse: 0 };
+      const plusUn = JSON.parse(JSON.stringify(plein)); plusUn.photos[0].entries.push({ title: 'x'.repeat(201), printed_page: 3, section: null, uncertain: false });
+      eq([D.revaliderResultatIndex(plein, ENVOI)?.ecartees, D.revaliderResultatIndex(plusUn, ENVOI)], [{ trop_longues: 9999, adresse: 0 }, null], 'T-C3 (A11, ronde 1) : un compte stocké à 9 999 est gardé ; 9 999 + une entrée trop longue injectée = 10 000 → null (la SOMME est bornée)');
       for (const [nom, e] of [['absent', undefined], ['-1', { trop_longues: -1, adresse: 0 }], ['1.5', { trop_longues: 1.5, adresse: 0 }], ['« 2 »', { trop_longues: '2', adresse: 0 }], ['10000', { trop_longues: 10000, adresse: 0 }], ['objet à clé __proto__', JSON.parse('{"__proto__":{"trop_longues":1,"adresse":0}}')]]) {
         eq(D.revaliderResultatIndex({ photos: C.photos, ...(e === undefined ? {} : { ecartees: e }), uncertain: [] }, ENVOI), null, `T-C3 (M103) : ecartees stocké ${nom} → null`);
       }
@@ -160,6 +183,7 @@ export async function runTableMatieresTests({ eq, ok }) {
       eq([D.reordonnerSeance(['a', 'b', 'c'], ['c', 'zz', 'a']), D.reordonnerSeance(['a', 'b'], ['b', 'b', 'a'])], [['c', 'b', 'a'], ['b', 'a']], 'T-C5 : un identifiant de l’ordre absent de la séance est ignoré ; un doublon de l’ordre ne duplique rien');
       const bizarres = new Map([['p1', { id: 'p1', position: 2 }], ['p2', { id: 'p2', position: 2 }], ['p3', { id: 'p3', position: null }], ['p4', { id: 'p4', position: 'x' }], ['p5', { id: 'p5', position: 6 }]]);
       eq(D.positionsProposees(['p5', 'p4', 'p3', 'p2', 'p1'], bizarres, ['p1', 'p2', 'p3', 'p4', 'p5']).pages.map((p) => [p.id, p.position]), [['p5', 2], ['p4', 2], ['p3', 6], ['p2', null], ['p1', 'x']], 'T-C5 (M60, S-19) : positions {2, 2, null, « x », 6} → créneaux triés (entiers d’abord, puis les autres par rang de séance), réassignés TELS QUELS dans l’ordre choisi');
+      eq(essai(() => D.positionsProposees(['p2', 'zz', 'p1', 'p2'], new Map([['p1', { id: 'p1', position: 4 }], ['p2', { id: 'p2', position: 9 }]]), ['p1', 'p2'])), { pages: [{ id: 'p2', position: 4 }, { id: 'p1', position: 9 }], ordre: ['p2', 'p1'] }, 'T-C5 (A17, B14, ronde 1) : un identifiant de l’ordre absent de pagesParId est ignoré (jamais une exception) ; un doublon de l’ordre ne compte qu’une fois (deux pages, deux créneaux)');
       eq([D.memeOrdre(['a', 'b'], ['a', 'b']), D.memeOrdre(['a', 'b'], ['b', 'a']), D.memeOrdre(['a'], ['a', 'b']), D.memeOrdre(null, [])], [true, false, false, true], 'T-C5 : memeOrdre');
       eq([D.trierParSeance(['p5', 'p1', 'p3'], ['p1', 'p2', 'p3', 'p4', 'p5']), D.trierParSeance(['p9', 'p2'], ['p1', 'p2'])], [['p1', 'p3', 'p5'], ['p2']], 'T-C5 (M61, F-9) : les cochées remises dans l’ordre de la SÉANCE (jamais l’ordre de cochage) ; un identifiant hors séance écarté');
       const ligne = { page_ids: ['p2', 'p9', 'p1'] };
@@ -194,6 +218,7 @@ export async function runTableMatieresTests({ eq, ok }) {
       const lignes = [imp('i1', 'a_verifier', '2026-10-19T10:00:00Z'), imp('i2', 'echec', '2026-10-19T11:00:00Z'), imp('i3', 'enregistre', '2026-10-19T12:00:00Z'), imp('i4', 'a_lancer', '2026-10-19T13:00:00Z', { kind: 'recette' }), imp('i5', 'a_lancer', '2026-10-19T14:00:00Z', { scan_session_id: 'ss2' }), imp('i6', 'nimporte', '2026-10-19T15:00:00Z')];
       eq([D.ligneOuverteDeSeance(lignes, 'ss1')?.id, D.ligneOuverteDeSeance(lignes, 'ss1', { importId: 'i1' })?.id, D.ligneOuverteDeSeance(lignes, 'ss1', { importId: 'i3' })?.id, D.ligneOuverteDeSeance(lignes, 'ssX'), D.ligneOuverteDeSeance(lignes, null), D.ligneOuverteDeSeance(null, 'ss1')],
         ['i2', 'i1', 'i2', null, null, null], 'T-C6 (M62, D-C16) : la ligne index OUVERTE la plus récente de la séance ; importId gagne s’il désigne une ligne ouverte de la séance ; une ligne terminale, d’une autre sorte, d’une autre séance ou au statut inconnu n’est jamais reprise');
+      eq([D.ligneOuverteDeSeance(lignes, 'ss1', { importId: 'i5' })?.id, D.ligneOuverteDeSeance(lignes, 'ss1', { importId: 'i4' })?.id], ['i2', 'i2'], 'T-C6 (B4, D-C16, ronde 1) : un importId qui désigne une ligne OUVERTE d’une AUTRE séance (i5, ss2) ou d’une autre sorte (i4, recette) est ignoré : la ligne index ouverte la plus récente de CETTE séance est rendue');
     });
 
     // T-C7 cohérence page / plage (D-C12)
@@ -215,6 +240,13 @@ export async function runTableMatieresTests({ eq, ok }) {
       const edite = D.recalculer(lt2.map((l, k) => (k === 0 ? { ...l, title: 'Velouté de pois' } : k === 1 ? { ...l, printed_page: 300 } : l)), []);
       const f2 = D.fabriquerReferences(D.planCreation(edite), { edition, pagesParId, resultat: C, newId });
       eq([f2.recipes[0].original_title, f2.recipes[0].raw_entry, f2.recipes[1].index_uncertain, f2.recipes[1].printed_page, f2.recipes[1].raw_entry], ['Velouté de pois', 'Velouté de petits pois — 8', true, 300, 'Salade de betteraves — 12'], 'T-C8 (M30, M31) : titre édité → original_title édité, raw_entry LU ; page hors plage → index_uncertain');
+      const petit = { photos: [{ page_id: 'p1', printed_page_range: [8, 94], entries: [{ title: 'Pesto', printed_page: 20, section: null, uncertain: true }, { title: 'Soupe', printed_page: null, section: null, uncertain: false }] }], ecartees: { trop_longues: 0, adresse: 0 }, uncertain: [] };
+      const f4 = D.fabriquerReferences(D.planCreation(D.lignesTableau(petit, { ordre: ['p1'], existantes: [] })), { edition, pagesParId, resultat: petit, newId });
+      eq(f4.recipes.map((r) => [r.original_title, r.index_uncertain, r.raw_entry, r.printed_page]), [['Pesto', true, 'Pesto — 20', 20], ['Soupe', false, 'Soupe', null]], 'T-C8 (A9, A10, ronde 1) : une entrée uncertain DANS sa plage → index_uncertain vrai (uncertain || horsPlage) ; une page lue nulle → raw_entry = le titre lu seul (jamais « Soupe — null »)');
+      const cs = String.fromCharCode(0xd800); // une demi-paire de substitution seule (Cs), construite sans échappement dans le source
+      const forges = D.recalculer([{ ...lt2[0], title: 'Velo' + cs + 'uté', section: 'Prin' + cs + 'temps', printed_page: -5 }, { ...lt2[1], printed_page: 123456 }, { ...lt2[2], printed_page: 9999 }, { ...lt2[3], printed_page: 4.5 }], []);
+      const f5 = D.fabriquerReferences(D.planCreation(forges), { edition, pagesParId, resultat: C, newId });
+      eq(f5.recipes.map((r) => [r.original_title, r.section, r.printed_page]), [['Velouté', 'Printemps', null], ['Salade de betteraves', 'Printemps', null], ['Risotto aux champignons', 'Printemps', 9999], ['Tarte aux pommes', 'Printemps', null]], 'T-C8 (S-11, § 4.4, ronde 1) : le fabricant, dernier mur avant recipes, retire une demi-paire de substitution (Cs) du titre et de la section, et ramène une printed_page hors 1..9 999 ou non entière à null (une ligne éditée ou forgée)');
       const pages2 = new Map([['p1', { id: 'p1', kind: null, printed_page: null }], ['p2', { id: 'p2', kind: 'recipe', printed_page: 9, role: null }], ['p4', { id: 'p4', kind: 'index', printed_page: 9 }], ['p5', { id: 'p5', kind: null, printed_page: null }]]); // p3 retirée entre lecture et création
       const f3 = D.fabriquerReferences(D.planCreation(lt2), { edition, pagesParId: pages2, resultat: C, newId });
       eq(f3.pageUpdates.map((p) => [p.id, p.kind, p.role, p.printed_page_range, p.printed_page]), [['p1', 'index', 'index', [8, 94], null], ['p5', 'index', 'index', null, null], ['p2', 'recipe', null, [98, 158], 9], ['p4', 'index', 'index', [182, 192], 9]], 'T-C8 (M63, M33, D-C14) : kind nul → index (+ role index) ; kind recipe GARDÉ, role non posé ; plage citée posée ; printed_page jamais écrit par C (nul reste nul, 9 reste 9)');
@@ -255,6 +287,19 @@ export async function runTableMatieresTests({ eq, ok }) {
       let forme = null;
       try { await repo.transitionner('imports', 'imp_c24', { attendus: ['a_verifier'], patch: { page_ids: ['p9'] }, conditions: { scan_sessions: { key: 'ss_c24' } } }); } catch (e) { forme = e; }
       eq([forme?.name, await db.get('imports', 'imp_c24')], ['TypeError', ligneAvant], 'T-C24 : un sac conditions mal formé (pas un tableau) → TypeError, rien d’écrit (la ligne relue identique, son patch non posé)');
+      // Ronde 1 : la forme « patch? » (vérification seule), la coexistence avec `autres` sur un même magasin, et la garde sur le magasin de la transition.
+      const seanceV = { id: 'ss_v', status: 'open', page_ids: ['p1'], document_ids: [], created_at: DATE, updated_at: DATE };
+      await db.mutate({ puts: { scan_sessions: [seanceV] }, origin: 'device' });
+      const vus2 = []; const capture2 = db.onMutate;
+      db.onMutate = (m) => { vus2.push(Object.keys(m.puts).sort()); return capture2 ? capture2(m) : {}; };
+      try { await repo.transitionner('imports', 'imp_c24', { attendus: ['a_verifier'], patch: { page_ids: ['p1', 'p2'] }, conditions: { scan_sessions: [{ key: 'ss_v', attendus: ['open'] }] } }); } finally { db.onMutate = capture2; }
+      eq([vus2, await db.get('scan_sessions', 'ss_v'), (await db.get('imports', 'imp_c24')).page_ids], [[['imports']], seanceV, ['p1', 'p2']], 'T-C24 (A13, ronde 1) : une condition SANS patch vérifie seulement — la séance relue identique (updated_at inchangé), un seul magasin dans puts (rien en file pour elle) ; la ligne est écrite');
+      let refusAutres = null;
+      try { await repo.transitionner('imports', 'imp_c24', { attendus: ['a_verifier'], patch: { page_ids: ['p9'] }, autres: { scan_sessions: [{ key: 'ss_absente', attendus: ['open'] }] }, conditions: { scan_sessions: [{ key: 'ss_v', attendus: ['open'], patch: { page_ids: ['p9'] } }] } }); } catch (e) { refusAutres = e; }
+      eq([refusAutres?.name, refusAutres?.key, (await db.get('imports', 'imp_c24')).page_ids, await db.get('scan_sessions', 'ss_v')], ['TransitionRefusee', 'ss_absente', ['p1', 'p2'], seanceV], 'T-C24 (A14, ronde 1) : `autres` et `conditions` sur le MÊME magasin coexistent — la condition brute d’autres (séance absente) refuse la transition, rien d’écrit (ni la ligne ni la séance)');
+      let surSoi = null;
+      try { await repo.transitionner('imports', 'imp_c24', { attendus: ['a_verifier'], patch: { page_ids: ['p8'] }, conditions: { imports: [{ key: 'imp_autre', attendus: ['a_lancer'] }] } }); } catch (e) { surSoi = e; }
+      eq([surSoi?.name, (await db.get('imports', 'imp_c24')).page_ids], ['TypeError', ['p1', 'p2']], 'T-C24 (ronde 1) : comme `autres`, le sac `conditions` ne porte pas de condition sur le magasin de la transition (TypeError avant toute écriture, rien d’écrit)');
     }));
 
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne

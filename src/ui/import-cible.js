@@ -75,11 +75,12 @@ const questionAPoser = ({ ok, rattachee, remplacement, remplacer }) => (!ok && !
 
 // Les images qui PARTENT, dans l'ordre de page_ids (seule source de vérité de l'ordre), réduites par pagePourEnvoi (F-3), et les identifiants des
 // pages EFFECTIVEMENT envoyées, dans le même ordre (lot C, D-C21 : la photo n de la réponse est pageIds[n − 1]). Une page absente est écartée des
-// deux (pointeur souple, § 3.1) ; une page dont les octets ne sont pas sur cet appareil fait refuser l'envoi (rien n'est lu à moitié).
+// deux (pointeur souple, § 3.1) ; une page dont les octets ne sont pas sur cet appareil fait refuser l'envoi (rien n'est lu à moitié). Ronde 1 de la
+// tâche 1 du lot C : un identifiant DOUBLÉ (page_ids est une donnée de synchro ou d'archive) ne part qu'une fois, à sa première place.
 async function imagesDe(repo, pageIds) {
   const images = [];
   const envoyees = [];
-  for (const id of pageIds) {
+  for (const id of new Set(pageIds)) {
     const page = await repo.get('source_pages', id);
     if (!page?.sha256) continue;
     const fichier = await repo.getFile(page.sha256);

@@ -344,6 +344,8 @@ export async function runPasserelleTests({ eq, ok }) {
           try { await L.extraireTableMatieres(new L.PasserelleProvider({}, { session: SESSION, fetch: async () => { n += 1; return reponse(200, {}); } }), images, { signal: ctl.signal }); } catch (x) { e = x; }
           eq([e?.message, n], ['annule', 0], 'T-C9 : un signal déjà levé → aucun POST, Error(annule)'); }
         eq([await echec(texte('pas du json'), L.extraireTableMatieres), await echec(texte('{"photos": 3}'), L.extraireTableMatieres), await echec(texte('{"photos": []}'), L.extraireTableMatieres)], [['ErreurExtraction', 'illisible'], ['ErreurExtraction', 'illisible'], ['ErreurExtraction', 'vide']], 'T-C9 : prose → illisible ; photos non tableau → illisible ; aucune entrée → vide');
+        { let e = null; try { await L.extraireTableMatieres(avecCorps(texte('{"photos": []}')), images); } catch (x) { e = x; }
+          eq([e?.name, e?.raison, e?.texteBrut, e?.stopReason, e?.modele], ['ErreurExtraction', 'vide', '{"photos": []}', 'end_turn', 'claude-x'], 'T-C9 (A7, ronde 1) : un refus de VALIDATION (vide) porte texteBrut, stopReason et modele sur l’erreur, comme extraireRecette (le diagnostic du journal) ; la réponse brute est coupée sur un refus comme sur un succès'); }
         eq(typeof L.extraireIndex, 'function', 'T-C9 (garde transitoire, sans mutant : réécrite en tâche 4) : en tâche 1, l’ancien extraireIndex reste en place (le panneau le lit jusqu’à la tâche 4, F-3)');
       }
       // parseStepsBlock(texte, { parParagraphe }) : une étape par paragraphe (ligne vide), sauts de ligne internes gardés ; sans option, comme avant.
