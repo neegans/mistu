@@ -1,18 +1,20 @@
 // Séance de scan continue (spec §16) : photos et fichiers conservés sur l'appareil, miniatures numérotées, regroupement,
 // remplacement d'une page, entrées d'index, états fondés sur des événements réels. Aucune page n'est annoncée « sur le serveur » sans un remote
 // de ce compte sur sa ligne files (lot G, § 4.3, I5).
-import { el, toast, pickFiles, confirmDialog, formatDate } from '../core/dom.js';
+import { el, toast, toast as toastDom, pickFiles, confirmDialog, formatDate } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { navigate, buildQuery, refresh, remplacerAdresse, parseHash } from '../core/router.js';
 import { logError } from '../core/log.js';
 import { TransitionRefusee } from '../core/db.js';
+import { borner } from '../core/bornes.js';
 import * as repo from '../model/repo.js';
+import * as repoModule from '../model/repo.js';
 import { remoteDeCeCompte } from '../sync/tables.js';
 import { sha256Hex } from '../core/hash.js';
-import { normalizeText } from '../domain/units.js';
 import { assertVocabulaire } from '../domain/vocabulaire.js';
 import { providerFrom } from '../domain/llm.js';
 import { seanceDUnImportCible, importOuvert } from '../domain/import-cible.js';
+import { cleReference } from '../domain/table-matieres.js';
 import { pageHeader, section, emptyState, select, field, carteConnexion, texteEchecAssistant, pdfFrame, libelleLivre, sessionAssistant, contexteFichiers, vignettesDePages, boutonTelechargerPages, gesteTelechargement } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { lireDansLeJournal, relireDuJournal, phraseEchec, cleLecture } from './import-cible.js';
@@ -214,7 +216,7 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
 // Panneau d'entrées d'index : « Titre — 132 » par ligne ; création de références (reference_only) sans inventer d'ingrédients.
 // Tâche 6 (spec § 4.6) : « Lire avec l'assistant IA » écrit dans le journal (kind index) et relit sa ligne ; le bouton est verrouillé pendant
 // l'appel (double clic → un POST) ; `importId` (?import=) reprend une lecture déjà reçue, sans appel ; « Créer les références » la clôt.
-export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId = null, importId = null } = {}) {
+export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId = null, importId = null, repo = repoModule, toast = toastDom, maintenant = horloge } = {}) {
   const panel = el('div', { class: 'card stack' }, el('h2', null, t('Entrées d’index ou de table des matières')));
   const ta = el('textarea', { placeholder: 'Magret de canard aux cerises — 132\nSalade de fenouil, p. 58\n212 Pâtes puttanesca', rows: 8 });
   const preview = el('div', null);
@@ -256,7 +258,7 @@ export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId 
     status.textContent = t('Lecture des pages par l’assistant…');
     let connecte = true;
     try {
-      const r = await lireDansLeJournal({ kind: 'index', importId: importCourant, pageIds: ids, editionId: editionId || session?.edition_id || null, sessionId: session?.id ?? null, ctx });
+      const r = await lireDansLeJournal({ kind: 'index', importId: importCourant, pageIds: ids, editionId: editionId || session?.edition_id || null, sessionId: session?.id ?? null, ctx, repo });
       importCourant = r.importId; connecte = r.connecte;
       if (r.resultat) { remplir(r.resultat); cleZone = r.cle; } else status.textContent = r.texte;
     } catch (e) { logError('import.index_lecture', { error: e }); status.textContent = texteEchecAssistant(e); }
@@ -268,59 +270,72 @@ export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId 
   } }, t('Lire avec l’assistant IA'));
   lierAssistant();
   // ?import= : la lecture déjà reçue est relue et REVALIDÉE (I-1), puis posée dans la zone — aucun appel ; une ligne en échec dit sa raison.
-  if (importId) relireDuJournal(importId, 'index').then((relue) => {
+  if (importId) relireDuJournal(importId, 'index', { repo }).then((relue) => {
     if (!relue) { importCourant = null; return; }
     if (relue.resultat) { remplir(relue.resultat); cleZone = cleLecture(relue.ligne); }
     else if (relue.ligne?.status === 'echec') status.textContent = phraseEchec(relue.ligne.erreur);
   }).catch((e) => logError('import.index_relu', { error: e }));
   const create = async () => {
-    const edId = editionId || session?.edition_id;
-    if (!edId) { toast(t('Associe d’abord un livre à cette séance')); return; }
-    const entries = parse();
-    if (!entries.length) return;
-    const edition = ctx.editionsById.get(edId);
-    const existing = ctx.recipes.filter((r) => r.edition_id === edId);
-    const key = (title, page) => `${normalizeText(title)}|${page ?? ''}`;
-    const seen = new Set(existing.map((r) => key(r.original_title, r.printed_page)));
-    const pageIds = getSelectedPageIds().filter((id) => ctx.pagesById.get(id));
-    const created = [];
-    let dupes = 0;
-    for (const e of entries) {
-      const k = key(e.title, e.printed_page);
-      if (seen.has(k)) { dupes++; continue; }
-      seen.add(k);
-      const fiche = { id: repo.newId('rc'), edition_id: edId, original_title: e.title, original_language: edition?.language || null, availability: 'reference_only', verification_state: 'unverified', printed_page: e.printed_page, section: e.section || null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: pageIds, current_version_id: null, ingredient_ids: [] };
-      assertVocabulaire(fiche, 'recipes'); // D-12 : « Créer les références » est un fabricant de recipes comme les autres (spec import-cible § 3.3)
-      created.push(fiche);
-    }
-    const pagesIndex = pageIds.map((id) => ({ ...ctx.pagesById.get(id), kind: 'index' }));
-    // Tâche 6 : la lecture du journal POSÉE DANS LA ZONE (a_verifier, sa clé) est CLOSE avec ce qu'elle a produit — références et pages d'index —, dans UNE
-    // transaction conditionnée (I-10) à cette même lecture (T4-R2, ronde 1 : une lecture plus récente, arrivée d'un autre onglet, n'est jamais close sans
-    // avoir été vue ; les références de la zone s'écrivent alors sans elle). Refusée (close ou ignorée entre-temps) : rien n'est écrit ; le panneau se
-    // détache de la ligne, et « Créer les références » écrira à nouveau sans elle.
-    const ouverte = importCourant && cleZone ? await repo.get('imports', importCourant) : null;
-    if (ouverte?.status === 'a_verifier' && ouverte.kind === 'index' && cleLecture(ouverte) === cleZone) {
-      const cle = cleZone;
-      const cloture = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', ouverte.id, c.status); return { status: 'enregistre', reponse_brute: null, finished_at: repo.nowIso() }; };
-      try {
-        await repo.transitionner('imports', ouverte.id, { attendus: ['a_verifier'], patch: cloture, puts: { ...(pagesIndex.length ? { source_pages: pagesIndex } : {}), ...(created.length ? { recipes: created } : {}) } });
-      } catch (e) {
-        if (!(e instanceof TransitionRefusee)) throw e;
-        importCourant = null; cleZone = null;
-        toast(t('Les références n’ont pas pu être créées. Réessaie.'));
-        return;
-      }
-      importCourant = null; cleZone = null;
-    } else {
-      if (pagesIndex.length) await repo.saveBatch({ source_pages: pagesIndex });
-      if (created.length) await repo.saveBatch({ recipes: created });
-    }
-    toast(t('{n} référence(s) créée(s){d}', { n: created.length, d: dupes ? `, ${t('{n} doublon(s) ignoré(s)', { n: dupes })}` : '' }));
-    ta.value = ''; draw(); refresh();
+    // Lot C, tâche 2 : creerDepuisSaisie (raw_entry, bornes, kind gardé) ; la lecture POSÉE DANS LA ZONE (importCourant, sa clé cleZone) est close dans la
+    // transaction des fiches ; refusée, rien n'est écrit et le panneau se détache de la ligne (décision 4 de la ronde 1 de T6) — un second clic écrit sans elle.
+    const r = await creerDepuisSaisie(ta.value, { session, ctx, editionId, pageIds: getSelectedPageIds(), repo, toast, maintenant, importId: importCourant, cle: cleZone });
+    if (r.issue === 'refuse' || r.ferme) { importCourant = null; cleZone = null; }
+    if (r.issue === 'cree') { ta.value = ''; draw(); refresh(); }
   };
   panel.append(el('p', { class: 'muted' }, t('Une ligne par recette : titre puis numéro de page. Un titre ne suffit pas à déduire des ingrédients : ces entrées deviennent des références « Repérée dans ton livre ».')),
     connexion, ta, el('div', { class: 'row' }, aiBtn, el('button', { class: 'btn primary', onClick: create }, t('Créer les références'))), status, preview);
   return panel;
+}
+
+const horloge = () => new Date().toISOString();
+const STATUTS_FERMABLES = ['a_verifier', 'echec', 'a_lancer']; // D-C19 : en_cours n'est jamais fermé par la zone de texte
+
+// « Créer les références » depuis la zone de texte (spec C § 4.4, D-C19 ; sans DOM, testable seule) : une ligne tapée = une référence ; titre et
+// raw_entry bornés (données de la personne : troncature acceptable, S-10) ; index_page_id null, section null, index_uncertain faux ; source_page_ids =
+// les pages cochées PRÉSENTES (règle d'avant) ; une page cochée garde son kind (kind ?? 'index'). La ligne d'index que le panneau MONTRE (`importId`,
+// sa clé `cle` = cleLecture : T4-R2 du lot A) est fermée dans la MÊME transaction que les fiches (a_verifier → enregistre : la lecture a servi ;
+// echec | a_lancer → ignore), finished_at posé, la clé revérifiée DANS la transaction. Refusée (close, ignorée ou relue ailleurs entre-temps) : RIEN
+// n'est écrit et c'est dit (décision 4 de la ronde 1 de T6 ; l'appelant se détache de la ligne). Sans clé, ou la ligne relue porte une autre lecture :
+// les fiches par saveBatch, la ligne reste à reprendre. Sans ligne (fiche livre, séance sans lecture) : le chemin d'avant.
+export async function creerDepuisSaisie(texte, { session = null, ctx, editionId = null, pageIds = [], repo = repoModule, toast = toastDom, maintenant = horloge, importId = null, cle = null } = {}) {
+  const edId = editionId || session?.edition_id || null;
+  if (!edId) { toast(t('Associe d’abord un livre à cette séance')); return { issue: 'sans_livre' }; }
+  const entries = parseIndexLines(texte);
+  if (!entries.length) return { issue: 'vide' };
+  const edition = ctx.editionsById.get(edId);
+  const seen = new Set(ctx.recipes.filter((r) => r.edition_id === edId).map((r) => cleReference(r.original_title, r.printed_page)));
+  const presentes = [...new Set(Array.isArray(pageIds) ? pageIds : [])].filter((id) => ctx.pagesById.get(id));
+  const created = [];
+  let dupes = 0;
+  for (const e of entries) {
+    const titre = borner(e.title, 200);
+    const k = cleReference(titre, e.printed_page);
+    if (seen.has(k)) { dupes++; continue; }
+    seen.add(k);
+    const fiche = { id: repo.newId('rc'), edition_id: edId, original_title: titre, original_language: edition?.language || null, availability: 'reference_only', verification_state: 'unverified', printed_page: e.printed_page, section: null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: presentes, current_version_id: null, ingredient_ids: [], index_page_id: null, raw_entry: borner(e.raw, 300), index_uncertain: false };
+    assertVocabulaire(fiche, 'recipes'); // D-12 : « Créer les références » est un fabricant de recipes comme les autres (spec import-cible § 3.3)
+    created.push(fiche);
+  }
+  const puts = {};
+  if (created.length) puts.recipes = created;
+  if (presentes.length) puts.source_pages = presentes.map((id) => { const p = ctx.pagesById.get(id); return { ...p, kind: p.kind ?? 'index' }; });
+  const ligne = importId && cle ? await repo.get('imports', importId) : null;
+  let ferme = false;
+  if (ligne?.kind === 'index' && STATUTS_FERMABLES.includes(ligne.status) && cleLecture(ligne) === cle) {
+    const vers = ligne.status === 'a_verifier' ? 'enregistre' : 'ignore';
+    const fin = maintenant();
+    const fermer = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', ligne.id, c.status); return { status: vers, reponse_brute: null, finished_at: fin }; };
+    try {
+      await repo.transitionner('imports', ligne.id, { attendus: [ligne.status], patch: fermer, puts });
+      ferme = true;
+    } catch (e) {
+      if (!(e instanceof TransitionRefusee)) throw e;
+      toast(t('Les références n’ont pas pu être créées. Réessaie.'));
+      return { issue: 'refuse' };
+    }
+  } else if (Object.keys(puts).length) await repo.saveBatch(puts);
+  toast(t('{n} référence(s) créée(s){d}', { n: created.length, d: dupes ? `, ${t('{n} doublon(s) ignoré(s)', { n: dupes })}` : '' }));
+  return { issue: 'cree', n: created.length, doublons: dupes, ferme };
 }
 
 export function parseIndexLines(text) {
@@ -329,10 +344,10 @@ export function parseIndexLines(text) {
     const line = raw.trim();
     if (!line) continue;
     let m = /^(.*?)\s*(?:[—–-]|,|\.{2,}|\s+p\.?|\s+page)\s*p?\.?\s*(\d{1,4})\s*$/i.exec(line);
-    if (m && m[1].trim()) { out.push({ title: m[1].trim().replace(/[,.]+$/, ''), printed_page: parseInt(m[2], 10) }); continue; }
+    if (m && m[1].trim()) { out.push({ title: m[1].trim().replace(/[,.]+$/, ''), printed_page: parseInt(m[2], 10), raw: line }); continue; }
     m = /^(\d{1,4})\s+(.+)$/.exec(line);
-    if (m) { out.push({ title: m[2].trim(), printed_page: parseInt(m[1], 10) }); continue; }
-    out.push({ title: line, printed_page: null });
+    if (m) { out.push({ title: m[2].trim(), printed_page: parseInt(m[1], 10), raw: line }); continue; }
+    out.push({ title: line, printed_page: null, raw: line });
   }
   return out;
 }

@@ -6,6 +6,7 @@ import { withRepo } from './sync-fixture.js';
 import { on } from '../src/core/bus.js';
 import { resetClock } from '../src/sync/clock.js';
 import { setUiLocale, getUiLocale } from '../src/core/i18n.js';
+import { sha256Hex } from '../src/core/hash.js';
 
 const DATE = '2026-10-19T00:00:00.000Z';
 const NOW = '2026-10-19T12:00:00.000Z';
@@ -32,6 +33,44 @@ const reponse = (status, corps) => ({ ok: status >= 200 && status < 300, status,
 const SEANCE7 = ['q1', 'p3', 'p1', 'q4', 'p5', 'p2', 'p4']; // une séance de 7 pages : q1 et q4 ne sont pas des photos de la lecture
 // Une ligne du journal, sorte index, sans référence, a_lancer — la forme que repo.ouvrirImport écrit (fixture posée par db.mutate, jamais par un écran).
 const ligneJournal = ({ id, edition_id = null, scan_session_id = null, page_ids = [], device_id = null }) => ({ id, kind: 'index', edition_id, recipe_id: null, scan_session_id, page_ids: [...page_ids], photo_sha256: null, status: 'a_lancer', erreur: null, resultat: null, reponse_brute: null, appels: 0, model: null, duree_ms: null, device_id, document_id_vol: null, battement_at: null, started_at: null, finished_at: null });
+const COULEURS = ['#811', '#181', '#118', '#881', '#188', '#818', '#444', '#a50'];
+// Une vraie image (pagePourEnvoi la décode) : couleur différente → octets et empreinte différents.
+async function imageDe(nom, couleur) {
+  const c = new OffscreenCanvas(320, 240); const cx = c.getContext('2d');
+  cx.fillStyle = couleur; cx.fillRect(0, 0, 320, 240); cx.fillStyle = '#fff'; cx.fillRect(10, 10, 160, 120);
+  return new File([await c.convertToBlob({ type: 'image/jpeg', quality: 0.9 })], nom, { type: 'image/jpeg' });
+}
+// Une bibliothèque minimale sur la base jetable : un livre « Saisons », son édition ed1, les références EXISTANTES, les pages nommées dans `seances`
+// (position = rang dans la première séance qui les nomme ; octets réels seulement si `octets`), une séance ouverte par entrée de `seances`.
+async function poserBibliotheque(repo, db, { seances = { ss1: ENVOI }, octets = false, existantes = EXISTANTES, kinds = {} } = {}) {
+  const ids = [...new Set(Object.values(seances).flat())];
+  const posDe = (id) => { for (const s of Object.values(seances)) { const k = s.indexOf(id); if (k >= 0) return k + 1; } return null; };
+  const pages = [];
+  for (const [i, id] of ids.entries()) {
+    let sha256 = 'sha-' + id;
+    if (octets) { const f = await imageDe(id + '.jpg', COULEURS[i % COULEURS.length]); sha256 = await sha256Hex(f); await repo.putFile(sha256, f, { original_filename: f.name }); }
+    pages.push({ id, document_id: null, edition_id: 'ed1', sha256, printed_page: null, file_position: null, locator: null, position: posDe(id), issues: [], kind: kinds[id] ?? null, created_at: DATE, updated_at: DATE });
+  }
+  const recettes = existantes.map((e, i) => ({ id: 'rc_ex' + i, edition_id: 'ed1', original_title: e.original_title, original_language: 'fr', availability: 'reference_only', verification_state: 'unverified', printed_page: e.printed_page, section: e.section ?? null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: [], current_version_id: null, ingredient_ids: [], created_at: DATE, updated_at: DATE }));
+  const sessions = Object.entries(seances).map(([id, page_ids]) => ({ id, status: 'open', edition_id: 'ed1', started_at: DATE, page_ids: [...page_ids], document_ids: [], device_id: repo.deviceId(), created_at: DATE, updated_at: DATE }));
+  await db.mutate({ puts: { books: [{ id: 'b1', title: 'Saisons', author: 'A. B.', created_at: DATE, updated_at: DATE }], book_editions: [{ id: 'ed1', book_id: 'b1', language: 'fr', created_at: DATE, updated_at: DATE }], recipes: recettes, source_pages: pages, scan_sessions: sessions }, origin: 'device' });
+}
+// Le contexte d'un écran (comme getData), relu dans la base jetable ; la session de l'assistant par ctx.sync (sessionAssistant).
+async function ctxDe(repo, db, { session = SESSION } = {}) {
+  const [recipes, books, book_editions, source_pages, scan_sessions, imports] = await Promise.all(['recipes', 'books', 'book_editions', 'source_pages', 'scan_sessions', 'imports'].map((s) => db.getAll(s)));
+  return {
+    recipes, books, book_editions, source_pages, scan_sessions, imports, source_documents: [], recipe_versions: [], rediscovery_prefs: [], cook_history: [], dish_recipe_links: [], recipe_translations: [], dishes: [], ingredients: [],
+    recipesById: repo.indexBy(recipes), editionsById: repo.indexBy(book_editions), booksById: repo.indexBy(books), pagesById: repo.indexBy(source_pages),
+    versionsByRecipe: new Map(), versionsById: new Map(), dishesById: new Map(), ingredientsById: new Map(), docsByRecipe: new Map(),
+    settings: { llm: { provider: 'none' }, units: 'original', reading_locale: 'original' },
+    sync: { user: session ? { id: 'u1', email: 'a@exemple.invalid' } : null, auth: { jeton: async () => session } },
+    editionLabel: () => 'Saisons', conventionFor: () => null,
+  };
+}
+// La ligne index la plus récente d'une séance, relue dans la base.
+const ligneDe = async (db, sessionId) => (await db.getAll('imports')).filter((i) => i.kind === 'index' && i.scan_session_id === sessionId).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)))[0] ?? null;
+// Une ligne a_verifier portant un résultat (forme C ou A), prête à poser dans la base.
+const ligneAVerifier = ({ id, sessionId = 'ss1', page_ids = ENVOI, resultat, over = {} }) => ({ ...ligneJournal({ id, edition_id: 'ed1', scan_session_id: sessionId, page_ids }), status: 'a_verifier', resultat, model: 'claude-x', duree_ms: 1200, started_at: DATE, ...over });
 
 export async function runTableMatieresTests({ eq, ok }) {
   resetClock();
@@ -300,6 +339,135 @@ export async function runTableMatieresTests({ eq, ok }) {
       let surSoi = null;
       try { await repo.transitionner('imports', 'imp_c24', { attendus: ['a_verifier'], patch: { page_ids: ['p8'] }, conditions: { imports: [{ key: 'imp_autre', attendus: ['a_lancer'] }] } }); } catch (e) { surSoi = e; }
       eq([surSoi?.name, (await db.get('imports', 'imp_c24')).page_ids], ['TypeError', ['p1', 'p2']], 'T-C24 (ronde 1) : comme `autres`, le sac `conditions` ne porte pas de condition sur le magasin de la transition (TypeError avant toute écriture, rien d’écrit)');
+    }));
+
+    // =================================================================================================================================
+    // Tâche 2 — création enrichie et fusion, sans écran (§ 4.4, D-C5, D-C19, R-C-2, I-C7, I-C11)
+    await run('T-C14 creerReferences : 21 fiches et la ligne en UNE transaction', () => withRepo(async (repo, db) => {
+      const T = await import('../src/ui/table-matieres.js');
+      await poserBibliotheque(repo, db);
+      const ligne = ligneAVerifier({ id: 'imp_c14', resultat: C });
+      await db.mutate({ puts: { imports: [ligne] }, origin: 'device' });
+      const ctx = await ctxDe(repo, db);
+      const dits = []; const vus = []; const capture = db.onMutate;
+      db.onMutate = (m) => { vus.push([Object.keys(m.puts).sort(), m.puts.recipes?.length ?? 0, m.puts.imports?.[0]?.status ?? null]); return capture ? capture(m) : {}; };
+      let r;
+      try { r = await T.creerReferences(ligne, D.lignesTableau(C, { ordre: D.ordrePropose(C.photos), existantes: ctx.recipes }), { repo, ctx, editionId: 'ed1', toast: (m) => dits.push(m), maintenant: () => NOW }); }
+      finally { db.onMutate = capture; }
+      eq(vus, [[['imports', 'recipes', 'source_pages'], 21, 'enregistre']], 'T-C14 (M50) : les 21 fiches, les 5 pages et la ligne enregistre dans UNE transaction (un seul appel de db.onMutate)');
+      const lu = await db.get('imports', 'imp_c14');
+      eq([r, lu.status, lu.reponse_brute, lu.finished_at], [{ issue: 'enregistre', n: 21, doublons: 2 }, 'enregistre', null, NOW], 'T-C14 : { issue, n, doublons } ; la ligne enregistre, reponse_brute effacée, finished_at posé');
+      const toutes = await db.byIndex('recipes', 'edition_id', 'ed1');
+      const par = (titre) => toutes.find((x) => x.original_title === titre);
+      eq([toutes.length, par('Velouté de petits pois').index_page_id, par('Soupe de courge').index_page_id, par('Fond de volaille').index_page_id, par('Pesto').index_page_id, par('Pesto').section, par('Pesto').raw_entry, par('Pesto').source_page_ids, par('Pesto').availability, par('Pesto').verification_state],
+        [23, 'p1', 'p2', 'p3', 'p4', 'Au fil des saisons', 'Pesto — 186', ['p4'], 'reference_only', 'unverified'], 'T-C14 : en base 21 fiches neuves + 2 existantes ; chacune liée à SA photo, section et raw_entry posés, toujours reference_only / unverified');
+      eq((await db.getMany('source_pages', ENVOI)).map((p) => [p.id, p.kind, p.role, p.printed_page_range, p.printed_page]), [['p3', 'index', 'index', [164, 180], null], ['p1', 'index', 'index', [8, 94], null], ['p5', 'index', 'index', null, null], ['p2', 'index', 'index', [98, 158], null], ['p4', 'index', 'index', [182, 192], null]], 'T-C14 : pages kind et role index, plage CITÉE posée (nulle sur la page décorative), printed_page jamais écrit');
+      eq(dits, ['21 référence(s) créée(s), 2 doublon(s) ignoré(s)'], 'T-C14 : le toast de succès par le toast injecté (les deux déjà repérées sont des doublons ignorés)');
+    }));
+    await run('T-C14 creerReferences : ligne décochée, refus, sans livre', () => withRepo(async (repo, db) => {
+      const T = await import('../src/ui/table-matieres.js');
+      await poserBibliotheque(repo, db);
+      const ligne = ligneAVerifier({ id: 'imp_c14b', resultat: C });
+      await db.mutate({ puts: { imports: [ligne] }, origin: 'device' });
+      const ctx = await ctxDe(repo, db);
+      const lignes = D.lignesTableau(C, { ordre: D.ordrePropose(C.photos), existantes: ctx.recipes });
+      const decochee = D.recalculer(lignes.map((l) => (l.title === 'Gaspacho' ? { ...l, cochee: false, decocheeParLaPersonne: true } : l)), ctx.recipes);
+      const r = await T.creerReferences(ligne, decochee, { repo, ctx, editionId: 'ed1', toast: () => {}, maintenant: () => NOW });
+      const toutes = await db.byIndex('recipes', 'edition_id', 'ed1');
+      eq([r.n, toutes.length, toutes.some((x) => x.original_title === 'Gaspacho')], [20, 22, false], 'T-C14 (M28) : une ligne décochée → 20 fiches ; elle est absente de la base');
+      const ligne2 = ligneAVerifier({ id: 'imp_c14c', resultat: C });
+      await db.mutate({ puts: { imports: [{ ...ligne2, status: 'enregistre' }] }, origin: 'device' }); // un autre chemin a tranché
+      const dits = []; const avant = (await db.getAll('recipes')).length;
+      const r2 = await T.creerReferences(ligne2, lignes, { repo, ctx, editionId: 'ed1', toast: (m) => dits.push(m), maintenant: () => NOW });
+      eq([r2, (await db.getAll('recipes')).length, dits], [{ issue: 'refuse' }, avant, ['La lecture a déjà été enregistrée.']], 'T-C14 (m2, garde avant la transaction) : la ligne relue déjà enregistrée par un autre chemin → { issue: refuse }, 0 fiche, toast injecté « La lecture a déjà été enregistrée. »');
+      const ligne3 = ligneAVerifier({ id: 'imp_c14d', resultat: C, over: { started_at: 'R2' } }); // une AUTRE lecture (R2) arrivée sur la ligne
+      await db.mutate({ puts: { imports: [ligne3] }, origin: 'device' });
+      const dits3 = [];
+      eq([await T.creerReferences({ ...ligne3, started_at: 'R1' }, lignes, { repo, ctx, editionId: 'ed1', toast: (m) => dits3.push(m) }), (await db.get('imports', 'imp_c14d')).status, dits3, (await db.getAll('recipes')).length], [{ issue: 'change' }, 'a_verifier', [], avant], 'T-C14 (T4-R2 du lot A) : la ligne relue porte une autre lecture (R2) → { issue: change }, rien d’écrit, aucun toast, R2 reste à reprendre');
+      const ligne4 = ligneAVerifier({ id: 'imp_c14e', resultat: { x: 1 } });
+      await db.mutate({ puts: { imports: [ligne4] }, origin: 'device' });
+      eq([(await T.creerReferences({ ...ligne2, edition_id: null }, lignes, { repo, ctx, editionId: null, toast: () => {} })).issue, (await T.creerReferences(ligne4, lignes, { repo, ctx, editionId: 'ed1', toast: () => {} })).issue, (await db.getAll('recipes')).length], ['sans_livre', 'illisible', avant], 'T-C14 : sans livre → sans_livre ; résultat relu illisible → illisible ; rien d’écrit');
+      // T4-R2 DANS la transaction : une autre lecture (R2) arrive entre la relecture et l'écriture → la clé revérifiée refuse, rien d'écrit, la phrase est dite.
+      const ligne5 = ligneAVerifier({ id: 'imp_c14f', resultat: C });
+      await db.mutate({ puts: { imports: [ligne5] }, origin: 'device' });
+      const dits5 = [];
+      const r2tx = { ...repo, transitionner: async (s, k, o) => { await db.put('imports', { ...(await db.get('imports', k)), started_at: 'R2' }); return repo.transitionner(s, k, o); } };
+      eq([await T.creerReferences(ligne5, lignes, { repo: r2tx, ctx, editionId: 'ed1', toast: (m) => dits5.push(m) }), (await db.get('imports', 'imp_c14f')).status, (await db.get('imports', 'imp_c14f')).started_at, (await db.getAll('recipes')).length, dits5], [{ issue: 'change' }, 'a_verifier', 'R2', avant, ['Les références n’ont pas pu être créées. Réessaie.']], 'T-C14 (T4-R2 dans la transaction, M-C2) : R2 arrivée entre la relecture et l’écriture → { issue: change }, rien d’écrit (ni fiche ni ligne), R2 reste à reprendre, la phrase est dite');
+      // m2 DANS la transaction (M-C9) : un autre chemin enregistre la ligne entre la relecture et l'écriture → la transition refuse ; la relecture du catch
+      // le voit : « La lecture a déjà été enregistrée. », { issue: refuse }, rien d'écrit.
+      const ligne6 = ligneAVerifier({ id: 'imp_c14g', resultat: C });
+      await db.mutate({ puts: { imports: [ligne6] }, origin: 'device' });
+      const dits6 = [];
+      const enregistreeTx = { ...repo, transitionner: async (s, k, o) => { await db.put('imports', { ...(await db.get('imports', k)), status: 'enregistre' }); return repo.transitionner(s, k, o); } };
+      eq([await T.creerReferences(ligne6, lignes, { repo: enregistreeTx, ctx, editionId: 'ed1', toast: (m) => dits6.push(m) }), (await db.getAll('recipes')).length, dits6], [{ issue: 'refuse' }, avant, ['La lecture a déjà été enregistrée.']], 'T-C14 (m2 dans la transaction, M-C9) : la ligne enregistrée ailleurs ENTRE la relecture et l’écriture → la transition refuse, { issue: refuse }, aucune fiche, « La lecture a déjà été enregistrée. »');
+    }));
+
+    await run('T-C15 fusion : une seconde lecture ne réécrit ni n’enrichit rien', () => withRepo(async (repo, db) => {
+      const T = await import('../src/ui/table-matieres.js');
+      await poserBibliotheque(repo, db, { existantes: [{ original_title: 'Risotto aux champignons', printed_page: 34 }, { original_title: 'Pâtes aux tomates confites', printed_page: 116, section: 'Automne' }] });
+      const avant = await db.getAll('recipes');
+      const resultat = { photos: [{ page_id: 'p2', printed_page_range: [34, 120], entries: [
+        { title: 'Risotto aux champignons', printed_page: 34, section: 'Printemps', uncertain: false },
+        { title: 'Pâtes aux tomates confites', printed_page: 116, section: 'Automne', uncertain: false },
+        { title: 'Gnocchi', printed_page: 40, section: 'Printemps', uncertain: false },
+        { title: 'Pain perdu', printed_page: 120, section: 'Desserts', uncertain: false }] }], ecartees: { trop_longues: 0, adresse: 0 }, uncertain: [] };
+      const ligne = ligneAVerifier({ id: 'imp_c15', page_ids: ['p2'], resultat });
+      await db.mutate({ puts: { imports: [ligne] }, origin: 'device' });
+      const ctx = await ctxDe(repo, db);
+      const lignes = D.lignesTableau(resultat, { ordre: ['p2'], existantes: ctx.recipes }).map((l) => (l.dejaReperee ? { ...l, cochee: true } : l)); // forcées cochées
+      const r = await T.creerReferences(ligne, lignes, { repo, ctx, editionId: 'ed1', toast: () => {}, maintenant: () => NOW });
+      const apres = await db.getAll('recipes');
+      eq([r.n, apres.length - avant.length, apres.filter((x) => !avant.some((a) => a.id === x.id)).map((x) => x.original_title).sort()], [2, 2, ['Gnocchi', 'Pain perdu']], 'T-C15 : 4 entrées dont 2 existantes → 2 fiches créées, jamais de doublon par titre et page');
+      eq(avant.map((a) => apres.find((x) => x.id === a.id)), avant, 'T-C15 (M51, R-C-2, I-C7) : les existantes sont intactes champ pour champ (updated_at compris) — celle sans section ni index_page_id le reste');
+    }));
+
+    await run('T-C16 saisie à la main : création et fermeture de la ligne (D-C19)', () => withRepo(async (repo, db) => {
+      const I = await import('../src/ui/import.js');
+      const { cleLecture } = await import('../src/ui/import-cible.js');
+      await poserBibliotheque(repo, db, { seances: { ss1: ['p1', 'p2'] }, kinds: { p2: 'recipe' } });
+      const session = (await ctxDe(repo, db)).scan_sessions[0];
+      const dits = [];
+      const saisir = async (texte, deps = {}) => I.creerDepuisSaisie(texte, { session, ctx: await ctxDe(repo, db), pageIds: ['p2', 'p9'], repo, toast: (m) => dits.push(m), maintenant: () => NOW, ...deps });
+      const montree = (L) => ({ importId: L.id, cle: cleLecture(L) }); // la lecture que le panneau MONTRE
+      const UNE_P1 = D.resultatIndex(L.validerLectureIndex({ photos: [blocDe('p1', 0)], uncertain: [] }, { nbPhotos: 1 }), ['p1']); // le résultat d'UNE page : la seule forme qu'une ligne de page_ids ['p1'] porte en base
+      const r0 = await saisir(`Gnocchi — 40\n${'x'.repeat(1000)} — 41`);
+      const toutes = await db.byIndex('recipes', 'edition_id', 'ed1');
+      const g = toutes.find((x) => x.original_title === 'Gnocchi'); const lg = toutes.find((x) => x.printed_page === 41);
+      eq([r0.issue, r0.n, g.raw_entry, g.index_page_id, g.index_uncertain, g.section, g.source_page_ids], ['cree', 2, 'Gnocchi — 40', null, false, null, ['p2']], 'T-C16 (M52) : sans ligne, la zone de texte crée comme avant — raw_entry = la ligne tapée, index_page_id null, section null, source_page_ids = pages cochées PRÉSENTES');
+      eq([Array.from(lg.raw_entry).length, Array.from(lg.original_title).length], [300, 200], 'T-C16 (M75, S-10) : une ligne de 1 000 caractères → raw_entry borné à 300, titre à 200 points de code');
+      eq([(await db.get('source_pages', 'p2')).kind, (await db.get('source_pages', 'p1')).kind], ['recipe', null], 'T-C16 (M63) : kind recipe d’une page cochée GARDÉ ; une page non cochée intouchée');
+      // La ligne a_verifier MONTRÉE par le panneau : enregistre dans la MÊME transaction que les fiches (M53)
+      const s1 = ligneAVerifier({ id: 'imp_s1', page_ids: ['p1'], resultat: UNE_P1 });
+      await db.mutate({ puts: { imports: [s1] }, origin: 'device' });
+      const vus = []; const capture = db.onMutate;
+      db.onMutate = (m) => { vus.push([Object.keys(m.puts).sort(), m.puts.imports?.[0]?.status ?? null]); return capture ? capture(m) : {}; };
+      try { await saisir('Tartiflette — 61', { pageIds: ['p1'], ...montree(s1) }); } finally { db.onMutate = capture; }
+      const s1lu = await db.get('imports', 'imp_s1');
+      eq([vus, s1lu.status, s1lu.finished_at, s1lu.reponse_brute], [[[['imports', 'recipes', 'source_pages'], 'enregistre']], 'enregistre', NOW, null], 'T-C16 / T-C23 (M53, D-C19) : la ligne a_verifier montrée passe enregistre DANS la transaction des fiches, finished_at posé');
+      // echec et a_lancer montrées → ignore, finished_at posé (Q2, Q3)
+      for (const statut of ['echec', 'a_lancer']) {
+        const l0 = { ...ligneJournal({ id: 'imp_' + statut, edition_id: 'ed1', scan_session_id: 'ss1', page_ids: ['p1'] }), status: statut, erreur: statut === 'echec' ? { raison: 'coupe', extra: {} } : null };
+        await db.mutate({ puts: { imports: [l0] }, origin: 'device' });
+        await saisir(`Recette ${statut} — 7${statut.length}`, montree(l0));
+        const l = await db.get('imports', 'imp_' + statut);
+        eq([l.status, l.finished_at], ['ignore', NOW], `T-C16 (D-C19, Q2, Q3) : une ligne ${statut} montrée passe ignore, finished_at posé`);
+      }
+      // Clôture refusée (décision 4 de la ronde 1 de T6) : la ligne est close ailleurs ENTRE la relecture et la transaction → RIEN d'écrit, la phrase est dite
+      const s4 = ligneAVerifier({ id: 'imp_s4', page_ids: ['p1'], resultat: UNE_P1 });
+      await db.mutate({ puts: { imports: [s4] }, origin: 'device' });
+      const espion = { ...repo, transitionner: async (s, k, o) => { await db.put('imports', { ...(await db.get('imports', k)), status: 'ignore' }); return repo.transitionner(s, k, o); } };
+      dits.length = 0;
+      const r4 = await saisir('Crêpes — 90', { repo: espion, ...montree(s4) });
+      eq([r4, (await db.byIndex('recipes', 'edition_id', 'ed1')).some((x) => x.original_title === 'Crêpes'), (await db.get('imports', 'imp_s4')).status, dits], [{ issue: 'refuse' }, false, 'ignore', ['Les références n’ont pas pu être créées. Réessaie.']], 'T-C16 (D-C19, ronde 1 de T6) : la ligne close ailleurs entre la relecture et la transaction → RIEN d’écrit (ni fiche, ni ligne), « Les références n’ont pas pu être créées. Réessaie. »');
+      const r4b = await saisir('Crêpes — 90');
+      eq([r4b.issue, r4b.ferme, (await db.byIndex('recipes', 'edition_id', 'ed1')).some((x) => x.original_title === 'Crêpes')], ['cree', false, true], 'T-C16 (ronde 1 de T6) : le second « Créer les références », sans ligne montrée, écrit les fiches sans elle');
+      // T4-R2 du lot A : la ligne a reçu une AUTRE lecture (R2) depuis celle que le panneau montre → R2 n'est pas close, les fiches sont créées sans elle
+      const s5 = ligneAVerifier({ id: 'imp_s5', page_ids: ['p1'], resultat: UNE_P1, over: { started_at: 'R2' } });
+      await db.mutate({ puts: { imports: [s5] }, origin: 'device' });
+      const r5 = await saisir('Clafoutis — 94', montree({ ...s5, started_at: 'R1' }));
+      eq([r5.ferme, (await db.get('imports', 'imp_s5')).status, (await db.byIndex('recipes', 'edition_id', 'ed1')).some((x) => x.original_title === 'Clafoutis')], [false, 'a_verifier', true], 'T-C16 (T4-R2 du lot A, M-C3) : une autre lecture (R2) n’est jamais close par la zone de texte ; la fiche est créée');
+      await db.put('imports', { ...(await db.get('imports', 'imp_s5')), status: 'ignore' }); // rangement
+      eq((await saisir('', {})).issue, 'vide', 'T-C16 : une zone vide ne crée rien');
     }));
 
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne

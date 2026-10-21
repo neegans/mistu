@@ -586,4 +586,8 @@ export const EN = {
   "Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages": "Without an account these photos stay on this device: back up from Settings",
   "{n}/{m} photos de cette séance envoyées au serveur": "{n}/{m} photos of this session uploaded to the server",
   "Page originale": "Original page", // ronde 1 : l'alt d'« Original » (antérieur au lot, sans entrée jusqu'ici)
+  // Lot C (table des matières), tâche 2 : création des références.
+  "La lecture a déjà été enregistrée.": "This reading has already been saved.",
+  "{n} référence(s) créée(s){d}": "{n} reference(s) created{d}",
+  "{n} doublon(s) ignoré(s)": "{n} duplicate(s) skipped",
 };
