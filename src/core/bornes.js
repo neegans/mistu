@@ -59,3 +59,19 @@ export function signalDelai(ms) {
   setTimeout(() => ctl.abort(), ms);
   return ctl.signal;
 }
+
+// Une adresse web dans un texte du modèle (déménagés de domain/recherche-web.js au lot C, spec D-C13 : la présentation du serveur, la lecture d'une
+// page web du lot B ET la table des matières les emploient ; corps inchangés : ceux du code COMMIS du lot B, R-B-26). MOTIF_ADRESSE : schéma,
+// « www. » ou hôte suivi d'un chemin, le départ hôte tenté au DÉBUT d'une suite de [a-z0-9-] seulement (lookbehind du lot B, ronde 1 de sa
+// tâche 3 : mêmes verdicts, linéaire). MOTIF_HOTE : l'HÔTE NU dont le dernier
+// segment est dans une liste FERMÉE de domaines de premier niveau, ni précédé d'une lettre, d'un chiffre, de « @ », « . », « _ » ou « - », ni suivi
+// d'une lettre, d'un chiffre ou d'un tiret (faux positif CONNU et assumé : « Le sel.Ca y est »). normaliserPourAdresse (exporté au lot B) normalise le
+// texte POUR LE TEST seulement (NFKC, puis « 。 » U+3002 et « ｡ » U+FF61 → « . », « ∕ » U+2215 et « ⁄ » U+2044 → « / ») : le texte n'est jamais modifié ;
+// porteUneAdresse : MOTIF_ADRESSE ou MOTIF_HOTE sur ce texte normalisé.
+export const MOTIF_ADRESSE = /(https?:\/\/|www\.|(?<![a-z0-9-])[a-z0-9-]+\.[a-z]{2,}\/)/iu;
+export const MOTIF_HOTE = /(?<![\p{L}\p{N}@._-])[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9-]+)*\.(?:com|net|org|ca|quebec|fr|be|ch|io|co|info|app|blog|xyz|site|online|shop|me|tv|us|uk|ly|gl)(?![\p{L}\p{N}-])/iu;
+export const normaliserPourAdresse = (texte) => texte.normalize('NFKC').replace(/[\u{3002}\u{FF61}]/gu, '.').replace(/[\u{2215}\u{2044}]/gu, '/');
+export function porteUneAdresse(texte) {
+  const n = normaliserPourAdresse(texte);
+  return MOTIF_ADRESSE.test(n) || MOTIF_HOTE.test(n);
+}

@@ -276,9 +276,10 @@ export async function runImportCibleTests({ eq, ok }) {
     // (if (false) …) ne se voit qu'au comportement : fabriquerExtraction et le save() de l'éditeur ont chacun leur test de vocabulaire hostile.
     const sansCommentaires = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
     // Tâche 3 : fabriquerExtraction (src/domain/import-cible.js) est le cinquième fabricant épinglé (spec § 3.3 : « appelée par fabriquerExtraction »).
-    const fabricants = ['../src/domain/creation-ia.js', '../src/ui/signet.js', '../src/ui/recipe-edit.js', '../src/ui/import.js', '../src/domain/import-cible.js'];
+    // Lot C, tâche 1 : fabriquerReferences (src/domain/table-matieres.js) est le sixième fabricant (spec C § 3.5 : « appelant ajouté au test de source » ; M32).
+    const fabricants = ['../src/domain/creation-ia.js', '../src/ui/signet.js', '../src/ui/recipe-edit.js', '../src/ui/import.js', '../src/domain/import-cible.js', '../src/domain/table-matieres.js'];
     const appels = await Promise.all(fabricants.map(async (f) => (sansCommentaires(await lire(f)).match(/assertVocabulaire\(/g) || []).length >= 1));
-    eq(appels, [true, true, true, true, true], 'vocabulaire : les cinq fabricants (dont fabriquerExtraction de import-cible.js) appellent assertVocabulaire( hors commentaire (test de source, faible, admis)');
+    eq(appels, [true, true, true, true, true, true], 'vocabulaire : les six fabricants (dont fabriquerExtraction de import-cible.js et fabriquerReferences de table-matieres.js) appellent assertVocabulaire( hors commentaire (test de source, faible, admis ; M32)');
     // Fiche valide par comportement : le fabricant du signet (pur) rend une fiche du vocabulaire \u2014 valeurs codées en dur, ne prouve PAS l'appel.
     const { fabriquerSignet, signetModel } = await import('../src/ui/signet.js');
     const m = signetModel({ adresse: 'https://exemple.test/recette', titre: 'Signet' });
@@ -1913,7 +1914,7 @@ export async function runImportCibleTests({ eq, ok }) {
         const L = await import('../src/domain/llm.js');
         const raisonIndex = (data) => { try { L.validerIndex(data); return 'ok'; } catch (e) { return e?.raison ?? e?.message; } };
         const n = (k, f) => Array.from({ length: k }, (_, i) => f(i));
-        eq([L.BORNES_INDEX, raisonIndex({ entries: n(500, (i) => ({ title: 'T' + i, printed_page: 1 })), uncertain: n(40, (i) => 'u' + i) }), raisonIndex({ entries: n(501, (i) => ({ title: 'T' + i })) }), raisonIndex({ entries: [], uncertain: n(41, (i) => 'u' + i) }),
+        eq([L.BORNES_INDEX_A, raisonIndex({ entries: n(500, (i) => ({ title: 'T' + i, printed_page: 1 })), uncertain: n(40, (i) => 'u' + i) }), raisonIndex({ entries: n(501, (i) => ({ title: 'T' + i })) }), raisonIndex({ entries: [], uncertain: n(41, (i) => 'u' + i) }),
           raisonIndex({ entries: [{ title: 'T', ingredients_mentioned: n(80, (i) => 'm' + i) }] }), raisonIndex({ entries: [{ title: 'T', ingredients_mentioned: n(81, (i) => 'm' + i) }] })],
         [{ entrees: 500, incertains: 40, mentions: 80 }, 'ok', 'hors_bornes', 'hors_bornes', 'ok', 'hors_bornes'], 'validerIndex (ronde 1) : 500 entrées, 40 incertitudes et 80 mentions par entrée au plus ; au-delà → hors_bornes (comme les listes de la recette)');
       });
@@ -2734,6 +2735,110 @@ export async function runImportCibleTests({ eq, ok }) {
     } finally {
       V.reinitialiserVol();
       scene.remove(); setUiLocale(localeAvant);
+    }
+  }));
+
+  // =====================================================================================================================================
+  // Lot C, tâche 1 — T-C25 : la primitive de vol est PARTAGÉE (lancerVol, spec C D-C21, N-1). lancerExtraction reste verte telle quelle (blocs
+  // « extraire et enregistrer », « annuler », « incertain », « battement » ci-dessus : aucune assertion amendée, M87) ; ici lancerVol avec un
+  // `executer` factice : ce qu'il reçoit et quand, appels, a_verifier, echec, Annuler, verrou partagé recette ↔ index, battement face à init().
+  await run('vol partagé lancerVol (lot C, T-C25)', () => withRepo(async (repo, db) => {
+    const UI = await import('../src/ui/import-cible.js');
+    const L = await import('../src/domain/llm.js');
+    const D = await import('../src/domain/import-cible.js');
+    const { installCapture } = await import('../src/sync/outbox.js');
+    const vraiFetch = globalThis.fetch;
+    globalThis.fetch = async (u) => { throw new Error('aucun reseau attendu : ' + u); };
+    const attendre = async (cond, quoi) => { for (let i = 0; i < 300; i += 1) { if (await cond()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error('attente dépassée (3 s) : ' + quoi); };
+    const imageDe = async (nom, couleur) => { const c = new OffscreenCanvas(320, 240); const cx = c.getContext('2d'); cx.fillStyle = couleur; cx.fillRect(0, 0, 320, 240); cx.fillStyle = '#fff'; cx.fillRect(10, 10, 160, 120); return new File([await c.convertToBlob({ type: 'image/jpeg', quality: 0.9 })], nom, { type: 'image/jpeg' }); };
+    const SESSION_VOL = { access_token: 'jeton-vol-sentinelle', user: { id: 'u1', email: 'a@exemple.invalid' } };
+    const ctx = { sync: { user: { id: 'u1', email: 'a@exemple.invalid' }, auth: { jeton: async () => SESSION_VOL } } };
+    const rep = (status, corps) => ({ ok: status >= 200 && status < 300, status, headers: new Headers(), text: async () => JSON.stringify(corps) });
+    const fetchOk = async () => rep(200, { model: 'claude-x', stop_reason: 'end_turn', content: [{ type: 'text', text: '{}' }] });
+    // Une ligne d'index (kind index, recipe_id null) sur deux pages réelles, plus un identifiant de page ABSENT de la base (pointeur souple).
+    const preparer = async (kind = 'index') => {
+      const r = await repo.ajouterPages([await imageDe('a.jpg', '#a33'), await imageDe('b.jpg', '#3a3')], { import: { id: repo.newId('imp'), kind, ...(kind === 'recette' ? { recipe_id: repo.newId('rc') } : {}) } });
+      const l = await db.get('imports', r.importId);
+      await db.put('imports', { ...l, page_ids: [r.pages[0].id, 'pg_absente', r.pages[1].id] });
+      return { id: r.importId, pages: r.pages.map((p) => p.id) };
+    };
+    try {
+      // 1) Ce qu'executer reçoit, et quand.
+      const { id, pages } = await preparer();
+      let recu = null; let lueAuDepart = null; let finir;
+      const suspendu = new Promise((r) => { finir = r; });
+      const vol = UI.lancerVol(id, async (args) => {
+        lueAuDepart = await db.get('imports', id);
+        recu = args;
+        await args.provider.complete([{ role: 'user', content: 'x' }]); // un fetch fait par le fournisseur : appels + 1 (M88)
+        await suspendu;
+        return { resultat: { x: 1 }, texteBrut: 'brut', modele: 'claude-x' };
+      }, { ctx, repo, fetch: fetchOk });
+      await attendre(() => recu !== null && UI.volEnCours()?.importId === id, 'executer appelé');
+      eq([lueAuDepart.status, lueAuDepart.document_id_vol, typeof lueAuDepart.started_at, typeof lueAuDepart.battement_at], ['en_cours', UI.DOCUMENT_ID, 'string', 'string'], 'T-C25 : la ligne est en_cours, document_id_vol = DOCUMENT_ID, started_at et battement_at posés AVANT qu’executer soit appelé');
+      eq([recu.pageIds, recu.images.length, recu.kind, recu.signal instanceof AbortSignal, recu.provider instanceof L.PasserelleProvider], [pages, 2, 'index', true, true], 'T-C25 (M83) : executer reçoit les pages ENVOYÉES (la page absente écartée des deux listes), autant d’images, la sorte de la ligne, un signal, le fournisseur de la passerelle');
+      await attendre(async () => (await db.get('imports', id)).appels === 1, 'appels à 1');
+      finir();
+      eq(await vol, { issue: 'a_verifier' }, 'T-C25 : lancerVol rend { issue: a_verifier }');
+      const fin = await db.get('imports', id);
+      eq([fin.status, fin.resultat, fin.reponse_brute, fin.model, typeof fin.duree_ms, fin.document_id_vol, fin.erreur, fin.finished_at ?? null, fin.appels, UI.volEnCours()], ['a_verifier', { x: 1 }, 'brut', 'claude-x', 'number', null, null, null, 1, null], 'T-C25 (M88, M89) : a_verifier avec le resultat RENDU PAR executer (jamais celui d’une recette), reponse_brute, model, duree_ms, sans finished_at ; appels 1 ; vol libéré');
+      // 2) executer lève une ErreurExtraction : echec(raison), reponse_brute gardée.
+      { const p2 = await preparer();
+        eq(await UI.lancerVol(p2.id, async () => { throw new L.ErreurExtraction('coupe', { texteBrut: 'coupé' }); }, { ctx, repo, fetch: fetchOk }), { issue: 'echec', raison: 'coupe' }, 'T-C25 : executer lève ErreurExtraction(coupe) → { issue: echec, raison: coupe }');
+        const l2 = await db.get('imports', p2.id);
+        eq([l2.status, l2.erreur?.raison, l2.reponse_brute, l2.document_id_vol], ['echec', 'coupe', 'coupé', null], 'T-C25 : echec(coupe) écrit avec la réponse brute, vol libéré'); }
+      // 3) « Annuler » pendant executer : echec(annule), signal levé.
+      { const p3 = await preparer(); let signalVu = null;
+        const v3 = UI.lancerVol(p3.id, (args) => new Promise((_, rej) => { signalVu = args.signal; args.signal.addEventListener('abort', () => rej(new Error('annule')), { once: true }); }), { ctx, repo, fetch: fetchOk });
+        await attendre(() => signalVu !== null, 'executer suspendu');
+        eq(await UI.annulerVol(p3.id), true, 'T-C25 : annulerVol tient le vol de ce document');
+        const r3 = await v3; const l3 = await db.get('imports', p3.id);
+        eq([r3.issue, signalVu.aborted, l3.status, l3.erreur?.raison, UI.volEnCours()], ['echec', true, 'echec', 'annule', null], 'T-C25 : Annuler → signal levé, echec(annule), plus de vol'); }
+      // 4) UN vol par document, recettes ET index (I-C4, M90).
+      { const p4 = await preparer(); const p5 = await preparer(); const pr = await preparer('recette');
+        let lacher; const tenu = new Promise((r) => { lacher = r; });
+        const v4 = UI.lancerVol(p4.id, async () => { await tenu; return { resultat: { y: 1 }, texteBrut: '', modele: null }; }, { ctx, repo, fetch: fetchOk });
+        await attendre(() => UI.volEnCours()?.importId === p4.id, 'vol d’index tenu');
+        eq([await UI.lancerExtraction(pr.id, { ctx, repo, fetch: fetchOk }), await UI.lancerVol(p5.id, async () => ({ resultat: {}, texteBrut: '', modele: null }), { ctx, repo, fetch: fetchOk })], [{ issue: 'refuse', raison: 'vol_tenu' }, { issue: 'refuse', raison: 'vol_tenu' }], 'T-C25 (M90) : pendant un vol d’index, l’extraction d’une recette ET un autre lancerVol sont refusés (vol_tenu)');
+        lacher(); await v4;
+        let rendre = null; const fetchLent = () => new Promise((res) => { rendre = () => res(rep(502, { erreur: 'serveur' })); });
+        const v6 = UI.lancerExtraction(pr.id, { ctx, repo, fetch: fetchLent });
+        await attendre(() => typeof rendre === 'function', 'fetch de la recette parti');
+        eq(await UI.lancerVol(p5.id, async () => ({ resultat: {}, texteBrut: '', modele: null }), { ctx, repo, fetch: fetchOk }), { issue: 'refuse', raison: 'vol_tenu' }, 'T-C25 (M90) : … et l’inverse : pendant l’extraction d’une recette, une lecture d’index est refusée');
+        rendre(); await v6; }
+      // 5) Battement face à la passe `interrompu` de repo.init() (T6 du lot A ; Review Focus 1) et section Imports. La tête finale du lot A bat HORS de
+      //    la ligne (vague finale : repo.battre, ligne interne battement:<id> de sync_state) : l'espion compte les appels de repo.battre et l'attente lit
+      //    cette ligne (le repli de l'étape 5 ; modèle : le bloc « battement » de tests/import-cible.js).
+      { const p6 = await preparer();
+        const T0 = Date.now() - 120000; let premier = true;
+        const maintenant = () => { if (premier) { premier = false; return new Date(T0).toISOString(); } return new Date().toISOString(); }; // départ à T − 120 s, battements à l'heure réelle
+        let battements = 0;
+        const espion = { ...repo, battre: async (id, q) => { battements += 1; return repo.battre(id, q); } };
+        let lacher; const tenu = new Promise((r) => { lacher = r; });
+        const v = UI.lancerVol(p6.id, async () => { await tenu; return { resultat: { z: 1 }, texteBrut: '', modele: null }; }, { ctx, repo: espion, fetch: fetchOk, maintenant, battementMs: 20 });
+        await attendre(async () => { const l = await db.get('imports', p6.id); const hb = await db.get('sync_state', 'battement:' + p6.id); return l.status === 'en_cours' && hb?.status === 'vol' && Date.parse(hb.value) > T0 + 60000; }, 'au moins un battement à l’heure réelle (modèle : bloc « battement »)');
+        installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
+        await repo.init(); // la passe `interrompu` rejouée PENDANT le vol (brief T6 : « capture posée puis repo.init() rappelé »)
+        eq((await db.get('imports', p6.id)).status, 'en_cours', 'T-C25 (M91) : un vol d’index rebattu n’est pas marqué interrompu par repo.init() (son départ datait de 120 s)');
+        const ctxI = { imports: await db.getAll('imports'), scan_sessions: [], recipesById: new Map(), editionsById: new Map(), booksById: new Map() };
+        const la = D.lignesImports(ctxI, { documentId: UI.DOCUMENT_ID, deviceId: repo.deviceId(), maintenant: new Date().toISOString() }).find((x) => x.id === p6.id);
+        eq([la?.gestes, la?.ailleurs], [['annuler'], false], 'T-C25 (M92) : la section Imports offre « Annuler » pour ce vol d’index de CE document');
+        lacher(); await v;
+        const n = battements; await new Promise((r) => setTimeout(r, 80)); // 4 × battementMs : un intervalle survivant appellerait encore
+        eq([UI.volEnCours(), battements, n >= 1], [null, n, true], 'T-C25 : après le retour, plus de vol et plus AUCUN appel de battement (modèle : bloc « battement »)'); }
+      // 6) Une lecture SANS référence (option `lecture` de T6, ronde 1) : les gardes passent AVANT toute écriture ; puis la ligne naît et vole.
+      { const { pages: pg } = await preparer();
+        const lecture = { kind: 'index', importId: null, pageIds: pg, editionId: null, sessionId: 'ss_vol' };
+        const avant = (await db.getAll('imports')).length;
+        eq(await UI.lancerVol(null, async () => ({ resultat: { w: 1 }, texteBrut: '', modele: null }), { ctx, repo, fetch: fetchOk, enLigne: () => false, lecture }), { issue: 'refuse', raison: 'hors_ligne', importId: null }, 'T-C25 (lecture) : hors ligne → refusé, importId null');
+        eq((await db.getAll('imports')).length, avant, 'T-C25 (lecture, ronde 1 de T6) : un vol refusé n’écrit RIEN dans le journal');
+        let vu = null;
+        const r6 = await UI.lancerVol(null, async (args) => { vu = [args.kind, args.pageIds]; return { resultat: { w: 1 }, texteBrut: 'b', modele: 'claude-x' }; }, { ctx, repo, fetch: fetchOk, lecture });
+        const l6 = await db.get('imports', r6.importId);
+        eq([r6.issue, typeof r6.importId, vu, l6.kind, l6.recipe_id, l6.scan_session_id, l6.page_ids, l6.status, l6.resultat, UI.volEnCours()], ['a_verifier', 'string', ['index', pg], 'index', null, 'ss_vol', pg, 'a_verifier', { w: 1 }, null], 'T-C25 (lecture) : la ligne naît par repo.ouvrirImport sur ces pages, l’exécutant reçoit la sorte et les pages envoyées, le résultat rendu est écrit ; lancerVol rend l’importId'); }
+    } finally {
+      UI.reinitialiserImportCible?.();
+      globalThis.fetch = vraiFetch;
     }
   }));
 

@@ -73,18 +73,21 @@ const photoBornee = (L) => (typeof L?.photo_sha256 === 'string' && /^[0-9a-f]{64
 // cette lecture ? » (I-5) tant qu'elle n'a pas de réponse ; null = écrire.
 const questionAPoser = ({ ok, rattachee, remplacement, remplacer }) => (!ok && !rattachee ? 'discordance' : (remplacement && remplacer === null ? 'remplacer' : null));
 
-// Les images qui PARTENT, dans l'ordre de page_ids (seule source de vérité de l'ordre), réduites par pagePourEnvoi (F-3). Une page absente
-// est ignorée (pointeur souple, § 3.1) ; une page dont les octets ne sont pas sur cet appareil fait refuser l'envoi (rien n'est lu à moitié).
+// Les images qui PARTENT, dans l'ordre de page_ids (seule source de vérité de l'ordre), réduites par pagePourEnvoi (F-3), et les identifiants des
+// pages EFFECTIVEMENT envoyées, dans le même ordre (lot C, D-C21 : la photo n de la réponse est pageIds[n − 1]). Une page absente est écartée des
+// deux (pointeur souple, § 3.1) ; une page dont les octets ne sont pas sur cet appareil fait refuser l'envoi (rien n'est lu à moitié).
 async function imagesDe(repo, pageIds) {
   const images = [];
+  const envoyees = [];
   for (const id of pageIds) {
     const page = await repo.get('source_pages', id);
     if (!page?.sha256) continue;
     const fichier = await repo.getFile(page.sha256);
     if (!(fichier?.blob instanceof Blob)) { const e = new Error('octets_absents'); e.code = 'octets_absents'; throw e; }
     images.push(await pagePourEnvoi(fichier.blob));
+    envoyees.push(id);
   }
-  return images;
+  return { images, pageIds: envoyees };
 }
 
 // --- Le vol (spec § 4.3.1-2, I-3, I-4, I-7 ; exporté pour la section « Imports », tâche 6) -------------------------------------------------------
@@ -100,10 +103,17 @@ async function imagesDe(repo, pageIds) {
 // absents, une image refusée) ; ensuite seulement, la ligne `importId` est reprise — encore a_lancer | a_verifier | echec, de cette sorte et sans
 // référence, relu dans la transaction — PAR la transition de départ (page_ids remises, l'ancien résultat effacé au départ du vol, jamais avant) ; à
 // défaut, une ligne a_lancer est ouverte puis part. Le résultat porte alors `importId` : la ligne qui a volé (null si rien n'a été écrit).
-export async function lancerExtraction(importId, options = {}) {
+// Lot C (D-C21, N-1) : la primitive est PARTAGÉE. lancerVol(importId, executer, options) fait TOUT le vol ci-dessus — mêmes gardes avant écriture, même
+// `lecture`, même battement, mêmes écritures — et confie l'appel SEUL à `executer({ provider, images, pageIds, signal, kind })`, qui rend { resultat,
+// texteBrut, modele } ou lève (ErreurExtraction, ou l'Error de la passerelle) ; `pageIds` = les pages EFFECTIVEMENT envoyées (imagesDe), dans l'ordre des
+// images. lancerExtraction garde sa signature et son comportement : le vol avec l'exécutant de la sorte de la ligne.
+export async function lancerVol(importId, executer, options = {}) {
   const suivi = { importId: null };
-  const r = await volUnique(importId, options, suivi);
+  const r = await volUnique(importId, executer, options, suivi);
   return options.lecture ? { ...r, importId: suivi.importId } : r;
+}
+export async function lancerExtraction(importId, options = {}) {
+  return lancerVol(importId, executerExtraction, options);
 }
 // La ligne d'une lecture sans référence, écrite seulement APRÈS les gardes du vol (ronde 1) : reprise dans la transition de départ (a_verifier → a_lancer
 // → en_cours en une transaction, § 3.1), sinon ouverte (repo.ouvrirImport, le mur conditionné de la première photo) puis partie.
@@ -119,7 +129,7 @@ async function partirLecture(repo, lecture, pageIds, enVol, suivi) {
   await repo.transitionner('imports', ligne.id, { attendus: ['a_lancer'], patch: enVol });
   return ligne.id;
 }
-async function volUnique(importId, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, lecture = null } = {}, suivi) {
+async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, lecture = null } = {}, suivi) {
   const tenue = { importId: lecture ? null : importId, controller: new AbortController(), repo };
   if (!prendreVol(tenue)) return refus('vol_tenu'); // AVANT tout await : une seconde tape (ou une lecture web) pendant les gardes voit le vol
   notifier(); // vague finale (m2) : l'écran ciblé fige ses pages dès la pose du vol (la réduction des pages peut durer), pas seulement à en_cours
@@ -137,10 +147,10 @@ async function volUnique(importId, { ctx, repo = repoModule, fetch: fetchInjecte
     const session = await sessionAssistant(ctx);
     if (!session) { liberer(); return refus('non_connecte'); }
     if (!pageIds.length) { liberer(); return refus('sans_page'); }
-    let images;
-    try { images = await imagesDe(repo, pageIds); }
+    let envoi; // lot C : { images, pageIds } — les pages EFFECTIVEMENT envoyées, dans l'ordre des images
+    try { envoi = await imagesDe(repo, pageIds); }
     catch (e) { liberer(); return { issue: 'refuse', raison: e?.code === 'octets_absents' ? 'octets_absents' : 'image', code: e?.code ?? null }; }
-    if (!images.length) { liberer(); return refus('sans_page'); }
+    if (!envoi.images.length) { liberer(); return refus('sans_page'); }
     const depart = maintenant();
     const enVol = { status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null };
     // Vague finale (m2) : le départ vaut pour les pages LUES — une page retirée, ajoutée ou déplacée pendant la réduction (autre geste, autre onglet)
@@ -170,7 +180,7 @@ async function volUnique(importId, { ctx, repo = repoModule, fetch: fetchInjecte
     const t0 = Date.now();
     let reponse;
     try {
-      reponse = kind === 'index' ? await extraireIndex(provider, images, { signal: tenue.controller.signal }) : await extraireRecette(provider, images, { signal: tenue.controller.signal, maxTokens: MAX_TOKENS_EXTRACTION });
+      reponse = await executer({ provider, images: envoi.images, pageIds: envoi.pageIds, signal: tenue.controller.signal, kind }); // lot C : l'appel est celui de l'exécutant
     } catch (e) {
       // Échec de l'appel ou refus de la lecture : en_cours → echec(raison) ; une ErreurExtraction garde la réponse brute (diagnostic, bornée).
       // Un `annule` arrive aussi par annulerVol, qui écrit la même chose : la première écriture gagne, la seconde est refusée sans bruit.
@@ -183,7 +193,7 @@ async function volUnique(importId, { ctx, repo = repoModule, fetch: fetchInjecte
     const duree_ms = Date.now() - t0;
     // I-3 : le résultat vit dans le journal AVANT tout rendu ou toute écriture de recette. Patch-OBJET (son statut est lu par les espions des tests).
     try {
-      await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: { status: 'a_verifier', resultat: kind === 'index' ? reponse.index : reponse.recette, reponse_brute: brute(reponse.texteBrut), model: reponse.modele ?? null, duree_ms, document_id_vol: null, erreur: null } });
+      await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: { status: 'a_verifier', resultat: reponse.resultat, reponse_brute: brute(reponse.texteBrut), model: reponse.modele ?? null, duree_ms, document_id_vol: null, erreur: null } });
     } catch (e) {
       if (estRefus(e)) {
         // Réponse arrivée APRÈS « Annuler » ou un interrompu (spec § 3.1, Review Focus 4) : echec → a_verifier n'existe pas ; reponse_brute seule
@@ -205,6 +215,13 @@ async function volUnique(importId, { ctx, repo = repoModule, fetch: fetchInjecte
     notifier();
   }
 }
+
+// Les exécutants (lot C, D-C21). Une recette : extraireRecette, 6 000 jetons, le résultat est la recette validée. Un index (panneau, « Relancer » de la
+// section Imports) : extraireIndex et sa forme { entries, uncertain } jusqu'à la tâche 4 du lot C, qui bascule cette branche sur la table des matières
+// (executerIndex). Une seule primitive de vol pour les deux sortes.
+const executerRecette = async ({ provider, images, signal }) => { const r = await extraireRecette(provider, images, { signal, maxTokens: MAX_TOKENS_EXTRACTION }); return { resultat: r.recette, texteBrut: r.texteBrut, modele: r.modele }; };
+const executerIndexA = async ({ provider, images, signal }) => { const r = await extraireIndex(provider, images, { signal }); return { resultat: r.index, texteBrut: r.texteBrut, modele: r.modele }; };
+const executerExtraction = (args) => (args.kind === 'index' ? executerIndexA(args) : executerRecette(args));
 
 // « Annuler » (spec § 3.1, § 4.4, Review Focus 4) : seulement si CE document tient le vol de cet import — le fetch est abandonné (le serveur
 // abandonne l'amont, lot passerelle F-5) et la ligne passe en_cours → echec(annule). Sinon rien n'est fait et false est rendu.
