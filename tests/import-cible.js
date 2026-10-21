@@ -2880,7 +2880,7 @@ export async function runImportCibleTests({ eq, ok }) {
   await run('écran import ciblé : statique', async () => {
     const src = await lire('../src/ui/import-cible.js');
     ok(src.length > 1000 && /export async function renderImportCible/.test(src), 'statique : src/ui/import-cible.js est lu et exporte renderImportCible (garde contre un source vide)');
-    eq(/Anthropic|Supabase/.test(src), false, 'statique (I-9) : aucun texte ne nomme le fournisseur ni la base dans src/ui/import-cible.js');
+    eq(/anthropic|supabase/i.test(src), false, 'statique (I-9 ; sans égard à la casse depuis la ronde 1 de la tâche 6 du lot C, X8) : aucun texte ne nomme le fournisseur ni la base dans src/ui/import-cible.js');
     const sw = await lire('../sw.js');
     ok(sw.includes("'./src/ui/import-cible.js'"), 'SHELL : ./src/ui/import-cible.js');
     const modules = [...sw.matchAll(/'\.\/(src\/[^']+\.js)'/g)].map((m) => m[1]);

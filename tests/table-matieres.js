@@ -201,7 +201,7 @@ export async function runTableMatieresTests({ eq, ok }) {
       eq([Object.keys(C), Object.keys(C.photos[0]), C.ecartees, C.uncertain], [['photos', 'ecartees', 'uncertain'], ['page_id', 'printed_page_range', 'entries'], { trop_longues: 0, adresse: 0 }, []], 'T-C2 : la forme stockée (§ 3.2) — page_id au lieu du numéro de photo ; ecartees et uncertain repris');
       eq(D.resultatIndex({ ...LU_5, ecartees: { trop_longues: 2, adresse: 1 } }, ENVOI).ecartees, { trop_longues: 2, adresse: 1 }, 'T-C2 (A8, ronde 1) : les comptes ecartees de la lecture validée sont rendus TELS QUELS ({ 2, 1 }, jamais remis à 0 : le « {k} entrées écartées » de l’écran en dépend)');
       const melange = { photos: [LU_5.photos[2], LU_5.photos[0], LU_5.photos[4], LU_5.photos[1], LU_5.photos[3]], ecartees: LU_5.ecartees, uncertain: [] };
-      eq(D.resultatIndex(melange, ENVOI).photos.map((p) => p.page_id), ENVOI, 'T-C2 (M15) : blocs rendus dans l’ordre 1..N quel que soit l’ordre de la lecture');
+      eq(D.resultatIndex(melange, ENVOI).photos.map((p) => [p.page_id, p.printed_page_range?.[0] ?? null, p.entries.length]), [['p3', 164, 4], ['p1', 8, 9], ['p5', null, 0], ['p2', 98, 6], ['p4', 182, 4]], 'T-C2 (M15, M15-position ; ronde 1 de T6) : blocs rendus dans l’ordre 1..N quel que soit l’ordre de la lecture, chacun avec SA plage et SES entrées (page = pageIds[photo − 1], jamais le rang du bloc dans la réponse) — contrat pur de resultatIndex : sur le chemin du vol, validerLectureIndex rend déjà les photos 1..N et M15-position y est équivalent');
       const court = D.resultatIndex(L.validerLectureIndex({ photos: LECTURE_5.photos.slice(0, 2), uncertain: ['flou'] }, { nbPhotos: 2 }), ['p3', 'p1']);
       eq([court.photos.map((p) => p.page_id), court.uncertain], [['p3', 'p1'], ['flou']], 'T-C2 : autant de blocs que de pages ENVOYÉES (une page absente au vol n’a pas de bloc), aucun page_id inventé (le vol qui fournit ces pages : M83, tué par T-C25)');
     });
@@ -1027,6 +1027,30 @@ export async function runTableMatieresTests({ eq, ok }) {
         eq([l3.page_ids.length, l3.resultat.photos.length, imagesEnvoyees(ff2.appels[0]), /· 4 photo\(s\)$/.test(p3.querySelector('[data-role="etat"]')?.textContent ?? '')], [5, 4, 4, true], 'T-C10 (M108, Q5) : une page de la ligne absente au vol → 4 images, 4 blocs ; « 4 photo(s) » compte le TABLEAU, pas page_ids (5)');
       } finally { UI.reinitialiserImportCible(); scene.remove(); }
     }));
+    await run('T-C10 (ronde 1 de T6) « Incertain : … » : une chaîne du modèle rendue en texte, jamais en balisage', () => withRepo(async (repo, db) => {
+      const I = await import('../src/ui/import.js');
+      const UI = await import('../src/ui/import-cible.js');
+      await poserBibliotheque(repo, db, { octets: true });
+      // Une chaîne `uncertain` HOSTILE sans adresse (ni schéma, ni hôte à point) : validerLectureIndex la garde, texteDesChamps ne retire que Cc/Cf.
+      const brut = '<img src=x onerror="void 0"><b>flou</b>';
+      const ff = fauxFetch([200, corpsModele({ ...LECTURE_5, uncertain: [brut] })]);
+      const scene = nouvelleScene();
+      try {
+        const ctx = await ctxDe(repo, db);
+        const p1 = I.indexEntriesPanel(ctx.scan_sessions.find((s) => s.id === 'ss1'), ctx, () => [...ENVOI], { repo, toast: () => {}, confirmer: async () => false, fetch: ff.fetch, maintenant: () => NOW });
+        scene.append(p1);
+        await attendre(() => !lireIndex(p1).disabled, 'bouton allumé');
+        lireIndex(p1).click();
+        await attendre(() => !!p1.querySelector('[data-role="entrees-lues"]'), 'tableau rendu');
+        const lu = await ligneDe(db, 'ss1');
+        const ctxR = await ctxDe(repo, db);
+        const p2 = I.indexEntriesPanel(ctxR.scan_sessions.find((s) => s.id === 'ss1'), ctxR, () => [], { repo, toast: () => {}, confirmer: async () => false, fetch: ff.fetch, maintenant: () => NOW, importId: lu.id });
+        scene.append(p2);
+        await attendre(() => !!p2.querySelector('[data-role="incertain"]'), 'reprise : « Incertain » rendu');
+        const vu = (p) => { const n = p.querySelector('[data-role="incertain"]'); return [n?.querySelectorAll('img').length, n?.querySelectorAll('b').length, n?.childElementCount, n?.textContent]; };
+        eq([lu.resultat.uncertain, vu(p1), vu(p2), ff.appels.length], [[brut], [0, 0, 0, 'Incertain : ' + brut], [0, 0, 0, 'Incertain : ' + brut], 1], 'T-C10 (M-incertain-html, ronde 1 de T6 ; I-C2) : une chaîne uncertain du modèle porteuse de balisage (sans adresse : la lecture la garde) est rendue en NŒUD TEXTE dans « Incertain : … » — 0 img, 0 b, aucun élément, la chaîne brute dans textContent —, à la lecture reçue comme à la reprise (résultat revalidé du journal) ; un seul POST');
+      } finally { UI.reinitialiserImportCible(); scene.remove(); }
+    }));
 
     await run('T-C11 reprise sans appel, relecture sur les photos de la lecture, deux lignes, résultat hostile, lecture du lot A', () => withRepo(async (repo, db) => {
       const I = await import('../src/ui/import.js');
@@ -1132,6 +1156,26 @@ export async function runTableMatieresTests({ eq, ok }) {
         boutonTexte(p.querySelector('[data-role="ordre-photos"]'), 'Descendre la page 1').click();
         const apres = [...p.querySelectorAll('[data-role="entrees-lues"] li')];
         eq([apres[0].querySelector('input[type=text]').value, li('Tarte aux pommes') === tarte, tarte.querySelector('input[type=number]').value, tarte.querySelector('[data-role="photo"]').textContent], ['Soupe de courge', true, '300', 'photo 2'], 'T-C13 (D-C18) : ↑/↓ réordonnent le tableau (photos dans l’ordre courant) sans recréer les lignes : la ligne éditée est intacte, « photo n » suit le rang courant');
+      } finally { scene.remove(); }
+    }));
+    await run('T-C13 (ronde 1 de T6) tableau : une « p. imprimée » hors 1..9999 ou illisible vaut null', () => withRepo(async (repo, db) => {
+      const I = await import('../src/ui/import.js');
+      // « Pesto » existe déjà SANS page dans ce livre : la ligne lue « Pesto » p. 186 est créable. Une page tapée hors 1..9999 (« 0 », « 10000 ») ou
+      // qui n'est pas un entier écrit en chiffres (« 1e3 », que le champ numérique laisse passer) vaut null (spec § 4.4) : la clé redevient celle de la
+      // fiche existante, rien à créer (R-C-2). « 12a » n'atteint jamais le gestionnaire (le champ numérique le rend vide, Chrome l'écrit en console).
+      await poserBibliotheque(repo, db, { existantes: [...EXISTANTES, { original_title: 'Pesto', printed_page: null }] });
+      await db.mutate({ puts: { imports: [ligneAVerifier({ id: 'imp_u6', resultat: C })] }, origin: 'device' });
+      const scene = nouvelleScene();
+      try {
+        const ctx = await ctxDe(repo, db);
+        const p = I.indexEntriesPanel(ctx.scan_sessions[0], ctx, () => [], { repo, toast: () => {}, confirmer: async () => false, importId: 'imp_u6' });
+        scene.append(p);
+        const pesto = [...p.querySelectorAll('[data-role="entrees-lues"] li')].find((x) => x.querySelector('input[type=text]').value === 'Pesto');
+        const champ = pesto.querySelector('input[type=number]'); const coche = pesto.querySelector('input[type=checkbox]');
+        const etatPesto = () => [p.querySelector('[data-role="lecture"]').etatLecture().lignes.find((l) => l.title === 'Pesto')?.printed_page, pesto.querySelector('[data-role="puces"]').textContent.includes('déjà repérée'), coche.checked, coche.disabled, p.querySelector('[data-role="creer-references"]').textContent];
+        const apres = (v) => { champ.focus(); champ.value = v; champ.dispatchEvent(new Event('input', { bubbles: true })); return etatPesto(); };
+        const libre = [186, false, true, false, 'Créer 21 références']; const deja = [null, true, false, true, 'Créer 20 références'];
+        eq([etatPesto(), apres('0'), apres('186'), apres('10000'), apres('186'), apres('1e3')], [libre, deja, libre, deja, libre, deja], 'T-C13 (U6, ronde 1 de T6 ; § 4.4, R-C-2) : sur la ligne « Pesto » (une fiche « Pesto » sans page existe), « 0 », « 10000 » et « 1e3 » tapés dans « p. imprimée » → printed_page null, la ligne « déjà repérée », décochée et désactivée, hors du compte de « Créer {n} références » ; « 186 » retapé entre deux → créable, cochée (jamais une clé « pesto|0 » ni une seconde fiche « Pesto »)');
       } finally { scene.remove(); }
     }));
 
@@ -1622,13 +1666,14 @@ export async function runTableMatieresTests({ eq, ok }) {
         'Titre': 'Title', 'Section': 'Section', 'Section : {s}': 'Section: {s}',
       };
       eq(Object.entries(ATTENDU).filter(([fr, en]) => EN[fr] !== en).map(([fr]) => fr), [], 'T-C20 (I-C8, § 5) : chaque texte neuf du lot a son entrée en.js, avec l’anglais de la spec');
-      eq(['Saisir à la main', 'Monter la page {n}', 'Descendre la page {n}', 'p. imprimée', 'Lecture des pages par l’assistant…', 'Relancer', 'Annuler', 'L’assistant n’a pas répondu lisiblement. Réessaie.', 'Code : {c}', 'Une lecture est déjà en cours : annule-la d’abord.', 'Tu es hors ligne.', 'En cours sur un autre écran', 'incertain', 'Incertain : {t}', 'Ignorer', 'Page {n}'].filter((k) => typeof EN[k] !== 'string'), [], 'T-C20 : les clés existantes que le lot réemploie sont toujours là');
+      eq(['Saisir à la main', 'Monter la page {n}', 'Descendre la page {n}', 'p. imprimée', 'Lecture des pages par l’assistant…', 'Relancer', 'Annuler', 'L’assistant n’a pas répondu lisiblement. Réessaie.', 'Code : {c}', 'Une lecture est déjà en cours : annule-la d’abord.', 'Tu es hors ligne.', 'En cours sur un autre écran', 'incertain', 'Incertain : {t}', 'Ignorer', 'Page {n}', 'Repérée dans ton livre — page {p}', 'Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.', 'La lecture a été interrompue. L’appel a peut-être été compté ; relancer en coûtera un autre.', 'L’appel a peut-être été compté ; relancer en coûtera un autre.'].filter((k) => typeof EN[k] !== 'string'), [], 'T-C20 (B1, ronde 1 de T6 ; § 5) : les clés existantes que le lot réemploie sont toujours là, « Repérée dans ton livre — page {p} » (fiche d’une référence créée par C) et les trois phrases I-4 comprises');
       const sw = await lireSource('../sw.js');
-      ok(sw.includes("'./src/domain/table-matieres.js'") && sw.includes("'./src/ui/table-matieres.js'"), 'T-C20 : SHELL contient les deux modules neufs du lot');
+      const shell = [...(sw.match(/const SHELL = \[([\s\S]*?)\];/)?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]); // le TABLEAU, comme tests/sync.js
+      eq([shell.includes('./src/domain/table-matieres.js'), shell.includes('./src/ui/table-matieres.js')], [true, true], 'T-C20 (X4, ronde 1 de T6) : le tableau SHELL de sw.js (et non le fichier entier) contient les deux modules neufs du lot');
       eq([MODULES_NEUFS.includes('../src/ui/table-matieres.js'), ['Relire remplace la lecture reçue ({n} entrées non créées) et coûte un appel. Continuer ?', 'Relire', 'Les photos de cette séance ne sont pas sur cet appareil.', 'Revenir à la lecture'].every((c) => CHAINES_NEUVES_AILLEURS['../src/ui/import.js']?.includes(c)), CHAINES_NEUVES_AILLEURS['../src/ui/recipe.js']?.includes('Section : {s}')], [true, true, true], 'T-C20 : le filet i18n couvre le module neuf (MODULES_NEUFS) et les chaînes neuves d’import.js et de recipe.js (CHAINES_NEUVES_AILLEURS)');
       const src = await lireSource('../src/ui/table-matieres.js');
       ok(src.length > 1000 && /export function panneauLecture/.test(src) && /export async function creerReferences/.test(src), 'T-C20 : src/ui/table-matieres.js est lu (garde contre un source vide)');
-      eq(/Anthropic|Supabase/.test(src), false, 'T-C20 (I-C8) : aucun texte ne nomme le fournisseur ni la base dans src/ui/table-matieres.js');
+      eq(/anthropic|supabase/i.test(src), false, 'T-C20 (I-C8 ; X8, ronde 1 de T6 : sans égard à la casse) : aucun texte ne nomme le fournisseur ni la base dans src/ui/table-matieres.js');
     });
 
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne
