@@ -1,4 +1,17 @@
-# STATE.md — Cuisine OS (mistu) — état au 20 octobre 2026 (lots « Passerelle de l'assistant » et « Présentation du serveur » EN LIGNE, `main` = `57babc6` ; lot A « Import ciblé et journal d'import » FINI dans le worktree `mistu-import` (tête `2b6a2fd`), pas fusionné, `0005` pas collée ; lot B « Recette web complète » FINI dans le worktree `mistu-recette-web`, empilé sur A, pas fusionné, `0006` pas collée, fonction `assistant` pas redéployée)
+# STATE.md — Cuisine OS (mistu) — état au 20 octobre 2026 (lots « Passerelle de l'assistant » et « Présentation du serveur » EN LIGNE, `main` = `57babc6` ; lots A « Import ciblé et journal d'import », B « Recette web complète » et G « Les photos voyagent entre appareils » FINIS, empilés A → B → G sur `main`, NI fusionnés NI poussés, migrations `0005` et `0006` PAS collées, fonction `assistant` PAS redéployée ; lots C, D, E, F prêts (specs, plans, valeurs de rejeu) mais en attente du relèvement de la limite de dépense du compte)
+
+**20 octobre 2026, 23 h 30 — LOT G « LES PHOTOS VOYAGENT ENTRE APPAREILS » : FINI dans le worktree `~/projects/mistu-photos-entre-appareils`
+(branche `photos-entre-appareils`, base = la tête finale du lot B `cf91f09`, spec `3601a52`, plan rejoué `c227711`, tête de code `c42693f` — la vague
+finale, faite INLINE par le chef d'orchestre parce que la limite de dépense du compte a refusé l'agent de vague ; les commits de spec et de docs la
+suivent —, serveur 8090), six tâches en une ronde chacune (re-revues propres), revue finale à trois lentilles (4 Important et 15 Minor, tous fermés
+ou nommés : R-G-24 à R-G-29), `/verify` mécanique VERT (suite 4387/4387, épingle 4386, Node 174/174, `--check` 0, invisibles 0, aucune clé),
+`sw.js cuisine-os-v0.11.0-13`, `APP_VERSION 0.11.0`, aucune migration. **PAS fusionné, PAS poussé. RE-REVUE DUE** : le diff de la vague `c42693f` doit
+être relu à trois lentilles AVANT la fusion de G, dès que des agents sont disponibles (R-G-30).** Pour Neegan, dans l'ordre : les gestes des lots A
+et B (ci-dessous) ; relever la limite de dépense (claude.ai/settings/usage) pour la re-revue de G et pour les lots C, D, E, F (leurs Départs
+exigent un agent de rejeu et le workflow de construction) ; puis `git merge --ff-only photos-entre-appareils`, push, suite publique 4387/4387,
+preuve « deux appareils » (spec G § 10 : images réellement ouvertes sur le second appareil, pas seulement leurs pointeurs), décision R-G-28 (refuser
+« Effacer les données » tant que des photos restent à envoyer ?), « clean ». Registre `.superpowers/sdd/2026-10-19-photos-entre-appareils/`
+(copie dans `~/projects/mistu/.superpowers/sdd/`) ; rulings R-G-7 à R-G-30 dans la spec § 12 ; dettes au § 13.**
 
 **20 octobre 2026, 05 h 30 — LOT B « RECETTE WEB COMPLÈTE » : FINI dans le worktree `~/projects/mistu-recette-web` (branche `recette-web`, base = la
 tête finale du lot A `2b6a2fd`, tête de code `51bad50` (le dernier commit de code ; le suivent deux commits de spec, `7df269e` : rulings R-B-17 à

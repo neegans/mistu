@@ -1245,6 +1245,52 @@ Node seulement) ; deux appareils réels ; Safari et l'iPhone (dont le coût des 
 moteur linéaire de repli, la durée n'est affirmée que sous Node). Mesuré : la suite navigateur, Node (172/172 sur `51bad50`), `--check` 0, `tsc` 0, tous
 les mutants nommés par la spec § 7.5 et par le plan (C1 à C24, B1 à B8, T6a à T6j) rouges, deux équivalents déclarés, aucun survivant (R-B-28).
 
+## Les photos voyagent entre appareils : les octets des fichiers (20 octobre 2026, lot G)
+
+Spec : `docs/superpowers/specs/2026-10-19-photos-entre-appareils-design.md` (rév. 4 ; § 3 : données ; § 4 : parcours ; § 7 : tests ; § 11 : limites ;
+§ 12 : rulings R-G-1 à R-G-30 ; § 13 : dettes). Livré ici (branche `photos-entre-appareils`, empilée sur `recette-web`, non fusionnée) : le niveau
+L4 de la synchronisation — les OCTETS des fichiers (pages photographiées, couvertures, photos de plat) suivent le compte par le Storage de `mitsu`,
+sans migration ni changement de la fonction `assistant`.
+
+**Modules, un rôle chacun.**
+```text
+src/sync/tables.js       CHAMPS_FILES_SERVEUR, projectionFichier (une ligne files vue du serveur : sans blob, syncable, created_at),
+                         remoteValide (remote objet borné : sha256, size, mime, quality, uploaded_at, owner), HASH_FICHIER
+src/sync/fichiers.js     estOriginalIci, copiePerimee, candidatsEnvoi (D-G8), fusionnerFichier (D-G16, une règle), conditionFichier
+                         ({ key, fusion } : la fusion refaite sur la ligne relue en transaction, I-G3), memeRemote (F-7), peutEcrireRemote,
+                         peutEcrireOctets, octetsAEnvoyer (réduite ou telle quelle), createFichiers (envoyer, telecharger, telechargerTout,
+                         reessayerFichier ; erreurs file_error:<sha>, pause_fichiers, renvoi_originale), nomFichier, referencesFichiers,
+                         lireErreursFichiers, LIMITES_FICHIERS
+src/sync/mime.js         typeAffichage, displayUrl, safeDisplayType (F-9 : le type du blob, dans la liste blanche, gagne)
+src/sync/outbox.js       capture L4 : une ligne files n'entre en file qu'avec un remote valide de ce compte ; jamais une suppression
+src/sync/pull.js         réception files par conditionFichier ; tombale files = remote null (D-G15) ; F-7 : file_error de réception levée
+src/sync/push.js         reecrire.files refondu dans la transaction (conditions) ; reponses.js : conflit files = retrait sans journal (R-G-24)
+src/sync/conflits.js     garderIci (jamais de suppression de files), garderAilleurs (fusion)
+src/sync/moteur.js       phase « fichiers » après la réception, un snapshot par passe, vols tenus par arreter, gestes de fichiers
+src/sync/clock.js        reculMs (recul des erreurs passagères ; réexporté par push.js)
+src/core/db.js           db.mutate({ conditions: { files: [{ key, fusion }] } }) : relire et réécrire dans la même transaction (R-G-17)
+src/domain/backup.js     archive : missing_files, copies décrites par bytes_* (jamais la taille de l'original, R-G-25), decisionRestauration (R-G-6),
+                         decisionManquante (R-G-19), verifyRestored ; upload_quality hors archive (R-G-27)
+src/ui/components.js     bookCover, pdfFrame (état du fichier : Télécharger, Réessayer, phrase), contexteFichiers, MOTIFS_FICHIER / motifFichier
+src/ui/settings.js       section Synchronisation L4 (photos à envoyer, pages à télécharger, espace, qualité par appareil, fichiers refusés nommés),
+                         effacerDonnees (la perte des photos non envoyées est dite, R-G-28)
+src/ui/book.js, import-cible.js (poserImage), recipe.js (photoDuPlat)   écrans : couverture, vignettes, photo du plat, téléchargement sur une tape
+tests/sync-l4.js         la suite du lot (runSyncL4Tests, après runLectureWebTests) ; tests/stockage-factice.js : Storage factice
+```
+
+**Flux.** Une photo prise ici → ligne `files` avec blob (original, `syncable`) → si une fiche la référence, la passe fichiers l'envoie (réduite ou
+telle quelle), vérifie « déjà présent », pose `remote` (fait, jamais réglage) sur la ligne relue ; la ligne, désormais à remote de ce compte, entre en
+file et part comme fiche (projection). Ailleurs : la fiche arrive sans octets, la ligne porte `remote` ; l'écran dit « Télécharger » (ou tout d'un coup
+depuis Réglages) ; la descente écrit les octets retypés `remote.mime` sur la ligne relue, l'affichage suit F-9. Un original importé ici par-dessus une
+copie n'est pas remplacé par la copie ; une copie reçue n'efface jamais un original (I-G3). Conflit `files` au serveur (même original poussé par deux
+appareils) : retrait sans journal, la réception apporte la version du serveur (R-G-24).
+
+**Invariants.** I-G3 (un blob local n'est jamais effacé par une écriture serveur : condition de fusion en transaction) ; D-G8 (capture seulement sur
+remote confirmé) ; D-G15 (aucune suppression locale de `files` par la synchro) ; D-G16 (une règle de fusion) ; F-9 (type affiché = type du blob dans la
+liste blanche) ; I-G8 (une personne ne voit jamais une empreinte : `nomFichier`) ; R-G-25 (une copie d'archive ne prend jamais la taille de l'original ;
+des octets tels quels dont l'empreinte n'est pas la clé ne partent pas). Limites assumées : spec § 11 (dont le cache HTTP des octets privés, la reprise
+après une erreur passagère, l'arrêt entre onglets) ; dettes : § 13.
+
 ## Modèle de données (magasins IndexedDB)
 
 `books`, `book_editions` (ISBN, langue, `unit_convention_id`), `source_documents` (fichier, sha256, type), `source_pages` (page imprimée, position),

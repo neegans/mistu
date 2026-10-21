@@ -2366,6 +2366,76 @@ sans `0006` : chaque lecture web répond 502 `serveur`, la réservation refusant
 jouées **avant** la fusion (une redirection opaque à S17 = une ronde sur `telechargerPage` d'abord) ; `/verify` par le chef d'orchestre ; le registre
 copié **avant** tout `git worktree remove`. Le lot G part de la tête finale de B.
 
+### Les photos voyagent entre appareils : octets des fichiers (L4), archive, Storage, moteur, Réglages, écrans (20 octobre 2026, lot G)
+
+**Pour toi.** Les photos de tes pages, tes couvertures et tes photos de plat suivent ton compte : prises sur le Mac, elles s'affichent sur l'iPhone
+(et l'inverse), téléchargées à la demande ou toutes d'un coup, en qualité réduite par défaut (l'original reste sur l'appareil qui l'a prise ;
+« Originale » est un réglage par appareil). Une page dont les octets manquent le dit et offre « Télécharger » ; un fichier refusé à l'envoi est
+nommé par ta page ou ton livre, jamais par une empreinte. L'archive décrit ce qui manque et ne remplace jamais un original par une copie.
+
+**Où.** Branche `photos-entre-appareils`, worktree `~/projects/mistu-photos-entre-appareils`, empilée sur la tête finale du lot B `cf91f09`
+(chaîne A → B → G) ; spec `docs/superpowers/specs/2026-10-19-photos-entre-appareils-design.md` (rév. 4, commise `3601a52`, amendée à la clôture :
+§ 11, § 12 R-G-7 à R-G-30, § 13) ; plan rejoué par intention `docs/superpowers/plans/2026-10-19-photos-entre-appareils.md` (`c227711`) ; registre
+`.superpowers/sdd/2026-10-19-photos-entre-appareils/` (briefs, rapports, `bilan-workflow.md`, `rulings-chef.md`, `vague-finale-chef-report.md`,
+`verify-*.txt` ; copie dans `~/projects/mistu/.superpowers/sdd/`). Serveur de vérification `python3 -m http.server 8090 --bind 127.0.0.1`.
+**PAS fusionné, PAS poussé. Aucune migration, serveur `assistant` intact, `DB_VERSION` 4.**
+
+**Ce qui marche (prouvé par la suite, 4387/4387 sur `c42693f`, épingle 4386 ; Node 174/174 ; `--check` 0).**
+- **Données `files`.** Une ligne porte un `remote` OBJET (`sha256`, `size`, `mime`, `quality`, `uploaded_at`, `owner`) validé par `remoteValide`
+  (`src/sync/tables.js`), projetée au serveur sur `CHAMPS_FILES_SERVEUR` seulement (ni blob, ni `syncable`, ni `created_at`). UNE règle de fusion
+  (`fusionnerFichier`, D-G16) pour toute écriture depuis une copie serveur (réception, ajustement, « Garder celle d'ailleurs », tombale), refaite sur
+  la ligne RELUE dans la transaction : `conditionFichier` et la condition `{ key, fusion }` de `db.mutate` (R-G-17) — un blob arrivé entre la lecture
+  et l'écriture n'est jamais effacé ; une ligne qui a bougé ici depuis n'est pas réécrite. Tombale `files` : le remote passe à `null`, ligne et blob
+  restent (D-G15). Passe unique au démarrage : les anciens `remote: true` de L3 sont relus, `cursor:files` retiré.
+- **Capture (D-G8).** Une ligne `files` n'entre en file QUE quand ses octets sont confirmés (remote valide de ce compte) ; une suppression locale de
+  `files` n'est jamais capturée.
+- **Archive (`src/domain/backup.js`).** `missing_files` pour les pages sans octets ici ; une copie est décrite par `bytes_*` (et ne porte JAMAIS la taille
+  de l'original, R-G-25) ; l'original local n'est jamais remplacé (R-G-6, `decisionRestauration` prise sur la ligne relue) ; une page de
+  `missing_files` garde les octets d'ici, en fusion comme en remplacement (R-G-19) ; `verifyRestored` compare à la décision prise ; `upload_quality`
+  ne voyage pas (R-G-27).
+- **Passe fichiers (`src/sync/fichiers.js`, `createFichiers`).** Storage injecté (`stockage` ; factice `tests/stockage-factice.js`) ; candidats =
+  originaux ici, référencés, synchronisables, sans erreur, sans remote de ce compte (`candidatsEnvoi`) ; octets réduits (JPEG, côté maxi) ou tels quels
+  (`octetsAEnvoyer` : originale, PDF/EPUB, image déjà petite, photo trop grande ou illisible) ; remote validé AVANT l'envoi ; « déjà présent » vérifié ;
+  filet : des octets tels quels dont l'empreinte n'est pas la clé ne partent pas (R-G-25) ; téléchargement vérifié par les octets relus (retypés
+  `remote.mime`) ; espace mesuré ; `LIMITES_FICHIERS` (20 fichiers ou 60 s par passe, 50 Mio) ; erreurs par fichier dans `sync_state`
+  `file_error:<sha>` (motif + sens : `type`, `trop_gros`, `forme`, `illisible`, `verification`, …), `pause_fichiers` (seau plein) distincte de la pause L3,
+  `renvoi_originale`, `telecharger_tout`.
+- **Moteur (`src/sync/moteur.js`).** Phase « fichiers » après la réception, un snapshot par passe, vols tenus par `arreter` ; gestes `telecharger`,
+  `telechargerTout`, `reessayerFichier`, `envoyerMaintenant` (tenu, R-G-21) ; recul `reculMs` (`clock.js`).
+- **Réglages → Synchronisation (ensemble L4).** « Photos à envoyer », « pages à télécharger », espace mesuré, pause L3 sans palier, qualité d'envoi
+  (par appareil, aide qui nomme ce qui part tel quel), fichiers refusés NOMMÉS (`nomFichier` : « Page 12 · Le livre », « Couverture · … »,
+  « Photo du plat · … ») avec leur motif en phrase ; une ligne `files` en quarantaine ou en conflit est nommée de même (R-G-24) ; « Effacer les
+  données » dit la perte des photos pas encore envoyées (R-G-28).
+- **Écrans.** Couverture (`book.js`, `bookCover`), vignettes de pages (`import-cible.js`, `poserImage`), cadre PDF par état (`pdfFrame` : Télécharger,
+  Réessayer, phrase de § 4.10), photo du plat (`recipe.js`, `photoDuPlat`), téléchargement sur une tape, phrase de séance abonnée. Affichage F-9 : le type
+  du blob dans la liste blanche gagne (`typeAffichage`, `displayUrl`, `src/sync/mime.js`) — une copie JPEG reçue sous une ligne HEIC s'affiche ; une
+  ligne hors liste aux octets JPEG aussi (gardes épinglées, R-G-26).
+
+**Ce qui n'est PAS prouvé / dettes.** Rien n'est mesuré dans Safari ni sur l'iPhone ; aucun octet réel n'a été envoyé au bucket de `mitsu` par un
+agent (la preuve § 10 « deux appareils » est le geste de Neegan) ; la forme réelle des erreurs du Storage (`statusCode` sous 400) vient de la lecture
+du vendor, pas d'une mesure ; **la vague finale `c42693f` a été faite inline par le chef d'orchestre et n'a PAS été re-revue à trois lentilles
+(R-G-30) : la re-revue est due avant la fusion** ; dettes nommées R-G-29 (reprise après erreur passagère de « Télécharger toutes les pages »,
+`conflit_renvoyer` sur `files`, `uid` nul sans compte connu, cache HTTP des octets privés, aperçu de la couverture sur le type brut, relecture du
+snapshot à chaque rendu, `compterFichesSynchronisees` trop grand, toast transitoire sur deux tapes, trois copies de HASH, `nomFichier` et ses
+`Map`) ; P1 survit avec la fixture HEIC (connu) ; G13 / G16 équivalents ; tests sensibles au temps (R-B-15 : un rouge se rejoue avant d'être un constat).
+
+**Gestes de Neegan, dans l'ordre.** 1) Lots A puis B d'abord (leurs sections). 2) **Relever la limite de dépense du compte** (claude.ai/settings/usage)
+et faire relire la vague finale (`c42693f`) à trois lentilles par le contrôleur — AVANT toute fusion de G. 3) `git merge --ff-only photos-entre-appareils`
+par `!` (après la fusion de B), `git push`, suite publique `https://neegans.github.io/mistu/tests/` → 4387/4387 (épingle 4386, plus le 404 de
+`/favicon.ico`), service worker `cuisine-os-v0.11.0-13`. 4) Preuve réelle § 10 : Mac et iPhone connectés au même compte, une recette avec photo et un
+livre avec couverture sur le Mac → sur l'iPhone les images s'affichent (téléchargées), « Télécharger » puis récupération après interruption ;
+Réglages → Synchronisation, ensemble L4 (photos à envoyer, pages à télécharger, espace) ; relever la forme réelle du « déjà présent » (geste 7) et le
+mur de pixels iPhone (geste 8). 5) Trancher R-G-28 (refuser l'effacement tant que des photos restent à envoyer ?). 6) « clean » (worktrees, serveurs 8088-8094).
+
+**Versions.** `APP_VERSION 0.11.0` ; `sw.js` `cuisine-os-v0.11.0-1` (T1) … `-11` (T6), `-12` (ronde 1 de T6), `-13` (vague finale) ; `DB_VERSION` 4 inchangée.
+
+**Bilan.** Départ sur `cf91f09` (mesure = B : 3997/3997, épingle 3996, Node 172) ; rejeu du plan par intention (60 blocs sur 61 à l'octet, R-G-7 à
+R-G-16) ; six tâches, une ronde chacune, re-revues propres : `84ab222`/`ea24d88` (T1 : données, projection, fusion, capture), `771a598`/`45114e7` (T2 :
+archive), `5615211`/`8c3471c` (T3 : passe fichiers), `53bab70`/`63d7a3b` (T4 : moteur), `22b8bd1`/`2f1cd60` (T5 : Réglages), `9a7eaa7`/`bc3d844` (T6 :
+écrans) ; revue finale à trois lentilles : 4 Important et 15 Minor ; vague finale `c42693f` (inline, R-G-30) ; suite 3997 → 4387 (+390), Node 172 → 174.
+Mutants : ceux du plan et des revues rejoués sur copies à chaque tâche et à chaque ronde (rapports du registre) ; vague : M1 à M10 (résultat dans
+`vague-finale-chef-report.md`). `/verify` mécanique : `verify-G-bc3d844.txt` (VERT) puis la tête finale. Rulings : R-G-7 à R-G-30 (spec § 12).
+
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 
 **Contexte.** Lot 4 fusionné et poussé par Neegan (`main` = `3998f97`, Pages servi à 20 h 51 UTC, `cuisine-os-v0.8.0-6`) ; preuve
