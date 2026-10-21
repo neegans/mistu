@@ -268,7 +268,7 @@ export async function runImportCibleTests({ eq, ok }) {
     eq(V.assertVocabulaire({ availability: 'available', verification_state: 'to_verify' }, 'recipes'), true, 'vocabulaire : valeurs de la liste acceptées');
     e = null; try { V.assertVocabulaire({ status: 'fini' }, 'imports'); } catch (x) { e = x; } eq(e?.champ, 'status', 'vocabulaire : statut d’import hors liste refusé');
     e = null; try { V.assertVocabulaire({ id: 'imp' }, 'imports'); } catch (x) { e = x; } eq(e?.champ, 'status', 'vocabulaire : un import sans statut est refusé (le statut est obligatoire)');
-    eq(V.assertVocabulaire({ status: 'a_lancer' }, 'imports'), true, 'vocabulaire : statut d’import de la liste accepté');
+    eq(V.assertVocabulaire({ status: 'a_lancer', kind: 'recette' }, 'imports'), true, 'vocabulaire : statut d’import de la liste accepté (lot D, D-D12 : la sorte est désormais obligatoire et fermée — amendée, pas supprimée)');
     eq(V.assertVocabulaire({ status: 'nimporte' }, 'books'), true, 'vocabulaire : magasin sans vocabulaire fermé → rien à vérifier');
     // Test de source (faible, admis) : chaque fabricant de `recipes` appelle assertVocabulaire( HORS commentaire \u2014 un appel commenté ne compte
     // pas (ronde 1). Six fabricants (lot C, tâche 1) : création IA, signet, éditeur, « Créer les références » du panneau d'index (import.js),
@@ -436,7 +436,7 @@ export async function runImportCibleTests({ eq, ok }) {
       for (const args of [{ edition_id: 'ed1', import: { id: 'imp_k', kind: 'web', recipe_id: 'rc9' } }, { edition_id: 'ed1', import: { id: 'imp_k', recipe_id: 'rc9' } }, { session_id: r2.session.id, import_id: 'imp_n', import: { id: 'imp_k', kind: 'recette', recipe_id: 'rc9' } }]) {
         try { await repo.ajouterPages([fichier('k.jpg', 125)], args); formes.push('écrit'); } catch (e) { formes.push(e.name); }
       }
-      eq([formes, await db.get('imports', 'imp_k'), await db.count('files')], [['TypeError', 'TypeError', 'TypeError'], undefined, filesAvantFormes], 'ajouterPages (ronde 1) : kind hors recette | index, kind absent, import_id ET import ensemble → TypeError avant tout octet, rien d’écrit'); }
+      eq([formes, await db.get('imports', 'imp_k'), await db.count('files')], [['TypeError', 'TypeError', 'TypeError'], undefined, filesAvantFormes], 'ajouterPages (ronde 1) : kind hors KINDS_PAGES, kind absent, import_id ET import ensemble → TypeError avant tout octet, rien d’écrit (lot D, R-D-11, I-D11 : libellé amendé — KINDS_PAGES admet « classement », « web » reste refusée)'); }
     // 3) Pages de plus avec import_id : UN repo.transitionner, page_ids ajoutés EN FIN par patch-fonction, lignes de séance dans la même transaction.
     // Ronde 1 (faux-vert) : la LIGNE porte un sous-ensemble strict des pages de la SÉANCE (« Retirer » a détaché la page c de l’import, la ligne source_pages
     // reste, spec § 4.2.2) : un patch qui recopierait la liste de la séance lue hors transaction ferait revenir c en silence.
@@ -2612,8 +2612,8 @@ export async function runImportCibleTests({ eq, ok }) {
     const ligneDe = (root, id) => root.querySelector(`[data-role="ligne-import"][data-id="${CSS.escape(id)}"]`);
     try {
       // --- 1. Domaine PUR (§ 4.7) : une lecture web est listée, avec ses gestes ; la table entière.
-      eq(D.KINDS_IMPORT, ['recette', 'index', 'web'], 'lot B : KINDS_IMPORT connaît « web » (« couverture » reste réservée)');
-      eq(D.KINDS_PAGES, ['recette', 'index'], 'lot B (P-1) : KINDS_PAGES — les sortes à pages, seules ouvertes par le chemin photo (« web » listée, jamais ouverte par lui)');
+      eq(D.KINDS_IMPORT, ['recette', 'index', 'web', 'classement'], 'lot B : KINDS_IMPORT connaît « web » (« couverture » reste réservée) ; lot D (D-D12, I-D11) : et « classement »');
+      eq(D.KINDS_PAGES, ['recette', 'index', 'classement'], 'lot B (P-1) : KINDS_PAGES — les sortes à pages, seules ouvertes par le chemin photo (« web » listée, jamais ouverte par lui) ; lot D (I-D11) : une ligne de classement porte des photos');
       const ICI = 'doc-ici', MOI = 'dev-ici', AUTRE = 'dev-ailleurs';
       const ilYa = (min) => new Date(Date.parse(NOW) - min * 60000).toISOString();
       const SIG = { id: 'rc_w', edition_id: 'ed1', original_title: 'Pâtes puttanesca', source_url: 'https://www.ricardocuisine.com/recettes/123?utm_source=x' };

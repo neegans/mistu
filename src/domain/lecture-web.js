@@ -9,7 +9,7 @@ import { validateParsedRecipe, parseJsonLoose, ErreurExtraction, BORNES_EXTRACTI
 import { MOTIF_ADRESSE, porteUneAdresse, normaliserPourAdresse } from './recherche-web.js';
 import { parseIngredientLine, detectTimers } from './lines.js';
 import { assertVocabulaire } from './vocabulaire.js';
-import { versionEcrite } from './import-cible.js';
+import { versionEcrite, ligneImportNeuve } from './import-cible.js';
 import { newId } from '../core/ids.js';
 import { lienSignet } from '../core/lien.js';
 import { borner } from '../core/bornes.js';
@@ -172,15 +172,10 @@ export async function lireRecetteWeb({ url, session } = {}, { fetch, signal, ten
 // La ligne `imports` d'une lecture web (§ 3.1) : kind web, edition_id nul (D-B17), aucune séance ni page ni photo. Ronde 1 : `deviceId` est
 // OBLIGATOIRE (l'appelant passe repo.deviceId(), comme nouvelleLigneImport du lot A le fait par défaut) — une ligne née sans appareil serait jugée
 // « d'un autre appareil » (VOL_MORT_MS, 10 min) au lieu de 90 s de battement ; un null explicite reste admis (repo pas encore initialisé).
+// Lot D (D-D12) : la ligne est fabriquée par ligneImportNeuve (src/domain/import-cible.js), une seule définition des 19 champs et du vocabulaire.
 export function fabriquerImportWeb({ id, signet, deviceId }) {
   if (deviceId === undefined) throw new TypeError('fabriquerImportWeb : deviceId requis (repo.deviceId())');
-  const ligne = {
-    id, kind: 'web', edition_id: null, recipe_id: signet.id, scan_session_id: null, page_ids: [], photo_sha256: null,
-    status: 'a_lancer', erreur: null, resultat: null, reponse_brute: null, appels: 0, model: null, duree_ms: null,
-    device_id: deviceId ?? null, document_id_vol: null, battement_at: null, started_at: null, finished_at: null,
-  };
-  assertVocabulaire(ligne, 'imports');
-  return ligne;
+  return ligneImportNeuve({ id, kind: 'web', recipe_id: signet.id, edition_id: null, scan_session_id: null, page_ids: [], device_id: deviceId }); // lot D (D-D12) : une seule forme
 }
 // D-B8 (S-14), amendé par R-B-19 : la règle I-5 du lot A (VF-7) — `versionEcrite`, exportée par src/domain/import-cible.js à la ronde 1 (une seule
 // définition pour les deux fabricants) : ce que la personne a ÉCRIT et qui peut être courant, une version non ai de kind extraction (saisie à la
