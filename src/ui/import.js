@@ -13,8 +13,8 @@ import { remoteDeCeCompte } from '../sync/tables.js';
 import { sha256Hex } from '../core/hash.js';
 import { assertVocabulaire } from '../domain/vocabulaire.js';
 import { providerFrom, nettoyer } from '../domain/llm.js';
-import { seanceDUnImportCible, importOuvert } from '../domain/import-cible.js';
-import { cleReference, BORNE_RAW_ENTRY } from '../domain/table-matieres.js';
+import { seanceDUnImportCible } from '../domain/import-cible.js';
+import { cleReference, BORNE_RAW_ENTRY, ligneOuverteDeSeance } from '../domain/table-matieres.js';
 import { pageHeader, section, emptyState, select, field, carteConnexion, texteEchecAssistant, pdfFrame, libelleLivre, sessionAssistant, contexteFichiers, vignettesDePages, boutonTelechargerPages, gesteTelechargement } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { lireDansLeJournal, relireDuJournal, phraseEchec, cleLecture } from './import-cible.js';
@@ -49,11 +49,11 @@ export function deviceId() { return repo.deviceId(); }
 // Les lectures SANS référence du panneau d'index passent par le journal : lireDansLeJournal, relireDuJournal et phraseEchec vivent à côté du vol, dans
 // src/ui/import-cible.js (tâche 6, ronde 1 : l'éditeur ne dépend plus de ce module de route pour son journal).
 
-export async function renderImport(params, query, ctx) {
+export async function renderImport(params, query, ctx, deps = {}) {
   if (!query.session) return sessionsList(ctx);
   const session = ctx.scan_sessions.find((s) => s.id === query.session);
   if (!session) return el('div', { class: 'card' }, t('Séance introuvable.'));
-  return sessionView(session, ctx, query);
+  return sessionView(session, ctx, query, { deps }); // deps (lot C, D-C20) : les injectables du panneau d'index — le routeur n'en passe aucun
 }
 
 function sessionsList(ctx) {
@@ -70,7 +70,7 @@ function sessionsList(ctx) {
   return root;
 }
 
-async function sessionView(session, ctx, query = {}, { historique = { remplacer: remplacerAdresse } } = {}) {
+async function sessionView(session, ctx, query = {}, { historique = { remplacer: remplacerAdresse }, deps = {} } = {}) {
   const ctxF = await contexteFichiers(ctx);
   const pages = session.page_ids.map((id) => ctx.pagesById.get(id)).filter(Boolean);
   const docs = session.document_ids.map((id) => ctx.source_documents.find((d) => d.id === id)).filter(Boolean);
@@ -80,10 +80,15 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   // pas (fiche reçue d'ailleurs, page retirée depuis). Cocher un identifiant sans page créait une sélection qui ne
   // correspondait à aucune miniature, et « Regrouper en recette » l'emportait dans son adresse.
   const applique = appliquerIntention({ intention: query.intention, pageIds: pages.map((p) => p.id) });
-  // ?import=<imp> (spec § 4.5, tâche 6) : la lecture d'index de CETTE séance se reprend dans le panneau — ouvert, prérempli, ses pages cochées.
-  // Ronde 1 : seulement une lecture OUVERTE (une lecture close par « Créer les références » ne rouvre pas le panneau au refresh qui suit).
-  const ligneImport = query.import ? (ctx.imports || []).find((i) => importOuvert(i) && i.id === query.import && i.kind === 'index' && i.scan_session_id === session.id) || null : null;
-  const selected = new Set(ligneImport ? (Array.isArray(ligneImport.page_ids) ? ligneImport.page_ids : []).filter((id) => pages.some((p) => p.id === id)) : applique.selection);
+  // ?import=<imp> (spec § 4.5, tâche 6 ; lot C, D-C22) : la lecture d'index OUVERTE de cette séance — désignée par ?import=, sinon la plus récente
+  // (ligneOuverteDeSeance) — rend le panneau visible ; à la reprise par ?import= (sans intention), ses pages RÉSOLUES sont présélectionnées (C6 : jamais un
+  // identifiant sans vignette). Une lecture close, d'une autre sorte ou d'une autre séance ne rouvre rien. Une intention a posé sa sélection : elle gagne.
+  const ligneIndex = ligneOuverteDeSeance(ctx.imports, session.id, { importId: query.import ?? null });
+  const ligneImport = query.import && ligneIndex?.id === query.import ? ligneIndex : null;
+  const selected = new Set(applique.selection);
+  if (!applique.consommee && ligneImport) {
+    for (const id of Array.isArray(ligneImport.page_ids) ? ligneImport.page_ids : []) if (pages.some((p) => p.id === id)) selected.add(id);
+  }
   const edition = session.edition_id ? ctx.editionsById.get(session.edition_id) : null;
   const root = el('div', null);
   root.append(pageHeader(t('Séance de scan'), { subtitle: `${t('Débutée le')} ${formatDate(session.started_at, { withTime: true })}`, back: { href: '/import', label: t('Séances') } }));
@@ -141,7 +146,7 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   for (const p of pages) {
     const check = el('input', { type: 'checkbox', checked: selected.has(p.id), onChange: (e) => { if (e.target.checked) selected.add(p.id); else selected.delete(p.id); drawActions(); } });
     const pageInput = el('input', { type: 'number', placeholder: t('p. imprimée'), value: p.printed_page ?? '', style: { minHeight: '30px', padding: '.2rem .4rem', fontSize: '.8rem' }, onChange: async (e) => { p.printed_page = e.target.value ? parseInt(e.target.value, 10) : null; await repo.save('source_pages', p); } });
-    thumbs.append(el('figure', null, el('span', { class: 'num' }, String(p.position)), vignettes.places.get(p.id),
+    thumbs.append(el('figure', { dataset: { page: p.id } }, el('span', { class: 'num' }, String(p.position)), vignettes.places.get(p.id),
       el('figcaption', null, el('label', { class: 'check' }, check, p.kind ? t(p.kind === 'index' ? 'Index' : 'Recette') : t('Sélectionner')), pageInput,
         ...(p.issues || []).map((i) => el('div', { class: 'chip warn' }, i)))));
   }
@@ -165,15 +170,15 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
     })));
   }
 
-  // Entrées d'index
-  const indexPanel = indexEntriesPanel(session, ctx, () => [...selected], { importId: ligneImport?.id ?? null });
-  indexPanel.hidden = !ligneImport;
+  // Entrées d'index (lot C) : le panneau est visible au rendu dès qu'une ligne index OUVERTE existe pour cette séance (§ 4.1) — par n'importe quel
+  // chemin, pas seulement Imports → Reprendre ; « Appliquer cet ordre » réordonne les vignettes EN PLACE par apresOrdre (D-C15 : aucun refresh(),
+  // les éditions du tableau survivent).
+  const indexPanel = indexEntriesPanel(session, ctx, () => [...selected], { ...deps, importId: ligneImport?.id ?? null, apresOrdre: (maj) => reordonnerVignettes(thumbs, maj, { ctx, session }) });
+  indexPanel.dataset.role = 'panneau-index';
+  indexPanel.hidden = !(applique.ouvrirIndex || !!ligneIndex);
   root.append(indexPanel);
-  if (applique.consommee) {
-    if (applique.ouvrirIndex) indexPanel.hidden = false;
-    // consommée : un refresh() ne la réappliquera pas — mais seulement si l'adresse est encore celle-ci (C7).
-    if (peutRetirerIntention(applique, session.id, parseHash().query)) historique.remplacer(adresseSeance(session.id, null));
-  }
+  // consommée : un refresh() ne la réappliquera pas — mais seulement si l'adresse est encore celle-ci (C7).
+  if (applique.consommee && peutRetirerIntention(applique, session.id, parseHash().query)) historique.remplacer(adresseSeance(session.id, null));
 
   root.append(el('div', { class: 'row', style: { marginTop: '1rem' } },
     el('button', { class: 'btn', onClick: async () => { session.status = 'done'; await repo.save('scan_sessions', session); toast(t('Séance terminée')); navigate(session.edition_id ? `/books/${session.edition_id}` : '/library'); } }, t('Terminer la séance')),
@@ -211,6 +216,22 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
     setTimeout(() => { vu = true; if (!phraseSeance.isConnected) retirer(); }, 0);
   }
   return root;
+}
+
+// D-C15 (lot C) : après « Appliquer cet ordre », l'écran de séance suit SANS reconstruction — les MÊMES figures réordonnées dans `thumbs` selon
+// seance.page_ids RELUE, .num réécrits, session.page_ids posé, et les MÊMES objets de ctx.pagesById mis à jour (le champ « p. imprimée » d'une
+// vignette réécrit ensuite une fiche à jour, leçon C4).
+export function reordonnerVignettes(thumbs, { pages = [], seance = null } = {}, { ctx, session }) {
+  for (const maj of Array.isArray(pages) ? pages : []) { const p = ctx?.pagesById?.get(maj?.id); if (p) p.position = maj.position; }
+  if (Array.isArray(seance?.page_ids)) session.page_ids = [...seance.page_ids];
+  const parPage = new Map([...thumbs.children].map((f) => [f.dataset.page, f]));
+  for (const id of session.page_ids) { const f = parPage.get(id); if (f) thumbs.append(f); }
+  for (const f of thumbs.children) {
+    const p = ctx?.pagesById?.get(f.dataset.page);
+    if (!p) continue;
+    const num = f.querySelector('.num'); if (num) num.textContent = String(p.position);
+    const img = f.querySelector('img'); if (img) img.alt = `${t('Page')} ${p.position}`;
+  }
 }
 
 // Panneau d'entrées d'index : « Titre — 132 » par ligne ; création de références (reference_only) sans inventer d'ingrédients.

@@ -2462,6 +2462,9 @@ export async function runImportCibleTests({ eq, ok }) {
         // ?import= (ronde 1) : le panneau ne se rouvre que sur une lecture d'index OUVERTE de CETTE séance.
         const { session: ssAutre } = await repo.ajouterPages(await images(1, 'autre'), { edition_id: 'ed6' });
         const autre = await repo.ouvrirImport({ kind: 'index', edition_id: 'ed6', scan_session_id: ssAutre.id, page_ids: [] });
+        // Lot C, tâche 3 (§ 4.1, M67 : une ligne d'index OUVERTE de la séance rend le panneau visible même sans ?import=) : les lectures que ce bloc a
+        // laissées ouvertes dans ssI sont d'abord ignorées — l'intention reste « la ligne désignée (autre séance, ou close) ne rouvre rien ».
+        for (const i of await db.getAll('imports')) if (i.kind === 'index' && i.scan_session_id === ssI.id && !['enregistre', 'ignore'].includes(i.status)) await db.put('imports', { ...i, status: 'ignore' });
         const vueAutre = await I.renderImport({}, { session: ssI.id, import: autre.id }, await ctxDe());
         const vueClose = await I.renderImport({}, { session: ssI.id, import: enVol.id }, await ctxDe()); // enVol est close (enregistre) par « Créer les références »
         eq([vueAutre.querySelector('textarea')?.closest('.card')?.hidden, vueClose.querySelector('textarea')?.closest('.card')?.hidden], [true, true], '?import= (ronde 1) : une lecture d’une AUTRE séance, ou une lecture déjà close, ne rouvre pas le panneau d’index');

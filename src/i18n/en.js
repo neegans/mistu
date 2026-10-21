@@ -590,4 +590,12 @@ export const EN = {
   "La lecture a déjà été enregistrée.": "This reading has already been saved.",
   "{n} référence(s) créée(s){d}": "{n} reference(s) created{d}",
   "{n} doublon(s) ignoré(s)": "{n} duplicate(s) skipped",
+  // Lot C, tâche 3 : séquence proposée des photos.
+  "Ordre des photos": "Photo order",
+  "Ordre proposé d’après les numéros de page lus — vérifie.": "Order suggested from the page numbers read — check it.",
+  "L’ordre des photos suit les numéros lus.": "The photo order follows the page numbers read.",
+  "Appliquer cet ordre": "Apply this order",
+  "Ordre enregistré.": "Order saved.",
+  "p. {a}-{b}": "pp. {a}-{b}",
+  "page inconnue": "unknown page",
 };
