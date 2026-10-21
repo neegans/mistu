@@ -13,6 +13,7 @@ import { startScanSession, indexEntriesPanel } from './import.js';
 import { accueilLivreModel, renderAccueilLivre } from './accueil-livre.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes, motsClesExistants } from './puces.js';
 import { tagsDe } from '../domain/search.js';
+import { sectionLisible } from '../domain/llm.js';
 import { seanceDUnImportCible, importOuvert } from '../domain/import-cible.js';
 import { ACCEPT_PHOTOS, ACCEPT_FICHIERS } from './add.js';
 
@@ -124,14 +125,16 @@ export async function renderBook(params, query, ctx) {
     for (const r of rows) {
       const doc = ctx.docsByRecipe.get(r.id);
       list.append(recipeCard(doc || { recipe: r, version: null, book, edition }));
+      // Lot C (D-C6) : la section lue dans la table des matières, en libellé discret, pour une `reference_only` seulement ; regrouper par section est
+      // hors périmètre. Ronde 1 : lue par sectionLisible (une fiche reçue ou restaurée peut porter autre chose qu'une chaîne).
+      const sectionLue = r.availability === 'reference_only' ? sectionLisible(r.section) : null;
       // Import ciblé (spec import-cible § 4.1, m4 ; D-8) : la rangée est SOUS la carte, hors du <a> — recipeCard met `extra` à l'intérieur, ce qui
       // faisait un lien dans un lien. Une référence ou une recette partielle SANS lien web s'importe par l'écran déjà rattaché (même règle que
       // « Relire les pages » de recipe.js : un signet devenu partiel n'a pas d'entrée, T4-R1) ; « Saisir à la main » reste.
       if ((r.availability === 'reference_only' || r.availability === 'partial') && !r.source_url) list.append(el('div', { class: 'row', style: { margin: '-.4rem 0 .8rem' } },
         el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(r.id)}/importer` }, t('Importer')),
         el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(r.id)}/edit?kind=extraction` }, t('Saisir à la main')),
-        // Lot C (D-C6) : la section lue dans la table des matières, en libellé discret ; regrouper par section est hors périmètre.
-        r.availability === 'reference_only' && typeof r.section === 'string' && r.section.trim() ? el('span', { class: 'chip neutral', dataset: { role: 'section' } }, r.section.trim()) : null));
+        sectionLue ? el('span', { class: 'chip neutral', dataset: { role: 'section' } }, sectionLue) : null));
     }
   };
   const q = el('input', { type: 'search', placeholder: t('Filtrer les recettes de ce livre'), onInput: (e) => { filterState.q = e.target.value; drawList(); } });

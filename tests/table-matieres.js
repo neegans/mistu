@@ -51,7 +51,7 @@ async function poserBibliotheque(repo, db, { seances = { ss1: ENVOI }, octets = 
     if (octets) { const f = await imageDe(id + '.jpg', COULEURS[i % COULEURS.length]); sha256 = await sha256Hex(f); await repo.putFile(sha256, f, { original_filename: f.name }); }
     pages.push({ id, document_id: null, edition_id: 'ed1', sha256, printed_page: null, file_position: null, locator: null, position: posDe(id), issues: [], kind: kinds[id] ?? null, created_at: DATE, updated_at: DATE });
   }
-  const recettes = existantes.map((e, i) => ({ id: 'rc_ex' + i, edition_id: 'ed1', original_title: e.original_title, original_language: 'fr', availability: 'reference_only', verification_state: 'unverified', printed_page: e.printed_page, section: e.section ?? null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: [], current_version_id: null, ingredient_ids: [], created_at: DATE, updated_at: DATE }));
+  const recettes = existantes.map((e, i) => ({ id: 'rc_ex' + i, edition_id: 'ed1', original_title: e.original_title, original_language: 'fr', availability: e.availability ?? 'reference_only', verification_state: 'unverified', printed_page: e.printed_page, section: e.section ?? null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: [], current_version_id: null, ingredient_ids: [], created_at: DATE, updated_at: DATE }));
   const sessions = Object.entries(seances).map(([id, page_ids]) => ({ id, status: 'open', edition_id: 'ed1', started_at: DATE, page_ids: [...page_ids], document_ids: [], device_id: repo.deviceId(), created_at: DATE, updated_at: DATE }));
   await db.mutate({ puts: { books: [{ id: 'b1', title: 'Saisons', author: 'A. B.', created_at: DATE, updated_at: DATE }], book_editions: [{ id: 'ed1', book_id: 'b1', language: 'fr', created_at: DATE, updated_at: DATE }], recipes: recettes, source_pages: pages, scan_sessions: sessions }, origin: 'device' });
 }
@@ -1549,20 +1549,36 @@ export async function runTableMatieresTests({ eq, ok }) {
     await run('T-C18 section sur la fiche livre et la fiche référence', () => withRepo(async (repo, db) => {
       const { renderBook } = await import('../src/ui/book.js');
       const { renderRecipe } = await import('../src/ui/recipe.js');
-      await poserBibliotheque(repo, db, { existantes: [{ original_title: 'Soupe de courge', printed_page: 98, section: 'Soupes' }, { original_title: 'Gaspacho', printed_page: 76 }] });
+      // Ronde 1 : « Soupes » entre espaces (la section est ROGNÉE) ; puis des sections qu'une fiche reçue (synchronisation) ou restaurée (archive) peut porter :
+      // un tableau, un nombre, des espaces seuls, un caractère invisible (Cf), un U+202E devant le texte, une chaîne au-delà de la borne ; et une `partial`.
+      await poserBibliotheque(repo, db, { existantes: [{ original_title: 'Soupe de courge', printed_page: 98, section: '  Soupes  ' }, { original_title: 'Gaspacho', printed_page: 76 },
+        { original_title: 'Pot-au-feu', printed_page: 140, section: ['Soupes'] }, { original_title: 'Fond de volaille', printed_page: 164, section: 5 }, { original_title: 'Vinaigrette', printed_page: 174, section: '   ' },
+        { original_title: 'Mayonnaise', printed_page: 180, section: '\u200B' }, { original_title: 'Pesto', printed_page: 186, section: '\u202ESauces' }, { original_title: 'Pickles de légumes', printed_page: 190, section: 'x'.repeat(250) },
+        { original_title: 'Tian de courgettes', printed_page: 88, section: 'Soupes', availability: 'partial' }] });
       const ctx = await ctxDe(repo, db);
       const fiche = await renderBook({ id: 'ed1' }, { nouveau: '1' }, ctx);
       const rangee = (titre) => { const carte = [...fiche.querySelectorAll('a.item-link')].find((a) => a.querySelector('h3')?.textContent === titre); return carte?.nextElementSibling ?? null; };
-      eq([[...(rangee('Soupe de courge')?.querySelectorAll('.chip.neutral') ?? [])].map((c) => c.textContent), rangee('Soupe de courge')?.closest('a'), rangee('Gaspacho')?.querySelectorAll('.chip.neutral').length], [['Soupes'], null, 0], 'T-C18 (M55) : une référence avec section → une puce .chip.neutral « Soupes » dans SA rangée (hors du lien de la carte) ; sans section → aucune');
+      const puces = (titre) => { const r = rangee(titre); return r ? [...r.querySelectorAll('.chip.neutral')].map((c) => c.textContent) : 'sans rangée'; };
+      eq([puces('Soupe de courge'), puces('Gaspacho'), fiche.querySelectorAll('a [data-role="section"]').length], [['Soupes'], [], 0], 'T-C18 (M55, M-livre-sans-trim) : une référence avec section → une puce .chip.neutral « Soupes » (rognée) dans SA rangée, jamais dans un lien ; sans section → aucune');
+      eq(['Pot-au-feu', 'Fond de volaille', 'Vinaigrette', 'Mayonnaise', 'Tian de courgettes'].map(puces), [[], [], [], [], []], 'T-C18 (ronde 1 ; M-livre-sans-typeof, M-livre-partial) : une section tableau ou nombre ne fait pas tomber la liste et n’a pas de puce ; une section blanche ou invisible non plus ; une partial sans lien web garde sa rangée « Importer » sans puce');
+      eq([puces('Pesto'), puces('Pickles de légumes')], [['Sauces'], ['x'.repeat(200)]], 'T-C18 (ronde 1 ; M-section-brute, M-section-sans-borne) : la puce d’une section reçue est nettoyée (le U+202E est retiré) et bornée comme à la fabrication (BORNES_INDEX.section, 200 points de code)');
+      const ficheDe = (titre) => renderRecipe({ id: ctx.recipes.find((r) => r.original_title === titre).id }, {}, ctx);
+      const sousTitre = (p) => p.querySelector('.card.warn > h2 + p.muted')?.textContent ?? null;
+      const page = await ficheDe('Soupe de courge');
+      const sansSection = await ficheDe('Gaspacho');
+      eq([sousTitre(page), sansSection.textContent.includes('Section :')], ['Section : Soupes', false], 'T-C18 (M-recette-classe, M-recette-place) : la fiche d’une référence dit « Section : Soupes » (rognée) dans un p.muted juste sous le h2 ; sans section, rien');
+      const autres = [];
+      for (const titre of ['Pot-au-feu', 'Fond de volaille', 'Vinaigrette', 'Mayonnaise', 'Pesto']) { const p = await ficheDe(titre); autres.push([!!p.querySelector('.card.warn > h2'), sousTitre(p)]); }
+      eq(autres, [[true, null], [true, null], [true, null], [true, null], [true, 'Section : Sauces']], 'T-C18 (ronde 1 ; M-recette-sans-typeof, M-recette-sans-trim, M-recette-brute) : une section tableau, nombre, blanche ou invisible → la fiche se rend, sans « Section : » ; une section à U+202E est dite nettoyée');
       const rc = ctx.recipes.find((r) => r.original_title === 'Soupe de courge');
-      const page = await renderRecipe({ id: rc.id }, {}, ctx);
-      const sansSection = await renderRecipe({ id: ctx.recipes.find((r) => r.original_title === 'Gaspacho').id }, {}, ctx);
-      eq([page.textContent.includes('Section : Soupes'), sansSection.textContent.includes('Section :')], [true, false], 'T-C18 : la fiche d’une référence dit « Section : Soupes » ; sans section, rien');
-      const hostile = '<img src=x onerror="void 0">';
+      const hostile = '<img src=x onerror="void 0"><a href="https://exemple.test/">Reconnecte-toi</a>';
       await db.mutate({ puts: { recipes: [{ ...rc, section: hostile }] }, origin: 'device' });
       const ctxH = await ctxDe(repo, db);
       const ficheH = await renderBook({ id: 'ed1' }, { nouveau: '1' }, ctxH);
-      eq([ficheH.querySelectorAll('img[src="x"]').length, ficheH.textContent.includes(hostile)], [0, true], 'T-C18 (I-C2) : une section hostile reste du TEXTE (aucun élément créé)');
+      const pageH = await renderRecipe({ id: rc.id }, {}, ctxH);
+      const elements = (racine) => [racine.querySelectorAll('img[src="x"]').length, racine.querySelectorAll('a[href="https://exemple.test/"]').length];
+      eq([...elements(ficheH), ficheH.textContent.includes(hostile)], [0, 0, true], 'T-C18 (I-C2 ; M-html) : une section hostile reste du TEXTE sur la fiche livre (aucune image, aucun lien créés)');
+      eq([...elements(pageH), pageH.textContent.includes('Section : ' + hostile)], [0, 0, true], 'T-C18 (I-C2, ronde 1 ; M-recette-html) : sur la fiche référence aussi, « Section : » suivi du texte hostile, aucune image ni aucun lien créés');
     }));
     await run('T-C19 recherche par section', async () => {
       const S = await import('../src/domain/search.js');
@@ -1570,12 +1586,16 @@ export async function runTableMatieresTests({ eq, ok }) {
       const ref = { id: 'rc_s', edition_id: 'ed1', original_title: 'Soupe de courge', availability: 'reference_only', section: 'Entrées', cuisines: [], tags: [] };
       const sans = { ...ref, id: 'rc_n', section: null };
       const dispo = { id: 'rc_d', edition_id: 'ed1', original_title: 'Gratin dauphinois', availability: 'available', section: 'Entrées', cuisines: [], tags: [], current_version_id: 'v1' };
-      const versions = [{ id: 'v1', recipe_id: 'rc_d', kind: 'extraction', ingredients: [], steps: [] }];
-      const docs = S.buildDocs({ recipes: [ref, sans, dispo, { ...ref, id: 'rc_o', section: { x: 1 } }], versions, editions, books, dishes: [], links: [] });
+      const poisson = { ...dispo, id: 'rc_p', original_title: 'Plat du vendredi', section: 'Poissons', current_version_id: 'v2' };
+      const versions = [{ id: 'v1', recipe_id: 'rc_d', kind: 'extraction', ingredients: [], steps: [] }, { id: 'v2', recipe_id: 'rc_p', kind: 'extraction', ingredients: [], steps: [] }];
+      // Ronde 1 : la section qui n'est pas une chaîne est un TABLEAU ['Entrées'], dont String() donne « Entrées » (un objet { x: 1 } donnait « [object Object] » : vert sans garde).
+      const docs = S.buildDocs({ recipes: [ref, sans, dispo, { ...ref, id: 'rc_o', section: ['Entrées'] }, poisson], versions, editions, books, dishes: [], links: [] });
       const trouves = S.searchDocs(docs, S.parseQuery('entrée'), {}).references.map((r) => r.doc.recipe.id);
-      eq([trouves.includes('rc_s'), trouves.includes('rc_n'), trouves.includes('rc_o')], [true, false, false], 'T-C19 (M56) : une référence « Soupe de courge » rangée sous « Entrées » remonte sur « entrée » (section dans les titleTokens) ; sans section — ou une section qui n’est pas une chaîne — rien');
+      eq([trouves.includes('rc_s'), trouves.includes('rc_n'), trouves.includes('rc_o')], [true, false, false], 'T-C19 (M56, M-recherche-sans-typeof) : une référence « Soupe de courge » rangée sous « Entrées » remonte sur « entrée » (section dans les titleTokens) ; sans section — ou une section qui n’est pas une chaîne, même un tableau [« Entrées »] — rien');
+      eq(essai(() => S.buildDocs({ recipes: [{ ...ref, id: 'rc_t', section: JSON.parse('{"toString":0}') }], versions: [], editions, books, dishes: [], links: [] }).length), 1, 'T-C19 (ronde 1 ; M-recherche-sans-typeof) : une section reçue au toString hostile (du JSON valide) ne fait pas lever buildDocs — getData, donc toutes les routes, tomberaient');
       const d = docs.find((x) => x.recipe.id === 'rc_d');
       eq([d.tokens.has('entrees'), d.titleTokens.has('entrees')], [true, false], 'T-C19 : une recette available avec section → dans tokens, pas dans titleTokens');
+      eq(S.searchDocs(docs, S.parseQuery('poisson'), {}).admissible.map((h) => h.doc.recipe.id), ['rc_p'], 'T-C19 (ronde 1 ; M-textParts) : une recette available rangée sous « Poissons » est TROUVÉE par « poisson » (la section entre dans ses tokens) ; limite : un mot de section qui est aussi un mot de type (« entrée ») ne trouve pas une recette sans type');
     });
 
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne
