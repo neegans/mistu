@@ -119,13 +119,18 @@ async function imagesDe(repo, pageIds) {
 // `lecture`, même battement, mêmes écritures — et confie l'appel SEUL à `executer({ provider, images, pageIds, signal, kind })`, qui rend { resultat,
 // texteBrut, modele } ou lève (ErreurExtraction, ou l'Error de la passerelle) ; `pageIds` = les pages EFFECTIVEMENT envoyées (imagesDe), dans l'ordre des
 // images. lancerExtraction garde sa signature et son comportement : le vol avec l'exécutant de la sorte de la ligne.
+// Lot D (D-D14, S-3) : `accepte(ligne)` — une liste BLANCHE de sortes, évaluée après la relecture de la ligne et avant toute écriture (refus `sorte`) ;
+// `attendus` — les statuts de départ admis (défaut `['a_lancer', 'echec']`, lot A inchangé).
 export async function lancerVol(importId, executer, options = {}) {
   const suivi = { importId: null };
   const r = await volUnique(importId, executer, options, suivi);
   return options.lecture ? { ...r, importId: suivi.importId } : r;
 }
+// Les sortes que lancerExtraction LIT (lot D, D-D14 ; liste BLANCHE) : une recette, et un index tant que C le lit par ce vol (executerExtraction, « Relancer »
+// de la section Imports). Toute autre sorte — classement, couverture (lot E), web (lot B), une sorte future — est refusée `sorte`, rien d'écrit.
+export const SORTES_EXTRACTION = Object.freeze(['recette', 'index']);
 export async function lancerExtraction(importId, options = {}) {
-  return lancerVol(importId, executerExtraction, options);
+  return lancerVol(importId, executerExtraction, { ...options, accepte: (l) => SORTES_EXTRACTION.includes(l?.kind) }); // lot D : attendus transmis par options
 }
 // La ligne d'une lecture sans référence, écrite seulement APRÈS les gardes du vol (ronde 1) : reprise dans la transition de départ (a_verifier → a_lancer
 // → en_cours en une transaction, § 3.1), sinon ouverte (repo.ouvrirImport, le mur conditionné de la première photo) puis partie.
@@ -158,7 +163,7 @@ async function partirLecture(repo, lecture, pageIds, enVol, suivi) {
 }
 // Lot C, ronde 1 de la tâche 4 : `signal` (facultatif) = l'« Annuler » de l'appelant AVANT que la tenue ait une ligne (gardes : session, réduction des
 // photos). Levé pendant les gardes → refus `annule`, rien n'est parti ni écrit ; levé après le départ → l'appel est abandonné (comme annulerVol).
-async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, lecture = null, signal = null } = {}, suivi) {
+async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, lecture = null, signal = null, attendus = ['a_lancer', 'echec'], accepte = null } = {}, suivi) {
   const tenue = { importId: lecture ? null : importId, controller: new AbortController(), repo };
   if (!prendreVol(tenue)) return refus('vol_tenu'); // AVANT tout await : une seconde tape (ou une lecture web) pendant les gardes voit le vol
   notifier(); // vague finale (m2) : l'écran ciblé fige ses pages dès la pose du vol (la réduction des pages peut durer), pas seulement à en_cours
@@ -175,7 +180,9 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
       const ligne = await repo.get('imports', importId);
       if (!ligne) { liberer(); return refus('inconnu'); }
       kind = ligne.kind; pageIds = Array.isArray(ligne.page_ids) ? ligne.page_ids : [];
+      if (typeof accepte === 'function' && !accepte(ligne)) { liberer(); return refus('sorte'); } // lot D (D-D14) : la garde de sorte, APRÈS la relecture, AVANT toute écriture
     }
+    if (lecture && typeof accepte === 'function' && !accepte({ kind })) { liberer(); return refus('sorte'); }
     if (!enLigne()) { liberer(); return refus('hors_ligne'); }
     const session = await sessionAssistant(ctx);
     if (annule()) { liberer(); return refus('annule'); }
@@ -194,7 +201,7 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
     const memesPages = (c) => { if (JSON.stringify(Array.isArray(c.page_ids) ? c.page_ids : []) !== JSON.stringify(pageIds)) throw new TransitionRefusee('imports', importId, c.status); return enVol; };
     try {
       if (lecture) importId = await partirLecture(repo, lecture, pageIds, enVol, suivi);
-      else await repo.transitionner('imports', importId, { attendus: ['a_lancer', 'echec'], patch: memesPages });
+      else await repo.transitionner('imports', importId, { attendus, patch: memesPages }); // lot D (S-3) : lireLeLot passe ['a_lancer'] — jamais une ligne passée echec ; memesPages (lot A, m2) gardé
     } catch (e) {
       liberer();
       if (estRefus(e)) return { issue: 'refuse', raison: 'transition', statut: e.statut }; // un autre onglet a enregistré ou ignoré entre-temps (I-10)

@@ -27,6 +27,76 @@ const IMPORT_RCO = { id: 'imp_rco', kind: 'recette', recipe_id: 'rcO', edition_i
 const HOMONYMES = [ref('rcH1', 'Tarte aux pommes', 54), ref('rcH2', 'Tarte aux pommes', 210)];
 const corpsModele = (contenu, extra = {}) => ({ model: 'claude-x', stop_reason: 'end_turn', content: [{ type: 'text', text: typeof contenu === 'string' ? contenu : JSON.stringify(contenu) }], ...extra });
 const reponse = (status, corps) => ({ ok: status >= 200 && status < 300, status, headers: new Headers(), text: async () => (typeof corps === 'string' ? corps : JSON.stringify(corps)) });
+const COULEURS = ['#811', '#181', '#118', '#881', '#188', '#818', '#444', '#a50', '#5a0', '#05a', '#a05', '#0a5'];
+// Une vraie image (pagePourEnvoi la décode) : couleur différente → octets et empreinte différents.
+async function imageDe(nom, couleur) {
+  const c = new OffscreenCanvas(320, 240); const cx = c.getContext('2d');
+  cx.fillStyle = couleur; cx.fillRect(0, 0, 320, 240); cx.fillStyle = '#fff'; cx.fillRect(10, 10, 160, 120);
+  return new File([await c.convertToBlob({ type: 'image/jpeg', quality: 0.9 })], nom, { type: 'image/jpeg' });
+}
+// La forme stockée (§ 3.2) de CLASSEMENT_5 — égale à R5, calculée et affirmée par T-D3.
+const R5_STOCKE = { groupes: [{ page_ids: ['p1', 'p3'], title: 'Soupe de courge', printed_page: 132, uncertain: false }, { page_ids: ['p2'], title: 'Tarte fine aux poires', printed_page: 140, uncertain: false }, { page_ids: ['p5'], title: 'Gratin dauphinois', printed_page: 148, uncertain: false }], orphelines: ['p4'], non_classees: [], partagees: [], uncertain: [] };
+// Une ligne de classement (la forme qu'écrivent repo.ouvrirImport puis le vol), posée directement dans la base — jamais par un écran.
+// device_id : CET appareil par défaut (appareilIci, lu à l'appel, dans withRepo) — jamais null ; un autre appareil s'écrit explicitement ('dev_autre').
+const ligneClassement = ({ id = 'imp_cl', sessionId = 'ss1', page_ids = PAGES_5, status = 'a_verifier', device_id = appareilIci(), over = {} } = {}) => ({ id, kind: 'classement', edition_id: 'ed1', recipe_id: null, scan_session_id: sessionId, page_ids: [...page_ids], photo_sha256: null, status, erreur: null, resultat: status === 'a_verifier' ? R5_STOCKE : null, reponse_brute: null, brouillon: null, appels: 1, model: 'claude-x', duree_ms: 900, device_id, document_id_vol: null, battement_at: null, started_at: DATE, finished_at: null, created_at: DATE, updated_at: DATE, ...over });
+// Une bibliothèque minimale sur la base jetable : le livre « Saisons » (b1, édition ed1), les références, une séance `id` ouverte sur `pages`
+// (position = rang ; octets réels sauf pour les pages de `sansOctets`, ou toutes si octets = false), et des lignes du journal.
+async function poserSeance(repo, db, { id = 'ss1', pages = PAGES_5, octets = true, sansOctets = [], edition = 'ed1', references = REFERENCES_ED, imports = [], imprimees = {}, sortes = {} } = {}) {
+  const lignes = [];
+  for (const [i, pid] of pages.entries()) {
+    let sha256 = 'sha-' + pid;
+    if (octets && !sansOctets.includes(pid)) { const f = await imageDe(pid + '.jpg', COULEURS[i % COULEURS.length]); sha256 = await sha256Hex(f); await repo.putFile(sha256, f, { original_filename: f.name }); }
+    lignes.push({ id: pid, document_id: null, edition_id: edition, sha256, printed_page: imprimees[pid] ?? null, file_position: null, locator: null, position: i + 1, issues: [], kind: sortes[pid] ?? null, created_at: DATE, updated_at: DATE });
+  }
+  await db.mutate({ puts: {
+    books: [{ id: 'b1', title: 'Saisons', author: 'A. B.', created_at: DATE, updated_at: DATE }], book_editions: [{ id: 'ed1', book_id: 'b1', language: 'fr', created_at: DATE, updated_at: DATE }],
+    recipes: references, source_pages: lignes,
+    scan_sessions: [{ id, status: 'open', edition_id: edition, started_at: DATE, page_ids: [...pages], document_ids: [], recipe_ids: [], device_id: repo.deviceId(), created_at: DATE, updated_at: DATE }],
+    ...(imports.length ? { imports } : {}),
+  }, origin: 'device' });
+}
+// Le contexte d'un écran (comme getData), relu dans la base jetable ; la session de l'assistant par ctx.sync (sessionAssistant).
+async function ctxDe(repo, db, { session = SESSION } = {}) {
+  const noms = ['recipes', 'books', 'book_editions', 'source_pages', 'scan_sessions', 'imports', 'recipe_versions', 'source_documents'];
+  const [recipes, books, book_editions, source_pages, scan_sessions, imports, recipe_versions, source_documents] = await Promise.all(noms.map((s) => db.getAll(s)));
+  return {
+    recipes, books, book_editions, source_pages, scan_sessions, imports, recipe_versions, source_documents, rediscovery_prefs: [], cook_history: [], dish_recipe_links: [], recipe_translations: [], dishes: [], ingredients: [], library_activity: [],
+    recipesById: repo.indexBy(recipes), editionsById: repo.indexBy(book_editions), booksById: repo.indexBy(books), pagesById: repo.indexBy(source_pages),
+    versionsByRecipe: repo.groupBy(recipe_versions, 'recipe_id'), versionsById: repo.indexBy(recipe_versions), dishesById: new Map(), ingredientsById: new Map(), docsByRecipe: new Map(),
+    settings: { llm: { provider: 'none' }, units: 'original', reading_locale: 'original' },
+    sync: { user: session ? { id: 'u1', email: 'a@exemple.invalid' } : null, auth: { jeton: async () => session } },
+    editionLabel: () => 'Saisons', conventionFor: () => null,
+  };
+}
+// Attendre un FAIT, jamais un délai : true dès que la condition tient, sinon une erreur nommée au bout de 3 s.
+const attendre = async (cond, quoi) => { for (let i = 0; i < 300; i += 1) { if (await cond()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error('attente dépassée (3 s) : ' + quoi); };
+const tick = () => new Promise((r) => setTimeout(r, 0));
+// Une scène HORS ÉCRAN mais visible : le focus ne se pose pas dans un conteneur caché.
+const nouvelleScene = () => { const s = document.createElement('div'); s.style.cssText = 'position:absolute;left:-10000px;top:0;width:900px'; document.body.append(s); return s; };
+const boutonTexte = (racine, texte) => (racine ? [...racine.querySelectorAll('button')].find((b) => b.textContent === texte) || null : null);
+// Une fausse fetch qui HONORE le signal (rejet AbortError) et se résout à la main (a.rendre[i](statut, corps)) ou toute seule (a.auto : [statut, corps],
+// ou une fonction (appel) → [statut, corps], qui peut aussi lever pour simuler le réseau coupé).
+function fauxFetch(auto = null) {
+  const a = { appels: [], rendre: [], auto };
+  a.fetch = (url, options) => new Promise((resolve, reject) => {
+    const appel = { url, options }; a.appels.push(appel);
+    const abandon = () => reject(Object.assign(new Error('abandon'), { name: 'AbortError' }));
+    if (options?.signal?.aborted) { abandon(); return; }
+    options?.signal?.addEventListener('abort', abandon, { once: true });
+    const fin = (status, corps) => { options?.signal?.removeEventListener('abort', abandon); resolve(reponse(status, corps)); };
+    if (a.auto) { let d; try { d = typeof a.auto === 'function' ? a.auto(appel) : a.auto; } catch (e) { reject(e); return; } fin(d[0], d[1]); } else a.rendre.push(fin);
+  });
+  return a;
+}
+const imagesEnvoyees = (appel) => JSON.parse(appel.options.body).corps.messages[0].content.filter((c) => c.type === 'image').map((c) => c.source.data);
+// Les nœuds de la séance : une case par vignette (figure[data-page], C), le bouton « Classer » de la barre et la ligne sous lui, le lien « Regrouper ».
+const cocher = (racine, ids) => { for (const id of ids) racine.querySelector(`figure[data-page="${CSS.escape(id)}"] input[type="checkbox"]`).click(); };
+const cochees = (racine) => [...racine.querySelectorAll('figure[data-page] input[type="checkbox"]')].filter((c) => c.checked).map((c) => c.closest('figure').dataset.page);
+const classerBtn = (racine) => racine.querySelector('button[data-role="classer"]');
+const sousClasser = (racine) => classerBtn(racine)?.nextElementSibling ?? null;
+const lienRegrouper = (racine) => [...racine.querySelectorAll('a')].find((a) => a.textContent === 'Regrouper en recette') || null;
+const panneau = (racine) => racine.querySelector('[data-role="classement"]');
+const raisonPanneau = (racine) => panneau(racine)?.querySelector('[data-role="raison-classer"]')?.textContent ?? null;
 
 export async function runClassementTests({ eq, ok }) {
   resetClock();
@@ -358,6 +428,234 @@ export async function runClassementTests({ eq, ok }) {
       eq(C.blocsImports([A2, A1, A4, A3]), [{ type: 'ligne', ligne: A2 }, { type: 'lot', classementId: 'c1', lignes: [A3, A1] }, { type: 'lot', classementId: 'c2', lignes: [A4] }], 'T-D10 (M64) : blocsImports réunit les lignes d’un lot à la place de la plus récente (la première rencontrée), triées par rang ; les autres gardent leur place');
       const avecSeance = I.lignesImports({ ...ctxL([]), scan_sessions: [{ id: 'ss9', status: 'open', edition_id: 'ed1', page_ids: ['p1'], device_id: 'dev1', started_at: NOW, updated_at: NOW }] }, opts);
       eq(avecSeance.map((l) => [l.kind, nul(l.lot)]), [['seance', 'null']], 'T-D10 (MR-seance-sans-lot, ronde 1) : une ligne de SÉANCE porte lot: null (lu par son type, jamais par un tableau de null)');
+    });
+
+    // =================================================================================================================================
+    // Tâche 2 — le panneau « Classement » de la séance (§ 4.2) : T-D11 bouton, T-D12 classement, T-D9 (écran), T-D10 (écran). Montage par la route
+    // (renderImport à quatre paramètres, D-D13) ou par le panneau seul ; fetch, confirmer, navigate et toast injectés ; aucune scène partagée.
+    const G = await import('../src/ui/regroupement.js');
+    const UI = await import('../src/ui/import-cible.js');
+    const IM = await import('../src/ui/import.js');
+    const AD = await import('../src/ui/add.js');
+    const navs = [], dits = [], confirmations = [];
+    let reponseConfirmer = true;
+    const deps = (repo, over = {}) => ({ repo, toast: (m) => dits.push(m), navigate: (p) => navs.push(p), confirmer: async (message, o) => { confirmations.push([message, o?.okLabel ?? null]); return reponseConfirmer; }, maintenant: () => NOW, ...over });
+    const scene = nouvelleScene();
+    const monterSeance = async (repo, db, { query = { session: 'ss1' }, over = {}, session = SESSION } = {}) => { const racine = await IM.renderImport({}, query, await ctxDe(repo, db, { session }), deps(repo, over)); scene.append(racine); return racine; };
+    // Chaque bloc part d'une scène vide, d'une base jetable, de journaux vides, sans vol ni lot tenus, en ligne ; une fetch GLOBALE qui lève attrape tout appel
+    // non injecté (les écrans de D reçoivent toujours `fetch`).
+    const ecran = (nom, fn) => run('écran — ' + nom, () => withRepo(async (repo, db) => {
+      scene.replaceChildren(); navs.length = 0; dits.length = 0; confirmations.length = 0; reponseConfirmer = true;
+      const vraiFetch = globalThis.fetch;
+      globalThis.fetch = async (u) => { throw new Error('aucun reseau attendu : ' + u); };
+      try { await fn(repo, db); }
+      finally { UI.reinitialiserImportCible(); G.reinitialiserLot(); globalThis.fetch = vraiFetch; window.dispatchEvent(new Event('online')); }
+    }));
+
+    await ecran('T-D11 bouton : une, deux et onze photos cochées', async (repo, db) => {
+      const ONZE = Array.from({ length: 11 }, (_, i) => 'p' + (i + 1));
+      await poserSeance(repo, db, { pages: ONZE, octets: false });
+      let lectures = 0; const ff = fauxFetch();
+      const espion = { ...repo, getFile: async (sha) => { lectures += 1; return repo.getFile(sha); } };
+      const racine = await monterSeance(repo, db, { over: { repo: espion, fetch: ff.fetch } });
+      cocher(racine, ['p1']);
+      eq([classerBtn(racine), lienRegrouper(racine)?.className], [null, 'btn primary'], 'T-D11 (M65) : une photo cochée → aucun bouton « Classer » ; « Regrouper en recette » reste le primaire');
+      cocher(racine, ['p2']);
+      await attendre(() => classerBtn(racine) && !classerBtn(racine).disabled, 'session lue, bouton allumé');
+      eq([classerBtn(racine).className, classerBtn(racine).textContent, sousClasser(racine)?.textContent, lienRegrouper(racine)?.className], ['btn primary', 'Classer ces photos avec l’assistant', 'Un classement = un appel à l’assistant ; lire les recettes coûtera ensuite un appel par recette.', 'btn'], 'T-D11 (M122) : deux cochées → « Classer… » primaire et le coût dit sous lui ; « Regrouper en recette » passe secondaire');
+      cocher(racine, ONZE.slice(2));
+      eq([classerBtn(racine).disabled, sousClasser(racine)?.textContent], [true, 'Classe au plus 10 photos à la fois : décoche-en 1.'], 'T-D11 : onze cochées → éteint, la raison dite');
+      // click() sur un bouton ÉTEINT ne déclenche rien (spécification HTML) : pour éprouver la garde de classer() elle-même (un rendu périmé, une
+      // course), le nœud est RALLUMÉ avant le clic ; l'assertion « éteint » ci-dessus éprouve l'affichage.
+      const b11 = classerBtn(racine); b11.disabled = false; b11.click();
+      // Un FAIT, jamais des ticks (R-D-10) : classer() finit TOUJOURS par synchroniser({ forcer: true }), qui redessine la barre (surChangement →
+      // drawActions : un bouton « Classer » NEUF). Au redessin, classer() est sorti — le code juste au compte, avant tout await ; le mutant M66 (borne
+      // des 10 retirée) après octetsPresents, donc après la lecture d'octets que l'espion compte. Deux ticks le laissaient vivre selon le calendrier.
+      await attendre(() => classerBtn(racine) !== b11, 'barre redessinée : classer() est sorti');
+      eq([lectures, ff.appels.length, await db.count('imports')], [0, 0, 0], 'T-D11 (M66, M125) : onze cochées, bouton rallumé → classer() s’arrête au compte : aucun octet lu par le panneau, aucun POST, aucune ligne — rien n’est décodé avant la borne');
+      window.dispatchEvent(new Event('offline'));
+      await attendre(() => sousClasser(racine)?.textContent === 'Tu es hors ligne.', 'raison hors ligne');
+      eq([classerBtn(racine).disabled, ff.appels.length], [true, 0], 'T-D11 (M124, ordre des raisons) : hors ligne ET plus de 10 → UNE ligne, la première raison (« Tu es hors ligne. »), 0 POST');
+    });
+
+    await ecran('T-D11 bouton : photo déjà en cours d’import, sans session, vol tenu', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [{ ...IMPORT_RCO, id: 'imp_p2', recipe_id: null, scan_session_id: 'ss1', page_ids: ['p2'] }] });
+      const ff = fauxFetch();
+      let racine = await monterSeance(repo, db, { over: { fetch: ff.fetch } });
+      cocher(racine, ['p1', 'p2']);
+      await attendre(() => sousClasser(racine)?.textContent === 'Décoche les photos déjà en cours d’import (1).', 'raison photos en cours');
+      eq(classerBtn(racine).disabled, true, 'T-D11 (M67) : une cochée tenue par un import ouvert de la séance → éteint + « Décoche les photos déjà en cours d’import (1). »');
+      scene.replaceChildren();
+      racine = await monterSeance(repo, db, { over: { fetch: ff.fetch }, session: null });
+      cocher(racine, ['p1', 'p3']);
+      await attendre(() => sousClasser(racine)?.dataset?.role === 'connexion-ia', 'carte Connecte-toi');
+      eq([classerBtn(racine).disabled, sousClasser(racine).textContent.startsWith('Connecte-toi pour utiliser l’assistant.'), ff.appels.length], [true, true, 0], 'T-D11 : sans session → la carte « Connecte-toi… », bouton éteint, 0 POST');
+      scene.replaceChildren();
+      const idx = await repo.ouvrirImport({ kind: 'index', edition_id: 'ed1', scan_session_id: 'ss_idx', page_ids: ['p5'] });
+      let lacher; const tenu = new Promise((r) => { lacher = r; });
+      const vol = UI.lancerVol(idx.id, async () => { await tenu; return { resultat: { photos: [], ecartees: { trop_longues: 0, adresse: 0 }, uncertain: [] }, texteBrut: '', modele: null }; }, { ctx: await ctxDe(repo, db), repo, fetch: ff.fetch });
+      await attendre(() => UI.volEnCours()?.importId === idx.id, 'vol d’index tenu');
+      racine = await monterSeance(repo, db, { over: { fetch: ff.fetch } });
+      cocher(racine, ['p1', 'p3']);
+      await attendre(() => sousClasser(racine)?.textContent === 'Une lecture est en cours : attends sa fin ou annule-la.', 'raison vol tenu');
+      eq(classerBtn(racine).disabled, true, 'T-D11 (M124) : un vol tenu par ce document (une lecture d’index suspendue) → éteint, et la raison est dite');
+      lacher(); await vol;
+    });
+
+    await ecran('T-D11 regrouperPermis', async (repo, db) => {
+      await poserSeance(repo, db, { pages: [...PAGES_5, 'p6'], octets: false, imports: [ligneClassement({ id: 'imp_rp' })] });
+      const ctx = await ctxDe(repo, db);
+      const p = G.panneauClassement(ctx.scan_sessions.find((s) => s.id === 'ss1'), ctx, () => [], deps(repo));
+      eq([p.regrouperPermis(['p6']), p.regrouperPermis(['p1']), p.regrouperPermis([])], [true, false, true], 'T-D11 (M123) : classement reçu sur p1..p5 — une sélection hors du classement garde « Regrouper en recette », une sélection qui le touche le retire');
+    });
+
+    await ecran('T-D12 classer : un POST, ordre de la séance, vol rendu par le bus, Annuler', async (repo, db) => {
+      await poserSeance(repo, db);
+      const autre = await repo.ouvrirImport({ kind: 'recette', recipe_id: 'rcS', edition_id: 'ed1', scan_session_id: 'ss_autre', page_ids: ['p4'] });
+      const ff = fauxFetch();
+      // classer() lit enLigne() dans son premier segment SYNCHRONE (avant tout await) : un appel par entrée qui passe le verrou d'instance.
+      let entrees = 0;
+      const racine = await monterSeance(repo, db, { over: { fetch: ff.fetch, enLigne: () => { entrees += 1; return true; } } });
+      cocher(racine, ['p5', 'p1', 'p3']);
+      await attendre(() => classerBtn(racine) && !classerBtn(racine).disabled, 'bouton allumé');
+      const b = classerBtn(racine); const avantClics = entrees; b.click(); b.click();
+      eq(entrees - avantClics, 1, 'T-D12 (M-classer) : double clic → classer() n’entre qu’UNE fois (le verrou d’instance est posé avant tout await)');
+      await attendre(() => ff.appels.length === 1, 'POST parti');
+      await tick(); await tick();
+      const corps = JSON.parse(ff.appels[0].options.body);
+      const attendues = await Promise.all(['p1', 'p3', 'p5'].map(async (id) => (await L.pagePourEnvoi((await db.get('files', (await db.get('source_pages', id)).sha256)).blob)).base64));
+      eq([ff.appels.length, corps.outil, corps.corps.max_tokens, imagesEnvoyees(ff.appels[0])], [1, 'extraction', 2000, attendues], 'T-D12 (M68) : UN POST (double clic compris), outil extraction, max_tokens 2000, les images de p1, p3, p5 dans l’ordre de la SÉANCE (jamais l’ordre de cochage 5, 1, 3)');
+      eq([(await db.getAll('imports')).filter((i) => i.kind === 'classement').length, dits], [1, []], 'T-D12 (M-classer) : UNE ligne de classement et aucun refus dit (sans le verrou, un second classer() ouvrait une seconde ligne, refusée vol_tenu)');
+      const id = (await db.getAll('imports')).find((i) => i.kind === 'classement').id;
+      await attendre(async () => (await db.get('imports', id)).appels === 1, 'appels à 1');
+      const enVol = await db.get('imports', id);
+      eq([enVol.status, enVol.appels, enVol.document_id_vol, enVol.page_ids, enVol.scan_session_id, enVol.recipe_id, enVol.edition_id], ['en_cours', 1, UI.DOCUMENT_ID, ['p1', 'p3', 'p5'], 'ss1', null, 'ed1'], 'T-D12 : la ligne kind classement est en_cours, appels 1 au départ du fetch, document_id_vol = DOCUMENT_ID, pages de la séance, édition de la séance');
+      await attendre(() => !!panneau(racine).querySelector('.status[role="status"]'), 'état 2 rendu par le bus');
+      const statut = panneau(racine).querySelector('.status[role="status"]');
+      eq([statut.textContent, statut.nextElementSibling?.classList.contains('row'), !!boutonTexte(statut.nextElementSibling, 'Annuler'), ff.appels.length, ff.rendre.length], ['Classement des photos par l’assistant…', true, true, 1, 1], 'T-D12 (M126, M69) : PENDANT le fetch suspendu (avant le retour de lancerVol), .status[role=status] puis une .row avec « Annuler » (R-VIS-8)');
+      eq(lienRegrouper(racine), null, 'T-D12 (M70) : « Regrouper en recette » est retiré pendant le vol pour une sélection classée');
+      eq(await UI.lancerExtraction(autre.id, { ctx: await ctxDe(repo, db), repo, fetch: ff.fetch }), { issue: 'refuse', raison: 'vol_tenu' }, 'T-D12 (I-D5) : pendant le classement, l’extraction d’une recette est refusée (un vol par document)');
+      boutonTexte(panneau(racine), 'Annuler').click();
+      await attendre(async () => (await db.get('imports', id)).status === 'echec' && !!panneau(racine).querySelector('[data-role="echec"]'), 'echec(annule) rendu');
+      const fin = await db.get('imports', id);
+      eq([ff.appels[0].options.signal.aborted, fin.erreur?.raison, panneau(racine).querySelector('[data-role="echec"] span')?.textContent, !!panneau(racine).querySelector('button[data-role="reclasser"]'), UI.volEnCours()], [true, 'annule', 'Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.', true, null], 'T-D12 : « Annuler » → signal levé, echec(annule), la phrase I-4, « Reclasser » offert, plus de vol');
+      await attendre(() => !!lienRegrouper(racine), '« Regrouper en recette » revenu');
+      ok(!!lienRegrouper(racine), 'T-D12 : sur un échec, « Regrouper en recette » revient dans la barre');
+    });
+
+    await ecran('T-D12 réponses : a_verifier avant le regroupement ; coupe, vide, 413', async (repo, db) => {
+      await poserSeance(repo, db);
+      let suivante = [200, corpsModele(CLASSEMENT_5)];
+      const ff = fauxFetch(() => suivante);
+      const racine = await monterSeance(repo, db, { over: { fetch: ff.fetch } });
+      const vus = []; const capture = db.onMutate;
+      db.onMutate = (m) => { const l = (m.puts.imports || []).find((i) => i.kind === 'classement'); if (l) vus.push([l.status, !!racine.querySelector('[data-role="regroupement"]')]); return capture ? capture(m) : {}; };
+      try {
+        cocher(racine, PAGES_5);
+        await attendre(() => classerBtn(racine) && !classerBtn(racine).disabled, 'bouton allumé');
+        classerBtn(racine).click();
+        await attendre(() => !!racine.querySelector('[data-role="regroupement"]'), 'écran de regroupement rendu');
+      } finally { db.onMutate = capture; }
+      eq(vus.find((v) => v[0] === 'a_verifier'), ['a_verifier', false], 'T-D12 (M71) : la ligne passe a_verifier (résultat écrit) AVANT que l’écran de regroupement soit rendu (I-3)');
+      boutonTexte(panneau(racine), 'Ignorer ce classement').click();
+      await attendre(() => panneau(racine).hidden && !!classerBtn(racine) && !classerBtn(racine).disabled, 'classement ignoré, « Classer » revenu');
+      suivante = [200, corpsModele(CLASSEMENT_5, { stop_reason: 'max_tokens' })];
+      classerBtn(racine).click();
+      await attendre(() => panneau(racine).querySelector('[data-role="echec"] span')?.textContent === 'Le classement a été coupé : classe moins de photos à la fois.', 'coupe dite');
+      suivante = [200, corpsModele({ groupes: [], orphelines: [1, 2, 3, 4, 5], uncertain: [] })];
+      await attendre(() => panneau(racine).querySelector('button[data-role="reclasser"]')?.disabled === false, 'Reclasser allumé');
+      panneau(racine).querySelector('button[data-role="reclasser"]').click();
+      await attendre(() => panneau(racine).querySelector('[data-role="echec"] span')?.textContent === 'Aucune recette reconnue sur ces photos.', 'vide dit');
+      suivante = [413, { erreur: 'trop_lourd' }];
+      await attendre(() => panneau(racine).querySelector('button[data-role="reclasser"]')?.disabled === false, 'Reclasser allumé');
+      panneau(racine).querySelector('button[data-role="reclasser"]').click();
+      await attendre(() => panneau(racine).querySelector('[data-role="echec"] span')?.textContent === 'La demande est trop lourde : choisis moins de pages.', '413 dit');
+      eq([ff.appels.length, confirmations.map((c) => c[1])], [4, ['Ignorer']], 'T-D12 : coupe, vide et 413 disent leur texte (texteEchecClassement) ; quatre POST ; « Ignorer ce classement » d’un classement reçu est confirmé, « Reclasser » d’un échec ne l’est pas');
+    });
+
+    await ecran('T-D12 reprise par ?import=, résultat hostile, Ignorer', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_ok' })] });
+      await poserSeance(repo, db, { id: 'ss2', imports: [ligneClassement({ id: 'imp_hostile', sessionId: 'ss2', over: { resultat: { groupes: 'x' }, brouillon: { cle: DATE } } })] });
+      const ff = fauxFetch();
+      const racine = await monterSeance(repo, db, { query: { session: 'ss1', import: 'imp_ok' }, over: { fetch: ff.fetch } });
+      await attendre(() => !!racine.querySelector('[data-role="regroupement"]'), 'regroupement rendu');
+      eq([ff.appels.length, cochees(racine), racine.querySelector('[data-role="regroupement"] h2')?.textContent], [0, [], 'Recettes trouvées'], 'T-D12 (M72) : reprise par ?import= d’une ligne a_verifier → l’écran de regroupement, 0 POST, rien de coché d’office');
+      scene.replaceChildren();
+      const r2 = await monterSeance(repo, db, { query: { session: 'ss2', import: 'imp_hostile' }, over: { fetch: ff.fetch } });
+      await attendre(async () => (await db.get('imports', 'imp_hostile')).status === 'echec' && !!panneau(r2).querySelector('[data-role="echec"]'), 'echec(illisible)');
+      const h = await db.get('imports', 'imp_hostile');
+      eq([h.erreur?.raison, h.resultat, h.brouillon, panneau(r2).querySelector('[data-role="echec"] span')?.textContent, panneau(r2).querySelector('[data-role="echec"] small')?.textContent, ff.appels.length], ['illisible', null, null, 'L’assistant n’a pas répondu lisiblement. Réessaie.', 'Code : illisible', 0], 'T-D12 (M73) : un résultat hostile en base → echec(illisible) au montage, résultat ET brouillon effacés, « Code : illisible », aucun appel');
+      scene.replaceChildren();
+      const r3 = await monterSeance(repo, db, { query: { session: 'ss1', import: 'imp_ok' }, over: { fetch: ff.fetch } });
+      await attendre(() => !!boutonTexte(panneau(r3), 'Ignorer ce classement'), 'Ignorer offert');
+      cocher(r3, ['p1']);
+      eq(lienRegrouper(r3), null, 'T-D12 : une sélection qui touche le classement reçu → pas de « Regrouper en recette »');
+      reponseConfirmer = false;
+      const avant = await db.get('imports', 'imp_ok');
+      boutonTexte(panneau(r3), 'Ignorer ce classement').click();
+      await attendre(() => confirmations.length === 1, 'confirmation demandée'); await tick(); await tick();
+      eq([confirmations[0], await db.get('imports', 'imp_ok')], [['Ignorer ce classement ? Il a coûté un appel ; le refaire en coûtera un autre.', 'Ignorer'], avant], 'T-D12 (M127) : « Ignorer ce classement » répondu NON → 0 écriture');
+      reponseConfirmer = true;
+      boutonTexte(panneau(r3), 'Ignorer ce classement').click();
+      await attendre(async () => (await db.get('imports', 'imp_ok')).status === 'ignore' && panneau(r3).hidden && !!lienRegrouper(r3), 'ignoré, panneau caché, Regrouper revenu');
+      const ig = await db.get('imports', 'imp_ok');
+      eq([ig.status, typeof ig.finished_at, ig.brouillon, panneau(r3).hidden, !!lienRegrouper(r3)], ['ignore', 'string', null, true, true], 'T-D12 (M74) : « Ignorer ce classement » confirmé → ignore avec finished_at, brouillon nul, panneau caché, « Regrouper en recette » revenu');
+    });
+
+    await ecran('T-D12 liste blanche de l’extraction et option attendus', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_s', status: 'a_lancer' }), { ...ligneClassement({ id: 'imp_cov', status: 'a_lancer' }), kind: 'couverture' }] });
+      const ff = fauxFetch([200, corpsModele({ title: 'Soupe', ingredients: [{ source_text: '1 courge', uncertain: false }], steps: [{ text: 'Cuire.' }] })]);
+      const ctx = await ctxDe(repo, db);
+      const vus = []; const capture = db.onMutate;
+      db.onMutate = (m) => { vus.push(Object.keys(m.puts)); return capture ? capture(m) : {}; };
+      let rs;
+      try { rs = [await UI.lancerExtraction('imp_s', { ctx, repo, fetch: ff.fetch }), await UI.lancerExtraction('imp_cov', { ctx, repo, fetch: ff.fetch })]; }
+      finally { db.onMutate = capture; }
+      eq([rs, vus.length, ff.appels.length, (await db.get('imports', 'imp_s')).status, (await db.get('imports', 'imp_cov')).status], [[{ issue: 'refuse', raison: 'sorte' }, { issue: 'refuse', raison: 'sorte' }], 0, 0, 'a_lancer', 'a_lancer'], 'T-D12 (M75, M128) : lancerExtraction sur une ligne de classement, puis de couverture → refuse(sorte), 0 écriture, 0 POST (liste BLANCHE : une sorte inconnue n’est jamais lue comme une recette)');
+      eq(UI.SORTES_EXTRACTION, ['recette', 'index'], 'T-D12 : SORTES_EXTRACTION (C lit encore les index par lancerExtraction : écart E-3)');
+      const echouee = await repo.ouvrirImport({ kind: 'recette', recipe_id: 'rcS', edition_id: 'ed1', scan_session_id: 'ss1', page_ids: ['p1'] });
+      await db.put('imports', { ...(await db.get('imports', echouee.id)), status: 'echec', erreur: { raison: 'serveur', extra: {} } });
+      eq([await UI.lancerExtraction(echouee.id, { ctx, repo, fetch: ff.fetch, attendus: ['a_lancer'] }), ff.appels.length, (await db.get('imports', echouee.id)).status], [{ issue: 'refuse', raison: 'transition', statut: 'echec' }, 0, 'echec'], 'T-D12 (M143b) : avec attendus [a_lancer], une ligne echec est refusée (transition) AVANT toute écriture et tout POST');
+      eq([(await UI.lancerExtraction(echouee.id, { ctx, repo, fetch: ff.fetch })).issue, ff.appels.length], ['a_verifier', 1], 'T-D12 : sans l’option, une ligne echec part (lot A inchangé)');
+    });
+
+    await ecran('T-D12 état 4 : « Reclasser » éteint par un autre import de la séance, jamais par sa propre ligne', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_e4', status: 'echec', page_ids: ['p1', 'p3', 'p5'], over: { erreur: { raison: 'coupe', extra: {} } } }), { ...IMPORT_RCO, id: 'imp_p3', recipe_id: null, scan_session_id: 'ss1', page_ids: ['p3'] }] });
+      const racine = await monterSeance(repo, db, { query: { session: 'ss1', import: 'imp_e4' }, over: { fetch: fauxFetch().fetch } });
+      await attendre(() => raisonPanneau(racine) === 'Décoche les photos déjà en cours d’import (1).', 'raison dite');
+      eq([panneau(racine).querySelector('button[data-role="reclasser"]').disabled, cochees(racine)], [true, ['p1', 'p3', 'p5']], 'T-D12 (M118 à l’écran) : reprise d’un échec → ses pages cochées ; une cochée tenue par un AUTRE import ouvert éteint « Reclasser » et le dit');
+      await db.put('imports', { ...(await db.get('imports', 'imp_p3')), status: 'ignore' });
+      scene.replaceChildren();
+      const r2 = await monterSeance(repo, db, { query: { session: 'ss1', import: 'imp_e4' }, over: { fetch: fauxFetch().fetch } });
+      await attendre(() => raisonPanneau(r2) === 'Un classement = un appel à l’assistant ; lire les recettes coûtera ensuite un appel par recette.', 'coût dit');
+      eq(panneau(r2).querySelector('button[data-role="reclasser"]').disabled, false, 'T-D12 (M118) : la ligne de classement elle-même ne s’éteint pas (pagesEnCours, sauf: ligne.id)');
+    });
+
+    await ecran('T-D9 priorité des présélections (écran)', async (repo, db) => {
+      const idx = { ...ligneClassement({ id: 'imp_idx', page_ids: ['p2'], over: { updated_at: NOW } }), kind: 'index', resultat: { photos: [{ page_id: 'p2', printed_page_range: null, entries: [{ title: 'Soupe', printed_page: 5, section: null, uncertain: false }] }], ecartees: { trop_longues: 0, adresse: 0 }, uncertain: [] } };
+      await poserSeance(repo, db, { imports: [idx, ligneClassement({ id: 'imp_c9', status: 'echec', page_ids: ['p1', 'p3'], over: { erreur: { raison: 'coupe', extra: {} } } })] });
+      const racine = await monterSeance(repo, db, { query: { session: 'ss1', import: 'imp_c9' }, over: { fetch: fauxFetch().fetch } });
+      eq([cochees(racine), racine.querySelector('[data-role="panneau-index"]')?.hidden], [['p1', 'p3'], true], 'T-D9 (M119) : ?import= d’un classement en échec d’une séance qui a aussi un index ouvert → les pages du classement cochées, celles de l’index non, panneau d’index fermé');
+    });
+
+    await ecran('T-D10 Imports : titres et états du classement (écran)', async (repo, db) => {
+      const maintenantReel = new Date().toISOString();
+      await poserSeance(repo, db, { imports: [
+        ligneClassement({ id: 'c_lancer', status: 'a_lancer', page_ids: ['p1', 'p2'] }),
+        ligneClassement({ id: 'c_vol', status: 'en_cours', over: { document_id_vol: 'doc-ailleurs', started_at: maintenantReel, battement_at: maintenantReel } }),
+        ligneClassement({ id: 'c_recu', over: { started_at: '2026-10-18T09:30:00.000Z', updated_at: NOW } }),
+        ligneClassement({ id: 'c_echec', status: 'echec', over: { erreur: { raison: 'coupe', extra: {} } } }),
+      ] });
+      const racine = await AD.renderAdd({}, {}, await ctxDe(repo, db), { repo, navigate: (p) => navs.push(p), toast: (m) => dits.push(m), fetch: fauxFetch().fetch, maintenant: () => NOW });
+      scene.append(racine);
+      const ligneEl = (id) => racine.querySelector(`[data-role="ligne-import"][data-id="${CSS.escape(id)}"]`);
+      eq(['c_lancer', 'c_vol', 'c_recu', 'c_echec'].map((id) => ligneEl(id)?.querySelector('strong')?.textContent), Array(4).fill('Classement · Saisons'), 'T-D10 (écran) : « Classement · {livre} »');
+      eq([ligneEl('c_lancer').textContent.includes('2 photos ajoutées'), ligneEl('c_vol').textContent.includes('En cours sur un autre écran'), ligneEl('c_recu').textContent.includes('Classement reçu le'), ligneEl('c_echec').textContent.includes('Le classement a été coupé : classe moins de photos à la fois.')], [true, true, true, true], 'T-D10 (écran) : les états dits du classement (à lancer, ailleurs, reçu, échec)');
+      const { formatDate } = await import('../src/core/dom.js');
+      eq([ligneEl('c_recu').textContent.includes(formatDate('2026-10-18T09:30:00.900Z', { withTime: true })), ligneEl('c_recu').textContent.includes(formatDate(NOW, { withTime: true }))], [true, false], 'T-D10 (écran, M-recu) : « Classement reçu le » date la RÉCEPTION (départ du vol + durée, dateReception), jamais updated_at — que chaque geste du brouillon réécrit');
+      eq([...ligneEl('c_echec').querySelectorAll('button')].map((b) => b.textContent), ['Reprendre', 'Ignorer'], 'T-D10 (M62, écran) : jamais « Relancer » sur un classement');
+      boutonTexte(ligneEl('c_echec'), 'Reprendre').click();
+      eq(navs.at(-1), '/import?session=ss1&import=c_echec', 'T-D10 (écran) : « Reprendre » → la séance du classement');
     });
 
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne

@@ -14,6 +14,7 @@ import { lignesImports, dateReception } from '../domain/import-cible.js';
 import { pageHeader, carte, libelleLivre, field, select } from './components.js';
 import { startScanSession } from './import.js';
 import { DOCUMENT_ID, lancerExtraction, annulerVol, phraseEchec, texteRefus, cleLecture } from './import-cible.js';
+import { texteEchecClassement } from './regroupement.js';
 import { lancerLecture, annulerLecture, texteEchecLecture } from './import-web.js';
 import { texteEchecIndex } from './table-matieres.js';
 
@@ -81,6 +82,7 @@ const ATTENDUS_IGNORER = ['a_lancer', 'a_verifier', 'echec']; // « Ignorer » n
 const ageTexte = (age) => (age?.unite === 'j' ? t('il y a {n} j', { n: age.n }) : age?.unite === 'h' ? t('il y a {n} h', { n: age.n }) : t('il y a {n} min', { n: age?.n ?? 0 }));
 function titreLigne(l) {
   const livre = l.titre.livre ?? t('Sans livre');
+  if (l.titre.type === 'classement') return t('Classement · {l}', { l: livre }); // lot D
   if (l.titre.type === 'seance') return t('Photos conservées : {n} page(s)', { n: l.pages }) + (l.titre.livre ? ` · ${l.titre.livre}` : '');
   if (l.titre.type === 'index') return t('Index · {l}', { l: livre });
   if (l.titre.type === 'regrouper') return t('Recette à regrouper · {l}', { l: livre });
@@ -92,6 +94,13 @@ function titreLigne(l) {
 // porte pas). I-4 : interrompu, annule et incertain disent la même phrase (phraseEchec, une définition avec l'écran ciblé, l'éditeur et le panneau).
 function etatLigne(l, brute) {
   if (l.kind === 'seance') return null;
+  if (l.kind === 'classement') { // lot D (§ 4.7) : les états d'un classement
+    if (l.etat === 'a_lancer') return l.pages <= 1 ? t('{n} photo ajoutée', { n: l.pages }) : t('{n} photos ajoutées', { n: l.pages });
+    if (l.etat === 'en_cours') return l.ailleurs ? t('En cours sur un autre écran') : t('Classement des photos par l’assistant…');
+    if (l.etat === 'a_verifier') return t('Classement reçu le {d}', { d: formatDate(dateReception(brute), { withTime: true }) }); // comme « Lecture reçue le » (vague finale du lot A, m7) : jamais updated_at, que chaque geste du brouillon réécrit
+    if (l.etat === 'echec') { const { texte, code } = texteEchecClassement(brute?.erreur ?? { raison: l.raison }); return code ? `${texte} ${code}` : texte; }
+    return null;
+  }
   if (l.kind === 'web') { // lot B : ni photos ni pages ; l'échec dit le texte de l'écran de lecture (texteEchecLecture, une définition, I-B6)
     if (l.etat === 'a_lancer') return t('L’app n’a pas encore lu la page.');
     if (l.etat === 'en_cours') return l.ailleurs ? t('En cours sur un autre écran') : t('Lecture de la page par l’assistant…');

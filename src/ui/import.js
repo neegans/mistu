@@ -19,6 +19,7 @@ import { pageHeader, section, emptyState, select, field, carteConnexion, pdfFram
 import { demarrerConnexion } from './settings.js';
 import { lancerVol, annulerVol, volEnCours, estEnLigne, texteRefus, relireDuJournal, cleLecture, ecouterVol, BATTEMENT_MS } from './import-cible.js';
 import { panneauLecture, texteEchecIndex, ligneEtatLecture, ligneIncertain, texteQuota } from './table-matieres.js';
+import { panneauClassement } from './regroupement.js';
 
 const INTENTIONS = ['index', 'recette'];
 // L'intention (spec § 10) voyage dans l'adresse, pas dans la base : consommée au premier rendu, puis retirée.
@@ -86,11 +87,19 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   // identifiant sans vignette). Seules la présélection et l'importId du panneau suivent la ligne DÉSIGNÉE : une lecture close, d'une autre sorte ou d'une
   // autre séance n'est ni cochée ni relue ; la visibilité du panneau, elle, suit TOUTE ligne d'index ouverte de la séance (M67). Une intention a posé sa
   // sélection : elle gagne (garde équivalente tant que l'intention coche toutes les pages résolues, ronde 1).
-  const ligneIndex = ligneOuverteDeSeance(ctx.imports, session.id, { importId: query.import ?? null });
+  // Lot D (§ 4.1) : un ?import= qui désigne un classement OUVERT de cette séance l'emporte — ses pages présentes sont cochées sur a_lancer ou echec (rien
+  // d'office sur a_verifier : l'écran de regroupement se rend), et le panneau d'index reste fermé (le repli de ligneOuverteDeSeance sur l'index le plus
+  // récent ne vaut que pour un ?import= absent ou d'index). Sans ?import=, le classement ouvert le plus récent de la séance est montré aussi.
+  const ligneClassement = ligneOuverteDeSeance(ctx.imports, session.id, { importId: query.import ?? null, kind: 'classement' });
+  const classementDesigne = query.import && ligneClassement?.id === query.import ? ligneClassement : null;
+  const ligneIndex = classementDesigne ? null : ligneOuverteDeSeance(ctx.imports, session.id, { importId: query.import ?? null });
   const ligneImport = query.import && ligneIndex?.id === query.import ? ligneIndex : null;
   const selected = new Set(applique.selection);
   if (!applique.consommee && ligneImport) {
     for (const id of Array.isArray(ligneImport.page_ids) ? ligneImport.page_ids : []) if (pages.some((p) => p.id === id)) selected.add(id);
+  }
+  if (!applique.consommee && classementDesigne && ['a_lancer', 'echec'].includes(classementDesigne.status)) {
+    for (const id of Array.isArray(classementDesigne.page_ids) ? classementDesigne.page_ids : []) if (pages.some((p) => p.id === id)) selected.add(id);
   }
   const edition = session.edition_id ? ctx.editionsById.get(session.edition_id) : null;
   const root = el('div', null);
@@ -137,15 +146,23 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
     actions.append(el('span', { class: 'muted' }, n ? t('{n} page(s) sélectionnée(s)', { n }) : t('Sélectionne des pages pour les regrouper.')));
     if (n) {
       const ids = [...selected].join(',');
-      actions.append(
-        el('a', { class: 'btn primary', href: `#/recipes/new${buildQuery({ pages: ids, edition: session.edition_id || '', session: session.id })}` }, t('Regrouper en recette')),
+      actions.append(...[
+        ...panneau.actionsSelection(),
+        panneau.regrouperPermis([...selected]) ? el('a', { class: n >= 2 ? 'btn' : 'btn primary', href: `#/recipes/new${buildQuery({ pages: ids, edition: session.edition_id || '', session: session.id })}` }, t('Regrouper en recette')) : null,
         el('button', { class: 'btn', onClick: () => { indexPanel.hidden = false; indexPanel.scrollIntoView({ behavior: 'smooth' }); } }, t('Index / table des matières')),
         n === 1 ? el('button', { class: 'btn', onClick: () => replacePage([...selected][0]) }, t('Remplacer cette page')) : null,
-        el('button', { class: 'btn danger', onClick: () => removePages([...selected]) }, t('Retirer')));
+        el('button', { class: 'btn danger', onClick: () => removePages([...selected]) }, t('Retirer')),
+      ].filter(Boolean));
     }
   };
   // Lot G (§ 4.3) : chaque miniature par vignettePage (image, ou l'état et son geste) ; « Télécharger les {n} pages » au-dessus, à partir de deux.
   const vignettes = await vignettesDePages(pages, ctxF, { alt: (p) => `${t('Page')} ${p.position}` });
+  // Lot D (§ 4.2) : le panneau « Classement » (sous les miniatures, avant le panneau d'index) ; ses actions de sélection (« Classer ces photos avec
+  // l’assistant ») se placent dans la barre AVANT « Regrouper en recette », qui n'est rendu que si la sélection ne touche pas un classement en vol ou reçu
+  // (secondaire dès deux cochées, D-D2) ; chaque redessin du panneau redessine la barre.
+  // Créé APRÈS le dernier await du rendu (vignettesDePages, lot G) : comme l'abonné de la phrase de séance (lot G, ronde 1), il n'est monté qu'au
+  // tour qui suit la fin du rendu — créé avant, il se désabonnerait du bus sans avoir été monté ; drawActions ne le lit qu'après.
+  const panneau = panneauClassement(session, ctx, () => [...selected], { ...deps, importId: ligneClassement?.id ?? null, surChangement: () => drawActions() });
   for (const p of pages) {
     const check = el('input', { type: 'checkbox', checked: selected.has(p.id), onChange: (e) => { if (e.target.checked) selected.add(p.id); else selected.delete(p.id); drawActions(); } });
     const pageInput = el('input', { type: 'number', placeholder: t('p. imprimée'), value: p.printed_page ?? '', style: { minHeight: '30px', padding: '.2rem .4rem', fontSize: '.8rem' }, onChange: async (e) => { p.printed_page = e.target.value ? parseInt(e.target.value, 10) : null; await repo.save('source_pages', p); } });
@@ -155,7 +172,7 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   }
   const groupe = boutonTelechargerPages(vignettes.distantes, { connecte: ctxF.connecte, telecharger: vignettes.telecharger });
   if (groupe) root.append(groupe); // jamais root.append(null) : le DOM natif écrirait le nœud texte « null »
-  root.append(thumbs, actions);
+  root.append(thumbs, actions, panneau);
   drawActions();
 
   // Fichiers PDF / EPUB

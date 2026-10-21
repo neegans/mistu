@@ -626,4 +626,22 @@ export const EN = {
   "Section": "Section",
   // Lot C, tâche 5 : la section d’une référence sur sa fiche (D-C6).
   "Section : {s}": "Section: {s}",
+  // Lot D, tâche 2 : classer les photos d'une séance (panneau « Classement », section « Imports »).
+  "Classer ces photos avec l’assistant": "Sort these photos with the assistant",
+  "Un classement = un appel à l’assistant ; lire les recettes coûtera ensuite un appel par recette.": "One sorting = one call to the assistant; reading the recipes will then cost one call per recipe.",
+  "Classe au plus 10 photos à la fois : décoche-en {k}.": "Sort at most 10 photos at a time: uncheck {k}.",
+  "Décoche les photos déjà en cours d’import ({k}).": "Uncheck the photos already being imported ({k}).",
+  "Une lecture est en cours : attends sa fin ou annule-la.": "A reading is in progress: wait for it to finish or cancel it.",
+  "Classement des photos par l’assistant…": "The assistant is sorting the photos…",
+  "Reclasser": "Sort again",
+  "Reclasser remplace ce classement et tes changements de groupes, et coûte un appel. Continuer ?": "Sorting again replaces this sorting and your group changes, and costs one call. Continue?",
+  "Ignorer ce classement": "Ignore this sorting",
+  "Ignorer ce classement ? Il a coûté un appel ; le refaire en coûtera un autre.": "Ignore this sorting? It cost one call; doing it again will cost another.",
+  "Le classement a été coupé : classe moins de photos à la fois.": "The sorting was cut off: sort fewer photos at a time.",
+  "Aucune recette reconnue sur ces photos.": "No recipe was recognized on these photos.",
+  "Classement reçu le {d}": "Sorting received on {d}",
+  "Classement · {l}": "Sorting · {l}",
+  "Recettes trouvées": "Recipes found",
+  "1 recette proposée par l’assistant — vérifie le groupe avant de lire.": "1 recipe suggested by the assistant — check the group before reading.",
+  "{n} recettes proposées par l’assistant — vérifie les groupes avant de lire.": "{n} recipes suggested by the assistant — check the groups before reading.",
 };
