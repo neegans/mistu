@@ -96,6 +96,14 @@ export async function runClassementTests({ eq, ok }) {
       const r18 = V({ ...CLASSEMENT_5, x: 1, groupes: [{ ...CLASSEMENT_5.groupes[0], y: 2 }] });
       eq([Object.keys(r18), Object.keys(r18.groupes[0])], [['groupes', 'orphelines', 'non_classees', 'partagees', 'uncertain'], ['photos', 'title', 'printed_page', 'uncertain']], 'T-D1 (M18) : une clé inconnue est absente du rendu, à la racine comme dans un groupe, et aucune clé de travail (tete) ne fuit d’un groupe (objets construits champ par champ)');
       eq([raison(() => V({ groupes: [g([1])], orphelines: 'x' })), raison(() => V({ groupes: [g([1])], orphelines: ['1'] })), raison(() => V({ groupes: [g([1])], orphelines: [9] }))], [['ErreurExtraction', 'illisible'], ['ErreurExtraction', 'illisible'], ['ErreurExtraction', 'hors_bornes']], 'T-D1 : orphelines non tableau → illisible ; un élément non entier → illisible ; hors 1..N → hors_bornes');
+      // Ronde 1 de la tâche 1 (revue à trois lentilles) : les règles de § 3.5 que la première écriture n'épinglait pas.
+      const coupee = (sep) => V({ groupes: [g([1], 'Voir evil' + sep + '.com/promo'), g([2], 'B')], uncertain: ['Voir evil' + sep + '.com/promo', 'ok'] });
+      eq(['\n', '\u{2028}'].map((sep) => { const r = coupee(sep); return [nul(r.groupes[0].title), r.groupes[0].uncertain, r.groupes[1], r.uncertain]; }), Array(2).fill(['null', true, { photos: [2], title: 'B', printed_page: null, uncertain: false }, ['ok']]), 'T-D1 (M-recolle, ronde 1) : une adresse COUPÉE par une fin de ligne (saut de ligne, U+2028) est cherchée aussi sur la forme recollée, comme porteAdresse du lot C — le titre devient null et le groupe incertain, l’incertitude racine est écartée ; le reste gardé');
+      eq(raison(() => V({ groupes: [g([1])], orphelines: [4, 4] })), ['ErreurExtraction', 'hors_bornes'], 'T-D1 (M-d, ronde 1) : la même photo deux fois dans orphelines → hors_bornes (jamais un résultat que la revalidation rejetterait au remontage)');
+      eq([1, 9999].map((p) => V({ groupes: [g([1], 'A', { printed_page: p })] }).groupes[0].printed_page), [1, 9999], 'T-D1 (M-b, M-c, ronde 1) : printed_page 1 et 9999 gardées (bornes incluses)');
+      eq(V({ groupes: [g([3, 1]), g([1, 3])] }).partagees, [1, 3], 'T-D1 (M-e, ronde 1) : partagees en numéros croissants, même nommées dans l’ordre décroissant');
+      const blanc = V({ groupes: [g([1], '   ')], uncertain: 'x' });
+      eq([nul(blanc.groupes[0].title), blanc.groupes[0].uncertain, blanc.uncertain], ['null', false, []], 'T-D1 (M-w, M-hh, ronde 1) : un titre blanc → null SANS rendre le groupe incertain ; une racine uncertain qui n’est pas un tableau → []');
     });
 
     // T-D3 resultatClassement, revalidation, clé, prédicat partagé (§ 3.6, D-D11, D-D23)
@@ -125,6 +133,14 @@ export async function runClassementTests({ eq, ok }) {
       const ligne = { id: 'imp_c', started_at: DATE, resultat: R5, brouillon: null, updated_at: DATE };
       eq([C.cleClassement(ligne) === C.cleClassement({ ...ligne, brouillon: { cle: DATE }, updated_at: NOW }), C.cleClassement(ligne) === C.cleClassement({ ...ligne, started_at: NOW }), C.cleClassement(ligne) === C.cleClassement({ ...ligne, resultat: { ...R5, uncertain: ['x'] } })], [true, false, false], 'T-D3 (M109b) : la clé change avec started_at ou resultat, jamais avec le brouillon ni updated_at');
       eq(C.cleClassement(ligne), JSON.stringify(['imp_c', DATE, R5]), 'T-D3 : la clé = JSON.stringify([id, started_at, resultat]) (gabarit de cleLecture)');
+      // Ronde 1 : la racine uncertain, la forme tableau des quatre listes, la borne de 10 pages par groupe et la forme pliée des titres — toute violation
+      // → null ; la base `vide1` (valide) ne viole rien.
+      const vide1 = { groupes: [grp({})], orphelines: [], non_classees: [], partagees: [], uncertain: [] };
+      const sans = (k) => { const o = { ...vide1 }; delete o[k]; return o; };
+      const P11 = Array.from({ length: 11 }, (_, i) => 'q' + (i + 1));
+      const formes = [vide1, { ...vide1, uncertain: ['voir www.exemple.test/x'] }, { ...vide1, uncertain: ['x'.repeat(201)] }, { ...vide1, uncertain: ['photo\nfloue'] }, { ...vide1, uncertain: Array.from({ length: 41 }, (_, i) => 'doute ' + i) },
+        sans('orphelines'), { ...vide1, partagees: 'p1' }, { ...vide1, uncertain: 'x' }, { ...vide1, groupes: [grp({ title: 'Soupe  de courge' })] }];
+      eq([...formes.map((b) => nul(C.revaliderResultatClassement(b, ['p1']))), nul(C.revaliderResultatClassement({ ...vide1, groupes: [grp({ page_ids: P11 })] }, P11))], ['object', ...Array(9).fill('null')], 'T-D3 (M-f, M-f2, M-f3, M-n, M-gg, ronde 1) : une incertitude racine porteuse d’une adresse, de 201 points de code ou d’un saut de ligne, 41 incertitudes, orphelines absent, partagees ou uncertain non tableau, un titre non plié (double espace), un groupe de 11 pages → null');
     });
 
     // T-D4 regroupement et brouillon (§ 3.1.1, § 3.6, D-D20)
@@ -176,6 +192,19 @@ export async function runClassementTests({ eq, ok }) {
       eq([nul(C.restaurerBrouillon(onzeGroupes, ctx11)), C.restaurerBrouillon(dixGroupes, ctx11)?.etat.groupes.length ?? null], ['null', 10], 'T-D4 (M110) : 11 groupes → null ; 10 → acceptés (contexte de 11 pages)');
       const titreX = C.restaurerBrouillon({ ...BR, groupes: [{ cle: 'g1', page_ids: ['p1'], title: 'X', printed_page: 999, uncertain: true }, ...BR.groupes.slice(1)] }, ctxB);
       eq([titreX?.etat.groupes[0].title, titreX?.etat.groupes[0].printed_page, titreX?.etat.groupes[0].uncertain], ['Soupe de courge', 132, false], 'T-D4 (M111) : un brouillon qui porterait un titre, une page ou « incertain » n’apporte rien — tout se relit dans resultat');
+      // Ronde 1 : les pages non classées, « incertain » gardé, un choix sur un groupe vidé, la garde de n999, quatre formes hostiles de plus.
+      const RNC = { ...R5, groupes: [{ ...R5.groupes[0], uncertain: true }, ...R5.groupes.slice(1)], orphelines: [], non_classees: ['p4'] };
+      const ENC = C.regroupementInitial(RNC, PP);
+      eq([ENC.aPart, ENC.groupes.map((x) => x.uncertain)], [[{ page_id: 'p4', motif: 'non_classee' }], [true, false, false]], 'T-D4 (M-g, M-g2, M-h, ronde 1) : une page non classée est À PART (motif non_classee), jamais perdue ; un groupe incertain le reste');
+      const retourNC = C.restaurerBrouillon(JSON.parse(JSON.stringify(C.brouillonDe(ENC, new Map(), DATE))), { ...ctxB, resultat: RNC });
+      eq([retourNC?.etat, retourNC ? [...retourNC.choixFaits] : 'null'], [ENC, []], 'T-D4 (M-g, ronde 1) : brouillonDe puis restaurerBrouillon sur un résultat à page non classée rendent le même état');
+      const BRv = C.brouillonDe(C.deplacerVers(E0, 'p5', 'g1'), new Map([['g3', 'rcG'], ['g1', 'rcS']]), DATE); // g3 vidé, donc retiré
+      eq([BRv.choix, nul(C.restaurerBrouillon(JSON.parse(JSON.stringify(BRv)), ctxB))], [[['g1', 'rcS']], 'object'], 'T-D4 (M-i, ronde 1) : brouillonDe n’écrit que les choix des groupes PRÉSENTS — un choix sur un groupe vidé est omis, et le brouillon se restaure (jamais perdu au remontage)');
+      eq(C.deplacerVers({ ...E0, prochain: 1000 }, 'p3', 'nouveau'), { ...E0, prochain: 1000 }, 'T-D4 (M-o, ronde 1) : au-delà de n999, « nouveau » ne crée plus de groupe (n1000 ne se relirait pas) — état égal');
+      const hostiles2 = [['prochain 1001', { ...BR, prochain: 1001 }], ['deux groupes g1', { ...BR, groupes: [{ cle: 'g1', page_ids: ['p1'] }, { cle: 'g1', page_ids: ['p3', 'p2'] }, ...BR.groupes.slice(2)], choix: sansChoix('g2') }], ['deux choix pour g1', { ...BR, choix: [['g1', 'rcS'], ['g1', 'rcT']] }]];
+      eq(hostiles2.map(([nom, b]) => [nom, nul(C.restaurerBrouillon(b, ctxB))]), hostiles2.map(([nom]) => [nom, 'null']), 'T-D4 (M-p, M-q, M-r, ronde 1) : prochain 1001, deux groupes g1, deux choix pour g1 → null');
+      const oubli = C.restaurerBrouillon(JSON.parse(JSON.stringify(C.brouillonDe(E0, new Map([['g3', 'rcG'], ['g1', 'rcS']]), DATE))), { ...ctxB, pagesParId: new Map(['p1', 'p2', 'p3', 'p4'].map((id) => [id, { id }])) });
+      eq([oubli?.etat.groupes.map((x) => x.cle), oubli ? [...oubli.choixFaits] : 'null'], [['g1', 'g2'], [['g1', 'rcS']]], 'T-D4 (M-s, ronde 1) : les pages d’un groupe choisi absentes de l’appareil — le groupe est écarté et son choix OUBLIÉ');
     });
 
     // T-D5 appariement (§ 0 D-D5, § 3.6, B-1, F-2)
@@ -187,7 +216,7 @@ export async function runClassementTests({ eq, ok }) {
       eq(C.concordance({ title: 'Tarte fine aux poires', printed_page: 140 }, ref('x', 'Tarte aux poires', 141)), { titre: true, page: true, ecart: 1 }, 'T-D5 : « Tarte aux poires » ⊂ « Tarte fine aux poires », écart 1 → sûre');
       eq(C.concordance({ title: 'Tarte fine aux poires', printed_page: 140 }, ref('x', 'Tarte aux poires', 143)), { titre: true, page: false, ecart: 3 }, 'T-D5 (M39) : écart 3 → page fausse (± 2, jamais ± 3)');
       eq(C.concordance({ title: 'Tarte fine aux poires', printed_page: 140 }, ref('x', 'Poire rôtie au miel', 140)), { titre: false, page: true, ecart: 0 }, 'T-D5 (M40) : « Poire rôtie au miel » contre « Tarte fine aux poires » → titre faux (mots distinctifs, jamais l’égalité de chaînes)');
-      eq([C.concordance({ title: 'La Une', printed_page: 5 }, ref('x', 'La Une', 5)).titre, C.concordance({ title: null, printed_page: null }, ref('x', 'Soupe', null)).ecart], [false, null], 'T-D5 (M45) : une référence sans mot distinctif ne concorde jamais par le titre ; une page inconnue → écart null');
+      eq([C.concordance({ title: 'La Une', printed_page: 5 }, ref('x', 'La Une', 5)).titre, nul(C.concordance({ title: null, printed_page: null }, ref('x', 'Soupe', null)).ecart)], [false, 'null'], 'T-D5 (M45) : une référence sans mot distinctif ne concorde jamais par le titre ; une page inconnue → écart null');
       const G5 = C.regroupementInitial(R5, PP).groupes;
       eq([...C.proposerAppariements(G5, cand)], [['g1', { recipe_id: 'rcS', certitude: 'sure', motif: 'titre_et_page', cochee: true, ordre: ['rcS'] }], ['g2', { recipe_id: 'rcT', certitude: 'sure', motif: 'titre_et_page', cochee: true, ordre: ['rcT'] }], ['g3', { recipe_id: 'rcG', certitude: 'incertaine', motif: 'titre', cochee: false, ordre: ['rcG'] }]], 'T-D5 (M41) : g1 → rcS sûre cochée ; g2 → rcT sûre cochée (rcP, page seule, hors de la meilleure classe) ; g3 → rcG incertaine « titre », décochée');
       const un = (title, printed_page, cle = 'g1') => ({ cle, page_ids: ['p1'], title, printed_page, uncertain: false, origine: 'classement' });
@@ -200,6 +229,10 @@ export async function runClassementTests({ eq, ok }) {
       eq([...C.proposerAppariements(G5, [])].map(([, p]) => p.certitude), ['aucune', 'aucune', 'aucune'], 'T-D5 : sans édition (aucune candidate) → aucune partout');
       eq(C.proposerAppariements([{ cle: 'n1', page_ids: ['p1'], title: null, printed_page: null, uncertain: false, origine: 'personne' }], cand).get('n1'), { recipe_id: null, certitude: 'aucune', motif: null, cochee: false, ordre: [] }, 'T-D5 : un groupe de la personne (titre et page nuls) → aucune');
       eq([C.filtrerReferences(cand, 'courge').map((r) => r.id), C.filtrerReferences(cand, 'COURGE').map((r) => r.id), C.filtrerReferences(cand, '132').map((r) => r.id), C.filtrerReferences(cand, 'poire').map((r) => r.id), C.filtrerReferences(cand, '').map((r) => r.id)], [['rcS'], ['rcS'], ['rcS'], ['rcP', 'rcT'], ['rcX', 'rcS', 'rcP', 'rcT', 'rcG']], 'T-D5 (M46) : filtrerReferences — texte (casse et accents ignorés), chiffres → page égale ou titre qui les contient ; tri par page croissante');
+      // Ronde 1 : les deux clés du départage que T-D5 n'éprouvait pas (D-D5 ; § 12.0 de la rév. 4), et la borne de ± 2.
+      eq(C.proposerAppariements([un('Tarte aux poires', 140)], [ref('rA', 'Tarte aux poires', null), ref('rB', 'Tarte aux poires', 150)]).get('g1').ordre, ['rB', 'rA'], 'T-D5 (MR-ordre-inconnu-premier, ronde 1) : une classe qui mêle un écart connu (10) et un écart inconnu (page nulle) → l’inconnu en DERNIER');
+      eq(C.proposerAppariements([un('Tarte fine aux poires', 140)], [ref('rL', 'Tarte aux poires', 139), ref('rM', 'Tarte fine aux poires', 141)]).get('g1').ordre, ['rM', 'rL'], 'T-D5 (MR-ordre-sans-mots, M-nn, ronde 1) : deux sûres de même écart → le titre de référence le plus long en mots distinctifs d’abord (« tarte fine poires » avant « tarte poires »), avant la page');
+      eq([C.PROCHE_PAGE, C.concordance({ title: 'Tarte aux poires', printed_page: 140 }, ref('x', 'Tarte aux poires', 142))], [2, { titre: true, page: true, ecart: 2 }], 'T-D5 (M-j, CTRL-1, ronde 1) : PROCHE_PAGE = 2, et un écart de 2 exactement est « page » (± 2 inclus)');
     });
 
     // T-D6 lecturesDuLot et la fabrique (§ 3.3, § 3.4, D-D12)
@@ -224,6 +257,10 @@ export async function runClassementTests({ eq, ok }) {
       eq([e?.name, e?.champ, e?.valeur], ['ErreurVocabulaire', 'kind', 'cover'], 'T-D6 (M49) : ligneImportNeuve d’une sorte hors liste lève (par comportement)');
       const sansCommentaires = (s) => s.replace(/\/\/.*$/gm, '');
       ok(/ligneImportNeuve\(/.test(sansCommentaires(await lire('../src/domain/classement.js'))), 'T-D6 (M49b, test de source faible, admis) : src/domain/classement.js appelle ligneImportNeuve( hors commentaire');
+      // Ronde 1 : deviceId OUBLIÉ (comme fabriquerImportWeb du lot B) ; page_ids copiés par la fabrique.
+      eq([raison(() => C.lecturesDuLot(E0, choix, { classement, editionId: 'ed1', sessionId: 'ss1', newId, pagesParId: PP }))[0], C.lecturesDuLot(E0, choix, { classement, editionId: 'ed1', sessionId: 'ss1', deviceId: null, newId, pagesParId: PP }).lignes.map((l) => nul(l.device_id))], ['TypeError', ['null', 'null', 'null']], 'T-D6 (M-device, ronde 1) : lecturesDuLot sans deviceId (undefined) → TypeError (jamais N lignes nées sans appareil, sans reprise) ; un null explicite reste admis');
+      const pids = ['p1']; const neuveA = I.ligneImportNeuve({ id: 'imp_alias', kind: 'recette', page_ids: pids }); pids.push('p2');
+      eq(neuveA.page_ids, ['p1'], 'T-D6 (M-lig, ronde 1) : ligneImportNeuve COPIE page_ids (muter l’entrée après l’appel ne change pas la ligne)');
     }));
 
     // T-D7 lotDe, progressionLots, suiteDuLot, pagesEnCours, statutSeanceApres, issueDUneSeance (§ 3.3, § 3.6, D-D10, N-1)
@@ -251,6 +288,11 @@ export async function runClassementTests({ eq, ok }) {
       eq(I.statutSeanceApres({ status: 'open', page_ids: ['p1', 'p2', 'p9'] }, pp, new Set()), 'open', 'T-D7 (M159) : une page absente de la Map relue (ajoutée entre-temps) compte comme sans rôle');
       eq([I.statutSeanceApres({ status: 'open', page_ids: ['p4'] }, new Map([['p4', { id: 'p4', role: '', kind: null }]]), new Set()), I.statutSeanceApres({ status: 'open' }, pp, new Set())], ['open', 'done'], 'T-D7 : role vide et kind nul → sans rôle ; page_ids absent → done');
       eq([I.issueDUneSeance({ scan_session_id: 'ss1' }), I.issueDUneSeance({ scan_session_id: null }), I.issueDUneSeance({ scan_session_id: '' }), I.issueDUneSeance({}), I.issueDUneSeance({ scan_session_id: 7 }), I.issueDUneSeance({ scan_session_id: 'ss1', lot: null })], [true, false, false, false, false, true], 'T-D7 (M160) : issueDUneSeance — scan_session_id chaîne non vide, jamais lu sur lot');
+      // Ronde 1 : bornes et formes de lotDe, total d'un lot, `ecrites` en tableau, REFUS_ARRET_LOT épinglée.
+      eq([I.lotDe({ lot: { ...lotOk, rang: 10, total: 10 } }), I.lotDe({ lot: { ...lotOk, classement_id: 'x'.repeat(80) } }), nul(I.lotDe(Object.create({ lot: lotOk }))), I.lotDe({ lot: { ...lotOk, titre: 'Soupe\u{00A0}de courge' } })], [{ ...lotOk, rang: 10, total: 10 }, { ...lotOk, classement_id: 'x'.repeat(80) }, 'null', { ...lotOk, titre: null }], 'T-D7 (M-z, M-y, M-x, ronde 1) : rang = total = 10 gardé ; un classement_id de 80 points de code gardé ; un lot porté par le prototype de la LIGNE → null ; un titre non plié (insécable) → titre null, le lot gardé');
+      eq([...C.progressionLots([lig('a', 'a_lancer'), lig('b', 'a_lancer', { lot: { classement_id: 'imp_c', rang: 2, total: 2, titre: null, page: null } })], { deviceId: 'dev1' })].map(([k, p]) => [k, p.total]), [['imp_c', 3]], 'T-D7 (M-ll, ronde 1) : total = le plus grand lot.total lu (3 puis 2 → 3), jamais le dernier');
+      eq(I.statutSeanceApres({ status: 'open', page_ids: ['p1', 'p2', 'p3'] }, pp, ['p3']), 'done', 'T-D7 (MR-statut-ecrites-tableau, ronde 1) : `ecrites` admis aussi en tableau');
+      eq([C.REFUS_ARRET_LOT, Object.isFrozen(C.REFUS_ARRET_LOT)], [['vol_tenu', 'hors_ligne', 'non_connecte'], true], 'T-D7 (ronde 1) : REFUS_ARRET_LOT épinglée — liste DOCUMENTAIRE (spec § 3.6), sans effet sur suiteDuLot, dont le défaut fermé arrête');
     });
 
     // T-D8 vocabulaire, fabrique, sac conditions, règle des titres (§ 3.4, D-D12, D-D17, D-D11)
@@ -280,13 +322,22 @@ export async function runClassementTests({ eq, ok }) {
       eq([B.plierUneLigne('Soupe de courge\nrôtie'), B.plierUneLigne('  a\u{2028}b\tc  '), B.plierUneLigne(7)], ['Soupe de courge rôtie', 'a b c', ''], 'T-D8 (M119b) : plierUneLigne — tout blanc devient une espace, puis trim ; pas une chaîne → chaîne vide');
       eq(['x', 'é'.repeat(200), 'é'.repeat(201), '', ' a', 'a ', 'a\nb', 'a\u{2028}b', 'a\tb', 'Le\u{200B}sel', 'voir www.exemple.test/x', 'sur evil.com', 7, null].map((s) => B.estTitreUneLigne(s, 200)), [true, true, false, false, false, false, false, false, false, false, false, false, false, false], 'T-D8 (M119b) : estTitreUneLigne — une ligne, 1..200 points de code, égale à son trim, sans Cc/Cf/U+2028, sans adresse');
       eq([B.estTitreUneLigne('abc', 2), B.estTitreUneLigne('ab', 2), B.estTitreUneLigne('a', 0)], [false, true, false], 'T-D8 : la borne est un paramètre (max < 1 → faux)');
+      // Ronde 1 (R-D-14) : sur le magasin de la transition, la garde n'admet que des listes FAITES de formes sans fiche — un sac mixte, une condition de
+      // fusion, ou une « absente » qui ne vaut pas exactement true et porte une condition à clé → TypeError avant toute écriture.
+      const avantMain2 = await db.get('imports', 'imp_main2'), avantMain = await db.get('imports', 'imp_main');
+      const refusSac = async (sac) => { try { await repo.transitionner('imports', 'imp_main2', { attendus: ['a_verifier'], patch: { status: 'enregistre' }, conditions: { imports: sac } }); return 'acceptée'; } catch (e) { return e?.name; } };
+      const verdictsSac = [];
+      for (const sac of [[{ key: 'imp_neuve4', absente: true }, { key: 'imp_main', attendus: ['enregistre'] }], [{ key: 'imp_main', fusion: (c) => ({ ...c, note: 'x' }) }], [{ key: 'imp_main', absente: false, attendus: ['enregistre'], patch: { note: 'x' } }], [{ key: 'imp_main', absente: 1, attendus: ['enregistre'], patch: { note: 'x' } }]]) verdictsSac.push(await refusSac(sac));
+      eq([verdictsSac, await db.get('imports', 'imp_main2'), await db.get('imports', 'imp_main'), (await db.get('imports', 'imp_neuve4')) ?? 'absente'], [Array(4).fill('TypeError'), avantMain2, avantMain, 'absente'], 'T-D8 (MR-some, M-t, MR-fusion-admise, MR-absente-lache, ronde 1) : sur le magasin de la transition, un sac MIXTE (absente + condition à clé), une condition { key, fusion }, une « absente » qui vaut false ou 1 avec une condition à clé → TypeError, RIEN d’écrit (la ligne et l’autre fiche relues identiques)');
+      eq(['a\u{D800}b', 'a\u{2029}b', 'Soupe  de courge', 'Soupe\u{00A0}de courge', 'Soupe\u{2003}de courge', 'Soupe de courge'].map((s) => B.estTitreUneLigne(s, 200)), [false, false, false, false, false, true], 'T-D8 (M-k, M-l, ronde 1) : estTitreUneLigne refuse une demi-paire de substitution (Cs) et U+2029, et exige la forme PLIÉE (double espace, insécable, U+2003 → faux) — un titre relu que validerClassement ne produirait jamais est refusé');
+      eq(B.plierUneLigne('a \n\t b'), 'a b', 'T-D8 (M-v, ronde 1) : plierUneLigne — une SUITE de blancs devient UNE espace');
     }));
 
     // T-D9 (partie domaine) ligneOuverteDeSeance et la sorte (§ 4.1)
     await run('T-D9 ligneOuverteDeSeance par sorte', async () => {
       const T = await import('../src/domain/table-matieres.js');
       const lignes = [{ id: 'i1', kind: 'index', scan_session_id: 'ss1', status: 'a_verifier', updated_at: '2026-10-19T10:00:00Z', page_ids: [] }, { id: 'c1', kind: 'classement', scan_session_id: 'ss1', status: 'echec', updated_at: '2026-10-19T11:00:00Z', page_ids: [] }, { id: 'c2', kind: 'classement', scan_session_id: 'ss1', status: 'ignore', updated_at: '2026-10-19T12:00:00Z', page_ids: [] }];
-      eq([T.ligneOuverteDeSeance(lignes, 'ss1')?.id, T.ligneOuverteDeSeance(lignes, 'ss1', { kind: 'classement' })?.id, T.ligneOuverteDeSeance(lignes, 'ss1', { importId: 'i1', kind: 'classement' })?.id, T.ligneOuverteDeSeance(lignes, 'ss1', { importId: 'c1' })?.id, T.ligneOuverteDeSeance(lignes, 'ss2', { kind: 'classement' })], ['i1', 'c1', 'c1', 'i1', null], 'T-D9 (M61) : la sorte est lue — une ligne d’index n’est pas rendue pour kind classement, et l’inverse ; défaut index inchangé ; une ligne terminale jamais');
+      eq([T.ligneOuverteDeSeance(lignes, 'ss1')?.id, T.ligneOuverteDeSeance(lignes, 'ss1', { kind: 'classement' })?.id, T.ligneOuverteDeSeance(lignes, 'ss1', { importId: 'i1', kind: 'classement' })?.id, T.ligneOuverteDeSeance(lignes, 'ss1', { importId: 'c1' })?.id, nul(T.ligneOuverteDeSeance(lignes, 'ss2', { kind: 'classement' }))], ['i1', 'c1', 'c1', 'i1', 'null'], 'T-D9 (M61) : la sorte est lue — une ligne d’index n’est pas rendue pour kind classement, et l’inverse ; défaut index inchangé ; une ligne terminale jamais');
     });
 
     // T-D10 (partie domaine) « Imports » : sorte classement, lot, reprise, séance du lot, blocs (§ 4.7, D-D11, D-D14)
@@ -299,12 +350,14 @@ export async function runClassementTests({ eq, ok }) {
       eq([un(cl({ status: 'echec', erreur: { raison: 'coupe', extra: {} } })).gestes, un(cl({ status: 'a_lancer', resultat: null })).gestes], [['reprendre', 'ignorer'], ['reprendre', 'ignorer']], 'T-D10 (M62) : un classement en échec ou à lancer → Reprendre et Ignorer, JAMAIS Relancer depuis Imports');
       eq([un(cl({ device_id: 'dev2', status: 'a_lancer', resultat: null })).gestes, un(cl({ device_id: 'dev2' })).gestes, un(cl({ device_id: 'dev2', status: 'echec', resultat: null })).gestes], [['ignorer'], ['reprendre', 'ignorer'], ['ignorer']], 'T-D10 (D-D24) : autre appareil sans résultat → Ignorer seul ; avec un résultat reçu → Reprendre (les octets sont vérifiés dans la séance)');
       eq([un(cl({ status: 'en_cours', document_id_vol: 'doc1' })).gestes, un(cl({ status: 'en_cours', document_id_vol: 'doc2' })).gestes], [['annuler'], []], 'T-D10 : en vol → Annuler si CE document le tient, rien sinon');
-      eq([I.cibleReprise(cl({ scan_session_id: null })), I.cibleReprise(cl({ id: 'imp&1', scan_session_id: 'ss&1' }))], [null, '/import?session=ss%261&import=imp%261'], 'T-D10 : cibleReprise d’un classement sans séance → null ; identifiants encodés');
+      eq([nul(I.cibleReprise(cl({ scan_session_id: null }))), I.cibleReprise(cl({ id: 'imp&1', scan_session_id: 'ss&1' }))], ['null', '/import?session=ss%261&import=imp%261'], 'T-D10 : cibleReprise d’un classement sans séance → null ; identifiants encodés');
       const lotL = { id: 'imp_r', kind: 'recette', recipe_id: null, edition_id: 'ed1', scan_session_id: 'ss1', page_ids: ['p5'], status: 'a_lancer', erreur: null, resultat: null, device_id: 'dev1', document_id_vol: null, updated_at: NOW, lot: { classement_id: 'imp_cl', rang: 3, total: 3, titre: 'Gratin dauphinois', page: 148 } };
       eq([un(lotL).lot, un(lotL).titre.type, un({ ...lotL, lot: { rang: 0 } }).lot], [lotL.lot, 'regrouper', null], 'T-D10 : une ligne de lot porte lot (revalidé par lotDe) ; sans référence, elle garde le type regrouper');
       eq([I.seanceDUnImportCible({ id: 'ss1' }, [{ ...lotL, recipe_id: 'rcS' }]), I.seanceDUnImportCible({ id: 'ss1' }, [{ ...lotL, recipe_id: 'rcS', lot: undefined }])], [false, true], 'T-D10 (M63) : une ligne à recipe_id ET lot ne cache pas sa séance ; sans lot, le lot A inchangé');
       const A1 = { id: 'a', lot: { classement_id: 'c1', rang: 2, total: 2 } }, A2 = { id: 'b', lot: null }, A3 = { id: 'c', lot: { classement_id: 'c1', rang: 1, total: 2 } }, A4 = { id: 'd', lot: { classement_id: 'c2', rang: 1, total: 1 } };
       eq(C.blocsImports([A2, A1, A4, A3]), [{ type: 'ligne', ligne: A2 }, { type: 'lot', classementId: 'c1', lignes: [A3, A1] }, { type: 'lot', classementId: 'c2', lignes: [A4] }], 'T-D10 (M64) : blocsImports réunit les lignes d’un lot à la place de la plus récente (la première rencontrée), triées par rang ; les autres gardent leur place');
+      const avecSeance = I.lignesImports({ ...ctxL([]), scan_sessions: [{ id: 'ss9', status: 'open', edition_id: 'ed1', page_ids: ['p1'], device_id: 'dev1', started_at: NOW, updated_at: NOW }] }, opts);
+      eq(avecSeance.map((l) => [l.kind, nul(l.lot)]), [['seance', 'null']], 'T-D10 (MR-seance-sans-lot, ronde 1) : une ligne de SÉANCE porte lot: null (lu par son type, jamais par un tableau de null)');
     });
 
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne

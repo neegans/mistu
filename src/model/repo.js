@@ -412,15 +412,17 @@ export async function saveBatch(batch, { origin = 'local', conditions = null } =
 // horodatées : marquerInterrompus y relit le battement interne de sync_state) ; une condition sur le magasin de la transition est refusée (TypeError).
 // `conditions` (lot C, spec § 4.5) : { [autreMagasin]: [{ key, attendus, patch? }] } — d'autres fiches vérifiées et patchées dans la MÊME transaction,
 // chaque patch enveloppé comme celui de la ligne (nettoyé, horodaté : à la différence d'`autres`) ; une condition sans patch vérifie seulement ; comme
-// `autres`, jamais une condition sur le magasin de la transition (TypeError, ronde 1) ; la valeur rendue reste la fiche de `store`/`key`. Le sac porte aussi
+// `autres`, jamais une condition À CLÉ (statut, patch, fusion) sur le magasin de la transition (TypeError, ronde 1 ; lot D : les seules formes admises
+// y sont dites ci-dessous) ; la valeur rendue reste la fiche de `store`/`key`. Le sac porte aussi
 // `{ key, fusion }` (lot G) : la fiche calculée sur la fiche RELUE, enveloppée de même (envelopperFusion, ronde 1 de la tâche 2).
 // Lot D (D-D17, aligné sur la garde du lot C) : sur le magasin de la transition, le sac n'admet que les formes SANS fiche à relire — `{ key,
 // absente: true }` (une ligne neuve) et `{ index, valeur, exclus }` (I-2) —, passées telles quelles APRÈS la condition de la ligne, jamais à sa
-// place ; toute autre forme y reste refusée (TypeError, ronde 1 du lot C).
+// place ; toute autre forme y reste refusée, un sac MIXTE aussi (CHAQUE condition sans fiche ; `absente` vaut exactement true) — TypeError avant
+// toute écriture (ronde 1 du lot C, ronde 1 de la tâche 1 du lot D).
 export async function transitionner(store, key, { attendus, patch = null, puts = {}, deletes = {}, payloads = {}, origin = 'local', autres = {}, conditions = {} } = {}) {
   if (Object.hasOwn(autres, store)) throw new TypeError('transitionner : `autres` ne porte pas de condition sur ' + store);
   const sansFiche = (c) => !!c && typeof c === 'object' && (c.absente === true || c.index != null); // lot D (D-D17) : une ligne neuve ou une condition d'index
-  if (Object.hasOwn(conditions ?? {}, store) && !(Array.isArray(conditions[store]) && conditions[store].every(sansFiche))) throw new TypeError('transitionner : `conditions` ne porte pas de condition sur ' + store);
+  if (Object.hasOwn(conditions ?? {}, store) && !(Array.isArray(conditions[store]) && conditions[store].every(sansFiche))) throw new TypeError('transitionner : sur ' + store + ', `conditions` n’admet que { key, absente: true } et { index, valeur, exclus }');
   const now = syncNow();
   const stamped = {};
   for (const [s, rows] of Object.entries(puts)) stamped[s] = horodater(s, rows, now);

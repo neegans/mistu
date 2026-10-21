@@ -80,12 +80,14 @@ export function porteUneAdresse(texte) {
 // (domain/llm.js), la revalidation d'un résultat relu du journal (domain/classement.js) et le champ `lot` d'une ligne (domain/import-cible.js) — un
 // titre accepté par l'un l'est par les autres. plierUneLigne : tout blanc (sauts de ligne, U+2028/2029 et tabulations compris) devient UNE espace, puis
 // trim ; pas une chaîne → ''. estTitreUneLigne : une chaîne sur UNE ligne (aucun Cc — sauts de ligne compris —, Cf, Cs, U+2028 ni U+2029), égale à
-// son trim, de 1 à `max` points de code, que porteUneAdresse ne reconnaît pas. Le prédicat ne modifie jamais le texte.
+// sa forme PLIÉE (plierUneLigne : trim, ni suite de blancs ni blanc autre que l'espace — ronde 1 de la tâche 1 : un titre relu du journal ou d'une
+// ligne `lot` que la validation ne produirait jamais, double espace ou insécable, est refusé par les trois lecteurs), de 1 à `max` points de code, que
+// porteUneAdresse ne reconnaît pas. Le prédicat ne modifie jamais le texte.
 const HORS_D_UNE_LIGNE = /[\p{Cc}\p{Cf}\p{Cs}\u{2028}\u{2029}]/u;
 export const plierUneLigne = (s) => (typeof s === 'string' ? s.replace(/\s+/gu, ' ').trim() : '');
 export function estTitreUneLigne(s, max) {
   if (typeof s !== 'string' || !Number.isInteger(max) || max < 1) return false;
-  if (HORS_D_UNE_LIGNE.test(s) || s !== s.trim()) return false;
+  if (HORS_D_UNE_LIGNE.test(s) || s !== plierUneLigne(s)) return false;
   const n = Array.from(s).length;
   return n >= 1 && n <= max && !porteUneAdresse(s);
 }

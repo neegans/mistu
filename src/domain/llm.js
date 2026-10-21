@@ -258,7 +258,8 @@ export async function extraireTableMatieres(provider, images /* [{mime, base64}]
 // mal formé rend la correspondance douteuse (illisible), hors 1..N ou répété dans un même groupe ou entre un groupe et les orphelines → hors_bornes ;
 // une photo nommée par DEUX groupes ne jette pas le classement payé (D-D21) : elle reste dans le seul groupe qui l'a EN TÊTE, sinon dans le premier
 // qui la nomme (R-D-7), et entre dans `partagees` ; un titre trop long ou porteur d'une adresse devient null et le groupe incertain (jamais une lecture
-// jetée pour un titre). Une seule direction d'import : domain/classement.js → llm.js.
+// jetée pour un titre). L'adresse est cherchée aussi sur la forme RECOLLÉE (porteAdresse du lot C, ronde 1 de la tâche 1) : une adresse coupée par une
+// fin de ligne (« evil\n.com/x ») en reste une, dans un titre comme dans une incertitude. Une seule direction d'import : domain/classement.js → llm.js.
 export const MAX_PHOTOS_CLASSEMENT = 10;
 export const MAX_TOKENS_CLASSER = 2000;
 export const BORNES_CLASSEMENT = Object.freeze({ photos: 10, groupes: 10, titre: 200, page: 9999, incertitudes: 40, incertitude: 200 });
@@ -307,7 +308,7 @@ export function validerClassement(data, { nbPhotos = 0 } = {}) {
     const brut = sien(b, 'title');
     if (typeof brut === 'string') {
       const plie = surUneLigne(brut);
-      if (plie) { if (estTitreUneLigne(plie, B.titre)) title = plie; else uncertain = true; } // trop long ou adresse : titre nul, groupe incertain
+      if (plie) { if (estTitreUneLigne(plie, B.titre) && !porteAdresse(brut, plie)) title = plie; else uncertain = true; } // trop long ou adresse (même coupée) : titre nul, groupe incertain
     }
     const page = sien(b, 'printed_page');
     lus.push({ photos: [...photos], tete: photos[0], title, printed_page: Number.isInteger(page) && page >= 1 && page <= B.page ? page : null, uncertain });
@@ -336,7 +337,7 @@ export function validerClassement(data, { nbPhotos = 0 } = {}) {
   for (const u of Array.isArray(brutesInc) ? brutesInc : []) {
     if (typeof u !== 'string') continue;
     const s = surUneLigne(u);
-    if (s && estTitreUneLigne(s, B.incertitude)) uncertain.push(s); // > 200 ou porteuse d'une adresse : écartée SANS compte (ce n'est pas une recette)
+    if (s && estTitreUneLigne(s, B.incertitude) && !porteAdresse(u, s)) uncertain.push(s); // > 200 ou porteuse d'une adresse (même coupée) : écartée SANS compte
   }
   if (uncertain.length > B.incertitudes) throw new ErreurExtraction('hors_bornes');
   const nonClassees = [];

@@ -296,7 +296,9 @@ export function ligneImportNeuve({ id, kind, recipe_id = null, edition_id = null
 }
 // Le champ `lot` d'une ligne de recette (§ 3.3), DONNÉE reçue ou restaurée : revalidé à chaque lecture. classement_id (1 à 80 points de code), rang et
 // total (entiers 1..10, rang ≤ total) sont STRUCTURANTS : fautifs → null, la ligne se comporte comme une ligne du lot A. titre (estTitreUneLigne, 200) et
-// page (1..9999) ne servent qu'à l'affichage : fautifs → null SANS jeter le lot. Objet construit, lu par Object.hasOwn.
+// page (1..9999) ne servent qu'à l'affichage : fautifs → null SANS jeter le lot. Objet construit, lu par Object.hasOwn. Les bornes 10, 200 et 9999 sont
+// celles de BORNES_CLASSEMENT (src/domain/llm.js : groupes, titre, page), recopiées ici (import-cible.js n'importe pas llm.js) : une borne changée
+// là se change ici (ronde 1 de la tâche 1).
 export function lotDe(ligne) {
   const brut = ligne && typeof ligne === 'object' && Object.hasOwn(ligne, 'lot') ? ligne.lot : null;
   if (!brut || typeof brut !== 'object' || Array.isArray(brut)) return null;

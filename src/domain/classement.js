@@ -111,7 +111,7 @@ export function restaurerBrouillon(brut, { resultat, pageIds, startedAt, pagesPa
   if (!objetNu(brut)) return null;
   const cle = sien(brut, 'cle'), groupes = sien(brut, 'groupes'), aPart = sien(brut, 'a_part'), choix = sien(brut, 'choix'), prochain = sien(brut, 'prochain');
   if (typeof cle !== 'string' || cle !== startedAt) return null;
-  if (!Array.isArray(groupes) || groupes.length > 10 || !Array.isArray(aPart) || !Array.isArray(choix) || choix.length > 10) return null;
+  if (!Array.isArray(groupes) || groupes.length > BORNES_CLASSEMENT.groupes || !Array.isArray(aPart) || !Array.isArray(choix) || choix.length > BORNES_CLASSEMENT.groupes) return null;
   if (!Number.isInteger(prochain) || prochain < 1 || prochain > 1000) return null;
   const ids = new Set(liste(pageIds));
   const sources = liste(resultat?.groupes);
@@ -225,8 +225,11 @@ export function filtrerReferences(candidats, requete) {
 // --- Le plan de lecture (§ 3.3, D-D4) : une ligne `recette` par groupe qui garde au moins une page PRÉSENTE, fabriquée par ligneImportNeuve, dans
 // l'ordre des groupes ; rang 1..n et total n sur les seules lignes créées ; recipe_id = le choix ou null ; lot avec le titre et la page du CLASSEMENT
 // (estTitreUneLigne, 1..9999). Deux groupes sur la même référence, une page hors classement.page_ids ou dans deux groupes → TypeError : l'écran
-// l'empêche, c'est un défaut de programme, jamais un état de la personne.
-export function lecturesDuLot(etat, choix, { classement, editionId = null, sessionId = null, deviceId = null, newId, pagesParId } = {}) {
+// l'empêche, c'est un défaut de programme, jamais un état de la personne. `deviceId` est OBLIGATOIRE (ronde 1, comme fabriquerImportWeb du lot B) :
+// oublié (undefined) → TypeError, jamais N lignes nées sans appareil (progressionLots ne les compterait pas « ici », un vol y serait jugé d'un autre
+// appareil) ; un null explicite reste admis (repo pas encore initialisé).
+export function lecturesDuLot(etat, choix, { classement, editionId = null, sessionId = null, deviceId, newId, pagesParId } = {}) {
+  if (deviceId === undefined) throw new TypeError('lecturesDuLot : deviceId requis (repo.deviceId())');
   const autorisees = new Set(liste(classement?.page_ids));
   const vues = new Set();
   const refs = new Set();
@@ -245,7 +248,7 @@ export function lecturesDuLot(etat, choix, { classement, editionId = null, sessi
   const total = gardes.length;
   const lignes = gardes.map(({ g, presentes, rid }, i) => ({
     ...ligneImportNeuve({ id: newId('imp'), kind: 'recette', recipe_id: rid, edition_id: editionId, scan_session_id: sessionId, page_ids: presentes, device_id: deviceId }),
-    lot: { classement_id: classement.id, rang: i + 1, total, titre: estTitreUneLigne(g.title, 200) ? g.title : null, page: pageValide(g.printed_page) ? g.printed_page : null },
+    lot: { classement_id: classement.id, rang: i + 1, total, titre: estTitreUneLigne(g.title, BORNES_CLASSEMENT.titre) ? g.title : null, page: pageValide(g.printed_page) ? g.printed_page : null },
   }));
   return { lignes, references: [...refs] };
 }
@@ -285,7 +288,8 @@ export function blocsImports(lignes) {
 // --- La suite du lot (D-D10, R-D-4 ; défaut FERMÉ) : une seule liste fermée dit ce qui laisse continuer — ces pages-ci, lues, ont donné une réponse
 // inutilisable — plus `requete` quand la ligne RELUE porte erreur.extra.trop_lourd (le 413 : la suivante peut passer). Toute autre raison arrête, y
 // compris toute raison future ou inconnue : il n'y a pas de liste « arrêt » à tenir. Refus de lancerExtraction : les six de REFUS_SAUT_LOT sautent ce
-// groupe ; tout autre refus arrête.
+// groupe ; tout autre refus arrête. REFUS_ARRET_LOT (nommée par la spec § 3.6) est DOCUMENTAIRE : suiteDuLot ne la lit pas, c'est son défaut fermé
+// qui arrête (valeur épinglée par T-D7, ronde 1).
 export const RAISONS_SUITE_LOT = Object.freeze(['coupe', 'illisible', 'hors_bornes', 'vide']);
 export const REFUS_ARRET_LOT = Object.freeze(['vol_tenu', 'hors_ligne', 'non_connecte']);
 export const REFUS_SAUT_LOT = Object.freeze(['inconnu', 'transition', 'sans_page', 'image', 'octets_absents', 'sorte']);

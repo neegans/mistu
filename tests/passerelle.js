@@ -387,6 +387,13 @@ export async function runPasserelleTests({ eq, ok }) {
         eq(Array.from((await L.classerPhotos(avecCorps(texte(longCl)), images)).texteBrut).length, 16000, 'T-D2 : texteBrut coupé à 16 000 points de code (REPONSE_BRUTE_MAX)');
         { const sys = []; await L.extraireRecette(new L.PasserelleProvider({}, { session: SESSION, fetch: async (u, o) => { sys.push(JSON.parse(o.body).corps.system); return reponse(200, texte('{"title":"x","ingredients":[{"source_text":"a"}],"steps":[{"text":"s"}]}')); } }), images);
           eq([sys[0].includes(PHRASE_INJECTION), sys[0].split('\n')[1]], [true, PHRASE_INJECTION], 'T-D2 (M106) : le system d’une extraction porte la phrase anti-injection, en DEUXIÈME ligne de PARSER_SYSTEM (I-D8)'); }
+        // Ronde 1 de la tâche 1 : la borne de 10 photos, et le contexte attaché à un REFUS (calqué sur T-C9 A7).
+        { const vus10 = [];
+          const r10 = await L.classerPhotos(new L.PasserelleProvider({}, { session: SESSION, fetch: async (u, o) => { vus10.push(JSON.parse(o.body)); return reponse(200, texte(brutCl)); } }), Array.from({ length: 10 }, () => images[0]));
+          eq([vus10.length, vus10[0].corps.messages[0].content.filter((b) => b.type !== 'text').length, r10.classement.non_classees], [1, 10, [3, 4, 5, 6, 7, 8, 9, 10]], 'T-D2 (M-a, ronde 1) : exactement 10 images (MAX_PHOTOS_CLASSEMENT) → UN POST, le classement accepté sur nbPhotos = 10 (non_classees 3 à 10)'); }
+        { const contexteRefus = async (corpsRep) => { try { await L.classerPhotos(avecCorps(corpsRep), images); return 'acceptée'; } catch (e) { return [e?.name, e?.raison, e?.texteBrut, e?.stopReason, e?.modele]; } };
+          const tronque = brutCl.slice(0, 40);
+          eq([await contexteRefus(texte(tronque, { stop_reason: 'max_tokens' })), await contexteRefus(texte('pas du json')), await contexteRefus(texte('{"groupes": []}')), await contexteRefus(texte('{"groupes": [{"photos": [9]}]}'))], [['ErreurExtraction', 'coupe', tronque, 'max_tokens', 'claude-x'], ['ErreurExtraction', 'illisible', 'pas du json', 'end_turn', 'claude-x'], ['ErreurExtraction', 'vide', '{"groupes": []}', 'end_turn', 'claude-x'], ['ErreurExtraction', 'hors_bornes', '{"groupes": [{"photos": [9]}]}', 'end_turn', 'claude-x']], 'T-D2 (M-m, M-m2, M-m3, ronde 1) : un REFUS — coupe, texte sans JSON, refus de validerClassement (vide, hors_bornes) — porte texteBrut, stopReason et modele sur l’erreur, comme T-C9 (A7) : la réponse payée reste lisible pour le journal'); }
       }
       // parseStepsBlock(texte, { parParagraphe }) : une étape par paragraphe (ligne vide), sauts de ligne internes gardés ; sans option, comme avant.
       const { parseStepsBlock } = await import('../src/domain/lines.js');
