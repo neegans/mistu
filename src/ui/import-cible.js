@@ -120,25 +120,40 @@ export async function lancerExtraction(importId, options = {}) {
 }
 // La ligne d'une lecture sans référence, écrite seulement APRÈS les gardes du vol (ronde 1) : reprise dans la transition de départ (a_verifier → a_lancer
 // → en_cours en une transaction, § 3.1), sinon ouverte (repo.ouvrirImport, le mur conditionné de la première photo) puis partie.
+// Lot C, ronde 1 de la tâche 4 (T4-R2) : `lecture.cle` = la clé (cleLecture) de la lecture que l'écran MONTRE, ou null s'il n'en montre aucune ; une ligne
+// a_verifier n'est reprise que si elle porte CETTE lecture (vérifié dans la transaction) ; une relecture CONFIRMÉE (clé posée) refusée ne part jamais sur
+// une ligne neuve : la question valait pour cette lecture-là (refus `transition`, l'écran relit). Sans `cle` (l'éditeur), la règle d'avant.
 async function partirLecture(repo, lecture, pageIds, enVol, suivi) {
   const { kind, importId } = lecture;
   if (importId) {
-    const reprise = (c) => { if (!sansReference(c, kind)) throw new TransitionRefusee('imports', importId, c.status); return { ...enVol, page_ids: [...pageIds], resultat: null }; };
+    const garde = Object.hasOwn(lecture, 'cle');
+    let autreLecture = false;
+    const reprise = (c) => {
+      if (!sansReference(c, kind)) throw new TransitionRefusee('imports', importId, c.status);
+      if (garde && c.status === 'a_verifier' && cleLecture(c) !== lecture.cle) { autreLecture = true; throw new TransitionRefusee('imports', importId, c.status); }
+      return { ...enVol, page_ids: [...pageIds], resultat: null };
+    };
     try { await repo.transitionner('imports', importId, { attendus: ['a_lancer', 'a_verifier', 'echec'], patch: reprise }); suivi.importId = importId; return importId; }
-    catch (e) { if (!estRefus(e)) throw e; } // terminée, en vol ailleurs, d'une autre sorte ou ciblée : une ligne neuve
+    catch (e) { if (!estRefus(e) || autreLecture || typeof lecture.cle === 'string') throw e; } // terminée, en vol ailleurs, d'une autre sorte ou ciblée : une ligne neuve
   }
   const ligne = await repo.ouvrirImport({ kind, edition_id: lecture.editionId ?? null, scan_session_id: lecture.sessionId ?? null, page_ids: [...pageIds] });
   suivi.importId = ligne.id;
   await repo.transitionner('imports', ligne.id, { attendus: ['a_lancer'], patch: enVol });
   return ligne.id;
 }
-async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, lecture = null } = {}, suivi) {
+// Lot C, ronde 1 de la tâche 4 : `signal` (facultatif) = l'« Annuler » de l'appelant AVANT que la tenue ait une ligne (gardes : session, réduction des
+// photos). Levé pendant les gardes → refus `annule`, rien n'est parti ni écrit ; levé après le départ → l'appel est abandonné (comme annulerVol).
+async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, lecture = null, signal = null } = {}, suivi) {
   const tenue = { importId: lecture ? null : importId, controller: new AbortController(), repo };
   if (!prendreVol(tenue)) return refus('vol_tenu'); // AVANT tout await : une seconde tape (ou une lecture web) pendant les gardes voit le vol
   notifier(); // vague finale (m2) : l'écran ciblé fige ses pages dès la pose du vol (la réduction des pages peut durer), pas seulement à en_cours
   const liberer = () => libererTenue(tenue);
+  const abandon = () => tenue.controller.abort();
+  signal?.addEventListener?.('abort', abandon, { once: true });
+  const annule = () => !!signal?.aborted;
   let battement = null;
   try {
+    if (annule()) { liberer(); return refus('annule'); }
     let kind, pageIds;
     if (lecture) { kind = lecture.kind; pageIds = Array.isArray(lecture.pageIds) ? lecture.pageIds : []; } // rien n'est lu ni écrit avant les gardes
     else {
@@ -148,11 +163,13 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
     }
     if (!enLigne()) { liberer(); return refus('hors_ligne'); }
     const session = await sessionAssistant(ctx);
+    if (annule()) { liberer(); return refus('annule'); }
     if (!session) { liberer(); return refus('non_connecte'); }
     if (!pageIds.length) { liberer(); return refus('sans_page'); }
     let envoi; // lot C : { images, pageIds } — les pages EFFECTIVEMENT envoyées, dans l'ordre des images
     try { envoi = await imagesDe(repo, pageIds); }
     catch (e) { liberer(); return { issue: 'refuse', raison: e?.code === 'octets_absents' ? 'octets_absents' : 'image', code: e?.code ?? null }; }
+    if (annule()) { liberer(); return refus('annule'); } // dernier point avant la transition de départ : rien n'est encore écrit
     if (!envoi.images.length) { liberer(); return refus('sans_page'); }
     const depart = maintenant();
     // Lot C (F-18) : au départ d'un INDEX — reprise, « Relancer » de la section Imports, ligne neuve —, la lecture remplacée est effacée.
@@ -214,6 +231,7 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
     }
     return { issue: 'a_verifier' };
   } finally {
+    signal?.removeEventListener?.('abort', abandon);
     if (battement) { clearInterval(battement); repo.oublierBattement(importId).catch(() => {}); }
     liberer();
     notifier();
@@ -253,7 +271,8 @@ export function texteEchec(erreur) {
   if (raison === 'vide') return { texte: t('Aucun ingrédient ni étape lus sur ces pages.'), code: null };
   return { texte: texteEchecAssistant({ message: raison, quota: extra.quota, trop_lourd: extra.trop_lourd }), code: null };
 }
-// La même phrase en une ligne (le code à la suite) : la section « Imports », l'éditeur et le panneau d'index (ronde 1 : une définition).
+// La même phrase en une ligne (le code à la suite) : la section « Imports » et l'éditeur (ronde 1 : une définition). Le panneau d'index dit texteEchecIndex
+// (src/ui/table-matieres.js, lot C) : ses phrases `coupe` et `vide`, et texteEchec pour tout le reste.
 export const phraseEchec = (erreur) => { const { texte, code } = texteEchec(erreur); return code ? `${texte} ${code}` : texte; };
 
 // Ce qu'un vol REFUSÉ dit (rien n'est parti, rien n'est écrit) : une définition pour la section « Imports », l'éditeur et le panneau d'index (tâche 6,

@@ -2481,6 +2481,8 @@ export async function runImportCibleTests({ eq, ok }) {
         await db.put('imports', { ...(await db.get('imports', recetteLue.id)), status: 'a_verifier', resultat: { ...RECETTE } });
         const recAvant = await db.get('imports', recetteLue.id);
         const pSorte = I.indexEntriesPanel(ssR, await ctxDe(), () => [pr1.id], { ...deps, importId: recetteLue.id });
+        // Ronde 1 de T4 (lot C) : un FAIT d'abord (la session lue, le bouton allumé), PUIS la borne : une relecture lancée après la session n'échappe plus à la mesure.
+        await attendre(() => !lireP(pSorte).disabled, 'session lue (autre sorte)');
         await new Promise((r) => setTimeout(r, 100)); // rien ne doit arriver : on laisse à une relecture le temps d'écrire
         eq([pSorte.querySelector('textarea').value, !!pSorte.querySelector('[data-role="entrees-lues"]'), pSorte.etatPanneau().importId, await db.get('imports', recetteLue.id)], ['', false, null, recAvant], 'panneau d’index (ronde 1) : une ligne d’une autre sorte n’est ni posée ni revalidée comme un index (la ligne reste intacte)');
         // La phrase d'un échec (I-4) est dite sur un ?import= en échec (lot C : la phrase de l'index), et « Relancer » est offert.

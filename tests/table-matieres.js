@@ -936,11 +936,13 @@ export async function runTableMatieresTests({ eq, ok }) {
       // passé au panneau se lit par le repo injecté (deps). Lot C, tâche 4 (D-C16 ; constats 21 et 25 renvoyés par la ronde 1 de T3) : le panneau lit sa
       // ligne dans le journal de SA séance (repo.all('imports') ; relireDuJournal, donc repo.get, pour une lecture reçue seulement) — le témoin de l'espion
       // devient cette lecture du journal par le repo INJECTÉ, et l'importId effectivement REPRIS est affirmé : imp_r1, la lecture d'index OUVERTE de ss1.
+      // Ronde 1 de T4 (constats 2 et 24) : `lus` est lu APRÈS le redessin — le témoin compte les lectures du journal RENDUES (pas commencées), puis un tour
+      // de boucle laisse finir ce que charger() enchaîne après elles (une relecture de la ligne désignée faite après repo.all est vue, mutants M1 et N60).
       const lus = []; let journal = 0;
-      const deps = { repo: { ...repo, get: async (s, k) => { if (s === 'imports') lus.push(k); return repo.get(s, k); }, all: async (s) => { if (s === 'imports') journal += 1; return repo.all(s); } } };
-      const reprise = async (importId) => { lus.length = 0; journal = 0; const r = await I.renderImport({}, { session: 'ss1', import: importId }, ctx, deps); await attendre(() => journal > 0, 'journal relu par le repo injecté'); return [cases(r), lus.includes(importId), panneau(r).etatPanneau().importId]; };
+      const deps = { repo: { ...repo, get: async (s, k) => { if (s === 'imports') lus.push(k); return repo.get(s, k); }, all: async (s) => { const r = await repo.all(s); if (s === 'imports') journal += 1; return r; } } };
+      const reprise = async (importId) => { lus.length = 0; journal = 0; const r = await I.renderImport({}, { session: 'ss1', import: importId }, ctx, deps); await attendre(() => journal > 0, 'journal relu par le repo injecté'); await tick(); return [cases(r), lus.includes(importId), panneau(r).etatPanneau().importId]; };
       const aucune = { p1: false, p2: false, p3: false };
-      eq([await reprise('imp_r1'), await reprise('imp_c1'), await reprise('imp_k1'), await reprise('imp_r2')], [[{ p1: true, p2: false, p3: true }, false, 'imp_r1'], [aucune, false, 'imp_r1'], [aucune, false, 'imp_r1'], [aucune, false, 'imp_r1']], 'T-C11 (ronde 1, I30 ; lot C, tâche 4) : ?import= d’une lecture CLOSE, d’une AUTRE SORTE (recette) ou d’une AUTRE SÉANCE (imp_r2 de ss2) → aucune case cochée, et le panneau ne la relit jamais (aucun repo.get de cette ligne) ; dans les quatre cas, le panneau, qui lit le journal par le repo INJECTÉ (témoin), reprend la lecture d’index OUVERTE de la séance (imp_r1, D-C16) — jamais la ligne désignée close, d’une autre sorte ou d’une autre séance');
+      eq([await reprise('imp_r1'), await reprise('imp_c1'), await reprise('imp_k1'), await reprise('imp_r2')], [[{ p1: true, p2: false, p3: true }, false, 'imp_r1'], [aucune, false, 'imp_r1'], [aucune, false, 'imp_r1'], [aucune, false, 'imp_r1']], 'T-C11 (ronde 1, I30) : ?import= d’une lecture CLOSE, d’une AUTRE SORTE (recette) ou d’une AUTRE SÉANCE (imp_r2 de ss2) → aucune case cochée, et le panneau ne relit jamais la ligne désignée (aucun repo.get, mesuré après le redessin) ; dans les quatre cas, le panneau, qui lit le journal par le repo INJECTÉ (témoin), reprend la lecture d’index OUVERTE de la séance (imp_r1, D-C16) (forme C, lot C)');
       const r5 = await I.renderImport({}, { session: 'ss4', intention: 'index' }, ctx);
       const r6 = await I.renderImport({}, { session: 'ss4' }, ctx);
       eq([panneau(r5)?.hidden, panneau(r6)?.hidden], [false, true], 'T-C11 (ronde 1, I34) : séance SANS ligne ouverte — avec ?intention=index (fiche livre → « + Pages d’index ») le panneau d’index est visible ; sans intention ni ligne ouverte, il est caché');
@@ -969,6 +971,7 @@ export async function runTableMatieresTests({ eq, ok }) {
         eq([ff.appels.length, dits.filter((d) => d.startsWith('Une lecture est déjà en cours')), enVol.page_ids, enVol.status, enVol.document_id_vol, typeof enVol.battement_at, enVol.appels, imagesEnvoyees(ff.appels[0])], [1, [], ['p3', 'p1', 'p5'], 'en_cours', UI.DOCUMENT_ID, 'string', 1, 3], 'T-C10 (M39, M61, M93) : UN POST au double clic, et AUCUN refus « vol tenu » dit (le second clic n’atteint pas lire() : le bouton est éteint) ; page_ids dans l’ordre de la SÉANCE bien que coché 5,1,3 ; en_cours tenu par ce document, battement posé, appels 1 au départ du fetch');
         const st = panneau.querySelector('.status[role="status"]');
         eq([st?.textContent, st?.nextElementSibling?.classList.contains('row'), lireIndex(panneau).closest('[data-role="actions-index"]')?.hidden, !!boutonTexte(st?.nextElementSibling, 'Annuler')], ['Lecture des pages par l’assistant…', true, true, true], 'T-C10 (M94, R-VIS-8) : pendant le vol, .status[role=status] « Lecture des pages par l’assistant… » puis une .row avec « Annuler » ; le vrai bouton « Lire » est caché avec sa rangée (actions-index : le primaire éteint de la .row n’est qu’une place)');
+        eq([panneau.querySelector('textarea')?.disabled, boutonTexte(panneau, 'Créer les références')?.disabled], [true, true], 'T-C10 (ronde 1, N08, § 4.2) : pendant le vol, la zone de texte et « Créer les références » sont éteintes');
         boutonTexte(panneau, 'Annuler').click();
         await attendre(async () => (await ligneDe(db, 'ss1')).status === 'echec' && !UI.volEnCours() && panneau.textContent.includes('Lecture annulée.'), 'annulée');
         eq([(await ligneDe(db, 'ss1')).erreur?.raison, lireIndex(panneau).textContent, (await db.byIndex('recipes', 'edition_id', 'ed1')).length, ff.appels[0].options.signal.aborted], ['annule', 'Relancer', 2, true], 'T-C10 : « Annuler » → fetch abandonné, echec(annule), « Lecture annulée… », « Relancer » offert, aucune fiche');
@@ -1007,7 +1010,10 @@ export async function runTableMatieresTests({ eq, ok }) {
         const questions2 = [];
         const p2 = I.indexEntriesPanel(ctxR.scan_sessions.find((s) => s.id === 'ss1'), ctxR, () => [], { repo, toast: () => {}, confirmer: async (q) => { questions2.push(q); return false; }, fetch: ff.fetch, maintenant: () => NOW, importId: lu.id });
         scene.append(p2);
-        await new Promise((r) => setTimeout(r, 100)); // borné, comme pSorte : une relecture lancée au montage aurait déjà posé sa question
+        // Ronde 1 : un FAIT d'abord (la session lue, le bouton allumé), PUIS la borne : une relecture lancée au montage, même après la session (jusqu'à 2 s
+        // sur un jeton qui se rafraîchit), aurait posé sa question pendant ces 100 ms.
+        await attendre(() => !lireIndex(p2).disabled, 'session lue, bouton allumé (reprise)');
+        await new Promise((r) => setTimeout(r, 100));
         eq([p2.querySelector('[data-role="incertain"]')?.textContent, ff.appels.length, questions2], [inc, 1, []], 'T-C10 (M104, M41) : la même ligne REPRISE (nouvelle instance, résultat revalidé) rend le même texte, sans appel ni question de relecture (confirmer injecté)');
         const ctx2 = await ctxDe(repo, db);
         await db.delete('source_pages', 'p4'); // retirée de la base APRÈS la lecture du contexte, AVANT le vol
@@ -1318,6 +1324,224 @@ export async function runTableMatieresTests({ eq, ok }) {
         try { r8 = await UI.lancerExtraction('imp_c8', { ctx: await ctxDe(repo, db), repo, fetch: ff10.fetch }); } finally { db.onMutate = capture; }
         eq([r8, depart8 && [depart8.ordre_applique_at, depart8.reponse_brute, depart8.model, depart8.duree_ms, depart8.page_ids], (await db.get('imports', 'imp_c8')).ordre_applique_at ?? null, ff10.appels.length], [{ issue: 'a_verifier' }, [null, null, null, null, ['p1']], null, 1], 'T-C17 (M78, M78b, F-18) : « Relancer » d’un index depuis la section Imports (sans lecture) → le départ efface aussi l’ordre appliqué et le diagnostic de la lecture remplacée ; un POST, a_verifier');
       } finally { db.onMutate = capture; UI.reinitialiserImportCible(); scene.remove(); }
+    }));
+
+    // --- Ronde 1 de la tâche 4 : faux verts fermés et comportements promis par la spec § 4.2 / § 4.4 (un bloc par constat : une levée n'en cache aucun autre)
+    await run('T-C10 (ronde 1) textes du panneau : texteEchecIndex, ligneEtatLecture, ligneIncertain', async () => {
+      const T = await import('../src/ui/table-matieres.js');
+      const UI = await import('../src/ui/import-cible.js');
+      const I4 = 'L’appel a peut-être été compté ; relancer en coûtera un autre.';
+      const table = [
+        [{ raison: 'coupe' }, { texte: 'Lecture coupée : lis moins de photos à la fois.', code: null }],
+        [{ raison: 'vide' }, { texte: 'Aucune entrée lue sur ces photos.', code: null }],
+        [{ raison: 'illisible' }, { texte: 'L’assistant n’a pas répondu lisiblement. Réessaie.', code: 'Code : illisible' }],
+        [{ raison: 'hors_bornes' }, { texte: 'L’assistant n’a pas répondu lisiblement. Réessaie.', code: 'Code : hors_bornes' }],
+        [{ raison: 'annule' }, { texte: 'Lecture annulée. ' + I4, code: null }],
+        [{ raison: 'interrompu' }, { texte: 'La lecture a été interrompue. ' + I4, code: null }],
+        [{ raison: 'incertain' }, { texte: I4, code: null }],
+        [{ raison: 'quota', extra: { quota: 60 } }, { texte: 'Tu as atteint la limite du jour pour l’assistant (60 appels).', code: null }],
+        [{ raison: 'requete', extra: { trop_lourd: true } }, { texte: 'La demande est trop lourde : choisis moins de pages.', code: null }],
+        [{ raison: 'serveur' }, { texte: 'L’assistant n’a pas répondu. Réessaie. Code : serveur', code: null }],
+      ];
+      eq(table.map(([e]) => T.texteEchecIndex(e)), table.map(([, x]) => x), 'T-C10 (ronde 1 ; N28, N29, N30, N31, § 4.2 état 3) : texteEchecIndex — coupe et vide ont leur phrase ; illisible / hors_bornes la phrase générique + « Code : … » ; annule, interrompu, incertain les phrases I-4 ; quota, demande trop lourde et toute autre raison de la passerelle, le texte de texteEchecAssistant');
+      const communes = table.filter(([e]) => !['coupe', 'vide'].includes(e.raison)).map(([e]) => e);
+      eq(communes.map((e) => T.texteEchecIndex(e)), communes.map((e) => UI.texteEchec(e)), 'T-C10 (ronde 1, une définition) : hors coupe et vide, texteEchecIndex rend exactement texteEchec (lot A) — une phrase corrigée là change aussi le panneau d’index');
+      const blocs = (n) => ({ photos: Array.from({ length: n }, () => ({ entries: [] })) });
+      eq([T.ligneEtatLecture({ duree_ms: 1200 }, blocs(1)), T.ligneEtatLecture({ duree_ms: 2600 }, blocs(5)), T.ligneEtatLecture({}, blocs(3)), T.ligneEtatLecture({ duree_ms: null }, blocs(2)), T.ligneEtatLecture({ duree_ms: -5 }, blocs(2)), T.ligneEtatLecture({ duree_ms: 1e21 }, blocs(2)), T.ligneEtatLecture({ duree_ms: 600001 }, blocs(2)), T.ligneEtatLecture({ duree_ms: 600000 }, blocs(2))],
+        ['Lue en 1 s · 1 photo(s)', 'Lue en 3 s · 5 photo(s)', '3 photo(s)', '2 photo(s)', '2 photo(s)', '2 photo(s)', '2 photo(s)', 'Lue en 600 s · 2 photo(s)'], 'T-C10 (ronde 1 ; N32, Q5) : ligneEtatLecture — « Lue en {s} s · {n} photo(s) » (arrondi à la seconde), sans durée lisible « {n} photo(s) » ; une durée relue négative, absurde ou au-delà de 10 min (ligne reçue, archive) n’est jamais dite');
+      const cf = String.fromCharCode(0x202E);
+      eq([T.ligneIncertain({ ecartees: { trop_longues: 0, adresse: 1 }, uncertain: [] }), T.ligneIncertain({ ecartees: { trop_longues: 2, adresse: 1 }, uncertain: ['p. 41 ?'] }), T.ligneIncertain({ ecartees: { trop_longues: 0, adresse: 0 }, uncertain: [] }), T.ligneIncertain({ uncertain: ['x' + cf] })],
+        ['Incertain : 1 entrées écartées (adresse)', 'Incertain : 2 entrées écartées (trop longues) ; 1 entrées écartées (adresse) ; p. 41 ?', null, 'Incertain : x'], 'T-C10 (ronde 1 ; N27, Q1, P3) : ligneIncertain — le compte « (adresse) » est dit, après « (trop longues) » et avant les chaînes du modèle ; rien à dire → null ; Cf retirés');
+    });
+
+    await run('T-C13 (ronde 1) puces « incertain » et « en double », doublon après ↑/↓, homonyme d’un autre livre, adresse écartée, « Créer 1 référence », plan vide', () => withRepo(async (repo, db) => {
+      const I = await import('../src/ui/import.js');
+      const T = await import('../src/ui/table-matieres.js');
+      await poserBibliotheque(repo, db, { seances: { ss1: ['p1', 'p2'] } });
+      // Une recette HOMONYME (même titre, même page) dans un AUTRE livre (ed2) : elle ne rend jamais une entrée de ed1 « déjà repérée » (N26).
+      await db.mutate({ puts: { book_editions: [{ id: 'ed2', book_id: 'b1', language: 'fr', created_at: DATE, updated_at: DATE }], recipes: [{ id: 'rc_ed2', edition_id: 'ed2', original_title: 'Gratin', original_language: 'fr', availability: 'reference_only', verification_state: 'unverified', printed_page: 20, section: null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: [], current_version_id: null, ingredient_ids: [], created_at: DATE, updated_at: DATE }] }, origin: 'device' });
+      // Photo 1 : « Gratin » que le MODÈLE dit incertain, « Tarte », et une entrée porteuse d'une adresse (écartée et comptée) ; photo 2 : « Tarte » p. 30 encore (doublon).
+      const LU = L.validerLectureIndex({ photos: [
+        { photo: 1, printed_page_range: [8, 94], entries: [{ title: 'Gratin', printed_page: 20, section: null, uncertain: true }, { title: 'Tarte', printed_page: 30, section: null, uncertain: false }, { title: 'Voir https://exemple.com/tarte', printed_page: 40, section: null, uncertain: false }] },
+        { photo: 2, printed_page_range: null, entries: [{ title: 'Tarte', printed_page: 30, section: null, uncertain: false }] },
+      ], uncertain: [] }, { nbPhotos: 2 });
+      const resultat = D.resultatIndex(LU, ['p1', 'p2']);
+      await db.mutate({ puts: { imports: [ligneAVerifier({ id: 'imp_p13', page_ids: ['p1', 'p2'], resultat })] }, origin: 'device' });
+      const scene = nouvelleScene(); const dits = [];
+      try {
+        const ctx = await ctxDe(repo, db);
+        const p = I.indexEntriesPanel(ctx.scan_sessions.find((s) => s.id === 'ss1'), ctx, () => [], { repo, toast: (m) => dits.push(m), confirmer: async () => false, importId: 'imp_p13', maintenant: () => NOW });
+        scene.append(p);
+        const liDe = (cle) => p.querySelector(`[data-role="entrees-lues"] li[data-cle="${cle}"]`);
+        const caseDe = (x) => x.querySelector('input[type=checkbox]');
+        const etatLi = (x) => [x.querySelector('[data-role="puces"]').textContent, caseDe(x).checked, caseDe(x).disabled, caseDe(x).getAttribute('aria-label')];
+        eq([resultat.ecartees, etatLi(liDe('l0')), etatLi(liDe('l1')), etatLi(liDe('l2')), p.querySelector('[data-role="compteur"]').textContent, p.querySelector('[data-role="creer-references"]').textContent, p.querySelector('[data-role="incertain"]')?.textContent],
+          [{ trop_longues: 0, adresse: 1 }, ['incertain', true, false, 'Créer une référence pour « Gratin »'], ['', true, false, 'Créer une référence pour « Tarte »'], ['en double', false, true, 'En double dans cette lecture'], '3 entrées lues · 0 déjà dans ce livre', 'Créer 2 références', 'Incertain : 1 entrées écartées (adresse)'],
+          'T-C13 (ronde 1 ; N21, N20, N20b, N26, N27, R-C-3, § 4.4) : une entrée que le MODÈLE dit incertaine → puce « incertain », la case RESTE cochée ; un doublon de la lecture → « en double », décoché, désactivé, aria-label « En double dans cette lecture » ; une recette homonyme d’un AUTRE livre ne rend rien « déjà repérée » ; l’entrée porteuse d’une adresse est écartée, comptée en base ET dite en tête de « Incertain : »');
+        caseDe(liDe('l0')).click();
+        eq(p.querySelector('[data-role="creer-references"]').textContent, 'Créer 1 référence', 'T-C13 (ronde 1, N22) : une seule entrée à créer → « Créer 1 référence » (singulier)');
+        boutonTexte(p.querySelector('[data-role="ordre-photos"]'), 'Monter la page 2').click();
+        eq([[...p.querySelectorAll('[data-role="entrees-lues"] li')].map((x) => x.dataset.cle), etatLi(liDe('l2')), etatLi(liDe('l1')), p.querySelector('[data-role="creer-references"]').textContent], [['l2', 'l0', 'l1'], ['', true, false, 'Créer une référence pour « Tarte »'], ['en double', false, true, 'En double dans cette lecture'], 'Créer 1 référence'], 'T-C13 (ronde 1, N46, D-C18) : après ↑/↓, « en double » suit l’ordre COURANT — la première « Tarte » rencontrée est créable, la suivante en double (recalculer après trierLignes)');
+        // Plan vide (constat 8) : tout décoché → bouton ÉTEINT (N23) ; même forcé, « Créer 0 références » ne clôt pas la lecture payée (creer() ET creerReferences).
+        caseDe(liDe('l2')).click();
+        const bouton = p.querySelector('[data-role="creer-references"]');
+        const vue = p.querySelector('[data-role="lecture"]');
+        const avant = await db.get('imports', 'imp_p13'); const nAvant = (await db.getAll('recipes')).length;
+        const etatBouton = [bouton.textContent, bouton.disabled];
+        bouton.disabled = false; bouton.click();
+        const occupeAuClic = vue.occupe();
+        const lignesVides = vue.etatLecture().lignes;
+        const direct = await T.creerReferences(avant, lignesVides, { repo, ctx, editionId: 'ed1', toast: (m) => dits.push(m), maintenant: () => NOW });
+        eq([etatBouton, occupeAuClic, direct, await db.get('imports', 'imp_p13'), (await db.getAll('recipes')).length, [...dits]], [['Créer 0 références', true], false, { issue: 'vide' }, avant, nAvant, []], 'T-C13 (ronde 1 ; N23, constat 8) : tout décoché → « Créer 0 références » éteint ; forcé, le clic ne lance rien et creerReferences refuse un plan vide ({ issue: vide }) : la lecture payée reste a_verifier, aucune fiche, aucun toast');
+      } finally { scene.remove(); }
+    }));
+
+    await run('T-C13 (ronde 1) séance sans livre : « Créer {n} références » le dit', () => withRepo(async (repo, db) => {
+      const I = await import('../src/ui/import.js');
+      await poserBibliotheque(repo, db, { seances: { ss1: ['p1'] } });
+      await db.mutate({ puts: { scan_sessions: [{ id: 'ss_sans', status: 'open', edition_id: null, started_at: DATE, page_ids: ['p1'], document_ids: [], device_id: repo.deviceId(), created_at: DATE, updated_at: DATE }], imports: [ligneAVerifier({ id: 'imp_sans', sessionId: 'ss_sans', page_ids: ['p1'], resultat: D.resultatIndex(L.validerLectureIndex(blocsDe(['p1']), { nbPhotos: 1 }), ['p1']), over: { edition_id: null } })] }, origin: 'device' });
+      const scene = nouvelleScene(); const dits = [];
+      try {
+        const ctx = await ctxDe(repo, db);
+        const p = I.indexEntriesPanel(ctx.scan_sessions.find((s) => s.id === 'ss_sans'), ctx, () => [], { repo, toast: (m) => dits.push(m), confirmer: async () => false, importId: 'imp_sans', maintenant: () => NOW });
+        scene.append(p);
+        p.querySelector('[data-role="creer-references"]').click();
+        await attendre(() => dits.length === 1, 'sans livre dit');
+        eq([[...dits], (await db.get('imports', 'imp_sans')).status, (await db.getAll('recipes')).length], [['Associe d’abord un livre à cette séance'], 'a_verifier', 2], 'T-C13 (ronde 1, N25) : une séance sans livre → « Créer {n} références » dit « Associe d’abord un livre à cette séance », rien d’écrit');
+      } finally { scene.remove(); }
+    }));
+
+    await run('T-C17 (ronde 1) « Annuler » pendant les gardes du vol : aucun POST, rien d’écrit', () => withRepo(async (repo, db) => {
+      const I = await import('../src/ui/import.js');
+      const UI = await import('../src/ui/import-cible.js');
+      await poserBibliotheque(repo, db, { octets: true, seances: { ss1: ENVOI } });
+      await db.mutate({ puts: { imports: [ligneAVerifier({ id: 'imp_g', resultat: C })] }, origin: 'device' });
+      const scene = nouvelleScene(); const dits = [];
+      let porte = null; let ouvrir = () => {}; let lectures = 0;
+      // La réduction des photos (pagePourEnvoi, après la session) est RETENUE : la tenue du panneau n'a pas encore de ligne (importId nul).
+      const retenu = { ...repo, getFile: async (sha) => { lectures += 1; if (porte) await porte; return repo.getFile(sha); } };
+      const ff = fauxFetch([200, corpsModele(LECTURE_5)]);
+      try {
+        const ctx = await ctxDe(repo, db);
+        const p = I.indexEntriesPanel(ctx.scan_sessions.find((s) => s.id === 'ss1'), ctx, () => [], { repo: retenu, toast: (m) => dits.push(m), confirmer: async () => true, fetch: ff.fetch, maintenant: () => NOW, importId: 'imp_g' });
+        scene.append(p);
+        await attendre(() => !lireIndex(p).disabled && !!p.querySelector('[data-role="entrees-lues"]'), 'lecture reçue posée, bouton allumé');
+        const avant = await db.get('imports', 'imp_g');
+        porte = new Promise((r) => { ouvrir = r; }); const l0 = lectures;
+        lireIndex(p).click();
+        await attendre(() => lectures > l0 && !!p.querySelector('[data-role="annuler"]'), 'gardes du vol en cours (photos retenues), « Annuler » offert');
+        const tenue = UI.volEnCours();
+        p.querySelector('[data-role="annuler"]').click();
+        ouvrir(); porte = null;
+        await attendre(() => UI.volEnCours() === null && !p.etatPanneau().vol, 'vol relâché');
+        await tick();
+        eq([tenue, ff.appels.length, await db.get('imports', 'imp_g'), (await db.getAll('imports')).length, !!p.querySelector('[data-role="entrees-lues"]'), lireIndex(p).disabled, [...dits]], [{ importId: null }, 0, avant, 1, true, false, []], 'T-C17 (ronde 1 ; constats 4 et 6, § 4.2) : « Annuler » pendant les gardes du vol (réduction des photos : la tenue n’a pas encore de ligne) → AUCUN POST, rien d’écrit (la lecture reçue intacte, aucune ligne neuve), le tableau toujours là, « Lire » rallumé, aucun toast');
+      } finally { UI.reinitialiserImportCible(); scene.remove(); }
+    }));
+
+    await run('T-C17 (ronde 1) relecture : jamais d’une lecture que l’écran n’a pas montrée', () => withRepo(async (repo, db) => {
+      const I = await import('../src/ui/import.js');
+      const UI = await import('../src/ui/import-cible.js');
+      await poserBibliotheque(repo, db, { octets: true, seances: { ss1: ENVOI, ss2: ENVOI, ss3: ENVOI, ss4: ENVOI } });
+      const r2De = (L1) => ({ ...L1, page_ids: ['p2'], started_at: '2026-10-19T11:00:00.000Z', resultat: D.resultatIndex(L.validerLectureIndex(blocsDe(['p2']), { nbPhotos: 1 }), ['p2']) });
+      await db.mutate({ puts: { imports: [ligneAVerifier({ id: 'imp_s1', sessionId: 'ss1', resultat: C }), ligneAVerifier({ id: 'imp_s2', sessionId: 'ss2', resultat: C }), ligneAVerifier({ id: 'imp_s3', sessionId: 'ss3', resultat: C })] }, origin: 'device' });
+      const scene = nouvelleScene(); const questions = [];
+      const ff = fauxFetch([200, corpsModele(LECTURE_5)]);
+      const panneauDe = async (sessionId, importId, confirmer) => { const ctx = await ctxDe(repo, db); const p = I.indexEntriesPanel(ctx.scan_sessions.find((s) => s.id === sessionId), ctx, () => [], { repo, toast: () => {}, confirmer, fetch: ff.fetch, maintenant: () => NOW, importId }); scene.append(p); await attendre(() => !lireIndex(p).disabled && p.querySelectorAll('[data-role="entrees-lues"] li').length === 23, 'R1 montrée'); return p; };
+      try {
+        // (a) R2 arrivée AVANT la tape (autre onglet, réception) : la question portait sur R1 → aucune question, rien ne part, R2 intacte et montrée.
+        const p1 = await panneauDe('ss1', 'imp_s1', async (q) => { questions.push(q); return true; });
+        const r2a = r2De(await db.get('imports', 'imp_s1')); await db.put('imports', r2a);
+        lireIndex(p1).click();
+        await attendre(() => p1.querySelectorAll('[data-role="entrees-lues"] li').length === 6, 'R2 montrée');
+        eq([questions.length, ff.appels.length, await db.get('imports', 'imp_s1')], [0, 0, r2a], 'T-C17 (ronde 1, constat 5, T4-R2) : la ligne porte une AUTRE lecture (R2, jamais montrée) au moment de « Lire » → aucune question (elle aurait parlé de R1), aucun POST, R2 intacte ; le panneau relit et montre R2');
+        // (b) R2 arrivée PENDANT la question : « oui » valait pour R1 → la reprise refuse DANS la transaction (cleLecture) ; aucune ligne neuve, aucun POST.
+        const p2 = await panneauDe('ss2', 'imp_s2', async (q) => { questions.push(q); await db.put('imports', r2De(await db.get('imports', 'imp_s2'))); return true; });
+        lireIndex(p2).click();
+        await attendre(() => questions.length === 1 && UI.volEnCours() === null && !p2.etatPanneau().vol && p2.querySelectorAll('[data-role="entrees-lues"] li').length === 6, 'refus relu, R2 montrée');
+        const l2 = await db.get('imports', 'imp_s2');
+        eq([ff.appels.length, l2.status, l2.started_at, (await db.getAll('imports')).filter((i) => i.scan_session_id === 'ss2').length], [0, 'a_verifier', '2026-10-19T11:00:00.000Z', 1], 'T-C17 (ronde 1, constat 5, T4-R2 dans la transaction) : R2 arrivée pendant la question → « oui » ne vaut que pour R1 : la reprise refuse, R2 n’est pas écrasée, aucune ligne neuve, aucun POST');
+        // (c) La lecture montrée est ENREGISTRÉE pendant la question (« Créer {n} références » d'un autre geste) : rien ne repart sur une ligne neuve.
+        const p3 = await panneauDe('ss3', 'imp_s3', async (q) => { questions.push(q); await db.put('imports', { ...(await db.get('imports', 'imp_s3')), status: 'enregistre', finished_at: NOW }); return true; });
+        lireIndex(p3).click();
+        await attendre(() => questions.length === 2 && UI.volEnCours() === null && !p3.etatPanneau().vol && p3.etatPanneau().status === null, 'refus relu (enregistrée)');
+        eq([ff.appels.length, (await db.get('imports', 'imp_s3')).status, (await db.getAll('imports')).filter((i) => i.scan_session_id === 'ss3').length], [0, 'enregistre', 1], 'T-C17 (ronde 1, constat 18) : la lecture montrée close pendant la question → la relecture confirmée ne part pas sur une ligne neuve (aucun appel payé sur la foi d’une question devenue fausse)');
+        // (d) « Lire » pendant « Créer {n} références » (sa transaction retenue) : aucune question, rien ne part ; la création aboutit.
+        await db.mutate({ puts: { imports: [ligneAVerifier({ id: 'imp_s4', sessionId: 'ss4', resultat: C })] }, origin: 'device' });
+        let porte = null; let ouvrir = () => {}; let retenues = 0;
+        const lent = { ...repo, transitionner: async (...a) => { retenues += 1; if (porte) await porte; return repo.transitionner(...a); } };
+        porte = new Promise((r) => { ouvrir = r; });
+        const ctx4 = await ctxDe(repo, db);
+        const p4 = I.indexEntriesPanel(ctx4.scan_sessions.find((s) => s.id === 'ss4'), ctx4, () => [], { repo: lent, toast: () => {}, confirmer: async (q) => { questions.push(q); return true; }, fetch: ff.fetch, maintenant: () => NOW, importId: 'imp_s4' });
+        scene.append(p4);
+        await attendre(() => !lireIndex(p4).disabled && !!p4.querySelector('[data-role="entrees-lues"]'), 'lecture posée (d)');
+        const q4 = questions.length;
+        p4.querySelector('[data-role="creer-references"]').click();
+        await attendre(() => retenues > 0 && p4.querySelector('[data-role="lecture"]').occupe(), 'création en cours (transaction retenue)');
+        lireIndex(p4).click();
+        await tick(); await tick();
+        const pendant = [questions.length - q4, ff.appels.length];
+        ouvrir(); porte = null;
+        await attendre(async () => (await db.get('imports', 'imp_s4')).status === 'enregistre', 'création aboutie');
+        eq([pendant, questions.length - q4, ff.appels.length], [[0, 0], 0, 0], 'T-C17 (ronde 1, constat 18) : « Lire » pendant « Créer {n} références » de la lecture montrée → aucune question (elle dirait « non créées » des entrées en train d’être créées), aucun POST ; la création aboutit');
+      } finally { UI.reinitialiserImportCible(); scene.remove(); }
+    }));
+
+    await run('T-C17 (ronde 1) relecture sans session : aucune question', () => withRepo(async (repo, db) => {
+      const I = await import('../src/ui/import.js');
+      await poserBibliotheque(repo, db, { octets: true, seances: { ss1: ENVOI } });
+      await db.mutate({ puts: { imports: [ligneAVerifier({ id: 'imp_q', resultat: C })] }, origin: 'device' });
+      const scene = nouvelleScene(); const questions = [];
+      const ff = fauxFetch([200, corpsModele(LECTURE_5)]);
+      try {
+        const ctx = await ctxDe(repo, db);
+        let n = 0; ctx.sync = { ...ctx.sync, auth: { jeton: async () => (n++ === 0 ? SESSION : null) } }; // la session expire après le rendu
+        const p = I.indexEntriesPanel(ctx.scan_sessions.find((s) => s.id === 'ss1'), ctx, () => [], { repo, toast: () => {}, confirmer: async (q) => { questions.push(q); return true; }, fetch: ff.fetch, maintenant: () => NOW, importId: 'imp_q' });
+        scene.append(p);
+        await attendre(() => !lireIndex(p).disabled && !!p.querySelector('[data-role="entrees-lues"]'), 'lecture posée, bouton allumé');
+        const avant = await db.get('imports', 'imp_q');
+        lireIndex(p).click();
+        await attendre(() => p.querySelector('[data-role="connexion-ia"]')?.hidden === false, 'carte « Connecte-toi »');
+        eq([questions, ff.appels.length, await db.get('imports', 'imp_q')], [[], 0, avant], 'T-C17 (ronde 1, constat 19) : sans session au moment de « Lire », la question de la relecture n’est pas posée (l’appel ne peut pas partir) : la carte « Connecte-toi » revient, rien n’est écrit, aucun POST');
+      } finally { scene.remove(); }
+    }));
+
+    await run('T-C17 (ronde 1) ligne en_cours tenue par un autre document, « Ignorer » d’une autre lecture, veille', () => withRepo(async (repo, db) => {
+      const I = await import('../src/ui/import.js');
+      const UI = await import('../src/ui/import-cible.js');
+      await poserBibliotheque(repo, db, { octets: true, seances: { ss_x: ['p4'], ss_k: ['p1'], ss_m: ['p2'] } });
+      const VIVANT = '2026-10-19T11:59:00.000Z'; const MORT = '2026-10-19T11:58:00.000Z'; // NOW − 60 s ; NOW − 120 s
+      await db.mutate({ puts: { imports: [
+        { ...ligneJournal({ id: 'imp_x', edition_id: 'ed1', scan_session_id: 'ss_x', page_ids: ['p4'], device_id: 'dev_ailleurs' }), status: 'en_cours', document_id_vol: 'doc_ailleurs', started_at: VIVANT, battement_at: VIVANT },
+        ligneJournal({ id: 'imp_k', edition_id: 'ed1', scan_session_id: 'ss_k', page_ids: ['p1'] }),
+      ] }, origin: 'device' });
+      const scene = nouvelleScene(); const dits = [];
+      let alls = 0;
+      const espion = { ...repo, all: async (s) => { const r = await repo.all(s); if (s === 'imports') alls += 1; return r; } };
+      const ff = fauxFetch([200, corpsModele(blocsDe(['p4']))]);
+      const panneauDe = async (sessionId) => { const ctx = await ctxDe(repo, db); let jetons = 0; ctx.sync = { ...ctx.sync, auth: { jeton: async () => { jetons += 1; return SESSION; } } }; const a = alls; const p = I.indexEntriesPanel(ctx.scan_sessions.find((s) => s.id === sessionId), ctx, () => [], { repo: espion, toast: (m) => dits.push(m), confirmer: async () => true, fetch: ff.fetch, maintenant: () => NOW }); scene.append(p); await attendre(() => jetons > 0 && alls > a, 'session et journal lus (ce panneau)'); await tick(); return p; };
+      try {
+        // (a) en_cours tenue ailleurs (vol vivant) : le texte, « Lire » éteint, aucun « Annuler » ; même forcé, lire() ne lance rien (I-7).
+        const px = await panneauDe('ss_x');
+        eq([px.querySelector('[data-role="etat-lecture"]').textContent, lireIndex(px).disabled, px.querySelector('[data-role="annuler"]'), px.etatPanneau()], ['En cours sur un autre écran', true, null, { importId: 'imp_x', status: 'en_cours', saisie: false, vol: false }], 'T-C17 (ronde 1 ; N06, N07, I-7 du lot A, § 4.2 état 3) : une ligne en_cours tenue par un AUTRE document → « En cours sur un autre écran », « Lire » éteint, aucun « Annuler »');
+        const nX = (await db.getAll('imports')).filter((i) => i.scan_session_id === 'ss_x').length; const a0 = alls;
+        lireIndex(px).disabled = false; lireIndex(px).click(); // forcé : la garde de lire() elle-même, pas seulement l'attribut du bouton
+        await attendre(() => alls >= a0 + 2, 'lire() rendu, panneau relu'); await tick();
+        eq([ff.appels.length, (await db.getAll('imports')).filter((i) => i.scan_session_id === 'ss_x').length, (await db.get('imports', 'imp_x')).status, lireIndex(px).disabled, UI.volEnCours()], [0, nX, 'en_cours', true, null], 'T-C17 (ronde 1 ; N11, I-7) : même forcé, « Lire » sur une ligne en_cours tenue ailleurs ne lance rien — aucun POST, aucune seconde ligne pour la séance (jamais une double lecture payée), la ligne intacte, le bouton re-éteint');
+        // (b) « Ignorer » ne vaut que pour la lecture MONTRÉE (T4-R2) : la ligne a_lancer relancée ailleurs puis revenue à lancer (autre départ) n'est pas ignorée.
+        const pk = await panneauDe('ss_k');
+        const k2 = { ...(await db.get('imports', 'imp_k')), started_at: '2026-10-19T11:30:00.000Z' };
+        await db.put('imports', k2);
+        const b0 = alls;
+        boutonTexte(pk, 'Ignorer').click();
+        await attendre(() => alls >= b0 + 1, 'Ignorer refusé, panneau relu'); await tick();
+        eq([await db.get('imports', 'imp_k'), pk.etatPanneau().status, pk.querySelector('[data-role="ignorer"]').hidden], [k2, 'a_lancer', false], 'T-C17 (ronde 1 ; N17, T4-R2) : la ligne a_lancer porte une autre lecture (autre départ) que celle montrée → « Ignorer » n’écrit rien, la ligne reste intacte, le panneau relu l’offre pour la ligne réelle');
+        // (c) Veille (VF-15 du lot A) : une ligne en_cours de CET appareil dont le document est mort (battement de 120 s) est levée dès l'affichage.
+        await db.mutate({ puts: { imports: [{ ...ligneJournal({ id: 'imp_mort', edition_id: 'ed1', scan_session_id: 'ss_m', page_ids: ['p2'], device_id: repo.deviceId() }), status: 'en_cours', document_id_vol: 'doc_mort', started_at: MORT, battement_at: MORT }] }, origin: 'device' });
+        const pm = await panneauDe('ss_m');
+        await attendre(async () => (await db.get('imports', 'imp_mort')).status === 'echec' && pm.textContent.includes('La lecture a été interrompue.'), 'levée à l’affichage');
+        eq([(await db.get('imports', 'imp_mort')).erreur, lireIndex(pm).textContent, pm.textContent.includes('En cours sur un autre écran'), (await db.get('imports', 'imp_x')).status], [{ raison: 'interrompu', extra: {} }, 'Relancer', false, 'en_cours'], 'T-C17 (ronde 1 ; constat 20, VF-15 du lot A) : une ligne en_cours de CET appareil au document mort (battement de 120 s) est levée dès l’affichage du panneau — phrase I-4, « Relancer » ; plus d’impasse « En cours sur un autre écran » jusqu’au redémarrage ; le vol vivant d’un autre appareil reste en_cours');
+      } finally { UI.reinitialiserImportCible(); scene.remove(); }
     }));
 
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne
