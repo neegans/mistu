@@ -1598,6 +1598,39 @@ export async function runTableMatieresTests({ eq, ok }) {
       eq(S.searchDocs(docs, S.parseQuery('poisson'), {}).admissible.map((h) => h.doc.recipe.id), ['rc_p'], 'T-C19 (ronde 1 ; M-textParts) : une recette available rangée sous « Poissons » est TROUVÉE par « poisson » (la section entre dans ses tokens) ; limite : un mot de section qui est aussi un mot de type (« entrée ») ne trouve pas une recette sans type');
     });
 
+    // =================================================================================================================================
+    // Tâche 6 — filets du lot (T-C20, I-C8) : chaque texte neuf de la spec § 5 avec SON anglais ; modules dans SHELL et dans le filet i18n ; aucun texte
+    // ne nomme le fournisseur ni la base (test de source admis, comme pour src/ui/import-cible.js).
+    await run('T-C20 filets du lot', async () => {
+      const { EN } = await import('../src/i18n/en.js');
+      const { MODULES_NEUFS, CHAINES_NEUVES_AILLEURS } = await import('./ajouter.js');
+      const lireSource = async (chemin) => { const r = await vraiFetch(new URL(chemin, import.meta.url), { cache: 'no-store' }); if (!r.ok) throw new Error(`${chemin} : HTTP ${r.status}`); return r.text(); }; // la fetch réelle gardée en tête de la suite (globalThis.fetch y lève)
+      const ATTENDU = {
+        'Ordre des photos': 'Photo order', 'Ordre proposé d’après les numéros de page lus — vérifie.': 'Order suggested from the page numbers read — check it.',
+        'L’ordre des photos suit les numéros lus.': 'The photo order follows the page numbers read.', 'Appliquer cet ordre': 'Apply this order', 'Ordre enregistré.': 'Order saved.',
+        'p. {a}-{b}': 'pp. {a}-{b}', 'Entrées lues': 'Entries read', '{n} entrées lues · {m} déjà dans ce livre': '{n} entries read · {m} already in this book',
+        'Créer {n} références': 'Create {n} references', 'Créer 1 référence': 'Create 1 reference', 'déjà repérée': 'already spotted', 'en double': 'duplicate',
+        'photo {n}': 'photo {n}', 'photo inconnue': 'unknown photo', 'Créer une référence pour « {t} »': 'Create a reference for “{t}”',
+        'Déjà repérée dans ce livre': 'Already spotted in this book', 'En double dans cette lecture': 'Duplicate in this reading', 'Revenir à la lecture': 'Back to the reading',
+        'Lecture coupée : lis moins de photos à la fois.': 'Reading cut off: read fewer photos at a time.', 'Aucune entrée lue sur ces photos.': 'No entry was read on these photos.',
+        'Lue en {s} s · {n} photo(s)': 'Read in {s} s · {n} photo(s)', '{n} photo(s)': '{n} photo(s)', 'La lecture a déjà été enregistrée.': 'This reading has already been saved.',
+        'Relire remplace la lecture reçue ({n} entrées non créées) et coûte un appel. Continuer ?': 'Reading again replaces the reading received ({n} entries not created) and costs one call. Continue?',
+        'Relire': 'Read again', 'Une lecture = un appel à l’assistant, compté dans ton quota du jour.': 'One reading = one call to the assistant, counted in your daily quota.',
+        'Les photos de cette séance ne sont pas sur cet appareil.': 'The photos of this session are not on this device.',
+        '{k} entrées écartées (trop longues)': '{k} entries left out (too long)', '{k} entrées écartées (adresse)': '{k} entries left out (web address)',
+        'page inconnue': 'unknown page', 'Incertain': 'Uncertain', '{n} référence(s) créée(s){d}': '{n} reference(s) created{d}', '{n} doublon(s) ignoré(s)': '{n} duplicate(s) skipped',
+        'Titre': 'Title', 'Section': 'Section', 'Section : {s}': 'Section: {s}',
+      };
+      eq(Object.entries(ATTENDU).filter(([fr, en]) => EN[fr] !== en).map(([fr]) => fr), [], 'T-C20 (I-C8, § 5) : chaque texte neuf du lot a son entrée en.js, avec l’anglais de la spec');
+      eq(['Saisir à la main', 'Monter la page {n}', 'Descendre la page {n}', 'p. imprimée', 'Lecture des pages par l’assistant…', 'Relancer', 'Annuler', 'L’assistant n’a pas répondu lisiblement. Réessaie.', 'Code : {c}', 'Une lecture est déjà en cours : annule-la d’abord.', 'Tu es hors ligne.', 'En cours sur un autre écran', 'incertain', 'Incertain : {t}', 'Ignorer', 'Page {n}'].filter((k) => typeof EN[k] !== 'string'), [], 'T-C20 : les clés existantes que le lot réemploie sont toujours là');
+      const sw = await lireSource('../sw.js');
+      ok(sw.includes("'./src/domain/table-matieres.js'") && sw.includes("'./src/ui/table-matieres.js'"), 'T-C20 : SHELL contient les deux modules neufs du lot');
+      eq([MODULES_NEUFS.includes('../src/ui/table-matieres.js'), ['Relire remplace la lecture reçue ({n} entrées non créées) et coûte un appel. Continuer ?', 'Relire', 'Les photos de cette séance ne sont pas sur cet appareil.', 'Revenir à la lecture'].every((c) => CHAINES_NEUVES_AILLEURS['../src/ui/import.js']?.includes(c)), CHAINES_NEUVES_AILLEURS['../src/ui/recipe.js']?.includes('Section : {s}')], [true, true, true], 'T-C20 : le filet i18n couvre le module neuf (MODULES_NEUFS) et les chaînes neuves d’import.js et de recipe.js (CHAINES_NEUVES_AILLEURS)');
+      const src = await lireSource('../src/ui/table-matieres.js');
+      ok(src.length > 1000 && /export function panneauLecture/.test(src) && /export async function creerReferences/.test(src), 'T-C20 : src/ui/table-matieres.js est lu (garde contre un source vide)');
+      eq(/Anthropic|Supabase/.test(src), false, 'T-C20 (I-C8) : aucun texte ne nomme le fournisseur ni la base dans src/ui/table-matieres.js');
+    });
+
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne
   } catch (error) {
     ok(false, `Table des matières : suite interrompue — ${error?.name || 'Erreur'} — ${error?.message || String(error)}`);

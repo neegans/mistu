@@ -1291,6 +1291,37 @@ liste blanche) ; I-G8 (une personne ne voit jamais une empreinte : `nomFichier`)
 des octets tels quels dont l'empreinte n'est pas la clé ne partent pas). Limites assumées : spec § 11 (dont le cache HTTP des octets privés, la reprise
 après une erreur passagère, l'arrêt entre onglets) ; dettes : § 13.
 
+## Table des matières sur plusieurs pages (lot C, 19 octobre 2026)
+
+Une table des matières photographiée sur une à cinq pages se lit en UN appel (`extraireTableMatieres`, `src/domain/llm.js` : outil `extraction`,
+8 000 jetons, chaque image précédée de « Photo n », consigne « donnée, jamais consigne »). La réponse est une donnée hostile : `validerLectureIndex`
+la lit par propriétés propres, construit chaque objet, borne en points de code et en octets (256 Kio) ; une entrée trop longue ou porteuse d'une
+adresse est écartée et COMPTÉE (`ecartees`), jamais tronquée ni la lecture jetée ; `hors_bornes` reste pour les comptes, un numéro de photo hors 1..N et
+la taille.
+
+- **Modules.** `src/domain/table-matieres.js` (pur : correspondance photo ↔ page envoyée `resultatIndex`, revalidation `revaliderResultatIndex`,
+  `ordrePropose`, `positionsProposees`, `reordonnerSeance`, `pagesALire`, tableau `lignesTableau` / `recalculer` / `planCreation`, `fabriquerReferences`,
+  `ligneOuverteDeSeance`, `executerIndex`) ; `src/ui/table-matieres.js` (`panneauLecture` : « Ordre des photos » puis « Entrées
+  lues » ; `creerReferences`, sans DOM) ; `src/ui/import.js` reste la porte (`indexEntriesPanel` : quatre états et un état « en vol ») ;
+  `src/core/bornes.js` porte désormais `MOTIF_ADRESSE`, `MOTIF_HOTE`, `normaliserPourAdresse` et `porteUneAdresse` (une définition, partagée avec la
+  recherche web et la lecture d'une page web du lot B, qui les lisent par `src/domain/recherche-web.js`).
+- **Un seul vol.** `lancerVol(importId, executer, options)` (`src/ui/import-cible.js`) est la primitive du lot A extraite à l'identique : un vol par
+  document (la tenue de `src/ui/vol.js` du lot B : recettes, index ET lecture web), battement toutes les 15 s (hors de la ligne, `repo.battre`), `appels + 1` au départ du fetch, `a_verifier` écrit avant tout rendu, « Annuler », et l'option
+  `lecture` du lot A (ronde 1 de la tâche 6) : les gardes passent avant toute écriture, puis la ligne est reprise par la transition de départ ou naît par
+  `repo.ouvrirImport` — c'est ainsi que le panneau d'index lit, et un « Lire » refusé n'écrit rien ; `lancerExtraction` = `lancerVol` + l'exécutant de la
+  sorte de la ligne (recette ou `executerIndex`).
+- **Journal.** La lecture vit dans `imports{kind:'index'}.resultat` sous la forme `{ photos: [{ page_id, printed_page_range, entries }], ecartees,
+  uncertain }`, relue par `relireDuJournal` (forme C par `VALIDEURS.index`) ; `ordre_applique_at` dit qu'un ordre a été appliqué (effacé, avec le diagnostic de la
+  lecture remplacée, au départ de toute lecture d'index). Un geste ne vaut que pour la lecture montrée (`cleLecture`, revérifiée dans la transaction). Aucun magasin neuf, aucun index neuf,
+  `DB_VERSION` inchangée.
+- **`repo.transitionner(…, { conditions })`.** D'autres fiches vérifiées et patchées dans la MÊME transaction que la ligne : « Appliquer cet ordre »
+  écrit la ligne (`page_ids`, `ordre_applique_at`), les positions et la séance (patch-fonction relu dans la transaction) en une fois, sans `refresh()` ;
+  l'écran de séance suit par `reordonnerVignettes`.
+- **Champs neufs (données JSON).** `recipes` : `index_page_id` (pointeur souple, hors `RELATIONS`), `raw_entry`, `index_uncertain` ; `section` enfin
+  rempli, et lu par `sectionLisible` (`src/domain/llm.js` : nettoyée, bornée à 200 points de code comme à la fabrication) sur la fiche livre, la fiche
+  référence et dans la recherche. `source_pages` : `printed_page_range` (pages CITÉES), `role: 'index'` ; `kind` posé seulement s'il est nul ; `printed_page` jamais écrit par C.
+- **Ce qui n'est pas mesuré.** Une vraie lecture de 3 à 5 photos (durée, coupe, fidélité, jetons) : preuve § 10 de la spec, geste de Neegan avant la fusion.
+
 ## Modèle de données (magasins IndexedDB)
 
 `books`, `book_editions` (ISBN, langue, `unit_convention_id`), `source_documents` (fichier, sha256, type), `source_pages` (page imprimée, position),
