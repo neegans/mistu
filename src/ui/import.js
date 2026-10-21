@@ -82,7 +82,9 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   const applique = appliquerIntention({ intention: query.intention, pageIds: pages.map((p) => p.id) });
   // ?import=<imp> (spec § 4.5, tâche 6 ; lot C, D-C22) : la lecture d'index OUVERTE de cette séance — désignée par ?import=, sinon la plus récente
   // (ligneOuverteDeSeance) — rend le panneau visible ; à la reprise par ?import= (sans intention), ses pages RÉSOLUES sont présélectionnées (C6 : jamais un
-  // identifiant sans vignette). Une lecture close, d'une autre sorte ou d'une autre séance ne rouvre rien. Une intention a posé sa sélection : elle gagne.
+  // identifiant sans vignette). Seules la présélection et l'importId du panneau suivent la ligne DÉSIGNÉE : une lecture close, d'une autre sorte ou d'une
+  // autre séance n'est ni cochée ni relue ; la visibilité du panneau, elle, suit TOUTE ligne d'index ouverte de la séance (M67). Une intention a posé sa
+  // sélection : elle gagne (garde équivalente tant que l'intention coche toutes les pages résolues, ronde 1).
   const ligneIndex = ligneOuverteDeSeance(ctx.imports, session.id, { importId: query.import ?? null });
   const ligneImport = query.import && ligneIndex?.id === query.import ? ligneIndex : null;
   const selected = new Set(applique.selection);

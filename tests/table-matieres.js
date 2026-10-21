@@ -684,14 +684,17 @@ export async function runTableMatieresTests({ eq, ok }) {
         eq([zone().hidden, zone().querySelector('h3')?.textContent, zone().querySelector('[data-role="etat-ordre"]')?.textContent, figures().map((f) => f.dataset.page), figures().map((f) => f.querySelector('.num').textContent), figures().map((f) => f.querySelector('figcaption > span').textContent), appliquer().hidden],
           [false, 'Ordre des photos', 'Ordre proposé d’après les numéros de page lus — vérifie.', ['p1', 'p2', 'p3', 'p4', 'p5'], ['1', '2', '3', '4', '5'], ['p. 8-94', 'p. 98-158', 'p. 164-180', 'p. 182-192', 'page inconnue'], false],
           'T-C12 (D-C3) : « Ordre des photos », la phrase d’état (proposé ≠ séance), les vignettes dans l’ordre PROPOSÉ (rang, plage citée ou « page inconnue »), « Appliquer cet ordre » rendu');
+        eq(figures().map((f) => f.querySelector('figcaption > span').className), ['', '', '', '', 'chip warn'], 'T-C12 (ronde 1, P18, § 4.3) : « page inconnue » est une puce d’avertissement (.chip.warn) ; une plage citée, un texte nu');
         vus.length = 0;
         boutonTexte(zone(), 'Descendre la page 1').click();
         eq([vue.etatLecture().ordre, figures().map((f) => f.dataset.page), document.activeElement?.dataset.role, document.activeElement?.dataset.page, vus.length, appliquer().hidden], [['p2', 'p1', 'p3', 'p4', 'p5'], ['p2', 'p1', 'p3', 'p4', 'p5'], 'descendre', 'p1', 0, false], 'T-C12 (M45, I-C6) : « Descendre la page 1 » change l’ordre affiché, le focus suit la page déplacée, AUCUNE écriture');
         boutonTexte(zone(), 'Monter la page 1').click();
         eq([vue.etatLecture().ordre, vus.length], [['p2', 'p1', 'p3', 'p4', 'p5'], 0], 'T-C12 : monter la page en tête ne change rien (le bouton reste, sans effet)');
-        appliquer().click();
+        appliquer().click(); appliquer().click(); // ronde 1 (P04) : deux tapes dans le même tour — la seconde tombe sur le bouton redessiné, éteint
+        eq([...zone().querySelectorAll('button[data-role="monter"], button[data-role="descendre"]')].map((b) => b.disabled), Array(10).fill(true), 'T-C12 (ronde 1, ↑/↓ actifs pendant l’écriture) : dès la tape sur « Appliquer », les dix ↑/↓ sont éteints jusqu’à la fin de l’écriture');
         await attendre(() => zone().querySelector('[data-role="etat-ordre"]')?.textContent === 'Ordre enregistré.', 'ordre enregistré');
-        eq(vus.length, 1, 'T-C12 (M46) : « Appliquer cet ordre » = UNE transaction (un seul appel de db.onMutate)');
+        for (let i = 0; i < 10; i += 1) await new Promise((r) => setTimeout(r, 10)); // laisse finir une seconde transaction éventuelle (P04)
+        eq(vus.length, 1, 'T-C12 (M46, ronde 1 P04) : « Appliquer cet ordre », même tapé deux fois dans le même tour, = UNE transaction (un seul appel de db.onMutate)');
         const m = vus[0];
         eq([Object.keys(m).sort(), m.source_pages.map((p) => [p.id, p.position]), m.source_pages.some((p) => 'role' in p || 'printed_page_range' in p), m.source_pages.map((p) => [p.kind, p.printed_page]), m.imports.map((i) => [i.id, i.status, i.page_ids, i.ordre_applique_at]), m.scan_sessions.map((s) => s.page_ids)],
           [['imports', 'scan_sessions', 'source_pages'], [['p2', 2], ['p1', 3], ['p3', 5], ['p4', 6], ['p5', 7]], false, [[null, null], [null, null], [null, null], [null, null], [null, null]], [['imp_o1', 'a_verifier', ['p2', 'p1', 'p3', 'p4', 'p5'], NOW]], [['q1', 'p2', 'p1', 'q4', 'p3', 'p4', 'p5']]],
@@ -700,6 +703,8 @@ export async function runTableMatieresTests({ eq, ok }) {
         eq([opts?.attendus, typeof opts?.patch, Object.keys(patchLigne ?? {}).sort(), patchLigne?.page_ids, opts?.conditions?.scan_sessions?.map((c) => [c.key, c.attendus, typeof c.patch])], [['a_verifier'], 'function', ['ordre_applique_at', 'page_ids'], ['p2', 'p1', 'p3', 'p4', 'p5'], [['ss1', ['open', 'done'], 'function']]], 'T-C12 (V2, § 4.3, T4-R2) : « Appliquer » passe par la transition du repo injecté — attendus a_verifier, patch FONCTION (la clé de la lecture revérifiée dans la transaction) qui rend { page_ids, ordre_applique_at }, conditions.scan_sessions = [{ key, attendus open/done, patch FONCTION }] : la séance relue DANS la transaction');
         eq([appliquer().hidden, zone().querySelector('[data-role="etat-ordre"]').classList.contains('ok'), refreshs, apres.length, apres[0]?.pages.map((p) => [p.id, p.position]), apres[0]?.seance?.page_ids, dits, changements.length], [true, true, 0, 1, [['p2', 2], ['p1', 3], ['p3', 5], ['p4', 6], ['p5', 7]], ['q1', 'p2', 'p1', 'q4', 'p3', 'p4', 'p5'], [], 0], 'T-C12 (M70 en partie, D-C15) : « Ordre enregistré. » (.status ok), bouton caché, AUCUN refresh() (l’écran n’est pas reconstruit), apresOrdre reçoit une fois { pages, seance RELUE } ; aucun toast (sans effet en tâche 3 : l’option toast de panneauLecture naît en tâche 4, où la même assertion porte)');
         eq([(await db.get('scan_sessions', 'ss1')).page_ids, (await db.get('source_pages', 'p2')).position, (await db.get('imports', 'imp_o1')).ordre_applique_at], [['q1', 'p2', 'p1', 'q4', 'p3', 'p4', 'p5'], 2, NOW], 'T-C12 (M47) : en base, la séance réordonnée, la position neuve, ordre_applique_at posé');
+        boutonTexte(zone(), 'Descendre la page 1').click();
+        eq([vue.etatLecture().ordre, appliquer().hidden, appliquer().disabled, vus.length], [['p1', 'p2', 'p3', 'p4', 'p5'], false, false, 1], 'T-C12 (ronde 1, P03, § 4.3) : après un « Appliquer » réussi, la MÊME instance reste vivante — « Descendre la page 1 » change l’ordre, « Appliquer cet ordre » revient, allumé (une seconde correction est possible), rien d’écrit');
         const ctx2 = await ctxDe(repo, db);
         const vue2 = T.panneauLecture({ ligne: await db.get('imports', 'imp_o1'), resultat: C, session: ctx2.scan_sessions.find((s) => s.id === 'ss1'), ctx: ctx2, repo, maintenant: () => NOW, surChangement: () => changements.push(1) });
         scene.append(vue2);
@@ -711,6 +716,8 @@ export async function runTableMatieresTests({ eq, ok }) {
         z2.querySelector('[data-role="appliquer-ordre"]').click();
         await attendre(() => changements.length === 1, 'conflit signalé à l’appelant');
         eq([vus.length, dits, (await db.get('scan_sessions', 'ss1')).page_ids], [0, [], ['q1', 'p2', 'p1', 'q4', 'p3', 'p4', 'p5']], 'T-C12 : conflit (la ligne a été enregistrée ailleurs) → rien d’écrit, aucun toast bruyant, surChangement appelé (l’appelant relit)');
+        boutonTexte(z2, 'Descendre la page 2').click();
+        eq([vue2.etatLecture().ordre, z2.querySelector('[data-role="appliquer-ordre"]').hidden, z2.querySelector('[data-role="appliquer-ordre"]').disabled], [['p1', 'p3', 'p2', 'p4', 'p5'], false, false], 'T-C12 (ronde 1, P03) : après un conflit, la même instance reste vivante (↑/↓ et « Appliquer cet ordre » rallumés)');
       } finally { db.onMutate = capture; window.removeEventListener('cuisineos:refresh', compter); scene.remove(); }
     }));
     await run('T-C12 ordre : même ordre que la séance, une photo, photo inconnue', () => withRepo(async (repo, db) => {
@@ -725,6 +732,10 @@ export async function runTableMatieresTests({ eq, ok }) {
       const formeA = D.revaliderResultatIndex(LECTURE_A, ['p1']);
       const vA = T.panneauLecture({ ligne: ligneAVerifier({ id: 'imp_o4', page_ids: ['p1'], resultat: LECTURE_A }), resultat: formeA, session, ctx, repo });
       eq([v1.querySelector('[data-role="ordre-photos"]')?.hidden ?? true, vA.querySelector('[data-role="ordre-photos"]')?.hidden ?? true], [true, true], 'T-C12 (M44, M43) : une seule photo, ou une photo inconnue (lecture du lot A) → aucune section d’ordre');
+      // Ronde 1 (M43) : la forme A n'a qu'une photo, N ≥ 2 la cachait déjà — ici DEUX photos, dont une inconnue (forme C revalidée : page_id null admis).
+      const deuxDontInconnue = D.revaliderResultatIndex({ photos: [C.photos[1], { ...C.photos[3], page_id: null }], ecartees: C.ecartees, uncertain: [] }, ['p1']);
+      const vI = T.panneauLecture({ ligne: ligneAVerifier({ id: 'imp_o4b', page_ids: ['p1'], resultat: deuxDontInconnue }), resultat: deuxDontInconnue, session, ctx, repo });
+      eq([deuxDontInconnue?.photos.map((p) => p.page_id), vI.querySelector('[data-role="ordre-photos"]')?.hidden ?? true, vI.querySelector('[data-role="appliquer-ordre"]'), vI.querySelectorAll('figure').length], [['p1', null], true, null, 0], 'T-C12 (ronde 1, M43) : deux photos dont une INCONNUE (page_id null) → aucune section d’ordre (N ≥ 2 ne suffit pas : jamais une vignette sans page, ni un ↑/↓ ou un « Appliquer » sur null)');
     }));
     await run('T-C12 ordre : une page ajoutée par un autre onglet reste dans la séance', () => withRepo(async (repo, db) => {
       const T = await import('../src/ui/table-matieres.js');
@@ -768,6 +779,107 @@ export async function runTableMatieresTests({ eq, ok }) {
       eq([l7.status, l7.page_ids, D.revaliderResultatIndex(l7.resultat, l7.page_ids) !== null, (await db.get('scan_sessions', 'ss1')).page_ids, (await db.get('source_pages', 'p3')) ?? null],
         ['a_verifier', ['p1', 'p2', 'p3', 'p4', 'p5'], true, ['q1', 'p3', 'p1', 'q4', 'p2', 'p4', 'p5'], null], 'T-C12 (M-C7, § 4.3) : une photo retirée de la base avant « Appliquer » → la ligne garde les N photos dans l’ordre choisi (page_ids = l’ordre, jamais les seules pages relues) : la lecture payée reste lisible (revaliderResultatIndex non nul) ; positions et séance pour les pages présentes seulement, p3 garde son créneau et n’est pas recréée');
     }));
+    await run('T-C12 (ronde 1) ordre : une page retirée entre la relecture et la transaction n’est jamais ressuscitée', () => withRepo(async (repo, db) => {
+      const T = await import('../src/ui/table-matieres.js');
+      await poserBibliotheque(repo, db, { seances: { ss1: SEANCE7 } });
+      const ligne = ligneAVerifier({ id: 'imp_o8', resultat: C });
+      await db.mutate({ puts: { imports: [ligne] }, origin: 'device' });
+      const ctx = await ctxDe(repo, db); const session = ctx.scan_sessions[0];
+      // La porte : APRÈS la relecture des pages par l'écran et AVANT la transaction, p3 est retirée (« Retirer » d'un autre onglet, tombale reçue) et une
+      // « p. imprimée » est posée sur p1 (champ de la vignette de séance, autre onglet).
+      const espion = { ...repo, transitionner: async (s, k, o) => { if (s === 'imports') { await repo.remove('source_pages', 'p3'); await repo.save('source_pages', { ...(await repo.get('source_pages', 'p1')), printed_page: 12 }); } return repo.transitionner(s, k, o); } };
+      const vue = T.panneauLecture({ ligne, resultat: C, session, ctx, repo: espion, maintenant: () => NOW });
+      vue.querySelector('[data-role="appliquer-ordre"]').click();
+      await attendre(async () => (await db.get('imports', 'imp_o8')).ordre_applique_at === NOW, 'ordre appliqué');
+      const p1 = await db.get('source_pages', 'p1');
+      eq([(await db.get('source_pages', 'p3')) ?? null, (await db.getAll('outbox')).filter((o) => o.store === 'source_pages' && o.id === 'p3').map((o) => o.op), [p1.position, p1.printed_page], (await db.get('source_pages', 'p2')).position],
+        [null, ['delete'], [2, 12], 3], 'T-C12 (ronde 1, § 4.3 : fusion au lieu de puts) : chaque page ne reçoit QUE sa position, sur sa fiche RELUE dans la transaction — une page retirée entre la relecture et l’écriture n’est jamais ressuscitée (aucun put après sa suppression en file), une « p. imprimée » posée dans la fenêtre survit');
+    }));
+    await run('T-C12 (ronde 1) ordre : une photo retirée de la séance après un « Appliquer », puis reprise', () => withRepo(async (repo, db) => {
+      const T = await import('../src/ui/table-matieres.js');
+      await poserBibliotheque(repo, db, { seances: { ss1: SEANCE7 } });
+      const ligne = ligneAVerifier({ id: 'imp_o9', resultat: C });
+      await db.mutate({ puts: { imports: [ligne] }, origin: 'device' });
+      const ctx = await ctxDe(repo, db);
+      const vue = T.panneauLecture({ ligne, resultat: C, session: ctx.scan_sessions[0], ctx, repo, maintenant: () => NOW });
+      vue.querySelector('[data-role="appliquer-ordre"]').click();
+      await attendre(async () => (await db.get('imports', 'imp_o9')).ordre_applique_at === NOW, 'premier ordre appliqué');
+      // p5 (la page décorative) retirée de la séance et de la base : « Retirer » ne refuse que les pages citées par une recette.
+      const ss = await db.get('scan_sessions', 'ss1');
+      await db.put('scan_sessions', { ...ss, page_ids: ss.page_ids.filter((id) => id !== 'p5') });
+      await db.delete('source_pages', 'p5');
+      const ctx2 = await ctxDe(repo, db);
+      const NOW2 = '2026-10-19T13:00:00.000Z';
+      const reprise = T.panneauLecture({ ligne: await db.get('imports', 'imp_o9'), resultat: C, session: ctx2.scan_sessions[0], ctx: ctx2, repo, maintenant: () => NOW2 });
+      const ordreReprise = reprise.etatLecture().ordre;
+      boutonTexte(reprise, 'Descendre la page 1').click();
+      reprise.querySelector('[data-role="appliquer-ordre"]').click();
+      await attendre(async () => (await db.get('imports', 'imp_o9')).ordre_applique_at === NOW2, 'second ordre appliqué');
+      const l9 = await db.get('imports', 'imp_o9');
+      eq([ordreReprise, l9.page_ids, D.revaliderResultatIndex(l9.resultat, l9.page_ids) !== null], [['p1', 'p2', 'p3', 'p4', 'p5'], ['p2', 'p1', 'p3', 'p4', 'p5'], true], 'T-C12 (ronde 1, P17, M-C7) : reprise après un « Appliquer » puis une photo retirée de la séance → l’ordre courant garde les N photos (projection de la séance + la photo absente en queue) ; un second « Appliquer » écrit N page_ids et la lecture payée reste lisible');
+    }));
+    await run('T-C12 (ronde 1) ordre : refus à la relecture, autre séance, résultat qui n’est pas celui de la ligne', () => withRepo(async (repo, db) => {
+      const T = await import('../src/ui/table-matieres.js');
+      await poserBibliotheque(repo, db, { seances: { ss1: SEANCE7, ss2: ['q7'] } });
+      await db.mutate({ puts: { imports: ['imp_o10', 'imp_o11', 'imp_o12'].map((id) => ligneAVerifier({ id, resultat: C })) }, origin: 'device' });
+      const ctx = await ctxDe(repo, db);
+      const [ss1, ss2] = ['ss1', 'ss2'].map((id) => ctx.scan_sessions.find((s) => s.id === id));
+      const changements = []; let transitions = 0;
+      const espion = { ...repo, transitionner: async (...a) => { transitions += 1; return repo.transitionner(...a); } };
+      const essaiApplique = async (id, opts) => {
+        const n = changements.length;
+        const vue = T.panneauLecture({ ligne: await db.get('imports', id), resultat: C, session: ss1, ctx, repo: espion, maintenant: () => NOW, surChangement: () => changements.push(id), ...opts });
+        if (id === 'imp_o10') await db.put('imports', { ...(await db.get('imports', id)), started_at: 'R2' }); // une autre lecture arrivée AVANT le clic
+        vue.querySelector('[data-role="appliquer-ordre"]').click();
+        await attendre(() => changements.length === n + 1, 'refus signalé (' + id + ')');
+        const l = await db.get('imports', id);
+        return [l.ordre_applique_at ?? null, l.page_ids];
+      };
+      const relecture = await essaiApplique('imp_o10', {});
+      eq([relecture, transitions], [[null, ENVOI], 0], 'T-C12 (ronde 1, refus à la relecture) : la ligne porte une autre lecture AVANT le clic → refus à la relecture, AUCUNE transition, surChangement appelé (l’appelant relit), rien d’écrit');
+      const autreSeance = await essaiApplique('imp_o11', { session: ss2 });
+      const deux = D.revaliderResultatIndex({ photos: [C.photos[0], C.photos[1]], ecartees: C.ecartees, uncertain: [] }, ['p3', 'p1']);
+      const autreResultat = await essaiApplique('imp_o12', { resultat: deux });
+      eq([autreSeance, autreResultat, (await db.get('scan_sessions', 'ss1')).page_ids, (await db.get('source_pages', 'p1')).position, [...changements]], [[null, ENVOI], [null, ENVOI], SEANCE7, 3, ['imp_o10', 'imp_o11', 'imp_o12']], 'T-C12 (ronde 1, défense en profondeur) : une séance qui n’est pas celle de la ligne, ou un résultat qui n’est pas celui de la ligne (l’ordre n’est pas une permutation de ses photos) → la transaction refuse : rien d’écrit (ni la ligne, ni la séance, ni les positions), surChangement appelé');
+    }));
+    await run('T-C12 (ronde 1) ordre : positions absentes ou non entières départagées par le rang de la séance relue', () => withRepo(async (repo, db) => {
+      const T = await import('../src/ui/table-matieres.js');
+      await poserBibliotheque(repo, db, { seances: { ss1: ['p2', 'p1'] } });
+      // Venues d'un autre appareil ou d'une archive (S-19) : p2 à 4,5, p1 sans position — réassignées TELLES QUELLES, départagées par le rang de la séance.
+      await db.put('source_pages', { ...(await db.get('source_pages', 'p2')), position: 4.5 });
+      await db.put('source_pages', { ...(await db.get('source_pages', 'p1')), position: null });
+      const deux = D.revaliderResultatIndex({ photos: [C.photos[1], C.photos[3]], ecartees: C.ecartees, uncertain: [] }, ['p1', 'p2']);
+      const ligne = ligneAVerifier({ id: 'imp_o13', page_ids: ['p1', 'p2'], resultat: deux });
+      await db.mutate({ puts: { imports: [ligne] }, origin: 'device' });
+      const ctx = await ctxDe(repo, db);
+      const vue = T.panneauLecture({ ligne, resultat: deux, session: ctx.scan_sessions[0], ctx, repo, maintenant: () => NOW });
+      vue.querySelector('[data-role="appliquer-ordre"]').click();
+      await attendre(async () => (await db.get('imports', 'imp_o13')).ordre_applique_at === NOW, 'ordre appliqué');
+      eq([(await db.get('source_pages', 'p1')).position, (await db.get('source_pages', 'p2')).position, (await db.get('scan_sessions', 'ss1')).page_ids], [4.5, null, ['p1', 'p2']], 'T-C12 (ronde 1, P09, S-19) : deux positions non entières → les créneaux sont rangés par le rang de la SÉANCE RELUE (p2 avant p1 : 4,5 puis aucune) et réassignés dans l’ordre choisi (p1, p2) : p1 reçoit 4,5, p2 aucune');
+    }));
+    await run('T-C12 (ronde 1) ordre : les vignettes montrent les photos, une image par page pour toute l’instance', () => withRepo(async (repo, db) => {
+      const T = await import('../src/ui/table-matieres.js');
+      await poserBibliotheque(repo, db, { seances: { ss1: SEANCE7 }, octets: true });
+      const ligne = ligneAVerifier({ id: 'imp_o14', resultat: C });
+      await db.mutate({ puts: { imports: [ligne] }, origin: 'device' });
+      const ctx = await ctxDe(repo, db);
+      let lectures = 0;
+      const espion = { ...repo, getFile: async (sha) => { lectures += 1; return repo.getFile(sha); } };
+      const scene = nouvelleScene();
+      try {
+        const vue = T.panneauLecture({ ligne, resultat: C, session: ctx.scan_sessions[0], ctx, repo: espion, maintenant: () => NOW });
+        scene.append(vue);
+        const imgs = () => [...vue.querySelectorAll('[data-role="ordre-photos"] .thumbs figure img')];
+        await attendre(() => imgs().length === 5 && imgs().every((i) => i.src.startsWith('blob:')), 'cinq photos affichées');
+        const avant = new Map(imgs().map((i) => [i.closest('figure').dataset.page, i]));
+        const srcAvant = imgs().map((i) => i.src);
+        boutonTexte(vue, 'Descendre la page 1').click();
+        boutonTexte(vue, 'Monter la page 3').click();
+        await tick();
+        eq([imgs().map((i) => i.closest('figure').dataset.page), imgs().every((i) => i === avant.get(i.closest('figure').dataset.page)), imgs().map((i) => i.alt), [...imgs().map((i) => i.src)].sort(), lectures],
+          [['p2', 'p3', 'p1', 'p4', 'p5'], true, ['Page 1', 'Page 2', 'Page 3', 'Page 4', 'Page 5'], [...srcAvant].sort(), 5], 'T-C12 (ronde 1, P02, § 4.3) : chaque vignette montre la photo de sa page (src blob:) ; ↑/↓ déplacent les MÊMES images (aucune relecture, aucune URL neuve : 5 lectures pour l’instance), l’alt suit le rang');
+      } finally { scene.remove(); }
+    }));
     await run('T-C12 reordonnerVignettes : l’écran de séance suit sans reconstruction', async () => {
       const I = await import('../src/ui/import.js');
       const ctx = { pagesById: new Map([['a', { id: 'a', position: 1 }], ['b', { id: 'b', position: 2 }], ['c', { id: 'c', position: 3 }]]) };
@@ -777,15 +889,19 @@ export async function runTableMatieresTests({ eq, ok }) {
       const noeuds = [...thumbs.children]; const objetC = ctx.pagesById.get('c');
       I.reordonnerVignettes(thumbs, { pages: [{ id: 'c', position: 1 }, { id: 'a', position: 3 }], seance: { id: 's', page_ids: ['c', 'b', 'a'] } }, { ctx, session });
       eq([[...thumbs.children].map((f) => f.dataset.page), [...thumbs.children].map((f) => f.querySelector('.num').textContent), session.page_ids, objetC.position, ctx.pagesById.get('c') === objetC, [...thumbs.children].every((f) => noeuds.includes(f))], [['c', 'b', 'a'], ['1', '2', '3'], ['c', 'b', 'a'], 1, true, true], 'T-C12 (M71, M72, D-C15) : les MÊMES figures réordonnées en place, .num réécrits, session.page_ids posé, les MÊMES objets de ctx.pagesById mis à jour (le champ « p. imprimée » réécrira la position neuve)');
+      eq([...thumbs.children].map((f) => f.querySelector('img').alt), ['Page 1', 'Page 2', 'Page 3'], 'T-C12 (ronde 1, V40) : l’alt de chaque vignette de séance dit sa position NEUVE (« Page {position} »)');
     });
 
     await run('T-C11 reprise : présélection des pages de la lecture (cases cochées)', () => withRepo(async (repo, db) => {
       const I = await import('../src/ui/import.js');
-      await poserBibliotheque(repo, db, { seances: { ss1: ['p1', 'p2', 'p3'], ss2: ['p4', 'p5'], ss3: ['q1', 'q4'] } });
+      await poserBibliotheque(repo, db, { seances: { ss1: ['p1', 'p2', 'p3'], ss2: ['p4', 'p5'], ss3: ['q1', 'q4'], ss4: ['q5'] } });
       await db.mutate({ puts: { imports: [
         { ...ligneJournal({ id: 'imp_r1', edition_id: 'ed1', scan_session_id: 'ss1', page_ids: ['p1', 'p3'] }), status: 'echec', erreur: { raison: 'coupe', extra: {} } },
         { ...ligneJournal({ id: 'imp_r2', edition_id: 'ed1', scan_session_id: 'ss2', page_ids: ['p4', 'pg_absente'] }), status: 'a_lancer' },
         { ...ligneJournal({ id: 'imp_r3', edition_id: 'ed1', scan_session_id: 'ss3', page_ids: ['q1'] }), status: 'echec', erreur: { raison: 'coupe', extra: {} } },
+        // Ronde 1 (I30) : dans ss1, une lecture d'index CLOSE et une lecture d'une AUTRE SORTE (recette sans référence), chacune sur p2.
+        { ...ligneJournal({ id: 'imp_c1', edition_id: 'ed1', scan_session_id: 'ss1', page_ids: ['p2'] }), status: 'enregistre', finished_at: DATE },
+        { ...ligneJournal({ id: 'imp_k1', edition_id: 'ed1', scan_session_id: 'ss1', page_ids: ['p2'] }), kind: 'recette', status: 'echec', erreur: { raison: 'coupe', extra: {} } },
       ] }, origin: 'device' });
       const ctx = await ctxDe(repo, db);
       const cases = (root) => Object.fromEntries([...root.querySelectorAll(':scope > .thumbs > figure')].map((f) => [f.dataset.page, f.querySelector('input[type=checkbox]').checked]));
@@ -795,10 +911,20 @@ export async function runTableMatieresTests({ eq, ok }) {
       eq([cases(r1), panneau(r1)?.hidden], [{ p1: true, p2: false, p3: true }, false], 'T-C11 (M96, D-C22) : ?import= d’une ligne index OUVERTE de la séance (sans intention) → ses page_ids cochés, le panneau visible');
       const r2 = await I.renderImport({}, { session: 'ss2', import: 'imp_r2' }, ctx);
       eq([cases(r2), pagesDuLien(r2)], [{ p4: true, p5: false }, 'p4'], 'T-C11 (M97, C6) : un identifiant de la ligne sans vignette (page absente) n’est JAMAIS sélectionné');
-      eq(cases(await I.renderImport({}, { session: 'ss1', import: 'imp_r1', intention: 'index' }, ctx)), { p1: true, p2: true, p3: true }, 'T-C11 (D-C22) : avec ?intention=index, la sélection de l’intention gagne (toutes les pages)');
+      eq(cases(await I.renderImport({}, { session: 'ss1', import: 'imp_r1', intention: 'index' }, ctx)), { p1: true, p2: true, p3: true }, 'T-C11 (D-C22) : avec ?intention=index, la sélection de l’intention gagne (toutes les pages) — ronde 1 : la garde « !applique.consommee » est équivalente tant que l’intention coche TOUTES les pages résolues, un sur-ensemble de celles de la ligne (ce cas ne la tue pas)');
       const r4 = await I.renderImport({}, { session: 'ss3' }, ctx);
       eq([cases(r4), panneau(r4)?.hidden], [{ q1: false, q4: false }, false], 'T-C11 (M67, § 4.1) : sans ?import= mais avec une ligne ouverte → le panneau est VISIBLE au rendu, rien de coché');
       eq(cases(await I.renderImport({}, { session: 'ss1', import: 'imp_inconnu' }, ctx)), { p1: false, p2: false, p3: false }, 'T-C11 : un ?import= qui ne désigne aucune ligne ouverte de la séance → aucune présélection');
+      // Ronde 1 (I30) : la ligne que ?import= désigne n'est reprise (cases, importId du panneau) que si elle est OUVERTE, d'index, de CETTE séance. L'importId
+      // passé au panneau se lit par le repo injecté (deps) : relireDuJournal relit la ligne qu'on lui donne ; imp_r1 (ouverte) est le témoin de l'espion.
+      const lus = [];
+      const deps = { repo: { ...repo, get: async (s, k) => { if (s === 'imports') lus.push(k); return repo.get(s, k); } } };
+      const reprise = async (importId) => { lus.length = 0; const r = await I.renderImport({}, { session: 'ss1', import: importId }, ctx, deps); return [cases(r), lus.includes(importId)]; };
+      const aucune = { p1: false, p2: false, p3: false };
+      eq([await reprise('imp_r1'), await reprise('imp_c1'), await reprise('imp_k1'), await reprise('imp_r2')], [[{ p1: true, p2: false, p3: true }, true], [aucune, false], [aucune, false], [aucune, false]], 'T-C11 (ronde 1, I30) : ?import= d’une lecture CLOSE, d’une AUTRE SORTE (recette) ou d’une AUTRE SÉANCE (imp_r2 de ss2) → aucune case cochée, et le panneau ne la relit pas (importId nul pour elle) ; la lecture ouverte d’index de la séance, elle, est relue (témoin)');
+      const r5 = await I.renderImport({}, { session: 'ss4', intention: 'index' }, ctx);
+      const r6 = await I.renderImport({}, { session: 'ss4' }, ctx);
+      eq([panneau(r5)?.hidden, panneau(r6)?.hidden], [false, true], 'T-C11 (ronde 1, I34) : séance SANS ligne ouverte — avec ?intention=index (fiche livre → « + Pages d’index ») le panneau d’index est visible ; sans intention ni ligne ouverte, il est caché');
     }));
 
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne

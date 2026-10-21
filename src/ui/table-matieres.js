@@ -1,5 +1,5 @@
 // Le tableau d'une table des matières lue sur plusieurs photos (lot C, spec docs/superpowers/specs/2026-10-19-table-des-matieres-design.md, § 4.3,
-// § 4.4) : creerReferences (sans DOM, testable seule) ; la séquence proposée des photos et le tableau d'entrées arrivent aux tâches 3 et 4. Rendu PAR
+// § 4.4) : creerReferences (sans DOM, testable seule) ; panneauLecture, la séquence proposée des photos (tâche 3 ; le tableau d'entrées s'y ajoute en tâche 4). Rendu PAR
 // indexEntriesPanel (src/ui/import.js), qui reste la porte. Tout texte par t() avec son entrée en.js (MODULES_NEUFS) ; toute donnée du modèle en nœuds
 // texte ; écritures par repo.transitionner seulement (I-C1). Aucun texte ne nomme le fournisseur ni la base.
 import { el, toast as toastDom } from '../core/dom.js';
@@ -78,6 +78,16 @@ export function panneauLecture({ ligne, resultat, session = null, ctx = null, re
   etat.ordre = avecOrdre ? (ligne?.ordre_applique_at ? projection(etat.seance) : ordrePropose(photos)) : ids;
   const racine = el('div', { class: 'stack', dataset: { role: 'lecture' } });
   const zoneOrdre = el('div', { class: 'stack', dataset: { role: 'ordre-photos' } });
+  // Ronde 1 : UNE image par page pour toute l'instance (une lecture des octets, une URL blob:) ; un redessin déplace les MÊMES nœuds, seul l'alt suit le rang.
+  const images = new Map();
+  const imageDe = (id) => {
+    if (images.has(id)) return images.get(id);
+    const img = el('img', { loading: 'lazy' });
+    const page = ctx?.pagesById instanceof Map ? ctx.pagesById.get(id) : null;
+    if (page?.sha256) Promise.resolve(repo.getFile(page.sha256)).then((f) => { const u = displayUrl(f); if (u) img.src = u; }).catch(() => {});
+    images.set(id, img);
+    return img;
+  };
 
   function dessinerOrdre() {
     if (!avecOrdre) { zoneOrdre.hidden = true; zoneOrdre.replaceChildren(); return; }
@@ -88,9 +98,8 @@ export function panneauLecture({ ligne, resultat, session = null, ctx = null, re
     const vignettes = el('div', { class: 'thumbs' });
     etat.ordre.forEach((id, i) => {
       const photo = photos.find((p) => p.page_id === id);
-      const page = ctx?.pagesById instanceof Map ? ctx.pagesById.get(id) : null;
-      const img = el('img', { alt: t('Page {n}', { n: i + 1 }), loading: 'lazy' });
-      if (page?.sha256) Promise.resolve(repo.getFile(page.sha256)).then((f) => { const u = displayUrl(f); if (u) img.src = u; }).catch(() => {});
+      const img = imageDe(id);
+      img.alt = t('Page {n}', { n: i + 1 });
       const plage = Array.isArray(photo?.printed_page_range) ? photo.printed_page_range : null;
       const bouton = (role, libelle, sens) => el('button', { type: 'button', class: 'btn', dataset: { role, page: id }, disabled: etat.occupe, onClick: () => bouger(id, sens, role) }, libelle);
       vignettes.append(el('figure', { dataset: { page: id } }, el('span', { class: 'num' }, String(i + 1)), img,
@@ -111,30 +120,36 @@ export function panneauLecture({ ligne, resultat, session = null, ctx = null, re
     etat.focus = { role, page: id };
     dessinerOrdre();
   }
-  // « Appliquer cet ordre » (§ 4.3, D-C15) : la ligne et les pages RELUES, puis UNE transaction — la ligne (page_ids, ordre_applique_at) sous
-  // attendus a_verifier, les positions des N pages (précalculées sur les pages relues : fenêtre nommée en § 11), la séance patchée PAR FONCTION dans la
+  // « Appliquer cet ordre » (§ 4.3, D-C15) : l'ordre figé AU CLIC, la ligne et les pages RELUES, puis UNE transaction — la ligne (page_ids,
+  // ordre_applique_at) sous attendus a_verifier, la POSITION seule de chaque page posée sur sa fiche RELUE dans la transaction (condition de fusion,
+  // ronde 1 : une page retirée entre-temps n'est jamais ressuscitée, une « p. imprimée » posée entre-temps survit), la séance patchée PAR FONCTION dans la
   // transaction (une page ajoutée par un autre onglet n'est pas écrasée). La ligne doit porter la MÊME lecture (cleLecture, T4-R2 du lot A) à la
-  // relecture ET dans la transaction (patch-fonction). Refus ou autre lecture → rien d'écrit, l'appelant relit. Succès → séance relue, apresOrdre.
+  // relecture ET dans la transaction (patch-fonction) ; dans la transaction, elle doit aussi appartenir à CETTE séance et l'ordre être une permutation des
+  // photos de SA lecture revalidée (ronde 1, défense en profondeur contre un appelant qui passerait une autre séance ou un autre résultat). Refus ou autre
+  // lecture → rien d'écrit, l'appelant relit. Succès → séance relue, apresOrdre.
   async function appliquer() {
     if (etat.occupe || !session) return;
+    const ordre = [...etat.ordre]; // figé AU CLIC (ronde 1) : les N photos dans l'ordre que la personne avait devant elle, quoi qu'il arrive pendant les relectures
     etat.occupe = true; dessinerOrdre();
     try {
       const cle = cleLecture(etat.ligne);
       const L = await repo.get('imports', etat.ligne.id);
       if (!L || cleLecture(L) !== cle) { if (typeof surChangement === 'function') await surChangement(); return; } // jamais l'ordre de R1 sur une autre lecture
       const seanceLue = await repo.get('scan_sessions', session.id);
-      const ordre = [...etat.ordre]; // les N photos dans l'ordre choisi (les boutons sont éteints pendant l'écriture)
       const relues = new Map();
       for (const id of ordre) { const p = await repo.get('source_pages', id); if (p) relues.set(id, p); }
       const prop = positionsProposees(ordre, relues, Array.isArray(seanceLue?.page_ids) ? seanceLue.page_ids : etat.seance);
       const quand = maintenant();
+      const sesPhotos = (c) => { const r = revaliderResultatIndex(c.resultat, c.page_ids); const a = r ? r.photos.map((p) => p.page_id) : []; return new Set(ordre).size === ordre.length && a.length === ordre.length && ordre.every((id) => a.includes(id)); };
       const ecrite = await repo.transitionner('imports', L.id, {
         attendus: ['a_verifier'],
         // § 4.3 : page_ids = les N photos dans l'ordre choisi, jamais les seules pages relues (prop.ordre) — une photo retirée de la base entre-temps
         // sortirait de page_ids et revaliderResultatIndex rendrait la lecture payée illisible (M-C7). Positions et séance : sur prop (pages présentes).
-        patch: (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { page_ids: ordre, ordre_applique_at: quand }; },
-        puts: { source_pages: prop.pages },
-        conditions: { scan_sessions: [{ key: session.id, attendus: ['open', 'done'], patch: (c) => ({ page_ids: reordonnerSeance(Array.isArray(c.page_ids) ? c.page_ids : [], prop.ordre) }) }] },
+        patch: (c) => { if (cleLecture(c) !== cle || c.scan_session_id !== session.id || !sesPhotos(c)) throw new TransitionRefusee('imports', L.id, c.status); return { page_ids: ordre, ordre_applique_at: quand }; },
+        conditions: {
+          source_pages: prop.pages.map((p) => ({ key: p.id, fusion: (c) => (c ? { ...c, position: p.position } : null) })),
+          scan_sessions: [{ key: session.id, attendus: ['open', 'done'], patch: (c) => ({ page_ids: reordonnerSeance(Array.isArray(c.page_ids) ? c.page_ids : [], prop.ordre) }) }],
+        },
       });
       const seance = await repo.get('scan_sessions', session.id);
       etat.ligne = ecrite;
