@@ -153,12 +153,23 @@ export function planCreation(lignes) {
 }
 export const compteur = (lignes) => ({ lues: liste(lignes).length, dejaDans: liste(lignes).filter((l) => l.dejaReperee).length });
 
+// raw_entry (§ 3.3, S-10) : « titre — page » tels que lus, ou la ligne tapée — au plus 300 points de code.
+export const BORNE_RAW_ENTRY = 300;
+// La page d'index mise à jour (D-C14) : kind posé s'il est nul, role 'index' si le kind résultant est index, plage CITÉE ; printed_page jamais écrit. Une
+// fonction de la PAGE (ronde 1 de la tâche 2) : creerReferences l'applique à la page RELUE dans la transaction (condition de fusion), jamais à une copie lue
+// avant (constat 23 de la ronde 1 de T1 : une « p. imprimée » ou une position posée entre-temps survit).
+export const pageIndexee = (page, plage) => {
+  const kind = page.kind ?? 'index';
+  return { ...page, kind, role: kind === 'index' ? 'index' : (page.role ?? null), printed_page_range: copiePlage(plage), printed_page: page.printed_page ?? null };
+};
+
 // --- Fabrication (D-C3, D-C5, D-C11, D-C14, R-C-2, I-C11) : des fiches NEUVES seulement (une ligne non créable, même forcée dans le plan, ne produit
 // rien) ; index_page_id = la photo si sa page est dans `pagesParId` (pointeur souple), sinon null ; source_page_ids jamais vers une page absente ;
 // raw_entry = « titre — page » TELS QUE LUS ; pages : kind posé s'il est nul, role 'index' si le kind résultant est index, plage citée ; printed_page
 // jamais écrit (D-C14). assertVocabulaire sur chaque fiche (D-12 du lot A). Ronde 1 : dernier mur avant `recipes`, le fabricant nettoie titre et section
 // par `nettoyer` (Cc, Cf ET Cs : une demi-paire de substitution ferait refuser la fiche par le jsonb, S-11) avant de les borner, et ramène une
-// printed_page hors 1..9 999 ou non entière à null (§ 4.4) — une ligne éditée dans le tableau ou forgée passe les MÊMES bornes que la lecture.
+// printed_page hors 1..9 999 ou non entière à null (§ 4.4) — une ligne éditée dans le tableau ou forgée passe les MÊMES bornes que la lecture. Ronde 1 de
+// T2 : raw_entry passe le même mur (nettoyer puis borner à BORNE_RAW_ENTRY) ; un titre lu absent n'y écrit jamais « undefined ».
 export function fabriquerReferences(plan, { edition, pagesParId, resultat, pageIdsLigne = [], newId }) {
   const pages = pagesParId instanceof Map ? pagesParId : new Map();
   const recipes = [];
@@ -171,13 +182,14 @@ export function fabriquerReferences(plan, { edition, pagesParId, resultat, pageI
     const sectionLue = nettoyer(l.section);
     const section = sectionLue ? (borner(sectionLue, BORNES_INDEX.section) || null) : null;
     const page = Number.isInteger(l.printed_page) && l.printed_page >= 1 && l.printed_page <= BORNES_INDEX.page ? l.printed_page : null;
+    const titreLu = typeof l.titreLu === 'string' ? l.titreLu : '';
     const fiche = {
       id: newId('rc'), edition_id: edition?.id ?? null, original_title: titre, original_language: edition?.language || null,
       availability: 'reference_only', verification_state: 'unverified', printed_page: page, section,
       type: null, tags: [], cuisines: [], favorite: false,
       source_page_ids: inconnue ? liste(pageIdsLigne).filter((id) => pages.has(id)) : (indexPageId ? [indexPageId] : []),
       current_version_id: null, ingredient_ids: [], index_page_id: indexPageId,
-      raw_entry: l.pageLue != null ? `${l.titreLu} — ${l.pageLue}` : `${l.titreLu}`,
+      raw_entry: borner(nettoyer(l.pageLue != null ? `${titreLu} — ${l.pageLue}` : titreLu) ?? '', BORNE_RAW_ENTRY),
       index_uncertain: l.uncertain === true || l.horsPlage === true,
     };
     assertVocabulaire(fiche, 'recipes'); // D-12 : « Créer les références » est un fabricant de recipes comme les autres
@@ -186,9 +198,7 @@ export function fabriquerReferences(plan, { edition, pagesParId, resultat, pageI
   const pageUpdates = [];
   for (const p of liste(resultat?.photos)) {
     if (typeof p?.page_id !== 'string' || !pages.has(p.page_id)) continue;
-    const page = pages.get(p.page_id);
-    const kind = page.kind ?? 'index';
-    pageUpdates.push({ ...page, kind, role: kind === 'index' ? 'index' : (page.role ?? null), printed_page_range: copiePlage(p.printed_page_range), printed_page: page.printed_page ?? null });
+    pageUpdates.push(pageIndexee(pages.get(p.page_id), p.printed_page_range));
   }
   return { recipes, pageUpdates };
 }

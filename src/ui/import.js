@@ -12,9 +12,9 @@ import * as repoModule from '../model/repo.js';
 import { remoteDeCeCompte } from '../sync/tables.js';
 import { sha256Hex } from '../core/hash.js';
 import { assertVocabulaire } from '../domain/vocabulaire.js';
-import { providerFrom } from '../domain/llm.js';
+import { providerFrom, nettoyer } from '../domain/llm.js';
 import { seanceDUnImportCible, importOuvert } from '../domain/import-cible.js';
-import { cleReference } from '../domain/table-matieres.js';
+import { cleReference, BORNE_RAW_ENTRY } from '../domain/table-matieres.js';
 import { pageHeader, section, emptyState, select, field, carteConnexion, texteEchecAssistant, pdfFrame, libelleLivre, sessionAssistant, contexteFichiers, vignettesDePages, boutonTelechargerPages, gesteTelechargement } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { lireDansLeJournal, relireDuJournal, phraseEchec, cleLecture } from './import-cible.js';
@@ -275,12 +275,19 @@ export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId 
     if (relue.resultat) { remplir(relue.resultat); cleZone = cleLecture(relue.ligne); }
     else if (relue.ligne?.status === 'echec') status.textContent = phraseEchec(relue.ligne.erreur);
   }).catch((e) => logError('import.index_relu', { error: e }));
+  // Ronde 1 de la tâche 2 : un verrou, comme `occupe` pour « Lire » — une double tape ne crée qu'une fois (les doublons se lisent dans l'instantané du rendu :
+  // deux appels en vol écriraient chaque fiche deux fois).
+  let creation = false;
   const create = async () => {
-    // Lot C, tâche 2 : creerDepuisSaisie (raw_entry, bornes, kind gardé) ; la lecture POSÉE DANS LA ZONE (importCourant, sa clé cleZone) est close dans la
-    // transaction des fiches ; refusée, rien n'est écrit et le panneau se détache de la ligne (décision 4 de la ronde 1 de T6) — un second clic écrit sans elle.
-    const r = await creerDepuisSaisie(ta.value, { session, ctx, editionId, pageIds: getSelectedPageIds(), repo, toast, maintenant, importId: importCourant, cle: cleZone });
-    if (r.issue === 'refuse' || r.ferme) { importCourant = null; cleZone = null; }
-    if (r.issue === 'cree') { ta.value = ''; draw(); refresh(); }
+    if (creation) return;
+    creation = true;
+    try {
+      // Lot C, tâche 2 : creerDepuisSaisie (raw_entry, bornes, kind gardé) ; la lecture POSÉE DANS LA ZONE (importCourant, sa clé cleZone) est close dans la
+      // transaction des fiches ; refusée, rien n'est écrit et le panneau se détache de la ligne (décision 4 de la ronde 1 de T6) — un second clic écrit sans elle.
+      const r = await creerDepuisSaisie(ta.value, { session, ctx, editionId, pageIds: getSelectedPageIds(), repo, toast, maintenant, importId: importCourant, cle: cleZone });
+      if (r.issue === 'refuse' || r.ferme) { importCourant = null; cleZone = null; }
+      if (r.issue === 'cree') { ta.value = ''; draw(); refresh(); }
+    } finally { creation = false; }
   };
   panel.append(el('p', { class: 'muted' }, t('Une ligne par recette : titre puis numéro de page. Un titre ne suffit pas à déduire des ingrédients : ces entrées deviennent des références « Repérée dans ton livre ».')),
     connexion, ta, el('div', { class: 'row' }, aiBtn, el('button', { class: 'btn primary', onClick: create }, t('Créer les références'))), status, preview);
@@ -291,12 +298,15 @@ const horloge = () => new Date().toISOString();
 const STATUTS_FERMABLES = ['a_verifier', 'echec', 'a_lancer']; // D-C19 : en_cours n'est jamais fermé par la zone de texte
 
 // « Créer les références » depuis la zone de texte (spec C § 4.4, D-C19 ; sans DOM, testable seule) : une ligne tapée = une référence ; titre et
-// raw_entry bornés (données de la personne : troncature acceptable, S-10) ; index_page_id null, section null, index_uncertain faux ; source_page_ids =
-// les pages cochées PRÉSENTES (règle d'avant) ; une page cochée garde son kind (kind ?? 'index'). La ligne d'index que le panneau MONTRE (`importId`,
-// sa clé `cle` = cleLecture : T4-R2 du lot A) est fermée dans la MÊME transaction que les fiches (a_verifier → enregistre : la lecture a servi ;
-// echec | a_lancer → ignore), finished_at posé, la clé revérifiée DANS la transaction. Refusée (close, ignorée ou relue ailleurs entre-temps) : RIEN
-// n'est écrit et c'est dit (décision 4 de la ronde 1 de T6 ; l'appelant se détache de la ligne). Sans clé, ou la ligne relue porte une autre lecture :
-// les fiches par saveBatch, la ligne reste à reprendre. Sans ligne (fiche livre, séance sans lecture) : le chemin d'avant.
+// raw_entry nettoyés (Cc, Cf, Cs, comme fabriquerReferences — ronde 1 : un titre vide une fois nettoyé ne fait pas de fiche) et bornés (données de la
+// personne : troncature acceptable, S-10) ; index_page_id null, section null, index_uncertain faux ; source_page_ids = les pages cochées PRÉSENTES, RELUES en
+// base (ronde 1 : l'instantané du rendu peut dater de tout le temps où la route de saisie reste ouverte) ; une page cochée n'est réécrite que si son kind est
+// nul (kind 'index' ; M63), sur sa fiche RELUE dans la transaction (condition de fusion) — absente alors qu'une fiche la cite : refus (I-C11). La ligne
+// d'index que le panneau MONTRE (`importId`, sa clé `cle` = cleLecture : T4-R2 du lot A) est fermée dans la MÊME transaction que les fiches (a_verifier →
+// enregistre : la lecture a servi ; echec | a_lancer → ignore), finished_at posé, la clé revérifiée DANS la transaction. Refusée (close, ignorée ou relue
+// ailleurs entre-temps, ou une page citée retirée) : RIEN n'est écrit et c'est dit (décision 4 de la ronde 1 de T6 ; l'appelant se détache de la ligne).
+// Sans clé, ou la ligne relue porte une autre lecture : les fiches par saveBatch, la ligne reste à reprendre. Sans ligne (fiche livre, séance sans lecture) :
+// le chemin d'avant.
 export async function creerDepuisSaisie(texte, { session = null, ctx, editionId = null, pageIds = [], repo = repoModule, toast = toastDom, maintenant = horloge, importId = null, cle = null } = {}) {
   const edId = editionId || session?.edition_id || null;
   if (!edId) { toast(t('Associe d’abord un livre à cette séance')); return { issue: 'sans_livre' }; }
@@ -304,36 +314,40 @@ export async function creerDepuisSaisie(texte, { session = null, ctx, editionId 
   if (!entries.length) return { issue: 'vide' };
   const edition = ctx.editionsById.get(edId);
   const seen = new Set(ctx.recipes.filter((r) => r.edition_id === edId).map((r) => cleReference(r.original_title, r.printed_page)));
-  const presentes = [...new Set(Array.isArray(pageIds) ? pageIds : [])].filter((id) => ctx.pagesById.get(id));
+  const presentes = [];
+  for (const id of new Set(Array.isArray(pageIds) ? pageIds : [])) if (typeof id === 'string' && await repo.get('source_pages', id)) presentes.push(id);
   const created = [];
   let dupes = 0;
   for (const e of entries) {
-    const titre = borner(e.title, 200);
+    const titre = borner(nettoyer(e.title) ?? '', 200);
+    if (!titre) continue; // fait seulement d'invisibles (collé d'un PDF) : pas de fiche, comme fabriquerReferences
     const k = cleReference(titre, e.printed_page);
     if (seen.has(k)) { dupes++; continue; }
     seen.add(k);
-    const fiche = { id: repo.newId('rc'), edition_id: edId, original_title: titre, original_language: edition?.language || null, availability: 'reference_only', verification_state: 'unverified', printed_page: e.printed_page, section: null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: presentes, current_version_id: null, ingredient_ids: [], index_page_id: null, raw_entry: borner(e.raw, 300), index_uncertain: false };
+    const fiche = { id: repo.newId('rc'), edition_id: edId, original_title: titre, original_language: edition?.language || null, availability: 'reference_only', verification_state: 'unverified', printed_page: e.printed_page, section: null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: presentes, current_version_id: null, ingredient_ids: [], index_page_id: null, raw_entry: borner(nettoyer(e.raw) ?? '', BORNE_RAW_ENTRY), index_uncertain: false };
     assertVocabulaire(fiche, 'recipes'); // D-12 : « Créer les références » est un fabricant de recipes comme les autres (spec import-cible § 3.3)
     created.push(fiche);
   }
-  const puts = {};
-  if (created.length) puts.recipes = created;
-  if (presentes.length) puts.source_pages = presentes.map((id) => { const p = ctx.pagesById.get(id); return { ...p, kind: p.kind ?? 'index' }; });
+  const puts = created.length ? { recipes: created } : {};
+  const pages = presentes.map((id) => ({ key: id, fusion: (courant) => {
+    if (!courant) { if (created.length) throw new TransitionRefusee('source_pages', id, null); return null; } // I-C11 : jamais une fiche vers une page absente
+    return courant.kind == null ? { ...courant, kind: 'index' } : null; // M63 : un kind posé (recette…) est gardé, la page n'est pas réécrite
+  } }));
   const ligne = importId && cle ? await repo.get('imports', importId) : null;
   let ferme = false;
-  if (ligne?.kind === 'index' && STATUTS_FERMABLES.includes(ligne.status) && cleLecture(ligne) === cle) {
-    const vers = ligne.status === 'a_verifier' ? 'enregistre' : 'ignore';
-    const fin = maintenant();
-    const fermer = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', ligne.id, c.status); return { status: vers, reponse_brute: null, finished_at: fin }; };
-    try {
-      await repo.transitionner('imports', ligne.id, { attendus: [ligne.status], patch: fermer, puts });
+  try {
+    if (ligne?.kind === 'index' && STATUTS_FERMABLES.includes(ligne.status) && cleLecture(ligne) === cle) {
+      const vers = ligne.status === 'a_verifier' ? 'enregistre' : 'ignore';
+      const fin = maintenant();
+      const fermer = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', ligne.id, c.status); return { status: vers, reponse_brute: null, finished_at: fin }; };
+      await repo.transitionner('imports', ligne.id, { attendus: [ligne.status], patch: fermer, puts, conditions: pages.length ? { source_pages: pages } : {} });
       ferme = true;
-    } catch (e) {
-      if (!(e instanceof TransitionRefusee)) throw e;
-      toast(t('Les références n’ont pas pu être créées. Réessaie.'));
-      return { issue: 'refuse' };
-    }
-  } else if (Object.keys(puts).length) await repo.saveBatch(puts);
+    } else if (created.length || pages.length) await repo.saveBatch(puts, { conditions: pages.length ? { source_pages: pages } : null });
+  } catch (e) {
+    if (!(e instanceof TransitionRefusee)) throw e;
+    toast(t('Les références n’ont pas pu être créées. Réessaie.'));
+    return { issue: 'refuse' };
+  }
   toast(t('{n} référence(s) créée(s){d}', { n: created.length, d: dupes ? `, ${t('{n} doublon(s) ignoré(s)', { n: dupes })}` : '' }));
   return { issue: 'cree', n: created.length, doublons: dupes, ferme };
 }
