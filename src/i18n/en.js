@@ -623,4 +623,6 @@ export const EN = {
   "Incertain": "Uncertain",
   "Titre": "Title",
   "Section": "Section",
+  // Lot C, tâche 5 : la section d’une référence sur sa fiche (D-C6).
+  "Section : {s}": "Section: {s}",
 };

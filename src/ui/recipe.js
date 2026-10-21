@@ -298,6 +298,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     return el('div', null,
       el('div', { class: 'card warn stack' },
         el('h2', null, recipe.printed_page ? t('Repérée dans ton livre — page {p}', { p: recipe.printed_page }) : t('Repérée dans l’index de ton livre')),
+        typeof recipe.section === 'string' && recipe.section.trim() ? el('p', { class: 'muted' }, t('Section : {s}', { s: recipe.section.trim() })) : null,
         el('p', null, t('Cette référence vient de l’index : ingrédients, durées et compatibilités alimentaires sont inconnus tant que la recette n’est pas numérisée. Ouvre le livre à cette page pour cuisiner, ou scanne la recette.')),
         el('div', { class: 'row' },
           // D-8 : la voie « Scanner cette recette » (Ajouter + clé de session) est remplacée par l'écran d'import ciblé, déjà rattaché à la référence.

@@ -1544,6 +1544,40 @@ export async function runTableMatieresTests({ eq, ok }) {
       } finally { UI.reinitialiserImportCible(); scene.remove(); }
     }));
 
+    // =================================================================================================================================
+    // Tâche 5 — fiche livre et recherche (D-C6)
+    await run('T-C18 section sur la fiche livre et la fiche référence', () => withRepo(async (repo, db) => {
+      const { renderBook } = await import('../src/ui/book.js');
+      const { renderRecipe } = await import('../src/ui/recipe.js');
+      await poserBibliotheque(repo, db, { existantes: [{ original_title: 'Soupe de courge', printed_page: 98, section: 'Soupes' }, { original_title: 'Gaspacho', printed_page: 76 }] });
+      const ctx = await ctxDe(repo, db);
+      const fiche = await renderBook({ id: 'ed1' }, { nouveau: '1' }, ctx);
+      const rangee = (titre) => { const carte = [...fiche.querySelectorAll('a.item-link')].find((a) => a.querySelector('h3')?.textContent === titre); return carte?.nextElementSibling ?? null; };
+      eq([[...(rangee('Soupe de courge')?.querySelectorAll('.chip.neutral') ?? [])].map((c) => c.textContent), rangee('Soupe de courge')?.closest('a'), rangee('Gaspacho')?.querySelectorAll('.chip.neutral').length], [['Soupes'], null, 0], 'T-C18 (M55) : une référence avec section → une puce .chip.neutral « Soupes » dans SA rangée (hors du lien de la carte) ; sans section → aucune');
+      const rc = ctx.recipes.find((r) => r.original_title === 'Soupe de courge');
+      const page = await renderRecipe({ id: rc.id }, {}, ctx);
+      const sansSection = await renderRecipe({ id: ctx.recipes.find((r) => r.original_title === 'Gaspacho').id }, {}, ctx);
+      eq([page.textContent.includes('Section : Soupes'), sansSection.textContent.includes('Section :')], [true, false], 'T-C18 : la fiche d’une référence dit « Section : Soupes » ; sans section, rien');
+      const hostile = '<img src=x onerror="void 0">';
+      await db.mutate({ puts: { recipes: [{ ...rc, section: hostile }] }, origin: 'device' });
+      const ctxH = await ctxDe(repo, db);
+      const ficheH = await renderBook({ id: 'ed1' }, { nouveau: '1' }, ctxH);
+      eq([ficheH.querySelectorAll('img[src="x"]').length, ficheH.textContent.includes(hostile)], [0, true], 'T-C18 (I-C2) : une section hostile reste du TEXTE (aucun élément créé)');
+    }));
+    await run('T-C19 recherche par section', async () => {
+      const S = await import('../src/domain/search.js');
+      const editions = [{ id: 'ed1', book_id: 'b1' }]; const books = [{ id: 'b1', title: 'Saisons' }];
+      const ref = { id: 'rc_s', edition_id: 'ed1', original_title: 'Soupe de courge', availability: 'reference_only', section: 'Entrées', cuisines: [], tags: [] };
+      const sans = { ...ref, id: 'rc_n', section: null };
+      const dispo = { id: 'rc_d', edition_id: 'ed1', original_title: 'Gratin dauphinois', availability: 'available', section: 'Entrées', cuisines: [], tags: [], current_version_id: 'v1' };
+      const versions = [{ id: 'v1', recipe_id: 'rc_d', kind: 'extraction', ingredients: [], steps: [] }];
+      const docs = S.buildDocs({ recipes: [ref, sans, dispo, { ...ref, id: 'rc_o', section: { x: 1 } }], versions, editions, books, dishes: [], links: [] });
+      const trouves = S.searchDocs(docs, S.parseQuery('entrée'), {}).references.map((r) => r.doc.recipe.id);
+      eq([trouves.includes('rc_s'), trouves.includes('rc_n'), trouves.includes('rc_o')], [true, false, false], 'T-C19 (M56) : une référence « Soupe de courge » rangée sous « Entrées » remonte sur « entrée » (section dans les titleTokens) ; sans section — ou une section qui n’est pas une chaîne — rien');
+      const d = docs.find((x) => x.recipe.id === 'rc_d');
+      eq([d.tokens.has('entrees'), d.titleTokens.has('entrees')], [true, false], 'T-C19 : une recette available avec section → dans tokens, pas dans titleTokens');
+    });
+
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne
   } catch (error) {
     ok(false, `Table des matières : suite interrompue — ${error?.name || 'Erreur'} — ${error?.message || String(error)}`);

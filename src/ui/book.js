@@ -129,7 +129,9 @@ export async function renderBook(params, query, ctx) {
       // « Relire les pages » de recipe.js : un signet devenu partiel n'a pas d'entrée, T4-R1) ; « Saisir à la main » reste.
       if ((r.availability === 'reference_only' || r.availability === 'partial') && !r.source_url) list.append(el('div', { class: 'row', style: { margin: '-.4rem 0 .8rem' } },
         el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(r.id)}/importer` }, t('Importer')),
-        el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(r.id)}/edit?kind=extraction` }, t('Saisir à la main'))));
+        el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(r.id)}/edit?kind=extraction` }, t('Saisir à la main')),
+        // Lot C (D-C6) : la section lue dans la table des matières, en libellé discret ; regrouper par section est hors périmètre.
+        r.availability === 'reference_only' && typeof r.section === 'string' && r.section.trim() ? el('span', { class: 'chip neutral', dataset: { role: 'section' } }, r.section.trim()) : null));
     }
   };
   const q = el('input', { type: 'search', placeholder: t('Filtrer les recettes de ce livre'), onInput: (e) => { filterState.q = e.target.value; drawList(); } });
