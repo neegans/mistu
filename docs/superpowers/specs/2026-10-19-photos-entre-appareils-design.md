@@ -1,6 +1,7 @@
 # Lot G — « Les photos voyagent entre appareils » : octets des fichiers (L4 de la spec compte) — spec (rév. 4)
 
-> **Rév. 4 → construction, close le 20 octobre 2026** : rulings R-G-7 à R-G-30 au § 12 (Départ, construction, vague finale), limites ajoutées au § 11, dettes au § 13 ; chiffres finaux dans `CLAUDE.md` (section du lot G). La vague finale a été faite INLINE par le chef d'orchestre (limite de dépense du compte) : une re-revue à trois lentilles de ce diff est due AVANT la fusion (R-G-30).
+> **Rév. 4 → construction, close le 20 octobre 2026** : rulings R-G-7 à R-G-32 au § 12 (Départ, construction, vague finale), limites ajoutées au § 11, dettes au § 13 ; chiffres finaux dans `CLAUDE.md` (section du lot G). La vague finale a été faite INLINE par le chef d'orchestre (limite de dépense du compte), relue ensuite à trois lentilles, puis complétée par une ronde 2
+(R-G-31, R-G-24 bis, R-G-28 bis) avec sa re-revue ciblée ; tête de code `222b3a5`, `sw.js cuisine-os-v0.11.0-14`, épingle 4402, suite 4403/4403.
 
 Date : 19 octobre 2026 (rév. 1 le même jour ; rév. 2 après la revue adverse à trois lentilles ; rév. 3 après les rulings du chef
 d'orchestre R-G-1 à R-G-5 et les constats N-1 à N-4 ; rév. 4 après le ruling R-G-6 — constat C-1 de la vérification de la rév. 3 —, § 12 ;
@@ -1090,10 +1091,22 @@ spec (§ 11), la spec s'amende avant la suite.
   remplacement à l'archive).
 - **Archive fabriquée (vague finale, R-G-25)** : la limite « par la taille » n'était pas négligeable face à une archive construite à la main — une copie ne
   porte plus jamais la taille de l'original dans une archive (`bytesValides`), et des octets partis tels quels dont l'empreinte n'est pas la clé ne
-  partent pas (`file_error` `forme`). Reste assumé : une copie reçue du serveur dont la taille égale celle de l'original est prise pour l'original
-  (`estOriginalIci`) jusqu'au prochain téléchargement.
-- **Réglage par appareil (R-G-27)** : `upload_quality` ne voyage pas dans l'archive ; en remplacement, le magasin `settings` est vidé puis rempli des
-  réglages publics, et la qualité d'envoi revient à `reduite`.
+  partent pas (`file_error` `forme`). Ronde 2 de la vague (R-G-31) : au point unique d'écriture des octets reçus, une copie ne prend jamais la taille de
+  l'original, quelle que soit l'origine de la ligne (archive forgée par `missing_files`, serveur, coïncidence) : `file_error` `taille` (réception), sans
+  « Réessayer » — le serveur rendrait les mêmes octets. Le filet à l'envoi ne vaut que pour les octets partis TELS QUELS : un blob non original de la
+  taille de la ligne dont la réduction réussit partirait réduit sous la clé de l'original (coût d'un hachage de la source par candidat, non pris) ;
+  avec R-G-31, ce chemin n'est plus atteignable que par corruption locale.
+- **Réglage par appareil (R-G-27)** : `upload_quality` ne voyage pas dans l'archive ; une archive qui en porterait une ligne (forgée) n'est pas écrite à la
+  restauration (mesuré, ronde 2) : en fusion, la ligne locale reste ; en remplacement, le magasin `settings` est vidé puis rempli des réglages publics,
+  la ligne est absente et `getSetting` rend le défaut du dépôt, `reduite`.
+- **Refus « conflit » sur `files` (R-G-24 bis)** : `push` le compte en « ajustés », plus en « envoyés » ; la ligne adoptée garde son `mime` local (D-G16) avec
+  l'`updated_at` du serveur — si deux appareils ont typé différemment les MÊMES octets et que la version serveur n'a pas encore été reçue, la réception voit
+  un instant égal et des projections différentes et journalise un conflit `files` nommé (« Garder celle d'ailleurs » le règle) ; une tombale datée dans le
+  futur fait renvoyer la ligne, refusée de nouveau tant que l'horloge corrigée n'a pas dépassé cette heure (borné par le décalage, mesuré nulle part).
+- **Libellés (R-G-32)** : `nomFichier` retire tout `\p{Bidi_Control}` (U+202A-202E, U+2066-2069, et aussi U+061C, U+200E, U+200F) et `tronquer` coupe par
+  points de code ; les libellés L3 des autres magasins (titre d'un conflit `books`…) gardent leurs contrôles bidi (défaut préexistant).
+- **Texte de `reception:taille`** : « Fichier illisible reçu du serveur. » sert aussi au refus R-G-31 (copie de la taille de l'original), où les octets sont
+  lisibles mais ne sont pas ceux de la ligne ; phrase gardée (R-G-32).
 - **Arrêt entre onglets (R-G-21)** : « Arrêter le téléchargement » touché dans un autre onglet n'arrête pas la passe déjà en vol du premier (20 fichiers
   ou 60 s au plus) ; le compte final d'une passe relit la base au plus trois fois.
 - **Reprise après une erreur passagère de téléchargement (R-G-29)** : « Télécharger toutes les pages » s'arrête sans reprise automatique (seul l'envoi
@@ -1106,7 +1119,8 @@ spec (§ 11), la spec s'amende avant la suite.
   `cache: 'no-store'`) ; « Effacer les données de cet appareil » ne vide que la base.
 - **Aperçu de la couverture (R-G-29)** : `book.js` crée l'URL de l'aperçu sur le type brut du blob (préexistant l. 144, recopié l. 191), hors de la règle
   F-9 que `bookCover`, `photoDuPlat` et `poserImage` suivent ; non exploitable par le chemin du serveur (octets retypés à la descente).
-- **Réglages (R-G-29)** : dès qu'une `file_error` existe, chaque rendu relit le snapshot (`files` entier), jusqu'à toutes les 300 ms pendant une passe.
+- **Réglages (R-G-29)** : dès qu'une `file_error` existe, ou qu'une ligne `files` est en quarantaine ou en conflit (R-G-24), chaque rendu relit le snapshot
+  (`files` entier), jusqu'à toutes les 300 ms pendant une passe.
 
 ## 12. Ce que les revues ont amendé (rév. 1 → rév. 2 → rév. 3 → rév. 4)
 
@@ -1282,7 +1296,7 @@ nommé là où il porte ; les noms touchés ont été relus dans le worktree (`2
   remplacement ; `garder` sans `!entreeOriginale`), § 9 tâche 2, § 11 (limite par la taille, étendue à la restauration), en-tête (lecture du code).
   Les mineurs m-1 à m-4 de la même vérification ne font l'objet d'aucun ruling et restent à la construction (hors verdict).
 
-### Rév. 4 → construction : ce que le chef d'orchestre a tranché (R-G-7 à R-G-30, 20 octobre 2026)
+### Rév. 4 → construction : ce que le chef d'orchestre a tranché (R-G-7 à R-G-32, 20 octobre 2026)
 
 **Départ (rejeu du plan rév. 3 par intention, voie (b), sur la tête finale du lot B `cf91f09` ; spec commise `3601a52`, plan rejoué `c227711`).** Les
 écarts d'intention entre le plan G (écrit sur `bd03e48` / `4cb99a0`) et le code commis de B sont tranchés en faveur du code commis :
@@ -1338,25 +1352,48 @@ nommé là où il porte ; les noms touchés ont été relus dans le worktree (`2
   ANCIENNE que la sienne (pas seulement l'instant égal de D-G16), deux appareils qui envoient le même original se refusaient l'un l'autre et « Conflits
   à trancher » nommait une empreinte (I-G8). Retirer sans journal, comme K-5 ; la réception écrit la version du serveur par `conditionFichier` (blob
   gardé) et son remote de ce compte arrête la candidature. Réglages nomme une ligne `files` en quarantaine ou en conflit par `nomFichier` dès qu'un
-  snapshot est là (lu aussi dans ces deux cas) ; sans snapshot, la forme bornée de L3. Coût si faux : une ligne `files` refusée pour une autre raison
-  qu'un doublon n'est plus montrée comme conflit — elle repart par la capture ou reste en quarantaine, nommée.
+  snapshot est là (lu aussi dans ces deux cas) ; sans snapshot, la forme bornée de L3. **R-G-24 bis (ronde 2 de la vague)** : la convergence ne dépend pas
+  du curseur — comme K-5 et l'ajustement, le refus adopte sur place la version du serveur (`fusionnerFichier` sur la ligne relue en transaction) si la
+  fiche n'a pas bougé pendant l'aller-retour ; une tombale pose `remote: null` (D-G15). Coût si faux : une ligne `files` refusée n'est plus montrée comme
+  conflit — elle converge vers la version du serveur, ou reste en quarantaine, nommée.
 - **R-G-25 (sécurité)** — une copie ne porte jamais la taille de l'original dans une archive (`bytesValides`) ; `createArchive` décrit une copie locale de
   même taille avec `size: 0` ; filet à l'envoi : des octets partis tels quels dont l'empreinte n'est pas la clé ne partent pas (`file_error` `forme`).
   § 11 amendé (le « négligeable » devenait choisi par qui fabrique l'archive).
 - **R-G-26 (faux-verts)** — gardes `type` de `bookCover` et `poserImage` épinglées par une ligne `application/pdf` aux octets JPEG (P1) ;
-  `conditionFichier` « bougée » et « disparue depuis la lecture » épinglées (tests purs + réception) ; libellés corrigés.
+  `conditionFichier` « bougée » (test pur + réception) et « disparue depuis la lecture » (test pur seulement) épinglées ; libellés corrigés.
 - **R-G-27** — `upload_quality` (« par appareil, jamais synchronisé », § 3.3) ne voyage pas dans l'archive et n'est pas écrit à la restauration
   (`CLES_PAR_APPAREIL`, une définition pour les deux sens) ; limite au § 11 pour le mode remplacement.
-- **R-G-28** — avec un compte, la confirmation d'« Effacer les données de cet appareil » dit « Les photos pas encore envoyées seront perdues. » et la
-  section « Données » dit « …sauf les photos pas encore envoyées. » (la file ne compte que les fiches, D-G8). Refuser le geste tant que des photos
-  restent à envoyer est laissé à Neegan (§ 13).
+- **R-G-28** — avec un compte, la confirmation d'« Effacer les données de cet appareil » et la section « Données » nomment la perte : les photos ET les
+  documents pas encore envoyés, et le fait qu'une photo envoyée en qualité réduite ne garde au serveur que sa copie réduite (R-G-28 bis, ronde 2 : la
+  première formule ne disait que « photos pas encore envoyées »). La file ne compte que les fiches (D-G8). Refuser le geste tant que des photos restent
+  à envoyer est laissé à Neegan (§ 13).
 - **R-G-29** — limites et dettes de la revue finale nommées sans code : § 11 (reprise après erreur passagère, `conflit_renvoyer`, `uid` nul, cache HTTP,
   aperçu de la couverture, relecture du snapshot) et § 13 (identité des remotes à l'écho — F-23 —, `nomFichier` reconstruit trois `Map` par appel, trois
   copies de la regex HASH, alias mort `SYNCHRONISEES`, retypage recopié, fidélité du Storage factice au 404, assertions creuses nommées l. ~1885 et
   ~394 de `tests/sync-l4.js`, le contrôle « I-G8 lu dans les modules » admis comme contrôle supplémentaire).
 - **R-G-30 (méthode)** — la vague n'a pas pu être faite par un agent (limite de dépense du compte, 20 octobre) : le chef d'orchestre l'a faite inline,
-  tests d'abord (les rouges mesurés par les mutants M1 à M10 sur copies servies à part, le code étant corrigé au moment du premier passage), suite 4387/4387,
-  Node 174/174, `--check` 0, invisibles 0 ; aucune re-revue à trois lentilles n'a relu ce diff : elle est due avant la fusion de G.
+  tests d'abord, suite 4387/4387, Node 174/174, `--check` 0, invisibles 0. Mutants M1 à M10 sur copies servies à part : à `c42693f`, **M1 survivait** (la
+  fixture de l'archive fabriquée était refusée par le contrôle de longueur, pas par la règle neuve : un faux vert du test, trouvé par le mutant) et M7
+  était invalide (ancre qui coupait une ligne) ; fixture refaite par `rewriteArchive` (`33578a3`) et ancre corrigée : 10 rouges sur 10. Une re-revue à
+  trois lentilles a ensuite relu le diff (correctness et faux-vert PROPRES, sécurité À-CORRIGER : R-G-31), puis la ronde 2 de la vague l'a appliquée.
+- **R-G-31 (ronde 2 de la vague, sécurité)** — `bytesValides` ne contrôlait que les entrées `files` : une archive forgée par `missing_files` (une ligne dont
+  `size` vaut la taille de la copie serveur, ou un remote de même taille) faisait encore prendre les octets téléchargés pour l'original. Au point unique
+  d'écriture des octets reçus (`telechargerUn`), une copie dont l'empreinte n'est pas celle de la ligne ne prend jamais sa taille : `file_error` `taille`
+  (réception), aucun octet écrit, l'état de la page le dit. Coût si faux : une vraie copie du serveur dont la taille égale celle de l'original (§ 11,
+  coïncidence) est refusée et dite, au lieu d'être prise pour l'original en silence.
+- **R-G-32 (ronde 2 de la vague : résidus nommés, sans code)** — la re-revue ciblée de la ronde 2 (`222b3a5`) est PROPRE (rien de non traité, rien de neuf) ;
+  ses Minor et ceux de l'implémenteur sont tranchés ainsi, à coût nul en code : (a) F-7 n'est pas appliqué au chemin neuf — quand le refus « conflit »
+  réécrit le remote d'une ligne SANS blob qui porte une `file_error` de réception, l'erreur n'est pas levée (la réception la lève) ; remède nommé : lever
+  dans `push.js` les erreurs de sens réception des lignes `files` réécrites dont le remote change, comme `leverErreurReception` (§ 13) ; (b) mutants
+  survivants de test : C6 (une tombale lue dans `server.data` au lieu de `{ remote: null }` — la fixture porte `data: null` alors que `sync_push`,
+  `coalesce(d, cur_data)`, renvoie l'ancien corps) et M12c (la moitié « conflit » de la condition de relecture du snapshot) : le code est juste, les tests
+  ne l'épinglent pas (§ 13) ; (c) le test R-L3-8 du chemin `files` n'est pas discriminant seul (la recherche de l'élément dans le lot est un second mur ;
+  la garde générale reste épinglée par `tests/sync-l3.js`) ; (d) la phrase de `reception:taille` est gardée telle quelle pour le cas R-G-31 (§ 11) ;
+  (e) le filet à l'envoi (octets tels quels) n'est pas touché : après R-G-31 ce chemin n'est atteignable que par corruption locale ; (f) la convergence
+  R-G-24 bis exige, comme K-5, des instants lisibles et une version serveur au moins aussi récente, tombale comprise (le brief ne nommait que « inchangée »
+  et « objet nu ») ; coût si faux : une version serveur à l'heure illisible n'est pas adoptée (retrait seul, comme avant). Versions : `sw.js
+  cuisine-os-v0.11.0-14`, épingle 4402, suite 4403/4403, Node 174/174, 17 mutants rouges sur 17 (implémenteur) + 20 rouges et 2 survivants nommés
+  (relecteur).
 
 ## 13. Points à trancher par Neegan
 
@@ -1372,4 +1409,8 @@ après mesure ») — si l'une contredit la spec, elle s'amende avant la suite (
 2. **Dettes (R-G-19, R-G-23, R-G-29)** : `compterFichesSynchronisees` annonce un nombre trop grand avant le geste (B-25 contre D-G8) ; registre partagé des
    descentes en vol (toast transitoire sur deux tapes) ; identité des remotes à l'écho (F-23) ; `nomFichier` et ses trois `Map` ; trois copies de HASH ;
    alias `SYNCHRONISEES` ; retypage recopié dans `bookCover` / `poserImage` ; Storage factice et le 404 ; assertions creuses nommées.
-3. **Re-revue due (R-G-30)** : le diff de la vague finale `c42693f` doit être relu à trois lentilles AVANT la fusion de G, dès que des agents sont disponibles.
+3. **Re-revue (R-G-30) : FAITE** le 20 octobre au soir (trois lentilles, puis ronde 2 `222b3a5` et re-revue ciblée PROPRE) ; la fusion de G ne l'attend plus.
+4. **Dettes de la ronde 2 (R-G-32)** : F-7 sur le chemin du refus « conflit » (`push.js`, lever les `file_error` de réception des lignes `files` dont le
+   remote change) ; tests : fixture de tombale avec l'ancien corps (`coalesce`) pour épingler `{ remote: null }` (mutant C6), moitié « conflit » de la
+   relecture du snapshot (M12c), R-L3-8 du chemin `files` discriminant seul ; `tronquer` qui retirerait aussi `\p{Bidi_Control}` pour les libellés L3 des
+   autres magasins ; une phrase propre au refus R-G-31 si Neegan la veut.

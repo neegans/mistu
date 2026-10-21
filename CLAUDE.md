@@ -2380,7 +2380,7 @@ nommé par ta page ou ton livre, jamais par une empreinte. L'archive décrit ce 
 `verify-*.txt` ; copie dans `~/projects/mistu/.superpowers/sdd/`). Serveur de vérification `python3 -m http.server 8090 --bind 127.0.0.1`.
 **PAS fusionné, PAS poussé. Aucune migration, serveur `assistant` intact, `DB_VERSION` 4.**
 
-**Ce qui marche (prouvé par la suite, 4387/4387 sur `c42693f`, épingle 4386 ; Node 174/174 ; `--check` 0).**
+**Ce qui marche (prouvé par la suite, 4403/4403 sur `222b3a5`, épingle 4402 ; Node 174/174 ; `--check` 0).**
 - **Données `files`.** Une ligne porte un `remote` OBJET (`sha256`, `size`, `mime`, `quality`, `uploaded_at`, `owner`) validé par `remoteValide`
   (`src/sync/tables.js`), projetée au serveur sur `CHAMPS_FILES_SERVEUR` seulement (ni blob, ni `syncable`, ni `created_at`). UNE règle de fusion
   (`fusionnerFichier`, D-G16) pour toute écriture depuis une copie serveur (réception, ajustement, « Garder celle d'ailleurs », tombale), refaite sur
@@ -2413,28 +2413,28 @@ nommé par ta page ou ton livre, jamais par une empreinte. L'archive décrit ce 
 
 **Ce qui n'est PAS prouvé / dettes.** Rien n'est mesuré dans Safari ni sur l'iPhone ; aucun octet réel n'a été envoyé au bucket de `mitsu` par un
 agent (la preuve § 10 « deux appareils » est le geste de Neegan) ; la forme réelle des erreurs du Storage (`statusCode` sous 400) vient de la lecture
-du vendor, pas d'une mesure ; **la vague finale `c42693f` a été faite inline par le chef d'orchestre et n'a PAS été re-revue à trois lentilles
-(R-G-30) : la re-revue est due avant la fusion** ; dettes nommées R-G-29 (reprise après erreur passagère de « Télécharger toutes les pages »,
+du vendor, pas d'une mesure ; la vague finale `c42693f` a été faite inline par le chef d'orchestre, puis RE-REVUE à trois lentilles (correctness et faux-vert propres, sécurité
+à corriger → ronde 2 `222b3a5` : R-G-31, R-G-24 bis, R-G-28 bis, avec sa re-revue ciblée ; R-G-30) ; dettes nommées R-G-29 (reprise après erreur passagère de « Télécharger toutes les pages »,
 `conflit_renvoyer` sur `files`, `uid` nul sans compte connu, cache HTTP des octets privés, aperçu de la couverture sur le type brut, relecture du
 snapshot à chaque rendu, `compterFichesSynchronisees` trop grand, toast transitoire sur deux tapes, trois copies de HASH, `nomFichier` et ses
 `Map`) ; P1 survit avec la fixture HEIC (connu) ; G13 / G16 équivalents ; tests sensibles au temps (R-B-15 : un rouge se rejoue avant d'être un constat).
 
-**Gestes de Neegan, dans l'ordre.** 1) Lots A puis B d'abord (leurs sections). 2) **Relever la limite de dépense du compte** (claude.ai/settings/usage)
-et faire relire la vague finale (`c42693f`) à trois lentilles par le contrôleur — AVANT toute fusion de G. 3) `git merge --ff-only photos-entre-appareils`
-par `!` (après la fusion de B), `git push`, suite publique `https://neegans.github.io/mistu/tests/` → 4387/4387 (épingle 4386, plus le 404 de
-`/favicon.ico`), service worker `cuisine-os-v0.11.0-13`. 4) Preuve réelle § 10 : Mac et iPhone connectés au même compte, une recette avec photo et un
+**Gestes de Neegan, dans l'ordre.** 1) Lots A puis B d'abord (leurs sections). 2) (fait le 20 octobre au soir : la vague a été relue à trois lentilles et complétée par la ronde 2 `222b3a5`). 3) `git merge --ff-only photos-entre-appareils`
+par `!` (après la fusion de B), `git push`, suite publique `https://neegans.github.io/mistu/tests/` → 4403/4403 (épingle 4402, plus le 404 de
+`/favicon.ico`), service worker `cuisine-os-v0.11.0-14`. 4) Preuve réelle § 10 : Mac et iPhone connectés au même compte, une recette avec photo et un
 livre avec couverture sur le Mac → sur l'iPhone les images s'affichent (téléchargées), « Télécharger » puis récupération après interruption ;
 Réglages → Synchronisation, ensemble L4 (photos à envoyer, pages à télécharger, espace) ; relever la forme réelle du « déjà présent » (geste 7) et le
 mur de pixels iPhone (geste 8). 5) Trancher R-G-28 (refuser l'effacement tant que des photos restent à envoyer ?). 6) « clean » (worktrees, serveurs 8088-8094).
 
-**Versions.** `APP_VERSION 0.11.0` ; `sw.js` `cuisine-os-v0.11.0-1` (T1) … `-11` (T6), `-12` (ronde 1 de T6), `-13` (vague finale) ; `DB_VERSION` 4 inchangée.
+**Versions.** `APP_VERSION 0.11.0` ; `sw.js` `cuisine-os-v0.11.0-1` (T1) … `-11` (T6), `-12` (ronde 1 de T6), `-13` (vague finale), `-14` (ronde 2 de la vague) ; `DB_VERSION` 4 inchangée.
 
 **Bilan.** Départ sur `cf91f09` (mesure = B : 3997/3997, épingle 3996, Node 172) ; rejeu du plan par intention (60 blocs sur 61 à l'octet, R-G-7 à
 R-G-16) ; six tâches, une ronde chacune, re-revues propres : `84ab222`/`ea24d88` (T1 : données, projection, fusion, capture), `771a598`/`45114e7` (T2 :
 archive), `5615211`/`8c3471c` (T3 : passe fichiers), `53bab70`/`63d7a3b` (T4 : moteur), `22b8bd1`/`2f1cd60` (T5 : Réglages), `9a7eaa7`/`bc3d844` (T6 :
-écrans) ; revue finale à trois lentilles : 4 Important et 15 Minor ; vague finale `c42693f` (inline, R-G-30) ; suite 3997 → 4387 (+390), Node 172 → 174.
-Mutants : ceux du plan et des revues rejoués sur copies à chaque tâche et à chaque ronde (rapports du registre) ; vague : M1 à M10 (résultat dans
-`vague-finale-chef-report.md`). `/verify` mécanique : `verify-G-bc3d844.txt` (VERT) puis la tête finale. Rulings : R-G-7 à R-G-30 (spec § 12).
+écrans) ; revue finale à trois lentilles : 4 Important et 15 Minor ; vague finale `c42693f` (inline, R-G-30), re-revue à trois lentilles puis ronde 2
+`222b3a5` (R-G-31 : une copie téléchargée ne prend jamais la taille de l'original ; R-G-24 bis ; R-G-28 bis) ; suite 3997 → 4403, Node 172 → 174.
+Mutants : ceux du plan et des revues rejoués sur copies à chaque tâche et à chaque ronde (rapports du registre) ; vague : M1 à M10, 10 rouges sur 10 à
+`33578a3` (M1 avait révélé un faux vert de fixture, corrigé ; `vague-finale-chef-report.md`) ; ronde 2 : `vague-ronde-2-report.md`. `/verify` mécanique : `verify-G-bc3d844.txt` (VERT) puis la tête finale. Rulings : R-G-7 à R-G-32 (spec § 12).
 
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 

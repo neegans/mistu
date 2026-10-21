@@ -1248,7 +1248,7 @@ les mutants nommés par la spec § 7.5 et par le plan (C1 à C24, B1 à B8, T6a 
 ## Les photos voyagent entre appareils : les octets des fichiers (20 octobre 2026, lot G)
 
 Spec : `docs/superpowers/specs/2026-10-19-photos-entre-appareils-design.md` (rév. 4 ; § 3 : données ; § 4 : parcours ; § 7 : tests ; § 11 : limites ;
-§ 12 : rulings R-G-1 à R-G-30 ; § 13 : dettes). Livré ici (branche `photos-entre-appareils`, empilée sur `recette-web`, non fusionnée) : le niveau
+§ 12 : rulings R-G-1 à R-G-32 ; § 13 : dettes). Livré ici (branche `photos-entre-appareils`, empilée sur `recette-web`, non fusionnée) : le niveau
 L4 de la synchronisation — les OCTETS des fichiers (pages photographiées, couvertures, photos de plat) suivent le compte par le Storage de `mitsu`,
 sans migration ni changement de la fonction `assistant`.
 
@@ -1256,7 +1256,7 @@ sans migration ni changement de la fonction `assistant`.
 ```text
 src/sync/tables.js       CHAMPS_FILES_SERVEUR, projectionFichier (une ligne files vue du serveur : sans blob, syncable, created_at),
                          remoteValide (remote objet borné : sha256, size, mime, quality, uploaded_at, owner), HASH_FICHIER
-src/sync/fichiers.js     estOriginalIci, copiePerimee, candidatsEnvoi (D-G8), fusionnerFichier (D-G16, une règle), conditionFichier
+src/sync/fichiers.js     estOriginalIci, copiePerimee, telechargerUn (une copie reçue ne prend jamais la taille de l'original, R-G-31), candidatsEnvoi (D-G8), fusionnerFichier (D-G16, une règle), conditionFichier
                          ({ key, fusion } : la fusion refaite sur la ligne relue en transaction, I-G3), memeRemote (F-7), peutEcrireRemote,
                          peutEcrireOctets, octetsAEnvoyer (réduite ou telle quelle), createFichiers (envoyer, telecharger, telechargerTout,
                          reessayerFichier ; erreurs file_error:<sha>, pause_fichiers, renvoi_originale), nomFichier, referencesFichiers,
