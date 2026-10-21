@@ -16,8 +16,9 @@ import { preparerPhotoLocale } from '../core/image.js';
 import { TransitionRefusee } from '../core/db.js';
 import { typeAffichage, displayUrl } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
-import { PasserelleProvider, extraireRecette, extraireIndex, validateParsedRecipe, validerIndex, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION } from '../domain/llm.js';
+import { PasserelleProvider, extraireRecette, validateParsedRecipe, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION } from '../domain/llm.js';
 import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception, cleLecture, modeleBorne } from '../domain/import-cible.js';
+import { executerIndex, revaliderResultatIndex } from '../domain/table-matieres.js';
 import { getConvention } from '../domain/units.js';
 import { currentVersion } from '../domain/search.js';
 import { section, sessionAssistant, carteConnexion, texteEchecAssistant, TEXTE_CONNEXION } from './components.js';
@@ -41,6 +42,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('online', () => { enLigneFlag = true; majEnLigneToutes(); });
   window.addEventListener('offline', () => { enLigneFlag = false; majEnLigneToutes(); });
 }
+export const estEnLigne = () => enLigneFlag; // l'état réseau que le vol lit (lot C : le panneau d'index ne pose pas la question de la relecture hors ligne)
 export function reinitialiserImportCible() { reinitialiserVol(); vues.clear(); enLigneFlag = typeof navigator === 'undefined' ? true : navigator.onLine !== false; } // tests seulement
 function notifier() { for (const v of [...vues]) { if (!v.root.isConnected) { vues.delete(v); continue; } v.redessiner(); } }
 // Vague finale (I-7 dans les deux sens) : une lecture HORS journal (« Extraire » de « Corriger », recette existante) tient le vol du document le temps
@@ -97,8 +99,8 @@ async function imagesDe(repo, pageIds) {
 // la réponse validée est écrite dans le journal (a_verifier) AVANT tout rendu ou toute écriture de recette (I-3). Rend { issue, raison } :
 // 'refuse' (vol_tenu | inconnu | hors_ligne | non_connecte | sans_page | image | octets_absents | transition), 'echec' (raison § 4.4),
 // 'a_verifier'. Ne lève jamais vers l'écran pour une raison attendue. `vol` est libéré en finally, quoi qu'il arrive.
-// Tâche 6 : le même vol lit aussi une ligne `kind: 'index'` (panneau d'index, « Relancer » de la section « Imports ») — extraireIndex, et le
-// résultat écrit est { entries, uncertain } ; tout le reste (gardes, battement, appels, signal, Annuler, I-3, I-4) est commun aux deux sortes.
+// Tâche 6 : le même vol lit aussi une ligne `kind: 'index'` (panneau d'index, « Relancer » de la section « Imports ») — lot C : la table des
+// matières par photo (executerIndex), résultat de forme C ; tout le reste (gardes, battement, appels, signal, Annuler, I-3, I-4) est commun aux deux sortes.
 // Tâche 6, ronde 1 — `lecture` : une lecture SANS référence (éditeur, panneau d'index : { kind, importId, pageIds, editionId, sessionId }). Les gardes
 // portent sur ses `pageIds` AVANT TOUTE ÉCRITURE (spec § 4.4 : hors ligne, session absente → journal : rien ; de même pour un vol tenu, des octets
 // absents, une image refusée) ; ensuite seulement, la ligne `importId` est reprise — encore a_lancer | a_verifier | echec, de cette sorte et sans
@@ -153,7 +155,8 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
     catch (e) { liberer(); return { issue: 'refuse', raison: e?.code === 'octets_absents' ? 'octets_absents' : 'image', code: e?.code ?? null }; }
     if (!envoi.images.length) { liberer(); return refus('sans_page'); }
     const depart = maintenant();
-    const enVol = { status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null };
+    // Lot C (F-18) : au départ d'un INDEX — reprise, « Relancer » de la section Imports, ligne neuve —, la lecture remplacée est effacée.
+    const enVol = { status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, ...(kind === 'index' ? { resultat: null, reponse_brute: null, model: null, duree_ms: null, finished_at: null, ordre_applique_at: null } : {}) };
     // Vague finale (m2) : le départ vaut pour les pages LUES — une page retirée, ajoutée ou déplacée pendant la réduction (autre geste, autre onglet)
     // refuse le départ (rien ne part, le redessin montre la ligne) : jamais une page envoyée qui ne serait pas liée, ni une page liée jamais lue.
     const memesPages = (c) => { if (JSON.stringify(Array.isArray(c.page_ids) ? c.page_ids : []) !== JSON.stringify(pageIds)) throw new TransitionRefusee('imports', importId, c.status); return enVol; };
@@ -218,11 +221,9 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
 }
 
 // Les exécutants (lot C, D-C21). Une recette : extraireRecette, 6 000 jetons, le résultat est la recette validée. Un index (panneau, « Relancer » de la
-// section Imports) : extraireIndex et sa forme { entries, uncertain } jusqu'à la tâche 4 du lot C, qui bascule cette branche sur la table des matières
-// (executerIndex). Une seule primitive de vol pour les deux sortes.
+// section Imports) : la table des matières par photo (executerIndex, src/domain/table-matieres.js). Une seule primitive de vol pour les deux sortes.
 const executerRecette = async ({ provider, images, signal }) => { const r = await extraireRecette(provider, images, { signal, maxTokens: MAX_TOKENS_EXTRACTION }); return { resultat: r.recette, texteBrut: r.texteBrut, modele: r.modele }; };
-const executerIndexA = async ({ provider, images, signal }) => { const r = await extraireIndex(provider, images, { signal }); return { resultat: r.index, texteBrut: r.texteBrut, modele: r.modele }; };
-const executerExtraction = (args) => (args.kind === 'index' ? executerIndexA(args) : executerRecette(args));
+const executerExtraction = (args) => (args.kind === 'index' ? executerIndex(args) : executerRecette(args));
 
 // « Annuler » (spec § 3.1, § 4.4, Review Focus 4) : seulement si CE document tient le vol de cet import — le fetch est abandonné (le serveur
 // abandonne l'amont, lot passerelle F-5) et la ligne passe en_cours → echec(annule). Sinon rien n'est fait et false est rendu.
@@ -272,8 +273,8 @@ export function texteRefus(r) {
 // « Extraire avec l'assistant IA » de l'éditeur (kind recette, recipe_id null : « Regrouper en recette ») et « Lire avec l'assistant IA » du panneau
 // d'index (kind index) passent par le journal, comme l'écran ciblé : la section « Imports » les montre, les reprend (?import=), les relance ou les
 // annule. Le résultat d'une ligne est REVALIDÉ avant tout usage (I-1), par sorte ; le modèle relu est borné (80 points de code).
-const VALIDEURS = { recette: validateParsedRecipe, index: validerIndex };
-const validerSelon = (kind, resultat) => { try { return Object.hasOwn(VALIDEURS, kind) ? VALIDEURS[kind](resultat) : null; } catch { return null; } };
+const VALIDEURS = { recette: (r) => validateParsedRecipe(r), index: (r, L) => revaliderResultatIndex(r, L?.page_ids) }; // lot C : un index est de forme C, relu sur les pages de SA ligne
+const validerSelon = (kind, resultat, ligne = null) => { try { return Object.hasOwn(VALIDEURS, kind) ? VALIDEURS[kind](resultat, ligne) : null; } catch { return null; } };
 const sansReference = (ligne, kind) => !!ligne && ligne.kind === kind && ligne.recipe_id == null; // une ligne CIBLÉE se reprend par son écran
 
 // a_verifier → echec(illisible), résultat effacé (T4-R1) — pour LA lecture relue et jugée illisible, jamais pour une autre arrivée entre-temps (ronde 1 :
@@ -293,7 +294,7 @@ export async function relireDuJournal(importId, kind, { repo = repoModule } = {}
   const ligne = await repo.get('imports', importId);
   if (!sansReference(ligne, kind)) return null;
   if (ligne.status !== 'a_verifier') return { ligne, resultat: null, modele: null };
-  const resultat = validerSelon(kind, ligne.resultat);
+  const resultat = validerSelon(kind, ligne.resultat, ligne);
   if (resultat) return { ligne, resultat, modele: modeleBorne(ligne.model) };
   const ecrite = await marquerIllisible(repo, ligne);
   if (ecrite) return { ligne: ecrite, resultat: null, modele: null };

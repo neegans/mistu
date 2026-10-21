@@ -66,10 +66,6 @@ export const BORNES_EXTRACTION = Object.freeze({ titre: 200, ligne: 300, etape: 
 // Les nombres du modèle (ronde 1) : au-delà, la valeur vaut null (rien d'inventé : « p. 9007199254740991 » ou une mise à l'échelle par 10^15 ne sont
 // pas des lectures). 24 h comme detectTimers (R-CRE-8) ; 999 portions ; 9 999 pages. Un refus (hors_bornes) jetterait une recette lisible pour un nombre.
 export const BORNES_NOMBRES = Object.freeze({ portions: 999, minutes: 1440, page: 9999 });
-// Les listes d'un index (tâche 6, ronde 1) : comme celles de la recette, un dépassement REFUSE (hors_bornes). 500 entrées est au-delà de ce qu'une réponse
-// peut porter (≈ 15 jetons par entrée) ; un index relu du journal (synchro, archive) qui en porterait 20 000 ne devient jamais 20 000 fiches.
-// Renommée au lot C : le nom BORNES_INDEX est la table de la spec C § 3.4 ; retirée avec validerIndex en tâche 4.
-export const BORNES_INDEX_A = Object.freeze({ entrees: 500, incertains: 40, mentions: 80 });
 // D-5 : 6 000 jetons de sortie (était 4 000) ; une sortie plus longue frôlerait l'abandon serveur à 120 s — la preuve § 10 mesure.
 export const MAX_TOKENS_EXTRACTION = 6000;
 // La réponse brute gardée dans le journal (diagnostic, jamais rendue) : coupée à 16 000 points de code (sous la borne de 512 Kio de sync_push).
@@ -145,42 +141,6 @@ export async function extraireRecette(provider, images /* [{mime, base64}] */, {
 export async function extractRecipeFromImages(provider, images) {
   return (await extraireRecette(provider, images)).recette;
 }
-
-const INDEX_SYSTEM = `Tu lis la table des matières ou l'index d'un livre de cuisine. Réponds UNIQUEMENT en JSON :
-{"entries": [{"title": string, "printed_page": number|null, "section": string|null, "ingredients_mentioned": [string]}], "uncertain": [string]}
-Ne déduis aucun ingrédient d'un titre ; "ingredients_mentioned" ne contient que des mots explicitement imprimés dans l'entrée.`;
-
-// Un appel → { index: { entries, uncertain }, stopReason, modele, texteBrut }. Mêmes refus que extraireRecette (coupe, illisible : aucun JSON ou
-// pas de liste d'entrées) ; les entrées gardent leur typage existant (la table des matières structurée est le lot C).
-export async function extraireIndex(provider, images, { signal } = {}) {
-  if (!provider.configured) throw new Error('non_connecte');
-  const content = [{ type: 'text', text: 'Liste les entrées de cet index. JSON seulement.' }, ...images.map((im) => ({ type: 'image', mime: im.mime, base64: im.base64 }))];
-  const raw = await provider.complete([{ role: 'system', content: INDEX_SYSTEM }, { role: 'user', content }], { json: true, signal });
-  const contexte = contexteDe(provider, raw);
-  if (contexte.stopReason === 'max_tokens') throw new ErreurExtraction('coupe', contexte);
-  let data;
-  try { data = parseJsonLoose(raw); } catch { throw new ErreurExtraction('illisible', contexte); }
-  try { return { index: validerIndex(data), ...contexte }; }
-  catch (e) { if (e instanceof ErreurExtraction) Object.assign(e, contexte); throw e; }
-}
-
-// La forme d'un index (ronde 1 de la tâche 3) : les entrées deviennent des fiches (« Créer les références ») — typées et bornées comme la recette
-// (titre ≤ 200 points de code sinon hors_bornes, Cc/Cf retirés, page entier ≤ 9 999, section chaîne ou null, mentions chaînes seulement) ; une
-// entrée au titre vide est écartée ; pas de liste d'entrées → illisible. Exportée (tâche 6) : UNE définition, pour la réponse du modèle ET pour un
-// résultat relu du journal (synchro, archive), REVALIDÉ avant tout usage par le panneau d'index (I-1), comme validateParsedRecipe pour une recette.
-// Ronde 1 de la tâche 6 : les NOMBRES d'entrées, d'incertitudes et de mentions sont bornés aussi (BORNES_INDEX_A, hors_bornes au-delà).
-export function validerIndex(data) {
-  if (!data || typeof data !== 'object' || !Array.isArray(data.entries)) throw new ErreurExtraction('illisible');
-  const mentions = (m) => { const l = (Array.isArray(m) ? m : []).map((x) => texteBorne(x, BORNES_EXTRACTION.ligne)).filter(Boolean); if (l.length > BORNES_INDEX_A.mentions) horsBornes(); return l; };
-  const entries = data.entries.filter((e) => e && typeof e.title === 'string')
-    .map((e) => ({ title: texteBorne(e.title, BORNES_EXTRACTION.titre), printed_page: entierBorne(e.printed_page, BORNES_NOMBRES.page), section: texteBorne(e.section, BORNES_EXTRACTION.titre), ingredients_mentioned: mentions(e.ingredients_mentioned) }))
-    .filter((e) => e.title);
-  if (entries.length > BORNES_INDEX_A.entrees) horsBornes();
-  const uncertain = (Array.isArray(data.uncertain) ? data.uncertain : []).map((u) => texteBorne(u, BORNES_EXTRACTION.champIncertain)).filter(Boolean);
-  if (uncertain.length > BORNES_INDEX_A.incertains) horsBornes();
-  return { entries, uncertain };
-}
-// (Ronde 1 de la tâche 6 : l'enveloppe m5 extractIndexFromImages est retirée — son seul appelant, le panneau d'index, lit désormais par le journal.)
 
 // --- Table des matières sur plusieurs photos (lot C, spec docs/superpowers/specs/2026-10-19-table-des-matieres-design.md § 3.4, D-C1, D-C17) ------
 // UN appel pour N photos ; la réponse est donnée PAR PHOTO dans l'ordre d'envoi, chaque image précédée de « Photo n ». La sortie est une DONNÉE

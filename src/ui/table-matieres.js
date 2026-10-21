@@ -1,16 +1,19 @@
 // Le tableau d'une table des matières lue sur plusieurs photos (lot C, spec docs/superpowers/specs/2026-10-19-table-des-matieres-design.md, § 4.3,
-// § 4.4) : creerReferences (sans DOM, testable seule) ; panneauLecture, la séquence proposée des photos (tâche 3 ; le tableau d'entrées s'y ajoute en tâche 4). Rendu PAR
+// § 4.4) : creerReferences (sans DOM, testable seule) ; panneauLecture, la séquence proposée des photos (tâche 3) et le tableau d'entrées (tâche 4) ;
+// les textes du panneau d'index (texteEchecIndex, ligneEtatLecture, ligneIncertain, texteQuota). Rendu PAR
 // indexEntriesPanel (src/ui/import.js), qui reste la porte. Tout texte par t() avec son entrée en.js (MODULES_NEUFS) ; toute donnée du modèle en nœuds
 // texte ; écritures par repo.transitionner seulement (I-C1). Aucun texte ne nomme le fournisseur ni la base.
 import { el, toast as toastDom } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { TransitionRefusee } from '../core/db.js';
 import { logError } from '../core/log.js';
+import { borner } from '../core/bornes.js';
 import * as repoModule from '../model/repo.js';
 import { displayUrl } from '../sync/mime.js';
-import { ordrePropose, positionsProposees, reordonnerSeance, memeOrdre, recalculer, planCreation, fabriquerReferences, revaliderResultatIndex, pageIndexee } from '../domain/table-matieres.js';
+import { ordrePropose, positionsProposees, reordonnerSeance, memeOrdre, lignesTableau, trierLignes, recalculer, planCreation, compteur, fabriquerReferences, revaliderResultatIndex, pageIndexee } from '../domain/table-matieres.js';
 import { deplacerPage } from '../domain/import-cible.js';
 import { cleLecture } from './import-cible.js';
+import { texteDesChamps, texteEchecAssistant } from './components.js';
 
 const horloge = () => new Date().toISOString();
 const estRefus = (e) => e instanceof TransitionRefusee;
@@ -64,12 +67,50 @@ export async function creerReferences(ligne, lignes, { repo = repoModule, ctx = 
   return { issue: 'enregistre', n: recipes.length, doublons };
 }
 
-// La lecture reçue (§ 4.3 ; le tableau d'entrées s'ajoute en tâche 4). Options : ligne (a_verifier), resultat (REVALIDÉ par l'appelant), session (la
-// séance du contexte), ctx, repo, apresOrdre({ pages, seance }) (D-C15 : l'écran de séance se met à jour EN PLACE), maintenant, surChangement() (un
-// autre chemin a tranché : l'appelant relit). Rend la racine ; racine.etatLecture() → { ordre, enregistre, lignes }.
+let instances = 0; // les datalist d'une instance : un compteur, jamais l'identifiant de la ligne (S-14 : il peut porter une espace ou un guillemet)
+
+// Le texte d'une ligne echec d'un index (§ 4.2 état 3) : coupe et vide ont leur phrase ; illisible / hors_bornes la phrase générique + « Code : … » ;
+// annule / interrompu / incertain les phrases I-4 du lot A ; les raisons de la passerelle gardent texteEchecAssistant. Rend { texte, code }.
+export function texteEchecIndex(erreur) {
+  const raison = typeof erreur?.raison === 'string' ? erreur.raison : 'interne';
+  const extra = erreur?.extra && typeof erreur.extra === 'object' ? erreur.extra : {};
+  if (raison === 'coupe') return { texte: t('Lecture coupée : lis moins de photos à la fois.'), code: null };
+  if (raison === 'vide') return { texte: t('Aucune entrée lue sur ces photos.'), code: null };
+  if (raison === 'illisible' || raison === 'hors_bornes') return { texte: t('L’assistant n’a pas répondu lisiblement. Réessaie.'), code: t('Code : {c}', { c: raison }) };
+  if (raison === 'annule') return { texte: t('Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.'), code: null };
+  if (raison === 'interrompu') return { texte: t('La lecture a été interrompue. L’appel a peut-être été compté ; relancer en coûtera un autre.'), code: null };
+  if (raison === 'incertain') return { texte: t('L’appel a peut-être été compté ; relancer en coûtera un autre.'), code: null };
+  return { texte: texteEchecAssistant({ message: raison, quota: extra.quota, trop_lourd: extra.trop_lourd }), code: null };
+}
+// « Lue en {s} s · {n} photo(s) » (§ 4.2 état 2, Q5) : n = les blocs du TABLEAU (resultat.photos), jamais page_ids ; sans durée lisible, « {n} photo(s) ».
+export function ligneEtatLecture(ligne, resultat) {
+  const n = Array.isArray(resultat?.photos) ? resultat.photos.length : 0;
+  return Number.isFinite(ligne?.duree_ms) && ligne.duree_ms >= 0 ? t('Lue en {s} s · {n} photo(s)', { s: Math.round(ligne.duree_ms / 1000), n }) : t('{n} photo(s)', { n });
+}
+// « Incertain : … » (§ 4.2 état 2, Q1, P3) : les COMPTES d'entrées écartées EN TÊTE (par t()), puis les chaînes du modèle, par texteDesChamps
+// (src/ui/components.js, vague finale du lot A, m8 : la règle de texteIncertain sur une liste, UNE définition) — chaînes seulement, Cc/Cf retirés,
+// espaces repliées, jointes par « ; », bornées à INCERTAIN_MAX points de code (coupées avec « … ») ; null s'il n'y a rien.
+export function ligneIncertain(resultat) {
+  const e = resultat?.ecartees && typeof resultat.ecartees === 'object' ? resultat.ecartees : {};
+  const parts = [];
+  if (Number.isInteger(e.trop_longues) && e.trop_longues > 0) parts.push(t('{k} entrées écartées (trop longues)', { k: e.trop_longues }));
+  if (Number.isInteger(e.adresse) && e.adresse > 0) parts.push(t('{k} entrées écartées (adresse)', { k: e.adresse }));
+  const texte = texteDesChamps([...parts, ...(Array.isArray(resultat?.uncertain) ? resultat.uncertain : [])]);
+  return texte ? t('Incertain : {t}', { t: texte }) : null;
+}
+export const texteQuota = () => t('Une lecture = un appel à l’assistant, compté dans ton quota du jour.');
+
+// La lecture reçue (§ 4.3, § 4.4). Options : ligne (a_verifier), resultat (REVALIDÉ par l'appelant), session (la séance du contexte), ctx, repo, toast,
+// apresOrdre({ pages, seance }) (D-C15), maintenant, editionId, surCree(r) (création réussie : l'appelant rafraîchit), surChangement() (un autre chemin a
+// tranché : l'appelant relit), surSansLivre() (l'appelant le dit). Rend la racine ; racine.etatLecture() → { ordre, enregistre, lignes }.
+// En haut, « Ordre des photos » (N ≥ 2, aucune photo inconnue) ; en bas, « Entrées lues » : les modifications sont LOCALES (mémoire de l'instance)
+// jusqu'à « Créer {n} références » ; aucun geste ne redessine un champ en cours de saisie (le focus iPhone reste) ; ↑/↓ réordonnent les `li` sans les recréer.
 // Ordre COURANT au premier rendu : la projection de la séance sur les N photos si l'ordre a été appliqué (ordre_applique_at), sinon ordrePropose.
 // ↑/↓ n'écrivent RIEN (I-C6) ; « Appliquer cet ordre » écrit l'ordre SEUL, en une transaction conditionnée sur la ligne ET la séance (§ 4.3).
-export function panneauLecture({ ligne, resultat, session = null, ctx = null, repo = repoModule, apresOrdre = null, maintenant = horloge, surChangement = null } = {}) {
+export function panneauLecture({ ligne, resultat, session = null, ctx = null, repo = repoModule, toast = toastDom, apresOrdre = null, maintenant = horloge, editionId = null, surCree = null, surChangement = null, surSansLivre = null } = {}) {
+  const k = ++instances;
+  const edId = editionId || session?.edition_id || ligne?.edition_id || null;
+  const existantes = () => (Array.isArray(ctx?.recipes) ? ctx.recipes.filter((r) => r && r.edition_id === edId) : []);
   const photos = Array.isArray(resultat?.photos) ? resultat.photos : [];
   const ids = photos.map((p) => p.page_id);
   const avecOrdre = photos.length >= 2 && photos.every((p) => typeof p.page_id === 'string'); // N ≥ 2 et aucune photo inconnue
@@ -89,6 +130,7 @@ export function panneauLecture({ ligne, resultat, session = null, ctx = null, re
     return img;
   };
 
+  // --- Ordre des photos (§ 4.3) — identique à la tâche 3, plus le réordonnancement du tableau après ↑/↓ (D-C18).
   function dessinerOrdre() {
     if (!avecOrdre) { zoneOrdre.hidden = true; zoneOrdre.replaceChildren(); return; }
     const meme = memeOrdre(etat.ordre, projection(etat.seance));
@@ -112,13 +154,15 @@ export function panneauLecture({ ligne, resultat, session = null, ctx = null, re
       el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn', dataset: { role: 'appliquer-ordre' }, hidden: meme, disabled: etat.occupe, onClick: appliquer }, t('Appliquer cet ordre'))));
     if (etat.focus) { const { role, page } = etat.focus; etat.focus = null; zoneOrdre.querySelector(`button[data-role="${role}"][data-page="${CSS.escape(page)}"]`)?.focus(); }
   }
-  // ↑/↓ (D-C3) : l'ordre courant est une donnée de l'instance ; en tête ou en queue, sans effet (le bouton reste) ; le focus suit la page déplacée.
+  // ↑/↓ (D-C3) : l'ordre courant est une donnée de l'instance ; en tête ou en queue, sans effet (le bouton reste) ; le focus suit la page déplacée ;
+  // le tableau suit l'ordre courant (D-C18 : ses `li` sont déplacés, jamais recréés).
   function bouger(id, sens, role) {
     const nouvel = deplacerPage(etat.ordre, id, sens);
-    if (memeOrdre(nouvel, etat.ordre)) return;
+    if (memeOrdre(nouvel, etat.ordre)) return; // en tête ou en queue : sans effet, le bouton reste
     etat.ordre = nouvel;
     etat.focus = { role, page: id };
     dessinerOrdre();
+    ordonnerTableau();
   }
   // « Appliquer cet ordre » (§ 4.3, D-C15) : l'ordre figé AU CLIC, la ligne et les pages RELUES, puis UNE transaction — la ligne (page_ids,
   // ordre_applique_at) sous attendus a_verifier, la POSITION seule de chaque page posée sur sa fiche RELUE dans la transaction (condition de fusion,
@@ -130,7 +174,7 @@ export function panneauLecture({ ligne, resultat, session = null, ctx = null, re
   async function appliquer() {
     if (etat.occupe || !session) return;
     const ordre = [...etat.ordre]; // figé AU CLIC (ronde 1) : les N photos dans l'ordre que la personne avait devant elle, quoi qu'il arrive pendant les relectures
-    etat.occupe = true; dessinerOrdre();
+    etat.occupe = true; dessinerOrdre(); majCompteurs();
     try {
       const cle = cleLecture(etat.ligne);
       const L = await repo.get('imports', etat.ligne.id);
@@ -158,11 +202,78 @@ export function panneauLecture({ ligne, resultat, session = null, ctx = null, re
     } catch (e) {
       if (!estRefus(e)) logError('table_matieres.ordre', { error: e });
       else if (typeof surChangement === 'function') await surChangement();
-    } finally { etat.occupe = false; dessinerOrdre(); }
+    } finally { etat.occupe = false; dessinerOrdre(); majCompteurs(); }
   }
 
+  // --- Entrées lues (§ 4.4, D-C4, D-C12, D-C18, R-C-3, I-C5)
+  const zoneEntrees = el('div', { class: 'stack', dataset: { role: 'entrees-lues' } });
+  const compteurEl = el('p', { class: 'muted', style: { margin: 0 }, dataset: { role: 'compteur' } });
+  const liste = el('ul', { class: 'list' });
+  const items = new Map(); // cle → { li, caseCoche, titre, page, section, photoEl, puces }
+  etat.lignes = lignesTableau(resultat, { ordre: etat.ordre, existantes: existantes() });
+  const idListe = `sections-lues-${k}`;
+  const sections = [...new Set(etat.lignes.map((l) => l.section).filter((s) => typeof s === 'string' && s))];
+  const datalist = el('datalist', { id: idListe }, ...sections.map((s) => el('option', { value: s })));
+  const boutonCreer = el('button', { type: 'button', class: 'btn primary', dataset: { role: 'creer-references' }, onClick: () => creer() });
+  const pageSaisie = (v) => { const s = String(v ?? '').trim(); return /^[1-9]\d{0,3}$/.test(s) ? parseInt(s, 10) : null; };
+  function construireLi(l) {
+    const caseCoche = el('input', { type: 'checkbox', onChange: (e) => modifier(l.cle, { cochee: e.target.checked, decocheeParLaPersonne: !e.target.checked }) });
+    const titre = el('input', { type: 'text', maxlength: 200, 'aria-label': t('Titre'), value: l.title, onInput: (e) => modifier(l.cle, { title: e.target.value }) });
+    const page = el('input', { type: 'number', min: 1, max: 9999, 'aria-label': t('p. imprimée'), value: l.printed_page ?? '', onInput: (e) => modifier(l.cle, { printed_page: pageSaisie(e.target.value) }) });
+    const section = el('input', { type: 'text', maxlength: 200, list: idListe, 'aria-label': t('Section'), value: l.section ?? '', onInput: (e) => modifier(l.cle, { section: e.target.value.trim() || null }) });
+    const photoEl = el('span', { class: 'muted', dataset: { role: 'photo' } });
+    const puces = el('span', { class: 'chips', dataset: { role: 'puces' } });
+    const li = el('li', { dataset: { cle: l.cle } }, el('div', { class: 'row top' }, caseCoche, titre), el('div', { class: 'row' }, page, section, photoEl, puces));
+    return { li, caseCoche, titre, page, section, photoEl, puces };
+  }
+  // Ce qu'une édition met à jour : la case (cochée, désactivée, son aria-label), le rang de la photo et les puces — JAMAIS la valeur d'un champ.
+  function majLi(l) {
+    const it = items.get(l.cle);
+    it.caseCoche.checked = l.cochee;
+    it.caseCoche.disabled = !l.creable;
+    it.caseCoche.setAttribute('aria-label', l.dejaReperee ? t('Déjà repérée dans ce livre') : l.enDouble ? t('En double dans cette lecture') : t('Créer une référence pour « {t} »', { t: borner(typeof l.title === 'string' ? l.title : '', 60) }));
+    it.photoEl.textContent = l.photo.page_id === null ? t('photo inconnue') : t('photo {n}', { n: l.photo.rang });
+    it.puces.replaceChildren(...[
+      l.uncertain || l.horsPlage ? el('span', { class: 'chip warn' }, t('incertain')) : null,
+      l.dejaReperee ? el('span', { class: 'chip neutral' }, t('déjà repérée')) : null,
+      l.enDouble ? el('span', { class: 'chip neutral' }, t('en double')) : null,
+    ].filter(Boolean));
+  }
+  function majCompteurs() {
+    if (!etat.lignes) return;
+    const c = compteur(etat.lignes);
+    compteurEl.textContent = t('{n} entrées lues · {m} déjà dans ce livre', { n: c.lues, m: c.dejaDans });
+    const n = planCreation(etat.lignes).aCreer.length;
+    boutonCreer.textContent = n === 1 ? t('Créer 1 référence') : t('Créer {n} références', { n });
+    boutonCreer.disabled = n === 0 || etat.occupe;
+  }
+  function modifier(cle, champs) {
+    etat.lignes = recalculer(etat.lignes.map((l) => (l.cle === cle ? { ...l, ...champs } : l)), existantes());
+    for (const l of etat.lignes) majLi(l);
+    majCompteurs();
+  }
+  // D-C18 : après ↑/↓, les lignes suivent l'ordre COURANT des photos ; les `li` sont DÉPLACÉS (jamais recréés : éditions et focus restent).
+  function ordonnerTableau() {
+    etat.lignes = recalculer(trierLignes(etat.lignes, etat.ordre), existantes());
+    for (const l of etat.lignes) { liste.append(items.get(l.cle).li); majLi(l); }
+    majCompteurs();
+  }
+  async function creer() {
+    if (etat.occupe) return;
+    etat.occupe = true; majCompteurs();
+    let r = null;
+    try { r = await creerReferences(etat.ligne, etat.lignes, { repo, ctx, editionId: edId, toast, maintenant }); }
+    catch (e) { logError('table_matieres.creer', { error: e }); }
+    finally { etat.occupe = false; majCompteurs(); }
+    if (r?.issue === 'enregistre' && typeof surCree === 'function') await surCree(r);
+    else if (r?.issue === 'sans_livre' && typeof surSansLivre === 'function') surSansLivre();
+    else if (['refuse', 'illisible', 'change'].includes(r?.issue) && typeof surChangement === 'function') await surChangement();
+  }
+  for (const l of etat.lignes) { const it = construireLi(l); items.set(l.cle, it); liste.append(it.li); majLi(l); }
+  zoneEntrees.append(el('h3', null, t('Entrées lues')), compteurEl, datalist, liste, el('div', { class: 'row' }, boutonCreer));
+  majCompteurs();
   dessinerOrdre();
-  racine.append(zoneOrdre);
-  racine.etatLecture = () => ({ ordre: [...etat.ordre], enregistre: projection(etat.seance), lignes: etat.lignes ? etat.lignes.map((l) => ({ ...l, photo: { ...l.photo } })) : null });
+  racine.append(zoneOrdre, zoneEntrees);
+  racine.etatLecture = () => ({ ordre: [...etat.ordre], enregistre: projection(etat.seance), lignes: etat.lignes.map((l) => ({ ...l, photo: { ...l.photo } })) });
   return racine;
 }

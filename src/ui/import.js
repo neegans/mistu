@@ -13,11 +13,12 @@ import { remoteDeCeCompte } from '../sync/tables.js';
 import { sha256Hex } from '../core/hash.js';
 import { assertVocabulaire } from '../domain/vocabulaire.js';
 import { providerFrom, nettoyer } from '../domain/llm.js';
-import { seanceDUnImportCible } from '../domain/import-cible.js';
-import { cleReference, BORNE_RAW_ENTRY, ligneOuverteDeSeance } from '../domain/table-matieres.js';
-import { pageHeader, section, emptyState, select, field, carteConnexion, texteEchecAssistant, pdfFrame, libelleLivre, sessionAssistant, contexteFichiers, vignettesDePages, boutonTelechargerPages, gesteTelechargement } from './components.js';
+import { seanceDUnImportCible, importOuvert } from '../domain/import-cible.js';
+import { cleReference, BORNE_RAW_ENTRY, ligneOuverteDeSeance, pagesALire, revaliderResultatIndex, planCreation, executerIndex } from '../domain/table-matieres.js';
+import { pageHeader, section, emptyState, select, field, carteConnexion, pdfFrame, libelleLivre, sessionAssistant, contexteFichiers, vignettesDePages, boutonTelechargerPages, gesteTelechargement } from './components.js';
 import { demarrerConnexion } from './settings.js';
-import { lireDansLeJournal, relireDuJournal, phraseEchec, cleLecture } from './import-cible.js';
+import { lancerVol, annulerVol, volEnCours, estEnLigne, texteRefus, relireDuJournal, cleLecture, BATTEMENT_MS } from './import-cible.js';
+import { panneauLecture, texteEchecIndex, ligneEtatLecture, ligneIncertain, texteQuota } from './table-matieres.js';
 
 const INTENTIONS = ['index', 'recette'];
 // L'intention (spec § 10) voyage dans l'adresse, pas dans la base : consommée au premier rendu, puis retirée.
@@ -46,8 +47,8 @@ export async function startScanSession(files, { edition_id = null, session_id = 
 // Identité de l'appareil : une seule, celle de la base (spec § 4.2). Posée par repo.init() au démarrage.
 export function deviceId() { return repo.deviceId(); }
 
-// Les lectures SANS référence du panneau d'index passent par le journal : lireDansLeJournal, relireDuJournal et phraseEchec vivent à côté du vol, dans
-// src/ui/import-cible.js (tâche 6, ronde 1 : l'éditeur ne dépend plus de ce module de route pour son journal).
+// Le panneau d'index lit par le journal : le vol partagé (lancerVol, option lecture) et relireDuJournal vivent à côté du vol, dans
+// src/ui/import-cible.js (tâche 6 du lot A et sa ronde 1 ; lot C, tâche 4).
 
 export async function renderImport(params, query, ctx, deps = {}) {
   if (!query.session) return sessionsList(ctx);
@@ -236,84 +237,178 @@ export function reordonnerVignettes(thumbs, { pages = [], seance = null } = {}, 
   }
 }
 
-// Panneau d'entrées d'index : « Titre — 132 » par ligne ; création de références (reference_only) sans inventer d'ingrédients.
-// Tâche 6 (spec § 4.6) : « Lire avec l'assistant IA » écrit dans le journal (kind index) et relit sa ligne ; le bouton est verrouillé pendant
-// l'appel (double clic → un POST) ; `importId` (?import=) reprend une lecture déjà reçue, sans appel ; « Créer les références » la clôt.
-export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId = null, importId = null, repo = repoModule, toast = toastDom, maintenant = horloge } = {}) {
-  const panel = el('div', { class: 'card stack' }, el('h2', null, t('Entrées d’index ou de table des matières')));
+// Panneau d'entrées d'index (lot C, spec § 4.2) : quatre états et un état « en vol », lus sur la ligne du journal `kind: 'index'` OUVERTE de la séance
+// (ligneOuverteDeSeance : ctx.imports au rendu, aucun flash ; relue dans la base avant tout geste, leçon C4).
+//   1) sans lecture : la zone de texte et « Lire avec l’assistant IA » ;   2) lecture reçue (a_verifier, résultat REVALIDÉ) : panneauLecture (ordre +
+//   tableau), « Lue en … », « Incertain : … », « Saisir à la main » ;   3) échec : la raison, « Relancer », la zone de texte ;   4) à lancer : « Lire »,
+//   « Ignorer », la zone de texte ;   en vol : « Lecture des pages par l’assistant… » puis une .row avec le primaire éteint et « Annuler » (R-VIS-8).
+// L'appel entier est confié à lancerVol (D-C21) AVEC l'option `lecture` du lot A (ronde 1 de T6 : les gardes du vol — session, réseau, octets, image —
+// passent AVANT toute écriture ; puis la ligne ouverte est reprise par la transition de départ, ou une ligne naît par repo.ouvrirImport) : le panneau
+// n'écrit jamais a_lancer, page_ids, en_cours, appels, document_id_vol ni battement_at, et un « Lire » refusé n'écrit rien. Une lecture reçue est relue
+// par relireDuJournal (I-1 : revalidée, forme C ; hostile → echec(illisible) conditionné à CETTE lecture, T4-R2). Dépendances injectées (D-C20) : repo,
+// toast, confirmer, apresOrdre (D-C15), fetch, maintenant, battementMs, enLigne (par défaut l'état réseau que le vol lit) ; importId = la ligne désignée
+// par ?import= (elle gagne). Sans séance (fiche livre) : état 1 toujours, et « Lire » dit « Sélectionne les pages d’index à lire ».
+export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId = null, importId = null, repo = repoModule, toast = toastDom, confirmer = confirmDialog, apresOrdre = null, fetch: fetchInjecte = undefined, maintenant = horloge, battementMs = BATTEMENT_MS, enLigne = estEnLigne } = {}) {
+  const panel = el('div', { class: 'card stack', dataset: { role: 'panneau-index' } }, el('h2', null, t('Entrées d’index ou de table des matières')));
+  const edId = () => editionId || session?.edition_id || null;
+  const etat = { ligne: null, resultat: null, cle: null, vue: null, saisie: false, occupe: false, lisant: false };
+  const zoneEtat = el('div', { class: 'stack', dataset: { role: 'etat-lecture' } });
+  const zoneVol = el('div', { class: 'stack', dataset: { role: 'vol' } });
+  const zoneLecture = el('div', { dataset: { role: 'zone-lecture' } });
   const ta = el('textarea', { placeholder: 'Magret de canard aux cerises — 132\nSalade de fenouil, p. 58\n212 Pâtes puttanesca', rows: 8 });
   const preview = el('div', null);
   const status = el('div', { class: 'muted' });
-  // La passerelle (R-T3-1) : la session arrive de façon asynchrone — le bouton reste éteint jusqu'à sa lecture, et elle est relue au
-  // clic (un jeton expiré se rafraîchit). `indexEntriesPanel` reste synchrone : c'est le fournisseur qui se met à jour. La phrase
-  // « Connecte-toi… » attend la même lecture (cachée au départ : une personne connectée ne la voit jamais en flash) ; avec une
-  // session elle est retirée, sans session elle se montre (R-T4-4).
-  let provider = providerFrom(ctx.settings);
-  const connexion = carteConnexion(() => demarrerConnexion(ctx.sync?.auth), ctx);
-  connexion.hidden = true;
-  // F-8 : la carte reste dans le document, cachée ou montrée — jamais retirée (un `hidden = false` sur un nœud détaché ne montre rien : la
-  // session disparue au clic laissait un bouton éteint et aucune explication) ; le bouton suit la session dans les deux sens.
-  const lierAssistant = async () => {
-    provider = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) });
-    aiBtn.disabled = !provider.configured;
-    connexion.hidden = provider.configured;
-  };
-  const parse = () => parseIndexLines(ta.value);
   const draw = () => {
-    const entries = parse();
+    const entries = parseIndexLines(ta.value);
     preview.replaceChildren(entries.length ? el('ul', { class: 'list plain' }, ...entries.map((e) => el('li', null, el('strong', null, e.title), e.printed_page ? el('span', { class: 'muted' }, ` — ${t('page')} ${e.printed_page}`) : el('span', { class: 'chip warn' }, t('page inconnue'))))) : null);
   };
   ta.addEventListener('input', draw);
-  // La lecture (revalidée) posée dans la zone : toujours du texte (valeur d'un textarea, textContent), jamais du balisage.
-  const remplir = (res) => {
-    ta.value = res.entries.map((e) => `${e.title} — ${e.printed_page ?? ''}`).join('\n');
-    status.textContent = t('{n} entrée(s) proposée(s) par l’assistant — vérifie avant de créer.', { n: res.entries.length }) + (res.uncertain.length ? ` ${t('Incertain')} : ${res.uncertain.join('; ')}` : '');
-    draw();
+  const createBtn = el('button', { type: 'button', class: 'btn primary', onClick: () => create() }, t('Créer les références'));
+  const zoneSaisie = el('div', { class: 'stack', dataset: { role: 'zone-saisie' } },
+    el('p', { class: 'muted' }, t('Une ligne par recette : titre puis numéro de page. Un titre ne suffit pas à déduire des ingrédients : ces entrées deviennent des références « Repérée dans ton livre ».')),
+    ta, el('div', { class: 'row' }, createBtn), status, preview);
+  // La passerelle (R-T3-1) : la session arrive de façon asynchrone ; la carte « Connecte-toi… » reste dans le document, cachée ou montrée (F-8).
+  let provider = providerFrom(ctx.settings);
+  const connexion = carteConnexion(() => demarrerConnexion(ctx.sync?.auth), ctx);
+  connexion.hidden = true;
+  const aiBtn = el('button', { type: 'button', class: 'btn', disabled: true, dataset: { role: 'lire-index' }, onClick: () => lire() }, t('Lire avec l’assistant IA'));
+  const saisirBtn = el('button', { type: 'button', class: 'btn', hidden: true, dataset: { role: 'saisir' }, onClick: () => { etat.saisie = !etat.saisie; dessiner(); } }, t('Saisir à la main'));
+  const ignorerBtn = el('button', { type: 'button', class: 'btn', hidden: true, dataset: { role: 'ignorer' }, onClick: () => ignorer() }, t('Ignorer'));
+  const actions = el('div', { class: 'row', dataset: { role: 'actions-index' } }, aiBtn, saisirBtn, ignorerBtn);
+  const quota = el('small', { class: 'muted', hidden: true, dataset: { role: 'quota' } }, texteQuota());
+  panel.append(zoneEtat, zoneVol, zoneLecture, connexion, zoneSaisie, actions, quota);
+
+  const lierAssistant = async () => {
+    provider = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) });
+    connexion.hidden = provider.configured;
+    dessiner();
   };
-  let importCourant = importId; // la ligne du journal de ce panneau : reprise par ?import=, ouverte au premier clic, close par « Créer les références »
-  let cleZone = null; // la clé (cleLecture) de LA lecture posée dans la zone : « Créer les références » ne clôt qu'elle (T4-R2, ronde 1)
-  let occupe = false;
-  const aiBtn = el('button', { class: 'btn', disabled: true, onClick: async () => {
-    if (occupe) return;
-    const ids = getSelectedPageIds();
-    if (!ids.length) { toast(t('Sélectionne les pages d’index à lire')); return; }
-    occupe = true; aiBtn.disabled = true; // verrou AVANT tout await : un double clic ne fait qu'un POST
-    status.textContent = t('Lecture des pages par l’assistant…');
-    let connecte = true;
-    try {
-      const r = await lireDansLeJournal({ kind: 'index', importId: importCourant, pageIds: ids, editionId: editionId || session?.edition_id || null, sessionId: session?.id ?? null, ctx, repo });
-      importCourant = r.importId; connecte = r.connecte;
-      if (r.resultat) { remplir(r.resultat); cleZone = r.cle; } else status.textContent = r.texte;
-    } catch (e) { logError('import.index_lecture', { error: e }); status.textContent = texteEchecAssistant(e); }
-    finally {
-      occupe = false;
-      if (!connecte) { provider = providerFrom(ctx.settings); connexion.hidden = false; } // la session a disparu au clic (F-8) : la carte, le bouton éteint
-      aiBtn.disabled = !provider.configured;
+  // La ligne adoptée par le panneau : OUVERTE et d'index, ou rien ; `resultat` = sa lecture REVALIDÉE (null hors d'un a_verifier valide). Une NOUVELLE
+  // lecture (cleLecture : autre ligne, autre départ, autre résultat) reconstruit panneauLecture — jamais un geste du panneau (D-C15 : « Appliquer » ne
+  // change ni le départ ni le résultat, les éditions locales survivent).
+  function poser(L, resultat) {
+    const ouverte = importOuvert(L) && L.kind === 'index' ? L : null;
+    const cle = ouverte?.status === 'a_verifier' && resultat ? cleLecture(ouverte) : null;
+    if (cle !== etat.cle) {
+      etat.cle = cle; etat.saisie = false;
+      etat.resultat = cle ? resultat : null;
+      etat.vue = etat.resultat ? panneauLecture({ ligne: ouverte, resultat: etat.resultat, session, ctx, repo, toast, apresOrdre, maintenant, editionId: edId(), surCree: async () => { refresh(); await redessiner(); }, surChangement: () => redessiner(), surSansLivre: () => toast(t('Associe d’abord un livre à cette séance')) }) : null;
     }
-  } }, t('Lire avec l’assistant IA'));
-  lierAssistant();
-  // ?import= : la lecture déjà reçue est relue et REVALIDÉE (I-1), puis posée dans la zone — aucun appel ; une ligne en échec dit sa raison.
-  if (importId) relireDuJournal(importId, 'index', { repo }).then((relue) => {
-    if (!relue) { importCourant = null; return; }
-    if (relue.resultat) { remplir(relue.resultat); cleZone = cleLecture(relue.ligne); }
-    else if (relue.ligne?.status === 'echec') status.textContent = phraseEchec(relue.ligne.erreur);
-  }).catch((e) => logError('import.index_relu', { error: e }));
-  // Ronde 1 de la tâche 2 : un verrou, comme `occupe` pour « Lire » — une double tape ne crée qu'une fois (les doublons se lisent dans l'instantané du rendu :
-  // deux appels en vol écriraient chaque fiche deux fois).
-  let creation = false;
-  const create = async () => {
-    if (creation) return;
-    creation = true;
+    etat.ligne = ouverte;
+  }
+  async function charger() {
+    if (!session) { poser(null, null); return; }
+    const L = ligneOuverteDeSeance(await repo.all('imports'), session.id, { importId: etat.ligne?.id ?? importId });
+    if (L?.status !== 'a_verifier') { poser(L, null); return; }
+    const relue = await relireDuJournal(L.id, 'index', { repo }); // I-1 : revalidée ; hostile → echec(illisible), conditionné à cette lecture (T4-R2)
+    poser(relue?.ligne ?? null, relue?.resultat ?? null);
+  }
+  let file = Promise.resolve(); // les redessins sont enchaînés : jamais deux lectures concurrentes qui se dépassent
+  const redessiner = () => { file = file.then(charger).then(() => dessiner()).catch((e) => logError('table_matieres.rendu', { error: e })); return file; };
+
+  function dessiner() {
+    const L = etat.ligne;
+    const statut = L?.status ?? null;
+    const enVol = etat.lisant || (!!L && volEnCours()?.importId === L.id);
+    const lecture = !enVol && statut === 'a_verifier' && !!etat.vue;
+    zoneEtat.replaceChildren(); zoneVol.replaceChildren();
+    if (enVol) {
+      // R-VIS-8 : la .status[role=status] puis la .row — « Annuler » se range à droite ; le primaire reste, éteint, à sa place.
+      zoneVol.append(el('div', { class: 'status', role: 'status' }, t('Lecture des pages par l’assistant…')),
+        el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn primary', disabled: true }, t('Lire avec l’assistant IA')), el('button', { type: 'button', class: 'btn', dataset: { role: 'annuler' }, onClick: () => annuler() }, t('Annuler'))));
+    } else if (statut === 'en_cours') zoneEtat.append(el('div', { class: 'status warn' }, t('En cours sur un autre écran'))); // I-7 du lot A : sans « Annuler »
+    else if (lecture) {
+      zoneEtat.append(el('p', { class: 'muted', style: { margin: 0 }, dataset: { role: 'etat' } }, ligneEtatLecture(L, etat.resultat)));
+      const incertain = ligneIncertain(etat.resultat);
+      if (incertain) zoneEtat.append(el('p', { class: 'muted', style: { margin: 0 }, dataset: { role: 'incertain' } }, incertain));
+    } else if (statut === 'echec') {
+      const { texte, code } = texteEchecIndex(L.erreur);
+      zoneEtat.append(el('div', { class: 'status warn', dataset: { role: 'echec' } }, el('span', null, texte), code ? el('small', { class: 'muted' }, ` ${code}`) : null));
+    }
+    zoneVol.hidden = !enVol;
+    if (lecture) { if (zoneLecture.firstChild !== etat.vue) zoneLecture.replaceChildren(etat.vue); } else zoneLecture.replaceChildren();
+    zoneLecture.hidden = !lecture || etat.saisie;
+    zoneSaisie.hidden = lecture && !etat.saisie;
+    ta.disabled = enVol; createBtn.disabled = enVol || etat.occupe;
+    actions.hidden = enVol;
+    aiBtn.textContent = statut === 'echec' ? t('Relancer') : t('Lire avec l’assistant IA');
+    aiBtn.disabled = !provider.configured || etat.occupe || enVol || statut === 'en_cours';
+    saisirBtn.hidden = !lecture;
+    saisirBtn.textContent = etat.saisie ? t('Revenir à la lecture') : t('Saisir à la main');
+    ignorerBtn.hidden = enVol || statut !== 'a_lancer';
+    quota.hidden = enVol || !['a_verifier', 'echec', 'a_lancer'].includes(statut);
+  }
+
+  // « Lire » / « Relancer » (D-C16, N-2, Q3, Q4) : la ligne ouverte de la séance RELUE (« au mieux », D-C7), puis la garde des pages (P2 : sur pagesALire,
+  // jamais sur la sélection seule) ; depuis une lecture reçue, la question de la relecture — posée seulement si l'appel PEUT partir (hors ligne : rien
+  // n'est demandé ni écrit) ; puis lancerVol avec `lecture` : la ligne reprise par la transition de départ (a_verifier | echec | a_lancer → en_cours, ses
+  // page_ids remises) ou une ligne neuve, APRÈS les gardes du vol.
+  async function lire() {
+    const tenu = volEnCours();
+    if (tenu) { if (!tenu.importId || tenu.importId !== etat.ligne?.id) toast(t('Une lecture est déjà en cours : annule-la d’abord.')); return; } // ce vol-ci : muet
+    if (etat.occupe) return;
+    etat.occupe = true; aiBtn.disabled = true; // le verrou du bouton (T6) : double clic → un POST
     try {
-      // Lot C, tâche 2 : creerDepuisSaisie (raw_entry, bornes, kind gardé) ; la lecture POSÉE DANS LA ZONE (importCourant, sa clé cleZone) est close dans la
-      // transaction des fiches ; refusée, rien n'est écrit et le panneau se détache de la ligne (décision 4 de la ronde 1 de T6) — un second clic écrit sans elle.
-      const r = await creerDepuisSaisie(ta.value, { session, ctx, editionId, pageIds: getSelectedPageIds(), repo, toast, maintenant, importId: importCourant, cle: cleZone });
-      if (r.issue === 'refuse' || r.ferme) { importCourant = null; cleZone = null; }
+      const ligne = session ? ligneOuverteDeSeance(await repo.all('imports'), session.id, { importId: etat.ligne?.id ?? importId }) : null;
+      const pages = session ? pagesALire(getSelectedPageIds(), ligne, session.page_ids, ctx.pagesById) : [];
+      if (!session || !pages.length) { toast(t('Sélectionne les pages d’index à lire')); return; }
+      if (ligne?.status === 'en_cours') return; // tenue par un autre document : rien à lancer (I-7) — le redessin le dit
+      if (ligne?.status === 'a_verifier') {
+        if (!enLigne()) { toast(t('Tu es hors ligne.')); return; }
+        const n = etat.vue && etat.ligne?.id === ligne.id ? planCreation(etat.vue.etatLecture().lignes).aCreer.length : 0;
+        if (!(await confirmer(t('Relire remplace la lecture reçue ({n} entrées non créées) et coûte un appel. Continuer ?', { n }), { okLabel: t('Relire') }))) return; // « non » : rien
+      }
+      etat.lisant = true;
+      const vol = lancerVol(ligne?.id ?? null, executerIndex, { ctx, repo, fetch: fetchInjecte, maintenant, battementMs, enLigne, lecture: { kind: 'index', importId: ligne?.id ?? null, pageIds: pages, editionId: edId(), sessionId: session.id } });
+      dessiner(); // le vol est tenu dès l'appel : l'état « en vol » et « Annuler »
+      const r = await vol;
+      if (r.importId && r.importId !== etat.ligne?.id) etat.ligne = await repo.get('imports', r.importId); // la ligne qui a volé : c'est elle que le redessin relit
+      if (r.issue === 'refuse') await refusDe(r);
+    } catch (e) {
+      logError('table_matieres.lire', { error: e });
+    } finally {
+      etat.lisant = false; etat.occupe = false;
+      await redessiner();
+    }
+  }
+  // Un vol refusé n'a rien écrit : le dire. Les phrases sont celles du vol (texteRefus, une définition) sauf les octets absents, que C dit pour la SÉANCE.
+  async function refusDe(r) {
+    if (r.raison === 'non_connecte') { await lierAssistant(); return; } // la carte « Connecte-toi… » revient
+    const tenu = volEnCours();
+    if (r.raison === 'vol_tenu' && tenu?.importId && tenu.importId === etat.ligne?.id) return; // ce panneau tient déjà ce vol : muet
+    const texte = r.raison === 'octets_absents' ? t('Les photos de cette séance ne sont pas sur cet appareil.') : texteRefus(r);
+    if (texte) toast(texte); // sans_page, inconnu, transition : un autre onglet a tranché — le redessin suffit
+  }
+  async function annuler() { const id = volEnCours()?.importId; if (!id) return; await annulerVol(id); await redessiner(); }
+  // « Ignorer » (état 4) : la ligne a_lancer MONTRÉE (T4-R2 : sa clé revérifiée dans la transaction), finished_at posé.
+  async function ignorer() {
+    const L = etat.ligne; if (!L || etat.occupe) return;
+    etat.occupe = true;
+    const cle = cleLecture(L);
+    const patch = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { status: 'ignore', finished_at: maintenant() }; };
+    try { await repo.transitionner('imports', L.id, { attendus: ['a_lancer'], patch }); }
+    catch (e) { if (!(e instanceof TransitionRefusee)) logError('table_matieres.ignorer', { error: e, id: L.id }); }
+    finally { etat.occupe = false; }
+    await redessiner();
+  }
+  async function create() {
+    if (etat.occupe) return;
+    etat.occupe = true;
+    try {
+      const L = etat.ligne;
+      const r = await creerDepuisSaisie(ta.value, { session, ctx, editionId: edId(), pageIds: getSelectedPageIds(), repo, toast, maintenant, importId: L?.id ?? null, cle: L ? cleLecture(L) : null });
       if (r.issue === 'cree') { ta.value = ''; draw(); refresh(); }
-    } finally { creation = false; }
-  };
-  panel.append(el('p', { class: 'muted' }, t('Une ligne par recette : titre puis numéro de page. Un titre ne suffit pas à déduire des ingrédients : ces entrées deviennent des références « Repérée dans ton livre ».')),
-    connexion, ta, el('div', { class: 'row' }, aiBtn, el('button', { class: 'btn primary', onClick: create }, t('Créer les références'))), status, preview);
+    } catch (e) { logError('table_matieres.saisie', { error: e }); }
+    finally { etat.occupe = false; }
+    await redessiner();
+  }
+
+  const L0 = session ? ligneOuverteDeSeance(ctx.imports, session.id, { importId }) : null;
+  poser(L0, L0?.status === 'a_verifier' ? revaliderResultatIndex(L0.resultat, L0.page_ids) : null); // synchrone : aucun flash de l'état 1
+  dessiner();
+  lierAssistant();
+  if (session) redessiner();
+  panel.etatPanneau = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, saisie: etat.saisie, vol: etat.lisant || (!!etat.ligne && volEnCours()?.importId === etat.ligne.id) });
   return panel;
 }
 

@@ -11,7 +11,7 @@ import { IMPORTS_TERMINES, STATUTS_IMPORT } from '../model/schema.js';
 
 // --- Transitions du journal (spec § 3.1) : toutes par repo.transitionner (I-10) ; aucune autre. `en_cours → echec` couvre annule,
 // interrompu et incertain (la raison est dans `erreur`). `a_verifier → echec` (T4-R1, ratifiée) couvre UN seul cas : un `resultat` relu du
-// journal (synchro, archive) qui ne passe plus sa validation — validateParsedRecipe pour une recette, validerIndex pour un index — → echec(illisible),
+// journal (synchro, archive) qui ne passe plus sa validation — validateParsedRecipe pour une recette, revaliderResultatIndex (forme C, lot C) pour un index — → echec(illisible),
 // résultat effacé (I-1, § 4.5), conditionné à la lecture relue (tâche 6, ronde 1) ; c'est la seule écriture que le simple MONTAGE d'un écran peut
 // faire, et trois écrans la font : l'écran ciblé, l'éditeur (?import=) et le panneau d'index (?import=). Une lecture SANS référence relancée sur
 // d'autres pages (éditeur, panneau) passe `a_verifier → a_lancer → en_cours` en UNE transaction, après les gardes du vol (tâche 6, ronde 1 : un
