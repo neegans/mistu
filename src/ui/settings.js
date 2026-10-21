@@ -197,7 +197,9 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
     el('div', { class: 'chips' }, ...counts.filter(([, c]) => c).map(([n, c]) => el('span', { class: 'chip neutral' }, `${n} : ${c}`))),
     // Promesse de serveur seulement s'il y a un serveur : sans session acceptée, ces données ne sont nulle part ailleurs.
     el('p', { class: 'muted' }, sync.user
-      ? t('Cet appareil sera déconnecté ; ta bibliothèque reste sur le serveur, sauf les photos pas encore envoyées.') // vague finale du lot G : la perte est dite (D-G8 : seules les photos à remote de ce compte sont parties)
+      // Vague finale du lot G, ronde 2 (R-G-28 bis) : la perte est dite — fichiers pas encore envoyés (photos, PDF, EPUB : D-G8, seuls ceux à remote de
+      // ce compte sont partis) et, en qualité réduite, l'original d'une photo envoyée (le serveur n'en a que la copie réduite).
+      ? t('Cet appareil sera déconnecté ; ta bibliothèque reste sur le serveur, sauf les photos et documents pas encore envoyés (une photo envoyée en qualité réduite n’y garde que sa copie réduite).')
       : t('Ces données ne sont que sur cet appareil : fais une sauvegarde avant de les effacer.')),
     el('div', { class: 'row', style: { marginTop: '.8rem' } },
       el('button', { class: 'btn danger', onClick: async () => {
@@ -421,9 +423,10 @@ export async function effacerDonnees({ user = null, pending, enQuarantaine = asy
   // La file est relue au moment du geste : elle a pu bouger depuis le rendu de la page.
   const enAttente = await pending();
   if (user && enAttente > 0) { dire(messageEnAttente(enAttente, await enQuarantaine())); return false; }
-  // Vague finale du lot G : avec un compte, la file ne compte que les fiches (D-G8) — les photos pas encore envoyées, ou refusées à l'envoi, seraient
-  // perdues sans un mot : la confirmation le dit. Sans compte, la phrase d'avant (tout est perdu, la sauvegarde d'abord).
-  const question = user ? t('Effacer les données de cet appareil ? Les photos pas encore envoyées seront perdues. Fais d’abord une sauvegarde.') : t('Effacer les données de cet appareil ? Fais d’abord une sauvegarde.');
+  // Vague finale du lot G : avec un compte, la file ne compte que les fiches (D-G8) — les photos et documents pas encore envoyés, ou refusés à l'envoi,
+  // seraient perdus sans un mot : la confirmation le dit, et (ronde 2, R-G-28 bis) qu'une photo envoyée en qualité réduite ne garde au serveur que sa
+  // copie réduite. Sans compte, la phrase d'avant (tout est perdu, la sauvegarde d'abord).
+  const question = user ? t('Effacer les données de cet appareil ? Les photos et documents pas encore envoyés seront perdus ; une photo envoyée en qualité réduite ne garde que sa copie réduite. Fais d’abord une sauvegarde.') : t('Effacer les données de cet appareil ? Fais d’abord une sauvegarde.');
   if (!(await confirm(question, { danger: true, okLabel: t('Continuer') }))) return false;
   const mot = await demanderMot(t('Tape EFFACER pour confirmer'));
   if (mot !== 'EFFACER') { dire(t('Annulé')); return false; }
@@ -852,7 +855,9 @@ function phraseEspace(e) {
 export { motifFichier };
 // B-22 : pas de « Réessayer » qui échouera pareil — trop_gros (les mêmes octets restent trop gros) et, ronde 1, forme à l'envoi (les mêmes octets
 // ne porteraient pas plus de remote valide : la passe reposerait la même clé). `illisible` garde le sien : le blob peut redevenir lisible.
-const sansReessai = (motif, sens) => motif === 'trop_gros' || (sens === 'envoi' && motif === 'forme');
+// Ronde 2 (R-G-31) : `taille` à la réception non plus — l'objet est nommé par son empreinte, le serveur rendrait les mêmes octets (un remote qui
+// change lève l'erreur, F-7).
+const sansReessai = (motif, sens) => motif === 'trop_gros' || (sens === 'envoi' && motif === 'forme') || (sens === 'reception' && motif === 'taille');
 
 export const SYNC_L4_ACTIONS = ['telechargerTout', 'arreterTelechargement', 'actualiserEspace', 'renvoyerOriginale', 'reessayerFichier'];
 
@@ -1047,7 +1052,8 @@ export function syncSectionModel({ available = false, reason = null, user = null
 // entier. Une clé opaque se reconnaît en 12 caractères ; un titre est fait pour être lu, on lui en laisse 40.
 const CLE_MAX = 12;
 const NOM_MAX = 40;
-const tronquer = (valeur, max) => { const s = String(valeur ?? ''); return s.length > max ? s.slice(0, max) + '…' : s; };
+// Ronde 2 du lot G (re-revue sécurité) : la coupe se fait par POINTS DE CODE — jamais une paire de substitution coupée en deux.
+const tronquer = (valeur, max) => { const s = String(valeur ?? ''); const points = [...s]; return points.length > max ? points.slice(0, max).join('') + '…' : s; };
 
 // Vocabulaire des motifs de rejet (spec § 5.3, R9) : le serveur renvoie des jetons ASCII, la personne lit une
 // phrase qui dit QUOI regarder. Un jeton inattendu (serveur plus récent que cette version de l'app) tombe sur la

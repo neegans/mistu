@@ -378,7 +378,30 @@ export async function runSyncL4Tests({ eq, ok }) {
     const serveur = { data: { sha256: sha, mime: 'image/jpeg', size: 4, remote: R({ sha256: sha, size: 4, owner: 'u1', uploaded_at: '2026-10-19T01:00:00.000Z' }), updated_at: '2026-10-19T01:00:00.000Z' }, updated_at: '2026-10-19T01:00:00.000Z', deleted_at: null };
     const effets = appliquerReponse({ lot: { seqs: [7], elements: [element] }, reponse: { server_time: 't', accepted: [], adjusted: [], rejected: [{ store: 'files', id: sha, reason: 'conflit', server: serveur }] },
       entreesParSeq: new Map([[7, { seq: 7, store: 'files', id: sha }]]), fichesLocales: { [cle]: { ...element.data, blob: octets('abcd'), updated_at: DATE } }, conflitsRenvoyes: new Set() });
-    eq([effets.retirer, effets.conflits, effets.quarantaine, effets.reecrire], [[7], [], [], {}], 'deux appareils, même original, poussées croisées : le refus « conflit » retire l’entrée SANS journal ni réécriture — la réception apportera la version du serveur (mutant : conflit journalisé → « Conflits à trancher » nomme une empreinte, I-G8)');
+    eq([effets.retirer, effets.conflits, effets.quarantaine], [[7], [], []], 'deux appareils, même original, poussées croisées : le refus « conflit » retire l’entrée SANS journal (mutant : conflit journalisé → « Conflits à trancher » nomme une empreinte, I-G8)');
+    // Ronde 2 (R-G-24 bis) : la version du serveur est adoptée ICI (comme K-5 et l'ajustement), sans dépendre du curseur — blob gardé, remote et
+    // updated_at du serveur ; push.js la refond par conditionFichier dans la transaction.
+    const locale = { ...element.data, blob: octets('abcd'), updated_at: DATE };
+    const ecrite = effets.reecrire.files?.[0];
+    eq([Object.keys(effets.reecrire), effets.reecrire.files?.length, ecrite?.blob instanceof Blob, ecrite?.remote, ecrite?.updated_at, ecrite?.sha256, ecrite?.size],
+      [['files'], 1, true, serveur.data.remote, serveur.updated_at, sha, 4], 'refus « conflit » files (ronde 2, R-G-24 bis) : la fiche inchangée pendant l’aller-retour reçoit la version du serveur par fusionnerFichier — blob, clé et taille d’ici, remote et updated_at du serveur (mutant : réécriture retirée → la ligne d’ici diverge en silence quand le curseur est déjà passé)');
+    eq(JSON.stringify(ecrite), JSON.stringify(F.fusionnerFichier(locale, serveur.data, serveur.updated_at)), 'refus « conflit » files (ronde 2) : la réécriture est exactement fusionnerFichier(locale, server.data, server.updated_at) — une règle, D-G16');
+    const reponseConflit = (server, id = sha) => ({ server_time: 't', accepted: [], adjusted: [], rejected: [{ store: 'files', id, reason: 'conflit', server }] });
+    const appliquerFiles = (server, sur = {}) => appliquerReponse({ lot: { seqs: [7], elements: [element] }, reponse: reponseConflit(server, sur.id), entreesParSeq: new Map([[7, { seq: 7, store: 'files', id: sha }]]),
+      fichesLocales: Object.hasOwn(sur, 'locale') ? { [cle]: sur.locale } : { [cle]: locale }, conflitsRenvoyes: new Set() });
+    // Tombale du serveur (D-G15) : remote null, blob gardé, updated_at de la tombale.
+    const tombale = appliquerFiles({ data: null, updated_at: '2026-10-19T01:00:00.000Z', deleted_at: '2026-10-19T01:00:00.000Z' }).reecrire.files?.[0];
+    eq([tombale?.remote, tombale?.blob instanceof Blob, tombale?.updated_at, tombale?.sha256], [null, true, '2026-10-19T01:00:00.000Z', sha], 'refus « conflit » files sur une TOMBALE du serveur (ronde 2, D-G15) : la ligne d’ici garde son blob, remote passe à null (elle redevient candidate à l’envoi) — mutant : tombale ignorée → B croit sa photo envoyée');
+    // Une ligne bougée pendant l'aller-retour (updated_at différent) n'est pas réécrite : sa version d'ici a sa propre entrée de file (R-L3-7).
+    const bougee = appliquerFiles(serveur, { locale: { ...locale, updated_at: '2026-10-19T00:30:00.000Z' } });
+    const disparue = appliquerFiles(serveur, { locale: null });
+    eq([bougee.retirer, bougee.reecrire, disparue.retirer, disparue.reecrire], [[7], {}, [7], {}], 'refus « conflit » files (ronde 2, R-L3-7) : une fiche bougée ou disparue pendant l’aller-retour n’est pas réécrite (mutant : garde « inchangée » retirée)');
+    // R-L3-8 : une clé hors du lot n'est jamais crue — ni retrait, ni réécriture.
+    const horsLot = appliquerFiles(serveur, { id: H('9') });
+    eq([horsLot.retirer, horsLot.reecrire, horsLot.conflits], [[], {}, []], 'refus « conflit » files (ronde 2, R-L3-8) : un id hors du lot envoyé n’a aucun effet');
+    // Une version du serveur illisible (data pas un objet nu, heure illisible) ou plus ANCIENNE que celle d'ici n'est jamais adoptée (comme K-5).
+    const formes = [{ ...serveur, data: 'chaine' }, { ...serveur, data: [1, 2] }, { ...serveur, updated_at: 'pas une date' }, { ...serveur, updated_at: '2026-10-18T00:00:00.000Z' }, null];
+    eq(formes.map((s) => appliquerFiles(s).reecrire), [{}, {}, {}, {}, {}], 'refus « conflit » files (ronde 2) : data non objet, heure illisible, version plus ancienne qu’ici ou serveur absent → rien n’est réécrit (comme K-5)');
     // Un conflit sur un autre magasin reste journalisé (la règle K-5 ne s'étend qu'à files et assistant_config).
     const livre = { store: 'books', id: 'bq', data: { id: 'bq', title: 'ici', updated_at: DATE }, updated_at: DATE, deleted: false };
     const autre = appliquerReponse({ lot: { seqs: [8], elements: [livre] }, reponse: { server_time: 't', accepted: [], adjusted: [], rejected: [{ store: 'books', id: 'bq', reason: 'conflit', server: { data: { id: 'bq', title: 'là' }, updated_at: DATE, deleted_at: null } }] },
@@ -1053,6 +1076,22 @@ export async function runSyncL4Tests({ eq, ok }) {
       apres = await db.get('settings', 'upload_quality');
     });
     eq([cles.includes('upload_quality'), cles.includes('ui_locale'), apres?.value], [false, true, 'reduite'], 'archive (vague finale) : le réglage par appareil upload_quality n’est ni archivé ni écrasé à la restauration ; les autres réglages publics voyagent (mutant : filtre limité aux clés secrètes)');
+    // Ronde 2 : le sens « restauration » épinglé sur une archive qui PORTE la ligne (fabriquée, ou produite par un build G de -5 à -12) — injectée par
+    // rewriteRows, restaurée en fusion ET en remplacement. Mesuré : en fusion, la valeur d'ici reste ; en remplacement, le magasin settings est vidé
+    // puis rempli des réglages publics de l'archive — la ligne est ABSENTE et l'app relit le défaut du dépôt (DEFAULT_SETTINGS : 'reduite').
+    const injectee = await B.inspectArchive(await rewriteArchive(archive.blob, async ({ rewriteRows }) => { await rewriteRows('settings', (rows) => { rows.push({ key: 'upload_quality', value: 'originale', updated_at: DATE }); }); }));
+    const restaurer = async (mode) => {
+      let ligne = null; let lue = null;
+      await withRepo(async (repo, db) => {
+        await db.putBatch({ settings: [{ key: 'upload_quality', value: 'reduite', updated_at: DATE }] });
+        await B.applyArchive(db, injectee, { mode });
+        ligne = (await db.get('settings', 'upload_quality'))?.value ?? null;
+        lue = await repo.getSetting('upload_quality');
+      });
+      return [ligne, lue];
+    };
+    eq([injectee.ok, (injectee.payload.stores.settings || []).some((r) => r.key === 'upload_quality'), await restaurer('merge'), await restaurer('replace')], [true, true, ['reduite', 'reduite'], [null, 'reduite']],
+      'archive (ronde 2) : une archive qui porte upload_quality « originale » ne l’écrit jamais — fusion : la valeur d’ici reste ; remplacement : la ligne est absente, l’app relit le défaut « reduite » (mutants : filtre de restauration limité aux clés secrètes ; M9 à la création)');
   });
 
   await run('ronde 1 — une taille d’archive menteuse ne fait pas d’un original une copie (#6, #33 ; P2, P4)', async () => {
@@ -1570,6 +1609,108 @@ export async function runSyncL4Tests({ eq, ok }) {
     });
   });
 
+  await run('ronde 2 — une copie reçue ne prend jamais la taille de l’original, quelle que soit l’origine de la ligne (R-G-31)', async () => {
+    const { texteErreurFichier } = await import('../src/ui/components.js');
+    const lireEtat = async (db, sha) => { const l = await db.get('files', sha); const erreurs = await F.lireErreursFichiers(db); return { l, erreurs, e: erreurs.get(sha) }; };
+    const pagesDe = (sha, n) => ({ source_documents: [{ id: 'dq' + n, sha256: sha, updated_at: DATE }], source_pages: [{ id: 'pgq' + n, document_id: 'dq' + n, sha256: sha, updated_at: DATE }] });
+    // (a1) Sonde 1 de la re-revue sécurité : une archive FABRIQUÉE par missing_files. La page X n'a pas d'octets ; seul son remote change, pour un objet
+    // du dossier du compte (une autre page, lisible dans toute archive partagée) qui a EXACTEMENT la taille de X. bytesValides ne lit que `files` : admise.
+    const X = await sha256Hex(octets('original-de-la-page-X-ronde-2'));
+    const tailleX = 4321;
+    const Y = octets('z'.repeat(tailleX)); const hY = await sha256Hex(Y);
+    let archive1 = null;
+    await withDatabase(async (db) => {
+      await db.putBatch({ files: [{ sha256: X, mime: 'image/jpeg', size: tailleX, updated_at: DATE, remote: R({ sha256: H('d'), size: 900 }) }], ...pagesDe(X, 1) });
+      archive1 = await B.createArchive(db);
+    });
+    const forgee1 = await B.inspectArchive(await rewriteArchive(archive1.blob, ({ manifest }) => { manifest.missing_files[0].remote = R({ sha256: hY, size: Y.size, quality: 'originale' }); }));
+    await withDatabase(async (db) => {
+      await B.applyArchive(db, forgee1, { mode: 'merge' });
+      const sf = creerStockageFactice({ objets: { ['u1/' + hY]: Y } });
+      const r = await passe(db, sf).telecharger([X]);
+      const { l, erreurs, e } = await lireEtat(db, X);
+      eq([forgee1.ok, sf.journal.map((j) => j.chemin), r.recus, r.erreurs, l.blob, l.size, e?.motif, e?.sens, F.etatFichier(l, { uid: 'u1', erreurs }), texteErreurFichier(X, erreurs), F.estOriginalIci(l)],
+        [true, ['u1/' + hY], 0, 1, undefined, tailleX, 'taille', 'reception', 'erreur', 'Fichier illisible reçu du serveur.', false],
+        'R-G-31 (sonde 1) : archive forgée par missing_files (remote d’un objet de la taille de l’original) — les octets reçus, d’une autre empreinte que la clé et de la taille de la ligne, ne sont JAMAIS écrits : file_error taille/reception, la page le dit (mutant : garde retirée → blob écrit, pris pour l’original à vie)');
+    });
+    // (a2) Sonde 2 : une entrée missing_files SANS remote dont la size est forgée à celle de la copie du serveur déjà connue ici (fusion).
+    const X2 = await sha256Hex(octets('original-de-la-page-X2-ronde-2'));
+    const copie = octets('c'.repeat(1234)); const hc = await sha256Hex(copie);
+    const ligneIci = { sha256: X2, mime: 'image/jpeg', size: 9999, updated_at: DATE, remote: R({ sha256: hc, size: copie.size }) };
+    let archive2 = null;
+    await withDatabase(async (db) => { await db.putBatch({ files: [{ ...ligneIci, remote: undefined }], ...pagesDe(X2, 2) }); archive2 = await B.createArchive(db); });
+    const forgee2 = await B.inspectArchive(await rewriteArchive(archive2.blob, ({ manifest }) => { manifest.missing_files[0].size = copie.size; delete manifest.missing_files[0].remote; }));
+    await withDatabase(async (db) => {
+      await db.putBatch({ files: [ligneIci], ...pagesDe(X2, 2) });
+      await B.applyArchive(db, forgee2, { mode: 'merge' });
+      const avant = await db.get('files', X2);
+      const r = await passe(db, creerStockageFactice({ objets: { ['u1/' + hc]: copie } })).telecharger([X2]);
+      const { l, erreurs, e } = await lireEtat(db, X2);
+      eq([forgee2.ok, avant.size, F.remoteValide(avant.remote), r.recus, l.blob, e?.motif, e?.sens, F.etatFichier(l, { uid: 'u1', erreurs }), F.estOriginalIci(l)],
+        [true, copie.size, true, 0, undefined, 'taille', 'reception', 'erreur', false],
+        'R-G-31 (sonde 2) : une size forgée à celle de la copie connue ici — la vraie copie, téléchargée, aurait la taille de la ligne : refusée (taille/reception), jamais prise pour l’original');
+    });
+    // (b) Un téléchargement honnête (copie d'une AUTRE taille que l'original) s'écrit toujours ; (c) l'original au serveur (remote.sha256 = clé, même
+    // taille : parti tel quel) s'écrit toujours — c'est l'original, qui a sa taille.
+    await withDatabase(async (db) => {
+      const honnete = octets('copie-honnete-ronde-2'); const hh = await sha256Hex(honnete);
+      const O = octets('original-au-serveur-ronde-2'); const hO = await sha256Hex(O);
+      await db.putBatch({ files: [
+        { sha256: X, mime: 'image/jpeg', size: tailleX, updated_at: DATE, remote: R({ sha256: hh, size: honnete.size }) },
+        { sha256: hO, mime: 'image/jpeg', size: O.size, updated_at: DATE, remote: R({ sha256: hO, size: O.size, quality: 'originale' }) },
+      ] });
+      const r = await passe(db, creerStockageFactice({ objets: { ['u1/' + hh]: honnete, ['u1/' + hO]: O } })).telecharger([X, hO]);
+      const lb = await db.get('files', X); const lc = await db.get('files', hO);
+      const empreinteDe = async (blob) => (blob instanceof Blob ? sha256Hex(blob) : null); // un blob absent (mutant) se lit, il ne fait pas lever
+      eq([r.recus, r.erreurs, await empreinteDe(lb.blob), F.estOriginalIci(lb), await empreinteDe(lc.blob), F.estOriginalIci(lc), (await F.lireErreursFichiers(db)).size],
+        [2, 0, hh, false, hO, true, 0], 'R-G-31 : (b) une copie d’une autre taille s’écrit (une copie) ; (c) l’original au serveur (remote.sha256 = clé, même taille) s’écrit et EST l’original (mutants : garde sur la seule empreinte → (b) refusée ; garde sur la seule taille → (c) refusée)');
+    });
+  });
+
+  await run('ronde 2 — un refus « conflit » files converge sans dépendre du curseur (R-G-24 bis, sonde S1c de la re-revue)', async () => {
+    const { installCapture, uninstallCapture } = await import('../src/sync/outbox.js');
+    const { createPush } = await import('../src/sync/push.js');
+    const { createPull } = await import('../src/sync/pull.js');
+    const { setClockOffset } = await import('../src/sync/clock.js');
+    const transport = creerTransportFactice({ serveur: true });
+    const stockage = creerStockageFactice();
+    await withDatabase((dbA) => withDatabase(async (dbB) => {
+      const appareil = (db, sur = {}) => {
+        installCapture(db, { getUserId: () => 'u1' });
+        return { push: createPush({ db, transport, getUserId: () => 'u1' }), pull: createPull({ db, transport, getUserId: () => 'u1' }),
+          fichiers: F.createFichiers({ db, stockage, getUserId: () => 'u1', ...sur }), snap: () => db.getSnapshot(F.MAGASINS_FICHIERS) };
+      };
+      try {
+        // A envoie la photo RÉDUITE et pousse ; B la reçoit (sans octets), puis pose le même original sans rien capturer.
+        const A = appareil(dbA, { qualite: () => 'reduite', reduire: async () => octets('jpeg-reduit-ronde-2') });
+        const Bp = appareil(dbB, { qualite: () => 'reduite' });
+        const photo = entetePng(3000, 2000, { taille: 96, graine: 'renvoi-ronde-2' });
+        const sha = await sha256Hex(photo);
+        const maintenant = new Date().toISOString();
+        await dbA.mutate({ puts: { files: [{ sha256: sha, mime: photo.type, size: photo.size, blob: photo, syncable: true, original_filename: 'p.png', created_at: maintenant, updated_at: maintenant }] }, origin: 'local' });
+        await dbA.mutate({ puts: { source_pages: [{ id: 'pg1', document_id: 'd_pg1', sha256: sha, updated_at: DATE }] }, origin: 'device' });
+        const envA = await A.fichiers.envoyer({ snapshot: await A.snap() });
+        await A.push.envoyer();
+        await Bp.pull.recevoir();
+        const recue = await dbB.get('files', sha);
+        await dbB.mutate({ puts: { files: [{ ...recue, blob: photo, size: photo.size, mime: photo.type, syncable: true }] }, origin: 'device' });
+        await dbB.mutate({ puts: { source_pages: [{ id: 'pg1', document_id: 'd_pg1', sha256: sha, updated_at: DATE }] }, origin: 'device' });
+        // B : horloge 2 minutes en retard, pas encore corrigée ; « Renvoyer en originale » → un updated_at plus ANCIEN que celui du serveur.
+        resetClock(); setClockOffset(-120000);
+        await dbB.mutate({ puts: { sync_state: [{ key: 'renvoi_originale', value: true }] }, origin: 'device' });
+        const envB = await Bp.fichiers.envoyer({ snapshot: await Bp.snap() });
+        const pushB = await Bp.push.envoyer(); // refusé « conflit » par le serveur (u_B < u_serveur)
+        const pullB = await Bp.pull.recevoir(); // curseur déjà passé : la réception ne rapporte rien
+        const ligneB = await dbB.get('files', sha);
+        const serveur = transport.ligne('files', sha);
+        eq([envA.confirmes, envB.confirmes, pushB.conflits, pullB.recues, await dbB.count('outbox'), await dbB.count('sync_conflicts'), F.memeRemote(ligneB.remote, serveur.data.remote), ligneB.remote?.quality,
+          ligneB.updated_at, await sha256Hex(ligneB.blob), F.estOriginalIci(ligneB), F.compterFichiers(await Bp.snap(), { uid: 'u1' }).aRenvoyer],
+        [1, 1, 0, 0, 0, 0, true, 'reduite', serveur.updated_at, sha, true, 1],
+        'R-G-24 bis (sonde S1c) : après le refus « conflit » d’un renvoi en originale sous une horloge en retard (curseur déjà passé), la ligne d’ici porte le remote et l’updated_at du SERVEUR, garde son original et redevient « à renvoyer » — aucun journal (mutant : réécriture retirée → B croit l’original envoyé, le serveur reste réduit, rien ne le dit)');
+      } finally { uninstallCapture(dbA); uninstallCapture(dbB); }
+    }));
+  });
+
   await run('télécharger toutes les pages : bornes, reprise, clé', async () => {
     await withRepo(async (repo, db) => {
       const objets = {}; const lignes = []; const pages = [];
@@ -1913,7 +2054,8 @@ export async function runSyncL4Tests({ eq, ok }) {
   const moteurDe = (db, sur = {}) => createMoteur({ db, getUserId: () => 'u1', transport: creerTransportFactice({ lire: {} }), fenetre: fenetreMuette(), bus: busMuet, ...sur });
   const ligneDistanteDe = async (db, texte, cle = H('7')) => {
     const copie = octets(texte); const shaC = await sha256Hex(copie);
-    await db.mutate({ puts: { files: [{ sha256: cle, mime: 'image/jpeg', size: 9, updated_at: DATE, remote: R({ sha256: shaC, size: copie.size }) }] }, origin: 'remote' });
+    // Ronde 2 (R-G-31) : la ligne déclare 99 octets — une copie ne prend jamais la taille de l'original ; avec 9, les copies de 9 octets (« global-10 »…) étaient refusées.
+    await db.mutate({ puts: { files: [{ sha256: cle, mime: 'image/jpeg', size: 99, updated_at: DATE, remote: R({ sha256: shaC, size: copie.size }) }] }, origin: 'remote' });
     return { copie, chemin: 'u1/' + shaC };
   };
 
@@ -2934,7 +3076,9 @@ export async function runSyncL4Tests({ eq, ok }) {
     const demande = async (q) => { questions.push(q); return false; };
     await SR.effacerDonnees({ user: { id: 'u1' }, pending: async () => 0, confirm: demande, demanderMot: async () => 'EFFACER', toast: () => {}, clearDevice: async () => {}, reload: () => {}, arreterSync: async () => {} });
     await SR.effacerDonnees({ user: null, pending: async () => 0, confirm: demande, demanderMot: async () => 'EFFACER', toast: () => {}, clearDevice: async () => {}, reload: () => {}, arreterSync: async () => {} });
-    eq([questions[0].includes('photos pas encore envoyées'), questions[1].includes('photos pas encore envoyées'), questions[1].startsWith('Effacer les données de cet appareil ?')], [true, false, true], 'effacer (vague finale) : avec un compte, la confirmation dit que les photos pas encore envoyées seront perdues ; sans compte, la phrase d’avant (mutant : une seule phrase)');
+    // Ronde 2 (R-G-28 bis) : la phrase nomme aussi les documents (PDF, EPUB) et la copie réduite d'une photo envoyée en qualité réduite.
+    eq(questions, ['Effacer les données de cet appareil ? Les photos et documents pas encore envoyés seront perdus ; une photo envoyée en qualité réduite ne garde que sa copie réduite. Fais d’abord une sauvegarde.', 'Effacer les données de cet appareil ? Fais d’abord une sauvegarde.'],
+      'effacer (vague finale, ronde 2) : avec un compte, la confirmation dit, mot pour mot, que les photos et documents pas encore envoyés seront perdus et qu’une photo envoyée en qualité réduite ne garde que sa copie réduite ; sans compte, la phrase d’avant (mutants : une seule phrase ; l’ancienne phrase « Les photos pas encore envoyées… »)');
     const changer = (dits, sur = {}) => SR.changerDeCompte({ confirm: oui(dits), toast: (m) => dits.push(m), pending: async () => 0, archiveCreated: () => 'oui', clearDevice: async () => {}, reload: () => {}, arreterSync: async () => { dits.push('<arrêt>'); }, ...sur });
     const vu = { effacerEnVol: [], effacerAuRepos: [], changerEnVol: [], changerAuRepos: [], effacerDefaut: [], changerDefaut: [], effacerDefautRepos: [], effacerRefuse: [], effacerMotFaux: [], changerSansArchive: [], changerRefuse: [], changerPerteRefusee: [] };
     const enVol = { transfertEnCours: () => true };
@@ -3111,6 +3255,70 @@ export async function runSyncL4Tests({ eq, ok }) {
     const sans = syncSectionModel({ ...base, quarantaine: [{ seq: 1, store: 'files', id: sha, last_error: 'taille' }], snapshot: null });
     eq([avec.quarantaine[0].libelle, avec.conflits[0].libelle, sans.quarantaine[0].libelle.startsWith('files · ')], ['Page 12 · Le livre', 'Page 12 · Le livre', true],
       'réglages (vague finale) : quarantaine et conflit d’une ligne files nommés « Page 12 · Le livre », jamais l’empreinte (mutant : libellé store · id) ; sans snapshot, la forme bornée de L3 reste');
+  });
+
+  await run('ronde 2 — Réglages : la page entière nomme une ligne files en quarantaine sans file_error (câblage de renderSettings, I-G8)', async () => {
+    const etat = await import('../src/ui/state.js');
+    const sha = H('3');
+    await withRepo(async (repo, db) => {
+      await db.mutate({ puts: {
+        books: [{ id: 'bkQ', title: 'Le livre', updated_at: DATE }],
+        book_editions: [{ id: 'edQ', book_id: 'bkQ', updated_at: DATE }],
+        source_documents: [{ id: 'docQ', edition_id: 'edQ', updated_at: DATE }],
+        source_pages: [{ id: 'pgQ', document_id: 'docQ', sha256: sha, printed_page: 12, updated_at: DATE }],
+        outbox: [{ user_id: 'u1', store: 'files', id: sha, op: 'put', updated_at: DATE, tries: 1, last_error: 'taille', quarantined_at: DATE }],
+      }, origin: 'device' });
+      const avant = etat.getSyncState().moteur;
+      let page = null;
+      try {
+        etat.setSyncState({ moteur: { etat: () => moteurL4({ enQuarantaine: 1 }) } });
+        page = await SR.renderSettings({}, {}, { settings: await repo.getSettings(), sync: { auth: { available: true, reason: null }, user: { id: 'u1', email: 'x@exemple.invalid' }, guard: { ok: true } } }, {});
+      } finally { etat.setSyncState({ moteur: avant }); }
+      const lignes = [...page.querySelectorAll('[data-quarantaine]')].map((n) => n.querySelector('p')?.textContent);
+      eq([(await F.lireErreursFichiers(db)).size, lignes, page.textContent.includes(sha.slice(0, 12))], [0, ['Page 12 · Le livre — Fiche trop grosse (plus de 512 Ko)'], false],
+        'renderSettings (ronde 2, R-G-24) : sans AUCUNE file_error, une entrée d’outbox files en quarantaine fait lire le snapshot — la page affiche « Page 12 · Le livre », jamais l’empreinte (mutant M12 : snapshot lu seulement s’il existe une file_error → « files · 333333333333 »)');
+      await etat.relectureEnCours();
+    });
+    await etat.relireReglages(); // la base de l'app reprend la main
+  });
+
+  await run('ronde 2 — Réglages : « Données » avec et sans compte, « reception:taille » sans Réessayer, libellés sans contrôle bidi coupés par points de code', async () => {
+    const etat = await import('../src/ui/state.js');
+    // R-G-28 bis : la phrase de la section « Données » rendue par la page entière, avec et sans sync.user.
+    const phraseDonnees = async (sync) => {
+      let page = null;
+      await withRepo(async (repo) => {
+        page = await SR.renderSettings({}, {}, { settings: await repo.getSettings(), sync }, {});
+        await etat.relectureEnCours();
+      });
+      const sec = [...page.querySelectorAll('section')].find((s) => s.querySelector('h2')?.textContent === 'Données sur cet appareil');
+      return [...(sec?.querySelectorAll('p.muted') || [])].map((p) => p.textContent).pop() ?? null;
+    };
+    eq([await phraseDonnees({ user: { id: 'u1', email: 'x@exemple.invalid' } }), await phraseDonnees({})],
+      ['Cet appareil sera déconnecté ; ta bibliothèque reste sur le serveur, sauf les photos et documents pas encore envoyés (une photo envoyée en qualité réduite n’y garde que sa copie réduite).', 'Ces données ne sont que sur cet appareil : fais une sauvegarde avant de les effacer.'],
+      'Réglages (ronde 2, R-G-28 bis) : la section « Données » dit, avec un compte, la perte des photos ET documents pas encore envoyés et la copie réduite ; sans compte, la phrase d’avant (mutants : ancienne phrase de la vague ; une seule phrase)');
+    await etat.relireReglages();
+    // R-G-31 : un refus « taille » à la réception ne s'offre pas « Réessayer » (le serveur rendrait les mêmes octets) ; « empreinte » le garde.
+    const bT = rendre(modele(moteurL4(), { fichiersErreurs: [{ sha256: H('1'), motif: 'taille', sens: 'reception' }, { sha256: H('3'), motif: 'empreinte', sens: 'reception' }], snapshot: snapNoms }), { reessayerFichier: () => {} });
+    eq([...bT.querySelectorAll('[data-fichier]')].map((l) => [l.querySelector('p').textContent, l.querySelectorAll('button').length]),
+      [['Page 12 · Mon livre — Fichier illisible reçu du serveur.', 0], ['Couverture · Mon livre — Fichier illisible reçu du serveur.', 1]],
+      'Réglages (ronde 2, R-G-31) : « reception:taille » sans « Réessayer » (une copie de la taille de l’original, ou des octets d’une autre taille que déclarée : le même objet reviendrait) ; « reception:empreinte » le garde (mutant : sansReessai sans reception:taille)');
+    // Libellés (ronde 2, revue sécurité) : nomFichier retire les contrôles bidi des textes reçus ; le libellé est coupé par POINTS DE CODE.
+    const cp = (n) => String.fromCodePoint(n);
+    const aBidi = (s) => [...String(s)].some((c) => { const p = c.codePointAt(0); return (p >= 0x202a && p <= 0x202e) || (p >= 0x2066 && p <= 0x2069); });
+    const snapBidi = { books: [{ id: 'b1', title: 'Livre ' + cp(0x202e) + 'gpj.exe' + cp(0x202c) }], book_editions: [{ id: 'e1', book_id: 'b1', cover_sha256: H('3') }],
+      source_documents: [{ id: 'd1', edition_id: 'e1', sha256: H('1') }, { id: 'd2', sha256: H('2'), original_filename: cp(0x2066) + 'menu' + cp(0x2069) + '.pdf' }],
+      source_pages: [{ id: 'p1', document_id: 'd1', sha256: H('1'), printed_page: 12 }], recipes: [{ id: 'r1', original_title: cp(0x202b) + 'Tarte' + cp(0x202a), photo_sha256: H('4') }], imports: [], files: [] };
+    const noms = [H('1'), H('2'), H('3'), H('4')].map((s) => F.nomFichier(s, snapBidi));
+    const texteBidi = modele(moteurL4(), { fichiersErreurs: [{ sha256: H('1'), motif: 'introuvable', sens: 'reception' }], snapshot: snapBidi }).erreursFichiers[0]?.texte;
+    eq([noms, noms.some(aBidi), texteBidi, aBidi(texteBidi)], [['Page 12 · Livre gpj.exe', 'menu.pdf', 'Couverture · Livre gpj.exe', 'Photo du plat · Tarte'], false, 'Page 12 · Livre gpj.exe — Ce fichier n’est plus sur le serveur.', false],
+      'nomFichier (ronde 2) : titre de livre, nom de fichier et titre de recette reçus perdent leurs contrôles bidi (U+202A-202E, U+2066-2069) — un U+202E ne retourne plus le motif dans Réglages (mutant : retrait retiré)');
+    const pain = cp(0x1f35e);
+    const snapLong = { ...snapBidi, books: [{ id: 'b1', title: 'T'.repeat(29) + pain + 'fin' }] };
+    const texteLong = modele(moteurL4(), { fichiersErreurs: [{ sha256: H('1'), motif: 'introuvable', sens: 'reception' }], snapshot: snapLong }).erreursFichiers[0]?.texte;
+    const bienForme = (s) => new TextDecoder().decode(new TextEncoder().encode(String(s))) === String(s);
+    eq([texteLong, bienForme(texteLong)], ['Page 12 · ' + 'T'.repeat(29) + pain + '… — Ce fichier n’est plus sur le serveur.', true],
+      'Réglages (ronde 2) : un libellé est coupé à 40 POINTS DE CODE — une paire de substitution en bord de coupe reste entière, jamais un demi-caractère (mutant : coupe par unités UTF-16)');
   });
 
   // === Tâche 6 — écrans (§ 4.2-4.5)

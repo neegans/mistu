@@ -14,7 +14,8 @@ import { logError } from '../core/log.js';
 
 export { remoteValide, remoteDeCeCompte, HASH_FICHIER };
 
-// L'original est ICI quand la taille du blob est celle de la ligne (sans hachage ; limite dite § 11 : une copie de la même taille passerait).
+// L'original est ICI quand la taille du blob est celle de la ligne (sans hachage ; limite dite § 11 : une copie de la même taille passerait — la
+// réception n'en écrit jamais, R-G-31, ni l'archive, R-G-25 ; reste une corruption locale).
 export const estOriginalIci = (row) => row?.blob instanceof Blob && row.blob.size === row.size;
 // Une copie dont la taille n'est plus celle que le serveur porte (renvoi en originale fait ailleurs) : `present`, comptée, jamais retéléchargée.
 export const copiePerimee = (row) => row?.blob instanceof Blob && !estOriginalIci(row) && remoteValide(row.remote) && row.blob.size !== row.remote.size;
@@ -49,7 +50,11 @@ function indexNoms(snapshot) {
   INDEX_NOMS.set(snapshot, ix);
   return ix;
 }
-export function nomFichier(sha256, snapshot = {}) {
+// Ronde 2 de la vague finale (re-revue sécurité) : le nom assemblé de textes REÇUS (titre de livre, de recette, nom de fichier) perd ses contrôles
+// bidi (Bidi_Control : U+202A-202E, U+2066-2069, et les marques U+061C, U+200E, U+200F) — un U+202E ne retourne plus le motif qui le suit dans Réglages.
+const CONTROLES_BIDI = /\p{Bidi_Control}/gu;
+export function nomFichier(sha256, snapshot = {}) { return nommerFichier(sha256, snapshot).replace(CONTROLES_BIDI, ''); }
+function nommerFichier(sha256, snapshot) {
   const ix = indexNoms(snapshot && typeof snapshot === 'object' ? snapshot : {});
   const titreLivre = (editionId) => { const ed = editionId ? ix.editions.get(editionId) : null; return (ed && ix.livres.get(ed.book_id)?.title) || null; };
   const page = ix.pages.get(sha256);
@@ -321,6 +326,10 @@ export function createFichiers({ db, stockage, getUserId, qualite = () => 'redui
     if (r.blob.size !== ligne.remote.size) { await poserErreur(sha256, 'taille', 'reception'); return ERREUR; }
     if (await hacher(r.blob) !== ligne.remote.sha256) { await poserErreur(sha256, 'empreinte', 'reception'); return ERREUR; }
     if (!isAllowed(ligne.remote.mime)) { await poserErreur(sha256, 'type', 'reception'); return ERREUR; }
+    // Ronde 2 de la vague finale (R-G-31, re-revue sécurité) : une COPIE (remote.sha256 ≠ clé) ne prend jamais la taille de l'original, quelle que
+    // soit l'origine de la ligne (archive forgée par missing_files — remote ou size —, serveur, coïncidence du § 11) : estOriginalIci la prendrait
+    // pour l'original, à vie (un blob présent n'est jamais retéléchargé). Refus dit (taille, réception), sans « Réessayer » : le même objet reviendrait.
+    if (ligne.remote.sha256 !== sha256 && r.blob.size === ligne.size) { await poserErreur(sha256, 'taille', 'reception'); return ERREUR; }
     // Même garde, relue DANS la transaction (condition `fusion`) : rien si un blob est arrivé ou si la ligne a bougé pendant la descente.
     const blob = new Blob([r.blob], { type: ligne.remote.mime });
     const ecrireOctets = (relue) => (peutEcrireOctets(ligne, relue) ? fusionnerOctetsRecus(relue, blob) : null);

@@ -75,7 +75,10 @@ export const CHAINES_NEUVES_AILLEURS = {
     'Espace serveur plein — rien n’est perdu, tout reste sur cet appareil.',
     // Lot G, ronde 1 de la tâche 5 : motifs d’envoi forme et illisible (l’aide de la qualité, réécrite, est à sa place ci-dessus).
     'Fichier vide ou mal formé : il reste sur cet appareil seulement.',
-    'Fichier illisible sur cet appareil.'],
+    'Fichier illisible sur cet appareil.',
+    // Lot G, ronde 2 de la vague finale (R-G-28 bis) : les deux phrases de l'effacement (confirmation et section « Données », avec un compte).
+    'Effacer les données de cet appareil ? Les photos et documents pas encore envoyés seront perdus ; une photo envoyée en qualité réduite ne garde que sa copie réduite. Fais d’abord une sauvegarde.',
+    'Cet appareil sera déconnecté ; ta bibliothèque reste sur le serveur, sauf les photos et documents pas encore envoyés (une photo envoyée en qualité réduite n’y garde que sa copie réduite).'],
 };
 
 export async function runAjouterTests({ eq, ok }) {
