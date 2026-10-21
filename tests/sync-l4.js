@@ -1012,13 +1012,17 @@ export async function runSyncL4Tests({ eq, ok }) {
   });
 
   await run('vague finale — une copie ne prend jamais la taille de l’original (archive fabriquée, § 11)', async () => {
-    const orig = await original('original-vague-archive');
+    const orig = await original('original-vague-archive-0');
     const copie = octets('copie-vague-archive');
     const archive = await archiveDeCopie(orig.sha256, orig.size, copie, R({ sha256: await sha256Hex(copie), size: copie.size }));
     const temoin = await ouvrir(archive);
-    // Une archive FABRIQUÉE qui déclare à une copie la taille de l'original : estOriginalIci (la taille) la prendrait pour l'original → refusée à l'inspection.
-    const fausse = await B.inspectArchive(await rewriteArchive(archive.blob, ({ manifest }) => { manifest.files[0].bytes_size = manifest.files[0].size; }));
-    eq([temoin.ok, fausse.ok], [true, false], 'inspectArchive (vague finale) : une copie (bytes_sha256 ≠ sha256) dont bytes_size vaut size est refusée ; la même archive honnête passe (mutant : règle d’avant, bytes_size === size admis pour une copie)');
+    // L'attaque : une archive FABRIQUÉE dont la « copie » a EXACTEMENT la taille de l'original (octets quelconques de même longueur, empreinte différente).
+    // Ses octets et sa description sont cohérents (bytes_size = longueur = size) : seule la règle « une copie ne prend jamais la taille de l'original »
+    // la refuse — sinon estOriginalIci (la taille) la prendrait pour l'original à la restauration.
+    // (createArchive lui-même ne produit jamais cette forme : une copie de la taille de l'original y est décrite size 0 — d'où la fabrication par rewriteArchive,
+    // qui déclare à l'original la taille de la copie : octets, bytes_size et size cohérents, seule la règle neuve refuse.)
+    const fausse = await B.inspectArchive(await rewriteArchive(archive.blob, ({ manifest }) => { manifest.files[0].size = manifest.files[0].bytes_size; }));
+    eq([temoin.ok, fausse.ok], [true, false], 'inspectArchive (vague finale) : une copie (bytes_sha256 ≠ sha256) dont bytes_size vaut size est refusée même quand ses octets ont bien cette longueur ; la copie honnête d’une autre taille passe (mutant : règle d’avant → archive admise, octets pris pour l’original à la restauration)');
     // L'app elle-même : une ligne dont les octets ne sont pas l'original mais en ont la taille est archivée comme copie SANS taille (size 0), et reste restaurable.
     const memeTaille = octets('xyz-pas-original'); const shaDeclare = H('7');
     let archiveApp = null;
