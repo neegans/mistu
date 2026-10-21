@@ -453,14 +453,15 @@ const STATUTS_FERMABLES = ['a_verifier', 'echec', 'a_lancer']; // D-C19 : en_cou
 // enregistre : la lecture a servi ; echec | a_lancer → ignore), finished_at posé, la clé revérifiée DANS la transaction. Refusée (close, ignorée ou relue
 // ailleurs entre-temps, ou une page citée retirée) : RIEN n'est écrit et c'est dit (décision 4 de la ronde 1 de T6 ; l'appelant se détache de la ligne).
 // Sans clé, ou la ligne relue porte une autre lecture : les fiches par saveBatch, la ligne reste à reprendre. Sans ligne (fiche livre, séance sans lecture) :
-// le chemin d'avant.
+// le chemin d'avant. Ronde de clôture (R-C-24, T2-R1) : les doublons sont lus dans les références de l'édition RELUES en base (repo.byIndex, comme
+// creerReferences), jamais dans l'instantané ctx.recipes du rendu — une référence créée par un autre onglet entre-temps n'est pas dupliquée.
 export async function creerDepuisSaisie(texte, { session = null, ctx, editionId = null, pageIds = [], repo = repoModule, toast = toastDom, maintenant = horloge, importId = null, cle = null } = {}) {
   const edId = editionId || session?.edition_id || null;
   if (!edId) { toast(t('Associe d’abord un livre à cette séance')); return { issue: 'sans_livre' }; }
   const entries = parseIndexLines(texte);
   if (!entries.length) return { issue: 'vide' };
   const edition = ctx.editionsById.get(edId);
-  const seen = new Set(ctx.recipes.filter((r) => r.edition_id === edId).map((r) => cleReference(r.original_title, r.printed_page)));
+  const seen = new Set((await repo.byIndex('recipes', 'edition_id', edId)).filter(Boolean).map((r) => cleReference(r.original_title, r.printed_page)));
   const presentes = [];
   for (const id of new Set(Array.isArray(pageIds) ? pageIds : [])) if (typeof id === 'string' && await repo.get('source_pages', id)) presentes.push(id);
   const created = [];
@@ -501,9 +502,13 @@ export async function creerDepuisSaisie(texte, { session = null, ctx, editionId 
   return { issue: 'cree', n: created.length, doublons: dupes, ferme };
 }
 
+// Une ligne tapée ou collée = une entrée. Ronde de clôture (R-C-24) : toute fin de ligne coupe (LF, CRLF compté une fois, CR seul, VT, FF, NEL U+0085,
+// U+2028, U+2029 : les fins de ligne d'uneLigne) ; collée d'un PDF ou d'une page, une ligne qui en porte une n'est plus lue d'un bloc (le « . » des motifs
+// ne les traverse pas : son numéro de page n'était pas lu).
+const FIN_DE_LIGNE = /\r\n|[\n\r\v\f\u{0085}\u{2028}\u{2029}]/u;
 export function parseIndexLines(text) {
   const out = [];
-  for (const raw of (text || '').split(/\r?\n/)) {
+  for (const raw of (text || '').split(FIN_DE_LIGNE)) {
     const line = raw.trim();
     if (!line) continue;
     let m = /^(.*?)\s*(?:[—–-]|,|\.{2,}|\s+p\.?|\s+page)\s*p?\.?\s*(\d{1,4})\s*$/i.exec(line);

@@ -177,7 +177,8 @@ export function panneauLecture({ ligne, resultat, session = null, ctx = null, re
   // transaction (une page ajoutée par un autre onglet n'est pas écrasée). La ligne doit porter la MÊME lecture (cleLecture, T4-R2 du lot A) à la
   // relecture ET dans la transaction (patch-fonction) ; dans la transaction, elle doit aussi appartenir à CETTE séance et l'ordre être une permutation des
   // photos de SA lecture revalidée (ronde 1, défense en profondeur contre un appelant qui passerait une autre séance ou un autre résultat). Refus ou autre
-  // lecture → rien d'écrit, l'appelant relit. Succès → séance relue, apresOrdre.
+  // lecture → rien d'écrit, l'appelant relit. Une écriture qui échoue SANS être un refus (base pleine ou fermée) → rien d'écrit, journalisée ET dite par
+  // le toast (ronde de clôture, R-C-24) ; le bouton revient. Succès → séance relue, apresOrdre.
   async function appliquer() {
     if (etat.occupe || !session) return;
     const ordre = [...etat.ordre]; // figé AU CLIC (ronde 1) : les N photos dans l'ordre que la personne avait devant elle, quoi qu'il arrive pendant les relectures
@@ -210,7 +211,7 @@ export function panneauLecture({ ligne, resultat, session = null, ctx = null, re
       if (Array.isArray(seance?.page_ids)) etat.seance = [...seance.page_ids];
       if (typeof apresOrdre === 'function') apresOrdre({ pages: prop.pages, seance });
     } catch (e) {
-      if (!estRefus(e)) logError('table_matieres.ordre', { error: e });
+      if (!estRefus(e)) { logError('table_matieres.ordre', { error: e }); toast(t('L’ordre n’a pas pu être enregistré. Réessaie.')); }
       else if (typeof surChangement === 'function') await surChangement();
     } finally { etat.occupe = false; dessinerOrdre(); majCompteurs(); }
   }

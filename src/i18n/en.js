@@ -598,6 +598,7 @@ export const EN = {
   "Ordre enregistré.": "Order saved.",
   "p. {a}-{b}": "pp. {a}-{b}",
   "page inconnue": "unknown page",
+  "L’ordre n’a pas pu être enregistré. Réessaie.": "The order could not be saved. Try again.", // ronde de clôture (R-C-24) : un échec d'écriture d'« Appliquer cet ordre »
   // Lot C, tâche 4 : tableau d'entrées, lecture, relecture, échecs d'un index.
   "Entrées lues": "Entries read",
   "{n} entrées lues · {m} déjà dans ce livre": "{n} entries read · {m} already in this book",
