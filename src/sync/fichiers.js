@@ -264,6 +264,9 @@ export function createFichiers({ db, stockage, getUserId, qualite = () => 'redui
       }
       if (octets.tropGrande && !tropGrandeDite) { tropGrandeDite = true; logError('sync.fichiers.trop_grande', { count: octets.pixels }); }
       if (octets.blob.size > limites.octetsMax) { await poserErreur(row.sha256, 'trop_gros', 'envoi'); bilan.erreurs += 1; continue; }
+      // Vague finale (chef d'orchestre, revue finale sécurité) : des octets partis TELS QUELS dont l'empreinte n'est pas celle de la ligne ne sont pas
+      // l'original (copie de même taille, § 11 ; archive fabriquée) : rien ne part, la ligne est marquée une fois (forme, envoi : sans « Réessayer »).
+      if (octets.blob === row.blob && h !== row.sha256) { await poserErreur(row.sha256, 'forme', 'envoi'); bilan.erreurs += 1; continue; }
       const corps = new Blob([octets.blob], { type: octets.mime }); // la copie retypée est la règle (S-2)
       // `quality` est le FAIT, jamais le réglage (D-G3, S-3). Ronde 1 : le remote est validé AVANT l'envoi — un fichier vide ou d'un type hors
       // liste ne peut porter aucun remote valide (il repartirait à chaque passe, à vie) : rien ne part, la ligne est marquée une fois.

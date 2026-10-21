@@ -27,15 +27,20 @@ const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const record = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const validKey = (value) => typeof value === 'string' && value.trim().length > 0;
 const validCount = (value) => Number.isSafeInteger(value) && value >= 0;
-const publicSettings = (rows) => rows.filter((r) => !SECRET_SETTING_KEYS.includes(r.key));
+// Vague finale du lot G (chef d'orchestre, revue finale) : `upload_quality` est « par appareil, jamais synchronisé » (spec G § 3.3) — il ne voyage pas
+// dans l'archive et une archive qui le porte ne l'écrit pas à la restauration (une seule définition pour les deux sens).
+const CLES_PAR_APPAREIL = ['upload_quality'];
+const publicSettings = (rows) => rows.filter((r) => !SECRET_SETTING_KEYS.includes(r.key) && !CLES_PAR_APPAREIL.includes(r.key));
 
 // Une description de fichier (§ 3.4), UNE définition relue par inspectArchive et requireInspection (ronde 1, #18, #25). `bytes_*` ensemble ou
 // aucun ; une entrée qui se dit l'original (bytes_sha256 === sha256, forme que createArchive n'écrit jamais) porte la taille de ses octets (#6) ;
-// `remote` absent ou valide.
+// `remote` absent ou valide. Vague finale (chef d'orchestre, revue finale sécurité) : une COPIE (bytes_sha256 ≠ sha256) ne porte JAMAIS la taille de
+// l'original — sinon une archive fabriquée ferait passer des octets quelconques pour l'original d'une page (estOriginalIci lit la taille) ; createArchive
+// écrit alors `size: 0`, comme pour une copie sans taille (#7).
 const remoteAdmis = (f) => !own(f, 'remote') || remoteValide(f.remote);
 const bytesValides = (f) => {
   const n = ['bytes_sha256', 'bytes_size', 'bytes_mime'].filter((k) => own(f, k)).length;
-  return n === 0 || (n === 3 && HASH.test(f.bytes_sha256) && validCount(f.bytes_size) && validKey(f.bytes_mime) && (f.bytes_sha256 !== f.sha256 || f.bytes_size === f.size));
+  return n === 0 || (n === 3 && HASH.test(f.bytes_sha256) && validCount(f.bytes_size) && validKey(f.bytes_mime) && (f.bytes_sha256 !== f.sha256 ? f.bytes_size !== f.size : f.bytes_size === f.size));
 };
 const fichierValide = (f) => record(f) && HASH.test(f.sha256) && validCount(f.size) && validKey(f.mime) && bytesValides(f) && remoteAdmis(f);
 const manquanteValide = (mf) => record(mf) && HASH.test(mf.sha256) && validKey(mf.mime) && validCount(mf.size) && remoteAdmis(mf);
@@ -154,6 +159,7 @@ export async function createArchive(db, { deviceName = '' } = {}) {
     // Ronde 1 (#7) : une copie sans taille valide prend 0, comme missing_files — jamais la longueur de ses octets, qui la ferait passer pour l'original.
     const entree = { sha256: file.sha256, size: h === file.sha256 ? data.length : (validCount(file.size) ? file.size : 0), mime };
     if (h !== file.sha256) {
+      if (entree.size === data.length) entree.size = 0; // vague finale : une copie de la taille de l'original est décrite sans taille (bytesValides la refuserait)
       // S-1 : des octets qui ne sont pas l'original sont décrits par bytes_*, quel que soit remote — jamais une levée (« Fichier source endommagé »
       // reste à l'inspection, pour un ZIP abîmé). Copie du serveur connue, ou autre chose (octets abîmés, copie périmée) : archivée telle quelle.
       Object.assign(entree, { bytes_sha256: h, bytes_size: data.length, bytes_mime: validKey(file.blob.type) ? file.blob.type : mime });

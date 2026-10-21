@@ -127,6 +127,8 @@ export const EN = {
   "{n} éléments sont en attente d’envoi. Restaure en fusion, ou efface d’abord les données de cet appareil.": "{n} items are waiting to be sent. Restore by merging, or erase this device’s data first.",
   "Ces données ne sont que sur cet appareil : fais une sauvegarde avant de les effacer.": "This data exists only on this device: back it up before erasing.",
   "Effacer les données de cet appareil ? Fais d’abord une sauvegarde.": "Erase this device’s data? Back it up first.",
+  "Effacer les données de cet appareil ? Les photos pas encore envoyées seront perdues. Fais d’abord une sauvegarde.": "Erase this device’s data? Photos not sent yet will be lost. Back it up first.",
+  "Cet appareil sera déconnecté ; ta bibliothèque reste sur le serveur, sauf les photos pas encore envoyées.": "This device will be signed out; your library stays on the server, except photos not sent yet.",
   "Le stockage de session est inaccessible : ce geste n’est pas possible ici.": "Session storage is unavailable: this action is not possible here.",
   // Réglages → Synchronisation (spec § 4.2, ensemble L3) : échanges, quarantaine, conflits, progression, pause.
   "Dernier échange : {h}": "Last exchange: {h}",

@@ -82,6 +82,13 @@ export function appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales = 
         if (inchangee && aussiRecente) (reecrire[r.store] ||= []).push({ ...serveur.data, id: element.id, updated_at: serveur.updated_at });
         continue;
       }
+      if (r.store === 'files') {
+        // Vague finale du lot G (chef d'orchestre, revue finale) : sync_push refuse aussi une version plus ANCIENNE que la sienne (`u < cur_updated`
+        // → conflit), pas seulement l'instant égal de D-G16 : deux appareils qui envoient le même original se refuseraient l'un l'autre et « Conflits à
+        // trancher » nommerait une empreinte (I-G8). Une ligne files n'a rien à trancher : retirer SANS journal, comme K-5 — la réception écrit la version
+        // du serveur par conditionFichier (blob gardé, D-G16) et son remote de ce compte arrête la candidature (D-G8) ; sinon la capture la refera partir.
+        continue;
+      }
       conflits.push({ id: k, store: r.store, record_id: r.id, local: fichesLocales[k] ?? null, server: r.server || null, at, kind: 'donnees' });
     } else {
       // updated_at | cle | forme | taille (R9) : permanent, la fiche est nommée, la personne décide (Réglages).

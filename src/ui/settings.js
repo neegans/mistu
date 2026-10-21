@@ -66,7 +66,10 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
   // au plus toutes les 300 ms pendant une passe : sans cette garde, l'écran relirait `files` à chaque fois (S-12 contournée par l'écran).
   const etatMoteur = moteur?.etat() || null;
   const fichiersErreurs = etatMoteur ? [...(await lireErreursFichiers(repo.db))].map(([sha256, v]) => ({ sha256, motif: v?.motif, sens: v?.sens })) : [];
-  const snapshotFichiers = fichiersErreurs.length ? await repo.db.getSnapshot(MAGASINS_FICHIERS) : null;
+  // Vague finale (chef d'orchestre, I-G8) : une ligne files en quarantaine ou en conflit est nommée comme une erreur de fichier (nomFichier), jamais
+  // par son empreinte — le snapshot est donc lu aussi dans ces deux cas, rares.
+  const ligneFiles = (e) => e?.store === 'files';
+  const snapshotFichiers = fichiersErreurs.length || quarantaine.some(ligneFiles) || conflits.some(ligneFiles) ? await repo.db.getSnapshot(MAGASINS_FICHIERS) : null;
   root.append(syncSection({
     available: !!auth?.available,
     reason: auth ? auth.reason : 'config',
@@ -194,7 +197,7 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
     el('div', { class: 'chips' }, ...counts.filter(([, c]) => c).map(([n, c]) => el('span', { class: 'chip neutral' }, `${n} : ${c}`))),
     // Promesse de serveur seulement s'il y a un serveur : sans session acceptée, ces données ne sont nulle part ailleurs.
     el('p', { class: 'muted' }, sync.user
-      ? t('Cet appareil sera déconnecté ; ta bibliothèque reste sur le serveur.')
+      ? t('Cet appareil sera déconnecté ; ta bibliothèque reste sur le serveur, sauf les photos pas encore envoyées.') // vague finale du lot G : la perte est dite (D-G8 : seules les photos à remote de ce compte sont parties)
       : t('Ces données ne sont que sur cet appareil : fais une sauvegarde avant de les effacer.')),
     el('div', { class: 'row', style: { marginTop: '.8rem' } },
       el('button', { class: 'btn danger', onClick: async () => {
@@ -418,7 +421,10 @@ export async function effacerDonnees({ user = null, pending, enQuarantaine = asy
   // La file est relue au moment du geste : elle a pu bouger depuis le rendu de la page.
   const enAttente = await pending();
   if (user && enAttente > 0) { dire(messageEnAttente(enAttente, await enQuarantaine())); return false; }
-  if (!(await confirm(t('Effacer les données de cet appareil ? Fais d’abord une sauvegarde.'), { danger: true, okLabel: t('Continuer') }))) return false;
+  // Vague finale du lot G : avec un compte, la file ne compte que les fiches (D-G8) — les photos pas encore envoyées, ou refusées à l'envoi, seraient
+  // perdues sans un mot : la confirmation le dit. Sans compte, la phrase d'avant (tout est perdu, la sauvegarde d'abord).
+  const question = user ? t('Effacer les données de cet appareil ? Les photos pas encore envoyées seront perdues. Fais d’abord une sauvegarde.') : t('Effacer les données de cet appareil ? Fais d’abord une sauvegarde.');
+  if (!(await confirm(question, { danger: true, okLabel: t('Continuer') }))) return false;
   const mot = await demanderMot(t('Tape EFFACER pour confirmer'));
   if (mot !== 'EFFACER') { dire(t('Annulé')); return false; }
   // S-11 / F-24 : upload() et download() ne prennent pas de signal ; arreter() attend le fichier en cours — on le dit avant d'attendre.
@@ -1003,14 +1009,15 @@ export function syncSectionModel({ available = false, reason = null, user = null
     // motif est une phrase — le jeton ASCII du serveur ne se montre jamais (R9).
     quarantaine: enQuarantaine.map((e) => ({
       seq: e.seq,
-      libelle: `${e.store} · ${tronquer(e.id, CLE_MAX)}`,
+      // Vague finale (I-G8) : une ligne files est nommée par nomFichier dès qu'un snapshot est là (sans snapshot : la forme de L3, bornée).
+      libelle: e.store === 'files' && snapshot ? tronquer(nomFichier(e.id, snapshot), NOM_MAX) : `${e.store} · ${tronquer(e.id, CLE_MAX)}`,
       motif: motifEnvoi(e.last_error),
     })),
     conflits: aTrancher.map((c) => {
       const nom = c.local?.title || c.local?.name || null;
       return {
         id: c.id,
-        libelle: `${c.store} · ${nom ? tronquer(nom, NOM_MAX) : tronquer(c.record_id, CLE_MAX)}`,
+        libelle: c.store === 'files' && snapshot ? tronquer(nomFichier(c.record_id, snapshot), NOM_MAX) : `${c.store} · ${nom ? tronquer(nom, NOM_MAX) : tronquer(c.record_id, CLE_MAX)}`,
         dateIci: formatDate(c.local?.updated_at || c.at, { withTime: true }),
         dateAilleurs: formatDate(c.server?.updated_at || c.at, { withTime: true }),
         kind: c.kind,

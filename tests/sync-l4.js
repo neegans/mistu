@@ -371,6 +371,21 @@ export async function runSyncL4Tests({ eq, ok }) {
     });
   });
 
+  await run('vague finale — un refus « conflit » de sync_push sur une ligne files ne fait aucune entrée de journal', async () => {
+    const { appliquerReponse } = await import('../src/sync/reponses.js');
+    const sha = H('6'); const cle = 'files:' + sha;
+    const element = { store: 'files', id: sha, data: { sha256: sha, mime: 'image/jpeg', size: 4, remote: R({ sha256: sha, size: 4 }), updated_at: DATE }, updated_at: DATE, deleted: false };
+    const serveur = { data: { sha256: sha, mime: 'image/jpeg', size: 4, remote: R({ sha256: sha, size: 4, owner: 'u1', uploaded_at: '2026-10-19T01:00:00.000Z' }), updated_at: '2026-10-19T01:00:00.000Z' }, updated_at: '2026-10-19T01:00:00.000Z', deleted_at: null };
+    const effets = appliquerReponse({ lot: { seqs: [7], elements: [element] }, reponse: { server_time: 't', accepted: [], adjusted: [], rejected: [{ store: 'files', id: sha, reason: 'conflit', server: serveur }] },
+      entreesParSeq: new Map([[7, { seq: 7, store: 'files', id: sha }]]), fichesLocales: { [cle]: { ...element.data, blob: octets('abcd'), updated_at: DATE } }, conflitsRenvoyes: new Set() });
+    eq([effets.retirer, effets.conflits, effets.quarantaine, effets.reecrire], [[7], [], [], {}], 'deux appareils, même original, poussées croisées : le refus « conflit » retire l’entrée SANS journal ni réécriture — la réception apportera la version du serveur (mutant : conflit journalisé → « Conflits à trancher » nomme une empreinte, I-G8)');
+    // Un conflit sur un autre magasin reste journalisé (la règle K-5 ne s'étend qu'à files et assistant_config).
+    const livre = { store: 'books', id: 'bq', data: { id: 'bq', title: 'ici', updated_at: DATE }, updated_at: DATE, deleted: false };
+    const autre = appliquerReponse({ lot: { seqs: [8], elements: [livre] }, reponse: { server_time: 't', accepted: [], adjusted: [], rejected: [{ store: 'books', id: 'bq', reason: 'conflit', server: { data: { id: 'bq', title: 'là' }, updated_at: DATE, deleted_at: null } }] },
+      entreesParSeq: new Map([[8, { seq: 8, store: 'books', id: 'bq' }]]), fichesLocales: { 'books:bq': livre.data }, conflitsRenvoyes: new Set() });
+    eq(autre.conflits.map((c) => c.store), ['books'], 'un conflit books reste journalisé (mutant : tout conflit retiré sans journal)');
+  });
+
   await run('conflits sur une ligne files : garder ici, garder ailleurs, tombale', async () => {
     const { garderAilleurs, garderIci } = await import('../src/sync/conflits.js');
     await withRepo(async (repo, db) => {
@@ -411,7 +426,13 @@ export async function runSyncL4Tests({ eq, ok }) {
       const toile = new OffscreenCanvas(2, 2); toile.getContext('2d').fillRect(0, 0, 2, 2);
       const jpeg = new Blob([await toile.convertToBlob({ type: 'image/png' })], { type: 'image/jpeg' });
       const couv = bookCover({ id: 'e1' }, { title: 'T' }, { fichier: { sha256: H('a'), mime: 'image/heic', blob: jpeg } });
-      eq([!!couv.querySelector('img.cover-img'), vus.map((b) => b.type)], [true, ['image/jpeg']], 'bookCover : une copie JPEG reçue sous une ligne HEIC s’affiche, et le Blob affiché est image/jpeg (mutant : safeDisplayType(fichier.mime) gardé → image/heic)');
+      eq([!!couv.querySelector('img.cover-img'), vus.map((b) => b.type)], [true, ['image/jpeg']], 'bookCover : une copie JPEG reçue sous une ligne HEIC s’affiche, et le Blob affiché est image/jpeg (le retypage ; la garde est épinglée par la ligne application/pdf ci-dessous)');
+      // Vague finale (chef d'orchestre) : la garde `type` ne décide plus que l'AFFICHAGE depuis que displayUrl retype, et la fixture HEIC la passe dans les
+      // deux cas (P1, comme photoDuPlat) : une ligne hors liste (application/pdf) dont les octets sont un vrai JPEG ne s'affiche que si la garde lit le
+      // type affiché (celui du blob, dans la liste), pas le mime de la ligne.
+      vus.length = 0;
+      const couvPdf = bookCover({ id: 'e1p' }, { title: 'T' }, { fichier: { sha256: H('5'), mime: 'application/pdf', blob: jpeg } });
+      eq([!!couvPdf.querySelector('img.cover-img'), vus.map((b) => b.type)], [true, ['image/jpeg']], 'bookCover (P1, vague finale) : une ligne application/pdf aux octets JPEG s’affiche image/jpeg — la garde lit le type affiché (mutant : garde sur safeDisplayType(fichier.mime) → aucune image)');
       // import-cible.js (poserImage) : la troisième lecture de la règle — vignette de page et aperçu de la photo du plat de l'import ciblé.
       vus.length = 0;
       const { renderImportCible } = await import('../src/ui/import-cible.js');
@@ -427,7 +448,23 @@ export async function runSyncL4Tests({ eq, ok }) {
         const ctxIC = { recipesById: new Map([['rIC', recette]]), editionsById: new Map(), booksById: new Map(), sync: {} };
         const root = await renderImportCible({ id: 'rIC' }, {}, ctxIC, { repo, navigate: () => {}, toast: () => {}, fetch: async () => { throw new Error('aucun réseau attendu'); }, pickFiles: async () => [] });
         for (let i = 0; i < 100 && vus.length < 2; i += 1) await new Promise((r) => setTimeout(r, 10));
-        eq([vus.map((b) => b.type), !!root.querySelector('.thumbs img'), !!root.querySelector('[data-role="apercu-plat"]')], [['image/jpeg', 'image/jpeg'], true, true], 'import ciblé (poserImage, F-9) : la vignette de page et l’aperçu du plat d’une copie JPEG sous une ligne HEIC sont servis image/jpeg (mutant : safeDisplayType(f?.mime) gardé → image/heic)');
+        eq([vus.map((b) => b.type), !!root.querySelector('.thumbs img'), !!root.querySelector('[data-role="apercu-plat"]')], [['image/jpeg', 'image/jpeg'], true, true], 'import ciblé (poserImage, F-9) : la vignette de page et l’aperçu du plat d’une copie JPEG sous une ligne HEIC sont servis image/jpeg (le retypage ; la garde est épinglée par les lignes application/pdf ci-dessous)');
+      });
+      // Vague finale (P1, poserImage) : les mêmes lignes sous un mime hors liste (application/pdf) avec des octets JPEG — la garde lit le type affiché.
+      vus.length = 0;
+      await withRepo(async (repo, db) => {
+        const lignePdf = (sha256) => ({ sha256, mime: 'application/pdf', size: 999, blob: jpeg, syncable: true, created_at: DATE, updated_at: DATE });
+        await db.mutate({ puts: {
+          files: [lignePdf(H('a')), lignePdf(H('b'))],
+          source_pages: [{ id: 'pgIP', document_id: 'dIP', sha256: H('b'), updated_at: DATE }],
+          recipes: [{ id: 'rIP', original_title: 'Tarte', availability: 'reference_only', edition_id: null, updated_at: DATE }],
+          imports: [{ id: 'impIP', kind: 'recette', recipe_id: 'rIP', edition_id: null, scan_session_id: null, status: 'a_lancer', page_ids: ['pgIP'], photo_sha256: H('a'), photo_origin: 'image', created_at: DATE, updated_at: DATE }],
+        }, origin: 'device' });
+        const recette = await db.get('recipes', 'rIP');
+        const ctxIP = { recipesById: new Map([['rIP', recette]]), editionsById: new Map(), booksById: new Map(), sync: {} };
+        const root = await renderImportCible({ id: 'rIP' }, {}, ctxIP, { repo, navigate: () => {}, toast: () => {}, fetch: async () => { throw new Error('aucun réseau attendu'); }, pickFiles: async () => [] });
+        for (let i = 0; i < 100 && vus.length < 2; i += 1) await new Promise((r) => setTimeout(r, 10));
+        eq([vus.map((b) => b.type), !!root.querySelector('.thumbs img')], [['image/jpeg', 'image/jpeg'], true], 'import ciblé (poserImage, P1, vague finale) : vignette et aperçu d’une ligne application/pdf aux octets JPEG servis image/jpeg (mutant : garde sur safeDisplayType(f?.mime) → aucune URL créée)');
       });
     } finally { URL.createObjectURL = vraiCreer; }
     (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob();
@@ -557,6 +594,33 @@ export async function runSyncL4Tests({ eq, ok }) {
       const [b, c] = [await db.get('files', shaB), await db.get('files', shaC)];
       eq([b?.blob instanceof Blob && b.blob.size === photo.size, b?.remote, F.estOriginalIci(b), c?.blob instanceof Blob && c.blob.size === copie.size, c?.remote, c?.size],
         [true, rA, true, true, rC, 99], 'réception (#4) : la fusion se fait sur la ligne relue DANS la transaction — un original importé et une copie téléchargée pendant la page restent, le remote reçu est posé (mutant : fusion sur l’instantané → blobs effacés)');
+    });
+  });
+
+  await run('vague finale — conditionFichier : bougée ou disparue depuis la lecture → rien (I7)', async () => {
+    const T2 = '2030-01-01T00:00:00.000Z';
+    const avant = { sha256: H('1'), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: R() };
+    const data = { sha256: H('1'), mime: 'image/jpeg', size: 5, remote: R({ sha256: H('f') }), updated_at: T2 };
+    const c = F.conditionFichier(H('1'), avant, data, T2);
+    eq([c.key, c.fusion({ ...avant, updated_at: '2029-01-01T00:00:00.000Z' }), c.fusion(null), c.fusion({ ...avant })?.remote, c.fusion({ ...avant })?.updated_at],
+      [H('1'), null, null, R({ sha256: H('f') }), T2], 'conditionFichier : clé = sha256 ; ligne bougée depuis la lecture → null ; disparue depuis → null ; inchangée → fusion sur la ligne relue (mutants : garde « bougée » retirée ; garde « disparue » retirée)');
+    const sansAvant = F.conditionFichier(H('1'), null, data, T2);
+    eq([sansAvant.fusion(null)?.sha256, sansAvant.fusion({ ...avant })?.remote], [H('1'), R({ sha256: H('f') })], 'conditionFichier : absente avant et après → créée ; apparue depuis → fusion sur elle');
+    // Réception : une ligne qui a bougé ICI pendant la page (version d'ici plus récente, qui a sa propre entrée de file) n'est pas réécrite.
+    const { createPull } = await import('../src/sync/pull.js');
+    await withRepo(async (repo, db) => {
+      const sha = H('2'); const rIci = R({ sha256: H('8'), size: 3 }); const T3 = '2031-01-01T00:00:00.000Z';
+      await db.mutate({ puts: { files: [{ sha256: sha, mime: 'image/jpeg', size: 9, updated_at: DATE, remote: R() }] }, origin: 'remote' });
+      const vraiGet = db.get; let fait = false;
+      db.get = async function (store, cle) {
+        const r = await vraiGet.call(this, store, cle);
+        if (store === 'files' && cle === sha && !fait) { fait = true; await db.mutate({ puts: { files: [{ ...r, remote: rIci, updated_at: T3 }] }, origin: 'device' }); }
+        return r;
+      };
+      const tf = creerTransportFactice({ lire: { files: [[{ id: sha, data: { sha256: sha, mime: 'image/jpeg', size: 9, remote: R({ sha256: H('9') }), updated_at: T2 }, updated_at: T2, deleted_at: null, server_seq: 1 }], []] } });
+      try { await createPull({ db, transport: tf, getUserId: () => 'u1' }).recevoir(); } finally { delete db.get; }
+      const apres = await db.get('files', sha);
+      eq([apres.updated_at, apres.remote], [T3, rIci], 'réception (vague finale) : la ligne bougée ici pendant la page garde son updated_at et son remote (mutant : garde « bougée depuis » retirée → la version du serveur écrase la plus récente)');
     });
   });
 
@@ -947,6 +1011,46 @@ export async function runSyncL4Tests({ eq, ok }) {
     }
   });
 
+  await run('vague finale — une copie ne prend jamais la taille de l’original (archive fabriquée, § 11)', async () => {
+    const orig = await original('original-vague-archive');
+    const copie = octets('copie-vague-archive');
+    const archive = await archiveDeCopie(orig.sha256, orig.size, copie, R({ sha256: await sha256Hex(copie), size: copie.size }));
+    const temoin = await ouvrir(archive);
+    // Une archive FABRIQUÉE qui déclare à une copie la taille de l'original : estOriginalIci (la taille) la prendrait pour l'original → refusée à l'inspection.
+    const fausse = await B.inspectArchive(await rewriteArchive(archive.blob, ({ manifest }) => { manifest.files[0].bytes_size = manifest.files[0].size; }));
+    eq([temoin.ok, fausse.ok], [true, false], 'inspectArchive (vague finale) : une copie (bytes_sha256 ≠ sha256) dont bytes_size vaut size est refusée ; la même archive honnête passe (mutant : règle d’avant, bytes_size === size admis pour une copie)');
+    // L'app elle-même : une ligne dont les octets ne sont pas l'original mais en ont la taille est archivée comme copie SANS taille (size 0), et reste restaurable.
+    const memeTaille = octets('xyz-pas-original'); const shaDeclare = H('7');
+    let archiveApp = null;
+    await withDatabase(async (db) => {
+      await db.putBatch({ files: [{ sha256: shaDeclare, mime: 'image/jpeg', size: memeTaille.size, blob: memeTaille, syncable: true, created_at: DATE, updated_at: DATE }] });
+      archiveApp = await B.createArchive(db);
+    });
+    const entree = archiveApp.manifest.files.find((f) => f.sha256 === shaDeclare);
+    const inspApp = await ouvrir(archiveApp);
+    let restauree = null;
+    await withDatabase(async (db) => { await B.applyArchive(db, inspApp, { mode: 'replace' }); restauree = await db.get('files', shaDeclare); });
+    eq([entree?.size, entree?.bytes_size, entree?.bytes_sha256, inspApp.ok, restauree?.size, F.estOriginalIci(restauree)], [0, memeTaille.size, await sha256Hex(memeTaille), true, 0, false],
+      'createArchive (vague finale) : une copie de la taille de l’original est décrite size 0 (comme une copie sans taille, #7), l’archive passe l’inspection et la ligne restaurée n’est pas prise pour l’original (mutant : size gardé → archive refusée par la nouvelle règle)');
+  });
+
+  await run('vague finale — upload_quality ne voyage pas dans l’archive (spec § 3.3 : par appareil)', async () => {
+    let archive = null;
+    await withDatabase(async (db) => {
+      await db.putBatch({ settings: [{ key: 'upload_quality', value: 'originale', updated_at: DATE }, { key: 'ui_locale', value: 'fr', updated_at: DATE }] });
+      archive = await B.createArchive(db);
+    });
+    const insp = await ouvrir(archive);
+    const cles = (insp.payload.stores.settings || []).map((r) => r.key);
+    let apres = null;
+    await withDatabase(async (db) => {
+      await db.putBatch({ settings: [{ key: 'upload_quality', value: 'reduite', updated_at: DATE }] });
+      await B.applyArchive(db, insp, { mode: 'merge' }); // en remplacement, le magasin settings est vidé puis rempli des réglages publics : le réglage par appareil revient à sa valeur par défaut (dit au § 11)
+      apres = await db.get('settings', 'upload_quality');
+    });
+    eq([cles.includes('upload_quality'), cles.includes('ui_locale'), apres?.value], [false, true, 'reduite'], 'archive (vague finale) : le réglage par appareil upload_quality n’est ni archivé ni écrasé à la restauration ; les autres réglages publics voyagent (mutant : filtre limité aux clés secrètes)');
+  });
+
   await run('ronde 1 — une taille d’archive menteuse ne fait pas d’un original une copie (#6, #33 ; P2, P4)', async () => {
     const orig = await original('original-r1-p2-de-cette-page');
     const copie = octets('copie-r1-p2');
@@ -1248,6 +1352,18 @@ export async function runSyncL4Tests({ eq, ok }) {
       const menteur = { ...sf, lister: async (prefixe, options) => { const r = await sf.lister(prefixe, options); return { ...r, objets: r.objets.map((o) => ({ ...o, metadata: { ...o.metadata, size: o.metadata.size + 1 } })) }; } };
       const bilan = await passe(db, menteur, { reduire: reducteur().reduire }).envoyer({ snapshot: await snapshot(db) });
       eq([bilan.confirmes, bilan.erreurs, (await db.get('sync_state', 'file_error:' + s))?.value?.motif, (await db.get('files', s)).remote], [0, 1, 'verification', undefined], 'passe (d) : déjà présent puis deux tailles différentes → file_error verification, rien d’écrit sur la ligne (mutant : remote écrit quand même)');
+    });
+  });
+
+  await run('vague finale — des octets tels quels qui ne sont pas l’original ne partent jamais (§ 11, archive fabriquée)', async () => {
+    await withRepo(async (repo, db) => {
+      const faux = octets('pas-l-original-mais-meme-taille'); const sha = H('4'); // clé ≠ empreinte des octets ; « taille de l'original » = celle des octets
+      await repo.putFile(sha, faux, {});
+      await db.mutate({ puts: { source_pages: [{ id: 'pg_faux', document_id: 'd', sha256: sha, updated_at: DATE }] }, origin: 'device' });
+      const sf = creerStockageFactice();
+      const bilan = await passe(db, sf, { qualite: () => 'originale' }).envoyer({ snapshot: await snapshot(db) });
+      const e = (await db.get('sync_state', 'file_error:' + sha))?.value;
+      eq([sf.journal.length, e?.motif, e?.sens, bilan.erreurs, (await db.get('files', sha)).remote], [0, 'forme', 'envoi', 1, undefined], 'envoi (vague finale) : la ligne passe estOriginalIci par la taille, mais l’empreinte des octets n’est pas la clé → aucun appel réseau, file_error forme (envoi, sans Réessayer), aucun remote (mutant : filet retiré → la copie part sous la clé de l’original)');
     });
   });
 
@@ -2809,6 +2925,12 @@ export async function runSyncL4Tests({ eq, ok }) {
     const oui = (dits) => async () => { dits.push('<confirmé>'); return true; };
     const non = (dits) => async () => { dits.push('<refusé>'); return false; };
     const effacer = (dits, sur = {}) => SR.effacerDonnees({ user: null, pending: async () => 0, confirm: oui(dits), demanderMot: async () => { dits.push('<mot>'); return 'EFFACER'; }, toast: (m) => dits.push(m), clearDevice: async () => {}, reload: () => {}, arreterSync: async () => { dits.push('<arrêt>'); }, ...sur });
+    // Vague finale du lot G : avec un compte, la question nomme la perte des photos pas encore envoyées (la file ne les compte pas, D-G8) ; sans compte, la phrase d'avant.
+    const questions = [];
+    const demande = async (q) => { questions.push(q); return false; };
+    await SR.effacerDonnees({ user: { id: 'u1' }, pending: async () => 0, confirm: demande, demanderMot: async () => 'EFFACER', toast: () => {}, clearDevice: async () => {}, reload: () => {}, arreterSync: async () => {} });
+    await SR.effacerDonnees({ user: null, pending: async () => 0, confirm: demande, demanderMot: async () => 'EFFACER', toast: () => {}, clearDevice: async () => {}, reload: () => {}, arreterSync: async () => {} });
+    eq([questions[0].includes('photos pas encore envoyées'), questions[1].includes('photos pas encore envoyées'), questions[1].startsWith('Effacer les données de cet appareil ?')], [true, false, true], 'effacer (vague finale) : avec un compte, la confirmation dit que les photos pas encore envoyées seront perdues ; sans compte, la phrase d’avant (mutant : une seule phrase)');
     const changer = (dits, sur = {}) => SR.changerDeCompte({ confirm: oui(dits), toast: (m) => dits.push(m), pending: async () => 0, archiveCreated: () => 'oui', clearDevice: async () => {}, reload: () => {}, arreterSync: async () => { dits.push('<arrêt>'); }, ...sur });
     const vu = { effacerEnVol: [], effacerAuRepos: [], changerEnVol: [], changerAuRepos: [], effacerDefaut: [], changerDefaut: [], effacerDefautRepos: [], effacerRefuse: [], effacerMotFaux: [], changerSansArchive: [], changerRefuse: [], changerPerteRefusee: [] };
     const enVol = { transfertEnCours: () => true };
@@ -2973,6 +3095,18 @@ export async function runSyncL4Tests({ eq, ok }) {
       await etat.relectureEnCours();
     });
     await etat.relireReglages(); // la base de l'app reprend la main
+  });
+
+  await run('vague finale — Réglages : une ligne files en quarantaine ou en conflit est nommée par nomFichier (I-G8)', async () => {
+    const { syncSectionModel } = await import('../src/ui/settings.js');
+    const sha = H('3');
+    const snapshot = { source_pages: [{ id: 'pgN', document_id: 'docN', sha256: sha, printed_page: 12, updated_at: DATE }], source_documents: [{ id: 'docN', edition_id: 'edN', updated_at: DATE }], book_editions: [{ id: 'edN', book_id: 'bkN', updated_at: DATE }], books: [{ id: 'bkN', title: 'Le livre', updated_at: DATE }], recipes: [], imports: [], files: [] };
+    const base = { available: true, user: { id: 'u1', email: 'x@exemple.invalid' }, guard: { ok: true }, pending: 0,
+      moteur: { enCours: false, phase: null, progression: null, dernierEchange: null, aEnvoyer: 0, enQuarantaine: 1, conflits: 1, pause: null, attenteConnexion: false, horloge: null, derniereErreur: null } };
+    const avec = syncSectionModel({ ...base, quarantaine: [{ seq: 1, store: 'files', id: sha, last_error: 'taille' }], conflits: [{ id: 'files:' + sha, store: 'files', record_id: sha, local: null, server: null, at: DATE, kind: 'donnees' }], snapshot });
+    const sans = syncSectionModel({ ...base, quarantaine: [{ seq: 1, store: 'files', id: sha, last_error: 'taille' }], snapshot: null });
+    eq([avec.quarantaine[0].libelle, avec.conflits[0].libelle, sans.quarantaine[0].libelle.startsWith('files · ')], ['Page 12 · Le livre', 'Page 12 · Le livre', true],
+      'réglages (vague finale) : quarantaine et conflit d’une ligne files nommés « Page 12 · Le livre », jamais l’empreinte (mutant : libellé store · id) ; sans snapshot, la forme bornée de L3 reste');
   });
 
   // === Tâche 6 — écrans (§ 4.2-4.5)
