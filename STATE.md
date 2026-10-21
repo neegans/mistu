@@ -1,4 +1,14 @@
-# STATE.md — Cuisine OS (mistu) — état au 20 octobre 2026 (lots « Passerelle de l'assistant » et « Présentation du serveur » EN LIGNE, `main` = `57babc6` ; lots A « Import ciblé et journal d'import », B « Recette web complète » et G « Les photos voyagent entre appareils » FINIS, empilés A → B → G sur `main`, NI fusionnés NI poussés, migrations `0005` et `0006` PAS collées, fonction `assistant` PAS redéployée ; lots C, D, E, F prêts (specs, plans, valeurs de rejeu) mais en attente du relèvement de la limite de dépense du compte)
+# STATE.md — Cuisine OS (mistu) — état au 21 octobre 2026 (lots « Passerelle de l'assistant » et « Présentation du serveur » EN LIGNE, `main` = `57babc6` ; lots A « Import ciblé et journal d'import », B « Recette web complète », G « Les photos voyagent entre appareils » et C « Table des matières sur plusieurs pages » FINIS, empilés A → B → G → C sur `main`, NI fusionnés NI poussés, migrations `0005` et `0006` PAS collées, fonction `assistant` PAS redéployée ; lots D, E, F prêts (specs, plans, valeurs de rejeu), D en Départ sur la tête finale de C)
+
+**21 octobre 2026, 16 h 49 — LOT C « TABLE DES MATIÈRES SUR PLUSIEURS PAGES » : FINI dans le worktree `~/projects/mistu-table-des-matieres`
+(branche `table-des-matieres`, base = la tête finale du lot G `1e4d68d`, spec `a9e75ca` (rév. 6) puis rév. 7 à la clôture, plan rejoué `f575d3d`,
+tête de code `e305355`, serveur 8091), six tâches en une ronde chacune (re-revues propres), revue finale à trois lentilles (6 Important et 18 Minor, tous fermés ou nommés : vague `0b9ba10` + ronde de clôture `e305355`, rulings R-C-15 à R-C-38),
+`/verify` mécanique VERT (suite 4743/4743, épingle 4742, Node 174/174, `--check` 0, invisibles 0, aucune clé), `sw.js cuisine-os-v0.12.0-12`,
+`APP_VERSION 0.12.0`, aucune migration, serveur `assistant` intact. **PAS fusionné, PAS poussé.** Pour Neegan, dans l'ordre : les gestes des lots A, B
+et G (ci-dessous) ; puis `git merge --ff-only table-des-matieres`, push, suite publique 4743/4743, preuve réelle § 10 de la spec C (une table des
+matières sur 3 à 5 photos lue en un appel : durée, coupe, fidélité, jetons — avant la fusion, elle peut amender `MAX_TOKENS_INDEX`), iPhone,
+« clean ». Registre `.superpowers/sdd/2026-10-19-table-des-matieres/` (copie dans `~/projects/mistu/.superpowers/sdd/`) ; rulings R-C-8 à R-C-38
+dans la spec § 12.3 ; dettes au § 13.**
 
 **20 octobre 2026, 23 h 30 — LOT G « LES PHOTOS VOYAGENT ENTRE APPAREILS » : FINI dans le worktree `~/projects/mistu-photos-entre-appareils`
 (branche `photos-entre-appareils`, base = la tête finale du lot B `cf91f09`, spec `3601a52`, plan rejoué `c227711`, tête de code `222b3a5` — la vague

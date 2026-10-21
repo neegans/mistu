@@ -1,4 +1,4 @@
-# Lot C — « Table des matières sur plusieurs pages » : ordre proposé, tableau d’entrées, références liées à leur photo — spec (rév. 6)
+# Lot C — « Table des matières sur plusieurs pages » : ordre proposé, tableau d’entrées, références liées à leur photo — spec (rév. 7)
 
 Date : 19 octobre 2026 (rév. 1 le matin ; rév. 2 après la revue adverse à trois lentilles — besoin, sécurité, faisabilité — ; **rév. 3 après la
 vérification de la rév. 2** : six rulings du chef d’orchestre R-C-1 à R-C-6 sur les points à trancher, deux constats Important N-1 et N-2 appliqués,
@@ -8,7 +8,10 @@ points du chef d’orchestre Q1 à Q6 — les comptes d’entrées écartées so
 à `enregistre` ou `ignore`, état `a_lancer` du panneau, création de la ligne conditionnée `absente: true`, deux corrections, tête `e88f0b1` — ;
 **rév. 6 après la vérification de la rév. 5** : le ruling R-C-7 (les numéros de ligne valent à **une** tête nommée du lot A) et trois points V1
 à V3 — pins relus à la tête courante `f8cfafa`, jointure « Incertain » rattachée à `texteIncertain`, conditions observées par le `repo` injecté et
-jamais par `db.onMutate` — ; tout est consigné en § 12, et § 13 dit ce qui reste ouvert). Base : la tête du lot précédent de la
+jamais par `db.onMutate` — ; tout est consigné en § 12, et § 13 dit ce qui reste ouvert ; **rév. 7 à la clôture de la construction, 21 octobre 2026** : le plan a été rejoué
+par intention sur la tête finale du lot G `1e4d68d` (quinze écarts d'intention EI-1 à EI-15, tranchés en faveur du code commis : R-C-8 à R-C-14),
+ses écarts déclarés E-1 à E-26 sont reportés, et les rulings de construction R-C-15 à R-C-38 tranchent ce que les six tâches, leurs rondes, la revue
+finale de branche et sa vague ont remonté — § 12.3 ; tête de code `e305355`, `sw.js cuisine-os-v0.12.0-12`, épingle 4742, suite 4743/4743 ; § 13 mis à jour). Base : la tête du lot précédent de la
 chaîne **A → B → G → C** (spec A § 9). Branche à créer : `table-des-matieres`, worktree `~/projects/mistu-table-des-matieres`, serveur de vérification `python3 -m http.server 8091 --bind 127.0.0.1` (consigne du chef d'orchestre au Départ : chaîne linéaire A → B → G → C → D → E → F, un worktree propre par lot, créé sur la tête FINALE du lot précédent — ici la tête finale du lot G — ; `APP_VERSION` = 0.12.0, règle R-E-18 ; les numéros de ligne cités valent à la tête du lot A nommée dans cette spec, le rejeu du plan sur la tête finale réelle les ré-ancre). Au moment d’écrire la rév. 6, la branche `import-cible` du lot A (worktree `~/projects/mistu-import`, 8088)
 est à **`f8cfafa`** (`git -C ~/projects/mistu-import rev-parse --short HEAD`, 19 octobre ; `24e539b` = tâche 4, `47f61ed` et `f155c8c` = ses
 rondes 1 et 2, `e88f0b1` = tâche 5 : fiche, cuisine, courses et « Corriger », `f8cfafa` = sa ronde 1) : tâches 1 à 5 commises ; **T6 n’est pas
@@ -129,7 +132,7 @@ spec → revue adverse → plan → construction par sous-agents (TDD) → `/ver
   `texteBorne`, `entierBorne` et `ErreurExtraction` en zone morte temporelle au chargement, F-6) ; les motifs d’adresse `MOTIF_ADRESSE`
   (`recherche-web.js:18`), `MOTIF_HOTE` (`:23`) et `porteUneAdresse` (`:26-29`, NFKC + U+3002/U+FF61/U+2215/U+2044, aujourd’hui interne)
   **déménagent** dans `src/core/bornes.js` (module existant, pur, sans import : `borner`, `bornerAuMot`, `lireBornee`, `signalDelai`),
-  `recherche-web.js` les importe de là et ré-exporte les deux motifs ; écran **neuf** `src/ui/table-matieres.js` (séquence proposée + tableau +
+  `recherche-web.js` les importe de là et ré-exporte les quatre noms (`MOTIF_ADRESSE`, `MOTIF_HOTE`, `normaliserPourAdresse`, `porteUneAdresse` : le code commis du lot B, R-C-8) ; écran **neuf** `src/ui/table-matieres.js` (séquence proposée + tableau +
   `creerReferences` exportée), rendu **par** `indexEntriesPanel` (`src/ui/import.js`, qui reste la porte : fiche livre et séance l’appellent
   déjà) ; **le vol** vit dans `src/ui/import-cible.js` (D-C21 : `lancerVol`, `annulerVol`, `volEnCours`, `DOCUMENT_ID`, `BATTEMENT_MS`), que
   `src/ui/import.js` importe ; suite **neuve** `tests/table-matieres.js` (`runTableMatieresTests`), appelée par `tests/tests.js` avant le total
@@ -170,7 +173,7 @@ spec → revue adverse → plan → construction par sous-agents (TDD) → `/ver
   - **depuis `echec`** (« Relancer » du panneau, ou « Lire » après avoir décoché des photos : le chemin « lecture coupée → lis moins de
     photos ») : pages identiques à `page_ids` → `lancerVol` directement (il fait `echec → en_cours`, `attendus: ['a_lancer', 'echec']`) ; pages
     différentes → `echec → a_lancer` (même patch complet) puis `lancerVol` ; aucune confirmation (rien à perdre : une ligne `echec` porte
-    `resultat: null`). « Relancer » d’un index appelle `lire()` du panneau, jamais `lancerExtraction` du lot A (propre à une recette) ;
+    `resultat: null`). « Relancer » d’un index appelle `lire()` du panneau, jamais `lancerExtraction` du lot A (propre à une recette) ; depuis la section « Imports », un index en échec offre « Reprendre » (le panneau de sa séance par `?import=`, ses pages cochées) et « Ignorer », et sa phrase est `texteEchecIndex` (rév. 7, VF-C3) ;
   - **depuis `a_lancer`** (ligne ouverte **sans résultat** : un `lancerVol` refusé après la création ou après une relecture confirmée, ou une
     ligne venue d’un autre appareil ; état 4 de § 4.2, Q3) : comme depuis `echec`, sans confirmation (rien de payé à perdre) — pages
     identiques à `page_ids` → `lancerVol` directement (`a_lancer → en_cours`) ; pages différentes → patch **sur place** `{ page_ids }` sous
@@ -420,7 +423,7 @@ par `revaliderResultatIndex`) : `BORNES_INDEX = Object.freeze({ entrees: 400, ti
 incertitude: 200, ecartees: 9999, octets: 262144 })` ; racine : objet non tableau sinon `illisible`, `photos` tableau sinon `illisible` ; bloc : lu par
 `Object.hasOwn` champ par champ (un bloc qui n’est pas un objet nu est écarté ; une clé `__proto__` ou `constructor` est une clé comme une
 autre, jamais suivie), `photo` entier sinon `illisible`, hors 1..N → `hors_bornes` (R-C-1 : un compte, pas une entrée) ; `printed_page_range` :
-tableau de deux entiers 1..9999 avec de ≤ a, sinon `null` ; `entries` : tableau sinon `[]` ; entrée : `title` chaîne sinon écartée, nettoyée par
+tableau de deux entiers 1..9999 avec de ≤ a, sinon `null` ; `entries` : tableau sinon `[]` ; entrée : `title` chaîne sinon écartée, ramenée à UNE ligne par `uneLigne` (rév. 7, VF-C2 : toute fin de ligne, tabulation ou suite d’espaces = une espace, AVANT les contrôles de longueur et d’adresse ; l’adresse est cherchée aussi sur la forme recollée — titre, section et incertitudes), nettoyée par
 `nettoyer(title)` (**neuf** : la partie nettoyage de `texteBorne` — CRLF, tabulations, `INVISIBLES`, trim — extraite à l’identique ; `texteBorne`
 l’appelle puis borne, comportement d’A inchangé) ; vide → écartée ; **`longueur(title) > 200` → écartée et comptée** (jamais `texteBorne`, qui
 **jette** `hors_bornes` au-delà de sa borne, `llm.js:96-101` : c’est le refus entier que R-C-1 interdit pour une entrée) ; adresse
@@ -462,7 +465,7 @@ dit en § 12, S-11).
 - `lignesTableau(resultat, { ordre, existantes })` → `[{ cle: 'l{i}', photo: { page_id, rang }, titreLu, pageLue, title, printed_page,
   section, uncertain, horsPlage, dejaReperee, enDouble, cochee, creable }]` dans l’ordre D-C18 ; `cleReference(titre, page)` =
   `` `${normalizeText(titre)}|${page ?? ''}` `` (extraite de `import.js:225`, désormais partagée) ; `dejaReperee` = clé présente dans
-  `existantes` (`recipes` de l’édition, `original_title` + `printed_page`) ; `enDouble` = clé déjà vue plus haut dans le tableau ; `horsPlage`
+  `existantes` (`recipes` de l’édition, `original_title` + `printed_page`) ; `enDouble` = clé déjà PRISE plus haut par une ligne créable que la personne n’a pas décochée (rév. 7, VF-C4 : décocher une occurrence libère la suivante) ; `horsPlage`
   (D-C12) ; `creable = !dejaReperee && !enDouble` ; `cochee = creable` au départ.
 - `recalculer(lignes, existantes)` → mêmes lignes avec `dejaReperee` / `enDouble` / `creable` recalculés après une édition (une ligne décochée
   par la personne reste décochée ; une ligne qui devient « déjà repérée » est décochée et sa case désactivée ; une ligne qui cesse de l’être
@@ -629,7 +632,7 @@ fiche livre) il n’y a pas de ligne : état 1 toujours.
 
 ### 4.5 Ce qui change ailleurs
 
-- `src/ui/import-cible.js` (**N-1, T1**) : `lancerVol(importId, executer, deps)` **exporté**, extrait de `lancerExtraction` à l’identique
+- `src/ui/import-cible.js` (**N-1, T1**) : `lancerVol(importId, executer, options)` **exporté** (rév. 7 : `options`, le nom du code commis, R-C-15), extrait de `lancerExtraction` à l’identique
   (D-C21) ; `imagesDe` rend `{ images, pageIds }` ; `lancerExtraction` reste exportée avec la même signature et devient un appel de `lancerVol`
   avec `executerRecette` ; `annulerVol`, `volEnCours`, `DOCUMENT_ID`, `BATTEMENT_MS`, `reinitialiserImportCible` inchangés. Aucun changement de
   comportement : `tests/import-cible.js` vert tel quel (I-C9).
@@ -638,7 +641,7 @@ fiche livre) il n’y a pas de ligne : état 1 toujours.
   celui de la ligne (`propre` + `updated_at`), fusionné dans `db.mutate({ conditions: { [store]: [...], ...autres } })` ; la valeur rendue
   (`ecrites[store][0]`) ne change pas ; `listeConditions` refuse déjà deux conditions sur la même fiche. Une dizaine de lignes, un test (T-C24).
 - `src/core/bornes.js` : `MOTIF_ADRESSE`, `MOTIF_HOTE`, `porteUneAdresse` (déplacés tels quels depuis `recherche-web.js:18-29`, exportés) ;
-  `src/domain/recherche-web.js` les importe de là et ré-exporte les deux motifs (ses tests ne les importent pas, mesuré : aucun appelant
+  `src/domain/recherche-web.js` les importe de là et ré-exporte les quatre noms (`MOTIF_ADRESSE`, `MOTIF_HOTE`, `normaliserPourAdresse`, `porteUneAdresse` : le code commis du lot B, R-C-8) (ses tests ne les importent pas, mesuré : aucun appelant
   externe, le ré-export est une précaution).
 - `src/domain/llm.js` : `TABLE_MATIERES_SYSTEM`, `extraireTableMatieres`, `MAX_TOKENS_INDEX`, `BORNES_INDEX`, `validerLectureIndex`, `nettoyer`
   (extrait de `texteBorne`), exports `texteBorne` / `entierBorne` / `nettoyer` / `longueur`, `INVISIBLES` + `\p{Cs}` ; à T4 : retrait de
@@ -789,7 +792,7 @@ Extraction (`tests/passerelle.js`, bloc **neuf** `extraireTableMatieres` en T1 ;
 Vol partagé (`tests/import-cible.js`, bloc **neuf** en T1 ; N-1) :
 - **T-C25 `lancerVol`** : `lancerExtraction` d’une recette passe **tel quel** les blocs existants (extraction l. 682-726, Annuler l. 733-740,
   réponse tardive l. 741-752, incertain l. 760-781, battement l. 1140-1156 : **aucune assertion amendée**, M87 « comportement d’A changé par
-  l’extraction ») ; `lancerVol(impX, executer, deps)` avec un `executer` factice qui lit `{ provider, images, pageIds, signal, ligne }` : la ligne
+  l’extraction ») ; `lancerVol(impX, executer, options)` avec un `executer` factice qui lit `{ provider, images, pageIds, signal, ligne }` : la ligne
   est `en_cours` avec `document_id_vol === DOCUMENT_ID`, `started_at` et `battement_at` posés **avant** que `executer` soit appelé ; `pageIds` =
   les pages envoyées (une page absente de la base écartée, `images.length === pageIds.length`, M83) ; un `fetch` fait par `provider` porte
   `appels` à 1 (M88 « appels non compté hors recette ») ; `executer` rend `{ resultat: { x: 1 }, texteBrut, modele }` → ligne `a_verifier` avec
@@ -898,7 +901,7 @@ par `OffscreenCanvas` comme `imageDe`, `repo`, `toast`, `confirmer`, `fetch`, `m
   (`MODULES_NEUFS` + `table-matieres.js` ; `CHAINES_NEUVES_AILLEURS` pour `import.js`, `book.js`, `recipe.js`), test de source
   `Anthropic|Supabase` sur `src/ui/table-matieres.js`, appelants d’`assertVocabulaire` (+ `fabriquerReferences`), test statique
   `transitionner(`, `tests/sync.js` graphe d’imports contre `SHELL`, total épinglé.
-- **T-C21 `porteUneAdresse` déplacé** (T1) : les cas existants de `tests/recherche-web.js` restent verts ; `bornes.js` exporte les deux motifs
+- **T-C21 `porteUneAdresse` déplacé** (T1) : les cas existants de `tests/recherche-web.js` restent verts ; `bornes.js` exporte les quatre noms (R-C-8)
   et la fonction ; `recherche-web.js` n’importe plus `MOTIF_*` de nulle part ailleurs que `bornes.js` (test de source, admis comme `SHELL`).
 - **T-C22 `INVISIBLES` + `\p{Cs}`** (T1) : `texteBorne('a\ud800b', 10) === 'ab'` ; les cas existants de `validateParsedRecipe` inchangés.
 - **T-C23 D-C19** : couvert par T-C16 partie création (M53).
@@ -979,8 +982,8 @@ comme en A) ; retirer `?import=` de l’adresse après la reprise (T6).
    avant/après ; une référence qui existait déjà n’a **pas** gagné de section (R-C-2).
 5. **Coupe** : si 5 photos coupent, décocher une photo puis « Lire » (une seule ligne dans Imports, pas deux), mesurer 4, puis 3 : le nombre
    de photos qui tient sous 8 000 jetons et sous 120 s est consigné en § 12 et dans le texte d’aide du panneau (« {n} photos au plus par
-   lecture ») **avant la fusion** ; si 3 photos coupent encore, `MAX_TOKENS_INDEX` et la consigne (demander moins de verbosité : pas de `section`
-   répétée ?) s’amendent avant le plan, pas après.
+   lecture ») **après la fusion de C et son `push`, avant la fusion du lot D** (R-C-33 : Pages ne sert que `main`, et le serveur local du worktree n’est pas une origine admise de la fonction ; un commit borné sur `main`, reculable par `revert`) ; si 3 photos coupent encore, `MAX_TOKENS_INDEX` et la consigne (demander moins de verbosité : pas de `section`
+   répétée ?) s’amendent par ce même commit borné (R-C-33).
 6. Fermer l’app pendant une lecture, rouvrir : la section Imports montre la ligne (T6) ; « Reprendre » une ligne `a_verifier` rouvre le
    tableau **sans** nouvel appel (vérifier `appels` dans l’éditeur SQL : inchangé), dans l’ordre appliqué si l’ordre l’a été, **les photos de la
    lecture cochées** (D-C22) ; « Reprendre » une ligne `echec` puis « Relancer » → un appel part (pas un toast, N-2).
@@ -1019,8 +1022,8 @@ comme en A) ; retirer `?import=` de l’adresse après la reprise (T6).
   rappel comme `apresOrdre` les couvrirait plus tard.
 - **« Appliquer cet ordre »** réécrit `scan_sessions` (une fiche synchronisée) — un appareil qui a la même séance ouverte verra l’ordre
   changer à la prochaine passe ; aucun conflit tant qu’il n’a pas écrit entre-temps (I7 de la synchro). La séance est patchée **dans** la
-  transaction ; les `source_pages` (sans statut) sont précalculées sur les pages relues : une page **modifiée** (pas ajoutée) par un autre
-  onglet entre la relecture et l’écriture est écrasée par la position neuve (fenêtre courte, dette L3 « lectures hors transaction »).
+  transaction ; les `source_pages` (sans statut) sont écrites par condition de fusion sur la fiche RELUE dans la transaction (R-C-17, rév. 7) : une page modifiée par un autre onglet entre la
+  relecture et l’écriture n’est plus écrasée, une page retirée ne reçoit pas de position — la fenêtre « pages précalculées » des rév. 2 à 6 n’existe plus.
 - **Deux onglets** (R-C-5) : chaque geste sur la ligne est conditionné (`attendus`) ; le second apprend le refus par un toast ou un redessin ;
   la création d’une ligne neuve porte `absente: true` (Q4 : elle n’écrase jamais une ligne existante) et reste « au mieux » pour l’unicité par
   séance (D-C7) : **fenêtre résiduelle** — deux onglets peuvent ouvrir deux lignes pour la même séance entre la relecture de `repo.all('imports')`
@@ -1040,6 +1043,19 @@ comme en A) ; retirer `?import=` de l’adresse après la reprise (T6).
   « the » est un mot vide (`STOP`, `search.js:6`) : « thé » ne trouve pas « Thés » pour cette autre raison.
 - **Safari / iPhone** jamais mesurés pour `datalist` sur `input` (iOS le rend comme une saisie libre : acceptable, le texte libre est
   prévu), pour `confirmDialog` (`<dialog>`, repli `window.confirm`) ni pour le décodage ci-dessus.
+- **Après « Appliquer », une photo retirée qui garde son créneau dans la séance** (R-C-18, rév. 7) : l’écran redit « Ordre proposé… — vérifie. »
+  et « Appliquer » reste visible ; chaque « Appliquer » réécrit la même chose, sans perte ni appel ; prendre `ligne.page_ids` comme référence quand
+  `ordre_applique_at` est posé est une dette § 13 (cas rare : synchronisation ou autre onglet).
+- **Compatibilité vers l’avant** (R-C-32, rév. 7) : un client resté sur les lots A, B ou G lit les index par `validerIndex` (forme `{ entries }`) ; une
+  ligne de forme C reçue par la synchronisation ou une archive y est jugée illisible, `echec(illisible)` avec `resultat: null` est écrit et se
+  synchronise : **tous les appareils servent `0.12.0` avant la première lecture d’index** (§ 13).
+- **Recherche, deux limites de plus** (R-C-27, rév. 7) : un mot de section qui est aussi un mot de type devient un filtre de type (une recette
+  `available` sans type est alors exclue) ; la section dans les `titleTokens` élargit la dette C7 (« sans X » remonte une section « X »).
+- **« Ordre des photos » et L4** (R-C-28, rév. 7) : les vignettes sont des `img` par `displayUrl`, une page distante n’y dit pas son état L4 — dette § 13 (leurs URL `blob:` sont révoquées au changement de route, VF-C8).
+- **`uncertain` de la racine porteur d’une adresse** (R-C-16, rév. 7) : écarté sans être compté (il irait en tête de « Incertain : … »).
+- **Faux positif du contrôle d’adresse recollée** (R-C-36, rév. 7) : une entrée sur deux lignes dont la première finit par un point et la seconde
+  commence par un mot de la liste fermée des hôtes (ca, co, me, fr…) est écartée et comptée comme adresse — le « Le sel.Ca y est » du lot web ; visible,
+  retapée à la main.
 - **Tests** : `confirmer` est injectable (sac D-C20) ; les mutants de transaction se comptent par `db.onMutate`, jamais par le nombre de POST ;
   les tests du vol (T-C25) rappellent `repo.init()` sur une base jetable pendant un vol : la passe `interrompu` de T6 doit accepter d’être rejouée
   (le brief T6 le prévoit : « capture posée puis `repo.init()` rappelé »).
@@ -1160,9 +1176,300 @@ consigner et garder les tests M96-M98), la garde « séance nulle » (§ 4.2, ta
 les champs que T6 écrit à `a_verifier`, la signature exacte de `lignesImports(ctx, { maintenant, documentId, deviceId })` et de
 `cibleReprise(ligne)` (brief T6), et la passe `interrompu` de `repo.init()` (nom, seuil de 90 s, filtre `device_id`) que T-C25 rejoue.
 
+### 12.3 Rév. 6 → rév. 7 (clôture de la construction, 21 octobre 2026 : rejeu du plan sur la tête finale du lot G, écarts déclarés par le plan, rulings de construction)
+
+**Rejeu du plan (voie (b)) sur `1e4d68d`, tête finale du lot G (code `222b3a5`).** Base de C : `a9e75ca` (= `1e4d68d` + cette spec) ; plan rejoué commis
+`f575d3d` (`docs/superpowers/plans/2026-10-19-table-des-matieres.md`). Le plan C avait été écrit et relu sur les têtes `f8cfafa` puis `4cb99a0` du lot A
+(R-C-7) ; depuis, la chaîne A → B → G a avancé (lot A clos à `2b6a2fd`, lot B « Recette web complète » à `cf91f09`, lot G « Les photos voyagent entre
+appareils » à `1e4d68d`). Le rejeu (agent, 70 minutes, DONE_WITH_CONCERNS, rien de bloquant ; rapport
+`~/projects/mistu/.superpowers/sdd/nuit-2026-10-18/lots/C/depart-rejeu-rapport.md`) a appliqué chaque bloc par intention, gardé identique à l'octet
+tout ce que la base n'avait pas changé, et déclaré quinze écarts d'intention EI-1 à EI-15 (plan, sous-section « Rejeu sur 1e4d68d (voie (b)) »), tous
+tranchés en faveur du code commis des lots A, B et G par les rulings suivants du chef d'orchestre, posés en tête des six briefs :
+
+- **R-C-8 (EI-1, EI-2, EI-6)** — Motifs d'adresse : `src/core/bornes.js` reçoit les définitions COMMISES du lot B (`MOTIF_ADRESSE` avec le lookbehind
+  `(?<![a-z0-9-])`, `MOTIF_HOTE`, `normaliserPourAdresse`, `porteUneAdresse`), jamais les corps de la rév. 2 (R-B-26 : un seul motif) ;
+  `src/domain/recherche-web.js` ré-exporte QUATRE noms (ses lecteurs commis : `src/domain/lecture-web.js`, `tests/lecture-web.js`) ; `cleLecture` reste
+  définie dans `src/domain/import-cible.js` et ré-exportée par `src/ui/import-cible.js` (les imports du plan restent valides). Coût si faux : un lecteur
+  de B casse à l'import (mutant MR-reexport : la page de tests ne se charge plus, SyntaxError sous Node).
+- **R-C-9 (EI-3, EI-13)** — Le vol : la tenue (`DOCUMENT_ID`, `BATTEMENT_MS`, `volEnCours`, `prendreVol`) vit dans `src/ui/vol.js` (D-B13, partagée avec
+  la lecture d'une page web) ; `lancerVol` reste dans `src/ui/import-cible.js`, autour de `volUnique`, prend la tenue par `prendreVol` et n'ajoute RIEN
+  à `vol.js` : une seule primitive, celle du code commis. I-C4 s'élargit : un vol tenu par une lecture web refuse une lecture d'index, et l'inverse
+  (M-C10). `estEnLigne` se pose après le suivi `online` / `offline` (l. 40-43 à `a9e75ca`), `volEnCours` n'étant plus défini dans ce module.
+- **R-C-10 (EI-4, EI-5)** — `repo.transitionner` est réécrite depuis sa version de `a9e75ca` : le sac `autres` de la vague finale du lot A (conditions
+  brutes sur d'autres magasins, garde `TypeError` sur `store`) et le sac `conditions` du plan (patchs enveloppés : nettoyés, horodatés, `change` émis)
+  COEXISTENT (mutant MR-autres rouge) ; la phrase `conditions` va à la fin du commentaire de tête. T-C25 scénario 5 compte les appels de `repo.battre` et
+  lit `sync_state` `battement:<id>` (le repli que l'étape 5 de la tâche 1 prévoit) ; M91 inchangé.
+- **R-C-11 (EI-7 ; à relire par la revue de la tâche 4)** — `ligneIncertain` (`src/ui/table-matieres.js`) emploie `texteDesChamps`
+  (`src/ui/components.js`, m8 de la vague finale du lot A) au lieu d'une copie de la règle « Incertain » : l'import devient
+  `{ texteDesChamps, texteEchecAssistant }`, la constante `CONTROLES` disparaît ; comportement identique (comptes en tête, Cc/Cf retirés, « ; »,
+  `INCERTAIN_MAX`, « … ») ; M95b est redéfini sur cette forme (`M95b-rejeu` : les chaînes du modèle AVANT les comptes) et rougit. C'est le seul
+  changement de code du rejeu qui n'est pas imposé par une ancre disparue : la lentille « conformité » de la tâche 4 le relit.
+- **R-C-12 (EI-8, EI-9)** — Tests : le scénario « Corriger en vol » (m13, vague finale du lot A) ajouté à la fin du bloc « panneau d'index » de
+  `tests/import-cible.js` est PORTÉ dans le bloc (d3) réécrit par la tâche 4 (I-C9 : une assertion ne disparaît pas ; le refus par le toast injecté,
+  le bouton par son rôle). DOM du lot G : les quatre aides de `tests/table-matieres.js` visent `:scope > .thumbs > figure` (une page sans octets porte
+  un `figure.fichier-absent` DANS sa figure de séance). « Ordre des photos » (tâche 3) garde des `img` par `displayUrl`, comme
+  `src/ui/recipe-edit.js:90` : une page distante n'y dit pas son état L4 — dette nommée (aucun test commis ne l'exige), à reprendre si la preuve § 10
+  montre une page sans octets sur l'appareil qui lit.
+- **R-C-13 (EI-11 ; ratifié)** — Pins de version : DOUZE lignes dans SEPT fichiers à `a9e75ca` (dont trois posées par G dans `tests/sync-l4.js` :
+  l. 514, 516, 3506-3507) passent à `0.12.0` ; le seuil « `0.11.0-N` avec N ≥ 6 » de `tests/sync-l4.js:3507` (clôture des écrans du lot G) devient
+  « `0.12.0-N` avec N ≥ 1 » : une garde de clôture d'un lot clos ne survit pas à la mineure suivante, le seul invariant qui garde un sens est le pin de la
+  mineure. Les commentaires `tests/sync-l4.js:551` et `:562` (passe du lot G datée de SA version) restent. Coût si faux : nul pour C (la garde de G reste
+  vraie dans l'histoire de G ; ce qui sera servi porte la mineure suivante).
+- **R-C-14 (EI-10, EI-12, EI-14, EI-15)** — Placements : la clé « Une lecture = un appel à l’assistant, compté dans ton quota du jour. » existe dans
+  `src/i18n/en.js` depuis le lot B et n'est PAS dupliquée (T-C20 la lit comme les autres) ; dans `tests/tests.js`, l'import de C suit celui de
+  `runSyncL4Tests` (l. 29) et le bloc C suit celui du lot G (l. 218-220), juste avant « Thème » ; épingle l. 230 ; `tests/ajouter.js` : `MODULES_NEUFS`
+  l. 7 (commentaire l. 5-6), les listes multi-lignes de `CHAINES_NEUVES_AILLEURS` reçoivent les ajouts EN FIN sous un commentaire de ligne ;
+  `sessionView` (`src/ui/import.js`) est `async` depuis le lot G : la signature amendée garde le mot, la figure de séance garde la place de vignette
+  (`vignettes.places.get(p.id)`) ; `docs/architecture.md` : la section C suit celle du lot G (l. 1248), avant « Modèle de données » (l. 1294).
+
+**Écarts déclarés par le plan (E-1 à E-26, reportés tels quels du plan commis `f575d3d`, section « Écarts déclarés à la spec ») :**
+
+- **E-1** `positionsProposees(ordre, pagesParId, pageIdsSeance = [])` : troisième paramètre, le rang dans la séance qu'exige le tri de S-19.
+- **E-2** `fabriquerReferences(…, { pageIdsLigne })` : les `page_ids` de la ligne, pour la forme A (D-C11).
+- **E-3** une ligne du tableau porte `photo.plage` (recalcul de `horsPlage` après une édition) ; helper neuf `trierLignes(lignes, ordre)` (D-C18).
+- **E-4** domaine : `executerIndex` (l'exécutant du vol) ; la ligne neuve naît DANS le vol par `repo.ouvrirImport` du `repo` injecté (le mur
+  `absente: true` de `nouvelleLigneImport`, lot A — M107 l'observe là) : la spec (D-C16, T-C17 M107) faisait créer la ligne par le panneau,
+  `repo.saveBatch({ imports: [ligne] }, { conditions: { imports: [{ key: ligne.id, absente: true }] } })` puis `lancerVol` ; même mur, une définition
+  suffit, celle du lot A (ronde 1 de sa tâche 6), et un « Lire » refusé n'écrit rien (E-15).
+- **E-5** `indexEntriesPanel` reçoit `importId` (la ligne de `?import=`) ; `renderImport(params, query, ctx, deps = {})` transmet les injectables au panneau ;
+  `panel.etatPanneau()` pour les tests.
+- **E-6** `creerDepuisSaisie` exportée d'`import.js` (le chemin de la zone de texte, testable sans DOM en tâche 2) ; `parseIndexLines` rend aussi `raw`.
+- **E-7** `reordonnerVignettes` exportée d'`import.js` (le corps du rappel `apresOrdre`).
+- **E-8** `texteEchecIndex`, `ligneEtatLecture`, `ligneIncertain`, `texteQuota` vivent dans `src/ui/table-matieres.js` (leurs chaînes y sont couvertes par
+  `MODULES_NEUFS`) ; `creerReferences` porte les deux toasts et rend `{ issue }` (`sans_livre` est dit par `import.js` : sa phrase n'a pas d'entrée `en.js`).
+- **E-9** T-C12 : l'édition d'un titre AVANT « Appliquer » (M70) et les vignettes de la séance de bout en bout (M71, M72) sont éprouvées en tâche 4 (le
+  tableau n'existe qu'à partir d'elle) ; la tâche 3 éprouve l'absence de `refresh()` par l'événement `cuisineos:refresh` et `reordonnerVignettes` seule.
+- **E-10** M32 est tué par le test de source des appelants d'`assertVocabulaire` (une `availability` hors liste ne peut pas être forcée par l'entrée).
+- **E-11** le refus `image` du vol se dit par le toast `messageErreurImage` : l'assertion F-3 « page indécodable » de `tests/passerelle.js` est amendée (elle
+  attendait « … Code : indecodable » dans la ligne d'état du panneau).
+- **E-12** `n = 0` : le bouton dit « Créer 0 références », éteint (la spec § 10 pas 4 écrit « Créer 0 référence » ; aucune clé neuve).
+- **E-13** texte exact « Lue en {s} s · {n} photo(s) » (T-C10 écrivait « 5 photos ») ; le cas « 21 lignes » de T-C10 remplace deux titres de LECTURE_5 par
+  des titres de 201 points de code.
+- **E-14** le panneau sans séance n'a jamais de ligne ; les tests du panneau de `tests/passerelle.js` reçoivent une séance de la base jetable et trouvent le
+  bouton par `data-role="lire-index"` (son libellé devient « Relancer » après un échec).
+- **E-15 (alignement sur la ronde 1 de T6 : « un clic refusé n'écrit rien »)** `lire()` confie TOUT au vol avec l'option `lecture` : gardes (session,
+  réseau, octets, image) AVANT toute écriture, puis la ligne reprise par la transition de départ (`a_verifier | echec | a_lancer → en_cours` en UNE
+  transaction, `page_ids` remises) ou ouverte par `repo.ouvrirImport`. Au départ d'un index — ce chemin, « Relancer » de la section Imports
+  (`lancerExtraction`, sans `lecture`) ou une ligne neuve —, `enVol` efface la lecture remplacée : `resultat`, `reponse_brute`, `model`, `duree_ms`,
+  `finished_at` et `ordre_applique_at` (`erreur` l'est déjà par le lot A) : c'est le « patch complet » de la spec (F-18, T-C17 M78), posé à la
+  transition de départ au lieu d'un patch `a_lancer` (tâche 4 ; une recette garde l'`enVol` du lot A, M87). La spec C (§ 4.2, D-C16) décrivait
+  `a_verifier → a_lancer` (patch complet), `echec → a_lancer` ou un patch sur place de `page_ids`, puis `lancerVol` : les MÊMES champs sont effacés, une
+  transition plus tard (au départ du vol, jamais avant), et un « Lire » refusé n'écrit plus rien. Seules la question de la relecture et la garde réseau
+  qui la précède restent au panneau (M-C1). T-C10 et T-C17 (séquences de statuts, M78, M78b, M100, M107) sont écrits en conséquence ; l'état 4 reste
+  celui d'une ligne `a_lancer` venue d'ailleurs ou d'une course.
+- **E-16 (T4-R2 du lot A)** « Créer {n} références », « Appliquer cet ordre », la fermeture par la zone de texte et « Ignorer » ne valent que pour la
+  lecture que le panneau montre : `cleLecture` du lot A (une définition ; la spec n'en nommait aucune), comparée à la relecture ET dans la transaction
+  (patch-fonction qui lève `TransitionRefusee`) — une autre lecture (R2) n'est jamais close ni réordonnée (M-C2 à M-C4).
+- **E-17** `BORNES_INDEX` de T6 (ronde 1, `{ entrees: 500, incertains: 40, mentions: 80 }`) est renommée `BORNES_INDEX_A` en tâche 1 (le nom est la table de
+  la spec C) ; en tâche 4, `validerIndex` et `BORNES_INDEX_A`, que le retrait d'`extraireIndex` (R-C-6) laisse sans appelant, sont retirées avec lui — leur
+  test (ronde 1) est réécrit sur `revaliderResultatIndex` (400 entrées, 40 incertitudes) ; `VALIDEURS.index` lit la forme C sur les `page_ids` de la ligne
+  (`validerSelon` reçoit la ligne).
+- **E-18 (décision 4 de la ronde 1 de T6)** `creerDepuisSaisie` : une clôture refusée n'écrit RIEN et le dit (« Les références n’ont pas pu être créées.
+  Réessaie. »), au lieu des mêmes fiches par `saveBatch` (D-C19 rév. 6) ; le panneau se détache de la ligne et le second clic écrit sans elle.
+- **E-19** `creerReferences` : refusée dans la transaction sans avoir été enregistrée ailleurs → « Les références n’ont pas pu être créées. Réessaie. »
+  et `change` (l'écran relit) ; une autre lecture vue dès la relecture → `change` sans toast (l'écran montre R2) — dans le test de T6 réécrit, rien n'est
+  créé depuis R1 (T6 créait les fiches de la zone de texte sans clore R2).
+- **E-20** le bloc de T6 `panneau d’index : journal, verrou et ?import=` est réécrit sur la forme C (I-C9) : un scénario par séance (le panneau de C reprend
+  la ligne ouverte de sa séance même sans `?import=`, § 4.1), confirmation et toast injectés ; après une clôture refusée, le panneau relit (état 1) ; un
+  échec dit la phrase de l'index. Le test de la fiche du livre compte les « Saisir à la main » VISIBLES (le bouton du panneau, caché, n'en est pas un).
+- **E-21** `estEnLigne()` exportée de `src/ui/import-cible.js` : l'état réseau par défaut du panneau est celui du vol (`enLigneFlag`, événements
+  `online` / `offline`), pas `navigator.onLine`.
+- **E-22** D-C22 : `sessionView` remplace la présélection `ligneImport` de T6 par `ligneOuverteDeSeance` (même règle pour la ligne désignée) ; une intention
+  gagne sur la présélection (T6 faisait l'inverse, sans test) ; le test de T6 « ?import= ne rouvre pas » ignore d'abord, en tâche 3, les autres lectures
+  laissées ouvertes dans sa séance.
+- **E-23 (signatures alignées sur T6)** l'exécutant reçoit `{ provider, images, pageIds, signal, kind }` — la SORTE de la ligne, pas la `ligne`
+  (spec D-C21, T-C25) : c'est tout ce dont il a besoin, et une `lecture` n'a pas encore de ligne quand passent les gardes ; T-C25 affirme `recu.kind`.
+  `lancerExtraction(importId, options)` = `lancerVol(importId, executerExtraction, options)`, qui choisit par sorte (recette → `executerRecette` ; index →
+  `executerIndexA` en tâche 1, `executerIndex` dès la tâche 4) : la spec écrivait `lancerVol` + `executerRecette`, mais T6 fait voler aussi l'index par
+  `lancerExtraction` (« Relancer » de la section Imports). `lancerVol(…, { …, lecture })` accepte l'option `lecture` du lot A et rend alors `importId`
+  (E-15). `panneauLecture` reçoit en plus `toast`, `editionId`, `surCree`, `surChangement` et `surSansLivre` (création, conflit et livre manquant
+  remontent à `indexEntriesPanel`, qui reste la porte) ; `creerReferences` reçoit en plus `maintenant` (`finished_at` injectable).
+- **E-24 (pré-vol de la rév. 2)** « Appliquer cet ordre » écrit `page_ids` = les N photos dans l'ordre choisi (`ordre` : la spec § 4.3 à la lettre) ;
+  positions et séance sont calculées sur les pages RELUES (`prop`). La rév. 1 écrivait `prop.ordre` : une photo retirée de la base entre le rendu et
+  « Appliquer » sortait de `page_ids`, et `revaliderResultatIndex` (qui exige chaque `page_id` dans `page_ids`) rendait la lecture payée illisible (M-C7).
+- **E-25 (pré-vol de la rév. 2)** `pagesALire` dédoublonne aussi le repli sur `ligne.page_ids` (une donnée de synchro, I-C2 : un doublon enverrait deux
+  fois la même image, puis la relecture rendrait `null`) ; les cochées l'étaient déjà (M-C8).
+- **E-26 (rejeu sur `a9e75ca`, voie (b))** les écarts d'intention entre ce plan et le code commis des lots A (vague finale), B et G, tranchés en faveur du
+  code commis, sont listés dans la sous-section finale « Rejeu sur 1e4d68d (voie (b)) » ; ils vont aussi en spec § 12 à la clôture.
+
+**Écarts déclarés par la vague finale (VF-C1 à VF-C8, recopiés tels quels du registre `cloture.md` ; ratifiés par R-C-30 ; VF-C3 amende E-23, VF-C6 précise E-15) :**
+
+- **VF-C1 (constat 1)** `ecouterVol(fn)` exportée de `src/ui/import-cible.js` (appelée à chaque `notifier()`) ; le panneau d'index s'y abonne tant qu'il
+  est monté (désabonné au tour suivant s'il ne l'a jamais été, ou au premier avis qui le trouve détaché) et se redessine à la pose et à la fin d'un vol de
+  CE document : une instance recréée pendant le vol de sa ligne, ou ouverte pendant un vol lancé hors d'elle, n'est plus figée sur « Lecture des pages… ».
+  `annuler()` n'annule que le vol de ce panneau ou de SA ligne, et relit toujours (jamais un bouton sans effet). Les vols web ne passent pas par ce notifier.
+- **VF-C2 (constats 2 et 4)** `uneLigne` (`src/domain/llm.js`) : titre, section et incertitude d'une table des matières sont ramenés à UNE ligne (toute fin
+  de ligne, tabulation ou suite d'espaces = une espace, la règle de `bornerAuMot`) AVANT les contrôles de longueur et d'adresse ; une adresse coupée par une
+  fin de ligne est cherchée aussi sur la forme recollée (écartée et comptée, section nulle, incertitude écartée). Même repli dans `fabriquerReferences`
+  (titre, section, `raw_entry`), `sectionLisible` et `creerDepuisSaisie` ; la clé d'une ligne du tableau (`recalculer`) et le filtre « sans titre » de
+  `planCreation` portent sur la forme ÉCRITE (`titreEcrit`). Spec § 3.4 / § 3.5 amendées en conséquence.
+- **VF-C3 (constat 3)** section « Imports » : un INDEX en échec offre « Reprendre » (le panneau de sa séance par `?import=`, ses pages cochées ; « Relancer »
+  y est `lire()`) et « Ignorer », jamais plus « Relancer » depuis la section (D-C16, § 10 pas 6 tenus) ; sa phrase est `texteEchecIndex`. E-23 amendé : la
+  section ne fait plus voler un index par `lancerExtraction` (l'exécutant index de `executerExtraction` reste, joignable par un appel direct).
+- **VF-C4 (constat 7)** `enDouble` = clé déjà PRISE plus haut par une ligne créable que la personne n'a pas décochée (spec § 3.5 : « clé déjà vue plus haut ») :
+  décocher une occurrence libère la suivante, la personne choisit laquelle garder.
+- **VF-C5 (constat 8)** `creerDepuisSaisie` ne ferme la ligne montrée que si au moins une fiche est créée (la garde de `creerReferences`).
+- **VF-C6 (constat 12)** `partirLecture` : une reprise refusée du panneau (`cle` posée, même nulle) relit la ligne ; encore ouverte (en_cours ailleurs, ou
+  autre) → refus `transition`, jamais une ligne neuve ni un second appel ; terminée ou absente → la ligne neuve d'avant.
+- **VF-C7 (constat 13, défense en profondeur)** `pagesALire` (repli sur `ligne.page_ids`) ne garde que les pages de la séance ; « Appliquer cet ordre » ne
+  pose une position que sur une page de la séance relue ; `creerReferences` ne lie ni ne réécrit qu'une page de la séance (relue) de la ligne. **Écart à la
+  lettre du constat** : la transaction d'« Appliquer » n'exige PAS `ordre ⊆ séance` — ce serait refuser le cas ratifié par E-24 / M-C7 (une photo retirée de la
+  séance puis « Appliquer » de nouveau, test « T-C12 (ronde 1) … photo retirée de la séance après un Appliquer, puis reprise ») ; le filtre des positions
+  suffit à protéger la numérotation de l'autre séance.
+- **VF-C8 (constat 14)** les vignettes d'« Ordre des photos » créent leurs URL par `urlDeBlob` (révoquées au changement de route).
+
+**Rulings de construction (six tâches en une ronde chacune, revue finale de branche à trois lentilles, vague finale et sa re-revue, ronde de clôture) :**
+
+- **R-C-15 (ratification en bloc)** — Les écarts déclarés par le plan E-1 à E-26 (ci-dessus, recopiés du plan commis `f575d3d`), les écarts d'intention
+  du rejeu EI-1 à EI-15 tranchés par R-C-8 à R-C-14, la relecture de T1 (`t1-relecture.md` : aucun écart) et les décisions hors brief sans effet de
+  comportement des six tâches (libellés de commentaires, places d'imports, « six fabricants », treize lignes de pins pour douze assertions, ports des
+  copies, M43 interprété et joué à part, `/verify` adapté à un projet sans `npm`) sont ratifiés, avec cinq mises à jour que la construction impose :
+  (a) E-8 : `texteEchecIndex` délègue à `texteEchec` sauf pour `coupe` et `vide` (`src/ui/table-matieres.js`), et `creerReferences` rend aussi
+  `{ issue: 'vide' }` ; (b) R-C-11 : l'import est `{ texteDesChamps }` seul (`texteEchecAssistant` n'est plus importé) ; (c) E-15 et E-23 : le vol porte en
+  plus `signal` et `lecture.cle` (R-C-20) ; (d) lettre de la spec : § 4.5 écrit « ré-exporte les deux motifs » (c'est quatre noms, EI-2, R-C-8) et
+  `lancerVol(importId, executer, deps)` (c'est `options`, `src/ui/import-cible.js`) — corrigé en rév. 7 ; (e) § 13 réécrit. Coût si faux : § 12 ment sur
+  le code commis.
+- **R-C-16 (défense en profondeur, tâches 1 et 4)** — Ratifiés, au-delà de la lettre de la spec : une chaîne `uncertain` de la racine porteuse d'une
+  adresse est écartée SANS être comptée (§ 3.4 ne la prévoyait pas ; elle irait en tête de « Incertain : … ») ; le fabricant passe titre et section par
+  `nettoyer` (Cc, Cf, Cs) avant `borner`, et une `printed_page` hors 1..9 999 ou non entière devient nulle ; `imagesDe` parcourt un ensemble (une page
+  en double ne part qu'une fois) ; une condition `conditions[store]` sur le magasin même de la transition lève `TypeError`, comme `autres` ; la veille
+  VF-15 tourne dans le panneau (`veilleMs`) ; une `duree_ms` au-delà de 600 000 ms n'est pas dite (« {n} photo(s) ») ; « Lire » ne fait rien pendant
+  « Créer » ou « Appliquer » (`racine.occupe()`) ; un plan vide ne ferme rien (`vide`) ; la question de la relecture exige une session ; T-C13 (U6)
+  saisit « 1e3 » au lieu de « 12a » (Chrome vide « 12a » avant tout gestionnaire). Coût si faux : nul — aucun chemin légitime n'est refusé.
+- **R-C-17 (écriture par condition de fusion, tâches 2 et 3)** — Les pages (`source_pages`) ne s'écrivent plus par des `puts` de fiches entières
+  précalculées hors transaction (spec § 4.3, § 4.4, fenêtre de § 11) mais par une condition de fusion `{ key, fusion }` sur la fiche RELUE dans la
+  transaction (`creerReferences`, `creerDepuisSaisie`, « Appliquer cet ordre ») : une page modifiée par un autre onglet entre la relecture et l'écriture
+  n'est plus écrasée, une page retirée ne reçoit pas de position, `printed_page` n'est jamais écrit (I-C3, D-C14). Le repo enveloppe toute fusion
+  (`propre`, `updated_at`) et émet `change` — un appelant qui voudrait garder l'`updated_at` d'une fusion `files` ne passe pas par le repo
+  (`docs/architecture.md`). Ratifiés avec lui : une page citée retirée entre la relecture et la transaction → `TransitionRefusee`, « Les références
+  n’ont pas pu être créées. Réessaie. », rien d'écrit (I-C11) ; zone de texte : une page cochée dont `kind` est posé n'est pas réécrite, le titre est
+  nettoyé avant d'être borné, un titre vide après nettoyage est ignoré sans compte ; `pageIndexee` et `BORNE_RAW_ENTRY` exportés ; « Appliquer » : ordre
+  figé au clic, `sesPhotos` exige une permutation sans doublon des `page_id` revalidés, le patch exige `scan_session_id === session.id`. La fenêtre des
+  « pages précalculées » de § 11 n'existe plus (texte amendé en rév. 7). Coût si faux : un refus (`surChangement`) là où un appelant mal câblé aurait
+  écrit — jamais une donnée écrasée.
+- **R-C-18 (projection de la séance après « Appliquer », T3-R1 c23)** — Quand une photo retirée de la base garde son créneau dans la séance, l'écran
+  redit « Ordre proposé… — vérifie. » et « Appliquer » reste visible ; chaque « Appliquer » réécrit la même chose, sans perte et sans appel. Limite
+  nommée en § 11 pour C ; prendre `ligne.page_ids` comme référence quand `ordre_applique_at` est posé est une dette § 13 (cas rare : synchronisation ou
+  autre onglet). Coût si faux : dans ce cas rare, « Ordre enregistré. » ne s'affiche jamais.
+- **R-C-19 (témoin I30 réécrit, T4)** — Le témoin I30 de T3-R1 (`tests/table-matieres.js`, hors liste des lignes amendables du brief) rougissait sous
+  le panneau de T4 (D-C16 : la ligne est lue par `repo.all` et `ligneOuverteDeSeance`) ; il est réécrit sur l'importId effectivement repris, suffixé
+  « (forme C, lot C) », son faux vert fermé en T4-R1 (M1, N60 et `I30-deps-perdus` / `I30-get-designee` rouges). Ratifié : l'assertion est plus forte
+  et ferme les renvois c21 et c25 de T3-R1 ; la re-revue de T4 (« A_CORRIGER, restants 0, nouveaux 0 ») n'attendait que cette ratification. Coût si
+  faux : nul.
+- **R-C-20 (« Annuler » et interfaces du vol, T4-R1)** — « Annuler » est rendu dès la tape et agit pendant les gardes (un signal levé avant le départ
+  rend un refus `annule`, rien n'est parti ni écrit : 0 POST), au-delà de la lettre du § 4.2 (« rendu si `volEnCours()?.importId === ligne.id` ») et
+  conforme à sa promesse (« Annuler arrête l'appel ») ; `lancerVol(…, { signal })`, `lecture.cle` (la reprise d'une ligne `a_verifier` exige, dans la
+  transaction de départ, la clé de la lecture montrée) et `partirLecture` (une relecture confirmée puis refusée ne part jamais sur une ligne neuve)
+  sont ratifiés ; les appelants des lots A et B ne les passent pas et gardent leur comportement. La vague (VF-C6) a fermé le mineur voisin : une reprise refusée avec `cle` posée (même nulle) relit la ligne ; encore ouverte → refus `transition`, jamais une ligne neuve ni un second appel ; terminée ou absente → la ligne neuve d'avant. Coût si faux : nul.
+- **R-C-21 (`sectionLisible` et sauts de ligne, T5-R1 et revue finale)** — `sectionLisible` (`src/domain/llm.js` : nettoyée, bornée à 200, une section
+  blanche ne donne ni puce ni « Section : ») est ratifiée. Le COLLAGE des sauts de ligne accepté par la décision 3 de T5-R1 (« Soupes » + saut +
+  « et potages » → « Soupeset potages ») est REFUSÉ : c'est la grave de la revue finale (correctness et sécurité, une seule cause : `INVISIBLES` exclut
+  le saut de ligne, le test d'adresse porte sur un texte encore sur plusieurs lignes, `borner` recolle) — un titre lu sur deux lignes faisait un
+  doublon à la relecture (D-C5) et une adresse coupée par un saut de ligne contournait I-C2. Corrigé par la vague (VF-C2) : `uneLigne` (`src/domain/llm.js`) ramène titre, section et incertitudes à UNE ligne (toute fin de ligne, tabulation ou suite d'espaces = une espace) AVANT les contrôles de longueur et d'adresse ; une adresse coupée par une fin de ligne est cherchée aussi sur la forme recollée (écartée et comptée) ; même repli dans `fabriquerReferences` (titre, section, `raw_entry`), `sectionLisible` et `creerDepuisSaisie` ; la clé d'une ligne du tableau et le filtre « sans titre » de `planCreation` portent sur la forme ÉCRITE (`titreEcrit`) ; mutants VF2 à VF2i rouges (T-C27, T-C8, T-C16). Spec § 3.4 et § 3.5 amendées en rév. 7. La composition « section lisible » en deux
+  copies (fabricant, `sectionLisible`) est une dette § 13. Coût si faux : une fiche aux mots collés ou porteuse d'une adresse.
+- **R-C-22 (documents)** — `docs/architecture.md`, section C : `lancerVol(importId, executer, options)` et la phrase sur `sectionLisible` sont justes contre
+  le code (le brief de T6 disait « texte exact ») — ratifiés ; les mentions `extraireIndex` et `validerIndex` de la section du lot A (retirés par
+  T4, R-C-6) sont corrigées au commit de clôture ; la spec rév. 7 aligne § 4.5 (`options` ; quatre noms ré-exportés) et § 11. Coût si faux : nul.
+- **R-C-23 (R-C-11 sur pièces)** — La relecture « conformité » demandée à la revue de T4 n'a pas laissé de trace écrite ; sur pièces à `401e96e` :
+  `ligneIncertain` emploie `texteDesChamps`, M95b-rejeu est rouge (T4 et table de T6), T-C10 de T6-R1 vérifie « Incertain : » rendu en texte.
+  Ratifié. Coût si faux : nul.
+- **R-C-24 (ronde de clôture)** — Les constats renvoyés de tâche en tâche sans preneur et les trous de test nommés sont pris par une ronde de clôture
+  (agent, tests rouges d'abord, mutants sur copie, re-revue ciblée) : un échec d'écriture d'« Appliquer cet ordre » qui n'est pas un refus est dit
+  (« L’ordre n’a pas pu être enregistré. Réessaie. », clé `en.js`, T-C20) au lieu d'être seulement journalisé ; une lecture A vide est épinglée
+  (R-C-25) ; `creerDepuisSaisie` relit les références en base (comme `creerReferences`) au lieu de l'instantané `ctx.recipes` ; `titreDe` nettoie
+  (Cc, Cf, Cs) avant `trim` pour que `sansTitre` compte juste ; `tests/lecture-web.js` (motif `/Anthropic|Supabase/` insensible à la casse) et
+  `tests/import-cible.js` (`sw.includes` sur la ligne `VERSION` seule) reçoivent le même durcissement que X8 et X4 ; I37 et N33 sont rejoués et
+  classés ; N05, N12, N13, N35 et N54 (T4-R1 c24) reçoivent une assertion chacun. Faite : `e305355` (agent Opus, DONE_WITH_CONCERNS ; re-revue ciblée PROPRE, aucun constat neuf) : constats 1, 3 et 5 corrigés (« L’ordre n’a pas pu être enregistré. Réessaie. », clé `en.js`, lue par T-C20, un refus garde `surChangement` sans toast ; `creerDepuisSaisie` relit par `repo.byIndex` ; `FIN_DE_LIGNE` : CRLF, LF, CR, VT, FF, NEL, U+2028 et U+2029 coupent la zone de texte et son aperçu — le CR seul au-delà du brief, même classe), 2 et 4 épinglés (R-C-25 ; `titreEcrit` passait déjà par `uneLigne` puis `nettoyer`, écrit en octets par échappement à accolades), N05 et N33 déjà tués par la vague et U6 (libellés complétés), N13, N35 et N54 épinglés, I37 et `VF1b-annuler-return` ÉQUIVALENTS (I37 : `importId` n’est lu que si `etat.ligne` est nul et une ligne close ne se rouvre jamais ; VF1b : l’abonnement `ecouterVol`), T-C27 réécrite parce que NEL coupe désormais (l’assertion porte sur la tabulation et les espaces repliées dans une ligne tapée, même intention, VF2g rouge) — ratifiée ; rouge lu 4738/4743, vert 4743/4743, épingle 4742, `sw.js cuisine-os-v0.12.0-12`, Node 174/174, `--check` 0, invisibles 0, mutants sur copies 14 rouges sur 16 (les deux autres équivalents) ; N13 ne rougit que par attente dépassée (faux rouge possible sous charge, jamais un faux vert, R-B-15). Coût si faux : nul — rien de ceci ne change un
+  chemin nominal.
+- **R-C-25 (D-C11 précisé, T1-R1 c16)** — Une lecture du lot A VIDE (`{ entries: [], uncertain }`, que `validerIndex` admettait) n'est pas « acceptée »
+  par `revaliderResultatIndex` : `validerLectureIndex` lève `vide`, attrapé en `null`, et la ligne `a_verifier` passe `echec(illisible)` au montage
+  (§ 4.2) — il n'y a rien à créer, et « Relancer » reste offert. Épinglée par la ronde de clôture. Coût si faux : nul.
+- **R-C-26 (dettes nommées, § 13)** — Deux squelettes d'extraction (`extraireRecette`, `extraireTableMatieres`) et `objetNu` en double ; la clôture liée
+  à la lecture en quatre copies, le toast de création en deux, `horloge` en double, imports répétés d'`import.js` ; `creerReferences` ne recoupe pas
+  les lignes du tableau avec le résultat revalidé (seul le mur du fabricant borne et nettoie) ; `transitionner` émet `change` pour une condition sans
+  patch (les URL `blob:` d'« Ordre des photos », elles, sont révoquées au changement de route depuis la vague, VF-C8) ; `tests/sync.js` lit le tableau
+  `SHELL` commentaires compris (une entrée commentée dans le tableau n'y rougit pas ; lot L3, hors lot) ; hors lot :
+  `buildDocs` lève sur un `original_title`, des `tags` ou des `cuisines` hostiles, et les chaînes antérieures du panneau n'ont pas d'entrée `en.js`
+  (§ 4.5). Coût : une divergence future, jamais une donnée.
+- **R-C-27 (recherche, § 11)** — Deux limites nommées : un mot de section qui est aussi un mot de type devient un filtre de type (une recette
+  `available` sans type est alors exclue) ; la section dans les `titleTokens` élargit la dette C7 (`refTerms` reprend les mots d'une exclusion : « sans
+  X » remonte une section « X »). Coût : nul.
+- **R-C-28 (dette L4 d'« Ordre des photos », R-C-12)** — Les vignettes sont des `img` par `displayUrl` : une page distante n'y dit pas son état L4 ;
+  nommée § 11 et § 13, reprise si la preuve § 10 montre une page sans octets sur l'appareil qui lit.
+- **R-C-29 (mutants)** — Ratifiés comme ÉQUIVALENTS : `ordre-fige-apres-les-relectures` (↑/↓ éteints pendant l'écriture, garde affirmée),
+  `!applique.consommee` (D-C22 : `appliquerIntention` coche toutes les pages résolues), C3 (la relecture suivante refuse par la clé ou le statut),
+  `m2-avant-retire`, M15-position et M15-position-b (le seul appelant de `resultatIndex` est `executerIndex`, après `validerLectureIndex` ; tués au
+  titre du contrat pur par T-C2 durci). Les définitions adaptées de `mutants.md` (M33, M35, M39, M42, M46, M47, M50, M63, M69, M70, M90, M93, M95 ;
+  M43 interprété) sont ratifiées : la table du § 7 décrit des `puts`, le code écrit par fusion (R-C-17). Les rouges par « attente dépassée (3 s) »
+  (M39, M42, M47, M54, M77, M88, M90, M91, M93, M98, M105, M107, M-C4) ne sont pas des survivants : un faux rouge possible sous charge (R-B-15), jamais
+  un faux vert. I37 et N33 sont rejoués par la ronde de clôture (R-C-24). Lentille faux-vert de la revue finale (rejouée après la coupure réseau) : 2 Important (réarmement périodique de la veille VF-15 ; câblage `VALIDEURS.index` sur les `page_ids` de la LIGNE) et 10 Minor, tous épinglés ou traités par la vague (T-C17 cas (d) et (e), T-C11, T-C25, T-C14, T-C16, T-C8, T-C13 ; M-C1, M-C5 et M-C6 désormais nommés par leur libellé). Coût si faux : un faux vert nommé.
+- **R-C-30 (revue finale de branche)** — Trois graves : le panneau d'index recréé pendant un vol de ce document reste figé en « Lecture des pages… »
+  et son « Annuler » est inerte (`annuler()` sans redessin, `veiller()` non armée pour un vol tenu ici, aucun abonnement à `notifier()` ; § 10 pas 7) ;
+  le saut de ligne (R-C-21) ; dans la section Imports, une lecture d'index en `echec` n'offre que « Relancer » et « Ignorer » et dit la phrase du lot A
+  (`cibleReprise`, `phraseEchec` d'`add.js` ; contre D-C1, D-C16 et § 10 pas 6, le constat 15 de T4-R1 laissé ouvert) — ruling : « Reprendre » offert
+  et la phrase de l'index dite (option (a)), jamais une réécriture du § 10. Vague finale `0b9ba10` (agent Opus, DONE_WITH_CONCERNS) : 24 constats des trois lentilles (correctness 7, sécurité 5, faux-vert 12), 6 Important corrigés ou épinglés, 18 Minor traités (en code 7, 8, 12, 13, 14 ; faux-verts 15 à 22 épinglés ; 23 et 24 libellés et filets X4/X8 ; 9, 10 et 11 documentés : R-C-32, R-C-33, R-C-27), aucun refusé ; rouge lu 4706/4725, vert 4731/4731, épingle 4730, `sw.js cuisine-os-v0.12.0-11`, Node 174/174, `--check` 0, invisibles 0 ; mutants sur copies 37 rouges sur 39 (VF1b-annuler-return équivalent par l'abonnement `ecouterVol` ; X4 trop faible au premier passage, lecteurs de `SHELL` durcis, trois variantes rouges) ; re-revue ciblée PROPRE (un Minor neuf : R-C-36). Ses écarts VF-C1 à VF-C8 (registre `cloture.md`, recopiés ci-dessous) sont ratifiés, dont VF-C3 qui amende E-23 (la section Imports ne fait plus voler un index par `lancerExtraction` : « Reprendre » mène au panneau de sa séance, « Relancer » y est `lire()`) et VF-C7 (R-C-37). Coût si faux : une preuve § 10 irréalisable aux pas 6 et 7.
+- **R-C-31 (D-C19 : fermer une lecture payée sur zéro référence)** — Une lecture payée ne se ferme que par une création effective, par « Ignorer », ou — au tableau — quand tout ce qui était coché est devenu « déjà repérée » entre le rendu et le clic (T4-R1 c8 : consommée). La vague l'a appliqué à la zone de texte (VF-C5 : `creerDepuisSaisie` ne ferme la ligne que si au moins une fiche est créée, T-C16) ; un plan vide est refusé (`vide`, rien d'écrit) ; `enDouble` ne compte plus une occurrence décochée (VF-C4 : clé PRISE plus haut par une ligne créable non décochée, décocher libère la suivante, spec § 3.5 amendée). Coût si faux :
+  une lecture payée fermée sans fiche.
+- **R-C-32 (compatibilité vers l'avant, geste de Neegan)** — Un client resté sur les lots A, B ou G lit les index par `validerIndex` (forme `{ entries }`) :
+  une ligne de forme C reçue par la synchronisation ou une archive y est jugée illisible, `echec(illisible)` avec `resultat: null` est écrit, et cet
+  effacement se synchronise — la lecture payée est perdue partout. Aucun garde-fou n'est possible dans l'ancien code : **tous les appareils de Neegan
+  servent `0.12.0` (recharger la PWA, Réglages → version) AVANT la première lecture d'index** ; nommé § 11, § 13, CLAUDE.md et STATE.md. Coût si faux :
+  une lecture (un appel du quota) perdue, refaite.
+- **R-C-33 (ordre des gestes, § 10)** — « Preuve réelle sur le site public AVANT la fusion » est irréalisable : Pages ne sert que `main`, et le serveur
+  local du worktree n'est pas une origine admise de la fonction `assistant`. La preuve § 10 se fait APRÈS la fusion `--ff-only` de `table-des-matieres`
+  et son `push` (derrière A, B et G), AVANT la fusion du lot D ; ce qu'elle apprend (nombre de photos sous 8 000 jetons et 120 s, `MAX_TOKENS_INDEX`,
+  consigne, aide du panneau) s'amende alors par un commit borné sur `main`, reculable par `revert`. § 10 pas 5 et § 13 amendés en rév. 7 ; les chiffres
+  périmés de `cloture.md` (4615/4615, `-5`) sont corrigés dans le registre. Coût si faux : un commit de plus sur `main`.
+- **R-C-34 (registre et résultat du workflow)** — `progress.md` reçoit la ligne manquante de la ronde 1 de T5 (`ed90e2c` → `4090ebe`, rouge 4690/4694,
+  vert 4694/4694, épingle 4693, `sw.js -10`, mutants 9/9 puis 19/19 ; la ligne T5 sous-comptait les survivants : 9 sur 15, pas 3 sur 11) ; dans le
+  résultat JSON du workflow, `bilan[].statut` est celui de l'implémenteur initial (T1 « DONE » pour `f226931`, livré DONE_WITH_CONCERNS à `569f01e`)
+  et `mineurs_non_traites` liste TOUS les mineurs de chaque revue (17, 17, 17, 13, 13, 6), dont les rondes ont traité la plupart (14, 13, 13, 11, 12, 5) :
+  ni l'un ni l'autre ne se reporte tel quel ; « trou hérité de T6 » (T3) se lit « ouvert par l'amendement I-C9 de T3 » ; le départ de T6 (`4090ebe`)
+  n'a pas été remesuré avant la pose (recoupé par le témoin des copies, 4700 = 4694 + 6). Chaîne vérifiée par `git show` : `sw.js` de `-1` à `-10` sans
+  trou (T6 et sa ronde ne touchent ni `src/` ni `sw.js`), épingle 4701 = 4402 + 299, douze commits linéaires de `f575d3d` à `401e96e`.
+- **R-C-35 (garde-fous)** — Deux refus du hook deny, tous deux en T1-R1 (un effacement récursif d'un dossier du scratchpad ; puis un ajout au registre
+  dont le texte citait cette commande) : respectés, rien d'effacé, l'ajout refait par un Edit ciblé reformulé ; aucun autre refus dans onze rapports.
+  Incidents voisins consignés : des échappements décodés par le JSON d'un outil (U+200B, U+202E en T2-R1 ; fixtures de T5-R1), corrigés par Python et
+  relus en octets ; deux scripts arrêtés par leurs propres assertions, revérifiés ; T1 a lu en lecture seule le rapport du Départ hors du worktree.
+- **R-C-36 (faux positif du contrôle d'adresse recollée, re-revue de la vague)** — Une entrée imprimée sur deux lignes dont la première finit par un
+  point et la seconde commence par un mot seul de la liste fermée des hôtes (ca, co, me, fr, us, be, ch, tv, blog, shop, site, info…) est écartée et
+  comptée comme adresse (« Pâtes au pesto. » puis « Ca change » → hôte « pesto.ca » sur la forme recollée) : le même faux positif que « Le sel.Ca y est »
+  du lot web, accepté et nommé § 11 ; visible (« Incertain : 1 entrée écartée (adresse) »), l'entrée se tape à la main. Remède possible après la mesure
+  réelle : n'essayer la forme recollée que sur une coupure au milieu d'un mot (sans point final avant la fin de ligne). Coût si faux : une entrée rare
+  retapée.
+- **R-C-37 (VF-C7, écart à la lettre du constat 13)** — « Appliquer cet ordre » ne pose une position que sur une page de la séance RELUE, `pagesALire`
+  et `creerReferences` ne gardent que les pages de la séance, mais la transaction n'exige PAS `ordre ⊆ séance` : l'exiger refuserait le cas ratifié par
+  E-24 / M-C7 (une photo retirée de la séance puis « Appliquer » de nouveau) ; le filtre des positions protège déjà la numérotation d'une autre séance.
+  Ratifié. Coût si faux : nul.
+- **R-C-38 (restes de la vague)** — `parseIndexLines` ne coupait qu'aux LF / CRLF (une ligne collée portant U+2028 ou U+2029 n'était pas coupée et son
+  numéro de page pas lu) : pris par la ronde de clôture (R-C-24) ; `annuler()` sans vol relit toujours (VF-C1), son mutant `VF1b-annuler-return` est
+  équivalent tant que l'abonnement `ecouterVol` tient (défense en profondeur, reconfirmé par la ronde de clôture) ; les tests sensibles au temps de la
+  vague (fenêtre de 200 ms du démontage de la veille, décompte des URL `blob:`) peuvent donner un faux rouge sous charge extrême, jamais un faux vert
+  (R-B-15).
+
+**Mesures finales de la construction.** Tête de code `e305355`, `APP_VERSION 0.12.0`, `sw.js cuisine-os-v0.12.0-12`, épingle 4742 (`tests/tests.js`), suite 4743/4743 (plus le 404 de
+`/favicon.ico`), Node 174/174, `--check` 0, invisibles 0 (Python), aucune clé, aucune migration (`DB_VERSION` 4, `TABLES` intact), serveur `assistant`
+intact ; registre `.superpowers/sdd/2026-10-19-table-des-matieres/` (briefs, rapports de tâche et de ronde, `mutants.md`, `final-fix-report.md`,
+`verify-*.txt` ; copie dans `~/projects/mistu/.superpowers/sdd/`).
+
 ## 13. Ce qui reste ouvert
 
-**Rien à trancher par Neegan.** Les cinq points de la rév. 2 sont tranchés (R-C-1 à R-C-5), les deux constats Important appliqués (N-1, N-2),
+**Après la construction (rév. 7, 21 octobre 2026).** Les rulings de construction R-C-15 à R-C-38 (§ 12.3) tranchent tout ce que les tâches, les
+rondes, la revue finale et sa vague ont remonté ; restent à Neegan, dans l'ordre : (a) **tous les appareils sur `0.12.0` avant la première lecture
+d'index** (R-C-32 : un client resté sur A, B ou G efface une lecture de forme C reçue par la synchronisation, et l'effacement se propage) ;
+(b) la **preuve § 10 APRÈS la fusion de C et son `push`, AVANT la fusion de D** (R-C-33) : durée et coupe, jetons (`assistant_usage_jour` avant et
+après), fidélité par photo et ordre proposé, « Appliquer » après une correction de titre, « Créer {n} », fiche livre et recherche par section, fusion
+par relecture d'une photo, « Reprendre » d'une ligne `a_verifier` sans appel et d'une ligne `echec` (pas 6), « Annuler » → 499 (pas 7), le nombre de
+photos qui tient sous 8 000 jetons et 120 s (consigné en § 12 et dans l'aide du panneau par un commit borné sur `main` ; au besoin `MAX_TOKENS_INDEX`
+et la consigne) ; (c) Safari et iPhone jamais mesurés (`datalist`, `confirmDialog`, décodage en série de N photos d'iPhone, § 11) : à relever pendant
+la preuve ; (d) la dette L4 d'« Ordre des photos » (R-C-28), reprise seulement si la preuve montre une page sans octets sur l'appareil qui lit ;
+(e) la phrase « Les {n} photos de la lecture seront relues. » si l'usage montre que « tout décocher puis Lire » surprend (une clé, renversable à
+chaud) ; (f) le registre `.superpowers/sdd/2026-10-19-table-des-matieres/` copié dans `~/projects/mistu/.superpowers/sdd/` (`diff -rq` muet) AVANT
+tout `git worktree remove`, « clean » après. Dettes de code nommées, sans décision à prendre : R-C-18 (projection de la séance quand une photo retirée
+garde son créneau), R-C-26 (doublons de squelette, factorisation, recoupement défense en profondeur, `tests/sync.js` qui lit `SHELL` commentaires compris, `buildDocs`
+hostile et chaînes antérieures du panneau, hors lot), R-C-36 (faux positif d'adresse sur une entrée coupée après un point), R-C-27 (recherche : mot de section = mot de type, dette C7 élargie).
+
+**Avant la construction (rév. 6) : rien à trancher par Neegan.** Les cinq points de la rév. 2 sont tranchés (R-C-1 à R-C-5), les deux constats Important appliqués (N-1, N-2),
 leurs trois propagations résiduelles faites en rév. 4 (P1 à P3, § 12.2), les six points Q1 à Q6 de la rév. 5 appliqués (§ 12.2 ; Q4 avec sa
 portée exacte : `absente: true` empêche l’écrasement d’une ligne, pas la seconde ligne d’un second onglet — fenêtre déjà acceptée par R-C-5,
 § 11), le ruling R-C-7 et les points V1 à V3 de la rév. 6 appliqués (§ 12.2 ; V2 avec sa primitive exacte pour T-C12 : `repo.transitionner`,
