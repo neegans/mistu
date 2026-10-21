@@ -15,6 +15,7 @@ import { pageHeader, carte, libelleLivre, field, select } from './components.js'
 import { startScanSession } from './import.js';
 import { DOCUMENT_ID, lancerExtraction, annulerVol, phraseEchec, texteRefus, cleLecture } from './import-cible.js';
 import { lancerLecture, annulerLecture, texteEchecLecture } from './import-web.js';
+import { texteEchecIndex } from './table-matieres.js';
 
 export const GRILLE_ACTIONS = ['ajouterLivre', 'pages', 'saisir', 'signet', 'creerIA', 'congelateur'];
 export const ACCEPT_PHOTOS = 'image/*';
@@ -99,6 +100,7 @@ function etatLigne(l, brute) {
   if (l.etat === 'a_lancer') return l.pages <= 1 ? t('{n} photo ajoutée', { n: l.pages }) : t('{n} photos ajoutées', { n: l.pages });
   if (l.etat === 'en_cours') return l.ailleurs ? t('En cours sur un autre écran') : t('Lecture des pages par l’assistant…');
   if (l.etat === 'a_verifier') return t('Lecture reçue le {d}', { d: formatDate(dateReception(brute), { withTime: true }) }); // vague finale (m7) : jamais updated_at
+  if (l.etat === 'echec' && l.kind === 'index') { const { texte, code } = texteEchecIndex(brute?.erreur ?? { raison: l.raison }); return code ? `${texte} ${code}` : texte; } // lot C (D-C1, vague finale, constat 3) : la phrase du panneau d'index
   if (l.etat === 'echec') return phraseEchec(brute?.erreur ?? { raison: l.raison });
   return null;
 }

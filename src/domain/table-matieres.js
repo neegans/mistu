@@ -3,7 +3,7 @@
 // photo ↔ page ENVOYÉE, la revalidation d'un résultat revenu du journal (synchro, archive), l'ordre proposé, le tableau d'entrées, le plan de création
 // et la fabrication des références. Une seule direction d'import : table-matieres.js → llm.js, jamais l'inverse (F-6). Aucun objet du modèle n'est
 // recopié tel quel : chaque objet rendu est construit champ par champ (I-C2).
-import { validerLectureIndex, extraireTableMatieres, ErreurExtraction, BORNES_INDEX, MAX_TOKENS_INDEX, nettoyer } from './llm.js';
+import { validerLectureIndex, extraireTableMatieres, ErreurExtraction, BORNES_INDEX, MAX_TOKENS_INDEX, uneLigne } from './llm.js';
 import { normalizeText } from './units.js';
 import { assertVocabulaire } from './vocabulaire.js';
 import { borner } from '../core/bornes.js';
@@ -98,12 +98,13 @@ export function trierParSeance(ids, pageIdsSeance) {
   const seance = liste(pageIdsSeance);
   return [...new Set(liste(ids))].filter((id) => seance.includes(id)).sort((a, b) => seance.indexOf(a) - seance.indexOf(b));
 }
-// Les pages à lire (N-2) : les cochées présentes, triées par la séance ; sinon les page_ids de la ligne ouverte présents, dans leur ordre ; sinon [].
+// Les pages à lire (N-2) : les cochées présentes, triées par la séance ; sinon les page_ids de la ligne ouverte présents ET de la séance (vague finale,
+// constat 13 : une ligne reçue, I-C2, peut citer la page d'une autre séance — jamais envoyée), dans leur ordre ; sinon [].
 export function pagesALire(cochees, ligne, pageIdsSeance, pagesParId) {
   const present = (id) => typeof id === 'string' && pagesParId instanceof Map && pagesParId.has(id);
   const choisies = trierParSeance(liste(cochees).filter(present), pageIdsSeance);
   if (choisies.length) return choisies;
-  return [...new Set(liste(ligne?.page_ids).filter(present))]; // dédoublonnés : page_ids est une donnée de synchro (I-C2), un doublon enverrait deux fois une image
+  return [...new Set(liste(ligne?.page_ids).filter(present).filter((id) => liste(pageIdsSeance).includes(id)))]; // dédoublonnés : page_ids est une donnée de synchro (I-C2), un doublon enverrait deux fois une image
 }
 
 // --- Tableau d'entrées (D-C4, D-C12, D-C18, R-C-3) -----------------------------------------------------------------------------------------------
@@ -117,17 +118,21 @@ export function trierLignes(lignes, ordre) {
     .sort((a, b) => (a.r - b.r) || (a.k - b.k))
     .map(({ l, r }) => ({ ...l, photo: { ...l.photo, rang: Number.isFinite(r) ? r : l.photo.rang } }));
 }
-// Recalcul après une édition : déjà repérée (clé dans `existantes`, les recettes de l'ÉDITION), en double (clé vue plus haut), créable, hors plage ;
-// cochée = créable et non décochée par la personne (une ligne qui cesse d'être déjà repérée est recochée, sauf décochée à la main).
+// La forme que le fabricant ÉCRIT (vague finale, constat 2) : une ligne (uneLigne), bornée à 200 points de code. La clé d'une ligne du tableau se calcule
+// sur elle, comme celle des fiches existantes (original_title) : une relecture reconnaît ce qui a été créé (D-C5).
+const titreEcrit = (l) => borner(uneLigne(l?.title) ?? '', BORNES_INDEX.titre);
+// Recalcul après une édition : déjà repérée (clé dans `existantes`, les recettes de l'ÉDITION), en double (clé déjà PRISE plus haut par une ligne créable
+// que la personne n'a pas décochée — vague finale, constat 7 : décocher une occurrence libère la suivante), créable, hors plage ; cochée = créable et
+// non décochée par la personne (une ligne qui cesse d'être déjà repérée est recochée, sauf décochée à la main).
 export function recalculer(lignes, existantes = []) {
   const deja = clesDe(existantes);
   const vues = new Set();
   return liste(lignes).map((l) => {
-    const cle = cleReference(l.title, l.printed_page);
+    const cle = cleReference(titreEcrit(l), l.printed_page);
     const dejaReperee = deja.has(cle);
     const enDouble = !dejaReperee && vues.has(cle);
-    vues.add(cle);
     const creable = !dejaReperee && !enDouble;
+    if (creable && !l.decocheeParLaPersonne) vues.add(cle);
     return { ...l, horsPlage: coherencePagePlage(l.printed_page, l.photo?.plage ?? null), dejaReperee, enDouble, creable, cochee: creable && !l.decocheeParLaPersonne };
   });
 }
@@ -143,12 +148,11 @@ export function lignesTableau(resultat, { ordre = null, existantes = [] } = {}) 
   });
   return recalculer(trierLignes(lignes, ordre ?? photos.map((p) => p?.page_id ?? null)), existantes);
 }
-const titreDe = (l) => (typeof l?.title === 'string' ? l.title.trim() : '');
 export function planCreation(lignes) {
   const ls = liste(lignes);
   return {
-    aCreer: ls.filter((l) => l.creable && l.cochee && titreDe(l)),
-    ecartees: { dejaReperees: ls.filter((l) => l.dejaReperee).length, enDouble: ls.filter((l) => l.enDouble).length, decochees: ls.filter((l) => l.creable && !l.cochee).length, sansTitre: ls.filter((l) => l.creable && l.cochee && !titreDe(l)).length },
+    aCreer: ls.filter((l) => l.creable && l.cochee && titreEcrit(l)),
+    ecartees: { dejaReperees: ls.filter((l) => l.dejaReperee).length, enDouble: ls.filter((l) => l.enDouble).length, decochees: ls.filter((l) => l.creable && !l.cochee).length, sansTitre: ls.filter((l) => l.creable && l.cochee && !titreEcrit(l)).length },
   };
 }
 export const compteur = (lignes) => ({ lues: liste(lignes).length, dejaDans: liste(lignes).filter((l) => l.dejaReperee).length });
@@ -169,17 +173,18 @@ export const pageIndexee = (page, plage) => {
 // jamais écrit (D-C14). assertVocabulaire sur chaque fiche (D-12 du lot A). Ronde 1 : dernier mur avant `recipes`, le fabricant nettoie titre et section
 // par `nettoyer` (Cc, Cf ET Cs : une demi-paire de substitution ferait refuser la fiche par le jsonb, S-11) avant de les borner, et ramène une
 // printed_page hors 1..9 999 ou non entière à null (§ 4.4) — une ligne éditée dans le tableau ou forgée passe les MÊMES bornes que la lecture. Ronde 1 de
-// T2 : raw_entry passe le même mur (nettoyer puis borner à BORNE_RAW_ENTRY) ; un titre lu absent n'y écrit jamais « undefined ».
+// T2 : raw_entry passe le même mur (nettoyer puis borner à BORNE_RAW_ENTRY) ; un titre lu absent n'y écrit jamais « undefined ». Vague finale (constats 2
+// et 4) : titre, section et raw_entry passent d'abord par `uneLigne` (une fin de ligne vaut une espace, puis `nettoyer`) — jamais des mots collés.
 export function fabriquerReferences(plan, { edition, pagesParId, resultat, pageIdsLigne = [], newId }) {
   const pages = pagesParId instanceof Map ? pagesParId : new Map();
   const recipes = [];
   for (const l of liste(plan?.aCreer)) {
     if (!l || !l.creable || l.dejaReperee || l.enDouble) continue; // R-C-2 : jamais une référence qui existe déjà
-    const titre = borner(nettoyer(titreDe(l)) ?? '', BORNES_INDEX.titre);
+    const titre = titreEcrit(l); // vague finale (constats 2 et 4) : une ligne, jamais des mots collés par borner
     if (!titre) continue;
     const inconnue = l.photo?.page_id == null;
     const indexPageId = !inconnue && pages.has(l.photo.page_id) ? l.photo.page_id : null;
-    const sectionLue = nettoyer(l.section);
+    const sectionLue = uneLigne(l.section);
     const section = sectionLue ? (borner(sectionLue, BORNES_INDEX.section) || null) : null;
     const page = Number.isInteger(l.printed_page) && l.printed_page >= 1 && l.printed_page <= BORNES_INDEX.page ? l.printed_page : null;
     const titreLu = typeof l.titreLu === 'string' ? l.titreLu : '';
@@ -189,7 +194,7 @@ export function fabriquerReferences(plan, { edition, pagesParId, resultat, pageI
       type: null, tags: [], cuisines: [], favorite: false,
       source_page_ids: inconnue ? liste(pageIdsLigne).filter((id) => pages.has(id)) : (indexPageId ? [indexPageId] : []),
       current_version_id: null, ingredient_ids: [], index_page_id: indexPageId,
-      raw_entry: borner(nettoyer(l.pageLue != null ? `${titreLu} — ${l.pageLue}` : titreLu) ?? '', BORNE_RAW_ENTRY),
+      raw_entry: borner(uneLigne(l.pageLue != null ? `${titreLu} — ${l.pageLue}` : titreLu) ?? '', BORNE_RAW_ENTRY),
       index_uncertain: l.uncertain === true || l.horsPlage === true,
     };
     assertVocabulaire(fiche, 'recipes'); // D-12 : « Créer les références » est un fabricant de recipes comme les autres

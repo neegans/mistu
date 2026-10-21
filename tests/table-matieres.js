@@ -1278,7 +1278,7 @@ export async function runTableMatieresTests({ eq, ok }) {
         dits.length = 0;
         lireIndex(p4h).click();
         await attendre(() => dits.length === 1, 'hors ligne dit');
-        eq([dits[0], questions.length, ff4.appels.length, await db.get('imports', 'imp_c4')], ['Tu es hors ligne.', 0, 0, avant4], 'T-C17 (alignement T6, spec A § 4.4) : hors ligne, « Lire » depuis une lecture reçue → « Tu es hors ligne. », AUCUNE question, la lecture reçue intacte (ni a_lancer, ni résultat effacé), aucun POST');
+        eq([dits[0], questions.length, ff4.appels.length, await db.get('imports', 'imp_c4')], ['Tu es hors ligne.', 0, 0, avant4], 'T-C17 (M-C1 ; alignement T6, spec A § 4.4) : hors ligne, « Lire » depuis une lecture reçue → « Tu es hors ligne. », AUCUNE question, la lecture reçue intacte (ni a_lancer, ni résultat effacé), aucun POST');
         reponseConfirmer = false;
         lireIndex(p4).click();
         await attendre(() => questions.length === 1, 'question posée');
@@ -1428,6 +1428,8 @@ export async function runTableMatieresTests({ eq, ok }) {
         eq([[...p.querySelectorAll('[data-role="entrees-lues"] li')].map((x) => x.dataset.cle), etatLi(liDe('l2')), etatLi(liDe('l1')), p.querySelector('[data-role="creer-references"]').textContent], [['l2', 'l0', 'l1'], ['', true, false, 'Créer une référence pour « Tarte »'], ['en double', false, true, 'En double dans cette lecture'], 'Créer 1 référence'], 'T-C13 (ronde 1, N46, D-C18) : après ↑/↓, « en double » suit l’ordre COURANT — la première « Tarte » rencontrée est créable, la suivante en double (recalculer après trierLignes)');
         // Plan vide (constat 8) : tout décoché → bouton ÉTEINT (N23) ; même forcé, « Créer 0 références » ne clôt pas la lecture payée (creer() ET creerReferences).
         caseDe(liDe('l2')).click();
+        eq(etatLi(liDe('l1')), ['', true, false, 'Créer une référence pour « Tarte »'], 'T-C13 (vague finale, constat 7) : décocher la première « Tarte » (l2) LIBÈRE la suivante (l1) — plus « en double », cochée, réactivée : la personne choisit laquelle garder');
+        caseDe(liDe('l1')).click(); // tout décocher, pour le plan vide qui suit
         const bouton = p.querySelector('[data-role="creer-references"]');
         const vue = p.querySelector('[data-role="lecture"]');
         const avant = await db.get('imports', 'imp_p13'); const nAvant = (await db.getAll('recipes')).length;
@@ -1665,16 +1667,284 @@ export async function runTableMatieresTests({ eq, ok }) {
         'page inconnue': 'unknown page', 'Incertain': 'Uncertain', '{n} référence(s) créée(s){d}': '{n} reference(s) created{d}', '{n} doublon(s) ignoré(s)': '{n} duplicate(s) skipped',
         'Titre': 'Title', 'Section': 'Section', 'Section : {s}': 'Section: {s}',
       };
-      eq(Object.entries(ATTENDU).filter(([fr, en]) => EN[fr] !== en).map(([fr]) => fr), [], 'T-C20 (I-C8, § 5) : chaque texte neuf du lot a son entrée en.js, avec l’anglais de la spec');
+      eq(Object.entries(ATTENDU).filter(([fr, en]) => EN[fr] !== en).map(([fr]) => fr), [], 'T-C20 (M-C5 ; I-C8, § 5) : chaque texte neuf du lot a son entrée en.js, avec l’anglais de la spec');
       eq(['Saisir à la main', 'Monter la page {n}', 'Descendre la page {n}', 'p. imprimée', 'Lecture des pages par l’assistant…', 'Relancer', 'Annuler', 'L’assistant n’a pas répondu lisiblement. Réessaie.', 'Code : {c}', 'Une lecture est déjà en cours : annule-la d’abord.', 'Tu es hors ligne.', 'En cours sur un autre écran', 'incertain', 'Incertain : {t}', 'Ignorer', 'Page {n}', 'Repérée dans ton livre — page {p}', 'Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.', 'La lecture a été interrompue. L’appel a peut-être été compté ; relancer en coûtera un autre.', 'L’appel a peut-être été compté ; relancer en coûtera un autre.'].filter((k) => typeof EN[k] !== 'string'), [], 'T-C20 (B1, ronde 1 de T6 ; § 5) : les clés existantes que le lot réemploie sont toujours là, « Repérée dans ton livre — page {p} » (fiche d’une référence créée par C) et les trois phrases I-4 comprises');
       const sw = await lireSource('../sw.js');
-      const shell = [...(sw.match(/const SHELL = \[([\s\S]*?)\];/)?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]); // le TABLEAU, comme tests/sync.js
-      eq([shell.includes('./src/domain/table-matieres.js'), shell.includes('./src/ui/table-matieres.js')], [true, true], 'T-C20 (X4, ronde 1 de T6) : le tableau SHELL de sw.js (et non le fichier entier) contient les deux modules neufs du lot');
+      const shell = [...(sw.match(/const SHELL = \[([\s\S]*?)\];/)?.[1] ?? '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '').matchAll(/'([^']+)'/g)].map((m) => m[1]); // le TABLEAU, sans ses commentaires (vague finale : une entrée commentée DANS le tableau ne compte plus)
+      eq([shell.includes('./src/domain/table-matieres.js'), shell.includes('./src/ui/table-matieres.js')], [true, true], 'T-C20 (M-C6 ; X4, ronde 1 de T6) : le tableau SHELL de sw.js (et non le fichier entier) contient les deux modules neufs du lot');
       eq([MODULES_NEUFS.includes('../src/ui/table-matieres.js'), ['Relire remplace la lecture reçue ({n} entrées non créées) et coûte un appel. Continuer ?', 'Relire', 'Les photos de cette séance ne sont pas sur cet appareil.', 'Revenir à la lecture'].every((c) => CHAINES_NEUVES_AILLEURS['../src/ui/import.js']?.includes(c)), CHAINES_NEUVES_AILLEURS['../src/ui/recipe.js']?.includes('Section : {s}')], [true, true, true], 'T-C20 : le filet i18n couvre le module neuf (MODULES_NEUFS) et les chaînes neuves d’import.js et de recipe.js (CHAINES_NEUVES_AILLEURS)');
       const src = await lireSource('../src/ui/table-matieres.js');
       ok(src.length > 1000 && /export function panneauLecture/.test(src) && /export async function creerReferences/.test(src), 'T-C20 : src/ui/table-matieres.js est lu (garde contre un source vide)');
       eq(/anthropic|supabase/i.test(src), false, 'T-C20 (I-C8 ; X8, ronde 1 de T6 : sans égard à la casse) : aucun texte ne nomme le fournisseur ni la base dans src/ui/table-matieres.js');
     });
+
+    // =================================================================================================================================
+    // Vague finale de la clôture (revue finale de branche) : un bloc par constat (une levée n'en cache aucun autre). Les invisibles sont écrits par
+    // échappement à accolades (\u{…}), jamais par la forme à quatre chiffres.
+    await run('T-C26 (vague finale, constat 1) instance neuve pendant le vol de CE document : la fin du vol la redessine sans geste', () => withRepo(async (repo, db) => {
+      const I = await import('../src/ui/import.js');
+      const UI = await import('../src/ui/import-cible.js');
+      await poserBibliotheque(repo, db, { octets: true, seances: { ss1: ENVOI, ss2: ['p1', 'p2'] } });
+      await db.mutate({ puts: { imports: [{ ...ligneJournal({ id: 'imp_v2', edition_id: 'ed1', scan_session_id: 'ss2', page_ids: ['p1', 'p2'] }), status: 'echec', erreur: { raison: 'coupe', extra: {} } }] }, origin: 'device' });
+      const scene = nouvelleScene(); const ff = fauxFetch();
+      const deps = { repo, toast: () => {}, confirmer: async () => true, fetch: ff.fetch, maintenant: () => NOW };
+      const panneauDe = async (sessionId, coches = []) => { const ctx = await ctxDe(repo, db); const p = I.indexEntriesPanel(ctx.scan_sessions.find((s) => s.id === sessionId), ctx, () => coches, deps); scene.append(p); return p; };
+      try {
+        // (a) A lance « Lire » ; pendant le vol, l'écran de séance est reconstruit (retour arrière, « + Photographier », « Retirer ») : B montre le vol, A est quittée.
+        const A = await panneauDe('ss1', [...ENVOI]);
+        await attendre(() => !lireIndex(A).disabled, 'bouton allumé (A)');
+        lireIndex(A).click();
+        await attendre(() => ff.appels.length === 1, 'fetch parti (A)');
+        const B = await panneauDe('ss1');
+        A.remove();
+        await attendre(() => B.etatPanneau().vol && !!B.querySelector('[data-role="annuler"]'), 'B montre le vol de ce document');
+        ff.rendre[0](200, corpsModele(LECTURE_5));
+        await attendre(() => B.querySelectorAll('[data-role="entrees-lues"] li').length === 23, 'B redessiné à la fin du vol, sans geste');
+        const lu = await ligneDe(db, 'ss1');
+        eq([B.etatPanneau(), B.querySelector('[data-role="vol"]').hidden, B.querySelector('[data-role="actions-index"]').hidden, lu.status], [{ importId: lu.id, status: 'a_verifier', saisie: false, vol: false }, true, false, 'a_verifier'], 'T-C26 (constat 1 de la revue finale ; ecouterVol) : une instance du panneau recréée pendant le vol de SA ligne (tenu par ce document, lancé par une autre instance) se redessine à la fin du vol, sans geste — le tableau, la zone du vol cachée, les actions rendues (jamais figée sur « Lecture des pages… »)');
+        // (b) Un vol d'index tenu par ce document HORS de toute instance (lancerExtraction), puis la séance ouverte : même règle.
+        const ff2 = fauxFetch();
+        const vol = UI.lancerExtraction('imp_v2', { ctx: await ctxDe(repo, db), repo, fetch: ff2.fetch, maintenant: () => NOW });
+        await attendre(() => ff2.appels.length === 1, 'fetch parti (lancerExtraction)');
+        const C2 = await panneauDe('ss2');
+        await attendre(() => C2.etatPanneau().vol, 'C montre le vol');
+        ff2.rendre[0](200, corpsModele(blocsDe(['p1', 'p2'])));
+        const fin = await vol;
+        await attendre(() => !!C2.querySelector('[data-role="entrees-lues"]'), 'C redessiné à la fin du vol, sans geste');
+        eq([fin, C2.etatPanneau().status, C2.etatPanneau().vol, C2.querySelector('[data-role="vol"]').hidden], [{ issue: 'a_verifier' }, 'a_verifier', false, true], 'T-C26 (constat 1 ; Relancer de la section Imports puis la séance ouverte) : un panneau ouvert pendant un vol de sa ligne lancé hors de lui se redessine à la fin du vol (le tableau), sans geste');
+      } finally { UI.reinitialiserImportCible(); scene.remove(); }
+    }));
+
+    await run('T-C27 (vague finale, constats 2 et 4) titre, section ou incertitude imprimés sur deux lignes : une seule ligne, jamais des mots collés ni une adresse recollée', () => withRepo(async (repo, db) => {
+      const I = await import('../src/ui/import.js');
+      const LS = '\u{2028}'; const NEL = '\u{0085}';
+      const V = (entries, uncertain = []) => L.validerLectureIndex({ photos: [{ photo: 1, printed_page_range: [8, 94], entries }], uncertain }, { nbPhotos: 1 });
+      const e = (title, printed_page, section = null) => ({ title, printed_page, section, uncertain: false });
+      const lu = V([e('Velouté de petits pois\net menthe fraîche', 8, 'Printemps\nEntrées'), e('Soupe de courge aux\r\népices', 9), e('Tarte' + LS + 'fine', 10, 'Été' + NEL + 'Desserts'), e('Recette sur evil\n.com/recette', 11), e('Pesto', 12, 'Voir evil\n.com')], ['photo\nfloue', 'voir evil\n.com/x']);
+      eq([lu.photos[0].entries.map((x) => [x.title, x.section]), lu.ecartees, lu.uncertain],
+        [[['Velouté de petits pois et menthe fraîche', 'Printemps Entrées'], ['Soupe de courge aux épices', null], ['Tarte fine', 'Été Desserts'], ['Pesto', null]], { trop_longues: 0, adresse: 1 }, ['photo floue']],
+        'T-C27 (constats 2 et 4 ; uneLigne) : un titre, une section ou une incertitude imprimés sur deux lignes (LF, CRLF, U+2028, NEL) valent UNE ligne (une espace, jamais des mots collés) ; une adresse COUPÉE par une fin de ligne est une adresse — dans le titre, l’entrée écartée et comptée ; dans la section, section nulle ; dans une incertitude, écartée sans compte');
+      let n = 0; const newId = (p) => `${p}_${++n}`;
+      const edition = { id: 'ed1', language: 'fr' };
+      const res = D.resultatIndex(lu, ['p1']);
+      const premiere = D.fabriquerReferences(D.planCreation(D.lignesTableau(res, { ordre: ['p1'], existantes: [] })), { edition, pagesParId: new Map([['p1', { id: 'p1', kind: null }]]), resultat: res, newId });
+      const relue = D.lignesTableau(D.resultatIndex(V([e('Velouté de petits pois\net menthe fraîche', 8, 'Printemps\nEntrées')]), ['p1']), { ordre: ['p1'], existantes: premiere.recipes });
+      eq([premiere.recipes.map((r) => [r.original_title, r.section, r.raw_entry]), relue.map((l) => [l.dejaReperee, l.creable, l.cochee])],
+        [[['Velouté de petits pois et menthe fraîche', 'Printemps Entrées', 'Velouté de petits pois et menthe fraîche — 8'], ['Soupe de courge aux épices', null, 'Soupe de courge aux épices — 9'], ['Tarte fine', 'Été Desserts', 'Tarte fine — 10'], ['Pesto', null, 'Pesto — 12']], [[true, false, false]]],
+        'T-C27 (constat 2 ; D-C5, § 10 pas 4) : les fiches portent le titre, la section et raw_entry en une ligne ; une relecture de la MÊME photo reconnaît la fiche « déjà repérée » (aucun doublon)');
+      const ZW = '\u{200B}';
+      const edite = D.recalculer([{ ...relue[0], title: 'Ri' + ZW + 'sotto aux champignons', printed_page: 34 }, { ...relue[0], title: ZW + ' ' + ZW, printed_page: 35 }], EXISTANTES);
+      eq([edite[0].dejaReperee, edite[0].creable, D.planCreation(edite).aCreer.length, D.planCreation(edite).ecartees.sansTitre], [true, false, 0, 1], 'T-C27 (constat 2 : la clé sur la forme ÉCRITE) : un titre tapé dans le tableau avec un caractère invisible (U+200B) est comparé sous la forme que le fabricant écrira — « Risotto aux champignons » p. 34 est « déjà repérée » (jamais une seconde fiche) ; un titre fait seulement d’invisibles n’est pas à créer (sans titre)');
+      const forgee = { creable: true, cochee: true, title: 'Gratin\ndauphinois', titreLu: 'Gratin\ndauphinois', pageLue: 148, printed_page: 148, section: 'Hiver' + LS + 'Plats', photo: { page_id: null } };
+      const f = D.fabriquerReferences({ aCreer: [forgee] }, { edition, pagesParId: new Map(), resultat: { photos: [] }, newId });
+      eq([f.recipes[0]?.original_title, f.recipes[0]?.section, f.recipes[0]?.raw_entry, L.sectionLisible('Printemps\nEntrées'), L.sectionLisible('Hiver' + LS + 'Plats')], ['Gratin dauphinois', 'Hiver Plats', 'Gratin dauphinois — 148', 'Printemps Entrées', 'Hiver Plats'], 'T-C27 (constats 2 et 4, défense en profondeur) : le fabricant (ligne forgée ou reçue) et sectionLisible (puce, « Section : », recherche) replient aussi une fin de ligne en une espace — jamais « Gratindauphinois »');
+      await poserBibliotheque(repo, db, { seances: { ss1: ['p1'] } });
+      const ctx = await ctxDe(repo, db);
+      const r = await I.creerDepuisSaisie('Tarte' + NEL + 'Tatin — 33', { session: ctx.scan_sessions[0], ctx, pageIds: [], repo, toast: () => {}, maintenant: () => NOW });
+      const tatin = (await db.byIndex('recipes', 'edition_id', 'ed1')).find((x) => x.printed_page === 33);
+      eq([r.issue, tatin?.original_title, tatin?.raw_entry], ['cree', 'Tarte Tatin', 'Tarte Tatin — 33'], 'T-C27 (constat 2) : la zone de texte replie de même une fin de ligne collée dans une ligne tapée (NEL) — « Tarte Tatin », jamais « TarteTatin »');
+    }));
+
+    await run('T-C17 (vague finale, constats 5 et 15) veille du panneau : réarmée tant que la ligne vole ailleurs, éteinte au démontage', () => withRepo(async (repo, db) => {
+      const I = await import('../src/ui/import.js');
+      const UI = await import('../src/ui/import-cible.js');
+      await poserBibliotheque(repo, db, { seances: { ss_d: ['p1'], ss_e: ['p2'] } });
+      const VIVANT = '2026-10-19T11:59:00.000Z'; // NOW − 60 s
+      const enVolAilleurs = (id, s, p) => ({ ...ligneJournal({ id, edition_id: 'ed1', scan_session_id: s, page_ids: [p], device_id: 'dev_ailleurs' }), status: 'en_cours', document_id_vol: 'doc_ailleurs', started_at: VIVANT, battement_at: VIVANT });
+      await db.mutate({ puts: { imports: [enVolAilleurs('imp_d', 'ss_d', 'p1'), enVolAilleurs('imp_e', 'ss_e', 'p2')] }, origin: 'device' });
+      const scene = nouvelleScene();
+      let horlogeD = NOW; let passes = 0;
+      const espion = { ...repo, marquerInterrompus: (m) => { passes += 1; return repo.marquerInterrompus(m); } };
+      try {
+        const ctx = await ctxDe(repo, db);
+        const deps = { repo: espion, toast: () => {}, confirmer: async () => true, maintenant: () => horlogeD, veilleMs: 30 };
+        // (e) Démontage d'abord (sur imp_e) : réarmée tant que le panneau est monté, la veille s'arrête dès qu'il est quitté (FV-veille-demonte).
+        const pe = I.indexEntriesPanel(ctx.scan_sessions.find((s) => s.id === 'ss_e'), ctx, () => [], deps);
+        scene.append(pe);
+        await attendre(() => pe.etatPanneau().status === 'en_cours' && passes >= 2, 'veille de pe passée deux fois (montée)');
+        pe.remove();
+        const q0 = passes;
+        await new Promise((r) => setTimeout(r, 200));
+        eq([passes - q0, (await db.get('imports', 'imp_e')).status], [0, 'en_cours'], 'T-C17 (vague finale, constat 15 ; FV-veille-demonte) : un panneau quitté ne relance plus la passe interrompu (0 appel de marquerInterrompus pendant 200 ms, au-delà de 6 × veilleMs) — aucune minuterie qui survit à l’écran');
+        // (d) Réarmement : vol vivant ailleurs au rendu, puis l'appareil qui le tenait meurt (horloge au-delà de VOL_MORT_MS) — la veille le lève sans geste.
+        const pd = I.indexEntriesPanel(ctx.scan_sessions.find((s) => s.id === 'ss_d'), ctx, () => [], deps);
+        scene.append(pd);
+        await attendre(() => pd.etatPanneau().status === 'en_cours' && pd.querySelector('[data-role="etat-lecture"]').textContent === 'En cours sur un autre écran', '« En cours sur un autre écran »');
+        const p0 = passes;
+        await attendre(() => passes >= p0 + 2, 'la veille repasse (vol vivant ailleurs)');
+        eq([(await db.get('imports', 'imp_d')).status, lireIndex(pd).disabled], ['en_cours', true], 'T-C17 (vague finale, constat 5) : vol vivant ailleurs → la veille repasse sans rien lever, « Lire » éteint');
+        horlogeD = '2026-10-19T12:11:00.000Z'; // NOW + 11 min : au-delà de VOL_MORT_MS depuis le départ et le battement synchronisés
+        await attendre(async () => (await db.get('imports', 'imp_d')).status === 'echec' && pd.textContent.includes('La lecture a été interrompue.'), 'levée par la veille réarmée');
+        eq([(await db.get('imports', 'imp_d')).erreur, lireIndex(pd).textContent, pd.querySelector('[data-role="etat-lecture"]').textContent.includes('En cours sur un autre écran')], [{ raison: 'interrompu', extra: {} }, 'Relancer', false], 'T-C17 (vague finale, constat 5 ; VF-15, T4-R1 ; FV-veille-sans-rearm) : un panneau ouvert pendant qu’un AUTRE appareil tient la ligne (battement vivant), puis cet appareil mort → la veille RÉARMÉE lève la ligne sans rechargement : phrase I-4, « Relancer »');
+      } finally { UI.reinitialiserImportCible(); scene.remove(); }
+    }));
+
+    await run('T-C11 (vague finale, constat 6) une lecture reçue dont une photo n’est pas une page de SA ligne : illisible au montage', () => withRepo(async (repo, db) => {
+      const I = await import('../src/ui/import.js');
+      const UI = await import('../src/ui/import-cible.js');
+      await poserBibliotheque(repo, db, { seances: { ss1: ['p1', 'p3'] } });
+      const resultat = D.resultatIndex(L.validerLectureIndex(blocsDe(['p1', 'p2']), { nbPhotos: 2 }), ['p1', 'p2']); // photos p1 et p2…
+      await db.mutate({ puts: { imports: [ligneAVerifier({ id: 'imp_p9', page_ids: ['p1', 'p3'], resultat })] }, origin: 'device' }); // …sur une ligne de pages p1 et p3 (reçue)
+      const scene = nouvelleScene();
+      try {
+        const ctx = await ctxDe(repo, db);
+        const p = I.indexEntriesPanel(ctx.scan_sessions[0], ctx, () => [], { repo, toast: () => {}, confirmer: async () => false, importId: 'imp_p9', maintenant: () => NOW });
+        scene.append(p);
+        await attendre(async () => (await db.get('imports', 'imp_p9')).status === 'echec' && p.textContent.includes('Code : illisible'), 'echec(illisible) au montage');
+        const relue = await UI.relireDuJournal('imp_p9', 'index', { repo });
+        const l = await db.get('imports', 'imp_p9');
+        eq([relue?.resultat ?? null, l.erreur?.raison, l.resultat, !!p.querySelector('[data-role="entrees-lues"]')], [null, 'illisible', null, false], 'T-C11 (vague finale, constat 6 ; E-17, I-C2 ; FV-valideur-pages-propres) : un résultat de forme C dont une photo (p2) n’est pas dans les page_ids de SA ligne → relu contre les page_ids de la LIGNE, jamais ses propres photos : echec(illisible) au montage, « Code : illisible », aucun tableau ; relireDuJournal ne rend aucun résultat');
+      } finally { scene.remove(); }
+    }));
+
+    await run('T-C6 (vague finale, constat 7) « en double » : une occurrence décochée par la personne libère la suivante', async () => {
+      const deuxPesto = { photos: [{ page_id: 'pa', printed_page_range: null, entries: [{ title: 'Pesto', printed_page: 186, section: 'A', uncertain: false }, { title: 'Pesto', printed_page: 186, section: 'B', uncertain: false }] }], ecartees: { trop_longues: 0, adresse: 0 }, uncertain: [] };
+      const lp = D.lignesTableau(deuxPesto, { ordre: ['pa'], existantes: [] });
+      const libre = D.recalculer(lp.map((l, k) => (k === 0 ? { ...l, cochee: false, decocheeParLaPersonne: true } : l)), []);
+      const repris = D.recalculer(libre.map((l, k) => (k === 0 ? { ...l, cochee: true, decocheeParLaPersonne: false } : l)), []);
+      eq([libre.map((l) => [l.cochee, l.creable, l.enDouble]), D.planCreation(libre).aCreer.map((l) => l.section), repris.map((l) => [l.cochee, l.creable, l.enDouble])],
+        [[[false, true, false], [true, true, false]], ['B'], [[true, true, false], [false, false, true]]], 'T-C6 (vague finale, constat 7) : deux « Pesto » p. 186 ; décocher la première (pour garder la section B) libère la seconde — créable, cochée, une fiche « B » ; la recocher rend la seconde « en double » (jamais deux fiches, jamais aucune)');
+    });
+
+    await run('T-C16 (vague finale, constat 8) zone de texte : aucune fiche créée → la lecture payée reste à reprendre', () => withRepo(async (repo, db) => {
+      const I = await import('../src/ui/import.js');
+      const { cleLecture } = await import('../src/ui/import-cible.js');
+      await poserBibliotheque(repo, db, { seances: { ss1: ['p1'] } });
+      const s = ligneAVerifier({ id: 'imp_z', page_ids: ['p1'], resultat: D.resultatIndex(L.validerLectureIndex(blocsDe(['p1']), { nbPhotos: 1 }), ['p1']) });
+      await db.mutate({ puts: { imports: [s] }, origin: 'device' });
+      const ctx = await ctxDe(repo, db); const dits = [];
+      const r = await I.creerDepuisSaisie('Risotto aux champignons — 34', { session: ctx.scan_sessions[0], ctx, pageIds: ['p1'], repo, toast: (m) => dits.push(m), maintenant: () => NOW, importId: 'imp_z', cle: cleLecture(s) });
+      const l = await db.get('imports', 'imp_z');
+      eq([r, l.status, l.finished_at ?? null, [...dits]], [{ issue: 'cree', n: 0, doublons: 1, ferme: false }, 'a_verifier', null, ['0 référence(s) créée(s), 1 doublon(s) ignoré(s)']], 'T-C16 (vague finale, constat 8 ; garde de creerReferences) : une saisie qui ne crée AUCUNE fiche (une ligne déjà dans le livre) ne ferme jamais la lecture payée montrée — elle reste a_verifier, à reprendre ; le toast dit 0 et le doublon');
+    }));
+
+    await run('T-C25 (vague finale, constat 12) une relance refusée parce que la ligne vole déjà ailleurs : jamais une ligne neuve ni un second appel', () => withRepo(async (repo, db) => {
+      const UI = await import('../src/ui/import-cible.js');
+      await poserBibliotheque(repo, db, { octets: true, seances: { ss1: ['p1', 'p2'] } });
+      await db.mutate({ puts: { imports: [{ ...ligneJournal({ id: 'imp_r', edition_id: 'ed1', scan_session_id: 'ss1', page_ids: ['p1', 'p2'] }), status: 'echec', erreur: { raison: 'coupe', extra: {} } }] }, origin: 'device' });
+      const ff = fauxFetch([200, corpsModele(blocsDe(['p1', 'p2']))]);
+      let une = true;
+      // Un autre onglet relance la même ligne ENTRE la relecture de ce panneau et sa transition de départ : elle est en_cours quand celle-ci arrive.
+      const ailleurs = { ...repo, transitionner: async (s, k, o) => { if (une && s === 'imports' && k === 'imp_r') { une = false; await db.put('imports', { ...(await db.get('imports', 'imp_r')), status: 'en_cours', document_id_vol: 'doc_autre_onglet', started_at: NOW, battement_at: NOW }); } return repo.transitionner(s, k, o); } };
+      try {
+        const r = await UI.lancerVol('imp_r', D.executerIndex, { ctx: await ctxDe(repo, db), repo: ailleurs, fetch: ff.fetch, maintenant: () => NOW, lecture: { kind: 'index', importId: 'imp_r', pageIds: ['p1', 'p2'], editionId: 'ed1', sessionId: 'ss1', cle: null } });
+        eq([r.issue, r.raison, ff.appels.length, (await db.getAll('imports')).filter((i) => i.scan_session_id === 'ss1').length, (await db.get('imports', 'imp_r')).status], ['refuse', 'transition', 0, 1, 'en_cours'], 'T-C25 (vague finale, constat 12 ; spec § 11) : le panneau montrait la ligne en echec (clé nulle) ; elle part en_cours ailleurs avant la transition de départ → refus `transition` : aucune ligne neuve pour la séance, aucun POST (jamais deux appels comptés au quota)');
+      } finally { UI.reinitialiserImportCible(); }
+    }));
+
+    await run('T-C5 / T-C12 / T-C14 (vague finale, constat 13) défense en profondeur : une page d’une AUTRE séance citée par la ligne n’est ni lue, ni réordonnée, ni liée', () => withRepo(async (repo, db) => {
+      const T = await import('../src/ui/table-matieres.js');
+      eq(D.pagesALire([], { page_ids: ['p2', 'q9', 'p1'] }, ['p1', 'p2', 'p3'], new Map([['p1', {}], ['p2', {}], ['q9', {}]])), ['p2', 'p1'], 'T-C5 (vague finale, constat 13) : le repli sur ligne.page_ids ne garde que les pages de la SÉANCE (q9, présente en base mais d’une autre séance, n’est jamais envoyée)');
+      await poserBibliotheque(repo, db, { seances: { ss1: ['p1', 'p2'], ss2: ['q9'] } });
+      await db.put('source_pages', { ...(await db.get('source_pages', 'q9')), position: 7 });
+      const lu = L.validerLectureIndex({ photos: [{ photo: 1, printed_page_range: [50, 60], entries: [{ title: 'Brioche', printed_page: 55, section: null, uncertain: false }] }, { photo: 2, printed_page_range: [10, 20], entries: [{ title: 'Bouillon', printed_page: 15, section: null, uncertain: false }] }], uncertain: [] }, { nbPhotos: 2 });
+      const resultat = D.resultatIndex(lu, ['p1', 'q9']);
+      await db.mutate({ puts: { imports: [ligneAVerifier({ id: 'imp_q9', page_ids: ['p1', 'q9'], resultat })] }, origin: 'device' }); // une ligne reçue (I-C2) qui cite q9, page de ss2
+      const ctx = await ctxDe(repo, db);
+      const vue = T.panneauLecture({ ligne: await db.get('imports', 'imp_q9'), resultat, session: ctx.scan_sessions.find((s) => s.id === 'ss1'), ctx, repo, maintenant: () => NOW });
+      vue.querySelector('[data-role="appliquer-ordre"]').click();
+      await attendre(async () => (await db.get('imports', 'imp_q9')).ordre_applique_at === NOW, 'ordre appliqué');
+      eq([(await db.get('source_pages', 'q9')).position, (await db.get('scan_sessions', 'ss2')).page_ids], [7, ['q9']], 'T-C12 (vague finale, constat 13) : « Appliquer cet ordre » ne pose la position que sur les pages de la SÉANCE — q9 (autre séance) garde sa position 7');
+      const ligne = await db.get('imports', 'imp_q9');
+      const r = await T.creerReferences(ligne, D.lignesTableau(resultat, { ordre: ['q9', 'p1'], existantes: [] }), { repo, ctx, editionId: 'ed1', toast: () => {}, maintenant: () => NOW });
+      const bouillon = (await db.byIndex('recipes', 'edition_id', 'ed1')).find((x) => x.original_title === 'Bouillon');
+      const q9 = await db.get('source_pages', 'q9');
+      eq([r.issue, bouillon ? bouillon.index_page_id : 'fiche absente', bouillon?.source_page_ids, q9.kind, q9.printed_page_range ?? null], ['enregistre', null, [], null, null], 'T-C14 (vague finale, constat 13) : « Créer {n} références » ne lie ni ne réécrit une page d’une autre séance — la fiche « Bouillon » sans index_page_id, q9 intacte (ni kind ni plage)');
+    }));
+
+    await run('T-C12 (vague finale, constat 14) vignettes d’« Ordre des photos » : URL blob: suivies, révoquées au changement de route', () => withRepo(async (repo, db) => {
+      const T = await import('../src/ui/table-matieres.js');
+      const B = await import('../src/core/blob-urls.js');
+      await poserBibliotheque(repo, db, { seances: { ss1: SEANCE7 }, octets: true });
+      const ligne = ligneAVerifier({ id: 'imp_b14', resultat: C });
+      await db.mutate({ puts: { imports: [ligne] }, origin: 'device' });
+      const ctx = await ctxDe(repo, db);
+      const scene = nouvelleScene();
+      try {
+        B.revoquerUrlsDeBlob(); // un registre vide au départ
+        const vue = T.panneauLecture({ ligne, resultat: C, session: ctx.scan_sessions[0], ctx, repo, maintenant: () => NOW });
+        scene.append(vue);
+        const imgs = () => [...vue.querySelectorAll('[data-role="ordre-photos"] .thumbs figure img')];
+        await attendre(() => imgs().length === 5 && imgs().every((i) => i.src.startsWith('blob:')), 'cinq photos affichées');
+      } finally { scene.remove(); }
+      eq(B.revoquerUrlsDeBlob(), 5, 'T-C12 (vague finale, constat 14) : les cinq URL blob: des vignettes sont créées par urlDeBlob (src/core/blob-urls.js) — suivies, donc révoquées au changement de route comme celles de recipe.js et book.js (jamais un blob de plusieurs Mo retenu jusqu’au rechargement)');
+    }));
+
+    await run('T-C25 (vague finale, constat 16) « Annuler » (signal) pendant la transition de départ : l’appel ne part pas, echec(annule)', () => withRepo(async (repo, db) => {
+      const UI = await import('../src/ui/import-cible.js');
+      await poserBibliotheque(repo, db, { octets: true, seances: { ss1: ['p1', 'p2'] } });
+      await db.mutate({ puts: { imports: [{ ...ligneJournal({ id: 'imp_sg', edition_id: 'ed1', scan_session_id: 'ss1', page_ids: ['p1', 'p2'] }), status: 'echec', erreur: { raison: 'coupe', extra: {} } }] }, origin: 'device' });
+      const ff = fauxFetch([200, corpsModele(blocsDe(['p1', 'p2']))]);
+      const ctl = new AbortController();
+      let ouvrir = () => {}; let retenue = false;
+      const porte = new Promise((r) => { ouvrir = r; });
+      const lent = { ...repo, transitionner: async (s, k, o) => { if (!retenue && s === 'imports') { retenue = true; await porte; } return repo.transitionner(s, k, o); } };
+      try {
+        const vol = UI.lancerVol('imp_sg', D.executerIndex, { ctx: await ctxDe(repo, db), repo: lent, fetch: ff.fetch, maintenant: () => NOW, signal: ctl.signal, lecture: { kind: 'index', importId: 'imp_sg', pageIds: ['p1', 'p2'], editionId: 'ed1', sessionId: 'ss1', cle: null } });
+        await attendre(() => retenue, 'transition de départ retenue');
+        ctl.abort(); ouvrir();
+        const r = await vol;
+        const l = await db.get('imports', 'imp_sg');
+        eq([r.issue, r.raison, ff.appels.length, l.status, l.erreur?.raison, UI.volEnCours()], ['echec', 'annule', 0, 'echec', 'annule', null], 'T-C25 (vague finale, constat 16 ; FV-vol-sans-signal) : le signal du panneau levé APRÈS le dernier contrôle des gardes, pendant la transition de départ, est relayé à l’appel (écouteur abort de volUnique) : aucun POST, echec(annule), vol libéré');
+      } finally { UI.reinitialiserImportCible(); }
+    }));
+
+    await run('T-C14 (vague finale, constat 17) « Créer {n} références » sur une lecture devenue illisible en base : le panneau relit et le dit', () => withRepo(async (repo, db) => {
+      const I = await import('../src/ui/import.js');
+      await poserBibliotheque(repo, db);
+      await db.mutate({ puts: { imports: [ligneAVerifier({ id: 'imp_f3', resultat: C })] }, origin: 'device' });
+      const scene = nouvelleScene();
+      try {
+        const ctx = await ctxDe(repo, db);
+        const p = I.indexEntriesPanel(ctx.scan_sessions[0], ctx, () => [], { repo, toast: () => {}, confirmer: async () => false, maintenant: () => NOW, importId: 'imp_f3' });
+        scene.append(p);
+        await attendre(() => !!p.querySelector('[data-role="entrees-lues"]'), 'tableau rendu');
+        // Reçue (synchro) après le rendu : une photo de la lecture n'est plus une page de la ligne ; la clé de la lecture (id, départ, résultat) est inchangée.
+        await db.put('imports', { ...(await db.get('imports', 'imp_f3')), page_ids: ENVOI.filter((id) => id !== 'p4') });
+        p.querySelector('[data-role="creer-references"]').click();
+        await attendre(async () => (await db.get('imports', 'imp_f3')).status === 'echec' && p.textContent.includes('Code : illisible'), 'echec(illisible) relu par le panneau');
+        eq([(await db.get('imports', 'imp_f3')).erreur?.raison, !!p.querySelector('[data-role="entrees-lues"]'), p.querySelector('[data-role="zone-saisie"]').hidden, (await db.byIndex('recipes', 'edition_id', 'ed1')).length], ['illisible', false, false, 2], 'T-C14 (vague finale, constat 17 ; FV3-creer-illisible-sans-relecture) : creerReferences → illisible (rien d’écrit) → le panneau RELIT : echec(illisible), « Code : illisible », la zone de texte, aucun tableau, aucune fiche');
+      } finally { scene.remove(); }
+    }));
+
+    await run('T-C16 (vague finale, constats 18 et 21) relecture : la question porte « Relire » ; une NOUVELLE lecture reçue quitte « Saisir à la main »', () => withRepo(async (repo, db) => {
+      const I = await import('../src/ui/import.js');
+      const UI = await import('../src/ui/import-cible.js');
+      await poserBibliotheque(repo, db, { octets: true });
+      await db.mutate({ puts: { imports: [ligneAVerifier({ id: 'imp_f2', resultat: C })] }, origin: 'device' });
+      const scene = nouvelleScene(); const ff = fauxFetch([200, corpsModele(LECTURE_5)]); const options = [];
+      try {
+        const ctx = await ctxDe(repo, db);
+        const p = I.indexEntriesPanel(ctx.scan_sessions[0], ctx, () => [], { repo, toast: () => {}, confirmer: async (q, o) => { options.push(o); return true; }, fetch: ff.fetch, maintenant: () => NOW, importId: 'imp_f2' });
+        scene.append(p);
+        await attendre(() => !lireIndex(p).disabled && !!p.querySelector('[data-role="entrees-lues"]'), 'lecture posée');
+        boutonTexte(p, 'Saisir à la main').click();
+        const avant = [p.etatPanneau().saisie, p.querySelector('[data-role="zone-lecture"]').hidden];
+        lireIndex(p).click();
+        await attendre(async () => ff.appels.length === 1 && (await db.get('imports', 'imp_f2')).status === 'a_verifier' && UI.volEnCours() === null && !p.etatPanneau().vol && !lireIndex(p).disabled, 'nouvelle lecture reçue');
+        eq(options.map((o) => o?.okLabel), ['Relire'], 'T-C17 (vague finale, constat 21 ; N12, FV2-N12-okLabel ; spec § 4.2) : la question de la relecture est posée avec { okLabel: « Relire » }');
+        eq([avant, p.etatPanneau().saisie, p.querySelector('[data-role="zone-lecture"]').hidden, p.querySelector('[data-role="zone-saisie"]').hidden], [[true, true], false, false, true], 'T-C16 (vague finale, constat 18 ; FV2-saisie-persistante) : « Saisir à la main », puis « Lire » (confirmé) → la NOUVELLE lecture reçue quitte la saisie : le tableau payé est visible, la zone de texte cachée');
+      } finally { UI.reinitialiserImportCible(); scene.remove(); }
+    }));
+
+    await run('T-C8 (vague finale, constats 19 et 20) fabricant : bornes 200 du titre et de la section ; role d’une page de recette gardé', async () => {
+      let n = 0; const newId = (p) => `${p}_${++n}`;
+      const long = 'é'.repeat(250);
+      const forgee = { creable: true, cochee: true, title: long, titreLu: long, pageLue: 3, printed_page: 3, section: 'ç'.repeat(250), photo: { page_id: 'pr' } };
+      const res = { photos: [{ page_id: 'pr', printed_page_range: [3, 3], entries: [] }] };
+      const f = D.fabriquerReferences({ aCreer: [forgee] }, { edition: { id: 'ed1', language: 'fr' }, pagesParId: new Map([['pr', { id: 'pr', kind: 'recipe', role: 'index', printed_page: 7 }]]), resultat: res, newId });
+      eq([Array.from(f.recipes[0]?.original_title ?? '').length, f.recipes[0]?.original_title === 'é'.repeat(200), Array.from(f.recipes[0]?.section ?? '').length, f.recipes[0]?.section === 'ç'.repeat(200)], [200, true, 200, true], 'T-C8 (vague finale, constat 19 ; FV-fab-titre-borne, FV-fab-section-borne) : une ligne forgée au titre et à la section de 250 points de code → fiche à 200 points de code exactement (le dernier mur avant recipes)');
+      eq(f.pageUpdates.map((p) => [p.id, p.kind, p.role, p.printed_page_range, p.printed_page]), [['pr', 'recipe', 'index', [3, 3], 7]], 'T-C8 (vague finale, constat 20 ; FV-pageIndexee-role, D-C14, § 8) : une page kind « recipe » qui porte un role « index » périmé le GARDE (la remise à null est hors périmètre) ; plage posée, printed_page intact');
+    });
+
+    await run('T-C13 (vague finale, constat 22) aria-label de la case : le titre borné à 60 points de code', () => withRepo(async (repo) => {
+      const T = await import('../src/ui/table-matieres.js');
+      const t80 = 'Gâteau ' + 'x'.repeat(73);
+      const lu = L.validerLectureIndex({ photos: [{ photo: 1, printed_page_range: [3, 3], entries: [{ title: t80, printed_page: 3, section: null, uncertain: false }] }], uncertain: [] }, { nbPhotos: 1 });
+      const res = D.resultatIndex(lu, ['p1']);
+      const vue = T.panneauLecture({ ligne: ligneAVerifier({ id: 'imp_a60', page_ids: ['p1'], resultat: res }), resultat: res, session: null, ctx: { recipes: [] }, repo });
+      eq([Array.from(t80).length, vue.querySelector('[data-role="entrees-lues"] li input[type=checkbox]')?.getAttribute('aria-label')], [80, `Créer une référence pour « ${Array.from(t80).slice(0, 60).join('')} »`], 'T-C13 (vague finale, constat 22 ; FV2-aria-60, spec § 4.4) : un titre de 80 points de code → l’aria-label de la case n’en dit que les 60 premiers');
+    }));
 
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne
   } catch (error) {

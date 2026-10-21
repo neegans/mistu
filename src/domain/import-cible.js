@@ -219,7 +219,7 @@ export function cibleReprise(ligne) {
 // restent listées). ctx : { imports, scan_sessions, recipesById, editionsById, booksById } ; documentId : le document (onglet) courant ;
 // deviceId : cet appareil. Gestes (spec § 4.5) :
 //   a_lancer → reprendre, ignorer · en_cours → annuler si CE document tient le vol (document_id_vol), sinon aucun (« ailleurs ») ·
-//   a_verifier → reprendre, ignorer · echec → relancer, ignorer ;
+//   a_verifier → reprendre, ignorer · echec → relancer, ignorer (un index : reprendre, ignorer — lot C, vague finale, D-C16) ;
 //   ligne d'un AUTRE appareil (« Photos sur un autre appareil ») : reprendre seulement si un résultat est là, jamais relancer → ignorer seul sinon ;
 //   référence pas encore reçue (recipe_id inconnu ici) → aucun geste ; rien où reprendre (index sans séance) → pas de « reprendre » ;
 //   (ronde 1) référence devenue `available` (complétée ailleurs : l'écran ciblé la refuse) → ignorer seul ; echec sans page → pas de « relancer ».
@@ -255,7 +255,9 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     else if (web) gestes = i.status === 'echec' ? ['relancer', 'ignorer'] : i.status === 'a_verifier' && i.resultat == null ? ['ignorer'] : ['reprendre', 'ignorer'];
     else if (recette?.availability === 'available') gestes = ['ignorer']; // un POST ne servirait à rien : l'écran ciblé refuse une recette qui a son texte
     else if (autreAppareil) gestes = i.status === 'a_verifier' && i.resultat != null ? ['reprendre', 'ignorer'] : ['ignorer'];
-    else gestes = i.status === 'echec' ? ['relancer', 'ignorer'] : ['reprendre', 'ignorer'];
+    // Lot C, vague finale (constat 3 ; D-C16, § 10 pas 6) : un INDEX en échec se REPREND (le panneau de sa séance, ses pages cochées) — son « Relancer »
+    // est lire() du panneau (décocher pour lire moins), jamais un second appel sur les mêmes photos depuis la section.
+    else gestes = i.status === 'echec' && i.kind !== 'index' ? ['relancer', 'ignorer'] : ['reprendre', 'ignorer'];
     if (!cible) gestes = gestes.filter((g) => g !== 'reprendre');
     // Un vol sans page serait refusé (sans_page) sans rien dire ; une lecture web n'a jamais de page (P-10), mais sans recipe_id (forme reçue) elle
     // n'a aucun signet à relire : « Réessayer » ne pourrait jamais aboutir (ronde 1 ; lancerLecture la refuse `inconnu`) — « Ignorer » seul reste.

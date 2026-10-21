@@ -12,12 +12,12 @@ import * as repoModule from '../model/repo.js';
 import { remoteDeCeCompte } from '../sync/tables.js';
 import { sha256Hex } from '../core/hash.js';
 import { assertVocabulaire } from '../domain/vocabulaire.js';
-import { providerFrom, nettoyer } from '../domain/llm.js';
+import { providerFrom, uneLigne } from '../domain/llm.js';
 import { seanceDUnImportCible, importOuvert } from '../domain/import-cible.js';
 import { cleReference, BORNE_RAW_ENTRY, ligneOuverteDeSeance, pagesALire, revaliderResultatIndex, planCreation, executerIndex } from '../domain/table-matieres.js';
 import { pageHeader, section, emptyState, select, field, carteConnexion, pdfFrame, libelleLivre, sessionAssistant, contexteFichiers, vignettesDePages, boutonTelechargerPages, gesteTelechargement } from './components.js';
 import { demarrerConnexion } from './settings.js';
-import { lancerVol, annulerVol, volEnCours, estEnLigne, texteRefus, relireDuJournal, cleLecture, BATTEMENT_MS } from './import-cible.js';
+import { lancerVol, annulerVol, volEnCours, estEnLigne, texteRefus, relireDuJournal, cleLecture, ecouterVol, BATTEMENT_MS } from './import-cible.js';
 import { panneauLecture, texteEchecIndex, ligneEtatLecture, ligneIncertain, texteQuota } from './table-matieres.js';
 
 const INTENTIONS = ['index', 'recette'];
@@ -393,10 +393,11 @@ export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId 
     if (texte) toast(texte); // sans_page, inconnu, transition : un autre onglet a tranché — le redessin suffit
   }
   // « Annuler » (§ 4.2) : la ligne en vol (annulerVol : fetch abandonné, echec(annule)) ; pendant les gardes, la tenue n'a pas encore de ligne — le
-  // signal du panneau l'abandonne : rien ne part, rien n'est écrit (ronde 1 de T4, constats 4 et 6).
+  // signal du panneau l'abandonne : rien ne part, rien n'est écrit (ronde 1 de T4, constats 4 et 6). Vague finale (constat 1) : seulement le vol de CE
+  // panneau ou de SA ligne ; sans vol à annuler (fini entre-temps), le panneau relit et montre l'état réel — jamais un bouton sans effet.
   async function annuler() {
     const id = volEnCours()?.importId;
-    if (id) await annulerVol(id); else if (etat.lisant) etat.abandon?.abort(); else return;
+    if (id && (etat.lisant || id === etat.ligne?.id)) await annulerVol(id); else if (etat.lisant) etat.abandon?.abort();
     await redessiner();
   }
   // « Ignorer » (état 4) : la ligne a_lancer MONTRÉE (T4-R2 : sa clé revérifiée dans la transaction), finished_at posé.
@@ -427,6 +428,15 @@ export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId 
   dessiner();
   lierAssistant();
   if (session) redessiner();
+  // Vague finale (constat 1) : le panneau suit le vol de CE document (ecouterVol) tant qu'il est monté — une instance recréée pendant le vol de sa ligne
+  // (retour arrière, « + Photographier », « Retirer », livre changé), ou ouverte pendant un vol lancé hors d'elle, se redessine à la pose et à la fin du
+  // vol, sans geste. Comme la phrase de séance (lot G) : un panneau jamais monté se désabonne au tour suivant, un panneau monté puis quitté au premier
+  // avis qui le trouve détaché.
+  if (session) {
+    let vu = false;
+    const desabonner = ecouterVol(() => { if (!panel.isConnected) { if (vu) desabonner(); return; } redessiner(); });
+    setTimeout(() => { vu = true; if (!panel.isConnected) desabonner(); }, 0);
+  }
   panel.etatPanneau = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, saisie: etat.saisie, vol: etat.lisant || (!!etat.ligne && volEnCours()?.importId === etat.ligne.id) });
   return panel;
 }
@@ -456,12 +466,12 @@ export async function creerDepuisSaisie(texte, { session = null, ctx, editionId 
   const created = [];
   let dupes = 0;
   for (const e of entries) {
-    const titre = borner(nettoyer(e.title) ?? '', 200);
+    const titre = borner(uneLigne(e.title) ?? '', 200); // vague finale (constat 2) : une ligne (une fin de ligne collée vaut une espace), comme fabriquerReferences
     if (!titre) continue; // fait seulement d'invisibles (collé d'un PDF) : pas de fiche, comme fabriquerReferences
     const k = cleReference(titre, e.printed_page);
     if (seen.has(k)) { dupes++; continue; }
     seen.add(k);
-    const fiche = { id: repo.newId('rc'), edition_id: edId, original_title: titre, original_language: edition?.language || null, availability: 'reference_only', verification_state: 'unverified', printed_page: e.printed_page, section: null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: presentes, current_version_id: null, ingredient_ids: [], index_page_id: null, raw_entry: borner(nettoyer(e.raw) ?? '', BORNE_RAW_ENTRY), index_uncertain: false };
+    const fiche = { id: repo.newId('rc'), edition_id: edId, original_title: titre, original_language: edition?.language || null, availability: 'reference_only', verification_state: 'unverified', printed_page: e.printed_page, section: null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: presentes, current_version_id: null, ingredient_ids: [], index_page_id: null, raw_entry: borner(uneLigne(e.raw) ?? '', BORNE_RAW_ENTRY), index_uncertain: false };
     assertVocabulaire(fiche, 'recipes'); // D-12 : « Créer les références » est un fabricant de recipes comme les autres (spec import-cible § 3.3)
     created.push(fiche);
   }
@@ -473,7 +483,9 @@ export async function creerDepuisSaisie(texte, { session = null, ctx, editionId 
   const ligne = importId && cle ? await repo.get('imports', importId) : null;
   let ferme = false;
   try {
-    if (ligne?.kind === 'index' && STATUTS_FERMABLES.includes(ligne.status) && cleLecture(ligne) === cle) {
+    // Vague finale (constat 8, la garde de creerReferences) : la ligne n'est fermée que si au moins une fiche est créée — jamais une lecture payée close
+    // sur zéro référence (toutes les lignes tapées en double ou vides) ; sinon les pages seules, et la lecture reste à reprendre.
+    if (created.length && ligne?.kind === 'index' && STATUTS_FERMABLES.includes(ligne.status) && cleLecture(ligne) === cle) {
       const vers = ligne.status === 'a_verifier' ? 'enregistre' : 'ignore';
       const fin = maintenant();
       const fermer = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', ligne.id, c.status); return { status: vers, reponse_brute: null, finished_at: fin }; };

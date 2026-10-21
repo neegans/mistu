@@ -43,8 +43,17 @@ if (typeof window !== 'undefined') {
   window.addEventListener('offline', () => { enLigneFlag = false; majEnLigneToutes(); });
 }
 export const estEnLigne = () => enLigneFlag; // l'état réseau que le vol lit (lot C : le panneau d'index ne pose pas la question de la relecture hors ligne)
-export function reinitialiserImportCible() { reinitialiserVol(); vues.clear(); enLigneFlag = typeof navigator === 'undefined' ? true : navigator.onLine !== false; } // tests seulement
-function notifier() { for (const v of [...vues]) { if (!v.root.isConnected) { vues.delete(v); continue; } v.redessiner(); } }
+// Vague finale du lot C (constat 1) : les abonnés au vol de CE document — le panneau d'index (src/ui/import.js) : une instance recréée pendant le vol de sa
+// ligne, ou ouverte pendant un vol lancé hors d'elle, se redessine à la pose et à la fin du vol (jamais figée sur « Lecture des pages… »). Appelés à
+// chaque notifier() (prise du vol, ligne posée, fin, « Annuler », tenirVol / libererVol) ; l'abonné gère lui-même son démontage. Rend le désabonnement.
+// Les vols de la lecture web (src/ui/import-web.js) ne passent pas par ce notifier (dette « notification croisée » du lot B, inchangée).
+const ecouteurs = new Set();
+export function ecouterVol(fn) { ecouteurs.add(fn); return () => { ecouteurs.delete(fn); }; }
+export function reinitialiserImportCible() { reinitialiserVol(); vues.clear(); ecouteurs.clear(); enLigneFlag = typeof navigator === 'undefined' ? true : navigator.onLine !== false; } // tests seulement
+function notifier() {
+  for (const v of [...vues]) { if (!v.root.isConnected) { vues.delete(v); continue; } v.redessiner(); }
+  for (const fn of [...ecouteurs]) { try { fn(); } catch (e) { logError('import_cible.ecouteur', { error: e }); } }
+}
 // Vague finale (I-7 dans les deux sens) : une lecture HORS journal (« Extraire » de « Corriger », recette existante) tient le vol du document le temps
 // de son appel — sans ligne (importId null : aucun « Annuler » dans la section), mais lancerExtraction la voit et rend vol_tenu. Rend le jeton, ou
 // null quand un vol est déjà tenu ; libererVol(jeton) en finally. Lot B (D-B13) : le jeton est une tenue de ./vol.js — LE vol du document, celui
@@ -134,7 +143,13 @@ async function partirLecture(repo, lecture, pageIds, enVol, suivi) {
       return { ...enVol, page_ids: [...pageIds], resultat: null };
     };
     try { await repo.transitionner('imports', importId, { attendus: ['a_lancer', 'a_verifier', 'echec'], patch: reprise }); suivi.importId = importId; return importId; }
-    catch (e) { if (!estRefus(e) || autreLecture || typeof lecture.cle === 'string') throw e; } // terminée, en vol ailleurs, d'une autre sorte ou ciblée : une ligne neuve
+    catch (e) {
+      if (!estRefus(e) || autreLecture || typeof lecture.cle === 'string') throw e;
+      // Vague finale du lot C (constat 12 ; spec § 11 : « le second onglet qui tape Lire sur la même ligne est refusé ») : le panneau (`cle` posée, même
+      // nulle) ne part sur une ligne neuve que si la sienne est TERMINÉE ou absente — relue en_cours (un autre onglet vient de la relancer) ou encore
+      // ouverte d'une autre façon, le refus remonte (`transition`, l'écran relit) : jamais deux lignes ni deux appels comptés pour une séance.
+      if (garde && importOuvert(await repo.get('imports', importId))) throw e;
+    } // terminée, d'une autre sorte ou ciblée (l'éditeur, sans `cle`) : une ligne neuve
   }
   const ligne = await repo.ouvrirImport({ kind, edition_id: lecture.editionId ?? null, scan_session_id: lecture.sessionId ?? null, page_ids: [...pageIds] });
   suivi.importId = ligne.id;

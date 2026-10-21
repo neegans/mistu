@@ -10,6 +10,7 @@ import { logError } from '../core/log.js';
 import { borner } from '../core/bornes.js';
 import * as repoModule from '../model/repo.js';
 import { displayUrl } from '../sync/mime.js';
+import { urlDeBlob } from '../core/blob-urls.js';
 import { ordrePropose, positionsProposees, reordonnerSeance, memeOrdre, lignesTableau, trierLignes, recalculer, planCreation, compteur, fabriquerReferences, revaliderResultatIndex, pageIndexee } from '../domain/table-matieres.js';
 import { deplacerPage } from '../domain/import-cible.js';
 import { cleLecture, texteEchec } from './import-cible.js';
@@ -45,8 +46,11 @@ export async function creerReferences(ligne, lignes, { repo = repoModule, ctx = 
   const existantes = await repo.byIndex('recipes', 'edition_id', edition.id);
   const plan = planCreation(recalculer(liste(lignes), existantes));
   const ids = [...new Set([...resultat.photos.map((p) => p.page_id), ...liste(lue.page_ids)].filter((id) => typeof id === 'string'))];
+  // Vague finale (constat 13, défense en profondeur, I-C2) : seules les pages de la SÉANCE de la ligne (relue) sont liées ou réécrites — une ligne reçue
+  // qui cite la page d'une autre séance (un autre livre) ne la modifie jamais ; ses entrées sont créées sans elle (comme une page absente).
+  const seanceL = typeof lue.scan_session_id === 'string' ? await repo.get('scan_sessions', lue.scan_session_id) : null;
   const pagesParId = new Map();
-  for (const id of ids) { const p = await repo.get('source_pages', id); if (p) pagesParId.set(id, p); }
+  for (const id of ids) { if (!liste(seanceL?.page_ids).includes(id)) continue; const p = await repo.get('source_pages', id); if (p) pagesParId.set(id, p); }
   const { recipes, pageUpdates } = fabriquerReferences(plan, { edition, pagesParId, resultat, pageIdsLigne: lue.page_ids, newId: repo.newId });
   const plages = new Map(pageUpdates.map((p) => [p.id, p.printed_page_range]));
   const citees = new Set(recipes.flatMap((r) => [r.index_page_id, ...liste(r.source_page_ids)]).filter((id) => typeof id === 'string'));
@@ -127,7 +131,8 @@ export function panneauLecture({ ligne, resultat, session = null, ctx = null, re
     if (images.has(id)) return images.get(id);
     const img = el('img', { loading: 'lazy' });
     const page = ctx?.pagesById instanceof Map ? ctx.pagesById.get(id) : null;
-    if (page?.sha256) Promise.resolve(repo.getFile(page.sha256)).then((f) => { const u = displayUrl(f); if (u) img.src = u; }).catch(() => {});
+    // Vague finale (constat 14) : l'URL blob: est créée par urlDeBlob (suivie, révoquée au changement de route par app.js, comme recipe.js et book.js).
+    if (page?.sha256) Promise.resolve(repo.getFile(page.sha256)).then((f) => { const u = displayUrl(f, urlDeBlob); if (u) img.src = u; }).catch(() => {});
     images.set(id, img);
     return img;
   };
@@ -182,9 +187,12 @@ export function panneauLecture({ ligne, resultat, session = null, ctx = null, re
       const L = await repo.get('imports', etat.ligne.id);
       if (!L || cleLecture(L) !== cle) { if (typeof surChangement === 'function') await surChangement(); return; } // jamais l'ordre de R1 sur une autre lecture
       const seanceLue = await repo.get('scan_sessions', session.id);
+      const deLaSeance = Array.isArray(seanceLue?.page_ids) ? seanceLue.page_ids : etat.seance;
       const relues = new Map();
-      for (const id of ordre) { const p = await repo.get('source_pages', id); if (p) relues.set(id, p); }
-      const prop = positionsProposees(ordre, relues, Array.isArray(seanceLue?.page_ids) ? seanceLue.page_ids : etat.seance);
+      // Vague finale (constat 13, défense en profondeur) : une position n'est posée que sur une page de la SÉANCE — jamais sur la page d'une autre séance
+      // qu'une ligne reçue citerait (sa numérotation resterait intacte) ; page_ids de la ligne = l'ordre choisi, inchangé (E-24, M-C7).
+      for (const id of ordre) { if (!deLaSeance.includes(id)) continue; const p = await repo.get('source_pages', id); if (p) relues.set(id, p); }
+      const prop = positionsProposees(ordre, relues, deLaSeance);
       const quand = maintenant();
       const sesPhotos = (c) => { const r = revaliderResultatIndex(c.resultat, c.page_ids); const a = r ? r.photos.map((p) => p.page_id) : []; return new Set(ordre).size === ordre.length && a.length === ordre.length && ordre.every((id) => a.includes(id)); };
       const ecrite = await repo.transitionner('imports', L.id, {
