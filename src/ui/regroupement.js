@@ -14,14 +14,14 @@ import { on, emit } from '../core/bus.js';
 import { urlDeBlob } from '../core/blob-urls.js';
 import { borner } from '../core/bornes.js';
 import { TransitionRefusee } from '../core/db.js';
-import { typeAffichage } from '../sync/mime.js';
+import { typeAffichage, displayUrl } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
 import { classerPhotos, MAX_TOKENS_CLASSER, MAX_PHOTOS_CLASSEMENT } from '../domain/llm.js';
 import { IMPORTS_OUVERTS, lotDe } from '../domain/import-cible.js';
 import { cleClassement, resultatClassement, revaliderResultatClassement, regroupementInitial, deplacerVers, bougerDansGroupe, retirerDuGroupe, brouillonDe, restaurerBrouillon, candidatsReference, referencesOccupees, proposerAppariements, filtrerReferences, lecturesDuLot, suiteDuLot, pagesEnCours } from '../domain/classement.js';
 import { trierParSeance, pagesALire, ligneOuverteDeSeance } from '../domain/table-matieres.js';
 import { lancerVol, lancerExtraction, annulerVol, volEnCours, estEnLigne, texteEchec, BATTEMENT_MS } from './import-cible.js';
-import { sessionAssistant, carteConnexion, texteDesChamps, TEXTE_CONNEXION } from './components.js';
+import { sessionAssistant, carteConnexion, messageGardeRefusee, texteDesChamps, TEXTE_CONNEXION } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { messageErreurImage } from './livre-ajout.js';
 
@@ -43,6 +43,12 @@ if (typeof window !== 'undefined') {
 }
 const titre60 = (r) => borner(typeof r?.original_title === 'string' ? r.original_title : '', 60);
 const libelleReference = (r) => (Number.isInteger(r?.printed_page) ? `${titre60(r)} — ${t('p.')} ${r.printed_page}` : titre60(r));
+// Les octets d'une page sont-ils ICI (ronde 1 de T3, constat 23 : UNE règle pour trois appelants — verifierOctets, octetsPresents, creerLesLectures) : une
+// empreinte, une ligne files lisible, un Blob ; une erreur de lecture compte pour « absents ». Chaque appelant garde sa règle pour une page sans empreinte.
+async function octetsIci(repo, sha256) {
+  if (!sha256) return false;
+  try { return (await repo.getFile(sha256))?.blob instanceof Blob; } catch { return false; }
+}
 const texteRefusLire = (raison) => (raison === 'pages' ? t('Rien n’a été lancé : une photo est déjà en cours d’import ailleurs.')
   : raison === 'octets_absents' ? t('Les photos de cette séance ne sont pas sur cet appareil.')
     : t('Rien n’a été lancé : ce classement, le livre de la séance ou une référence choisie a changé entre-temps.'));
@@ -112,12 +118,12 @@ export async function creerLesLectures(classementId, { cle, editionId = null, et
   if (pagesGroupes.some((p) => prises.has(p))) return refuse('pages');
   const pagesParId = new Map();
   for (const id of pagesGroupes) { const p = await repo.get('source_pages', id); if (p) pagesParId.set(id, p); }
-  for (const p of pagesParId.values()) {
-    let f = null;
-    try { f = p.sha256 ? await repo.getFile(p.sha256) : null; } catch { f = null; }
-    if (!(f?.blob instanceof Blob)) return refuse('octets_absents');
-  }
+  for (const p of pagesParId.values()) if (!(await octetsIci(repo, p.sha256))) return refuse('octets_absents');
   const { lignes, references } = lecturesDuLot(etat, choix, { classement: ligne, editionId, sessionId: ligne.scan_session_id ?? null, deviceId, newId, pagesParId });
+  // Ronde 1 (constats 17 et 27) : AUCUNE ligne à créer — aucun groupe (n = 0 : le bouton est éteint, un rendu périmé peut le rallumer), ou toutes les
+  // photos des groupes supprimées ailleurs — → refus, rien d'écrit : le classement payé n'est jamais enregistré pour rien (D-D21) ; la fonction derrière
+  // un bouton éteint a sa propre garde.
+  if (!lignes.length) return refuse('classement');
   try {
     await repo.transitionner('imports', classementId, {
       attendus: ['a_verifier'],
@@ -194,10 +200,11 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
   const ligneSousBouton = (r) => (r?.carte ? carteConnexion(connecter, ctx) : r?.attente ? null
     : el('small', { class: 'muted', dataset: { role: 'raison-classer' } }, r ? r.texte : t('Un classement = un appel à l’assistant ; lire les recettes coûtera ensuite un appel par recette.')));
 
-  // État 1 : ce que la barre de sélection place AVANT « Regrouper en recette » (rien à moins de deux cochées) ; aux états 4 et 5, le panneau dépend de
+  // État 1 : ce que la barre de sélection place AVANT « Regrouper en recette » (rien à moins de deux cochées) ; aux états 3, 4 et 5, le panneau dépend de
   // la sélection : il se redessine à chaque redessin de la barre.
   racine.actionsSelection = () => {
-    if (ouverte()) { if (['a_lancer', 'echec'].includes(etat.ligne.status)) dessiner(); return []; }
+    // Ronde 1 de T3 (constat 19) : l'état 3 aussi — « Reclasser » y lit la sélection (pagesALire) : il suit chaque case cochée, jamais un clic muet.
+    if (ouverte()) { if (['a_lancer', 'echec', 'a_verifier'].includes(etat.ligne.status)) dessiner(); return []; }
     const coches = trierParSeance(presentes(getSelection()), pagesSeance());
     if (coches.length < 2) return [];
     const r = raisonEteint(coches, null);
@@ -245,19 +252,17 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     if (!sha) return;
     if (urls.has(sha)) { img.src = urls.get(sha); return; }
     Promise.resolve(repo.getFile(sha)).then((f) => {
-      const type = typeAffichage(f); // F-9 (lot G) : le type du blob dans la liste blanche gagne (comme poserImage d'import-cible.js) ; blob retypé avec lui
-      if (!(f?.blob instanceof Blob) || !type || !type.startsWith('image/')) return;
-      if (!urls.has(sha)) urls.set(sha, urlDeBlob(f.blob.type === type ? f.blob : new Blob([f.blob], { type })));
+      // Ronde 1 (constat 18) : une miniature est une IMAGE de la liste blanche (typeAffichage, F-9 du lot G : le type du blob gagne) ; l'URL vient de
+      // displayUrl — la seule copie de la règle de retypage (f8cfafa) —, créée par urlDeBlob (suivie, révoquée par app.js) et gardée par empreinte.
+      if (!typeAffichage(f)?.startsWith('image/')) return;
+      if (!urls.has(sha)) urls.set(sha, displayUrl(f, urlDeBlob));
       img.src = urls.get(sha);
     }).catch(() => {});
   }
   async function verifierOctets(R) {
     const m = new Map();
     for (const pid of [...R.etat.groupes.flatMap((g) => g.page_ids), ...R.etat.aPart.map((a) => a.page_id)].slice(0, MAX_PHOTOS_CLASSEMENT)) {
-      const p = ctx?.pagesById?.get(pid);
-      let f = null;
-      try { f = p?.sha256 ? await repo.getFile(p.sha256) : null; } catch { f = null; }
-      m.set(pid, f?.blob instanceof Blob);
+      m.set(pid, await octetsIci(repo, ctx?.pagesById?.get(pid)?.sha256));
     }
     R.octets = m;
     if (etat.regroupement === R) dessiner();
@@ -363,13 +368,19 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     const prisesDe = (pages) => pages.filter((p) => x.prises.has(p)).length;
     const commune = !enLigne() ? { texte: t('Tu es hors ligne.') }
       : (etat.session === undefined || R.octets === null) ? { attente: true }
-        : !etat.session ? { texte: t(TEXTE_CONNEXION) }
+        // Ronde 1 (constat 29, F-7 du lot passerelle) : la garde de compte a refusé l'adresse → la carte dit son message, la ligne n'invite pas à se connecter.
+        : !etat.session ? (messageGardeRefusee(ctx?.sync) ? { attente: true } : { texte: t(TEXTE_CONNEXION) })
           : (volEnCours() || lotEnCours()) ? { texte: t('Une lecture est en cours : attends sa fin ou annule-la.') }
             : manquent ? { texte: t('Les photos de cette séance ne sont pas sur cet appareil.') } : null;
     const kLire = prisesDe(pagesGroupes);
     const raisonLire = commune ?? (kLire ? { texte: t('{k} photo(s) déjà en cours d’import ailleurs : retire-les de leur recette, ou termine l’autre import.', { k: kLire }) } : null);
     const aReclasser = pagesALire(presentes(getSelection()), L, pagesSeance(), ctx?.pagesById);
-    const raisonReclasser = commune ?? (aReclasser.length < 2 || aReclasser.length > MAX_PHOTOS_CLASSEMENT || prisesDe(aReclasser) ? { attente: true } : null);
+    // Ronde 1 (constat 19) : la raison qui éteint « Reclasser » pour la SÉLECTION est dite (les textes de raisonEteint, I-D4) — jamais un bouton éteint en
+    // silence ; elle va sur sa propre ligne (raison-reclasser) : la ligne de « Lire » reste la seule de § 4.3.
+    const kReclasser = prisesDe(aReclasser);
+    const raisonReclasser = commune ?? (aReclasser.length > MAX_PHOTOS_CLASSEMENT ? { texte: t('Classe au plus 10 photos à la fois : décoche-en {k}.', { k: aReclasser.length - MAX_PHOTOS_CLASSEMENT }) }
+      : kReclasser ? { texte: t('Décoche les photos déjà en cours d’import ({k}).', { k: kReclasser }) }
+        : aReclasser.length < 2 ? { texte: t('Coche au moins deux photos de cette séance.') } : null);
     const blocs = [el('div', { dataset: { role: 'hors-ligne' } }, ...(enLigne() ? [] : [el('div', { class: 'status warn' }, t('Tu es hors ligne.'))]))];
     if (etat.session === null) blocs.push(carteConnexion(connecter, ctx));
     if (n === 0) blocs.push(el('p', { class: 'muted' }, t('Aucune recette à lire : déplace des photos vers une recette, ou ignore ce classement.')));
@@ -379,6 +390,7 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
       el('button', { type: 'button', class: 'btn', dataset: { role: 'ignorer-classement' }, disabled: etat.occupe, onClick: ignorerClassement }, t('Ignorer ce classement'))));
     if (!raisonLire) blocs.push(el('small', { class: 'muted', dataset: { role: 'raison-lire' } }, t('Une lecture = un appel à l’assistant, compté dans ton quota du jour.')));
     else if (raisonLire.texte) blocs.push(el('small', { class: 'muted', dataset: { role: 'raison-lire' } }, raisonLire.texte));
+    if (raisonReclasser && raisonReclasser !== commune && raisonReclasser.texte) blocs.push(el('small', { class: 'muted', dataset: { role: 'raison-reclasser' } }, raisonReclasser.texte));
     return blocs;
   }
   function ecranRegroupement(L) {
@@ -389,6 +401,8 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
       etat.regroupement = R;
     }
     const R = etat.regroupement;
+    // Ronde 1 (constat 22) : ecranRegroupement est un RENDU qui écrit R.editionId et R.affiches (l'édition et les choix RENDUS) ; une action ne relit
+    // JAMAIS R.* après un dessiner() — elle prend ce qui est rendu AVANT (lireRecettes : `rendu`), sinon elle agirait sur un rendu que personne n'a vu.
     R.editionId = etat.edition; // l'édition de la séance RELUE (D-D23) : brouillon gardé quand le livre change
     const candidats = candidatsReference(etat.recettes, { editionId: R.editionId, imports: etat.imports });
     const occupees = referencesOccupees(etat.recettes, { editionId: R.editionId, imports: etat.imports });
@@ -444,9 +458,11 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     if (!R || !L || L.status !== 'a_verifier') return Promise.resolve();
     const cle = R.cle;
     const brouillon = brouillonDe(R.etat, R.choix, L.started_at);
+    // Ronde 1 (constat 25) : un brouillon REFUSÉ (la clé ou le statut ont changé ailleurs) n'est jamais gardé en silence — le panneau relit la ligne et
+    // montre l'état réel ; l'écriture en attente tombe avec lui (elle serait refusée de même).
     etat.ecriture = repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: (c) => { if (cleClassement(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { brouillon }; } })
-      .catch((e) => { if (!(e instanceof TransitionRefusee)) logError('regroupement.brouillon', { error: e, id: L.id }); })
-      .finally(() => { etat.ecriture = null; if (etat.aEcrire) { etat.aEcrire = false; ecrireBrouillon(); } });
+      .then(() => false, (e) => { if (e instanceof TransitionRefusee) return true; logError('regroupement.brouillon', { error: e, id: L.id }); return false; })
+      .then((refuse) => { etat.ecriture = null; if (refuse) { etat.aEcrire = false; synchroniser({ forcer: true }); } else if (etat.aEcrire) { etat.aEcrire = false; ecrireBrouillon(); } });
     return etat.ecriture;
   }
   function geste(nouvelEtat, focus = null) {
@@ -481,10 +497,7 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
   async function octetsPresents(pageIds) {
     for (const id of pageIds) {
       const p = await repo.get('source_pages', id);
-      if (!p?.sha256) continue;
-      let f = null;
-      try { f = await repo.getFile(p.sha256); } catch { f = null; }
-      if (!(f?.blob instanceof Blob)) return false;
+      if (p?.sha256 && !(await octetsIci(repo, p.sha256))) return false; // une page sans empreinte ne bloque pas ici (lancerVol la juge)
     }
     return true;
   }
@@ -494,7 +507,8 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     else if (r.raison === 'image') toast(messageErreurImage({ code: r.code }));
     else if (r.raison === 'hors_ligne') toast(t('Tu es hors ligne.'));
     else if (r.raison === 'vol_tenu') toast(t('Une lecture est déjà en cours : annule-la d’abord.'));
-    else if (r.raison === 'non_connecte') etat.session = null; // la carte revient au redessin ; inconnu, transition, sans_page, sorte : redessin silencieux
+    // non_connecte (classer() pose la session : la carte revient au redessin ; ronde 1, constat 24 — direRefus ne fait que DIRE), inconnu, transition,
+    // sans_page, sorte : redessin silencieux.
   }
   // « Classer » (état 1), « Reclasser » (états 3 et 4), « Classer » d'une ligne à lancer (état 5) : le verrou d'instance AVANT tout await ; les pages
   // COMPTÉES (2 à 10) avant tout décodage (D-D1, S-10) ; réseau, session, photos déjà en cours d'import et octets vérifiés AVANT toute écriture (un clic
@@ -520,6 +534,11 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
       let id = L?.id ?? null;
       if (L?.status === 'a_verifier') {
         if (!(await confirmer(t('Reclasser remplace ce classement et tes changements de groupes, et coûte un appel. Continuer ?'), { okLabel: t('Reclasser') }))) return;
+        // Ronde 1 (constat 26) : le dialogue a pu durer — réseau et session revérifiés AVANT d'effacer le classement payé et le brouillon (sinon la remise à
+        // zéro serait écrite, puis lancerVol refuserait : un classement jeté sans appel) ; rien d'écrit, le redessin le montre.
+        if (!enLigne()) { toast(t('Tu es hors ligne.')); return; }
+        etat.session = await sessionAssistant(ctx);
+        if (!etat.session) return;
         const cle = cleClassement(L);
         await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: (c) => { if (cleClassement(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return remiseAZero(pages); } });
       } else if (L && !memeListe(pages, L.page_ids)) {
@@ -529,7 +548,7 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
         id = ligne.id; etat.ligne = ligne;
       }
       const r = await lancerVol(id, executerClassement, { ctx, repo, fetch: fetchInjecte, maintenant, enLigne, battementMs, accepte: (l) => l?.kind === 'classement' });
-      if (r.issue === 'refuse') direRefus(r);
+      if (r.issue === 'refuse') { if (r.raison === 'non_connecte') etat.session = null; direRefus(r); }
     } catch (e) { if (!(e instanceof TransitionRefusee)) logError('regroupement.classer', { error: e }); }
     finally { etat.occupe = false; await synchroniser({ forcer: true }); }
   }
@@ -556,6 +575,10 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
   async function lireRecettes() {
     const R = etat.regroupement; const L = etat.ligne;
     if (!R || !L || etat.occupe) return;
+    // Ronde 1 (constat 28) : revérifiés AU CLIC, avant toute écriture (un rendu périmé : l'événement offline relu en différé, un vol posé sans événement) —
+    // le réseau, la session, un vol ou un lot tenus ; le refus est dit, rien n'est écrit, le panneau relu.
+    const refus = !enLigne() ? t('Tu es hors ligne.') : (volEnCours() || lotEnCours()) ? t('Une lecture est déjà en cours : annule-la d’abord.') : null;
+    if (refus || !etat.session) { if (refus) toast(refus); await synchroniser({ forcer: true }); return; }
     // Vérification de la tâche 3 (D-D23, § 4.5) : la clé, l'édition, l'état et les choix RENDUS, pris AVANT le redessin qui éteint le bouton — ce
     // redessin relit etat.edition et les recettes que le bus a pu changer sans redessiner (la signature ne les porte pas) : la personne ne l'a pas vu.
     const rendu = { cle: R.cle, editionId: R.editionId, etat: R.etat, choix: R.affiches };
@@ -565,10 +588,13 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
       if (etat.ecriture) await etat.ecriture;
       const r = await creerLesLectures(L.id, { ...rendu, ctx, repo, maintenant, newId: repo.newId, deviceId: repo.deviceId() });
       if (r.issue === 'refuse') toast(texteRefusLire(r.raison)); else cree = r;
-    } catch (e) { logError('regroupement.lire', { error: e }); }
+    } catch (e) { logError('regroupement.lire', { error: e }); toast(t('Une erreur est survenue')); } // ronde 1 (constat 28) : jamais un clic sans retour
     finally { etat.occupe = false; }
     if (cree) {
-      lireLeLot(L.id, { ctx, repo, fetch: fetchInjecte, maintenant, battementMs, enLigne }).catch((e) => logError('regroupement.lot', { error: e }));
+      // Ronde 1 (constat 28) : un lot refusé (lot_tenu : un autre lot pris pendant la création) est DIT ; les lectures restent à lancer depuis Imports.
+      lireLeLot(L.id, { ctx, repo, fetch: fetchInjecte, maintenant, battementMs, enLigne })
+        .then((r) => { if (r?.issue === 'refuse') toast(t('Une lecture est déjà en cours : annule-la d’abord.')); })
+        .catch((e) => logError('regroupement.lot', { error: e }));
       const n = cree.importIds.length;
       toast(n === 1 ? t('1 recette à lire : suis-la dans Imports.') : t('{n} recettes à lire : suis-les dans Imports.', { n }));
       if (racine.isConnected) navigate('/add?section=imports');
