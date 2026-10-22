@@ -1,29 +1,35 @@
 // Un lot de recettes photographiées (lot D, spec docs/superpowers/specs/2026-10-19-recettes-en-lot-design.md, § 4.2 à 4.6, § 4.8.3) : le panneau
 // « Classement » d'une séance de scan — classer les photos cochées en UN appel (le vol partagé lancerVol de C, outil extraction), montrer le vol, l'échec et
-// la ligne à lancer, puis (tâche 3) l'écran de regroupement, l'appariement proposé, « Lire ces recettes » et la lecture du lot ; et (tâche 5) la
-// proposition de référence de l'éditeur. Tout ce que le module écrit passe par repo.transitionner ou repo.ouvrirImport (I-D1) ; la sortie du modèle est une
-// DONNÉE HOSTILE revalidée avant tout usage et rendue en nœuds texte (I-D2). Le paramètre s'appelle `repo` partout (le test statique le lit). Ce module
-// n'importe jamais src/ui/import.js ni src/ui/recipe-edit.js, qui l'importent (pas de cycle). Tous les textes neufs du lot vivent ici (filet i18n :
-// MODULES_NEUFS). Dépendances injectables { repo, toast, confirmer, fetch, maintenant, battementMs, enLigne } : la suite n'ouvre ni dialogue ni réseau.
+// la ligne à lancer, l'écran de regroupement (groupes corrigeables, brouillon gardé dans la ligne), l'appariement proposé à une référence, « Lire ces
+// recettes » (une transaction gardée par la clé du classement rendu) et la lecture du lot (une à la fois) ; et (tâche 5) la proposition de référence de
+// l'éditeur. Tout ce que le module écrit passe par repo.transitionner ou repo.ouvrirImport (I-D1) ; la sortie du modèle est une DONNÉE HOSTILE revalidée
+// avant tout usage et rendue en nœuds texte (I-D2). Le paramètre s'appelle `repo` partout (le test statique le lit). Ce module n'importe jamais
+// src/ui/import.js ni src/ui/recipe-edit.js, qui l'importent (pas de cycle). Tous les textes neufs du lot vivent ici (filet i18n : MODULES_NEUFS).
+// Dépendances injectables { repo, toast, confirmer, navigate, fetch, maintenant, battementMs, enLigne } : la suite n'ouvre ni dialogue, ni réseau, ni routeur.
 import { el, toast as toastDom, confirmDialog } from '../core/dom.js';
 import { t } from '../core/i18n.js';
+import { navigate as naviguerDom } from '../core/router.js';
 import { logError } from '../core/log.js';
-import { on } from '../core/bus.js';
+import { on, emit } from '../core/bus.js';
+import { urlDeBlob } from '../core/blob-urls.js';
+import { borner } from '../core/bornes.js';
 import { TransitionRefusee } from '../core/db.js';
+import { typeAffichage } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
 import { classerPhotos, MAX_TOKENS_CLASSER, MAX_PHOTOS_CLASSEMENT } from '../domain/llm.js';
-import { IMPORTS_OUVERTS } from '../domain/import-cible.js';
-import { cleClassement, resultatClassement, revaliderResultatClassement, pagesEnCours } from '../domain/classement.js';
+import { IMPORTS_OUVERTS, lotDe } from '../domain/import-cible.js';
+import { cleClassement, resultatClassement, revaliderResultatClassement, regroupementInitial, deplacerVers, bougerDansGroupe, retirerDuGroupe, brouillonDe, restaurerBrouillon, candidatsReference, referencesOccupees, proposerAppariements, filtrerReferences, lecturesDuLot, suiteDuLot, pagesEnCours } from '../domain/classement.js';
 import { trierParSeance, pagesALire, ligneOuverteDeSeance } from '../domain/table-matieres.js';
-import { lancerVol, annulerVol, volEnCours, estEnLigne, texteEchec, BATTEMENT_MS } from './import-cible.js';
-import { sessionAssistant, carteConnexion } from './components.js';
+import { lancerVol, lancerExtraction, annulerVol, volEnCours, estEnLigne, texteEchec, BATTEMENT_MS } from './import-cible.js';
+import { sessionAssistant, carteConnexion, texteDesChamps, TEXTE_CONNEXION } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { messageErreurImage } from './livre-ajout.js';
 
 const horloge = () => new Date().toISOString();
 const liste = (v) => (Array.isArray(v) ? v : []);
 const memeListe = (a, b) => { const A = liste(a); const B = liste(b); return A.length === B.length && A.every((x, i) => x === B[i]); };
-// UN lot en lecture par document (I-D5) : posé avant tout await, libéré en finally (lireLeLot, tâche 3). Les tests seuls le réinitialisent.
+let instances = 0; // les identifiants d'aria-labelledby : un compteur, jamais un identifiant de la base
+// UN lot en lecture par document (I-D5) : posé avant tout await, libéré en finally (lireLeLot). Les tests seuls le réinitialisent.
 let lot = null;
 export const lotEnCours = () => (lot ? { classementId: lot.classementId } : null);
 export function reinitialiserLot() { lot = null; }
@@ -35,6 +41,11 @@ if (typeof window !== 'undefined') {
   window.addEventListener('online', reseau);
   window.addEventListener('offline', reseau);
 }
+const titre60 = (r) => borner(typeof r?.original_title === 'string' ? r.original_title : '', 60);
+const libelleReference = (r) => (Number.isInteger(r?.printed_page) ? `${titre60(r)} — ${t('p.')} ${r.printed_page}` : titre60(r));
+const texteRefusLire = (raison) => (raison === 'pages' ? t('Rien n’a été lancé : une photo est déjà en cours d’import ailleurs.')
+  : raison === 'octets_absents' ? t('Les photos de cette séance ne sont pas sur cet appareil.')
+    : t('Rien n’a été lancé : ce classement, le livre de la séance ou une référence choisie a changé entre-temps.'));
 
 // L'exécutant du classement pour lancerVol (D-D1) : UN appel classerPhotos, puis la correspondance sur les pages ENVOYÉES (C, D-C21).
 export async function executerClassement({ provider, images, pageIds, signal }) {
@@ -52,17 +63,114 @@ export function texteEchecClassement(erreur) {
   return texteEchec(erreur);
 }
 
+// Le sélecteur de repli « Choisir une référence… » (§ 4.4 ; aussi pour la proposition de l'éditeur, D-D19) : un champ de recherche (la saisie ne
+// redessine QUE la liste : le focus reste dans le champ), les 20 premières candidates de filtrerReferences (précédées de `enTete` sans saisie), sans
+// celles de `exclus` (cochées par un autre groupe) ; les occupées ÉTEINTES avec « Import en cours — voir Imports » ; « Nouvelle recette » en bas si
+// `nouvelle`. Libellé : « titre — p. N » composé avec la clé existante « p. ». `surChoix(id | null)`, `surSaisie(texte)`.
+export function selecteurReferences({ candidats = [], occupees = [], exclus = new Set(), enTete = [], saisie = '', surSaisie = null, surChoix, nouvelle = true } = {}) {
+  const racine = el('div', { class: 'stack', dataset: { role: 'selecteur' } });
+  const champ = el('input', { type: 'search', 'aria-label': t('Chercher dans les références de ce livre'), placeholder: t('Chercher dans les références de ce livre'), value: saisie });
+  const zoneListe = el('div', { class: 'stack' });
+  const dessinerListe = () => {
+    const q = champ.value;
+    const libres = liste(candidats).filter((r) => !exclus.has(r.id));
+    const tete = q.trim() ? [] : liste(enTete).map((id) => libres.find((r) => r.id === id)).filter(Boolean);
+    const tous = [...tete, ...filtrerReferences(libres, q).filter((r) => !tete.includes(r))];
+    const visibles = tous.slice(0, 20);
+    const prises = filtrerReferences(occupees, q);
+    const enfants = [];
+    if (visibles.length) enfants.push(el('ul', { class: 'list' }, ...visibles.map((r) => el('li', null, el('button', { type: 'button', class: 'btn', dataset: { role: 'reference', id: r.id }, onClick: () => surChoix(r.id) }, libelleReference(r))))));
+    if (prises.length) enfants.push(el('ul', { class: 'list' }, ...prises.map((r) => el('li', null, el('button', { type: 'button', class: 'btn', disabled: true, dataset: { role: 'reference-occupee', id: r.id } }, libelleReference(r)), el('small', { class: 'muted' }, t('Import en cours — voir Imports'))))));
+    if (tous.length > 20) enfants.push(el('p', { class: 'muted' }, t('{n} autres : affine la recherche.', { n: tous.length - 20 })));
+    if (!visibles.length && !prises.length) enfants.push(el('p', { class: 'muted' }, t('Aucune référence ne correspond.')));
+    if (nouvelle) enfants.push(el('button', { type: 'button', class: 'btn', dataset: { role: 'nouvelle-recette' }, onClick: () => surChoix(null) }, t('Nouvelle recette')));
+    zoneListe.replaceChildren(...enfants);
+  };
+  champ.addEventListener('input', () => { if (typeof surSaisie === 'function') surSaisie(champ.value); dessinerListe(); });
+  racine.append(champ, zoneListe);
+  dessinerListe();
+  return racine;
+}
+
+// « Lire ces recettes » (§ 4.5, D-D4, D-D17, D-D23, I-D7, I-D9) — sans DOM. `cle` et `editionId` : ceux du RENDU ; `choix` : Map(cle → recipe_id | null),
+// les choix effectifs (faits, à défaut les propositions cochées). Toutes les relectures AVANT la transaction ; AUCUNE écriture avant elle ; puis UNE
+// transaction : le classement a_verifier → enregistre (clé rejouée DANS la transaction), les lignes neuves (absente) et une condition d'index par
+// référence cochée. Rend { issue: 'cree', importIds } ou { issue: 'refuse', raison }.
+export async function creerLesLectures(classementId, { cle, editionId = null, etat, choix, ctx = null, repo = repoModule, maintenant = horloge, newId = repoModule.newId, deviceId = repoModule.deviceId() } = {}) {
+  const refuse = (raison) => ({ issue: 'refuse', raison });
+  const ligne = await repo.get('imports', classementId);
+  if (!ligne || ligne.status !== 'a_verifier' || cleClassement(ligne) !== cle) return refuse('classement');
+  if (!revaliderResultatClassement(ligne.resultat, ligne.page_ids)) return refuse('classement');
+  const seance = typeof ligne.scan_session_id === 'string' ? await repo.get('scan_sessions', ligne.scan_session_id) : null;
+  if ((seance?.edition_id ?? null) !== (editionId ?? null)) return refuse('edition');
+  const recettes = editionId ? liste(await repo.byIndex('recipes', 'edition_id', editionId)) : []; // jamais l'index interrogé avec null
+  const imports = liste(await repo.all('imports'));
+  const candidats = new Set(candidatsReference(recettes, { editionId, imports }).map((r) => r.id));
+  for (const id of (choix instanceof Map ? choix.values() : [])) if (id != null && !candidats.has(id)) return refuse('reference');
+  const prises = pagesEnCours(imports, ligne.scan_session_id, { sauf: classementId });
+  const pagesGroupes = liste(etat?.groupes).flatMap((g) => liste(g.page_ids));
+  if (pagesGroupes.some((p) => prises.has(p))) return refuse('pages');
+  const pagesParId = new Map();
+  for (const id of pagesGroupes) { const p = await repo.get('source_pages', id); if (p) pagesParId.set(id, p); }
+  for (const p of pagesParId.values()) {
+    let f = null;
+    try { f = p.sha256 ? await repo.getFile(p.sha256) : null; } catch { f = null; }
+    if (!(f?.blob instanceof Blob)) return refuse('octets_absents');
+  }
+  const { lignes, references } = lecturesDuLot(etat, choix, { classement: ligne, editionId, sessionId: ligne.scan_session_id ?? null, deviceId, newId, pagesParId });
+  try {
+    await repo.transitionner('imports', classementId, {
+      attendus: ['a_verifier'],
+      patch: (c) => { if (cleClassement(c) !== cle) throw new TransitionRefusee('imports', classementId, c.status); return { status: 'enregistre', reponse_brute: null, brouillon: null, finished_at: maintenant() }; },
+      puts: { imports: lignes },
+      conditions: { imports: [...lignes.map((l) => ({ key: l.id, absente: true })), ...references.map((r) => ({ index: 'recipe_id', valeur: r, exclus: IMPORTS_OUVERTS }))] },
+    });
+  } catch (e) { if (e instanceof TransitionRefusee) return refuse('transition'); throw e; }
+  return { issue: 'cree', importIds: lignes.map((l) => l.id) };
+}
+
+// La lecture du lot (§ 4.6, D-D4, D-D10, D-D22, S-3) : UN lot par document, posé avant tout await ; la prise et la libération émettent chacune un change
+// « imports » (la libération n'écrit rien). Liste FIGÉE au départ : les a_lancer de CET appareil du lot, par rang ; chacune tentée une fois, une à la fois,
+// par lancerExtraction avec attendus [a_lancer] (une ligne passée echec ou prise ailleurs depuis le gel est refusée AVANT tout POST) ; sur un echec, la
+// ligne est RELUE pour son erreur.extra ; suiteDuLot décide (défaut fermé). Rien n'est écrit sur une recette par le lot (I-3 du lot A).
+export async function lireLeLot(classementId, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, battementMs = BATTEMENT_MS, enLigne = estEnLigne } = {}) {
+  if (lot) return { issue: 'refuse', raison: 'lot_tenu' };
+  const tenue = { classementId };
+  lot = tenue;
+  emit('change', { store: 'imports' });
+  let lues = 0, echecs = 0, sautees = 0, arret = null;
+  try {
+    const moi = repo.deviceId();
+    const lignes = liste(await repo.byIndex('imports', 'status', 'a_lancer')).filter((l) => l && l.device_id === moi && lotDe(l)?.classement_id === classementId).sort((a, b) => lotDe(a).rang - lotDe(b).rang);
+    for (const l of lignes) {
+      const retour = await lancerExtraction(l.id, { ctx, repo, fetch: fetchInjecte, maintenant, enLigne, battementMs, attendus: ['a_lancer'] });
+      const relue = retour?.issue === 'echec' ? await repo.get('imports', l.id) : l;
+      const suite = suiteDuLot(retour, relue);
+      if (retour?.issue === 'a_verifier') lues += 1;
+      else if (retour?.issue === 'echec') echecs += 1;
+      else if (suite === 'sauter') sautees += 1;
+      if (suite === 'arreter') { arret = retour?.raison ?? retour?.issue ?? 'inconnu'; break; }
+    }
+    return { issue: 'fini', lues, echecs, sautees, arret };
+  } finally {
+    if (lot === tenue) lot = null;
+    emit('change', { store: 'imports' });
+  }
+}
+
 // Le panneau « Classement » (§ 4.2) : monté par sessionView SOUS les miniatures. `getSelection()` rend les identifiants cochés ; `importId` = la ligne de
 // classement désignée (?import=) — sinon la plus récente ouverte de la séance. États : 1) aucun classement ouvert → panneau caché, « Classer… » dans la
-// barre (actionsSelection) ; 2) en vol ; 3) reçu ; 4) échec ; 5) à lancer. La ligne est lue au rendu dans ctx.imports, RELUE (repo.get) avant toute
-// écriture ; le panneau suit le bus (D-D22) et ne se redessine que si sa signature change. `surChangement()` : la barre de sélection se redessine aussi.
-export function panneauClassement(session, ctx, getSelection, { repo = repoModule, toast = toastDom, confirmer = confirmDialog, fetch: fetchInjecte = undefined, maintenant = horloge, battementMs = BATTEMENT_MS, enLigne = estEnLigne, importId = null, surChangement = null } = {}) {
+// barre (actionsSelection) ; 2) en vol ; 3) reçu : l'écran de regroupement ; 4) échec ; 5) à lancer. La ligne est lue au rendu dans ctx.imports, RELUE
+// (repo.get) avant toute écriture ; le panneau suit le bus (D-D22) et ne se redessine que si sa signature change ; `surChangement()` redessine la barre.
+export function panneauClassement(session, ctx, getSelection, { repo = repoModule, toast = toastDom, confirmer = confirmDialog, navigate = naviguerDom, fetch: fetchInjecte = undefined, maintenant = horloge, battementMs = BATTEMENT_MS, enLigne = estEnLigne, importId = null, surChangement = null } = {}) {
   const racine = el('div', { class: 'card stack', dataset: { role: 'classement' } });
   const pagesSeance = () => liste(session?.page_ids);
   const presentes = (ids) => liste(ids).filter((id) => typeof id === 'string' && ctx?.pagesById instanceof Map && ctx.pagesById.has(id));
-  // ligne : le classement ouvert de la séance ; imports : le journal relu ; session : celle de l'assistant (undefined tant qu'elle n'est pas lue) ;
-  // occupe : un geste écrit (verrou d'instance, posé avant tout await) ; illisibles : les clés déjà marquées illisibles (jamais deux fois).
-  const etat = { ligne: ligneOuverteDeSeance(ctx?.imports, session?.id, { importId, kind: 'classement' }), imports: liste(ctx?.imports), session: undefined, occupe: false, signature: null, illisibles: new Set() };
+  // ligne : le classement ouvert de la séance ; imports, recettes, edition : relus ; session : celle de l'assistant (undefined tant qu'elle n'est pas
+  // lue) ; occupe : un geste écrit (verrou d'instance) ; regroupement : l'état de l'écran 3 (R) ; ecriture / aEcrire : le brouillon en vol et celui qui
+  // attend ; focus : { role, page } à focaliser au prochain dessin ; illisibles : les clés déjà marquées illisibles (jamais deux fois).
+  const etat = { ligne: ligneOuverteDeSeance(ctx?.imports, session?.id, { importId, kind: 'classement' }), imports: liste(ctx?.imports), recettes: liste(ctx?.recipes), edition: session?.edition_id ?? null,
+    session: undefined, occupe: false, signature: null, regroupement: null, ecriture: null, aEcrire: false, focus: null, illisibles: new Set(), instance: ++instances };
   const ouverte = () => !!etat.ligne && IMPORTS_OUVERTS.includes(etat.ligne.status);
   const signatureDe = (L) => JSON.stringify([L?.status ?? null, L?.document_id_vol ?? null, L ? cleClassement(L) : null, volEnCours()?.importId ?? null, lotEnCours()?.classementId ?? null]);
   const connecter = () => demarrerConnexion(ctx?.sync?.auth);
@@ -102,9 +210,15 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     const siennes = new Set(liste(L.page_ids));
     return !liste(selection).some((p) => siennes.has(p));
   };
-  racine.etatClassement = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, groupes: [], aPart: [], appels: Number.isInteger(etat.ligne?.appels) ? etat.ligne.appels : 0, lot: lotEnCours()?.classementId ?? null, brouillon: etat.ligne?.brouillon ?? null });
+  racine.etatClassement = () => {
+    const R = etat.regroupement && etat.ligne?.status === 'a_verifier' ? etat.regroupement : null;
+    return { importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null,
+      groupes: R ? R.etat.groupes.map((g) => ({ cle: g.cle, page_ids: [...g.page_ids], recipe_id: R.affiches.get(g.cle) ?? null })) : [],
+      aPart: R ? R.etat.aPart.map((a) => ({ page_id: a.page_id, motif: a.motif })) : [],
+      appels: Number.isInteger(etat.ligne?.appels) ? etat.ligne.appels : 0, lot: lotEnCours()?.classementId ?? null, brouillon: etat.ligne?.brouillon ?? null };
+  };
 
-  // --- Dessin -------------------------------------------------------------------------------------------------------------------------------------
+  // --- États 2, 4 et 5 ------------------------------------------------------------------------------------------------------------------------------
   const blocEnVol = (L) => (volEnCours()?.importId === L.id
     // R-VIS-8 : la .status[role=status] puis la .row — « Annuler » se range à droite ; le primaire reste, éteint, à sa place.
     ? [el('div', { class: 'status', role: 'status' }, t('Classement des photos par l’assistant…')), el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn primary', disabled: true }, t('Classer ces photos avec l’assistant')), el('button', { type: 'button', class: 'btn', dataset: { role: 'annuler' }, onClick: () => annulerVol(L.id) }, t('Annuler')))]
@@ -121,32 +235,200 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     if (sous) blocs.push(sous);
     return blocs;
   }
-  // État 3 (tâche 2) : la lecture reçue est REVALIDÉE (I-D2) ; hostile → echec(illisible), brouillon effacé, au montage (T4-R1 du lot A). L'écran de
-  // regroupement complet vient en tâche 3.
-  function blocRecu(L) {
+
+  // --- État 3 : l'écran de regroupement (§ 4.3, § 4.4, D-D20, D-D23, D-D24) ----------------------------------------------------------------------
+  // R = { cle, editionId, resultat, etat, choix (les choix FAITS), octets (Map page → octets présents, null tant que non vérifiés), ouverture (sélecteurs
+  // ouverts), saisies (texte de chaque sélecteur), affiches (les choix EFFECTIFS du dernier rendu) }. Préparé une fois par clé de classement.
+  const MOTIFS = { titre: () => t('Titre semblable, page différente ou inconnue.'), page: () => t('Même page, titre différent.'), conflit: () => t('Une autre recette du lot vise aussi cette référence.') };
+  const urls = new Map(); // sha256 → URL blob: de CETTE instance, réutilisée à chaque redessin (révoquées par app.js au changement de route)
+  function poserImage(img, sha) {
+    if (!sha) return;
+    if (urls.has(sha)) { img.src = urls.get(sha); return; }
+    Promise.resolve(repo.getFile(sha)).then((f) => {
+      const type = typeAffichage(f); // F-9 (lot G) : le type du blob dans la liste blanche gagne (comme poserImage d'import-cible.js) ; blob retypé avec lui
+      if (!(f?.blob instanceof Blob) || !type || !type.startsWith('image/')) return;
+      if (!urls.has(sha)) urls.set(sha, urlDeBlob(f.blob.type === type ? f.blob : new Blob([f.blob], { type })));
+      img.src = urls.get(sha);
+    }).catch(() => {});
+  }
+  async function verifierOctets(R) {
+    const m = new Map();
+    for (const pid of [...R.etat.groupes.flatMap((g) => g.page_ids), ...R.etat.aPart.map((a) => a.page_id)].slice(0, MAX_PHOTOS_CLASSEMENT)) {
+      const p = ctx?.pagesById?.get(pid);
+      let f = null;
+      try { f = p?.sha256 ? await repo.getFile(p.sha256) : null; } catch { f = null; }
+      m.set(pid, f?.blob instanceof Blob);
+    }
+    R.octets = m;
+    if (etat.regroupement === R) dessiner();
+  }
+  function preparer(L) {
     const resultat = revaliderResultatClassement(L.resultat, L.page_ids);
-    // Ronde 1 : pendant le marquage, un nœud NEUTRE — jamais le rôle de l'écran de regroupement (un test qui attend cet écran ne lit pas un écran vide).
-    if (!resultat) { marquerIllisible(L); return el('div', { class: 'stack', dataset: { role: 'revalidation' } }); }
-    const n = resultat.groupes.length;
-    return el('div', { class: 'stack', dataset: { role: 'regroupement' } },
+    if (!resultat) return null;
+    const pagesParId = ctx?.pagesById instanceof Map ? ctx.pagesById : new Map();
+    const restaure = restaurerBrouillon(L.brouillon ?? null, { resultat, pageIds: L.page_ids, startedAt: L.started_at, pagesParId });
+    const base = restaure ?? { etat: regroupementInitial(resultat, pagesParId), choixFaits: new Map() };
+    const R = { cle: cleClassement(L), editionId: etat.edition, resultat, etat: base.etat, choix: base.choixFaits, octets: null, ouverture: new Map(), saisies: new Map(), affiches: new Map() };
+    verifierOctets(R);
+    return R;
+  }
+  // Les choix EFFECTIFS : le choix fait (revalidé contre les candidates du moment : une référence qui n'est plus candidate retombe sur la proposition),
+  // sinon la proposition cochée ; jamais deux groupes sur la même référence (le second perd).
+  function choixEffectifs(R, propositions, candidats) {
+    const ids = new Set(candidats.map((r) => r.id));
+    const m = new Map();
+    for (const g of R.etat.groupes) {
+      const fait = R.choix.has(g.cle) ? R.choix.get(g.cle) : undefined;
+      if (fait === null) m.set(g.cle, null);
+      else if (typeof fait === 'string' && ids.has(fait)) m.set(g.cle, fait);
+      else { const p = propositions.get(g.cle); m.set(g.cle, p?.cochee ? p.recipe_id : null); }
+    }
+    const vus = new Set();
+    for (const [c, id] of m) { if (id && vus.has(id)) m.set(c, null); else if (id) vus.add(id); }
+    return m;
+  }
+  function figurePage(pid, rang, cle, x) {
+    const R = etat.regroupement;
+    const p = ctx?.pagesById?.get(pid) ?? null;
+    const img = el('img', { alt: t('Page {n}', { n: rang }), loading: 'lazy' });
+    poserImage(img, p?.sha256);
+    const puces = [];
+    if (cle) { if (x.partagees.has(pid)) puces.push(el('span', { class: 'chip warn' }, t('porte peut-être deux recettes'))); }
+    else {
+      const a = R.etat.aPart.find((y) => y.page_id === pid);
+      puces.push(a?.motif === 'orpheline' ? el('span', { class: 'chip warn' }, t('sans début de recette')) : el('span', { class: 'chip neutral' }, a?.motif === 'retiree' ? t('retirée') : t('non classée')));
+    }
+    if (x.prises.has(pid)) puces.push(el('span', { class: 'chip warn' }, t('déjà en cours d’import')));
+    if (p?.kind === 'recipe') puces.push(el('span', { class: 'chip neutral' }, t('déjà liée à une recette')));
+    const bouton = (role, libelle, calcul, focus) => el('button', { type: 'button', class: 'btn', dataset: { role, page: pid }, onClick: () => geste(calcul(), focus) }, libelle);
+    const rangee = cle ? el('div', { class: 'row' },
+      bouton('monter', t('Monter la page {n}', { n: rang }), () => bougerDansGroupe(R.etat, cle, pid, -1), { role: 'monter', page: pid }),
+      bouton('descendre', t('Descendre la page {n}', { n: rang }), () => bougerDansGroupe(R.etat, cle, pid, 1), { role: 'descendre', page: pid }),
+      bouton('retirer', t('Retirer la page {n}', { n: rang }), () => retirerDuGroupe(R.etat, pid), { role: 'deplacer', page: pid })) : null;
+    const options = [el('option', { value: '' }, t('Déplacer vers…')),
+      ...R.etat.groupes.filter((g) => g.cle !== cle).map((g) => el('option', { value: g.cle }, g.title ? t('Recette {k} — {t}', { k: x.rangs.get(g.cle), t: g.title }) : t('Recette {k}', { k: x.rangs.get(g.cle) }))),
+      el('option', { value: 'nouveau' }, t('Nouvelle recette'))];
+    const deplacer = el('select', { 'aria-label': t('Déplacer la page {n} vers…', { n: rang }), dataset: { role: 'deplacer', page: pid }, onChange: (e) => { const v = e.target.value; if (v) geste(deplacerVers(R.etat, pid, v), { role: 'deplacer', page: pid }); } }, ...options);
+    return el('figure', { dataset: { page: pid } }, el('span', { class: 'num' }, String(rang)), img, el('figcaption', { class: 'stack' }, ...puces, rangee, deplacer));
+  }
+  function blocAppariement(g, x) {
+    const R = etat.regroupement;
+    const zone = el('div', { class: 'stack', dataset: { role: 'appariement' } });
+    if (!R.editionId) return zone; // D-D16 : séance sans livre, aucun appariement
+    const prop = x.propositions.get(g.cle) ?? { recipe_id: null, certitude: 'aucune', motif: null, cochee: false, ordre: [] };
+    const choisi = x.choix.get(g.cle) ?? null;
+    const parId = new Map(x.candidats.map((r) => [r.id, r]));
+    const autreDe = (id) => [...x.choix].find(([c, v]) => c !== g.cle && v === id)?.[0] ?? null;
+    const cible = choisi ?? (prop.motif === 'plusieurs' ? null : prop.recipe_id);
+    if (cible && parId.has(cible)) {
+      const r = parId.get(cible);
+      const question = choisi !== cible && prop.certitude !== 'sure';
+      const texte = Number.isInteger(r.printed_page)
+        ? (question ? t('Complète “{t}”, p. {p} ?', { t: titre60(r), p: r.printed_page }) : t('Complète “{t}”, p. {p}', { t: titre60(r), p: r.printed_page }))
+        : (question ? t('Complète “{t}” ?', { t: titre60(r) }) : t('Complète “{t}”', { t: titre60(r) }));
+      const autre = autreDe(cible);
+      const caseRef = el('input', { type: 'checkbox', checked: choisi === cible, disabled: !!autre, ...(autre ? { 'aria-label': t('Déjà choisie pour la recette {k}', { k: x.rangs.get(autre) }) } : {}), onChange: (e) => choisir(g.cle, e.target.checked ? cible : null) });
+      zone.append(el('label', { class: 'check' }, caseRef, ' ', texte));
+      if (question && Object.hasOwn(MOTIFS, prop.motif ?? '')) zone.append(el('small', { class: 'muted' }, MOTIFS[prop.motif]()));
+      if (choisi !== cible) zone.append(el('p', { class: 'muted' }, t('Nouvelle recette — “{t}” restera repérée.', { t: titre60(r) })));
+    } else if (prop.motif === 'plusieurs') zone.append(el('p', { class: 'muted' }, t('Plusieurs références possibles.')), el('p', { class: 'muted' }, t('Nouvelle recette')));
+    else zone.append(el('p', { class: 'muted' }, t('Nouvelle recette')));
+    const ouvert = R.ouverture.has(g.cle) ? R.ouverture.get(g.cle) : (prop.motif === 'plusieurs' && !choisi);
+    const exclus = new Set([...x.choix].filter(([c, v]) => c !== g.cle && v).map(([, v]) => v));
+    const selecteur = selecteurReferences({ candidats: x.candidats, occupees: x.occupees, exclus, enTete: prop.motif === 'plusieurs' ? prop.ordre : [], saisie: R.saisies.get(g.cle) ?? '', surSaisie: (v) => R.saisies.set(g.cle, v), surChoix: (id) => choisir(g.cle, id), nouvelle: true });
+    selecteur.hidden = !ouvert;
+    const bascule = el('button', { type: 'button', class: 'btn', dataset: { role: 'choisir-reference' }, 'aria-expanded': ouvert ? 'true' : 'false', onClick: () => { const o = selecteur.hidden; R.ouverture.set(g.cle, o); selecteur.hidden = !o; bascule.setAttribute('aria-expanded', o ? 'true' : 'false'); } }, t('Choisir une référence…'));
+    zone.append(bascule, selecteur);
+    return zone;
+  }
+  function blocGroupe(g, rang, x) {
+    const idTitre = `classement-${etat.instance}-${g.cle}`;
+    const vignettes = el('div', { class: 'thumbs' });
+    g.page_ids.forEach((pid, j) => vignettes.append(figurePage(pid, j + 1, g.cle, x)));
+    return el('section', { class: 'card flat stack', 'aria-labelledby': idTitre, dataset: { role: 'groupe', cle: g.cle } },
+      el('h3', { id: idTitre }, t('Recette {k}', { k: rang })),
+      el('div', { class: 'row' }, g.title ? el('span', null, g.title) : el('span', { class: 'muted' }, t('(titre non lu)')), Number.isInteger(g.printed_page) ? el('span', { class: 'muted' }, `${t('p.')} ${g.printed_page}`) : null, g.uncertain ? el('span', { class: 'chip warn' }, t('incertain')) : null),
+      vignettes, blocAppariement(g, x));
+  }
+  function blocAPart(x) {
+    const vignettes = el('div', { class: 'thumbs' });
+    etat.regroupement.etat.aPart.forEach((a, j) => vignettes.append(figurePage(a.page_id, j + 1, null, x)));
+    return el('section', { class: 'card flat stack', dataset: { role: 'a-part' } }, el('h3', null, t('Photos qui ne seront pas lues')), el('p', { class: 'muted' }, t('Déplace-les vers une recette si elles en font partie.')), vignettes);
+  }
+  function pied(L, x) {
+    const R = etat.regroupement;
+    const n = R.etat.groupes.length;
+    const pagesGroupes = R.etat.groupes.flatMap((g) => g.page_ids);
+    const manquent = R.octets ? pagesGroupes.some((p) => R.octets.get(p) === false) : false;
+    const prisesDe = (pages) => pages.filter((p) => x.prises.has(p)).length;
+    const commune = !enLigne() ? { texte: t('Tu es hors ligne.') }
+      : (etat.session === undefined || R.octets === null) ? { attente: true }
+        : !etat.session ? { texte: t(TEXTE_CONNEXION) }
+          : (volEnCours() || lotEnCours()) ? { texte: t('Une lecture est en cours : attends sa fin ou annule-la.') }
+            : manquent ? { texte: t('Les photos de cette séance ne sont pas sur cet appareil.') } : null;
+    const kLire = prisesDe(pagesGroupes);
+    const raisonLire = commune ?? (kLire ? { texte: t('{k} photo(s) déjà en cours d’import ailleurs : retire-les de leur recette, ou termine l’autre import.', { k: kLire }) } : null);
+    const aReclasser = pagesALire(presentes(getSelection()), L, pagesSeance(), ctx?.pagesById);
+    const raisonReclasser = commune ?? (aReclasser.length < 2 || aReclasser.length > MAX_PHOTOS_CLASSEMENT || prisesDe(aReclasser) ? { attente: true } : null);
+    const blocs = [el('div', { dataset: { role: 'hors-ligne' } }, ...(enLigne() ? [] : [el('div', { class: 'status warn' }, t('Tu es hors ligne.'))]))];
+    if (etat.session === null) blocs.push(carteConnexion(connecter, ctx));
+    if (n === 0) blocs.push(el('p', { class: 'muted' }, t('Aucune recette à lire : déplace des photos vers une recette, ou ignore ce classement.')));
+    blocs.push(el('div', { class: 'row' },
+      el('button', { type: 'button', class: 'btn primary', dataset: { role: 'lire-recettes' }, disabled: !!raisonLire || n === 0 || etat.occupe, onClick: lireRecettes }, n === 1 ? t('Lire cette recette (1 appel)') : t('Lire ces recettes ({n} appels)', { n })),
+      el('button', { type: 'button', class: 'btn', dataset: { role: 'reclasser' }, disabled: !!raisonReclasser || etat.occupe, onClick: () => classer() }, t('Reclasser')),
+      el('button', { type: 'button', class: 'btn', dataset: { role: 'ignorer-classement' }, disabled: etat.occupe, onClick: ignorerClassement }, t('Ignorer ce classement'))));
+    if (!raisonLire) blocs.push(el('small', { class: 'muted', dataset: { role: 'raison-lire' } }, t('Une lecture = un appel à l’assistant, compté dans ton quota du jour.')));
+    else if (raisonLire.texte) blocs.push(el('small', { class: 'muted', dataset: { role: 'raison-lire' } }, raisonLire.texte));
+    return blocs;
+  }
+  function ecranRegroupement(L) {
+    if (etat.regroupement?.cle !== cleClassement(L)) {
+      const R = preparer(L);
+      // Ronde 1 de T2 : pendant le marquage, un nœud NEUTRE — jamais le rôle de l'écran de regroupement (un test qui attend cet écran ne lit pas un écran vide).
+      if (!R) { etat.regroupement = null; marquerIllisible(L); return el('div', { class: 'stack', dataset: { role: 'revalidation' } }); }
+      etat.regroupement = R;
+    }
+    const R = etat.regroupement;
+    R.editionId = etat.edition; // l'édition de la séance RELUE (D-D23) : brouillon gardé quand le livre change
+    const candidats = candidatsReference(etat.recettes, { editionId: R.editionId, imports: etat.imports });
+    const occupees = referencesOccupees(etat.recettes, { editionId: R.editionId, imports: etat.imports });
+    const propositions = proposerAppariements(R.etat.groupes, candidats);
+    const choix = choixEffectifs(R, propositions, candidats);
+    R.affiches = choix;
+    const x = { candidats, occupees, propositions, choix, rangs: new Map(R.etat.groupes.map((g, i) => [g.cle, i + 1])), prises: pagesEnCours(etat.imports, session?.id, { sauf: L.id }), partagees: new Set(R.resultat.partagees) };
+    const n = R.resultat.groupes.length;
+    const box = el('div', { class: 'stack', dataset: { role: 'regroupement' } },
       el('h2', null, t('Recettes trouvées')),
-      el('p', { class: 'muted' }, n === 1 ? t('1 recette proposée par l’assistant — vérifie le groupe avant de lire.') : t('{n} recettes proposées par l’assistant — vérifie les groupes avant de lire.', { n })),
-      el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn', dataset: { role: 'ignorer-classement' }, disabled: etat.occupe, onClick: ignorerClassement }, t('Ignorer ce classement'))));
+      el('p', { class: 'muted' }, n === 1 ? t('1 recette proposée par l’assistant — vérifie le groupe avant de lire.') : t('{n} recettes proposées par l’assistant — vérifie les groupes avant de lire.', { n })));
+    // « Incertain : … » (§ 4.3, R-D-19) : texteDesChamps (src/ui/components.js, m8 du lot A, la règle de texteIncertain sur une liste, UNE définition,
+    // comme C) — chaînes seulement, Cc/Cf retirés, espaces repliées, jointes par « ; », bornées à INCERTAIN_MAX points de code (« … ») ; null s'il ne
+    // reste rien ; rendue en nœud texte.
+    const incertain = texteDesChamps(R.resultat.uncertain);
+    if (incertain) box.append(el('p', { class: 'muted', dataset: { role: 'incertain' } }, t('Incertain : {t}', { t: incertain })));
+    if (!R.editionId) box.append(el('p', { class: 'status info' }, t('Aucun livre associé à cette séance : chaque recette sera une nouvelle recette.')));
+    R.etat.groupes.forEach((g, i) => box.append(blocGroupe(g, i + 1, x)));
+    if (R.etat.aPart.length) box.append(blocAPart(x));
+    box.append(...pied(L, x));
+    return box;
   }
   function dessiner() {
     const L = ouverte() ? etat.ligne : null;
     racine.hidden = !L;
     if (!L) { racine.replaceChildren(); return; }
     if (L.status === 'en_cours') racine.replaceChildren(...blocEnVol(L));
-    else if (L.status === 'a_verifier') racine.replaceChildren(blocRecu(L));
+    else if (L.status === 'a_verifier') racine.replaceChildren(ecranRegroupement(L));
     else racine.replaceChildren(...blocALancer(L));
+    if (etat.focus) { const { role, page } = etat.focus; etat.focus = null; racine.querySelector(`[data-role="${role}"][data-page="${CSS.escape(page)}"]`)?.focus(); }
   }
 
-  // --- Relecture (D-D22) : le journal relu ; la ligne suivie (ou, terminée, la plus récente ouverte de la séance) ; redessin si la signature change. ----
+  // --- Relecture (D-D22) : le journal, la séance (son livre) et les recettes relus ; la ligne suivie (ou, terminée, la plus récente ouverte de la
+  // séance) ; redessin si la signature change.
   let file = Promise.resolve();
   function synchroniser({ forcer = false } = {}) {
     file = file.then(async () => {
-      etat.imports = liste(await repo.all('imports'));
+      const [imports, seance, recettes] = await Promise.all([repo.all('imports'), session?.id ? repo.get('scan_sessions', session.id) : null, repo.all('recipes')]);
+      etat.imports = liste(imports); etat.recettes = liste(recettes);
+      if (seance) etat.edition = seance.edition_id ?? null;
       const relue = etat.ligne ? etat.imports.find((i) => i && i.id === etat.ligne.id) ?? null : null;
       etat.ligne = relue && IMPORTS_OUVERTS.includes(relue.status) ? relue : (ligneOuverteDeSeance(etat.imports, session?.id, { kind: 'classement' }) ?? relue);
       const sig = signatureDe(etat.ligne);
@@ -155,7 +437,38 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     return file;
   }
 
-  // --- Gestes -------------------------------------------------------------------------------------------------------------------------------------
+  // --- Gestes de l'écran de regroupement : chacun écrit le BROUILLON (D-D20) puis redessine le panneau SEUL (jamais la route) ; aucun appel, aucune ligne.
+  function ecrireBrouillon() {
+    if (etat.ecriture) { etat.aEcrire = true; return etat.ecriture; } // une écriture à la fois ; la suivante portera l'état le plus récent
+    const R = etat.regroupement; const L = etat.ligne;
+    if (!R || !L || L.status !== 'a_verifier') return Promise.resolve();
+    const cle = R.cle;
+    const brouillon = brouillonDe(R.etat, R.choix, L.started_at);
+    etat.ecriture = repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: (c) => { if (cleClassement(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { brouillon }; } })
+      .catch((e) => { if (!(e instanceof TransitionRefusee)) logError('regroupement.brouillon', { error: e, id: L.id }); })
+      .finally(() => { etat.ecriture = null; if (etat.aEcrire) { etat.aEcrire = false; ecrireBrouillon(); } });
+    return etat.ecriture;
+  }
+  function geste(nouvelEtat, focus = null) {
+    const R = etat.regroupement;
+    if (!R || etat.ligne?.status !== 'a_verifier') return;
+    if (JSON.stringify(nouvelEtat) === JSON.stringify(R.etat)) return; // en tête, en queue, même place : sans effet, rien d'écrit
+    R.etat = nouvelEtat;
+    for (const c of [...R.choix.keys()]) if (!R.etat.groupes.some((g) => g.cle === c)) R.choix.delete(c); // un groupe vidé emporte son choix
+    etat.focus = focus;
+    ecrireBrouillon();
+    dessiner();
+  }
+  function choisir(cle, id) {
+    const R = etat.regroupement;
+    if (!R || etat.ligne?.status !== 'a_verifier') return;
+    R.choix.set(cle, id);
+    R.ouverture.set(cle, false);
+    ecrireBrouillon();
+    dessiner();
+  }
+
+  // --- Gestes qui écrivent le journal -------------------------------------------------------------------------------------------------------------
   // a_verifier → echec(illisible) pour LA lecture relue (clé gardée dans la transaction), une fois par clé.
   async function marquerIllisible(L) {
     const cle = cleClassement(L);
@@ -237,6 +550,31 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     } catch (e) { if (!(e instanceof TransitionRefusee)) logError('regroupement.ignorer', { error: e, id: vue.id }); }
     finally { etat.occupe = false; await synchroniser({ forcer: true }); }
   }
+  // « Lire ces recettes » (§ 4.5) : le verrou d'instance ; le brouillon en vol d'abord ; creerLesLectures avec la clé et l'édition RENDUES et les choix
+  // EFFECTIFS ; refus → le toast, puis le panneau relu (propositions recalculées sur la base relue) ; créé → lireLeLot lancé SANS être attendu (ses erreurs
+  // au journal), le toast, puis Imports si le panneau est encore monté (D-D18).
+  async function lireRecettes() {
+    const R = etat.regroupement; const L = etat.ligne;
+    if (!R || !L || etat.occupe) return;
+    // Vérification de la tâche 3 (D-D23, § 4.5) : la clé, l'édition, l'état et les choix RENDUS, pris AVANT le redessin qui éteint le bouton — ce
+    // redessin relit etat.edition et les recettes que le bus a pu changer sans redessiner (la signature ne les porte pas) : la personne ne l'a pas vu.
+    const rendu = { cle: R.cle, editionId: R.editionId, etat: R.etat, choix: R.affiches };
+    etat.occupe = true; dessiner();
+    let cree = null;
+    try {
+      if (etat.ecriture) await etat.ecriture;
+      const r = await creerLesLectures(L.id, { ...rendu, ctx, repo, maintenant, newId: repo.newId, deviceId: repo.deviceId() });
+      if (r.issue === 'refuse') toast(texteRefusLire(r.raison)); else cree = r;
+    } catch (e) { logError('regroupement.lire', { error: e }); }
+    finally { etat.occupe = false; }
+    if (cree) {
+      lireLeLot(L.id, { ctx, repo, fetch: fetchInjecte, maintenant, battementMs, enLigne }).catch((e) => logError('regroupement.lot', { error: e }));
+      const n = cree.importIds.length;
+      toast(n === 1 ? t('1 recette à lire : suis-la dans Imports.') : t('{n} recettes à lire : suis-les dans Imports.', { n }));
+      if (racine.isConnected) navigate('/add?section=imports');
+    }
+    await synchroniser({ forcer: true });
+  }
 
   // --- Montage : le bus tant que le panneau est monté (désabonné au premier événement où il ne l'est plus, ou s'il ne l'a jamais été — modèle d'add.js).
   let montee = false;
@@ -244,7 +582,7 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
   const desabonner = on('change', ({ store } = {}) => {
     if (!racine.isConnected) { if (montee) { desabonner(); vues.delete(vue); } return; }
     montee = true;
-    if (store === 'imports' || store === '*') synchroniser();
+    if (store === 'imports' || store === 'recipes' || store === 'scan_sessions' || store === '*') synchroniser();
   });
   vues.add(vue);
   setTimeout(() => { if (!racine.isConnected) { desabonner(); vues.delete(vue); return; } montee = true; }, 0);

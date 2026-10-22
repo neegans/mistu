@@ -4,7 +4,7 @@
 // nomme le mutant qu'elle tue (spec § 7). Les modules du lot sont importés DYNAMIQUEMENT : un module absent fait une ligne rouge nommée, jamais une
 // page de tests blanche.
 import { withRepo } from './sync-fixture.js';
-import { on } from '../src/core/bus.js';
+import { on, emit } from '../src/core/bus.js';
 import { resetClock } from '../src/sync/clock.js';
 import { setUiLocale, getUiLocale } from '../src/core/i18n.js';
 import { sha256Hex } from '../src/core/hash.js';
@@ -101,6 +101,12 @@ const raisonPanneau = (racine) => panneau(racine)?.querySelector('[data-role="ra
 // écrirait « null », écart E-7).
 const barre = (racine) => [...racine.querySelectorAll('button.btn.danger')].find((b) => b.textContent === 'Retirer')?.parentElement ?? null;
 const texteNuDeBarre = (racine) => [...(barre(racine)?.childNodes ?? [])].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.data);
+// Une lecture de recette (forme validée par validateParsedRecipe) que la fausse fetch rend pour une ligne du lot.
+const RECETTE_LUE = (title = 'Soupe de courge', printed_page = 132, over = {}) => ({ title, servings: null, prep_minutes: null, cook_minutes: null, ingredients: [{ source_text: '1 courge', uncertain: false }], steps: [{ text: 'Cuire.' }], printed_page, sub_recipes: [], uncertain_fields: [], notes: null, incomplete: false, missing_page: false, ...over });
+// Une ligne d'un lot (la forme de lecturesDuLot), posée directement dans la base ; device_id : CET appareil par défaut (jamais null).
+const ligneLot = ({ id, classementId = 'imp_cl', rang = 1, total = 3, page_ids = ['p1'], recipe_id = null, device_id = appareilIci(), sessionId = 'ss1', status = 'a_lancer', over = {} }) => ({ id, kind: 'recette', edition_id: 'ed1', recipe_id, scan_session_id: sessionId, page_ids: [...page_ids], photo_sha256: null, status, erreur: null, resultat: null, reponse_brute: null, appels: 0, model: null, duree_ms: null, device_id, document_id_vol: null, battement_at: null, started_at: null, finished_at: null, lot: { classement_id: classementId, rang, total, titre: null, page: null }, created_at: DATE, updated_at: DATE, ...over });
+// Une fetch qui rend, dans l'ordre, les réponses d'une liste ([statut, corps]) ; au-delà, la dernière.
+const fetchSuite = (reponses) => { let k = 0; return fauxFetch(() => reponses[Math.min(k++, reponses.length - 1)]); };
 
 export async function runClassementTests({ eq, ok }) {
   resetClock();
@@ -856,6 +862,377 @@ export async function runClassementTests({ eq, ok }) {
       await attendre(async () => (await db.get('imports', 'c_recu')).status === 'ignore', 'classement reçu ignoré');
       const igR = await db.get('imports', 'c_recu');
       eq([confirmations.length, igR.finished_at, nul(igR.brouillon)], [2, NOW, 'null'], 'T-D10 (écran, ronde 1, constat 26) : « oui » → ignore, finished_at = l’horloge injectée, le brouillon effacé (D-D20 : « Ignorer ce classement » l’efface, d’où qu’il vienne)');
+    });
+
+    // =================================================================================================================================
+    // Tâche 3 — l'écran de regroupement (§ 4.3, § 4.4), « Lire ces recettes » (§ 4.5) et la lecture du lot (§ 4.6) : T-D13 à T-D16. Le panneau est
+    // monté SEUL (G.panneauClassement, dépendances injectées) sur un classement reçu posé en base ; les gestes n'écrivent que le brouillon.
+    const monterPanneau = async (repo, db, { sessionId = 'ss1', importId = 'imp_cl', selection = [], over = {}, session = SESSION } = {}) => {
+      const ctx = await ctxDe(repo, db, { session });
+      const sel = new Set(selection);
+      const p = G.panneauClassement(ctx.scan_sessions.find((s) => s.id === sessionId), ctx, () => [...sel], deps(repo, { importId, ...over }));
+      scene.append(p);
+      return p;
+    };
+    const boutonLire = (p) => p.querySelector('button[data-role="lire-recettes"]');
+    const pret = (p) => attendre(() => boutonLire(p) && !boutonLire(p).disabled, '« Lire ces recettes » allumé');
+    const blocDe = (p, cle) => p.querySelector(`[data-role="groupe"][data-cle="${CSS.escape(cle)}"]`);
+    const choisirSelect = (p, page, valeur) => { const s = p.querySelector(`select[data-role="deplacer"][data-page="${CSS.escape(page)}"]`); s.value = valeur; s.dispatchEvent(new Event('change', { bubbles: true })); };
+    const brouillonEn = async (db, id) => (await db.get('imports', id))?.brouillon ?? null;
+    const groupesBrouillon = async (db, id) => ((await brouillonEn(db, id))?.groupes ?? []).map((g) => [g.cle, g.page_ids]);
+    const puces = (racine, page) => [...racine.querySelector(`figure[data-page="${CSS.escape(page)}"]`).querySelectorAll('.chip')].map((c) => c.textContent);
+
+    await ecran('T-D13 regroupement : blocs, puces, gestes du brouillon, nouveau montage', async (repo, db) => {
+      await poserSeance(repo, db, { sortes: { p5: 'recipe' }, imports: [ligneClassement({ over: { resultat: { ...R5_STOCKE, partagees: ['p3'], uncertain: ['photo 3 floue'] } } })] });
+      const ff = fauxFetch();
+      const vraiCreer = URL.createObjectURL; let urlsCreees = 0;
+      URL.createObjectURL = (b) => { urlsCreees += 1; return vraiCreer.call(URL, b); };
+      try {
+        const p = await monterPanneau(repo, db, { over: { fetch: ff.fetch } });
+        await pret(p);
+        const titreDe = (b) => [...b.querySelectorAll('h3 + .row span')].map((s) => s.textContent);
+        eq([...p.querySelectorAll('[data-role="groupe"]')].map((b) => [b.dataset.cle, b.querySelector('h3').textContent, b.getAttribute('aria-labelledby') === b.querySelector('h3').id, titreDe(b), [...b.querySelectorAll('figure')].map((f) => f.dataset.page)]),
+          [['g1', 'Recette 1', true, ['Soupe de courge', 'p. 132'], ['p1', 'p3']], ['g2', 'Recette 2', true, ['Tarte fine aux poires', 'p. 140'], ['p2']], ['g3', 'Recette 3', true, ['Gratin dauphinois', 'p. 148'], ['p5']]], 'T-D13 : trois blocs « Recette k », le titre lu, « p. N », les miniatures dans l’ordre, chacun étiqueté par son h3');
+        const aPart = p.querySelector('[data-role="a-part"]');
+        eq([aPart?.querySelector('h3')?.textContent, [...aPart.querySelectorAll('p.muted')].map((x) => x.textContent), [...aPart.querySelectorAll('figure')].map((f) => [f.dataset.page, [...f.querySelectorAll('.chip')].map((c) => c.textContent)])], ['Photos qui ne seront pas lues', ['Déplace-les vers une recette si elles en font partie.'], [['p4', ['sans début de recette']]]], 'T-D13 : le bloc « Photos qui ne seront pas lues », sa SEULE phrase, p4 « sans début de recette »');
+        eq([p.querySelector('[data-role="incertain"]')?.textContent, p.querySelector('[data-role="regroupement"] > p.muted')?.textContent], ['Incertain : photo 3 floue', '3 recettes proposées par l’assistant — vérifie les groupes avant de lire.'], 'T-D13 : « Incertain : … » quand la racine en porte ; le compte des groupes DU CLASSEMENT');
+        eq([puces(p, 'p3'), puces(p, 'p5'), puces(p, 'p1')], [['porte peut-être deux recettes'], ['déjà liée à une recette'], []], 'T-D13 (M130) : une photo de partagees porte « porte peut-être deux recettes » ; une page kind recipe « déjà liée à une recette »');
+        await attendre(() => [...p.querySelectorAll('figure img')].every((i) => i.src.startsWith('blob:')), 'miniatures posées');
+        const srcP1 = p.querySelector('figure[data-page="p1"] img').src; const urlsAvant = urlsCreees;
+        const vus = []; const capture = db.onMutate;
+        db.onMutate = (m) => { vus.push([Object.keys(m.puts).sort(), (m.puts.imports || []).map((i) => [i.id, i.status])]); return capture ? capture(m) : {}; };
+        let gestes = 0;
+        const geste = async (fn, attendu) => { gestes += 1; fn(); await attendre(async () => JSON.stringify(await groupesBrouillon(db, 'imp_cl')) === JSON.stringify(attendu), 'brouillon écrit : ' + JSON.stringify(attendu)); };
+        try {
+          await geste(() => choisirSelect(p, 'p3', 'g2'), [['g1', ['p1']], ['g2', ['p2', 'p3']], ['g3', ['p5']]]);
+          eq([[...blocDe(p, 'g2').querySelectorAll('figure')].map((f) => f.dataset.page), document.activeElement === p.querySelector('select[data-role="deplacer"][data-page="p3"]')], [['p2', 'p3'], true], 'T-D13 : déplacer p3 vers « Recette 2 » par le select → blocs redessinés, le focus va au select de la même photo dans son nouveau bloc');
+          await geste(() => choisirSelect(p, 'p2', 'nouveau'), [['g1', ['p1']], ['g2', ['p3']], ['g3', ['p5']], ['n1', ['p2']]]);
+          eq([p.querySelectorAll('[data-role="groupe"]').length, boutonLire(p).textContent], [4, 'Lire ces recettes (4 appels)'], 'T-D13 (M77) : « Nouvelle recette » → un quatrième bloc, le coût recalculé (4 appels)');
+          await geste(() => choisirSelect(p, 'p4', 'g1'), [['g1', ['p1', 'p4']], ['g2', ['p3']], ['g3', ['p5']], ['n1', ['p2']]]);
+          await geste(() => blocDe(p, 'g1').querySelector('button[data-role="descendre"][data-page="p1"]').click(), [['g1', ['p4', 'p1']], ['g2', ['p3']], ['g3', ['p5']], ['n1', ['p2']]]);
+          eq([document.activeElement?.dataset?.role, document.activeElement?.dataset?.page], ['descendre', 'p1'], 'T-D13 (M78) : ↓ — le focus suit la page déplacée');
+          await geste(() => boutonTexte(blocDe(p, 'g1'), 'Retirer la page 2').click(), [['g1', ['p4']], ['g2', ['p3']], ['g3', ['p5']], ['n1', ['p2']]]);
+          eq([...p.querySelector('[data-role="a-part"]').querySelectorAll('figure')].map((f) => [f.dataset.page, [...f.querySelectorAll('.chip')].map((c) => c.textContent)]), [['p1', ['retirée']]], 'T-D13 : « Retirer la page 2 » → la photo à part, puce « retirée »');
+          gestes += 1;
+          blocDe(p, 'g3').querySelector('[data-role="appariement"] label.check input').click();
+          await attendre(async () => JSON.stringify((await brouillonEn(db, 'imp_cl'))?.choix) === JSON.stringify([['g3', 'rcG']]), 'choix de g3 écrit');
+          await geste(() => choisirSelect(p, 'p5', 'g1'), [['g1', ['p4', 'p5']], ['g2', ['p3']], ['n1', ['p2']]]);
+          eq([blocDe(p, 'g3'), (await brouillonEn(db, 'imp_cl')).choix], [null, []], 'T-D13 : vider un groupe le retire AVEC son choix');
+        } finally { db.onMutate = capture; }
+        eq([vus.length, vus.every((v) => v[0].join() === 'imports' && v[1].length === 1 && v[1][0][0] === 'imp_cl' && v[1][0][1] === 'a_verifier'), ff.appels.length, (await db.getAll('imports')).length], [gestes, true, 0, 1], 'T-D13 (M76) : CHAQUE geste n’écrit que le brouillon — un appel de db.onMutate par geste, imports seul, la ligne toujours a_verifier, aucune ligne neuve, 0 POST');
+        eq([p.querySelector('figure[data-page="p1"] img').src === srcP1, urlsCreees], [true, urlsAvant], 'T-D13 (M132) : les redessins réutilisent la même URL pour la même photo, aucune URL de plus');
+        // Un choix FAIT avant le nouveau montage : décocher g2 (proposition sûre rcT) écrit [['g2', null]] — sans lui, le remontage ne rendrait que des
+        // propositions recalculées, et un écran qui ignorerait les choix restaurés resterait vert.
+        blocDe(p, 'g2').querySelector('[data-role="appariement"] label.check input').click();
+        await attendre(async () => JSON.stringify((await brouillonEn(db, 'imp_cl'))?.choix) === JSON.stringify([['g2', null]]), 'choix de g2 (décochée) écrit');
+        scene.replaceChildren();
+        const p2 = await monterPanneau(repo, db, { over: { fetch: ff.fetch } });
+        await pret(p2);
+        eq([[...p2.querySelectorAll('[data-role="groupe"]')].map((b) => [b.dataset.cle, [...b.querySelectorAll('figure')].map((f) => f.dataset.page)]), p2.etatClassement().aPart, p2.etatClassement().groupes.map((g) => g.recipe_id), blocDe(p2, 'g2').querySelector('[data-role="appariement"] label.check input')?.checked], [[['g1', ['p4', 'p5']], ['g2', ['p3']], ['n1', ['p2']]], [{ page_id: 'p1', motif: 'retiree' }], ['rcS', null, null], false], 'T-D13 (M109) : un NOUVEAU montage (refresh simulé) rend les mêmes groupes, la même photo à part et les mêmes choix — g2, décochée avant le remontage, le reste (choix restauré, jamais la proposition rcT recalculée)');
+      } finally { URL.createObjectURL = vraiCreer; }
+    });
+
+    await ecran('T-D13 identifiant à guillemet, octets absents, photo prise ailleurs, « Reclasser »', async (repo, db) => {
+      const Q = ['q"1', 'q"2'];
+      await poserSeance(repo, db, { id: 'ssq', pages: Q, imports: [ligneClassement({ id: 'imp_q', sessionId: 'ssq', page_ids: Q, over: { resultat: { groupes: [{ page_ids: Q, title: 'Q', printed_page: null, uncertain: false }], orphelines: [], non_classees: [], partagees: [], uncertain: [] } } })] });
+      const pq = await monterPanneau(repo, db, { sessionId: 'ssq', importId: 'imp_q' });
+      await pret(pq);
+      pq.querySelector(`button[data-role="descendre"][data-page="${CSS.escape('q"1')}"]`).click();
+      await attendre(async () => (await brouillonEn(db, 'imp_q'))?.groupes?.[0]?.page_ids?.[0] === 'q"2' && document.activeElement?.dataset?.page === 'q"1', 'focus suivi');
+      eq(document.activeElement?.dataset?.role, 'descendre', 'T-D13 (M133) : un identifiant de page qui contient « " » — le focus suit quand même (CSS.escape)');
+      scene.replaceChildren();
+      await poserSeance(repo, db, { id: 'ss_o', sansOctets: ['p3'], imports: [ligneClassement({ id: 'imp_o', sessionId: 'ss_o' })] });
+      const po = await monterPanneau(repo, db, { sessionId: 'ss_o', importId: 'imp_o' });
+      await attendre(() => po.querySelector('[data-role="raison-lire"]')?.textContent === 'Les photos de cette séance ne sont pas sur cet appareil.', 'octets absents dits');
+      eq([boutonLire(po).disabled, po.querySelector('button[data-role="reclasser"]').disabled], [true, true], 'T-D13 (M131) : une page d’un groupe sans octets → « Lire » et « Reclasser » éteints, la raison dite');
+      scene.replaceChildren();
+      await poserSeance(repo, db, { id: 'ss_pr', imports: [ligneClassement({ id: 'imp_pr', sessionId: 'ss_pr' }), { ...ligneLot({ id: 'imp_autre', sessionId: 'ss_pr', page_ids: ['p3'] }), lot: null }] });
+      const pp = await monterPanneau(repo, db, { sessionId: 'ss_pr', importId: 'imp_pr' });
+      await attendre(() => pp.querySelector('[data-role="raison-lire"]')?.textContent === '1 photo(s) déjà en cours d’import ailleurs : retire-les de leur recette, ou termine l’autre import.', 'photo prise dite');
+      eq([boutonLire(pp).disabled, puces(pp, 'p3')], [true, ['déjà en cours d’import']], 'T-D13 (M139b) : une page tenue par un autre import ouvert de la séance → « déjà en cours d’import », « Lire » éteint et la phrase');
+      scene.replaceChildren();
+      await poserSeance(repo, db, { id: 'ss_rc', imports: [ligneClassement({ id: 'imp_rc', sessionId: 'ss_rc' })] });
+      const ff = fauxFetch();
+      const pr = await monterPanneau(repo, db, { sessionId: 'ss_rc', importId: 'imp_rc', over: { fetch: ff.fetch } });
+      await pret(pr);
+      const avant = await db.get('imports', 'imp_rc');
+      reponseConfirmer = false;
+      const reclasserAvant = pr.querySelector('button[data-role="reclasser"]');
+      reclasserAvant.click();
+      await attendre(() => confirmations.length === 1, 'confirmation demandée');
+      // Un FAIT, jamais des ticks (R-D-10) : après le « non », classer() sort par son finally (synchroniser, forcé), qui redessine le panneau — un
+      // « Reclasser » NEUF ; au redessin, ce qu'un « non » mal tenu aurait écrit ou envoyé l'a été.
+      await attendre(() => pr.querySelector('button[data-role="reclasser"]') !== reclasserAvant, 'panneau redessiné après le « non »');
+      eq([confirmations[0], ff.appels.length, await db.get('imports', 'imp_rc')], [['Reclasser remplace ce classement et tes changements de groupes, et coûte un appel. Continuer ?', 'Reclasser'], 0, avant], 'T-D13 (M129) : « Reclasser » répondu NON → 0 POST, 0 écriture');
+      reponseConfirmer = true;
+      window.dispatchEvent(new Event('offline'));
+      await attendre(() => pr.querySelector('button[data-role="reclasser"]')?.disabled === true, '« Reclasser » éteint hors ligne');
+      // Éteint, il ne se clique pas (spécification HTML) : RALLUMÉ, pour éprouver la garde de classer() elle-même (un rendu périmé, une course).
+      const rc = pr.querySelector('button[data-role="reclasser"]'); rc.disabled = false; rc.click();
+      // Un FAIT, jamais des ticks (R-D-10) : classer() sort à la garde réseau par son finally (synchroniser, forcé) — le panneau redessiné n'a plus ce
+      // nœud. Le mutant M129b écrit la remise à zéro AVANT la garde : son premier redessin (bus ou finally) vient après son écriture.
+      await attendre(() => pr.querySelector('button[data-role="reclasser"]') !== rc, 'panneau redessiné : classer() est sorti à la garde réseau');
+      eq([confirmations.length, ff.appels.length, await db.get('imports', 'imp_rc')], [1, 0, avant], 'T-D13 (M129b) : hors ligne, « Reclasser » est éteint ; rallumé et cliqué, classer() s’arrête à la garde réseau — aucune confirmation de plus, 0 POST, 0 écriture, le résultat intact (jamais jeté avant les gardes)');
+    });
+
+    await ecran('T-D14 appariement à l’écran', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement(), IMPORT_RCO] });
+      const p = await monterPanneau(repo, db);
+      await pret(p);
+      const zone = (cle) => blocDe(p, cle).querySelector('[data-role="appariement"]');
+      const caseDe = (cle) => zone(cle).querySelector('label.check input[type="checkbox"]');
+      const ouvrir = (cle) => { zone(cle).querySelector('button[data-role="choisir-reference"]').click(); return zone(cle).querySelector('[data-role="selecteur"]'); };
+      const listeDe = (sel) => [...sel.querySelectorAll('button[data-role="reference"]')].map((b) => [b.dataset.id, b.textContent]);
+      eq([zone('g1').querySelector('label.check').textContent.trim(), caseDe('g1').checked], ['Complète “Soupe de courge”, p. 132', true], 'T-D14 : g1 cochée, la proposition sûre dite');
+      eq([zone('g3').querySelector('label.check').textContent.trim(), caseDe('g3').checked, zone('g3').querySelector('small.muted')?.textContent], ['Complète “Gratin dauphinois”, p. 152 ?', false, 'Titre semblable, page différente ou inconnue.'], 'T-D14 : g3 proposée DÉCOCHÉE, avec « ? » et la raison de son motif');
+      caseDe('g1').click();
+      await attendre(() => zone('g1').querySelector('p.muted')?.textContent === 'Nouvelle recette — “Soupe de courge” restera repérée.', 'décochée dite');
+      eq(caseDe('g1').checked, false, 'T-D14 (M135) : décocher g1 → « Nouvelle recette — “Soupe de courge” restera repérée. »');
+      const s2 = ouvrir('g2');
+      eq([s2.hidden, zone('g2').querySelector('button[data-role="choisir-reference"]').getAttribute('aria-expanded'), s2.querySelector('input[type="search"]').getAttribute('aria-label'), [...s2.querySelectorAll('button[data-role="reference-occupee"]')].map((b) => [b.dataset.id, b.disabled, b.nextElementSibling?.textContent])], [false, 'true', 'Chercher dans les références de ce livre', [['rcO', true, 'Import en cours — voir Imports']]], 'T-D14 (M113) : « Choisir une référence… » ouvre le sélecteur ; rcO (import ouvert) listée ÉTEINTE, « Import en cours — voir Imports »');
+      const champ = s2.querySelector('input[type="search"]');
+      champ.focus(); champ.value = 'poire'; champ.dispatchEvent(new Event('input', { bubbles: true }));
+      eq([listeDe(s2), document.activeElement === champ], [[['rcP', 'Poire rôtie au miel — p. 140'], ['rcT', 'Tarte aux poires — p. 141']], true], 'T-D14 : saisir « poire » → rcP et rcT listées, libellés « titre — p. N » ; la saisie ne redessine que la liste (le focus reste dans le champ)');
+      ouvrir('g3').querySelector('button[data-role="reference"][data-id="rcP"]').click();
+      await attendre(() => caseDe('g3')?.checked === true && zone('g3').querySelector('label.check').textContent.trim() === 'Complète “Poire rôtie au miel”, p. 140', 'rcP choisie pour g3');
+      const ids = (cle) => [...zone(cle).querySelectorAll('[data-role="selecteur"] button[data-role="reference"]')].map((b) => b.dataset.id);
+      eq([ids('g1').includes('rcP'), ids('g2').includes('rcP')], [false, false], 'T-D14 (M79) : rcP choisie pour g3 → absente des sélecteurs de g1 et g2');
+      scene.replaceChildren();
+      const deuxSures = { groupes: [{ page_ids: ['p1'], title: 'Soupe de courge', printed_page: 132, uncertain: false }, { page_ids: ['p2'], title: 'Soupe de courge', printed_page: 133, uncertain: false }], orphelines: [], non_classees: [], partagees: [], uncertain: [] };
+      await poserSeance(repo, db, { id: 'ss_cf', imports: [ligneClassement({ id: 'imp_cf', sessionId: 'ss_cf', page_ids: ['p1', 'p2'], over: { resultat: deuxSures } })] });
+      const pc = await monterPanneau(repo, db, { sessionId: 'ss_cf', importId: 'imp_cf' });
+      await pret(pc);
+      const cas = (cle) => blocDe(pc, cle).querySelector('[data-role="appariement"] label.check input');
+      eq([cas('g1').checked, cas('g2').checked, blocDe(pc, 'g1').querySelector('[data-role="appariement"] small')?.textContent], [false, false, 'Une autre recette du lot vise aussi cette référence.'], 'T-D14 (M43 à l’écran) : deux groupes sûrs sur rcS → conflit, les deux décochés, la raison dite');
+      cas('g1').click();
+      await attendre(() => cas('g2')?.disabled === true, 'case de g2 éteinte');
+      eq([cas('g1').checked, cas('g2').disabled, cas('g2').getAttribute('aria-label')], [true, true, 'Déjà choisie pour la recette 1'], 'T-D14 (M79) : une référence cochée pour un groupe est désactivée ailleurs — « Déjà choisie pour la recette 1 »');
+      scene.replaceChildren();
+      const homonyme = { groupes: [{ page_ids: ['p1'], title: 'Tarte aux pommes', printed_page: null, uncertain: false }], orphelines: [], non_classees: [], partagees: [], uncertain: [] };
+      await poserSeance(repo, db, { id: 'ss_h', references: [...REFERENCES_ED, ...HOMONYMES], imports: [ligneClassement({ id: 'imp_h', sessionId: 'ss_h', page_ids: ['p1'], over: { resultat: homonyme } })] });
+      const ph = await monterPanneau(repo, db, { sessionId: 'ss_h', importId: 'imp_h' });
+      await pret(ph);
+      const zh = ph.querySelector('[data-role="appariement"]');
+      eq([[...zh.querySelectorAll(':scope > p.muted')].map((x) => x.textContent), zh.querySelector('button[data-role="choisir-reference"]').getAttribute('aria-expanded'), zh.querySelector('[data-role="selecteur"]').hidden, listeDe(zh.querySelector('[data-role="selecteur"]')).slice(0, 2).map(([id]) => id), zh.querySelector('label.check')], [['Plusieurs références possibles.', 'Nouvelle recette'], 'true', false, ['rcH1', 'rcH2'], null], 'T-D14 (M134) : HOMONYMES, page nulle → « Plusieurs références possibles. », rien de coché, le sélecteur OUVERT au premier rendu avec rcH1 puis rcH2 en tête');
+      scene.replaceChildren();
+      await poserSeance(repo, db, { id: 'ss_sl', edition: null, imports: [ligneClassement({ id: 'imp_sl', sessionId: 'ss_sl' })] });
+      const ps = await monterPanneau(repo, db, { sessionId: 'ss_sl', importId: 'imp_sl' });
+      await pret(ps);
+      eq([ps.querySelector('[data-role="regroupement"] .status.info')?.textContent, ps.querySelectorAll('[data-role="appariement"] input, [data-role="appariement"] button').length], ['Aucun livre associé à cette séance : chaque recette sera une nouvelle recette.', 0], 'T-D14 (D-D16) : séance sans livre → la phrase, aucune case, aucun sélecteur');
+    });
+
+    await ecran('T-D15 « Lire ces recettes » : une transaction gardée, puis le lot', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement()] });
+      const ff = fauxFetch(); // la lecture du lot reste suspendue : la création se lit seule
+      let troisieme = null;
+      // lireRecettes lit repo.deviceId() en passant ses arguments à creerLesLectures, sans autre attente que le brouillon en vol (nul ici : `pret`) :
+      // un appel par entrée qui passe le verrou d'instance (lireLeLot, lui, ne le lit qu'APRÈS la création, des transactions plus tard).
+      let entreesLire = 0;
+      const espion = { ...repo, deviceId: () => { entreesLire += 1; return repo.deviceId(); }, transitionner: async (store, key, opts) => { if (key === 'imp_cl' && opts?.puts?.imports) troisieme = opts; return repo.transitionner(store, key, opts); } };
+      const p = await monterPanneau(repo, db, { over: { repo: espion, fetch: ff.fetch } });
+      await pret(p);
+      blocDe(p, 'g1').querySelector('button[data-role="monter"][data-page="p3"]').click();
+      await attendre(async () => JSON.stringify((await brouillonEn(db, 'imp_cl'))?.groupes?.[0]?.page_ids) === JSON.stringify(['p3', 'p1']), 'ordre [p3, p1] gardé');
+      await pret(p);
+      const vus = []; const capture = db.onMutate;
+      db.onMutate = (m) => { vus.push((m.puts.imports || []).map((i) => [i.id, i.status, i.lot?.rang ?? null])); return capture ? capture(m) : {}; };
+      try {
+        const b = boutonLire(p); const avantLire = entreesLire; b.click(); b.click();
+        for (let k = 0; k < 5; k += 1) await Promise.resolve(); // des microtâches seulement : aucune transaction IndexedDB ne se termine entre deux
+        eq(entreesLire - avantLire, 1, 'T-D15 (M86) : double clic → lireRecettes n’entre qu’UNE fois (verrou d’instance avant tout await)');
+        await attendre(() => navs.includes('/add?section=imports'), 'navigation vers Imports');
+      } finally { db.onMutate = capture; }
+      const creation = vus.filter((v) => v.some(([id, status]) => id === 'imp_cl' && status === 'enregistre'));
+      eq([creation.length, creation[0]?.length, creation[0]?.filter(([id]) => id !== 'imp_cl').map(([, status, rang]) => [status, rang])], [1, 4, [['a_lancer', 1], ['a_lancer', 2], ['a_lancer', 3]]], 'T-D15 (M80, M86) : UNE transaction (double clic compris) — les trois lignes neuves ET le classement enregistre dans le même appel de db.onMutate');
+      eq([troisieme?.attendus, typeof troisieme?.patch, troisieme?.conditions?.imports?.filter((c) => c.absente === true).length, troisieme?.conditions?.imports?.filter((c) => c.index === 'recipe_id').map((c) => c.valeur)], [['a_verifier'], 'function', 3, ['rcS', 'rcT']], 'T-D15 (M81, M82) : le troisième argument porte attendus [a_verifier], un patch-FONCTION, trois conditions absente et une condition d’index par référence cochée (rcS, rcT)');
+      const neuves = (await db.getAll('imports')).filter((i) => i.kind === 'recette').sort((a, b) => a.lot.rang - b.lot.rang);
+      eq(neuves.map((l) => [l.recipe_id, l.page_ids, l.scan_session_id, l.edition_id, l.device_id, l.lot]), [['rcS', ['p3', 'p1'], 'ss1', 'ed1', repo.deviceId(), { classement_id: 'imp_cl', rang: 1, total: 3, titre: 'Soupe de courge', page: 132 }], ['rcT', ['p2'], 'ss1', 'ed1', repo.deviceId(), { classement_id: 'imp_cl', rang: 2, total: 3, titre: 'Tarte fine aux poires', page: 140 }], [null, ['p5'], 'ss1', 'ed1', repo.deviceId(), { classement_id: 'imp_cl', rang: 3, total: 3, titre: 'Gratin dauphinois', page: 148 }]], 'T-D15 (M141) : trois lignes — référence cochée ou nulle, l’ordre CHOISI [p3, p1], la séance, son édition, cet appareil, le lot');
+      const cl = await db.get('imports', 'imp_cl');
+      eq([cl.status, cl.reponse_brute, cl.brouillon, typeof cl.finished_at, dits, navs.at(-1)], ['enregistre', null, null, 'string', ['3 recettes à lire : suis-les dans Imports.'], '/add?section=imports'], 'T-D15 : classement enregistre (réponse brute et brouillon effacés, finished_at) ; UN toast, celui du succès (aucun refus d’un second geste) ; la navigation vers Imports');
+      await attendre(() => G.lotEnCours()?.classementId === 'imp_cl' && ff.appels.length === 1, 'le lot lit la première');
+      await UI.annulerVol(neuves[0].id);
+      await attendre(() => G.lotEnCours() === null, 'lot arrêté');
+    });
+
+    await ecran('T-D15 refus : référence prise, classement remplacé (avant et dans la transaction), livre changé, photo prise, octets absents', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement()] });
+      const ff = fauxFetch();
+      const avant = await db.get('imports', 'imp_cl');
+      const RIEN = 'Rien n’a été lancé : ce classement, le livre de la séance ou une référence choisie a changé entre-temps.';
+      const monter = async (over = {}) => { scene.replaceChildren(); const p = await monterPanneau(repo, db, { over: { fetch: ff.fetch, ...over } }); await pret(p); return p; };
+      // Chaque altération passe par db.mutate (aucun événement du bus) : le panneau garde le rendu d'avant, comme un autre onglet le laisserait.
+      const essayer = async (p, toastAttendu) => { const n = (await db.getAll('imports')).length; dits.length = 0; boutonLire(p).click(); await attendre(() => dits.length >= 1, 'toast de refus'); return [dits[0] === toastAttendu, (await db.getAll('imports')).length - n, (await db.get('imports', 'imp_cl')).status]; };
+      let p = await monter();
+      await db.mutate({ puts: { imports: [{ ...IMPORT_RCO, id: 'imp_rcs', recipe_id: 'rcS', scan_session_id: 'ss_x' }] }, origin: 'device' });
+      eq(await essayer(p, RIEN), [true, 0, 'a_verifier'], 'T-D15 (M85) : un import ouvert sur rcS créé entre le rendu et le clic → rien d’écrit, classement a_verifier, « Rien n’a été lancé : … »');
+      await db.mutate({ deletes: { imports: ['imp_rcs'] }, origin: 'device' });
+      p = await monter();
+      const autreResultat = { ...R5_STOCKE, uncertain: ['reclassé ailleurs'] };
+      await db.mutate({ puts: { imports: [{ ...avant, started_at: NOW, resultat: autreResultat }] }, origin: 'device' });
+      eq([await essayer(p, RIEN), (await db.get('imports', 'imp_cl')).resultat], [[true, 0, 'a_verifier'], autreResultat], 'T-D15 (M136) : un « Reclasser » d’un autre onglet entre le rendu et le clic → 0 écriture, le nouveau résultat intact');
+      await db.mutate({ puts: { imports: [avant] }, origin: 'device' });
+      let altere = false;
+      const espion = { ...repo, transitionner: async (store, key, opts) => { if (key === 'imp_cl' && opts?.puts?.imports && !altere) { altere = true; await db.mutate({ puts: { imports: [{ ...(await db.get('imports', 'imp_cl')), started_at: NOW }] }, origin: 'device' }); } return repo.transitionner(store, key, opts); } };
+      p = await monter({ repo: espion });
+      eq([await essayer(p, RIEN), altere], [[true, 0, 'a_verifier'], true], 'T-D15 (M137) : la même altération faite ENTRE l’étape 1 et la transaction → TransitionRefusee (garde rejouée DANS la transaction), rien d’écrit');
+      await db.mutate({ puts: { imports: [avant] }, origin: 'device' });
+      p = await monter();
+      const seance = await db.get('scan_sessions', 'ss1');
+      await db.mutate({ puts: { scan_sessions: [{ ...seance, edition_id: 'ed2' }] }, origin: 'device' });
+      eq(await essayer(p, RIEN), [true, 0, 'a_verifier'], 'T-D15 (M138) : le livre de la séance changé entre le rendu et le clic → refuse(edition), 0 écriture');
+      await db.mutate({ puts: { scan_sessions: [seance] }, origin: 'device' });
+      p = await monter();
+      await db.mutate({ puts: { imports: [{ ...IMPORT_RCO, id: 'imp_p5', recipe_id: null, scan_session_id: 'ss1', page_ids: ['p5'] }] }, origin: 'device' });
+      eq(await essayer(p, 'Rien n’a été lancé : une photo est déjà en cours d’import ailleurs.'), [true, 0, 'a_verifier'], 'T-D15 (M139) : une photo d’un groupe prise par un autre import ouvert → refuse(pages), 0 écriture');
+      await db.mutate({ deletes: { imports: ['imp_p5'] }, origin: 'device' });
+      p = await monter();
+      await db.mutate({ deletes: { files: [(await db.get('source_pages', 'p5')).sha256] }, origin: 'device' });
+      eq([await essayer(p, 'Les photos de cette séance ne sont pas sur cet appareil.'), ff.appels.length], [[true, 0, 'a_verifier'], 0], 'T-D15 (M140) : une photo d’un groupe sans octets → refuse(octets_absents), AUCUNE ligne, aucun POST');
+    });
+
+    // Vérification de la tâche 3 (D-D23, § 4.5 « cle et editionId = ceux du rendu ») : la séance et les recettes relues PAR LE BUS ne redessinent pas
+    // le panneau (sa signature ne les porte pas) ; le clic doit alors agir sur ce qui est RENDU — jamais sur un redessin fait au clic, que la personne n'a
+    // pas vu. Le fait attendu avant le clic : les trois lectures de LA relecture que l'écriture déclenche (séance, journal, recettes), comptées par
+    // l'espion — le montage n'en lance aucune, chaque bloc a sa base et son espion : rien d'autre ne les compte.
+    const relectureEspion = (repo) => {
+      const lus = { scan_sessions: 0, imports: 0, recipes: 0 };
+      const compter = (s) => { if (Object.hasOwn(lus, s)) lus[s] += 1; };
+      const espion = { ...repo, get: async (s, k) => { const r = await repo.get(s, k); compter(s); return r; }, all: async (s) => { const r = await repo.all(s); compter(s); return r; } };
+      const relu = async (ecrire) => { const avant = { ...lus }; await ecrire(); await attendre(() => Object.keys(lus).every((s) => lus[s] > avant[s]), 'séance, journal et recettes relus par le panneau'); };
+      return { espion, relu };
+    };
+    const RIEN_LIRE = 'Rien n’a été lancé : ce classement, le livre de la séance ou une référence choisie a changé entre-temps.';
+    const essayerLire = async (p, db) => { const n = (await db.getAll('imports')).length; dits.length = 0; boutonLire(p).click(); await attendre(() => dits.length >= 1, 'un toast'); return [dits[0], (await db.getAll('imports')).length - n, (await db.get('imports', 'imp_cl')).status]; };
+
+    await ecran('T-D15 (vérification) livre de la séance relu par le bus sans redessin : le clic garde l’édition RENDUE', async (repo, db) => {
+      // Aucune référence : aucun choix (tous nuls) — seule la garde d'édition peut refuser.
+      await poserSeance(repo, db, { references: [], imports: [ligneClassement()] });
+      const ff = fauxFetch();
+      const { espion, relu } = relectureEspion(repo);
+      const p = await monterPanneau(repo, db, { over: { repo: espion, fetch: ff.fetch } });
+      await pret(p);
+      const seance = await db.get('scan_sessions', 'ss1');
+      await relu(() => repo.save('scan_sessions', { ...seance, edition_id: 'ed2' }));
+      eq([...(await essayerLire(p, db)), ff.appels.length], [RIEN_LIRE, 0, 'a_verifier', 0], 'T-D15 (M-rendu, M-rendu-edition, vérification) : le livre de la séance changé ICI (le bus relit la séance, sans redessin) → refuse(edition) : l’édition RENDUE part, jamais celle relue ni celle d’un redessin fait au clic ; rien d’écrit, 0 POST');
+    });
+
+    await ecran('T-D15 (vérification) référence prise, relue par le bus sans redessin : le clic garde les choix RENDUS', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement()] });
+      const ff = fauxFetch();
+      const { espion, relu } = relectureEspion(repo);
+      const p = await monterPanneau(repo, db, { over: { repo: espion, fetch: ff.fetch } });
+      await pret(p);
+      eq(blocDe(p, 'g1').querySelector('[data-role="appariement"] label.check input')?.checked, true, 'T-D15 (vérification) : rcS cochée pour g1 au rendu');
+      await relu(async () => { await db.mutate({ puts: { imports: [{ ...IMPORT_RCO, id: 'imp_rcs2', recipe_id: 'rcS', scan_session_id: 'ss_x' }] }, origin: 'device' }); emit('change', { store: 'imports' }); });
+      eq([...(await essayerLire(p, db)), ff.appels.length], [RIEN_LIRE, 0, 'a_verifier', 0], 'T-D15 (M-rendu, vérification) : rcS prise ailleurs, relue par le bus sans redessin → refuse(reference) : le choix RENDU part — jamais une « nouvelle recette » silencieuse recalculée au clic ; rien d’écrit, 0 POST');
+    });
+
+    // Vérification de la tâche 3 (§ 4.5, étape 1) : page_ids n'entre pas dans la clé (cleClassement : id, started_at, resultat) — une ligne réécrite
+    // ailleurs sans une de ses pages garde sa clé, mais son résultat ne se revalide plus : refuse(classement), jamais une levée ni une écriture.
+    await ecran('T-D15 (vérification) creerLesLectures : un résultat qui ne se revalide plus sous la même clé → refuse(classement)', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement()] });
+      const L = await db.get('imports', 'imp_cl');
+      const ctx = await ctxDe(repo, db);
+      await db.mutate({ puts: { imports: [{ ...L, page_ids: ['p1', 'p2', 'p3', 'p4'] }] }, origin: 'device' });
+      const n = (await db.getAll('imports')).length;
+      const r = await G.creerLesLectures('imp_cl', { cle: C.cleClassement(L), editionId: 'ed1', etat: C.regroupementInitial(L.resultat, ctx.pagesById), choix: new Map(), ctx, repo, maintenant: () => NOW, newId: repo.newId, deviceId: repo.deviceId() });
+      eq([r, (await db.getAll('imports')).length - n, (await db.get('imports', 'imp_cl')).status], [{ issue: 'refuse', raison: 'classement' }, 0, 'a_verifier'], 'T-D15 (M-revalider, vérification) : même clé, page_ids réécrits sans p5 → le résultat ne se revalide plus → refuse(classement), rien d’écrit (jamais la levée de lecturesDuLot)');
+    });
+
+    await ecran('T-D16 lecture du lot : séquentielle, dans l’ordre, erreur de groupe, rien sur une recette', async (repo, db) => {
+      await poserSeance(repo, db);
+      const moi = repo.deviceId();
+      // Identifiants À REBOURS des rangs (l_c rang 1, l_b rang 2, l_a rang 3) : byIndex rend une même valeur d'index dans l'ordre des clés — seul le tri
+      // par rang de lireLeLot fait partir l_c d'abord (M84, M84b) ; en production, les identifiants viennent de newId, dans un ordre quelconque.
+      await db.mutate({ puts: { imports: [ligneLot({ id: 'l_c', rang: 1, page_ids: ['p1', 'p3'], device_id: moi }), ligneLot({ id: 'l_b', rang: 2, page_ids: ['p2'], device_id: moi }), ligneLot({ id: 'l_a', rang: 3, page_ids: ['p5'], device_id: moi })] }, origin: 'device' });
+      const ff = fauxFetch();
+      const ctx = await ctxDe(repo, db);
+      const vus = []; const capture = db.onMutate;
+      db.onMutate = (m) => { vus.push(Object.keys(m.puts)); return capture ? capture(m) : {}; };
+      let fin;
+      try {
+        const course = G.lireLeLot('imp_cl', { ctx, repo, fetch: ff.fetch, maintenant: () => NOW });
+        await attendre(() => ff.appels.length === 1 && G.lotEnCours()?.classementId === 'imp_cl', 'premier POST');
+        await tick(); await tick();
+        eq([ff.appels.length, (await db.get('imports', 'l_c')).status, (await db.get('imports', 'l_b')).status, await G.lireLeLot('imp_cl', { ctx, repo, fetch: ff.fetch })], [1, 'en_cours', 'a_lancer', { issue: 'refuse', raison: 'lot_tenu' }], 'T-D16 (M83, M90) : UN seul POST en vol (la ligne de rang 1) ; un second lireLeLot pendant → refuse(lot_tenu)');
+        ff.rendre[0](200, corpsModele(RECETTE_LUE()));
+        await attendre(() => ff.appels.length === 2, 'second POST');
+        eq([(await db.get('imports', 'l_c')).status, (await db.get('imports', 'l_b')).status, (await db.get('imports', 'l_a')).status], ['a_verifier', 'en_cours', 'a_lancer'], 'T-D16 (M84, M84b) : la réponse du premier rendue → le second part, dans l’ordre des RANGS (jamais celui des identifiants)');
+        ff.rendre[1](200, corpsModele(RECETTE_LUE(), { stop_reason: 'max_tokens' }));
+        await attendre(() => ff.appels.length === 3, 'troisième POST');
+        ff.rendre[2](200, corpsModele(RECETTE_LUE()));
+        fin = await course;
+      } finally { db.onMutate = capture; }
+      eq([fin, (await db.get('imports', 'l_b')).erreur?.raison, (await db.get('imports', 'l_a')).status, G.lotEnCours()], [{ issue: 'fini', lues: 2, echecs: 1, sautees: 0, arret: null }, 'coupe', 'a_verifier', null], 'T-D16 (M87) : [ok, coupe, ok] → a_verifier, echec(coupe), a_verifier, 3 POST (une erreur propre au groupe n’arrête pas le lot) ; lot libéré');
+      eq(vus.some((k) => k.includes('recipes') || k.includes('recipe_versions')), false, 'T-D16 (M92) : aucune écriture recipes ni recipe_versions pendant tout le lot (rien n’est écrit sur une recette)');
+    });
+
+    await ecran('T-D16 défaut fermé : quota, 400 relayé et 200 illisible arrêtent ; 413 continue ; Annuler arrête', async (repo, db) => {
+      await poserSeance(repo, db);
+      const moi = repo.deviceId();
+      const ctx = await ctxDe(repo, db);
+      const lot3 = (cl) => db.mutate({ puts: { imports: [1, 2, 3].map((r) => ligneLot({ id: `${cl}_${r}`, classementId: cl, rang: r, page_ids: [PAGES_5[r - 1]], device_id: moi })) }, origin: 'device' });
+      const statuts = (cl) => Promise.all([1, 2, 3].map(async (r) => (await db.get('imports', `${cl}_${r}`)).status));
+      for (const [cl, rep, libelle] of [
+        ['quota', [429, { erreur: 'quota', quota: 60 }], 'T-D16 (M88) : un 429 écrit par la passerelle (quota) → 1 POST, les deux suivantes restent a_lancer'],
+        ['relaye', [400, { type: 'error', error: { type: 'invalid_request_error', message: 'credit balance' } }], 'T-D16 (M116) : un 400 relayé sans champ erreur (requete : crédit épuisé, plafond) → 1 POST, arrêt'],
+        ['illisible', [200, 'pas du json'], 'T-D16 (M117) : un 200 illisible (reponse_illisible) → 1 POST, arrêt'],
+      ]) {
+        await lot3(cl);
+        const f = fauxFetch(rep);
+        const r = await G.lireLeLot(cl, { ctx, repo, fetch: f.fetch, maintenant: () => NOW });
+        eq([f.appels.length, await statuts(cl), r.arret !== null], [1, ['echec', 'a_lancer', 'a_lancer'], true], libelle);
+      }
+      await lot3('lourd');
+      const f413 = fetchSuite([[413, { erreur: 'trop_lourd' }], [200, corpsModele(RECETTE_LUE())], [200, corpsModele(RECETTE_LUE())]]);
+      await G.lireLeLot('lourd', { ctx, repo, fetch: f413.fetch, maintenant: () => NOW });
+      eq([f413.appels.length, await statuts('lourd'), (await db.get('imports', 'lourd_1')).erreur], [3, ['echec', 'a_verifier', 'a_verifier'], { raison: 'requete', extra: { trop_lourd: true } }], 'T-D16 (M142) : [413 écrit (trop_lourd), ok, ok] → 3 POST — cette demande-ci est trop lourde, la suivante peut passer');
+      await lot3('annule');
+      const fa = fauxFetch();
+      const course = G.lireLeLot('annule', { ctx, repo, fetch: fa.fetch, maintenant: () => NOW });
+      await attendre(() => fa.appels.length === 1, 'premier POST');
+      await UI.annulerVol('annule_1');
+      await course;
+      eq([fa.appels.length, await statuts('annule')], [1, ['echec', 'a_lancer', 'a_lancer']], 'T-D16 (M89) : « Annuler » du premier (annulerVol) → arrêt du lot');
+    });
+
+    await ecran('T-D16 sauts, ligne passée echec, second passage, battement, libération dite', async (repo, db) => {
+      await poserSeance(repo, db, { sansOctets: ['p4'] });
+      const moi = repo.deviceId();
+      const ctx = await ctxDe(repo, db);
+      await db.mutate({ puts: { imports: [ligneLot({ id: 'o1', classementId: 'cl_o', rang: 1, page_ids: ['p1'], device_id: moi }), ligneLot({ id: 'o2', classementId: 'cl_o', rang: 2, page_ids: ['p4'], device_id: moi }), ligneLot({ id: 'o3', classementId: 'cl_o', rang: 3, page_ids: ['p5'], device_id: moi })] }, origin: 'device' });
+      const fo = fauxFetch([200, corpsModele(RECETTE_LUE())]);
+      eq([await G.lireLeLot('cl_o', { ctx, repo, fetch: fo.fetch, maintenant: () => NOW }), fo.appels.length, (await db.get('imports', 'o2')).status], [{ issue: 'fini', lues: 2, echecs: 0, sautees: 1, arret: null }, 2, 'a_lancer'], 'T-D16 : octets_absents sur le second → sauté (il reste a_lancer), le troisième lu');
+      await db.mutate({ puts: { imports: [ligneLot({ id: 't1', classementId: 'cl_t', rang: 1, total: 2, page_ids: ['p1'], device_id: moi }), ligneLot({ id: 't2', classementId: 'cl_t', rang: 2, total: 2, page_ids: ['p2'], device_id: moi })] }, origin: 'device' });
+      const base = fauxFetch([200, corpsModele(RECETTE_LUE())]);
+      let crochet = true;
+      const fetchCrochet = async (u, o) => { if (crochet) { crochet = false; await db.mutate({ puts: { imports: [{ ...(await db.get('imports', 't2')), status: 'echec', erreur: { raison: 'serveur', extra: {} } }] }, origin: 'device' }); } return base.fetch(u, o); };
+      eq([await G.lireLeLot('cl_t', { ctx, repo, fetch: fetchCrochet, maintenant: () => NOW }), base.appels.length, (await db.get('imports', 't2')).status], [{ issue: 'fini', lues: 1, echecs: 0, sautees: 1, arret: null }, 1, 'echec'], 'T-D16 (M143) : une ligne passée echec entre le gel et son tour (écrite pendant le premier POST) → refusée transition AVANT tout POST, sautée ; le lot ne relance jamais un échec');
+      await db.mutate({ puts: { imports: [ligneLot({ id: 's3', classementId: 'cl_s', rang: 3, total: 4, page_ids: ['p5'], device_id: moi }), ligneLot({ id: 's1', classementId: 'cl_s', rang: 1, total: 4, page_ids: ['p1'], device_id: moi, status: 'a_verifier' }), ligneLot({ id: 's2', classementId: 'cl_s', rang: 2, total: 4, page_ids: ['p2'], device_id: 'dev_autre' }), ligneLot({ id: 's4', classementId: 'cl_s', rang: 4, total: 4, page_ids: ['p3'], device_id: moi })] }, origin: 'device' });
+      // Les départs relevés PAR LA BASE (db.onMutate : chaque ligne écrite en_cours, une fois) — jamais par la forme du patch : le départ part par le
+      // patch-FONCTION memesPages (vague finale du lot A), comme « appels + 1 ».
+      const ordre = []; const captureS = db.onMutate;
+      db.onMutate = (m) => { for (const i of (m.puts.imports || [])) if (i?.status === 'en_cours' && !ordre.includes(i.id)) ordre.push(i.id); return captureS ? captureS(m) : {}; };
+      try { await G.lireLeLot('cl_s', { ctx, repo, fetch: fauxFetch([200, corpsModele(RECETTE_LUE())]).fetch, maintenant: () => NOW }); }
+      finally { db.onMutate = captureS; }
+      eq(ordre, ['s3', 's4'], 'T-D16 (M91) : second passage — seules les a_lancer de CET appareil, dans l’ordre des rangs (départs relevés par la base)');
+      const { installCapture } = await import('../src/sync/outbox.js');
+      await db.mutate({ puts: { imports: [ligneLot({ id: 'b1', classementId: 'cl_b', rang: 1, total: 1, page_ids: ['p1'], device_id: moi })] }, origin: 'device' });
+      const fb = fauxFetch();
+      const course = G.lireLeLot('cl_b', { ctx, repo, fetch: fb.fetch, battementMs: 20 }); // horloge réelle : le battement est frais
+      await attendre(() => fb.appels.length === 1, 'POST en vol');
+      installCapture(db, { getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true });
+      await repo.init();
+      eq((await db.get('imports', 'b1')).status, 'en_cours', 'T-D16 : repo.init() rejoué pendant un vol au battement frais → la ligne reste en_cours (règle de T6 du lot A)');
+      fb.rendre[0](200, corpsModele(RECETTE_LUE()));
+      await course;
+      const evts = []; const off = on('change', (pl) => evts.push(pl?.store));
+      const ecritures = []; const capture = db.onMutate;
+      db.onMutate = (m) => { ecritures.push(1); return capture ? capture(m) : {}; };
+      let vide;
+      try { vide = await G.lireLeLot('cl_vide', { ctx, repo, fetch: fauxFetch().fetch }); }
+      finally { off(); db.onMutate = capture; }
+      eq([vide, evts.filter((s) => s === 'imports').length, ecritures.length], [{ issue: 'fini', lues: 0, echecs: 0, sautees: 0, arret: null }, 2, 0], 'T-D16 (M144) : la prise et la libération du lot émettent chacune un change « imports », sans aucune écriture (« Lecture du lot en cours… » ne reste jamais affiché)');
     });
 
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne
