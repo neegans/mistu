@@ -96,10 +96,12 @@ export const retirerPage = (pageIds, id) => pageIds.filter((p) => p !== id);
 // Pages : `printed_page` de la page gardé ; une page SANS numéro ne reçoit celui de la fiche que si elle est la PREMIÈRE de l'ordre (ronde 1 :
 // la deuxième photo d'une recette p. 132 est la p. 133, pas la 132 — rien d'inventé, I-1) ; les suivantes restent nulles.
 // Lot D : `reecrirePositions` (défaut vrai, lot A inchangé), `role: 'recette'`, union sans `reference.index_page_id`.
+// Lot D, ronde 1 (I-D3, B-7) : la photo d'index de LA référence n'est jamais une page de la recette, même quand la lecture la porte (classée dans le
+// groupe, cochée par « Regrouper en recette ») : écartée des pages lues — ni dans la version, ni dans l'union, ni réécrite (elle garde kind et position).
 const ORIGINES_PHOTO = ['photo', 'image'];
 export function fabriquerExtraction(resultat, { reference, versions = [], pages = [], pageIds = [], edition = null, convention = null, importId = null, modele = null, photo = null, maintenant = null, remplacer = true, reecrirePositions = true } = {}) {
   const parId = pages instanceof Map ? pages : new Map((pages || []).map((p) => [p.id, p]));
-  const presentes = pageIds.filter((id) => parId.has(id));
+  const presentes = pageIds.filter((id) => parId.has(id) && id !== reference.index_page_id);
   const ingredients = (resultat.ingredients || []).map((l) => ({ ...parseIngredientLine(l.source_text), uncertain: l.uncertain === true, verification_state: 'to_verify' }));
   const steps = (resultat.steps || []).map((s, i) => ({ id: newId('st'), position: i + 1, text: s.text, ...detectTimers(s.text) }));
   const incomplete = resultat.incomplete === true;

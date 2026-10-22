@@ -634,7 +634,7 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
 
 // « Enregistrer dans cette référence » (§ 4.8.3, D-D19) — sans DOM : la lecture du journal de la clé RENDUE (`cle`), a_verifier, de sorte recette, sans
 // référence, reçoit `recipeId` — la référence relue, encore candidate de l'édition de la ligne (reference_only, sans lien web, sans import ouvert) ; dans la
-// transaction, la clé, la sorte et l'absence de référence regardées, et la condition d'index d'I-2. Aucun appel. Rend { issue: 'rattache' } ou
+// transaction, la clé, la sorte et l'absence de référence regardées, la candidature rejouée (ronde 1) et la condition d'index d'I-2. Aucun appel. Rend { issue: 'rattache' } ou
 // { issue: 'refuse', raison: 'lecture' | 'reference' | 'transition' }.
 export async function rattacherLecture(importId, recipeId, { cle, repo = repoModule } = {}) {
   const refuse = (raison) => ({ issue: 'refuse', raison });
@@ -648,6 +648,9 @@ export async function rattacherLecture(importId, recipeId, { cle, repo = repoMod
       attendus: ['a_verifier'],
       patch: (c) => { if (cleLecture(c) !== cle || c.kind !== 'recette' || c.recipe_id != null) throw new TransitionRefusee('imports', importId, c.status); return { recipe_id: recipeId }; },
       conditions: { imports: [{ index: 'recipe_id', valeur: recipeId, exclus: IMPORTS_OUVERTS }] },
+      // Ronde 1 : la candidature de la référence rejouée DANS la transaction (une lecture reçue a pu la rendre available entre-temps) ; vérification
+      // seule, par le sac `autres` du lot A : la fusion ne rend jamais de fiche, rien n'est écrit sur `recipes`.
+      autres: { recipes: [{ key: recipeId, fusion: (r) => { if (!candidatsReference(r ? [r] : [], { editionId }).length) throw new TransitionRefusee('recipes', recipeId, null); return null; } }] },
     });
   } catch (e) { if (e instanceof TransitionRefusee) return refuse('transition'); throw e; }
   return { issue: 'rattache' };
@@ -680,7 +683,7 @@ export function blocApparierLecture({ ligne, resultat, ctx, repo = repoModule, n
       const tenue = !!L && L.status === 'a_verifier' && L.kind === 'recette' && L.recipe_id == null && cleLecture(L) === cle;
       const frais = tenue ? blocApparierLecture({ ligne: L, resultat, ctx: { ...ctx, recipes, imports }, repo, navigate, toast }) : null;
       racine.replaceWith(frais ?? el('div', { hidden: true }));
-    } catch (e) { logError('regroupement.rattacher', { error: e, id: ligne.id }); }
+    } catch (e) { logError('regroupement.rattacher', { error: e, id: ligne.id }); toast(t('Une erreur est survenue')); } // ronde 1 : un échec est dit
     finally { occupe = false; }
   }
   const r = prop?.recipe_id ? candidats.find((x) => x.id === prop.recipe_id) ?? null : null;

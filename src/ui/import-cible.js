@@ -376,7 +376,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
   // la lecture pour laquelle « Rattacher » a été répondu, sinon null ; verdict : la discordance calculée par decider() ; focus : le bouton à focaliser
   // après un déplacement ; occupe : une écriture est en cours (aucune double pose) ; ecriteMain : la question « Remplacer ? » vient d'une version écrite à
   // la main (I-5), et non de la seule couverture des pages (ronde finale 2) — la phrase qui le dit n'est montrée que dans ce cas.
-  const etat = { ligne: null, pages: new Map(), question: null, cleQuestion: null, rattache: null, verdict: null, focus: null, occupe: false, ecriteMain: false };
+  const etat = { ligne: null, pages: new Map(), question: null, cleQuestion: null, rattache: null, verdict: null, focus: null, occupe: false, ecriteMain: false, seanceRefusee: null };
   const oublierQuestion = () => { etat.question = null; etat.cleQuestion = null; etat.rattache = null; etat.verdict = null; etat.ecriteMain = false; };
   root.etatRoute = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, pageIds: [...(Array.isArray(etat.ligne?.page_ids) ? etat.ligne.page_ids : [])], vol: !!etat.ligne && volEnCours()?.importId === etat.ligne.id, discordance: etat.verdict });
   if (!recipe) { root.append(el('div', { class: 'card' }, t('Recette introuvable.'))); return root; }
@@ -602,7 +602,8 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
   // autre onglet a tranché juste avant, I-10) → rien n'est écrit et rien n'est dit « importé » ; réussie → toast et navigation SEULEMENT si l'écran est
   // encore monté (T4-R1 : une lecture qui arrive après avoir quitté l'écran n'arrache pas la personne à sa saisie ; la fiche montre la version).
   async function enregistrer(L, fab) {
-    const seance = L.scan_session_id ? await repo.get('scan_sessions', L.scan_session_id) : null;
+    // Ronde 1 : une séance refusée dans la transaction (disparue, ou d'un statut hors open/done) n'est plus relue — le geste suivant écrit sans elle (§ 4.8.1 point 2).
+    const seance = L.scan_session_id && etat.seanceRefusee !== L.scan_session_id ? await repo.get('scan_sessions', L.scan_session_id) : null;
     const puts = { recipes: [fab.recipe], recipe_versions: [fab.version], source_pages: fab.pageUpdates };
     // Lot D (§ 4.8.1 point 2, N-1) : la séance n'est plus écrite par une copie lue hors transaction — elle entre dans LA transaction par le sac
     // `conditions`, relue dedans (deux enregistrements concurrents gardent leurs deux recipe_ids) ; done seulement quand plus aucune de ses photos n'est
@@ -621,7 +622,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     try {
       await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: cloture, puts, ...(conditions ? { conditions } : {}) });
     } catch (e) {
-      if (estRefus(e) && e.store === 'scan_sessions') toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); // lot D : la séance a disparu entre-temps ; le geste suivant écrit sans elle
+      if (estRefus(e) && e.store === 'scan_sessions') { etat.seanceRefusee = L.scan_session_id; toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); } // lot D : la séance a disparu (ou porte un statut inconnu) ; le geste suivant écrit sans elle
       else if (!estRefus(e)) { logError('import_cible.enregistrer', { error: e, id: L.id }); toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); }
       return;
     }
@@ -703,7 +704,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     try {
       await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: (c) => { if (cleLecture(c) !== cle || c.kind !== 'recette') throw new TransitionRefusee('imports', L.id, c.status); return { recipe_id: null }; } });
       fait = true;
-    } catch (e) { if (!estRefus(e)) logError('import_cible.nouvelle_recette', { error: e, id: L.id }); }
+    } catch (e) { if (!estRefus(e)) { logError('import_cible.nouvelle_recette', { error: e, id: L.id }); toast(t('Une erreur est survenue')); } } // ronde 1 : un échec qui n'est pas un refus est dit
     finally { etat.occupe = false; }
     if (fait) { oublierQuestion(); if (root.isConnected) navigate('/recipes/new?import=' + encodeURIComponent(L.id)); return; }
     await reposer();

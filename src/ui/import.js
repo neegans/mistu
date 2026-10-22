@@ -219,7 +219,12 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
     toast(t('Page remplacée')); refresh();
   }
   async function removePages(ids) {
-    const used = ids.filter((id) => ctx.recipes.some((r) => (r.source_page_ids || []).includes(id)));
+    // Lot D, ronde 1 : une page est liée dès qu'une fiche la nomme — source_page_ids, ou index_page_id (B-7 retire la photo d'index de l'union d'une fiche
+    // lue) — ou qu'une version la cite (provenance.source_page_ids, relation d'archive dure) : la retirer casserait la fiche et la restauration.
+    const liees = new Set();
+    for (const r of ctx.recipes) { for (const id of r.source_page_ids || []) liees.add(id); if (r.index_page_id) liees.add(r.index_page_id); }
+    for (const v of ctx.recipe_versions || []) for (const id of (Array.isArray(v?.provenance?.source_page_ids) ? v.provenance.source_page_ids : [])) liees.add(id);
+    const used = ids.filter((id) => liees.has(id));
     if (used.length) { toast(t('{n} page(s) déjà liée(s) à une recette : retire d’abord la recette.', { n: used.length })); return; }
     if (!(await confirmDialog(t('Retirer {n} page(s) de la séance ? Les fichiers restent dans la base tant qu’une autre référence existe.', { n: ids.length }), { danger: true, okLabel: t('Retirer') }))) return;
     session.page_ids = session.page_ids.filter((id) => !ids.includes(id));

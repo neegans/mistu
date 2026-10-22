@@ -58,6 +58,7 @@ export async function renderRecipeEdit(params, query, ctx) {
   // LA lecture du journal posée dans le formulaire (ronde 1) : sa clé (cleLecture — « Enregistrer » ne clôt qu'elle, T4-R2) et ce qu'elle a dit
   // d'incomplet (I-1 : montré à l'écran, porté par la version, jamais comblé).
   let lecturePosee = null; // { cle, resultat } | null
+  let seanceRefusee = false; // lot D, ronde 1 : la séance refusée dans la transaction (disparue, statut hors open/done) — le geste suivant écrit sans elle
   const editionId = query.edition || recipe?.edition_id || ligneImport?.edition_id || null;
   const edition = editionId ? ctx.editionsById.get(editionId) : null;
   const book = edition ? ctx.booksById.get(edition.book_id) : null;
@@ -340,7 +341,7 @@ export async function renderRecipeEdit(params, query, ctx) {
     assertVocabulaire(rec, 'recipes'); // D-12 : vocabulaire fermé vérifié avant l'écriture
     const lot = { recipes: [rec], recipe_versions: [version], source_pages: pageUpdates };
     // La séance (recipe_ids) s'écrit dans la MÊME transaction que la recette (I-10, ronde 1), relue juste avant (leçon C4).
-    const seance = sessionId ? await repo.get('scan_sessions', sessionId) : null;
+    const seance = sessionId && !seanceRefusee ? await repo.get('scan_sessions', sessionId) : null;
     // Lot D (§ 4.8.2 point 5, N-1) : quand « Enregistrer » ferme une lecture du journal, la séance entre dans LA transaction par le sac `conditions` (relue
     // dedans, recipe_ids réunis, done seulement quand plus aucune de ses photos n'est sans rôle — statutSeanceApres sur ses pages relues juste avant ;
     // les positions ne sont jamais réécrites) ; sans lecture du journal, la copie relue comme avant.
@@ -361,6 +362,8 @@ export async function renderRecipeEdit(params, query, ctx) {
       try { await repo.transitionner('imports', ligneLue.id, { attendus: ['a_verifier'], patch: cloture, puts: lot, ...(conditionsSeance ? { conditions: conditionsSeance } : {}) }); }
       catch (e) {
         if (!(e instanceof TransitionRefusee)) throw e;
+        // Ronde 1 (§ 4.8.1 point 2, repris par § 4.8.2 point 5) : un refus de la SÉANCE garde la lecture posée — le geste suivant la clôt sans la séance.
+        if (e.store === 'scan_sessions') { seanceRefusee = true; toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); return; }
         importCourant = null; lecturePosee = { ...lecturePosee, cle: null }; // détachée de la ligne ; ce que la lecture a dit d'incomplet reste porté
         toast(t('La recette n’a pas pu être enregistrée. Réessaie.'));
         return;
