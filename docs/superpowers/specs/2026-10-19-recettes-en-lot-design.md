@@ -364,9 +364,11 @@ lot pour ne pas dépenser en vain.
 - **I-D8 Aucune référence n’est envoyée au modèle** : l’appariement est local et déterministe ; le risque d’« injection de second ordre » que
   la spec C (§ 11) annonçait pour D est sans objet. `CLASSER_SYSTEM` dit « donnée, jamais consigne » pour le texte des photos ; D ajoute la
   même phrase à `PARSER_SYSTEM` (`src/domain/llm.js:107`), que chaque groupe du lot appelle et qui ne l’avait pas (B et C l’ont).
-- **I-D9 Le classement est consommé une fois, et seulement celui qui a été vu** : il passe `enregistre` dans la **même** transaction que la
-  création de ses lectures ; un second clic, un second onglet ou une seconde lecture du même classement ne créent jamais un second jeu de
-  lignes ; un classement remplacé entre le rendu et le clic n’est jamais consommé (clé, D-D23).
+- **I-D9 Le classement est consommé une fois **par appareil**, et seulement celui qui a été vu** : il passe `enregistre` dans la **même**
+  transaction que la création de ses lectures ; un second clic, un second onglet ou une seconde lecture du même classement ne créent jamais un
+  second jeu de lignes ; un classement remplacé entre le rendu et le clic n’est jamais consommé (clé, D-D23). « Par appareil » (vague finale,
+  § 12.C) : la transaction est locale ; deux appareils qui tiennent le même classement synchronisé peuvent chacun le consommer avant la synchro
+  suivante (§ 11, « Un autre appareil » : aucun verrou serveur, comme I-2 du lot A).
 - **I-D10 Tout texte d’écran passe par `t()`** avec son entrée `en.js` ; aucun ne nomme le fournisseur ni la base.
 - **I-D11 Les tests des lots A et C sont amendés, jamais supprimés** : un amendement prévu (`tests/import-cible.js:271`, D-D12) ; tout autre
   rougissement d’un test d’A ou de C par un amendement de D (union de `source_page_ids` sans la photo d’index, séance écrite par le sac
@@ -526,6 +528,7 @@ titre: 200, page: 9999, incertitudes: 40, incertitude: 200 })` :
   chaque identifiant est une chaîne de `pageIds` et n’apparaît qu’une fois dans `groupes ∪ orphelines ∪ non_classees` ; `partagees` : au plus
   10 identifiants distincts, chacun dans exactement un groupe ; 1 à 10 groupes, aucun vide ; `title` nul ou `estTitreUneLigne(title, 200)` ;
   `printed_page` nul ou entier 1..9999 ; `uncertain` booléen ; racine `uncertain` : au plus 40 chaînes, chacune `estTitreUneLigne(s, 200)` ;
+  au plus 10 `pageIds` distincts (la borne de § 3.1 : 2 à 10 photos ; vague finale, § 12.C) ;
   toute violation → `null` (un résultat stocké a été produit par notre propre validation : un écart est une altération, l’écran écrit
   `echec(illisible)`) ; un résultat valide revient **à l’identique**.
 - `regroupementInitial(resultat, pagesParId: Map)` → `{ groupes: [{ cle: 'g1'…, page_ids, title, printed_page, uncertain, origine:
@@ -542,7 +545,10 @@ titre: 200, page: 9999, incertitudes: 40, incertitude: 200 })` :
   `Object.hasOwn` ; `cle === startedAt` (chaîne) ; `groupes` tableau de 0 à 10 objets nus, `cle` conforme à `/^[gn][1-9][0-9]{0,2}$/` et
   unique, un `g{k}` seulement si `resultat.groupes[k − 1]` existe ; `page_ids` tableau non vide de chaînes de `pageIds` ; `a_part` tableau
   d’objets `{ page_id ∈ pageIds, motif ∈ ['orpheline', 'non_classee', 'retiree'] }` ; chaque page au plus une fois dans `groupes ∪ a_part`, et
-  `groupes ∪ a_part` = exactement les pages de `resultat` (groupes, orphelines, non classées) ; `prochain` entier 1..1000 supérieur à tout
+  chacune une page de `resultat` (groupes, orphelines, non classées) ; la couverture ne vaut que pour les pages de `resultat` **présentes** dans
+  `pagesParId` (vague finale, § 12.C, D-D20 : un brouillon écrit quand une photo manquait — « Retirer », pas encore reçue — se restaure) : une
+  page présente d’un **groupe** de `resultat` que le brouillon ne nomme pas est une violation ; une orpheline ou une non classée présente qu’il ne
+  nomme pas va dans `aPart` avec son motif d’origine (sa place initiale) ; une page absente peut manquer ; `prochain` entier 1..1000 supérieur à tout
   numéro `n{k}` ; `choix` tableau d’au plus 10 paires `[cle d’un groupe présent, chaîne de 1 à 80 points de code | null]`, une par groupe,
   jamais deux groupes sur la même référence ; toute violation → `null`. Les groupes `g{k}` reprennent `title`, `printed_page`, `uncertain` de
   `resultat.groupes[k − 1]` ; les pages absentes de `pagesParId` sont ensuite écartées comme dans `regroupementInitial`.
@@ -636,8 +642,9 @@ battementMs, enLigne, surChangement }` ; `surChangement` fait que chaque redessi
 miniatures, avant le panneau d’index. Le paramètre s’appelle `repo` dans tout le module (comme D-C20 du lot C), pour que le test statique
 `transitionner(` (`tests/import-cible.js:177-191`) reste vert sans exception. L’élément porte trois méthodes : `actionsSelection()` (les
 nœuds que `drawActions`, `src/ui/import.js:160-172`, place **avant** « Regrouper en recette »), `regrouperPermis(selection)` (faux
-seulement quand un classement de la séance est `en_cours` ou `a_verifier` **et** que `selection` touche ses `page_ids` : « Regrouper en
-recette » n’est alors pas rendu) et `etatClassement()` (tests : `{ importId, status, groupes: [{ cle, page_ids, recipe_id }], aPart: [{
+seulement quand un classement de la séance est `en_cours` ou `a_verifier` **et** que `selection` touche ses `page_ids`, ou — vague finale,
+§ 12.C, D-D15 — quand `selection` touche une photo d’une lecture de **recette** ouverte de la séance, ligne de lot pas encore lue comprise :
+« Regrouper en recette » n’est alors pas rendu) et `etatClassement()` (tests : `{ importId, status, groupes: [{ cle, page_ids, recipe_id }], aPart: [{
 page_id, motif }], appels, lot, brouillon }`). La ligne est lue **au rendu** dans `ctx.imports` (`getData` la charge,
 `src/ui/state.js:221`) et **relue** par `repo.get` avant toute écriture (leçon C4). Tant qu’il est monté, le panneau suit le bus (D-D22).
 `drawActions` rend « Regrouper en recette » en `.btn` (secondaire) dès que 2 photos ou plus sont cochées, en `.btn.primary` à une photo
@@ -662,7 +669,9 @@ page_id, motif }], appels, lot, brouillon }`). La ligne est lue **au rendu** dan
 2. **En vol** (`en_cours`, `volEnCours()?.importId === ligne.id`) : rendu dès que le passage `en_cours` émet (D-D22), pas au retour de
    `lancerVol` : `.status[role="status"]` « Classement des photos par l’assistant… » puis une `.row` avec le primaire éteint « Classer ces
    photos avec l’assistant » et `button[data-role="annuler"]` « Annuler » (`annulerVol(ligne.id)` ; structure R-VIS-8 : « Annuler » à droite).
-   Tenu par un autre document : `.status.warn` « En cours sur un autre écran », sans « Annuler » (I-7).
+   Tenu par un autre document : `.status.warn` « En cours sur un autre écran », sans « Annuler » (I-7) ; la passe `interrompu`
+   (`repo.marquerInterrompus`) y est rejouée à l’affichage, puis toutes les `BATTEMENT_MORT_MS` + 1 s tant que la ligne vole ailleurs et que le
+   panneau est monté (vague finale, § 12.C : la veille VF-15 du lot A, comme l’écran ciblé et le panneau d’index).
 3. **Reçu** (`a_verifier`, résultat **revalidé** : hostile → `echec(illisible)`, `brouillon: null`, au montage, puis état 4) : l’écran de
    regroupement (§ 4.3-4.5), brouillon restauré (D-D20).
 4. **Échec** (`echec`) : `texteEchecClassement(erreur)` (**neuf**, exporté) dans un `.status.warn[data-role="echec"]` : `coupe` → « Le
@@ -700,7 +709,9 @@ l’édition de la séance) vivent dans l’instance ; le panneau garde aussi la
 descendre, retirer, cocher, décocher, choisir une référence) écrit le brouillon (D-D20) puis redessine **le panneau seulement** (jamais la
 route : pas de `refresh()`). Au montage, les octets de chaque photo du classement sont cherchés (`repo.getFile`, au plus 10) : tant que la
 réponse n’est pas là, « Lire » et « Reclasser » sont éteints sans texte ; une photo d’un groupe sans octets les éteint avec « Les photos de
-cette séance ne sont pas sur cet appareil. » (D-D24). Miniatures : une `Map` sha256 → URL de `urlDeBlob` (`src/core/blob-urls.js`) par
+cette séance ne sont pas sur cet appareil. » (D-D24) ; tant qu’une photo manque, le panneau suit les états du moteur de synchronisation
+(`ctx.sync.moteur.onEtat`) et revérifie les octets : une photo téléchargée pendant que l’écran est monté rallume les boutons (vague finale,
+§ 12.C). Miniatures : une `Map` sha256 → URL de `urlDeBlob` (`src/core/blob-urls.js`) par
 instance, réutilisée à chaque redessin et révoquée au changement de route par `app.js` (modèle de `src/ui/import-cible.js:214`, `:312-320` ;
 jamais `displayUrl`, qui crée une URL non suivie par photo et par geste). Structure (classes existantes ; aucune règle CSS neuve, aucun
 `display: none` neuf) :
@@ -878,7 +889,8 @@ référence sans `index_page_id` — lot A — ne change pas).
    quand il **ferme** la lecture (`lue?.status === 'a_verifier'`) et que `f.lecture?.import_id === lue.id` : `version.provenance` reçoit
    `import_id`, `incomplete`, `missing_page`, `titre_lu` ; `rec.availability` passe `partial` si elle valait `available` et que `incomplete`
    ou `missing_page` est vrai ; les pages reçoivent `printed_page: p.printed_page ?? (i === 0 ? n(f.printed_page) : null)` (la première
-   seulement, I-D3) ;
+   seulement, I-D3) — règle appliquée par **tout** enregistrement de l’éditeur, saisie à la main, « Corriger » et adaptation comprises, pas
+   seulement à la clôture d’une lecture (écart de construction RATIFIÉ par la vague finale, § 12.C : rien d’inventé sur les pages suivantes) ;
 4. toutes les pages écrites par `save()` portent `role: 'recette'` avec `kind: 'recipe'` (l. 284), **sauf** la photo d’index de la fiche
    corrigée (`p.id === recipe?.index_page_id`), qui n’est jamais réécrite (ni `kind`, ni `role`, ni `printed_page`) ;
 5. quand `save()` ferme une lecture du journal, la séance entre dans **la même** transaction par le sac `conditions` (même forme qu’en § 4.8.1 : `status` par `statutSeanceApres` pour toute lecture issue d’une séance, N-1 — l’éditeur, qui ne touchait jamais le statut, ferme désormais la séance quand plus aucune de ses photos n’est sans rôle ; il ne réécrit pas les positions, et c’est gardé) au lieu de `repo.save('scan_sessions',
@@ -1058,7 +1070,9 @@ Domaine (`tests/classement.js`, **neuf**) :
   toléré ») ; photo 4 dans un groupe et dans `orphelines` → `hors_bornes` (M4) ; 11 groupes → `hors_bornes`, 10 → acceptés (M5) ; titre de 201
   points de code → titre `null`, `uncertain: true`, le reste gardé (M6 « lecture jetée pour un titre long », M6b « titre tronqué à 200 ») ;
   titre de 200 → gardé ; « Soupe de courge\nrôtie » → « Soupe de courge rôtie » (M104 « titre gardé sur deux lignes ») ; titre « voir
-  www.exemple.test/x » → `null` + `uncertain` (M7 « adresse gardée ») ; U+202E et U+200B retirés d’un titre (M8) ; `\ud800` retiré (M9) ;
+  www.exemple.test/x » → `null` + `uncertain` (le mur de `validerClassement`, `porteAdresse` sur la forme recollée ; vague finale, § 12.C : M7
+  « adresse gardée » retire la garde d’`estTitreUneLigne`, que ce cas ne voit pas — un second mur le tient —, et il est tué par la table
+  d’`estTitreUneLigne` de T-D8, qui le nomme) ; U+202E et U+200B retirés d’un titre (M8) ; `\ud800` retiré (M9) ;
   `printed_page` 0, 10000, `'132'`, 1.5 → `null` (M10) ; `uncertain: 'oui'` → `false` (M11) ; bloc sans `photos` ou à `photos: []` → écarté
   (M12) ; bloc tableau, `null`, `'x'` → écartés ; bloc construit par `Object.create({ photos: [1] })` (ou le littéral JS `{ __proto__: { photos:
   [1] } }`) passé **directement** à `validerClassement` → écarté (M13 « lecture par la chaîne de prototypes ») ; la variante JSON
@@ -1072,8 +1086,9 @@ Domaine (`tests/classement.js`, **neuf**) :
   absente au vol) → seules les pages envoyées (M26) ; un résultat valide revient **identique** (M27) ; identifiant hors `ligne.page_ids` →
   `null` (M28 « revalidation absente ») ; doublon entre groupe et orphelines → `null` ; `partagees` qui nomme une page hors groupe, ou deux
   fois → `null` (M107 « partagées non revalidées ») ; 11 groupes, groupe vide, zéro groupe → `null` ; titre stocké de 201, portant U+202E, ou
-  portant un `\n` → `null` (M29 « revalidation moins stricte que la validation ») ; `printed_page: 0`, `uncertain: 'x'` → `null` ; `'x'`, `{}`,
-  `[]`, `null`, clé `__proto__` → `null` ; **table de titres** jugée par les trois lecteurs (`validerClassement` après pliage,
+  portant un `\n` → `null` (M29 « revalidation moins stricte que la validation ») ; 3 groupes de 10 et 5 orphelines sur 35 `page_ids`, ou
+  10 pages rangées sur une ligne de 11 → `null`, 10 → accepté (M-borne-photos, vague finale, § 12.C) ; `printed_page: 0`, `uncertain: 'x'` →
+  `null` ; `'x'`, `{}`, `[]`, `null`, clé `__proto__` → `null` ; **table de titres** jugée par les trois lecteurs (`validerClassement` après pliage,
   `revaliderResultatClassement`, `lotDe`) : « Soupe », « Soupe\nrôtie » (plié par la validation, refusé tel quel par les deux autres),
   201 points de code, une adresse, U+200B — un titre rendu par la validation est accepté par les deux autres, un titre refusé par l’un est
   refusé par tous (M108 « prédicats divergents ») ; `cleClassement` change quand `started_at` ou `resultat` change, pas quand `brouillon` ou
@@ -1086,12 +1101,18 @@ Domaine (`tests/classement.js`, **neuf**) :
   `restaurerBrouillon(brouillonDe(etat, choix, T), …)` rend le même état et les mêmes choix après déplacements, nouveau groupe et choix
   (M109 « brouillon non restauré ») ; un brouillon dont `cle` diffère de `started_at`, qui nomme une page hors du classement, une page deux
   fois, un `g4` sans groupe 4, une `cle` `x1`, 11 groupes, une paire de choix sur une `cle` absente, deux groupes sur la même référence, une
-  clé `__proto__`, ou qui oublie une page du résultat → `null` (M110 « brouillon hostile accepté ») ; un brouillon qui porterait `title: 'X'`
-  sur `g1` → le titre restauré reste celui de `resultat` (M111 « titre lu du brouillon »).
+  clé `__proto__`, ou qui oublie une page présente d’un **groupe** du résultat → `null` (M110 « brouillon hostile accepté » ; vague finale,
+  § 12.C : « une page du résultat » devient « une page présente d’un groupe ») ; un brouillon qui porterait `title: 'X'`
+  sur `g1` → le titre restauré reste celui de `resultat` (M111 « titre lu du brouillon »). Vague finale : `brouillonDe(état sans p5)` puis
+  `restaurerBrouillon(pagesParId sans p5)` → même état et mêmes choix (M-couverture « brouillon écrit sans une page absente refusé ») ; une
+  orpheline absente à l’écriture, présente au remontage → à part, motif `orpheline` (M-orpheline-revenue) ; une page de `page_ids` que le
+  résultat ne nomme pas, à part ou dans un groupe → `null` (M-hors-resultat) ; à l’écran, « Retirer » une photo classée, un geste, un
+  remontage → les groupes corrigés gardés.
 - **T-D5 appariement** (T1) : `candidatsReference` exclut `rcW`, `rcA`, `rcO` et une autre édition (M38 « référence en cours d’import
   proposée ») ; `referencesOccupees` rend `rcO` seule (M113 « référence occupée perdue ») ; `concordance` : « Tarte aux poires » ⊂ « Tarte fine
-  aux poires », écart 1 → sûre ; écart 3 → page fausse (M39 « ± 3 au lieu de ± 2 ») ; « Poire rôtie au miel » contre « Tarte fine aux
-  poires » → titre faux (M40 « égalité de chaînes au lieu des mots distinctifs ») ; `proposerAppariements(CLASSEMENT_5,
+  aux poires », écart 1 → sûre (M40 « égalité de chaînes au lieu des mots distinctifs » : l’inclusion, que l’égalité refuserait ; vague finale,
+  § 12.C) ; écart 3 → page fausse (M39 « ± 3 au lieu de ± 2 ») ; « Poire rôtie au miel » contre « Tarte fine aux poires » → titre faux (le cas
+  « titre faux », que l’égalité de chaînes dit faux aussi : il ne tue pas M40) ; `proposerAppariements(CLASSEMENT_5,
   REFERENCES_ED)` → attendus ci-dessus (M41 « incertaine pré-cochée ») ; `HOMONYMES` : groupe « Tarte aux pommes » p. 54 → `rcH1` sûre cochée ; page
   nulle → `plusieurs`, `recipe_id` nul, rien de coché, `ordre` `[rcH1, rcH2]` (M42 « homonyme proposé par départage ») ; deux groupes sûrs
   sur `rcS` → `conflit` pour les deux, décochés (M43 « une référence pour deux groupes ») ; deux sûres pour un groupe (`rcS` p. 132 et une
@@ -1210,7 +1231,8 @@ Extraction (`tests/passerelle.js`, bloc **neuf** `classerPhotos`, T1) :
   « Continuer la lecture (1 appel) » → `lireLeLot` → 1 POST (M93) ; pendant : « Lecture du lot en cours… », pas de bouton ; **après le dernier
   POST**, sans autre geste : « Continuer… » ou le bloc absent, **jamais** « Lecture du lot en cours… » (M144) ; lignes triées par rang avec
   « Recette {k} sur {n} » ; titre d’une ligne sans référence = « Tarte fine aux poires » (`lot.titre`) ; classement : « Classement · Livre »,
-  états, **pas** de « Relancer » (M62), « Reprendre » → `/import?session=…&import=…` ; `noteLotsDeSeance` sur la séance du lot : « 2
+  états, **pas** de « Relancer » sur un classement **en échec** (M62 ; vague finale, § 12.C : un classement reçu ou à lancer n’exerce pas la branche),
+  « Reprendre » → `/import?session=…&import=…` ; `noteLotsDeSeance` sur la séance du lot : « 2
   recette(s) de cette séance dans Imports » et « Voir les imports » → `#/add?section=imports` ; rien quand aucune ligne du lot n’est ouverte
   (M145 « note absente »).
 - **T-D18 enregistrer par l’écran ciblé** (T5 ; N-1 sur chaque chemin, R-D-3) :
@@ -1384,7 +1406,11 @@ attend).
   conditionné sur la ligne et sa clé (I-D9) et sur les références (I-D7) ; deux lots, ou deux lignes d’un même lot, peuvent se lire en même
   temps dans deux onglets (un vol par document), jamais la même ligne deux fois.
 - **Un autre appareil** : une ligne de classement reçue peut être reprise (`a_verifier`), brouillon compris ; ses photos n’y ont des octets
-  qu’après G : « Lire » y reste éteint et le dit (D-D24).
+  qu’après G : « Lire » y reste éteint et le dit (D-D24) — et se rallume quand elles arrivent pendant que l’écran est monté (vague finale).
+  I-D9 vaut **par appareil** (vague finale, constat 6 de la revue de branche) : deux appareils qui tiennent le même classement synchronisé,
+  `a_verifier`, peuvent chacun toucher « Lire ces recettes » avant la synchro suivante — chaque transaction locale passe, deux jeux de lignes
+  naissent, jusqu’à 2n appels, deux « Nouvelle recette » pour un même groupe, deux imports ouverts sur une même référence après la synchro
+  (I-2 du lot A est déjà par appareil). Aucun remède local sans verrou serveur ; nommé, non corrigé.
 - **Le brouillon et la synchronisation** : écrit à chaque geste (origine `local`), il avance `updated_at` de la ligne ; par la règle I7
   (« plus récent gagne »), une écriture plus ancienne d’un autre appareil arrivée après un geste d’ici est écartée — comme pour toute ligne du
   journal ; un brouillon de deux appareils différents : le dernier écrit gagne.
@@ -1405,8 +1431,23 @@ attend).
   la tâche 1 de E le relit (`couverture` est déjà dans `SORTES_IMPORT`) ; `SORTES_EXTRACTION` refuse `couverture` tant que E ne lui donne pas
   son propre chemin.
 - **L’éditeur, chemin du clic** (« Regrouper en recette » puis « Extraire avec l’assistant IA ») : `parParagraphe` reste calculé au rendu,
-  une étape sur plusieurs lignes lue par ce clic est encore coupée (le chemin du lot passe par `?import=`, corrigé) ; la règle « première page
-  seulement » ne vaut que pour une lecture du journal (la saisie à la main garde l’ancien comportement).
+  une étape sur plusieurs lignes lue par ce clic est encore coupée (le chemin du lot passe par `?import=`, corrigé). La règle « première page
+  seulement » vaut pour **tout** enregistrement de l’éditeur, saisie à la main comprise (vague finale, constat 3 de la revue de branche :
+  l’écart de construction est RATIFIÉ, § 4.8.2 point 3 ; avant D, une recette de trois pages saisie à la main avec « Page imprimée » 132 numérotait
+  ses trois pages 132 — une invention sur les deux suivantes).
+- **Le brouillon et une page qui revient** (vague finale, constat 1) : la couverture du brouillon ne vaut que pour les pages présentes ici ; une
+  orpheline ou une non classée qui revient (reçue après l’écriture) va à part ; une page d’un **groupe** du résultat absente quand le brouillon
+  a été écrit, puis présente au remontage (une tombale pas encore reçue ici, un retrait annulé ailleurs), fait encore refuser le brouillon :
+  l’écran repart du regroupement initial (défaut fermé, rien d’inventé ; rare, nommé).
+- **« Regrouper en recette » par une adresse** (vague finale, constat 4) : le geste est retiré quand la sélection touche une photo d’une lecture
+  de recette ouverte de la séance ; une adresse `#/recipes/new?pages=…` tapée ou gardée en signet l’ouvre encore (aucune condition sur les pages
+  dans l’éditeur, `lireDansLeJournal`) — rare, nommé.
+- **Une photo d’index dans un groupe** (constat 10 de la revue de branche, **décision de Neegan**, § 13) : avec l’intention « recette », toutes
+  les photos sont cochées ; une photo de table des matières déjà lue par C (`kind: 'index'`, `role: 'index'`) envoyée au classement peut être
+  rangée dans un groupe (par le modèle, ou par la personne : aucune puce ne la signale). Lue avec sa recette, elle est réécrite `kind: 'recipe'`,
+  `role: 'recette'` et peut recevoir le numéro de la recette si elle est première (`fabriquerExtraction`, `save()` de l’éditeur) — une invention
+  sur une page d’original. D-D6 dit qu’une page choisie par la personne dans un groupe reçoit `role: 'recette'` ; I-D3 dit que la photo d’index
+  d’**une** référence n’est jamais une page de la recette (seul `reference.index_page_id` est écarté). Non corrigé par la vague : à trancher.
 - **`sub_recipes`** : lus par le modèle, perdus par les deux chemins d’enregistrement (écran ciblé et éditeur) — dette du lot A, que D ne
   ferme pas (cahier B5 : « conserver … sous-recettes ») ; à reprendre avec le lot qui leur donnera une place dans la fiche.
 - **Quota** : un lot de 10 recettes = 11 appels sur 60 par jour ; une erreur de service, de compte ou une réponse relayée arrête le lot pour
@@ -1631,6 +1672,56 @@ cette lecture » range, une lecture en vol perdue a peut-être été comptée ; 
 (épingle 5216 inchangée : assertions amendées, aucune ajoutée), Node 174/174, `--check` 0, invisibles 0 ; aucun fichier de `src/` (`VERSION` `-10`
 inchangée).
 
+**Vague finale (revue finale de branche de `915df9f` : 2 Important, 14 Minor ; 22 octobre 2026).** Chaque constat de comportement a son test,
+lu ROUGE sur l'ancien `src/` (copie : le worktree, `src/` et `sw.js` de `915df9f` par-dessus) puis vert. Ce que la vague change :
+- **(1, Important) Le brouillon après « Retirer »** — `restaurerBrouillon` exigeait que le brouillon couvre TOUTES les pages du résultat : un
+  brouillon écrit après « Retirer » d'une photo classée (ou sur un appareil où une page manque) était refusé au remontage suivant, et l'écran
+  repartait en silence du regroupement initial, contre D-D20. La couverture ne vaut plus que pour les pages présentes ici ; une page du
+  brouillon reste une page du résultat (refus explicite d'une page de `page_ids` que le résultat ne nomme pas) ; une orpheline ou une non classée
+  présente que le brouillon ne nomme pas va à part avec son motif d'origine ; une page présente d'un GROUPE du résultat qu'il ne nomme pas reste
+  une violation (§ 3.6 amendé, § 11 « Le brouillon et une page qui revient »). Tests : T-D4 M-couverture, M-orpheline-revenue, M-hors-resultat
+  (garde de la règle relâchée), un écran (« Retirer » par la vraie question, un geste, deux remontages) ; la forme hostile « oublie une page du
+  résultat » de M110 est AMENDÉE en « oublie une page présente d'un groupe du résultat » (I-D11 : une règle par forme, l'oubli d'une orpheline
+  n'en est plus une).
+- **(2, Important) Faux-vert de T-D10 et T-D12 (R-D-10)** — « Ignorer » d'un classement reçu répondu non attendait deux ticks : une relecture
+  avant l'écriture passait verte (FV-M127i, vert ×3 sur `915df9f`). `agir()` (`src/ui/add.js`) finit désormais par son redessin même après un
+  « non » (son en-tête le disait déjà : « chaque geste la redessine ») ; T-D10 attend la ligne détachée par ce redessin, après un redessin connu
+  qui vide la file ; T-D12 (panneau) attend le bouton « Ignorer ce classement » remplacé par le `finally`, le panneau prêt d'abord.
+- **(3) La règle « première page seulement » de l'éditeur** vaut pour tout enregistrement (saisie à la main, « Corriger », adaptation) : écart
+  de construction RATIFIÉ (rien d'inventé) ; § 4.8.2 point 3 et § 11 corrigés. Aucun code.
+- **(4) « Regrouper en recette »** est retiré quand la sélection touche une photo d'une lecture de RECETTE ouverte de la séance (ligne de lot pas
+  encore lue, lecture ciblée, autre « Regrouper ») — D-D15 ; une ligne d'index ou de classement garde sa règle (le test T-C11 du lot C, qui lit
+  le lien sur les pages d'un index repris, reste vert) ; § 4.2 amendé ; résidu nommé en § 11 (une adresse `?pages=` tapée).
+- **(5) Des octets arrivés pendant que l'écran est monté** (« Télécharger » du lot G, rien sur le bus) : dès qu'une photo manque, le panneau
+  suit `ctx.sync.moteur.onEtat` et revérifie les octets ; abonnement pris par un panneau monté seulement, rendu au premier état qui le trouve
+  détaché (le test du lot G qui compte les abonnés de la séance reste `[1, 2, 0]`).
+- **(6) I-D9 vaut par appareil** : § 2 et § 11 (« Un autre appareil ») le disent ; aucun code (pas de remède local sans verrou serveur).
+- **(7) La veille de l'état 2** : un classement en vol ailleurs dont le document est mort était montré « En cours sur un autre écran » sans
+  geste ; la passe `interrompu` (`repo.marquerInterrompus`) est rejouée à l'affichage puis toutes les `BATTEMENT_MORT_MS` + 1 s (injectable,
+  `veilleMs`), comme l'écran ciblé, l'écran web et le panneau d'index. Le filet I-D1 de T-D20 l'admet (amendé : `marquerInterrompus` au rang des
+  écritures permises — la passe du démarrage du lot A, par `transitionner` conditionné — et `BATTEMENT_MORT_MS` lu sur l'espace de noms).
+- **(8) `revaliderResultatClassement` refuse plus de 10 `page_ids`** (§ 3.1) ; § 3.6 amendé ; la borne « 10 groupes » devient redondante (dix
+  photos au plus), gardée en défense.
+- **(9) Le vol lié aux pages comptées** : `classer()` passe `accepte: (l) => l?.kind === 'classement' && memeListe(l.page_ids, pages)` ; une
+  ligne réécrite entre le compte et le vol est refusée (`sorte`) avant tout décodage et toute transition (T-D12, espion de `getFile`).
+- **(10) Une photo d'index dans un groupe** : non corrigé — un choix de produit entre D-D6 et I-D3 ; porté en § 13 (décision de Neegan) et en
+  § 11.
+- **(11) Filet I-D1** : les imports sont épinglés — `repo.js` importé une seule fois, comme `import * as repoModule`, `db.js` pour
+  `TransitionRefusee` seul (FV-ID1-import-nomme et FV-ID1-espace-renomme, verts sur `915df9f`, rouges ici) ; assertion amendée, jamais retirée.
+- **(12, 13, 14) Libellés des mutants** : M40 nommé par le cas d'inclusion de T-D5 ; M7 nommé par la table d'`estTitreUneLigne` de T-D8 (le cas
+  de T-D1 nomme le mur de `validerClassement`) ; T-D17 pose un classement EN ÉCHEC (l'état qui exerce la branche de M62 ; un classement à
+  lancer, essayé d'abord, garde « Reprendre », « Ignorer » sous M62 : mesuré, corrigé) ; § 7 aligné.
+- **(15) Registre** : `mutants.md` gagne la passe à la lettre des quatorze lignes dont la définition jouée n'était pas celle de la table
+  (M76, M87, M88, M89, M97, M98, M109, M113, M116, M117, M124, M141, M152, M154) ; l'outil de la tâche 6 (`lotD-t6/liste.py`, laissé tel quel)
+  n'en gardait qu'une par ligne : une copie corrigée (`lotD-final/liste-toutes.py`) les garde toutes.
+
+**Mesures de la vague.** Suite `✅ 5228/5228` (épingle **5227** : +11 assertions — T-D3 ×1, T-D4 ×3, écrans ×7 ; les autres changements amendent
+des assertions existantes), seule erreur de console le 404 de `/favicon.ico` ; Node 174/174 ; `--check` 0 ; invisibles 0 ; `sw.js`
+`cuisine-os-v0.13.0-11` ; `APP_VERSION 0.13.0`, `DB_VERSION` 4 ; rien sous `supabase/` ni `tools/`. Rouge d'abord : les tests de la vague sur
+l'ancien `src/` → ❌ 5214/5225 (dix assertions de comportement et l'épingle). Mutants (`mutants.md`, « Vague finale ») : 37 passes, toutes
+rouges — les 14 lignes à la lettre de la table, 14 mutants des gardes neuves, les 6 faux-verts de la revue, M7, M40, M62 (rejoué après la
+correction de T-D17).
+
 ### 12.0 Rév. 3 → rév. 4 (vérification de la rév. 3, deux corrections de forme par le chef d’orchestre)
 
 La vérification de la rév. 3 (`wf_ff331391-a09`) a jugé appliqués R-D-1 à R-D-7, N-1, N-2 et les réserves, sans Critical neuf, et relevé deux
@@ -1823,7 +1914,16 @@ appliqués. Deux paires se contredisaient (B-1 / F-2, S-2 / F-1) : chacune est t
 
 ## 13. Points à trancher par Neegan
 
-Aucun. Les cinq points de la rév. 2 ont été tranchés par le chef d’orchestre (R-D-1 à R-D-5, § 12.1), par défaut le moins coûteux ; Neegan
+**Un point, ouvert par la revue finale de branche (constat 10), sans urgence avant la fusion** : une photo de **table des matières** (déjà
+lue par C : `kind: 'index'`, `role: 'index'`) rangée dans un groupe du classement — par le modèle ou par toi — est lue avec la recette, puis
+réécrite `kind: 'recipe'`, `role: 'recette'`, et reçoit le numéro de la recette si elle est la première page (§ 11, « Une photo d’index dans un
+groupe »). Deux lectures : (a) **protéger** — une page `index` n’est jamais réécrite (ni `kind`, ni `role`, ni `printed_page`) ni ajoutée aux
+pages de la recette, et l’écran de regroupement lui met une puce « photo d’index » (une clé neuve, § 5 et T-D20), ou l’écarte de la lecture ;
+(b) **garder** D-D6 à la lettre (une page choisie par toi dans un groupe devient une page de recette) et seulement ne jamais lui donner le
+numéro de la recette. Coût d’attendre : rare (une table des matières photographiée dans la même séance que des recettes, puis rangée dans un
+groupe), aucune perte de texte ; la photo garde ses octets. Défaut appliqué : aucun changement (la vague finale ne tranche pas un choix de produit).
+
+Les cinq points de la rév. 2 ont été tranchés par le chef d’orchestre (R-D-1 à R-D-5, § 12.1), par défaut le moins coûteux ; Neegan
 peut renverser chacun avant la fusion, par une ronde. Les deux constats de la vérification sont appliqués (N-1 ; N-2 par R-D-7). Restent des
 **mesures** avant la fusion, pas des décisions : la preuve § 10 du lot A consignée, et la sonde exigée de § 9 (R-D-8 : pas 1, 2, 7 et 8 de
 § 10 sur la branche servie localement), qui peut amender une constante ou rouvrir R-D-1 par une ronde ; le parcours complet de § 10 sur le

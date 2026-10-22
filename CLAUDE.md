@@ -2525,19 +2525,23 @@ Deux modules neufs : `src/domain/classement.js` (pur) et `src/ui/regroupement.js
 la séance (`sessionView`, `src/ui/import.js`), la proposition de référence dans l'éditeur (`blocApparierLecture`), les blocs de lot dans la section
 « Imports » d'Ajouter (`src/ui/add.js`). **PAS fusionné, PAS poussé. Aucune migration, serveur `assistant` intact, `DB_VERSION` 4.**
 
-**Ce qui marche (prouvé par la suite, `✅ 5217/5217`, épingle 5216, T-D1 à T-D22 plus les blocs de vérification et de ronde ; Node 174/174 ;
-`--check` 0 ; aucun réseau, bases jetables, `fetch` injecté).**
+**Ce qui marche (prouvé par la suite, `✅ 5228/5228`, épingle 5227 après la vague finale, T-D1 à T-D22 plus les blocs de vérification, de ronde et
+de la vague ; Node 174/174 ; `--check` 0 ; aucun réseau, bases jetables, `fetch` injecté).**
 - **Classement en un appel** (`classerPhotos`, `src/domain/llm.js` : outil `extraction`, 2 000 jetons, 2 à 10 photos, « Photo n » avant chaque
   image) ; la réponse est une donnée hostile (`validerClassement` : propriétés propres, objets construits, numéros bornés, photo à deux nommants
   départagée par la tête — R-D-7 —, titre trop long ou porteur d'une adresse rendu nul sans jeter le classement payé) ; une règle des titres
   (`estTitreUneLigne` sur la forme pliée, `surUneLigne` = `uneLigne` de C puis `plierUneLigne`, R-D-13).
 - **Panneau « Classement »** (`panneauClassement`, cinq états, abonné au bus) par le vol partagé `lancerVol` (options `attendus` / `accepte` ;
   `SORTES_EXTRACTION = ['recette', 'index']`) : « Annuler », « Reclasser » (confirmé, un appel), « Ignorer ce classement » (relu, gardé par sa clé) ;
-  « Regrouper en recette » devient secondaire à deux photos cochées.
+  « Regrouper en recette » devient secondaire à deux photos cochées. Vague finale : le vol est lié aux pages comptées ; un classement en vol
+  ailleurs dont le document est mort est levé (passe `interrompu` à l'affichage, puis la veille, comme l'écran ciblé) ; « Regrouper en recette »
+  est retiré aussi sur une photo d'une lecture de recette ouverte de la séance (une ligne de lot pas encore lue ne se paie pas deux fois).
 - **Écran de regroupement** : déplacer / nouvelle recette / retirer sans appel, brouillon gardé par la clé du classement (un brouillon hostile
-  n'apporte rien, jamais un titre), appariement proposé (`proposerAppariements`, `selecteurReferences`), « Lire ces recettes ({n} appels) » en UNE
-  transaction (`creerLesLectures` : classement `enregistre`, lignes neuves `absente`, une condition d'index par référence cochée), lecture séquentielle
-  (`lireLeLot` : `attendus: ['a_lancer']`, un lot par document, `suiteDuLot` à défaut fermé, `referenceALire` relue avant chaque lancement).
+  n'apporte rien, jamais un titre ; vague finale : il se restaure aussi après « Retirer » d'une photo classée — la couverture ne vaut que pour les
+  pages présentes —, et des octets arrivés pendant que l'écran est monté rallument « Lire »), appariement proposé (`proposerAppariements`,
+  `selecteurReferences`), « Lire ces recettes ({n} appels) » en UNE transaction (`creerLesLectures` : classement `enregistre`, lignes neuves
+  `absente`, une condition d'index par référence cochée), lecture séquentielle (`lireLeLot` : `attendus: ['a_lancer']`, un lot par document,
+  `suiteDuLot` à défaut fermé, `referenceALire` relue avant chaque lancement).
 - **Imports** : blocs de lot (« Lot de {n} recettes · {l} », « {k} sur {n} lues », « Continuer la lecture ({r} appels) »), note de séance.
 - **Enregistrer une lecture issue d'une séance (N-1)** : positions de la séance jamais réécrites, `role: 'recette'`, photo d'index de la fiche écartée
   des pages lues, de l'union et du bloc « Original », séance dans la même transaction par le sac `conditions` (garde élargie à `absente` / `index`,
@@ -2546,10 +2550,13 @@ la séance (`sessionView`, `src/ui/import.js`), la proposition de référence da
 - **Une fabrique** de ligne d'import (`ligneImportNeuve`, aussi pour la lecture web du lot B, R-D-15) ; `SORTES_IMPORT` ferme `imports.kind`.
 - **Filet T-D20** (tâche 6, élargi en ronde 1) : chaque texte neuf de la spec § 5 avec son anglais, les clés réemployées (les trois phrases I-4 du
   lot A comprises), les deux modules dans `SHELL`, `regroupement.js` dans le filet i18n, ni fournisseur ni base nommés (toute casse),
-  `src/ui/regroupement.js` n'écrit que par `repo.transitionner` et `repo.ouvrirImport` (tout accès sur `repo` ou sur l'espace de noms `repoModule`,
-  `?.` et espaces compris ; `repoModule` pour `newId` et `deviceId` seulement ; ni crochets, ni alias, ni déstructuration). Vu rouge sur copie :
-  M-D1 et M-D2 (tâche 6) ; M-D3 `repo.save(`, M-D4 `repoModule.save(` et six variantes, M-D5 « anthropic » en minuscules (ronde 1 ; M-D4, deux
-  variantes et M-D5 passaient le filet de `4d4da15`). Faible (admis) : `repo` passé en argument à une fonction d'un autre module lui échappe.
+  `src/ui/regroupement.js` n'écrit que par `repo.transitionner`, `repo.ouvrirImport` et `repo.marquerInterrompus` (la veille, vague finale) — tout
+  accès sur `repo` ou sur l'espace de noms `repoModule`, `?.` et espaces compris ; `repoModule` pour `newId`, `deviceId` et `BATTEMENT_MORT_MS`
+  seulement ; ni crochets, ni alias, ni déstructuration ; `repo.js` importé une seule fois, comme `repoModule`, et `db.js` pour `TransitionRefusee`
+  seul (vague finale : ni import nommé, ni second espace de noms). Vu rouge sur copie : M-D1 et M-D2 (tâche 6) ; M-D3 `repo.save(`, M-D4
+  `repoModule.save(` et six variantes, M-D5 « anthropic » en minuscules (ronde 1 ; M-D4, deux variantes et M-D5 passaient le filet de `4d4da15`) ;
+  FV-ID1-import-nomme et FV-ID1-espace-renomme (vague finale ; verts sur `915df9f`). Faible (admis) : `repo` passé en argument à une fonction d'un
+  autre module lui échappe.
 
 **Ce qui n'est PAS prouvé.** Aucun classement réel ni aucune lecture réelle : la durée et la justesse d'un vrai classement, la taille réelle d'un
 envoi (`octets`) et la borne réelle de 10 photos (413 de la passerelle, refus de la bordure ou succès), la photo partagée en vrai (mesure de R-D-1 :
@@ -2564,10 +2571,14 @@ deux murs restent (le second empêche deux URL pour une même empreinte en cas d
 M53 et M84 rendent un bilan rouge au lieu de figer la suite. Écarts E-1 à E-29 du plan et écarts de construction des rondes (séance refusée sans
 détacher l'éditeur, même règle sur l'écran ciblé, candidature rejouée par `autres`, `src/ui/import.js` touché en T5-R1, `referenceALire`,
 `lotDeRecette`, « Continuer » qui dit un arrêt, miniatures par `displayUrl`, ligne `raison-reclasser`, R-D-19, texte « Coche au moins deux photos de
-cette séance. ») : déclarés, **à ratifier par la revue finale de branche**. Doublons nommés (`classerPhotos` / `extraireTableMatieres`, `nu` / `sien`
-contre `objetNu` / `proprio`, sac de séance en deux copies, prédicat « lecture tenue » ×5), pages écrites par copie hors transaction (lot A), séance
-par copie sur trois chemins (refusé, spec § 4.8.2 point 5), pas d'objet `R.rendu`, échelle des raisons en deux copies, « Continuer » ne suit pas le
-réseau, « (n appels) » est un maximum (une ligne sans octets ici est refusée avant tout POST).
+cette séance. ») : déclarés ; la revue finale de branche n'en a relevé qu'un, la règle « première page seulement » de l'éditeur appliquée à toute
+saisie (constat 3), RATIFIÉ par la vague (rien d'inventé) — la ratification formelle des autres reste au chef d'orchestre, à la clôture. Limites
+nommées par la vague (spec § 11) : I-D9 vaut par appareil (deux appareils peuvent consommer le même classement avant la synchro) ; une page d'un
+GROUPE absente à l'écriture du brouillon puis revenue le fait encore refuser ; une adresse `#/recipes/new?pages=…` tapée relit une photo de lot ;
+**une photo d'index rangée dans un groupe** est réécrite page de recette (décision de Neegan, spec § 13). Doublons nommés (`classerPhotos` /
+`extraireTableMatieres`, `nu` / `sien` contre `objetNu` / `proprio`, sac de séance en deux copies, prédicat « lecture tenue » ×5), pages écrites
+par copie hors transaction (lot A), séance par copie sur trois chemins (refusé, spec § 4.8.2 point 5), pas d'objet `R.rendu`, échelle des
+raisons en deux copies, « Continuer » ne suit pas le réseau, « (n appels) » est un maximum (une ligne sans octets ici est refusée avant tout POST).
 
 **Gestes de Neegan, dans l'ordre.** 1) Lots A, B, G puis C d'abord (leurs sections). 2) **Sonde R-D-8, AVANT la fusion de D** (aucun agent ne
 dépense d'appel à ta place) : `http://127.0.0.1:8092` ajoutée le temps de la sonde à `ASSISTANT_ORIGINES` (elle remplace la valeur par défaut,
@@ -2580,14 +2591,15 @@ la branche écrit dans ta vraie bibliothèque** : l'entrée `dev` de `src/sync/c
 lignes `imports` du lot (`classement`, `recette` à champ `lot`), écrites par un code non fusionné, partent au serveur et arrivent sur les appareils
 restés sur C avant la fusion de D. 3) **La preuve § 10 du lot A consignée**
 (une extraction réelle : le lot D en lance cinq) — second mur avant la fusion. 4) `! git -C ~/projects/mistu merge --ff-only recettes-en-lot` (après
-C), puis **un** `! git -C ~/projects/mistu push origin main` ; suite publique `https://neegans.github.io/mistu/tests/` → le total de la vague finale
-(à la tâche 6 : `5217/5217`, épingle 5216, plus le 404 de `/favicon.ico`), service worker `cuisine-os-v0.13.0-10` (ou le suffixe de la vague finale).
+C), puis **un** `! git -C ~/projects/mistu push origin main` ; suite publique `https://neegans.github.io/mistu/tests/` → `5228/5228` (épingle 5227,
+vague finale ; plus le 404 de `/favicon.ico`), service worker `cuisine-os-v0.13.0-11` (ou le suffixe d'une ronde ultérieure).
 5) **Preuve § 10 complète sur le site public**, connecté (iPhone de préférence), pas 1 à 8 ; jetons avant et après (`select jour, appels,
-jetons_entree, jetons_sortie from public.assistant_usage_jour;`). 6) « clean » seulement après la copie du registre.
+jetons_entree, jetons_sortie from public.assistant_usage_jour;`). 6) **Trancher la photo d'index dans un groupe** (spec § 13 : la protéger, ou
+garder D-D6 sans lui donner le numéro de la recette ; sans urgence, rien n'est perdu). 7) « clean » seulement après la copie du registre.
 
 **Versions.** `APP_VERSION 0.13.0` (C : 0.12.0) ; `sw.js` `cuisine-os-v0.13.0-1` (T1) … `-10` (ronde 1 de T5 ; la ronde 2 de T5 et la tâche 6 ne
-touchent pas `src/`), chaque commit qui touche `src/` incrémente (R-B-24) ; `SHELL` + `./src/domain/classement.js`, `./src/ui/regroupement.js` ;
-`DB_VERSION` 4 inchangée.
+touchent pas `src/`), **`-11`** (vague finale), chaque commit qui touche `src/` incrémente (R-B-24) ; `SHELL` + `./src/domain/classement.js`,
+`./src/ui/regroupement.js` ; `DB_VERSION` 4 inchangée.
 
 **Bilan (tâche 6 et sa ronde 1).** Départ sur `4db4d8e` (mesure = C : 4743/4743, épingle 4742, Node 174) ; rejeu du plan par intention (EI-1 à EI-13 →
 R-D-13 à R-D-19) ; six tâches. T1 à T5 revues à trois lentilles, chacune avec au moins une ronde : T1 `b5565a6`/`1ae60f0`, T2 `ad0c439`/`29cd797`, T3
@@ -2596,8 +2608,16 @@ Important, 12 Minor) puis sa ronde 1 (filet I-D1 élargi, T-D13 et T-D16 durcis,
 **5216**, inchangée par la ronde 1 : assertions amendées, aucune ajoutée), Node 174/174, `--check` 0. Mutants : les 193 lignes de la table (171 de la
 spec § 7, 16 du pré-vol, M-D1 et M-D2, quatre du rejeu) en 218 passes sur des copies servies à part (8192-8194, témoins verts) à la tâche 6 — 217
 rouges, dont M53 et M84 qui figeaient la suite, et M132 survivant — ; à la ronde 1 (copies 8192-8194, témoins verts) : M132 et M132 sur les deux murs
-rouges, M53 et M84 rouges avec bilan, MR-c3 rejoué sur la tête rouge, M-D3, M-D4 et ses six variantes, M-D5 rouges ; registre `mutants.md`. Restent la
-re-revue de T6, la revue finale de branche, sa vague, `/verify` et la copie du registre (clôture du contrôleur).
+rouges, M53 et M84 rouges avec bilan, MR-c3 rejoué sur la tête rouge, M-D3, M-D4 et ses six variantes, M-D5 rouges ; registre `mutants.md`.
+
+**Vague finale (22 octobre 2026, revue finale de branche de `915df9f` : 2 Important, 14 Minor ; rapport `final-fix-report.md`).** Corrigés : le
+brouillon après « Retirer » d'une photo classée (constat 1), deux attentes par ticks devenues des faits (2), « Regrouper en recette » sur une photo
+de lot (4), octets arrivés pendant que l'écran est monté (5), la veille de l'état 2 (7), la borne de 10 `page_ids` (8), le vol lié aux pages
+comptées (9), le filet I-D1 sur les imports (11), trois libellés de mutants (12-14), le registre à la lettre (15) ; ratifié : la règle
+« première page seulement » de l'éditeur (3) ; nommé : I-D9 par appareil (6) ; porté à ta décision : la photo d'index dans un groupe (10, spec
+§ 13). Suite **5228/5228** (épingle **5227**, +11), Node 174/174, `--check` 0, invisibles 0, `sw.js` `-11` ; rouge d'abord sur l'ancien `src/`
+(❌ 5214/5225) ; mutants : 37 passes, toutes rouges (spec § 12.C). Restent la re-revue de la vague, `/verify` et la copie du registre (clôture du
+contrôleur).
 
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 

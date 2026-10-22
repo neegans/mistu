@@ -1362,6 +1362,12 @@ des titres (`estTitreUneLigne`, `src/core/bornes.js`) juge la validation, la rev
   discordance ; l'éditeur porte notes, incertitudes et limites de la lecture et propose une référence (`blocApparierLecture` → `rattacherLecture`).
 - **`repo.transitionner(…, { conditions })`** (sac de C, précisé par D-D17) : sur le magasin de la ligne, le sac n'admet que les formes `absente` et
   `index` (toute autre forme y reste refusée, garde du lot C), passées telles quelles APRÈS la condition de la ligne.
+- **Vague finale (revue de branche).** `restaurerBrouillon` n'exige la couverture que des pages du résultat présentes ici (un brouillon écrit après
+  « Retirer » d'une photo classée se restaure ; une orpheline revenue va à part) ; `revaliderResultatClassement` refuse plus de 10 `page_ids` ;
+  `classer()` lie le vol aux pages comptées (`accepte` compare `page_ids`) ; le panneau rejoue la passe `interrompu` (`repo.marquerInterrompus`) sur
+  un classement en vol ailleurs, à l'affichage puis toutes les `BATTEMENT_MORT_MS` + 1 s, et, tant qu'une photo manque, revérifie les octets à
+  chaque état du moteur (`ctx.sync.moteur.onEtat`) ; `regrouperPermis` retire « Regrouper en recette » pour une photo d'une lecture de recette
+  ouverte de la séance ; « Ignorer » d'un classement reçu, répondu non, redessine la section « Imports ».
 - **Ce qui n'est pas mesuré.** Un vrai classement (durée, justesse des groupes, borne réelle d'un envoi de 10 photos, page partagée) : sonde de Neegan
   avant la fusion (R-D-8) ; la lecture réelle de cinq recettes : preuve § 10 de la spec.
 
