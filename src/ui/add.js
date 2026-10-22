@@ -11,10 +11,11 @@ import { logError } from '../core/log.js';
 import { TransitionRefusee } from '../core/db.js';
 import * as repoModule from '../model/repo.js';
 import { lignesImports, dateReception } from '../domain/import-cible.js';
+import { progressionLots, blocsImports } from '../domain/classement.js';
 import { pageHeader, carte, libelleLivre, field, select } from './components.js';
 import { startScanSession } from './import.js';
-import { DOCUMENT_ID, lancerExtraction, annulerVol, phraseEchec, texteRefus, cleLecture } from './import-cible.js';
-import { texteEchecClassement } from './regroupement.js';
+import { DOCUMENT_ID, lancerExtraction, annulerVol, phraseEchec, texteRefus, cleLecture, volEnCours } from './import-cible.js';
+import { texteEchecClassement, lotEnCours, lireLeLot } from './regroupement.js';
 import { lancerLecture, annulerLecture, texteEchecLecture } from './import-web.js';
 import { texteEchecIndex } from './table-matieres.js';
 
@@ -85,6 +86,7 @@ function titreLigne(l) {
   if (l.titre.type === 'classement') return t('Classement · {l}', { l: livre }); // lot D
   if (l.titre.type === 'seance') return t('Photos conservées : {n} page(s)', { n: l.pages }) + (l.titre.livre ? ` · ${l.titre.livre}` : '');
   if (l.titre.type === 'index') return t('Index · {l}', { l: livre });
+  if (l.titre.type === 'regrouper' && l.lot) return l.lot.titre ?? t('Recette {k} sur {n}', { k: l.lot.rang, n: l.lot.total }); // lot D (§ 4.7) : une ligne de lot sans référence
   if (l.titre.type === 'regrouper') return t('Recette à regrouper · {l}', { l: livre });
   // Ronde 1 : le titre du signet (donnée reçue : ses Cf peuvent rester) est isolé dans un <bdi> — un U+202E n'y réordonne pas l'hôte recalculé (I-B5).
   if (l.titre.type === 'web' && !l.referenceAbsente) return [el('bdi', null, l.titre.texte ?? t('Sans titre')), ` — ${l.titre.livre ? t('Lien web · {h}', { h: l.titre.livre }) : t('Lien web')}`];
@@ -160,10 +162,41 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
     }
     await redessiner();
   }
+  // Lot D (§ 4.7) : « Recette {k} sur {n} » sous le titre d'une ligne de lot — sauf quand c'est déjà son titre.
+  const rangDuLot = (l) => {
+    if (!l.lot) return null;
+    const rang = t('Recette {k} sur {n}', { k: l.lot.rang, n: l.lot.total });
+    return titreLigne(l) === rang ? null : el('small', { class: 'muted', dataset: { role: 'rang-lot' } }, rang);
+  };
+  // Lot D (§ 4.7, D-D22) : un bloc par lot — l'en-tête (« Lot de {n} recettes · {l} », la progression sur TOUTES les lignes relues), « Lecture du lot en
+  // cours… » quand CE document lit ce lot, sinon « Continuer la lecture ({r} appels) » s'il reste des lignes à lancer ICI et qu'aucun vol ni lot n'est
+  // tenu (un lot par document : lireLeLot refuserait) ; puis ses lignes, par rang. La prise et la libération du lot passent par le bus : la section se
+  // redessine seule, même pour un lot lancé ailleurs (« Lire ces recettes »).
+  async function continuer(classementId) {
+    try { await lireLeLot(classementId, { ctx, repo, fetch, maintenant, battementMs }); }
+    catch (e) { logError('add.lot', { error: e, id: classementId }); }
+    await redessiner();
+  }
+  function blocLot(b, p, brutes) {
+    const n = p?.total ?? b.lignes.length;
+    const livre = b.lignes[0]?.titre?.livre ?? t('Sans livre');
+    const lues = t('{k} sur {n} lues', { k: p?.lues ?? 0, n });
+    const r = p?.restantesIci ?? 0;
+    const geste = lotEnCours()?.classementId === b.classementId
+      ? el('div', { class: 'status', role: 'status' }, t('Lecture du lot en cours…'))
+      : (r > 0 && !volEnCours() && !lotEnCours()
+        ? el('button', { type: 'button', class: 'btn primary', dataset: { geste: 'continuer' }, onClick: () => continuer(b.classementId) }, r === 1 ? t('Continuer la lecture (1 appel)') : t('Continuer la lecture ({r} appels)', { r }))
+        : null);
+    return el('div', { class: 'card flat stack', dataset: { role: 'lot', classement: b.classementId } },
+      el('div', { class: 'row between' }, el('strong', null, n === 1 ? t('Lot de 1 recette · {l}', { l: livre }) : t('Lot de {n} recettes · {l}', { n, l: livre })),
+        el('span', { class: 'muted' }, p?.echecs ? `${lues} ${t('· {e} en échec', { e: p.echecs })}` : lues)),
+      geste, ...b.lignes.map((l) => ligneEl(l, brutes.get(l.id))));
+  }
   function ligneEl(l, brute) {
     const etat = etatLigne(l, brute);
     return el('div', { class: 'card flat stack', dataset: { role: 'ligne-import', id: l.id } },
       el('div', { class: 'row between' }, el('strong', null, titreLigne(l)), el('span', { class: 'muted' }, ageTexte(l.age))),
+      rangDuLot(l),
       etat ? el('span', { class: l.etat === 'echec' ? 'status warn' : 'muted' }, etat) : null,
       l.autreAppareil && l.kind !== 'seance' && l.kind !== 'web' ? el('small', { class: 'muted' }, t('Photos sur un autre appareil')) : null,
       l.gestes.length ? el('div', { class: 'row' }, ...l.gestes.map((g) => el('button', { type: 'button', class: g === 'reprendre' || g === 'ouvrir_seance' ? 'btn primary' : 'btn', dataset: { geste: g }, onClick: () => agir(g, l, brute) }, libelle(g, l)))) : null);
@@ -174,7 +207,9 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
     const actif = hote.contains(document.activeElement) ? document.activeElement : null;
     const repere = actif ? { id: actif.closest('[data-role="ligne-import"]')?.dataset.id ?? null, geste: actif.dataset?.geste ?? null } : null;
     if (!lignes.length) { hote.replaceChildren(); return; }
-    const section = el('section', { class: 'card stack', tabindex: '-1', dataset: { role: 'imports' } }, el('h2', null, t('Imports')), ...lignes.map((l) => ligneEl(l, brutes.get(l.id))));
+    const progression = progressionLots(imports, { deviceId: repo.deviceId() }); // lot D : sur TOUTES les lignes relues
+    const section = el('section', { class: 'card stack', tabindex: '-1', dataset: { role: 'imports' } }, el('h2', null, t('Imports')),
+      ...blocsImports(lignes).map((b) => (b.type === 'lot' ? blocLot(b, progression.get(b.classementId), brutes) : ligneEl(b.ligne, brutes.get(b.ligne.id)))));
     hote.replaceChildren(section);
     if (repere) ((repere.id && repere.geste && section.querySelector(`[data-role="ligne-import"][data-id="${CSS.escape(repere.id)}"] button[data-geste="${CSS.escape(repere.geste)}"]`)) || section).focus();
   }

@@ -19,7 +19,7 @@ import { pageHeader, section, emptyState, select, field, carteConnexion, pdfFram
 import { demarrerConnexion } from './settings.js';
 import { lancerVol, annulerVol, volEnCours, estEnLigne, texteRefus, relireDuJournal, cleLecture, ecouterVol, BATTEMENT_MS } from './import-cible.js';
 import { panneauLecture, texteEchecIndex, ligneEtatLecture, ligneIncertain, texteQuota } from './table-matieres.js';
-import { panneauClassement } from './regroupement.js';
+import { panneauClassement, noteLotsDeSeance } from './regroupement.js';
 
 const INTENTIONS = ['index', 'recette'];
 // L'intention (spec § 10) voyage dans l'adresse, pas dans la base : consommée au premier rendu, puis retirée.
@@ -104,6 +104,7 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   const edition = session.edition_id ? ctx.editionsById.get(session.edition_id) : null;
   const root = el('div', null);
   root.append(pageHeader(t('Séance de scan'), { subtitle: `${t('Débutée le')} ${formatDate(session.started_at, { withTime: true })}`, back: { href: '/import', label: t('Séances') } }));
+  const noteLots = noteLotsDeSeance(session, ctx); if (noteLots) root.append(noteLots); // lot D (D-D18)
 
   // Lot G (§ 4.3, I5, F-21) : la phrase de séance dit un FAIT — les pages dont la ligne a un remote de ce compte. /import est une route de saisie :
   // doitRendreApresPasse refuse le rendu, donc cette ligne SEULE se redessine sur onEtat (jusqu'à ce que l'écran soit quitté).

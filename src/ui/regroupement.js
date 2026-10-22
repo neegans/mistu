@@ -17,7 +17,7 @@ import { TransitionRefusee } from '../core/db.js';
 import { typeAffichage, displayUrl } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
 import { classerPhotos, MAX_TOKENS_CLASSER, MAX_PHOTOS_CLASSEMENT } from '../domain/llm.js';
-import { IMPORTS_OUVERTS, lotDe } from '../domain/import-cible.js';
+import { IMPORTS_OUVERTS, lotDe, importOuvert } from '../domain/import-cible.js';
 import { cleClassement, resultatClassement, revaliderResultatClassement, regroupementInitial, deplacerVers, bougerDansGroupe, retirerDuGroupe, brouillonDe, restaurerBrouillon, candidatsReference, referencesOccupees, proposerAppariements, filtrerReferences, lecturesDuLot, suiteDuLot, pagesEnCours } from '../domain/classement.js';
 import { trierParSeance, pagesALire, ligneOuverteDeSeance } from '../domain/table-matieres.js';
 import { lancerVol, lancerExtraction, annulerVol, volEnCours, estEnLigne, texteEchec, BATTEMENT_MS } from './import-cible.js';
@@ -67,6 +67,16 @@ export function texteEchecClassement(erreur) {
   if (raison === 'vide') return { texte: t('Aucune recette reconnue sur ces photos.'), code: null };
   if (raison === 'requete' && erreur?.extra?.trop_lourd === true) return { texte: t('La demande est trop lourde : choisis moins de pages.'), code: null };
   return texteEchec(erreur);
+}
+
+// La note de séance (D-D18, § 4.2) : quand des lignes de LOT de cette séance sont ouvertes, « {n} recette(s) de cette séance dans Imports » et le lien
+// « Voir les imports » (#/add?section=imports : la section y reçoit le focus) ; sinon null. Rendue au montage de la séance (sessionView).
+export function noteLotsDeSeance(session, ctx) {
+  const n = liste(ctx?.imports).filter((i) => importOuvert(i) && lotDe(i) !== null && i.scan_session_id === session?.id).length;
+  if (!n) return null;
+  return el('div', { class: 'row', dataset: { role: 'note-lots' } },
+    el('div', { class: 'status info' }, t('{n} recette(s) de cette séance dans Imports', { n })),
+    el('a', { class: 'btn small', href: '#/add?section=imports' }, t('Voir les imports')));
 }
 
 // Le sélecteur de repli « Choisir une référence… » (§ 4.4 ; aussi pour la proposition de l'éditeur, D-D19) : un champ de recherche (la saisie ne

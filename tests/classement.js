@@ -1598,6 +1598,128 @@ export async function runClassementTests({ eq, ok }) {
       eq(choix, [null, 'c3'], 'T-D14 (M-nouvelle-selecteur, ronde 1, constat 33) : « Nouvelle recette » du sélecteur → surChoix(null) ; une référence → surChoix(son id)');
     });
 
+    // =================================================================================================================================
+    // Tâche 4 — la progression du lot dans « Imports » (§ 4.7) et la note de séance (D-D18) : T-D17. renderAdd à dépendances injectées (fetch compris) ;
+    // un lot démarré par « Continuer » OU directement (comme après « Lire ces recettes ») : la section ne suit alors que le bus.
+    const monterAdd = async (repo, db, over = {}) => { const r = await AD.renderAdd({}, {}, await ctxDe(repo, db), { repo, navigate: (p) => navs.push(p), toast: (m) => dits.push(m), fetch: fauxFetch().fetch, maintenant: () => NOW, ...over }); scene.append(r); return r; };
+    const blocLot = (racine, id) => racine.querySelector(`[data-role="lot"][data-classement="${CSS.escape(id)}"]`);
+    const enteteLot = (racine, id) => { const b = blocLot(racine, id); return b ? [b.firstElementChild?.querySelector('strong')?.textContent ?? null, b.firstElementChild?.querySelector('span.muted')?.textContent ?? null] : null; };
+    const continuerDe = (racine, id) => blocLot(racine, id)?.querySelector('button[data-geste="continuer"]') ?? null;
+    const enLectureDe = (racine, id) => blocLot(racine, id)?.querySelector('.status[role="status"]')?.textContent ?? null;
+
+    await ecran('T-D17 Imports : bloc de lot, progression, titres et rangs ; classement', async (repo, db) => {
+      await poserSeance(repo, db);
+      const moi = repo.deviceId();
+      await db.mutate({ puts: { imports: [
+        ligneClassement({ status: 'enregistre', over: { finished_at: DATE } }),
+        ligneLot({ id: 'l1', rang: 1, page_ids: ['p1', 'p3'], recipe_id: 'rcS', device_id: moi, status: 'a_verifier', over: { resultat: RECETTE_LUE(), started_at: DATE } }),
+        ligneLot({ id: 'l3', rang: 3, page_ids: ['p5'], device_id: moi, status: 'echec', over: { erreur: { raison: 'serveur', extra: {} } } }),
+        ligneLot({ id: 'l2', rang: 2, page_ids: ['p2'], device_id: moi, status: 'a_verifier', over: { resultat: RECETTE_LUE('Tarte fine aux poires', 140), started_at: DATE, lot: { classement_id: 'imp_cl', rang: 2, total: 3, titre: 'Tarte fine aux poires', page: 140 } } }),
+        ligneClassement({ id: 'c_ouvert' }),
+      ] }, origin: 'device' });
+      const racine = await monterAdd(repo, db);
+      eq([enteteLot(racine, 'imp_cl'), continuerDe(racine, 'imp_cl'), enLectureDe(racine, 'imp_cl')], [['Lot de 3 recettes · Saisons', '2 sur 3 lues · 1 en échec'], null, null], 'T-D17 : le bloc du lot — « Lot de 3 recettes · Saisons », « 2 sur 3 lues · 1 en échec » (la ligne enregistrée comptée parmi les lues) ; rien à lancer ici → ni « Continuer » ni lecture en cours');
+      eq([...blocLot(racine, 'imp_cl').querySelectorAll('[data-role="ligne-import"]')].map((l) => [l.dataset.id, l.querySelector('strong')?.textContent, l.querySelector('[data-role="rang-lot"]')?.textContent ?? null]),
+        [['l1', 'Soupe de courge', 'Recette 1 sur 3'], ['l2', 'Tarte fine aux poires', 'Recette 2 sur 3'], ['l3', 'Recette 3 sur 3', null]], 'T-D17 : les lignes du lot dans leur bloc, par rang ; à référence → le titre de la référence ; sans référence → lot.titre (« Tarte fine aux poires »), sinon « Recette k sur n », sans le redire dessous');
+      eq([...racine.querySelectorAll('[data-role="imports"] > [data-role="ligne-import"]')].map((l) => l.dataset.id).filter((id) => ['l1', 'l2', 'l3'].includes(id)), [], 'T-D17 (M64, écran) : une ligne de lot n’est rendue que dans son bloc, jamais hors de lui');
+      const cl = racine.querySelector('[data-role="ligne-import"][data-id="c_ouvert"]');
+      eq([cl?.querySelector('strong')?.textContent, [...cl.querySelectorAll('button')].map((x) => x.textContent)], ['Classement · Saisons', ['Reprendre', 'Ignorer']], 'T-D17 (M62) : le classement — « Classement · Saisons », Reprendre et Ignorer, jamais « Relancer »');
+      boutonTexte(cl, 'Reprendre').click();
+      eq(navs.at(-1), '/import?session=ss1&import=c_ouvert', 'T-D17 : « Reprendre » d’un classement → /import?session=…&import=…');
+    });
+
+    await ecran('T-D17 Imports : « Continuer la lecture », lecture du lot dite puis levée sans geste', async (repo, db) => {
+      await poserSeance(repo, db, { sansOctets: ['p5'] });
+      const moi = repo.deviceId();
+      await db.mutate({ puts: { imports: [
+        ligneLot({ id: 'm1', classementId: 'cl_m', rang: 1, total: 2, page_ids: ['p1'], device_id: moi }),
+        ligneLot({ id: 'm2', classementId: 'cl_m', rang: 2, total: 2, page_ids: ['p2'], device_id: 'dev_autre' }),
+        ligneLot({ id: 'n1', classementId: 'cl_n', rang: 1, total: 2, page_ids: ['p3'], device_id: moi }),
+        ligneLot({ id: 'n2', classementId: 'cl_n', rang: 2, total: 2, page_ids: ['p5'], device_id: moi }),
+      ] }, origin: 'device' });
+      const ff = fauxFetch();
+      const racine = await monterAdd(repo, db, { fetch: ff.fetch });
+      eq([continuerDe(racine, 'cl_m')?.textContent, continuerDe(racine, 'cl_m')?.className, continuerDe(racine, 'cl_n')?.textContent, enteteLot(racine, 'cl_m')], ['Continuer la lecture (1 appel)', 'btn primary', 'Continuer la lecture (2 appels)', ['Lot de 2 recettes · Saisons', '0 sur 2 lues']], 'T-D17 : « Continuer la lecture » nomme le coût — les lignes à lancer de CET appareil (m2, d’un autre, n’est pas comptée)');
+      continuerDe(racine, 'cl_m').click();
+      await attendre(() => ff.appels.length === 1 && enLectureDe(racine, 'cl_m') === 'Lecture du lot en cours…', 'lecture du lot dite');
+      eq([continuerDe(racine, 'cl_m'), continuerDe(racine, 'cl_n'), G.lotEnCours()], [null, null, { classementId: 'cl_m' }], 'T-D17 : pendant la lecture, « Lecture du lot en cours… » et AUCUN « Continuer » (ni sur ce lot ni sur un autre : un lot par document)');
+      ff.rendre[0](200, corpsModele(RECETTE_LUE()));
+      await attendre(() => G.lotEnCours() === null && enLectureDe(racine, 'cl_m') === null && !!continuerDe(racine, 'cl_n'), 'lot libéré, section redessinée');
+      eq([ff.appels.length, (await db.get('imports', 'm1')).status, (await db.get('imports', 'm2')).status, continuerDe(racine, 'cl_m'), enteteLot(racine, 'cl_m')], [1, 'a_verifier', 'a_lancer', null, ['Lot de 2 recettes · Saisons', '1 sur 2 lues']], 'T-D17 (M93) : « Continuer la lecture (1 appel) » → lireLeLot → UN POST (la ligne de cet appareil) ; après, plus rien à continuer ICI, le bloc reste');
+      // Un lot lancé HORS de la section (comme après « Lire ces recettes ») : seule la libération dite sur le bus peut retirer « Lecture du lot en cours… ».
+      // n2 n'a pas ses octets : son refus (octets_absents, sans écriture ni émission) est tenu ouvert par une porte, pour que le redessin dû à la dernière
+      // écriture (n1 → a_verifier) se fasse lot TENU ; à la porte ouverte, plus aucune écriture : seule la libération redessine.
+      let ouvrir; const porte = new Promise((r) => { ouvrir = r; });
+      const espion = { ...repo, getFile: async (sha) => { if (sha === 'sha-p5') await porte; return repo.getFile(sha); } };
+      const f2 = fauxFetch();
+      const course = G.lireLeLot('cl_n', { ctx: await ctxDe(repo, db), repo: espion, fetch: f2.fetch, maintenant: () => NOW });
+      await attendre(() => f2.appels.length === 1 && enLectureDe(racine, 'cl_n') === 'Lecture du lot en cours…', 'la prise du lot dite par le bus');
+      f2.rendre[0](200, corpsModele(RECETTE_LUE()));
+      await attendre(async () => (await db.get('imports', 'n1')).status === 'a_verifier' && enteteLot(racine, 'cl_n')?.[1] === '1 sur 2 lues' && enLectureDe(racine, 'cl_n') === 'Lecture du lot en cours…', 'dernière écriture redessinée, lot tenu');
+      ouvrir();
+      eq(await course, { issue: 'fini', lues: 1, echecs: 0, sautees: 1, arret: null }, 'T-D17 : n2 sans octets → sautée (aucune écriture)');
+      await attendre(() => enLectureDe(racine, 'cl_n') === null, 'la libération du lot redessine la section sans geste');
+      eq([f2.appels.length, continuerDe(racine, 'cl_n')?.textContent ?? null, dits.length], [1, 'Continuer la lecture (1 appel)', 0], 'T-D17 (M144) : après le dernier POST, sans autre geste, « Lecture du lot en cours… » disparaît (la libération est dite sur le bus) ; « Continuer » revient pour la ligne sautée');
+    });
+
+    await ecran('T-D17 note de séance : « {n} recette(s) de cette séance dans Imports », absente sans ligne ouverte', async (repo, db) => {
+      await poserSeance(repo, db);
+      const moi = repo.deviceId();
+      await db.mutate({ puts: { imports: [
+        ligneLot({ id: 'q1', rang: 1, total: 3, page_ids: ['p1'], device_id: moi, status: 'enregistre' }),
+        ligneLot({ id: 'q2', rang: 2, total: 3, page_ids: ['p2'], device_id: moi }),
+        ligneLot({ id: 'q3', rang: 3, total: 3, page_ids: ['p5'], device_id: moi, status: 'echec', over: { erreur: { raison: 'serveur', extra: {} } } }),
+        ligneLot({ id: 'q9', classementId: 'cl_ailleurs', rang: 1, total: 1, sessionId: 'ss_autre', page_ids: ['q9'] }),
+      ] }, origin: 'device' });
+      const racine = await monterSeance(repo, db);
+      const note = racine.querySelector('[data-role="note-lots"]');
+      eq([note?.querySelector('.status.info')?.textContent, note?.querySelector('a.btn.small')?.textContent, note?.querySelector('a.btn.small')?.getAttribute('href')], ['2 recette(s) de cette séance dans Imports', 'Voir les imports', '#/add?section=imports'], 'T-D17 (M145, D-D18) : la séance du lot dit ses lignes de lot OUVERTES (q2 à lancer, q3 en échec ; q1 enregistrée et la ligne d’une autre séance ne comptent pas) et mène à Imports');
+      await db.mutate({ puts: { imports: await Promise.all(['q2', 'q3'].map(async (id) => ({ ...(await db.get('imports', id)), status: 'ignore' }))) }, origin: 'device' });
+      scene.replaceChildren();
+      const racine2 = await monterSeance(repo, db);
+      eq([racine2.querySelector('[data-role="note-lots"]'), G.noteLotsDeSeance({ id: 'ss1' }, { imports: [] })], [null, null], 'T-D17 : aucune ligne du lot ouverte → aucune note');
+    });
+
+    // Vérification de la tâche 4 (hors bloc du plan, écart déclaré au rapport) : ce que les blocs ci-dessus laissaient vivant, rejoué en mutants — la
+    // progression lue sur TOUTES les lignes relues (une ligne `enregistre`, absente du bloc, comptée parmi les lues), le total du lot (jamais le nombre de
+    // lignes rendues), le singulier « Lot de 1 recette », « aucun vol tenu » (un vol sans lot éteint aussi « Continuer »), « aucun lot tenu » (un lot pris
+    // avant son premier vol éteint aussi « Continuer » d'un autre lot), « Lecture du lot en cours… » réservée AU lot lu, et la note de séance qui ne compte
+    // que les lignes de LOT (un classement ouvert de la séance n'y entre pas).
+    await ecran('T-D17 (vérification) Imports : lues et total sur toutes les lignes, singulier, vol tenu, lot pris ; note des seules lignes de lot', async (repo, db) => {
+      await poserSeance(repo, db);
+      const moi = repo.deviceId();
+      await db.mutate({ puts: { imports: [
+        ligneLot({ id: 'e1', classementId: 'cl_e', rang: 1, total: 2, page_ids: ['p1'], device_id: moi, status: 'enregistre', over: { finished_at: DATE } }),
+        ligneLot({ id: 'e2', classementId: 'cl_e', rang: 2, total: 2, page_ids: ['p2'], device_id: moi }),
+        ligneLot({ id: 'u1', classementId: 'cl_u', rang: 1, total: 1, page_ids: ['p3'], device_id: moi }),
+      ] }, origin: 'device' });
+      const jeton = UI.tenirVol();
+      try {
+        const racine = await monterAdd(repo, db);
+        eq([enteteLot(racine, 'cl_e'), [...blocLot(racine, 'cl_e').querySelectorAll('[data-role="ligne-import"]')].map((l) => l.dataset.id), enteteLot(racine, 'cl_u')?.[0] ?? null, continuerDe(racine, 'cl_e'), continuerDe(racine, 'cl_u'), enLectureDe(racine, 'cl_e')],
+          [['Lot de 2 recettes · Saisons', '1 sur 2 lues'], ['e2'], 'Lot de 1 recette · Saisons', null, null, null],
+          'T-D17 (vérification : MT-total, MT-progression-ouvertes, M51 à l’écran, MT-singulier, MT-vol) : e1 enregistrée n’est plus rendue mais compte — « Lot de 2 recettes », « 1 sur 2 lues » ; un lot d’une recette dit le singulier ; un vol tenu sans lot (tenirVol) → aucun « Continuer » et pas de « Lecture du lot en cours… »');
+      } finally { UI.libererVol(jeton); }
+      scene.replaceChildren();
+      const racine2 = await monterAdd(repo, db);
+      eq([continuerDe(racine2, 'cl_e')?.textContent ?? null, continuerDe(racine2, 'cl_u')?.textContent ?? null], ['Continuer la lecture (1 appel)', 'Continuer la lecture (1 appel)'], 'T-D17 (vérification) : le vol libéré, « Continuer » revient sur les deux lots');
+      // Le lot cl_u PRIS mais pas encore en vol : sa liste figée (byIndex) est tenue par une porte — lotEnCours() vaut cl_u, volEnCours() rien.
+      let ouvrir; const porte = new Promise((r) => { ouvrir = r; });
+      const espion = { ...repo, byIndex: async (...a) => { await porte; return repo.byIndex(...a); } };
+      const f2 = fauxFetch();
+      const course = G.lireLeLot('cl_u', { ctx: await ctxDe(repo, db), repo: espion, fetch: f2.fetch, maintenant: () => NOW });
+      try {
+        await attendre(() => enLectureDe(racine2, 'cl_u') === 'Lecture du lot en cours…', 'la prise de cl_u dite par le bus');
+        eq([enLectureDe(racine2, 'cl_e'), continuerDe(racine2, 'cl_e'), UI.volEnCours(), f2.appels.length], [null, null, null, 0], 'T-D17 (vérification : MT-ce-lot, MT-lot) : un lot pris avant son premier vol — le bloc de cl_e ne dit pas « Lecture du lot en cours… » (ce n’est pas lui qu’on lit) et n’offre pas « Continuer » (un lot par document), alors qu’aucun vol n’est tenu');
+      } finally { ouvrir(); }
+      await attendre(() => f2.appels.length === 1, 'le POST de u1');
+      f2.rendre[0](200, corpsModele(RECETTE_LUE()));
+      eq(await course, { issue: 'fini', lues: 1, echecs: 0, sautees: 0, arret: null }, 'T-D17 (vérification) : cl_u lu (un POST)');
+      await attendre(() => G.lotEnCours() === null && enLectureDe(racine2, 'cl_u') === null && !!continuerDe(racine2, 'cl_e'), 'lot cl_u libéré, section redessinée');
+      const note = (imports) => G.noteLotsDeSeance({ id: 'ss1' }, { imports })?.querySelector('.status.info')?.textContent ?? null;
+      eq([note([ligneClassement({ status: 'a_lancer' }), ligneLot({ id: 'z1' })]), note([ligneClassement({ status: 'a_lancer' })])], ['1 recette(s) de cette séance dans Imports', null], 'T-D17 (vérification : MT-note-lot) : la note ne compte que les lignes de LOT ouvertes — un classement ouvert de la séance n’y entre pas, et seul il n’en fait aucune');
+    });
+
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne
   } catch (error) {
     ok(false, `Lot de recettes : suite interrompue — ${error?.name || 'Erreur'} — ${error?.message || String(error)}`);

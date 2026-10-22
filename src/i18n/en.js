@@ -686,4 +686,15 @@ export const EN = {
   "Rien n’a été lancé : une photo est déjà en cours d’import ailleurs.": "Nothing was started: a photo is already being imported elsewhere.",
   // Chaîne antérieure (src/ui/recipe-edit.js) sans entrée jusqu'ici, employée par l'écran de regroupement (spec § 5) :
   "Nouvelle recette": "New recipe",
+  // Lot D, tâche 4 : la progression du lot dans « Imports » et la note de séance.
+  "Lot de 1 recette · {l}": "Batch of 1 recipe · {l}",
+  "Lot de {n} recettes · {l}": "Batch of {n} recipes · {l}",
+  "{k} sur {n} lues": "{k} of {n} read",
+  "· {e} en échec": "· {e} failed",
+  "Lecture du lot en cours…": "Reading the batch…",
+  "Continuer la lecture (1 appel)": "Continue reading (1 call)",
+  "Continuer la lecture ({r} appels)": "Continue reading ({r} calls)",
+  "Recette {k} sur {n}": "Recipe {k} of {n}",
+  "{n} recette(s) de cette séance dans Imports": "{n} recipe(s) from this session in Imports",
+  "Voir les imports": "See imports",
 };
