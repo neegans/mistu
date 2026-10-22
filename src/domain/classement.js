@@ -6,7 +6,7 @@
 import { BORNES_CLASSEMENT } from './llm.js';
 import { estTitreUneLigne } from '../core/bornes.js';
 import { normalizeText } from './units.js';
-import { motsDistinctifs, deplacerPage, importOuvert, IMPORTS_OUVERTS, lotDe, ligneImportNeuve } from './import-cible.js';
+import { motsDistinctifs, deplacerPage, importOuvert, IMPORTS_OUVERTS, lotDeRecette, ligneImportNeuve } from './import-cible.js';
 
 export const PROCHE_PAGE = 2;
 const liste = (v) => (Array.isArray(v) ? v : []);
@@ -252,19 +252,30 @@ export function lecturesDuLot(etat, choix, { classement, editionId = null, sessi
   }));
   return { lignes, references: [...refs] };
 }
+// Ronde 1 de la tâche 4 (revue : constats 1 et 3 ; décision à ratifier) : une ligne de lot n'est à LIRE que si sa référence l'est encore — sans
+// référence (recipe_id nul : la lecture ira à « Regrouper en recette »), ou une référence PRÉSENTE ici qui n'est pas `available`. Une référence complétée
+// entre-temps (saisie à la main, reçue par la synchro) ou absente (pas encore reçue, supprimée) : un POST ne servirait à rien — lignesImports n'offre
+// alors qu'« Ignorer » (ou aucun geste), l'écran ciblé refuse une recette qui a son texte. UNE règle, pour le compte de « Continuer »
+// (progressionLots → restantesIci) et pour lireLeLot (la référence relue juste avant chaque lancement : sautée sans écriture ni POST).
+export function referenceALire(ligne, recette) {
+  if (typeof ligne?.recipe_id !== 'string' || !ligne.recipe_id) return true; // comme lignesImports (chaine) : pas de référence
+  return !!recette && typeof recette === 'object' && recette.availability !== 'available';
+}
 // La progression des lots (§ 4.7), sur TOUTES les lignes relues (enregistre et ignore comprises) à lot valide : Map(classement_id → { total, lues
-// (a_verifier + enregistre), echecs, ignorees, restantes (a_lancer), restantesIci (a_lancer de cet appareil), ouvertes (statut non terminal), edition_id }).
-export function progressionLots(imports, { deviceId = null } = {}) {
+// (a_verifier + enregistre), echecs, ignorees, restantes (a_lancer), restantesIci (a_lancer de cet appareil, À LIRE : referenceALire sur recipesById —
+// sans Map, une référence est inconnue, donc jamais comptée), ouvertes (statut non terminal), edition_id }). Ronde 1 : les lignes `recette` seules.
+export function progressionLots(imports, { deviceId = null, recipesById = null } = {}) {
   const m = new Map();
+  const recettes = recipesById instanceof Map ? recipesById : new Map();
   for (const i of liste(imports)) {
-    const lot = lotDe(i);
+    const lot = lotDeRecette(i);
     if (!lot) continue;
     const p = m.get(lot.classement_id) ?? { total: 0, lues: 0, echecs: 0, ignorees: 0, restantes: 0, restantesIci: 0, ouvertes: 0, edition_id: i.edition_id ?? null };
     p.total = Math.max(p.total, lot.total);
     if (i.status === 'a_verifier' || i.status === 'enregistre') p.lues += 1;
     if (i.status === 'echec') p.echecs += 1;
     if (i.status === 'ignore') p.ignorees += 1;
-    if (i.status === 'a_lancer') { p.restantes += 1; if (deviceId && i.device_id === deviceId) p.restantesIci += 1; }
+    if (i.status === 'a_lancer') { p.restantes += 1; if (deviceId && i.device_id === deviceId && referenceALire(i, recettes.get(i.recipe_id))) p.restantesIci += 1; }
     if (IMPORTS_OUVERTS.includes(i.status)) p.ouvertes += 1;
     m.set(lot.classement_id, p);
   }
@@ -288,8 +299,8 @@ export function blocsImports(lignes) {
 // --- La suite du lot (D-D10, R-D-4 ; défaut FERMÉ) : une seule liste fermée dit ce qui laisse continuer — ces pages-ci, lues, ont donné une réponse
 // inutilisable — plus `requete` quand la ligne RELUE porte erreur.extra.trop_lourd (le 413 : la suivante peut passer). Toute autre raison arrête, y
 // compris toute raison future ou inconnue : il n'y a pas de liste « arrêt » à tenir. Refus de lancerExtraction : les six de REFUS_SAUT_LOT sautent ce
-// groupe ; tout autre refus arrête. REFUS_ARRET_LOT (nommée par la spec § 3.6) est DOCUMENTAIRE : suiteDuLot ne la lit pas, c'est son défaut fermé
-// qui arrête (valeur épinglée par T-D7, ronde 1).
+// groupe ; tout autre refus arrête. REFUS_ARRET_LOT (nommée par la spec § 3.6) est DOCUMENTAIRE pour suiteDuLot, qui ne la lit pas (c'est son défaut
+// fermé qui arrête ; valeur épinglée par T-D7, ronde 1) ; la section « Imports » la lit pour DIRE un arrêt de « Continuer » (ronde 1 de la tâche 4).
 export const RAISONS_SUITE_LOT = Object.freeze(['coupe', 'illisible', 'hors_bornes', 'vide']);
 export const REFUS_ARRET_LOT = Object.freeze(['vol_tenu', 'hors_ligne', 'non_connecte']);
 export const REFUS_SAUT_LOT = Object.freeze(['inconnu', 'transition', 'sans_page', 'image', 'octets_absents', 'sorte']);

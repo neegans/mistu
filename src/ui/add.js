@@ -11,7 +11,7 @@ import { logError } from '../core/log.js';
 import { TransitionRefusee } from '../core/db.js';
 import * as repoModule from '../model/repo.js';
 import { lignesImports, dateReception } from '../domain/import-cible.js';
-import { progressionLots, blocsImports } from '../domain/classement.js';
+import { progressionLots, blocsImports, REFUS_ARRET_LOT } from '../domain/classement.js';
 import { pageHeader, carte, libelleLivre, field, select } from './components.js';
 import { startScanSession } from './import.js';
 import { DOCUMENT_ID, lancerExtraction, annulerVol, phraseEchec, texteRefus, cleLecture, volEnCours } from './import-cible.js';
@@ -92,6 +92,12 @@ function titreLigne(l) {
   if (l.titre.type === 'web' && !l.referenceAbsente) return [el('bdi', null, l.titre.texte ?? t('Sans titre')), ` — ${l.titre.livre ? t('Lien web · {h}', { h: l.titre.livre }) : t('Lien web')}`];
   return l.referenceAbsente ? t('(référence pas encore reçue)') : (l.titre.texte ?? t('Sans titre'));
 }
+// Lot D (§ 4.7) : « Recette {k} sur {n} » sous le titre d'une ligne de lot — sauf quand c'est déjà son titre (ligne sans référence ni lot.titre :
+// titreLigne rend alors ce rang). Ronde 1 : décidé par la STRUCTURE de la ligne, jamais en comparant des textes rendus.
+function rangDuLot(l) {
+  if (!l.lot || (l.titre.type === 'regrouper' && !l.lot.titre)) return null;
+  return el('small', { class: 'muted', dataset: { role: 'rang-lot' } }, t('Recette {k} sur {n}', { k: l.lot.rang, n: l.lot.total }));
+}
 // L'état dit en clair ; `brute` : la ligne du journal (sa date et son erreur, avec le nombre du quota ou « trop lourd » — que la ligne du domaine ne
 // porte pas). I-4 : interrompu, annule et incertain disent la même phrase (phraseEchec, une définition avec l'écran ciblé, l'éditeur et le panneau).
 function etatLigne(l, brute) {
@@ -162,19 +168,17 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
     }
     await redessiner();
   }
-  // Lot D (§ 4.7) : « Recette {k} sur {n} » sous le titre d'une ligne de lot — sauf quand c'est déjà son titre.
-  const rangDuLot = (l) => {
-    if (!l.lot) return null;
-    const rang = t('Recette {k} sur {n}', { k: l.lot.rang, n: l.lot.total });
-    return titreLigne(l) === rang ? null : el('small', { class: 'muted', dataset: { role: 'rang-lot' } }, rang);
-  };
   // Lot D (§ 4.7, D-D22) : un bloc par lot — l'en-tête (« Lot de {n} recettes · {l} », la progression sur TOUTES les lignes relues), « Lecture du lot en
   // cours… » quand CE document lit ce lot, sinon « Continuer la lecture ({r} appels) » s'il reste des lignes à lancer ICI et qu'aucun vol ni lot n'est
   // tenu (un lot par document : lireLeLot refuserait) ; puis ses lignes, par rang. La prise et la libération du lot passent par le bus : la section se
   // redessine seule, même pour un lot lancé ailleurs (« Lire ces recettes »).
+  // Ronde 1 : un arrêt sur un REFUS (hors ligne, sans session, vol tenu ailleurs : REFUS_ARRET_LOT) n'écrit rien — il est DIT, comme le refus de
+  // « Relancer » (texteRefus) ; un échec écrit (quota, requête…) se voit sur sa ligne.
   async function continuer(classementId) {
-    try { await lireLeLot(classementId, { ctx, repo, fetch, maintenant, battementMs }); }
-    catch (e) { logError('add.lot', { error: e, id: classementId }); }
+    try {
+      const r = await lireLeLot(classementId, { ctx, repo, fetch, maintenant, battementMs });
+      if (REFUS_ARRET_LOT.includes(r?.arret)) toast(texteRefus({ issue: 'refuse', raison: r.arret }));
+    } catch (e) { logError('add.lot', { error: e, id: classementId }); }
     await redessiner();
   }
   function blocLot(b, p, brutes) {
@@ -205,13 +209,16 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
     const brutes = new Map((Array.isArray(imports) ? imports : []).filter((i) => i && typeof i.id === 'string').map((i) => [i.id, i]));
     const lignes = lignesImports({ ...ctx, imports, scan_sessions, recipesById }, { maintenant: maintenant(), documentId: DOCUMENT_ID, deviceId: repo.deviceId() });
     const actif = hote.contains(document.activeElement) ? document.activeElement : null;
-    const repere = actif ? { id: actif.closest('[data-role="ligne-import"]')?.dataset.id ?? null, geste: actif.dataset?.geste ?? null } : null;
+    const repere = actif ? { id: actif.closest('[data-role="ligne-import"]')?.dataset.id ?? null, lot: actif.closest('[data-role="lot"]')?.dataset.classement ?? null, geste: actif.dataset?.geste ?? null } : null;
     if (!lignes.length) { hote.replaceChildren(); return; }
-    const progression = progressionLots(imports, { deviceId: repo.deviceId() }); // lot D : sur TOUTES les lignes relues
+    const progression = progressionLots(imports, { deviceId: repo.deviceId(), recipesById }); // lot D : sur TOUTES les lignes relues ; ronde 1 : les références relues
     const section = el('section', { class: 'card stack', tabindex: '-1', dataset: { role: 'imports' } }, el('h2', null, t('Imports')),
       ...blocsImports(lignes).map((b) => (b.type === 'lot' ? blocLot(b, progression.get(b.classementId), brutes) : ligneEl(b.ligne, brutes.get(b.ligne.id)))));
     hote.replaceChildren(section);
-    if (repere) ((repere.id && repere.geste && section.querySelector(`[data-role="ligne-import"][data-id="${CSS.escape(repere.id)}"] button[data-geste="${CSS.escape(repere.geste)}"]`)) || section).focus();
+    // Ronde 1 : un geste de BLOC de lot (« Continuer », hors de toute ligne) garde aussi son focus, retrouvé par le classement de son bloc.
+    if (repere) ((repere.id && repere.geste && section.querySelector(`[data-role="ligne-import"][data-id="${CSS.escape(repere.id)}"] button[data-geste="${CSS.escape(repere.geste)}"]`))
+      || (!repere.id && repere.lot && repere.geste && section.querySelector(`[data-role="lot"][data-classement="${CSS.escape(repere.lot)}"] > button[data-geste="${CSS.escape(repere.geste)}"]`))
+      || section).focus();
   }
   return { hote, redessiner, dessiner };
 }

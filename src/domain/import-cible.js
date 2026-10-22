@@ -272,7 +272,7 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     return {
       id: i.id, kind: i.kind, titre: { type, texte: recette ? chaine(recette.original_title) : null, livre: web ? (recette ? lienSignet(recette.source_url).hote : null) : livreDe(recette?.edition_id ?? i.edition_id) },
       etat: i.status, age: ageDepuis(i.updated_at, maintenant), raison: i.status === 'echec' ? chaine(i.erreur?.raison) : null,
-      gestes, cible, ailleurs, autreAppareil, referenceAbsente, pages: nbPages(i), lot: lotDe(i),
+      gestes, cible, ailleurs, autreAppareil, referenceAbsente, pages: nbPages(i), lot: lotDeRecette(i),
     };
   });
   const photos = seances.filter((s) => s && typeof s === 'object' && chaine(s.id) && s.status === 'open' && !seanceDUnImportCible(s, imports)).sort(parRecence('started_at')).map((s) => ({
@@ -309,6 +309,10 @@ export function lotDe(ligne) {
   if (!Number.isInteger(rang) || !Number.isInteger(total) || rang < 1 || total < 1 || rang > 10 || total > 10 || rang > total) return null;
   return { classement_id: id, rang, total, titre: estTitreUneLigne(titre, 200) ? titre : null, page: Number.isInteger(page) && page >= 1 && page <= 9999 ? page : null };
 }
+// Ronde 1 de la tâche 4 (revue, lentille sécurité) : `lot` n'existe que sur une ligne `recette` (§ 3.3). Une ligne d'une autre sorte qui en porte un
+// (reçue, restaurée) n'est d'AUCUN lot : ni bloc, ni progression, ni « Continuer », ni note de séance. lotDe reste la revalidation du champ seul (T-D7) ;
+// toute ligne du JOURNAL se lit par lotDeRecette (lignesImports, progressionLots, lireLeLot, noteLotsDeSeance).
+export const lotDeRecette = (ligne) => (ligne?.kind === 'recette' ? lotDe(ligne) : null);
 // N-1 (§ 3.6) : une lecture ISSUE D'UNE SÉANCE — ligne de lot, « Regrouper en recette », photo seule, lecture rattachée (D-D19) ET ligne ciblée du lot A
 // (sa séance naît avec la première photo, RV-1). Seul critère des amendements d'enregistrement : jamais `lot`.
 export const issueDUneSeance = (ligne) => typeof ligne?.scan_session_id === 'string' && ligne.scan_session_id.length > 0;

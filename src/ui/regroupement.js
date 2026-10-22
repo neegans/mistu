@@ -17,8 +17,8 @@ import { TransitionRefusee } from '../core/db.js';
 import { typeAffichage, displayUrl } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
 import { classerPhotos, MAX_TOKENS_CLASSER, MAX_PHOTOS_CLASSEMENT } from '../domain/llm.js';
-import { IMPORTS_OUVERTS, lotDe, importOuvert } from '../domain/import-cible.js';
-import { cleClassement, resultatClassement, revaliderResultatClassement, regroupementInitial, deplacerVers, bougerDansGroupe, retirerDuGroupe, brouillonDe, restaurerBrouillon, candidatsReference, referencesOccupees, proposerAppariements, filtrerReferences, lecturesDuLot, suiteDuLot, pagesEnCours } from '../domain/classement.js';
+import { IMPORTS_OUVERTS, lotDeRecette, importOuvert } from '../domain/import-cible.js';
+import { cleClassement, resultatClassement, revaliderResultatClassement, regroupementInitial, deplacerVers, bougerDansGroupe, retirerDuGroupe, brouillonDe, restaurerBrouillon, candidatsReference, referencesOccupees, proposerAppariements, filtrerReferences, lecturesDuLot, suiteDuLot, pagesEnCours, referenceALire } from '../domain/classement.js';
 import { trierParSeance, pagesALire, ligneOuverteDeSeance } from '../domain/table-matieres.js';
 import { lancerVol, lancerExtraction, annulerVol, volEnCours, estEnLigne, texteEchec, BATTEMENT_MS } from './import-cible.js';
 import { sessionAssistant, carteConnexion, messageGardeRefusee, texteDesChamps, TEXTE_CONNEXION } from './components.js';
@@ -72,7 +72,7 @@ export function texteEchecClassement(erreur) {
 // La note de séance (D-D18, § 4.2) : quand des lignes de LOT de cette séance sont ouvertes, « {n} recette(s) de cette séance dans Imports » et le lien
 // « Voir les imports » (#/add?section=imports : la section y reçoit le focus) ; sinon null. Rendue au montage de la séance (sessionView).
 export function noteLotsDeSeance(session, ctx) {
-  const n = liste(ctx?.imports).filter((i) => importOuvert(i) && lotDe(i) !== null && i.scan_session_id === session?.id).length;
+  const n = liste(ctx?.imports).filter((i) => importOuvert(i) && lotDeRecette(i) !== null && i.scan_session_id === session?.id).length; // ronde 1 : lignes `recette` seules
   if (!n) return null;
   return el('div', { class: 'row', dataset: { role: 'note-lots' } },
     el('div', { class: 'status info' }, t('{n} recette(s) de cette séance dans Imports', { n })),
@@ -157,8 +157,11 @@ export async function lireLeLot(classementId, { ctx, repo = repoModule, fetch: f
   let lues = 0, echecs = 0, sautees = 0, arret = null;
   try {
     const moi = repo.deviceId();
-    const lignes = liste(await repo.byIndex('imports', 'status', 'a_lancer')).filter((l) => l && l.device_id === moi && lotDe(l)?.classement_id === classementId).sort((a, b) => lotDe(a).rang - lotDe(b).rang);
+    const lignes = liste(await repo.byIndex('imports', 'status', 'a_lancer')).filter((l) => l && l.device_id === moi && lotDeRecette(l)?.classement_id === classementId).sort((a, b) => lotDeRecette(a).rang - lotDeRecette(b).rang);
     for (const l of lignes) {
+      // Ronde 1 de la tâche 4 : la référence RELUE juste avant le lancement — complétée ou absente (referenceALire, la règle du compte de « Continuer ») →
+      // sautée comme un refus de REFUS_SAUT_LOT, avant toute écriture et tout POST.
+      if (!referenceALire(l, typeof l.recipe_id === 'string' && l.recipe_id ? await repo.get('recipes', l.recipe_id) : null)) { sautees += 1; continue; }
       const retour = await lancerExtraction(l.id, { ctx, repo, fetch: fetchInjecte, maintenant, enLigne, battementMs, attendus: ['a_lancer'] });
       const relue = retour?.issue === 'echec' ? await repo.get('imports', l.id) : l;
       const suite = suiteDuLot(retour, relue);
