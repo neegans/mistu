@@ -1,4 +1,19 @@
-# STATE.md — Cuisine OS (mistu) — état au 21 octobre 2026 (lots « Passerelle de l'assistant » et « Présentation du serveur » EN LIGNE, `main` = `57babc6` ; lots A « Import ciblé et journal d'import », B « Recette web complète », G « Les photos voyagent entre appareils » et C « Table des matières sur plusieurs pages » FINIS, empilés A → B → G → C sur `main`, NI fusionnés NI poussés, migrations `0005` et `0006` PAS collées, fonction `assistant` PAS redéployée ; lots D, E, F prêts (specs, plans, valeurs de rejeu), D en Départ sur la tête finale de C)
+# STATE.md — Cuisine OS (mistu) — état au 22 octobre 2026 (lots « Passerelle de l'assistant » et « Présentation du serveur » EN LIGNE, `main` = `57babc6` ; lots A « Import ciblé et journal d'import », B « Recette web complète », G « Les photos voyagent entre appareils », C « Table des matières sur plusieurs pages » et D « Un lot de recettes photographiées » FINIS, empilés A → B → G → C → D sur `main`, NI fusionnés NI poussés, migrations `0005` et `0006` PAS collées, fonction `assistant` PAS redéployée ; lots E, F prêts (specs, plans, valeurs de rejeu), E en Départ sur la tête finale de D)
+
+**22 octobre 2026, 18 h 18 — LOT D « UN LOT DE RECETTES PHOTOGRAPHIÉES » : FINI dans le worktree `~/projects/mistu-recettes-en-lot`
+(branche `recettes-en-lot`, base = la tête finale du lot C `739e706`, spec `4db4d8e` (rév. 4) puis rév. 5 à la clôture, plan rejoué `d42d4ab`,
+tête de code `c90f527` (docs de la vague `1046c64`, vérifiée)`, serveur 8092), six tâches (T1 à T4 une ronde chacune, T5 deux, T6 une ; re-revues
+propres), revue finale à trois lentilles (2 Important et 13 Minor : la vague `c90f527` / `1046c64` corrige les 2 Important et 10 Minor, en ratifie 1,
+en nomme 1, en porte 1 à Neegan (la photo d'index dans un groupe, § 13) ; re-revue PROPRE ; rulings de construction R-D-20 à R-D-28),
+`/verify` mécanique VERT (suite 5228/5228, épingle 5227, Node 174/174, `--check` 0, invisibles 0, aucune clé), `sw.js cuisine-os-v0.13.0-11`,
+`APP_VERSION 0.13.0`, aucune migration, serveur `assistant` intact. **PAS fusionné, PAS poussé.** Pour Neegan, dans l'ordre : les gestes des lots A, B,
+G et C (ci-dessous) ; puis la **sonde R-D-8 sur la branche servie localement, AVANT la fusion** (origine `http://127.0.0.1:8092` ajoutée à
+`ASSISTANT_ORIGINES` le temps de la sonde ; pas 1, 2, 7 et 8 de la spec § 10 ; mesures en § 12, qui peuvent amender `MAX_PHOTOS_CLASSEMENT`,
+`CLASSER_SYSTEM` ou rouvrir R-D-1 par une ronde) ; `git merge --ff-only recettes-en-lot`, push, suite publique 5228/5228, parcours § 10 complet
+sur le site public, iPhone, « clean ». Registre `.superpowers/sdd/2026-10-19-recettes-en-lot/` (copie dans `~/projects/mistu/.superpowers/sdd/`) ;
+rulings R-D-13 à R-D-28 dans la spec § 12.C ; dettes au § 13. Pendant la sonde R-D-8, les autres appareils restent fermés ; après la fusion, tous sur
+0.13.0 avant le premier classement réel (R-D-27). Prochain : Départ E « Couverture lue » sur cette tête (worktree `~/projects/mistu-couverture-lue`,
+8093, `APP_VERSION 0.14.0`).**
 
 **21 octobre 2026, 16 h 49 — LOT C « TABLE DES MATIÈRES SUR PLUSIEURS PAGES » : FINI dans le worktree `~/projects/mistu-table-des-matieres`
 (branche `table-des-matieres`, base = la tête finale du lot G `1e4d68d`, spec `a9e75ca` (rév. 6) puis rév. 7 à la clôture, plan rejoué `f575d3d`,

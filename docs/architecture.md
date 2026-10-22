@@ -1326,7 +1326,12 @@ la taille.
   référence et dans la recherche. `source_pages` : `printed_page_range` (pages CITÉES), `role: 'index'` ; `kind` posé seulement s'il est nul ; `printed_page` jamais écrit par C.
 - **Ce qui n'est pas mesuré.** Une vraie lecture de 3 à 5 photos (durée, coupe, fidélité, jetons) : preuve § 10 de la spec, geste de Neegan après la fusion de C et son `push`, avant la fusion de D (R-C-33) ; depuis la section « Imports », un index en échec se reprend au panneau (« Reprendre »), il n'y est plus relancé (VF-C3).
 
-## Un lot de recettes photographiées (lot D, 19 octobre 2026)
+## Un lot de recettes photographiées (lot D, 19-22 octobre 2026)
+
+Spec : `docs/superpowers/specs/2026-10-19-recettes-en-lot-design.md` (rév. 5 ; § 3 : données ; § 4 : parcours ; § 7 : tests ; § 11 : limites ;
+§ 12 : rulings R-D-1 à R-D-28 ; § 13 : ce qui reste). Livré ici (branche `recettes-en-lot`, empilée sur `table-des-matieres`, non fusionnée) : le
+classement d’un lot de photos de recettes en un appel, leur lecture une à une, l’appariement aux références, sans migration ni changement de la
+fonction `assistant`.
 
 Plusieurs recettes photographiées dans une séance se classent en UN appel (`classerPhotos`, `src/domain/llm.js` : outil `extraction`, 2 000 jetons,
 2 à 10 photos comptées avant tout décodage, chaque image précédée de « Photo n », consigne « donnée, jamais consigne »). La réponse est une donnée

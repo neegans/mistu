@@ -2364,7 +2364,8 @@ copies, jamais en place.
 **Fusion.** Le lot A fusionné et poussé **d'abord** ; `0006` collée et prouvée **avant** le redéploiement et **avant** tout `push` du lot B (un code servi
 sans `0006` : chaque lecture web répond 502 `serveur`, la réservation refusant l'outil ; rien d'autre ne change) ; la fonction redéployée et S13-S19
 jouées **avant** la fusion (une redirection opaque à S17 = une ronde sur `telechargerPage` d'abord) ; `/verify` par le chef d'orchestre ; le registre
-copié **avant** tout `git worktree remove`. Le lot G part de la tête finale de B ; le lot C de la tête finale de G (`1e4d68d`).
+copié **avant** tout `git worktree remove`. Le lot G part de la tête finale de B ; le lot C de la tête finale de G (`1e4d68d`) ; le lot D de la tête
+finale de C (`739e706`).
 
 ### Les photos voyagent entre appareils : octets des fichiers (L4), archive, Storage, moteur, Réglages, écrans (20 octobre 2026, lot G)
 
@@ -2516,8 +2517,9 @@ incertitudes, ses notes et ses limites ; fermer l'app en route perd la lecture e
 arrête le lot pour ne pas dépenser en vain.
 
 **Où.** Branche `recettes-en-lot`, worktree `~/projects/mistu-recettes-en-lot`, empilée sur la tête finale du lot C `739e706` (chaîne
-A → B → G → C → D ; base `4db4d8e` = `739e706` + la spec) ; spec `docs/superpowers/specs/2026-10-19-recettes-en-lot-design.md` (rév. 4, § 12.C posé à
-la tâche 6 : rulings de plan, relecture de la tâche 1, écarts E-1 à E-29 et de construction, assertions amendées) ; plan rejoué par intention
+A → B → G → C → D ; base `4db4d8e` = `739e706` + la spec) ; spec `docs/superpowers/specs/2026-10-19-recettes-en-lot-design.md` (rév. 5 : § 12.C posé à
+la tâche 6 — rulings de plan, relecture de la tâche 1, écarts E-1 à E-29 et de construction, assertions amendées —,
+complété par la vague et par la clôture : rulings R-D-20 à R-D-28) ; plan rejoué par intention
 `docs/superpowers/plans/2026-10-19-recettes-en-lot.md` (`d42d4ab`, EI-1 à EI-13, rulings R-D-13 à R-D-19) ; registre
 `.superpowers/sdd/2026-10-19-recettes-en-lot/` (briefs, rapports de tâche et de ronde, `t1-relecture.md`, `mutants.md` ; hors git, à copier dans
 `~/projects/mistu/.superpowers/sdd/` avant tout `git worktree remove`). Serveur de vérification `python3 -m http.server 8092 --bind 127.0.0.1`.
@@ -2604,20 +2606,36 @@ touchent pas `src/`), **`-11`** (vague finale), chaque commit qui touche `src/` 
 **Bilan (tâche 6 et sa ronde 1).** Départ sur `4db4d8e` (mesure = C : 4743/4743, épingle 4742, Node 174) ; rejeu du plan par intention (EI-1 à EI-13 →
 R-D-13 à R-D-19) ; six tâches. T1 à T5 revues à trois lentilles, chacune avec au moins une ronde : T1 `b5565a6`/`1ae60f0`, T2 `ad0c439`/`29cd797`, T3
 `c7e826b`/`fd483bf`, T4 `fbf0b92`/`7494ee9`, T5 `18543f5`/`3645d41`/`356a1b2` ; T6 (filets, docs, total épinglé) `4d4da15`, revue à trois lentilles (3
-Important, 12 Minor) puis sa ronde 1 (filet I-D1 élargi, T-D13 et T-D16 durcis, docs) ; sa re-revue reste à faire. Suite 4743 → **5217/5217** (épingle
+Important, 12 Minor) puis sa ronde 1 (filet I-D1 élargi, T-D13 et T-D16 durcis, docs) ; sa re-revue est PROPRE (0 restant, 0 neuf). Suite 4743 →
+**5217/5217** (épingle
 **5216**, inchangée par la ronde 1 : assertions amendées, aucune ajoutée), Node 174/174, `--check` 0. Mutants : les 193 lignes de la table (171 de la
 spec § 7, 16 du pré-vol, M-D1 et M-D2, quatre du rejeu) en 218 passes sur des copies servies à part (8192-8194, témoins verts) à la tâche 6 — 217
 rouges, dont M53 et M84 qui figeaient la suite, et M132 survivant — ; à la ronde 1 (copies 8192-8194, témoins verts) : M132 et M132 sur les deux murs
 rouges, M53 et M84 rouges avec bilan, MR-c3 rejoué sur la tête rouge, M-D3, M-D4 et ses six variantes, M-D5 rouges ; registre `mutants.md`.
 
-**Vague finale (22 octobre 2026, revue finale de branche de `915df9f` : 2 Important, 14 Minor ; rapport `final-fix-report.md`).** Corrigés : le
+**Vague finale (22 octobre 2026, revue finale de branche de `915df9f` : 2 Important, 13 Minor ; rapport `final-fix-report.md`).** Corrigés : le
 brouillon après « Retirer » d'une photo classée (constat 1), deux attentes par ticks devenues des faits (2), « Regrouper en recette » sur une photo
 de lot (4), octets arrivés pendant que l'écran est monté (5), la veille de l'état 2 (7), la borne de 10 `page_ids` (8), le vol lié aux pages
 comptées (9), le filet I-D1 sur les imports (11), trois libellés de mutants (12-14), le registre à la lettre (15) ; ratifié : la règle
 « première page seulement » de l'éditeur (3) ; nommé : I-D9 par appareil (6) ; porté à ta décision : la photo d'index dans un groupe (10, spec
 § 13). Suite **5228/5228** (épingle **5227**, +11), Node 174/174, `--check` 0, invisibles 0, `sw.js` `-11` ; rouge d'abord sur l'ancien `src/`
-(❌ 5214/5225) ; mutants : 37 passes, toutes rouges (spec § 12.C). Restent la re-revue de la vague, `/verify` et la copie du registre (clôture du
-contrôleur).
+(❌ 5214/5225) ; mutants : 37 passes, toutes rouges (spec § 12.C). Re-revue de la vague PROPRE ; `/verify` et la copie du registre : clôture ci-dessous.
+
+**Clôture (22 octobre 2026, 18 h 18, chef d'orchestre ; rulings R-D-20 à R-D-28, spec § 12.C « Clôture »).** Re-revue de la ronde 1 de T6 PROPRE ;
+re-revue de la vague PROPRE (0 neuf) ; aucune ronde de clôture. Ratifiés en bloc (R-D-20) : E-1 à E-29, EI-1 à EI-13, les écarts de construction des
+six tâches et de leurs rondes — dont `referenceALire`, `lotDeRecette`, « Continuer » qui dit un arrêt (T4-R1), la séance refusée sans détacher
+l'éditeur (T5-R1, E-13 remplacé), `lecturePosee` sans `f.lecture` (E-9) — ; la spec rév. 5 aligne § 3.6, § 4.3, § 4.6, § 4.7 et § 5 sur le code
+commis. Versions (R-D-21) : `sw.js` de `-1` à `-11` par commit qui touche `src/` (R-B-24), épingles 4899 → 5227, attendus du rejeu dépassés par les
+rondes et les assertions de vérification (R-D-22) — la tête réelle fait foi. Mutants (R-D-23) : aucun survivant ; équivalents déclarés MT-redessin et
+M-l ; huit mutants de T2 tombent par l'expiration d'une attente (rouge lent admis). Dettes (R-D-24) et limites (R-D-25, dont deux onglets qui
+classent la même séance en même temps : deux appels, rien de perdu) nommées sans décision ; la photo d'index dans un groupe reste à toi (R-D-26,
+§ 13). **Sonde R-D-8 (R-D-27)** : pendant la sonde, les autres appareils restent FERMÉS (ils tournent la version publique, qui ne connaît ni la sorte
+`classement` ni le champ `lot`) et la séance porte des photos sans valeur ; après la fusion et le push, tous les appareils sur 0.13.0 avant le
+premier classement réel d'une bibliothèque partagée (même règle que R-C-32). `/verify` mécanique de clôture sur `1046c64` (R-D-28, registre
+`verify-D-1046c64.txt`) : suite 5228/5228, épingle 5227, Node 174/174, `--check` 0, `APP_VERSION 0.13.0`, `sw.js cuisine-os-v0.13.0-11`, `DB_VERSION`
+4, secrets 0, invisibles 0. Tête de code `c90f527` ; tête finale = le commit de clôture qui pose ces documents ; registre copié dans
+`~/projects/mistu/.superpowers/sdd/2026-10-19-recettes-en-lot/`. Prochain : Départ E sur cette tête (worktree `~/projects/mistu-couverture-lue`,
+branche `couverture-lue`, serveur 8093, `APP_VERSION 0.14.0`).
 
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 
