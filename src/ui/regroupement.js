@@ -20,7 +20,7 @@ import { classerPhotos, MAX_TOKENS_CLASSER, MAX_PHOTOS_CLASSEMENT } from '../dom
 import { IMPORTS_OUVERTS, lotDeRecette, importOuvert } from '../domain/import-cible.js';
 import { cleClassement, resultatClassement, revaliderResultatClassement, regroupementInitial, deplacerVers, bougerDansGroupe, retirerDuGroupe, brouillonDe, restaurerBrouillon, candidatsReference, referencesOccupees, proposerAppariements, filtrerReferences, lecturesDuLot, suiteDuLot, pagesEnCours, referenceALire } from '../domain/classement.js';
 import { trierParSeance, pagesALire, ligneOuverteDeSeance } from '../domain/table-matieres.js';
-import { lancerVol, lancerExtraction, annulerVol, volEnCours, estEnLigne, texteEchec, BATTEMENT_MS } from './import-cible.js';
+import { lancerVol, lancerExtraction, annulerVol, volEnCours, estEnLigne, texteEchec, BATTEMENT_MS, cleLecture } from './import-cible.js';
 import { sessionAssistant, carteConnexion, messageGardeRefusee, texteDesChamps, TEXTE_CONNEXION } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { messageErreurImage } from './livre-ajout.js';
@@ -52,6 +52,8 @@ async function octetsIci(repo, sha256) {
 const texteRefusLire = (raison) => (raison === 'pages' ? t('Rien n’a été lancé : une photo est déjà en cours d’import ailleurs.')
   : raison === 'octets_absents' ? t('Les photos de cette séance ne sont pas sur cet appareil.')
     : t('Rien n’a été lancé : ce classement, le livre de la séance ou une référence choisie a changé entre-temps.'));
+// La raison dite sous une proposition incertaine (§ 4.4, § 4.8.3) : une définition pour l'écran de regroupement et l'éditeur.
+const MOTIFS = { titre: () => t('Titre semblable, page différente ou inconnue.'), page: () => t('Même page, titre différent.'), conflit: () => t('Une autre recette du lot vise aussi cette référence.') };
 
 // L'exécutant du classement pour lancerVol (D-D1) : UN appel classerPhotos, puis la correspondance sur les pages ENVOYÉES (C, D-C21).
 export async function executerClassement({ provider, images, pageIds, signal }) {
@@ -259,7 +261,6 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
   // --- État 3 : l'écran de regroupement (§ 4.3, § 4.4, D-D20, D-D23, D-D24) ----------------------------------------------------------------------
   // R = { cle, editionId, resultat, etat, choix (les choix FAITS), octets (Map page → octets présents, null tant que non vérifiés), ouverture (sélecteurs
   // ouverts), saisies (texte de chaque sélecteur), affiches (les choix EFFECTIFS du dernier rendu) }. Préparé une fois par clé de classement.
-  const MOTIFS = { titre: () => t('Titre semblable, page différente ou inconnue.'), page: () => t('Même page, titre différent.'), conflit: () => t('Une autre recette du lot vise aussi cette référence.') };
   const urls = new Map(); // sha256 → URL blob: de CETTE instance, réutilisée à chaque redessin (révoquées par app.js au changement de route)
   function poserImage(img, sha) {
     if (!sha) return;
@@ -628,5 +629,75 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
   sessionAssistant(ctx).then((s) => { etat.session = s; dessiner(); prevenir(); });
   etat.signature = signatureDe(etat.ligne);
   dessiner();
+  return racine;
+}
+
+// « Enregistrer dans cette référence » (§ 4.8.3, D-D19) — sans DOM : la lecture du journal de la clé RENDUE (`cle`), a_verifier, de sorte recette, sans
+// référence, reçoit `recipeId` — la référence relue, encore candidate de l'édition de la ligne (reference_only, sans lien web, sans import ouvert) ; dans la
+// transaction, la clé, la sorte et l'absence de référence regardées, et la condition d'index d'I-2. Aucun appel. Rend { issue: 'rattache' } ou
+// { issue: 'refuse', raison: 'lecture' | 'reference' | 'transition' }.
+export async function rattacherLecture(importId, recipeId, { cle, repo = repoModule } = {}) {
+  const refuse = (raison) => ({ issue: 'refuse', raison });
+  const ligne = await repo.get('imports', importId);
+  if (!ligne || ligne.status !== 'a_verifier' || ligne.kind !== 'recette' || ligne.recipe_id != null || cleLecture(ligne) !== cle) return refuse('lecture');
+  const reference = typeof recipeId === 'string' ? await repo.get('recipes', recipeId) : null;
+  const editionId = typeof ligne.edition_id === 'string' ? ligne.edition_id : null;
+  if (!reference || !candidatsReference([reference], { editionId, imports: liste(await repo.all('imports')) }).length) return refuse('reference');
+  try {
+    await repo.transitionner('imports', importId, {
+      attendus: ['a_verifier'],
+      patch: (c) => { if (cleLecture(c) !== cle || c.kind !== 'recette' || c.recipe_id != null) throw new TransitionRefusee('imports', importId, c.status); return { recipe_id: recipeId }; },
+      conditions: { imports: [{ index: 'recipe_id', valeur: recipeId, exclus: IMPORTS_OUVERTS }] },
+    });
+  } catch (e) { if (e instanceof TransitionRefusee) return refuse('transition'); throw e; }
+  return { issue: 'rattache' };
+}
+
+// La proposition de l'éditeur (§ 4.8.3, D-D19) : la règle de D-D5 (proposerAppariements, une définition) appliquée au titre et à la page LUS par
+// l'extraction ; sans candidate dans l'édition de la ligne, null. Sûre : « Ces pages complètent “{t}”, p. {p}. » et le primaire ; titre ou page : la
+// question, sa raison et un bouton secondaire ; plusieurs : le sélecteur ouvert, ces candidates en tête ; aucune : le seul « Choisir une référence… ».
+// Toujours : ce que le geste fait. Ne rien choisir EST la nouvelle recette (le sélecteur n'offre pas « Nouvelle recette »). Refus → le toast, puis le
+// bloc relu et redessiné (une référence prise entre-temps n'est plus proposée ; une autre lecture le retire). Tout est rendu en nœuds texte (I-D2).
+export function blocApparierLecture({ ligne, resultat, ctx, repo = repoModule, navigate = naviguerDom, toast = toastDom } = {}) {
+  const editionId = typeof ligne?.edition_id === 'string' ? ligne.edition_id : null;
+  if (!editionId || !resultat || typeof resultat !== 'object') return null;
+  const candidats = candidatsReference(liste(ctx?.recipes), { editionId, imports: liste(ctx?.imports) });
+  if (!candidats.length) return null;
+  const occupees = referencesOccupees(liste(ctx?.recipes), { editionId, imports: liste(ctx?.imports) });
+  const lu = { cle: 'lu', title: typeof resultat.title === 'string' ? resultat.title : null, printed_page: Number.isInteger(resultat.printed_page) ? resultat.printed_page : null, origine: 'classement' };
+  const prop = proposerAppariements([lu], candidats).get('lu');
+  const cle = cleLecture(ligne);
+  const racine = el('div', { class: 'card flat stack', dataset: { role: 'apparier-lecture' } });
+  let occupe = false;
+  async function rattacher(recipeId) {
+    if (occupe) return;
+    occupe = true;
+    try {
+      const r = await rattacherLecture(ligne.id, recipeId, { cle, repo });
+      if (r.issue === 'rattache') { if (racine.isConnected) navigate('/recipes/' + encodeURIComponent(recipeId) + '/importer'); return; }
+      toast(t('Rien n’a été rattaché : cette lecture ou cette référence a changé entre-temps.'));
+      const [L, recipes, imports] = await Promise.all([repo.get('imports', ligne.id), repo.all('recipes'), repo.all('imports')]);
+      const tenue = !!L && L.status === 'a_verifier' && L.kind === 'recette' && L.recipe_id == null && cleLecture(L) === cle;
+      const frais = tenue ? blocApparierLecture({ ligne: L, resultat, ctx: { ...ctx, recipes, imports }, repo, navigate, toast }) : null;
+      racine.replaceWith(frais ?? el('div', { hidden: true }));
+    } catch (e) { logError('regroupement.rattacher', { error: e, id: ligne.id }); }
+    finally { occupe = false; }
+  }
+  const r = prop?.recipe_id ? candidats.find((x) => x.id === prop.recipe_id) ?? null : null;
+  const avecPage = (sure) => (Number.isInteger(r.printed_page)
+    ? (sure ? t('Ces pages complètent “{t}”, p. {p}.', { t: titre60(r), p: r.printed_page }) : t('Ces pages complètent peut-être “{t}”, p. {p} ?', { t: titre60(r), p: r.printed_page }))
+    : (sure ? t('Ces pages complètent “{t}”.', { t: titre60(r) }) : t('Ces pages complètent peut-être “{t}” ?', { t: titre60(r) })));
+  if (r) {
+    const sure = prop.certitude === 'sure';
+    racine.append(el('p', { dataset: { role: 'proposition' } }, avecPage(sure)));
+    if (!sure && Object.hasOwn(MOTIFS, prop.motif ?? '')) racine.append(el('small', { class: 'muted', dataset: { role: 'motif' } }, MOTIFS[prop.motif]()));
+    racine.append(el('button', { type: 'button', class: sure ? 'btn primary' : 'btn', dataset: { role: 'enregistrer-reference' }, onClick: () => rattacher(r.id) }, t('Enregistrer dans cette référence')));
+  } else if (prop?.motif === 'plusieurs') racine.append(el('p', { class: 'muted' }, t('Plusieurs références possibles.')));
+  racine.append(el('small', { class: 'muted', dataset: { role: 'avertissement' } }, t('La lecture sera enregistrée telle que lue dans la référence ; tes changements ici ne la suivent pas.')));
+  const ouvert = prop?.motif === 'plusieurs';
+  const selecteur = selecteurReferences({ candidats, occupees, enTete: ouvert ? prop.ordre : [], surChoix: (id) => { if (id) rattacher(id); }, nouvelle: false });
+  selecteur.hidden = !ouvert;
+  const bascule = el('button', { type: 'button', class: 'btn', dataset: { role: 'choisir-reference' }, 'aria-expanded': ouvert ? 'true' : 'false', onClick: () => { const o = selecteur.hidden; selecteur.hidden = !o; bascule.setAttribute('aria-expanded', o ? 'true' : 'false'); } }, t('Choisir une référence…'));
+  racine.append(bascule, selecteur);
   return racine;
 }

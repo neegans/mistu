@@ -697,4 +697,13 @@ export const EN = {
   "Recette {k} sur {n}": "Recipe {k} of {n}",
   "{n} recette(s) de cette séance dans Imports": "{n} recipe(s) from this session in Imports",
   "Voir les imports": "See imports",
+  // Lot D, tâche 5 : enregistrer une lecture issue d'une séance, la proposition de référence de l'éditeur.
+  "En faire une nouvelle recette": "Make it a new recipe",
+  "Ces pages complètent “{t}”, p. {p}.": "These pages complete “{t}”, p. {p}.",
+  "Ces pages complètent “{t}”.": "These pages complete “{t}”.",
+  "Ces pages complètent peut-être “{t}”, p. {p} ?": "These pages may complete “{t}”, p. {p}?",
+  "Ces pages complètent peut-être “{t}” ?": "These pages may complete “{t}”?",
+  "Enregistrer dans cette référence": "Save into this reference",
+  "La lecture sera enregistrée telle que lue dans la référence ; tes changements ici ne la suivent pas.": "The reading will be saved as read into the reference; your changes here don’t follow it.",
+  "Rien n’a été rattaché : cette lecture ou cette référence a changé entre-temps.": "Nothing was linked: this reading or this reference changed in the meantime.",
 };

@@ -1826,6 +1826,377 @@ export async function runClassementTests({ eq, ok }) {
       eq([await G.lireLeLot('cl_w', { ctx: await ctxDe(repo, db), repo, fetch: f2.fetch, maintenant: () => NOW }), f2.appels.length, (await db.get('imports', 'w1')).status], [{ issue: 'fini', lues: 0, echecs: 0, sautees: 0, arret: null }, 0, 'a_lancer'], 'T-D17 (ronde 1, MR-lot-sorte-lecture) : lireLeLot ne fige que les lignes `recette` de son lot — la ligne web au `lot` n’est ni tentée ni sautée (0 POST, rien d’écrit)');
     });
 
+    // =================================================================================================================================
+    // Tâche 5 — enregistrer une lecture issue d'une séance (§ 4.8, N-1, R-D-3, D-D19) : T-D18, T-D19, T-D21, T-D22. L'écran ciblé est monté avec ses
+    // dépendances (renderImportCible) ; l'éditeur (renderRecipeEdit) n'en a pas : sa navigation passe par location.hash, relue puis rendue (comme les
+    // tests du lot A) ; la fiche par renderRecipe.
+    const RE = await import('../src/ui/recipe-edit.js');
+    const FI = await import('../src/ui/recipe.js');
+    const adresseT5 = location.href;
+    const ecranT5 = (nom, fn) => ecran(nom, async (repo, db) => { try { await fn(repo, db); } finally { history.replaceState(null, '', adresseT5); } });
+    const monterCible = async (repo, db, recipeId, over = {}) => { const r = await UI.renderImportCible({ id: recipeId }, {}, await ctxDe(repo, db), deps(repo, { fetch: fauxFetch().fetch, ...over })); scene.append(r); return r; };
+    const monterEditeur = async (repo, db, query, params = { id: null }) => { const r = await RE.renderRecipeEdit(params, query, await ctxDe(repo, db)); scene.append(r); return r; };
+    const champDe = (racine, libelle) => [...racine.querySelectorAll('.field')].find((f) => f.querySelector('span')?.textContent === libelle) || null;
+    const enregistrerLecture = async (racine) => { await attendre(() => racine.querySelector('button[data-role="enregistrer"]') && !racine.querySelector('button[data-role="enregistrer"]').disabled, '« Enregistrer cette lecture »'); racine.querySelector('button[data-role="enregistrer"]').click(); };
+    const statutDe = async (db, id) => (await db.get('imports', id))?.status ?? null;
+    const lueDuLot = (id, { classementId = 'imp_cl', rang = 1, total = 1, sessionId = 'ss1', page_ids, recipe_id = null, device_id = appareilIci(), resultat }) => ligneLot({ id, classementId, rang, total, sessionId, page_ids, recipe_id, device_id, status: 'a_verifier', over: { resultat, started_at: DATE, model: 'claude-x' } });
+    const legendesOriginal = (racine) => [...([...racine.querySelectorAll('section')].find((s) => s.querySelector('h2')?.textContent === 'Original')?.querySelectorAll('figcaption') ?? [])].map((c) => c.textContent);
+    // Les figures de PAGE d'une section (R-D-9) — jamais toute figure : après G, la miniature d'une page SANS octets est un figure.fichier-absent
+    // IMBRIQUÉ dans la figure de sa page (vignettesDePages : figure > div.vignette-page > vignettePage, plan G rév. 3) ; querySelectorAll('figure')
+    // y compterait deux figures pour une page. La figure de page est l'enfant direct du div.thumbs de la section, avant G (section > div.thumbs >
+    // figure, à 58bb49b) comme après (« Original » et « Pages d’index » bâties de même) : `:scope > .thumbs > figure` vaut des deux côtés.
+    const figuresDe = (racine, titre) => [...racine.querySelectorAll('section')].find((s) => s.querySelector('h2')?.textContent === titre)?.querySelectorAll(':scope > .thumbs > figure').length ?? 0;
+
+    await run('T-D18 domaine : fabriquerExtraction — positions, rôle, union sans photo d’index', async () => {
+      const reference = REFERENCES_ED.find((r) => r.id === 'rcX');
+      const pages = [{ id: 'pX', position: 4, printed_page: null, kind: null, document_id: null }, { id: 'pY', position: 2, printed_page: 121, kind: null, document_id: null }];
+      const opts = { reference, pages, pageIds: ['pX', 'pY'], maintenant: NOW };
+      const garde = I.fabriquerExtraction(RECETTE_LUE('Velouté de panais', 120), { ...opts, reecrirePositions: false });
+      const defaut = I.fabriquerExtraction(RECETTE_LUE('Velouté de panais', 120), opts);
+      eq([garde.pageUpdates.map((p) => [p.id, p.position, p.kind, p.role, p.printed_page]), defaut.pageUpdates.map((p) => p.position), garde.recipe.source_page_ids, I.fabriquerExtraction(RECETTE_LUE(), { ...opts, reference: REFERENCES_ED[0] }).recipe.source_page_ids],
+        [[['pX', 4, 'recipe', 'recette', 120], ['pY', 2, 'recipe', 'recette', 121]], [1, 2], ['pX', 'pY'], ['pX', 'pY']], 'T-D18 (M94, M96, M148) : reecrirePositions faux garde les positions (défaut vrai : 1..n, le lot A inchangé) ; role recette avec kind recipe ; l’union privée de reference.index_page_id (pIdx retirée) ; une référence sans photo d’index ne change pas');
+    });
+
+    await ecranT5('T-D18 (a) écran ciblé, lignes de lot : positions gardées, séance par le sac, deux instances, dernière ligne', async (repo, db) => {
+      await poserSeance(repo, db);
+      const moi = repo.deviceId();
+      await db.mutate({ puts: { imports: [
+        lueDuLot('la', { rang: 1, total: 3, page_ids: ['p1', 'p3'], recipe_id: 'rcS', device_id: moi, resultat: RECETTE_LUE('Soupe de courge', 132) }),
+        lueDuLot('lb', { rang: 2, total: 3, page_ids: ['p2'], recipe_id: 'rcT', device_id: moi, resultat: RECETTE_LUE('Tarte aux poires', 141) }),
+        lueDuLot('lc', { rang: 3, total: 3, page_ids: ['p5'], recipe_id: 'rcG', device_id: moi, resultat: RECETTE_LUE('Gratin dauphinois', 152) }),
+      ] }, origin: 'device' });
+      const options = [];
+      const espion = { ...repo, transitionner: async (s, k, o) => { options.push([k, o]); return repo.transitionner(s, k, o); } };
+      const ca = await monterCible(repo, db, 'rcS', { repo: espion });
+      await enregistrerLecture(ca);
+      await attendre(async () => (await statutDe(db, 'la')) === 'enregistre', 'la enregistrée');
+      const [p1, p3] = await db.getMany('source_pages', ['p1', 'p3']);
+      const ss = await db.get('scan_sessions', 'ss1');
+      const cond = options.filter(([k, o]) => k === 'la' && o?.conditions?.scan_sessions).map(([, o]) => o.conditions.scan_sessions[0])[0];
+      eq([[p1.position, p1.kind, p1.role], [p3.position, p3.kind, p3.role], ss.status, ss.recipe_ids, typeof cond?.patch, cond?.key, cond?.attendus], [[1, 'recipe', 'recette'], [3, 'recipe', 'recette'], 'open', ['rcS'], 'function', 'ss1', ['open', 'done']], 'T-D18 (a) (M94, M95, M96) : positions de la séance GARDÉES (p3 reste 3), pages kind recipe ET role recette ; la séance reçoit rcS et reste open ; elle passe par le sac (patch-fonction, attendus open et done)');
+      scene.replaceChildren();
+      // Deux instances entrelacées DE FORCE : l'enregistrement de lb est tenu à une porte juste avant sa transaction (tout ce qu'il relit hors transaction
+      // est déjà lu ; la porte reconnaît la séance par le sac OU par une copie dans puts, pour tenir aussi le mutant) ; celui de lc passe pendant ce
+      // temps ; puis la porte s'ouvre. Une séance écrite par une copie lue hors transaction (M146) perdrait rcG ; relue DANS la transaction, rien ne se perd.
+      let ouvrirPorte; const porte = new Promise((r) => { ouvrirPorte = r; }); let tenue = false;
+      const aLaPorte = { ...repo, transitionner: async (s, k, o) => { if (k === 'lb' && (o?.conditions?.scan_sessions || o?.puts?.scan_sessions)) { tenue = true; await porte; } return repo.transitionner(s, k, o); } };
+      const cb = await monterCible(repo, db, 'rcT', { repo: aLaPorte });
+      const cc = await monterCible(repo, db, 'rcG');
+      await attendre(() => !!cb.querySelector('button[data-role="enregistrer"]') && !!cc.querySelector('button[data-role="enregistrer"]'), 'deux écrans prêts');
+      try {
+        cb.querySelector('button[data-role="enregistrer"]').click();
+        await attendre(() => tenue, 'lb tenu à la porte, sa séance déjà lue');
+        cc.querySelector('button[data-role="enregistrer"]').click();
+        await attendre(async () => (await statutDe(db, 'lc')) === 'enregistre', 'lc enregistrée pendant que lb attend');
+      } finally { ouvrirPorte(); }
+      await attendre(async () => (await statutDe(db, 'lb')) === 'enregistre', 'lb enregistrée après la porte');
+      const ss2 = await db.get('scan_sessions', 'ss1');
+      eq([[...ss2.recipe_ids].sort(), ss2.status], [['rcG', 'rcS', 'rcT'], 'open'], 'T-D18 (a) (M146, M120) : deux enregistrements de deux lignes du lot, depuis deux instances ENTRELACÉES (lb tenu avant sa transaction pendant que lc s’enregistre), gardent les DEUX recipe_ids (séance relue dans la transaction) ; la dernière ligne ouverte enregistrée, la séance reste open — p4, orpheline, est sans rôle');
+    });
+
+    await ecranT5('T-D18 (a) séance fermée, page ajoutée entre-temps, « En faire une nouvelle recette » (et la question reposée, (e))', async (repo, db) => {
+      const moi = repo.deviceId();
+      const REFS = [...REFERENCES_ED, ref('rcV', 'Velouté de poireaux', 77)];
+      await poserSeance(repo, db, { id: 'ss2', pages: ['pA', 'pB'], references: REFS });
+      await db.mutate({ puts: { imports: [lueDuLot('ld', { classementId: 'cl_d', sessionId: 'ss2', page_ids: ['pA', 'pB'], recipe_id: 'rcP', device_id: moi, resultat: RECETTE_LUE('Poire rôtie au miel', 140) })] }, origin: 'device' });
+      const cd = await monterCible(repo, db, 'rcP');
+      await enregistrerLecture(cd);
+      await attendre(async () => (await statutDe(db, 'ld')) === 'enregistre', 'ld enregistrée');
+      eq((await db.get('scan_sessions', 'ss2')).status, 'done', 'T-D18 (a) (M121) : une séance de 2 photos lues en un groupe apparié → done (plus aucune photo sans rôle)');
+      await poserSeance(repo, db, { id: 'ss3', pages: ['pC'], references: REFS });
+      await db.mutate({ puts: { imports: [lueDuLot('le', { classementId: 'cl_e', sessionId: 'ss3', page_ids: ['pC'], recipe_id: 'rcO', device_id: moi, resultat: RECETTE_LUE('Pot-au-feu', 98) })] }, origin: 'device' });
+      const espion = { ...repo, transitionner: async (s, k, o) => {
+        if (k === 'le' && o?.conditions?.scan_sessions) { // une page arrive dans la séance APRÈS la relecture de ses pages, AVANT la transaction
+          const seance = await db.get('scan_sessions', 'ss3');
+          await db.mutate({ puts: { source_pages: [{ ...(await db.get('source_pages', 'pC')), id: 'pD', position: 2, kind: null }], scan_sessions: [{ ...seance, page_ids: [...seance.page_ids, 'pD'] }] }, origin: 'device' });
+        }
+        return repo.transitionner(s, k, o);
+      } };
+      scene.replaceChildren();
+      const ce = await monterCible(repo, db, 'rcO', { repo: espion });
+      await enregistrerLecture(ce);
+      await attendre(async () => (await statutDe(db, 'le')) === 'enregistre', 'le enregistrée');
+      const ss3 = await db.get('scan_sessions', 'ss3');
+      eq([ss3.status, ss3.page_ids, ss3.recipe_ids], ['open', ['pC', 'pD'], ['rcO']], 'T-D18 (a) (M159) : une page ajoutée à la séance entre la relecture de ses pages et la transaction compte comme sans rôle → statut inchangé (jamais fermée trop tôt)');
+      await poserSeance(repo, db, { id: 'ss4', pages: ['pE'], references: REFS });
+      await db.mutate({ puts: { imports: [lueDuLot('lf', { classementId: 'cl_f', sessionId: 'ss4', page_ids: ['pE'], recipe_id: 'rcV', device_id: moi, resultat: RECETTE_LUE('Potage Crécy', 77) })] }, origin: 'device' });
+      const ff = fauxFetch();
+      scene.replaceChildren(); navs.length = 0;
+      const cf = await monterCible(repo, db, 'rcV', { fetch: ff.fetch });
+      await enregistrerLecture(cf);
+      await attendre(() => !!cf.querySelector('[data-role="discordance"]'), 'discordance');
+      eq([...cf.querySelectorAll('[data-role="discordance"] button')].map((b) => b.textContent), ['Rattacher', 'Garder la lecture sans l’enregistrer', 'Changer les pages', 'En faire une nouvelle recette'], 'T-D18 (a) (R-D-3) : le panneau de discordance d’une ligne de lot porte quatre gestes, « En faire une nouvelle recette » en dernier');
+      // (e) M147 : une autre lecture écrite sur la ligne (un autre onglet, sans bus) entre la question et la réponse → rien de détaché, la question reposée.
+      await db.mutate({ puts: { imports: [{ ...(await db.get('imports', 'lf')), started_at: NOW, resultat: RECETTE_LUE('Potage paysan', 77) }] }, origin: 'device' });
+      cf.querySelector('[data-role="discordance"] button[data-role="nouvelle-recette"]').click();
+      await attendre(() => !!cf.querySelector('[data-role="discordance"]')?.textContent.includes('Potage paysan'), 'question reposée pour la lecture courante');
+      eq([(await db.get('imports', 'lf')).recipe_id, navs.length], ['rcV', 0], 'T-D18 (e) (M147) : la lecture questionnée a changé → recipe_id inchangé, aucune navigation ; la question est reposée pour la lecture courante');
+      cf.querySelector('[data-role="discordance"] button[data-role="nouvelle-recette"]').click();
+      await attendre(() => navs.length === 1, 'navigation vers l’éditeur');
+      const lf = await db.get('imports', 'lf');
+      eq([lf.recipe_id, lf.status, navs[0], ff.appels.length, (await db.get('scan_sessions', 'ss4')).status], [null, 'a_verifier', '/recipes/new?import=lf', 0, 'open'], 'T-D18 (a) (M97) : « En faire une nouvelle recette » → recipe_id null, statut a_verifier, éditeur ?import=, AUCUN appel ; la séance inchangée');
+      scene.replaceChildren();
+      const edf = await monterEditeur(repo, db, { import: 'lf' });
+      eq(champDe(edf, 'Titre original *')?.querySelector('input')?.value, 'Potage paysan', 'T-D18 (a) (M97) : l’éditeur est prérempli par la lecture, sans appel (fetch global piégé)');
+    });
+
+    await ecranT5('T-D18 (b) « Regrouper en recette », lecture, « Enregistrer dans cette référence », écran ciblé', async (repo, db) => {
+      await poserSeance(repo, db, { pages: ['p1', 'p2', 'p3'] });
+      const ff = fauxFetch([200, corpsModele(RECETTE_LUE('Soupe de courge', 132))]);
+      globalThis.fetch = ff.fetch;
+      // Le lien « Regrouper en recette » de la séance (un href, sans geste) porte ces paramètres : pages dans l'ordre de la sélection, livre, séance.
+      const ed = await monterEditeur(repo, db, { pages: 'p3,p1', edition: 'ed1', session: 'ss1' });
+      boutonTexte(ed, 'Extraire avec l’assistant IA').click();
+      await attendre(() => !!ed.querySelector('[data-role="apparier-lecture"] [data-role="proposition"]'), 'proposition de référence');
+      const ligne = (await db.getAll('imports')).find((i) => i.kind === 'recette');
+      eq([ligne.page_ids, ligne.status, ligne.recipe_id, ed.querySelector('[data-role="apparier-lecture"] [data-role="proposition"]').textContent], [['p3', 'p1'], 'a_verifier', null, 'Ces pages complètent “Soupe de courge”, p. 132.'], 'T-D18 (b) : la lecture de « Regrouper en recette » est écrite (a_verifier, sans référence), puis la référence sûre est proposée');
+      ed.querySelector('[data-role="enregistrer-reference"]').click();
+      await attendre(() => location.hash === '#/recipes/rcS/importer', 'navigation vers l’écran ciblé');
+      history.replaceState(null, '', adresseT5);
+      scene.replaceChildren();
+      const c = await monterCible(repo, db, 'rcS');
+      await enregistrerLecture(c);
+      await attendre(async () => (await statutDe(db, ligne.id)) === 'enregistre', 'enregistrée');
+      const [p1, p3] = await db.getMany('source_pages', ['p1', 'p3']);
+      const ss = await db.get('scan_sessions', 'ss1');
+      eq([p1.position, p3.position, ss.status, ss.recipe_ids, ff.appels.length, (await db.get('recipes', 'rcS')).source_page_ids], [1, 3, 'open', ['rcS'], 1, ['p3', 'p1']], 'T-D18 (b) (M94, M120) : positions de la séance gardées ; la séance reçoit rcS et reste open (p2 sans rôle) ; UN appel en tout ; la recette garde l’ordre lu');
+    });
+
+    await ecranT5('T-D18 (c) photo seule, référence proposée par la page, discordance → « En faire une nouvelle recette »', async (repo, db) => {
+      await poserSeance(repo, db, { pages: ['p1', 'p2', 'p3'] });
+      const ff = fauxFetch([200, corpsModele(RECETTE_LUE('Compote de poires', 152))]);
+      globalThis.fetch = ff.fetch;
+      const ed = await monterEditeur(repo, db, { pages: 'p2', edition: 'ed1', session: 'ss1' });
+      boutonTexte(ed, 'Extraire avec l’assistant IA').click();
+      await attendre(() => !!ed.querySelector('[data-role="apparier-lecture"] [data-role="proposition"]'), 'proposition');
+      const bloc = ed.querySelector('[data-role="apparier-lecture"]');
+      eq([bloc.querySelector('[data-role="proposition"]').textContent, bloc.querySelector('[data-role="motif"]')?.textContent, bloc.querySelector('[data-role="enregistrer-reference"]')?.className], ['Ces pages complètent peut-être “Gratin dauphinois”, p. 152 ?', 'Même page, titre différent.', 'btn'], 'T-D18 (c) : titre lu sans concordance, une seule référence à ± 2 pages → la question, sa raison, un bouton secondaire');
+      const ligne = (await db.getAll('imports')).find((i) => i.kind === 'recette');
+      bloc.querySelector('[data-role="enregistrer-reference"]').click();
+      await attendre(() => location.hash === '#/recipes/rcG/importer', 'navigation vers l’écran ciblé');
+      history.replaceState(null, '', adresseT5);
+      scene.replaceChildren(); navs.length = 0;
+      const c = await monterCible(repo, db, 'rcG');
+      await enregistrerLecture(c);
+      await attendre(() => !!c.querySelector('[data-role="discordance"]'), 'discordance de titre');
+      const boutons = [...c.querySelectorAll('[data-role="discordance"] button')].map((b) => b.textContent);
+      eq([boutons.length, boutons.at(-1)], [4, 'En faire une nouvelle recette'], 'T-D18 (c) (M98) : hors lot aussi, le panneau porte quatre boutons, « En faire une nouvelle recette » en dernier');
+      c.querySelector('[data-role="discordance"] button[data-role="nouvelle-recette"]').click();
+      await attendre(() => navs.length === 1, 'navigation vers l’éditeur');
+      const relue = await db.get('imports', ligne.id);
+      eq([relue.recipe_id, relue.status, navs[0], ff.appels.length, (await db.get('scan_sessions', 'ss1')).status, (await db.get('source_pages', 'p2')).position], [null, 'a_verifier', '/recipes/new?import=' + ligne.id, 1, 'open', 2], 'T-D18 (c) : recipe_id null, a_verifier, éditeur ?import=, AUCUN appel de plus, séance open, position de la photo inchangée');
+      scene.replaceChildren();
+      eq(champDe(await monterEditeur(repo, db, { import: ligne.id }), 'Titre original *')?.querySelector('input')?.value, 'Compote de poires', 'T-D18 (c) : l’éditeur prérempli');
+    });
+
+    await ecranT5('T-D18 (e) photo d’index de la référence : hors de la recette lue, hors de l’Original', async (repo, db) => {
+      await poserSeance(repo, db, { id: 'ss5', pages: ['pX'] });
+      const pIdx = { id: 'pIdx', document_id: null, edition_id: 'ed1', sha256: 'sha-idx', printed_page: 120, file_position: null, locator: null, position: 1, issues: [], kind: 'index', created_at: DATE, updated_at: DATE };
+      await db.mutate({ puts: { source_pages: [pIdx], imports: [lueDuLot('lx', { classementId: 'cl_x', sessionId: 'ss5', page_ids: ['pX'], recipe_id: 'rcX', device_id: repo.deviceId(), resultat: RECETTE_LUE('Velouté de panais', 120) })] }, origin: 'device' });
+      const c = await monterCible(repo, db, 'rcX');
+      await enregistrerLecture(c);
+      await attendre(async () => (await statutDe(db, 'lx')) === 'enregistre', 'lx enregistrée');
+      eq([(await db.get('recipes', 'rcX')).source_page_ids, await db.get('source_pages', 'pIdx')], [['pX'], pIdx], 'T-D18 (e) (M148) : la lecture enregistrée dans une référence de C → source_page_ids SANS sa photo d’index ; pIdx intacte (kind, role, printed_page)');
+      // Trois fiches. rcX, lue (available), dont source_page_ids porte encore sa photo d'index. rcZ, une référence reference_only AVEC une version — la forme
+      // qu'écrit « Saisir à la main » enregistré sans ingrédient ni étape (src/ui/recipe-edit.js : la fiche garde reference_only, une version courante
+      // posée) : elle atteint le bloc « Original », branche reference_only de pagesOriginal. rcR, une référence SANS version : renderRecipe la rend par
+      // referenceOnly (avant le bloc « Original »), qui montre la photo d'index sous « Pages d’index » — le chemin du lot A et de C, que D ne touche pas.
+      const vZ = { id: 'rvZ', recipe_id: 'rcZ', kind: 'extraction', parent_version_id: null, status: null, servings: null, prep_minutes: null, cook_minutes: null, active_minutes: null, total_minutes: null, ingredients: [], steps: [], constraints: {}, changes: '', notes: '', provenance: { source_page_ids: ['pIdx'], generated_by: 'manual' }, verification_state: 'to_verify', created_at: DATE, updated_at: DATE };
+      await db.mutate({ puts: { recipes: [{ ...(await db.get('recipes', 'rcX')), source_page_ids: ['pIdx', 'pX'] }, ref('rcZ', 'Panais rôtis', 121, { index_page_id: 'pIdx', source_page_ids: ['pIdx'], current_version_id: 'rvZ' }), ref('rcR', 'Panais glacés', 122, { index_page_id: 'pIdx', source_page_ids: ['pIdx'] })], recipe_versions: [vZ] }, origin: 'device' });
+      scene.replaceChildren();
+      const ctx = await ctxDe(repo, db);
+      const fx = await FI.renderRecipe({ id: 'rcX' }, {}, ctx); scene.append(fx);
+      const fz = await FI.renderRecipe({ id: 'rcZ' }, {}, ctx); scene.append(fz);
+      const fr = await FI.renderRecipe({ id: 'rcR' }, {}, ctx); scene.append(fr);
+      eq([legendesOriginal(fx).length, figuresDe(fx, 'Original'), legendesOriginal(fz), figuresDe(fz, 'Original')], [1, 1, ['p. 120'], 1], 'T-D18 (e) (M149, M149b) : une fiche lue (available) dont source_page_ids porte encore sa photo d’index ne la montre pas dans « Original » (une légende, une figure de PAGE) ; une référence reference_only qui a une version la montre toujours dans « Original » (branche reference_only de pagesOriginal ; une figure de page — la figure d’absence que G imbrique pour pIdx, sans octets, ne compte pas : R-D-9)');
+      eq([legendesOriginal(fr), figuresDe(fr, 'Pages d’index')], [[], 1], 'T-D18 (e) : une référence SANS version passe par referenceOnly — aucun bloc « Original », sa photo d’index sous « Pages d’index » : UNE figure de page, avant comme après G (R-D-9) — chemin du lot A et de C, inchangé');
+      // R-D-18 (M149-partiel) : le compte de « Télécharger les {n} pages » du bloc « Original » ne porte pas la photo d'index — rcQ (lue, available) a
+      // une page d'index et deux pages originales, toutes trois distantes (une ligne files de ce compte, sans octets ici) ; un compte et un moteur
+      // (contexteFichiers : connecte) → « Télécharger les 2 pages », deux figures de page, aucune vignette de la photo d'index. Passer `pages` à la garde
+      // et à vignettesDePages sans changer le `map` (M149-partiel) dirait « Télécharger les 3 pages ».
+      const HQ = (c) => c.repeat(64);
+      const distante = (sha, copie) => ({ sha256: sha, mime: 'image/jpeg', size: 5, updated_at: DATE, remote: { sha256: copie, size: 5, mime: 'image/jpeg', quality: 'reduite', uploaded_at: DATE, owner: 'u1' } });
+      const pageQ = (id, sha, kind, printed_page, position) => ({ id, document_id: null, edition_id: 'ed1', sha256: sha, printed_page, file_position: null, locator: null, position, issues: [], kind, ...(kind === 'recipe' ? { role: 'recette' } : {}), created_at: DATE, updated_at: DATE });
+      const vQ = { ...vZ, id: 'rvQ', recipe_id: 'rcQ', steps: [{ id: 'stQ', position: 1, text: 'Rôtir.' }], provenance: { source_page_ids: ['pQ1', 'pQ2'], generated_by: 'manual' } };
+      await db.mutate({ puts: { files: [distante(HQ('1'), HQ('a')), distante(HQ('2'), HQ('b')), distante(HQ('3'), HQ('c'))] }, origin: 'remote' });
+      await db.mutate({ puts: { source_pages: [pageQ('pIdQ', HQ('1'), 'index', 200, 1), pageQ('pQ1', HQ('2'), 'recipe', 201, 1), pageQ('pQ2', HQ('3'), 'recipe', 202, 2)], recipes: [ref('rcQ', 'Panais au four', 201, { availability: 'available', index_page_id: 'pIdQ', source_page_ids: ['pIdQ', 'pQ1', 'pQ2'], current_version_id: 'rvQ' })], recipe_versions: [vQ] }, origin: 'device' });
+      scene.replaceChildren();
+      const ctxQ = await ctxDe(repo, db);
+      const moteurQ = { telecharger: async () => ({ recus: 0, erreurs: 0, erreur: null }), reessayerFichier: async () => ({ recus: 0, erreurs: 0, erreur: null }), onEtat: () => () => {} };
+      const fq = await FI.renderRecipe({ id: 'rcQ' }, {}, { ...ctxQ, sync: { ...ctxQ.sync, moteur: moteurQ } }); scene.append(fq);
+      const origQ = [...fq.querySelectorAll('section')].find((s) => s.querySelector('h2')?.textContent === 'Original');
+      eq([[...(origQ?.querySelectorAll('button') ?? [])].map((b) => b.textContent).filter((x) => x.startsWith('Télécharger les')), figuresDe(fq, 'Original'), [...(origQ?.querySelectorAll('.fichier-absent') ?? [])].map((f) => f.dataset.sha256)], [['Télécharger les 2 pages'], 2, [HQ('2'), HQ('3')]], 'T-D18 (e) (M149-partiel, R-D-18) : une fiche lue dont source_page_ids porte sa photo d’index et deux pages originales, toutes distantes, avec un compte → « Télécharger les 2 pages » (le compte ne porte pas la photo d’index), deux figures de page, aucune vignette de la photo d’index');
+    });
+
+    await ecranT5('T-D19 éditeur : lecture, incertitudes, notes, limites et séance portées', async (repo, db) => {
+      await poserSeance(repo, db, { pages: ['p1', 'p2', 'p3'] });
+      const moi = repo.deviceId();
+      const LU = RECETTE_LUE('Tarte fine aux poires', 140, { missing_page: true, notes: 'Se congèle bien.', ingredients: [{ source_text: '2 poires', uncertain: false }, { source_text: '2 c. à soupe\nd’huile', uncertain: true }, { source_text: '1 pincée de sel', uncertain: true }], steps: [{ text: 'Mélanger.\nLaisser reposer.' }, { text: 'Cuire.' }] });
+      await db.mutate({ puts: { imports: [lueDuLot('lg', { total: 2, page_ids: ['p1', 'p3'], device_id: moi, resultat: LU })] }, origin: 'device' });
+      const ed = await monterEditeur(repo, db, { import: 'lg' });
+      const ingTa = champDe(ed, 'Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)')?.querySelector('textarea');
+      eq([ingTa?.value, champDe(ed, 'Notes')?.querySelector('textarea')?.value, champDe(ed, 'Étapes')?.querySelector('textarea')?.value], ['2 poires\n2 c. à soupe d’huile\n1 pincée de sel', 'Se congèle bien.', 'Mélanger.\nLaisser reposer.\n\nCuire.'], 'T-D19 (M151, M150, M101) : ?import= d’une ligne de lot → la ligne lue sur deux lignes est PLIÉE en une ; les notes lues posées ; une étape par paragraphe');
+      ingTa.value = ingTa.value.replace('1 pincée de sel', '1 pincée de sel fin'); ingTa.dispatchEvent(new Event('input', { bubbles: true }));
+      boutonTexte(ed, 'Analyser les lignes').click();
+      boutonTexte(ed, 'Enregistrer la recette').click();
+      await attendre(async () => (await statutDe(db, 'lg')) === 'enregistre', 'lecture close');
+      const rec = (await db.getAll('recipes')).find((r) => r.original_title === 'Tarte fine aux poires');
+      const ver = await db.get('recipe_versions', rec.current_version_id);
+      const [p1, p3, p2] = await db.getMany('source_pages', ['p1', 'p3', 'p2']);
+      const ss = await db.get('scan_sessions', 'ss1');
+      eq([ver.provenance.import_id, ver.provenance.incomplete, ver.provenance.missing_page, ver.provenance.titre_lu], ['lg', false, true, 'Tarte fine aux poires'], 'T-D19 (M103) : la version porte la lecture — import_id, incomplete, missing_page, titre_lu');
+      eq(ver.ingredients.map((l) => [l.source_text, l.uncertain === true]), [['2 poires', false], ['2 c. à soupe d’huile', true], ['1 pincée de sel fin', false]], 'T-D19 (M99, M151) : la ligne pliée reste UNE ligne et garde uncertain ; [0] faux ; la ligne retapée perd uncertain');
+      eq([ver.notes, rec.availability, ver.steps.length, ver.steps[0].text], ['Se congèle bien.', 'partial', 2, 'Mélanger.\nLaisser reposer.'], 'T-D19 (M150, M100, M101) : notes lues gardées ; page manquante → partial (jamais comblée) ; deux étapes, la première garde son saut de ligne');
+      eq([[p1.printed_page, p1.kind, p1.role, p1.position], [p3.printed_page, p3.kind, p3.role, p3.position], [p2.kind, p2.role ?? null]], [[140, 'recipe', 'recette', 1], [null, 'recipe', 'recette', 3], [null, null]], 'T-D19 (M102, M94) : la première page reçoit p. 140, la seconde reste nulle ; kind recipe ET role recette ; positions inchangées ; p2, hors de la lecture, intacte');
+      eq([ss.status, ss.recipe_ids], ['open', [rec.id]], 'T-D19 (M120) : la séance reçoit la recette, par le sac, et reste open — p2 est encore sans rôle');
+      scene.replaceChildren();
+      const fiche = await FI.renderRecipe({ id: rec.id }, {}, await ctxDe(repo, db)); scene.append(fiche);
+      ok(fiche.textContent.includes('page possiblement manquante'), 'T-D19 : la fiche montre « page possiblement manquante » (bandeau du lot A)');
+      // Chemin de l'éditeur de N-1 : toutes les photos de la séance ont un rôle après l'enregistrement → done.
+      await poserSeance(repo, db, { id: 'ss2', pages: ['pA', 'pB'] });
+      await db.mutate({ puts: { imports: [lueDuLot('lh', { classementId: 'cl_h', sessionId: 'ss2', page_ids: ['pA', 'pB'], device_id: moi, resultat: RECETTE_LUE('Clafoutis aux cerises', 60) })] }, origin: 'device' });
+      scene.replaceChildren();
+      boutonTexte(await monterEditeur(repo, db, { import: 'lh' }), 'Enregistrer la recette').click();
+      await attendre(async () => (await statutDe(db, 'lh')) === 'enregistre', 'seconde lecture close');
+      eq((await db.get('scan_sessions', 'ss2')).status, 'done', 'T-D19 (M121, chemin de l’éditeur) : plus aucune photo sans rôle → done');
+      // M152 : la ligne close par un autre onglet entre remplir et « Enregistrer » est RELUE.
+      await db.mutate({ puts: { imports: [lueDuLot('li', { classementId: 'cl_i', sessionId: 'ss2', page_ids: ['pB'], device_id: moi, resultat: RECETTE_LUE('Flan pâtissier', 61, { missing_page: true }) })] }, origin: 'device' });
+      scene.replaceChildren();
+      const ed3 = await monterEditeur(repo, db, { import: 'li' });
+      await db.mutate({ puts: { imports: [{ ...(await db.get('imports', 'li')), status: 'enregistre', finished_at: NOW }] }, origin: 'device' });
+      boutonTexte(ed3, 'Enregistrer la recette').click();
+      await attendre(async () => (await db.getAll('recipes')).some((r) => r.original_title === 'Flan pâtissier'), 'fiche écrite sans la lecture');
+      const flan = (await db.getAll('recipes')).find((r) => r.original_title === 'Flan pâtissier');
+      const vFlan = await db.get('recipe_versions', flan.current_version_id);
+      eq([Object.hasOwn(vFlan.provenance, 'import_id'), vFlan.provenance.missing_page, flan.availability], [false, true, 'partial'], 'T-D19 (M152) : la ligne relue n’est plus a_verifier → la version ne nomme pas la lecture (aucun import_id) ; ce que la lecture a dit d’incomplet reste porté (I-1 du lot A, écart E-12)');
+      // M161 : une lecture sans notes (null).
+      await db.mutate({ puts: { imports: [lueDuLot('lj', { classementId: 'cl_j', sessionId: 'ss2', page_ids: ['pA'], device_id: moi, resultat: RECETTE_LUE('Crème brûlée', 62) })] }, origin: 'device' });
+      scene.replaceChildren();
+      const ed4 = await monterEditeur(repo, db, { import: 'lj' });
+      eq(champDe(ed4, 'Notes')?.querySelector('textarea')?.value, '', 'T-D19 (M161) : une lecture sans notes (null) laisse la zone « Notes » vide');
+      boutonTexte(ed4, 'Enregistrer la recette').click();
+      await attendre(async () => (await statutDe(db, 'lj')) === 'enregistre', 'lecture sans notes close');
+      eq((await db.get('recipe_versions', (await db.getAll('recipes')).find((r) => r.original_title === 'Crème brûlée').current_version_id)).notes, '', 'T-D19 (M161) : « Enregistrer la recette » ne lève pas sur des notes nulles');
+      // M148, chemin de l'éditeur : « Corriger » une fiche dont source_page_ids porte sa photo d'index.
+      const pIdxY = { id: 'pIdxY', document_id: null, edition_id: 'ed1', sha256: 'sha-idx-y', printed_page: 7, file_position: null, locator: null, position: 1, issues: [], kind: 'index', created_at: DATE, updated_at: DATE };
+      const pY = { ...pIdxY, id: 'pY', sha256: 'sha-y', printed_page: null, kind: 'recipe', position: 2 };
+      const vY = { id: 'rvY', recipe_id: 'rcY', kind: 'extraction', parent_version_id: null, status: null, servings: null, prep_minutes: null, cook_minutes: null, active_minutes: null, total_minutes: null, ingredients: [], steps: [{ id: 'stY', position: 1, text: 'Cuire.' }], constraints: {}, changes: '', notes: '', provenance: { source_page_ids: ['pY'], generated_by: 'manual' }, verification_state: 'to_verify', created_at: DATE, updated_at: DATE };
+      await db.mutate({ puts: { recipes: [ref('rcY', 'Velouté de cresson', 30, { availability: 'partial', index_page_id: 'pIdxY', source_page_ids: ['pIdxY', 'pY'], current_version_id: 'rvY' })], recipe_versions: [vY], source_pages: [pIdxY, pY] }, origin: 'device' });
+      scene.replaceChildren();
+      const ed5 = await monterEditeur(repo, db, { kind: 'correction' }, { id: 'rcY' });
+      boutonTexte(ed5, 'Enregistrer une nouvelle version').click();
+      await attendre(async () => (await db.get('recipes', 'rcY')).current_version_id !== 'rvY', 'correction écrite');
+      eq([await db.get('source_pages', 'pIdxY'), (await db.get('source_pages', 'pY')).role], [pIdxY, 'recette'], 'T-D19 (M148, chemin de l’éditeur) : « Corriger » ne réécrit pas la photo d’index de la fiche (ni kind, ni role, ni printed_page) ; les autres pages reçoivent role recette');
+    });
+
+    await ecranT5('T-D21 éditeur : la référence proposée après la lecture, rattachée sans appel', async (repo, db) => {
+      await poserSeance(repo, db, { pages: ['p1', 'p2'] });
+      const moi = repo.deviceId();
+      const lecture = (id, resultat, over = {}) => ({ id, kind: 'recette', edition_id: 'ed1', recipe_id: null, scan_session_id: 'ss1', page_ids: ['p1'], photo_sha256: null, status: 'a_verifier', erreur: null, resultat, reponse_brute: null, appels: 1, model: 'claude-x', duree_ms: 900, device_id: moi, document_id_vol: null, battement_at: null, started_at: DATE, finished_at: null, created_at: DATE, updated_at: DATE, ...over });
+      await db.mutate({ puts: { imports: [lecture('lk', RECETTE_LUE('Soupe de courge rôtie', 132))] }, origin: 'device' });
+      const avant = (await db.getAll('recipes')).length;
+      const ed = await monterEditeur(repo, db, { import: 'lk' });
+      await attendre(() => !!ed.querySelector('[data-role="apparier-lecture"]'), 'proposition');
+      const bloc = ed.querySelector('[data-role="apparier-lecture"]');
+      eq([bloc.querySelector('[data-role="proposition"]')?.textContent, bloc.querySelector('[data-role="enregistrer-reference"]')?.className, bloc.querySelector('[data-role="avertissement"]')?.textContent, bloc.querySelector('button[data-role="choisir-reference"]')?.textContent], ['Ces pages complètent “Soupe de courge”, p. 132.', 'btn primary', 'La lecture sera enregistrée telle que lue dans la référence ; tes changements ici ne la suivent pas.', 'Choisir une référence…'], 'T-D21 (M153) : « Soupe de courge rôtie » p. 132 lue → la référence sûre proposée au-dessus du formulaire, ce que le geste fait, et le repli');
+      const vus = []; const capture = db.onMutate;
+      db.onMutate = (m) => { vus.push(Object.keys(m.puts).sort().map((s) => [s, (m.puts[s] || []).map((x) => x.id)])); return capture ? capture(m) : {}; };
+      try {
+        bloc.querySelector('[data-role="enregistrer-reference"]').click();
+        await attendre(() => location.hash === '#/recipes/rcS/importer', 'navigation vers l’écran ciblé');
+      } finally { db.onMutate = capture; }
+      history.replaceState(null, '', adresseT5);
+      eq([vus, (await db.get('imports', 'lk')).recipe_id, await statutDe(db, 'lk')], [[[['imports', ['lk']]]], 'rcS', 'a_verifier'], 'T-D21 : « Enregistrer dans cette référence » → UNE écriture (la ligne seule) : rcS, toujours a_verifier ; aucun appel (fetch global piégé)');
+      scene.replaceChildren();
+      const c = await monterCible(repo, db, 'rcS');
+      await enregistrerLecture(c);
+      await attendre(async () => (await statutDe(db, 'lk')) === 'enregistre', 'enregistrée');
+      eq([(await db.get('recipes', 'rcS')).availability, (await db.getAll('recipes')).length], ['available', avant], 'T-D21 (M154) : puis « Enregistrer cette lecture » → rcS available, AUCUNE seconde fiche');
+      // La condition d'index dans le même appel : rattacherLecture appelé avec un espion (le repo de l'éditeur n'est pas injectable).
+      await db.mutate({ puts: { imports: [lecture('lk2', RECETTE_LUE('Tarte fine aux poires', 140))] }, origin: 'device' });
+      const appels = [];
+      const espion = { ...repo, transitionner: async (s, k, o) => { appels.push(o); return repo.transitionner(s, k, o); } };
+      eq([await G.rattacherLecture('lk2', 'rcT', { cle: UI.cleLecture(await db.get('imports', 'lk2')), repo: espion }), appels[0]?.attendus, appels[0]?.conditions], [{ issue: 'rattache' }, ['a_verifier'], { imports: [{ index: 'recipe_id', valeur: 'rcT', exclus: I.IMPORTS_OUVERTS }] }], 'T-D21 : rattacherLecture — a_verifier gardé et la condition d’index de la référence (I-2) dans le MÊME appel');
+      // M155 et M156 : le bloc monté seul, toast et navigation injectés.
+      const monterBloc = async (id, r = repo) => { const l = await db.get('imports', id); const b = G.blocApparierLecture({ ligne: l, resultat: l.resultat, ctx: await ctxDe(repo, db), repo: r, navigate: (p) => navs.push(p), toast: (m) => dits.push(m) }); scene.append(b); return b; };
+      await db.mutate({ puts: { imports: [lecture('lk3', RECETTE_LUE('Gratin dauphinois', 152))] }, origin: 'device' });
+      scene.replaceChildren(); navs.length = 0; dits.length = 0;
+      const b3 = await monterBloc('lk3');
+      await db.mutate({ puts: { imports: [{ ...(await db.get('imports', 'lk3')), started_at: NOW, resultat: RECETTE_LUE('Gratin dauphinois', 153) }] }, origin: 'device' });
+      b3.querySelector('[data-role="enregistrer-reference"]').click();
+      await attendre(() => dits.length === 1, 'refus dit');
+      eq([dits[0], (await db.get('imports', 'lk3')).recipe_id, navs.length, scene.querySelector('[data-role="apparier-lecture"]')], ['Rien n’a été rattaché : cette lecture ou cette référence a changé entre-temps.', null, 0, null], 'T-D21 (M155) : une autre lecture écrite sur la ligne entre le rendu et le geste → refus dit, recipe_id nul, aucune navigation ; le bloc relu disparaît (ce n’est plus la lecture du formulaire)');
+      await db.mutate({ puts: { imports: [lecture('lk4', RECETTE_LUE('Gratin dauphinois', 152), { page_ids: ['p2'] })] }, origin: 'device' });
+      scene.replaceChildren(); navs.length = 0; dits.length = 0;
+      const course = { ...repo, transitionner: async (s, k, o) => { if (k === 'lk4') await db.mutate({ puts: { imports: [{ ...IMPORT_RCO, id: 'imp_rcg', recipe_id: 'rcG' }] }, origin: 'device' }); return repo.transitionner(s, k, o); } };
+      const b4 = await monterBloc('lk4', course);
+      b4.querySelector('[data-role="enregistrer-reference"]').click();
+      await attendre(() => dits.length === 1, 'refus dit');
+      eq([(await db.get('imports', 'lk4')).recipe_id, navs.length], [null, 0], 'T-D21 (M156) : la référence a reçu un import ouvert entre la relecture et la transaction → la condition d’index refuse, rien de rattaché');
+      const l5 = lecture('lk5', RECETTE_LUE('Ragoût de lentilles', 300));
+      const ctx = await ctxDe(repo, db);
+      const b5 = G.blocApparierLecture({ ligne: l5, resultat: l5.resultat, ctx, repo });
+      eq([b5?.querySelector('[data-role="enregistrer-reference"]') ?? null, b5?.querySelector('[data-role="proposition"]') ?? null, b5?.querySelector('button[data-role="choisir-reference"]')?.textContent ?? null, G.blocApparierLecture({ ligne: { ...l5, edition_id: null }, resultat: l5.resultat, ctx, repo })], [null, null, 'Choisir une référence…', null], 'T-D21 : titre lu sans concordance → le seul « Choisir une référence… » ; sans édition → aucun bloc');
+      await db.mutate({ puts: { imports: [lecture('lk6', RECETTE_LUE('Soupe de courge rôtie', 132))] }, origin: 'device' });
+      scene.replaceChildren();
+      const n0 = (await db.getAll('recipes')).length;
+      boutonTexte(await monterEditeur(repo, db, { import: 'lk6' }), 'Enregistrer la recette').click();
+      await attendre(async () => (await statutDe(db, 'lk6')) === 'enregistre', 'nouvelle fiche');
+      eq([(await db.getAll('recipes')).length, (await db.getAll('recipes')).some((r) => r.original_title === 'Soupe de courge rôtie')], [n0 + 1, true], 'T-D21 : ne rien choisir puis « Enregistrer la recette » → une nouvelle fiche, comme avant');
+    });
+
+    await ecranT5('T-D22 de bout en bout : classer, lire, reprendre, enregistrer une recette répartie', async (repo, db) => {
+      await poserSeance(repo, db, { pages: ['pA', 'pB'], references: [], imprimees: { pA: 61, pB: 60 } });
+      const f = fetchSuite([[200, corpsModele({ groupes: [{ photos: [2, 1], title: 'Clafoutis', printed_page: 60, uncertain: false }], orphelines: [], uncertain: [] })], [200, corpsModele(RECETTE_LUE('Clafoutis', 60))]]);
+      const racine = await monterSeance(repo, db, { over: { fetch: f.fetch } });
+      cocher(racine, ['pA', 'pB']);
+      await attendre(() => classerBtn(racine) && !classerBtn(racine).disabled, '« Classer » allumé');
+      classerBtn(racine).click();
+      const p = panneau(racine);
+      await pret(p);
+      eq([p.etatClassement().groupes.map((g) => g.page_ids), boutonLire(p).textContent], [[['pB', 'pA']], 'Lire cette recette (1 appel)'], 'T-D22 : le classement factice [2, 1] → un groupe [pB, pA] ; « Lire cette recette (1 appel) »');
+      boutonLire(p).click();
+      await attendre(async () => (await db.getAll('imports')).some((i) => i.kind === 'recette' && i.status === 'a_verifier') && G.lotEnCours() === null, 'la recette lue');
+      const ligne = (await db.getAll('imports')).find((i) => i.kind === 'recette');
+      eq([f.appels.length, ligne.page_ids, ligne.recipe_id, navs.at(-1)], [2, ['pB', 'pA'], null, '/add?section=imports'], 'T-D22 : UN classement et UNE lecture (2 POST en tout), la ligne sur [pB, pA], sans référence ; Imports ensuite');
+      scene.replaceChildren();
+      boutonTexte(await monterEditeur(repo, db, { import: ligne.id }), 'Enregistrer la recette').click();
+      await attendre(async () => (await statutDe(db, ligne.id)) === 'enregistre', 'enregistrée');
+      const rec = (await db.getAll('recipes')).find((r) => r.original_title === 'Clafoutis');
+      scene.replaceChildren();
+      const fiche = await FI.renderRecipe({ id: rec.id }, {}, await ctxDe(repo, db)); scene.append(fiche);
+      eq([rec.source_page_ids, legendesOriginal(fiche), (await db.get('scan_sessions', 'ss1')).status], [['pB', 'pA'], ['p. 60', 'p. 61'], 'done'], 'T-D22 (M157, M121) : la fiche porte [pB, pA] et son « Original » montre pB (p. 60) puis pA (p. 61) ; la séance passe done (ses deux photos ont un rôle)');
+    });
+
+    // Tâche 5 (vérification, hors brief — décision déclarée au rapport) : deux comportements de la spec que la passe de mutants a laissés sans assertion.
+    // § 4.8.1 point 2 : la séance disparue entre la relecture et la transaction → refus, rien d'écrit, le toast existant ; le geste suivant écrit sans elle
+    // (M-seance-refus-muet). § 4.8.3 : la référence RELUE doit être encore candidate de l'édition de la ligne, sinon refus sans écriture (M-candidate).
+    await ecranT5('T-D18 (vérification) écran ciblé : la séance disparue avant la transaction → refus dit, rien d’écrit ; le geste suivant écrit sans elle', async (repo, db) => {
+      await poserSeance(repo, db);
+      await db.mutate({ puts: { imports: [lueDuLot('lm', { rang: 1, total: 1, page_ids: ['p1'], recipe_id: 'rcS', device_id: repo.deviceId(), resultat: RECETTE_LUE('Soupe de courge', 132) })] }, origin: 'device' });
+      let fois = 0;
+      const espion = { ...repo, transitionner: async (s, k, o) => { if (k === 'lm' && o?.conditions?.scan_sessions && fois++ === 0) await db.mutate({ deletes: { scan_sessions: ['ss1'] }, origin: 'device' }); return repo.transitionner(s, k, o); } };
+      const c = await monterCible(repo, db, 'rcS', { repo: espion });
+      await enregistrerLecture(c);
+      await attendre(() => dits.includes('La recette n’a pas pu être enregistrée. Réessaie.'), 'refus dit');
+      eq([await statutDe(db, 'lm'), (await db.get('recipes', 'rcS')).availability, (await db.get('source_pages', 'p1')).role ?? null, navs.length], ['a_verifier', 'reference_only', null, 0], 'T-D18 (vérification, M-seance-refus-muet) : la séance effacée entre la relecture de ses pages et la transaction → la condition du sac refuse : rien d’écrit (ligne a_verifier, fiche reference_only, page sans rôle, aucune navigation) et le toast existant le dit');
+      await enregistrerLecture(c);
+      await attendre(async () => (await statutDe(db, 'lm')) === 'enregistre', 'enregistrée sans la séance');
+      eq([(await db.get('recipes', 'rcS')).availability, await db.get('scan_sessions', 'ss1') ?? null, dits.at(-1)], ['available', null, 'Recette importée'], 'T-D18 (vérification) : le geste suivant enregistre la lecture sans la séance disparue (jamais ressuscitée)');
+    });
+
+    await ecranT5('T-D21 (vérification) rattacherLecture : une référence qui n’est plus candidate, relue, est refusée sans écriture', async (repo, db) => {
+      await poserSeance(repo, db);
+      const lv = { id: 'lv', kind: 'recette', edition_id: 'ed1', recipe_id: null, scan_session_id: 'ss1', page_ids: ['p1'], photo_sha256: null, status: 'a_verifier', erreur: null, resultat: RECETTE_LUE('Gratin dauphinois', 148), reponse_brute: null, appels: 1, model: 'claude-x', duree_ms: 900, device_id: repo.deviceId(), document_id_vol: null, battement_at: null, started_at: DATE, finished_at: null, created_at: DATE, updated_at: DATE };
+      await db.mutate({ puts: { imports: [lv] }, origin: 'device' });
+      const appels = [];
+      const espion = { ...repo, transitionner: async (s, k, o) => { appels.push(k); return repo.transitionner(s, k, o); } };
+      const cle = UI.cleLecture(await db.get('imports', 'lv'));
+      const issues = [];
+      for (const id of ['rcA', 'rcW', 'rc_inconnue']) issues.push(await G.rattacherLecture('lv', id, { cle, repo: espion }));
+      eq([issues.map((r) => [r.issue, r.raison]), appels.length, (await db.get('imports', 'lv')).recipe_id], [[['refuse', 'reference'], ['refuse', 'reference'], ['refuse', 'reference']], 0, null], 'T-D21 (vérification, M-candidate) : une référence relue available (rcA), un signet (rcW) ou une fiche absente → refus « reference », AUCUN appel à transitionner, recipe_id nul');
+    });
+
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne
   } catch (error) {
     ok(false, `Lot de recettes : suite interrompue — ${error?.name || 'Erreur'} — ${error?.message || String(error)}`);

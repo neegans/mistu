@@ -163,12 +163,13 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   root.append(body);
   drawBody();
 
+  const pagesOriginal = recipe.availability === 'reference_only' ? pages : pages.filter((p) => p.id !== recipe.index_page_id); // lot D (§ 4.8.4) : une fiche lue n'a pas sa photo d'index dans « Original » ; une référence la garde (D-C5)
   // Pages originales
-  if (pages.length) {
-    const vignettes = await vignettesDePages(pages, ctxF, { alt: () => t('Page originale') }); // ronde 1 : l'alt d'avant le lot G
+  if (pagesOriginal.length) {
+    const vignettes = await vignettesDePages(pagesOriginal, ctxF, { alt: () => t('Page originale') }); // ronde 1 : l'alt d'avant le lot G
     root.append(section(t('Original'), el('p', { class: 'muted' }, t('Pages du livre telles que photographiées. Une adaptation n’est jamais présentée comme le texte original.')),
       boutonTelechargerPages(vignettes.distantes, { connecte: ctxF.connecte, telecharger: vignettes.telecharger }),
-      el('div', { class: 'thumbs' }, ...pages.map((p) => el('figure', null, vignettes.places.get(p.id), el('figcaption', null, p.printed_page ? `${t('p.')} ${p.printed_page}` : ''))))));
+      el('div', { class: 'thumbs' }, ...pagesOriginal.map((p) => el('figure', null, vignettes.places.get(p.id), el('figcaption', null, p.printed_page ? `${t('p.')} ${p.printed_page}` : ''))))));
   }
   // C-2 : une fiche origine 'ia' n'a pas de livre — un numéro de page tapé dans « Corriger » (champ « Page imprimée ») ne la fait pas passer pour une page d'original.
   else if (recipe.printed_page && recipe.origine !== 'ia') root.append(el('p', { class: 'muted' }, t('Original : page {p} du livre (pages non photographiées).', { p: recipe.printed_page })));

@@ -17,7 +17,7 @@ import { TransitionRefusee } from '../core/db.js';
 import { typeAffichage, displayUrl } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
 import { PasserelleProvider, extraireRecette, validateParsedRecipe, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION } from '../domain/llm.js';
-import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception, cleLecture, modeleBorne } from '../domain/import-cible.js';
+import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception, cleLecture, modeleBorne, issueDUneSeance, statutSeanceApres } from '../domain/import-cible.js';
 import { executerIndex, revaliderResultatIndex } from '../domain/table-matieres.js';
 import { getConvention } from '../domain/units.js';
 import { currentVersion } from '../domain/search.js';
@@ -578,7 +578,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
       const pages = (await Promise.all(pageIds.map((id) => repo.get('source_pages', id)))).filter(Boolean);
       const ed = reference.edition_id ? (ctx.editionsById?.get(reference.edition_id) ?? (await repo.get('book_editions', reference.edition_id)) ?? null) : null;
       const conventionId = typeof ctx.conventionFor === 'function' ? ctx.conventionFor(reference) : (ed?.unit_convention_id ?? null);
-      const options = { reference, versions, pages, pageIds, edition: ed, convention: conventionId ? getConvention(conventionId) : null, importId: L.id, modele: modeleBorne(L.model), photo: photoBornee(L), maintenant: maintenant() };
+      const options = { reference, versions, pages, pageIds, edition: ed, convention: conventionId ? getConvention(conventionId) : null, importId: L.id, modele: modeleBorne(L.model), photo: photoBornee(L), maintenant: maintenant(), reecrirePositions: !issueDUneSeance(L) }; // lot D (§ 4.8.1 point 1, N-1)
       const sonde = fabriquerExtraction(resultat, options); // pur : lu pour `remplacement` (I-5) avant la décision
       // Ronde finale 2 (garde de couverture) : une lecture qui ne relit pas TOUTES les pages de la version courante (octets absents ici, page retirée de la
       // ligne) ne la remplace jamais d'office — elle perdrait en silence les lignes de ces pages. « Remplacer par cette lecture ? » (I-5) est posée ;
@@ -604,15 +604,25 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
   async function enregistrer(L, fab) {
     const seance = L.scan_session_id ? await repo.get('scan_sessions', L.scan_session_id) : null;
     const puts = { recipes: [fab.recipe], recipe_versions: [fab.version], source_pages: fab.pageUpdates };
-    if (seance) puts.scan_sessions = [{ ...seance, status: 'done', recipe_ids: [...new Set([...(Array.isArray(seance.recipe_ids) ? seance.recipe_ids : []), recipe.id])] }];
+    // Lot D (§ 4.8.1 point 2, N-1) : la séance n'est plus écrite par une copie lue hors transaction — elle entre dans LA transaction par le sac
+    // `conditions`, relue dedans (deux enregistrements concurrents gardent leurs deux recipe_ids) ; done seulement quand plus aucune de ses photos n'est
+    // sans rôle (statutSeanceApres, sur ses pages relues juste avant : une page arrivée entre-temps compte comme sans rôle) ; disparue → refus.
+    let conditions = null;
+    if (seance) {
+      const pagesSeance = new Map();
+      for (const id of Array.isArray(seance.page_ids) ? seance.page_ids : []) { const p = await repo.get('source_pages', id); if (p) pagesSeance.set(id, p); }
+      const ecrites = new Set(fab.pageUpdates.map((p) => p.id));
+      conditions = { scan_sessions: [{ key: seance.id, attendus: ['open', 'done'], patch: (c) => ({ recipe_ids: [...new Set([...(Array.isArray(c.recipe_ids) ? c.recipe_ids : []), recipe.id])], status: statutSeanceApres(c, pagesSeance, ecrites) }) }] };
+    }
     // Vague finale (T6-R1-d ici aussi) : la clôture vaut pour LA lecture dont la recette a été fabriquée — une autre lecture arrivée sur la ligne entre
     // la relecture et la transaction (autre onglet, autre appareil) n'est jamais close sans avoir été vue ; rien n'est écrit, le redessin la montre.
     const cle = cleLecture(L);
     const cloture = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { status: 'enregistre', reponse_brute: null, finished_at: maintenant() }; };
     try {
-      await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: cloture, puts });
+      await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: cloture, puts, ...(conditions ? { conditions } : {}) });
     } catch (e) {
-      if (!estRefus(e)) { logError('import_cible.enregistrer', { error: e, id: L.id }); toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); }
+      if (estRefus(e) && e.store === 'scan_sessions') toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); // lot D : la séance a disparu entre-temps ; le geste suivant écrit sans elle
+      else if (!estRefus(e)) { logError('import_cible.enregistrer', { error: e, id: L.id }); toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); }
       return;
     }
     if (!root.isConnected) return;
@@ -681,6 +691,34 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
   }
 
   const retour = () => el('a', { class: 'btn', href: `#/recipes/${encodeURIComponent(recipe.id)}` }, t('Retour à la fiche'));
+  // Lot D (§ 4.8.1 point 3, D-D9, R-D-3) : sur TOUT panneau de discordance, la lecture devient une recette neuve, SANS appel — la ligne perd sa référence
+  // (recipe_id null), gardée dans la transaction par la clé de LA lecture questionnée et par la sorte ; puis l'éditeur prérempli (?import=) si l'écran est
+  // encore monté. Refusé (une autre lecture est arrivée) → reposer() : rien n'est détaché, la question est reposée pour la lecture courante.
+  async function enFaireUneNouvelle() {
+    const L = etat.ligne;
+    if (!L || etat.occupe) return;
+    const cle = etat.cleQuestion;
+    etat.occupe = true;
+    let fait = false;
+    try {
+      await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: (c) => { if (cleLecture(c) !== cle || c.kind !== 'recette') throw new TransitionRefusee('imports', L.id, c.status); return { recipe_id: null }; } });
+      fait = true;
+    } catch (e) { if (!estRefus(e)) logError('import_cible.nouvelle_recette', { error: e, id: L.id }); }
+    finally { etat.occupe = false; }
+    if (fait) { oublierQuestion(); if (root.isConnected) navigate('/recipes/new?import=' + encodeURIComponent(L.id)); return; }
+    await reposer();
+  }
+  // La question pour la lecture COURANTE, sans rien écrire : discordante → le panneau reposé (avec son verdict) ; sinon la question est oubliée et l'écran
+  // offre « Enregistrer cette lecture » (jamais une lecture enregistrée sans avoir été vue).
+  async function reposer() {
+    const L = await ligneOuverte(etat.ligne?.id ?? null);
+    const resultat = L?.status === 'a_verifier' ? resultatValide(L) : null;
+    const reference = resultat ? await repo.get('recipes', recipe.id) : null;
+    const verdict = reference ? discordance(resultat, reference) : null;
+    if (verdict && !verdict.ok) { etat.ligne = L; etat.verdict = verdict; etat.question = 'discordance'; etat.cleQuestion = cleLecture(L); dessiner(); return; }
+    oublierQuestion();
+    await redessiner();
+  }
   function panneauDiscordance() {
     const v = etat.verdict || {};
     const x = typeof v.titreLu === 'string' && v.titreLu ? v.titreLu : t('(sans titre)');
@@ -693,7 +731,8 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
       el('div', { class: 'row' },
         el('button', { type: 'button', class: 'btn primary', onClick: () => decider({ rattache: true }) }, t('Rattacher')),
         el('button', { type: 'button', class: 'btn', onClick: () => { oublierQuestion(); dessiner(); } }, t('Garder la lecture sans l’enregistrer')),
-        el('button', { type: 'button', class: 'btn', onClick: changerLesPages }, t('Changer les pages'))));
+        el('button', { type: 'button', class: 'btn', onClick: changerLesPages }, t('Changer les pages')),
+        el('button', { type: 'button', class: 'btn', dataset: { role: 'nouvelle-recette' }, onClick: enFaireUneNouvelle }, t('En faire une nouvelle recette'))));
   }
   const panneauRemplacer = () => el('div', { class: 'card warn stack', dataset: { role: 'remplacer' } },
     el('p', { style: { margin: 0 } }, t('Remplacer par cette lecture ?')),

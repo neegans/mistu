@@ -95,8 +95,9 @@ export const retirerPage = (pageIds, id) => pageIds.filter((p) => p !== id);
 // entrée du modèle, sauts de ligne gardés (jamais parseStepsBlock, I5), avec les clés de detectTimers. assertVocabulaire garde la fiche (D-12).
 // Pages : `printed_page` de la page gardé ; une page SANS numéro ne reçoit celui de la fiche que si elle est la PREMIÈRE de l'ordre (ronde 1 :
 // la deuxième photo d'une recette p. 132 est la p. 133, pas la 132 — rien d'inventé, I-1) ; les suivantes restent nulles.
+// Lot D : `reecrirePositions` (défaut vrai, lot A inchangé), `role: 'recette'`, union sans `reference.index_page_id`.
 const ORIGINES_PHOTO = ['photo', 'image'];
-export function fabriquerExtraction(resultat, { reference, versions = [], pages = [], pageIds = [], edition = null, convention = null, importId = null, modele = null, photo = null, maintenant = null, remplacer = true } = {}) {
+export function fabriquerExtraction(resultat, { reference, versions = [], pages = [], pageIds = [], edition = null, convention = null, importId = null, modele = null, photo = null, maintenant = null, remplacer = true, reecrirePositions = true } = {}) {
   const parId = pages instanceof Map ? pages : new Map((pages || []).map((p) => [p.id, p]));
   const presentes = pageIds.filter((id) => parId.has(id));
   const ingredients = (resultat.ingredients || []).map((l) => ({ ...parseIngredientLine(l.source_text), uncertain: l.uncertain === true, verification_state: 'to_verify' }));
@@ -121,7 +122,7 @@ export function fabriquerExtraction(resultat, { reference, versions = [], pages 
   const availability = ingredients.length && steps.length && !incomplete && !missing_page ? 'available' : 'partial';
   const recipe = {
     ...reference,
-    source_page_ids: [...new Set([...(reference.source_page_ids || []), ...presentes])],
+    source_page_ids: [...new Set([...(reference.source_page_ids || []).filter((id) => id !== reference.index_page_id), ...presentes])], // lot D (B-7) : la photo d'index de la référence n'est pas une page de la recette
     photo_sha256: photo ? photo.sha256 : (reference.photo_sha256 ?? null),
     photo_origin: photo ? (ORIGINES_PHOTO.includes(photo.origin) ? photo.origin : null) : (reference.photo_origin ?? null),
     ...(remplacer === false ? {} : {
@@ -131,7 +132,9 @@ export function fabriquerExtraction(resultat, { reference, versions = [], pages 
     }),
   };
   assertVocabulaire(recipe, 'recipes'); // D-12 : le fabricant vérifie le vocabulaire fermé avant toute écriture
-  const pageUpdates = presentes.map((id, i) => ({ ...parId.get(id), kind: 'recipe', position: i + 1, printed_page: parId.get(id).printed_page ?? (i === 0 ? recipe.printed_page ?? null : null) }));
+  // Lot D (§ 4.8.1, N-1) : role recette avec kind recipe ; une lecture issue d'une séance garde les positions de la séance (reecrirePositions faux :
+  // seul « Appliquer cet ordre » les réécrit, C I-C10) — l'ordre de la RECETTE reste celui de la lecture (source_page_ids).
+  const pageUpdates = presentes.map((id, i) => ({ ...parId.get(id), kind: 'recipe', role: 'recette', ...(reecrirePositions ? { position: i + 1 } : {}), printed_page: parId.get(id).printed_page ?? (i === 0 ? recipe.printed_page ?? null : null) }));
   const remplacement = versions.some(versionEcrite);
   return { recipe, version, pageUpdates, remplacement };
 }
