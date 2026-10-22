@@ -7,13 +7,15 @@ import { navigate } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { sha256Hex } from '../core/hash.js';
 import { COVER_INPUT_MIME } from '../sync/mime.js';
-import { LIMITES_COUVERTURE, dimensionsImage, reduireImage, preparerPhotoLocale, ErreurImage } from '../core/image.js';
+import { LIMITES_COUVERTURE, dimensionsImage, reduireImage, preparerPhotoLocale, ErreurImage, messageErreurImage } from '../core/image.js';
 import { urlDeBlob } from '../core/blob-urls.js';
 import { listConventions } from '../domain/units.js';
 import { pageHeader, field, select } from './components.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes, motsClesExistants, suggestionsModel, renderSuggestions, normaliser, LIMITES_PUCES } from './puces.js';
 import { GOOGLE_BOOKS } from '../sync/config.js';
 import { nettoyerIsbn, validerIsbn, codeBarresVersIsbn } from '../core/isbn.js';
+import { isbnUnique } from '../domain/couverture.js';
+export { messageErreurImage }; // déplacée dans core/image.js (lot E) : book.js et regroupement.js (lot D) l'importent toujours d'ici
 
 export const LIMITES_ISBN = { champ: 300, corps: 256 * 1024, delaiMs: 10000, tentativeMs: 8000, repriseMs: 1500, totalMs: 20000 };
 import { borner as bornerCore, lireBornee, signalDelai, OPTIONS_FETCH } from '../core/bornes.js';
@@ -161,6 +163,46 @@ export async function lookupIsbn(isbn13, { fetch = globalThis.fetch, signal, cle
   return { ...bilan, statut: 'introuvable', google: lu3?.repondu ? 'rien' : 'echec' };
 }
 
+// --- Lot E (spec couverture § 3.4) : Open Library par titre ET auteur. Mêmes `tentative`, délais, reprise et lecteurs que lookupIsbn ; une fiche
+// d'ŒUVRE ne dit rien de l'édition photographiée tant que l'œuvre a plusieurs éditions (R-E-1 : ISBN, éditeur, année et langue seulement si
+// edition_count === 1 ET un seul ISBN-13 distinct). L'auteur est le PREMIER lu (une liste jointe filtrerait la recherche et cacherait la bonne fiche).
+export const URL_OL_TITRE_AUTEUR = (titre, auteur) => `https://openlibrary.org/search.json?title=${encodeURIComponent(titre)}&author=${encodeURIComponent(auteur)}&fields=title,author_name,publisher,first_publish_year,language,subject,isbn,edition_count&limit=3`;
+export function lireSearchListe(json) {
+  const docs = json?.docs;
+  if (!Array.isArray(docs)) return { repondu: false };
+  const fiches = [];
+  for (const d of docs) {
+    if (fiches.length >= 3) break;
+    if (!d || typeof d !== 'object' || typeof d.title !== 'string' || !borner(d.title).trim()) continue;
+    const authors = chaines(d.author_name).map((a) => borner(a).trim()).filter(Boolean);
+    const editionUnique = d.edition_count === 1;
+    const editeurs = chaines(d.publisher);
+    fiches.push({ title: borner(d.title).trim(), authors, author: borner(authors.join(', ')),
+      publisher: editionUnique && editeurs.length === 1 ? borner(editeurs[0]).trim() : '', year: editionUnique ? (annee(d.first_publish_year) ?? '') : '',
+      language: editionUnique ? langueDe(d.language) : null, motsCles: motsClesDe(d.subject), isbn13: editionUnique ? isbnUnique(d.isbn) : null, editionUnique });
+  }
+  return { repondu: true, fiches };
+}
+export async function chercherParTitreAuteur(titre, auteur, { fetch = globalThis.fetch, signal, attendre = attenteReelle, tentativeMs = LIMITES_ISBN.tentativeMs, repriseMs = LIMITES_ISBN.repriseMs } = {}) {
+  const t0 = typeof titre === 'string' ? borner(titre).trim() : '';
+  const a0 = typeof auteur === 'string' ? borner(auteur).trim() : '';
+  if (!t0 || !a0) throw new TypeError('chercherParTitreAuteur : un titre et un auteur sont attendus'); // l'appelant ne lance ni sans titre ni sans auteur (D-E4)
+  const bilan = { statut: 'indisponible', fiches: [], motif: null, appels: 0 };
+  let r = null;
+  for (let essai = 0; essai < 2; essai += 1) {
+    if (signal?.aborted) return { ...bilan, motif: 'delai' };
+    if (essai === 1) { await attendre(repriseMs, signal); if (signal?.aborted) return { ...bilan, motif: 'delai' }; }
+    bilan.appels += 1;
+    r = await tentative(fetch, URL_OL_TITRE_AUTEUR(t0, a0), OPTIONS_FETCH, { tentativeMs, signal });
+    if (r.ok) break;
+    if (!((r.motif === 'reseau' || r.motif === 'delai') && !signal?.aborted)) break; // une reprise sur un échec MUET seulement (I-R)
+  }
+  if (!r.ok) return { ...bilan, motif: r.motif };
+  const lu = lireSearchListe(r.json);
+  if (!lu.repondu) return { ...bilan, motif: 'serveur' };
+  return lu.fiches.length ? { ...bilan, statut: 'trouve', fiches: lu.fiches } : { ...bilan, statut: 'rien' };
+}
+
 // C2 : `language` a un défaut NON VIDE ('fr'), donc la règle « ne remplir que ce qui est vide » ne l'atteignait
 // jamais — un livre anglais identifié restait « fr ». Une langue reconnue de la fiche gagne donc tant que la
 // personne n'a pas touché au menu Langue elle-même (tout est étiqueté « Renseigné par … — vérifie et corrige »).
@@ -225,14 +267,6 @@ export async function poserCouverture(blob, { origine = 'locale', repo: r = repo
   const empreinte = await sha256(jpeg);
   await r.putFile(empreinte, jpeg, { mime: 'image/jpeg' });
   return { sha256: empreinte, taille: jpeg.size };
-}
-
-// Un refus d'image, dit du côté de la personne (I-B) : chaque cause a sa phrase, et une cause inconnue ne se
-// déguise pas en « trop lourde ».
-export function messageErreurImage(e) {
-  if (e?.code === 'trop_lourde') return t('Cette image est trop lourde (25 Mo au plus).');
-  if (e?.code === 'trop_grande') return t('Cette image est trop grande.');
-  return t('Cette image ne peut pas être lue ici. Essaie une autre photo.');
 }
 
 // R-UX-8 : aucun groupe de boutons dans un <label> — un clic sur le mot « Couverture » déclencherait « Photographier ».

@@ -23,7 +23,7 @@ import { getConvention } from '../domain/units.js';
 import { currentVersion } from '../domain/search.js';
 import { section, sessionAssistant, carteConnexion, texteEchecAssistant, TEXTE_CONNEXION } from './components.js';
 import { demarrerConnexion } from './settings.js';
-import { messageErreurImage } from './livre-ajout.js';
+import { messageErreurImage } from '../core/image.js';
 import { DOCUMENT_ID, BATTEMENT_MS, prendreVol, libererVol as libererTenue, volEnCours, volTenu, reinitialiserVol } from './vol.js';
 import { renderImportWeb, texteEchecLecture } from './import-web.js'; // sens unique (D-B13) : import-web.js n'importe jamais ce module
 

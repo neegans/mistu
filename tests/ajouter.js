@@ -474,6 +474,48 @@ export async function runAjouterTests({ eq, ok }) {
     eq([g5.statut, g5.appels, g5.google], ['introuvable', 2, 'echec'], 'lookup : abandon après le legacy → Google jamais appelé, introuvable avec google = echec (S4c)');
   }
   {
+    // --- Lot E (couverture lue), tâche 1 : Open Library par titre ET auteur (spec couverture § 3.4). Mêmes délais, reprise et lecteurs que lookupIsbn ;
+    // fiches d'ŒUVRE : ISBN, éditeur, année et langue seulement pour une œuvre à UNE édition (R-E-1). Fixtures mesurées le 19 octobre.
+    const { OL_DOCS, OL_STASIO, OL_BERBER, OL_JERUSALEM, reponse: rep } = await import('./couverture-fixture.js');
+    const URL_STASIO = 'https://openlibrary.org/search.json?title=%C3%80%20la%20di%20Stasio&author=Jos%C3%A9e%20Di%20Stasio&fields=title,author_name,publisher,first_publish_year,language,subject,isbn,edition_count&limit=3';
+    const jamais = async () => { throw new Error('attendre ne doit pas être appelée'); };
+    const chercher = (fetch, titre = 'À la di Stasio', auteur = 'Josée Di Stasio', options = {}) => LA.chercherParTitreAuteur(titre, auteur, { fetch, attendre: async () => {}, tentativeMs: 50, ...options });
+    const urls = [];
+    const r1 = await chercher(async (u, o) => { urls.push([u, o]); return rep(200, OL_STASIO); }, undefined, undefined, { attendre: jamais });
+    eq([urls[0][0], LA.URL_OL_TITRE_AUTEUR('À la di Stasio', 'Josée Di Stasio')], [URL_STASIO, URL_STASIO], 'titre+auteur : adresse exacte, title= et author= encodés, fields avec isbn ET edition_count, limit=3 (mutant : limit=1 → rouge)');
+    ok(urls[0][1].signal instanceof AbortSignal && urls[0][1].mode === 'cors' && urls[0][1].credentials === 'omit' && urls[0][1].cache === 'no-store' && urls[0][1].referrerPolicy === 'no-referrer', 'titre+auteur : options S12 et un signal par tentative');
+    eq([r1.statut, r1.appels, r1.fiches.length], ['trouve', 1, 3], 'titre+auteur : trouvé en un appel, trois fiches au plus');
+    eq(r1.fiches[0], { title: 'À la di Stasio', authors: ['Josée Di Stasio'], author: 'Josée Di Stasio', publisher: 'Flammarion Québec', year: 2004, language: 'fr', motsCles: ['Cooking', 'Cuisine'], isbn13: '9782890772816', editionUnique: true }, 'titre+auteur : une œuvre à UNE édition porte son ISBN-13, son éditeur, son année et sa langue');
+    eq(r1.fiches[1].publisher, 'n/a', 'titre+auteur : « n/a » reste un éditeur (limite nommée § 11)');
+    const rB = await chercher(async () => rep(200, OL_BERBER), 'Berber & Q', 'Josh Katz');
+    eq([rB.fiches[1].title, rB.fiches[1].editionUnique, rB.fiches[1].isbn13, rB.fiches[1].publisher, rB.fiches[1].year, rB.fiches[1].language, rB.fiches[1].authors, rB.fiches[1].motsCles], ['Berber and Q', false, null, '', '', null, ['Josh Katz'], ['Barbecuing']], 'titre+auteur : deux éditions → ni ISBN, ni éditeur, ni année, ni langue ; auteurs et mots-clés gardés (mutant : publisher[0] pris → rouge)');
+    eq([rB.fiches[0].isbn13, rB.fiches[0].year, rB.fiches[0].publisher], ['9780857839879', 2022, 'Octopus Publishing Group'], 'titre+auteur : « Berber&Q » (une édition) porte son ISBN');
+    const rJ = await chercher(async () => rep(200, OL_JERUSALEM), 'Jerusalem', 'Yotam Ottolenghi');
+    eq([rJ.fiches[0].isbn13, rJ.fiches[0].editionUnique, rJ.fiches[0].publisher, rJ.fiches[0].author, rJ.fiches[0].motsCles.includes('nyt:hardcover-advice=2012-11-04')], [null, false, '', 'Yotam Ottolenghi, Sami Tamimi', false], 'titre+auteur : Jerusalem → isbn13 null (mutant : isbn[0] → 9788416295029 → rouge) ; sujet technique écarté');
+    for (const [titre, auteur] of [['', 'X'], ['T', ''], ['   ', 'X'], [null, 'X'], ['T', 42]]) {
+      let e = null, n = 0;
+      try { await LA.chercherParTitreAuteur(titre, auteur, { fetch: async () => { n += 1; return rep(200, OL_STASIO); } }); } catch (x) { e = x; }
+      eq([e instanceof TypeError, n], [true, 0], `titre+auteur : ${JSON.stringify([titre, auteur])} → TypeError, aucun appel`);
+    }
+    eq((await chercher(async () => rep(200, { numFound: 0, docs: [] }))).statut, 'rien', 'titre+auteur : docs vide → rien');
+    const rS = await chercher(async () => rep(200, {}));
+    eq([rS.statut, rS.motif], ['indisponible', 'serveur'], 'titre+auteur : pas de liste docs → serveur');
+    let attentes = 0;
+    const r429 = await chercher(async () => rep(429, {}), undefined, undefined, { attendre: async () => { attentes += 1; } });
+    eq([r429.statut, r429.motif, r429.appels, attentes], ['indisponible', 'limite', 1, 0], 'titre+auteur : 429 → limite, jamais de reprise ni d’attente (I-R)');
+    let n2 = 0;
+    const rR = await chercher(async () => { n2 += 1; if (n2 === 1) throw new TypeError('reseau'); return rep(200, OL_STASIO); });
+    eq([rR.statut, rR.appels], ['trouve', 2], 'titre+auteur : une reprise sur un échec muet');
+    let annule = false;
+    const flux = () => ({ ok: true, status: 200, headers: new Headers(), body: { getReader: () => ({ read: async () => ({ done: false, value: new Uint8Array(100 * 1024) }), cancel: async () => { annule = true; } }) } });
+    const rF = await chercher(async () => flux());
+    eq([rF.motif, annule], ['serveur', true], 'titre+auteur : un corps en flux au-delà de 256 Kio est coupé (cancel) → serveur');
+    eq(LA.lireSearchListe({ docs: 'x' }), { repondu: false }, 'lireSearchListe : docs qui n’est pas un tableau → repondu false');
+    eq(LA.lireSearchListe({ docs: [OL_DOCS[0], OL_DOCS[1], OL_DOCS[2], OL_DOCS[3]] }).fiches.map((f) => f.title), ['À la di Stasio', 'À LA DI STASIO 3', 'Pasta Et Cetera a la Di Stasio'], 'lireSearchListe : quatre documents lisibles → les TROIS premiers, dans l’ordre (mutant : limite de trois retirée → rouge)');
+    eq(LA.lireSearchListe({ docs: [null, 7, { title: '' }, { title: 'T', edition_count: '1', isbn: ['9782890772816'], publisher: ['P'], first_publish_year: 2004, language: ['fre'] }] }).fiches,
+      [{ title: 'T', authors: [], author: '', publisher: '', year: '', language: null, motsCles: [], isbn13: null, editionUnique: false }], 'lireSearchListe : formes hostiles écartées ; edition_count non entier → editionUnique false, rien de l’édition');
+  }
+  {
     // C2 : `language` a un défaut NON VIDE — « ne remplir que ce qui est vide » ne l'atteignait jamais, et un livre
     // anglais identifié par Google Books était écrit « fr » dans l'édition.
     const vides = { title: '', author: '', publisher: '', year: '', language: 'fr', convention: '', cuisines: [] };
@@ -1976,9 +2018,9 @@ export async function runAjouterTests({ eq, ok }) {
     const sw = await lire('../sw.js');
     ok(sw.length > 300 && sw.includes('SHELL'), `statique sw.js : le source est bien lu (${sw.length} caractères, SHELL présent) — sans quoi les inclusions ci-dessous ne prouveraient rien (S4)`);
     for (const m of ['./src/ui/puces.js', './src/ui/livre-ajout.js', './src/ui/accueil-livre.js', './src/ui/signet.js', './src/core/image.js', './src/core/blob-urls.js', './src/core/lien.js', './src/core/isbn.js', './src/domain/lecture-web.js']) ok(sw.includes(`'${m}'`), `SHELL : ${m}`);
-    ok(/VERSION = 'cuisine-os-v0\.13\.0-\d+'/.test(sw), 'sw.js : VERSION 0.13.0');
+    ok(/VERSION = 'cuisine-os-v0\.14\.0-\d+'/.test(sw), 'sw.js : VERSION 0.14.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.13.0', 'APP_VERSION 0.13.0');
+    eq(APP_VERSION, '0.14.0', 'APP_VERSION 0.14.0 (lot E, couverture lue)');
     const { GOOGLE_BOOKS } = await import('../src/sync/config.js');
     ok(typeof GOOGLE_BOOKS?.key === 'string' && (GOOGLE_BOOKS.key === '' || /^AIza[0-9A-Za-z_-]{35}$/.test(GOOGLE_BOOKS.key)), 'config : la clé Google Books est vide ou au format d’une clé d’API publique — un test de forme, jamais de valeur (S2/F2)');
   }

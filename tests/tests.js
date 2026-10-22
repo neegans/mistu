@@ -25,6 +25,7 @@ import { runAssistantCompteTests } from './assistant-compte.js';
 import { runCreerIaTests } from './creer-ia.js';
 import { runPasserelleTests } from './passerelle.js';
 import { runImportCibleTests } from './import-cible.js';
+import { runCouvertureTests } from './couverture.js';
 import { runLectureWebTests } from './lecture-web.js';
 import { runSyncL4Tests } from './sync-l4.js';
 import { runTableMatieresTests } from './table-matieres.js';
@@ -213,6 +214,10 @@ catch (error) { ok(false, `Suite passerelle interrompue : ${error?.message || St
 try { await runImportCibleTests({ eq, ok }); }
 catch (error) { ok(false, `Suite import ciblé interrompue : ${error?.message || String(error)}`); }
 
+// --- Lot E « Un livre reconnu depuis sa couverture » : domaine, lecture par l'assistant, vol, section Imports, suppression, traces orphelines.
+try { await runCouvertureTests({ eq, ok }); }
+catch (error) { ok(false, `Suite couverture interrompue : ${error?.message || String(error)}`); }
+
 // --- Recette web complète (lot B) : outil lecture-web côté app — domaine, vol partagé, signet, onglet Web, écran, fiche, section Imports.
 try { await runLectureWebTests({ eq, ok }); }
 catch (error) { ok(false, `Suite lecture web interrompue : ${error?.message || String(error)}`); }
@@ -237,7 +242,7 @@ catch (error) { ok(false, `Suite thème interrompue : ${error?.message || String
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 5227,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 5325,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

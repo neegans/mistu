@@ -7,6 +7,7 @@
 // 16 Mpx (S6) = 4 000 × 4 000 : au-delà, aucune couverture de livre n'a de raison d'être, et le canvas d'un téléphone
 // renonce bien avant (une photo de 48 Mpx est un cas réel, pas une couverture).
 import { COVER_INPUT_MIME } from '../sync/mime.js';
+import { t } from './i18n.js';
 
 // Types acceptés pour une photo choisie ICI : les images de la liste blanche des couvertures plus HEIC (que Safari décode). Jamais ALLOWED_MIME :
 // un PDF ou un EPUB « photo du plat » doit être refusé par `type` (ce que l'écran dit), pas par le décodage (ronde 1).
@@ -86,4 +87,12 @@ export async function preparerPhotoLocale(blob) {
   const dims = await dimensionsImage(blob);
   if (dims && dims.largeur * dims.hauteur > LIMITES_COUVERTURE.pixels) throw new ErreurImage('trop_grande');
   return reduireImage(blob);
+}
+
+// Un refus d'image, dit du côté de la personne (I-B) : chaque cause a sa phrase, et une cause inconnue ne se déguise pas en « trop lourde ». Déplacée de
+// src/ui/livre-ajout.js (lot E, D-E20) : livre-ajout.js va importer import-cible.js, qui l'importait de livre-ajout.js — un cycle ; ré-exportée là-bas.
+export function messageErreurImage(e) {
+  if (e?.code === 'trop_lourde') return t('Cette image est trop lourde (25 Mo au plus).');
+  if (e?.code === 'trop_grande') return t('Cette image est trop grande.');
+  return t('Cette image ne peut pas être lue ici. Essaie une autre photo.');
 }
