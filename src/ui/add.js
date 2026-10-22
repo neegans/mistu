@@ -153,12 +153,16 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
       // ignorée sans avoir été vue — le redessin la montre, et un second « Ignorer » vaudra pour elle.
       // Lot D, ronde 1 de T2 (I-D4, D-D20) : un classement REÇU s'ignore ici comme dans le panneau — la même question (il a coûté un appel ; « non » → rien
       // d'écrit), et son brouillon effacé avec lui.
+      // Vague finale (revue de branche, constat 2) : un « non » ne sort plus avant le redessin — CHAQUE geste finit par un redessin depuis la base (le fait
+      // qu'un test attend, jamais des ticks : R-D-10).
       const classement = l.kind === 'classement';
-      if (classement && brute?.status === 'a_verifier' && !(await confirmer(t('Ignorer ce classement ? Il a coûté un appel ; le refaire en coûtera un autre.'), { okLabel: t('Ignorer') }))) return;
+      const refuse = classement && brute?.status === 'a_verifier' && !(await confirmer(t('Ignorer ce classement ? Il a coûté un appel ; le refaire en coûtera un autre.'), { okLabel: t('Ignorer') }));
       const cle = cleLecture(brute);
       const patch = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', l.id, c.status); return { status: 'ignore', finished_at: maintenant(), ...(classement ? { brouillon: null } : {}) }; };
-      try { await repo.transitionner('imports', l.id, { attendus: ATTENDUS_IGNORER, patch }); }
-      catch (e) { if (!(e instanceof TransitionRefusee)) logError('add.ignorer', { error: e, id: l.id }); }
+      if (!refuse) {
+        try { await repo.transitionner('imports', l.id, { attendus: ATTENDUS_IGNORER, patch }); }
+        catch (e) { if (!(e instanceof TransitionRefusee)) logError('add.ignorer', { error: e, id: l.id }); }
+      }
     } else if (geste === 'relancer') {
       // UN appel par le vol de l'écran ciblé (spec § 4.5) : aucune page ni séance n'est écrite ; la ligne s'arrête à a_verifier (« Reprendre » ensuite).
       // Lot B : une lecture web repart par lancerLecture (même forme de retour), aussi depuis une ligne d'un autre appareil (§ 4.7).

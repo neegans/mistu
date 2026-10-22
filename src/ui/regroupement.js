@@ -183,7 +183,7 @@ export async function lireLeLot(classementId, { ctx, repo = repoModule, fetch: f
 // classement désignée (?import=) — sinon la plus récente ouverte de la séance. États : 1) aucun classement ouvert → panneau caché, « Classer… » dans la
 // barre (actionsSelection) ; 2) en vol ; 3) reçu : l'écran de regroupement ; 4) échec ; 5) à lancer. La ligne est lue au rendu dans ctx.imports, RELUE
 // (repo.get) avant toute écriture ; le panneau suit le bus (D-D22) et ne se redessine que si sa signature change ; `surChangement()` redessine la barre.
-export function panneauClassement(session, ctx, getSelection, { repo = repoModule, toast = toastDom, confirmer = confirmDialog, navigate = naviguerDom, fetch: fetchInjecte = undefined, maintenant = horloge, battementMs = BATTEMENT_MS, enLigne = estEnLigne, importId = null, surChangement = null } = {}) {
+export function panneauClassement(session, ctx, getSelection, { repo = repoModule, toast = toastDom, confirmer = confirmDialog, navigate = naviguerDom, fetch: fetchInjecte = undefined, maintenant = horloge, battementMs = BATTEMENT_MS, enLigne = estEnLigne, importId = null, surChangement = null, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000 } = {}) {
   const racine = el('div', { class: 'card stack', dataset: { role: 'classement' } });
   const pagesSeance = () => liste(session?.page_ids);
   const presentes = (ids) => liste(ids).filter((id) => typeof id === 'string' && ctx?.pagesById instanceof Map && ctx.pagesById.has(id));
@@ -226,8 +226,13 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     return [el('button', { type: 'button', class: 'btn primary', dataset: { role: 'classer' }, disabled: !!r || etat.occupe, onClick: () => classer() }, t('Classer ces photos avec l’assistant')), ligneSousBouton(r)].filter(Boolean);
   };
   // « Regrouper en recette » n'est retiré que si un classement EN VOL ou REÇU de la séance touche la sélection (D-D3, B-13).
+  // Vague finale (revue de branche, constat 4 ; D-D15 « ne pas payer deux fois les mêmes photos ») : ni si la sélection touche une photo d'une LECTURE DE
+  // RECETTE ouverte de la séance (ligne de lot pas encore lue, lecture ciblée, autre « Regrouper ») — l'éditeur la relirait comme recette, un appel de
+  // plus ; une ligne d'index ou de classement garde sa règle (C : les pages d'un index repris restent regroupables ; D-D3 ci-dessus).
   racine.regrouperPermis = (selection) => {
     const L = etat.ligne;
+    const prises = pagesEnCours(etat.imports.filter((i) => i?.kind === 'recette'), session?.id);
+    if (liste(selection).some((p) => prises.has(p))) return false;
     if (!L || !['en_cours', 'a_verifier'].includes(L.status)) return true;
     const siennes = new Set(liste(L.page_ids));
     return !liste(selection).some((p) => siennes.has(p));
@@ -279,8 +284,23 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
       m.set(pid, await octetsIci(repo, ctx?.pagesById?.get(pid)?.sha256));
     }
     R.octets = m;
+    if ([...m.values()].includes(false)) suivreMoteur();
     if (etat.regroupement === R) dessiner();
   }
+  // Vague finale (revue de branche, constat 5 ; D-D24 après G) : des octets arrivés pendant que l'écran est monté (« Télécharger » du lot G, passe du
+  // moteur : rien sur le bus) — dès qu'une photo manque, le panneau suit les états publiés par le moteur et revérifie tant qu'il en manque une : « Lire »
+  // et « Reclasser » se rallument, leur raison se tait, sans quitter la séance. Pris seulement par un panneau MONTÉ (jamais par un rendu dépassé) ;
+  // rendu au premier état qui le trouve détaché, ou avec le bus.
+  let suiviMoteur = null;
+  function suivreMoteur() {
+    if (suiviMoteur || !racine.isConnected || typeof ctx?.sync?.moteur?.onEtat !== 'function') return;
+    suiviMoteur = ctx.sync.moteur.onEtat(() => {
+      if (!racine.isConnected) { quitterMoteur(); return; }
+      const R = etat.regroupement;
+      if (R?.octets && [...R.octets.values()].includes(false)) verifierOctets(R);
+    });
+  }
+  function quitterMoteur() { if (suiviMoteur) { suiviMoteur(); suiviMoteur = null; } }
   function preparer(L) {
     const resultat = revaliderResultatClassement(L.resultat, L.page_ids);
     if (!resultat) return null;
@@ -439,11 +459,22 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     box.append(...pied(L, x));
     return box;
   }
+  // Vague finale (revue de branche, constat 7 ; VF-15 du lot A, comme l'écran ciblé, l'écran web et le panneau d'index) : un classement en vol AILLEURS dont
+  // le document est mort (app rechargée moins de 90 s après le départ, onglet tué) n'attend plus le démarrage — la passe `interrompu` (repo.marquerInterrompus,
+  // mêmes règles, horloge du panneau) à l'affichage, puis toutes les BATTEMENT_MORT_MS + 1 s tant qu'il vole ailleurs et que le panneau est monté.
+  let veille = null;
+  function veiller(maintenantAussi = true) {
+    const L = etat.ligne;
+    if (veille || L?.status !== 'en_cours' || volEnCours()?.importId === L.id || typeof repo.marquerInterrompus !== 'function') return;
+    const passe = () => { const m = Date.parse(maintenant()); return repo.marquerInterrompus(Number.isFinite(m) ? m : undefined).then((n) => (n ? synchroniser({ forcer: true }) : null)).catch((e) => logError('regroupement.interrompus', { error: e })); };
+    if (maintenantAussi) passe();
+    veille = setTimeout(() => { veille = null; if (racine.isConnected) passe().then(() => veiller(false)); }, veilleMs);
+  }
   function dessiner() {
     const L = ouverte() ? etat.ligne : null;
     racine.hidden = !L;
     if (!L) { racine.replaceChildren(); return; }
-    if (L.status === 'en_cours') racine.replaceChildren(...blocEnVol(L));
+    if (L.status === 'en_cours') { racine.replaceChildren(...blocEnVol(L)); veiller(); }
     else if (L.status === 'a_verifier') racine.replaceChildren(ecranRegroupement(L));
     else racine.replaceChildren(...blocALancer(L));
     if (etat.focus) { const { role, page } = etat.focus; etat.focus = null; racine.querySelector(`[data-role="${role}"][data-page="${CSS.escape(page)}"]`)?.focus(); }
@@ -561,7 +592,9 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
         const ligne = await repo.ouvrirImport({ kind: 'classement', edition_id: session?.edition_id ?? null, scan_session_id: session?.id ?? null, page_ids: pages });
         id = ligne.id; etat.ligne = ligne;
       }
-      const r = await lancerVol(id, executerClassement, { ctx, repo, fetch: fetchInjecte, maintenant, enLigne, battementMs, accepte: (l) => l?.kind === 'classement' });
+      // Vague finale (revue de branche, constat 9 ; D-D1) : le vol est lié aux pages COMPTÉES — une ligne dont page_ids a été réécrite entre ces relectures et
+      // celle du vol (réception, autre onglet) est refusée (sorte) avant toute écriture et tout décodage ; le redessin montre la ligne réelle.
+      const r = await lancerVol(id, executerClassement, { ctx, repo, fetch: fetchInjecte, maintenant, enLigne, battementMs, accepte: (l) => l?.kind === 'classement' && memeListe(l.page_ids, pages) });
       if (r.issue === 'refuse') { if (r.raison === 'non_connecte') etat.session = null; direRefus(r); }
     } catch (e) { if (!(e instanceof TransitionRefusee)) logError('regroupement.classer', { error: e }); }
     finally { etat.occupe = false; await synchroniser({ forcer: true }); }
@@ -620,12 +653,12 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
   let montee = false;
   const vue = { racine, redessiner: () => synchroniser({ forcer: true }) };
   const desabonner = on('change', ({ store } = {}) => {
-    if (!racine.isConnected) { if (montee) { desabonner(); vues.delete(vue); } return; }
+    if (!racine.isConnected) { if (montee) { desabonner(); quitterMoteur(); vues.delete(vue); } return; }
     montee = true;
     if (store === 'imports' || store === 'recipes' || store === 'scan_sessions' || store === '*') synchroniser();
   });
   vues.add(vue);
-  setTimeout(() => { if (!racine.isConnected) { desabonner(); vues.delete(vue); return; } montee = true; }, 0);
+  setTimeout(() => { if (!racine.isConnected) { desabonner(); quitterMoteur(); vues.delete(vue); return; } montee = true; }, 0);
   sessionAssistant(ctx).then((s) => { etat.session = s; dessiner(); prevenir(); });
   etat.signature = signatureDe(etat.ligne);
   dessiner();

@@ -37,6 +37,9 @@ export function resultatClassement(classement, pageIds) {
 export function revaliderResultatClassement(brut, pageIds) {
   const B = BORNES_CLASSEMENT;
   const ids = new Set(liste(pageIds));
+  // Vague finale (revue de branche, constat 8) : la borne de § 3.1 — un classement porte 2 à 10 photos ; une ligne reçue ou restaurée qui en porterait
+  // plus est une altération (notre validation n'en produit jamais) : null, l'écran écrit echec(illisible).
+  if (ids.size > B.photos) return null;
   if (!objetNu(brut)) return null;
   const groupes = sien(brut, 'groupes'), orphelines = sien(brut, 'orphelines'), nonClassees = sien(brut, 'non_classees'), partagees = sien(brut, 'partagees'), uncertain = sien(brut, 'uncertain');
   if (!Array.isArray(groupes) || groupes.length < 1 || groupes.length > B.groupes) return null;
@@ -107,6 +110,10 @@ export function brouillonDe(etat, choixFaits, startedAt) {
 // Relu au montage (D-D20) : DONNÉE HOSTILE — toute violation → null (l'écran repart de regroupementInitial, rien n'est écrit). Le brouillon n'apporte
 // JAMAIS de texte : un g{k} reprend title, printed_page et uncertain de resultat.groupes[k − 1] ; un n{k} est « personne ». Les pages absentes de
 // `pagesParId` sont ensuite écartées comme dans regroupementInitial (un choix dont le groupe a disparu est oublié).
+// Vague finale (revue de branche, constat 1 ; D-D20 « un refresh() de la séance (« Retirer », …) ne perd plus les groupes ») : la couverture ne vaut que
+// pour les pages du résultat PRÉSENTES ici — un brouillon écrit quand une photo manquait (retirée de la séance, pas encore reçue) n'est plus refusé au
+// remontage. Une page du brouillon reste une page du résultat, une seule fois ; une orpheline ou une non classée présente qu'il ne nomme pas va à part
+// avec son motif d'origine (sa place initiale : rien d'inventé) ; une page présente d'un GROUPE du résultat qu'il ne nomme pas reste une violation.
 export function restaurerBrouillon(brut, { resultat, pageIds, startedAt, pagesParId } = {}) {
   if (!objetNu(brut)) return null;
   const cle = sien(brut, 'cle'), groupes = sien(brut, 'groupes'), aPart = sien(brut, 'a_part'), choix = sien(brut, 'choix'), prochain = sien(brut, 'prochain');
@@ -127,7 +134,7 @@ export function restaurerBrouillon(brut, { resultat, pageIds, startedAt, pagesPa
     if (c[0] === 'g' && !sources[k - 1]) return null;
     if (c[0] === 'n' && k >= prochain) return null;
     if (!Array.isArray(p) || !p.length) return null;
-    for (const x of p) { if (typeof x !== 'string' || !ids.has(x) || vues.has(x)) return null; vues.add(x); }
+    for (const x of p) { if (typeof x !== 'string' || !ids.has(x) || !attendues.has(x) || vues.has(x)) return null; vues.add(x); }
     cles.add(c);
     const source = c[0] === 'g' ? sources[k - 1] : null;
     gs.push({ cle: c, page_ids: [...p], title: source ? (source.title ?? null) : null, printed_page: source ? (source.printed_page ?? null) : null, uncertain: source ? source.uncertain === true : false, origine: source ? 'classement' : 'personne' });
@@ -136,10 +143,16 @@ export function restaurerBrouillon(brut, { resultat, pageIds, startedAt, pagesPa
   for (const a of aPart) {
     if (!objetNu(a)) return null;
     const pid = sien(a, 'page_id'), motif = sien(a, 'motif');
-    if (typeof pid !== 'string' || !ids.has(pid) || vues.has(pid) || !['orpheline', 'non_classee', 'retiree'].includes(motif)) return null;
+    if (typeof pid !== 'string' || !ids.has(pid) || !attendues.has(pid) || vues.has(pid) || !['orpheline', 'non_classee', 'retiree'].includes(motif)) return null;
     vues.add(pid); ap.push({ page_id: pid, motif });
   }
-  if (vues.size !== attendues.size || [...attendues].some((x) => !vues.has(x))) return null;
+  const present = (x) => pagesParId instanceof Map && pagesParId.has(x);
+  const origine = new Map([...liste(resultat?.orphelines).map((x) => [x, 'orpheline']), ...liste(resultat?.non_classees).map((x) => [x, 'non_classee'])]);
+  for (const x of attendues) {
+    if (vues.has(x) || !present(x)) continue;
+    if (!origine.has(x)) return null; // une page présente d'un groupe du résultat, que le brouillon ne nomme pas
+    vues.add(x); ap.push({ page_id: x, motif: origine.get(x) });
+  }
   const choixFaits = new Map();
   const refs = new Set();
   for (const paire of choix) {
@@ -150,7 +163,6 @@ export function restaurerBrouillon(brut, { resultat, pageIds, startedAt, pagesPa
     if (id !== null) { if (refs.has(id)) return null; refs.add(id); }
     choixFaits.set(c, id);
   }
-  const present = (x) => pagesParId instanceof Map && pagesParId.has(x);
   const etat = { groupes: gs.map((g) => ({ ...g, page_ids: g.page_ids.filter(present) })).filter((g) => g.page_ids.length), aPart: ap.filter((a) => present(a.page_id)), prochain };
   for (const c of [...choixFaits.keys()]) if (!etat.groupes.some((g) => g.cle === c)) choixFaits.delete(c);
   return { etat, choixFaits };

@@ -157,7 +157,7 @@ export async function runClassementTests({ eq, ok }) {
       eq(V({ groupes: [g([1], long200)] }).groupes[0].title, long200, 'T-D1 : un titre de 200 points de code exactement est gardé');
       eq(V({ groupes: [g([1], 'Soupe de courge\nrôtie')] }).groupes[0].title, 'Soupe de courge rôtie', 'T-D1 (M104) : un titre sur deux lignes est plié sur une ligne');
       eq(V({ groupes: [g([1], 'Soupe\u{2028}de courge')] }).groupes[0].title, 'Soupe de courge', 'T-D1 (MR-colle, R-D-13) : un titre coupé par U+2028 SANS espace autour rend « Soupe de courge », jamais « Soupede courge » — la fin de ligne devient une espace AVANT le nettoyage (uneLigne du lot C, puis plierUneLigne)');
-      eq([V({ groupes: [g([1], 'voir www.exemple.test/x')] }).groupes[0].title, V({ groupes: [g([1], 'voir www.exemple.test/x')] }).groupes[0].uncertain], [null, true], 'T-D1 (M7) : une adresse dans le titre → titre null + incertain');
+      eq([V({ groupes: [g([1], 'voir www.exemple.test/x')] }).groupes[0].title, V({ groupes: [g([1], 'voir www.exemple.test/x')] }).groupes[0].uncertain], [null, true], 'T-D1 (mur de validerClassement, porteAdresse sur la forme recollée) : une adresse dans le titre → titre null + incertain (vague finale, constat 13 : M7, la garde d’estTitreUneLigne, est tenu par T-D8 — validerClassement garde un second mur)');
       eq([V({ groupes: [g([1], 'Tar\u{202E}te\u{200B} aux pommes')] }).groupes[0].title, V({ groupes: [g([1], 'Tar\u{D800}te')] }).groupes[0].title], ['Tarte aux pommes', 'Tarte'], 'T-D1 (M8, M9) : Cf (U+202E, U+200B) et une demi-paire de substitution retirés d’un titre');
       eq([0, 10000, '132', 1.5].map((p) => V({ groupes: [g([1], 'A', { printed_page: p })] }).groupes[0].printed_page), [null, null, null, null], 'T-D1 (M10) : printed_page 0, 10000, « 132 », 1.5 → null');
       eq(V({ groupes: [g([1], 'A', { uncertain: 'oui' })] }).groupes[0].uncertain, false, 'T-D1 (M11) : uncertain « oui » → false (vrai seulement s’il vaut true)');
@@ -220,6 +220,12 @@ export async function runClassementTests({ eq, ok }) {
       const P11 = Array.from({ length: 11 }, (_, i) => 'q' + (i + 1));
       const formes = [vide1, { ...vide1, uncertain: ['voir www.exemple.test/x'] }, { ...vide1, uncertain: ['x'.repeat(201)] }, { ...vide1, uncertain: ['photo\nfloue'] }, { ...vide1, uncertain: Array.from({ length: 41 }, (_, i) => 'doute ' + i) },
         sans('orphelines'), { ...vide1, partagees: 'p1' }, { ...vide1, uncertain: 'x' }, { ...vide1, groupes: [grp({ title: 'Soupe  de courge' })] }];
+      // Vague finale (revue de branche, constat 8) : la borne de § 3.1 — une ligne de classement porte 2 à 10 photos ; un résultat relu sur plus de 10
+      // page_ids est une altération (rendre 35 figures, et « Lire » allumé sur des octets jamais vérifiés au-delà de la dixième).
+      const P35 = Array.from({ length: 35 }, (_, i) => 'r' + (i + 1));
+      const trente5 = { groupes: [0, 1, 2].map((k) => grp({ page_ids: P35.slice(k * 10, k * 10 + 10) })), orphelines: P35.slice(30), non_classees: [], partagees: [], uncertain: [] };
+      const dix = { groupes: [grp({ page_ids: P35.slice(0, 5) }), grp({ page_ids: P35.slice(5, 10) })], orphelines: [], non_classees: [], partagees: [], uncertain: [] };
+      eq([nul(C.revaliderResultatClassement(trente5, P35)), nul(C.revaliderResultatClassement(dix, P35.slice(0, 11))), nul(C.revaliderResultatClassement(dix, P35.slice(0, 10)))], ['null', 'null', 'object'], 'T-D3 (M-borne-photos, vague finale, constat 8) : 3 groupes de 10 et 5 orphelines sur 35 page_ids → null ; 10 pages rangées sur une ligne de 11 page_ids → null (§ 3.1 : 2 à 10 photos) ; 10 page_ids → accepté');
       eq([...formes.map((b) => nul(C.revaliderResultatClassement(b, ['p1']))), nul(C.revaliderResultatClassement({ ...vide1, groupes: [grp({ page_ids: P11 })] }, P11))], ['object', ...Array(9).fill('null')], 'T-D3 (M-f, M-f2, M-f3, M-n, M-gg, ronde 1) : une incertitude racine porteuse d’une adresse, de 201 points de code ou d’un saut de ligne, 41 incertitudes, orphelines absent, partagees ou uncertain non tableau, un titre non plié (double espace), un groupe de 11 pages → null');
     });
 
@@ -260,7 +266,9 @@ export async function runClassementTests({ eq, ok }) {
         ['prochain ≤ n1', { ...BR, prochain: 1 }], ['cle x1', { ...BR, groupes: [{ cle: 'x1', page_ids: ['p1'] }, ...BR.groupes.slice(1)], choix: sansChoix('g1') }],
         ['motif inconnu', { ...BR, a_part: [{ page_id: 'p4', motif: 'x' }], groupes: BR.groupes.filter((g) => g.cle !== 'n1'), choix: sansChoix('n1') }],
         ['choix sur une cle absente', { ...BR, choix: [['g9', 'rcS']] }], ['choix de 81', { ...BR, choix: [['g2', 'x'.repeat(81)]] }], ['deux groupes sur la même référence', { ...BR, choix: [['g1', 'rcS'], ['g2', 'rcS']] }],
-        ['clé __proto__', JSON.parse('{"__proto__":{"cle":"x"}}')], ['oublie une page du résultat', { ...BR, groupes: BR.groupes.slice(0, 3), choix: sansChoix('n1') }],
+        // Vague finale (constat 1) : amendée, jamais retirée (I-D11) — l'oubli d'une ORPHELINE présente n'est plus une violation (elle va à part avec son
+        // motif d'origine, ci-dessous) ; l'oubli d'une page présente d'un GROUPE du résultat (p5, g3) en reste une.
+        ['clé __proto__', JSON.parse('{"__proto__":{"cle":"x"}}')], ['oublie une page présente d’un groupe du résultat', { ...BR, groupes: [BR.groupes[0], BR.groupes[1], BR.groupes[3]] }],
       ];
       eq(hostiles.map(([nom, b]) => [nom, nul(C.restaurerBrouillon(b, ctxB))]), hostiles.map(([nom]) => [nom, 'null']), 'T-D4 (M110) : un brouillon hostile (douze formes, une règle chacune) → null, l’écran repart du regroupement initial');
       // 11 groupes : seul un contexte de 11 pages le permet sans violer une autre règle (un résultat relu d'une ligne hostile synchronisée : une ligne
@@ -285,6 +293,18 @@ export async function runClassementTests({ eq, ok }) {
       eq(hostiles2.map(([nom, b]) => [nom, nul(C.restaurerBrouillon(b, ctxB))]), hostiles2.map(([nom]) => [nom, 'null']), 'T-D4 (M-p, M-q, M-r, ronde 1) : prochain 1001, deux groupes g1, deux choix pour g1 → null');
       const oubli = C.restaurerBrouillon(JSON.parse(JSON.stringify(C.brouillonDe(E0, new Map([['g3', 'rcG'], ['g1', 'rcS']]), DATE))), { ...ctxB, pagesParId: new Map(['p1', 'p2', 'p3', 'p4'].map((id) => [id, { id }])) });
       eq([oubli?.etat.groupes.map((x) => x.cle), oubli ? [...oubli.choixFaits] : 'null'], [['g1', 'g2'], [['g1', 'rcS']]], 'T-D4 (M-s, ronde 1) : les pages d’un groupe choisi absentes de l’appareil — le groupe est écarté et son choix OUBLIÉ');
+      // Vague finale (revue de branche, constat 1 ; D-D20 « « Retirer » … ne perd plus les groupes ») : un brouillon ÉCRIT quand une photo manquait.
+      const PP4 = new Map(['p1', 'p2', 'p3', 'p4'].map((id) => [id, { id }]));
+      const sans5 = C.bougerDansGroupe(C.deplacerVers(C.regroupementInitial(R5, PP4), 'p3', 'g2'), 'g2', 'p3', -1);
+      const choix5 = new Map([['g2', 'rcT']]);
+      const r5 = C.restaurerBrouillon(JSON.parse(JSON.stringify(C.brouillonDe(sans5, choix5, DATE))), { ...ctxB, pagesParId: PP4 });
+      eq([r5?.etat ?? 'null', r5 ? [...r5.choixFaits] : 'null'], [sans5, [...choix5]], 'T-D4 (M-couverture, vague finale, constat 1) : brouillonDe(état sans p5) puis restaurerBrouillon(pagesParId sans p5) rendent le même état et les mêmes choix — la couverture ne vaut que pour les pages du résultat PRÉSENTES');
+      const PPsans4 = new Map(['p1', 'p2', 'p3', 'p5'].map((id) => [id, { id }]));
+      const sans4 = C.deplacerVers(C.regroupementInitial(R5, PPsans4), 'p3', 'g2');
+      const r4 = C.restaurerBrouillon(JSON.parse(JSON.stringify(C.brouillonDe(sans4, new Map(), DATE))), ctxB);
+      eq(r4?.etat ?? 'null', { ...sans4, aPart: [{ page_id: 'p4', motif: 'orpheline' }] }, 'T-D4 (M-orpheline-revenue, vague finale, constat 1) : une orpheline absente à l’écriture du brouillon, présente au remontage → à part avec son motif d’origine (sa place initiale), les groupes gardés');
+      const ctx6 = { ...ctxB, pageIds: [...PAGES_5, 'p6'], pagesParId: new Map([...PP, ['p6', { id: 'p6' }]]) };
+      eq([nul(C.restaurerBrouillon({ ...BR, a_part: [{ page_id: 'p6', motif: 'retiree' }] }, ctx6)), nul(C.restaurerBrouillon({ ...BR, groupes: [...BR.groupes, { cle: 'n2', page_ids: ['p6'] }], prochain: 3 }, ctx6))], ['null', 'null'], 'T-D4 (M-hors-resultat, vague finale, constat 1) : une page de la ligne que le résultat ne nomme pas (p6), à part ou dans un groupe → null — la couverture relâchée ne laisse entrer aucune page hors du résultat');
     });
 
     // T-D5 appariement (§ 0 D-D5, § 3.6, B-1, F-2)
@@ -293,9 +313,9 @@ export async function runClassementTests({ eq, ok }) {
       eq(cand.map((r) => r.id), ['rcS', 'rcT', 'rcG', 'rcP', 'rcX'], 'T-D5 (M38) : candidatsReference exclut le signet rcW, l’available rcA, rcO (import ouvert) et une autre édition');
       eq(C.referencesOccupees(REFERENCES_ED, { editionId: 'ed1', imports: [IMPORT_RCO] }).map((r) => r.id), ['rcO'], 'T-D5 (M113) : referencesOccupees rend rcO seule (montrée éteinte, jamais proposée)');
       eq([C.candidatsReference(REFERENCES_ED, { editionId: null, imports: [] }), C.referencesOccupees(REFERENCES_ED, { editionId: null, imports: [IMPORT_RCO] })], [[], []], 'T-D5 : sans édition → aucune candidate');
-      eq(C.concordance({ title: 'Tarte fine aux poires', printed_page: 140 }, ref('x', 'Tarte aux poires', 141)), { titre: true, page: true, ecart: 1 }, 'T-D5 : « Tarte aux poires » ⊂ « Tarte fine aux poires », écart 1 → sûre');
+      eq(C.concordance({ title: 'Tarte fine aux poires', printed_page: 140 }, ref('x', 'Tarte aux poires', 141)), { titre: true, page: true, ecart: 1 }, 'T-D5 (M40) : « Tarte aux poires » ⊂ « Tarte fine aux poires » (une INCLUSION de mots distinctifs, que l’égalité de chaînes refuserait), écart 1 → sûre');
       eq(C.concordance({ title: 'Tarte fine aux poires', printed_page: 140 }, ref('x', 'Tarte aux poires', 143)), { titre: true, page: false, ecart: 3 }, 'T-D5 (M39) : écart 3 → page fausse (± 2, jamais ± 3)');
-      eq(C.concordance({ title: 'Tarte fine aux poires', printed_page: 140 }, ref('x', 'Poire rôtie au miel', 140)), { titre: false, page: true, ecart: 0 }, 'T-D5 (M40) : « Poire rôtie au miel » contre « Tarte fine aux poires » → titre faux (mots distinctifs, jamais l’égalité de chaînes)');
+      eq(C.concordance({ title: 'Tarte fine aux poires', printed_page: 140 }, ref('x', 'Poire rôtie au miel', 140)), { titre: false, page: true, ecart: 0 }, 'T-D5 : « Poire rôtie au miel » contre « Tarte fine aux poires » → titre faux (le cas « titre faux » ; vague finale, constat 12 : il ne tue pas M40 — l’égalité de chaînes le dit faux aussi —, tenu par l’inclusion ci-dessus)');
       eq([C.concordance({ title: 'La Une', printed_page: 5 }, ref('x', 'La Une', 5)).titre, nul(C.concordance({ title: null, printed_page: null }, ref('x', 'Soupe', null)).ecart)], [false, 'null'], 'T-D5 (M45) : une référence sans mot distinctif ne concorde jamais par le titre ; une page inconnue → écart null');
       const G5 = C.regroupementInitial(R5, PP).groupes;
       eq([...C.proposerAppariements(G5, cand)], [['g1', { recipe_id: 'rcS', certitude: 'sure', motif: 'titre_et_page', cochee: true, ordre: ['rcS'] }], ['g2', { recipe_id: 'rcT', certitude: 'sure', motif: 'titre_et_page', cochee: true, ordre: ['rcT'] }], ['g3', { recipe_id: 'rcG', certitude: 'incertaine', motif: 'titre', cochee: false, ordre: ['rcG'] }]], 'T-D5 (M41) : g1 → rcS sûre cochée ; g2 → rcT sûre cochée (rcP, page seule, hors de la meilleure classe) ; g3 → rcG incertaine « titre », décochée');
@@ -400,7 +420,7 @@ export async function runClassementTests({ eq, ok }) {
       try { await repo.transitionner('imports', 'imp_main2', { attendus: ['a_verifier'], patch: { status: 'enregistre' }, puts: { imports: [{ ...neuve, id: 'imp_neuve3' }] }, conditions: { imports: [{ key: 'imp_neuve3', absente: true }, { index: 'recipe_id', valeur: 'rcS', exclus: I.IMPORTS_OUVERTS }] } }); } catch (e) { refus = e; }
       eq([refus?.name, (await db.get('imports', 'imp_neuve3')) ?? null, (await db.get('imports', 'imp_main2')).status], ['TransitionRefusee', null, 'a_verifier'], 'T-D8 (M59) : une condition d’index sur une référence à import ouvert → refus, rien d’écrit');
       eq([B.plierUneLigne('Soupe de courge\nrôtie'), B.plierUneLigne('  a\u{2028}b\tc  '), B.plierUneLigne(7)], ['Soupe de courge rôtie', 'a b c', ''], 'T-D8 (M119b) : plierUneLigne — tout blanc devient une espace, puis trim ; pas une chaîne → chaîne vide');
-      eq(['x', 'é'.repeat(200), 'é'.repeat(201), '', ' a', 'a ', 'a\nb', 'a\u{2028}b', 'a\tb', 'Le\u{200B}sel', 'voir www.exemple.test/x', 'sur evil.com', 7, null].map((s) => B.estTitreUneLigne(s, 200)), [true, true, false, false, false, false, false, false, false, false, false, false, false, false], 'T-D8 (M119b) : estTitreUneLigne — une ligne, 1..200 points de code, égale à son trim, sans Cc/Cf/U+2028, sans adresse');
+      eq(['x', 'é'.repeat(200), 'é'.repeat(201), '', ' a', 'a ', 'a\nb', 'a\u{2028}b', 'a\tb', 'Le\u{200B}sel', 'voir www.exemple.test/x', 'sur evil.com', 7, null].map((s) => B.estTitreUneLigne(s, 200)), [true, true, false, false, false, false, false, false, false, false, false, false, false, false], 'T-D8 (M119b, M7) : estTitreUneLigne — une ligne, 1..200 points de code, égale à son trim, sans Cc/Cf/U+2028, sans adresse (« voir www.exemple.test/x », « sur evil.com » : M7)');
       eq([B.estTitreUneLigne('abc', 2), B.estTitreUneLigne('ab', 2), B.estTitreUneLigne('a', 0)], [false, true, false], 'T-D8 : la borne est un paramètre (max < 1 → faux)');
       // Ronde 1 (R-D-14) : sur le magasin de la transition, la garde n'admet que des listes FAITES de formes sans fiche — un sac mixte, une condition de
       // fusion, ou une « absente » qui ne vaut pas exactement true et porte une condition à clé → TypeError avant toute écriture.
@@ -661,8 +681,14 @@ export async function runClassementTests({ eq, ok }) {
       eq(texteNuDeBarre(r3), [], 'T-D12 (M-filter, ronde 1) : sélection classée → « Regrouper » absent de la barre, et aucun nœud texte « null » à sa place');
       reponseConfirmer = false;
       const avant = await db.get('imports', 'imp_ok');
-      boutonTexte(panneau(r3), 'Ignorer ce classement').click();
-      await attendre(() => confirmations.length === 1, 'confirmation demandée'); await tick(); await tick();
+      // Vague finale (revue de branche, constat 2 ; R-D-10) : un FAIT, jamais des ticks — le panneau prêt d'abord (session lue, octets vérifiés : aucun
+      // redessin du montage ne viendra plus), puis, après le « non », ignorerClassement sort par son finally (synchroniser, forcé) : un bouton NEUF ; au
+      // redessin, ce qu'un « non » mal tenu aurait écrit l'a été (FV-M127p : la réponse ignorée, une relecture avant l'écriture).
+      await attendre(() => { const b = panneau(r3).querySelector('button[data-role="lire-recettes"]'); return !!b && !b.disabled; }, 'panneau prêt');
+      const ignorerAvant = boutonTexte(panneau(r3), 'Ignorer ce classement');
+      ignorerAvant.click();
+      await attendre(() => confirmations.length === 1, 'confirmation demandée');
+      await attendre(() => boutonTexte(panneau(r3), 'Ignorer ce classement') !== ignorerAvant, 'panneau redessiné après le « non »');
       eq([confirmations[0], await db.get('imports', 'imp_ok')], [['Ignorer ce classement ? Il a coûté un appel ; le refaire en coûtera un autre.', 'Ignorer'], avant], 'T-D12 (M127) : « Ignorer ce classement » répondu NON → 0 écriture');
       reponseConfirmer = true;
       boutonTexte(panneau(r3), 'Ignorer ce classement').click();
@@ -854,8 +880,16 @@ export async function runClassementTests({ eq, ok }) {
       // Ronde 1 (constat 26) : « Ignorer » d'un classement REÇU depuis Imports — la question du panneau, et le brouillon effacé (D-D20).
       reponseConfirmer = false;
       const avantRecu = await db.get('imports', 'c_recu');
-      boutonTexte(ligneEl('c_recu'), 'Ignorer').click();
-      await attendre(() => confirmations.length === 1, 'confirmation demandée'); await tick(); await tick();
+      // Vague finale (revue de branche, constat 2 ; R-D-10) : un FAIT, jamais des ticks. D'abord un redessin connu (la file des redessins est en série :
+      // tout redessin d'avant est fini) ; puis, après le « non », agir() finit par son redessin depuis la base — la ligne rendue avant le clic n'est plus
+      // dans la page ; ce qu'un « non » mal tenu aurait écrit l'a été avant ce redessin (FV-M127i : la réponse ignorée, une relecture avant l'écriture).
+      const avantFile = ligneEl('c_recu');
+      emit('change', { store: 'imports' });
+      await attendre(() => !avantFile.isConnected, 'section redessinée avant la question');
+      const avantNon = ligneEl('c_recu');
+      boutonTexte(avantNon, 'Ignorer').click();
+      await attendre(() => confirmations.length === 1, 'confirmation demandée');
+      await attendre(() => !avantNon.isConnected, 'section redessinée après le « non »');
       eq([confirmations[0], await db.get('imports', 'c_recu')], [['Ignorer ce classement ? Il a coûté un appel ; le refaire en coûtera un autre.', 'Ignorer'], avantRecu], 'T-D10 (écran, ronde 1, constat 26) : « Ignorer » d’un classement REÇU depuis Imports pose la question du panneau (il a coûté un appel) ; « non » → rien d’écrit');
       reponseConfirmer = true;
       boutonTexte(ligneEl('c_recu'), 'Ignorer').click();
@@ -1623,7 +1657,9 @@ export async function runClassementTests({ eq, ok }) {
         ligneLot({ id: 'l1', rang: 1, page_ids: ['p1', 'p3'], recipe_id: 'rcS', device_id: moi, status: 'a_verifier', over: { resultat: RECETTE_LUE(), started_at: DATE, updated_at: '2026-10-19T00:00:01.000Z' } }),
         ligneLot({ id: 'l3', rang: 3, page_ids: ['p5'], device_id: moi, status: 'echec', over: { erreur: { raison: 'serveur', extra: {} }, updated_at: '2026-10-19T00:00:03.000Z' } }),
         ligneLot({ id: 'l2', rang: 2, page_ids: ['p2'], device_id: moi, status: 'a_verifier', over: { resultat: RECETTE_LUE('Tarte fine aux poires', 140), started_at: DATE, updated_at: '2026-10-19T00:00:02.000Z', lot: { classement_id: 'imp_cl', rang: 2, total: 3, titre: 'Tarte fine aux poires', page: 140 } } }),
-        ligneClassement({ id: 'c_ouvert' }),
+        // Vague finale (revue de branche, constat 14) : EN ÉCHEC, pas reçu — sous M62 (branche classement de lignesImports retirée), une ligne en échec
+        // reçoit les gestes communs, « Relancer » compris ; une ligne reçue ou à lancer garderait « Reprendre », « Ignorer » (mesuré : l'état ne tuait pas M62).
+        ligneClassement({ id: 'c_ouvert', status: 'echec', over: { erreur: { raison: 'coupe', extra: {} } } }),
       ] }, origin: 'device' });
       const racine = await monterAdd(repo, db);
       eq([enteteLot(racine, 'imp_cl'), continuerDe(racine, 'imp_cl'), enLectureDe(racine, 'imp_cl')], [['Lot de 3 recettes · Saisons', '2 sur 3 lues · 1 en échec'], null, null], 'T-D17 : le bloc du lot — « Lot de 3 recettes · Saisons », « 2 sur 3 lues · 1 en échec » (l1 et l2, à vérifier, comptées parmi les lues ; une ligne de lot ENREGISTRÉE l’est par la vérification ci-dessous, M51 — libellé corrigé en ronde 1) ; rien à lancer ici → ni « Continuer » ni lecture en cours');
@@ -1632,7 +1668,7 @@ export async function runClassementTests({ eq, ok }) {
       eq([...racine.querySelectorAll('[data-role="imports"] > [data-role="ligne-import"]')].map((l) => l.dataset.id).filter((id) => ['l1', 'l2', 'l3'].includes(id)), [], 'T-D17 (MT-blocs, écran — libellé corrigé en ronde 1) : une ligne de lot n’est rendue que dans son bloc, jamais hors de lui');
       eq(['l1', 'l2'].map((id) => { const r = blocLot(racine, 'imp_cl').querySelector(`[data-role="ligne-import"][data-id="${id}"] > [data-role="rang-lot"]`); return r?.previousElementSibling?.matches('.row.between') ? r.previousElementSibling.querySelector('strong')?.textContent ?? null : null; }), ['Soupe de courge', 'Tarte fine aux poires'], 'T-D17 (ronde 1, N2) : « Recette {k} sur {n} » est un enfant de sa ligne qui suit IMMÉDIATEMENT la rangée du titre (.row.between), jamais rendu après l’état ou les gestes');
       const cl = racine.querySelector('[data-role="ligne-import"][data-id="c_ouvert"]');
-      eq([cl?.querySelector('strong')?.textContent, [...cl.querySelectorAll('button')].map((x) => x.textContent)], ['Classement · Saisons', ['Reprendre', 'Ignorer']], 'T-D17 (M62) : le classement — « Classement · Saisons », Reprendre et Ignorer, jamais « Relancer »');
+      eq([cl?.querySelector('strong')?.textContent, [...cl.querySelectorAll('button')].map((x) => x.textContent)], ['Classement · Saisons', ['Reprendre', 'Ignorer']], 'T-D17 (M62) : le classement EN ÉCHEC — « Classement · Saisons », Reprendre et Ignorer, jamais « Relancer » (vague finale, constat 14 : l’état qui exerce la branche)');
       boutonTexte(cl, 'Reprendre').click();
       eq(navs.at(-1), '/import?session=ss1&import=c_ouvert', 'T-D17 : « Reprendre » d’un classement → /import?session=…&import=…');
     });
@@ -2538,10 +2574,106 @@ export async function runClassementTests({ eq, ok }) {
       const src = sansCommentaires(sources[0]);
       const acces = [...src.matchAll(/(?<![\w$/])repo(Module)?\s*\??\.\s*(\w+)/g)];
       const ecritures = [...new Set(acces.filter((m) => !m[1]).map((m) => m[2]).filter((f) => !['get', 'all', 'byIndex', 'getFile', 'deviceId', 'newId'].includes(f)))].sort();
-      const duModule = [...new Set(acces.filter((m) => m[1]).map((m) => m[2]))].filter((f) => !['newId', 'deviceId'].includes(f));
+      const duModule = [...new Set(acces.filter((m) => m[1]).map((m) => m[2]))].filter((f) => !['newId', 'deviceId', 'BATTEMENT_MORT_MS'].includes(f));
       const detours = [...src.matchAll(/(?<![\w$])repo(?:Module)?\s*(?:\?\.\s*)?\[|\.\.\.\s*repo(?:Module)?\b/g)].map((m) => m[0])
         .concat([...src.matchAll(/(\w*)\s*=\s*(repo(?:Module)?)\b(?!\s*\??\.)/g)].map((m) => `${m[1]} = ${m[2]}`).filter((x) => x !== 'repo = repoModule'));
-      eq([ecritures, duModule, detours], [['ouvrirImport', 'transitionner'], [], []], 'T-D20 (I-D1) : src/ui/regroupement.js n’écrit que par repo.transitionner et repo.ouvrirImport (ni save, ni saveBatch, ni put, ni remove) — par repo ou par repoModule, `?.` et espaces compris ; repoModule ne sert que newId et deviceId ; ni crochets, ni alias, ni déstructuration, ni décomposition (ronde 1 de T6)');
+      // Vague finale (revue de branche, constat 11) : les deux formes que le motif ne voyait pas — un import NOMMÉ d'une fonction de repo.js, un second espace
+      // de noms sous un autre nom — sont fermées en épinglant les imports : repo.js n'est importé QUE comme `repoModule`, db.js que pour TransitionRefusee.
+      // Et (constat 7) la veille de l'état 2 rejoue repo.marquerInterrompus (lot A : la passe du démarrage, par transitionner conditionné) avec la constante
+      // BATTEMENT_MORT_MS lue sur l'espace de noms.
+      const lignesDe = (fin) => src.split('\n').filter((l) => l.includes(fin)).map((l) => l.trim());
+      eq([ecritures, duModule, detours, lignesDe('repo.js'), lignesDe('db.js')], [['marquerInterrompus', 'ouvrirImport', 'transitionner'], [], [], ["import * as repoModule from '../model/repo.js';"], ["import { TransitionRefusee } from '../core/db.js';"]], 'T-D20 (I-D1) : src/ui/regroupement.js n’écrit que par repo.transitionner, repo.ouvrirImport et repo.marquerInterrompus (ni save, ni saveBatch, ni put, ni remove) — par repo ou par repoModule, `?.` et espaces compris ; repoModule ne sert que newId, deviceId et BATTEMENT_MORT_MS ; ni crochets, ni alias, ni déstructuration, ni décomposition (ronde 1 de T6) ; repo.js importé une seule fois, comme l’espace de noms repoModule, et db.js pour TransitionRefusee seul — ni import nommé, ni second espace de noms (vague finale, constat 11)');
+    });
+
+    // =================================================================================================================================
+    // Vague finale (revue de branche) : un brouillon écrit après « Retirer » d'une photo classée (constat 1), « Regrouper en recette » sur une ligne de lot
+    // (constat 4), des octets arrivés pendant que l'écran est monté (constat 5), la veille de l'état 2 (constat 7), le vol lié aux pages comptées (constat 9).
+    await ecran('T-D4 (écran, vague finale, constat 1) « Retirer » une photo classée, un geste, un remontage : les groupes gardés', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_rt' })] });
+      const groupesDe = (r) => panneau(r).etatClassement().groupes.map((g) => [g.cle, g.page_ids]);
+      const monter = async (quoi) => { scene.replaceChildren(); const r = await monterSeance(repo, db, { query: { session: 'ss1', import: 'imp_rt' } }); await attendre(() => !!panneau(r).querySelector('[data-role="regroupement"]'), quoi); return r; };
+      try {
+        const r1 = await monter('regroupement rendu');
+        choisirSelect(panneau(r1), 'p3', 'g2');
+        await attendre(async () => (await brouillonEn(db, 'imp_rt'))?.groupes?.find((g) => g.cle === 'g2')?.page_ids?.join() === 'p2,p3', 'brouillon écrit (p3 dans g2)');
+        cocher(r1, ['p5']);
+        [...r1.querySelectorAll('button.btn.danger')].find((b) => b.textContent === 'Retirer').click(); // « Retirer » de la séance : la vraie question
+        await attendre(() => !!document.querySelector('dialog[open]'), 'question « Retirer »');
+        [...document.querySelector('dialog[open]').querySelectorAll('button')].find((b) => b.textContent === 'Retirer').click();
+        await attendre(async () => !(await db.get('source_pages', 'p5')), 'p5 retirée de la séance');
+        const r2 = await monter('remontage après « Retirer » (le refresh() de la séance)');
+        const apresRetrait = groupesDe(r2);
+        choisirSelect(panneau(r2), 'p4', 'nouveau'); // un geste : le brouillon est écrit SANS p5
+        await attendre(async () => !!(await brouillonEn(db, 'imp_rt'))?.groupes?.some((g) => g.cle === 'n1'), 'brouillon écrit sans p5');
+        const ecrit = await brouillonEn(db, 'imp_rt');
+        const r3 = await monter('second remontage');
+        eq([apresRetrait, ecrit.groupes.flatMap((g) => g.page_ids).includes('p5'), groupesDe(r3), panneau(r3).etatClassement().aPart], [[['g1', ['p1']], ['g2', ['p2', 'p3']]], false, [['g1', ['p1']], ['g2', ['p2', 'p3']], ['n1', ['p4']]], []], 'T-D4 (écran, M-couverture, vague finale, constat 1) : « Retirer » une photo classée (p5), puis un geste (brouillon écrit sans p5), puis un remontage → les groupes corrigés sont GARDÉS (p3 dans g2, p4 en recette neuve) ; jamais le regroupement initial en silence');
+      } finally { document.querySelectorAll('dialog[open]').forEach((d) => d.close()); }
+    });
+
+    await ecran('T-D11 (vague finale, constat 4) regrouperPermis : une photo d’une ligne de lot pas encore lue retire « Regrouper en recette »', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_lu', status: 'enregistre', over: { finished_at: DATE } }), ligneLot({ id: 'l1', classementId: 'imp_lu', rang: 1, total: 1, page_ids: ['p1', 'p3'] })] });
+      const racine = await monterSeance(repo, db);
+      cocher(racine, ['p1']);
+      const surLot = lienRegrouper(racine);
+      cocher(racine, ['p1', 'p2']);
+      eq([surLot, !!lienRegrouper(racine), panneau(racine).regrouperPermis(['p3', 'p4']), panneau(racine).regrouperPermis(['p4'])], [null, true, false, true], 'T-D11 (M-regrouper-lot, vague finale, constat 4 ; D-D15) : une photo d’une ligne de lot pas encore lue (p1, p3) → pas de « Regrouper en recette » (l’éditeur la relirait : un appel de plus) ; une photo libre (p2, p4) → le geste reste');
+    });
+
+    await ecran('T-D12 (vague finale, constat 9) état 5 : page_ids réécrite entre le clic et le vol → refus avant tout décodage et toute transition', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_rw', status: 'a_lancer', page_ids: ['p1', 'p2'] })] });
+      const ff = fauxFetch([200, corpsModele(CLASSEMENT_5)]);
+      const sha = await Promise.all(['p4', 'p5'].map(async (id) => (await db.get('source_pages', id)).sha256));
+      let arme = false, reecrit = false; const lus = [];
+      // La relecture du journal par classer() (après la session) déclenche la réécriture : une réception ou un autre onglet entre le compte et le vol.
+      const espion = { ...repo,
+        all: async (s) => { const r = await repo.all(s); if (arme && !reecrit && s === 'imports') { reecrit = true; const l = await db.get('imports', 'imp_rw'); await db.mutate({ puts: { imports: [{ ...l, page_ids: ['p4', 'p5'] }] }, origin: 'device' }); } return r; },
+        getFile: async (h) => { if (reecrit) lus.push(h); return repo.getFile(h); } };
+      const p = await monterPanneau(espion, db, { importId: 'imp_rw', over: { fetch: ff.fetch } });
+      await attendre(() => { const b = p.querySelector('button[data-role="classer"]'); return !!b && !b.disabled; }, '« Classer » allumé');
+      arme = true;
+      const avant = p.querySelector('button[data-role="classer"]');
+      avant.click();
+      await attendre(() => reecrit && p.querySelector('button[data-role="classer"]') !== avant, 'panneau redessiné après le clic');
+      const l = await db.get('imports', 'imp_rw');
+      eq([lus.filter((h) => sha.includes(h)), ff.appels.length, l.status, l.page_ids], [[], 0, 'a_lancer', ['p4', 'p5']], 'T-D12 (M-vol-pages, vague finale, constat 9 ; D-D1) : page_ids réécrite entre le compte et le vol → aucun octet des pages réécrites lu (aucun décodage), aucune transition, 0 POST — le vol est lié aux pages COMPTÉES');
+    });
+
+    await ecran('T-D13 (vague finale, constat 5) octets arrivés pendant que l’écran est monté : « Lire » se rallume au prochain état du moteur', async (repo, db) => {
+      await poserSeance(repo, db, { sansOctets: ['p3'], imports: [ligneClassement({ id: 'imp_oc' })] });
+      const abonnes = new Set();
+      const ctx = await ctxDe(repo, db);
+      ctx.sync.moteur = { onEtat: (fn) => { abonnes.add(fn); return () => abonnes.delete(fn); } }; // un moteur factice : seul onEtat est lu
+      const p = G.panneauClassement(ctx.scan_sessions.find((s) => s.id === 'ss1'), ctx, () => [], deps(repo, { importId: 'imp_oc', fetch: fauxFetch().fetch }));
+      scene.append(p);
+      await attendre(() => p.querySelector('[data-role="raison-lire"]')?.textContent === 'Les photos de cette séance ne sont pas sur cet appareil.', 'octets absents dits');
+      const f = await imageDe('p3.jpg', '#123');
+      await repo.putFile('sha-p3', f, { original_filename: f.name }); // « Télécharger » du lot G : les octets arrivent, rien sur le bus
+      for (const fn of [...abonnes]) fn({});
+      await attendre(() => { const b = p.querySelector('button[data-role="lire-recettes"]'); return !!b && !b.disabled; }, '« Lire » rallumé sans quitter la séance');
+      eq([p.querySelector('[data-role="raison-lire"]')?.textContent, abonnes.size], ['Une lecture = un appel à l’assistant, compté dans ton quota du jour.', 1], 'T-D13 (M-octets-arrives, vague finale, constat 5 ; D-D24 après G) : des octets arrivés pendant que l’écran est monté → revérifiés à l’état suivant du moteur : « Lire » rallumé, la raison tue');
+      scene.replaceChildren();
+      for (const fn of [...abonnes]) fn({});
+      eq(abonnes.size, 0, 'T-D13 (vague finale, constat 5) : le panneau démonté se désabonne du moteur au premier état qui le trouve détaché');
+    });
+
+    await ecran('T-D12 (vague finale, constat 7) état 2 « ailleurs » : la passe interrompu à l’affichage, puis la veille', async (repo, db) => {
+      const passes = [];
+      const espion = { ...repo, marquerInterrompus: async (m) => { const n = await repo.marquerInterrompus(m); passes.push(n); return n; } };
+      // (a) un vol d'un document mort (battement de 12 h à l'horloge du panneau) : levé dès l'affichage — la veille par défaut (91 s) n'a pas le temps.
+      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_mort', status: 'en_cours', over: { document_id_vol: 'doc-mort', battement_at: DATE, started_at: DATE } })] });
+      const p = await monterPanneau(espion, db, { importId: 'imp_mort' });
+      await attendre(async () => (await db.get('imports', 'imp_mort')).erreur?.raison === 'interrompu' && !!p.querySelector('[data-role="echec"]') && !!p.querySelector('button[data-role="reclasser"]'), 'interrompu à l’affichage');
+      eq([(await db.get('imports', 'imp_mort')).status, passes[0]], ['echec', 1], 'T-D12 (M-veille-affichage, vague finale, constat 7 ; VF-15 du lot A) : un classement « en cours sur un autre écran » dont le document est mort → echec(interrompu) dès l’affichage, l’état 4 et « Reclasser » ; jamais bloqué sans geste');
+      // (b) un vol encore vivant à l'affichage (battement à l'heure du panneau), dont le document meurt ensuite : levé par la veille (60 ms ici).
+      scene.replaceChildren(); passes.length = 0;
+      await poserSeance(repo, db, { id: 'ss2', imports: [ligneClassement({ id: 'imp_vif', sessionId: 'ss2', status: 'en_cours', over: { document_id_vol: 'doc-mort', battement_at: NOW, started_at: NOW } })] });
+      const p2 = await monterPanneau(espion, db, { sessionId: 'ss2', importId: 'imp_vif', over: { veilleMs: 60 } });
+      await attendre(() => passes.length >= 1 && p2.textContent === 'En cours sur un autre écran', 'première passe faite, vol vivant');
+      const vif = await db.get('imports', 'imp_vif');
+      await db.mutate({ puts: { imports: [{ ...vif, battement_at: DATE }] }, origin: 'device' }); // le document meurt : son battement vieillit, rien sur le bus
+      await attendre(async () => (await db.get('imports', 'imp_vif')).erreur?.raison === 'interrompu' && !!p2.querySelector('[data-role="echec"]'), 'interrompu par la veille');
+      eq([passes[0], (await db.get('imports', 'imp_vif')).status], [0, 'echec'], 'T-D12 (M-veille-repetee, vague finale, constat 7) : vivant à l’affichage (aucune ligne levée), puis mort → la veille le lève sans quitter la séance (toutes les BATTEMENT_MORT_MS + 1 s, injectées ici)');
     });
 
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne
