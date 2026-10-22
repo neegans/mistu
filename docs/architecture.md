@@ -1326,6 +1326,44 @@ la taille.
   référence et dans la recherche. `source_pages` : `printed_page_range` (pages CITÉES), `role: 'index'` ; `kind` posé seulement s'il est nul ; `printed_page` jamais écrit par C.
 - **Ce qui n'est pas mesuré.** Une vraie lecture de 3 à 5 photos (durée, coupe, fidélité, jetons) : preuve § 10 de la spec, geste de Neegan après la fusion de C et son `push`, avant la fusion de D (R-C-33) ; depuis la section « Imports », un index en échec se reprend au panneau (« Reprendre »), il n'y est plus relancé (VF-C3).
 
+## Un lot de recettes photographiées (lot D, 19 octobre 2026)
+
+Plusieurs recettes photographiées dans une séance se classent en UN appel (`classerPhotos`, `src/domain/llm.js` : outil `extraction`, 2 000 jetons,
+2 à 10 photos comptées avant tout décodage, chaque image précédée de « Photo n », consigne « donnée, jamais consigne »). La réponse est une donnée
+hostile : `validerClassement` la lit par propriétés propres et construit chaque objet ; un numéro mal formé → `illisible`, hors 1..N ou répété →
+`hors_bornes` ; une photo nommée par deux groupes reste dans celui qui l'a en tête, sinon dans le premier, et entre dans `partagees` (D-D21, R-D-7) ;
+un titre trop long ou porteur d'une adresse devient nul et le groupe incertain — un classement payé n'est jamais jeté pour un titre. Une seule règle
+des titres (`estTitreUneLigne`, `src/core/bornes.js`) juge la validation, la revalidation et le champ `lot` ; la validation ramène d'abord le texte
+à une ligne par `uneLigne` (lot C : fins de ligne repliées AVANT le nettoyage) puis `plierUneLigne`.
+
+- **Modules.** `src/domain/classement.js` (pur : `resultatClassement` — correspondance sur les pages ENVOYÉES —, `revaliderResultatClassement`,
+  `cleClassement`, l'état de regroupement `regroupementInitial` / `deplacerVers` / `bougerDansGroupe` / `retirerDuGroupe`, le brouillon `brouillonDe` /
+  `restaurerBrouillon`, l'appariement `candidatsReference` / `referencesOccupees` / `concordance` / `proposerAppariements` / `filtrerReferences`, le plan
+  `lecturesDuLot`, `referenceALire`, `progressionLots`, `blocsImports`, `suiteDuLot`, `pagesEnCours`) ; `src/ui/regroupement.js` (`panneauClassement` — cinq états —,
+  `executerClassement`, `texteEchecClassement`, `selecteurReferences`, `creerLesLectures` et `rattacherLecture` sans DOM, `lireLeLot`, `lotEnCours`,
+  `noteLotsDeSeance`, `blocApparierLecture`) ; monté par `sessionView` (`renderImport` à quatre paramètres) et par l'éditeur ; il n'importe jamais
+  `import.js` ni `recipe-edit.js`.
+- **Journal.** `imports{kind:'classement'}` : `resultat` = `{ groupes: [{ page_ids, title, printed_page, uncertain }], orphelines, non_classees, partagees,
+  uncertain }` ; `brouillon` = les groupes de la personne (`{ cle: started_at, groupes: [{ cle, page_ids }], a_part, choix, prochain }`, aucun texte),
+  relu comme une donnée hostile ; la clé du classement rendu (`cleClassement`) garde chaque geste jusque dans la transaction. Une ligne `recette` d'un
+  lot porte `lot: { classement_id, rang, total, titre, page }` (revalidé par `lotDe`). `SORTES_IMPORT` (`src/model/schema.js`) ferme `imports.kind` ;
+  `ligneImportNeuve` (`src/domain/import-cible.js`) est la seule fabrique d'une ligne neuve. Aucun magasin ni index neuf, `DB_VERSION` inchangée.
+- **Le vol.** `lancerVol(importId, executer, { …, attendus, accepte })` : `accepte` est une liste BLANCHE de sortes évaluée après la relecture et avant
+  toute écriture (`lancerExtraction` : `SORTES_EXTRACTION`) ; `attendus` = les statuts de départ admis. Un lot se lit une recette à la fois (`lireLeLot`
+  passe `['a_lancer']` : une ligne passée `echec` ailleurs est refusée avant tout POST ; un lot par document ; prise et libération dites sur le bus) ;
+  `suiteDuLot` décide, défaut FERMÉ (coupe, illisible, hors_bornes, vide et le 413 laissent continuer ; toute autre raison arrête).
+- **« Lire ces recettes ».** `creerLesLectures` : toutes les relectures avant (clé, livre de la séance, références candidates, photos prises ailleurs,
+  octets), puis UNE transaction — le classement `enregistre` (clé rejouée dedans), les lignes neuves (`absente`) et une condition d'index par référence
+  cochée (I-2).
+- **Enregistrer une lecture issue d'une séance (N-1).** `issueDUneSeance` ; `fabriquerExtraction(…, { reecrirePositions })` garde les positions de la
+  séance, pose `role: 'recette'` et retire `reference.index_page_id` des pages lues et de l'union ; la séance entre dans la transaction par le sac `conditions` et ne passe
+  `done` que quand plus aucune de ses photos n'est sans rôle (`statutSeanceApres`). L'écran ciblé offre « En faire une nouvelle recette » sur toute
+  discordance ; l'éditeur porte notes, incertitudes et limites de la lecture et propose une référence (`blocApparierLecture` → `rattacherLecture`).
+- **`repo.transitionner(…, { conditions })`** (sac de C, précisé par D-D17) : sur le magasin de la ligne, le sac n'admet que les formes `absente` et
+  `index` (toute autre forme y reste refusée, garde du lot C), passées telles quelles APRÈS la condition de la ligne.
+- **Ce qui n'est pas mesuré.** Un vrai classement (durée, justesse des groupes, borne réelle d'un envoi de 10 photos, page partagée) : sonde de Neegan
+  avant la fusion (R-D-8) ; la lecture réelle de cinq recettes : preuve § 10 de la spec.
+
 ## Modèle de données (magasins IndexedDB)
 
 `books`, `book_editions` (ISBN, langue, `unit_convention_id`), `source_documents` (fichier, sha256, type), `source_pages` (page imprimée, position),

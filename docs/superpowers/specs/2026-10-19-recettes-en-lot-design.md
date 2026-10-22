@@ -1414,6 +1414,192 @@ attend).
 
 ## 12. Amendements
 
+### 12.C Construction (plan rév. 3, rejoué sur la tête finale du lot C ; posé à la tâche 6, 22 octobre 2026)
+
+Le plan rév. 3 (écrit sur `58bb49b` / `2b6a2fd`) a été rejoué par intention sur `739e706`, tête finale du lot C (voie (b) ; base de D `4db4d8e` =
+`739e706` + cette spec ; plan rejoué commis `d42d4ab`), puis construit en six tâches, chacune revue à trois lentilles (spec, sécurité, faux-vert) avec
+au moins une ronde : T1 `b5565a6` / `1ae60f0`, T2 `ad0c439` / `29cd797`, T3 `c7e826b` / `fd483bf`, T4 `fbf0b92` / `7494ee9`, T5 `18543f5` / `3645d41` /
+`356a1b2`, T6 (filet T-D20, total épinglé, `docs/architecture.md`, `CLAUDE.md`, cette section). Cette section consigne ce que la construction a
+amendé ; la revue finale de branche, sa vague et ses rulings la complètent à la clôture (ratification ou renversement des écarts ci-dessous).
+
+**Rulings de plan (rév. 3).**
+- **R-D-9** — les figures de T-D18 (e) se comptent par PAGE (`:scope > .thumbs > figure`) : G imbrique une figure d'absence dans la figure d'une page
+  sans octets.
+- **R-D-10** — T-D11 attend le redessin de la barre, jamais des ticks (M66 déterministe) ; la règle « attendre un fait, jamais des ticks » devient
+  globale (des ticks ne restent admis que pour constater une ABSENCE sans redessin : T-D12 double clic, « Ignorer » répondu non, T-D16 un seul POST).
+- **R-D-11** — `KINDS_PAGES` + `'classement'` ratifié ; le libellé du lot A « hors recette | index » devient « hors KINDS_PAGES ».
+- **R-D-12** — la base de D est la tête FINALE du lot C (chaîne A `2b6a2fd` → B → G → C → D) ; `APP_VERSION` de D = `0.13.0`, `VERSION` de `sw.js`
+  repart à `cuisine-os-v0.13.0-1` à la première tâche qui touche `src/`, puis +1 par tâche (et par ronde, R-B-24) ; une dérive de numéro ou d'ancre
+  n'est pas un constat (R-C-7).
+
+**Rulings du rejeu (chef d'orchestre, 21 octobre, en tête des six briefs ; écarts d'intention EI-1 à EI-13 du plan commis).**
+- **R-D-13 (EI-1)** — `surUneLigne(v) = plierUneLigne(uneLigne(v) ?? '')` (`uneLigne` de C : fins de ligne repliées AVANT le nettoyage) ; M8 et M104
+  redéfinis sur cette forme ; T-D1 gagne l'assertion MR-colle (un titre « Soupe » + U+2028 + « de courge » rend « Soupe de courge »).
+- **R-D-14 (EI-2)** — la garde du sac `conditions` de C est élargie aux deux formes sans fiche — `{ key, absente: true }` et `{ index, valeur,
+  exclus }` — sur le magasin de la transition, passées APRÈS la condition de la ligne ; une condition à clé y reste refusée (T-C24 vert ; MR-sac-large
+  et MR-sac-ferme rouges).
+- **R-D-15 (EI-3)** — une seule fabrique : `fabriquerImportWeb` (B) passe par `ligneImportNeuve`, sa garde `deviceId` gardée ; l'épingle de source de B
+  `tests/lecture-web.js:217` passe de « quatre » à « trois » appels à `assertVocabulaire` (amendée, jamais supprimée, I-D11 ; MR-web rouge).
+- **R-D-16 (EI-4)** — le panneau « Classement » est créé après le dernier `await` du rendu de `sessionView` (G a posé `await vignettesDePages` après
+  `drawActions`) ; MR-c3 rouge.
+- **R-D-17 (EI-5 à EI-13, en bloc)** — quatorze lignes de pins de version dans sept fichiers ; seuil `0.13.0-N` (N ≥ 1) de `tests/sync-l4.js` ; bloc
+  « Original » sur la forme de G ; `signal` avant `attendus` / `accepte` ; branche `classement` de `lignesImports` après `en_cours`, avant `web` ; ordre
+  de `tests/tests.js` ; `SORTES_EXTRACTION = ['recette', 'index']` ; `pagesALire` de C ; phrases de commentaire sur une ligne propre ; `MODULES_NEUFS` ;
+  section D de `docs/architecture.md` après celle de C.
+- **R-D-18** — la tâche 5 épingle « Télécharger les 2 pages » du bloc « Original » sans la photo d'index (M149-partiel rouge).
+- **R-D-19** — `incertainDe` emploie `texteDesChamps` (comme C, R-C-11) : comportement identique, mutant redéfini ; la phrase de § 4.3 « la règle de
+  `texteIncertain` reprise sans l'appeler » ne décrit plus le code (amendement, ci-dessous).
+
+**Relecture du code commis (tâche 1, étape 1, `t1-relecture.md`, tête `d42d4ab`, code `e305355`).** Tout ce qui suit est déjà déclaré par le
+rejeu (EI-1 à EI-13) ; rien de neuf. Une ligne par point :
+- **(a) Le vol** — `lancerVol(importId, executer, options = {})` ; `volUnique(…, { …, lecture = null, signal = null } = {}, suivi)` (`signal` de C,
+  EI-7) ; départ par `memesPages` ; prise du vol par `prendreVol` (B, `./vol.js`).
+- **(b) `executerExtraction`** lit `recette` ET `index` → `SORTES_EXTRACTION = ['recette', 'index']` (EI-11, E-3).
+- **(c) Deux sacs de `repo.transitionner`** — `autres` (lot A, autres magasins, brut, `TypeError` sur le magasin de la transition, lu par
+  `marquerInterrompus`) et `conditions` (C, après la ligne, `patch` et `{ key, fusion }` enveloppés) ; la garde de ronde 1 de C refusait le magasin de
+  la transition → EI-2 / R-D-14.
+- **(d)** `porteUneAdresse` dans `src/core/bornes.js` ; `nettoyer`, `longueur`, `texteBorne`, `entierBorne` et **`uneLigne`** exportés de
+  `src/domain/llm.js` → EI-1 / R-D-13.
+- **(e)** `RAISONS_ECHEC` : 23 raisons ; `KINDS_IMPORT = ['recette', 'index', 'web']`, `KINDS_PAGES = ['recette', 'index']` ; imports de `repo.js` et
+  de `vocabulaire.js` tels qu'attendus ; `importOuvert` lit `KINDS_IMPORT` (un classement devient « ouvert », voulu).
+- **(f)** `fabriquerImportWeb` : mêmes 19 champs que `nouvelleLigneImport`, garde `deviceId` de B ; épingle « quatre » (EI-3) ; import étendu (EI-9).
+- **(g)** `renderImport(params, query, ctx, deps = {})` (quatre paramètres) ; `sessionView` et la présélection de C ; `await vignettesDePages` après
+  `drawActions` (EI-4) ; bloc « Original » de G (EI-6) ; `cleLecture` dans le domaine, ré-exportée ; `estEnLigne` ; `DOCUMENT_ID`, `BATTEMENT_MS`,
+  `volEnCours` ré-exportés de `./vol.js`.
+- **(h)** Première ligne de `PARSER_SYSTEM` telle quelle ; la phrase I-D8 s'insère en deuxième ligne.
+- **(i)** Épingle `tests/tests.js:235` (4742) ; quatorze pins de version dans sept fichiers (EI-5), plus `APP_VERSION` et `sw.js`.
+- **(j)** Filet i18n : `MODULES_NEUFS` l. 7, `CHAINES_NEUVES_AILLEURS` l. 19 de `tests/ajouter.js`.
+- **(k)** Vague finale du lot A commise (bascule par paragraphe, `champsIncertains`, `lectureJournal`, `ligneOuverte(prefere)`, `tenirVol` /
+  `libererVol`, `memesPages`, `pagesDejaLiees`, `dateReception`, `marquerInterrompus`, `battre` / `oublierBattement`, `banniereLecture`) ; les trois
+  assertions du lot A que la tâche 5 amende repérées.
+
+**Écarts déclarés par le plan (E-1 à E-29, recopiés tels quels ; DÉCLARÉS, à ratifier ou renverser par la revue finale de branche).**
+
+- **E-1** B, G et C ne sont pas bâtis à la date du plan (19 oct.) : leurs noms et leurs textes sont pris de leurs plans (`lots/B`, `lots/G`, `lots/C`) ; la
+  tâche 1, étape 1, relit la tête réelle (`t1-relecture.md`) et D s'aligne (D-D17 : « si C a tranché autrement, D s'aligne et le consigne »).
+- **E-2** « Classer » (`classer`) vérifie le réseau, la session, les photos déjà en cours d'import et les octets AVANT toute écriture : un clic refusé
+  n'écrit rien (la règle de la ronde 1 de la tâche 6 du lot A, appliquée au classement).
+- **E-3** `SORTES_EXTRACTION = ['recette', 'index']` : C lit encore les index par `lancerExtraction` (cas prévu par D-D14).
+- **E-4** Le panneau suit aussi les magasins `recipes` et `scan_sessions` sur le bus (le livre de la séance et les références relus, D-D23) ; il ne se
+  redessine que si sa signature change.
+- **E-5** `noteLotsDeSeance` rend `div.row[data-role="note-lots"]` qui contient le `.status.info` et le lien `.btn.small`.
+- **E-6** La clé « · {e} en échec » s'écrit sans espace de tête (`'· {e} en échec'` → `'· {e} failed'`) et se joint à « {k} sur {n} lues » par une espace :
+  une clé ne commence jamais par un blanc.
+- **E-7** `drawActions` filtre les `null` (`.filter(Boolean)`) : un `null` passé à `append` natif s'écrivait « null ».
+- **E-8** « Continuer la lecture » est éteint (absent) tant que CE document tient un vol OU un lot, de n'importe quel lot (`lireLeLot` refuserait). La
+  fin d'un vol ne s'annonce pas sur le bus : la section relit `volEnCours()` au redessin que la dernière écriture du vol émet.
+- **E-9** L'éditeur garde la lecture posée dans `lecturePosee` (lot A, ronde 1) et non dans un `f.lecture` neuf (spec § 4.8.2 points 2-3) : même
+  information, une définition.
+- **E-10** § 4.8.2 point 1 : tenu par la bascule de `remplir` de la vague finale du lot A (`porteUnSaut(r.steps)`) ; la tâche 5 ne l'écrit que si elle
+  manque à la tête réelle.
+- **E-11** « En faire une nouvelle recette » refusé (une autre lecture est arrivée) → `reposer()` : la question n'est reposée que si la lecture courante
+  est encore discordante ; sinon elle est oubliée et l'écran offre « Enregistrer cette lecture » (une lecture n'est jamais enregistrée sans avoir été vue).
+- **E-12** M152 : une lecture du journal close ailleurs entre `remplir` et « Enregistrer » ne nomme plus la ligne (`import_id` absent), mais ce qu'elle a
+  dit d'incomplet (`missing_page`, `incomplete`) reste porté et la fiche reste `partial` (I-1 du lot A, ronde 1) — la spec écrivait « sans import_id ni
+  missing_page ».
+- **E-13** L'écran ciblé dit le refus d'une séance disparue (`TransitionRefusee` du magasin `scan_sessions`) par le toast existant ; l'éditeur garde sa
+  branche de refus (il se détache de la ligne, le toast existant).
+- **E-14** `blocApparierLecture` se relit et se redessine seul après un refus (aucun rappel dans sa signature) ; ses nœuds portent `data-role`
+  (`proposition`, `motif`, `enregistrer-reference`, `avertissement`) ; `rattacherLecture` rend `refuse('lecture' | 'reference' | 'transition')`.
+- **E-15** § 4.8.4 : l'écart de la photo d'index se fait dans le seul bloc « Original » (`pagesOriginal`) ; `const pages` (l. 33) et ses autres lecteurs
+  ne changent pas.
+- **E-16** `MOTIFS` (raisons d'une proposition incertaine) passe au niveau du module en tâche 5 : une définition pour l'écran de regroupement et l'éditeur.
+- **E-17** Les tests T-D18 (b) et (c) montent l'éditeur avec les paramètres que porte le lien « Regrouper en recette » (un `href`, sans geste) ; T-D21
+  observe la condition d'index par `rattacherLecture` appelé avec un espion (le `repo` de l'éditeur n'est pas injectable) ; T-D19 lit trois lignes
+  (la troisième retapée) ; T-D18 (e) éprouve M147 sur l'écran ciblé d'une ligne de lot.
+- **E-18** Les mutants à deux murs (M85, M136, M155) retirent ensemble la relecture et la garde de la transaction ; chacune seule est tenue par un
+  mutant voisin (M82, M137, M156).
+- **E-19** Tâche 1 (e2) : `seanceDUnImportCible` s'ancre sur la condition `importOuvert(i) && …` de `4cb99a0` (la spec citait
+  `!IMPORTS_TERMINES.includes(i.status)`).
+- **E-20** `KINDS_PAGES` (B, P-1) gagne `'classement'`, à côté de `KINDS_IMPORT` : la spec (D-D12) nommait « `KINDS_IMPORT` de `src/model/repo.js` (les
+  sortes que `repo.ouvrirImport` et `repo.ajouterPages` ouvrent) » ; après B, cette liste est `KINDS_PAGES` (domaine, importée par `repo.js`). Les deux
+  pins de B (`D.KINDS_IMPORT`, `D.KINDS_PAGES`) sont amendés (I-D11) ; `web` reste hors de `KINDS_PAGES`. Conséquence RATIFIÉE (R-D-11, rév. 3) :
+  `repo.ouvrirImport` et `repo.ajouterPages` admettent `kind: 'classement'` (aucun appelant n'ajoute de pages à un classement) ; `web` reste refusée ;
+  le test du lot A qui l'essaie reste vert, et son libellé « hors recette | index » devient « hors KINDS_PAGES » (tâche 1, étape 5).
+- **E-21** L'aide `ecran` de `tests/classement.js` pose un piège `globalThis.fetch` (qui LÈVE) le temps de chaque bloc d'écran et rend la vraie en
+  `finally` : seconde exception nommée, après l'éditeur, à « aucun ne remplace `globalThis.fetch` » (spec § 7) — un piège, jamais un faux réseau.
+- **E-22** Le départ du vol garde le patch-fonction `memesPages` de la vague finale du lot A (m2) : seul `attendus` devient l'option de S-3. M143b et
+  l'espion de T-D16 (M91) s'y alignent : les départs se relèvent par `db.onMutate` (chaque ligne écrite `en_cours`, une fois), jamais par la forme du
+  patch.
+- **E-23** Le sac `autres` de la vague finale du lot A (autres magasins, conditions brutes, `TypeError` sur le magasin de la transition, lu par
+  `marquerInterrompus`) est GARDÉ à côté du sac D-D17 (`conditions`) : la spec ne précisait que le sac de C ; toute correction de la tâche 1 (étape 11)
+  étend le sac commis, jamais ne le remplace.
+- **E-24** T-D18 (e) éprouve « une référence la montre toujours » sur ses DEUX chemins : une référence `reference_only` avec une version (la forme d'un
+  « Saisir à la main » enregistré sans ingrédient ni étape) atteint le bloc « Original » (branche `reference_only` de `pagesOriginal`, M149b) ; une
+  référence sans version est rendue par `referenceOnly`, qui montre sa photo d'index sous « Pages d'index » (chemin du lot A et de C). Les figures se comptent par PAGE
+  (R-D-9) : `figuresDe` ne retient que `:scope > .thumbs > figure` — après G, la page pIdx (sans octets) rend un `figure.fichier-absent` IMBRIQUÉ
+  dans la figure de sa page (plan G rév. 3 l. 3292-3303, 3319, 3436-3446), et `querySelectorAll('figure')` y compterait deux ; avec ce sélecteur,
+  « Pages d’index » de rcR vaut **1 à `58bb49b` et 1 après G**, « Original » de rcX et de rcZ 1 et 1 ; `legendesOriginal` (les `figcaption`, une
+  par figure de page) n'est pas touchée par la figure d'absence, qui n'en porte pas.
+- **E-25** T-D20 (spec § 7 : « chaque tâche, puis T6 ») n'est posé qu'en tâche 6 ; à chaque tâche, les filets existants le couvrent : pins de
+  `APP_VERSION` et de `VERSION`, graphe d'imports de `tests/sync.js` contre `SHELL` (chaque module neuf dès qu'il est importé), filet i18n
+  `MODULES_NEUFS` (dès la tâche 2), tests statiques `transitionner(` et des écritures de `tests/sync.js`, total épinglé. N'arrivent qu'en T6 : la table
+  des textes § 5 avec leur anglais, `Anthropic|Supabase` et le filet I-D1.
+- **E-26** `/verify` et la copie du registre (spec § 9, T6) sont portés par la clôture du contrôleur (points 2 et 4 de « Clôture »), pas par la tâche
+  6 : gestes du chef d'orchestre, après la revue finale de branche et sa vague.
+- **E-27** « Classement reçu le {d} » date la RÉCEPTION (`dateReception` : départ du vol plus sa durée, vague finale du lot A, m7), jamais `updated_at`,
+  que chaque geste du brouillon réécrit (la spec ne nommait pas la date) ; T-D10 (écran) l'éprouve, M-recu.
+- **E-28** Les tests qui éprouvent la garde d'une fonction derrière un bouton éteint (T-D11 M66, T-D13 M129b) RALLUMENT le nœud avant le clic
+  (`click()` sur un contrôle désactivé ne déclenche rien), puis attendent le REDESSIN qui marque la sortie de la fonction — un nœud remplacé,
+  jamais des ticks (R-D-10 ; T-D13 M129 de même après le « non ») ; les verrous d'instance (T-D12 M-classer, T-D15 M86) sont observés par une dépendance
+  injectée lue dans le premier segment synchrone du geste (`enLigne`, `repo.deviceId`) ; T-D18 (a) (M146) entrelace deux instances par une porte.
+- **E-29** Table des mutants (rév. 2) : M12 et M18 redéfinis (leurs définitions de la rév. 1 étaient équivalentes au code, mesuré), M26 tué par T-C25
+  (C), M57 porté sur `KINDS_PAGES` ; seize mutants ajoutés (M14b, M57b, M84b, M-classer, M110b à M110h, M149b, M-recu, M-nul1 à M-nul3) ; les formes
+  hostiles de T-D4 ne violent plus qu'une règle chacune (douze formes, plus 11 groupes sur un contexte de 11 pages) ; T-D16 nomme ses lignes à rebours
+  des rangs.
+
+**Assertions existantes amendées (I-D11 : amendées, jamais supprimées).**
+- Lot A, `tests/import-cible.js` : « vocabulaire : statut d’import de la liste accepté » (la sorte devient obligatoire et fermée, D-D12 ; tâche 1) ;
+  « ajouterPages (ronde 1) : kind hors recette | index » → « hors KINDS_PAGES » (R-D-11 ; tâche 1) ; et les trois de la tâche 5 (N-1) —
+  « extraction : source_pages kind recipe, position 1..n » → `kind` recipe ET `role` recette, positions de la séance GARDÉES ; « extraction : la
+  séance passe done » → elle reçoit `recipe_ids` et reste `open` (une photo sans rôle) ; le panneau de discordance a quatre boutons (« En faire une
+  nouvelle recette », R-D-3). Aucune autre assertion des lots A, B, G ou C n'a rougi à l'étape 5 de la tâche 5.
+- Lot B : `tests/import-cible.js` (pins `KINDS_IMPORT` + `classement`, `KINDS_PAGES` + `classement`) ; `tests/lecture-web.js:217` quatre → trois
+  (R-D-15).
+- Pins de version (R-D-17, EI-5) : quatorze lignes dans sept fichiers (`tests/ajouter.js`, `tests/passerelle.js`, `tests/recherche-web.js` dont un
+  commentaire, `tests/assistant-compte.js`, `tests/creer-ia.js`, `tests/sync-l3.js`, `tests/sync-l4.js` — seuil `0.13.0-N`).
+- Lot D, par ses rondes : T3-R1 (« Ignorer » écrit `finished_at === NOW`) ; T5-R2 (la coche « Vérifié » de E10 sort du parcours principal de T-D19 vers
+  son propre montage : le « [0] faux » de M99 n'est plus creux ; le compte est inchangé).
+
+**Écarts de construction déclarés par les tâches et leurs rondes (à ratifier par la revue finale de branche ; « coût si faux » dans chaque rapport).**
+- **T1** — l'assertion MR-colle suit celle de M104 ; le commentaire « Lot D … » de `lignesImports` sur une ligne propre ; `estTitreUneLigne(s, max)`
+  exige la forme PLIÉE (égale à `plierUneLigne(s)`, ronde 1) ; `lecturesDuLot` exige `deviceId` (défaut `null` retiré) ; adresse coupée par une fin de
+  ligne cherchée sur la forme recollée (`porteAdresse`) ; bornes lues dans `BORNES_CLASSEMENT` ; `orphelines: null` → `illisible` ; en-tête de § 3.6 :
+  `classement.js` n'importe de `llm.js` que `BORNES_CLASSEMENT`.
+- **T2** — texte neuf hors § 5 « Coche au moins deux photos de cette séance. » ; « Ignorer ce classement » relu avant la question, gardé par sa clé
+  dans la transaction ; depuis Imports, un classement reçu se confirme et son brouillon est effacé ; `device_id` repris au départ d'un classement
+  (comme R-B-8) ; `synchroniser` relit tout le journal ; `drawActions` filtre les `null` (E-7) et lit le panneau sans sélection.
+- **T3** — les valeurs RENDUES (`cle`, `editionId`, `etat`, `choix`) prises avant le redessin de « Lire ces recettes » (défaut D-D23 mesuré sur le
+  bloc du brief, quatre assertions) ; miniatures par `displayUrl(f, urlDeBlob)` sous le cache par empreinte (contre la lettre de § 4.3 « jamais
+  displayUrl », conforme à son intention) ; ligne `small.muted[data-role="raison-reclasser"]` ; R-D-19 ; « Lire » revérifié au clic (réseau, session,
+  vol ou lot), « Reclasser » revérifié après la question.
+- **T4** — cinq assertions de vérification (« T-D17 (vérification) ») ; MT-redessin équivalent (la libération émet sur le bus) ; `referenceALire` :
+  une ligne dont la référence relue est `available` ou absente n'est ni comptée par « Continuer » ni lue par `lireLeLot` (amende § 3.6
+  `progressionLots(imports, { deviceId, recipesById })` et § 4.6) ; `lotDeRecette` : `lot` lu sur les seules lignes `recette` ; « Continuer » dit un
+  arrêt de `REFUS_ARRET_LOT` par `texteRefus` ; refusé : dire « au plus » sur « (n appels) » (une ligne sans octets est refusée avant tout POST).
+- **T5** — forme de l'assertion R-D-18 (fiche `available` à trois pages distantes, moteur factice) ; T5-V1 (refus `scan_sessions` dit) et T5-V2
+  (référence plus candidate refusée) ; séance refusée dans l'éditeur SANS détacher la lecture (contre la lettre du brief, selon § 4.8.1 point 2 —
+  le geste suivant clôt la lecture sans la séance) et même règle sur l'écran ciblé (`seanceRefusee`) ; candidature de `rattacherLecture` rejouée
+  dans la transaction par le sac `autres` (`{ key, fusion }` sur `recipes`, vérification seule) ; `src/ui/import.js` touché pour que « Retirer »
+  protège encore la photo d'index (régression corrigée, aucun texte neuf) ; photo d'index de la fiche écartée des pages lues (`fabriquerExtraction`) ;
+  un échec qui n'est pas un refus dit par « Une erreur est survenue » (texte existant) ; `f.lecture` non introduit (la lecture posée du lot A,
+  `lecturePosee`, la tient : E-9).
+- **T6** — T-D20 posé tel quel (sept assertions, vert d'emblée, rouge vu sur copie par M-D1 et M-D2) ; section D de `docs/architecture.md` : le texte
+  du plan plus deux précisions sur le code commis (`referenceALire` dans la liste du domaine ; la photo d'index retirée « des pages lues et de
+  l'union ») ; la table des mutants rejouée sur trois copies servies en parallèle (8192-8194), pas une seule sur 8193.
+
+**Dettes nommées pour la clôture.** Doublons : `classerPhotos` / `extraireTableMatieres`, `nu` / `sien` contre `objetNu` / `proprio` (et une
+troisième copie de `liste`, `objetNu`, `sien` dans `classement.js`), le sac de séance en deux copies (écran ciblé, éditeur), le prédicat « lecture
+tenue » ×5, l'échelle des raisons en deux copies (`raisonEteint` / pied de l'état 3), pas d'objet `R.rendu` ; pages écrites par des copies lues hors
+transaction (schéma du lot A) ; séance écrite par copie sur trois chemins (éditeur sans lecture du journal, « Terminer la séance », `removePages` —
+refusé pour une ronde, § 4.8.2 point 5) ; `classer()` long ; veille de l'état 2 ; borne « 10 » en dur dans un texte ; « Continuer » ne suit pas
+`online` / `offline` ; `proposer` lit le `ctx` du montage (une proposition périmée peut s'afficher jusqu'au geste, refusée alors) ; redessin double
+de l'état 3. Mutants : la table de la tâche 6 (193 lignes : les 171 de § 7, les 16 du pré-vol, M-D1 et M-D2, MR-sac-large, MR-sac-ferme, MR-web, MR-colle) rejouée en 218 passes sur des copies servies à part (registre `mutants.md`) : 217 rouges, **un survivant** — M132 à la lettre (« retirer `if (urls.has(sha)) { … return; }` ») : le second mur du cache de `poserImage` (`if (!urls.has(sha)) urls.set(…)`, ronde 1 de T3) le rend équivalent observable (une lecture `getFile` de plus) ; les deux murs ensemble, rouges par T-D13 (E-18) ; à trancher à la clôture (redéfinir M132 sur les deux murs, ou retirer le mur redondant). **M53 et M84** rougissent leurs assertions (« T-D7 (M53) … » ×20, « T-D16 (M84, M84b) ») mais la suite ne rend plus de bilan : T-D16 « Annuler » attend `course` sans borne quand le lot ne s'arrête pas sur la première ligne (test à borner, R-D-10). MR-colle, survivant au rejeu, est rouge (R-D-13).
+
+**Mesures de la tâche 6.** Suite `✅ 5217/5217` (épingle **5216**, `tests/tests.js:240` ; départ de la tâche 5210/5210, épingle 5209 ; T-D20 : +7),
+seule erreur de console le 404 de `/favicon.ico` ; Node 174/174 ; `--check` 0 ; `APP_VERSION 0.13.0`, `sw.js cuisine-os-v0.13.0-10` (la tâche 6 ne
+touche pas `src/`) ; `DB_VERSION` 4 ; rien sous `supabase/` ni `tools/` ; invisibles 0 (Python).
+
 ### 12.0 Rév. 3 → rév. 4 (vérification de la rév. 3, deux corrections de forme par le chef d’orchestre)
 
 La vérification de la rév. 3 (`wf_ff331391-a09`) a jugé appliqués R-D-1 à R-D-7, N-1, N-2 et les réserves, sans Critical neuf, et relevé deux

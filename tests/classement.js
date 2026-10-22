@@ -2462,6 +2462,72 @@ export async function runClassementTests({ eq, ok }) {
       eq([issues.map((r) => [r.issue, r.raison]), appels.length, (await db.get('imports', 'lv')).recipe_id], [[['refuse', 'reference'], ['refuse', 'reference'], ['refuse', 'reference']], 0, null], 'T5-V2 (M-candidate) : une référence relue available (rcA), un signet (rcW) ou une fiche absente → refus « reference », AUCUN appel à transitionner, recipe_id nul');
     });
 
+    // =================================================================================================================================
+    // Tâche 6 — filets du lot (T-D20) : chaque texte neuf de la spec § 5 avec SON anglais (en.js fait foi pour la clé exacte) ; les clés réemployées
+    // présentes ; les deux modules neufs dans SHELL, regroupement.js dans le filet i18n ; aucun texte ne nomme le fournisseur ni la base ;
+    // regroupement.js n'écrit que par transitionner ou ouvrirImport (I-D1) ; la version de l'app et celle du service worker.
+    await run('T-D20 filets du lot', async () => {
+      const { EN } = await import('../src/i18n/en.js');
+      const { MODULES_NEUFS } = await import('./ajouter.js');
+      const { APP_VERSION } = await import('../src/model/schema.js');
+      const sansCommentaires = (s) => s.replace(/\/\/.*$/gm, '');
+      const ATTENDU = {
+        'Classer ces photos avec l’assistant': 'Sort these photos with the assistant',
+        'Un classement = un appel à l’assistant ; lire les recettes coûtera ensuite un appel par recette.': 'One sorting = one call to the assistant; reading the recipes will then cost one call per recipe.',
+        'Classe au plus 10 photos à la fois : décoche-en {k}.': 'Sort at most 10 photos at a time: uncheck {k}.',
+        'Décoche les photos déjà en cours d’import ({k}).': 'Uncheck the photos already being imported ({k}).',
+        'Une lecture est en cours : attends sa fin ou annule-la.': 'A reading is in progress: wait for it to finish or cancel it.',
+        'Classement des photos par l’assistant…': 'The assistant is sorting the photos…', 'Reclasser': 'Sort again',
+        'Reclasser remplace ce classement et tes changements de groupes, et coûte un appel. Continuer ?': 'Sorting again replaces this sorting and your group changes, and costs one call. Continue?',
+        'Ignorer ce classement': 'Ignore this sorting',
+        'Ignorer ce classement ? Il a coûté un appel ; le refaire en coûtera un autre.': 'Ignore this sorting? It cost one call; doing it again will cost another.',
+        'Le classement a été coupé : classe moins de photos à la fois.': 'The sorting was cut off: sort fewer photos at a time.',
+        'Aucune recette reconnue sur ces photos.': 'No recipe was recognized on these photos.', 'Classement reçu le {d}': 'Sorting received on {d}', 'Classement · {l}': 'Sorting · {l}',
+        'Recettes trouvées': 'Recipes found',
+        '1 recette proposée par l’assistant — vérifie le groupe avant de lire.': '1 recipe suggested by the assistant — check the group before reading.',
+        '{n} recettes proposées par l’assistant — vérifie les groupes avant de lire.': '{n} recipes suggested by the assistant — check the groups before reading.',
+        '(titre non lu)': '(title not read)', 'Recette {k}': 'Recipe {k}', 'Recette {k} — {t}': 'Recipe {k} — {t}', 'déjà liée à une recette': 'already linked to a recipe',
+        'porte peut-être deux recettes': 'may hold two recipes', 'déjà en cours d’import': 'already being imported', 'Déplacer vers…': 'Move to…',
+        'Déplacer la page {n} vers…': 'Move page {n} to…', 'Photos qui ne seront pas lues': 'Photos that won’t be read',
+        'Déplace-les vers une recette si elles en font partie.': 'Move them to a recipe if they belong to one.', 'sans début de recette': 'no recipe start', 'non classée': 'not sorted',
+        'retirée': 'removed', 'Complète “{t}”, p. {p}': 'Completes “{t}”, p. {p}', 'Complète “{t}”, p. {p} ?': 'Completes “{t}”, p. {p}?', 'Complète “{t}”': 'Completes “{t}”',
+        'Complète “{t}” ?': 'Completes “{t}”?', 'Titre semblable, page différente ou inconnue.': 'Similar title, different or unknown page.',
+        'Même page, titre différent.': 'Same page, different title.', 'Plusieurs références possibles.': 'Several possible references.',
+        'Une autre recette du lot vise aussi cette référence.': 'Another recipe in the batch also targets this reference.',
+        'Nouvelle recette — “{t}” restera repérée.': 'New recipe — “{t}” will stay spotted.', 'Déjà choisie pour la recette {k}': 'Already chosen for recipe {k}',
+        'Choisir une référence…': 'Choose a reference…', 'Chercher dans les références de ce livre': 'Search this book’s references',
+        'Aucune référence ne correspond.': 'No reference matches.', '{n} autres : affine la recherche.': '{n} more: refine the search.',
+        'Import en cours — voir Imports': 'Import in progress — see Imports',
+        'Aucun livre associé à cette séance : chaque recette sera une nouvelle recette.': 'No book linked to this session: each recipe will be a new recipe.',
+        'Aucune recette à lire : déplace des photos vers une recette, ou ignore ce classement.': 'No recipe to read: move photos to a recipe, or ignore this sorting.',
+        '{k} photo(s) déjà en cours d’import ailleurs : retire-les de leur recette, ou termine l’autre import.': '{k} photo(s) already being imported elsewhere: remove them from their recipe, or finish the other import.',
+        'Lire cette recette (1 appel)': 'Read this recipe (1 call)', 'Lire ces recettes ({n} appels)': 'Read these recipes ({n} calls)',
+        '1 recette à lire : suis-la dans Imports.': '1 recipe to read: follow it in Imports.',
+        '{n} recettes à lire : suis-les dans Imports.': '{n} recipes to read: follow them in Imports.',
+        'Rien n’a été lancé : ce classement, le livre de la séance ou une référence choisie a changé entre-temps.': 'Nothing was started: this sorting, the session’s book or a chosen reference changed in the meantime.',
+        'Rien n’a été lancé : une photo est déjà en cours d’import ailleurs.': 'Nothing was started: a photo is already being imported elsewhere.', 'Nouvelle recette': 'New recipe',
+        'Lot de 1 recette · {l}': 'Batch of 1 recipe · {l}', 'Lot de {n} recettes · {l}': 'Batch of {n} recipes · {l}', '{k} sur {n} lues': '{k} of {n} read',
+        '· {e} en échec': '· {e} failed', 'Lecture du lot en cours…': 'Reading the batch…', 'Continuer la lecture (1 appel)': 'Continue reading (1 call)',
+        'Continuer la lecture ({r} appels)': 'Continue reading ({r} calls)', 'Recette {k} sur {n}': 'Recipe {k} of {n}',
+        '{n} recette(s) de cette séance dans Imports': '{n} recipe(s) from this session in Imports', 'Voir les imports': 'See imports',
+        'En faire une nouvelle recette': 'Make it a new recipe', 'Ces pages complètent “{t}”, p. {p}.': 'These pages complete “{t}”, p. {p}.',
+        'Ces pages complètent “{t}”.': 'These pages complete “{t}”.', 'Ces pages complètent peut-être “{t}”, p. {p} ?': 'These pages may complete “{t}”, p. {p}?',
+        'Ces pages complètent peut-être “{t}” ?': 'These pages may complete “{t}”?', 'Enregistrer dans cette référence': 'Save into this reference',
+        'La lecture sera enregistrée telle que lue dans la référence ; tes changements ici ne la suivent pas.': 'The reading will be saved as read into the reference; your changes here don’t follow it.',
+        'Rien n’a été rattaché : cette lecture ou cette référence a changé entre-temps.': 'Nothing was linked: this reading or this reference changed in the meantime.',
+      };
+      eq(Object.entries(ATTENDU).filter(([fr, en]) => EN[fr] !== en).map(([fr]) => fr), [], 'T-D20 (§ 5) : chaque texte neuf du lot a son entrée en.js, avec son anglais (« Nouvelle recette » comprise)');
+      eq(['Monter la page {n}', 'Descendre la page {n}', 'Retirer la page {n}', 'incertain', 'Incertain : {t}', 'Annuler', 'Ignorer', 'Reprendre', 'Relancer', 'Tu es hors ligne.', 'En cours sur un autre écran', 'Une lecture est déjà en cours : annule-la d’abord.', 'Code : {c}', 'L’assistant n’a pas répondu lisiblement. Réessaie.', 'Connecte-toi pour utiliser l’assistant.', '{n} photo ajoutée', '{n} photos ajoutées', 'p.', 'Sans livre', 'La recette n’a pas pu être enregistrée. Réessaie.', 'Une lecture = un appel à l’assistant, compté dans ton quota du jour.', 'Les photos de cette séance ne sont pas sur cet appareil.'].filter((k) => typeof EN[k] !== 'string'), [], 'T-D20 : les clés existantes que le lot réemploie sont toujours là');
+      const sw = await lire('../sw.js');
+      ok(sw.includes("'./src/domain/classement.js'") && sw.includes("'./src/ui/regroupement.js'"), 'T-D20 : SHELL contient les deux modules neufs du lot');
+      eq([APP_VERSION, sw.includes(`VERSION = 'cuisine-os-v${APP_VERSION}-`), MODULES_NEUFS.includes('../src/ui/regroupement.js')], ['0.13.0', true, true], 'T-D20 : APP_VERSION 0.13.0 (fixée par le chef d’orchestre, R-D-12), VERSION du service worker sur elle, regroupement.js dans le filet i18n');
+      const sources = await Promise.all(['../src/ui/regroupement.js', '../src/domain/classement.js'].map(lire));
+      ok(sources.every((x) => x.length > 1000) && /export function panneauClassement/.test(sources[0]) && /export function proposerAppariements/.test(sources[1]), 'T-D20 : les deux modules neufs sont lus (garde contre un source vide)');
+      eq(sources.map((x) => /Anthropic|Supabase/.test(x)), [false, false], 'T-D20 : aucun texte ne nomme le fournisseur ni la base dans les deux modules neufs');
+      const appels = [...sansCommentaires(sources[0]).matchAll(/repo\.(\w+)\(/g)].map((m) => m[1]).filter((f) => !['get', 'all', 'byIndex', 'getFile', 'deviceId'].includes(f));
+      eq([...new Set(appels)].sort(), ['ouvrirImport', 'transitionner'], 'T-D20 (I-D1) : src/ui/regroupement.js n’écrit que par repo.transitionner et repo.ouvrirImport (ni save, ni saveBatch, ni put, ni remove)');
+    });
+
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne
   } catch (error) {
     ok(false, `Lot de recettes : suite interrompue — ${error?.name || 'Erreur'} — ${error?.message || String(error)}`);
