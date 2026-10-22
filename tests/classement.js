@@ -2138,9 +2138,9 @@ export async function runClassementTests({ eq, ok }) {
       const ed = await monterEditeur(repo, db, { import: 'lg' });
       const ingTa = champDe(ed, 'Ingrédients (une ligne par ingrédient, texte tel qu’imprimé)')?.querySelector('textarea');
       eq([ingTa?.value, champDe(ed, 'Notes')?.querySelector('textarea')?.value, champDe(ed, 'Étapes')?.querySelector('textarea')?.value], ['2 poires\n2 c. à soupe d’huile\n1 pincée de sel', 'Se congèle bien.', 'Mélanger.\nLaisser reposer.\n\nCuire.'], 'T-D19 (M151, M150, M101) : ?import= d’une ligne de lot → la ligne lue sur deux lignes est PLIÉE en une ; les notes lues posées ; une étape par paragraphe');
-      // Ronde 1 (E10) : le tableau des lignes est redessiné après la pose de `uncertain` — « Vérifié » coché sur la première ligne vaut à l'enregistrement
-      // (sans ce redessin, la coche modifierait un objet ligne abandonné).
-      ed.querySelector('table.compare tbody tr input[type="checkbox"]').click();
+      // Ronde 2 : AUCUNE ligne n'est cochée « Vérifié » dans ce parcours — save() efface `uncertain` d'une ligne vérifiée, et la coche de la ronde 1 sur la
+      // ligne [0] rendait creux le « [0] faux » de M99 (un remplir() qui marquait toutes les lignes incertaines restait vert). E10 a son propre montage,
+      // dans « T-D19 (ronde 1) ».
       ingTa.value = ingTa.value.replace('1 pincée de sel', '1 pincée de sel fin'); ingTa.dispatchEvent(new Event('input', { bubbles: true }));
       boutonTexte(ed, 'Analyser les lignes').click();
       boutonTexte(ed, 'Enregistrer la recette').click();
@@ -2151,7 +2151,6 @@ export async function runClassementTests({ eq, ok }) {
       const ss = await db.get('scan_sessions', 'ss1');
       eq([ver.provenance.import_id, ver.provenance.incomplete, ver.provenance.missing_page, ver.provenance.titre_lu], ['lg', false, true, 'Tarte fine aux poires'], 'T-D19 (M103) : la version porte la lecture — import_id, incomplete, missing_page, titre_lu');
       eq(ver.ingredients.map((l) => [l.source_text, l.uncertain === true]), [['2 poires', false], ['2 c. à soupe d’huile', true], ['1 pincée de sel fin', false]], 'T-D19 (M99, M151) : la ligne pliée reste UNE ligne et garde uncertain ; [0] faux ; la ligne retapée perd uncertain');
-      eq(ver.ingredients.map((l) => l.verification_state), ['verified', 'to_verify', 'to_verify'], 'T-D19 (ronde 1, E10) : « Vérifié » coché dans le tableau après ?import= → la première ligne est enregistrée verified (le tableau suit les lignes de la lecture posée)');
       eq([ver.notes, rec.availability, ver.steps.length, ver.steps[0].text], ['Se congèle bien.', 'partial', 2, 'Mélanger.\nLaisser reposer.'], 'T-D19 (M150, M100, M101) : notes lues gardées ; page manquante → partial (jamais comblée) ; deux étapes, la première garde son saut de ligne');
       eq([[p1.printed_page, p1.kind, p1.role, p1.position], [p3.printed_page, p3.kind, p3.role, p3.position], [p2.kind, p2.role ?? null]], [[140, 'recipe', 'recette', 1], [null, 'recipe', 'recette', 3], [null, null]], 'T-D19 (M102, M94) : la première page reçoit p. 140, la seconde reste nulle ; kind recipe ET role recette ; positions inchangées ; p2, hors de la lecture, intacte');
       eq([ss.status, ss.recipe_ids], ['open', [rec.id]], 'T-D19 (M120) : la séance reçoit la recette, par le sac, et reste open — p2 est encore sans rôle');
@@ -2195,7 +2194,7 @@ export async function runClassementTests({ eq, ok }) {
       eq([await db.get('source_pages', 'pIdxY'), (await db.get('source_pages', 'pY')).role], [pIdxY, 'recette'], 'T-D19 (M148, chemin de l’éditeur) : « Corriger » ne réécrit pas la photo d’index de la fiche (ni kind, ni role, ni printed_page) ; les autres pages reçoivent role recette');
     });
 
-    await ecranT5('T-D19 (ronde 1) éditeur : séance relue dans la transaction, notes tapées gardées, saisie à la main, séance refusée', async (repo, db) => {
+    await ecranT5('T-D19 (ronde 1) éditeur : séance relue dans la transaction, notes tapées gardées, saisie à la main, séance refusée, « Vérifié » après ?import=', async (repo, db) => {
       const moi = repo.deviceId();
       const toastDit = () => document.querySelector('.toast')?.textContent ?? '';
       const viderToast = () => { const n = document.querySelector('.toast'); if (n) n.textContent = ''; };
@@ -2260,6 +2259,18 @@ export async function runClassementTests({ eq, ok }) {
       await attendre(async () => (await statutDe(db, 'lq')) === 'enregistre', 'lecture close sans la séance');
       const ss6 = await db.get('scan_sessions', 'ss6');
       eq([lqRefusee, ss6.status, ss6.recipe_ids, (await db.getAll('recipes')).filter((r) => r.original_title === 'Pain perdu').length], ['a_verifier', 'zzz', [], 1], 'T-D19 (ronde 1) : une séance d’un statut hors open/done → refus dit ; le geste suivant écrit SANS elle (jamais relue indéfiniment), clôt la lecture, une seule fiche ; la séance intacte');
+      // E10 (ronde 1 ; montage à part depuis la ronde 2, pour que le parcours principal de T-D19 garde sa ligne [0] NON vérifiée) : le tableau des lignes
+      // est redessiné après la pose de `uncertain` — « Vérifié » coché sur la première ligne d'une lecture posée par ?import= vaut à l'enregistrement (sans
+      // ce redessin, la coche modifierait un objet ligne abandonné) ; la ligne vérifiée perd `uncertain`, l'autre ligne garde le sien (faux).
+      await poserSeance(repo, db, { id: 'ss8', pages: ['pV'] });
+      await db.mutate({ puts: { imports: [lueDuLot('lv', { classementId: 'cl_v', sessionId: 'ss8', page_ids: ['pV'], device_id: moi, resultat: RECETTE_LUE('Poires pochées', 82, { ingredients: [{ source_text: '4 poires', uncertain: true }, { source_text: '1 citron', uncertain: false }] }) })] }, origin: 'device' });
+      scene.replaceChildren();
+      const ed6 = await monterEditeur(repo, db, { import: 'lv' });
+      ed6.querySelector('table.compare tbody tr input[type="checkbox"]').click();
+      boutonTexte(ed6, 'Enregistrer la recette').click();
+      await attendre(async () => (await statutDe(db, 'lv')) === 'enregistre', 'lecture close (E10)');
+      const poires = (await db.getAll('recipes')).find((r) => r.original_title === 'Poires pochées');
+      eq((await db.get('recipe_versions', poires.current_version_id)).ingredients.map((l) => [l.source_text, l.verification_state, l.uncertain === true]), [['4 poires', 'verified', false], ['1 citron', 'to_verify', false]], 'T-D19 (ronde 1, E10) : « Vérifié » coché dans le tableau après ?import= → la première ligne est enregistrée verified et perd uncertain ; la seconde reste to_verify, sans uncertain (le tableau suit les lignes de la lecture posée)');
     });
 
     await ecranT5('T-D21 éditeur : la référence proposée après la lecture, rattachée sans appel', async (repo, db) => {
