@@ -904,7 +904,10 @@ export async function runClassementTests({ eq, ok }) {
         const vus = []; const capture = db.onMutate;
         db.onMutate = (m) => { vus.push([Object.keys(m.puts).sort(), (m.puts.imports || []).map((i) => [i.id, i.status])]); return capture ? capture(m) : {}; };
         let gestes = 0;
-        const geste = async (fn, attendu) => { gestes += 1; fn(); await attendre(async () => JSON.stringify(await groupesBrouillon(db, 'imp_cl')) === JSON.stringify(attendu), 'brouillon écrit : ' + JSON.stringify(attendu)); };
+        // Ronde 1 de T6 (M132) : la miniature de p1 relue de façon SYNCHRONE juste après chaque geste (le redessin l'est) — lue après des attentes,
+        // elle laissait vivant un cache qui ne rend plus l'URL tout de suite (miniatures vides jusqu'à getFile, une relecture IndexedDB par redessin).
+        const srcSynchrones = [];
+        const geste = async (fn, attendu) => { gestes += 1; fn(); srcSynchrones.push(p.querySelector('figure[data-page="p1"] img')?.src === srcP1); await attendre(async () => JSON.stringify(await groupesBrouillon(db, 'imp_cl')) === JSON.stringify(attendu), 'brouillon écrit : ' + JSON.stringify(attendu)); };
         try {
           await geste(() => choisirSelect(p, 'p3', 'g2'), [['g1', ['p1']], ['g2', ['p2', 'p3']], ['g3', ['p5']]]);
           eq([[...blocDe(p, 'g2').querySelectorAll('figure')].map((f) => f.dataset.page), document.activeElement === p.querySelector('select[data-role="deplacer"][data-page="p3"]')], [['p2', 'p3'], true], 'T-D13 : déplacer p3 vers « Recette 2 » par le select → blocs redessinés, le focus va au select de la même photo dans son nouveau bloc');
@@ -924,7 +927,7 @@ export async function runClassementTests({ eq, ok }) {
           eq([blocDe(p, 'g3'), (await brouillonEn(db, 'imp_cl')).choix], [null, []], 'T-D13 : vider un groupe le retire AVEC son choix');
         } finally { db.onMutate = capture; }
         eq([vus.length, vus.every((v) => v[0].join() === 'imports' && v[1].length === 1 && v[1][0][0] === 'imp_cl' && v[1][0][1] === 'a_verifier'), ff.appels.length, (await db.getAll('imports')).length], [gestes, true, 0, 1], 'T-D13 (M76) : CHAQUE geste n’écrit que le brouillon — un appel de db.onMutate par geste, imports seul, la ligne toujours a_verifier, aucune ligne neuve, 0 POST');
-        eq([p.querySelector('figure[data-page="p1"] img').src === srcP1, urlsCreees], [true, urlsAvant], 'T-D13 (M132) : les redessins réutilisent la même URL pour la même photo, aucune URL de plus');
+        eq([p.querySelector('figure[data-page="p1"] img').src === srcP1, urlsCreees, srcSynchrones], [true, urlsAvant, Array(6).fill(true)], 'T-D13 (M132) : les redessins réutilisent la même URL pour la même photo, aucune URL de plus, et la posent DÈS le redessin (six gestes, ronde 1 de T6)');
         // Un choix FAIT avant le nouveau montage : décocher g2 (proposition sûre rcT) écrit [['g2', null]] — sans lui, le remontage ne rendrait que des
         // propositions recalculées, et un écran qui ignorerait les choix restaurés resterait vert.
         blocDe(p, 'g2').querySelector('[data-role="appariement"] label.check input').click();
@@ -1250,6 +1253,10 @@ export async function runClassementTests({ eq, ok }) {
       const course = G.lireLeLot('annule', { ctx, repo, fetch: fa.fetch, maintenant: () => NOW });
       await attendre(() => fa.appels.length === 1, 'premier POST');
       await UI.annulerVol('annule_1');
+      // Ronde 1 de T6 (R-D-10) : attendre un FAIT, borné — un lot qui ne s'arrête pas après « Annuler » (M53, M84) rougit ici, nommé, au lieu
+      // de figer la suite.
+      let lotFini = false; course.then(() => { lotFini = true; }, () => { lotFini = true; });
+      await attendre(() => lotFini, 'lot arrêté après « Annuler »');
       await course;
       eq([fa.appels.length, await statuts('annule')], [1, ['echec', 'a_lancer', 'a_lancer']], 'T-D16 (M89) : « Annuler » du premier (annulerVol) → arrêt du lot');
       // Ronde 1 (constat 31) : enLigne est TRANSMIS à lancerExtraction — injecté hors ligne, le lot s'arrête à la première, aucun POST.
@@ -2470,7 +2477,9 @@ export async function runClassementTests({ eq, ok }) {
       const { EN } = await import('../src/i18n/en.js');
       const { MODULES_NEUFS } = await import('./ajouter.js');
       const { APP_VERSION } = await import('../src/model/schema.js');
-      const sansCommentaires = (s) => s.replace(/\/\/.*$/gm, '');
+      // Ronde 1 de T6 : ne retire que les commentaires qui OUVRENT une ligne (`//` et `/* */`) — couper tout ce qui suit un `//` effaçait aussi le code
+      // qui suit une adresse dans une chaîne (« 'https://x'; repo.save( »).
+      const sansCommentaires = (s) => s.replace(/^[ \t]*\/\*[\s\S]*?\*\//gm, '').replace(/^[ \t]*\/\/.*$/gm, '');
       const ATTENDU = {
         'Classer ces photos avec l’assistant': 'Sort these photos with the assistant',
         'Un classement = un appel à l’assistant ; lire les recettes coûtera ensuite un appel par recette.': 'One sorting = one call to the assistant; reading the recipes will then cost one call per recipe.',
@@ -2517,15 +2526,22 @@ export async function runClassementTests({ eq, ok }) {
         'Rien n’a été rattaché : cette lecture ou cette référence a changé entre-temps.': 'Nothing was linked: this reading or this reference changed in the meantime.',
       };
       eq(Object.entries(ATTENDU).filter(([fr, en]) => EN[fr] !== en).map(([fr]) => fr), [], 'T-D20 (§ 5) : chaque texte neuf du lot a son entrée en.js, avec son anglais (« Nouvelle recette » comprise)');
-      eq(['Monter la page {n}', 'Descendre la page {n}', 'Retirer la page {n}', 'incertain', 'Incertain : {t}', 'Annuler', 'Ignorer', 'Reprendre', 'Relancer', 'Tu es hors ligne.', 'En cours sur un autre écran', 'Une lecture est déjà en cours : annule-la d’abord.', 'Code : {c}', 'L’assistant n’a pas répondu lisiblement. Réessaie.', 'Connecte-toi pour utiliser l’assistant.', '{n} photo ajoutée', '{n} photos ajoutées', 'p.', 'Sans livre', 'La recette n’a pas pu être enregistrée. Réessaie.', 'Une lecture = un appel à l’assistant, compté dans ton quota du jour.', 'Les photos de cette séance ne sont pas sur cet appareil.'].filter((k) => typeof EN[k] !== 'string'), [], 'T-D20 : les clés existantes que le lot réemploie sont toujours là');
+      eq(['Monter la page {n}', 'Descendre la page {n}', 'Retirer la page {n}', 'incertain', 'Incertain : {t}', 'Annuler', 'Ignorer', 'Reprendre', 'Relancer', 'Tu es hors ligne.', 'En cours sur un autre écran', 'Une lecture est déjà en cours : annule-la d’abord.', 'Code : {c}', 'L’assistant n’a pas répondu lisiblement. Réessaie.', 'Connecte-toi pour utiliser l’assistant.', '{n} photo ajoutée', '{n} photos ajoutées', 'p.', 'Sans livre', 'La recette n’a pas pu être enregistrée. Réessaie.', 'Une lecture = un appel à l’assistant, compté dans ton quota du jour.', 'Les photos de cette séance ne sont pas sur cet appareil.', 'Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.', 'La lecture a été interrompue. L’appel a peut-être été compté ; relancer en coûtera un autre.', 'L’appel a peut-être été compté ; relancer en coûtera un autre.', 'Page {n}', 'Une erreur est survenue', 'La demande est trop lourde : choisis moins de pages.'].filter((k) => typeof EN[k] !== 'string'), [], 'T-D20 : les clés existantes que le lot réemploie sont toujours là (ronde 1 de T6 : les trois phrases I-4 du lot A et les trois clés anciennes de regroupement.js comprises)');
       const sw = await lire('../sw.js');
       ok(sw.includes("'./src/domain/classement.js'") && sw.includes("'./src/ui/regroupement.js'"), 'T-D20 : SHELL contient les deux modules neufs du lot');
       eq([APP_VERSION, sw.includes(`VERSION = 'cuisine-os-v${APP_VERSION}-`), MODULES_NEUFS.includes('../src/ui/regroupement.js')], ['0.13.0', true, true], 'T-D20 : APP_VERSION 0.13.0 (fixée par le chef d’orchestre, R-D-12), VERSION du service worker sur elle, regroupement.js dans le filet i18n');
       const sources = await Promise.all(['../src/ui/regroupement.js', '../src/domain/classement.js'].map(lire));
       ok(sources.every((x) => x.length > 1000) && /export function panneauClassement/.test(sources[0]) && /export function proposerAppariements/.test(sources[1]), 'T-D20 : les deux modules neufs sont lus (garde contre un source vide)');
-      eq(sources.map((x) => /Anthropic|Supabase/.test(x)), [false, false], 'T-D20 : aucun texte ne nomme le fournisseur ni la base dans les deux modules neufs');
-      const appels = [...sansCommentaires(sources[0]).matchAll(/repo\.(\w+)\(/g)].map((m) => m[1]).filter((f) => !['get', 'all', 'byIndex', 'getFile', 'deviceId'].includes(f));
-      eq([...new Set(appels)].sort(), ['ouvrirImport', 'transitionner'], 'T-D20 (I-D1) : src/ui/regroupement.js n’écrit que par repo.transitionner et repo.ouvrirImport (ni save, ni saveBatch, ni put, ni remove)');
+      eq(sources.map((x) => /anthropic|supabase/i.test(x)), [false, false], 'T-D20 : aucun texte ne nomme le fournisseur ni la base dans les deux modules neufs (toute casse, ronde 1 de T6)');
+      // Ronde 1 de T6 (I-D1) : tout ACCÈS sur `repo` ou sur l'espace de noms importé `repoModule` (chaînage optionnel et espaces compris, appelé ou non),
+      // jamais une forme qui échappe au motif — crochets, alias, déstructuration, décomposition ; `repo = repoModule` (défaut des paramètres) seul admis.
+      const src = sansCommentaires(sources[0]);
+      const acces = [...src.matchAll(/(?<![\w$/])repo(Module)?\s*\??\.\s*(\w+)/g)];
+      const ecritures = [...new Set(acces.filter((m) => !m[1]).map((m) => m[2]).filter((f) => !['get', 'all', 'byIndex', 'getFile', 'deviceId', 'newId'].includes(f)))].sort();
+      const duModule = [...new Set(acces.filter((m) => m[1]).map((m) => m[2]))].filter((f) => !['newId', 'deviceId'].includes(f));
+      const detours = [...src.matchAll(/(?<![\w$])repo(?:Module)?\s*(?:\?\.\s*)?\[|\.\.\.\s*repo(?:Module)?\b/g)].map((m) => m[0])
+        .concat([...src.matchAll(/(\w*)\s*=\s*(repo(?:Module)?)\b(?!\s*\??\.)/g)].map((m) => `${m[1]} = ${m[2]}`).filter((x) => x !== 'repo = repoModule'));
+      eq([ecritures, duModule, detours], [['ouvrirImport', 'transitionner'], [], []], 'T-D20 (I-D1) : src/ui/regroupement.js n’écrit que par repo.transitionner et repo.ouvrirImport (ni save, ni saveBatch, ni put, ni remove) — par repo ou par repoModule, `?.` et espaces compris ; repoModule ne sert que newId et deviceId ; ni crochets, ni alias, ni déstructuration, ni décomposition (ronde 1 de T6)');
     });
 
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne

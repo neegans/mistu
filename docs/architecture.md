@@ -1351,7 +1351,8 @@ des titres (`estTitreUneLigne`, `src/core/bornes.js`) juge la validation, la rev
 - **Le vol.** `lancerVol(importId, executer, { …, attendus, accepte })` : `accepte` est une liste BLANCHE de sortes évaluée après la relecture et avant
   toute écriture (`lancerExtraction` : `SORTES_EXTRACTION`) ; `attendus` = les statuts de départ admis. Un lot se lit une recette à la fois (`lireLeLot`
   passe `['a_lancer']` : une ligne passée `echec` ailleurs est refusée avant tout POST ; un lot par document ; prise et libération dites sur le bus) ;
-  `suiteDuLot` décide, défaut FERMÉ (coupe, illisible, hors_bornes, vide et le 413 laissent continuer ; toute autre raison arrête).
+  `suiteDuLot` décide, défaut FERMÉ (coupe, illisible, hors_bornes, vide et le 413 laissent continuer ; les refus de `REFUS_SAUT_LOT` — inconnu,
+  transition, sans_page, image, octets_absents, sorte — sautent le groupe ; tout autre échec ou refus arrête).
 - **« Lire ces recettes ».** `creerLesLectures` : toutes les relectures avant (clé, livre de la séance, références candidates, photos prises ailleurs,
   octets), puis UNE transaction — le classement `enregistre` (clé rejouée dedans), les lignes neuves (`absente`) et une condition d'index par référence
   cochée (I-2).

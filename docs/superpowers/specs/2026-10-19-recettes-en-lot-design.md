@@ -1303,7 +1303,9 @@ la suite, `node --test tools/*.test.mjs` et `--check` verts. T6 ne fait que **v�
    écran), T-D10 (partie écran) ; `SHELL` + écran, `MODULES_NEUFS`. Commit : `Classer les photos d une seance par le vol partage, annuler,
    reclasser, ignorer, liste blanche de l extraction (lot D, tache 2)`.
    **Sonde de Neegan, exigée avant la fusion de D** (R-D-8 ; aucun agent ne dépense un appel) : sur la branche de D servie localement
-   (`http://127.0.0.1:8092`, ajoutée le temps de la sonde à `ASSISTANT_ORIGINES`, qui remplace la valeur par défaut — `supabase/README.md`), un
+   (`http://127.0.0.1:8092`, ajoutée le temps de la sonde à `ASSISTANT_ORIGINES`, qui remplace la valeur par défaut — `supabase/README.md` —, et
+   `http://127.0.0.1:8092/**` aux Redirect URLs de `mitsu`, retirées ensemble après la sonde ; connectée, la branche se synchronise avec la vraie
+   bibliothèque par l’entrée `dev` de `src/sync/config.js` — précisé en § 12.C, ronde 1 de la tâche 6), un
    classement réel de 5 photos (pas 1 et 2 de § 10 : durée, justesse des groupes, `octets` dans `assistant_journal`), une tentative à 10 photos
    (pas 7 : borne réelle d’un envoi) et la séance de 2 photos à page partagée (pas 8 : mesure de R-D-1) ; les trois mesures sont consignées en
    § 12 **avant la fusion** et peuvent amender `MAX_PHOTOS_CLASSEMENT` ou `CLASSER_SYSTEM`, ou rouvrir R-D-1, par une ronde (commit en tête de
@@ -1417,10 +1419,12 @@ attend).
 ### 12.C Construction (plan rév. 3, rejoué sur la tête finale du lot C ; posé à la tâche 6, 22 octobre 2026)
 
 Le plan rév. 3 (écrit sur `58bb49b` / `2b6a2fd`) a été rejoué par intention sur `739e706`, tête finale du lot C (voie (b) ; base de D `4db4d8e` =
-`739e706` + cette spec ; plan rejoué commis `d42d4ab`), puis construit en six tâches, chacune revue à trois lentilles (spec, sécurité, faux-vert) avec
-au moins une ronde : T1 `b5565a6` / `1ae60f0`, T2 `ad0c439` / `29cd797`, T3 `c7e826b` / `fd483bf`, T4 `fbf0b92` / `7494ee9`, T5 `18543f5` / `3645d41` /
-`356a1b2`, T6 (filet T-D20, total épinglé, `docs/architecture.md`, `CLAUDE.md`, cette section). Cette section consigne ce que la construction a
-amendé ; la revue finale de branche, sa vague et ses rulings la complètent à la clôture (ratification ou renversement des écarts ci-dessous).
+`739e706` + cette spec ; plan rejoué commis `d42d4ab`), puis construit en six tâches ; les cinq premières revues à trois lentilles (spec, sécurité,
+faux-vert) avec au moins une ronde : T1 `b5565a6` / `1ae60f0`, T2 `ad0c439` / `29cd797`, T3 `c7e826b` / `fd483bf`, T4 `fbf0b92` / `7494ee9`, T5
+`18543f5` / `3645d41` / `356a1b2` ; T6 (filet T-D20, total épinglé, `docs/architecture.md`, `CLAUDE.md`, cette section) `4d4da15`, revue à trois
+lentilles puis ronde 1 (ci-dessous, « Ronde 1 de la tâche 6 ») ; sa re-revue reste à faire et se consigne à la clôture. Cette section consigne ce que
+la construction a amendé ; la revue finale de branche, sa vague et ses rulings la complètent à la clôture (ratification ou renversement des écarts
+ci-dessous).
 
 **Rulings de plan (rév. 3).**
 - **R-D-9** — les figures de T-D18 (e) se comptent par PAGE (`:scope > .thumbs > figure`) : G imbrique une figure d'absence dans la figure d'une page
@@ -1441,7 +1445,7 @@ amendé ; la revue finale de branche, sa vague et ses rulings la complètent à 
 - **R-D-15 (EI-3)** — une seule fabrique : `fabriquerImportWeb` (B) passe par `ligneImportNeuve`, sa garde `deviceId` gardée ; l'épingle de source de B
   `tests/lecture-web.js:217` passe de « quatre » à « trois » appels à `assertVocabulaire` (amendée, jamais supprimée, I-D11 ; MR-web rouge).
 - **R-D-16 (EI-4)** — le panneau « Classement » est créé après le dernier `await` du rendu de `sessionView` (G a posé `await vignettesDePages` après
-  `drawActions`) ; MR-c3 rouge.
+  `drawActions`) ; MR-c3 rouge au rejeu (copie du chef d'orchestre), rejoué sur la tête en ronde 1 de la tâche 6 (`mutants.md`).
 - **R-D-17 (EI-5 à EI-13, en bloc)** — quatorze lignes de pins de version dans sept fichiers ; seuil `0.13.0-N` (N ≥ 1) de `tests/sync-l4.js` ; bloc
   « Original » sur la forme de G ; `signal` avant `attendus` / `accepte` ; branche `classement` de `lignesImports` après `en_cours`, avant `web` ; ordre
   de `tests/tests.js` ; `SORTES_EXTRACTION = ['recette', 'index']` ; `pagesALire` de C ; phrases de commentaire sur une ligne propre ; `MODULES_NEUFS` ;
@@ -1588,17 +1592,44 @@ rejeu (EI-1 à EI-13) ; rien de neuf. Une ligne par point :
   du plan plus deux précisions sur le code commis (`referenceALire` dans la liste du domaine ; la photo d'index retirée « des pages lues et de
   l'union ») ; la table des mutants rejouée sur trois copies servies en parallèle (8192-8194), pas une seule sur 8193.
 
-**Dettes nommées pour la clôture.** Doublons : `classerPhotos` / `extraireTableMatieres`, `nu` / `sien` contre `objetNu` / `proprio` (et une
-troisième copie de `liste`, `objetNu`, `sien` dans `classement.js`), le sac de séance en deux copies (écran ciblé, éditeur), le prédicat « lecture
-tenue » ×5, l'échelle des raisons en deux copies (`raisonEteint` / pied de l'état 3), pas d'objet `R.rendu` ; pages écrites par des copies lues hors
-transaction (schéma du lot A) ; séance écrite par copie sur trois chemins (éditeur sans lecture du journal, « Terminer la séance », `removePages` —
-refusé pour une ronde, § 4.8.2 point 5) ; `classer()` long ; veille de l'état 2 ; borne « 10 » en dur dans un texte ; « Continuer » ne suit pas
-`online` / `offline` ; `proposer` lit le `ctx` du montage (une proposition périmée peut s'afficher jusqu'au geste, refusée alors) ; redessin double
-de l'état 3. Mutants : la table de la tâche 6 (193 lignes : les 171 de § 7, les 16 du pré-vol, M-D1 et M-D2, MR-sac-large, MR-sac-ferme, MR-web, MR-colle) rejouée en 218 passes sur des copies servies à part (registre `mutants.md`) : 217 rouges, **un survivant** — M132 à la lettre (« retirer `if (urls.has(sha)) { … return; }` ») : le second mur du cache de `poserImage` (`if (!urls.has(sha)) urls.set(…)`, ronde 1 de T3) le rend équivalent observable (une lecture `getFile` de plus) ; les deux murs ensemble, rouges par T-D13 (E-18) ; à trancher à la clôture (redéfinir M132 sur les deux murs, ou retirer le mur redondant). **M53 et M84** rougissent leurs assertions (« T-D7 (M53) … » ×20, « T-D16 (M84, M84b) ») mais la suite ne rend plus de bilan : T-D16 « Annuler » attend `course` sans borne quand le lot ne s'arrête pas sur la première ligne (test à borner, R-D-10). MR-colle, survivant au rejeu, est rouge (R-D-13).
+**Dettes nommées pour la clôture.** Doublons : `classerPhotos` / `extraireTableMatieres`, `nu` / `sien` contre `objetNu` / `proprio` (et une troisième
+copie de `liste`, `objetNu`, `sien` dans `classement.js`), le sac de séance en deux copies (écran ciblé, éditeur), le prédicat « lecture tenue » ×5,
+l'échelle des raisons en deux copies (`raisonEteint` / pied de l'état 3), pas d'objet `R.rendu` ; pages écrites par des copies lues hors transaction
+(schéma du lot A) ; séance écrite par copie sur trois chemins (éditeur sans lecture du journal, « Terminer la séance », `removePages` — refusé pour
+une ronde, § 4.8.2 point 5) ; `classer()` long ; veille de l'état 2 ; borne « 10 » en dur dans un texte ; « Continuer » ne suit pas `online` /
+`offline` ; `proposer` lit le `ctx` du montage (une proposition périmée peut s'afficher jusqu'au geste, refusée alors) ; redessin double de l'état 3.
+Mutants : la table de la tâche 6 (193 lignes : les 171 de § 7, les 16 du pré-vol, M-D1 et M-D2, MR-sac-large, MR-sac-ferme, MR-web, MR-colle) rejouée
+en 218 passes sur des copies servies à part (registre `mutants.md`) : 217 rouges, un survivant, M132 à la lettre (« retirer `if (urls.has(sha)) { …
+return; }` »), d'abord classé « équivalent observable » à cause du second mur du cache de `poserImage` (`if (!urls.has(sha)) urls.set(…)`, ronde 1 de
+T3). Reclassé par la ronde 1 de la tâche 6 : **un survivant à tuer**, pas un équivalent — sans le premier mur, chaque redessin laisse les miniatures
+vides jusqu'à la réponse de `getFile` et relit chaque miniature dans IndexedDB ; c'est T-D13 qui ne le voyait pas, parce qu'il lisait `src` après des
+attentes. T-D13 (M132) relit désormais la miniature de façon synchrone après chaque geste : M132 à la lettre est rouge, M132 sur les deux murs aussi
+(E-18) ; les deux murs restent (le second empêche deux URL pour une même empreinte en cas de course). **M53 et M84** rougissaient leurs assertions («
+T-D7 (M53) … » ×20, « T-D16 (M84, M84b) ») mais la suite ne rendait plus de bilan : T-D16 « Annuler » attendait `course` sans borne ; la ronde 1 borne
+cette attente (`attendre`, 3 s, erreur nommée, R-D-10) et les deux mutants rendent un bilan rouge. MR-colle, survivant au rejeu, est rouge (R-D-13).
 
 **Mesures de la tâche 6.** Suite `✅ 5217/5217` (épingle **5216**, `tests/tests.js:240` ; départ de la tâche 5210/5210, épingle 5209 ; T-D20 : +7),
 seule erreur de console le 404 de `/favicon.ico` ; Node 174/174 ; `--check` 0 ; `APP_VERSION 0.13.0`, `sw.js cuisine-os-v0.13.0-10` (la tâche 6 ne
 touche pas `src/`) ; `DB_VERSION` 4 ; rien sous `supabase/` ni `tools/` ; invisibles 0 (Python).
+
+**Ronde 1 de la tâche 6 (revue à trois lentilles de `4d4da15` : 3 Important, 12 Minor ; tous traités).** (1) Le filet I-D1 de T-D20 ne voyait ni
+l'espace de noms que le module importe (`repoModule`, déjà appelé pour `newId` et `deviceId`), ni `repo?.`, ni `repo.save (`, ni `repo['save']`, ni la
+déstructuration, et `sansCommentaires` coupait tout ce qui suit un `//`, chaîne comprise : tout accès sur `repo` ou sur `repoModule` est relevé (`?.`
+et espaces compris, appelé ou non), `repoModule` ne sert que `newId` et `deviceId`, crochets, alias, déstructuration et décomposition sont refusés, et
+seuls les commentaires qui ouvrent une ligne sont retirés ; assertion amendée (une, jamais retirée). Mutants M-D3 (`repo.save(`) et M-D4
+(`repoModule.save(`) rouges, avec six variantes (`?.`, espace, crochets, déstructuration, alias, code après une adresse sur la même ligne) ; M-D4 et
+deux variantes passaient le filet de `4d4da15`. Reste hors du filet, faible et admis : `repo` passé en argument à une fonction d'un autre module. (2)
+M132 reclassé (ci-dessus) et T-D13 durci. (3) T-D16 « Annuler » borné (ci-dessus). (4) Le contrôle « ni fournisseur ni base » passe à
+`/anthropic|supabase/i` (M-D5, « // envoye a anthropic » : vert sous le filet de `4d4da15`, rouge sous celui-ci). (5) Les clés réemployées de T-D20
+comptent aussi les trois phrases I-4 du lot A, « Page {n} », « Une erreur est survenue » et « La demande est trop lourde : choisis moins de pages. ».
+(6) Sonde R-D-8 précisée (§ 9) : `http://127.0.0.1:8092/**` ajoutée aux Redirect URLs de `mitsu` le temps de la sonde (sans elle, le retour de Google
+retombe sur la Site URL publique), retirée avec l'origine ; connectée, la branche écrit dans la vraie bibliothèque (entrée `dev` de
+`src/sync/config.js` = `mitsu`) : la séance, ses photos et les lignes `imports` du lot partent au serveur avant la fusion. (7) MR-c3 (R-D-16) rejoué
+sur la tête : rouge (T-D11 et T-D12 dépassent leurs 3 s). (8) Documents : le « Pour toi » de `CLAUDE.md` suit § 1 (« Reprendre » ouvre, « Enregistrer
+cette lecture » range, une lecture en vol perdue a peut-être été comptée ; trois phrases) ; `docs/architecture.md` dit que les refus de
+`REFUS_SAUT_LOT` sautent le groupe ; le bilan dit ce qui a été revu ; les lignes longues de la tâche 6 repliées. Mesures : suite `✅ 5217/5217`
+(épingle 5216 inchangée : assertions amendées, aucune ajoutée), Node 174/174, `--check` 0, invisibles 0 ; aucun fichier de `src/` (`VERSION` `-10`
+inchangée).
 
 ### 12.0 Rév. 3 → rév. 4 (vérification de la rév. 3, deux corrections de forme par le chef d’orchestre)
 

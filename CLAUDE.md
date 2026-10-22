@@ -2510,9 +2510,10 @@ appel) te rend des groupes — une recette par bloc, ses pages dans l'ordre, son
 absente est mise de côté, une photo qui semble porter deux recettes est signalée et reste avec celle qui y commence. Tu corriges sans appel
 (déplacer, nouvelle recette, retirer ; tes changements survivent à un rechargement), l'app te propose pour chaque recette la référence de ton index
 (même titre ET même page : cochée ; un doute : rien de coché, la raison dite), puis « Lire ces recettes ({n} appels) » les lit une à la fois et la
-section Imports montre où on en est (« 2 sur 3 lues », « Continuer la lecture ») ; « Reprendre » range chaque lecture dans sa référence ou l'ouvre dans
-l'éditeur, en gardant les numéros des photos de la séance, ses incertitudes, ses notes et ses limites, et une erreur de service arrête le lot pour
-ne pas dépenser en vain.
+section Imports montre où on en est (« 2 sur 3 lues », « Continuer la lecture »). « Reprendre » ouvre chaque lecture — dans sa référence, c'est
+« Enregistrer cette lecture » qui la range ; une nouvelle recette s'ouvre dans l'éditeur —, en gardant les numéros des photos de la séance, ses
+incertitudes, ses notes et ses limites ; fermer l'app en route perd la lecture en cours, qui a peut-être été comptée, et une erreur de service
+arrête le lot pour ne pas dépenser en vain.
 
 **Où.** Branche `recettes-en-lot`, worktree `~/projects/mistu-recettes-en-lot`, empilée sur la tête finale du lot C `739e706` (chaîne
 A → B → G → C → D ; base `4db4d8e` = `739e706` + la spec) ; spec `docs/superpowers/specs/2026-10-19-recettes-en-lot-design.md` (rév. 4, § 12.C posé à
@@ -2543,28 +2544,41 @@ la séance (`sessionView`, `src/ui/import.js`), la proposition de référence da
   R-D-14) et `done` seulement quand plus aucune photo n'est sans rôle ; « En faire une nouvelle recette » sur toute discordance ; l'éditeur porte
   incertitudes, notes et limites et propose une référence (`rattacherLecture`, candidature rejouée dans la transaction).
 - **Une fabrique** de ligne d'import (`ligneImportNeuve`, aussi pour la lecture web du lot B, R-D-15) ; `SORTES_IMPORT` ferme `imports.kind`.
-- **Filet T-D20** (tâche 6) : chaque texte neuf de la spec § 5 avec son anglais, les clés réemployées, les deux modules dans `SHELL`,
-  `regroupement.js` dans le filet i18n, ni fournisseur ni base nommés, `src/ui/regroupement.js` n'écrit que par `repo.transitionner` et
-  `repo.ouvrirImport` ; vu rouge sur copie (M-D1, M-D2).
+- **Filet T-D20** (tâche 6, élargi en ronde 1) : chaque texte neuf de la spec § 5 avec son anglais, les clés réemployées (les trois phrases I-4 du
+  lot A comprises), les deux modules dans `SHELL`, `regroupement.js` dans le filet i18n, ni fournisseur ni base nommés (toute casse),
+  `src/ui/regroupement.js` n'écrit que par `repo.transitionner` et `repo.ouvrirImport` (tout accès sur `repo` ou sur l'espace de noms `repoModule`,
+  `?.` et espaces compris ; `repoModule` pour `newId` et `deviceId` seulement ; ni crochets, ni alias, ni déstructuration). Vu rouge sur copie :
+  M-D1 et M-D2 (tâche 6) ; M-D3 `repo.save(`, M-D4 `repoModule.save(` et six variantes, M-D5 « anthropic » en minuscules (ronde 1 ; M-D4, deux
+  variantes et M-D5 passaient le filet de `4d4da15`). Faible (admis) : `repo` passé en argument à une fonction d'un autre module lui échappe.
 
 **Ce qui n'est PAS prouvé.** Aucun classement réel ni aucune lecture réelle : la durée et la justesse d'un vrai classement, la taille réelle d'un
 envoi (`octets`) et la borne réelle de 10 photos (413 de la passerelle, refus de la bordure ou succès), la photo partagée en vrai (mesure de R-D-1 :
 dans quel groupe elle reste, « page possiblement manquante » sur l'autre), la lecture réelle de cinq recettes d'un lot ; rien dans Safari ni sur
 l'iPhone (décodage de 5 à 10 photos par `createImageBitmap`) ; rien entre deux appareils.
 
-**Dettes (assumées ; détail en spec § 12.C et dans les rapports).** Mutants (registre `mutants.md` : les 193 lignes de la table de la tâche 6 en 218 passes sur copies servies à part) : **un survivant**, M132 à la lettre (le premier mur du cache de `poserImage` seul ; le second, posé en ronde 1 de T3, garde le cache — les deux murs ensemble sont rouges) ; **M53 et M84** rougissent leurs assertions (T-D7, T-D16) mais la suite se bloque ensuite dans T-D16 « Annuler » (`await course` sans borne) — deux tests à durcir à la vague finale. Écarts E-1 à E-29 du plan et écarts de construction des
-rondes (séance refusée sans détacher l'éditeur, même règle sur l'écran ciblé, candidature rejouée par `autres`, `src/ui/import.js` touché en T5-R1,
-`referenceALire`, `lotDeRecette`, « Continuer » qui dit un arrêt, miniatures par `displayUrl`, ligne `raison-reclasser`, R-D-19, texte « Coche au moins
-deux photos de cette séance. ») : déclarés, **à ratifier par la revue finale de branche**. Doublons nommés (`classerPhotos` / `extraireTableMatieres`,
-`nu` / `sien` contre `objetNu` / `proprio`, sac de séance en deux copies, prédicat « lecture tenue » ×5), pages écrites par copie hors transaction (lot
-A), séance par copie sur trois chemins (refusé, spec § 4.8.2 point 5), pas d'objet `R.rendu`, échelle des raisons en deux copies, « Continuer » ne suit
-pas le réseau, « (n appels) » est un maximum (une ligne sans octets ici est refusée avant tout POST).
+**Dettes (assumées ; détail en spec § 12.C et dans les rapports).** Mutants (registre `mutants.md` : les 193 lignes de la table de la tâche 6 en 218
+passes sur copies servies à part, puis les passes de la ronde 1 de T6) : **aucun survivant**. M132 à la lettre (le premier mur du cache de
+`poserImage`) survivait par un trou de T-D13, qui lisait la miniature après des attentes : sans ce mur, chaque redessin laisse les miniatures vides
+jusqu'à la réponse de `getFile` et relit chaque miniature dans IndexedDB ; T-D13 la relit désormais dès le redessin (ronde 1), M132 est rouge et les
+deux murs restent (le second empêche deux URL pour une même empreinte en cas de course). T-D16 « Annuler » attend un fait borné (R-D-10, ronde 1) :
+M53 et M84 rendent un bilan rouge au lieu de figer la suite. Écarts E-1 à E-29 du plan et écarts de construction des rondes (séance refusée sans
+détacher l'éditeur, même règle sur l'écran ciblé, candidature rejouée par `autres`, `src/ui/import.js` touché en T5-R1, `referenceALire`,
+`lotDeRecette`, « Continuer » qui dit un arrêt, miniatures par `displayUrl`, ligne `raison-reclasser`, R-D-19, texte « Coche au moins deux photos de
+cette séance. ») : déclarés, **à ratifier par la revue finale de branche**. Doublons nommés (`classerPhotos` / `extraireTableMatieres`, `nu` / `sien`
+contre `objetNu` / `proprio`, sac de séance en deux copies, prédicat « lecture tenue » ×5), pages écrites par copie hors transaction (lot A), séance
+par copie sur trois chemins (refusé, spec § 4.8.2 point 5), pas d'objet `R.rendu`, échelle des raisons en deux copies, « Continuer » ne suit pas le
+réseau, « (n appels) » est un maximum (une ligne sans octets ici est refusée avant tout POST).
 
 **Gestes de Neegan, dans l'ordre.** 1) Lots A, B, G puis C d'abord (leurs sections). 2) **Sonde R-D-8, AVANT la fusion de D** (aucun agent ne
 dépense d'appel à ta place) : `http://127.0.0.1:8092` ajoutée le temps de la sonde à `ASSISTANT_ORIGINES` (elle remplace la valeur par défaut,
-`supabase/README.md`), la branche servie localement, connecté : pas 1, 2, 7 et 8 de § 10 (classement réel de 5 photos : durée, groupes, `octets` dans
-`assistant_journal` ; une tentative à 10 photos ; la séance de 2 photos à page partagée) ; mesures consignées en spec § 12 (elles peuvent amender
-`MAX_PHOTOS_CLASSEMENT`, `CLASSER_SYSTEM` ou rouvrir R-D-1 par une ronde) ; l'origine retirée ensuite. 3) **La preuve § 10 du lot A consignée**
+`supabase/README.md`), **et** `http://127.0.0.1:8092/**` ajoutée aux Redirect URLs de `mitsu` (Authentication → URL Configuration ; sans elle, le
+retour de Google retombe sur la Site URL publique et la branche locale n'est jamais connectée), la branche servie localement, connecté : pas 1, 2, 7
+et 8 de § 10 (classement réel de 5 photos : durée, groupes, `octets` dans `assistant_journal` ; une tentative à 10 photos ; la séance de 2 photos à
+page partagée) ; mesures consignées en spec § 12 (elles peuvent amender `MAX_PHOTOS_CLASSEMENT`, `CLASSER_SYSTEM` ou rouvrir R-D-1 par une ronde) ;
+l'origine ET l'adresse de retour retirées ensemble ensuite (une adresse `http` de développement ne reste jamais admise sur le projet réel). **Connecté,
+la branche écrit dans ta vraie bibliothèque** : l'entrée `dev` de `src/sync/config.js` pointe `mitsu` ; la séance, ses photos (octets L4) et les
+lignes `imports` du lot (`classement`, `recette` à champ `lot`), écrites par un code non fusionné, partent au serveur et arrivent sur les appareils
+restés sur C avant la fusion de D. 3) **La preuve § 10 du lot A consignée**
 (une extraction réelle : le lot D en lance cinq) — second mur avant la fusion. 4) `! git -C ~/projects/mistu merge --ff-only recettes-en-lot` (après
 C), puis **un** `! git -C ~/projects/mistu push origin main` ; suite publique `https://neegans.github.io/mistu/tests/` → le total de la vague finale
 (à la tâche 6 : `5217/5217`, épingle 5216, plus le 404 de `/favicon.ico`), service worker `cuisine-os-v0.13.0-10` (ou le suffixe de la vague finale).
@@ -2575,11 +2589,15 @@ jetons_entree, jetons_sortie from public.assistant_usage_jour;`). 6) « clean »
 touchent pas `src/`), chaque commit qui touche `src/` incrémente (R-B-24) ; `SHELL` + `./src/domain/classement.js`, `./src/ui/regroupement.js` ;
 `DB_VERSION` 4 inchangée.
 
-**Bilan (tâche 6).** Départ sur `4db4d8e` (mesure = C : 4743/4743, épingle 4742, Node 174) ; rejeu du plan par intention (EI-1 à EI-13 → R-D-13 à
-R-D-19) ; six tâches, chacune revue à trois lentilles avec au moins une ronde : T1 `b5565a6`/`1ae60f0`, T2 `ad0c439`/`29cd797`, T3
-`c7e826b`/`fd483bf`, T4 `fbf0b92`/`7494ee9`, T5 `18543f5`/`3645d41`/`356a1b2`, T6 (filets, docs, total épinglé) ; suite 4743 → **5217/5217**
-(épingle **5216**), Node 174/174, `--check` 0. Mutants : les 193 lignes de la table (171 de la spec § 7, 16 du pré-vol, M-D1 et M-D2, quatre du rejeu) en 218 passes sur des copies servies à part (8192-8194, témoins verts) : 217 rouges — dont M53 et M84, rouges par leurs assertions mais la suite bloquée ensuite —, 1 survivant (M132 à la lettre ; les deux murs ensemble rouges) ; registre `mutants.md`. Restent la revue finale de branche, sa vague, `/verify` et la copie du
-registre (clôture du contrôleur).
+**Bilan (tâche 6 et sa ronde 1).** Départ sur `4db4d8e` (mesure = C : 4743/4743, épingle 4742, Node 174) ; rejeu du plan par intention (EI-1 à EI-13 →
+R-D-13 à R-D-19) ; six tâches. T1 à T5 revues à trois lentilles, chacune avec au moins une ronde : T1 `b5565a6`/`1ae60f0`, T2 `ad0c439`/`29cd797`, T3
+`c7e826b`/`fd483bf`, T4 `fbf0b92`/`7494ee9`, T5 `18543f5`/`3645d41`/`356a1b2` ; T6 (filets, docs, total épinglé) `4d4da15`, revue à trois lentilles (3
+Important, 12 Minor) puis sa ronde 1 (filet I-D1 élargi, T-D13 et T-D16 durcis, docs) ; sa re-revue reste à faire. Suite 4743 → **5217/5217** (épingle
+**5216**, inchangée par la ronde 1 : assertions amendées, aucune ajoutée), Node 174/174, `--check` 0. Mutants : les 193 lignes de la table (171 de la
+spec § 7, 16 du pré-vol, M-D1 et M-D2, quatre du rejeu) en 218 passes sur des copies servies à part (8192-8194, témoins verts) à la tâche 6 — 217
+rouges, dont M53 et M84 qui figeaient la suite, et M132 survivant — ; à la ronde 1 (copies 8192-8194, témoins verts) : M132 et M132 sur les deux murs
+rouges, M53 et M84 rouges avec bilan, MR-c3 rejoué sur la tête rouge, M-D3, M-D4 et ses six variantes, M-D5 rouges ; registre `mutants.md`. Restent la
+re-revue de T6, la revue finale de branche, sa vague, `/verify` et la copie du registre (clôture du contrôleur).
 
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 
