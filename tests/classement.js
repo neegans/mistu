@@ -97,6 +97,10 @@ const sousClasser = (racine) => classerBtn(racine)?.nextElementSibling ?? null;
 const lienRegrouper = (racine) => [...racine.querySelectorAll('a')].find((a) => a.textContent === 'Regrouper en recette') || null;
 const panneau = (racine) => racine.querySelector('[data-role="classement"]');
 const raisonPanneau = (racine) => panneau(racine)?.querySelector('[data-role="raison-classer"]')?.textContent ?? null;
+// Ronde 1 de T2 : la barre de sélection de sessionView (la rangée de son bouton « Retirer ») et ses nœuds texte NUS (un null passé à append natif s'y
+// écrirait « null », écart E-7).
+const barre = (racine) => [...racine.querySelectorAll('button.btn.danger')].find((b) => b.textContent === 'Retirer')?.parentElement ?? null;
+const texteNuDeBarre = (racine) => [...(barre(racine)?.childNodes ?? [])].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.data);
 
 export async function runClassementTests({ eq, ok }) {
   resetClock();
@@ -449,8 +453,13 @@ export async function runClassementTests({ eq, ok }) {
       const vraiFetch = globalThis.fetch;
       globalThis.fetch = async (u) => { throw new Error('aucun reseau attendu : ' + u); };
       try { await fn(repo, db); }
-      finally { UI.reinitialiserImportCible(); G.reinitialiserLot(); globalThis.fetch = vraiFetch; window.dispatchEvent(new Event('online')); }
+      // Ronde 1 : la vraie fetch est rendue D'ABORD — une réinitialisation qui lèverait ne laisse jamais le piège posé pour les suites suivantes.
+      finally { globalThis.fetch = vraiFetch; UI.reinitialiserImportCible(); G.reinitialiserLot(); window.dispatchEvent(new Event('online')); }
     }));
+    // Ronde 1 (faux-vert, constat 3) : éprouver une garde de classer() derrière un bouton éteint ou un rendu périmé — le nœud est RALLUMÉ, cliqué, puis le
+    // redessin de la barre attendu (classer() finit toujours par synchroniser({ forcer: true }) : au redessin, il est sorti — R-D-10, un fait, pas des ticks).
+    const rallumerEtCliquer = async (racine) => { const b = classerBtn(racine); b.disabled = false; b.click(); await attendre(() => classerBtn(racine) !== b, 'barre redessinée : classer() est sorti'); };
+    const lignesClassement = async (db) => (await db.getAll('imports')).filter((i) => i.kind === 'classement').length;
 
     await ecran('T-D11 bouton : une, deux et onze photos cochées', async (repo, db) => {
       const ONZE = Array.from({ length: 11 }, (_, i) => 'p' + (i + 1));
@@ -463,6 +472,7 @@ export async function runClassementTests({ eq, ok }) {
       cocher(racine, ['p2']);
       await attendre(() => classerBtn(racine) && !classerBtn(racine).disabled, 'session lue, bouton allumé');
       eq([classerBtn(racine).className, classerBtn(racine).textContent, sousClasser(racine)?.textContent, lienRegrouper(racine)?.className], ['btn primary', 'Classer ces photos avec l’assistant', 'Un classement = un appel à l’assistant ; lire les recettes coûtera ensuite un appel par recette.', 'btn'], 'T-D11 (M122) : deux cochées → « Classer… » primaire et le coût dit sous lui ; « Regrouper en recette » passe secondaire');
+      eq(texteNuDeBarre(racine), [], 'T-D11 (M-filter, ronde 1) : deux cochées → aucun nœud texte nu dans la barre (le null de « Remplacer cette page » n’y est jamais écrit « null », écart E-7)');
       cocher(racine, ONZE.slice(2));
       eq([classerBtn(racine).disabled, sousClasser(racine)?.textContent], [true, 'Classe au plus 10 photos à la fois : décoche-en 1.'], 'T-D11 : onze cochées → éteint, la raison dite');
       // click() sur un bouton ÉTEINT ne déclenche rien (spécification HTML) : pour éprouver la garde de classer() elle-même (un rendu périmé, une
@@ -485,11 +495,15 @@ export async function runClassementTests({ eq, ok }) {
       cocher(racine, ['p1', 'p2']);
       await attendre(() => sousClasser(racine)?.textContent === 'Décoche les photos déjà en cours d’import (1).', 'raison photos en cours');
       eq(classerBtn(racine).disabled, true, 'T-D11 (M67) : une cochée tenue par un import ouvert de la séance → éteint + « Décoche les photos déjà en cours d’import (1). »');
+      await rallumerEtCliquer(racine);
+      eq([await lignesClassement(db), ff.appels.length, dits, sousClasser(racine)?.textContent], [0, 0, [], 'Décoche les photos déjà en cours d’import (1).'], 'T-D11 (N4, ronde 1, D-D15) : une cochée tenue par un import ouvert, bouton RALLUMÉ → classer() relit le journal et s’arrête : aucune ligne, aucun POST (jamais une photo payée deux fois), la raison redite');
       scene.replaceChildren();
       racine = await monterSeance(repo, db, { over: { fetch: ff.fetch }, session: null });
       cocher(racine, ['p1', 'p3']);
       await attendre(() => sousClasser(racine)?.dataset?.role === 'connexion-ia', 'carte Connecte-toi');
       eq([classerBtn(racine).disabled, sousClasser(racine).textContent.startsWith('Connecte-toi pour utiliser l’assistant.'), ff.appels.length], [true, true, 0], 'T-D11 : sans session → la carte « Connecte-toi… », bouton éteint, 0 POST');
+      await rallumerEtCliquer(racine);
+      eq([await lignesClassement(db), ff.appels.length, dits, sousClasser(racine)?.dataset?.role], [0, 0, [], 'connexion-ia'], 'T-D11 (N7, ronde 1) : sans session, bouton RALLUMÉ → classer() relit la session et s’arrête avant toute écriture : aucune ligne, aucun POST ; la carte revient');
       scene.replaceChildren();
       const idx = await repo.ouvrirImport({ kind: 'index', edition_id: 'ed1', scan_session_id: 'ss_idx', page_ids: ['p5'] });
       let lacher; const tenu = new Promise((r) => { lacher = r; });
@@ -499,7 +513,53 @@ export async function runClassementTests({ eq, ok }) {
       cocher(racine, ['p1', 'p3']);
       await attendre(() => sousClasser(racine)?.textContent === 'Une lecture est en cours : attends sa fin ou annule-la.', 'raison vol tenu');
       eq(classerBtn(racine).disabled, true, 'T-D11 (M124) : un vol tenu par ce document (une lecture d’index suspendue) → éteint, et la raison est dite');
+      await rallumerEtCliquer(racine);
+      eq([await lignesClassement(db), ff.appels.length, dits], [0, 0, ['Une lecture est déjà en cours : annule-la d’abord.']], 'T-D11 (N9, ronde 1) : un vol tenu, bouton RALLUMÉ → le filet de la course le dit et s’arrête : aucune ligne de classement (sans lui, une ligne était ouverte puis refusée vol_tenu), aucun POST');
       lacher(); await vol;
+    });
+
+    await ecran('T-D11 garde réseau de classer() (ronde 1) : hors ligne, bouton rallumé', async (repo, db) => {
+      await poserSeance(repo, db);
+      const ff = fauxFetch();
+      const racine = await monterSeance(repo, db, { over: { fetch: ff.fetch } });
+      cocher(racine, ['p1', 'p2']);
+      await attendre(() => classerBtn(racine) && !classerBtn(racine).disabled, 'bouton allumé');
+      window.dispatchEvent(new Event('offline'));
+      await attendre(() => sousClasser(racine)?.textContent === 'Tu es hors ligne.', 'raison hors ligne');
+      await rallumerEtCliquer(racine);
+      eq([await lignesClassement(db), ff.appels.length, dits], [0, 0, ['Tu es hors ligne.']], 'T-D11 (N6, N6b, ronde 1) : hors ligne, bouton RALLUMÉ → classer() le dit et s’arrête AVANT toute écriture : aucune ligne, aucun POST');
+    });
+
+    await ecran('T-D11 garde des octets de classer() (ronde 1) : une photo cochée sans ses octets ici', async (repo, db) => {
+      await poserSeance(repo, db, { sansOctets: ['p2'] });
+      const ff = fauxFetch();
+      const racine = await monterSeance(repo, db, { over: { fetch: ff.fetch } });
+      cocher(racine, ['p1', 'p2']);
+      await attendre(() => classerBtn(racine) && !classerBtn(racine).disabled, 'bouton allumé (les octets ne sont lus qu’au clic)');
+      await rallumerEtCliquer(racine);
+      eq([await lignesClassement(db), ff.appels.length, dits], [0, 0, ['Les photos de cette séance ne sont pas sur cet appareil.']], 'T-D11 (N5, ronde 1) : une cochée sans octets ici → classer() le dit et s’arrête AVANT toute écriture : aucune ligne (sans la garde, une ligne était ouverte puis refusée octets_absents), aucun POST');
+    });
+
+    await ecran('T-D11 garde « classement ouvert ailleurs » de classer() (ronde 1) : rendu périmé', async (repo, db) => {
+      await poserSeance(repo, db);
+      const ff = fauxFetch();
+      const racine = await monterSeance(repo, db, { over: { fetch: ff.fetch } });
+      cocher(racine, ['p1', 'p2']);
+      await attendre(() => classerBtn(racine) && !classerBtn(racine).disabled, 'bouton allumé');
+      // Un autre onglet (le bus est propre à chaque document : aucun événement ici) ouvre un classement dans cette séance.
+      await db.put('imports', ligneClassement({ id: 'imp_autre_onglet', status: 'a_lancer', page_ids: ['p4', 'p5'] }));
+      await rallumerEtCliquer(racine);
+      eq([await lignesClassement(db), ff.appels.length, panneau(racine).hidden, panneau(racine).etatClassement().importId], [1, 0, false, 'imp_autre_onglet'], 'T-D11 (N8, ronde 1) : un classement ouvert entre-temps par un autre onglet → classer() n’en crée pas un second ni ne lance rien ; le panneau se redessine sur lui');
+    });
+
+    await ecran('T-D11 session pas encore lue (ronde 1) : bouton éteint, jamais la carte « Connecte-toi »', async (repo, db) => {
+      await poserSeance(repo, db);
+      const ctx = await ctxDe(repo, db);
+      ctx.sync.auth.jeton = () => new Promise(() => {}); // la lecture de la session ne finit pas (sessionAssistant la borne à 2 s : l'assertion la précède)
+      const racine = await IM.renderImport({}, { session: 'ss1' }, ctx, deps(repo, { fetch: fauxFetch().fetch }));
+      scene.append(racine);
+      cocher(racine, ['p1', 'p2']);
+      eq([classerBtn(racine)?.disabled, !!barre(racine)?.querySelector('[data-role="connexion-ia"]'), !!barre(racine)?.querySelector('[data-role="raison-classer"]')], [true, false, false], 'T-D11 (M-session-attente, ronde 1) : session pas encore lue → « Classer » éteint, SANS la carte « Connecte-toi » (jamais un flash pour une personne connectée) ni aucune ligne');
     });
 
     await ecran('T-D11 regrouperPermis', async (repo, db) => {
@@ -557,6 +617,7 @@ export async function runClassementTests({ eq, ok }) {
         await attendre(() => !!racine.querySelector('[data-role="regroupement"]'), 'écran de regroupement rendu');
       } finally { db.onMutate = capture; }
       eq(vus.find((v) => v[0] === 'a_verifier'), ['a_verifier', false], 'T-D12 (M71) : la ligne passe a_verifier (résultat écrit) AVANT que l’écran de regroupement soit rendu (I-3)');
+      eq((await db.getAll('imports')).find((i) => i.kind === 'classement').resultat, R5_STOCKE, 'T-D12 (N1, ronde 1) : le résultat écrit par le vol du panneau porte chaque groupe sur SES photos (photo n → la n-ième page ENVOYÉE) : la forme stockée de CLASSEMENT_5');
       boutonTexte(panneau(racine), 'Ignorer ce classement').click();
       await attendre(() => panneau(racine).hidden && !!classerBtn(racine) && !classerBtn(racine).disabled, 'classement ignoré, « Classer » revenu');
       suivante = [200, corpsModele(CLASSEMENT_5, { stop_reason: 'max_tokens' })];
@@ -574,7 +635,8 @@ export async function runClassementTests({ eq, ok }) {
     });
 
     await ecran('T-D12 reprise par ?import=, résultat hostile, Ignorer', async (repo, db) => {
-      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_ok' })] });
+      // Ronde 1 (M74 creux) : imp_ok porte un brouillon NON nul — « Ignorer » doit l'effacer, pas le trouver déjà nul.
+      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_ok', over: { brouillon: { cle: 'brouillon-sentinelle' } } })] });
       await poserSeance(repo, db, { id: 'ss2', imports: [ligneClassement({ id: 'imp_hostile', sessionId: 'ss2', over: { resultat: { groupes: 'x' }, brouillon: { cle: DATE } } })] });
       const ff = fauxFetch();
       const racine = await monterSeance(repo, db, { query: { session: 'ss1', import: 'imp_ok' }, over: { fetch: ff.fetch } });
@@ -590,6 +652,7 @@ export async function runClassementTests({ eq, ok }) {
       await attendre(() => !!boutonTexte(panneau(r3), 'Ignorer ce classement'), 'Ignorer offert');
       cocher(r3, ['p1']);
       eq(lienRegrouper(r3), null, 'T-D12 : une sélection qui touche le classement reçu → pas de « Regrouper en recette »');
+      eq(texteNuDeBarre(r3), [], 'T-D12 (M-filter, ronde 1) : sélection classée → « Regrouper » absent de la barre, et aucun nœud texte « null » à sa place');
       reponseConfirmer = false;
       const avant = await db.get('imports', 'imp_ok');
       boutonTexte(panneau(r3), 'Ignorer ce classement').click();
@@ -599,7 +662,7 @@ export async function runClassementTests({ eq, ok }) {
       boutonTexte(panneau(r3), 'Ignorer ce classement').click();
       await attendre(async () => (await db.get('imports', 'imp_ok')).status === 'ignore' && panneau(r3).hidden && !!lienRegrouper(r3), 'ignoré, panneau caché, Regrouper revenu');
       const ig = await db.get('imports', 'imp_ok');
-      eq([ig.status, typeof ig.finished_at, ig.brouillon, panneau(r3).hidden, !!lienRegrouper(r3)], ['ignore', 'string', null, true, true], 'T-D12 (M74) : « Ignorer ce classement » confirmé → ignore avec finished_at, brouillon nul, panneau caché, « Regrouper en recette » revenu');
+      eq([ig.status, ig.finished_at, nul(ig.brouillon), panneau(r3).hidden, !!lienRegrouper(r3)], ['ignore', NOW, 'null', true, true], 'T-D12 (M74, N43, N44, ronde 1) : « Ignorer ce classement » confirmé → ignore avec finished_at = l’horloge injectée, le brouillon (non nul) effacé, panneau caché, « Regrouper en recette » revenu');
     });
 
     await ecran('T-D12 liste blanche de l’extraction et option attendus', async (repo, db) => {
@@ -613,6 +676,11 @@ export async function runClassementTests({ eq, ok }) {
       finally { db.onMutate = capture; }
       eq([rs, vus.length, ff.appels.length, (await db.get('imports', 'imp_s')).status, (await db.get('imports', 'imp_cov')).status], [[{ issue: 'refuse', raison: 'sorte' }, { issue: 'refuse', raison: 'sorte' }], 0, 0, 'a_lancer', 'a_lancer'], 'T-D12 (M75, M128) : lancerExtraction sur une ligne de classement, puis de couverture → refuse(sorte), 0 écriture, 0 POST (liste BLANCHE : une sorte inconnue n’est jamais lue comme une recette)');
       eq(UI.SORTES_EXTRACTION, ['recette', 'index'], 'T-D12 : SORTES_EXTRACTION (C lit encore les index par lancerExtraction : écart E-3)');
+      // Ronde 1 (R3, M-lecture-sorte) : la garde de sorte du chemin `lecture` (une lecture SANS ligne, l'éditeur et le panneau d'index) — l'interface
+      // Produces : accepte({ kind }) évaluée avant toute écriture.
+      let executions = 0; const avantLecture = await db.count('imports');
+      const rl = await UI.lancerVol(null, async () => { executions += 1; return { resultat: null, texteBrut: '', modele: null }; }, { ctx, repo, fetch: ff.fetch, lecture: { kind: 'classement', pageIds: ['p1', 'p2'], editionId: 'ed1', sessionId: 'ss1', cle: null }, accepte: (l) => l?.kind === 'recette' });
+      eq([rl, executions, ff.appels.length, await db.count('imports')], [{ issue: 'refuse', raison: 'sorte', importId: null }, 0, 0, avantLecture], 'T-D12 (M-lecture-sorte, ronde 1) : une LECTURE d’une sorte que accepte refuse → refuse(sorte), aucune ligne ouverte, l’exécutant jamais appelé, aucun POST');
       const echouee = await repo.ouvrirImport({ kind: 'recette', recipe_id: 'rcS', edition_id: 'ed1', scan_session_id: 'ss1', page_ids: ['p1'] });
       await db.put('imports', { ...(await db.get('imports', echouee.id)), status: 'echec', erreur: { raison: 'serveur', extra: {} } });
       eq([await UI.lancerExtraction(echouee.id, { ctx, repo, fetch: ff.fetch, attendus: ['a_lancer'] }), ff.appels.length, (await db.get('imports', echouee.id)).status], [{ issue: 'refuse', raison: 'transition', statut: 'echec' }, 0, 'echec'], 'T-D12 (M143b) : avec attendus [a_lancer], une ligne echec est refusée (transition) AVANT toute écriture et tout POST');
@@ -631,6 +699,117 @@ export async function runClassementTests({ eq, ok }) {
       eq(panneau(r2).querySelector('button[data-role="reclasser"]').disabled, false, 'T-D12 (M118) : la ligne de classement elle-même ne s’éteint pas (pagesEnCours, sauf: ligne.id)');
     });
 
+    const COUT = 'Un classement = un appel à l’assistant ; lire les recettes coûtera ensuite un appel par recette.';
+    const DECOCHE_1 = 'Décoche les photos déjà en cours d’import (1).';
+    await ecran('T-D12 état 4 (ronde 1) : la raison suit la sélection, vide comprise ; « Reclasser » sur d’autres pages n’envoie qu’elles', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_e4', status: 'echec', page_ids: ['p1', 'p3', 'p5'], over: { erreur: { raison: 'coupe', extra: {} } } }), { ...IMPORT_RCO, id: 'imp_p3', recipe_id: null, scan_session_id: 'ss1', page_ids: ['p3'] }] });
+      const ff = fauxFetch();
+      const racine = await monterSeance(repo, db, { query: { session: 'ss1', import: 'imp_e4' }, over: { fetch: ff.fetch } });
+      const reclasser = () => panneau(racine).querySelector('button[data-role="reclasser"]');
+      await attendre(() => raisonPanneau(racine) === DECOCHE_1, 'raison dite');
+      cocher(racine, ['p3']);
+      await attendre(() => raisonPanneau(racine) === COUT, 'p3 décochée : le coût dit, sans clic');
+      eq(reclasser().disabled, false, 'T-D12 (N14, ronde 1) : décocher la photo tenue ailleurs redessine le panneau — « Reclasser » se rallume et le coût est dit, sans aucun clic');
+      cocher(racine, ['p1', 'p5']);
+      await attendre(() => raisonPanneau(racine) === DECOCHE_1, 'sélection vidée : le panneau se redessine sur les pages de la ligne');
+      eq([cochees(racine), reclasser().disabled], [[], true], 'T-D12 (ronde 1, constat 14) : sélection VIDÉE → le panneau se redessine aussi (pagesALire retombe sur les pages de la ligne, dont p3, tenue ailleurs) : éteint, la raison dite');
+      cocher(racine, ['p1', 'p5']);
+      await attendre(() => raisonPanneau(racine) === COUT && reclasser()?.disabled === false, 'p1 et p5 recochées');
+      reclasser().click();
+      await attendre(() => ff.appels.length === 1, 'POST parti');
+      const attendues = await Promise.all(['p1', 'p5'].map(async (id) => (await L.pagePourEnvoi((await db.get('files', (await db.get('source_pages', id)).sha256)).blob)).base64));
+      const e4 = await db.get('imports', 'imp_e4');
+      eq([imagesEnvoyees(ff.appels[0]), e4.page_ids, e4.status], [attendues, ['p1', 'p5'], 'en_cours'], 'T-D12 (N2, ronde 1) : « Reclasser » d’un échec sur d’AUTRES pages → echec → a_lancer (page_ids [p1, p5]) puis le vol : exactement ces deux images, jamais p3, tenue par un autre import');
+      ff.rendre[0](413, { erreur: 'trop_lourd' });
+      await attendre(async () => (await db.get('imports', 'imp_e4')).status === 'echec', 'vol fini');
+    });
+
+    await ecran('T-D12 état 5 (ronde 1) : ?import= d’un classement à lancer coche ses pages ; une seule cochée → la raison ; d’autres pages → patch puis le vol, relancé ICI', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_l5', status: 'a_lancer', page_ids: ['p1', 'p3', 'p5'], device_id: 'dev_autre' })] });
+      const ff = fauxFetch();
+      const racine = await monterSeance(repo, db, { query: { session: 'ss1', import: 'imp_l5' }, over: { fetch: ff.fetch } });
+      eq(cochees(racine), ['p1', 'p3', 'p5'], 'T-D12 (N17, ronde 1) : reprise par ?import= d’un classement À LANCER → ses pages présentes cochées (§ 4.1, comme un échec)');
+      const bouton = () => panneau(racine).querySelector('button[data-role="classer"]');
+      cocher(racine, ['p3', 'p5']);
+      await attendre(() => raisonPanneau(racine) === 'Coche au moins deux photos de cette séance.', 'une seule cochée : la raison dite');
+      eq(bouton().disabled, true, 'T-D12 (ronde 1, constats 15 et 24) : à l’état 5, une seule photo cochée → « Classer » éteint ET la raison dite (I-D4 : un bouton éteint dit pourquoi)');
+      window.dispatchEvent(new Event('offline'));
+      await attendre(() => raisonPanneau(racine) === 'Tu es hors ligne.', 'hors ligne : la première raison');
+      eq(bouton().disabled, true, 'T-D12 (ronde 1, constat 15) : hors ligne avec une seule cochée → « Tu es hors ligne. » d’abord (l’ordre des raisons de § 4.2 tient, la borne basse vient après)');
+      window.dispatchEvent(new Event('online'));
+      cocher(racine, ['p5']);
+      await attendre(() => raisonPanneau(racine) === COUT && bouton()?.disabled === false, 'p1 et p5 : Classer allumé');
+      bouton().click();
+      await attendre(() => ff.appels.length === 1, 'POST parti');
+      const l5 = await db.get('imports', 'imp_l5');
+      eq([imagesEnvoyees(ff.appels[0]).length, l5.page_ids, l5.status, l5.device_id], [2, ['p1', 'p5'], 'en_cours', appareilIci()], 'T-D12 (ronde 1, constat 23) : état 5, d’autres pages → patch { page_ids } sur place puis le vol (2 images) ; une ligne venue d’un AUTRE appareil, relancée ici, devient celle de CET appareil (comme R-B-8 : son battement est ici)');
+      ff.rendre[0](413, { erreur: 'trop_lourd' });
+      await attendre(async () => (await db.get('imports', 'imp_l5')).status === 'echec', 'vol fini');
+    });
+
+    await ecran('T-D12 « Ignorer ce classement » sans question sur un échec ou une ligne à lancer (ronde 1)', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_ie', status: 'echec', over: { erreur: { raison: 'coupe', extra: {} }, brouillon: { cle: 'brouillon-sentinelle' } } })] });
+      await poserSeance(repo, db, { id: 'ss2', pages: ['q1', 'q2'], octets: false, imports: [ligneClassement({ id: 'imp_il', sessionId: 'ss2', status: 'a_lancer', page_ids: ['q1', 'q2'], over: { brouillon: { cle: 'brouillon-sentinelle' } } })] });
+      for (const [seance, id, sorte] of [['ss1', 'imp_ie', 'en échec'], ['ss2', 'imp_il', 'à lancer']]) {
+        scene.replaceChildren();
+        const racine = await monterSeance(repo, db, { query: { session: seance, import: id }, over: { fetch: fauxFetch().fetch } });
+        await attendre(() => !!boutonTexte(panneau(racine), 'Ignorer ce classement'), 'Ignorer offert');
+        boutonTexte(panneau(racine), 'Ignorer ce classement').click();
+        await attendre(async () => (await db.get('imports', id)).status === 'ignore' && panneau(racine).hidden, 'ignoré, panneau caché');
+        const ig = await db.get('imports', id);
+        eq([confirmations.length, ig.finished_at, nul(ig.brouillon), panneau(racine).hidden], [0, NOW, 'null', true], `T-D12 (N12, N20, N43, N44, ronde 1) : « Ignorer ce classement » d’une ligne ${sorte} → ignore SANS question (rien de reçu à perdre), finished_at = l’horloge injectée, brouillon effacé, panneau caché`);
+      }
+    });
+
+    await ecran('T-D12 « Ignorer ce classement » relit la ligne (ronde 1) : changée ailleurs depuis le rendu, ou pendant la question → rien d’écrit', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_x', status: 'echec', over: { erreur: { raison: 'coupe', extra: {} } } })] });
+      let pendant = null;
+      const confirmer = async (message, o) => { confirmations.push([message, o?.okLabel ?? null]); if (pendant) await pendant(); return true; };
+      const racine = await monterSeance(repo, db, { query: { session: 'ss1', import: 'imp_x' }, over: { fetch: fauxFetch().fetch, confirmer } });
+      await attendre(() => !!boutonTexte(panneau(racine), 'Ignorer ce classement'), 'Ignorer offert');
+      // S1 : l'écran montre l'échec ; un autre onglet (aucun événement du bus ici) l'a reclassé : a_verifier, un résultat neuf, payé (appels 2).
+      const R2 = { ...ligneClassement({ id: 'imp_x' }), appels: 2, started_at: '2026-10-19T11:00:00.000Z' };
+      await db.put('imports', R2);
+      boutonTexte(panneau(racine), 'Ignorer ce classement').click();
+      await attendre(() => panneau(racine).querySelector('[data-role="regroupement"] h2')?.textContent === 'Recettes trouvées', 'redessin sur la ligne relue (reçue)');
+      eq([confirmations.length, await db.get('imports', 'imp_x')], [0, R2], 'T-D12 (ronde 1, constats 1 et 2, S1) : rendu sur un échec, reclassé ailleurs depuis → « Ignorer » relit la ligne : rien n’est demandé ni écrit (le classement payé reste à vérifier), le panneau montre la ligne relue');
+      // S2 : la question est posée pour le classement montré (R2) ; un autre (R3, autre départ) arrive PENDANT la question ; « oui » → rien d'écrit.
+      const R3 = { ...R2, appels: 3, started_at: '2026-10-19T11:30:00.000Z' };
+      pendant = () => db.put('imports', R3);
+      const b = boutonTexte(panneau(racine), 'Ignorer ce classement');
+      b.click();
+      await attendre(() => confirmations.length === 1 && !b.isConnected, 'question posée, puis redessin');
+      eq([confirmations[0], await db.get('imports', 'imp_x')], [['Ignorer ce classement ? Il a coûté un appel ; le refaire en coûtera un autre.', 'Ignorer'], R3], 'T-D12 (ronde 1, constat 2, S2) : la question vaut pour LE classement montré — un autre reçu pendant la question (synchro, autre onglet) n’est jamais ignoré sans avoir été vu : la clé est gardée DANS la transaction');
+    });
+
+    await ecran('T-D12 marquerIllisible garde la clé DANS la transaction (ronde 1)', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_h', over: { resultat: { groupes: 'x' } } })] });
+      const valide = { ...ligneClassement({ id: 'imp_h' }), started_at: '2026-10-19T11:00:00.000Z' };
+      let transitions = 0;
+      // Entre la relecture (hostile) et la transaction, la ligne est reclassée ailleurs : un nouveau départ, un résultat valide.
+      const espion = { ...repo, transitionner: async (store, key, opts) => { if (key === 'imp_h' && transitions++ === 0) await db.put('imports', valide); return repo.transitionner(store, key, opts); } };
+      const racine = await monterSeance(repo, db, { query: { session: 'ss1', import: 'imp_h' }, over: { repo: espion, fetch: fauxFetch().fetch } });
+      await attendre(() => panneau(racine).querySelector('[data-role="regroupement"] h2')?.textContent === 'Recettes trouvées', 'redessin sur le classement valide');
+      eq([transitions, await db.get('imports', 'imp_h')], [1, valide], 'T-D12 (N11, ronde 1) : un résultat hostile relu puis reclassé AILLEURS avant la transaction → la revalidation est refusée par la clé : le classement payé, valide, reste à vérifier, intact');
+    });
+
+    await ecran('T-D12 résultat hostile : un nœud neutre pendant le marquage (ronde 1)', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_h2', over: { resultat: { groupes: 'x' } } })] });
+      const ctx = await ctxDe(repo, db);
+      let lacher; const suspendue = new Promise((r) => { lacher = r; });
+      const espion = { ...repo, transitionner: async (...a) => { await suspendue; return repo.transitionner(...a); } }; // le marquage reste en cours
+      const p = G.panneauClassement(ctx.scan_sessions.find((s) => s.id === 'ss1'), ctx, () => [], deps(espion, { fetch: fauxFetch().fetch }));
+      eq([!!p.querySelector('[data-role="regroupement"]'), !!p.querySelector('[data-role="revalidation"]')], [false, true], 'T-D12 (ronde 1, constat 16) : un résultat hostile → pendant son marquage echec(illisible), un nœud NEUTRE (data-role revalidation), jamais un écran de regroupement vide qu’un test prendrait pour rendu');
+      lacher();
+      await attendre(async () => (await db.get('imports', 'imp_h2')).status === 'echec', 'marquage fini');
+    });
+
+    await ecran('T-D12 état 2 tenu par un AUTRE document (ronde 1, I-7)', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_v', status: 'en_cours', over: { document_id_vol: 'doc-ailleurs', battement_at: NOW, started_at: NOW } })] });
+      const racine = await monterSeance(repo, db, { query: { session: 'ss1', import: 'imp_v' }, over: { fetch: fauxFetch().fetch } });
+      eq([panneau(racine).hidden, panneau(racine).textContent, !!panneau(racine).querySelector('button[data-role="annuler"]'), !!panneau(racine).querySelector('.status[role="status"]')], [false, 'En cours sur un autre écran', false, false], 'T-D12 (N13, ronde 1, I-7) : un classement en vol tenu par un AUTRE document → « En cours sur un autre écran », sans « Annuler » (il n’annulerait rien ici)');
+    });
+
     await ecran('T-D9 priorité des présélections (écran)', async (repo, db) => {
       const idx = { ...ligneClassement({ id: 'imp_idx', page_ids: ['p2'], over: { updated_at: NOW } }), kind: 'index', resultat: { photos: [{ page_id: 'p2', printed_page_range: null, entries: [{ title: 'Soupe', printed_page: 5, section: null, uncertain: false }] }], ecartees: { trop_longues: 0, adresse: 0 }, uncertain: [] } };
       await poserSeance(repo, db, { imports: [idx, ligneClassement({ id: 'imp_c9', status: 'echec', page_ids: ['p1', 'p3'], over: { erreur: { raison: 'coupe', extra: {} } } })] });
@@ -638,15 +817,24 @@ export async function runClassementTests({ eq, ok }) {
       eq([cochees(racine), racine.querySelector('[data-role="panneau-index"]')?.hidden], [['p1', 'p3'], true], 'T-D9 (M119) : ?import= d’un classement en échec d’une séance qui a aussi un index ouvert → les pages du classement cochées, celles de l’index non, panneau d’index fermé');
     });
 
+    await ecran('T-D9 ?import= désigne la ligne du panneau parmi deux classements ouverts (ronde 1)', async (repo, db) => {
+      await poserSeance(repo, db, { imports: [ligneClassement({ id: 'imp_vieux', status: 'echec', page_ids: ['p1', 'p2'], over: { erreur: { raison: 'coupe', extra: {} }, updated_at: DATE } }), ligneClassement({ id: 'imp_neuf', status: 'echec', page_ids: ['p3', 'p4'], over: { erreur: { raison: 'vide', extra: {} }, updated_at: NOW } })] });
+      const racine = await monterSeance(repo, db, { query: { session: 'ss1', import: 'imp_vieux' }, over: { fetch: fauxFetch().fetch } });
+      eq([panneau(racine).etatClassement().importId, cochees(racine), panneau(racine).querySelector('[data-role="echec"] span')?.textContent], ['imp_vieux', ['p1', 'p2'], 'Le classement a été coupé : classe moins de photos à la fois.'], 'T-D9 (N18, ronde 1) : deux classements ouverts dans la séance, ?import= désigne le plus ancien → le panneau montre CELUI-LÀ (importId passé au panneau), jamais le plus récent');
+    });
+
     await ecran('T-D10 Imports : titres et états du classement (écran)', async (repo, db) => {
       const maintenantReel = new Date().toISOString();
       await poserSeance(repo, db, { imports: [
         ligneClassement({ id: 'c_lancer', status: 'a_lancer', page_ids: ['p1', 'p2'] }),
         ligneClassement({ id: 'c_vol', status: 'en_cours', over: { document_id_vol: 'doc-ailleurs', started_at: maintenantReel, battement_at: maintenantReel } }),
-        ligneClassement({ id: 'c_recu', over: { started_at: '2026-10-18T09:30:00.000Z', updated_at: NOW } }),
+        ligneClassement({ id: 'c_recu', over: { started_at: '2026-10-18T09:30:00.000Z', updated_at: NOW, brouillon: { cle: 'brouillon-sentinelle' } } }),
         ligneClassement({ id: 'c_echec', status: 'echec', over: { erreur: { raison: 'coupe', extra: {} } } }),
+        // Ronde 1 : un vol tenu par CE document, et un échec illisible (son code).
+        ligneClassement({ id: 'c_ici', status: 'en_cours', over: { document_id_vol: UI.DOCUMENT_ID, started_at: maintenantReel, battement_at: maintenantReel } }),
+        ligneClassement({ id: 'c_illis', status: 'echec', over: { erreur: { raison: 'illisible', extra: {} } } }),
       ] });
-      const racine = await AD.renderAdd({}, {}, await ctxDe(repo, db), { repo, navigate: (p) => navs.push(p), toast: (m) => dits.push(m), fetch: fauxFetch().fetch, maintenant: () => NOW });
+      const racine = await AD.renderAdd({}, {}, await ctxDe(repo, db), { ...deps(repo), fetch: fauxFetch().fetch });
       scene.append(racine);
       const ligneEl = (id) => racine.querySelector(`[data-role="ligne-import"][data-id="${CSS.escape(id)}"]`);
       eq(['c_lancer', 'c_vol', 'c_recu', 'c_echec'].map((id) => ligneEl(id)?.querySelector('strong')?.textContent), Array(4).fill('Classement · Saisons'), 'T-D10 (écran) : « Classement · {livre} »');
@@ -656,6 +844,18 @@ export async function runClassementTests({ eq, ok }) {
       eq([...ligneEl('c_echec').querySelectorAll('button')].map((b) => b.textContent), ['Reprendre', 'Ignorer'], 'T-D10 (M62, écran) : jamais « Relancer » sur un classement');
       boutonTexte(ligneEl('c_echec'), 'Reprendre').click();
       eq(navs.at(-1), '/import?session=ss1&import=c_echec', 'T-D10 (écran) : « Reprendre » → la séance du classement');
+      eq([ligneEl('c_ici').textContent.includes('Classement des photos par l’assistant…'), ligneEl('c_illis').textContent.includes('L’assistant n’a pas répondu lisiblement. Réessaie. Code : illisible')], [true, true], 'T-D10 (écran, N15, N53, ronde 1) : un classement en vol tenu par CE document dit « Classement des photos par l’assistant… » ; un échec illisible dit sa phrase ET son code');
+      // Ronde 1 (constat 26) : « Ignorer » d'un classement REÇU depuis Imports — la question du panneau, et le brouillon effacé (D-D20).
+      reponseConfirmer = false;
+      const avantRecu = await db.get('imports', 'c_recu');
+      boutonTexte(ligneEl('c_recu'), 'Ignorer').click();
+      await attendre(() => confirmations.length === 1, 'confirmation demandée'); await tick(); await tick();
+      eq([confirmations[0], await db.get('imports', 'c_recu')], [['Ignorer ce classement ? Il a coûté un appel ; le refaire en coûtera un autre.', 'Ignorer'], avantRecu], 'T-D10 (écran, ronde 1, constat 26) : « Ignorer » d’un classement REÇU depuis Imports pose la question du panneau (il a coûté un appel) ; « non » → rien d’écrit');
+      reponseConfirmer = true;
+      boutonTexte(ligneEl('c_recu'), 'Ignorer').click();
+      await attendre(async () => (await db.get('imports', 'c_recu')).status === 'ignore', 'classement reçu ignoré');
+      const igR = await db.get('imports', 'c_recu');
+      eq([confirmations.length, igR.finished_at, nul(igR.brouillon)], [2, NOW, 'null'], 'T-D10 (écran, ronde 1, constat 26) : « oui » → ignore, finished_at = l’horloge injectée, le brouillon effacé (D-D20 : « Ignorer ce classement » l’efface, d’où qu’il vienne)');
     });
 
     // --- (repère) les tâches suivantes ajoutent leurs blocs AU-DESSUS de cette ligne

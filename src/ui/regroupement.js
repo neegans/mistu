@@ -69,7 +69,8 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
   const prevenir = () => { if (typeof surChangement === 'function') surChangement(); };
 
   // La PREMIÈRE raison qui éteint « Classer » / « Reclasser » (§ 4.2 état 1, I-D4), dans cet ordre ; null = allumé ; { attente } = la session n'est pas
-  // encore lue (éteint, sans texte : jamais un flash « Connecte-toi » pour une personne connectée).
+  // encore lue (éteint, sans texte : jamais un flash « Connecte-toi » pour une personne connectée), son seul sens depuis la ronde 1 ; moins de deux
+  // pages (états 4 et 5 ; l'état 1 ne rend aucun bouton sous deux cochées) est une raison DITE, en dernier, après les raisons ordonnées (I-D4).
   function raisonEteint(pages, sauf) {
     if (!enLigne()) return { texte: t('Tu es hors ligne.') };
     if (etat.session === undefined) return { attente: true };
@@ -79,6 +80,7 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     const prises = pagesEnCours(etat.imports, session?.id, { sauf });
     const k = pages.filter((p) => prises.has(p)).length;
     if (k) return { texte: t('Décoche les photos déjà en cours d’import ({k}).', { k }) };
+    if (pages.length < 2) return { texte: t('Coche au moins deux photos de cette séance.') };
     return null;
   }
   const ligneSousBouton = (r) => (r?.carte ? carteConnexion(connecter, ctx) : r?.attente ? null
@@ -109,7 +111,7 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     : [el('div', { class: 'status warn' }, t('En cours sur un autre écran'))]); // I-7 : sans « Annuler »
   function blocALancer(L) { // états 4 (echec) et 5 (a_lancer)
     const pages = pagesALire(presentes(getSelection()), L, pagesSeance(), ctx?.pagesById);
-    const r = pages.length < 2 ? { attente: true } : raisonEteint(pages, L.id);
+    const r = raisonEteint(pages, L.id); // ronde 1 : moins de deux pages est une raison dite (raisonEteint), jamais une attente muette
     const blocs = [];
     if (L.status === 'echec') { const { texte, code } = texteEchecClassement(L.erreur); blocs.push(el('div', { class: 'status warn', dataset: { role: 'echec' } }, el('span', null, texte), code ? el('small', { class: 'muted' }, code) : null)); }
     blocs.push(el('div', { class: 'row' },
@@ -123,7 +125,8 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
   // regroupement complet vient en tâche 3.
   function blocRecu(L) {
     const resultat = revaliderResultatClassement(L.resultat, L.page_ids);
-    if (!resultat) { marquerIllisible(L); return el('div', { class: 'stack', dataset: { role: 'regroupement' } }); }
+    // Ronde 1 : pendant le marquage, un nœud NEUTRE — jamais le rôle de l'écran de regroupement (un test qui attend cet écran ne lit pas un écran vide).
+    if (!resultat) { marquerIllisible(L); return el('div', { class: 'stack', dataset: { role: 'revalidation' } }); }
     const n = resultat.groupes.length;
     return el('div', { class: 'stack', dataset: { role: 'regroupement' } },
       el('h2', null, t('Recettes trouvées')),
@@ -218,13 +221,20 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     finally { etat.occupe = false; await synchroniser({ forcer: true }); }
   }
   // « Ignorer ce classement » : confirmé sur un classement REÇU (il a coûté un appel) ; à lancer ou en échec, sans confirmation.
+  // Ronde 1 (§ 4.2 « relue par repo.get avant toute écriture », D-D23) : le verrou d'instance avant tout await ; la ligne RELUE — changée depuis le rendu
+  // (statut ou clé : un autre onglet ou appareil l'a reclassée ou relancée), rien n'est demandé ni écrit, le redessin la montre ; la question se décide sur
+  // la ligne relue ; la transition part de SON statut et garde sa clé DANS la transaction : un classement reçu pendant la question n'est jamais ignoré.
   async function ignorerClassement() {
-    const L = ouverte() ? etat.ligne : null;
-    if (!L || etat.occupe || L.status === 'en_cours') return;
-    if (L.status === 'a_verifier' && !(await confirmer(t('Ignorer ce classement ? Il a coûté un appel ; le refaire en coûtera un autre.'), { okLabel: t('Ignorer') }))) return;
+    const vue = ouverte() ? etat.ligne : null;
+    if (!vue || etat.occupe || vue.status === 'en_cours') return;
     etat.occupe = true;
-    try { await repo.transitionner('imports', L.id, { attendus: ['a_lancer', 'a_verifier', 'echec'], patch: { status: 'ignore', finished_at: maintenant(), brouillon: null } }); }
-    catch (e) { if (!(e instanceof TransitionRefusee)) logError('regroupement.ignorer', { error: e, id: L.id }); }
+    try {
+      const L = await repo.get('imports', vue.id);
+      if (!L || L.status !== vue.status || cleClassement(L) !== cleClassement(vue) || !['a_lancer', 'a_verifier', 'echec'].includes(L.status)) return;
+      if (L.status === 'a_verifier' && !(await confirmer(t('Ignorer ce classement ? Il a coûté un appel ; le refaire en coûtera un autre.'), { okLabel: t('Ignorer') }))) return;
+      const cle = cleClassement(L);
+      await repo.transitionner('imports', L.id, { attendus: [L.status], patch: (c) => { if (cleClassement(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { status: 'ignore', finished_at: maintenant(), brouillon: null }; } });
+    } catch (e) { if (!(e instanceof TransitionRefusee)) logError('regroupement.ignorer', { error: e, id: vue.id }); }
     finally { etat.occupe = false; await synchroniser({ forcer: true }); }
   }
 

@@ -644,4 +644,6 @@ export const EN = {
   "Recettes trouvées": "Recipes found",
   "1 recette proposée par l’assistant — vérifie le groupe avant de lire.": "1 recipe suggested by the assistant — check the group before reading.",
   "{n} recettes proposées par l’assistant — vérifie les groupes avant de lire.": "{n} recipes suggested by the assistant — check the groups before reading.",
+  // Lot D, ronde 1 de la tâche 2 : « Reclasser » / « Classer » d'une ligne éteints faute de deux photos disent pourquoi (I-D4).
+  "Coche au moins deux photos de cette séance.": "Check at least two photos from this session.",
 };

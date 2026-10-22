@@ -143,11 +143,14 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   const drawActions = () => {
     actions.replaceChildren();
     const n = selected.size;
+    // Lot D, ronde 1 de T2 : lue à CHAQUE redessin de la barre, sélection vide comprise — le panneau des états 4 et 5 suit la sélection (vide :
+    // pagesALire retombe sur les pages de la ligne, la raison et le bouton changent aussi).
+    const classement = panneau.actionsSelection();
     actions.append(el('span', { class: 'muted' }, n ? t('{n} page(s) sélectionnée(s)', { n }) : t('Sélectionne des pages pour les regrouper.')));
     if (n) {
       const ids = [...selected].join(',');
       actions.append(...[
-        ...panneau.actionsSelection(),
+        ...classement,
         panneau.regrouperPermis([...selected]) ? el('a', { class: n >= 2 ? 'btn' : 'btn primary', href: `#/recipes/new${buildQuery({ pages: ids, edition: session.edition_id || '', session: session.id })}` }, t('Regrouper en recette')) : null,
         el('button', { class: 'btn', onClick: () => { indexPanel.hidden = false; indexPanel.scrollIntoView({ behavior: 'smooth' }); } }, t('Index / table des matières')),
         n === 1 ? el('button', { class: 'btn', onClick: () => replacePage([...selected][0]) }, t('Remplacer cette page')) : null,

@@ -3,7 +3,7 @@
 // (#/add/livre), le signet dans signet.js (#/add/signet). Avant la grille, la section « Imports » (lot A « Importer une recette repérée »,
 // spec import-cible § 4.5, tâche 6) : ce qui est en cours, à reprendre ou en échec dans le journal, et les photos conservées d'une séance — et,
 // depuis le lot B (spec recette-web § 4.7), les lectures web (relancées et annulées par import-web.js).
-import { el, pickFiles, toast as toastDom, formatDate } from '../core/dom.js';
+import { el, pickFiles, toast as toastDom, formatDate, confirmDialog } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { navigate as naviguerDom } from '../core/router.js';
 import { on } from '../core/bus.js';
@@ -94,12 +94,10 @@ function titreLigne(l) {
 // porte pas). I-4 : interrompu, annule et incertain disent la même phrase (phraseEchec, une définition avec l'écran ciblé, l'éditeur et le panneau).
 function etatLigne(l, brute) {
   if (l.kind === 'seance') return null;
-  if (l.kind === 'classement') { // lot D (§ 4.7) : les états d'un classement
-    if (l.etat === 'a_lancer') return l.pages <= 1 ? t('{n} photo ajoutée', { n: l.pages }) : t('{n} photos ajoutées', { n: l.pages });
-    if (l.etat === 'en_cours') return l.ailleurs ? t('En cours sur un autre écran') : t('Classement des photos par l’assistant…');
+  if (l.kind === 'classement') { // lot D (§ 4.7) : ce qui diffère d'une lecture de pages — « à lancer » et « ailleurs » suivent les règles communes ci-dessous (ronde 1)
+    if (l.etat === 'en_cours' && !l.ailleurs) return t('Classement des photos par l’assistant…');
     if (l.etat === 'a_verifier') return t('Classement reçu le {d}', { d: formatDate(dateReception(brute), { withTime: true }) }); // comme « Lecture reçue le » (vague finale du lot A, m7) : jamais updated_at, que chaque geste du brouillon réécrit
     if (l.etat === 'echec') { const { texte, code } = texteEchecClassement(brute?.erreur ?? { raison: l.raison }); return code ? `${texte} ${code}` : texte; }
-    return null;
   }
   if (l.kind === 'web') { // lot B : ni photos ni pages ; l'échec dit le texte de l'écran de lecture (texteEchecLecture, une définition, I-B6)
     if (l.etat === 'a_lancer') return t('L’app n’a pas encore lu la page.');
@@ -126,8 +124,8 @@ const volDe = (l) => (l.kind === 'web' ? { lancer: lancerLecture, annuler: annul
 // vient du contexte de la route (getData charge imports et scan_sessions : sans eux, la page ne lit aucune base) ; chaque écriture du journal ou des
 // séances (bus `change`) et chaque geste la redessinent DEPUIS LA BASE : un vol lancé d'ici montre « Annuler » tant qu'il court, puis son issue. Le
 // focus d'un geste survit au redessin (même ligne, même geste), sinon il revient à la section.
-// Dépendances injectables { repo, navigate, toast, fetch, maintenant, battementMs } : la suite n'ouvre ni réseau ni routeur.
-function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, battementMs }) {
+// Dépendances injectables { repo, navigate, toast, fetch, maintenant, battementMs, confirmer } : la suite n'ouvre ni réseau, ni routeur, ni dialogue.
+function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, battementMs, confirmer }) {
   const hote = el('div', null);
   let file = Promise.resolve();
   // Ronde 1 : les références visées sont relues aussi — une fiche reçue (synchro) pendant que la page est montée donne son titre et ses gestes au redessin.
@@ -145,8 +143,12 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
     else if (geste === 'ignorer') {
       // « Ignorer » vaut pour LA lecture affichée (T4-R2, ronde 1) : une ligne relancée ailleurs depuis le dessin (autre lecture, autre départ) n'est pas
       // ignorée sans avoir été vue — le redessin la montre, et un second « Ignorer » vaudra pour elle.
+      // Lot D, ronde 1 de T2 (I-D4, D-D20) : un classement REÇU s'ignore ici comme dans le panneau — la même question (il a coûté un appel ; « non » → rien
+      // d'écrit), et son brouillon effacé avec lui.
+      const classement = l.kind === 'classement';
+      if (classement && brute?.status === 'a_verifier' && !(await confirmer(t('Ignorer ce classement ? Il a coûté un appel ; le refaire en coûtera un autre.'), { okLabel: t('Ignorer') }))) return;
       const cle = cleLecture(brute);
-      const patch = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', l.id, c.status); return { status: 'ignore', finished_at: maintenant() }; };
+      const patch = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', l.id, c.status); return { status: 'ignore', finished_at: maintenant(), ...(classement ? { brouillon: null } : {}) }; };
       try { await repo.transitionner('imports', l.id, { attendus: ATTENDUS_IGNORER, patch }); }
       catch (e) { if (!(e instanceof TransitionRefusee)) logError('add.ignorer', { error: e, id: l.id }); }
     } else if (geste === 'relancer') {
@@ -179,10 +181,10 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
   return { hote, redessiner, dessiner };
 }
 
-export async function renderAdd(params, query, ctx, { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch = undefined, maintenant = () => new Date().toISOString(), battementMs = undefined, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000 } = {}) {
+export async function renderAdd(params, query, ctx, { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch = undefined, maintenant = () => new Date().toISOString(), battementMs = undefined, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000, confirmer = confirmDialog } = {}) {
   const root = el('div', null, pageHeader(t('Ajouter')));
   const zone = el('div', null);
-  const imports = sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, battementMs });
+  const imports = sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, battementMs, confirmer });
   root.append(imports.hote, zone); // la section AVANT la grille (spec § 4.5)
   imports.dessiner({ imports: ctx?.imports, scan_sessions: ctx?.scan_sessions });
   // Redessin à chaque écriture du journal ou des séances, tant que la page est montée ; désabonné dès qu'elle ne l'est plus (ou ne l'a jamais été).
