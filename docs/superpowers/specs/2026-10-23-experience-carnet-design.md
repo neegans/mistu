@@ -1,4 +1,4 @@
-# Expérience « carnet » : la direction des maquettes et la recherche en images (lot UI, rév. 2, 23 octobre 2026)
+# Expérience « carnet » : la direction des maquettes et la recherche en images (lot UI, rév. 2.1, 23 octobre 2026)
 
 Base : `main` `05c751f` (chaîne A → F en ligne, `APP_VERSION 0.15.0`, `sw.js cuisine-os-v0.15.0-9`, suite 5948/5948, épingle 5947).
 Demande de Neegan (23 octobre, 16 h 57 HAE, capture de l'onglet Web) : « je ne vois toujours pas d'images qui accompagnent les
@@ -9,7 +9,8 @@ priment sur les petites incohérences des images ») ; la décision D-9 du lot A
 la spec « Refonte visuelle » (`2026-10-18-refonte-visuelle-design.md`, V-1 à V-6, T-1 à T-11, R-VIS-1 à R-VIS-14) que ce lot amende ;
 la spec « Les plats en images » (`2026-10-19-plats-en-images-design.md`, D-F3, I-F2, I-F3, I-F6, D-F9, D-F11) qu'il respecte.
 Cartographie préalable (cinq lectures en parallèle, 23 octobre) : `.superpowers/sdd/2026-10-23-experience-carnet/cartographie.md`.
-Rév. 2 : après la revue adverse de la rév. 1 (trois lentilles, 63 constats, aucun Critical : § 12).
+Rév. 2 : après la revue adverse de la rév. 1 (trois lentilles, 63 constats, aucun Critical) ; rév. 2.1 : après la vérification de la
+rév. 2 (deux relecteurs, 28 constats, aucun Critical) : § 12.
 
 Deux volets, deux plans, deux branches : **UI-2 « Aperçus »** (un outil serveur sans modèle qui rend les images des résultats web, une
 migration `0007`, un redéploiement ; la première phrase de Neegan) et **UI-1 « Carnet »** (thème, composition des écrans, textes, icônes :
@@ -29,8 +30,9 @@ sans attendre l'autre (§ 9).
   jamais `.btn.primary`) ; l'action (bouton plein, lien, onglet actif, anneau de focus) n'emprunte jamais le vert gris ; la galerie de la
   preuve visuelle montre un badge « Original » à côté d'un `.btn.primary` pour que l'œil les distingue (§ 7).
 - **D-UI-3 Titres plus grands, police système.** Titres de PAGE (`pageHeader` d'Aujourd'hui, Bibliothèque, Ajouter, Ma semaine, Ma
-  cuisine, Réglages) : `h1` `clamp(1.8rem, 6vw, 2.6rem)` (3,2 rem ≥ 900 px) ; titres de FICHE (recette, livre : `h1.titre-fiche`) :
-  `clamp(1.5rem, 4.5vw, 2.2rem)` (2,6 rem ≥ 900 px), pour qu'un titre long (« The Particular Sadness of Lemon Cake ») tienne en deux
+  cuisine, Réglages) : `h1` `clamp(1.8rem, 6vw, 3.2rem)` (1,8 rem à 375 et 390 px, 2,88 rem à 768 px, 3,2 rem à 1512 px) ; titres de
+  FICHE (recette, livre : `h1.titre-fiche`, classe posée par l'option `classeTitre` de `pageHeader`) : `clamp(1.5rem, 4.5vw, 2.6rem)`
+  (1,5 rem à 375 et 390 px, 2,16 rem à 768 px, 2,6 rem à 1512 px), pour qu'un titre long (« The Particular Sadness of Lemon Cake ») tienne en deux
   lignes à 375 px ; `h2` 1,6 rem ; titre de carte-plat en serif 1,3 rem ; `--serif` reste Georgia (la CSP n'admet aucune police externe
   et V-2 le veut ainsi). La barre haute garde 64 px et sa marque 44 px.
 - **D-UI-4 La bibliothèque s'ouvre sur les plats.** `#/library` gagne un troisième segment, **« Recettes »**, par défaut : la grille des
@@ -43,7 +45,8 @@ sans attendre l'autre (§ 9).
   « Aller à Mes livres. » (accueil-livre.js:14) suivent (« ← Bibliothèque », « Aller à la bibliothèque. ») ; le segment « Mes livres » de
   la RECHERCHE (`MODES`, search.js:18) garde son libellé : il nomme une portée de recherche, pas l'écran.
 - **D-UI-5 La carte-plat.** `recipeCard(doc, { photoEnTete: true, fichier })` : l'appelant passe la ligne `files` lue en une fois
-  (`repo.getFiles`), la carte décide au rendu, de façon synchrone ; QUAND `typeAffichage(fichier)` est une image (I-F6, I-UI-5), une image
+  (`repo.getFiles`), la carte décide au rendu, de façon synchrone, ne rend pas `vignettePlat` et ne lit rien elle-même (`fichier`
+  est sa seule source d'image) ; QUAND `typeAffichage(fichier)` est une image (I-F6, I-UI-5), une image
   4:3 (`img.plat-vignette.grande`, `displayUrl(fichier, urlDeBlob)`) au-dessus du titre serif et d'une ligne « Du web · {hôte} · 35 min »
   ou « De mon livre · {titre} · 40 min » (durée = `total_minutes ?? prep + cook`, UN nombre par `formatMinutes`, jamais la paire
   « actif · total » ; rien sans durée) ; SANS photo, une seule forme : `a.item-link.carte-plat.sans-photo`, un bloc de titre serif sur
@@ -55,30 +58,33 @@ sans attendre l'autre (§ 9).
   [Ingrédients] | [Préparation]. < 760 px : photo pleine largeur sous la provenance, repères, puis un `segmented` **Ingrédients /
   Préparation** (bascule locale, sans navigation ni appel), « Commencer à cuisiner » pleine largeur, « Corriger » en lien texte à côté
   tant que la version affichée n'est pas vérifiée (le seul geste que « — vérifie » et « {n} lignes à vérifier » réclament). Le −/+ des
-  portions, Unités, Langue, le sélecteur de versions, « Créer ma version », « Adapter avec l'IA », repas, épicerie, plat, export passent
-  sous un `details[data-role=autres-gestes]` « Portions, versions et autres gestes » (jamais « Réglages » : l'app a déjà un écran de ce
-  nom). Le style inline 320 px de la photo disparaît. La bascule et l'ouverture du `details` suivent un `matchMedia('(min-width: 760px)')`
+  portions, Unités, Langue, le sélecteur de versions, « Créer ma version », « Adapter avec l'IA », repas, épicerie, plat passent sous un
+  `details[data-role=autres-gestes]` « Portions, versions et autres gestes » (jamais « Réglages » : l'app a déjà un écran de ce
+  nom) ; la rangée Export (recipe.js:204-208) reste en bas, inchangée. Le style inline 320 px de la photo disparaît. La bascule et l'ouverture du `details` suivent un `matchMedia('(min-width: 760px)')`
   injectable (`deps.matchMedia`, défaut `window.matchMedia`), écouté sur `change` : les deux sections sont toujours dans le DOM ; en
   large aucune n'a `hidden` et le `segmented` est `hidden` ; le choix mémorisé dans l'instance survit à `drawBody()`.
 - **D-UI-7 La fiche livre en deux colonnes.** ≥ 900 px (`div.two-col.livre`, `200px 1fr`, classe neuve) : gauche = `bookCover`
   ≈ 200 px, la section « Couverture » actuelle (`.card`, ses gestes inchangés : Télécharger, Réessayer, Photographier, Choisir),
   métadonnées repliées (`details` inchangé), « Sommaire » (vignettes des pages d'index) ; droite = `pageHeader` déjà passé (titre,
-  sous-titre « {auteur} · {n} disponible(s) · {m} à importer », ACTIONS gardées en tête : les deux menus `details.menu-source` d'aujourd'hui,
+  sous-titre « {auteur} · {éditeur} · {année} » (ISBN et langue vivent dans le `details` Métadonnées), ACTIONS gardées en tête : les deux menus `details.menu-source` d'aujourd'hui,
   renommés « Ajouter des recettes » (Photographier / Choisir des photos ou un PDF ; plusieurs recettes à la fois = lot D) et « Ajouter des
-  pages de sommaire »), les rappels, puis « Les recettes de ce livre » : filtres, liste COMPACTE « vignette 48 px si octets · titre · p. N ·
+  pages de sommaire »), les rappels, puis « Les recettes de ce livre » (sous son titre, `p.muted` « {n} disponible(s) · {m} à importer ») : filtres, liste COMPACTE
+  « vignette 48 px (`.plat-vignette.petite`) si octets · titre · p. N ·
   badge » avec « Importer » (référence sans adresse) et « Saisir à la main » (même `href` qu'aujourd'hui) sur la ligne. < 900 px : la même
   chose empilée, la liste limitée à 8 lignes puis « Voir les {n} recettes » (déplie sur place, sans navigation) pour que les actions
   restent atteignables. Les trois chips d'état du menu disparaissent (la phrase du sous-titre les remplace) ; la vignette de la liste
   tient D-F9.
-- **D-UI-8 Les listes sur le papier, section par section.** `section(title, …, { plain: true })` rend `section.plain` (sans fond ni ombre,
-  `h2` serif, filet fin `--line` sous le titre) ; sans l'option, `section.card` reste le défaut (54 appelants dans 17 modules : rien ne
+- **D-UI-8 Les listes sur le papier, section par section.** `sectionPlain(title, ...children)` (fonction sœur de `section`, même forme, qui lui
+  délègue) rend `section.plain` (sans fond ni ombre, `h2` serif, filet fin `--line` sous le titre) ; `section(title, ...children)` ne change
+  pas et reste `section.card` (54 appelants dans 17 modules : rien ne
   change hors des sections nommées en § 4). Chaque tâche liste les sections qu'elle bascule et amende leurs tests (§ 7).
-- **D-UI-9 Icônes au trait.** Un module `src/ui/icones.js` de vingt-deux SVG inline monochromes (`currentColor`, `aria-hidden`, `icone(nom)`
+- **D-UI-9 Icônes au trait.** Un module `src/ui/icones.js` de vingt-trois SVG inline monochromes (`currentColor`, `aria-hidden`, `icone(nom)`
   lève sur un nom inconnu) remplace les émojis de la navigation (`app.js`), de la grille Ajouter (`add.js:29-34`), de l'accueil d'un livre
   (`accueil-livre.js:12-14`) et des onze états vides (`emptyState`, § 3.3) ; les émojis restent dans les textes de contenu.
 - **D-UI-10 Libellés d'affichage.** « À importer » pour une référence sans adresse dans les listes, badges, compteurs et filtres
-  (`availabilityBadge` → « À importer · p. {p} » ; `label('availability', 'reference_only')` → « À importer », suivi par les exports et
-  Redécouvrir) ; « Disponible » pour le badge court ; « Repérée dans ton livre — page {p} » reste sur la fiche (il dit d'où elle vient) ;
+  (`availabilityBadge` porte ses propres textes courts : « À importer · p. {p} » ou « À importer », « Disponible », « Partielle »,
+  « Lien web » ; dans `STATE_LABELS.availability` (i18n.js:27), seule `reference_only` change, → « À importer », suivie par les exports et
+  Redécouvrir ; `available` et `partial` y restent « Recette disponible » et « Partiellement disponible ») ; « Repérée dans ton livre — page {p} » reste sur la fiche (il dit d'où elle vient) ;
   « Voir la page d'origine ↗ » (lien texte, même `data-role`) remplace « Ouvrir le lien » partout (fiche, bloc du signet, écran d'import
   web) sur TOUTE adresse lisible, `http:` compris (I-B5 : seule la LECTURE exige https) ; « Ajouter des recettes » et « Ajouter des pages
   de sommaire » remplacent « + Recette » et « + Pages d'index ». La phrase « Texte conservé dans Mitsu » de la rév. 1 est retirée (elle
@@ -88,11 +94,13 @@ sans attendre l'autre (§ 9).
 - **D-UI-12 Les aperçus des résultats web (UI-2).** Un sixième outil serveur, **`apercu-web`**, sans modèle : pour au plus 5 adresses
   (celles des liens choisis d'une recherche), la fonction télécharge chaque page (bornes de `lecture-web`), en tire l'adresse d'image par
   LA règle de F (`lirePageHtml(...).page.image_url` : `Recipe` lisible retenu, sinon `og:image` hors page de liste), télécharge l'image
-  (bornes d'`image-web`, ≤ 1 Mio par image) et rend une entrée par adresse reçue ; **un appel du quota pour les cinq**, zéro jeton.
+  (bornes d'`image-web` pour les types, les redirections et les délais ; octets : `max` 1 Mio, le défaut d'`image-web` restant 2 Mio)
+  et rend une entrée par adresse reçue ; **un appel du quota pour les cinq**, zéro jeton.
   Forme exacte : § 6. Côté app, la vignette (4:3, classe `plat-vignette`) s'affiche par blob local, jamais par une adresse `https` (I-F3,
   CSP inchangée), après le mur de pixels de F (I-F2). Rien n'est écrit dans `files` : une mémoire vive par adresse (`Map(href → aperçu)`,
   échecs compris) à côté de la mémoire des liens ; les URL `blob:` sont révoquées au redessin et au changement de route (D-T9), les Blob
-  vivent et meurent avec la mémoire des liens.
+  vivent avec le module : une entrée est lâchée quand son `href` n'est plus dans les liens affichés après une nouvelle réception, toutes
+  le sont par `reinitialiserWeb()`, jamais par une simple nouvelle issue.
 - **D-UI-13 Les aperçus sont automatiques, un appel de plus par recherche — défaut à confirmer (§ 13, point 2).** Quand une vue connectée
   rend un « trouvé », l'app demande les aperçus des adresses qu'elle ne connaît pas encore (un vol d'aperçus unique, annulable) ; le texte
   de garde dit AVANT la tape « Une recherche = 2 appels à l'assistant (résultats, puis photos), comptés dans ton quota du jour. » ; une
@@ -101,8 +109,8 @@ sans attendre l'autre (§ 9).
   écrit par la passerelle) ; les figures sont insérées en UNE fois pour toute la liste, jamais carte par carte. Renversable vers une tape
   « Voir les photos (1 appel) ».
 - **D-UI-14 UI-2 exige `0007`.** La contrainte `outil` du journal passe à six valeurs ; `0007` est écrite à la main comme `0004` et `0006`,
-  collée par Neegan AVANT le redéploiement et AVANT le push de UI-2 ; sans elle, chaque aperçu répond 502 sans ligne comptée (l'insert
-  lève 23514 avant la réservation) et l'app montre les résultats sans image (comportement dégradé de D-UI-13, jamais une erreur bloquante).
+  collée par Neegan AVANT le redéploiement et AVANT le push de UI-2 ; sans elle, après la validation des adresses, l'insert d'`assistant_reserver` lève 23514 :
+  la réservation échoue, aucune ligne n'est écrite, la fonction répond 502, et l'app montre les résultats sans image (comportement dégradé de D-UI-13, jamais une erreur bloquante).
 
 ## 1. Pour toi
 
@@ -127,8 +135,8 @@ changent que de couleurs et de titres.
   « Du web » de la bibliothèque ; « Voir la page d'origine » reste offert sur toute adresse lisible (I-B5).
 - **I-UI-2 Aucune image distante.** `img-src 'self' blob: data:` inchangée ; toute image vient d'un blob local (I-F3) ; l'adresse IP de
   l'appareil ne part jamais chez un site (D-F3) ; les aperçus passent par la fonction, avec ses hôtes refusés, sa boucle de redirections
-  et son `User-Agent` ; une image reçue passe le mur de pixels de F avant tout `<img>` (I-F2 : type de l'en-tête = type annoncé, ≤ 16 Mpx,
-  petit côté ≥ 200 px).
+  et son `User-Agent` ; une image reçue passe le mur de F, `preparerPhotoDistante`, avant tout `<img>` (I-F2 : type de l'en-tête = type
+  annoncé, ≤ 16 Mpx, petit côté ≥ 200 px ; sans ré-encodage pour un aperçu).
 - **I-UI-3 Aucune classe JS renommée, aucune route retirée, aucun écran retiré de la navigation** (règle « une page sans lien n'existe
   pas ») ; `NAV`, `registerRoutes`, `ROUTES_DE_SAISIE` gardent leurs entrées ; les blocs épinglés par les tests de comportement (ordre des
   rangées d'une carte web, `.status[role=status]` suivie de `.row`, `data-role` des gestes) se déplacent avec leurs tests amendés, jamais
@@ -174,23 +182,26 @@ maquettes) ; espacement vertical des sections 1,6 rem. Aucune taille n'est épin
 
 ### 3.3 Composants
 
-- **`section(title, …, { plain })`** : `section.plain` seulement sur demande (D-UI-8) ; `section.card` reste le défaut. Basculent en
+- **`sectionPlain(title, ...children)`** : `section.plain` seulement par cette fonction sœur (D-UI-8) ; `section()` ne change pas. Basculent en
   `plain` : fiche recette « Ingrédients », « Préparation », « Original », « Versions », « Mémoire culinaire » ; fiche livre « Les recettes de
   ce livre », « Sommaire », « Pages et fichiers sources » ; Aujourd'hui « Favoris », « Dernières cuissons », « Reprendre ma recette »,
-  « Redécouvrir », « À utiliser » ; Bibliothèque sous Livres « Liens web gardés », « Recettes créées avec l'IA ». Restent `.card` : les
+  « À utiliser en priorité » (« Redécouvrir » est `rediscoverCard`, pas une section) ; Bibliothèque sous Livres « Liens web gardés », « Recettes créées avec l'IA ». Restent `.card` : les
   panneaux d'action (« Couverture », « Photo du plat », « Fichiers », « Pages d'index », import, questions, réglages, erreurs) et tout
   module hors § 4. `.card` ne change pas (R-VIS-14).
 - **`recipeCard(doc, { photoEnTete, fichier })`** : variante verticale `a.item-link.carte-plat` : `img.plat-vignette.grande` 4:3
   (`object-fit: cover`, rayon 12) quand `fichier` est une image affichable, puis `h3` serif, puis une ligne `.muted` « {source} · {durée} »
   (D-UI-5) ; les badges (« À importer », « Lien web », favori, cuisinée) restent dans la carte ; sans photo : `a.item-link.carte-plat
   .sans-photo` (bloc de titre sur `--paper-2`, hauteur minimale 7 rem, ligne de source). Le balisage de la carte horizontale actuelle ne
-  change pas (épinglé par `tests/photo-plat.js:1164-1179`). La règle `.plat-vignette` 72 px reste unique ; la règle neuve porte le
-  sélecteur `.plat-vignette.grande` (l'épingle `tests/photo-plat.js:1320-1323` passe à « exactement deux sélecteurs »).
+  change pas (épinglé par `tests/photo-plat.js:1164-1179`). La règle `.plat-vignette` 72 px ne change pas ; deux règles neuves la complètent,
+  `.plat-vignette.grande` (carte-plat, 4:3) et `.plat-vignette.petite` (48 × 48, ligne compacte de la fiche livre) ; l'épingle
+  `tests/photo-plat.js:1320-1323` passe à « exactement trois sélecteurs », dans cet ordre.
 - **`grilleCartes(noeuds)`** : `div.grille-plats` (2 colonnes dès 360 px, 3 ≥ 900 px, `gap 1.2rem`, `align-items: stretch`) : classe neuve,
   `.grid` intact. Bornée : 60 cartes rendues, `getFiles` sur les empreintes des cartes rendues seulement, « Voir plus » rend la page
   suivante (F-9).
-- **`pageHeader`** : inchangé (titre + sous-titre + actions) ; les écrans qui ne l'utilisaient pas (Aujourd'hui) l'adoptent.
-- **`icones.js`** : `icone(nom)` → `svg[aria-hidden=true][focusable=false]` 24 × 24 au trait (`stroke: currentColor`), vingt-deux noms,
+- **`pageHeader(title, { subtitle, actions, back, classeTitre })`** : `back` reste un objet `{ href, label }` (components.js:17-19) ; une
+  option neuve `classeTitre` pose une classe sur le `h1` (`titre-fiche`) ; rien d'autre ne change ; les écrans qui ne l'utilisaient pas
+  (Aujourd'hui) l'adoptent.
+- **`icones.js`** : `icone(nom)` → `svg[aria-hidden=true][focusable=false]` 24 × 24 au trait (`stroke: currentColor`), vingt-trois noms (le test d'icônes en compte exactement 23),
   relevés du code : navigation `soleil`, `bibliotheque`, `calendrier`, `toque`, `plus`, `roue` ; grille Ajouter `livres`, `appareil-photo`,
   `crayon`, `lien`, `etincelle`, `flocon` ; accueil d'un livre `page`, `horloge` ; états vides `panier` (grocery.js:21), `assiette`
   (library.js:103, dish.js:43), `couverts` (meals.js:18), `salade` (meals.js:79), `livre-ouvert` (book.js:176), `loupe` (search.js:162),
@@ -206,17 +217,17 @@ maquettes) ; espacement vertical des sections 1,6 rem. Aucune taille n'est épin
 ### 4.1 Bibliothèque (`src/ui/library.js`)
 
 `pageHeader('Bibliothèque', { subtitle: 'Tes livres, tes trouvailles, tes recettes.', actions })` — `actions` = « Ajouter une recette »
-(`a.btn.primary` → `#/add`) sur le segment Recettes, « Ajouter un livre » (→ `#/add/livre`, l'actuel) sur Livres, rien sur Plats —, puis
+(`a.btn.primary` → `#/add`) sur le segment Recettes, « Ajouter un livre » (→ `#/add/livre`, neuf : il remplace l'action actuelle « Ajouter » → `#/add`, library.js:13) sur Livres, rien sur Plats —, puis
 `segmented` **Recettes | Livres | Plats** (`?tab=recettes|books|dishes`, `recettes` par défaut ; `?tab=books` et `?tab=dishes` d'aujourd'hui
-restent valides). Segment Recettes : champ `input[type=search]` « Une recette, un ingrédient… » (filtre local sur `ctx.docs` : titre,
-ingrédients, livre, comme `library.js:66`), puces **Toutes / De mes livres / Du web** (`edition_id` non nul ; `source_url` non nul ; une
+restent valides). Segment Recettes : champ `input[type=search]` « Une recette, un ingrédient… » (filtre local sur `ctx.docs`, champs : titre,
+ingrédients, livre ; même mécanique que le filtre des livres de `library.js:66`, pas les mêmes champs), puces **Toutes / De mes livres / Du web** (`edition_id` non nul ; `source_url` non nul ; une
 fiche qui a les deux est dans les deux), tri : dernière modification d'abord (§ 13, point 5), `grilleCartes` de `recipeCard(doc,
 { photoEnTete: true, fichier })` pour chaque recette dont **`availability !== 'reference_only' || source_url`** (les signets non lus sont
 dedans, en carte sans photo avec le badge « Lien web » et sans durée ; les références d'index sont dehors), les octets des photos des 60
 premières cartes lus en UNE fois par `repo.getFiles(...)` (comme les couvertures, library.js:57) et révoqués après chaque redessin (D-T9 :
 `remplacerEnRevoquant` relève `img.plat-vignette`) ; « Voir plus » rend les 60 suivantes. Sous 760 px, « Ajouter une recette » est répété
 en `a.btn.primary.big.block` sous la grille. Pied : « Recettes de mes livres à importer → » vers `#/library?tab=a-importer` : segment actif
-Recettes, `back: 'Recettes'`, liste compacte des références sans adresse, groupées par livre (« {titre du livre} » puis « {titre} · p. N ·
+Recettes, `back: { href: '/library?tab=recettes', label: t('Recettes') }`, liste compacte des références sans adresse, groupées par livre (« {titre du livre} » puis « {titre} · p. N ·
 À importer » → `#/recipes/<id>/importer`). Vide : « Aucune recette pour l'instant. » + « Ajouter une recette ». Segments Livres (grille
 actuelle) et Plats inchangés ; « Liens web gardés » et « Recettes créées avec l'IA » restent sous Livres (ordre N-7, en `plain`) ET leurs
 fiches apparaissent dans la grille Recettes avec leur badge. Les tests qui appellent `renderLibrary({}, {}, ctx)` en attendant les livres
@@ -225,8 +236,8 @@ Recettes.
 
 ### 4.2 Fiche recette (`src/ui/recipe.js`, `src/ui/photo-plat.js`)
 
-Ordre du DOM : `pageHeader` (titre `h1.titre-fiche` ; sous-titre = « Du web · {hôte} » / « De mon livre · {titre} — {auteur} · page N » /
-étiquette IA ; `back: 'Bibliothèque'`) → `div.fiche-tete` à deux colonnes ≥ 760 px (`.two-col`) : colonne 1 = badges (disponibilité,
+Ordre du DOM : `pageHeader` (titre `h1.titre-fiche` par `classeTitre` ; sous-titre = « Du web · {hôte} » / « De mon livre · {titre} — {auteur} · page N » /
+étiquette IA ; `back: { href: '/library', label: t('Bibliothèque') }`) → `div.fiche-tete` à deux colonnes ≥ 760 px (`.two-col`) : colonne 1 = badges (disponibilité,
 version, vérification, type, cuisines), bandeau web / bandeau lecture (inchangés), ligne de repères `div.reperes` (« {n} portions ·
 {durée} », chaque partie seulement si connue ; durée = `total_minutes ?? prep + cook` par `formatMinutes`), lien « Voir la page d'origine ↗ »
 (`a.btn.link[data-role=ouvrir-lien]`, toute adresse lisible), rangée `button.btn.primary.big.block` « Commencer à cuisiner » + `a.btn.link`
@@ -238,7 +249,7 @@ versions et autres gestes » (ouvert ≥ 760 px, fermé en dessous, par le `matc
 Ingrédients | section Préparation] (toutes deux `plain`) ; < 760 px un `segmented` **Ingrédients / Préparation** au-dessus (bascule par
 `hidden` sur la section non choisie, état mémorisé dans l'instance, jamais dans l'adresse ; le `segmented` lui-même `hidden` en large).
 Puis `photo.zone` (section « Photo du plat », `.card`, gestes inchangés), « Original », « Versions », « Mémoire culinaire » (`plain`),
-Export, inchangés. Ingrédients : la liste garde `ingredientLineEl` et « Remplacer » (le mode cuisine garde les cases « j'ai » ; pas de liste
+la rangée Export (recipe.js:204-208, hors du `details`), inchangés. Ingrédients : la liste garde `ingredientLineEl` et « Remplacer » (le mode cuisine garde les cases « j'ai » ; pas de liste
 cochable dupliquée) ; le `select` « Évaluer une restriction… » et `timeText` (la paire « actif · total ») restent dans l'en-tête de la
 section. Le test `tests/photo-plat.js:341` (ordre emplacement → `.card.sage` → body → zone → Original) est amendé à l'ordre neuf
 (emplacement dans `.fiche-tete`, `details[data-role=autres-gestes]` à la place de `.card.sage`) ; `tests/creer-ia.js:1346, 1376, 1391`
@@ -246,15 +257,16 @@ lisent `[data-role=autres-gestes]` au lieu de `.card.sage`.
 
 ### 4.3 Fiche livre (`src/ui/book.js`)
 
-`pageHeader(book.title, { subtitle: '{auteur} · {n} disponible(s) · {m} à importer', back: 'Bibliothèque', actions })` — `actions` = les
+`pageHeader(book.title, { subtitle: '{auteur} · {éditeur} · {année}', back: { href: '/library', label: t('Bibliothèque') }, classeTitre:
+'titre-fiche', actions })` (ISBN et langue quittent le sous-titre : ils restent dans le `details` « Métadonnées et convention ») — `actions` = les
 deux `details.menu-source` d'aujourd'hui (book.js:32, markup inchangé, `styles.css:144-145` inchangées), `summary` « Ajouter des recettes »
 et « Ajouter des pages de sommaire » (`tests/ajouter.js:844-846` amendés aux nouveaux textes) ; puis `div.two-col.livre` ≥ 900 px :
 gauche = `bookCover` ≈ 200 px + section « Couverture » (`.card`, `renderZoneCouverture`, `tests/sync-l4.js:3396/3585/3715` et
 `tests/ajouter.js:3667` intacts) + `details` « Métadonnées et convention » (inchangé) + « Sommaire » (`plain`) : `div.thumbs` des pages
 `kind === 'index'` (vignettes numérotées, « Reprendre la séance » si une séance est ouverte ; l'ordre se corrige dans le panneau de la
-séance, pas ici) ; droite = rappels (imports à reprendre, séance en cours, convention tasses : inchangés), puis `section.plain` « Les
-recettes de ce livre » : filtres Toutes / Disponibles / À importer / Favoris + champ, `ul.liste-compacte` de lignes `li.row.between`
-[`img.plat-vignette` 48 px quand les octets sont là (même `getFiles`, même révocation que `drawList` aujourd'hui : D-F9 tenu,
+séance, pas ici) ; droite = rappels (imports à reprendre, séance en cours, convention tasses : inchangés), puis `sectionPlain` « Les
+recettes de ce livre » (`p.muted` « {n} disponible(s) · {m} à importer » sous le titre) : filtres Toutes / Disponibles / À importer / Favoris + champ, `ul.liste-compacte` de lignes `li.row.between`
+[`img.plat-vignette.petite` 48 px quand les octets sont là (même `getFiles`, même révocation que `drawList` aujourd'hui : D-F9 tenu,
 `tests/photo-plat.js:1296-1309` amendé à la ligne compacte) ; `a[href=#/recipes/<id>]` titre serif, `span.muted` « p. N » si
 `printed_page`, `span.chip.neutral` section] [badge « Disponible » / « À importer » / « Lien web » / « Partielle » ; `a.btn.small`
 « Importer » et `a.btn.small` « Saisir à la main » (référence sans adresse, mêmes `href` qu'aujourd'hui : `tests/import-cible.js:1485`
@@ -266,8 +278,10 @@ place). `renderAccueilLivre` (`?nouveau=1`) reste ; « Pages et fichiers sources
 
 `pageHeader('Qu'est-ce qu'on cuisine ?', { subtitle: 'Cherche une recette, un ingrédient, une envie.' })` au-dessus de la `.search-bar`
 (qui quitte sa `.card.sage`) ; « Favoris » et « Dernières cuissons » en `grilleCartes` de cartes-plat (home.js fait sa passe `getFiles` sur
-les empreintes des cartes rendues ; la cuisson garde sa date et son bouton « Refaire comme la dernière fois » sous la carte) ; « Reprendre
-ma recette », « Redécouvrir », « À utiliser » inchangés en `section.plain` ; « Bienvenue » inchangé.
+les empreintes des cartes rendues ; la cuisson garde sa date et son bouton « Refaire comme la dernière fois », rendus HORS du `<a>`, sous
+la carte dans la cellule de grille) ; les puces d'exemple restent sous la barre, hors de toute carte ; « Reprendre ma recette » et
+« À utiliser en priorité » passent en `sectionPlain` ; « Redécouvrir » (`rediscoverCard`, pas une section) et « Bienvenue » ne changent
+que par le thème.
 
 ### 4.5 Ajouter, import ciblé, séance
 
@@ -285,8 +299,9 @@ amendée dans le test : `FIGURE.apercu` optionnel en premier) ; `renderSearch` p
 `apercus = Map(href → { blob, type } | { raison })` au niveau du module, à côté de `memoire` ; au premier rendu d'un `trouve` par une vue
 connectée, l'app demande les hrefs ABSENTS de la Map (0 appel si tout est connu ; « Chercher à nouveau » ne repaie que les adresses
 neuves) dans un vol d'aperçus unique (`AbortController`, abandonné par `lancer()`, par « Annuler », par `reinitialiserWeb()` et quand plus
-aucune vue n'est connectée ; côté serveur un abandon fait 499, appel compté) ; la Map se vide avec `memoire` (`reinitialiserWeb`,
-nouvelle issue). Au rendu, les URL `blob:` sont recréées depuis les Blob et révoquées par `remplacerEnRevoquant` et au changement de
+aucune vue n'est connectée ; côté serveur un abandon fait 499, appel compté) ; la Map SURVIT à une nouvelle issue (elle est indexée par
+`href`, pas par demande) : après chaque réception d'un « trouvé », les entrées dont le `href` n'est plus dans les liens de l'issue sont
+lâchées, Blob compris ; elle n'est vidée entière que par `reinitialiserWeb()`. Au rendu, les URL `blob:` sont recréées depuis les Blob et révoquées par `remplacerEnRevoquant` et au changement de
 route ; `img.onerror` → figure retirée, URL révoquée. Ligne d'état `p.muted[data-role=etat-apercus]` sous « Demande envoyée » : « Photos en
 cours de récupération… » pendant le vol ; retirée dès qu'une image est posée ; « Photos indisponibles pour cette recherche. » (aucune
 image, échec, `0007` absente) ; « Quota du jour atteint : photos indisponibles. » (429 écrit, raison `quota`). Texte de garde :
@@ -314,7 +329,7 @@ filet `CLES` :1289 amendés).
 | De mon livre · {t} | From my book · {t} | ligne de source |
 | {n} portions · {d} | {n} servings · {d} | repères (n ≥ 2 ; « 1 portion ») |
 | Voir la page d'origine | View the original page | lien (fiche, bloc du signet, écran d'import web) |
-| Corriger | Edit | lien texte de l'en-tête (clé existante) |
+| Corriger | Fix | lien texte de l'en-tête (clé existante, traduction inchangée) |
 | Portions, versions et autres gestes | Servings, versions and more | details |
 | Ingrédients / Préparation | Ingredients / Steps | segmented mobile |
 | Les recettes de ce livre | The recipes in this book | section |
@@ -352,8 +367,10 @@ recherche). Les chaînes retirées quittent aussi `en.js` : « + Recette », « 
   raison }` (`inaccessible`, `pas_de_recette`, `pas_d_image`, `image_trop_lourde`, `delai`) sans faire échouer les autres ; le budget
   épuisé rend `delai` aux adresses restantes. Somme bornée par appel : 5 × 2 Mio de pages + 5 × 1 Mio d'images = 15 Mio lus ; mémoire
   transitoire de l'isolat ≈ 2 × (2 Mio d'octets + 2 Mio de chaîne + copies de `balayer` et de `textePrincipal`) ≈ 20 Mio au parallélisme 2
-  (contre ≈ 5 Mio pour `image-web`) ; CPU : 47 à 185 ms par page hostile de 2 Mio (mesure de B), donc ≈ 1 s pour cinq ; les limites réelles
-  de la plateforme (mémoire, CPU par requête) ne sont pas dans le dépôt : la sonde « cinq pages hostiles de 2 Mio » les éprouve (§ 6, Sondes).
+  (contre ≈ 5 Mio pour `image-web`) ; CPU : 47 à 185 ms par page hostile de 2 Mio (mesure de B), donc ≈ 1 s pour cinq ; chaque image est encodée en base64 dès
+  sa réception et ses octets lâchés : la pointe à la construction de la réponse vaut ≈ 20 Mio (téléchargement) + 7 Mio de base64 + 7 Mio de
+  JSON ≈ 35 Mio ; les limites réelles de la plateforme (mémoire, CPU par requête) ne sont pas dans le dépôt : la sonde « cinq pages hostiles
+  de 2 Mio » les éprouve et la sonde « puttanesca » relève la taille réelle de la réponse (§ 6, Sondes).
 - **Réponse** : 200 `{ apercus: [{ url, image: { type, taille, octets (base64) } | null, raison: null | 'interdit' | 'inaccessible' |
   'pas_de_recette' | 'pas_d_image' | 'image_trop_lourde' | 'delai' }] }` ; ≤ 5 × 1,4 Mio de base64 (≈ 7 Mio) ; `raison` nulle quand
   l'image est présente ; jamais le modèle (`OUTILS_MODELE` inchangé) ; journal `apercu-web`, statut 200 (499 si le client est parti :
@@ -367,13 +384,14 @@ recherche). Les chaînes retirées quittent aussi `en.js` : « + Recette », « 
   quelques millisecondes sur une petite table), écrite à la main comme `0006` ; sa preuve reprend 1.01 à six valeurs et ajoute 2.03 ter
   (`assistant_reserver(uid, 'apercu-web', …)` → id non nul ; les cinq anciens passent) ; README étape 13 (dit que la preuve `0006` devient
   historique : rejouée après `0007`, son 1.01 rougit) ; `RESULTATS-mitsu.md` : sections « Preuve `0007` — à jouer » et « Sondes
-  `apercu-web` ». Le générateur (`tools/generer-migrations.mjs:202, 322`), son test (`:1264-1266`) et le README étape 11 passent de
-  « la 0007 à venir » à « la 0008 à venir ».
+  `apercu-web` ». Le générateur (`tools/generer-migrations.mjs:202, 322`), son test (`:1264-1266`) passent de « la 0007 à venir » à
+  « la 0008 à venir » (le README étape 11 ne porte aucun numéro : rien à y changer).
 - **Client** : `src/domain/apercu-web.js` : `lireApercusWeb({ urls, session }, { fetch, signal, tentativeMs: 135 000, corpsMax: 8 Mio })` →
   `{ etat: 'recus', apercus: Map(url → { blob, type } | { raison }) }` | `{ etat: 'echec', raison }` ; chaque entrée est décodée l'une après
   l'autre (base64 relu à la longueur exacte, `atob` puis `Uint8Array`, la chaîne intermédiaire lâchée avant la suivante), type dans la liste
-  blanche, blob retypé, puis `dimensionsImage(blob)` (I-F2 : type de l'en-tête = type annoncé, ≤ 16 Mpx, petit côté ≥ `COTE_MIN_DISTANT`
-  200 px) sinon `{ raison: 'image_refusee' }` ; `search.js` l'appelle par `deps.apercus` (§ 4.6) ; le délai client (135 s) est celui de la
+  blanche, blob retypé, puis `preparerPhotoDistante(blob, { coteMin: COTE_MIN_DISTANT, reencoder: false })` (LE mur de F, image.js:100-110 :
+  type de l'en-tête = type annoncé, ≤ 16 Mpx, petit côté ≥ 200 px ; l'option neuve `reencoder: false` rend le blob contrôlé sans
+  `reduireImage` : un aperçu n'est pas ré-encodé, cinq décodages canvas par recherche sont évités) sinon `{ raison: 'image_refusee' }` ; `search.js` l'appelle par `deps.apercus` (§ 4.6) ; le délai client (135 s) est celui de la
   passerelle, au-dessus du budget serveur (60 s) et du transfert de 7 Mio (≈ 56 s à 1 Mbit/s).
 - **Sondes** après redéploiement (sans dépense : forme refusée 400, cinq adresses interdites 422 sans ligne au journal, une admise et
   quatre interdites → 200 avec quatre `interdit` et UNE ligne, sans jeton 401 ; payantes, zéro jeton : les cinq adresses de la recherche
@@ -385,39 +403,42 @@ recherche). Les chaînes retirées quittent aussi `en.js` : « + Recette », « 
 ## 7. Tests
 
 - **Épingles à amender, jamais à contourner**, tâche par tâche (chaque tâche relève `tests/tests.js:250` à la valeur mesurée) :
-  - UI-1 T1 : `tests/theme.js:27` (`--action`), `PAIRES` (+1), `:93` (libellé) ; pins de version : `tests/ajouter.js:3817, 3819`,
+  - UI-1 T1 : `tests/theme.js:27` (`--action`), `PAIRES` (+1), les libellés « tomate » des lignes 27, 93, 95, 96, 106, 108, 110, 113
+    (assertions sur `hex('--action')`, vertes, renommées) ; pins de version : `tests/ajouter.js:3817, 3819`,
     `tests/passerelle.js:765, 767`, `tests/recherche-web.js:66 (commentaire), 69, 72`, `tests/sync-l3.js:1867`, `tests/sync-l4.js:514, 516,
     3506-3507`, `tests/assistant-compte.js:8`, `tests/creer-ia.js:11`, `tests/classement.js:2568` (13 assertions + 1 commentaire, 8 suites),
     `src/model/schema.js:6`, `sw.js:4` ; `tests/ajouter.js:8` (`MODULES_NEUFS` + `icones.js`) ; SHELL. Aucun test n'épingle le libellé
     NAV « Mes livres » (grep fait) : seuls les quatre sites du source (D-UI-4) changent.
   - UI-1 T2 : `tests/ajouter.js:3675, 3734-3758` et `tests/creer-ia.js:1513-1517` (`{ tab: 'books' }`) ; `tests/ajouter.js:3729`,
     `tests/creer-ia.js:1511-1512` (sections « Liens web gardés » / « Recettes créées avec l'IA » en `plain`) ; `tests/photo-plat.js:1320-1323`
-    (deux sélecteurs `.plat-vignette`).
-  - UI-1 T3 : `tests/photo-plat.js:340-341` (ordre, « Original » et « Versions » en `plain`), `tests/creer-ia.js:1341, 1346, 1376, 1391,
-    1790` (`[data-role=autres-gestes]`, sections `plain`) ; `tests/lecture-web.js:605, 611, 1051-1073, 1109, 1150` et `tests/ajouter.js:37,
+    (trois sélecteurs `.plat-vignette`, règle 72 px inchangée).
+  - UI-1 T3 : `tests/photo-plat.js:340-341` (ordre, « Original » et « Versions » en `plain`), `tests/sync-l4.js:3476` (« Original »),
+    `tests/creer-ia.js:1341, 1346, 1376, 1391, 1790` (`[data-role=autres-gestes]`, sections `plain`) ; `tests/lecture-web.js:605, 611, 1051-1073, 1109, 1150` et `tests/ajouter.js:37,
     1149` (libellé « Voir la page d'origine », même `data-role`, http gardé).
   - UI-1 T4 : `tests/ajouter.js:844-846` (textes des `summary`), `tests/photo-plat.js:1296-1309` (vignette de la ligne compacte),
-    `tests/sync-l4.js:3476, 3580, 3595, 3606, 3810` et `tests/ajouter.js:3729` (sections de la fiche livre basculées en `plain` ; « Couverture »,
-    « Fichiers », « Pages d'index » restent `.card`), `tests/import-cible.js` (ligne compacte, mêmes `href` ; « Retirer la page {n} » en `×`),
+    `tests/sync-l4.js:3580, 3595, 3606, 3810` (« Pages et fichiers sources » en `plain` ; « Couverture », « Fichiers », « Pages d'index »
+    restent `.card`), `tests/import-cible.js` (ligne compacte, mêmes `href` ; « Retirer la page {n} » en `×`),
     `CHAINES_NEUVES_AILLEURS` de book.js.
-  - UI-1 T5 : `tests/ajouter.js:1133` (« À importer · p. 12 »), compteurs book.js:163/195 et library.js:73 (aucun test : vérifiés par le test
-    neuf des libellés).
+  - UI-1 T5 : `tests/ajouter.js:1133` (« À importer · p. 12 »), `tests/import-cible.js:668` (badge de l'écran d'import → « À importer »),
+    `tests/table-matieres.js:1672` et `CHAINES_NEUVES_AILLEURS` d'import-cible.js (filets i18n qui portent « Repérée dans ton livre ») ;
+    compteur book.js:163, filtre book.js:195 et compteur library.js:73 (aucun test : vérifiés par le test neuf des libellés).
   - UI-2 : `tests/recherche-web.js:553` (texte de garde), `:1035/1055/1225` (forme de la carte avec `FIGURE.apercu` optionnel), `:1289`
     (`CLES`) ; `tests/photo-plat.js:1330` (test de source I-F3 : + `src/ui/search.js`, + `src/ui/library.js`) ; `tools/assistant-index.test.mjs`
     (u2-u12 : `telechargerImage` avec `max`), `tools/generer-migrations.test.mjs:1182-1192, 1264-1266`.
 - **Tests neufs** (par comportement, bases jetables, `fetch` factice, `matchMedia` factice) : `tests/carnet.js` : jetons et paire (dans
-  `theme.js`), carte-plat avec et sans octets (décision synchrone, jamais de cadre vide ; `plat-vignette` révoquée au redessin), grille 2/3
-  colonnes (scène hors écran à 375 et 1100 px), grille bornée (fixture de 70 recettes à photo : 60 lectures, « Voir plus » en lit 10),
+  `theme.js`), `sectionPlain` (rend `section.plain` avec ses enfants ; `section()` reste `.card`), carte-plat avec et sans octets (décision synchrone, jamais de cadre vide ; `plat-vignette` révoquée au redessin), grille 2/3
+  colonnes (scène hors écran à 375 et 1100 px), grille bornée (fixture de 70 recettes à photo : 60 lectures, `getFile` et `getFiles` comptés ensemble, « Voir plus » en lit 10),
   segment Recettes (défaut `{}`, filtres par données, signet dedans / référence dehors, pied « à importer », `?tab=` ancien valide), actions
   d'en-tête par segment, fiche recette (ordre du DOM, bascule Ingrédients / Préparation sans navigation dans les deux états du
   `matchMedia`, `details` ouvert/fermé selon l'état, « Corriger » visible non vérifiée / absent de l'en-tête vérifiée, « autres gestes »
-  porte tous les anciens boutons, repères dérivés : « 1 portion », rien sans durée, un seul nombre), fiche livre (ligne compacte, vignette
+  porte tous les anciens boutons de `controls` et de la rangée d'actions, pas l'Export, repères dérivés : « 1 portion », rien sans durée, un seul nombre), fiche livre (ligne compacte, vignette
   48 px si octets, « Importer » et « Saisir à la main » seulement sur une référence sans adresse, sous-titre dérivé, 8 lignes puis « Voir les
   {n} recettes »), libellés (« À importer » n'apparaît que pour `reference_only` sans `source_url` ; « Voir la page d'origine » sur une
-  fiche http), icônes (`aria-hidden`, `currentColor`, nom inconnu → levée), filets i18n. UI-2 : `tests/apercu-web.js` (forme exacte de la
-  demande, en-têtes, un appel pour N, 0 appel quand tout est connu, « Chercher à nouveau » ne redemande que les hrefs neufs, un seul vol,
+  fiche http), icônes (`aria-hidden`, `currentColor`, exactement 23 noms, nom inconnu → levée), filets i18n. UI-2 : `tests/apercu-web.js` (forme exacte de la
+  demande, en-têtes, un appel pour N, même demande relancée avec les mêmes cinq liens → 0 appel, trois liens neufs sur cinq → un appel pour trois adresses, les Blob des
+  liens disparus lâchés, un seul vol,
   abandon par `lancer()` / « Annuler » / dernière vue déconnectée, insertion en une fois, ligne d'état dans ses trois formes, 429 `quota`,
-  blob par adresse, `dimensionsImage` refuse un en-tête menteur ou 400 Mpx, `onerror`, URL révoquées et Blob gardés au changement de
+  blob par adresse, `preparerPhotoDistante({ reencoder: false })` refuse un en-tête menteur ou 400 Mpx et ne ré-encode pas, `onerror`, URL révoquées et Blob gardés au changement de
   route, type hors liste refusé, `deps.chercher` sans `deps.apercus` → 0 appel, jamais de `src` https).
 - **Mutants** rejoués sur des copies servies à part : olive remise en tomate (theme rougit), `photoEnTete` sans contrôle des octets (cadre
   vide : rougit), filtre « Du web » câblé sur `mode=web` (rougit : aucun appel), « À importer » posé sur une `available` (rougit),
@@ -445,14 +466,15 @@ Deux branches, toutes deux créées sur le commit de cette rév. 2 (spec et maqu
 `~/projects/mistu-apercus`, serveur 8095) et **`experience-carnet`** (UI-1, worktree `~/projects/mistu-carnet`, serveur 8096). Construction
 séquentielle : UI-2 d'abord (le plus court, la première phrase de Neegan), UI-1 ensuite sans attendre la fusion de UI-2 (sa fusion dépend
 de `0007` et du redéploiement, gestes de Neegan et du contrôleur). Chaque lot fusionne dans `main` par un commit de fusion ; le second
-résout les quatre fichiers communs : `sw.js` (son propre `VERSION`), `src/model/schema.js` et les pins (règle I-UI-7), `src/i18n/en.js`
+résout les quatre fichiers communs : `sw.js` (UNION de `SHELL`, les deux modules neufs, et son propre `VERSION`, +1 au commit de
+fusion), `src/model/schema.js` et les pins (règle I-UI-7), `src/i18n/en.js`
 (union), `tests/tests.js:250` (remesuré) ; le § 12 de cette spec reçoit les rulings de chaque lot sous son propre titre.
 
 **UI-2 « Aperçus »** (plan 1, `0.16.0`) : S1 serveur (`lecture-web.js` / `logique.js` / `index.ts`, `telechargerImage({ max })`) + tests Node +
 `0007` + preuve + README + générateur « 0008 » ; S2 domaine client (`apercu-web.js`, `dimensionsImage`) + `search.js` (vol, Map, ligne
 d'état, insertion) + tests + filets + pins ; S3 docs, redéploiement (chef), sondes, RESULTATS. Gate de fusion : `0007` collée et prouvée,
 sondes vertes (dont « cinq pages hostiles »), `/verify`.
-**UI-1 « Carnet »** (plan 2, `0.17.0`) : T1 jetons, typographie, `section({ plain })`, `icones.js`, NAV « Bibliothèque » et ses quatre
+**UI-1 « Carnet »** (plan 2, `0.17.0`) : T1 jetons, typographie, `sectionPlain`, `pageHeader` (`classeTitre`), `icones.js`, NAV « Bibliothèque » et ses quatre
 sites, pins, `theme.js` amendé ; T2 carte-plat, `grilleCartes` bornée, segment Recettes + filtres + actions + pied « à importer » ; T3 fiche
 recette ; T4 fiche livre ; T5 Aujourd'hui, Ajouter, import ciblé, libellés dérivés ; T6 filets, preuve visuelle, docs. Revue à trois
 lentilles par tâche, revue finale, vague, `/verify`.
@@ -460,7 +482,9 @@ lentilles par tâche, revue finale, vague, `/verify`.
 ## 10. Preuve réelle (geste de Neegan, sur le site public, après chaque push)
 
 UI-2 : après `0007` collée et la fonction redéployée : « puttanesca » dans l'onglet Web → la ligne « Photos en cours de récupération… »
-puis des photos en tête des cartes, posées d'un coup ; `select jour, outil, appels from public.assistant_usage_jour` : +2 par recherche ;
+puis des photos en tête des cartes, posées d'un coup ; `select jour, appels from public.assistant_usage_jour;` : +2 par recherche, et
+`select outil, statut, jetons_entree, jetons_sortie, duree_ms from public.assistant_journal order by id desc limit 2;` : une ligne
+`recherche-web` puis une ligne `apercu-web` ;
 « Chercher à nouveau » → au plus un appel de plus ; une recherche dont les sites n'ont pas d'image → « Photos indisponibles ». UI-1 :
 Bibliothèque → Recettes sur TA bibliothèque (dire si la grille, avec le nombre réel de photos que tu as, ressemble assez à la maquette ;
 sinon § 13, point 5), filtres, pied, « Ajouter une recette » ; une fiche de recette avec photo sur le Mac (deux colonnes) et sur l'iPhone
@@ -482,7 +506,8 @@ Ajouter ; l'onglet « Bibliothèque » lisible sur l'iPhone, « Agrandir l'affic
   l'infrastructure (I-UI-2) ; F n'avait accepté cette exposition que pour une image, après un geste : d'où § 13, point 2.
 - UI-2, amplification : un appel du quota achète jusqu'à 10 téléchargements (15 Mio, 60 s de connexions sortantes, 30 sauts) au lieu
   d'un ; mêmes règles SSRF par adresse que B et F (résidu R-B-21 inchangé) ; le mur reste la liste admise et `ASSISTANT_QUOTA_JOUR`.
-- UI-2, mémoire : ≈ 20 Mio transitoires dans l'isolat au parallélisme 2 ; côté iPhone, une réponse de 7 Mio lue en texte puis décodée
+- UI-2, mémoire : ≈ 20 Mio transitoires dans l'isolat au parallélisme 2 pendant le téléchargement, ≈ 35 Mio à la construction de la
+  réponse (base64 puis JSON) ; côté iPhone, une réponse de 7 Mio lue en texte puis décodée
   adresse par adresse (≈ 7 Mio de chaîne + un binaire à la fois) ; une image au-delà de 1 Mio rend `image_trop_lourde` (pas de
   redimensionnement) et peut manquer en silence (la sonde « puttanesca » compte ces cas).
 - UI-2, écran : les figures arrivent 20 à 90 s après les résultats, en une fois ; la ligne d'état prévient ; une personne qui tape pendant
@@ -505,9 +530,9 @@ Lentille besoin (B) :
 - **B-I-7** « Texte conservé dans Mitsu » retirée (D-UI-10, § 5).
 - **B-I-8** « Corriger » en lien texte à côté de « Commencer à cuisiner » tant que non vérifiée ; `details` renommé « Portions, versions et
   autres gestes », `data-role=autres-gestes` (D-UI-6, § 4.2, § 13.4).
-- **B-I-9** `.plain` opt-in ; liste des sections basculées en § 3.3 ; les autres écrans en § 8 (D-UI-8).
+- **B-I-9** `.plain` opt-in (par `sectionPlain`, rév. 2.1) ; liste des sections basculées en § 3.3 ; les autres écrans en § 8 (D-UI-8).
 - **B-I-10** « Voir la page d'origine » sur toute adresse lisible, http compris (I-B5 tenu) ; tests nommés en § 7 T3.
-- **B-I-11** vingt-deux icônes relevées du code (`grep ico:` et `emptyState(`), listées avec leur usage (§ 3.3).
+- **B-I-11** vingt-trois icônes relevées du code (`grep ico:` et `emptyState(`), listées avec leur usage (§ 3.3).
 - **B-I-12** insertion des figures en une fois, ligne d'état « Photos en cours de récupération… », mesure dans la preuve visuelle (D-UI-13, § 4.6).
 - **B-I-13** validation par adresse avant la réservation, `interdit` par entrée, 422 seulement si aucune admise (I-UI-6, § 6).
 - **B-I-14** actions de la fiche livre gardées en tête ; liste à 8 lignes + « Voir les {n} recettes » sous 900 px (D-UI-7, § 4.3).
@@ -517,7 +542,7 @@ Lentille besoin (B) :
   § 13.3. **B-M-4** `?tab=a-importer` : segment Recettes actif, `back: 'Recettes'`. **B-M-5** stepper et H1 de la maquette 02 en § 8.
   **B-M-6** borne d'image gardée à 1 Mio, comptée par la sonde « puttanesca » avant de passer à 2 Mio (§ 6, § 11). **B-M-7** une fiche
   dans les deux filtres, dit. **B-M-8** « Ajouter des pages de sommaire ». **B-M-9** retours « ← Bibliothèque » ; segment de recherche
-  « Mes livres » gardé (D-UI-4, § 5). **B-M-10** générateur, test et README étape 11 : « la 0008 à venir » (§ 6). **B-M-11** pointe mémoire
+  « Mes livres » gardé (D-UI-4, § 5). **B-M-10** générateur et test : « la 0008 à venir » (le README n'a pas de numéro, rév. 2.1) (§ 6). **B-M-11** pointe mémoire
   iPhone en § 11, décodage adresse par adresse (§ 6). **B-M-12** titres de fiche en `clamp()`, vérifiés aux quatre largeurs (D-UI-3).
 
 Lentille faisabilité (F) :
@@ -528,7 +553,7 @@ Lentille faisabilité (F) :
 - **F-5** `matchMedia` injectable, deux sections toujours dans le DOM, `segmented` `hidden` en large, état survivant à `drawBody()` (D-UI-6).
 - **F-6** fiche livre : menus `details.menu-source` gardés (textes des `summary` amendés), « Couverture » reste `.card`, vignette 48 px sur la
   ligne compacte (D-F9 tenu), « Saisir à la main » gardé sur la ligne ; épingles listées en § 7 T4 (D-UI-7, § 4.3).
-- **F-7** `.plat-vignette.grande` ; l'épingle `tests/photo-plat.js:1320-1323` passe à deux sélecteurs (§ 3.3).
+- **F-7** `.plat-vignette.grande` et `.plat-vignette.petite` ; l'épingle `tests/photo-plat.js:1320-1323` passe à trois sélecteurs (§ 3.3, rév. 2.1).
 - **F-8** `tests/ajouter.js:1133` en § 7 T5 ; compteurs et `label('availability', 'reference_only')` dits (D-UI-10).
 - **F-9** grille bornée a priori : 60 cartes, `getFiles` des cartes rendues, « Voir plus » ; test à 70 recettes (§ 3.3, § 4.1, § 7).
 - **F-10** `deps.apercus` ; `deps.chercher` sans `deps.apercus` → aucun appel ; `tests/recherche-web.js:553` et `:1289` en § 7 (§ 4.6).
@@ -551,8 +576,9 @@ Lentille sécurité, quota, vie privée (S) :
 - **S-4** vol d'aperçus unique, demandé par une vue connectée, abandonné par `lancer()`, « Annuler », `reinitialiserWeb()` et la dernière
   vue déconnectée ; 499 compté dit en § 6 et § 11.
 - **S-5** `Map(href → aperçu | { raison })` au niveau du module, échecs mémorisés, seuls les hrefs absents sont demandés (§ 4.6).
-- **S-6** URL révoquées au redessin et au changement de route, Blob gardés avec `memoire` et libérés avec elle (D-UI-12, § 4.6).
-- **S-7** `dimensionsImage(blob)` avant tout `<img>` (I-F2), `onerror` → figure retirée (I-UI-2, § 6, § 4.6).
+- **S-6** URL révoquées au redessin et au changement de route, Blob gardés par adresse et lâchés quand leur lien quitte l'issue ou par
+  `reinitialiserWeb()` (D-UI-12, § 4.6, précisé en rév. 2.1).
+- **S-7** `preparerPhotoDistante` sans ré-encodage avant tout `<img>` (I-F2), `onerror` → figure retirée (I-UI-2, § 6, § 4.6 ; rév. 2.1).
 - **S-8** amplification ×10 nommée, somme par appel bornée (§ 6, § 11).
 - **S-9** `url` de la réponse = chaîne reçue ; dédoublonnage pour le téléchargement seulement (§ 6).
 - **S-10** `lirePageHtml(...).page.image_url` : une seule règle d'image (D-UI-12, § 6).
@@ -563,6 +589,33 @@ Lentille sécurité, quota, vie privée (S) :
 - **S-15** « Quota du jour atteint : photos indisponibles. » sur 429 `quota` écrit (D-UI-13, § 4.6, § 5).
 - **S-16** test de source I-F3 (`tests/photo-plat.js:1330`) étendu à `search.js` et `library.js` (§ 7).
 - **S-17** une seule forme de réponse (§ 6), `raison: null` avec une image ; D-UI-12 renvoie à § 6.
+
+### Vérification de la rév. 2 → rév. 2.1 (23 octobre 2026 ; deux relecteurs, couverture des 63 constats et lecture à froid ; 0 Critical, 12 Important, 16 Minor ; `verif-spec-rev2.md` du registre)
+
+Couverture (K) : 61 constats traités tels quels ; deux contradictions introduites par la rév. 2, fermées ici.
+- **K-1** (= H-5) la Map des aperçus survit à une nouvelle issue ; une entrée est lâchée quand son lien quitte l'issue ; `reinitialiserWeb()`
+  seul la vide (D-UI-12, § 4.6, test § 7).
+- **K-2** (= H-4) troisième règle `.plat-vignette.petite` 48 px ; l'épingle passe à trois sélecteurs (§ 3.3, § 4.3, § 7 T2).
+- **K-3** (= H-11) vingt-trois icônes, comptées par le test. **K-4** (= H-12) requêtes SQL de § 10 corrigées (la vue n'a pas de colonne
+  `outil`). **K-5** mémoire de la phase de réponse chiffrée (≈ 35 Mio), base64 dès réception, taille réelle relevée par la sonde (§ 6,
+  § 11). **K-6** `sw.js` : union de `SHELL` + `VERSION` (§ 9). **K-7** D-UI-14 : l'insert d'`assistant_reserver` est la réservation ; 502
+  après la validation des adresses.
+
+Lecture à froid (H) :
+- **H-1** `back` est un objet `{ href, label }` ; les trois retours écrits ainsi (§ 4.1, § 4.2, § 4.3). **H-2** `sectionPlain(title,
+  ...children)` au lieu d'un sac d'options après un rest (D-UI-8, § 3.3, § 9, test § 7). **H-3** l'Export reste en bas, hors du `details`
+  (D-UI-6, § 4.2, test « autres gestes »). **H-6** une seule formule `clamp()` par titre, valeurs attendues aux quatre largeurs (D-UI-3).
+  **H-7** le mur est `preparerPhotoDistante`, option neuve `reencoder: false` (I-UI-2, § 6, § 7, S-7). **H-8** `tests/sync-l4.js:3476` en
+  T3, `tests/ajouter.js:3729` retiré de T4 (§ 7). **H-9** `tests/import-cible.js:668`, `tests/table-matieres.js:1672` et le filet
+  d'import-cible.js en T5 (§ 7). **H-10** la variante `photoEnTete` ne rend pas `vignettePlat` ; le test compte `getFile` et `getFiles`
+  (D-UI-5, § 7).
+- **H-13** le README étape 11 ne porte pas de numéro (§ 6). **H-14** « Corriger » reste « Fix » (§ 5). **H-15** « Ajouter un livre » →
+  `#/add/livre` est neuf (§ 4.1). **H-16** Aujourd'hui : sections nommées telles qu'elles sont, date et bouton de cuisson hors du `<a>`,
+  puces d'exemple sous la barre (§ 3.3, § 4.4). **H-17** citations précisées : filtre de library.js:66 (mécanique, pas les champs),
+  compteur book.js:163 et filtre :195, libellés « tomate » de theme.js (§ 4.1, § 7). **H-18** octets : `max` 1 Mio distinct du défaut
+  2 Mio d'`image-web` (D-UI-12). **H-19** portée des libellés : `STATE_LABELS.availability.reference_only` seule change, le badge porte
+  ses textes courts (D-UI-10). **H-20** `pageHeader` gagne `classeTitre` (§ 3.3, D-UI-3). **H-21** sous-titre du livre : auteur · éditeur ·
+  année ; ISBN et langue dans le `details` ; le compte « {n} disponible(s) · {m} à importer » sous le titre de la section (D-UI-7, § 4.3).
 
 ### Specs amendées par ce lot
 
