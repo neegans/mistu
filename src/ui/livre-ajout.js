@@ -308,6 +308,13 @@ export function texteEchecCouverture(erreur) {
   return texteEchec({ raison, extra });
 }
 
+// Ronde 1 (#24) : deux phrases dites à plusieurs endroits, et le bloc du vol tenu ici (pas 1 et pas 2) — une seule source chacun ; t() lu à l'appel.
+const phraseVolTenu = () => t('Une lecture est déjà en cours : annule-la d’abord.');
+const phraseEnregistrementBloque = () => t('La couverture est en cours de lecture : attends la réponse ou annule-la.');
+// R-VIS-8 : la .status[role=status] puis la .row — « Annuler » se range à droite.
+const blocVolTenu = (g) => [el('div', { class: 'status', role: 'status' }, t('Lecture de la couverture par l’assistant…')),
+  el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn', dataset: { role: 'annuler-lecture' }, onClick: g('annulerLecture') }, t('Annuler')))];
+
 // § 4.1 : le troisième chemin du pas 1, SOUS la phrase des sources. Pur : la carte de connexion vient de gestes.carteConnexion (le rendu tolère son absence,
 // les tests purs du pas 1 rendent sans gestes). Aucun état « sélecteur ouvert » (N1) : pendant le choix d'une photo, les deux boutons restent actifs.
 export function renderBlocCouverture(model, gestes = {}) {
@@ -317,11 +324,8 @@ export function renderBlocCouverture(model, gestes = {}) {
   if (model.session === 'verification') corps = el('div', { class: 'status', role: 'status' }, t('Vérification de l’assistant…'));
   else if (model.session !== 'prete') corps = typeof gestes.carteConnexion === 'function' ? gestes.carteConnexion() : null;
   else if (L?.statut === 'preparation') corps = el('div', { class: 'status', role: 'status' }, t('Préparation de la photo…'));
-  else if (L?.statut === 'en_cours' && model.volTenu) {
-    // R-VIS-8 : la .status[role=status] puis la .row — « Annuler » se range à droite.
-    corps = [el('div', { class: 'status', role: 'status' }, t('Lecture de la couverture par l’assistant…')),
-      el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn', dataset: { role: 'annuler-lecture' }, onClick: g('annulerLecture') }, t('Annuler')))];
-  } else {
+  else if (L?.statut === 'en_cours' && model.volTenu) corps = blocVolTenu(g);
+  else {
     const eteint = !!model.volAilleurs || !!model.recherche; // un vol d'une autre route tient le document, ou une identification par ISBN est en vol
     corps = el('div', { class: 'row' },
       el('button', { type: 'button', class: 'btn', dataset: { role: 'photographier-couverture' }, disabled: eteint, onClick: () => g('photographierCouverture')('environment') }, t('Photographier la couverture')),
@@ -350,9 +354,7 @@ export function renderBlocLecture(model, gestes = {}) {
   const L = model.lecture;
   if (model.pas !== 2 || !L || !['a_lancer', 'echec', 'en_cours'].includes(L.statut)) return null;
   if (L.statut === 'en_cours') {
-    if (model.volTenu) return el('div', { class: 'stack', dataset: { role: 'lecture' } },
-      el('div', { class: 'status', role: 'status' }, t('Lecture de la couverture par l’assistant…')),
-      el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn', dataset: { role: 'annuler-lecture' }, onClick: g('annulerLecture') }, t('Annuler'))));
+    if (model.volTenu) return el('div', { class: 'stack', dataset: { role: 'lecture' } }, ...blocVolTenu(g));
     return el('div', { class: 'stack', dataset: { role: 'lecture' } }, el('div', { class: 'status warn' }, t('En cours sur un autre écran'))); // I-7 : sans « Annuler »
   }
   let texte, code = null, offrir = true;
@@ -442,14 +444,19 @@ export async function enregistrerLivre(args, { repo: r = repo, importId = null, 
   const repo = r; // le dépôt injecté sous le nom littéral que le test statique du lot A exige (contrainte globale) ; le défaut ci-dessus lit le module
   const { book, edition } = fabriquerLivre({ ...args, coverSha256: shaBornee(args?.coverSha256) }, { newId: repo.newId });
   if (!importId) { await repo.saveBatch({ books: [book], book_editions: [edition] }); return edition; }
+  const ATTENDUS = ['a_verifier', 'echec', 'a_lancer'];
+  const fermer = () => repo.transitionner('imports', importId, { attendus: ATTENDUS, patch: (c) => ({ status: c.status === 'a_verifier' ? 'enregistre' : 'ignore', edition_id: edition.id, reponse_brute: null, finished_at: maintenant() }), puts: { books: [book], book_editions: [edition] } });
   try {
-    await repo.transitionner('imports', importId, { attendus: ['a_verifier', 'echec', 'a_lancer'], patch: (c) => ({ status: c.status === 'a_verifier' ? 'enregistre' : 'ignore', edition_id: edition.id, reponse_brute: null, finished_at: maintenant() }), puts: { books: [book], book_editions: [edition] } });
+    await fermer();
     return edition;
   } catch (e) {
     if (!(e instanceof TransitionRefusee)) throw e;
     const ligne = await repo.get('imports', importId);
     if (ligne?.status === 'en_cours') throw new Error('lecture_en_cours');
     if (ligne?.status === 'enregistre' && typeof ligne.edition_id === 'string' && ligne.edition_id && await repo.get('book_editions', ligne.edition_id)) return { dejaAjoute: ligne.edition_id };
+    // Ronde 1 (#27) : la ligne a été ROUVERTE entre la transaction et cette relecture (deux routes sur le même ?import=, tâche 5) — la fermeture est rejouée
+    // une fois, avec le livre ; jamais un livre écrit seul à côté d'une ligne ouverte (une reprise en écrirait un second). Un second refus remonte.
+    if (ATTENDUS.includes(ligne?.status)) { await fermer(); return edition; }
     await repo.saveBatch({ books: [book], book_editions: [edition] });
     return edition;
   }
@@ -523,7 +530,7 @@ export function renderLivreAjout(model, gestes = {}) {
       mentions('publisher')),
     el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn primary', dataset: { role: 'enregistrer' }, disabled: !model.peutEnregistrer, onClick: g('enregistrer') }, t('Ajouter ce livre'))),
     // D-E9 : la phrase est toujours rendue au pas 2, cachée quand rien ne bloque ; majBoutonEnregistrer la montre et la cache sans dessiner().
-    el('small', { class: 'muted', dataset: { role: 'enregistrer-bloque' }, hidden: !model.enregistrementBloque }, t('La couverture est en cours de lecture : attends la réponse ou annule-la.')));
+    el('small', { class: 'muted', dataset: { role: 'enregistrer-bloque' }, hidden: !model.enregistrementBloque }, phraseEnregistrementBloque()));
 }
 
 // R-UX-9 : `disabled` n'est posé qu'une fois, à la construction — or le pas 2 s'ouvre souvent à champs vides et le
@@ -568,35 +575,42 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
   // Le modèle de la route : la phrase des sources suit la clé RÉELLEMENT passée (cleGoogle), et les puces lisent
   // les cuisines et mots-clés déjà employés. Toute lecture du modèle passe par ici (jamais le modèle nu de l'état).
   const modele = () => ({ ...livreAjoutModel({ ...etat, cleGoogle: !!cle, horsLigne: !enLigne(), volAilleurs: volAilleurs() }), existantes: etat.existantes, existantesMotsCles: etat.existantesMotsCles });
+  // Lot E, ronde 1 (I-E4) : une route DÉMONTÉE n'applique plus rien et ne parle plus à Open Library. Elle l'est dès qu'elle a été RENDUE à l'appelant (posé
+  // juste avant `return root` : app.js l'attache sans autre await, ou ne l'attache jamais si une navigation plus récente a eu lieu) et qu'elle n'est pas
+  // dans le document ; pendant le montage (relire() d'un ?import=, tâche 5), elle est vivante.
+  let rendue = false;
+  const demontee = () => rendue && !root.isConnected;
   const dessiner = () => zone.replaceChildren(renderLivreAjout(modele(), gestes));
-  // C3 : une seconde identification ne doit pas fusionner par-dessus les champs du PREMIER ISBN (titre A + ISBN B).
-  // Tout champ encore ÉGAL à ce que le distant y avait mis est rendu : la personne ne l'a pas touché, il n'est pas
-  // à elle. Ce qu'elle a corrigé reste (c'est sa saisie). `retourIsbn` ne vide rien (F23).
-  const oublierDistants = () => {
-    const d = etat.champsDistants;
-    etat.champsDistants = null; etat.isbnDistant = null; etat.sourceDistante = null;
-    if (!d) return;
+  // Lot E, ronde 1 (R-UX-9) : après une relecture du journal, si ni le pas ni la FORME du pas (bloc lecture, champs lus) ni la couverture n'ont changé, seuls
+  // les blocs sont remplacés — un événement réseau ou un échec reçu après un geste ne reconstruit pas le formulaire pendant la saisie ; sinon dessiner().
+  const forme = () => (etat.pas === 1 ? 'pas1' : etat.lecture?.statut === 'lue' ? 'lue' : ['a_lancer', 'echec', 'en_cours'].includes(etat.lecture?.statut) ? 'bloc' : 'nu');
+  const avantRelecture = () => ({ forme: forme(), couverture: etat.couverture });
+  const rendreApres = (avant) => {
+    if (avant.forme !== forme() || avant.couverture !== etat.couverture) { dessiner(); return; }
+    const m = modele();
+    majBlocCouverture(zone, m, gestes); majBlocLecture(zone, m, gestes); majBoutonEnregistrer(zone, m);
+  };
+  // C3 et N4 (une seule remise, ronde 1) : chaque champ de `valeurs` encore ÉGAL à ce qu'une source (fiche d'ISBN, lecture de la couverture) y avait mis
+  // est rendu à CHAMPS_VIDES() — la personne ne l'a pas touché, il n'est pas à elle ; ce qu'elle a corrigé reste ; sa langue touchée lui appartient (C2).
+  const rendreChamps = (valeurs) => {
+    if (!valeurs) return;
     const vides = CHAMPS_VIDES();
     for (const k of CHAMPS_DISTANTS) {
-      if (d[k] === undefined) continue;
-      if (k === 'language' && etat.langueTouchee) continue; // son choix de langue lui appartient (C2)
-      if (String(etat.champs[k] ?? '') !== String(d[k] ?? '')) continue;
-      etat.champs[k] = vides[k];
+      if (!Object.hasOwn(valeurs, k) || (k === 'language' && etat.langueTouchee)) continue;
+      if (String(etat.champs[k] ?? '') === String(valeurs[k] ?? '')) etat.champs[k] = vides[k];
     }
   };
+  // C3 : une seconde identification ne doit pas fusionner par-dessus les champs du PREMIER ISBN (titre A + ISBN B). `retourIsbn` ne vide rien (F23).
+  const oublierDistants = () => { const d = etat.champsDistants; etat.champsDistants = null; etat.isbnDistant = null; etat.sourceDistante = null; rendreChamps(d); };
   // Lot E (N4, I-E10) : ce qu'une lecture précédente de cette route et ses « Utiliser » ont posé, et que la personne n'a pas touché, est rendu ; l'ISBN posé
-  // par « Utiliser ces renseignements » aussi. Une saisie de la personne n'est jamais vidée (elle n'est plus égale). La langue touchée lui appartient (C2).
-  const remettreChampsLus = () => {
+  // par « Utiliser ces renseignements » aussi, sauf `{ isbn: false }` (« Identifier » : l'ISBN tapé est celui qu'on identifie).
+  const remettreChampsLus = ({ isbn = true } = {}) => {
     const lus = etat.champsLus;
-    if (!lus) return;
-    const vides = CHAMPS_VIDES();
-    for (const k of CHAMPS_DISTANTS) {
-      if (!Object.hasOwn(lus, k)) continue;
-      if (k === 'language' && etat.langueTouchee) continue;
-      if (String(etat.champs[k] ?? '') === String(lus[k] ?? '')) etat.champs[k] = vides[k];
-    }
-    if (Object.hasOwn(lus, 'isbn') && etat.isbn === lus.isbn) etat.isbn = '';
+    rendreChamps(lus);
+    if (isbn && lus && Object.hasOwn(lus, 'isbn') && etat.isbn === lus.isbn) etat.isbn = '';
   };
+  // D-E18, ronde 1 : une photo de CETTE route — posée, ou en préparation (importId est encore nul pendant le ré-encodage) — garde la couverture de l'écran.
+  const photoDeLaRoute = () => !!etat.importId || etat.lecture?.statut === 'preparation';
   // I-G : tout geste qui change l'ISBN ou le pas ferme la porte aux réponses en vol (avancer, C1) ET libère la recherche.
   // R-ISBN-8 : la requête en vol est aussi ABANDONNÉE (le réseau est libéré, pas seulement la réponse rendue muette).
   // `depuisFichier` et `retirer` appellent avancer() seul et ne touchent pas `recherche` : la zone de couverture
@@ -615,9 +629,12 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     // Une provenance ne survit pas à l'ISBN qui l'a produite (I-B) : la précédente tombe avant le nouvel appel.
     // R-UX-13 : la COUVERTURE non plus — c'est l'image d'un autre livre. Elle tombe ici, pas quand la réponse arrive.
     // C3 (oublierDistants) avant C1 (avancer).
-    // Lot E (D-E18) : une couverture PHOTOGRAPHIÉE dans cette route survit à « Identifier » ; sans import de couverture, comme aujourd'hui.
-    etat.provenance = null; if (!etat.importId) etat.couverture = COUVERTURE_VIDE(); etat.suggestions = null;
+    // Lot E (D-E18) : une couverture PHOTOGRAPHIÉE dans cette route (posée ou en préparation, ronde 1) survit à « Identifier » ; sans photo, comme aujourd'hui.
+    etat.provenance = null; if (!photoDeLaRoute()) etat.couverture = COUVERTURE_VIDE(); etat.suggestions = null;
     oublierDistants();
+    // Lot E, ronde 1 (C3, I-E10, I-B ; choix à ratifier) : une lecture APPLIQUÉE n'est pas la fiche de cet ISBN — ses champs non touchés sont rendus avant la
+    // fusion (l'ISBN tapé reste), ses mentions quittent l'écran ; le journal la garde (état `recue`), « Ajouter ce livre » la fermera avec le livre.
+    if (etat.lecture?.statut === 'lue') { remettreChampsLus({ isbn: false }); etat.champsLus = null; etat.lecture = { statut: 'recue' }; }
     avancer();
     const generation = etat.generation;
     etat.recherche = true; etat.reprise = false; etat.resultat = null;
@@ -716,9 +733,13 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     const id = etat.importId;
     const ligne = await r.get('imports', id);
     if (etat.importId !== id) return; // une nouvelle photo a pris la route pendant la lecture
-    if (!ligne) { etat.lecture = null; etat.importId = null; dessiner(); return; }
-    const sha = shaBornee(ligne.cover_sha256);
+    const sha = ligne ? shaBornee(ligne.cover_sha256) : null;
     const fichier = sha ? await r.getFile(sha) : null;
+    if (etat.importId !== id) return; // ronde 1 : … ou pendant la lecture des octets
+    // Ronde 1 (I-E4) : route démontée — rien n'est appliqué ni rendu ; une lecture non appliquée reste au journal (état `recue`), « Reprendre » la retrouve.
+    if (demontee()) { if (ligne?.status === 'a_verifier' && etat.lectureAppliquee !== cleLecture(ligne)) etat.lecture = { statut: 'recue' }; return; }
+    const avant = avantRelecture();
+    if (!ligne) { etat.lecture = null; etat.importId = null; rendreApres(avant); return; }
     etat.octetsAbsents = !(fichier?.blob instanceof Blob);
     if (etat.octetsAbsents && (!etat.couverture.sha256 || etat.couverture.sha256 === sha)) etat.couverture = { ...etat.couverture, apercu: null, message: t('La couverture n’est pas sur cet appareil.') };
     const memeVol = etat.generation === etat.generationLecture; // P-6 : aucun geste depuis le vol (ou la reprise)
@@ -734,7 +755,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     else if (ligne.status === 'echec') etat.lecture = { statut: 'echec', erreur: ligne.erreur ?? null };
     else etat.lecture = { statut: 'termine' }; // fermée ailleurs : « Ajouter ce livre » décide (§ 4.4)
     if (memeVol && etat.lecture.statut !== 'termine') etat.pas = 2;
-    dessiner();
+    rendreApres(avant);
   }
   // § 4.3.2 : la lecture REVALIDÉE (I-E1 : un résultat revenu du journal est une donnée hostile) est appliquée UNE fois ; un résultat hostile → a_verifier →
   // echec(illisible) pour CETTE lecture (T4-R1). Puis le rattrapage, si en ligne, avec un titre ET un premier auteur lus, ni l'un ni l'autre incertains (D-E4).
@@ -745,11 +766,14 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
       const patch = (c) => { if (cleLecture(c) !== cleLue) throw new TransitionRefusee('imports', ligne.id, c.status); return { status: 'echec', erreur: { raison: 'illisible', extra: {} }, resultat: null }; };
       try { await repo.transitionner('imports', ligne.id, { attendus: ['a_verifier'], patch }); }
       catch (e) { if (!(e instanceof TransitionRefusee)) logError('livre.couverture.revalidation', { error: e }); }
+      if (etat.importId !== ligne.id) return; // ronde 1 (#20, #26) : une nouvelle photo a pris la route pendant l'écriture
+      const avantEchec = avantRelecture();
       etat.lecture = { statut: 'echec', erreur: { raison: 'illisible', extra: {} } };
-      etat.pas = 2;
-      dessiner();
+      if (etat.generation === etat.generationLecture) etat.pas = 2; // P-6 : un geste fait pendant l'écriture garde son pas
+      rendreApres(avantEchec);
       return;
     }
+    oublierDistants(); // ronde 1 (C3, I-B) : les champs d'une fiche d'ISBN non touchés ne restent pas sous l'étiquette « Lu sur la couverture »
     const avant = { ...etat.champs };
     const { champs, incertains, placeholders, sousTitre } = champsDepuisLecture(etat.champs, lecture, { langueTouchee: etat.langueTouchee });
     etat.champs = champs;
@@ -760,7 +784,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     etat.provenance = 'couverture';
     etat.champsDistants = null; // une lecture n'est pas une fiche d'ISBN : C3 ne la reprend pas
     etat.pas = 2;
-    const rattrapage = enLigne() && !!lecture.title && !!lecture.authors[0] && !lecture.uncertain.includes('title') && !lecture.uncertain.includes('authors');
+    const rattrapage = !demontee() && enLigne() && !!lecture.title && !!lecture.authors[0] && !lecture.uncertain.includes('title') && !lecture.uncertain.includes('authors');
     etat.proposition = rattrapage ? { statut: 'recherche' } : null;
     dessiner();
     if (rattrapage) rattraper(lecture).catch((e) => logError('livre.couverture.rattrapage', { error: e })); // jamais attendu : une file de relire() n'attend pas Open Library
@@ -796,7 +820,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     etat.lecturesRecues += 1; // le FAIT que les tests attendent
     if (r1?.issue !== 'refuse') return;
     if (r1.raison === 'non_connecte') etat.session = null;
-    if (r1.raison === 'vol_tenu') dire(t('Une lecture est déjà en cours : annule-la d’abord.'));
+    if (r1.raison === 'vol_tenu') dire(phraseVolTenu());
     const message = r1.raison === 'octets_absents' ? t('La couverture n’est pas sur cet appareil.') : r1.raison === 'image' ? messageErreurImage({ code: r1.code }) : null;
     if (['hors_ligne', 'non_connecte', 'vol_tenu', 'octets_absents', 'image', 'sans_page'].includes(r1.raison)) etat.lecture = { statut: 'a_lancer', message };
   }
@@ -806,12 +830,13 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
   // journal impossible rendent la précédente à la route.
   async function photographierCouverture(capture) {
     if (etat.lecture?.statut === 'preparation') return;
-    if (volEnCours()) { dire(t('Une lecture est déjà en cours : annule-la d’abord.')); return; }
+    if (volEnCours()) { dire(phraseVolTenu()); return; }
     const files = await choisirFichiers(capture ? { accept: 'image/*', multiple: false, capture } : { accept: 'image/*', multiple: false });
     if (!files?.length) return;
     if (etat.lecture?.statut === 'preparation') return; // un autre choix de cette route a gagné
-    if (volEnCours()) { dire(t('Une lecture est déjà en cours : annule-la d’abord.')); return; } // vol pris pendant le choix : rien n'est posé
-    const precedent = etat.importId;
+    if (volEnCours()) { dire(phraseVolTenu()); return; } // vol pris pendant le choix : rien n'est posé
+    // Ronde 1 (C1) : la ligne précédente ET la clé de sa lecture appliquée, rendues ensemble à la route sur un refus.
+    const precedent = etat.importId, appliqueePrecedente = etat.lectureAppliquee;
     nouvelleGeneration();
     oublierDistants();
     remettreChampsLus();
@@ -821,25 +846,31 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     dessiner();
     const gen = etat.generation;
     etat.generationLecture = gen;
+    // M3 / R-E-10 : rien n'est créé, rien n'est détaché, la ligne précédente reste celle de la route (« Ajouter ce livre » la fermera avec le livre). Ronde 1
+    // (C1, I-E4) : sa lecture garde sa clé et n'appartient plus à la génération de l'écran (generationLecture nulle) — un relire() suivant (un `online`) ne la
+    // réapplique jamais sans geste ; les champs, eux, ont été remis au pas 2 (N4, § 11).
+    const refuser = (message, couverture) => {
+      etat.lecture = { statut: 'refus_image', message }; etat.couverture = couverture;
+      etat.importId = precedent; etat.lectureAppliquee = appliqueePrecedente; etat.generationLecture = null;
+      dessiner();
+    };
     let sha256;
     try { ({ sha256 } = await poserCouverture(files[0], { origine: 'locale', repo: r })); }
     catch (e) {
-      etat.lecture = { statut: 'refus_image', message: messageErreurImage(e) };
-      etat.couverture = { ...COUVERTURE_VIDE(), touchee: true };
-      etat.importId = precedent; // M3 : rien n'est créé, rien n'est détaché ; « Ajouter ce livre » la fermera avec le livre
-      dessiner();
+      // Ronde 1 (#21) : seule une ErreurImage est un refus d'image ; un stockage plein (putFile) est dit comme le journal impossible, et journalisé.
+      if (!(e instanceof ErreurImage)) logError('livre.couverture.pose', { error: e });
+      refuser(e instanceof ErreurImage ? messageErreurImage(e) : t('Le livre n’a pas pu être enregistré. Réessaie.'), { ...COUVERTURE_VIDE(), touchee: true });
       return;
     }
-    const fichier = await r.getFile(sha256);
-    const posee = { sha256, apercu: urlDeBlob(fichier.blob), message: t('Couverture enregistrée.'), enCours: false, touchee: true };
-    const ligne = fabriquerImportCouverture({ id: r.newId('imp'), coverSha256: sha256, deviceId: r.deviceId() });
-    try { await r.saveBatch({ imports: [ligne] }, { conditions: { imports: [{ key: ligne.id, absente: true }] } }); }
-    catch (e) {
+    let posee = null, ligne;
+    try { // ronde 1 (#29) : la relecture des octets posés est dans le même filet que l'écriture du journal
+      const fichier = await r.getFile(sha256);
+      posee = { sha256, apercu: urlDeBlob(fichier.blob), message: t('Couverture enregistrée.'), enCours: false, touchee: true };
+      ligne = fabriquerImportCouverture({ id: r.newId('imp'), coverSha256: sha256, deviceId: r.deviceId() });
+      await r.saveBatch({ imports: [ligne] }, { conditions: { imports: [{ key: ligne.id, absente: true }] } });
+    } catch (e) {
       logError('livre.couverture.journal', { error: e });
-      etat.lecture = { statut: 'refus_image', message: t('Le livre n’a pas pu être enregistré. Réessaie.') };
-      etat.couverture = posee; // la couverture reste posée (ligne files écrite)
-      etat.importId = precedent; // R-E-10 : même règle que M3
-      dessiner();
+      refuser(t('Le livre n’a pas pu être enregistré. Réessaie.'), posee ?? { ...COUVERTURE_VIDE(), touchee: true }); // la couverture reste posée (ligne files écrite)
       return;
     }
     etat.importId = ligne.id;
@@ -852,8 +883,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     etat.couverturesAppliquees += 1; // le FAIT que les tests attendent
     etat.lecture = { statut: 'en_cours', ici: true }; // N2 : rendu AVANT l'appel (`vol` n'est posé que par lancerLectureCouverture)
     dessiner();
-    apresVol(await lancerLectureCouverture(ligne.id, { ctx, repo: r, fetch, maintenant, enLigne, battementMs }));
-    await relire();
+    await voler(ligne.id);
   }
   // N2-b : « Lire / Relire la couverture » — un vol de cette route comme un autre, sur la MÊME ligne (echec | a_lancer → en_cours), rendu avant l'appel.
   async function lireCouverture() {
@@ -862,7 +892,14 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     etat.generationLecture = etat.generation;
     etat.lecture = { statut: 'en_cours', ici: true };
     dessiner();
-    apresVol(await lancerLectureCouverture(id, { ctx, repo: r, fetch, maintenant, enLigne, battementMs }));
+    await voler(id);
+  }
+  // Le vol puis la relecture. Ronde 1 (#29) : un rejet imprévu du vol (IndexedDB) est journalisé, et l'écran suit la ligne relue — jamais figé.
+  async function voler(id) {
+    let r1 = null;
+    try { r1 = await lancerLectureCouverture(id, { ctx, repo: r, fetch, maintenant, enLigne, battementMs }); }
+    catch (e) { logError('livre.couverture.vol', { error: e }); }
+    apresVol(r1);
     await relire();
   }
   // D-E16 : « Utiliser « {v} » » — un geste = une saisie ; la valeur reste une valeur de CETTE couverture (N4).
@@ -925,7 +962,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
       // C5 (vague /verify) : la photo et la lecture prennent du temps ; un geste pendant ce temps (« Saisir à la main »,
       // « ← Changer d'ISBN », une identification tapée) l'emporte sur le code lu après coup (I-G).
       const gen = etat.generation, pas = etat.pas;
-      const files = await pickFiles({ accept: 'image/*', multiple: false, capture: 'environment' });
+      const files = await choisirFichiers({ accept: 'image/*', multiple: false, capture: 'environment' }); // ronde 1 (#22) : par deps.pickFiles, comme les deux autres gestes
       if (!files.length) return;
       try {
         const detector = new window.BarcodeDetector({ formats: ['ean_13'] });
@@ -948,8 +985,8 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
       if (memeIsbn) etat.provenance = etat.sourceDistante;
       else { oublierDistants(); etat.provenance = null; }
       etat.isbn = v.ok ? v.isbn13 : nettoyerIsbn(etat.isbn).slice(0, 20); // affiché = enregistré quand valide ; borné sinon (S8/F22)
-      // Lot E (D-E18) : la couverture photographiée dans cette route survit ; R-UX-13 ne vise que la couverture REÇUE.
-      etat.couverture = etat.importId ? etat.couverture : { ...COUVERTURE_VIDE(), touchee: true }; etat.pas = 2; dessiner();
+      // Lot E (D-E18) : la couverture photographiée dans cette route (posée ou en préparation, ronde 1) survit ; R-UX-13 ne vise que la couverture REÇUE.
+      etat.couverture = photoDeLaRoute() ? etat.couverture : { ...COUVERTURE_VIDE(), touchee: true }; etat.pas = 2; dessiner();
     },
     changerChamp: (k, v) => { etat.champs[k] = v; if (k === 'language') etat.langueTouchee = true; majBoutonEnregistrer(zone, modele()); },
     basculerCuisine: (v) => { etat.champs.cuisines = basculerPuce(etat.champs.cuisines, v); dessiner(); },
@@ -957,7 +994,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     // R-UX-13 : revenir changer l'ISBN abandonne la couverture de l'ancien — et `touchee` empêche la réponse encore
     // en vol de la reposer en coulisse (le pas 1 ne montre pas la zone). L'`identifier` suivant repart d'un
     // COUVERTURE_VIDE() neuf, donc `touchee` retombe et la couverture du nouvel ISBN est bien demandée.
-    retourIsbn: () => { nouvelleGeneration(); etat.pas = 1; etat.provenance = null; etat.couverture = etat.importId ? etat.couverture : { ...COUVERTURE_VIDE(), touchee: true }; dessiner(); },
+    retourIsbn: () => { nouvelleGeneration(); etat.pas = 1; etat.provenance = null; etat.couverture = photoDeLaRoute() ? etat.couverture : { ...COUVERTURE_VIDE(), touchee: true }; dessiner(); },
     basculerMotCle: (v) => { etat.champs.tags = basculerPuce(etat.champs.tags, v); dessiner(); },
     ajouterMotCle: (v) => { const apres = ajouterPuce(etat.champs.tags, v); if (apres !== etat.champs.tags) { etat.champs.tags = apres; dessiner(); } },
     // Une écriture refusée ne s'annonce pas (I-B) : on reste au pas 2, la saisie est intacte, et c'est dit.
@@ -972,7 +1009,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
       } catch (e) {
         etat.enCours = false;
         majBoutonEnregistrer(zone, modele());
-        if (e?.message === 'lecture_en_cours') { dire(t('La couverture est en cours de lecture : attends la réponse ou annule-la.')); relire(); return; }
+        if (e?.message === 'lecture_en_cours') { dire(phraseEnregistrementBloque()); relire(); return; }
         logError('livre.enregistrer', { error: e });
         dire(t('Le livre n’a pas pu être enregistré. Réessaie.'));
         return;
@@ -982,11 +1019,15 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
       nav(`/books/${encodeURIComponent(res.id)}?nouveau=1`);
     },
   };
-  // Lot E (§ 4.7, F-17) : en ligne / hors ligne — posés au montage, retirés par le gestionnaire lui-même dès que la route n'est plus dans le document (motif
-  // des `vues` d'import-cible.js) ; `online` relit le journal (R-E-10 : rien sans import), `offline` redessine (« Lire » s'éteint).
+  // Lot E (§ 4.7, F-17) : en ligne / hors ligne — posés au montage, retirés par le gestionnaire lui-même dès que la route est démontée (motif des `vues`
+  // d'import-cible.js ; avant son premier attachement, la route écoute) ; `online` relit le journal (R-E-10 : rien sans import). Ronde 1 (R-UX-9) :
+  // `offline` ne redessine plus — sans import de couverture rien n'en dépend ; sinon les SEULS blocs sont remplacés (« Lire » s'éteint, « Tu es hors ligne. »).
   const surReseau = (e) => {
-    if (!root.isConnected) { window.removeEventListener('online', surReseau); window.removeEventListener('offline', surReseau); return; }
-    if (e.type === 'online') relire(); else dessiner();
+    if (demontee()) { window.removeEventListener('online', surReseau); window.removeEventListener('offline', surReseau); return; }
+    if (e.type === 'online') { relire(); return; }
+    if (!etat.importId) return;
+    const m = modele();
+    majBlocLecture(zone, m, gestes); majBlocCouverture(zone, m, gestes);
   };
   window.addEventListener('online', surReseau);
   window.addEventListener('offline', surReseau);
@@ -997,5 +1038,6 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
   // Les tests lisent l'état par là (F3/F4) : un fait observable, jamais un délai. Aucune vue ne s'en sert.
   root.etatRoute = () => ({ ...etat, couverture: { ...etat.couverture }, champs: { ...etat.champs } });
   dessiner();
+  rendue = true; // ronde 1 : à partir d'ici, une route hors du document est démontée (demontee()) — à garder juste avant le `return`
   return root;
 }
