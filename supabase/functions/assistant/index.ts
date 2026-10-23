@@ -2,15 +2,17 @@
 // Lot B (spec 2026-10-19-recette-web § 6.3) : pour `lecture-web`, après la réservation, la page est téléchargée (telechargerPage), lue (lirePageHtml)
 // et, SEULEMENT sans JSON-LD lisible, son texte est confié au modèle ; un seul point d'appel au modèle et un seul point d'écriture du journal.
 // Jamais : la clé dans une réponse ou un journal ; un corps de demande, de réponse ou de PAGE dans le journal ; un appel Anthropic avant la dernière garde.
+// Lot F (spec 2026-10-19-plats-en-images § 6.3) : `image-web` télécharge l'image d'une page par la MÊME boucle de redirections (suivreRedirections)
+// et la relaie en base64 ; il n'atteint jamais le modèle (corpsModele posé par OUTILS_MODELE).
 import { createClient } from '@supabase/supabase-js';
-import { LIMITES, OUTILS, corpsErreur, corpsLectureModele, entetesCors, ligneJournal, lireDemande as lireDemandeJs, origineAdmise, statutRelaye } from './logique.js';
-import { LIMITES_LECTURE, lireCharset, lirePageHtml as lirePageHtmlJs, typeAdmis, valideAdresse as valideAdresseJs } from './lecture-web.js';
+import { LIMITES, OUTILS, OUTILS_MODELE, corpsErreur, corpsLectureModele, entetesCors, ligneJournal, lireDemande as lireDemandeJs, origineAdmise, statutRelaye } from './logique.js';
+import { LIMITES_IMAGE, LIMITES_LECTURE, lireCharset, lirePageHtml as lirePageHtmlJs, signatureImage, typeAdmis, typeImageAdmis, valideAdresse as valideAdresseJs, versBase64 } from './lecture-web.js';
 
 // logique.js et lecture-web.js sont du JS : tsc ne lit pas la forme réelle de leurs paramètres déstructurés. On la déclare ici, une fois (aucun effet à l'exécution).
 type Demande = { ok: true; corps: unknown; statut?: never; raison?: never } | { ok: false; statut: number; raison: string; corps?: never };
 const lireDemande = lireDemandeJs as unknown as (texte: string, o: { outil: string; modele: string; maxTokens: number; octets: number; hotesRefuses: string[] }) => Demande;
 type PageLue = { jsonld: { recette: unknown; autres: number } | null; texte: string | null; texte_coupe: boolean; page: Record<string, unknown> };
-const lirePageHtml = lirePageHtmlJs as unknown as (o: { html: string; urlFinale: string; contentType: string }) => PageLue;
+const lirePageHtml = lirePageHtmlJs as unknown as (o: { html: string; urlFinale: string; contentType: string; hotesRefuses: string[] }) => PageLue;
 const valideAdresse = valideAdresseJs as unknown as (url: string, o: { hotesRefuses: string[] }) => { ok: true; href: string; hote: string } | { ok: false; raison: string };
 
 const ANTHROPIC = 'https://api.anthropic.com/v1/messages';
@@ -95,7 +97,13 @@ async function lireCorpsBorne(source: Request | Response, max: number): Promise<
 const REDIRECTIONS = [301, 302, 303, 307, 308];
 type PageTelechargee = { html: string; urlFinale: string; contentType: string };
 type RefusPage = { erreur: string; statut: number };
-async function telechargerPage(href: string, { signal, hotesRefuses: refuses }: { signal: AbortSignal; hotesRefuses: string[] }): Promise<PageTelechargee | RefusPage> {
+// Lot B, D-B1 / D-B26, puis lot F (R-F-6) : UNE boucle de redirections pour la page (lecture-web) et l'image (image-web). https seulement, chaque
+// cible revalidée, au plus 3 sauts, 15 s par saut et 30 s en tout ; aucun cookie, aucune identité, EXACTEMENT trois en-têtes. Le corps d'un 2xx est
+// lu par `lire(r)` DANS le try/finally du saut : la minuterie du saut, la minuterie globale et le relais de `signal` restent posés pendant TOUTE la
+// lecture du corps (un hôte qui envoie ses en-têtes vite puis son corps au goutte-à-goutte est coupé à 15 s). Une exception pendant `lire` : abandon
+// par `signal` (le budget de 120 s, ou le client parti) → relancée (504 / 499 dans traiter) ; sinon (minuterie, réseau) → inaccessible.
+type Lecture<T> = { ok: T } | RefusPage;
+async function suivreRedirections<T>(href: string, { signal, hotesRefuses: refuses, accept, lire }: { signal: AbortSignal; hotesRefuses: string[]; accept: string; lire: (r: Response) => Promise<Lecture<T>> }): Promise<{ valeur: T; urlFinale: string } | RefusPage> {
   const inaccessible: RefusPage = { erreur: 'inaccessible', statut: 502 };
   const total = new AbortController();
   const minuterieTotale = setTimeout(() => total.abort(), LIMITES_LECTURE.delaiTotalMs);
@@ -111,7 +119,7 @@ async function telechargerPage(href: string, { signal, hotesRefuses: refuses }: 
       try {
         let r: Response;
         try {
-          r = await fetch(courant, { method: 'GET', redirect: 'manual', credentials: 'omit', signal: ctlSaut.signal, headers: { 'user-agent': 'Mitsu/0.10 (+https://neegans.github.io/mistu/)', accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1', 'accept-language': 'fr-CA,fr;q=0.9,en;q=0.5' } });
+          r = await fetch(courant, { method: 'GET', redirect: 'manual', credentials: 'omit', signal: ctlSaut.signal, headers: { 'user-agent': 'Mitsu/0.10 (+https://neegans.github.io/mistu/)', accept, 'accept-language': 'fr-CA,fr;q=0.9,en;q=0.5' } });
         } catch (e) { if (signal.aborted) throw e; return inaccessible; }
         // Vague finale (SSRF, défense en profondeur) : le mur des redirections (valideAdresse sur chaque cible) suppose que le runtime honore
         // redirect: 'manual'. Une réponse SUIVIE quand même (r.redirected) vient d'une adresse jamais revalidée : refusée, son corps jamais lu.
@@ -129,12 +137,10 @@ async function telechargerPage(href: string, { signal, hotesRefuses: refuses }: 
           continue;
         }
         if (r.status < 200 || r.status > 299) { void r.body?.cancel().catch(() => {}); return inaccessible; }
-        const type = r.headers.get('content-type') ?? '';
-        if (!typeAdmis(type)) { void r.body?.cancel().catch(() => {}); return { erreur: 'pas_une_page', statut: 422 }; }
-        let octets: Uint8Array | null;
-        try { octets = await lireCorpsBorne(r, LIMITES_LECTURE.page); } catch (e) { if (signal.aborted) throw e; return inaccessible; }
-        if (octets === null) return { erreur: 'trop_lourde', statut: 413 };
-        return { html: new TextDecoder(lireCharset(type, octets)).decode(octets), urlFinale: courant, contentType: type };
+        let lu: Lecture<T>;
+        try { lu = await lire(r); } catch (e) { if (signal.aborted) throw e; return inaccessible; }
+        if ('erreur' in lu) return lu;
+        return { valeur: lu.ok, urlFinale: courant };
       } finally {
         clearTimeout(minuterieSaut);
         signal.removeEventListener('abort', couper);
@@ -142,6 +148,34 @@ async function telechargerPage(href: string, { signal, hotesRefuses: refuses }: 
       }
     }
   } finally { clearTimeout(minuterieTotale); }
+}
+
+// La page (lot B, comportement inchangé) : content-type html, corps borné à 2 Mio, décodé selon son charset.
+async function telechargerPage(href: string, { signal, hotesRefuses: refuses }: { signal: AbortSignal; hotesRefuses: string[] }): Promise<PageTelechargee | RefusPage> {
+  const r = await suivreRedirections<{ html: string; contentType: string }>(href, { signal, hotesRefuses: refuses, accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1', lire: async (rep) => {
+    const type = rep.headers.get('content-type') ?? '';
+    if (!typeAdmis(type)) { void rep.body?.cancel().catch(() => {}); return { erreur: 'pas_une_page', statut: 422 }; }
+    const octets = await lireCorpsBorne(rep, LIMITES_LECTURE.page);
+    if (octets === null) return { erreur: 'trop_lourde', statut: 413 };
+    return { ok: { html: new TextDecoder(lireCharset(type, octets)).decode(octets), contentType: type } };
+  } });
+  if ('erreur' in r) return r;
+  return { html: r.valeur.html, urlFinale: r.urlFinale, contentType: r.valeur.contentType };
+}
+
+// L'image d'une page (lot F, D-F3) : jpeg, png ou webp annoncés ET signés par leurs premiers octets, ≤ 2 Mio (R-F-4), jamais un corps vide.
+type ImageTelechargee = { octets: Uint8Array; type: string; urlFinale: string };
+async function telechargerImage(href: string, { signal, hotesRefuses: refuses }: { signal: AbortSignal; hotesRefuses: string[] }): Promise<ImageTelechargee | RefusPage> {
+  const r = await suivreRedirections<{ octets: Uint8Array; type: string }>(href, { signal, hotesRefuses: refuses, accept: 'image/jpeg,image/png,image/webp;q=0.9,*/*;q=0.1', lire: async (rep) => {
+    const type = typeImageAdmis(rep.headers.get('content-type'));
+    if (!type) { void rep.body?.cancel().catch(() => {}); return { erreur: 'pas_une_image', statut: 422 }; }
+    const octets = await lireCorpsBorne(rep, LIMITES_IMAGE.octets);
+    if (octets === null) return { erreur: 'image_trop_lourde', statut: 413 };
+    if (octets.byteLength === 0 || signatureImage(octets) !== type) return { erreur: 'pas_une_image', statut: 422 };
+    return { ok: { octets, type } };
+  } });
+  if ('erreur' in r) return r;
+  return { octets: r.valeur.octets, type: r.valeur.type, urlFinale: r.urlFinale };
 }
 
 // L'appel au modèle, partagé par les quatre outils : mêmes en-têtes, `redirect: 'error'`, réponse lue bornée, statut relayé. Une exception (réseau,
@@ -207,14 +241,14 @@ async function traiter(req: Request, cors: Record<string, string>, origine: stri
   const relais = () => ctl.abort();
   if (req.signal.aborted) ctl.abort(); else req.signal.addEventListener('abort', relais, { once: true });
   let statut = 504; let corpsReponse = ''; let usage: unknown = null;
-  let corpsModele: unknown = lu.corps; // pour lecture-web : posé seulement quand la page n'a pas de JSON-LD lisible
+  let corpsModele: unknown = OUTILS_MODELE.includes(outil) ? lu.corps : null; // lot F (S-2) : image-web n'atteint JAMAIS le modèle ; lecture-web : posé seulement quand la page n'a pas de JSON-LD lisible
   try {
     if (outil === 'lecture-web') {
       corpsModele = null;
       const telechargee = await telechargerPage((lu.corps as { url: string }).url, { signal: ctl.signal, hotesRefuses: refuses });
       if ('erreur' in telechargee) { statut = telechargee.statut; corpsReponse = JSON.stringify(corpsErreur(telechargee.erreur)); }
       else {
-        const lue = lirePageHtml({ html: telechargee.html, urlFinale: telechargee.urlFinale, contentType: telechargee.contentType });
+        const lue = lirePageHtml({ html: telechargee.html, urlFinale: telechargee.urlFinale, contentType: telechargee.contentType, hotesRefuses: refuses });
         const page = { ...lue.page, lue_le: new Date().toISOString() };
         if (lue.jsonld) {
           // D-B2 : un JSON-LD lisible → AUCUN appel au modèle, zéro jeton (journal 0 / 0).
@@ -224,6 +258,12 @@ async function traiter(req: Request, cors: Record<string, string>, origine: stri
           statut = 422; corpsReponse = JSON.stringify(corpsErreur('vide'));
         } else corpsModele = { page, corps: corpsLectureModele({ modele: modele(), texte: lue.texte }) };
       }
+    }
+    if (outil === 'image-web') {
+      // Lot F (§ 6.3) : la réservation est faite (le quota compte cet appel) ; l'image est téléchargée par la boucle partagée, relayée en base64.
+      const image = await telechargerImage((lu.corps as { url: string }).url, { signal: ctl.signal, hotesRefuses: refuses });
+      if ('erreur' in image) { statut = image.statut; corpsReponse = JSON.stringify(corpsErreur(image.erreur)); }
+      else { statut = 200; usage = null; corpsReponse = JSON.stringify({ type: image.type, taille: image.octets.byteLength, url_finale: image.urlFinale, octets: versBase64(image.octets) }); }
     }
     if (corpsModele !== null) {
       const enLecture = outil === 'lecture-web';

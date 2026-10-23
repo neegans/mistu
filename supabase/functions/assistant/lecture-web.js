@@ -270,7 +270,7 @@ function portionsDe(v, profondeur = 0) {
 //   (le premier de chaque nom, fermé au « </nom> » qui équilibre son ouvrant ; fin nulle = jusqu'au bout) ; horsTexte : [début, fin, nom], les
 //   tranches de `texte` couvertes par un nav, header, footer, aside ou form FERMÉ (profondeur 1 par nom : un élément imbriqué dans un autre du même
 //   nom est coupé au premier « </nom » ; un élément jamais fermé n'est pas une tranche, son étendue est inconnue) ; blocs : le contenu brut de chaque
-//   <script type="application/ld+json"> fermé (≤ 512 Kio) ; titre : le contenu brut du premier <title> ; metas : og:site_name et author → content brut.
+//   <script type="application/ld+json"> fermé (≤ 512 Kio) ; titre : le contenu brut du premier <title> ; metas : og:site_name, author et og:image (lot F) → content brut.
 const SAUTES = new Set(['script', 'style', 'noscript', 'svg', 'template']);
 const HORS_TEXTE = new Set(['nav', 'header', 'footer', 'aside', 'form']);
 const ZONES = new Set(['main', 'article', 'body']);
@@ -285,7 +285,7 @@ function fermetureEn(bas, nom, depuis) {
 function lireMetaTranche(html, bas, a, b, metas) {
   if (b - a > 2048) return;
   const tranche = bas.slice(a, b + 1);
-  const cle = /\b(?:property|name)\s*=\s*["']?\s*(og:site_name|author)["'\s/>]/.exec(tranche);
+  const cle = /\b(?:property|name)\s*=\s*["']?\s*(og:site_name|author|og:image)["'\s/>]/.exec(tranche);
   if (!cle || metas.has(cle[1])) return;
   const c = /\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/d.exec(tranche);
   if (!c) return;
@@ -405,6 +405,76 @@ export function titreDe(html) {
   return typeof html === 'string' ? titreDuBalayage(balayer(html).titre) : null;
 }
 
+// --- Lot F « Les plats en images » (spec § 6.1) : l'image de la page et son transport ----------------------------------------------------------
+// L'image d'une page est une DONNÉE HOSTILE comme le reste : lue par Object.hasOwn, nettoyée, résolue contre l'adresse finale (une adresse
+// relative ou sans schéma), puis revalidée par valideAdresse (https, hôte public, ni IP, ni port, ni identifiants, ≤ 2 048, hôte du projet refusé).
+export const LIMITES_IMAGE = Object.freeze({
+  url: LIMITES_LECTURE.url, octets: 2 * 1024 * 1024, redirections: LIMITES_LECTURE.redirections, delaiSautMs: LIMITES_LECTURE.delaiSautMs,
+  delaiTotalMs: LIMITES_LECTURE.delaiTotalMs, types: Object.freeze(['image/jpeg', 'image/png', 'image/webp']),
+});
+export function typeImageAdmis(contentType) {
+  if (typeof contentType !== 'string') return null;
+  const t = contentType.split(';')[0].trim().toLowerCase();
+  return LIMITES_IMAGE.types.includes(t) ? t : null;
+}
+// Les premiers octets doivent dire le type annoncé (S-7) : un HTML, un PDF ou une PNG annoncés image/jpeg ne sont jamais relayés.
+export function signatureImage(octets) {
+  try {
+    if (!(octets instanceof Uint8Array)) return null;
+    const a = (i, liste) => octets.length >= i + liste.length && liste.every((x, k) => octets[i + k] === x);
+    if (a(0, [0xff, 0xd8, 0xff])) return 'image/jpeg';
+    if (a(0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'image/png';
+    if (a(0, [0x52, 0x49, 0x46, 0x46]) && a(8, [0x57, 0x45, 0x42, 0x50])) return 'image/webp';
+    return null;
+  } catch { return null; }
+}
+// `image` d'un objet Recipe : une chaîne ; un objet nu → url, sinon contentUrl ; un tableau → le premier élément qui rend une adresse (profondeur 2 :
+// un tableau d'ImageObject). Jamais Object.assign ni une boucle « in » (S-11 de B).
+const PROFONDEUR_IMAGE = 2;
+function adresseDe(x, profondeur) {
+  if (typeof x === 'string') return nettoyerChaineJsonLd(x) || null;
+  if (Array.isArray(x)) {
+    if (profondeur >= PROFONDEUR_IMAGE) return null;
+    for (const y of x) { const a = adresseDe(y, profondeur + 1); if (a) return a; }
+    return null;
+  }
+  if (objetNu(x)) {
+    const u = propre(x, 'url'); const c = propre(x, 'contentUrl');
+    return (typeof u === 'string' && nettoyerChaineJsonLd(u)) || (typeof c === 'string' && nettoyerChaineJsonLd(c)) || null;
+  }
+  return null;
+}
+export function imageDe(objet) {
+  try { return adresseDe(propre(objet, 'image'), 0); } catch { return null; }
+}
+// <meta property|name="og:image" content="…"> : capturée par le balayage UNIQUE de la page (lireMetaTranche, la première), décodée, rognée (P-4).
+const ogDesMetas = (metas) => { const b = metas?.get?.('og:image'); const v = typeof b === 'string' ? decoderEntites(b).trim() : ''; return v || null; };
+export function imageOgDe(html) {
+  return typeof html === 'string' ? ogDesMetas(balayer(html).metas) : null;
+}
+// D-F3 : l'image du Recipe RETENU, sinon og:image — sauf sur une page de liste (autresRecettes > 0 : l'image de partage serait celle d'une autre recette).
+function imageUrlDesMetas(objet, metas, { urlFinale, hotesRefuses = [], autresRecettes = 0 } = {}) {
+  try {
+    const candidat = (objet ? imageDe(objet) : null) ?? (autresRecettes > 0 ? null : ogDesMetas(metas));
+    if (!candidat) return null;
+    let abs;
+    try { abs = new URL(candidat, urlFinale); } catch { return null; }
+    const v = valideAdresse(abs.href, { hotesRefuses });
+    return v.ok ? v.href : null;
+  } catch { return null; }
+}
+export function imageUrlDe(objet, html, { urlFinale, hotesRefuses = [], autresRecettes = 0 } = {}) {
+  return imageUrlDesMetas(objet, typeof html === 'string' ? balayer(html).metas : new Map(), { urlFinale, hotesRefuses, autresRecettes });
+}
+// Le base64 d'une image (avec remplissage) : par tranches de 24 576 octets, un MULTIPLE DE 3 — une tranche multiple de 3 n'a jamais de
+// remplissage, donc seul le DERNIER morceau peut finir par « = » (rév. 1 de la spec : 32 Kio plaçaient des « = » au milieu). Node et Deno.
+export const TRANCHE_BASE64 = 24576;
+export function versBase64(octets) {
+  const morceaux = [];
+  for (let i = 0; i < octets.length; i += TRANCHE_BASE64) morceaux.push(btoa(String.fromCharCode(...octets.subarray(i, i + TRANCHE_BASE64))));
+  return morceaux.join('');
+}
+
 // --- Texte principal (D-B2, B-9, S-10) ------------------------------------------------------------------------------------------------------------
 // La zone : le premier <main>, sinon le premier <article>, sinon <body>, sinon tout ; les tranches nav / header / footer / aside / form qui
 // COMMENCENT dans la zone en sont retirées (une tranche ouverte avant la zone, comme un <form> qui enveloppe un <main>, ne l'efface donc pas).
@@ -446,7 +516,7 @@ export function textePrincipal(html, max = LIMITES_LECTURE.texte) {
 // --- Assemblage (§ 6.2) -----------------------------------------------------------------------------------------------------------------------------
 // UN balayage ; les Recipe → la PREMIÈRE LISIBLE (les illisibles sautées et non comptées) ; `autres` = les lisibles au-delà. `texte` et
 // `texte_coupe` seulement sans JSON-LD lisible. `lue_le` est posé par index.ts. `contentType` est gardé pour la forme (le décodage est fait avant).
-export function lirePageHtml({ html, urlFinale, contentType } = {}) {
+export function lirePageHtml({ html, urlFinale, contentType, hotesRefuses = [] } = {}) {
   void contentType;
   const scan = balayer(typeof html === 'string' ? html : '');
   let premiere = null; let objetRecette = null; let autres = 0;
@@ -455,10 +525,12 @@ export function lirePageHtml({ html, urlFinale, contentType } = {}) {
     if (!r.lisible) continue;
     if (premiere === null) { premiere = r.recette; objetRecette = o; } else autres += 1;
   }
+  // Lot F (D-F3) : l'image de l'objet Recipe RETENU (brut), sinon og:image — écartée d'une page de liste ; null sans l'un ni l'autre.
+  const image_url = imageUrlDesMetas(objetRecette, scan.metas, { urlFinale, hotesRefuses, autresRecettes: premiere ? autres : 0 });
   let hote = null;
   try { hote = sansPointFinal(new URL(urlFinale).hostname); } catch { hote = null; }
   const commun = { url_finale: typeof urlFinale === 'string' ? urlFinale : null, hote, titre_page: titreDuBalayage(scan.titre), auteur: (objetRecette ? auteurDe(objetRecette) : null) ?? auteurDuBalayage(scan.metas), site: siteDuBalayage(objetRecette, scan.metas), lue_le: null };
-  if (premiere) return { jsonld: { recette: premiere, autres }, texte: null, texte_coupe: false, page: { ...commun, autres_recettes: autres, texte_coupe: false } };
+  if (premiere) return { jsonld: { recette: premiere, autres }, texte: null, texte_coupe: false, page: { ...commun, autres_recettes: autres, texte_coupe: false, image_url } };
   const { texte, coupe } = texteDuBalayage(scan, LIMITES_LECTURE.texte);
-  return { jsonld: null, texte, texte_coupe: coupe, page: { ...commun, autres_recettes: 0, texte_coupe: coupe } };
+  return { jsonld: null, texte, texte_coupe: coupe, page: { ...commun, autres_recettes: 0, texte_coupe: coupe, image_url } };
 }

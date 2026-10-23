@@ -1,10 +1,13 @@
 // Logique pure de la passerelle de l'assistant (spec 2026-10-18-passerelle-assistant § 2-5). Tourne sous Node (tests) et sous Deno (index.ts).
 // Le client est une DONNÉE HOSTILE : liste blanche par outil, modèle forcé, plafonds, propriétés propres seulement. Le journal ne porte que des compteurs.
 // Lot B (spec 2026-10-19-recette-web § 6.1) : le quatrième outil, `lecture-web`, ne reçoit qu'une adresse ; sa validation et ses bornes vivent dans
-// ./lecture-web.js (feuille, un seul sens d'import : F-1). La contrainte `check` de 0006 liste OUTILS dans cet ordre, puis `image-web` (la
-// valeur du lot F, R-B-6) : OUTILS reste à quatre, une valeur admise de plus dans un check est inoffensive tant qu'OUTILS ne la porte pas.
+// ./lecture-web.js (feuille, un seul sens d'import : F-1). La contrainte `check` de 0006 liste OUTILS dans cet ordre ; `image-web` (la valeur
+// du lot F, R-B-6) en est le cinquième (lot F, R-F-9 : OUTILS = OUTILS_0006), et n'atteint jamais le modèle (OUTILS_MODELE).
 import { valideAdresse, LIMITES_LECTURE } from './lecture-web.js';
-export const OUTILS = Object.freeze(['recherche-web', 'creation', 'extraction', 'lecture-web']);
+export const OUTILS = Object.freeze(['recherche-web', 'creation', 'extraction', 'lecture-web', 'image-web']);
+// Lot F (S-2) : la liste FERMÉE des outils qui peuvent atteindre le modèle ; image-web n'y est pas et n'y sera jamais (index.ts initialise
+// corpsModele par elle, avant tout await).
+export const OUTILS_MODELE = Object.freeze(['recherche-web', 'creation', 'extraction', 'lecture-web']);
 export const LIMITES = Object.freeze({ corps: 512 * 1024, corpsExtraction: 8 * 1024 * 1024, maxTokens: 16000, quotaJour: 60, attenteMs: 120000, reponse: 2 * 1024 * 1024, system: 20000, messages: 20, maxUses: 5 });
 const TYPES_IMAGE = Object.freeze(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const OUTIL_WEB = 'web_search_20250305';
@@ -32,7 +35,15 @@ function bloc(b, outil) {
   }
   return null;
 }
-// `hotesRefuses` (lecture-web) : l'hôte du projet, passé par index.ts (S-12) — la fonction ne se rappelle jamais elle-même.
+// lecture-web et image-web : UNE règle (lot F) — liste blanche { url } ; tout autre champ est ignoré ; une adresse refusée l'est AVANT toute
+// réservation (I-B10) : 422 interdit.
+function lireDemandeUrl(corps, { hotesRefuses = [] } = {}) {
+  const url = own(corps, 'url');
+  if (typeof url !== 'string') return refus(400, 'forme');
+  const v = valideAdresse(url, { hotesRefuses });
+  return v.ok ? { ok: true, corps: { url: v.href } } : refus(422, 'interdit');
+}
+// `hotesRefuses` (lecture-web, image-web) : l'hôte du projet, passé par index.ts (S-12) — la fonction ne se rappelle jamais elle-même.
 export function lireDemande(texte, { outil, modele, maxTokens = LIMITES.maxTokens, octets, hotesRefuses = [] } = {}) {
   if (!OUTILS.includes(outil)) return refus(400, 'outil');
   if (typeof modele !== 'string' || modele === '') return refus(502, 'serveur');
@@ -44,12 +55,7 @@ export function lireDemande(texte, { outil, modele, maxTokens = LIMITES.maxToken
   let enveloppe; try { enveloppe = JSON.parse(texte); } catch { return refus(400, 'forme'); }
   const corps = own(enveloppe, 'corps');
   if (!objetNu(corps)) return refus(400, 'forme');
-  if (outil === 'lecture-web') { // liste blanche { url } : tout autre champ est ignoré ; une adresse refusée l'est AVANT toute réservation (I-B10)
-    const url = own(corps, 'url');
-    if (typeof url !== 'string') return refus(400, 'forme');
-    const v = valideAdresse(url, { hotesRefuses });
-    return v.ok ? { ok: true, corps: { url: v.href } } : refus(422, 'interdit');
-  }
+  if (outil === 'lecture-web' || outil === 'image-web') return lireDemandeUrl(corps, { hotesRefuses });
   const out = { model: modele };
   const system = own(corps, 'system');
   if (system !== undefined) { if (typeof system !== 'string') return refus(400, 'forme'); if (system.length > LIMITES.system) return refus(422, 'bornes'); out.system = system; }

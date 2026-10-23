@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OUTILS, LIMITES, origineAdmise, entetesCors, lireDemande, decisionQuota, statutRelaye, ligneJournal, corpsErreur, CONSIGNE_LECTURE_WEB, corpsLectureModele, neutraliser } from '../supabase/functions/assistant/logique.js';
+import { OUTILS, OUTILS_MODELE, LIMITES, origineAdmise, entetesCors, lireDemande, decisionQuota, statutRelaye, ligneJournal, corpsErreur, CONSIGNE_LECTURE_WEB, corpsLectureModele, neutraliser } from '../supabase/functions/assistant/logique.js';
 import { LIMITES_LECTURE, textePrincipal } from '../supabase/functions/assistant/lecture-web.js';
 
 const MODELE = 'claude-sonnet-5-5';
@@ -41,7 +41,7 @@ test('lireDemande : refus de forme (400) et bornes (422)', () => {
 test('lireDemande : outil', () => {
   assert.equal(lire(CREATION, 'inconnu').statut, 400);
   assert.equal(lireDemande(JSON.stringify(CREATION), { modele: MODELE }).statut, 400, 'outil absent');
-  assert.deepEqual(OUTILS, ['recherche-web', 'creation', 'extraction', 'lecture-web'], 'lot B : quatre outils, lecture-web dernier (la contrainte de 0006 suit cet ordre)');
+  assert.deepEqual(OUTILS, ['recherche-web', 'creation', 'extraction', 'lecture-web', 'image-web'], 'lot F : cinq outils, image-web dernier (la contrainte de 0006 suit cet ordre, R-F-1)');
 });
 test('lireDemande : tools seulement pour recherche-web, forme fermée', () => {
   const outil = { type: 'web_search_20250305', name: 'web_search', max_uses: 3, user_location: { type: 'approximate', country: 'CA', timezone: 'America/Toronto' } };
@@ -226,4 +226,31 @@ test('LIMITES de logique.js : forme inchangee ; LIMITES_LECTURE : les six bornes
   assert.deepEqual([LIMITES_LECTURE.titre, LIMITES_LECTURE.ligne, LIMITES_LECTURE.etape, LIMITES_LECTURE.notes, LIMITES_LECTURE.lignes, LIMITES_LECTURE.etapes], [200, 300, 2000, 2000, 80, 60], 'le miroir de BORNES_EXTRACTION (src/domain/llm.js), epingle en litteral');
   assert.ok(Object.isFrozen(LIMITES_LECTURE));
   assert.deepEqual([LIMITES_LECTURE.url, LIMITES_LECTURE.redirections, LIMITES_LECTURE.delaiSautMs, LIMITES_LECTURE.delaiTotalMs, LIMITES_LECTURE.page, LIMITES_LECTURE.texte, LIMITES_LECTURE.texteMin, LIMITES_LECTURE.maxTokens], [2048, 3, 15000, 30000, 2 * 1024 * 1024, 40000, 40, 6000]);
+});
+
+// --- Lot F « Les plats en images » (spec § 6.2) -----------------------------------------------------------------------------------------------
+test('OUTILS_MODELE : gelee, egale a OUTILS sans image-web (image-web n atteint jamais le modele)', () => {
+  assert.ok(Object.isFrozen(OUTILS_MODELE));
+  assert.deepEqual(OUTILS_MODELE, OUTILS.filter((o) => o !== 'image-web'));
+  assert.ok(!OUTILS_MODELE.includes('image-web'));
+});
+test('lireDemande image-web : liste blanche { url }, adresse revalidee, 422 interdit, rien d autre lu', () => {
+  const iw = (corps, extra = {}) => lireDemande(JSON.stringify({ outil: 'image-web', corps }), { outil: 'image-web', modele: MODELE, maxTokens: LIMITES.maxTokens, ...extra });
+  assert.deepEqual(iw({ url: 'https://a.test/i.jpg#f', messages: 'x', system: 'y', max_tokens: 9, model: 'autre' }), { ok: true, corps: { url: 'https://a.test/i.jpg' } }, 'champs en trop ignores ; href sans fragment');
+  for (const corps of [{}, { url: 7 }, { url: null }, { url: ['https://a.test/i.jpg'] }]) assert.deepEqual([iw(corps).statut, iw(corps).raison], [400, 'forme'], JSON.stringify(corps));
+  assert.deepEqual([iw({ url: 'http://a.test/i.jpg' }).statut, iw({ url: 'http://a.test/i.jpg' }).raison], [422, 'interdit']);
+  assert.deepEqual([iw({ url: 'https://x.test/i.jpg' }, { hotesRefuses: ['x.test'] }).statut, iw({ url: 'https://x.test/i.jpg' }, { hotesRefuses: ['x.test'] }).raison], [422, 'interdit'], 'S-12');
+  const gros = JSON.stringify({ outil: 'image-web', corps: { url: 'https://a.test/i.jpg', bourrage: 'x'.repeat(LIMITES.corps) } });
+  assert.equal(lireDemande(gros, { outil: 'image-web', modele: MODELE }).statut, 413, 'corps > 512 Kio');
+  assert.equal(iw({ url: 'https://a.test/i.jpg' }).ok, true, 'messages absents : pas une erreur pour cet outil');
+});
+test('lireDemandeUrl : une regle, deux outils (lecture-web et image-web rendent le meme verdict)', () => {
+  const adresses = ['https://a.test/r', 'http://a.test/r', 'https://127.0.0.1/r', 'https://u:p@a.test/r', 'https://a.test:8443/r', 'https://projet.test/r'];
+  const verdict = (outil, url) => { const r = lireDemande(JSON.stringify({ outil, corps: { url } }), { outil, modele: MODELE, hotesRefuses: ['projet.test'] }); return r.ok ? r.corps.url : `${r.statut}:${r.raison}`; };
+  assert.deepEqual(adresses.map((u) => verdict('image-web', u)), adresses.map((u) => verdict('lecture-web', u)));
+  assert.deepEqual(adresses.map((u) => verdict('image-web', u)), ['https://a.test/r', '422:interdit', '422:interdit', '422:interdit', '422:interdit', '422:interdit']);
+});
+test('ligneJournal : image-web admis, usage nul → jetons null', () => {
+  const l = ligneJournal({ ownerId: 'u', outil: 'image-web', statut: 200, usage: null, dureeMs: 3, octets: 40, maintenant: '2026-10-19T00:00:00.000Z' });
+  assert.deepEqual([l.outil, l.statut, l.jetons_entree, l.jetons_sortie, l.octets], ['image-web', 200, null, null, 40]);
 });

@@ -733,22 +733,23 @@ test('index.ts : imports fermes, deno.json epingle, aucune cle ni journal de con
   // (async function telechargerPage(, async function appelerAnthropic() et le cast local de lirePageHtml ne portent aucun de ces marqueurs.
   assert.deepEqual(ordreDuFlux(code), { presents: true, croissants: true }, 'gardes, reservation, telechargement, lecture, modele, journal : dans cet ordre');
   for (const m of ['await fetch(ANTHROPIC', "redirect: 'manual'", "redirect: 'error'", 'async function telechargerPage(', 'async function appelerAnthropic(']) assert.ok(code.includes(m), m);
-  assert.equal((code.match(/await fetch\(/g) || []).length, 2, 'deux appels sortants : la page dans telechargerPage, Anthropic dans appelerAnthropic');
+  assert.equal((code.match(/await fetch\(/g) || []).length, 2, 'deux appels sortants : la page ou l image dans suivreRedirections, le fournisseur dans appelerAnthropic');
   assert.ok(code.includes('await fetch(courant, {') && code.includes('await fetch(ANTHROPIC, {'), 'les deux appels sortants nommes');
 });
 // Les marqueurs du flux de traiter() (N-1) et leur ordre : présents ET strictement croissants. Exportée en fonction pour rejouer le mutant
 // « réservation après le téléchargement » et le témoin « appelerAnthropic déclarée avant traiter » sur un texte modifié.
 const ORDRE_DU_FLUX = ["req.method === 'OPTIONS'", 'origineAdmise(origine, admises)', "req.method !== 'POST'", 'auth.getUser(jeton)', "rpc('is_allowed')",
-  "req.method === 'GET'", 'await lireCorpsBorne(req,', 'lireDemande(texte', ".rpc('assistant_reserver'", 'await telechargerPage(', 'lirePageHtml(', 'await appelerAnthropic(', '.update('];
+  "req.method === 'GET'", 'await lireCorpsBorne(req,', 'lireDemande(texte', ".rpc('assistant_reserver'", 'await telechargerPage(', 'lirePageHtml(', 'await telechargerImage(', 'await appelerAnthropic(', '.update('];
 function ordreDuFlux(code) {
   const pos = ORDRE_DU_FLUX.map((s) => code.indexOf(s));
   return { presents: pos.every((x) => x !== -1), croissants: pos.every((x, i) => i === 0 || x > pos[i - 1]) };
 }
 test('index.ts (N-1) : le test d ordre tient par les points d appel — mutant « reservation apres le telechargement » rouge, temoin « declarations deplacees » vert', () => {
   const code = sansCommentaires(lire(`${FONCTION}/index.ts`));
-  for (const nom of ['async function telechargerPage(', 'async function appelerAnthropic(']) {
-    const debut = code.indexOf(nom); const corps = code.slice(debut, code.indexOf('\n}\n', debut));
-    assert.ok(!/await (telechargerPage|appelerAnthropic)\(/.test(corps) && !corps.includes('lirePageHtml('), nom + ' ne porte aucun marqueur du flux');
+  for (const nom of ['async function suivreRedirections<T>(', 'async function telechargerPage(', 'async function telechargerImage(', 'async function appelerAnthropic(']) {
+    const debut = code.indexOf(nom); assert.notEqual(debut, -1, nom + ' : declaration trouvee');
+    const corps = code.slice(debut, code.indexOf('\n}\n', debut));
+    assert.ok(!/await (telechargerPage|telechargerImage|appelerAnthropic)\(/.test(corps) && !corps.includes('lirePageHtml('), nom + ' ne porte aucun marqueur du flux');
   }
   const ligneImport = code.split('\n').find((l) => l.includes("from './lecture-web.js'")) || '';
   const cast = code.split('\n').find((l) => l.startsWith('const lirePageHtml = ')) || '';
@@ -760,8 +761,8 @@ test('index.ts (N-1) : le test d ordre tient par les points d appel — mutant �
   assert.ok(mutant.indexOf(".rpc('assistant_reserver'") > mutant.indexOf('await telechargerPage('), 'le mutant porte bien la reservation sous le telechargement');
   assert.deepEqual(ordreDuFlux(mutant), { presents: true, croissants: false }, 'mutant « reservation apres le telechargement » : rouge');
   // Témoin : appelerAnthropic et telechargerPage déclarées AVANT traiter (elles le sont) ou APRÈS : le test reste vert.
-  const decl = (nom) => { const d = code.indexOf(nom); return code.slice(d, code.indexOf('\n}\n', d) + 3); };
-  const deplacees = [decl('async function telechargerPage('), decl('async function appelerAnthropic(')];
+  const decl = (nom) => { const d = code.indexOf(nom); assert.notEqual(d, -1, nom + ' : declaration trouvee'); return code.slice(d, code.indexOf('\n}\n', d) + 3); };
+  const deplacees = [decl('async function suivreRedirections<T>('), decl('async function telechargerPage('), decl('async function telechargerImage('), decl('async function appelerAnthropic(')];
   let temoin = code; for (const d of deplacees) temoin = temoin.replace(d, '');
   temoin = temoin + '\n' + deplacees.join('\n');
   assert.deepEqual(ordreDuFlux(temoin), { presents: true, croissants: true }, 'temoin : les declarations peuvent etre n importe ou');
@@ -1175,7 +1176,7 @@ test('RESULTATS-mitsu : section « Preuve 0005_imports.sql — à jouer » prepa
 // --- Lot B « Recette web complète » (spec 2026-10-19-recette-web § 3.7, § 6.4, D-B11, D-B23) : 0006 écrite à la main, sa preuve, le README,
 // RESULTATS et le commentaire du générateur. 0006 est hors de NOMS et de --check, comme 0004.
 // R-B-6 (= R-F-1 du lot F) : la contrainte de 0006 porte CINQ valeurs, figées en littéral comme OUTILS_0004 ; la cinquième, image-web, sert le lot F
-// (qui n'écrira aucune migration). OUTILS (logique.js) en porte quatre : une valeur admise de plus dans un check est inoffensive tant qu'OUTILS ne la porte pas.
+// (qui n'écrira aucune migration). Depuis le lot F, OUTILS (logique.js) porte les cinq : OUTILS = OUTILS_0006 (R-F-9).
 const OUTILS_0006 = ['recherche-web', 'creation', 'extraction', 'lecture-web', 'image-web'];
 test('0006 : hors NOMS, une transaction, 4 instructions — drop puis add de la contrainte, avec les cinq valeurs d OUTILS_0006 dans l ordre ; rien d autre', () => {
   assert.ok(!NOMS.some((n) => n.startsWith('0006')), '0006 n est pas generee');
@@ -1185,7 +1186,8 @@ test('0006 : hors NOMS, une transaction, 4 instructions — drop puis add de la 
   assert.deepEqual(l, ['begin;', 'alter table public.assistant_journal drop constraint assistant_journal_outil_check;',
     `alter table public.assistant_journal add constraint assistant_journal_outil_check check (outil in (${OUTILS_0006.map((o) => `'${o}'`).join(', ')}));`, 'commit;'],
     'quatre instructions ; la liste SQL est le litteral OUTILS_0006 (cinq valeurs, image-web pour le lot F)');
-  assert.deepEqual(OUTILS_PASSERELLE, OUTILS_0006.slice(0, 4), 'test croise : OUTILS (quatre outils du lot B) = les quatre premieres valeurs de OUTILS_0006');
+  assert.equal(OUTILS_PASSERELLE.length, 5, 'lot F : cinq outils, image-web compris (R-F-9)');
+  assert.deepEqual(OUTILS_PASSERELLE, OUTILS_0006, 'lot F : le prefixe de B devient l egalite (R-F-9)');
   assert.doesNotMatch(code, /\b(create|grant|revoke|insert|update|delete|truncate)\b/, 'ni table, ni fonction, ni privilege, ni donnee');
   assert.equal(code, code.toLowerCase(), 'SQL en minuscules');
   assert.ok(m.includes('de colonne') && m.includes('23514') && m.includes('502'), 'l en-tete dit pourquoi (check de colonne de 0004, 23514, 502)');
@@ -1261,4 +1263,27 @@ test('generateur (D-B11) : le commentaire dit « la 0007 à venir » ; plus aucu
   const g = lire('tools/generer-migrations.mjs');
   assert.ok(g.includes('la 0007 à venir'), 'la prochaine migration generee est 0007');
   assert.doesNotMatch(g, /la 0006 à venir|dans une 0006 \(/, 'aucune 0006 promise par le generateur');
+});
+
+// --- Lot F « Les plats en images » (spec § 6.3, § 7.2-7.3) : image-web dans le flux, une seule boucle, le modele jamais atteint ; OUTILS = 0006
+test('lot F : OUTILS porte les cinq outils de 0006, image-web dernier (le prefixe devient l egalite)', () => {
+  assert.equal(OUTILS_PASSERELLE.length, 5);
+  assert.deepEqual(OUTILS_PASSERELLE, OUTILS_0006);
+});
+test('index.ts (lot F) : image-web dans l ordre du flux, une seule boucle de redirections, corpsModele par OUTILS_MODELE ; mutant « reservation apres telechargerImage » rouge', () => {
+  const code = sansCommentaires(lire(`${FONCTION}/index.ts`));
+  assert.deepEqual(ordreDuFlux(code), { presents: true, croissants: true });
+  assert.equal((code.match(/redirect: 'manual'/g) || []).length, 1, 'une seule boucle (suivreRedirections)');
+  assert.equal((code.match(/await fetch\(/g) || []).length, 2, 'deux appels sortants : la page ou l image dans suivreRedirections, le fournisseur dans appelerAnthropic');
+  assert.ok(code.includes('OUTILS_MODELE.includes(outil)'), 'corpsModele initialise par la liste fermee');
+  for (const nom of ['async function suivreRedirections<T>(', 'async function telechargerPage(', 'async function telechargerImage(']) assert.notEqual(code.indexOf(nom), -1, nom);
+  // Mutant : la réservation déplacée sous le téléchargement de l'IMAGE → l'ordre casse. (« un second await fetch( dans telechargerImage » se
+  // rejoue sur une COPIE d'index.ts, Step 10 : le compte ci-dessus le tue.)
+  const debutRes = code.indexOf('  const { data: idReserve');
+  assert.notEqual(debutRes, -1, 'la ligne de reservation est trouvee');
+  const reservation = code.slice(debutRes, code.indexOf('\n', debutRes) + 1);
+  const sansRes = code.replace(reservation, '');
+  const apres = sansRes.indexOf('\n', sansRes.indexOf('await telechargerImage(')) + 1;
+  const mutant1 = sansRes.slice(0, apres) + reservation + sansRes.slice(apres);
+  assert.deepEqual(ordreDuFlux(mutant1), { presents: true, croissants: false }, 'mutant « reservation apres telechargerImage » : rouge');
 });
