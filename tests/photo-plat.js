@@ -1278,6 +1278,83 @@ export async function runPhotoPlatTests({ eq, ok }) {
       eq([srcPP, srcRecipe].flatMap((s) => s.split('\n').filter((l) => l.includes('photo_source_url') && /textContent|\bt\(|\bel\(/.test(l))), [], 'D-F11 : photo_source_url n’entre dans aucune ligne qui porte textContent, t( ou el( (photo-plat.js, recipe.js)');
     });
 
+    // ===== Tâche 5 — régression (spec § 7.4 « Régression », § 3.1 ; P-11)
+    await run('régression : « Corriger » relit la photo (D-F16, D-F19), archive aller-retour, capture et envoi', () => withRepo(async (repo, db) => {
+      const PP = await import('../src/ui/photo-plat.js');
+      const { renderRecipeEdit } = await import('../src/ui/recipe-edit.js');
+      const { createArchive, inspectArchive, applyArchive, verifyRestored } = await import('../src/domain/backup.js');
+      const { createPush } = await import('../src/sync/push.js');
+      const { creerTransportFactice } = await import('./transport-factice.js');
+      PP.reinitialiserPhotoPlat();
+      const scene = nouvelleScene();
+      const adresseAvant = location.href;
+      const vraiFetch = globalThis.fetch; globalThis.fetch = async (u) => { throw new Error('aucun reseau attendu : ' + u); };
+      try {
+        const jpeg = await imageTest('c.jpg', '#c63', 640, 480); const sha = await sha256Hex(jpeg);
+        await repo.putFile(sha, jpeg, { mime: 'image/jpeg', origin: 'device' });
+        const idsDe = async (rid) => new Set((await db.byIndex('recipe_versions', 'recipe_id', rid)).map((v) => v.id));
+        // « Corriger » joué PAR l'éditeur : rendu, geste éventuel pendant l'édition, « Enregistrer une nouvelle version » ; l'adresse posée par la
+        // navigation est rendue (motif de tests/import-cible.js, Review Focus 5 du lot A).
+        const corriger = async (rid, pendantEdition = async () => {}) => {
+          const ed = await renderRecipeEdit({ id: rid }, { kind: 'correction' }, await ctxPour(repo, db)); scene.append(ed);
+          await pendantEdition();
+          const avant = await idsDe(rid);
+          bouton(ed, 'Enregistrer une nouvelle version').click();
+          await attendre(async () => (await idsDe(rid)).size === avant.size + 1, 'version écrite (' + rid + ')');
+          await tick(); history.replaceState(null, '', adresseAvant); ed.remove();
+          return db.get('recipes', rid);
+        };
+        // 1. Une fiche à photo garde ses trois champs (garde de régression : verte avant le changement).
+        await db.mutate({ puts: { recipes: [fiche('rc_k1', { source_url: 'https://site.test/k1', photo_sha256: sha, photo_origin: 'web', photo_source_url: 'https://cdn.test/k1.jpg' })], recipe_versions: [version('rc_k1')] }, origin: 'device' });
+        const k1 = await corriger('rc_k1');
+        eq([k1.photo_sha256, k1.photo_origin, k1.photo_source_url], [sha, 'web', 'https://cdn.test/k1.jpg'], '« Corriger » sur une fiche à photo : la fiche écrite garde photo_sha256, photo_origin, photo_source_url');
+        // 2. D-F16 (rouge d'abord) : une photo écrite en base PENDANT l'édition (descente web, autre onglet) survit à « Enregistrer ».
+        await db.mutate({ puts: { recipes: [fiche('rc_k2', { photo_source_url: 'https://cdn.test/k2.jpg' })], recipe_versions: [version('rc_k2')] }, origin: 'device' });
+        const k2 = await corriger('rc_k2', async () => { await db.mutate({ puts: { recipes: [{ ...(await db.get('recipes', 'rc_k2')), photo_sha256: sha, photo_origin: 'web' }] }, origin: 'device' }); });
+        eq([k2.photo_sha256, k2.photo_origin, k2.photo_source_url], [sha, 'web', 'https://cdn.test/k2.jpg'], 'D-F16 : éditeur rendu, puis une photo écrite en base, puis « Enregistrer » → la fiche écrite porte les trois champs de la BASE');
+        // 3. D-F19 (rouge d'abord) : une origine hors liste relue se lit null, sans lever.
+        await db.mutate({ puts: { recipes: [fiche('rc_k3', { photo_sha256: sha, photo_origin: 'appareil' })], recipe_versions: [version('rc_k3')] }, origin: 'device' });
+        const k3 = await corriger('rc_k3');
+        eq([k3.photo_sha256, k3.photo_origin], [sha, null], 'D-F19 : « Corriger » d’une fiche relue avec photo_origin « appareil » ne lève pas ; photo_origin null écrit, le pointeur gardé');
+        // 4. P-6 : une fiche d'avant le lot ne gagne aucune clé de photo (garde de régression).
+        await db.mutate({ puts: { recipes: [fiche('rc_k4')], recipe_versions: [version('rc_k4')] }, origin: 'device' });
+        const k4 = await corriger('rc_k4');
+        eq(['photo_sha256', 'photo_origin', 'photo_source_url'].map((k) => Object.hasOwn(k4, k)), [false, false, false], '« Corriger » d’une fiche d’avant le lot : aucune clé de photo ajoutée (P-6)');
+
+        // 5. Archive aller-retour (§ 3.1) : une fiche à photo web voyage intacte, ses octets aussi, zéro écart.
+        await withDatabase(async (source) => {
+          await source.mutate({ puts: {
+            files: [{ sha256: sha, mime: 'image/jpeg', blob: jpeg, size: jpeg.size, syncable: true, created_at: DATE, updated_at: DATE }],
+            recipes: [fiche('rc_ar', { source_url: 'https://site.test/ar', photo_sha256: sha, photo_origin: 'web', photo_source_url: 'https://cdn.test/ar.jpg' })],
+            recipe_versions: [version('rc_ar')],
+          }, origin: 'device' });
+          const inspection = await inspectArchive(await (await createArchive(source)).blob.arrayBuffer());
+          ok(inspection.ok, 'archive : la fixture est acceptée (' + (inspection.errors || []).join(' · ') + ')');
+          await withDatabase(async (cible) => {
+            await applyArchive(cible, inspection, { mode: 'replace' });
+            const v = await verifyRestored(cible, inspection, { mode: 'replace' });
+            const ar = await cible.get('recipes', 'rc_ar');
+            eq([v.ok, v.diffs, ar.photo_sha256, ar.photo_origin, ar.photo_source_url, (await cible.get('files', sha))?.blob instanceof Blob], [true, [], sha, 'web', 'https://cdn.test/ar.jpg', true],
+              'archive aller-retour d’une fiche à photo web : champs intacts, octets restaurés, verifyRestored zéro écart');
+          });
+        });
+
+        // 6. La photo rapatriée voyage (P-11) : l'écriture de rapatrierPhotoWeb passe par la capture (une entrée recipes en file) et l'envoi porte les
+        //    trois champs au serveur (transport factice arbitre, tests/transport-factice.js) ; les octets, eux, sont l'affaire du lot G.
+        const png = await octetsDe(await imageTest('cap.png', '#3a7', 800, 600, 'image/png'));
+        const fetchImage = async () => reponse(200, { type: 'image/png', taille: png.length, url_finale: 'https://cdn.test/cap.png', octets: base64De(png) });
+        await db.mutate({ puts: { recipes: [fiche('rc_cap', { photo_source_url: 'https://cdn.test/cap.png' })] }, origin: 'device' });
+        const sync = { user: { id: 'u1' }, auth: { jeton: async () => ({ access_token: 'jeton-capture', user: { id: 'u1' } }) } };
+        const r = await PP.rapatrierPhotoWeb('rc_cap', { ctx: { sync }, repo, fetch: fetchImage, enLigne: () => true });
+        const enFile = (await db.getAll('outbox')).filter((e) => e.store === 'recipes' && e.id === 'rc_cap').map((e) => e.op);
+        const tf = creerTransportFactice({ serveur: true });
+        await createPush({ db, transport: tf, getUserId: () => 'u1' }).envoyer();
+        const auServeur = tf.ligne('recipes', 'rc_cap')?.data;
+        eq([r.issue, enFile, auServeur?.photo_sha256, auServeur?.photo_origin, auServeur?.photo_source_url], ['ok', ['put'], r.sha256, 'web', 'https://cdn.test/cap.png'],
+          'capture : une entrée recipes (put, origine local) en file après le rapatriement ; l’envoi porte photo_sha256, photo_origin web et photo_source_url au serveur');
+      } finally { globalThis.fetch = vraiFetch; scene.remove(); PP.reinitialiserPhotoPlat(); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
+    }));
+
     // ===== fin des blocs du lot F (les tâches 3 à 5 ajoutent les leurs AU-DESSUS de cette ligne)
   } finally { setUiLocale(localeAvant); }
 }

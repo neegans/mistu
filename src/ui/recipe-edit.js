@@ -11,7 +11,7 @@ import { currentVersion } from '../domain/search.js';
 import { getConvention } from '../domain/units.js';
 import { providerFrom, extractRecipeFromImages, pagePourEnvoi, BORNES_EXTRACTION } from '../domain/llm.js';
 import { RECIPE_TYPES } from '../model/schema.js';
-import { assertVocabulaire } from '../domain/vocabulaire.js';
+import { assertVocabulaire, originePhotoAdmise } from '../domain/vocabulaire.js';
 import { statutSeanceApres } from '../domain/import-cible.js';
 import { logError } from '../core/log.js';
 import { pageHeader, field, select, carteConnexion, texteEchecAssistant, section, pdfFrame, sessionAssistant, isoLisible } from './components.js';
@@ -338,6 +338,16 @@ export async function renderRecipeEdit(params, query, ctx) {
     // Lot D (§ 4.8.2 points 3 et 4, I-D3) : role recette avec kind recipe ; le numéro de la fiche ne va qu'à la PREMIÈRE page sans numéro ; la photo
     // d'index de la fiche corrigée n'est jamais réécrite (ni kind, ni role, ni printed_page).
     const pageUpdates = pages.filter((p) => p.id !== recipe?.index_page_id).map((p, i) => ({ ...p, kind: 'recipe', role: 'recette', printed_page: p.printed_page ?? (i === 0 ? n(f.printed_page) : null) }));
+    // Lot F (D-F16, D-F19) : les trois champs de la photo du plat viennent de la fiche RELUE juste avant l'écriture — l'éditeur ne les édite pas, la
+    // base fait foi : une photo posée pendant l'édition (descente web, autre onglet) survit ; une origine hors liste se lit null ; une clé absente
+    // en base reste absente (P-6). Une fiche supprimée pendant l'édition garde la règle d'avant (sa copie : dette C4 du lot UX, hors lot).
+    if (targetRecipe) {
+      const enBase = (await repo.get('recipes', targetRecipe.id)) ?? targetRecipe;
+      for (const champ of ['photo_sha256', 'photo_origin', 'photo_source_url']) {
+        if (Object.hasOwn(enBase, champ)) rec[champ] = champ === 'photo_origin' ? originePhotoAdmise(enBase[champ]) : enBase[champ];
+        else delete rec[champ];
+      }
+    }
     assertVocabulaire(rec, 'recipes'); // D-12 : vocabulaire fermé vérifié avant l'écriture
     const lot = { recipes: [rec], recipe_versions: [version], source_pages: pageUpdates };
     // La séance (recipe_ids) s'écrit dans la MÊME transaction que la recette (I-10, ronde 1), relue juste avant (leçon C4).

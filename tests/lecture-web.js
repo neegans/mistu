@@ -1201,5 +1201,220 @@ export async function runLectureWebTests({ eq, ok }) {
       try { ap2 = fab({ ...SIGNET, photo_origin: 'appareil' }, { remplacer: false }); } catch (x) { e2 = x; }
       eq([e2?.name ?? null, ap2?.recipe.photo_origin], [null, 'appareil'], 'P-5 : « Ajouter sans remplacer » sur une origine hors liste ne lève pas ; le signet rendu reste intact (il n’est pas écrit)');
     });
+
+    // === Lot F (spec plats-en-images § 4.3) : l'écran a_verifier ANNONCE l'essai, « Enregistrer » le déclenche APRÈS la transaction ; le texte ne
+    // dépend jamais de l'image (I-F4) ; un appel ne part que pour l'adresse annoncée (S-12) ; « Ajouter sans remplacer » descend aussi (R-F-2).
+    await run('lot F — import web : annonce, ordre, déclenchement, « Ajouter sans remplacer », échec, relecture (§ 4.3, I-F4, S-12, R-F-2)', () => withRepo(async (repo, db) => {
+      const IC = await import('../src/ui/import-cible.js');
+      const W = await import('../src/ui/import-web.js');
+      const V = await import('../src/ui/vol.js');
+      const PP = await import('../src/ui/photo-plat.js');
+      const { renderRecipe } = await import('../src/ui/recipe.js');
+      const srcWeb = await lire('../src/ui/import-web.js'); // lu AVANT de couper le réseau
+      V.reinitialiserVol(); W.reinitialiserLectureWeb(); PP.reinitialiserPhotoPlat();
+      const vraiFetch = globalThis.fetch; let reseau = 0;
+      globalThis.fetch = async (u) => { reseau += 1; throw new Error('aucun reseau attendu : ' + u); };
+      const vraiErreur = console.error; const journal = [];
+      console.error = (...a) => { journal.push(a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ')); };
+      const scene = document.createElement('div'); scene.style.cssText = 'position:absolute;left:-10000px;top:0;width:900px'; document.body.append(scene);
+      const mutate = db.mutate.bind(db);
+      try {
+        const NOW = '2026-10-19T12:00:00.000Z'; const DATE = '2026-10-19T00:00:00.000Z';
+        const H = (c) => c.repeat(64);
+        const IMG = 'https://cdn.site.test/puttanesca.jpg'; const IMG2 = 'https://cdn.site.test/autre.jpg';
+        const SESSION = { access_token: 'jeton-photo-web-sentinelle', user: { id: 'u1', email: 'a@exemple.invalid' } };
+        const signet = (id, over = {}) => ({ id, edition_id: null, original_title: 'site.test', original_language: 'fr', availability: 'reference_only', verification_state: 'unverified', printed_page: null, section: null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: [], current_version_id: null, ingredient_ids: [], source_url: `https://site.test/${id}`, source_label: 'site.test', created_at: DATE, updated_at: DATE, ...over });
+        const humaine = (rid) => ({ id: 'rv_' + rid, recipe_id: rid, kind: 'extraction', status: null, servings: 4, ingredients: [{ id: 'ri_' + rid, source_text: '1 pomme', name_text: 'pomme', verification_state: 'verified' }], steps: [{ id: 'st_' + rid, position: 1, text: 'Cuire.' }], provenance: { generated_by: 'manual' }, verification_state: 'verified', created_at: DATE, updated_at: DATE });
+        const ctxDe = async () => {
+          const recipes = await db.getAll('recipes'); const vs = await db.getAll('recipe_versions');
+          return { recipes, recipesById: new Map(recipes.map((r) => [r.id, r])), recipe_versions: vs, versionsByRecipe: repo.groupBy(vs, 'recipe_id'), versionsById: new Map(vs.map((v) => [v.id, v])), editionsById: new Map(), booksById: new Map(), books: [], book_editions: [], pagesById: new Map(), imports: await db.getAll('imports'), settings: { llm: { provider: 'none' }, units: 'original', reading_locale: 'original' }, sync: { user: { id: 'u1', email: 'a@exemple.invalid' }, auth: { jeton: async () => SESSION } }, conventionFor: () => null,
+            dishesById: new Map(), cook_history: [], dish_recipe_links: [], recipe_translations: [], ingredients: [], ingredientsById: new Map(), dishes: [], source_documents: [], source_pages: [], rediscovery_prefs: [], docsByRecipe: new Map(), scan_sessions: [] };
+        };
+        const reponse = (status, corps) => ({ ok: status >= 200 && status < 300, status, headers: new Headers(), text: async () => (typeof corps === 'string' ? corps : JSON.stringify(corps)) });
+        const PAGE = { url_finale: 'https://site.test/r', hote: 'site.test', titre_page: 'P', auteur: 'Ricardo', site: 'Ricardo Cuisine', lue_le: NOW, autres_recettes: 0, texte_coupe: false };
+        const RECETTE = { title: 'Pâtes puttanesca', servings: 4, prep_minutes: 20, cook_minutes: 20, total_minutes: 40, ingredients: [{ source_text: '250 g de spaghettis', uncertain: false }, { source_text: '1 boîte de tomates', uncertain: false }], steps: [{ text: 'Cuire.' }, { text: 'Servir.' }], notes: 'Un classique.', incomplete: false };
+        const ld = (page = {}) => ({ source_kind: 'jsonld', page: { ...PAGE, ...page }, recette: RECETTE, usage: { input_tokens: 0, output_tokens: 0 }, stop_reason: null, model: null });
+        // L'image que la fonction rend : une PNG 800 × 600 en base64 (un seul btoa sur la chaîne binaire entière : la même chaîne que la tranche de 3 du serveur).
+        const corpsPng = async (couleur) => {
+          const toile = new OffscreenCanvas(800, 600); const cx = toile.getContext('2d'); cx.fillStyle = couleur; cx.fillRect(0, 0, 800, 600);
+          const u8 = new Uint8Array(await (await toile.convertToBlob({ type: 'image/png' })).arrayBuffer());
+          let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+          return { type: 'image/png', taille: u8.length, url_finale: IMG, octets: btoa(s) };
+        };
+        const IMAGE_A = await corpsPng('#3a7'); const IMAGE_B = await corpsPng('#a37');
+        // Le fetch factice : chaque appel est noté { outil, url } et dans `evenements` ; une lecture répond par la file `lectures`, une image par la file
+        // `images` (file vide : IMAGE_A).
+        const appels = []; const evenements = []; const lectures = []; const images = [];
+        const ff = async (url, options) => {
+          const corps = JSON.parse(options.body);
+          appels.push({ outil: corps.outil, url: corps.corps?.url }); evenements.push('fetch:' + corps.outil);
+          if (corps.outil === 'lecture-web') return reponse(...(lectures.shift() || [200, ld()]));
+          return reponse(...(images.shift() || [200, IMAGE_A]));
+        };
+        const postsImage = () => appels.filter((a) => a.outil === 'image-web');
+        const espionner = () => { db.mutate = (o) => { evenements.push('mutate:' + [...Object.keys(o.puts || {}), ...Object.keys(o.conditions || {})].sort().join('+')); return mutate(o); }; };
+        const navs = []; const dits = []; const choix = { suivant: [], appels: 0 };
+        const choisir = async () => { choix.appels += 1; return choix.suivant.length ? choix.suivant.shift() : null; };
+        const gestes = (deps = {}) => ({ repo, navigate: (x) => navs.push(x), toast: (m) => dits.push(m), fetch: ff, maintenant: () => NOW, enLigne: () => true, choisir, ...deps });
+        const monter = async (id, deps = {}) => { const root = await IC.renderImportCible({ id }, {}, await ctxDe(), gestes(deps)); scene.append(root); return root; };
+        const bouton = (root, texte) => [...root.querySelectorAll('button')].find((x) => x.textContent === texte) || null;
+        const attendre = async (cond, quoi) => { for (let i = 0; i < 300; i += 1) { if (await cond()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error('attente dépassée (3 s) : ' + quoi); };
+        const ligneDe = async (recipeId) => (await db.byIndex('imports', 'recipe_id', recipeId)).find((i) => !['enregistre', 'ignore'].includes(i.status)) || null;
+        // Lire une fiche (la lecture rend `page`), puis attendre l'aperçu a_verifier rendu.
+        const lireAvec = async (id, page = {}, deps = {}) => {
+          scene.replaceChildren(); // l'écran précédent est détaché (B : il se désabonne à la notification suivante)
+          lectures.push([200, ld(page)]);
+          const root = await monter(id, deps);
+          bouton(root, 'Lire la recette avec l’assistant').click();
+          await attendre(async () => (await ligneDe(id))?.status === 'a_verifier' && root.etatRouteWeb().status === 'a_verifier', 'aperçu de ' + id);
+          return root;
+        };
+        // « Enregistrer » qui navigue ; la descente éventuelle est attendue avant de continuer (aucune descente ne survit à la base jetable).
+        const enregistrer = async (root, id) => { const n = navs.length; bouton(root, 'Enregistrer').click(); await attendre(() => navs.length > n, 'enregistré : ' + id); await PP.attendreRecuperation(id); };
+        const ANNONCE = 'Après l’enregistrement, l’app essaiera de récupérer la photo du plat de la page : un appel de plus, compté dans ton quota du jour.';
+        const annonce = (root) => root.querySelector('[data-role="photo-web-annonce"]');
+        const enFiche = async (id) => { const p = await renderRecipe({ id }, {}, await ctxDe(), { pickFiles: async () => [], toast: () => {}, fetch: ff, enLigne: () => true }); scene.append(p); return p; };
+
+        // 1. Ordre (Review Focus 2, I-F4) : la transaction AVANT le premier POST image-web, puis UN POST, puis files, puis la photo sur la fiche.
+        await db.mutate({ puts: { recipes: [signet('rc_o')] }, origin: 'device' });
+        let root = await lireAvec('rc_o', { image_url: IMG });
+        const ligneAnnonce = annonce(root);
+        const mode = root.querySelector('[data-role="mode"]');
+        eq([ligneAnnonce?.tagName, ligneAnnonce?.className, ligneAnnonce?.textContent, !!mode && !!ligneAnnonce && !!(mode.compareDocumentPosition(ligneAnnonce) & Node.DOCUMENT_POSITION_FOLLOWING)], ['SMALL', 'muted', ANNONCE, true],
+          'écran a_verifier : small.muted « Après l’enregistrement, l’app essaiera de récupérer… » (un ESSAI et son coût), sous la ligne du mode');
+        evenements.length = 0; espionner();
+        try { await enregistrer(root, 'rc_o'); } finally { db.mutate = mutate; }
+        const iTx = evenements.indexOf('mutate:imports+recipe_versions+recipes'); const iImg = evenements.indexOf('fetch:image-web');
+        const iFiles = evenements.findIndex((e, i) => i > iImg && e === 'mutate:files');
+        const iPhoto = evenements.findIndex((e, i) => i > iFiles && e === 'mutate:recipes');
+        eq([iTx >= 0, iTx < iImg, iFiles > iImg, iPhoto > iFiles, evenements.filter((e) => e === 'fetch:image-web').length], [true, true, true, true, 1],
+          'ordre : la transaction (recipes, recipe_versions, imports enregistre) est écrite AVANT le premier POST image-web, puis UN POST, puis files, puis la photo sur la fiche');
+        const o = await db.get('recipes', 'rc_o');
+        eq([o.availability, o.photo_origin, o.photo_source_url, /^[0-9a-f]{64}$/.test(o.photo_sha256 ?? ''), (await db.byIndex('imports', 'recipe_id', 'rc_o'))[0].status, postsImage().at(-1).url],
+          ['available', 'web', IMG, true, 'enregistre', IMG], 'Enregistrer : la recette enregistrée, puis la photo web posée avec sa provenance ; l’import reste enregistre ; l’adresse demandée est l’annoncée');
+
+        // 2. Sans candidat, aucune annonce et aucun POST : pas d'image, une photo de la personne, la même image web déjà là.
+        await db.mutate({ puts: { recipes: [signet('rc_sans'), signet('rc_perso', { photo_sha256: H('a'), photo_origin: 'image' }), signet('rc_meme', { photo_sha256: H('b'), photo_origin: 'web', photo_source_url: IMG })] }, origin: 'device' });
+        for (const [id, page, nom] of [['rc_sans', {}, 'sans image'], ['rc_perso', { image_url: IMG }, 'photo de la personne'], ['rc_meme', { image_url: IMG }, 'même image web déjà là']]) {
+          const n = postsImage().length;
+          root = await lireAvec(id, page);
+          eq(annonce(root), null, `annonce absente (${nom})`);
+          await enregistrer(root, id);
+          eq(postsImage().length - n, 0, `${nom} : zéro POST image-web à l’enregistrement`);
+        }
+        const perso = await db.get('recipes', 'rc_perso');
+        eq([perso.photo_sha256, perso.photo_origin], [H('a'), 'image'], 'une photo de la personne reste après l’enregistrement d’une lecture (I-F5)');
+
+        // 3. S-12, les deux sens : un appel ne part que pour une adresse ANNONCÉE et encore candidate.
+        await db.mutate({ puts: { recipes: [signet('rc_s1'), signet('rc_s2', { photo_sha256: H('c'), photo_origin: 'image' })] }, origin: 'device' });
+        root = await lireAvec('rc_s1', { image_url: IMG });
+        ok(!!annonce(root), 'S-12 : annonce affichée (rc_s1)');
+        await db.mutate({ puts: { recipes: [{ ...(await db.get('recipes', 'rc_s1')), photo_sha256: H('d'), photo_origin: 'image' }] }, origin: 'device' });
+        let n = postsImage().length;
+        await enregistrer(root, 'rc_s1');
+        eq([postsImage().length - n, (await db.get('recipes', 'rc_s1')).photo_sha256], [0, H('d')], 'S-12 : annonce affichée, puis une photo posée dans un autre onglet avant « Enregistrer » → zéro POST, la photo reste');
+        root = await lireAvec('rc_s2', { image_url: IMG });
+        eq(annonce(root), null, 'S-12 : aucune annonce au rendu (fiche avec une photo de la personne)');
+        await db.mutate({ puts: { recipes: [{ ...(await db.get('recipes', 'rc_s2')), photo_sha256: null, photo_origin: null }] }, origin: 'device' });
+        n = postsImage().length;
+        await enregistrer(root, 'rc_s2');
+        eq(postsImage().length - n, 0, 'S-12 : aucune annonce, puis photo retirée avant « Enregistrer » → zéro POST (rien n’a été annoncé)');
+
+        // 4. TransitionRefusee : un autre onglet a enregistré juste avant → aucun POST image-web.
+        await db.mutate({ puts: { recipes: [signet('rc_tr')] }, origin: 'device' });
+        // La transition d'« Enregistrer » est la SEULE qui écrit une version (`puts.recipe_versions`) ; son `patch` est une FONCTION (`cloture`, plan B
+        // rév. 2), jamais lue ici. L'autre onglet écrit `enregistre` juste avant ; la vraie transition refuse alors (TransitionRefusee). `courses`
+        // prouve que la course a bien été simulée (sans lui, un faux repo qui ne se déclenche jamais laisserait l'enregistrement réussir).
+        let courses = 0;
+        const repoCourse = { ...repo, transitionner: async (store, key, opts) => {
+          if (store === 'imports' && opts?.puts?.recipe_versions) { courses += 1; const l = await db.get('imports', key); await db.mutate({ puts: { imports: [{ ...l, status: 'enregistre' }] }, origin: 'device' }); }
+          return repo.transitionner(store, key, opts);
+        } };
+        root = await lireAvec('rc_tr', { image_url: IMG }, { repo: repoCourse });
+        ok(!!annonce(root), 'annonce affichée (rc_tr)');
+        n = postsImage().length;
+        bouton(root, 'Enregistrer').click();
+        await attendre(() => root.etatRouteWeb().status !== 'a_verifier', 'écran redessiné après le refus');
+        await PP.attendreRecuperation('rc_tr');
+        eq([courses, postsImage().length - n, (await db.get('recipes', 'rc_tr')).photo_source_url ?? null, navs.some((x) => x.startsWith('/recipes/rc_tr'))], [1, 0, null, false],
+          'TransitionRefusee à l’enregistrement (la course simulée UNE fois) → aucun POST image-web, rien d’écrit sur la fiche, aucune navigation');
+
+        // 5. « Ajouter sans remplacer » (R-F-2, B-24) : la transaction sans put recipes, PUIS un POST ; réussite → les trois champs ; échec → fiche intacte.
+        await db.mutate({ puts: { recipes: [signet('rc_aj', { availability: 'available', verification_state: 'verified', current_version_id: 'rv_rc_aj', original_title: 'Pâtes de Mamie' }),
+          signet('rc_aj2', { availability: 'available', verification_state: 'verified', current_version_id: 'rv_rc_aj2', original_title: 'Pâtes de Papi' })], recipe_versions: [humaine('rc_aj'), humaine('rc_aj2')] }, origin: 'device' });
+        root = await lireAvec('rc_aj', { image_url: IMG });
+        ok(!!annonce(root), 'annonce affichée (rc_aj : une version écrite à la main)');
+        const avantAj = await db.get('recipes', 'rc_aj');
+        choix.suivant.push('ajouter'); evenements.length = 0; espionner();
+        try { await enregistrer(root, 'rc_aj'); } finally { db.mutate = mutate; }
+        const aj = await db.get('recipes', 'rc_aj');
+        eq([evenements[0], evenements.indexOf('mutate:imports+recipe_versions') < evenements.indexOf('fetch:image-web'), evenements.filter((e) => e === 'fetch:image-web').length], ['mutate:imports+recipe_versions', true, 1],
+          '« Ajouter sans remplacer » : la transaction n’a AUCUN put recipes (imports en condition, recipe_versions : B-24 inchangé), PUIS un POST image-web');
+        eq([aj.current_version_id, aj.original_title, aj.photo_origin, aj.photo_source_url, /^[0-9a-f]{64}$/.test(aj.photo_sha256 ?? '')], [avantAj.current_version_id, 'Pâtes de Mamie', 'web', IMG, true],
+          '« Ajouter sans remplacer », réussite : la version courante et le titre intacts, les trois champs de la photo écrits ENSEMBLE');
+        root = await lireAvec('rc_aj2', { image_url: IMG });
+        const avantAj2 = await db.get('recipes', 'rc_aj2');
+        choix.suivant.push('ajouter'); images.push([502, { erreur: 'inaccessible' }]);
+        n = postsImage().length;
+        await enregistrer(root, 'rc_aj2');
+        const pAj2 = await enFiche('rc_aj2');
+        eq([postsImage().length - n, await db.get('recipes', 'rc_aj2'), pAj2.querySelector('[data-role="photo-web-etat"]')], [1, avantAj2, null],
+          '« Ajouter sans remplacer », échec : un POST, puis la fiche INTACTE (aucune clé changée) et aucune ligne « non récupérée » (aucun candidat écrit)');
+        pAj2.remove();
+
+        // 6. « Annuler » du dialogue (B-13) : rien d'écrit, rien ne part.
+        await db.mutate({ puts: { recipes: [signet('rc_an', { availability: 'available', verification_state: 'verified', current_version_id: 'rv_rc_an', original_title: 'Pâtes de Tata' })], recipe_versions: [humaine('rc_an')] }, origin: 'device' });
+        root = await lireAvec('rc_an', { image_url: IMG });
+        choix.suivant.push(null); choix.appels = 0; n = postsImage().length;
+        bouton(root, 'Enregistrer').click();
+        await attendre(() => choix.appels > 0 && !!bouton(root, 'Enregistrer') && !bouton(root, 'Enregistrer').disabled, 'dialogue fermé');
+        await PP.attendreRecuperation('rc_an');
+        eq([postsImage().length - n, (await ligneDe('rc_an')).status, PP.recuperationEnCours('rc_an')], [0, 'a_verifier', false], '« Annuler » du dialogue → zéro POST, l’import reste a_verifier');
+
+        // 7. Échec du rapatriement (I-F4) : l'import reste enregistre, la version et availability intactes, la fiche dit « non récupérée ».
+        await db.mutate({ puts: { recipes: [signet('rc_ec')] }, origin: 'device' });
+        root = await lireAvec('rc_ec', { image_url: IMG });
+        images.push([502, { erreur: 'inaccessible' }]); journal.length = 0; dits.length = 0;
+        await enregistrer(root, 'rc_ec');
+        const ec = await db.get('recipes', 'rc_ec');
+        eq([(await db.byIndex('imports', 'recipe_id', 'rc_ec'))[0].status, ec.availability, ec.verification_state, !!(await db.get('recipe_versions', ec.current_version_id)), ec.photo_sha256 ?? null, ec.photo_source_url, journal.some((l) => l.includes('photo_web.echec'))],
+          ['enregistre', 'available', 'to_verify', true, null, IMG, true], 'échec du rapatriement : import enregistre, version et availability intactes, photo_source_url gardé (rapatriement attendu), logError photo_web.echec');
+        const pEc = await enFiche('rc_ec');
+        eq([pEc.querySelector('[data-role="zone-photo-plat"]')?.textContent.includes('Photo du plat non récupérée.'), pEc.querySelector('[data-role="raison-photo-web"]'), dits], [true, null, ['Recette enregistrée']],
+          'échec du rapatriement : la zone de la fiche dit « Photo du plat non récupérée. », AUCUNE raison (départ automatique) ; le seul toast est celui de l’enregistrement (aucun toast de l’image)');
+        pEc.remove();
+
+        // 8. Relecture (§ 4.3 point 4) : même image → rien ; autre image → un POST et la photo remplacée ; photo choisie à la main → rien (B-10, P-12).
+        root = await lireAvec('rc_o', { image_url: IMG });
+        eq(annonce(root), null, 'relecture, même image_url → aucune annonce');
+        n = postsImage().length;
+        await enregistrer(root, 'rc_o');
+        eq(postsImage().length - n, 0, 'relecture, même image_url → aucun POST');
+        const shaAvant = (await db.get('recipes', 'rc_o')).photo_sha256;
+        root = await lireAvec('rc_o', { image_url: IMG2 });
+        ok(!!annonce(root), 'relecture, autre image_url → annonce');
+        images.push([200, IMAGE_B]); n = postsImage().length;
+        await enregistrer(root, 'rc_o');
+        const rel = await db.get('recipes', 'rc_o');
+        eq([postsImage().length - n, postsImage().at(-1).url, rel.photo_sha256 !== shaAvant, rel.photo_origin, rel.photo_source_url], [1, IMG2, true, 'web', IMG2], 'relecture, autre image_url → un POST et la photo remplacée, avec SA provenance');
+        const toile = new OffscreenCanvas(640, 480); const cx = toile.getContext('2d'); cx.fillStyle = '#36c'; cx.fillRect(0, 0, 640, 480);
+        const mienne = new File([await toile.convertToBlob({ type: 'image/jpeg', quality: 0.9 })], 'mienne.jpg', { type: 'image/jpeg' });
+        eq((await PP.poserPhotoPlat('rc_o', mienne, { repo, origin: 'image' })).issue, 'ok', 'photo choisie à la main sur la photo web');
+        const shaMienne = (await db.get('recipes', 'rc_o')).photo_sha256;
+        root = await lireAvec('rc_o', { image_url: IMG2 });
+        eq(annonce(root), null, 'B-10 : relecture de la même page après une photo choisie à la main → aucune annonce');
+        n = postsImage().length;
+        await enregistrer(root, 'rc_o');
+        const apresMain = await db.get('recipes', 'rc_o');
+        eq([postsImage().length - n, apresMain.photo_sha256, apresMain.photo_origin, apresMain.photo_source_url], [0, shaMienne, 'image', null], 'B-10 : zéro POST image-web, la photo de la personne intacte (I-F5)');
+
+        // 9. Filets : aucun réseau ; image_url n'est jamais rendue (D-F11, test de source sur import-web.js).
+        eq([reseau, appels.every((a) => a.outil === 'lecture-web' || a.outil === 'image-web')], [0, true], 'aucun appel réseau hors du fetch injecté ; seuls lecture-web et image-web');
+        eq(srcWeb.split('\n').filter((l) => l.includes('image_url') && /textContent|\bt\(|\bel\(/.test(l)), [], 'D-F11 : image_url n’entre dans aucune ligne d’import-web.js qui porte textContent, t( ou el(');
+      } finally {
+        db.mutate = mutate; console.error = vraiErreur; globalThis.fetch = vraiFetch; scene.remove(); PP.reinitialiserPhotoPlat(); V.reinitialiserVol(); W.reinitialiserLectureWeb();
+        (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob();
+      }
+    }));
   } finally { setUiLocale(localeAvant); }
 }
