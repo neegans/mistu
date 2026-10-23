@@ -1,0 +1,91 @@
+{
+  "project": "Mitsu",
+  "created_date": "2026-10-18",
+  "package_kind": "handoff_documents_and_visual_references",
+  "repository_included": false,
+  "full_repository_audit_included": false,
+  "audit_summary_included": true,
+  "functional_tests_executed": false,
+  "files": [
+    {
+      "path": "00_LIRE_EN_PREMIER.md",
+      "bytes": 3602,
+      "sha256": "acabeba5b26b3bf03242854de1f7a3294bd60d99dcc3d417ed02daab6aecafc8"
+    },
+    {
+      "path": "01_PROMPT_CLAUDE_CODE.md",
+      "bytes": 9521,
+      "sha256": "a1c8893d34be174a17be4a12683f3da4f14d5da6d6fbad23f3cdd1d299a40a21"
+    },
+    {
+      "path": "02_CAHIER_DES_BESOINS.md",
+      "bytes": 8952,
+      "sha256": "c39359f7ac3d9f982458280953173818009ac317571c207bd19c83e3fea341b2"
+    },
+    {
+      "path": "03_PARCOURS_ET_DIRECTION_VISUELLE.md",
+      "bytes": 7058,
+      "sha256": "8939b085bb93a17a275854d98b87e3907024145f9c743b0140f467661ea7248d"
+    },
+    {
+      "path": "04_PLAN_TECHNIQUE_ET_VALIDATION.md",
+      "bytes": 9029,
+      "sha256": "d2277cbf4b5537734eee7f0004f0264a5b55cb8b0360c0122ea031661dbe0245"
+    },
+    {
+      "path": "05_AUDIT_TRANSMIS.md",
+      "bytes": 5922,
+      "sha256": "7e04ef63764da0e105486e4acf74b961ab22ee06ba50097692c24bb6de5855ec"
+    },
+    {
+      "path": "maquettes/mobile/01_bibliotheque.png",
+      "bytes": 1837205,
+      "sha256": "bdd094f678e7e69785501301fd1323f82e2dc7157bdec77ca2b4ff5d6b6975e5",
+      "width_px": 853,
+      "height_px": 1844
+    },
+    {
+      "path": "maquettes/mobile/02_import_livre.png",
+      "bytes": 1557295,
+      "sha256": "52b4ef855ab22d9854d1671e7fccd3ce93e39c65b7d47b1a68bcbd6ba0b46408",
+      "width_px": 853,
+      "height_px": 1844
+    },
+    {
+      "path": "maquettes/mobile/03_recette_enregistree.png",
+      "bytes": 1778108,
+      "sha256": "a4cfa15de7c09e8b34eb0a5515997a00fd2466ee4cf46646612c65558258b190",
+      "width_px": 853,
+      "height_px": 1844
+    },
+    {
+      "path": "maquettes/mobile/04_import_recette_ciblee.png",
+      "bytes": 1606117,
+      "sha256": "25c0d6f4e82919bf5043830860a069c53658efba193101a22274c1490ce3f213",
+      "width_px": 853,
+      "height_px": 1844
+    },
+    {
+      "path": "maquettes/web/01_bibliotheque.png",
+      "bytes": 2197797,
+      "sha256": "4e76edf01ea0c868c346d1acc02435b8192bb745e595c30ec6327717c8bad33b",
+      "width_px": 1487,
+      "height_px": 1058
+    },
+    {
+      "path": "maquettes/web/02_import_livre.png",
+      "bytes": 1537294,
+      "sha256": "a2e13563a5be9d5b163b72ca05e11f9218e1275015753999716d06fbb54322ad",
+      "width_px": 1487,
+      "height_px": 1058
+    },
+    {
+      "path": "maquettes/web/03_recette_enregistree.png",
+      "bytes": 2003397,
+      "sha256": "a845fb7eb444a7345f641317b48d31f355d74e46f5a8680b6072cbc5837551f9",
+      "width_px": 1487,
+      "height_px": 1058
+    }
+  ],
+  "note": "Le manifeste ne contient pas sa propre empreinte. Les PNG sont des maquettes generees; les fichiers MD precisent les limites et la provenance."
+}
