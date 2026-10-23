@@ -207,6 +207,41 @@ export async function runSyncTests({ eq, ok }) {
     await repo.clearDevice({ signOut: async () => {} });
     eq([(await db.getAll('recipes')).length, (await db.getAll('outbox')).length, (await db.getAll('sync_state')).map((s) => s.key)], [0, 0, ['device_id']], 'clearDevice : tout vidé sauf device_id');
   });
+  // --- repo.removeBatch (lot E, R-E-8, R-E-12, R-E-15) : plusieurs magasins en UNE transaction ; la capture garde son filtre (l'historique de consultation
+  // ne part au serveur que si « Synchroniser mon historique » est activé — coupé ici, comme le défaut de l'app et de withRepo).
+  await withRepo(async (repo, db) => {
+    const { on } = await import('../src/core/bus.js');
+    const capture = db.onMutate;
+    const appels = [];
+    db.onMutate = (m) => { appels.push({ deletes: Object.fromEntries(Object.entries(m.deletes || {}).map(([s, k]) => [s, [...k]])), payloads: Object.fromEntries(Object.entries(m.payloads || {}).map(([s, b]) => [s, Object.keys(b)])), origin: m.origin }); return capture ? capture(m) : null; };
+    const changes = [];
+    const off = on('change', (e) => changes.push(e?.store));
+    try {
+      await repo.saveBatch({ books: [{ id: 'b_rb', title: 'Livre' }], book_editions: [{ id: 'e_rb', book_id: 'b_rb' }] });
+      const avant = (await db.getAll('outbox')).length;
+      appels.length = 0; changes.length = 0;
+      await repo.removeBatch({ book_editions: ['e_rb'], books: ['b_rb'] });
+      eq([appels.length, appels[0]?.deletes, appels[0]?.payloads, appels[0]?.origin], [1, { book_editions: ['e_rb'], books: ['b_rb'] }, { book_editions: ['e_rb'], books: ['b_rb'] }, 'local'], 'removeBatch : UN db.mutate porte les deux suppressions et leurs copies, origine local (mutant : un db.mutate par magasin → rouge)');
+      eq([await db.get('books', 'b_rb'), await db.get('book_editions', 'e_rb')], [undefined, undefined], 'removeBatch : les deux fiches sont parties');
+      eq((await db.getAll('outbox')).slice(avant).map((o) => [o.store, o.id, o.op, o.payload?.id ?? null]), [['book_editions', 'e_rb', 'delete', 'e_rb'], ['books', 'b_rb', 'delete', 'b_rb']], 'removeBatch : DEUX entrées d’outbox delete, une par magasin, chacune avec sa copie (mutants : un magasin perdu ; payloads omis ; origine device → rouge)');
+      eq(changes.sort(), ['book_editions', 'books'], 'removeBatch : un change par magasin');
+      appels.length = 0;
+      await repo.removeBatch({}); await repo.removeBatch({ books: [] });
+      eq(appels.length, 0, 'removeBatch : rien à supprimer → aucun db.mutate');
+      await repo.removeBatch({ books: ['b_absent'] });
+      const derniere = (await db.getAll('outbox')).at(-1);
+      eq([derniere.store, derniere.id, derniere.op, derniere.payload], ['books', 'b_absent', 'delete', null], 'removeBatch : une clé absente ne lève pas, payload nul (comme removeMany)');
+      // Contre-épreuve (R-E-15) : le réglage d'historique est COUPÉ (withRepo : isActivitySynced → false).
+      await repo.recordActivity('e_rb2', 'open_book');
+      const [act] = await db.getAll('library_activity');
+      const n0 = (await db.getAll('outbox')).length;
+      ok(!!act && !(await db.getAll('outbox')).some((o) => o.store === 'library_activity'), 'contre-épreuve, garde du garde : la ligne d’historique est en base, et sa put n’a laissé AUCUNE entrée d’outbox (la capture est bien coupée)');
+      appels.length = 0;
+      await repo.removeBatch({ library_activity: [act.id] });
+      eq([appels.length, appels[0]?.deletes, await db.get('library_activity', act.id), (await db.getAll('outbox')).length, (await db.getAll('outbox')).some((o) => o.store === 'library_activity')], [1, { library_activity: [act.id] }, undefined, n0, false],
+        'contre-épreuve : la suppression de l’historique est faite EN BASE, et rien n’entre en file (mutant : capture forcée de library_activity → rouge)');
+    } finally { db.onMutate = capture; off(); }
+  });
   // R20 : l'identité d'avant le lot est reprise UNE fois depuis l'ancienne clé, qui est ensuite retirée.
   localStorage.setItem('cuisineos.device', 'dev-ancien');
   await withRepo(async (repo) => {

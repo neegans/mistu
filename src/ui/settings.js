@@ -115,13 +115,13 @@ export async function renderSettings(params, query, ctx, { fetch, createArchive 
       button.textContent = t('Préparation de l’archive…');
       let generated = false;
       try {
-        const { blob, manifest, bytes, warnings, missingFiles = 0, copies } = await createArchive(repo.db, { deviceName: s.device_name });
+        const { blob, manifest, bytes, warnings, missingFiles = 0, copies, tracesOrphelines = 0 } = await createArchive(repo.db, { deviceName: s.device_name });
         telechargerArchive(blob, 'cuisine-os-' + manifest.created_at.slice(0, 19).replace(/[:T]/g, '-') + '.zip');
         generated = true;
         // § 4.6 : le bilan de création, une phrase par cas (pages manquantes, copies du serveur, octets inconnus) ; rien à dire, rien de dit. Posé
         // juste après le téléchargement (ronde 1, #16) : un suivi qui échoue plus bas ne le fait pas taire ; l'ancien bilan part d'abord.
         backupStatus.querySelector('[data-role="bilan-archive"]')?.remove();
-        const bilanArchive = messagesArchive({ missingFiles, copies });
+        const bilanArchive = messagesArchive({ missingFiles, copies, tracesOrphelines }); // lot E (R-E-11) : les traces écartées, dans le même bilan
         if (bilanArchive.length) backupStatus.append(el('div', { class: 'status warn', dataset: { role: 'bilan-archive' } }, ...bilanArchive.map((p) => el('p', null, p))));
         // Une archive existe pour cette session : « Changer de compte sur cet appareil » l’exige.
         try { sessionStorage.setItem(ARCHIVE_FLAG, manifest.created_at); } catch { /* stockage indisponible */ }
@@ -350,13 +350,22 @@ export const messageRenvoi = (n) => {
   return n === 1 ? t('1 fiche sera renvoyée au serveur.') : t('{n} fiches seront renvoyées au serveur.', { n });
 };
 
-// Bilan de création (§ 4.6) : une phrase par cas, jamais un pluriel calculé sur une chaîne traduite. Rien à dire → rien de dit.
-export function messagesArchive({ missingFiles = 0, copies = { serveur: 0, inconnues: 0 } } = {}) {
+// R-E-11 (lot E, § 3.7) : le bilan d'une sauvegarde qui a écarté des traces de consultation orphelines. null hors entier ≥ 1 (rien à dire).
+export function texteTracesOrphelines(n) {
+  if (!Number.isInteger(n) || n < 1) return null;
+  return n === 1 ? t('{n} trace de consultation orpheline ignorée', { n }) : t('{n} traces de consultation orphelines ignorées', { n });
+}
+
+// Bilan de création (§ 4.6) : une phrase par cas, jamais un pluriel calculé sur une chaîne traduite. Rien à dire → rien de dit. Lot E (R-E-11) : les
+// traces de consultation écartées de l'archive sont un cas de plus (texteTracesOrphelines), dans le même bilan.
+export function messagesArchive({ missingFiles = 0, copies = { serveur: 0, inconnues: 0 }, tracesOrphelines = 0 } = {}) {
   const sortie = [];
   if (missingFiles === 1) sortie.push(t('1 page n’est pas encore téléchargée sur cet appareil et n’est pas dans l’archive.'));
   else if (missingFiles > 1) sortie.push(t('{n} pages ne sont pas encore téléchargées sur cet appareil et ne sont pas dans l’archive.', { n: missingFiles }));
   if (copies?.serveur > 0) sortie.push(t('{n} fichier(s) archivé(s) sont des copies du serveur, pas l’original.', { n: copies.serveur }));
   if (copies?.inconnues > 0) sortie.push(t('{n} fichier(s) archivé(s) ont des octets qui ne sont ni l’original ni la copie du serveur connue : archivés tels quels.', { n: copies.inconnues }));
+  const traces = texteTracesOrphelines(tracesOrphelines);
+  if (traces) sortie.push(traces);
   return sortie;
 }
 

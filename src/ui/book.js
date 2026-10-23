@@ -16,6 +16,8 @@ import { tagsDe } from '../domain/search.js';
 import { sectionLisible } from '../domain/llm.js';
 import { seanceDUnImportCible, importOuvert } from '../domain/import-cible.js';
 import { ACCEPT_PHOTOS, ACCEPT_FICHIERS } from './add.js';
+import { STATUTS_IMPORT, IMPORTS_TERMINES } from '../model/schema.js';
+import { TransitionRefusee } from '../core/db.js';
 
 // C8 : la plus RÉCENTE d'abord. La fiche ne rappelle qu'UNE séance et « Reprendre » doit mener à celle qu'on vient
 // de laisser, pas à la plus vieille restée ouverte (l'ordre de la base est celui des clés, pas du temps).
@@ -28,6 +30,32 @@ export const seancesOuvertes = (ctx, editionId) => (ctx.scan_sessions || [])
 // « + Pages d'index » / « + Recette » : un <details> dont le résumé est le bouton, les sources dessous (spec § 9).
 function menuSource(libelle, ...boutons) {
   return el('details', { class: 'menu-source' }, el('summary', { class: 'btn primary' }, libelle), el('div', { class: 'row', style: { marginTop: '.5rem' } }, ...boutons));
+}
+
+// D-E23 (R-E-2, R-E-8, R-E-12, R-E-15) : supprimer un livre vide sans laisser d'orphelin. Temps 1 — les lignes du journal qui pointent l'édition en sont
+// DÉTACHÉES avant toute suppression : une ligne terminale reçoit le seul patch edition_id null (statut inchangé) ; une ligne ouverte passe ignore AVEC
+// edition_id null, reponse_brute null et finished_at, en UNE écriture ; une ligne en_cours fait REFUSER la suppression avant toute écriture (TRANSITIONS :
+// en_cours → ignore n'existe pas). Temps 2 — UNE transaction (repo.removeBatch) retire les traces de consultation de l'édition (library_activity, sa
+// préférence de Redécouvrir), listées AVANT elle, puis l'édition et, sauf garderLivre, le livre. La capture garde son filtre : l'historique ne part au
+// serveur que sous « Synchroniser mon historique de consultation » (R27). Rend { ok: true } ou { refus: 'lecture_en_cours' }.
+export async function supprimerLivreVide({ book, edition, garderLivre = false }, { repo: r = repo } = {}) {
+  const repo = r; // le dépôt injecté sous le nom littéral que le test statique du lot A exige (contrainte globale) ; le défaut ci-dessus lit le module
+  const lignes = (await repo.byIndex('imports', 'edition_id', edition.id)).filter(Boolean);
+  if (lignes.some((l) => l.status === 'en_cours')) return { refus: 'lecture_en_cours' };
+  const attendus = STATUTS_IMPORT.filter((s) => s !== 'en_cours');
+  for (const l of lignes) {
+    const patch = (c) => (IMPORTS_TERMINES.includes(c.status) ? { edition_id: null } : { status: 'ignore', edition_id: null, reponse_brute: null, finished_at: repo.nowIso() });
+    try { await repo.transitionner('imports', l.id, { attendus, patch }); }
+    catch (e) {
+      if (!(e instanceof TransitionRefusee)) throw e;
+      if (e.statut === 'en_cours') return { refus: 'lecture_en_cours' }; // passée en vol entre la lecture et la transition (inatteignable aujourd'hui, § 11)
+      // disparue entre-temps (statut indéfini) : muette
+    }
+  }
+  const activites = (await repo.byIndex('library_activity', 'edition_id', edition.id)).filter((a) => a && typeof a.id === 'string').map((a) => a.id);
+  const preference = await repo.get('rediscovery_prefs', edition.id);
+  await repo.removeBatch({ library_activity: activites, ...(preference ? { rediscovery_prefs: [edition.id] } : {}), book_editions: [edition.id], ...(garderLivre ? {} : { books: [book.id] }) });
+  return { ok: true };
 }
 
 export async function renderBook(params, query, ctx) {
@@ -262,8 +290,9 @@ export async function renderBook(params, query, ctx) {
       pref?.hidden ? el('button', { class: 'btn', onClick: async () => { await repo.save('rediscovery_prefs', { ...pref, hidden: false }); toast(t('Livre de nouveau proposé dans Redécouvrir')); refresh(); } }, t('Réafficher dans Redécouvrir')) : null,
       !recipes.length && !docs.length ? el('button', { class: 'btn danger', onClick: async () => {
         if (!(await confirmDialog(t('Supprimer ce livre ? Il n’a aucune recette ni page.'), { danger: true, okLabel: t('Supprimer') }))) return;
-        await repo.remove('book_editions', edition.id);
-        if (!ctx.book_editions.some((e) => e.book_id === book.id && e.id !== edition.id)) await repo.remove('books', book.id);
+        // Lot E (D-E23) : sans orphelin — les lignes du journal détachées, l'historique et la préférence retirés avec l'édition, en une transaction.
+        const res = await supprimerLivreVide({ book, edition, garderLivre: ctx.book_editions.some((e) => e.book_id === book.id && e.id !== edition.id) }, { repo });
+        if (res?.refus === 'lecture_en_cours') { toast(t('Une lecture est déjà en cours : annule-la d’abord.')); return; }
         navigate('/library');
       } }, t('Supprimer')) : el('small', { class: 'muted' }, t('Un livre avec des recettes ou des pages ne se supprime pas d’un geste.')))));
   return root;

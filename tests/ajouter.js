@@ -16,10 +16,14 @@ export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', 
 // tâche 6 : « {n} import(s) à reprendre » (book.js), les textes du journal du panneau d'index (import.js) et de l'éditeur (recipe-edit.js) ; la section
 // « Imports » vit dans add.js, déjà scanné en entier (MODULES_NEUFS). Tâche 6, ronde 1 : la plomberie du journal (et ses phrases de refus) a rejoint
 // src/ui/import-cible.js, scanné en entier ; l'éditeur dit en plus le vol tenu et ce que la lecture a dit d'incomplet (chaînes déjà traduites).
+// Lot E, tâche 3a : le refus du geste « Supprimer » d’un livre (book.js) et le bilan des traces de consultation écartées de la sauvegarde
+// (settings.js, AJOUTÉES à la liste du lot G : une seconde clé homonyme la remplacerait).
 export const CHAINES_NEUVES_AILLEURS = {
   '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', '+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer', '{n} import à reprendre', '{n} imports à reprendre',
     // Lot G, tâche 6 : la couverture par état (§ 4.2).
-    'La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.', 'La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.', 'Fichier illisible reçu du serveur.', 'Le téléchargement n’a pas abouti.'],
+    'La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.', 'La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.', 'Fichier illisible reçu du serveur.', 'Le téléchargement n’a pas abouti.',
+    // Lot E, tâche 3a : le refus du geste « Supprimer » quand une lecture tient une ligne du journal de l’édition (D-E23).
+    'Une lecture est déjà en cours : annule-la d’abord.'],
   '../src/ui/import.js': ['Les références n’ont pas pu être créées. Réessaie.',
     // Lot G, tâche 6 : la phrase de séance (§ 4.3, F-21).
     'Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages', '{n}/{m} photos de cette séance envoyées au serveur',
@@ -82,7 +86,9 @@ export const CHAINES_NEUVES_AILLEURS = {
     'Fichier illisible sur cet appareil.',
     // Lot G, ronde 2 de la vague finale (R-G-28 bis) : les deux phrases de l'effacement (confirmation et section « Données », avec un compte).
     'Effacer les données de cet appareil ? Les photos et documents pas encore envoyés seront perdus ; une photo envoyée en qualité réduite ne garde que sa copie réduite. Fais d’abord une sauvegarde.',
-    'Cet appareil sera déconnecté ; ta bibliothèque reste sur le serveur, sauf les photos et documents pas encore envoyés (une photo envoyée en qualité réduite n’y garde que sa copie réduite).'],
+    'Cet appareil sera déconnecté ; ta bibliothèque reste sur le serveur, sauf les photos et documents pas encore envoyés (une photo envoyée en qualité réduite n’y garde que sa copie réduite).',
+    // Lot E, tâche 3a : le bilan de la sauvegarde, les traces de consultation écartées de l’archive (R-E-11).
+    '{n} trace de consultation orpheline ignorée', '{n} traces de consultation orphelines ignorées'],
 };
 
 export async function runAjouterTests({ eq, ok }) {

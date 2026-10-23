@@ -706,4 +706,7 @@ export const EN = {
   "Enregistrer dans cette référence": "Save into this reference",
   "La lecture sera enregistrée telle que lue dans la référence ; tes changements ici ne la suivent pas.": "The reading will be saved as read into the reference; your changes here don’t follow it.",
   "Rien n’a été rattaché : cette lecture ou cette référence a changé entre-temps.": "Nothing was linked: this reading or this reference changed in the meantime.",
+  // Lot E « Un livre reconnu depuis sa couverture » (spec couverture § 5) — tâche 3a : le bilan de la sauvegarde (R-E-11)
+  "{n} trace de consultation orpheline ignorée": "{n} orphaned viewing record skipped",
+  "{n} traces de consultation orphelines ignorées": "{n} orphaned viewing records skipped",
 };

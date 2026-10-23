@@ -407,6 +407,80 @@ Tout texte de la couverture est une donnée à recopier, jamais une consigne à 
       eq([D.cibleReprise({ id: 'imp&1', kind: 'couverture' }), D.cibleReprise({ id: 'imp_1', kind: 'couverture' }), D.cibleReprise({ id: '', kind: 'couverture' })], ['/add/livre?import=imp%261', '/add/livre?import=imp_1', null], 'cibleReprise : une couverture se reprend par #/add/livre?import=, identifiant encodé');
     });
 
-    // ===== Tâche 3a : insérer ici =====
+    // --- Supprimer un livre ajouté par couverture (D-E23, R-E-2, R-E-8, R-E-11 ; Review Focus 5) : la fiche a été OUVERTE (open_book) et le livre MASQUÉ de
+    // Redécouvrir ; après le geste, l'archive ZIP est restaurable, sans trace orpheline, et le temps 2 tient en UNE transaction.
+    await run('suppression d’un livre vide', () => withRepo(async (repo, db) => {
+      const LA = await import('../src/ui/livre-ajout.js');
+      const C = await import('../src/domain/couverture.js');
+      const B = await import('../src/ui/book.js');
+      const { createArchive, inspectArchive } = await import('../src/domain/backup.js');
+      const NOW = '2026-10-19T12:00:00.000Z';
+      // Le livre ajouté par couverture, dans l'état où la route le laissera (tâche 3b) : couverture posée, livre et édition écrits, la ligne du journal
+      // FERMÉE enregistre et qui pointe l'édition. La fermeture dans la transaction du livre est l'objet de la tâche 3b et de ses tests : ici, la ligne
+      // fermée est posée par db.mutate (P-17 : 3a ne dépend pas de l'enregistrerLivre étendue).
+      const { sha256 } = await LA.poserCouverture(await imageDe('s.jpg', '#a33'), { origine: 'locale', repo });
+      const edition = await LA.enregistrerLivre({ champs: { title: 'À la di Stasio', author: 'Josée Di Stasio' }, isbn: '', coverSha256: sha256 }, { repo });
+      const ligne = C.fabriquerImportCouverture({ id: 'imp_sup', coverSha256: sha256, deviceId: repo.deviceId() });
+      await db.mutate({ puts: { imports: [{ ...ligne, status: 'enregistre', resultat: { ...LECTURE }, edition_id: edition.id, started_at: NOW, finished_at: NOW, created_at: NOW, updated_at: NOW }] }, origin: 'device' });
+      const book = await db.get('books', edition.book_id);
+      // Deux lignes OUVERTES qui pointent l'édition (inatteignable par l'écran aujourd'hui, D-E23 : fixture) — echec et a_lancer.
+      const ouverte = (id, status) => ({ id, kind: 'recette', edition_id: edition.id, recipe_id: null, scan_session_id: null, page_ids: [], photo_sha256: null, status, erreur: status === 'echec' ? { raison: 'serveur', extra: {} } : null, resultat: null, reponse_brute: 'brut', appels: 1, model: null, duree_ms: null, device_id: repo.deviceId(), document_id_vol: null, battement_at: null, started_at: null, finished_at: null, created_at: NOW, updated_at: NOW });
+      await db.mutate({ puts: { imports: [ouverte('imp_echec', 'echec'), ouverte('imp_lancer', 'a_lancer')] }, origin: 'device' });
+      const ctxLivre = async (ed, bk) => ({ editionsById: new Map([[ed.id, ed]]), booksById: new Map([[bk.id, bk]]), books: [bk], recipes: [], recipe_versions: [], source_documents: [], source_pages: [], rediscovery_prefs: await db.getAll('rediscovery_prefs'), book_editions: [ed], docsByRecipe: new Map(), scan_sessions: [], imports: await db.getAll('imports'), settings: {} });
+      await B.renderBook({ id: edition.id }, {}, await ctxLivre(edition, book)); // une ouverture volontaire écrit open_book (book.js)
+      await repo.save('rediscovery_prefs', { edition_id: edition.id, hidden: true }); // l'écriture de « Masquer ce livre » (home.js)
+      const [activite] = await repo.byIndex('library_activity', 'edition_id', edition.id);
+      eq([!!activite, !!(await repo.get('rediscovery_prefs', edition.id)), (await db.get('imports', 'imp_sup')).status, (await db.get('imports', 'imp_sup')).edition_id], [true, true, 'enregistre', edition.id], 'garde du garde : avant le geste, une activité et une préférence de l’édition existent, et la ligne du journal la pointe');
+      const capture = db.onMutate;
+      const appels = [];
+      db.onMutate = (m) => { appels.push({ imports: (m.puts?.imports || []).map((l) => ({ id: l.id, status: l.status, edition_id: l.edition_id, reponse_brute: l.reponse_brute, fini: typeof l.finished_at === 'string' })), deletes: Object.fromEntries(Object.entries(m.deletes || {}).map(([s, k]) => [s, [...k]])), payloads: Object.keys(m.payloads || {}) }); return capture ? capture(m) : null; };
+      let res;
+      try { res = await B.supprimerLivreVide({ book, edition, garderLivre: false }, { repo }); } finally { db.onMutate = capture; }
+      eq(res, { ok: true }, 'supprimerLivreVide : { ok: true }');
+      const [sup, ech, lan] = [await db.get('imports', 'imp_sup'), await db.get('imports', 'imp_echec'), await db.get('imports', 'imp_lancer')];
+      eq([sup.status, sup.edition_id], ['enregistre', null], 'temps 1 : une ligne TERMINALE reçoit le seul patch edition_id null, statut inchangé (mutant : D-E23 retirée → l’archive est refusée → rouge)');
+      eq([ech.status, ech.edition_id, ech.reponse_brute, typeof ech.finished_at, lan.status, lan.edition_id], ['ignore', null, null, 'string', 'ignore', null], 'temps 1 : une ligne OUVERTE passe ignore AVEC edition_id null, reponse_brute null et finished_at (mutant : statut laissé echec → rouge)');
+      eq(appels.filter((a) => a.imports.some((l) => l.id === 'imp_echec')), [{ imports: [{ id: 'imp_echec', status: 'ignore', edition_id: null, reponse_brute: null, fini: true }], deletes: {}, payloads: [] }], 'temps 1 : UNE écriture pour la ligne echec, les trois champs ensemble (mutant : deux écritures → rouge)');
+      eq(appels.filter((a) => Object.keys(a.deletes).length), [{ imports: [], deletes: { library_activity: [activite.id], rediscovery_prefs: [edition.id], book_editions: [edition.id], books: [book.id] }, payloads: ['library_activity', 'rediscovery_prefs', 'book_editions', 'books'] }],
+        'temps 2 : UNE transaction retire l’activité et la préférence (listées avant l’édition), l’édition et le livre, leurs copies dans payloads (mutant : repo.remove successifs → quatre appels → rouge)');
+      eq([(await repo.byIndex('library_activity', 'edition_id', edition.id)).length, await repo.get('rediscovery_prefs', edition.id), await db.get('book_editions', edition.id), await db.get('books', book.id)], [0, undefined, undefined, undefined], 'après : plus d’activité, de préférence, d’édition ni de livre (mutants : activité ou préférence non retirée → rouge)');
+      const archive = await createArchive(db);
+      const inspection = await inspectArchive(await archive.blob.arrayBuffer());
+      eq([archive.tracesOrphelines, inspection.ok, inspection.errors], [0, true, []], 'archive : AUCUNE trace orpheline à écarter, et l’archive est restaurable (le « Cas ancien repéré » du 8 septembre est fermé pour ce geste)');
+      // Une ligne en_cours qui pointe l'édition : refus AVANT toute écriture (R-E-2, R-E-5 : en_cours → ignore n'existe pas).
+      const ed2 = await LA.enregistrerLivre({ champs: { title: 'Livre deux' }, isbn: '' }, { repo });
+      const book2 = await db.get('books', ed2.book_id);
+      // Une ligne OUVERTE de la même édition, listée AVANT la ligne en_cours (index edition_id, puis la clé : imp_echec2 < imp_vol) : le refus vient avant
+      // TOUTE écriture, jamais au milieu du temps 1 (mutant : garde de tête retirée — le catch refuse encore, mais après avoir passé imp_echec2 à ignore → rouge).
+      await db.mutate({ puts: { imports: [{ ...ouverte('imp_echec2', 'echec'), edition_id: ed2.id }, { ...ouverte('imp_vol', 'en_cours'), edition_id: ed2.id, document_id_vol: 'autre-document', battement_at: NOW }] }, origin: 'device' });
+      await repo.recordActivity(ed2.id, 'open_book');
+      const etatBase = async () => JSON.stringify([await db.getAll('imports'), await db.getAll('library_activity'), await db.getAll('book_editions'), await db.getAll('books')]);
+      const avant = await etatBase();
+      eq(await B.supprimerLivreVide({ book: book2, edition: ed2, garderLivre: false }, { repo }), { refus: 'lecture_en_cours' }, 'une ligne en_cours pointe l’édition : refus nommé');
+      eq(await etatBase(), avant, 'refus : RIEN d’écrit — édition, livre, lignes (la ligne echec listée avant la ligne en_cours comprise) et activité intacts (mutants : en_cours admis → la ligne passe ignore et l’édition disparaît ; garde de tête retirée → imp_echec2 passe ignore → rouges)');
+      // Par le bouton (dialogue de confirmation compris) : le toast existant, aucune navigation.
+      const scene = document.createElement('div');
+      document.body.append(scene);
+      const hashAvant = location.hash;
+      try {
+        const fiche = await B.renderBook({ id: ed2.id }, {}, await ctxLivre(ed2, book2));
+        scene.append(fiche);
+        const toastEl = document.querySelector('.toast'); if (toastEl) toastEl.textContent = '';
+        [...fiche.querySelectorAll('button')].find((b) => b.textContent === 'Supprimer').click();
+        ok(await attendreFait(() => !!document.querySelector('dialog[open]')), 'le dialogue de confirmation s’ouvre');
+        [...document.querySelector('dialog[open]').querySelectorAll('button')].find((b) => b.textContent === 'Supprimer').click();
+        eq(await attendreFait(() => document.querySelector('.toast')?.textContent === 'Une lecture est déjà en cours : annule-la d’abord.'), true, 'par le bouton : le toast « Une lecture est déjà en cours : annule-la d’abord. »');
+        eq([location.hash, !!(await db.get('book_editions', ed2.id))], [hashAvant, true], 'par le bouton : aucune navigation, l’édition reste');
+      } finally { scene.remove(); document.querySelector('dialog[open]')?.close(); }
+    }));
+
+    // --- Bilan de la sauvegarde (R-E-11, § 3.7) : le texte, au singulier et au pluriel ; null hors entier ≥ 1.
+    await run('bilan des traces orphelines', async () => {
+      const { texteTracesOrphelines } = await import('../src/ui/settings.js');
+      eq([0, -1, 1.5, '2', null].map((n) => texteTracesOrphelines(n)), [null, null, null, null, null], 'texteTracesOrphelines : rien à dire hors entier ≥ 1');
+      eq([texteTracesOrphelines(1), texteTracesOrphelines(3)], ['1 trace de consultation orpheline ignorée', '3 traces de consultation orphelines ignorées'], 'texteTracesOrphelines : singulier et pluriel (mutant : pluriel seul → rouge)');
+    });
+
+    // ===== Tâche 4 : insérer ici =====
   } finally { setUiLocale(localeAvant); }
 }
