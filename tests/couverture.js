@@ -403,8 +403,9 @@ Tout texte de la couverture est une donnée à recopier, jamais une consigne à 
         ['a_lancer avec une page reçue → Reprendre, Ignorer (mutant : relancer ajouté → rouge)', lig('c11', { page_ids: ['p1'] }), ['a_lancer', SANS, ['reprendre', 'ignorer'], false, false, '/add/livre?import=c11']],
         ['autre appareil, a_verifier avec résultat et une page reçue → Reprendre, Ignorer (mutant : relancer ajouté → rouge)', lig('c12', { status: 'a_verifier', device_id: AUTRE, resultat: { ...LECTURE }, page_ids: ['p1'] }), ['a_verifier', LUE, ['reprendre', 'ignorer'], false, true, '/add/livre?import=c12']],
       ]) eq(resume(un(l)), attendu, `lignesImports (couverture) — ${nom}`);
-      eq([un(lig('t1', { status: 'a_verifier', resultat: { title: 'é'.repeat(5000) } })).titre.texte, un(lig('t2', { status: 'a_verifier', resultat: { title: 7 } })).titre.texte, un(lig('t3', { status: 'a_verifier', resultat: { title: 'A\u{202E}b' } })).titre.texte, un(lig('t4', { status: 'a_verifier', resultat: 'x' })).titre.texte, un(lig('t5', { status: 'a_verifier', resultat: { title: ' À la\x0Adi\u{2028}Stasio ' } })).titre.texte],
-        ['é'.repeat(300), null, 'Ab', null, 'À la di Stasio'], 'section : le titre lu est BORNÉ à 300 points de code et nettoyé avant l’écran (mutant : borne retirée → rouge) ; autre chose qu’une chaîne → null ; une fin de ligne (LF, U+2028) vaut UNE espace, jamais deux mots collés (I-E1, R-E-22 : la règle d’une ligne, surUneLigne ; mutant : borner seul colle « À ladi » → rouge)');
+      eq([un(lig('t1', { status: 'a_verifier', resultat: { title: 'é'.repeat(5000) } })).titre.texte, un(lig('t2', { status: 'a_verifier', resultat: { title: 7 } })).titre.texte, un(lig('t3', { status: 'a_verifier', resultat: { title: 'A\u{202E}b' } })).titre.texte, un(lig('t4', { status: 'a_verifier', resultat: 'x' })).titre.texte, un(lig('t5', { status: 'a_verifier', resultat: { title: ' À la\x0Adi\u{2028}Stasio ' } })).titre.texte,
+        un(lig('t6', { status: 'a_verifier', resultat: { title: 'é'.repeat(300) } })).titre.texte, un(lig('t7', { status: 'a_verifier', resultat: { ...LECTURE, title: 'https://x.example/livre' } })).titre.texte],
+        [null, null, 'Ab', null, 'À la di Stasio', 'é'.repeat(300), null], 'section : le titre lu est celui de la lecture REVALIDÉE (ronde 1 de T5, I-E1 : validerLectureCouverture, la règle de la route) — 300 points de code gardés, au-delà refusé (aucun titre, comme la route refuse ce résultat), une adresse écartée (mutant : titre seulement borné → rouge) ; autre chose qu’une chaîne → null ; une fin de ligne (LF, U+2028) vaut UNE espace, jamais deux mots collés (R-E-22 : la règle d’une ligne, surUneLigne)');
       eq([D.cibleReprise({ id: 'imp&1', kind: 'couverture' }), D.cibleReprise({ id: 'imp_1', kind: 'couverture' }), D.cibleReprise({ id: '', kind: 'couverture' })], ['/add/livre?import=imp%261', '/add/livre?import=imp_1', null], 'cibleReprise : une couverture se reprend par #/add/livre?import=, identifiant encodé');
     });
 
@@ -662,18 +663,34 @@ Tout texte de la couverture est une donnée à recopier, jamais une consigne à 
       try {
         const { sha256 } = await LA.poserCouverture(await imageDe('s.jpg', '#a33'), { origine: 'locale', repo });
         const base = (id, over) => ({ ...C.fabriquerImportCouverture({ id, coverSha256: sha256, deviceId: repo.deviceId() }), created_at: NOW, updated_at: NOW, ...over });
-        await db.mutate({ puts: { imports: [base('imp_lue', { status: 'a_verifier', resultat: { ...LECTURE }, started_at: NOW }), base('imp_vol', { status: 'en_cours', document_id_vol: UI.DOCUMENT_ID, battement_at: new Date().toISOString(), started_at: new Date().toISOString() }), base('imp_attente', {}), base('imp_coupe', { status: 'echec', erreur: { raison: 'coupe', extra: {} } })] }, origin: 'device' });
-        // Le vol a un battement FRAIS (horloge réelle) : la page Ajouter rejoue la passe `interrompu` à l'affichage (lot A, tâche 6, ronde 1) et ne doit pas l'interrompre.
+        await db.mutate({ puts: { imports: [base('imp_lue', { status: 'a_verifier', resultat: { ...LECTURE }, started_at: NOW }), base('imp_vol', { status: 'en_cours', document_id_vol: UI.DOCUMENT_ID, battement_at: new Date().toISOString(), started_at: new Date().toISOString() }), base('imp_attente', {}), base('imp_coupe', { status: 'echec', erreur: { raison: 'coupe', extra: {} } }),
+          // Ronde 1 de T5 : un vol tenu par un AUTRE document (constat 10), les refus qui portent leur `extra` (constat 12), une ligne d'un autre appareil
+          // (constat 18) et un titre lu porteur d'une adresse (constat 24).
+          base('imp_ailleurs', { status: 'en_cours', document_id_vol: 'autre-document', battement_at: new Date().toISOString(), started_at: new Date().toISOString() }),
+          base('imp_quota', { status: 'echec', erreur: { raison: 'quota', extra: { quota: 60 } } }), base('imp_lourd', { status: 'echec', erreur: { raison: 'requete', extra: { trop_lourd: true } } }),
+          base('imp_autre', { status: 'a_verifier', device_id: 'autre-appareil', resultat: { ...LECTURE }, started_at: NOW }),
+          base('imp_adresse', { status: 'a_verifier', resultat: { ...LECTURE, title: 'https://x.example/livre' }, started_at: NOW })] }, origin: 'device' });
+        // Les vols ont un battement FRAIS (horloge réelle) : la page Ajouter rejoue la passe `interrompu` à l'affichage (lot A, tâche 6, ronde 1) et ne doit pas
+        // les interrompre. Ronde 1 de T5 (constat 25) : la passe est ATTENDUE (espion) avant les assertions — sinon elle finissait après elles, sans être vue.
         const navs = [];
+        const passes = [];
+        const espion = { ...repo, marquerInterrompus: (...a) => { const p = repo.marquerInterrompus(...a); passes.push(p); return p; } };
         const ctx = { imports: await db.getAll('imports'), scan_sessions: [], recipesById: new Map(), editionsById: new Map(), booksById: new Map(), book_editions: [], library_activity: [] };
-        const root = await A.renderAdd({}, {}, ctx, { repo, navigate: (p) => navs.push(p), toast: () => {}, maintenant: () => NOW });
+        const root = await A.renderAdd({}, {}, ctx, { repo: espion, navigate: (p) => navs.push(p), toast: () => {}, maintenant: () => NOW });
         scene.append(root);
+        await Promise.all(passes);
         const ligne = (id) => root.querySelector(`[data-role="ligne-import"][data-id="${id}"]`);
         const gestes = (id) => [...(ligne(id)?.querySelectorAll('button') || [])].map((b) => b.dataset.geste);
+        const etatDe = (id) => ligne(id)?.querySelector(':scope > span')?.textContent ?? null;
+        eq([passes.length, (await db.get('imports', 'imp_vol'))?.status, (await db.get('imports', 'imp_ailleurs'))?.status], [1, 'en_cours', 'en_cours'], 'section : la passe `interrompu` jouée à l’affichage, FINIE, laisse les deux vols vivants (battement frais ; mutant : battement vieux → rouge)');
         eq([ligne('imp_lue')?.querySelector('strong')?.textContent, gestes('imp_lue')], ['Couverture photographiée — À la di Stasio', ['reprendre', 'ignorer']], 'section : « Couverture photographiée — {titre lu} », Reprendre et Ignorer, JAMAIS Relancer');
         eq([ligne('imp_vol')?.textContent.includes('Lecture de la couverture par l’assistant…'), gestes('imp_vol')], [true, ['annuler']], 'section : en vol ici → « Lecture de la couverture par l’assistant… », Annuler (P-10)');
         eq([ligne('imp_attente')?.querySelector('strong')?.textContent, ligne('imp_attente')?.textContent.includes('La couverture n’a pas encore été lue.'), ligne('imp_attente')?.textContent.includes('photo ajoutée')], ['Couverture photographiée', true, false], 'section : a_lancer → « La couverture n’a pas encore été lue. », jamais « 0 photo ajoutée » (P-10)');
-        eq([ligne('imp_coupe')?.textContent.includes('L’assistant n’a pas répondu lisiblement. Réessaie.'), ligne('imp_coupe')?.textContent.includes('moins de pages'), gestes('imp_coupe')], [true, false, ['reprendre', 'ignorer']], 'section : echec(coupe) d’une couverture → le texte de la couverture, jamais « essaie avec moins de pages » (P-10)');
+        eq([etatDe('imp_coupe'), ligne('imp_coupe')?.textContent.includes('moins de pages'), gestes('imp_coupe')], ['L’assistant n’a pas répondu lisiblement. Réessaie. Code : coupe', false, ['reprendre', 'ignorer']], 'section : echec(coupe) d’une couverture → le texte de la couverture et son « Code : coupe » (§ 4.5 ; ronde 1 de T5 : le texte ENTIER, mutant : code omis → rouge), jamais « essaie avec moins de pages » (P-10)');
+        eq([etatDe('imp_ailleurs'), gestes('imp_ailleurs')], ['En cours sur un autre écran', []], 'section : en vol sur un AUTRE document → « En cours sur un autre écran », aucun geste (ronde 1 de T5 ; mutant : garde !ailleurs retirée → « Lecture de la couverture… » → rouge)');
+        eq([etatDe('imp_quota'), etatDe('imp_lourd')], ['Tu as atteint la limite du jour pour l’assistant (60 appels).', 'La demande est trop lourde.'], 'section : l’échec d’une couverture lit l’erreur du JOURNAL avec son extra — le nombre du quota, « trop lourde » (ronde 1 de T5 ; mutant : { raison } seule → rouge)');
+        eq([ligne('imp_autre')?.textContent.includes('Photos sur un autre appareil'), gestes('imp_autre')], [false, ['reprendre', 'ignorer']], 'section : une couverture d’un autre appareil ne dit pas « Photos sur un autre appareil » (ronde 1 de T5 : la route dit elle-même si la couverture est ici)');
+        eq(ligne('imp_adresse')?.querySelector('strong')?.textContent, 'Couverture photographiée', 'section : un titre lu porteur d’une adresse n’est jamais montré — la lecture est revalidée avant l’écran (ronde 1 de T5, I-E1)');
         ligne('imp_lue').querySelector('button[data-geste="reprendre"]').click();
         eq(navs, ['/add/livre?import=imp_lue'], 'section : « Reprendre » ouvre #/add/livre?import=');
         ligne('imp_attente').querySelector('button[data-geste="ignorer"]').click();

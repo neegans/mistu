@@ -201,7 +201,8 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
     // Lot C (F-18) : au départ d'un INDEX — reprise, « Relancer » de la section Imports, ligne neuve —, la lecture remplacée est effacée.
     // Lot D, ronde 1 de T2 (comme R-B-8 pour le web) : un CLASSEMENT relancé ici — une ligne venue d'un autre appareil (état 5 du panneau) — devient celle
     // de CET appareil, dont le battement est ici ; sinon son appareil d'origine la jugeait à 90 s sur battement_at et l'interrompait pendant le vol.
-    const ici = kind === 'classement' && typeof repo.deviceId === 'function' ? repo.deviceId() : null;
+    // Lot E, ronde 1 de T5 (même règle) : une COUVERTURE d'un autre appareil relancée ici par sa route de reprise (#/add/livre?import=) aussi.
+    const ici = (kind === 'classement' || kind === 'couverture') && typeof repo.deviceId === 'function' ? repo.deviceId() : null;
     const enVol = { status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, ...(ici ? { device_id: ici } : {}), ...(kind === 'index' ? { resultat: null, reponse_brute: null, model: null, duree_ms: null, finished_at: null, ordre_applique_at: null } : {}) };
     // Vague finale (m2) : le départ vaut pour les pages LUES — une page retirée, ajoutée ou déplacée pendant la réduction (autre geste, autre onglet)
     // refuse le départ (rien ne part, le redessin montre la ligne) : jamais une page envoyée qui ne serait pas liée, ni une page liée jamais lue.

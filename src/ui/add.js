@@ -213,7 +213,8 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
       el('div', { class: 'row between' }, el('strong', null, titreLigne(l)), el('span', { class: 'muted' }, ageTexte(l.age))),
       rangDuLot(l),
       etat ? el('span', { class: l.etat === 'echec' ? 'status warn' : 'muted' }, etat) : null,
-      l.autreAppareil && l.kind !== 'seance' && l.kind !== 'web' ? el('small', { class: 'muted' }, t('Photos sur un autre appareil')) : null,
+      // Lot E, ronde 1 de T5 : ni une couverture (une seule photo, que L4 peut avoir amenée ici : sa route dit elle-même si elle est sur cet appareil).
+      l.autreAppareil && l.kind !== 'seance' && l.kind !== 'web' && l.kind !== 'couverture' ? el('small', { class: 'muted' }, t('Photos sur un autre appareil')) : null,
       l.gestes.length ? el('div', { class: 'row' }, ...l.gestes.map((g) => el('button', { type: 'button', class: g === 'reprendre' || g === 'ouvrir_seance' ? 'btn primary' : 'btn', dataset: { geste: g }, onClick: () => agir(g, l, brute) }, libelle(g, l)))) : null);
   }
   function dessiner({ imports = [], scan_sessions = [], recipesById = ctx?.recipesById } = {}) {

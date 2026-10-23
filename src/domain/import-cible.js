@@ -8,8 +8,8 @@ import { assertVocabulaire } from './vocabulaire.js';
 import { newId } from '../core/ids.js';
 import { lienSignet } from '../core/lien.js';
 import { IMPORTS_TERMINES, STATUTS_IMPORT } from '../model/schema.js';
-import { estTitreUneLigne, borner } from '../core/bornes.js';
-import { surUneLigne } from './llm.js'; // lot E, ronde 1 : LA règle d'une ligne (R-E-22, R-D-13) — le titre lu d'une couverture (section « Imports »)
+import { estTitreUneLigne } from '../core/bornes.js';
+import { validerLectureCouverture } from './llm.js'; // lot E, ronde 1 de T5 : le titre lu d'une couverture (section « Imports ») est celui de la lecture REVALIDÉE
 
 // --- Transitions du journal (spec § 3.1) : toutes par repo.transitionner (I-10) ; aucune autre. `en_cours → echec` couvre annule,
 // interrompu et incertain (la raison est dans `erreur`). `a_verifier → echec` (T4-R1, ratifiée) couvre UN seul cas : un `resultat` relu du
@@ -207,9 +207,10 @@ export const KINDS_IMPORT = Object.freeze(['recette', 'index', 'web', 'classemen
 // `couverture` (lot E, spec couverture § 3.6, P-2) : une couverture ne reçoit jamais de page — hors de cette liste, les murs de repo.ajouterPages et
 // repo.ouvrirImport la refusent.
 export const KINDS_PAGES = Object.freeze(['recette', 'index', 'classement']);
-// Le titre lu d'une couverture, ramené à UNE ligne (surUneLigne : une fin de ligne vaut une espace, jamais deux mots collés) puis BORNÉ avant l'écran (I-E1 :
-// une ligne reçue peut porter 16 000 points de code).
-const TITRE_COUVERTURE_MAX = 300;
+// Le titre lu d'une couverture : celui de la lecture du journal REVALIDÉE (I-E1 : une ligne reçue est une donnée hostile, elle peut porter 16 000 points
+// de code) par la règle de la route, validerLectureCouverture — une ligne (surUneLigne, R-E-22), 300 points de code au plus, aucune adresse. Une lecture
+// refusée n'a pas de titre : l'écran dit « Couverture photographiée » seul, comme la route refuse ce résultat (ronde 1 de T5).
+const titreCouverture = (resultat) => { try { return validerLectureCouverture(resultat).title; } catch { return null; } };
 export const IMPORTS_OUVERTS = Object.freeze(STATUTS_IMPORT.filter((s) => !IMPORTS_TERMINES.includes(s)));
 export const importOuvert = (i) => !!i && typeof i === 'object' && typeof i.id === 'string' && !!i.id && KINDS_IMPORT.includes(i.kind) && IMPORTS_OUVERTS.includes(i.status);
 
@@ -247,7 +248,7 @@ export function cibleReprise(ligne) {
 // livre: l'hôte RECALCULÉ de son adresse }.
 // Lot E (D-E14, R-E-13) : une ligne `couverture` — Reprendre (#/add/livre?import=) et Ignorer, jamais Relancer ; en vol : Annuler si CE document la
 // tient ; d'un autre appareil : Ignorer seul, sauf un a_verifier qui porte sa lecture (ronde 1 : LA règle du classement, une seule branche) ; son titre
-// est la lecture sur UNE ligne (surUneLigne, R-E-22) et BORNÉE (300 points de code, nettoyée).
+// est celui de la lecture revalidée (titreCouverture : une ligne, 300 points de code, aucune adresse ; sinon null).
 // Rend [{ id, kind, titre: { type: reference | index | regrouper | web | classement | couverture | seance, texte, livre }, etat, age: { n, unite }, raison, gestes, cible,
 // ailleurs, autreAppareil, referenceAbsente, pages }].
 // Lot D : une ligne `classement` (Reprendre → la séance ; jamais Relancer) ; chaque ligne porte `lot` (lotDe, revalidé) ; une ligne de lot sans référence garde le type `regrouper`.
@@ -288,7 +289,7 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     // n'a aucun signet à relire : « Réessayer » ne pourrait jamais aboutir (ronde 1 ; lancerLecture la refuse `inconnu`) — « Ignorer » seul reste.
     if (web ? !recetteId : !nbPages(i)) gestes = gestes.filter((g) => g !== 'relancer');
     return {
-      id: i.id, kind: i.kind, titre: couverture ? { type, texte: borner(surUneLigne(i.resultat?.title), TITRE_COUVERTURE_MAX) || null, livre: null } : { type, texte: recette ? chaine(recette.original_title) : null, livre: web ? (recette ? lienSignet(recette.source_url).hote : null) : livreDe(recette?.edition_id ?? i.edition_id) },
+      id: i.id, kind: i.kind, titre: couverture ? { type, texte: titreCouverture(i.resultat), livre: null } : { type, texte: recette ? chaine(recette.original_title) : null, livre: web ? (recette ? lienSignet(recette.source_url).hote : null) : livreDe(recette?.edition_id ?? i.edition_id) },
       etat: i.status, age: ageDepuis(i.updated_at, maintenant), raison: i.status === 'echec' ? chaine(i.erreur?.raison) : null,
       gestes, cible, ailleurs, autreAppareil, referenceAbsente, pages: nbPages(i), lot: lotDeRecette(i),
     };

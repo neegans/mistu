@@ -1911,9 +1911,11 @@ export async function runAjouterTests({ eq, ok }) {
     // que la session de l'assistant soit résolue (D-E8 : le bloc du pas 1 dit « Vérification… » jusque-là, sans bouton) — un FAIT, jamais un délai.
     // `tentativeMs` (50 par défaut : une panne d'Open Library se dit vite) passe à 5 000 dans un scénario qui tient une requête Open Library SUSPENDUE
     // (ol: null) : sinon la tentative est abandonnée avant que le test la résolve sur une machine chargée (faux rouge).
-    const monter = async (repo, { ctx = F.ctxDe(), ff = F.fauxFetch(), fetch = null, pick = async () => [], enLigne = () => true, query = {}, nav = null, attendreSession = true, tentativeMs = 50 } = {}) => {
+    // Ronde 1 de T5 : `veilleMs` (la veille d'une ligne en vol ailleurs, VF-15) et `delaiSessionMs` (la borne de sessionAssistant) passent tels quels ; non
+    // donnés, ils valent `undefined` et la route prend ses défauts.
+    const monter = async (repo, { ctx = F.ctxDe(), ff = F.fauxFetch(), fetch = null, pick = async () => [], enLigne = () => true, query = {}, nav = null, attendreSession = true, tentativeMs = 50, veilleMs, delaiSessionMs } = {}) => {
       const dits = [], navs = [];
-      const root = await LA.renderLivreAjoutRoute({}, query, ctx, { repo, fetch: fetch ?? ff.fetch, enLigne, attendre: async () => {}, tentativeMs, navigate: nav ?? ((p) => navs.push(p)), toast: (m) => dits.push(m), pickFiles: pick, maintenant: () => NOW });
+      const root = await LA.renderLivreAjoutRoute({}, query, ctx, { repo, fetch: fetch ?? ff.fetch, enLigne, attendre: async () => {}, tentativeMs, navigate: nav ?? ((p) => navs.push(p)), toast: (m) => dits.push(m), pickFiles: pick, maintenant: () => NOW, veilleMs, delaiSessionMs });
       scene.append(root);
       if (attendreSession) await attendre(() => root.etatRoute().session !== 'verification', 'session de l’assistant résolue');
       return { root, dits, navs };
@@ -2999,6 +3001,8 @@ export async function runAjouterTests({ eq, ok }) {
         eq([root.etatRoute().importId, root.etatRoute().pas, titreDe(root).value, root.querySelector('.status.info')?.textContent, ff.posts().length, ff.vers('openlibrary.org/search.json').length, !!root.querySelector('.zone-couverture img'), bandeau(root), ff.vers('covers.openlibrary.org').length],
           [l.id, 2, 'À la di Stasio', 'Lu sur la couverture — vérifie.', 0, 1, true, 'Proposé par Open Library : À la di Stasio, Josée Di Stasio, Flammarion Québec, 2004, ISBN 9782890772816', 0],
           'reprise : la lecture du journal, revalidée, remplit le pas 2 ; ZÉRO appel à l’assistant, UNE requête Open Library (hors quota, D-E13) ; aucune couverture distante (D-E18)');
+        eq([root.etatRoute().couverture.touchee, root.etatRoute().couverture.message, root.querySelector('.zone-couverture')?.textContent.includes('Couverture enregistrée.')], [true, 'Couverture enregistrée.', true],
+          'reprise, octets présents : la couverture est « touchée » et dit « Couverture enregistrée. » (§ 4.6 ; ronde 1 de T5 : mutants touchee faux, message nul → rouges)');
         const capture = db.onMutate;
         const lots = [];
         db.onMutate = (m) => { if (m.puts?.books) lots.push(Object.keys(m.puts).sort()); return capture ? capture(m) : null; };
@@ -3031,6 +3035,39 @@ export async function runAjouterTests({ eq, ok }) {
           const r2 = await monter(repo, { query: { import: absente.id } });
           await attendre(() => r2.root.etatRoute().lecture?.statut === 'a_lancer', 'relue');
           eq([r2.root.textContent.includes('La couverture n’est pas sur cet appareil.'), role(r2.root, 'relire')?.disabled, r2.root.etatRoute().couverture.sha256], [true, true, absente.cover_sha256], 'empreinte valide sans ligne files : le message, « Lire » éteint, l’empreinte gardée');
+          // Ronde 1 de T5 : une relecture qui n'apprend rien (octets toujours absents) ne reconstruit pas le formulaire — la saisie et le focus survivent (R-UX-9 ;
+          // les avis du vol, ecouterVol, relisent désormais aussi). Trois allers-retours de la base laissent la relecture finir.
+          const titre2 = titreDe(r2.root);
+          titre2.focus();
+          window.dispatchEvent(new Event('online'));
+          for (let i = 0; i < 3; i += 1) await db.get('imports', absente.id);
+          await tick();
+          eq([titreDe(r2.root) === titre2, document.activeElement === titre2], [true, true], 'octets toujours absents : une relecture (online) ne reconstruit pas le pas 2 — même champ Titre, focus gardé (ronde 1 de T5 ; mutant : couverture réécrite à chaque relecture → rouge)');
+          // Ronde 1 de T5 (constats 13 et 14) : une empreinte hostile qui EST une chaîne (majuscules) passe aussi par shaBornee ; et `touchee` (§ 4.6) ferme la
+          // couverture distante après « ← Changer d’ISBN » puis « Identifier » (D-E18).
+          scene.replaceChildren();
+          const majuscules = await ligneDe(repo, db, { cover_sha256: 'F'.repeat(64) }, { octets: false });
+          const ff3 = F.fauxFetch({ ol: [200, F.OL_STASIO] });
+          const r3 = await monter(repo, { ff: ff3, query: { import: majuscules.id } });
+          await attendre(() => r3.root.etatRoute().lecture?.statut === 'a_lancer', 'relue');
+          const couv = r3.root.etatRoute().couverture;
+          bouton(r3.root, '← Changer d’ISBN').click();
+          taper(r3.root.querySelector('input[name="isbn"]'), '9782890772816');
+          bouton(r3.root, 'Identifier').click();
+          await attendre(() => r3.root.etatRoute().reponsesRecues === 1 && !r3.root.etatRoute().recherche, 'fiche d’ISBN reçue');
+          await tick();
+          eq([couv.sha256, couv.touchee, r3.root.etatRoute().pas, ff3.vers('covers.openlibrary.org').length], [null, true, 2, 0],
+            'cover_sha256 « F… » (chaîne hors forme) : revalidée, empreinte nulle (mutant : typeof seul → rouge) ; touchee posé : « Identifier » ne demande aucune couverture distante (D-E18 ; mutant : touchee faux → rouge)');
+          // Ronde 1 de T5 (constat 23) : des octets qui ne sont pas une IMAGE de la liste blanche (un blob text/html sous l'empreinte) valent des octets absents —
+          // ni aperçu, ni « Couverture enregistrée. », « Lire » éteint.
+          scene.replaceChildren();
+          const sha = 'a'.repeat(64);
+          await db.mutate({ puts: { files: [{ sha256: sha, blob: new Blob(['<p>x</p>'], { type: 'text/html' }), mime: 'text/html', size: 8, created_at: NOW }] }, origin: 'device' });
+          const pasImage = await ligneDe(repo, db, { cover_sha256: sha }, { octets: false });
+          const r4 = await monter(repo, { query: { import: pasImage.id } });
+          await attendre(() => r4.root.etatRoute().lecture?.statut === 'a_lancer', 'relue');
+          eq([!!r4.root.querySelector('.zone-couverture img'), r4.root.textContent.includes('Couverture enregistrée.'), r4.root.textContent.includes('La couverture n’est pas sur cet appareil.'), role(r4.root, 'relire')?.disabled],
+            [false, false, true, true], 'octets hors liste blanche (text/html) sous l’empreinte : traités comme absents — aucun aperçu, aucun « Couverture enregistrée. », « Lire » éteint (ronde 1 de T5)');
         } finally { window.removeEventListener('unhandledrejection', surRejet); }
       });
 
@@ -3052,16 +3089,117 @@ export async function runAjouterTests({ eq, ok }) {
         role(r2.root, 'annuler-lecture').click();
         await attendre(async () => (await db.get('imports', a.id)).erreur?.raison === 'annule', 'annulée');
         scene.replaceChildren();
+        // battement_at = NOW : VIVANT à l'horloge de la route (`maintenant` injecté), que la passe `interrompu` de la route lit (ronde 1 de T5, comme les écrans du
+        // lot A) — pas à l'horloge réelle, qui la dirait vieille de plusieurs jours.
         const v = await ligneDe(repo, db, { status: 'en_cours', document_id_vol: 'autre-document', battement_at: NOW });
         const r3 = await monter(repo, { query: { import: v.id } });
         await attendre(() => r3.root.etatRoute().lecture?.statut === 'en_cours', 'relue');
         eq([role(r3.root, 'lecture')?.textContent, role(r3.root, 'annuler-lecture')], ['En cours sur un autre écran', null], 'en_cours d’un autre document : « En cours sur un autre écran », sans « Annuler » (I-7)');
       });
 
+      // Ronde 1 de T5 (constats 5, 17, 26 ; sonde SONDE-2) : une ligne en vol sur un AUTRE document n'est plus figée tant que la route est montée — la passe
+      // `interrompu` est rejouée à l'affichage puis par la veille (VF-15 du lot A, transposé), et chaque passe relit la ligne.
+      await scenario('reprise : en vol ailleurs, la veille relit la ligne — finie ailleurs, elle est appliquée ; document mort, elle est interrompue', async (repo, db) => {
+        const v = await ligneDe(repo, db, { status: 'en_cours', document_id_vol: 'autre-document', battement_at: NOW, started_at: NOW });
+        // Un espion compte les passes : la ligne ne finit « ailleurs » qu'APRÈS la deuxième (celle de la veille) — la passe de l'affichage ne peut donc pas
+        // l'avoir vue, et c'est bien la veille qui la relit (mutant : veille retirée → une seule passe → rouge).
+        const passes = [];
+        const espion = { ...repo, marquerInterrompus: (...a) => { const p = repo.marquerInterrompus(...a); passes.push(p); return p; } };
+        const r1 = await monter(espion, { query: { import: v.id }, veilleMs: 40 });
+        await attendre(() => r1.root.etatRoute().lecture?.statut === 'en_cours', 'relue en vol ailleurs');
+        await attendre(() => passes.length >= 2, 'la veille a rejoué la passe `interrompu`');
+        await Promise.all(passes);
+        const bloque = [role(r1.root, 'lecture')?.textContent, bouton(r1.root, 'Ajouter ce livre')?.disabled, (await db.get('imports', v.id)).status];
+        await db.mutate({ puts: { imports: [{ ...(await db.get('imports', v.id)), status: 'a_verifier', resultat: { ...F.LECTURE }, document_id_vol: null }] }, origin: 'device' }); // l'autre onglet a fini
+        await attendre(() => lue(r1.root), 'lecture finie ailleurs, vue par la veille');
+        eq([bloque, titreDe(r1.root).value, bouton(r1.root, 'Ajouter ce livre')?.disabled, (await db.get('imports', v.id)).status], [['En cours sur un autre écran', true, 'en_cours'], 'À la di Stasio', false, 'a_verifier'],
+          'en vol ailleurs puis fini ailleurs : la veille relit la ligne et applique la lecture, « Ajouter ce livre » rallumé (mutant : veille retirée → figé → rouge)');
+        scene.replaceChildren();
+        const mort = await ligneDe(repo, db, { status: 'en_cours', document_id_vol: 'document-mort', battement_at: '2026-10-19T11:57:00.000Z', started_at: '2026-10-19T11:57:00.000Z' });
+        const r2 = await monter(repo, { query: { import: mort.id } });
+        await attendre(() => r2.root.etatRoute().lecture?.statut === 'echec', 'interrompue à l’affichage');
+        eq([(await db.get('imports', mort.id)).erreur?.raison, role(r2.root, 'lecture')?.textContent.includes('La lecture a été interrompue.'), role(r2.root, 'relire')?.textContent, role(r2.root, 'enregistrer-bloque')?.hidden], ['interrompu', true, 'Relire la couverture', true],
+          'en vol sur un document MORT (battement de 3 min) : la passe `interrompu` est rejouée à l’affichage — echec(interrompu), « Relire la couverture », la phrase D-E9 levée (mutant : passe retirée → rouge)');
+      });
+
+      // Ronde 1 de T5 (constats 1, 4, 7 ; sonde P1) : une route REMONTÉE pendant le vol de sa ligne tenu par CE document (« Lire la couverture », « ← Ajouter »,
+      // puis le retour du navigateur) suit ce vol (ecouterVol) : à sa fin, elle relit la ligne — jamais figée sur « Lecture… » avec un « Annuler » qui appliquerait.
+      await scenario('reprise : une route remontée pendant le vol de CE document voit la fin du vol (ecouterVol)', async (repo, db) => {
+        const a = await ligneDe(repo, db);
+        const ff = F.fauxFetch({ assistant: null });
+        const r1 = await monter(repo, { ff, query: { import: a.id } });
+        await attendre(() => r1.root.etatRoute().lecture?.statut === 'a_lancer', 'relue');
+        role(r1.root, 'relire').click();
+        await attendre(() => ff.posts().length === 1, 'vol parti');
+        scene.replaceChildren(); // la route qui vole quitte le document (retour arrière)
+        const r2 = await monter(repo, { ff, query: { import: a.id } });
+        await attendre(() => r2.root.etatRoute().lecture?.statut === 'en_cours', 'relue en vol');
+        const pendant = [role(r2.root, 'lecture')?.textContent.includes('Lecture de la couverture par l’assistant…'), !!role(r2.root, 'annuler-lecture')];
+        ff.rendre.shift()(200, F.corpsOk(F.LECTURE));
+        await attendre(() => lue(r2.root), 'fin du vol vue par la route remontée');
+        eq([pendant, (await db.get('imports', a.id)).status, titreDe(r2.root).value, role(r2.root, 'annuler-lecture'), bouton(r2.root, 'Ajouter ce livre')?.disabled], [[true, true], 'a_verifier', 'À la di Stasio', null, false],
+          'route remontée pendant le vol de CE document : statut et « Annuler » pendant le vol, puis la lecture appliquée à sa fin, « Annuler » retiré, « Ajouter ce livre » rallumé (mutant : écoute retirée → figée → rouge)');
+      });
+
+      // Ronde 1 de T5 : la route qui VOLE ignore les avis de son propre vol jusqu'à sa fin — pendant les gardes (session relue, photo réduite), l'écran reste
+      // « Lecture de la couverture… » avec « Annuler » (N2-b : en_cours rendu AVANT l'appel), jamais la ligne encore a_lancer relue. Trois allers-retours de
+      // la base laissent finir une relecture qui serait partie.
+      await scenario('reprise : pendant les gardes de son propre vol, la route reste « Lecture… » (N2-b ; avis du vol ignorés par la route qui vole)', async (repo, db) => {
+        let jetons = 0, liberer = null;
+        const ctx = F.ctxDe(F.SESSION, { jeton: () => ((jetons += 1) === 1 ? Promise.resolve(F.SESSION) : new Promise((r) => { liberer = () => r(F.SESSION); })) });
+        const a = await ligneDe(repo, db);
+        const { root } = await monter(repo, { ctx, query: { import: a.id } });
+        await attendre(() => root.etatRoute().lecture?.statut === 'a_lancer', 'relue');
+        role(root, 'relire').click();
+        await attendre(() => typeof liberer === 'function', 'session relue par le vol (gardes)');
+        for (let i = 0; i < 3; i += 1) await db.get('imports', a.id);
+        await tick();
+        const pendant = [root.etatRoute().lecture?.statut, !!role(root, 'annuler-lecture'), (await db.get('imports', a.id)).status];
+        liberer();
+        await attendre(() => lue(root), 'lecture appliquée');
+        eq(pendant, ['en_cours', true, 'a_lancer'], 'pendant les gardes du vol (ligne encore a_lancer) : l’écran reste « Lecture… » avec « Annuler » (mutant : la route relit à chaque avis de son propre vol → « Lire la couverture » → rouge)');
+      });
+
+      // Ronde 1 de T5 (constats 2, 6, 8 ; sondes P2, SONDE-3) : une couverture d'un AUTRE appareil relancée ici devient celle de CET appareil (device_id réécrit au
+      // départ du vol, comme le classement du lot D et R-B-8 pour le web) — son appareil d'origine ne la juge plus à 90 s sur un battement qu'il ne voit pas.
+      await scenario('reprise : une couverture d’un autre appareil relancée ici prend le device_id d’ici', async (repo, db) => {
+        const a = await ligneDe(repo, db, { device_id: 'appareil-B' });
+        const ff = F.fauxFetch({ assistant: null });
+        const { root } = await monter(repo, { ff, query: { import: a.id } });
+        await attendre(() => root.etatRoute().lecture?.statut === 'a_lancer', 'relue');
+        role(root, 'relire').click();
+        await attendre(() => ff.posts().length === 1, 'vol parti');
+        const enVol = await db.get('imports', a.id);
+        eq([enVol.status, enVol.device_id === repo.deviceId(), enVol.document_id_vol === UI.DOCUMENT_ID], ['en_cours', true, true], 'couverture d’un autre appareil relancée ici : en vol, son device_id est celui de CET appareil (mutant : `ici` du classement seul → rouge)');
+        role(root, 'annuler-lecture').click();
+        await attendre(async () => (await db.get('imports', a.id)).erreur?.raison === 'annule', 'annulée');
+      });
+
+      // Ronde 1 de T5 (constat 16 ; sonde P4) : des octets arrivés APRÈS la reprise (L4) — la relecture suivante rend l'aperçu et « Couverture enregistrée. »,
+      // jamais « Lire » rallumé sous une phrase qui dit la couverture absente.
+      await scenario('reprise : des octets arrivés après la reprise rendent l’aperçu et « Couverture enregistrée. »', async (repo, db) => {
+        const { sha256 } = await LA.poserCouverture(await F.imageDe('l4.jpg', '#3a3'), { origine: 'locale', repo });
+        const fichier = await db.get('files', sha256);
+        await db.mutate({ deletes: { files: [sha256] }, origin: 'device' });
+        const a = await ligneDe(repo, db, { cover_sha256: sha256 }, { octets: false });
+        const { root } = await monter(repo, { query: { import: a.id } });
+        await attendre(() => root.etatRoute().lecture?.statut === 'a_lancer', 'relue');
+        const avant = [role(root, 'relire')?.disabled, !!root.querySelector('.zone-couverture img'), root.textContent.includes('La couverture n’est pas sur cet appareil.')];
+        await db.mutate({ puts: { files: [fichier] }, origin: 'device' });
+        window.dispatchEvent(new Event('online'));
+        await attendre(() => role(root, 'relire')?.disabled === false, 'octets relus');
+        await tick();
+        eq([avant, !!root.querySelector('.zone-couverture img'), root.textContent.includes('Couverture enregistrée.'), root.textContent.includes('La couverture n’est pas sur cet appareil.')], [[true, false, true], true, true, false],
+          'octets arrivés après la reprise : « Lire » rallumé AVEC l’aperçu et « Couverture enregistrée. », la phrase d’absence retirée (ronde 1 de T5)');
+      });
+
       await scenario('reprise : import terminé, d’une autre sorte, ou inconnu → toast, pas 1', async (repo, db) => {
         const fini = await ligneDe(repo, db, { status: 'enregistre' });
         const r1 = await monter(repo, { query: { import: fini.id } });
-        eq([r1.dits, r1.root.etatRoute().pas, r1.root.etatRoute().importId], [['Cet import est terminé.'], 1, null], 'enregistre : « Cet import est terminé. », pas 1 ordinaire');
+        const ignoree = await ligneDe(repo, db, { status: 'ignore' });
+        const r1b = await monter(repo, { query: { import: ignoree.id } });
+        eq([r1.dits, r1.root.etatRoute().pas, r1.root.etatRoute().importId, r1b.dits, r1b.root.etatRoute().pas, r1b.root.etatRoute().importId], [['Cet import est terminé.'], 1, null, ['Cet import est terminé.'], 1, null],
+          'enregistre OU ignore (§ 4.5, IMPORTS_TERMINES) : « Cet import est terminé. », pas 1 ordinaire (ronde 1 de T5 : mutant « enregistre seul » → rouge)');
         const recette = (await repo.ajouterPages([await F.imageDe('p.jpg', '#777')], { import: { id: repo.newId('imp'), kind: 'recette', recipe_id: 'rc_d5' } })).importId;
         const r2 = await monter(repo, { query: { import: recette } });
         const r3 = await monter(repo, { query: { import: 'imp_inconnu' } });
@@ -3086,7 +3224,9 @@ export async function runAjouterTests({ eq, ok }) {
       await scenario('reprise : la session résolue APRÈS le montage rallume « Relire la couverture », sans reconstruire le pas 2 (D-E8)', async (repo, db) => {
         let liberer = null;
         const q = await ligneDe(repo, db, { status: 'echec', erreur: { raison: 'quota', extra: { quota: 60 } } });
-        const { root } = await monter(repo, { ctx: F.ctxDe(F.SESSION, { jeton: () => new Promise((r) => { liberer = () => r(F.SESSION); }) }), query: { import: q.id }, attendreSession: false });
+        // Ronde 1 de T5 (constat 27) : la borne de sessionAssistant est portée à 60 s ici — sur une machine chargée, plus de 2 s entre le montage et liberer()
+        // rendait la session nulle (un rouge de bruit) ; le scénario attend un FAIT, la résolution qu'il provoque lui-même.
+        const { root } = await monter(repo, { ctx: F.ctxDe(F.SESSION, { jeton: () => new Promise((r) => { liberer = () => r(F.SESSION); }) }), query: { import: q.id }, attendreSession: false, delaiSessionMs: 60000 });
         await attendre(() => root.etatRoute().lecture?.statut === 'echec' && typeof liberer === 'function', 'relue, jeton demandé');
         const titre = titreDe(root);
         eq([root.etatRoute().session, role(root, 'relire')?.textContent, role(root, 'relire')?.disabled], ['verification', 'Relire la couverture', true], 'reprise, session en cours de lecture : « Relire la couverture » rendu éteint (D-E8)');

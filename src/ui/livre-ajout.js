@@ -6,7 +6,7 @@ import { logError } from '../core/log.js';
 import { navigate } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { sha256Hex } from '../core/hash.js';
-import { COVER_INPUT_MIME } from '../sync/mime.js';
+import { COVER_INPUT_MIME, typeAffichage, displayUrl } from '../sync/mime.js';
 import { LIMITES_COUVERTURE, dimensionsImage, reduireImage, preparerPhotoLocale, ErreurImage, messageErreurImage } from '../core/image.js';
 import { urlDeBlob } from '../core/blob-urls.js';
 import { listConventions } from '../domain/units.js';
@@ -16,7 +16,7 @@ import { GOOGLE_BOOKS } from '../sync/config.js';
 import { nettoyerIsbn, validerIsbn, codeBarresVersIsbn } from '../core/isbn.js';
 import { TransitionRefusee } from '../core/db.js';
 import { demarrerConnexion } from './settings.js';
-import { lancerLectureCouverture, annulerVol, volEnCours, DOCUMENT_ID, texteEchec, cleLecture } from './import-cible.js';
+import { lancerLectureCouverture, annulerVol, volEnCours, DOCUMENT_ID, texteEchec, cleLecture, ecouterVol } from './import-cible.js';
 import { RAISONS_ECHEC } from '../domain/import-cible.js';
 import { validerLectureCouverture } from '../domain/llm.js';
 import { isbnUnique, shaBornee, fabriquerImportCouverture, champsDepuisLecture, ficheDepuisProposition, ficheSelonIsbn, choisirProposition } from '../domain/couverture.js';
@@ -551,7 +551,12 @@ export function majBoutonEnregistrer(zone, model) {
 // la charnière § 5 → § 8 (« Ajouter ce livre » → /books/<id>?nouveau=1) devient mesurable sans toucher à l'adresse.
 // Le nœud rendu porte `etatRoute()` : les tests attendent un FAIT observable (un rappel de couverture entré, une
 // couverture appliquée) au lieu d'un délai (F3/F4).
-export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo, navigate: nav = navigate, toast: dire = toast, fetch = globalThis.fetch, enLigne = () => navigator.onLine !== false, attendre = attenteReelle, cle = GOOGLE_BOOKS.key, tentativeMs = LIMITES_ISBN.tentativeMs, repriseMs = LIMITES_ISBN.repriseMs, pickFiles: choisirFichiers = pickFiles, maintenant = () => new Date().toISOString(), battementMs = undefined } = {}) {
+// Ronde 1 de T5 (constat 23) : des octets de couverture ne valent que s'ils sont une IMAGE de la liste blanche (typeAffichage : la règle de bookCover, S3) ;
+// sinon ils comptent comme absents — ni aperçu, ni « Couverture enregistrée. », ni lecture.
+const octetsImage = (fichier) => !!typeAffichage(fichier)?.startsWith('image/');
+// Ronde 1 de T5 : `veilleMs` (la veille d'une ligne en vol ailleurs, comme l'écran ciblé du lot A) et `delaiSessionMs` (la borne de sessionAssistant,
+// 2 s par défaut) sont injectables : la suite ne dépend d'aucune horloge courte.
+export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo, navigate: nav = navigate, toast: dire = toast, fetch = globalThis.fetch, enLigne = () => navigator.onLine !== false, attendre = attenteReelle, cle = GOOGLE_BOOKS.key, tentativeMs = LIMITES_ISBN.tentativeMs, repriseMs = LIMITES_ISBN.repriseMs, pickFiles: choisirFichiers = pickFiles, maintenant = () => new Date().toISOString(), battementMs = undefined, veilleMs = repo.BATTEMENT_MORT_MS + 1000, delaiSessionMs = undefined } = {}) {
   // Lot E : le dépôt injecté sous le nom littéral `repo`, pour les SEULS appels qui transitionnent (contrainte globale : le test statique du lot A
   // n'admet hors repo.js que `repo.transitionner(`) ; le reste du corps garde `r`, comme aujourd'hui. Le défaut `repo: r = repo` lit le module.
   const repo = r;
@@ -741,8 +746,12 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     if (demontee()) { if (ligne?.status === 'a_verifier' && etat.lectureAppliquee !== cleLecture(ligne)) etat.lecture = { statut: 'recue' }; return; }
     const avant = avantRelecture();
     if (!ligne) { etat.lecture = null; etat.importId = null; rendreApres(avant); return; }
-    etat.octetsAbsents = !(fichier?.blob instanceof Blob);
-    if (etat.octetsAbsents && (!etat.couverture.sha256 || etat.couverture.sha256 === sha)) etat.couverture = { ...etat.couverture, apercu: null, message: t('La couverture n’est pas sur cet appareil.') };
+    etat.octetsAbsents = !octetsImage(fichier); // ronde 1 de T5 (constat 23) : des octets qui ne sont pas une image valent des octets absents
+    // Ronde 1 de T5 (constat 16) : des octets arrivés depuis (L4) rendent l'aperçu et « Couverture enregistrée. » ; une relecture qui n'apprend rien ne remplace
+    // pas la couverture (aucun redessin du formulaire : les avis du vol, ecouterVol, relisent sans prendre le focus).
+    const absente = t('La couverture n’est pas sur cet appareil.');
+    if (etat.octetsAbsents && (!etat.couverture.sha256 || etat.couverture.sha256 === sha) && (etat.couverture.apercu || etat.couverture.message !== absente)) etat.couverture = { ...etat.couverture, apercu: null, message: absente };
+    else if (!etat.octetsAbsents && etat.couverture.sha256 === sha && !etat.couverture.apercu && !etat.couverture.enCours) etat.couverture = { ...etat.couverture, apercu: displayUrl(fichier, urlDeBlob), message: t('Couverture enregistrée.') };
     const memeVol = etat.generation === etat.generationLecture; // P-6 : aucun geste depuis le vol (ou la reprise)
     if (ligne.status === 'a_verifier') {
       const cleLue = cleLecture(ligne);
@@ -757,6 +766,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     else etat.lecture = { statut: 'termine' }; // fermée ailleurs : « Ajouter ce livre » décide (§ 4.4)
     if (memeVol && etat.lecture.statut !== 'termine') etat.pas = 2;
     rendreApres(avant);
+    veiller(); // ronde 1 de T5 : une ligne qui vole ailleurs garde une veille tant que la route est montée
   }
   // § 4.3.2 : la lecture REVALIDÉE (I-E1 : un résultat revenu du journal est une donnée hostile) est appliquée UNE fois ; un résultat hostile → a_verifier →
   // echec(illisible) pour CETTE lecture (T4-R1). Puis le rattrapage, si en ligne, avec un titre ET un premier auteur lus, ni l'un ni l'autre incertains (D-E4).
@@ -896,10 +906,15 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     await voler(id);
   }
   // Le vol puis la relecture. Ronde 1 (#29) : un rejet imprévu du vol (IndexedDB) est journalisé, et l'écran suit la ligne relue — jamais figé.
+  // Ronde 1 de T5 : `enVol` dit que CETTE route attend son propre vol — ses avis (ecouterVol) ne relisent pas la ligne avant la fin (N2 : en_cours est
+  // rendu AVANT l'appel, jamais remplacé par la ligne encore a_lancer pendant les gardes) ; la relecture d'ici suit le vol.
+  let enVol = false;
   async function voler(id) {
     let r1 = null;
+    enVol = true;
     try { r1 = await lancerLectureCouverture(id, { ctx, repo: r, fetch, maintenant, enLigne, battementMs }); }
     catch (e) { logError('livre.couverture.vol', { error: e }); }
+    finally { enVol = false; }
     apresVol(r1);
     await relire();
   }
@@ -1020,6 +1035,25 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
       nav(`/books/${encodeURIComponent(res.id)}?nouveau=1`);
     },
   };
+  // Ronde 1 de T5 (constats 5, 17, 26 ; VF-15 du lot A, transposé comme dans l'écran ciblé, l'écran web, le panneau d'index et le classement) : une ligne
+  // en_cours que CE document ne tient pas (autre onglet ; document mort : PWA tuée, onglet fermé) n'attend plus le démarrage ni la page Ajouter — la passe
+  // `interrompu` (repo.marquerInterrompus, mêmes règles, horloge de la route) est rejouée à l'affichage, puis toutes les BATTEMENT_MORT_MS + 1 s tant que la
+  // ligne vole ailleurs et que la route est montée ; chaque passe RELIT la ligne (une lecture finie ailleurs est appliquée, une ligne interrompue le dit).
+  let veille = null;
+  const volDAilleurs = () => !!etat.importId && etat.lecture?.statut === 'en_cours' && volEnCours()?.importId !== etat.importId;
+  const passeInterrompus = () => {
+    const m = Date.parse(maintenant());
+    return Promise.resolve(typeof r.marquerInterrompus === 'function' ? r.marquerInterrompus(Number.isFinite(m) ? m : undefined) : 0)
+      .catch((e) => logError('livre.couverture.interrompus', { error: e })).then(() => relire());
+  };
+  function veiller() {
+    if (veille || demontee() || !volDAilleurs()) return;
+    veille = setTimeout(() => { veille = null; if (!demontee() && volDAilleurs()) passeInterrompus(); }, veilleMs);
+  }
+  // Ronde 1 de T5 (constats 1, 4, 7) : la route suit le vol de CE document (ecouterVol, comme le panneau d'index du lot C) — une instance montée pendant le
+  // vol de sa ligne (retour arrière puis avant) relit la ligne à la pose et à la fin du vol, jamais figée sur « Lecture… » avec un « Annuler » qui
+  // appliquerait la lecture ; désabonnée au premier avis qui la trouve démontée (jamais attachée : au tour suivant le montage, plus bas).
+  const desabonnerVol = ecouterVol(() => { if (demontee()) { desabonnerVol(); return; } if (etat.importId && !enVol) relire(); });
   // Lot E (§ 4.7, F-17) : en ligne / hors ligne — posés au montage, retirés par le gestionnaire lui-même dès que la route est démontée (motif des `vues`
   // d'import-cible.js ; avant son premier attachement, la route écoute) ; `online` relit le journal (R-E-10 : rien sans import). Ronde 1 (R-UX-9) :
   // `offline` ne redessine plus — sans import de couverture rien n'en dépend ; sinon les SEULS blocs sont remplacés (« Lire » s'éteint, « Tu es hors ligne. »).
@@ -1034,30 +1068,34 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
   window.addEventListener('offline', surReseau);
   // Lot E (D-E8) : la session est lue SANS retenir l'écran ; à la résolution, le bloc du pas 1 (et le bloc lecture du pas 2) SEULS sont remplacés.
   if (etat.session === 'verification') {
-    sessionAssistant(ctx).then((s) => { etat.session = s ? 'prete' : null; const m = modele(); majBlocCouverture(zone, m, gestes); majBlocLecture(zone, m, gestes); }).catch(() => {});
+    sessionAssistant(ctx, { delaiMs: delaiSessionMs }).then((s) => { etat.session = s ? 'prete' : null; const m = modele(); majBlocCouverture(zone, m, gestes); majBlocLecture(zone, m, gestes); }).catch(() => {});
   }
   // Lot E (§ 4.6) : la reprise d'une couverture (#/add/livre?import=<imp>) — la ligne est RELUE (jamais un état mémorisé), sa couverture revalidée
-  // (shaBornee) ; aucun appel à l'assistant ici (D-E13 : le rattrapage d'Open Library, lui, repart si en ligne). Le rendu suit relire(), comme après un vol.
-  const demande = typeof query?.import === 'string' && query.import ? query.import : null;
-  if (demande) {
-    const ligne = await r.get('imports', demande);
-    if (!ligne || ligne.kind !== 'couverture') dire(t('Import introuvable.'));
-    else if (IMPORTS_TERMINES.includes(ligne.status)) dire(t('Cet import est terminé.'));
-    else {
-      etat.importId = ligne.id;
-      etat.generationLecture = etat.generation;
-      const sha = shaBornee(ligne.cover_sha256);
-      const fichier = sha ? await r.getFile(sha) : null;
-      etat.couverture = fichier?.blob instanceof Blob
-        ? { sha256: sha, apercu: urlDeBlob(fichier.blob), message: t('Couverture enregistrée.'), enCours: false, touchee: true }
-        : { ...COUVERTURE_VIDE(), sha256: sha, message: t('La couverture n’est pas sur cet appareil.'), touchee: true };
-      etat.pas = 2;
-    }
+  // (shaBornee ; ronde 1 de T5 : ses octets ne valent que s'ils sont une image, octetsImage) ; aucun appel à l'assistant ici (D-E13 : le rattrapage
+  // d'Open Library, lui, repart si en ligne). Le rendu suit relire(), comme après un vol. Ronde 1 de T5 : une fonction nommée.
+  async function reprendre(id) {
+    const ligne = await r.get('imports', id);
+    if (!ligne || ligne.kind !== 'couverture') { dire(t('Import introuvable.')); return; }
+    if (IMPORTS_TERMINES.includes(ligne.status)) { dire(t('Cet import est terminé.')); return; }
+    etat.importId = ligne.id;
+    etat.generationLecture = etat.generation;
+    const sha = shaBornee(ligne.cover_sha256);
+    const fichier = sha ? await r.getFile(sha) : null;
+    etat.couverture = octetsImage(fichier)
+      ? { sha256: sha, apercu: displayUrl(fichier, urlDeBlob), message: t('Couverture enregistrée.'), enCours: false, touchee: true }
+      : { ...COUVERTURE_VIDE(), sha256: sha, message: t('La couverture n’est pas sur cet appareil.'), touchee: true };
+    etat.pas = 2;
   }
+  const demande = typeof query?.import === 'string' && query.import ? query.import : null;
+  if (demande) await reprendre(demande);
   // Les tests lisent l'état par là (F3/F4) : un fait observable, jamais un délai. Aucune vue ne s'en sert.
   root.etatRoute = () => ({ ...etat, couverture: { ...etat.couverture }, champs: { ...etat.champs } });
   dessiner();
-  if (etat.importId) await relire();
+  if (etat.importId) {
+    await relire();
+    if (volDAilleurs()) passeInterrompus(); // ronde 1 de T5 : la passe `interrompu` rejouée à l'affichage (la veille, elle, est posée par relire())
+  }
+  setTimeout(() => { if (demontee()) desabonnerVol(); }, 0); // ronde 1 de T5 : une route jamais attachée se désabonne au tour suivant
   rendue = true; // ronde 1 : à partir d'ici, une route hors du document est démontée (demontee()) — à garder juste avant le `return`
   return root;
 }
