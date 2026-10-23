@@ -41,7 +41,9 @@ function menuSource(libelle, ...boutons) {
 // statut illisible aussi (aucune condition ne le relit : import_lie). Seule une ligne DISPARUE entre la lecture et la transition se tait ; toute autre
 // transition refusée fait refuser avant le temps 2. Temps 2 — UNE transaction (repo.removeBatch) retire les traces de consultation de l'édition
 // (library_activity, sa préférence de Redécouvrir), listées AVANT elle, puis l'édition et, sauf garder, le livre, SOUS LA CONDITION qu'aucune ligne du
-// journal ne la pointe plus (une ligne arrivée entre les deux temps fait refuser, rien n'est supprimé). La capture garde son filtre : l'historique ne part
+// journal à un statut CONNU (STATUTS_IMPORT) ne la pointe plus (une telle ligne arrivée entre les deux temps fait refuser, rien n'est supprimé ; une ligne
+// glissée au statut hors vocabulaire ou non-chaîne n'est pas vue par cette condition, et la vacuité de l'édition est relue hors transaction : limites
+// nommées en spec § 11, vague finale du lot E). La capture garde son filtre : l'historique ne part
 // au serveur que sous « Synchroniser mon historique de consultation » (R27). Rend { ok: true } ou { refus: 'lecture_en_cours' | 'non_vide' | 'import_lie' }.
 export async function supprimerLivreVide({ book, edition, garderLivre = false }, { repo: r = repo } = {}) {
   const repo = r; // le dépôt injecté sous le nom littéral que le test statique du lot A exige (contrainte globale) ; le défaut ci-dessus lit le module

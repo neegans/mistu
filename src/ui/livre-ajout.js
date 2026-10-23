@@ -568,7 +568,10 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     // l'assistant ('verification' | 'prete' | null, D-E8), l'état de la lecture à l'écran, la proposition d'Open Library et son abandon, deux FAITS pour
     // les tests, ce que la lecture et ses « Utiliser » ont posé (N4), et l'absence des octets de la couverture sur cet appareil.
     importId: null, generationLecture: null, lectureAppliquee: null, session: ctx?.sync?.user ? 'verification' : null, lecture: null, proposition: null, ctlOl: null,
-    lecturesRecues: 0, propositionsRecues: 0, champsLus: null, octetsAbsents: false };
+    lecturesRecues: 0, propositionsRecues: 0, champsLus: null, octetsAbsents: false,
+    // Vague finale (R-D-10) : un FAIT de plus pour les tests — le nombre de relectures du journal ACHEVÉES (chaque passage de la file de relire(), même
+    // sans import) ; un test qui affirme « rien ne s'est passé » attend ce compte au lieu d'un nombre fixe d'allers-retours de la base.
+    relecturesFaites: 0 };
   const root = el('div', null, pageHeader(t('Ajouter un livre'), { back: { href: '/add', label: t('Ajouter') } }));
   const zone = el('div', null);
   root.append(zone);
@@ -576,6 +579,10 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
   // capture la sienne au départ et la revérifie après chaque `await` : « ← Changer d'ISBN » puis « Saisir à la
   // main » pendant le ré-encodage ne pouvaient pas être vus par la garde d'avant (évaluée une seule fois).
   const avancer = () => { etat.generation += 1; };
+  // Vague finale (constat 7) : un geste sur la SEULE zone Couverture du pas 2 (« Retirer », « Photographier », « Choisir une image ») avance la génération
+  // (R-UX-13 : une couverture distante tardive ne se repose pas) sans détacher la lecture en vol — il ne change pas de livre (la ligne du journal garde sa
+  // photo, § 4.3.3) : la lecture payée qui arrive reste celle de l'écran. Les gestes qui changent le livre la détachent toujours (I-E4).
+  const avancerCouverture = () => { const suivie = etat.generationLecture === etat.generation; avancer(); if (suivie) etat.generationLecture = etat.generation; };
   // Lot E : un vol d'une AUTRE ligne tient le document (le verrou de import-cible.js est unique, I-E3).
   const volAilleurs = () => { const v = volEnCours(); return !!v && v.importId !== etat.importId; };
   // Le modèle de la route : la phrase des sources suit la clé RÉELLEMENT passée (cleGoogle), et les puces lisent
@@ -595,6 +602,19 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     if (avant.forme !== forme() || avant.couverture !== etat.couverture) { dessiner(); return; }
     const m = modele();
     majBlocCouverture(zone, m, gestes); majBlocLecture(zone, m, gestes); majBoutonEnregistrer(zone, m);
+  };
+  // Vague finale (constat 6) : une couverture changée par une relecture (octets arrivés ou disparus) est rendue dans la SEULE zone Couverture quand la
+  // relecture ne rend rien d'autre (lecture déjà appliquée, ou reçue après un geste) — jamais dessiner() : la saisie et le focus survivent.
+  const majZoneCouverture = (avant) => { if (avant.couverture !== etat.couverture) zone.querySelector('.zone-couverture')?.replaceWith(gestes.couverture()); };
+  // Vague finale (constat 8) : les blocs SEULS — celui du pas 1, le bloc lecture du pas 2 (posé avant le champ Titre s'il n'y était pas), la zone
+  // Couverture, « Ajouter ce livre » et sa phrase — sans reconstruire le formulaire (la fin d'une préparation après un geste qui a déjà rendu son écran).
+  const rendreBlocs = () => {
+    const m = modele();
+    majBlocCouverture(zone, m, gestes);
+    if (zone.querySelector('[data-role="lecture"]')) majBlocLecture(zone, m, gestes);
+    else { const neuf = renderBlocLecture(m, gestes); if (neuf) zone.querySelector('.livre-ajout > label.field')?.before(neuf); }
+    zone.querySelector('.zone-couverture')?.replaceWith(gestes.couverture());
+    majBoutonEnregistrer(zone, m);
   };
   // C3 et N4 (une seule remise, ronde 1) : chaque champ de `valeurs` encore ÉGAL à ce qu'une source (fiche d'ISBN, lecture de la couverture) y avait mis
   // est rendu à CHAMPS_VIDES() — la personne ne l'a pas touché, il n'est pas à elle ; ce qu'elle a corrigé reste ; sa langue touchée lui appartient (C2).
@@ -638,9 +658,6 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     // Lot E (D-E18) : une couverture PHOTOGRAPHIÉE dans cette route (posée ou en préparation, ronde 1) survit à « Identifier » ; sans photo, comme aujourd'hui.
     etat.provenance = null; if (!photoDeLaRoute()) etat.couverture = COUVERTURE_VIDE(); etat.suggestions = null;
     oublierDistants();
-    // Lot E, ronde 1 (C3, I-E10, I-B ; choix à ratifier) : une lecture APPLIQUÉE n'est pas la fiche de cet ISBN — ses champs non touchés sont rendus avant la
-    // fusion (l'ISBN tapé reste), ses mentions quittent l'écran ; le journal la garde (état `recue`), « Ajouter ce livre » la fermera avec le livre.
-    if (etat.lecture?.statut === 'lue') { remettreChampsLus({ isbn: false }); etat.champsLus = null; etat.lecture = { statut: 'recue' }; }
     avancer();
     const generation = etat.generation;
     etat.recherche = true; etat.reprise = false; etat.resultat = null;
@@ -656,6 +673,11 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
       // couverture qu'elle aurait demandée. La génération le dit (I-G).
       if (etat.generation !== generation) return;
       if (res.statut === 'trouve') {
+        // Lot E, ronde 1 (C3, I-E10, I-B ; constat 7 de T4, option 1), vague finale (constat 2) : une lecture APPLIQUÉE n'est pas la fiche de cet ISBN — ses
+        // champs non touchés sont rendus avant la fusion (l'ISBN tapé reste), ses mentions quittent l'écran ; le journal la garde (état `recue`), « Ajouter
+        // ce livre » la fermera avec le livre. Seulement quand une fiche est TROUVÉE : introuvable, panne ou erreur laissent la lecture, ses champs et son
+        // étiquette à l'écran (la lecture payée ne disparaît pas sans rien à la place).
+        if (etat.lecture?.statut === 'lue') { remettreChampsLus({ isbn: false }); etat.champsLus = null; etat.lecture = { statut: 'recue' }; }
         const avantFusion = { ...etat.champs };
         etat.champs = fusionnerFiche(etat.champs, res.fiche, { langueTouchee: etat.langueTouchee });
         // C3 : ne sont « distants » que les champs que la fusion a RÉELLEMENT repris de la fiche — mesurés avant et
@@ -698,7 +720,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
             dessiner();
           }).catch(() => { /* une couverture n'est jamais essentielle : aucun rejet non traité, aucune carte rouge */ });
         }
-      } else if (res.statut === 'introuvable') { etat.provenance = 'aucune'; etat.resultat = res; etat.pas = 2; }
+      } else if (res.statut === 'introuvable') { etat.provenance = etat.lecture?.statut === 'lue' ? 'couverture' : 'aucune'; etat.resultat = res; etat.pas = 2; } // vague finale (constat 2) : les champs à l'écran sont ceux de la lecture (I-B)
       else { etat.resultat = res; } // indisponible : on reste au pas 1, ISBN conservé, Réessayer offert
     } catch (e) {
       // S1 (vague /verify) : filet — lookupIsbn ne doit jamais lever, mais si elle le fait l'écran ne reste pas muet.
@@ -714,8 +736,8 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
   const depuisFichier = async (capture) => {
     const files = await choisirFichiers({ accept: 'image/*', multiple: false, capture }); // lot E : par deps.pickFiles (défaut : celui de core/dom.js)
     if (!files.length) return;
-    // R-UX-13 : dès que la personne a choisi une image, une réponse distante tardive n'a plus rien à dire ici.
-    avancer();
+    // R-UX-13 : dès que la personne a choisi une image, une réponse distante tardive n'a plus rien à dire ici. Vague finale (constat 7) : sans détacher la lecture.
+    avancerCouverture();
     etat.couverture = { ...etat.couverture, touchee: true, enCours: true }; dessiner();
     try { const { sha256 } = await poserCouverture(files[0], { origine: 'locale', repo: r }); const ligne = await r.getFile(sha256); etat.couverture = { sha256, apercu: urlDeBlob(ligne.blob), message: t('Couverture enregistrée.'), enCours: false, touchee: true }; }
     // Un refus ne RETIRE pas la couverture déjà posée : seul le message change (l'écran ne perd rien de vrai).
@@ -726,7 +748,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
   // relire() est la SEULE fonction qui lit le journal pour l'écran (§ 4.3.1) ; dessiner() ne l'appelle jamais. File de promesses : jamais deux relectures
   // qui se dépassent. Déclenchée au montage avec ?import= (tâche 4), à la fin d'un vol, après « Annuler », après « Lire / Relire », sur `online`.
   let file = Promise.resolve();
-  const relire = () => { file = file.then(relireMaintenant).catch((e) => logError('livre.couverture.relire', { error: e })); return file; };
+  const relire = () => { file = file.then(relireMaintenant).catch((e) => logError('livre.couverture.relire', { error: e })).then(() => { etat.relecturesFaites += 1; }); return file; };
   // N2-a : une lecture reçue après un geste (état `recue`) ne redessine pas — le bloc lecture du pas 2 est RETIRÉ, le bloc du pas 1 est rendu à ses deux
   // boutons, le bouton « Ajouter ce livre » est rallumé et sa phrase cachée : la saisie et le focus survivent.
   const transitionsRecue = () => {
@@ -755,8 +777,8 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     const memeVol = etat.generation === etat.generationLecture; // P-6 : aucun geste depuis le vol (ou la reprise)
     if (ligne.status === 'a_verifier') {
       const cleLue = cleLecture(ligne);
-      if (etat.lectureAppliquee === cleLue) return; // déjà appliquée : idempotence (un second relire() ne remplit plus rien)
-      if (!memeVol || etat.importId !== ligne.id) { etat.lecture = { statut: 'recue' }; transitionsRecue(); return; } // I-E4 : le journal la garde
+      if (etat.lectureAppliquee === cleLue) { majZoneCouverture(avant); return; } // déjà appliquée : idempotence (un second relire() ne remplit plus rien)
+      if (!memeVol || etat.importId !== ligne.id) { etat.lecture = { statut: 'recue' }; transitionsRecue(); majZoneCouverture(avant); return; } // I-E4 : le journal la garde
       await appliquerLecture(ligne, cleLue);
       return;
     }
@@ -857,13 +879,16 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     dessiner();
     const gen = etat.generation;
     etat.generationLecture = gen;
+    // Vague finale (constat 8) : un geste fait pendant la préparation (« Saisir à la main », « ← Changer d’ISBN », « Identifier ») a déjà rendu son écran,
+    // peut-être avec une saisie en cours — la fin de la préparation n'y rend que ses blocs (I-E4 : les champs tapés et le focus restent) ; sinon dessiner().
+    const rendreFin = () => { if (etat.generation === gen) dessiner(); else rendreBlocs(); };
     // M3 / R-E-10 : rien n'est créé, rien n'est détaché, la ligne précédente reste celle de la route (« Ajouter ce livre » la fermera avec le livre). Ronde 1
     // (C1, I-E4) : sa lecture garde sa clé et n'appartient plus à la génération de l'écran (generationLecture nulle) — un relire() suivant (un `online`) ne la
     // réapplique jamais sans geste ; les champs, eux, ont été remis au pas 2 (N4, § 11).
     const refuser = (message, couverture) => {
       etat.lecture = { statut: 'refus_image', message }; etat.couverture = couverture;
       etat.importId = precedent; etat.lectureAppliquee = appliqueePrecedente; etat.generationLecture = null;
-      dessiner();
+      rendreFin();
     };
     let sha256;
     try { ({ sha256 } = await poserCouverture(files[0], { origine: 'locale', repo: r })); }
@@ -893,7 +918,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     etat.couverture = posee;
     etat.couverturesAppliquees += 1; // le FAIT que les tests attendent
     etat.lecture = { statut: 'en_cours', ici: true }; // N2 : rendu AVANT l'appel (`vol` n'est posé que par lancerLectureCouverture)
-    dessiner();
+    rendreFin();
     await voler(ligne.id);
   }
   // N2-b : « Lire / Relire la couverture » — un vol de cette route comme un autre, sur la MÊME ligne (echec | a_lancer → en_cours), rendu avant l'appel.
@@ -961,7 +986,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     couverture: () => renderZoneCouverture(etat.couverture, {
       photographier: () => depuisFichier('environment'),
       choisir: () => depuisFichier(null),
-      retirer: () => { avancer(); etat.couverture = { ...COUVERTURE_VIDE(), touchee: true }; dessiner(); },
+      retirer: () => { avancerCouverture(); etat.couverture = { ...COUVERTURE_VIDE(), touchee: true }; dessiner(); }, // vague finale (constat 7) : sans détacher la lecture
     }),
     // Lot E
     carteConnexion: () => carteConnexion(connecter, ctx),
@@ -997,9 +1022,11 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     saisirMain: () => {
       nouvelleGeneration();
       const v = validerIsbn(etat.isbn);
-      const memeIsbn = !!etat.champsDistants && v.ok && v.isbn13 === etat.isbnDistant;
+      // Vague finale (constat 1) : « aucun ISBN avant comme après » vaut le même ISBN — les champs repris par « Utiliser ces renseignements » sans ISBN (une
+      // œuvre à plusieurs éditions) restent avec leur étiquette (§ 4.3.5). Constat 5 : sinon, une lecture encore appliquée garde la sienne (I-B, I-E1).
+      const memeIsbn = !!etat.champsDistants && (v.ok ? v.isbn13 === etat.isbnDistant : etat.isbnDistant === null && !String(etat.isbn ?? '').trim());
       if (memeIsbn) etat.provenance = etat.sourceDistante;
-      else { oublierDistants(); etat.provenance = null; }
+      else { oublierDistants(); etat.provenance = etat.lecture?.statut === 'lue' ? 'couverture' : null; }
       etat.isbn = v.ok ? v.isbn13 : nettoyerIsbn(etat.isbn).slice(0, 20); // affiché = enregistré quand valide ; borné sinon (S8/F22)
       // Lot E (D-E18) : la couverture photographiée dans cette route (posée ou en préparation, ronde 1) survit ; R-UX-13 ne vise que la couverture REÇUE.
       etat.couverture = photoDeLaRoute() ? etat.couverture : { ...COUVERTURE_VIDE(), touchee: true }; etat.pas = 2; dessiner();
@@ -1053,13 +1080,19 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
   // Ronde 1 de T5 (constats 1, 4, 7) : la route suit le vol de CE document (ecouterVol, comme le panneau d'index du lot C) — une instance montée pendant le
   // vol de sa ligne (retour arrière puis avant) relit la ligne à la pose et à la fin du vol, jamais figée sur « Lecture… » avec un « Annuler » qui
   // appliquerait la lecture ; désabonnée au premier avis qui la trouve démontée (jamais attachée : au tour suivant le montage, plus bas).
-  const desabonnerVol = ecouterVol(() => { if (demontee()) { desabonnerVol(); return; } if (etat.importId && !enVol) relire(); });
+  // Vague finale (constat 3) : SANS import de couverture, le seul bloc du pas 1 suit le vol d'une autre route — ses deux boutons s'éteignent à la prise du vol
+  // et se rallument à sa fin (volAilleurs), sans dessiner(). Un vol de la lecture web (lot B) ne notifie pas (dette R-B-27) : la garde du geste reste.
+  const desabonnerVol = ecouterVol(() => {
+    if (demontee()) { desabonnerVol(); return; }
+    if (!etat.importId) { majBlocCouverture(zone, modele(), gestes); return; }
+    if (!enVol) relire();
+  });
   // Lot E (§ 4.7, F-17) : en ligne / hors ligne — posés au montage, retirés par le gestionnaire lui-même dès que la route est démontée (motif des `vues`
   // d'import-cible.js ; avant son premier attachement, la route écoute) ; `online` relit le journal (R-E-10 : rien sans import). Ronde 1 (R-UX-9) :
   // `offline` ne redessine plus — sans import de couverture rien n'en dépend ; sinon les SEULS blocs sont remplacés (« Lire » s'éteint, « Tu es hors ligne. »).
   const surReseau = (e) => {
     if (demontee()) { window.removeEventListener('online', surReseau); window.removeEventListener('offline', surReseau); return; }
-    if (e.type === 'online') { relire(); return; }
+    if (e.type === 'online') { if (!enVol) relire(); return; } // vague finale (constat 4) : la route qui vole ignore `online` comme ses avis — la relecture de la fin du vol rattrape l'écran
     if (!etat.importId) return;
     const m = modele();
     majBlocLecture(zone, m, gestes); majBlocCouverture(zone, m, gestes);

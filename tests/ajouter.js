@@ -2099,14 +2099,23 @@ export async function runAjouterTests({ eq, ok }) {
         const pick = { n: 0, fn: async () => { pick.n += 1; return [await F.imageDe('vt.jpg', '#a3a')]; } };
         const r1 = await monter(repo, { ff, pick: pick.fn });
         const nImports = await db.count('imports');
+        // Vague finale (constat 3) : la route suit désormais les avis du vol (ecouterVol) même sans import — un vol qui NOTIFIE éteint ses boutons. La garde
+        // DANS le geste reste nécessaire pour un vol qui ne notifie pas (une lecture web du lot B, dette R-B-27) : simulé ici par la tenue nue de ./vol.js.
+        const V = await import('../src/ui/vol.js');
+        const web = { importId: 'imp_web_nu', controller: new AbortController(), repo };
+        V.prendreVol(web);
+        eq(role(r1.root, 'choisir-couverture')?.disabled, false, 'garde du garde : le bouton, rendu avant un vol qui ne notifie pas (lecture web, R-B-27), est encore actif');
+        role(r1.root, 'choisir-couverture').click(); await tick();
+        eq([pick.n, r1.dits.at(-1), await db.count('imports'), ff.posts().length], [0, 'Une lecture est déjà en cours : annule-la d’abord.', nImports, 0], 'vol tenu AVANT la tape : le toast, AUCUN sélecteur ouvert, rien d’écrit (mutant : les deux gardes avant pickFiles retirées → sélecteur ouvert → rouge)');
+        V.libererVol(web);
         const vol = UI.lancerExtraction(recette, { ctx: F.ctxDe(), repo, fetch: ff.fetch, enLigne: () => true });
         await attendre(() => ff.posts().length === 1, 'le vol de l’import ciblé est parti');
-        eq(role(r1.root, 'choisir-couverture')?.disabled, false, 'garde du garde : le bouton, rendu avant le vol, est encore actif');
-        role(r1.root, 'choisir-couverture').click(); await tick();
-        eq([pick.n, r1.dits.at(-1), await db.count('imports'), ff.posts().length], [0, 'Une lecture est déjà en cours : annule-la d’abord.', nImports, 1], 'vol tenu AVANT la tape : le toast, AUCUN sélecteur ouvert, rien d’écrit (mutant : les deux gardes avant pickFiles retirées → sélecteur ouvert → rouge)');
         const r2 = await monter(repo, { ff, pick: pick.fn });
-        eq([role(r2.root, 'photographier-couverture')?.disabled, role(r2.root, 'choisir-couverture')?.disabled], [true, true], 'vol tenu AVANT le montage : les deux boutons du pas 1 rendus éteints (volAilleurs ; mutants : eteint = false, eteint sans volAilleurs → rouge)');
+        const eteints = (r) => [role(r.root, 'photographier-couverture')?.disabled, role(r.root, 'choisir-couverture')?.disabled];
+        eq([eteints(r2), eteints(r1)], [[true, true], [true, true]], 'vol tenu AVANT le montage : les deux boutons du pas 1 rendus éteints (volAilleurs ; mutants : eteint = false, eteint sans volAilleurs → rouge) ; la route montée AVANT le vol a suivi son avis (vague finale, constat 3)');
         await UI.annulerVol(recette); await vol;
+        await attendre(() => [...eteints(r1), ...eteints(r2)].every((x) => x === false), 'fin du vol d’une autre route : les boutons rallumés');
+        eq([eteints(r1), eteints(r2), r2.root.querySelector('input[name="isbn"]') !== null], [[false, false], [false, false], true], 'fin du vol d’une autre route, SANS import de couverture : les deux boutons des deux routes se rallument, sans geste ni navigation (vague finale, constat 3 ; mutant : écouteur muet sans import → rouge)');
       });
 
       await scenario('vol d’une autre route pris PENDANT la préparation : le toast, la ligne a_lancer, un seul POST (§ 4.5 ; ronde 1)', async (repo, db) => {
@@ -2351,7 +2360,9 @@ export async function runAjouterTests({ eq, ok }) {
           const image = await F.imageDe('e.jpg', couleurs.shift());
           const r = await monter(repo, { ff, enLigne, pick: async () => [image] });
           role(r.root, 'choisir-couverture').click();
-          await attendre(() => r.root.etatRoute().lecturesRecues === 1 && ['lue', 'echec', 'a_lancer'].includes(r.root.etatRoute().lecture?.statut), 'issue du vol');
+          // Vague finale : `pas === 2` attend aussi la RELECTURE qui suit le vol — un refus (hors ligne) pose a_lancer dès apresVol, avant elle ; sans ce terme,
+          // une machine chargée lisait le pas 1 (titreDe nul : un rouge de bruit vu sous mutants, R-E-29).
+          await attendre(() => r.root.etatRoute().lecturesRecues === 1 && ['lue', 'echec', 'a_lancer'].includes(r.root.etatRoute().lecture?.statut) && r.root.etatRoute().pas === 2, 'issue du vol, écran relu');
           r.ligne = (await db.getAll('imports')).find((l) => l.id === r.root.etatRoute().importId);
           return r;
         };
@@ -3036,12 +3047,13 @@ export async function runAjouterTests({ eq, ok }) {
           await attendre(() => r2.root.etatRoute().lecture?.statut === 'a_lancer', 'relue');
           eq([r2.root.textContent.includes('La couverture n’est pas sur cet appareil.'), role(r2.root, 'relire')?.disabled, r2.root.etatRoute().couverture.sha256], [true, true, absente.cover_sha256], 'empreinte valide sans ligne files : le message, « Lire » éteint, l’empreinte gardée');
           // Ronde 1 de T5 : une relecture qui n'apprend rien (octets toujours absents) ne reconstruit pas le formulaire — la saisie et le focus survivent (R-UX-9 ;
-          // les avis du vol, ecouterVol, relisent désormais aussi). Trois allers-retours de la base laissent la relecture finir.
+          // les avis du vol, ecouterVol, relisent désormais aussi). Vague finale (constat 12, R-D-10) : la relecture est ATTENDUE (relecturesFaites), jamais
+          // un nombre fixe d'allers-retours de la base.
           const titre2 = titreDe(r2.root);
           titre2.focus();
+          const faites2 = r2.root.etatRoute().relecturesFaites;
           window.dispatchEvent(new Event('online'));
-          for (let i = 0; i < 3; i += 1) await db.get('imports', absente.id);
-          await tick();
+          await attendre(() => r2.root.etatRoute().relecturesFaites === faites2 + 1, 'la relecture du retour en ligne est faite');
           eq([titreDe(r2.root) === titre2, document.activeElement === titre2], [true, true], 'octets toujours absents : une relecture (online) ne reconstruit pas le pas 2 — même champ Titre, focus gardé (ronde 1 de T5 ; mutant : couverture réécrite à chaque relecture → rouge)');
           // Ronde 1 de T5 (constats 13 et 14) : une empreinte hostile qui EST une chaîne (majuscules) passe aussi par shaBornee ; et `touchee` (§ 4.6) ferme la
           // couverture distante après « ← Changer d’ISBN » puis « Identifier » (D-E18).
@@ -3142,22 +3154,24 @@ export async function runAjouterTests({ eq, ok }) {
       });
 
       // Ronde 1 de T5 : la route qui VOLE ignore les avis de son propre vol jusqu'à sa fin — pendant les gardes (session relue, photo réduite), l'écran reste
-      // « Lecture de la couverture… » avec « Annuler » (N2-b : en_cours rendu AVANT l'appel), jamais la ligne encore a_lancer relue. Trois allers-retours de
-      // la base laissent finir une relecture qui serait partie.
-      await scenario('reprise : pendant les gardes de son propre vol, la route reste « Lecture… » (N2-b ; avis du vol ignorés par la route qui vole)', async (repo, db) => {
+      // « Lecture de la couverture… » avec « Annuler » (N2-b : en_cours rendu AVANT l'appel), jamais la ligne encore a_lancer relue. Vague finale (constats 4
+      // et 12) : un `online` reçu pendant les gardes est ignoré lui aussi, et le scénario COMPTE les relectures (relecturesFaites, R-D-10) — la seule
+      // attendue est celle de la fin du vol ; une relecture d'un avis ou d'un `online` en ajouterait au moins une, quelle que soit la charge de la machine.
+      await scenario('reprise : pendant les gardes de son propre vol, la route reste « Lecture… » (N2-b ; avis du vol et online ignorés par la route qui vole)', async (repo, db) => {
         let jetons = 0, liberer = null;
         const ctx = F.ctxDe(F.SESSION, { jeton: () => ((jetons += 1) === 1 ? Promise.resolve(F.SESSION) : new Promise((r) => { liberer = () => r(F.SESSION); })) });
         const a = await ligneDe(repo, db);
         const { root } = await monter(repo, { ctx, query: { import: a.id } });
         await attendre(() => root.etatRoute().lecture?.statut === 'a_lancer', 'relue');
+        const faites = root.etatRoute().relecturesFaites;
         role(root, 'relire').click();
         await attendre(() => typeof liberer === 'function', 'session relue par le vol (gardes)');
-        for (let i = 0; i < 3; i += 1) await db.get('imports', a.id);
+        window.dispatchEvent(new Event('online'));
         await tick();
         const pendant = [root.etatRoute().lecture?.statut, !!role(root, 'annuler-lecture'), (await db.get('imports', a.id)).status];
         liberer();
         await attendre(() => lue(root), 'lecture appliquée');
-        eq(pendant, ['en_cours', true, 'a_lancer'], 'pendant les gardes du vol (ligne encore a_lancer) : l’écran reste « Lecture… » avec « Annuler » (mutant : la route relit à chaque avis de son propre vol → « Lire la couverture » → rouge)');
+        eq([pendant, root.etatRoute().relecturesFaites - faites], [['en_cours', true, 'a_lancer'], 1], 'pendant les gardes du vol (ligne encore a_lancer) : l’écran reste « Lecture… » avec « Annuler », et la SEULE relecture est celle de la fin du vol (mutants : la route relit à chaque avis de son propre vol, ou sur un `online` pendant les gardes → une relecture de plus → rouge)');
       });
 
       // Ronde 1 de T5 (constats 2, 6, 8 ; sondes P2, SONDE-3) : une couverture d'un AUTRE appareil relancée ici devient celle de CET appareil (device_id réécrit au
@@ -3248,6 +3262,196 @@ export async function runAjouterTests({ eq, ok }) {
         bouton(root, 'Ajouter ce livre').click();
         await attendre(() => navs.length === 1, 'livre écrit');
         eq([await db.count('books'), await db.count('imports'), (await db.getAll('book_editions'))[0]?.cover_sha256 === l.cover_sha256], [1, 0, true], 'ligne disparue : « Ajouter ce livre » écrit le livre seul, avec la couverture de la reprise ; aucune ligne d’import recréée');
+      });
+
+      // --- Vague finale du lot E (revue finale de branche) : chaque scénario a été vu ROUGE sur le src/ d'avant la vague (rapport final-fix-report.md).
+      // Constat 1 : sans ISBN (œuvre à plusieurs éditions), « Utiliser ces renseignements » puis « ← Changer d’ISBN » et « Saisir à la main » — aucun ISBN avant
+      // comme après : les champs repris et leur étiquette restent (§ 4.3.5). Une couverture en capitales rend le titre de la fiche différent du titre lu.
+      await scenario('vague finale : sans ISBN, « Utiliser ces renseignements », « ← Changer d’ISBN » puis « Saisir à la main » gardent les champs repris et leur étiquette (§ 4.3.5)', async (repo) => {
+        const capitales = { title: 'JERUSALEM', subtitle: null, authors: ['YOTAM OTTOLENGHI'], publisher: null, language: 'en', uncertain: [] };
+        const ff = F.fauxFetch({ assistant: [200, F.corpsOk(capitales)], ol: [200, F.OL_JERUSALEM] });
+        const { root } = await monter(repo, { ff, pick: async () => [await F.imageDe('jc.jpg', '#3a3')] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => root.etatRoute().propositionsRecues === 1 && bandeau(root) !== null, 'bandeau');
+        bouton(root, 'Utiliser ces renseignements').click();
+        const apres = [titreDe(root).value, champ(root, 'Auteur / chef').value, root.querySelector('.status.info')?.textContent, root.etatRoute().isbn];
+        bouton(root, '← Changer d’ISBN').click();
+        bouton(root, 'Saisir à la main').click();
+        eq([apres, root.etatRoute().pas, titreDe(root).value, champ(root, 'Auteur / chef').value, root.querySelector('.status.info')?.textContent],
+          [['Jerusalem', 'Yotam Ottolenghi, Sami Tamimi', 'Renseigné par Open Library — vérifie et corrige.', ''], 2, 'Jerusalem', 'Yotam Ottolenghi, Sami Tamimi', 'Renseigné par Open Library — vérifie et corrige.'],
+          'sans ISBN avant comme après : « Saisir à la main » garde le titre et l’auteur repris d’Open Library ET leur étiquette (vague finale, constat 1 ; avant : champs vidés, étiquette tombée)');
+      });
+
+      // Constats 2 et 5 : une lecture APPLIQUÉE n'est rendue qu'à une fiche d'ISBN TROUVÉE (option 1 du constat 7 de la tâche 4, appliquée à la branche
+      // `trouve` seule) — un ISBN introuvable ou une panne d'Open Library laissent les champs lus, la lecture `lue` et « Lu sur la couverture — vérifie. » ;
+      // « ← Changer d’ISBN » puis « Saisir à la main » garde l'étiquette de la lecture qui est encore à l'écran (I-B), avec ses mentions.
+      await scenario('vague finale : une lecture appliquée survit à « Saisir à la main », à un ISBN introuvable et à une panne d’Open Library (I-B, C3)', async (repo) => {
+        let panne = false;
+        const rien = { numFound: 0, docs: [] };
+        const ff = F.fauxFetch({ assistant: [200, F.corpsOk({ ...F.LECTURE, uncertain: ['publisher'] })], ol: (a) => (new URL(a.url).searchParams.has('isbn') && panne ? [503, ''] : [200, rien]) });
+        const { root } = await monter(repo, { ff, pick: async () => [await F.imageDe('ki.jpg', '#a33')] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => lue(root) && root.etatRoute().propositionsRecues === 1, 'lecture appliquée, rattrapage fini');
+        const vu = () => [root.etatRoute().pas, titreDe(root)?.value, champ(root, 'Auteur / chef')?.value, root.etatRoute().lecture?.statut, root.querySelector('.status.info')?.textContent ?? null, !!role(root, 'incertain-publisher')];
+        bouton(root, '← Changer d’ISBN').click();
+        bouton(root, 'Saisir à la main').click();
+        eq(vu(), [2, 'À la di Stasio', 'Josée Di Stasio', 'lue', 'Lu sur la couverture — vérifie.', true], '« ← Changer d’ISBN » puis « Saisir à la main » après une lecture : champs lus, mention de l’éditeur incertain ET « Lu sur la couverture — vérifie. » (vague finale, constat 5 ; avant : étiquette tombée)');
+        bouton(root, '← Changer d’ISBN').click();
+        taper(root.querySelector('input[name="isbn"]'), '9780306406157');
+        bouton(root, 'Identifier').click();
+        await attendre(() => root.etatRoute().reponsesRecues === 1 && !root.etatRoute().recherche, 'ISBN introuvable');
+        eq([...vu(), rappel(root)], [2, 'À la di Stasio', 'Josée Di Stasio', 'lue', 'Lu sur la couverture — vérifie.', true, 'ISBN 9780306406157'], 'ISBN introuvable après une lecture : la lecture reste appliquée, ses champs et son étiquette aussi, l’ISBN tapé est rappelé (vague finale, constat 2 ; avant : champs vidés, lecture « recue »)');
+        bouton(root, '← Changer d’ISBN').click();
+        panne = true;
+        taper(root.querySelector('input[name="isbn"]'), '9782890772816');
+        bouton(root, 'Identifier').click();
+        await attendre(() => root.etatRoute().reponsesRecues === 2 && !root.etatRoute().recherche, 'Open Library en panne');
+        const enPanne = [root.etatRoute().pas, !!role(root, 'indisponible'), root.etatRoute().lecture?.statut];
+        bouton(root, 'Saisir à la main').click();
+        eq([enPanne, ...vu()], [[1, true, 'lue'], 2, 'À la di Stasio', 'Josée Di Stasio', 'lue', 'Lu sur la couverture — vérifie.', true], 'Open Library en panne après une lecture : le pas 1 dit la panne, la lecture reste ; « Saisir à la main » rend ses champs et son étiquette (vague finale, constats 2 et 5 ; avant : champs vides)');
+      });
+
+      // Constat 6 : une lecture a_verifier DÉJÀ appliquée (reprise) dont les octets arrivent après (L4) — la relecture suivante rend l'aperçu dans la zone
+      // Couverture seule, sans reconstruire le formulaire (le constat 16 de T5 n'éprouvait que a_lancer).
+      await scenario('vague finale : reprise d’une lecture a_verifier, des octets arrivés après rendent l’aperçu, saisie et focus gardés', async (repo, db) => {
+        const { sha256 } = await LA.poserCouverture(await F.imageDe('av.jpg', '#33a'), { origine: 'locale', repo });
+        const fichier = await db.get('files', sha256);
+        await db.mutate({ deletes: { files: [sha256] }, origin: 'device' });
+        const l = await ligneDe(repo, db, { cover_sha256: sha256, status: 'a_verifier', resultat: { ...F.LECTURE }, started_at: NOW }, { octets: false });
+        const { root } = await monter(repo, { query: { import: l.id } });
+        await attendre(() => lue(root) && root.etatRoute().propositionsRecues === 1, 'lecture reprise');
+        const zoneTexte = () => root.querySelector('.zone-couverture')?.textContent ?? '';
+        const avant = [!!root.querySelector('.zone-couverture img'), zoneTexte().includes('La couverture n’est pas sur cet appareil.')];
+        const titre = titreDe(root);
+        titre.focus();
+        const faites = root.etatRoute().relecturesFaites;
+        await db.mutate({ puts: { files: [fichier] }, origin: 'device' });
+        window.dispatchEvent(new Event('online'));
+        await attendre(() => root.etatRoute().relecturesFaites === faites + 1, 'relecture du retour en ligne faite');
+        eq([avant, !!root.querySelector('.zone-couverture img'), zoneTexte().includes('Couverture enregistrée.'), root.textContent.includes('La couverture n’est pas sur cet appareil.'), titreDe(root) === titre, document.activeElement === titre, titre.value],
+          [[false, true], true, true, false, true, true, 'À la di Stasio'], 'a_verifier appliquée, octets arrivés après la reprise : l’aperçu et « Couverture enregistrée. » rendus dans la zone seule, la phrase d’absence retirée, le champ Titre (nœud, focus) intact (vague finale, constat 6)');
+        // L'autre branche (lecture REÇUE après un geste, `recue`) : une ligne en vol sur un autre document, reprise sans ses octets ; « ← Changer d’ISBN » puis
+        // « Saisir à la main » (un geste) ; l'autre onglet finit (a_verifier) et les octets arrivent — la relecture du retour en ligne garde la lecture au
+        // journal (`recue`) ET rend l'aperçu dans la zone seule.
+        scene.replaceChildren();
+        const { sha256: sha2 } = await LA.poserCouverture(await F.imageDe('av2.jpg', '#a3a'), { origine: 'locale', repo });
+        const fichier2 = await db.get('files', sha2);
+        await db.mutate({ deletes: { files: [sha2] }, origin: 'device' });
+        const v = await ligneDe(repo, db, { cover_sha256: sha2, status: 'en_cours', document_id_vol: 'autre-document', battement_at: NOW, started_at: NOW }, { octets: false });
+        const r2 = await monter(repo, { query: { import: v.id } });
+        await attendre(() => r2.root.etatRoute().lecture?.statut === 'en_cours' && r2.root.etatRoute().relecturesFaites === 2, 'relue en vol ailleurs, et la relecture de la passe `interrompu` de l’affichage faite');
+        bouton(r2.root, '← Changer d’ISBN').click();
+        bouton(r2.root, 'Saisir à la main').click();
+        const titre2 = titreDe(r2.root);
+        titre2.focus(); taper(titre2, 'Le mien');
+        await db.mutate({ puts: { imports: [{ ...(await db.get('imports', v.id)), status: 'a_verifier', resultat: { ...F.LECTURE }, document_id_vol: null }], files: [fichier2] }, origin: 'device' });
+        const faites2 = r2.root.etatRoute().relecturesFaites;
+        window.dispatchEvent(new Event('online'));
+        await attendre(() => r2.root.etatRoute().relecturesFaites === faites2 + 1, 'relecture du retour en ligne faite');
+        eq([r2.root.etatRoute().lecture?.statut, !!r2.root.querySelector('.zone-couverture img'), (r2.root.querySelector('.zone-couverture')?.textContent ?? '').includes('Couverture enregistrée.'), titreDe(r2.root) === titre2, document.activeElement === titre2, titre2.value],
+          ['recue', true, true, true, true, 'Le mien'], 'lecture reçue après un geste (recue), octets arrivés : l’aperçu rendu dans la zone seule, la saisie (nœud, valeur, focus) intacte (vague finale, constat 6, seconde branche)');
+      });
+
+      // Constat 7 : un geste sur la SEULE zone Couverture du pas 2 (« Retirer », « Choisir une image ») pendant « Relire » ne change pas de livre — la lecture
+      // payée qui arrive reste celle de l'écran et est appliquée (I-E4 ne vise que les gestes qui changent le livre) ; la couverture de l'édition suit le geste.
+      await scenario('vague finale : « Retirer » ou « Choisir une image » de la zone Couverture pendant « Relire » ne détachent pas la lecture payée (I-E4, § 4.3.3)', async (repo, db) => {
+        for (const geste of ['Retirer', 'Choisir une image']) {
+          scene.replaceChildren();
+          const q = await ligneDe(repo, db, { status: 'echec', erreur: { raison: 'quota', extra: { quota: 60 } } });
+          const ff = F.fauxFetch({ assistant: null });
+          const { root } = await monter(repo, { ff, query: { import: q.id }, pick: async () => [await F.imageDe('zc.jpg', '#3aa')] });
+          await attendre(() => root.etatRoute().lecture?.statut === 'echec', 'relue');
+          const sha = root.etatRoute().couverture.sha256;
+          const faites = root.etatRoute().relecturesFaites;
+          role(root, 'relire').click();
+          await attendre(() => ff.posts().length === 1, 'vol parti');
+          bouton(root, geste).click();
+          if (geste !== 'Retirer') await attendre(() => root.etatRoute().couverture.sha256 && root.etatRoute().couverture.sha256 !== sha && !root.etatRoute().couverture.enCours, 'nouvelle image posée dans la zone');
+          ff.rendre.shift()(200, F.corpsOk(F.LECTURE));
+          await attendre(() => root.etatRoute().lecturesRecues === 1 && root.etatRoute().relecturesFaites === faites + 1, 'lecture reçue et relue');
+          const couv = root.etatRoute().couverture.sha256;
+          eq([root.etatRoute().lecture?.statut, titreDe(root).value, root.querySelector('.status.info')?.textContent, (await db.get('imports', q.id)).status, (await db.get('imports', q.id)).cover_sha256 === sha, geste === 'Retirer' ? couv === null : (couv !== null && couv !== sha)],
+            ['lue', 'À la di Stasio', 'Lu sur la couverture — vérifie.', 'a_verifier', true, true], `« ${geste} » dans la zone Couverture pendant « Relire » : la lecture payée est appliquée, la ligne garde sa photo, l’édition suit le geste (vague finale, constat 7 ; avant : lecture « recue », rien à l’écran)`);
+        }
+      });
+
+      // Constat 8 : la préparation d'une photo qui finit APRÈS « Saisir à la main » (et la saisie du titre) ne reconstruit pas le pas 2 — les blocs seuls sont
+      // rendus (lecture, zone Couverture, « Ajouter ce livre ») ; un refus de la préparation, de même (I-E4 : « les champs tapés et le focus restent »).
+      await scenario('vague finale : la préparation finie après « Saisir à la main » rend les blocs seuls — saisie et focus gardés (I-E4, R-UX-9)', async (repo, db) => {
+        const ff = F.fauxFetch({ assistant: null });
+        let libererPut = null;
+        const espion = { ...repo, putFile: (...a) => new Promise((r) => { libererPut = () => r(repo.putFile(...a)); }) };
+        const { root } = await monter(espion, { ff, pick: async () => [await F.imageDe('fp.jpg', '#a3a')] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => root.etatRoute().lecture?.statut === 'preparation' && typeof libererPut === 'function', 'préparation');
+        bouton(root, 'Saisir à la main').click();
+        const titre = titreDe(root);
+        titre.focus(); taper(titre, 'Mon li');
+        libererPut();
+        await attendre(() => ff.posts().length === 1, 'le vol est parti après la préparation');
+        eq([titreDe(root) === titre, titre.value, document.activeElement === titre, role(root, 'lecture')?.textContent.includes('Lecture de la couverture par l’assistant…'), !!role(root, 'annuler-lecture'), !!root.querySelector('.zone-couverture img'), bouton(root, 'Ajouter ce livre')?.disabled, role(root, 'enregistrer-bloque')?.hidden],
+          [true, 'Mon li', true, true, true, true, true, false], 'préparation finie après « Saisir à la main » : le champ Titre (nœud, valeur, focus) survit ; le bloc lecture et « Annuler », l’aperçu et la phrase D-E9 sont rendus (vague finale, constat 8 ; avant : dessiner() → focus perdu)');
+        const [ligne] = await db.getAll('imports');
+        role(root, 'annuler-lecture').click();
+        await attendre(async () => (await db.get('imports', ligne.id)).erreur?.raison === 'annule' && !UI.volEnCours(), 'annulée, vol libéré');
+        scene.replaceChildren();
+        const vraiErreur = console.error;
+        console.error = () => {};
+        try {
+          let rejeter = null;
+          const e2 = { ...repo, putFile: () => new Promise((_, rej) => { rejeter = () => rej(new Error('QuotaExceededError')); }) };
+          const b = await monter(e2, { pick: async () => [await F.imageDe('fq.jpg', '#aa3')] });
+          role(b.root, 'choisir-couverture').click();
+          await attendre(() => b.root.etatRoute().lecture?.statut === 'preparation' && typeof rejeter === 'function', 'préparation (refus à venir)');
+          bouton(b.root, 'Saisir à la main').click();
+          const t2 = titreDe(b.root);
+          t2.focus(); taper(t2, 'Mon li');
+          rejeter();
+          await attendre(() => b.root.etatRoute().lecture?.statut === 'refus_image', 'refus de la préparation');
+          eq([titreDe(b.root) === t2, t2.value, document.activeElement === t2, bouton(b.root, 'Ajouter ce livre')?.disabled, role(b.root, 'enregistrer-bloque')?.hidden], [true, 'Mon li', true, false, true],
+            'refus de la préparation après « Saisir à la main » : le champ Titre (nœud, valeur, focus) survit, « Ajouter ce livre » se rallume, la phrase D-E9 se cache (vague finale, constat 8)');
+        } finally { console.error = vraiErreur; }
+      });
+
+      // Constat 11 (faux-verts T5q, P1, P2) : le message d'un vol REFUSÉ est lu dans le bloc lecture lui-même, jamais dans root.textContent (que la zone
+      // Couverture peut remplir de la même phrase) — des octets typés image mais non décodables (refus `image`), des octets disparus au moment du vol
+      // (refus `octets_absents`) ; aucun POST, la ligne reste a_lancer.
+      await scenario('vague finale : le message d’un vol refusé (image, octets_absents) est celui du bloc lecture (§ 4.2, pas 5)', async (repo, db) => {
+        const shaC = 'c'.repeat(64);
+        await db.mutate({ puts: { files: [{ sha256: shaC, blob: new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x01, 0x02, 0x03])], { type: 'image/jpeg' }), mime: 'image/jpeg', size: 8, created_at: NOW }] }, origin: 'device' });
+        const l1 = await ligneDe(repo, db, { cover_sha256: shaC }, { octets: false });
+        const ff1 = F.fauxFetch();
+        const r1 = await monter(repo, { ff: ff1, query: { import: l1.id } });
+        await attendre(() => r1.root.etatRoute().lecture?.statut === 'a_lancer', 'relue');
+        const allume1 = role(r1.root, 'relire')?.disabled;
+        const faites1 = r1.root.etatRoute().relecturesFaites;
+        role(r1.root, 'relire').click();
+        await attendre(() => r1.root.etatRoute().lecturesRecues === 1 && r1.root.etatRoute().relecturesFaites === faites1 + 1, 'vol refusé puis relu');
+        eq([allume1, role(r1.root, 'lecture')?.querySelector('.status')?.textContent, ff1.posts().length, (await db.get('imports', l1.id)).status], [false, 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 0, 'a_lancer'],
+          'octets typés image mais non décodables : « Lire » allumé, puis le refus `image` dit dans le bloc lecture, aucun POST, la ligne a_lancer (vague finale, constat 11 ; mutant P1 : message du refus image nul → rouge)');
+        scene.replaceChildren();
+        const l2 = await ligneDe(repo, db);
+        let sansOctets = false;
+        const espion = { ...repo, getFile: (...a) => (sansOctets ? Promise.resolve(null) : repo.getFile(...a)) };
+        const ff2 = F.fauxFetch();
+        const r2 = await monter(espion, { ff: ff2, query: { import: l2.id } });
+        await attendre(() => r2.root.etatRoute().lecture?.statut === 'a_lancer', 'relue');
+        const allume2 = role(r2.root, 'relire')?.disabled;
+        const faites2 = r2.root.etatRoute().relecturesFaites;
+        sansOctets = true;
+        role(r2.root, 'relire').click();
+        await attendre(() => r2.root.etatRoute().lecturesRecues === 1 && r2.root.etatRoute().relecturesFaites === faites2 + 1, 'vol refusé puis relu');
+        eq([allume2, role(r2.root, 'lecture')?.querySelector('.status')?.textContent, role(r2.root, 'relire')?.disabled, ff2.posts().length, (await db.get('imports', l2.id)).status], [false, 'La couverture n’est pas sur cet appareil.', true, 0, 'a_lancer'],
+          'octets disparus au moment du vol : le refus `octets_absents` dit dans le bloc lecture, « Lire » éteint, aucun POST, la ligne a_lancer (vague finale, constat 11 ; mutants T5q : message nul, P2 : octets_absents hors de la liste → rouge)');
+      });
+
+      // Constat 11 bis (faux-vert T5r) : enregistrerLivre, exportée, borne ELLE-MÊME l'empreinte de couverture (I-E1) — un appelant futur qui lui passe un
+      // pointeur relu du journal sans le borner n'écrit jamais une édition au pointeur hostile.
+      await scenario('vague finale : enregistrerLivre borne elle-même l’empreinte de couverture (I-E1)', async (repo, db) => {
+        const ed1 = await LA.enregistrerLivre({ champs: { title: 'x' }, isbn: '', coverSha256: 'F'.repeat(64) }, { repo });
+        const ed2 = await LA.enregistrerLivre({ champs: { title: 'y' }, isbn: '', coverSha256: { x: 1 } }, { repo });
+        eq([ed1.cover_sha256, ed2.cover_sha256, (await db.get('book_editions', ed1.id))?.cover_sha256, (await db.get('book_editions', ed2.id))?.cover_sha256], [null, null, null, null],
+          'enregistrerLivre : une empreinte hors forme (« F… », objet) donne une édition sans couverture (vague finale, constat 11 bis ; mutant T5r : shaBornee retirée d’enregistrerLivre → rouge)');
       });
     } finally { scene.remove(); setUiLocale(localeAvant); }
   }

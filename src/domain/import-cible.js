@@ -9,7 +9,7 @@ import { newId } from '../core/ids.js';
 import { lienSignet } from '../core/lien.js';
 import { IMPORTS_TERMINES, STATUTS_IMPORT } from '../model/schema.js';
 import { estTitreUneLigne } from '../core/bornes.js';
-import { validerLectureCouverture } from './llm.js'; // lot E, ronde 1 de T5 : le titre lu d'une couverture (section « Imports ») est celui de la lecture REVALIDÉE
+import { validerLectureCouverture, BORNES_CLASSEMENT } from './llm.js'; // lot E, ronde 1 de T5 : le titre lu d'une couverture (section « Imports ») est celui de la lecture REVALIDÉE ; vague finale : les bornes de lotDe
 
 // --- Transitions du journal (spec § 3.1) : toutes par repo.transitionner (I-10) ; aucune autre. `en_cours → echec` couvre annule,
 // interrompu et incertain (la raison est dans `erreur`). `a_verifier → echec` (T4-R1, ratifiée) couvre UN seul cas : un `resultat` relu du
@@ -316,8 +316,8 @@ export function ligneImportNeuve({ id, kind, recipe_id = null, edition_id = null
 // Le champ `lot` d'une ligne de recette (§ 3.3), DONNÉE reçue ou restaurée : revalidé à chaque lecture. classement_id (1 à 80 points de code), rang et
 // total (entiers 1..10, rang ≤ total) sont STRUCTURANTS : fautifs → null, la ligne se comporte comme une ligne du lot A. titre (estTitreUneLigne, 200) et
 // page (1..9999) ne servent qu'à l'affichage : fautifs → null SANS jeter le lot. Objet construit, lu par Object.hasOwn. Les bornes 10, 200 et 9999 sont
-// celles de BORNES_CLASSEMENT (src/domain/llm.js : groupes, titre, page), recopiées ici (import-cible.js n'importe pas llm.js) : une borne changée
-// là se change ici (ronde 1 de la tâche 1).
+// celles de BORNES_CLASSEMENT (src/domain/llm.js : groupes, titre, page), LUES là depuis la vague finale du lot E — la copie d'avant venait de ce que
+// import-cible.js n'importait pas llm.js ; l'arc existe depuis la ronde 1 de la tâche 5 du lot E (validerLectureCouverture) : une seule source.
 export function lotDe(ligne) {
   const brut = ligne && typeof ligne === 'object' && Object.hasOwn(ligne, 'lot') ? ligne.lot : null;
   if (!brut || typeof brut !== 'object' || Array.isArray(brut)) return null;
@@ -325,8 +325,9 @@ export function lotDe(ligne) {
   const id = champ('classement_id'), rang = champ('rang'), total = champ('total'), titre = champ('titre'), page = champ('page');
   const n = typeof id === 'string' ? Array.from(id).length : 0;
   if (n < 1 || n > 80) return null;
-  if (!Number.isInteger(rang) || !Number.isInteger(total) || rang < 1 || total < 1 || rang > 10 || total > 10 || rang > total) return null;
-  return { classement_id: id, rang, total, titre: estTitreUneLigne(titre, 200) ? titre : null, page: Number.isInteger(page) && page >= 1 && page <= 9999 ? page : null };
+  const B = BORNES_CLASSEMENT;
+  if (!Number.isInteger(rang) || !Number.isInteger(total) || rang < 1 || total < 1 || rang > B.groupes || total > B.groupes || rang > total) return null;
+  return { classement_id: id, rang, total, titre: estTitreUneLigne(titre, B.titre) ? titre : null, page: Number.isInteger(page) && page >= 1 && page <= B.page ? page : null };
 }
 // Ronde 1 de la tâche 4 (revue, lentille sécurité) : `lot` n'existe que sur une ligne `recette` (§ 3.3). Une ligne d'une autre sorte qui en porte un
 // (reçue, restaurée) n'est d'AUCUN lot : ni bloc, ni progression, ni « Continuer », ni note de séance. lotDe reste la revalidation du champ seul (T-D7) ;
