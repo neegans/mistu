@@ -280,7 +280,8 @@ const sien = (o, cle) => (Object.hasOwn(o, cle) ? o[cle] : undefined);
 // Un texte du modèle sur UNE ligne (D-D11) : `uneLigne` du lot C (vague finale : fins de ligne et blancs ramenés à UNE espace AVANT le
 // nettoyage Cc/Cf/Cs, jamais deux mots collés), puis plié (plierUneLigne : tout blanc restant, insécables comprises, devient une espace) ;
 // '' s'il ne reste rien.
-const surUneLigne = (v) => plierUneLigne(uneLigne(v) ?? '');
+// Exportée (lot E, ronde 1) : la section « Imports » (src/domain/import-cible.js) la lit pour le titre lu d'une couverture — une seule règle de pli.
+export const surUneLigne = (v) => plierUneLigne(uneLigne(v) ?? '');
 
 // validerClassement(data, { nbPhotos }) → { groupes: [{ photos, title, printed_page, uncertain }], orphelines, non_classees, partagees, uncertain }.
 // Lève ErreurExtraction(illisible | hors_bornes | vide). `non_classees` et `partagees` sont CALCULÉES (une clé homonyme de la réponse est ignorée).

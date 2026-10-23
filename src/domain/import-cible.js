@@ -9,6 +9,7 @@ import { newId } from '../core/ids.js';
 import { lienSignet } from '../core/lien.js';
 import { IMPORTS_TERMINES, STATUTS_IMPORT } from '../model/schema.js';
 import { estTitreUneLigne, borner } from '../core/bornes.js';
+import { surUneLigne } from './llm.js'; // lot E, ronde 1 : LA règle d'une ligne (R-E-22, R-D-13) — le titre lu d'une couverture (section « Imports »)
 
 // --- Transitions du journal (spec § 3.1) : toutes par repo.transitionner (I-10) ; aucune autre. `en_cours → echec` couvre annule,
 // interrompu et incertain (la raison est dans `erreur`). `a_verifier → echec` (T4-R1, ratifiée) couvre UN seul cas : un `resultat` relu du
@@ -206,7 +207,9 @@ export const KINDS_IMPORT = Object.freeze(['recette', 'index', 'web', 'classemen
 // `couverture` (lot E, spec couverture § 3.6, P-2) : une couverture ne reçoit jamais de page — hors de cette liste, les murs de repo.ajouterPages et
 // repo.ouvrirImport la refusent.
 export const KINDS_PAGES = Object.freeze(['recette', 'index', 'classement']);
-const TITRE_COUVERTURE_MAX = 300; // le titre lu d'une couverture, borné avant l'écran (I-E1 : une ligne reçue peut porter 16 000 points de code)
+// Le titre lu d'une couverture, ramené à UNE ligne (surUneLigne : une fin de ligne vaut une espace, jamais deux mots collés) puis BORNÉ avant l'écran (I-E1 :
+// une ligne reçue peut porter 16 000 points de code).
+const TITRE_COUVERTURE_MAX = 300;
 export const IMPORTS_OUVERTS = Object.freeze(STATUTS_IMPORT.filter((s) => !IMPORTS_TERMINES.includes(s)));
 export const importOuvert = (i) => !!i && typeof i === 'object' && typeof i.id === 'string' && !!i.id && KINDS_IMPORT.includes(i.kind) && IMPORTS_OUVERTS.includes(i.status);
 
@@ -243,7 +246,8 @@ export function cibleReprise(ligne) {
 // relecture D-B18 vise justement une fiche lue, et la variante web de l'écran l'admet). Son titre est { type: 'web', texte: titre du signet,
 // livre: l'hôte RECALCULÉ de son adresse }.
 // Lot E (D-E14, R-E-13) : une ligne `couverture` — Reprendre (#/add/livre?import=) et Ignorer, jamais Relancer ; en vol : Annuler si CE document la
-// tient ; d'un autre appareil : Ignorer seul, sauf un a_verifier qui porte sa lecture ; son titre est la lecture BORNÉE (300 points de code, nettoyée).
+// tient ; d'un autre appareil : Ignorer seul, sauf un a_verifier qui porte sa lecture (ronde 1 : LA règle du classement, une seule branche) ; son titre
+// est la lecture sur UNE ligne (surUneLigne, R-E-22) et BORNÉE (300 points de code, nettoyée).
 // Rend [{ id, kind, titre: { type: reference | index | regrouper | web | classement | couverture | seance, texte, livre }, etat, age: { n, unite }, raison, gestes, cible,
 // ailleurs, autreAppareil, referenceAbsente, pages }].
 // Lot D : une ligne `classement` (Reprendre → la séance ; jamais Relancer) ; chaque ligne porte `lot` (lotDe, revalidé) ; une ligne de lot sans référence garde le type `regrouper`.
@@ -268,11 +272,11 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     const type = couverture ? 'couverture' : i.kind === 'classement' ? 'classement' : i.kind === 'index' ? 'index' : web ? 'web' : recetteId ? 'reference' : 'regrouper';
     const cible = cibleReprise(i);
     let gestes;
-    // Lot E (D-E14, R-E-13) : une couverture ne se RELANCE jamais en place — « Reprendre » ouvre la route, qui offre « Lire / Relire la couverture ».
-    if (couverture) gestes = i.status === 'en_cours' ? (tenu ? ['annuler'] : []) : (autreAppareil && !(i.status === 'a_verifier' && i.resultat != null) ? ['ignorer'] : ['reprendre', 'ignorer']);
-    else if (referenceAbsente) gestes = [];
+    if (referenceAbsente) gestes = [];
     else if (i.status === 'en_cours') gestes = tenu ? ['annuler'] : [];
-    else if (i.kind === 'classement') gestes = autreAppareil && !(i.status === 'a_verifier' && i.resultat != null) ? ['ignorer'] : ['reprendre', 'ignorer']; // lot D (D-D14) : jamais « Relancer » depuis Imports
+    // Lot D (D-D14) : un classement ne se RELANCE jamais depuis Imports. Lot E (D-E14, R-E-13 ; ronde 1 : la même règle, une seule branche) : une couverture
+    // non plus — « Reprendre » ouvre sa route, qui offre « Lire / Relire la couverture » (sa référence n'est jamais absente : elle n'a pas de recipe_id).
+    else if (i.kind === 'classement' || couverture) gestes = autreAppareil && !(i.status === 'a_verifier' && i.resultat != null) ? ['ignorer'] : ['reprendre', 'ignorer'];
     else if (web) gestes = i.status === 'echec' ? ['relancer', 'ignorer'] : i.status === 'a_verifier' && i.resultat == null ? ['ignorer'] : ['reprendre', 'ignorer'];
     else if (recette?.availability === 'available') gestes = ['ignorer']; // un POST ne servirait à rien : l'écran ciblé refuse une recette qui a son texte
     else if (autreAppareil) gestes = i.status === 'a_verifier' && i.resultat != null ? ['reprendre', 'ignorer'] : ['ignorer'];
@@ -284,7 +288,7 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     // n'a aucun signet à relire : « Réessayer » ne pourrait jamais aboutir (ronde 1 ; lancerLecture la refuse `inconnu`) — « Ignorer » seul reste.
     if (web ? !recetteId : !nbPages(i)) gestes = gestes.filter((g) => g !== 'relancer');
     return {
-      id: i.id, kind: i.kind, titre: couverture ? { type, texte: borner(i.resultat?.title, TITRE_COUVERTURE_MAX) || null, livre: null } : { type, texte: recette ? chaine(recette.original_title) : null, livre: web ? (recette ? lienSignet(recette.source_url).hote : null) : livreDe(recette?.edition_id ?? i.edition_id) },
+      id: i.id, kind: i.kind, titre: couverture ? { type, texte: borner(surUneLigne(i.resultat?.title), TITRE_COUVERTURE_MAX) || null, livre: null } : { type, texte: recette ? chaine(recette.original_title) : null, livre: web ? (recette ? lienSignet(recette.source_url).hote : null) : livreDe(recette?.edition_id ?? i.edition_id) },
       etat: i.status, age: ageDepuis(i.updated_at, maintenant), raison: i.status === 'echec' ? chaine(i.erreur?.raison) : null,
       gestes, cible, ailleurs, autreAppareil, referenceAbsente, pages: nbPages(i), lot: lotDeRecette(i),
     };
