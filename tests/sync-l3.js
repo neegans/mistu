@@ -1881,9 +1881,9 @@ export async function runSyncL3Tests({ eq, ok }) {
   // rendu demandé par le moteur au milieu le remplacerait sans que personne l'ait demandé.
   {
     const { ROUTES_DE_SAISIE, estRouteDeSaisie, passeAEcrit } = etatUi;
-    eq(ROUTES_DE_SAISIE, ['/recipes/new', '/recipes/creer', '/recipes/*/edit', '/recipes/*/importer', '/import', '/cook/*', '/add'], 'R-L3-19 : les routes de saisie sont nommées une fois, en un seul endroit (F2 du lot création IA : /recipes/creer, sa saisie et son vol ; I16 du lot import ciblé : /recipes/*/importer, ses photos et son vol)');
-    eq(['/recipes/new', '/recipes/creer', '/recipes/rc1/edit', '/recipes/rc1/importer', '/import', '/cook/cs1', '/add'].filter((p) => !estRouteDeSaisie(p)), [], 'R-L3-19 : les sept écrans de saisie sont reconnus');
-    eq(['/', '/library', '/recipes/rc1', '/settings', '/meals', '/kitchen', '/cook', '/add/livre', '/recipes'].filter((p) => estRouteDeSaisie(p)), [],
+    eq(ROUTES_DE_SAISIE, ['/recipes/new', '/recipes/creer', '/recipes/*/edit', '/recipes/*/importer', '/import', '/cook/*', '/add', '/add/livre'], 'R-L3-19 : les routes de saisie sont nommées une fois, en un seul endroit (F2 du lot création IA : /recipes/creer, sa saisie et son vol ; I16 du lot import ciblé : /recipes/*/importer, ses photos et son vol ; D-E19 du lot E : /add/livre, sa photo et son vol)');
+    eq(['/recipes/new', '/recipes/creer', '/recipes/rc1/edit', '/recipes/rc1/importer', '/import', '/cook/cs1', '/add', '/add/livre'].filter((p) => !estRouteDeSaisie(p)), [], 'R-L3-19 : les huit écrans de saisie sont reconnus');
+    eq(['/', '/library', '/recipes/rc1', '/settings', '/meals', '/kitchen', '/cook', '/add/signet', '/add/livre/x', '/recipes'].filter((p) => estRouteDeSaisie(p)), [],
       'R-L3-19 : … et rien d’autre — le motif « * » vaut UN segment, jamais une arborescence');
     eq([estRouteDeSaisie(''), estRouteDeSaisie(null), estRouteDeSaisie(undefined)], [false, false, false], 'R-L3-19 : une route absente n’est pas une saisie');
 

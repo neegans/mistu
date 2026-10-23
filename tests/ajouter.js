@@ -1879,6 +1879,700 @@ export async function runAjouterTests({ eq, ok }) {
       eq([titreDe(r8c).value, auteurDe(r8c).value], ['Mon titre', `Auteur ${A}`], 'route : un titre tapé à la main survit à la réidentification de A ; le champ vide est rempli (C1, C3)');
     });
   }
+  // --- La ROUTE, partie C : la couverture lue (lot E, spec couverture § 4, § 7). Base jetable, fausse fetch qui aiguille et honore le signal, pickFiles
+  // injecté, scène HORS ÉCRAN mais visible (le focus s'y pose). Chaque scénario part d'une base neuve et d'une scène vide ; une exception y devient une
+  // assertion rouge NOMMÉE (la suite continue). Jamais le réseau, jamais la bibliothèque de la personne, jamais le navigateur MCP.
+  {
+    const { withRepo } = await import('./sync-fixture.js');
+    const F = await import('./couverture-fixture.js');
+    const UI = await import('../src/ui/import-cible.js');
+    const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
+    const localeAvant = getUiLocale();
+    setUiLocale('fr');
+    const NOW = '2026-10-19T12:00:00.000Z';
+    const PHRASE_D_E9 = 'La couverture est en cours de lecture : attends la réponse ou annule-la.';
+    const scene = document.createElement('div');
+    scene.style.cssText = 'position:absolute;left:-10000px;top:0;width:900px';
+    document.body.append(scene);
+    const attendre = async (cond, quoi) => { for (let i = 0; i < 300; i += 1) { if (await cond()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error('attente dépassée (3 s) : ' + quoi); };
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    const role = (root, r) => root.querySelector(`[data-role="${r}"]`);
+    const bouton = (root, texte) => [...root.querySelectorAll('button')].find((b) => b.textContent === texte) || null;
+    const titreDe = (root) => [...root.querySelectorAll('input[type="text"]')].find((i) => i.name !== 'isbn') || null;
+    const champ = (root, libelle) => [...root.querySelectorAll('label.field')].find((f) => f.querySelector('span')?.textContent === libelle)?.querySelector('input, select') || null;
+    const rappel = (root) => [...root.querySelectorAll('span.muted')].find((s) => s.textContent.startsWith('ISBN'))?.textContent ?? null;
+    const bandeau = (root) => role(root, 'proposition-ol')?.querySelector('p')?.textContent ?? null;
+    const suggestions = (root) => [...root.querySelectorAll('button.puce.suggestion')].map((b) => b.textContent);
+    const cuisine = (root) => [...root.querySelectorAll('div.field')].find((f) => f.querySelector(':scope > span')?.textContent === 'Cuisines')?.querySelector('button.puce');
+    const taper = (input, v) => { input.value = v; input.dispatchEvent(new Event('input', { bubbles: true })); };
+    const lue = (root) => root.etatRoute().lecture?.statut === 'lue';
+    const PDF = () => new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], 'livre.pdf', { type: 'application/pdf' });
+    // La route, dépendances injectées, racine posée dans la scène. `pick` : pickFiles (défaut : un sélecteur refermé sans fichier). Par défaut, on attend
+    // que la session de l'assistant soit résolue (D-E8 : le bloc du pas 1 dit « Vérification… » jusque-là, sans bouton) — un FAIT, jamais un délai.
+    // `tentativeMs` (50 par défaut : une panne d'Open Library se dit vite) passe à 5 000 dans un scénario qui tient une requête Open Library SUSPENDUE
+    // (ol: null) : sinon la tentative est abandonnée avant que le test la résolve sur une machine chargée (faux rouge).
+    const monter = async (repo, { ctx = F.ctxDe(), ff = F.fauxFetch(), fetch = null, pick = async () => [], enLigne = () => true, query = {}, nav = null, attendreSession = true, tentativeMs = 50 } = {}) => {
+      const dits = [], navs = [];
+      const root = await LA.renderLivreAjoutRoute({}, query, ctx, { repo, fetch: fetch ?? ff.fetch, enLigne, attendre: async () => {}, tentativeMs, navigate: nav ?? ((p) => navs.push(p)), toast: (m) => dits.push(m), pickFiles: pick, maintenant: () => NOW });
+      scene.append(root);
+      if (attendreSession) await attendre(() => root.etatRoute().session !== 'verification', 'session de l’assistant résolue');
+      return { root, dits, navs };
+    };
+    const scenario = (nom, fn) => withRepo(async (repo, db) => {
+      scene.replaceChildren();
+      try { await fn(repo, db); }
+      catch (e) { ok(false, `couverture, route — ${nom} : ${e?.name || 'Erreur'} — ${e?.message || String(e)}`); }
+      finally { if (UI.volEnCours()) UI.reinitialiserImportCible(); }
+    });
+    try {
+      await scenario('pas 1 sans compte (D-E1, D-E8, F-7)', async (repo, db) => {
+        let jetons = 0;
+        const ff = F.fauxFetch();
+        const pick = { n: 0, fn: async () => { pick.n += 1; return []; } };
+        const { root } = await monter(repo, { ctx: F.ctxDe(null, { jeton: async () => { jetons += 1; return null; } }), ff, pick: pick.fn });
+        const bloc = role(root, 'couverture-pas1');
+        eq([!!bloc, bloc?.querySelector('p')?.textContent, role(root, 'connexion-ia')?.textContent.includes('Connecte-toi pour utiliser l’assistant.'), !!role(root, 'se-connecter'), role(root, 'photographier-couverture'), role(root, 'choisir-couverture'), bloc?.textContent.includes('Vérification de l’assistant…')],
+          [true, 'Ou photographie la couverture : l’assistant lit le titre et l’auteur.', true, true, null, null, false], 'pas 1 sans compte : le bloc dit le but, la carte « Connecte-toi… » + « Se connecter », AUCUN bouton de photo, aucun état « Vérification »');
+        await tick();
+        eq([pick.n, ff.appels.length, jetons, await db.count('imports')], [0, 0, 0, 0], 'pas 1 sans compte : ni sélecteur, ni fetch, ni jeton demandé, rien d’écrit');
+        eq([root.querySelector('section p').textContent, bloc.querySelector('small')?.textContent, [...root.querySelectorAll('button')].filter((b) => b.textContent === 'Saisir à la main').length],
+          ['Scanne le code-barres, tape l’ISBN, ou saisis le livre à la main.', 'Une photo de la couverture = un appel à l’assistant, compté dans ton quota du jour.', 1], 'pas 1 : la première ligne ne bouge pas, le coût est dit, « Saisir à la main » reste UN (F17)');
+        const garde = await monter(repo, { ctx: F.ctxDe(null, { guard: { ok: false, message: 'Cet appareil est lié à un autre compte.' } }), ff });
+        eq([role(garde.root, 'connexion-ia')?.textContent, role(garde.root, 'se-connecter')], ['Cet appareil est lié à un autre compte.', null], 'pas 1, garde de compte refusée : le message de la garde, sans « Se connecter » (F-7)');
+      });
+
+      await scenario('pas 1 : la session ne retient jamais l’écran (D-E8)', async (repo, db) => {
+        let liberer = null;
+        const pick = { appels: [], fn: async (o) => { pick.appels.push(o); return []; } };
+        const { root } = await monter(repo, { ctx: F.ctxDe(F.SESSION, { jeton: () => new Promise((r) => { liberer = () => r(F.SESSION); }) }), pick: pick.fn, attendreSession: false });
+        const isbn = root.querySelector('input[name="isbn"]');
+        eq([!!isbn, role(root, 'couverture-pas1')?.querySelector('.status[role="status"]')?.textContent, role(root, 'photographier-couverture')], [true, 'Vérification de l’assistant…', null], 'pas 1 rendu TOUT DE SUITE : champ ISBN présent, « Vérification de l’assistant… » dans le bloc, aucun bouton de photo (mutant : await de la session avant le rendu → rouge)');
+        isbn.focus(); taper(isbn, '978030640');
+        await attendre(() => typeof liberer === 'function', 'jeton() demandé');
+        liberer();
+        await attendre(() => !!role(root, 'photographier-couverture'), 'le bloc seul rend les deux boutons');
+        eq([root.querySelector('input[name="isbn"]') === isbn, isbn.value, document.activeElement === isbn], [true, '978030640', true], 'à la résolution, le bloc SEUL change : le champ ISBN, sa valeur et son focus survivent (mutant : dessiner() → rouge)');
+        const [b1, b2] = [role(root, 'photographier-couverture'), role(root, 'choisir-couverture')];
+        eq([b1.className, b2.className, b1.disabled, b2.disabled, b1.textContent, b2.textContent], ['btn', 'btn', false, false, 'Photographier la couverture', 'Choisir une image'], 'pas 1 : deux .btn secondaires (D-E17), actifs');
+        b1.click(); b2.click();
+        await attendre(() => pick.appels.length === 2, 'deux sélecteurs');
+        eq([pick.appels, await db.count('imports')], [[{ accept: 'image/*', multiple: false, capture: 'environment' }, { accept: 'image/*', multiple: false }], 0], 'pas 1 : « Photographier la couverture » ouvre l’appareil photo, « Choisir une image » sans capture ; un sélecteur refermé n’écrit rien');
+      });
+
+      await scenario('image refusée : rien n’est écrit, rien ne part (I-E2)', async (repo, db) => {
+        const ff = F.fauxFetch();
+        const { root } = await monter(repo, { ff, pick: async () => [PDF()] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => root.etatRoute().lecture?.statut === 'refus_image', 'refus dit');
+        eq([role(root, 'lecture-message')?.textContent, await db.count('imports'), ff.posts().length, root.etatRoute().importId, root.etatRoute().pas, !!role(root, 'choisir-couverture')],
+          ['Cette image ne peut pas être lue ici. Essaie une autre photo.', 0, 0, null, 1, true], 'image refusée : messageErreurImage dans le bloc, AUCUNE ligne du journal, aucun POST, pas 1, boutons de retour (mutant : journal écrit avant poserCouverture → rouge)');
+      });
+
+      await scenario('photo → lecture → pas 2 → Open Library → « Ajouter ce livre » (I-E2, I-E4, D-E4, D-E12)', async (repo, db) => {
+        const ev = [];
+        const lotsLivre = [];
+        const ff = F.fauxFetch({ assistant: null, ol: null });
+        const image = await F.imageDe('stasio.jpg', '#a33');
+        const capture = db.onMutate;
+        db.onMutate = (m) => {
+          if (m.puts?.files) ev.push('files');
+          for (const l of m.puts?.imports || []) ev.push('imports:' + l.status);
+          if (m.puts?.books) { ev.push('books'); lotsLivre.push(Object.keys(m.puts).sort()); }
+          return capture ? capture(m) : null;
+        };
+        let obs = null;
+        // Un espion des lectures d'octets : relireMaintenant lit la ligne puis getFile — la promesse de getFile est le FAIT qu'une relecture a eu lieu
+        // (idempotence, plus bas). Open Library est SUSPENDU ici (ol: null) : tentativeMs 5 000, jamais 50.
+        const lus = [];
+        const espion = { ...repo, getFile: (...a) => { const p = repo.getFile(...a); lus.push(p); return p; } };
+        try {
+          const { root, dits } = await monter(espion, { ff, tentativeMs: 5000, fetch: (u, o) => { if (String(u).endsWith('/functions/v1/assistant')) ev.push('POST'); return ff.fetch(u, o); }, pick: async () => [image], nav: (p) => ev.push('nav:' + p) });
+          obs = new MutationObserver(() => { if (!ev.includes('dom:lu') && root.querySelector('.status.info')?.textContent === 'Lu sur la couverture — vérifie.') ev.push('dom:lu'); });
+          obs.observe(root, { childList: true, subtree: true, characterData: true });
+          role(root, 'choisir-couverture').click();
+          await attendre(() => ff.posts().length === 1, 'le POST est parti');
+          const [ligne] = await db.getAll('imports');
+          const [fichier] = await db.getAll('files');
+          eq([await db.count('imports'), ligne.kind, ligne.status, ligne.cover_sha256, ligne.page_ids, ligne.appels, ligne.document_id_vol, ligne.edition_id], [1, 'couverture', 'en_cours', fichier.sha256, [], 1, UI.DOCUMENT_ID, null], 'vol : UNE ligne couverture, cover_sha256 = le JPEG écrit, appels 1, tenue par CE document');
+          eq(ev.slice(0, 5), ['files', 'imports:a_lancer', 'imports:en_cours', 'imports:en_cours', 'POST'], 'ordre (I-E2) : les octets, puis la ligne a_lancer, puis le vol — le POST en dernier (mutant : POST avant la ligne → rouge)');
+          const statut = role(root, 'couverture-pas1').querySelector('.status[role="status"]');
+          eq([statut?.textContent, statut?.nextElementSibling?.classList.contains('row'), statut?.nextElementSibling?.textContent, role(root, 'photographier-couverture'), role(root, 'choisir-couverture')], ['Lecture de la couverture par l’assistant…', true, 'Annuler', null, null], 'pendant le vol : le statut puis la rangée « Annuler » (R-VIS-8), boutons de photo absents');
+          ff.rendre.shift()(200, F.corpsOk(F.LECTURE));
+          await attendre(() => lue(root), 'lecture appliquée');
+          eq([ev.indexOf('imports:a_verifier') >= 0, ev.indexOf('imports:a_verifier') < ev.indexOf('dom:lu'), root.etatRoute().lecturesRecues], [true, true, 1], 'I-E4 : la lecture est écrite dans le journal AVANT que l’écran la rende (mutant : rendu avant l’écriture → rouge)');
+          eq([titreDe(root).value, champ(root, 'Auteur / chef').value, champ(root, 'Éditeur').value, champ(root, 'Langue du livre').value, root.querySelector('.status.info')?.textContent, !!root.querySelector('.zone-couverture img'), root.etatRoute().couverture.sha256],
+            ['À la di Stasio', 'Josée Di Stasio', 'Flammarion Québec', 'fr', 'Lu sur la couverture — vérifie.', true, fichier.sha256], 'pas 2 : les champs lus, la provenance, la photo comme couverture de l’édition');
+          eq([role(root, 'proposition-ol')?.textContent, ff.vers('openlibrary.org/search.json').length], ['Recherche d’une fiche chez Open Library…', 1], 'rattrapage : « Recherche d’une fiche chez Open Library… » (le tiers est nommé), une requête');
+          const url = ff.vers('openlibrary.org/search.json')[0].url;
+          eq([url.includes('title=%C3%80%20la%20di%20Stasio'), url.includes('&author=Jos%C3%A9e%20Di%20Stasio&'), ff.vers('covers.openlibrary.org').length], [true, true, 0], 'rattrapage : le titre et le PREMIER auteur ; aucune couverture distante avant la fiche (recomptée après « Utiliser » et après « Ajouter ce livre »)');
+          ff.rendreOl.shift()(200, F.OL_STASIO);
+          await attendre(() => root.etatRoute().propositionsRecues === 1 && bandeau(root) !== null, 'bandeau');
+          eq([bandeau(root), role(root, 'plusieurs-editions'), !!bouton(root, 'Utiliser ces renseignements'), bouton(root, 'Ignorer')?.className], ['Proposé par Open Library : À la di Stasio, Josée Di Stasio, Flammarion Québec, 2004, ISBN 9782890772816', null, true, 'btn link'], 'bandeau : œuvre à une édition → titre, auteur, éditeur, année, ISBN ; deux gestes (D-E11)');
+          bouton(root, 'Utiliser ces renseignements').click();
+          eq([titreDe(root).value, champ(root, 'Auteur / chef').value, champ(root, 'Éditeur').value, champ(root, 'Année').value, rappel(root), root.querySelector('.status.info')?.textContent, suggestions(root), root.etatRoute().couverture.sha256, role(root, 'proposition-ol'), root.etatRoute().isbn, root.etatRoute().propositionsRecues],
+            ['À la di Stasio', 'Josée Di Stasio', 'Flammarion Québec', '2004', 'ISBN 9782890772816', 'Renseigné par Open Library — vérifie et corrige.', ['Cooking', 'Cuisine'], fichier.sha256, null, '9782890772816', 1],
+            '« Utiliser ces renseignements » : champs repris, ISBN posé (aucun n’était là), provenance Open Library, mots-clés proposés, la PHOTO reste la couverture, bandeau parti');
+          // I-E4 (idempotence de relire) : un `online` après « Utiliser » relit la ligne (a_verifier, lecture DÉJÀ appliquée) et ne fait RIEN — ni la
+          // lecture rejouée par-dessus « Utiliser », ni l'état `recue`, ni une seconde recherche. Attendu sur un FAIT : la relecture a lu les octets.
+          const [nLus, nOlAvant] = [lus.length, ff.vers('openlibrary.org/search.json').length];
+          window.dispatchEvent(new Event('online'));
+          await attendre(() => lus.length > nLus, 'online : la ligne et les octets relus');
+          await lus.at(-1); await tick(); await tick();
+          eq([root.etatRoute().lecture?.statut, root.etatRoute().provenance, root.etatRoute().propositionsRecues, ff.vers('openlibrary.org/search.json').length, role(root, 'proposition-ol'), titreDe(root).value, rappel(root), ff.vers('covers.openlibrary.org').length],
+            ['lue', 'openlibrary', 1, nOlAvant, null, 'À la di Stasio', 'ISBN 9782890772816', 0],
+            'online après « Utiliser » : la lecture déjà appliquée ne l’est pas une seconde fois — statut lue, provenance Open Library, aucune seconde recherche, rien de rendu par-dessus (mutant : lectureAppliquee jamais posée → rouge) ; aucune couverture distante après « Utiliser » (D-E18 ; mutant : couverture demandée pour la fiche → rouge)');
+          const nOl = ff.vers('openlibrary.org/search.json').length;
+          cuisine(root).click(); await tick();
+          eq([ff.vers('openlibrary.org/search.json').length, root.etatRoute().provenance, root.etatRoute().pas, titreDe(root).value], [nOl, 'openlibrary', 2, 'À la di Stasio'], 'un redessin (puce de cuisine) ne relance pas Open Library : zéro requête de plus, provenance et pas intacts (mutant : rattrapage relancé par dessiner() → rouge ; « relire() dans dessiner() » est tué pendant le vol, au bloc du pas 1)');
+          bouton(root, 'Ajouter ce livre').click();
+          await attendre(() => ev.some((x) => x.startsWith('nav:')), 'navigation');
+          const [ed] = await db.getAll('book_editions');
+          const fermee = await db.get('imports', ligne.id);
+          eq([lotsLivre, ed.cover_sha256, ed.isbn, fermee.status, fermee.edition_id, fermee.reponse_brute, fermee.finished_at, await db.count('books')], [[['book_editions', 'books', 'imports']], fichier.sha256, '9782890772816', 'enregistre', ed.id, null, NOW, 1],
+            '« Ajouter ce livre » : UNE transaction pour le livre, l’édition et la fermeture du journal (mutant : deux écritures → rouge) ; la ligne enregistre, pointe l’édition, réponse brute effacée');
+          eq([ev.indexOf('books') < ev.findIndex((x) => x.startsWith('nav:')), ev.find((x) => x.startsWith('nav:')), dits.at(-1), ff.vers('covers.openlibrary.org').length], [true, `nav:/books/${ed.id}?nouveau=1`, 'Livre ajouté', 0], '« Livre ajouté » et la fiche ?nouveau=1 APRÈS l’écriture seulement (I-E5) ; toujours aucune couverture distante (D-E18)');
+        } finally { db.onMutate = capture; obs?.disconnect(); }
+      });
+
+      await scenario('sans « Utiliser », puis « Retirer » : isbn null ; la couverture quitte l’édition, jamais le journal', async (repo, db) => {
+        const { root } = await monter(repo, { pick: async () => [await F.imageDe('r.jpg', '#3a3')] }); // Open Library : « rien »
+        role(root, 'choisir-couverture').click();
+        await attendre(() => lue(root) && root.etatRoute().propositionsRecues === 1, 'lecture et rattrapage');
+        eq(role(root, 'proposition-ol'), null, 'Open Library « rien » : aucun bandeau, la mention « Recherche… » disparaît (silencieux)');
+        const [ligne] = await db.getAll('imports');
+        bouton(root, 'Retirer').click();
+        bouton(root, 'Ajouter ce livre').click();
+        await attendre(async () => (await db.count('books')) === 1, 'livre écrit');
+        const [ed] = await db.getAll('book_editions');
+        const l = await db.get('imports', ligne.id);
+        eq([ed.isbn, ed.cover_sha256, l.status, l.cover_sha256, l.edition_id], [null, null, 'enregistre', ligne.cover_sha256, ed.id], 'sans « Utiliser » : isbn null ; « Retirer » vide la couverture de l’ÉDITION, jamais celle du journal (la photo reste la preuve de la lecture)');
+      });
+
+      await scenario('double tape → UNE ligne, UN POST (N1, I-E3 ; Review Focus 2)', async (repo, db) => {
+        const ff = F.fauxFetch();
+        const image = await F.imageDe('d.jpg', '#3a3');
+        const ouverts = [];
+        const { root } = await monter(repo, { ff, pick: () => new Promise((r) => ouverts.push(r)) });
+        const b = role(root, 'choisir-couverture');
+        b.click(); b.click();
+        await attendre(() => ouverts.length === 2, 'deux sélecteurs ouverts (aucun verrou pendant le choix)');
+        ouverts.forEach((r) => r([image])); // résolus au même tour
+        await attendre(() => lue(root), 'lecture appliquée');
+        const lignes = await db.getAll('imports');
+        eq([lignes.length, ff.posts().length, root.etatRoute().importId === lignes[0].id], [1, 1, true], 'double tape : une ligne, un POST, importId stable (mutants : relecture synchrone retirée → deux lignes ; await glissé avant « preparation » → deux lignes)');
+      });
+
+      await scenario('sélecteur annulé : rien ne se fige (N1 ; Review Focus 2)', async (repo, db) => {
+        const ff = F.fauxFetch();
+        let choisir = () => new Promise(() => {}); // une annulation ne résout jamais pickFiles (src/core/dom.js n'écoute que change)
+        const { root } = await monter(repo, { ff, pick: (o) => choisir(o) });
+        role(root, 'choisir-couverture').click(); await tick();
+        eq([!!role(root, 'choisir-couverture'), role(root, 'choisir-couverture')?.disabled, role(root, 'photographier-couverture')?.disabled, await db.count('imports')], [true, false, false, 0], 'sélecteur annulé : les deux boutons restent là et actifs, rien d’écrit (mutant : verrou posé avant pickFiles → boutons éteints → rouge)');
+        const image = await F.imageDe('s.jpg', '#a3a');
+        choisir = async () => [image];
+        role(root, 'choisir-couverture').click();
+        await attendre(() => lue(root), 'seconde tape : lecture');
+        eq([await db.count('imports'), ff.posts().length], [1, 1], 'seconde tape : une ligne, un POST, lecture appliquée');
+      });
+
+      await scenario('vol de l’import ciblé pris pendant le choix (N1, I-E3)', async (repo, db) => {
+        const ff = F.fauxFetch({ assistant: null });
+        const recette = (await repo.ajouterPages([await F.imageDe('p.jpg', '#777')], { import: { id: repo.newId('imp'), kind: 'recette', recipe_id: 'rc_n1' } })).importId;
+        const [nFiles, nImports] = [await db.count('files'), await db.count('imports')];
+        let resoudre = null;
+        const { root, dits } = await monter(repo, { ff, pick: () => new Promise((r) => { resoudre = r; }) });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => typeof resoudre === 'function', 'sélecteur ouvert');
+        const vol = UI.lancerExtraction(recette, { ctx: F.ctxDe(), repo, fetch: ff.fetch, enLigne: () => true });
+        await attendre(() => ff.posts().length === 1, 'le vol de l’import ciblé est parti');
+        resoudre([await F.imageDe('c.jpg', '#a3a')]);
+        await attendre(() => dits.length > 0, 'le refus est dit');
+        eq([dits.at(-1), await db.count('imports'), await db.count('files'), ff.posts().length], ['Une lecture est déjà en cours : annule-la d’abord.', nImports, nFiles, 1], 'vol pris pendant le choix : le toast, AUCUNE ligne, AUCUNE photo posée, un seul POST (mutant : volEnCours() lu seulement avant pickFiles → une ligne a_lancer → rouge)');
+        await UI.annulerVol(recette); await vol;
+      });
+
+      await scenario('incertains : vides, « Lu : … ? », « Utiliser « … » », sous-titre (D-E15, D-E16)', async (repo) => {
+        const ff = F.fauxFetch({ assistant: [200, F.corpsOk({ ...F.LECTURE, subtitle: 'Recettes de tous les jours', uncertain: ['title', 'language'] })] });
+        const { root } = await monter(repo, { ff, pick: async () => [await F.imageDe('i.jpg', '#a3a')] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => lue(root), 'lecture appliquée');
+        const titre = titreDe(root);
+        eq([titre.value, titre.getAttribute('placeholder'), role(root, 'incertain-title')?.textContent, role(root, 'utiliser-lu-title')?.textContent, role(root, 'utiliser-lu-title')?.className, role(root, 'utiliser-lu-title')?.closest('label')],
+          ['', 'Lu : À la di Stasio ?', 'illisible sur la couverture', 'Utiliser « À la di Stasio »', 'btn link', null], 'titre incertain : vide, indice « Lu : … ? », la mention, le geste « Utiliser « … » » HORS du label (R-UX-8)');
+        eq([!!role(root, 'incertain-language'), role(root, 'utiliser-lu-language'), champ(root, 'Langue du livre').getAttribute('placeholder'), role(root, 'incertain-author'), champ(root, 'Auteur / chef').value, role(root, 'sous-titre')?.textContent],
+          [true, null, null, null, 'Josée Di Stasio', 'Sous-titre lu : Recettes de tous les jours'], 'langue incertaine : la mention seule (<select>) ; l’auteur lu, sans mention ; le sous-titre en mention, jamais écrit');
+        eq(ff.vers('openlibrary.org').length, 0, 'titre incertain : AUCUNE requête Open Library (D-E4)');
+        role(root, 'utiliser-lu-title').click();
+        eq([titreDe(root).value, root.etatRoute().champs.title, role(root, 'incertain-title'), role(root, 'utiliser-lu-title'), root.etatRoute().champsLus?.title], ['À la di Stasio', 'À la di Stasio', null, null, 'À la di Stasio'], '« Utiliser « … » » : la valeur posée d’UN geste, mention et bouton partis (mutant : valeur posée sans geste → rouge)');
+      });
+
+      await scenario('Jerusalem : une œuvre à huit éditions ne pose ni ISBN ni éditeur (R-E-1 ; Review Focus 1)', async (repo) => {
+        const ff = F.fauxFetch({ assistant: [200, F.corpsOk(F.LECTURE_JERUSALEM)], ol: [200, F.OL_JERUSALEM] });
+        const { root } = await monter(repo, { ff, pick: async () => [await F.imageDe('j.jpg', '#33a')] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => root.etatRoute().propositionsRecues === 1 && bandeau(root) !== null, 'bandeau');
+        eq([bandeau(root), role(root, 'plusieurs-editions')?.textContent, ff.vers('openlibrary.org/search.json')[0].url.includes('&author=Yotam%20Ottolenghi&')],
+          ['Proposé par Open Library : Jerusalem, Yotam Ottolenghi, Sami Tamimi', 'Plusieurs éditions chez Open Library : scanne le code-barres pour l’ISBN exact.', true], 'bandeau sans ISBN, éditeur ni année, et le renvoi au code-barres ; la requête porte le PREMIER auteur seul');
+        taper(champ(root, 'Éditeur'), 'Appetite by Random House');
+        bouton(root, 'Utiliser ces renseignements').click();
+        eq([root.etatRoute().isbn, rappel(root), champ(root, 'Éditeur').value, champ(root, 'Langue du livre').value], ['', null, 'Appetite by Random House', 'en'], '« Utiliser » : AUCUN ISBN posé (mutant : isbn[0] → 9788416295029 → rouge), aucun rappel ISBN, l’éditeur tapé conservé');
+      });
+
+      await scenario('ISBN introuvable puis couverture : l’ISBN tapé reste, rien d’une autre édition (N3, R-E-9)', async (repo) => {
+        for (const [lecture, reponseOl, attendu, couleur] of [[F.LECTURE, F.OL_STASIO, 'Proposé par Open Library : À la di Stasio, Josée Di Stasio', '#a33'], [F.LECTURE_JERUSALEM, F.OL_JERUSALEM, 'Proposé par Open Library : Jerusalem, Yotam Ottolenghi, Sami Tamimi', '#33a']]) {
+          scene.replaceChildren();
+          const ff = F.fauxFetch({ assistant: [200, F.corpsOk(lecture)], ol: (a) => (new URL(a.url).searchParams.has('isbn') ? [200, { numFound: 0, docs: [] }] : [200, reponseOl]) });
+          const { root } = await monter(repo, { ff, pick: async () => [await F.imageDe('n3.jpg', couleur)] });
+          taper(root.querySelector('input[name="isbn"]'), '9780306406157');
+          bouton(root, 'Identifier').click();
+          await attendre(() => root.etatRoute().pas === 2 && root.etatRoute().provenance === 'aucune', 'introuvable → pas 2');
+          bouton(root, '← Changer d’ISBN').click();
+          role(root, 'choisir-couverture').click();
+          await attendre(() => root.etatRoute().propositionsRecues === 1 && bandeau(root) !== null, 'bandeau');
+          eq([bandeau(root), role(root, 'plusieurs-editions')], [attendu, null], `${lecture.title} sous un ISBN valide déjà là : bandeau SANS « ISBN … », sans éditeur ni année (R-E-9 ; mutant : bandeau avec ISBN → rouge), sans renvoi au code-barres (N3)`);
+          bouton(root, 'Utiliser ces renseignements').click();
+          eq([root.etatRoute().isbn, rappel(root), root.etatRoute().champs.year, root.etatRoute().provenance, titreDe(root).value], ['9780306406157', 'ISBN 9780306406157', '', 'openlibrary', lecture.title],
+            `${lecture.title} : « Utiliser » ne remplace ni ne vide l’ISBN tapé (mutant : etat.isbn = fiche.isbn13 ?? '' → rouge) ; aucune année d’une autre édition (mutant : ficheSelonIsbn retirée → '2004' → rouge)`);
+          if (lecture === F.LECTURE) eq(suggestions(root), ['Cooking', 'Cuisine'], 'les mots-clés de la fiche restent proposés');
+        }
+      });
+
+      await scenario('langue choisie à la main : ni la lecture, ni « Utiliser », ni une seconde photo ne la changent (C2, § 7)', async (repo) => {
+        // Le câblage de langueTouchee dans la ROUTE (le domaine est éprouvé en tâche 1) : appliquerLecture, utiliserOl et la seconde photo. La lecture
+        // et la fiche de Stasio disent « fr » ; la personne a choisi « English » au pas 2 AVANT la première photo.
+        const ff = F.fauxFetch({ assistant: [200, F.corpsOk(F.LECTURE)], ol: [200, F.OL_STASIO] });
+        const images = [await F.imageDe('l1.jpg', '#a33'), await F.imageDe('l2.jpg', '#33a')];
+        const { root } = await monter(repo, { ff, pick: async () => [images.shift()] });
+        bouton(root, 'Saisir à la main').click();
+        const menu = champ(root, 'Langue du livre');
+        menu.value = 'en'; menu.dispatchEvent(new Event('change')); // un <select> exige le change dispatché, même attaché
+        eq([root.etatRoute().langueTouchee, root.etatRoute().champs.language], [true, 'en'], 'garde du garde : le menu « Langue du livre » est touché (English)');
+        bouton(root, '← Changer d’ISBN').click();
+        role(root, 'choisir-couverture').click();
+        await attendre(() => root.etatRoute().propositionsRecues === 1 && bandeau(root) !== null, 'lecture « fr » et bandeau');
+        eq([champ(root, 'Langue du livre').value, titreDe(root).value], ['en', 'À la di Stasio'], 'lecture « fr » : la langue choisie reste, le titre lu est posé (mutant : appliquerLecture sans { langueTouchee } → « fr » → rouge)');
+        bouton(root, 'Utiliser ces renseignements').click();
+        eq([champ(root, 'Langue du livre').value, root.etatRoute().provenance], ['en', 'openlibrary'], '« Utiliser » (fiche « fr ») : la langue choisie reste (mutant : langueTouchee ignoré par « Utiliser » → « fr » → rouge)');
+        bouton(root, '← Changer d’ISBN').click();
+        role(root, 'choisir-couverture').click();
+        await attendre(() => root.etatRoute().propositionsRecues === 2, 'seconde lecture « fr » et son rattrapage');
+        eq(champ(root, 'Langue du livre').value, 'en', 'seconde photo : la langue touchée n’est ni rendue par remettreChampsLus ni reposée par la seconde lecture (C2)');
+      });
+
+      await scenario('seconde photo : un autre livre (N4, I-E10)', async (repo) => {
+        const lectures = [F.LECTURE, F.LECTURE_BERBER];
+        const ff = F.fauxFetch({ assistant: () => [200, F.corpsOk(lectures.shift())], ol: (a) => [200, new URL(a.url).searchParams.get('title') === 'Berber & Q' ? F.OL_BERBER : F.OL_STASIO] });
+        const images = [await F.imageDe('s.jpg', '#a33'), await F.imageDe('b.jpg', '#33a')];
+        const { root } = await monter(repo, { ff, pick: async () => [images.shift()] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => root.etatRoute().propositionsRecues === 1 && bandeau(root) !== null, 'première lecture et son bandeau');
+        bouton(root, 'Utiliser ces renseignements').click();
+        eq(root.etatRoute().isbn, '9782890772816', 'première couverture : l’ISBN posé par « Utiliser »');
+        taper(champ(root, 'Auteur / chef'), 'Josée D.');
+        bouton(root, '← Changer d’ISBN').click();
+        role(root, 'choisir-couverture').click();
+        await attendre(() => root.etatRoute().propositionsRecues === 2, 'seconde lecture et son rattrapage');
+        eq([titreDe(root).value, champ(root, 'Auteur / chef').value, champ(root, 'Éditeur').value, champ(root, 'Année').value, root.etatRoute().isbn, root.etatRoute().champsLus],
+          ['Berber & Q', 'Josée D.', '', '', '', { title: 'Berber & Q', language: 'en' }], 'seconde photo : ce que la première lecture et « Utiliser » avaient posé est vidé, la saisie de la personne reste, la seconde lecture remplit (mutants : remettreChampsLus omise → « À la di Stasio » ; champ tapé vidé ; ISBN posé gardé → rouge)');
+      });
+
+      await scenario('seconde photo : un ISBN tapé reste, un titre pris par « Utiliser « … » » est vidé (N4)', async (repo) => {
+        const lectures = [{ ...F.LECTURE, uncertain: ['title'] }, F.LECTURE_BERBER];
+        const ff = F.fauxFetch({ assistant: () => [200, F.corpsOk(lectures.shift())] });
+        const images = [await F.imageDe('s.jpg', '#a33'), await F.imageDe('b.jpg', '#33a')];
+        const { root } = await monter(repo, { ff, pick: async () => [images.shift()] });
+        taper(root.querySelector('input[name="isbn"]'), '9780306406157');
+        role(root, 'choisir-couverture').click();
+        await attendre(() => lue(root), 'première lecture');
+        role(root, 'utiliser-lu-title').click();
+        bouton(root, '← Changer d’ISBN').click();
+        role(root, 'choisir-couverture').click();
+        await attendre(() => lue(root) && root.etatRoute().lecture.lecture?.title === 'Berber & Q', 'seconde lecture');
+        eq([titreDe(root).value, root.etatRoute().isbn], ['Berber & Q', '9780306406157'], 'seconde photo : le titre pris d’un geste sur la première couverture est vidé puis relu ; l’ISBN TAPÉ avant la première photo reste');
+      });
+
+      await scenario('ISBN identifié puis couverture : la fiche d’ISBN ne survit pas à un autre livre (N4, C3)', async (repo) => {
+        const ff = F.fauxFetch({ ol: (a) => (new URL(a.url).searchParams.has('isbn') ? [200, { numFound: 1, docs: [F.OL_DOCS[4]] }] : [200, F.OL_STASIO]) });
+        const { root } = await monter(repo, { ff, pick: async () => [await F.imageDe('s.jpg', '#a33')] });
+        taper(root.querySelector('input[name="isbn"]'), '9781785035289');
+        bouton(root, 'Identifier').click();
+        await attendre(() => root.etatRoute().pas === 2 && titreDe(root)?.value === 'Berber and Q', 'ISBN identifié');
+        bouton(root, '← Changer d’ISBN').click();
+        role(root, 'choisir-couverture').click();
+        await attendre(() => root.etatRoute().propositionsRecues === 1 && bandeau(root) !== null, 'lecture et bandeau');
+        eq([titreDe(root).value, champ(root, 'Auteur / chef').value, root.etatRoute().isbn, bandeau(root)], ['À la di Stasio', 'Josée Di Stasio', '9781785035289', 'Proposé par Open Library : À la di Stasio, Josée Di Stasio'],
+          'les champs reçus pour l’ISBN et non touchés sont rendus avant la lecture (mutant : oublierDistants() retiré → « Berber and Q » gardé → rouge) ; l’ISBN identifié reste ; bandeau sans ISBN ni « Flammarion Québec, 2004 » (R-E-9)');
+      });
+
+      await scenario('Open Library : ignorer, rien, autre auteur, panne, sans auteur, tout incertain (D-E4, D-E11)', async (repo) => {
+        const vraiErreur = console.error;
+        const erreurs = [];
+        console.error = (...a) => erreurs.push(String(a[0]));
+        try {
+          for (const [nom, ol, avecBandeau] of [['« Ignorer »', [200, F.OL_STASIO], true], ['aucune correspondance de titre', [200, { numFound: 1, docs: [F.OL_DOCS[2]] }], false],
+            ['titre égal, auteur étranger', [200, { numFound: 1, docs: [{ ...F.OL_DOCS[0], author_name: ['Ricardo'] }] }], false], ['panne (deux rejets)', () => { throw new TypeError('reseau coupe'); }, false]]) {
+            scene.replaceChildren();
+            const ff = F.fauxFetch({ assistant: [200, F.corpsOk(F.LECTURE)], ol });
+            const { root } = await monter(repo, { ff, pick: async () => [await F.imageDe('o.jpg', '#a33')] });
+            role(root, 'choisir-couverture').click();
+            await attendre(() => lue(root) && root.etatRoute().propositionsRecues === 1, nom);
+            eq([bandeau(root) !== null, role(root, 'proposition-ol') === null || bandeau(root) !== null], [avecBandeau, true], `Open Library — ${nom} : ${avecBandeau ? 'le bandeau' : 'aucun bandeau, aucune mention restée (mutant : contrôle d’auteur retiré → rouge)'}`);
+            if (avecBandeau) {
+              bouton(root, 'Ignorer').click();
+              eq([role(root, 'proposition-ol'), titreDe(root).value, root.etatRoute().provenance], [null, 'À la di Stasio', 'couverture'], '« Ignorer » : le bandeau part, les champs lus restent (D-E11)');
+            }
+            if (nom.startsWith('panne')) eq(ff.vers('openlibrary.org/search.json').length, 2, 'panne : une reprise sur l’échec muet, puis silence');
+          }
+          for (const [nom, lecture] of [['lecture sans auteur', { ...F.LECTURE, authors: [] }], ['tout incertain, sans éditeur', { ...F.LECTURE, publisher: null, uncertain: ['title', 'subtitle', 'authors', 'publisher', 'language'] }]]) {
+            scene.replaceChildren();
+            const ff = F.fauxFetch({ assistant: [200, F.corpsOk(lecture)], ol: [200, F.OL_STASIO] });
+            const { root } = await monter(repo, { ff, pick: async () => [await F.imageDe('o.jpg', '#a33')] });
+            role(root, 'choisir-couverture').click();
+            await attendre(() => lue(root), nom);
+            await tick(); await tick();
+            // propositionsRecues est le FAIT que rattraper() a tourné : la garde de chercherParTitreAuteur (tâche 1, TypeError avant tout fetch) masquerait
+            // à elle seule une garde de la route retirée — zéro requête ne suffit pas à le prouver.
+            eq([ff.vers('openlibrary.org').length, role(root, 'proposition-ol'), root.etatRoute().pas, root.etatRoute().propositionsRecues], [0, null, 2, 0], `${nom} : rattraper() ne tourne pas, AUCUNE requête Open Library (B1 : jamais le seul titre ; mutant : garde « sans auteur » retirée → propositionsRecues 1 → rouge), pas 2`);
+          }
+        } finally { console.error = vraiErreur; }
+        eq(erreurs, [], 'Open Library : silencieux — aucun logError, aucune carte rouge (mutant : logError ajouté → rouge)');
+      });
+
+      await scenario('« Ajouter ce livre » : ignore sans lecture, statut relu dans la transaction, ligne prise ailleurs (D-E12, I-E5 ; Review Focus 4)', async (repo, db) => {
+        const couleurs = ['#a11', '#1a1', '#11a', '#aa1', '#1aa', '#a1a'];
+        const vu = async (assistant, { enLigne = () => true } = {}) => {
+          scene.replaceChildren();
+          const ff = F.fauxFetch({ assistant });
+          const image = await F.imageDe('e.jpg', couleurs.shift());
+          const r = await monter(repo, { ff, enLigne, pick: async () => [image] });
+          role(r.root, 'choisir-couverture').click();
+          await attendre(() => r.root.etatRoute().lecturesRecues === 1 && ['lue', 'echec', 'a_lancer'].includes(r.root.etatRoute().lecture?.statut), 'issue du vol');
+          r.ligne = (await db.getAll('imports')).find((l) => l.id === r.root.etatRoute().importId);
+          return r;
+        };
+        const a = await vu([502, { erreur: 'serveur' }]);
+        taper(titreDe(a.root), 'Livre tapé');
+        bouton(a.root, 'Ajouter ce livre').click();
+        await attendre(async () => (await db.get('imports', a.ligne.id)).status !== 'echec', 'fermée');
+        const la = await db.get('imports', a.ligne.id);
+        eq([la.status, !!(await db.get('book_editions', la.edition_id)), a.navs.at(-1)], ['ignore', true, `/books/${la.edition_id}?nouveau=1`], 'après un echec et un titre tapé : la ligne passe IGNORE avec edition_id — aucune lecture reçue (mutant : enregistre → rouge)');
+        const b = await vu([200, F.corpsOk(F.LECTURE)], { enLigne: () => false });
+        taper(titreDe(b.root), 'Livre hors ligne');
+        bouton(b.root, 'Ajouter ce livre').click();
+        await attendre(async () => (await db.get('imports', b.ligne.id)).status === 'ignore', 'fermée');
+        eq(typeof (await db.get('imports', b.ligne.id)).edition_id, 'string', 'après a_lancer (hors ligne) : ignore, avec edition_id');
+        const c = await vu([200, F.corpsOk(F.LECTURE)]);
+        const vraiMutate = db.mutate;
+        let bascule = true;
+        db.mutate = async (args) => {
+          if (bascule && args?.conditions?.imports && args?.puts?.books) {
+            bascule = false;
+            await vraiMutate.call(db, { puts: { imports: [{ ...(await db.get('imports', c.ligne.id)), status: 'echec', erreur: { raison: 'interne', extra: {} } }] }, origin: 'device' });
+          }
+          return vraiMutate.call(db, args);
+        };
+        try { bouton(c.root, 'Ajouter ce livre').click(); await attendre(() => c.navs.length === 1, 'livre écrit'); }
+        finally { db.mutate = vraiMutate; }
+        eq([(await db.get('imports', c.ligne.id)).status, bascule], ['ignore', false], 'statut basculé a_verifier → echec juste avant la transaction : IGNORE écrit, jamais enregistre — le statut est relu DANS la transaction (mutant : vers calculé hors transaction → rouge)');
+        const d = await vu([200, F.corpsOk(F.LECTURE)]);
+        await db.put('imports', { ...(await db.get('imports', d.ligne.id)), status: 'en_cours', document_id_vol: 'autre-document', battement_at: NOW });
+        const livresAvant = await db.count('books');
+        bouton(d.root, 'Ajouter ce livre').click();
+        await attendre(() => d.dits.includes(PHRASE_D_E9), 'refus dit');
+        eq([await db.count('books'), (await db.get('imports', d.ligne.id)).status], [livresAvant, 'en_cours'], 'ligne passée en_cours par un autre document avant le clic : RIEN d’écrit, la phrase D-E9');
+        const e = await vu([200, F.corpsOk(F.LECTURE)]);
+        await db.put('imports', { ...(await db.get('imports', e.ligne.id)), status: 'ignore', finished_at: NOW });
+        const n0 = await db.count('books');
+        bouton(e.root, 'Ajouter ce livre').click();
+        await attendre(() => e.navs.length === 1, 'livre écrit');
+        const le = await db.get('imports', e.ligne.id);
+        eq([await db.count('books'), le.status, le.edition_id, e.dits.at(-1)], [n0 + 1, 'ignore', null, 'Livre ajouté'], 'ligne fermée IGNORE par un autre onglet : le livre est écrit seul (saveBatch), le journal intact');
+        // La branche `dejaAjoute` d'enregistrerLivre, écrite dans CETTE tâche, a ici son test (le cas « deux routes sur le même ?import= » suit en tâche 4) :
+        // la ligne a été fermée ENREGISTRE par un autre onglet, avec une édition présente.
+        const dejaLa = await LA.enregistrerLivre({ champs: { title: 'Déjà là' }, isbn: '' }, { repo });
+        const f = await vu([200, F.corpsOk(F.LECTURE)]);
+        await db.put('imports', { ...(await db.get('imports', f.ligne.id)), status: 'enregistre', edition_id: dejaLa.id, finished_at: NOW });
+        const nf = await db.count('books');
+        bouton(f.root, 'Ajouter ce livre').click();
+        await attendre(() => f.navs.length === 1, 'navigation');
+        eq([await db.count('books'), f.dits.at(-1), f.navs[0], (await db.get('imports', f.ligne.id)).edition_id], [nf, 'Ce livre a déjà été ajouté.', `/books/${dejaLa.id}`, dejaLa.id],
+          'ligne fermée ENREGISTRE ailleurs, édition présente : AUCUN second livre, « Ce livre a déjà été ajouté. », la fiche existante sans ?nouveau (mutant : saveBatch sur enregistre → deux livres → rouge)');
+      });
+
+      await scenario('raisons d’échec → textes et « Relire » (§ 4.5, D-E10, R-E-3)', async (repo, db) => {
+        const GEN = 'L’assistant n’a pas répondu. Réessaie.';
+        const LISIBLE = 'L’assistant n’a pas répondu lisiblement. Réessaie.';
+        const CAS = [
+          [403, { erreur: 'non_admis' }, 'non_admis', 'Ce compte n’a pas accès à l’assistant.'],
+          [413, { erreur: 'trop_lourd' }, 'requete', 'La demande est trop lourde.'],
+          [429, { erreur: 'quota', quota: 60 }, 'quota', 'Tu as atteint la limite du jour pour l’assistant (60 appels).'],
+          [429, {}, 'trop_de_demandes', 'Trop de demandes pour l’instant. Réessaie dans une minute.'],
+          [401, { erreur: 'non_connecte' }, 'non_connecte', 'Connecte-toi pour utiliser l’assistant.'],
+          [502, { erreur: 'serveur' }, 'serveur', GEN + ' Code : serveur'],
+          [504, {}, 'delai', GEN + ' Code : delai'],
+          [200, F.corpsOk(F.LECTURE, { stop_reason: 'max_tokens' }), 'coupe', LISIBLE],
+          [200, F.corpsOk('pas du json'), 'illisible', LISIBLE],
+          [200, F.corpsOk({ ...F.LECTURE, title: 'x'.repeat(301) }), 'hors_bornes', LISIBLE],
+          ['reseau', null, 'reseau', GEN + ' Code : reseau'],
+          [200, F.corpsOk({}), 'vide', 'La couverture ne se lit pas : saisis le titre.'],
+        ];
+        const ff = F.fauxFetch();
+        const { root } = await monter(repo, { ff, pick: async () => [await F.imageDe('cas.jpg', '#a33')] });
+        let n = 0, id = null;
+        for (const [statut, corps, raison, attendu] of CAS) {
+          ff.assistant = statut === 'reseau' ? () => { throw new TypeError('reseau coupe'); } : [statut, corps]; n += 1;
+          if (n === 1) role(root, 'choisir-couverture').click(); else role(root, 'relire').click();
+          await attendre(async () => { id = id ?? (await db.getAll('imports'))[0]?.id ?? null; const l = id ? await db.get('imports', id) : null; return ff.posts().length === n && l?.erreur?.raison === raison && root.etatRoute().lecture?.statut === 'echec' && root.etatRoute().lecture.erreur?.raison === raison; }, `cas ${raison}`);
+          const bloc = role(root, 'lecture');
+          const code = ['coupe', 'illisible', 'hors_bornes'].includes(raison);
+          eq([root.etatRoute().pas, titreDe(root).value, !!root.querySelector('.zone-couverture img'), bloc?.textContent.includes(attendu), code ? bloc.textContent.includes('Code : ' + raison) : true, role(root, 'relire')?.textContent ?? null, await db.count('imports')],
+            [2, '', true, true, true, raison === 'vide' ? null : 'Relire la couverture', 1], `raison ${raison} (${statut}) : pas 2 vide avec la couverture, « ${attendu} »${code ? ' + « Code : ' + raison + ' »' : ''}, ${raison === 'vide' ? 'SANS « Relire » (mutant : Relire offert sur vide → rouge)' : '« Relire la couverture » (mutant : refusé sur illisible → rouge)'} ; une seule ligne`);
+          if (raison === 'requete') ok(!bloc.textContent.includes('choisis moins de pages'), '413 : « La demande est trop lourde. », jamais « choisis moins de pages » (mutant : texteEchecAssistant direct → rouge)');
+          if (raison === 'illisible') eq((await db.get('imports', id)).reponse_brute, 'pas du json', 'illisible : la réponse brute est gardée au journal (bornée par contexteDe)');
+        }
+      });
+
+      await scenario('« Annuler » pendant la lecture (§ 4.5)', async (repo, db) => {
+        const ff = F.fauxFetch({ assistant: null });
+        const { root } = await monter(repo, { ff, pick: async () => [await F.imageDe('a.jpg', '#a33')] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => ff.posts().length === 1, 'vol parti');
+        role(root, 'annuler-lecture').click();
+        await attendre(() => root.etatRoute().lecture?.statut === 'echec', 'annulée');
+        const [l] = await db.getAll('imports');
+        eq([l.status, l.erreur?.raison, ff.posts()[0].options.signal.aborted, role(root, 'lecture')?.textContent.includes('Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.'), titreDe(root).value, !!role(root, 'relire'), UI.volEnCours()],
+          ['echec', 'annule', true, true, '', true, null], '« Annuler » : echec(annule), fetch abandonné, la phrase I-4, aucune lecture appliquée, « Relire la couverture » offert, vol libéré');
+      });
+
+      await scenario('hors ligne au clic, puis retour en ligne ; une route démontée n’écoute plus (§ 4.7, F-17)', async (repo, db) => {
+        let enLigne = false, lectures = 0;
+        const espion = { ...repo, get: (s, k) => { if (s === 'imports') lectures += 1; return repo.get(s, k); } };
+        const ff = F.fauxFetch();
+        const { root } = await monter(espion, { ff, enLigne: () => enLigne, pick: async () => [await F.imageDe('h.jpg', '#a33')] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => root.etatRoute().lecture?.statut === 'a_lancer' && root.etatRoute().pas === 2, 'a_lancer');
+        const [l] = await db.getAll('imports');
+        eq([l.status, ff.posts().length, role(root, 'lecture')?.textContent.includes('Tu es hors ligne.'), role(root, 'relire')?.textContent, role(root, 'relire')?.disabled, !!root.querySelector('.zone-couverture img'), !!titreDe(root)],
+          ['a_lancer', 0, true, 'Lire la couverture', true, true, true], 'hors ligne : la couverture posée, la ligne a_lancer, « Tu es hors ligne. », « Lire la couverture » éteint, la saisie possible');
+        enLigne = true;
+        const lecturesAvantOnline = lectures;
+        window.dispatchEvent(new Event('online'));
+        await attendre(() => role(root, 'relire')?.disabled === false, '« Lire » rallumé');
+        eq([role(root, 'lecture')?.textContent.includes('La couverture n’a pas encore été lue.'), lectures > lecturesAvantOnline], [true, true], 'online (dispatché APRÈS le rendu) : la route MONTÉE relit le journal (garde du garde de l’assertion suivante : un simple redessin rallumerait aussi « Lire »), « La couverture n’a pas encore été lue. », « Lire la couverture » rallumé');
+        root.remove();
+        const n = lectures;
+        window.dispatchEvent(new Event('online')); await tick(); await tick();
+        eq(lectures, n, 'route démontée : online ne relit plus rien (l’écouteur s’est retiré)');
+      });
+
+      await scenario('session disparue entre le rendu et le clic → carte, a_lancer (§ 4.5)', async (repo, db) => {
+        let session = F.SESSION;
+        const ff = F.fauxFetch();
+        const { root } = await monter(repo, { ff, ctx: F.ctxDe(F.SESSION, { jeton: async () => session }), pick: async () => [await F.imageDe('s.jpg', '#a33')] });
+        await attendre(() => !!role(root, 'choisir-couverture'), 'session prête');
+        session = null;
+        role(root, 'choisir-couverture').click();
+        await attendre(() => root.etatRoute().lecture?.statut === 'a_lancer' && root.etatRoute().pas === 2, 'a_lancer');
+        eq([(await db.getAll('imports'))[0]?.status, ff.posts().length, !!role(root, 'connexion-ia'), role(root, 'relire')?.disabled, !!root.querySelector('.zone-couverture img')], ['a_lancer', 0, true, true, true], 'jeton nul au clic : aucun POST, la ligne a_lancer, la carte « Connecte-toi… » revient, « Lire » éteint, la couverture gardée');
+      });
+
+      await scenario('« Saisir à la main » pendant le vol : la lecture reçue n’écrase rien (I-E4, N2-a, D-E9, D-E18 ; Review Focus 3)', async (repo, db) => {
+        const ff = F.fauxFetch({ assistant: null });
+        const { root } = await monter(repo, { ff, pick: async () => [await F.imageDe('m.jpg', '#a33')] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => ff.posts().length === 1, 'vol parti');
+        const sha = root.etatRoute().couverture.sha256;
+        bouton(root, 'Saisir à la main').click();
+        const [ligne] = await db.getAll('imports');
+        eq([root.etatRoute().pas, root.etatRoute().couverture.sha256, UI.volEnCours()?.importId, bouton(root, 'Ajouter ce livre').disabled, role(root, 'enregistrer-bloque')?.hidden, role(root, 'enregistrer-bloque')?.textContent, role(root, 'lecture')?.textContent.includes('Lecture de la couverture par l’assistant…'), !!role(root, 'annuler-lecture')],
+          [2, sha, ligne.id, true, false, PHRASE_D_E9, true, true], '« Saisir à la main » pendant le vol : pas 2 AVEC la couverture (mutant : garde de saisirMain retirée → rouge), le vol continue, « Ajouter ce livre » éteint avec la phrase D-E9, le statut et « Annuler »');
+        const titre = titreDe(root);
+        titre.focus(); taper(titre, 'Mon titre');
+        ff.rendre.shift()(200, F.corpsOk(F.LECTURE));
+        await attendre(() => root.etatRoute().lecture?.statut === 'recue', 'lecture reçue');
+        eq([(await db.get('imports', ligne.id)).status, titreDe(root) === titre, titre.value, document.activeElement === titre, champ(root, 'Auteur / chef').value, bouton(root, 'Ajouter ce livre').disabled, role(root, 'enregistrer-bloque')?.hidden, role(root, 'lecture'), role(root, 'annuler-lecture')],
+          ['a_verifier', true, 'Mon titre', true, '', false, true, null, null], 'réponse après le geste : journal a_verifier, champs intacts, valeur ET focus du titre survivent, bouton rallumé, phrase cachée, statut et « Annuler » RETIRÉS (N2-a ; mutants : recue absent → champs remplis ; retrait omis → « Annuler » reste)');
+        cuisine(root).click(); cuisine(root).click(); await tick();
+        eq([titreDe(root).value, champ(root, 'Auteur / chef').value], ['Mon titre', ''], 'deux redessins de suite : les champs restent ceux de la personne (une lecture n’est jamais appliquée par dessiner())');
+        bouton(root, 'Ajouter ce livre').click();
+        await attendre(async () => (await db.get('imports', ligne.id)).status === 'enregistre', 'fermée avec le livre');
+        eq((await db.get('imports', ligne.id)).edition_id, (await db.getAll('book_editions'))[0]?.id, '« Ajouter ce livre » ferme la lecture reçue ENREGISTRE avec l’édition (D-E12)');
+      });
+
+      await scenario('« Identifier » après la photo : la couverture photographiée reste, aucune couverture distante (D-E18)', async (repo) => {
+        const ff = F.fauxFetch({ ol: (a) => (new URL(a.url).searchParams.has('isbn') ? [200, { numFound: 1, docs: [{ title: 'Livre identifié', author_name: ['X'], language: ['fre'] }] }] : [200, { numFound: 0, docs: [] }]) });
+        const { root } = await monter(repo, { ff, pick: async () => [await F.imageDe('d.jpg', '#a33')] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => lue(root), 'lecture');
+        const sha = root.etatRoute().couverture.sha256;
+        bouton(root, '← Changer d’ISBN').click();
+        taper(root.querySelector('input[name="isbn"]'), '9780306406157');
+        bouton(root, 'Identifier').click();
+        await attendre(() => root.etatRoute().reponsesRecues === 1 && root.etatRoute().pas === 2, 'identifié');
+        await tick(); await tick();
+        eq([root.etatRoute().couverture.sha256, !!root.querySelector('.zone-couverture img'), ff.vers('covers.openlibrary.org').length], [sha, true, 0], 'la photo reste la couverture, et AUCUNE requête covers.openlibrary.org ne part (pré-garde ; mutant : pré-garde retirée → une requête → rouge)');
+        bouton(root, '← Changer d’ISBN').click();
+        bouton(root, 'Saisir à la main').click();
+        eq([root.etatRoute().couverture.sha256, root.etatRoute().pas], [sha, 2], '« ← Changer d’ISBN » puis « Saisir à la main » : la couverture photographiée est toujours là (D-E18)');
+      });
+
+      await scenario('« ← Changer d’ISBN » pendant le vol : au pas 1, la réponse rend les deux boutons, la saisie survit (N2-a)', async (repo) => {
+        const ff = F.fauxFetch({ assistant: null });
+        const { root } = await monter(repo, { ff, pick: async () => [await F.imageDe('c.jpg', '#a33')] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => ff.posts().length === 1, 'vol parti');
+        bouton(root, 'Saisir à la main').click();
+        bouton(root, '← Changer d’ISBN').click();
+        eq([role(root, 'couverture-pas1')?.querySelector('.status[role="status"]')?.textContent, !!role(root, 'annuler-lecture'), role(root, 'choisir-couverture')], ['Lecture de la couverture par l’assistant…', true, null], 'pas 1 pendant le vol : le statut et « Annuler »');
+        const isbn = root.querySelector('input[name="isbn"]');
+        isbn.focus(); taper(isbn, '978');
+        ff.rendre.shift()(200, F.corpsOk(F.LECTURE));
+        await attendre(() => root.etatRoute().lecture?.statut === 'recue', 'reçue');
+        eq([!!role(root, 'choisir-couverture'), role(root, 'annuler-lecture'), root.querySelector('input[name="isbn"]') === isbn, isbn.value, document.activeElement === isbn, root.etatRoute().pas],
+          [true, null, true, '978', true, 1], 'réponse reçue au pas 1 : le bloc rend les deux boutons, plus d’« Annuler », valeur et focus du champ ISBN intacts (mutants : majBlocCouverture omis ; dessiner() → focus perdu)');
+      });
+
+      await scenario('« Relire la couverture » : en_cours rendu AVANT l’appel, même ligne (N2-b, D-E10)', async (repo, db) => {
+        const ff = F.fauxFetch({ assistant: [502, { erreur: 'serveur' }] });
+        const { root } = await monter(repo, { ff, pick: async () => [await F.imageDe('r.jpg', '#a33')] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => root.etatRoute().lecture?.statut === 'echec', 'echec');
+        taper(titreDe(root), 'Titre tapé');
+        ff.assistant = null;
+        role(root, 'relire').click();
+        await attendre(() => ff.posts().length === 2, 'second appel parti');
+        const [l] = await db.getAll('imports');
+        eq([await db.count('imports'), l.status, l.appels, role(root, 'lecture')?.textContent.includes('Lecture de la couverture par l’assistant…'), !!role(root, 'annuler-lecture'), bouton(root, 'Ajouter ce livre').disabled, role(root, 'enregistrer-bloque')?.hidden],
+          [1, 'en_cours', 2, true, true, true, false], 'pendant « Relire » : la MÊME ligne echec → en_cours, appels 2 ; le bloc dit la lecture et offre « Annuler » ; « Ajouter ce livre » éteint avec la phrase (mutants : rendu après l’await → « Annuler » absent ; etat.lecture non posé → bouton allumé)');
+        role(root, 'annuler-lecture').click();
+        await attendre(async () => (await db.get('imports', l.id)).erreur?.raison === 'annule', 'annulée');
+        eq(root.etatRoute().importId, l.id, '« Annuler » → echec(annule), sur la même ligne');
+      });
+
+      await scenario('seconde photo après un échec : une nouvelle ligne, la précédente ignorée (D-E22)', async (repo, db) => {
+        const ff = F.fauxFetch({ assistant: () => (ff.posts().length === 1 ? [502, { erreur: 'serveur' }] : [200, F.corpsOk(F.LECTURE)]) });
+        const images = [await F.imageDe('1.jpg', '#a33'), await F.imageDe('2.jpg', '#33a')];
+        const { root } = await monter(repo, { ff, pick: async () => [images.shift()] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => root.etatRoute().lecture?.statut === 'echec', 'premier échec');
+        const premiere = root.etatRoute().importId;
+        bouton(root, '← Changer d’ISBN').click();
+        role(root, 'choisir-couverture').click();
+        await attendre(() => lue(root), 'seconde lecture');
+        const p = await db.get('imports', premiere);
+        const seconde = root.etatRoute().importId;
+        eq([await db.count('imports'), p.status, p.finished_at, seconde !== premiere, (await db.get('imports', seconde)).status, await db.count('files')], [2, 'ignore', NOW, true, 'a_verifier', 2], 'seconde photo : DEUX lignes, la précédente ignore avec finished_at, la seconde a volé ; les deux photos restent dans files (mutant : précédente laissée echec → rouge)');
+      });
+
+      await scenario('seconde photo quand la précédente a été fermée ailleurs : ni erreur ni journal', async (repo, db) => {
+        const vraiErreur = console.error;
+        const erreurs = [];
+        console.error = (...a) => erreurs.push(String(a[0]));
+        try {
+          const ff = F.fauxFetch({ assistant: [502, { erreur: 'serveur' }] });
+          const images = [await F.imageDe('1.jpg', '#a33'), await F.imageDe('2.jpg', '#33a')];
+          const { root } = await monter(repo, { ff, pick: async () => [images.shift()] });
+          role(root, 'choisir-couverture').click();
+          await attendre(() => root.etatRoute().lecture?.statut === 'echec', 'échec');
+          const premiere = root.etatRoute().importId;
+          await db.put('imports', { ...(await db.get('imports', premiere)), status: 'ignore', finished_at: NOW });
+          ff.assistant = [200, F.corpsOk(F.LECTURE)];
+          bouton(root, '← Changer d’ISBN').click();
+          role(root, 'choisir-couverture').click();
+          await attendre(() => lue(root), 'seconde lecture');
+          eq([erreurs, (await db.get('imports', premiere)).status], [[], 'ignore'], 'la précédente déjà fermée ailleurs : TransitionRefusee muette, aucun logError');
+        } finally { console.error = vraiErreur; }
+      });
+
+      await scenario('seconde photo refusée : la ligne précédente reste celle de la route (M3)', async (repo, db) => {
+        const fichiers = [await F.imageDe('1.jpg', '#a33'), PDF()];
+        const { root } = await monter(repo, { pick: async () => [fichiers.shift()] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => lue(root), 'lecture');
+        const premiere = root.etatRoute().importId;
+        bouton(root, '← Changer d’ISBN').click();
+        role(root, 'choisir-couverture').click();
+        await attendre(() => root.etatRoute().lecture?.statut === 'refus_image', 'refus');
+        eq([await db.count('imports'), root.etatRoute().importId, (await db.get('imports', premiere)).status], [1, premiere, 'a_verifier'], 'image refusée en seconde photo : aucune ligne créée, la précédente gardée par la route, toujours a_verifier (mutant : importId laissé à null → rouge)');
+        bouton(root, 'Saisir à la main').click();
+        taper(titreDe(root), 'Mon livre');
+        bouton(root, 'Ajouter ce livre').click();
+        await attendre(async () => (await db.get('imports', premiere)).status === 'enregistre', 'fermée');
+        eq((await db.get('imports', premiere)).edition_id, (await db.getAll('book_editions'))[0]?.id, '« Ajouter ce livre » ferme cette ligne ENREGISTRE avec l’édition (D-E12)');
+      });
+
+      await scenario('écriture du journal impossible : couverture posée, aucun appel ; la ligne précédente reste (R-E-10)', async (repo, db) => {
+        const vraiErreur = console.error;
+        const erreurs = [];
+        console.error = (...a) => erreurs.push(String(a[0]));
+        try {
+          let rejeter = true;
+          const espion = { ...repo, saveBatch: (b, o) => (b?.imports && rejeter ? Promise.reject(new Error('QuotaExceededError')) : repo.saveBatch(b, o)) };
+          const ff = F.fauxFetch();
+          const images = [await F.imageDe('1.jpg', '#a33'), await F.imageDe('2.jpg', '#33a'), await F.imageDe('3.jpg', '#3a3')];
+          const r1 = await monter(espion, { ff, pick: async () => [images.shift()] });
+          role(r1.root, 'choisir-couverture').click();
+          await attendre(() => r1.root.etatRoute().lecture?.statut === 'refus_image', 'refus');
+          eq([role(r1.root, 'lecture-message')?.textContent, await db.count('files'), await db.count('imports'), ff.posts().length, !!r1.root.etatRoute().couverture.sha256, erreurs.some((x) => x.includes('livre.couverture.journal'))],
+            ['Le livre n’a pas pu être enregistré. Réessaie.', 1, 0, 0, true, true], 'journal impossible : le message, la couverture POSÉE (ligne files), aucune ligne, aucun POST, journalisé');
+          scene.replaceChildren();
+          rejeter = false;
+          const r2 = await monter(espion, { ff, pick: async () => [images.shift()] });
+          role(r2.root, 'choisir-couverture').click();
+          await attendre(() => lue(r2.root), 'première lecture');
+          const premiere = r2.root.etatRoute().importId;
+          bouton(r2.root, '← Changer d’ISBN').click();
+          rejeter = true;
+          role(r2.root, 'choisir-couverture').click();
+          await attendre(() => r2.root.etatRoute().lecture?.statut === 'refus_image', 'refus de la seconde');
+          eq([await db.count('imports'), r2.root.etatRoute().importId, (await db.get('imports', premiere)).status], [1, premiere, 'a_verifier'], 'même rejet sur une seconde photo : la ligne précédente reste celle de la route, a_verifier (mutant : importId laissé à null → rouge)');
+          rejeter = false;
+          bouton(r2.root, 'Saisir à la main').click();
+          taper(titreDe(r2.root), 'Mon livre');
+          bouton(r2.root, 'Ajouter ce livre').click();
+          await attendre(async () => (await db.get('imports', premiere)).status === 'enregistre', 'fermée');
+          eq(typeof (await db.get('imports', premiere)).edition_id, 'string', '« Ajouter ce livre » ferme la ligne précédente ENREGISTRE avec edition_id');
+        } finally { console.error = vraiErreur; }
+      });
+
+      await scenario('retour en ligne sans import, et pendant la préparation : rien n’est lu (R-E-10)', async (repo) => {
+        let lectures = 0, libererPut = null;
+        const rejets = [];
+        const surRejet = (e) => rejets.push(e);
+        window.addEventListener('unhandledrejection', surRejet);
+        try {
+          const espion = { ...repo, get: (s, k) => { if (s === 'imports') lectures += 1; return repo.get(s, k); }, putFile: (...a) => new Promise((r) => { libererPut = () => r(repo.putFile(...a)); }) };
+          const { root } = await monter(espion, { pick: async () => [await F.imageDe('p.jpg', '#a33')] });
+          window.dispatchEvent(new Event('online')); await tick(); await tick();
+          bouton(root, 'Saisir à la main').click();
+          taper(titreDe(root), 'Tapé');
+          window.dispatchEvent(new Event('online')); await tick(); await tick();
+          eq([lectures, rejets.length, root.etatRoute().pas, titreDe(root).value], [0, 0, 2, 'Tapé'], 'sans import de couverture : online ne lit RIEN (aucun r.get), aucun rejet non géré, état et champs intacts');
+          bouton(root, '← Changer d’ISBN').click();
+          role(root, 'choisir-couverture').click();
+          await attendre(() => root.etatRoute().lecture?.statut === 'preparation' && typeof libererPut === 'function', 'préparation');
+          window.dispatchEvent(new Event('online')); await tick(); await tick();
+          eq([root.etatRoute().lecture?.statut, lectures, rejets.length], ['preparation', 0, 0], 'pendant la préparation : online ne lit rien, la préparation survit (mutant : garde !etat.importId retirée → r.get(imports, null) → rouge)');
+          libererPut();
+          await attendre(() => lue(root), 'lecture après la préparation');
+        } finally { window.removeEventListener('unhandledrejection', surRejet); }
+      });
+
+      {
+        // S14 : un titre lu hostile reste du TEXTE — placeholder, bouton « Utiliser « … » », mention de sous-titre, bandeau. Puis les filets statiques.
+        const hostile = '<img src=x onerror="void 0">';
+        const m = LA.livreAjoutModel({ pas: 2, champs: { title: '' }, provenance: 'couverture', lecture: { statut: 'lue', incertains: ['title'], placeholders: { title: hostile }, sousTitre: hostile, lecture: {} }, proposition: { statut: 'trouvee', fiche: { title: hostile, authors: [hostile], author: hostile, publisher: '', year: '', language: null, motsCles: [], isbn13: null, editionUnique: false } } });
+        const n = LA.renderLivreAjout(m, {});
+        eq([n.querySelectorAll('img').length, titreDe(n)?.getAttribute('placeholder'), role(n, 'utiliser-lu-title')?.textContent, role(n, 'sous-titre')?.textContent, bandeau(n)],
+          [0, `Lu : ${hostile} ?`, `Utiliser « ${hostile} »`, `Sous-titre lu : ${hostile}`, `Proposé par Open Library : ${hostile}, ${hostile}`], 'S14 : un titre lu hostile ne crée aucun élément, il reste du texte partout');
+        const repLA = await fetch('../src/ui/livre-ajout.js', { cache: 'no-store' });
+        const srcLA = repLA.ok ? await repLA.text() : '';
+        ok(repLA.ok && srcLA.length > 1000 && !/anthropic|supabase/i.test(srcLA), 'livre-ajout.js (lu : HTTP 2xx, plus de 1 000 caractères) ne nomme ni le fournisseur ni la base, en toute casse (R-E-28 ; test de source admis ; un 404 ou un corps vide est rouge)');
+        const etatUi = await import('../src/ui/state.js');
+        eq([etatUi.ROUTES_DE_SAISIE.includes('/add/livre'), etatUi.estRouteDeSaisie('/add/livre'), etatUi.estRouteDeSaisie('/add/signet')], [true, true, false], 'ROUTES_DE_SAISIE (D-E19) : /add/livre — une passe de synchro ne reconstruit pas le pas 1 en plein vol ; /add/signet reste dehors (dette nommée)');
+      }
+    } finally { scene.remove(); setUiLocale(localeAvant); }
+  }
   // --- § 6 Couverture : ce que la fiche livre et Mes livres MONTRENT, sur une base jetable
   {
     const { withRepo } = await import('./sync-fixture.js');
