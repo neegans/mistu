@@ -31,6 +31,7 @@ import { runSyncL4Tests } from './sync-l4.js';
 import { runTableMatieresTests } from './table-matieres.js';
 import { runClassementTests } from './classement.js';
 import { runThemeTests } from './theme.js';
+import { runPhotoPlatTests } from './photo-plat.js';
 
 const results = [];
 const eq = (a, b, msg) => { const ok = JSON.stringify(a) === JSON.stringify(b); results.push({ ok, msg, got: a, want: b }); };
@@ -234,6 +235,10 @@ catch (error) { ok(false, `Suite table des matières interrompue : ${error?.mess
 try { await runClassementTests({ eq, ok }); }
 catch (error) { ok(false, `Suite lot de recettes interrompue : ${error?.message || String(error)}`); }
 
+// --- Les plats en images (lot F) : photo du plat, rapatriement par la fonction, cartes illustrées.
+try { await runPhotoPlatTests({ eq, ok }); }
+catch (error) { ok(false, `Suite photo du plat interrompue : ${error?.message || String(error)}`); }
+
 // --- Thème « magazine culinaire » : la feuille servie est lue (jetons, contrastes, inventaire) et mesurée (scène hors écran visible).
 try { await runThemeTests({ eq, ok }); }
 catch (error) { ok(false, `Suite thème interrompue : ${error?.message || String(error)}`); }
@@ -242,7 +247,7 @@ catch (error) { ok(false, `Suite thème interrompue : ${error?.message || String
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 5680,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 5947,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

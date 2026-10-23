@@ -36,6 +36,11 @@ export async function dimensionsImage(blob) {
       while (o + 9 < b.length) {
         if (b[o] !== 0xff) return null;
         const m = b[o + 1];
+        // Revue finale du lot F : lu comme libjpeg le lit (next_marker). Un FF de remplissage avant un marqueur est sauté (la norme l'admet) : « FF FF E0 00 »
+        // se lisait comme un segment de 57 344 octets, et un faux SOF caché dans un COM passait le mur distant. FF 00 (que libjpeg écarte avant de chercher le
+        // marqueur suivant), EOI ou SOS avant le SOF : un flux qu'on ne lirait pas comme le décodeur → null (une image distante est refusée, jamais décodée).
+        if (m === 0xff) { o += 1; continue; }
+        if (m === 0x00 || m === 0xd9 || m === 0xda) return null;
         if (m === 0xd8 || (m >= 0xd0 && m <= 0xd7) || m === 0x01) { o += 2; continue; }
         const taille = u16be(o + 2);
         if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return { largeur: u16be(o + 7), hauteur: u16be(o + 5), type: 'image/jpeg' };
@@ -86,6 +91,21 @@ export async function preparerPhotoLocale(blob) {
   if (blob.type && !MIME_PHOTO_LOCALE.includes(blob.type)) throw new ErreurImage('type');
   const dims = await dimensionsImage(blob);
   if (dims && dims.largeur * dims.hauteur > LIMITES_COUVERTURE.pixels) throw new ErreurImage('trop_grande');
+  return reduireImage(blob);
+}
+
+// Lot F (spec plats-en-images § 3.4, D-F12) : une image DISTANTE (l'image d'une page web, rapatriée par la fonction de l'assistant) passe un mur plus
+// strict qu'une photo locale : type annoncé de la liste des couvertures (jamais HEIC), en-tête LU et du MÊME type que l'annonce, petit côté ≥ 200 px
+// (une icône, un logo carré ou un pixel de suivi n'illustre pas un plat), ≤ 16 Mpx, ≤ 5 Mio ; puis le même ré-encodage JPEG 1 200 px. N'écrit rien.
+export const COTE_MIN_DISTANT = 200;
+export async function preparerPhotoDistante(blob, { coteMin = COTE_MIN_DISTANT } = {}) {
+  if (!(blob instanceof Blob)) throw new ErreurImage('indecodable');
+  if (blob.size > LIMITES_COUVERTURE.octetsDistants) throw new ErreurImage('trop_lourde');
+  if (!COVER_INPUT_MIME.includes(blob.type)) throw new ErreurImage('type');
+  const dims = await dimensionsImage(blob);
+  if (!dims || dims.type !== blob.type) throw new ErreurImage('indecodable');
+  if (Math.min(dims.largeur, dims.hauteur) < coteMin) throw new ErreurImage('trop_petite');
+  if (dims.largeur * dims.hauteur > LIMITES_COUVERTURE.pixels) throw new ErreurImage('trop_grande');
   return reduireImage(blob);
 }
 

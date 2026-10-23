@@ -5,7 +5,7 @@ import { navigate, refresh, remplacerAdresse } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { etatFichier } from '../sync/fichiers.js';
 import { listConventions } from '../domain/units.js';
-import { pageHeader, section, field, select, recipeCard, emptyState, bookCover, contexteFichiers, vignettesDePages, boutonTelechargerPages, relireErreurs, texteErreurFichier } from './components.js';
+import { pageHeader, section, field, select, recipeCard, emptyState, bookCover, contexteFichiers, vignettesDePages, boutonTelechargerPages, relireErreurs, texteErreurFichier, remplacerEnRevoquant } from './components.js';
 import { invalidate } from './state.js';
 import { urlDeBlob } from '../core/blob-urls.js';
 import { poserCouverture, renderZoneCouverture, messageErreurImage } from './livre-ajout.js';
@@ -167,7 +167,8 @@ export async function renderBook(params, query, ctx) {
   const filterState = { mode: 'all', q: '' };
   const list = el('div', null);
   const drawList = () => {
-    list.replaceChildren();
+    // Lot F (§ 4.2, D-T9) : le filtre redessine à chaque touche ; les URL des vignettes précédentes sont révoquées APRÈS le vidage, elles seules.
+    remplacerEnRevoquant(list);
     let rows = recipes;
     if (filterState.mode === 'available') rows = available; if (filterState.mode === 'refs') rows = refs; if (filterState.mode === 'fav') rows = recipes.filter((r) => r.favorite);
     if (filterState.q) rows = rows.filter((r) => (r.original_title + ' ' + (r.display_title || '')).toLowerCase().includes(filterState.q.toLowerCase()));

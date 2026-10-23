@@ -317,7 +317,7 @@ test('lirePageHtml : assemblage', () => {
   const avec = L.lirePageHtml({ html: '<title>Titre</title>' + script(RICARDO) + script(autre), urlFinale: 'https://www.ricardo.test/r/1', contentType: 'text/html' });
   assert.deepEqual(avec, {
     jsonld: { recette: L.recetteDepuisJsonLd(RICARDO).recette, autres: 1 }, texte: null, texte_coupe: false,
-    page: { url_finale: 'https://www.ricardo.test/r/1', hote: 'www.ricardo.test', titre_page: 'Titre', auteur: 'Ricardo', site: null, lue_le: null, autres_recettes: 1, texte_coupe: false },
+    page: { url_finale: 'https://www.ricardo.test/r/1', hote: 'www.ricardo.test', titre_page: 'Titre', auteur: 'Ricardo', site: null, lue_le: null, autres_recettes: 1, texte_coupe: false, image_url: 'https://ricardo.test/a.jpg' },
   });
   const sans = L.lirePageHtml({ html: '<main><p>Une recette racontée.</p></main>', urlFinale: 'https://blogue.test/x' });
   assert.deepEqual([sans.jsonld, sans.texte, sans.page.hote, sans.page.autres_recettes], [null, 'Une recette racontée.', 'blogue.test', 0]);
@@ -343,4 +343,230 @@ test('lirePageHtml : assemblage', () => {
   assert.ok(profond.length < 512 * 1024, 'sous la borne d un bloc');
   const lu = L.lirePageHtml({ html: script(profond), urlFinale: 'https://a.test/' });
   assert.deepEqual([lu.jsonld?.recette.title, lu.jsonld?.recette.steps], ['T', []], '11 000 sections imbriquées en objets : aucune levée (« aucune fonction ne lève »)');
+});
+
+// --- Lot F « Les plats en images » (spec § 6.1, § 7.1) : l'image de la page et son transport en base64 ------------------------------------------
+const octetsDe = (...morceaux) => Uint8Array.from(morceaux.flat());
+const ascii = (s) => [...s].map((c) => c.charCodeAt(0));
+// Octets pseudo-aléatoires à graine fixe (reproductibles d'un passage à l'autre).
+const pseudo = (n, graine = 7) => { const u = new Uint8Array(n); let x = graine >>> 0; for (let i = 0; i < n; i += 1) { x = (Math.imul(x, 1103515245) + 12345) >>> 0; u[i] = x >>> 24; } return u; };
+
+test('LIMITES_IMAGE : forme (R-F-4)', () => {
+  assert.ok(Object.isFrozen(L.LIMITES_IMAGE) && Object.isFrozen(L.LIMITES_IMAGE.types), 'gelees');
+  assert.deepEqual([L.LIMITES_IMAGE.url, L.LIMITES_IMAGE.redirections, L.LIMITES_IMAGE.delaiSautMs, L.LIMITES_IMAGE.delaiTotalMs],
+    [L.LIMITES_LECTURE.url, L.LIMITES_LECTURE.redirections, L.LIMITES_LECTURE.delaiSautMs, L.LIMITES_LECTURE.delaiTotalMs], 'url, redirections et delais recopient LIMITES_LECTURE');
+  assert.equal(L.LIMITES_IMAGE.octets, 2097152, '2 Mio en litteral : le meme que LIMITES_IMAGE_WEB.octets du client (les deux suites ne partagent aucun module)');
+  assert.deepEqual([...L.LIMITES_IMAGE.types], ['image/jpeg', 'image/png', 'image/webp'], 'exactement trois types');
+});
+
+test('typeImageAdmis : table', () => {
+  const table = [['image/jpeg', 'image/jpeg'], ['IMAGE/PNG; charset=binary', 'image/png'], ['image/webp', 'image/webp'], ['image/gif', null], ['image/svg+xml', null],
+    ['image/heic', null], ['text/html', null], ['application/octet-stream', null], ['', null], [null, null], [undefined, null], [7, null]];
+  for (const [entree, attendu] of table) assert.equal(L.typeImageAdmis(entree), attendu, String(entree));
+});
+
+test('signatureImage : table (les premiers octets doivent dire le type)', () => {
+  assert.equal(L.signatureImage(octetsDe([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10])), 'image/jpeg');
+  assert.equal(L.signatureImage(octetsDe([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0])), 'image/png');
+  assert.equal(L.signatureImage(octetsDe(ascii('RIFF'), [1, 2, 3, 4], ascii('WEBP'), ascii('VP8 '))), 'image/webp');
+  assert.equal(L.signatureImage(octetsDe(ascii('RIFF'), [1, 2, 3, 4], ascii('AVI '), [0, 0])), null, 'RIFF sans WEBP aux octets 8-11 : null');
+  assert.equal(L.signatureImage(octetsDe(ascii('<!doctype html>'))), null, 'un HTML');
+  assert.equal(L.signatureImage(octetsDe(ascii('%PDF-1.4'))), null, 'un PDF');
+  assert.equal(L.signatureImage(octetsDe([0xff, 0xd8])), null, 'deux octets');
+  assert.equal(L.signatureImage(new Uint8Array(0)), null, 'vide');
+  assert.equal(L.signatureImage('pas des octets'), null, 'ne leve jamais');
+});
+
+test('imageDe : formes (S-11 : jamais Object.assign ni for…in)', () => {
+  assert.equal(L.imageDe({ image: 'https://a.test/i.jpg' }), 'https://a.test/i.jpg', 'chaine');
+  assert.equal(L.imageDe({ image: { url: 'https://a.test/u.jpg' } }), 'https://a.test/u.jpg', '{ url }');
+  assert.equal(L.imageDe({ image: { contentUrl: 'https://a.test/c.jpg' } }), 'https://a.test/c.jpg', '{ contentUrl }');
+  assert.equal(L.imageDe({ image: { url: 'https://a.test/u.jpg', contentUrl: 'https://a.test/c.jpg' } }), 'https://a.test/u.jpg', 'ronde 1 : url, SINON contentUrl (l ordre du contrat)');
+  assert.equal(L.imageDe({ image: ['https://a.test/1.jpg', 'https://a.test/2.jpg'] }), 'https://a.test/1.jpg', 'tableau de chaines : la premiere');
+  assert.equal(L.imageDe({ image: [{ '@type': 'ImageObject' }, { url: 'https://a.test/o.jpg' }] }), 'https://a.test/o.jpg', 'tableau d ImageObject : le premier qui rend une adresse');
+  assert.equal(L.imageDe({ image: [] }), null, 'tableau vide');
+  // Ronde 1 : la borne de récursion (PROFONDEUR_IMAGE = 2) — un tableau, ou un tableau de tableaux, au plus.
+  assert.equal(L.imageDe({ image: [['https://a.test/x.jpg']] }), 'https://a.test/x.jpg', 'tableau de tableaux : admis');
+  assert.equal(L.imageDe({ image: [[{ url: 'https://a.test/y.jpg' }]] }), 'https://a.test/y.jpg', 'tableau de tableaux d ImageObject : admis');
+  assert.equal(L.imageDe({ image: [[['https://a.test/x.jpg']]] }), null, 'trois niveaux de tableaux : null');
+  assert.equal(L.imageDe({ image: { '@type': 'ImageObject' } }), null, 'ImageObject sans adresse');
+  assert.equal(L.imageDe({ image: '<b>https://a.test/i.jpg</b>' }), 'https://a.test/i.jpg', 'balises retirees');
+  assert.equal(L.imageDe({ image: 'https://a.test/i.jpg?a=1&amp;b=2' }), 'https://a.test/i.jpg?a=1&b=2', 'entites decodees');
+  assert.equal(L.imageDe({ image: 7 }), null);
+  assert.equal(L.imageDe(null), null);
+  // S-11 : un champ HÉRITÉ du prototype n'est jamais lu (Object.hasOwn) — le prototype est pollué le temps des appels, rendu en finally. Un
+  // JSON.parse de « __proto__ » crée une clé PROPRE et ne prouverait rien (un accès direct x.url y rendrait aussi null).
+  try {
+    Object.prototype.url = 'https://evil.test/u.jpg'; Object.prototype.image = 'https://evil.test/i.jpg';
+    assert.deepEqual([L.imageDe({ image: {} }), L.imageDe({}), L.imageDe({ image: [{}] })], [null, null, null], 'url et image heritees du prototype : jamais lues');
+  } finally { delete Object.prototype.url; delete Object.prototype.image; }
+});
+
+test('imageOgDe : la balise lue dans sa tranche, lineaire (S-4)', () => {
+  assert.equal(L.imageOgDe('<head><meta property="og:image" content="https://a.test/i.jpg"></head>'), 'https://a.test/i.jpg');
+  assert.equal(L.imageOgDe('<meta name="og:image" content="https://a.test/n.jpg">'), 'https://a.test/n.jpg', 'name=');
+  assert.equal(L.imageOgDe('<meta content="https://a.test/o.jpg" property="og:image">'), 'https://a.test/o.jpg', 'ordre des attributs libre');
+  assert.equal(L.imageOgDe("<META PROPERTY='og:image' CONTENT='https://a.test/q.jpg'>"), 'https://a.test/q.jpg', 'casse libre, guillemets simples');
+  assert.equal(L.imageOgDe('<meta property="og:image" content="https://a.test/i.jpg?a=1&amp;b=2">'), 'https://a.test/i.jpg?a=1&b=2', 'entites decodees');
+  assert.equal(L.imageOgDe('<meta property="og:image" content="https://a.test/1.jpg"><meta property="og:image" content="https://a.test/2.jpg">'), 'https://a.test/1.jpg', 'la premiere');
+  assert.equal(L.imageOgDe('<meta property="og:image:secure_url" content="https://a.test/s.jpg">'), null, 'og:image:secure_url seul : ignore');
+  assert.equal(L.imageOgDe('<meta property="og:image:url" content="https://a.test/u.jpg">'), null, 'og:image:url seul : ignore');
+  assert.equal(L.imageOgDe('<html><head><title>x</title></head></html>'), null, 'absente');
+  assert.equal(L.imageOgDe('<meta property="og:image" content="https://a.test/i.jpg"'), null, 'balise jamais fermee : null, sans lever');
+  assert.equal(L.imageOgDe(42), null);
+  // Ronde 1 : le contrat « rognée » (spec § 6.1) — des blancs autour de l'adresse sont retirés ; un content de blancs seuls vaut null.
+  assert.equal(L.imageOgDe('<meta property="og:image" content="  https://a.test/i.jpg  ">'), 'https://a.test/i.jpg', 'rognee');
+  assert.equal(L.imageOgDe('<meta property="og:image" content="   ">'), null, 'blancs seuls : null');
+  const t0 = performance.now();
+  assert.equal(L.imageOgDe('<meta'.repeat(Math.ceil((2 * MIO) / 5))), null);
+  assert.ok(performance.now() - t0 < 500, '2 Mio de <meta sans > : sous 500 ms');
+});
+
+// Ronde 1 (S-4) : l'essai ci-dessus arrête le balayage à la première balise sans « > » et n'entre jamais dans lireMetaTranche. Ici, 2 Mio de
+// balises meta FERMÉES, chacune sous la borne de 2 048 caractères de la tranche : la clé et le content y sont cherchés pour de bon. Les deux
+// premières pages (une longue suite de blancs après « name= » ou « property= ») faisaient revenir en arrière le motif de la clé de façon
+// quadratique (≈ 3,4 s mesurées) ; la troisième compte les tranches (≈ 36 000 balises og:image courtes) ; la quatrième lit une og:image longue.
+test('imageOgDe et lirePageHtml : 2 Mio de balises meta FERMEES lues dans leur tranche, en moins de 500 ms chacune (S-4)', () => {
+  const remplir = (motif) => motif.repeat(Math.ceil((2 * MIO) / motif.length));
+  const longue = 'https://a.test/' + 'x'.repeat(1950);
+  const pages = [
+    ['name= puis 2 030 blancs', remplir('<meta name=' + ' '.repeat(2030) + 'z>'), null],
+    ['property= puis 2 026 blancs', remplir('<meta property=' + ' '.repeat(2026) + 'z>'), null],
+    ['og:image courtes', remplir('<meta property="og:image" content="https://a.test/i.jpg">'), 'https://a.test/i.jpg'],
+    ['og:image de 2 002 caracteres', remplir('<meta property="og:image" content="' + longue + '">'), longue],
+  ];
+  for (const [nom, html, attendu] of pages) {
+    assert.ok(html.length >= 2 * MIO, nom + ' : 2 Mio');
+    let t0 = performance.now();
+    assert.equal(L.imageOgDe(html), attendu, nom + ' : imageOgDe');
+    const og = performance.now() - t0;
+    t0 = performance.now();
+    const lue = L.lirePageHtml({ html, urlFinale: 'https://a.test/' });
+    const lp = performance.now() - t0;
+    assert.equal(lue.page.image_url, attendu, nom + ' : lirePageHtml');
+    assert.ok(og < 500 && lp < 500, `${nom} : imageOgDe ${og.toFixed(0)} ms, lirePageHtml ${lp.toFixed(0)} ms (borne : 500 ms chacune)`);
+  }
+});
+
+test('imageUrlDe : priorite, resolution, validation, pages de liste (D-F3)', () => {
+  const OG = '<meta property="og:image" content="https://og.test/og.jpg">';
+  const base = { urlFinale: 'https://site.test/r/x' };
+  assert.equal(L.imageUrlDe({ image: 'https://site.test/ld.jpg' }, OG, base), 'https://site.test/ld.jpg', 'l image du JSON-LD avant og:image');
+  assert.equal(L.imageUrlDe({ name: 'x' }, OG, base), 'https://og.test/og.jpg', 'JSON-LD sans image : og:image');
+  assert.equal(L.imageUrlDe({ name: 'x' }, OG, { ...base, autresRecettes: 2 }), null, 'page de liste : og:image ecartee');
+  assert.equal(L.imageUrlDe({ image: 'https://site.test/ld.jpg' }, OG, { ...base, autresRecettes: 2 }), 'https://site.test/ld.jpg', 'page de liste : l image du Recipe retenu reste');
+  assert.equal(L.imageUrlDe(null, OG, base), 'https://og.test/og.jpg', 'sans objet : og:image');
+  assert.equal(L.imageUrlDe({ image: '/img/i.jpg' }, '', base), 'https://site.test/img/i.jpg', 'relative resolue contre urlFinale');
+  assert.equal(L.imageUrlDe({ image: '//cdn.test/i.jpg' }, '', base), 'https://cdn.test/i.jpg', 'sans schema resolue');
+  for (const refusee of ['http://a.test/i.jpg', 'https://127.0.0.1/i.jpg', 'https://a.test:8443/i.jpg', 'https://localhost/i.jpg', 'https://u:p@a.test/i.jpg']) assert.equal(L.imageUrlDe({ image: refusee }, '', base), null, refusee);
+  assert.equal(L.imageUrlDe({ image: 'https://projet.test/i.jpg' }, '', { ...base, hotesRefuses: ['projet.test'] }), null, 'hote du projet');
+  assert.equal(L.imageUrlDe({ image: 'https://a.test/i.jpg#frag' }, '', base), 'https://a.test/i.jpg', 'fragment retire');
+  assert.equal(L.imageUrlDe({ image: 'https://a.test/' + 'x'.repeat(2049 - 15) }, '', base), null, '2 049 points de code');
+  assert.equal(L.imageUrlDe({ image: '/i.jpg' }, '', {}), null, 'relative sans urlFinale : null, sans lever');
+  assert.equal(L.imageUrlDe(null, '', base), null);
+});
+
+test('versBase64 : base64 valide a toute taille (TRANCHE_BASE64 multiple de 3)', () => {
+  assert.equal(L.TRANCHE_BASE64, 24576);
+  assert.equal(L.TRANCHE_BASE64 % 3, 0, 'une tranche multiple de 3 n a jamais de remplissage');
+  assert.deepEqual([L.versBase64(Uint8Array.of(0)), L.versBase64(Uint8Array.of(0, 0)), L.versBase64(new Uint8Array(0))], ['AA==', 'AAA=', '']);
+  for (const n of [100000, L.TRANCHE_BASE64 + 1, 2 * L.TRANCHE_BASE64 + 2]) {
+    const entree = pseudo(n);
+    const sortie = L.versBase64(entree);
+    assert.equal(sortie.length, 4 * Math.ceil(n / 3), 'longueur pour ' + n);
+    assert.ok(!sortie.slice(0, -2).includes('='), 'aucun = ailleurs que dans les deux derniers caracteres (' + n + ')');
+    assert.ok(Buffer.from(sortie, 'base64').equals(Buffer.from(entree)), 'Buffer relit les memes octets (' + n + ')');
+    const binaire = atob(sortie);
+    assert.ok(binaire.length === n && entree.every((o, i) => binaire.charCodeAt(i) === o), 'atob relit les memes octets (' + n + ')');
+  }
+});
+
+test('lirePageHtml : page.image_url (le Recipe RETENU, og:image, pages de liste)', () => {
+  const ld = (o) => script(o);
+  const lisible = (nom, image) => ({ '@type': 'Recipe', name: nom, recipeIngredient: ['1 pomme'], recipeInstructions: ['Cuire.'], ...(image ? { image } : {}) });
+  const urlFinale = 'https://site.test/r/1';
+  const deux = ld({ '@type': 'Recipe', name: 'Vide', image: 'https://site.test/a.jpg' }) + ld(lisible('Bonne', 'https://site.test/b.jpg'));
+  assert.equal(L.lirePageHtml({ html: deux, urlFinale }).page.image_url, 'https://site.test/b.jpg', 'l image du Recipe RETENU (le premier lisible), jamais du premier trouve');
+  const texte = '<main><p>' + 'Texte de recette assez long pour le modele. '.repeat(3) + '</p></main>';
+  assert.equal(L.lirePageHtml({ html: '<meta property="og:image" content="/og.jpg">' + texte, urlFinale }).page.image_url, 'https://site.test/og.jpg', 'sans JSON-LD : og:image, relative resolue');
+  assert.equal(L.lirePageHtml({ html: texte, urlFinale }).page.image_url, null, 'ni l un ni l autre : null');
+  assert.equal(L.lirePageHtml({ html: '<meta property="og:image" content="   ">' + texte, urlFinale }).page.image_url, null, 'ronde 1 : og:image de blancs seuls → null (jamais l adresse de la page elle-meme)');
+  assert.equal(L.lirePageHtml({ html: ld(lisible('X', 'https://projet.test/i.jpg')), urlFinale, hotesRefuses: ['projet.test'] }).page.image_url, null, 'hotesRefuses relaye');
+  assert.equal(L.lirePageHtml({ html: ld(lisible('X', '/i/x.jpg')), urlFinale }).page.image_url, 'https://site.test/i/x.jpg', 'relative resolue contre urlFinale');
+  const liste = L.lirePageHtml({ html: ld(lisible('Un')) + ld(lisible('Deux')) + '<meta property="og:image" content="https://site.test/og.jpg">', urlFinale });
+  assert.deepEqual([liste.page.autres_recettes, liste.page.image_url], [1, null], 'deux Recipe lisibles sans image et une og:image : null (page de liste)');
+  assert.equal(Object.keys(L.lirePageHtml({ html: texte, urlFinale }).page).at(-1), 'image_url', 'image_url est la derniere cle de page');
+});
+
+// Revue finale du lot F : une image « dégénérée » se résolvait en la page elle-même (ou son dossier), passait valideAdresse et coûtait un appel pour un
+// 422 pas_une_image certain ; une image du JSON-LD refusée ne laissait pas og:image tenter la sienne ; la garde « page de liste » ne comptait que les
+// Recipe lisibles.
+test('image_url (revue finale) : formes degenerees → null ; repli sur og:image ; garde de liste sur toutes les Recipe trouvees', () => {
+  const urlFinale = 'https://site.test/r/x';
+  const texte = '<main><p>' + 'Texte de recette assez long pour le modele. '.repeat(3) + '</p></main>';
+  const og = (c) => '<meta property="og:image" content="' + c + '">';
+  for (const c of ['#', '#top', '?v=1', '.', './', '..', '../', '/', 'x', 'x#top', 'https://site.test/r/x', 'https://site.test/r/x#a', 'https://site.test/', '  #  ']) {
+    assert.equal(L.lirePageHtml({ html: og(c) + texte, urlFinale }).page.image_url, null, 'og:image « ' + c + ' » : la page, son dossier ou un fragment → null');
+    assert.equal(L.imageUrlDe({ image: c }, '', { urlFinale }), null, 'image JSON-LD « ' + c + ' » → null');
+  }
+  assert.deepEqual(['i.jpg', '/img/i.jpg', 'i.jpg?v=2', 'https://cdn.test/r/x', 'x.jpg#top'].map((c) => L.imageUrlDe({ image: c }, '', { urlFinale })),
+    ['https://site.test/r/i.jpg', 'https://site.test/img/i.jpg', 'https://site.test/r/i.jpg?v=2', 'https://cdn.test/r/x', 'https://site.test/r/x.jpg'], 'une vraie image relative, absolue ou d un autre hote (meme chemin) passe toujours');
+  const OG = og('https://og.test/og.jpg');
+  for (const refusee of ['http://site.test/i.jpg', 'https://127.0.0.1/i.jpg', 'https://site.test:8443/i.jpg', '#', 'https://site.test/r/x']) {
+    assert.equal(L.imageUrlDe({ image: refusee }, OG, { urlFinale }), 'https://og.test/og.jpg', 'image JSON-LD refusee (' + refusee + ') : og:image tente la sienne');
+  }
+  assert.equal(L.imageUrlDe({ image: 'http://site.test/i.jpg' }, OG, { urlFinale, autresRecettes: 1 }), null, 'image JSON-LD refusee sur une page de liste : og:image reste ecartee');
+  const ld = (o) => script(o);
+  const vignette = (nom) => ({ '@type': 'Recipe', name: nom, image: 'https://site.test/' + nom + '.jpg' });
+  const lisible = (nom, image) => ({ '@type': 'Recipe', name: nom, recipeIngredient: ['1 pomme'], recipeInstructions: ['Cuire.'], ...(image ? { image } : {}) });
+  const categorie = L.lirePageHtml({ html: ld(vignette('a')) + ld(vignette('b')) + OG + texte, urlFinale });
+  assert.deepEqual([categorie.jsonld, categorie.page.autres_recettes, categorie.page.image_url], [null, 0, null], 'page de categorie : deux Recipe-vignettes illisibles et une og:image → null (la banniere n est pas la photo du plat)');
+  assert.equal(L.lirePageHtml({ html: ld(vignette('seule')) + OG + texte, urlFinale }).page.image_url, 'https://og.test/og.jpg', 'UNE Recipe illisible (la page de la recette) : og:image reste prise');
+  const liee = L.lirePageHtml({ html: ld(lisible('Bonne')) + ld(vignette('liee')) + OG, urlFinale });
+  assert.deepEqual([liee.page.autres_recettes, liee.page.image_url], [0, null], 'caractere : une Recipe lisible SANS image et une vignette liee → og:image ecartee (moins de photos justes, jamais une fausse)');
+  assert.equal(L.lirePageHtml({ html: ld(lisible('Bonne', 'https://site.test/b.jpg')) + ld(vignette('liee')) + OG, urlFinale }).page.image_url, 'https://site.test/b.jpg', 'l image du Recipe retenu reste, vignettes ou pas');
+});
+
+// Revue finale du lot F (S-4) : le jumeau de l'essai des balises meta FERMÉES, sur des <script> FERMÉS — TYPE_JSONLD, que balayer applique à chaque
+// <script> de 2 048 caractères au plus, portait le même motif à retour arrière quadratique (« =\s*["']?\s* » : ≈ 8 s mesurées par lirePageHtml).
+test('imageOgDe et lirePageHtml : 2 Mio de <script type= FERMES suivis de blancs, en moins de 500 ms chacune (S-4)', () => {
+  const remplir = (motif) => motif.repeat(Math.ceil((2 * MIO) / motif.length));
+  const pages = [
+    ['type= puis 2 030 blancs', remplir('<script type=' + ' '.repeat(2030) + 'z></script>'), 0],
+    ['type = puis 2 026 blancs', remplir('<script type =' + ' '.repeat(2026) + 'z></script>'), 0],
+    ['type= puis 1 000 blancs, un guillemet, 1 000 blancs', remplir('<script type=' + ' '.repeat(1000) + '"' + ' '.repeat(1000) + 'z"></script>'), 0],
+    ['type= puis 2 000 blancs et le vrai type', remplir('<script type=' + ' '.repeat(2000) + '"application/ld+json">{"@type":"Thing"}</script>'), 1],
+  ];
+  for (const [nom, html, lus] of pages) {
+    assert.ok(html.length >= 2 * MIO, nom + ' : 2 Mio');
+    let t0 = performance.now();
+    assert.equal(L.imageOgDe(html), null, nom + ' : imageOgDe');
+    const og = performance.now() - t0;
+    t0 = performance.now();
+    const lue = L.lirePageHtml({ html, urlFinale: 'https://a.test/' });
+    const lp = performance.now() - t0;
+    assert.deepEqual([lue.jsonld, lue.page.image_url], [null, null], nom + ' : lirePageHtml');
+    assert.equal(L.extraireBlocsJsonLd(html.slice(0, 5000)).length > 0, lus > 0, nom + ' : le type JSON-LD est reconnu (ou non) comme avant');
+    assert.ok(og < 500 && lp < 500, `${nom} : imageOgDe ${og.toFixed(0)} ms, lirePageHtml ${lp.toFixed(0)} ms (borne : 500 ms chacune)`);
+  }
+});
+
+test('chainage serveur → client : lireOctetsBase64(versBase64(octets), n) rend les memes octets a toute taille ; base64.js sans import', async () => {
+  const chemin = path.join(ICI, '..', 'src', 'domain', 'base64.js');
+  assert.doesNotMatch(readFileSync(chemin, 'utf8'), /^\s*import\b/m, 'module feuille, sans import (importable par Node)');
+  const { lireOctetsBase64 } = await import(pathToFileURL(chemin).href);
+  for (const n of [1, 2, 3, 100000, L.TRANCHE_BASE64 + 1, 2 * L.TRANCHE_BASE64 + 2]) {
+    const entree = pseudo(n);
+    const relus = lireOctetsBase64(L.versBase64(entree), n);
+    assert.ok(relus instanceof Uint8Array && relus.length === n && relus.every((o, i) => o === entree[i]), 'n = ' + n);
+  }
+  const b = L.versBase64(pseudo(100000)); const milieu = Math.floor(b.length / 2);
+  assert.equal(lireOctetsBase64(b.slice(0, milieu) + '=' + b.slice(milieu + 1), 100000), null, 'un = au milieu → null');
+  assert.equal(lireOctetsBase64(b, 99999), null, 'longueur ≠ 4 × ceil(taille / 3) → null');
+  // Ronde 1 : la regle de longueur EXACTE, isolee — sans remplissage, 7 caracteres pour 5 octets passent l alphabet et atob les decode en 5 octets.
+  const cinq = L.versBase64(pseudo(5)); const nu = cinq.replace(/=+$/, '');
+  assert.deepEqual([cinq.length, nu.length, atob(nu).length], [8, 7, 5], 'fixture : 8 caracteres avec remplissage, 7 sans, decodables en 5 octets');
+  assert.equal(lireOctetsBase64(nu, 5), null, 'sans remplissage : seule la regle de longueur exacte la refuse');
+  assert.deepEqual([lireOctetsBase64(42, 1), lireOctetsBase64('@@@@', 3), lireOctetsBase64('', 0)?.length], [null, null, 0]);
+  assert.equal(lireOctetsBase64('AAA AAAA', 5), null, 'une espace, longueur exacte : atob l ignorerait, seule la regle ALPHABET la refuse');
 });

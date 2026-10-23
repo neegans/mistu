@@ -10,7 +10,7 @@ import { COVER_INPUT_MIME, typeAffichage, displayUrl } from '../sync/mime.js';
 import { LIMITES_COUVERTURE, dimensionsImage, reduireImage, preparerPhotoLocale, ErreurImage, messageErreurImage } from '../core/image.js';
 import { urlDeBlob } from '../core/blob-urls.js';
 import { listConventions } from '../domain/units.js';
-import { pageHeader, field, select, sessionAssistant, carteConnexion } from './components.js';
+import { pageHeader, field, select, sessionAssistant, carteConnexion, renderZoneCouverture } from './components.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes, motsClesExistants, suggestionsModel, renderSuggestions, normaliser, LIMITES_PUCES } from './puces.js';
 import { GOOGLE_BOOKS } from '../sync/config.js';
 import { nettoyerIsbn, validerIsbn, codeBarresVersIsbn } from '../core/isbn.js';
@@ -22,6 +22,7 @@ import { validerLectureCouverture } from '../domain/llm.js';
 import { isbnUnique, shaBornee, fabriquerImportCouverture, champsDepuisLecture, ficheDepuisProposition, ficheSelonIsbn, choisirProposition } from '../domain/couverture.js';
 import { IMPORTS_TERMINES } from '../model/schema.js';
 export { messageErreurImage }; // déplacée dans core/image.js (lot E) : book.js et regroupement.js (lot D) l'importent toujours d'ici
+export { renderZoneCouverture }; // déplacée dans components.js (lot F, EI-5 : photo-plat.js la lit sans importer ce module, aucun cycle) : book.js et les tests l'importent toujours d'ici
 
 export const LIMITES_ISBN = { champ: 300, corps: 256 * 1024, delaiMs: 10000, tentativeMs: 8000, repriseMs: 1500, totalMs: 20000 };
 import { borner as bornerCore, lireBornee, signalDelai, OPTIONS_FETCH } from '../core/bornes.js';
@@ -278,23 +279,6 @@ export async function poserCouverture(blob, { origine = 'locale', repo: r = repo
   const empreinte = await sha256(jpeg);
   await r.putFile(empreinte, jpeg, { mime: 'image/jpeg' });
   return { sha256: empreinte, taille: jpeg.size };
-}
-
-// R-UX-8 : aucun groupe de boutons dans un <label> — un clic sur le mot « Couverture » déclencherait « Photographier ».
-// L'état est dit tel qu'il est (I-B) : le message vient d'un fait (reçue, enregistrée, refusée), jamais d'une attente.
-export function renderZoneCouverture(etat, gestes = {}) {
-  const g = (nom) => () => (typeof gestes[nom] === 'function' ? gestes[nom]() : undefined);
-  return el('div', { class: 'field zone-couverture' }, el('span', null, t('Couverture')),
-    el('div', { class: 'row' },
-      etat.apercu ? el('img', { src: etat.apercu, alt: '' }) : null,
-      el('div', { class: 'stack' },
-        etat.message ? el('small', { class: 'muted' }, etat.message) : null,
-        el('div', { class: 'row' },
-          etat.telechargeable ? el('button', { type: 'button', class: 'btn primary', disabled: !!etat.telechargement, onClick: g('telecharger') }, etat.telechargement ? t('Téléchargement…') : t('Télécharger')) : null,
-          etat.reessayable ? el('button', { type: 'button', class: 'btn', disabled: !!etat.telechargement, onClick: g('reessayer') }, t('Réessayer')) : null,
-          el('button', { type: 'button', class: 'btn', disabled: !!etat.enCours, onClick: g('photographier') }, t('Photographier')),
-          el('button', { type: 'button', class: 'btn', disabled: !!etat.enCours, onClick: g('choisir') }, t('Choisir une image')),
-          etat.sha256 ? el('button', { type: 'button', class: 'btn link', disabled: !!etat.enCours, onClick: g('retirer') }, t('Retirer')) : null))));
 }
 
 // § 4.5 : le texte d'une ligne `echec` d'une COUVERTURE — rend { texte, code } comme texteEchec (P-1). `vide` : la couverture a été vue et rien n'y a été

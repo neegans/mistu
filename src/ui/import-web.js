@@ -18,6 +18,9 @@ import { sessionAssistant, carteConnexion, texteRefusAssistant, texteEchecAssist
 import { demarrerConnexion } from './settings.js';
 import { signetModel, fabriquerSignet, LIMITES_SIGNET } from './signet.js';
 import { DOCUMENT_ID, BATTEMENT_MS, prendreVol, libererVol, volTenu, volEnCours } from './vol.js';
+import { candidatPhotoWeb, pointeurValide } from '../domain/photo-web.js';
+import { assertVocabulaire, originePhotoAdmise } from '../domain/vocabulaire.js';
+import { ligneAnnoncePhotoWeb, rapatrierPhotoWeb } from './photo-plat.js';
 
 const horloge = () => new Date().toISOString();
 const estRefus = (e) => e instanceof TransitionRefusee;
@@ -240,7 +243,7 @@ async function marquerIllisible(repo, ligne) {
   try { await repo.transitionner('imports', ligne.id, { attendus: ['a_verifier'], patch }); }
   catch (e) { if (!estRefus(e)) logError('import_web.revalidation', { error: e, id: ligne.id }); }
 }
-export async function enregistrerLecture(importId, { repo = repoModule, remplacer = null, maintenant = horloge, choisir = chooseDialog, cle = null } = {}) {
+export async function enregistrerLecture(importId, { repo = repoModule, remplacer = null, maintenant = horloge, choisir = chooseDialog, cle = null, ctx = null, fetch: fetchInjecte = undefined, enLigne = () => enLigneFlag, photoAnnoncee = null } = {}) {
   const ligne = await repo.get('imports', importId);
   if (!ligne || ligne.kind !== 'web' || ligne.status !== 'a_verifier') return refus('statut');
   if (cle !== null && cleLecture(ligne) !== cle) return refus('lecture'); // la lecture affichée a été remplacée : rien d'écrit, l'écran se redessine
@@ -263,15 +266,31 @@ export async function enregistrerLecture(importId, { repo = repoModule, remplace
     if (!fiche) return refus('inconnu');
     if (fondement(fiche) === avant) choix = r === 'remplacer'; // sinon la question est reposée (ou n'a plus lieu d'être)
   }
-  const fab = fabriquerLectureWeb(lu.recette, { signet: fiche.signet, versions: fiche.versions, page: lu.page, sourceKind: lu.source_kind, importId: ligne.id, modele: modeleBorne(ligne.model), maintenant: maintenant(), ...(choix === false ? { remplacer: false } : {}) });
+  // Lot F (§ 4.3 point 2, S-12) : l'adresse ANNONCÉE par l'écran voyage jusqu'au fabricant, qui ne rend `photoWeb` que si elle est encore candidate.
+  const fab = fabriquerLectureWeb(lu.recette, { signet: fiche.signet, versions: fiche.versions, page: lu.page, sourceKind: lu.source_kind, importId: ligne.id, modele: modeleBorne(ligne.model), maintenant: maintenant(), photoAnnoncee, ...(choix === false ? { remplacer: false } : {}) });
   const cleLue = cleLecture(ligne);
   const cloture = (c) => { if (cleLecture(c) !== cleLue) throw new TransitionRefusee('imports', ligne.id, c.status); return { status: 'enregistre', reponse_brute: null, finished_at: maintenant() }; };
+  // Revue finale du lot F (D-F16) : la fiche s'écrit par une condition { key, fusion } — les trois champs de la photo relus DANS la transaction (une descente
+  // ou « Choisir une image » engagée après relire() n'est plus effacée) ; seul le rapatriement attendu (D-F18) repose photo_source_url, sur une fiche relue
+  // sans photo valide. Supprimée entre-temps : jamais ressuscitée (refus inconnu, rien d'écrit).
+  const ficheDans = (c) => {
+    if (!c) throw new TransitionRefusee('recipes', fiche.signet.id, null);
+    const r = { ...fab.recipe };
+    for (const champ of ['photo_sha256', 'photo_origin', 'photo_source_url']) { if (Object.hasOwn(c, champ)) r[champ] = champ === 'photo_origin' ? originePhotoAdmise(c[champ]) : c[champ]; else delete r[champ]; }
+    if (fab.photoWeb && !pointeurValide(c)) r.photo_source_url = fab.photoWeb;
+    assertVocabulaire(r, 'recipes');
+    return r;
+  };
   try {
-    await repo.transitionner('imports', ligne.id, { attendus: ['a_verifier'], patch: cloture, puts: { recipe_versions: [fab.version], ...(choix === false ? {} : { recipes: [fab.recipe] }) } });
+    await repo.transitionner('imports', ligne.id, { attendus: ['a_verifier'], patch: cloture, puts: { recipe_versions: [fab.version] }, ...(choix === false ? {} : { conditions: { recipes: [{ key: fiche.signet.id, fusion: ficheDans }] } }) });
   } catch (e) {
-    if (estRefus(e)) return refus('transition'); // enregistré, ignoré ou relu par un autre onglet juste avant : rien d'écrit
+    if (estRefus(e)) return refus(e.store === 'recipes' ? 'inconnu' : 'transition'); // enregistré, ignoré ou relu par un autre onglet juste avant : rien d'écrit
     throw e;
   }
+  // Lot F (§ 4.3 point 2, I-F4, R-F-2) : APRÈS la transaction réussie, et seulement alors — « Ajouter sans remplacer » compris —, la descente de
+  // l'image annoncée part SANS être attendue ; elle ne lève jamais et n'écrit rien sur la version ni sur le journal. La fiche s'ouvre sur
+  // « Récupération de la photo du plat… ».
+  if (fab.photoWeb) rapatrierPhotoWeb(fiche.signet.id, { candidat: fab.photoWeb, ctx, repo, fetch: fetchInjecte, enLigne });
   return { issue: 'enregistre', recipeId: fiche.signet.id, versionId: fab.version.id };
 }
 
@@ -283,7 +302,7 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
   const recipe = ctx?.recipesById?.get(params?.id);
   const root = el('div', null);
   // lu : la lecture relue (relireResultat) de la ligne a_verifier, calculée UNE fois par chargement (ronde 1) — null = illisible ou pas de lecture.
-  const etat = { ligne: null, lu: null, versions: [], occupe: false };
+  const etat = { ligne: null, lu: null, versions: [], occupe: false, photoAnnoncee: null };
   root.etatRouteWeb = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, vol: !!etat.ligne && volEnCours()?.importId === etat.ligne.id, remplacement: etat.versions.length ? versionHumaine(etat.versions) : null });
   if (!recipe) { root.append(el('div', { class: 'card' }, t('Recette introuvable.'))); return root; }
   const lien = lienSignet(recipe.source_url);
@@ -307,7 +326,10 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
     // Ronde 1 : jamais pendant que CE document relance cette ligne (« Réessayer » d'une lecture illisible, relire) — le départ du vol l'efface déjà.
     for (let passe = 0; passe < 2 && L?.status === 'a_verifier' && !lu && volEnCours()?.importId !== L.id; passe += 1) { await marquerIllisible(repo, L); L = await ligneOuverte(prefere); lu = lecture(L); }
     const versions = await repo.byIndex('recipe_versions', 'recipe_id', recipe.id);
-    etat.ligne = L; etat.lu = lu; etat.versions = versions;
+    // Lot F (§ 4.3 point 1) : l'image de la page est ANNONCÉE pour la fiche telle que la base la porte à ce rendu (jamais sur une photo de la
+    // personne, jamais pour la même image) ; « Enregistrer » ne lancera un appel que pour CETTE adresse (S-12).
+    const fiche = (await repo.get('recipes', recipe.id)) ?? recipe;
+    etat.ligne = L; etat.lu = lu; etat.versions = versions; etat.photoAnnoncee = lu ? candidatPhotoWeb(fiche, lu.page.image_url) : null;
   }
   let file = Promise.resolve();
   const redessiner = () => { file = file.then(async () => { await charger(); dessiner(); }).catch((e) => logError('import_web.rendu', { error: e })); return file; };
@@ -355,7 +377,7 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
     const L = etat.ligne; if (!L || etat.occupe) return;
     etat.occupe = true; dessiner();
     let r = null;
-    try { r = await enregistrerLecture(L.id, { repo, maintenant, choisir, cle: cleLecture(L) }); }
+    try { r = await enregistrerLecture(L.id, { repo, maintenant, choisir, cle: cleLecture(L), ctx, fetch: fetchInjecte, enLigne, photoAnnoncee: etat.photoAnnoncee }); }
     catch (e) { logError('import_web.enregistrer', { error: e, id: L.id }); toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); }
     finally { etat.occupe = false; }
     if (r?.issue === 'enregistre' && root.isConnected) { toast(t('Recette enregistrée')); navigate(`/recipes/${encodeURIComponent(recipe.id)}?v=${encodeURIComponent(r.versionId)}`); return; }
@@ -398,7 +420,8 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
     const bloc = el('div', { class: 'stack', dataset: { role: 'lecture' } },
       el('div', { class: 'status', dataset: { role: 'bandeau-web' } }, t('Lue sur {hote} — vérifie avant d’enregistrer.', { hote })),
       declares ? el('div', { class: 'muted', dataset: { role: 'selon-la-page' } }, t('Selon la page : {s}', { s: quand ? `${declares} · ${quand}` : declares })) : (quand ? el('div', { class: 'muted', dataset: { role: 'selon-la-page' } }, t('Lue le {d}', { d: quand })) : null),
-      el('div', { class: 'muted', dataset: { role: 'mode' } }, lu.source_kind === 'jsonld' ? t('Lue dans les données de la page : aucun jeton dépensé.') : t('Texte de la page lu par l’assistant.')));
+      el('div', { class: 'muted', dataset: { role: 'mode' } }, lu.source_kind === 'jsonld' ? t('Lue dans les données de la page : aucun jeton dépensé.') : t('Texte de la page lu par l’assistant.')),
+      etat.photoAnnoncee ? ligneAnnoncePhotoWeb() : null); // lot F (§ 4.3 point 1) : un ESSAI et son coût, jamais un résultat
     if (page.texte_coupe) bloc.append(el('div', { class: 'status warn' }, t('La page était longue : la fin n’a pas été lue.')));
     if (page.autres_recettes > 0) bloc.append(el('div', { class: 'status warn' }, t('D’autres recettes étaient sur cette page : ouvre-la.')));
     if (recette.incomplete) bloc.append(el('span', { class: 'chip warn' }, t('lecture incomplète')));

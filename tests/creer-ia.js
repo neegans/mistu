@@ -8,7 +8,7 @@ import { EN } from '../src/i18n/en.js';
 export async function runCreerIaTests({ eq, ok }) {
   const C = await import('../src/domain/creation-ia.js');
   buildIngredientIndex(INGREDIENTS); // l'index des lignes est global (lines.js:6) : la suite le pose elle-même (F10)
-  eq(APP_VERSION, '0.14.0', 'T1 : APP_VERSION 0.14.0 (lot E)');
+  eq(APP_VERSION, '0.15.0', 'T1 : APP_VERSION 0.15.0 (lot F)');
 
   // --- estCreationIA (C-2, F6)
   const synth = { kind: 'synthesis', provenance: { generated_by: 'ai', creation: { demande: 'x' } } };
@@ -1235,13 +1235,15 @@ export async function runCreerIaTests({ eq, ok }) {
     const tranche = (src, debut, fin) => { const i = src.indexOf(debut); const j = src.indexOf(fin, i + debut.length); return i >= 0 && j > i ? src.slice(i, j) : ''; };
     const components = await lire('../src/ui/components.js');
     const settings = await lire('../src/ui/settings.js');
-    const sources = { 'creer-ia.js': await lire('../src/ui/creer-ia.js'), 'add.js': await lire('../src/ui/add.js'), 'search.js': await lire('../src/ui/search.js'), 'import-cible.js': await lire('../src/ui/import-cible.js'),
+    const sources = { 'creer-ia.js': await lire('../src/ui/creer-ia.js'), 'photo-plat.js': await lire('../src/ui/photo-plat.js'), 'add.js': await lire('../src/ui/add.js'), 'search.js': await lire('../src/ui/search.js'), 'import-cible.js': await lire('../src/ui/import-cible.js'),
       'components.js (assistant)': tranche(components, '// === Assistant sans session', '// === fin Assistant'), 'settings.js (assistant)': tranche(settings, '// === Assistant IA (section de Réglages)', '// === fin Assistant IA') };
     // Antérieures au lot et hors périmètre (gelées ici pour ne rien cacher d'autre) : quatre chaînes de search.js sans entrée.
     const ANTERIEURES = ['search.js : Préciser : concombre, sans gluten, 15 minutes…', 'search.js : Ex. : une salade avec du concombre, sans gluten, en quinze minutes', 'search.js : Références d’index : ingrédients, durées et compatibilités inconnus tant que la recette n’est pas scannée.', 'search.js : {n} recette(s) écartée(s) par une restriction alimentaire.'];
     eq(sansEntree(sources, EN).filter((k) => !ANTERIEURES.includes(k)), [], 'en.js : chaque chaîne t() de creer-ia.js, add.js, search.js, du bloc de l’assistant de components.js et de celui de settings.js (hors quatre antérieures au lot) a sa traduction');
     ok(chainesDe(sources['add.js']).includes('Créer avec l’IA') && chainesDe(sources['search.js']).includes('Créer une recette avec ces critères') && chainesDe(sources['creer-ia.js']).includes('Écris d’abord ce que tu veux cuisiner.'), 'couverture en.js : le détecteur lit bien les chaînes des trois sources (garde contre un scan vide)');
     ok(chainesDe(sources['components.js (assistant)']).includes('Connecte-toi pour utiliser l’assistant.') && chainesDe(sources['components.js (assistant)']).includes('Ce compte n’a pas accès à l’assistant.') && chainesDe(sources['settings.js (assistant)']).includes('Modèle en service : {m}.') && chainesDe(sources['settings.js (assistant)']).includes('L’assistant est indisponible pour le moment.'), 'couverture en.js : le détecteur lit bien les blocs de l’assistant de components.js et de settings.js (garde contre une tranche vide)');
+    // Lot F (P-8, I-F8) : photo-plat.js est le seul module du lot qui porte des textes neufs ; la garde dit que son source a bien été lu.
+    ok(chainesDe(sources['photo-plat.js']).includes('Photo du plat non récupérée.') && chainesDe(sources['photo-plat.js']).includes('Ne pas récupérer'), 'couverture en.js : le détecteur lit bien photo-plat.js (garde contre un scan vide)');
   }
 
   // --- T6 : l'étiquette C-2 partout, dérivée des DONNÉES (kind, provenance.generated_by, provenance.creation, recipe.origine — jamais

@@ -4,7 +4,7 @@
 // La sortie du modèle est une DONNÉE HOSTILE déjà validée et bornée par validateParsedRecipe (llm.js) : ici elle est seulement assemblée.
 import { normalizeText } from './units.js';
 import { parseIngredientLine, detectTimers } from './lines.js';
-import { assertVocabulaire } from './vocabulaire.js';
+import { assertVocabulaire, originePhotoAdmise } from './vocabulaire.js';
 import { newId } from '../core/ids.js';
 import { lienSignet } from '../core/lien.js';
 import { IMPORTS_TERMINES, STATUTS_IMPORT } from '../model/schema.js';
@@ -127,7 +127,7 @@ export function fabriquerExtraction(resultat, { reference, versions = [], pages 
     ...reference,
     source_page_ids: [...new Set([...(reference.source_page_ids || []).filter((id) => id !== reference.index_page_id), ...presentes])], // lot D (B-7) : la photo d'index de la référence n'est pas une page de la recette
     photo_sha256: photo ? photo.sha256 : (reference.photo_sha256 ?? null),
-    photo_origin: photo ? (ORIGINES_PHOTO.includes(photo.origin) ? photo.origin : null) : (reference.photo_origin ?? null),
+    photo_origin: photo ? (ORIGINES_PHOTO.includes(photo.origin) ? photo.origin : null) : originePhotoAdmise(reference.photo_origin), // lot F (D-F19)
     ...(remplacer === false ? {} : {
       printed_page: reference.printed_page ?? resultat.printed_page ?? null,
       ingredient_ids: [...new Set(ingredients.map((l) => l.ingredient_id).filter(Boolean))],

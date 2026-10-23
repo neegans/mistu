@@ -4,8 +4,6 @@ import { el, toast, chooseDialog, promptDialog, confirmDialog, formatDate, downl
 import { t, label } from '../core/i18n.js';
 import { navigate, buildQuery, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
-import { displayUrl, typeAffichage, safeDisplayType } from '../sync/mime.js';
-import { urlDeBlob } from '../core/blob-urls.js';
 import { currentVersion } from '../domain/search.js';
 import { sectionLisible } from '../domain/llm.js';
 import { scaleVersion } from '../domain/scaling.js';
@@ -15,7 +13,8 @@ import { DIET_TAGS } from '../model/schema.js';
 import { reperesDe } from '../domain/recherche-web.js';
 import { lirePage, relireResultat } from '../domain/lecture-web.js';
 import { logError } from '../core/log.js';
-import { pageHeader, section, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture, sessionAssistant, carteConnexion, ligneReperes, contexteFichiers, vignettesDePages, boutonTelechargerPages, vignettePage, gesteTelechargement, relireErreurs } from './components.js';
+import { pageHeader, section, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture, sessionAssistant, carteConnexion, ligneReperes, contexteFichiers, vignettesDePages, boutonTelechargerPages } from './components.js';
+import { monterPhotoPlat } from './photo-plat.js';
 import { demarrerLectureWeb, texteEchecLecture, enLigneLecture, ligneWebOuverte } from './import-web.js';
 import { demarrerConnexion } from './settings.js';
 import { estCreationIA, etiquetteCreationIA, lireCreation, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
@@ -30,7 +29,8 @@ import { capitaliser } from './puces.js';
 export const adresseInerte = (u) => { const s = String(u ?? ''); return s.length > 200 ? s.slice(0, 200) + '…' : s; };
 
 // `deps` (lot B, facultatif : le routeur n'en passe pas) : les gestes de la lecture web { repo, navigate, toast, fetch, maintenant, enLigne } — la
-// suite n'ouvre ni réseau ni navigation réelle.
+// suite n'ouvre ni réseau ni navigation réelle. Lot F (§ 4.1.1) : le MÊME objet porte aussi `pickFiles` ; il est transmis tel quel à monterPhotoPlat
+// (les clés que la zone ne connaît pas sont ignorées ; sans deps, ses défauts valent la production).
 export async function renderRecipe(params, query, ctx, deps = {}) {
   const recipe = ctx.recipesById.get(params.id);
   if (!recipe) return el('div', { class: 'card' }, t('Recette introuvable.'));
@@ -73,7 +73,17 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   const conventionId = ctx.conventionFor(recipe);
   const root = el('div', null);
 
-  const favBtn = el('button', { class: 'btn', title: t('Favori'), onClick: async () => { await repo.save('recipes', { ...recipe, favorite: !recipe.favorite }); refresh(); } }, recipe.favorite ? '★ ' + t('Favori') : '☆ ' + t('Favori'));
+  // Lot F (D-F16) : ★ Favori n'écrit que `favorite`, sur la fiche RELUE — ronde 1 : DANS la transaction d'écriture (condition { key, fusion } par
+  // saveBatch, comme photo-plat.js) : une photo du plat posée depuis le rendu (descente web, autre onglet), même pendant ce geste, survit. La valeur
+  // écrite est celle que l'écran annonce (« ☆ » → favori), jamais l'inverse de la base. Le repo et le toast injectés (deps) servent ici aussi.
+  const favBtn = el('button', { class: 'btn', title: t('Favori'), onClick: async () => {
+    let absente = false;
+    try {
+      await gestesLecture.repo.saveBatch({}, { conditions: { recipes: [{ key: recipe.id, fusion: (c) => { if (!c) { absente = true; return null; } return { ...c, favorite: !recipe.favorite }; } }] } });
+    } catch (e) { logError('recipe.favori', { error: e, id: recipe.id }); return; }
+    if (absente) { dire(t('Recette introuvable.')); return; }
+    refresh();
+  } }, recipe.favorite ? '★ ' + t('Favori') : '☆ ' + t('Favori'));
   root.append(pageHeader(recipe.display_title || recipe.original_title, {
     subtitle: provenanceText(recipe, book, edition), back: edition ? { href: `/books/${edition.id}`, label: book?.title || t('Livre') } : { href: '/library', label: t('Mes livres') },
     actions: [favBtn],
@@ -100,8 +110,9 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   if (web) root.append(web); // lot B (§ 4.5) : la source d'une version lue sur le web, d'abord — puis la bannière du lot A
   if (lecture) root.append(bandeauLecture(lecture));
   const ctxF = await contexteFichiers(ctx); // lot G : compte, file_error et moteur, pour les vignettes et la photo du plat (§ 4.4)
-  const photo = await photoDuPlat(recipe, ctxF); // ronde 1 : jamais root.append(null) — le DOM natif écrirait le nœud texte « null »
-  if (photo) root.append(photo);
+  // Lot F (§ 4.1.1) : l'emplacement de tête (un div, jamais null : aucun nœud texte direct) ; la zone est insérée plus bas, après la préparation.
+  const photo = await monterPhotoPlat(recipe, ctx, { ...deps, ctxF });
+  root.append(photo.entete);
 
   if (!version) {
     root.append(await referenceOnly());
@@ -162,6 +173,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   const body = el('div', { class: 'recipe-body' }); // C-7 : overflow-wrap (styles.css)
   root.append(body);
   drawBody();
+  root.append(photo.zone); // lot F (D-F2, D-F8) : seulement quand la fiche a une version
 
   const pagesOriginal = recipe.availability === 'reference_only' ? pages : pages.filter((p) => p.id !== recipe.index_page_id); // lot D (§ 4.8.4) : une fiche lue n'a pas sa photo d'index dans « Original » ; une référence la garde (D-C5)
   // Pages originales
@@ -399,34 +411,6 @@ function bandeauLecture(lecture) {
   return el('div', { class: 'status warn', dataset: { role: 'bandeau-lecture' }, style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '.2rem', marginBottom: '.8rem' } },
     el('div', { dataset: { role: 'ligne-lecture' } }, parts.join(' · ')),
     lecture.incertain ? el('div', { dataset: { role: 'incertain-lecture' }, style: { fontSize: '.9rem' } }, t('Incertain : {t}', { t: lecture.incertain })) : null);
-}
-
-// Photo du plat (lot A D-4 ; lot G § 4.4 : la règle de la couverture). Aucune ligne files : rien, pas même un cadre (tests/import-cible.js) ; avec
-// octets d'un type d'image de la liste : l'image ; sans octets : la vignette d'état, avec « Télécharger » sur une tape (R-G-1).
-async function photoDuPlat(recipe, ctxF) {
-  if (typeof recipe?.photo_sha256 !== 'string' || !recipe.photo_sha256) return null;
-  let fichier = null;
-  try { fichier = await repo.getFile(recipe.photo_sha256); } catch { fichier = null; }
-  if (!fichier) return null;
-  // Ronde 1 : sans octets, rien n'est offert si ce qui arrivera ne s'affichera pas — le type que portera le blob reçu (remote.mime), sinon celui
-  // de la ligne (typeAffichage) ; une ligne distante application/pdf réussissait chaque tape sans que rien ne change (boucle muette).
-  if (!(fichier.blob instanceof Blob) && !(safeDisplayType(fichier.remote?.mime) ?? safeDisplayType(fichier.mime))?.startsWith('image/')) return null;
-  const figure = el('figure', { class: 'photo-plat', dataset: { role: 'photo-plat' }, style: { margin: '0 0 .8rem' } });
-  const dessiner = (f) => {
-    if (f?.blob instanceof Blob) {
-      const src = typeAffichage(f)?.startsWith('image/') ? displayUrl(f, urlDeBlob) : null;
-      if (!src) return false;
-      figure.replaceChildren(el('img', { alt: t('Photo du plat'), src, loading: 'lazy', style: { display: 'block', width: '320px', maxWidth: '100%', borderRadius: 'var(--radius)' } }));
-      return true;
-    }
-    figure.replaceChildren(vignettePage({ id: 'photo', sha256: recipe.photo_sha256 }, f, { ...ctxF, telecharger }));
-    return true;
-  };
-  const telecharger = gesteTelechargement({ moteur: ctxF.moteur, redessiner: async () => {
-    await relireErreurs(ctxF);
-    dessiner(await repo.getFile(recipe.photo_sha256));
-  } });
-  return dessiner(fichier) ? figure : null;
 }
 
 function slug(s) { return (s || 'recette').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60); }

@@ -11,7 +11,7 @@ import { currentVersion } from '../domain/search.js';
 import { getConvention } from '../domain/units.js';
 import { providerFrom, extractRecipeFromImages, pagePourEnvoi, BORNES_EXTRACTION } from '../domain/llm.js';
 import { RECIPE_TYPES } from '../model/schema.js';
-import { assertVocabulaire } from '../domain/vocabulaire.js';
+import { assertVocabulaire, originePhotoAdmise } from '../domain/vocabulaire.js';
 import { statutSeanceApres } from '../domain/import-cible.js';
 import { logError } from '../core/log.js';
 import { pageHeader, field, select, carteConnexion, texteEchecAssistant, section, pdfFrame, sessionAssistant, isoLisible } from './components.js';
@@ -338,8 +338,23 @@ export async function renderRecipeEdit(params, query, ctx) {
     // Lot D (§ 4.8.2 points 3 et 4, I-D3) : role recette avec kind recipe ; le numéro de la fiche ne va qu'à la PREMIÈRE page sans numéro ; la photo
     // d'index de la fiche corrigée n'est jamais réécrite (ni kind, ni role, ni printed_page).
     const pageUpdates = pages.filter((p) => p.id !== recipe?.index_page_id).map((p, i) => ({ ...p, kind: 'recipe', role: 'recette', printed_page: p.printed_page ?? (i === 0 ? n(f.printed_page) : null) }));
-    assertVocabulaire(rec, 'recipes'); // D-12 : vocabulaire fermé vérifié avant l'écriture
-    const lot = { recipes: [rec], recipe_versions: [version], source_pages: pageUpdates };
+    // Lot F (D-F16, D-F19) : les trois champs de la photo du plat viennent de la fiche RELUE — l'éditeur ne les édite pas, la base fait foi : une photo
+    // posée pendant l'édition (descente web, autre onglet) survit ; une origine hors liste se lit null ; une clé absente en base reste absente (P-6).
+    // Ronde 1 de la tâche 5 : relus DANS la transaction d'écriture (condition { key, fusion } de saveBatch, le motif de ★ Favori) — une écriture qui
+    // s'engage pendant les lectures de save() n'est plus écrasée. Une fiche supprimée pendant l'édition garde la règle d'avant (sa copie : dette C4 du
+    // lot UX, hors lot). D-12 : le vocabulaire fermé est vérifié sur la fiche qui s'écrit, avant l'écriture (dans la transaction pour une fiche relue).
+    const avecPhotoDe = (relue) => {
+      const r = { ...rec };
+      for (const champ of ['photo_sha256', 'photo_origin', 'photo_source_url']) {
+        if (Object.hasOwn(relue, champ)) r[champ] = champ === 'photo_origin' ? originePhotoAdmise(relue[champ]) : relue[champ];
+        else delete r[champ];
+      }
+      assertVocabulaire(r, 'recipes');
+      return r;
+    };
+    // Une fiche existante n'entre pas dans les puts : la condition l'écrit (fermer exige une recette neuve, donc le chemin de la clôture garde ses puts).
+    const lot = { ...(targetRecipe ? {} : { recipes: [avecPhotoDe(rec)] }), recipe_versions: [version], source_pages: pageUpdates };
+    const conditionFiche = targetRecipe ? { recipes: [{ key: targetRecipe.id, fusion: (c) => avecPhotoDe(c ?? targetRecipe) }] } : null;
     // La séance (recipe_ids) s'écrit dans la MÊME transaction que la recette (I-10, ronde 1), relue juste avant (leçon C4).
     const seance = sessionId && !seanceRefusee ? await repo.get('scan_sessions', sessionId) : null;
     // Lot D (§ 4.8.2 point 5, N-1) : quand « Enregistrer » ferme une lecture du journal, la séance entre dans LA transaction par le sac `conditions` (relue
@@ -368,7 +383,7 @@ export async function renderRecipeEdit(params, query, ctx) {
         toast(t('La recette n’a pas pu être enregistrée. Réessaie.'));
         return;
       }
-    } else await repo.saveBatch(lot);
+    } else await repo.saveBatch(lot, conditionFiche ? { conditions: conditionFiche } : {});
     toast(kind === 'adaptation' ? t('Ma version enregistrée') : t('Recette enregistrée'));
     navigate(`/recipes/${recipeId}?v=${version.id}`);
   }

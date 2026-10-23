@@ -3,7 +3,7 @@
 
 export const DB_NAME = 'cuisine-os';
 export const DB_VERSION = 4;
-export const APP_VERSION = '0.14.0';
+export const APP_VERSION = '0.15.0';
 
 export const ARCHIVE_FORMAT = 'cuisine-os-archive';
 export const ARCHIVE_FORMAT_VERSION = 1;
@@ -147,6 +147,12 @@ export const AVAILABILITY = ['reference_only', 'partial', 'available'];
 // D-B6 (lot B) : d'où vient le texte d'une recette lue sur le web — les données publiées par la page (JSON-LD) ou le texte lu par le modèle.
 export const SOURCE_KINDS = Object.freeze(['jsonld', 'modele']);
 export const VERIFICATION = ['unverified', 'to_verify', 'verified'];
+// Lot F « Les plats en images » (spec § 3.1, D-F1) : l'origine d'une photo du plat — prise ici (photo), choisie ici (image) ou rapatriée d'une page
+// web par la fonction de l'assistant (web). Liste FERMÉE, lue par assertVocabulaire ; l'écran ciblé du lot A n'admet que les deux premières.
+export const PHOTO_ORIGINS = Object.freeze(['photo', 'image', 'web']);
+// L'empreinte d'une ligne files (sa clé) : 64 chiffres hexadécimaux en minuscules. UNE définition pour les lecteurs du lot F (un pointeur
+// venu d'ailleurs n'est lu que s'il la passe, règle T4-R1-d du lot A).
+export const HASH = /^[0-9a-f]{64}$/;
 export const VERSION_KIND = ['extraction', 'correction', 'adaptation', 'translation', 'synthesis'];
 export const VERSION_STATUS = ['proposed', 'tested'];
 // États du journal des imports (spec import-cible § 3.1) ; les transitions permises vivent dans src/domain/import-cible.js (tâche 3).
