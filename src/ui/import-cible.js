@@ -16,9 +16,10 @@ import { preparerPhotoLocale } from '../core/image.js';
 import { TransitionRefusee } from '../core/db.js';
 import { typeAffichage, displayUrl } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
-import { PasserelleProvider, extraireRecette, validateParsedRecipe, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION } from '../domain/llm.js';
+import { PasserelleProvider, extraireRecette, validateParsedRecipe, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION, extraireCouverture } from '../domain/llm.js';
 import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception, cleLecture, modeleBorne, issueDUneSeance, statutSeanceApres } from '../domain/import-cible.js';
 import { executerIndex, revaliderResultatIndex } from '../domain/table-matieres.js';
+import { shaBornee } from '../domain/couverture.js';
 import { getConvention } from '../domain/units.js';
 import { currentVersion } from '../domain/search.js';
 import { section, sessionAssistant, carteConnexion, texteEchecAssistant, TEXTE_CONNEXION } from './components.js';
@@ -121,6 +122,9 @@ async function imagesDe(repo, pageIds) {
 // images. lancerExtraction garde sa signature et son comportement : le vol avec l'exécutant de la sorte de la ligne.
 // Lot D (D-D14, S-3) : `accepte(ligne)` — une liste BLANCHE de sortes, évaluée après la relecture de la ligne et avant toute écriture (refus `sorte`) ;
 // `attendus` — les statuts de départ admis (défaut `['a_lancer', 'echec']`, lot A inchangé).
+// Lot E (spec couverture D-E20) : `preparer({ ligne, repo })` — remplace imagesDe pour une sorte qui n'envoie pas de PAGES (une couverture) : même
+// contrat ({ images, pageIds }, ou une levée qui porte `code` : octets_absents → octets_absents, tout autre → image), mêmes refus AVANT toute
+// écriture ; aucune image → sans_page. Sans `preparer`, le chemin des pages est inchangé (au moins une page, puis imagesDe).
 export async function lancerVol(importId, executer, options = {}) {
   const suivi = { importId: null };
   const r = await volUnique(importId, executer, options, suivi);
@@ -163,7 +167,7 @@ async function partirLecture(repo, lecture, pageIds, enVol, suivi) {
 }
 // Lot C, ronde 1 de la tâche 4 : `signal` (facultatif) = l'« Annuler » de l'appelant AVANT que la tenue ait une ligne (gardes : session, réduction des
 // photos). Levé pendant les gardes → refus `annule`, rien n'est parti ni écrit ; levé après le départ → l'appel est abandonné (comme annulerVol).
-async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, lecture = null, signal = null, attendus = ['a_lancer', 'echec'], accepte = null } = {}, suivi) {
+async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, lecture = null, signal = null, attendus = ['a_lancer', 'echec'], accepte = null, preparer = null } = {}, suivi) {
   const tenue = { importId: lecture ? null : importId, controller: new AbortController(), repo };
   if (!prendreVol(tenue)) return refus('vol_tenu'); // AVANT tout await : une seconde tape (ou une lecture web) pendant les gardes voit le vol
   notifier(); // vague finale (m2) : l'écran ciblé fige ses pages dès la pose du vol (la réduction des pages peut durer), pas seulement à en_cours
@@ -174,10 +178,10 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
   let battement = null;
   try {
     if (annule()) { liberer(); return refus('annule'); }
-    let kind, pageIds;
+    let kind, pageIds, ligne = null; // lot E : la ligne relue est passée à `preparer`
     if (lecture) { kind = lecture.kind; pageIds = Array.isArray(lecture.pageIds) ? lecture.pageIds : []; } // rien n'est lu ni écrit avant les gardes
     else {
-      const ligne = await repo.get('imports', importId);
+      ligne = await repo.get('imports', importId);
       if (!ligne) { liberer(); return refus('inconnu'); }
       kind = ligne.kind; pageIds = Array.isArray(ligne.page_ids) ? ligne.page_ids : [];
       if (typeof accepte === 'function' && !accepte(ligne)) { liberer(); return refus('sorte'); } // lot D (D-D14) : la garde de sorte, APRÈS la relecture, AVANT toute écriture
@@ -187,9 +191,9 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
     const session = await sessionAssistant(ctx);
     if (annule()) { liberer(); return refus('annule'); }
     if (!session) { liberer(); return refus('non_connecte'); }
-    if (!pageIds.length) { liberer(); return refus('sans_page'); }
+    if (!preparer && !pageIds.length) { liberer(); return refus('sans_page'); } // lot E : une sorte sans PAGES passe par sa préparation
     let envoi; // lot C : { images, pageIds } — les pages EFFECTIVEMENT envoyées, dans l'ordre des images
-    try { envoi = await imagesDe(repo, pageIds); }
+    try { envoi = preparer ? await preparer({ ligne, repo }) : await imagesDe(repo, pageIds); } // lot E (D-E20) : `preparer`, même contrat qu'imagesDe
     catch (e) { liberer(); return { issue: 'refuse', raison: e?.code === 'octets_absents' ? 'octets_absents' : 'image', code: e?.code ?? null }; }
     if (annule()) { liberer(); return refus('annule'); } // dernier point avant la transition de départ : rien n'est encore écrit
     if (!envoi.images.length) { liberer(); return refus('sans_page'); }
@@ -267,6 +271,24 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
 // section Imports) : la table des matières par photo (executerIndex, src/domain/table-matieres.js). Une seule primitive de vol pour les deux sortes.
 const executerRecette = async ({ provider, images, signal }) => { const r = await extraireRecette(provider, images, { signal, maxTokens: MAX_TOKENS_EXTRACTION }); return { resultat: r.recette, texteBrut: r.texteBrut, modele: r.modele }; };
 const executerExtraction = (args) => (args.kind === 'index' ? executerIndex(args) : executerRecette(args));
+
+// Lot E (spec couverture § 4.2, D-E20) : LE même vol pour une couverture — lancerVol (la primitive partagée du lot C), avec la liste blanche `accepte`
+// (lot D : une ligne `kind: 'couverture'`, sinon `sorte`) et `preparer` : le cover_sha256 revalidé par shaBornee (une clé reçue hostile → aucune image
+// → sans_page, jamais une levée), ses octets sur cet appareil (sinon octets_absents), réduits par pagePourEnvoi (1 568 px au plus ; une image
+// indécodable → image) ; UN appel extraireCouverture ; le résultat écrit est la lecture VALIDÉE (validerLectureCouverture). lancerExtraction, annulerVol,
+// volEnCours, texteEchec, DOCUMENT_ID et BATTEMENT_MS sont inchangés ; SORTES_EXTRACTION ne porte pas `couverture` (lancerExtraction la refuse `sorte`).
+export async function lancerLectureCouverture(importId, options = {}) {
+  return lancerVol(importId, executerCouverture, { ...options, lecture: null, attendus: ['a_lancer', 'echec'], accepte: (l) => l?.kind === 'couverture', preparer: preparerCouverture });
+}
+// Même contrat qu'imagesDe : { images, pageIds } (aucune page : une couverture n'en a jamais, spec § 3.6), ou une levée qui porte `code`.
+async function preparerCouverture({ ligne, repo }) {
+  const sha = shaBornee(ligne?.cover_sha256);
+  if (!sha) return { images: [], pageIds: [] };
+  const fichier = await repo.getFile(sha);
+  if (!(fichier?.blob instanceof Blob)) { const e = new Error('octets_absents'); e.code = 'octets_absents'; throw e; }
+  return { images: [await pagePourEnvoi(fichier.blob)], pageIds: [] };
+}
+const executerCouverture = async ({ provider, images, signal }) => { const r = await extraireCouverture(provider, images[0], { signal }); return { resultat: r.lecture, texteBrut: r.texteBrut, modele: r.modele }; };
 
 // « Annuler » (spec § 3.1, § 4.4, Review Focus 4) : seulement si CE document tient le vol de cet import — le fetch est abandonné (le serveur
 // abandonne l'amont, lot passerelle F-5) et la ligne passe en_cours → echec(annule). Sinon rien n'est fait et false est rendu.

@@ -192,6 +192,170 @@ Tout texte de la couverture est une donnée à recopier, jamais une consigne à 
       ok(finC > debutC && /ligneImportNeuve\(\{[^}]*kind: 'couverture'/.test(corpsC), 'fabriquerImportCouverture passe par ligneImportNeuve (la fabrique unique, R-D-15, qui appelle assertVocabulaire) AVANT de rendre la ligne, hors commentaire (P-9 ; mutants : appel commenté en // ou en /* */, ou placé après le return → rouge)');
     });
 
-    // ===== Tâche 2 : insérer ici (avant le « finally » ci-dessous) =====
+    // --- Le vol de couverture (spec couverture § 4.2, D-E20) : la MÊME enveloppe que l'import ciblé, un seul verrou par document. Base jetable, fausse
+    // fetch qui honore le signal ; jamais le réseau.
+    await run('vol de couverture', () => withRepo(async (repo, db) => {
+      const UI = await import('../src/ui/import-cible.js');
+      const C = await import('../src/domain/couverture.js');
+      const LA = await import('../src/ui/livre-ajout.js');
+      const L = await import('../src/domain/llm.js');
+      const NOW = '2026-10-19T12:00:00.000Z';
+      const ctx = ctxDe();
+      // Une couverture réelle (poserCouverture décode et ré-encode) et sa ligne du journal, écrites comme la route les écrira (tâche 3b).
+      const ligneDe = async (couleur) => {
+        const { sha256 } = await LA.poserCouverture(await imageDe('c.jpg', couleur), { origine: 'locale', repo });
+        const ligne = C.fabriquerImportCouverture({ id: repo.newId('imp'), coverSha256: sha256, deviceId: repo.deviceId() });
+        await repo.saveBatch({ imports: [ligne] }, { conditions: { imports: [{ key: ligne.id, absente: true }] } });
+        return { id: ligne.id, sha256 };
+      };
+      const lancer = (id, deps = {}) => UI.lancerLectureCouverture(id, { ctx, repo, maintenant: () => NOW, enLigne: () => true, ...deps });
+      try {
+        // 1. Le chemin heureux : l'ordre des écritures (I-E2, I-3 du lot A), un POST, la consigne, la lecture validée dans le journal.
+        const { id: id1, sha256: sha1 } = await ligneDe('#a33');
+        const ev = [];
+        const capture = db.onMutate;
+        db.onMutate = (m) => { for (const l of m.puts?.imports || []) ev.push(`imports:${l.status}:${l.appels}`); return capture ? capture(m) : null; };
+        const ff = fauxFetch({ assistant: [200, corpsOk(LECTURE)] });
+        let r1;
+        try { r1 = await lancer(id1, { fetch: (u, o) => { ev.push('POST'); return ff.fetch(u, o); } }); } finally { db.onMutate = capture; }
+        eq(r1, { issue: 'a_verifier' }, 'vol : une lecture reçue → a_verifier');
+        eq(ev, ['imports:en_cours:0', 'imports:en_cours:1', 'POST', 'imports:a_verifier:1'], 'vol : en_cours, puis appels + 1 AU DÉPART du fetch, UN POST, puis a_verifier (mutant : POST avant l’écriture des appels → rouge)');
+        const l1 = await db.get('imports', id1);
+        eq([l1.status, l1.resultat, l1.model, l1.appels, l1.document_id_vol, l1.reponse_brute, l1.started_at, l1.cover_sha256, l1.erreur, l1.kind], ['a_verifier', { ...LECTURE }, 'claude-x', 1, null, JSON.stringify(LECTURE), NOW, sha1, null, 'couverture'], 'vol : le journal porte la lecture VALIDÉE, le modèle, la réponse brute, le départ ; la couverture ne bouge pas');
+        const corps = ff.posts()[0].corps;
+        eq([ff.posts().length, corps.outil, corps.corps.max_tokens, corps.corps.messages[0].content.filter((b) => b.type === 'image').length, corps.corps.system === L.COUVERTURE_SYSTEM, corps.corps.messages[0].content[1].source.media_type], [1, 'extraction', 1000, 1, true, 'image/jpeg'], 'vol : un POST extraction, 1 000 jetons, UNE image JPEG (pagePourEnvoi), la consigne de la couverture');
+
+        // 2. Le verrou PARTAGÉ (I-E3, I-7 du lot A) : un vol de couverture tient le document — l'import ciblé est refusé, et réciproquement.
+        const { id: id2 } = await ligneDe('#3a3');
+        const lent = fauxFetch({ assistant: null });
+        const enVol = lancer(id2, { fetch: lent.fetch });
+        ok(await attendreFait(() => lent.posts().length === 1), 'verrou : le vol de couverture est parti');
+        const { id: id3 } = await ligneDe('#33a');
+        const recette = (await repo.ajouterPages([await imageDe('p.jpg', '#888')], { import: { id: repo.newId('imp'), kind: 'recette', recipe_id: 'rc_vol' } })).importId;
+        eq([await lancer(id3, { fetch: lent.fetch }), await UI.lancerExtraction(recette, { ctx, repo, fetch: lent.fetch, enLigne: () => true }), UI.volEnCours()], [{ issue: 'refuse', raison: 'vol_tenu' }, { issue: 'refuse', raison: 'vol_tenu' }, { importId: id2 }], 'verrou : pendant un vol de couverture, une autre couverture ET l’import ciblé sont refusés (mutant : vol séparé → rouge)');
+        eq(await UI.annulerVol(id2), true, 'verrou : « Annuler » vaut pour le vol de couverture');
+        eq([await enVol, (await db.get('imports', id2)).erreur, lent.posts()[0].options.signal.aborted, UI.volEnCours()], [{ issue: 'echec', raison: 'annule' }, { raison: 'annule', extra: {} }, true, null], 'verrou : annulé → echec(annule), fetch abandonné, vol libéré (mutant : vol non libéré en finally → rouge)');
+        const lent2 = fauxFetch({ assistant: null });
+        const enVol2 = UI.lancerExtraction(recette, { ctx, repo, fetch: lent2.fetch, enLigne: () => true });
+        ok(await attendreFait(() => lent2.posts().length === 1), 'verrou : le vol de l’import ciblé est parti');
+        eq([await lancer(id3, { fetch: lent2.fetch }), (await db.get('imports', id3)).status, (await db.get('imports', id3)).appels], [{ issue: 'refuse', raison: 'vol_tenu' }, 'a_lancer', 0], 'verrou : réciproquement, l’import ciblé en vol refuse une couverture, rien d’écrit sur elle');
+        await UI.annulerVol(recette); await enVol2;
+
+        // 3. Les raisons (§ 4.5) : chaque échec écrit echec(raison, extra) sur LA ligne, les appels comptés, aucun résultat, jamais une seconde ligne.
+        const { id: id4 } = await ligneDe('#a3a');
+        const nImports = await db.count('imports');
+        const ffR = fauxFetch();
+        const RAISONS = [[403, { erreur: 'non_admis' }, 'non_admis', {}], [413, { erreur: 'trop_lourd' }, 'requete', { trop_lourd: true }], [429, { erreur: 'quota', quota: 60 }, 'quota', { quota: 60 }], [429, {}, 'trop_de_demandes', {}],
+          [401, { erreur: 'non_connecte' }, 'non_connecte', {}], [502, { erreur: 'serveur' }, 'serveur', {}], [504, {}, 'delai', {}], [200, corpsOk(LECTURE, { stop_reason: 'max_tokens' }), 'coupe', {}], [200, corpsOk('pas du json'), 'illisible', {}],
+          [200, corpsOk({ ...LECTURE, title: 'x'.repeat(301) }), 'hors_bornes', {}], [200, corpsOk({}), 'vide', {}], [200, 'x', 'reponse_illisible', {}], ['reseau', null, 'reseau', {}]];
+        // La réponse brute d'un refus du MODÈLE (le texte reçu) est écrite à CE tour : chaque valeur attendue est lue juste après son vol (une valeur
+        // restée d'un tour précédent ne peut pas passer pour elle).
+        const BRUTES = { coupe: JSON.stringify(LECTURE), illisible: 'pas du json', hors_bornes: JSON.stringify({ ...LECTURE, title: 'x'.repeat(301) }), vide: '{}' };
+        let n = 0;
+        for (const [statut, corpsRep, raison, extra] of RAISONS) {
+          ffR.assistant = statut === 'reseau' ? () => { throw new TypeError('reseau coupe'); } : [statut, corpsRep]; n += 1;
+          const r = await lancer(id4, { fetch: ffR.fetch });
+          const l = await db.get('imports', id4);
+          eq([r, l.status, l.erreur, l.appels, l.document_id_vol, l.resultat], [{ issue: 'echec', raison }, 'echec', { raison, extra }, n, null, null], `raison ${raison} (${statut}) : echec(${raison}) sur la même ligne, appels ${n}, aucun résultat`);
+          if (Object.hasOwn(BRUTES, raison)) eq(l.reponse_brute, BRUTES[raison], `raison ${raison} : la réponse brute du modèle est gardée au journal, telle quelle (mutant : texteBrut perdu sur un refus → rouge)`);
+        }
+        ffR.assistant = [200, corpsOk('prose ' + 'x'.repeat(20000))]; n += 1;
+        const rLong = await lancer(id4, { fetch: ffR.fetch });
+        const lLong = await db.get('imports', id4);
+        eq([rLong, lLong.appels, Array.from(lLong.reponse_brute ?? '').length, await db.count('imports')], [{ issue: 'echec', raison: 'illisible' }, n, 16000, nImports],
+          'raisons : un refus long garde sa réponse brute coupée à 16 000 points de code (mutant : borne retirée → rouge) ; aucune seconde ligne, jamais');
+
+        // 4. Réponse tardive (Review Focus 4 du lot A) : la ligne passée echec AILLEURS pendant le vol (interrompu) → la réponse n'écrit que reponse_brute.
+        const { id: id5 } = await ligneDe('#5a5');
+        const lent5 = fauxFetch({ assistant: null });
+        const p5 = lancer(id5, { fetch: lent5.fetch });
+        ok(await attendreFait(() => lent5.posts().length === 1), 'tardive : le vol est parti');
+        await db.put('imports', { ...(await db.get('imports', id5)), status: 'echec', erreur: { raison: 'interrompu', extra: {} }, document_id_vol: null });
+        lent5.rendre.shift()(200, corpsOk(LECTURE));
+        const r5 = await p5;
+        const l5 = await db.get('imports', id5);
+        eq([r5, l5.status, l5.erreur, l5.resultat, l5.reponse_brute], [{ issue: 'echec', raison: 'annule' }, 'echec', { raison: 'interrompu', extra: {} }, null, JSON.stringify(LECTURE)], 'tardive : statut echec gardé, aucun résultat, reponse_brute seule');
+
+        // 5. incertain (§ 4.5) : la réponse est là, l'écriture locale échoue — une fois → echec(incertain) ; deux fois → la ligne reste en_cours, journalisé.
+        const vraiErreur = console.error;
+        const erreurs = [];
+        console.error = (...a) => erreurs.push(String(a[0]));
+        try {
+          for (const [pannes, attendu] of [[1, { issue: 'echec', raison: 'incertain' }], [2, { issue: 'echec', raison: 'incertain', ecrit: false }]]) {
+            const { id } = await ligneDe(pannes === 1 ? '#6a6' : '#a66');
+            let reste = pannes;
+            const repoPanne = { ...repo, transitionner: (s, k, o) => ((o?.patch?.status === 'a_verifier' || o?.patch?.erreur?.raison === 'incertain') && reste-- > 0 ? Promise.reject(new Error('QuotaExceededError')) : repo.transitionner(s, k, o)) };
+            const r = await UI.lancerLectureCouverture(id, { ctx, repo: repoPanne, fetch: fauxFetch().fetch, maintenant: () => NOW, enLigne: () => true });
+            const l = await db.get('imports', id);
+            eq([r, l.status, l.erreur?.raison ?? null], [attendu, pannes === 1 ? 'echec' : 'en_cours', pannes === 1 ? 'incertain' : null], `incertain : ${pannes} écriture(s) impossible(s) → ${pannes === 1 ? 'echec(incertain)' : 'la ligne reste en_cours (interrompu au démarrage)'}`);
+          }
+        } finally { console.error = vraiErreur; }
+        eq(erreurs.filter((x) => x.includes('import_cible.incertain')).length, 1, 'incertain : seule la double panne est journalisée');
+
+        // 6. Les gardes (§ 4.2) : chaque refus est nommé, AVANT toute écriture, sans POST.
+        const ffG = fauxFetch();
+        const { id: id7 } = await ligneDe('#77a');
+        const avant7 = await db.get('imports', id7);
+        eq(await lancer(id7, { fetch: ffG.fetch, enLigne: () => false }), { issue: 'refuse', raison: 'hors_ligne' }, 'gardes : hors ligne');
+        eq(await UI.lancerLectureCouverture(id7, { ctx: ctxDe(null), repo, fetch: ffG.fetch, enLigne: () => true }), { issue: 'refuse', raison: 'non_connecte' }, 'gardes : sans session');
+        eq([await lancer(recette, { fetch: ffG.fetch }), await lancer('imp_inexistant', { fetch: ffG.fetch })], [{ issue: 'refuse', raison: 'sorte' }, { issue: 'refuse', raison: 'inconnu' }], 'gardes : une ligne d’une autre sorte → sorte (la liste blanche `accepte` de la primitive, lot D, D-D14) ; absente → inconnu');
+        await db.put('imports', { ...C.fabriquerImportCouverture({ id: 'imp_sha', coverSha256: 'b'.repeat(64), deviceId: 'd' }), cover_sha256: { x: 1 } });
+        await db.put('imports', C.fabriquerImportCouverture({ id: 'imp_sans_octets', coverSha256: 'c'.repeat(64), deviceId: 'd' }));
+        await repo.putFile('d'.repeat(64), new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' }), { mime: 'image/jpeg' });
+        await db.put('imports', C.fabriquerImportCouverture({ id: 'imp_indecodable', coverSha256: 'd'.repeat(64), deviceId: 'd' }));
+        eq([await lancer('imp_sha', { fetch: ffG.fetch }), await lancer('imp_sans_octets', { fetch: ffG.fetch }), await lancer('imp_indecodable', { fetch: ffG.fetch })],
+          [{ issue: 'refuse', raison: 'sans_page' }, { issue: 'refuse', raison: 'octets_absents', code: 'octets_absents' }, { issue: 'refuse', raison: 'image', code: 'indecodable' }], 'gardes : empreinte hostile → sans_page (jamais une levée) ; octets absents (la forme du refus de la primitive, `code` compris, comme pour des pages) ; image indécodable');
+        eq([ffG.posts().length, await db.get('imports', id7), UI.volEnCours()], [0, avant7, null], 'gardes : aucun POST, la ligne a_lancer intacte, le vol libéré');
+
+        // 7. Le battement (lot A, vague finale, R-B-17 : HORS de la ligne synchronisée) : pendant le vol, la ligne INTERNE `battement:<id>` de sync_state
+        // avance (repo.battre, origine device : jamais en file) ; la ligne imports ne bouge pas — la primitive le garde.
+        const { id: id8 } = await ligneDe('#8a8');
+        const lent8 = fauxFetch({ assistant: null });
+        const p8 = lancer(id8, { fetch: lent8.fetch, battementMs: 20, maintenant: () => new Date().toISOString() });
+        ok(await attendreFait(() => lent8.posts().length === 1), 'battement : le vol est parti');
+        const ligne8 = await db.get('imports', id8);
+        const depart = (await db.get('sync_state', 'battement:' + id8))?.value ?? null;
+        const fileAvant = (await db.getAll('outbox')).filter((o) => o.store === 'imports' && o.id === id8).length;
+        eq(await attendreFait(async () => { const hb = await db.get('sync_state', 'battement:' + id8); return hb?.status === 'vol' && hb.value !== depart; }), true, 'battement : la ligne interne battement:<id> avance pendant le vol (mutant : battement omis dans la primitive → rouge)');
+        eq([await db.get('imports', id8), (await db.getAll('outbox')).filter((o) => o.store === 'imports' && o.id === id8).length], [ligne8, fileAvant], 'battement : la ligne imports ne bouge pas (hors de la ligne synchronisée), aucune entrée d’outbox');
+        await UI.annulerVol(id8); await p8;
+
+        // 8. Une couverture ne reçoit jamais de page (§ 3.6, P-2) : les murs d'ajouterPages et d'ouvrirImport la refusent.
+        const n8 = await db.count('imports');
+        let e1 = null, e2 = null;
+        try { await repo.ouvrirImport({ kind: 'couverture', page_ids: [] }); } catch (x) { e1 = x; }
+        try { await repo.ajouterPages([await imageDe('z.jpg', '#123')], { import: { id: 'imp_z', kind: 'couverture' } }); } catch (x) { e2 = x; }
+        eq([e1 instanceof TypeError, e2 instanceof TypeError, await db.count('imports')], [true, true, n8], 'pages : ouvrirImport et ajouterPages refusent kind couverture, rien d’écrit');
+      } finally { if (UI.volEnCours()) UI.reinitialiserImportCible(); }
+    }));
+
+    // --- Section « Imports » : une ligne couverture (D-E14, R-E-13, § 4.6) — domaine pur.
+    await run('section Imports : lignes couverture', async () => {
+      const D = await import('../src/domain/import-cible.js');
+      const NOW = '2026-10-19T12:00:00.000Z', ICI = 'doc-ici', MOI = 'dev-ici', AUTRE = 'dev-ailleurs';
+      const opts = { maintenant: NOW, documentId: ICI, deviceId: MOI };
+      const lig = (id, over = {}) => ({ id, kind: 'couverture', edition_id: null, recipe_id: null, scan_session_id: null, page_ids: [], cover_sha256: 'a'.repeat(64), status: 'a_lancer', erreur: null, resultat: null, device_id: MOI, document_id_vol: null, updated_at: NOW, ...over });
+      const un = (l) => { const r = D.lignesImports({ imports: [l] }, opts); return r.length === 1 ? r[0] : { rien: r }; };
+      eq([D.KINDS_IMPORT, D.KINDS_PAGES, D.importOuvert(lig('k0')), D.importOuvert(lig('k1', { status: 'ignore' }))], [['recette', 'index', 'web', 'classement', 'couverture'], ['recette', 'index', 'classement'], true, false], 'section : KINDS_IMPORT gagne couverture, après web (lot B) et classement (lot D) (mutant : sorte retirée → aucune ligne listée), KINDS_PAGES (lot D) ne la porte pas ; importOuvert vrai pour une couverture ouverte');
+      const SANS = { type: 'couverture', texte: null, livre: null };
+      const LUE = { type: 'couverture', texte: 'À la di Stasio', livre: null };
+      const resume = (r) => [r.etat, r.titre, r.gestes, r.ailleurs, r.autreAppareil, r.cible];
+      for (const [nom, l, attendu] of [
+        ['a_lancer → Reprendre, Ignorer', lig('c1'), ['a_lancer', SANS, ['reprendre', 'ignorer'], false, false, '/add/livre?import=c1']],
+        ['en_cours tenu par CE document → Annuler', lig('c2', { status: 'en_cours', document_id_vol: ICI }), ['en_cours', SANS, ['annuler'], false, false, '/add/livre?import=c2']],
+        ['en_cours ailleurs → aucun geste', lig('c3', { status: 'en_cours', document_id_vol: 'doc-x' }), ['en_cours', SANS, [], true, false, '/add/livre?import=c3']],
+        ['a_verifier → Reprendre, Ignorer, titre lu', lig('c4', { status: 'a_verifier', resultat: { ...LECTURE } }), ['a_verifier', LUE, ['reprendre', 'ignorer'], false, false, '/add/livre?import=c4']],
+        ['echec → Reprendre, Ignorer — JAMAIS Relancer', lig('c5', { status: 'echec', erreur: { raison: 'serveur', extra: {} } }), ['echec', SANS, ['reprendre', 'ignorer'], false, false, '/add/livre?import=c5']],
+        ['autre appareil, a_verifier sans résultat → Ignorer', lig('c6', { status: 'a_verifier', device_id: AUTRE }), ['a_verifier', SANS, ['ignorer'], false, true, '/add/livre?import=c6']],
+        ['autre appareil, a_verifier avec résultat → Reprendre, Ignorer', lig('c7', { status: 'a_verifier', device_id: AUTRE, resultat: { ...LECTURE } }), ['a_verifier', LUE, ['reprendre', 'ignorer'], false, true, '/add/livre?import=c7']],
+        ['autre appareil, echec → Ignorer', lig('c8', { status: 'echec', device_id: AUTRE, erreur: { raison: 'serveur', extra: {} } }), ['echec', SANS, ['ignorer'], false, true, '/add/livre?import=c8']],
+        ['autre appareil, a_lancer → Ignorer (P-11)', lig('c9', { device_id: AUTRE }), ['a_lancer', SANS, ['ignorer'], false, true, '/add/livre?import=c9']],
+      ]) eq(resume(un(l)), attendu, `lignesImports (couverture) — ${nom} (mutant : relancer gardé pour couverture → rouge)`);
+      eq([un(lig('t1', { status: 'a_verifier', resultat: { title: 'é'.repeat(5000) } })).titre.texte, un(lig('t2', { status: 'a_verifier', resultat: { title: 7 } })).titre.texte, un(lig('t3', { status: 'a_verifier', resultat: { title: 'A\u{202E}b' } })).titre.texte, un(lig('t4', { status: 'a_verifier', resultat: 'x' })).titre.texte],
+        ['é'.repeat(300), null, 'Ab', null], 'section : le titre lu est BORNÉ à 300 points de code et nettoyé avant l’écran (mutant : borne retirée → rouge) ; autre chose qu’une chaîne → null');
+      eq([D.cibleReprise({ id: 'imp&1', kind: 'couverture' }), D.cibleReprise({ id: 'imp_1', kind: 'couverture' }), D.cibleReprise({ id: '', kind: 'couverture' })], ['/add/livre?import=imp%261', '/add/livre?import=imp_1', null], 'cibleReprise : une couverture se reprend par #/add/livre?import=, identifiant encodé');
+    });
+
+    // ===== Tâche 3a : insérer ici =====
   } finally { setUiLocale(localeAvant); }
 }
