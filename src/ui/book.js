@@ -16,7 +16,7 @@ import { tagsDe } from '../domain/search.js';
 import { sectionLisible } from '../domain/llm.js';
 import { seanceDUnImportCible, importOuvert } from '../domain/import-cible.js';
 import { ACCEPT_PHOTOS, ACCEPT_FICHIERS } from './add.js';
-import { STATUTS_IMPORT, IMPORTS_TERMINES } from '../model/schema.js';
+import { STATUTS_IMPORT } from '../model/schema.js';
 import { TransitionRefusee } from '../core/db.js';
 
 // C8 : la plus RÉCENTE d'abord. La fiche ne rappelle qu'UNE séance et « Reprendre » doit mener à celle qu'on vient
@@ -32,29 +32,50 @@ function menuSource(libelle, ...boutons) {
   return el('details', { class: 'menu-source' }, el('summary', { class: 'btn primary' }, libelle), el('div', { class: 'row', style: { marginTop: '.5rem' } }, ...boutons));
 }
 
-// D-E23 (R-E-2, R-E-8, R-E-12, R-E-15) : supprimer un livre vide sans laisser d'orphelin. Temps 1 — les lignes du journal qui pointent l'édition en sont
-// DÉTACHÉES avant toute suppression : une ligne terminale reçoit le seul patch edition_id null (statut inchangé) ; une ligne ouverte passe ignore AVEC
-// edition_id null, reponse_brute null et finished_at, en UNE écriture ; une ligne en_cours fait REFUSER la suppression avant toute écriture (TRANSITIONS :
-// en_cours → ignore n'existe pas). Temps 2 — UNE transaction (repo.removeBatch) retire les traces de consultation de l'édition (library_activity, sa
-// préférence de Redécouvrir), listées AVANT elle, puis l'édition et, sauf garderLivre, le livre. La capture garde son filtre : l'historique ne part au
-// serveur que sous « Synchroniser mon historique de consultation » (R27). Rend { ok: true } ou { refus: 'lecture_en_cours' }.
+// D-E23 (R-E-2, R-E-8, R-E-12, R-E-15) : supprimer un livre vide sans laisser d'orphelin. Rien n'est cru du rendu (ronde 1) : AVANT toute écriture,
+// l'édition est relue VIDE (aucune recette, aucun document, aucune page par l'index edition_id ; sinon refus non_vide) et le livre relu par book_id
+// (une autre édition en base le garde, comme garderLivre ; un livre de repli sans identifiant n'est jamais listé). Temps 1 — les lignes du journal qui
+// pointent l'édition en sont DÉTACHÉES avant toute suppression : une ligne ouverte (importOuvert, R-B-18) passe ignore AVEC edition_id null, reponse_brute
+// null et finished_at, en UNE écriture ; toute autre — terminale, ou à un statut hors vocabulaire (relu tel quel : jamais une transition inventée) —
+// reçoit le seul patch edition_id null ; une ligne en_cours fait REFUSER avant toute écriture (TRANSITIONS : en_cours → ignore n'existe pas), une ligne au
+// statut illisible aussi (aucune condition ne le relit : import_lie). Seule une ligne DISPARUE entre la lecture et la transition se tait ; toute autre
+// transition refusée fait refuser avant le temps 2. Temps 2 — UNE transaction (repo.removeBatch) retire les traces de consultation de l'édition
+// (library_activity, sa préférence de Redécouvrir), listées AVANT elle, puis l'édition et, sauf garder, le livre, SOUS LA CONDITION qu'aucune ligne du
+// journal ne la pointe plus (une ligne arrivée entre les deux temps fait refuser, rien n'est supprimé). La capture garde son filtre : l'historique ne part
+// au serveur que sous « Synchroniser mon historique de consultation » (R27). Rend { ok: true } ou { refus: 'lecture_en_cours' | 'non_vide' | 'import_lie' }.
 export async function supprimerLivreVide({ book, edition, garderLivre = false }, { repo: r = repo } = {}) {
   const repo = r; // le dépôt injecté sous le nom littéral que le test statique du lot A exige (contrainte globale) ; le défaut ci-dessus lit le module
+  const cle = (v) => typeof v === 'string' && v.trim().length > 0;
+  if (!cle(edition?.id)) throw new TypeError('supprimerLivreVide : une édition sans identifiant');
+  const livre = cle(book?.id) ? book.id : null;
+  const [recettes, documents, pages, editions] = await Promise.all([
+    repo.byIndex('recipes', 'edition_id', edition.id), repo.byIndex('source_documents', 'edition_id', edition.id),
+    repo.byIndex('source_pages', 'edition_id', edition.id), livre ? repo.byIndex('book_editions', 'book_id', livre) : [],
+  ]);
+  if ([recettes, documents, pages].some((fiches) => fiches.some(Boolean))) return { refus: 'non_vide' };
+  const garder = garderLivre || !livre || editions.some((e) => e && e.id !== edition.id);
   const lignes = (await repo.byIndex('imports', 'edition_id', edition.id)).filter(Boolean);
   if (lignes.some((l) => l.status === 'en_cours')) return { refus: 'lecture_en_cours' };
-  const attendus = STATUTS_IMPORT.filter((s) => s !== 'en_cours');
+  if (lignes.some((l) => typeof l.status !== 'string' || !l.status)) return { refus: 'import_lie' };
   for (const l of lignes) {
-    const patch = (c) => (IMPORTS_TERMINES.includes(c.status) ? { edition_id: null } : { status: 'ignore', edition_id: null, reponse_brute: null, finished_at: repo.nowIso() });
+    const attendus = STATUTS_IMPORT.includes(l.status) ? STATUTS_IMPORT.filter((s) => s !== 'en_cours') : [l.status];
+    const patch = (c) => (importOuvert(c) ? { status: 'ignore', edition_id: null, reponse_brute: null, finished_at: repo.nowIso() } : { edition_id: null });
     try { await repo.transitionner('imports', l.id, { attendus, patch }); }
     catch (e) {
       if (!(e instanceof TransitionRefusee)) throw e;
-      if (e.statut === 'en_cours') return { refus: 'lecture_en_cours' }; // passée en vol entre la lecture et la transition (inatteignable aujourd'hui, § 11)
-      // disparue entre-temps (statut indéfini) : muette
+      if (e.statut === 'en_cours') return { refus: 'lecture_en_cours' }; // passée en vol entre la lecture et la transition
+      if (e.statut !== undefined || (await repo.get('imports', l.id)) != null) return { refus: 'import_lie' }; // seule une ligne disparue se tait
     }
   }
   const activites = (await repo.byIndex('library_activity', 'edition_id', edition.id)).filter((a) => a && typeof a.id === 'string').map((a) => a.id);
   const preference = await repo.get('rediscovery_prefs', edition.id);
-  await repo.removeBatch({ library_activity: activites, ...(preference ? { rediscovery_prefs: [edition.id] } : {}), book_editions: [edition.id], ...(garderLivre ? {} : { books: [book.id] }) });
+  try {
+    await repo.removeBatch({ library_activity: activites, ...(preference ? { rediscovery_prefs: [edition.id] } : {}), book_editions: [edition.id], ...(garder ? {} : { books: [livre] }) },
+      { conditions: { imports: [{ index: 'edition_id', valeur: edition.id, exclus: STATUTS_IMPORT }] } });
+  } catch (e) {
+    if (!(e instanceof TransitionRefusee)) throw e;
+    return { refus: e.statut === 'en_cours' ? 'lecture_en_cours' : 'import_lie' };
+  }
   return { ok: true };
 }
 
@@ -292,7 +313,12 @@ export async function renderBook(params, query, ctx) {
         if (!(await confirmDialog(t('Supprimer ce livre ? Il n’a aucune recette ni page.'), { danger: true, okLabel: t('Supprimer') }))) return;
         // Lot E (D-E23) : sans orphelin — les lignes du journal détachées, l'historique et la préférence retirés avec l'édition, en une transaction.
         const res = await supprimerLivreVide({ book, edition, garderLivre: ctx.book_editions.some((e) => e.book_id === book.id && e.id !== edition.id) }, { repo });
-        if (res?.refus === 'lecture_en_cours') { toast(t('Une lecture est déjà en cours : annule-la d’abord.')); return; }
+        // Ronde 1 : chaque refus est dit ; rien n'est supprimé et la fiche reste.
+        if (res?.refus) {
+          toast(res.refus === 'lecture_en_cours' ? t('Une lecture est déjà en cours : annule-la d’abord.')
+            : res.refus === 'non_vide' ? t('Un livre avec des recettes ou des pages ne se supprime pas d’un geste.') : t('Un import est encore lié à ce livre : rien n’a été supprimé.'));
+          return;
+        }
         navigate('/library');
       } }, t('Supprimer')) : el('small', { class: 'muted' }, t('Un livre avec des recettes ou des pages ne se supprime pas d’un geste.')))));
   return root;

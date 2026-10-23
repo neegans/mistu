@@ -240,6 +240,17 @@ export async function runBackupTests({ eq, ok }) {
     eq(await snapshotValue(db), before, 'Sauvegarde : base source INCHANGÉE — rien n’est supprimé en base (mutant : orphelin supprimé de la base → rouge)');
   }));
 
+  // Ronde 1 de la tâche 3 du lot E : une activité à edition_id INVALIDE (42, espaces) n'est pas une trace écartée — elle reste dans l'archive et y est
+  // signalée comme avant le lot (« identifiant invalide ») ; seule une clé VALIDE absente des éditions est écartée.
+  await run('trace à edition_id invalide : signalée, jamais écartée (R-E-11)', () => withDatabase(async (db) => {
+    await prepared(db);
+    await db.putBatch({ library_activity: [{ id: 'la_num', edition_id: 42, event_type: 'open_book', occurred_at: '2026-01-01T00:00:00.000Z', updated_at: DATE_FIXTURE }, { id: 'la_blanc', edition_id: '  ', event_type: 'open_book', occurred_at: '2026-01-02T00:00:00.000Z', updated_at: DATE_FIXTURE }] });
+    const archive = await createArchive(db);
+    const gardees = JSON.parse(textOf(readZip(await archive.blob.arrayBuffer()).get('data/library_activity.json'))).map((a) => a.id).filter((id) => id === 'la_num' || id === 'la_blanc').sort();
+    eq([archive.tracesOrphelines, gardees, archive.warnings.filter((w) => w === 'library_activity.edition_id : identifiant invalide').length], [0, ['la_blanc', 'la_num'], 2],
+      'Sauvegarde : une activité à edition_id invalide n’est ni écartée ni comptée, elle reste signalée « identifiant invalide » (mutant : validKey remplacé par != null → écartées et comptées → rouge)');
+  }));
+
   await run('archives refusées', () => withDatabase(async (db) => {
     const { archive } = await prepared(db);
     const before = await snapshotValue(db);

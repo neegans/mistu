@@ -709,4 +709,7 @@ export const EN = {
   // Lot E « Un livre reconnu depuis sa couverture » (spec couverture § 5) — tâche 3a : le bilan de la sauvegarde (R-E-11)
   "{n} trace de consultation orpheline ignorée": "{n} orphaned viewing record skipped",
   "{n} traces de consultation orphelines ignorées": "{n} orphaned viewing records skipped",
+  // Lot E, tâche 3a, ronde 1 : les refus du geste « Supprimer » d’un livre (le premier existait sur main sans entrée).
+  "Un livre avec des recettes ou des pages ne se supprime pas d’un geste.": "A book with recipes or pages can’t be deleted in one step.",
+  "Un import est encore lié à ce livre : rien n’a été supprimé.": "An import is still linked to this book: nothing was deleted.",
 };
