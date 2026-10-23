@@ -3577,6 +3577,58 @@ export async function runAjouterTests({ eq, ok }) {
         role(root, 'annuler-lecture').click();
         await attendre(async () => (await db.get('imports', a.id)).erreur?.raison === 'annule', 'annulée');
       });
+
+      // --- Ronde de clôture 2 du lot E (R-E-31, tests seuls). La condition `etat.isbnDistant === null` de `garderDistants` (identifier, src/ui/livre-ajout.js)
+      // n'était épinglée par aucun test : le mutant RA5 (`garderDistants = !!etat.champsDistants`) laissait la suite verte et rouvrait C3 / I-B — les champs
+      // d'un ISBN A restaient affichés sous un ISBN B introuvable, avec l'étiquette « Renseigné par Open Library ». Le code commis est juste : ces deux scénarios
+      // sont verts à la tête et ROUGES sous RA5 (copie servie à part, rapport ronde-cloture-2-report.md). Sans couverture : aucune lecture, aucun POST.
+      await scenario('ronde de clôture 2 : sans couverture, ISBN A trouvé, « ← Changer d’ISBN », ISBN B introuvable — rien de A ne reste sous B (C3, I-B)', async (repo) => {
+        const A = '9782890772816', B = '9780306406157';
+        const ff = F.fauxFetch({ assistant: null, ol: (a) => [200, new URL(a.url).searchParams.get('isbn') === A ? { numFound: 1, docs: [F.OL_DOCS[0]] } : { numFound: 0, docs: [] }] });
+        const { root } = await monter(repo, { ff });
+        const vu = () => [root.etatRoute().pas, titreDe(root)?.value ?? null, champ(root, 'Auteur / chef')?.value ?? null, root.querySelector('.status.info')?.textContent ?? null, !!role(root, 'introuvable'), root.etatRoute().champsDistants];
+        taper(root.querySelector('input[name="isbn"]'), A);
+        bouton(root, 'Identifier').click();
+        await attendre(() => root.etatRoute().reponsesRecues === 1 && root.etatRoute().passagesCouverture === 1 && !root.etatRoute().recherche, `ISBN ${A} trouvé, couverture demandée`);
+        const apresA = vu();
+        bouton(root, '← Changer d’ISBN').click();
+        taper(root.querySelector('input[name="isbn"]'), B);
+        bouton(root, 'Identifier').click();
+        await attendre(() => root.etatRoute().reponsesRecues === 2 && !root.etatRoute().recherche, `ISBN ${B} introuvable`);
+        eq([apresA, vu(), rappel(root), ff.posts().length],
+          [[2, 'À la di Stasio', 'Josée Di Stasio', 'Renseigné par Open Library — vérifie et corrige.', false, { title: 'À la di Stasio', author: 'Josée Di Stasio', publisher: 'Flammarion Québec', year: '2004' }],
+            [2, '', '', 'Aucune fiche chez Open Library pour cet ISBN. Complète à la main.', false, null], `ISBN ${B}`, 0],
+          'sans couverture, ISBN A trouvé puis « ← Changer d’ISBN » et ISBN B INTROUVABLE : pas 2, titre et auteur de A rendus vides, l’étiquette dit « Aucune fiche… » (provenance aucune), pas de ligne discrète, aucun champ distant gardé (ronde de clôture 2, R-E-31 ; mutant RA5 : garderDistants sans `isbnDistant === null` → titre et auteur de A sous l’ISBN B, étiquette Open Library → rouge)');
+      });
+
+      // Variante panne : la PREMIÈRE réponse pour B est un 503 (pas 1, « Réessayer ») — les champs de A sont déjà rendus avant l'appel ; « Réessayer » trouve B
+      // et la fiche de B remplit seule (une fiche de B complète : un champ de A gardé y resterait, la fusion ne remplit que les champs vides).
+      await scenario('ronde de clôture 2 : ISBN A trouvé, « ← Changer d’ISBN », ISBN B en panne puis « Réessayer » qui le trouve — rien de A ne reste (C3, I-B)', async (repo) => {
+        const A = '9782890772816', B = '9780306406157';
+        let appelsB = 0;
+        const ff = F.fauxFetch({ assistant: null, ol: (a) => {
+          if (new URL(a.url).searchParams.get('isbn') === A) return [200, { numFound: 1, docs: [F.OL_DOCS[0]] }];
+          appelsB += 1;
+          return appelsB === 1 ? [503, ''] : [200, { numFound: 1, docs: [F.OL_DOCS[4]] }];
+        } });
+        const { root } = await monter(repo, { ff });
+        const champs = () => [titreDe(root)?.value ?? null, champ(root, 'Auteur / chef')?.value ?? null, champ(root, 'Éditeur')?.value ?? null, champ(root, 'Année')?.value ?? null, champ(root, 'Langue du livre')?.value ?? null];
+        taper(root.querySelector('input[name="isbn"]'), A);
+        bouton(root, 'Identifier').click();
+        await attendre(() => root.etatRoute().reponsesRecues === 1 && root.etatRoute().passagesCouverture === 1 && !root.etatRoute().recherche, `ISBN ${A} trouvé, couverture demandée`);
+        const apresA = champs();
+        bouton(root, '← Changer d’ISBN').click();
+        taper(root.querySelector('input[name="isbn"]'), B);
+        bouton(root, 'Identifier').click();
+        await attendre(() => root.etatRoute().reponsesRecues === 2 && !root.etatRoute().recherche, `ISBN ${B} en panne`);
+        const e = root.etatRoute();
+        const enPanne = [e.pas, !!role(root, 'indisponible'), !!role(root, 'reessayer'), e.champs.title, e.champs.author, e.champs.publisher, e.champs.year, e.champsDistants];
+        role(root, 'reessayer').click();
+        await attendre(() => root.etatRoute().reponsesRecues === 3 && root.etatRoute().passagesCouverture === 2 && !root.etatRoute().recherche, `ISBN ${B} trouvé par « Réessayer »`);
+        eq([apresA, enPanne, root.etatRoute().pas, ...champs(), root.querySelector('.status.info')?.textContent ?? null, !!role(root, 'introuvable'), root.etatRoute().champsDistants?.title ?? null, root.etatRoute().isbnDistant, rappel(root), appelsB, ff.posts().length],
+          [['À la di Stasio', 'Josée Di Stasio', 'Flammarion Québec', '2004', 'fr'], [1, true, true, '', '', '', '', null], 2, 'Berber and Q', 'Josh Katz', 'Ebury Publishing', '2018', 'en', 'Renseigné par Open Library — vérifie et corrige.', false, 'Berber and Q', B, `ISBN ${B}`, 2, 0],
+          'ISBN A trouvé, « ← Changer d’ISBN », ISBN B en PANNE (503) : pas 1, « Réessayer » offert, les champs de A déjà rendus vides, aucun champ distant gardé ; « Réessayer » trouve B : la fiche de B seule (titre, auteur, éditeur, année, langue), une seule étiquette, pas de ligne discrète (ronde de clôture 2, R-E-31 ; mutant RA5 : les champs de A gardés pendant la panne → rouge)');
+      });
     } finally { scene.remove(); setUiLocale(localeAvant); }
   }
   // --- § 6 Couverture : ce que la fiche livre et Mes livres MONTRENT, sur une base jetable
