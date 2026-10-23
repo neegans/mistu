@@ -4,6 +4,8 @@
 // ici = remise en file, sans journal non plus). Tout ce qui s'écrit ici porte origin 'remote' : jamais recapturé.
 import { SYNC_STORES, STORES } from '../model/schema.js';
 import { logError } from '../core/log.js';
+import { projectionFichier, remoteValide } from './tables.js';
+import { conditionFichier, memeRemote, HASH_FICHIER } from './fichiers.js';
 
 // R-L3-12 : les versions AVANT les recettes. Le pointeur d'une recette reçue désigne presque toujours une version
 // créée par le même geste, sur l'autre appareil : lue après la recette, elle serait encore inconnue ici et chaque
@@ -26,8 +28,10 @@ function stable(valeur) {
 // Les deux fiches sont comparées SANS leur updated_at (R-L3-11) : l'égalité d'instant est déjà établie avant
 // l'appel, et les deux chaînes qui portent ce même instant ne s'écrivent pas pareil ('.000Z' ici, '+00:00' là).
 // Un champ `undefined` équivaut à son absence (JSON les confond) ; un champ `null`, non : c'est une valeur.
-export function identiques(a, b) {
-  const sansHeure = (fiche) => { const { updated_at: _heure, ...reste } = fiche || {}; return stable(reste); };
+// Lot G (R56, D-G8) : une ligne `files` se compare sur sa PROJECTION serveur (CHAMPS_FILES_SERVEUR) — ni blob, ni syncable, ni created_at, qui
+// ne voyagent pas : ce qui part est ce qui se compare.
+export function identiques(a, b, table = null) {
+  const sansHeure = (fiche) => { const { updated_at: _heure, ...reste } = (table === 'files' ? projectionFichier(fiche) : fiche) || {}; return stable(reste); };
   return JSON.stringify(sansHeure(a)) === JSON.stringify(sansHeure(b));
 }
 
@@ -39,7 +43,7 @@ const instant = (valeur) => {
   return Number.isFinite(ms) ? ms : null;
 };
 
-export function decider({ locale, distante }) {
+export function decider({ locale, distante, table = null }) {
   if (locale === undefined || locale === null) return distante.deleted_at ? 'ignorer' : 'ecrire';
   // Les deux heures, comparées comme des INSTANTS ; repli sur la chaîne si l'une est illisible, pour rester
   // déterministe. C'est la seule question que I7 pose — et elle se pose aussi à une tombale.
@@ -58,7 +62,11 @@ export function decider({ locale, distante }) {
   if (distante.deleted_at) return plusRecentIci ? 'conflit_renvoyer' : 'supprimer';
   if (plusRecentAilleurs) return 'ecrire';
   if (plusRecentIci) return 'conflit_renvoyer';
-  return identiques(locale, distante.data) ? 'ignorer' : 'conflit';
+  // Lot G, ronde 1 (#2) : à instant égal, une ligne files d'ici SANS remote valide (true de L3, absent, nul) adopte le remote valide du serveur —
+  // jamais un « conflit ». C'est le cas d'une ligne reçue par un client d'avant G (ficheFichier écrivait `true` ou effaçait remote, l'updated_at
+  // du serveur verbatim), relue après la passe unique (D-G12) ; une ligne d'ici sans copie serveur confirmée n'a rien à défendre (I-G2).
+  if (table === 'files' && !remoteValide(locale.remote) && remoteValide(distante.data?.remote)) return 'ecrire';
+  return identiques(locale, distante.data, table) ? 'ignorer' : 'conflit';
 }
 
 // Spec assistant-par-le-compte K-5 (§ 5.5) : pour assistant_config, I7 s'applique SANS écran. `decider` reste pur et
@@ -130,36 +138,53 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
     return { id: `recipes:${ligne.id}`, store: 'recipes', record_id: ligne.id, local: locale, server: { data: ligne.data, updated_at: ligne.updated_at, deleted_at: null }, at: new Date().toISOString(), kind: 'version' };
   }
 
-  // Une ligne files n'apporte JAMAIS d'octets ici (L4 les téléchargera). Les métadonnées LOCALES (syncable,
-  // created_at, original_filename) survivent sous les champs du serveur ; le blob local est conservé s'il existe,
-  // sinon la ligne est marquée « remote » et reste sans octets. Jamais un blob effacé par une réception.
-  function ficheFichier(ligne, locale) {
-    const blob = locale?.blob instanceof Blob ? locale.blob : null;
-    const { blob: _octets, ...metaLocale } = locale || {};
-    const fiche = { ...metaLocale, ...ligne.data, updated_at: ligne.updated_at };
-    if (blob) { fiche.blob = blob; delete fiche.remote; } else fiche.remote = true;
-    return fiche;
-  }
-
   async function appliquerPage(table, lignes, bilan, curseur) {
     const puts = {}; const deletes = {}; const conflits = []; const refile = [];
+    // Lot G, ronde 1 (#4, I-G3) : les lignes files ne s'écrivent pas depuis l'instantané lu plus haut (`locale`, hors transaction) mais par une
+    // condition `fusion` refaite sur la ligne RELUE dans la transaction de la page (conditionFichier) : une copie téléchargée ou un original
+    // importé pendant la page n'est jamais effacé. Une clé par fiche (la dernière ligne reçue d'une même clé gagne, comme un put).
+    const fusions = new Map();
+    // F-7 (§ 3.2) : un remote qui CHANGE — ligne écrite ou tombale — lève l'erreur de réception posée sur l'ancien, dans la même transaction ;
+    // une erreur d'ENVOI reste (trop_gros, type : la renvoyer échouerait encore). Remotes comparés validés (memeRemote : true, absent → aucun).
+    async function leverErreurReception(id, avant, apres) {
+      if (!HASH_FICHIER.test(id) || memeRemote(avant, apres)) return;
+      const cle = 'file_error:' + id;
+      if ((await db.get('sync_state', cle))?.value?.sens === 'reception') (deletes.sync_state ||= []).push(cle);
+    }
     const clePrimaire = STORES[table].keyPath;
     let supprimees = 0; let recues = 0;
     for (const ligne of lignes) {
       const refus = refusDeForme(table, ligne, clePrimaire);
       if (refus) return { erreur: refus };
       const locale = await db.get(table, ligne.id);
-      const decision = regleDuMagasin(table, decider({ locale, distante: ligne }));
+      const decision = regleDuMagasin(table, decider({ locale, distante: ligne, table }));
       if (decision === 'renvoyer_seulement') { // K-5 : plus récent ici → repart, SANS entrée de journal
         refile.push(remiseEnFile(table, ligne, locale));
         continue;
       }
-      if (decision === 'supprimer') { (deletes[table] ||= []).push(ligne.id); supprimees += 1; continue; }
+      if (decision === 'supprimer') {
+        if (table === 'files') {
+          // D-G15 / N-4 : une tombale files dit « cette copie serveur n'existe plus », jamais « efface l'original » : ligne et blob restent,
+          // remote passe à null. Comptée en recues, jamais en supprimees ; rien ne repart (origine remote).
+          fusions.set(ligne.id, conditionFichier(ligne.id, locale, { remote: null }, ligne.updated_at));
+          await leverErreurReception(ligne.id, locale?.remote, null);
+          recues += 1;
+          logError('sync.pull.tombale_files', { table });
+          continue;
+        }
+        (deletes[table] ||= []).push(ligne.id); supprimees += 1; continue;
+      }
       if (decision === 'ignorer') continue;
       if (decision === 'ecrire') {
         // L'updated_at du serveur est stocké VERBATIM (R-L3-11) : microsecondes et décalage compris. Un renvoi doit
         // être égal, côté serveur, à la microseconde — et le serveur a pu ajuster l'heure à l'écriture (R25).
-        (puts[table] ||= []).push(table === 'files' ? ficheFichier(ligne, locale) : { ...ligne.data, updated_at: ligne.updated_at });
+        if (table === 'files') {
+          // D-G16 : une ligne files n'apporte JAMAIS d'octets ici — une seule règle de fusion (fusionnerFichier, refaite sur la ligne relue en
+          // transaction : conditionFichier) : blob, syncable et created_at locaux gardés, remote tel que la ligne reçue le porte (D-G12 : jamais
+          // `true`, jamais effacé sous un blob local).
+          fusions.set(ligne.id, conditionFichier(ligne.id, locale ?? null, ligne.data, ligne.updated_at));
+          await leverErreurReception(ligne.id, locale?.remote, ligne.data?.remote);
+        } else (puts[table] ||= []).push({ ...ligne.data, updated_at: ligne.updated_at });
         recues += 1;
         if (table === 'recipes') {
           const pointeur = await conflitDePointeur(ligne, locale);
@@ -190,7 +215,7 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
     // arrière, sinon tout ce qui est déjà reçu repartirait en boucle.
     const dernier = Math.max(...lignes.map((l) => l.server_seq));
     puts.sync_state = [{ key: `cursor:${table}`, value: Math.max(curseur, dernier) }];
-    await db.mutate({ puts, deletes, origin: 'remote' });
+    await db.mutate({ puts, deletes, origin: 'remote', conditions: fusions.size ? { files: [...fusions.values()] } : null });
     bilan.recues += recues;
     bilan.supprimees += supprimees;
     bilan.conflits += conflits.length;

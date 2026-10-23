@@ -4,7 +4,7 @@ import { el, toast, chooseDialog, promptDialog, confirmDialog, formatDate, downl
 import { t, label } from '../core/i18n.js';
 import { navigate, buildQuery, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
-import { displayUrl, safeDisplayType } from '../sync/mime.js';
+import { displayUrl, typeAffichage, safeDisplayType } from '../sync/mime.js';
 import { urlDeBlob } from '../core/blob-urls.js';
 import { currentVersion } from '../domain/search.js';
 import { scaleVersion } from '../domain/scaling.js';
@@ -14,7 +14,7 @@ import { DIET_TAGS } from '../model/schema.js';
 import { reperesDe } from '../domain/recherche-web.js';
 import { lirePage, relireResultat } from '../domain/lecture-web.js';
 import { logError } from '../core/log.js';
-import { pageHeader, section, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture, sessionAssistant, carteConnexion, ligneReperes } from './components.js';
+import { pageHeader, section, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture, sessionAssistant, carteConnexion, ligneReperes, contexteFichiers, vignettesDePages, boutonTelechargerPages, vignettePage, gesteTelechargement, relireErreurs } from './components.js';
 import { demarrerLectureWeb, texteEchecLecture, enLigneLecture, ligneWebOuverte } from './import-web.js';
 import { demarrerConnexion } from './settings.js';
 import { estCreationIA, etiquetteCreationIA, lireCreation, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
@@ -98,11 +98,12 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   const web = bandeauWeb(version);
   if (web) root.append(web); // lot B (§ 4.5) : la source d'une version lue sur le web, d'abord — puis la bannière du lot A
   if (lecture) root.append(bandeauLecture(lecture));
-  const photo = await photoDuPlat(recipe); // ronde 1 : jamais root.append(null) — le DOM natif écrirait le nœud texte « null »
+  const ctxF = await contexteFichiers(ctx); // lot G : compte, file_error et moteur, pour les vignettes et la photo du plat (§ 4.4)
+  const photo = await photoDuPlat(recipe, ctxF); // ronde 1 : jamais root.append(null) — le DOM natif écrirait le nœud texte « null »
   if (photo) root.append(photo);
 
   if (!version) {
-    root.append(referenceOnly());
+    root.append(await referenceOnly());
     // F-9 : la carte « Connecte-toi » et le bouton de lecture sont rendus cachée / éteint ; la session (déjà lue plus haut) les bascule ici —
     // jamais de flash « Connecte-toi » pour une personne connectée, jamais de carte retirée (le motif d'import.js).
     basculerSessionSignet(root, sessionWeb, enLigneWeb());
@@ -162,8 +163,12 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   drawBody();
 
   // Pages originales
-  if (pages.length) root.append(section(t('Original'), el('p', { class: 'muted' }, t('Pages du livre telles que photographiées. Une adaptation n’est jamais présentée comme le texte original.')),
-    el('div', { class: 'thumbs' }, ...pages.map((p) => { const img = el('img', { alt: t('Page originale'), loading: 'lazy' }); repo.getFile(p.sha256).then((f) => { const u = displayUrl(f); if (u) img.src = u; }); return el('figure', null, img, el('figcaption', null, p.printed_page ? `${t('p.')} ${p.printed_page}` : '')); }))));
+  if (pages.length) {
+    const vignettes = await vignettesDePages(pages, ctxF, { alt: () => t('Page originale') }); // ronde 1 : l'alt d'avant le lot G
+    root.append(section(t('Original'), el('p', { class: 'muted' }, t('Pages du livre telles que photographiées. Une adaptation n’est jamais présentée comme le texte original.')),
+      boutonTelechargerPages(vignettes.distantes, { connecte: ctxF.connecte, telecharger: vignettes.telecharger }),
+      el('div', { class: 'thumbs' }, ...pages.map((p) => el('figure', null, vignettes.places.get(p.id), el('figcaption', null, p.printed_page ? `${t('p.')} ${p.printed_page}` : ''))))));
+  }
   // C-2 : une fiche origine 'ia' n'a pas de livre — un numéro de page tapé dans « Corriger » (champ « Page imprimée ») ne la fait pas passer pour une page d'original.
   else if (recipe.printed_page && recipe.origine !== 'ia') root.append(el('p', { class: 'muted' }, t('Original : page {p} du livre (pages non photographiées).', { p: recipe.printed_page })));
 
@@ -285,9 +290,11 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     navigate(`/recipes/${recipe.id}?v=${newVersion.id}`);
   }
 
-  function referenceOnly() {
+  async function referenceOnly() {
     // Un signet web n'est pas une référence d'index : il n'y a pas de page de livre à ouvrir, il y a un lien (F8).
     if (recipe.source_url) return el('div', null, blocSignet(recipe, ctx, { lire: lireWeb, connecter: connecterWeb, moi: gestesLecture.repo.deviceId?.() ?? null }));
+    // Lot G (§ 4.4) : les pages d'index par vignettePage, avec « Télécharger les {n} pages » quand ≥ 2 manquent (la branche signet ci-dessus rend avant).
+    const vignettes = pages.length ? await vignettesDePages(pages, ctxF) : null;
     return el('div', null,
       el('div', { class: 'card warn stack' },
         el('h2', null, recipe.printed_page ? t('Repérée dans ton livre — page {p}', { p: recipe.printed_page }) : t('Repérée dans l’index de ton livre')),
@@ -297,7 +304,8 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
           el('a', { class: 'btn primary', href: `#/recipes/${encodeURIComponent(recipe.id)}/importer` }, t('Importer cette recette')),
           el('a', { class: 'btn', href: `#/recipes/${recipe.id}/edit?kind=extraction` }, t('Saisir à la main')),
           dish ? el('a', { class: 'btn', href: `#/dishes/${dish.id}` }, t('Autres recettes de ce plat')) : el('button', { class: 'btn', onClick: attachDish }, t('Rattacher à un plat')))),
-      pages.length ? section(t('Pages d’index'), el('div', { class: 'thumbs' }, ...pages.map((p) => { const img = el('img', { loading: 'lazy' }); repo.getFile(p.sha256).then((f) => { const u = displayUrl(f); if (u) img.src = u; }); return el('figure', null, img); }))) : null);
+      vignettes ? section(t('Pages d’index'), boutonTelechargerPages(vignettes.distantes, { connecte: ctxF.connecte, telecharger: vignettes.telecharger }),
+        el('div', { class: 'thumbs' }, ...pages.map((p) => el('figure', null, vignettes.places.get(p.id))))) : null);
   }
 }
 
@@ -389,18 +397,32 @@ function bandeauLecture(lecture) {
     lecture.incertain ? el('div', { dataset: { role: 'incertain-lecture' }, style: { fontSize: '.9rem' } }, t('Incertain : {t}', { t: lecture.incertain })) : null);
 }
 
-// Photo du plat (spec D-4, § 4.3.6) : rendue seulement quand files a les octets — un pointeur sans octets (ligne reçue avant L4) ne rend rien, pas
-// même un cadre ; un type d'image seulement, retypé par la liste blanche (S3, displayUrl : une seule copie de la règle), URL blob: suivie (urlDeBlob,
-// révoquée au changement de route). Rend null sinon : l'appelant n'ajoute rien (Element.append(null) écrirait « null »).
-async function photoDuPlat(recipe) {
+// Photo du plat (lot A D-4 ; lot G § 4.4 : la règle de la couverture). Aucune ligne files : rien, pas même un cadre (tests/import-cible.js) ; avec
+// octets d'un type d'image de la liste : l'image ; sans octets : la vignette d'état, avec « Télécharger » sur une tape (R-G-1).
+async function photoDuPlat(recipe, ctxF) {
   if (typeof recipe?.photo_sha256 !== 'string' || !recipe.photo_sha256) return null;
   let fichier = null;
   try { fichier = await repo.getFile(recipe.photo_sha256); } catch { fichier = null; }
-  if (!safeDisplayType(fichier?.mime)?.startsWith('image/')) return null;
-  const src = displayUrl(fichier, urlDeBlob);
-  if (!src) return null;
-  return el('figure', { class: 'photo-plat', dataset: { role: 'photo-plat' }, style: { margin: '0 0 .8rem' } },
-    el('img', { alt: t('Photo du plat'), src, loading: 'lazy', style: { display: 'block', width: '320px', maxWidth: '100%', borderRadius: 'var(--radius)' } }));
+  if (!fichier) return null;
+  // Ronde 1 : sans octets, rien n'est offert si ce qui arrivera ne s'affichera pas — le type que portera le blob reçu (remote.mime), sinon celui
+  // de la ligne (typeAffichage) ; une ligne distante application/pdf réussissait chaque tape sans que rien ne change (boucle muette).
+  if (!(fichier.blob instanceof Blob) && !(safeDisplayType(fichier.remote?.mime) ?? safeDisplayType(fichier.mime))?.startsWith('image/')) return null;
+  const figure = el('figure', { class: 'photo-plat', dataset: { role: 'photo-plat' }, style: { margin: '0 0 .8rem' } });
+  const dessiner = (f) => {
+    if (f?.blob instanceof Blob) {
+      const src = typeAffichage(f)?.startsWith('image/') ? displayUrl(f, urlDeBlob) : null;
+      if (!src) return false;
+      figure.replaceChildren(el('img', { alt: t('Photo du plat'), src, loading: 'lazy', style: { display: 'block', width: '320px', maxWidth: '100%', borderRadius: 'var(--radius)' } }));
+      return true;
+    }
+    figure.replaceChildren(vignettePage({ id: 'photo', sha256: recipe.photo_sha256 }, f, { ...ctxF, telecharger }));
+    return true;
+  };
+  const telecharger = gesteTelechargement({ moteur: ctxF.moteur, redessiner: async () => {
+    await relireErreurs(ctxF);
+    dessiner(await repo.getFile(recipe.photo_sha256));
+  } });
+  return dessiner(fichier) ? figure : null;
 }
 
 function slug(s) { return (s || 'recette').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60); }

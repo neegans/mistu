@@ -150,7 +150,8 @@ schéma `private`, tous deux nés en `0001`.
 
 Coller `proofs/0002_stockage.sql` (aucun jeton à remplacer, lecture seule). Même lecture : un tableau, une ligne
 `999 BILAN`. Les refus réels (objet hors de son dossier, type hors liste, plus de 50 Mo) ne s'y trouvent pas : ils
-sont prononcés par l'API de téléversement et se jouent **depuis l'app**, au lot L4.
+sont prononcés par l'API de téléversement et se jouent **depuis l'app**, au lot L4. L4 utilise ces règles (lot G) ; l'espace est mesuré par
+l'app en listant son dossier ; le quota est celui du projet, l'app ne le connaît pas.
 
 ### 8. Brancher le crochet, et le prouver
 

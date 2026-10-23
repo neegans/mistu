@@ -6,9 +6,10 @@ import { urlDeBlob } from '../core/blob-urls.js';
 import { displayQuantity, REASON_LABELS } from '../domain/units.js';
 import { shortcutUrl, siriPhrase, describeDuration, isAppleTouchDevice } from '../domain/timers.js';
 import { navigate } from '../core/router.js';
-import { displayUrl, safeDisplayType } from '../sync/mime.js';
+import { displayUrl, typeAffichage } from '../sync/mime.js';
+import { etatFichier, lireErreursFichiers } from '../sync/fichiers.js';
 import * as repo from '../model/repo.js';
-import { pastilleModel } from './state.js';
+import { pastilleModel, invalidate } from './state.js';
 import { estCreationIA, etiquetteCreationIA } from '../domain/creation-ia.js';
 import { DIFFICULTES, LIMITES_WEB } from '../domain/recherche-web.js';
 
@@ -181,11 +182,12 @@ export function recipeCard(doc, { extra = null, href = null, reasons = null } = 
 export function bookCover(edition, book, { href = null, fichier = null } = {}) {
   // S3 : une ligne `files` peut venir d'une archive ou du serveur et porter n'importe quel `mime` sur n'importe quel
   // blob. Le type d'affichage passe par la liste blanche et DOIT être une image ; le blob est retypé avec lui (un
-  // blob text/html dans un <img> ne s'afficherait pas, mais l'URL existerait quand même). Hors liste : vignette texte.
-  const type = safeDisplayType(fichier?.mime);
-  const affichable = fichier?.blob instanceof Blob && !!type && type.startsWith('image/');
+  // blob text/html dans un <img> ne s'afficherait pas, mais l'URL existerait quand même). Hors liste : vignette texte. La règle de displayUrl
+  // (F-9, lot G) : le type du blob, dans la liste blanche, gagne — une copie JPEG reçue sous une ligne image/heic s'affiche.
+  const type = typeAffichage(fichier);
+  const affichable = !!type && type.startsWith('image/');
   const image = affichable
-    ? el('img', { class: 'cover-img', alt: book?.title || '', src: urlDeBlob(fichier.blob.type === type ? fichier.blob : new Blob([fichier.blob], { type })) })
+    ? el('img', { class: 'cover-img', alt: book?.title || '', src: displayUrl(fichier, urlDeBlob) }) // retypage : une copie de la règle (displayUrl)
     : null;
   // D-T9 : sans titre connu, l'image reste décorative (alt vide, jamais un nom inventé) — mais le texte passe en
   // display:none quand l'image est là, et le lien n'aurait alors plus aucun nom. L'ancre le porte donc toujours.
@@ -393,15 +395,159 @@ export function linkButton(label, href, cls = 'btn') { return el('a', { class: c
 
 export function goto(path) { navigate(path); }
 
-// Cadre PDF isolé : sandbox vide, bouton et phrase de repli toujours présents de façon synchrone — l'absence du blob
-// (ligne « files » reçue, octets pas encore téléchargés, cf. L4) n'est pas détectable à l'avance (spec I5, § 6.2).
-export function pdfFrame({ sha256, filename }) {
-  const frame = el('iframe', { class: 'pdf', title: filename, sandbox: '' });
-  repo.getFile(sha256).then((f) => { const u = displayUrl(f); if (u) frame.src = u; });
-  return el('div', { class: 'stack' }, frame,
-    el('div', { class: 'row' },
-      el('button', { class: 'btn', onClick: async () => { const f = await repo.getFile(sha256); if (f) downloadBlob(f.blob, filename); else toast(t('Ce fichier n’est pas encore sur cet appareil.')); } }, t('Télécharger le fichier')),
-      el('small', { class: 'muted' }, t('Si l’aperçu reste vide, télécharge le fichier.'))));
+// === Lot G : les fichiers qui ne sont pas encore ici (§ 4.2-4.5)
+// Les textes d'état d'un fichier sans octets ici (§ 4.10) : lus par t() au rendu.
+const TEXTES_VIGNETTE = {
+  distant: 'Pas encore sur cet appareil',
+  sans_compte: 'Connecte-toi pour la télécharger',
+  absent: 'Pas encore envoyée par l’appareil qui l’a prise',
+  pas_recue: 'Pas encore reçue',
+  erreur: 'Fichier illisible reçu du serveur.',
+};
+
+// Motifs d'un fichier refusé (§ 4.10) : le motif ET le sens décident la phrase (« type » à l'envoi = refusé par le serveur ; à la réception =
+// illisible). Lus par hasOwn : un jeton inconnu ou hostile retombe sur « Fichier refusé », jamais sur le jeton. UNE table pour Réglages et les
+// écrans (tâche 6, ronde 1 : déplacée de settings.js, qui la réexporte — un 404 se dit « plus sur le serveur », jamais « illisible reçu »).
+const MOTIFS_FICHIER = {
+  'envoi:trop_gros': 'Plus de 50 Mo : ce fichier reste sur cet appareil seulement.',
+  'envoi:type': 'Type de fichier refusé par le serveur.',
+  'envoi:verification': 'Empreinte différente après envoi.',
+  // Ronde 1 de la tâche 5 (à ratifier : textes hors spec § 5) : `forme` à l'envoi (T3-R1 : un fichier vide ne porte aucun remote valide) et
+  // `illisible` (T4-R1 : un blob que le navigateur ne relit plus) sont posés par la passe depuis le plan ; sans phrase, ils retombaient sur « Fichier refusé ».
+  'envoi:forme': 'Fichier vide ou mal formé : il reste sur cet appareil seulement.',
+  'envoi:illisible': 'Fichier illisible sur cet appareil.',
+  'reception:forme': 'Ligne de fichier mal formée reçue du serveur.',
+  'reception:introuvable': 'Ce fichier n’est plus sur le serveur.',
+  'reception:empreinte': 'Fichier illisible reçu du serveur.',
+  'reception:taille': 'Fichier illisible reçu du serveur.',
+  'reception:type': 'Fichier illisible reçu du serveur.',
+};
+export const motifFichier = (motif, sens) => { const cle = `${sens}:${motif}`; return t(Object.hasOwn(MOTIFS_FICHIER, cle) ? MOTIFS_FICHIER[cle] : 'Fichier refusé'); };
+// La phrase d'un fichier en erreur sur un écran : celle de SON motif quand `erreurs` le porte (la Map de lireErreursFichiers), sinon « illisible reçu ».
+export const texteErreurFichier = (sha256, erreurs) => { const e = typeof erreurs?.get === 'function' ? erreurs.get(sha256) : null; return e ? motifFichier(e.motif, e.sens) : t(TEXTES_VIGNETTE.erreur); };
+
+// Cadre PDF isolé (§ 4.5, B-24) : SYNCHRONE à l'appel (l'appelant fait box.append(pdfFrame(…))) — le conteneur est rendu de suite, et c'est la
+// résolution de repo.getFile qui y pose le cadre (sandbox vide, type par la liste blanche) OU, sans octets, la phrase et « Télécharger » (avec un
+// compte). Jamais un cadre vide ; « Télécharger le fichier » seulement avec un blob. Après un téléchargement, le cadre remplace le bouton.
+// Ronde 1 : l'état se LIT (etatFichier, avec `uid` et les file_error relues à chaque remplissage) — « Télécharger » pour une ligne distante de ce
+// compte avec un compte, « Réessayer » pour une erreur avec un compte, sinon la phrase de § 4.10 sans geste (une tape sur une ligne sans remote
+// posait un faux file_error « forme ») ; des octets ici d'un type hors liste : aucun cadre, « Télécharger le fichier » seul (ils SONT ici).
+export function pdfFrame({ sha256, filename, connecte = false, uid = null, telecharger = null }) {
+  const boite = el('div', { class: 'stack' });
+  const remplir = async () => {
+    let f = null; let erreurs = new Map();
+    try { f = await repo.getFile(sha256); erreurs = await lireErreursFichiers(repo.db); } catch { /* base illisible : l'état se lit avec ce qui a été lu */ }
+    const u = displayUrl(f);
+    const telechargerFichier = el('button', { class: 'btn', onClick: () => downloadBlob(f.blob, filename) }, t('Télécharger le fichier'));
+    if (u) {
+      boite.replaceChildren(el('iframe', { class: 'pdf', title: filename, sandbox: '', src: u }),
+        el('div', { class: 'row' }, telechargerFichier, el('small', { class: 'muted' }, t('Si l’aperçu reste vide, télécharge le fichier.'))));
+      return;
+    }
+    if (f?.blob instanceof Blob) { boite.replaceChildren(el('div', { class: 'row' }, telechargerFichier)); return; }
+    // Un appelant qui ne câble pas le geste (recipe-edit.js, P4) ne donne pas le compte : la phrase de repli seule, sans état deviné.
+    const cable = typeof telecharger === 'function';
+    const etat = f ? etatFichier(f, { uid, erreurs }) : 'pas_recue';
+    const detail = !cable ? null : etat === 'erreur' ? texteErreurFichier(sha256, erreurs) : etat === 'distant' ? (connecte ? null : t(TEXTES_VIGNETTE.sans_compte)) : t(TEXTES_VIGNETTE[etat]);
+    const enfants = [el('p', { class: 'muted' }, t('Ce fichier n’est pas encore sur cet appareil.')), detail ? el('small', { class: 'muted' }, detail) : null];
+    const geste = (libelle, reessayer) => {
+      const b = el('button', { type: 'button', class: 'btn', onClick: async () => { b.disabled = true; b.textContent = t('Téléchargement…'); try { await telecharger(sha256, { reessayer }); } finally { await remplir(); } } }, libelle);
+      return el('div', { class: 'row' }, b);
+    };
+    if (connecte && cable && (etat === 'distant' || etat === 'erreur')) enfants.push(geste(etat === 'distant' ? t('Télécharger') : t('Réessayer'), etat === 'erreur'));
+    boite.replaceChildren(...enfants.filter(Boolean));
+  };
+  remplir();
+  return boite;
+}
+
+// Le contexte des fichiers d'un écran : le compte (connecté, sinon celui que l'appareil a connu — sync_state.user_id —, pour reconnaître un remote
+// de ce compte et dire « Connecte-toi pour la télécharger »), les file_error (Map empreinte → { motif, sens } ; etatFichier n'en lit que `has`) et
+// le moteur (le seul qui télécharge, R53).
+export async function contexteFichiers(ctx) {
+  const sync = ctx?.sync || {};
+  const moteur = sync.moteur || null;
+  let uid = sync.user?.id || null;
+  let erreurs = new Map();
+  try {
+    if (!uid) uid = (await repo.get('sync_state', 'user_id'))?.value || null;
+    erreurs = await lireErreursFichiers(repo.db);
+  } catch { /* base illisible : ni compte connu ni erreur affichée */ }
+  return { connecte: !!sync.user && !!moteur, uid, erreurs, moteur };
+}
+
+// Relit les file_error d'un écran après une tape (ronde 1 : UNE définition). Réécrit `ctxF.erreurs` EXPRÈS : ctxF est le contexte de l'écran,
+// partagé par toutes ses vignettes — une erreur relue après une tape vaut pour chacune.
+export async function relireErreurs(ctxF) {
+  try { ctxF.erreurs = await lireErreursFichiers(repo.db); } catch { /* garde les erreurs connues */ }
+  return ctxF.erreurs;
+}
+
+// Le geste « Télécharger » d'un écran : sur une TAPE seulement (R-G-1), par le moteur ; puis l'écran redessine ce qui a changé — jamais un
+// refresh() de la route (/import est une route de saisie) ; un échec se dit. Ronde 1 : le succès est le FAIT relu — les octets de chaque clé
+// demandée sont ici —, pas le compte `recus` du moteur : un fichier arrivé entre-temps (« Télécharger toutes les pages ») rend recus: 0 sans échouer.
+export function gesteTelechargement({ moteur, redessiner = async () => {}, dire = toast }) {
+  return async (sha256s, { reessayer = false } = {}) => {
+    const liste = Array.isArray(sha256s) ? sha256s : [sha256s];
+    let r = null;
+    try { r = reessayer ? await moteur?.reessayerFichier(liste[0]) : await moteur?.telecharger(liste); } catch { r = null; }
+    invalidate();
+    await redessiner(liste);
+    let ici = false;
+    try { const fs = await repo.getFiles(liste); ici = liste.length > 0 && liste.every((s) => fs.get(s)?.blob instanceof Blob); } catch { ici = false; }
+    if (!ici) dire(t('Le téléchargement n’a pas abouti.'));
+    return r;
+  };
+}
+
+// Une miniature de page (§ 4.3) : avec octets, l'image (displayUrl, le type par la liste blanche) ; sinon un figure.fichier-absent qui DIT l'état
+// et n'offre que le geste qui a un sens — « Télécharger » (distante, compte) ou « Réessayer » (erreur, compte : sans compte, la tape effaçait le
+// diagnostic sans rien retenter — ronde 1). `alt` : celui de l'écran (« Page {position} » en séance, « Page originale » sur la fiche recette).
+export function vignettePage(page, fichier, { connecte = false, uid = null, erreurs = new Map(), telecharger = null, alt = t('Page') } = {}) {
+  if (fichier?.blob instanceof Blob) {
+    const img = el('img', { alt, loading: 'lazy' });
+    const u = displayUrl(fichier);
+    if (u) img.src = u;
+    return img;
+  }
+  const etat = fichier ? etatFichier(fichier, { uid, erreurs }) : 'pas_recue';
+  const texte = etat === 'erreur' ? texteErreurFichier(page?.sha256, erreurs) : t(TEXTES_VIGNETTE[etat === 'distant' && !connecte ? 'sans_compte' : etat]);
+  const fig = el('figure', { class: 'fichier-absent', dataset: { etat, sha256: String(page?.sha256 || '') } }, el('small', null, texte));
+  const geste = (libelle, reessayer) => {
+    const b = el('button', { type: 'button', class: 'btn small', onClick: async () => {
+      b.disabled = true; b.textContent = t('Téléchargement…');
+      try { await telecharger(page.sha256, { reessayer }); } finally { if (b.isConnected) { b.disabled = false; b.textContent = libelle; } }
+    } }, libelle);
+    return b;
+  };
+  if (typeof telecharger === 'function' && etat === 'distant' && connecte) fig.append(geste(t('Télécharger'), false));
+  if (typeof telecharger === 'function' && etat === 'erreur' && connecte) fig.append(geste(t('Réessayer'), true));
+  return fig;
+}
+
+// Les miniatures d'une liste de pages — UNE définition pour la fiche du livre, la séance et la fiche recette : chaque page a sa place, redessinée
+// seule après un téléchargement. `distantes` = les pages téléchargeables, dans l'ordre des pages (pour « Télécharger les {n} pages »).
+export async function vignettesDePages(pages, ctxF, { alt = () => t('Page') } = {}) {
+  const places = new Map(pages.map((p) => [p.id, el('div', { class: 'vignette-page' })]));
+  const dessiner = async (liste) => {
+    const fichiers = await repo.getFiles(liste.map((p) => p.sha256));
+    for (const p of liste) places.get(p.id)?.replaceChildren(vignettePage(p, fichiers.get(p.sha256), { ...ctxF, telecharger, alt: alt(p) }));
+    return fichiers;
+  };
+  const telecharger = gesteTelechargement({ moteur: ctxF.moteur, redessiner: async (shas) => {
+    await relireErreurs(ctxF);
+    await dessiner(pages.filter((p) => shas.includes(p.sha256)));
+  } });
+  const fichiers = await dessiner(pages);
+  const distantes = pages.filter((p) => { const f = fichiers.get(p.sha256); return !!f && !(f.blob instanceof Blob) && etatFichier(f, ctxF) === 'distant'; }).map((p) => p.sha256);
+  return { places, distantes, telecharger };
+}
+
+// « Télécharger les {n} pages » (§ 4.3, § 4.4) : un geste, en série dans l'ordre des pages ; seulement à partir de deux pages et avec un compte.
+export function boutonTelechargerPages(distantes, { connecte = false, telecharger = null } = {}) {
+  if (!connecte || typeof telecharger !== 'function' || distantes.length < 2) return null;
+  const b = el('button', { type: 'button', class: 'btn small', onClick: async () => { b.disabled = true; try { await telecharger(distantes); } finally { if (b.isConnected) b.disabled = false; } } }, t('Télécharger les {n} pages', { n: distantes.length }));
+  return el('div', { class: 'row' }, b);
 }
 
 export function dietChip(assessment) {

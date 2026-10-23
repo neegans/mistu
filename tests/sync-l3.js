@@ -97,7 +97,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     { seq: 6, store: 'files', id: 'f'.repeat(64), op: 'put', updated_at: '2026-10-13T10:05:00Z', tries: 0 },
   ];
   const cf = await composerLots(fichiersRepetes, async () => undefined);
-  eq([cf.lots, cf.abandonnees], [[], []], 'lots : deux put du même fichier ne produisent aucun lot — et la retenue passe AVANT la relecture (une ligne files n’est pas « disparue »)');
+  eq([cf.lots, cf.abandonnees], [[], []], 'lots : deux put du même fichier ne produisent aucun lot — une ligne files relue absente est retenue, jamais « disparue » (L4 : la retenue suit la relecture et précède la branche « fiche disparue »)');
   eq(cf.retenues, [{ seq: 6, seqs: [4, 6], raison: 'fichier en attente' }], 'lots : deux put du même fichier dédoublonnés → une seule retenue, tous les seq (R-L3-5)');
 
   const recreation = [
@@ -519,14 +519,13 @@ export async function runSyncL3Tests({ eq, ok }) {
   // --- Envoi initial par marqueurs (spec § 5.2) : complet, reprenable, déclenché sur un appareil déjà connecté
   const { tablesAEnvoyer, envoiInitial, retirerMarqueur } = await import('../src/sync/backfill.js');
   const { SYNC_STORES } = await import('../src/model/schema.js');
-  // R-L3-22 : `files` n'est PAS de l'envoi initial en L3 (les octets sont L4), et son marqueur n'est pas posé —
-  // L4 trouvera donc la table entière à envoyer, sans rattrapage à faire.
+  // L4 (D-G8) : `files` est de l'envoi initial, filtrée par remote de ce compte ; son marqueur est posé.
   // Assistant par le compte (K-3, R-CPT-1) : `assistant_config` est dans SYNC_STORES mais n'est candidate que sur un
-  // appareil de production (`configSuitLeCompte`, faux par défaut) : ces décomptes restent 23/24 sans lui ; les
-  // 24/25 avec lui sont éprouvés dans tests/assistant-compte.js.
-  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false }).length, 24, 'envoi initial : 24 tables (imports comprise, lot A) sans l’historique ni les fichiers (R-L3-22), ni assistant_config (hors production par défaut)');
-  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true }).length, 25, 'envoi initial : 25 tables avec l’historique');
-  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true }).includes('files'), false, 'R-L3-22 : « files » n’est jamais de l’envoi initial en L3');
+  // appareil de production (`configSuitLeCompte`, faux par défaut) : ces décomptes valent 25/26 sans lui (`files`
+  // comprise depuis L4) ; les 26/27 avec lui sont éprouvés dans tests/assistant-compte.js.
+  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false }).length, 25, 'envoi initial : 25 tables (imports et files comprises ; files depuis L4) sans l’historique ni assistant_config (hors production par défaut)');
+  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true }).length, 26, 'envoi initial : 26 tables avec l’historique');
+  eq(tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true }).includes('files'), true, 'L4 (D-G8) : « files » est de l’envoi initial, filtrée par remote de ce compte');
   eq(tablesAEnvoyer({ marqueurs: { 'backfill:books': 'fait' }, isActivitySynced: () => false }).includes('books'), false, 'envoi initial : une table marquée « fait » ne repart pas');
   await withRepo(async (repo, db) => {
     // Bibliothèque d’AVANT la connexion : écrite sans capture (comme en L1, ou restaurée), puis compte connecté.
@@ -534,15 +533,15 @@ export async function runSyncL3Tests({ eq, ok }) {
     eq(await db.count('outbox'), 0, 'envoi initial : rien en file avant');
     const progression = [];
     const r = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false, surProgression: (p) => progression.push(p), tailleMorceau: 1 });
-    eq(r.tables.length, 24, 'envoi initial : les 24 tables sont parcourues (imports comprise ; ni l’historique, ni les fichiers, ni assistant_config hors production)');
+    eq(r.tables.length, 25, 'envoi initial : les 25 tables sont parcourues (imports et files comprises ; ni l’historique, ni assistant_config hors production)');
     const file = await db.getAll('outbox');
     const refs = (await db.count('ingredients')) + (await db.count('unit_definitions')) + (await db.count('unit_conventions')); // amorçage mesuré : ingredients, unit_definitions, unit_conventions
     eq(file.length, refs + 2, 'envoi initial : références amorcées + 2 livres en file (R-L3-22 : aucun fichier)');
     ok(file.every((e) => e.op === 'put' && e.user_id === 'u1'), 'envoi initial : des put, au nom du compte');
     ok(!file.some((e) => e.store === 'files'), 'R-L3-22 : aucune ligne files n’est mise en file par l’envoi initial, synchronisable ou non');
-    eq(await db.get('sync_state', 'backfill:files'), undefined, 'R-L3-22 : le marqueur « backfill:files » n’est PAS posé — L4 trouvera la table entière à envoyer');
+    eq((await db.get('sync_state', 'backfill:files'))?.value, 'fait', 'L4 (D-G8) : le marqueur « backfill:files » est posé par l’envoi initial (aucune ligne à remote de ce compte : rien en file)');
     eq((await db.get('sync_state', 'backfill:books'))?.value, 'fait', 'envoi initial : marqueur posé après la table');
-    ok(progression.some((p) => p.table === 'books' && p.n >= 1 && p.total === 24), 'envoi initial : progression « table n/24 »');
+    ok(progression.some((p) => p.table === 'books' && p.n >= 1 && p.total === 25), 'envoi initial : progression « table n/25 »');
     // Une table vide (aucune ligne) reçoit quand même son marqueur, sans aucune entrée en file pour elle.
     eq((await db.get('sync_state', 'backfill:dishes'))?.value, 'fait', 'envoi initial : une table vide est marquée « fait »');
     ok(!file.some((e) => e.store === 'dishes'), 'envoi initial : une table vide ne met jamais rien en file');
@@ -670,7 +669,8 @@ export async function runSyncL3Tests({ eq, ok }) {
   ok(!journalReception.some((t) => t.includes('autre') || t.includes('"bad"') || t.includes('"x"')), 'réception : le journal ne porte ni contenu de fiche ni texte du fournisseur');
 
   await withRepo(async (repo, db) => {
-    // files reçue sans octets : ligne écrite remote:true ; une ligne locale qui a déjà le blob le garde.
+    // files reçue sans octets : ligne écrite sans remote valide (L4, D-G12) ; une ligne locale qui a déjà le blob le garde.
+    const { remoteValide } = await import('../src/sync/tables.js');
     const sha = 'c'.repeat(64);
     await repo.putFile(sha, new Blob(['x'], { type: 'image/jpeg' }), { original_filename: 'x.jpg' });
     const tf = creerTransportFactice({ lire: { files: [[{ id: sha, data: { sha256: sha, mime: 'image/jpeg', size: 1, updated_at: '2030-01-01T00:00:00Z' }, updated_at: '2030-01-01T00:00:00Z', deleted_at: null, server_seq: 3 }, { id: 'd'.repeat(64), data: { sha256: 'd'.repeat(64), mime: 'image/png', size: 2, updated_at: '2030-01-01T00:00:00Z' }, updated_at: '2030-01-01T00:00:00Z', deleted_at: null, server_seq: 4 }], []] } });
@@ -679,7 +679,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(avecBlob.blob instanceof Blob, 'réception : une ligne files reçue n’efface jamais le blob local');
     eq([avecBlob.original_filename, avecBlob.syncable, typeof avecBlob.created_at], ['x.jpg', true, 'string'], 'réception : les métadonnées locales d’une ligne files (nom d’origine, syncable, created_at) survivent à la réception');
     const sans = await db.get('files', 'd'.repeat(64));
-    eq([sans.remote, 'blob' in sans], [true, false], 'réception : une ligne files inconnue arrive remote:true, sans octets (L4 les téléchargera)');
+    eq([remoteValide(sans.remote), 'blob' in sans], [false, false], 'réception (L4, D-G12) : une ligne files inconnue arrive sans octets et sans remote valide (plus remote: true)');
   });
   await withRepo(async (repo, db) => {
     // R-L3-11 de bout en bout : l’écho de notre propre envoi (même instant, rendu « +00:00 » avec des microsecondes)
@@ -1234,7 +1234,7 @@ export async function runSyncL3Tests({ eq, ok }) {
   eq(syncSectionModel({ ...base, moteur: etatMoteur({ enCours: false, phase: 'reception', progression: { table: 'books', n: 1, total: 24 } }) }).progression,
     null, 'réglages L3 : une passe terminée n’affiche plus de progression');
   const m4 = syncSectionModel({ ...base, moteur: etatMoteur({ pause: { raison: 'quota', at: 't' }, horloge: { minutes: 12 } }) });
-  ok(m4.pause && m4.pause.includes('1 Go'), 'réglages L3 : pause quota nommée (rien n’est perdu)');
+  eq(m4.pause, 'Espace serveur plein — rien n’est perdu, tout reste sur cet appareil.', 'réglages L3 : pause quota nommée (rien n’est perdu), sans palier ni plan : l’app ne connaît pas le plan du projet (R-G-5, lot G)');
   ok(m4.lines.some((l) => l.includes('12')), 'réglages L3 : avertissement d’horloge avec les minutes');
   eq(syncSectionModel({ ...base, moteur: etatMoteur({ pause: { raison: 'autre', at: 't' } }) }).pause, null, 'réglages L3 : seule la pause de quota a une phrase');
   const m5 = syncSectionModel({ ...base, moteur: etatMoteur({ attenteConnexion: true }) });
@@ -1323,7 +1323,7 @@ export async function runSyncL3Tests({ eq, ok }) {
   {
     const boite = document.createElement('div');
     for (const n of syncSectionL3(m4, {})) boite.append(n);
-    ok(boite.querySelector('.warn')?.textContent.includes('1 Go'), 'rendu L3 : la pause de quota est un avertissement visible');
+    eq(boite.querySelector('.warn')?.textContent, 'Espace serveur plein — rien n’est perdu, tout reste sur cet appareil.', 'rendu L3 : la pause de quota est un avertissement visible, sans palier (R-G-5, lot G)');
     const boite2 = document.createElement('div');
     for (const n of syncSectionL3(m2, {})) boite2.append(n);
     eq(boite2.textContent, 'Envoi initial : recipes 8/24', 'rendu L3 : la progression seule, sans liste vide ni titre orphelin');
@@ -1700,12 +1700,12 @@ export async function runSyncL3Tests({ eq, ok }) {
     const tf = creerTransportFactice({ lire: { books: [[recue], []] } });
     const moteur = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: tf, fenetre: fenetreMuette(), bus: busMuet });
     const e = await moteur.executer('t');
-    eq(e.derniersEffets, { recues: 1, supprimees: 0, ajustes: 0, conflits: 0 }, 'moteur (R-L3-16) : la fin d’une passe dit ce qu’elle a écrit');
+    eq(e.derniersEffets, { recues: 1, supprimees: 0, ajustes: 0, conflits: 0, fichiersRecus: 0 }, 'moteur (R-L3-16) : la fin d’une passe dit ce qu’elle a écrit');
     ok(Object.isFrozen(e.derniersEffets), 'moteur (R-L3-16) : … et ce bilan sort figé comme le reste de l’état');
     await moteur.arreter();
     const vide = creerTransportFactice({ lire: {} });
     const m2 = createMoteur({ db, getUserId: () => 'u1', isActivitySynced: () => false, transport: vide, fenetre: fenetreMuette(), bus: busMuet });
-    eq((await m2.executer('t')).derniersEffets, { recues: 0, supprimees: 0, ajustes: 0, conflits: 0 }, 'moteur (R-L3-16) : une passe qui n’écrit rien le dit aussi — zéro partout');
+    eq((await m2.executer('t')).derniersEffets, { recues: 0, supprimees: 0, ajustes: 0, conflits: 0, fichiersRecus: 0 }, 'moteur (R-L3-16) : une passe qui n’écrit rien le dit aussi — zéro partout');
     await m2.arreter();
   });
 
@@ -1864,7 +1864,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(liste.length > 30, 'SHELL lu : ' + liste.length + ' entrées à relire avant de conclure');
     eq(['./src/sync/transport.js', './src/sync/lots.js', './src/sync/reponses.js', './src/sync/push.js', './src/sync/pull.js', './src/sync/conflits.js', './src/sync/backfill.js', './src/sync/moteur.js']
       .filter((c) => !liste.includes(c)), [], 'SHELL : les modules d’envoi et de réception, désormais atteignables depuis app.js, sont servis hors connexion');
-    ok(/VERSION = 'cuisine-os-v0\.10\.0-\d+'/.test(source), 'sw.js : VERSION incrémentée (format cuisine-os-vMAJOR.MINOR.PATCH-N), l’ancien cache est purgé à l’activation');
+    ok(/VERSION = 'cuisine-os-v0\.11\.0-\d+'/.test(source), 'sw.js : VERSION incrémentée (format cuisine-os-vMAJOR.MINOR.PATCH-N), l’ancien cache est purgé à l’activation');
     // Le nom du cache et la version affichée dans Réglages doivent dire la MÊME chose : deux versions qui se
     // contredisent rendent impossible de savoir ce qui est servi (un cache « 0.2.0 » pour une app qui s'annonce
     // « 0.3.0 » est exactement le genre de doute qu'un marqueur de version existe pour lever). Le contrôle porte

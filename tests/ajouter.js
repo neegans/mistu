@@ -2,8 +2,9 @@
 // Modèles purs et rendus DOM à gestes injectés ; bases jetables seulement ; aucun réseau ; aucun history.* réel.
 
 // Filet i18n (F13) : chaque t('…') de ces modules doit avoir son entrée en.js. Exportées : tests/import-cible.js vérifie que son module y figure.
-// MODULES_NEUFS : les modules créés par les lots (lien.js de R-UX-11 et isbn.js inclus) + add.js réécrit + l'écran d'import ciblé (lot A, tâche 4).
-export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js', '../src/ui/import-cible.js', '../src/domain/lecture-web.js', '../src/ui/import-web.js', '../src/ui/vol.js'];
+// MODULES_NEUFS : les modules créés par les lots (lien.js de R-UX-11 et isbn.js inclus) + add.js réécrit + l'écran d'import ciblé (lot A, tâche 4)
+// + le module des fichiers du lot G.
+export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js', '../src/ui/import-cible.js', '../src/domain/lecture-web.js', '../src/ui/import-web.js', '../src/ui/vol.js', '../src/sync/fichiers.js'];
 // CHAINES_NEUVES_AILLEURS reconstituée depuis le code réel (git diff main...HEAD, ensemble main vs HEAD des clés t(),
 // pas seulement les lignes ajoutées : une ligne réécrite pour une autre raison peut porter une chaîne déjà sur main —
 // book.js:'Cuisines', recipe-edit.js:'Cuisines / régions' et import.js:'— Aucun livre (à associer plus tard) —'
@@ -16,8 +17,12 @@ export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', 
 // « Imports » vit dans add.js, déjà scanné en entier (MODULES_NEUFS). Tâche 6, ronde 1 : la plomberie du journal (et ses phrases de refus) a rejoint
 // src/ui/import-cible.js, scanné en entier ; l'éditeur dit en plus le vol tenu et ce que la lecture a dit d'incomplet (chaînes déjà traduites).
 export const CHAINES_NEUVES_AILLEURS = {
-  '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', '+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer', '{n} import à reprendre', '{n} imports à reprendre'],
-  '../src/ui/import.js': ['Les références n’ont pas pu être créées. Réessaie.'],
+  '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', '+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer', '{n} import à reprendre', '{n} imports à reprendre',
+    // Lot G, tâche 6 : la couverture par état (§ 4.2).
+    'La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.', 'La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.', 'Fichier illisible reçu du serveur.', 'Le téléchargement n’a pas abouti.'],
+  '../src/ui/import.js': ['Les références n’ont pas pu être créées. Réessaie.',
+    // Lot G, tâche 6 : la phrase de séance (§ 4.3, F-21).
+    'Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages', '{n}/{m} photos de cette séance envoyées au serveur'],
   '../src/ui/recipe.js': ['Lien web gardé.', 'Ouvrir le lien', 'Adresse non reconnue : ', 'Importer cette recette', 'Relire les pages',
     // Lot B, tâche 5 : la fiche d'un lien gardé (blocSignet), le bandeau d'une version lue sur le web, la relecture (B-27 : l'ancienne phrase est retirée).
     'L’app n’a pas encore lu la page.', 'Lecture de la page en cours…', 'Voir', 'Lecture reçue : vérifie-la et enregistre.', 'Vérifier et enregistrer', 'Contenu non récupéré : ouvre la page.',
@@ -26,12 +31,54 @@ export const CHAINES_NEUVES_AILLEURS = {
     'Lue par l’assistant le {d}', 'Lue par l’assistant', '{n} ligne(s) incertaine(s)', 'page possiblement manquante', 'lecture incomplète', 'Incertain : {t}', 'Vérifiée', 'À vérifier', '1 ligne à vérifier', '{n} lignes à vérifier', 'Photo du plat'],
   '../src/ui/components.js': ['Lien web', 'Adresse non reconnue', 'incertain', 'Ligne incertaine selon l’assistant',
     // Lot B, tâche 4 : la ligne de repères déménagée de search.js (ligneReperes, mêmes textes).
-    '≈ {n} min', '≈ {h} h', '≈ {h} h {m}', 'facile', 'moyen', 'exigeant', '1 ingrédient', '{n} ingrédients'],
+    '≈ {n} min', '≈ {h} h', '≈ {h} h {m}', 'facile', 'moyen', 'exigeant', '1 ingrédient', '{n} ingrédients',
+    // Lot G, tâche 6 : vignettePage, gesteTelechargement, boutonTelechargerPages, pdfFrame (§ 4.3-4.5).
+    'Page', 'Télécharger', 'Téléchargement…', 'Télécharger les {n} pages', 'Le téléchargement n’a pas abouti.', 'Pas encore sur cet appareil', 'Connecte-toi pour la télécharger', 'Pas encore envoyée par l’appareil qui l’a prise', 'Pas encore reçue', 'Fichier illisible reçu du serveur.'],
   // Lot B, tâche 4 : « Garder et lire » et le doublon sur une carte de l'onglet Web.
   '../src/ui/search.js': ['Garder et lire', 'Tu as déjà gardé cette adresse.', 'Ouvrir la fiche', 'Adresse non reconnue.', 'Le lien n’a pas pu être gardé. Réessaie.'],
   '../src/ui/cook.js': ['Lue par l’assistant, non relue'],
   '../src/ui/grocery.js': ['Lue par l’assistant, non relue'],
   '../src/ui/recipe-edit.js': ['Une étape par paragraphe (ligne vide entre deux étapes).', 'La recette n’a pas pu être enregistrée. Réessaie.', 'Une lecture est déjà en cours : annule-la d’abord.', 'page possiblement manquante', 'lecture incomplète'],
+  // Lot G, tâche 2 : bilans d'archive (création, inspection, restauration — § 4.6).
+  '../src/ui/settings.js': ['{n} pages ne sont pas encore téléchargées sur cet appareil et ne sont pas dans l’archive.', '1 page n’est pas encore téléchargée sur cet appareil et n’est pas dans l’archive.', '{n} fichier(s) archivé(s) sont des copies du serveur, pas l’original.', '{n} fichier(s) archivé(s) ont des octets qui ne sont ni l’original ni la copie du serveur connue : archivés tels quels.', 'pages manquantes : {n}', 'copies du serveur : {n}', 'Cette archive renvoie à {n} pages qui ne sont pas dedans : celles qui sont sur le serveur pourront être téléchargées (sur la fiche, ou Réglages → Télécharger toutes les pages).', 'Les pages de cet appareil absentes de l’archive seront retirées d’ici.', '{n} originaux de cet appareil conservés (l’archive portait des copies).', '1 original de cet appareil conservé (l’archive portait une copie).',
+    // Lot G, tâche 2, ronde 1 (#35) : le singulier de la phrase d'inspection.
+    'Cette archive renvoie à 1 page qui n’est pas dedans : si elle est sur le serveur, elle pourra être téléchargée (sur la fiche, ou Réglages → Télécharger toutes les pages).',
+    // Lot G, tâche 5 ; pause L3 sans palier, P2.
+    'Photos à envoyer : {n}',
+    'Envoi des photos : {n}/{m}',
+    'Pages à télécharger : {n} (~{m} Mo)',
+    'Télécharger toutes les pages ({n} fichiers, ~{m} Mo)',
+    'Arrêter le téléchargement',
+    'Téléchargement des pages : {n}/{m}',
+    'Tes photos sur le serveur : {x} Mo ({n} fichiers)',
+    'Espace serveur : pas encore mesuré.',
+    'au moins {x} Mo ({n} fichiers)',
+    'Actualiser',
+    'Espace photos plein sur le serveur : les photos attendent sur cet appareil, les fiches continuent de partir.',
+    'Qualité d’envoi des photos',
+    'Réduite (≈ 400 Ko, 2 000 px)',
+    'Originale',
+    'L’original reste toujours sur l’appareil qui a pris la photo. Réduite : JPEG de 2 000 px au plus, environ 400 Ko par page, métadonnées retirées, quand la réduction est possible et utile ; sinon le fichier part tel quel, métadonnées comprises : une image déjà petite (2 000 px et 600 Ko au plus), une photo de plus de 16 Mpx ou que ce navigateur ne sait pas lire, un PDF ou un EPUB. Originale : le fichier tel quel, avec ses métadonnées (dont la position GPS si la photo en porte).',
+    'Renvoyer en originale les {n} photos de cet appareil envoyées en réduite',
+    'Fichiers refusés : {n}',
+    '{n} fichier(s) de type inconnu ne seront pas synchronisés.',
+    '{n} copie(s) de photos ici dont le serveur n’a plus trace : l’appareil qui a l’original les renverra.',
+    '{n} photo(s) ici sont une copie plus ancienne que celle du serveur.',
+    'Plus de 50 Mo : ce fichier reste sur cet appareil seulement.',
+    'Type de fichier refusé par le serveur.',
+    'Empreinte différente après envoi.',
+    'Ligne de fichier mal formée reçue du serveur.',
+    'Ce fichier n’est plus sur le serveur.',
+    'Fichier illisible reçu du serveur.',
+    'Fichier refusé',
+    'Envoi en cours…',
+    'Espace serveur plein — rien n’est perdu, tout reste sur cet appareil.',
+    // Lot G, ronde 1 de la tâche 5 : motifs d’envoi forme et illisible (l’aide de la qualité, réécrite, est à sa place ci-dessus).
+    'Fichier vide ou mal formé : il reste sur cet appareil seulement.',
+    'Fichier illisible sur cet appareil.',
+    // Lot G, ronde 2 de la vague finale (R-G-28 bis) : les deux phrases de l'effacement (confirmation et section « Données », avec un compte).
+    'Effacer les données de cet appareil ? Les photos et documents pas encore envoyés seront perdus ; une photo envoyée en qualité réduite ne garde que sa copie réduite. Fais d’abord une sauvegarde.',
+    'Cet appareil sera déconnecté ; ta bibliothèque reste sur le serveur, sauf les photos et documents pas encore envoyés (une photo envoyée en qualité réduite n’y garde que sa copie réduite).'],
 };
 
 export async function runAjouterTests({ eq, ok }) {
@@ -1925,9 +1972,9 @@ export async function runAjouterTests({ eq, ok }) {
     const sw = await lire('../sw.js');
     ok(sw.length > 300 && sw.includes('SHELL'), `statique sw.js : le source est bien lu (${sw.length} caractères, SHELL présent) — sans quoi les inclusions ci-dessous ne prouveraient rien (S4)`);
     for (const m of ['./src/ui/puces.js', './src/ui/livre-ajout.js', './src/ui/accueil-livre.js', './src/ui/signet.js', './src/core/image.js', './src/core/blob-urls.js', './src/core/lien.js', './src/core/isbn.js', './src/domain/lecture-web.js']) ok(sw.includes(`'${m}'`), `SHELL : ${m}`);
-    ok(/VERSION = 'cuisine-os-v0\.10\.0-\d+'/.test(sw), 'sw.js : VERSION 0.10.0');
+    ok(/VERSION = 'cuisine-os-v0\.11\.0-\d+'/.test(sw), 'sw.js : VERSION 0.11.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.10.0', 'APP_VERSION 0.10.0');
+    eq(APP_VERSION, '0.11.0', 'APP_VERSION 0.11.0');
     const { GOOGLE_BOOKS } = await import('../src/sync/config.js');
     ok(typeof GOOGLE_BOOKS?.key === 'string' && (GOOGLE_BOOKS.key === '' || /^AIza[0-9A-Za-z_-]{35}$/.test(GOOGLE_BOOKS.key)), 'config : la clé Google Books est vide ou au format d’une clé d’API publique — un test de forme, jamais de valeur (S2/F2)');
   }

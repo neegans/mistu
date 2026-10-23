@@ -3,9 +3,10 @@ import { el, toast, pickFiles, confirmDialog, promptDialog } from '../core/dom.j
 import { t } from '../core/i18n.js';
 import { navigate, refresh, remplacerAdresse } from '../core/router.js';
 import * as repo from '../model/repo.js';
-import { displayUrl } from '../sync/mime.js';
+import { etatFichier } from '../sync/fichiers.js';
 import { listConventions } from '../domain/units.js';
-import { pageHeader, section, field, select, recipeCard, emptyState, bookCover } from './components.js';
+import { pageHeader, section, field, select, recipeCard, emptyState, bookCover, contexteFichiers, vignettesDePages, boutonTelechargerPages, relireErreurs, texteErreurFichier } from './components.js';
+import { invalidate } from './state.js';
 import { urlDeBlob } from '../core/blob-urls.js';
 import { poserCouverture, renderZoneCouverture, messageErreurImage } from './livre-ajout.js';
 import { startScanSession, indexEntriesPanel } from './import.js';
@@ -43,6 +44,20 @@ export async function renderBook(params, query, ctx) {
   // Une empreinte de couverture sans ligne files est un état NORMAL (fiche reçue d'un autre appareil, octets en L4) :
   // ici ça se dit, parce que la personne peut agir ; dans la grille de Mes livres, la vignette reste muette (§ 6).
   const fichierCouverture = edition.cover_sha256 ? await repo.getFile(edition.cover_sha256) : null;
+  // Lot G (§ 4.2) : l'état de la couverture dit ce que la personne peut faire — télécharger (distante, compte), se connecter, ou attendre l'appareil
+  // qui l'a prise. Sans ligne files du tout (pointeur arrivé avant sa ligne), le texte d'avant (tests/ajouter.js « un pointeur sans ligne files le DIT »).
+  const ctxF = await contexteFichiers(ctx);
+  const decrireCouverture = (fichier) => {
+    const rien = { message: null, telechargeable: false, reessayable: false };
+    if (!edition.cover_sha256 || fichier?.blob instanceof Blob) return rien;
+    if (!fichier) return { ...rien, message: t('La couverture n’est pas sur cet appareil.') };
+    const etat = etatFichier(fichier, ctxF);
+    // Ronde 1 : la phrase du motif (un 404 n'est pas « illisible reçu ») ; « Réessayer » avec un compte ET le moteur (sans compte, la tape effaçait
+    // le diagnostic sans rien retenter, R52 ; sans moteur, elle ne pouvait rien).
+    if (etat === 'erreur') return { ...rien, message: texteErreurFichier(edition.cover_sha256, ctxF.erreurs), reessayable: ctxF.connecte };
+    if (etat === 'distant') return ctxF.connecte ? { ...rien, message: t('La couverture n’est pas sur cet appareil.'), telechargeable: true } : { ...rien, message: t('La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.') };
+    return { ...rien, message: t('La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.') };
+  };
   const root = el('div', null);
   // I-F : un scan parti d'ici porte le livre ET l'intention (index ou recette) ; le menu ne décide que de la SOURCE.
   const lancer = (intention) => async (accept, capture) => {
@@ -126,7 +141,8 @@ export async function renderBook(params, query, ctx) {
   drawList();
 
   // Couverture (spec § 6) : visible, hors du <details> replié ; « Retirer » ne touche que le pointeur.
-  const etatCouv = { sha256: edition.cover_sha256 || null, apercu: fichierCouverture?.blob ? urlDeBlob(fichierCouverture.blob) : null, message: edition.cover_sha256 && !fichierCouverture ? t('La couverture n’est pas sur cet appareil.') : null, enCours: false };
+  const etatCouv = { sha256: edition.cover_sha256 || null, apercu: fichierCouverture?.blob ? urlDeBlob(fichierCouverture.blob) : null, enCours: false,
+    telechargement: false, ...decrireCouverture(fichierCouverture) };
   // Le ré-encodage d'une photo de téléphone prend un instant : les boutons se ferment pendant (aucune double pose),
   // et l'état réel est redessiné sur place. En cas de succès, refresh() rend la fiche entière.
   const zoneCouv = el('div', null);
@@ -163,6 +179,21 @@ export async function renderBook(params, query, ctx) {
       if (!(await ecrirePointeur(null))) { etatCouv.enCours = false; dessinerCouv(); toast(t('La couverture n’a pas pu être changée. Réessaie.')); return; }
       toast(t('Couverture retirée.')); refresh();
     },
+    // Sur une tape seulement (R-G-1). Succès : la zone se redessine avec l'image, le cache est invalidé et la fiche se rend (bookCover de l'en-tête).
+    telecharger: async (reessayer = false) => {
+      if (etatCouv.telechargement) return;
+      etatCouv.telechargement = true; dessinerCouv();
+      try { if (reessayer) await ctxF.moteur?.reessayerFichier(edition.cover_sha256); else await ctxF.moteur?.telecharger([edition.cover_sha256]); } catch { /* dit plus bas */ }
+      // Ronde 1 : une relecture qui lève (base fermée, quota) ne laisse plus la zone figée sur « Téléchargement… » : l'état d'avant, et l'échec dit.
+      let f = null; let lu = true;
+      try { f = await repo.getFile(edition.cover_sha256); } catch { lu = false; }
+      etatCouv.telechargement = false;
+      if (lu && f?.blob instanceof Blob) { invalidate(); Object.assign(etatCouv, { apercu: urlDeBlob(f.blob) }, decrireCouverture(f)); dessinerCouv(); refresh(); return; }
+      if (lu) { await relireErreurs(ctxF); Object.assign(etatCouv, decrireCouverture(f)); }
+      dessinerCouv();
+      toast(t('Le téléchargement n’a pas abouti.'));
+    },
+    reessayer: () => gestesCouv.telecharger(true),
   };
   dessinerCouv();
   root.append(section(t('Couverture'), zoneCouv));
@@ -174,14 +205,13 @@ export async function renderBook(params, query, ctx) {
 
   // Pages et documents
   if (docs.length) {
-    const thumbs = el('div', { class: 'thumbs' });
-    for (const p of [...pages].sort((a, b) => (a.printed_page ?? 9999) - (b.printed_page ?? 9999))) {
-      const img = el('img', { alt: t('Page'), loading: 'lazy' });
-      repo.getFile(p.sha256).then((f) => { const u = displayUrl(f); if (u) img.src = u; });
-      thumbs.append(el('figure', null, img, el('figcaption', null, p.printed_page ? `${t('p.')} ${p.printed_page}` : t('page non numérotée'), p.kind ? ` · ${p.kind === 'index' ? t('index') : t('recette')}` : '')));
-    }
+    const triees = [...pages].sort((a, b) => (a.printed_page ?? 9999) - (b.printed_page ?? 9999));
+    const vignettes = await vignettesDePages(triees, ctxF);
+    const thumbs = el('div', { class: 'thumbs' }, ...triees.map((p) => el('figure', null, vignettes.places.get(p.id),
+      el('figcaption', null, p.printed_page ? `${t('p.')} ${p.printed_page}` : t('page non numérotée'), p.kind ? ` · ${p.kind === 'index' ? t('index') : t('recette')}` : ''))));
     root.append(section(t('Pages et fichiers sources'),
       el('p', { class: 'muted' }, t('{n} document(s). Les originaux restent consultables depuis chaque recette.', { n: docs.length })),
+      boutonTelechargerPages(vignettes.distantes, { connecte: ctxF.connecte, telecharger: vignettes.telecharger }),
       thumbs,
       ...docs.filter((d) => d.source_type !== 'photo').map((d) => el('div', { class: 'row between card flat' }, el('span', null, `${d.original_filename} (${d.source_type.toUpperCase()})`), el('a', { class: 'btn small', href: `#/recipes/new?doc=${encodeURIComponent(d.id)}&edition=${encodeURIComponent(edition.id)}` }, t('Créer une recette depuis ce fichier'))))));
   }

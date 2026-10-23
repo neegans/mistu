@@ -5,7 +5,7 @@ import { SYNC_STORES_0001 } from '../src/sync/tables.js';
 
 export async function runAssistantCompteTests({ eq, ok }) {
   // --- T1 : schéma (K-9, § 4.1)
-  eq([DB_VERSION, APP_VERSION], [4, '0.10.0'], 'lot B : DB_VERSION 4 (inchangée), APP_VERSION 0.10.0');
+  eq([DB_VERSION, APP_VERSION], [4, '0.11.0'], 'lot G : DB_VERSION 4 (inchangée), APP_VERSION 0.11.0');
   eq(STORES.assistant_config, { keyPath: 'id', indexes: [], noDelete: true }, 'T1 : magasin assistant_config, clé id, noDelete');
   eq([SYNC_STORES.length, SYNC_STORES.slice(-2)], [27, ['assistant_config', 'imports']], 'K-9 (lot A) : 27 magasins synchronisés, assistant_config puis imports DERNIER');
   eq(SYNC_STORES.slice(0, 25), [...SYNC_STORES_0001], 'K-9 : les 25 premiers = la liste figée de 0001, dans l’ordre');
@@ -385,20 +385,20 @@ export async function runAssistantCompteTests({ eq, ok }) {
     eq((await db.getAll('outbox')).length, 1, 'capture : une réception n’est pas recapturée');
     uninstallCapture(db);
   });
-  eq([tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false }).includes('assistant_config'), tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false, configSuitLeCompte: () => true }).includes('assistant_config'), tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true, configSuitLeCompte: () => true }).length], [false, true, 26], 'envoi initial : hors production exclue ; en production incluse (26 avec l’historique et imports)');
+  eq([tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false }).includes('assistant_config'), tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => false, configSuitLeCompte: () => true }).includes('assistant_config'), tablesAEnvoyer({ marqueurs: {}, isActivitySynced: () => true, configSuitLeCompte: () => true }).length], [false, true, 27], 'envoi initial : hors production exclue ; en production incluse (27 avec l’historique, imports et files)');
   // L'envoi initial lui-même (pas seulement la liste des tables) : la ligne d'ici est mise en file en production, au nom
   // du compte, et la progression « n/total » compte la même liste que celle qui est parcourue.
   await withDatabase(async (db) => {
     await db.mutate({ puts: { assistant_config: [LIGNE('sk-factice-envoi')] }, origin: 'device' });
     const prog = [];
     const r = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false, configSuitLeCompte: () => true, surProgression: (p) => prog.push(p) });
-    eq([r.tables.length, r.tables.slice(-2), prog.every((p) => p.total === 25), (await db.getAll('outbox')).map((e) => [e.store, e.op, e.user_id])], [25, ['assistant_config', 'imports'], true, [['assistant_config', 'put', 'u1']]], 'envoi initial : en production, 25 tables, assistant_config puis imports (dernière, lot A) sont parcourues, la ligne mise en file au nom du compte, progression sur 25');
+    eq([r.tables.length, r.tables.slice(-2), prog.every((p) => p.total === 26), (await db.getAll('outbox')).map((e) => [e.store, e.op, e.user_id])], [26, ['assistant_config', 'imports'], true, [['assistant_config', 'put', 'u1']]], 'envoi initial : en production, 26 tables (files comprise depuis L4), assistant_config puis imports (dernière, lot A) sont parcourues, la ligne mise en file au nom du compte, progression sur 26');
   });
   await withDatabase(async (db) => {
     await db.mutate({ puts: { assistant_config: [LIGNE('sk-factice-envoi-dev')] }, origin: 'device' });
     const prog = [];
     const r = await envoiInitial({ db, getUserId: () => 'u1', isActivitySynced: () => false, surProgression: (p) => prog.push(p) });
-    eq([r.tables.includes('assistant_config'), prog.every((p) => p.total === 24), await db.count('outbox'), await db.get('sync_state', 'backfill:assistant_config')], [false, true, 0, undefined], 'envoi initial : hors production (défaut), rien en file, aucun marqueur posé, progression sur 24 (imports comprise)');
+    eq([r.tables.includes('assistant_config'), prog.every((p) => p.total === 25), await db.count('outbox'), await db.get('sync_state', 'backfill:assistant_config')], [false, true, 0, undefined], 'envoi initial : hors production (défaut), rien en file, aucun marqueur posé, progression sur 25 (imports et files comprises)');
   });
   // Réception : hors production la table n'est pas lue ; en production elle est lue EN DERNIER (K-9)
   const tf = creerTransportFactice({ serveur: true });

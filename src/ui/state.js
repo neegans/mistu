@@ -86,7 +86,8 @@ export function passeAEcrit({ avant = false, etat = null } = {}) {
   if (!avant || etat?.enCours === true) return false; // seule la fin d'une passe compte
   const effets = etat?.derniersEffets;
   if (!effets) return false;
-  return (effets.recues > 0) || (effets.supprimees > 0) || (effets.ajustes > 0) || (effets.conflits > 0);
+  // Lot G (§ 3.6) : une page arrivée (fichiersRecus) redessine la fiche affichée, comme une fiche reçue.
+  return (effets.recues > 0) || (effets.supprimees > 0) || (effets.ajustes > 0) || (effets.conflits > 0) || (effets.fichiersRecus > 0);
 }
 
 // R-L3-16 : l'écran affiché doit montrer ce qui vient d'arriver de l'autre appareil — sauf s'il est de ceux qu'un
@@ -194,6 +195,8 @@ export async function relireReglages() {
 }
 
 export const isActivitySynced = () => reglages.sync_activity === true;
+// Qualité d'envoi des photos (lot G, § 3.3) : relue à CHAQUE fichier par la passe (B-16) ; une valeur inconnue vaut Réduite.
+export const qualiteEnvoi = () => (reglages.upload_quality === 'originale' ? 'originale' : 'reduite');
 
 // Relecture demandée par le BUS (par opposition aux appels explicites, que leur appelant attend) : différée d'un
 // tour de boucle, puis abandonnée si plus aucune base n'est ouverte. Raison (R-L3-17) : `Database.open()` rouvre

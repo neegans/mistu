@@ -22,10 +22,18 @@ export function resolveMime(type, filename = '') {
 export const safeDisplayType = (mime) => (isAllowed(mime) ? mime : null);
 export const extensionFor = (mime) => (Object.hasOwn(MIME_TO_EXT, mime) ? MIME_TO_EXT[mime] : 'bin');
 
-// URL d'affichage d'une ligne files : le blob est retypé avec un type de la liste blanche, ou rien n'est affiché. `creerUrl` : qui crée l'URL
-// (par défaut URL.createObjectURL ; une vue qui suit ses URL passe urlDeBlob de core/blob-urls.js — une seule copie de la règle S3).
+// Lot G (F-9) : le type du BLOB, s'il est dans la liste blanche, gagne — une copie JPEG reçue sous une ligne image/heic s'affiche image/jpeg ;
+// un type hors liste n'est jamais servi (S3 du lot UX) : repli sur le type de la ligne, sinon rien.
+export function typeAffichage(fileRow) {
+  if (!(fileRow?.blob instanceof Blob)) return null;
+  return safeDisplayType(String(fileRow.blob.type || '').toLowerCase().split(';')[0].trim()) ?? safeDisplayType(fileRow?.mime);
+}
+
+// URL d'affichage d'une ligne files : le blob est retypé avec le type de typeAffichage (liste blanche), ou rien n'est affiché. `creerUrl` : qui
+// crée l'URL (par défaut URL.createObjectURL ; une vue qui suit ses URL passe urlDeBlob de core/blob-urls.js — une seule copie de la règle S3 ;
+// ronde 1 de la tâche 5 du lot A, `f8cfafa`). Signature gardée.
 export function displayUrl(fileRow, creerUrl = (b) => URL.createObjectURL(b)) {
-  const type = safeDisplayType(fileRow?.mime);
-  if (!type || !(fileRow.blob instanceof Blob)) return null;
+  const type = typeAffichage(fileRow);
+  if (!type) return null;
   return creerUrl(fileRow.blob.type === type ? fileRow.blob : new Blob([fileRow.blob], { type }));
 }

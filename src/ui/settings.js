@@ -1,14 +1,15 @@
 // Réglages : préférences (langue de l'interface, langue de lecture, unités), sauvegarde complète et restauration vérifiée,
 // exports d'échange, assistant IA, minuterie système, données locales (spec §29.1, §31, §33).
 import { el, toast, confirmDialog, promptDialog, pickFiles, downloadBlob, formatDate } from '../core/dom.js';
-import { t } from '../core/i18n.js';
+import { t, getUiLocale } from '../core/i18n.js';
 import { refresh, currentPath } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { logError } from '../core/log.js';
 import { reprendreEnvoi, retirerEnvoi, fileDe } from '../sync/outbox.js';
 import { garderIci, garderAilleurs, ignorerRenvoye } from '../sync/conflits.js';
 import { retirerMarqueur } from '../sync/backfill.js';
-import { createArchive, inspectArchive, applyArchive, verifyRestored, compterFichesSynchronisees } from '../domain/backup.js';
+import { referencesFichiers, nomFichier, lireErreursFichiers, MAGASINS_FICHIERS } from '../sync/fichiers.js';
+import { createArchive as createArchiveReel, inspectArchive, applyArchive, verifyRestored, compterFichesSynchronisees } from '../domain/backup.js';
 import { syncNow } from '../sync/clock.js';
 import { toJsonLd, toPaprikaYaml, toReadableSite } from '../domain/exporters.js';
 import { createZip } from '../core/zip.js';
@@ -16,7 +17,7 @@ import { extFor } from '../domain/backup.js';
 import { etatAssistant, sessionValide } from '../domain/passerelle.js';
 import { shortcutUrl, SHORTCUT_NAME, isAppleTouchDevice } from '../domain/timers.js';
 import { STORES, SYNC_INTERNAL_STORES, APP_VERSION, ARCHIVE_FORMAT_VERSION } from '../model/schema.js';
-import { pageHeader, section, field, segmented, majPastille, sessionAssistant, TEXTE_CONNEXION, boutonSeConnecter, messageGardeRefusee } from './components.js';
+import { pageHeader, section, field, segmented, majPastille, sessionAssistant, TEXTE_CONNEXION, boutonSeConnecter, messageGardeRefusee, motifFichier } from './components.js';
 import { invalidate, setSyncState, getSyncState, relireReglages, SYNC_ROUTE_KEY } from './state.js';
 
 // Évite deux opérations d’archive concurrentes, même après un changement d’écran.
@@ -31,7 +32,9 @@ export const archiveEnCours = () => archiveOperation;
 // Posée par le bouton d’archive de cette page, jamais déduite d’un réglage ni d’une date.
 const ARCHIVE_FLAG = 'cuisineos.archive_created';
 
-export async function renderSettings(params, query, ctx, { fetch } = {}) {
+// Injections (lot G, tâche 2) : createArchive, pickFiles (le choix de l’archive à restaurer) et telechargerArchive (l’enregistrement de l’archive
+// créée) — le bilan de création et le vrai rapport d’inspection s’éprouvent sans téléchargement réel dans le Chrome sans tête.
+export async function renderSettings(params, query, ctx, { fetch, createArchive = createArchiveReel, pickFiles: choisirArchive = pickFiles, telechargerArchive = downloadBlob } = {}) {
   const s = ctx.settings;
   const root = el('div', null, pageHeader(t('Réglages'), { subtitle: `Cuisine OS ${APP_VERSION}` }));
 
@@ -58,6 +61,15 @@ export async function renderSettings(params, query, ctx, { fetch } = {}) {
   // Le moteur est posé par le démarrage (L3, tâche 9) : tant qu'il n'est pas là, rien de L3 n'est affiché.
   const moteur = getSyncState().moteur || null;
   suivreMoteurDeLaPage(moteur);
+  // Lot G (§ 4.1) : les erreurs de fichiers et le snapshot (pour nomFichier) sont lus au rendu, comme la quarantaine — seulement s'il y a un moteur.
+  // Ronde 1 : le snapshot (sept magasins, `files` entier) n'est lu que s'il y a une erreur à nommer — c'est son seul usage. Réglages se redessine
+  // au plus toutes les 300 ms pendant une passe : sans cette garde, l'écran relirait `files` à chaque fois (S-12 contournée par l'écran).
+  const etatMoteur = moteur?.etat() || null;
+  const fichiersErreurs = etatMoteur ? [...(await lireErreursFichiers(repo.db))].map(([sha256, v]) => ({ sha256, motif: v?.motif, sens: v?.sens })) : [];
+  // Vague finale (chef d'orchestre, I-G8) : une ligne files en quarantaine ou en conflit est nommée comme une erreur de fichier (nomFichier), jamais
+  // par son empreinte — le snapshot est donc lu aussi dans ces deux cas, rares.
+  const ligneFiles = (e) => e?.store === 'files';
+  const snapshotFichiers = fichiersErreurs.length || quarantaine.some(ligneFiles) || conflits.some(ligneFiles) ? await repo.db.getSnapshot(MAGASINS_FICHIERS) : null;
   root.append(syncSection({
     available: !!auth?.available,
     reason: auth ? auth.reason : 'config',
@@ -66,9 +78,12 @@ export async function renderSettings(params, query, ctx, { fetch } = {}) {
     retour: sync.retour || null,
     pending: file.length,
     enAttente: sync.enAttente === true, // R28 : le démarrage n’a pas abouti dans sa borne de temps
-    moteur: moteur?.etat() || null,
+    moteur: etatMoteur,
     quarantaine,
     conflits,
+    fichiersErreurs,
+    qualite: s.upload_quality,
+    snapshot: snapshotFichiers,
   }, auth, s));
 
   // Le navigateur ne confirme pas que le téléchargement a été enregistré dans Fichiers.
@@ -100,9 +115,14 @@ export async function renderSettings(params, query, ctx, { fetch } = {}) {
       button.textContent = t('Préparation de l’archive…');
       let generated = false;
       try {
-        const { blob, manifest, bytes, warnings } = await createArchive(repo.db, { deviceName: s.device_name });
-        downloadBlob(blob, 'cuisine-os-' + manifest.created_at.slice(0, 19).replace(/[:T]/g, '-') + '.zip');
+        const { blob, manifest, bytes, warnings, missingFiles = 0, copies } = await createArchive(repo.db, { deviceName: s.device_name });
+        telechargerArchive(blob, 'cuisine-os-' + manifest.created_at.slice(0, 19).replace(/[:T]/g, '-') + '.zip');
         generated = true;
+        // § 4.6 : le bilan de création, une phrase par cas (pages manquantes, copies du serveur, octets inconnus) ; rien à dire, rien de dit. Posé
+        // juste après le téléchargement (ronde 1, #16) : un suivi qui échoue plus bas ne le fait pas taire ; l'ancien bilan part d'abord.
+        backupStatus.querySelector('[data-role="bilan-archive"]')?.remove();
+        const bilanArchive = messagesArchive({ missingFiles, copies });
+        if (bilanArchive.length) backupStatus.append(el('div', { class: 'status warn', dataset: { role: 'bilan-archive' } }, ...bilanArchive.map((p) => el('p', null, p))));
         // Une archive existe pour cette session : « Changer de compte sur cet appareil » l’exige.
         try { sessionStorage.setItem(ARCHIVE_FLAG, manifest.created_at); } catch { /* stockage indisponible */ }
         showExportWarnings(warnings);
@@ -118,7 +138,7 @@ export async function renderSettings(params, query, ctx, { fetch } = {}) {
     } }, t('Sauvegarder toute ma bibliothèque')),
     el('button', { class: 'btn', onClick: async () => {
       if (archiveOperation) { toast(t('Une opération d’archive est déjà en cours.')); return; }
-      const files = await pickFiles({ accept: '.zip,application/zip', multiple: false });
+      const files = await choisirArchive({ accept: '.zip,application/zip', multiple: false });
       if (!files.length) return;
       if (archiveOperation) { toast(t('Une opération d’archive est déjà en cours.')); return; }
       setArchiveBusy(true);
@@ -177,7 +197,9 @@ export async function renderSettings(params, query, ctx, { fetch } = {}) {
     el('div', { class: 'chips' }, ...counts.filter(([, c]) => c).map(([n, c]) => el('span', { class: 'chip neutral' }, `${n} : ${c}`))),
     // Promesse de serveur seulement s'il y a un serveur : sans session acceptée, ces données ne sont nulle part ailleurs.
     el('p', { class: 'muted' }, sync.user
-      ? t('Cet appareil sera déconnecté ; ta bibliothèque reste sur le serveur.')
+      // Vague finale du lot G, ronde 2 (R-G-28 bis) : la perte est dite — fichiers pas encore envoyés (photos, PDF, EPUB : D-G8, seuls ceux à remote de
+      // ce compte sont partis) et, en qualité réduite, l'original d'une photo envoyée (le serveur n'en a que la copie réduite).
+      ? t('Cet appareil sera déconnecté ; ta bibliothèque reste sur le serveur, sauf les photos et documents pas encore envoyés (une photo envoyée en qualité réduite n’y garde que sa copie réduite).')
       : t('Ces données ne sont que sur cet appareil : fais une sauvegarde avant de les effacer.')),
     el('div', { class: 'row', style: { marginTop: '.8rem' } },
       el('button', { class: 'btn danger', onClick: async () => {
@@ -208,9 +230,14 @@ export async function renderSettings(params, query, ctx, { fetch } = {}) {
     if (!insp.manifest) { box.append(el('div', { class: 'status danger' }, insp.errors.join(' · '))); return box; }
     const m = insp.manifest;
     box.append(el('div', null, el('strong', null, t('Archive du {d}', { d: formatDate(m.created_at, { withTime: true }) })), ' · ' + t('format') + ' v' + m.format_version));
+    // § 4.6 (lot G) : pages manquantes et copies du serveur, en puces ; la phrase dessous ne promet aucun téléchargement (B-8). Sur une archive
+    // REFUSÉE, ni l'une ni l'autre (ronde 1, #15 : I5, rien n'est annoncé sans fait).
+    const ins = insp.ok ? phrasesInspection(insp.summary || {}) : { puces: [], phrases: [] };
     if (insp.summary) box.append(el('div', { class: 'chips' },
       ...Object.entries(insp.summary.counts).filter(([, count]) => count).map(([name, count]) => el('span', { class: 'chip neutral' }, name + ' : ' + count)),
-      el('span', { class: 'chip neutral' }, t('fichiers vérifiés') + ' : ' + insp.summary.files_ok)));
+      el('span', { class: 'chip neutral' }, t('fichiers vérifiés') + ' : ' + insp.summary.files_ok),
+      ...ins.puces.map((p) => el('span', { class: 'chip neutral' }, p))));
+    for (const phrase of ins.phrases) box.append(el('div', { class: 'status info' }, phrase));
     // Avec un compte, une restauration n’est pas seulement locale : tout ce qu’elle écrit repart au serveur, donc
     // sur les autres appareils. La personne doit le savoir AVANT le geste, et avec un nombre, pas une allusion.
     const renvoi = getSyncState().user ? messageRenvoi(compterFichesSynchronisees(insp)) : null;
@@ -245,7 +272,7 @@ export async function renderSettings(params, query, ctx, { fetch } = {}) {
         // comme en remplacement — sinon le serveur garderait sa version (I7) et rien ne se verrait ailleurs.
         // Le compte est relu AU MOMENT du geste : la session a pu changer depuis le rendu de la page.
         const reHorodatage = !!getSyncState().user;
-        await applyArchive(repo.db, insp, { mode, horodater: reHorodatage ? syncNow : null });
+        const bilanRestauration = await applyArchive(repo.db, insp, { mode, horodater: reHorodatage ? syncNow : null });
         committed = true;
         appliedOnce = true;
         controls.remove();
@@ -262,6 +289,9 @@ export async function renderSettings(params, query, ctx, { fetch } = {}) {
           : el('div', { class: 'status danger' }, t('La restauration a été écrite, mais des écarts subsistent. Conserve l’archive et ce bilan.')));
         if (!check.ok) result.append(el('ul', null, ...check.diffs.slice(0, 30).map((diff) => el('li', null, diff))));
         else if (mode === 'merge') result.append(el('small', { class: 'muted' }, t('Les fiches supplémentaires déjà présentes ont été conservées.')));
+        // R-G-6 : les originaux de cet appareil gardés (l’archive portait des copies), dits après le statut de verifyRestored.
+        const conserves = messageOriginauxConserves(bilanRestauration?.originauxConserves);
+        if (conserves) result.append(el('p', { class: 'muted' }, conserves));
       } catch (err) {
         result.replaceChildren(el('div', { class: 'status danger' },
           (committed ? t('Données restaurées, mais la vérification n’a pas pu se terminer. Conserve l’archive.') : t('Restauration annulée : aucune écriture de cet import n’a été conservée.')) + ' ' + err.message));
@@ -286,6 +316,9 @@ export async function renderSettings(params, query, ctx, { fetch } = {}) {
     // bouton qui en décide, et pas dans le bilan — celui-ci est commun aux deux modes.
     const horsArchive = empty ? null : messageRemplacementServeur(!!getSyncState().user);
     if (horsArchive) box.append(el('small', { class: 'muted' }, horsArchive));
+    // B-28 (lot G) : un remplacement vide `files` puis réécrit — les octets locaux des pages absentes de l’archive partent d’ici ; une page que
+    // l’archive nomme sans ses octets (missing_files) garde ceux d’ici (ronde 1, #4, #8 : decisionManquante), la phrase reste donc exacte.
+    if (!empty) box.append(el('small', { class: 'muted' }, t('Les pages de cet appareil absentes de l’archive seront retirées d’ici.')));
     box.append(result);
     return box;
   }
@@ -317,6 +350,35 @@ export const messageRenvoi = (n) => {
   return n === 1 ? t('1 fiche sera renvoyée au serveur.') : t('{n} fiches seront renvoyées au serveur.', { n });
 };
 
+// Bilan de création (§ 4.6) : une phrase par cas, jamais un pluriel calculé sur une chaîne traduite. Rien à dire → rien de dit.
+export function messagesArchive({ missingFiles = 0, copies = { serveur: 0, inconnues: 0 } } = {}) {
+  const sortie = [];
+  if (missingFiles === 1) sortie.push(t('1 page n’est pas encore téléchargée sur cet appareil et n’est pas dans l’archive.'));
+  else if (missingFiles > 1) sortie.push(t('{n} pages ne sont pas encore téléchargées sur cet appareil et ne sont pas dans l’archive.', { n: missingFiles }));
+  if (copies?.serveur > 0) sortie.push(t('{n} fichier(s) archivé(s) sont des copies du serveur, pas l’original.', { n: copies.serveur }));
+  if (copies?.inconnues > 0) sortie.push(t('{n} fichier(s) archivé(s) ont des octets qui ne sont ni l’original ni la copie du serveur connue : archivés tels quels.', { n: copies.inconnues }));
+  return sortie;
+}
+
+// Inspection (§ 4.6, B-8) : rien n'est promis comme « se téléchargera » — une entrée sans remote ne viendra de nulle part (I5).
+export function phrasesInspection(summary = {}) {
+  const puces = []; const phrases = [];
+  if (summary.files_distants > 0) {
+    puces.push(t('pages manquantes : {n}', { n: summary.files_distants }));
+    phrases.push(summary.files_distants === 1 // ronde 1 (#35) : jamais « 1 pages »
+      ? t('Cette archive renvoie à 1 page qui n’est pas dedans : si elle est sur le serveur, elle pourra être téléchargée (sur la fiche, ou Réglages → Télécharger toutes les pages).')
+      : t('Cette archive renvoie à {n} pages qui ne sont pas dedans : celles qui sont sur le serveur pourront être téléchargées (sur la fiche, ou Réglages → Télécharger toutes les pages).', { n: summary.files_distants }));
+  }
+  if (summary.files_copies > 0) puces.push(t('copies du serveur : {n}', { n: summary.files_copies }));
+  return { puces, phrases };
+}
+
+// R-G-6 : le bilan de restauration dit les originaux gardés (l'archive portait des copies). Singulier sur le gabarit de messageRenvoi.
+export const messageOriginauxConserves = (n) => {
+  if (!(n > 0)) return null;
+  return n === 1 ? t('1 original de cet appareil conservé (l’archive portait une copie).') : t('{n} originaux de cet appareil conservés (l’archive portait des copies).', { n });
+};
+
 // Ce qu’un remplacement ne fait pas (R-L3-18) : il vide cet appareil, jamais le serveur. Rien à dire sans compte.
 export const messageRemplacementServeur = (connecte) => (connecte ? t('Les fiches absentes de l’archive restent sur le serveur.') : null);
 
@@ -343,6 +405,10 @@ const messagePerte = (n) => (n > 1
   ? t('{n} envois en attente seront perdus — ils sont dans l’archive.', { n })
   : t('{n} envoi en attente sera perdu — il est dans l’archive.', { n }));
 
+// S-11 / F-24 (lot G) : un envoi ou un téléchargement de fichier est en vol tant que `progressionFichiers` est non nul. Une seule définition,
+// défaut des deux gestes destructeurs ci-dessous (ronde 1 : elle était écrite deux fois).
+const transfertEnVol = () => !!getSyncState().moteur?.etat?.()?.progressionFichiers;
+
 // « Effacer les données de cet appareil » (spec § 4.2) : décision et effets, sans DOM ni base — toutes les
 // dépendances sont injectées, pour que le geste le plus destructeur de l'app soit éprouvé plutôt que relu.
 // R24 : le refus pour file non vide ne vaut QUE s'il existe un compte. Sans compte rien n'envoie, donc rien ne
@@ -353,13 +419,19 @@ const messagePerte = (n) => (n > 1
 // jamais dire par où sortir.
 // `arreterSync` est appelé juste AVANT l’effacement, et seulement si le geste va au bout : une passe déclenchée
 // entre le vidage et le rechargement écrirait dans une base qu’on vient d’effacer, ou enverrait ce qui n’existe plus.
-export async function effacerDonnees({ user = null, pending, enQuarantaine = async () => 0, confirm, demanderMot, toast: dire, clearDevice, signOut = null, reload, arreterSync = arreterMoteur }) {
+export async function effacerDonnees({ user = null, pending, enQuarantaine = async () => 0, confirm, demanderMot, toast: dire, clearDevice, signOut = null, reload, arreterSync = arreterMoteur, transfertEnCours = transfertEnVol }) {
   // La file est relue au moment du geste : elle a pu bouger depuis le rendu de la page.
   const enAttente = await pending();
   if (user && enAttente > 0) { dire(messageEnAttente(enAttente, await enQuarantaine())); return false; }
-  if (!(await confirm(t('Effacer les données de cet appareil ? Fais d’abord une sauvegarde.'), { danger: true, okLabel: t('Continuer') }))) return false;
+  // Vague finale du lot G : avec un compte, la file ne compte que les fiches (D-G8) — les photos et documents pas encore envoyés, ou refusés à l'envoi,
+  // seraient perdus sans un mot : la confirmation le dit, et (ronde 2, R-G-28 bis) qu'une photo envoyée en qualité réduite ne garde au serveur que sa
+  // copie réduite. Sans compte, la phrase d'avant (tout est perdu, la sauvegarde d'abord).
+  const question = user ? t('Effacer les données de cet appareil ? Les photos et documents pas encore envoyés seront perdus ; une photo envoyée en qualité réduite ne garde que sa copie réduite. Fais d’abord une sauvegarde.') : t('Effacer les données de cet appareil ? Fais d’abord une sauvegarde.');
+  if (!(await confirm(question, { danger: true, okLabel: t('Continuer') }))) return false;
   const mot = await demanderMot(t('Tape EFFACER pour confirmer'));
   if (mot !== 'EFFACER') { dire(t('Annulé')); return false; }
+  // S-11 / F-24 : upload() et download() ne prennent pas de signal ; arreter() attend le fichier en cours — on le dit avant d'attendre.
+  if (transfertEnCours()) dire(t('Envoi en cours…'));
   await arreterSync();
   await clearDevice({ signOut });
   dire(t('Données effacées'));
@@ -389,7 +461,7 @@ export async function restaurerArchive({ mode, pending, toast: dire, appliquer }
 // échec fermé, cohérent avec le reste du lot.
 // `arreterSync` est appelé juste AVANT l’effacement, et seulement si le geste est allé au bout : un refus (archive
 // manquante, confirmation annulée) ne doit pas laisser la synchronisation arrêtée sur un appareil qui reste en place.
-export async function changerDeCompte({ confirm, toast: dire, pending, archiveCreated, clearDevice, signOut = null, reload, arreterSync = arreterMoteur }) {
+export async function changerDeCompte({ confirm, toast: dire, pending, archiveCreated, clearDevice, signOut = null, reload, arreterSync = arreterMoteur, transfertEnCours = transfertEnVol }) {
   let archive = null;
   try { archive = archiveCreated(); }
   catch { dire(t('Le stockage de session est inaccessible : ce geste n’est pas possible ici.')); return false; }
@@ -397,6 +469,8 @@ export async function changerDeCompte({ confirm, toast: dire, pending, archiveCr
   if (!(await confirm(t('Changer de compte sur cet appareil ? Toutes les données de cet appareil seront effacées.'), { danger: true, okLabel: t('Continuer') }))) return false;
   const enAttente = await pending(); // compté au moment du geste : la file a pu bouger depuis le rendu
   if (!(await confirm(messagePerte(enAttente), { danger: true, okLabel: t('Changer de compte') }))) return false;
+  // S-11 / F-24 : upload() et download() ne prennent pas de signal ; arreter() attend le fichier en cours — on le dit avant d'attendre.
+  if (transfertEnCours()) dire(t('Envoi en cours…'));
   await arreterSync();
   await clearDevice({ signOut });
   reload();
@@ -480,6 +554,13 @@ export async function garderVersionDAilleurs({ db, id, appliquer = garderAilleur
   return applique;
 }
 
+// Un geste de Réglages protégé (L3, L4, bascule de qualité) : une levée est journalisée (`sync.geste.<nom>`) et dite, jamais un rejet non
+// traité. Ronde 1 de la tâche 5 : une seule définition (elle était copiée à l'octet dans gestesL3Pour et gestesL4Pour).
+const protegerGeste = (dire, journaliser) => (nom, fn) => async (cle) => {
+  try { await fn(cle); }
+  catch (error) { journaliser('sync.geste.' + nom, { error }); dire(t('Ce geste n’a pas abouti.')); }
+};
+
 // Le câblage des gestes L3 (spec § 4.2) : une fonction par geste NOMMÉ, toutes les dépendances injectées — c'est
 // cet objet que le rendu reçoit, et c'est lui que le test éprouve (sans quoi le fil entre les décisions et les
 // boutons ne serait vérifié par personne). `obtenirMoteur` est une fonction : le moteur est posé par le démarrage,
@@ -496,10 +577,7 @@ export function gestesL3Pour({
   invalider = invalidate,
   journaliser = logError,
 } = {}) {
-  const protege = (nom, fn) => async (cle) => {
-    try { await fn(cle); }
-    catch (error) { journaliser('sync.geste.' + nom, { error }); dire(t('Ce geste n’a pas abouti.')); }
-  };
+  const protege = protegerGeste(dire, journaliser);
   return {
     envoyerMaintenant: protege('envoyer_maintenant', async () => { await obtenirMoteur()?.envoyerMaintenant(); rafraichir(); }),
     reessayer: protege('reessayer', async (seq) => { await reessayerEnvoi({ db, seq, moteur: obtenirMoteur() }); rafraichir(); }),
@@ -629,6 +707,7 @@ export async function demarrerConnexion(auth, hash = location.hash) {
 function syncSection(state, auth, settings) {
   const model = syncSectionModel(state);
   const gestesL3 = gestesL3Pour();
+  const gestesL4 = gestesL4Pour();
   const gestes = {
     signIn: () => demarrerConnexion(auth),
     signOut: async () => {
@@ -661,6 +740,7 @@ function syncSection(state, auth, settings) {
       ? el('div', { class: 'row' }, ...boutons.map((b) => el('button', { class: 'btn' + (b.tone ? ' ' + b.tone : ''), onClick: gestes[b.action] }, b.label)))
       : null,
     ...syncSectionL3(model, gestesL3),
+    ...syncSectionL4(model, gestesL4),
     field(t('Historique de consultation'),
       el('label', { class: 'check' },
         el('input', { type: 'checkbox', checked: settings.sync_activity === true, onChange: async (e) => { await reglerHistorique(e.target.checked); refresh(); } }),
@@ -737,6 +817,114 @@ const PHRASES_CONFLIT = {
 
 const phraseConflit = (kind) => t(Object.hasOwn(PHRASES_CONFLIT, kind) ? PHRASES_CONFLIT[kind] : 'Deux versions existent pour cette fiche.');
 
+// Lot G (§ 4.1) : des mégaoctets arrondis au dixième, dans la langue de l'interface (« 1,6 », « 850 ») — une MESURE, jamais un plafond (R-G-5).
+const enMo = (octets) => new Intl.NumberFormat(getUiLocale() === 'en' ? 'en-CA' : 'fr-CA', { maximumFractionDigits: 1 }).format(Math.round((Number(octets) || 0) / 104857.6) / 10);
+const compte = (v) => (Number.isSafeInteger(v) && v > 0 ? v : 0);
+
+function modeleFichiers(moteur, { qualite, refuses }) {
+  const f = moteur.fichiers || {};
+  const prog = moteur.progressionFichiers;
+  const aTelecharger = compte(f.aTelecharger);
+  const mo = enMo(f.octetsATelecharger);
+  return {
+    aEnvoyer: t('Photos à envoyer : {n}', { n: compte(f.aEnvoyer) }),
+    envoi: prog?.sens === 'envoi' ? t('Envoi des photos : {n}/{m}', { n: prog.n, m: prog.total }) : null,
+    pause: moteur.pauseFichiers ? t('Espace photos plein sur le serveur : les photos attendent sur cet appareil, les fiches continuent de partir.') : null,
+    aTelecharger: aTelecharger ? t('Pages à télécharger : {n} (~{m} Mo)', { n: aTelecharger, m: mo }) : null,
+    // Ronde 1 (§ 3.2) : sous `pause_fichiers`, la passe fichiers entière est suspendue, téléchargement global compris — le bouton ne ferait rien
+    // descendre : il n'est pas offert (« Arrêter le téléchargement » reste si le global était demandé ; la tape sur une page, elle, marche).
+    telechargerTout: aTelecharger && moteur.telechargementGlobal !== true && !moteur.pauseFichiers ? t('Télécharger toutes les pages ({n} fichiers, ~{m} Mo)', { n: aTelecharger, m: mo }) : null,
+    reception: prog?.sens === 'reception' ? t('Téléchargement des pages : {n}/{m}', { n: prog.n, m: prog.total }) : null,
+    arreter: moteur.telechargementGlobal === true,
+    renvoi: qualite === 'originale' && compte(f.aRenvoyer) ? t('Renvoyer en originale les {n} photos de cet appareil envoyées en réduite', { n: f.aRenvoyer }) : null,
+    refuses: refuses ? t('Fichiers refusés : {n}', { n: refuses }) : null,
+    typeInconnu: compte(f.typeInconnu) ? t('{n} fichier(s) de type inconnu ne seront pas synchronisés.', { n: f.typeInconnu }) : null,
+    copiesSansServeur: compte(f.copiesSansServeur) ? t('{n} copie(s) de photos ici dont le serveur n’a plus trace : l’appareil qui a l’original les renverra.', { n: f.copiesSansServeur }) : null,
+    copiesPerimees: compte(f.copiesPerimees) ? t('{n} photo(s) ici sont une copie plus ancienne que celle du serveur.', { n: f.copiesPerimees }) : null,
+  };
+}
+
+function phraseEspace(e) {
+  if (!e || !Number.isFinite(e.octets) || !Number.isFinite(e.objets)) return t('Espace serveur : pas encore mesuré.');
+  const v = { x: enMo(e.octets), n: e.objets };
+  return e.tronque ? t('au moins {x} Mo ({n} fichiers)', v) : t('Tes photos sur le serveur : {x} Mo ({n} fichiers)', v);
+}
+
+// Motifs d'un fichier refusé (§ 4.10) : la table et `motifFichier` vivent dans components.js depuis la tâche 6, ronde 1 (UNE définition pour
+// Réglages et les écrans : vignettes, couverture, cadre PDF) ; réexportés ici, la signature d'avant tient.
+export { motifFichier };
+// B-22 : pas de « Réessayer » qui échouera pareil — trop_gros (les mêmes octets restent trop gros) et, ronde 1, forme à l'envoi (les mêmes octets
+// ne porteraient pas plus de remote valide : la passe reposerait la même clé). `illisible` garde le sien : le blob peut redevenir lisible.
+// Ronde 2 (R-G-31) : `taille` à la réception non plus — l'objet est nommé par son empreinte, le serveur rendrait les mêmes octets (un remote qui
+// change lève l'erreur, F-7).
+const sansReessai = (motif, sens) => motif === 'trop_gros' || (sens === 'envoi' && motif === 'forme') || (sens === 'reception' && motif === 'taille');
+
+export const SYNC_L4_ACTIONS = ['telechargerTout', 'arreterTelechargement', 'actualiserEspace', 'renvoyerOriginale', 'reessayerFichier'];
+
+// Le câblage des gestes L4 (§ 4.1), protégé comme gestesL3Pour : l'écran n'a ni le client ni le stockage (R53), tout passe par le moteur.
+// Ronde 1 : l'API du moteur rend ses échecs EN VALEUR (`{ erreur }`, ARRETE après l'arrêt), jamais en levée : ils sont dits après le redessin —
+// sinon un « Réessayer » hors réseau retire la ligne de refus sans un mot et se lit comme un succès. Un moteur absent (arrêté entre le rendu et la
+// tape) n'est plus avalé par `?.` : il lève, donc il est journalisé et dit.
+export function gestesL4Pour({ obtenirMoteur = () => getSyncState().moteur, dire = toast, rafraichir = refresh, journaliser = logError } = {}) {
+  const protege = protegerGeste(dire, journaliser);
+  const appeler = (nom, api) => protege(nom, async (cle) => {
+    const moteur = obtenirMoteur();
+    if (!moteur) throw new Error('moteur absent');
+    const r = await moteur[api](cle);
+    rafraichir();
+    if (r?.erreur) dire(t('Ce geste n’a pas abouti.'));
+  });
+  return {
+    telechargerTout: appeler('telecharger_tout', 'telechargerTout'),
+    arreterTelechargement: appeler('arreter_telechargement', 'arreterTelechargement'),
+    actualiserEspace: appeler('actualiser_espace', 'actualiserEspace'),
+    renvoyerOriginale: appeler('renvoyer_originale', 'renvoyerEnOriginale'),
+    reessayerFichier: appeler('reessayer_fichier', 'reessayerFichier'),
+  };
+}
+
+// La bascule de qualité (§ 4.1 item 4) : écrit le réglage PUIS redessine — le segmented n'a pas d'état propre (sa classe active est celle du
+// rendu) et la relecture des réglages par le bus ne redessine pas Réglages. Ronde 1 : protégée comme les gestes L4 ; une écriture refusée est
+// journalisée et dite, et l'écran reste sur la valeur réellement écrite (aucun redessin). Dépendances injectables pour être éprouvée.
+export function choisirQualitePour({ ecrire = (valeur) => repo.setSetting('upload_quality', valeur), rafraichir = refresh, dire = toast, journaliser = logError } = {}) {
+  return protegerGeste(dire, journaliser)('qualite', async (valeur) => { await ecrire(valeur); rafraichir(); });
+}
+
+// Rendu de l'ensemble L4 (§ 4.1), exporté pour être éprouvé tel quel. Un bouton n'existe que si son geste est câblé (la règle de L3).
+export function syncSectionL4(model, gestes = {}, { choisirQualite = choisirQualitePour() } = {}) {
+  const f = model?.fichiers;
+  if (!f) return [];
+  const bouton = (action, libelle, cle) => (Object.hasOwn(gestes, action) ? el('button', { class: 'btn', onClick: () => gestes[action](cle) }, libelle) : null);
+  const rangee = (...b) => { const vus = b.filter(Boolean); return vus.length ? el('div', { class: 'row' }, ...vus) : null; };
+  const bloc = el('div', { class: 'stack', dataset: { role: 'sync-l4' } }, el('p', { class: 'muted' }, f.aEnvoyer));
+  if (f.envoi) bloc.append(el('p', { class: 'muted' }, f.envoi));
+  if (f.pause) bloc.append(el('div', { class: 'card warn' }, f.pause));
+  if (f.aTelecharger) bloc.append(el('p', { class: 'muted' }, f.aTelecharger));
+  if (f.reception) bloc.append(el('p', { class: 'muted' }, f.reception));
+  const telechargement = rangee(f.telechargerTout ? bouton('telechargerTout', f.telechargerTout) : null, f.arreter ? bouton('arreterTelechargement', t('Arrêter le téléchargement')) : null);
+  if (telechargement) bloc.append(telechargement);
+  bloc.append(el('p', { class: 'muted' }, model.espace));
+  const actualiser = rangee(bouton('actualiserEspace', t('Actualiser')));
+  if (actualiser) bloc.append(actualiser);
+  // R-UX-8 / B-15 : le segmented n'est JAMAIS dans un <label> (field() en rend un) : même habillage .field, par un div.
+  bloc.append(el('div', { class: 'field' }, el('span', null, t('Qualité d’envoi des photos')),
+    segmented([{ value: 'reduite', label: t('Réduite (≈ 400 Ko, 2 000 px)') }, { value: 'originale', label: t('Originale') }], model.qualite, (v) => choisirQualite(v)),
+    // Ronde 1 (S-9, R-G-4 ; à ratifier, spec § 4.1 item 4, § 5 et § 11 à amender) : « Réduite » n'est pas toujours réduite — octetsAEnvoyer envoie
+    // tel quel une image petite et légère, une photo au-delà du mur de pixels ou que ce navigateur ne décode pas, une réduction qui serait plus lourde,
+    // un PDF ou un EPUB. L'aide le dit au lieu de promettre « métadonnées retirées » sans exception.
+    el('small', null, t('L’original reste toujours sur l’appareil qui a pris la photo. Réduite : JPEG de 2 000 px au plus, environ 400 Ko par page, métadonnées retirées, quand la réduction est possible et utile ; sinon le fichier part tel quel, métadonnées comprises : une image déjà petite (2 000 px et 600 Ko au plus), une photo de plus de 16 Mpx ou que ce navigateur ne sait pas lire, un PDF ou un EPUB. Originale : le fichier tel quel, avec ses métadonnées (dont la position GPS si la photo en porte).'))));
+  const renvoi = f.renvoi ? rangee(bouton('renvoyerOriginale', f.renvoi)) : null;
+  if (renvoi) bloc.append(renvoi);
+  if (f.refuses) {
+    bloc.append(el('p', null, f.refuses));
+    for (const e of model.erreursFichiers || []) {
+      bloc.append(el('div', { class: 'status warn', dataset: { fichier: e.sha256 } }, el('p', null, e.texte), e.reessayer ? rangee(bouton('reessayerFichier', t('Réessayer'), e.sha256)) : null));
+    }
+  }
+  for (const phrase of [f.typeInconnu, f.copiesSansServeur, f.copiesPerimees]) if (phrase) bloc.append(el('p', { class: 'muted' }, phrase));
+  return [bloc];
+}
+
 // Câblage du geste « Changer de compte sur cet appareil » : la décision et les effets vivent dans changerDeCompte().
 async function changeAccount(auth) {
   if (archiveOperation) { toast(t('Une opération d’archive est déjà en cours.')); return; }
@@ -758,7 +946,7 @@ async function changeAccount(auth) {
 // conflits. Rien de L3 n'apparaît hors de l'état « connectée + garde ok » — avant lui le compte n'est pas établi —
 // et SANS moteur le modèle est exactement celui de L2, pas même une clé de plus : la section de L2 reste intacte
 // tant que le moteur n'est pas branché.
-export function syncSectionModel({ available = false, reason = null, user = null, pending = 0, guard = null, retour = null, enAttente = false, moteur = null, quarantaine: enQuarantaine = [], conflits: aTrancher = [] } = {}) {
+export function syncSectionModel({ available = false, reason = null, user = null, pending = 0, guard = null, retour = null, enAttente = false, moteur = null, quarantaine: enQuarantaine = [], conflits: aTrancher = [], fichiersErreurs = [], qualite = 'reduite', snapshot = null } = {}) {
   const lines = [];
   const buttons = [];
   let connectee = false;
@@ -812,6 +1000,12 @@ export function syncSectionModel({ available = false, reason = null, user = null
   const avancement = moteur.enCours && moteur.progression
     ? { t: moteur.progression.table, n: moteur.progression.n, total: moteur.progression.total }
     : null;
+  // Lot G (§ 4.1, I-G8) : une erreur de fichier n'est dite que pour une ligne RÉFÉRENCÉE (un orphelin n'est pas nommé), par le nom que la
+  // personne reconnaît (nomFichier) et son motif en phrase ; trop_gros et forme à l'envoi n'offrent pas « Réessayer » (B-22). Ronde 1 : le nom
+  // vient de fiches reçues (titre du livre, de la recette, nom de fichier) : il est BORNÉ comme les libellés de L3 (NOM_MAX, la coupe se voit).
+  const refsFichiers = snapshot ? referencesFichiers(snapshot) : new Set();
+  const erreursReferencees = (fichiersErreurs || []).filter((e) => refsFichiers.has(e?.sha256))
+    .map((e) => ({ sha256: e.sha256, texte: `${tronquer(nomFichier(e.sha256, snapshot), NOM_MAX)} — ${motifFichier(e.motif, e.sens)}`, reessayer: !sansReessai(e.motif, e.sens) }));
   return {
     title,
     lines,
@@ -820,14 +1014,15 @@ export function syncSectionModel({ available = false, reason = null, user = null
     // motif est une phrase — le jeton ASCII du serveur ne se montre jamais (R9).
     quarantaine: enQuarantaine.map((e) => ({
       seq: e.seq,
-      libelle: `${e.store} · ${tronquer(e.id, CLE_MAX)}`,
+      // Vague finale (I-G8) : une ligne files est nommée par nomFichier dès qu'un snapshot est là (sans snapshot : la forme de L3, bornée).
+      libelle: e.store === 'files' && snapshot ? tronquer(nomFichier(e.id, snapshot), NOM_MAX) : `${e.store} · ${tronquer(e.id, CLE_MAX)}`,
       motif: motifEnvoi(e.last_error),
     })),
     conflits: aTrancher.map((c) => {
       const nom = c.local?.title || c.local?.name || null;
       return {
         id: c.id,
-        libelle: `${c.store} · ${nom ? tronquer(nom, NOM_MAX) : tronquer(c.record_id, CLE_MAX)}`,
+        libelle: c.store === 'files' && snapshot ? tronquer(nomFichier(c.record_id, snapshot), NOM_MAX) : `${c.store} · ${nom ? tronquer(nom, NOM_MAX) : tronquer(c.record_id, CLE_MAX)}`,
         dateIci: formatDate(c.local?.updated_at || c.at, { withTime: true }),
         dateAilleurs: formatDate(c.server?.updated_at || c.at, { withTime: true }),
         kind: c.kind,
@@ -843,8 +1038,13 @@ export function syncSectionModel({ available = false, reason = null, user = null
       ? (moteur.phase === 'reception' ? t('Réception : {t} {n}/{total}', avancement) : t('Envoi initial : {t} {n}/{total}', avancement))
       : null,
     pause: moteur.pause?.raison === 'quota'
-      ? t('Espace serveur plein (1 Go au palier gratuit) — rien n’est perdu, tout reste sur cet appareil.')
+      ? t('Espace serveur plein — rien n’est perdu, tout reste sur cet appareil.')
       : null,
+    // Lot G (§ 4.1) : l'ensemble L4 — des faits du moteur, des phrases ici ; aucun plan, palier ni prix (R-G-5).
+    fichiers: modeleFichiers(moteur, { qualite, refuses: erreursReferencees.length }),
+    espace: phraseEspace(moteur.espaceServeur),
+    qualite: qualite === 'originale' ? 'originale' : 'reduite',
+    erreursFichiers: erreursReferencees,
   };
 }
 
@@ -852,7 +1052,8 @@ export function syncSectionModel({ available = false, reason = null, user = null
 // entier. Une clé opaque se reconnaît en 12 caractères ; un titre est fait pour être lu, on lui en laisse 40.
 const CLE_MAX = 12;
 const NOM_MAX = 40;
-const tronquer = (valeur, max) => { const s = String(valeur ?? ''); return s.length > max ? s.slice(0, max) + '…' : s; };
+// Ronde 2 du lot G (re-revue sécurité) : la coupe se fait par POINTS DE CODE — jamais une paire de substitution coupée en deux.
+const tronquer = (valeur, max) => { const s = String(valeur ?? ''); const points = [...s]; return points.length > max ? points.slice(0, max).join('') + '…' : s; };
 
 // Vocabulaire des motifs de rejet (spec § 5.3, R9) : le serveur renvoie des jetons ASCII, la personne lit une
 // phrase qui dit QUOI regarder. Un jeton inattendu (serveur plus récent que cette version de l'app) tombe sur la

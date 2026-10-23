@@ -2,6 +2,8 @@
 // (store, id) part une fois (la version la plus récente), un put est RELU au moment de l'envoi (la file ne garde
 // pas la fiche), une suppression part avec son payload. Bornes du serveur appliquées avec une marge pour le lot ;
 // la dichotomie de l'envoi reste le filet.
+import { projectionFichier, remoteDeCeCompte } from './tables.js';
+
 export const LIMITES = { elements: 500, lot: 921600, element: 524288 };
 const CONTROLE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g;
 const encodeur = new TextEncoder();
@@ -63,12 +65,18 @@ const tombaleDe = (entree) => ({
   },
 });
 
+// Lot G (D-G8) : une entrée files part avec la PROJECTION serveur, relue au moment de l'envoi ; sans remote de ce compte (ou disparue), elle est
+// retenue « fichier en attente » — la retenue PRÉCÈDE la branche « fiche disparue » (R-L3-28 : l. 99-101 de tests/sync-l3.js). Jamais une tombale.
+async function elementFichier(entree, relire) {
+  if (entree.op !== 'put') return { retenue: true };
+  const fiche = await relire('files', entree.id);
+  if (!fiche || !remoteDeCeCompte(fiche.remote, entree.user_id)) return { retenue: true };
+  const data = nettoyerChaines(projectionFichier(fiche));
+  return { element: { store: 'files', id: entree.id, data, updated_at: data.updated_at || entree.updated_at, deleted: false } };
+}
+
 async function elementDe(entree, relire) {
-  // Garde-fou désormais INATTEIGNABLE depuis la capture (R-L3-22 : les lignes `files` n'entrent plus en file en L3,
-  // et celles déjà présentes sont retirées une fois par `repo.init()`). Il reste : c'est la seule barrière si une
-  // entrée `files` revient par un chemin qu'on n'a pas prévu, et L4 lui donnera son vrai travail (confirmer
-  // l'empreinte distante avant d'envoyer la ligne). Sa retenue reste donc testée sur `composerLots`, pas sur la file.
-  if (entree.store === 'files') return { retenue: true };
+  if (entree.store === 'files') return elementFichier(entree, relire);
   if (entree.op === 'delete') return tombaleDe(entree);
   const fiche = await relire(entree.store, entree.id);
   if (fiche === undefined || fiche === null) {

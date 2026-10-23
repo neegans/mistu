@@ -245,6 +245,8 @@ export function renderZoneCouverture(etat, gestes = {}) {
       el('div', { class: 'stack' },
         etat.message ? el('small', { class: 'muted' }, etat.message) : null,
         el('div', { class: 'row' },
+          etat.telechargeable ? el('button', { type: 'button', class: 'btn primary', disabled: !!etat.telechargement, onClick: g('telecharger') }, etat.telechargement ? t('Téléchargement…') : t('Télécharger')) : null,
+          etat.reessayable ? el('button', { type: 'button', class: 'btn', disabled: !!etat.telechargement, onClick: g('reessayer') }, t('Réessayer')) : null,
           el('button', { type: 'button', class: 'btn', disabled: !!etat.enCours, onClick: g('photographier') }, t('Photographier')),
           el('button', { type: 'button', class: 'btn', disabled: !!etat.enCours, onClick: g('choisir') }, t('Choisir une image')),
           etat.sha256 ? el('button', { type: 'button', class: 'btn link', disabled: !!etat.enCours, onClick: g('retirer') }, t('Retirer')) : null))));

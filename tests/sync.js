@@ -118,11 +118,12 @@ export async function runSyncTests({ eq, ok }) {
   eq(seen.length, 1, 'un seul appel console');
   ok(JSON.stringify(seen[0]).includes('books') && !JSON.stringify(seen[0]).includes('corps de réponse') && !JSON.stringify(seen[0]).includes('ne doit pas sortir'), 'console : code et identifiants seulement');
 
-  // Ronde 1 : le bouton de repli doit exister avant toute resolution du fichier (le refus L4 n'est pas detectable a l'avance, spec I5).
+  // Lot G (§ 4.5, B-24) : le conteneur est rendu de suite, et c'est la résolution qui pose le cadre OU la phrase de repli — jamais un cadre vide.
   const { pdfFrame } = await import('../src/ui/components.js');
   const frame = pdfFrame({ sha256: 'z'.repeat(64), filename: 'x.pdf' });
-  ok(frame.querySelector('iframe[sandbox]'), 'pdfFrame : iframe sandbox present avant resolution');
-  ok([...frame.querySelectorAll('button')].some((b) => b.textContent === 'Télécharger le fichier'), 'pdfFrame : bouton Télécharger le fichier toujours present');
+  ok(frame.classList.contains('stack') && !frame.querySelector('iframe'), 'pdfFrame (lot G) : conteneur rendu de suite, aucun cadre vide avant la resolution');
+  for (let i = 0; i < 100 && !frame.querySelector('p'); i += 1) await new Promise((r) => setTimeout(r, 10));
+  ok(frame.textContent.includes('Ce fichier n’est pas encore sur cet appareil.') && ![...frame.querySelectorAll('button')].some((b) => b.textContent === 'Télécharger le fichier'), 'pdfFrame (lot G) : sans octets, la phrase de repli ; « Télécharger le fichier » seulement avec un blob');
 
   // --- Service worker (spec § 5.6)
   const rules = globalThis.CuisineSwRules;

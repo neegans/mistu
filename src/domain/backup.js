@@ -5,6 +5,9 @@ import { sha256Hex } from '../core/hash.js';
 import { ARCHIVE_FORMAT, ARCHIVE_FORMAT_VERSION, SUPPORTED_ARCHIVE_VERSIONS, ARCHIVE_DATA_STORES, SECRET_SETTING_KEYS, RELATIONS, STORES, APP_VERSION, SYNC_INTERNAL_STORES, SYNC_STORES, MAGASINS_AJOUTES_APRES_V1 } from '../model/schema.js';
 import { nettoyerChaines } from '../sync/lots.js';
 import { syncNow } from '../sync/clock.js';
+import { remoteValide, HASH_FICHIER } from '../sync/tables.js';
+import { estOriginalIci } from '../sync/fichiers.js';
+import { isAllowed } from '../sync/mime.js';
 
 const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf', 'application/epub+zip': 'epub', 'text/plain': 'txt' };
 export const extFor = (mime) => MIME_EXT[mime] || 'bin';
@@ -14,16 +17,33 @@ const README_TXT = `Archive Cuisine OS
 manifest.json  : format, version du format, date, décomptes, liste des fichiers avec empreinte SHA-256.
 data/*.json    : un tableau JSON par magasin (identifiants stables, relations par identifiant).
 files/<sha256>.<ext> : scans, photos et PDF originaux, nommés par leur empreinte.
+Le manifeste peut porter l'identifiant technique du compte qui a envoyé un fichier (un uuid, pas un secret).
 Aucun secret d'accès n'est inclus. Cette archive est privée ; sa création ne publie rien.
 `;
 
 const DATA_STORES = [...ARCHIVE_DATA_STORES, 'settings'];
-const HASH = /^[a-f0-9]{64}$/;
+const HASH = HASH_FICHIER; // I-G10 : une définition (src/sync/tables.js)
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const record = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const validKey = (value) => typeof value === 'string' && value.trim().length > 0;
 const validCount = (value) => Number.isSafeInteger(value) && value >= 0;
-const publicSettings = (rows) => rows.filter((r) => !SECRET_SETTING_KEYS.includes(r.key));
+// Vague finale du lot G (chef d'orchestre, revue finale) : `upload_quality` est « par appareil, jamais synchronisé » (spec G § 3.3) — il ne voyage pas
+// dans l'archive et une archive qui le porte ne l'écrit pas à la restauration (une seule définition pour les deux sens).
+const CLES_PAR_APPAREIL = ['upload_quality'];
+const publicSettings = (rows) => rows.filter((r) => !SECRET_SETTING_KEYS.includes(r.key) && !CLES_PAR_APPAREIL.includes(r.key));
+
+// Une description de fichier (§ 3.4), UNE définition relue par inspectArchive et requireInspection (ronde 1, #18, #25). `bytes_*` ensemble ou
+// aucun ; une entrée qui se dit l'original (bytes_sha256 === sha256, forme que createArchive n'écrit jamais) porte la taille de ses octets (#6) ;
+// `remote` absent ou valide. Vague finale (chef d'orchestre, revue finale sécurité) : une COPIE (bytes_sha256 ≠ sha256) ne porte JAMAIS la taille de
+// l'original — sinon une archive fabriquée ferait passer des octets quelconques pour l'original d'une page (estOriginalIci lit la taille) ; createArchive
+// écrit alors `size: 0`, comme pour une copie sans taille (#7).
+const remoteAdmis = (f) => !own(f, 'remote') || remoteValide(f.remote);
+const bytesValides = (f) => {
+  const n = ['bytes_sha256', 'bytes_size', 'bytes_mime'].filter((k) => own(f, k)).length;
+  return n === 0 || (n === 3 && HASH.test(f.bytes_sha256) && validCount(f.bytes_size) && validKey(f.bytes_mime) && (f.bytes_sha256 !== f.sha256 ? f.bytes_size !== f.size : f.bytes_size === f.size));
+};
+const fichierValide = (f) => record(f) && HASH.test(f.sha256) && validCount(f.size) && validKey(f.mime) && bytesValides(f) && remoteAdmis(f);
+const manquanteValide = (mf) => record(mf) && HASH.test(mf.sha256) && validKey(mf.mime) && validCount(mf.size) && remoteAdmis(mf);
 
 function validateRows(stores) {
   const errors = [];
@@ -122,38 +142,51 @@ export async function createArchive(db, { deviceName = '' } = {}) {
     entries.push({ path, data });
     dataFiles.push({ path, store: name, count: counts[name], sha256: await sha256Hex(data) });
   }
-  let bytesTotal = 0, missingFiles = 0;
+  let bytesTotal = 0;
+  const manquantes = [];
+  const copies = { serveur: 0, inconnues: 0 };
   for (const file of snapshot.files) {
     if (!HASH.test(file.sha256)) throw new Error('Fichier source invalide : ' + file.sha256);
+    const remote = remoteValide(file.remote) ? file.remote : undefined;
+    const mime = validKey(file.mime) ? file.mime : (validKey(file.blob?.type) ? file.blob.type : 'application/octet-stream');
     if (!(file.blob instanceof Blob)) {
-      // Page référencée mais pas encore téléchargée (spec § 5.4) : comptée, absente de l'archive.
-      if (file.remote) { missingFiles++; continue; }
-      throw new Error('Fichier source invalide : ' + file.sha256);
+      // D-G7 (R18) : une ligne sans octets ici entre dans missing_files, QUELLE QUE SOIT la valeur de remote (D-G12).
+      manquantes.push({ sha256: file.sha256, mime, size: validCount(file.size) ? file.size : 0, ...(remote ? { remote } : {}) });
+      continue;
     }
     const data = new Uint8Array(await file.blob.arrayBuffer());
-    if (await sha256Hex(data) !== file.sha256) throw new Error('Fichier source endommagé : ' + file.sha256);
-    const mime = file.mime || file.blob.type || 'application/octet-stream';
-    const path = 'files/' + file.sha256 + '.' + extFor(mime);
+    const h = await sha256Hex(data);
+    // Ronde 1 (#7) : une copie sans taille valide prend 0, comme missing_files — jamais la longueur de ses octets, qui la ferait passer pour l'original.
+    const entree = { sha256: file.sha256, size: h === file.sha256 ? data.length : (validCount(file.size) ? file.size : 0), mime };
+    if (h !== file.sha256) {
+      if (entree.size === data.length) entree.size = 0; // vague finale : une copie de la taille de l'original est décrite sans taille (bytesValides la refuserait)
+      // S-1 : des octets qui ne sont pas l'original sont décrits par bytes_*, quel que soit remote — jamais une levée (« Fichier source endommagé »
+      // reste à l'inspection, pour un ZIP abîmé). Copie du serveur connue, ou autre chose (octets abîmés, copie périmée) : archivée telle quelle.
+      Object.assign(entree, { bytes_sha256: h, bytes_size: data.length, bytes_mime: validKey(file.blob.type) ? file.blob.type : mime });
+      if (remote && remote.sha256 === h) copies.serveur += 1; else copies.inconnues += 1;
+    }
+    if (remote) entree.remote = remote;
+    const path = 'files/' + file.sha256 + '.' + extFor(entree.bytes_mime ?? mime);
     entries.push({ path, data });
-    files.push({ path, sha256: file.sha256, size: data.length, mime });
+    files.push({ path, ...entree });
     bytesTotal += data.length;
   }
-  counts.files = files.length;
+  counts.files = files.length; // missing_files n'entre PAS dans counts : un client plus ancien refuse tout décompte de magasin inconnu
   const manifest = {
     format: ARCHIVE_FORMAT, format_version: ARCHIVE_FORMAT_VERSION, app_version: APP_VERSION,
-    created_at: new Date().toISOString(), device_name: deviceName || null, counts, data_files: dataFiles, files,
+    created_at: new Date().toISOString(), device_name: deviceName || null, counts, data_files: dataFiles, files, missing_files: manquantes,
   };
   entries.unshift({ path: 'manifest.json', data: JSON.stringify(manifest, null, 2) });
   entries.push({ path: 'README.txt', data: README_TXT });
   const zip = createZip(entries);
-  return { blob: new Blob([zip], { type: 'application/zip' }), manifest, bytes: zip.length, filesBytes: bytesTotal, warnings, missingFiles };
+  return { blob: new Blob([zip], { type: 'application/zip' }), manifest, bytes: zip.length, filesBytes: bytesTotal, warnings, missingFiles: manquantes.length, copies };
 }
 
 // Inspection isolée : aucune écriture. Les archives v1 complètes existantes restent acceptées.
 export async function inspectArchive(arrayBuffer) {
   const errors = [], warnings = [];
   let manifest = null;
-  const payload = { stores: Object.create(null), files: [] };
+  const payload = { stores: Object.create(null), files: [], missing: [] };
   const fail = () => ({ ok: false, errors, warnings, manifest });
   try {
     const zip = readZip(arrayBuffer);
@@ -188,27 +221,38 @@ export async function inspectArchive(arrayBuffer) {
     const hashes = new Set();
     let missing = 0, hashMismatch = 0;
     for (const f of manifest.files) {
-      if (!record(f) || !HASH.test(f.sha256) || !validCount(f.size) || !validKey(f.mime)) { errors.push('Description de fichier invalide'); continue; }
+      if (!fichierValide(f)) { errors.push('Description de fichier invalide'); continue; }
       if (hashes.has(f.sha256)) { errors.push('Empreinte de fichier répétée : ' + f.sha256); continue; }
       hashes.add(f.sha256);
-      if (f.path !== 'files/' + f.sha256 + '.' + extFor(f.mime) || paths.has(f.path)) { errors.push('Chemin de fichier invalide : ' + f.path); continue; }
+      const copie = own(f, 'bytes_sha256');
+      if (f.path !== 'files/' + f.sha256 + '.' + extFor(copie ? f.bytes_mime : f.mime) || paths.has(f.path)) { errors.push('Chemin de fichier invalide : ' + f.path); continue; }
       paths.add(f.path);
       const fileEntry = zip.get(f.path);
       if (!fileEntry) { missing++; errors.push('Fichier source manquant : ' + f.path); continue; }
-      if (!fileEntry.crcOk || await sha256Hex(fileEntry.data) !== f.sha256) { hashMismatch++; errors.push('Fichier source endommagé : ' + f.path); continue; }
-      if (fileEntry.data.length !== f.size) { errors.push('Taille différente : ' + f.path); continue; }
-      payload.files.push({ sha256: f.sha256, bytes: fileEntry.data, mime: f.mime, size: f.size });
+      if (!fileEntry.crcOk || await sha256Hex(fileEntry.data) !== (copie ? f.bytes_sha256 : f.sha256)) { hashMismatch++; errors.push('Fichier source endommagé : ' + f.path); continue; }
+      if (fileEntry.data.length !== (copie ? f.bytes_size : f.size)) { errors.push('Taille différente : ' + f.path); continue; }
+      payload.files.push({ sha256: f.sha256, bytes: fileEntry.data, mime: f.mime, size: f.size,
+        ...(copie ? { bytes_sha256: f.bytes_sha256, bytes_size: f.bytes_size, bytes_mime: f.bytes_mime } : {}), ...(own(f, 'remote') ? { remote: f.remote } : {}) });
+    }
+    const listeManquantes = own(manifest, 'missing_files') ? manifest.missing_files : []; // archive d'avant le lot : absente = []
+    if (!Array.isArray(listeManquantes)) errors.push('Description de fichier invalide');
+    else for (const mf of listeManquantes) {
+      if (!manquanteValide(mf)) { errors.push('Description de fichier invalide'); continue; }
+      if (hashes.has(mf.sha256)) { errors.push('Empreinte de fichier répétée : ' + mf.sha256); continue; }
+      hashes.add(mf.sha256);
+      payload.missing.push({ sha256: mf.sha256, mime: mf.mime, size: mf.size, ...(own(mf, 'remote') ? { remote: mf.remote } : {}) });
     }
     if (!validCount(manifest.counts.files) || manifest.counts.files !== manifest.files.length) errors.push('Décompte différent : files');
     for (const name of Object.keys(manifest.counts)) if (!own(STORES, name)) errors.push('Décompte de magasin inconnu : ' + name);
     for (const path of zip.keys()) if (!paths.has(path)) errors.push('Entrée non déclarée dans le manifeste : ' + path);
-    const relationErrors = checkRelations(payload.stores, new Set(payload.files.map((f) => f.sha256)));
+    const relationErrors = checkRelations(payload.stores, new Set([...payload.files.map((f) => f.sha256), ...payload.missing.map((m) => m.sha256)]));
     errors.push(...relationErrors);
     if (payload.stores.settings?.some((r) => record(r) && SECRET_SETTING_KEYS.includes(r.key))) warnings.push('Les réglages secrets présents dans cette archive seront ignorés.');
     return {
       ok: errors.length === 0, errors, warnings, manifest, payload,
       summary: { counts: Object.fromEntries(Object.entries(payload.stores).map(([name, rows]) => [name, rows.length])),
-        files_ok: payload.files.length, files_missing: missing, hash_mismatches: hashMismatch, relation_errors: relationErrors.length },
+        files_ok: payload.files.length, files_missing: missing, hash_mismatches: hashMismatch, relation_errors: relationErrors.length,
+        files_distants: payload.missing.length, files_copies: payload.files.filter((f) => own(f, 'bytes_sha256')).length },
     };
   } catch (e) {
     errors.push('Archive illisible : ' + e.message);
@@ -218,15 +262,22 @@ export async function inspectArchive(arrayBuffer) {
 
 function requireInspection(inspection, mode) {
   if (!['merge', 'replace'].includes(mode)) throw new Error('Mode de restauration inconnu');
-  if (!inspection?.ok || !record(inspection.payload) || !Array.isArray(inspection.payload.files)) throw new Error('Archive non validée');
-  const errors = validateRows(inspection.payload.stores);
+  const payload = inspection?.payload;
+  // Ronde 1 (#25) : un `missing` présent qui n'est pas un tableau est refusé ici, nommé — pas plus loin, par une clé invalide.
+  if (!inspection?.ok || !record(payload) || !Array.isArray(payload.files) || (payload.missing != null && !Array.isArray(payload.missing))) throw new Error('Archive non validée');
+  const errors = validateRows(payload.stores);
   const hashes = new Set();
-  for (const file of inspection.payload.files) {
-    if (!record(file) || !HASH.test(file.sha256) || hashes.has(file.sha256) || !(file.bytes instanceof Uint8Array) || file.size !== file.bytes.length || !validKey(file.mime)) {
-      errors.push('Fichier de restauration invalide');
-    } else hashes.add(file.sha256);
+  // Mêmes règles qu'à l'inspection (fichierValide, manquanteValide), plus les octets : F-8, (bytes_size ?? size) === bytes.length.
+  for (const file of payload.files) {
+    const taille = record(file) && own(file, 'bytes_size') ? file.bytes_size : file?.size;
+    if (!fichierValide(file) || !(file.bytes instanceof Uint8Array) || taille !== file.bytes.length || hashes.has(file.sha256)) errors.push('Fichier de restauration invalide');
+    else hashes.add(file.sha256);
   }
-  errors.push(...checkRelations(inspection.payload.stores, hashes));
+  for (const mf of payload.missing ?? []) {
+    if (!manquanteValide(mf) || hashes.has(mf.sha256)) errors.push('Fichier de restauration invalide');
+    else hashes.add(mf.sha256);
+  }
+  errors.push(...checkRelations(payload.stores, hashes)); // B-6 : files ∪ missing
   if (errors.length) throw new Error('Archive non validée : ' + errors.slice(0, 10).join(' · '));
 }
 
@@ -247,7 +298,7 @@ export function compterFichesSynchronisees(inspection) {
   if (!stores) return 0;
   let total = 0;
   for (const name of SYNC_STORES) {
-    if (name === 'files') total += inspection.payload.files?.length || 0;
+    if (name === 'files') total += (inspection.payload.files?.length || 0) + (inspection.payload.missing?.length || 0);
     else total += stores[name]?.length || 0;
   }
   return total;
@@ -273,38 +324,83 @@ const ficheRestauree = (name, row) => (SYNC_STORES.includes(name) && record(row)
 //     un neuf — en fusion comme en remplacement. Sans cela le serveur garderait sa version (I7 : updated_at
 //     strictement supérieur gagne) et la restauration ne se verrait sur aucun autre appareil. Un remplacement ne
 //     supprime rien chez le fournisseur pour autant : ce qui n'est pas dans l'archive y reste (dit par Réglages).
+const normaliserFiche = (name, row, { horodater }) => {
+  const fiche = ficheRestauree(name, row);
+  if (typeof horodater === 'function') fiche.updated_at = horodater();
+  else if (!fiche.updated_at) fiche.updated_at = syncNow();
+  return fiche;
+};
 function normaliserFiches(batch, { horodater }) {
-  const renvoi = typeof horodater === 'function';
   for (const name of SYNC_STORES) {
     const rows = batch[name];
     if (!Array.isArray(rows)) continue;
-    for (const [i, row] of rows.entries()) {
-      if (!record(row)) continue;
-      const fiche = ficheRestauree(name, row);
-      if (renvoi) fiche.updated_at = horodater();
-      else if (!fiche.updated_at) fiche.updated_at = syncNow();
-      rows[i] = fiche;
-    }
+    for (const [i, row] of rows.entries()) if (record(row)) rows[i] = normaliserFiche(name, row, { horodater });
   }
 }
 
-// Tout préparer AVANT la transaction. Effacement et écritures sont validés ou annulés ensemble.
+// R-G-6 (C-1) : ce que la restauration écrit pour une entrée `files`, NOMMÉ UNE FOIS et relu par applyArchive (dans la transaction, sur la ligne
+// relue : ronde 1, #9) ET verifyRestored (le gabarit de ficheRestauree, R61 : le bilan compare la base à ce que la restauration a PROMIS). La
+// DÉCISION seule, sans octets (ronde 1, #17 : verifyRestored ne recopie plus aucun blob). Un blob local ORIGINAL n'est jamais remplacé par une
+// copie venue d'une archive, ni en fusion ni en remplacement, et il garde sa taille et son type (ceux de ses octets : une archive ne fait jamais
+// d'un original une « copie », #6) ; une copie locale cède à ce que l'archive porte (l'original, ou une autre copie).
+export function decisionRestauration(entry, ligne) {
+  const entreeOriginale = (entry.bytes_sha256 ?? entry.sha256) === entry.sha256;
+  if (!entreeOriginale && estOriginalIci(ligne)) return { garder: true, size: ligne.size, mime: ligne.mime ?? entry.mime, attendu: { sha256: entry.sha256, size: ligne.size } };
+  return { garder: false, size: entry.size, mime: entry.mime, attendu: { sha256: entry.bytes_sha256 ?? entry.sha256, size: entry.bytes_size ?? entry.size } };
+}
+// La décision et ses octets : le blob d'ici gardé, ou un blob neuf des octets de l'archive (typé par bytes_mime : F-9 sert le blob).
+export function octetsRestaures(entry, ligne) {
+  const d = decisionRestauration(entry, ligne);
+  return { ...d, blob: d.garder ? ligne.blob : new Blob([entry.bytes], { type: entry.bytes_mime ?? entry.mime }) };
+}
+// D-G7 (ronde 1, #4, #5, #8 — ruling à ratifier) : une page de missing_files est restaurée SANS octets ; un blob d'ici est gardé, en fusion COMME
+// en remplacement (I-G3 : l'archive nomme la page sans ses octets, elle n'en dit rien — l'original d'ici ne s'efface pas), et avec lui sa taille
+// et son type (la règle de fusionnerFichier : « avec un blob local, la taille et le type locaux restent »).
+export function decisionManquante(entry, ligne) {
+  if (ligne?.blob instanceof Blob) return { garder: true, size: ligne.size ?? entry.size, mime: ligne.mime ?? entry.mime };
+  return { garder: false, size: entry.size, mime: entry.mime };
+}
+
+// La ligne restaurée, une règle pour files et missing_files (#18) : en fusion, la ligne d'ici sous l'entrée (...existing), son remote quand
+// l'entrée n'en porte pas, son created_at ; en remplacement, la ligne d'ici ne sert QU'À la décision — ni ...existing, ni son remote, ni son
+// created_at (§ 3.4). `syncable` suit le type quand il ne vient pas de la ligne d'ici (#24, la règle de fusionnerOctetsRecus).
+function ligneRestauree(entree, existing, d, blob, { fusion, maintenant }) {
+  const ici = fusion && record(existing) ? existing : {};
+  return { ...ici, sha256: entree.sha256, mime: d.mime, size: d.size, remote: entree.remote ?? ici.remote ?? null, created_at: ici.created_at || maintenant,
+    syncable: ici.syncable ?? isAllowed(d.mime), ...(blob instanceof Blob ? { blob } : {}) };
+}
+
+// Tout ce qui s'attend se fait AVANT la transaction : chaque octet de l'archive est revérifié (« modifié depuis la validation »), gardé ou non.
+// La décision R-G-6 se prend DANS la transaction, sur la ligne RELUE (ronde 1, #9 : la condition `fusion` de db.mutate, comme putFile et la
+// réception — un original importé depuis n'est jamais remplacé ; ecrireConditionne lit avant de vider, donc le remplacement aussi) ; le blob
+// d'une entrée qui n'est pas gardée y est construit (synchrone). Effacement et écritures sont validés ou annulés ensemble.
 export async function applyArchive(db, inspection, { mode = 'merge', horodater = null } = {}) {
   requireInspection(inspection, mode);
   const batch = structuredClone(restoredStores(inspection));
-  const existingFiles = mode === 'merge' ? new Map((await db.getSnapshot(['files'])).files.map((row) => [row.sha256, row])) : new Map();
-  batch.files = [];
-  for (const file of inspection.payload.files) {
-    const blob = new Blob([file.bytes], { type: file.mime });
-    if (await sha256Hex(blob) !== file.sha256) throw new Error('Fichier modifié depuis la validation : ' + file.sha256);
-    const existing = existingFiles.get(file.sha256);
-    batch.files.push({ ...existing, sha256: file.sha256, blob, mime: file.mime, size: file.size, created_at: existing?.created_at || new Date().toISOString() });
-  }
   normaliserFiches(batch, { horodater });
+  const fusion = mode === 'merge';
+  const maintenant = new Date().toISOString();
+  for (const file of inspection.payload.files) {
+    if (await sha256Hex(file.bytes) !== (file.bytes_sha256 ?? file.sha256)) throw new Error('Fichier modifié depuis la validation : ' + file.sha256);
+  }
+  let originauxConserves = 0;
+  const ecrire = (entree, courant, d, blob) => normaliserFiche('files', ligneRestauree(entree, courant, d, blob, { fusion, maintenant }), { horodater });
+  const conditions = [
+    ...inspection.payload.files.map((entree) => ({ key: entree.sha256, fusion: (courant) => {
+      const o = octetsRestaures(entree, courant);
+      if (o.garder) originauxConserves += 1;
+      return ecrire(entree, courant, o, o.blob);
+    } })),
+    ...(inspection.payload.missing ?? []).map((entree) => ({ key: entree.sha256, fusion: (courant) => {
+      const d = decisionManquante(entree, courant);
+      return ecrire(entree, courant, d, d.garder ? courant.blob : null);
+    } })),
+  ];
   // K-7 (spec assistant-par-le-compte) : la configuration de l'assistant n'est pas de la bibliothèque — une
   // restauration en remplacement ne la vide pas (elle n'est dans aucune archive : il n'y aurait rien pour la réécrire).
-  await db.putBatch(batch, { clearStores: mode === 'replace' ? Object.keys(STORES).filter((s) => !SYNC_INTERNAL_STORES.includes(s) && s !== 'assistant_config') : [] });
-  return Object.fromEntries(Object.entries(batch).map(([name, rows]) => [name, rows.length]));
+  await db.mutate({ puts: batch, origin: 'local', conditions: conditions.length ? { files: conditions } : null,
+    clearStores: mode === 'replace' ? Object.keys(STORES).filter((s) => !SYNC_INTERNAL_STORES.includes(s) && s !== 'assistant_config') : [] });
+  return { ...Object.fromEntries(Object.entries(batch).map(([name, rows]) => [name, rows.length])), files: conditions.length, originauxConserves };
 }
 
 // Comparaison JSON indépendante de l’ordre des propriétés, sensible à l’ordre des tableaux.
@@ -355,15 +451,29 @@ export async function verifyRestored(db, inspection, { mode = 'merge', horodate 
     }
   }
   const filesBySha = new Map(snapshot.files.map((row) => [row.sha256, row]));
-  // Une page référencée sans octets (remote, jamais téléchargée) n'entre pas dans le décompte (spec § 5.4).
-  const comparableFiles = snapshot.files.filter((row) => row.blob instanceof Blob || !row.remote);
+  const manquantes = inspection.payload.missing ?? [];
+  const shaManquantes = new Set(manquantes.map((mf) => mf.sha256));
+  // Une ligne sans octets (missing_files, ou reçue sans être téléchargée) n'entre pas dans le décompte (spec § 3.4), ni le blob d'ici gardé pour
+  // une page de missing_files (ronde 1, #4, #8 : decisionManquante).
+  const comparableFiles = snapshot.files.filter((row) => row.blob instanceof Blob && !shaManquantes.has(row.sha256));
   if (mode === 'replace' && comparableFiles.length !== inspection.payload.files.length) diffs.push('files : décompte différent après restauration');
+  // N-1 : un remote n'est comparé que si l'entrée en porte un (en fusion, une entrée sans remote laisse celui de la ligne locale).
+  const memeRemote = (row, entree) => !own(entree, 'remote') || canonical(row.remote ?? null) === canonical(entree.remote);
   for (const file of inspection.payload.files) {
     const row = filesBySha.get(file.sha256);
     if (!row) { diffs.push('Fichier absent : ' + file.sha256); continue; }
     if (!(row.blob instanceof Blob)) { diffs.push('Fichier illisible : ' + file.sha256); continue; }
-    if (row.size !== file.size || row.blob.size !== file.size || row.mime !== file.mime) diffs.push('Métadonnées de fichier différentes : ' + file.sha256);
-    if (await sha256Hex(row.blob) !== file.sha256) diffs.push('Empreinte différente : ' + file.sha256);
+    const d = decisionRestauration(file, row); // R-G-6 : la même décision qu'à l'application, jamais bytes_sha256 ?? sha256 en brut
+    if (row.size !== d.size || row.mime !== d.mime || row.blob.size !== d.attendu.size) diffs.push('Métadonnées de fichier différentes : ' + file.sha256);
+    if (await sha256Hex(row.blob) !== d.attendu.sha256) diffs.push('Empreinte différente : ' + file.sha256);
+    if (!memeRemote(row, file)) diffs.push('Copie serveur différente : ' + file.sha256);
+  }
+  for (const mf of manquantes) {
+    const row = filesBySha.get(mf.sha256);
+    if (!row) { diffs.push('Fichier absent : ' + mf.sha256); continue; }
+    // Sans octets ici, la ligne porte la taille et le type de l'archive ; avec, ceux d'ici (decisionManquante) — rien à comparer.
+    if (!(row.blob instanceof Blob) && (row.size !== mf.size || row.mime !== mf.mime)) diffs.push('Métadonnées de fichier différentes : ' + mf.sha256);
+    if (!memeRemote(row, mf)) diffs.push('Copie serveur différente : ' + mf.sha256);
   }
   diffs.push(...checkRelations(currentStores, new Set(filesBySha.keys())));
   return { ok: diffs.length === 0, diffs };

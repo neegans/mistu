@@ -6,11 +6,11 @@ import * as repo from './model/repo.js';
 import { on } from './core/bus.js';
 import { logError } from './core/log.js';
 import { revoquerUrlsDeBlob } from './core/blob-urls.js';
-import { getData, invalidate, getSyncState, routeApresRetour, relireReglages, isActivitySynced, demarrerSync, setSyncState, poserMoteur, passeAEcrit, doitRendreApresPasse, SYNC_ROUTE_KEY } from './ui/state.js';
+import { getData, invalidate, getSyncState, routeApresRetour, relireReglages, isActivitySynced, demarrerSync, setSyncState, poserMoteur, passeAEcrit, doitRendreApresPasse, SYNC_ROUTE_KEY, qualiteEnvoi } from './ui/state.js';
 import { installCapture } from './sync/outbox.js';
 import { createAuth } from './sync/auth.js';
 import { createMoteur } from './sync/moteur.js';
-import { createTransport } from './sync/transport.js';
+import { createTransport, createStockage } from './sync/transport.js';
 import { configAssistantSuitLeCompte } from './sync/config.js';
 import { pastille, majPastille } from './ui/components.js';
 
@@ -186,6 +186,8 @@ function demarrerMoteur() {
   const moteur = poserMoteur(() => createMoteur({
     db: repo.db,
     transport: createTransport(client),
+    stockage: createStockage(client), // lot G : le client ne sort de app.js que vers transport.js (R53)
+    qualite: qualiteEnvoi,
     getUserId: () => getSyncState().user?.id || null,
     isActivitySynced,
     configSuitLeCompte: () => configAssistantSuitLeCompte(),
