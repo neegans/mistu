@@ -299,26 +299,66 @@ Code : `supabase/functions/assistant/` (spec `docs/superpowers/specs/2026-10-18-
 
 Reste non prouvé côté SQL : la concurrence réelle (deux appels simultanés sous le verrou), qui ne se joue pas dans l'éditeur.
 
-## Preuve `0005_imports.sql` — à jouer
+## Preuve `0005_imports.sql` — 35 verdicts, 0 faux (23 octobre 2026, vers 20 h 05 UTC = 16 h 05 à Montréal, geste de Neegan)
+
+**JOUÉE par Neegan le 23 octobre 2026 (vers 20 h 05 UTC), avant la fusion et le `push` du code de ce lot : `999 BILAN` =
+`0 faux sur 35`, `ok` vrai sur les 36 lignes.** Les collages ont été faits dans l'ordre de l'étape 11 depuis un kit copier-coller
+préparé par le contrôleur (cinq fichiers, jetons de la preuve déjà remplacés : une adresse `exemple.invalid`, un uuid tiré au hasard ;
+ni l'un ni l'autre n'est consigné ici) ; le tableau des verdicts ci-dessous est la sortie de l'éditeur SQL, collée telle quelle.
 
 Section préparée le 18 octobre 2026 (lot A « importer une recette repérée », spec
-`docs/superpowers/specs/2026-10-18-import-cible-design.md` § 3.5 ; procédure : étape 11 du README). **À jouer par Neegan avant
-toute fusion et tout `push` du code de ce lot**, après `0003` (jouée le 18 octobre, ci-dessus) ; indépendante de `0004`. Jetons
+`docs/superpowers/specs/2026-10-18-import-cible-design.md` § 3.5 ; procédure : étape 11 du README). **Jouée par Neegan avant
+toute fusion et tout `push` du code de ce lot** (règle de l'étape 11), après `0003` (jouée le 18 octobre, ci-dessus) ; indépendante de `0004`. Jetons
 `A_EMAIL` / `A_UUID` remis ; la preuve n'affiche jamais la colonne `data` (compteurs, motifs et verdicts « conforme / différente »
 seulement) ; aucune clé n'est en jeu (`imports` n'en porte pas). La migration `0005` est rendue depuis le `SYNC_STORES` vivant tant
 qu'elle n'est pas appliquée : une fois collée, la figer (`SYNC_STORES_0005` + empreinte épinglée, fin de l'étape 11).
 
 | Heure | Collage | Résultat |
 | --- | --- | --- |
-| … | `insert into private.allowed_users …` (1 adresse de preuve `exemple.invalid`) | … |
-| … | `migrations/0005_imports.sql` | … (attendu `Success. No rows returned`) |
-| … | empreinte du `0005` collé : `shasum -a 256 supabase/migrations/0005_imports.sql` | … |
-| … | `notify pgrst, 'reload schema';` (collée seule) | … |
-| … | preuve `0005` (« Run without RLS ») | `999 BILAN : … faux sur …` |
-| … | retrait de l'adresse de preuve | … |
+| 23 oct. 2026, avant 20 h 05 UTC | `insert into private.allowed_users …` (1 adresse de preuve `exemple.invalid`) | jouée (fichier 1 du kit) ; le compte affiché n'a pas été rapporté au contrôleur |
+| idem | `migrations/0005_imports.sql` | jouée en un seul collage (fichier 2 du kit, identique au fichier du dépôt : `cmp` muet) ; sortie non rapportée (attendu `Success. No rows returned`) ; la preuve atteste la table, ses règles, son déclencheur, ses index et les quatre fonctions recréées (verdicts 1.01-1.08, 2.01, 5.01-5.05) |
+| — | empreinte du `0005` collé : `shasum -a 256 supabase/migrations/0005_imports.sql` | `1af9e999d88958ea44ed739900cef842e54d1473b9d3f6a825ee23a388600ae0` (fichier du dépôt à `2b6a2fd`, celui du kit) |
+| idem | `notify pgrst, 'reload schema';` (collée seule) | jouée (fichier 3 du kit) |
+| vers 20 h 05 UTC | preuve `0005` (« Run without RLS ») | `999 BILAN : 0 faux sur 35`, `ok` vrai sur les 36 lignes (fichier 4 du kit) |
+| après 20 h 05 UTC | retrait de l'adresse de preuve | fichier 5 du kit remis à Neegan juste après la preuve ; compte de retour à consigner quand il sera rapporté |
 
 Tableau des verdicts (ordre, etape, attendu, obtenu, ok), tel que rendu par l'éditeur SQL :
 
 | ordre | etape | attendu | obtenu | ok |
 | --- | --- | --- | --- | --- |
-| … | … | … | … | … |
+| 0.01  | usage sur le schema temporaire pour authenticated                                                                          | accorde ou implicite                                                         | accorde explicitement                                                        | true |
+| 0.02  | un compte de preuve cree (annule au rollback)                                                                              | 1                                                                            | 1                                                                            | true |
+| 1.01  | public.imports presente, RLS activee                                                                                       | true                                                                         | true                                                                         | true |
+| 1.02  | quatre regles : une par commande, pour authenticated, is_allowed et owner_id partout, delete sous app.purge                | 4 : DELETE, INSERT, SELECT, UPDATE / {authenticated} / delete sous app.purge | 4 : DELETE, INSERT, SELECT, UPDATE / {authenticated} / delete sous app.purge | true |
+| 1.03  | declencheur imports_seq -> public.touch_server_seq(), actif                                                                | 1                                                                            | 1                                                                            | true |
+| 1.04  | index imports_recv (owner_id, server_seq)                                                                                  | 1                                                                            | 1                                                                            | true |
+| 1.05  | cle primaire composee (owner_id, id) : elle isole les comptes                                                              | 1                                                                            | 1                                                                            | true |
+| 1.06  | owner_id references auth.users on delete cascade                                                                           | 1                                                                            | 1                                                                            | true |
+| 1.07  | trois colonnes generees stockees, de type text : edition_id, recipe_id, status                                             | 3                                                                            | 3                                                                            | true |
+| 1.08  | un index (owner_id, colonne) par colonne generee : imports_edition_id, imports_recipe_id, imports_status                   | 3                                                                            | 3                                                                            | true |
+| 2.01  | authenticated : select, insert, update sur public.imports                                                                  | true / true / true                                                           | true / true / true                                                           | true |
+| 2.02  | anon : aucun privilege sur aucune table de public ; les 27 tables synchronisees y sont                                     | 27 synchronisees, 0 table avec un privilege anon                             | 27 synchronisees, 0 table avec un privilege anon                             | true |
+| 2.03  | anon : execute sur public.sync_push(jsonb)                                                                                 | false                                                                        | false                                                                        | true |
+| 2.04  | anon : execute sur public.sync_purge(text, text)                                                                           | false                                                                        | false                                                                        | true |
+| 2.05  | anon : execute sur public.sync_purge_all()                                                                                 | false                                                                        | false                                                                        | true |
+| 2.06  | anon : execute sur public.purge_tombstones()                                                                               | false                                                                        | false                                                                        | true |
+| 2.07  | authenticated : execute sur public.sync_push(jsonb)                                                                        | true                                                                         | true                                                                         | true |
+| 2.08  | authenticated : execute sur public.sync_purge(text, text)                                                                  | true                                                                         | true                                                                         | true |
+| 2.09  | authenticated : execute sur public.sync_purge_all()                                                                        | true                                                                         | true                                                                         | true |
+| 2.10  | authenticated : execute sur public.purge_tombstones()                                                                      | false                                                                        | false                                                                        | true |
+| 2.11  | les 27 tables synchronisees de public ont toutes la RLS activee                                                            | 27                                                                           | 27                                                                           | true |
+| 3.01  | A pousse une ligne imports (import de recette, a_lancer)                                                                   | accepted 1, adjusted 0, rejected 0                                           | accepted 1, adjusted 0, rejected 0                                           | true |
+| 3.02  | A relit sa ligne par ses colonnes generees : une ligne, edition_id / recipe_id / status conformes (compares, pas affiches) | 1 ligne, conformes                                                           | 1 ligne, conformes                                                           | true |
+| 3.03  | la fiche entiere est celle qui a ete poussee (comparee sans etre affichee)                                                 | conforme                                                                     | conforme                                                                     | true |
+| 3.04  | A pousse la meme ligne PLUS RECENTE, passee a a_verifier (transition du journal) : acceptee                                | accepted 1, rejected 0                                                       | accepted 1, rejected 0                                                       | true |
+| 3.05  | la colonne generee status suit la fiche : a_verifier, toujours une seule ligne                                             | 1 ligne, status conforme                                                     | 1 ligne, status conforme                                                     | true |
+| 3.06  | A pousse un import d index sans recipe_id (aucun champ requis pour imports) : accepte                                      | accepted 1, rejected 0                                                       | accepted 1, rejected 0                                                       | true |
+| 3.07  | sa colonne generee recipe_id est nulle, edition_id et status posees                                                        | 1 ligne, recipe_id nul, edition_id et status conformes                       | 1 ligne, recipe_id nul, edition_id et status conformes                       | true |
+| 4.01  | delete direct de A, sans app.purge : aucune ligne supprimee, sans erreur                                                   | 0                                                                            | 0                                                                            | true |
+| 4.02  | A garde ses deux lignes apres le delete                                                                                    | 2                                                                            | 2                                                                            | true |
+| 5.01  | public.sync_push(jsonb) : 27 magasins, la liste finit par assistant_config, imports                                        | 27 / true                                                                    | 27 / true                                                                    | true |
+| 5.02  | public.sync_purge(text, text) : 27 magasins, la liste finit par assistant_config, imports                                  | 27 / true                                                                    | 27 / true                                                                    | true |
+| 5.03  | public.sync_purge_all() : 27 magasins, la liste finit par assistant_config, imports                                        | 27 / true                                                                    | 27 / true                                                                    | true |
+| 5.04  | public.purge_tombstones() : 27 magasins, la liste finit par assistant_config, imports                                      | 27 / true                                                                    | 27 / true                                                                    | true |
+| 5.05  | sync_push : keys et required connaissent imports                                                                           | true / true                                                                  | true / true                                                                  | true |
+| 999   | BILAN                                                                                                                      | aucun verdict faux                                                           | 0 faux sur 35                                                                | true |
