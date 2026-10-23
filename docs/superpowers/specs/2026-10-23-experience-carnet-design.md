@@ -631,6 +631,10 @@ Lecture à froid (H) :
 
 ## 13. À trancher par Neegan (sans urgence ; chaque point a son défaut, construit tel quel)
 
+**Tranché le 23 octobre 2026 au soir : « Go » de Neegan sur la présentation des sept points = les sept défauts sont confirmés** (olive,
+« Cuisine OS », aperçus automatiques, « Bibliothèque », gestes repliés avec « Corriger » visible, tri par dernière modification, Aperçus
+d'abord). Chaque point reste renversable plus tard, au prix dit dans sa ligne.
+
 0. **L'olive comme couleur d'action** (renverse V-4 de la refonte visuelle, jamais confirmée) : olive (défaut, c'est la maquette) ou garder
    la tomate `#bc3026` (une ligne de `styles.css` et `theme.js:27`).
 1. **La marque** : garder « Cuisine OS » (défaut) ou passer à « Mitsu » (titre, manifeste, icône iPhone, `SHELL`).
