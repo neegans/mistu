@@ -1814,6 +1814,15 @@ rulings de construction tranchent ce que les tâches, les rondes, la revue final
   5227, Node 174/174, `--check` 0, `APP_VERSION 0.13.0`, `sw.js cuisine-os-v0.13.0-11`, `DB_VERSION` 4, secrets 0, invisibles 0, seule erreur de
   console le 404 de `/favicon.ico`. Registre copié dans `~/projects/mistu/.superpowers/sdd/2026-10-19-recettes-en-lot/` (`diff -rq` muet) ; tête
   finale = le commit de clôture qui pose cette rév. 5, `CLAUDE.md`, `STATE.md` et `docs/architecture.md`. Coût si faux : nul.
+- **R-D-29 (fusion sans la sonde R-D-8 ; décision de Neegan, 23 octobre 2026, écrite sur `main` après la clôture)** — Après les points 1 à 4 du bilan
+  de chaîne (`0005` et `0006` collées et prouvées, fonction `assistant` redéployée en version 4 et sondée, A, B, G et C fusionnés et poussés, suite
+  publique 4743/4743), Neegan a tranché « non je fais confiance, enchaine » : D est fusionné (`c8a0491`) et poussé SANS la sonde R-D-8 (§ 9 ; § 10 pas
+  1, 2, 7 et 8) ni la preuve § 10 du lot A — les deux murs de R-D-27 (c). Les mesures de la sonde (durée et justesse d'un classement de 5 photos,
+  `octets` dans `assistant_journal`, borne réelle d'un envoi de 10 photos, photo partagée de R-D-1) restent dues, sur le site public, par le parcours
+  complet de § 10 ; une constante amendée (`MAX_PHOTOS_CLASSEMENT`, `CLASSER_SYSTEM`) ou R-D-1 rouvert passe par un commit borné sur `main` (reculable
+  par `revert`) au lieu d'une ronde avant la fusion. R-D-27 (d) tient : tous les appareils sur la version servie (0.15.0 : la chaîne entière est
+  poussée le même jour) avant le premier classement réel d'une bibliothèque partagée. Coût si faux : un envoi de 10 photos refusé ou un classement
+  faux découvert en usage réel, corrigé par un commit sur `main` ; aucune donnée perdue (le journal garde la réponse brute).
 
 **Mesures de clôture** (`/verify` mécanique sur `1046c64`, registre `verify-D-1046c64.txt`) : suite `✅ 5228/5228` (épingle 5227, `tests/tests.js:240`),
 seule erreur de console le 404 de `/favicon.ico` ; Node 174/174 ; `--check` 0 ; `APP_VERSION 0.13.0` ; `sw.js cuisine-os-v0.13.0-11` ; `DB_VERSION` 4 ;

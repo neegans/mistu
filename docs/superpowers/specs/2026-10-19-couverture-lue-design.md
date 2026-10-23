@@ -1906,6 +1906,13 @@ null`) compte comme « vol ailleurs » depuis la ronde de clôture (R-E-31). Co�
 14 commits depuis `2bb855a`. Le registre `progress.md` de E n’a pas été alimenté par les agents : le chef l’a complété
   depuis les journaux du run (tâche par tâche, rapports à l’appui). Registre copié dans `~/projects/mistu/.superpowers/sdd/2026-10-19-couverture-lue/`
   (`diff -rq` muet) ; tête finale = le commit de clôture qui pose cette rév. 7, `CLAUDE.md`, `STATE.md` et `docs/architecture.md`. Coût si faux : nul.
+- **R-E-40 (fusion sans la preuve § 10 locale ; décision de Neegan, 23 octobre 2026, écrite sur `main` après la clôture)** — Neegan a tranché « non je
+  fais confiance, enchaine » : E est fusionné (`017f94d`) et poussé SANS la preuve réelle § 10 sur la branche servie localement (R-E-38 (a) et (b) :
+  l'origine `http://localhost:8093` et l'adresse de retour n'ont pas été posées, rien à retirer). Les sept points de § 10 (une vraie couverture, Open
+  Library, hors ligne, « Annuler », suppression, archive restaurée, le parcours qui confirme) restent dus sur le site public, après que tous les
+  appareils sont sur la version servie (0.15.0) ; une limite révélée amende la consigne § 3.3 ou la table § 3.2 par un commit borné sur `main`
+  (reculable par `revert`) au lieu d'une ronde avant la fusion. Coût si faux : une couverture mal lue en usage réel, corrigée par un commit sur `main`
+  ; aucune donnée perdue.
 
 **Mesures finales de la construction.** Tête de code `1e5e61b`, `APP_VERSION 0.14.0`, `sw.js cuisine-os-v0.14.0-12`, épingle 5680 (`tests/tests.js`),
 suite 5681/5681 (plus le 404 de
