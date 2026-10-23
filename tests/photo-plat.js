@@ -223,8 +223,28 @@ export async function runPhotoPlatTests({ eq, ok }) {
       try {
         eq([await code(IM.preparerPhotoDistante(new Blob([tete], { type: 'image/png' }))), decodes], ['trop_grande', 0], 'en-tête 5 000 × 4 000 → trop_grande AVANT décodage (createImageBitmap jamais appelé)');
         eq([await code(IM.preparerPhotoDistante(new Blob([new Uint8Array(10)], { type: 'image/jpeg' }))), decodes], ['indecodable', 0], '10 octets nuls annoncés image/jpeg → indecodable, sans décodage');
+        // Revue finale : l'en-tête JPEG lu comme libjpeg le lit. (a) Un FF de remplissage après SOI : « FF FF E0 00 » lu comme un segment faisait sauter à
+        // l'offset 57 348, sur un faux SOF 1 000 × 800 caché dans un COM ; le vrai SOF dit 5 000 × 4 000 (mesuré dans Chrome sans tête : createImageBitmap
+        // décode les VRAIES dimensions). (b) « FF 00 », que libjpeg écarte avant de chercher le marqueur suivant, lu comme un segment : même saut → null.
+        const sof = (h, l) => [0xff, 0xc0, 0x00, 0x11, 0x08, h >> 8, h & 0xff, l >> 8, l & 0xff, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01];
+        const APP0 = [0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00];
+        const L = 60000; const forgeA = new Uint8Array(21 + 2 + L + 19 + 8);
+        forgeA.set([0xff, 0xd8, 0xff, ...APP0]); forgeA.set([0xff, 0xfe, L >> 8, L & 0xff], 21); forgeA.set(sof(800, 1000), 57348); forgeA.set(sof(4000, 5000), 21 + 2 + L);
+        const forgeB = new Uint8Array(20 + 4 + 2 + 300 + 19 + 8);
+        forgeB.set([0xff, 0xd8, ...APP0]); forgeB.set([0xff, 0x00, 0x01, 0x00], 20); forgeB.set([0xff, 0xfe, 0x01, 0x2c], 24); forgeB.set(sof(800, 1000), 20 + 2 + 256); forgeB.set(sof(4000, 5000), 24 + 2 + 300);
+        const jA = new Blob([forgeA], { type: 'image/jpeg' }); const jB = new Blob([forgeB], { type: 'image/jpeg' });
+        eq([await IM.dimensionsImage(jA), await code(IM.preparerPhotoDistante(jA)), decodes], [{ largeur: 5000, hauteur: 4000, type: 'image/jpeg' }, 'trop_grande', 0],
+          'JPEG à FF de remplissage et faux SOF caché dans un COM → les VRAIES dimensions (5 000 × 4 000), trop_grande AVANT décodage (createImageBitmap jamais appelé)');
+        eq([await IM.dimensionsImage(jB), await code(IM.preparerPhotoDistante(jB)), decodes], [null, 'indecodable', 0], 'JPEG à « FF 00 » avant un faux SOF → en-tête illisible (null), indecodable, sans décodage');
+        const avantSof = (m) => { const o = new Uint8Array(20 + 4 + 19 + 8); o.set([0xff, 0xd8, ...APP0]); o.set([0xff, m, 0x00, 0x02], 20); o.set(sof(800, 1000), 24); return new Blob([o], { type: 'image/jpeg' }); };
+        eq([await IM.dimensionsImage(avantSof(0xd9)), await IM.dimensionsImage(avantSof(0xda)), await code(IM.preparerPhotoDistante(avantSof(0xda))), decodes], [null, null, 'indecodable', 0],
+          'EOI ou SOS AVANT le SOF (un flux que libjpeg refuse) → en-tête illisible (null), indecodable, sans décodage');
         const heic = new Blob([new Uint8Array(64).fill(7)], { type: 'image/heic' });
         eq([await code(IM.preparerPhotoLocale(heic)), decodes > 0], ['indecodable', true], 'preparerPhotoLocale inchangée : un image/heic d’en-tête illisible passe au ré-encodage (createImageBitmap appelé), qui tranche');
+        const vraie = await octetsDe(await imageTest('r.jpg', '#a52', 600, 400));
+        const remplie = new Blob([vraie.subarray(0, 2), Uint8Array.of(0xff, 0xff, 0xff), vraie.subarray(2)], { type: 'image/jpeg' });
+        eq([await IM.dimensionsImage(remplie), await code(IM.preparerPhotoDistante(remplie))], [{ largeur: 600, hauteur: 400, type: 'image/jpeg' }, 'ok'],
+          'revue finale : un vrai JPEG à trois FF de remplissage après SOI (la norme les admet) → lu 600 × 400 et accepté, jamais un faux refus');
       } finally { globalThis.createImageBitmap = vrai; }
     });
 
@@ -715,8 +735,11 @@ export async function runPhotoPlatTests({ eq, ok }) {
         try {
           await attendre(() => zoneDe(pZ5)?.querySelector('[data-role="reessayer-photo"]')?.disabled === true, '« Réessayer » éteint hors ligne');
           const avantH = corpsEnvoyes.length;
-          zoneDe(pZ5).querySelector('[data-role="reessayer-photo"]').click(); await tick();
-          eq([zoneDe(pZ5).textContent.includes('Tu es hors ligne.'), corpsEnvoyes.length - avantH], [true, 0], '« Réessayer » hors ligne → bouton éteint, « Tu es hors ligne. », zéro POST');
+          // Revue finale : un clic sur un bouton ÉTEINT ne déclenche rien, garde ou pas — la tape est jouée directement (comme en 3) : c'est la garde hors
+          // ligne de la descente qu'elle éprouve (retirée, un POST partirait).
+          const rH = garde(await PP.rapatrierPhotoWeb('rc_z5', opts({ tape: true, enLigne: () => false })));
+          eq([zoneDe(pZ5).textContent.includes('Tu es hors ligne.'), rH, corpsEnvoyes.length - avantH], [true, { issue: 'refuse', raison: 'hors_ligne' }, 0],
+            '« Réessayer » hors ligne → bouton éteint, « Tu es hors ligne. » ; la tape elle-même → refuse(hors_ligne), zéro POST');
         } finally { enLigneTest = true; window.dispatchEvent(new Event('online')); }
         await poser(fiche('rc_z6', { photo_source_url: 'https://cdn.test/z6.png' })); await versionsPour('rc_z6');
         const pZ6 = await monter('rc_z6', ctxSync(null));
@@ -740,8 +763,24 @@ export async function runPhotoPlatTests({ eq, ok }) {
         await attendre(() => ligneWeb(pZ8)?.getAttribute('role') === 'status', 'descente en cours (z8)');
         bouton(zoneDe(pZ8), 'Choisir une image').click();
         await attendre(async () => (await db.get('recipes', 'rc_z8')).photo_origin === 'image', 'photo de la personne posée pendant la descente');
+        // Revue finale (I-F6) : la descente vole encore, mais la zone dit l'état vrai — la photo choisie, sans « Récupération… » (elle finira fiche_changee).
+        await attendre(() => !!pZ8.querySelector('[data-role="photo-plat"] img'), 'la photo de la personne en tête (z8)');
+        eq([PP.recuperationEnCours('rc_z8'), ligneWeb(pZ8)?.textContent ?? null], [true, null], 'photo choisie PENDANT la descente : la descente vole encore, la zone ne dit plus « Récupération de la photo du plat… » sous la photo de la personne (I-F6)');
         suspendus.shift()(200, corps200());
         eq([garde(await pz8).raison, (await db.get('recipes', 'rc_z8')).photo_origin], ['fiche_changee', 'image'], 'photo choisie PENDANT la descente → la photo de la personne reste (I-F5)');
+        // Et « Retirer » pendant la descente d'une AUTRE image (une relecture : la photo web en place, l'image suivante en vol) : la zone dit le cas 1.
+        const jz9 = await imageTest('z9.jpg', '#39a', 400, 300); const sz9 = await sha256Hex(jz9); await repo.putFile(sz9, jz9, { mime: 'image/jpeg', origin: 'device' });
+        await poser(fiche('rc_z9', { photo_sha256: sz9, photo_origin: 'web', photo_source_url: 'https://cdn.test/z9a.png' })); await versionsPour('rc_z9');
+        const pZ9 = await monter('rc_z9');
+        file.push('suspendre');
+        const pz9 = auto('rc_z9', { candidat: 'https://cdn.test/z9b.png' });
+        await attendre(() => suspendus.length === 1 && ligneWeb(pZ9)?.getAttribute('role') === 'status', 'descente en vol sous la photo web (z9)');
+        bouton(zoneDe(pZ9), 'Retirer').click();
+        await attendre(() => !pZ9.querySelector('[data-role="photo-plat"] img') && !zoneDe(pZ9).querySelector('button[disabled]'), 'photo retirée, zone redessinée (z9)');
+        eq([PP.recuperationEnCours('rc_z9'), ligneWeb(pZ9)?.textContent ?? null, zoneDe(pZ9).textContent.includes('Ajoute une photo du plat')], [true, null, true],
+          '« Retirer » PENDANT la descente d’une autre image : la zone dit « Ajoute une photo du plat… », sans « Récupération… » (I-F6)');
+        suspendus.shift()(200, corps200());
+        eq([garde(await pz9).raison, (await db.get('recipes', 'rc_z9')).photo_sha256 ?? null], ['fiche_changee', null], '« Retirer » pendant la descente → fiche_changee, rien de reposé (I-F5)');
 
         eq([tous.length > 0, tous.every((u) => u === URL_ASSISTANT), reseau], [true, true, 0], 'S-8 / I-F3 : pendant tout le bloc, seul /functions/v1/assistant est appelé (jamais l’hôte de l’image)');
         eq(resultats.some((x) => JSON.stringify(x).includes('jeton-rapatriement-sentinelle')), false, 'le jeton n’est dans aucun résultat');
@@ -905,13 +944,26 @@ export async function runPhotoPlatTests({ eq, ok }) {
       mA.entete.remove(); mA.zone.remove(); // la fiche A quittée
       inserer(await monter('rc_vc'));
       const apresC = PP.vuesPhotoPlat();
-      await monter('rc_vd'); // jamais insérée (route abandonnée, fiche sans version : D-F8)
+      // jamais insérée (route abandonnée, fiche sans version : D-F8), montée il y a plus de deux minutes (revue finale : la vie d'une vue jamais insérée)
+      await PP.monterPhotoPlat(await db.get('recipes', 'rc_vd'), { sync: syncR1 }, { repo, pickFiles: async () => [], toast: () => {}, enLigne: () => true, instant: () => Date.now() - 2 * 60 * 1000 - 1 });
       inserer(await monter('rc_ve'));
       const apresE = PP.vuesPhotoPlat();
       window.dispatchEvent(new Event('online')); // une notification voit B, C et E dans le document
       mB.entete.remove(); mB.zone.remove(); // puis B quittée
       window.dispatchEvent(new Event('online'));
-      eq([deux, apresC, apresE, PP.vuesPhotoPlat()], [2, 2, 3, 2], 'vues bornées : chaque montage purge les zones détachées (A quittée, D jamais insérée) ; une zone vue insérée puis détachée (B) est purgée par la notification suivante');
+      eq([deux, apresC, apresE, PP.vuesPhotoPlat()], [2, 2, 3, 2], 'vues bornées : chaque montage purge les zones détachées (A quittée, vue insérée ; D jamais insérée, montée il y a plus de 2 min) ; une zone vue insérée puis détachée (B) est purgée par la notification suivante');
+    });
+
+    await blocR1('revue finale : deux rendus de la même fiche qui se chevauchent — le plus ancien, monté APRÈS, ne purge pas la vue que le routeur insère', async ({ PP, repo, db, scene, mettre }) => {
+      const monter = async (id) => PP.monterPhotoPlat(await db.get('recipes', id), { sync: syncR1 }, { repo, pickFiles: async () => [], toast: () => {}, enLigne: () => true });
+      await mettre(fiche('rc_vr'));
+      const recent = await monter('rc_vr'); // le rendu N+1 monte d'abord (son jeton est venu tout de suite)
+      await monter('rc_vr'); // le rendu N, retardé, monte ensuite ; le routeur ne l'insérera jamais (le plus récent gagne)
+      scene.append(recent.entete, recent.zone); // le routeur insère N+1
+      await mettre({ ...(await db.get('recipes', 'rc_vr')), photo_source_url: 'https://cdn.test/vr.png' }); // une écriture que seule une notification fait voir
+      window.dispatchEvent(new Event('online'));
+      await attendre(() => recent.zone.textContent.includes('Photo du plat non récupérée.'), 'la vue insérée redessinée par la notification');
+      ok(!recent.zone.textContent.includes('Ajoute une photo du plat'), 'la vue du rendu le plus récent, insérée par le routeur, reçoit encore les notifications après le montage tardif du plus ancien');
     });
 
     await blocR1('ronde 1 : l’image de tête est gardée telle quelle par un redessin qui ne la change pas (aucune URL blob: neuve, aucun second décodage)', async ({ PP, repo, db, scene, mettre }) => {

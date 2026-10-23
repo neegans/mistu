@@ -1460,12 +1460,40 @@ export async function runLectureWebTests({ eq, ok }) {
         eq([(await db.byIndex('imports', 'recipe_id', 'rc_hl'))[0].status, !!(await db.get('recipe_versions', hl.current_version_id)), postsImage().length - n, hl.photo_source_url, hl.photo_sha256 ?? null], ['enregistre', true, 0, IMG, null],
           'hors ligne à « Enregistrer » : import enregistre et version écrite, ZÉRO POST image-web, photo_source_url posé (rapatriement attendu), photo_sha256 nul');
 
+        // 13. Revue finale (D-F16) : la fiche s'écrit DANS la transaction, sur la fiche RELUE — une photo posée entre la dernière relecture d'« Enregistrer »
+        //     et sa transaction (une descente en vol qui aboutit, « Choisir une image » dans un autre onglet) n'est plus effacée par la copie fabriquée.
+        let poses = 0;
+        const photoEntreDeux = (champs) => ({ ...repo, transitionner: async (store, key, opts) => {
+          if (store === 'imports' && opts?.puts?.recipe_versions) { poses += 1; const f = await db.get('recipes', (await db.get('imports', key)).recipe_id); await db.mutate({ puts: { recipes: [{ ...f, ...champs }] }, origin: 'device' }); }
+          return repo.transitionner(store, key, opts);
+        } });
+        await db.mutate({ puts: { recipes: [signet('rc_fx'), signet('rc_fy')] }, origin: 'device' });
+        root = await lireAvec('rc_fx', {}, { repo: photoEntreDeux({ photo_sha256: H('9'), photo_origin: 'image', photo_source_url: null }) });
+        await enregistrer(root, 'rc_fx');
+        const fx = await db.get('recipes', 'rc_fx');
+        eq([poses, fx.availability, fx.photo_sha256, fx.photo_origin, fx.photo_source_url], [1, 'available', H('9'), 'image', null],
+          'une photo posée entre la relecture d’« Enregistrer » et sa transaction survit : la recette est enregistrée, les trois champs de la photo relus dans la transaction');
+        root = await lireAvec('rc_fy', { image_url: IMG }, { repo: photoEntreDeux({ photo_sha256: H('8'), photo_origin: 'image', photo_source_url: null }) });
+        ok(!!annonce(root), 'annonce affichée (rc_fy)');
+        n = postsImage().length;
+        await enregistrer(root, 'rc_fy');
+        const fy = await db.get('recipes', 'rc_fy');
+        eq([poses, fy.availability, fy.photo_sha256, fy.photo_origin, fy.photo_source_url, postsImage().length - n], [2, 'available', H('8'), 'image', null, 0],
+          'image annoncée, puis une photo de la personne posée juste avant la transaction : elle survit (pas de photo_source_url reposé sur une fiche relue AVEC photo), zéro POST image-web');
+        // Et une fiche SUPPRIMÉE dans la même fenêtre (une tombale reçue) : jamais ressuscitée par la copie fabriquée, aucune version orpheline (refus inconnu).
+        await db.mutate({ puts: { recipes: [signet('rc_fz')] }, origin: 'device' });
+        root = await lireAvec('rc_fz', {});
+        const supprimeEntreDeux = { ...repo, transitionner: async (store, key, opts) => { if (store === 'imports' && opts?.puts?.recipe_versions) await db.mutate({ deletes: { recipes: ['rc_fz'] }, origin: 'device' }); return repo.transitionner(store, key, opts); } };
+        const rFz = await W.enregistrerLecture((await ligneDe('rc_fz')).id, { repo: supprimeEntreDeux, maintenant: () => NOW, choisir });
+        eq([rFz, await db.get('recipes', 'rc_fz') ?? null, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_fz')).length, (await ligneDe('rc_fz'))?.status], [{ issue: 'refuse', raison: 'inconnu' }, null, 0, 'a_verifier'],
+          'fiche supprimée entre la relecture d’« Enregistrer » et sa transaction : refus inconnu, jamais ressuscitée, aucune version écrite, la lecture reste a_verifier');
+
         // 9. Filets : aucun réseau ; image_url n'est jamais rendue (D-F11, test de source sur import-web.js, puis le DOM de chaque aperçu à image — ronde 1) ;
         //    la console ne porte que l'échec attendu (ronde 1) ; le jeton de la session n'est écrit nulle part (ronde 1).
         eq([reseau, appels.every((a) => a.outil === 'lecture-web' || a.outil === 'image-web')], [0, true], 'aucun appel réseau hors du fetch injecté ; seuls lecture-web et image-web');
         eq(srcWeb.split('\n').filter((l) => l.includes('image_url') && /textContent|\bt\(|\bel\(/.test(l)), [], 'D-F11 : image_url n’entre dans aucune ligne d’import-web.js qui porte textContent, t( ou el(');
-        eq([ecransImage.length, fuitesImage], [17, []], 'D-F11 (DOM, ronde 1) : aucun des 17 aperçus a_verifier d’une page à image ne rend IMG, IMG2 ni l’hôte cdn.site.test (texte ni balisage)');
-        eq([...journal], ['[cuisine-os] photo_web.echec {"id":"rc_ec","reason":"inaccessible"}'],'console (cas 7 à 12) : une seule erreur journalisée, l’échec du rapatriement de rc_ec — rien d’autre');
+        eq([ecransImage.length, fuitesImage], [18, []], 'D-F11 (DOM, ronde 1) : aucun des 18 aperçus a_verifier d’une page à image ne rend IMG, IMG2 ni l’hôte cdn.site.test (texte ni balisage)');
+        eq([...journal], ['[cuisine-os] photo_web.echec {"id":"rc_ec","reason":"inaccessible"}'],'console (cas 7 à 13) : une seule erreur journalisée, l’échec du rapatriement de rc_ec — rien d’autre');
         const SENTINELLE = SESSION.access_token;
         eq([JSON.stringify(await db.getAll('recipes')), JSON.stringify(await db.getAll('imports')), JSON.stringify(journal), scene.innerHTML].map((s) => s.includes(SENTINELLE)), [false, false, false, false],
           'le jeton de la session (sentinelle) n’est ni dans recipes, ni dans imports, ni au journal, ni dans le DOM');

@@ -274,7 +274,9 @@ function portionsDe(v, profondeur = 0) {
 const SAUTES = new Set(['script', 'style', 'noscript', 'svg', 'template']);
 const HORS_TEXTE = new Set(['nav', 'header', 'footer', 'aside', 'form']);
 const ZONES = new Set(['main', 'article', 'body']);
-const TYPE_JSONLD = /\btype\s*=\s*["']?\s*application\/ld\+json/;
+// Revue finale du lot F (S-4) : « =\s* » puis, au plus, un guillemet suivi de blancs — le même langage que « =\s*["']?\s* », sans ses deux suites de blancs
+// adjacentes (le remède de lireMetaTranche) : 2 Mio de « <script type= » + 2 030 blancs fermés coûtaient ≈ 8 s à lirePageHtml.
+const TYPE_JSONLD = /\btype\s*=\s*(?:["']\s*)?application\/ld\+json/;
 // La fermeture « </nom » d'un élément, suivie d'une espace, de « / » ou de « > » (« </scriptx » n'en est pas une), à partir de `depuis` ; -1 sinon.
 // Linéaire : chaque candidat écarté fait repartir la recherche après lui.
 function fermetureEn(bas, nom, depuis) {
@@ -454,15 +456,24 @@ const ogDesMetas = (metas) => { const b = metas.get('og:image'); const v = typeo
 export function imageOgDe(html) {
   return typeof html === 'string' ? ogDesMetas(balayer(html).metas) : null;
 }
+// Un candidat → l'adresse absolue validée, ou null. Revue finale du lot F : un candidat « dégénéré » ne désigne pas une image — un fragment ou une requête
+// seuls (« # », « #top », « ?v=1 »), un dossier (chemin résolu qui finit par « / » : « . », « ./ », « / ») ou la page elle-même, fragment ôté — : null
+// (sinon un appel payé partait pour un 422 pas_une_image certain).
+function adresseImage(candidat, { urlFinale, hotesRefuses }) {
+  if (typeof candidat !== 'string' || !candidat || /^\s*[#?]/.test(candidat)) return null;
+  let abs;
+  try { abs = new URL(candidat, urlFinale); } catch { return null; }
+  const v = valideAdresse(abs.href, { hotesRefuses });
+  if (!v.ok || abs.pathname.endsWith('/')) return null;
+  let page = null;
+  try { const p = new URL(urlFinale); p.hash = ''; page = p.href; } catch { page = null; }
+  return v.href === page ? null : v.href;
+}
 // D-F3 : l'image du Recipe RETENU, sinon og:image — sauf sur une page de liste (autresRecettes > 0 : l'image de partage serait celle d'une autre recette).
+// Revue finale : chaque candidat est VALIDÉ avant de céder la place — une image du JSON-LD refusée (http:, IP, port, dégénérée) laisse og:image tenter la sienne.
 function imageUrlDesMetas(objet, metas, { urlFinale, hotesRefuses = [], autresRecettes = 0 } = {}) {
   try {
-    const candidat = (objet ? imageDe(objet) : null) ?? (autresRecettes > 0 ? null : ogDesMetas(metas));
-    if (!candidat) return null;
-    let abs;
-    try { abs = new URL(candidat, urlFinale); } catch { return null; }
-    const v = valideAdresse(abs.href, { hotesRefuses });
-    return v.ok ? v.href : null;
+    return (objet ? adresseImage(imageDe(objet), { urlFinale, hotesRefuses }) : null) ?? (autresRecettes > 0 ? null : adresseImage(ogDesMetas(metas), { urlFinale, hotesRefuses }));
   } catch { return null; }
 }
 export function imageUrlDe(objet, html, { urlFinale, hotesRefuses = [], autresRecettes = 0 } = {}) {
@@ -522,14 +533,16 @@ export function lirePageHtml({ html, urlFinale, contentType, hotesRefuses = [] }
   void contentType;
   const scan = balayer(typeof html === 'string' ? html : '');
   let premiere = null; let objetRecette = null; let autres = 0;
-  for (const o of trouverRecettes(objetsDesBlocs(scan.blocs))) {
+  const trouvees = trouverRecettes(objetsDesBlocs(scan.blocs));
+  for (const o of trouvees) {
     const r = recetteDepuisJsonLd(o);
     if (!r.lisible) continue;
     if (premiere === null) { premiere = r.recette; objetRecette = o; } else autres += 1;
   }
   // Lot F (D-F3) : l'image de l'objet Recipe RETENU (brut), sinon og:image — écartée d'une page de liste ; null sans l'un ni l'autre. `autres`
-  // ne compte que les Recipe lisibles APRÈS la première : il vaut 0 sans Recipe lisible (chemin modele).
-  const image_url = imageUrlDesMetas(objetRecette, scan.metas, { urlFinale, hotesRefuses, autresRecettes: autres });
+  // ne compte que les Recipe lisibles APRÈS la première : il vaut 0 sans Recipe lisible (chemin modele). Revue finale : la garde « page de liste » compte
+  // TOUTES les Recipe trouvées hors une, lisibles ou non (une page de catégorie dont les Recipe sont des vignettes illisibles n'a pas d'og:image à elle).
+  const image_url = imageUrlDesMetas(objetRecette, scan.metas, { urlFinale, hotesRefuses, autresRecettes: Math.max(autres, trouvees.length - 1) });
   let hote = null;
   try { hote = sansPointFinal(new URL(urlFinale).hostname); } catch { hote = null; }
   const commun = { url_finale: typeof urlFinale === 'string' ? urlFinale : null, hote, titre_page: titreDuBalayage(scan.titre), auteur: (objetRecette ? auteurDe(objetRecette) : null) ?? auteurDuBalayage(scan.metas), site: siteDuBalayage(objetRecette, scan.metas), lue_le: null };

@@ -36,6 +36,11 @@ export async function dimensionsImage(blob) {
       while (o + 9 < b.length) {
         if (b[o] !== 0xff) return null;
         const m = b[o + 1];
+        // Revue finale du lot F : lu comme libjpeg le lit (next_marker). Un FF de remplissage avant un marqueur est sauté (la norme l'admet) : « FF FF E0 00 »
+        // se lisait comme un segment de 57 344 octets, et un faux SOF caché dans un COM passait le mur distant. FF 00 (que libjpeg écarte avant de chercher le
+        // marqueur suivant), EOI ou SOS avant le SOF : un flux qu'on ne lirait pas comme le décodeur → null (une image distante est refusée, jamais décodée).
+        if (m === 0xff) { o += 1; continue; }
+        if (m === 0x00 || m === 0xd9 || m === 0xda) return null;
         if (m === 0xd8 || (m >= 0xd0 && m <= 0xd7) || m === 0x01) { o += 2; continue; }
         const taille = u16be(o + 2);
         if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return { largeur: u16be(o + 7), hauteur: u16be(o + 5), type: 'image/jpeg' };

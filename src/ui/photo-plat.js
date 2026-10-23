@@ -21,13 +21,13 @@ import { section, sessionAssistant, texteRefusAssistant, texteEchecAssistant, me
 const pointeur = (f) => (pointeurValide(f) ? f.photo_sha256 : null);
 const lireEnLigne = () => (typeof navigator === 'undefined' ? true : navigator.onLine !== false);
 let enLigneFlag = lireEnLigne();
-const enVol = new Map();          // recipe_id → { controller, promesse } : un rapatriement par fiche et par document (D-F7)
+const enVol = new Map();          // recipe_id → { controller, promesse, depart } : un rapatriement par fiche et par document (D-F7) ; depart = les trois champs lus au départ
 const derniersEchecs = new Map(); // recipe_id → { raison, extra, tape, url } : la raison du dernier échec, pour l'adresse tentée (D-F17)
-// Les zones montées : { root (la section), entete, recipeId, redessiner, inseree }. Ronde 1 : le routeur insère la racine APRÈS la fin de la route,
+// Les zones montées : { root (la section), entete, recipeId, redessiner, inseree, montee }. Ronde 1 : le routeur insère la racine APRÈS la fin de la route,
 // parfois bien après le montage (une fiche à pages attend encore ses vignettes) — une vue jamais vue dans le document est REDESSINÉE (ses nœuds y
 // entreront à jour), jamais purgée par notifier ; seule une vue vue insérée puis détachée l'est. Une vue jamais insérée (route abandonnée, fiche sans
-// version : D-F8) est purgée au montage suivant (enregistrerVue) : l'ensemble reste borné en permanence (motif de search.js), sans attendre une
-// notification (sur le Mac, toujours en ligne, il n'en vient parfois aucune).
+// version : D-F8) est purgée par un montage suivant, deux minutes au moins après le sien (enregistrerVue, revue finale) : l'ensemble reste borné en
+// permanence (motif de search.js), sans attendre une notification (sur le Mac, toujours en ligne, il n'en vient parfois aucune).
 const vues = new Set();
 const dansLeDocument = (v) => v.root.isConnected || v.entete.isConnected;
 function notifier(recipeId = null) {
@@ -37,15 +37,25 @@ function notifier(recipeId = null) {
     if (recipeId === null || v.recipeId === recipeId) v.redessiner();
   }
 }
+// Revue finale : l'ordre des montages n'est pas celui des rendus — deux rendus de la même fiche qui se chevauchent, le plus ancien peut monter APRÈS le
+// plus récent, que le routeur insérera ; purger « tout ce qui n'est pas dans le document » le privait de toute notification. Une vue vue insérée puis
+// détachée est purgée tout de suite ; une vue jamais insérée, seulement VIE_SANS_INSERTION_MS après son montage (l'ensemble reste borné).
+const VIE_SANS_INSERTION_MS = 2 * 60 * 1000;
 function enregistrerVue(vue) {
-  for (const v of [...vues]) if (!dansLeDocument(v)) vues.delete(v);
+  for (const v of [...vues]) {
+    if (dansLeDocument(v)) v.inseree = true;
+    else if (v.inseree || vue.montee - v.montee > VIE_SANS_INSERTION_MS) vues.delete(v);
+  }
   vues.add(vue);
 }
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => { enLigneFlag = true; notifier(); });
   window.addEventListener('offline', () => { enLigneFlag = false; notifier(); });
 }
-export const recuperationEnCours = (recipeId) => enVol.has(recipeId);
+// Revue finale (I-F6) : avec la fiche relue, une descente n'est « en cours » que si les trois champs n'ont pas bougé depuis son départ — une photo choisie
+// ou retirée pendant la descente la condamne (fiche_changee, I-F5) : la zone ne dit plus « Récupération… » sous la photo de la personne.
+const inchangeeDepuis = (depart, relue) => !!relue && relue.photo_sha256 === depart.photo_sha256 && relue.photo_origin === depart.photo_origin && adressesEgalesOuNulles(relue.photo_source_url, depart.photo_source_url);
+export const recuperationEnCours = (recipeId, relue = undefined) => { const e = enVol.get(recipeId); return !!e && (relue === undefined || !e.depart || inchangeeDepuis(e.depart, relue)); };
 export const attendreRecuperation = (recipeId) => enVol.get(recipeId)?.promesse ?? Promise.resolve();
 export function reinitialiserPhotoPlat() { for (const e of enVol.values()) e.controller.abort(); enVol.clear(); vues.clear(); derniersEchecs.clear(); enLigneFlag = lireEnLigne(); } // tests seulement
 export const vuesPhotoPlat = () => vues.size; // tests seulement (ronde 1 : l'ensemble des vues reste borné)
@@ -211,7 +221,7 @@ export async function retirerPhotoPlat(recipeId, { repo = repoModule, attendu = 
 const adressesEgalesOuNulles = (a, b) => (adresseImageAdmise(a) === null && adresseImageAdmise(b) === null) || memeAdresseImage(a, b);
 export function rapatrierPhotoWeb(recipeId, options = {}) {
   if (enVol.has(recipeId)) return Promise.resolve({ issue: 'refuse', raison: 'vol_tenu' });
-  const entree = { controller: new AbortController(), promesse: null };
+  const entree = { controller: new AbortController(), promesse: null, depart: null };
   enVol.set(recipeId, entree);
   notifier(recipeId);
   entree.promesse = descendre(recipeId, entree, options).finally(() => { if (enVol.get(recipeId) === entree) enVol.delete(recipeId); notifier(recipeId); });
@@ -233,6 +243,7 @@ async function descendre(recipeId, entree, { candidat = null, tape = false, ctx 
     const fiche = await repo.get('recipes', recipeId);
     if (!fiche) return refuser('fiche_absente');
     const depart = { photo_sha256: fiche.photo_sha256, photo_origin: fiche.photo_origin, photo_source_url: fiche.photo_source_url };
+    entree.depart = depart;
     const sha = pointeur(fiche);
     // Les deux refus de D-F10 (photo_manuelle, deja_la) sont ceux de candidatPhotoWeb (photo-web.js), ici pour NOMMER la raison : une règle changée là se
     // change ici (ronde 1 : le pointeur, lui, a une seule définition, pointeurValide).
@@ -251,7 +262,7 @@ async function descendre(recipeId, entree, { candidat = null, tape = false, ctx 
     // Garde des trois champs (I-F1, I-F5, D-F18), AVANT putFile puis encore à l'écriture — ronde 1 : rejouée DANS la transaction (ecrireChamps), une
     // photo choisie qui s'engage juste avant n'est jamais écrasée : la personne a pu choisir une photo, retirer, refuser le rapatriement, ou une
     // relecture changer l'adresse — rien n'est alors écrasé.
-    const inchangee = (relue) => relue.photo_sha256 === depart.photo_sha256 && relue.photo_origin === depart.photo_origin && adressesEgalesOuNulles(relue.photo_source_url, depart.photo_source_url);
+    const inchangee = (relue) => inchangeeDepuis(depart, relue);
     const relue = await repo.get('recipes', recipeId);
     if (!relue) return refuser('fiche_absente');
     if (!inchangee(relue)) return refuser('fiche_changee');
@@ -271,7 +282,7 @@ async function descendre(recipeId, entree, { candidat = null, tape = false, ctx 
 
 // --- Le montage (§ 4.1.1) : l'emplacement de tête (un div, jamais null), la section « Photo du plat », les gestes. Monter n'appelle RIEN (I-F11).
 // Les redessins sont sérialisés (P-15) ; les URL blob: d'avant sont relevées juste avant le remplacement et révoquées APRÈS (D-T9).
-export async function monterPhotoPlat(recipe, ctx, { repo = repoModule, pickFiles = pickDom, toast = toastDom, fetch = undefined, enLigne = () => enLigneFlag, ctxF = {} } = {}) {
+export async function monterPhotoPlat(recipe, ctx, { repo = repoModule, pickFiles = pickDom, toast = toastDom, fetch = undefined, enLigne = () => enLigneFlag, ctxF = {}, instant = Date.now } = {}) {
   const entete = el('div', { dataset: { role: 'emplacement-photo-plat' } });
   const conteneur = el('div', { dataset: { role: 'zone-photo-plat' } });
   const zone = section(t('Photo du plat'), conteneur);
@@ -288,7 +299,7 @@ export async function monterPhotoPlat(recipe, ctx, { repo = repoModule, pickFile
     if (sha) { try { fichier = (await repo.getFile(sha)) ?? null; } catch { fichier = null; } }
     // `connecte` relu à chaque dessin (ronde 1) ; le jeton lui-même n'est lu qu'au geste (sessionAssistant). `absente` (cas 3) ne sert que de témoin à
     // I-F10 : l'état du fichier vit en tête, la zone ne le rend pas.
-    const etat = etatZonePlat(relue, { present: !!typeAffichage(fichier)?.startsWith('image/'), enVol: recuperationEnCours(relue.id), enLigne: enLigne(), connecte: !!ctx?.sync?.user, occupe, echec: derniersEchecs.get(relue.id) ?? null });
+    const etat = etatZonePlat(relue, { present: !!typeAffichage(fichier)?.startsWith('image/'), enVol: recuperationEnCours(relue.id, relue), enLigne: enLigne(), connecte: !!ctx?.sync?.user, occupe, echec: derniersEchecs.get(relue.id) ?? null });
     const cle = fichier?.blob instanceof Blob ? JSON.stringify([sha, typeAffichage(fichier), relue.photo_origin === 'web' ? String(relue.source_url ?? '') : null]) : null;
     const garder = cle !== null && cle === cleImage && entete.firstElementChild !== null;
     const figure = garder ? null : await figurePhotoPlat(relue, { repo, ctxF, fichier });
@@ -337,7 +348,7 @@ export async function monterPhotoPlat(recipe, ctx, { repo = repoModule, pickFile
   // Ronde 1 : la vue est enregistrée AVANT le premier dessin et n'est jamais purgée avant d'avoir été vue dans le document (notifier) — une descente finie
   // entre le montage et l'insertion par le routeur la redessine, quel que soit le moment où renderRecipe finit (la garde « setTimeout 0 » d'import-cible.js,
   // qui tirait avant l'insertion d'une fiche à pages, est retirée).
-  enregistrerVue({ root: zone, entete, recipeId: recipe.id, redessiner, inseree: false });
+  enregistrerVue({ root: zone, entete, recipeId: recipe.id, redessiner, inseree: false, montee: instant() });
   await redessiner();
   return { entete, zone, gestes };
 }

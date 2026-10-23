@@ -18,7 +18,8 @@ import { sessionAssistant, carteConnexion, texteRefusAssistant, texteEchecAssist
 import { demarrerConnexion } from './settings.js';
 import { signetModel, fabriquerSignet, LIMITES_SIGNET } from './signet.js';
 import { DOCUMENT_ID, BATTEMENT_MS, prendreVol, libererVol, volTenu, volEnCours } from './vol.js';
-import { candidatPhotoWeb } from '../domain/photo-web.js';
+import { candidatPhotoWeb, pointeurValide } from '../domain/photo-web.js';
+import { assertVocabulaire, originePhotoAdmise } from '../domain/vocabulaire.js';
 import { ligneAnnoncePhotoWeb, rapatrierPhotoWeb } from './photo-plat.js';
 
 const horloge = () => new Date().toISOString();
@@ -269,10 +270,21 @@ export async function enregistrerLecture(importId, { repo = repoModule, remplace
   const fab = fabriquerLectureWeb(lu.recette, { signet: fiche.signet, versions: fiche.versions, page: lu.page, sourceKind: lu.source_kind, importId: ligne.id, modele: modeleBorne(ligne.model), maintenant: maintenant(), photoAnnoncee, ...(choix === false ? { remplacer: false } : {}) });
   const cleLue = cleLecture(ligne);
   const cloture = (c) => { if (cleLecture(c) !== cleLue) throw new TransitionRefusee('imports', ligne.id, c.status); return { status: 'enregistre', reponse_brute: null, finished_at: maintenant() }; };
+  // Revue finale du lot F (D-F16) : la fiche s'écrit par une condition { key, fusion } — les trois champs de la photo relus DANS la transaction (une descente
+  // ou « Choisir une image » engagée après relire() n'est plus effacée) ; seul le rapatriement attendu (D-F18) repose photo_source_url, sur une fiche relue
+  // sans photo valide. Supprimée entre-temps : jamais ressuscitée (refus inconnu, rien d'écrit).
+  const ficheDans = (c) => {
+    if (!c) throw new TransitionRefusee('recipes', fiche.signet.id, null);
+    const r = { ...fab.recipe };
+    for (const champ of ['photo_sha256', 'photo_origin', 'photo_source_url']) { if (Object.hasOwn(c, champ)) r[champ] = champ === 'photo_origin' ? originePhotoAdmise(c[champ]) : c[champ]; else delete r[champ]; }
+    if (fab.photoWeb && !pointeurValide(c)) r.photo_source_url = fab.photoWeb;
+    assertVocabulaire(r, 'recipes');
+    return r;
+  };
   try {
-    await repo.transitionner('imports', ligne.id, { attendus: ['a_verifier'], patch: cloture, puts: { recipe_versions: [fab.version], ...(choix === false ? {} : { recipes: [fab.recipe] }) } });
+    await repo.transitionner('imports', ligne.id, { attendus: ['a_verifier'], patch: cloture, puts: { recipe_versions: [fab.version] }, ...(choix === false ? {} : { conditions: { recipes: [{ key: fiche.signet.id, fusion: ficheDans }] } }) });
   } catch (e) {
-    if (estRefus(e)) return refus('transition'); // enregistré, ignoré ou relu par un autre onglet juste avant : rien d'écrit
+    if (estRefus(e)) return refus(e.store === 'recipes' ? 'inconnu' : 'transition'); // enregistré, ignoré ou relu par un autre onglet juste avant : rien d'écrit
     throw e;
   }
   // Lot F (§ 4.3 point 2, I-F4, R-F-2) : APRÈS la transaction réussie, et seulement alors — « Ajouter sans remplacer » compris —, la descente de

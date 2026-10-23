@@ -498,6 +498,59 @@ test('lirePageHtml : page.image_url (le Recipe RETENU, og:image, pages de liste)
   assert.equal(Object.keys(L.lirePageHtml({ html: texte, urlFinale }).page).at(-1), 'image_url', 'image_url est la derniere cle de page');
 });
 
+// Revue finale du lot F : une image « dégénérée » se résolvait en la page elle-même (ou son dossier), passait valideAdresse et coûtait un appel pour un
+// 422 pas_une_image certain ; une image du JSON-LD refusée ne laissait pas og:image tenter la sienne ; la garde « page de liste » ne comptait que les
+// Recipe lisibles.
+test('image_url (revue finale) : formes degenerees → null ; repli sur og:image ; garde de liste sur toutes les Recipe trouvees', () => {
+  const urlFinale = 'https://site.test/r/x';
+  const texte = '<main><p>' + 'Texte de recette assez long pour le modele. '.repeat(3) + '</p></main>';
+  const og = (c) => '<meta property="og:image" content="' + c + '">';
+  for (const c of ['#', '#top', '?v=1', '.', './', '..', '../', '/', 'x', 'x#top', 'https://site.test/r/x', 'https://site.test/r/x#a', 'https://site.test/', '  #  ']) {
+    assert.equal(L.lirePageHtml({ html: og(c) + texte, urlFinale }).page.image_url, null, 'og:image « ' + c + ' » : la page, son dossier ou un fragment → null');
+    assert.equal(L.imageUrlDe({ image: c }, '', { urlFinale }), null, 'image JSON-LD « ' + c + ' » → null');
+  }
+  assert.deepEqual(['i.jpg', '/img/i.jpg', 'i.jpg?v=2', 'https://cdn.test/r/x', 'x.jpg#top'].map((c) => L.imageUrlDe({ image: c }, '', { urlFinale })),
+    ['https://site.test/r/i.jpg', 'https://site.test/img/i.jpg', 'https://site.test/r/i.jpg?v=2', 'https://cdn.test/r/x', 'https://site.test/r/x.jpg'], 'une vraie image relative, absolue ou d un autre hote (meme chemin) passe toujours');
+  const OG = og('https://og.test/og.jpg');
+  for (const refusee of ['http://site.test/i.jpg', 'https://127.0.0.1/i.jpg', 'https://site.test:8443/i.jpg', '#', 'https://site.test/r/x']) {
+    assert.equal(L.imageUrlDe({ image: refusee }, OG, { urlFinale }), 'https://og.test/og.jpg', 'image JSON-LD refusee (' + refusee + ') : og:image tente la sienne');
+  }
+  assert.equal(L.imageUrlDe({ image: 'http://site.test/i.jpg' }, OG, { urlFinale, autresRecettes: 1 }), null, 'image JSON-LD refusee sur une page de liste : og:image reste ecartee');
+  const ld = (o) => script(o);
+  const vignette = (nom) => ({ '@type': 'Recipe', name: nom, image: 'https://site.test/' + nom + '.jpg' });
+  const lisible = (nom, image) => ({ '@type': 'Recipe', name: nom, recipeIngredient: ['1 pomme'], recipeInstructions: ['Cuire.'], ...(image ? { image } : {}) });
+  const categorie = L.lirePageHtml({ html: ld(vignette('a')) + ld(vignette('b')) + OG + texte, urlFinale });
+  assert.deepEqual([categorie.jsonld, categorie.page.autres_recettes, categorie.page.image_url], [null, 0, null], 'page de categorie : deux Recipe-vignettes illisibles et une og:image → null (la banniere n est pas la photo du plat)');
+  assert.equal(L.lirePageHtml({ html: ld(vignette('seule')) + OG + texte, urlFinale }).page.image_url, 'https://og.test/og.jpg', 'UNE Recipe illisible (la page de la recette) : og:image reste prise');
+  const liee = L.lirePageHtml({ html: ld(lisible('Bonne')) + ld(vignette('liee')) + OG, urlFinale });
+  assert.deepEqual([liee.page.autres_recettes, liee.page.image_url], [0, null], 'caractere : une Recipe lisible SANS image et une vignette liee → og:image ecartee (moins de photos justes, jamais une fausse)');
+  assert.equal(L.lirePageHtml({ html: ld(lisible('Bonne', 'https://site.test/b.jpg')) + ld(vignette('liee')) + OG, urlFinale }).page.image_url, 'https://site.test/b.jpg', 'l image du Recipe retenu reste, vignettes ou pas');
+});
+
+// Revue finale du lot F (S-4) : le jumeau de l'essai des balises meta FERMÉES, sur des <script> FERMÉS — TYPE_JSONLD, que balayer applique à chaque
+// <script> de 2 048 caractères au plus, portait le même motif à retour arrière quadratique (« =\s*["']?\s* » : ≈ 8 s mesurées par lirePageHtml).
+test('imageOgDe et lirePageHtml : 2 Mio de <script type= FERMES suivis de blancs, en moins de 500 ms chacune (S-4)', () => {
+  const remplir = (motif) => motif.repeat(Math.ceil((2 * MIO) / motif.length));
+  const pages = [
+    ['type= puis 2 030 blancs', remplir('<script type=' + ' '.repeat(2030) + 'z></script>'), 0],
+    ['type = puis 2 026 blancs', remplir('<script type =' + ' '.repeat(2026) + 'z></script>'), 0],
+    ['type= puis 1 000 blancs, un guillemet, 1 000 blancs', remplir('<script type=' + ' '.repeat(1000) + '"' + ' '.repeat(1000) + 'z"></script>'), 0],
+    ['type= puis 2 000 blancs et le vrai type', remplir('<script type=' + ' '.repeat(2000) + '"application/ld+json">{"@type":"Thing"}</script>'), 1],
+  ];
+  for (const [nom, html, lus] of pages) {
+    assert.ok(html.length >= 2 * MIO, nom + ' : 2 Mio');
+    let t0 = performance.now();
+    assert.equal(L.imageOgDe(html), null, nom + ' : imageOgDe');
+    const og = performance.now() - t0;
+    t0 = performance.now();
+    const lue = L.lirePageHtml({ html, urlFinale: 'https://a.test/' });
+    const lp = performance.now() - t0;
+    assert.deepEqual([lue.jsonld, lue.page.image_url], [null, null], nom + ' : lirePageHtml');
+    assert.equal(L.extraireBlocsJsonLd(html.slice(0, 5000)).length > 0, lus > 0, nom + ' : le type JSON-LD est reconnu (ou non) comme avant');
+    assert.ok(og < 500 && lp < 500, `${nom} : imageOgDe ${og.toFixed(0)} ms, lirePageHtml ${lp.toFixed(0)} ms (borne : 500 ms chacune)`);
+  }
+});
+
 test('chainage serveur → client : lireOctetsBase64(versBase64(octets), n) rend les memes octets a toute taille ; base64.js sans import', async () => {
   const chemin = path.join(ICI, '..', 'src', 'domain', 'base64.js');
   assert.doesNotMatch(readFileSync(chemin, 'utf8'), /^\s*import\b/m, 'module feuille, sans import (importable par Node)');
