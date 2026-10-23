@@ -285,7 +285,9 @@ function fermetureEn(bas, nom, depuis) {
 function lireMetaTranche(html, bas, a, b, metas) {
   if (b - a > 2048) return;
   const tranche = bas.slice(a, b + 1);
-  const cle = /\b(?:property|name)\s*=\s*["']?\s*(og:site_name|author|og:image)["'\s/>]/.exec(tranche);
+  // Ronde 1 du lot F (S-4) : « =\s* » puis, au plus, un guillemet suivi de blancs — le même langage que « =\s*["']?\s* », sans ses deux suites
+  // de blancs adjacentes, qui revenaient en arrière de façon quadratique sur une longue suite de blancs (≈ 3,4 s pour 2 Mio de balises fermées).
+  const cle = /\b(?:property|name)\s*=\s*(?:["']\s*)?(og:site_name|author|og:image)["'\s/>]/.exec(tranche);
   if (!cle || metas.has(cle[1])) return;
   const c = /\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/d.exec(tranche);
   if (!c) return;
@@ -428,8 +430,8 @@ export function signatureImage(octets) {
     return null;
   } catch { return null; }
 }
-// `image` d'un objet Recipe : une chaîne ; un objet nu → url, sinon contentUrl ; un tableau → le premier élément qui rend une adresse (profondeur 2 :
-// un tableau d'ImageObject). Jamais Object.assign ni une boucle « in » (S-11 de B).
+// `image` d'un objet Recipe : une chaîne ; un objet nu → url, sinon contentUrl ; un tableau → le premier élément qui rend une adresse — un tableau,
+// ou un tableau de tableaux, au plus (PROFONDEUR_IMAGE = 2 : trois niveaux de tableaux → null). Jamais Object.assign ni une boucle « in » (S-11 de B).
 const PROFONDEUR_IMAGE = 2;
 function adresseDe(x, profondeur) {
   if (typeof x === 'string') return nettoyerChaineJsonLd(x) || null;
@@ -448,7 +450,7 @@ export function imageDe(objet) {
   try { return adresseDe(propre(objet, 'image'), 0); } catch { return null; }
 }
 // <meta property|name="og:image" content="…"> : capturée par le balayage UNIQUE de la page (lireMetaTranche, la première), décodée, rognée (P-4).
-const ogDesMetas = (metas) => { const b = metas?.get?.('og:image'); const v = typeof b === 'string' ? decoderEntites(b).trim() : ''; return v || null; };
+const ogDesMetas = (metas) => { const b = metas.get('og:image'); const v = typeof b === 'string' ? decoderEntites(b).trim() : ''; return v || null; };
 export function imageOgDe(html) {
   return typeof html === 'string' ? ogDesMetas(balayer(html).metas) : null;
 }
@@ -525,8 +527,9 @@ export function lirePageHtml({ html, urlFinale, contentType, hotesRefuses = [] }
     if (!r.lisible) continue;
     if (premiere === null) { premiere = r.recette; objetRecette = o; } else autres += 1;
   }
-  // Lot F (D-F3) : l'image de l'objet Recipe RETENU (brut), sinon og:image — écartée d'une page de liste ; null sans l'un ni l'autre.
-  const image_url = imageUrlDesMetas(objetRecette, scan.metas, { urlFinale, hotesRefuses, autresRecettes: premiere ? autres : 0 });
+  // Lot F (D-F3) : l'image de l'objet Recipe RETENU (brut), sinon og:image — écartée d'une page de liste ; null sans l'un ni l'autre. `autres`
+  // ne compte que les Recipe lisibles APRÈS la première : il vaut 0 sans Recipe lisible (chemin modele).
+  const image_url = imageUrlDesMetas(objetRecette, scan.metas, { urlFinale, hotesRefuses, autresRecettes: autres });
   let hote = null;
   try { hote = sansPointFinal(new URL(urlFinale).hostname); } catch { hote = null; }
   const commun = { url_finale: typeof urlFinale === 'string' ? urlFinale : null, hote, titre_page: titreDuBalayage(scan.titre), auteur: (objetRecette ? auteurDe(objetRecette) : null) ?? auteurDuBalayage(scan.metas), site: siteDuBalayage(objetRecette, scan.metas), lue_le: null };

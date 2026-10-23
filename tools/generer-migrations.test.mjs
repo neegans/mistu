@@ -728,9 +728,10 @@ test('index.ts : imports fermes, deno.json epingle, aucune cle ni journal de con
   // Les raisons de lireDemande rejoignent la liste fermee de l'erreur HTTP.
   assert.ok(code.includes("lu.raison === 'trop_lourd' ? 'trop_lourd' : lu.raison === 'bornes' ? 'bornes' : lu.raison === 'serveur' ? 'serveur' : lu.raison === 'interdit' ? 'interdit' : 'requete'"), 'interdit rejoint la liste fermee (lot B)');
   assert.ok(code.includes('json(lu.statut,'));
-  // Ordre du flux (lot B, N-1) : épinglé par les POINTS D'APPEL de traiter(), jamais par la place des déclarations — gardes, réservation,
-  // téléchargement de la page, lecture de la page, appel au modèle (en repli seulement), mise à jour du journal. Les déclarations
-  // (async function telechargerPage(, async function appelerAnthropic() et le cast local de lirePageHtml ne portent aucun de ces marqueurs.
+  // Ordre du flux (lot B, N-1 ; lot F) : épinglé par les POINTS D'APPEL de traiter(), jamais par la place des déclarations — gardes, réservation,
+  // téléchargement de la page, lecture de la page, téléchargement de l'image, appel au modèle (en repli seulement), mise à jour du journal. Les
+  // quatre déclarations (async function suivreRedirections<T>(, telechargerPage(, telechargerImage( et appelerAnthropic() et le cast local de
+  // lirePageHtml ne portent aucun de ces marqueurs.
   assert.deepEqual(ordreDuFlux(code), { presents: true, croissants: true }, 'gardes, reservation, telechargement, lecture, modele, journal : dans cet ordre');
   for (const m of ['await fetch(ANTHROPIC', "redirect: 'manual'", "redirect: 'error'", 'async function telechargerPage(', 'async function appelerAnthropic(']) assert.ok(code.includes(m), m);
   assert.equal((code.match(/await fetch\(/g) || []).length, 2, 'deux appels sortants : la page ou l image dans suivreRedirections, le fournisseur dans appelerAnthropic');
@@ -760,7 +761,8 @@ test('index.ts (N-1) : le test d ordre tient par les points d appel — mutant �
   const mutant = code.replace(reservation, '').slice(0, apres - reservation.length) + reservation + code.replace(reservation, '').slice(apres - reservation.length);
   assert.ok(mutant.indexOf(".rpc('assistant_reserver'") > mutant.indexOf('await telechargerPage('), 'le mutant porte bien la reservation sous le telechargement');
   assert.deepEqual(ordreDuFlux(mutant), { presents: true, croissants: false }, 'mutant « reservation apres le telechargement » : rouge');
-  // Témoin : appelerAnthropic et telechargerPage déclarées AVANT traiter (elles le sont) ou APRÈS : le test reste vert.
+  // Témoin : les quatre déclarations (suivreRedirections<T>, telechargerPage, telechargerImage, appelerAnthropic) AVANT traiter (elles le sont)
+  // ou APRÈS : le test reste vert.
   const decl = (nom) => { const d = code.indexOf(nom); assert.notEqual(d, -1, nom + ' : declaration trouvee'); return code.slice(d, code.indexOf('\n}\n', d) + 3); };
   const deplacees = [decl('async function suivreRedirections<T>('), decl('async function telechargerPage('), decl('async function telechargerImage('), decl('async function appelerAnthropic(')];
   let temoin = code; for (const d of deplacees) temoin = temoin.replace(d, '');
@@ -1270,20 +1272,25 @@ test('lot F : OUTILS porte les cinq outils de 0006, image-web dernier (le prefix
   assert.equal(OUTILS_PASSERELLE.length, 5);
   assert.deepEqual(OUTILS_PASSERELLE, OUTILS_0006);
 });
-test('index.ts (lot F) : image-web dans l ordre du flux, une seule boucle de redirections, corpsModele par OUTILS_MODELE ; mutant « reservation apres telechargerImage » rouge', () => {
+test('index.ts (lot F) : image-web dans l ordre du flux, une seule boucle de redirections, corpsModele par OUTILS_MODELE ; mutant « telechargerImage avant la reservation » rouge', () => {
   const code = sansCommentaires(lire(`${FONCTION}/index.ts`));
   assert.deepEqual(ordreDuFlux(code), { presents: true, croissants: true });
   assert.equal((code.match(/redirect: 'manual'/g) || []).length, 1, 'une seule boucle (suivreRedirections)');
   assert.equal((code.match(/await fetch\(/g) || []).length, 2, 'deux appels sortants : la page ou l image dans suivreRedirections, le fournisseur dans appelerAnthropic');
   assert.ok(code.includes('OUTILS_MODELE.includes(outil)'), 'corpsModele initialise par la liste fermee');
   for (const nom of ['async function suivreRedirections<T>(', 'async function telechargerPage(', 'async function telechargerImage(']) assert.notEqual(code.indexOf(nom), -1, nom);
-  // Mutant : la réservation déplacée sous le téléchargement de l'IMAGE → l'ordre casse. (« un second await fetch( dans telechargerImage » se
-  // rejoue sur une COPIE d'index.ts, Step 10 : le compte ci-dessus le tue.)
-  const debutRes = code.indexOf('  const { data: idReserve');
+  // Mutant (ronde 1) : la ligne qui télécharge l'IMAGE remontée AU-DESSUS de la réservation → l'ordre casse. Il ne rougit QUE si
+  // 'await telechargerImage(' est dans ORDRE_DU_FLUX (l'ancien mutant, la réservation déplacée sous l'image, passait aussi sous
+  // telechargerPage : il rougissait sans cette entrée). « Un second await fetch( dans telechargerImage » se rejoue sur une COPIE d'index.ts
+  // (Step 10) : le compte ci-dessus le tue.
+  const appelImage = code.indexOf('await telechargerImage(');
+  assert.notEqual(appelImage, -1, 'l appel de telechargerImage est trouve');
+  const debutImage = code.lastIndexOf('\n', appelImage) + 1;
+  const ligneImage = code.slice(debutImage, code.indexOf('\n', appelImage) + 1);
+  const sansImage = code.replace(ligneImage, '');
+  const debutRes = sansImage.indexOf('  const { data: idReserve');
   assert.notEqual(debutRes, -1, 'la ligne de reservation est trouvee');
-  const reservation = code.slice(debutRes, code.indexOf('\n', debutRes) + 1);
-  const sansRes = code.replace(reservation, '');
-  const apres = sansRes.indexOf('\n', sansRes.indexOf('await telechargerImage(')) + 1;
-  const mutant1 = sansRes.slice(0, apres) + reservation + sansRes.slice(apres);
-  assert.deepEqual(ordreDuFlux(mutant1), { presents: true, croissants: false }, 'mutant « reservation apres telechargerImage » : rouge');
+  const mutant1 = sansImage.slice(0, debutRes) + ligneImage + sansImage.slice(debutRes);
+  assert.ok(mutant1.indexOf('await telechargerImage(') < mutant1.indexOf(".rpc('assistant_reserver'"), 'le mutant porte bien le telechargement de l image au-dessus de la reservation');
+  assert.deepEqual(ordreDuFlux(mutant1), { presents: true, croissants: false }, 'mutant « telechargerImage avant la reservation » : rouge');
 });

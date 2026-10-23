@@ -381,9 +381,14 @@ test('imageDe : formes (S-11 : jamais Object.assign ni for…in)', () => {
   assert.equal(L.imageDe({ image: 'https://a.test/i.jpg' }), 'https://a.test/i.jpg', 'chaine');
   assert.equal(L.imageDe({ image: { url: 'https://a.test/u.jpg' } }), 'https://a.test/u.jpg', '{ url }');
   assert.equal(L.imageDe({ image: { contentUrl: 'https://a.test/c.jpg' } }), 'https://a.test/c.jpg', '{ contentUrl }');
+  assert.equal(L.imageDe({ image: { url: 'https://a.test/u.jpg', contentUrl: 'https://a.test/c.jpg' } }), 'https://a.test/u.jpg', 'ronde 1 : url, SINON contentUrl (l ordre du contrat)');
   assert.equal(L.imageDe({ image: ['https://a.test/1.jpg', 'https://a.test/2.jpg'] }), 'https://a.test/1.jpg', 'tableau de chaines : la premiere');
   assert.equal(L.imageDe({ image: [{ '@type': 'ImageObject' }, { url: 'https://a.test/o.jpg' }] }), 'https://a.test/o.jpg', 'tableau d ImageObject : le premier qui rend une adresse');
   assert.equal(L.imageDe({ image: [] }), null, 'tableau vide');
+  // Ronde 1 : la borne de récursion (PROFONDEUR_IMAGE = 2) — un tableau, ou un tableau de tableaux, au plus.
+  assert.equal(L.imageDe({ image: [['https://a.test/x.jpg']] }), 'https://a.test/x.jpg', 'tableau de tableaux : admis');
+  assert.equal(L.imageDe({ image: [[{ url: 'https://a.test/y.jpg' }]] }), 'https://a.test/y.jpg', 'tableau de tableaux d ImageObject : admis');
+  assert.equal(L.imageDe({ image: [[['https://a.test/x.jpg']]] }), null, 'trois niveaux de tableaux : null');
   assert.equal(L.imageDe({ image: { '@type': 'ImageObject' } }), null, 'ImageObject sans adresse');
   assert.equal(L.imageDe({ image: '<b>https://a.test/i.jpg</b>' }), 'https://a.test/i.jpg', 'balises retirees');
   assert.equal(L.imageDe({ image: 'https://a.test/i.jpg?a=1&amp;b=2' }), 'https://a.test/i.jpg?a=1&b=2', 'entites decodees');
@@ -409,9 +414,38 @@ test('imageOgDe : la balise lue dans sa tranche, lineaire (S-4)', () => {
   assert.equal(L.imageOgDe('<html><head><title>x</title></head></html>'), null, 'absente');
   assert.equal(L.imageOgDe('<meta property="og:image" content="https://a.test/i.jpg"'), null, 'balise jamais fermee : null, sans lever');
   assert.equal(L.imageOgDe(42), null);
+  // Ronde 1 : le contrat « rognée » (spec § 6.1) — des blancs autour de l'adresse sont retirés ; un content de blancs seuls vaut null.
+  assert.equal(L.imageOgDe('<meta property="og:image" content="  https://a.test/i.jpg  ">'), 'https://a.test/i.jpg', 'rognee');
+  assert.equal(L.imageOgDe('<meta property="og:image" content="   ">'), null, 'blancs seuls : null');
   const t0 = performance.now();
   assert.equal(L.imageOgDe('<meta'.repeat(Math.ceil((2 * MIO) / 5))), null);
   assert.ok(performance.now() - t0 < 500, '2 Mio de <meta sans > : sous 500 ms');
+});
+
+// Ronde 1 (S-4) : l'essai ci-dessus arrête le balayage à la première balise sans « > » et n'entre jamais dans lireMetaTranche. Ici, 2 Mio de
+// balises meta FERMÉES, chacune sous la borne de 2 048 caractères de la tranche : la clé et le content y sont cherchés pour de bon. Les deux
+// premières pages (une longue suite de blancs après « name= » ou « property= ») faisaient revenir en arrière le motif de la clé de façon
+// quadratique (≈ 3,4 s mesurées) ; la troisième compte les tranches (≈ 36 000 balises og:image courtes) ; la quatrième lit une og:image longue.
+test('imageOgDe et lirePageHtml : 2 Mio de balises meta FERMEES lues dans leur tranche, en moins de 500 ms chacune (S-4)', () => {
+  const remplir = (motif) => motif.repeat(Math.ceil((2 * MIO) / motif.length));
+  const longue = 'https://a.test/' + 'x'.repeat(1950);
+  const pages = [
+    ['name= puis 2 030 blancs', remplir('<meta name=' + ' '.repeat(2030) + 'z>'), null],
+    ['property= puis 2 026 blancs', remplir('<meta property=' + ' '.repeat(2026) + 'z>'), null],
+    ['og:image courtes', remplir('<meta property="og:image" content="https://a.test/i.jpg">'), 'https://a.test/i.jpg'],
+    ['og:image de 2 002 caracteres', remplir('<meta property="og:image" content="' + longue + '">'), longue],
+  ];
+  for (const [nom, html, attendu] of pages) {
+    assert.ok(html.length >= 2 * MIO, nom + ' : 2 Mio');
+    let t0 = performance.now();
+    assert.equal(L.imageOgDe(html), attendu, nom + ' : imageOgDe');
+    const og = performance.now() - t0;
+    t0 = performance.now();
+    const lue = L.lirePageHtml({ html, urlFinale: 'https://a.test/' });
+    const lp = performance.now() - t0;
+    assert.equal(lue.page.image_url, attendu, nom + ' : lirePageHtml');
+    assert.ok(og < 500 && lp < 500, `${nom} : imageOgDe ${og.toFixed(0)} ms, lirePageHtml ${lp.toFixed(0)} ms (borne : 500 ms chacune)`);
+  }
 });
 
 test('imageUrlDe : priorite, resolution, validation, pages de liste (D-F3)', () => {
@@ -456,6 +490,7 @@ test('lirePageHtml : page.image_url (le Recipe RETENU, og:image, pages de liste)
   const texte = '<main><p>' + 'Texte de recette assez long pour le modele. '.repeat(3) + '</p></main>';
   assert.equal(L.lirePageHtml({ html: '<meta property="og:image" content="/og.jpg">' + texte, urlFinale }).page.image_url, 'https://site.test/og.jpg', 'sans JSON-LD : og:image, relative resolue');
   assert.equal(L.lirePageHtml({ html: texte, urlFinale }).page.image_url, null, 'ni l un ni l autre : null');
+  assert.equal(L.lirePageHtml({ html: '<meta property="og:image" content="   ">' + texte, urlFinale }).page.image_url, null, 'ronde 1 : og:image de blancs seuls → null (jamais l adresse de la page elle-meme)');
   assert.equal(L.lirePageHtml({ html: ld(lisible('X', 'https://projet.test/i.jpg')), urlFinale, hotesRefuses: ['projet.test'] }).page.image_url, null, 'hotesRefuses relaye');
   assert.equal(L.lirePageHtml({ html: ld(lisible('X', '/i/x.jpg')), urlFinale }).page.image_url, 'https://site.test/i/x.jpg', 'relative resolue contre urlFinale');
   const liste = L.lirePageHtml({ html: ld(lisible('Un')) + ld(lisible('Deux')) + '<meta property="og:image" content="https://site.test/og.jpg">', urlFinale });

@@ -629,6 +629,7 @@ test('t2. page avec JSON-LD Recipe : reservation lecture-web, UN fetch (la page)
   const f = appelsPage()[0];
   assert.equal(f.url, 'https://site.test/r/1');
   assert.deepEqual([f.options.method, f.options.redirect, f.options.credentials], ['GET', 'manual', 'omit']);
+  assert.deepEqual(Object.keys(f.options).sort(), ['credentials', 'headers', 'method', 'redirect', 'signal'], 'lot F, ronde 1 : les options ENTIERES — jamais referrer ni referrerPolicy (fetch en ferait un en-tete Referer)');
   assert.deepEqual(Object.keys(f.options.headers).sort(), ['accept', 'accept-language', 'user-agent'], 'exactement trois en-tetes poses par le code');
   assert.ok(f.options.headers['user-agent'].startsWith('Mitsu/'));
   assert.deepEqual(f.options.headers, { 'user-agent': 'Mitsu/0.10 (+https://neegans.github.io/mistu/)', accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1', 'accept-language': 'fr-CA,fr;q=0.9,en;q=0.5' }, 'ronde 1 : les VALEURS des trois en-tetes (spec § 6.3)');
@@ -1054,6 +1055,7 @@ test('u2. une JPEG : reservation image-web par la cle secrete, UN fetch (trois e
   assert.deepEqual([appelsFetch.length, appelsModele().length], [1, 0], 'un seul fetch : l image ; aucun appel au modele');
   const f = appelsPage()[0];
   assert.deepEqual([f.url, f.options.method, f.options.redirect, f.options.credentials], ['https://site.test/i.jpg', 'GET', 'manual', 'omit']);
+  assert.deepEqual(Object.keys(f.options).sort(), ['credentials', 'headers', 'method', 'redirect', 'signal'], 'ronde 1 : les options ENTIERES — jamais referrer ni referrerPolicy (fetch en ferait un en-tete Referer, spec § 6.3)');
   assert.deepEqual(Object.keys(f.options.headers).sort(), ['accept', 'accept-language', 'user-agent'], 'exactement trois en-tetes : jamais referer, origin, cookie, authorization, apikey');
   assert.ok(f.options.headers['user-agent'].startsWith('Mitsu/') && f.options.headers.accept.startsWith('image/jpeg'));
   assert.deepEqual(Object.keys(corps).sort(), ['octets', 'taille', 'type', 'url_finale']);
@@ -1296,6 +1298,21 @@ test('u9. lecture-web : une page sans image → page.image_url null ; une og:ima
   remise();
   page({ page: async () => htmlReponse(`<html><head><meta property="og:image" content="/img/og.jpg"></head><body><main><p>${TEXTE_RECETTE}</p></main></body></html>`), anthropic: modele });
   assert.equal((await lire(await handler(requete('POST', { texte: corpsLecture('https://site.test/r/og') })))).page.image_url, 'https://site.test/img/og.jpg');
+  // Ronde 1 (S-12) : traiter() RELAIE hotesRefuses à lirePageHtml — une image (og:image, ou image du JSON-LD) sur l'hôte de SUPABASE_URL, ou sur
+  // un de ses sous-domaines, rend page.image_url null ; le témoin (la même page, image sur un autre hôte) rend l'adresse.
+  const avecOg = (img) => `<html><head><meta property="og:image" content="${img}"></head><body><main><p>${TEXTE_RECETTE}</p></main></body></html>`;
+  const avecLd = (img) => `<html><head><script type="application/ld+json">${JSON.stringify({ ...RECETTE_LD, image: img })}</script></head><body><main><p>Texte.</p></main></body></html>`;
+  const issues = [];
+  for (const [nom, html] of [['og:image projet', avecOg('https://projet.test/storage/i.jpg')], ['og:image sous-domaine', avecOg('https://cdn.projet.test/i.jpg')],
+    ['JSON-LD projet', avecLd('https://projet.test/i.jpg')], ['og:image temoin', avecOg('https://cdn.test/i.jpg')], ['JSON-LD temoin', avecLd('https://cdn.test/j.jpg')]]) {
+    remise(); ENV.SUPABASE_URL = 'https://projet.test';
+    page({ page: async () => htmlReponse(html), anthropic: modele });
+    const r = await handler(requete('POST', { texte: corpsLecture('https://site.test/r/projet') }));
+    const corps = await lire(r);
+    issues.push([nom, r.status, corps.source_kind, corps.page.image_url]);
+  }
+  assert.deepEqual(issues, [['og:image projet', 200, 'modele', null], ['og:image sous-domaine', 200, 'modele', null], ['JSON-LD projet', 200, 'jsonld', null],
+    ['og:image temoin', 200, 'modele', 'https://cdn.test/i.jpg'], ['JSON-LD temoin', 200, 'jsonld', 'https://cdn.test/j.jpg']]);
 });
 
 test('u10. une seule boucle : image-web et lecture-web rediriges vers https://localhost/ rendent le meme 422 interdit', async () => {
@@ -1344,4 +1361,18 @@ test('u11. image-web n atteint JAMAIS le modele : pour chaque issue, zero fetch 
   await appele; client.abort();
   assert.equal((await enCours).status, 499, '499');
   sansModele('499');
+});
+
+test('u12. ronde 1 : une image SUIVIE malgre redirect manual (r.redirected) → 422 interdit, corps annule, jamais lu, aucun appel au modele, journal 422 (la garde de B vaut pour image-web, R-F-13)', async () => {
+  remise();
+  let annule = false; let lu = false;
+  page({ page: async () => {
+    const r = new Response(new ReadableStream({ pull(c) { lu = true; c.enqueue(JPEG(40)); c.close(); }, cancel() { annule = true; } }, { highWaterMark: 0 }), { status: 200, headers: { 'content-type': 'image/jpeg' } }); // highWaterMark 0 : pull seulement sur une lecture
+    Object.defineProperty(r, 'redirected', { value: true }); // un runtime qui aurait suivi la redirection (vers une adresse jamais revalidee)
+    return r;
+  } });
+  const r = await handler(requete('POST', { texte: corpsImage('https://site.test/i.jpg') }));
+  await vider();
+  assert.deepEqual([r.status, await lire(r), annule, appelsPage().length, appelsModele().length, faux.MAJ[0].v.statut], [422, { erreur: 'interdit' }, true, 1, 0, 422]);
+  assert.equal(lu, false, 'le corps d une image suivie n est jamais lu');
 });

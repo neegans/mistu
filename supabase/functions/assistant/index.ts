@@ -1,4 +1,4 @@
-// Passerelle de l'assistant (spec 2026-10-18-passerelle-assistant). Ordre des gardes : OPTIONS → origine → méthode → session → liste admise → corps → quota → (lecture-web : téléchargement de la page →) Anthropic.
+// Passerelle de l'assistant (spec 2026-10-18-passerelle-assistant). Ordre des gardes : OPTIONS → origine → méthode → session → liste admise → corps → quota → (lecture-web : téléchargement de la page →) Anthropic ; image-web : quota → téléchargement de l'image, jamais Anthropic.
 // Lot B (spec 2026-10-19-recette-web § 6.3) : pour `lecture-web`, après la réservation, la page est téléchargée (telechargerPage), lue (lirePageHtml)
 // et, SEULEMENT sans JSON-LD lisible, son texte est confié au modèle ; un seul point d'appel au modèle et un seul point d'écriture du journal.
 // Jamais : la clé dans une réponse ou un journal ; un corps de demande, de réponse ou de PAGE dans le journal ; un appel Anthropic avant la dernière garde.
@@ -90,10 +90,8 @@ async function lireCorpsBorne(source: Request | Response, max: number): Promise<
   return out;
 }
 
-// Lot B, D-B1 / D-B26 : la page, téléchargée par la fonction (jamais par le téléphone). https seulement, chaque cible de redirection revalidée par
-// valideAdresse, au plus 3 sauts, 15 s par saut et 30 s en tout, corps lu borné à 2 Mio, content-type html seulement ; aucun cookie, aucune
-// identité, trois en-têtes posés par le code. La vérification TLS n'est jamais relâchée (aucun client HTTP sur mesure). Rend la page décodée,
-// ou un refus typé { erreur, statut }. Un abandon par `signal` (le budget de 120 s, ou le client parti) est RELANCÉ : traiter() en fait 504 ou 499.
+// Lot B, D-B1 / D-B26 : les statuts de redirection suivis, et les types partagés par la boucle (suivreRedirections) et ses lecteurs, la page
+// (telechargerPage) et, depuis le lot F, l'image (telechargerImage). La vérification TLS n'est jamais relâchée (aucun client HTTP sur mesure).
 const REDIRECTIONS = [301, 302, 303, 307, 308];
 type PageTelechargee = { html: string; urlFinale: string; contentType: string };
 type RefusPage = { erreur: string; statut: number };
@@ -163,7 +161,8 @@ async function telechargerPage(href: string, { signal, hotesRefuses: refuses }: 
   return { html: r.valeur.html, urlFinale: r.urlFinale, contentType: r.valeur.contentType };
 }
 
-// L'image d'une page (lot F, D-F3) : jpeg, png ou webp annoncés ET signés par leurs premiers octets, ≤ 2 Mio (R-F-4), jamais un corps vide.
+// L'image d'une page (lot F, D-F3) : jpeg, png ou webp annoncés ET signés par leurs premiers octets, ≤ 2 Mio (R-F-4), jamais un corps vide (un
+// corps vide, ou de moins de trois octets, n'a pas de signature : signatureImage rend null).
 type ImageTelechargee = { octets: Uint8Array; type: string; urlFinale: string };
 async function telechargerImage(href: string, { signal, hotesRefuses: refuses }: { signal: AbortSignal; hotesRefuses: string[] }): Promise<ImageTelechargee | RefusPage> {
   const r = await suivreRedirections<{ octets: Uint8Array; type: string }>(href, { signal, hotesRefuses: refuses, accept: 'image/jpeg,image/png,image/webp;q=0.9,*/*;q=0.1', lire: async (rep) => {
@@ -171,7 +170,7 @@ async function telechargerImage(href: string, { signal, hotesRefuses: refuses }:
     if (!type) { void rep.body?.cancel().catch(() => {}); return { erreur: 'pas_une_image', statut: 422 }; }
     const octets = await lireCorpsBorne(rep, LIMITES_IMAGE.octets);
     if (octets === null) return { erreur: 'image_trop_lourde', statut: 413 };
-    if (octets.byteLength === 0 || signatureImage(octets) !== type) return { erreur: 'pas_une_image', statut: 422 };
+    if (signatureImage(octets) !== type) return { erreur: 'pas_une_image', statut: 422 };
     return { ok: { octets, type } };
   } });
   if ('erreur' in r) return r;
@@ -225,7 +224,7 @@ async function traiter(req: Request, cors: Record<string, string>, origine: stri
   const outil = typeof enveloppe?.outil === 'string' && OUTILS.includes(enveloppe.outil) ? enveloppe.outil : '';
   const refuses = hotesRefuses();
   const lu = lireDemande(texte, { outil, modele: modele(), maxTokens: LIMITES.maxTokens, octets: bytes.byteLength, hotesRefuses: refuses });
-  // `interdit` (lecture-web : adresse refusée) part AVANT la réservation : un refus sur l'adresse tapée ne coûte rien (I-B10).
+  // `interdit` (lecture-web, image-web : adresse refusée) part AVANT la réservation : un refus sur l'adresse tapée ne coûte rien (I-B10).
   if (!lu.ok) return json(lu.statut, corpsErreur(lu.raison === 'trop_lourd' ? 'trop_lourd' : lu.raison === 'bornes' ? 'bornes' : lu.raison === 'serveur' ? 'serveur' : lu.raison === 'interdit' ? 'interdit' : 'requete'), cors);
   // Réservation ATOMIQUE (0004, assistant_reserver) : verrou par compte, comptage du jour UTC et insertion de la ligne « en vol » (statut 0)
   // en une seule transaction. null = quota atteint. Un plantage laisse une ligne « en vol » qui compte : voulu.
@@ -263,7 +262,7 @@ async function traiter(req: Request, cors: Record<string, string>, origine: stri
       // Lot F (§ 6.3) : la réservation est faite (le quota compte cet appel) ; l'image est téléchargée par la boucle partagée, relayée en base64.
       const image = await telechargerImage((lu.corps as { url: string }).url, { signal: ctl.signal, hotesRefuses: refuses });
       if ('erreur' in image) { statut = image.statut; corpsReponse = JSON.stringify(corpsErreur(image.erreur)); }
-      else { statut = 200; usage = null; corpsReponse = JSON.stringify({ type: image.type, taille: image.octets.byteLength, url_finale: image.urlFinale, octets: versBase64(image.octets) }); }
+      else { statut = 200; corpsReponse = JSON.stringify({ type: image.type, taille: image.octets.byteLength, url_finale: image.urlFinale, octets: versBase64(image.octets) }); } // usage reste null : jetons null au journal
     }
     if (corpsModele !== null) {
       const enLecture = outil === 'lecture-web';
