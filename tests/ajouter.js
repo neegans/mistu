@@ -3453,6 +3453,130 @@ export async function runAjouterTests({ eq, ok }) {
         eq([ed1.cover_sha256, ed2.cover_sha256, (await db.get('book_editions', ed1.id))?.cover_sha256, (await db.get('book_editions', ed2.id))?.cover_sha256], [null, null, null, null],
           'enregistrerLivre : une empreinte hors forme (« F… », objet) donne une édition sans couverture (vague finale, constat 11 bis ; mutant T5r : shaBornee retirée d’enregistrerLivre → rouge)');
       });
+
+      // --- Ronde de clôture du lot E (R-E-30) : chaque scénario a été vu ROUGE sur le src/ de 8934f07 (rapport ronde-cloture-report.md).
+      // Constat 1 (re-revue de la vague, Important) : les champs repris par « Utiliser ces renseignements » SANS ISBN (œuvre à plusieurs éditions : isbnDistant
+      // nul) n'appartiennent à aucun ISBN — « Identifier » ne les rend qu'à une fiche TROUVÉE ; un ISBN introuvable, ou une panne d'Open Library puis « Saisir
+      // à la main », les gardent avec leur étiquette (sourceDistante). La couverture imprime le titre en capitales : la fiche le remplace (champ « repris »).
+      await scenario('ronde de clôture : sans ISBN, « Utiliser ces renseignements » puis un ISBN introuvable, ou une panne et « Saisir à la main », gardent les champs repris et leur étiquette (constat 1)', async (repo) => {
+        const capitales = { title: 'JERUSALEM', subtitle: null, authors: ['YOTAM OTTOLENGHI'], publisher: null, language: 'en', uncertain: [] };
+        const OL = 'Renseigné par Open Library — vérifie et corrige.';
+        const parIsbn = { introuvable: [200, { numFound: 0, docs: [] }], panne: [503, ''], trouve: [200, { numFound: 1, docs: [F.OL_DOCS[0]] }] };
+        for (const issue of ['introuvable', 'panne', 'trouve']) {
+          scene.replaceChildren();
+          const ff = F.fauxFetch({ assistant: [200, F.corpsOk(capitales)], ol: (a) => (new URL(a.url).searchParams.has('isbn') ? parIsbn[issue] : [200, F.OL_JERUSALEM]) });
+          const { root } = await monter(repo, { ff, pick: async () => [await F.imageDe('rc1.jpg', { introuvable: '#a3a', panne: '#3a3', trouve: '#aa3' }[issue])] });
+          role(root, 'choisir-couverture').click();
+          await attendre(() => root.etatRoute().propositionsRecues === 1 && bandeau(root) !== null, 'bandeau');
+          bouton(root, 'Utiliser ces renseignements').click();
+          const vu = () => [root.etatRoute().pas, titreDe(root)?.value, champ(root, 'Auteur / chef')?.value, root.querySelector('.status.info')?.textContent ?? null];
+          const apres = vu();
+          bouton(root, '← Changer d’ISBN').click();
+          taper(root.querySelector('input[name="isbn"]'), '9780306406157');
+          bouton(root, 'Identifier').click();
+          await attendre(() => root.etatRoute().reponsesRecues === 1 && !root.etatRoute().recherche, `ISBN ${issue}`);
+          if (issue === 'introuvable') {
+            eq([apres, ...vu(), root.etatRoute().lecture?.statut, rappel(root), role(root, 'introuvable')?.textContent ?? null],
+              [[2, 'Jerusalem', 'Yotam Ottolenghi, Sami Tamimi', OL], 2, 'Jerusalem', 'Yotam Ottolenghi, Sami Tamimi', OL, 'lue', 'ISBN 9780306406157', 'Aucune fiche chez Open Library pour cet ISBN. Complète à la main.'],
+              'sans ISBN, « Utiliser », puis un ISBN valide INTROUVABLE : pas 2, titre et auteur repris d’Open Library gardés avec leur étiquette, lecture toujours lue, l’ISBN tapé rappelé et la ligne discrète du résultat (ronde de clôture, constat 1 ; avant : titre et auteur vidés par oublierDistants() avant l’appel ; mutant : oublierDistants() remis avant l’appel → rouge)');
+          } else if (issue === 'trouve') {
+            eq([apres, ...vu(), root.etatRoute().lecture?.statut, rappel(root), role(root, 'introuvable'), root.etatRoute().champsDistants?.title ?? null],
+              [[2, 'Jerusalem', 'Yotam Ottolenghi, Sami Tamimi', OL], 2, 'À la di Stasio', 'Josée Di Stasio', OL, 'recue', 'ISBN 9780306406157', null, 'À la di Stasio'],
+              'sans ISBN, « Utiliser », puis un ISBN valide TROUVÉ : les champs repris de l’œuvre (et ceux de la lecture) sont rendus avant la fusion, la fiche de cet ISBN remplit, une seule étiquette, la lecture reste au journal (recue) ; aucune ligne « Aucune fiche » (ronde de clôture, constat 1 : rendus dans la seule branche `trouve`)');
+          } else {
+            const enPanne = [root.etatRoute().pas, !!role(root, 'indisponible')];
+            bouton(root, 'Saisir à la main').click();
+            eq([apres, enPanne, ...vu(), root.etatRoute().lecture?.statut],
+              [[2, 'Jerusalem', 'Yotam Ottolenghi, Sami Tamimi', OL], [1, true], 2, 'Jerusalem', 'Yotam Ottolenghi, Sami Tamimi', OL, 'lue'],
+              'sans ISBN, « Utiliser », puis une PANNE d’Open Library sur un ISBN valide tapé et « Saisir à la main » : titre et auteur repris gardés avec leur étiquette (ronde de clôture, constat 1 ; mutants : oublierDistants() remis avant l’appel, ou l’ancienne formule de memeIsbn dans saisirMain → rouge)');
+          }
+        }
+      });
+
+      // Constat 1, la branche `trouve` SANS lecture appliquée : la ligne fermée AILLEURS (un autre onglet l'ignore, ou ajoute le livre) — la relecture la dit
+      // `termine`, plus de remise de lecture ; les champs gardés de l'œuvre ne sont rendus que par oublierDistants() de `trouve`, avant la fusion.
+      await scenario('ronde de clôture : sans ISBN, « Utiliser », la ligne fermée ailleurs, puis un ISBN TROUVÉ — la fiche de cet ISBN remplace les champs de l’œuvre (constat 1)', async (repo, db) => {
+        const capitales = { title: 'JERUSALEM', subtitle: null, authors: ['YOTAM OTTOLENGHI'], publisher: null, language: 'en', uncertain: [] };
+        const ff = F.fauxFetch({ assistant: [200, F.corpsOk(capitales)], ol: (a) => [200, new URL(a.url).searchParams.has('isbn') ? { numFound: 1, docs: [F.OL_DOCS[0]] } : F.OL_JERUSALEM] });
+        const { root } = await monter(repo, { ff, pick: async () => [await F.imageDe('rc5.jpg', '#5a5')] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => root.etatRoute().propositionsRecues === 1 && bandeau(root) !== null, 'bandeau');
+        bouton(root, 'Utiliser ces renseignements').click();
+        const id = root.etatRoute().importId;
+        await db.mutate({ puts: { imports: [{ ...(await db.get('imports', id)), status: 'ignore' }] }, origin: 'device' }); // fermée ailleurs
+        const faites = root.etatRoute().relecturesFaites;
+        window.dispatchEvent(new Event('online'));
+        await attendre(() => root.etatRoute().relecturesFaites === faites + 1, 'ligne relue : fermée ailleurs');
+        const ferme = [root.etatRoute().lecture?.statut, titreDe(root)?.value];
+        bouton(root, '← Changer d’ISBN').click();
+        taper(root.querySelector('input[name="isbn"]'), '9780306406157');
+        bouton(root, 'Identifier').click();
+        await attendre(() => root.etatRoute().reponsesRecues === 1 && root.etatRoute().pas === 2 && !root.etatRoute().recherche, 'ISBN trouvé');
+        eq([ferme, titreDe(root)?.value, champ(root, 'Auteur / chef')?.value, root.querySelector('.status.info')?.textContent ?? null, role(root, 'introuvable')],
+          [['termine', 'Jerusalem'], 'À la di Stasio', 'Josée Di Stasio', 'Renseigné par Open Library — vérifie et corrige.', null],
+          'ligne fermée ailleurs (plus de lecture à rendre), puis un ISBN trouvé : les champs gardés de l’œuvre sont rendus dans la branche `trouve`, la fiche de cet ISBN remplit (ronde de clôture, constat 1 ; mutant : oublierDistants() retiré de `trouve` → « Jerusalem » gardé → rouge)');
+      });
+
+      // Constat neuf de la re-revue (Minor) : une lecture APPLIQUÉE garde son étiquette sur un ISBN introuvable, ET une ligne discrète tirée du résultat
+      // (etat.resultat, statut introuvable) dit que l'ISBN n'a rien donné — le texte EXISTANT de la provenance « aucune », selon google (aucune chaîne neuve).
+      await scenario('ronde de clôture : une lecture appliquée puis un ISBN introuvable — « Lu sur la couverture — vérifie. » ET la ligne discrète « Aucune fiche… » (constat neuf de la re-revue)', async (repo) => {
+        const { root } = await monter(repo, { pick: async () => [await F.imageDe('rc2.jpg', '#a33')] });
+        role(root, 'choisir-couverture').click();
+        await attendre(() => lue(root) && root.etatRoute().propositionsRecues === 1, 'lecture appliquée, rattrapage fini');
+        const avant = role(root, 'introuvable');
+        bouton(root, '← Changer d’ISBN').click();
+        taper(root.querySelector('input[name="isbn"]'), '9780306406157');
+        bouton(root, 'Identifier').click();
+        await attendre(() => root.etatRoute().reponsesRecues === 1 && !root.etatRoute().recherche, 'ISBN introuvable');
+        const ligne = role(root, 'introuvable');
+        eq([avant, root.etatRoute().pas, root.querySelector('.status.info')?.textContent ?? null, ligne?.textContent ?? null, ligne?.tagName ?? null, ligne?.className ?? null, titreDe(root)?.value, root.etatRoute().lecture?.statut],
+          [null, 2, 'Lu sur la couverture — vérifie.', 'Aucune fiche chez Open Library pour cet ISBN. Complète à la main.', 'SMALL', 'muted', 'À la di Stasio', 'lue'],
+          'lecture appliquée puis ISBN introuvable : la provenance de la couverture reste, ET une ligne discrète dit qu’Open Library n’a aucune fiche pour cet ISBN (ronde de clôture ; mutant : ligne omise → rouge)');
+        bouton(root, '← Changer d’ISBN').click();
+        bouton(root, 'Saisir à la main').click();
+        eq([root.etatRoute().pas, role(root, 'introuvable')], [2, null], 'un geste qui efface le résultat (« ← Changer d’ISBN ») retire la ligne : elle ne dit que le résultat de CETTE identification');
+        // Le modèle (pur) : le texte suit google (non_appele, rien, echec), exactement celui de la provenance « aucune » ; rien quand l'étiquette le dit déjà
+        // (« aucune »), ni hors d'un résultat introuvable.
+        const M = (provenance, resultat) => LA.livreAjoutModel({ pas: 2, champs: { title: 'X' }, provenance, resultat }).messages.introuvable ?? null;
+        const intr = (google) => ({ statut: 'introuvable', motif: null, google });
+        eq([M('couverture', intr('non_appele')), M('couverture', intr('rien')), M('openlibrary', intr('echec')), M('aucune', intr('rien')), M('couverture', { statut: 'indisponible', motif: 'serveur', google: 'non_appele' }), M('couverture', null)],
+          ['Aucune fiche chez Open Library pour cet ISBN. Complète à la main.', 'Aucune fiche chez Open Library ni Google Books pour cet ISBN. Complète à la main.', 'Aucune fiche chez Open Library pour cet ISBN (Google Books n’a pas répondu). Complète à la main.', null, null, null],
+          'modèle : la ligne discrète reprend le texte de « aucune » selon google (non_appele, rien, echec) ; absente sous l’étiquette « aucune » (qui le dit déjà), sur une panne, sans résultat');
+      });
+
+      // Observation résiduelle (a) de la vague : un vol HORS journal (tenirVol : une lecture de « Corriger », importId nul) tient le document — la route SANS
+      // import le compte comme un vol ailleurs (null !== null était faux) : ses deux boutons s'éteignent, et se rallument à la libération (constat 3 de la vague).
+      await scenario('ronde de clôture : un vol hors journal (tenirVol, sans identifiant) éteint les boutons d’une route sans import ; libéré, il les rallume (observation (a))', async (repo, db) => {
+        const pick = { n: 0, fn: async () => { pick.n += 1; return []; } };
+        const r1 = await monter(repo, { pick: pick.fn });
+        const eteints = (r) => [role(r.root, 'photographier-couverture')?.disabled, role(r.root, 'choisir-couverture')?.disabled];
+        const avant = eteints(r1);
+        const jeton = UI.tenirVol();
+        const r2 = await monter(repo, { pick: pick.fn });
+        const pendant = [!!jeton, UI.volEnCours(), r1.root.etatRoute().importId, eteints(r1), eteints(r2)];
+        UI.libererVol(jeton);
+        await attendre(() => [...eteints(r1), ...eteints(r2)].every((x) => x === false), 'vol hors journal libéré : les boutons rallumés');
+        eq([avant, pendant, eteints(r1), eteints(r2), pick.n, await db.count('imports')], [[false, false], [true, { importId: null }, null, [true, true], [true, true]], [false, false], [false, false], 0, 0],
+          'vol hors journal (importId nul) pendant une route sans import : les deux boutons éteints, sur la route montée avant (avis du vol) comme sur celle montée pendant ; rallumés à la libération (ronde de clôture, observation (a) ; mutant : l’ancienne condition v.importId !== etat.importId → rouge)');
+      });
+
+      // T5-R1, doute 3, remède (a) ratifié : le chemin RÉEL d'une couverture d'un autre appareil — une a_verifier dont la section offre « Reprendre » (le
+      // résultat est là), hostile à la revalidation (echec illisible), puis « Relire la couverture » — vole avec le device_id de CET appareil.
+      await scenario('ronde de clôture : une couverture a_verifier HOSTILE d’un autre appareil, reprise par ?import=, passe echec ; « Relire » la fait voler avec le device_id d’ici (constat 4)', async (repo, db) => {
+        const a = await ligneDe(repo, db, { status: 'a_verifier', device_id: 'appareil-B', resultat: { ...F.LECTURE, title: 'x'.repeat(400) }, started_at: NOW });
+        const ff = F.fauxFetch({ assistant: null });
+        const { root } = await monter(repo, { ff, query: { import: a.id } });
+        await attendre(() => root.etatRoute().lecture?.statut === 'echec', 'revalidée : echec(illisible)');
+        const echec = await db.get('imports', a.id);
+        role(root, 'relire').click();
+        await attendre(() => ff.posts().length === 1, 'vol parti');
+        const enVol = await db.get('imports', a.id);
+        eq([echec.status, echec.erreur?.raison, echec.device_id, enVol.status, enVol.device_id === repo.deviceId(), enVol.document_id_vol === UI.DOCUMENT_ID],
+          ['echec', 'illisible', 'appareil-B', 'en_cours', true, true],
+          'a_verifier hostile d’un autre appareil : la revalidation écrit echec(illisible) sans toucher device_id, puis « Relire la couverture » vole avec le device_id de CET appareil (ronde de clôture, constat 4 ; mutant : `ici` sans couverture → rouge)');
+        role(root, 'annuler-lecture').click();
+        await attendre(async () => (await db.get('imports', a.id)).erreur?.raison === 'annule', 'annulée');
+      });
     } finally { scene.remove(); setUiLocale(localeAvant); }
   }
   // --- § 6 Couverture : ce que la fiche livre et Mes livres MONTRENT, sur une base jetable

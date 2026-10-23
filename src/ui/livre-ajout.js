@@ -397,12 +397,13 @@ export function renderProposition(model, gestes = {}) {
 export function livreAjoutModel({ pas = 1, isbn = '', champs = {}, provenance = null, recherche = false, reprise = false, validation = null, resultat = null, suggestions = null, cleGoogle = false, lecteurDisponible = true, enCours = false, session = null, lecture = null, proposition = null, importId = null, volAilleurs = false, horsLigne = false, octetsAbsents = false } = {}) {
   const c = { ...CHAMPS_VIDES(), ...champs };
   const google = resultat?.google || 'non_appele';
+  const texteAucune = () => (google === 'rien' ? t('Aucune fiche chez Open Library ni Google Books pour cet ISBN. Complète à la main.')
+    : google === 'echec' ? t('Aucune fiche chez Open Library pour cet ISBN (Google Books n’a pas répondu). Complète à la main.')
+    : t('Aucune fiche chez Open Library pour cet ISBN. Complète à la main.'));
   const provenanceMessage = provenance === 'openlibrary' ? t('Renseigné par Open Library — vérifie et corrige.')
     : provenance === 'googlebooks' ? t('Renseigné par Google Books — vérifie et corrige.')
     : provenance === 'couverture' ? t('Lu sur la couverture — vérifie.')
-    : provenance === 'aucune' ? (google === 'rien' ? t('Aucune fiche chez Open Library ni Google Books pour cet ISBN. Complète à la main.')
-      : google === 'echec' ? t('Aucune fiche chez Open Library pour cet ISBN (Google Books n’a pas répondu). Complète à la main.')
-      : t('Aucune fiche chez Open Library pour cet ISBN. Complète à la main.')) : null;
+    : provenance === 'aucune' ? texteAucune() : null;
   // Tables fermées, lues par hasOwn : un motif inconnu (ou hostile, « __proto__ ») retombe sur un texte sûr (S12).
   const INDISPONIBLE = { delai: t('Open Library n’a pas répondu à temps.'), reseau: t('Impossible de joindre Open Library. Vérifie ta connexion.'), limite: t('Open Library reçoit trop de demandes en ce moment. Attends quelques secondes.'), serveur: t('Open Library est en panne pour le moment.'), horsligne: t('Tu es hors ligne.') };
   const VALIDATION = { longueur: t('Cet ISBN n’est pas valide, vérifie les chiffres.'), controle: t('Cet ISBN n’est pas valide, vérifie les chiffres.'), pas_isbn: t('Ce numéro n’est pas un ISBN : il doit commencer par 978 ou 979.') }; // C2 : seul le clavier produit ce motif
@@ -419,6 +420,9 @@ export function livreAjoutModel({ pas = 1, isbn = '', champs = {}, provenance = 
     peutReessayer: indisponible,
     messages: {
       provenance: provenanceMessage,
+      // Ronde de clôture (constat neuf de la re-revue) : un ISBN introuvable sous une AUTRE étiquette (une lecture appliquée, des champs repris d'une œuvre
+      // sans ISBN) est dit par une ligne discrète — le texte de « aucune », tiré du résultat ; sous « aucune », l'étiquette le dit déjà.
+      introuvable: resultat?.statut === 'introuvable' && provenance !== 'aucune' ? texteAucune() : null,
       recherche: recherche ? (reprise ? t('Nouvel essai…') : t('Recherche…')) : null,
       lecteur: lecteurDisponible ? null : t('Le lecteur de code-barres n’est pas offert dans ce navigateur.'),
       validation: validation ? lire(VALIDATION, validation, VALIDATION.longueur) : null,
@@ -506,6 +510,7 @@ export function renderLivreAjout(model, gestes = {}) {
     el('p', null, t('Vérifie la fiche, puis ajoute le livre.')),
     model.messages.provenance ? el('div', { class: 'status info' }, model.messages.provenance) : null,
     renderProposition(model, gestes),
+    model.messages.introuvable ? el('small', { class: 'muted', dataset: { role: 'introuvable' } }, model.messages.introuvable) : null,
     model.isbn ? el('div', { class: 'row' }, el('span', { class: 'muted' }, model.messages.rappelIsbn), el('button', { type: 'button', class: 'btn link', onClick: g('retourIsbn') }, t('← Changer d’ISBN'))) : el('button', { type: 'button', class: 'btn link', onClick: g('retourIsbn') }, t('← Changer d’ISBN')),
     renderBlocLecture(model, gestes),
     field(t('Titre *'), inp('title')),
@@ -583,8 +588,9 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
   // (R-UX-13 : une couverture distante tardive ne se repose pas) sans détacher la lecture en vol — il ne change pas de livre (la ligne du journal garde sa
   // photo, § 4.3.3) : la lecture payée qui arrive reste celle de l'écran. Les gestes qui changent le livre la détachent toujours (I-E4).
   const avancerCouverture = () => { const suivie = etat.generationLecture === etat.generation; avancer(); if (suivie) etat.generationLecture = etat.generation; };
-  // Lot E : un vol d'une AUTRE ligne tient le document (le verrou de import-cible.js est unique, I-E3).
-  const volAilleurs = () => { const v = volEnCours(); return !!v && v.importId !== etat.importId; };
+  // Lot E : un vol d'une AUTRE ligne tient le document (le verrou de import-cible.js est unique, I-E3). Ronde de clôture (observation (a) de la vague) : un
+  // vol HORS journal (tenirVol, importId nul) en est un aussi, même quand la route n'a pas d'import (null !== null était faux) — le vol de la route a sa ligne.
+  const volAilleurs = () => { const v = volEnCours(); return !!v && (v.importId == null || v.importId !== etat.importId); };
   // Le modèle de la route : la phrase des sources suit la clé RÉELLEMENT passée (cleGoogle), et les puces lisent
   // les cuisines et mots-clés déjà employés. Toute lecture du modèle passe par ici (jamais le modèle nu de l'état).
   const modele = () => ({ ...livreAjoutModel({ ...etat, cleGoogle: !!cle, horsLigne: !enLigne(), volAilleurs: volAilleurs() }), existantes: etat.existantes, existantesMotsCles: etat.existantesMotsCles });
@@ -657,7 +663,10 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     // C3 (oublierDistants) avant C1 (avancer).
     // Lot E (D-E18) : une couverture PHOTOGRAPHIÉE dans cette route (posée ou en préparation, ronde 1) survit à « Identifier » ; sans photo, comme aujourd'hui.
     etat.provenance = null; if (!photoDeLaRoute()) etat.couverture = COUVERTURE_VIDE(); etat.suggestions = null;
-    oublierDistants();
+    // Ronde de clôture (constat 1) : des champs repris d'une fiche SANS ISBN (« Utiliser ces renseignements », isbnDistant nul) n'appartiennent à aucun ISBN —
+    // gardés pendant l'appel, rendus dans la seule branche `trouve` ; ceux d'un ISBN précédent tombent ici, avant l'appel (C3).
+    const garderDistants = !!etat.champsDistants && etat.isbnDistant === null;
+    if (!garderDistants) oublierDistants();
     avancer();
     const generation = etat.generation;
     etat.recherche = true; etat.reprise = false; etat.resultat = null;
@@ -676,7 +685,9 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
         // Lot E, ronde 1 (C3, I-E10, I-B ; constat 7 de T4, option 1), vague finale (constat 2) : une lecture APPLIQUÉE n'est pas la fiche de cet ISBN — ses
         // champs non touchés sont rendus avant la fusion (l'ISBN tapé reste), ses mentions quittent l'écran ; le journal la garde (état `recue`), « Ajouter
         // ce livre » la fermera avec le livre. Seulement quand une fiche est TROUVÉE : introuvable, panne ou erreur laissent la lecture, ses champs et son
-        // étiquette à l'écran (la lecture payée ne disparaît pas sans rien à la place).
+        // étiquette à l'écran (la lecture payée ne disparaît pas sans rien à la place). Ronde de clôture (constat 1) : les champs repris d'une fiche sans ISBN
+        // (gardés pendant l'appel) sont rendus ici, avec la remise, avant la fusion et sous la garde de génération.
+        oublierDistants();
         if (etat.lecture?.statut === 'lue') { remettreChampsLus({ isbn: false }); etat.champsLus = null; etat.lecture = { statut: 'recue' }; }
         const avantFusion = { ...etat.champs };
         etat.champs = fusionnerFiche(etat.champs, res.fiche, { langueTouchee: etat.langueTouchee });
@@ -720,7 +731,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
             dessiner();
           }).catch(() => { /* une couverture n'est jamais essentielle : aucun rejet non traité, aucune carte rouge */ });
         }
-      } else if (res.statut === 'introuvable') { etat.provenance = etat.lecture?.statut === 'lue' ? 'couverture' : 'aucune'; etat.resultat = res; etat.pas = 2; } // vague finale (constat 2) : les champs à l'écran sont ceux de la lecture (I-B)
+      } else if (res.statut === 'introuvable') { etat.provenance = garderDistants ? etat.sourceDistante : etat.lecture?.statut === 'lue' ? 'couverture' : 'aucune'; etat.resultat = res; etat.pas = 2; } // vague finale (constat 2) : les champs à l'écran sont ceux de la lecture (I-B) ; ronde de clôture (constat 1) : ou ceux, gardés, d'une fiche sans ISBN
       else { etat.resultat = res; } // indisponible : on reste au pas 1, ISBN conservé, Réessayer offert
     } catch (e) {
       // S1 (vague /verify) : filet — lookupIsbn ne doit jamais lever, mais si elle le fait l'écran ne reste pas muet.
@@ -1024,7 +1035,9 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
       const v = validerIsbn(etat.isbn);
       // Vague finale (constat 1) : « aucun ISBN avant comme après » vaut le même ISBN — les champs repris par « Utiliser ces renseignements » sans ISBN (une
       // œuvre à plusieurs éditions) restent avec leur étiquette (§ 4.3.5). Constat 5 : sinon, une lecture encore appliquée garde la sienne (I-B, I-E1).
-      const memeIsbn = !!etat.champsDistants && (v.ok ? v.isbn13 === etat.isbnDistant : etat.isbnDistant === null && !String(etat.isbn ?? '').trim());
+      // Ronde de clôture (constat 1) : ces champs n'appartiennent à aucun ISBN (isbnDistant nul) — un ISBN tapé depuis (une panne l'a laissé sans fiche) ne
+      // les fait pas tomber ; seule une fiche TROUVÉE les rend (identifier).
+      const memeIsbn = !!etat.champsDistants && (etat.isbnDistant === null || (v.ok && v.isbn13 === etat.isbnDistant));
       if (memeIsbn) etat.provenance = etat.sourceDistante;
       else { oublierDistants(); etat.provenance = etat.lecture?.statut === 'lue' ? 'couverture' : null; }
       etat.isbn = v.ok ? v.isbn13 : nettoyerIsbn(etat.isbn).slice(0, 20); // affiché = enregistré quand valide ; borné sinon (S8/F22)
