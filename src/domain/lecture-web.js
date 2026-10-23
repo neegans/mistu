@@ -10,12 +10,12 @@ import { MOTIF_ADRESSE, porteUneAdresse, normaliserPourAdresse } from './recherc
 import { parseIngredientLine, detectTimers } from './lines.js';
 import { assertVocabulaire, originePhotoAdmise } from './vocabulaire.js';
 import { versionEcrite, ligneImportNeuve } from './import-cible.js';
-import { adresseImageAdmise, candidatPhotoWeb, memeAdresseImage } from './photo-web.js';
+import { adresseImageAdmise, candidatPhotoWeb, memeAdresseImage, pointeurValide } from './photo-web.js';
 import { newId } from '../core/ids.js';
 import { lienSignet } from '../core/lien.js';
 import { borner } from '../core/bornes.js';
 import { t } from '../core/i18n.js';
-import { SOURCE_KINDS, HASH } from '../model/schema.js';
+import { SOURCE_KINDS } from '../model/schema.js';
 
 // Les bornes de la page relue (§ 3.5) ; TITRE_FICHE_MAX = LIMITES_SIGNET.titre (src/ui/signet.js : un module de vue, que le domaine n'importe
 // pas — l'égalité est épinglée par la suite).
@@ -224,7 +224,7 @@ export function fabriquerLectureWeb(recette, { signet, versions = [], page = nul
   const photoWeb = candidat !== null && memeAdresseImage(candidat, photoAnnoncee) ? candidat : null;
   const origine = Object.hasOwn(signet, 'photo_origin') ? { photo_origin: originePhotoAdmise(signet.photo_origin) } : {};
   if (remplacer === false) { const intact = { ...signet }; assertVocabulaire({ ...intact, ...origine }, 'recipes'); return { recipe: intact, version, remplacement, photoWeb }; } // une copie, jamais la référence ; P-5 (lot F) : le vocabulaire est vérifié avec l'origine admise, le signet rendu INTACT (B-24)
-  const sansPhoto = !(typeof signet.photo_sha256 === 'string' && HASH.test(signet.photo_sha256));
+  const sansPhoto = !pointeurValide(signet); // ronde 1 : la définition de photo-web.js (un pointeur hostile = sans photo), jamais une copie
   const recipe = {
     ...signet,
     original_title: premiere && titreLu ? titreLu : signet.original_title,

@@ -56,6 +56,9 @@ export async function runPhotoPlatTests({ eq, ok }) {
       const { COVER_INPUT_MIME } = await import('../src/sync/mime.js');
       const { LIMITES_PASSERELLE } = await import('../src/domain/passerelle.js');
       ok(Object.isFrozen(W.LIMITES_IMAGE_WEB), 'LIMITES_IMAGE_WEB : gelée');
+      // Ronde 1 : le gel doit aussi tenir la liste des types (COVER_INPUT_MIME, partagée avec le mur distant et les couvertures) — un push la
+      // passerait en silence dans les trois murs à la fois.
+      ok(Object.isFrozen(W.LIMITES_IMAGE_WEB.types) && Object.isFrozen(COVER_INPUT_MIME), 'LIMITES_IMAGE_WEB.types (COVER_INPUT_MIME) : gelée elle aussi');
       eq([W.LIMITES_IMAGE_WEB.url, W.LIMITES_IMAGE_WEB.octets, W.LIMITES_IMAGE_WEB.corpsReponse, W.LIMITES_IMAGE_WEB.tentativeMs, W.LIMITES_IMAGE_WEB.types === COVER_INPUT_MIME],
         [2048, 2097152, 3 * 1024 * 1024, 90000, true], 'LIMITES_IMAGE_WEB : 2 048 points, 2 Mio (le littéral du serveur), réponse ≤ 3 Mio, 90 s, les types des couvertures');
       ok(W.LIMITES_IMAGE_WEB.octets <= LIMITES_COUVERTURE.octetsDistants, 'LIMITES_IMAGE_WEB.octets ≤ le mur commun des images distantes (5 Mio)');
@@ -72,6 +75,10 @@ export async function runPhotoPlatTests({ eq, ok }) {
         'adresseImageAdmise : http, espace, non ASCII, U+2028, 2 049 points, javascript:, vide, null, nombre, objet → null');
       const longue = 'https://a.test/' + '"'.repeat(10) + 'x'.repeat(2040 - 15 - 10);
       eq([longue.length, new URL(longue).href.length > 2048, A(longue)], [2040, true, null], 'adresseImageAdmise : un href ASCII de 2 040 points dont dix « " » (encodés %22) dépasse 2 048 APRÈS normalisation → null');
+      // Ronde 1 : la borne AVANT lienSignet, isolée — une entrée de plus de 2 048 points qui RACCOURCIT à la normalisation (identifiants retirés).
+      const { lienSignet } = await import('../src/core/lien.js');
+      const raccourcie = 'https://' + 'u'.repeat(40) + ':p@a.test/' + 'x'.repeat(2010);
+      eq([raccourcie.length, lienSignet(raccourcie).href.length, A(raccourcie)], [2068, 2025, null], 'adresseImageAdmise : 2 068 points en entrée, 2 025 une fois les identifiants retirés → null (la borne d’entrée seule la refuse)');
       eq([W.memeAdresseImage('HTTPS://A.TEST:443/i.jpg', 'https://a.test/i.jpg'), W.memeAdresseImage('https://a.test/1.jpg', 'https://a.test/2.jpg'), W.memeAdresseImage('http://a.test/i.jpg', 'http://a.test/i.jpg'), W.memeAdresseImage(null, null)],
         [true, false, false, false], 'memeAdresseImage : la même adresse sous une autre forme → vrai ; deux adresses → faux ; refusée des deux côtés → faux');
     });
@@ -117,7 +124,18 @@ export async function runPhotoPlatTests({ eq, ok }) {
       const annule = await W.lireImageWeb({ url: 'https://a.test/i.jpg', session: SESSION }, { fetch: f(200, corps200(grosse)), config: SUPABASE.prod, signal: ctl.signal });
       resultats.push(sansSession, enHttp, annule);
       eq([sansSession.raison, enHttp.raison, annule.raison, appels.length], ['non_connecte', 'adresse', 'annule', 0], 'lireImageWeb : sans session → non_connecte ; http → adresse ; signal levé → annule ; zéro fetch');
+      // Ronde 1 : le corps porte l'adresse NORMALISÉE (identifiants retirés, D-T7), jamais l'adresse reçue telle quelle.
+      const avecIdentifiants = await W.lireImageWeb({ url: 'https://u:p@a.test/i.jpg', session: SESSION }, { fetch: f(200, corps200(Uint8Array.of(0xff, 0xd8, 0xff))), config: SUPABASE.prod });
+      resultats.push(avecIdentifiants);
+      eq([appels.length, JSON.parse(appels[0]?.options?.body ?? 'null'), avecIdentifiants.etat], [1, { outil: 'image-web', corps: { url: 'https://a.test/i.jpg' } }, 'recue'], 'lireImageWeb : https://u:p@a.test/i.jpg → le POST porte https://a.test/i.jpg (l’href normalisé), jamais les identifiants');
+      // Ronde 1 : « ne lève jamais » vaut aussi pour des arguments absents — la déstructuration vit DANS le try (aucun rejet, aucun fetch possible :
+      // une adresse refusée s'arrête avant la passerelle, une session nulle avant tout réseau).
+      const sansArgs = await Promise.allSettled([W.lireImageWeb(null), W.lireImageWeb(undefined, null), W.lireImageWeb({ url: 'http://a.test/i.jpg' }, null), W.lireImageWeb({ url: 'https://a.test/i.jpg', session: null }, null)]);
+      resultats.push(...sansArgs.map((p) => p.value));
+      eq([sansArgs.map((p) => p.status), sansArgs.map((p) => p.value?.raison)], [['fulfilled', 'fulfilled', 'fulfilled', 'fulfilled'], ['adresse', 'adresse', 'adresse', 'non_connecte']],
+        'lireImageWeb(null), (undefined, null), ({ url http }, null), ({ url, session: null }, null) → jamais un rejet : adresse, adresse, adresse, non_connecte');
       eq(resultats.some((x) => JSON.stringify(x ?? null).includes('jeton-photo-sentinelle')), false, 'lireImageWeb : le jeton n’est dans aucun résultat');
+      ok(resultats.length === 9 && resultats.every((x) => x?.etat === 'recue' || (x?.etat === 'echec' && W.RAISONS_PHOTO_WEB.includes(x.raison))), 'lireImageWeb (l’appel) : les neuf résultats sont recue ou un échec dont la raison ∈ RAISONS_PHOTO_WEB (adresse, non_connecte, annule compris)');
     });
 
     await run('lireImageWeb : le 200 est une donnée hostile', async () => {
@@ -129,7 +147,9 @@ export async function runPhotoPlatTests({ eq, ok }) {
       const lu = async (corps) => W.lireImageWeb({ url: 'https://a.test/i.jpg', session: SESSION }, { fetch: async () => reponse(200, corps), config: SUPABASE.prod });
       const resultats = [];
       const garde = (r) => { resultats.push(r); return r; };
-      eq([(garde(await lu(corps200({ type: 'image/gif' })))).raison, (garde(await lu(corps200({ taille: 0 })))).raison], ['illisible', 'illisible'], '200 hostile : type hors liste → illisible ; taille 0 → illisible');
+      // Ronde 1 : taille 0 AVEC des octets vides — lireOctetsBase64('', 0) rendrait un Uint8Array(0) : seule la règle « taille ≥ 1 » refuse ici
+      // (avec les octets de `petit`, la règle de longueur du base64 refusait à sa place : faux vert).
+      eq([(garde(await lu(corps200({ type: 'image/gif' })))).raison, (garde(await lu(corps200({ taille: 0, octets: '' })))).raison], ['illisible', 'illisible'], '200 hostile : type hors liste → illisible ; taille 0 et octets vides → illisible (la règle taille ≥ 1, isolée)');
       // La borne AVANT tout décodage : un base64 de la BONNE longueur pour 2 097 153 octets — un mutant « décoder puis borner » appellerait atob.
       const TROP = W.LIMITES_IMAGE_WEB.octets + 1;
       const vraiAtob = globalThis.atob; let atobs = 0;
@@ -138,6 +158,14 @@ export async function runPhotoPlatTests({ eq, ok }) {
       finally { globalThis.atob = vraiAtob; }
       eq([(garde(await lu(corps200({ octets: '@@' })))).raison, (garde(await lu(corps200({ octets: base64De(petit) + 'AAAA' })))).raison, (garde(await lu(corps200({ taille: 4 })))).raison, (garde(await lu(corps200({ octets: 'AAA AAAA' })))).raison],
         ['illisible', 'illisible', 'illisible', 'illisible'], '200 hostile : alphabet hors base64, longueur ≠ 4 × ceil(taille / 3), décodé de longueur ≠ taille, une espace à la bonne longueur (atob l’ignorerait : seule la règle ALPHABET la refuse) → illisible');
+      // Ronde 1 : la règle de longueur EXACTE, isolée — un base64 SANS remplissage (7 caractères pour 5 octets) passe l'alphabet et atob le décode
+      // en 5 octets : seule la longueur 4 × ceil(taille / 3) le refuse (« avec remplissage », spec § 3.4).
+      const sansRemplissage = base64De(petit).replace(/=+$/, '');
+      eq([base64De(petit).length, sansRemplissage.length, atob(sansRemplissage).length, (garde(await lu(corps200({ octets: sansRemplissage })))).raison], [8, 7, 5, 'illisible'], '200 hostile : base64 sans remplissage (7 pour 5 octets, décodable) → illisible');
+      // Ronde 1 : url_finale est revalidée par adresseImageAdmise (informative, jamais écrite) — http, javascript:, non chaîne → null sur un recue.
+      const finales = [];
+      for (const url_finale of ['http://cdn.test/i.jpg', 'javascript:x', 7]) { const x = garde(await lu(corps200({ url_finale }))); finales.push([x.etat, x.urlFinale]); }
+      eq(finales, [['recue', null], ['recue', null], ['recue', null]], '200 : url_finale http, javascript:, nombre → urlFinale null (jamais la valeur reçue telle quelle)');
       // S-11 sans polluer aucun prototype (R-F-8 : la suite tourne des cas en parallèle et un appel asynchrone y lit des objets nus) : le corps passe
       // par la configuration de test déjà prévue pour lireImageWeb (P-3 : config, fetch factice, JSON relu par la passerelle) ; un champ absent du
       // corps est absent pour lu(k). Mutants tués : « type par défaut quand le champ propre manque » (lu('type') ?? 'image/jpeg' : le corps sans type
@@ -150,6 +178,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
       const bon = garde(await lu(corps200()));
       eq([bon.etat, bon.blob.type, [...(await octetsDe(bon.blob))]], ['recue', 'image/jpeg', [...petit]], '200 valide → { etat: recue, blob } du bon type et des bons octets');
       eq(resultats.some((x) => JSON.stringify(x).includes('jeton-photo-sentinelle')), false, 'le jeton n’est dans aucun résultat');
+      ok(resultats.length === 15 && resultats.every((x) => x?.etat === 'recue' || (x?.etat === 'echec' && W.RAISONS_PHOTO_WEB.includes(x.raison))), '200 hostile : les quinze résultats sont recue ou un échec dont la raison ∈ RAISONS_PHOTO_WEB (illisible, image_trop_lourde compris)');
     });
 
     await run('table serveur → client, raisons fermées', async () => {
@@ -157,11 +186,18 @@ export async function runPhotoPlatTests({ eq, ok }) {
       const { SUPABASE } = await import('../src/sync/config.js');
       const SESSION = { access_token: 'jeton-photo-sentinelle', user: { id: 'u1' } };
       const table = [[422, { erreur: 'pas_une_image' }, 'pas_une_image', {}], [413, { erreur: 'image_trop_lourde' }, 'image_trop_lourde', {}], [422, { erreur: 'interdit' }, 'interdit', {}],
-        [502, { erreur: 'inaccessible' }, 'inaccessible', {}], [429, { erreur: 'quota', quota: 60 }, 'quota', { quota: 60 }], [429, { type: 'error' }, 'trop_de_demandes', {}], [504, { erreur: 'delai' }, 'delai', {}]];
+        [502, { erreur: 'inaccessible' }, 'inaccessible', {}], [429, { erreur: 'quota', quota: 60 }, 'quota', { quota: 60 }], [429, { type: 'error' }, 'trop_de_demandes', {}], [504, { erreur: 'delai' }, 'delai', {}],
+        // Ronde 1 : des refus PROPRES à lecture-web (la passerelle les traduit quel que soit l'outil : page_vide, pas_une_page, page_trop_lourde) sortent
+        // de la liste fermée — le filtre de lireImageWeb les ramène à « interne » (sans ces lignes, il n'était éprouvé par rien).
+        [422, { erreur: 'vide' }, 'interne', {}], [422, { erreur: 'pas_une_page' }, 'interne', {}], [413, { erreur: 'trop_lourde' }, 'interne', {}]];
       const obtenus = [];
       for (const [statut, corps] of table) { const x = await W.lireImageWeb({ url: 'https://a.test/i.jpg', session: SESSION }, { fetch: async () => reponse(statut, corps), config: SUPABASE.prod }); obtenus.push([x.etat, x.raison, x.extra]); }
-      eq(obtenus, table.map(([, , raison, extra]) => ['echec', raison, extra]), 'table serveur → client : pas_une_image, image_trop_lourde, interdit, inaccessible relayées ; quota 60 ; 429 sans champ → trop_de_demandes ; 504 → delai');
-      ok(obtenus.every(([, raison]) => W.RAISONS_PHOTO_WEB.includes(raison)), 'toute raison rendue ∈ RAISONS_PHOTO_WEB');
+      eq(obtenus, table.map(([, , raison, extra]) => ['echec', raison, extra]), 'table serveur → client : pas_une_image, image_trop_lourde, interdit, inaccessible relayées ; quota 60 ; 429 sans champ → trop_de_demandes ; 504 → delai ; vide, pas_une_page, trop_lourde (lecture-web) → interne');
+      ok(obtenus.length === 10 && obtenus.every(([, raison]) => W.RAISONS_PHOTO_WEB.includes(raison)), 'toute raison rendue ∈ RAISONS_PHOTO_WEB');
+      // Ronde 1 : la liste fermée elle-même, épinglée (les 29 raisons de la spec § 3.4, dans son ordre) : retirer « adresse » ou « illisible » rougit ici.
+      eq([...W.RAISONS_PHOTO_WEB], ['adresse', 'fiche_absente', 'fiche_changee', 'photo_manuelle', 'deja_la', 'vol_tenu', 'hors_ligne', 'non_connecte', 'non_admis', 'quota',
+        'trop_de_demandes', 'requete', 'serveur', 'delai', 'reseau', 'interne', 'reponse_illisible', 'annule', 'interdit', 'inaccessible', 'pas_une_image', 'image_trop_lourde', 'illisible',
+        'type', 'trop_petite', 'trop_grande', 'indecodable', 'trop_lourde', 'ecriture'], 'RAISONS_PHOTO_WEB : les 29 raisons de la spec § 3.4');
       ok(Object.isFrozen(W.RAISONS_PHOTO_WEB) && Object.isFrozen(W.RAISONS_DEFINITIVES) && W.RAISONS_DEFINITIVES.every((r) => W.RAISONS_PHOTO_WEB.includes(r)), 'RAISONS_DEFINITIVES ⊂ RAISONS_PHOTO_WEB, les deux gelées');
       eq([...W.RAISONS_DEFINITIVES], ['interdit', 'pas_une_image', 'image_trop_lourde', 'type', 'trop_petite', 'trop_grande', 'indecodable', 'trop_lourde'], 'RAISONS_DEFINITIVES : la liste de la spec');
     });
@@ -177,6 +213,8 @@ export async function runPhotoPlatTests({ eq, ok }) {
       eq(await code(IM.preparerPhotoDistante(new Blob([png], { type: 'image/jpeg' }))), 'indecodable', 'octets PNG annoncés image/jpeg → indecodable (l’en-tête dit un autre type)');
       eq(await code(IM.preparerPhotoDistante(new Blob([new Uint8Array(10)], { type: 'image/heic' }))), 'type', 'image/heic → type (jamais HEIC pour une image distante)');
       eq(await code(IM.preparerPhotoDistante(new Blob([new Uint8Array(5 * 1024 * 1024 + 1)], { type: 'image/jpeg' }))), 'trop_lourde', '5 Mio + 1 → trop_lourde (le mur commun octetsDistants)');
+      // Ronde 1 : la borne exacte — 5 Mio pile passe le mur de taille (> et non ≥) ; l'en-tête nul tranche ensuite.
+      eq([IM.LIMITES_COUVERTURE.octetsDistants, await code(IM.preparerPhotoDistante(new Blob([new Uint8Array(IM.LIMITES_COUVERTURE.octetsDistants)], { type: 'image/jpeg' })))], [5 * 1024 * 1024, 'indecodable'], '5 Mio pile → indecodable (jamais trop_lourde : la borne est incluse)');
       eq([await code(IM.preparerPhotoDistante(await imageTest('e.jpg', '#a52', 199, 600))), await code(IM.preparerPhotoDistante(await imageTest('f.jpg', '#a52', 200, 600)))], ['trop_petite', 'ok'], 'petit côté 199 → trop_petite ; 200 → accepté');
       const tete = new Uint8Array(33); tete.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
       const dv = new DataView(tete.buffer); dv.setUint32(16, 5000); dv.setUint32(20, 4000);

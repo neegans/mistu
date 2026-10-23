@@ -510,6 +510,10 @@ test('chainage serveur → client : lireOctetsBase64(versBase64(octets), n) rend
   const b = L.versBase64(pseudo(100000)); const milieu = Math.floor(b.length / 2);
   assert.equal(lireOctetsBase64(b.slice(0, milieu) + '=' + b.slice(milieu + 1), 100000), null, 'un = au milieu → null');
   assert.equal(lireOctetsBase64(b, 99999), null, 'longueur ≠ 4 × ceil(taille / 3) → null');
+  // Ronde 1 : la regle de longueur EXACTE, isolee — sans remplissage, 7 caracteres pour 5 octets passent l alphabet et atob les decode en 5 octets.
+  const cinq = L.versBase64(pseudo(5)); const nu = cinq.replace(/=+$/, '');
+  assert.deepEqual([cinq.length, nu.length, atob(nu).length], [8, 7, 5], 'fixture : 8 caracteres avec remplissage, 7 sans, decodables en 5 octets');
+  assert.equal(lireOctetsBase64(nu, 5), null, 'sans remplissage : seule la regle de longueur exacte la refuse');
   assert.deepEqual([lireOctetsBase64(42, 1), lireOctetsBase64('@@@@', 3), lireOctetsBase64('', 0)?.length], [null, null, 0]);
   assert.equal(lireOctetsBase64('AAA AAAA', 5), null, 'une espace, longueur exacte : atob l ignorerait, seule la regle ALPHABET la refuse');
 });

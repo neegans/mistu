@@ -45,5 +45,6 @@ export function assertVocabulaire(fiche, magasin) {
 }
 
 // D-F19 : une origine relue hors liste (archive, appareil plus récent) se lit null chez les fabricants qui RECOPIENT une fiche (fabriquerExtraction,
-// fabriquerLectureWeb, « Corriger ») — sinon assertVocabulaire lèverait sur une fiche reçue. Le pointeur et l'adresse, eux, sont revalidés à chaque lecture.
+// fabriquerLectureWeb ; « Corriger », src/ui/recipe-edit.js, à la tâche 5 du lot F — jusque-là il recopie l'origine brute) — sinon assertVocabulaire
+// lèverait sur une fiche reçue. Le pointeur et l'adresse, eux, sont revalidés à chaque lecture.
 export const originePhotoAdmise = (v) => (PHOTO_ORIGINS.includes(v) ? v : null);

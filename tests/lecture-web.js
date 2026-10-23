@@ -1186,6 +1186,14 @@ export async function runLectureWebTests({ eq, ok }) {
       const d = fab(sig, { versions: [{ id: 'rv_m', kind: 'extraction', provenance: { generated_by: 'manual' }, verification_state: 'verified' }], remplacer: false });
       eq([d.recipe, d.photoWeb], [sig, IMG], 'remplacer: false → le signet INTACT (aucune clé changée, B-24), photoWeb = l’adresse (la descente partira après la transaction, R-F-2)');
       eq([fab(SIGNET, { photoAnnoncee: null }).photoWeb, fab(SIGNET, { photoAnnoncee: 'https://cdn.site.test/autre.jpg' }).photoWeb, 'photo_source_url' in fab(SIGNET, { photoAnnoncee: null }).recipe], [null, null, false], 'photoAnnoncee nulle ou différente → photoWeb null, aucun photo_source_url posé (S-12)');
+      // Ronde 1 : la moitié « pointeur VALIDE » de la règle (D-F18 : une fiche SANS pointeur valide reçoit photo_source_url) — un pointeur hostile vaut
+      // « pas de photo », quelle que soit l'origine, et l'ancienne adresse est remplacée (sinon « Réessayer » relancerait l'ANCIENNE image).
+      const hw = fab({ ...SIGNET, photo_sha256: '../x', photo_origin: 'web', photo_source_url: 'https://cdn.site.test/ancienne.jpg' });
+      const hi = fab({ ...SIGNET, photo_sha256: '../x', photo_origin: 'image' });
+      eq([hw.photoWeb, hw.recipe.photo_source_url, hi.photoWeb, hi.recipe.photo_source_url], [IMG, IMG, IMG, IMG], 'pointeur hostile (« ../x », origine web ou image) = sans photo → photoWeb et photo_source_url = l’adresse annoncée');
+      // Ronde 1 : la comparaison à l'annonce passe par memeAdresseImage (S-10) — l'annonce sous une autre forme est la même adresse.
+      const af = fab(SIGNET, { photoAnnoncee: 'HTTPS://CDN.SITE.TEST:443/p.jpg' });
+      eq([af.photoWeb, af.recipe.photo_source_url], [IMG, IMG], 'photoAnnoncee « HTTPS://CDN.SITE.TEST:443/p.jpg » = la même adresse → photoWeb = l’href normalisé');
       let e = null; let ap = null;
       try { ap = fab({ ...SIGNET, photo_origin: 'appareil' }); } catch (x) { e = x; }
       eq([e?.name ?? null, ap?.recipe.photo_origin], [null, null], 'D-F19 : signet relu avec photo_origin « appareil » → aucune levée, photo_origin null');

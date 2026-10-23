@@ -36,7 +36,8 @@ export function memeAdresseImage(a, b) {
   const x = adresseImageAdmise(a);
   return x !== null && x === adresseImageAdmise(b);
 }
-const pointeurValide = (f) => typeof f?.photo_sha256 === 'string' && HASH.test(f.photo_sha256);
+// UNE définition du « pointeur valide » d'une photo du plat (candidat ici, fabriquerLectureWeb dans lecture-web.js) : un pointeur hostile vaut « pas de photo ».
+export const pointeurValide = (f) => typeof f?.photo_sha256 === 'string' && HASH.test(f.photo_sha256);
 // D-F10 : l'adresse à rapatrier pour cette fiche, ou null — jamais quand la personne a sa photo (origine photo, image, ou inconnue, avec un pointeur
 // valide), jamais quand cette image-là est déjà en place ; une photo web se remplace par une image différente.
 export function candidatPhotoWeb(fiche, imageUrl) {
@@ -50,8 +51,12 @@ export function candidatPhotoWeb(fiche, imageUrl) {
 const echecDe = (raison, extra = {}) => ({ etat: 'echec', raison, extra });
 // UN POST { outil: 'image-web', corps: { url } } (corpsMax 3 Mio : le défaut de 2 Mio de la passerelle ne suffit pas à une image à la borne).
 // Rend { etat: 'recue', blob, urlFinale } ou { etat: 'echec', raison ∈ RAISONS_PHOTO_WEB, extra }. `config` : tests seulement (P-3).
-export async function lireImageWeb({ url, session } = {}, { fetch, signal, tentativeMs = LIMITES_IMAGE_WEB.tentativeMs, config } = {}) {
+// Forme d'appel : lireImageWeb({ url, session }, { fetch, signal, tentativeMs = 90 000, config }) ; la déstructuration vit DANS le try (ronde 1) :
+// des arguments nuls rendent un échec, jamais un rejet.
+export async function lireImageWeb(args, opts) {
   try {
+    const { url, session } = args ?? {};
+    const { fetch, signal, tentativeMs = LIMITES_IMAGE_WEB.tentativeMs, config } = opts ?? {};
     const href = adresseImageAdmise(url);
     if (href === null) return echecDe('adresse');
     const r = await appelerAssistant('image-web', { url: href }, { fetch, session, config, signal, tentativeMs, corpsMax: LIMITES_IMAGE_WEB.corpsReponse });
