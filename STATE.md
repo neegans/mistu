@@ -1,4 +1,22 @@
-# STATE.md — Cuisine OS (mistu) — état au 22 octobre 2026 (lots « Passerelle de l'assistant » et « Présentation du serveur » EN LIGNE, `main` = `57babc6` ; lots A « Import ciblé et journal d'import », B « Recette web complète », G « Les photos voyagent entre appareils », C « Table des matières sur plusieurs pages » et D « Un lot de recettes photographiées » FINIS, empilés A → B → G → C → D sur `main`, NI fusionnés NI poussés, migrations `0005` et `0006` PAS collées, fonction `assistant` PAS redéployée ; lots E, F prêts (specs, plans, valeurs de rejeu), E en Départ sur la tête finale de D)
+# STATE.md — Cuisine OS (mistu) — état au 23 octobre 2026 (lots « Passerelle de l'assistant » et « Présentation du serveur » EN LIGNE, `main` = `57babc6` ; lots A « Import ciblé et journal d'import », B « Recette web complète », G « Les photos voyagent entre appareils », C « Table des matières sur plusieurs pages », D « Un lot de recettes photographiées » et E « Un livre reconnu depuis sa couverture » FINIS, empilés A → B → G → C → D → E sur `main`, NI fusionnés NI poussés, migrations `0005` et `0006` PAS collées, fonction `assistant` PAS redéployée ; lot F prêt (spec, plan, valeurs de rejeu), F en Départ sur la tête finale de E)
+
+**23 octobre 2026, 4 h 59 — LOT E « UN LIVRE RECONNU DEPUIS SA COUVERTURE » : FINI dans le worktree `~/projects/mistu-couverture-lue`
+(branche `couverture-lue`, base = la tête finale du lot D `619e6c0`, spec `209de95` (rév. 6) puis rév. 7 à la clôture, plan rejoué `2bb855a`,
+tête de code `1e5e61b`, serveur 8093), cinq tâches (1, 2, 3a, 3b, 4 ; une ronde chacune, re-revues propres ; vague finale puis ronde de clôture),
+revue finale à trois lentilles (3 Important et 11 Minor : la vague `f814f13` / `8934f07` corrige 3 Important et 8 Minor, nomme 2 limites (§ 11),
+ratifie 2 choix ; re-revue A_CORRIGER (constat 2 en partie, 1 Minor neuf) → ronde de clôture `784e7cf` puis `1e5e61b` (tests seuls) (`sw.js -12`,
+épingle 5678 puis 5680, 5681/5681, mutants 20/20 puis RA5 rouge sur les deux assertions neuves (`❌ 5679/5681`), RA1 et RA3 restent rouges, X1 du
+relecteur rouge ; témoins verts sur 8298 et 8398-8399), re-revue de la ronde 1 A_CORRIGER (quatre points fermés, un faux-vert neuf RA5) puis, après la
+ronde 2 tests seuls `1e5e61b`, **PROPRE** (0 restant, 0 neuf) ; rulings de construction R-E-30 à R-E-39),
+`/verify` mécanique VERT (suite 5681/5681, épingle 5680, Node 174/174, `--check` 0, invisibles 0, aucune clé), `sw.js cuisine-os-v0.14.0-12`,
+`APP_VERSION 0.14.0`, aucune migration, serveur `assistant` intact. **PAS fusionné, PAS poussé.** Pour Neegan, dans l'ordre : les gestes des lots A, B,
+G, C et D (ci-dessous) ; puis la **preuve réelle § 10 sur la branche servie localement, AVANT la fusion** (`ASSISTANT_ORIGINES` =
+`https://neegans.github.io,http://localhost:8093` — les deux origines — et `http://localhost:8093/**` aux Redirect URLs, le temps de la preuve ; les
+sept points de § 10 ; une limite révélée amende la consigne § 3.3 et la table § 3.2 par une ronde avant la fusion ; autres appareils fermés) ;
+`git merge --ff-only couverture-lue`, push, suite publique 5681/5681, tous les appareils sur 0.14.0, iPhone, « clean ». Registre
+`.superpowers/sdd/2026-10-19-couverture-lue/` (copie dans `~/projects/mistu/.superpowers/sdd/`) ; rulings R-E-16 à R-E-39 dans la spec § 12
+« Rév. 6 → rév. 7 » ; ce qui reste au § 13. Prochain : Départ F « Les plats en images » sur cette tête (worktree `~/projects/mistu-plats-en-images`,
+8094, `APP_VERSION 0.15.0`, tâche 1 serveur `image-web`).**
 
 **22 octobre 2026, 18 h 18 — LOT D « UN LOT DE RECETTES PHOTOGRAPHIÉES » : FINI dans le worktree `~/projects/mistu-recettes-en-lot`
 (branche `recettes-en-lot`, base = la tête finale du lot C `739e706`, spec `4db4d8e` (rév. 4) puis rév. 5 à la clôture, plan rejoué `d42d4ab`,

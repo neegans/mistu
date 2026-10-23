@@ -200,11 +200,12 @@ export async function runBackupTests({ eq, ok }) {
 
   await run('copie avec relation déjà cassée', () => withDatabase(async (db) => {
     await prepared(db);
-    const activity = { id: 'la_orpheline', edition_id: 'ed_absente', event_type: 'open_book', occurred_at: '2026-01-01T00:00:00.000Z' };
+    const activity = { id: 'la_orpheline', edition_id: 'ed_test', recipe_id: 'rc_absente', event_type: 'open_book', occurred_at: '2026-01-01T00:00:00.000Z' };
     await db.put('library_activity', activity);
     const before = await snapshotValue(db);
     const archive = await createArchive(db);
     ok(archive.blob instanceof Blob && archive.blob.size > 0, 'Sauvegarde : copie ZIP générée malgré une ancienne relation cassée');
+    eq(archive.tracesOrphelines, 0, 'Sauvegarde : une relation cassée vers une recette n’est pas une trace écartée (R-E-11)');
     ok(Array.isArray(archive.warnings) && archive.warnings.length > 0, 'Sauvegarde : relation cassée signalée dans les avertissements');
     const bytes = await archive.blob.arrayBuffer();
     const entries = readZip(bytes);
@@ -212,6 +213,42 @@ export async function runBackupTests({ eq, ok }) {
     const inspection = await inspectArchive(bytes);
     ok(!inspection.ok && inspection.errors.length > 0, 'Restauration : copie aux relations cassées refusée avant écriture');
     eq(await snapshotValue(db), before, 'Sauvegarde avec avertissement : source intégralement inchangée');
+  }));
+
+  await run('traces de consultation orphelines écartées (R-E-11)', () => withDatabase(async (db) => {
+    await prepared(db);
+    const orpheline = { id: 'la_orph', edition_id: 'ed_absente', event_type: 'open_book', occurred_at: '2026-01-01T00:00:00.000Z', updated_at: DATE_FIXTURE };
+    const gardee = { id: 'la_ok', edition_id: 'ed_test', event_type: 'open_book', occurred_at: '2026-01-02T00:00:00.000Z', updated_at: DATE_FIXTURE };
+    const sansEdition = { id: 'la_sans', event_type: 'open_app', occurred_at: '2026-01-03T00:00:00.000Z', updated_at: DATE_FIXTURE };
+    const prefOrpheline = { edition_id: 'ed_absente', hidden: true, updated_at: DATE_FIXTURE };
+    await db.putBatch({ library_activity: [orpheline, gardee, sansEdition], rediscovery_prefs: [prefOrpheline] });
+    eq([(await db.getAll('library_activity')).length, !!(await db.get('rediscovery_prefs', 'ed_absente')), !!(await db.get('rediscovery_prefs', 'ed_test'))], [3, true, true], 'garde du garde : les quatre lignes sont en base avant la sauvegarde');
+    const before = await snapshotValue(db);
+    const archive = await createArchive(db);
+    eq([archive.tracesOrphelines, archive.warnings], [2, []], 'Sauvegarde : deux traces orphelines écartées, aucun avertissement (elles ne bloquent plus rien)');
+    const bytes = await archive.blob.arrayBuffer();
+    const entries = readZip(bytes);
+    eq(JSON.parse(textOf(entries.get('data/library_activity.json'))).map((a) => a.id).sort(), ['la_ok', 'la_sans'], 'Sauvegarde : l’activité orpheline est écartée ; celle d’une édition présente et celle sans edition_id restent (mutant : toute activité sans édition connue écartée → rouge)');
+    eq(JSON.parse(textOf(entries.get('data/rediscovery_prefs.json'))).map((p) => p.edition_id), ['ed_test'], 'Sauvegarde : la préférence orpheline est écartée, l’autre reste');
+    eq([archive.manifest.counts.library_activity, archive.manifest.counts.rediscovery_prefs], [2, 1], 'Sauvegarde : les décomptes du manifeste portent les lignes GARDÉES');
+    const inspection = await inspectArchive(bytes);
+    ok(inspection.ok, 'Restauration : l’archive passe l’inspection (mutant : orphelin gardé dans l’archive → refusée → rouge)');
+    await withDatabase(async (target) => {
+      await applyArchive(target, inspection, { mode: 'replace' });
+      ok((await verifyRestored(target, inspection, { mode: 'replace' })).ok, 'Restauration : vérifiée dans une base vide');
+    });
+    eq(await snapshotValue(db), before, 'Sauvegarde : base source INCHANGÉE — rien n’est supprimé en base (mutant : orphelin supprimé de la base → rouge)');
+  }));
+
+  // Ronde 1 de la tâche 3 du lot E : une activité à edition_id INVALIDE (42, espaces) n'est pas une trace écartée — elle reste dans l'archive et y est
+  // signalée comme avant le lot (« identifiant invalide ») ; seule une clé VALIDE absente des éditions est écartée.
+  await run('trace à edition_id invalide : signalée, jamais écartée (R-E-11)', () => withDatabase(async (db) => {
+    await prepared(db);
+    await db.putBatch({ library_activity: [{ id: 'la_num', edition_id: 42, event_type: 'open_book', occurred_at: '2026-01-01T00:00:00.000Z', updated_at: DATE_FIXTURE }, { id: 'la_blanc', edition_id: '  ', event_type: 'open_book', occurred_at: '2026-01-02T00:00:00.000Z', updated_at: DATE_FIXTURE }] });
+    const archive = await createArchive(db);
+    const gardees = JSON.parse(textOf(readZip(await archive.blob.arrayBuffer()).get('data/library_activity.json'))).map((a) => a.id).filter((id) => id === 'la_num' || id === 'la_blanc').sort();
+    eq([archive.tracesOrphelines, gardees, archive.warnings.filter((w) => w === 'library_activity.edition_id : identifiant invalide').length], [0, ['la_blanc', 'la_num'], 2],
+      'Sauvegarde : une activité à edition_id invalide n’est ni écartée ni comptée, elle reste signalée « identifiant invalide » (mutant : validKey remplacé par != null → écartées et comptées → rouge)');
   }));
 
   await run('archives refusées', () => withDatabase(async (db) => {

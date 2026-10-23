@@ -457,6 +457,26 @@ export async function removeMany(store, keys) {
   emit('change', { store });
 }
 
+// Plusieurs magasins en UNE transaction (lot E, R-E-8, R-E-12) : removeMany étendue — les copies lues AVANT (la capture en a besoin, spec § 5.1), un seul
+// db.mutate d'origine 'local', puis un `change` par magasin. Un magasin sans clé est ignoré ; rien à supprimer → aucun db.mutate. La capture garde son
+// filtre (installCapture : library_activity seulement sous le réglage d'historique, R-E-15) — removeBatch ne le contourne jamais. `conditions` (ronde 1 de
+// la tâche 3) : vérifiées par db.mutate dans la MÊME transaction (une condition d'index fausse → TransitionRefusee, rien de supprimé, aucun change) ; un
+// patch ou une fusion y est refusé avant toute écriture (TypeError) : une suppression n'écrit aucune fiche, un statut ne change que par transitionner.
+export async function removeBatch(deletes, { conditions = null } = {}) {
+  for (const [store, items] of Object.entries(conditions ?? {})) for (const c of (Array.isArray(items) ? items : [])) if (c?.patch != null || c?.fusion != null) throw new TypeError('removeBatch ne porte ni patch ni fusion (' + store + ')');
+  const entrees = Object.entries(deletes || {}).filter(([, keys]) => Array.isArray(keys) && keys.length);
+  if (!entrees.length) return;
+  const payloads = {};
+  for (const [store, keys] of entrees) {
+    const existing = await db.getMany(store, keys);
+    const sac = Object.create(null); // une clé homonyme d'une propriété native reste une clé, pas un héritage
+    keys.forEach((key, i) => { sac[key] = existing[i] || null; });
+    payloads[store] = sac;
+  }
+  await db.mutate({ deletes: Object.fromEntries(entrees), payloads, conditions });
+  for (const [store] of entrees) emit('change', { store });
+}
+
 // Efface tout ce qui est à cet appareil sauf son identité ; jamais capturé (spec § 5.1).
 export async function clearDevice({ signOut } = {}) {
   const device = await db.get('sync_state', 'device_id');

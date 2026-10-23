@@ -127,6 +127,17 @@ export async function createArchive(db, { deviceName = '' } = {}) {
   const stores = Object.fromEntries(DATA_STORES.map((name) => [
     name, JSON.parse(JSON.stringify(name === 'settings' ? publicSettings(lignes(name)) : lignes(name))),
   ]));
+  // R-E-11 (lot E, § 3.7) : une trace de CONSULTATION (library_activity, rediscovery_prefs) dont l'édition n'existe pas dans CE même instantané rendrait
+  // l'archive non restaurable ; elle est ÉCARTÉE de l'archive — jamais de la base (une passe destructive effacerait des traces dont l'édition n'est pas
+  // encore reçue). Une ligne sans edition_id (relation optionnelle) ou à l'edition_id invalide (signalée comme avant) n'est pas touchée ; aucune autre
+  // relation n'est filtrée (library_activity.recipe_id reste vérifiée). Décomptes et empreintes portent les lignes gardées (calculés après).
+  const editionsPresentes = new Set((stores.book_editions || []).map((e) => e?.id).filter(validKey));
+  let tracesOrphelines = 0;
+  for (const name of ['library_activity', 'rediscovery_prefs']) {
+    const gardees = (stores[name] || []).filter((row) => !(record(row) && validKey(row.edition_id) && !editionsPresentes.has(row.edition_id)));
+    tracesOrphelines += (stores[name] || []).length - gardees.length;
+    stores[name] = gardees;
+  }
   const errors = validateRows(stores);
   // Une incohérence déjà présente ne doit pas empêcher de conserver une copie.
   // Elle est signalée à l’export et restera bloquante à l’inspection avant restauration.
@@ -179,7 +190,7 @@ export async function createArchive(db, { deviceName = '' } = {}) {
   entries.unshift({ path: 'manifest.json', data: JSON.stringify(manifest, null, 2) });
   entries.push({ path: 'README.txt', data: README_TXT });
   const zip = createZip(entries);
-  return { blob: new Blob([zip], { type: 'application/zip' }), manifest, bytes: zip.length, filesBytes: bytesTotal, warnings, missingFiles: manquantes.length, copies };
+  return { blob: new Blob([zip], { type: 'application/zip' }), manifest, bytes: zip.length, filesBytes: bytesTotal, warnings, tracesOrphelines, missingFiles: manquantes.length, copies };
 }
 
 // Inspection isolée : aucune écriture. Les archives v1 complètes existantes restent acceptées.

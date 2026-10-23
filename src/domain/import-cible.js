@@ -9,6 +9,7 @@ import { newId } from '../core/ids.js';
 import { lienSignet } from '../core/lien.js';
 import { IMPORTS_TERMINES, STATUTS_IMPORT } from '../model/schema.js';
 import { estTitreUneLigne } from '../core/bornes.js';
+import { validerLectureCouverture, BORNES_CLASSEMENT } from './llm.js'; // lot E, ronde 1 de T5 : le titre lu d'une couverture (section « Imports ») est celui de la lecture REVALIDÉE ; vague finale : les bornes de lotDe
 
 // --- Transitions du journal (spec § 3.1) : toutes par repo.transitionner (I-10) ; aucune autre. `en_cours → echec` couvre annule,
 // interrompu et incertain (la raison est dans `erreur`). `a_verifier → echec` (T4-R1, ratifiée) couvre UN seul cas : un `resultat` relu du
@@ -195,15 +196,21 @@ export const cleLecture = (L) => JSON.stringify([L?.id ?? null, L?.started_at ??
 export const modeleBorne = (m) => (typeof m === 'string' && m && Array.from(m).length <= 80 ? m : null);
 
 // --- Section « Imports » d'Ajouter (spec § 4.5, tâche 6) ---------------------------------------------------------------------------------------
-// Les sortes écrites aujourd'hui (« couverture » reste réservée au lot E : une ligne d'une autre sorte n'est pas listée, rien d'inventé ; « web »
+// Les sortes écrites aujourd'hui (« couverture » est le lot E, R-E-13 : elle se reprend par #/add/livre?import= ; une ligne d'une autre sorte n'est pas listée, rien d'inventé ; « web »
 // arrive avec le lot B, spec recette-web § 4.7) et les statuts NON terminés. `importOuvert` : une ligne que la section liste (et que la fiche du
 // livre compte — un import web n'y compte jamais : son edition_id est nul, D-B17).
 // `classement` (lot D) : la ligne d'un classement de photos, reprise dans sa séance ; jamais « Relancer » depuis la section.
-export const KINDS_IMPORT = Object.freeze(['recette', 'index', 'web', 'classement']);
+export const KINDS_IMPORT = Object.freeze(['recette', 'index', 'web', 'classement', 'couverture']);
 // Les sortes qui portent des PAGES (photos) : les seules que le chemin photo ouvre (repo.ouvrirImport, repo.ajouterPages). Une lecture web naît par
 // demarrerLectureWeb (src/ui/import-web.js), jamais par ce chemin (lot B, P-1).
 // `classement` (lot D) : une ligne de classement porte des photos — `repo.ouvrirImport({ kind: 'classement' })` l'ouvre ; `web` reste hors de cette liste.
+// `couverture` (lot E, spec couverture § 3.6, P-2) : une couverture ne reçoit jamais de page — hors de cette liste, les murs de repo.ajouterPages et
+// repo.ouvrirImport la refusent.
 export const KINDS_PAGES = Object.freeze(['recette', 'index', 'classement']);
+// Le titre lu d'une couverture : celui de la lecture du journal REVALIDÉE (I-E1 : une ligne reçue est une donnée hostile, elle peut porter 16 000 points
+// de code) par la règle de la route, validerLectureCouverture — une ligne (surUneLigne, R-E-22), 300 points de code au plus, aucune adresse. Une lecture
+// refusée n'a pas de titre : l'écran dit « Couverture photographiée » seul, comme la route refuse ce résultat (ronde 1 de T5).
+const titreCouverture = (resultat) => { try { return validerLectureCouverture(resultat).title; } catch { return null; } };
 export const IMPORTS_OUVERTS = Object.freeze(STATUTS_IMPORT.filter((s) => !IMPORTS_TERMINES.includes(s)));
 export const importOuvert = (i) => !!i && typeof i === 'object' && typeof i.id === 'string' && !!i.id && KINDS_IMPORT.includes(i.kind) && IMPORTS_OUVERTS.includes(i.status);
 
@@ -221,6 +228,7 @@ export function cibleReprise(ligne) {
   if (ligne.kind === 'index') return chaine(ligne.scan_session_id) ? `/import?session=${encodeURIComponent(ligne.scan_session_id)}&import=${encodeURIComponent(id)}` : null;
   if (ligne.kind === 'web') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/importer?import=${encodeURIComponent(id)}` : null;
   if (ligne.kind === 'classement') return chaine(ligne.scan_session_id) ? `/import?session=${encodeURIComponent(ligne.scan_session_id)}&import=${encodeURIComponent(id)}` : null; // lot D : la séance du classement
+  if (ligne.kind === 'couverture') return `/add/livre?import=${encodeURIComponent(id)}`; // lot E (§ 4.6) : la route d'ajout d'un livre reprend la lecture
   return null;
 }
 
@@ -238,7 +246,10 @@ export function cibleReprise(ligne) {
 // porte jamais) ; « reprendre » sur a_verifier exige un résultat, d'où qu'elle vienne ; une fiche déjà `available` garde ces gestes (la
 // relecture D-B18 vise justement une fiche lue, et la variante web de l'écran l'admet). Son titre est { type: 'web', texte: titre du signet,
 // livre: l'hôte RECALCULÉ de son adresse }.
-// Rend [{ id, kind, titre: { type: reference | index | regrouper | web | seance, texte, livre }, etat, age: { n, unite }, raison, gestes, cible,
+// Lot E (D-E14, R-E-13) : une ligne `couverture` — Reprendre (#/add/livre?import=) et Ignorer, jamais Relancer ; en vol : Annuler si CE document la
+// tient ; d'un autre appareil : Ignorer seul, sauf un a_verifier qui porte sa lecture (ronde 1 : LA règle du classement, une seule branche) ; son titre
+// est celui de la lecture revalidée (titreCouverture : une ligne, 300 points de code, aucune adresse ; sinon null).
+// Rend [{ id, kind, titre: { type: reference | index | regrouper | web | classement | couverture | seance, texte, livre }, etat, age: { n, unite }, raison, gestes, cible,
 // ailleurs, autreAppareil, referenceAbsente, pages }].
 // Lot D : une ligne `classement` (Reprendre → la séance ; jamais Relancer) ; chaque ligne porte `lot` (lotDe, revalidé) ; une ligne de lot sans référence garde le type `regrouper`.
 const parRecence = (champ) => (a, b) => String(b[champ] || '').localeCompare(String(a[champ] || ''));
@@ -255,15 +266,18 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     const tenu = i.status === 'en_cours' && !!documentId && i.document_id_vol === documentId;
     const ailleurs = i.status === 'en_cours' && !tenu;
     const web = i.kind === 'web';
+    const couverture = i.kind === 'couverture';
     const recetteId = i.kind === 'recette' || web ? chaine(i.recipe_id) : null;
     const recette = recetteId ? recettes.get(recetteId) ?? null : null;
     const referenceAbsente = !!recetteId && !recette;
-    const type = i.kind === 'classement' ? 'classement' : i.kind === 'index' ? 'index' : web ? 'web' : recetteId ? 'reference' : 'regrouper';
+    const type = couverture ? 'couverture' : i.kind === 'classement' ? 'classement' : i.kind === 'index' ? 'index' : web ? 'web' : recetteId ? 'reference' : 'regrouper';
     const cible = cibleReprise(i);
     let gestes;
     if (referenceAbsente) gestes = [];
     else if (i.status === 'en_cours') gestes = tenu ? ['annuler'] : [];
-    else if (i.kind === 'classement') gestes = autreAppareil && !(i.status === 'a_verifier' && i.resultat != null) ? ['ignorer'] : ['reprendre', 'ignorer']; // lot D (D-D14) : jamais « Relancer » depuis Imports
+    // Lot D (D-D14) : un classement ne se RELANCE jamais depuis Imports. Lot E (D-E14, R-E-13 ; ronde 1 : la même règle, une seule branche) : une couverture
+    // non plus — « Reprendre » ouvre sa route, qui offre « Lire / Relire la couverture » (sa référence n'est jamais absente : elle n'a pas de recipe_id).
+    else if (i.kind === 'classement' || couverture) gestes = autreAppareil && !(i.status === 'a_verifier' && i.resultat != null) ? ['ignorer'] : ['reprendre', 'ignorer'];
     else if (web) gestes = i.status === 'echec' ? ['relancer', 'ignorer'] : i.status === 'a_verifier' && i.resultat == null ? ['ignorer'] : ['reprendre', 'ignorer'];
     else if (recette?.availability === 'available') gestes = ['ignorer']; // un POST ne servirait à rien : l'écran ciblé refuse une recette qui a son texte
     else if (autreAppareil) gestes = i.status === 'a_verifier' && i.resultat != null ? ['reprendre', 'ignorer'] : ['ignorer'];
@@ -275,7 +289,7 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     // n'a aucun signet à relire : « Réessayer » ne pourrait jamais aboutir (ronde 1 ; lancerLecture la refuse `inconnu`) — « Ignorer » seul reste.
     if (web ? !recetteId : !nbPages(i)) gestes = gestes.filter((g) => g !== 'relancer');
     return {
-      id: i.id, kind: i.kind, titre: { type, texte: recette ? chaine(recette.original_title) : null, livre: web ? (recette ? lienSignet(recette.source_url).hote : null) : livreDe(recette?.edition_id ?? i.edition_id) },
+      id: i.id, kind: i.kind, titre: couverture ? { type, texte: titreCouverture(i.resultat), livre: null } : { type, texte: recette ? chaine(recette.original_title) : null, livre: web ? (recette ? lienSignet(recette.source_url).hote : null) : livreDe(recette?.edition_id ?? i.edition_id) },
       etat: i.status, age: ageDepuis(i.updated_at, maintenant), raison: i.status === 'echec' ? chaine(i.erreur?.raison) : null,
       gestes, cible, ailleurs, autreAppareil, referenceAbsente, pages: nbPages(i), lot: lotDeRecette(i),
     };
@@ -302,8 +316,8 @@ export function ligneImportNeuve({ id, kind, recipe_id = null, edition_id = null
 // Le champ `lot` d'une ligne de recette (§ 3.3), DONNÉE reçue ou restaurée : revalidé à chaque lecture. classement_id (1 à 80 points de code), rang et
 // total (entiers 1..10, rang ≤ total) sont STRUCTURANTS : fautifs → null, la ligne se comporte comme une ligne du lot A. titre (estTitreUneLigne, 200) et
 // page (1..9999) ne servent qu'à l'affichage : fautifs → null SANS jeter le lot. Objet construit, lu par Object.hasOwn. Les bornes 10, 200 et 9999 sont
-// celles de BORNES_CLASSEMENT (src/domain/llm.js : groupes, titre, page), recopiées ici (import-cible.js n'importe pas llm.js) : une borne changée
-// là se change ici (ronde 1 de la tâche 1).
+// celles de BORNES_CLASSEMENT (src/domain/llm.js : groupes, titre, page), LUES là depuis la vague finale du lot E — la copie d'avant venait de ce que
+// import-cible.js n'importait pas llm.js ; l'arc existe depuis la ronde 1 de la tâche 5 du lot E (validerLectureCouverture) : une seule source.
 export function lotDe(ligne) {
   const brut = ligne && typeof ligne === 'object' && Object.hasOwn(ligne, 'lot') ? ligne.lot : null;
   if (!brut || typeof brut !== 'object' || Array.isArray(brut)) return null;
@@ -311,8 +325,9 @@ export function lotDe(ligne) {
   const id = champ('classement_id'), rang = champ('rang'), total = champ('total'), titre = champ('titre'), page = champ('page');
   const n = typeof id === 'string' ? Array.from(id).length : 0;
   if (n < 1 || n > 80) return null;
-  if (!Number.isInteger(rang) || !Number.isInteger(total) || rang < 1 || total < 1 || rang > 10 || total > 10 || rang > total) return null;
-  return { classement_id: id, rang, total, titre: estTitreUneLigne(titre, 200) ? titre : null, page: Number.isInteger(page) && page >= 1 && page <= 9999 ? page : null };
+  const B = BORNES_CLASSEMENT;
+  if (!Number.isInteger(rang) || !Number.isInteger(total) || rang < 1 || total < 1 || rang > B.groupes || total > B.groupes || rang > total) return null;
+  return { classement_id: id, rang, total, titre: estTitreUneLigne(titre, B.titre) ? titre : null, page: Number.isInteger(page) && page >= 1 && page <= B.page ? page : null };
 }
 // Ronde 1 de la tâche 4 (revue, lentille sécurité) : `lot` n'existe que sur une ligne `recette` (§ 3.3). Une ligne d'une autre sorte qui en porte un
 // (reçue, restaurée) n'est d'AUCUN lot : ni bloc, ni progression, ni « Continuer », ni note de séance. lotDe reste la revalidation du champ seul (T-D7) ;
