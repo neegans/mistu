@@ -1087,6 +1087,130 @@ export async function runPhotoPlatTests({ eq, ok }) {
       eq([avant, tete.querySelector('[data-role="legende-photo-plat"]')?.textContent], [null, 'Image de la page recettes.test'], 'photo web aux octets distants : la légende arrive AVEC l’image, après « Télécharger » (calculée dans le redessin de la figure)');
     });
 
+    // ===== Tâche 4 — les cartes illustrées (spec § 4.2)
+    await run('recipeCard : la carte sans photo est celle d’avant le lot (référence construite dans le test, spec § 7.4 ; R-F-7)', () => withRepo(async () => {
+      const K = await import('../src/ui/components.js');
+      // La référence est CONSTRUITE ici, jamais relevée en littéral (R-F-7 : le lanceur coupe un échec à 400 caractères). La carte AVEC photo, rendue
+      // par le MÊME composant et privée de sa vignette, doit être EXACTEMENT la carte sans photo ; un gabarit explicite borne ce que le composant ne
+      // peut pas comparer à lui-même (une enveloppe posée sur toutes les cartes). Pointeur valide sans ligne files (base jetable) : la carte est lue
+      // de façon SYNCHRONE, la vignette encore née cachée, sans src.
+      const doc = { recipe: { id: 'rc_k', original_title: 'Tarte', availability: 'available', favorite: false }, version: null, book: null, edition: null };
+      const sans = K.recipeCard(doc);
+      const pointeurHostile = K.recipeCard({ ...doc, recipe: { ...doc.recipe, photo_sha256: 'pas une empreinte' } });
+      const avec = K.recipeCard({ ...doc, recipe: { ...doc.recipe, photo_sha256: H('f') } });
+      const v = avec.querySelector('.col')?.firstElementChild;
+      eq([v?.tagName, v?.className, v?.getAttribute('alt'), v?.getAttribute('loading'), v?.hidden, v?.hasAttribute('src')], ['IMG', 'plat-vignette', '', 'lazy', true, false],
+        'recipeCard avec un pointeur valide : la vignette est le PREMIER enfant de .col — img.plat-vignette, alt vide, loading lazy, née cachée, sans src');
+      const reference = avec.cloneNode(true);
+      reference.querySelector('.col > img.plat-vignette')?.remove();
+      eq([sans.outerHTML === reference.outerHTML, pointeurHostile.outerHTML === sans.outerHTML], [true, true],
+        'recipeCard sans photo (ou à pointeur hostile) : son balisage est EXACTEMENT celui de la carte avec photo privée de sa vignette (référence construite)');
+      const gabarit = (carte) => { const col = carte.querySelector('.col'); const rangee = col?.parentElement; return [!!rangee?.matches('.row.between.top'), rangee?.parentElement === carte, !!col?.firstElementChild?.classList.contains('badge'), carte.querySelectorAll('img').length]; };
+      eq([gabarit(sans), gabarit(pointeurHostile)], [[true, true, true, 0], [true, true, true, 0]],
+        'recipeCard sans photo (gabarit explicite) : .col enfant direct de .row.between.top, elle-même enfant direct de la carte ; le badge en tête de .col ; aucune img');
+    }));
+
+    await run('cartes : vignettePlat, recipeCard avec photo, renderMeal, révocation au redessin (§ 4.2)', () => withRepo(async (repo, db) => {
+      const K = await import('../src/ui/components.js');
+      const { renderMeal } = await import('../src/ui/meals.js');
+      const { renderSearch } = await import('../src/ui/search.js');
+      const { renderBook } = await import('../src/ui/book.js');
+      const { buildDocs } = await import('../src/domain/search.js');
+      const BU = await import('../src/core/blob-urls.js');
+      const scene = nouvelleScene();
+      const vraiFetch = globalThis.fetch; globalThis.fetch = async (u) => { throw new Error('aucun reseau attendu : ' + u); };
+      try {
+        const jpeg1 = await imageTest('v1.jpg', '#c63', 320, 240); const sha1 = await sha256Hex(jpeg1);
+        const jpeg2 = await imageTest('v2.jpg', '#36c', 320, 240); const sha2 = await sha256Hex(jpeg2);
+        await repo.putFile(sha1, jpeg1, { mime: 'image/jpeg', origin: 'device' }); await repo.putFile(sha2, jpeg2, { mime: 'image/jpeg', origin: 'device' });
+        await db.mutate({ puts: { files: [
+          { sha256: H('1'), mime: 'text/html', blob: new Blob(['<p>x</p>'], { type: 'text/html' }), size: 8, syncable: false, created_at: DATE, updated_at: DATE },
+          { sha256: H('2'), mime: 'application/pdf', blob: new Blob(['%PDF-1.4'], { type: 'application/pdf' }), size: 8, syncable: true, created_at: DATE, updated_at: DATE },
+          { sha256: H('3'), mime: 'image/heic', blob: jpeg1, size: jpeg1.size, syncable: true, created_at: DATE, updated_at: DATE },
+        ] }, origin: 'device' });
+        const v1 = K.vignettePlat({ photo_sha256: sha1 }, { repo });
+        await attendre(() => !v1.hidden, 'octets lus (v1)');
+        eq([v1.tagName, v1.className, v1.getAttribute('alt'), v1.getAttribute('src')?.startsWith('blob:'), v1.getAttribute('loading')], ['IMG', 'plat-vignette', '', true, 'lazy'], 'vignettePlat : pointeur + octets → img.plat-vignette visible, src blob:, alt vide (décorative)');
+        const vSans = K.vignettePlat({ photo_sha256: H('9') }, { repo }); const vHtml = K.vignettePlat({ photo_sha256: H('1') }, { repo });
+        const vPdf = K.vignettePlat({ photo_sha256: H('2') }, { repo }); const vHeic = K.vignettePlat({ photo_sha256: H('3') }, { repo });
+        // R-F-10, limite NOMMÉE : les quatre getFile partent dans l'ordre (vSans, vHtml, vPdf, vHeic), une transaction en lecture seule chacun ;
+        // attendre vHeic (la DERNIÈRE) puis deux tick() suppose que les trois premières ont abouti — IndexedDB ne garantit pas l'ordre d'achèvement
+        // de transactions en lecture seule concurrentes. Un rouge intermittent sur les négatives ci-dessous se REJOUE avant d'en faire un constat
+        // (R-B-15 du lot B, même esprit).
+        await attendre(() => !vHeic.hidden, 'ligne heic à blob jpeg visible'); await tick(); await tick();
+        eq([vSans.hidden, vSans.hasAttribute('src'), vHtml.hidden, vHtml.hasAttribute('src'), vPdf.hidden, vPdf.hasAttribute('src'), vHeic.hidden], [true, false, true, false, true, false, false],
+          'vignettePlat : sans octets → cachée, sans src ; text/html → cachée ; application/pdf (liste blanche, pas une image) → cachée ; ligne image/heic à blob image/jpeg → visible (le type du blob gagne, G)');
+        eq([K.vignettePlat({}), K.vignettePlat({ photo_sha256: '../x' }), K.vignettePlat(null)], [null, null, null], 'vignettePlat : sans pointeur valide → null (rien, ni pictogramme ni cadre)');
+        // La carte SANS photo : bloc « recipeCard : référence construite » (R-F-7). Ici, la carte AVEC photo.
+        const doc = { recipe: { id: 'rc_k', original_title: 'Tarte', availability: 'available', favorite: false }, version: null, book: null, edition: null };
+        const avec = K.recipeCard({ ...doc, recipe: { ...doc.recipe, photo_sha256: sha1 } });
+        eq([avec.querySelector('.col')?.firstElementChild?.className, avec.querySelector('.col')?.children[1]?.classList.contains('badge')], ['plat-vignette', true], 'recipeCard avec photo : la vignette est le premier enfant de .col, avant le badge');
+        const recA = fiche('rc_m1', { photo_sha256: sha1 }); const recB = fiche('rc_m2');
+        const meal = { id: 'm1', title: 'Souper', servings: 2, items: [{ id: 'mi1', recipe_id: 'rc_m1', recipe_version_id: null, role: 'plat_principal', servings: 2, locked: false }, { id: 'mi2', recipe_id: 'rc_m2', recipe_version_id: null, role: 'accompagnement', servings: 2, locked: false }], constraints_snapshot: { diets: [] } };
+        const repas = await renderMeal({ id: 'm1' }, {}, { meals: [meal], recipesById: new Map([[recA.id, recA], [recB.id, recB]]), versionsById: new Map(), editionsById: new Map(), editionLabel: () => '', ingredientsById: ING, meal_feedback: [], docs: [], docsByRecipe: new Map(), settings: {} });
+        scene.append(repas);
+        const cartes = [...repas.querySelectorAll('.card.flat.stack')];
+        await attendre(() => !!cartes[0]?.querySelector('img.plat-vignette:not([hidden])'), 'vignette du repas');
+        const gauche = (c) => c.querySelector(':scope > .row.between.top')?.firstElementChild;
+        eq([gauche(cartes[0])?.className, gauche(cartes[0])?.firstElementChild?.className, gauche(cartes[1])?.className, gauche(cartes[1])?.querySelector('img')], ['row top', 'plat-vignette', '', null],
+          'renderMeal : la vignette à gauche du titre avec octets ; sans photo, le bloc de gauche est celui d’avant le lot (un div sans classe)');
+        const recettes = [fiche('rc_s1', { original_title: 'Tarte aux pommes', photo_sha256: sha1 }), fiche('rc_s2', { original_title: 'Tarte aux poires', photo_sha256: sha2 })];
+        const docs = buildDocs({ recipes: recettes, versions: recettes.map((r) => version(r.id)), editions: [], books: [], dishes: [], links: [], translations: [], history: [] });
+        const ctxR = await ctxPour(repo, db, { docs, docsByRecipe: new Map(docs.map((d) => [d.recipe.id, d])) });
+        BU.revoquerUrlsDeBlob();
+        // L'espion note chaque révocation ET si l'URL est encore sous un <img> du document à cet instant (D-T9 : révoquer APRÈS le vidage) ; il est
+        // vidé juste avant chaque geste : le compte est EXACT.
+        const revoquees = []; const vraiRevoke = URL.revokeObjectURL;
+        const dansLeDocument = (u) => [...document.querySelectorAll('img')].some((i) => i.getAttribute('src') === u);
+        URL.revokeObjectURL = (u) => { revoquees.push({ u, encore: dansLeDocument(u) }); return vraiRevoke.call(URL, u); };
+        const srcs = (n) => [...n.querySelectorAll('img.plat-vignette')].map((i) => i.getAttribute('src'));
+        const toutesPretes = (n, k) => { const s = srcs(n); return s.length === k && s.every((u) => typeof u === 'string' && u.startsWith('blob:')); };
+        try {
+          const rs = await renderSearch({}, { mode: 'recipes' }, ctxR, { navigate: () => {}, remplacerAdresse: () => {} });
+          scene.append(rs);
+          await attendre(() => toutesPretes(rs, 2), 'chaque vignette de la recherche a son src');
+          const avant = srcs(rs);
+          revoquees.length = 0;
+          bouton(rs, 'Chercher').click();
+          await attendre(() => revoquees.length >= avant.length, 'révocations du redessin (recherche)');
+          eq([revoquees.map((x) => x.u).sort(), revoquees.filter((x) => x.encore).length], [[...avant].sort(), 0],
+            'renderSearch : un redessin révoque EXACTEMENT les URL des vignettes précédentes (compte exact), chacune APRÈS le vidage (plus sous un img du document, D-T9)');
+          const edition = { id: 'ed_v', book_id: 'b_v', language: 'fr', updated_at: DATE }; const livre = { id: 'b_v', title: 'Livre', updated_at: DATE };
+          const recLivre = [fiche('rc_l1', { edition_id: 'ed_v', original_title: 'Tarte', photo_sha256: sha1 }), fiche('rc_l2', { edition_id: 'ed_v', original_title: 'Tourte', photo_sha256: sha2 })];
+          await db.mutate({ puts: { books: [livre], book_editions: [edition], recipes: recLivre, recipe_versions: recLivre.map((r) => version(r.id)) }, origin: 'device' });
+          const rb = await renderBook({ id: 'ed_v' }, {}, await ctxPour(repo, db, { editionsById: new Map([['ed_v', edition]]), booksById: new Map([['b_v', livre]]), books: [livre], book_editions: [edition] }));
+          scene.append(rb);
+          await attendre(() => toutesPretes(rb, 2), 'chaque vignette du livre a son src');
+          const avantL = srcs(rb);
+          const filtre = rb.querySelector('input[type="search"]');
+          revoquees.length = 0;
+          filtre.value = 'ta'; filtre.dispatchEvent(new Event('input', { bubbles: true }));
+          await attendre(() => revoquees.length >= avantL.length, 'révocations du redessin (livre)');
+          eq([revoquees.map((x) => x.u).sort(), revoquees.filter((x) => x.encore).length], [[...avantL].sort(), 0],
+            'book.js drawList : le filtre redessine et révoque EXACTEMENT les URL des vignettes précédentes, APRÈS le vidage');
+        } finally { URL.revokeObjectURL = vraiRevoke; }
+      } finally { globalThis.fetch = vraiFetch; scene.remove(); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
+    }));
+
+    await run('styles.css : la règle .plat-vignette (D-F9 ; T-1, T-2 ; P-21)', async () => {
+      // Lue SANS ses commentaires : le commentaire posé juste avant la règle (Step 4) ne la masque pas. Une règle introuvable est un rouge NOMMÉ.
+      const css = (await lire('../styles.css')).replace(/\/\*[\s\S]*?\*\//g, '');
+      const regle = css.match(/(?:^|\})\s*\.plat-vignette\s*\{([^}]*)\}/)?.[1] ?? '';
+      ok(regle.trim() !== '', 'styles.css : la règle .plat-vignette est trouvée');
+      const decl = Object.fromEntries(regle.split(';').map((d) => [d.slice(0, d.indexOf(':')).trim(), d.slice(d.indexOf(':') + 1).trim()]).filter(([k, v]) => k && v));
+      eq([decl.width, decl.height, decl['object-fit'], decl['border-radius'], decl.border, decl.flex], ['72px', '72px', 'cover', '8px', '1px solid var(--line)', '0 0 auto'], 'styles.css : .plat-vignette 72 × 72, object-fit cover, coins 8 px, bord var(--line), flex 0 0 auto (D-F9)');
+      ok(regle.trim() !== '' && !/display\s*:\s*none/.test(regle) && !/#[0-9a-f]{3,8}\b/i.test(regle), 'styles.css : la règle est lue, et elle ne porte ni display:none ni couleur en dur (T-1, T-2 : tests/theme.js inchangé)');
+    });
+
+    await run('CSP et sources (I-F3, I-F8, D-F11)', async () => {
+      const [srcPP, srcK, srcMeals, srcPW, srcB64, srcRecipe, index] = await Promise.all(['../src/ui/photo-plat.js', '../src/ui/components.js', '../src/ui/meals.js', '../src/domain/photo-web.js', '../src/domain/base64.js', '../src/ui/recipe.js', '../index.html'].map(lire));
+      const csp = /Content-Security-Policy" content="([^"]+)"/.exec(index)?.[1] || '';
+      eq(/img-src ([^;]+)/.exec(csp)?.[1], "'self' blob: data:", 'CSP : img-src inchangée (aucune image externe chargée par le navigateur)');
+      eq([srcPP, srcK, srcMeals].map((s) => /(?:\bsrc\s*:|\.src\s*=)\s*['"`]https?:/.test(s)), [false, false, false], 'aucun src d’image ne reçoit une adresse http(s) écrite en dur (photo-plat.js, components.js, meals.js)');
+      eq([srcPP, srcPW, srcB64].map((s) => /Anthropic|Supabase/.test(s)), [false, false, false], 'aucun texte ne nomme le fournisseur ni la base (photo-plat.js, photo-web.js, base64.js)');
+      eq([srcPP, srcRecipe].flatMap((s) => s.split('\n').filter((l) => l.includes('photo_source_url') && /textContent|\bt\(|\bel\(/.test(l))), [], 'D-F11 : photo_source_url n’entre dans aucune ligne qui porte textContent, t( ou el( (photo-plat.js, recipe.js)');
+    });
+
     // ===== fin des blocs du lot F (les tâches 3 à 5 ajoutent les leurs AU-DESSUS de cette ligne)
   } finally { setUiLocale(localeAvant); }
 }

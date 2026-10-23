@@ -7,7 +7,7 @@ import * as repo from '../model/repo.js';
 import { summarizeMeal } from '../domain/pairing.js';
 import { assessMeal } from '../domain/diet.js';
 import { MEAL_ROLES, DIET_TAGS, RECIPE_TYPES } from '../model/schema.js';
-import { pageHeader, section, emptyState, select, field, dietChip, versionBadge } from './components.js';
+import { pageHeader, section, emptyState, select, field, dietChip, versionBadge, vignettePlat } from './components.js';
 import { libelleSource } from '../core/lien.js';
 import { deviceId } from './import.js';
 
@@ -78,13 +78,16 @@ export async function renderMeal(params, query, ctx) {
   const list = el('div', null);
   if (!items.length) list.append(emptyState('🥗', t('Ajoute un plat principal depuis sa fiche, puis « Avec quoi on mange ça ? ».')));
   for (const it of items) {
+    // Lot F (§ 4.2) : une vignette à gauche du titre quand les octets sont ici ; sans photo, le DOM de la carte est celui d'avant le lot.
+    const vignette = vignettePlat(it.recipe);
+    const bloc = el('div', null, el('a', { href: `#/recipes/${it.recipe.id}?v=${it.recipe_version_id || ''}` }, el('strong', null, it.recipe.display_title || it.recipe.original_title)), ' ', versionBadge(it.version, it.recipe),
+      // S8 : l'hôte d'un signet est RECALCULÉ depuis l'adresse, ici comme ailleurs — `source_label` stocké peut
+      // venir d'une archive ou du serveur et nommer n'importe quel site (S7). C-2 : une fiche IA est « Créée avec l’IA », texte de
+      // libelleSource rendu ici par t() (seul ce texte-là est une clé ; un libellé libre de la personne n'est jamais traduit).
+      el('div', { class: 'muted', style: { fontSize: '.85rem' } }, it.recipe.origine === 'ia' ? t(libelleSource(it.recipe)) : (ctx.editionLabel(ctx.editionsById.get(it.recipe.edition_id)) || libelleSource(it.recipe))));
     const card = el('div', { class: 'card flat stack' },
       el('div', { class: 'row between top' },
-        el('div', null, el('a', { href: `#/recipes/${it.recipe.id}?v=${it.recipe_version_id || ''}` }, el('strong', null, it.recipe.display_title || it.recipe.original_title)), ' ', versionBadge(it.version, it.recipe),
-          // S8 : l'hôte d'un signet est RECALCULÉ depuis l'adresse, ici comme ailleurs — `source_label` stocké peut
-          // venir d'une archive ou du serveur et nommer n'importe quel site (S7). C-2 : une fiche IA est « Créée avec l’IA », texte de
-          // libelleSource rendu ici par t() (seul ce texte-là est une clé ; un libellé libre de la personne n'est jamais traduit).
-          el('div', { class: 'muted', style: { fontSize: '.85rem' } }, it.recipe.origine === 'ia' ? t(libelleSource(it.recipe)) : (ctx.editionLabel(ctx.editionsById.get(it.recipe.edition_id)) || libelleSource(it.recipe)))),
+        vignette ? el('div', { class: 'row top', style: { flex: '1', minWidth: '0' } }, vignette, bloc) : bloc,
         el('div', { class: 'row' },
           select(MEAL_ROLES.map((r) => ({ value: r, label: label('meal_role', r) })), it.role, (v) => { meal.items.find((x) => x.id === it.id).role = v; save(); }),
           el('input', { type: 'number', min: 1, value: it.servings || meal.servings, style: { width: '80px' }, title: t('Portions de cet élément'), onChange: (e) => { const x = meal.items.find((y) => y.id === it.id); x.servings = Number(e.target.value) || meal.servings; x.servings_custom = true; save(); } }),

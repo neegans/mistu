@@ -12,6 +12,7 @@ import * as repo from '../model/repo.js';
 import { pastilleModel, invalidate } from './state.js';
 import { estCreationIA, etiquetteCreationIA } from '../domain/creation-ia.js';
 import { DIFFICULTES, LIMITES_WEB } from '../domain/recherche-web.js';
+import { HASH } from '../model/schema.js';
 
 export function pageHeader(title, { subtitle = null, actions = [], back = null } = {}) {
   return el('header', { class: 'stack', style: { marginBottom: '1rem' } },
@@ -154,6 +155,24 @@ export function provenanceText(recipe, book, edition) {
   return t('Source personnelle');
 }
 
+// Lot F (spec plats-en-images § 4.2, D-F9) : la vignette d'une carte de recette — décorative (alt vide : la carte porte le titre), née cachée ([hidden]
+// du thème), montrée seulement quand les octets sont ICI et d'un type d'image (la règle d'affichage du lot G : typeAffichage puis displayUrl). Sans
+// pointeur valide : null (la carte est celle d'avant le lot) ; sans octets : l'élément reste caché, sans src (I-F6).
+export function vignettePlat(recipe, { repo: depot = repo } = {}) {
+  const sha = recipe?.photo_sha256;
+  if (typeof sha !== 'string' || !HASH.test(sha)) return null;
+  const img = el('img', { class: 'plat-vignette', alt: '', loading: 'lazy', hidden: true });
+  Promise.resolve().then(() => depot.getFile(sha)).then((f) => {
+    if (!typeAffichage(f)?.startsWith('image/')) return;
+    const u = displayUrl(f, urlDeBlob);
+    if (!u) return;
+    img.src = u; img.hidden = false;
+  }).catch(() => {});
+  return img;
+}
+// Les URL blob: des vignettes d'un conteneur : relevées AVANT son vidage et révoquées APRÈS par les écrans qui redessinent leur liste (D-T9).
+export const urlsDesVignettes = (conteneur) => [...conteneur.querySelectorAll('img.plat-vignette')].map((i) => i.getAttribute('src')).filter((u) => typeof u === 'string' && u.startsWith('blob:'));
+
 // doc : { recipe, version, book, edition, cooked }
 export function recipeCard(doc, { extra = null, href = null, reasons = null } = {}) {
   const { recipe, version, book, edition } = doc;
@@ -167,6 +186,7 @@ export function recipeCard(doc, { extra = null, href = null, reasons = null } = 
         version ? el('div', { class: 'muted', style: { fontSize: '.85rem' } }, timeText(version)) : null,
         reasons?.length ? el('div', { class: 'muted', style: { fontSize: '.8rem' } }, `${t('Correspond à')} : ${reasons.slice(0, 4).join(', ')}`) : null),
       el('div', { class: 'col', style: { alignItems: 'flex-end', gap: '.3rem' } },
+        vignettePlat(recipe),
         availabilityBadge(recipe),
         recipe.favorite ? el('span', { class: 'badge' }, '★ ' + t('Favori')) : null,
         doc.cooked ? el('span', { class: 'badge' }, t('Cuisinée {n}×', { n: doc.cooked })) : null)),
