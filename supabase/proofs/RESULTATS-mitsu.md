@@ -323,24 +323,39 @@ Tableau des verdicts (ordre, etape, attendu, obtenu, ok), tel que rendu par l'é
 | --- | --- | --- | --- | --- |
 | … | … | … | … | … |
 
-## Preuve `0006_lecture_web.sql` — à jouer
+## Preuve `0006_lecture_web.sql` — 10 verdicts, 0 faux (23 octobre 2026, vers 20 h 20 UTC = 16 h 20 à Montréal, geste de Neegan)
 
 Section préparée le 19 octobre 2026 (lot B « recette web complète », spec `docs/superpowers/specs/2026-10-19-recette-web-design.md` § 6.4 ;
-procédure : étape 12 du README). **À jouer par Neegan après `0005`, avant le redéploiement de la fonction et avant tout `push`.** Rien à
+procédure : étape 12 du README). **JOUÉE par Neegan le 23 octobre 2026 (vers 20 h 20 UTC), après `0005` (jouée le même jour), avant le redéploiement de la fonction et
+avant tout `push` : `999 BILAN` = `0 faux sur 10`, `ok` vrai sur les 11 lignes.** Collages depuis un kit copier-coller préparé par le
+contrôleur (trois fichiers, identiques à ceux du dépôt, rien à remplacer) ; le tableau des verdicts ci-dessous est la sortie de l'éditeur SQL,
+collée telle quelle. Rien à
 remplacer ; la preuve n'affiche aucune adresse ni aucun identifiant (compte emprunté jamais nommé) ; aucune clé n'est en jeu. Lire en
 particulier 1.01 (les cinq outils, dans l'ordre d'`OUTILS_0006` : `image-web` comprise, pour le lot F) et 2.03 bis (`image-web` accepté par
 `assistant_reserver`).
 
 | Heure | Collage | Résultat |
 | --- | --- | --- |
-| … | `migrations/0006_lecture_web.sql` | … (attendu `Success. No rows returned`) |
-| … | preuve `0006` (« Run without RLS ») | `999 BILAN : … faux sur …` |
+| 23 oct. 2026, vers 20 h 15 UTC | `migrations/0006_lecture_web.sql` | jouée en un collage (fichier 1 du kit, identique au fichier du dépôt) ; sortie non rapportée (attendu `Success. No rows returned`) ; la preuve atteste la contrainte (1.01, 1.02) |
+| — | empreinte du `0006` collé : `shasum -a 256 supabase/migrations/0006_lecture_web.sql` | `b2d4cf5944e2c2dc0c3982f0acbcd88d3b61d0f849d3693635aa98d1d286f234` (fichier du dépôt à `cf91f09`, identique à la pointe `0c7cbbd`) |
+| idem | `notify pgrst, 'reload schema';` (collée seule ; facultative selon l'étape 12) | jouée (fichier 2 du kit) |
+| vers 20 h 20 UTC | preuve `0006` (« Run without RLS ») | `999 BILAN : 0 faux sur 10`, `ok` vrai sur les 11 lignes (fichier 3 du kit) |
 
 Tableau des verdicts (ordre, etape, attendu, obtenu, ok), tel que rendu par l'éditeur SQL :
 
 | ordre | etape | attendu | obtenu | ok |
 | --- | --- | --- | --- | --- |
-| … | … | … | … | … |
+| 1.01  | pg_get_constraintdef : les cinq outils, dans l ordre d OUTILS_0006                           | recherche-web < creation < extraction < lecture-web < image-web | dans l ordre       | true |
+| 1.02  | une seule contrainte check sur assistant_journal                                             | 1                                                               | 1                  | true |
+| 1.03  | anon et authenticated : aucun privilege sur la table (inchange depuis 0004)                  | false / false                                                   | false / false      | true |
+| 1.04  | service_role : select, insert, update sur la table                                           | true / true / true                                              | true / true / true | true |
+| 1.05  | vue assistant_usage_jour toujours la, en security invoker                                    | true                                                            | true               | true |
+| 2.01  | sous postgres : une ligne de journal outil lecture-web est acceptee                          | acceptee                                                        | acceptee           | true |
+| 2.02  | un outil hors liste est toujours refuse par le check                                         | 23514                                                           | 23514              | true |
+| 2.03  | assistant_reserver accepte lecture-web : un id non nul                                       | id non nul                                                      | id non nul         | true |
+| 2.031 | 2.03 bis : assistant_reserver(uid, 'image-web', 1, c + 1) -> id non nul (la valeur du lot F) | id non nul                                                      | id non nul         | true |
+| 3.01  | les trois anciens outils passent encore                                                      | acceptes                                                        | acceptes           | true |
+| 999   | BILAN                                                                                        | aucun verdict faux                                              | 0 faux sur 10      | true |
 
 ## Sondes `lecture-web` — à jouer après le redéploiement
 
