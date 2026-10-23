@@ -78,9 +78,11 @@ export async function renderMeal(params, query, ctx) {
   const list = el('div', null);
   if (!items.length) list.append(emptyState('🥗', t('Ajoute un plat principal depuis sa fiche, puis « Avec quoi on mange ça ? ».')));
   for (const it of items) {
-    // Lot F (§ 4.2) : une vignette à gauche du titre quand les octets sont ici ; sans photo, le DOM de la carte est celui d'avant le lot.
+    // Lot F (§ 4.2) : une vignette à gauche du titre quand les octets sont ici ; sans photo, le DOM de la carte est celui d'avant le lot. Ronde 1 : à côté
+    // d'une vignette, le bloc prend la place qui reste (flex 1, min-width 0) — sans quoi l'enveloppe .row (flex-wrap) le renvoyait SOUS la vignette dès
+    // que le titre ne tenait plus sur sa ligne (D-F9 : la vignette à gauche du titre) ; sans vignette, aucun style.
     const vignette = vignettePlat(it.recipe);
-    const bloc = el('div', null, el('a', { href: `#/recipes/${it.recipe.id}?v=${it.recipe_version_id || ''}` }, el('strong', null, it.recipe.display_title || it.recipe.original_title)), ' ', versionBadge(it.version, it.recipe),
+    const bloc = el('div', vignette ? { style: { flex: '1', minWidth: '0' } } : null, el('a', { href: `#/recipes/${it.recipe.id}?v=${it.recipe_version_id || ''}` }, el('strong', null, it.recipe.display_title || it.recipe.original_title)), ' ', versionBadge(it.version, it.recipe),
       // S8 : l'hôte d'un signet est RECALCULÉ depuis l'adresse, ici comme ailleurs — `source_label` stocké peut
       // venir d'une archive ou du serveur et nommer n'importe quel site (S7). C-2 : une fiche IA est « Créée avec l’IA », texte de
       // libelleSource rendu ici par t() (seul ce texte-là est une clé ; un libellé libre de la personne n'est jamais traduit).

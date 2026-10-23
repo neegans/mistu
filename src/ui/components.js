@@ -2,7 +2,7 @@
 import { el, formatMinutes, downloadBlob, toast } from '../core/dom.js';
 import { t, label } from '../core/i18n.js';
 import { lienSignet } from '../core/lien.js';
-import { urlDeBlob } from '../core/blob-urls.js';
+import { urlDeBlob, revoquerUrlDeBlob } from '../core/blob-urls.js';
 import { displayQuantity, REASON_LABELS } from '../domain/units.js';
 import { shortcutUrl, siriPhrase, describeDuration, isAppleTouchDevice } from '../domain/timers.js';
 import { navigate } from '../core/router.js';
@@ -12,7 +12,7 @@ import * as repo from '../model/repo.js';
 import { pastilleModel, invalidate } from './state.js';
 import { estCreationIA, etiquetteCreationIA } from '../domain/creation-ia.js';
 import { DIFFICULTES, LIMITES_WEB } from '../domain/recherche-web.js';
-import { HASH } from '../model/schema.js';
+import { pointeurValide } from '../domain/photo-web.js';
 
 export function pageHeader(title, { subtitle = null, actions = [], back = null } = {}) {
   return el('header', { class: 'stack', style: { marginBottom: '1rem' } },
@@ -157,21 +157,32 @@ export function provenanceText(recipe, book, edition) {
 
 // Lot F (spec plats-en-images § 4.2, D-F9) : la vignette d'une carte de recette — décorative (alt vide : la carte porte le titre), née cachée ([hidden]
 // du thème), montrée seulement quand les octets sont ICI et d'un type d'image (la règle d'affichage du lot G : typeAffichage puis displayUrl). Sans
-// pointeur valide : null (la carte est celle d'avant le lot) ; sans octets : l'élément reste caché, sans src (I-F6).
+// pointeur valide : null (la carte est celle d'avant le lot) ; sans octets : l'élément reste caché, sans src (I-F6). Ronde 1 : le pointeur est jugé par
+// pointeurValide (photo-web.js), la définition UNIQUE que la zone, le rapatriement et candidatPhotoWeb emploient ; des octets que le navigateur ne
+// décode pas (HEIC hors Safari, octets tronqués) lèvent error : la vignette redevient cachée, sans src, son URL révoquée — jamais un cadre vide.
 export function vignettePlat(recipe, { repo: depot = repo } = {}) {
-  const sha = recipe?.photo_sha256;
-  if (typeof sha !== 'string' || !HASH.test(sha)) return null;
+  if (!pointeurValide(recipe)) return null;
+  const sha = recipe.photo_sha256;
   const img = el('img', { class: 'plat-vignette', alt: '', loading: 'lazy', hidden: true });
   Promise.resolve().then(() => depot.getFile(sha)).then((f) => {
     if (!typeAffichage(f)?.startsWith('image/')) return;
     const u = displayUrl(f, urlDeBlob);
     if (!u) return;
+    img.addEventListener('error', () => { img.hidden = true; img.removeAttribute('src'); revoquerUrlDeBlob(u); }, { once: true });
     img.src = u; img.hidden = false;
   }).catch(() => {});
   return img;
 }
 // Les URL blob: des vignettes d'un conteneur : relevées AVANT son vidage et révoquées APRÈS par les écrans qui redessinent leur liste (D-T9).
 export const urlsDesVignettes = (conteneur) => [...conteneur.querySelectorAll('img.plat-vignette')].map((i) => i.getAttribute('src')).filter((u) => typeof u === 'string' && u.startsWith('blob:'));
+// D-T9 (la règle de library.js, l. 76-82) en UNE définition pour les écrans qui redessinent une liste de cartes à chaque frappe (render() de
+// search.js, drawList() de book.js) : les URL des vignettes sont relevées AVANT le vidage et révoquées APRÈS (plus sous aucun <img> du document) ;
+// celles-là seulement — « tout révoquer » emporterait la couverture et toute autre image encore affichée sur la route.
+export function remplacerEnRevoquant(conteneur, ...noeuds) {
+  const anciennes = urlsDesVignettes(conteneur);
+  conteneur.replaceChildren(...noeuds);
+  for (const u of anciennes) revoquerUrlDeBlob(u);
+}
 
 // doc : { recipe, version, book, edition, cooked }
 export function recipeCard(doc, { extra = null, href = null, reasons = null } = {}) {

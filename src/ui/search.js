@@ -10,8 +10,7 @@ import { findAccompaniments } from '../domain/pairing.js';
 import { providerFrom } from '../domain/llm.js';
 import { chercherRecettesWeb, construireDemande, dateLisible, reperesDe } from '../domain/recherche-web.js';
 import { RECIPE_TYPES, DIET_TAGS } from '../model/schema.js';
-import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select, sessionAssistant, carteConnexion, texteRefusAssistant, ligneReperes, urlsDesVignettes } from './components.js';
-import { revoquerUrlDeBlob } from '../core/blob-urls.js';
+import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select, sessionAssistant, carteConnexion, texteRefusAssistant, ligneReperes, remplacerEnRevoquant } from './components.js';
 import { demarrerLectureWeb } from './import-web.js';
 import { addToMealFlow } from './meals.js';
 import { demarrerConnexion } from './settings.js';
@@ -112,10 +111,8 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   root.append(header, results);
 
   function render() {
-    // Lot F (§ 4.2, D-T9) : les URL des vignettes de la génération précédente, relevées AVANT le vidage, révoquées APRÈS.
-    const anciennes = urlsDesVignettes(results);
-    results.replaceChildren();
-    for (const u of anciennes) revoquerUrlDeBlob(u);
+    // Lot F (§ 4.2, D-T9) : les URL des vignettes de la génération précédente, relevées AVANT le vidage, révoquées APRÈS (remplacerEnRevoquant).
+    remplacerEnRevoquant(results);
     const { parsed } = state;
     const chips = chipsFor(parsed.filters);
     const removeChip = (c) => {

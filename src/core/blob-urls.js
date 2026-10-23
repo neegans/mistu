@@ -1,5 +1,7 @@
 // Propriétaire des URL blob: d'affichage (spec UX § 6, F4/S15) : chaque vue en crée par urlDeBlob, et app.js révoque tout
-// à chaque changement de route ; library.js révoque aussi en tête de chaque draw() (le filtre redessine à chaque touche).
+// à chaque changement de route. Entre deux redessins d'une même route, seules les anciennes images sont révoquées, APRÈS le
+// vidage (D-T9) : library.js en tête de chaque draw() (couvertures), et, lot F, render() de search.js et drawList() de book.js
+// (vignettes des cartes, par remplacerEnRevoquant de src/ui/components.js) — le filtre ou la recherche redessinent à chaque touche.
 const vivantes = new Set();
 export function urlDeBlob(blob) { const u = URL.createObjectURL(blob); vivantes.add(u); return u; }
 // Révoquer UNE URL connue : le cas de library.js, qui remplace la grille entière à chaque touche du filtre et ne
