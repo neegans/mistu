@@ -2365,7 +2365,7 @@ copies, jamais en place.
 sans `0006` : chaque lecture web répond 502 `serveur`, la réservation refusant l'outil ; rien d'autre ne change) ; la fonction redéployée et S13-S19
 jouées **avant** la fusion (une redirection opaque à S17 = une ronde sur `telechargerPage` d'abord) ; `/verify` par le chef d'orchestre ; le registre
 copié **avant** tout `git worktree remove`. Le lot G part de la tête finale de B ; le lot C de la tête finale de G (`1e4d68d`) ; le lot D de la tête
-finale de C (`739e706`).
+finale de C (`739e706`) ; le lot E de la tête finale de D (`619e6c0`).
 
 ### Les photos voyagent entre appareils : octets des fichiers (L4), archive, Storage, moteur, Réglages, écrans (20 octobre 2026, lot G)
 
@@ -2636,6 +2636,108 @@ premier classement réel d'une bibliothèque partagée (même règle que R-C-32)
 4, secrets 0, invisibles 0. Tête de code `c90f527` ; tête finale = le commit de clôture qui pose ces documents ; registre copié dans
 `~/projects/mistu/.superpowers/sdd/2026-10-19-recettes-en-lot/`. Prochain : Départ E sur cette tête (worktree `~/projects/mistu-couverture-lue`,
 branche `couverture-lue`, serveur 8093, `APP_VERSION 0.14.0`).
+
+### Un livre reconnu depuis sa couverture : lecture par l'assistant, rattrapage Open Library (19-23 octobre 2026, lot E)
+
+**Pour toi.** Un livre dans les mains, pas d'ISBN sous la main : tu photographies la **couverture**. L'app garde la photo tout de suite, puis
+l'assistant lit ce qui est imprimé — titre, auteur, éditeur — et le pas 2 d'« Ajouter un livre » s'ouvre déjà rempli, étiqueté « Lu sur la
+couverture — vérifie. » ; ce qui ne se lit pas reste vide et le dit. Dans la foulée, l'app demande à Open Library si elle connaît ce titre de cet
+auteur : si oui, un bandeau te propose sa fiche — et son ISBN seulement quand le livre n'a qu'une édition —, que tu prends d'un geste ou que tu
+ignores. Puis « Ajouter ce livre », comme avant. Si la couverture ne se lit pas, si tu es hors ligne ou si le quota du jour est atteint, rien n'est
+perdu : la couverture est posée, tu saisis le titre. Si tu quittes l'écran pendant la lecture, la section Imports de la page Ajouter te la rend
+(« Reprendre »). Une seconde photo repart d'un nouveau livre : ce que la lecture avait rempli s'efface, ce que tu as tapé reste. Un livre vide se
+supprime sans laisser de trace ; la sauvegarde écarte les traces orphelines. Le chemin par ISBN reste là, inchangé, et reste le plus sûr.
+
+**Où.** Branche `couverture-lue`, worktree `~/projects/mistu-couverture-lue`, empilée sur la tête finale du lot D `619e6c0` (chaîne
+A → B → G → C → D → E ; base `209de95` = `619e6c0` + la spec) ; spec `docs/superpowers/specs/2026-10-19-couverture-lue-design.md` (rév. 6 commise
+`209de95`, rév. 7 à la clôture : § 12 « Rév. 6 → rév. 7 », rulings R-E-16 à R-E-39, écarts EI-1 à EI-17 ; § 13) ; plan rejoué par intention sur
+`619e6c0` `docs/superpowers/plans/2026-10-19-couverture-lue.md` (`2bb855a`, tâches 1, 2, 3a, 3b, 4 = tâches 1 à 5 du registre) ; registre
+`.superpowers/sdd/2026-10-19-couverture-lue/` (briefs, rapports de tâche et de ronde, `final-fix-report.md`, `verify-*.txt` ; hors git, copie dans
+`~/projects/mistu/.superpowers/sdd/`). Serveur de vérification `python3 -m http.server 8093 --bind 127.0.0.1`. Un module neuf :
+`src/domain/couverture.js`
+(pur) ; la lecture et sa validation dans `src/domain/llm.js` ; le vol par la primitive partagée `lancerVol` (option `preparer` de `volUnique`, R-E-23) ;
+l'écran dans `src/ui/livre-ajout.js` ; `repo.removeBatch` et `supprimerLivreVide` (`src/ui/book.js`) ; le filet de `createArchive`
+(`src/domain/backup.js`) ;
+la section Imports (`src/ui/add.js`). **PAS fusionné, PAS poussé. Aucune migration, serveur `assistant` intact, `DB_VERSION` 4.**
+
+**Ce qui marche (prouvé par la suite, 5681/5681 sur `1e5e61b`, épingle 5680 ; Node 174/174 ; `--check` 0 ; aucun réseau, bases jetables, `fetch` et
+`pickFiles` injectés).**
+- **La couverture d'abord** (I-E2) : octets dans `files` (`poserCouverture`), ligne `imports` `kind: 'couverture'` `a_lancer` avec `cover_sha256`
+  (fabrique unique `ligneImportNeuve`, R-E-21), puis seulement le `fetch` ; un échec, une coupure, un quota ne perdent jamais la photo.
+- **Un clic = un appel** (I-E3) : un seul vol par document (`lancerVol`, partagé avec l'import ciblé, la table des matières, le classement et la
+  lecture web) ; une ligne d'une autre sorte en vol est refusée `sorte` ; `appels + 1` au départ du `fetch` ; « Annuler » (499).
+- **Une lecture validée** (I-E1 : donnée hostile lue champ par champ, bornée, Cc/Cf retirés, une ligne par `surUneLigne` (R-E-22), aucune adresse ;
+  `hors_bornes` sur un dépassement ; un résultat revenu du journal est revalidé) remplit le pas 2 « Lu sur la couverture — vérifie. » ; les champs
+  illisibles sont vides et nommés (`uncertain`).
+- **Open Library** par titre ET auteur (`search.json`, `fields` fixés) ; ISBN, éditeur, année et langue proposés seulement pour une œuvre à UNE
+  édition (`edition_count === 1` et un seul ISBN-13) ; « Utiliser ces renseignements » / « Ignorer » ; une requête par lecture appliquée, jamais sur
+  un redessin ; le bandeau est posé par `majProposition()`, la saisie et le focus survivent.
+- **« Ajouter ce livre »** ferme l'import dans la transaction du livre ; la section Imports reprend une lecture quittée (`?import=`, « Reprendre »),
+  avec ses propres phrases (R-E-19) ; une couverture `a_lancer` d'un autre appareil n'offre que « Ignorer ».
+- **Supprimer un livre vide sans orphelin** (`repo.removeBatch`, `supprimerLivreVide`, refus pendant `en_cours`) ; **la sauvegarde** écarte les traces
+  de consultation orphelines et le dit dans le bilan `messagesArchive` du lot G (R-E-26) ; une archive ancienne à relation cassée se restaure.
+- **Filets** : `MODULES_NEUFS` / `CHAINES_NEUVES_AILLEURS` (`tests/ajouter.js`), `SHELL` + `./src/domain/couverture.js`, S14 « ni fournisseur ni base »
+  en toute casse (R-E-28), test statique « `repo.transitionner(` » du lot A vert (`const repo = r;`, R-E-16), seize pins de version à `0.14.0`.
+- **Vague finale et ronde de clôture** (revue finale de branche de `6192422` : 3 Important, 11 Minor) : sans ISBN avant comme après, « Saisir à la
+  main » garde les champs repris d'Open Library et leur étiquette ; « Identifier » ne remet une lecture qu'à la fiche trouvée — sur un ISBN
+  introuvable ou une panne, la lecture et les champs repris restent, et la ligne « Aucune fiche… » le dit (ronde de clôture) ; les boutons du pas 1
+  éteints par le vol d'une autre route se rallument à sa fin (un vol hors journal compte aussi) ; `online` ignoré pendant le vol de la route ; des
+  octets arrivés après une reprise s'affichent sans redessin ; un geste sur la seule zone Couverture ne détache plus une lecture en vol ; la
+  préparation finie après un changement de pas ne redessine que ses blocs ; deux faux-verts fermés (message du refus `octets_absents` / `image`,
+  `cover_sha256` borné) ; des faits (`relecturesFaites`) à la place de ticks ; `lotDe` lit `BORNES_CLASSEMENT`. Ronde de clôture `784e7cf` (R-E-31) :
+  après « Utiliser ces renseignements » sans ISBN, « Identifier » d'un ISBN introuvable ou en panne garde les champs repris et leur étiquette, et dit
+  « Aucune fiche… » ; un vol hors journal éteint aussi les boutons du pas 1 ; une couverture relancée ici porte cet appareil (seconde assertion).
+  Re-revue : les quatre points fermés, un faux-vert neuf (la garde `isbnDistant === null` sans assertion, RA5) → ronde de clôture 2, tests seuls
+  (`1e5e61b`) : ISBN A trouvé puis ISBN B introuvable → rien de A ne reste ; RA5 rouge.
+
+**Ce qui n'est PAS prouvé.** Aucune lecture réelle de couverture (§ 10 : durée, modèle, justesse de la consigne § 3.3 et de la table § 3.2, `uncertain`
+réellement porté, jetons de sortie attendus sous 1 000) ; Open Library réel (fixtures remesurées par `curl` le 19 octobre, pas depuis) ; Safari et
+iPhone (`createImageBitmap` sur une photo de 48 Mpx, « Photographier la couverture », appareil photo refermé sans photo) ; deux appareils.
+
+**Dettes (assumées ; détail en spec § 12 et § 13).** Mutants : T1 24/24, T2 15/15, T3 29 joués (27 rouges, les deux survivants tués en T3-R1), T4
+45/47 (N02, N28 équivalents), T5 26/26, vague 20/20, ronde de clôture 20/20 puis RA5 rouge sur les deux assertions neuves (`❌ 5679/5681`), RA1 et RA3
+restent rouges, X1 du relecteur rouge ; témoins verts sur 8298 et 8398-8399 — aucun survivant ; équivalents nommés M03/M03b, N02, N28, R16 (cycle
+évité), M16, P4, P7 (= T5r) ; deux mutants figeaient la suite (M01, MW d'un autre lot) : attente bornée, MW nommé. Dettes de code (R-E-35) : quatre
+copies des gardes « sans vision » (`extraireRecette`, `extraireTableMatieres`, `classerPhotos`, `extraireCouverture`) ; `removeMany` non réécrit sur
+`removeBatch` ; les deux temps de `supprimerLivreVide` non atomiques et la relecture « édition vide » hors transaction ; `scan_sessions.edition_id →
+book_editions` non relu ; route sans crochet de sortie (m13 du lot A) ; `photographierCouverture` long ; double lecture montage + `relire()` ;
+`lireSearch` (chemin ISBN) garde le défaut des demi-paires ; `BarcodeDetector` / `createImageBitmap` hors suite ; une couverture d'un autre appareil
+dit « Photos sur un autre appareil » dans la section ; la passe `interrompu` n'est pas rejouée au montage d'un `?import=` `en_cours` ; un vol web ne
+notifie pas (R-B-27) ; la relance d'une ligne en échec garde `reponse_brute`, `model`, `duree_ms` et `finished_at` (le remède rougit une assertion du
+lot A, R-E-35). Limites nommées (§ 11, R-E-36) : la photo d'une couverture en attente n'est pas un pointeur L4 (**décision de Neegan**, R-E-37, § 13)
+; la condition du temps 2 de D-E23 ne voit que les statuts connus ; une ligne au statut non-chaîne bloque la suppression d'un livre vide tant qu'elle
+existe.
+
+**Gestes de Neegan, dans l'ordre.** 1) Les lots A, B, G, C puis D d'abord (leurs sections : migrations, redéploiement, sondes, fusions, sonde R-D-8).
+2) **Preuve réelle § 10 AVANT la fusion de E**, sur la branche servie localement, connecté : poser `ASSISTANT_ORIGINES` à
+`https://neegans.github.io,http://localhost:8093` (LES DEUX origines, séparées par une virgule : la valeur posée remplace le défaut, et
+`http://localhost:8093` seul couperait le site public), **et** `http://localhost:8093/**` aux Redirect URLs de `mitsu` (sans elle, le retour de Google
+retombe sur la Site URL publique) ; jouer les sept points de § 10 (une vraie couverture : « À la di Stasio », puis « Berber and Q », une typographie
+difficile, une anglaise à plusieurs éditions, hors ligne, « Annuler », rouvrir et supprimer puis archive restaurée) ; noter durée, modèle, champs lus
+contre la couverture, `select owner_id, jour, appels, jetons_entree, jetons_sortie from public.assistant_usage_jour;` ; **retirer le port et l'adresse
+de
+retour ensuite**. Si le premier essai révèle une limite (titre pris pour l'auteur, `uncertain` jamais ou partout, langue fantaisiste), la consigne
+§ 3.3 (module ET test littéral) et la table § 3.2 s'amendent par une ronde avant la fusion. Pendant la preuve, les autres appareils de la bibliothèque
+restent fermés (la version publique ne connaît pas la sorte `couverture`, et la ligne de la preuve leur arrive par la synchronisation).
+3) `! git -C ~/projects/mistu merge --ff-only couverture-lue` (après D), puis **un** `! git -C ~/projects/mistu push origin main` ; suite publique
+`https://neegans.github.io/mistu/tests/` → `5681/5681` (épingle 5680 ; plus le 404 de `/favicon.ico`), service worker `cuisine-os-v0.14.0-12`. 4) Tous
+les appareils sur
+0.14.0 avant la première couverture lue d'une bibliothèque partagée (même règle que R-C-32 et R-D-27). 5) iPhone (§ 10 point 6 : l'appareil photo
+s'ouvre, une photo de 12 Mpx passe, refermé sans photo il se rouvre et rien n'est écrit). 6) « clean » seulement après la copie du registre.
+
+**Versions.** `APP_VERSION 0.14.0` (D : 0.13.0) ; `sw.js` `cuisine-os-v0.14.0-1` (T1) … `-10` (ronde 1 de T5), `-11` (vague), **`-12`** (ronde de
+clôture `784e7cf`) ; chaque commit qui touche `src/` incrémente (R-B-24) ; chaque commit qui touche `src/` incrémente (R-B-24) ; `SHELL` +
+`./src/domain/couverture.js` ; `DB_VERSION` 4 inchangée.
+
+**Bilan.** Départ sur `209de95` (mesure = D : 5228/5228, épingle 5227, Node 174) ; rejeu du plan par intention (EI-1 à EI-17 → R-E-21 à R-E-29) ; cinq
+tâches (1, 2, 3a, 3b, 4), chacune revue à trois lentilles avec une ronde et une re-revue PROPRE : T1 `a5a89dc`/`79f113b` (5326 → 5350), T2
+`29f6ec7`/`804e947` (5404 → 5414), T3 `f170942`/`35dd837` (5446 → 5473), T4 `c647e4a`/`f5cf6c8` (5576 → 5618), T5 `8d447a0`/`6192422` (5641 → 5656) ;
+revue finale de branche (3 Important, 11 Minor), vague `f814f13` + `8934f07` (5670/5670, épingle 5669, 20 mutants rouges), re-revue A_CORRIGER → ronde
+de clôture `784e7cf` puis `1e5e61b` (tests seuls) (`sw.js -12`, épingle 5678 puis 5680, 5681/5681, mutants 20/20 puis RA5 rouge sur les deux
+assertions neuves (`❌ 5679/5681`), RA1 et RA3 restent rouges, X1 du relecteur rouge ; témoins verts sur 8298 et 8398-8399), re-revue de la ronde 1
+A_CORRIGER (quatre points fermés, un faux-vert neuf RA5) puis, après la ronde 2 tests seuls `1e5e61b`, **PROPRE** (0 restant, 0 neuf) ; suite 5228 →
+**5681/5681** (épingle **5680**), Node 174/174, `--check` 0 ; clôture du chef d'orchestre : rulings R-E-30 à R-E-39, `/verify` VERT
+(`verify-E-1e5e61b.txt`), registre copié.
 
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 

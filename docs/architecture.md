@@ -1376,6 +1376,43 @@ des titres (`estTitreUneLigne`, `src/core/bornes.js`) juge la validation, la rev
 - **Ce qui n'est pas mesuré.** Un vrai classement (durée, justesse des groupes, borne réelle d'un envoi de 10 photos, page partagée) : sonde de Neegan
   avant la fusion (R-D-8) ; la lecture réelle de cinq recettes : preuve § 10 de la spec.
 
+## Un livre reconnu depuis sa couverture (lot E, 19-23 octobre 2026)
+
+Spec : `docs/superpowers/specs/2026-10-19-couverture-lue-design.md` (rév. 7 ; § 0 : décisions D-E1 à D-E23 ; § 2 : invariants I-E1 à I-E10 ; § 3 :
+données ; § 4 : parcours ; § 7 : tests ; § 11 : limites ; § 12 : rulings R-E-1 à R-E-39 ; § 13 : ce qui reste). Livré ici (branche `couverture-lue`,
+empilée sur `recettes-en-lot`, non fusionnée) : la lecture d'une couverture par l'assistant au pas 1 d'« Ajouter un livre », le rattrapage Open Library,
+la suppression d'un livre vide sans orphelin et le filet de l'archive, sans migration ni changement de la fonction `assistant`.
+
+- **Domaine pur** `src/domain/couverture.js` : la ligne du journal (`fabriquerImportCouverture` = `ligneImportNeuve({ kind: 'couverture' })` +
+  `cover_sha256`, R-E-21), la correspondance titre / auteur (`titreCorrespond`, normalisation), l'ISBN d'une œuvre à une seule édition
+  (`editionUnique`, `isbnUnique`), les champs depuis une lecture (`champsDepuisLecture`, `uncertain` honoré), `URL_OL_TITRE_AUTEUR` et `lireSearchListe`
+  (exportées). La lecture et sa validation vivent dans `src/domain/llm.js` (`COUVERTURE_SYSTEM`, `extraireCouverture`, `validerLectureCouverture` :
+  propriétés propres, bornes en points de code, `ligneNettoyee` = `surUneLigne`, R-E-22 ; aucune adresse).
+- **Le vol** est la primitive partagée `lancerVol` (`src/ui/import-cible.js`, lot C, étendue par D) sur `volUnique` (`src/ui/vol.js`, lot B) : E lui
+  ajoute l'option `preparer({ ligne, repo })` (une couverture n'a jamais de page ; sans elle, le chemin des pages est inchangé) ;
+`lancerLectureCouverture
+  = lancerVol(id, executerCouverture, { accepte, preparer, attendus: ['a_lancer', 'echec'], lecture: null })` ; un seul vol par document, verrou
+réciproque
+  avec l'import ciblé, l'index, le classement et la lecture web (R-E-23). Le battement vit dans `sync_state` (`repo.battre`), jamais dans la ligne.
+- **L'écran** `src/ui/livre-ajout.js` : pas 1 (photo posée dans `files` AVANT toute ligne et tout appel, I-E2), pas 2 pré-rempli et étiqueté,
+  `relire()` / `appliquerLecture()` idempotentes (générations : un geste de la personne gagne, I-E4), bandeau Open Library posé par `majProposition()`
+  (jamais par `dessiner()` : la saisie et le focus survivent), « Ajouter ce livre » qui ferme l'import dans la transaction du livre, reprise par
+  `#/add/livre?import=` (`src/ui/state.js`, `ROUTES_DE_SAISIE`).
+- **Données et suppression** : `repo.removeBatch` (une transaction, plusieurs magasins, R-E-12), `supprimerLivreVide` (`src/ui/book.js` : refus pendant
+  `en_cours`, aucun orphelin : lignes du journal détachées, activité et préférence retirées avec l'édition, R-E-8) ; `createArchive`
+(`src/domain/backup.js`)
+  écarte les traces de consultation orphelines et les compte (`tracesOrphelines`), dites par `messagesArchive` (lot G, R-E-26).
+- **Section Imports** (`src/ui/add.js`, `src/domain/import-cible.js`) : `KINDS_IMPORT` + `'couverture'` (jamais de page : `KINDS_PAGES` inchangée, les
+  murs
+  de `repo.js` refusent une page sur une couverture) ; phrases propres (« La couverture n’a pas encore été lue. », « Lecture de la couverture par
+  l’assistant… », `texteEchecCouverture`) ; une couverture `a_lancer` d'un autre appareil n'offre que « Ignorer » (R-E-19).
+- **Vague finale et ronde de clôture (22-23 octobre)** : `saisirMain` (« aucun ISBN avant comme après » = le même ISBN ; provenance `couverture`),
+  `identifier` (remise d'une lecture appliquée dans la seule branche `trouve` ; champs repris d'Open Library gardés sur introuvable ou panne),
+  `rendreFin()` (blocs seuls après un geste), `majZoneCouverture`, `online` ignoré pendant le vol, `relecturesFaites` (fait pour les tests),
+  `avancerCouverture` (un geste de la seule zone Couverture ne détache pas la lecture), `volAilleurs` (un vol hors journal compte), `ici` de
+  `volUnique` couvre `couverture` (R-E-30 (e)) ; `lotDe` lit `BORNES_CLASSEMENT`, `surUneLigne` privée. Ronde de clôture : `garderDistants` dans
+  `identifier`, `messages.introuvable` / `texteAucune()` dans le modèle du pas 2.
+
 ## Modèle de données (magasins IndexedDB)
 
 `books`, `book_editions` (ISBN, langue, `unit_convention_id`), `source_documents` (fichier, sha256, type), `source_pages` (page imprimée, position),

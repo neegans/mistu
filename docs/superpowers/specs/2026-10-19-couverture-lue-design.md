@@ -1,6 +1,9 @@
-# Lot E — « Un livre reconnu depuis sa couverture » : lecture par l’assistant, rattrapage Open Library — spec (rév. 6)
+# Lot E — « Un livre reconnu depuis sa couverture » : lecture par l’assistant, rattrapage Open Library — spec (rév. 7)
 
-Date : 19 octobre 2026 (rév. 1 le matin ; rév. 2 après la revue adverse à trois lentilles ; rév. 3 après les rulings du chef d'orchestre
+Date : 19 octobre 2026 (**rév. 7 à la clôture de la construction, 23 octobre 2026** : rejeu du plan sur la tête finale du lot D `619e6c0`
+— dix-sept écarts d’intention EI-1 à EI-17 tranchés par R-E-21 à R-E-29 —, P-15 à P-17 ratifiés, rulings de construction R-E-30 à R-E-39, mesures
+finales, le tout en § 12 « Rév. 6 → rév. 7 » ; tête de code `1e5e61b`, `sw.js cuisine-os-v0.14.0-12`, épingle 5680, suite 5681/5681 ; § 13 mis à jour
+; rév. 1 le matin ; rév. 2 après la revue adverse à trois lentilles ; rév. 3 après les rulings du chef d'orchestre
 R-E-1 à R-E-7 et les constats N1 à N4 ; rév. 4 après les rulings R-E-8 (C1) et R-E-9 et les constats M1 à M3 ; rév. 5 après les rulings R-E-10 à R-E-14 ; rév. 6 après le ruling R-E-15, § 12). Base : `main` **après la fusion du lot A**
 (« Importer une recette repérée », branche `import-cible`, worktree `~/projects/mistu-import`, aujourd’hui à la tâche 4 de 6 : **`47f61ed`**
 (ronde 1 de la tâche 4, **commise** : T4-R1 ratifiée, § 3.6), `APP_VERSION 0.9.0`, `sw.js cuisine-os-v0.9.0-6`, total épinglé **3442** dans
@@ -94,8 +97,11 @@ inchangés jusqu’à `bd03e48`). **Référence commune : `f8cfafa`** (R-E-14, c
   auteur** sont lus sans être incertains (B1 : jamais sur le seul titre) : `search.json?title=&author=&fields=…,edition_count&limit=3` (mêmes
   `fetch` borné, délais et reprise que `lookupIsbn`, § 3.4) ; une fiche dont le **titre** normalisé correspond **et** dont un auteur contient un
   mot distinctif de l’auteur lu (§ 3.5) → bandeau « Proposé par Open Library : {f} » + « Utiliser ces renseignements ». **L’ISBN, l’éditeur,
-  l’année et la langue ne sont proposés que si l’œuvre n’a qu’une édition chez Open Library** (`edition_count === 1` **et** un seul ISBN-13
-  distinct dans la liste, § 3.5) : `search.json` rend des fiches d’**œuvre** qui agrègent les ISBN, éditeurs et langues de toutes les éditions
+  l’année et la langue ne sont proposés que si l’œuvre n’a qu’une édition chez Open Library** (`edition_count === 1` ; l’ISBN seul exige **en plus**
+un seul ISBN-13
+  distinct dans la liste, § 3.5 — construction, T1-R1 constat 14, R-E-30 : l’éditeur, l’année et la langue dès l’édition unique, l’ISBN seulement s’il
+est
+  unique) : `search.json` rend des fiches d’**œuvre** qui agrègent les ISBN, éditeurs et langues de toutes les éditions
   (mesuré § 3.4 : « Jerusalem » = 8 éditions, 12 ISBN, 7 éditeurs, `isbn[0]` espagnol) ; sinon le bandeau porte le titre, l’auteur et les mots-clés
   seulement, avec « Plusieurs éditions chez Open Library : scanne le code-barres pour l’ISBN exact. ». « Utiliser » ne remplace que ce que la fiche
   **porte** (un champ vide de la fiche ne vide jamais un champ lu ou tapé), la provenance devient « Renseigné par Open Library — vérifie et
@@ -405,8 +411,10 @@ fiches: [...], motif, appels }` :
   recettes » vrai ; « Soupes » ↔ « Soupes (50 recettes) » vrai ; « Soupes » ↔ « Soupes — 50 recettes » vrai ; « Soupes » ↔ « Soupes du monde »
   **faux** ; « Grand-mère » ↔ « Grand-mère : recettes » vrai (trait d’union sans espaces non coupé) ; `''` ↔ quoi que ce soit faux.
 - `motsDistinctifsAuteur(s)` : `normaliserTitre(s)` découpé sur les espaces, mots de **3 lettres ou plus** (« di », « de », « le » tombent).
-  `auteurCorrespond(auteursLus, auteursFiche)` : un mot distinctif d’**un** auteur lu figure parmi les mots de **l’un** des `author_name` de la
-  fiche ; `auteursLus` vide → faux. Table : `['Josée Di Stasio']` ↔ `['Josée Di Stasio']` vrai ; ↔ `['Josee Di Stasio']` vrai (accents aplatis) ;
+  `auteurCorrespond(auteursLus, auteursFiche)` : tous les mots distinctifs (au moins un) d’**un** auteur lu figurent parmi les mots de **l’un** des
+`author_name` de la
+  fiche (T1-R1, R-E-30 : « Christophe Felder » ↔ « Christophe Michalak » faux) ; `auteursLus` vide → faux. Table : `['Josée Di Stasio']` ↔ `['Josée Di
+Stasio']` vrai ; ↔ `['Josee Di Stasio']` vrai (accents aplatis) ;
   `['Josh Katz']` ↔ `['Josh Katz']` vrai ; `['J. Katz']` ↔ `['Josh Katz']` vrai (« katz ») ; `['Ricardo']` ↔ `['Josh Katz']` faux ; `['Di']` ↔
   quoi que ce soit faux ; `[]` ↔ quoi que ce soit faux.
 - `choisirProposition(lecture, fiches)` : la **première** fiche dont `titreCorrespond(lecture.title, fiche.title)` **et**
@@ -439,7 +447,9 @@ fiches: [...], motif, appels }` :
 `TRANSITIONS` — **avec `a_verifier → echec`**, ruling **T4-R1-a ratifié** (commis dans `47f61ed` : `src/domain/import-cible.js:12`, et
 `tests/import-cible.js:291` épingle la table à quatre sorties pour `a_verifier`) : ce lot s’y appuie pour la revalidation (§ 4.3) —,
 `RAISONS_ECHEC`, `validateParsedRecipe`, `lookupIsbn`, `fusionnerFiche`, `poserCouverture`, `renderZoneCouverture` (signature : `book.js`
-l’importe), `fabriquerLivre`, `ajouterPages` (le `KINDS_IMPORT` **privé** de `src/model/repo.js`, l. 430, qui garde aussi
+l’importe), `fabriquerLivre`, `ajouterPages` (construction, EI-7 et R-E-24 : `repo.js` lit `KINDS_PAGES = ['recette', 'index', 'classement']` du lot
+D, sans `couverture` — un import
+`couverture` ne reçoit jamais de page ; la spec écrivait : le `KINDS_IMPORT` **privé** de `src/model/repo.js`, l. 430, qui garde aussi
 `ouvrirImport` depuis la tâche 6 du lot A, reste `['recette', 'index']` : un import `couverture` ne reçoit jamais de page ; le `KINDS_IMPORT`
 **exporté** par `src/domain/import-cible.js`, lui, gagne `'couverture'` : R-E-13, § 4.6), la
 CSP (`connect-src 'self' https:` couvre `openlibrary.org`), `src/model/repo.js` (sauf `removeBatch`, neuve, R-E-8, ratifiée R-E-12 : rien d’existant n’y
@@ -461,7 +471,9 @@ l’`edition_id` invalide (signalée comme aujourd’hui) n’est pas touchée, 
 → recipes`, `schema.js:135`, reste vérifiée : § 11). Les décomptes du manifeste et les empreintes portent les lignes **gardées** (ils sont
 calculés après, comme aujourd’hui). `createArchive` rend en plus **`tracesOrphelines`** (neuf : entier ≥ 0, les lignes écartées des deux
 magasins) ; `warnings` ne les compte pas (elles ne bloquent plus rien). **Le bilan** : Réglages (`src/ui/settings.js`, après « Sauvegarder
-toute ma bibliothèque », à côté des avertissements d’export) affiche, quand le compte vaut 1 ou plus, `small.muted[data-export-orphelins]`
+toute ma bibliothèque », à côté des avertissements d’export) affiche, quand le compte vaut 1 ou plus, la phrase dans le bilan `messagesArchive` du lot
+G (`[data-role="bilan-archive"]`, R-E-26 ; la spec
+écrivait `small.muted[data-export-orphelins]`)
 « {n} trace de consultation orpheline ignorée » (n = 1) ou « {n} traces de consultation orphelines ignorées » (n ≥ 2), texte rendu par
 **`texteTracesOrphelines(n)`** (neuve, exportée, pure : `null` hors entier ≥ 1). **Inchangées** : `inspectArchive` ; `applyArchive` (une
 archive produite par ce code ne porte pas d’orpheline : rien à y faire ; une archive plus ancienne qui en porte reste refusée à
@@ -556,8 +568,9 @@ passent par elle, jamais par `dessiner()` — qui reconstruit le champ ISBN et f
    - `r1.issue === 'a_verifier'` : `relire()` applique la lecture **si** `etat.generation === etat.generationLecture` **et** `etat.importId ===
      ligne.id` ; sinon état `recue` (I-E4 : le journal garde la lecture, la section Imports l’offre ; les champs tapés et le **focus** restent).
 
-**`lancerLectureCouverture(importId, { ctx, repo, fetch, maintenant, enLigne, battementMs })`** (`src/ui/import-cible.js`, exportée) = `voler`
-(D-E20) avec : `attendus: ['a_lancer', 'echec']` ; garde de sorte : `ligne.kind !== 'couverture'` → `refus('inconnu')` ; `preparer(ligne)` :
+**`lancerLectureCouverture(importId, { ctx, repo, fetch, maintenant, enLigne, battementMs })`** (`src/ui/import-cible.js`, exportée) = `lancerVol`
+(la primitive partagée des lots C et D, option `preparer`, R-E-23 ; la spec écrivait `voler`, D-E20) avec : `attendus: ['a_lancer', 'echec']` ;
+garde de sorte (liste blanche `accepte`) : `ligne.kind !== 'couverture'` → `refus('sorte')` (R-E-24 ; la spec écrivait `inconnu`) ; `preparer(ligne)` :
 `shaBornee(ligne.cover_sha256)` nul → `refus('sans_page')` (une clé non-chaîne venue d’une ligne reçue ne lève pas hors refus nommé) ;
 `repo.getFile(sha)` sans `blob` → `refus('octets_absents')` ; `pagePourEnvoi(blob)` (1 568 px au plus, la couverture stockée fait déjà 1 200 px) ;
 `ErreurImage` → `{ issue: 'refuse', raison: 'image', code }` ; `appeler(provider, [image], { signal })` = `extraireCouverture(provider, image,
@@ -571,7 +584,9 @@ passent par elle, jamais par `dessiner()` — qui reconstruit le champ ISBN et f
 1. **`relire()`** (route ; file de promesses comme `redessiner` de l’import ciblé : jamais deux relectures qui se dépassent) — la **seule** fonction
    qui lit le journal pour l’écran ; `dessiner()` ne l’appelle **jamais**. Déclenchée : au montage avec `?import=` (§ 4.6), à la fin d’un vol
    (§ 4.2, étape 5), après « Annuler », après « Lire / Relire la couverture », sur l’événement `online` (§ 4.7). Pas sur un `change` du magasin
-   (aucune infrastructure d’écoute dans `import-cible.js` non plus : une ligne bougée par un autre onglet est vue au prochain déclencheur).
+   (construction, T5-R1 et vague, R-E-30 : la route écoute aussi les avis du vol de CE document (`ecouterVol`), rejoue la veille d’une ligne en vol
+   ailleurs (`veilleMs`, `delaiSessionMs` injectables), ignore `online` pendant son propre vol et, sans import, rend le seul bloc du pas 1 ; la spec
+   écrivait : aucune infrastructure d’écoute dans `import-cible.js` non plus — une ligne bougée par un autre onglet est vue au prochain déclencheur).
    - **Garde en tête (R-E-10)** : `if (!etat.importId) return` — **rien n’est lu** (aucun `r.get('imports', null)` : `repo.get` → `db.get`,
      `src/core/db.js:218-221`, passe la clé telle quelle à `IDBObjectStore.get`, qui lève `DataError` sur `null` — sans la garde, un rejet non
      géré à chaque retour en ligne), **rien n’est redessiné**, `etat.lecture` reste tel quel. Cas : route sans import de couverture (chemin ISBN,
@@ -642,8 +657,11 @@ passent par elle, jamais par `dessiner()` — qui reconstruit le champ ISBN et f
      valeurs: fiche.motsCles } : null` ; `etat.lecture.incertains` ne garde que les champs **non remplacés** (un champ repris de la fiche n’est
      plus incertain ; `placeholders` de même ; le sous-titre reste en mention) ; `etat.champsDistants` = les champs **réellement repris**
      (comparés avant/après, comme C3), `isbnDistant` = l’ISBN valide affiché **après** le geste (`validerIsbn(etat.isbn).isbn13`, sinon `null`),
-     `sourceDistante = 'openlibrary'` (pour « ← Changer d’ISBN » puis « Saisir à la main » : sous ce même ISBN, les champs et leur étiquette
-     restent) ; `etat.champsLus` gagne ces mêmes champs repris et, si l’ISBN vient d’être posé, `isbn: fiche.isbn13` (N4) ; `etat.proposition = null` ; **la couverture ne bouge pas** (`etat.couverture` intact, `touchee: true`) ; **aucune requête
+     `sourceDistante = 'openlibrary'` (pour « ← Changer d’ISBN » puis « Saisir à la main » : sous ce même ISBN — « aucun ISBN avant comme après » vaut
+le même ISBN, vague
+     constat 1 — les champs et leur étiquette restent ; sur « Identifier » d’un ISBN introuvable ou en panne, les champs repris restent aussi, R-E-31)
+; `etat.champsLus` gagne ces mêmes champs repris et, si l’ISBN vient d’être posé, `isbn: fiche.isbn13` (N4) ; `etat.proposition = null` ; **la
+couverture ne bouge pas** (`etat.couverture` intact, `touchee: true`) ; **aucune requête
      `covers.openlibrary.org`** ; `dessiner()`. Avec un ISBN, le rappel « ISBN {isbn13} » et « ← Changer d’ISBN » apparaissent (rendu existant).
    - « Ignorer » : `etat.proposition = null` ; `dessiner()`.
 6. **Bloc lecture** (`div.status.warn[data-role="lecture"]`, au-dessus des champs) quand la ligne n’est ni `lue` ni `recue` ni `termine` :
@@ -788,9 +806,11 @@ là aujourd’hui, mesuré au `grep` ; `presentation` l. 153 inchangée). `src/d
 `ficheSelonIsbn` (R-E-9).
 `src/domain/import-cible.js` : `KINDS_IMPORT` + `'couverture'` (R-E-13, § 4.6), `lignesImports` et `cibleReprise` amendées pour `couverture`. `src/ui/book.js` (**touché par E**, R-E-2 et R-E-8) : D-E23 — le corps du geste
 « Supprimer » (après `confirmDialog`) devient **`supprimerLivreVide({ book, edition, garderLivre }, { repo })`** (neuve, exportée : testable
-sans cliquer le dialogue ; rend `{ ok: true }` ou `{ refus: 'lecture_en_cours' }`) : `repo.byIndex('imports', 'edition_id', edition.id)` ;
+sans cliquer le dialogue ; rend `{ ok: true }` ou `{ refus: 'lecture_en_cours' | 'non_vide' | 'import_lie' }`, T3-R1, R-E-30) :
+`repo.byIndex('imports', 'edition_id', edition.id)` ;
 refus avant toute écriture si une ligne est `en_cours` ; un `repo.transitionner('imports', id, { attendus, patch })` par ligne (`attendus` =
-`STATUTS_IMPORT` sans `en_cours` ; patch fonction : statut dans `IMPORTS_TERMINES` → `{ edition_id: null }`, sinon `{ status: 'ignore',
+`STATUTS_IMPORT` sans `en_cours` ; patch fonction (dérivé d’`importOuvert(c)`, R-B-18, T3-R1 ; la spec écrivait `IMPORTS_TERMINES`) : ligne fermée →
+`{ edition_id: null }`, sinon `{ status: 'ignore',
 edition_id: null, reponse_brute: null, finished_at: repo.nowIso() }` ; `TransitionRefusee` d’une ligne disparue entre-temps muette, d’une
 ligne passée `en_cours` → refus) ; puis, **en une transaction** (R-E-8), `repo.removeBatch({ library_activity, rediscovery_prefs,
 book_editions, books })` : les clés de `repo.byIndex('library_activity', 'edition_id', edition.id)`, `[edition.id]` pour la préférence si
@@ -1264,7 +1284,7 @@ d’appel à la place de Neegan.
   (la remise est au pas 2, avant le ré-encodage) ; voulu : le geste dit « un autre livre ». L’éditeur, l’année et la langue d’une fiche
   d’Open Library à une édition ne sont plus proposés quand un autre ISBN valide est là (R-E-9, `ficheSelonIsbn`, § 3.5).
 
-## 12. Ce que les revues ont amendé (rév. 1 → rév. 2 → rév. 3 → rév. 4 → rév. 5 → rév. 6)
+## 12. Ce que les revues ont amendé (rév. 1 → rév. 2 → rév. 3 → rév. 4 → rév. 5 → rév. 6 → rév. 7)
 
 ### Rév. 1 → rév. 2 : revue adverse à trois lentilles
 
@@ -1570,8 +1590,344 @@ présents. Chaque nom touché a été relu dans le code (fichier et ligne sur la
 (« la suppression est capturée et part au serveur », vraie pour trois magasins sur quatre) ; les retouches de l’en-tête, de D-E23, § 3.6,
 § 4.7 (liste des tests), § 7, § 11 et § 13 sont les conséquences directes de R-E-15.
 
-## 13. Ce qui reste ouvert (rév. 6)
+### Rév. 6 → rév. 7 : la construction (rejeu du plan sur la tête finale du lot D, rulings R-E-16 à R-E-39, 23 octobre 2026)
 
-Rien. Le constat Critical de la vérification de la rév. 5 (test de `removeBatch` contraire au filtre d’historique de la capture) est
+**Base et rejeu (voie (b)).** E est construit sur la tête FINALE du lot D `619e6c0` (chaîne A → B → G → C → D → E → F ; R-E-18) : base `209de95`
+(= `619e6c0` + cette spec, rév. 6), plan rév. 2 (écrit sur `bd03e48` / `4cb99a0`) rejoué par intention et commis `2bb855a`
+(`docs/superpowers/plans/2026-10-19-couverture-lue.md` ; rapport `~/projects/mistu/.superpowers/sdd/nuit-2026-10-18/lots/E/depart-rejeu-rapport.md`) ;
+mesure de départ `✅ 5228/5228` (épingle 5227), Node 174/174, `--check` 0, `APP_VERSION 0.13.0`, `sw.js cuisine-os-v0.13.0-11`. Les numéros de ligne de
+cette spec valent à `f8cfafa` (R-E-14) ; ceux du plan commis, à `209de95`.
+
+**Précisions du plan ratifiées (P-15 à P-17, recopiées du plan commis).**
+
+- **P-15** Le § 9 place en tâche 4 les docs (`CLAUDE.md`, `STATE.md`, `docs/architecture.md`) et `/verify` : ce plan les passe à la **Clôture du
+  contrôleur** (après la revue finale de branche, sur la branche entière), la tâche 4 ne gardant que la reprise et la section. Et `sw.js` : D-E7 demande
+  un suffixe « monotone sur le suffixe de `main` » ; la consigne du chef d'orchestre le **remet à `-1`** avec la nouvelle mineure
+(`cuisine-os-v0.10.0-1`,
+  alors que `main` portera `cuisine-os-v0.9.0-N` après A). Aucun test ne rougit (`tests/sync-l3.js:1867` ne vérifie que la forme, et le changement de
+  mineure renomme le cache, donc le purge à l'activation) ; l'écart est nommé ici et reporté au § 12 de la spec à la clôture. **Rejeu (EI-12)** :
+`cuisine-os-v0.14.0-1` (R-E-18) ; la chaîne porte
+  `cuisine-os-v0.13.0-11` après D.
+- **P-16** La spec dit « `src/model/schema.js` : rien » (§ 3.6, § 4.7) et, dans le même temps, `APP_VERSION` +1 mineure (D-E7) — qui vit dans
+  `schema.js:6`. Ce plan tranche : `schema.js` change **seulement** pour `APP_VERSION` (tâche 1, P-4) ; rien d'autre n'y bouge. Reporté au § 12.
+- **P-17** La tâche 3 du § 9 est **scindée** : **3a** « données et suppression » (`repo.removeBatch`, le filet de `createArchive`, le bilan de Réglages,
+  `supprimerLivreVide` et le bouton « Supprimer », avec `tests/sync.js`, `tests/backup.js` et les blocs « suppression » et « bilan » de
+  `tests/couverture.js` ; `VERSION -3`), puis **3b** « l'écran » (`livre-ajout.js`, `state.js`, la partie C de `tests/ajouter.js`, les pins de
+  `tests/sync-l3.js` ; `VERSION -4`) ; la tâche 4 passe à `-5`. 3a ne dépend que des tâches 1 et 2 (son test de suppression pose la ligne fermée
+  `enregistre` par `db.mutate` au lieu de l'écrire par l'`enregistrerLivre` étendue de 3b) : un rouge a un rayon plus court, la revue aussi.
+
+**Écarts d’intention du rejeu (EI-1 à EI-17, recopiés du plan commis ; chacun tranché pour le code commis des lots B, G, C, D).**
+
+- **EI-1 — la fabrique unique des lignes du journal.** Le plan bâtit la ligne d'une couverture en littéral (19 champs) et appelle `assertVocabulaire`.
+  Le
+  lot D (D-D12, R-D-15) a fait de `ligneImportNeuve` (`src/domain/import-cible.js:294`) LA fabrique des lignes neuves — « nouvelleLigneImport,
+  lecturesDuLot et les fabricants des autres lots l'appellent » — et a déjà mis `couverture` dans `SORTES_IMPORT` (`src/model/schema.js`), vocabulaire
+  fermé de `imports.kind`. Tranché : `fabriquerImportCouverture` = `{ ...ligneImportNeuve({ id, kind: 'couverture', device_id }), cover_sha256 }` ; le
+  test de la forme exacte suit son ordre (`cover_sha256` en dernier) ; le test de source P-9 exige l'appel de `ligneImportNeuve({ … kind: 'couverture'`
+  avant le `return` (précédent : T-D6 M49b). Mutants inchangés en nature (commenté `//`, `/* */`, après le `return`), tous rouges.
+- **EI-2 — la règle d'une ligne.** Le plan écrit une `ligneNettoyee` propre (Cc/Cf et U+2028 RETIRÉS avant le pli : « À la⏎di » sur U+2028 donnait
+  « À ladi »). `src/domain/llm.js` porte depuis le lot C `uneLigne` (vague finale : fins de ligne et blancs ramenés à une espace AVANT le nettoyage,
+  « jamais deux mots collés ») et depuis le lot D `surUneLigne` = `uneLigne` puis `plierUneLigne` (R-D-13). Tranché : `ligneNettoyee` =
+`surUneLigne(v) ||
+  null` sur une chaîne ; l'assertion « sauts de ligne » gagne le cas U+2028/NEL (le mutant MR1, la version du plan, rougit).
+- **EI-3 — les motifs d'adresse ont déjà déménagé.** Le lot C (D-C13) a déplacé `MOTIF_ADRESSE`, `MOTIF_HOTE` et `porteUneAdresse` dans
+  `src/core/bornes.js:71-77` (avec `normaliserPourAdresse`, exportée au lot B) ; `recherche-web.js:18` les ré-exporte ; `llm.js:6` importe déjà
+  `porteUneAdresse`. Le corps COMMIS de `MOTIF_ADRESSE` porte le lookbehind du lot B (R-B-26) que la copie du plan n'a pas. Tranché : rien à déplacer ;
+  le test « déménagements » de la tâche 1 reste (il redit en partie T-C21 du lot C, et ses dix verdicts tiennent sur le corps commis) ; `bornes.js`
+reste
+  sans import.
+- **EI-4 — la garde de sorte.** Le plan rend `inconnu` pour une ligne d'une autre sorte. Le lot D (D-D14) a ajouté à la primitive une liste BLANCHE
+  `accepte`, évaluée après la relecture : une ligne d'une autre sorte rend `sorte`, une ligne absente `inconnu`. Tranché : le test l'attend ;
+l'interface
+  de `lancerLectureCouverture` gagne `sorte` et `annule` (refus de la primitive).
+- **EI-5 — la forme du refus `octets_absents`.** Le refus de la primitive pour des octets absents porte `code: 'octets_absents'` (celui des pages).
+  Tranché :
+  `preparerCouverture` a le contrat d'`imagesDe` et le test attend `{ issue: 'refuse', raison: 'octets_absents', code: 'octets_absents' }`.
+- **EI-6 — le battement hors de la ligne synchronisée.** Le plan éprouve `imports.battement_at` qui avance. La vague finale du lot A (R-B-17 au lot B) a
+  sorti le battement de la ligne : `repo.battre` réécrit la ligne INTERNE `battement:<id>` de `sync_state` (origine device, jamais en file), la ligne
+  `imports` ne bouge pas, `repo.oublierBattement` l'efface en fin de vol. Tranché : le test 7 lit `sync_state` (« avance », mutant « battement omis
+dans la
+  primitive ») et affirme la ligne `imports` intacte et aucune entrée d'outbox — trois assertions, comme au plan.
+- **EI-7 — les listes de sortes.** Le plan écrit `KINDS_IMPORT = ['recette', 'index', 'couverture']` et crée `KINDS_PAGES` (P-2). À `209de95` :
+  `KINDS_IMPORT = ['recette', 'index', 'web', 'classement']` (B, D) et `KINDS_PAGES = ['recette', 'index', 'classement']` existe (D), lue par les murs
+de
+  `repo.js` (l. 585, 593, 602). Tranché : `KINDS_IMPORT` est PROLONGÉE (`…, 'classement', 'couverture'`), `KINDS_PAGES` et `repo.js` ne changent pas ;
+le test
+  attend les listes commises.
+- **EI-8 — `tests/import-cible.js` est touché.** Le plan dit « pas touché (F-13) » et « tests du lot A verts tels quels ». Le lot B y a épinglé
+  `KINDS_IMPORT` (amendée par D) et fait de « couverture » LA sorte réservée de quatre assertions (à la place de « web », qu'il listait) ; elles
+rougissent
+  dès que E liste « couverture ». Tranché : amendées, jamais retirées — l'épingle gagne « couverture », les quatre gardent leur preuve (« une sorte hors
+  liste n'est ni listée ni reprise ») avec une sorte inconnue, `'sorte_future'`. F-13 (les fixtures) tient.
+- **EI-9 — la primitive de vol.** Le plan factorise le vol en une `voler` privée (`preparer` + `appeler`). Le lot C l'a factorisé en
+  `lancerVol(importId,
+  executer, options)` (D-C21 : `executer` = l'appel) et le lot D l'a étendu (`accepte`, `attendus`) ; le vol vit dans `src/ui/vol.js` depuis le lot B
+(UN
+  vol par document, partagé avec la lecture web). Ce que C n'a pas factorisé : la préparation des PAGES (`sans_page` si `page_ids` est vide, puis
+  `imagesDe`) — une couverture n'a jamais de page. Tranché : une seule primitive, celle du code commis ; `volUnique` gagne l'option `preparer({ ligne,
+  repo })`, même contrat qu'`imagesDe` (sans elle, le chemin des pages est inchangé à la ligne près) ; `lancerLectureCouverture = lancerVol(id,
+  executerCouverture, { accepte: couverture, preparer: preparerCouverture, attendus: ['a_lancer', 'echec'], lecture: null })`. Le verrou réciproque
+  (« un import ciblé en vol refuse une couverture », et l'inverse) est écrit contre cette primitive et vert ; une lecture web en vol la refuse aussi
+  (`vol.js`, non éprouvé par le lot E).
+- **EI-10 — le filet i18n de `settings.js`.** Le plan crée l'entrée `'../src/ui/settings.js'` de `CHAINES_NEUVES_AILLEURS`. Elle existe (lot G, une
+  quarantaine de chaînes) : une seconde clé homonyme REMPLACERAIT la liste du lot G dans l'objet. Tranché : les deux chaînes s'ajoutent à la liste
+  existante.
+- **EI-11 — le bilan de la sauvegarde.** Le plan pose `showTracesOrphelines` (un `small[data-export-orphelins]` à part). Le lot G a posé LE bilan de
+  création d'une archive (`messagesArchive`, `[data-role="bilan-archive"]`, « une phrase par cas ; rien à dire, rien de dit ») : la règle voisine.
+  Tranché : `messagesArchive({ missingFiles, copies, tracesOrphelines = 0 })` dit la phrase en dernier cas ; le geste « Sauvegarder toute ma
+  bibliothèque » lit `tracesOrphelines` de `createArchive` (défaut 0) ; `texteTracesOrphelines` reste exportée et éprouvée ; le point d'appel reste hors
+  suite (il télécharge un fichier, § 11). G n'a posé AUCUNE règle voisine pour `removeBatch`, la suppression d'un livre vide ni le filtre des traces
+dans
+  `createArchive` (relu : `missing_files` et `copies` ne touchent que `files`) : ces trois blocs sont à l'octet.
+- **EI-12 — les versions.** Le plan pose `0.10.0` et `cuisine-os-v0.10.0-1` et relève « dix pins ». R-E-18 (chef d'orchestre) fixe `0.14.0` : `sw.js`
+  `cuisine-os-v0.14.0-1` à `-5`. Les pins relevées à `209de95` (Python, deux formes) sont SEIZE lignes dans huit fichiers, dont celles que B, G, C et
+D ont
+  ajoutées : `tests/sync-l4.js` (G) et `tests/classement.js:2568` (T-D20, D) ; libellés : « APP_VERSION 0.14.0 (lot E, couverture lue) », « T1 (lot E,
+  couverture lue) … », « T-D20 : APP_VERSION 0.14.0 (fixée par le chef d'orchestre : R-D-12 au lot D, R-E-18 au lot E) ».
+- **EI-13 — `SHELL`.** Le plan place `couverture.js` entre `backup.js` et `creation-ia.js` ; `classement.js` (lot D) est entre eux : `couverture.js` va
+  après lui (ordre alphabétique gardé).
+- **EI-14 — `messageErreurImage` a un troisième lecteur.** `src/ui/regroupement.js:26` (lot D) l'importe de `./livre-ajout.js`, comme `book.js`. Le
+  ré-export du plan le sert ; aucun cycle (regroupement → livre-ajout → import-cible, qui n'importe ni l'un ni l'autre) : `regroupement.js` n'est pas
+  touché, le commentaire du ré-export le nomme.
+- **EI-15 — la chaîne, pas `main`.** P-4 et le Step 0 de la tâche 4 relisent `main` pour la mineure. Dans la chaîne A → … → F, c'est le chef
+  d'orchestre qui la fixe (R-E-18 : `0.14.0`) : le Step 0 de la tâche 4 relit cette consigne, pas `main`.
+- **EI-16 — commit de départ.** Le Step 0 de la tâche 1 crée la branche et commet spec + plan. Au Départ, le contrôleur a déjà créé le worktree et
+  commis
+  la spec seule (`209de95`) ; ce plan régénéré se commet à part, avant la tâche 1 (`docs/superpowers/plans/2026-10-19-couverture-lue.md`).
+- **EI-17 — les noms des mutants.** « battement omis dans `voler` » devient « dans la primitive (`volUnique`) » ; « `KINDS_IMPORT` lu par `repo.js` sans
+  `KINDS_PAGES` » reste un mutant valide (le remettre là, contre le code de D) ; « appel d'`assertVocabulaire` commenté » devient « appel de
+  `ligneImportNeuve` commenté » ; « noms inconnus gardés » exige de retirer les DEUX filtres de `uncertain` (M03c ; chacun seul est un mutant
+équivalent).
+
+**Rulings du chef d’orchestre (R-E-16 à R-E-20 du plan de nuit ; R-E-21 à R-E-29 du Départ, en tête des cinq briefs).**
+
+- **R-E-16** — alias `const repo = r;` accepté (une préférence de relecteur n'est pas un constat) ; le test statique « transitionner( » du lot A reste
+  vert
+  (aucun `r.transitionner(` hors `repo.js`).
+- **R-E-17** — P-17 ratifié : la tâche 3 du § 9 est scindée en 3a (données et suppression) et 3b (écran) ; cinq tâches au lieu de quatre ; les briefs
+  et le
+  registre les numérotent 1, 2, 3 (= 3a), 4 (= 3b), 5 (= 4).
+- **R-E-18 (version de chaîne)** — `APP_VERSION` d'E = `0.14.0` (pas `0.10.0` : le plan a été écrit comme si E suivait A), posée par le brief de T1 au
+  Départ ;
+  le suffixe de `sw.js` repart à `-1` avec la nouvelle `APP_VERSION` puis +1 par commit qui touche `src/` (P-15 ratifié ; « monotone » de D-E7 vaut
+dans le
+  lot ; R-B-24 : rondes comprises). Règle pour tous les lots : la version et le suffixe réels sont fixés au Départ par le chef, sur la tête finale du
+lot
+  précédent — ici `619e6c0` (`APP_VERSION 0.13.0`, `sw.js cuisine-os-v0.13.0-11`).
+- **R-E-19** — P-10 et P-11 ratifiés : phrases propres aux lignes `couverture` dans `src/ui/add.js` ; une ligne `couverture` `a_lancer` d'un autre
+  appareil
+  n'offre que « Ignorer ».
+- **R-E-20** — P-6 et P-7 : le focus perdu à un redessin après un geste est une limite nommée (§ 11, Review Focus de 3b, pas de test) ; P-9 :
+  `assertVocabulaire` prouvé par un test de source (ruling du constat 10 du lot A).
+
+### Rulings du rejeu (R-E-21 et suivants : à écrire après le rapport `depart-rejeu-rapport.md`, un par écart d'intention EI-n)
+- **R-E-21 (EI-1, fabrique unique)** — `fabriquerImportCouverture` = `{ ...ligneImportNeuve({ id, kind: 'couverture', device_id }), cover_sha256 }`
+  (R-D-15 :
+  « les fabricants des autres lots l'appellent ») ; la forme exacte suit l'ordre de la fabrique, `cover_sha256` en dernier ; le test de source P-9 lit
+  l'appel `ligneImportNeuve({ … kind: 'couverture'` avant le `return` (précédent T-D6 M49b) ; mutants « appel commenté » rouges. Coût si faux : nul.
+- **R-E-22 (EI-2, règle d'une ligne)** — `ligneNettoyee(v)` = `surUneLigne(v) || null` sur une chaîne (le code commis de C et D : `uneLigne` puis
+  `plierUneLigne`, R-D-13) ; l'assertion « sauts de ligne » couvre aussi U+2028 et NEL (même compte d'assertions) ; MR1 (la version du plan, qui collait
+  « À la⏎di » en « À ladi ») rouge. Coût si faux : une seconde règle de pli.
+- **R-E-23 (EI-9, la primitive de vol)** — Une seule primitive : `lancerVol(importId, executer, options)` de `src/ui/import-cible.js` (C, étendue par
+  D) sur
+  `volUnique` (`src/ui/vol.js`, B) ; `volUnique` gagne l'option `preparer({ ligne, repo })` (contrat d'`imagesDe` ; cinq lignes ; sans elle, le chemin
+des
+  pages est inchangé à la ligne près) ; `lancerLectureCouverture = lancerVol(id, executerCouverture, { accepte: couverture, preparer:
+preparerCouverture,
+  attendus: ['a_lancer', 'echec'], lecture: null })` ; aucune `voler`. Le verrou réciproque (un import ciblé en vol refuse une couverture, et
+l'inverse ;
+  une lecture web aussi) s'écrit contre cette primitive. Toute assertion de B, C ou D sur le vol qui rougirait est un arrêt (NEEDS_CONTEXT), jamais une
+  assertion amendée. Coût si faux : deux machines de vol à garder alignées.
+- **R-E-24 (EI-4 à EI-7, formes du code commis)** — Une ligne d'une autre sorte rend `sorte` (liste blanche `accepte`, D-D14), une ligne absente
+  `inconnu` ;
+  le refus `octets_absents` porte `code: 'octets_absents'` ; le battement vit hors de la ligne synchronisée (`repo.battre` → `sync_state`
+  `battement:<id>`, R-B-17) : le test lit `sync_state` « avance », la ligne `imports` intacte, aucune entrée d'outbox (trois assertions) ;
+`KINDS_IMPORT` est
+  PROLONGÉE (`…, 'classement', 'couverture'`), `KINDS_PAGES` et `src/model/repo.js` ne changent pas (P-2 fait par D). Coût si faux : nul.
+- **R-E-25 (EI-8, `tests/import-cible.js`)** — Cinq lignes amendées en tâche 2 (à `209de95` : 2615 épingle `KINDS_IMPORT` ; 1899, 1912-1913, 2648-2650
+  où le lot B avait fait de « couverture » LA sorte réservée → `'sorte_future'`), jamais affaiblies (I-D11) ; F-13 (les fixtures) tient ; toute autre
+  assertion du lot A ou B qui rougit arrête la tâche (NEEDS_CONTEXT). Coût si faux : une preuve « sorte hors liste » perdue.
+- **R-E-26 (EI-10, EI-11, le lot G)** — Filet i18n : les deux chaînes de `settings.js` s'AJOUTENT à la liste existante de `CHAINES_NEUVES_AILLEURS` (une
+  seconde clé homonyme remplacerait celle du lot G) ; le bilan de l'archive passe par `messagesArchive({ missingFiles, copies, tracesOrphelines = 0 })`
+  (la phrase des traces écartées en dernier cas), `texteTracesOrphelines` exportée et éprouvée ; `removeBatch`, `supprimerLivreVide` et le filtre de
+  `createArchive` à l'octet (G n'a posé aucune règle voisine). Coût si faux : deux bilans d'archive.
+- **R-E-27 (EI-3, EI-12 à EI-17, en bloc)** — Rien dans `src/core/bornes.js` ni `recherche-web.js` (les motifs d'adresse ont déménagé au lot C, le
+  corps commis
+  porte le lookbehind de B) ; seize pins dans huit fichiers relevées en Python sous les deux formes (`tests/ajouter.js:1979,1981`,
+`assistant-compte.js:8`,
+  `classement.js:2568`, `creer-ia.js:11`, `passerelle.js:765,767`, `recherche-web.js:66,69,72`, `sync-l3.js:1867` regex,
+`sync-l4.js:514,516,3506,3507`) ;
+  `./src/domain/couverture.js` dans `SHELL` après `./src/domain/classement.js` ; le commentaire du ré-export de `messageErreurImage` nomme aussi
+  `regroupement.js` (aucun cycle) ; la mineure se relit dans la consigne de la chaîne (R-E-18), jamais sur `main` ; le commit de départ est fait
+  (`209de95`), le plan rejoué est commis à part (`2bb855a` = BASE0) ; noms des mutants : « battement omis dans la primitive (`volUnique`) », « appel de
+  `ligneImportNeuve` commenté », M03c (les DEUX filtres de `uncertain` retirés ; M03 et M03b seuls sont équivalents, nommés). Coût si faux : nul.
+- **R-E-28 (S14 toute casse, X8)** — Le test de source S14 de la tâche 3b (= tâche 4 du registre) écrit `/anthropic|supabase/i` (convention des lots C
+  et D :
+  « anthropic » en minuscules est rouge) ; la tâche 4 du plan (= 5) le garde. Coût si faux : un fournisseur nommé en minuscules passe le filet.
+- **R-E-29 (rouges de bruit, R-B-15 ; disque)** — Node 173/174 sous la charge de cinq Chrome et « moteur : deux écritures rapprochées »
+  (`tests/sync-l3.js:976`,
+  60 ms) sont des rouges de bruit connus : un rouge se rejoue SEUL (machine à vide) avant d'être un constat ; jamais plus de trois copies servies en
+  parallèle sur ce Mac. Le disque est à 2 Gio libres au Départ : copies par `rsync` sans `.git` ni `.superpowers`, au plus trois copies vivantes par
+  tâche ; un ENOSPC est un faux rouge à dire dans le rapport, jamais un vert supposé ; aucun effacement récursif (garde-fou) : les copies d'une tâche
+finie
+  restent, nommées dans le rapport. Coût si faux : un faux rouge, jamais un faux vert.
+
+**Rulings de construction (cinq tâches, leurs rondes, la revue finale de branche à trois lentilles, la vague finale et sa re-revue).**
+
+- **R-E-30 (ratification en bloc)** — Les écarts d’intention EI-1 à EI-17 (R-E-21 à R-E-29), les précisions P-15 à P-17 du plan et les écarts de
+  construction déclarés par les cinq tâches, leurs rondes et la vague sont ratifiés, le code commis faisant foi : (a) T1-R1 — `auteurCorrespond` exige
+  tous les mots distinctifs (au moins un) d’un même auteur lu dans un même auteur de la fiche (« Christophe Felder » ↔ « Christophe Michalak » est
+faux ;
+  § 3.5 amendé) ; `fabriquerImportCouverture` exige `deviceId` (`TypeError` s’il manque, `null` admis), comme `fabriquerImportWeb` ; l’adresse est
+  cherchée aussi sur la forme recollée (§ 3.2) et les demi-paires Cs sont retirées avant l’adresse et dans `lireSearchListe` (§ 3.4) ; **constat 14 : la
+  lecture du § 3.4 est retenue** — éditeur, année et langue sont proposés dès `edition_count === 1`, l’ISBN seulement s’il est l’unique ISBN-13 (D-E4,
+  B-1 et R-E-1 se lisent ainsi : les trois champs ne nomment pas un exemplaire, l’ISBN si) ; (b) T2-R1 — la branche `couverture` de `lignesImports`
+  est fusionnée avec celle du classement (même règle `en_cours`, pas de `recipe_id`) ; le titre lu d’une couverture reçue est revalidé par
+  `validerLectureCouverture` (T5-R1 : un titre de 5 000 points de code donne `null`, pas 300), `surUneLigne` redevient privée (vague, constat 13) ;
+  (c) T3-R1 — `supprimerLivreVide` rend `{ ok } | { refus: 'lecture_en_cours' | 'non_vide' | 'import_lie' }` et dit « Un livre avec des recettes ou
+  des pages ne se supprime pas d’un geste. » (texte existant) ou « Un import est encore lié à ce livre : rien n’a été supprimé. » (chaîne NEUVE, § 5,
+  `en.js`, `CHAINES_NEUVES_AILLEURS`) ; `removeBatch(deletes, { conditions })` passe ses conditions à `db.mutate` dans la même transaction (un patch
+ou une
+  fusion y est refusé) ; le livre est gardé si `garderLivre`, si la fiche n’a pas d’identifiant de livre ou si une autre édition existe en base ; le
+patch
+  d’une ligne du journal dérive d’`importOuvert(c)` (R-B-18), `IMPORTS_TERMINES` retiré ; une ligne hors vocabulaire au statut chaîne est détachée, au
+  statut non-chaîne elle fait refuser `import_lie` tant qu’elle existe (limite § 11) ; (d) T4-R1 — constat 7, option 1 : une source ne fusionne jamais
+  par-dessus les champs d’une autre et l’étiquette dit la seule source (C3, I-E10) — RÉDUITE par la vague (constat 2) à la seule branche `trouve`, et
+  complétée par la ronde de clôture (R-E-31 : les champs repris de la proposition restent sur introuvable ou panne) ; `demontee() = rendue &&
+  !isConnected` ; `rendreChamps`, `blocVolTenu` ; `photographierCouverture` scindée en `refuser()` et `voler()` seulement ; S14 en toute casse
+  (R-E-28) ; (e) T5-R1 — `ici` de `volUnique` couvre `kind === 'couverture'` (une couverture relancée sur un autre appareil est reprise par cet
+appareil,
+  comme le classement et R-B-8) ; la fixture `en_cours` d’un autre document garde `battement_at: NOW` (l’horloge injectée de la route) ; `reprendre(id)`
+  extraite, la double lecture montage puis `relire()` gardée (M16 équivalent) ; garde `enVol` et fait `relecturesFaites` ; **scénario MP ratifié** : une
+  ligne disparue entre la lecture du montage et `relire()` rend le pas 2 sans import, couverture gardée, puis le livre s’écrit seul ; quatre assertions
+  hors brief (MD, MP) ; (f) vague — constats 1 à 8 et 11 à 13 corrigés ; **constat 7 ratifié** : un geste de la seule zone Couverture du pas 2
+  (« Retirer », « Photographier », « Choisir une image ») ne détache plus une lecture en vol (`avancerCouverture`, précision d’I-E4 et de § 4.3.1) ;
+  `rendreFin()` (blocs seuls après un geste) remplace `dessiner()` au pas 5 de § 4.2 ; `majZoneCouverture` dans les deux sorties `a_verifier` de §
+4.3.1 ;
+  `online` ignoré pendant le vol de la route ; l’écouteur d’`ecouterVol` sans import rend le seul bloc du pas 1 ; `saisirMain` tient « aucun ISBN
+  avant comme après » pour le même ISBN et pose la provenance `couverture` (§ 4.3.5, § 4.7) ; `identifier` ne remet une lecture que sur `trouve`
+  (§ 4.7) ; `lotDe` lit `BORNES_CLASSEMENT` ; équivalents P4 (`relire()` recalcule `a_lancer`) et P7 (réduit à T5r). Coût si faux : § 12 ment sur le
+code
+  commis.
+- **R-E-31 (ronde de clôture)** — Commit `784e7cf` (base `8934f07`, `sw.js cuisine-os-v0.14.0-12`, épingle 5669 → 5678, suite `✅ 5679/5679`, Node
+  174/174, `--check` 0, invisibles 0, secrets 0 ; rouge lu d’abord `❌ 5673/5680` sur le `src/` de `8934f07`, puis `❌ 5673/5678` sur une copie à
+  l’ancien `livre-ajout.js` ; mutants sur copies 8295/8296 : phase 1 à `8934f07` 10/10 rouges, phase 2 à la tête 10/10 rouges, MC1c tué par un
+  scénario de caractère neuf). Corrigés : (1) `identifier` calcule `garderDistants = !!champsDistants && isbnDistant === null` — les champs repris
+  d’une proposition sans ISBN ne sont plus rendus avant la recherche ; `oublierDistants()` s’appelle dans la seule branche `trouve`, avec la remise,
+  avant `fusionnerFiche`, sous la garde de génération ; sur introuvable, panne ou erreur, ces champs restent avec la provenance `sourceDistante`
+  (étiquette Open Library) et la lecture reste `lue` ; `saisirMain` les garde aussi après une panne, sous tout ISBN tapé ; (2, Minor neuf) le modèle
+  porte `messages.introuvable` (`texteAucune()`, texte existant : « Aucune fiche chez Open Library (ni Google Books) pour cet ISBN. Complète à la
+  main. ») dès qu’un résultat est introuvable et que l’étiquette n’est pas « aucune » — règle générale, donc aussi sous l’étiquette Open Library et
+  sous une lecture relue après un introuvable ; (3, observation (a)) `volAilleurs = !!v && (v.importId == null || v.importId !== etat.importId)` : un
+  vol hors journal éteint les boutons du pas 1 d’une route sans import et les rallume à sa fin ; (4) `device_id` d’une couverture relancée ici : une
+  seconde assertion sur le chemin réel (une `a_verifier` hostile d’un autre appareil → `echec(illisible)` → « Relire » → cet appareil), mutant « `ici`
+  sans couverture » rouge sur les deux. Déjà tués à la tête, mutants rejoués, aucune assertion ajoutée : (5) `garderLivre` (M08c, « garder = false »)
+  et `messagesArchive` avec `tracesOrphelines` (M24, T3-R1) ; (6) M05b et sa variante « Relire » (N01, T4-R1) ; (7) X3 (titre et auteur) et X4 (T1-R1)
+  ; (8) M01 « vol séparé » rend un bilan rouge (`❌ 5646/5670`) grâce à `borne()` (5 s, valeur `fige`) et à une fausse `fetch` qui répond (T2-R1). (9)
+  NON appliqué, dette : remettre `reponse_brute`, `model`, `duree_ms` et `finished_at` à `null` au départ d’une relance rougit
+  `tests/import-cible.js:1161` du lot A (« un refus de l’extraction garde la réponse brute ») — code et test retirés. MW localisé :
+  `tests/lecture-web.js` l. 376, bloc (6) « Annuler » du lot B, `await r6.lancement;` sans borne (figé après 4 295 assertions) — hors lot, nommé.
+  Ratifiés : (a) la ligne « Aucune fiche… » est une règle générale du modèle ; (b) `saisirMain` garde les champs d’une fiche sans ISBN sous TOUT ISBN
+  tapé, invalide compris (rien de perdu : la personne les a acceptés) ; (c) après un ISBN introuvable ou une panne, l’éditeur, l’année et la langue
+  d’une œuvre à édition unique sans ISBN restent (résidu de R-E-9 ; `ficheSelonIsbn` les aurait omis). Coût si faux : des champs acceptés gardés sous
+  un ISBN inconnu — l’étiquette dit leur source. **Re-revue ciblée de la ronde 1 : A_CORRIGER** — les quatre points sont fermés (sonde du relecteur
+  sur une copie de `784e7cf` : 12/12, et 6/12 sur l’ancien `livre-ajout.js` ; dix mutants RA1-RA6, RB1-RB4, RC1 rouges sur les bonnes assertions),
+  mais un faux-vert neuf : la condition `isbnDistant === null` de `garderDistants` n’était tenue par aucune assertion (mutant RA5 vert à 5679/5679,
+  qui rouvrirait C3 / I-B : les champs d’un ISBN A gardés sous un ISBN B introuvable). **Ronde de clôture 2, tests seuls** : commit `1e5e61b`
+  (`tests/ajouter.js` +52, épingle 5678 → 5680, `src/` et `sw.js` intacts, suite `✅ 5681/5681`) : ISBN A `9782890772816` trouvé, « ← Changer d’ISBN »,
+  ISBN B `9780306406157` introuvable → pas 2, titre et auteur vides, « Aucune fiche chez Open Library pour cet ISBN. Complète à la main. », aucune
+  ligne discrète, `champsDistants` nul ; variante panne 503 puis « Réessayer » (l’état pendant la panne tue RA5 ; après « Réessayer », la branche
+  `trouve` rend les champs de A : test de caractère, déclaré) ; RA5 `❌ 5679/5681` sur les deux assertions, RA1 et RA3 toujours rouges. Re-revue ciblée
+  : **PROPRE** (sonde indépendante sur `git archive HEAD` : à la tête, rien de A sous B ; sous RA5, le défaut reproduit ; X1 rouge ; 0 constat neuf).
+- **R-E-32 (versions et épingles, R-B-24)** — Chaîne réelle de `sw.js` : `-1` (T1 `a5a89dc`), `-2` (T1-R1 `79f113b`), `-3` (T2 `29f6ec7`), `-4`
+  (T2-R1 `804e947`), `-5` (T3 `f170942`), `-6` (T3-R1 `35dd837`), `-7` (T4 `c647e4a`), `-8` (T4-R1 `f5cf6c8`), `-9` (T5 `8d447a0`), `-10` (T5-R1
+  `6192422`), `-11` (vague `f814f13`), `-12` (ronde de clôture 1 `784e7cf` ; la ronde 2, tests seuls, ne touche pas `src/`) ; épingles 5325, 5349,
+5403, 5413, 5445, 5472, 5575, 5617, 5640, 5655, 5669, 5678, 5680. Les attendus
+  du rejeu (5326 / 5380 / 5412 / 5515 / 5534, `-1` à `-5`) sont dépassés par les rondes (+24, +10, +27, +42, +15) et par les quatre assertions hors
+  brief de T5 : la tête réelle fait foi, les briefs qui portaient d’autres numéros ne sont pas des constats (R-C-7). Les « seize pins » d’EI-12 sont
+  quinze lignes de test plus `sw.js` et `schema.js` (T1-R1, constat 19) : rectifié, aucune assertion ne lit `0.13.0`. Le commit de clôture ne touche
+  pas `src/`. Coût si faux : nul.
+- **R-E-33 (assertions hors brief et amendées, I-D11)** — Ratifiées, ajoutées et jamais retirées : les quatre de T5 (scénarios MD et MP), celles des
+  rondes (T1-R1 +24, T2-R1 +10, T3-R1 +27, T4-R1 +42, T5-R1 +15, vague +14, ronde de clôture +9, puis +2 (ronde 2)) ; amendées : une assertion de T2
+dans
+  `tests/couverture.js` (titre lu de 5 000 points de code → `null`, T5-R1), les cinq lignes de `tests/import-cible.js` (R-E-25),
+`tests/sync-l3.js:1884-1887`
+  (P-12), les pins de version (R-E-27), le scénario « vol d’une autre route » (vague, constat 3). Le libellé « (ronde 1) » ou « (vague) » après un
+  identifiant de la spec dit l’origine. Coût si faux : un libellé qui laisse croire que § 7 nommait l’assertion.
+- **R-E-34 (mutants)** — T1 24/24 sur copies (M03 et M03b équivalents nommés : un seul des deux filtres d’`uncertain` retiré), T2 15/15 (+ M05b,
+  M12 à M14), T3 29 joués dont 27 rouges (les deux survivants hors liste, `garderLivre` ignoré et `messagesArchive` sans `tracesOrphelines`, vont à
+  la ronde de clôture), T4 45/47 (N02 et N28 équivalents ; R16 équivalent et refusé : il créerait un cycle `import-cible → livre-ajout → import-cible` ;
+  M05b survivant hors liste → ronde de clôture), T5 26/26 (M16 équivalent ; F03 vert en passe 1 par un faux vert du test, durci, rouge en passe 2),
+  vague 20/20 (P4 équivalent, P7 = T5r), ronde de clôture 20/20 (phase 1 à `8934f07` 10/10, phase 2 à la tête 10/10 ; MC1c tué par un scénario de
+caractère : ligne fermée ailleurs, relue `termine`, puis un ISBN trouvé) ; ronde 2 : RA5 rouge sur les deux assertions neuves (`❌ 5679/5681`), RA1 et
+RA3 restent rouges, X1 du relecteur rouge ; témoins verts sur 8298 et 8398-8399. Deux mutants figeaient la suite au lieu de la rougir (M01 « vol
+séparé »,
+  MW d’une suite d’un autre lot qui attend un vol web suspendu) : l’attente de `tests/couverture.js` est bornée par la ronde de clôture (R-D-10) ; MW
+est
+  nommé, hors lot. Rouges de bruit connus (R-E-29) : Node 173/174 sous charge, `tests/sync-l3.js:976`. Coût si faux : un rouge lent au lieu d’un rouge
+nommé.
+- **R-E-35 (dettes nommées, sans décision)** — Quatre copies des gardes « sans vision » et de leur squelette (`extraireRecette`,
+  `extraireTableMatieres`,
+  `classerPhotos`, `extraireCouverture` ; T1-R1 constat 18 refusé : hors § 3.6) ; `lireSearch` (chemin ISBN) garde le défaut des demi-paires (lot
+ISBN) ;
+  `removeMany` n’est pas réécrit sur `removeBatch` (prochain lot qui touche `repo.js`) ; les deux temps de `supprimerLivreVide` ne sont pas atomiques
+  (un refus au milieu de la boucle laisse des lignes détachées, rien de supprimé) et la relecture « édition vide » (magasins sans statut) est hors
+  transaction ; `scan_sessions.edition_id → book_editions` n’est pas relu ; la route n’a aucun crochet de sortie (rétention jusqu’au prochain événement
+  réseau, m13 du lot A) ; `photographierCouverture` reste long ; `BarcodeDetector` et `createImageBitmap` hors suite (lot ISBN) ; ME quasi
+inatteignable ;
+  double lecture montage + `relire()` (M16) ; une couverture d’un autre appareil dit « Photos sur un autre appareil » dans la section Imports (règle
+  commune d’`add.js`) ; la route ne rejoue pas la passe `interrompu` au montage d’un `?import=` `en_cours` ; au départ d’une relance d’une couverture
+(ou d’une recette) en `echec`, `reponse_brute`, `model`, `duree_ms` et `finished_at` restent sur la ligne (T2-R1 constat 13 ; remède d’une ligne dans
+`volUnique` refusé par la ronde de clôture : `tests/import-cible.js:1161` du lot A compte sur une réponse brute laissée par un vol précédent — à
+reprendre avec le lot A si la règle change) ; un vol web ne notifie pas
+  (R-B-27). Coût si faux : nul — chaque ligne a sa lecture.
+- **R-E-36 (limites, § 11)** — Ratifiées, nommées par la vague : `imports.cover_sha256` n’est pas un pointeur de L4 (la photo d’une couverture en
+  attente
+  n’est jamais envoyée : sur un autre appareil, la reprise n’a ni aperçu ni « Lire / Relire » ; décision R-E-37) ; la condition du temps 2 de
+  `supprimerLivreVide` ne voit que les statuts connus (remède `aucune: true` au lot qui touchera `src/core/db.js`) ; un vol web ne notifie pas
+  (R-B-27). Nommées par T3-R1 : les deux temps non atomiques et la relecture hors transaction (R-E-35). Un vol hors journal (`tenirVol`, `importId:
+null`) compte comme « vol ailleurs » depuis la ronde de clôture (R-E-31). Coût si faux : un geste
+  refusé ou une attente, jamais une donnée perdue.
+- **R-E-37 (§ 13 : la photo d’une couverture en attente et L4)** — Décision de Neegan, sans urgence : (a) ajouter `imports.cover_sha256` aux `POINTEURS`
+  de L4 (la photo voyage avec la ligne ; les cinq pointeurs épinglés par `tests/sync-l4.js` s’amendent ; coût : un envoi de plus par couverture, et un
+  contrat du lot G qui change) ; (b) garder : une fois le livre créé, sa couverture est un pointeur et voyage ; seule la reprise d’une lecture quittée
+  sur un AUTRE appareil n’a pas l’image. Défaut appliqué : (b). Coût d’attendre : une reprise sans aperçu sur un autre appareil, rien de perdu.
+- **R-E-38 (preuve et appareils ; R-C-32 et R-D-27 reprises)** — La preuve réelle § 10 se fait sur la branche servie localement, connectée au projet
+  réel, AVANT la fusion : `ASSISTANT_ORIGINES` = `https://neegans.github.io,http://localhost:8093` (les deux origines ; la valeur posée remplace le
+  défaut) et `http://localhost:8093/**` aux Redirect URLs de `mitsu`, le temps de la preuve, retirés ensemble ensuite ; les autres appareils de la
+  bibliothèque restent fermés (la version publique ne connaît pas la sorte `couverture`) ; une limite révélée (titre pris pour l’auteur, `uncertain`
+  jamais ou partout, langue fantaisiste) amende la consigne § 3.3 — module ET test littéral — et la table § 3.2 par une ronde avant la fusion ; après
+  la fusion et le push, tous les appareils sur 0.14.0 avant la première couverture lue d’une bibliothèque partagée. Coût si faux : des lignes d’une
+  sorte inconnue sur un appareil en retard.
+- **R-E-39 (clôture)** — Re-revue de la vague A_CORRIGER → ronde de clôture (R-E-31), re-revue ciblée de la ronde 1 A_CORRIGER (quatre points fermés,
+  un faux-vert neuf RA5) puis, après la ronde 2 tests seuls `1e5e61b`, **PROPRE** (0 restant, 0 neuf). `/verify` mécanique sur
+  `1e5e61b` (registre `verify-E-1e5e61b.txt`) : suite `✅ 5681/5681` (épingle 5680, `tests/tests.js:245`), seule erreur de console le 404 de
+`/favicon.ico`, Node 174/174, `--check` 0, `APP_VERSION 0.14.0`, `sw.js cuisine-os-v0.14.0-12`, `DB_VERSION` 4, secrets 0, invisibles 0, arbre propre,
+14 commits depuis `2bb855a`. Le registre `progress.md` de E n’a pas été alimenté par les agents : le chef l’a complété
+  depuis les journaux du run (tâche par tâche, rapports à l’appui). Registre copié dans `~/projects/mistu/.superpowers/sdd/2026-10-19-couverture-lue/`
+  (`diff -rq` muet) ; tête finale = le commit de clôture qui pose cette rév. 7, `CLAUDE.md`, `STATE.md` et `docs/architecture.md`. Coût si faux : nul.
+
+**Mesures finales de la construction.** Tête de code `1e5e61b`, `APP_VERSION 0.14.0`, `sw.js cuisine-os-v0.14.0-12`, épingle 5680 (`tests/tests.js`),
+suite 5681/5681 (plus le 404 de
+`/favicon.ico`), Node 174/174, `--check` 0, invisibles 0 (Python), aucune clé, aucune migration (`DB_VERSION` 4, `TABLES` intact), serveur `assistant`
+intact ; registre `.superpowers/sdd/2026-10-19-couverture-lue/` (copie dans `~/projects/mistu/.superpowers/sdd/`).
+
+## 13. Ce qui reste ouvert (rév. 7)
+
+**Après la construction (rév. 7, 23 octobre 2026).** Les rulings de construction R-E-30 à R-E-39 (§ 12 « Rév. 6 → rév. 7 ») tranchent ce que les
+tâches, les rondes, la revue finale et sa vague ont remonté ; restent à Neegan, dans l'ordre : (a) la **preuve réelle § 10 sur la branche servie
+localement, AVANT la fusion** (`ASSISTANT_ORIGINES` à deux origines et l'adresse de retour `http://localhost:8093/**`, le temps de la preuve ; les sept
+points ; durée, modèle, champs lus contre la couverture, jetons) — si elle révèle une limite, la consigne § 3.3 (module ET test littéral) et la table
+§ 3.2 s'amendent par une ronde avant la fusion ; (b) après la fusion et le `push`, le parcours sur le site public, qui confirme ; (c) tous les
+appareils sur 0.14.0 avant la première couverture lue d'une bibliothèque partagée ; (d) Safari et iPhone jamais mesurés (`createImageBitmap` sur
+une photo de 48 Mpx, appareil photo) ; (e) le registre `.superpowers/sdd/2026-10-19-couverture-lue/` copié dans `~/projects/mistu/.superpowers/sdd/`
+(`diff -rq` muet) AVANT tout `git worktree remove`, « clean » après. Dettes de code nommées, sans décision à prendre : voir R-E-35 (§ 12) ; aucune ne
+change un comportement promis. Un point de produit reste à trancher, sans urgence : **la photo d'une couverture en attente et L4** (R-E-37) — (a)
+ajouter `imports.cover_sha256` aux pointeurs de L4 (la photo d'une lecture quittée voyage ; un envoi de plus par couverture ; le contrat du lot G et
+les cinq pointeurs épinglés par `tests/sync-l4.js` changent), ou (b) garder : une fois le livre créé, sa couverture est un pointeur et voyage ; seule
+la reprise d'une lecture quittée sur un AUTRE appareil n'a ni aperçu ni « Lire / Relire ». Défaut appliqué : (b).
+
+**Avant la construction (rév. 6) :** Rien. Le constat Critical de la vérification de la rév. 5 (test de `removeBatch` contraire au filtre d’historique
+de la capture) est
 appliqué par R-E-15 (D-E23, § 3.6, § 7, § 11) ; les deux points de la rév. 4 restent appliqués par R-E-10. Les limites assumées vivent en
 § 11 ; la consigne § 3.3 et la table § 3.2 restent amendables après la preuve réelle de Neegan (§ 10), avant la fusion.
