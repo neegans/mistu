@@ -1,4 +1,17 @@
-# STATE.md — Cuisine OS (mistu) — état au 23 octobre 2026 (lots « Passerelle de l'assistant » et « Présentation du serveur » EN LIGNE, `main` = `57babc6` ; lots A « Import ciblé et journal d'import », B « Recette web complète », G « Les photos voyagent entre appareils », C « Table des matières sur plusieurs pages », D « Un lot de recettes photographiées », E « Un livre reconnu depuis sa couverture » et F « Les plats en images » FINIS, empilés A → B → G → C → D → E → F sur `main`, NI fusionnés NI poussés, migrations `0005` et `0006` PAS collées, fonction `assistant` PAS redéployée ; chaîne A → F COMPLÈTE : plus aucun lot en Départ ; fonction `assistant` à redéployer pour F)
+# STATE.md — Cuisine OS (mistu) — état au 23 octobre 2026, 17 h 30 (chaîne A → B → G → C → D → E → F EN LIGNE : `main` = `origin/main` = `2f15d2e`, 0.15.0, suite publique 5948/5948 ; migrations `0005` et `0006` collées et prouvées ; fonction `assistant` version 4 ; plus aucun lot en construction ; reste à Neegan : appareils à jour, preuves réelles sur le site public, décisions ouvertes, révocation de l'ancienne clé, « clean »)
+
+**23 octobre 2026, 17 h 30 — CHAÎNE A → F EN LIGNE.** Points 1 à 4 du bilan `.superpowers/sdd/nuit-2026-10-18/BILAN-CHAINE-A-F.md` faits le 23 octobre
+: `0005` (35 verdicts, 0 faux) et `0006` (10 verdicts, 0 faux) collées et prouvées par Neegan ; fonction `assistant` redéployée en version 4 depuis
+`0c7cbbd` (`lecture-web` + `image-web`) et sondée (S1-S9 rejouées, `GET` d'état `cles: nouvelles`, S13-S19, S-F1 à S-F5 : tout conforme, 4 appels du
+quota, zéro jeton ; `supabase/proofs/RESULTATS-mitsu.md`) ; fusions simples dans l'ordre B `e973321`, G `d962193`, C `b02fe50`, D `c8a0491`, E
+`017f94d`, F `d2424c4` (pas d'avance rapide : `main` portait la preuve `0005` ; un seul conflit, `RESULTATS-mitsu.md` à la fusion de B, composé et
+relu ; chaque arbre identique à la branche vérifiée hors ce fichier) ; suite publique 3694 → 4743 → **5948/5948** (`cuisine-os-v0.15.0-9`). Les points
+5 et 6 (sonde R-D-8 et preuve § 10 de E sur les serveurs locaux) ont été **sautés sur décision de Neegan** (« non je fais confiance, enchaine ») :
+rulings R-D-29 et R-E-40 (`2f15d2e`). Les sept serveurs locaux sont arrêtés ; les worktrees des lots restent en place jusqu'au « clean ». **Reste à
+Neegan** : tous les appareils sur 0.15.0 avant tout geste réel ; les preuves réelles sur le site public (C § 10, A § 10, D § 10 pas 1 à 8, E § 10, F §
+10, G sur deux appareils ; `select … from public.assistant_usage_jour` avant et après chaque appel), chaque borne révélée = un commit borné sur
+`main`, reculable ; les décisions ouvertes (VF-16, R-G-28, C § 13, R-D-26, R-E-37, F § 13) ; révoquer l'ancienne clé Anthropic ; « clean » (worktrees
+des sept lots, `STATE.avant-web.md`, scratchpad). Les blocs ci-dessous décrivent chaque lot tel qu'il était à sa clôture.
 
 **23 octobre 2026, 14 h 04 — LOT F « LES PLATS EN IMAGES » : FINI dans le worktree `~/projects/mistu-plats-en-images` (branche `plats-en-images`,
 base = la tête finale du lot E `5ec092c`, spec `35fb29c` (rév. 3) puis rév. 4 à la clôture, plan rejoué `111f857`, tête de code `b65988f`, serveur
