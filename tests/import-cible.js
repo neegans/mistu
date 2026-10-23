@@ -268,7 +268,7 @@ export async function runImportCibleTests({ eq, ok }) {
     eq(V.assertVocabulaire({ availability: 'available', verification_state: 'to_verify' }, 'recipes'), true, 'vocabulaire : valeurs de la liste acceptées');
     e = null; try { V.assertVocabulaire({ status: 'fini' }, 'imports'); } catch (x) { e = x; } eq(e?.champ, 'status', 'vocabulaire : statut d’import hors liste refusé');
     e = null; try { V.assertVocabulaire({ id: 'imp' }, 'imports'); } catch (x) { e = x; } eq(e?.champ, 'status', 'vocabulaire : un import sans statut est refusé (le statut est obligatoire)');
-    eq(V.assertVocabulaire({ status: 'a_lancer' }, 'imports'), true, 'vocabulaire : statut d’import de la liste accepté');
+    eq(V.assertVocabulaire({ status: 'a_lancer', kind: 'recette' }, 'imports'), true, 'vocabulaire : statut d’import de la liste accepté (lot D, D-D12 : la sorte est désormais obligatoire et fermée — amendée, pas supprimée)');
     eq(V.assertVocabulaire({ status: 'nimporte' }, 'books'), true, 'vocabulaire : magasin sans vocabulaire fermé → rien à vérifier');
     // Test de source (faible, admis) : chaque fabricant de `recipes` appelle assertVocabulaire( HORS commentaire \u2014 un appel commenté ne compte
     // pas (ronde 1). Six fabricants (lot C, tâche 1) : création IA, signet, éditeur, « Créer les références » du panneau d'index (import.js),
@@ -436,7 +436,7 @@ export async function runImportCibleTests({ eq, ok }) {
       for (const args of [{ edition_id: 'ed1', import: { id: 'imp_k', kind: 'web', recipe_id: 'rc9' } }, { edition_id: 'ed1', import: { id: 'imp_k', recipe_id: 'rc9' } }, { session_id: r2.session.id, import_id: 'imp_n', import: { id: 'imp_k', kind: 'recette', recipe_id: 'rc9' } }]) {
         try { await repo.ajouterPages([fichier('k.jpg', 125)], args); formes.push('écrit'); } catch (e) { formes.push(e.name); }
       }
-      eq([formes, await db.get('imports', 'imp_k'), await db.count('files')], [['TypeError', 'TypeError', 'TypeError'], undefined, filesAvantFormes], 'ajouterPages (ronde 1) : kind hors recette | index, kind absent, import_id ET import ensemble → TypeError avant tout octet, rien d’écrit'); }
+      eq([formes, await db.get('imports', 'imp_k'), await db.count('files')], [['TypeError', 'TypeError', 'TypeError'], undefined, filesAvantFormes], 'ajouterPages (ronde 1) : kind hors KINDS_PAGES, kind absent, import_id ET import ensemble → TypeError avant tout octet, rien d’écrit (lot D, R-D-11, I-D11 : libellé amendé — KINDS_PAGES admet « classement », « web » reste refusée)'); }
     // 3) Pages de plus avec import_id : UN repo.transitionner, page_ids ajoutés EN FIN par patch-fonction, lignes de séance dans la même transaction.
     // Ronde 1 (faux-vert) : la LIGNE porte un sous-ensemble strict des pages de la SÉANCE (« Retirer » a détaché la page c de l’import, la ligne source_pages
     // reste, spec § 4.2.2) : un patch qui recopierait la liste de la séance lue hors transaction ferait revenir c en silence.
@@ -783,8 +783,8 @@ export async function runImportCibleTests({ eq, ok }) {
           eq([fin.status, fin.reponse_brute, typeof fin.finished_at, fin.resultat?.title, fin.model, fin.document_id_vol, typeof fin.duree_ms], ['enregistre', null, 'string', 'Tarte aux pommes', 'claude-x', null, 'number'], 'extraction : imports enregistre, reponse_brute null, finished_at posé, resultat et modèle gardés, vol libéré sur la ligne');
           eq([rc.id, rc.original_title, rc.availability, rc.verification_state, rc.photo_sha256, rc.photo_origin, rc.current_version_id === vs[0]?.id, rc.source_page_ids, rc.printed_page], ['rc_a', 'Tarte aux pommes', 'available', 'to_verify', shaPhoto, 'image', true, [p2, p3], 132], 'extraction (I-2) : la recette garde id et original_title, devient available / to_verify, photo du plat posée, pages liées, la version devient courante');
           eq([vs.length, vs[0].kind, vs[0].provenance.generated_by, vs[0].provenance.import_id, vs[0].provenance.model, vs[0].provenance.source_page_ids, vs[0].ingredients.length, vs[0].steps.length, vs[0].ingredients[1].uncertain], [1, 'extraction', 'ai', ligne.id, 'claude-x', [p2, p3], 2, 2, true], 'extraction : une version extraction, provenance ai / import_id / modèle du serveur / pages, lignes et étapes du modèle, uncertain recopié');
-          eq(pg.map((p) => [p.kind, p.position, p.printed_page]), [['recipe', 1, 133], ['recipe', 2, null]], 'extraction : source_pages kind recipe, position 1..n, printed_page gardé (133 tapé) ; rien d’inventé sur la seconde');
-          eq([ss.status, ss.recipe_ids], ['done', ['rc_a']], 'extraction : la séance passe done avec recipe_ids');
+          eq(pg.map((p) => [p.kind, p.role, p.position, p.printed_page]), [['recipe', 'recette', 2, 133], ['recipe', 'recette', 3, null]], 'extraction (lot D, N-1, I-D11) : source_pages kind recipe ET role recette ; positions de la séance GARDÉES (p2 et p3 restent 2 et 3 : une lecture issue d’une séance ne réécrit pas les positions) ; printed_page gardé (133 tapé) ; rien d’inventé sur la seconde');
+          eq([ss.status, ss.recipe_ids], ['open', ['rc_a']], 'extraction (lot D, N-1, I-D11) : la séance reçoit recipe_ids et reste open — p1, retirée de la ligne, est encore sans rôle (« Terminer la séance » la ferme)');
           eq([dits.at(-1), navs.at(-1)], ['Recette importée', `/recipes/rc_a?v=${vs[0].id}`], 'extraction : toast « Recette importée » et navigation vers la fiche sur la version');
           eq([UI.volEnCours(), root.etatRoute().vol, reseau], [null, false, 0], 'extraction : le vol est libéré, aucun réseau réel');
         } finally { db.onMutate = capture; }
@@ -862,7 +862,7 @@ export async function runImportCibleTests({ eq, ok }) {
         eq([l.status, Array.from(l.reponse_brute).length, l.resultat?.title, l.resultat?.ingredients?.length, JSON.stringify(l).length < 512 * 1024], ['a_verifier', 16000, 'Tarte aux poires', 2, true], 'reponse_brute : coupée à 16 000 points de code, resultat intact, la ligne tient sous 512 Kio');
         eq(root.etatRoute().discordance, { ok: false, raison: 'titre', titreLu: 'Tarte aux poires', pageLue: 133 }, 'discordance (Review Focus 2) : « Tarte aux poires » lue pour « Tarte aux pommes » → verdict titre, avant toute écriture');
         const panneau = root.querySelector('[data-role="discordance"]');
-        eq([!!panneau, [...(panneau?.querySelectorAll('button') ?? [])].map((b) => b.textContent), panneau?.textContent.includes('Tarte aux poires') && panneau?.textContent.includes('Tarte aux pommes') && panneau?.textContent.includes('p. 132')], [true, ['Rattacher', 'Garder la lecture sans l’enregistrer', 'Changer les pages'], true], 'discordance : panneau à trois boutons, qui nomme les deux titres et la page de la référence');
+        eq([!!panneau, [...(panneau?.querySelectorAll('button') ?? [])].map((b) => b.textContent), panneau?.textContent.includes('Tarte aux poires') && panneau?.textContent.includes('Tarte aux pommes') && panneau?.textContent.includes('p. 132')], [true, ['Rattacher', 'Garder la lecture sans l’enregistrer', 'Changer les pages', 'En faire une nouvelle recette'], true], 'discordance (lot D, R-D-3, I-D11) : panneau à quatre boutons, « En faire une nouvelle recette » en dernier, qui nomme les deux titres et la page de la référence');
         eq([await db.get('recipes', 'rc_b'), await db.byIndex('recipe_versions', 'recipe_id', 'rc_b'), bouton(root, 'Enregistrer cette lecture')], [avantRc, [], null], 'discordance : rien n’est écrit sur la recette ; la question remplace la rangée d’enregistrement');
         bouton(panneau, 'Garder la lecture sans l’enregistrer').click();
         await attendre(() => !root.querySelector('[data-role="discordance"]'), 'panneau fermé');
@@ -2612,8 +2612,8 @@ export async function runImportCibleTests({ eq, ok }) {
     const ligneDe = (root, id) => root.querySelector(`[data-role="ligne-import"][data-id="${CSS.escape(id)}"]`);
     try {
       // --- 1. Domaine PUR (§ 4.7) : une lecture web est listée, avec ses gestes ; la table entière.
-      eq(D.KINDS_IMPORT, ['recette', 'index', 'web'], 'lot B : KINDS_IMPORT connaît « web » (« couverture » reste réservée)');
-      eq(D.KINDS_PAGES, ['recette', 'index'], 'lot B (P-1) : KINDS_PAGES — les sortes à pages, seules ouvertes par le chemin photo (« web » listée, jamais ouverte par lui)');
+      eq(D.KINDS_IMPORT, ['recette', 'index', 'web', 'classement'], 'lot B : KINDS_IMPORT connaît « web » (« couverture » reste réservée) ; lot D (D-D12, I-D11) : et « classement »');
+      eq(D.KINDS_PAGES, ['recette', 'index', 'classement'], 'lot B (P-1) : KINDS_PAGES — les sortes à pages, seules ouvertes par le chemin photo (« web » listée, jamais ouverte par lui) ; lot D (I-D11) : une ligne de classement porte des photos');
       const ICI = 'doc-ici', MOI = 'dev-ici', AUTRE = 'dev-ailleurs';
       const ilYa = (min) => new Date(Date.parse(NOW) - min * 60000).toISOString();
       const SIG = { id: 'rc_w', edition_id: 'ed1', original_title: 'Pâtes puttanesca', source_url: 'https://www.ricardocuisine.com/recettes/123?utm_source=x' };

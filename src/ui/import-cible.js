@@ -17,7 +17,7 @@ import { TransitionRefusee } from '../core/db.js';
 import { typeAffichage, displayUrl } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
 import { PasserelleProvider, extraireRecette, validateParsedRecipe, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION } from '../domain/llm.js';
-import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception, cleLecture, modeleBorne } from '../domain/import-cible.js';
+import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception, cleLecture, modeleBorne, issueDUneSeance, statutSeanceApres } from '../domain/import-cible.js';
 import { executerIndex, revaliderResultatIndex } from '../domain/table-matieres.js';
 import { getConvention } from '../domain/units.js';
 import { currentVersion } from '../domain/search.js';
@@ -119,13 +119,18 @@ async function imagesDe(repo, pageIds) {
 // `lecture`, même battement, mêmes écritures — et confie l'appel SEUL à `executer({ provider, images, pageIds, signal, kind })`, qui rend { resultat,
 // texteBrut, modele } ou lève (ErreurExtraction, ou l'Error de la passerelle) ; `pageIds` = les pages EFFECTIVEMENT envoyées (imagesDe), dans l'ordre des
 // images. lancerExtraction garde sa signature et son comportement : le vol avec l'exécutant de la sorte de la ligne.
+// Lot D (D-D14, S-3) : `accepte(ligne)` — une liste BLANCHE de sortes, évaluée après la relecture de la ligne et avant toute écriture (refus `sorte`) ;
+// `attendus` — les statuts de départ admis (défaut `['a_lancer', 'echec']`, lot A inchangé).
 export async function lancerVol(importId, executer, options = {}) {
   const suivi = { importId: null };
   const r = await volUnique(importId, executer, options, suivi);
   return options.lecture ? { ...r, importId: suivi.importId } : r;
 }
+// Les sortes que lancerExtraction LIT (lot D, D-D14 ; liste BLANCHE) : une recette, et un index tant que C le lit par ce vol (executerExtraction, « Relancer »
+// de la section Imports). Toute autre sorte — classement, couverture (lot E), web (lot B), une sorte future — est refusée `sorte`, rien d'écrit.
+export const SORTES_EXTRACTION = Object.freeze(['recette', 'index']);
 export async function lancerExtraction(importId, options = {}) {
-  return lancerVol(importId, executerExtraction, options);
+  return lancerVol(importId, executerExtraction, { ...options, accepte: (l) => SORTES_EXTRACTION.includes(l?.kind) }); // lot D : attendus transmis par options
 }
 // La ligne d'une lecture sans référence, écrite seulement APRÈS les gardes du vol (ronde 1) : reprise dans la transition de départ (a_verifier → a_lancer
 // → en_cours en une transaction, § 3.1), sinon ouverte (repo.ouvrirImport, le mur conditionné de la première photo) puis partie.
@@ -158,7 +163,7 @@ async function partirLecture(repo, lecture, pageIds, enVol, suivi) {
 }
 // Lot C, ronde 1 de la tâche 4 : `signal` (facultatif) = l'« Annuler » de l'appelant AVANT que la tenue ait une ligne (gardes : session, réduction des
 // photos). Levé pendant les gardes → refus `annule`, rien n'est parti ni écrit ; levé après le départ → l'appel est abandonné (comme annulerVol).
-async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, lecture = null, signal = null } = {}, suivi) {
+async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, lecture = null, signal = null, attendus = ['a_lancer', 'echec'], accepte = null } = {}, suivi) {
   const tenue = { importId: lecture ? null : importId, controller: new AbortController(), repo };
   if (!prendreVol(tenue)) return refus('vol_tenu'); // AVANT tout await : une seconde tape (ou une lecture web) pendant les gardes voit le vol
   notifier(); // vague finale (m2) : l'écran ciblé fige ses pages dès la pose du vol (la réduction des pages peut durer), pas seulement à en_cours
@@ -175,7 +180,9 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
       const ligne = await repo.get('imports', importId);
       if (!ligne) { liberer(); return refus('inconnu'); }
       kind = ligne.kind; pageIds = Array.isArray(ligne.page_ids) ? ligne.page_ids : [];
+      if (typeof accepte === 'function' && !accepte(ligne)) { liberer(); return refus('sorte'); } // lot D (D-D14) : la garde de sorte, APRÈS la relecture, AVANT toute écriture
     }
+    if (lecture && typeof accepte === 'function' && !accepte({ kind })) { liberer(); return refus('sorte'); }
     if (!enLigne()) { liberer(); return refus('hors_ligne'); }
     const session = await sessionAssistant(ctx);
     if (annule()) { liberer(); return refus('annule'); }
@@ -188,13 +195,16 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
     if (!envoi.images.length) { liberer(); return refus('sans_page'); }
     const depart = maintenant();
     // Lot C (F-18) : au départ d'un INDEX — reprise, « Relancer » de la section Imports, ligne neuve —, la lecture remplacée est effacée.
-    const enVol = { status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, ...(kind === 'index' ? { resultat: null, reponse_brute: null, model: null, duree_ms: null, finished_at: null, ordre_applique_at: null } : {}) };
+    // Lot D, ronde 1 de T2 (comme R-B-8 pour le web) : un CLASSEMENT relancé ici — une ligne venue d'un autre appareil (état 5 du panneau) — devient celle
+    // de CET appareil, dont le battement est ici ; sinon son appareil d'origine la jugeait à 90 s sur battement_at et l'interrompait pendant le vol.
+    const ici = kind === 'classement' && typeof repo.deviceId === 'function' ? repo.deviceId() : null;
+    const enVol = { status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, ...(ici ? { device_id: ici } : {}), ...(kind === 'index' ? { resultat: null, reponse_brute: null, model: null, duree_ms: null, finished_at: null, ordre_applique_at: null } : {}) };
     // Vague finale (m2) : le départ vaut pour les pages LUES — une page retirée, ajoutée ou déplacée pendant la réduction (autre geste, autre onglet)
     // refuse le départ (rien ne part, le redessin montre la ligne) : jamais une page envoyée qui ne serait pas liée, ni une page liée jamais lue.
     const memesPages = (c) => { if (JSON.stringify(Array.isArray(c.page_ids) ? c.page_ids : []) !== JSON.stringify(pageIds)) throw new TransitionRefusee('imports', importId, c.status); return enVol; };
     try {
       if (lecture) importId = await partirLecture(repo, lecture, pageIds, enVol, suivi);
-      else await repo.transitionner('imports', importId, { attendus: ['a_lancer', 'echec'], patch: memesPages });
+      else await repo.transitionner('imports', importId, { attendus, patch: memesPages }); // lot D (S-3) : lireLeLot passe ['a_lancer'] — jamais une ligne passée echec ; memesPages (lot A, m2) gardé
     } catch (e) {
       liberer();
       if (estRefus(e)) return { issue: 'refuse', raison: 'transition', statut: e.statut }; // un autre onglet a enregistré ou ignoré entre-temps (I-10)
@@ -366,7 +376,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
   // la lecture pour laquelle « Rattacher » a été répondu, sinon null ; verdict : la discordance calculée par decider() ; focus : le bouton à focaliser
   // après un déplacement ; occupe : une écriture est en cours (aucune double pose) ; ecriteMain : la question « Remplacer ? » vient d'une version écrite à
   // la main (I-5), et non de la seule couverture des pages (ronde finale 2) — la phrase qui le dit n'est montrée que dans ce cas.
-  const etat = { ligne: null, pages: new Map(), question: null, cleQuestion: null, rattache: null, verdict: null, focus: null, occupe: false, ecriteMain: false };
+  const etat = { ligne: null, pages: new Map(), question: null, cleQuestion: null, rattache: null, verdict: null, focus: null, occupe: false, ecriteMain: false, seanceRefusee: null };
   const oublierQuestion = () => { etat.question = null; etat.cleQuestion = null; etat.rattache = null; etat.verdict = null; etat.ecriteMain = false; };
   root.etatRoute = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, pageIds: [...(Array.isArray(etat.ligne?.page_ids) ? etat.ligne.page_ids : [])], vol: !!etat.ligne && volEnCours()?.importId === etat.ligne.id, discordance: etat.verdict });
   if (!recipe) { root.append(el('div', { class: 'card' }, t('Recette introuvable.'))); return root; }
@@ -568,7 +578,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
       const pages = (await Promise.all(pageIds.map((id) => repo.get('source_pages', id)))).filter(Boolean);
       const ed = reference.edition_id ? (ctx.editionsById?.get(reference.edition_id) ?? (await repo.get('book_editions', reference.edition_id)) ?? null) : null;
       const conventionId = typeof ctx.conventionFor === 'function' ? ctx.conventionFor(reference) : (ed?.unit_convention_id ?? null);
-      const options = { reference, versions, pages, pageIds, edition: ed, convention: conventionId ? getConvention(conventionId) : null, importId: L.id, modele: modeleBorne(L.model), photo: photoBornee(L), maintenant: maintenant() };
+      const options = { reference, versions, pages, pageIds, edition: ed, convention: conventionId ? getConvention(conventionId) : null, importId: L.id, modele: modeleBorne(L.model), photo: photoBornee(L), maintenant: maintenant(), reecrirePositions: !issueDUneSeance(L) }; // lot D (§ 4.8.1 point 1, N-1)
       const sonde = fabriquerExtraction(resultat, options); // pur : lu pour `remplacement` (I-5) avant la décision
       // Ronde finale 2 (garde de couverture) : une lecture qui ne relit pas TOUTES les pages de la version courante (octets absents ici, page retirée de la
       // ligne) ne la remplace jamais d'office — elle perdrait en silence les lignes de ces pages. « Remplacer par cette lecture ? » (I-5) est posée ;
@@ -592,17 +602,28 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
   // autre onglet a tranché juste avant, I-10) → rien n'est écrit et rien n'est dit « importé » ; réussie → toast et navigation SEULEMENT si l'écran est
   // encore monté (T4-R1 : une lecture qui arrive après avoir quitté l'écran n'arrache pas la personne à sa saisie ; la fiche montre la version).
   async function enregistrer(L, fab) {
-    const seance = L.scan_session_id ? await repo.get('scan_sessions', L.scan_session_id) : null;
+    // Ronde 1 : une séance refusée dans la transaction (disparue, ou d'un statut hors open/done) n'est plus relue — le geste suivant écrit sans elle (§ 4.8.1 point 2).
+    const seance = L.scan_session_id && etat.seanceRefusee !== L.scan_session_id ? await repo.get('scan_sessions', L.scan_session_id) : null;
     const puts = { recipes: [fab.recipe], recipe_versions: [fab.version], source_pages: fab.pageUpdates };
-    if (seance) puts.scan_sessions = [{ ...seance, status: 'done', recipe_ids: [...new Set([...(Array.isArray(seance.recipe_ids) ? seance.recipe_ids : []), recipe.id])] }];
+    // Lot D (§ 4.8.1 point 2, N-1) : la séance n'est plus écrite par une copie lue hors transaction — elle entre dans LA transaction par le sac
+    // `conditions`, relue dedans (deux enregistrements concurrents gardent leurs deux recipe_ids) ; done seulement quand plus aucune de ses photos n'est
+    // sans rôle (statutSeanceApres, sur ses pages relues juste avant : une page arrivée entre-temps compte comme sans rôle) ; disparue → refus.
+    let conditions = null;
+    if (seance) {
+      const pagesSeance = new Map();
+      for (const id of Array.isArray(seance.page_ids) ? seance.page_ids : []) { const p = await repo.get('source_pages', id); if (p) pagesSeance.set(id, p); }
+      const ecrites = new Set(fab.pageUpdates.map((p) => p.id));
+      conditions = { scan_sessions: [{ key: seance.id, attendus: ['open', 'done'], patch: (c) => ({ recipe_ids: [...new Set([...(Array.isArray(c.recipe_ids) ? c.recipe_ids : []), recipe.id])], status: statutSeanceApres(c, pagesSeance, ecrites) }) }] };
+    }
     // Vague finale (T6-R1-d ici aussi) : la clôture vaut pour LA lecture dont la recette a été fabriquée — une autre lecture arrivée sur la ligne entre
     // la relecture et la transaction (autre onglet, autre appareil) n'est jamais close sans avoir été vue ; rien n'est écrit, le redessin la montre.
     const cle = cleLecture(L);
     const cloture = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { status: 'enregistre', reponse_brute: null, finished_at: maintenant() }; };
     try {
-      await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: cloture, puts });
+      await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: cloture, puts, ...(conditions ? { conditions } : {}) });
     } catch (e) {
-      if (!estRefus(e)) { logError('import_cible.enregistrer', { error: e, id: L.id }); toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); }
+      if (estRefus(e) && e.store === 'scan_sessions') { etat.seanceRefusee = L.scan_session_id; toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); } // lot D : la séance a disparu (ou porte un statut inconnu) ; le geste suivant écrit sans elle
+      else if (!estRefus(e)) { logError('import_cible.enregistrer', { error: e, id: L.id }); toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); }
       return;
     }
     if (!root.isConnected) return;
@@ -671,6 +692,34 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
   }
 
   const retour = () => el('a', { class: 'btn', href: `#/recipes/${encodeURIComponent(recipe.id)}` }, t('Retour à la fiche'));
+  // Lot D (§ 4.8.1 point 3, D-D9, R-D-3) : sur TOUT panneau de discordance, la lecture devient une recette neuve, SANS appel — la ligne perd sa référence
+  // (recipe_id null), gardée dans la transaction par la clé de LA lecture questionnée et par la sorte ; puis l'éditeur prérempli (?import=) si l'écran est
+  // encore monté. Refusé (une autre lecture est arrivée) → reposer() : rien n'est détaché, la question est reposée pour la lecture courante.
+  async function enFaireUneNouvelle() {
+    const L = etat.ligne;
+    if (!L || etat.occupe) return;
+    const cle = etat.cleQuestion;
+    etat.occupe = true;
+    let fait = false;
+    try {
+      await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: (c) => { if (cleLecture(c) !== cle || c.kind !== 'recette') throw new TransitionRefusee('imports', L.id, c.status); return { recipe_id: null }; } });
+      fait = true;
+    } catch (e) { if (!estRefus(e)) { logError('import_cible.nouvelle_recette', { error: e, id: L.id }); toast(t('Une erreur est survenue')); } } // ronde 1 : un échec qui n'est pas un refus est dit
+    finally { etat.occupe = false; }
+    if (fait) { oublierQuestion(); if (root.isConnected) navigate('/recipes/new?import=' + encodeURIComponent(L.id)); return; }
+    await reposer();
+  }
+  // La question pour la lecture COURANTE, sans rien écrire : discordante → le panneau reposé (avec son verdict) ; sinon la question est oubliée et l'écran
+  // offre « Enregistrer cette lecture » (jamais une lecture enregistrée sans avoir été vue).
+  async function reposer() {
+    const L = await ligneOuverte(etat.ligne?.id ?? null);
+    const resultat = L?.status === 'a_verifier' ? resultatValide(L) : null;
+    const reference = resultat ? await repo.get('recipes', recipe.id) : null;
+    const verdict = reference ? discordance(resultat, reference) : null;
+    if (verdict && !verdict.ok) { etat.ligne = L; etat.verdict = verdict; etat.question = 'discordance'; etat.cleQuestion = cleLecture(L); dessiner(); return; }
+    oublierQuestion();
+    await redessiner();
+  }
   function panneauDiscordance() {
     const v = etat.verdict || {};
     const x = typeof v.titreLu === 'string' && v.titreLu ? v.titreLu : t('(sans titre)');
@@ -683,7 +732,8 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
       el('div', { class: 'row' },
         el('button', { type: 'button', class: 'btn primary', onClick: () => decider({ rattache: true }) }, t('Rattacher')),
         el('button', { type: 'button', class: 'btn', onClick: () => { oublierQuestion(); dessiner(); } }, t('Garder la lecture sans l’enregistrer')),
-        el('button', { type: 'button', class: 'btn', onClick: changerLesPages }, t('Changer les pages'))));
+        el('button', { type: 'button', class: 'btn', onClick: changerLesPages }, t('Changer les pages')),
+        el('button', { type: 'button', class: 'btn', dataset: { role: 'nouvelle-recette' }, onClick: enFaireUneNouvelle }, t('En faire une nouvelle recette'))));
   }
   const panneauRemplacer = () => el('div', { class: 'card warn stack', dataset: { role: 'remplacer' } },
     el('p', { style: { margin: 0 } }, t('Remplacer par cette lecture ?')),

@@ -8,6 +8,7 @@ import { assertVocabulaire } from './vocabulaire.js';
 import { newId } from '../core/ids.js';
 import { lienSignet } from '../core/lien.js';
 import { IMPORTS_TERMINES, STATUTS_IMPORT } from '../model/schema.js';
+import { estTitreUneLigne } from '../core/bornes.js';
 
 // --- Transitions du journal (spec § 3.1) : toutes par repo.transitionner (I-10) ; aucune autre. `en_cours → echec` couvre annule,
 // interrompu et incertain (la raison est dans `erreur`). `a_verifier → echec` (T4-R1, ratifiée) couvre UN seul cas : un `resultat` relu du
@@ -94,10 +95,13 @@ export const retirerPage = (pageIds, id) => pageIds.filter((p) => p !== id);
 // entrée du modèle, sauts de ligne gardés (jamais parseStepsBlock, I5), avec les clés de detectTimers. assertVocabulaire garde la fiche (D-12).
 // Pages : `printed_page` de la page gardé ; une page SANS numéro ne reçoit celui de la fiche que si elle est la PREMIÈRE de l'ordre (ronde 1 :
 // la deuxième photo d'une recette p. 132 est la p. 133, pas la 132 — rien d'inventé, I-1) ; les suivantes restent nulles.
+// Lot D : `reecrirePositions` (défaut vrai, lot A inchangé), `role: 'recette'`, union sans `reference.index_page_id`.
+// Lot D, ronde 1 (I-D3, B-7) : la photo d'index de LA référence n'est jamais une page de la recette, même quand la lecture la porte (classée dans le
+// groupe, cochée par « Regrouper en recette ») : écartée des pages lues — ni dans la version, ni dans l'union, ni réécrite (elle garde kind et position).
 const ORIGINES_PHOTO = ['photo', 'image'];
-export function fabriquerExtraction(resultat, { reference, versions = [], pages = [], pageIds = [], edition = null, convention = null, importId = null, modele = null, photo = null, maintenant = null, remplacer = true } = {}) {
+export function fabriquerExtraction(resultat, { reference, versions = [], pages = [], pageIds = [], edition = null, convention = null, importId = null, modele = null, photo = null, maintenant = null, remplacer = true, reecrirePositions = true } = {}) {
   const parId = pages instanceof Map ? pages : new Map((pages || []).map((p) => [p.id, p]));
-  const presentes = pageIds.filter((id) => parId.has(id));
+  const presentes = pageIds.filter((id) => parId.has(id) && id !== reference.index_page_id);
   const ingredients = (resultat.ingredients || []).map((l) => ({ ...parseIngredientLine(l.source_text), uncertain: l.uncertain === true, verification_state: 'to_verify' }));
   const steps = (resultat.steps || []).map((s, i) => ({ id: newId('st'), position: i + 1, text: s.text, ...detectTimers(s.text) }));
   const incomplete = resultat.incomplete === true;
@@ -120,7 +124,7 @@ export function fabriquerExtraction(resultat, { reference, versions = [], pages 
   const availability = ingredients.length && steps.length && !incomplete && !missing_page ? 'available' : 'partial';
   const recipe = {
     ...reference,
-    source_page_ids: [...new Set([...(reference.source_page_ids || []), ...presentes])],
+    source_page_ids: [...new Set([...(reference.source_page_ids || []).filter((id) => id !== reference.index_page_id), ...presentes])], // lot D (B-7) : la photo d'index de la référence n'est pas une page de la recette
     photo_sha256: photo ? photo.sha256 : (reference.photo_sha256 ?? null),
     photo_origin: photo ? (ORIGINES_PHOTO.includes(photo.origin) ? photo.origin : null) : (reference.photo_origin ?? null),
     ...(remplacer === false ? {} : {
@@ -130,7 +134,9 @@ export function fabriquerExtraction(resultat, { reference, versions = [], pages 
     }),
   };
   assertVocabulaire(recipe, 'recipes'); // D-12 : le fabricant vérifie le vocabulaire fermé avant toute écriture
-  const pageUpdates = presentes.map((id, i) => ({ ...parId.get(id), kind: 'recipe', position: i + 1, printed_page: parId.get(id).printed_page ?? (i === 0 ? recipe.printed_page ?? null : null) }));
+  // Lot D (§ 4.8.1, N-1) : role recette avec kind recipe ; une lecture issue d'une séance garde les positions de la séance (reecrirePositions faux :
+  // seul « Appliquer cet ordre » les réécrit, C I-C10) — l'ordre de la RECETTE reste celui de la lecture (source_page_ids).
+  const pageUpdates = presentes.map((id, i) => ({ ...parId.get(id), kind: 'recipe', role: 'recette', ...(reecrirePositions ? { position: i + 1 } : {}), printed_page: parId.get(id).printed_page ?? (i === 0 ? recipe.printed_page ?? null : null) }));
   const remplacement = versions.some(versionEcrite);
   return { recipe, version, pageUpdates, remplacement };
 }
@@ -174,8 +180,9 @@ export function dateReception(ligne) {
 // rappels génériques (« Séances à reprendre », « Séance en cours », « Photos conservées ») ; elle y réapparaît sur enregistre / ignore.
 // Vague finale (m10) : « non terminé » = importOuvert (une seule définition) — une ligne reçue hors vocabulaire (statut inconnu ou nul) ne masque plus
 // sa séance, comme elle n'est ni listée, ni reprise, ni bloquante (I-2 ne couvre que le vocabulaire connu).
+// Lot D (D-D11) : une ligne d'un LOT ne cache pas sa séance (ses autres photos — l'orpheline, une recette qui attend — restent rappelées).
 export function seanceDUnImportCible(seance, imports) {
-  return (Array.isArray(imports) ? imports : []).some((i) => importOuvert(i) && i.kind === 'recette' && !!i.recipe_id && i.scan_session_id === seance?.id);
+  return (Array.isArray(imports) ? imports : []).some((i) => importOuvert(i) && i.kind === 'recette' && !!i.recipe_id && i.scan_session_id === seance?.id && lotDe(i) === null);
 }
 
 // La clé d'UNE lecture (T4-R2 du lot A) : la ligne, le départ de son vol et son résultat. Une clôture (Ignorer, Enregistrer, echec(illisible)) ne
@@ -191,10 +198,12 @@ export const modeleBorne = (m) => (typeof m === 'string' && m && Array.from(m).l
 // Les sortes écrites aujourd'hui (« couverture » reste réservée au lot E : une ligne d'une autre sorte n'est pas listée, rien d'inventé ; « web »
 // arrive avec le lot B, spec recette-web § 4.7) et les statuts NON terminés. `importOuvert` : une ligne que la section liste (et que la fiche du
 // livre compte — un import web n'y compte jamais : son edition_id est nul, D-B17).
-export const KINDS_IMPORT = Object.freeze(['recette', 'index', 'web']);
+// `classement` (lot D) : la ligne d'un classement de photos, reprise dans sa séance ; jamais « Relancer » depuis la section.
+export const KINDS_IMPORT = Object.freeze(['recette', 'index', 'web', 'classement']);
 // Les sortes qui portent des PAGES (photos) : les seules que le chemin photo ouvre (repo.ouvrirImport, repo.ajouterPages). Une lecture web naît par
 // demarrerLectureWeb (src/ui/import-web.js), jamais par ce chemin (lot B, P-1).
-export const KINDS_PAGES = Object.freeze(['recette', 'index']);
+// `classement` (lot D) : une ligne de classement porte des photos — `repo.ouvrirImport({ kind: 'classement' })` l'ouvre ; `web` reste hors de cette liste.
+export const KINDS_PAGES = Object.freeze(['recette', 'index', 'classement']);
 export const IMPORTS_OUVERTS = Object.freeze(STATUTS_IMPORT.filter((s) => !IMPORTS_TERMINES.includes(s)));
 export const importOuvert = (i) => !!i && typeof i === 'object' && typeof i.id === 'string' && !!i.id && KINDS_IMPORT.includes(i.kind) && IMPORTS_OUVERTS.includes(i.status);
 
@@ -211,6 +220,7 @@ export function cibleReprise(ligne) {
   if (ligne.kind === 'recette') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/importer?import=${encodeURIComponent(id)}` : `/recipes/new?import=${encodeURIComponent(id)}`;
   if (ligne.kind === 'index') return chaine(ligne.scan_session_id) ? `/import?session=${encodeURIComponent(ligne.scan_session_id)}&import=${encodeURIComponent(id)}` : null;
   if (ligne.kind === 'web') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/importer?import=${encodeURIComponent(id)}` : null;
+  if (ligne.kind === 'classement') return chaine(ligne.scan_session_id) ? `/import?session=${encodeURIComponent(ligne.scan_session_id)}&import=${encodeURIComponent(id)}` : null; // lot D : la séance du classement
   return null;
 }
 
@@ -230,6 +240,7 @@ export function cibleReprise(ligne) {
 // livre: l'hôte RECALCULÉ de son adresse }.
 // Rend [{ id, kind, titre: { type: reference | index | regrouper | web | seance, texte, livre }, etat, age: { n, unite }, raison, gestes, cible,
 // ailleurs, autreAppareil, referenceAbsente, pages }].
+// Lot D : une ligne `classement` (Reprendre → la séance ; jamais Relancer) ; chaque ligne porte `lot` (lotDe, revalidé) ; une ligne de lot sans référence garde le type `regrouper`.
 const parRecence = (champ) => (a, b) => String(b[champ] || '').localeCompare(String(a[champ] || ''));
 export function lignesImports(ctx, { maintenant = null, documentId = null, deviceId = null } = {}) {
   const imports = Array.isArray(ctx?.imports) ? ctx.imports : [];
@@ -247,11 +258,12 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     const recetteId = i.kind === 'recette' || web ? chaine(i.recipe_id) : null;
     const recette = recetteId ? recettes.get(recetteId) ?? null : null;
     const referenceAbsente = !!recetteId && !recette;
-    const type = i.kind === 'index' ? 'index' : web ? 'web' : recetteId ? 'reference' : 'regrouper';
+    const type = i.kind === 'classement' ? 'classement' : i.kind === 'index' ? 'index' : web ? 'web' : recetteId ? 'reference' : 'regrouper';
     const cible = cibleReprise(i);
     let gestes;
     if (referenceAbsente) gestes = [];
     else if (i.status === 'en_cours') gestes = tenu ? ['annuler'] : [];
+    else if (i.kind === 'classement') gestes = autreAppareil && !(i.status === 'a_verifier' && i.resultat != null) ? ['ignorer'] : ['reprendre', 'ignorer']; // lot D (D-D14) : jamais « Relancer » depuis Imports
     else if (web) gestes = i.status === 'echec' ? ['relancer', 'ignorer'] : i.status === 'a_verifier' && i.resultat == null ? ['ignorer'] : ['reprendre', 'ignorer'];
     else if (recette?.availability === 'available') gestes = ['ignorer']; // un POST ne servirait à rien : l'écran ciblé refuse une recette qui a son texte
     else if (autreAppareil) gestes = i.status === 'a_verifier' && i.resultat != null ? ['reprendre', 'ignorer'] : ['ignorer'];
@@ -265,12 +277,59 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     return {
       id: i.id, kind: i.kind, titre: { type, texte: recette ? chaine(recette.original_title) : null, livre: web ? (recette ? lienSignet(recette.source_url).hote : null) : livreDe(recette?.edition_id ?? i.edition_id) },
       etat: i.status, age: ageDepuis(i.updated_at, maintenant), raison: i.status === 'echec' ? chaine(i.erreur?.raison) : null,
-      gestes, cible, ailleurs, autreAppareil, referenceAbsente, pages: nbPages(i),
+      gestes, cible, ailleurs, autreAppareil, referenceAbsente, pages: nbPages(i), lot: lotDeRecette(i),
     };
   });
   const photos = seances.filter((s) => s && typeof s === 'object' && chaine(s.id) && s.status === 'open' && !seanceDUnImportCible(s, imports)).sort(parRecence('started_at')).map((s) => ({
     id: s.id, kind: 'seance', titre: { type: 'seance', texte: null, livre: livreDe(s.edition_id) }, etat: 'open', age: ageDepuis(s.updated_at ?? s.started_at, maintenant), raison: null,
-    gestes: ['ouvrir_seance'], cible: `/import?session=${encodeURIComponent(s.id)}`, ailleurs: false, autreAppareil: autre(s), referenceAbsente: false, pages: nbPages(s),
+    gestes: ['ouvrir_seance'], cible: `/import?session=${encodeURIComponent(s.id)}`, ailleurs: false, autreAppareil: autre(s), referenceAbsente: false, pages: nbPages(s), lot: null,
   }));
   return [...lignes, ...photos];
+}
+
+// --- Lot D « Un lot de recettes photographiées » (spec § 3.3, § 3.4, § 3.6, D-D11, D-D12, N-1) -------------------------------------------------------
+// La fabrique des lignes NEUVES du journal (D-D12) : la forme qui vivait dans nouvelleLigneImport (src/model/repo.js), extraite À L'IDENTIQUE — les 19
+// champs, mêmes valeurs — et gardée par le vocabulaire fermé (statut ET sorte). Une seule définition : nouvelleLigneImport, lecturesDuLot (classement.js)
+// et les fabricants des autres lots l'appellent. `device_id` est fourni par l'appelant (repo.deviceId() chez nouvelleLigneImport).
+export function ligneImportNeuve({ id, kind, recipe_id = null, edition_id = null, scan_session_id = null, page_ids = [], device_id = null } = {}) {
+  const ligne = {
+    id, kind, edition_id: edition_id ?? null, recipe_id: recipe_id ?? null, scan_session_id: scan_session_id ?? null, page_ids: [...page_ids], photo_sha256: null, status: 'a_lancer', erreur: null,
+    resultat: null, reponse_brute: null, appels: 0, model: null, duree_ms: null, device_id: device_id ?? null, document_id_vol: null, battement_at: null, started_at: null, finished_at: null,
+  };
+  assertVocabulaire(ligne, 'imports'); // D-12 du lot A, D-D12 : la ligne naît dans son vocabulaire fermé
+  return ligne;
+}
+// Le champ `lot` d'une ligne de recette (§ 3.3), DONNÉE reçue ou restaurée : revalidé à chaque lecture. classement_id (1 à 80 points de code), rang et
+// total (entiers 1..10, rang ≤ total) sont STRUCTURANTS : fautifs → null, la ligne se comporte comme une ligne du lot A. titre (estTitreUneLigne, 200) et
+// page (1..9999) ne servent qu'à l'affichage : fautifs → null SANS jeter le lot. Objet construit, lu par Object.hasOwn. Les bornes 10, 200 et 9999 sont
+// celles de BORNES_CLASSEMENT (src/domain/llm.js : groupes, titre, page), recopiées ici (import-cible.js n'importe pas llm.js) : une borne changée
+// là se change ici (ronde 1 de la tâche 1).
+export function lotDe(ligne) {
+  const brut = ligne && typeof ligne === 'object' && Object.hasOwn(ligne, 'lot') ? ligne.lot : null;
+  if (!brut || typeof brut !== 'object' || Array.isArray(brut)) return null;
+  const champ = (k) => (Object.hasOwn(brut, k) ? brut[k] : undefined);
+  const id = champ('classement_id'), rang = champ('rang'), total = champ('total'), titre = champ('titre'), page = champ('page');
+  const n = typeof id === 'string' ? Array.from(id).length : 0;
+  if (n < 1 || n > 80) return null;
+  if (!Number.isInteger(rang) || !Number.isInteger(total) || rang < 1 || total < 1 || rang > 10 || total > 10 || rang > total) return null;
+  return { classement_id: id, rang, total, titre: estTitreUneLigne(titre, 200) ? titre : null, page: Number.isInteger(page) && page >= 1 && page <= 9999 ? page : null };
+}
+// Ronde 1 de la tâche 4 (revue, lentille sécurité) : `lot` n'existe que sur une ligne `recette` (§ 3.3). Une ligne d'une autre sorte qui en porte un
+// (reçue, restaurée) n'est d'AUCUN lot : ni bloc, ni progression, ni « Continuer », ni note de séance. lotDe reste la revalidation du champ seul (T-D7) ;
+// toute ligne du JOURNAL se lit par lotDeRecette (lignesImports, progressionLots, lireLeLot, noteLotsDeSeance).
+export const lotDeRecette = (ligne) => (ligne?.kind === 'recette' ? lotDe(ligne) : null);
+// N-1 (§ 3.6) : une lecture ISSUE D'UNE SÉANCE — ligne de lot, « Regrouper en recette », photo seule, lecture rattachée (D-D19) ET ligne ciblée du lot A
+// (sa séance naît avec la première photo, RV-1). Seul critère des amendements d'enregistrement : jamais `lot`.
+export const issueDUneSeance = (ligne) => typeof ligne?.scan_session_id === 'string' && ligne.scan_session_id.length > 0;
+// N-1 : le statut d'une séance APRÈS l'enregistrement d'une de ses lectures — 'done' si CHAQUE photo de seance.page_ids est écrite par la transaction
+// (`ecrites`, avec kind recipe et role recette) ou porte déjà un role ou un kind (chaîne non vide) dans `pagesParId` (les pages relues juste avant) ;
+// sinon le statut INCHANGÉ. Une page absente de la Map (ajoutée entre-temps) compte comme sans rôle : jamais fermée trop tôt. `seance` = la séance
+// relue DANS la transaction (patch-fonction du sac conditions) ; page_ids absent → [] → 'done'.
+export function statutSeanceApres(seance, pagesParId, ecrites) {
+  const ids = Array.isArray(seance?.page_ids) ? seance.page_ids : [];
+  const pages = pagesParId instanceof Map ? pagesParId : new Map();
+  const ecr = ecrites instanceof Set ? ecrites : new Set(Array.isArray(ecrites) ? ecrites : []);
+  const nonVide = (v) => typeof v === 'string' && v !== '';
+  const aUnRole = (id) => ecr.has(id) || (pages.has(id) && (nonVide(pages.get(id)?.role) || nonVide(pages.get(id)?.kind)));
+  return ids.every(aUnRole) ? 'done' : seance?.status;
 }

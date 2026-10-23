@@ -211,9 +211,10 @@ export function fabriquerReferences(plan, { edition, pagesParId, resultat, pageI
 // --- La ligne du journal (D-C16, D-C22) ------------------------------------------------------------------------------------------------------
 // La ligne `kind: 'index'` OUVERTE de la séance (importOuvert du lot A : une définition) : `importId` s'il en désigne une ; sinon la plus récente
 // (updated_at) ; sinon null.
-export function ligneOuverteDeSeance(imports, sessionId, { importId = null } = {}) {
+// Lot D (§ 4.1) : `kind` (défaut 'index', inchangé) — la même règle pour une ligne de classement.
+export function ligneOuverteDeSeance(imports, sessionId, { importId = null, kind = 'index' } = {}) {
   if (!sessionId) return null;
-  const ouvertes = liste(imports).filter((i) => importOuvert(i) && i.kind === 'index' && i.scan_session_id === sessionId);
+  const ouvertes = liste(imports).filter((i) => importOuvert(i) && i.kind === kind && i.scan_session_id === sessionId);
   if (importId) { const l = ouvertes.find((i) => i.id === importId); if (l) return l; }
   return [...ouvertes].sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))[0] ?? null;
 }

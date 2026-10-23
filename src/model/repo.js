@@ -9,8 +9,7 @@ import { nettoyerChaines, porteDesCaracteresDeControle } from '../sync/lots.js';
 import { resolveMime } from '../sync/mime.js';
 import { fusionnerOctetsRecus } from '../sync/fichiers.js';
 import { normaliserConfigAssistant, LIGNE_ASSISTANT } from '../domain/assistant-config.js';
-import { assertVocabulaire } from '../domain/vocabulaire.js';
-import { IMPORTS_OUVERTS, KINDS_PAGES } from '../domain/import-cible.js'; // une définition (lot A, tâche 6, ronde 1) : I-2 et les sortes que le chemin photo écrit (lot B : « web » exclue, P-1)
+import { IMPORTS_OUVERTS, KINDS_PAGES, ligneImportNeuve } from '../domain/import-cible.js'; // une définition (lot A, tâche 6, ronde 1) : I-2 et les sortes que le chemin photo écrit (lot B : « web » exclue, P-1)
 import { sha256Hex } from '../core/hash.js';
 import { t } from '../core/i18n.js';
 
@@ -413,11 +412,17 @@ export async function saveBatch(batch, { origin = 'local', conditions = null } =
 // horodatées : marquerInterrompus y relit le battement interne de sync_state) ; une condition sur le magasin de la transition est refusée (TypeError).
 // `conditions` (lot C, spec § 4.5) : { [autreMagasin]: [{ key, attendus, patch? }] } — d'autres fiches vérifiées et patchées dans la MÊME transaction,
 // chaque patch enveloppé comme celui de la ligne (nettoyé, horodaté : à la différence d'`autres`) ; une condition sans patch vérifie seulement ; comme
-// `autres`, jamais une condition sur le magasin de la transition (TypeError, ronde 1) ; la valeur rendue reste la fiche de `store`/`key`. Le sac porte aussi
+// `autres`, jamais une condition À CLÉ (statut, patch, fusion) sur le magasin de la transition (TypeError, ronde 1 ; lot D : les seules formes admises
+// y sont dites ci-dessous) ; la valeur rendue reste la fiche de `store`/`key`. Le sac porte aussi
 // `{ key, fusion }` (lot G) : la fiche calculée sur la fiche RELUE, enveloppée de même (envelopperFusion, ronde 1 de la tâche 2).
+// Lot D (D-D17, aligné sur la garde du lot C) : sur le magasin de la transition, le sac n'admet que les formes SANS fiche à relire — `{ key,
+// absente: true }` (une ligne neuve) et `{ index, valeur, exclus }` (I-2) —, passées telles quelles APRÈS la condition de la ligne, jamais à sa
+// place ; toute autre forme y reste refusée, un sac MIXTE aussi (CHAQUE condition sans fiche ; `absente` vaut exactement true) — TypeError avant
+// toute écriture (ronde 1 du lot C, ronde 1 de la tâche 1 du lot D).
 export async function transitionner(store, key, { attendus, patch = null, puts = {}, deletes = {}, payloads = {}, origin = 'local', autres = {}, conditions = {} } = {}) {
   if (Object.hasOwn(autres, store)) throw new TypeError('transitionner : `autres` ne porte pas de condition sur ' + store);
-  if (Object.hasOwn(conditions ?? {}, store)) throw new TypeError('transitionner : `conditions` ne porte pas de condition sur ' + store);
+  const sansFiche = (c) => !!c && typeof c === 'object' && (c.absente === true || c.index != null); // lot D (D-D17) : une ligne neuve ou une condition d'index
+  if (Object.hasOwn(conditions ?? {}, store) && !(Array.isArray(conditions[store]) && conditions[store].every(sansFiche))) throw new TypeError('transitionner : sur ' + store + ', `conditions` n’admet que { key, absente: true } et { index, valeur, exclus }');
   const now = syncNow();
   const stamped = {};
   for (const [s, rows] of Object.entries(puts)) stamped[s] = horodater(s, rows, now);
@@ -568,11 +573,7 @@ const ATTENDUS_AJOUT = ['a_lancer', 'a_verifier', 'echec']; // les statuts qui a
 // import ouvert ne porte déjà cette recipe_id (sans recipe_id — un index, « Regrouper en recette » —, I-2 ne joue pas). Une définition pour les deux
 // chemins qui ouvrent une ligne : ajouterPages (première photo de l'écran ciblé) et ouvrirImport (pages déjà là : éditeur, panneau d'index).
 function nouvelleLigneImport({ id, kind, recipe_id = null, edition_id = null, scan_session_id = null, page_ids = [], device_id = null }) {
-  const ligne = {
-    id, kind, edition_id: edition_id ?? null, recipe_id: recipe_id ?? null, scan_session_id: scan_session_id ?? null, page_ids: [...page_ids], photo_sha256: null, status: 'a_lancer', erreur: null,
-    resultat: null, reponse_brute: null, appels: 0, model: null, duree_ms: null, device_id: device_id ?? deviceId(), document_id_vol: null, battement_at: null, started_at: null, finished_at: null,
-  };
-  assertVocabulaire(ligne, 'imports'); // D-12 : la ligne du journal naît dans son vocabulaire fermé
+  const ligne = ligneImportNeuve({ id, kind, recipe_id, edition_id, scan_session_id, page_ids, device_id: device_id ?? deviceId() }); // lot D (D-D12) : une seule forme
   const conditions = { imports: [{ key: ligne.id, absente: true }, ...(ligne.recipe_id != null ? [{ index: 'recipe_id', valeur: ligne.recipe_id, exclus: IMPORTS_OUVERTS }] : [])] };
   return { ligne, conditions };
 }
