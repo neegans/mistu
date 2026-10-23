@@ -429,8 +429,9 @@ export function validerLectureCouverture(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new ErreurExtraction('illisible');
   const B = BORNES_COUVERTURE;
   const incertains = new Set((Array.isArray(data.uncertain) ? data.uncertain : []).filter((u) => typeof u === 'string' && CHAMPS_LECTURE.includes(u)));
-  // Une adresse (après nettoyage, sur une chaîne seulement) : le champ vaut null et devient incertain.
-  const champ = (nom, max) => { const s = texteLigne(data[nom], max); if (s !== null && porteUneAdresse(s)) { incertains.add(nom); return null; } return s; };
+  // Une adresse (après nettoyage, sur une chaîne seulement) : le champ vaut null et devient incertain. Cherchée sur la forme d'une ligne ET sur la forme
+  // RECOLLÉE (porteAdresse des lots C et D, I-C2 ; ronde 1) : « evil⏎.com/x » plié en « evil .com/x » reste une adresse.
+  const champ = (nom, max) => { const s = texteLigne(data[nom], max); if (s !== null && porteAdresse(data[nom], s)) { incertains.add(nom); return null; } return s; };
   const title = champ('title', B.titre);
   const subtitle = champ('subtitle', B.titre);
   const publisher = champ('publisher', B.editeur);
@@ -438,7 +439,7 @@ export function validerLectureCouverture(data) {
   for (const a of Array.isArray(data.authors) ? data.authors : []) {
     const s = ligneNettoyee(a);
     if (s === null) continue;
-    if (longueur(s) > B.auteur || porteUneAdresse(s)) { incertains.add('authors'); continue; } // ce nom retiré, les autres gardés
+    if (longueur(s) > B.auteur || porteAdresse(a, s)) { incertains.add('authors'); continue; } // ce nom retiré (adresse même coupée), les autres gardés
     authors.push(s);
   }
   if (authors.length > B.auteurs) { authors = []; incertains.add('authors'); } // un collectif : le titre et l'éditeur lus ne sont pas jetés

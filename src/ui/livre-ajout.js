@@ -164,8 +164,13 @@ export async function lookupIsbn(isbn13, { fetch = globalThis.fetch, signal, cle
 }
 
 // --- Lot E (spec couverture § 3.4) : Open Library par titre ET auteur. Mêmes `tentative`, délais, reprise et lecteurs que lookupIsbn ; une fiche
-// d'ŒUVRE ne dit rien de l'édition photographiée tant que l'œuvre a plusieurs éditions (R-E-1 : ISBN, éditeur, année et langue seulement si
-// edition_count === 1 ET un seul ISBN-13 distinct). L'auteur est le PREMIER lu (une liste jointe filtrerait la recherche et cacherait la bonne fiche).
+// d'ŒUVRE ne dit rien de l'édition photographiée tant que l'œuvre a plusieurs éditions (§ 3.4 : éditeur — s'il est seul —, année et langue seulement si
+// edition_count === 1 ; l'ISBN de plus seulement s'il est le SEUL ISBN-13 distinct, isbnUnique. R-E-1 et D-E4 écrivent « et un seul ISBN-13 » pour les
+// quatre : la lecture du § 3.4 est retenue, ronde 1, à aligner à la clôture). L'auteur est le PREMIER lu (une liste jointe cacherait la bonne fiche).
+// ligneOL : borner (Cc, Cf, U+2028/2029, 300 points de code) APRÈS le retrait des demi-paires de substitution (Cs : encodeURIComponent lèverait une
+// URIError, le jsonb refuserait la fiche ; ronde 1) — ici seulement, lookupIsbn ne change pas (§ 3.6).
+const sansCs = (s) => (typeof s === 'string' ? s.replace(/\p{Cs}/gu, '') : s);
+const ligneOL = (s) => borner(sansCs(s)).trim();
 export const URL_OL_TITRE_AUTEUR = (titre, auteur) => `https://openlibrary.org/search.json?title=${encodeURIComponent(titre)}&author=${encodeURIComponent(auteur)}&fields=title,author_name,publisher,first_publish_year,language,subject,isbn,edition_count&limit=3`;
 export function lireSearchListe(json) {
   const docs = json?.docs;
@@ -173,19 +178,19 @@ export function lireSearchListe(json) {
   const fiches = [];
   for (const d of docs) {
     if (fiches.length >= 3) break;
-    if (!d || typeof d !== 'object' || typeof d.title !== 'string' || !borner(d.title).trim()) continue;
-    const authors = chaines(d.author_name).map((a) => borner(a).trim()).filter(Boolean);
+    if (!d || typeof d !== 'object' || typeof d.title !== 'string' || !ligneOL(d.title)) continue;
+    const authors = chaines(d.author_name).map(ligneOL).filter(Boolean);
     const editionUnique = d.edition_count === 1;
     const editeurs = chaines(d.publisher);
-    fiches.push({ title: borner(d.title).trim(), authors, author: borner(authors.join(', ')),
-      publisher: editionUnique && editeurs.length === 1 ? borner(editeurs[0]).trim() : '', year: editionUnique ? (annee(d.first_publish_year) ?? '') : '',
-      language: editionUnique ? langueDe(d.language) : null, motsCles: motsClesDe(d.subject), isbn13: editionUnique ? isbnUnique(d.isbn) : null, editionUnique });
+    fiches.push({ title: ligneOL(d.title), authors, author: borner(authors.join(', ')),
+      publisher: editionUnique && editeurs.length === 1 ? ligneOL(editeurs[0]) : '', year: editionUnique ? (annee(d.first_publish_year) ?? '') : '',
+      language: editionUnique ? langueDe(d.language) : null, motsCles: motsClesDe(chaines(d.subject).map(sansCs)), isbn13: editionUnique ? isbnUnique(d.isbn) : null, editionUnique });
   }
   return { repondu: true, fiches };
 }
 export async function chercherParTitreAuteur(titre, auteur, { fetch = globalThis.fetch, signal, attendre = attenteReelle, tentativeMs = LIMITES_ISBN.tentativeMs, repriseMs = LIMITES_ISBN.repriseMs } = {}) {
-  const t0 = typeof titre === 'string' ? borner(titre).trim() : '';
-  const a0 = typeof auteur === 'string' ? borner(auteur).trim() : '';
+  const t0 = ligneOL(titre); // pas une chaîne → '' (borner)
+  const a0 = ligneOL(auteur);
   if (!t0 || !a0) throw new TypeError('chercherParTitreAuteur : un titre et un auteur sont attendus'); // l'appelant ne lance ni sans titre ni sans auteur (D-E4)
   const bilan = { statut: 'indisponible', fiches: [], motif: null, appels: 0 };
   let r = null;

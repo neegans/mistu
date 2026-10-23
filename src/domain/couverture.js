@@ -12,11 +12,13 @@ export const shaBornee = (s) => (typeof s === 'string' && /^[0-9a-f]{64}$/.test(
 // § 3.1 : la ligne du journal d'une couverture — mêmes statuts, transitions et battement que le lot A ; cover_sha256 NEUF, pointeur souple vers files
 // (hors RELATIONS) ; aucune page, aucune recette, aucune édition avant la fermeture (D-E12). Créée a_lancer, dans son vocabulaire fermé (D-12 du lot A) :
 // par ligneImportNeuve, LA fabrique des lignes neuves du journal (lot D, D-D12, R-D-15 : une définition des 19 champs, statut ET sorte gardés par
-// assertVocabulaire) ; cover_sha256 est posé sur la ligne qu'elle rend.
-export function fabriquerImportCouverture({ id, coverSha256, deviceId = null } = {}) {
+// assertVocabulaire) ; cover_sha256 est posé sur la ligne qu'elle rend. deviceId est REQUIS, comme pour fabriquerImportWeb (R-B-26 ; ronde 1) : une ligne
+// née sans appareil serait « locale » sur tous les appareils (P-11) ; null explicite admis.
+export function fabriquerImportCouverture({ id, coverSha256, deviceId } = {}) {
   const sha = shaBornee(coverSha256);
   if (!sha) throw new TypeError('fabriquerImportCouverture : empreinte de couverture attendue (64 caractères hexadécimaux)');
-  const ligne = { ...ligneImportNeuve({ id, kind: 'couverture', device_id: deviceId ?? null }), cover_sha256: sha };
+  if (deviceId === undefined) throw new TypeError('fabriquerImportCouverture : deviceId requis (repo.deviceId())');
+  const ligne = { ...ligneImportNeuve({ id, kind: 'couverture', device_id: deviceId }), cover_sha256: sha };
   return ligne;
 }
 
@@ -38,10 +40,12 @@ export function troncTitre(candidat) { const s = String(candidat ?? ''); const m
 export function titreCorrespond(lu, candidat) { const n = normaliserTitre(lu); return !!n && (n === normaliserTitre(candidat) || n === normaliserTitre(troncTitre(candidat))); }
 const mots = (s) => normaliserTitre(s).split(' ').filter(Boolean);
 export const motsDistinctifsAuteur = (s) => mots(s).filter((m) => Array.from(m).length >= 3);
-// Un mot distinctif (3 lettres ou plus) d'UN auteur lu figure parmi les mots de L'UN des auteurs de la fiche ; sans auteur lu → faux.
+// TOUS les mots distinctifs (3 lettres ou plus, au moins un) d'UN auteur lu figurent parmi les mots d'UN MÊME auteur de la fiche, mot entier ; sans auteur
+// lu → faux. Un prénom ou un article commun ne suffit pas (ronde 1, § 11 : « Christophe Felder » ↔ « Christophe Michalak » était vrai) ; « J. Katz » ↔
+// « Josh Katz » reste vrai (« j » n'est pas distinctif). Écart au texte du § 3.5 (« un mot distinctif ») : la table du § 3.5 tient, à ratifier.
 export function auteurCorrespond(auteursLus, auteursFiche) {
   const fiche = (Array.isArray(auteursFiche) ? auteursFiche : []).filter((a) => typeof a === 'string').map(mots);
-  return (Array.isArray(auteursLus) ? auteursLus : []).filter((a) => typeof a === 'string').some((a) => motsDistinctifsAuteur(a).some((m) => fiche.some((f) => f.includes(m))));
+  return (Array.isArray(auteursLus) ? auteursLus : []).filter((a) => typeof a === 'string').some((a) => { const d = motsDistinctifsAuteur(a); return d.length > 0 && fiche.some((f) => d.every((m) => f.includes(m))); });
 }
 // La PREMIÈRE fiche au titre ET à l'auteur concordants (« Pâtisserie » ou « Jerusalem » existent chez plusieurs auteurs) ; null sinon.
 export function choisirProposition(lecture, fiches) {

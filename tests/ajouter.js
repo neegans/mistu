@@ -492,7 +492,7 @@ export async function runAjouterTests({ eq, ok }) {
     eq([rB.fiches[0].isbn13, rB.fiches[0].year, rB.fiches[0].publisher], ['9780857839879', 2022, 'Octopus Publishing Group'], 'titre+auteur : « Berber&Q » (une édition) porte son ISBN');
     const rJ = await chercher(async () => rep(200, OL_JERUSALEM), 'Jerusalem', 'Yotam Ottolenghi');
     eq([rJ.fiches[0].isbn13, rJ.fiches[0].editionUnique, rJ.fiches[0].publisher, rJ.fiches[0].author, rJ.fiches[0].motsCles.includes('nyt:hardcover-advice=2012-11-04')], [null, false, '', 'Yotam Ottolenghi, Sami Tamimi', false], 'titre+auteur : Jerusalem → isbn13 null (mutant : isbn[0] → 9788416295029 → rouge) ; sujet technique écarté');
-    for (const [titre, auteur] of [['', 'X'], ['T', ''], ['   ', 'X'], [null, 'X'], ['T', 42]]) {
+    for (const [titre, auteur] of [['', 'X'], ['T', ''], ['   ', 'X'], [null, 'X'], ['T', 42], ['\u{D800}', 'X']]) {
       let e = null, n = 0;
       try { await LA.chercherParTitreAuteur(titre, auteur, { fetch: async () => { n += 1; return rep(200, OL_STASIO); } }); } catch (x) { e = x; }
       eq([e instanceof TypeError, n], [true, 0], `titre+auteur : ${JSON.stringify([titre, auteur])} → TypeError, aucun appel`);
@@ -503,17 +503,40 @@ export async function runAjouterTests({ eq, ok }) {
     let attentes = 0;
     const r429 = await chercher(async () => rep(429, {}), undefined, undefined, { attendre: async () => { attentes += 1; } });
     eq([r429.statut, r429.motif, r429.appels, attentes], ['indisponible', 'limite', 1, 0], 'titre+auteur : 429 → limite, jamais de reprise ni d’attente (I-R)');
+    for (const statut of [500, 503]) {
+      let att = 0, n5 = 0;
+      const r5 = await chercher(async () => { n5 += 1; return rep(statut, {}); }, undefined, undefined, { attendre: async () => { att += 1; } });
+      eq([r5.statut, r5.motif, r5.appels, n5, att], ['indisponible', 'serveur', 1, 1, 0], `titre+auteur : ${statut} → serveur, une seule requête, jamais d’attente ni de reprise (I-R ; ronde 1 ; mutant : reprise sur serveur → rouge)`);
+    }
+    { const ctl = new AbortController(); ctl.abort(); let nA = 0;
+      const rA = await chercher(async () => { nA += 1; return rep(200, OL_STASIO); }, undefined, undefined, { signal: ctl.signal });
+      eq([rA.statut, rA.motif, rA.appels, nA], ['indisponible', 'delai', 0, 0], 'titre+auteur : signal déjà levé → delai, AUCUNE requête (signal lu avant chaque tentative, § 3.4 ; ronde 1 ; mutant : lecture retirée → rouge)'); }
+    { const ctl = new AbortController(); let nP = 0;
+      const rP = await chercher(async () => { nP += 1; throw new TypeError('reseau'); }, undefined, undefined, { signal: ctl.signal, attendre: async () => { ctl.abort(); } });
+      eq([rP.statut, rP.motif, rP.appels, nP], ['indisponible', 'delai', 1, 1], 'titre+auteur : abandon pendant l’attente de la reprise (« Saisir à la main ») → delai, aucune seconde requête (ronde 1 ; mutant : signal non relu après attendre → rouge)'); }
+    { const vus = [];
+      await chercher(async (u) => { vus.push(u); return rep(200, { docs: [] }); }, 't'.repeat(299) + '\u{202E}' + '\u{1F600}'.repeat(100), 'a'.repeat(400));
+      const p = new URL(vus[0]).searchParams;
+      eq([p.get('title') === 't'.repeat(299) + '\u{1F600}', Array.from(p.get('title')).length, p.get('author') === 'a'.repeat(300)], [true, 300, true], 'titre+auteur : titre et auteur passés par borner(·, 300) avant l’adresse — Cf retiré, coupe en POINTS DE CODE (§ 3.4 ; ronde 1 ; mutant : borner retiré → rouge)'); }
+    { const vus = []; let e = null;
+      try { await chercher(async (u) => { vus.push(u); return rep(200, { docs: [] }); }, 'A\u{D800}B', 'Ka\u{DC00}tz'); } catch (x) { e = x; }
+      const p = vus[0] ? new URL(vus[0]).searchParams : null;
+      eq([e?.name ?? null, vus.length, p?.get('title'), p?.get('author')], [null, 1, 'AB', 'Katz'], 'titre+auteur : une demi-paire de substitution (Cs) est retirée avant l’adresse — jamais d’URIError, un statut rendu (ronde 1)'); }
     let n2 = 0;
     const rR = await chercher(async () => { n2 += 1; if (n2 === 1) throw new TypeError('reseau'); return rep(200, OL_STASIO); });
     eq([rR.statut, rR.appels], ['trouve', 2], 'titre+auteur : une reprise sur un échec muet');
     let annule = false;
     const flux = () => ({ ok: true, status: 200, headers: new Headers(), body: { getReader: () => ({ read: async () => ({ done: false, value: new Uint8Array(100 * 1024) }), cancel: async () => { annule = true; } }) } });
     const rF = await chercher(async () => flux());
-    eq([rF.motif, annule], ['serveur', true], 'titre+auteur : un corps en flux au-delà de 256 Kio est coupé (cancel) → serveur');
+    eq([rF.motif, annule, rF.appels], ['serveur', true, 1], 'titre+auteur : un corps en flux au-delà de 256 Kio est coupé (cancel) → serveur, sans reprise (ronde 1 : appels épinglé)');
     eq(LA.lireSearchListe({ docs: 'x' }), { repondu: false }, 'lireSearchListe : docs qui n’est pas un tableau → repondu false');
     eq(LA.lireSearchListe({ docs: [OL_DOCS[0], OL_DOCS[1], OL_DOCS[2], OL_DOCS[3]] }).fiches.map((f) => f.title), ['À la di Stasio', 'À LA DI STASIO 3', 'Pasta Et Cetera a la Di Stasio'], 'lireSearchListe : quatre documents lisibles → les TROIS premiers, dans l’ordre (mutant : limite de trois retirée → rouge)');
     eq(LA.lireSearchListe({ docs: [null, 7, { title: '' }, { title: 'T', edition_count: '1', isbn: ['9782890772816'], publisher: ['P'], first_publish_year: 2004, language: ['fre'] }] }).fiches,
       [{ title: 'T', authors: [], author: '', publisher: '', year: '', language: null, motsCles: [], isbn13: null, editionUnique: false }], 'lireSearchListe : formes hostiles écartées ; edition_count non entier → editionUnique false, rien de l’édition');
+    eq(LA.lireSearchListe({ docs: [{ title: 'T', author_name: ['A'], edition_count: 1, publisher: ['P1', 'P2'] }, { title: 'U', author_name: ['B'], edition_count: 1, publisher: ['P'], first_publish_year: 2004, language: ['fre'] }] }).fiches.map((f) => [f.publisher, f.year, f.language, f.isbn13, f.editionUnique]),
+      [['', '', null, null, true], ['P', 2004, 'fr', null, true]], 'lireSearchListe : une édition unique listée sous DEUX éditeurs n’en propose aucun (mutant : le premier pris dès qu’il y en a un → rouge) ; une édition unique SANS ISBN garde éditeur, année et langue, isbn13 null (lecture du § 3.4, ronde 1 : R-E-1 et D-E4 à aligner à la clôture)');
+    { const f = LA.lireSearchListe({ docs: [{ title: 'Ti\u{D800}tre', author_name: ['Jo\u{DC00}sh'], edition_count: 1, publisher: ['Ed\u{D800}'], subject: ['Cui\u{DC00}sine'] }] }).fiches[0];
+      eq([f?.title, f?.authors, f?.author, f?.publisher, f?.motsCles], ['Titre', ['Josh'], 'Josh', 'Ed', ['Cuisine']], 'lireSearchListe : les demi-paires de substitution (Cs) reçues sont retirées du titre, des auteurs, de l’éditeur et des mots-clés — le jsonb les refuserait à l’envoi (ronde 1)'); }
   }
   {
     // C2 : `language` a un défaut NON VIDE — « ne remplir que ce qui est vide » ne l'atteignait jamais, et un livre
