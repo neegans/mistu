@@ -454,7 +454,8 @@ export async function runPhotoPlatTests({ eq, ok }) {
         // Pendant une écriture : boutons éteints ; la garde occupe empêche un second pickFiles
         await mettre(fiche('rc_b')); await versions(version('rc_b'));
         let lever; const barriere = new Promise((r) => { lever = r; });
-        const repoB = { get: (...a) => repo.get(...a), getFile: (...a) => repo.getFile(...a), save: (...a) => repo.save(...a), putFile: async (...a) => { await barriere; return repo.putFile(...a); }, db: repo.db };
+        // Ronde 1 : saveBatch — l'écriture de la fiche passe par la condition { key, fusion } (relue dans la transaction).
+        const repoB = { get: (...a) => repo.get(...a), getFile: (...a) => repo.getFile(...a), save: (...a) => repo.save(...a), saveBatch: (...a) => repo.saveBatch(...a), putFile: async (...a) => { await barriere; return repo.putFile(...a); }, db: repo.db };
         let picks = 0; const imgB = await imageTest('b.jpg', '#a5a', 640, 480);
         const m = await PP.monterPhotoPlat(await db.get('recipes', 'rc_b'), { sync }, { repo: repoB, pickFiles: async () => { picks += 1; return [imgB]; }, toast: () => {}, enLigne: () => true });
         scene.append(m.entete, m.zone);
@@ -615,7 +616,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
         eq([rc1, lu1.photo_sha256, lu1.photo_origin, await db.count('files')], [{ issue: 'refuse', raison: 'fiche_changee' }, H('c'), 'image', nf1], 'photo choisie entre le POST et l’écriture → fiche_changee, la photo de la personne intacte, AUCUNE ligne files neuve (garde AVANT putFile)');
         await poser(fiche('rc_c2', { photo_source_url: 'https://cdn.test/c2.png' }));
         let lever; const barriere = new Promise((r) => { lever = r; }); let entre; const dansPutFile = new Promise((r) => { entre = r; });
-        const repoB = { get: (...a) => repo.get(...a), getFile: (...a) => repo.getFile(...a), save: (...a) => repo.save(...a), putFile: async (...a) => { entre(); await barriere; return repo.putFile(...a); }, db: repo.db };
+        const repoB = { get: (...a) => repo.get(...a), getFile: (...a) => repo.getFile(...a), save: (...a) => repo.save(...a), saveBatch: (...a) => repo.saveBatch(...a), putFile: async (...a) => { entre(); await barriere; return repo.putFile(...a); }, db: repo.db };
         const nf2 = await db.count('files');
         file.push([200, corps200(pngC2)]);
         const pc2 = PP.rapatrierPhotoWeb('rc_c2', opts({ repo: repoB }));
@@ -766,6 +767,325 @@ export async function runPhotoPlatTests({ eq, ok }) {
         eq([f.favorite, /^[0-9a-f]{64}$/.test(f.photo_sha256 ?? ''), f.photo_origin, f.photo_source_url], [true, true, 'web', 'https://cdn.test/fav.png'], 'D-F16 : ★ Favori écrit favorite: true SANS effacer la photo posée depuis le rendu (fiche relue, leçon C4)');
       } finally { globalThis.fetch = vraiFetch; scene.remove(); PP.reinitialiserPhotoPlat(); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
     }));
+
+    // ===== Ronde 1 de la tâche 3 (revue adverse) : écritures dans la transaction (I-F5, C4, D-F16), vue périmée, vues bornées, notification avant
+    // l'insertion, redessins sérialisés (P-15), sans compte et garde refusée, gestes et rapatriement aux bords, légende après « Télécharger ».
+    const pngR1 = await octetsDe(await imageTest('r1.png', '#3a7', 800, 600, 'image/png'));
+    const corpsPngR1 = { type: 'image/png', taille: pngR1.length, url_finale: 'https://cdn.test/r1.png', octets: base64De(pngR1) };
+    const syncR1 = { user: { id: 'u1' }, auth: { jeton: async () => ({ access_token: 'jeton-ronde-sentinelle', user: { id: 'u1' } }) } };
+    // Le fetch factice des blocs de la ronde : une file de réponses ([statut, corps], ou 'suspendre', rendue par suspendus.shift()(statut, corps)) ;
+    // file vide = la PNG 800 × 600 ; `posts` compte les appels.
+    const fauxFetchR1 = () => {
+      const f = { file: [], suspendus: [], posts: 0 };
+      f.fetch = () => new Promise((resolve) => {
+        f.posts += 1;
+        const prochaine = f.file.length ? f.file.shift() : [200, corpsPngR1];
+        if (prochaine === 'suspendre') { f.suspendus.push((st, c) => resolve(reponse(st, c))); return; }
+        resolve(reponse(prochaine[0], prochaine[1]));
+      });
+      return f;
+    };
+    // Un bloc de la ronde : base jetable, scène, aucun réseau, état du module remis ; `journal` : console.error collecté (blocs qui provoquent un
+    // logError) ; les enveloppes de la base jetable (propriétés PROPRES mutate / getMany, jamais un prototype : R-F-8) sont retirées en finally.
+    const blocR1 = (nom, corps, { journal = false } = {}) => run(nom, () => withRepo(async (repo, db) => {
+      const PP = await import('../src/ui/photo-plat.js');
+      PP.reinitialiserPhotoPlat();
+      const scene = nouvelleScene();
+      const vraiFetch = globalThis.fetch; globalThis.fetch = async (u) => { throw new Error('aucun reseau attendu : ' + u); };
+      const vraiErreur = console.error; const lignes = [];
+      if (journal) console.error = (...a) => { lignes.push(a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ')); };
+      const mettre = (...rows) => db.mutate({ puts: { recipes: rows }, origin: 'device' });
+      try { await corps({ PP, repo, db, scene, journal: lignes, mettre }); }
+      finally {
+        for (const k of ['mutate', 'getMany']) if (Object.hasOwn(db, k)) delete db[k];
+        console.error = vraiErreur; globalThis.fetch = vraiFetch; scene.remove(); PP.reinitialiserPhotoPlat(); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob();
+      }
+    }));
+    // Une écriture « d'ailleurs » (un autre onglet, une descente, la synchronisation) posée JUSTE AVANT la prochaine écriture de la fiche visée, après la
+    // dernière lecture du geste : db.mutate est la porte unique (db.put y passe). `viser({ id, champs })` arme l'injection ; `arme()` dit si elle attend.
+    const ecritureJusteAvant = (db) => {
+      const vraiMutate = db.mutate; let avant = null;
+      db.mutate = async function (args = {}) {
+        const vise = !!avant && ((args.puts?.recipes || []).some((r) => r?.id === avant.id) || (args.conditions?.recipes || []).some((c) => c?.key === avant.id));
+        if (vise) { const a = avant; avant = null; await vraiMutate.call(this, { puts: { recipes: [{ ...(await this.get('recipes', a.id)), ...a.champs }] }, origin: 'device' }); }
+        return vraiMutate.call(this, args);
+      };
+      return { viser: (x) => { avant = x; }, arme: () => avant !== null };
+    };
+
+    await blocR1('ronde 1 : I-F5 dans la transaction — une écriture qui s’engage juste avant l’écriture du geste n’est jamais défaite (rapatrier, poser, retirer)', async ({ PP, repo, db, mettre }) => {
+      const inj = ecritureJusteAvant(db);
+      const f = fauxFetchR1();
+      await mettre(fiche('rc_t5', { photo_source_url: 'https://cdn.test/t5.png' }), fiche('rc_tp'), fiche('rc_tr', { photo_sha256: H('e'), photo_origin: 'image' }), fiche('rc_ta', { photo_source_url: 'https://cdn.test/ta.png' }));
+      inj.viser({ id: 'rc_t5', champs: { photo_sha256: H('d'), photo_origin: 'image', photo_source_url: null } });
+      const rT = await PP.rapatrierPhotoWeb('rc_t5', { ctx: { sync: syncR1 }, repo, fetch: f.fetch, enLigne: () => true });
+      const fT = await db.get('recipes', 'rc_t5');
+      eq([inj.arme(), f.posts, rT, fT.photo_sha256, fT.photo_origin, fT.photo_source_url], [false, 1, { issue: 'refuse', raison: 'fiche_changee' }, H('d'), 'image', null],
+        'I-F5 sans fenêtre : une photo choisie qui s’engage APRÈS la dernière relecture de la descente et AVANT son écriture n’est jamais écrasée (garde rejouée dans la transaction → fiche_changee)');
+      inj.viser({ id: 'rc_tp', champs: { original_title: 'Titre écrit juste avant' } });
+      const rP = await PP.poserPhotoPlat('rc_tp', await imageTest('tp.jpg', '#c63', 640, 480), { repo, origin: 'image' });
+      const fP = await db.get('recipes', 'rc_tp');
+      eq([inj.arme(), rP.issue, fP.original_title, fP.photo_sha256 === rP.sha256, fP.photo_origin], [false, 'ok', 'Titre écrit juste avant', true, 'image'], 'poser (C4 dans la transaction) : un titre écrit juste avant l’écriture de la photo est gardé, la photo posée');
+      inj.viser({ id: 'rc_tr', champs: { original_title: 'Titre écrit juste avant le retrait' } });
+      const rR = await PP.retirerPhotoPlat('rc_tr', { repo, attendu: { sha256: H('e'), candidat: null } });
+      const fR = await db.get('recipes', 'rc_tr');
+      inj.viser({ id: 'rc_ta', champs: { photo_sha256: H('f'), photo_origin: 'image', photo_source_url: null } });
+      const rA = await PP.retirerPhotoPlat('rc_ta', { repo, attendu: { sha256: null, candidat: 'https://cdn.test/ta.png' } });
+      const fA = await db.get('recipes', 'rc_ta');
+      eq([inj.arme(), rR, fR.original_title, fR.photo_sha256, rA, fA.photo_sha256, fA.photo_origin], [false, { issue: 'ok' }, 'Titre écrit juste avant le retrait', null, { issue: 'refuse', raison: 'fiche_changee' }, H('f'), 'image'],
+        '« Retirer » dans la transaction : un titre écrit juste avant est gardé ; « Ne pas récupérer » quand une photo s’engage juste avant → fiche_changee, la photo de la personne intacte');
+    });
+
+    await blocR1('ronde 1 : C4 relue APRÈS putFile — un titre changé, puis une fiche supprimée, PENDANT putFile', async ({ PP, repo, db, mettre }) => {
+      const avecBarriere = () => {
+        let lever; const barriere = new Promise((r) => { lever = r; }); let entre; const dans = new Promise((r) => { entre = r; });
+        const r = { get: (...a) => repo.get(...a), getFile: (...a) => repo.getFile(...a), save: (...a) => repo.save(...a), saveBatch: (...a) => repo.saveBatch(...a), putFile: async (...a) => { entre(); await barriere; return repo.putFile(...a); } };
+        return { lever, dans, repo: r };
+      };
+      await mettre(fiche('rc_s1a'), fiche('rc_s1b'));
+      const b1 = avecBarriere();
+      const p1 = PP.poserPhotoPlat('rc_s1a', await imageTest('s1a.jpg', '#a0a', 640, 480), { repo: b1.repo, origin: 'image' });
+      await b1.dans;
+      await mettre({ ...(await db.get('recipes', 'rc_s1a')), original_title: 'Titre changé pendant putFile' });
+      b1.lever();
+      const r1 = await p1;
+      const b2 = avecBarriere();
+      const p2 = PP.poserPhotoPlat('rc_s1b', await imageTest('s1b.jpg', '#0a0', 640, 480), { repo: b2.repo, origin: 'image' });
+      await b2.dans;
+      await db.mutate({ deletes: { recipes: ['rc_s1b'] }, origin: 'device' });
+      b2.lever();
+      const r2 = await p2;
+      eq([r1.issue, (await db.get('recipes', 'rc_s1a')).original_title, (await db.get('recipes', 'rc_s1a')).photo_sha256 === r1.sha256, r2, await db.get('recipes', 'rc_s1b')],
+        ['ok', 'Titre changé pendant putFile', true, { issue: 'refuse', raison: 'fiche_absente' }, undefined], 'C4 relue APRÈS putFile : un titre changé PENDANT putFile est gardé (et la photo posée) ; une fiche supprimée PENDANT putFile → fiche_absente, jamais ressuscitée');
+    });
+
+    await blocR1('ronde 1 : ★ Favori dans la transaction (D-F16) — photo écrite juste avant, valeur que l’écran annonce, fiche supprimée depuis le rendu', async ({ repo, db, scene }) => {
+      const { renderRecipe } = await import('../src/ui/recipe.js');
+      const inj = ecritureJusteAvant(db);
+      const dits = [];
+      const monterFiche = async (id) => { const p = await renderRecipe({ id }, {}, await ctxPour(repo, db, { sync: syncR1 }), { pickFiles: async () => [], toast: (m) => dits.push(m), fetch: async () => reponse(500, {}), enLigne: () => true }); scene.append(p); return p; };
+      const etoile = (p) => [...p.querySelectorAll('button')].find((b) => b.title === 'Favori');
+      const enFile = async (id) => (await db.getAll('outbox')).filter((e) => e.store === 'recipes' && e.id === id).length;
+      await db.mutate({ puts: { recipes: [fiche('rc_fa'), fiche('rc_fv'), fiche('rc_fs')], recipe_versions: [version('rc_fa'), version('rc_fv'), version('rc_fs')] }, origin: 'device' });
+      // une descente qui écrit juste avant ★ (le scénario « ★ dans les 30 s » de D-F16)
+      const pFa = await monterFiche('rc_fa');
+      inj.viser({ id: 'rc_fa', champs: { photo_sha256: H('c'), photo_origin: 'web', photo_source_url: 'https://cdn.test/fa.png' } });
+      etoile(pFa).click();
+      await attendre(async () => (await db.get('recipes', 'rc_fa')).favorite === true, '★ écrit (rc_fa)');
+      const fFa = await db.get('recipes', 'rc_fa');
+      eq([inj.arme(), fFa.favorite, fFa.photo_sha256, fFa.photo_origin, fFa.photo_source_url], [false, true, H('c'), 'web', 'https://cdn.test/fa.png'], 'D-F16 dans la transaction : une photo web écrite juste avant ★ survit (seul favorite change)');
+      // la valeur que l'écran annonce (« ☆ Favori » → favori), même si favorite a bougé ailleurs depuis le rendu
+      const pFv = await monterFiche('rc_fv');
+      const avantFv = await enFile('rc_fv');
+      await db.mutate({ puts: { recipes: [{ ...(await db.get('recipes', 'rc_fv')), favorite: true }] }, origin: 'device' });
+      etoile(pFv).click();
+      await attendre(async () => (await enFile('rc_fv')) > avantFv, '★ écrit (rc_fv)');
+      eq((await db.get('recipes', 'rc_fv')).favorite, true, '★ écrit la valeur que l’écran annonce (« ☆ Favori » → favori), jamais l’inverse de la base : un favori posé ailleurs n’est pas défait');
+      // fiche supprimée entre le rendu et ★ : rien d'écrit, « Recette introuvable. » par le toast injecté (deps.toast), aucun rejet non géré
+      const pFs = await monterFiche('rc_fs');
+      await db.mutate({ deletes: { recipes: ['rc_fs'] }, origin: 'device' });
+      dits.length = 0; const rejets = []; const surRejet = (e) => { rejets.push(e); };
+      window.addEventListener('unhandledrejection', surRejet);
+      try {
+        etoile(pFs).click();
+        await attendre(() => dits.length === 1, 'toast de la fiche supprimée');
+        await tick();
+      } finally { window.removeEventListener('unhandledrejection', surRejet); }
+      eq([dits, await db.get('recipes', 'rc_fs'), await enFile('rc_fs'), rejets.length], [['Recette introuvable.'], undefined, 0, 0], '★ sur une fiche supprimée depuis le rendu : « Recette introuvable. » (toast injecté), aucune fiche recréée, rien en file, aucun rejet');
+    });
+
+    await blocR1('ronde 1 : vues bornées — chaque montage purge les zones détachées ou jamais insérées', async ({ PP, repo, db, scene, mettre }) => {
+      const monter = async (id) => PP.monterPhotoPlat(await db.get('recipes', id), { sync: syncR1 }, { repo, pickFiles: async () => [], toast: () => {}, enLigne: () => true });
+      const inserer = (m) => { scene.append(m.entete, m.zone); return m; };
+      await mettre(fiche('rc_va'), fiche('rc_vb'), fiche('rc_vc'), fiche('rc_vd'), fiche('rc_ve'));
+      const mA = inserer(await monter('rc_va')); const mB = inserer(await monter('rc_vb'));
+      const deux = PP.vuesPhotoPlat();
+      mA.entete.remove(); mA.zone.remove(); // la fiche A quittée
+      inserer(await monter('rc_vc'));
+      const apresC = PP.vuesPhotoPlat();
+      await monter('rc_vd'); // jamais insérée (route abandonnée, fiche sans version : D-F8)
+      inserer(await monter('rc_ve'));
+      const apresE = PP.vuesPhotoPlat();
+      window.dispatchEvent(new Event('online')); // une notification voit B, C et E dans le document
+      mB.entete.remove(); mB.zone.remove(); // puis B quittée
+      window.dispatchEvent(new Event('online'));
+      eq([deux, apresC, apresE, PP.vuesPhotoPlat()], [2, 2, 3, 2], 'vues bornées : chaque montage purge les zones détachées (A quittée, D jamais insérée) ; une zone vue insérée puis détachée (B) est purgée par la notification suivante');
+    });
+
+    await blocR1('ronde 1 : l’image de tête est gardée telle quelle par un redessin qui ne la change pas (aucune URL blob: neuve, aucun second décodage)', async ({ PP, repo, db, scene, mettre }) => {
+      const j = await imageTest('k.jpg', '#a33', 400, 300); const s = await sha256Hex(j); await repo.putFile(s, j, { mime: 'image/jpeg', origin: 'device' });
+      await mettre(fiche('rc_k', { photo_sha256: s, photo_origin: 'image' }));
+      const m = await PP.monterPhotoPlat(await db.get('recipes', 'rc_k'), { sync: syncR1 }, { repo, pickFiles: async () => [], toast: () => {}, enLigne: () => true });
+      scene.append(m.entete, m.zone);
+      const img = m.entete.querySelector('img'); const src = img?.getAttribute('src');
+      const cont = m.zone.querySelector('[data-role="zone-photo-plat"]');
+      let dessins = 0; const vraiRemplacer = cont.replaceChildren;
+      cont.replaceChildren = function (...a) { dessins += 1; return vraiRemplacer.apply(this, a); }; // propriété propre du nœud, jamais un prototype
+      window.dispatchEvent(new Event('online')); window.dispatchEvent(new Event('online'));
+      await attendre(() => dessins >= 2, 'deux redessins');
+      eq([!!src?.startsWith('blob:'), m.entete.querySelector('img') === img, img?.getAttribute('src') === src, !!img?.isConnected], [true, true, true, true],
+        'un redessin qui ne change ni le pointeur, ni les octets, ni la légende garde la figure de tête : même img, même URL blob: (aucun scintillement)');
+    });
+
+    await blocR1('ronde 1 : notification entre le montage et l’insertion (fiche sans pages) — un échec fini avant l’insertion, puis une réussite', async ({ PP, repo, db, scene, mettre }) => {
+      const f = fauxFetchR1();
+      const monter = async (id) => PP.monterPhotoPlat(await db.get('recipes', id), { sync: syncR1 }, { repo, pickFiles: async () => [], toast: () => {}, fetch: f.fetch, enLigne: () => true });
+      const inserer = (m) => { scene.append(m.entete, m.zone); return m; };
+      const ligneWeb = (m) => m.zone.querySelector('[data-role="photo-web-etat"]');
+      await mettre(fiche('rc_ni', { photo_source_url: 'https://cdn.test/ni.png' }), fiche('rc_ns', { photo_source_url: 'https://cdn.test/ns.png' }));
+      // le départ automatique de la tâche 5 : la descente part avant le montage et finit (échec) pendant la fin du rendu, AVANT l'insertion
+      f.file.push('suspendre');
+      const pNi = PP.rapatrierPhotoWeb('rc_ni', { ctx: { sync: syncR1 }, repo, fetch: f.fetch, enLigne: () => true });
+      await attendre(() => f.suspendus.length === 1, 'POST parti (ni)');
+      const mNi = await monter('rc_ni');
+      const pendant = ligneWeb(mNi)?.textContent;
+      f.suspendus.shift()(502, { erreur: 'inaccessible' });
+      await pNi;
+      inserer(mNi);
+      await attendre(() => !!ligneWeb(mNi)?.textContent.includes('Photo du plat non récupérée.'), '« non récupérée » après l’insertion');
+      // la même, réussie : la descente part juste avant l'insertion, dans le même tour (comme le routeur pour une fiche sans pages)
+      const mNs = await monter('rc_ns');
+      const pNs = PP.rapatrierPhotoWeb('rc_ns', { ctx: { sync: syncR1 }, repo, fetch: f.fetch, enLigne: () => true });
+      inserer(mNs);
+      await pNs;
+      await attendre(() => !!mNs.entete.querySelector('img'), 'l’image en tête après la descente');
+      eq([pendant, !!ligneWeb(mNi)?.textContent.includes('Récupération'), ligneWeb(mNs)], ['Récupération de la photo du plat…', false, null],
+        'notification entre le montage et l’insertion : la vue n’est jamais perdue — « non récupérée » après un échec fini avant l’insertion, l’image après une réussite');
+    }, { journal: true }); // l'échec journalise photo_web.echec
+
+    await blocR1('ronde 1 : fiche à pages — une notification pendant la fin du rendu (après le montage, avant l’insertion) ne perd pas la vue', async ({ repo, db, scene }) => {
+      const { renderRecipe } = await import('../src/ui/recipe.js');
+      const f = fauxFetchR1();
+      await db.mutate({ puts: { recipes: [fiche('rc_pg', { source_page_ids: ['pg_r1'], photo_source_url: 'https://cdn.test/pg.png' })], recipe_versions: [version('rc_pg')] }, origin: 'device' });
+      // renderRecipe attend encore les vignettes des pages APRÈS monterPhotoPlat : la lecture des octets de la page est retenue (enveloppe propre de getMany)
+      const vraiGetMany = db.getMany;
+      let lever; const barriere = new Promise((r) => { lever = r; }); let entre; const dans = new Promise((r) => { entre = r; });
+      db.getMany = async function (store, keys) { if (store === 'files' && Array.isArray(keys) && keys.includes(H('9'))) { entre(); await barriere; } return vraiGetMany.call(this, store, keys); };
+      const prPg = renderRecipe({ id: 'rc_pg' }, {}, await ctxPour(repo, db, { sync: syncR1, pagesById: new Map([['pg_r1', { id: 'pg_r1', sha256: H('9'), printed_page: 3 }]]) }), { pickFiles: async () => [], toast: () => {}, fetch: f.fetch, enLigne: () => true });
+      await dans; await tick(); await tick(); // monté ; une réinscription différée d'un tour aurait déjà tiré : la racine n'est pas encore insérée
+      window.dispatchEvent(new Event('online')); // une notification pendant la fin du rendu (online, ou la fin du rapatriement d'une AUTRE fiche)
+      lever();
+      const pPg = await prPg;
+      scene.append(pPg);
+      const zPg = pPg.querySelector('[data-role="zone-photo-plat"]');
+      zPg.querySelector('[data-role="reessayer-photo"]').click();
+      await attendre(() => !!pPg.querySelector('[data-role="photo-plat"] img'), 'l’image en tête après « Réessayer » (fiche à pages)');
+      eq([zPg.textContent.includes('Photo du plat non récupérée.'), (await db.get('recipes', 'rc_pg')).photo_origin, f.posts], [false, 'web', 1],
+        'fiche à pages : une notification arrivée pendant la fin du rendu ne perd pas la vue — « Réessayer » réussi redessine la zone et l’en-tête');
+    });
+
+    await blocR1('ronde 1 : redessins sérialisés (P-15) — un redessin lent qui finit après un plus récent ne laisse jamais la zone périmée', async ({ PP, repo, db, scene, mettre }) => {
+      await mettre(fiche('rc_ser', { photo_source_url: 'https://cdn.test/ser.png' }));
+      let bloquer = false; let lever; const barriere = new Promise((r) => { lever = r; }); let entre; const dans = new Promise((r) => { entre = r; });
+      const repoS = { get: async (s, k) => { const r = await repo.get(s, k); if (bloquer && s === 'recipes' && k === 'rc_ser') { bloquer = false; entre(); await barriere; } return r; },
+        getFile: (...a) => repo.getFile(...a), putFile: (...a) => repo.putFile(...a), saveBatch: (...a) => repo.saveBatch(...a) };
+      const m = await PP.monterPhotoPlat(await db.get('recipes', 'rc_ser'), { sync: syncR1 }, { repo: repoS, pickFiles: async () => [], toast: () => {}, enLigne: () => true });
+      scene.append(m.entete, m.zone);
+      const cont = m.zone.querySelector('[data-role="zone-photo-plat"]');
+      let dessins = 0; const vraiRemplacer = cont.replaceChildren;
+      cont.replaceChildren = function (...a) { dessins += 1; return vraiRemplacer.apply(this, a); }; // propriété propre du nœud, jamais un prototype
+      bloquer = true; window.dispatchEvent(new Event('online')); // redessin 1 : lit la fiche au cas 5, puis reste bloqué
+      await dans;
+      await mettre({ ...(await db.get('recipes', 'rc_ser')), photo_source_url: null }); // la fiche passe au cas 1
+      window.dispatchEvent(new Event('online')); // redessin 2
+      for (let i = 0; i < 30 && dessins < 1; i += 1) await new Promise((r) => setTimeout(r, 10)); // borné : un redessin NON sérialisé finirait ici
+      lever();
+      await attendre(() => dessins >= 2, 'les deux redessins finis');
+      await tick();
+      eq([cont.textContent.includes('Ajoute une photo du plat : elle illustre la recette dans tes listes.'), cont.textContent.includes('Photo du plat non récupérée.')], [true, false],
+        'redessins sérialisés : la zone finit sur l’état relu le plus récent (cas 1), jamais sur celui du redessin lent (cas 5)');
+    });
+
+    await blocR1('ronde 1 : sans compte, et garde de compte refusée — « Réessayer » éteint, la bonne ligne dessous, une fois', async ({ PP, repo, db, mettre }) => {
+      await mettre(fiche('rc_sc', { photo_source_url: 'https://cdn.test/sc.png' }), fiche('rc_gr', { photo_source_url: 'https://cdn.test/gr.png' }));
+      const GARDE = 'Garde de compte refusée (test).';
+      const CONNECTE = 'Connecte-toi pour utiliser l’assistant.';
+      const monter = async (id, ctx) => PP.monterPhotoPlat(await db.get('recipes', id), ctx, { repo, pickFiles: async () => [], toast: () => {}, enLigne: () => true });
+      const mSc = await monter('rc_sc', { sync: {} });
+      const mGr = await monter('rc_gr', { sync: { user: null, guard: { ok: false, message: GARDE } } });
+      const re = (m) => m.zone.querySelector('[data-role="reessayer-photo"]');
+      const fois = (m, s) => m.zone.textContent.split(s).length - 1;
+      eq([re(mSc)?.disabled, fois(mSc, CONNECTE), re(mGr)?.disabled, fois(mGr, GARDE), fois(mGr, CONNECTE)], [true, 1, true, 1, 0],
+        'fiche montée sans compte (ctx.sync sans user) : « Réessayer » éteint et « Connecte-toi… » une fois ; garde de compte refusée : son message à la place (F-7), jamais « Connecte-toi… »');
+    });
+
+    await blocR1('ronde 1 : vue périmée — « Ne pas récupérer » et « Retirer » après qu’un autre onglet a posé une photo', async ({ PP, repo, db, scene, mettre }) => {
+      const poserOctets = async (couleur) => { const j = await imageTest(couleur + '.jpg', couleur, 400, 300); const s = await sha256Hex(j); await repo.putFile(s, j, { mime: 'image/jpeg', origin: 'device' }); return s; };
+      const shaA = await poserOctets('#a33'); const shaB = await poserOctets('#33a');
+      await mettre(fiche('rc_vp', { photo_source_url: 'https://cdn.test/vp.png' }), fiche('rc_vr', { photo_sha256: shaA, photo_origin: 'image' }));
+      const dits = [];
+      const monter = async (id) => { const m = await PP.monterPhotoPlat(await db.get('recipes', id), { sync: syncR1 }, { repo, pickFiles: async () => [], toast: (x) => dits.push(x), enLigne: () => true }); scene.append(m.entete, m.zone); return m; };
+      const mVp = await monter('rc_vp'); const mVr = await monter('rc_vr');
+      const avantVp = !!mVp.zone.querySelector('[data-role="photo-web-etat"]')?.textContent.includes('Photo du plat non récupérée.');
+      // un autre onglet (aucune notification d'un document à l'autre) pose une photo sur rc_vp et en met une autre sur rc_vr
+      await mettre({ ...(await db.get('recipes', 'rc_vp')), photo_sha256: shaB, photo_origin: 'image', photo_source_url: null });
+      await mettre({ ...(await db.get('recipes', 'rc_vr')), photo_sha256: shaB, photo_origin: 'photo' });
+      await mVp.gestes.abandonner(); await mVr.gestes.retirer();
+      const fVp = await db.get('recipes', 'rc_vp'); const fVr = await db.get('recipes', 'rc_vr');
+      eq([avantVp, fVp.photo_sha256, fVp.photo_origin, fVr.photo_sha256, fVr.photo_origin, dits, etiquettes(mVp.zone), !!mVp.entete.querySelector('img')],
+        [true, shaB, 'image', shaB, 'photo', [], ['Photographier', 'Choisir une image', 'Retirer'], true],
+        'vue périmée : « Ne pas récupérer » (zone au cas 5) puis « Retirer » (photo A rendue) après qu’un autre onglet a posé une photo → rien d’effacé, aucun toast, la zone redessinée sur l’état relu');
+    });
+
+    await blocR1('ronde 1 : gestes et rapatriement aux bords — choix annulé, écriture qui lève, lecture qui lève, origine nulle, fiche reçue hors vocabulaire', async ({ PP, repo, db, journal, mettre }) => {
+      const f = fauxFetchR1();
+      const ctx = { sync: syncR1 };
+      const comme = (over) => ({ get: (...a) => repo.get(...a), getFile: (...a) => repo.getFile(...a), putFile: (...a) => repo.putFile(...a), save: (...a) => repo.save(...a), saveBatch: (...a) => repo.saveBatch(...a), ...over });
+      // un choix annulé (pickFiles ne se résout jamais, dom.js), puis un second « Choisir une image »
+      await mettre(fiche('rc_pk'));
+      let picks = 0; const imgPk = await imageTest('pk.jpg', '#c63', 640, 480);
+      const mPk = await PP.monterPhotoPlat(await db.get('recipes', 'rc_pk'), ctx, { repo, pickFiles: () => { picks += 1; return picks === 1 ? new Promise(() => {}) : Promise.resolve([imgPk]); }, toast: () => {}, enLigne: () => true });
+      mPk.gestes.choisir();
+      await mPk.gestes.choisir();
+      eq([picks, (await db.get('recipes', 'rc_pk')).photo_origin], [2, 'image'], 'un choix annulé ne fige pas la zone : un second « Choisir une image » rappelle pickFiles et pose la photo (occupe seulement APRÈS le choix)');
+      // une écriture qui lève
+      await mettre(fiche('rc_ew'));
+      const panne = async () => { throw new Error('panne d’écriture'); };
+      const repoE = comme({ save: panne, saveBatch: panne });
+      const ditsE = [];
+      const mE = await PP.monterPhotoPlat(await db.get('recipes', 'rc_ew'), ctx, { repo: repoE, pickFiles: async () => [await imageTest('ew.jpg', '#c63', 640, 480)], toast: (m) => ditsE.push(m), enLigne: () => true });
+      journal.length = 0;
+      await mE.gestes.choisir();
+      const direct = await PP.poserPhotoPlat('rc_ew', await imageTest('ew2.jpg', '#36c', 640, 480), { repo: repoE, origin: 'image' });
+      eq([ditsE, journal.some((l) => l.includes('photo_plat.pose')), direct, (await db.get('recipes', 'rc_ew')).photo_sha256 ?? null],
+        [['La photo du plat n’a pas pu être changée. Réessaie.'], true, { issue: 'echec', raison: 'ecriture' }, null], 'une écriture qui lève : echec(ecriture), logError photo_plat.pose, le toast d’échec (jamais « Recette introuvable. »), rien d’écrit');
+      // une lecture qui lève pendant la descente
+      await mettre(fiche('rc_gl', { photo_source_url: 'https://cdn.test/gl.png' }));
+      journal.length = 0;
+      const lev = await Promise.allSettled([PP.rapatrierPhotoWeb('rc_gl', { ctx, repo: comme({ get: async () => { throw new Error('panne de lecture'); } }), fetch: f.fetch, enLigne: () => true })]);
+      eq([lev[0].status, lev[0].value, journal.some((l) => l.includes('photo_web.echec')), PP.recuperationEnCours('rc_gl')], ['fulfilled', { issue: 'echec', raison: 'interne' }, true, false],
+        'une lecture qui lève pendant la descente : la promesse se RÉSOUT en echec(interne), photo_web.echec journalisé, le vol est rendu (I-F4, P-17)');
+      // un pointeur valide d'origine NULLE (photo d'avant le lot, P-6) : la photo de la personne (D-F10)
+      await mettre(fiche('rc_on', { photo_sha256: H('e'), photo_origin: null, photo_source_url: 'https://cdn.test/on.png' }));
+      const avantOn = f.posts;
+      const rOn = await PP.rapatrierPhotoWeb('rc_on', { candidat: 'https://cdn.test/autre.png', ctx, repo, fetch: f.fetch, enLigne: () => true });
+      const fOn = await db.get('recipes', 'rc_on');
+      eq([rOn, f.posts - avantOn, fOn.photo_sha256, fOn.photo_origin], [{ issue: 'refuse', raison: 'photo_manuelle' }, 0, H('e'), null], 'D-F10 : un pointeur valide d’origine NULLE compte comme la photo de la personne — photo_manuelle, zéro POST, pointeur intact');
+      // une fiche reçue dont un AUTRE champ est hors vocabulaire (source_kind d'une version plus récente)
+      await mettre(fiche('rc_vk', { source_kind: 'pdf', photo_source_url: 'https://cdn.test/vk.png' }), fiche('rc_vk2', { source_kind: 'pdf' }));
+      const rVk = await PP.rapatrierPhotoWeb('rc_vk', { ctx, repo, fetch: f.fetch, enLigne: () => true });
+      const fVk = await db.get('recipes', 'rc_vk');
+      const rVk2 = await PP.poserPhotoPlat('rc_vk2', await imageTest('vk.jpg', '#c63', 640, 480), { repo, origin: 'photo' });
+      const rVk3 = await PP.retirerPhotoPlat('rc_vk2', { repo });
+      eq([rVk.issue, fVk.source_kind, fVk.photo_origin, rVk2.issue, rVk3.issue], ['ok', 'pdf', 'web', 'ok', 'ok'],
+        'une fiche reçue dont un AUTRE champ est hors vocabulaire : rapatrier, poser et retirer aboutissent — seul ce qui est écrit passe le vocabulaire (aucun appel payé pour une écriture impossible)');
+    }, { journal: true });
+
+    await blocR1('ronde 1 : photo WEB aux octets distants — après « Télécharger », l’image ET sa légende (§ 4.1.4)', async ({ repo, db, scene }) => {
+      const { renderRecipe } = await import('../src/ui/recipe.js');
+      const jpegL = await imageTest('l.jpg', '#c63', 320, 240);
+      await db.mutate({ puts: { files: [{ sha256: H('7'), mime: 'image/jpeg', size: jpegL.size, updated_at: DATE, remote: { sha256: H('7'), size: jpegL.size, mime: 'image/jpeg', quality: 'reduite', uploaded_at: DATE, owner: 'u1' } }] }, origin: 'remote' });
+      const moteur = { telecharger: async () => { const ligne = await db.get('files', H('7')); await db.mutate({ puts: { files: [{ ...ligne, blob: jpegL }] }, origin: 'remote' }); return { recus: 1, erreurs: 0, erreur: null }; },
+        reessayerFichier: async () => ({ recus: 0, erreurs: 0, erreur: null }), onEtat: () => () => {} };
+      await db.mutate({ puts: { recipes: [fiche('rc_lg', { source_url: 'https://recettes.test/x', photo_sha256: H('7'), photo_origin: 'web', photo_source_url: 'https://cdn.test/lg.jpg' })], recipe_versions: [version('rc_lg')] }, origin: 'device' });
+      const p = await renderRecipe({ id: 'rc_lg' }, {}, await ctxPour(repo, db, { sync: { user: { id: 'u1' }, moteur } }));
+      scene.append(p);
+      const tete = p.querySelector('[data-role="photo-plat"]');
+      const avant = tete?.querySelector('[data-role="legende-photo-plat"]') ?? null;
+      [...tete.querySelectorAll('button')].find((b) => b.textContent === 'Télécharger').click();
+      await attendre(() => !!tete.querySelector('img'), 'image en tête après « Télécharger »');
+      eq([avant, tete.querySelector('[data-role="legende-photo-plat"]')?.textContent], [null, 'Image de la page recettes.test'], 'photo web aux octets distants : la légende arrive AVEC l’image, après « Télécharger » (calculée dans le redessin de la figure)');
+    });
 
     // ===== fin des blocs du lot F (les tâches 3 à 5 ajoutent les leurs AU-DESSUS de cette ligne)
   } finally { setUiLocale(localeAvant); }

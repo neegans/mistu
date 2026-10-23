@@ -12,23 +12,34 @@ import { lienSignet } from '../core/lien.js';
 import { urlDeBlob, revoquerUrlDeBlob } from '../core/blob-urls.js';
 import { preparerPhotoLocale, preparerPhotoDistante, ErreurImage, messageErreurImage } from '../core/image.js';
 import * as repoModule from '../model/repo.js';
-import { HASH } from '../model/schema.js';
 import { assertVocabulaire } from '../domain/vocabulaire.js';
-import { adresseImageAdmise, memeAdresseImage, lireImageWeb, RAISONS_DEFINITIVES } from '../domain/photo-web.js';
+import { adresseImageAdmise, memeAdresseImage, lireImageWeb, pointeurValide, RAISONS_DEFINITIVES } from '../domain/photo-web.js';
 import { displayUrl, typeAffichage, safeDisplayType } from '../sync/mime.js';
-import { section, sessionAssistant, texteRefusAssistant, texteEchecAssistant, vignettePage, gesteTelechargement, relireErreurs, renderZoneCouverture } from './components.js';
+import { section, sessionAssistant, texteRefusAssistant, texteEchecAssistant, messageGardeRefusee, vignettePage, gesteTelechargement, relireErreurs, renderZoneCouverture } from './components.js';
 
-const pointeur = (f) => (typeof f?.photo_sha256 === 'string' && HASH.test(f.photo_sha256) ? f.photo_sha256 : null);
+// Ronde 1 : UNE définition du pointeur valide (pointeurValide, photo-web.js) — la zone, le rapatriement et le domaine (candidatPhotoWeb) jugent le même.
+const pointeur = (f) => (pointeurValide(f) ? f.photo_sha256 : null);
 const lireEnLigne = () => (typeof navigator === 'undefined' ? true : navigator.onLine !== false);
 let enLigneFlag = lireEnLigne();
 const enVol = new Map();          // recipe_id → { controller, promesse } : un rapatriement par fiche et par document (D-F7)
 const derniersEchecs = new Map(); // recipe_id → { raison, extra, tape, url } : la raison du dernier échec, pour l'adresse tentée (D-F17)
-const vues = new Set();           // { root, recipeId, redessiner } : les zones montées, purgées par isConnected
+// Les zones montées : { root (la section), entete, recipeId, redessiner, inseree }. Ronde 1 : le routeur insère la racine APRÈS la fin de la route,
+// parfois bien après le montage (une fiche à pages attend encore ses vignettes) — une vue jamais vue dans le document est REDESSINÉE (ses nœuds y
+// entreront à jour), jamais purgée par notifier ; seule une vue vue insérée puis détachée l'est. Une vue jamais insérée (route abandonnée, fiche sans
+// version : D-F8) est purgée au montage suivant (enregistrerVue) : l'ensemble reste borné en permanence (motif de search.js), sans attendre une
+// notification (sur le Mac, toujours en ligne, il n'en vient parfois aucune).
+const vues = new Set();
+const dansLeDocument = (v) => v.root.isConnected || v.entete.isConnected;
 function notifier(recipeId = null) {
   for (const v of [...vues]) {
-    if (!v.root.isConnected) { vues.delete(v); continue; }
+    if (dansLeDocument(v)) v.inseree = true;
+    else if (v.inseree) { vues.delete(v); continue; }
     if (recipeId === null || v.recipeId === recipeId) v.redessiner();
   }
+}
+function enregistrerVue(vue) {
+  for (const v of [...vues]) if (!dansLeDocument(v)) vues.delete(v);
+  vues.add(vue);
 }
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => { enLigneFlag = true; notifier(); });
@@ -37,16 +48,18 @@ if (typeof window !== 'undefined') {
 export const recuperationEnCours = (recipeId) => enVol.has(recipeId);
 export const attendreRecuperation = (recipeId) => enVol.get(recipeId)?.promesse ?? Promise.resolve();
 export function reinitialiserPhotoPlat() { for (const e of enVol.values()) e.controller.abort(); enVol.clear(); vues.clear(); derniersEchecs.clear(); enLigneFlag = lireEnLigne(); } // tests seulement
+export const vuesPhotoPlat = () => vues.size; // tests seulement (ronde 1 : l'ensemble des vues reste borné)
 
 // --- La figure de tête (lot A D-4 ; lot G § 4.4) : le photoDuPlat de G DÉPLACÉ, avec deux différences — le pointeur doit passer HASH, et une image
 // web porte sa légende (D-F11 : l'hôte RECALCULÉ depuis l'adresse de la recette, jamais celle de l'image). Aucune ligne files : null (rien, pas
 // même un cadre) ; octets d'un type que typeAffichage ne rend pas image/ : null ; sans octets : la vignette d'état de G et son « Télécharger »,
-// redessinée sur place. La légende est calculée DANS le redessin : elle suit l'image après un téléchargement.
-export async function figurePhotoPlat(recipe, { repo = repoModule, ctxF = {} } = {}) {
+// redessinée sur place. La légende est calculée DANS le redessin : elle suit l'image après un téléchargement. Ronde 1 : `fichier` (facultatif) =
+// la ligne files déjà lue par l'appelant (la zone la lit pour `present`) — une seule lecture par redessin ; absent (undefined), elle est lue ici.
+export async function figurePhotoPlat(recipe, { repo = repoModule, ctxF = {}, fichier: dejaLu = undefined } = {}) {
   const sha = pointeur(recipe);
   if (!sha) return null;
-  let fichier = null;
-  try { fichier = await repo.getFile(sha); } catch { fichier = null; }
+  let fichier = dejaLu ?? null;
+  if (dejaLu === undefined) { try { fichier = await repo.getFile(sha); } catch { fichier = null; } }
   if (!fichier) return null;
   // Lot G (ronde 1 de sa tâche 6, recopiée) : sans octets, rien n'est offert si ce qui arrivera ne s'affichera pas — le type que portera le blob reçu (remote.mime), sinon celui
   // de la ligne (typeAffichage) ; une ligne distante application/pdf réussissait chaque tape sans que rien ne change (boucle muette).
@@ -107,17 +120,19 @@ export function etatZonePlat(recipe, { present = false, enVol = false, enLigne =
   return etat;
 }
 
-// --- Le rendu de la zone : le composant de la couverture (libellé et nom accessible de la photo du plat), puis la ligne web.
-export function renderZonePhotoPlat(etat, gestes = {}) {
+// --- Le rendu de la zone : le composant de la couverture (libellé et nom accessible de la photo du plat), puis la ligne web. Ronde 1 : les gestes du
+// composant lui sont passés tels quels (renderZoneCouverture porte déjà la garde `typeof`) ; `gardeRefusee` (messageGardeRefusee(ctx.sync), F-7) : la
+// garde de compte a refusé l'adresse — sous un « Réessayer » éteint faute de compte, son message remplace « Connecte-toi… » (se connecter y ramènerait).
+export function renderZonePhotoPlat(etat, gestes = {}, { gardeRefusee = null } = {}) {
   const g = (nom) => () => (typeof gestes[nom] === 'function' ? gestes[nom]() : undefined);
   const composant = renderZoneCouverture({ sha256: etat.sha256, apercu: null, message: etat.message, enCours: etat.enCours },
-    { photographier: g('photographier'), choisir: g('choisir'), retirer: g('retirer') },
+    { photographier: gestes.photographier, choisir: gestes.choisir, retirer: gestes.retirer },
     { libelle: t('Photo du plat'), nomRetirer: t('Retirer la photo du plat') });
   let ligne = null;
   if (etat.web === 'en_cours') ligne = el('p', { class: 'status', role: 'status', dataset: { role: 'photo-web-etat' } }, t('Récupération de la photo du plat…'));
   else if (etat.web === 'echouee') {
     const motif = etat.motifEteint === 'hors_ligne' ? el('small', { class: 'muted' }, t('Tu es hors ligne.'))
-      : etat.motifEteint === 'sans_compte' ? el('small', { class: 'muted' }, t('Connecte-toi pour utiliser l’assistant.')) : null;
+      : etat.motifEteint === 'sans_compte' ? el('small', { class: 'muted' }, gardeRefusee ?? t('Connecte-toi pour utiliser l’assistant.')) : null;
     ligne = el('div', { class: 'stack', dataset: { role: 'photo-web-etat' } },
       el('small', { class: 'muted' }, t('Photo du plat non récupérée.')),
       etat.raison ? el('small', { class: 'muted', dataset: { role: 'raison-photo-web' } }, etat.raison) : null,
@@ -135,8 +150,25 @@ export function ligneAnnoncePhotoWeb() {
   return el('small', { class: 'muted', dataset: { role: 'photo-web-annonce' } }, t('Après l’enregistrement, l’app essaiera de récupérer la photo du plat de la page : un appel de plus, compté dans ton quota du jour.'));
 }
 
-// --- Poser (§ 4.1.3) : le mur local, la fiche relue AVANT putFile (une fiche absente n'entraîne aucune ligne files), puis relue encore (C4) ;
-// les trois champs ENSEMBLE ; une photo choisie efface le candidat web (D-F10). Ne lève jamais (sauf une origine hors liste : erreur de programmation).
+// --- Écrire les champs de la photo (ronde 1 : I-F5 sans fenêtre d'await, C4, D-F16) : sur la fiche RELUE DANS la transaction d'écriture — la condition
+// { key, fusion } du lot G (src/core/db.js), par repo.saveBatch (fiche nettoyée, horodatée, capturée ; le motif de regroupement.js). Une écriture d'ailleurs
+// engagée depuis la dernière lecture du geste n'est jamais défaite. `champs(courante)` rend les champs à poser, ou null (refus : rien d'écrit). Seul ce
+// qui est écrit passe le vocabulaire : une fiche reçue d'une version plus récente garde ses autres champs tels quels (D-F19). → 'ecrite' | 'absente' | 'changee'.
+async function ecrireChamps(repo, recipeId, champs) {
+  let issue = 'ecrite';
+  await repo.saveBatch({}, { conditions: { recipes: [{ key: recipeId, fusion: (courante) => {
+    if (!courante) { issue = 'absente'; return null; }
+    const pose = champs(courante);
+    if (!pose) { issue = 'changee'; return null; }
+    assertVocabulaire(pose, 'recipes');
+    return { ...courante, ...pose };
+  } }] } });
+  return issue;
+}
+
+// --- Poser (§ 4.1.3) : le mur local, la fiche relue AVANT putFile (une fiche absente n'entraîne aucune ligne files), puis relue encore (C4) — ronde 1 :
+// DANS la transaction d'écriture ; les trois champs ENSEMBLE ; une photo choisie efface le candidat web (D-F10). Ne lève jamais (sauf une origine hors
+// liste : erreur de programmation).
 export async function poserPhotoPlat(recipeId, file, { repo = repoModule, origin } = {}) {
   if (origin !== 'photo' && origin !== 'image') throw new TypeError('poserPhotoPlat : origine ' + String(origin));
   let jpeg;
@@ -146,11 +178,8 @@ export async function poserPhotoPlat(recipeId, file, { repo = repoModule, origin
     if (!(await repo.get('recipes', recipeId))) return { issue: 'refuse', raison: 'fiche_absente' };
     const sha = await sha256Hex(jpeg);
     await repo.putFile(sha, jpeg, { mime: 'image/jpeg' });
-    const courante = await repo.get('recipes', recipeId);
-    if (!courante) return { issue: 'refuse', raison: 'fiche_absente' }; // la ligne files reste : orphelin L5
-    const ecrite = { ...courante, photo_sha256: sha, photo_origin: origin, photo_source_url: null };
-    assertVocabulaire(ecrite, 'recipes');
-    await repo.save('recipes', ecrite);
+    const issue = await ecrireChamps(repo, recipeId, () => ({ photo_sha256: sha, photo_origin: origin, photo_source_url: null }));
+    if (issue === 'absente') return { issue: 'refuse', raison: 'fiche_absente' }; // la ligne files reste : orphelin L5
     derniersEchecs.delete(recipeId);
     return { issue: 'ok', sha256: sha };
   } catch (e) {
@@ -159,14 +188,16 @@ export async function poserPhotoPlat(recipeId, file, { repo = repoModule, origin
   }
 }
 
-// « Retirer » et « Ne pas récupérer » (D-F4) : les trois champs à null sur la fiche relue ; la ligne files reste (orphelins = L5). Aucun appel.
-export async function retirerPhotoPlat(recipeId, { repo = repoModule } = {}) {
+// « Retirer » et « Ne pas récupérer » (D-F4) : les trois champs à null sur la fiche relue dans la transaction ; la ligne files reste (orphelins = L5).
+// Aucun appel. Ronde 1 : `attendu` = ce que la zone MONTRAIT ({ sha256, candidat }) — « Retirer » n'enlève que la photo vue, « Ne pas récupérer » que le
+// candidat vu, sans photo ; une fiche changée depuis (un autre onglet a posé une photo, aucune notification d'un document à l'autre) n'est pas touchée :
+// refuse(fiche_changee). Sans `attendu` (appel direct) : aucune condition.
+export async function retirerPhotoPlat(recipeId, { repo = repoModule, attendu = null } = {}) {
+  const conforme = (c) => attendu == null || (attendu.sha256 ? pointeur(c) === attendu.sha256 : pointeur(c) === null && memeAdresseImage(c.photo_source_url, attendu.candidat));
   try {
-    const courante = await repo.get('recipes', recipeId);
-    if (!courante) return { issue: 'refuse', raison: 'fiche_absente' };
-    const ecrite = { ...courante, photo_sha256: null, photo_origin: null, photo_source_url: null };
-    assertVocabulaire(ecrite, 'recipes');
-    await repo.save('recipes', ecrite);
+    const issue = await ecrireChamps(repo, recipeId, (c) => (conforme(c) ? { photo_sha256: null, photo_origin: null, photo_source_url: null } : null));
+    if (issue === 'absente') return { issue: 'refuse', raison: 'fiche_absente' };
+    if (issue === 'changee') return { issue: 'refuse', raison: 'fiche_changee' };
     derniersEchecs.delete(recipeId);
     return { issue: 'ok' };
   } catch (e) {
@@ -203,6 +234,8 @@ async function descendre(recipeId, entree, { candidat = null, tape = false, ctx 
     if (!fiche) return refuser('fiche_absente');
     const depart = { photo_sha256: fiche.photo_sha256, photo_origin: fiche.photo_origin, photo_source_url: fiche.photo_source_url };
     const sha = pointeur(fiche);
+    // Les deux refus de D-F10 (photo_manuelle, deja_la) sont ceux de candidatPhotoWeb (photo-web.js), ici pour NOMMER la raison : une règle changée là se
+    // change ici (ronde 1 : le pointeur, lui, a une seule définition, pointeurValide).
     if (sha && fiche.photo_origin !== 'web') return refuser('photo_manuelle'); // D-F10 : une origine nulle avec un pointeur compte comme celle de la personne
     url = candidat !== null ? adresseImageAdmise(candidat) : adresseImageAdmise(fiche.photo_source_url);
     if (!url) return refuser('adresse');
@@ -215,18 +248,20 @@ async function descendre(recipeId, entree, { candidat = null, tape = false, ctx 
     let jpeg;
     try { jpeg = await preparerPhotoDistante(r.blob); } catch (e) { return echouer(e instanceof ErreurImage ? e.code : 'indecodable'); }
     const sha2 = await sha256Hex(jpeg);
-    // Garde des trois champs (I-F1, I-F5, D-F18), AVANT putFile puis encore avant l'écriture : la personne a pu choisir une photo, retirer, refuser
-    // le rapatriement, ou une relecture changer l'adresse — rien n'est alors écrasé.
+    // Garde des trois champs (I-F1, I-F5, D-F18), AVANT putFile puis encore à l'écriture — ronde 1 : rejouée DANS la transaction (ecrireChamps), une
+    // photo choisie qui s'engage juste avant n'est jamais écrasée : la personne a pu choisir une photo, retirer, refuser le rapatriement, ou une
+    // relecture changer l'adresse — rien n'est alors écrasé.
     const inchangee = (relue) => relue.photo_sha256 === depart.photo_sha256 && relue.photo_origin === depart.photo_origin && adressesEgalesOuNulles(relue.photo_source_url, depart.photo_source_url);
-    let relue = await repo.get('recipes', recipeId);
+    const relue = await repo.get('recipes', recipeId);
     if (!relue) return refuser('fiche_absente');
     if (!inchangee(relue)) return refuser('fiche_changee');
     try { await repo.putFile(sha2, jpeg, { mime: 'image/jpeg' }); } catch { return echouer('ecriture'); }
-    relue = await repo.get('recipes', recipeId);
-    if (!relue) return refuser('fiche_absente');
-    if (!inchangee(relue)) return refuser('fiche_changee'); // la ligne files reste : orphelin L5
-    const ecrite = { ...relue, photo_sha256: sha2, photo_origin: 'web', photo_source_url: url }; // les trois ENSEMBLE : la provenance de CETTE image
-    try { assertVocabulaire(ecrite, 'recipes'); await repo.save('recipes', ecrite); } catch { return echouer('ecriture'); }
+    let issue;
+    // les trois ENSEMBLE : la provenance de CETTE image
+    try { issue = await ecrireChamps(repo, recipeId, (c) => (inchangee(c) ? { photo_sha256: sha2, photo_origin: 'web', photo_source_url: url } : null)); }
+    catch { return echouer('ecriture'); }
+    if (issue === 'absente') return refuser('fiche_absente');
+    if (issue === 'changee') return refuser('fiche_changee'); // la ligne files reste : orphelin L5
     derniersEchecs.delete(recipeId);
     return { issue: 'ok', sha256: sha2 };
   } catch {
@@ -240,19 +275,27 @@ export async function monterPhotoPlat(recipe, ctx, { repo = repoModule, pickFile
   const entete = el('div', { dataset: { role: 'emplacement-photo-plat' } });
   const conteneur = el('div', { dataset: { role: 'zone-photo-plat' } });
   const zone = section(t('Photo du plat'), conteneur);
-  const connecte = !!ctx?.sync?.user;
   let occupe = false;
+  // Ronde 1 : ce que la zone MONTRE (le dernier dessin) — « Retirer » et « Ne pas récupérer » n'écrivent que sur cet état ; et la clé de l'image de tête,
+  // gardée telle quelle tant que ce qu'elle montre n'a pas changé (ni URL blob: neuve, ni second décodage à chaque redessin : occupe, online, offline).
+  let rendu = null;
+  let cleImage = null;
   async function dessiner() {
     let relue = recipe;
     try { relue = (await repo.get('recipes', recipe.id)) || recipe; } catch { relue = recipe; }
     const sha = pointeur(relue);
     let fichier = null;
-    if (sha) { try { fichier = await repo.getFile(sha); } catch { fichier = null; } }
-    const etat = etatZonePlat(relue, { present: !!typeAffichage(fichier)?.startsWith('image/'), enVol: recuperationEnCours(relue.id), enLigne: enLigne(), connecte, occupe, echec: derniersEchecs.get(relue.id) ?? null });
-    const figure = await figurePhotoPlat(relue, { repo, ctxF });
-    const anciennes = [...entete.querySelectorAll('img'), ...conteneur.querySelectorAll('img')].map((i) => i.getAttribute('src')).filter((u) => typeof u === 'string' && u.startsWith('blob:'));
-    entete.replaceChildren(...[figure].filter(Boolean));
-    conteneur.replaceChildren(renderZonePhotoPlat(etat, gestes));
+    if (sha) { try { fichier = (await repo.getFile(sha)) ?? null; } catch { fichier = null; } }
+    // `connecte` relu à chaque dessin (ronde 1) ; le jeton lui-même n'est lu qu'au geste (sessionAssistant). `absente` (cas 3) ne sert que de témoin à
+    // I-F10 : l'état du fichier vit en tête, la zone ne le rend pas.
+    const etat = etatZonePlat(relue, { present: !!typeAffichage(fichier)?.startsWith('image/'), enVol: recuperationEnCours(relue.id), enLigne: enLigne(), connecte: !!ctx?.sync?.user, occupe, echec: derniersEchecs.get(relue.id) ?? null });
+    const cle = fichier?.blob instanceof Blob ? JSON.stringify([sha, typeAffichage(fichier), relue.photo_origin === 'web' ? String(relue.source_url ?? '') : null]) : null;
+    const garder = cle !== null && cle === cleImage && entete.firstElementChild !== null;
+    const figure = garder ? null : await figurePhotoPlat(relue, { repo, ctxF, fichier });
+    const anciennes = [...(garder ? [] : entete.querySelectorAll('img')), ...conteneur.querySelectorAll('img')].map((i) => i.getAttribute('src')).filter((u) => typeof u === 'string' && u.startsWith('blob:'));
+    if (!garder) { entete.replaceChildren(...[figure].filter(Boolean)); cleImage = figure ? cle : null; }
+    conteneur.replaceChildren(renderZonePhotoPlat(etat, gestes, { gardeRefusee: messageGardeRefusee(ctx?.sync) }));
+    rendu = { sha256: etat.sha256, candidat: etat.sha256 ? null : adresseImageAdmise(relue.photo_source_url) };
     for (const u of anciennes) revoquerUrlDeBlob(u);
   }
   let file = Promise.resolve();
@@ -274,12 +317,13 @@ export async function monterPhotoPlat(recipe, ctx, { repo = repoModule, pickFile
   }
   async function retirerAvec({ dire }) {
     if (occupe) return;
+    const attendu = rendu; // relevé AVANT le redessin « occupe » : l'état que la personne a vu en touchant (ronde 1)
     occupe = true; await redessiner();
     try {
-      const r = await retirerPhotoPlat(recipe.id, { repo });
+      const r = await retirerPhotoPlat(recipe.id, { repo, attendu });
       if (r.issue === 'ok') { if (dire) toast(t('Photo du plat retirée.')); }
       else if (r.raison === 'fiche_absente') toast(t('Recette introuvable.'));
-      else toast(t('La photo du plat n’a pas pu être changée. Réessaie.'));
+      else if (r.raison !== 'fiche_changee') toast(t('La photo du plat n’a pas pu être changée. Réessaie.')); // fiche_changee : le redessin dit l'état vrai
     } finally { occupe = false; await redessiner(); }
   }
   const gestes = {
@@ -290,11 +334,10 @@ export async function monterPhotoPlat(recipe, ctx, { repo = repoModule, pickFile
     // Sans await dans le gestionnaire : le vol est posé avant tout await, la zone passe en « Récupération… » par notifier (§ 4.1.3).
     reessayer: () => (occupe ? Promise.resolve(null) : rapatrierPhotoWeb(recipe.id, { tape: true, ctx, repo, fetch, enLigne })),
   };
+  // Ronde 1 : la vue est enregistrée AVANT le premier dessin et n'est jamais purgée avant d'avoir été vue dans le document (notifier) — une descente finie
+  // entre le montage et l'insertion par le routeur la redessine, quel que soit le moment où renderRecipe finit (la garde « setTimeout 0 » d'import-cible.js,
+  // qui tirait avant l'insertion d'une fiche à pages, est retirée).
+  enregistrerVue({ root: zone, entete, recipeId: recipe.id, redessiner, inseree: false });
   await redessiner();
-  const vue = { root: zone, recipeId: recipe.id, redessiner };
-  vues.add(vue);
-  // Le routeur insère la racine APRÈS la fin de la route : une notification arrivée avant l'insertion purge la vue ; elle revient ici (motif
-  // d'import-cible.js) et se redessine — une descente finie entre-temps n'est jamais perdue.
-  setTimeout(() => { if (zone.isConnected && !vues.has(vue)) { vues.add(vue); redessiner(); } }, 0);
   return { entete, zone, gestes };
 }

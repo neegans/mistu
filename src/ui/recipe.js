@@ -73,11 +73,15 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   const conventionId = ctx.conventionFor(recipe);
   const root = el('div', null);
 
-  // Lot F (D-F16) : ★ Favori RELIT la fiche et n'écrit que `favorite` — une photo du plat posée depuis le rendu (descente web, autre onglet) survit.
+  // Lot F (D-F16) : ★ Favori n'écrit que `favorite`, sur la fiche RELUE — ronde 1 : DANS la transaction d'écriture (condition { key, fusion } par
+  // saveBatch, comme photo-plat.js) : une photo du plat posée depuis le rendu (descente web, autre onglet), même pendant ce geste, survit. La valeur
+  // écrite est celle que l'écran annonce (« ☆ » → favori), jamais l'inverse de la base. Le repo et le toast injectés (deps) servent ici aussi.
   const favBtn = el('button', { class: 'btn', title: t('Favori'), onClick: async () => {
-    const relue = await repo.get('recipes', recipe.id);
-    if (!relue) { toast(t('Recette introuvable.')); return; }
-    await repo.save('recipes', { ...relue, favorite: !relue.favorite });
+    let absente = false;
+    try {
+      await gestesLecture.repo.saveBatch({}, { conditions: { recipes: [{ key: recipe.id, fusion: (c) => { if (!c) { absente = true; return null; } return { ...c, favorite: !recipe.favorite }; } }] } });
+    } catch (e) { logError('recipe.favori', { error: e, id: recipe.id }); return; }
+    if (absente) { dire(t('Recette introuvable.')); return; }
     refresh();
   } }, recipe.favorite ? '★ ' + t('Favori') : '☆ ' + t('Favori'));
   root.append(pageHeader(recipe.display_title || recipe.original_title, {
