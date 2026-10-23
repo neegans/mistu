@@ -1192,7 +1192,12 @@ d’appel à la place de Neegan.
 - **`createImageBitmap`** sur une photo d’iPhone de plusieurs dizaines de Mpx : non mesuré (risque hérité du lot UX) ; le mur de 16 Mpx lu
   dans l’en-tête tient avant tout décodage.
 - **Deux appareils** : un import `couverture` ouvert ici est visible là-bas sans ses octets (« La couverture n’est pas sur cet appareil. ») ;
-  « Reprendre » n’y offre que la saisie ; les octets voyagent au lot G.
+  « Reprendre » n’y offre que la saisie ; les octets voyagent au lot G. **Mesuré à la vague finale** : `imports.cover_sha256` n’est **pas** un
+  pointeur de L4 (`POINTEURS`, `src/sync/fichiers.js` : les cinq pointeurs du lot G, épinglés par `tests/sync-l4.js`) — la photo d’une couverture
+  **en attente** n’est jamais envoyée ; elle ne voyage qu’après « Ajouter ce livre », par `book_editions.cover_sha256`. Sur un autre appareil, la
+  reprise n’a donc ni l’aperçu ni « Lire / Relire », sauf si les mêmes octets y sont déjà (même empreinte, référencée ailleurs) ; la réécriture du
+  `device_id` d’une couverture relancée ici (`volUnique`, ronde 1 de la tâche 5) n’est atteignable que dans ce cas. Ajouter ce pointeur change le
+  contrat de G (ce qui part au serveur, et quand) : décision de Neegan, hors de ce lot.
 - **`imports.edition_id → book_editions`** : traité par D-E23 pour la suppression d’un livre ; une suppression faite **ailleurs** (autre appareil,
   avant qu’il ait ce code) peut encore laisser un pointeur rompu jusqu’à la purge à 30 jours — même nature que le lot A, nommé.
 - **Vol qui survit au geste** (D-E9) : un appel payé peut finir dans le journal sans être appliqué (la personne a tapé entre-temps : état
@@ -1217,8 +1222,19 @@ d’appel à la place de Neegan.
 - **Sélecteur annulé** (N1) : `pickFiles` (`src/core/dom.js:112-119`, préexistant, partagé par toute l’app) laisse sa promesse en suspens et
   son `<input>` caché dans le document à chaque annulation ; E ne tient aucun verrou pendant le choix, donc rien ne se fige ; la fuite d’un
   nœud par annulation est préexistante, nommée.
+- **Vol d’une lecture web pendant le pas 1** (dette R-B-27 du lot B : ses vols ne notifient pas) : la route suit les avis du vol (`ecouterVol`,
+  vague finale) — le vol d’une autre route éteint puis rallume les deux boutons de la couverture, sans import comme avec — mais un vol **web** ne
+  la prévient pas : rendue avant, elle garde ses boutons allumés (la garde du geste dit « Une lecture est déjà en cours : annule-la d’abord. ») ;
+  rendue pendant, elle les garde éteints jusqu’au prochain redessin ou à la navigation.
 - **D-E23 et `en_cours`** : une ligne qui passerait `en_cours` entre la lecture des lignes de l’édition et leur transition arrêterait la
   suppression au milieu (lignes déjà rendues, édition gardée) ; inatteignable aujourd’hui (D-E23), nommé.
+- **D-E23, condition du temps 2** (vague finale) : `{ index: 'edition_id', valeur, exclus: STATUTS_IMPORT }` ne refuse qu’une ligne glissée à un
+  statut **connu** (`src/core/db.js` : `exclus.includes(r.status)`) ; une ligne `imports` au statut hors vocabulaire ou non-chaîne (appareil sur
+  une version future, donnée reçue hostile) arrivée entre la relecture du temps 1 et la transaction laisse partir l’édition — la ligne pointe
+  alors une édition absente, et toute archive suivante est refusée à l’inspection (relation `imports.edition_id` rompue) ; la vacuité de
+  l’édition (recettes, documents, pages) est relue hors transaction, même fenêtre. Quelques millisecondes, une ligne du même compte : nommé.
+  Remède au lot qui touchera `src/core/db.js` : une condition `{ index, valeur, aucune: true }` (aucune fiche à cette valeur, quel que soit son
+  statut), reprise ici, avec les cas glissés `'zzz'` et `null` ajoutés en rouge à la boucle de `tests/couverture.js`.
 - **Traces de consultation orphelines (R-E-8, R-E-11)** : R-E-8 ferme le défaut pour toute suppression faite **par ce geste, sur un
   appareil qui a ce code** ; il ne répare pas les orphelins `library_activity` / `rediscovery_prefs` **déjà présents** (« Cas ancien
   repéré », `CLAUDE.md:1491`), et un orphelin peut **revenir** : un livre supprimé sur un appareil **sans ce code** (sa suppression arrive
