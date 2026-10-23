@@ -370,22 +370,33 @@ export async function save(store, record) {
 // Fiches prêtes à écrire : nettoyées (R-L3-25, comme save() — même raison, et un seul endroit qui en décide : `propre`), created_at
 // conservé ou posé, updated_at = `now`. Les deux chemins d'écriture en lot (saveBatch, transitionner) passent ici.
 const horodater = (store, rows, now) => rows.map((r) => ({ ...propre(store, r), created_at: r.created_at || now, updated_at: now }));
+// Une condition de fusion `{ key, fusion }` (lot G) portée par saveBatch, ou par le sac `conditions` de transitionner, est enveloppée comme un patch (ronde 1
+// de la tâche 2 du lot C) : la fiche qu'elle calcule sur la fiche RELUE dans la transaction est nettoyée (R61) et horodatée (created_at conservé, updated_at =
+// now) ; null : rien d'écrit pour elle. Une forme fausse (fusion qui n'est pas une fonction) passe telle quelle : db.mutate la refuse (TypeError).
+const envelopperFusion = (store, c, now) => (c && typeof c.fusion === 'function'
+  ? { ...c, fusion: (courant) => { const f = c.fusion(courant); return f == null ? null : horodater(store, [f], now)[0]; } }
+  : c);
+const envelopperFusions = (conditions, now) => (conditions && typeof conditions === 'object' && !Array.isArray(conditions)
+  ? Object.fromEntries(Object.entries(conditions).map(([store, items]) => [store, Array.isArray(items) ? items.map((c) => envelopperFusion(store, c, now)) : items]))
+  : conditions);
 
 // `origin` : 'local' par défaut (écriture de la personne, donc capturée) ; 'device' pour ce qui ne part jamais au
 // serveur (amorçage des références, rattrapages) — c'est la capture qui tranche, d'après l'origine (src/sync/outbox.js).
 // `conditions` (spec import-cible § 3.6) : le lot n'est écrit que si chaque fiche conditionnée porte un statut attendu, dans la même
-// transaction ; condition fausse → TransitionRefusee, rien d'écrit. VÉRIFICATION SEULE : la fiche conditionnée n'est ni réécrite ni
-// recapturée (à la différence de transitionner, qui la réécrit avec un updated_at neuf) ; un `patch` ici contournerait `propre` et
-// l'horodatage, il est refusé : passer par repo.transitionner.
+// transaction ; condition fausse → TransitionRefusee, rien d'écrit. Une condition de statut VÉRIFIE SEULEMENT : la fiche conditionnée n'est ni
+// réécrite ni recapturée (à la différence de transitionner, qui la réécrit avec un updated_at neuf) ; un `patch` ici contournerait `propre` et
+// l'horodatage, il est refusé : passer par repo.transitionner. Une condition de fusion `{ key, fusion }` (lot G) écrit la fiche qu'elle calcule sur la
+// fiche RELUE, enveloppée comme un patch (envelopperFusion, ronde 1 de la tâche 2 du lot C), et un `change` part aussi pour son magasin.
 export async function saveBatch(batch, { origin = 'local', conditions = null } = {}) {
   const now = syncNow();
   const stamped = {};
   for (const [store, rows] of Object.entries(batch)) stamped[store] = horodater(store, rows, now);
+  let ecrites = {};
   if (conditions) {
     for (const [store, items] of Object.entries(conditions)) for (const c of (Array.isArray(items) ? items : [])) if (c?.patch != null) throw new TypeError('saveBatch ne porte pas de patch (' + store + ') : passer par repo.transitionner');
-    await db.mutate({ puts: stamped, origin, conditions });
+    ecrites = (await db.mutate({ puts: stamped, origin, conditions: envelopperFusions(conditions, now) })) ?? {};
   } else await db.putBatch(stamped, { origin });
-  for (const store of Object.keys(stamped)) emit('change', { store });
+  for (const store of new Set([...Object.keys(stamped), ...Object.keys(ecrites)])) emit('change', { store });
   return stamped;
 }
 
@@ -400,16 +411,28 @@ export async function saveBatch(batch, { origin = 'local', conditions = null } =
 // « transitionner( » n'existe que sous la forme repo.transitionner( hors de ce fichier).
 // `autres` (vague finale) : des conditions de plus, sur d'AUTRES magasins, vérifiées dans la même transaction et passées telles quelles (ni nettoyées ni
 // horodatées : marquerInterrompus y relit le battement interne de sync_state) ; une condition sur le magasin de la transition est refusée (TypeError).
-export async function transitionner(store, key, { attendus, patch = null, puts = {}, deletes = {}, payloads = {}, origin = 'local', autres = {} } = {}) {
+// `conditions` (lot C, spec § 4.5) : { [autreMagasin]: [{ key, attendus, patch? }] } — d'autres fiches vérifiées et patchées dans la MÊME transaction,
+// chaque patch enveloppé comme celui de la ligne (nettoyé, horodaté : à la différence d'`autres`) ; une condition sans patch vérifie seulement ; comme
+// `autres`, jamais une condition sur le magasin de la transition (TypeError, ronde 1) ; la valeur rendue reste la fiche de `store`/`key`. Le sac porte aussi
+// `{ key, fusion }` (lot G) : la fiche calculée sur la fiche RELUE, enveloppée de même (envelopperFusion, ronde 1 de la tâche 2).
+export async function transitionner(store, key, { attendus, patch = null, puts = {}, deletes = {}, payloads = {}, origin = 'local', autres = {}, conditions = {} } = {}) {
   if (Object.hasOwn(autres, store)) throw new TypeError('transitionner : `autres` ne porte pas de condition sur ' + store);
+  if (Object.hasOwn(conditions ?? {}, store)) throw new TypeError('transitionner : `conditions` ne porte pas de condition sur ' + store);
   const now = syncNow();
   const stamped = {};
   for (const [s, rows] of Object.entries(puts)) stamped[s] = horodater(s, rows, now);
-  const modif = (courant) => ({ ...propre(store, typeof patch === 'function' ? patch(courant) : (patch || {})), updated_at: now });
-  const ecrites = await db.mutate({ puts: stamped, deletes, payloads, origin, conditions: { ...autres, [store]: [{ key, attendus, patch: modif }] } });
+  // Chaque patch — celui de la ligne et ceux du sac `conditions` (lot C) — est enveloppé de la même façon : nettoyage des chaînes (R61) puis updated_at ;
+  // ceux d'`autres` (vague finale du lot A) passent tels quels.
+  const envelopper = (s, p) => (courant) => ({ ...propre(s, typeof p === 'function' ? p(courant) : (p || {})), updated_at: now });
+  const toutes = { ...autres, [store]: [{ key, attendus, patch: envelopper(store, patch) }] };
+  for (const [s, items] of Object.entries(conditions ?? {})) {
+    if (!Array.isArray(items)) throw new TypeError('Les conditions de ' + s + ' doivent être un tableau');
+    toutes[s] = [...(toutes[s] || []), ...items.map((c) => (c && c.patch != null ? { ...c, patch: envelopper(s, c.patch) } : envelopperFusion(s, c, now)))];
+  }
+  const ecrites = await db.mutate({ puts: stamped, deletes, payloads, origin, conditions: toutes });
   emit('change', { store, id: key });
-  for (const s of new Set([...Object.keys(stamped), ...Object.keys(deletes)])) if (s !== store) emit('change', { store: s });
-  return ecrites[store][0]; // une seule condition ici : la fiche de store/key
+  for (const s of new Set([...Object.keys(stamped), ...Object.keys(deletes), ...Object.keys(conditions ?? {})])) if (s !== store) emit('change', { store: s });
+  return ecrites[store][0]; // la première condition de `store` est toujours celle de la ligne
 }
 
 // La fiche est relue avant sa suppression : la capture a besoin de sa copie pour l'envoyer (spec § 5.1).

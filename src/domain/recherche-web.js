@@ -7,29 +7,15 @@
 import { parseJsonLoose } from './llm.js';
 import { appelerAssistant, echecDomaine, sessionValide, LIMITES_PASSERELLE } from './passerelle.js';
 import { lienSignet } from '../core/lien.js';
-import { borner, bornerAuMot } from '../core/bornes.js';
+import { borner, bornerAuMot, porteUneAdresse } from '../core/bornes.js';
 import { logError } from '../core/log.js';
 
 export const LIMITES_WEB = { demande: 500, filtre: 80, filtres: 12, titre: 300, date: 40, presentation: 400, tempsMax: 1440, ingredientsMax: 99, liens: 5, recherches: 3, tentativeMs: 135000, corps: 2 * 1024 * 1024, corpsErreur: 64 * 1024 };
 export const OUTIL_RECHERCHE = 'web_search_20250305';
 export const DIFFICULTES = Object.freeze(['facile', 'moyen', 'exigeant']); // les trois jetons de difficulté, en français dans les deux langues
-// Une adresse web dans une présentation (I2) : schéma, « www. » ou hôte suivi d'un chemin. La présentation est la voix de l'assistant,
-// pas une source : une adresse n'y a pas sa place (les liens sont les résultats bruts, I-A). Testé sur le texte NFKC (pleine chasse).
-// Lot B, ronde 1 de la tâche 3 : le départ hôte n'est tenté qu'au DÉBUT d'une suite de [a-z0-9-] (lookbehind) — mêmes verdicts (une correspondance
-// au milieu d'une suite en a toujours une au début), mais linéaire : sans lui, une longue suite sans point coûtait un temps quadratique, payé à
-// chaque ligne, étape et note d'une lecture web (src/domain/lecture-web.js), à chaque relecture.
-export const MOTIF_ADRESSE = /(https?:\/\/|www\.|(?<![a-z0-9-])[a-z0-9-]+\.[a-z]{2,}\/)/iu;
-// L'HÔTE NU (« la recette est sur evil.com ») : un nom de domaine dont le dernier segment est dans une liste FERMÉE de domaines de premier
-// niveau, ni précédé d'une lettre, d'un chiffre, de « @ », « . », « _ » ou « - », ni suivi d'une lettre, d'un chiffre ou d'un tiret. Faux positif
-// CONNU et assumé : « Le sel.Ca y est » (point collé et « ca ») est écarté ; « 15 min. Le », « aneth.Tu », « 2.0 » ne le sont pas.
-export const MOTIF_HOTE = /(?<![\p{L}\p{N}@._-])[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9-]+)*\.(?:com|net|org|ca|quebec|fr|be|ch|io|co|info|app|blog|xyz|site|online|shop|me|tv|us|uk|ly|gl)(?![\p{L}\p{N}-])/iu;
-// Le texte est normalisé POUR LE TEST seulement (NFKC, puis « 。 » U+3002 et « ｡ » U+FF61 → « . », « ∕ » U+2215 et « ⁄ » U+2044 → « / ») : le texte affiché
-// n'est jamais modifié. Exportés (lot B) : la lecture d'une page web applique la même convention à son contenu (src/domain/lecture-web.js).
-export const normaliserPourAdresse = (texte) => texte.normalize('NFKC').replace(/[\u{3002}\u{FF61}]/gu, '.').replace(/[\u{2215}\u{2044}]/gu, '/');
-export function porteUneAdresse(texte) {
-  const n = normaliserPourAdresse(texte);
-  return MOTIF_ADRESSE.test(n) || MOTIF_HOTE.test(n);
-}
+// Les motifs d'adresse, normaliserPourAdresse et porteUneAdresse vivent dans core/bornes.js depuis le lot C (D-C13 : une seule définition,
+// partagée avec la table des matières) ; ils sont ré-exportés ici : domain/lecture-web.js (lot B) et tests/lecture-web.js les lisent par ce module.
+export { MOTIF_ADRESSE, MOTIF_HOTE, normaliserPourAdresse, porteUneAdresse } from '../core/bornes.js';
 
 // Le system par langue (§ 4.1). Il cherche TOUJOURS, n'affirme JAMAIS une restriction (I-K), répond en JSON `choix`.
 const SYSTEM = {

@@ -2364,7 +2364,7 @@ copies, jamais en place.
 **Fusion.** Le lot A fusionné et poussé **d'abord** ; `0006` collée et prouvée **avant** le redéploiement et **avant** tout `push` du lot B (un code servi
 sans `0006` : chaque lecture web répond 502 `serveur`, la réservation refusant l'outil ; rien d'autre ne change) ; la fonction redéployée et S13-S19
 jouées **avant** la fusion (une redirection opaque à S17 = une ronde sur `telechargerPage` d'abord) ; `/verify` par le chef d'orchestre ; le registre
-copié **avant** tout `git worktree remove`. Le lot G part de la tête finale de B.
+copié **avant** tout `git worktree remove`. Le lot G part de la tête finale de B ; le lot C de la tête finale de G (`1e4d68d`).
 
 ### Les photos voyagent entre appareils : octets des fichiers (L4), archive, Storage, moteur, Réglages, écrans (20 octobre 2026, lot G)
 
@@ -2435,6 +2435,73 @@ archive), `5615211`/`8c3471c` (T3 : passe fichiers), `53bab70`/`63d7a3b` (T4 : m
 `222b3a5` (R-G-31 : une copie téléchargée ne prend jamais la taille de l'original ; R-G-24 bis ; R-G-28 bis) ; suite 3997 → 4403, Node 172 → 174.
 Mutants : ceux du plan et des revues rejoués sur copies à chaque tâche et à chaque ronde (rapports du registre) ; vague : M1 à M10, 10 rouges sur 10 à
 `33578a3` (M1 avait révélé un faux vert de fixture, corrigé ; `vague-finale-chef-report.md`) ; ronde 2 : `vague-ronde-2-report.md`. `/verify` mécanique : `verify-G-bc3d844.txt` (VERT) puis la tête finale. Rulings : R-G-7 à R-G-32 (spec § 12).
+
+### Table des matières sur plusieurs pages : ordre proposé, tableau d'entrées, références liées à leur photo (19-21 octobre 2026, lot C)
+
+**Pour toi.** Tu photographies la table des matières d'un livre (une, quatre ou cinq pages) et tu la lis en UNE fois avec l'assistant (un appel,
+compté dans ton quota du jour). Il te rend les entrées photo par photo : l'app te propose l'ordre des photos d'après les numéros de page lus (tu
+corriges en deux tapes et tu décides si cet ordre est enregistré ; rien d'autre n'est écrit à ce moment-là), puis un tableau de toutes les entrées
+(titre, page, section, et la photo d'où chaque ligne vient). Tu corriges ce qui est faux, tu décoches ce que tu ne veux pas, et « Créer {n}
+références » range tout dans le livre : les recettes déjà repérées (même titre, même page) sont reconnues et ne font jamais de doublon, celles qui
+sont déjà là ne sont jamais modifiées ; chaque référence sait de quelle photo elle vient et dans quelle section elle est, et la recherche la trouve
+par sa section. « Annuler » arrête l'appel ; une lecture payée reste dans la section Imports (« Reprendre » rouvre le tableau sans rappeler
+l'assistant) ; « Saisir à la main » rend la zone de texte ; relire coûte un appel et l'app te le demande avant ; une lecture coupée est dite ; une
+entrée trop longue ou porteuse d'une adresse n'est ni inventée ni raccourcie : l'app te dit combien elle en a écartées. Un « Lire » refusé (hors
+ligne, séance vide, photo sans octets) n'écrit rien.
+
+**Où.** Branche `table-des-matieres`, worktree `~/projects/mistu-table-des-matieres`, empilée sur la tête finale du lot G `1e4d68d` (chaîne
+A → B → G → C) ; spec `docs/superpowers/specs/2026-10-19-table-des-matieres-design.md` (rév. 6 commise `a9e75ca`, rév. 7 à la clôture : § 12.3
+R-C-8 à R-C-38, § 13) ; plan rejoué par intention sur `1e4d68d` `docs/superpowers/plans/2026-10-19-table-des-matieres.md` (`f575d3d`, EI-1 à EI-15) ;
+registre `.superpowers/sdd/2026-10-19-table-des-matieres/` (briefs, rapports de tâche et de ronde, `mutants.md`, `final-fix-report.md`,
+`verify-*.txt` ; copie dans `~/projects/mistu/.superpowers/sdd/`). Serveur de vérification `python3 -m http.server 8091 --bind 127.0.0.1`.
+**PAS fusionné, PAS poussé. Aucune migration, serveur `assistant` intact, `DB_VERSION` 4.**
+
+**Ce qui marche (prouvé par la suite, 4743/4743 sur `e305355`, épingle 4742 ; Node 174/174 ; `--check` 0).**
+- **Lecture en un appel** (`extraireTableMatieres`, `src/domain/llm.js` : outil `extraction`, 8 000 jetons, chaque image précédée de « Photo n »,
+  consigne « donnée, jamais consigne »). La réponse est une donnée hostile : `validerLectureIndex` la lit par propriétés propres, construit chaque
+  objet, borne en points de code et en octets ; une entrée trop longue ou porteuse d'une adresse est écartée et COMPTÉE (`ecartees`), jamais tronquée
+  ni la lecture jetée ; « Incertain : … » du modèle est rendu en texte, jamais en HTML.
+- **Domaine pur `src/domain/table-matieres.js`** : `resultatIndex` (photo ↔ page envoyée), `revaliderResultatIndex` (relecture du journal, forme C sur
+  les `page_ids` de la ligne), `ordrePropose`, `positionsProposees`, `reordonnerSeance`, `pagesALire` (dédoublonné), `lignesTableau` / `recalculer` /
+  `planCreation`, `fabriquerReferences` (titre et section nettoyés et bornés, `printed_page` 1..9 999 ou nul), `ligneOuverteDeSeance`, `executerIndex`.
+- **Panneau d'index** (`indexEntriesPanel`, `src/ui/import.js` : quatre états et un état « en vol ») et `panneauLecture` (`src/ui/table-matieres.js` :
+  « Ordre des photos » puis « Entrées lues ») ; « Appliquer cet ordre » écrit la ligne (`page_ids`, `ordre_applique_at`), les positions et la séance en
+  UNE transaction (`repo.transitionner(…, { conditions })`, fiches relues dans la transaction par condition de fusion), sans `refresh()` ; « Créer {n}
+  références », la zone de texte et « Ignorer » ne valent que pour la lecture montrée (`cleLecture`, revérifiée dans la transaction) ; une clôture
+  refusée n'écrit rien et le dit ; « Annuler » agit aussi pendant les gardes.
+- **Un seul vol** : `lancerVol(importId, executer, options)` (`src/ui/import-cible.js`) autour de la tenue de `src/ui/vol.js` du lot B (recettes, index
+  et lecture web se refusent mutuellement, I-C4) ; les gardes (session, réseau, octets, image) passent AVANT toute écriture (option `lecture`), puis la
+  ligne est reprise par la transition de départ ou naît dans le vol par `repo.ouvrirImport` ; `appels + 1` au départ du fetch, `a_verifier` écrit avant
+  tout rendu, battement par `repo.battre`, veille bornée ; `lancerExtraction` = `lancerVol` + l'exécutant de la sorte de la ligne.
+- **Journal** : `imports{kind:'index'}.resultat` = `{ photos: [{ page_id, printed_page_range, entries }], ecartees, uncertain }`, relu par
+  `relireDuJournal` (`VALIDEURS.index`) ; `ordre_applique_at` ; la section Imports et la fiche du livre reprennent la ligne ouverte de la séance
+  (`?import=` gagne) ; un échec dit la phrase de l'index.
+- **Champs neufs (données JSON, aucun index, aucune migration)** : `recipes.index_page_id` (pointeur souple), `raw_entry`, `index_uncertain`, `section`
+  rempli et lu par `sectionLisible` (fiche livre, fiche référence, recherche) ; `source_pages.printed_page_range` (pages CITÉES), `role: 'index'` ;
+  `printed_page` jamais écrit par C.
+- **Textes** par `t()` (clés exactes dans `en.js`, filet T-C20 ; `MODULES_NEUFS` : `src/ui/table-matieres.js`) ; motifs d'adresse d'une seule
+  définition dans `src/core/bornes.js` (R-C-8), lus aussi par la recherche et la lecture web.
+- **Vague finale et ronde de clôture.** Titre, section et incertitudes ramenés à UNE ligne (`uneLigne`) avant les contrôles de longueur et d'adresse,
+  l'adresse cherchée aussi sur la forme recollée (une entrée imprimée sur deux lignes ne fait plus de doublon à la relecture, une adresse coupée par un
+  saut de ligne n'échappe plus à I-C2) ; le panneau d'index s'abonne au vol de son document (`ecouterVol`) : recréé pendant un vol, il se redessine à la
+  fin, « Annuler » relit toujours ; depuis la section « Imports », un index en échec se reprend au panneau (« Reprendre », pages cochées) avec la phrase
+  de l'index ; une relecture refusée ne rouvre jamais une ligne neuve ; positions, pages à lire et références limitées à la séance relue ; URL `blob:`
+  révoquées ; un échec d'enregistrement de l'ordre qui n'est pas un refus est dit ; la zone de texte relit les références en base et coupe à toute fin de ligne (CR, VT, FF, NEL, U+2028, U+2029) ; lecture vide du lot A et titres faits d’invisibles épinglés (ronde de clôture `e305355`, re-revue propre).
+
+**Ce qui n'est PAS prouvé / dettes.** Aucune lecture réelle : la preuve § 10 de la spec (une table de 3 à 5 photos : durée, coupe, fidélité, jetons)
+est le geste de Neegan AVANT la fusion et peut amender `MAX_TOKENS_INDEX` ; rien n'est mesuré dans Safari ni sur l'iPhone ; dettes nommées R-C-18 (projection de la séance quand une photo retirée garde son créneau), R-C-26 (doublons de squelette et de clôture, recoupement défense en profondeur, `tests/sync.js` et `SHELL`, hors lot `buildDocs` et chaînes antérieures du panneau), R-C-27 (recherche : mot de section = mot de type, dette C7 élargie), R-C-28 (L4 d'« Ordre des photos »), R-C-36 (faux positif d'adresse après un point) ; tests sensibles au temps de la vague (R-B-15) ; équivalents déclarés (R-C-29, VF1b).
+
+**Gestes de Neegan, dans l'ordre.** 1) Lots A, B puis G d'abord (leurs sections). 2) `git merge --ff-only table-des-matieres` par `!` (après la fusion
+de G), `git push`, suite publique `https://neegans.github.io/mistu/tests/` → 4743/4743 (épingle 4742, plus le 404 de `/favicon.ico`), service
+worker `cuisine-os-v0.12.0-12`. 3) Preuve réelle § 10, connecté : un livre, sa table des matières sur 3 à 5 photos, « Lire » → UN POST `/functions/v1/assistant`,
+l'ordre proposé, le tableau, « Créer {n} références », les fiches liées à leur photo ; `select jour, appels from public.assistant_usage_jour;` ;
+relever durée, coupe et jetons (§ 10 pas 5). 4) iPhone (le même parcours depuis l'app installée). 5) « clean » (worktrees, serveurs 8088-8094), après la
+copie du registre.
+
+**Versions.** `APP_VERSION 0.12.0` ; `sw.js` `cuisine-os-v0.12.0-1` (T1) … `-10` (ronde 1 de T5 ; T6 et sa ronde ne touchent pas `src/`), `-11` (vague finale), `-12` (ronde de clôture) ; `DB_VERSION` 4 inchangée.
+
+**Bilan.** Départ sur `1e4d68d` (mesure = G : 4403/4403, épingle 4402, Node 174) ; rejeu du plan par intention (EI-1 à EI-15 → R-C-8 à R-C-14) ;
+six tâches, une ronde chacune, re-revues propres : `f226931`/`569f01e` (T1 : vol partagé, validation, domaine), `a0708e2`/`7de1cd2` (T2 : créer les références), `3e8592a`/`199b5b9` (T3 : ordre proposé), `e541a43`/`70bf7d6` (T4 : panneau et tableau), `ed90e2c`/`4090ebe` (T5 : section), `7c519f8`/`401e96e` (T6 : filets, docs) ; revue finale à trois lentilles (la lentille faux-vert et la vague rejouées après une coupure réseau) : 6 Important et 18 Minor ; vague finale `0b9ba10` (VF-C1 à VF-C8, re-revue PROPRE) ; ronde de clôture `e305355` (R-C-24, re-revue PROPRE) ; suite 4403 → 4743, Node 174. Mutants : ceux du plan et des revues rejoués sur copies à chaque tâche et à chaque ronde (`mutants.md`, rapports) ; vague 37/39 (un équivalent, X4 durci) ; ronde de clôture 14/16 (I37 et VF1b équivalents). `/verify` mécanique : `verify-C-e305355.txt` (registre). Rulings : R-C-8 à R-C-38 (spec § 12.3).
 
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 

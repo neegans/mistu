@@ -16,8 +16,9 @@ import { preparerPhotoLocale } from '../core/image.js';
 import { TransitionRefusee } from '../core/db.js';
 import { typeAffichage, displayUrl } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
-import { PasserelleProvider, extraireRecette, extraireIndex, validateParsedRecipe, validerIndex, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION } from '../domain/llm.js';
+import { PasserelleProvider, extraireRecette, validateParsedRecipe, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION } from '../domain/llm.js';
 import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception, cleLecture, modeleBorne } from '../domain/import-cible.js';
+import { executerIndex, revaliderResultatIndex } from '../domain/table-matieres.js';
 import { getConvention } from '../domain/units.js';
 import { currentVersion } from '../domain/search.js';
 import { section, sessionAssistant, carteConnexion, texteEchecAssistant, TEXTE_CONNEXION } from './components.js';
@@ -41,8 +42,18 @@ if (typeof window !== 'undefined') {
   window.addEventListener('online', () => { enLigneFlag = true; majEnLigneToutes(); });
   window.addEventListener('offline', () => { enLigneFlag = false; majEnLigneToutes(); });
 }
-export function reinitialiserImportCible() { reinitialiserVol(); vues.clear(); enLigneFlag = typeof navigator === 'undefined' ? true : navigator.onLine !== false; } // tests seulement
-function notifier() { for (const v of [...vues]) { if (!v.root.isConnected) { vues.delete(v); continue; } v.redessiner(); } }
+export const estEnLigne = () => enLigneFlag; // l'état réseau que le vol lit (lot C : le panneau d'index ne pose pas la question de la relecture hors ligne)
+// Vague finale du lot C (constat 1) : les abonnés au vol de CE document — le panneau d'index (src/ui/import.js) : une instance recréée pendant le vol de sa
+// ligne, ou ouverte pendant un vol lancé hors d'elle, se redessine à la pose et à la fin du vol (jamais figée sur « Lecture des pages… »). Appelés à
+// chaque notifier() (prise du vol, ligne posée, fin, « Annuler », tenirVol / libererVol) ; l'abonné gère lui-même son démontage. Rend le désabonnement.
+// Les vols de la lecture web (src/ui/import-web.js) ne passent pas par ce notifier (dette « notification croisée » du lot B, inchangée).
+const ecouteurs = new Set();
+export function ecouterVol(fn) { ecouteurs.add(fn); return () => { ecouteurs.delete(fn); }; }
+export function reinitialiserImportCible() { reinitialiserVol(); vues.clear(); ecouteurs.clear(); enLigneFlag = typeof navigator === 'undefined' ? true : navigator.onLine !== false; } // tests seulement
+function notifier() {
+  for (const v of [...vues]) { if (!v.root.isConnected) { vues.delete(v); continue; } v.redessiner(); }
+  for (const fn of [...ecouteurs]) { try { fn(); } catch (e) { logError('import_cible.ecouteur', { error: e }); } }
+}
 // Vague finale (I-7 dans les deux sens) : une lecture HORS journal (« Extraire » de « Corriger », recette existante) tient le vol du document le temps
 // de son appel — sans ligne (importId null : aucun « Annuler » dans la section), mais lancerExtraction la voit et rend vol_tenu. Rend le jeton, ou
 // null quand un vol est déjà tenu ; libererVol(jeton) en finally. Lot B (D-B13) : le jeton est une tenue de ./vol.js — LE vol du document, celui
@@ -73,18 +84,22 @@ const photoBornee = (L) => (typeof L?.photo_sha256 === 'string' && /^[0-9a-f]{64
 // cette lecture ? » (I-5) tant qu'elle n'a pas de réponse ; null = écrire.
 const questionAPoser = ({ ok, rattachee, remplacement, remplacer }) => (!ok && !rattachee ? 'discordance' : (remplacement && remplacer === null ? 'remplacer' : null));
 
-// Les images qui PARTENT, dans l'ordre de page_ids (seule source de vérité de l'ordre), réduites par pagePourEnvoi (F-3). Une page absente
-// est ignorée (pointeur souple, § 3.1) ; une page dont les octets ne sont pas sur cet appareil fait refuser l'envoi (rien n'est lu à moitié).
+// Les images qui PARTENT, dans l'ordre de page_ids (seule source de vérité de l'ordre), réduites par pagePourEnvoi (F-3), et les identifiants des
+// pages EFFECTIVEMENT envoyées, dans le même ordre (lot C, D-C21 : la photo n de la réponse est pageIds[n − 1]). Une page absente est écartée des
+// deux (pointeur souple, § 3.1) ; une page dont les octets ne sont pas sur cet appareil fait refuser l'envoi (rien n'est lu à moitié). Ronde 1 de la
+// tâche 1 du lot C : un identifiant DOUBLÉ (page_ids est une donnée de synchro ou d'archive) ne part qu'une fois, à sa première place.
 async function imagesDe(repo, pageIds) {
   const images = [];
-  for (const id of pageIds) {
+  const envoyees = [];
+  for (const id of new Set(pageIds)) {
     const page = await repo.get('source_pages', id);
     if (!page?.sha256) continue;
     const fichier = await repo.getFile(page.sha256);
     if (!(fichier?.blob instanceof Blob)) { const e = new Error('octets_absents'); e.code = 'octets_absents'; throw e; }
     images.push(await pagePourEnvoi(fichier.blob));
+    envoyees.push(id);
   }
-  return images;
+  return { images, pageIds: envoyees };
 }
 
 // --- Le vol (spec § 4.3.1-2, I-3, I-4, I-7 ; exporté pour la section « Imports », tâche 6) -------------------------------------------------------
@@ -93,39 +108,67 @@ async function imagesDe(repo, pageIds) {
 // la réponse validée est écrite dans le journal (a_verifier) AVANT tout rendu ou toute écriture de recette (I-3). Rend { issue, raison } :
 // 'refuse' (vol_tenu | inconnu | hors_ligne | non_connecte | sans_page | image | octets_absents | transition), 'echec' (raison § 4.4),
 // 'a_verifier'. Ne lève jamais vers l'écran pour une raison attendue. `vol` est libéré en finally, quoi qu'il arrive.
-// Tâche 6 : le même vol lit aussi une ligne `kind: 'index'` (panneau d'index, « Relancer » de la section « Imports ») — extraireIndex, et le
-// résultat écrit est { entries, uncertain } ; tout le reste (gardes, battement, appels, signal, Annuler, I-3, I-4) est commun aux deux sortes.
+// Tâche 6 : le même vol lit aussi une ligne `kind: 'index'` (panneau d'index, « Relancer » de la section « Imports ») — lot C : la table des
+// matières par photo (executerIndex), résultat de forme C ; tout le reste (gardes, battement, appels, signal, Annuler, I-3, I-4) est commun aux deux sortes.
 // Tâche 6, ronde 1 — `lecture` : une lecture SANS référence (éditeur, panneau d'index : { kind, importId, pageIds, editionId, sessionId }). Les gardes
 // portent sur ses `pageIds` AVANT TOUTE ÉCRITURE (spec § 4.4 : hors ligne, session absente → journal : rien ; de même pour un vol tenu, des octets
 // absents, une image refusée) ; ensuite seulement, la ligne `importId` est reprise — encore a_lancer | a_verifier | echec, de cette sorte et sans
 // référence, relu dans la transaction — PAR la transition de départ (page_ids remises, l'ancien résultat effacé au départ du vol, jamais avant) ; à
 // défaut, une ligne a_lancer est ouverte puis part. Le résultat porte alors `importId` : la ligne qui a volé (null si rien n'a été écrit).
-export async function lancerExtraction(importId, options = {}) {
+// Lot C (D-C21, N-1) : la primitive est PARTAGÉE. lancerVol(importId, executer, options) fait TOUT le vol ci-dessus — mêmes gardes avant écriture, même
+// `lecture`, même battement, mêmes écritures — et confie l'appel SEUL à `executer({ provider, images, pageIds, signal, kind })`, qui rend { resultat,
+// texteBrut, modele } ou lève (ErreurExtraction, ou l'Error de la passerelle) ; `pageIds` = les pages EFFECTIVEMENT envoyées (imagesDe), dans l'ordre des
+// images. lancerExtraction garde sa signature et son comportement : le vol avec l'exécutant de la sorte de la ligne.
+export async function lancerVol(importId, executer, options = {}) {
   const suivi = { importId: null };
-  const r = await volUnique(importId, options, suivi);
+  const r = await volUnique(importId, executer, options, suivi);
   return options.lecture ? { ...r, importId: suivi.importId } : r;
+}
+export async function lancerExtraction(importId, options = {}) {
+  return lancerVol(importId, executerExtraction, options);
 }
 // La ligne d'une lecture sans référence, écrite seulement APRÈS les gardes du vol (ronde 1) : reprise dans la transition de départ (a_verifier → a_lancer
 // → en_cours en une transaction, § 3.1), sinon ouverte (repo.ouvrirImport, le mur conditionné de la première photo) puis partie.
+// Lot C, ronde 1 de la tâche 4 (T4-R2) : `lecture.cle` = la clé (cleLecture) de la lecture que l'écran MONTRE, ou null s'il n'en montre aucune ; une ligne
+// a_verifier n'est reprise que si elle porte CETTE lecture (vérifié dans la transaction) ; une relecture CONFIRMÉE (clé posée) refusée ne part jamais sur
+// une ligne neuve : la question valait pour cette lecture-là (refus `transition`, l'écran relit). Sans `cle` (l'éditeur), la règle d'avant.
 async function partirLecture(repo, lecture, pageIds, enVol, suivi) {
   const { kind, importId } = lecture;
   if (importId) {
-    const reprise = (c) => { if (!sansReference(c, kind)) throw new TransitionRefusee('imports', importId, c.status); return { ...enVol, page_ids: [...pageIds], resultat: null }; };
+    const garde = Object.hasOwn(lecture, 'cle');
+    let autreLecture = false;
+    const reprise = (c) => {
+      if (!sansReference(c, kind)) throw new TransitionRefusee('imports', importId, c.status);
+      if (garde && c.status === 'a_verifier' && cleLecture(c) !== lecture.cle) { autreLecture = true; throw new TransitionRefusee('imports', importId, c.status); }
+      return { ...enVol, page_ids: [...pageIds], resultat: null };
+    };
     try { await repo.transitionner('imports', importId, { attendus: ['a_lancer', 'a_verifier', 'echec'], patch: reprise }); suivi.importId = importId; return importId; }
-    catch (e) { if (!estRefus(e)) throw e; } // terminée, en vol ailleurs, d'une autre sorte ou ciblée : une ligne neuve
+    catch (e) {
+      if (!estRefus(e) || autreLecture || typeof lecture.cle === 'string') throw e;
+      // Vague finale du lot C (constat 12 ; spec § 11 : « le second onglet qui tape Lire sur la même ligne est refusé ») : le panneau (`cle` posée, même
+      // nulle) ne part sur une ligne neuve que si la sienne est TERMINÉE ou absente — relue en_cours (un autre onglet vient de la relancer) ou encore
+      // ouverte d'une autre façon, le refus remonte (`transition`, l'écran relit) : jamais deux lignes ni deux appels comptés pour une séance.
+      if (garde && importOuvert(await repo.get('imports', importId))) throw e;
+    } // terminée, d'une autre sorte ou ciblée (l'éditeur, sans `cle`) : une ligne neuve
   }
   const ligne = await repo.ouvrirImport({ kind, edition_id: lecture.editionId ?? null, scan_session_id: lecture.sessionId ?? null, page_ids: [...pageIds] });
   suivi.importId = ligne.id;
   await repo.transitionner('imports', ligne.id, { attendus: ['a_lancer'], patch: enVol });
   return ligne.id;
 }
-async function volUnique(importId, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, lecture = null } = {}, suivi) {
+// Lot C, ronde 1 de la tâche 4 : `signal` (facultatif) = l'« Annuler » de l'appelant AVANT que la tenue ait une ligne (gardes : session, réduction des
+// photos). Levé pendant les gardes → refus `annule`, rien n'est parti ni écrit ; levé après le départ → l'appel est abandonné (comme annulerVol).
+async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, lecture = null, signal = null } = {}, suivi) {
   const tenue = { importId: lecture ? null : importId, controller: new AbortController(), repo };
   if (!prendreVol(tenue)) return refus('vol_tenu'); // AVANT tout await : une seconde tape (ou une lecture web) pendant les gardes voit le vol
   notifier(); // vague finale (m2) : l'écran ciblé fige ses pages dès la pose du vol (la réduction des pages peut durer), pas seulement à en_cours
   const liberer = () => libererTenue(tenue);
+  const abandon = () => tenue.controller.abort();
+  signal?.addEventListener?.('abort', abandon, { once: true });
+  const annule = () => !!signal?.aborted;
   let battement = null;
   try {
+    if (annule()) { liberer(); return refus('annule'); }
     let kind, pageIds;
     if (lecture) { kind = lecture.kind; pageIds = Array.isArray(lecture.pageIds) ? lecture.pageIds : []; } // rien n'est lu ni écrit avant les gardes
     else {
@@ -135,14 +178,17 @@ async function volUnique(importId, { ctx, repo = repoModule, fetch: fetchInjecte
     }
     if (!enLigne()) { liberer(); return refus('hors_ligne'); }
     const session = await sessionAssistant(ctx);
+    if (annule()) { liberer(); return refus('annule'); }
     if (!session) { liberer(); return refus('non_connecte'); }
     if (!pageIds.length) { liberer(); return refus('sans_page'); }
-    let images;
-    try { images = await imagesDe(repo, pageIds); }
+    let envoi; // lot C : { images, pageIds } — les pages EFFECTIVEMENT envoyées, dans l'ordre des images
+    try { envoi = await imagesDe(repo, pageIds); }
     catch (e) { liberer(); return { issue: 'refuse', raison: e?.code === 'octets_absents' ? 'octets_absents' : 'image', code: e?.code ?? null }; }
-    if (!images.length) { liberer(); return refus('sans_page'); }
+    if (annule()) { liberer(); return refus('annule'); } // dernier point avant la transition de départ : rien n'est encore écrit
+    if (!envoi.images.length) { liberer(); return refus('sans_page'); }
     const depart = maintenant();
-    const enVol = { status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null };
+    // Lot C (F-18) : au départ d'un INDEX — reprise, « Relancer » de la section Imports, ligne neuve —, la lecture remplacée est effacée.
+    const enVol = { status: 'en_cours', started_at: depart, document_id_vol: DOCUMENT_ID, battement_at: depart, erreur: null, ...(kind === 'index' ? { resultat: null, reponse_brute: null, model: null, duree_ms: null, finished_at: null, ordre_applique_at: null } : {}) };
     // Vague finale (m2) : le départ vaut pour les pages LUES — une page retirée, ajoutée ou déplacée pendant la réduction (autre geste, autre onglet)
     // refuse le départ (rien ne part, le redessin montre la ligne) : jamais une page envoyée qui ne serait pas liée, ni une page liée jamais lue.
     const memesPages = (c) => { if (JSON.stringify(Array.isArray(c.page_ids) ? c.page_ids : []) !== JSON.stringify(pageIds)) throw new TransitionRefusee('imports', importId, c.status); return enVol; };
@@ -170,7 +216,7 @@ async function volUnique(importId, { ctx, repo = repoModule, fetch: fetchInjecte
     const t0 = Date.now();
     let reponse;
     try {
-      reponse = kind === 'index' ? await extraireIndex(provider, images, { signal: tenue.controller.signal }) : await extraireRecette(provider, images, { signal: tenue.controller.signal, maxTokens: MAX_TOKENS_EXTRACTION });
+      reponse = await executer({ provider, images: envoi.images, pageIds: envoi.pageIds, signal: tenue.controller.signal, kind }); // lot C : l'appel est celui de l'exécutant
     } catch (e) {
       // Échec de l'appel ou refus de la lecture : en_cours → echec(raison) ; une ErreurExtraction garde la réponse brute (diagnostic, bornée).
       // Un `annule` arrive aussi par annulerVol, qui écrit la même chose : la première écriture gagne, la seconde est refusée sans bruit.
@@ -183,7 +229,7 @@ async function volUnique(importId, { ctx, repo = repoModule, fetch: fetchInjecte
     const duree_ms = Date.now() - t0;
     // I-3 : le résultat vit dans le journal AVANT tout rendu ou toute écriture de recette. Patch-OBJET (son statut est lu par les espions des tests).
     try {
-      await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: { status: 'a_verifier', resultat: kind === 'index' ? reponse.index : reponse.recette, reponse_brute: brute(reponse.texteBrut), model: reponse.modele ?? null, duree_ms, document_id_vol: null, erreur: null } });
+      await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: { status: 'a_verifier', resultat: reponse.resultat, reponse_brute: brute(reponse.texteBrut), model: reponse.modele ?? null, duree_ms, document_id_vol: null, erreur: null } });
     } catch (e) {
       if (estRefus(e)) {
         // Réponse arrivée APRÈS « Annuler » ou un interrompu (spec § 3.1, Review Focus 4) : echec → a_verifier n'existe pas ; reponse_brute seule
@@ -200,11 +246,17 @@ async function volUnique(importId, { ctx, repo = repoModule, fetch: fetchInjecte
     }
     return { issue: 'a_verifier' };
   } finally {
+    signal?.removeEventListener?.('abort', abandon);
     if (battement) { clearInterval(battement); repo.oublierBattement(importId).catch(() => {}); }
     liberer();
     notifier();
   }
 }
+
+// Les exécutants (lot C, D-C21). Une recette : extraireRecette, 6 000 jetons, le résultat est la recette validée. Un index (panneau, « Relancer » de la
+// section Imports) : la table des matières par photo (executerIndex, src/domain/table-matieres.js). Une seule primitive de vol pour les deux sortes.
+const executerRecette = async ({ provider, images, signal }) => { const r = await extraireRecette(provider, images, { signal, maxTokens: MAX_TOKENS_EXTRACTION }); return { resultat: r.recette, texteBrut: r.texteBrut, modele: r.modele }; };
+const executerExtraction = (args) => (args.kind === 'index' ? executerIndex(args) : executerRecette(args));
 
 // « Annuler » (spec § 3.1, § 4.4, Review Focus 4) : seulement si CE document tient le vol de cet import — le fetch est abandonné (le serveur
 // abandonne l'amont, lot passerelle F-5) et la ligne passe en_cours → echec(annule). Sinon rien n'est fait et false est rendu.
@@ -234,7 +286,8 @@ export function texteEchec(erreur) {
   if (raison === 'vide') return { texte: t('Aucun ingrédient ni étape lus sur ces pages.'), code: null };
   return { texte: texteEchecAssistant({ message: raison, quota: extra.quota, trop_lourd: extra.trop_lourd }), code: null };
 }
-// La même phrase en une ligne (le code à la suite) : la section « Imports », l'éditeur et le panneau d'index (ronde 1 : une définition).
+// La même phrase en une ligne (le code à la suite) : la section « Imports » et l'éditeur (ronde 1 : une définition). Le panneau d'index dit texteEchecIndex
+// (src/ui/table-matieres.js, lot C) : ses phrases `coupe` et `vide`, et texteEchec pour tout le reste.
 export const phraseEchec = (erreur) => { const { texte, code } = texteEchec(erreur); return code ? `${texte} ${code}` : texte; };
 
 // Ce qu'un vol REFUSÉ dit (rien n'est parti, rien n'est écrit) : une définition pour la section « Imports », l'éditeur et le panneau d'index (tâche 6,
@@ -254,8 +307,8 @@ export function texteRefus(r) {
 // « Extraire avec l'assistant IA » de l'éditeur (kind recette, recipe_id null : « Regrouper en recette ») et « Lire avec l'assistant IA » du panneau
 // d'index (kind index) passent par le journal, comme l'écran ciblé : la section « Imports » les montre, les reprend (?import=), les relance ou les
 // annule. Le résultat d'une ligne est REVALIDÉ avant tout usage (I-1), par sorte ; le modèle relu est borné (80 points de code).
-const VALIDEURS = { recette: validateParsedRecipe, index: validerIndex };
-const validerSelon = (kind, resultat) => { try { return Object.hasOwn(VALIDEURS, kind) ? VALIDEURS[kind](resultat) : null; } catch { return null; } };
+const VALIDEURS = { recette: (r) => validateParsedRecipe(r), index: (r, L) => revaliderResultatIndex(r, L?.page_ids) }; // lot C : un index est de forme C, relu sur les pages de SA ligne
+const validerSelon = (kind, resultat, ligne = null) => { try { return Object.hasOwn(VALIDEURS, kind) ? VALIDEURS[kind](resultat, ligne) : null; } catch { return null; } };
 const sansReference = (ligne, kind) => !!ligne && ligne.kind === kind && ligne.recipe_id == null; // une ligne CIBLÉE se reprend par son écran
 
 // a_verifier → echec(illisible), résultat effacé (T4-R1) — pour LA lecture relue et jugée illisible, jamais pour une autre arrivée entre-temps (ronde 1 :
@@ -275,7 +328,7 @@ export async function relireDuJournal(importId, kind, { repo = repoModule } = {}
   const ligne = await repo.get('imports', importId);
   if (!sansReference(ligne, kind)) return null;
   if (ligne.status !== 'a_verifier') return { ligne, resultat: null, modele: null };
-  const resultat = validerSelon(kind, ligne.resultat);
+  const resultat = validerSelon(kind, ligne.resultat, ligne);
   if (resultat) return { ligne, resultat, modele: modeleBorne(ligne.model) };
   const ecrite = await marquerIllisible(repo, ligne);
   if (ecrite) return { ligne: ecrite, resultat: null, modele: null };

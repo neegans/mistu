@@ -1150,7 +1150,7 @@ export async function runLectureWebTests({ eq, ok }) {
         eq([ficheSH.querySelector('[data-role="bandeau-web"]'), !!ficheSH.querySelector('[data-role="ouvrir-lien"]')], [null, true], 'fiche (vague finale) : une provenance web dont l’adresse ne se lit pas (« pas une adresse », sans url_finale) → aucun bandeau « Lue sur … » ; la fiche est rendue (« Ouvrir le lien »)');
         ficheSH.remove();
         eq([srcRecette.includes('L’app n’a pas lu la page'), srcEn.includes('L’app n’a pas lu la page'), srcEn.includes('lot suivant')], [false, false, false], 'B-27 : « L’app n’a pas lu la page » ni dans recipe.js ni dans en.js ; le toast « lot suivant » retiré du dictionnaire');
-        eq([/Anthropic|Supabase/.test(srcWeb), /Anthropic|Supabase/.test(srcVol), /Anthropic|Supabase/.test(srcDomaine), /\bconst TEXTES_/.test(srcWeb)], [false, false, false, false], 'I-B6 (test de source) : aucun texte ne nomme le fournisseur ni la base ; aucune table TEXTES_ dans import-web.js (F-11)');
+        eq([/anthropic|supabase/i.test(srcWeb), /anthropic|supabase/i.test(srcVol), /anthropic|supabase/i.test(srcDomaine), /\bconst TEXTES_/.test(srcWeb)], [false, false, false, false], 'I-B6 (test de source ; sans égard à la casse, X8, vague finale du lot C) : aucun texte ne nomme le fournisseur ni la base ; aucune table TEXTES_ dans import-web.js (F-11)');
         eq(reseau, 0, 'aucun réseau réel');
       } finally { globalThis.fetch = vraiFetch; scene.remove(); V.reinitialiserVol(); W.reinitialiserLectureWeb(); IC.reinitialiserImportCible(); }
     }));

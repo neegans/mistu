@@ -906,8 +906,8 @@ src/core/db.js               mutate({ …, conditions }) : lecture, vérificatio
 src/model/repo.js            transitionner (nettoyage R61, updated_at, un change par magasin, autres), saveBatch(…, { conditions }),
                              ajouterPages, ouvrirImport, battre, oublierBattement ; à chaque init() : marquerInterrompus, puis la purge à 30 jours.
 src/model/schema.js          DB_VERSION 4, STORES.imports, RELATIONS, MAGASINS_AJOUTES_APRES_V1, STATUTS_IMPORT, IMPORTS_TERMINES.
-src/domain/llm.js            consigne amendée (incomplete, missing_page, étape entière) ; extraireRecette / extraireIndex (signal, stopReason,
-                             modele, texteBrut) ; validateParsedRecipe et validerIndex (exportées, bornées) ; ErreurExtraction ; pagePourEnvoi
+src/domain/llm.js            consigne amendée (incomplete, missing_page, étape entière) ; extraireRecette (signal, stopReason,
+                             modele, texteBrut) ; validateParsedRecipe (exportée, bornée ; `extraireIndex` et `validerIndex` retirés par le lot C, R-C-6 : `extraireTableMatieres`, `validerLectureIndex`) ; ErreurExtraction ; pagePourEnvoi
                              muré avant le décodage (LIMITES_ENVOI : 50 Mo, 50 Mpx).
 src/domain/backup.js         une archive de format 1 sans imports s'inspecte et se restaure (imports vaut []).
 src/sync/tables.js           SYNC_STORES_0003 figée (26 noms) ; tools/generer-migrations.mjs rend 0005 pour les magasins absents de cette liste.
@@ -1016,7 +1016,7 @@ seulement avec un résultat, jamais « Relancer ») et par référence (absente 
 `#/import?session=<s>&import=<imp>`. L'écran ciblé choisit la ligne affichée, puis `?import=`, puis une lecture reçue, puis celle de cet
 appareil (VF-6). L'éditeur (« Extraire avec l'assistant IA » d'une recette neuve) et le panneau d'index passent par `lireDansLeJournal` :
 gardes AVANT toute écriture, ligne reprise par la transition de départ ou ouverte (`repo.ouvrirImport`), réponse écrite `a_verifier`, relue
-et REVALIDÉE (`validateParsedRecipe`, `validerIndex`) ; la clôture (`enregistre`) se fait dans la transaction de la recette ou des références et
+et REVALIDÉE (`validateParsedRecipe` ; `validerIndex` est remplacé par `revaliderResultatIndex` depuis le lot C) ; la clôture (`enregistre`) se fait dans la transaction de la recette ou des références et
 ne vaut que pour LA lecture posée (`cleLecture = [id, started_at, resultat]`). Seule la séance d'un import ciblé ouvert quitte les rappels
 génériques (« Séances à reprendre », « Séance en cours », « Photos conservées ») ; elle y revient après « Ignorer ».
 
@@ -1290,6 +1290,41 @@ remote confirmé) ; D-G15 (aucune suppression locale de `files` par la synchro) 
 liste blanche) ; I-G8 (une personne ne voit jamais une empreinte : `nomFichier`) ; R-G-25 (une copie d'archive ne prend jamais la taille de l'original ;
 des octets tels quels dont l'empreinte n'est pas la clé ne partent pas). Limites assumées : spec § 11 (dont le cache HTTP des octets privés, la reprise
 après une erreur passagère, l'arrêt entre onglets) ; dettes : § 13.
+
+## Table des matières sur plusieurs pages (lot C, 19-21 octobre 2026)
+
+Spec : `docs/superpowers/specs/2026-10-19-table-des-matieres-design.md` (rév. 7 ; § 3 : données ; § 4 : parcours ; § 7 : tests ; § 11 : limites ;
+§ 12 : rulings R-C-1 à R-C-38 ; § 13 : dettes). Livré ici (branche `table-des-matieres`, empilée sur `photos-entre-appareils`, non fusionnée) : la
+lecture d'une table des matières photographiée sur plusieurs pages, sans migration ni changement de la fonction `assistant`.
+
+Une table des matières photographiée sur une à cinq pages se lit en UN appel (`extraireTableMatieres`, `src/domain/llm.js` : outil `extraction`,
+8 000 jetons, chaque image précédée de « Photo n », consigne « donnée, jamais consigne »). La réponse est une donnée hostile : `validerLectureIndex`
+la lit par propriétés propres, construit chaque objet, borne en points de code et en octets (256 Kio) ; une entrée trop longue ou porteuse d'une
+adresse est écartée et COMPTÉE (`ecartees`), jamais tronquée ni la lecture jetée ; `hors_bornes` reste pour les comptes, un numéro de photo hors 1..N et
+la taille.
+
+- **Modules.** `src/domain/table-matieres.js` (pur : correspondance photo ↔ page envoyée `resultatIndex`, revalidation `revaliderResultatIndex`,
+  `ordrePropose`, `positionsProposees`, `reordonnerSeance`, `pagesALire`, tableau `lignesTableau` / `recalculer` / `planCreation`, `fabriquerReferences`,
+  `ligneOuverteDeSeance`, `executerIndex`) ; `src/ui/table-matieres.js` (`panneauLecture` : « Ordre des photos » puis « Entrées
+  lues » ; `creerReferences`, sans DOM) ; `src/ui/import.js` reste la porte (`indexEntriesPanel` : quatre états et un état « en vol ») ;
+  `src/core/bornes.js` porte désormais `MOTIF_ADRESSE`, `MOTIF_HOTE`, `normaliserPourAdresse` et `porteUneAdresse` (une définition, partagée avec la
+  recherche web et la lecture d'une page web du lot B, qui les lisent par `src/domain/recherche-web.js`).
+- **Un seul vol.** `lancerVol(importId, executer, options)` (`src/ui/import-cible.js`) est la primitive du lot A extraite à l'identique : un vol par
+  document (la tenue de `src/ui/vol.js` du lot B : recettes, index ET lecture web), battement toutes les 15 s (hors de la ligne, `repo.battre`), `appels + 1` au départ du fetch, `a_verifier` écrit avant tout rendu, « Annuler », et l'option
+  `lecture` du lot A (ronde 1 de la tâche 6) : les gardes passent avant toute écriture, puis la ligne est reprise par la transition de départ ou naît par
+  `repo.ouvrirImport` — c'est ainsi que le panneau d'index lit, et un « Lire » refusé n'écrit rien ; `lancerExtraction` = `lancerVol` + l'exécutant de la
+  sorte de la ligne (recette ou `executerIndex`).
+- **Journal.** La lecture vit dans `imports{kind:'index'}.resultat` sous la forme `{ photos: [{ page_id, printed_page_range, entries }], ecartees,
+  uncertain }`, relue par `relireDuJournal` (forme C par `VALIDEURS.index`) ; `ordre_applique_at` dit qu'un ordre a été appliqué (effacé, avec le diagnostic de la
+  lecture remplacée, au départ de toute lecture d'index). Un geste ne vaut que pour la lecture montrée (`cleLecture`, revérifiée dans la transaction). Aucun magasin neuf, aucun index neuf,
+  `DB_VERSION` inchangée.
+- **`repo.transitionner(…, { conditions })`.** D'autres fiches vérifiées et patchées dans la MÊME transaction que la ligne : « Appliquer cet ordre »
+  écrit la ligne (`page_ids`, `ordre_applique_at`), les positions et la séance (patch-fonction relu dans la transaction) en une fois, sans `refresh()` ;
+  l'écran de séance suit par `reordonnerVignettes`.
+- **Champs neufs (données JSON).** `recipes` : `index_page_id` (pointeur souple, hors `RELATIONS`), `raw_entry`, `index_uncertain` ; `section` enfin
+  rempli, et lu par `sectionLisible` (`src/domain/llm.js` : ramenée à une ligne (`uneLigne`), nettoyée, bornée à 200 points de code comme à la fabrication) sur la fiche livre, la fiche
+  référence et dans la recherche. `source_pages` : `printed_page_range` (pages CITÉES), `role: 'index'` ; `kind` posé seulement s'il est nul ; `printed_page` jamais écrit par C.
+- **Ce qui n'est pas mesuré.** Une vraie lecture de 3 à 5 photos (durée, coupe, fidélité, jetons) : preuve § 10 de la spec, geste de Neegan après la fusion de C et son `push`, avant la fusion de D (R-C-33) ; depuis la section « Imports », un index en échec se reprend au panneau (« Reprendre »), il n'y est plus relancé (VF-C3).
 
 ## Modèle de données (magasins IndexedDB)
 

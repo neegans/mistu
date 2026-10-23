@@ -7,6 +7,7 @@ import * as repo from '../model/repo.js';
 import { displayUrl, typeAffichage, safeDisplayType } from '../sync/mime.js';
 import { urlDeBlob } from '../core/blob-urls.js';
 import { currentVersion } from '../domain/search.js';
+import { sectionLisible } from '../domain/llm.js';
 import { scaleVersion } from '../domain/scaling.js';
 import { assessVersion } from '../domain/diet.js';
 import { toJsonLd, toPaprikaYaml } from '../domain/exporters.js';
@@ -295,9 +296,11 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     if (recipe.source_url) return el('div', null, blocSignet(recipe, ctx, { lire: lireWeb, connecter: connecterWeb, moi: gestesLecture.repo.deviceId?.() ?? null }));
     // Lot G (§ 4.4) : les pages d'index par vignettePage, avec « Télécharger les {n} pages » quand ≥ 2 manquent (la branche signet ci-dessus rend avant).
     const vignettes = pages.length ? await vignettesDePages(pages, ctxF) : null;
+    const sectionLue = sectionLisible(recipe.section); // lot C (D-C6) : nettoyée et bornée, sinon null (ronde 1)
     return el('div', null,
       el('div', { class: 'card warn stack' },
         el('h2', null, recipe.printed_page ? t('Repérée dans ton livre — page {p}', { p: recipe.printed_page }) : t('Repérée dans l’index de ton livre')),
+        sectionLue ? el('p', { class: 'muted' }, t('Section : {s}', { s: sectionLue })) : null,
         el('p', null, t('Cette référence vient de l’index : ingrédients, durées et compatibilités alimentaires sont inconnus tant que la recette n’est pas numérisée. Ouvre le livre à cette page pour cuisiner, ou scanne la recette.')),
         el('div', { class: 'row' },
           // D-8 : la voie « Scanner cette recette » (Ajouter + clé de session) est remplacée par l'écran d'import ciblé, déjà rattaché à la référence.

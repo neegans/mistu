@@ -1,21 +1,24 @@
 // Séance de scan continue (spec §16) : photos et fichiers conservés sur l'appareil, miniatures numérotées, regroupement,
 // remplacement d'une page, entrées d'index, états fondés sur des événements réels. Aucune page n'est annoncée « sur le serveur » sans un remote
 // de ce compte sur sa ligne files (lot G, § 4.3, I5).
-import { el, toast, pickFiles, confirmDialog, formatDate } from '../core/dom.js';
+import { el, toast, toast as toastDom, pickFiles, confirmDialog, formatDate } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { navigate, buildQuery, refresh, remplacerAdresse, parseHash } from '../core/router.js';
 import { logError } from '../core/log.js';
 import { TransitionRefusee } from '../core/db.js';
+import { borner } from '../core/bornes.js';
 import * as repo from '../model/repo.js';
+import * as repoModule from '../model/repo.js';
 import { remoteDeCeCompte } from '../sync/tables.js';
 import { sha256Hex } from '../core/hash.js';
-import { normalizeText } from '../domain/units.js';
 import { assertVocabulaire } from '../domain/vocabulaire.js';
-import { providerFrom } from '../domain/llm.js';
+import { providerFrom, uneLigne } from '../domain/llm.js';
 import { seanceDUnImportCible, importOuvert } from '../domain/import-cible.js';
-import { pageHeader, section, emptyState, select, field, carteConnexion, texteEchecAssistant, pdfFrame, libelleLivre, sessionAssistant, contexteFichiers, vignettesDePages, boutonTelechargerPages, gesteTelechargement } from './components.js';
+import { cleReference, BORNE_RAW_ENTRY, ligneOuverteDeSeance, pagesALire, revaliderResultatIndex, planCreation, executerIndex } from '../domain/table-matieres.js';
+import { pageHeader, section, emptyState, select, field, carteConnexion, pdfFrame, libelleLivre, sessionAssistant, contexteFichiers, vignettesDePages, boutonTelechargerPages, gesteTelechargement } from './components.js';
 import { demarrerConnexion } from './settings.js';
-import { lireDansLeJournal, relireDuJournal, phraseEchec, cleLecture } from './import-cible.js';
+import { lancerVol, annulerVol, volEnCours, estEnLigne, texteRefus, relireDuJournal, cleLecture, ecouterVol, BATTEMENT_MS } from './import-cible.js';
+import { panneauLecture, texteEchecIndex, ligneEtatLecture, ligneIncertain, texteQuota } from './table-matieres.js';
 
 const INTENTIONS = ['index', 'recette'];
 // L'intention (spec § 10) voyage dans l'adresse, pas dans la base : consommée au premier rendu, puis retirée.
@@ -44,14 +47,14 @@ export async function startScanSession(files, { edition_id = null, session_id = 
 // Identité de l'appareil : une seule, celle de la base (spec § 4.2). Posée par repo.init() au démarrage.
 export function deviceId() { return repo.deviceId(); }
 
-// Les lectures SANS référence du panneau d'index passent par le journal : lireDansLeJournal, relireDuJournal et phraseEchec vivent à côté du vol, dans
-// src/ui/import-cible.js (tâche 6, ronde 1 : l'éditeur ne dépend plus de ce module de route pour son journal).
+// Le panneau d'index lit par le journal : le vol partagé (lancerVol, option lecture) et relireDuJournal vivent à côté du vol, dans
+// src/ui/import-cible.js (tâche 6 du lot A et sa ronde 1 ; lot C, tâche 4).
 
-export async function renderImport(params, query, ctx) {
+export async function renderImport(params, query, ctx, deps = {}) {
   if (!query.session) return sessionsList(ctx);
   const session = ctx.scan_sessions.find((s) => s.id === query.session);
   if (!session) return el('div', { class: 'card' }, t('Séance introuvable.'));
-  return sessionView(session, ctx, query);
+  return sessionView(session, ctx, query, { deps }); // deps (lot C, D-C20) : les injectables du panneau d'index — le routeur n'en passe aucun
 }
 
 function sessionsList(ctx) {
@@ -68,7 +71,7 @@ function sessionsList(ctx) {
   return root;
 }
 
-async function sessionView(session, ctx, query = {}, { historique = { remplacer: remplacerAdresse } } = {}) {
+async function sessionView(session, ctx, query = {}, { historique = { remplacer: remplacerAdresse }, deps = {} } = {}) {
   const ctxF = await contexteFichiers(ctx);
   const pages = session.page_ids.map((id) => ctx.pagesById.get(id)).filter(Boolean);
   const docs = session.document_ids.map((id) => ctx.source_documents.find((d) => d.id === id)).filter(Boolean);
@@ -78,10 +81,17 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   // pas (fiche reçue d'ailleurs, page retirée depuis). Cocher un identifiant sans page créait une sélection qui ne
   // correspondait à aucune miniature, et « Regrouper en recette » l'emportait dans son adresse.
   const applique = appliquerIntention({ intention: query.intention, pageIds: pages.map((p) => p.id) });
-  // ?import=<imp> (spec § 4.5, tâche 6) : la lecture d'index de CETTE séance se reprend dans le panneau — ouvert, prérempli, ses pages cochées.
-  // Ronde 1 : seulement une lecture OUVERTE (une lecture close par « Créer les références » ne rouvre pas le panneau au refresh qui suit).
-  const ligneImport = query.import ? (ctx.imports || []).find((i) => importOuvert(i) && i.id === query.import && i.kind === 'index' && i.scan_session_id === session.id) || null : null;
-  const selected = new Set(ligneImport ? (Array.isArray(ligneImport.page_ids) ? ligneImport.page_ids : []).filter((id) => pages.some((p) => p.id === id)) : applique.selection);
+  // ?import=<imp> (spec § 4.5, tâche 6 ; lot C, D-C22) : la lecture d'index OUVERTE de cette séance — désignée par ?import=, sinon la plus récente
+  // (ligneOuverteDeSeance) — rend le panneau visible ; à la reprise par ?import= (sans intention), ses pages RÉSOLUES sont présélectionnées (C6 : jamais un
+  // identifiant sans vignette). Seules la présélection et l'importId du panneau suivent la ligne DÉSIGNÉE : une lecture close, d'une autre sorte ou d'une
+  // autre séance n'est ni cochée ni relue ; la visibilité du panneau, elle, suit TOUTE ligne d'index ouverte de la séance (M67). Une intention a posé sa
+  // sélection : elle gagne (garde équivalente tant que l'intention coche toutes les pages résolues, ronde 1).
+  const ligneIndex = ligneOuverteDeSeance(ctx.imports, session.id, { importId: query.import ?? null });
+  const ligneImport = query.import && ligneIndex?.id === query.import ? ligneIndex : null;
+  const selected = new Set(applique.selection);
+  if (!applique.consommee && ligneImport) {
+    for (const id of Array.isArray(ligneImport.page_ids) ? ligneImport.page_ids : []) if (pages.some((p) => p.id === id)) selected.add(id);
+  }
   const edition = session.edition_id ? ctx.editionsById.get(session.edition_id) : null;
   const root = el('div', null);
   root.append(pageHeader(t('Séance de scan'), { subtitle: `${t('Débutée le')} ${formatDate(session.started_at, { withTime: true })}`, back: { href: '/import', label: t('Séances') } }));
@@ -139,7 +149,7 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   for (const p of pages) {
     const check = el('input', { type: 'checkbox', checked: selected.has(p.id), onChange: (e) => { if (e.target.checked) selected.add(p.id); else selected.delete(p.id); drawActions(); } });
     const pageInput = el('input', { type: 'number', placeholder: t('p. imprimée'), value: p.printed_page ?? '', style: { minHeight: '30px', padding: '.2rem .4rem', fontSize: '.8rem' }, onChange: async (e) => { p.printed_page = e.target.value ? parseInt(e.target.value, 10) : null; await repo.save('source_pages', p); } });
-    thumbs.append(el('figure', null, el('span', { class: 'num' }, String(p.position)), vignettes.places.get(p.id),
+    thumbs.append(el('figure', { dataset: { page: p.id } }, el('span', { class: 'num' }, String(p.position)), vignettes.places.get(p.id),
       el('figcaption', null, el('label', { class: 'check' }, check, p.kind ? t(p.kind === 'index' ? 'Index' : 'Recette') : t('Sélectionner')), pageInput,
         ...(p.issues || []).map((i) => el('div', { class: 'chip warn' }, i)))));
   }
@@ -163,15 +173,14 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
     })));
   }
 
-  // Entrées d'index
-  const indexPanel = indexEntriesPanel(session, ctx, () => [...selected], { importId: ligneImport?.id ?? null });
-  indexPanel.hidden = !ligneImport;
+  // Entrées d'index (lot C) : le panneau est visible au rendu dès qu'une ligne index OUVERTE existe pour cette séance (§ 4.1) — par n'importe quel
+  // chemin, pas seulement Imports → Reprendre ; « Appliquer cet ordre » réordonne les vignettes EN PLACE par apresOrdre (D-C15 : aucun refresh(),
+  // les éditions du tableau survivent).
+  const indexPanel = indexEntriesPanel(session, ctx, () => [...selected], { ...deps, importId: ligneImport?.id ?? null, apresOrdre: (maj) => reordonnerVignettes(thumbs, maj, { ctx, session }) });
+  indexPanel.hidden = !(applique.ouvrirIndex || !!ligneIndex);
   root.append(indexPanel);
-  if (applique.consommee) {
-    if (applique.ouvrirIndex) indexPanel.hidden = false;
-    // consommée : un refresh() ne la réappliquera pas — mais seulement si l'adresse est encore celle-ci (C7).
-    if (peutRetirerIntention(applique, session.id, parseHash().query)) historique.remplacer(adresseSeance(session.id, null));
-  }
+  // consommée : un refresh() ne la réappliquera pas — mais seulement si l'adresse est encore celle-ci (C7).
+  if (applique.consommee && peutRetirerIntention(applique, session.id, parseHash().query)) historique.remplacer(adresseSeance(session.id, null));
 
   root.append(el('div', { class: 'row', style: { marginTop: '1rem' } },
     el('button', { class: 'btn', onClick: async () => { session.status = 'done'; await repo.save('scan_sessions', session); toast(t('Séance terminée')); navigate(session.edition_id ? `/books/${session.edition_id}` : '/library'); } }, t('Terminer la séance')),
@@ -211,128 +220,302 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   return root;
 }
 
-// Panneau d'entrées d'index : « Titre — 132 » par ligne ; création de références (reference_only) sans inventer d'ingrédients.
-// Tâche 6 (spec § 4.6) : « Lire avec l'assistant IA » écrit dans le journal (kind index) et relit sa ligne ; le bouton est verrouillé pendant
-// l'appel (double clic → un POST) ; `importId` (?import=) reprend une lecture déjà reçue, sans appel ; « Créer les références » la clôt.
-export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId = null, importId = null } = {}) {
-  const panel = el('div', { class: 'card stack' }, el('h2', null, t('Entrées d’index ou de table des matières')));
+// D-C15 (lot C) : après « Appliquer cet ordre », l'écran de séance suit SANS reconstruction — les MÊMES figures réordonnées dans `thumbs` selon
+// seance.page_ids RELUE, .num réécrits, session.page_ids posé, et les MÊMES objets de ctx.pagesById mis à jour (le champ « p. imprimée » d'une
+// vignette réécrit ensuite une fiche à jour, leçon C4).
+export function reordonnerVignettes(thumbs, { pages = [], seance = null } = {}, { ctx, session }) {
+  for (const maj of Array.isArray(pages) ? pages : []) { const p = ctx?.pagesById?.get(maj?.id); if (p) p.position = maj.position; }
+  if (Array.isArray(seance?.page_ids)) session.page_ids = [...seance.page_ids];
+  const parPage = new Map([...thumbs.children].map((f) => [f.dataset.page, f]));
+  for (const id of session.page_ids) { const f = parPage.get(id); if (f) thumbs.append(f); }
+  for (const f of thumbs.children) {
+    const p = ctx?.pagesById?.get(f.dataset.page);
+    if (!p) continue;
+    const num = f.querySelector('.num'); if (num) num.textContent = String(p.position);
+    const img = f.querySelector('img'); if (img) img.alt = `${t('Page')} ${p.position}`;
+  }
+}
+
+// Panneau d'entrées d'index (lot C, spec § 4.2) : quatre états et un état « en vol », lus sur la ligne du journal `kind: 'index'` OUVERTE de la séance
+// (ligneOuverteDeSeance : ctx.imports au rendu, aucun flash ; relue dans la base avant tout geste, leçon C4).
+//   1) sans lecture : la zone de texte et « Lire avec l’assistant IA » ;   2) lecture reçue (a_verifier, résultat REVALIDÉ) : panneauLecture (ordre +
+//   tableau), « Lue en … », « Incertain : … », « Saisir à la main » ;   3) échec : la raison, « Relancer », la zone de texte ;   4) à lancer : « Lire »,
+//   « Ignorer », la zone de texte ;   en vol : « Lecture des pages par l’assistant… » puis une .row avec le primaire éteint et « Annuler » (R-VIS-8).
+// L'appel entier est confié à lancerVol (D-C21) AVEC l'option `lecture` du lot A (ronde 1 de T6 : les gardes du vol — session, réseau, octets, image —
+// passent AVANT toute écriture ; puis la ligne ouverte est reprise par la transition de départ, ou une ligne naît par repo.ouvrirImport) : le panneau
+// n'écrit jamais a_lancer, page_ids, en_cours, appels, document_id_vol ni battement_at, et un « Lire » refusé n'écrit rien. Une lecture reçue est relue
+// par relireDuJournal (I-1 : revalidée, forme C ; hostile → echec(illisible) conditionné à CETTE lecture, T4-R2). Dépendances injectées (D-C20) : repo,
+// toast, confirmer, apresOrdre (D-C15), fetch, maintenant, battementMs, enLigne (par défaut l'état réseau que le vol lit) ; importId = la ligne désignée
+// par ?import= (elle gagne). Sans séance (fiche livre) : état 1 toujours, et « Lire » dit « Sélectionne les pages d’index à lire ».
+export function indexEntriesPanel(session, ctx, getSelectedPageIds, { editionId = null, importId = null, repo = repoModule, toast = toastDom, confirmer = confirmDialog, apresOrdre = null, fetch: fetchInjecte = undefined, maintenant = horloge, battementMs = BATTEMENT_MS, enLigne = estEnLigne, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000 } = {}) {
+  const panel = el('div', { class: 'card stack', dataset: { role: 'panneau-index' } }, el('h2', null, t('Entrées d’index ou de table des matières')));
+  const edId = () => editionId || session?.edition_id || null;
+  const etat = { ligne: null, resultat: null, cle: null, vue: null, saisie: false, occupe: false, lisant: false, abandon: null };
+  const zoneEtat = el('div', { class: 'stack', dataset: { role: 'etat-lecture' } });
+  const zoneVol = el('div', { class: 'stack', dataset: { role: 'vol' } });
+  const zoneLecture = el('div', { dataset: { role: 'zone-lecture' } });
   const ta = el('textarea', { placeholder: 'Magret de canard aux cerises — 132\nSalade de fenouil, p. 58\n212 Pâtes puttanesca', rows: 8 });
   const preview = el('div', null);
-  const status = el('div', { class: 'muted' });
-  // La passerelle (R-T3-1) : la session arrive de façon asynchrone — le bouton reste éteint jusqu'à sa lecture, et elle est relue au
-  // clic (un jeton expiré se rafraîchit). `indexEntriesPanel` reste synchrone : c'est le fournisseur qui se met à jour. La phrase
-  // « Connecte-toi… » attend la même lecture (cachée au départ : une personne connectée ne la voit jamais en flash) ; avec une
-  // session elle est retirée, sans session elle se montre (R-T4-4).
-  let provider = providerFrom(ctx.settings);
-  const connexion = carteConnexion(() => demarrerConnexion(ctx.sync?.auth), ctx);
-  connexion.hidden = true;
-  // F-8 : la carte reste dans le document, cachée ou montrée — jamais retirée (un `hidden = false` sur un nœud détaché ne montre rien : la
-  // session disparue au clic laissait un bouton éteint et aucune explication) ; le bouton suit la session dans les deux sens.
-  const lierAssistant = async () => {
-    provider = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) });
-    aiBtn.disabled = !provider.configured;
-    connexion.hidden = provider.configured;
-  };
-  const parse = () => parseIndexLines(ta.value);
   const draw = () => {
-    const entries = parse();
+    const entries = parseIndexLines(ta.value);
     preview.replaceChildren(entries.length ? el('ul', { class: 'list plain' }, ...entries.map((e) => el('li', null, el('strong', null, e.title), e.printed_page ? el('span', { class: 'muted' }, ` — ${t('page')} ${e.printed_page}`) : el('span', { class: 'chip warn' }, t('page inconnue'))))) : null);
   };
   ta.addEventListener('input', draw);
-  // La lecture (revalidée) posée dans la zone : toujours du texte (valeur d'un textarea, textContent), jamais du balisage.
-  const remplir = (res) => {
-    ta.value = res.entries.map((e) => `${e.title} — ${e.printed_page ?? ''}`).join('\n');
-    status.textContent = t('{n} entrée(s) proposée(s) par l’assistant — vérifie avant de créer.', { n: res.entries.length }) + (res.uncertain.length ? ` ${t('Incertain')} : ${res.uncertain.join('; ')}` : '');
-    draw();
+  const createBtn = el('button', { type: 'button', class: 'btn primary', onClick: () => create() }, t('Créer les références'));
+  const zoneSaisie = el('div', { class: 'stack', dataset: { role: 'zone-saisie' } },
+    el('p', { class: 'muted' }, t('Une ligne par recette : titre puis numéro de page. Un titre ne suffit pas à déduire des ingrédients : ces entrées deviennent des références « Repérée dans ton livre ».')),
+    ta, el('div', { class: 'row' }, createBtn), preview);
+  // La passerelle (R-T3-1) : la session arrive de façon asynchrone ; la carte « Connecte-toi… » reste dans le document, cachée ou montrée (F-8).
+  let provider = providerFrom(ctx.settings);
+  const connexion = carteConnexion(() => demarrerConnexion(ctx.sync?.auth), ctx);
+  connexion.hidden = true;
+  const aiBtn = el('button', { type: 'button', class: 'btn', disabled: true, dataset: { role: 'lire-index' }, onClick: () => lire() }, t('Lire avec l’assistant IA'));
+  const saisirBtn = el('button', { type: 'button', class: 'btn', hidden: true, dataset: { role: 'saisir' }, onClick: () => { etat.saisie = !etat.saisie; dessiner(); } }, t('Saisir à la main'));
+  const ignorerBtn = el('button', { type: 'button', class: 'btn', hidden: true, dataset: { role: 'ignorer' }, onClick: () => ignorer() }, t('Ignorer'));
+  const actions = el('div', { class: 'row', dataset: { role: 'actions-index' } }, aiBtn, saisirBtn, ignorerBtn);
+  const quota = el('small', { class: 'muted', hidden: true, dataset: { role: 'quota' } }, texteQuota());
+  panel.append(zoneEtat, zoneVol, zoneLecture, connexion, zoneSaisie, actions, quota);
+
+  const lierAssistant = async () => {
+    provider = providerFrom(ctx.settings, { session: await sessionAssistant(ctx) });
+    connexion.hidden = provider.configured;
+    dessiner();
   };
-  let importCourant = importId; // la ligne du journal de ce panneau : reprise par ?import=, ouverte au premier clic, close par « Créer les références »
-  let cleZone = null; // la clé (cleLecture) de LA lecture posée dans la zone : « Créer les références » ne clôt qu'elle (T4-R2, ronde 1)
-  let occupe = false;
-  const aiBtn = el('button', { class: 'btn', disabled: true, onClick: async () => {
-    if (occupe) return;
-    const ids = getSelectedPageIds();
-    if (!ids.length) { toast(t('Sélectionne les pages d’index à lire')); return; }
-    occupe = true; aiBtn.disabled = true; // verrou AVANT tout await : un double clic ne fait qu'un POST
-    status.textContent = t('Lecture des pages par l’assistant…');
-    let connecte = true;
+  // La ligne adoptée par le panneau : OUVERTE et d'index, ou rien ; `resultat` = sa lecture REVALIDÉE (null hors d'un a_verifier valide). Une NOUVELLE
+  // lecture (cleLecture : autre ligne, autre départ, autre résultat) reconstruit panneauLecture — jamais un geste du panneau (D-C15 : « Appliquer » ne
+  // change ni le départ ni le résultat, les éditions locales survivent).
+  function poser(L, resultat) {
+    const ouverte = importOuvert(L) && L.kind === 'index' ? L : null;
+    const cle = ouverte?.status === 'a_verifier' && resultat ? cleLecture(ouverte) : null;
+    if (cle !== etat.cle) {
+      etat.cle = cle; etat.saisie = false;
+      etat.resultat = cle ? resultat : null;
+      etat.vue = etat.resultat ? panneauLecture({ ligne: ouverte, resultat: etat.resultat, session, ctx, repo, toast, apresOrdre, maintenant, editionId: edId(), surCree: async () => { refresh(); await redessiner(); }, surChangement: () => redessiner(), surSansLivre: () => toast(t('Associe d’abord un livre à cette séance')) }) : null;
+    }
+    etat.ligne = ouverte;
+  }
+  async function charger() {
+    if (!session) { poser(null, null); return; }
+    const L = ligneOuverteDeSeance(await repo.all('imports'), session.id, { importId: etat.ligne?.id ?? importId });
+    if (L?.status !== 'a_verifier') { poser(L, null); return; }
+    const relue = await relireDuJournal(L.id, 'index', { repo }); // I-1 : revalidée ; hostile → echec(illisible), conditionné à cette lecture (T4-R2)
+    poser(relue?.ligne ?? null, relue?.resultat ?? null);
+  }
+  let file = Promise.resolve(); // les redessins sont enchaînés : jamais deux lectures concurrentes qui se dépassent
+  const redessiner = () => { file = file.then(charger).then(() => dessiner()).catch((e) => logError('table_matieres.rendu', { error: e })); return file; };
+
+  function dessiner() {
+    const L = etat.ligne;
+    const statut = L?.status ?? null;
+    const enVol = etat.lisant || (!!L && volEnCours()?.importId === L.id);
+    const lecture = !enVol && statut === 'a_verifier' && !!etat.vue;
+    zoneEtat.replaceChildren(); zoneVol.replaceChildren();
+    if (enVol) {
+      // R-VIS-8 : la .status[role=status] puis la .row — « Annuler » se range à droite ; le primaire reste, éteint, à sa place.
+      zoneVol.append(el('div', { class: 'status', role: 'status' }, t('Lecture des pages par l’assistant…')),
+        el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn primary', disabled: true }, t('Lire avec l’assistant IA')), el('button', { type: 'button', class: 'btn', dataset: { role: 'annuler' }, onClick: () => annuler() }, t('Annuler'))));
+    } else if (statut === 'en_cours') zoneEtat.append(el('div', { class: 'status warn' }, t('En cours sur un autre écran'))); // I-7 du lot A : sans « Annuler »
+    else if (lecture) {
+      zoneEtat.append(el('p', { class: 'muted', style: { margin: 0 }, dataset: { role: 'etat' } }, ligneEtatLecture(L, etat.resultat)));
+      const incertain = ligneIncertain(etat.resultat);
+      if (incertain) zoneEtat.append(el('p', { class: 'muted', style: { margin: 0 }, dataset: { role: 'incertain' } }, incertain));
+    } else if (statut === 'echec') {
+      const { texte, code } = texteEchecIndex(L.erreur);
+      zoneEtat.append(el('div', { class: 'status warn', dataset: { role: 'echec' } }, el('span', null, texte), code ? el('small', { class: 'muted' }, ` ${code}`) : null));
+    }
+    zoneVol.hidden = !enVol;
+    if (lecture) { if (zoneLecture.firstChild !== etat.vue) zoneLecture.replaceChildren(etat.vue); } else zoneLecture.replaceChildren();
+    zoneLecture.hidden = !lecture || etat.saisie;
+    zoneSaisie.hidden = lecture && !etat.saisie;
+    ta.disabled = enVol; createBtn.disabled = enVol || etat.occupe;
+    actions.hidden = enVol;
+    aiBtn.textContent = statut === 'echec' ? t('Relancer') : t('Lire avec l’assistant IA');
+    aiBtn.disabled = !provider.configured || etat.occupe || enVol || statut === 'en_cours';
+    saisirBtn.hidden = !lecture;
+    saisirBtn.textContent = etat.saisie ? t('Revenir à la lecture') : t('Saisir à la main');
+    ignorerBtn.hidden = enVol || statut !== 'a_lancer';
+    quota.hidden = enVol || !['a_verifier', 'echec', 'a_lancer'].includes(statut);
+    veiller();
+  }
+  // Ronde 1 de T4 (VF-15 du lot A, comme l'écran ciblé et l'écran web) : une ligne en_cours que CE document ne tient pas (onglet rechargé, PWA tuée) n'attend
+  // plus le démarrage — la passe `interrompu` (repo.marquerInterrompus, mêmes règles, horloge du panneau) est rejouée à l'affichage, puis toutes les
+  // BATTEMENT_MORT_MS + 1 s tant que la ligne vole ailleurs et que le panneau est monté ; une passe qui interrompt redessine (phrase I-4, « Relancer »).
+  let veille = null;
+  function veiller(maintenantAussi = true) {
+    const L = etat.ligne;
+    if (veille || L?.status !== 'en_cours' || etat.lisant || volEnCours()?.importId === L.id || typeof repo.marquerInterrompus !== 'function') return;
+    const passe = () => { const m = Date.parse(maintenant()); return repo.marquerInterrompus(Number.isFinite(m) ? m : undefined).then((n) => (n ? redessiner() : null)).catch((e) => logError('table_matieres.interrompus', { error: e })); };
+    if (maintenantAussi) passe();
+    veille = setTimeout(() => { veille = null; if (panel.isConnected) passe().then(() => veiller(false)); }, veilleMs);
+  }
+
+  // « Lire » / « Relancer » (D-C16, N-2, Q3, Q4) : la ligne ouverte de la séance RELUE (« au mieux », D-C7), puis la garde des pages (P2 : sur pagesALire,
+  // jamais sur la sélection seule) ; depuis une lecture reçue, la question de la relecture — posée seulement si l'appel PEUT partir (hors ligne : rien
+  // n'est demandé ni écrit) ; puis lancerVol avec `lecture` : la ligne reprise par la transition de départ (a_verifier | echec | a_lancer → en_cours, ses
+  // page_ids remises) ou une ligne neuve, APRÈS les gardes du vol.
+  async function lire() {
+    const tenu = volEnCours();
+    if (tenu) { if (!tenu.importId || tenu.importId !== etat.ligne?.id) toast(t('Une lecture est déjà en cours : annule-la d’abord.')); return; } // ce vol-ci : muet
+    if (etat.occupe || etat.vue?.occupe?.()) return; // ronde 1 : jamais pendant « Créer {n} références » ou « Appliquer cet ordre » de la lecture montrée
+    etat.occupe = true; aiBtn.disabled = true; // le verrou du bouton (T6) : double clic → un POST
     try {
-      const r = await lireDansLeJournal({ kind: 'index', importId: importCourant, pageIds: ids, editionId: editionId || session?.edition_id || null, sessionId: session?.id ?? null, ctx });
-      importCourant = r.importId; connecte = r.connecte;
-      if (r.resultat) { remplir(r.resultat); cleZone = r.cle; } else status.textContent = r.texte;
-    } catch (e) { logError('import.index_lecture', { error: e }); status.textContent = texteEchecAssistant(e); }
-    finally {
-      occupe = false;
-      if (!connecte) { provider = providerFrom(ctx.settings); connexion.hidden = false; } // la session a disparu au clic (F-8) : la carte, le bouton éteint
-      aiBtn.disabled = !provider.configured;
-    }
-  } }, t('Lire avec l’assistant IA'));
-  lierAssistant();
-  // ?import= : la lecture déjà reçue est relue et REVALIDÉE (I-1), puis posée dans la zone — aucun appel ; une ligne en échec dit sa raison.
-  if (importId) relireDuJournal(importId, 'index').then((relue) => {
-    if (!relue) { importCourant = null; return; }
-    if (relue.resultat) { remplir(relue.resultat); cleZone = cleLecture(relue.ligne); }
-    else if (relue.ligne?.status === 'echec') status.textContent = phraseEchec(relue.ligne.erreur);
-  }).catch((e) => logError('import.index_relu', { error: e }));
-  const create = async () => {
-    const edId = editionId || session?.edition_id;
-    if (!edId) { toast(t('Associe d’abord un livre à cette séance')); return; }
-    const entries = parse();
-    if (!entries.length) return;
-    const edition = ctx.editionsById.get(edId);
-    const existing = ctx.recipes.filter((r) => r.edition_id === edId);
-    const key = (title, page) => `${normalizeText(title)}|${page ?? ''}`;
-    const seen = new Set(existing.map((r) => key(r.original_title, r.printed_page)));
-    const pageIds = getSelectedPageIds().filter((id) => ctx.pagesById.get(id));
-    const created = [];
-    let dupes = 0;
-    for (const e of entries) {
-      const k = key(e.title, e.printed_page);
-      if (seen.has(k)) { dupes++; continue; }
-      seen.add(k);
-      const fiche = { id: repo.newId('rc'), edition_id: edId, original_title: e.title, original_language: edition?.language || null, availability: 'reference_only', verification_state: 'unverified', printed_page: e.printed_page, section: e.section || null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: pageIds, current_version_id: null, ingredient_ids: [] };
-      assertVocabulaire(fiche, 'recipes'); // D-12 : « Créer les références » est un fabricant de recipes comme les autres (spec import-cible § 3.3)
-      created.push(fiche);
-    }
-    const pagesIndex = pageIds.map((id) => ({ ...ctx.pagesById.get(id), kind: 'index' }));
-    // Tâche 6 : la lecture du journal POSÉE DANS LA ZONE (a_verifier, sa clé) est CLOSE avec ce qu'elle a produit — références et pages d'index —, dans UNE
-    // transaction conditionnée (I-10) à cette même lecture (T4-R2, ronde 1 : une lecture plus récente, arrivée d'un autre onglet, n'est jamais close sans
-    // avoir été vue ; les références de la zone s'écrivent alors sans elle). Refusée (close ou ignorée entre-temps) : rien n'est écrit ; le panneau se
-    // détache de la ligne, et « Créer les références » écrira à nouveau sans elle.
-    const ouverte = importCourant && cleZone ? await repo.get('imports', importCourant) : null;
-    if (ouverte?.status === 'a_verifier' && ouverte.kind === 'index' && cleLecture(ouverte) === cleZone) {
-      const cle = cleZone;
-      const cloture = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', ouverte.id, c.status); return { status: 'enregistre', reponse_brute: null, finished_at: repo.nowIso() }; };
-      try {
-        await repo.transitionner('imports', ouverte.id, { attendus: ['a_verifier'], patch: cloture, puts: { ...(pagesIndex.length ? { source_pages: pagesIndex } : {}), ...(created.length ? { recipes: created } : {}) } });
-      } catch (e) {
-        if (!(e instanceof TransitionRefusee)) throw e;
-        importCourant = null; cleZone = null;
-        toast(t('Les références n’ont pas pu être créées. Réessaie.'));
-        return;
+      const ligne = session ? ligneOuverteDeSeance(await repo.all('imports'), session.id, { importId: etat.ligne?.id ?? importId }) : null;
+      const pages = session ? pagesALire(getSelectedPageIds(), ligne, session.page_ids, ctx.pagesById) : [];
+      if (!session || !pages.length) { toast(t('Sélectionne les pages d’index à lire')); return; }
+      if (ligne?.status === 'en_cours') return; // tenue par un autre document : rien à lancer (I-7) — le redessin le dit
+      if (ligne?.status === 'a_verifier') {
+        if (!enLigne()) { toast(t('Tu es hors ligne.')); return; }
+        if (cleLecture(ligne) !== etat.cle) return; // ronde 1 (T4-R2) : une lecture que l'écran n'a pas MONTRÉE — aucune question sur elle ; le redessin la montre
+        if (!(await sessionAssistant(ctx))) { await refusDe({ raison: 'non_connecte' }); return; } // ronde 1 : la question n'est posée que si l'appel PEUT partir
+        const n = etat.vue && etat.ligne?.id === ligne.id ? planCreation(etat.vue.etatLecture().lignes).aCreer.length : 0;
+        if (!(await confirmer(t('Relire remplace la lecture reçue ({n} entrées non créées) et coûte un appel. Continuer ?', { n }), { okLabel: t('Relire') }))) return; // « non » : rien
       }
-      importCourant = null; cleZone = null;
-    } else {
-      if (pagesIndex.length) await repo.saveBatch({ source_pages: pagesIndex });
-      if (created.length) await repo.saveBatch({ recipes: created });
+      etat.lisant = true; etat.abandon = new AbortController();
+      // `cle` (ronde 1, T4-R2) : la lecture MONTRÉE, revérifiée dans la transaction de départ ; `signal` : « Annuler » pendant les gardes (aucune ligne encore).
+      const vol = lancerVol(ligne?.id ?? null, executerIndex, { ctx, repo, fetch: fetchInjecte, maintenant, battementMs, enLigne, signal: etat.abandon.signal, lecture: { kind: 'index', importId: ligne?.id ?? null, pageIds: pages, editionId: edId(), sessionId: session.id, cle: etat.cle } });
+      dessiner(); // le vol est tenu dès l'appel : l'état « en vol » et « Annuler »
+      const r = await vol;
+      if (r.importId && r.importId !== etat.ligne?.id) etat.ligne = await repo.get('imports', r.importId); // la ligne qui a volé : c'est elle que le redessin relit
+      if (r.issue === 'refuse') await refusDe(r);
+    } catch (e) {
+      logError('table_matieres.lire', { error: e });
+    } finally {
+      etat.lisant = false; etat.occupe = false; etat.abandon = null;
+      await redessiner();
     }
-    toast(t('{n} référence(s) créée(s){d}', { n: created.length, d: dupes ? `, ${t('{n} doublon(s) ignoré(s)', { n: dupes })}` : '' }));
-    ta.value = ''; draw(); refresh();
-  };
-  panel.append(el('p', { class: 'muted' }, t('Une ligne par recette : titre puis numéro de page. Un titre ne suffit pas à déduire des ingrédients : ces entrées deviennent des références « Repérée dans ton livre ».')),
-    connexion, ta, el('div', { class: 'row' }, aiBtn, el('button', { class: 'btn primary', onClick: create }, t('Créer les références'))), status, preview);
+  }
+  // Un vol refusé n'a rien écrit : le dire. Les phrases sont celles du vol (texteRefus, une définition) sauf les octets absents, que C dit pour la SÉANCE.
+  async function refusDe(r) {
+    if (r.raison === 'non_connecte') { await lierAssistant(); return; } // la carte « Connecte-toi… » revient
+    const tenu = volEnCours();
+    if (r.raison === 'vol_tenu' && tenu?.importId && tenu.importId === etat.ligne?.id) return; // ce panneau tient déjà ce vol : muet
+    const texte = r.raison === 'octets_absents' ? t('Les photos de cette séance ne sont pas sur cet appareil.') : texteRefus(r);
+    if (texte) toast(texte); // sans_page, inconnu, transition : un autre onglet a tranché — le redessin suffit
+  }
+  // « Annuler » (§ 4.2) : la ligne en vol (annulerVol : fetch abandonné, echec(annule)) ; pendant les gardes, la tenue n'a pas encore de ligne — le
+  // signal du panneau l'abandonne : rien ne part, rien n'est écrit (ronde 1 de T4, constats 4 et 6). Vague finale (constat 1) : seulement le vol de CE
+  // panneau ou de SA ligne ; sans vol à annuler (fini entre-temps), le panneau relit et montre l'état réel — jamais un bouton sans effet.
+  async function annuler() {
+    const id = volEnCours()?.importId;
+    if (id && (etat.lisant || id === etat.ligne?.id)) await annulerVol(id); else if (etat.lisant) etat.abandon?.abort();
+    await redessiner();
+  }
+  // « Ignorer » (état 4) : la ligne a_lancer MONTRÉE (T4-R2 : sa clé revérifiée dans la transaction), finished_at posé.
+  async function ignorer() {
+    const L = etat.ligne; if (!L || etat.occupe) return;
+    etat.occupe = true;
+    const cle = cleLecture(L);
+    const patch = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { status: 'ignore', finished_at: maintenant() }; };
+    try { await repo.transitionner('imports', L.id, { attendus: ['a_lancer'], patch }); }
+    catch (e) { if (!(e instanceof TransitionRefusee)) logError('table_matieres.ignorer', { error: e, id: L.id }); }
+    finally { etat.occupe = false; }
+    await redessiner();
+  }
+  async function create() {
+    if (etat.occupe) return;
+    etat.occupe = true;
+    try {
+      const L = etat.ligne;
+      const r = await creerDepuisSaisie(ta.value, { session, ctx, editionId: edId(), pageIds: getSelectedPageIds(), repo, toast, maintenant, importId: L?.id ?? null, cle: L ? cleLecture(L) : null });
+      if (r.issue === 'cree') { ta.value = ''; draw(); refresh(); }
+    } catch (e) { logError('table_matieres.saisie', { error: e }); }
+    finally { etat.occupe = false; }
+    await redessiner();
+  }
+
+  const L0 = session ? ligneOuverteDeSeance(ctx.imports, session.id, { importId }) : null;
+  poser(L0, L0?.status === 'a_verifier' ? revaliderResultatIndex(L0.resultat, L0.page_ids) : null); // synchrone : aucun flash de l'état 1
+  dessiner();
+  lierAssistant();
+  if (session) redessiner();
+  // Vague finale (constat 1) : le panneau suit le vol de CE document (ecouterVol) tant qu'il est monté — une instance recréée pendant le vol de sa ligne
+  // (retour arrière, « + Photographier », « Retirer », livre changé), ou ouverte pendant un vol lancé hors d'elle, se redessine à la pose et à la fin du
+  // vol, sans geste. Comme la phrase de séance (lot G) : un panneau jamais monté se désabonne au tour suivant, un panneau monté puis quitté au premier
+  // avis qui le trouve détaché.
+  if (session) {
+    let vu = false;
+    const desabonner = ecouterVol(() => { if (!panel.isConnected) { if (vu) desabonner(); return; } redessiner(); });
+    setTimeout(() => { vu = true; if (!panel.isConnected) desabonner(); }, 0);
+  }
+  panel.etatPanneau = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, saisie: etat.saisie, vol: etat.lisant || (!!etat.ligne && volEnCours()?.importId === etat.ligne.id) });
   return panel;
 }
 
+const horloge = () => new Date().toISOString();
+const STATUTS_FERMABLES = ['a_verifier', 'echec', 'a_lancer']; // D-C19 : en_cours n'est jamais fermé par la zone de texte
+
+// « Créer les références » depuis la zone de texte (spec C § 4.4, D-C19 ; sans DOM, testable seule) : une ligne tapée = une référence ; titre et
+// raw_entry nettoyés (Cc, Cf, Cs, comme fabriquerReferences — ronde 1 : un titre vide une fois nettoyé ne fait pas de fiche) et bornés (données de la
+// personne : troncature acceptable, S-10) ; index_page_id null, section null, index_uncertain faux ; source_page_ids = les pages cochées PRÉSENTES, RELUES en
+// base (ronde 1 : l'instantané du rendu peut dater de tout le temps où la route de saisie reste ouverte) ; une page cochée n'est réécrite que si son kind est
+// nul (kind 'index' ; M63), sur sa fiche RELUE dans la transaction (condition de fusion) — absente alors qu'une fiche la cite : refus (I-C11). La ligne
+// d'index que le panneau MONTRE (`importId`, sa clé `cle` = cleLecture : T4-R2 du lot A) est fermée dans la MÊME transaction que les fiches (a_verifier →
+// enregistre : la lecture a servi ; echec | a_lancer → ignore), finished_at posé, la clé revérifiée DANS la transaction. Refusée (close, ignorée ou relue
+// ailleurs entre-temps, ou une page citée retirée) : RIEN n'est écrit et c'est dit (décision 4 de la ronde 1 de T6 ; l'appelant se détache de la ligne).
+// Sans clé, ou la ligne relue porte une autre lecture : les fiches par saveBatch, la ligne reste à reprendre. Sans ligne (fiche livre, séance sans lecture) :
+// le chemin d'avant. Ronde de clôture (R-C-24, T2-R1) : les doublons sont lus dans les références de l'édition RELUES en base (repo.byIndex, comme
+// creerReferences), jamais dans l'instantané ctx.recipes du rendu — une référence créée par un autre onglet entre-temps n'est pas dupliquée.
+export async function creerDepuisSaisie(texte, { session = null, ctx, editionId = null, pageIds = [], repo = repoModule, toast = toastDom, maintenant = horloge, importId = null, cle = null } = {}) {
+  const edId = editionId || session?.edition_id || null;
+  if (!edId) { toast(t('Associe d’abord un livre à cette séance')); return { issue: 'sans_livre' }; }
+  const entries = parseIndexLines(texte);
+  if (!entries.length) return { issue: 'vide' };
+  const edition = ctx.editionsById.get(edId);
+  const seen = new Set((await repo.byIndex('recipes', 'edition_id', edId)).filter(Boolean).map((r) => cleReference(r.original_title, r.printed_page)));
+  const presentes = [];
+  for (const id of new Set(Array.isArray(pageIds) ? pageIds : [])) if (typeof id === 'string' && await repo.get('source_pages', id)) presentes.push(id);
+  const created = [];
+  let dupes = 0;
+  for (const e of entries) {
+    const titre = borner(uneLigne(e.title) ?? '', 200); // vague finale (constat 2) : une ligne (une fin de ligne collée vaut une espace), comme fabriquerReferences
+    if (!titre) continue; // fait seulement d'invisibles (collé d'un PDF) : pas de fiche, comme fabriquerReferences
+    const k = cleReference(titre, e.printed_page);
+    if (seen.has(k)) { dupes++; continue; }
+    seen.add(k);
+    const fiche = { id: repo.newId('rc'), edition_id: edId, original_title: titre, original_language: edition?.language || null, availability: 'reference_only', verification_state: 'unverified', printed_page: e.printed_page, section: null, type: null, tags: [], cuisines: [], favorite: false, source_page_ids: presentes, current_version_id: null, ingredient_ids: [], index_page_id: null, raw_entry: borner(uneLigne(e.raw) ?? '', BORNE_RAW_ENTRY), index_uncertain: false };
+    assertVocabulaire(fiche, 'recipes'); // D-12 : « Créer les références » est un fabricant de recipes comme les autres (spec import-cible § 3.3)
+    created.push(fiche);
+  }
+  const puts = created.length ? { recipes: created } : {};
+  const pages = presentes.map((id) => ({ key: id, fusion: (courant) => {
+    if (!courant) { if (created.length) throw new TransitionRefusee('source_pages', id, null); return null; } // I-C11 : jamais une fiche vers une page absente
+    return courant.kind == null ? { ...courant, kind: 'index' } : null; // M63 : un kind posé (recette…) est gardé, la page n'est pas réécrite
+  } }));
+  const ligne = importId && cle ? await repo.get('imports', importId) : null;
+  let ferme = false;
+  try {
+    // Vague finale (constat 8, la garde de creerReferences) : la ligne n'est fermée que si au moins une fiche est créée — jamais une lecture payée close
+    // sur zéro référence (toutes les lignes tapées en double ou vides) ; sinon les pages seules, et la lecture reste à reprendre.
+    if (created.length && ligne?.kind === 'index' && STATUTS_FERMABLES.includes(ligne.status) && cleLecture(ligne) === cle) {
+      const vers = ligne.status === 'a_verifier' ? 'enregistre' : 'ignore';
+      const fin = maintenant();
+      const fermer = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', ligne.id, c.status); return { status: vers, reponse_brute: null, finished_at: fin }; };
+      await repo.transitionner('imports', ligne.id, { attendus: [ligne.status], patch: fermer, puts, conditions: pages.length ? { source_pages: pages } : {} });
+      ferme = true;
+    } else if (created.length || pages.length) await repo.saveBatch(puts, { conditions: pages.length ? { source_pages: pages } : null });
+  } catch (e) {
+    if (!(e instanceof TransitionRefusee)) throw e;
+    toast(t('Les références n’ont pas pu être créées. Réessaie.'));
+    return { issue: 'refuse' };
+  }
+  toast(t('{n} référence(s) créée(s){d}', { n: created.length, d: dupes ? `, ${t('{n} doublon(s) ignoré(s)', { n: dupes })}` : '' }));
+  return { issue: 'cree', n: created.length, doublons: dupes, ferme };
+}
+
+// Une ligne tapée ou collée = une entrée. Ronde de clôture (R-C-24) : toute fin de ligne coupe (LF, CRLF compté une fois, CR seul, VT, FF, NEL U+0085,
+// U+2028, U+2029 : les fins de ligne d'uneLigne) ; collée d'un PDF ou d'une page, une ligne qui en porte une n'est plus lue d'un bloc (le « . » des motifs
+// ne les traverse pas : son numéro de page n'était pas lu).
+const FIN_DE_LIGNE = /\r\n|[\n\r\v\f\u{0085}\u{2028}\u{2029}]/u;
 export function parseIndexLines(text) {
   const out = [];
-  for (const raw of (text || '').split(/\r?\n/)) {
+  for (const raw of (text || '').split(FIN_DE_LIGNE)) {
     const line = raw.trim();
     if (!line) continue;
     let m = /^(.*?)\s*(?:[—–-]|,|\.{2,}|\s+p\.?|\s+page)\s*p?\.?\s*(\d{1,4})\s*$/i.exec(line);
-    if (m && m[1].trim()) { out.push({ title: m[1].trim().replace(/[,.]+$/, ''), printed_page: parseInt(m[2], 10) }); continue; }
+    if (m && m[1].trim()) { out.push({ title: m[1].trim().replace(/[,.]+$/, ''), printed_page: parseInt(m[2], 10), raw: line }); continue; }
     m = /^(\d{1,4})\s+(.+)$/.exec(line);
-    if (m) { out.push({ title: m[2].trim(), printed_page: parseInt(m[1], 10) }); continue; }
-    out.push({ title: line, printed_page: null });
+    if (m) { out.push({ title: m[2].trim(), printed_page: parseInt(m[1], 10), raw: line }); continue; }
+    out.push({ title: line, printed_page: null, raw: line });
   }
   return out;
 }
