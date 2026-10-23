@@ -42,9 +42,9 @@ export async function runLectureWebTests({ eq, ok }) {
     await run('page', async () => {
       const W = await import('../src/domain/lecture-web.js');
       const { page } = W.lirePage({ page: { url_finale: 'https://www.ricardo.test/r/1', hote: 'evil.test', titre_page: 't'.repeat(1000), auteur: 'Ricardo', site: 'Ricardo Cuisine', lue_le: '2026-10-19T12:00:00.000Z', autres_recettes: 2, texte_coupe: true } });
-      eq(page, { url_finale: 'https://www.ricardo.test/r/1', hote: 'www.ricardo.test', titre_page: 't'.repeat(300), auteur: 'Ricardo', site: 'Ricardo Cuisine', lue_le: '2026-10-19T12:00:00.000Z', autres_recettes: 2, texte_coupe: true }, 'lirePage : hôte RECALCULÉ (jamais celui du serveur, evil.test), titre borné à 300');
+      eq(page, { url_finale: 'https://www.ricardo.test/r/1', hote: 'www.ricardo.test', titre_page: 't'.repeat(300), auteur: 'Ricardo', site: 'Ricardo Cuisine', lue_le: '2026-10-19T12:00:00.000Z', autres_recettes: 2, texte_coupe: true, image_url: null }, 'lirePage : hôte RECALCULÉ (jamais celui du serveur, evil.test), titre borné à 300');
       const hostile = W.lirePage({ page: { url_finale: 'pas une adresse', lue_le: 'hier', autres_recettes: '2', texte_coupe: 'oui', titre_page: 7 }, stop_reason: 'x'.repeat(100), model: { m: 1 } });
-      eq(hostile, { page: { url_finale: null, hote: null, titre_page: null, auteur: null, site: null, lue_le: null, autres_recettes: 0, texte_coupe: false }, stopReason: 'x'.repeat(40), modele: null }, 'lirePage : url_finale non URL → null, lue_le illisible → null, autres_recettes « 2 » → 0, texte_coupe « oui » → false, stop_reason borné à 40, model non chaîne → null');
+      eq(hostile, { page: { url_finale: null, hote: null, titre_page: null, auteur: null, site: null, lue_le: null, autres_recettes: 0, texte_coupe: false, image_url: null }, stopReason: 'x'.repeat(40), modele: null }, 'lirePage : url_finale non URL → null, lue_le illisible → null, autres_recettes « 2 » → 0, texte_coupe « oui » → false, stop_reason borné à 40, model non chaîne → null');
       eq([W.lirePage({ page: { auteur: 'A' + String.fromCodePoint(0x202e, 0x200b) + 'b' } }).page.auteur, W.lirePage({ page: { site: 'R' + String.fromCodePoint(0x202e) + 'icardo' + String.fromCodePoint(0x200b) } }).page.site], ['Ab', 'Ricardo'], 'lirePage (S-1) : Cc / Cf retirés de l’auteur et du site');
       const u2048 = 'https://a.test/' + 'x'.repeat(2048 - 15);
       const [p2048, p2049] = [u2048, u2048 + 'y'].map((u) => W.lirePage({ page: { url_finale: u } }).page);
@@ -148,7 +148,7 @@ export async function runLectureWebTests({ eq, ok }) {
       const r = await W.lireRecetteWeb({ url: 'https://a.test/r', session: SESSION }, { fetch: f(200, ok200), config: SUPABASE.prod });
       eq([appels.length, JSON.parse(appels[0].options.body), Object.keys(appels[0].options.headers).sort(), appels[0].options.redirect], [1, { outil: 'lecture-web', corps: { url: 'https://a.test/r' } }, ['apikey', 'authorization', 'content-type'], 'error'], 'lireRecetteWeb : UN POST { outil: lecture-web, corps: { url } } exact, trois en-têtes, redirect error');
       eq([r.etat, r.resultat.source_kind, r.resultat.recette.title, JSON.stringify(r).includes('jeton-lecture-sentinelle')], ['lue', 'jsonld', 'T', false], 'lireRecetteWeb : lue, résultat relu ; le jeton n’est dans aucun résultat');
-      eq([r.resultat.page, r.reponseBrute, r.modele], [PAGE, JSON.stringify(ok200.recette), null], 'lireRecetteWeb : le succès porte la page RELUE (celle que le journal et la fiche diront), la réponse brute (la recette reçue, en JSON) et le modèle (null pour un JSON-LD)');
+      eq([r.resultat.page, r.reponseBrute, r.modele], [{ ...PAGE, image_url: null }, JSON.stringify(ok200.recette), null], 'lireRecetteWeb : le succès porte la page RELUE (celle que le journal et la fiche diront), la réponse brute (la recette reçue, en JSON) et le modèle (null pour un JSON-LD)');
       const parModele = await W.lireRecetteWeb({ url: 'https://a.test/r', session: SESSION }, { fetch: f(200, { ...ok200, source_kind: 'modele', recette: JSON.stringify(ok200.recette), stop_reason: 'end_turn', model: 'claude-x' }), config: SUPABASE.prod });
       eq([parModele.etat, parModele.resultat.source_kind, parModele.modele, parModele.reponseBrute], ['lue', 'modele', 'claude-x', JSON.stringify(ok200.recette)], 'lireRecetteWeb (modele) : le modèle de la réponse et le texte reçu tel quel');
       const longue = await W.lireRecetteWeb({ url: 'https://a.test/r', session: SESSION }, { fetch: f(200, { ...ok200, source_kind: 'modele', recette: 'y'.repeat(20000), stop_reason: 'max_tokens' }), config: SUPABASE.prod });
@@ -1154,5 +1154,44 @@ export async function runLectureWebTests({ eq, ok }) {
         eq(reseau, 0, 'aucun réseau réel');
       } finally { globalThis.fetch = vraiFetch; scene.remove(); V.reinitialiserVol(); W.reinitialiserLectureWeb(); IC.reinitialiserImportCible(); }
     }));
+
+    // === Lot F (spec plats-en-images § 3.3, § 4.3 point 2, D-F18, D-F19) : l'image de la page, relue ; la provenance n'est écrite qu'avec la photo
+    await run('lot F — lirePage : image_url', async () => {
+      const W = await import('../src/domain/lecture-web.js');
+      const p = (image_url) => W.lirePage({ page: { url_finale: 'https://a.test/r', image_url } }).page.image_url;
+      eq([p('https://cdn.test/i.jpg'), p('http://cdn.test/i.jpg'), p(undefined), p('https://cdn.test/i' + String.fromCodePoint(0x2028) + '.jpg'), p(7)], ['https://cdn.test/i.jpg', null, null, null, null],
+        'lirePage : image_url admise gardée ; http, absente, hostile (U+2028), non chaîne → null');
+      eq(Object.keys(W.lirePage({ page: {} }).page).at(-1), 'image_url', 'lirePage : image_url est la dernière clé de page');
+      const source = await lire('../src/domain/lecture-web.js');
+      const debut = source.indexOf('export function lirePage(');
+      const corps = source.slice(debut, source.indexOf('\n}\n', debut));
+      ok(corps.includes("adresseImageAdmise(propre(p, 'image_url'))"), 'lirePage (test de source) : image_url passe par adresseImageAdmise( — jamais par borner (une adresse tronquée n’est pas une adresse)');
+    });
+
+    await run('lot F — fabriquerLectureWeb : photoWeb et photo_source_url (D-F18, D-F19)', async () => {
+      const W = await import('../src/domain/lecture-web.js');
+      const H = (c) => c.repeat(64);
+      const IMG = 'https://cdn.site.test/p.jpg';
+      const SIGNET = { id: 'rc_s', edition_id: null, original_title: 'site.test', original_language: 'fr', availability: 'reference_only', verification_state: 'unverified', printed_page: null, tags: [], cuisines: [], favorite: false, source_page_ids: [], current_version_id: null, ingredient_ids: [], source_url: 'https://site.test/r/1', source_label: 'site.test' };
+      const PAGE = { url_finale: 'https://site.test/r/1', hote: 'site.test', titre_page: 'P', auteur: null, site: null, lue_le: '2026-10-19T12:00:00.000Z', autres_recettes: 0, texte_coupe: false, image_url: IMG };
+      const RECETTE = { title: 'Pâtes', servings: 2, prep_minutes: null, cook_minutes: null, total_minutes: null, ingredients: [{ source_text: '1 pomme', uncertain: false }], steps: [{ text: 'Cuire.' }], printed_page: null, sub_recipes: [], uncertain_fields: [], notes: null, incomplete: false, missing_page: false };
+      const fab = (signet, over = {}) => W.fabriquerLectureWeb(RECETTE, { signet, versions: [], page: PAGE, sourceKind: 'jsonld', photoAnnoncee: IMG, ...over });
+      const a = fab(SIGNET);
+      eq([a.photoWeb, a.recipe.photo_source_url, 'photo_sha256' in a.recipe, 'photo_origin' in a.recipe], [IMG, IMG, false, false], 'fiche sans photo + image annoncée → photo_source_url = l’adresse (le rapatriement attendu), photoWeb = l’adresse ; photo_sha256 jamais touché ; aucune clé photo_origin ajoutée');
+      const b = fab({ ...SIGNET, photo_sha256: H('a'), photo_origin: 'image', photo_source_url: null });
+      eq([b.photoWeb, b.recipe.photo_source_url, b.recipe.photo_sha256, b.recipe.photo_origin], [null, null, H('a'), 'image'], 'fiche à photo de la personne → photoWeb null, rien de la photo changé');
+      const c = fab({ ...SIGNET, photo_sha256: H('a'), photo_origin: 'web', photo_source_url: 'https://cdn.site.test/ancienne.jpg' });
+      eq([c.photoWeb, c.recipe.photo_source_url, c.recipe.photo_sha256], [IMG, 'https://cdn.site.test/ancienne.jpg', H('a')], 'photo web + autre image annoncée → photoWeb = l’adresse, photo_source_url INCHANGÉ (la provenance de la photo en place reste vraie)');
+      const sig = { ...SIGNET, current_version_id: 'rv_m' };
+      const d = fab(sig, { versions: [{ id: 'rv_m', kind: 'extraction', provenance: { generated_by: 'manual' }, verification_state: 'verified' }], remplacer: false });
+      eq([d.recipe, d.photoWeb], [sig, IMG], 'remplacer: false → le signet INTACT (aucune clé changée, B-24), photoWeb = l’adresse (la descente partira après la transaction, R-F-2)');
+      eq([fab(SIGNET, { photoAnnoncee: null }).photoWeb, fab(SIGNET, { photoAnnoncee: 'https://cdn.site.test/autre.jpg' }).photoWeb, 'photo_source_url' in fab(SIGNET, { photoAnnoncee: null }).recipe], [null, null, false], 'photoAnnoncee nulle ou différente → photoWeb null, aucun photo_source_url posé (S-12)');
+      let e = null; let ap = null;
+      try { ap = fab({ ...SIGNET, photo_origin: 'appareil' }); } catch (x) { e = x; }
+      eq([e?.name ?? null, ap?.recipe.photo_origin], [null, null], 'D-F19 : signet relu avec photo_origin « appareil » → aucune levée, photo_origin null');
+      let e2 = null; let ap2 = null;
+      try { ap2 = fab({ ...SIGNET, photo_origin: 'appareil' }, { remplacer: false }); } catch (x) { e2 = x; }
+      eq([e2?.name ?? null, ap2?.recipe.photo_origin], [null, 'appareil'], 'P-5 : « Ajouter sans remplacer » sur une origine hors liste ne lève pas ; le signet rendu reste intact (il n’est pas écrit)');
+    });
   } finally { setUiLocale(localeAvant); }
 }

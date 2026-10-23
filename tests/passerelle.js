@@ -762,8 +762,18 @@ export async function runPasserelleTests({ eq, ok }) {
     const passerelle = lus.find(([m]) => m === 'src/domain/passerelle.js')?.[1] ?? '';
     ok(!/from '\.\.\/ui\//.test(passerelle), 'passerelle.js : n’importe rien de src/ui/ (couche domaine)');
     ok(sw.includes("'./src/domain/passerelle.js'"), 'SHELL : ./src/domain/passerelle.js');
-    ok(/VERSION = 'cuisine-os-v0\.14\.0-\d+'/.test(sw), 'sw.js : VERSION 0.14.0');
+    ok(/VERSION = 'cuisine-os-v0\.15\.0-\d+'/.test(sw), 'sw.js : VERSION 0.15.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.14.0', 'APP_VERSION 0.14.0 (lot E, couverture lue)');
+    eq(APP_VERSION, '0.15.0', 'APP_VERSION 0.15.0 (lot F, plats en images)');
+  }
+
+  // --- Lot F (spec plats-en-images § 4.6) : deux raisons de plus, écrites par la passerelle pour image-web et relayées telles quelles
+  {
+    const f = (s, c) => async () => reponse(s, c);
+    const a = await P.appelerAssistant('image-web', { url: 'https://a.test/i.jpg' }, { fetch: f(422, { erreur: 'pas_une_image' }), session: SESSION, config: CONFIG });
+    const b = await P.appelerAssistant('image-web', { url: 'https://a.test/i.jpg' }, { fetch: f(413, { erreur: 'image_trop_lourde' }), session: SESSION, config: CONFIG });
+    eq([a.raison, a.ecrite, b.raison, b.ecrite], ['pas_une_image', true, 'image_trop_lourde', true], 'RAISON_DE_ERREUR lit pas_une_image et image_trop_lourde (écrites par la passerelle)');
+    eq([P.echecDomaine(a), P.echecDomaine(b)], [{ raison: 'pas_une_image', extra: {} }, { raison: 'image_trop_lourde', extra: {} }], 'echecDomaine les relaie avec extra: {}');
+    eq([JSON.stringify(a).includes(JETON), JSON.stringify(b).includes(JETON)], [false, false], 'le jeton n’est dans aucun des deux résultats');
   }
 }

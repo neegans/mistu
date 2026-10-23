@@ -287,6 +287,29 @@ export async function runImportCibleTests({ eq, ok }) {
     eq(V.assertVocabulaire(fabriquerSignet(m, { newId: (p) => p + '_1', langue: 'fr' }), 'recipes'), true, 'vocabulaire : la fiche rendue par fabriquerSignet est une fiche valide du vocabulaire');
   });
 
+  await run('vocabulaire (lot F) : PHOTO_ORIGINS, HASH, originePhotoAdmise, fabriquerExtraction (D-F1, D-F19)', async () => {
+    const S = await import('../src/model/schema.js');
+    const V = await import('../src/domain/vocabulaire.js');
+    const D = await import('../src/domain/import-cible.js');
+    eq([[...S.PHOTO_ORIGINS], Object.isFrozen(S.PHOTO_ORIGINS)], [['photo', 'image', 'web'], true], 'PHOTO_ORIGINS gelée = photo, image, web');
+    eq([S.HASH instanceof RegExp, String(S.HASH), S.HASH.test('a'.repeat(64)), S.HASH.test('A'.repeat(64)), S.HASH.test('a'.repeat(63)), S.HASH.test('g'.repeat(64))],
+      [true, '/^[0-9a-f]{64}$/', true, false, false, false], 'HASH exporté par schema.js = /^[0-9a-f]{64}$/');
+    let e = null; try { V.assertVocabulaire({ photo_origin: 'appareil' }, 'recipes'); } catch (x) { e = x; }
+    eq([e?.name, e?.magasin, e?.champ, e?.valeur], ['ErreurVocabulaire', 'recipes', 'photo_origin', 'appareil'], 'recipes.photo_origin « appareil » → ErreurVocabulaire (magasin, champ, valeur)');
+    eq([V.assertVocabulaire({ photo_origin: null }, 'recipes'), V.assertVocabulaire({}, 'recipes'), V.assertVocabulaire({ photo_origin: 'web' }, 'recipes')], [true, true, true], 'null et absent tolérés ; web admis');
+    eq(['photo', 'image', 'web', 'appareil', '', 7, null, '__proto__', 'constructor'].map((v) => V.originePhotoAdmise(v)), ['photo', 'image', 'web', null, null, null, null, null, null], 'originePhotoAdmise : les trois origines → elles-mêmes ; tout le reste → null');
+    eq(S.RELATIONS.filter(([, champ]) => /photo_(sha256|source_url)/.test(champ)), [], 'RELATIONS : aucune relation sur photo_sha256 ni photo_source_url (pointeurs souples)');
+    eq(S.DB_VERSION, 4, 'DB_VERSION 4 inchangée');
+    const reference = { id: 'rc_f', edition_id: 'ed1', original_title: 'Tarte', original_language: 'fr', availability: 'reference_only', verification_state: 'unverified', printed_page: null, source_page_ids: [], current_version_id: null, tags: [], cuisines: [], favorite: false, ingredient_ids: [] };
+    const resultat = { title: 'Tarte', servings: 4, prep_minutes: null, cook_minutes: null, ingredients: [{ source_text: '1 pomme', uncertain: false }], steps: [{ text: 'Cuire.' }], printed_page: null, sub_recipes: [], uncertain_fields: [], notes: null, incomplete: false, missing_page: false };
+    const opts = { reference, versions: [], pages: [], pageIds: [], edition: null, importId: 'imp_f', modele: 'claude-x', maintenant: '2026-10-19T00:00:00.000Z' };
+    eq(D.fabriquerExtraction(resultat, { ...opts, photo: { sha256: 'a'.repeat(64), origin: 'web' } }).recipe.photo_origin, null, 'fabriquerExtraction avec photo { origin: web } → photo_origin null (l’écran ciblé n’admet que photo | image)');
+    let e2 = null; let f2 = null;
+    try { f2 = D.fabriquerExtraction(resultat, { ...opts, reference: { ...reference, photo_origin: 'appareil' }, photo: null }); } catch (x) { e2 = x; }
+    eq([e2?.name ?? null, f2?.recipe.photo_origin], [null, null], 'D-F19 : une référence relue avec photo_origin « appareil » et sans photo → aucune levée, photo_origin null');
+    eq(Object.keys(f2?.recipe || {}).sort(), Object.keys({ ...reference, photo_sha256: null, photo_origin: null }).sort(), 'D-F19 : aucune clé ajoutée à la fiche par le lot F (ni photo_source_url)');
+  });
+
   // =====================================================================================================================================
   // Tâche 3 \u2014 domaine pur de l'import ciblé (spec § 3.1 transitions, § 4.3.3 discordance, § 4.3.4 fabrication, § 4.5 âge, § 4.1 séance exclue)
   await run('domaine import-cible : transitions, discordance, ordre, âge', async () => {

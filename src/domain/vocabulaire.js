@@ -2,7 +2,7 @@
 // création IA, signet, éditeur) AVANT toute écriture — jamais un mur dans db.mutate : la restauration, la réception et les passes du
 // démarrage restent tolérantes. Une valeur hors liste lève une erreur nommée (magasin, champ, valeur). Pour une recette, un champ absent
 // (ou nul) est toléré : une fiche ancienne peut ne pas le porter. Pour un import, le statut et la sorte sont obligatoires (lot D, D-D12) : un journal sans état ni sorte n'existe pas.
-import { AVAILABILITY, VERIFICATION, STATUTS_IMPORT, SOURCE_KINDS, SORTES_IMPORT } from '../model/schema.js';
+import { AVAILABILITY, VERIFICATION, STATUTS_IMPORT, SOURCE_KINDS, SORTES_IMPORT, PHOTO_ORIGINS } from '../model/schema.js';
 
 // Le message ne recopie jamais une valeur hostile en entier : une chaîne est coupée à 80 points de code, le reste est décrit par son type.
 const decrire = (valeur) => (typeof valeur === 'string' ? [...valeur].slice(0, 80).join('') : (valeur === null || ['number', 'boolean', 'undefined'].includes(typeof valeur) ? String(valeur) : typeof valeur));
@@ -23,6 +23,7 @@ const VOCABULAIRE = {
     availability: { liste: AVAILABILITY, obligatoire: false },
     verification_state: { liste: VERIFICATION, obligatoire: false },
     source_kind: { liste: SOURCE_KINDS, obligatoire: false }, // lot B (D-B6) : absent ou nul sur toute fiche d'avant le lot
+    photo_origin: { liste: PHOTO_ORIGINS, obligatoire: false }, // lot F (D-F1) : absent ou nul sur une fiche sans photo du plat
   },
   imports: {
     status: { liste: STATUTS_IMPORT, obligatoire: true },
@@ -42,3 +43,7 @@ export function assertVocabulaire(fiche, magasin) {
   }
   return true;
 }
+
+// D-F19 : une origine relue hors liste (archive, appareil plus récent) se lit null chez les fabricants qui RECOPIENT une fiche (fabriquerExtraction,
+// fabriquerLectureWeb, « Corriger ») — sinon assertVocabulaire lèverait sur une fiche reçue. Le pointeur et l'adresse, eux, sont revalidés à chaque lecture.
+export const originePhotoAdmise = (v) => (PHOTO_ORIGINS.includes(v) ? v : null);

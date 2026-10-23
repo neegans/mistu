@@ -497,3 +497,19 @@ test('lirePageHtml : page.image_url (le Recipe RETENU, og:image, pages de liste)
   assert.deepEqual([liste.page.autres_recettes, liste.page.image_url], [1, null], 'deux Recipe lisibles sans image et une og:image : null (page de liste)');
   assert.equal(Object.keys(L.lirePageHtml({ html: texte, urlFinale }).page).at(-1), 'image_url', 'image_url est la derniere cle de page');
 });
+
+test('chainage serveur → client : lireOctetsBase64(versBase64(octets), n) rend les memes octets a toute taille ; base64.js sans import', async () => {
+  const chemin = path.join(ICI, '..', 'src', 'domain', 'base64.js');
+  assert.doesNotMatch(readFileSync(chemin, 'utf8'), /^\s*import\b/m, 'module feuille, sans import (importable par Node)');
+  const { lireOctetsBase64 } = await import(pathToFileURL(chemin).href);
+  for (const n of [1, 2, 3, 100000, L.TRANCHE_BASE64 + 1, 2 * L.TRANCHE_BASE64 + 2]) {
+    const entree = pseudo(n);
+    const relus = lireOctetsBase64(L.versBase64(entree), n);
+    assert.ok(relus instanceof Uint8Array && relus.length === n && relus.every((o, i) => o === entree[i]), 'n = ' + n);
+  }
+  const b = L.versBase64(pseudo(100000)); const milieu = Math.floor(b.length / 2);
+  assert.equal(lireOctetsBase64(b.slice(0, milieu) + '=' + b.slice(milieu + 1), 100000), null, 'un = au milieu → null');
+  assert.equal(lireOctetsBase64(b, 99999), null, 'longueur ≠ 4 × ceil(taille / 3) → null');
+  assert.deepEqual([lireOctetsBase64(42, 1), lireOctetsBase64('@@@@', 3), lireOctetsBase64('', 0)?.length], [null, null, 0]);
+  assert.equal(lireOctetsBase64('AAA AAAA', 5), null, 'une espace, longueur exacte : atob l ignorerait, seule la regle ALPHABET la refuse');
+});

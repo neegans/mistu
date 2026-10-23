@@ -8,13 +8,14 @@ import { appelerAssistant, echecDomaine, LIMITES_PASSERELLE } from './passerelle
 import { validateParsedRecipe, parseJsonLoose, ErreurExtraction, BORNES_EXTRACTION, BORNES_NOMBRES, REPONSE_BRUTE_MAX } from './llm.js';
 import { MOTIF_ADRESSE, porteUneAdresse, normaliserPourAdresse } from './recherche-web.js';
 import { parseIngredientLine, detectTimers } from './lines.js';
-import { assertVocabulaire } from './vocabulaire.js';
+import { assertVocabulaire, originePhotoAdmise } from './vocabulaire.js';
 import { versionEcrite, ligneImportNeuve } from './import-cible.js';
+import { adresseImageAdmise, candidatPhotoWeb, memeAdresseImage } from './photo-web.js';
 import { newId } from '../core/ids.js';
 import { lienSignet } from '../core/lien.js';
 import { borner } from '../core/bornes.js';
 import { t } from '../core/i18n.js';
-import { SOURCE_KINDS } from '../model/schema.js';
+import { SOURCE_KINDS, HASH } from '../model/schema.js';
 
 // Les bornes de la page relue (§ 3.5) ; TITRE_FICHE_MAX = LIMITES_SIGNET.titre (src/ui/signet.js : un module de vue, que le domaine n'importe
 // pas — l'égalité est épinglée par la suite).
@@ -48,6 +49,7 @@ export function lirePage(corps) {
       auteur: auteur && !porteUneAdresse(auteur) ? auteur : null, site: site && !porteUneAdresse(site) ? site : null, // S-2
       lue_le: ISO_UTC.test(lue) && Number.isFinite(Date.parse(lue)) ? lue : null,
       autres_recettes: Number.isSafeInteger(autres) && autres >= 0 ? autres : 0, texte_coupe: propre(p, 'texte_coupe') === true,
+      image_url: adresseImageAdmise(propre(p, 'image_url')), // lot F (§ 3.3) : une adresse admise ou null — jamais borner (une adresse tronquée n'est pas une adresse) ; jamais rendue (D-F11)
     },
     stopReason: stop || null, modele: modele || null,
   };
@@ -191,7 +193,8 @@ export function versionHumaine(versions) {
 // Ronde 1 : la provenance porte aussi `lu_le` (la date de la LECTURE, que lisent la bannière du lot A et l'héritage de « Corriger » — sinon elles
 // dataient la lecture du jour d'« Enregistrer ») et `uncertain_fields` (VF-10 du lot A, ≤ 40 × 200 : « Incertain : adresse retirée… » et « La page
 // était longue… » survivent à la purge à 30 jours de la ligne du journal) ; le source_kind est vérifié dans les DEUX branches.
-export function fabriquerLectureWeb(recette, { signet, versions = [], page = null, sourceKind = null, importId = null, modele = null, maintenant = null, remplacer = true } = {}) {
+// Lot F (§ 4.3 point 2) : `photoAnnoncee` (l'adresse que l'écran a ANNONCÉE) entre ; `photoWeb` (l'adresse à rapatrier après la transaction, ou null) sort.
+export function fabriquerLectureWeb(recette, { signet, versions = [], page = null, sourceKind = null, importId = null, modele = null, maintenant = null, remplacer = true, photoAnnoncee = null } = {}) {
   assertVocabulaire({ source_kind: sourceKind }, 'recipes'); // la provenance porte sourceKind même quand la fiche reste intacte
   const B = BORNES_EXTRACTION;
   const ingredients = recette.ingredients.map((l) => ({ ...parseIngredientLine(l.source_text), uncertain: l.uncertain === true, verification_state: 'to_verify' }));
@@ -214,7 +217,14 @@ export function fabriquerLectureWeb(recette, { signet, versions = [], page = nul
     ...(maintenant ? { created_at: maintenant } : {}),
   };
   const remplacement = versionHumaine(versions);
-  if (remplacer === false) { const intact = { ...signet }; assertVocabulaire(intact, 'recipes'); return { recipe: intact, version, remplacement }; } // une copie, jamais la référence
+  // Lot F (§ 4.3 point 2, D-F18) : un appel ne part que s'il a été ANNONCÉ, et pour l'adresse annoncée (S-12) ; la provenance n'est écrite
+  // ici que sur une fiche SANS photo valide (le rapatriement attendu) ; photo_sha256 n'est jamais touché ; l'origine recopiée passe
+  // originePhotoAdmise (D-F19), et seulement si la fiche la porte (P-6 : aucune clé ajoutée).
+  const candidat = candidatPhotoWeb(signet, page?.image_url ?? null);
+  const photoWeb = candidat !== null && memeAdresseImage(candidat, photoAnnoncee) ? candidat : null;
+  const origine = Object.hasOwn(signet, 'photo_origin') ? { photo_origin: originePhotoAdmise(signet.photo_origin) } : {};
+  if (remplacer === false) { const intact = { ...signet }; assertVocabulaire({ ...intact, ...origine }, 'recipes'); return { recipe: intact, version, remplacement, photoWeb }; } // une copie, jamais la référence ; P-5 (lot F) : le vocabulaire est vérifié avec l'origine admise, le signet rendu INTACT (B-24)
+  const sansPhoto = !(typeof signet.photo_sha256 === 'string' && HASH.test(signet.photo_sha256));
   const recipe = {
     ...signet,
     original_title: premiere && titreLu ? titreLu : signet.original_title,
@@ -222,7 +232,9 @@ export function fabriquerLectureWeb(recette, { signet, versions = [], page = nul
     verification_state: 'to_verify', current_version_id: version.id, printed_page: null,
     ingredient_ids: [...new Set(ingredients.map((l) => l.ingredient_id).filter(Boolean))],
     source_author: page?.auteur ?? null, source_site: page?.site ?? null, source_fetched_at: page?.lue_le ?? null, source_kind: sourceKind ?? null,
+    ...origine, // Lot F (D-F19)
+    ...(photoWeb && sansPhoto ? { photo_source_url: photoWeb } : {}), // Lot F (D-F18) : le rapatriement attendu
   };
   assertVocabulaire(recipe, 'recipes'); // D-12 : le sixième fabricant vérifie le vocabulaire fermé avant toute écriture
-  return { recipe, version, remplacement };
+  return { recipe, version, remplacement, photoWeb };
 }
