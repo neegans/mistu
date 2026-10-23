@@ -3,8 +3,9 @@
 
 // Filet i18n (F13) : chaque t('…') de ces modules doit avoir son entrée en.js. Exportées : tests/import-cible.js vérifie que son module y figure.
 // MODULES_NEUFS : les modules créés par les lots (lien.js de R-UX-11 et isbn.js inclus) + add.js réécrit + l'écran d'import ciblé (lot A, tâche 4)
-// + le module des fichiers du lot G + l'écran de la table des matières (lot C) + le panneau et l'écran de regroupement (lot D, tâche 2).
-export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js', '../src/ui/import-cible.js', '../src/domain/lecture-web.js', '../src/ui/import-web.js', '../src/ui/vol.js', '../src/sync/fichiers.js', '../src/ui/table-matieres.js', '../src/ui/regroupement.js'];
+// + le module des fichiers du lot G + l'écran de la table des matières (lot C) + le panneau et l'écran de regroupement (lot D, tâche 2)
+// + la photo du plat (lot F, tâche 3, P-8).
+export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js', '../src/ui/import-cible.js', '../src/domain/lecture-web.js', '../src/ui/import-web.js', '../src/ui/vol.js', '../src/sync/fichiers.js', '../src/ui/table-matieres.js', '../src/ui/regroupement.js', '../src/ui/photo-plat.js'];
 // CHAINES_NEUVES_AILLEURS reconstituée depuis le code réel (git diff main...HEAD, ensemble main vs HEAD des clés t(),
 // pas seulement les lignes ajoutées : une ligne réécrite pour une autre raison peut porter une chaîne déjà sur main —
 // book.js:'Cuisines', recipe-edit.js:'Cuisines / régions' et import.js:'— Aucun livre (à associer plus tard) —'
@@ -1390,6 +1391,16 @@ export async function runAjouterTests({ eq, ok }) {
     // compris, sinon le pointeur partait à null pendant qu'une écriture de couverture était en vol.
     const pendant = LA.renderZoneCouverture({ sha256: 'x', apercu: null, message: null, enCours: true }, { photographier: () => {}, choisir: () => {}, retirer: () => {} });
     eq([...pendant.querySelectorAll('button')].map((b) => [b.textContent, b.disabled]), [['Photographier', true], ['Choisir une image', true], ['Retirer', true]], 'couverture : pendant une écriture, les trois boutons sont fermés (F9, RF-m4)');
+  }
+  {
+    // Lot F (spec plats-en-images § 4.1.2) : deux options de plus, défauts inchangés — la fiche du livre appelle toujours à deux arguments.
+    const gestes = { photographier: () => {}, choisir: () => {}, retirer: () => {} };
+    const sans = LA.renderZoneCouverture({ sha256: 'x', apercu: null, message: null, enCours: false }, gestes);
+    eq([sans.querySelector(':scope > span')?.textContent, [...sans.querySelectorAll('button')].find((b) => b.textContent === 'Retirer')?.hasAttribute('aria-label')], ['Couverture', false],
+      'renderZoneCouverture sans troisième argument : « Couverture », « Retirer » sans aria-label (inchangé)');
+    const avec = LA.renderZoneCouverture({ sha256: 'x', apercu: null, message: null, enCours: false }, gestes, { libelle: 'Photo du plat', nomRetirer: 'Retirer la photo du plat' });
+    eq([avec.querySelector(':scope > span')?.textContent, [...avec.querySelectorAll('button')].map((b) => b.textContent), [...avec.querySelectorAll('button')].find((b) => b.textContent === 'Retirer')?.getAttribute('aria-label')],
+      ['Photo du plat', ['Photographier', 'Choisir une image', 'Retirer'], 'Retirer la photo du plat'], 'renderZoneCouverture avec { libelle, nomRetirer } : « Photo du plat », les mêmes boutons dans le même ordre, « Retirer » nommé « Retirer la photo du plat »');
   }
   // --- § 6 Couverture, la ROUTE : une couverture appartient à l’ISBN qui l’a demandée (R-UX-13)
   {

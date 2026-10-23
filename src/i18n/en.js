@@ -525,7 +525,7 @@ export const EN = {
   "Page {p}": "Page {p}",
   "page non numérotée": "unnumbered page",
   "Couverture · {livre}": "Cover · {livre}",
-  "Photo du plat · {titre}": "Dish photo · {titre}",
+  "Photo du plat · {titre}": "Photo of the dish · {titre}", // lot F (§ 5) : un seul nom anglais pour la photo du plat
   "Photo importée · {date}": "Imported photo · {date}",
   // Lot G : archive (§ 4.6).
   "{n} pages ne sont pas encore téléchargées sur cet appareil et ne sont pas dans l’archive.": "{n} pages are not downloaded on this device yet and are not in the archive.",
@@ -737,4 +737,19 @@ export const EN = {
   "Couverture photographiée": "Photographed cover",
   "Import introuvable.": "Import not found.",
   "Cet import est terminé.": "This import is finished.",
+  // Lot F « Les plats en images » (spec § 5).
+  "Ajoute une photo du plat : elle illustre la recette dans tes listes.": "Add a photo of the dish: it illustrates the recipe in your lists.",
+  "Image de la page {hote}": "Image from the page {hote}",
+  "Image de la page web": "Image from the web page",
+  "Récupération de la photo du plat…": "Fetching the photo of the dish…",
+  "Photo du plat non récupérée.": "Photo of the dish not retrieved.",
+  "Un appel de plus, compté dans ton quota du jour.": "One more call, counted in your daily quota.",
+  "Ne pas récupérer": "Don’t fetch it",
+  "Le site de la page n’a pas donné son image.": "The page’s site did not provide its image.",
+  "L’image de cette page ne peut pas être utilisée.": "This page’s image cannot be used.",
+  "Photo du plat enregistrée.": "Photo of the dish saved.",
+  "Photo du plat retirée.": "Photo of the dish removed.",
+  "La photo du plat n’a pas pu être changée. Réessaie.": "The photo of the dish could not be changed. Try again.",
+  "Retirer la photo du plat": "Remove the photo of the dish",
+  "Après l’enregistrement, l’app essaiera de récupérer la photo du plat de la page : un appel de plus, compté dans ton quota du jour.": "After saving, the app will try to fetch the photo of the dish from the page: one more call, counted in your daily quota.",
 };

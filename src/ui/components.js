@@ -550,6 +550,25 @@ export function boutonTelechargerPages(distantes, { connecte = false, telecharge
   return el('div', { class: 'row' }, b);
 }
 
+// La zone d'une image (couverture d'un livre, photo du plat : lot F) — déplacée de livre-ajout.js au lot F (rejeu : photo-plat.js la lit
+// sans importer livre-ajout.js, qui importe import-cible.js ; aucun cycle d'imports), ré-exportée là-bas (motif de D-E20).
+// R-UX-8 : aucun groupe de boutons dans un <label> — un clic sur le mot « Couverture » déclencherait « Photographier ».
+// L'état est dit tel qu'il est (I-B) : le message vient d'un fait (reçue, enregistrée, refusée), jamais d'une attente.
+export function renderZoneCouverture(etat, gestes = {}, { libelle = null, nomRetirer = null } = {}) {
+  const g = (nom) => () => (typeof gestes[nom] === 'function' ? gestes[nom]() : undefined);
+  return el('div', { class: 'field zone-couverture' }, el('span', null, libelle ?? t('Couverture')),
+    el('div', { class: 'row' },
+      etat.apercu ? el('img', { src: etat.apercu, alt: '' }) : null,
+      el('div', { class: 'stack' },
+        etat.message ? el('small', { class: 'muted' }, etat.message) : null,
+        el('div', { class: 'row' },
+          etat.telechargeable ? el('button', { type: 'button', class: 'btn primary', disabled: !!etat.telechargement, onClick: g('telecharger') }, etat.telechargement ? t('Téléchargement…') : t('Télécharger')) : null,
+          etat.reessayable ? el('button', { type: 'button', class: 'btn', disabled: !!etat.telechargement, onClick: g('reessayer') }, t('Réessayer')) : null,
+          el('button', { type: 'button', class: 'btn', disabled: !!etat.enCours, onClick: g('photographier') }, t('Photographier')),
+          el('button', { type: 'button', class: 'btn', disabled: !!etat.enCours, onClick: g('choisir') }, t('Choisir une image')),
+          etat.sha256 ? el('button', { type: 'button', class: 'btn link', disabled: !!etat.enCours, 'aria-label': nomRetirer, onClick: g('retirer') }, t('Retirer')) : null))));
+}
+
 export function dietChip(assessment) {
   const cls = { compatible: 'ok', adaptation: 'warn', to_verify: 'warn', incompatible: 'danger' }[assessment.state] || 'neutral';
   const detail = assessment.state === 'to_verify' ? ` (${assessment.unknown.length} ${t('inconnu(s)')})` : assessment.blocking?.length ? ` : ${assessment.blocking.map((b) => b.label).join(', ')}` : '';
