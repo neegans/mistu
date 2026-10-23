@@ -1,4 +1,54 @@
-# STATE.md — Cuisine OS (mistu) — état au 19 octobre 2026 (lots « Passerelle de l'assistant » et « Présentation du serveur » EN LIGNE, `main` = `57babc6` ; lot A « Import ciblé et journal d'import » FINI dans le worktree `mistu-import`, pas fusionné, `0005` pas collée)
+# STATE.md — Cuisine OS (mistu) — état au 20 octobre 2026 (lots « Passerelle de l'assistant » et « Présentation du serveur » EN LIGNE, `main` = `57babc6` ; lot A « Import ciblé et journal d'import » FINI dans le worktree `mistu-import` (tête `2b6a2fd`), pas fusionné, `0005` pas collée ; lot B « Recette web complète » FINI dans le worktree `mistu-recette-web`, empilé sur A, pas fusionné, `0006` pas collée, fonction `assistant` pas redéployée)
+
+**20 octobre 2026, 05 h 30 — LOT B « RECETTE WEB COMPLÈTE » : FINI dans le worktree `~/projects/mistu-recette-web` (branche `recette-web`, base = la
+tête finale du lot A `2b6a2fd`, tête de code `51bad50` (le dernier commit de code ; le suivent deux commits de spec, `7df269e` : rulings R-B-17 à
+R-B-28 et amendements de clôture, et `76d88dd` : bilan des mutants vérifiable, R-B-22 bis, heure du Départ ; puis le commit de clôture qui pose ces
+documents), serveur 8089), revu (six tâches à trois lentilles, une ronde chacune, re-revues propres ; revue finale de branche, 4 Important et 10
+Minor : la vague finale `d8163be` + `ebbcf10` ferme les 4 Important et 8 Minor (compte de son rapport), le Minor `portionsDe`, refusé par la vague,
+est tranché par R-B-22 à la ronde finale 2, les 2 Minor de documentation (R-B-11 « survivant », chiffres de `cloture.md`) sont fermés à la clôture ;
+ronde finale 2 `51bad50` : R-B-22 `portionsDe`, R-B-23 alias de la fonction ; clôture du chef d'orchestre : rulings R-B-17 à R-B-28, puis R-B-22 bis),
+PAS fusionné, PAS poussé, `0006` PAS collée, fonction `assistant` PAS redéployée (la version 3 du lot 4 sert toujours) ; `/verify` de clôture par le
+chef d'orchestre.** Pour Neegan : un lien web gardé devient une vraie recette — « Lire la recette avec l’assistant » sur la fiche du lien, ou « Garder
+et lire » sous une carte de l'onglet Web (le lien gardé et lu d'un geste) ; la fonction `assistant` télécharge la page (jamais le téléphone), lit
+d'abord les données que le site publie (JSON-LD `Recipe` : « Lue dans les données de la page : aucun jeton dépensé. »), et seulement sinon fait lire
+le texte par le modèle ; l'écran dit « Lue sur {hôte} — vérifie avant d’enregistrer. », l'hôte réel toujours d'abord, le site et l'auteur ensuite sous
+« Selon la page : … » ; « Enregistrer » fait du lien la recette (à la première lecture, le titre lu devient son titre), toutes les lignes « à
+vérifier » ; « Ouvrir le lien » reste sur toute fiche venue du web ; une adresse en `http:` n'est jamais lue (ni bouton de lecture ni « Réessayer » :
+« Ouvrir le lien » et la phrase du refus ; « Garder et lire » n'est pas proposé) ; un échec (site injoignable ou qui refuse les robots, PDF, page trop
+lourde ou vide) laisse le lien intact, dit pourquoi et offre « Réessayer » ; une version écrite à la main n'est jamais remplacée sans « Remplacer par
+cette lecture ? » (« Ajouter sans remplacer » d'abord), mais une lecture ou une correction de l'assistant, même vérifiée, l'est sans question
+(R-B-19) ; la même adresse gardée deux fois est dite, rien d'écrit ; la section « Imports » liste les lectures web, « Réessayer » compris depuis un
+autre appareil ; chaque lecture compte pour un appel du quota (60 par jour par défaut, réglable par le secret `ASSISTANT_QUOTA_JOUR`), même sans
+jeton. Chiffres : suite **3997/3997** (épinglé 3996 ; départ 3694/3694 ; vague 3997/3997), Node **172/172** sur `51bad50` (125 au
+départ, 167 à la vague, 5 de plus à la ronde finale 2 ; registre `verify-51bad50.txt`), `--check` 0, `tsc` 0, pglast `0006` 4 instructions et preuve
+12 instructions + 2 blocs `do`, `APP_VERSION 0.10.0`, `DB_VERSION 4`, `sw.js` `cuisine-os-v0.10.0-8`, tous les mutants nommés par la spec § 7.5 et par le plan (C1 à
+C24, B1 à B8, T6a à T6j) rouges, aucun survivant (R-B-28 ; deux équivalents déclarés par la spec, M30r et « Annuler » web par `annulerVol`, un
+troisième, R18b, au rapport de la tâche 4 ; 338 passages relevés dans les rapports hors ronde finale 2, 352 avec ses 14 mutants, tous rouges), 15
+commits de code sur `e411779` (14 de construction jusqu'à `ebbcf10`, puis `51bad50`), puis les deux commits de spec. **Aucune lecture réelle** ;
+`0006` jamais jouée sur `mitsu` ; `redirect: 'manual'` jamais mesuré sous le runtime Supabase (c'est la sonde S17). **Gestes, dans l'ordre :** (1)
+**le lot A d'abord** (B est empilé sur A) : `0005` collée et prouvée (`0 faux sur 35`), adresse de preuve retirée,
+`! git -C ~/projects/mistu merge --ff-only import-cible`, `! git -C ~/projects/mistu push origin main` (paragraphe du lot A, ci-dessous) ; (2) **AVANT
+le redéploiement et AVANT tout `push` du lot B**, dans l'éditeur SQL de `mitsu` (`supabase/README.md`, étape 12) : coller
+`supabase/migrations/0006_lecture_web.sql` entière (la contrainte `outil` à CINQ valeurs : `recherche-web`, `creation`, `extraction`, `lecture-web`,
+`image-web`), puis, collée seule, `notify pgrst, 'reload schema';`, puis jouer la preuve `supabase/proofs/0006_lecture_web.sql` (« Run without RLS »,
+rien à remplacer ; lire `999 BILAN` : attendu `0 faux sur 10`, verdict 2.031 `image-web` compris) et coller le tableau dans
+`supabase/proofs/RESULTATS-mitsu.md` (section préparée) ; (3) le chef d'orchestre redéploie la fonction `assistant` (`index.ts` et `lecture-web.js`
+ont changé depuis la version 3, en dernier dans `ebbcf10` et `51bad50` ; `supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb
+--no-verify-jwt --use-api`, la version suivante) et joue les sondes de l'étape 12 du README : S13-S16 et S1-S9 sans dépense, **S19** (R-B-23, R-B-22
+bis : `https://ybdooerfeziiabsbfxtb.functions.supabase.co/` → 422 `interdit`, sans réservation ni dépense ; ni le README ni la table « Sondes
+`lecture-web` » de `RESULTATS-mitsu.md` n'ont encore sa ligne : l'y ajouter), puis S17 (la sonde de redirection, R-B-14) et S18, un appel du quota
+chacune sans dépense Anthropic — une redirection opaque à S17 impose une ronde sur `telechargerPage` avant la fusion ; (4)
+`! git -C ~/projects/mistu merge --ff-only recette-web` puis `! git -C ~/projects/mistu push origin main` ; ouvrir
+`https://neegans.github.io/mistu/tests/` et lire le BILAN (attendu : 3997/3997, plus le 404 de `/favicon.ico`) ; (5) preuve réelle sur le
+site public, connecté : un lien web → « Garder et lire » (ou « Lire la recette avec l’assistant » sur un lien déjà gardé) : **un** POST
+`/functions/v1/assistant` ; sur une page à JSON-LD, l'écran dit « Lue dans les données de la page : aucun jeton dépensé. » (sinon, une lecture par le
+modèle : « Texte de la page lu par l’assistant. ») ; « Enregistrer » ; puis `select jour, appels from public.assistant_usage_jour;` (et, pour le
+détail, la ligne `lecture-web` de `public.assistant_journal` : 200, 0 / 0 pour un JSON-LD) ; (6) iPhone (le même parcours depuis l'app installée) ;
+(7) « clean » en dernier, **après** avoir copié le registre `.superpowers/sdd/2026-10-19-recette-web/` (hors git) dans
+`~/projects/mistu/.superpowers/sdd/` (`diff -rq` muet), puis `git worktree remove`. Non prouvé et dettes nommées (R-B-27 : identité du vol non
+vérifiée aux écritures de fin, dans les deux machines ; deux machines de vol à garder alignées à la main ; fenêtre sans dialogue avant la transaction
+d'« Enregistrer » ; entités 0x80-0x9F retirées ; DoS de regex mesuré sous Node seulement ; spec § 13 : sept points, deux ouverts à défaut appliqué et,
+points 3 à 7, les dettes R-B-27) : `CLAUDE.md`, section « Recette web complète », et `docs/architecture.md`, section du lot.
 
 **19 octobre 2026, 19 h 45 — LOT A « IMPORT CIBLÉ ET JOURNAL D'IMPORT » : FINI dans le worktree `~/projects/mistu-import` (branche `import-cible`,
 base `main 57babc6`, tête `58bb49b` (dernier commit de code ; le commit de clôture qui pose ces documents le suit), serveur 8088), revu (six tâches à trois lentilles, revue finale de branche, vague finale VF-1 à VF-15, ronde

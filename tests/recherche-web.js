@@ -63,13 +63,13 @@ export async function runRechercheWebTests({ eq, ok }) {
     ok(!(await lire('../src/domain/pairing.js')).includes('notice'), 'domaine : pairing.js ne propage plus de notice');
   }
 
-  // --- § 8 : version 0.9.0 (lot A, import ciblé ; 0.8.1 à la présentation du serveur), SHELL
+  // --- § 8 : version 0.10.0 (lot B, recette web ; 0.9.0 au lot A, 0.8.1 à la présentation du serveur), SHELL
   {
     const sw = await lire('../sw.js');
-    ok(/VERSION = 'cuisine-os-v0\.9\.0-\d+'/.test(sw), 'sw.js : VERSION 0.9.0');
+    ok(/VERSION = 'cuisine-os-v0\.10\.0-\d+'/.test(sw), 'sw.js : VERSION 0.10.0');
     ok(sw.includes("'./src/core/bornes.js'"), 'SHELL : ./src/core/bornes.js');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.9.0', 'APP_VERSION 0.9.0');
+    eq(APP_VERSION, '0.10.0', 'APP_VERSION 0.10.0');
   }
 
   // --- § 7.1 : supportsWebSearch lu par l'écran (F6) — seule la passerelle (une SESSION) cherche sur le web
@@ -1032,7 +1032,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         const ANCIENNE = 'L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.';
         let r1 = await rendre([lienR({ presentation: 'Un saumon rôti, fenouil fondant.', temps_min: 15, difficulte: 'facile', ingredients: 7 })]);
         { const c = cartes(r1)[0];
-          eq([forme(c), c.children[2].textContent, c.children[3].textContent, c.children[3].style.fontSize], [['A.btn', 'DIV.muted', 'DIV', 'DIV.muted', 'DIV.row'], 'Un saumon rôti, fenouil fondant.', 'Estimé par l’assistant : ≈ 15 min · facile · 7 ingrédients', '0.9rem'], 'présentation : la carte = titre, hôte, présentation, ligne de repères (« Estimé par l’assistant : ≈ 15 min · facile · 7 ingrédients », .9rem), rangée de boutons — dans cet ordre');
+          eq([forme(c), c.children[2].textContent, c.children[3].textContent, c.children[3].style.fontSize], [['A.btn', 'DIV.muted', 'DIV', 'DIV.muted', 'DIV.row', 'DIV.row'], 'Un saumon rôti, fenouil fondant.', 'Estimé par l’assistant : ≈ 15 min · facile · 7 ingrédients', '0.9rem'], 'présentation : la carte = titre, hôte, présentation, ligne de repères (« Estimé par l’assistant : ≈ 15 min · facile · 7 ingrédients », .9rem), rangée de boutons, puis (lot B) la rangée « Garder et lire » — dans cet ordre');
           const rangee = [...c.children[4].children];
           eq([rangee.map((n) => n.tagName + '.' + n.className), rangee.map((n) => n.textContent)], [['A.btn small', 'BUTTON.btn small'], ['Voir la recette', 'Garder ce lien']], 'présentation : la rangée = « Voir la recette » (lien) puis « Garder ce lien » (bouton), tous deux .btn.small');
           eq([rangee[0].getAttribute('href'), rangee[0].getAttribute('target'), rangee[0].getAttribute('rel'), titres(r1)[0].getAttribute('href')], ['https://r0.test/r', '_blank', 'noopener noreferrer', 'https://r0.test/r'], '« Voir la recette » : a avec href = l’adresse du titre, target _blank, rel noopener noreferrer');
@@ -1052,7 +1052,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         r1.remove();
         // présence de la présentation et de la ligne : les quatre formes de carte
         r1 = await rendre([lienR({}, 0), lienR({ presentation: 'Seule.' }, 1), lienR({ temps_min: 20 }, 2), lienR({ presentation: 42, temps_min: '15', difficulte: 'impossible', ingredients: 0 }, 3), lienR({ temps_min: 20, difficulte: 'impossible' }, 4)]);
-        eq([cartes(r1).map(forme), reperes(cartes(r1)[4])], [[['A.btn', 'DIV.muted', 'DIV.row'], ['A.btn', 'DIV.muted', 'DIV', 'DIV.row'], ['A.btn', 'DIV.muted', 'DIV.muted', 'DIV.row'], ['A.btn', 'DIV.muted', 'DIV.row'], ['A.btn', 'DIV.muted', 'DIV.muted', 'DIV.row']], [P + '≈ 20 min']], 'carte : sans présentation ni repère → ni l’un ni l’autre ; la ligne de repères n’existe que s’il y a un repère ; des valeurs illisibles à l’écran (« 15 », « impossible », 0, 42) ne font rien paraître, sans « · » orphelin à côté d’un repère valide');
+        eq([cartes(r1).map(forme), reperes(cartes(r1)[4])], [[['A.btn', 'DIV.muted', 'DIV.row', 'DIV.row'], ['A.btn', 'DIV.muted', 'DIV', 'DIV.row', 'DIV.row'], ['A.btn', 'DIV.muted', 'DIV.muted', 'DIV.row', 'DIV.row'], ['A.btn', 'DIV.muted', 'DIV.row', 'DIV.row'], ['A.btn', 'DIV.muted', 'DIV.muted', 'DIV.row', 'DIV.row']], [P + '≈ 20 min']], 'carte : sans présentation ni repère → ni l’un ni l’autre ; la ligne de repères n’existe que s’il y a un repère ; des valeurs illisibles à l’écran (« 15 », « impossible », 0, 42) ne font rien paraître, sans « · » orphelin à côté d’un repère valide');
         r1.remove();
         // m6 : au-delà des bornes du domaine (1440 min, 99 ingrédients), un repère ne paraît pas non plus à l'écran
         r1 = await rendre([lienR({ temps_min: 1e9, ingredients: 1e9 }, 0), lienR({ temps_min: 1441, ingredients: 100 }, 1), lienR({ temps_min: 1e9, difficulte: 'facile', ingredients: 99 }, 2)]);
@@ -1185,6 +1185,103 @@ export async function runRechercheWebTests({ eq, ok }) {
         eq([banniere(root), champ(root, 'Adresse *').value], [null, ''], 'signet sans query : aucune bannière, champ vide (comportement inchangé)');
       });
     } finally { globalThis.fetch = vraiFetch; }
+  }
+  // --- Lot B « Recette web complète » (spec 2026-10-19-recette-web § 4.1 b, D-B5, D-B7, D-B21, B-29) : « Garder et lire » sur une carte
+  {
+    const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
+    const localeAvant = getUiLocale(); setUiLocale('fr');
+    const S = await import('../src/ui/search.js');
+    const V = await import('../src/ui/vol.js');
+    const { withRepo } = await import('./sync-fixture.js');
+    const vraiFetch = globalThis.fetch; let reseau = 0;
+    globalThis.fetch = async (u) => { reseau += 1; throw new Error(`aucun reseau attendu ici : ${u}`); };
+    const scene = document.createElement('div'); scene.hidden = true; document.body.append(scene);
+    try {
+      await withRepo(async (repo, db) => {
+        const SESSION = { access_token: 'jeton-garder-sentinelle', user: { id: 'u1', email: 'a@exemple.invalid' } };
+        const ctxDe = async () => ({ docs: [], docsByRecipe: new Map(), ingredientsById: new Map(), meal_feedback: [], settings: { llm: { provider: 'none' } }, recipes: await db.getAll('recipes'), imports: await db.getAll('imports'), sync: { user: { id: 'u1' }, auth: { jeton: async () => SESSION } } });
+        const reponse = (status, corps) => ({ ok: status >= 200 && status < 300, status, headers: new Headers(), text: async () => JSON.stringify(corps) });
+        const LD = { source_kind: 'jsonld', page: { url_finale: 'https://r.test/a', hote: 'r.test', titre_page: 'P', auteur: null, site: null, lue_le: '2026-10-19T12:00:00.000Z', autres_recettes: 0, texte_coupe: false }, recette: { title: 'Pâtes', ingredients: [{ source_text: 'a' }], steps: [{ text: 'b' }] }, usage: { input_tokens: 0, output_tokens: 0 }, stop_reason: null, model: null };
+        const posts = []; const fetchLecture = async (url, options) => { posts.push(JSON.parse(options.body)); return reponse(200, LD); };
+        const lien = (href, champs = {}) => ({ href, hote: new URL(href).host, titre: 'Pâtes du garde-manger', date: null, presentation: 'Un plat rapide.', temps_min: 20, difficulte: 'facile', ingredients: 7, ...champs });
+        const trouve = (liens) => ({ etat: 'trouve', raison: null, liens, autres: [], repli: false, recherches: 1, modele: 'm' });
+        const navs = []; const toasts = [];
+        const monter = async (liens, lecture = {}) => {
+          S.reinitialiserWeb();
+          let rendre; const chercher = async () => new Promise((r) => { rendre = r; });
+          const root = await S.renderSearch({}, { mode: 'web', q: 'pâtes' }, await ctxDe(), { chercher, navigate: (p) => navs.push(p), remplacerAdresse: () => {}, toast: (m) => toasts.push(m), lecture: { repo, fetch: fetchLecture, ...lecture } });
+          scene.append(root);
+          [...root.querySelectorAll('button')].find((b) => b.textContent === 'Chercher sur le web avec l’assistant').click();
+          await new Promise((r) => setTimeout(r, 0)); rendre(trouve(liens)); await new Promise((r) => setTimeout(r, 0));
+          return root;
+        };
+        const attendre = async (cond, quoi) => { for (let i = 0; i < 300; i += 1) { if (await cond()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error('attente dépassée (3 s) : ' + quoi); };
+        const carteDe = (root, i = 0) => root.querySelectorAll('a.btn:not(.small)[target="_blank"]')[i].parentElement;
+        const garderEtLire = (carte) => carte.querySelector('[data-role="garder-et-lire"]');
+
+        // La carte : « Voir la recette » · « Garder ce lien » (.btn.small), puis « Garder et lire » sur une rangée DÉDIÉE, primaire (pas .small, B-29).
+        let root = await monter([lien('https://r.test/a'), lien('http://r.test/b')]);
+        const rangees = [...carteDe(root).querySelectorAll(':scope > .row')];
+        eq([rangees.length, [...rangees[0].children].map((n) => [n.tagName, n.className, n.textContent]), [...rangees[1].children].map((n) => [n.tagName, n.className, n.textContent])], [2, [['A', 'btn small', 'Voir la recette'], ['BUTTON', 'btn small', 'Garder ce lien']], [['BUTTON', 'btn primary', 'Garder et lire']]], 'carte : deux rangées — « Voir la recette » · « Garder ce lien » (.btn.small), puis « Garder et lire » (.btn.primary, pas .small)');
+        eq([garderEtLire(carteDe(root, 1)), !!carteDe(root, 1).querySelector('button.btn.small')], [null, true], 'carte : un résultat en http: n’offre pas « Garder et lire » (« Garder ce lien » reste)');
+
+        // UNE transaction (signet + import a_lancer kind web), conditionnée ; puis UN POST lecture-web avec l'adresse du signet relu ; puis la route.
+        const appels = []; const mutate = db.mutate.bind(db);
+        db.mutate = (o) => { appels.push({ puts: Object.keys(o.puts || {}).sort(), conditions: o.conditions ? Object.keys(o.conditions).sort() : null }); return mutate(o); };
+        try {
+          garderEtLire(carteDe(root)).click();
+          await attendre(() => navs.some((p) => p.endsWith('/importer')), 'navigation vers l’écran de lecture');
+          await attendre(() => posts.length === 1 && V.volEnCours() === null, 'lecture finie');
+        } finally { db.mutate = mutate; }
+        const signet = (await db.getAll('recipes')).find((r) => r.source_url === 'https://r.test/a');
+        const ligne = (await db.byIndex('imports', 'recipe_id', signet.id))[0];
+        eq(appels[0], { puts: ['imports', 'recipes'], conditions: ['imports', 'recipes'] }, '« Garder et lire » : UNE transaction écrit le signet ET l’import, conditionnée (D-B21)');
+        eq([signet.original_title, signet.availability, signet.web_reperes, ligne.kind, ligne.recipe_id], ['Pâtes du garde-manger', 'reference_only', { presentation: 'Un plat rapide.', temps_min: 20, difficulte: 'facile', ingredients: 7 }, 'web', signet.id], '« Garder et lire » : le signet porte le titre et l’adresse du résultat, et ses quatre repères (web_reperes) ; l’import est kind web');
+        eq([posts, navs.at(-1)], [[{ outil: 'lecture-web', corps: { url: 'https://r.test/a' } }], `/recipes/${signet.id}/importer`], '« Garder et lire » : puis un POST lecture-web avec l’adresse du signet, puis #/recipes/<id>/importer');
+
+        // Doublon : la même adresse (normalisée) → la phrase et « Ouvrir la fiche » remplacent les deux rangées ; rien d'écrit, zéro POST.
+        const nRecettes = await db.count('recipes');
+        root = await monter([lien('https://r.test/a/?utm_source=x')]);
+        garderEtLire(carteDe(root)).click();
+        await attendre(() => !!carteDe(root).querySelector('[data-role="doublon-adresse"]'), 'doublon dit');
+        const statut = carteDe(root).querySelector('[data-role="doublon-adresse"]');
+        eq([statut.textContent.includes('Tu as déjà gardé cette adresse.'), statut.querySelector('a').getAttribute('href'), carteDe(root).querySelectorAll(':scope > .row').length, await db.count('recipes') - nRecettes, posts.length], [true, `#/recipes/${signet.id}`, 0, 0, 1], 'doublon : « Tu as déjà gardé cette adresse. » + « Ouvrir la fiche » à la place des rangées, zéro écriture, zéro POST (mutant « sans retrait des utm_* » : rouge)');
+
+        // Double tape → un signet, un POST.
+        root = await monter([lien('https://r.test/double')]);
+        const b = garderEtLire(carteDe(root)); b.click(); b.click();
+        await attendre(() => posts.length === 2 && V.volEnCours() === null, 'une lecture');
+        await new Promise((r) => setTimeout(r, 30));
+        eq([(await db.getAll('recipes')).filter((r) => r.source_url === 'https://r.test/double').length, posts.length], [1, 2], 'double tape : un signet, un POST');
+
+        // Hors ligne : le signet et l'import a_lancer sont écrits, zéro POST, la navigation a lieu (l'écran dira « Tu es hors ligne. »).
+        root = await monter([lien('https://r.test/hors')], { enLigne: () => false });
+        const avantNav = navs.length;
+        garderEtLire(carteDe(root)).click();
+        await attendre(() => navs.length > avantNav, 'navigation');
+        const sh = (await db.getAll('recipes')).find((r) => r.source_url === 'https://r.test/hors');
+        eq([(await db.byIndex('imports', 'recipe_id', sh.id))[0].status, posts.length, navs.at(-1)], ['a_lancer', 2, `/recipes/${sh.id}/importer`], 'hors ligne : signet + import a_lancer écrits, zéro POST, navigation quand même');
+
+        // Régression (§ 8) : « Garder ce lien » navigue toujours vers /add/signet?adresse=&titre= (sans repères).
+        [...carteDe(root).querySelectorAll('button')].find((x) => x.textContent === 'Garder ce lien').click();
+        const q = new URLSearchParams(navs.at(-1).split('?')[1]);
+        eq([navs.at(-1).startsWith('/add/signet?'), q.get('adresse'), q.get('titre'), [...q.keys()].sort()], [true, 'https://r.test/hors', 'Pâtes du garde-manger', ['adresse', 'titre']], 'régression : « Garder ce lien » mène toujours au formulaire, adresse et titre seulement');
+        // Ronde 1 : une écriture impossible (quota, base fermée) est journalisée (search.garder_et_lire) et dite « Le lien n’a pas pu être gardé.
+        // Réessaie. » — jamais « Adresse non reconnue. » pour une adresse valide — ; le bouton se rallume ; rien d'écrit, zéro POST, aucune navigation.
+        const nPosts = posts.length; const nNavs = navs.length;
+        const erreursG = []; const vraiErreurG = console.error; console.error = (...a) => { erreursG.push(String(a[0])); };
+        let bPanne;
+        try {
+          root = await monter([lien('https://r.test/panne')], { repo: { ...repo, saveBatch: async () => { throw new Error('disque plein'); } } });
+          bPanne = garderEtLire(carteDe(root)); const nToasts = toasts.length;
+          bPanne.click();
+          await attendre(() => toasts.length > nToasts, 'le refus dit');
+        } finally { console.error = vraiErreurG; }
+        eq([toasts.at(-1), bPanne.disabled, erreursG.some((e) => e.includes('search.garder_et_lire')), (await db.getAll('recipes')).some((r) => r.source_url === 'https://r.test/panne'), posts.length - nPosts, navs.length - nNavs], ['Le lien n’a pas pu être gardé. Réessaie.', false, true, false, 0, 0], '« Garder et lire » : une écriture impossible → journalisée, « Le lien n’a pas pu être gardé. Réessaie. », bouton rallumé ; rien d’écrit, zéro POST, aucune navigation');
+
+        eq(reseau, 0, 'aucun réseau réel');
+      });
+    } finally { globalThis.fetch = vraiFetch; scene.remove(); S.reinitialiserWeb(); setUiLocale(localeAvant); }
   }
   // --- § 8 / § 9.8 dictionnaire et statiques
   {

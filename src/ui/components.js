@@ -10,6 +10,7 @@ import { displayUrl, safeDisplayType } from '../sync/mime.js';
 import * as repo from '../model/repo.js';
 import { pastilleModel } from './state.js';
 import { estCreationIA, etiquetteCreationIA } from '../domain/creation-ia.js';
+import { DIFFICULTES, LIMITES_WEB } from '../domain/recherche-web.js';
 
 export function pageHeader(title, { subtitle = null, actions = [], back = null } = {}) {
   return el('header', { class: 'stack', style: { marginBottom: '1rem' } },
@@ -112,6 +113,25 @@ export function texteDesChamps(champs) {
 // sa propre étiquette) ou une version vérifiée ne le sont pas.
 export function estExtractionNonRelue(version) {
   return !!version && (version.kind === 'extraction' || version.kind === 'correction') && version.provenance?.generated_by === 'ai' && version.verification_state === 'to_verify';
+}
+
+// La ligne de repères d'une carte de l'onglet Web, et désormais d'un signet gardé par « Garder et lire » (lot B, D-B5 : déménagée de search.js, même
+// rendu, même texte) : temps estimé, difficulté, nombre d'ingrédients — les parties PRÉSENTES, jointes par « · », dans cet ordre ; '' s'il n'y en a
+// aucune. Chaque partie est revalidée ici : une valeur illisible ou hors des bornes du domaine (1440 min, 99 ingrédients) ne fait rien paraître.
+export function ligneReperes(lien) {
+  const parties = [];
+  const n = lien?.temps_min;
+  if (Number.isInteger(n) && n >= 1 && n <= LIMITES_WEB.tempsMax) {
+    if (n < 60) parties.push(t('≈ {n} min', { n }));
+    else {
+      const h = Math.floor(n / 60); const m = n % 60;
+      parties.push(m === 0 ? t('≈ {h} h', { h }) : t('≈ {h} h {m}', { h, m: String(m).padStart(2, '0') }));
+    }
+  }
+  if (DIFFICULTES.includes(lien?.difficulte)) parties.push({ facile: t('facile'), moyen: t('moyen'), exigeant: t('exigeant') }[lien.difficulte]);
+  const k = lien?.ingredients;
+  if (Number.isInteger(k) && k >= 1 && k <= LIMITES_WEB.ingredientsMax) parties.push(k === 1 ? t('1 ingrédient') : t('{n} ingrédients', { n: k }));
+  return parties.join(' · ');
 }
 
 export function provenanceText(recipe, book, edition) {

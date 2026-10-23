@@ -299,6 +299,14 @@ Code : `supabase/functions/assistant/` (spec `docs/superpowers/specs/2026-10-18-
 
 Reste non prouvé côté SQL : la concurrence réelle (deux appels simultanés sous le verrou), qui ne se joue pas dans l'éditeur.
 
+**Redéploiement, version 4 (contrôleur, 23 octobre 2026, 20 h 24 UTC = 16 h 24 à Montréal)** : même commande (`--no-verify-jwt --use-api`,
+CLI 2.121.0), code = `0c7cbbd` (pointe de la chaîne A → F : outils `lecture-web` du lot B et `image-web` du lot F ; quatre fichiers téléversés,
+`lecture-web.js` compris), `ezbr_sha256 cbe7be61ef10fc312b898aa37b013beb30dd9f66ef4c7887efd4a8ddfb2e081a`, `ACTIVE`, `verify_jwt: false` ; jouée après `0005` et `0006` collées et
+prouvées, et après les tests Node du serveur sur `0c7cbbd` (115/115). **S1-S9 rejouées à 20 h 25 UTC : statuts, corps et en-têtes CORS
+identiques aux versions 1 à 3** (204 avec Allow-Origin, `allow-headers: authorization, apikey, content-type, x-client-info`,
+`allow-methods: POST, OPTIONS`, `max-age: 600` / 204 sans Allow-Origin / 401 / 403 / 401 / 401 / 405 / 403 / 401 ; 94 à 627 ms, S1 à froid).
+Le `GET` d'état avec une session réelle (première mesure, F-1) : voir « Sondes `lecture-web` ».
+
 ## Preuve `0005_imports.sql` — 35 verdicts, 0 faux (23 octobre 2026, vers 20 h 05 UTC = 16 h 05 à Montréal, geste de Neegan)
 
 **JOUÉE par Neegan le 23 octobre 2026 (vers 20 h 05 UTC), avant la fusion et le `push` du code de ce lot : `999 BILAN` =
@@ -362,3 +370,76 @@ Tableau des verdicts (ordre, etape, attendu, obtenu, ok), tel que rendu par l'é
 | 5.04  | public.purge_tombstones() : 27 magasins, la liste finit par assistant_config, imports                                      | 27 / true                                                                    | 27 / true                                                                    | true |
 | 5.05  | sync_push : keys et required connaissent imports                                                                           | true / true                                                                  | true / true                                                                  | true |
 | 999   | BILAN                                                                                                                      | aucun verdict faux                                                           | 0 faux sur 35                                                                | true |
+
+## Preuve `0006_lecture_web.sql` — 10 verdicts, 0 faux (23 octobre 2026, vers 20 h 20 UTC = 16 h 20 à Montréal, geste de Neegan)
+
+Section préparée le 19 octobre 2026 (lot B « recette web complète », spec `docs/superpowers/specs/2026-10-19-recette-web-design.md` § 6.4 ;
+procédure : étape 12 du README). **JOUÉE par Neegan le 23 octobre 2026 (vers 20 h 20 UTC), après `0005` (jouée le même jour), avant le redéploiement de la fonction et
+avant tout `push` : `999 BILAN` = `0 faux sur 10`, `ok` vrai sur les 11 lignes.** Collages depuis un kit copier-coller préparé par le
+contrôleur (trois fichiers, identiques à ceux du dépôt, rien à remplacer) ; le tableau des verdicts ci-dessous est la sortie de l'éditeur SQL,
+collée telle quelle. Rien à
+remplacer ; la preuve n'affiche aucune adresse ni aucun identifiant (compte emprunté jamais nommé) ; aucune clé n'est en jeu. Lire en
+particulier 1.01 (les cinq outils, dans l'ordre d'`OUTILS_0006` : `image-web` comprise, pour le lot F) et 2.03 bis (`image-web` accepté par
+`assistant_reserver`).
+
+| Heure | Collage | Résultat |
+| --- | --- | --- |
+| 23 oct. 2026, vers 20 h 15 UTC | `migrations/0006_lecture_web.sql` | jouée en un collage (fichier 1 du kit, identique au fichier du dépôt) ; sortie non rapportée (attendu `Success. No rows returned`) ; la preuve atteste la contrainte (1.01, 1.02) |
+| — | empreinte du `0006` collé : `shasum -a 256 supabase/migrations/0006_lecture_web.sql` | `b2d4cf5944e2c2dc0c3982f0acbcd88d3b61d0f849d3693635aa98d1d286f234` (fichier du dépôt à `cf91f09`, identique à la pointe `0c7cbbd`) |
+| idem | `notify pgrst, 'reload schema';` (collée seule ; facultative selon l'étape 12) | jouée (fichier 2 du kit) |
+| vers 20 h 20 UTC | preuve `0006` (« Run without RLS ») | `999 BILAN : 0 faux sur 10`, `ok` vrai sur les 11 lignes (fichier 3 du kit) |
+
+Tableau des verdicts (ordre, etape, attendu, obtenu, ok), tel que rendu par l'éditeur SQL :
+
+| ordre | etape | attendu | obtenu | ok |
+| --- | --- | --- | --- | --- |
+| 1.01  | pg_get_constraintdef : les cinq outils, dans l ordre d OUTILS_0006                           | recherche-web < creation < extraction < lecture-web < image-web | dans l ordre       | true |
+| 1.02  | une seule contrainte check sur assistant_journal                                             | 1                                                               | 1                  | true |
+| 1.03  | anon et authenticated : aucun privilege sur la table (inchange depuis 0004)                  | false / false                                                   | false / false      | true |
+| 1.04  | service_role : select, insert, update sur la table                                           | true / true / true                                              | true / true / true | true |
+| 1.05  | vue assistant_usage_jour toujours la, en security invoker                                    | true                                                            | true               | true |
+| 2.01  | sous postgres : une ligne de journal outil lecture-web est acceptee                          | acceptee                                                        | acceptee           | true |
+| 2.02  | un outil hors liste est toujours refuse par le check                                         | 23514                                                           | 23514              | true |
+| 2.03  | assistant_reserver accepte lecture-web : un id non nul                                       | id non nul                                                      | id non nul         | true |
+| 2.031 | 2.03 bis : assistant_reserver(uid, 'image-web', 1, c + 1) -> id non nul (la valeur du lot F) | id non nul                                                      | id non nul         | true |
+| 3.01  | les trois anciens outils passent encore                                                      | acceptes                                                        | acceptes           | true |
+| 999   | BILAN                                                                                        | aucun verdict faux                                              | 0 faux sur 10      | true |
+
+## Sondes `lecture-web` — jouées le 23 octobre 2026 sur la version 4 (7 sur 7 conformes, plus le `GET` d'état)
+
+Jouées par le contrôleur le 23 octobre 2026 (étape 12, point 5) entre 20 h 25 et 20 h 35 UTC, sur la **version 4** de la fonction
+(déployée à 20 h 24 UTC depuis `0c7cbbd`, `ezbr_sha256 cbe7be61ef10fc31…`, voir « Passerelle `assistant` »). **`GET` d'état avec la session
+de Neegan : 200 `{"modele":"claude-sonnet-5-5","quotaJour":60,"cles":"nouvelles"}` (689 ms)** : la plateforme sert les NOUVELLES clés
+(`sb_publishable_` / `sb_secret_`, F-1 ; première mesure). Session : jeton copié depuis la console du site connecté vers un fichier d'en-tête à
+mode 600 (`curl -H @fichier`), jamais affiché ni tapé dans une commande, fichier vidé dès les sondes finies. S13-S16 et S19 ne dépensent rien (elles s'arrêtent avant
+la réservation) ; S17-S18 coûtent un appel du quota chacune, sans dépense Anthropic : zéro jeton attendu (R-B-14). S13-S15 et S17-S18 se jouent
+avec la session de Neegan lue par `read -rs JETON` (README, étape 10, point 4 ; jamais le jeton dans une commande) ; S16 sans jeton.
+
+| Sonde | Requête | Statut attendu | Statut obtenu | Ce que ça prouve |
+| --- | --- | --- | --- | --- |
+| S13 | `{ outil: 'lecture-web', corps: { url: 'http://exemple.test/' } }` | 422 `interdit` | 422 `interdit` (307 ms) | refus avant toute réservation (`assistant_usage_jour` inchangé) |
+| S14 | `https://127.0.0.1/` | 422 `interdit` | 422 `interdit` (155 ms) | adresse IP refusée |
+| S15 | `https://localhost/` | 422 `interdit` | 422 `interdit` (263 ms) | hôte local refusé |
+| S16 | sans jeton | 401 `non_connecte` | 401 `non_connecte` (sans jeton, 94 ms) | la session d'abord |
+| S17 | une adresse `https` en 301 / 302 vers une page à JSON-LD `Recipe` complet (vérifiée d'abord sans la fonction : `curl -sI -A 'Mitsu/0.10 (+https://neegans.github.io/mistu/)'`, puis `curl -s` sur la cible) | 200 `jsonld`, `usage` 0 / 0 — ou un refus propre et nommé | 200 `source_kind: jsonld`, `usage` 0 / 0, `page.url_finale` = la page `www`, recette « Pâtes à la sauce puttanesca » lue (10 ingrédients, étapes) ; 658 ms. Adresse envoyée : `https://ricardocuisine.com/recettes/6309-pates-a-la-sauce-puttanesca` (301 vers `www.ricardocuisine.com`, vérifié d'abord par `curl -sI` avec le `User-Agent` de la fonction ; la cible porte un JSON-LD `Recipe` complet) | `redirect: 'manual'` sous le runtime : lecture `jsonld` sans appel au modèle, `page.url_finale` ≠ l'adresse envoyée ; opaque (502 `inaccessible` sur une chaîne que `curl` suit) → ronde sur `telechargerPage` avant la fusion |
+| S18 | une adresse publique en `https` qui redirige vers `http://` | 422 `interdit` | 422 `interdit` (430 ms). Adresse : `https://httpbin.org/redirect-to?url=http%3A%2F%2Fexample.com%2F` (302 vers `http://example.com/`, vérifié d'abord par `curl -sI`) | la cible d'une redirection est revalidée (« non mesurée » si aucun hôte connu) |
+| S19 | `https://ybdooerfeziiabsbfxtb.functions.supabase.co/` | 422 `interdit` | 422 `interdit` (176 ms) | l'alias de la fonction est refusé avant toute réservation (R-B-23, ronde finale 2 `51bad50`) |
+
+## Sondes `image-web` — jouées le 23 octobre 2026 sur la version 4 (5 sur 5 conformes)
+
+Lot F « Les plats en images » (spec `docs/superpowers/specs/2026-10-19-plats-en-images-design.md` § 10, pas 2) : même version 4, même session et
+mêmes conditions que les sondes `lecture-web` ci-dessus, le même jour (20 h 25 à 20 h 35 UTC). S-F1 à S-F3 ne dépensent rien (elles s'arrêtent
+avant la réservation) ; S-F4 et S-F5 coûtent un appel du quota chacune, zéro jeton (la fonction télécharge l'image elle-même, aucun appel au
+modèle). Cible de S-F4 vérifiée d'abord sans la fonction (`curl -sI` : `content-type: image/jpeg`, `content-length: 171503`, sous les 2 Mio,
+R-F-4) ; aucun 403 anti-hotlink rencontré (D-F3 : rien à contourner).
+
+| Sonde | Requête | Statut attendu | Statut obtenu | Ce que ça prouve |
+| --- | --- | --- | --- | --- |
+| S-F1 | `{ outil: 'image-web', corps: { url: 'http://exemple.test/i.jpg' } }` | 422 `interdit` | 422 `interdit` (219 ms) | refus avant toute réservation |
+| S-F2 | `https://127.0.0.1/i.jpg` | 422 `interdit` | 422 `interdit` (383 ms) | adresse IP refusée |
+| S-F3 | sans jeton | 401 `non_connecte` | 401 `non_connecte` (148 ms) | la session d'abord |
+| S-F4 | l'image de la recette Ricardo de S17 : `https://images.ricardocuisine.com/services/recipes/1x1/6309-v2.jpg` | 200, `type` et `taille` conformes, `Buffer.from(octets, 'base64').length === taille` | 200 `type: image/jpeg`, `taille` 171 503, `url_finale` = l'adresse envoyée, base64 décodé = 171 503 octets (cohérent) ; 676 ms | la fonction télécharge l'image, la borne et la rend telle quelle, sans appel au modèle |
+| S-F5 | la page HTML de la même recette (`https://www.ricardocuisine.com/recettes/6309-pates-a-la-sauce-puttanesca`) | 422 `pas_une_image` | 422 `pas_une_image` (406 ms) | une page n'est pas une image |
+
+Attendu dans `public.assistant_journal` (à lire par Neegan dans l'éditeur SQL, non fait par le contrôleur) : deux lignes `lecture-web` (S17 en 200,
+S18 en 422) et deux lignes `image-web` (S-F4 en 200, S-F5 en 422), jetons `null` ; `assistant_usage_jour` du 23 octobre : 4 appels de plus.

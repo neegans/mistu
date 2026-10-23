@@ -545,6 +545,9 @@ test('README : etape 8 bis (0003 et sa preuve) et procedure « appareil perdu ou
 // prouve par les sondes du deploiement (README, etape 10), pas ici.
 import { OUTILS as OUTILS_PASSERELLE } from '../supabase/functions/assistant/logique.js';
 const FONCTION = 'supabase/functions/assistant';
+// F-2 (lot B) : 0004 est APPLIQUÉE et figée ; sa liste d'outils est un littéral (comme SYNC_STORES_0001). OUTILS ne fait que croître : ses trois
+// premiers sont ceux de 0004 ; le quatrième (lecture-web) entre par 0006.
+const OUTILS_0004 = ['recherche-web', 'creation', 'extraction'];
 
 test('0004 : une transaction a ajout seul, journal de compteurs sans contenu, RLS sans regle, aucun privilege client', () => {
   const m = lire('supabase/migrations/0004_assistant_journal.sql');
@@ -563,8 +566,9 @@ test('0004 : une transaction a ajout seul, journal de compteurs sans contenu, RL
   const bloc = code.slice(code.indexOf('create table public.assistant_journal ('), code.indexOf('\n);', code.indexOf('create table public.assistant_journal (')));
   assert.equal((bloc.match(/\btext\b/g) || []).length, 1, 'une seule colonne texte dans la table : l outil');
   assert.doesNotMatch(code, /\b(jsonb?|bytea|varchar|char)\b/);
-  // La liste blanche des outils du journal est celle de la logique pure.
-  assert.ok(code.includes(`check (outil in (${OUTILS_PASSERELLE.map((o) => `'${o}'`).join(', ')}))`), 'outils du journal = OUTILS');
+  // La liste blanche des outils du journal est celle de 0004, figée ; OUTILS la prolonge sans la changer (F-2).
+  assert.ok(code.includes(`check (outil in (${OUTILS_0004.map((o) => `'${o}'`).join(', ')}))`), 'outils du journal de 0004 = OUTILS_0004');
+  assert.deepEqual(OUTILS_PASSERELLE.slice(0, 3), OUTILS_0004, 'OUTILS commence par les trois outils de 0004');
   // RLS activee SANS aucune regle, et plus aucun privilege pour les roles clients (table, sequence, vue).
   assert.doesNotMatch(code, /create policy/);
   assert.ok(code.includes('alter table public.assistant_journal enable row level security;'));
@@ -672,10 +676,10 @@ test('preuve 0004 : rollback final, BILAN, aucune adresse ni jeton, privileges e
 test('index.ts : imports fermes, deno.json epingle, aucune cle ni journal de console, gardes dans l ordre', () => {
   const src = lire(`${FONCTION}/index.ts`);
   const code = sansCommentaires(src);
-  // Imports : exactement deux, ./logique.js et le specificateur nu resolu par deno.json.
-  assert.equal((code.match(/^\s*import\b/gm) || []).length, 2, 'deux imports');
+  // Imports : exactement trois (lot B), ./logique.js, ./lecture-web.js et le specificateur nu resolu par deno.json.
+  assert.equal((code.match(/^\s*import\b/gm) || []).length, 3, 'trois imports');
   const specs = [...code.matchAll(/^\s*import\s[^;]*?\sfrom\s+(['"])([^'"]+)\1/gm)].map((m) => m[2]).sort();
-  assert.deepEqual(specs, ['./logique.js', '@supabase/supabase-js']);
+  assert.deepEqual(specs, ['./lecture-web.js', './logique.js', '@supabase/supabase-js']);
   const importes = (code.match(/import \{([^}]*)\} from '\.\/logique\.js'/) || [])[1] || '';
   assert.ok(importes.includes('lireDemande'), 'lireDemande importee');
   assert.ok(!/\bdecisionQuota\b/.test(code), 'decisionQuota reste dans logique.js, plus dans index.ts');
@@ -691,7 +695,12 @@ test('index.ts : imports fermes, deno.json epingle, aucune cle ni journal de con
   assert.doesNotMatch(src, /\bconsole\s*\./, 'aucun journal du tout');
   assert.equal((code.match(/ANTHROPIC_API_KEY/g) || []).length, 1, 'la cle n est lue qu une fois : dans l en-tete x-api-key');
   assert.ok(code.includes("'x-api-key': env('ANTHROPIC_API_KEY')"));
-  assert.ok(code.includes("redirect: 'error'"));
+  assert.ok(code.includes("redirect: 'error'"), 'Anthropic : redirect error');
+  // Lot B (D-B1, S-12, I-B8) : la page est demandée sans suivre les redirections (chacune est revalidée), sans identité, avec un User-Agent qui
+  // nomme Mitsu ; la vérification TLS n'est jamais relâchée (aucun client HTTP sur mesure).
+  assert.ok(code.includes("redirect: 'manual'") && code.includes("credentials: 'omit'"), 'la page : redirect manual, credentials omit');
+  assert.ok(code.includes("'user-agent': 'Mitsu/"), 'User-Agent nomme Mitsu');
+  assert.doesNotMatch(code, /Deno\.createHttpClient|caCerts/, 'TLS jamais relache');
   assert.ok(code.includes("'anthropic-version': '2023-06-01'"));
   assert.ok(code.includes('LIMITES.attenteMs'), 'delai de 120 s');
   // Octets : la taille en OCTETS du corps lu (pas les unites UTF-16 du texte), a la lecture et au journal.
@@ -717,14 +726,45 @@ test('index.ts : imports fermes, deno.json epingle, aucune cle ni journal de con
   assert.ok(code.includes('maxTokens: LIMITES.maxTokens'));
   assert.equal((code.match(/maintenant: new Date\(\)\.toISOString\(\)/g) || []).length, 1, 'la mise a jour (la reservation est en SQL)');
   // Les raisons de lireDemande rejoignent la liste fermee de l'erreur HTTP.
-  assert.ok(code.includes("lu.raison === 'trop_lourd' ? 'trop_lourd' : lu.raison === 'bornes' ? 'bornes' : lu.raison === 'serveur' ? 'serveur' : 'requete'"));
+  assert.ok(code.includes("lu.raison === 'trop_lourd' ? 'trop_lourd' : lu.raison === 'bornes' ? 'bornes' : lu.raison === 'serveur' ? 'serveur' : lu.raison === 'interdit' ? 'interdit' : 'requete'"), 'interdit rejoint la liste fermee (lot B)');
   assert.ok(code.includes('json(lu.statut,'));
-  // Ordre des gardes (spec § 5) : OPTIONS, origine, methode, session, liste admise, GET, corps, quota, reservation, Anthropic, mise a jour.
-  const ordre = ["req.method === 'OPTIONS'", 'origineAdmise(origine, admises)', "req.method !== 'POST'", 'auth.getUser(jeton)', "rpc('is_allowed')", "req.method === 'GET'", 'await lireCorpsBorne(req,', 'lireDemande(texte', ".rpc('assistant_reserver'", 'await fetch(ANTHROPIC', '.update('];
-  const pos = ordre.map((s) => code.indexOf(s));
-  assert.ok(pos.every((x) => x !== -1), 'toutes les gardes presentes : ' + pos.join(','));
-  assert.deepEqual([...pos].sort((a, b) => a - b), pos, 'gardes dans l ordre de la spec');
-  assert.equal((code.match(/await fetch\(/g) || []).length, 1, 'un seul appel sortant');
+  // Ordre du flux (lot B, N-1) : épinglé par les POINTS D'APPEL de traiter(), jamais par la place des déclarations — gardes, réservation,
+  // téléchargement de la page, lecture de la page, appel au modèle (en repli seulement), mise à jour du journal. Les déclarations
+  // (async function telechargerPage(, async function appelerAnthropic() et le cast local de lirePageHtml ne portent aucun de ces marqueurs.
+  assert.deepEqual(ordreDuFlux(code), { presents: true, croissants: true }, 'gardes, reservation, telechargement, lecture, modele, journal : dans cet ordre');
+  for (const m of ['await fetch(ANTHROPIC', "redirect: 'manual'", "redirect: 'error'", 'async function telechargerPage(', 'async function appelerAnthropic(']) assert.ok(code.includes(m), m);
+  assert.equal((code.match(/await fetch\(/g) || []).length, 2, 'deux appels sortants : la page dans telechargerPage, Anthropic dans appelerAnthropic');
+  assert.ok(code.includes('await fetch(courant, {') && code.includes('await fetch(ANTHROPIC, {'), 'les deux appels sortants nommes');
+});
+// Les marqueurs du flux de traiter() (N-1) et leur ordre : présents ET strictement croissants. Exportée en fonction pour rejouer le mutant
+// « réservation après le téléchargement » et le témoin « appelerAnthropic déclarée avant traiter » sur un texte modifié.
+const ORDRE_DU_FLUX = ["req.method === 'OPTIONS'", 'origineAdmise(origine, admises)', "req.method !== 'POST'", 'auth.getUser(jeton)', "rpc('is_allowed')",
+  "req.method === 'GET'", 'await lireCorpsBorne(req,', 'lireDemande(texte', ".rpc('assistant_reserver'", 'await telechargerPage(', 'lirePageHtml(', 'await appelerAnthropic(', '.update('];
+function ordreDuFlux(code) {
+  const pos = ORDRE_DU_FLUX.map((s) => code.indexOf(s));
+  return { presents: pos.every((x) => x !== -1), croissants: pos.every((x, i) => i === 0 || x > pos[i - 1]) };
+}
+test('index.ts (N-1) : le test d ordre tient par les points d appel — mutant « reservation apres le telechargement » rouge, temoin « declarations deplacees » vert', () => {
+  const code = sansCommentaires(lire(`${FONCTION}/index.ts`));
+  for (const nom of ['async function telechargerPage(', 'async function appelerAnthropic(']) {
+    const debut = code.indexOf(nom); const corps = code.slice(debut, code.indexOf('\n}\n', debut));
+    assert.ok(!/await (telechargerPage|appelerAnthropic)\(/.test(corps) && !corps.includes('lirePageHtml('), nom + ' ne porte aucun marqueur du flux');
+  }
+  const ligneImport = code.split('\n').find((l) => l.includes("from './lecture-web.js'")) || '';
+  const cast = code.split('\n').find((l) => l.startsWith('const lirePageHtml = ')) || '';
+  assert.ok(ligneImport && cast && !ligneImport.includes('lirePageHtml(') && !cast.includes('lirePageHtml('), 'ni l import ni le cast ne portent lirePageHtml(');
+  // Mutant : la réservation déplacée sous le téléchargement → l'ordre casse.
+  const reservation = code.slice(code.indexOf('  const { data: idReserve'), code.indexOf('\n', code.indexOf('  const { data: idReserve')) + 1);
+  const apres = code.indexOf('\n', code.indexOf('await telechargerPage(')) + 1;
+  const mutant = code.replace(reservation, '').slice(0, apres - reservation.length) + reservation + code.replace(reservation, '').slice(apres - reservation.length);
+  assert.ok(mutant.indexOf(".rpc('assistant_reserver'") > mutant.indexOf('await telechargerPage('), 'le mutant porte bien la reservation sous le telechargement');
+  assert.deepEqual(ordreDuFlux(mutant), { presents: true, croissants: false }, 'mutant « reservation apres le telechargement » : rouge');
+  // Témoin : appelerAnthropic et telechargerPage déclarées AVANT traiter (elles le sont) ou APRÈS : le test reste vert.
+  const decl = (nom) => { const d = code.indexOf(nom); return code.slice(d, code.indexOf('\n}\n', d) + 3); };
+  const deplacees = [decl('async function telechargerPage('), decl('async function appelerAnthropic(')];
+  let temoin = code; for (const d of deplacees) temoin = temoin.replace(d, '');
+  temoin = temoin + '\n' + deplacees.join('\n');
+  assert.deepEqual(ordreDuFlux(temoin), { presents: true, croissants: true }, 'temoin : les declarations peuvent etre n importe ou');
 });
 test('deno.d.ts : declarations minimales pour tsc, jamais importees', () => {
   const d = lire(`${FONCTION}/deno.d.ts`);
@@ -1130,4 +1170,95 @@ test('RESULTATS-mitsu : section « Preuve 0005_imports.sql — à jouer » prepa
   for (const m of ['étape 11', 'migrations/0005_imports.sql', 'shasum -a 256 supabase/migrations/0005_imports.sql', "notify pgrst, 'reload schema';", 'Run without RLS', '999 BILAN', 'A_EMAIL', 'A_UUID', '| ordre | etape | attendu | obtenu | ok |']) assert.ok(section.includes(m), m);
   assert.doesNotMatch(res, /sk-(?!…)[A-Za-z0-9_-]{4,}/, 'aucune cle dans RESULTATS');
   assert.doesNotMatch(section, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i, 'aucune adresse');
+});
+
+// --- Lot B « Recette web complète » (spec 2026-10-19-recette-web § 3.7, § 6.4, D-B11, D-B23) : 0006 écrite à la main, sa preuve, le README,
+// RESULTATS et le commentaire du générateur. 0006 est hors de NOMS et de --check, comme 0004.
+// R-B-6 (= R-F-1 du lot F) : la contrainte de 0006 porte CINQ valeurs, figées en littéral comme OUTILS_0004 ; la cinquième, image-web, sert le lot F
+// (qui n'écrira aucune migration). OUTILS (logique.js) en porte quatre : une valeur admise de plus dans un check est inoffensive tant qu'OUTILS ne la porte pas.
+const OUTILS_0006 = ['recherche-web', 'creation', 'extraction', 'lecture-web', 'image-web'];
+test('0006 : hors NOMS, une transaction, 4 instructions — drop puis add de la contrainte, avec les cinq valeurs d OUTILS_0006 dans l ordre ; rien d autre', () => {
+  assert.ok(!NOMS.some((n) => n.startsWith('0006')), '0006 n est pas generee');
+  const m = lire('supabase/migrations/0006_lecture_web.sql');
+  const code = sansCommentaires(m);
+  const l = instructions(code);
+  assert.deepEqual(l, ['begin;', 'alter table public.assistant_journal drop constraint assistant_journal_outil_check;',
+    `alter table public.assistant_journal add constraint assistant_journal_outil_check check (outil in (${OUTILS_0006.map((o) => `'${o}'`).join(', ')}));`, 'commit;'],
+    'quatre instructions ; la liste SQL est le litteral OUTILS_0006 (cinq valeurs, image-web pour le lot F)');
+  assert.deepEqual(OUTILS_PASSERELLE, OUTILS_0006.slice(0, 4), 'test croise : OUTILS (quatre outils du lot B) = les quatre premieres valeurs de OUTILS_0006');
+  assert.doesNotMatch(code, /\b(create|grant|revoke|insert|update|delete|truncate)\b/, 'ni table, ni fonction, ni privilege, ni donnee');
+  assert.equal(code, code.toLowerCase(), 'SQL en minuscules');
+  assert.ok(m.includes('de colonne') && m.includes('23514') && m.includes('502'), 'l en-tete dit pourquoi (check de colonne de 0004, 23514, 502)');
+  assert.doesNotMatch(m, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i, 'aucune adresse'); assert.ok(!m.includes('sk-'), 'aucune cle');
+});
+test('preuve 0006 : rollback final, une transaction, BILAN, gardes, verdicts nommes, aucune adresse ni jeton', () => {
+  const p = lire('supabase/proofs/0006_lecture_web.sql');
+  const code = sansCommentaires(p);
+  const l = instructions(code);
+  assert.equal(l[l.length - 1], 'rollback;', 'rollback dernier');
+  assert.equal(l.filter((x) => x === 'begin;').length, 1, 'une seule transaction');
+  assert.match(code, /select 999,\s*'BILAN'/);
+  for (const n of ['1.01', '1.02', '1.03', '1.04', '1.05', '2.01', '2.02', '2.03', '2.031', '3.01']) assert.ok(code.includes(`${n},`), 'verdict ' + n);
+  for (const m of ['pg_get_constraintdef', "'23514'", 'public.assistant_reserver(uid, \'lecture-web\', 1, c::integer + 1)', "'lecture-web'", "'aucun compte : etape sautee'", 'security_invoker=true',
+    'les cinq outils, dans l ordre d OUTILS_0006', "public.assistant_reserver(uid, 'image-web', 1, c::integer + 1)", "'image-web'", "2.03 bis : assistant_reserver(uid, ''image-web'', 1, c + 1) -> id non nul",
+    "conname = 'assistant_journal_outil_check'", "string_agg(conname, ', ')", "contype = 'c'"]) assert.ok(code.includes(m), m);
+  for (const outil of OUTILS_0006) assert.ok(code.includes(`'''${outil}'''`), '1.01 cherche ' + outil);
+  // Ronde 1 (spec § 6.4) : c RECOMPTÉ entre 2.03 et l'appel image-web (sinon le quota c + 1 est atteint par la ligne de 2.03 : faux rouge) ; chaque
+  // appel d'assistant_reserver dans un bloc exception, comme 2.01 et 2.02 (une 0006 collée sans image-web : 2.031 rend 23514 en verdict lisible au
+  // BILAN, au lieu d'annuler le collage entier) ; les verdicts 2.03 et 2.031 portent sur l'id rendu.
+  const plat = code.replace(/\s+/g, ' ');
+  const entre = plat.slice(plat.lastIndexOf("(2.03, 'assistant_reserver accepte"), plat.indexOf("r := public.assistant_reserver(uid, 'image-web'"));
+  assert.ok(entre.includes("select count(*) into c from public.assistant_journal where owner_id = uid and jour = (now() at time zone 'utc')::date;"), 'c RECOMPTE entre 2.03 et 2.031');
+  for (const outil of ['lecture-web', 'image-web']) {
+    assert.ok(plat.includes(`begin r := public.assistant_reserver(uid, '${outil}', 1, c::integer + 1); v := case when r is null then 'null' else 'id non nul' end; exception when others then v := sqlstate; end;`), outil + ' : appel dans un bloc exception');
+  }
+  assert.ok(plat.includes("(2.03, 'assistant_reserver accepte lecture-web : un id non nul', 'id non nul', v, v = 'id non nul');"), 'verdict 2.03 sur l id');
+  assert.ok(plat.includes("(2.031, '2.03 bis : assistant_reserver(uid, ''image-web'', 1, c + 1) -> id non nul (la valeur du lot F)', 'id non nul', v, v = 'id non nul');"), 'verdict 2.031 sur l id');
+  assert.ok(!p.includes('@'), 'aucun arobase'); assert.doesNotMatch(p, /A_UUID|B_UUID|A_EMAIL|B_EMAIL/, 'aucun jeton a remplacer');
+  assert.doesNotMatch(code, /\bemail\b/i, 'aucune adresse lue'); assert.ok(!p.includes('sk-'), 'aucune cle');
+  assert.ok(code.includes('from auth.users order by created_at limit 1'), 'compte emprunte, jamais affiche');
+});
+test('README : etape 12 (0006, preuve, ordre 0006 → redeploiement → sondes → fusion → push, la phrase du 502) entre 11 et « Où coller les sorties »', () => {
+  const r = lire('supabase/README.md');
+  const titre = '### 12. Coller `0006_lecture_web.sql`, puis jouer sa preuve';
+  const debut = r.indexOf(titre);
+  assert.notEqual(debut, -1, 'etape 12');
+  assert.ok(r.indexOf('### 11. Coller `0005_imports.sql`') < debut && debut < r.indexOf('## Où coller les sorties'), '12 apres 11, avant « Où coller les sorties »');
+  const etape = rubrique(r, titre).replace(/\s+/g, ' '); // les retours à la ligne du Markdown ne comptent pas
+  for (const m of ['migrations/0006_lecture_web.sql', 'proofs/0006_lecture_web.sql', 'Run without RLS', '999 BILAN', 'RESULTATS-mitsu.md',
+    'un code servi avant `0006` : chaque lecture web répond 502 `serveur` (la réservation refuse l\'outil), rien d\'autre ne change.',
+    'supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api', 'S13', 'S17', 'Facultatif',
+    'la contrainte admet aussi `image-web` (lot F, à venir)', '2.03 bis', 'JSON-LD `Recipe` complet', 'ronde sur `telechargerPage`']) assert.ok(etape.includes(m), m);
+  // Ronde 1 (spec § 10, 2 et 2 bis) : les neuf sondes S1-S9 nommées là où elles vivent ; la session lue par `read -rs JETON` ; S17 vérifiée par
+  // `curl -sI` avec LE User-Agent de la fonction (relu dans index.ts : un site qui redirige selon l'agent montrerait autre chose à curl).
+  const ua = (sansCommentaires(lire(`${FONCTION}/index.ts`)).match(/'user-agent': '([^']+)'/) || [])[1];
+  assert.ok(ua && ua.startsWith('Mitsu/'), 'User-Agent relu dans index.ts');
+  for (const m of ['S1-S9 du lot 4', 'section « Passerelle `assistant` »', 'read -rs JETON', `curl -sI -A '${ua}'`]) assert.ok(etape.includes(m), m);
+  const i = ['migrations/0006_lecture_web.sql', 'proofs/0006_lecture_web.sql', 'supabase functions deploy assistant', 'S13', 'S17', 'fusion', '`push`'].map((m) => etape.lastIndexOf(m) === -1 ? -1 : etape.indexOf(m));
+  assert.ok(i.every((x) => x !== -1), 'gestes presents : ' + i.join(','));
+  assert.deepEqual([...i].sort((a, b) => a - b), i, 'dans l ordre : ' + i.join(','));
+  const arbre = r.slice(0, r.indexOf('## Un seul projet'));
+  for (const f of ['migrations/0006_lecture_web.sql', 'proofs/0006_lecture_web.sql', 'lecture-web.js']) assert.ok(arbre.includes(f), 'arbre : ' + f);
+  assert.ok(arbre.replace(/\s+/g, ' ').includes('deux écrites à la main (`0004`, `0006`)'), 'intro : deux ecrites a la main');
+  assert.doesNotMatch(etape, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+});
+test('RESULTATS-mitsu : sections « Preuve 0006_lecture_web.sql — à jouer » et « Sondes lecture-web » preparees, sans cle ni adresse', () => {
+  const res = lire('supabase/proofs/RESULTATS-mitsu.md');
+  const debut = res.indexOf('## Preuve `0006_lecture_web.sql` — ');
+  assert.notEqual(debut, -1, 'section 0006');
+  assert.ok(debut > res.indexOf('## Preuve `0005_imports.sql` — '), 'apres la section 0005');
+  const section = res.slice(debut);
+  for (const m of ['étape 12', 'migrations/0006_lecture_web.sql', 'Run without RLS', '999 BILAN', '| ordre | etape | attendu | obtenu | ok |', '## Sondes `lecture-web`', 'S13', 'S14', 'S15', 'S16', 'S17', 'S18',
+    '2.03 bis', '`image-web`', 'JSON-LD `Recipe` complet', 'sans dépense Anthropic']) assert.ok(section.includes(m), m);
+  // Ronde 1 : la session des sondes et le User-Agent de S17, comme au README ; et aucune ligne vide en fin de fichier (`git diff --check`).
+  const ua = (sansCommentaires(lire(`${FONCTION}/index.ts`)).match(/'user-agent': '([^']+)'/) || [])[1];
+  for (const m of ['read -rs JETON', `curl -sI -A '${ua}'`]) assert.ok(section.includes(m), m);
+  assert.ok(res.endsWith('\n') && !res.endsWith('\n\n'), 'une seule fin de ligne en fin de fichier');
+  assert.doesNotMatch(section, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i, 'aucune adresse');
+  assert.doesNotMatch(res, /sk-(?!…)[A-Za-z0-9_-]{4,}/, 'aucune cle');
+});
+test('generateur (D-B11) : le commentaire dit « la 0007 à venir » ; plus aucune « 0006 » a generer', () => {
+  const g = lire('tools/generer-migrations.mjs');
+  assert.ok(g.includes('la 0007 à venir'), 'la prochaine migration generee est 0007');
+  assert.doesNotMatch(g, /la 0006 à venir|dans une 0006 \(/, 'aucune 0006 promise par le generateur');
 });

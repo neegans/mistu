@@ -9,7 +9,7 @@ import { nettoyerChaines, porteDesCaracteresDeControle } from '../sync/lots.js';
 import { resolveMime } from '../sync/mime.js';
 import { normaliserConfigAssistant, LIGNE_ASSISTANT } from '../domain/assistant-config.js';
 import { assertVocabulaire } from '../domain/vocabulaire.js';
-import { IMPORTS_OUVERTS, KINDS_IMPORT } from '../domain/import-cible.js'; // une définition (tâche 6, ronde 1) : I-2 et les sortes que ce lot écrit
+import { IMPORTS_OUVERTS, KINDS_PAGES } from '../domain/import-cible.js'; // une définition (lot A, tâche 6, ronde 1) : I-2 et les sortes que le chemin photo écrit (lot B : « web » exclue, P-1)
 import { sha256Hex } from '../core/hash.js';
 import { t } from '../core/i18n.js';
 
@@ -528,7 +528,7 @@ function nouvelleLigneImport({ id, kind, recipe_id = null, edition_id = null, sc
 // recette, recipe_id null : « Regrouper en recette ») et « Lire avec l'assistant IA » du panneau d'index (kind index). Aucun octet, aucune séance
 // écrite : la ligne seule, a_lancer, par un saveBatch CONDITIONNÉ (même mur que la première photo de l'écran ciblé). Rend la ligne écrite.
 export async function ouvrirImport({ id = newId('imp'), kind, recipe_id = null, edition_id = null, scan_session_id = null, page_ids = [] } = {}) {
-  if (!KINDS_IMPORT.includes(kind)) throw new TypeError('ouvrirImport : kind d’import inconnu (' + String(kind) + ')');
+  if (!KINDS_PAGES.includes(kind)) throw new TypeError('ouvrirImport : kind d’import inconnu (' + String(kind) + ')');
   if (!Array.isArray(page_ids) || page_ids.some((p) => typeof p !== 'string' || !p)) throw new TypeError('ouvrirImport : page_ids doit être une liste d’identifiants');
   const { ligne, conditions } = nouvelleLigneImport({ id, kind, recipe_id, edition_id, scan_session_id, page_ids });
   const ecrit = await saveBatch({ imports: [ligne] }, { conditions });
@@ -536,7 +536,7 @@ export async function ouvrirImport({ id = newId('imp'), kind, recipe_id = null, 
 }
 export async function ajouterPages(files, { edition_id = null, session_id = null, import_id = null, import: nouvelImport = null } = {}) {
   if (import_id && nouvelImport) throw new TypeError('ajouterPages : import_id et import ne se donnent pas ensemble');
-  if (nouvelImport && !KINDS_IMPORT.includes(nouvelImport.kind)) throw new TypeError('ajouterPages : kind d’import inconnu (' + String(nouvelImport.kind) + ')');
+  if (nouvelImport && !KINDS_PAGES.includes(nouvelImport.kind)) throw new TypeError('ajouterPages : kind d’import inconnu (' + String(nouvelImport.kind) + ')');
   // Vague finale (Important, « Relire les pages ») : `import.page_ids` = les pages DÉJÀ liées à la recette (celles de sa version courante), placées en
   // tête de la ligne neuve, dans leur ordre ; les photos du geste suivent. Sans elles, une relecture d'une fiche partial ne lisait que la page neuve.
   const deja = nouvelImport?.page_ids ?? [];
@@ -544,6 +544,8 @@ export async function ajouterPages(files, { edition_id = null, session_id = null
   if (import_id) {
     const lue = await db.get('imports', import_id);
     if (!lue || !ATTENDUS_AJOUT.includes(lue.status)) throw new TransitionRefusee('imports', import_id, lue?.status);
+    // P-1 (lot B, ronde 1 de la tâche 6) : une lecture web ne reçoit jamais de pages (page_ids: [] toujours) — refus avant tout octet, comme à l'ouverture.
+    if (!KINDS_PAGES.includes(lue.kind)) throw new TypeError('ajouterPages : l’import ' + import_id + ' n’est pas une lecture de pages (' + String(lue.kind) + ')');
     if (session_id && lue.scan_session_id && lue.scan_session_id !== session_id) throw new TypeError('ajouterPages : l’import ' + import_id + ' pointe la séance ' + String(lue.scan_session_id) + ', pas ' + String(session_id));
     session_id = session_id ?? lue.scan_session_id ?? null;
   }

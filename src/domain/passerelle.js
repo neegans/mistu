@@ -19,7 +19,10 @@ export const LIMITES_PASSERELLE = { tentativeMs: 135000, etatMs: 15000, corps: 2
 // Le champ `erreur` d'une réponse de la passerelle (T2) ramené aux raisons connues de l'app (lu par Object.hasOwn : « constructor »
 // n'est pas une raison). Une origine refusée (F-6) est une PANNE DE CONFIGURATION — la passerelle n'admet pas ce site —, pas un compte
 // refusé : `serveur`, jamais « Ce compte n'a pas accès » ; une méthode ou des bornes refusées sont une requête refusée.
-const RAISON_DE_ERREUR = { non_connecte: 'non_connecte', non_admis: 'non_admis', origine: 'serveur', methode: 'requete', requete: 'requete', trop_lourd: 'trop_lourd', bornes: 'requete', quota: 'quota', serveur: 'serveur', delai: 'delai' };
+// Lot B (D-B14) : les refus de l'outil lecture-web ont leur raison à eux ; `trop_lourde` (la PAGE) devient page_trop_lourde — jamais confondue avec
+// `trop_lourd` (la demande) — et `vide` (la page sans texte) devient page_vide — jamais le `vide` d'une extraction (zéro ligne et zéro étape).
+const RAISON_DE_ERREUR = { non_connecte: 'non_connecte', non_admis: 'non_admis', origine: 'serveur', methode: 'requete', requete: 'requete', trop_lourd: 'trop_lourd', bornes: 'requete', quota: 'quota', serveur: 'serveur', delai: 'delai',
+  interdit: 'interdit', inaccessible: 'inaccessible', pas_une_page: 'pas_une_page', trop_lourde: 'page_trop_lourde', vide: 'page_vide' };
 
 export function urlAssistant(config = currentConfig()) {
   const base = typeof config?.url === 'string' ? config.url.replace(/\/+$/, '') : '';
@@ -115,7 +118,7 @@ async function echanger({ methode, corps = null, fetch: f = globalThis.fetch, se
 export function echecDomaine({ raison, quota = null, ecrite = false } = {}) {
   if (raison === 'quota') return ecrite ? { raison: 'quota', extra: { quota } } : { raison: 'trop_de_demandes', extra: {} };
   if (raison === 'trop_lourd') return { raison: 'requete', extra: { trop_lourd: true } };
-  if (['non_connecte', 'non_admis', 'requete', 'serveur', 'delai', 'reseau', 'annule', 'reponse_illisible'].includes(raison)) return { raison, extra: {} };
+  if (['non_connecte', 'non_admis', 'requete', 'serveur', 'delai', 'reseau', 'annule', 'reponse_illisible', 'interdit', 'inaccessible', 'pas_une_page', 'page_trop_lourde', 'page_vide'].includes(raison)) return { raison, extra: {} };
   return { raison: 'interne', extra: {} };
 }
 

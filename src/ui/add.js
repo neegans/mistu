@@ -1,7 +1,8 @@
 // Ajouter (spec UX § 4, § 10) : une grille de six cartes (dont « Créer avec l'IA », qui ouvre #/recipes/creer — spec de création § 3.1),
 // et — avant un scan parti d'ici — la question « ces pages vont où ? ». Le formulaire « Ajouter un livre » vit dans livre-ajout.js
 // (#/add/livre), le signet dans signet.js (#/add/signet). Avant la grille, la section « Imports » (lot A « Importer une recette repérée »,
-// spec import-cible § 4.5, tâche 6) : ce qui est en cours, à reprendre ou en échec dans le journal, et les photos conservées d'une séance.
+// spec import-cible § 4.5, tâche 6) : ce qui est en cours, à reprendre ou en échec dans le journal, et les photos conservées d'une séance — et,
+// depuis le lot B (spec recette-web § 4.7), les lectures web (relancées et annulées par import-web.js).
 import { el, pickFiles, toast as toastDom, formatDate } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { navigate as naviguerDom } from '../core/router.js';
@@ -13,6 +14,7 @@ import { lignesImports, dateReception } from '../domain/import-cible.js';
 import { pageHeader, carte, libelleLivre, field, select } from './components.js';
 import { startScanSession } from './import.js';
 import { DOCUMENT_ID, lancerExtraction, annulerVol, phraseEchec, texteRefus, cleLecture } from './import-cible.js';
+import { lancerLecture, annulerLecture, texteEchecLecture } from './import-web.js';
 
 export const GRILLE_ACTIONS = ['ajouterLivre', 'pages', 'saisir', 'signet', 'creerIA', 'congelateur'];
 export const ACCEPT_PHOTOS = 'image/*';
@@ -81,12 +83,19 @@ function titreLigne(l) {
   if (l.titre.type === 'seance') return t('Photos conservées : {n} page(s)', { n: l.pages }) + (l.titre.livre ? ` · ${l.titre.livre}` : '');
   if (l.titre.type === 'index') return t('Index · {l}', { l: livre });
   if (l.titre.type === 'regrouper') return t('Recette à regrouper · {l}', { l: livre });
+  // Ronde 1 : le titre du signet (donnée reçue : ses Cf peuvent rester) est isolé dans un <bdi> — un U+202E n'y réordonne pas l'hôte recalculé (I-B5).
+  if (l.titre.type === 'web' && !l.referenceAbsente) return [el('bdi', null, l.titre.texte ?? t('Sans titre')), ` — ${l.titre.livre ? t('Lien web · {h}', { h: l.titre.livre }) : t('Lien web')}`];
   return l.referenceAbsente ? t('(référence pas encore reçue)') : (l.titre.texte ?? t('Sans titre'));
 }
 // L'état dit en clair ; `brute` : la ligne du journal (sa date et son erreur, avec le nombre du quota ou « trop lourd » — que la ligne du domaine ne
 // porte pas). I-4 : interrompu, annule et incertain disent la même phrase (phraseEchec, une définition avec l'écran ciblé, l'éditeur et le panneau).
 function etatLigne(l, brute) {
   if (l.kind === 'seance') return null;
+  if (l.kind === 'web') { // lot B : ni photos ni pages ; l'échec dit le texte de l'écran de lecture (texteEchecLecture, une définition, I-B6)
+    if (l.etat === 'a_lancer') return t('L’app n’a pas encore lu la page.');
+    if (l.etat === 'en_cours') return l.ailleurs ? t('En cours sur un autre écran') : t('Lecture de la page par l’assistant…');
+    if (l.etat === 'echec') { const { texte, code } = texteEchecLecture(brute?.erreur ?? { raison: l.raison }); return code ? `${texte} ${code}` : texte; }
+  }
   if (l.etat === 'a_lancer') return l.pages <= 1 ? t('{n} photo ajoutée', { n: l.pages }) : t('{n} photos ajoutées', { n: l.pages });
   if (l.etat === 'en_cours') return l.ailleurs ? t('En cours sur un autre écran') : t('Lecture des pages par l’assistant…');
   if (l.etat === 'a_verifier') return t('Lecture reçue le {d}', { d: formatDate(dateReception(brute), { withTime: true }) }); // vague finale (m7) : jamais updated_at
@@ -94,7 +103,13 @@ function etatLigne(l, brute) {
   return null;
 }
 const LIBELLES = { reprendre: () => t('Reprendre'), relancer: () => t('Relancer'), annuler: () => t('Annuler'), ignorer: () => t('Ignorer'), ouvrir_seance: () => t('Ouvrir la séance') };
-// Ce qu'un « Relancer » refusé dit : texteRefus (src/ui/import-cible.js, une définition) ; un refus sans phrase (ligne changée ailleurs) se voit au redessin.
+// Lot B (spec recette-web § 4.7) : pour une lecture web, le geste « relancer » s'appelle « Réessayer ».
+const libelle = (g, l) => (g === 'relancer' && l.kind === 'web' ? t('Réessayer') : LIBELLES[g]());
+// Le vol d'une ligne, par sorte (ronde 1) : une lecture web part et s'annule par import-web.js, une lecture de pages par import-cible.js (lot A). Les
+// deux « annuler » agissent sur LE vol partagé de vol.js (seuls l'étiquette du journal et les abonnés notifiés diffèrent : non observable ici).
+const volDe = (l) => (l.kind === 'web' ? { lancer: lancerLecture, annuler: annulerLecture } : { lancer: lancerExtraction, annuler: annulerVol });
+// Ce qu'un « Relancer » (ou « Réessayer ») refusé dit : texteRefus (src/ui/import-cible.js, une définition, le refus `interdit` d'une lecture
+// web compris) ; un refus sans phrase (ligne changée ailleurs) se voit au redessin.
 
 // La section : absente quand il n'y a rien ; sinon une ligne par import ouvert et par séance libre, avec ses gestes (.btn, ≥ 44 px). Le premier dessin
 // vient du contexte de la route (getData charge imports et scan_sessions : sans eux, la page ne lit aucune base) ; chaque écriture du journal ou des
@@ -115,7 +130,7 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
   const redessiner = () => { file = file.then(async () => dessiner(await lireBase())).catch((e) => logError('add.imports', { error: e })); return file; };
   async function agir(geste, l, brute) {
     if (geste === 'reprendre' || geste === 'ouvrir_seance') { if (l.cible) navigate(l.cible); return; }
-    if (geste === 'annuler') await annulerVol(l.id); // rien si ce document ne tient pas ce vol : le redessin dit l'état réel
+    if (geste === 'annuler') await volDe(l).annuler(l.id); // rien si ce document ne tient pas ce vol : le redessin dit l'état réel
     else if (geste === 'ignorer') {
       // « Ignorer » vaut pour LA lecture affichée (T4-R2, ronde 1) : une ligne relancée ailleurs depuis le dessin (autre lecture, autre départ) n'est pas
       // ignorée sans avoir été vue — le redessin la montre, et un second « Ignorer » vaudra pour elle.
@@ -125,7 +140,8 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
       catch (e) { if (!(e instanceof TransitionRefusee)) logError('add.ignorer', { error: e, id: l.id }); }
     } else if (geste === 'relancer') {
       // UN appel par le vol de l'écran ciblé (spec § 4.5) : aucune page ni séance n'est écrite ; la ligne s'arrête à a_verifier (« Reprendre » ensuite).
-      const r = await lancerExtraction(l.id, { ctx, repo, fetch, maintenant, battementMs });
+      // Lot B : une lecture web repart par lancerLecture (même forme de retour), aussi depuis une ligne d'un autre appareil (§ 4.7).
+      const r = await volDe(l).lancer(l.id, { ctx, repo, fetch, maintenant, battementMs });
       const dit = r.issue === 'refuse' ? texteRefus(r) : null;
       if (dit) toast(dit);
     }
@@ -136,8 +152,8 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
     return el('div', { class: 'card flat stack', dataset: { role: 'ligne-import', id: l.id } },
       el('div', { class: 'row between' }, el('strong', null, titreLigne(l)), el('span', { class: 'muted' }, ageTexte(l.age))),
       etat ? el('span', { class: l.etat === 'echec' ? 'status warn' : 'muted' }, etat) : null,
-      l.autreAppareil && l.kind !== 'seance' ? el('small', { class: 'muted' }, t('Photos sur un autre appareil')) : null,
-      l.gestes.length ? el('div', { class: 'row' }, ...l.gestes.map((g) => el('button', { type: 'button', class: g === 'reprendre' || g === 'ouvrir_seance' ? 'btn primary' : 'btn', dataset: { geste: g }, onClick: () => agir(g, l, brute) }, LIBELLES[g]()))) : null);
+      l.autreAppareil && l.kind !== 'seance' && l.kind !== 'web' ? el('small', { class: 'muted' }, t('Photos sur un autre appareil')) : null,
+      l.gestes.length ? el('div', { class: 'row' }, ...l.gestes.map((g) => el('button', { type: 'button', class: g === 'reprendre' || g === 'ouvrir_seance' ? 'btn primary' : 'btn', dataset: { geste: g }, onClick: () => agir(g, l, brute) }, libelle(g, l)))) : null);
   }
   function dessiner({ imports = [], scan_sessions = [], recipesById = ctx?.recipesById } = {}) {
     const brutes = new Map((Array.isArray(imports) ? imports : []).filter((i) => i && typeof i.id === 'string').map((i) => [i.id, i]));

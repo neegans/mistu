@@ -17,22 +17,23 @@ import { TransitionRefusee } from '../core/db.js';
 import { safeDisplayType } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
 import { PasserelleProvider, extraireRecette, extraireIndex, validateParsedRecipe, validerIndex, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION } from '../domain/llm.js';
-import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception } from '../domain/import-cible.js';
+import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception, cleLecture, modeleBorne } from '../domain/import-cible.js';
 import { getConvention } from '../domain/units.js';
 import { currentVersion } from '../domain/search.js';
 import { section, sessionAssistant, carteConnexion, texteEchecAssistant, TEXTE_CONNEXION } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { messageErreurImage } from './livre-ajout.js';
+import { DOCUMENT_ID, BATTEMENT_MS, prendreVol, libererVol as libererTenue, volEnCours, volTenu, reinitialiserVol } from './vol.js';
+import { renderImportWeb, texteEchecLecture } from './import-web.js'; // sens unique (D-B13) : import-web.js n'importe jamais ce module
 
 // --- État du module (I-7) ----------------------------------------------------------------------------------------------------------------------
-// Le document (onglet) : tiré à l'import du module, écrit dans imports.document_id_vol pendant un vol ; « Annuler » n'est offert que par lui.
-export const DOCUMENT_ID = crypto.randomUUID();
+// Le vol (DOCUMENT_ID, BATTEMENT_MS, la tenue) vit dans ./vol.js depuis le lot B (D-B13) : UN vol par document, partagé avec la lecture de page
+// web ; ré-exportés ici pour que l'API de l'écran ne change pas (tests/import-cible.js).
 // Le battement du vol (spec § 3.1) : toutes les 15 s, une ligne interne de sync_state est réécrite (repo.battre, origine device : jamais en file, la
 // ligne imports ne bouge pas — vague finale) ; au démarrage, une ligne en_cours dont le battement a plus de 90 s passe interrompu (tâche 6).
-export const BATTEMENT_MS = 15000;
+export { DOCUMENT_ID, BATTEMENT_MS, volEnCours };
 const ATTENDUS_PAGES = ['a_lancer', 'a_verifier', 'echec']; // les statuts qui acceptent des pages et une photo (spec § 3.6)
 const horloge = () => new Date().toISOString();
-let vol = null; // { importId, controller, repo } — UN vol par document ; posé AVANT tout await (double tape), libéré en finally
 const vues = new Set(); // { root, redessiner, majEnLigne } : les instances de l'écran, purgées par isConnected
 // En ligne / hors ligne (spec § 4.2.4) : le bouton suit les événements de la fenêtre, pas seulement navigator.onLine au rendu.
 let enLigneFlag = typeof navigator === 'undefined' ? true : navigator.onLine !== false;
@@ -40,14 +41,14 @@ if (typeof window !== 'undefined') {
   window.addEventListener('online', () => { enLigneFlag = true; majEnLigneToutes(); });
   window.addEventListener('offline', () => { enLigneFlag = false; majEnLigneToutes(); });
 }
-export const volEnCours = () => (vol ? { importId: vol.importId } : null);
-export function reinitialiserImportCible() { vol?.controller.abort(); vol = null; vues.clear(); enLigneFlag = typeof navigator === 'undefined' ? true : navigator.onLine !== false; } // tests seulement
+export function reinitialiserImportCible() { reinitialiserVol(); vues.clear(); enLigneFlag = typeof navigator === 'undefined' ? true : navigator.onLine !== false; } // tests seulement
 function notifier() { for (const v of [...vues]) { if (!v.root.isConnected) { vues.delete(v); continue; } v.redessiner(); } }
 // Vague finale (I-7 dans les deux sens) : une lecture HORS journal (« Extraire » de « Corriger », recette existante) tient le vol du document le temps
 // de son appel — sans ligne (importId null : aucun « Annuler » dans la section), mais lancerExtraction la voit et rend vol_tenu. Rend le jeton, ou
-// null quand un vol est déjà tenu ; libererVol(jeton) en finally.
-export function tenirVol() { if (vol) return null; vol = { importId: null, controller: new AbortController(), repo: repoModule }; notifier(); return vol; }
-export function libererVol(jeton) { if (jeton && vol === jeton) { vol = null; notifier(); } }
+// null quand un vol est déjà tenu ; libererVol(jeton) en finally. Lot B (D-B13) : le jeton est une tenue de ./vol.js — LE vol du document, celui
+// d'une lecture web compris (une lecture web tenue refuse tenirVol, et l'inverse).
+export function tenirVol() { const jeton = { importId: null, controller: new AbortController(), repo: repoModule }; if (!prendreVol(jeton)) return null; notifier(); return jeton; }
+export function libererVol(jeton) { if (jeton && volTenu(jeton.importId) === jeton) { libererTenue(jeton); notifier(); } }
 function majEnLigneToutes() { for (const v of [...vues]) { if (!v.root.isConnected) { vues.delete(v); continue; } v.majEnLigne(); } }
 
 const refus = (raison) => ({ issue: 'refuse', raison });
@@ -63,11 +64,10 @@ const estRefus = (e) => e instanceof TransitionRefusee;
 // résultat (etat.cleQuestion). Une lecture arrivée d'un autre onglet entre-temps (même id, même statut a_verifier) a une autre clé → la réponse est
 // ignorée et la question redemandée pour la nouvelle lecture (T4-R1, puis T4-R2 : jamais la clé de la ligne RELUE au clic). Exportée (tâche 6, ronde 1) :
 // la clôture d'une lecture par l'éditeur ou le panneau d'index, « Ignorer » de la section et la revalidation ne valent que pour LA lecture affichée.
-export const cleLecture = (L) => JSON.stringify([L?.id ?? null, L?.started_at ?? null, L?.resultat ?? null]);
+export { cleLecture }; // définie dans src/domain/import-cible.js depuis le lot B (la variante web la partage sans importer cet écran)
 // Deux champs relus du journal, bornés avant d'entrer dans la fiche (T4-R1) : le modèle ≤ 80 points de code (la borne de PasserelleProvider), la
 // photo du plat = une empreinte hexadécimale de 64 (la clé de files) ; tout le reste vaut null. Une seule définition du modèle borné (ronde 1 de la
-// tâche 6 : l'éditeur et le panneau la partagent ; une chaîne vide vaut null).
-const modeleBorne = (m) => (typeof m === 'string' && m && Array.from(m).length <= 80 ? m : null);
+// tâche 6 : l'éditeur et le panneau la partagent ; une chaîne vide vaut null) — dans le domaine depuis le lot B (modeleBorne, la variante web la partage).
 const photoBornee = (L) => (typeof L?.photo_sha256 === 'string' && /^[0-9a-f]{64}$/.test(L.photo_sha256) ? { sha256: L.photo_sha256, origin: L.photo_origin ?? null } : null);
 // La question à poser avant d'écrire (pure) : la discordance tant que « Rattacher » n'a pas été répondu pour CETTE lecture, puis « Remplacer par
 // cette lecture ? » (I-5) tant qu'elle n'a pas de réponse ; null = écrire.
@@ -120,11 +120,10 @@ async function partirLecture(repo, lecture, pageIds, enVol, suivi) {
   return ligne.id;
 }
 async function volUnique(importId, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, enLigne = () => enLigneFlag, battementMs = BATTEMENT_MS, lecture = null } = {}, suivi) {
-  if (vol) return refus('vol_tenu');
   const tenue = { importId: lecture ? null : importId, controller: new AbortController(), repo };
-  vol = tenue; // AVANT tout await : une seconde tape pendant les gardes voit le vol (double clic → un POST)
+  if (!prendreVol(tenue)) return refus('vol_tenu'); // AVANT tout await : une seconde tape (ou une lecture web) pendant les gardes voit le vol
   notifier(); // vague finale (m2) : l'écran ciblé fige ses pages dès la pose du vol (la réduction des pages peut durer), pas seulement à en_cours
-  const liberer = () => { if (vol === tenue) vol = null; };
+  const liberer = () => libererTenue(tenue);
   let battement = null;
   try {
     let kind, pageIds;
@@ -210,8 +209,9 @@ async function volUnique(importId, { ctx, repo = repoModule, fetch: fetchInjecte
 // « Annuler » (spec § 3.1, § 4.4, Review Focus 4) : seulement si CE document tient le vol de cet import — le fetch est abandonné (le serveur
 // abandonne l'amont, lot passerelle F-5) et la ligne passe en_cours → echec(annule). Sinon rien n'est fait et false est rendu.
 export async function annulerVol(importId) {
-  if (!vol || vol.importId !== importId) return false;
-  const { controller, repo } = vol;
+  const tenue = volTenu(importId);
+  if (!tenue) return false;
+  const { controller, repo } = tenue;
   controller.abort();
   try { await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: { status: 'echec', erreur: { raison: 'annule', extra: {} }, document_id_vol: null } }); }
   catch (e) { if (!estRefus(e)) logError('import_cible.annuler', { error: e, id: importId }); }
@@ -246,6 +246,7 @@ export function texteRefus(r) {
   if (r?.raison === 'non_connecte') return t(TEXTE_CONNEXION);
   if (r?.raison === 'octets_absents') return t('Les photos de cette recette ne sont pas sur cet appareil.');
   if (r?.raison === 'image') return messageErreurImage({ code: r.code });
+  if (r?.raison === 'interdit') return texteEchecLecture({ raison: 'interdit' }).texte; // lot B : « Réessayer » d'un signet relu hors https, rien n'est parti
   return null;
 }
 
@@ -300,8 +301,12 @@ export async function lireDansLeJournal({ kind, importId = null, pageIds = [], e
 }
 
 // --- L'écran ------------------------------------------------------------------------------------------------------------------------------------
-export async function renderImportCible(params, query, ctx, { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch: fetchInjecte = undefined, pickFiles = pickDom, maintenant = horloge, battementMs = BATTEMENT_MS, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000 } = {}) {
+export async function renderImportCible(params, query, ctx, deps = {}) {
+  const { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch: fetchInjecte = undefined, pickFiles = pickDom, maintenant = horloge, battementMs = BATTEMENT_MS, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000 } = deps;
   const recipe = ctx?.recipesById?.get(params?.id);
+  // Lot B (§ 4.1, D-B13) : une fiche qui porte une adresse (signet, recette lue sur le web) s'ouvre dans la variante web de l'écran — mêmes gestes
+  // injectés. Une fiche disponible à adresse y est admise (relecture, D-B18).
+  if (typeof recipe?.source_url === 'string' && recipe.source_url) return renderImportWeb(params, query, ctx, deps);
   const root = el('div', null);
   // ligne : l'import NON TERMINÉ de cette recette (un seul, I-2) ; pages : ses source_pages par id ; question : 'discordance' | 'remplacer' | null ;
   // cleQuestion : la clé (cleLecture) de LA lecture pour laquelle `question` a été posée (T4-R2 : toute réponse s'y rapporte) ; rattache : la clé de
@@ -310,10 +315,9 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
   // la main (I-5), et non de la seule couverture des pages (ronde finale 2) — la phrase qui le dit n'est montrée que dans ce cas.
   const etat = { ligne: null, pages: new Map(), question: null, cleQuestion: null, rattache: null, verdict: null, focus: null, occupe: false, ecriteMain: false };
   const oublierQuestion = () => { etat.question = null; etat.cleQuestion = null; etat.rattache = null; etat.verdict = null; etat.ecriteMain = false; };
-  root.etatRoute = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, pageIds: [...(Array.isArray(etat.ligne?.page_ids) ? etat.ligne.page_ids : [])], vol: !!vol && !!etat.ligne && vol.importId === etat.ligne.id, discordance: etat.verdict });
+  root.etatRoute = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, pageIds: [...(Array.isArray(etat.ligne?.page_ids) ? etat.ligne.page_ids : [])], vol: !!etat.ligne && volEnCours()?.importId === etat.ligne.id, discordance: etat.verdict });
   if (!recipe) { root.append(el('div', { class: 'card' }, t('Recette introuvable.'))); return root; }
-  // D-11 : un signet web ou une recette qui a déjà son texte n'a pas d'entrée ici — le dire, revenir à la fiche.
-  if (recipe.source_url) { toast(t('Un lien web s’importe au lot suivant.')); navigate(`/recipes/${encodeURIComponent(recipe.id)}`); return root; }
+  // D-11 : une recette qui a déjà son texte (et pas d'adresse : voir plus haut) n'a pas d'entrée ici — le dire, revenir à la fiche.
   if (recipe.availability === 'available') { toast(t('Cette recette a déjà son texte.')); navigate(`/recipes/${encodeURIComponent(recipe.id)}`); return root; }
 
   const edition = recipe.edition_id ? ctx.editionsById?.get(recipe.edition_id) ?? null : null;
@@ -457,7 +461,8 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
 
   // --- Gestes : extraire, annuler, décider, enregistrer -------------------------------------------------------------------------------------------
   async function lancer() {
-    if (vol) { if (vol.importId !== etat.ligne?.id) toast(t('Une lecture est déjà en cours : annule-la d’abord.')); return; } // double tape : muette
+    const enVol = volEnCours();
+    if (enVol) { if (enVol.importId !== etat.ligne?.id) toast(t('Une lecture est déjà en cours : annule-la d’abord.')); return; } // double tape : muette
     const L = etat.ligne; if (!L) return;
     oublierQuestion();
     const r = await lancerExtraction(L.id, { ctx, repo, fetch: fetchInjecte, maintenant, enLigne: () => enLigneFlag, battementMs });
@@ -553,7 +558,7 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
   }
 
   // --- Dessin -----------------------------------------------------------------------------------------------------------------------------------
-  const pretALancer = () => !!etat.ligne && (Array.isArray(etat.ligne.page_ids) && etat.ligne.page_ids.length > 0) && !!session && enLigneFlag && !vol && !etat.occupe;
+  const pretALancer = () => !!etat.ligne && (Array.isArray(etat.ligne.page_ids) && etat.ligne.page_ids.length > 0) && !!session && enLigneFlag && !volEnCours() && !etat.occupe;
   function majEnLigne() {
     const zone = root.querySelector('[data-role="hors-ligne"]');
     if (zone) zone.replaceChildren(...(enLigneFlag ? [] : [el('div', { class: 'status warn' }, t('Tu es hors ligne.'))]));
@@ -678,7 +683,7 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
   let veille = null;
   function veiller(maintenantAussi = true) {
     const L = etat.ligne;
-    if (veille || L?.status !== 'en_cours' || (vol && vol.importId === L.id) || typeof repo.marquerInterrompus !== 'function') return;
+    if (veille || L?.status !== 'en_cours' || volEnCours()?.importId === L.id || typeof repo.marquerInterrompus !== 'function') return;
     const passe = () => { const m = Date.parse(maintenant()); return repo.marquerInterrompus(Number.isFinite(m) ? m : undefined).then((n) => (n ? redessiner() : null)).catch((e) => logError('import_cible.interrompus', { error: e })); };
     if (maintenantAussi) passe();
     veille = setTimeout(() => { veille = null; if (root.isConnected) passe().then(() => veiller(false)); }, veilleMs);
@@ -687,7 +692,7 @@ export async function renderImportCible(params, query, ctx, { repo = repoModule,
     const L = etat.ligne;
     const statut = L?.status ?? null;
     const pageIds = Array.isArray(L?.page_ids) ? L.page_ids : [];
-    const enVol = !!vol && !!L && vol.importId === L.id;
+    const enVol = !!L && volEnCours()?.importId === L.id;
     // Vague finale (m2) : figées dès que CE document tient le vol de cette ligne, avant même en_cours (gardes et réduction des pages).
     root.replaceChildren(enTete(), sectionPages(pageIds, enVol || statut === 'en_cours' || statut === 'a_verifier'), sectionPhoto(L, enVol || statut === 'en_cours'), zoneAction(L, statut, enVol));
     majEnLigne();

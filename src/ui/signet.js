@@ -5,11 +5,12 @@
 import { borner } from '../core/bornes.js';
 import { el, toast } from '../core/dom.js';
 import { t, getUiLocale } from '../core/i18n.js';
-import { lienSignet } from '../core/lien.js';
+import { lienSignet, doublonDAdresse } from '../core/lien.js';
 import { logError } from '../core/log.js';
 import { navigate } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { assertVocabulaire } from '../domain/vocabulaire.js';
+import { reperesDe } from '../domain/recherche-web.js';
 import { pageHeader, field, select, libelleLivre } from './components.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes } from './puces.js';
 
@@ -20,7 +21,8 @@ export const LIMITES_SIGNET = { adresse: 2048, titre: 300 };
 // l'API du signet reste d'un seul tenant.
 export { lienSignet } from '../core/lien.js';
 
-export function signetModel({ adresse = '', titre = '', editionId = '', cuisines = [], enCours = false } = {}) {
+// Lot B (D-B7) : `doublon` = la fiche qui porte déjà cette adresse NORMALISÉE (ou null) ; tant qu'elle existe, on ne peut pas enregistrer.
+export function signetModel({ adresse = '', titre = '', editionId = '', cuisines = [], enCours = false, doublon = null } = {}) {
   const erreurs = {};
   const lien = lienSignet(String(adresse ?? '').trim());
   if (!lien.ok) erreurs.adresse = t('Adresse non reconnue.');
@@ -35,7 +37,7 @@ export function signetModel({ adresse = '', titre = '', editionId = '', cuisines
   // pas parce qu'un geste a touché un nœud au passage. `valide` reste la validité de la SAISIE (ce que l'écriture
   // revérifie, S13) ; `peutEnregistrer` est ce que le bouton suit.
   return {
-    valide, erreurs, enCours: !!enCours, peutEnregistrer: valide && !enCours,
+    valide, erreurs, enCours: !!enCours, peutEnregistrer: valide && !enCours && !doublon, doublon: doublon || null,
     href: erreurs.adresse ? null : lien.href, hote: erreurs.adresse ? null : lien.hote,
     titre: titreNet, editionId: editionId || '', cuisines: Array.isArray(cuisines) ? [...cuisines] : [],
   };
@@ -43,22 +45,27 @@ export function signetModel({ adresse = '', titre = '', editionId = '', cuisines
 
 // Une recette-référence et rien d'autre : pas de version, pas d'ingrédient, pas de durée — l'app n'a rien lu (I-E).
 // source_label garde l'hôte pour les listes, mais aucun affichage ne lui fait confiance : tout est recalculé (S7).
-export function fabriquerSignet(m, { newId, langue }) {
+// Lot B (D-B16) : `reperes` (« Garder et lire ») — les repères de la carte, REVALIDÉS par reperesDe ; `web_reperes` n'est posé que s'il en reste :
+// sans repères, la fiche est octet pour octet celle d'avant le lot.
+export function fabriquerSignet(m, { newId, langue, reperes = null }) {
   const fiche = {
     id: newId('rc'), edition_id: m.editionId || null, original_title: m.titre, original_language: langue,
     availability: 'reference_only', verification_state: 'unverified', printed_page: null, section: null, type: null,
     tags: [], cuisines: [...m.cuisines], favorite: false, source_page_ids: [], current_version_id: null,
     ingredient_ids: [], source_url: m.href, source_label: m.hote,
   };
+  const r = reperes ? reperesDe(reperes) : null;
+  if (r) fiche.web_reperes = r;
   assertVocabulaire(fiche, 'recipes'); // D-12 : le fabricant vérifie le vocabulaire fermé avant toute écriture
   return fiche;
 }
 
 // Deuxième porte de la borne S13 : une adresse hostile ou trop longue qui arriverait d'ailleurs que de l'écran
 // (un état bricolé, un appel direct) est refusée ICI, avant toute écriture.
-export async function enregistrerSignet(etat, { repo: r = repo, langue = getUiLocale() } = {}) {
+export async function enregistrerSignet(etat, { repo: r = repo, langue = getUiLocale(), existantes = [] } = {}) {
   const m = signetModel(etat);
   if (!m.valide) throw new Error('signet_invalide');
+  if (doublonDAdresse(existantes, m.href)) throw new Error('signet_doublon'); // seconde porte du doublon (D-B7), comme S13
   return r.save('recipes', fabriquerSignet(m, { newId: r.newId, langue }));
 }
 
@@ -77,6 +84,10 @@ export function renderSignet(model, gestes = {}) {
     el('p', null, t('Une recette ou une page que tu veux retrouver dans ta bibliothèque.')),
     el('small', { class: 'muted' }, t('L’app n’ouvre pas la page : donne-lui le titre.')),
     champTexte(t('Adresse *'), 'adresse', model, el('input', { type: 'url', inputmode: 'url', value: model.adresse ?? model.href ?? '', onInput: (e) => g('changerAdresse')(e.target.value) })),
+    // D-B7 : toujours rendu (caché sans doublon), pour que la frappe le montre ou le cache SUR PLACE (majSignet).
+    el('div', { class: 'status', dataset: { role: 'doublon-adresse' }, hidden: !model.doublon },
+      el('span', null, t('Tu as déjà gardé cette adresse.')), ' ',
+      el('a', { class: 'btn small', href: model.doublon ? `#/recipes/${encodeURIComponent(model.doublon.id)}` : '#/library' }, t('Ouvrir la fiche'))),
     champTexte(t('Titre *'), 'titre', model, el('input', { type: 'text', value: model.titre, onInput: (e) => g('changerTitre')(e.target.value) })),
     field(t('Livre (facultatif)'), select(livres, model.editionId, (v) => g('changerLivre')(v))),
     // R-UX-8 : les puces ne vont JAMAIS dans un <label> — field() en rend un, et un clic sur le mot « Cuisines »
@@ -97,6 +108,12 @@ export function majSignet(zone, model) {
     noeud.textContent = model.erreurs[cle] || '';
     noeud.hidden = !model.erreurs[cle];
   }
+  const doublon = zone?.querySelector?.('[data-role="doublon-adresse"]');
+  if (doublon) {
+    doublon.hidden = !model.doublon;
+    const a = doublon.querySelector('a');
+    if (a) a.setAttribute('href', model.doublon ? `#/recipes/${encodeURIComponent(model.doublon.id)}` : '#/library');
+  }
   const bouton = zone?.querySelector?.('[data-role="enregistrer"]');
   if (bouton) bouton.disabled = !model.peutEnregistrer;
   return bouton || null;
@@ -112,7 +129,7 @@ export async function renderSignetRoute(params, query, ctx, { repo: r = repo, na
   const etat = { adresse: recue ? query.adresse : '', titre: borner(typeof query?.titre === 'string' ? query.titre : '', LIMITES_SIGNET.titre), editionId: '', cuisines: [], enCours: false };
   const livres = [{ value: '', label: t('Aucun — recette indépendante') },
     ...(ctx?.book_editions || []).map((e) => ({ value: e.id, label: libelleLivre(e, ctx?.booksById?.get(e.book_id)) }))];
-  const existantes = cuisinesExistantes(ctx);
+  const cuisinesConnues = cuisinesExistantes(ctx); // ronde 1 : les CUISINES déjà employées (puces) — pas les fiches que reçoit enregistrerSignet
   const root = el('div', null, pageHeader(t('Garder un lien web'), { back: { href: '/add', label: t('Ajouter') } }));
   if (recue) {
     // R-WEB-8 : l'hôte vient de la MÊME décision que l'enregistrement (signetModel rogne par trim(), que l'analyseur d'URL ne
@@ -126,11 +143,13 @@ export async function renderSignetRoute(params, query, ctx, { repo: r = repo, na
   root.append(zone);
   // Une erreur ne s'affiche pas sur un champ encore vide : l'étoile du libellé et le bouton éteint disent déjà
   // qu'il manque quelque chose. « Adresse non reconnue. » sur un champ vide accuserait une saisie qui n'existe pas.
+  // D-B7 : le doublon est cherché dans toutes les fiches de l'appareil (ctx.recipes), sur l'adresse que le formulaire enregistrerait.
+  const doublonDe = () => { const href = signetModel(etat).href; return href ? doublonDAdresse(ctx?.recipes, href) : null; };
   const modelVu = () => {
-    const m = signetModel(etat);
+    const m = signetModel({ ...etat, doublon: doublonDe() });
     const erreurs = {};
     for (const cle of ['adresse', 'titre']) if (String(etat[cle] ?? '').trim() && m.erreurs[cle]) erreurs[cle] = m.erreurs[cle];
-    return { ...m, erreurs, adresse: etat.adresse, livres, existantes };
+    return { ...m, erreurs, adresse: etat.adresse, livres, existantes: cuisinesConnues };
   };
   const dessiner = () => zone.replaceChildren(renderSignet(modelVu(), gestes));
   const gestes = {
@@ -142,13 +161,13 @@ export async function renderSignetRoute(params, query, ctx, { repo: r = repo, na
     // Rien n'est annoncé avant l'écriture (I-B). Le bouton se ferme pendant : deux tapes pressées ne font pas deux
     // signets ; il se rouvre si l'écriture échoue, et la saisie reste intacte.
     enregistrer: async () => {
-      const m = signetModel(etat);
+      const m = signetModel({ ...etat, doublon: doublonDe() });
       if (!m.peutEnregistrer) { dessiner(); return; }
       etat.enCours = true;
       majSignet(zone, modelVu());
       let rec;
       try {
-        rec = await enregistrerSignet({ ...etat, enCours: false }, { repo: r });
+        rec = await enregistrerSignet({ ...etat, enCours: false }, { repo: r, existantes: ctx?.recipes ?? [] });
       } catch (e) {
         etat.enCours = false;
         majSignet(zone, modelVu());

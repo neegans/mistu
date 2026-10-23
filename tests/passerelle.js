@@ -639,6 +639,22 @@ export async function runPasserelleTests({ eq, ok }) {
     } finally { globalThis.fetch = vraiFetch; setUiLocale(avant); }
   }
 
+  // --- Lot B (D-B14, spec 2026-10-19-recette-web § 4.4, § 7.4) : les refus de l'outil lecture-web ont leur raison ; `trop_lourde` (la page) n'est
+  // jamais `trop_lourd` (la demande), `vide` (la page) n'est jamais le `vide` d'une extraction. Le contrôle du jeton (V-F2) a déjà compté les
+  // résultats de `garde` plus haut : ceux-ci sont contrôlés SUR PLACE (le jeton n'est dans aucun).
+  {
+    const fuite = (r) => /access_token|jeton-factice/.test(JSON.stringify(r));
+    const statut = (s, corps) => P.appelerAssistant('lecture-web', { url: 'https://a.test/' }, { fetch: async () => reponse(s, corps), session: SESSION, config: CONFIG });
+    const lus = [];
+    for (const [s, corps] of [[422, { erreur: 'interdit' }], [502, { erreur: 'inaccessible' }], [422, { erreur: 'pas_une_page' }], [413, { erreur: 'trop_lourde' }], [422, { erreur: 'vide' }]]) { const r = await statut(s, corps); lus.push([r.raison, r.ecrite, fuite(r)]); }
+    eq(lus, [['interdit', true, false], ['inaccessible', true, false], ['pas_une_page', true, false], ['page_trop_lourde', true, false], ['page_vide', true, false]], 'RAISON_DE_ERREUR (lot B) : les cinq raisons web sont lues — trop_lourde → page_trop_lourde, vide → page_vide ; le jeton n’est dans aucun résultat');
+    eq(['interdit', 'inaccessible', 'pas_une_page', 'page_trop_lourde', 'page_vide'].map((raison) => P.echecDomaine({ raison })), ['interdit', 'inaccessible', 'pas_une_page', 'page_trop_lourde', 'page_vide'].map((raison) => ({ raison, extra: {} })), 'echecDomaine (lot B) : les cinq raisons web passent telles quelles, extra {}');
+    const lourd = await statut(413, { erreur: 'trop_lourd' });
+    eq([lourd.raison, fuite(lourd), P.echecDomaine({ raison: 'trop_lourd' })], ['trop_lourd', false, { raison: 'requete', extra: { trop_lourd: true } }], 'lot B : trop_lourd (la demande) garde son chemin — requete + extra trop_lourd');
+    const { RAISONS_ECHEC } = await import('../src/domain/import-cible.js');
+    ok(Object.isFrozen(RAISONS_ECHEC) && ['interdit', 'inaccessible', 'pas_une_page', 'page_trop_lourde', 'page_vide', 'lien'].every((r) => RAISONS_ECHEC.includes(r)) && !RAISONS_ECHEC.includes('trop_lourde') && !RAISONS_ECHEC.includes('trop_lourd'), 'RAISONS_ECHEC (lot B) : élargie aux six raisons web, gelée, sans valeur morte (ni trop_lourde ni trop_lourd)');
+  }
+
   // --- Absence de toute clé et de tout appel direct : lue dans les SOURCES (les modules de la coquille)
   {
     const sw = await lire('../sw.js');
@@ -653,8 +669,8 @@ export async function runPasserelleTests({ eq, ok }) {
     const passerelle = lus.find(([m]) => m === 'src/domain/passerelle.js')?.[1] ?? '';
     ok(!/from '\.\.\/ui\//.test(passerelle), 'passerelle.js : n’importe rien de src/ui/ (couche domaine)');
     ok(sw.includes("'./src/domain/passerelle.js'"), 'SHELL : ./src/domain/passerelle.js');
-    ok(/VERSION = 'cuisine-os-v0\.9\.0-\d+'/.test(sw), 'sw.js : VERSION 0.9.0');
+    ok(/VERSION = 'cuisine-os-v0\.10\.0-\d+'/.test(sw), 'sw.js : VERSION 0.10.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.9.0', 'APP_VERSION 0.9.0');
+    eq(APP_VERSION, '0.10.0', 'APP_VERSION 0.10.0');
   }
 }

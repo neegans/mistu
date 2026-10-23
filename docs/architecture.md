@@ -1047,6 +1047,203 @@ l'iPhone (`capture`, focus, photos de 48 Mpx, HEIC, veille d'une PWA tuée puis 
 déclaré équivalent à la clôture, et **M3** (`?.blob instanceof Blob` remplacé par la seule présence de la ligne `files` dans `pagesDejaLiees`),
 survivant nommé : seule une ligne `files` distante sans blob (fenêtre L2, avant R58) le tue, pratiquement inatteignable pour les pages du lot A.
 
+## Recette web complète : l'outil `lecture-web` (19-20 octobre 2026, lot B)
+
+Spec : `docs/superpowers/specs/2026-10-19-recette-web-design.md` (rév. 4 ; § 3 : données ; § 4 : parcours ; § 6 : serveur ; § 12 : rulings, jusqu'à la
+clôture du chef d'orchestre : R-B-17 à R-B-28, puis R-B-22 bis ; § 13 : ce qui reste ouvert). Livré ici (branche `recette-web`, empilée sur
+`import-cible`, non fusionnée) : un lien web gardé (un signet `reference_only` à `source_url`) devient une recette. La passerelle gagne un quatrième
+outil, `lecture-web` : la fonction télécharge elle-même la page, lit d'abord son JSON-LD `Recipe` (aucun appel au modèle), sinon fait lire son texte
+principal par le modèle ; le client revalide tout, écrit la lecture dans le journal du lot A (une ligne `imports` `kind: 'web'`), puis « Enregistrer »
+recompose la fiche du signet. Côté serveur : un module pur neuf (`lecture-web.js`), `logique.js` et `index.ts` amendés, une migration écrite à la main
+(`0006`, la contrainte `outil`) ; côté app : un domaine (`src/domain/lecture-web.js`), un écran (`src/ui/import-web.js`) et une feuille de vol
+(`src/ui/vol.js`) neufs. Amendé par la vague finale de la revue de branche (`d8163be`, `ebbcf10` : veille VF-15 de l'écran web, `adresseNormalisee`
+linéaire et bornée, réponse suivie refusée, `auMot`) et par la ronde finale 2 (`51bad50` : R-B-22 `portionsDe`, précisé par R-B-22 bis ; R-B-23 alias
+de la fonction). La fonction déployée reste la version 3 du lot 4 : ce chemin n'est pas servi avant `0006` et le redéploiement (`index.ts` et
+`lecture-web.js` ont changé jusqu'à `ebbcf10` et `51bad50`).
+
+```text
+fiche d'un lien « Lire la recette avec l’assistant » · onglet Web « Garder et lire » · « Relire la page avec l’assistant » · section « Imports »
+  |
+  v
+demarrerLectureWeb (src/ui/import-web.js) : adresse du signet (ou du résultat) par lienSignet ET https:, sinon refus local (interdit, zéro réseau)
+  | « Garder et lire » : adresse normalisée déjà gardée -> dit, rien d'écrit ; sinon UNE transaction conditionnée :
+  |                      recipes (signet neuf, absente) + imports a_lancer kind web (absente ; aucun import ouvert pour ce recipe_id)
+  | fiche : l'import web OUVERT de la fiche est repris (importOuvert) ; sinon même création conditionnée (TransitionRefusee -> relu, repris)
+  v
+lancerLecture : prendreVol (src/ui/vol.js, LE vol du document, posé avant tout await) ;
+  gardes : vol tenu | inconnu | statut | hors ligne | session | signet relu hors https  -> refus, rien d'écrit
+  a_lancer | echec (| a_verifier pour « Relire ») -> en_cours en UNE transition (started_at, document_id_vol, battement_at de départ, device_id d'ici)
+  battement toutes les 15 s : sync_state « battement:<id> » (repo.battre, origine device ; la ligne imports ne bouge pas, R-B-17)
+  appels + 1 au départ du fetch -> lireRecetteWeb : POST /functions/v1/assistant { outil: 'lecture-web', corps: { url: <source_url du signet RELU> } }
+  |
+  v
+fonction « assistant » : OPTIONS | origine | méthode | session | is_allowed | corps borné | lireDemande : liste blanche { url }, valideAdresse
+  |                      (refus -> 422 interdit AVANT la réservation : rien n'est compté)
+  v   rpc assistant_reserver(owner, 'lecture-web', octets, quota)     null -> 429 ; la contrainte de 0006 admet l'outil
+telechargerPage : GET, redirect 'manual', credentials 'omit', user-agent Mitsu/0.10, 15 s par saut, 30 s en tout
+  |   r.redirected -> 422 interdit ; 3xx : corps annulé, location revalidée par valideAdresse, 3 sauts au plus ; hors 2xx -> 502 inaccessible ;
+  |   content-type hors text/html | application/xhtml+xml -> 422 pas_une_page ; corps > 2 Mio -> 413 trop_lourde ; décodage par lireCharset
+  v
+lirePageHtml (lecture-web.js, pur, balayages linéaires) : blocs JSON-LD -> la première Recipe LISIBLE ?
+  |-- oui : 200 { source_kind: 'jsonld', page, recette (construite), usage 0 / 0, stop_reason null, model null }     aucun appel au modèle
+  |-- non : texte principal (<= 40 000 points de code, coupe dite) ; moins de 40 -> 422 vide ; sinon
+  |         appelerAnthropic(corpsLectureModele : CONSIGNE_LECTURE_WEB, <<<PAGE>>> texte neutralisé <<<FIN>>>, max_tokens 6000)
+  |         -> 200 { source_kind: 'modele', page, recette: <texte des blocs text>, usage, stop_reason, model }
+  v   journal : statut rendu, jetons (0 / 0 pour un JSON-LD), durée ; budget de 120 s épuisé -> 504 delai ; client parti -> 499
+client : lireLecture = lirePage (hôte RECALCULÉ, bornes, Cc / Cf retirés, auteur et site à adresse -> null) + validateParsedRecipe + retirerAdresses
+  |  en_cours -> a_verifier (resultat { source_kind, page, recette }, reponse_brute <= 16 000, model, duree_ms)     [I-B4 : AVANT tout rendu]
+  |  sinon en_cours -> echec(raison) ; « Annuler » -> echec(annule) ; réponse arrivée après : reponse_brute seule, l'état reste echec
+  v
+#/recipes/<id>/importer, variante web : relireResultat à chaque rendu (illisible -> echec(illisible), lié à cleLecture) ; « Lue sur {hote} — vérifie… »
+  |  « Enregistrer » : signet et versions RELUS après le dialogue ; fabriquerLectureWeb ; « Remplacer par cette lecture ? » si une version ÉCRITE existe
+  v
+UNE transaction : imports a_verifier -> enregistre (reponse_brute null, finished_at ; liée à cleLecture)
+                  + recipe_versions (extraction, provenance web) + recipes (le signet recomposé ; aucun put si « Ajouter sans remplacer »)
+```
+
+**Modules, un rôle chacun.**
+```text
+supabase/functions/assistant/lecture-web.js   pur, FEUILLE (aucun import ; Node et Deno) : LIMITES_LECTURE, valideAdresse, hoteAdmis, typeAdmis,
+                                              lireCharset, decoderEntites, nettoyerChaineJsonLd, decouperEtape, dureeIsoEnMinutes, extraireBlocsJsonLd,
+                                              trouverRecettes, auteurDe, siteDe, titreDe, recetteDepuisJsonLd ({ recette, lisible }), textePrincipal
+                                              ({ texte, coupe }), lirePageHtml. Aucune fonction ne lève sur une entrée hostile.
+supabase/functions/assistant/logique.js       OUTILS (quatre), lireDemande (lecture-web : { url } seul, valideAdresse, hotesRefuses),
+                                              CONSIGNE_LECTURE_WEB, neutraliser, corpsLectureModele ; importe valideAdresse et LIMITES_LECTURE de
+                                              lecture-web.js (un seul sens).
+supabase/functions/assistant/index.ts         hotesRefuses() (hôte de SUPABASE_URL, ses sous-domaines, l'alias <ref>.functions.supabase.co),
+                                              telechargerPage, appelerAnthropic (UN point d'appel pour les quatre outils), le bloc lecture-web de traiter.
+supabase/migrations/0006_lecture_web.sql      écrite à la main : drop puis add constraint assistant_journal_outil_check, à cinq valeurs.
+supabase/proofs/0006_lecture_web.sql          preuve (garde 0, 10 verdicts, rollback dernier) ; jamais jouée.
+src/domain/lecture-web.js    lirePage, MOTIF_FRAGMENT_ADRESSE, retirerAdresses, lireLecture, relireResultat, lireRecetteWeb (l'appel, par la passerelle),
+                             fabriquerImportWeb, versionHumaine, fabriquerLectureWeb (sixième fabricant à appeler assertVocabulaire).
+src/ui/vol.js                feuille sans vue : DOCUMENT_ID, BATTEMENT_MS, LA variable de vol (prendreVol, libererVol, volEnCours, volTenu).
+src/ui/import-web.js         demarrerLectureWeb, lancerLecture, annulerLecture, enregistrerLecture, texteEchecLecture, renderImportWeb ; ouverteWeb,
+                             ligneWebOuverte ; abonnés (ecouterLecture) et veille VF-15.
+src/ui/import-cible.js       prend son vol dans vol.js (ré-exports gardés) ; renderImportCible délègue une fiche à source_url à renderImportWeb (sens
+                             unique : import-web.js et vol.js n'importent jamais import-cible.js) ; texteRefus dit interdit.
+src/domain/import-cible.js   KINDS_IMPORT (+ web), KINDS_PAGES, importOuvert, versionEcrite, cleLecture, modeleBorne, RAISONS_ECHEC élargie, cibleReprise et
+                             lignesImports pour le web.
+src/core/lien.js             adresseNormalisee, doublonDAdresse, ADRESSE_MAX ; src/domain/recherche-web.js : reperesDe, porteUneAdresse, MOTIF_ADRESSE ancré.
+src/domain/passerelle.js     RAISON_DE_ERREUR : interdit, inaccessible, pas_une_page, trop_lourde -> page_trop_lourde, vide -> page_vide.
+src/ui/recipe.js, search.js, signet.js, components.js, add.js   la fiche d'un lien (blocSignet, bandeau web), « Garder et lire », le doublon au
+                             formulaire, ligneReperes, les lignes web de la section « Imports ».
+src/model/schema.js, repo.js, src/domain/vocabulaire.js   SOURCE_KINDS ; gardes KINDS_PAGES d'ouvrirImport et d'ajouterPages ; recipes.source_kind.
+tests : tests/lecture-web.js (neuf) ; tools/assistant-lecture-web.test.mjs et tools/lien.test.mjs (neufs), assistant-index.test.mjs,
+        assistant-logique.test.mjs, generer-migrations.test.mjs.
+```
+
+**Les murs de la fonction (D-B1, I-B8, I-B10, R-B-21, R-B-23).** Le client n'envoie que `{ url }` ; `lireDemande` ne lit aucun autre champ et refuse
+AVANT la réservation (422 `interdit`, rien de compté) toute adresse que `valideAdresse` refuse : hors ASCII visible (vérifié AVANT `new URL` : un U+2028
+ou un Cf ne passe jamais), plus de 2 048 points de code (le `href` normalisé aussi), autre schéma que `https:`, port explicite, identifiants, hôte sans
+point, IP littérale (IPv4, y compris les formes numériques que `URL` ramène à une IPv4 ; IPv6 entre crochets), `localhost`, suffixes `.local`,
+`.internal`, `.localhost`, hôte refusé et ses sous-domaines (`hotesRefuses()` : l'hôte de `SUPABASE_URL`, qui sert PostgREST et `/functions/v1`, et
+l'alias `<ref>.functions.supabase.co` : la fonction ne se rappelle jamais elle-même). La réservation précède tout téléchargement : la fonction n'est
+jamais un relais gratuit. À chaque saut : `redirect: 'manual'`, corps du 3xx annulé, `location` résolue contre l'adresse courante puis REVALIDÉE par les
+mêmes règles (refus → 422 après réservation), trois sauts au plus ; une réponse que le runtime aurait suivie malgré tout (`r.redirected`) est refusée
+sans lire son corps. Trois en-têtes posés par le code (`user-agent` qui nomme Mitsu, `accept`, `accept-language`) et `credentials: 'omit'` : jamais
+`authorization`, `apikey`, `cookie`, `x-api-key` ; aucun corps d'erreur d'un site n'est relayé ni journalisé. Le mur contre un hôte public qui
+résoudrait vers une adresse interne est TLS : la vérification du certificat n'est jamais relâchée (`Deno.createHttpClient` et `caCerts` absents, test de
+source) ; pas d'épinglage d'IP (rebinding DNS assumé, R-B-21 ; l'absence de réseau privé des isolats est un second filet, non mesuré). Minuteries : 15 s
+par saut, 30 s pour tout le téléchargement, retirées en `finally` avec leurs écouteurs ; le budget de 120 s (`ctl`) couvre la requête : son abandon
+pendant le téléchargement, en-têtes ou corps, est relancé et rend 504 `delai`, jamais `inaccessible` (D-B26).
+
+**La page (D-B2, D-B12, D-B20, D-B25).** Décodage par `lireCharset` (`charset` du `content-type`, sinon `<meta charset>` ou `http-equiv` dans les 4 096
+premiers octets, sinon UTF-8 ; un label que `TextDecoder` refuse vaut UTF-8). Tout est lu par balayages linéaires (`indexOf` depuis la position
+courante ; aucune regex sur le HTML entier hors la passe bornée de `decoderEntites` et les normalisations d'espaces) : trois pages hostiles de 2 Mio
+tiennent sous 500 ms. Une balise commence par `<` suivi d'une lettre, de `/`, `!` ou `?` (un `<` de texte reste du texte) ; un nom de balise finit sur
+un blanc, `/` ou `>`. `extraireBlocsJsonLd` lit les `<script type="application/ld+json">` (≤ 512 Kio chacun ; `@graph` et tableaux aplatis ; JSON
+illisible ignoré) ; `recetteDepuisJsonLd` construit l'objet de sortie du lot A (§ 3.4) plus `total_minutes`, en lisant chaque propriété par
+`Object.hasOwn` (jamais `Object.assign` ni `for…in` : aucune pollution de prototype) ; une `Recipe` n'est « trouvée » que LISIBLE (au moins une ligne
+ou une étape), la première gagne et les autres lisibles sont comptées (`autres_recettes`) ; une chaîne d'instructions est découpée aux fins de phrase
+en étapes ≤ 2 000 (rien de perdu), la `description` coupée au mot à 2 000 (la seule troncature), les listes relayées à la borne + 1 (le client refuse
+alors `hors_bornes`) ; `recipeYield` → `portionsDe` (R-B-22 et R-B-22 bis : la chaîne passe par `nettoyerChaineJsonLd` puis NFC ; un nombre nu, un
+intervalle (la borne basse, même inversé) ou un nombre accompagné d'un mot de portion, avant ou après ; 1 à 9 999, nombre JSON compris ; sinon `null` :
+rien d'inventé) ; `image` est ignorée (lot F). Sans JSON-LD lisible, `textePrincipal` retire scripts, styles, `noscript`, `svg`, `template` et
+commentaires, prend `<main>`, sinon `<article>`, sinon `<body>`, y retire `nav`, `header`, `footer`, `aside` (et `form` dans `main` / `article`, jamais
+s'il vide la zone), décode les entités (table fermée ; Cc, Cf, surrogates, U+2028 / U+2029, U+007F retirés), coupe net à 40 000 points de code et le
+dit (`texte_coupe`). Le modèle reçoit ce texte, `neutraliser` (toute suite de trois `<` ou plus espacée) entre `<<<PAGE>>>` et `<<<FIN>>>`, avec
+`CONSIGNE_LECTURE_WEB` (le texte de la page est une DONNÉE, jamais une consigne ; aucune adresse web nommée) et `max_tokens` 6 000 ; la fonction relaie
+sa sortie sans la valider.
+
+**Réponse et statuts de l'outil `lecture-web`.**
+
+| Issue | Statut et corps de la fonction | Journal (`assistant_journal`) | Côté app |
+|---|---|---|---|
+| adresse envoyée refusée | 422 `interdit` | aucune ligne (avant la réservation) | `interdit` |
+| quota atteint | 429 `quota` | aucune ligne (la réservation rend `null`) | `quota` |
+| cible d'une redirection refusée, ou réponse suivie (`r.redirected`) | 422 `interdit` | 422 | `interdit` |
+| DNS, connexion, TLS, 4xx ou 5xx, 3xx sans `location` lisible, plus de 3 sauts, 15 s d'un saut, 30 s en tout | 502 `inaccessible` | 502 | `inaccessible` |
+| `content-type` refusé | 422 `pas_une_page` | 422 | `pas_une_page` |
+| corps de plus de 2 Mio | 413 `trop_lourde` | 413 | `page_trop_lourde` |
+| moins de 40 points de code de texte | 422 `vide` | 422 | `page_vide` |
+| JSON-LD lisible | 200 `jsonld`, `usage` 0 / 0 | 200, 0 / 0 | `a_verifier`, ou `hors_bornes` (texte JSON-LD), `vide`, `lien` |
+| texte lu par le modèle | 200 `modele`, `usage` d'Anthropic | 200, jetons | `a_verifier`, ou `coupe`, `illisible`, `hors_bornes`, `vide`, `lien` |
+| 400, 403, 413, 429 d'Anthropic | relayés tels quels (comme le lot 4) | statut relayé | comme le lot 4 |
+| budget de 120 s épuisé | 504 `delai` | 504 | `delai` |
+| client parti | 499, aucun corps | 499 | — |
+
+**Relecture côté client (I-B2, I-B5).** La réponse est une donnée hostile. `lirePage` relit chaque champ de `page` par `borner` (Cc / Cf retirés,
+borné) ; l'hôte est RECALCULÉ par `lienSignet(url_finale)`, jamais celui du serveur, et toujours affiché en premier ; `auteur` et `site` passent à `null`
+s'ils portent une adresse et ne s'affichent qu'après, sous « Selon la page : … » ; `lue_le` n'est admise qu'en ISO UTC ; `titre_page` n'est jamais
+rendue. La recette passe `validateParsedRecipe` (un dépassement REFUSE, `hors_bornes`, jamais de troncature silencieuse), puis `retirerAdresses` : une
+adresse (`MOTIF_ADRESSE` sur le texte NFKC, jamais `MOTIF_HOTE`) dans le TITRE refuse (`lien`) ; dans une ligne, une étape ou les notes, le fragment
+devient « [adresse retirée] » dans le texte d'origine, la ligne passe `uncertain` et `uncertain_fields` reçoit une entrée par champ (motifs ancrés par
+lookbehind : linéaires). `total_minutes` ne vient que d'un JSON-LD ; `printed_page` et `missing_page` sont forcés. Un `resultat` relu du journal (rendu,
+synchro, archive, « Reprendre ») repasse par `relireResultat` avant tout usage, et la fiche passe sa recette relue à la bannière du lot A. Tout texte lu
+est rendu en nœud texte.
+
+**La migration `0006`.** Le `check` de colonne de `public.assistant_journal` (`0004`) ne connaissait que trois outils : sans `0006`,
+`assistant_reserver('lecture-web')` échoue en 23514 et chaque lecture web répond 502 `serveur`, sans rien casser d'autre. `0006` (écrite à la main,
+hors `NOMS` du générateur et de `--check`, comme `0004` ; 4 instructions, `begin` et `commit` compris : deux `alter table` entre eux) remplace
+`assistant_journal_outil_check` par une liste à CINQ valeurs, dans l'ordre `'recherche-web', 'creation', 'extraction', 'lecture-web', 'image-web'` :
+la cinquième sert le lot F, qui n'écrira aucune migration ; `OUTILS` n'en porte que quatre (une valeur admise de plus dans un `check` est inoffensive
+tant qu'`OUTILS` ne la porte pas ; le test croisé affirme `OUTILS` = `OUTILS_0006.slice(0, 4)`). Ni table, ni fonction, ni privilège : la vue,
+`assistant_reserver` et les `revoke` de `0004` tiennent. La preuve (`rollback;` dernier, rien à remplacer) : garde 0 (table et contrainte présentes,
+sinon les `check` réels nommés) ; 1.01 les cinq outils dans l'ordre, 1.02 une seule contrainte `check`, 1.03 et 1.04 privilèges inchangés, 1.05 la vue
+`security_invoker` ; 2.01 à 2.031 sous `postgres`, avec un compte emprunté : 2.01 `lecture-web` accepté et 2.02 `'inconnu'` → 23514 (inserts datés du
+2000-01-01), 2.03 `assistant_reserver` accepte `lecture-web` puis 2.031 `image-web` (sur le jour UTC courant : `c` compté sur `(now() at time zone
+'utc')::date`, recompté avant 2.031), chaque appel dans un bloc `exception` ; 3.01 les trois anciens outils (inserts datés du 2000-01-01) ; tout est
+annulé par le `rollback` ; `999 BILAN` (attendu `0 faux sur 10`). Le générateur dit « la 0007 à venir » : le prochain lot qui ajoute un magasin
+synchronisé la génère, après avoir figé `0005`.
+
+**La ligne `imports` `kind: 'web'` et le vol partagé.** `fabriquerImportWeb` naît `a_lancer`, `recipe_id` = le signet, `edition_id`, `scan_session_id`,
+`photo_sha256` nuls, `page_ids: []`, `device_id` de cet appareil (exigé) ; `resultat` = `{ source_kind, page, recette }`, `reponse_brute` (texte du
+modèle, ou la recette JSON-LD reçue) ≤ 16 000 points de code et effacée à `enregistre`. `KINDS_IMPORT = ['recette', 'index', 'web']` (les sortes que
+la section liste et qu'`importOuvert` reconnaît) ; `KINDS_PAGES = ['recette', 'index']` (les sortes à pages) : `repo.ouvrirImport` et `repo.ajouterPages`
+refusent une ligne web (`TypeError`, rien d'écrit). Une seule définition d'« ouvert » (`importOuvert`, R-B-18) ; le mur de création reste celui du lot A
+(`absente` + index `recipe_id` sans statut ouvert), aveugle à la sorte : un import ouvert d'une autre sorte rend le refus nommé `transition`. `vol.js`
+porte LA variable de vol du document : `prendreVol` avant tout `await`, `libererVol` ne libère que sa tenue ; un vol web refuse une extraction photo et
+l'inverse ; « Annuler » n'est offert que par le document qui tient le vol (`volTenu`). Le départ est UNE transition (`a_lancer | echec`, plus
+`a_verifier` pour « Relire », liée à `cleLecture`) qui pose `en_cours`, efface l'ancien diagnostic et réécrit `device_id` : une ligne venue d'un autre
+appareil devient celle d'ici (R-B-8) : l'appareil d'origine la juge alors à 10 min (`VOL_MORT_MS`), plus sur 90 s d'un battement qu'il ne voit pas.
+`lignesImports` : « {titre} — Lien web · {hôte} » ;
+« Réessayer » (`relancer`) offert aussi pour une ligne d'un autre appareil et sans page ; une fiche `available` garde ses gestes (la relecture la vise) ;
+`cibleReprise` → `/recipes/<recipe_id>/importer?import=<id>` (R-B-20).
+
+**Frontière avec le lot A.** B est un client du journal d'A, sans champ neuf ni statut neuf : mêmes `TRANSITIONS`, même porte (`repo.transitionner`,
+`db.mutate({ conditions })`), même battement interne (`battement:<id>` de `sync_state`, R-B-17), même passe `interrompu` (au démarrage, à l'affichage
+de la section, et, depuis la vague, à l'affichage de l'écran web puis toutes les `BATTEMENT_MORT_MS` + 1 s tant que la ligne vole ailleurs), même
+purge à 30 jours. L'écran ciblé d'A (`#/recipes/<id>/importer`) délègue toute fiche à `source_url` à la variante web, en sens unique ; son vol vient
+de `vol.js` (`DOCUMENT_ID`, `BATTEMENT_MS` et `volEnCours` ré-exportés ; `reinitialiserImportCible` y reste locale et appelle `reinitialiserVol`). Les
+versions : « Enregistrer » fabrique une version `extraction` (`generated_by: 'ai'`, provenance web : `source_url`, `url_finale`, `source_kind`,
+`lue_le`, `lu_le`, `auteur`, `site`, `titre_lu`, `titre_signet`, `uncertain_fields`), et la question I-5 ne se pose que devant une version ÉCRITE au
+sens de `versionEcrite` (R-B-19, la même définition que `fabriquerExtraction`) ; la bannière du lot A s'applique telle quelle à cette version, après
+le bandeau web. Deux compteurs, comme au lot A : `imports.appels` (les départs de la ligne) et `public.assistant_usage_jour` (le quota du serveur :
+chaque lecture admise compte, même lue dans le JSON-LD).
+
+**Ce qui est absent.** Image du plat et `og:image` (lot F, qui emploiera `image-web`) ; PDF, EPUB, pages derrière une connexion ; pages rendues par
+JavaScript (`page_vide`) ; plusieurs recettes d'une page (la première lisible) ; `recipeCuisine`, `keywords`, `nutrition` ; épinglage d'IP ; `deno-dom` ;
+repères portés par « Garder ce lien » ; une écoute `online` / `offline` sur la fiche ; la garde d'identité du vol aux écritures de fin (les deux machines,
+A et B, R-B-27) ; une fin de vol commune (`lancerLecture` recopie `volUnique`) ; la notification croisée des deux écrans quand un vol de l'autre sorte
+commence ou finit.
+
+**Ce qui n'est pas prouvé.** `0006` et sa preuve n'ont pas été jouées sur `mitsu` (syntaxe seulement, pglast v8.6) ; la fonction n'est pas redéployée :
+`redirect: 'manual'` sous le runtime Supabase (S17), `credentials: 'omit'` sous Deno, le mur TLS et l'absence de réseau privé des isolats ne sont pas
+mesurés ; aucune lecture réelle (JSON-LD d'un vrai site, durée, jetons et coût d'une lecture par le modèle, charset réel) ; le 499 à « Annuler » (sous
+Node seulement) ; deux appareils réels ; Safari et l'iPhone (dont le coût des motifs sous JavaScriptCore : Chrome masque un retour arrière par son
+moteur linéaire de repli, la durée n'est affirmée que sous Node). Mesuré : la suite navigateur, Node (172/172 sur `51bad50`), `--check` 0, `tsc` 0, tous
+les mutants nommés par la spec § 7.5 et par le plan (C1 à C24, B1 à B8, T6a à T6j) rouges, deux équivalents déclarés, aucun survivant (R-B-28).
+
 ## Modèle de données (magasins IndexedDB)
 
 `books`, `book_editions` (ISBN, langue, `unit_convention_id`), `source_documents` (fichier, sha256, type), `source_pages` (page imprimée, position),

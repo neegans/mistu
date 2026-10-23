@@ -6,6 +6,7 @@ import { normalizeText } from './units.js';
 import { parseIngredientLine, detectTimers } from './lines.js';
 import { assertVocabulaire } from './vocabulaire.js';
 import { newId } from '../core/ids.js';
+import { lienSignet } from '../core/lien.js';
 import { IMPORTS_TERMINES, STATUTS_IMPORT } from '../model/schema.js';
 
 // --- Transitions du journal (spec § 3.1) : toutes par repo.transitionner (I-10) ; aucune autre. `en_cours → echec` couvre annule,
@@ -30,7 +31,9 @@ export const transitionPermise = (de, vers) => typeof de === 'string' && Object.
 // celles de l'extraction et du journal. Un 413 n'est PAS une raison : echecDomaine l'écrit `requete` + extra `trop_lourd` (ronde 1 : plus de valeur
 // morte dans la liste). `non_connecte` y figure (la session peut disparaître entre le rendu et le clic : complete() le lève).
 export const RAISONS_ECHEC = Object.freeze(['non_connecte', 'non_admis', 'quota', 'trop_de_demandes', 'requete', 'serveur', 'delai', 'reseau', 'interne', 'reponse_illisible',
-  'annule', 'coupe', 'illisible', 'hors_bornes', 'vide', 'interrompu', 'incertain']);
+  'annule', 'coupe', 'illisible', 'hors_bornes', 'vide', 'interrompu', 'incertain',
+  // Lot B (D-B14) : les refus d'une lecture web (passerelle) et `lien` (une adresse dans le TITRE lu, R-B-2).
+  'interdit', 'inaccessible', 'pas_une_page', 'page_trop_lourde', 'page_vide', 'lien']);
 
 // --- Discordance (spec D-6, § 4.3.3, Review Focus 2). Mots vides : la liste FERMÉE fr/en de la spec, possessifs compris.
 export const MOTS_VIDES = Object.freeze(['le', 'la', 'les', 'l', 'de', 'du', 'des', 'd', 'au', 'aux', 'à', 'et', 'en', 'un', 'une', 'ma', 'mon', 'mes', 'ta', 'ton', 'tes', 'sa', 'son', 'ses',
@@ -128,12 +131,13 @@ export function fabriquerExtraction(resultat, { reference, versions = [], pages 
   };
   assertVocabulaire(recipe, 'recipes'); // D-12 : le fabricant vérifie le vocabulaire fermé avant toute écriture
   const pageUpdates = presentes.map((id, i) => ({ ...parId.get(id), kind: 'recipe', position: i + 1, printed_page: parId.get(id).printed_page ?? (i === 0 ? recipe.printed_page ?? null : null) }));
-  // I-5 (vague finale, m5) : ce que la personne a ÉCRIT et qui peut être courant — une saisie à la main (extraction) ou une correction — jamais une
-  // adaptation (« Ma version », un remplacement d'ingrédient) ni une traduction, qui ne deviennent pas courantes : sinon « Garder ma version » gardait
-  // courante l'ancienne lecture partielle de l'assistant.
-  const remplacement = versions.some((v) => v?.provenance?.generated_by !== 'ai' && (v?.kind === 'extraction' || v?.kind === 'correction'));
+  const remplacement = versions.some(versionEcrite);
   return { recipe, version, pageUpdates, remplacement };
 }
+// I-5 (vague finale, m5) : ce que la personne a ÉCRIT et qui peut être courant — une saisie à la main (extraction) ou une correction — jamais une
+// adaptation (« Ma version », un remplacement d'ingrédient) ni une traduction, qui ne deviennent pas courantes : sinon « Garder ma version » gardait
+// courante l'ancienne lecture partielle de l'assistant. Exportée (lot B, ronde 1 de la tâche 3) : la lecture web (versionHumaine, R-B-19) lit la même.
+export const versionEcrite = (v) => v?.provenance?.generated_by !== 'ai' && (v?.kind === 'extraction' || v?.kind === 'correction');
 
 // --- Couverture d'une relecture (ronde finale 2, I-5) : les pages de la version COURANTE (provenance.source_page_ids, identifiants seulement,
 // dédoublonnés, dans leur ordre) qu'une lecture ne relit pas (`lues` : les pages de la nouvelle version). Tant qu'il en reste, l'écran demande
@@ -174,17 +178,31 @@ export function seanceDUnImportCible(seance, imports) {
   return (Array.isArray(imports) ? imports : []).some((i) => importOuvert(i) && i.kind === 'recette' && !!i.recipe_id && i.scan_session_id === seance?.id);
 }
 
+// La clé d'UNE lecture (T4-R2 du lot A) : la ligne, le départ de son vol et son résultat. Une clôture (Ignorer, Enregistrer, echec(illisible)) ne
+// vaut que pour la lecture AFFICHÉE : une lecture arrivée d'un autre onglet entre-temps (même id, même statut) a une autre clé. Une définition, ici
+// (pure) : l'écran ciblé, l'éditeur, le panneau d'index et la section « Imports » (lot A, par src/ui/import-cible.js) et la variante web (lot B).
+export const cleLecture = (L) => JSON.stringify([L?.id ?? null, L?.started_at ?? null, L?.resultat ?? null]);
+// Le modèle relu du journal, borné avant d'entrer dans une provenance (T4-R1 du lot A) : ≤ 80 points de code (LIMITES_PASSERELLE.modele, la borne de
+// PasserelleProvider) ; une chaîne vide, ou autre chose qu'une chaîne, vaut null. UNE définition (ronde 1 de la tâche 5 du lot B) : l'écran ciblé, l'éditeur
+// et le panneau d'index (lot A) et la variante web la partagent.
+export const modeleBorne = (m) => (typeof m === 'string' && m && Array.from(m).length <= 80 ? m : null);
+
 // --- Section « Imports » d'Ajouter (spec § 4.5, tâche 6) ---------------------------------------------------------------------------------------
-// Les sortes que ce lot écrit (« couverture » et « web » sont réservées aux lots E et B : une ligne d'une autre sorte n'est pas listée, rien
-// d'inventé) et les statuts NON terminés. `importOuvert` : une ligne que la section liste (et que la fiche du livre compte).
-export const KINDS_IMPORT = Object.freeze(['recette', 'index']);
+// Les sortes écrites aujourd'hui (« couverture » reste réservée au lot E : une ligne d'une autre sorte n'est pas listée, rien d'inventé ; « web »
+// arrive avec le lot B, spec recette-web § 4.7) et les statuts NON terminés. `importOuvert` : une ligne que la section liste (et que la fiche du
+// livre compte — un import web n'y compte jamais : son edition_id est nul, D-B17).
+export const KINDS_IMPORT = Object.freeze(['recette', 'index', 'web']);
+// Les sortes qui portent des PAGES (photos) : les seules que le chemin photo ouvre (repo.ouvrirImport, repo.ajouterPages). Une lecture web naît par
+// demarrerLectureWeb (src/ui/import-web.js), jamais par ce chemin (lot B, P-1).
+export const KINDS_PAGES = Object.freeze(['recette', 'index']);
 export const IMPORTS_OUVERTS = Object.freeze(STATUTS_IMPORT.filter((s) => !IMPORTS_TERMINES.includes(s)));
 export const importOuvert = (i) => !!i && typeof i === 'object' && typeof i.id === 'string' && !!i.id && KINDS_IMPORT.includes(i.kind) && IMPORTS_OUVERTS.includes(i.status);
 
 // Où « Reprendre » mène, par sorte (spec § 4.5) : une recette ciblée → son écran (#/recipes/<id>/importer, photos en place) ; une recette sans
 // référence (« Regrouper en recette ») → l'éditeur prérempli (#/recipes/new?import=) ; un index → le panneau d'index de sa séance
-// (#/import?session=…&import=). Identifiants encodés (une fiche reçue d'ailleurs peut porter « & » ou « / ») ; un index sans séance, une sorte
-// inconnue ou une ligne sans identifiant → null (rien où reprendre).
+// (#/import?session=…&import=) ; une lecture web (lot B) → l'écran de sa fiche avec LA ligne (#/recipes/<id>/importer?import=, variante web ;
+// R-B-20, comme m4 / VF-6 du lot A : après synchro, une fiche peut avoir une lecture ouverte par appareil). Identifiants encodés
+// (une fiche reçue d'ailleurs peut porter « & » ou « / ») ; un index sans séance, une sorte inconnue ou une ligne sans identifiant → null.
 const chaine = (v) => (typeof v === 'string' && v ? v : null);
 export function cibleReprise(ligne) {
   const id = chaine(ligne?.id);
@@ -192,6 +210,7 @@ export function cibleReprise(ligne) {
   // Vague finale (m4) : l'écran ciblé reçoit aussi LA ligne (?import=) — après synchro, une recette peut avoir un import ouvert par appareil.
   if (ligne.kind === 'recette') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/importer?import=${encodeURIComponent(id)}` : `/recipes/new?import=${encodeURIComponent(id)}`;
   if (ligne.kind === 'index') return chaine(ligne.scan_session_id) ? `/import?session=${encodeURIComponent(ligne.scan_session_id)}&import=${encodeURIComponent(id)}` : null;
+  if (ligne.kind === 'web') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/importer?import=${encodeURIComponent(id)}` : null;
   return null;
 }
 
@@ -204,7 +223,12 @@ export function cibleReprise(ligne) {
 //   ligne d'un AUTRE appareil (« Photos sur un autre appareil ») : reprendre seulement si un résultat est là, jamais relancer → ignorer seul sinon ;
 //   référence pas encore reçue (recipe_id inconnu ici) → aucun geste ; rien où reprendre (index sans séance) → pas de « reprendre » ;
 //   (ronde 1) référence devenue `available` (complétée ailleurs : l'écran ciblé la refuse) → ignorer seul ; echec sans page → pas de « relancer ».
-// Rend [{ id, kind, titre: { type: reference | index | regrouper | seance, texte, livre }, etat, age: { n, unite }, raison, gestes, cible,
+// Une lecture web (lot B, spec recette-web § 4.7, ruling P-10) : mêmes états, trois différences — « relancer » (« Réessayer » à l'écran)
+// est offert AUSSI pour une ligne d'un autre appareil (aucune photo requise : l'adresse est dans le signet) et SANS page (une lecture web n'en
+// porte jamais) ; « reprendre » sur a_verifier exige un résultat, d'où qu'elle vienne ; une fiche déjà `available` garde ces gestes (la
+// relecture D-B18 vise justement une fiche lue, et la variante web de l'écran l'admet). Son titre est { type: 'web', texte: titre du signet,
+// livre: l'hôte RECALCULÉ de son adresse }.
+// Rend [{ id, kind, titre: { type: reference | index | regrouper | web | seance, texte, livre }, etat, age: { n, unite }, raison, gestes, cible,
 // ailleurs, autreAppareil, referenceAbsente, pages }].
 const parRecence = (champ) => (a, b) => String(b[champ] || '').localeCompare(String(a[champ] || ''));
 export function lignesImports(ctx, { maintenant = null, documentId = null, deviceId = null } = {}) {
@@ -219,21 +243,25 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     const autreAppareil = autre(i);
     const tenu = i.status === 'en_cours' && !!documentId && i.document_id_vol === documentId;
     const ailleurs = i.status === 'en_cours' && !tenu;
-    const recetteId = i.kind === 'recette' ? chaine(i.recipe_id) : null;
+    const web = i.kind === 'web';
+    const recetteId = i.kind === 'recette' || web ? chaine(i.recipe_id) : null;
     const recette = recetteId ? recettes.get(recetteId) ?? null : null;
     const referenceAbsente = !!recetteId && !recette;
-    const type = i.kind === 'index' ? 'index' : recetteId ? 'reference' : 'regrouper';
+    const type = i.kind === 'index' ? 'index' : web ? 'web' : recetteId ? 'reference' : 'regrouper';
     const cible = cibleReprise(i);
     let gestes;
     if (referenceAbsente) gestes = [];
     else if (i.status === 'en_cours') gestes = tenu ? ['annuler'] : [];
+    else if (web) gestes = i.status === 'echec' ? ['relancer', 'ignorer'] : i.status === 'a_verifier' && i.resultat == null ? ['ignorer'] : ['reprendre', 'ignorer'];
     else if (recette?.availability === 'available') gestes = ['ignorer']; // un POST ne servirait à rien : l'écran ciblé refuse une recette qui a son texte
     else if (autreAppareil) gestes = i.status === 'a_verifier' && i.resultat != null ? ['reprendre', 'ignorer'] : ['ignorer'];
     else gestes = i.status === 'echec' ? ['relancer', 'ignorer'] : ['reprendre', 'ignorer'];
     if (!cible) gestes = gestes.filter((g) => g !== 'reprendre');
-    if (!nbPages(i)) gestes = gestes.filter((g) => g !== 'relancer'); // un vol sans page serait refusé (sans_page) sans rien dire
+    // Un vol sans page serait refusé (sans_page) sans rien dire ; une lecture web n'a jamais de page (P-10), mais sans recipe_id (forme reçue) elle
+    // n'a aucun signet à relire : « Réessayer » ne pourrait jamais aboutir (ronde 1 ; lancerLecture la refuse `inconnu`) — « Ignorer » seul reste.
+    if (web ? !recetteId : !nbPages(i)) gestes = gestes.filter((g) => g !== 'relancer');
     return {
-      id: i.id, kind: i.kind, titre: { type, texte: recette ? chaine(recette.original_title) : null, livre: livreDe(recette?.edition_id ?? i.edition_id) },
+      id: i.id, kind: i.kind, titre: { type, texte: recette ? chaine(recette.original_title) : null, livre: web ? (recette ? lienSignet(recette.source_url).hote : null) : livreDe(recette?.edition_id ?? i.edition_id) },
       etat: i.status, age: ageDepuis(i.updated_at, maintenant), raison: i.status === 'echec' ? chaine(i.erreur?.raison) : null,
       gestes, cible, ailleurs, autreAppareil, referenceAbsente, pages: nbPages(i),
     };

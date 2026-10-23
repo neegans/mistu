@@ -3,7 +3,7 @@
 
 export const DB_NAME = 'cuisine-os';
 export const DB_VERSION = 4;
-export const APP_VERSION = '0.9.0';
+export const APP_VERSION = '0.10.0';
 
 export const ARCHIVE_FORMAT = 'cuisine-os-archive';
 export const ARCHIVE_FORMAT_VERSION = 1;
@@ -144,6 +144,8 @@ export const RELATIONS = [
 
 // Vocabulaire fermé des états (libellés visibles dans src/i18n).
 export const AVAILABILITY = ['reference_only', 'partial', 'available'];
+// D-B6 (lot B) : d'où vient le texte d'une recette lue sur le web — les données publiées par la page (JSON-LD) ou le texte lu par le modèle.
+export const SOURCE_KINDS = Object.freeze(['jsonld', 'modele']);
 export const VERIFICATION = ['unverified', 'to_verify', 'verified'];
 export const VERSION_KIND = ['extraction', 'correction', 'adaptation', 'translation', 'synthesis'];
 export const VERSION_STATUS = ['proposed', 'tested'];

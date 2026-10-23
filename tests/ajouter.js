@@ -3,7 +3,7 @@
 
 // Filet i18n (F13) : chaque t('…') de ces modules doit avoir son entrée en.js. Exportées : tests/import-cible.js vérifie que son module y figure.
 // MODULES_NEUFS : les modules créés par les lots (lien.js de R-UX-11 et isbn.js inclus) + add.js réécrit + l'écran d'import ciblé (lot A, tâche 4).
-export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js', '../src/ui/import-cible.js'];
+export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js', '../src/ui/import-cible.js', '../src/domain/lecture-web.js', '../src/ui/import-web.js', '../src/ui/vol.js'];
 // CHAINES_NEUVES_AILLEURS reconstituée depuis le code réel (git diff main...HEAD, ensemble main vs HEAD des clés t(),
 // pas seulement les lignes ajoutées : une ligne réécrite pour une autre raison peut porter une chaîne déjà sur main —
 // book.js:'Cuisines', recipe-edit.js:'Cuisines / régions' et import.js:'— Aucun livre (à associer plus tard) —'
@@ -18,9 +18,17 @@ export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', 
 export const CHAINES_NEUVES_AILLEURS = {
   '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', '+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer', '{n} import à reprendre', '{n} imports à reprendre'],
   '../src/ui/import.js': ['Les références n’ont pas pu être créées. Réessaie.'],
-  '../src/ui/recipe.js': ['Lien web gardé.', 'L’app n’a pas lu la page : ouvre-la pour cuisiner.', 'Ouvrir le lien', 'Adresse non reconnue : ', 'Importer cette recette', 'Relire les pages',
+  '../src/ui/recipe.js': ['Lien web gardé.', 'Ouvrir le lien', 'Adresse non reconnue : ', 'Importer cette recette', 'Relire les pages',
+    // Lot B, tâche 5 : la fiche d'un lien gardé (blocSignet), le bandeau d'une version lue sur le web, la relecture (B-27 : l'ancienne phrase est retirée).
+    'L’app n’a pas encore lu la page.', 'Lecture de la page en cours…', 'Voir', 'Lecture reçue : vérifie-la et enregistre.', 'Vérifier et enregistrer', 'Contenu non récupéré : ouvre la page.',
+    'Lire la recette avec l’assistant', 'Réessayer', 'Une lecture = un appel à l’assistant, compté dans ton quota du jour.', 'Lors de la recherche, l’assistant disait : {p}', 'Estimé par l’assistant : {r}',
+    'Tu es hors ligne.', 'Lue sur {h} le {d} · {m} — vérifie.', 'Lue sur {h} · {m} — vérifie.', 'données de la page', 'texte lu par l’assistant', 'Selon la page : {s}', 'Relire la page avec l’assistant',
     'Lue par l’assistant le {d}', 'Lue par l’assistant', '{n} ligne(s) incertaine(s)', 'page possiblement manquante', 'lecture incomplète', 'Incertain : {t}', 'Vérifiée', 'À vérifier', '1 ligne à vérifier', '{n} lignes à vérifier', 'Photo du plat'],
-  '../src/ui/components.js': ['Lien web', 'Adresse non reconnue', 'incertain', 'Ligne incertaine selon l’assistant'],
+  '../src/ui/components.js': ['Lien web', 'Adresse non reconnue', 'incertain', 'Ligne incertaine selon l’assistant',
+    // Lot B, tâche 4 : la ligne de repères déménagée de search.js (ligneReperes, mêmes textes).
+    '≈ {n} min', '≈ {h} h', '≈ {h} h {m}', 'facile', 'moyen', 'exigeant', '1 ingrédient', '{n} ingrédients'],
+  // Lot B, tâche 4 : « Garder et lire » et le doublon sur une carte de l'onglet Web.
+  '../src/ui/search.js': ['Garder et lire', 'Tu as déjà gardé cette adresse.', 'Ouvrir la fiche', 'Adresse non reconnue.', 'Le lien n’a pas pu être gardé. Réessaie.'],
   '../src/ui/cook.js': ['Lue par l’assistant, non relue'],
   '../src/ui/grocery.js': ['Lue par l’assistant, non relue'],
   '../src/ui/recipe-edit.js': ['Une étape par paragraphe (ligne vide entre deux étapes).', 'La recette n’a pas pu être enregistrée. Réessaie.', 'Une lecture est déjà en cours : annule-la d’abord.', 'page possiblement manquante', 'lecture incomplète'],
@@ -916,6 +924,38 @@ export async function runAjouterTests({ eq, ok }) {
     eq([boutonMaj === bouton, bouton.disabled, zone.querySelector('[data-erreur="adresse"]').textContent, zone.querySelector('[data-erreur="adresse"]').hidden], [true, true, 'Adresse non reconnue.', false], 'signet : la frappe met à jour l’erreur ET le bouton, sur place');
     S.majSignet(zone, S.signetModel({ adresse: 'https://b.test/', titre: 'T' }));
     eq([bouton.disabled, zone.querySelector('[data-erreur="adresse"]').textContent, zone.querySelector('[data-erreur="adresse"]').hidden], [false, '', true], 'signet : une adresse redevenue bonne efface l’erreur et rallume le bouton');
+  }
+  {
+    // Lot B (D-B16, D-B7, § 4.6) : les repères de « Garder et lire » et le doublon d'adresse.
+    const avecReperes = S.fabriquerSignet(S.signetModel({ adresse: 'https://a.test/p', titre: 'T' }), { newId: () => 'rc-2', langue: 'fr', reperes: { presentation: 'Un plat.', temps_min: 2000, difficulte: 'facile', ingredients: 7, autre: 'x' } });
+    eq(avecReperes.web_reperes, { presentation: 'Un plat.', temps_min: null, difficulte: 'facile', ingredients: 7 }, 'signet (D-B16) : avec reperes, web_reperes posé et REVALIDÉ (2 000 min → null, champ inconnu écarté)');
+    eq(Object.hasOwn(S.fabriquerSignet(S.signetModel({ adresse: 'https://a.test/p', titre: 'T' }), { newId: () => 'rc-3', langue: 'fr', reperes: { presentation: null, temps_min: null } }), 'web_reperes'), false, 'signet (D-B16) : des repères tous nuls ne posent rien (mutant « web_reperes posé même sans repères » : la forme épinglée plus haut rougit)');
+    eq([S.signetModel({ adresse: 'https://a.test/', titre: 'T', doublon: { id: 'rc_x' } }).peutEnregistrer, S.signetModel({ adresse: 'https://a.test/', titre: 'T' }).doublon], [false, null], 'signet (D-B7) : un doublon éteint l’enregistrement ; sans doublon, null');
+    const { withRepo } = await import('./sync-fixture.js');
+    const vraiFetch = globalThis.fetch;
+    globalThis.fetch = async (u) => { throw new Error(`aucun reseau attendu ici : ${u}`); };
+    try {
+      await withRepo(async (repo, db) => {
+        const existante = { id: 'rc_garde', original_title: 'Déjà là', availability: 'reference_only', source_url: 'https://a.test/x/' };
+        await db.mutate({ puts: { recipes: [existante] }, origin: 'device' });
+        let refus = null; try { await S.enregistrerSignet({ adresse: 'https://a.test/x?utm_source=y', titre: 'T' }, { repo, langue: 'fr', existantes: [existante] }); } catch (e) { refus = e.message; }
+        eq([refus, (await db.getAll('recipes')).length], ['signet_doublon', 1], 'enregistrerSignet (D-B7, seconde porte) : une adresse déjà gardée → signet_doublon, rien d’écrit');
+        const navs = [];
+        const autre = { id: 'rc_garde_b', original_title: 'Autre', availability: 'reference_only', source_url: 'https://a.test/y' };
+        const root = await S.renderSignetRoute({}, { adresse: 'https://A.test/x', titre: 'T' }, { book_editions: [], booksById: new Map(), books: [], recipes: [existante, autre] }, { repo, navigate: (p) => navs.push(p), toast: () => {} });
+        const banniere = () => root.querySelector('[data-role="doublon-adresse"]');
+        const garder = () => root.querySelector('[data-role="enregistrer"]');
+        eq([banniere().hidden, banniere().textContent.includes('Tu as déjà gardé cette adresse.'), banniere().querySelector('a').getAttribute('href'), banniere().querySelector('a').textContent, garder().disabled], [false, true, '#/recipes/rc_garde', 'Ouvrir la fiche', true], 'route (D-B7) : adresse préremplie déjà gardée → bannière doublon-adresse, « Garder le lien » éteint, « Ouvrir la fiche » mène à la fiche');
+        const champ = [...root.querySelectorAll('label.field')].find((f) => f.querySelector('span')?.textContent === 'Adresse *').querySelector('input');
+        champ.value = 'https://a.test/libre'; champ.dispatchEvent(new Event('input'));
+        eq([banniere().hidden, garder().disabled], [true, false], 'route (D-B7) : frappe vers une adresse libre → bannière cachée, bouton rallumé (sur place)');
+        // Ronde 1 : vers une AUTRE adresse gardée → la bannière mène à CETTE fiche (majSignet réécrit l'href sur place).
+        champ.value = 'https://a.test/y'; champ.dispatchEvent(new Event('input'));
+        eq([banniere().hidden, banniere().querySelector('a').getAttribute('href'), garder().disabled], [false, '#/recipes/rc_garde_b', true], 'route (D-B7) : frappe vers une autre adresse gardée → « Ouvrir la fiche » mène à cette fiche-là (href mis à jour sur place), bouton éteint');
+        champ.value = 'https://a.test/x#ancre'; champ.dispatchEvent(new Event('input'));
+        eq([banniere().hidden, garder().disabled, navs], [false, true, []], 'route (D-B7) : retour vers l’adresse gardée → de nouveau, rien d’écrit ni de navigation');
+      });
+    } finally { globalThis.fetch = vraiFetch; }
   }
   {
     // La route entière (F12 : base JETABLE, `fetch` remplacé par un refus — l'app n'ouvre pas la page, et c'est
@@ -1884,10 +1924,10 @@ export async function runAjouterTests({ eq, ok }) {
   {
     const sw = await lire('../sw.js');
     ok(sw.length > 300 && sw.includes('SHELL'), `statique sw.js : le source est bien lu (${sw.length} caractères, SHELL présent) — sans quoi les inclusions ci-dessous ne prouveraient rien (S4)`);
-    for (const m of ['./src/ui/puces.js', './src/ui/livre-ajout.js', './src/ui/accueil-livre.js', './src/ui/signet.js', './src/core/image.js', './src/core/blob-urls.js', './src/core/lien.js', './src/core/isbn.js']) ok(sw.includes(`'${m}'`), `SHELL : ${m}`);
-    ok(/VERSION = 'cuisine-os-v0\.9\.0-\d+'/.test(sw), 'sw.js : VERSION 0.9.0');
+    for (const m of ['./src/ui/puces.js', './src/ui/livre-ajout.js', './src/ui/accueil-livre.js', './src/ui/signet.js', './src/core/image.js', './src/core/blob-urls.js', './src/core/lien.js', './src/core/isbn.js', './src/domain/lecture-web.js']) ok(sw.includes(`'${m}'`), `SHELL : ${m}`);
+    ok(/VERSION = 'cuisine-os-v0\.10\.0-\d+'/.test(sw), 'sw.js : VERSION 0.10.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.9.0', 'APP_VERSION 0.9.0');
+    eq(APP_VERSION, '0.10.0', 'APP_VERSION 0.10.0');
     const { GOOGLE_BOOKS } = await import('../src/sync/config.js');
     ok(typeof GOOGLE_BOOKS?.key === 'string' && (GOOGLE_BOOKS.key === '' || /^AIza[0-9A-Za-z_-]{35}$/.test(GOOGLE_BOOKS.key)), 'config : la clé Google Books est vide ou au format d’une clé d’API publique — un test de forme, jamais de valeur (S2/F2)');
   }

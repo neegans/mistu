@@ -25,6 +25,7 @@ import { runAssistantCompteTests } from './assistant-compte.js';
 import { runCreerIaTests } from './creer-ia.js';
 import { runPasserelleTests } from './passerelle.js';
 import { runImportCibleTests } from './import-cible.js';
+import { runLectureWebTests } from './lecture-web.js';
 import { runThemeTests } from './theme.js';
 
 const results = [];
@@ -209,6 +210,10 @@ catch (error) { ok(false, `Suite passerelle interrompue : ${error?.message || St
 try { await runImportCibleTests({ eq, ok }); }
 catch (error) { ok(false, `Suite import ciblé interrompue : ${error?.message || String(error)}`); }
 
+// --- Recette web complète (lot B) : outil lecture-web côté app — domaine, vol partagé, signet, onglet Web, écran, fiche, section Imports.
+try { await runLectureWebTests({ eq, ok }); }
+catch (error) { ok(false, `Suite lecture web interrompue : ${error?.message || String(error)}`); }
+
 // --- Thème « magazine culinaire » : la feuille servie est lue (jetons, contrastes, inventaire) et mesurée (scène hors écran visible).
 try { await runThemeTests({ eq, ok }); }
 catch (error) { ok(false, `Suite thème interrompue : ${error?.message || String(error)}`); }
@@ -217,7 +222,7 @@ catch (error) { ok(false, `Suite thème interrompue : ${error?.message || String
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 3693,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 3996,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);
