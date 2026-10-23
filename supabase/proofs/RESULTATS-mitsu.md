@@ -315,12 +315,12 @@ qu'elle n'est pas appliquée : une fois collée, la figer (`SYNC_STORES_0005` + 
 
 | Heure | Collage | Résultat |
 | --- | --- | --- |
-| 23 oct. 2026, avant 20 h 05 UTC | `insert into private.allowed_users …` (1 adresse de preuve `exemple.invalid`) | jouée (fichier 1 du kit) ; le compte affiché n'a pas été rapporté au contrôleur |
+| 23 oct. 2026, avant 20 h 05 UTC | `insert into private.allowed_users …` (1 adresse de preuve `exemple.invalid`) | jouée (fichier 1 du kit) ; le compte affiché après l'insertion n'a pas été rapporté (attendu 3 : les deux adresses admises plus celle de preuve ; le retrait rend 2) |
 | idem | `migrations/0005_imports.sql` | jouée en un seul collage (fichier 2 du kit, identique au fichier du dépôt : `cmp` muet) ; sortie non rapportée (attendu `Success. No rows returned`) ; la preuve atteste la table, ses règles, son déclencheur, ses index et les quatre fonctions recréées (verdicts 1.01-1.08, 2.01, 5.01-5.05) |
 | — | empreinte du `0005` collé : `shasum -a 256 supabase/migrations/0005_imports.sql` | `1af9e999d88958ea44ed739900cef842e54d1473b9d3f6a825ee23a388600ae0` (fichier du dépôt à `2b6a2fd`, celui du kit) |
 | idem | `notify pgrst, 'reload schema';` (collée seule) | jouée (fichier 3 du kit) |
 | vers 20 h 05 UTC | preuve `0005` (« Run without RLS ») | `999 BILAN : 0 faux sur 35`, `ok` vrai sur les 36 lignes (fichier 4 du kit) |
-| après 20 h 05 UTC | retrait de l'adresse de preuve | fichier 5 du kit remis à Neegan juste après la preuve ; compte de retour à consigner quand il sera rapporté |
+| 20 h 14 UTC (16 h 14 à Montréal) | retrait de l'adresse de preuve | jouée (fichier 5 du kit : `delete … where email = lower('…')` puis `select count(*)`) ; `allowed_users_apres` = **2**, soit les deux adresses admises connues (capture d'écran de Neegan) |
 
 Tableau des verdicts (ordre, etape, attendu, obtenu, ok), tel que rendu par l'éditeur SQL :
 
