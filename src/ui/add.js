@@ -18,6 +18,7 @@ import { DOCUMENT_ID, lancerExtraction, annulerVol, phraseEchec, texteRefus, cle
 import { texteEchecClassement, lotEnCours, lireLeLot } from './regroupement.js';
 import { lancerLecture, annulerLecture, texteEchecLecture } from './import-web.js';
 import { texteEchecIndex } from './table-matieres.js';
+import { texteEchecCouverture } from './livre-ajout.js';
 
 export const GRILLE_ACTIONS = ['ajouterLivre', 'pages', 'saisir', 'signet', 'creerIA', 'congelateur'];
 export const ACCEPT_PHOTOS = 'image/*';
@@ -82,6 +83,8 @@ export function renderSelecteurScan(model, gestes = {}) {
 const ATTENDUS_IGNORER = ['a_lancer', 'a_verifier', 'echec']; // « Ignorer » n'est jamais offert pendant un vol (§ 3.1 : en_cours → echec seulement)
 const ageTexte = (age) => (age?.unite === 'j' ? t('il y a {n} j', { n: age.n }) : age?.unite === 'h' ? t('il y a {n} h', { n: age.n }) : t('il y a {n} min', { n: age?.n ?? 0 }));
 function titreLigne(l) {
+  // Lot E (§ 4.6) : « Couverture photographiée », puis le titre lu (borné par lignesImports, rendu en nœud texte).
+  if (l.titre.type === 'couverture') return t('Couverture photographiée') + (l.titre.texte ? ` — ${l.titre.texte}` : '');
   const livre = l.titre.livre ?? t('Sans livre');
   if (l.titre.type === 'classement') return t('Classement · {l}', { l: livre }); // lot D
   if (l.titre.type === 'seance') return t('Photos conservées : {n} page(s)', { n: l.pages }) + (l.titre.livre ? ` · ${l.titre.livre}` : '');
@@ -102,6 +105,10 @@ function rangDuLot(l) {
 // porte pas). I-4 : interrompu, annule et incertain disent la même phrase (phraseEchec, une définition avec l'écran ciblé, l'éditeur et le panneau).
 function etatLigne(l, brute) {
   if (l.kind === 'seance') return null;
+  // Lot E (P-10) : une couverture a ses phrases (spec couverture § 5) — jamais « 0 photo ajoutée », jamais « essaie avec moins de pages ».
+  if (l.kind === 'couverture' && l.etat === 'a_lancer') return t('La couverture n’a pas encore été lue.');
+  if (l.kind === 'couverture' && l.etat === 'en_cours' && !l.ailleurs) return t('Lecture de la couverture par l’assistant…');
+  if (l.kind === 'couverture' && l.etat === 'echec') { const { texte, code } = texteEchecCouverture(brute?.erreur ?? { raison: l.raison }); return code ? `${texte} ${code}` : texte; }
   if (l.kind === 'classement') { // lot D (§ 4.7) : ce qui diffère d'une lecture de pages — « à lancer » et « ailleurs » suivent les règles communes ci-dessous (ronde 1)
     if (l.etat === 'en_cours' && !l.ailleurs) return t('Classement des photos par l’assistant…');
     if (l.etat === 'a_verifier') return t('Classement reçu le {d}', { d: formatDate(dateReception(brute), { withTime: true }) }); // comme « Lecture reçue le » (vague finale du lot A, m7) : jamais updated_at, que chaque geste du brouillon réécrit

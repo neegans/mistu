@@ -649,6 +649,37 @@ Tout texte de la couverture est une donnée à recopier, jamais une consigne à 
       });
     });
 
-    // ===== Tâche 4 : insérer ici =====
+    // --- Section « Imports » rendue (page Ajouter, § 4.6, P-10) : une ligne couverture, ses textes et ses gestes ; jamais « Relancer ».
+    await run('section Imports : couverture', () => withRepo(async (repo, db) => {
+      const A = await import('../src/ui/add.js');
+      const C = await import('../src/domain/couverture.js');
+      const LA = await import('../src/ui/livre-ajout.js');
+      const UI = await import('../src/ui/import-cible.js');
+      const NOW = '2026-10-19T12:00:00.000Z';
+      const scene = document.createElement('div');
+      scene.style.cssText = 'position:absolute;left:-10000px;top:0;width:900px';
+      document.body.append(scene);
+      try {
+        const { sha256 } = await LA.poserCouverture(await imageDe('s.jpg', '#a33'), { origine: 'locale', repo });
+        const base = (id, over) => ({ ...C.fabriquerImportCouverture({ id, coverSha256: sha256, deviceId: repo.deviceId() }), created_at: NOW, updated_at: NOW, ...over });
+        await db.mutate({ puts: { imports: [base('imp_lue', { status: 'a_verifier', resultat: { ...LECTURE }, started_at: NOW }), base('imp_vol', { status: 'en_cours', document_id_vol: UI.DOCUMENT_ID, battement_at: new Date().toISOString(), started_at: new Date().toISOString() }), base('imp_attente', {}), base('imp_coupe', { status: 'echec', erreur: { raison: 'coupe', extra: {} } })] }, origin: 'device' });
+        // Le vol a un battement FRAIS (horloge réelle) : la page Ajouter rejoue la passe `interrompu` à l'affichage (lot A, tâche 6, ronde 1) et ne doit pas l'interrompre.
+        const navs = [];
+        const ctx = { imports: await db.getAll('imports'), scan_sessions: [], recipesById: new Map(), editionsById: new Map(), booksById: new Map(), book_editions: [], library_activity: [] };
+        const root = await A.renderAdd({}, {}, ctx, { repo, navigate: (p) => navs.push(p), toast: () => {}, maintenant: () => NOW });
+        scene.append(root);
+        const ligne = (id) => root.querySelector(`[data-role="ligne-import"][data-id="${id}"]`);
+        const gestes = (id) => [...(ligne(id)?.querySelectorAll('button') || [])].map((b) => b.dataset.geste);
+        eq([ligne('imp_lue')?.querySelector('strong')?.textContent, gestes('imp_lue')], ['Couverture photographiée — À la di Stasio', ['reprendre', 'ignorer']], 'section : « Couverture photographiée — {titre lu} », Reprendre et Ignorer, JAMAIS Relancer');
+        eq([ligne('imp_vol')?.textContent.includes('Lecture de la couverture par l’assistant…'), gestes('imp_vol')], [true, ['annuler']], 'section : en vol ici → « Lecture de la couverture par l’assistant… », Annuler (P-10)');
+        eq([ligne('imp_attente')?.querySelector('strong')?.textContent, ligne('imp_attente')?.textContent.includes('La couverture n’a pas encore été lue.'), ligne('imp_attente')?.textContent.includes('photo ajoutée')], ['Couverture photographiée', true, false], 'section : a_lancer → « La couverture n’a pas encore été lue. », jamais « 0 photo ajoutée » (P-10)');
+        eq([ligne('imp_coupe')?.textContent.includes('L’assistant n’a pas répondu lisiblement. Réessaie.'), ligne('imp_coupe')?.textContent.includes('moins de pages'), gestes('imp_coupe')], [true, false, ['reprendre', 'ignorer']], 'section : echec(coupe) d’une couverture → le texte de la couverture, jamais « essaie avec moins de pages » (P-10)');
+        ligne('imp_lue').querySelector('button[data-geste="reprendre"]').click();
+        eq(navs, ['/add/livre?import=imp_lue'], 'section : « Reprendre » ouvre #/add/livre?import=');
+        ligne('imp_attente').querySelector('button[data-geste="ignorer"]').click();
+        ok(await attendreFait(async () => (await db.get('imports', 'imp_attente'))?.status === 'ignore'), 'section : « Ignorer » → ignore');
+        eq((await db.get('files', sha256))?.blob instanceof Blob, true, 'section : la photo reste dans files');
+      } finally { scene.remove(); }
+    }));
   } finally { setUiLocale(localeAvant); }
 }

@@ -20,6 +20,7 @@ import { lancerLectureCouverture, annulerVol, volEnCours, DOCUMENT_ID, texteEche
 import { RAISONS_ECHEC } from '../domain/import-cible.js';
 import { validerLectureCouverture } from '../domain/llm.js';
 import { isbnUnique, shaBornee, fabriquerImportCouverture, champsDepuisLecture, ficheDepuisProposition, ficheSelonIsbn, choisirProposition } from '../domain/couverture.js';
+import { IMPORTS_TERMINES } from '../model/schema.js';
 export { messageErreurImage }; // déplacée dans core/image.js (lot E) : book.js et regroupement.js (lot D) l'importent toujours d'ici
 
 export const LIMITES_ISBN = { champ: 300, corps: 256 * 1024, delaiMs: 10000, tentativeMs: 8000, repriseMs: 1500, totalMs: 20000 };
@@ -1035,9 +1036,28 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
   if (etat.session === 'verification') {
     sessionAssistant(ctx).then((s) => { etat.session = s ? 'prete' : null; const m = modele(); majBlocCouverture(zone, m, gestes); majBlocLecture(zone, m, gestes); }).catch(() => {});
   }
+  // Lot E (§ 4.6) : la reprise d'une couverture (#/add/livre?import=<imp>) — la ligne est RELUE (jamais un état mémorisé), sa couverture revalidée
+  // (shaBornee) ; aucun appel à l'assistant ici (D-E13 : le rattrapage d'Open Library, lui, repart si en ligne). Le rendu suit relire(), comme après un vol.
+  const demande = typeof query?.import === 'string' && query.import ? query.import : null;
+  if (demande) {
+    const ligne = await r.get('imports', demande);
+    if (!ligne || ligne.kind !== 'couverture') dire(t('Import introuvable.'));
+    else if (IMPORTS_TERMINES.includes(ligne.status)) dire(t('Cet import est terminé.'));
+    else {
+      etat.importId = ligne.id;
+      etat.generationLecture = etat.generation;
+      const sha = shaBornee(ligne.cover_sha256);
+      const fichier = sha ? await r.getFile(sha) : null;
+      etat.couverture = fichier?.blob instanceof Blob
+        ? { sha256: sha, apercu: urlDeBlob(fichier.blob), message: t('Couverture enregistrée.'), enCours: false, touchee: true }
+        : { ...COUVERTURE_VIDE(), sha256: sha, message: t('La couverture n’est pas sur cet appareil.'), touchee: true };
+      etat.pas = 2;
+    }
+  }
   // Les tests lisent l'état par là (F3/F4) : un fait observable, jamais un délai. Aucune vue ne s'en sert.
   root.etatRoute = () => ({ ...etat, couverture: { ...etat.couverture }, champs: { ...etat.champs } });
   dessiner();
+  if (etat.importId) await relire();
   rendue = true; // ronde 1 : à partir d'ici, une route hors du document est démontée (demontee()) — à garder juste avant le `return`
   return root;
 }

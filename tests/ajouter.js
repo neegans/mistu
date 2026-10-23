@@ -2980,6 +2980,135 @@ export async function runAjouterTests({ eq, ok }) {
         const etatUi = await import('../src/ui/state.js');
         eq([etatUi.ROUTES_DE_SAISIE.includes('/add/livre'), etatUi.estRouteDeSaisie('/add/livre'), etatUi.estRouteDeSaisie('/add/signet')], [true, true, false], 'ROUTES_DE_SAISIE (D-E19) : /add/livre — une passe de synchro ne reconstruit pas le pas 1 en plein vol ; /add/signet reste dehors (dette nommée)');
       }
+
+      // --- Reprise (§ 4.6) : #/add/livre?import=<imp>. Une ligne du journal dans l'état voulu, avec (ou sans) sa couverture dans files.
+      const C = await import('../src/domain/couverture.js');
+      const ligneDe = async (repo, db, over = {}, { octets = true } = {}) => {
+        let sha = 'f'.repeat(64);
+        if (octets) ({ sha256: sha } = await LA.poserCouverture(await F.imageDe('r.jpg', '#a33'), { origine: 'locale', repo }));
+        const l = { ...C.fabriquerImportCouverture({ id: repo.newId('imp'), coverSha256: sha, deviceId: repo.deviceId() }), created_at: NOW, updated_at: NOW, ...over };
+        await db.mutate({ puts: { imports: [l] }, origin: 'device' });
+        return l;
+      };
+
+      await scenario('reprise ?import= sur a_verifier : pas 2 prérempli, sans appel à l’assistant (D-E5, D-E13)', async (repo, db) => {
+        const l = await ligneDe(repo, db, { status: 'a_verifier', resultat: { ...F.LECTURE }, started_at: NOW });
+        const ff = F.fauxFetch({ assistant: () => { throw new Error('aucun appel attendu'); }, ol: [200, F.OL_STASIO] });
+        const { root, navs } = await monter(repo, { ff, query: { import: l.id } });
+        await attendre(() => lue(root) && root.etatRoute().propositionsRecues === 1, 'lecture reprise et rattrapage');
+        eq([root.etatRoute().importId, root.etatRoute().pas, titreDe(root).value, root.querySelector('.status.info')?.textContent, ff.posts().length, ff.vers('openlibrary.org/search.json').length, !!root.querySelector('.zone-couverture img'), bandeau(root), ff.vers('covers.openlibrary.org').length],
+          [l.id, 2, 'À la di Stasio', 'Lu sur la couverture — vérifie.', 0, 1, true, 'Proposé par Open Library : À la di Stasio, Josée Di Stasio, Flammarion Québec, 2004, ISBN 9782890772816', 0],
+          'reprise : la lecture du journal, revalidée, remplit le pas 2 ; ZÉRO appel à l’assistant, UNE requête Open Library (hors quota, D-E13) ; aucune couverture distante (D-E18)');
+        const capture = db.onMutate;
+        const lots = [];
+        db.onMutate = (m) => { if (m.puts?.books) lots.push(Object.keys(m.puts).sort()); return capture ? capture(m) : null; };
+        try { bouton(root, 'Ajouter ce livre').click(); await attendre(() => navs.length === 1, 'livre écrit'); } finally { db.onMutate = capture; }
+        const [ed] = await db.getAll('book_editions');
+        eq([lots, (await db.get('imports', l.id)).status, (await db.get('imports', l.id)).edition_id, ff.vers('covers.openlibrary.org').length], [[['book_editions', 'books', 'imports']], 'enregistre', ed.id, 0], '?import= puis « Ajouter ce livre » : une transaction, la ligne enregistre et pointe l’édition ; toujours aucune couverture distante (D-E18)');
+      });
+
+      await scenario('reprise : un résultat hostile est revalidé → echec(illisible) (I-E1)', async (repo, db) => {
+        const l = await ligneDe(repo, db, { status: 'a_verifier', resultat: { ...F.LECTURE, title: 'x'.repeat(400) }, started_at: NOW });
+        const { root } = await monter(repo, { ff: F.fauxFetch({ ol: [200, F.OL_STASIO] }), query: { import: l.id } });
+        await attendre(() => root.etatRoute().lecture?.statut === 'echec', 'revalidée');
+        const lu = await db.get('imports', l.id);
+        eq([lu.status, lu.erreur?.raison, lu.resultat, titreDe(root).value, role(root, 'lecture')?.textContent.includes('L’assistant n’a pas répondu lisiblement. Réessaie.'), role(root, 'relire')?.textContent],
+          ['echec', 'illisible', null, '', true, 'Relire la couverture'], 'résultat hostile (titre de 400) : a_verifier → echec(illisible), résultat effacé, rien n’atteint les champs, « Relire » offert (mutant : revalidation retirée → rouge)');
+      });
+
+      await scenario('reprise : empreinte hostile ou octets absents → « La couverture n’est pas sur cet appareil. », « Lire » éteint', async (repo, db) => {
+        const rejets = [];
+        const surRejet = (e) => rejets.push(e);
+        window.addEventListener('unhandledrejection', surRejet);
+        try {
+          const hostile = await ligneDe(repo, db, { cover_sha256: { x: 1 } }, { octets: false });
+          const r1 = await monter(repo, { query: { import: hostile.id } });
+          await attendre(() => r1.root.etatRoute().lecture?.statut === 'a_lancer', 'relue');
+          await tick();
+          eq([r1.root.textContent.includes('La couverture n’est pas sur cet appareil.'), role(r1.root, 'relire')?.disabled, rejets.length], [true, true, 0], 'cover_sha256 { x: 1 } : le message, « Lire » éteint, aucune exception (mutant : shaBornee retirée → getFile lève → rouge)');
+          scene.replaceChildren();
+          const absente = await ligneDe(repo, db, {}, { octets: false });
+          const r2 = await monter(repo, { query: { import: absente.id } });
+          await attendre(() => r2.root.etatRoute().lecture?.statut === 'a_lancer', 'relue');
+          eq([r2.root.textContent.includes('La couverture n’est pas sur cet appareil.'), role(r2.root, 'relire')?.disabled, r2.root.etatRoute().couverture.sha256], [true, true, absente.cover_sha256], 'empreinte valide sans ligne files : le message, « Lire » éteint, l’empreinte gardée');
+        } finally { window.removeEventListener('unhandledrejection', surRejet); }
+      });
+
+      await scenario('reprise : echec(quota), a_lancer puis « Lire la couverture », en_cours d’un autre document', async (repo, db) => {
+        const q = await ligneDe(repo, db, { status: 'echec', erreur: { raison: 'quota', extra: { quota: 60 } } });
+        const r1 = await monter(repo, { query: { import: q.id } });
+        await attendre(() => r1.root.etatRoute().lecture?.statut === 'echec', 'relue');
+        eq([r1.root.etatRoute().pas, role(r1.root, 'lecture')?.textContent.includes('Tu as atteint la limite du jour pour l’assistant (60 appels).'), role(r1.root, 'relire')?.textContent, role(r1.root, 'relire')?.disabled], [2, true, 'Relire la couverture', false], 'echec(quota) : pas 2, le refus en clair avec son nombre, « Relire la couverture »');
+        scene.replaceChildren();
+        const a = await ligneDe(repo, db);
+        const ff = F.fauxFetch({ assistant: null });
+        const r2 = await monter(repo, { ff, query: { import: a.id } });
+        await attendre(() => r2.root.etatRoute().lecture?.statut === 'a_lancer', 'relue');
+        eq([r2.root.etatRoute().pas, role(r2.root, 'lecture')?.textContent.includes('La couverture n’a pas encore été lue.'), role(r2.root, 'relire')?.textContent, role(r2.root, 'relire')?.disabled], [2, true, 'Lire la couverture', false], 'a_lancer : « La couverture n’a pas encore été lue. » + « Lire la couverture »');
+        const n = await db.count('imports');
+        role(r2.root, 'relire').click();
+        await attendre(() => ff.posts().length === 1, 'vol parti');
+        eq([role(r2.root, 'lecture')?.textContent.includes('Lecture de la couverture par l’assistant…'), !!role(r2.root, 'annuler-lecture'), (await db.get('imports', a.id)).status, await db.count('imports')], [true, true, 'en_cours', n], '« Lire la couverture » sur une ligne a_lancer : en_cours rendu AVANT l’appel, sur la MÊME ligne (N2-b)');
+        role(r2.root, 'annuler-lecture').click();
+        await attendre(async () => (await db.get('imports', a.id)).erreur?.raison === 'annule', 'annulée');
+        scene.replaceChildren();
+        const v = await ligneDe(repo, db, { status: 'en_cours', document_id_vol: 'autre-document', battement_at: NOW });
+        const r3 = await monter(repo, { query: { import: v.id } });
+        await attendre(() => r3.root.etatRoute().lecture?.statut === 'en_cours', 'relue');
+        eq([role(r3.root, 'lecture')?.textContent, role(r3.root, 'annuler-lecture')], ['En cours sur un autre écran', null], 'en_cours d’un autre document : « En cours sur un autre écran », sans « Annuler » (I-7)');
+      });
+
+      await scenario('reprise : import terminé, d’une autre sorte, ou inconnu → toast, pas 1', async (repo, db) => {
+        const fini = await ligneDe(repo, db, { status: 'enregistre' });
+        const r1 = await monter(repo, { query: { import: fini.id } });
+        eq([r1.dits, r1.root.etatRoute().pas, r1.root.etatRoute().importId], [['Cet import est terminé.'], 1, null], 'enregistre : « Cet import est terminé. », pas 1 ordinaire');
+        const recette = (await repo.ajouterPages([await F.imageDe('p.jpg', '#777')], { import: { id: repo.newId('imp'), kind: 'recette', recipe_id: 'rc_d5' } })).importId;
+        const r2 = await monter(repo, { query: { import: recette } });
+        const r3 = await monter(repo, { query: { import: 'imp_inconnu' } });
+        eq([r2.dits, r3.dits, r2.root.etatRoute().pas, r3.root.etatRoute().importId], [['Import introuvable.'], ['Import introuvable.'], 1, null], 'kind recette ou identifiant inconnu : « Import introuvable. », pas 1 ordinaire');
+      });
+
+      await scenario('deux routes sur le même ?import= : UN livre (I-E5, S-3 ; Review Focus 4)', async (repo, db) => {
+        const l = await ligneDe(repo, db, { status: 'a_verifier', resultat: { ...F.LECTURE }, started_at: NOW });
+        const r1 = await monter(repo, { query: { import: l.id } });
+        const r2 = await monter(repo, { query: { import: l.id } });
+        await attendre(() => lue(r1.root) && lue(r2.root), 'deux lectures reprises');
+        bouton(r1.root, 'Ajouter ce livre').click();
+        await attendre(() => r1.navs.length === 1, 'premier livre');
+        bouton(r2.root, 'Ajouter ce livre').click();
+        await attendre(() => r2.navs.length === 1, 'second geste');
+        const [ed] = await db.getAll('book_editions');
+        eq([await db.count('books'), r2.dits.at(-1), r2.navs[0], r1.navs[0]], [1, 'Ce livre a déjà été ajouté.', `/books/${ed.id}`, `/books/${ed.id}?nouveau=1`], 'deux « Ajouter ce livre » sur le même import : UN livre ; le second dit « Ce livre a déjà été ajouté. » et ouvre la fiche sans ?nouveau (mutant : saveBatch sur enregistre → deux livres → rouge)');
+      });
+
+      // Ronde 1 de la tâche 4 (MD, laissé à la tâche 5) : le bloc lecture d'une reprise existe AVANT que la session soit résolue (D-E8) — à la résolution, il est
+      // remplacé SEUL : « Relire la couverture » s'allume, le formulaire du pas 2 n'est pas reconstruit (R-UX-9).
+      await scenario('reprise : la session résolue APRÈS le montage rallume « Relire la couverture », sans reconstruire le pas 2 (D-E8)', async (repo, db) => {
+        let liberer = null;
+        const q = await ligneDe(repo, db, { status: 'echec', erreur: { raison: 'quota', extra: { quota: 60 } } });
+        const { root } = await monter(repo, { ctx: F.ctxDe(F.SESSION, { jeton: () => new Promise((r) => { liberer = () => r(F.SESSION); }) }), query: { import: q.id }, attendreSession: false });
+        await attendre(() => root.etatRoute().lecture?.statut === 'echec' && typeof liberer === 'function', 'relue, jeton demandé');
+        const titre = titreDe(root);
+        eq([root.etatRoute().session, role(root, 'relire')?.textContent, role(root, 'relire')?.disabled], ['verification', 'Relire la couverture', true], 'reprise, session en cours de lecture : « Relire la couverture » rendu éteint (D-E8)');
+        liberer();
+        await attendre(() => root.etatRoute().session === 'prete', 'session résolue');
+        eq([role(root, 'relire')?.disabled, titreDe(root) === titre], [false, true], 'reprise, session résolue après le montage : « Relire la couverture » s’allume, le champ Titre reste le même nœud (mutant : majBlocLecture retiré de la résolution → rouge)');
+      });
+
+      // Ronde 1 de la tâche 4 (MP, laissé à la tâche 5) : la ligne disparaît entre la lecture du montage et celle de relire() (purge, tombale reçue) — l'écran ne la
+      // dit plus, rien ne lève, la couverture reste, et « Ajouter ce livre » écrit le livre seul (le journal n'est plus à nous, § 4.4).
+      await scenario('reprise : la ligne disparue avant la relecture → plus d’import, rien ne lève, le livre s’écrit seul', async (repo, db) => {
+        const l = await ligneDe(repo, db, { status: 'a_verifier', resultat: { ...F.LECTURE }, started_at: NOW });
+        let lectures = 0;
+        const espion = { ...repo, get: async (store, cle) => { const v = await repo.get(store, cle); if (store === 'imports' && cle === l.id && (lectures += 1) === 1) await db.mutate({ deletes: { imports: [l.id] }, origin: 'device' }); return v; } };
+        const { root, navs } = await monter(espion, { query: { import: l.id } });
+        eq([lectures, root.etatRoute().importId, root.etatRoute().lecture, root.etatRoute().pas, !!root.querySelector('.zone-couverture img'), role(root, 'lecture')], [2, null, null, 2, true, null],
+          'ligne disparue avant la relecture : importId nul, aucun bloc lecture, la couverture de la reprise reste (mutant : branche « ligne absente » retirée → relire lève, importId gardé → rouge)');
+        taper(titreDe(root), 'Seul');
+        bouton(root, 'Ajouter ce livre').click();
+        await attendre(() => navs.length === 1, 'livre écrit');
+        eq([await db.count('books'), await db.count('imports'), (await db.getAll('book_editions'))[0]?.cover_sha256 === l.cover_sha256], [1, 0, true], 'ligne disparue : « Ajouter ce livre » écrit le livre seul, avec la couverture de la reprise ; aucune ligne d’import recréée');
+      });
     } finally { scene.remove(); setUiLocale(localeAvant); }
   }
   // --- § 6 Couverture : ce que la fiche livre et Mes livres MONTRENT, sur une base jetable

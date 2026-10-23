@@ -733,4 +733,8 @@ export const EN = {
   "Utiliser ces renseignements": "Use these details",
   "La couverture est en cours de lecture : attends la réponse ou annule-la.": "The cover is being read: wait for the answer or cancel it.",
   "Ce livre a déjà été ajouté.": "This book has already been added.",
+  // Lot E — tâche 5 du registre (Task 4 du plan) : la reprise par ?import= et la section Imports (spec couverture § 5)
+  "Couverture photographiée": "Photographed cover",
+  "Import introuvable.": "Import not found.",
+  "Cet import est terminé.": "This import is finished.",
 };
