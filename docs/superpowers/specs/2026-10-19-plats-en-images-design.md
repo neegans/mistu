@@ -1,6 +1,11 @@
-# Lot F — « Les plats en images » : photo du plat, rapatriement par la fonction, cartes illustrées — spec (rév. 3)
+# Lot F — « Les plats en images » : photo du plat, rapatriement par la fonction, cartes illustrées — spec (rév. 4)
 
-Date : 19 octobre 2026. Base : la tête du lot A sur `import-cible` (worktree `~/projects/mistu-import`), **`bd03e48`** à l'écriture des rév. 2 et 3
+Date : 19 octobre 2026 (**rév. 4 à la clôture de la construction, 23 octobre 2026** : rejeu du plan sur la tête finale du lot E `5ec092c`
+— sept écarts d’intention EI-1 à EI-7, trois défauts du plan D-1 à D-3 et onze adaptations A-1 à A-11 tranchés par R-F-12 à R-F-18 —, précisions P-1 à
+P-19 du plan, rulings de construction R-F-19 à R-F-29, mesures finales, le tout en § 12 « Rév. 3 → rév. 4 » ; tête de code `b65988f`, `sw.js
+cuisine-os-v0.15.0-9`, épingle 5947,
+suite 5948/5948, Node 208/208, `tsc` 0 ; § 13 mis à jour). Base : la tête du lot A sur `import-cible` (worktree `~/projects/mistu-import`),
+**`bd03e48`** à l'écriture des rév. 2 et 3
 (tâche 6 du lot A commise, sur `f8cfafa` — ronde 1 de la tâche 5 — et `e88f0b1` — tâche 5 ; `APP_VERSION 0.9.0`, `DB_VERSION 4`, `sw.js`
 `cuisine-os-v0.9.0-10`, total épinglé **3586**, `tests/tests.js` l. 220), elle-même sur `main` `57babc6`. Le lot F se construit EN DERNIER de la
 chaîne linéaire (A → B → G → C → D → E → F), dans son propre worktree (`~/projects/mistu-plats-en-images`, branche `plats-en-images`, port 8094 ; fixés par le chef d'orchestre au Départ : worktree
@@ -237,7 +242,9 @@ que tu as choisie reste toujours la tienne : une image du web ne la remplace jam
   écrits AVANT le premier octet d'image ; un échec d'image n'écrit rien sur la version ni sur le journal (`enregistre` reste `enregistre`) et ne
   lève jamais vers l'écran (`logError` seulement). « Enregistrer » n'attend pas l'image.
 - **I-F5 Sur cet appareil, jamais une photo de la personne écrasée par le web** (D-F10), y compris par une descente partie AVANT son geste (garde
-  des trois champs de `rapatrierPhotoWeb`, § 4.3 point 3). La garde relit puis écrit en deux transactions (les conditions de `db.mutate` lisent
+  des trois champs de `rapatrierPhotoWeb`, § 4.3 point 3). La garde relit puis écrit DANS une transaction, par la condition `{ key, fusion }` de
+`repo.saveBatch` (T3-R1, R-F-20 ; la spec écrivait : en deux
+  transactions — les conditions de `db.mutate` lisent
   `status`, que `recipes` n'a pas) : la fenêtre d'un `await` reste, et entre deux appareils l'écriture la plus récente gagne (I7) — nommées en
   § 11.
 - **I-F6 Rien d'inventé, rien de vide.** Une carte montre une vignette seulement quand les octets sont ici ; sans octets : rien. L'en-tête de la
@@ -584,7 +591,8 @@ un téléchargement) : elle suit l'image, sans geste de F.
      `components.js` l. 276-284 — ; la zone dit alors pourquoi rien n'est venu, aucun appel n'étant payé) ;
    - aucun toast dans aucun cas ; la zone et l'en-tête de la fiche, s'ils sont montés, se redessinent par `notifier` ; les cartes des autres
      écrans suivent au prochain rendu (le `change` de `repo.save` vide le cache, D-F15).
-   La relecture puis l'écriture font deux transactions : la fenêtre d'un `await` reste (§ 11) ; les conditions de `db.mutate` (lot A, § 3.6) lisent
+   La relecture puis l'écriture font UNE transaction (`{ key, fusion }`, T3-R1, R-F-20 ; la spec écrivait : deux transactions, la fenêtre d'un `await`
+   reste, § 11) ; les conditions de `db.mutate` (lot A, § 3.6) lisent
    `status`, que `recipes` n'a pas : elles ne s'appliquent pas telles quelles.
 4. **Relecture d'une fiche déjà lue** (D-B18, « Relire la page avec l’assistant ») : `candidatPhotoWeb` sur le signet relu — photo `'web'` avec une
    autre `image_url` → annonce, puis descente avec le candidat EN ARGUMENT ; `photo_source_url` n'est pas touché par la fabrication (la provenance
@@ -685,7 +693,7 @@ exportée de `photo-plat.js` (`ligneAnnoncePhotoWeb()`), pour que le filet la vo
 | `signatureImage(octets)` → type \| `null` | lit les premiers octets d'un `Uint8Array` : `FF D8 FF` → `image/jpeg` ; `89 50 4E 47 0D 0A 1A 0A` → `image/png` ; `52 49 46 46` (« RIFF ») aux octets 0-3 ET `57 45 42 50` (« WEBP ») aux octets 8-11 → `image/webp` ; tout autre début, ou trop court, → `null` ; ne lève jamais |
 | `imageDe(objet)` → chaîne \| `null` | `image` lu par `Object.hasOwn` : chaîne → elle ; objet nu → `url`, sinon `contentUrl` (chaînes) ; tableau → le premier élément qui rend une chaîne par la même règle (profondeur 2 : un tableau d'`ImageObject`) ; `nettoyerChaineJsonLd` ; vide → `null` ; jamais `Object.assign` ni `for…in` (S-11 du lot B) ; ne lève jamais |
 | `imageOgDe(html)` → chaîne \| `null` | `<meta property="og:image" content="…">` (ou `name="og:image"` ; casse et ordre des attributs libres, guillemets simples ou doubles), balise trouvée par `indexOf('<meta', i)` et lue dans sa tranche jusqu'à `>` (linéaire, D-B12 ; le lecteur de balise `meta` de `siteDe` est partagé s'il est exporté par B), premier `content` décodé (`decoderEntites`), rogné ; absente → `null` ; `og:image:url`, `og:image:secure_url` ignorés |
-| `imageUrlDe(objet, html, { urlFinale, hotesRefuses = [], autresRecettes = 0 } = {})` → chaîne \| `null` | `candidat = (objet ? imageDe(objet) : null) ?? (autresRecettes > 0 ? null : imageOgDe(html))` (D-F3 : l'image de partage d'une page de liste n'est pas celle de la recette) ; `null` → `null` ; `abs = new URL(candidat, urlFinale)` sous `try` (levée → `null` ; une adresse relative ou `//hôte/…` est ainsi résolue) ; `valideAdresse(abs.href, { hotesRefuses })` → `.href` sinon `null` (`http:`, une IP, un hôte interne, un port, l'hôte de `SUPABASE_URL` → `null`) |
+| `imageUrlDe(objet, html, { urlFinale, hotesRefuses = [], autresRecettes = 0 } = {})` → chaîne \| `null` | **Construction (vague finale, VF-F3 à VF-F5, R-F-21) : chaque candidat est validé avant de passer la main — une image JSON-LD refusée laisse `og:image` tenter la sienne —, une adresse dégénérée (`#`, `#top`, `.`, `./`, `?v=1` : la page elle-même ou son dossier) est écartée, et la garde « page de liste » compte `max(autresRecettes, Recipe trouvées − 1)` ; la spec écrivait :** `candidat = (objet ? imageDe(objet) : null) ?? (autresRecettes > 0 ? null : imageOgDe(html))` (D-F3 : l'image de partage d'une page de liste n'est pas celle de la recette) ; `null` → `null` ; `abs = new URL(candidat, urlFinale)` sous `try` (levée → `null` ; une adresse relative ou `//hôte/…` est ainsi résolue) ; `valideAdresse(abs.href, { hotesRefuses })` → `.href` sinon `null` (`http:`, une IP, un hôte interne, un port, l'hôte de `SUPABASE_URL` → `null`) |
 | `TRANCHE_BASE64` | `24576` (= 3 × 8 192) : un MULTIPLE DE 3, épinglé par un test (`TRANCHE_BASE64 % 3 === 0`) |
 | `versBase64(octets)` → chaîne | `Uint8Array` → base64 avec remplissage : pour chaque tranche de `TRANCHE_BASE64` octets, `btoa(String.fromCharCode(...tranche))`, concaténées. Une tranche multiple de 3 n'a jamais de remplissage : seul le DERNIER morceau peut finir par `=` (rév. 1 : 32 Kio, qui n'est pas un multiple de 3, plaçait des `=` au milieu — base64 invalide dès 32 769 octets, mesuré) ; Node et Deno ; `new Uint8Array(0)` → `''` |
 | `lirePageHtml({ html, urlFinale, contentType, hotesRefuses = [] })` | **amendée** : retient en interne l'OBJET `Recipe` dont vient la recette lisible (B : « la première lisible ») et pose `page.image_url = imageUrlDe(<cet objet, brut>, html, { urlFinale, hotesRefuses, autresRecettes: <page.autres_recettes> })` ; sans `Recipe` lisible (chemin `modele`), `imageUrlDe(null, html, …)` (`og:image` seul, `autres_recettes` vaut 0) ; tout le reste de B inchangé |
@@ -806,7 +814,9 @@ enregistre une lecture web attend `attendreRecuperation` avant de sortir de son 
   décodé ; bloc `{"image":{"__proto__":{"pollue":1}}}` → `null` et `({}).pollue === undefined` (en `try/finally`, S-11) ; `image: 7` → `null`.
 - **« `imageOgDe` : balise lue dans sa tranche »** — `<meta property="og:image" content="https://a.test/i.jpg">` ; `name="og:image"` ;
   attributs dans l'autre ordre ; guillemets simples ; `content` avec `&amp;` ; `og:image:secure_url` seul → `null` ; absente → `null` ; une
-  balise jamais fermée → `null` sans lever ; 2 Mio de `<meta` sans `>` → sous 500 ms (borne temporelle S-4).
+  balise jamais fermée → `null` sans lever ; 2 Mio de `<meta` sans `>` → sous 500 ms (borne temporelle S-4) ; construction (T1-R1, vague VF-F2) : un
+test jumeau sur des balises FERMÉES
+  (`<script type=` + 2 030 blancs, `TYPE_JSONLD` linéaire) tient la borne que l'entrée « sans `>` » ne mesure pas.
 - **« `imageUrlDe` : priorité, résolution, validation, pages de liste »** — JSON-LD `image` ET `og:image` → l'image du JSON-LD ; JSON-LD sans
   `image` → `og:image` ; **JSON-LD sans `image`, `og:image` présente, `autresRecettes: 2` → `null`** ; JSON-LD avec `image` et `autresRecettes: 2`
   → l'image du JSON-LD ; `/img/i.jpg` avec `urlFinale: 'https://site.test/r/x'` → `https://site.test/img/i.jpg` ; `//cdn.test/i.jpg` →
@@ -1238,7 +1248,10 @@ remove`, puis D-F6 (redéploiement, sondes) et § 10 (gestes de Neegan).
   descend déjà (deux lignes `files`, une orpheline).
 - **Raisons gardées par document** (D-F17) : perdues au rechargement ; « Réessayer » revient alors, même après une raison définitive (un appel de
   plus pour un échec connu, dit par la ligne de coût). Un onglet fermé pendant une descente laisse « non récupérée » au retour, sans raison.
-- **Fenêtres de la garde finale** (I-F5) : sur l'appareil, la relecture et l'écriture font deux transactions — une écriture de la personne déjà en
+- **Fenêtres de la garde finale** (I-F5 ; construction, T3-R1 et T5-R1, R-F-20 : les écrivains de la photo — rapatriement, pose, retrait, ★ Favori,
+  « Corriger », « Créer ma version » — et « Enregistrer » de l'import web (vague, VF-F6) relisent la fiche DANS la transaction par `{ key, fusion }` de
+  `repo.saveBatch` : cette fenêtre n'existe plus sur ces chemins ; la spec écrivait :) sur l'appareil, la relecture et l'écriture font deux
+transactions — une écriture de la personne déjà en
   file dans IndexedDB peut s'engager entre les deux et être écrasée (la fenêtre d'un `await`) ; les conditions de `db.mutate` (lot A § 3.6) lisent
   `status`, que `recipes` n'a pas : une condition « champs de la photo inchangés » serait une forme neuve de la primitive, hors lot. Entre deux
   appareils, I7 fait gagner l'`updated_at` le plus récent : une photo choisie sur l'iPhone pendant la descente du Mac (jusqu'à 90 s), pas encore
@@ -1270,7 +1283,7 @@ remove`, puis D-F6 (redéploiement, sondes) et § 10 (gestes de Neegan).
 - **Mesures absentes** : aucun appel réel `image-web` ; aucune page réelle dont on sache qu'elle porte `image` dans son JSON-LD ou un `og:image`
   absolu (la preuve § 10 le dira) ; Safari et l'iPhone jamais vus ; aucune durée de transfert d'une réponse de ≈ 2,7 Mio sur réseau mobile.
 
-## 12. Ce que la revue a amendé (rév. 1 → rév. 2, puis rév. 2 → rév. 3)
+## 12. Ce que la revue a amendé (rév. 1 → rév. 2, puis rév. 2 → rév. 3, puis rév. 3 → rév. 4)
 
 Trois relecteurs (lentilles besoin, sécurité, faisabilité ; 41 constats, dont un Critical). Chaque constat de faisabilité a été vérifié dans le code
 du worktree (tête `f8cfafa` puis `bd03e48`, en lecture seule) ou dans les specs, le plan G et le prototype B avant d'être appliqué. Les constats
@@ -1431,9 +1444,378 @@ La vérification de la rév. 2 (`verification-rev2.md` : 17 constats Critical / 
   « Réessayer » éteint n'est pas rendue quand la raison dit déjà ce texte (§ 4.1.2 cas 5 ; test et mutant).
 - **Règle de forme** — les numéros de ligne valent à `bd03e48` ; une dérive due à un commit du lot A postérieur n'est pas un constat (en-tête).
 
+### Rév. 3 → rév. 4 : la construction (rejeu du plan sur la tête finale du lot E, rulings R-F-7 à R-F-29, 23 octobre 2026)
+
+**Base et rejeu (voie (b)).** F est construit sur la tête FINALE du lot E `5ec092c` (chaîne A → B → G → C → D → E → F ; R-E-18) : base `35fb29c`
+(= `5ec092c` + cette spec, rév. 3), plan rév. 3 (écrit sur `bd03e48` / `4cb99a0`) rejoué par intention et commis `111f857`
+(`docs/superpowers/plans/2026-10-19-plats-en-images.md` ; rapport `~/projects/mistu/.superpowers/sdd/nuit-2026-10-18/lots/F/depart-rejeu-rapport.md`) ;
+mesure de départ `✅ 5681/5681` (épingle 5680), Node 174/174, `--check` 0, `APP_VERSION 0.14.0`, `sw.js cuisine-os-v0.14.0-12`. Les numéros de ligne de
+cette spec valent à `bd03e48` (R-F-11) ; ceux du plan commis, à `35fb29c`.
+
+**Précisions du plan (P-1 à P-19, recopiées du plan commis).**
+
+- **P-1** `logError('photo_web.echec', { reason, id })` (et non `{ raison, id }`) : `src/core/log.js` ne garde que les clés `store, id, status,
+    reason, table, count` — `raison` serait jetée.
+- **P-2** `etatZonePlat` rend aussi **`motifEteint`** (`'hors_ligne' | 'sans_compte' | null`) : la ligne sous un « Réessayer » éteint est
+    décidée par la fonction pure (testable par table), le rendu ne fait que l'afficher ; `null` quand la raison dit déjà « Connecte-toi… »
+    (résidu 4 de la vérification rév. 2).
+- **P-3** `lireImageWeb` accepte un `config` facultatif (comme `lireRecetteWeb` de B) pour les tests ; la production n'en passe pas
+    (`currentConfig()`).
+- **P-4** `imageOgDe` lit la balise `og:image` par le balayage linéaire UNIQUE de B (`balayer(html).metas` : `lireMetaTranche` capture
+    `og:image` en troisième clé, la première occurrence) ; `lirePageHtml` réutilise le `scan` qu'elle a déjà fait (aucun second balayage, D-B12).
+    Conséquence nommée : une balise `meta` de plus de 2 048 caractères est ignorée par la borne de B (une `og:image` de plus de ≈ 2 000
+    caractères vaut `null`).
+- **P-5** `fabriquerLectureWeb(…, { remplacer: false })` vérifie le vocabulaire sur une COPIE dont l'origine passe `originePhotoAdmise`, et rend le
+    signet INTACT (B-24) : sans cela, une fiche reçue avec `photo_origin: 'appareil'` ferait lever « Ajouter sans remplacer ».
+- **P-6** `photo_origin` n'est réécrite par `fabriquerLectureWeb` et « Corriger » que si la fiche la porte (`Object.hasOwn`) : aucune clé ajoutée
+    à une fiche ancienne (les formes exactes de B restent vertes).
+- **P-7** `enregistrerLecture` gagne **quatre** dépendances (`ctx`, `fetch`, `enLigne`, `photoAnnoncee`) : la signature du plan B rév. 2
+    (`{ repo, remplacer, maintenant, choisir, cle }`, P-12 de B) n'a pas `ctx`, dont `rapatrierPhotoWeb` a besoin pour la session. `cle`, le refus
+    `lecture` et la clôture `cloture` de B sont gardés tels quels (les retirer réintroduirait le mutant C23 de B).
+- **P-8** `photo-plat.js` dans les deux filets i18n (ci-dessus).
+- **P-9** le test Node de B « `lirePageHtml` : assemblage » épingle la forme exacte de `page` ; `RICARDO` y porte une `image` : amendé
+    (`image_url: 'https://ricardo.test/a.jpg'`), amendement que la spec I-F9 ne listait pas.
+- **P-10** les docs (`CLAUDE.md`, `STATE.md`, `docs/architecture.md`, spec § 12) passent à la Clôture (spec § 9 : tâche 5), comme B (P-7 du plan B).
+- **P-11** le test « l'écriture passe par la capture » vit en tâche 5 (spec § 9) ; § 7.4 le range sous « Rapatriement ».
+- **P-12** le test B-10 « remplaçable à la main… puis relecture de la même page → zéro POST » est coupé en deux : la tâche 3 éprouve le candidat
+    pur (`candidatPhotoWeb` → `null` après le remplacement), la tâche 5 le parcours complet de relecture par l'écran web.
+- **P-13** « session nulle avec `ctx.sync.user` posé » : le jeton factice rend `null` tout de suite (`jeton: async () => null`) — même branche que
+    « ne répond pas en 2 s » (`sessionAssistant` rend `null` dans les deux cas), sans 2 s d'attente dans la suite.
+- **P-14** worktree `/Users/neeganmac/projects/mistu-plats-en-images` (consigne), et non `~/projects/mistu-plats` (spec, en-tête).
+- **P-15** `monterPhotoPlat` sérialise ses redessins (une file de promesses, motif de `renderImportWeb`) : deux redessins ne s'entrelacent jamais.
+- **P-16** `poserPhotoPlat` : une exception autre qu'`ErreurImage` levée par `preparerPhotoLocale` vaut `refuse(image, 'indecodable')`.
+- **P-17** `descendre` (le corps de `rapatrierPhotoWeb`) attrape toute exception inattendue → `echec('interne')` : rien ne lève vers l'écran (I-F4).
+- **P-18** les assertions neuves de `tests/passerelle.js` n'emploient pas `garde()` : le balayage « jeton absent » du lot 4 compte exactement ses
+    résultats (R-T3-12) ; elles contrôlent le jeton sur place.
+- **P-19** D-F15 : la suite n'a pas de routeur, donc un `refresh()` ne redessine rien sous test ; le mutant « `refresh()` après un geste » est tué
+    par l'écouteur espion de `cuisineos:refresh` (spec), et la conservation des portions par `#servings-val` ; « le segment Métrique reste actif »
+    n'est pas observable (le segmenté ne change pas sa classe au clic, préexistant) et n'est pas affirmé.
+- **P-20** *(refusé en rév. 3, R-F-7)* — la « référence dorée » (le `outerHTML` de la carte relevé en littéral au Step 0 de la tâche 4) est
+    abandonnée : le lanceur `suite.cjs` réduit les blancs et coupe chaque échec à 400 caractères (`.slice(0, 400)`, l. 22 du lanceur du lot A,
+    relu) — le littéral « obtenu » n'est pas lisible dans le bilan. Retour à la lettre de la spec § 7.4 : la référence est CONSTRUITE dans le
+    test (la carte avec photo, rendue par le MÊME composant et privée de sa vignette, doit être exactement la carte sans photo ; un gabarit
+    explicite borne la colonne), et le test compare des FAITS (tâche 4, bloc « recipeCard : référence construite »).
+- **P-21** la règle `.plat-vignette` est lue dans `styles.css` **sans ses commentaires**, dans un bloc à part : son rouge se lit au Step 2 de la
+    tâche 4 pour la bonne raison (règle absente) ; une règle introuvable est un rouge NOMMÉ, jamais une chaîne vide qui passe les filets.
+- **P-22** les mutants serveur (tâches 1 et 5) se rejouent sur une **copie entière** du worktree dans le scratchpad, une par mutant : les
+    harnais Node importent `logique.js` (et `index.ts` charge `lecture-web.js`) par des chemins fixes ; `LECTURE_WEB_JS` et `INDEX_TS` ne
+    suffisent pas pour `logique.js`. Jamais une mutation dans le worktree.
+
+**Rejeu sur `5ec092c` (voie (b)) : écarts d’intention EI-1 à EI-7, défauts du plan D-1 à D-3, adaptations A-1 à A-11 (recopiés du plan commis).**
+
+Départ du 23 octobre 2026, contrôleur délégué (Opus 5.5), sans sous-agent, sans réseau réel, sans déploiement ; jamais le navigateur MCP (la suite par
+`suite.cjs`, l'app par un Chrome sans tête dédié). Base : le worktree `/Users/neeganmac/projects/mistu-plats-en-images`, branche `plats-en-images` à
+`35fb29c` (= `5ec092c` + la spec F commise), copié par `rsync` (sans `.git` ni `.superpowers`) dans le scratchpad du lot F (`depart/base`,
+`depart/rejeu`,
+`depart/mut`), servi à part sur 8194, 8294 et 8394 ; le worktree n'a reçu AUCUNE écriture. Chaque bloc a été appliqué PAR INTENTION par des scripts
+Python
+qui vérifient chaque ancre (présence et unicité) et refusent toute écriture hors des copies (`depart/outils/t1.py` à `t5.py`, `t1-d1.py`, `t2-fin.py`,
+`t3-d2.py`, `t3-cycle.py`) ; les blocs du plan sont copiés À L'OCTET depuis ce fichier (aucune séquence « barre oblique inverse + u + hexa » retapée) ;
+chaque fonction que le plan réécrit l'a été DEPUIS `35fb29c`. Journal des opérations : `depart/logs/rejeu-journal.txt` ; rapport :
+`depart-rejeu-rapport.md` (même dossier que ce plan).
+
+**Totaux mesurés** (lanceur `suite.cjs` sur la copie servie ; `node --test tools/*.test.mjs` ; `node tools/generer-migrations.mjs --check` ; `tsc` 5.6.3
+`--strict` ; une seule erreur de console partout : le 404 de `/favicon.ico`) :
+
+| État | Suite | Épingle | Node | `--check` | `tsc` | `APP_VERSION` / `sw.js` |
+|---|---|---|---|---|---|---|
+| Départ (`35fb29c`) | ✅ 5681/5681 | 5680 | 174/174 | 0 | 0 | `0.14.0` / `cuisine-os-v0.14.0-12` |
+| T1, rouge (Step 5, `--test-timeout=10000`) | — | — | 174 : 142 ✓, 29 ✗, 3 annulés | — | — | — |
+| T1, vert | ✅ 5681/5681 | 5680 | **203/203** | 0 | 0 | inchangés |
+| T2, rouge (Step 6) | ❌ 5668/5703 | 5680 | 203/204 | — | — | — |
+| T2, vert (Steps 8-9) | ❌ 5738/5739 (épingle) → ✅ **5739/5739** | **5738** | 204/204 | 0 | — | `0.15.0` / `-1` |
+| T3, vert (Steps 11-12) | ❌ 5827/5828 (épingle) → ✅ **5828/5828** | **5827** | 204/204 | 0 | — | `-2` |
+| T4, vert (Steps 5-6) | ❌ 5844/5845 (épingle) → ✅ **5845/5845** | **5844** | 204/204 | 0 | — | `-3` |
+| T5, vert (Steps 6-7) | ❌ 5883/5884 (épingle) → ✅ **5884/5884** | **5883** | 204/204 | 0 | 0 | `-4` |
+
+Entre deux tâches, seule l'épingle a rougi ; les lignes existantes amendées (A-5, EI-2, pins, P-9, I-F9) ont rougi exactement dans la tâche qui les
+amende ;
+aucune autre assertion existante n'a rougi. `DB_VERSION` 4 et `ARCHIVE_FORMAT_VERSION` 1 inchangées ; aucune migration (`--check` 0 à chaque tâche).
+Graphe des imports statiques depuis `src/app.js` : 85 modules, 0 cycle au départ ; 88 modules, 0 cycle à la fin (EI-5). L'app réelle (`index.html`,
+`#/library`, `#/add`, `#/search`) se charge à la fin sans aucune erreur de console.
+
+**Écarts d'intention** (chacun tranché en faveur du code commis ; une ligne de ruling R-F-12 et suivants par écart, à écrire par le chef d'orchestre) :
+
+- **EI-1** (tâche 1, `supabase/functions/assistant/index.ts`) — Plan : extraire du prototype B une boucle `suivreRedirections` sans autre garde. Code
+  commis :
+  la vague finale de B (`ebbcf10`, défense en profondeur SSRF, test t13) refuse en 422 `interdit` une réponse SUIVIE malgré `redirect: 'manual'`
+  (`r.redirected`), et nomme `ctlSaut` le contrôleur du saut. Tranché : la boucle partagée GARDE la garde `r.redirected` (elle vaut désormais pour
+  `image-web` aussi) et les noms de B ; mutant M20 « garde retirée » rouge sur t13.
+- **EI-2** (tâche 1, `tools/assistant-index.test.mjs`, t3) — Plan : amender la ligne à trois champs `[hote, titre_page, texte_coupe]` du prototype. Code
+  commis : depuis sa ronde 1, B épingle l'objet `page` ENTIER (l. 672). Tranché : `image_url: 'https://cdn.test/og.jpg'` ajoutée en dernière clé de
+cet objet
+  (même fait affirmé, plus strict).
+- **EI-3** (tâche 3, `src/ui/photo-plat.js` `figurePhotoPlat`) — Plan : déplacer le `photoDuPlat` du plan G rév. 3 (erreurs relues en `Set` par
+  `lireErreursFichiers`). Code commis : le `photoDuPlat` de G (ronde 1 de sa tâche 6) n'offre rien sans octets si ce qui arrivera ne s'affichera pas
+  (`safeDisplayType` du `remote.mime`, sinon du `mime`) et relit les erreurs par `relireErreurs(ctxF)` (une définition, une `Map`). Tranché : la garde
+est
+  recopiée, `relireErreurs` remplace la relecture locale, l'import de `lireErreursFichiers` disparaît.
+- **EI-4** (tâche 3, `src/ui/photo-plat.js`) — Plan : `messageErreurImage` importée de `./livre-ajout.js`. Code commis : le lot E (D-E20) l'a
+  déménagée dans
+  `src/core/image.js` ; `livre-ajout.js` ne la ré-exporte que pour book.js et regroupement.js. Tranché : importée de `../core/image.js`.
+- **EI-5** (tâches 3 et 5, `src/ui/components.js`, `src/ui/livre-ajout.js`, `src/ui/photo-plat.js`) — Plan : `photo-plat.js` lit
+  `renderZoneCouverture` dans
+  `livre-ajout.js`, et `import-web.js` importe `photo-plat.js` (tâche 5). Code commis : `livre-ajout.js` importe `./import-cible.js` depuis le lot E
+  (`c647e4a`), qui importe `./import-web.js` depuis le lot B (`3ca8d19`) ; le graphe n'a AUCUN cycle à `35fb29c`, et B (D-B13 « sens unique ») comme E
+  (D-E20, « un cycle ») les évitent exprès. Le plan tel quel ferme, à la tâche 5, le cycle import-web → photo-plat → livre-ajout → import-cible →
+import-web
+  (mesuré : 1 composante cyclique ; suite verte et app chargée sans erreur quand même). Tranché : `renderZoneCouverture` est DÉPLACÉE dans
+`components.js`
+  et ré-exportée par `livre-ajout.js` — le motif même de D-E20 (et de `lireBornee` / `signalDelai`, lot ISBN) ; 0 cycle ; suite et app vertes. À
+ratifier :
+  le revers (garder la lettre du plan et accepter le cycle) ne change aucun test.
+- **EI-6** (tâche 5, `src/ui/import-web.js` `enregistrerLecture`) — Plan : la forme du plan B rév. 2 (deux appels de `fabriquerLectureWeb`, le signet lu
+  avant le dialogue). Code commis : la ronde 1 de la tâche 5 de B relit le signet et ses versions APRÈS le dialogue (`relire`, `fondement`, question
+  reposée), appelle `fabriquerLectureWeb` une fois, et nomme la fiche `fiche.signet`. Tranché : le corps de B est gardé ligne pour ligne ;
+`photoAnnoncee`
+  entre dans l'appel unique ; le déclenchement vise `fiche.signet.id`.
+- **EI-7** (tâche 5, `renderImportWeb`) — Plan : `etat` sans `lu`, `charger()` qui relit le résultat pour l'annonce. Code commis : `etat.lu` (la lecture
+  relue UNE fois par chargement, ronde 1 de B) et un `charger()` qui relit la ligne préférée et rejoue deux passes `marquerIllisible`. Tranché :
+  `photoAnnoncee` est calculée sur `lu` et posée dans la même affectation que `ligne`, `lu` et `versions`.
+
+**Défauts du plan** (indépendants des lots construits depuis ; corrigés au plus près, à ratifier) :
+
+- **D-1** (tâche 1, u5, `tools/assistant-index.test.mjs`) — le flux de 2 Mio + 1 se FERMAIT dans le tirage qui suit le dernier octet : quand le lecteur
+  franchit la borne, le flux est déjà clos et `reader.cancel()` n'appelle jamais `cancel()` — l'assertion `annule2 === true` ne pouvait pas être vraie
+  (mesuré : rouge sur le code juste). Correction : la fermeture est différée d'un tirage (`finDemandee`) ; la borne exacte reste éprouvée (mutant «
+borne + 1 »
+  de `lireCorpsBorne` rejoué : rouge, sans blocage).
+- **D-2** (tâche 3, « rapatriement », cas 5) — `files` est adressé par l'empreinte : c1, c2 et c4 redescendaient la MÊME image que les cas 1 à 4 bis ;
+  c2
+  (« la ligne files du JPEG reste », `nf2 + 1`) était impossible, c1 et c4 (« aucune ligne files neuve ») vrais par construction — le mutant « `putFile`
+  avant la garde » du Step 13 survivait (mesuré : seul le rouge permanent de c2). Correction : trois PNG distinctes (`pngC1`, `pngC2`, `pngC4`) ; le
+même
+  mutant rougit alors c1 et c4.
+- **D-3** (tâche 1, Step 5) — contre le code d'avant, u6, u6 bis, u7 et u11 attendent un `fetch` de l'image qui ne part jamais : `node --test` ne finit
+  pas. Correction : le rouge se lit avec `--test-timeout=10000` (u7 et u6 bis (d) ont déjà leur `timeout`).
+
+**Adaptations de forme** (même intention, autre forme du code commis) :
+
+- **A-1** `supabase/functions/assistant/logique.js` l. 4-5 : le commentaire de B « OUTILS reste à quatre … » devenu faux est réécrit (cinq outils,
+  `OUTILS_MODELE`).
+- **A-2** `tools/generer-migrations.test.mjs` l. 1177-1178 : idem pour le commentaire d'`OUTILS_0006` ; préfixe l. 1188 de forme `slice(0, 4)` (R-F-9).
+- **A-3** `src/model/schema.js` : `PHOTO_ORIGINS` et `HASH` après `VERIFICATION` (l. 149), `SOURCE_KINDS` de B séparant `AVAILABILITY` (l. 146) de
+  `VERIFICATION`.
+- **A-4** `src/domain/vocabulaire.js` : l'import garde `SOURCE_KINDS` (B) et `SORTES_IMPORT` (D) ; `photo_origin` après `source_kind` (l. 25).
+- **A-5** `tests/lecture-web.js` l. 151 (« tout autre `eq` qui compare un `resultat.page` complet », Step 0 de la tâche 2) : `PAGE` y est l'entrée ET
+  l'attendu — l'attendu devient `{ ...PAGE, image_url: null }`.
+- **A-6** `src/domain/lecture-web.js` `fabriquerLectureWeb` : le corps RÉEL de B (l. 194-228 : vocabulaire de `source_kind` en tête, `incertains`,
+  `lu_le`,
+  copie `intact`) gardé ligne pour ligne, lignes « Lot F » ajoutées ; P-5 sur `{ ...intact, ...origine }` (cas prévu par le plan).
+- **A-7** pins : quinze lignes relevées en Python à `35fb29c` (`tests/ajouter.js` 3806, 3808 ; `assistant-compte.js` 8 ; `classement.js` 2568 ;
+  `creer-ia.js` 11 ; `passerelle.js` 765, 767 ; `recherche-web.js` 66, 69, 72 ; `sync-l3.js` 1867 ; `sync-l4.js` 514, 516, 3506, 3507), libellés du
+lot F
+  et historique prolongé (convention du lot E).
+- **A-8** `tests/tests.js` : l'appel du lot F se pose juste avant le thème (l. 236-238), soit après le bloc du lot D (l. 232-234) — celui du lot E est
+  l. 217-219.
+- **A-9** `src/ui/recipe.js` : imports que `photoDuPlat` lisait seule, relevés hors commentaires — lignes `../sync/mime.js` (l. 7) et
+  `../core/blob-urls.js`
+  (l. 8) entières, `vignettePage`, `gesteTelechargement`, `relireErreurs` de la ligne `./components.js` (l. 18).
+- **A-10** `src/i18n/en.js` l. 528 : la valeur de G « Dish photo · {titre} » devient « Photo of the dish · {titre} » (cas prévu par le Step 10).
+- **A-11** `src/ui/book.js` : `revoquerUrlDeBlob` rejoint la ligne existante `import { urlDeBlob } from '../core/blob-urls.js';` (l. 10, lot G).
+
+**Fichiers rejoués** (39) : serveur — `supabase/functions/assistant/{lecture-web.js, logique.js, index.ts}` ; app — `src/model/schema.js`,
+`src/domain/{vocabulaire.js, import-cible.js, passerelle.js, lecture-web.js}`, `src/domain/{base64.js, photo-web.js}` (neufs), `src/core/image.js`,
+`src/ui/photo-plat.js` (neuf), `src/ui/{components.js, livre-ajout.js, recipe.js, meals.js, search.js, book.js, import-web.js, recipe-edit.js}`,
+`src/i18n/en.js`, `styles.css`, `sw.js` ; tests — `tests/photo-plat.js` (neuf), `tests/{tests.js, import-cible.js, passerelle.js, lecture-web.js,
+ajouter.js, creer-ia.js}` et les pins de `tests/{assistant-compte.js, classement.js, recherche-web.js, sync-l3.js, sync-l4.js}`,
+`tools/{assistant-lecture-web, assistant-logique, assistant-index, generer-migrations}.test.mjs`. Vérifications sur les 39 : `python3 -I` invisibles
+(U+200B-200D, U+2028/2029, U+202A-202E, U+2060, U+FEFF) **0** ; motifs de clés (Anthropic, JWT, `sb_secret_`, `sb_publishable_` réels) **0** ;
+`node --check` **0 échec** ; chaque ligne de `35fb29c` qui porte une séquence « barre oblique inverse + u » retrouvée telle quelle **(0 perdue)** ; le
+plan régénéré lui-même : invisibles 0.
+
+**Mutants de la tâche 1** (Step 10, P-22 : copie entière, `node --test --test-timeout=10000` depuis la copie) : les 19 de la liste rougissent, chacun
+par au
+moins un test nommé (`image/gif` → « LIMITES_IMAGE : forme », « typeImageAdmis : table », u4 ; 5 Mio → « forme », u5, u11 ; `svg+xml` → «
+typeImageAdmis »,
+u4 ; WebP sur RIFF → « signatureImage », u4 ; signature retirée → u4 ; sans `valideAdresse` → « imageUrlDe », « lirePageHtml : page.image_url » ; sans
+résolution → mêmes + u9 ; sans `autresRecettes` → « imageUrlDe », « lirePageHtml » ; premier Recipe → « lirePageHtml » ; `TRANCHE_BASE64 = 32768` →
+« versBase64 », u5 ; `lire` hors du saut → u6 bis (a)-(d), u11, t5 ; minuterie retirée aux en-têtes → u6 bis (a), t5 ; `referer` → u2, t2 ;
+`corpsModele = lu.corps` → u2 à u11, « index.ts (lot F) » ; `OUTILS` sans `image-web` → 17 tests dont « 0006 », u1-u11 ; `image-web` sans
+`valideAdresse` → « lireDemande image-web », « lireDemandeUrl », u1 ; boucle propre → u10, « index.ts (lot F) », « index.ts : imports fermés… » ; second
+`await fetch(` → « index.ts (lot F) », « index.ts : imports fermés… » ; `propre` → accès direct → « imageDe : formes »). Hors liste : M20 (EI-1) → t13.
+
+**Ce qui reste au contrôleur** : (1) relire ce plan et le rapport, puis le commettre dans le worktree sous
+`docs/superpowers/plans/2026-10-19-plats-en-images.md`
+(chemin par nom, message ASCII) ; (2) écrire les rulings R-F-12 et suivants (un par EI-1 à EI-7, et la ratification de D-1 à D-3) dans `rulings-F.md`,
+puis spec § 12 à la clôture — EI-5 est le seul qui demande une décision de forme (déplacement ou cycle accepté) ; (3) poser le registre
+`.superpowers/sdd/2026-10-19-plats-en-images/progress.md` (le relevé du Départ ci-dessus) et `recensement-D-F16.md` (Step 0 de la tâche 3 : aucun (c)
+neuf) ; (4) les briefs (en-tête `entete.txt`), puis lancer la tâche 1.
+
+**Rulings du chef d’orchestre (R-F-7 à R-F-11 du plan de nuit ; R-F-12 à R-F-18 du Départ, en tête des cinq briefs).**
+
+- **R-F-7** — P-20 REFUSÉ : la référence dorée d'une image n'est pas un littéral illisible dans le test (le lanceur `suite.cjs` tronque à 400
+  caractères) ; elle est construite dans le test (spec § 7.4).
+- **R-F-8** — aucune mutation d'`Object.prototype` dans la suite (la configuration de test de `lireImageWeb` passe par une option, ou par un `Blob`
+  typé).
+- **R-F-9** — préfixe des outils : le lot B affirme `OUTILS = OUTILS_0006.slice(0, 4)` ; F passe à l'égalité (`OUTILS_0006` entière, `image-web`
+  compris :
+  la migration `0006` de B porte déjà les cinq outils, aucune migration dans F) ; le Step 0 de la tâche 1 accepte les deux formes sur la tête.
+- **R-F-10** — les négatives « cartes » (un redessin qui ne doit PAS recharger une vignette) sont une limite nommée (§ 11) ; un rouge intermittent se
+  rejoue seul, machine à vide, avant d'être un constat (R-B-15, R-E-29).
+- **R-F-11** — les numéros de ligne du plan se relisent sur la tête finale du lot E (`5ec092c`) : une dérive n'est pas un constat, un nom absent ou un
+  comportement différent en est un (R-C-7, R-E-14).
+
+### Rulings du Départ (R-F-12 et suivants : à écrire après le rapport `depart-rejeu-rapport.md`, un par écart d'intention EI-n)
+- **R-F-12 (EI-5, cycle d'imports)** — RATIFIÉ : `renderZoneCouverture` passe dans `src/ui/components.js` et `src/ui/livre-ajout.js` la ré-exporte
+  (le motif de D-E20 pour `messageErreurImage` et de D-B13) ; le graphe d'imports reste sans cycle (`import-web` → `photo-plat` → `livre-ajout` →
+  `import-cible` → `import-web` l'aurait fermé). Les deux fichiers hors des Files du plan (`components.js`, `livre-ajout.js`) sont touchés en tâche 3 et
+  déclarés ; aucun test ne change. Coût si faux : nul (le revers, un cycle, est mesuré inoffensif à l'exécution).
+- **R-F-13 (EI-1, EI-2, EI-6, EI-7 : le code commis du lot B)** — La boucle de redirections partagée d'`index.ts` garde la garde `r.redirected` et le
+  nom
+  `ctlSaut` de la vague finale de B (mutant M20 rouge sur t13) et vaut pour `image-web` ; t3 épingle l'objet `page` ENTIER, `image_url` en dernière
+clé ;
+  `enregistrerLecture` garde le corps réel de B (relecture APRÈS le dialogue, `fondement`, un seul `fabriquerLectureWeb`, déclenchement sur
+  `fiche.signet.id`) ; `renderImportWeb` garde `etat.lu` et le `charger()` réel, l'annonce calculée sur `lu`. Coût si faux : nul.
+- **R-F-14 (EI-3, EI-4 : le code commis des lots G et E)** — `figurePhotoPlat` recopie la garde de G (rien sans octets si ce qui arrivera ne s'affichera
+  pas, `safeDisplayType`) et lit `relireErreurs(ctxF)` (une `Map`, une définition) ; `messageErreurImage` est importée de `src/core/image.js`
+  (déménagée par E). Coût si faux : nul.
+- **R-F-15 (D-1 à D-3 : défauts du plan rév. 3, corrigés au plus près)** — RATIFIÉS : D-1 u5 — le flux de 2 Mio + 1 était déjà clos quand la borne
+  tombait ; fermeture différée d'un tirage, le mutant « borne + 1 » de `lireCorpsBorne` rougit sans blocage ; D-2 — les cas c1, c2 et c4 du rapatriement
+  prennent trois PNG distinctes (la même image ne pouvait pas donner une ligne `files` de plus) : le mutant « `putFile` avant la garde » rougit c1 et
+c4 ;
+  D-3 — le rouge du Step 5 de la tâche 1 se lit avec `--test-timeout=10000` (u6, u6 bis, u7, u11 attendent un `fetch` qui ne part jamais). Coût si
+faux :
+  un test de caractère de moins.
+- **R-F-16 (adaptations de forme A-1 à A-11, pins, versions, attendus)** — Ratifiées : commentaires de B « quatre outils » réécrits (`OUTILS` à
+  l'égalité
+  avec `OUTILS_0006`, R-F-9 ; `tools/generer-migrations.test.mjs` l. 1188) ; `PHOTO_ORIGINS` et `HASH` après `VERIFICATION` ; l'import de
+  `vocabulaire.js` garde les noms de B et D ; `tests/lecture-web.js:151` attend `{ ...PAGE, image_url: null }` ; `fabriquerLectureWeb` corps réel ;
+  quinze pins de version relevées en Python ; l'appel du lot F après le bloc du lot D dans `tests/tests.js` ; imports de `recipe.js` relevés ;
+  `en.js:528` « Photo of the dish » ; `revoquerUrlDeBlob` sur l'import existant de `book.js`. `docs/architecture.md:1200` dit encore « quatre outils » :
+  corrigé à la clôture (P-10). Attendus de mesure (rejeu sur copie) : T1 5681/5681 (aucune version ; Node 203/203 ; `tsc` 0 ; rouge Node 174 tests,
+  142 ✓, 29 ✗, 3 annulés), T2 5739/5739 (épingle 5738, `APP_VERSION 0.15.0`, `sw.js cuisine-os-v0.15.0-1`, Node 204 ; rouge `❌ 5668/5703`), T3 5828/5828
+  (5827, `-2`), T4 5845/5845 (5844, `-3`), T5 5884/5884 (5883, `-4`, `tsc` 0) ; `--check` 0 partout ; entre deux tâches seule l'épingle rougit ; les
+  rouges des tâches 3 à 5 n'ont pas été remesurés au Départ (l'implémenteur les lit). Une ronde qui touche `src/` fait +1 (R-B-24). Coût si faux : nul.
+- **R-F-17 (serveur et recensement)** — Aucun déploiement par un agent ; `tsc` 5.6.3 `--strict --noEmit` passe à chaque tâche qui touche
+  `supabase/functions/` (`npx -y -p typescript@5.6.3 tsc …`, commande du lot B, typescript 5.6.3 en cache) ; aucune migration (`0006` de B porte déjà
+  `image-web`) ; le redéploiement d'`assistant` est un geste du chef d'orchestre après la clôture, la sonde réelle `image-web` et la preuve § 10 des
+  gestes de Neegan ; aucun agent ne dépense d'appel. Recensement D-F16 (script du plan sur `35fb29c`, diff contre `4cb99a0`) : les écrivains (c) sont
+  `recipe.js:76` (★ Favori, corrigé en tâche 3) et `recipe-edit.js:342` (« Corriger », tâche 5) ; AUCUN (c) neuf venu de B, C, D ou E (`import-web.js`
+  l. 186 = (a), l. 270 = (b) ; `table-matieres.js` l. 64 et `domain/table-matieres.js` l. 201 = (a) ; `regroupement.js` l. 686 = condition sans
+écriture) :
+  la tâche 3 n'a pas d'écrivain neuf à corriger, `recensement-D-F16.md` est posé au registre. Coût si faux : une fiche écrite par copie non relue.
+- **R-F-18 (rouges de bruit, copies, disque)** — Un rouge intermittent (négatives « cartes », R-F-10 ; Node sous charge ; `tests/sync-l3.js:976`) se
+  rejoue
+  seul, machine à vide, avant d'être un constat (R-B-15) ; au plus trois copies servies à la fois ; copies par `rsync` sans `.git` ni `.superpowers`
+  (ports 8194, 8294, 8394…) ; un ENOSPC est un faux rouge dit dans le rapport ; aucun effacement récursif (les copies d'une tâche finie restent,
+  nommées). Coût si faux : un faux rouge, jamais un faux vert.
+
+**Rulings de construction (cinq tâches, leurs rondes, la revue finale de branche à trois lentilles, la vague finale et sa re-revue).**
+
+- **R-F-19 (revue de sécurité automatique du commit `2da429d`, tâche 1 : « SSRF » dans `index.ts`)** — Constat RATIFIÉ comme le résidu déjà ratifié
+  au lot B (R-B-21 : l'hôte est filtré par son nom — `https` seul, hôte public, ni IP, ni port, ni identifiants, hôte du projet et alias refusés —,
+  sans épinglage d'IP ; le DNS rebinding théorique est assumé, le mur restant TLS). `image-web` passe par la MÊME boucle `suivreRedirections`
+  (`valideAdresse` sur chaque cible, `r.redirected` refusé, 3 sauts, 15 s par saut et 30 s en tout, corps borné à 2 Mio, type lu dans la signature des
+  octets, jamais le modèle). Sans correction ; nommé en § 11. Coût si faux : un relais vers une adresse privée par un nom public qui y résout.
+- **R-F-20 (ratification en bloc des écarts de construction)** — Le code commis fait foi : (a) T1-R1 — quatre redondances simplifiées (`byteLength ===
+  0`,
+  `usage = null`, `premiere ? autres : 0`, `metas?.get?.`, mutants équivalents), bloc de commentaire de B réduit, relais `hotesRefuses` épinglé (u9),
+  motif de clé `meta` linéaire ; le test de borne de § 7.1 gardé tel quel et un test sur des balises fermées ajouté ; (b) T2-R1 — `src/sync/mime.js`
+  touché hors Files (`COVER_INPUT_MIME` gelé), `src/domain/lecture-web.js` lit `pointeurValide` exporté par `photo-web.js` (une définition),
+`lireImageWeb(args,
+  opts)` déstructure dans son `try`, arguments nuls refusés ; (c) T3-R1 — les écrivains de la photo (rapatriement, pose, retrait, ★ Favori) relisent
+la fiche
+  DANS la transaction par la condition `{ key, fusion }` de `repo.saveBatch` (la garde `setTimeout(0)` de § 4.1.1 disparaît ; § 11 « Fenêtres de la
+garde
+  finale », I-F5 et B-13 amendés) ; interfaces étendues sans changer les appels existants : `figurePhotoPlat(recipe, { repo, ctxF, fichier })`,
+  `renderZonePhotoPlat(etat, gestes, { gardeRefusee })`, `retirerPhotoPlat(id, { repo, attendu })` rend aussi `refuse('fiche_changee')`,
+`vuesPhotoPlat()`
+  (tests) ; ★ Favori écrit la valeur montrée (`!recipe.favorite`) par `deps.repo` et `deps.toast` ; sur une vue périmée, « Retirer » et « Ne pas
+  récupérer » rendent `fiche_changee` sans phrase et la zone redessine l'état relu (une phrase serait une clé `t()` neuve : décision de produit, non
+  prise) ; un échec d'écriture du Favori est seulement journalisé ; une borne de 500 ms (`Promise.race`) autour de `m.gestes.choisir()` (M17 rendait un
+  bilan figé) ; (d) T4-R1 — titre du repas à droite de la vignette, vignette indécodable cachée, `pointeurValide` ; (e) T5-R1 — « Corriger » et «
+Créer ma
+  version » relisent les trois champs de la photo DANS la transaction (`{ key, fusion }`), le vocabulaire vérifié sur la fiche écrite (une levée annule
+  tout ; m14 du lot A vert) ; `vol_tenu` refusé (constat Minor) : une descente déjà en vol sur la fiche abandonne l'essai annoncé sans rien dire —
+limite
+  § 11 (R-F-26) ; la fenêtre « Corriger » de T2 (`photo_origin` hors liste reçue → `ErreurVocabulaire`) est fermée par `originePhotoAdmise` en T5 ;
+  (f) T1 — `Object.prototype` pollué le temps de trois appels synchrones dans un test Node (R-F-8 vise la suite navigateur ; `node --test` isole chaque
+  fichier), l'exception de `headers.get('content-type')` attrapée dans `suivreRedirections` (502 `inaccessible` au lieu de `serveur`, inatteignable avec
+  une vraie `Response`). Coût si faux : § 12 ment sur le code commis.
+- **R-F-21 (vague finale VF-F1 à VF-F8, revue finale de branche de `fb3b30c` : 2 Important, 9 Minor ; commit `b65988f`)** — RATIFIÉS : (VF-F1) l'en-tête
+  JPEG est lu comme libjpeg le lit — l'octet FF de remplissage avant un marqueur est sauté ; `FF 00`, EOI ou SOS avant le SOF rendent l'en-tête
+  illisible et une image distante est refusée « indecodable » sans décodage (le mur ≤ 16 Mpx / petit côté ≥ 200 px, I-F2 et D-F12, ne se contourne
+  plus par un faux SOF caché dans un COM ; effet assumé : un JPEG distant corrompu que Chrome décoderait est refusé) ; (VF-F2) `TYPE_JSONLD` (code du
+  lot B) devient linéaire (`/\btype\s*=\s*(?:["']\s*)?application\/ld\+json/`) et son jumeau S-4 sur des balises fermées entre dans
+  `tools/assistant-lecture-web.test.mjs` (3 466 ms → 84 ms pour quatre pages) ; (VF-F3) une image de page dégénérée (`#`, `#top`, `.`, `./`, `?v=1` : la
+  page elle-même ou son dossier) est écartée ; (VF-F4) chaque candidat d'image est validé avant de passer la main — une image JSON-LD refusée laisse
+  `og:image` tenter la sienne (contrat § 6.1 d'`imageUrlDe` / `lirePageHtml` amendé) ; (VF-F5) la garde « page de liste » compte `max(autres, Recipe
+  trouvées − 1)` (coût assumé, test de caractère : une Recipe lisible sans image accompagnée d'une vignette liée perd son `og:image`) ; (VF-F6)
+  `enregistrerLecture` écrit la fiche DANS la transaction par fusion — une fiche supprimée entre la relecture et la transaction n'est plus recréée :
+refus
+  `inconnu`, rien d'écrit ; les autres champs du signet écrits depuis la copie restent la fenêtre R-B-27 du lot B ; (VF-F7) la zone n'affiche plus
+  « Récupération de la photo… » après une photo choisie ou un « Retirer » pendant la descente ; les vues jamais insérées sont bornées par le temps ; z5
+  tué par la tape ; (VF-F8) le faux-vert « Réessayer hors ligne → zéro POST » (clic sur un bouton `disabled`) est fermé, et les deux tests de temps du
+  lot B (S-4 < 500 ms, `portionsDe` < 50 ms) se jouent seuls (rouges de charge). Mutants de la vague : client 15/15, serveur 7/7 (un par un, seuls).
+  Re-revue ciblée : PROPRE (les deux Important fermés, 0 neuf). Coût si faux : nul — chaque changement a son test lu rouge d'abord.
+- **R-F-22 (versions et épingles, R-B-24)** — La tâche 1 (serveur) ne porte aucune version (`sw.js` reste `cuisine-os-v0.14.0-12`, épingle 5680) ;
+  `APP_VERSION 0.15.0` dès T2. Chaîne réelle de `sw.js` : `-1` (T2 `a2cafe0`), `-2` (T2-R1 `68ce8fb`), `-3` (T3 `09af72c`), `-4` (T3-R1 `7cb1145`),
+`-5` (T4
+  `d0d3161`), `-6` (T4-R1 `58aa0c1`), `-7` (T5 `a3b55c8`), `-8` (T5-R1 `fb3b30c`), `-9` (vague `b65988f`) ; épingles 5680, 5738, 5750, 5839, 5859, 5876,
+  5881, 5920, 5935, 5947. Les attendus du rejeu (5681 / 5739 / 5828 / 5845 / 5884, `-1` à `-4`) sont dépassés par les rondes ; les deltas propres aux
+  tâches (+58, +89, +17, +39) sont ceux du rejeu : la tête réelle fait foi (R-C-7). Node 174 → 203 (T1) → 204 (T2) → 206 (T5) → 208 (vague) ; `tsc`
+  5.6.3 `--strict` 0 à chaque tâche qui touche la fonction. Le commit de clôture ne touche pas `src/`. Coût si faux : nul.
+- **R-F-23 (assertions hors brief et amendées, I-D11)** — Ratifiées, ajoutées et jamais retirées : celles des rondes (T1-R1, T2-R1 +12, T3-R1 +20,
+  T4-R1 +5, T5-R1 +15), de la vague (+12), la borne de 500 ms de T3 (M17) ; les quinze pins passées à `0.15.0` pendant les Steps rouges (le rouge égale
+  celui du rejeu) ; `tools/generer-migrations.test.mjs` à l'égalité `OUTILS` = `OUTILS_0006` (R-F-9). Coût si faux : un libellé qui laisse croire que
+§ 7
+  nommait l'assertion.
+- **R-F-24 (mutants)** — T1 19/19 + M20 ; T2 18/18 ; T3 tous rouges sauf deux équivalents observables (une seule définition de `pointeurValide`, une
+  seule
+  lecture `files`) ; T4 12/12 (M07a/M07b, M11 rejoué seul) ; T5 78/78 (client 57, serveur 21 dont M21 « réservation après `telechargerImage` ») ; vague
+  22/22. Équivalents déclarés : les quatre redondances de T1 ; R-F-10 (négatives « cartes » : aucun rouge intermittent sur trois passages, M01-M03
+  rouges). Rouges de charge connus : les deux tests de temps du lot B, joués seuls ; les mutants Node se jouent un par un. Les copies des agents
+  (`lots/F/build`, ~1,1 Gio) restent nommées, aucun effacement récursif. Coût si faux : un rouge lent au lieu d'un rouge nommé.
+- **R-F-25 (dettes nommées, sans décision)** — `HASH` (`schema.js`) double `HASH_FICHIER` (`src/sync/tables.js`) : le lot qui touchera `tables.js`
+  écrit `export const HASH_FICHIER = HASH` ; commentaires périmés d'`index.ts` autour de la boucle partagée (bloc de B) ; `PROFONDEUR_IMAGE = 2` et le
+  rognage d'`og:image` non épinglés ; la garde `r.redirected` pour `image-web` tenue par le test de source « un seul `redirect: 'manual'` » et non par
+  un test de comportement ; le test de borne « 2 Mio de `<meta` sans `>` » (§ 7.1) ne mesure pas `lireMetaTranche` (gardé tel quel, son jumeau sur des
+  balises fermées tient la borne) ; une vue insérée puis détachée sans avis reste enregistrée jusqu'au prochain montage (une par montage au plus) ;
+  une lecture `files` par carte (`repo.getFiles` si l'iPhone peine) ; les autres champs de la fiche viennent de la copie du rendu (C4 du lot UX,
+  R-B-27) ; rien n'est mesuré sous le vrai runtime Deno (`redirect: 'manual'`, relais des signaux pendant le corps, mémoire 2 Mio + base64) ni dans
+  Safari, sur l'iPhone ou avec ImageIO. Coût si faux : nul — chaque ligne a sa lecture.
+- **R-F-26 (limites, § 11)** — Ratifiées : une descente déjà en vol sur la fiche abandonne l'essai annoncé sans rien dire (`vol_tenu` ; fiche sans
+  photo : « non récupérée », il faut payer « Réessayer » ; photo web en place : l'ancienne image reste, `fabriquerLectureWeb` ne réécrit pas
+  `photo_source_url` quand une photo est en place) ; une fiche supprimée entre la relecture et « Enregistrer » → refus `inconnu` ; un JPEG distant
+  corrompu (FF 00, EOI ou SOS avant le SOF) est refusé bien que Chrome le décoderait ; une Recipe lisible sans image accompagnée d'une vignette liée
+  perd son `og:image` ; le résidu SSRF de R-F-19. Coût si faux : un appel payé pour rien, jamais une photo de la personne écrasée.
+- **R-F-27 (serveur, redéploiement, preuve ; R-C-32 reprise)** — La fonction `assistant` est modifiée (cinquième outil `image-web`) et NON déployée :
+  le redéploiement est un geste du chef d'orchestre, APRÈS que Neegan a collé et prouvé la `0006` à cinq outils avec le lot B (verdict 2.031 relu dans
+  `RESULTATS-mitsu.md`), suivi des sondes S-F1 à S-F3 sans dépense, de S1-S9 et S13-S16 rejouées, puis des deux sondes payantes d'un appel chacune et
+  zéro jeton (S-F4, S-F5), avec la session de Neegan lue comme au README ; la preuve § 10 sur le site public est le geste de Neegan (deux appels par
+  recette web) ; aucun agent ne dépense d'appel. Après la fusion et le push, tous les appareils sur 0.15.0 avant la première photo web d'une
+  bibliothèque partagée. Coût si faux : un appel du quota.
+- **R-F-28 (lettre de la spec)** — Alignés en rév. 4 : I-F5 et § 4.3 (une transaction par `{ key, fusion }`, plus deux), § 11 « Fenêtres de la garde
+  finale », § 6.1 (`imageUrlDe` : candidats validés tour à tour, dégénérées écartées, garde de liste), § 7.1 (jumeau S-4 sur des balises fermées) ;
+  `docs/architecture.md` : `OUTILS` en porte cinq. Les trois choix de § 13 restent à Neegan, le lot a construit les défauts. Coût si faux : nul.
+- **R-F-29 (clôture)** — Re-revue de la vague PROPRE ; aucune ronde de clôture. `/verify` mécanique sur `b65988f` (registre `verify-F-b65988f.txt`) :
+  suite `✅ 5948/5948` (épingle 5947, `tests/tests.js:250`), seule erreur de console le 404 de `/favicon.ico`, Node 208/208, `--check` 0, `tsc` 5.6.3
+`--strict` 0, `APP_VERSION 0.15.0`, `sw.js cuisine-os-v0.15.0-9`, `DB_VERSION` 4, secrets 0, invisibles 0, arbre propre, 11 commits depuis `111f857`.
+Le registre `progress.md` a été alimenté par les agents (Départ, tâches, rondes) et complété par le chef. Registre copié dans
+  `~/projects/mistu/.superpowers/sdd/2026-10-19-plats-en-images/` (`diff -rq` muet) ; tête finale = le commit de clôture qui pose cette rév. 4,
+  `CLAUDE.md`, `STATE.md` et `docs/architecture.md`. La chaîne A → B → G → C → D → E → F est complète. Coût si faux : nul.
+
+**Mesures finales de la construction.** Tête de code `b65988f`, `APP_VERSION 0.15.0`, `sw.js cuisine-os-v0.15.0-9`, épingle 5947 (`tests/tests.js`),
+suite 5948/5948 (plus le 404 de
+`/favicon.ico`), Node 208/208, `--check` 0, `tsc` 5.6.3 `--strict` 0, invisibles 0 (Python), aucune clé, aucune migration (`DB_VERSION` 4, `TABLES`
+intact ;
+`OUTILS` = `OUTILS_0006`, cinq outils), fonction `assistant` modifiée (outil `image-web`) et NON déployée ; registre
+`.superpowers/sdd/2026-10-19-plats-en-images/` (copie dans `~/projects/mistu/.superpowers/sdd/`).
+
 ## 13. Points à trancher par Neegan (≤ 3)
 
-Les questions au chef d'orchestre sont tranchées (R-F-1 à R-F-6, § 12) : rien d'autre n'est ouvert. Restent les trois choix de Neegan ; chacun a
+**Après la construction (rév. 4, 23 octobre 2026).** Les rulings de construction R-F-19 à R-F-29 (§ 12 « Rév. 3 → rév. 4 ») tranchent ce que
+les tâches, les rondes, la revue finale et sa vague ont remonté ; les trois choix ci-dessous restent à Neegan, sans urgence : le lot a construit les
+défauts. Restent aussi des gestes, pas des décisions : (a) le redéploiement de la fonction `assistant` (cinquième outil `image-web` ; geste du chef
+d'orchestre, après la `0006` collée et prouvée par Neegan avec le lot B) et les sondes S-F1 à S-F5 (§ 10 pas 2, deux appels payants sans jeton) ;
+(b) après la fusion et le `push`, la preuve § 10 sur le site public (première photo web réelle : deux appels) ; (c) tous les appareils sur 0.15.0 avant
+la première photo web d'une bibliothèque partagée ; (d) Safari et iPhone jamais mesurés ; (e) le registre `.superpowers/sdd/2026-10-19-plats-en-images/`
+copié dans `~/projects/mistu/.superpowers/sdd/` (`diff -rq` muet) AVANT tout `git worktree remove`, « clean » après. Dettes de code nommées, sans
+décision à prendre : voir R-F-25 (§ 12) ; aucune ne change un comportement promis.
+
+**Avant la construction (rév. 3) :** Les questions au chef d'orchestre sont tranchées (R-F-1 à R-F-6, § 12) : rien d'autre n'est ouvert. Restent les
+trois choix de Neegan ; chacun a
 son défaut, que le plan construit si Neegan ne dit rien.
 
 1. **L'image d'une recette web est cherchée toute seule après « Enregistrer » (défaut, D-F3 : deux appels par recette web, annoncé à l'écran) — ou

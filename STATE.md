@@ -1,4 +1,18 @@
-# STATE.md — Cuisine OS (mistu) — état au 23 octobre 2026 (lots « Passerelle de l'assistant » et « Présentation du serveur » EN LIGNE, `main` = `57babc6` ; lots A « Import ciblé et journal d'import », B « Recette web complète », G « Les photos voyagent entre appareils », C « Table des matières sur plusieurs pages », D « Un lot de recettes photographiées » et E « Un livre reconnu depuis sa couverture » FINIS, empilés A → B → G → C → D → E sur `main`, NI fusionnés NI poussés, migrations `0005` et `0006` PAS collées, fonction `assistant` PAS redéployée ; lot F prêt (spec, plan, valeurs de rejeu), F en Départ sur la tête finale de E)
+# STATE.md — Cuisine OS (mistu) — état au 23 octobre 2026 (lots « Passerelle de l'assistant » et « Présentation du serveur » EN LIGNE, `main` = `57babc6` ; lots A « Import ciblé et journal d'import », B « Recette web complète », G « Les photos voyagent entre appareils », C « Table des matières sur plusieurs pages », D « Un lot de recettes photographiées », E « Un livre reconnu depuis sa couverture » et F « Les plats en images » FINIS, empilés A → B → G → C → D → E → F sur `main`, NI fusionnés NI poussés, migrations `0005` et `0006` PAS collées, fonction `assistant` PAS redéployée ; chaîne A → F COMPLÈTE : plus aucun lot en Départ ; fonction `assistant` à redéployer pour F)
+
+**23 octobre 2026, 14 h 04 — LOT F « LES PLATS EN IMAGES » : FINI dans le worktree `~/projects/mistu-plats-en-images` (branche `plats-en-images`,
+base = la tête finale du lot E `5ec092c`, spec `35fb29c` (rév. 3) puis rév. 4 à la clôture, plan rejoué `111f857`, tête de code `b65988f`, serveur
+8094), cinq tâches (une ronde chacune, re-revues propres ; vague finale, re-revue PROPRE), revue finale à trois lentilles (2 Important et 9 Minor : la
+vague `b65988f` les traite tous (VF-F1 à VF-F8), re-revue PROPRE ; rulings de construction R-F-19 à R-F-29), `/verify` mécanique VERT (suite
+5948/5948, épingle 5947, Node
+208/208, `--check` 0, `tsc` 0, invisibles 0, aucune clé), `sw.js cuisine-os-v0.15.0-9`, `APP_VERSION 0.15.0`, aucune migration, fonction `assistant` À
+REDÉPLOYER
+(cinquième outil `image-web` ; geste du chef d'orchestre après la `0006` collée et prouvée par Neegan avec le lot B). **PAS fusionné, PAS poussé.**
+**La chaîne A → B → G → C → D → E → F est COMPLÈTE** : six lots empilés sur `main`, aucun fusionné. Pour Neegan, dans l'ordre : les gestes des lots A,
+B, G, C, D et E (ci-dessous) ; puis le redéploiement d'`assistant` et les sondes S-F1 à S-F5 (chef) ; `git merge --ff-only plats-en-images`, push,
+suite publique 5948/5948, preuve § 10 (première photo web réelle, deux appels), tous les appareils sur 0.15.0, iPhone, trois choix de la spec § 13,
+« clean ». Registre `.superpowers/sdd/2026-10-19-plats-en-images/` (copie dans `~/projects/mistu/.superpowers/sdd/`) ; rulings R-F-7 à R-F-29 dans
+la spec § 12 « Rév. 3 → rév. 4 » ; ce qui reste au § 13. **FIN DE LA CHAÎNE** : A → B → G → C → D → E → F construits et clos ; aucun lot en Départ.**
 
 **23 octobre 2026, 4 h 59 — LOT E « UN LIVRE RECONNU DEPUIS SA COUVERTURE » : FINI dans le worktree `~/projects/mistu-couverture-lue`
 (branche `couverture-lue`, base = la tête finale du lot D `619e6c0`, spec `209de95` (rév. 6) puis rév. 7 à la clôture, plan rejoué `2bb855a`,

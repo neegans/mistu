@@ -1197,8 +1197,10 @@ est rendu en nœud texte.
 `assistant_reserver('lecture-web')` échoue en 23514 et chaque lecture web répond 502 `serveur`, sans rien casser d'autre. `0006` (écrite à la main,
 hors `NOMS` du générateur et de `--check`, comme `0004` ; 4 instructions, `begin` et `commit` compris : deux `alter table` entre eux) remplace
 `assistant_journal_outil_check` par une liste à CINQ valeurs, dans l'ordre `'recherche-web', 'creation', 'extraction', 'lecture-web', 'image-web'` :
-la cinquième sert le lot F, qui n'écrira aucune migration ; `OUTILS` n'en porte que quatre (une valeur admise de plus dans un `check` est inoffensive
-tant qu'`OUTILS` ne la porte pas ; le test croisé affirme `OUTILS` = `OUTILS_0006.slice(0, 4)`). Ni table, ni fonction, ni privilège : la vue,
+la cinquième sert le lot F, qui n'écrira aucune migration ; `OUTILS` en porte CINQ depuis le lot F (`OUTILS` = `OUTILS_0006`, R-F-9 ; jusqu’au lot E,
+quatre : le test croisé affirmait
+`OUTILS_0006.slice(0, 4)`, une valeur admise de plus dans un `check` étant inoffensive tant qu’`OUTILS` ne la portait pas). Ni table, ni fonction, ni
+privilège : la vue,
 `assistant_reserver` et les `revoke` de `0004` tiennent. La preuve (`rollback;` dernier, rien à remplacer) : garde 0 (table et contrainte présentes,
 sinon les `check` réels nommés) ; 1.01 les cinq outils dans l'ordre, 1.02 une seule contrainte `check`, 1.03 et 1.04 privilèges inchangés, 1.05 la vue
 `security_invoker` ; 2.01 à 2.031 sous `postgres`, avec un compte emprunté : 2.01 `lecture-web` accepté et 2.02 `'inconnu'` → 23514 (inserts datés du
@@ -1412,6 +1414,34 @@ réciproque
   `avancerCouverture` (un geste de la seule zone Couverture ne détache pas la lecture), `volAilleurs` (un vol hors journal compte), `ici` de
   `volUnique` couvre `couverture` (R-E-30 (e)) ; `lotDe` lit `BORNES_CLASSEMENT`, `surUneLigne` privée. Ronde de clôture : `garderDistants` dans
   `identifier`, `messages.introuvable` / `texteAucune()` dans le modèle du pas 2.
+
+## Les plats en images (lot F, 19-23 octobre 2026)
+
+Spec : `docs/superpowers/specs/2026-10-19-plats-en-images-design.md` (rév. 4 ; § 0 : décisions D-F1 à D-F19 ; § 2 : invariants I-F1 à I-F11 ; § 3 :
+données ; § 4 : parcours ; § 6 : serveur ; § 7 : tests ; § 11 : limites ; § 12 : rulings R-F-1 à R-F-29 ; § 13 : ce qui reste). Livré ici (branche
+`plats-en-images`, empilée sur `couverture-lue`, non fusionnée) : la photo du plat sur la fiche et dans les listes, son rapatriement depuis la page web
+par la fonction, sans migration ; la fonction `assistant` gagne un cinquième outil et doit être redéployée.
+
+- **Données.** `recipes.photo_sha256` : pointeur souple vers `files` (comme `cover_sha256` : la fiche vit sans ses octets, l'état « fichier absent » et
+  « Télécharger » du lot G s'appliquent) ; `recipes.photo_origin` (`PHOTO_ORIGINS` : la personne, la page web, `null` sinon) ; `photo_source_url` : la
+  provenance ou le rapatriement attendu, jamais rendu tel quel ; `HASH` (`src/model/schema.js`). Toute écriture relit la fiche (I-F1) ; les écrivains de
+  `recipes` sont recensés (D-F16, `recensement-D-F16.md`) : ★ Favori et « Corriger » relisent avant d'écrire.
+- **Serveur** (`supabase/functions/assistant/`, outil `image-web`, cinquième et dernier outil de `OUTILS` = `OUTILS_0006`, R-F-9) : télécharge l'image
+  de la page (`https` seul, hôtes refusés et alias comme `lecture-web`, UNE boucle de redirections partagée — `suivreRedirections`, garde
+  `r.redirected`, `ctlSaut` —, corps borné à 2 Mio, type lu dans la signature des octets, jamais le modèle : zéro jeton, un appel du quota), rend
+  `{ octets (base64), type, taille }` ou un 422 nommé (`pas_une_image`, `trop_lourde`, `inaccessible`, `interdit`).
+- **Domaine client** : `src/domain/photo-web.js` (adresse d'image depuis le JSON-LD ou `og:image` de la lecture web, `originePhotoAdmise`, mur distant),
+  `src/domain/base64.js` (décodage borné), `lireImageWeb` (un appel, un `putFile` après relecture de la fiche, jamais par-dessus une photo choisie).
+- **Écrans** : `src/ui/photo-plat.js` (zone « Photo du plat » = `renderZoneCouverture` de `src/ui/components.js`, déplacée là pour éviter le premier
+  cycle
+  d'imports, R-F-12 ; figure de tête `figurePhotoPlat` avec la garde `safeDisplayType` de G ; « Récupération… », « Image de la page {site} », échec en
+  une ligne, « Réessayer » avec son coût, « Ne pas récupérer ») ; cartes (`vignettePlat` 72 px, `recipeCard`, repas ; URL de blob révoquées au
+  redessin) ; `import-web.js` (annonce des deux appels, rapatriement déclenché sur `fiche.signet.id`).
+- **Vague finale (R-F-21)** : `dimensionsImage` (`src/core/image.js`) lit l'en-tête JPEG comme libjpeg (FF de remplissage sauté ; `FF 00`, EOI ou SOS
+  avant le SOF → illisible → image distante refusée sans décodage) ; `TYPE_JSONLD` linéaire ; `imageUrlDe` valide chaque candidat tour à tour (JSON-LD
+  refusée → `og:image`), écarte une adresse dégénérée et compte `max(autres, Recipe − 1)` pour la garde de liste ; `enregistrerLecture`
+  (`import-web.js`) et les écrivains de la photo (`photo-plat.js`, ★ Favori, « Corriger ») écrivent par la condition `{ key, fusion }` de
+  `repo.saveBatch`, la fiche relue DANS la transaction ; résidu SSRF de R-B-21 repris (R-F-19).
 
 ## Modèle de données (magasins IndexedDB)
 

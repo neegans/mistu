@@ -2365,7 +2365,7 @@ copies, jamais en place.
 sans `0006` : chaque lecture web répond 502 `serveur`, la réservation refusant l'outil ; rien d'autre ne change) ; la fonction redéployée et S13-S19
 jouées **avant** la fusion (une redirection opaque à S17 = une ronde sur `telechargerPage` d'abord) ; `/verify` par le chef d'orchestre ; le registre
 copié **avant** tout `git worktree remove`. Le lot G part de la tête finale de B ; le lot C de la tête finale de G (`1e4d68d`) ; le lot D de la tête
-finale de C (`739e706`) ; le lot E de la tête finale de D (`619e6c0`).
+finale de C (`739e706`) ; le lot E de la tête finale de D (`619e6c0`) ; le lot F de la tête finale de E (`5ec092c`) — la chaîne A → F est complète.
 
 ### Les photos voyagent entre appareils : octets des fichiers (L4), archive, Storage, moteur, Réglages, écrans (20 octobre 2026, lot G)
 
@@ -2738,6 +2738,90 @@ assertions neuves (`❌ 5679/5681`), RA1 et RA3 restent rouges, X1 du relecteur 
 A_CORRIGER (quatre points fermés, un faux-vert neuf RA5) puis, après la ronde 2 tests seuls `1e5e61b`, **PROPRE** (0 restant, 0 neuf) ; suite 5228 →
 **5681/5681** (épingle **5680**), Node 174/174, `--check` 0 ; clôture du chef d'orchestre : rulings R-E-30 à R-E-39, `/verify` VERT
 (`verify-E-1e5e61b.txt`), registre copié.
+
+### Les plats en images : photo du plat, rapatriement par la fonction, cartes illustrées (19-23 octobre 2026, lot F)
+
+**Pour toi.** Chaque recette peut avoir SA photo du plat. Sur la fiche, une section « Photo du plat » — la même que la couverture d'un livre — te
+laisse photographier, choisir (ce qui remplace la photo en place) ou retirer ; la photo s'affiche en tête de la fiche. Quand tu gardes et lis une
+recette du web, l'app essaie aussi de récupérer l'image que la page affiche, par le serveur et jamais depuis ton téléphone, juste après
+« Enregistrer » ; l'écran te dit avant que c'est un appel de plus de ton quota du jour (60), sans jeton. Si l'image ne vient pas, la recette est là
+quand même, la section le dit en une ligne, et tu choisis : « Réessayer » (un appel de plus, dit sous le bouton), poser ta propre photo, ou « Ne pas
+récupérer ». Une image venue du web porte la mention « Image de la page » suivie du site de la recette. Dans tes listes (recherche, Mes livres,
+fiche d'un livre, plats, favoris, repas), une petite vignette montre les plats dont tu as la photo ; sans photo, rien ne change. Une photo que tu as
+choisie reste toujours la tienne : une image du web ne la remplace jamais.
+
+**Où.** Branche `plats-en-images`, worktree `~/projects/mistu-plats-en-images`, empilée sur la tête finale du lot E `5ec092c` (chaîne
+A → B → G → C → D → E → F ; base `35fb29c` = `5ec092c` + la spec) ; spec `docs/superpowers/specs/2026-10-19-plats-en-images-design.md` (rév. 3 commise
+`35fb29c`, rév. 4 à la clôture : § 12 « Rév. 3 → rév. 4 », rulings R-F-7 à R-F-29, écarts EI-1 à EI-7, défauts D-1 à D-3, adaptations A-1 à A-11 ;
+§ 13) ; plan rejoué par intention sur `5ec092c` `docs/superpowers/plans/2026-10-19-plats-en-images.md` (`111f857`) ; registre
+`.superpowers/sdd/2026-10-19-plats-en-images/` (briefs, rapports, `recensement-D-F16.md`, `final-fix-report.md`, `verify-*.txt` ; hors git, copie dans
+`~/projects/mistu/.superpowers/sdd/`). Serveur de vérification `python3 -m http.server 8094 --bind 127.0.0.1`. Modules neufs :
+`src/domain/photo-web.js`,
+`src/domain/base64.js`, `src/ui/photo-plat.js` ; la fonction `assistant` gagne son cinquième outil `image-web` (`supabase/functions/assistant/`, une
+seule boucle de redirections partagée avec `lecture-web`) ; `renderZoneCouverture` vit dans `src/ui/components.js` (R-F-12). **PAS fusionné, PAS poussé.
+Aucune migration (`0006` du lot B porte déjà `image-web`), fonction `assistant` À REDÉPLOYER après la clôture (geste du chef d'orchestre, après la
+`0006` collée et prouvée par Neegan), `DB_VERSION` 4.**
+
+**Ce qui marche (prouvé par la suite, 5948/5948 sur `b65988f`, épingle 5947 ; Node 208/208 ; `--check` 0 ; `tsc` 5.6.3 `--strict` 0 ; aucun réseau,
+bases jetables, `fetch` et `pickFiles` injectés).**
+- **La photo du plat** sur la fiche (`src/ui/photo-plat.js`, zone « Photo du plat » = la zone de couverture des livres, figure de tête, «
+  Photographier »,
+  « Choisir une image », « Retirer ») ; `recipes.photo_sha256` pointeur souple vers `files`, `photo_origin` (`PHOTO_ORIGINS`), toute écriture par `repo`
+  après relecture de la fiche (I-F1, D-F16 : ★ Favori et « Corriger » relus ; recensement : aucun autre écrivain par copie).
+- **Le rapatriement par la fonction** (`image-web`, D-F3 : deux appels par recette web, annoncés ; `lireImageWeb`, base64 borné à 2 Mio, type lu dans la
+  signature des octets, `https` seul, hôtes refusés et redirections bornées comme `lecture-web`) : « Récupération… », « Image de la page {site} »,
+  échec dit en une ligne, « Réessayer » avec son coût, « Ne pas récupérer » ; une photo choisie n'est jamais remplacée par une image du web.
+- **Les cartes illustrées** (`vignettePlat`, `recipeCard`, repas) : vignette 72 px à droite quand la photo est là, rien sinon ; URL de blob révoquées au
+  redessin ; une lecture `files` par carte (limite § 11).
+- **Import web → rapatriement** (`import-web.js` : annonce sur `lu`, `enregistrerLecture` déclenche sur `fiche.signet.id`) ; « Corriger » relu avant
+  d'écrire (D-F16).
+- **Filets** : `MODULES_NEUFS` / `CHAINES_NEUVES_AILLEURS`, `SHELL` + les trois modules, quinze pins à `0.15.0`, `OUTILS` = `OUTILS_0006` (cinq outils,
+  R-F-9), tests Node de la fonction (208/208), `tsc` 0, aucun cycle d'imports (R-F-12).
+- **Vague finale** (`b65988f`, revue finale de branche : 2 Important, 9 Minor ; R-F-21) : l'en-tête JPEG lu comme libjpeg (un faux SOF caché ne
+  contourne plus le mur ≤ 16 Mpx), `TYPE_JSONLD` linéaire (page hostile de 2 Mio lue en 84 ms au lieu de 3,5 s), image de page dégénérée écartée et
+  repli sur `og:image` quand l'image JSON-LD est refusée, garde « page de liste » élargie, « Enregistrer » écrit la fiche dans la transaction (une
+  fiche supprimée n'est plus ressuscitée), zone sans « Récupération… » après une photo choisie, faux-vert « Réessayer hors ligne » fermé ; re-revue
+  PROPRE.
+
+**Ce qui n'est PAS prouvé.** Aucune image réelle rapatriée (§ 10 : sondes S-F1 à S-F5 après le redéploiement, première photo web réelle, durée en
+réseau mobile, 403 anti-hotlink réel) ; la fonction n'est PAS redéployée ; Safari et iPhone (appareil photo, « Choisir une image », VoiceOver) ; deux
+appareils (« Télécharger » en tête).
+
+**Dettes (assumées ; détail en spec § 12 et § 13).** Mutants (R-F-24) : T1 19+1, T2 18, T4 12, T5 78, vague 22, tous rouges ; équivalents nommés
+(quatre redondances de T1, deux de T3) ; négatives « cartes » = limite R-F-10 ; tests de temps du lot B joués seuls. Dettes de code (R-F-25) : `HASH`
+double `HASH_FICHIER` ; commentaires périmés d'`index.ts` ; `PROFONDEUR_IMAGE` et le rognage d'`og:image` non épinglés ; `r.redirected` pour
+`image-web` tenu par un test de source ; test de borne « 2 Mio de `<meta` » creux (son jumeau tient) ; une vue détachée sans avis jusqu'au prochain
+montage ; une lecture `files` par carte ; autres champs de la fiche depuis la copie du rendu (C4, R-B-27) ; rien sous le vrai Deno, Safari, iPhone,
+ImageIO. Limites (§ 11, R-F-26) : descente déjà en vol → essai annoncé abandonné sans phrase ; fiche supprimée entre relecture et « Enregistrer » →
+refus `inconnu` ; JPEG corrompu refusé ; Recipe sans image avec vignette liée → pas d'`og:image` ; résidu SSRF de R-B-21 (R-F-19). Les trois choix de
+la spec § 13 restent à toi (rapatriement automatique, vignette 72 px, place de la section) : le lot a construit les défauts.
+
+**Gestes, dans l'ordre.** 1) Les lots A, B, G, C, D puis E d'abord (leurs sections). 2) **Rien à coller pour F** : la `0006` du lot B porte déjà
+`image-web` ; le chef d'orchestre relit le verdict 2.031 dans `supabase/proofs/RESULTATS-mitsu.md`. 3) **Redéploiement de la fonction `assistant`**
+(geste du chef d'orchestre, CLI 2.121.0 extraite, `supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api`),
+version et empreinte consignées dans « Sondes `image-web` » de `RESULTATS-mitsu.md` ; sondes sans dépense S-F1 (`http://` → 422 `interdit`),
+S-F2 (`https://127.0.0.1/i.jpg` → 422), S-F3 (sans jeton → 401), S1-S9 et S13-S16 rejouées ; puis les deux sondes PAYANTES d'un appel chacune, zéro
+jeton (S-F4 une image `https` publique vérifiée par `curl -sI`, S-F5 une page HTML → 422 `pas_une_image`) — avec la session de Neegan lue comme au
+README, dépense dite à chaque pas. 4) `! git -C ~/projects/mistu merge --ff-only plats-en-images` (après E), puis **un** `! git -C ~/projects/mistu
+push origin main` ; suite publique `https://neegans.github.io/mistu/tests/` → `5948/5948` (épingle 5947 ; plus le 404 de `/favicon.ico`), service worker
+`cuisine-os-v0.15.0-9`. 5) **Preuve § 10 sur le site public** (Neegan, connecté) : première photo web réelle (deux appels : la lecture puis l'image ;
+« Récupération… »,
+l'image en tête avec « Image de la page {site} », journal `lecture-web` 200 puis `image-web` 200, durée depuis l'iPhone en réseau mobile, vignettes
+dans « Liens web gardés », la recherche et un repas) ; un échec dit ; la fiche sans dépense (« Photographier », « Choisir une image », « Retirer » lu
+par VoiceOver) ; deux appareils. 6) Tous les appareils sur 0.15.0 avant la première photo web d'une bibliothèque partagée (R-C-32). 7) Trancher, s'il
+le veut, les trois points de la spec § 13 (rapatriement automatique, vignette 72 px, place de la section) : le lot construit les défauts. 8) « clean »
+seulement après la copie du registre.
+
+**Versions.** `APP_VERSION 0.15.0` (E : 0.14.0) ; `sw.js` `cuisine-os-v0.15.0-1` (T2) … `-8` (ronde 1 de T5), **`-9`** (vague finale) ; chaque commit
+qui touche `src/` incrémente (R-B-24) ; la tâche 1 (serveur) ne
+porte aucune version ; `SHELL` + `./src/domain/photo-web.js`, `./src/domain/base64.js`, `./src/ui/photo-plat.js` ; `DB_VERSION` 4 inchangée.
+
+**Bilan.** Départ sur `35fb29c` (mesure = E : 5681/5681, épingle 5680, Node 174) ; rejeu du plan par intention (EI-1 à EI-7, D-1 à D-3, A-1 à A-11 →
+R-F-12 à R-F-18) ; cinq tâches, chacune revue à trois lentilles avec une ronde et une re-revue PROPRE : T1 `2da429d`/`66c6eb4` (serveur, Node 203,
+`tsc` 0), T2 `a2cafe0`/`68ce8fb` (5739 → 5751), T3 `09af72c`/`7cb1145` (5840 → 5860), T4 `d0d3161`/`58aa0c1` (5877 → 5882), T5 `a3b55c8`/`fb3b30c`
+(5921 → 5936) ; revue finale de branche (2 Important, 9 Minor), vague `b65988f` (5948/5948, épingle 5947, 22 mutants rouges), re-revue PROPRE ; suite
+5681 → **5948/5948** (épingle **5947**), Node 174 → 208/208, `--check` 0, `tsc` 0 ; clôture du chef d'orchestre : rulings R-F-19 à R-F-29, `/verify`
+VERT (`verify-F-b65988f.txt`), registre copié.
 
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 
