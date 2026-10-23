@@ -299,6 +299,14 @@ Code : `supabase/functions/assistant/` (spec `docs/superpowers/specs/2026-10-18-
 
 Reste non prouvé côté SQL : la concurrence réelle (deux appels simultanés sous le verrou), qui ne se joue pas dans l'éditeur.
 
+**Redéploiement, version 4 (contrôleur, 23 octobre 2026, 20 h 24 UTC = 16 h 24 à Montréal)** : même commande (`--no-verify-jwt --use-api`,
+CLI 2.121.0), code = `0c7cbbd` (pointe de la chaîne A → F : outils `lecture-web` du lot B et `image-web` du lot F ; quatre fichiers téléversés,
+`lecture-web.js` compris), `ezbr_sha256 cbe7be61ef10fc312b898aa37b013beb30dd9f66ef4c7887efd4a8ddfb2e081a`, `ACTIVE`, `verify_jwt: false` ; jouée après `0005` et `0006` collées et
+prouvées, et après les tests Node du serveur sur `0c7cbbd` (115/115). **S1-S9 rejouées à 20 h 25 UTC : statuts, corps et en-têtes CORS
+identiques aux versions 1 à 3** (204 avec Allow-Origin, `allow-headers: authorization, apikey, content-type, x-client-info`,
+`allow-methods: POST, OPTIONS`, `max-age: 600` / 204 sans Allow-Origin / 401 / 403 / 401 / 401 / 405 / 403 / 401 ; 94 à 627 ms, S1 à froid).
+Le `GET` d'état avec une session réelle (première mesure, F-1) : voir « Sondes `lecture-web` ».
+
 ## Preuve `0005_imports.sql` — à jouer
 
 Section préparée le 18 octobre 2026 (lot A « importer une recette repérée », spec
@@ -357,18 +365,41 @@ Tableau des verdicts (ordre, etape, attendu, obtenu, ok), tel que rendu par l'é
 | 3.01  | les trois anciens outils passent encore                                                      | acceptes                                                        | acceptes           | true |
 | 999   | BILAN                                                                                        | aucun verdict faux                                              | 0 faux sur 10      | true |
 
-## Sondes `lecture-web` — à jouer après le redéploiement
+## Sondes `lecture-web` — jouées le 23 octobre 2026 sur la version 4 (7 sur 7 conformes, plus le `GET` d'état)
 
-À remplir par le contrôleur (étape 12, point 5), version déployée et `ezbr_sha256` notés. S13-S16 et S19 ne dépensent rien (elles s'arrêtent avant
+Jouées par le contrôleur le 23 octobre 2026 (étape 12, point 5) entre 20 h 25 et 20 h 35 UTC, sur la **version 4** de la fonction
+(déployée à 20 h 24 UTC depuis `0c7cbbd`, `ezbr_sha256 cbe7be61ef10fc31…`, voir « Passerelle `assistant` »). **`GET` d'état avec la session
+de Neegan : 200 `{"modele":"claude-sonnet-5-5","quotaJour":60,"cles":"nouvelles"}` (689 ms)** : la plateforme sert les NOUVELLES clés
+(`sb_publishable_` / `sb_secret_`, F-1 ; première mesure). Session : jeton copié depuis la console du site connecté vers un fichier d'en-tête à
+mode 600 (`curl -H @fichier`), jamais affiché ni tapé dans une commande, fichier vidé dès les sondes finies. S13-S16 et S19 ne dépensent rien (elles s'arrêtent avant
 la réservation) ; S17-S18 coûtent un appel du quota chacune, sans dépense Anthropic : zéro jeton attendu (R-B-14). S13-S15 et S17-S18 se jouent
 avec la session de Neegan lue par `read -rs JETON` (README, étape 10, point 4 ; jamais le jeton dans une commande) ; S16 sans jeton.
 
 | Sonde | Requête | Statut attendu | Statut obtenu | Ce que ça prouve |
 | --- | --- | --- | --- | --- |
-| S13 | `{ outil: 'lecture-web', corps: { url: 'http://exemple.test/' } }` | 422 `interdit` | … | refus avant toute réservation (`assistant_usage_jour` inchangé) |
-| S14 | `https://127.0.0.1/` | 422 `interdit` | … | adresse IP refusée |
-| S15 | `https://localhost/` | 422 `interdit` | … | hôte local refusé |
-| S16 | sans jeton | 401 `non_connecte` | … | la session d'abord |
-| S17 | une adresse `https` en 301 / 302 vers une page à JSON-LD `Recipe` complet (vérifiée d'abord sans la fonction : `curl -sI -A 'Mitsu/0.10 (+https://neegans.github.io/mistu/)'`, puis `curl -s` sur la cible) | 200 `jsonld`, `usage` 0 / 0 — ou un refus propre et nommé | … | `redirect: 'manual'` sous le runtime : lecture `jsonld` sans appel au modèle, `page.url_finale` ≠ l'adresse envoyée ; opaque (502 `inaccessible` sur une chaîne que `curl` suit) → ronde sur `telechargerPage` avant la fusion |
-| S18 | une adresse publique en `https` qui redirige vers `http://` | 422 `interdit` | … | la cible d'une redirection est revalidée (« non mesurée » si aucun hôte connu) |
-| S19 | `https://ybdooerfeziiabsbfxtb.functions.supabase.co/` | 422 `interdit` | … | l'alias de la fonction est refusé avant toute réservation (R-B-23, ronde finale 2 `51bad50`) |
+| S13 | `{ outil: 'lecture-web', corps: { url: 'http://exemple.test/' } }` | 422 `interdit` | 422 `interdit` (307 ms) | refus avant toute réservation (`assistant_usage_jour` inchangé) |
+| S14 | `https://127.0.0.1/` | 422 `interdit` | 422 `interdit` (155 ms) | adresse IP refusée |
+| S15 | `https://localhost/` | 422 `interdit` | 422 `interdit` (263 ms) | hôte local refusé |
+| S16 | sans jeton | 401 `non_connecte` | 401 `non_connecte` (sans jeton, 94 ms) | la session d'abord |
+| S17 | une adresse `https` en 301 / 302 vers une page à JSON-LD `Recipe` complet (vérifiée d'abord sans la fonction : `curl -sI -A 'Mitsu/0.10 (+https://neegans.github.io/mistu/)'`, puis `curl -s` sur la cible) | 200 `jsonld`, `usage` 0 / 0 — ou un refus propre et nommé | 200 `source_kind: jsonld`, `usage` 0 / 0, `page.url_finale` = la page `www`, recette « Pâtes à la sauce puttanesca » lue (10 ingrédients, étapes) ; 658 ms. Adresse envoyée : `https://ricardocuisine.com/recettes/6309-pates-a-la-sauce-puttanesca` (301 vers `www.ricardocuisine.com`, vérifié d'abord par `curl -sI` avec le `User-Agent` de la fonction ; la cible porte un JSON-LD `Recipe` complet) | `redirect: 'manual'` sous le runtime : lecture `jsonld` sans appel au modèle, `page.url_finale` ≠ l'adresse envoyée ; opaque (502 `inaccessible` sur une chaîne que `curl` suit) → ronde sur `telechargerPage` avant la fusion |
+| S18 | une adresse publique en `https` qui redirige vers `http://` | 422 `interdit` | 422 `interdit` (430 ms). Adresse : `https://httpbin.org/redirect-to?url=http%3A%2F%2Fexample.com%2F` (302 vers `http://example.com/`, vérifié d'abord par `curl -sI`) | la cible d'une redirection est revalidée (« non mesurée » si aucun hôte connu) |
+| S19 | `https://ybdooerfeziiabsbfxtb.functions.supabase.co/` | 422 `interdit` | 422 `interdit` (176 ms) | l'alias de la fonction est refusé avant toute réservation (R-B-23, ronde finale 2 `51bad50`) |
+
+## Sondes `image-web` — jouées le 23 octobre 2026 sur la version 4 (5 sur 5 conformes)
+
+Lot F « Les plats en images » (spec `docs/superpowers/specs/2026-10-19-plats-en-images-design.md` § 10, pas 2) : même version 4, même session et
+mêmes conditions que les sondes `lecture-web` ci-dessus, le même jour (20 h 25 à 20 h 35 UTC). S-F1 à S-F3 ne dépensent rien (elles s'arrêtent
+avant la réservation) ; S-F4 et S-F5 coûtent un appel du quota chacune, zéro jeton (la fonction télécharge l'image elle-même, aucun appel au
+modèle). Cible de S-F4 vérifiée d'abord sans la fonction (`curl -sI` : `content-type: image/jpeg`, `content-length: 171503`, sous les 2 Mio,
+R-F-4) ; aucun 403 anti-hotlink rencontré (D-F3 : rien à contourner).
+
+| Sonde | Requête | Statut attendu | Statut obtenu | Ce que ça prouve |
+| --- | --- | --- | --- | --- |
+| S-F1 | `{ outil: 'image-web', corps: { url: 'http://exemple.test/i.jpg' } }` | 422 `interdit` | 422 `interdit` (219 ms) | refus avant toute réservation |
+| S-F2 | `https://127.0.0.1/i.jpg` | 422 `interdit` | 422 `interdit` (383 ms) | adresse IP refusée |
+| S-F3 | sans jeton | 401 `non_connecte` | 401 `non_connecte` (148 ms) | la session d'abord |
+| S-F4 | l'image de la recette Ricardo de S17 : `https://images.ricardocuisine.com/services/recipes/1x1/6309-v2.jpg` | 200, `type` et `taille` conformes, `Buffer.from(octets, 'base64').length === taille` | 200 `type: image/jpeg`, `taille` 171 503, `url_finale` = l'adresse envoyée, base64 décodé = 171 503 octets (cohérent) ; 676 ms | la fonction télécharge l'image, la borne et la rend telle quelle, sans appel au modèle |
+| S-F5 | la page HTML de la même recette (`https://www.ricardocuisine.com/recettes/6309-pates-a-la-sauce-puttanesca`) | 422 `pas_une_image` | 422 `pas_une_image` (406 ms) | une page n'est pas une image |
+
+Attendu dans `public.assistant_journal` (à lire par Neegan dans l'éditeur SQL, non fait par le contrôleur) : deux lignes `lecture-web` (S17 en 200,
+S18 en 422) et deux lignes `image-web` (S-F4 en 200, S-F5 en 422), jetons `null` ; `assistant_usage_jour` du 23 octobre : 4 appels de plus.
