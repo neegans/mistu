@@ -1411,8 +1411,11 @@ test('v2. une admise et quatre interdites : UNE reservation apercu-web (cle secr
   routeur({ 'https://site.test/r1': async () => htmlReponse(pageLd('https://site.test/i/p.jpg')), 'https://site.test/i/p.jpg': async () => imageReponse(octets) });
   const urls = ['https://site.test/r1#frag', 'http://b.test/', 'https://127.0.0.1/', 'https://u:p@c.test/', 'https://projet.test/x'];
   const texte = corpsApercu(urls);
+  const minuteries = () => process.getActiveResourcesInfo().filter((x) => x === 'Timeout').length; // ronde 1 : le budget (60 s) et l attente (120 s) sont ici de VRAIES minuteries (v7 seul les simule)
+  const minuteriesAvant = minuteries();
   const r = await handler(requete('POST', { texte }));
   assert.equal(r.status, 200);
+  assert.equal(minuteries(), minuteriesAvant, 'ronde 1 : aucune minuterie laissee derriere la reponse (clearTimeout du budget de 60 s ET de l attente de 120 s) ; sans le clearTimeout du budget, chaque appel tiendrait une minuterie orpheline 60 s de plus');
   const corps = await lire(r);
   assert.deepEqual(reserves().map((a) => a.args), [{ p_owner: 'compte-1', p_outil: 'apercu-web', p_octets: Buffer.byteLength(texte), p_quota: 2 }], 'une seule reservation pour les cinq (I-UI-6)');
   assert.equal(reserves()[0].cle, 'sb_secret_factice');
@@ -1429,6 +1432,7 @@ test('v2. une admise et quatre interdites : UNE reservation apercu-web (cle secr
   assert.deepEqual(corps.apercus.map((a) => [a.url, a.raison, a.image === null]), [['https://site.test/r1#frag', null, false], ['http://b.test/', 'interdit', true], ['https://127.0.0.1/', 'interdit', true], ['https://u:p@c.test/', 'interdit', true], ['https://projet.test/x', 'interdit', true]], 'une entree par chaine recue, dans l ordre, url telle quelle (fragment garde) ; raison nulle si et seulement si image presente');
   assert.deepEqual([corps.apercus[0].image.type, corps.apercus[0].image.taille, Object.keys(corps.apercus[0].image).sort()], ['image/jpeg', 1000, ['octets', 'taille', 'type']]);
   assert.ok(Buffer.from(corps.apercus[0].image.octets, 'base64').equals(Buffer.from(octets)), 'les octets relus du base64');
+  assert.equal(corps.apercus[0].image.octets.length, 1336, 'ronde 1 : 1 000 octets → 1 336 caracteres, remplissage compris (Buffer.from tolere un = final manquant ; la longueur, non)');
   assert.deepEqual(faux.MAJ[0].v, { statut: 200, jetons_entree: null, jetons_sortie: null, duree_ms: faux.MAJ[0].v.duree_ms });
   assert.deepEqual(faux.evenements, ['rpc:is_allowed', 'rpc:assistant_reserver', 'fetch', 'fetch', 'update'], 'validation, reservation, page, image, journal : dans cet ordre');
 });
@@ -1494,6 +1498,26 @@ test('v4. une raison par adresse, sans faire echouer les autres (page : inaccess
   assert.equal(demandees.includes('https://localhost/x'), false, 'une cible de redirection refusee n est jamais demandee');
 });
 
+test('v4 bis. S-12 dans apercuDe : l hote du projet et ses sous-domaines sont refuses par les TROIS relais de hotesRefuses (lirePageHtml, telechargerPage, telechargerImage) — og:image sur l hote du projet → pas_de_recette ; image JSON-LD sur un sous-domaine du projet → pas_d_image ; 301 de page vers le projet → interdit ; 302 d image vers le projet → interdit ; aucun fetch dont l hote finit par projet.test', async () => {
+  remise(); ENV.SUPABASE_URL = 'https://projet.test';
+  const servie = async () => imageReponse(JPEG(12)); // ce que la fonction rendrait si un relais tombait : une image du projet, telechargee par elle-meme
+  routeur({
+    'https://site.test/og-projet': async () => htmlReponse(pageOg('https://projet.test/storage/v1/object/public/plats/p.jpg')),
+    'https://site.test/ld-projet': async () => htmlReponse(pageLd('https://cdn.projet.test/i.jpg')),
+    'https://site.test/301-projet': async () => new Response(null, { status: 301, headers: { location: 'https://projet.test/functions/v1/assistant' } }),
+    'https://site.test/302-image': async () => htmlReponse(pageOg('https://cdn.test/vers-projet.jpg')),
+    'https://cdn.test/vers-projet.jpg': async () => new Response(null, { status: 302, headers: { location: 'https://projet.test/i.jpg' } }),
+    'https://projet.test/storage/v1/object/public/plats/p.jpg': servie, 'https://cdn.projet.test/i.jpg': servie, 'https://projet.test/i.jpg': servie,
+    'https://projet.test/functions/v1/assistant': async () => htmlReponse(pageOg('https://cdn.test/x.jpg')), 'https://cdn.test/x.jpg': servie,
+  });
+  const urls = ['https://site.test/og-projet', 'https://site.test/ld-projet', 'https://site.test/301-projet', 'https://site.test/302-image'];
+  const r = await handler(requete('POST', { texte: corpsApercu(urls) }));
+  const corps = await lire(r);
+  assert.deepEqual([r.status, corps.apercus.map((a) => [a.url, a.raison, a.image])], [200, [[urls[0], 'pas_de_recette', null], [urls[1], 'pas_d_image', null], [urls[2], 'interdit', null], [urls[3], 'interdit', null]]], 'une raison par relais : lirePageHtml (og:image, image JSON-LD), telechargerPage (301), telechargerImage (302)');
+  assert.deepEqual(appelsPage().map((a) => new URL(a.url).hostname).filter((h) => h === 'projet.test' || h.endsWith('.projet.test')), [], 'aucune requete vers l hote du projet ni un sous-domaine : la fonction ne se rappelle jamais elle-meme (S-12)');
+  assert.deepEqual([reserves().length, appelsModele().length, faux.MAJ[0].v.statut], [1, 0, 200]);
+});
+
 test('v5. borne de 1 Mio par apercu (H-18, F-19, S-11) : 1 048 577 octets → image_trop_lourde ; 1 048 576 → image rendue (1 398 104 caracteres) ; cinq images a la borne → corps ≤ 8 Mio (le corpsMax du client) ; image-web garde ses 2 Mio (u5)', { timeout: 20000 }, async () => {
   remise();
   routeur({ 'https://site.test/un': async () => htmlReponse(pageOg('https://cdn.test/un.jpg')), 'https://cdn.test/un.jpg': async () => imageReponse(JPEG(MIO + 1)),
@@ -1517,7 +1541,9 @@ test('v5. borne de 1 Mio par apercu (H-18, F-19, S-11) : 1 048 577 octets → im
 test('v6. parallelisme 2 (PARALLELISME_APERCU, S-2) : deux pages en vol, jamais trois ; la troisieme part quand une des deux premieres finit ; l ordre des entrees est celui des chaines recues', async () => {
   remise();
   const attentes = new Map();
-  page({ page: (url) => (url.startsWith('https://cdn.test/') ? Promise.resolve(imageReponse(JPEG(10))) : new Promise((res) => { attentes.set(url, res); })) });
+  // Ronde 1 : une taille d image DISTINCTE par page (10 × son numero), deduite de l adresse de l image : l alignement resultat ↔ adresse est affirme par index.
+  const tailleDe = (url) => 10 * Number(/(\d+)\.jpg$/.exec(url)[1]);
+  page({ page: (url) => (url.startsWith('https://cdn.test/') ? Promise.resolve(imageReponse(JPEG(tailleDe(url)))) : new Promise((res) => { attentes.set(url, res); })) });
   const urls = [1, 2, 3, 4, 5].map((i) => `https://site.test/p${i}`);
   const enCours = handler(requete('POST', { texte: corpsApercu(urls) }));
   await drainer();
@@ -1531,7 +1557,7 @@ test('v6. parallelisme 2 (PARALLELISME_APERCU, S-2) : deux pages en vol, jamais 
   attentes.get(urls[4])(htmlReponse(pageOg('https://cdn.test/5.jpg')));
   const r = await enCours;
   const corps = await lire(r);
-  assert.deepEqual([r.status, corps.apercus.map((a) => a.url), corps.apercus.every((a) => a.image !== null && a.raison === null), appelsPage().length, appelsModele().length], [200, urls, true, 10, 0]);
+  assert.deepEqual([r.status, corps.apercus.map((a) => [a.url, a.raison, a.image?.taille ?? null]), appelsPage().length, appelsModele().length], [200, urls.map((u, i) => [u, null, 10 * (i + 1)]), 10, 0], 'chaque entree porte l image de SA page (taille 10 × i), dans l ordre des chaines recues, meme quand p2 finit avant p1 (un enParallele en ordre d achevement rougit ici)');
 });
 
 test('v7. budget serveur de 60 s (S-1) : UN AbortController par appel, relaye a chaque suivreRedirections — (a) les adresses lues avant restent, celle en vol est abandonnee a 60 s EXACTES (delai) ; (b) une adresse jamais commencee rend delai sans fetch ; 200, journal 200', async () => {
@@ -1545,7 +1571,7 @@ test('v7. budget serveur de 60 s (S-1) : UN AbortController par appel, relaye a 
       options.signal.addEventListener('abort', () => rejeter(new DOMException('Aborted', 'AbortError')));
       setTimeout(() => resoudre(url.endsWith('/a') ? new Response(null, { status: 301, headers: { location: url.slice(0, -2) + '/b' } }) : htmlReponse(pageOg('https://cdn.test/' + url.split('/')[3] + '.jpg'))), 11000);
     });
-    page({ page: (url, options) => { if (url.startsWith('https://cdn.test/')) return Promise.resolve(imageReponse(JPEG(10))); signaux.push(options.signal); return saut(url, options); } });
+    page({ page: (url, options) => { if (url.startsWith('https://cdn.test/')) return Promise.resolve(imageReponse(JPEG(10 * Number(/p(\d+)\.jpg$/.exec(url)[1])))); signaux.push(options.signal); return saut(url, options); } });
     const urls = [1, 2, 3, 4, 5].map((i) => `https://site.test/p${i}/a`);
     const enCours = handler(requete('POST', { texte: corpsApercu(urls) }));
     await drainer();
@@ -1559,7 +1585,7 @@ test('v7. budget serveur de 60 s (S-1) : UN AbortController par appel, relaye a 
     assert.equal(signaux[9].aborted, true, 'a 60 s exactes, la requete en vol est abandonnee par le budget');
     const r = await enCours;
     const corps = await lire(r);
-    assert.deepEqual([r.status, corps.apercus.map((a) => [a.raison, a.image !== null]), faux.MAJ[0].v.statut, appelsModele().length], [200, [[null, true], [null, true], [null, true], [null, true], ['delai', false]], 200, 0]);
+    assert.deepEqual([r.status, corps.apercus.map((a) => [a.raison, a.image?.taille ?? null]), faux.MAJ[0].v.statut, appelsModele().length], [200, [[null, 10], [null, 20], [null, 30], [null, 40], ['delai', null]], 200, 0], 'ronde 1 : chaque image a sa carte (taille 10 × le numero de la page)');
     assert.equal(appelsPage().length, 14, 'dix fetch de page (deux sauts par adresse) et quatre images ; rien apres le budget');
   } finally { mock.timers.reset(); }
   // (b) Chaque page = 301 a 12 s, 301 a 12 s, puis un troisieme saut coupe par les 30 s de la page (inaccessible) : p1-p2 0-30 s (inaccessible), p3-p4
@@ -1595,6 +1621,33 @@ test('v8. le client part pendant les apercus (F-5) : les requetes en vol sont ab
   client.abort();
   const r = await enCours;
   assert.deepEqual([r.status, await r.text(), signaux.map((s) => s.aborted), appelsPage().length, faux.MAJ[0].v.statut, appelsModele().length], [499, '', [true, true], 2, 499, 0]);
+});
+
+test('v8 bis. le client part PENDANT la reservation (F-5) : ctl deja leve avant le premier fetch → budget leve d emblee, aucune page demandee, 499 sans corps, journal 499 (appel compte)', async () => {
+  remise();
+  const client = new AbortController();
+  faux.REPONSES.rpc = async (nom) => { if (nom === 'assistant_reserver') { client.abort(); return { data: 7, error: null }; } return { data: true, error: null }; };
+  routeur({ 'https://site.test/r1': async () => htmlReponse(pageOg('https://cdn.test/og.jpg')), 'https://cdn.test/og.jpg': async () => imageReponse(JPEG(10)) });
+  const r = await handler(requete('POST', { texte: corpsApercu(['https://site.test/r1', 'https://site.test/r2']), signal: client.signal }));
+  assert.deepEqual([r.status, await r.text(), appelsFetch.length, reserves().length, faux.MAJ[0].v.statut], [499, '', 0, 1, 499], 'reservation faite (compte), client parti : rien n est telecharge pour personne (un addEventListener seul, pose sur un signal deja leve, ne tirerait jamais)');
+});
+
+test('v8 ter. le depart du client coupe aussi l IMAGE en vol (F-5 : relais ctl → budget → suivreRedirections dans la phase image d apercuDe) : page immediate, image sourde, client parti → le signal de l image est leve aussitot, 499 sans corps, journal 499', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    remise();
+    const signaux = [];
+    page({ page: (url, options) => { if (url.startsWith('https://cdn.test/')) { signaux.push(options.signal); return sourde(url, options); } return Promise.resolve(htmlReponse(pageOg('https://cdn.test/lente.jpg'))); } });
+    const client = new AbortController();
+    const enCours = handler(requete('POST', { texte: corpsApercu(['https://site.test/p1']), signal: client.signal }));
+    await drainer();
+    assert.deepEqual([appelsPage().map((a) => a.url), signaux.length, signaux[0]?.aborted], [['https://site.test/p1', 'https://cdn.test/lente.jpg'], 1, false], 'la page est lue, l image est en vol');
+    client.abort(); await drainer();
+    assert.equal(signaux[0].aborted, true, 'le depart du client coupe l image en vol (un telechargerImage sans relais du budget la laisserait courir jusqu a sa minuterie de 15 s / 30 s, pour personne)');
+    mock.timers.tick(31000); await drainer(); // sans relais, seule la minuterie de 30 s couperait l image : ici il ne reste rien a couper
+    const r = await enCours;
+    assert.deepEqual([r.status, await r.text(), appelsPage().length, faux.MAJ[0].v.statut, appelsModele().length], [499, '', 2, 499, 0]);
+  } finally { mock.timers.reset(); }
 });
 
 test('v9. D-UI-14 / K-7 : la reservation en erreur (0007 absente : 23514 sur l insert d assistant_reserver) → 502 serveur, aucune page demandee ; quota atteint → 429 quota, aucune page demandee', async () => {

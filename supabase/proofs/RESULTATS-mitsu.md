@@ -446,7 +446,7 @@ S18 en 422) et deux lignes `image-web` (S-F4 en 200, S-F5 en 422), jetons `null`
 
 ## Preuve `0007_apercu_web.sql` — à jouer
 
-Section préparée le 23 octobre 2026 (lot UI-2 « Aperçus des résultats web », spec `docs/superpowers/specs/2026-10-23-experience-carnet-design.md`
+Section préparée le 25 octobre 2026 (lot UI-2 « Aperçus des résultats web », spec `docs/superpowers/specs/2026-10-23-experience-carnet-design.md`
 § 6, D-UI-14 ; procédure : étape 13 du README). **À jouer par Neegan après `0006` (jouée le 23 octobre, ci-dessus), AVANT le redéploiement de la
 fonction et AVANT que le code du lot UI-2 n'arrive sur le site public** : coller `migrations/0007_apercu_web.sql` en entier (attendu `Success. No rows
 returned`), relever `shasum -a 256 supabase/migrations/0007_apercu_web.sql`, puis la preuve (« Run without RLS ») : lire `999 BILAN`, attendu

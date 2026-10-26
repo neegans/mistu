@@ -229,7 +229,7 @@ test('LIMITES de logique.js : forme inchangee ; LIMITES_LECTURE : les six bornes
 });
 
 // --- Lot F « Les plats en images » (spec § 6.2) -----------------------------------------------------------------------------------------------
-test('OUTILS_MODELE : gelee, egale a OUTILS sans image-web (image-web n atteint jamais le modele)', () => {
+test('OUTILS_MODELE : gelee, egale a OUTILS sans image-web ni apercu-web (aucun des deux n atteint le modele)', () => {
   assert.ok(Object.isFrozen(OUTILS_MODELE));
   assert.deepEqual(OUTILS_MODELE, OUTILS.filter((o) => o !== 'image-web' && o !== 'apercu-web'));
   assert.ok(!OUTILS_MODELE.includes('image-web'));

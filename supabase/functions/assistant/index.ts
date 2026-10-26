@@ -309,7 +309,9 @@ async function traiter(req: Request, cors: Record<string, string>, origine: stri
 // Lot UI-2 (spec § 6) : UNE adresse d'aperçu. La page par telechargerPage (bornes de lecture-web), l'adresse d'image par LA règle de F (lirePageHtml(...).page.image_url :
 // Recipe lisible retenu, sinon og:image hors page de liste — aucune seconde copie, S-10), l'image par telechargerImage bornée à LIMITES_APERCU.image, encodée en
 // base64 dès sa réception et ses octets lâchés (K-5). Ne lève jamais : une raison fermée par échec (RAISON_PAGE, RAISON_IMAGE ; `delai` quand le budget a levé
-// `signal`, en vol ou avant de commencer). Déclarée APRÈS traiter : N-1 épingle l'ordre du flux par la première occurrence de chaque point d'appel.
+// `signal`, en vol ou avant de commencer). La branche `inaccessible` du catch est DÉFENSIVE : suivreRedirections absorbe déjà réseau et minuteries, seule une
+// levée de lirePageHtml ou de versBase64 l'atteindrait ; aucun test ne l'épingle (mutant « toujours delai » déclaré équivalent, ronde 1 de la tâche 1).
+// Déclarée APRÈS traiter : N-1 épingle l'ordre du flux par la première occurrence de chaque point d'appel.
 type ImageApercu = { type: string; taille: number; octets: string };
 type Apercu = { image: ImageApercu | null; raison: string | null };
 const RAISON_PAGE: Record<string, string> = { inaccessible: 'inaccessible', interdit: 'interdit', pas_une_page: 'pas_de_recette', trop_lourde: 'inaccessible' };
@@ -322,6 +324,9 @@ async function apercuDe(href: string, { signal, hotesRefuses: refuses }: { signa
     const lue = lirePageHtml({ html: page.html, urlFinale: page.urlFinale, contentType: page.contentType, hotesRefuses: refuses });
     const adresse = lue.page.image_url;
     // pas_d_image : une Recipe lisible UNIQUE sans image ni og:image ; pas_de_recette : rien de lisible, ou une page de liste (og:image écartée par F).
+    // Écart diagnostique NOMMÉ (ronde 1, R-UI2-2) : la garde « page de liste » de F compte TOUTES les Recipe trouvées (lisibles ou non), `jsonld.autres` les seules
+    // lisibles — une page de liste dont les vignettes sont des Recipe illisibles rend donc pas_d_image, non pas_de_recette ; aucun effet à l'écran (le client
+    // n'affiche pas la raison par carte), le remède touche lecture-web.js (lot F) : décision du chef.
     if (typeof adresse !== 'string') return { image: null, raison: lue.jsonld !== null && lue.jsonld.autres === 0 ? 'pas_d_image' : 'pas_de_recette' };
     const image = await telechargerImage(adresse, { signal, hotesRefuses: refuses, max: LIMITES_APERCU.image });
     if ('erreur' in image) return { image: null, raison: RAISON_IMAGE[image.erreur] ?? 'inaccessible' };
