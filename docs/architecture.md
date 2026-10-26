@@ -20,6 +20,7 @@ src/domain/  quantity.js (fractions, plages, qualitatif), units.js (conventions,
              recherche-web.js (demande, corps, lecture de la réponse et choix des liens de la recherche web ; un appel, ne lève jamais),
              assistant-config.js (normalisation de la configuration de l'assistant IA, pure — voir « L'assistant suit le compte »),
              creation-ia.js (demande, validation, fabrication et appel de « Créer une recette avec l'assistant » — voir cette section)
+             apercu-web.js (les aperçus des résultats web : un appel `apercu-web` par la passerelle, le 200 lu comme une donnée hostile, le mur de F sans ré-encodage — voir « Aperçus des résultats web »)
 src/ui/      state.js (cache), components.js, home, search, library, book, dish, recipe, recipe-edit, cook, import, meals, grocery, kitchen, settings, add,
              creer-ia (écran #/recipes/creer)
 src/sync/    tables.js, mime.js, clock.js, outbox.js, config.js, auth.js — voir « Synchronisation (L1-L2) »
@@ -1426,7 +1427,7 @@ par la fonction, sans migration ; la fonction `assistant` gagne un cinquième ou
   « Télécharger » du lot G s'appliquent) ; `recipes.photo_origin` (`PHOTO_ORIGINS` : la personne, la page web, `null` sinon) ; `photo_source_url` : la
   provenance ou le rapatriement attendu, jamais rendu tel quel ; `HASH` (`src/model/schema.js`). Toute écriture relit la fiche (I-F1) ; les écrivains de
   `recipes` sont recensés (D-F16, `recensement-D-F16.md`) : ★ Favori et « Corriger » relisent avant d'écrire.
-- **Serveur** (`supabase/functions/assistant/`, outil `image-web`, cinquième et dernier outil de `OUTILS` = `OUTILS_0006`, R-F-9) : télécharge l'image
+- **Serveur** (`supabase/functions/assistant/`, outil `image-web`, cinquième outil de `OUTILS` = `OUTILS_0006`, R-F-9 ; depuis le lot UI-2, `OUTILS` = `OUTILS_0007` et `apercu-web` est le sixième et dernier) : télécharge l'image
   de la page (`https` seul, hôtes refusés et alias comme `lecture-web`, UNE boucle de redirections partagée — `suivreRedirections`, garde
   `r.redirected`, `ctlSaut` —, corps borné à 2 Mio, type lu dans la signature des octets, jamais le modèle : zéro jeton, un appel du quota), rend
   `{ octets (base64), type, taille }` ou un 422 nommé (`pas_une_image`, `trop_lourde`, `inaccessible`, `interdit`).
@@ -1442,6 +1443,68 @@ par la fonction, sans migration ; la fonction `assistant` gagne un cinquième ou
   refusée → `og:image`), écarte une adresse dégénérée et compte `max(autres, Recipe − 1)` pour la garde de liste ; `enregistrerLecture`
   (`import-web.js`) et les écrivains de la photo (`photo-plat.js`, ★ Favori, « Corriger ») écrivent par la condition `{ key, fusion }` de
   `repo.saveBatch`, la fiche relue DANS la transaction ; résidu SSRF de R-B-21 repris (R-F-19).
+
+## Aperçus des résultats web (lot UI-2, 23-26 octobre 2026)
+
+Spec : `docs/superpowers/specs/2026-10-23-experience-carnet-design.md` (volet UI-2 : D-UI-12 à D-UI-14, I-UI-2, I-UI-5 à I-UI-7, § 4.6, § 6, § 7, § 11 ;
+§ 12 sous-titre « Construction de UI-2 »). Livré ici (branche `apercus-web`, sur `main` `05c751f` + la spec, non fusionnée) : les vignettes des
+résultats de l'onglet Web, rendues par un sixième outil serveur sans modèle, avec une migration écrite à la main (`0007`) ; la fonction `assistant`
+doit être redéployée. Rien n'est écrit dans `files` ni dans aucun magasin ; `DB_VERSION` 4.
+
+```text
+src/ui/search.js  (onglet Web, issue « trouvé ») ──► deps.apercus = lireApercusWeb({ urls: hrefs ABSENTS de la Map, session }, { signal })
+   │   Map(href → { blob, type } | { raison }) au niveau du module, à côté de `memoire` ; UN vol d'aperçus (volApercus : controller, promesse, hrefs, garde)
+   │   demandé par une vue CONNECTÉE qui rend un « trouvé », pour les adresses https sans identifiants (adresseApercu ; la clé reste lien.href) ; abandonné
+   │   par lancer(), annuler(), reinitialiserWeb(), et quand la dernière vue se déconnecte ALORS QUE la route a quitté /search (MutationObserver du document,
+   │   le temps du vol ; deps.routeCourante, défaut currentPath : une reconstruction de /search laisse le vol, la nouvelle instance l'adopte) ; un résultat
+   │   d'un vol abandonné est MUET ; à la réception : une entrée par adresse demandée, puis UN notifier() (les figures de toute la liste en un seul redessin) ;
+   │   un échec de l'appel entier n'entre pas dans la Map : echecApercus = { issue, raison } (l'identité de l'issue affichée), un redessin de la même issue
+   │   ne redemande rien, une nouvelle issue redemande ; elaguerApercus(issue) à chaque « trouvé » reçu lâche les href sortis des liens, Blob compris ;
+   │   au montage d'une vue rendue détachée (MutationObserver de montage, microtâche ; morte au tour de boucle suivant) : demande des adresses absentes.
+   ▼
+src/domain/apercu-web.js  lireApercusWeb → appelerAssistant('apercu-web', { urls }, { fetch, session, config, signal, tentativeMs 135 000, corpsMax 8 Mio })
+   │   une adresse de plus de 2 048 unités n'est jamais envoyée (interdit, posé ici ; rien d'admis → adresse, zéro fetch) ;
+   │   le 200 est une donnée hostile : Object.hasOwn, UNE clé par adresse DEMANDÉE (absente → illisible ; non demandée ignorée ; la première entrée gagne),
+   │   type ∈ COVER_INPUT_MIME, taille ≤ 1 Mio AVANT atob, lireOctetsBase64 à la longueur exacte, preparerPhotoDistante(blob, { coteMin, reencoder: false })
+   │   (le mur de F : en-tête lu = type annoncé, ≤ 16 Mpx, petit côté ≥ 200 px ; sans reduireImage) sinon image_refusee ; décodage adresse par adresse.
+   ▼
+supabase/functions/assistant  POST { outil: 'apercu-web', corps: { urls: [1..5] } }
+   lireDemande → lireDemandeUrls : liste blanche { urls } (1 à 5 chaînes ≤ 2 048, sinon 400 forme) ; valideAdresse(url, { hotesRefuses }) sur CHACUNE,
+   AVANT la réservation : refusée → { url, href: null } (l'entrée interdit) ; aucune admise → 422 interdit sans réservation.
+   traiter : UNE réservation (assistant_reserver, 'apercu-web') ; budget = AbortController 60 s (LIMITES_APERCU.budgetMs) relayé à chaque
+   suivreRedirections et levé par ctl (120 s, client parti → 499, même pendant la réservation) ; hrefs dédoublonnés pour le TÉLÉCHARGEMENT seulement ;
+   enParallele(hrefs.map(h => () => apercuDe(h)), PARALLELISME_APERCU = 2) ; réponse { apercus: [{ url (chaîne reçue, ordre reçu),
+   image: { type, taille, octets base64 } | null, raison }] }, une seule clé, jamais usage ni model ; journal 200 (499), jetons null.
+   apercuDe(href) : telechargerPage (LIMITES_LECTURE) → lirePageHtml(...).page.image_url (LA règle de F) → telechargerImage(adresse, { max: 1 Mio })
+   → base64 dès réception ; hotesRefuses relayé aux trois ; ne lève jamais : interdit | inaccessible | pas_de_recette | pas_d_image | image_trop_lourde
+   | delai (RAISON_PAGE, RAISON_IMAGE). Déclarée APRÈS traiter (N-1 épingle le flux par la première occurrence des points d'appel).
+```
+
+- **Serveur** : `logique.js` — `OUTILS` à six (= `OUTILS_0007`, `apercu-web` dernier ; `OUTILS_MODELE` inchangé : ni `image-web` ni `apercu-web`
+  n'atteint le modèle), `LIMITES_APERCU = { adresses: 5, budgetMs: 60000, image: 1 Mio }`, `PARALLELISME_APERCU = 2`, `lireDemandeUrls` ; `index.ts` —
+  `telechargerImage(href, { signal, hotesRefuses, max = LIMITES_IMAGE.octets })` (2 Mio par défaut : `image-web` inchangé), le bloc `apercu-web` de
+  `traiter` entre `image-web` et le modèle, `apercuDe`, `enParallele`, `RAISON_PAGE`, `RAISON_IMAGE` ; `0007_apercu_web.sql` (à la main, hors `NOMS` et
+  `--check` : `drop` puis `add` de `assistant_journal_outil_check` à six valeurs, une transaction, aucune fenêtre sans contrainte) et sa preuve (11
+  verdicts, `rollback;` dernier ; la preuve `0006` devient historique : son 1.01 rougit après `0007`) ; README étape 13 ; le générateur dit « la 0008 à
+  venir ». Sans `0007`, l'insert d'`assistant_reserver('apercu-web')` lève 23514 → 502 `serveur` : l'app montre les résultats sans image (D-UI-14).
+- **Client** : `src/core/image.js` — `preparerPhotoDistante(blob, { coteMin, reencoder = true })`, `reencoder: false` rend LE MÊME Blob contrôlé ;
+  `src/domain/apercu-web.js` — `LIMITES_APERCU_WEB` (5 adresses, `url` 2 048, `octets` 1 Mio, `corpsReponse` 8 Mio, `tentativeMs` 135 000, `types` =
+  `COVER_INPUT_MIME`), `RAISONS_ENTREE_APERCU` (les six du serveur + `illisible`, `image_refusee`), `RAISONS_ECHEC_APERCU` (liste fermée ; toute autre →
+  `interne`), `lireApercusWeb` (ne lève jamais ; le jeton n'entre dans aucun objet rendu) ; `src/ui/search.js` — `apercus`, `volApercus`, `echecApercus`,
+  `montages`, `etatApercus()` (tests), `abandonnerApercus`, `elaguerApercus`, `demanderApercus(hrefs, issue)` (rend vrai quand un vol vient d'être posé),
+  `adresseApercu`, `figureApercu` (`figure.apercu` > `img.plat-vignette.grande[alt=''][decoding=async]`, URL `blob:` neuve à chaque rendu, révoquée par
+  `remplacerEnRevoquant` et au changement de route ; `img.onerror` → figure retirée, URL révoquée, entrée `image_refusee` si l'URL était encore
+  vivante), `ligneEtatApercus(hrefs, issue)` (`p.muted[data-role=etat-apercus]` : « Photos en cours de récupération… » | « Photos indisponibles pour
+  cette recherche. » | « Quota du jour atteint : photos indisponibles. » | rien), l'observateur de montage (R-UI2-7), `deps.apercus` (défaut
+  `lireApercusWeb` ; `null` quand `deps.chercher` est injecté seul), `deps.routeCourante` (défaut `currentPath`) ; texte de garde « Une recherche = 2 appels
+  à l’assistant (résultats, puis photos), comptés dans ton quota du jour. » ; `styles.css` — `.plat-vignette.grande` (4:3, pleine largeur, rayon 12 px,
+  `display: block`) et `figure.apercu` (marge basse), jetons seuls (R-UI2-9).
+- **Limites nommées** (spec § 11, § 12) : 2 appels par recherche illustrée ; jusqu'à 10 requêtes signées Mitsu par recherche vers des pages non
+  choisies (mode automatique, § 13 point 2) ; un appel du quota achète jusqu'à 10 téléchargements (15 Mio, 60 s) ; une image au-delà de 1 Mio manque en
+  silence ; un échec de l'appel entier est mémorisé pour l'issue affichée, dans un seul emplacement (R-UI2-6) ; le montage d'une vue détachée doit suivre
+  son rendu dans la microtâche (R-UI2-7) ; un changement de mode sur `/search` pendant un vol le laisse finir (garde par la route, ronde 1 de S2) ; une
+  page de liste à `Recipe` illisibles peut lire `pas_d_image` (écart diagnostique de S1, décision du chef) ; aucune borne de pixels propre aux aperçus
+  (16 Mpx, celle du mur de F ; `decoding="async"` seulement).
 
 ## Modèle de données (magasins IndexedDB)
 

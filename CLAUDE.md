@@ -2823,6 +2823,166 @@ R-F-12 à R-F-18) ; cinq tâches, chacune revue à trois lentilles avec une rond
 5681 → **5948/5948** (épingle **5947**), Node 174 → 208/208, `--check` 0, `tsc` 0 ; clôture du chef d'orchestre : rulings R-F-19 à R-F-29, `/verify`
 VERT (`verify-F-b65988f.txt`), registre copié.
 
+### Aperçus des résultats web : l'outil `apercu-web`, `0007`, vignettes et ligne d'état de l'onglet Web (23-26 octobre 2026, lot UI-2)
+
+**Pour toi.** Dans l'onglet Web, chaque résultat vient avec la photo de la page quand le site en publie une : juste après les liens, une ligne
+« Photos en cours de récupération… », puis les photos arrivent d'un coup en tête des cartes (en grand : 4:3, toute la largeur de la carte) ; sans
+photo nulle part, « Photos indisponibles pour cette recherche. » ; quota atteint, « Quota du jour atteint : photos indisponibles. ». C'est un second
+appel de ton quota par recherche (deux au lieu d'un, dit avant la tape : « Une recherche = 2 appels à l’assistant (résultats, puis photos), comptés
+dans ton quota du jour. »), zéro jeton, et jamais une page ni une image chargée depuis ton appareil : c'est la fonction qui télécharge, avec ses
+hôtes refusés, ses redirections bornées et son `User-Agent`. « Chercher à nouveau » ne repaie que les adresses neuves ; après une panne, un simple
+redessin ne redemande rien, une nouvelle recherche redemande. Seules les adresses `https` sans identifiants partent. Rien n'est écrit dans ta
+bibliothèque. Rien n'arrive sur le site public avant `0007` (collée et prouvée par toi), le redéploiement de la fonction (chef d'orchestre), la
+fusion et le `push` ; **aucun aperçu réel n'a encore été rendu**.
+
+**Où.** Branche `apercus-web`, worktree `~/projects/mistu-apercus` (jamais `~/projects/mistu`), serveur de vérification
+`python3 -m http.server 8095 --bind 127.0.0.1` (suite : `node .superpowers/sdd/2026-10-23-apercus-web/suite.cjs 8095`). Base `f3672be` = `main`
+`05c751f` + la spec « expérience carnet » (rév. 1 `0346a3b`, rév. 2 `20aa2fc`, rév. 2.1 `7633675`) + le « Go » de Neegan du 23 octobre (`f3672be`,
+§ 13 : les sept défauts confirmés, dont les aperçus AUTOMATIQUES, D-UI-13). Spec : `docs/superpowers/specs/2026-10-23-experience-carnet-design.md`
+(volet UI-2 : D-UI-12 à D-UI-14, I-UI-2, I-UI-5 à I-UI-7, § 4.6, § 6, § 7, § 10, § 11 ; § 12 sous-titre « Construction de UI-2 » : rulings de plan
+P-UI2-1 à P-UI2-23, rulings du chef R-UI2-1 à R-UI2-17, écarts de construction E-UI2-1 à E-UI2-20). Plan : `docs/superpowers/plans/2026-10-23-apercus-web.md`
+(rév. 2, commis `daca8b3`, la base des tâches). Registre, hors git : `.superpowers/sdd/2026-10-23-apercus-web/` (`progress.md`, un brief et un
+rapport par tâche, `cloture.md`, `suite.cjs`). Les rulings du chef R-UI2-1 à R-UI2-17 (25 octobre, en tête des briefs) priment sur le plan : P-UI2-6
+et P-UI2-7 sont amendés, P-UI2-10 renversé (voir « Ce qui marche »). Trois tâches : S1 serveur (`654e63d` puis sa ronde `c8b07f5`), S2 client
+(`a1720bc` puis sa ronde `16dd810`), S3 docs (ce commit) ; implémenteur Claude Fable 5.1 pour S1, S2 et leurs rondes, Claude Opus 5.5 pour S3 (la
+limite de dépense mensuelle de Fable 5.1 a été atteinte dans la nuit du 25 au 26 octobre). Le volet UI-1 « Carnet » (thème, grille, fiches, icônes)
+est l'autre branche, `experience-carnet`, sur la même base, en construction. **PAS fusionné, PAS poussé, `0007` PAS collée, fonction `assistant` PAS
+redéployée** (la version 4 du 23 octobre sert toujours : le chemin `apercu-web` n'existe pas encore sur `mitsu`).
+
+**Ce qui marche, prouvé** (suite navigateur : `fetch` injecté, `chercher` et `apercus` factices, images fabriquées par canvas, aucun réseau, aucune
+base ; tests Node : faux `Deno`, faux supabase-js, faux `fetch`, minuteries simulées ; **aucun appel réel, aucune sonde, fonction non redéployée**) :
+- **Serveur** (`supabase/functions/assistant/`, sixième outil `apercu-web`, `OUTILS` = `OUTILS_0007`, sans modèle : `OUTILS_MODELE` inchangé) :
+  `lireDemande` lit `{ urls }` (1 à 5 chaînes de 2 048 unités au plus, sinon 400 `requete` sans réservation, R-UI2-1), valide CHAQUE adresse par
+  `valideAdresse` AVANT la réservation (`href` null = `interdit`), refuse 422 `interdit` sans réservation si aucune n'est admise ; `traiter` fait UNE
+  réservation pour les cinq, pose un `AbortController` de 60 s (`LIMITES_APERCU.budgetMs`) relayé à chaque `suivreRedirections` et levé par le client
+  parti (499, appel compté, même parti pendant la réservation), dédoublonne pour le TÉLÉCHARGEMENT seulement, lance `apercuDe` à deux adresses à la
+  fois (`PARALLELISME_APERCU`, `enParallele` : résultats rangés à l'index de leur adresse) : `telechargerPage` → `lirePageHtml(...).page.image_url` (LA
+  règle de F) → `telechargerImage(…, { max: LIMITES_APERCU.image })` (1 Mio ; le défaut d'`image-web` reste 2 Mio) → base64 dès réception ;
+  `hotesRefuses` relayé aux trois (page, lecture, image) ; rend `{ apercus: [{ url (la chaîne reçue, dans l'ordre), image: { type, taille, octets } |
+  null, raison: null | interdit | inaccessible | pas_de_recette | pas_d_image | image_trop_lourde | delai }] }`, une seule clé, jamais un corps
+  d'erreur ; table des raisons par entrée `RAISON_PAGE` / `RAISON_IMAGE` (R-UI2-2) ; journal `apercu-web` 200 (499), jetons `null`.
+  `0007_apercu_web.sql` (à la main : `drop` puis `add` de `assistant_journal_outil_check` à six valeurs, une transaction ; `shasum -a 256` =
+  `70168ef8…`) et sa preuve (11 verdicts : 1.01 à six valeurs, 2.032 « 2.03 ter » `apercu-web`, 3.01 les cinq anciens ; BILAN attendu `0 faux sur 11` ;
+  `312b9d6f…`) ; README étape 13 ; RESULTATS : « Preuve `0007_apercu_web.sql` — à jouer » et « Sondes `apercu-web` — à jouer (après `0007` et le
+  redéploiement) » (S-A1 à S-A7) ; générateur « la 0008 à venir ». Tests Node : logique (OUTILS, LIMITES_APERCU, formes, validation par adresse,
+  journal), index v1 à v9 plus v4 bis, v8 bis et v8 ter de la ronde (refus avant réservation, nominal, dédoublonnage, raisons par adresse, les trois
+  relais de `hotesRefuses` vers l'hôte du projet, borne 1 Mio et cinq images sous 8 Mio, parallélisme 2, budget 60 s en vol et jamais commencée, 499
+  avant le premier fetch et pendant l'image, 502 sur `0007` absente et 429 ; v2 affirme la longueur exacte du base64 et qu'aucune minuterie ne survit
+  à la réponse), générateur (`0007`, preuve, README 13, RESULTATS, « 0008 », `OUTILS` = `OUTILS_0007`, `index.ts` UI-2 : `apercuDe` après `traiter`, N-1).
+- **Domaine client** (`src/domain/apercu-web.js`, neuf ; `src/core/image.js`) : `lireApercusWeb({ urls, session }, { fetch, signal, tentativeMs 135 000,
+  corpsMax 8 Mio })` : UN POST `{ outil: 'apercu-web', corps: { urls } }` par la passerelle (trois en-têtes, `redirect: 'error'`, `credentials: 'omit'`),
+  sans session aucun fetch ; une adresse de plus de 2 048 unités n'est JAMAIS envoyée (elle vaut `interdit`, posé ici ; rien d'admis à envoyer →
+  `adresse`, zéro fetch : R-UI2-1) ; le 200 est une donnée hostile : UNE clé par adresse DEMANDÉE dans l'ordre (absente → `illisible`, non demandée
+  ignorée, la première entrée gagne), type dans la liste des couvertures (`COVER_INPUT_MIME`, R-UI2-15), taille bornée à 1 Mio AVANT tout décodage,
+  base64 relu à la longueur exacte (`lireOctetsBase64`), puis LE mur de F sans ré-encodage (`preparerPhotoDistante(blob, { coteMin, reencoder: false })` :
+  en-tête du même type que l'annonce, ≤ 16 Mpx, petit côté ≥ 200 px, `createImageBitmap` jamais appelé) sinon `image_refusee` ; décodage adresse par
+  adresse ; échecs de l'appel entier classés (`quota` écrit, `trop_de_demandes`, `interdit`, `requete`, `non_connecte`, `non_admis`, `serveur`, `delai`,
+  `reseau`, `interne`, `reponse_illisible`, `annule`) ; `tentativeMs` transmis à la passerelle ; ne lève jamais ; le jeton n'est dans aucun résultat.
+- **Écran** (`src/ui/search.js`) : `Map(href → { blob, type } | { raison })` au niveau du module, à côté de `memoire` ; une vue CONNECTÉE qui rend un
+  « trouvé » demande les adresses ABSENTES (0 appel sur la même liste ; un appel pour les trois adresses neuves sur cinq ; seules les adresses `https`
+  sans identifiants, `adresseApercu`, la clé restant `lien.href` ; les entrées des liens disparus sont lâchées à chaque « trouvé » reçu, Blob compris,
+  jamais sur une issue « rien » ni sur un échec ; `reinitialiserWeb()` vide tout) dans UN vol d'aperçus, abandonné par `lancer()`, « Annuler »,
+  `reinitialiserWeb()`, et quand la dernière vue se déconnecte ALORS QUE la route a quitté `/search` (ronde 1 de S2 : une reconstruction de `/search`,
+  par `run()` ou `cuisineos:refresh`, laisse le vol au module et la nouvelle instance l'ADOPTE — deux appels, jamais trois) ; un résultat tardif d'un vol
+  abandonné est muet ; un ÉCHEC de l'appel entier n'entre pas dans la Map : il est mémorisé pour l'ISSUE affichée (`echecApercus = { issue, raison }`,
+  clé = l'identité de l'objet issue), lu par la ligne d'état ; un redessin de la même issue ne redemande rien, une nouvelle issue (« Chercher à
+  nouveau », nouvelle tape) redemande les adresses absentes (R-UI2-6, qui amende P-UI2-6) ; au MONTAGE d'une vue rendue détachée (retour arrière,
+  reconstruction), un `MutationObserver` vérifie UNE fois si son « trouvé » a des adresses absentes et les demande (R-UI2-7, qui amende P-UI2-7 ; une
+  vue pas montée au tour de boucle suivant est réputée morte) ; les figures (`figure.apercu > img.plat-vignette.grande[alt=''][decoding=async]`, en
+  TÊTE des cartes qui ont l'image) sont insérées en UNE fois (un seul redessin) ; `styles.css` porte `.plat-vignette.grande` (4:3, pleine largeur, rayon
+  12 px) et `figure.apercu` (marge basse), jetons seuls, aucun style en ligne (R-UI2-9, qui renverse P-UI2-10 ; l'épingle de `tests/photo-plat.js`
+  compte exactement deux sélecteurs, la règle 72 px inchangée) ; URL `blob:` recréées au rendu, révoquées par `remplacerEnRevoquant` et au changement
+  de route, Blob gardés ; `img.onerror` → figure retirée, URL révoquée, entrée remplacée par `image_refusee` seulement si l'URL était encore vivante
+  (P-UI2-8) ; ligne d'état `p.muted[data-role=etat-apercus]` sous « Demande envoyée » dans ses trois formes (une image posée gagne sur un état mixte) ;
+  texte de garde « 2 appels » ; `deps.apercus` (défaut `lireApercusWeb` ; `null` quand `deps.chercher` est injecté seul : les tests de route d'avant le
+  lot n'appellent rien) ; `deps.routeCourante` (défaut `currentPath` du routeur).
+- **Filets** : `MODULES_NEUFS` + `apercu-web.js`, `SHELL` + `./src/domain/apercu-web.js`, les quatre clés de § 5 dans `en.js` et l'ancienne garde
+  retirée, test de source I-F3 étendu à `search.js` et `library.js` (S-16, R-UI2-5), épingle de `tests/photo-plat.js` à deux sélecteurs (R-UI2-9),
+  `Anthropic|Supabase` absent du domaine, 15 lignes de pins à `0.16.0` (R-UI2-12) ; `tests/apercu-web.js` neuf (130 assertions : 108 à la tâche, 22 à
+  sa ronde).
+
+**Ce qui n'est PAS prouvé.** **`0007` et sa preuve** : jamais jouées sur `mitsu` (et, pglast étant absent de ce Mac, R-UI2-11, leur syntaxe n'est
+vérifiée que par les tests de texte : le collage de Neegan est la preuve). **Le chemin `apercu-web` sous le vrai runtime** : la fonction n'est pas
+redéployée ; S-A1 à S-A7 n'ont pas été jouées — la taille réelle de la réponse (K-5), la durée totale, le compte d'`image_trop_lourde` sur
+« puttanesca » (décide si la borne passe de 1 à 2 Mio, B-M-6, R-UI2-4), la mémoire et le CPU de l'isolat au parallélisme 2 (« cinq pages hostiles de
+2 Mio », S-A7, consignée « non jouée » faute d'hôte public contrôlé, R-UI2-14), le 499 d'un client parti. **Aucun aperçu réel** dans l'app (preuve
+§ 10 UI-2 : geste de Neegan après le push). **Le chemin `search.js` → `lireApercusWeb` de bout en bout** : les tests de l'écran injectent
+`deps.apercus` ; le défaut n'est exercé que par le mutant m22 de S2 (il frappe le `fetch` muré) : prouvé pièce par pièce. **Safari et l'iPhone** :
+rien (une réponse de 7 Mio lue en texte puis décodée adresse par adresse ; cinq images décodées à leur taille pleine, jusqu'à 16 Mpx chacune :
+`decoding="async"` déplace le décodage, il ne réduit pas la mémoire de pic ; l'`OffscreenCanvas` des tests n'est pas l'appareil). Le rendu de la
+figure (4:3, pleine largeur) n'est vu par aucune preuve visuelle : seules les déclarations de la feuille sont épinglées (UI-1 habillera la carte).
+**La re-revue de la ronde 1 de S2** (`16dd810`) n'était pas faite à l'écriture de ces documents (`progress.md`, 26 octobre : relancée par le chef
+d'orchestre). Les tests sensibles au temps (v7 (b), v2 sur `process.getActiveResourcesInfo()`, les `attendre` de l'`onerror`, `portionsDe` du lot B
+sous charge) : un rouge se rejoue avant d'être un constat (R-B-15, R-UI2-10).
+
+**Dettes et limites (assumées, une ligne chacune ; spec § 11 UI-2 et § 12 sous-titre UI-2).**
+- R-UI2-6 : l'échec de l'appel entier vit dans UN emplacement (`echecApercus`), pour l'issue affichée ; la clé est l'identité de l'objet issue, pas la
+  `cle` de la demande (le même texte relancé donne la même `cle`) ; une `WeakMap` par issue a été refusée (M-6 : deux issues en échec à la fois sont
+  inatteignables, `memoire` étant elle-même un emplacement unique).
+- R-UI2-7 : le montage doit suivre le rendu dans la microtâche (le seul appelant, `app.js`, fait ainsi) ; une vue montée plus tard est réputée morte et
+  son montage ne demande rien (une tape de plus pour les photos) — à ratifier.
+- Garde du vol par la route (ronde 1 de S2) : « quitter la recherche » = la route a quitté `/search` ; un changement de MODE sur `/search` (Web → Mes
+  recettes) pendant un vol le laisse finir (réservation faite : zéro appel de plus, au plus 60 s de serveur, le résultat attend dans la Map le retour
+  en mode Web) — à ratifier.
+- R-UI2-8 : après toute tape qui interrompt un vol d'aperçus puis « Annuler », le « trouvé » redessiné repose un vol (un appel de plus), à une vue
+  comme à deux.
+- R-UI2-1 : côté serveur, une chaîne de plus de 2 048 unités refuse tout l'appel (400) ; le client l'écarte avant (elle vaut `interdit`) ; si aucune
+  adresse n'est admise à l'envoi : `adresse`, zéro fetch (cas limite tranché par S2).
+- R-UI2-2 : la table des raisons par entrée est diagnostique (aucune raison affichée par carte) ; écart nommé (ronde 1 de S1, constats 3 et 13, à la
+  décision du chef) : `apercuDe` dit `pas_d_image` dès que la page porte une `Recipe` lisible sans image et `jsonld.autres === 0`, alors que la garde
+  « page de liste » de F compte `max(autres, Recipe − 1)` : une page de liste dont les vignettes sont des `Recipe` illisibles peut lire `pas_d_image`
+  au lieu de `pas_de_recette` (remède : une ligne de `lecture-web.js`, lot F).
+- La borne de pixels d'un aperçu (`pixelsMax` sous 16 Mpx, miroir serveur) : décision ouverte (ronde 1 de S2, M-11).
+- Quota : 2 appels par recherche illustrée (30 par jour) ; vie privée : jusqu'à 10 requêtes signées `Mitsu/0.10 (+https://neegans.github.io/mistu/)`
+  par recherche vers des pages que la personne n'a pas choisies (§ 11 ; renversable vers une tape « Voir les photos (1 appel) », § 13 point 2) ;
+  amplification : un appel du quota achète jusqu'à 10 téléchargements (15 Mio, 60 s), mêmes règles SSRF que B et F (résidu R-B-21).
+- Une image au-delà de 1 Mio manque en silence (`image_trop_lourde`) ; une page sans `Recipe` ni `og:image` n'a pas d'aperçu ; un 403 anti-hotlink
+  rend `inaccessible` ; deux copies de la borne 1 Mio (serveur `LIMITES_APERCU.image`, client `LIMITES_APERCU_WEB.octets`, plus le littéral `BORNE` du
+  bloc « corpsMax » des tests), à bouger ensemble (R-UI2-4) ; `apercuDe` et `enParallele` déclarées après `traiter` (N-1, R-UI2-3) ; les figures
+  arrivent 20 à 90 s après les résultats, en une fois (la liste descend d'un coup).
+- Mutants : S1 21 rouges sur 21, sa ronde 9 mutants en 10 passages (8 rouges, MG équivalent) ; S2 33 rouges sur 33, sa ronde 14 passages (13 rouges,
+  `X2b-figure` équivalent) ; équivalents déclarés : MG (le `catch` défensif d'`apercuDe`, non injectable depuis le harnais) et `X2b-figure` (le second
+  mur de `figureApercu`, défense en profondeur sans chemin : la Map n'est écrite que par le `.then` filtré).
+
+**Gestes, dans l'ordre (dépense dite à chaque pas).** 1) **Neegan, `0007` AVANT le redéploiement et AVANT tout `push` de UI-2** (`supabase/README.md`,
+étape 13) : coller `supabase/migrations/0007_apercu_web.sql` entière (attendu `Success. No rows returned`), relever
+`shasum -a 256 supabase/migrations/0007_apercu_web.sql` (attendu `70168ef8…`), jouer `supabase/proofs/0007_apercu_web.sql` (« Run without RLS », rien à
+remplacer) : `999 BILAN` = `0 faux sur 11`, tableau collé dans `RESULTATS-mitsu.md`, section « Preuve `0007_apercu_web.sql` — à jouer » ; la preuve
+`0006` devient historique (son 1.01 rougit, voulu). Sans dépense. 2) **Chef d'orchestre, après le geste 1** : redéploiement `supabase functions deploy
+assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api` depuis le worktree (version 5 attendue ; version et `ezbr_sha256` dans
+« Sondes `apercu-web` ») ; sondes sans dépense S-A1, S-A2, S-A4, S1-S9, S13-S19, S-F1 à S-F3 et le `GET` d'état ; S-A3 (un appel du quota, zéro
+jeton) ; puis S-A5 (« puttanesca »), S-A6 (page de liste), S-A7 (cinq pages hostiles, si un hôte public contrôlé existe ; sinon « non jouée »,
+R-UI2-14) ; la session de Neegan par le script d'attente du presse-papiers, jamais dans une commande. Si S-A5 compte des `image_trop_lourde` : ronde
+« borne 2 Mio » (les deux constantes, le littéral `BORNE`, v5, le test du domaine) AVANT la fusion. 3) **Neegan** : après `/verify` :
+`! git -C ~/projects/mistu merge --ff-only apercus-web` si `main` est encore `05c751f` (sinon, UI-1 fusionné d'abord : un commit de fusion qui résout
+`sw.js` (union de `SHELL`, `VERSION` +1), `src/model/schema.js` et les pins, `src/i18n/en.js` (union), `styles.css` (les règles `.plat-vignette.grande` et
+`figure.apercu` à côté de `.plat-vignette.petite`, épingle de `tests/photo-plat.js` à trois sélecteurs), `tests/tests.js` (épingle remesurée) — spec
+§ 9), puis `! git -C ~/projects/mistu push origin main` ; suite publique `https://neegans.github.io/mistu/tests/` → `6080/6080` (épingle 6079 ; plus
+le 404 de `/favicon.ico`), service worker `cuisine-os-v0.16.0-2` (ou le suffixe d'une ronde ultérieure). 4) **Preuve § 10 UI-2 sur le site public**,
+connecté : « puttanesca » dans l'onglet Web → « Photos en cours de récupération… » puis des photos en tête des cartes, posées d'un coup ;
+`select jour, appels from public.assistant_usage_jour;` : +2 par recherche ; `select outil, statut, jetons_entree, jetons_sortie, duree_ms from
+public.assistant_journal order by id desc limit 2;` : une ligne `recherche-web` puis une ligne `apercu-web` ; « Chercher à nouveau » → au plus un appel
+de plus ; une recherche dont les sites n'ont pas d'image → « Photos indisponibles pour cette recherche. ». 5) Tous les appareils sur 0.16.0 avant la
+première recherche illustrée d'une bibliothèque partagée (rien n'est écrit par ce lot : règle de confort, R-C-32). 6) iPhone : le même parcours depuis
+l'app installée (durée en réseau mobile). 7) Décisions, sans urgence : la borne 1 ou 2 Mio (B-M-6), `PARALLELISME_APERCU` 1, 2 ou 3 (S-2), le mode
+automatique ou la tape « Voir les photos (1 appel) » (§ 13 point 2, confirmé le 23 octobre), la borne de pixels d'un aperçu, la garde du vol par la
+route, R-UI2-6, R-UI2-7, R-UI2-8. 8) « clean » seulement après la copie du registre dans `~/projects/mistu/.superpowers/sdd/` (serveur 8095 arrêté,
+worktree `mistu-apercus` retiré ; la branche `experience-carnet` reste : UI-1).
+
+**Versions.** `APP_VERSION 0.16.0` (F : 0.15.0 ; I-UI-7 : le premier lot UI fusionné porte 0.16.0, le second 0.17.0) ; `sw.js`
+`cuisine-os-v0.16.0-1` (tâche 2), `-2` (sa ronde 1), +1 par commit qui touche `src/`, `styles.css` ou `sw.js` (rondes comprises, R-B-24) ; `SHELL` +
+`./src/domain/apercu-web.js` ; `DB_VERSION` 4 inchangée ; la migration `0007` est côté serveur, écrite à la main (hors `NOMS` et `--check`, comme
+`0004` et `0006`) ; CSP inchangée (`img-src 'self' blob: data:` : aucune image externe chargée par le navigateur).
+
+**Bilan.** Départ sur `daca8b3` (`f3672be` + le plan ; mesure = F : 5948/5948, épingle 5947, Node 208/208, `--check` 0, `tsc` 0) ; tâche 1 (serveur)
+`654e63d` : Node 208 → 227/227, `tsc` 0, `--check` 0, suite inchangée, 21 mutants rouges sur 21 ; revue à trois lentilles (2 Important, 13 Minor) →
+ronde 1 `c8b07f5` : Node 230/230 (v4 bis, v8 bis, v8 ter), 9 mutants (8 rouges, MG équivalent), re-revue PROPRE ; tâche 2 (client) `a1720bc` : suite
+5948 → 6058/6058 (épingle 6057 ; +20 sur l'attendu 6037 du plan : les assertions des rulings R-UI2-1, R-UI2-6, R-UI2-7 et R-UI2-9), Node 230 inchangé,
+33 mutants rouges sur 33 ; revue à trois lentilles (5 Important, 11 Minor) → ronde 1 `16dd810` : suite 6080/6080 (épingle 6079, +22), `sw.js -2`,
+14 passages (13 rouges, `X2b-figure` équivalent), M-6 refusé ; sa re-revue : non faite à l'écriture ; tâche 3 : ces documents. Mesure relue à la tête
+`16dd810` par la tâche 3 (26 octobre) : suite `✅ 6080/6080` (épingle `tests/tests.js:255` = 6079 ; seule erreur console le 404 de `/favicon.ico`),
+Node 230/230, `--check` 0, `tsc` 0. Revue finale de branche, vague et `/verify` : à la clôture du chef d'orchestre (`cloture.md` du registre).
+
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 
 **Contexte.** Lot 4 fusionné et poussé par Neegan (`main` = `3998f97`, Pages servi à 20 h 51 UTC, `cuisine-os-v0.8.0-6`) ; preuve

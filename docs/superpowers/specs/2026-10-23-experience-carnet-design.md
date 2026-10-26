@@ -629,6 +629,130 @@ Lecture à froid (H) :
 - Recette web (`2026-10-19-recette-web-design.md`) : I-B5 tenu (« Voir la page d'origine » sur toute adresse lisible) ; `telechargerImage`
   gagne un paramètre `max` ; `0007` prend le nom que le générateur réservait (la prochaine migration générée sera `0008`).
 
+### Construction de UI-2 « Aperçus » (23-26 octobre 2026 ; plan `docs/superpowers/plans/2026-10-23-apercus-web.md`, rév. 2 ; rulings de plan P-UI2-1 à P-UI2-23 ; rulings du chef R-UI2-1 à R-UI2-17 ; écarts de construction E-UI2-1 à E-UI2-20)
+
+Branche `apercus-web` sur `f3672be` (worktree `~/projects/mistu-apercus`, serveur 8095 ; plan commis `daca8b3`, la base des tâches) ; trois tâches (S1
+serveur `654e63d` + sa ronde `c8b07f5`, S2 client `a1720bc` + sa ronde `16dd810`, S3 docs : le commit qui pose ce sous-titre) ; mesures à la tête de
+code `16dd810` : suite `6080/6080` (épingle 6079, `tests/tests.js:255`), Node `230/230`, `--check` 0, `tsc` 0, `APP_VERSION 0.16.0`,
+`sw.js cuisine-os-v0.16.0-2`, `DB_VERSION` 4. Les décisions du 23 octobre (§ 13) sont construites telles quelles : aperçus AUTOMATIQUES (D-UI-13).
+`0007` ÉCRITE, pas collée ; fonction `assistant` pas redéployée ; aucune sonde S-A1 à S-A7 jouée : la Clôture du plan les porte.
+
+Rulings de plan (une ligne chacun ; détail dans le plan, « Global Constraints » ; les rulings du chef, plus bas, priment) :
+- **P-UI2-1** une chaîne de plus de 2 048 unités dans `urls` → 400 (raison `forme` dans `lireDemande`, corps `{ erreur: 'requete' }`, tout l'appel, sans
+  réservation), pas une entrée `interdit` (§ 6 lu à la lettre) ; ratifié par R-UI2-1, qui ajoute l'écart côté client.
+- **P-UI2-2** table des raisons par entrée : `pas_une_page` et page de liste → `pas_de_recette` ; page `trop_lourde` → `inaccessible` ; `pas_une_image` →
+  `pas_d_image` ; redirection refusée → `interdit` ; `pas_d_image` réservé à une `Recipe` lisible unique sans image (ratifié, R-UI2-2 ; écart E-UI2-2).
+- **P-UI2-3** `apercuDe` et `enParallele` déclarées APRÈS `traiter` (le test d'ordre N-1 épingle la première occurrence des points d'appel ; R-UI2-3).
+- **P-UI2-4** la borne de 1 Mio vit en deux copies (`LIMITES_APERCU.image`, `LIMITES_APERCU_WEB.octets`) : à bouger ensemble (ronde avant la fusion si
+  S-A5 l'impose, B-M-6 ; R-UI2-4).
+- **P-UI2-5** `tests/photo-plat.js:1331` (la spec dit « :1330 ») étendu à `search.js` ET `library.js` dès ce lot (S-16 à la lettre, coût nul ; UI-1 n'y
+  touche plus ; R-UI2-5).
+- **P-UI2-6** les échecs de l'appel entier mémorisés par adresse — **AMENDÉ par R-UI2-6** : ils ne sont plus écrits dans la Map, mais mémorisés pour
+  l'issue affichée (`echecApercus`) ; un redessin de la même issue ne redemande rien, une nouvelle issue redemande les adresses absentes.
+- **P-UI2-7** une nouvelle instance rend son premier « trouvé » déconnectée et attend le prochain redessin connecté — **AMENDÉ par R-UI2-7** : au montage,
+  un `MutationObserver` vérifie une fois et demande les adresses absentes.
+- **P-UI2-8** `img.onerror` remplace aussi l'entrée de la Map par `{ raison: 'image_refusee' }` (S-7 précisé) — seulement si l'URL était encore vivante
+  (`revoquerUrlDeBlob(u)` vrai) : une `error` d'URL déjà révoquée (redessin ou changement de route pendant le chargement) ne jette pas le Blob.
+- **P-UI2-9** « Annuler » n'est éprouvé qu'à deux vues ; après « Annuler », la vue redessinée sur le « trouvé » K1 repose un vol (règle de § 4.6) ;
+  ratifié comme limite par R-UI2-8 ; vaut aussi à une vue (E-UI2-19).
+- **P-UI2-10** aucune règle CSS, la figure héritant de `.plat-vignette` 72 px — **RENVERSÉ par R-UI2-9** : ce lot pose `.plat-vignette.grande` (4:3,
+  pleine largeur) et `figure.apercu` dans `styles.css`, aucun style en ligne, épingle de `tests/photo-plat.js` à deux sélecteurs.
+- **P-UI2-11** `deps.apercus` : `lireApercusWeb` par défaut, `null` quand `deps.chercher` est injecté sans `deps.apercus` (F-10).
+- **P-UI2-12** v7 (b) : minuteries coïncidentes à 60 s, test sensible à l'ordre des minuteries simulées (R-B-15, R-UI2-10).
+- **P-UI2-13** pglast absent : la syntaxe de `0007` et de sa preuve n'est vérifiée que par les tests de texte ; la preuve est le collage (R-UI2-11).
+- **P-UI2-14** `scratchpad` = le dossier scratchpad de la session de l'implémenteur ; toute mutation sur copie.
+- **P-UI2-15** 15 lignes de pins (13 assertions, un commentaire, une ligne `const v`), pas « 13 + 1 » (R-UI2-12).
+- **P-UI2-16** S3 de la spec coupée : docs = tâche 3 ; redéploiement, sondes, RESULTATS = Clôture (après la `0007` collée et prouvée ; R-UI2-13).
+- **P-UI2-17** la spec n'est amendée qu'ici (§ 12) ; titre, en-tête et § 13 restent à UI-1 (R-UI2-13).
+- **P-UI2-18** trailers des commits : le modèle réel de l'implémenteur (R-T1-3) ; `Claude-Session` quand le harnais la fournit (jamais fournie ici).
+- **P-UI2-19** S-A7 exige un hôte public contrôlé ; sinon « non jouée » (rouge nommé ; R-UI2-14).
+- **P-UI2-20** le commit de docs ne porte aucune version (R-B-24).
+- **P-UI2-21** la table serveur → client de la tâche 2 emploie le corps réel du 400 (`{ erreur: 'requete' }`).
+- **P-UI2-22** I-UI-5 : la liste blanche des aperçus est `COVER_INPUT_MIME` (JPEG, PNG, WebP), sous-ensemble gelé d'`ALLOWED_MIME` que `typeAffichage`
+  applique aux lignes `files` ; la même liste que `LIMITES_IMAGE_WEB.types` et le mur distant ; un élargissement de `typeAffichage` seul ne touche pas
+  les aperçus (R-UI2-15).
+- **P-UI2-23** `tests/recherche-web.js:1027` (`forme`) reste stricte (ces tests n'injectent pas `deps.apercus` : « `FIGURE.apercu` optionnel » y vaut
+  toujours « absent ») ; une assertion « 0 `figure.apercu` » s'ajoute sur `r1` et sur la carte de « Garder et lire ».
+
+Rulings du chef d'orchestre (25 octobre 2026, en tête des briefs ; ils priment sur les Steps du plan) :
+- **R-UI2-1** (P-UI2-1) ratifié côté serveur ; ajout côté client : `lireApercusWeb` écarte avant l'envoi toute adresse de plus de 2 048 unités (entrée
+  `{ raison: 'interdit' }` posée localement) ; coût si faux : un aperçu de moins, jamais un 400 qui prive les quatre autres.
+- **R-UI2-2** (P-UI2-2) la table des raisons par entrée, ratifiée ; diagnostique seulement.
+- **R-UI2-3** (P-UI2-3) `apercuDe` et `enParallele` après `traiter`, épinglé par un test et un mutant.
+- **R-UI2-4** (P-UI2-4) la borne 1 Mio en deux copies, dette nommée ; si S-A5 impose 2 Mio, une ronde touche les deux AVANT la fusion.
+- **R-UI2-5** (P-UI2-5) le test de source I-F3 couvre `search.js` et `library.js` (cinq sources).
+- **R-UI2-6** (P-UI2-6, amendé) un échec de l'appel ENTIER n'est pas écrit dans la Map ; il est mémorisé pour l'issue courante, lu par la ligne d'état ;
+  un redessin de la même issue ne redemande rien, une nouvelle issue redemande ; les raisons par entrée restent dans la Map.
+- **R-UI2-7** (P-UI2-7, amendé) au montage d'une vue, une vérification, une fois, dans une microtâche : les adresses absentes du « trouvé » affiché
+  sont demandées.
+- **R-UI2-8** (P-UI2-9) « Annuler » à deux vues : limite nommée (§ 11), aucun code.
+- **R-UI2-9** (P-UI2-10, renversé) `.plat-vignette.grande` et `figure.apercu` dans `styles.css`, jetons seuls ; épingle de `tests/photo-plat.js` à deux
+  sélecteurs (UI-1 ajoutera `.plat-vignette.petite` et passera à trois) ; coût si faux : un conflit de fusion sur deux lignes.
+- **R-UI2-10** (P-UI2-12) v7 (b) sensible à l'ordre des minuteries simulées : un rouge se rejoue seul avant d'être un constat.
+- **R-UI2-11** (P-UI2-13) pglast absent : le contrôle de syntaxe SQL est sauté en le disant ; le chef rejoue pglast à la clôture s'il le trouve.
+- **R-UI2-12** (P-UI2-15) les 15 lignes de pins passent à 0.16.0, relevées par leur texte.
+- **R-UI2-13** (P-UI2-16, P-UI2-17) S3 coupée en tâche 3 (docs) et Clôture ; la spec n'est amendée qu'au § 12.
+- **R-UI2-14** (P-UI2-19) S-A7 consignée « non jouée » dans RESULTATS ; le budget de 60 s n'est prouvé que par v7.
+- **R-UI2-15** (constats 5 et 8 de la rév. 2) la liste blanche des aperçus est `COVER_INPUT_MIME`, jamais `ALLOWED_MIME` ; la révocation au changement de
+  route passe par `revoquerUrlDeBlob(u)` (les images sont encore attachées quand `app.js` révoque).
+- **R-UI2-16** les totaux du plan sont des attendus de copie : la valeur lue fait foi ; une ronde qui touche `src/` fait +1 (R-B-24).
+- **R-UI2-17** copies de mutation sur les ports 8205-8299 (8195 occupé par une autre session, jamais tué), jamais le 8095 du worktree.
+
+Écarts de construction (tâches 1 à 3 et rondes, depuis `progress.md` et les rapports ; une ligne chacun ; à ratifier par le chef d'orchestre à la
+clôture ; numérotés E-UI2-n parce que R-UI2-1 à R-UI2-17 désignent déjà ses rulings) :
+- **E-UI2-1** (S1) dix fichiers commis, pas onze : `lecture-web.js` n'est pas touché (la liste « Files » du brief ne le nomme pas).
+- **E-UI2-2** (ronde 1 de S1, constats 3 et 13) `apercuDe` dit `pas_d_image` dès qu'une `Recipe` lisible sans image est seule (`jsonld.autres === 0`),
+  alors que la garde « page de liste » de F compte `max(autres, Recipe − 1)` : une page de liste à `Recipe` illisibles peut lire `pas_d_image` au lieu
+  de `pas_de_recette` ; NON corrigé (le remède touche `lirePageHtml`, `lecture-web.js`, lot F, hors des fichiers du brief), nommé dans le commentaire
+  d'`apercuDe` ; diagnostique seulement ; décision du chef.
+- **E-UI2-3** (ronde 1 de S1, constats 4 et 12) la branche `inaccessible` du `catch` d'`apercuDe` est défensive : mutant MG (« le `catch` rend toujours
+  `delai` ») survivant, déclaré équivalent (non injectable depuis le harnais : `suivreRedirections` absorbe déjà réseau et minuteries).
+- **E-UI2-4** (ronde 1 de S1) v2 épingle `clearTimeout(minuterieBudget)` par `process.getActiveResourcesInfo()` (Node 17 et plus) et la longueur exacte du
+  base64 (1 336 caractères) ; v7 (a) n'est pas tueur de MF à lui seul (p1 et p2 finissent au même tick), v6 l'est.
+- **E-UI2-5** (S1, mutants) m2 double le budget dans `index.ts` en gardant le nom de la constante (seul v7 tue : v7 mesure le budget, pas la constante) ;
+  m21 ajouté (base64 tronqué d'un groupe entier), m11 (« −1 ») n'ôtant qu'un `=` de remplissage que `Buffer.from` tolère.
+- **E-UI2-6** (S1) la séquence d'échappement de U+2028 du test de logique (cas « invisible ») est posée par un jeton remplacé en Python : le transport des
+  appels d'outil décode une telle séquence (mesuré au départ) ; relue aux octets : six octets ASCII, aucun U+2028 réel.
+- **E-UI2-7** (S2, R-UI2-1) cas limite : aucune adresse admise à l'envoi (toutes trop longues) → `{ etat: 'echec', raison: 'adresse' }`, zéro fetch.
+- **E-UI2-8** (S2, R-UI2-6) la clé de l'échec mémorisé est l'IDENTITÉ de l'objet `issue` (renouvelé à chaque `lancer()`), pas la `cle` de la demande, que
+  « Chercher à nouveau » avec le même texte reproduit ; `etatApercus()` garde ses trois champs (l'échec s'observe par la ligne d'état et le compte des
+  appels).
+- **E-UI2-9** (S2, R-UI2-7) l'observateur de montage n'est posé que pour une vue rendue détachée en mode Web ; il se retire au montage, à la purge de
+  `vues` sans montage et par `reinitialiserWeb()` ; au montage, `render()` seulement si un vol vient d'être posé ; `demanderApercus` rend un booléen (le
+  plan : rien).
+- **E-UI2-10** (S2, R-UI2-9) aucun style en ligne sur la figure (le `style: { margin: '0' }` du Step 7 (g) retiré : la feuille le fait), épinglé par une
+  assertion ; le contrôle « `styles.css` absent du diff » du plan est renversé.
+- **E-UI2-11** (S2) suite 6058/6058 au lieu des 6038 attendus : +20 assertions pour les rulings (R-UI2-1 : 3 ; R-UI2-6 : 10 ; R-UI2-7 : 3 ; R-UI2-9 : 4) ;
+  33 mutants au lieu de 24 (le n° 14 joué en trois — `lancer()`, `annuler()`, `reinitialiserWeb()` —, 7 pour les rulings).
+- **E-UI2-12** (ronde 1 de S2, I-1, I-4, I-5) faux-verts fermés par des tests seuls : la garde d'issue de la ligne d'état, l'élagage sur un « trouvé »
+  seulement (une issue « rien » ou un échec gardent la Map), le mur de l'écran (un Blob `image/svg+xml` reçu n'est pas une image).
+- **E-UI2-13** (ronde 1 de S2, I-2 et I-3) garde du vol par la route : `deps.routeCourante` (défaut `currentPath` du routeur) ; le vol n'est abandonné que
+  si plus aucune vue n'est connectée ET que la route a quitté `/search` ; une reconstruction de `/search` (`run()`, `cuisineos:refresh`) laisse le vol au
+  module et la nouvelle instance l'adopte (deux appels, jamais trois) ; un changement de MODE sur `/search` pendant un vol le laisse finir (zéro appel de
+  plus, au plus 60 s de serveur) — à ratifier.
+- **E-UI2-14** (ronde 1 de S2, M-7) borne de fuite de R-UI2-7 : une vue encore détachée au tour de boucle suivant son rendu est morte (`setTimeout(0)`),
+  son observateur et son entrée de `vues` partent ; R-UI2-7 vaut donc pour un montage dans la microtâche du rendu (le seul appelant, `app.js`) — à ratifier.
+- **E-UI2-15** (ronde 1 de S2, M-10 et M-16) `adresseApercu` : seules les adresses `https` sans `username` ni `password` sont demandées (D-T7, S-9) ; la clé
+  de la Map reste `lien.href` ; le filtre `lienSignet` n'est plus appelé là.
+- **E-UI2-16** (ronde 1 de S2, M-11) `decoding="async"` posé sur l'image ; `loading="lazy"` non (une URL `blob:` n'économise rien au réseau, une scène
+  `hidden` ne chargerait jamais) ; la borne de pixels propre aux aperçus (`pixelsMax` sous 16 Mpx) reste à la décision du chef.
+- **E-UI2-17** (ronde 1 de S2, M-8) la borne des adresses demandées lit `LIMITES_APERCU_WEB.adresses` (plus de copie dans l'écran) ; pas de mutant
+  (une égalité de constantes).
+- **E-UI2-18** (ronde 1 de S2) `X2b-figure` (le mur de `figureApercu` seul retiré) survivant, déclaré équivalent : la Map n'est écrite que par le `.then`
+  filtré ; M-6 refusé (une `WeakMap` par issue : deux issues en échec à la fois sont inatteignables, `memoire` est un emplacement unique).
+- **E-UI2-19** (ronde 1 de S2, M-15 et M-9) R-UI2-8 vaut aussi à UNE vue (« après toute tape qui interrompt un vol d'aperçus puis « Annuler », le
+  « trouvé » redessiné repose un vol ») ; le Step 12 du plan écrit le script des insécables dans un fichier (`§` levait un `SyntaxError` en entrée standard).
+- **E-UI2-20** (S3) les documents portent les mesures LUES à la tête (Node 230, suite 6080/6080, épingle 6079 à `tests/tests.js:255`, `sw.js -2`) au lieu
+  des attendus du plan, décrivent P-UI2-6, P-UI2-7 et P-UI2-10 tels qu'amendés ou renversés, disent UI-1 « en construction » (`8b5c6d2`) et les dates
+  réelles ; une ligne « tâche 3 : relevés » est ajoutée en fin de `progress.md` (le brief le dit « lu » mais son Step 0 y fait noter les relevés).
+
+Mutants : S1 21 rouges sur 21 (dont les douze rejoués par l'auteur du plan, m11 sous une forme plus faible complétée par m21), sa ronde 9 mutants en 10
+passages (8 rouges, MG équivalent) ; S2 33 rouges sur 33, sa ronde 14 passages (13 rouges, `X2b-figure` équivalent) ; équivalents déclarés : MG
+(E-UI2-3) et `X2b-figure` (E-UI2-18). Revues : S1 à trois lentilles (2 Important, 13 Minor), ronde 1, re-revue PROPRE ; S2 à trois lentilles
+(5 Important, 11 Minor), ronde 1, re-revue non faite à l'écriture de ce sous-titre. Ce qui reste (§ 10, Clôture du plan) : `0007` et sa preuve
+(Neegan), redéploiement et sondes S-A1 à S-A7 (chef), preuve § 10 UI-2 sur le site public, décisions : borne 1 ou 2 Mio (B-M-6),
+`PARALLELISME_APERCU` (S-2), mode automatique ou tape (§ 13 point 2), borne de pixels d'un aperçu (E-UI2-16), E-UI2-2, E-UI2-13, E-UI2-14, R-UI2-8.
+
 ## 13. À trancher par Neegan (sans urgence ; chaque point a son défaut, construit tel quel)
 
 **Tranché le 23 octobre 2026 au soir : « Go » de Neegan sur la présentation des sept points = les sept défauts sont confirmés** (olive,

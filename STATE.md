@@ -1,4 +1,22 @@
-# STATE.md — Cuisine OS (mistu) — état au 23 octobre 2026, 17 h 30 (chaîne A → B → G → C → D → E → F EN LIGNE : `main` = `origin/main` = `2f15d2e`, 0.15.0, suite publique 5948/5948 ; migrations `0005` et `0006` collées et prouvées ; fonction `assistant` version 4 ; plus aucun lot en construction ; reste à Neegan : appareils à jour, preuves réelles sur le site public, décisions ouvertes, révocation de l'ancienne clé, « clean »)
+# STATE.md — Cuisine OS (mistu) — état au 26 octobre 2026, 10 h 05 (chaîne A → F EN LIGNE : `main` = `05c751f`, 0.15.0, suite publique 5948/5948, migrations `0005` et `0006` collées et prouvées, fonction `assistant` version 4 ; LOT UI-2 « APERÇUS DES RÉSULTATS WEB » FINI dans le worktree `~/projects/mistu-apercus` (branche `apercus-web`, 0.16.0), PAS fusionné, `0007` PAS collée, fonction PAS redéployée ; lot UI-1 « Carnet » en construction sur `experience-carnet` ; reste à Neegan : `0007` et sa preuve, appareils à jour, preuves réelles sur le site public, décisions ouvertes, révocation de l'ancienne clé, « clean »)
+
+**26 octobre 2026, 10 h 05 — LOT UI-2 « APERÇUS DES RÉSULTATS WEB » : FINI dans le worktree `~/projects/mistu-apercus` (branche `apercus-web`, base
+`f3672be` = `main` `05c751f` + la spec « expérience carnet » rév. 2.1 `7633675` + le « Go » du 23 octobre `f3672be` ; plan
+`docs/superpowers/plans/2026-10-23-apercus-web.md` (rév. 2, `daca8b3`) ; tête de code `16dd810` ; serveur 8095), trois tâches (S1 serveur `654e63d`
+et sa ronde `c8b07f5`, S2 client `a1720bc` et sa ronde `16dd810`, S3 docs = ce commit) ; rulings du chef R-UI2-1 à R-UI2-17 (25 octobre ; P-UI2-6 et
+P-UI2-7 amendés, P-UI2-10 renversé : `styles.css` porte `.plat-vignette.grande` et `figure.apercu`) ; re-revue de la ronde 1 de S2 et `/verify`
+mécanique : à la clôture du chef d'orchestre ; mesures à la tête : suite `6080/6080` (épingle 6079, `tests/tests.js:255`), Node `230/230`, `--check` 0,
+`tsc` 0, `sw.js cuisine-os-v0.16.0-2`, `APP_VERSION 0.16.0`, `DB_VERSION` 4 ; `0007_apercu_web.sql` ÉCRITE (à coller par Neegan : README étape 13 ;
+empreinte `70168ef8…`), fonction `assistant` À REDÉPLOYER (sixième outil `apercu-web` ; geste du chef d'orchestre APRÈS la `0007` collée et prouvée).
+**PAS fusionné, PAS poussé.** Pour Neegan, dans l'ordre : `0007` + preuve (`0 faux sur 11`) ; puis le chef : redéploiement, sondes S-A1 à S-A7 (S-A3 et
+S-A5 à S-A7 : un appel du quota chacune, zéro jeton) ; ronde « borne 2 Mio » si S-A5 l'impose ; `/verify` ; `git merge --ff-only apercus-web` (si `main`
+est encore `05c751f`), push, suite publique `6080/6080`, preuve § 10 UI-2 (« puttanesca » : la ligne « Photos en cours de récupération… » puis les
+photos d'un coup ; `assistant_usage_jour` +2 par recherche), tous les appareils sur 0.16.0, iPhone, décisions (borne 1 ou 2 Mio, parallélisme, mode
+automatique ou tape, borne de pixels d'un aperçu, garde du vol par la route), « clean ». Registre `.superpowers/sdd/2026-10-23-apercus-web/` (copie
+dans `~/projects/mistu/.superpowers/sdd/`) ; rulings dans la spec § 12, sous-titre « Construction de UI-2 ». En parallèle : UI-1 « Carnet » en
+construction (branche `experience-carnet` sur `f3672be` ; worktree `~/projects/mistu-carnet`, serveur 8096, `APP_VERSION 0.17.0` pendant la
+construction ; tâche 1 commise `8b5c6d2`) ; le second lot fusionné résout les fichiers communs (spec § 9 : `sw.js`, `schema.js` et les pins, `en.js`,
+`tests/tests.js` ; plus `styles.css` et l'épingle de `tests/photo-plat.js`, R-UI2-9).**
 
 **23 octobre 2026, 17 h 30 — CHAÎNE A → F EN LIGNE.** Points 1 à 4 du bilan `.superpowers/sdd/nuit-2026-10-18/BILAN-CHAINE-A-F.md` faits le 23 octobre
 : `0005` (35 verdicts, 0 faux) et `0006` (10 verdicts, 0 faux) collées et prouvées par Neegan ; fonction `assistant` redéployée en version 4 depuis
