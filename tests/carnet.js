@@ -229,7 +229,12 @@ export async function runCarnetTests({ eq, ok }) {
       db.get = (store, key) => { if (store === 'files') lectures.push(key); return vraiGet(store, key); };
       db.getMany = (store, keys) => { if (store === 'files') lectures.push(...keys); return vraiGetMany(store, keys); };
       return { lectures, rendre: () => { delete db.get; delete db.getMany; } }; };
-    const vraiFetch = globalThis.fetch; globalThis.fetch = async (u) => { throw new Error('aucun reseau attendu : ' + u); };
+    // Ronde 1 : un ESPION, plus un lanceur muet — un appel avalé par un catch (`fetch(…).catch(() => {})`) passait inaperçu. Le compte est affirmé à la fin
+    // du bloc (aucun appel réseau) ; le fragment de la page est relevé pour affirmer qu'aucun geste ne navigue, et rendu tel quel en sortie.
+    const appelsReseau = []; const hashT2 = location.hash;
+    const vraiFetch = globalThis.fetch; globalThis.fetch = async (u) => { appelsReseau.push(String(u?.url ?? u)); throw new Error('aucun reseau attendu : ' + u); };
+    // Les 70 recettes à photo de trois blocs (une empreinte DISTINCTE chacune ; la plus récemment modifiée = la 69) : une définition (ronde 1).
+    const septanteAPhoto = (prefixe) => Array.from({ length: 70 }, (_, i) => fiche(prefixe + String(i).padStart(2, '0'), { photo_sha256: hex64(i), original_title: 'Photo ' + String(i).padStart(2, '0'), updated_at: new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString() }));
     try {
       await run('recipeCard({ photoEnTete, fichier }) : décision synchrone, jamais de cadre vide, aucune lecture (D-UI-5, I-UI-5)', () => withRepo(async (repo, db) => {
         const jpeg = await imageTest();
@@ -295,6 +300,13 @@ export async function runCarnetTests({ eq, ok }) {
         // Ajout de l’implémenteur (T2, survivant M7 : source_label lue avant l’hôte) : une source_label stockée ne remplace ni l’hôte recalculé ni le livre.
         eq([K.ligneSource(docDe(fiche('rc_y', { source_url: 'https://vrai.test/p', source_label: 'Faux site' }))), K.ligneSource(docDe(fiche('rc_z', { edition_id: 'e1', source_label: 'Faux livre' }), { book: livre, edition: ed }))],
           ['Du web · vrai.test', 'De mon livre · Le livre'], 'ligneSource : une source_label stockée ne prend jamais la place de l’hôte recalculé ni du livre (S7) — elle ne vaut que pour une fiche sans adresse ni livre');
+        // Ronde 1 (C-2) : une fiche créée avec l'assistant le dit d'abord — une adresse ou un livre portés par une fiche reçue ou restaurée ne prennent pas sa place.
+        eq([K.ligneSource(docDe(fiche('rc_ia1', { origine: 'ia', source_url: 'https://evil.test/p' }))), K.ligneSource(docDe(fiche('rc_ia2', { origine: 'ia', edition_id: 'e1' }), { book: livre, edition: ed }))],
+          ['Créée avec l’IA', 'Créée avec l’IA'], 'ligneSource : une fiche IA qui porte une adresse ou un livre dit « Créée avec l’IA » (C-2, comme provenanceText), jamais l’hôte ni le livre');
+        // Ronde 1 : seule une durée STRICTEMENT positive compte (« PT0S » d'un JSON-LD, une valeur négative tapée dans l'éditeur).
+        eq([K.dureeTotale(version('x', { total_minutes: 0 })), K.dureeTotale(version('x', { total_minutes: 0, prep_minutes: 10 })), K.dureeTotale(version('x', { prep_minutes: -30, cook_minutes: 10 })), K.dureeTotale(version('x', { prep_minutes: -30, cook_minutes: 0 })),
+          K.ligneSource(docDe(fiche('rc_0', { source_url: 'https://site.test/r' }), { version: version('rc_0', { total_minutes: 0 }) }))],
+          [null, 10, 10, null, 'Du web · site.test'], 'dureeTotale : 0 ou une valeur négative valent null (le total retombe sur prep + cook), une somme nulle aussi ; la carte ne dit jamais « · 0 min » ni une durée négative');
         const badges = (d) => [...K.recipeCard(d, { photoEnTete: true }).querySelectorAll('.carte-plat-corps > .carte-plat-badges > *')].map((b) => b.textContent);
         // Le badge de disponibilité est celui d'availabilityBadge, lu par le composant lui-même (« Recette disponible » aujourd'hui, « Disponible » dès T5, D-UI-10) :
         // ce test tient la CARTE (ordre et présence des badges), jamais le libellé — qui est à T5 (rév. 2).
@@ -307,7 +319,8 @@ export async function runCarnetTests({ eq, ok }) {
       await run('styles.css : .grille-plats 1 colonne à 359 px, 2 dès 360, 2 à 899, 3 dès 900 et à 950 (D-UI-4, bornes exactes ; D-15) ; carte sans photo ≥ 7 rem sur --paper-2 ; image 4:3 ; h3 serif 1,3 rem (mesurés dans un cadre)', async () => {
         // La grille suit la LARGEUR DE LA FENÊTRE (@media) : une scène dans la page de tests ne la ferait pas varier. Un <iframe> about:blank par largeur,
         // hors écran, même origine (frame-src 'self' ; about:blank hérite de la politique), qui charge la feuille servie et adopte la grille.
-        const jpeg = await imageTest();
+        // Ronde 1 : une image test en PORTRAIT (48 × 64), DÉCODÉE avant la mesure — le 4:3 doit venir de la règle, jamais du ratio naturel des octets.
+        const jpeg = await imageTest('#c63', 48, 64);
         const cadre = async (largeur) => {
           const f = document.createElement('iframe'); f.setAttribute('aria-hidden', 'true'); f.setAttribute('title', 'scène de mesure');
           f.style.cssText = `position:absolute;left:-12000px;top:0;width:${largeur}px;height:900px;border:0`;
@@ -327,16 +340,19 @@ export async function runCarnetTests({ eq, ok }) {
             const w = f.contentWindow; const d = f.contentDocument;
             if (w.innerWidth !== largeur) fautes.push(`cadre ${largeur} : innerWidth ${w.innerWidth}`);
             const g = K.grilleCartes([K.recipeCard(web, { photoEnTete: true, fichier: ligneFichier(H('a'), jpeg) }), K.recipeCard(duLivre, { photoEnTete: true }), K.recipeCard(sansDuree, { photoEnTete: true }), K.recipeCard(signet, { photoEnTete: true })]);
+            // Le cadre est hors écran : une img lazy n'y chargerait jamais. La scène (pas le composant) la passe en eager et attend son décodage, borné à 3 s.
+            for (const i of g.querySelectorAll('img')) i.loading = 'eager';
             d.querySelector('main').append(g); // adopté par le document du cadre : la feuille du cadre s'applique
+            const decodee = await Promise.race([g.querySelector('img.plat-vignette.grande').decode().then(() => true, () => false), new Promise((ok3) => setTimeout(() => ok3(false), 3000))]);
             const cs = w.getComputedStyle(g);
             const pistes = cs.gridTemplateColumns.trim().split(/\s+/);
             const img = g.querySelector('img.plat-vignette.grande'); const r = img.getBoundingClientRect();
             const corps = g.querySelector('.carte-plat.sans-photo > .carte-plat-corps'); const cc = w.getComputedStyle(corps);
             const h3 = w.getComputedStyle(g.querySelector('.carte-plat h3'));
             const cartes = [...g.children].map((c) => Math.round(c.getBoundingClientRect().height));
-            eq([largeur, cs.display, pistes.length, cs.columnGap, cs.alignItems, Math.abs(r.width / r.height - 4 / 3) < 0.02, w.getComputedStyle(img).objectFit, w.getComputedStyle(img).borderRadius, cc.minHeight, cc.backgroundColor, cc.borderRadius, h3.fontSize, /georgia/i.test(h3.fontFamily), cartes.slice(0, colonnes).every((h) => h === cartes[0])],
-              [largeur, 'grid', colonnes, '19.2px', 'stretch', true, 'cover', '12px', '112px', 'rgb(241, 236, 227)', '12px', '20.8px', true, true],
-              `styles.css à ${largeur} px : .grille-plats = grid à ${colonnes} colonnes, gap 1.2rem, align-items stretch ; l’image 4:3, recadrée, rayon 12 ; le bloc sans photo ≥ 7 rem (112 px) sur --paper-2 (#f1ece3), rayon 12 ; h3 serif 1,3 rem ; les cartes d’une même rangée ont la même hauteur (mesurés)`);
+            eq([largeur, decodee, img.naturalWidth, img.naturalHeight, cs.display, pistes.length, cs.columnGap, cs.alignItems, Math.abs(r.width / r.height - 4 / 3) < 0.02, w.getComputedStyle(img).objectFit, w.getComputedStyle(img).borderRadius, cc.minHeight, cc.backgroundColor, cc.borderRadius, h3.fontSize, /georgia/i.test(h3.fontFamily), cartes.slice(0, colonnes).every((h) => h === cartes[0])],
+              [largeur, true, 48, 64, 'grid', colonnes, '19.2px', 'stretch', true, 'cover', '12px', '112px', 'rgb(241, 236, 227)', '12px', '20.8px', true, true],
+              `styles.css à ${largeur} px : .grille-plats = grid à ${colonnes} colonnes, gap 1.2rem, align-items stretch ; l’image 4:3 (une photo PORTRAIT 48 × 64 décodée : le ratio vient de la règle), recadrée, rayon 12 ; le bloc sans photo ≥ 7 rem (112 px) sur --paper-2 (#f1ece3), rayon 12 ; h3 serif 1,3 rem ; les cartes d’une même rangée ont la même hauteur (mesurés)`);
           } finally { f.remove(); }
         }
         eq(fautes, [], 'cadres de mesure : chaque iframe a la largeur demandée (359, 360, 899, 900, 950)');
@@ -358,24 +374,26 @@ export async function runCarnetTests({ eq, ok }) {
         const puce = (r, libelle) => [...r.querySelectorAll('button.puce')].find((b) => b.textContent === libelle);
         const pressees = (r) => [...r.querySelectorAll('button.puce')].map((b) => [b.textContent, b.getAttribute('aria-pressed')]);
         const n = await renderLibrary({}, {}, ctx, fauxMatchMedia(false));
-        eq([texte(n.querySelector('header h1')), texte(n.querySelector('header p.muted')), [...n.querySelectorAll('.segmented button')].map((b) => b.textContent), segment(n), action(n), !!n.querySelector('.grille-plats'), titres(n)],
-          ['Bibliothèque', 'Tes livres, tes trouvailles, tes recettes.', ['Recettes', 'Livres', 'Plats'], 'Recettes', ['btn primary', '#/add', 'Ajouter une recette'], true, ['Plat rE', 'Plat rB', 'Plat rC', 'Plat rA']],
-          'renderLibrary({}) : « Bibliothèque », son sous-titre, trois segments, Recettes ACTIF par défaut, « Ajouter une recette » → #/add en tête, la grille triée par dernière modification (E, B, C, A) ; la référence D est DEHORS, le signet non lu E DEDANS (B-I-5)');
+        const fragments = []; const geste = () => fragments.push(location.hash); // ronde 1 : le fragment après chaque puce et chaque frappe
+        eq([texte(n.querySelector('header h1')), texte(n.querySelector('header p.muted')), [...n.querySelectorAll('.segmented button')].map((b) => b.textContent), segment(n), action(n), !!n.querySelector('.grille-plats'), titres(n), n.querySelector('header > a')],
+          ['Bibliothèque', 'Tes livres, tes trouvailles, tes recettes.', ['Recettes', 'Livres', 'Plats'], 'Recettes', ['btn primary', '#/add', 'Ajouter une recette'], true, ['Plat rE', 'Plat rB', 'Plat rC', 'Plat rA'], null],
+          'renderLibrary({}) : « Bibliothèque », son sous-titre, trois segments, Recettes ACTIF par défaut, « Ajouter une recette » → #/add en tête, la grille triée par dernière modification (E, B, C, A) ; la référence D est DEHORS, le signet non lu E DEDANS (B-I-5) ; aucun retour « ← … » sur Recettes');
         const carteE = n.querySelector('.grille-plats > a.carte-plat[href="#/recipes/rE"]');
-        eq([carteE?.className, texte(carteE?.querySelector('.carte-plat-source')), [...(carteE?.querySelectorAll('.carte-plat-badges > *') || [])].map((b) => b.textContent), texte(n.querySelector('a.carte-plat[href="#/recipes/rB"] .carte-plat-source'))],
-          ['item-link carte-plat sans-photo', 'Du web · web.test', ['Lien web'], 'Du web · web.test · 35 min'],
-          'un signet non lu : carte sans photo, « Du web · {hôte} » sans durée, badge « Lien web » ; une recette web lue porte sa durée');
-        puce(n, 'De mes livres').click(); await attendre(() => titres(n).length === 2, 'puce « De mes livres »');
+        eq([carteE?.className, texte(carteE?.querySelector('.carte-plat-source')), [...(carteE?.querySelectorAll('.carte-plat-badges > *') || [])].map((b) => b.textContent), texte(n.querySelector('a.carte-plat[href="#/recipes/rB"] .carte-plat-source')), texte(n.querySelector('a.carte-plat[href="#/recipes/rC"] .carte-plat-source'))],
+          ['item-link carte-plat sans-photo', 'Du web · web.test', ['Lien web'], 'Du web · web.test · 35 min', 'Du web · web.test'],
+          'un signet non lu : carte sans photo, « Du web · {hôte} » sans durée, badge « Lien web » ; une recette web lue porte sa durée ; C (un livre ET une adresse) dit le web, l’adresse avant le livre');
+        puce(n, 'De mes livres').click(); await attendre(() => titres(n).length === 2, 'puce « De mes livres »'); geste();
         eq([titres(n), pressees(n)], [['Plat rC', 'Plat rA'], [['Toutes', 'false'], ['De mes livres', 'true'], ['Du web', 'false']]], '« De mes livres » = edition_id non nul (C puis A) ; une seule puce pressée (aria-pressed)');
-        puce(n, 'Du web').click(); await attendre(() => titres(n).length === 3, 'puce « Du web »');
+        puce(n, 'Du web').click(); await attendre(() => titres(n).length === 3, 'puce « Du web »'); geste();
         eq(titres(n), ['Plat rE', 'Plat rB', 'Plat rC'], '« Du web » = source_url non nul (E, B, C) : une fiche qui a les deux est dans les deux (B-M-7) — un filtre de DONNÉES, jamais un appel');
-        puce(n, 'Toutes').click(); await attendre(() => titres(n).length === 4, 'puce « Toutes »');
+        puce(n, 'Toutes').click(); await attendre(() => titres(n).length === 4, 'puce « Toutes »'); geste();
         const champ = n.querySelector('.stack input[type="search"]');
         // Après chaque frappe, l'attente borne le redessin (asynchrone : il relit les lignes files manquantes) ; au-delà, les titres du moment sont rendus tels quels (le diff se lit dans eq).
-        const taper = async (q, attendu) => { champ.value = q; champ.dispatchEvent(new Event('input', { bubbles: true })); try { await attendre(() => JSON.stringify(titres(n)) === JSON.stringify(attendu), `filtre « ${q} »`); } catch { /* lu tel quel */ } return titres(n); };
-        eq([champ.getAttribute('placeholder'), await taper('rb', ['Plat rB']), await taper('pomme', ['Plat rB', 'Plat rC', 'Plat rA']), await taper('le livre', ['Plat rC', 'Plat rA']), await taper('', ['Plat rE', 'Plat rB', 'Plat rC', 'Plat rA'])],
-          ['Une recette, un ingrédient…', ['Plat rB'], ['Plat rB', 'Plat rC', 'Plat rA'], ['Plat rC', 'Plat rA'], ['Plat rE', 'Plat rB', 'Plat rC', 'Plat rA']],
-          'le champ « Une recette, un ingrédient… » filtre LOCALEMENT sur le titre, les ingrédients de la version courante (« pomme » : A, B, C) et le titre du livre ; vidé, tout revient ; aucun appel, aucune navigation');
+        const taper = async (q, attendu) => { champ.value = q; champ.dispatchEvent(new Event('input', { bubbles: true })); try { await attendre(() => JSON.stringify(titres(n)) === JSON.stringify(attendu), `filtre « ${q} »`); } catch { /* lu tel quel */ } geste(); return titres(n); };
+        eq([champ.getAttribute('placeholder'), champ.getAttribute('aria-label'), await taper('rb', ['Plat rB']), await taper('Pomme', ['Plat rB', 'Plat rC', 'Plat rA']), await taper('le livre', ['Plat rC', 'Plat rA']), await taper('', ['Plat rE', 'Plat rB', 'Plat rC', 'Plat rA'])],
+          ['Une recette, un ingrédient…', 'Une recette, un ingrédient…', ['Plat rB'], ['Plat rB', 'Plat rC', 'Plat rA'], ['Plat rC', 'Plat rA'], ['Plat rE', 'Plat rB', 'Plat rC', 'Plat rA']],
+          'le champ « Une recette, un ingrédient… » filtre LOCALEMENT sur le titre, les ingrédients de la version courante (« Pomme », casse ignorée : A, B, C) et le titre du livre ; vidé, tout revient ; le champ porte son nom accessible (aria-label)');
+        eq(fragments, Array(7).fill(hashT2), 'les trois puces et les quatre frappes ne touchent pas l’adresse de la page : aucune navigation (filtres LOCAUX, ronde 1) — l’absence d’appel est affirmée en fin de bloc');
         const pied = n.querySelector('a[data-role="a-importer"]');
         eq([pied?.getAttribute('href'), pied?.textContent, !!(n.querySelector('.grille-plats').compareDocumentPosition(pied) & Node.DOCUMENT_POSITION_FOLLOWING)], ['#/library?tab=a-importer', 'Recettes de mes livres à importer →', true],
           'pied : « Recettes de mes livres à importer → » vers ?tab=a-importer, sous la grille, parce qu’une référence sans adresse existe');
@@ -386,26 +404,46 @@ export async function runCarnetTests({ eq, ok }) {
         const plats = await renderLibrary({}, { tab: 'dishes' }, ctx, fauxMatchMedia(false));
         const recettes = await renderLibrary({}, { tab: 'recettes' }, ctx, fauxMatchMedia(false));
         const inconnu = await renderLibrary({}, { tab: 'zzz' }, ctx, fauxMatchMedia(false));
-        eq([segment(livres), action(livres), !!livres.querySelector('.grid.livres'), livres.querySelectorAll('.grid').length, !!livres.querySelector('.grille-plats'), segment(plats), action(plats), !!plats.querySelector('.grille-plats'), segment(recettes), !!recettes.querySelector('.grille-plats'), segment(inconnu), titres(inconnu).length],
-          ['Livres', ['btn primary', '#/add/livre', 'Ajouter un livre'], true, 1, false, 'Plats', null, false, 'Recettes', true, 'Recettes', 4],
-          '?tab=books : Livres actif, « Ajouter un livre » → #/add/livre (neuf, H-15), la grille des couvertures porte .grid.livres (§ 3.3 : minmax 170 px, règle de T1) et reste la seule .grid ; ?tab=dishes : Plats actif, AUCUNE action ; ?tab=recettes et un ?tab inconnu : la grille des plats');
+        eq([segment(livres), action(livres), !!livres.querySelector('.grid.livres'), livres.querySelectorAll('.grid').length, !!livres.querySelector('.grille-plats'), segment(plats), action(plats), !!plats.querySelector('.grille-plats'), segment(recettes), !!recettes.querySelector('.grille-plats'), segment(inconnu), titres(inconnu).length, livres.querySelector('header > a')],
+          ['Livres', ['btn primary', '#/add/livre', 'Ajouter un livre'], true, 1, false, 'Plats', null, false, 'Recettes', true, 'Recettes', 4, null],
+          '?tab=books : Livres actif, « Ajouter un livre » → #/add/livre (neuf, H-15), la grille des couvertures porte .grid.livres (§ 3.3 : minmax 170 px, règle de T1) et reste la seule .grid ; ?tab=dishes : Plats actif, AUCUNE action ; ?tab=recettes et un ?tab inconnu : la grille des plats ; aucun retour « ← … » sous Livres');
         eq([[...livres.querySelectorAll('section.plain > h2')].map((h) => h.textContent), livres.querySelectorAll('section.card').length, livres.querySelector('section.plain a.item-link.card')?.getAttribute('href')],
           [['Liens web gardés'], 0, '#/recipes/rB'], 'sous Livres : « Liens web gardés » (B et E, signets sans livre, en carte horizontale) est une section PLAIN ; aucune section .card (D-UI-8)');
-        // Le bouton mobile : a.btn.primary.big.block « Ajouter une recette » sous la grille, [hidden] ≥ 760 px (matchMedia injecté), suivi sur change tant qu'il est dans le document.
+        // Le bouton mobile : a.btn.primary.big.block « Ajouter une recette » sous la grille, [hidden] ≥ 760 px (matchMedia injecté). Ronde 1 : l'abonnement à
+        // `change` attend le MONTAGE (setTimeout 0 puis isConnected : app.js monte la route juste après son rendu) et il n'y en a jamais qu'UN dans l'app (le rendu
+        // monté retire celui du précédent) — le MediaQueryList ne retient aucun rendu détaché (constat de la revue : N rendus, N écouteurs, N arbres retenus).
         const mm = fauxMatchMedia(true);
-        const large = await renderLibrary({}, {}, ctx, mm);
         const bouton = (r) => r.querySelector('a[data-role="ajouter-mobile"]');
-        eq([bouton(large)?.className, bouton(large)?.getAttribute('href'), bouton(large)?.textContent, bouton(large)?.hidden, bouton(n)?.hidden, !!(large.querySelector('.grille-plats').compareDocumentPosition(bouton(large)) & Node.DOCUMENT_POSITION_FOLLOWING), mm.ecouteurs.length],
-          ['btn primary big block', '#/add', 'Ajouter une recette', true, false, true, 1],
-          '« Ajouter une recette » répété sous la grille en a.btn.primary.big.block : [hidden] quand (min-width: 760px) est vraie, visible dessous ; un écouteur change posé');
+        const nonMonte = await renderLibrary({}, {}, ctx, mm);
+        await tick(); await tick();
+        eq([bouton(nonMonte)?.className, bouton(nonMonte)?.getAttribute('href'), bouton(nonMonte)?.textContent, bouton(nonMonte)?.hidden, bouton(n)?.hidden, !!(nonMonte.querySelector('.grille-plats').compareDocumentPosition(bouton(nonMonte)) & Node.DOCUMENT_POSITION_FOLLOWING),
+          bouton(nonMonte)?.parentElement === nonMonte.querySelector('.grille-plats')?.parentElement, mm.ecouteurs.length],
+          ['btn primary big block', '#/add', 'Ajouter une recette', true, false, true, true, 0],
+          '« Ajouter une recette » répété sous la grille en a.btn.primary.big.block, sans enveloppe à marge (caché, il ne laisse aucune bande vide) : [hidden] quand (min-width: 760px) est vraie, visible dessous ; un rendu jamais monté ne pose AUCUN écouteur');
         const scene = nouvelleScene();
         try {
-          scene.append(large);
-          mm.bascule(false); eq(bouton(large).hidden, false, 'le bouton suit la largeur : (min-width: 760px) devient fausse → visible');
-          mm.bascule(true); eq(bouton(large).hidden, true, '… et redevient vraie → [hidden]');
+          const large = await renderLibrary({}, {}, ctx, mm);
+          const auRendu = bouton(large).hidden;
+          mm.bascule(false); // un change ENTRE le rendu et le montage (D-T2-b)
+          scene.append(large); await tick(); await tick();
+          eq([auRendu, bouton(large).hidden, mm.ecouteurs.length], [true, false, 1], 'un change reçu entre le rendu et le montage n’est pas perdu : l’abonnement, posé au montage, relit la largeur (visible) ; un écouteur (D-T2-b)');
+          mm.bascule(true); eq(bouton(large).hidden, true, 'le bouton suit la largeur : (min-width: 760px) devient vraie → [hidden]');
+          mm.bascule(false); eq(bouton(large).hidden, false, '… et redevient fausse → visible');
+          // Trois rendus montés tour à tour (navigation, refresh après une passe de synchro qui écrit), sans aucun change : un seul écouteur reste.
+          let dernier = large;
+          for (let i = 0; i < 3; i += 1) { dernier = await renderLibrary({}, {}, ctx, mm); scene.replaceChildren(dernier); await tick(); await tick(); }
+          const sansChange = mm.ecouteurs.length; // compté AVANT tout change : un change retirerait de lui-même les écouteurs détachés
+          mm.bascule(true);
+          eq([sansChange, mm.ecouteurs.length, bouton(large).hidden, bouton(dernier).hidden], [1, 1, false, true], 'trois rendus montés tour à tour sans aucun change : UN écouteur actif (le rendu monté retire celui du précédent : aucun rendu détaché retenu) ; le bouton détaché ne suit plus, le monté suit');
+          scene.remove(); mm.bascule(false);
+          eq([mm.ecouteurs.length, bouton(dernier).hidden], [0, true], 'hors du document (route quittée), le prochain change retire l’écouteur sans rien toucher');
         } finally { scene.remove(); }
-        mm.bascule(false);
-        eq([mm.ecouteurs.length, bouton(large).hidden], [0, true], 'hors du document, le prochain change retire l’écouteur sans rien toucher (aucune fuite par route)');
+        // Ronde 1 : le défaut de production — app.js appelle handler(params, query, ctx) SANS deps : le vrai window.matchMedia, appelé lié (« Illegal invocation »
+        // sinon). Rendu sans être monté : aucun écouteur sur la vraie MediaQueryList.
+        let parDefaut = null; try { parDefaut = await renderLibrary({}, {}, ctx); } catch (e) { parDefaut = e; }
+        const boutonDefaut = parDefaut instanceof Error ? null : bouton(parDefaut);
+        eq([parDefaut instanceof Error ? `${parDefaut.name}: ${parDefaut.message}` : null, !!(parDefaut instanceof Error ? null : parDefaut.querySelector('.grille-plats')), boutonDefaut?.hidden ?? null],
+          [null, true, window.matchMedia('(min-width: 760px)').matches], 'renderLibrary sans deps (le chemin de app.js) : le vrai window.matchMedia, sans levée ; la grille et le bouton mobile, [hidden] selon la vraie largeur');
         // Vide : seules des références → l'état vide « Aucune recette pour l’instant. » + « Ajouter une recette », aucune grille — et le pied, puisque des références attendent.
         const vide = await renderLibrary({}, {}, ctxDe([D, F], { editions: [ed], books: [livre] }), fauxMatchMedia(false));
         eq([texte(vide.querySelector('.empty p')), vide.querySelector('.empty a.btn.primary')?.getAttribute('href'), texte(vide.querySelector('.empty a.btn.primary')), !!vide.querySelector('.grille-plats'), vide.querySelector('a[data-role="a-importer"]')?.getAttribute('href')],
@@ -423,13 +461,40 @@ export async function runCarnetTests({ eq, ok }) {
         const seulG = await renderLibrary({}, {}, ctxDe([G], { editions: [ed], books: [livre] }), fauxMatchMedia(false));
         eq([[...avecG.querySelectorAll('section.plain li > a')].map((a) => a.getAttribute('href')), titres(seulG), seulG.querySelector('a[data-role="a-importer"]')], [['#/recipes/rD/importer'], ['Plat rG'], null],
           'un signet rangé dans un livre est dans la grille (carte), jamais dans la liste « à importer » ni dans le pied (seule une référence SANS adresse est à importer)');
+        // Ronde 1 : l'ORDRE de la liste « à importer » — deux livres insérés à rebours de l'alphabet, des pages insérées à rebours, deux références sans page aux
+        // titres inversés : les livres par titre, puis dans chacun la page d'abord, puis le titre (l'ordre de la base ne passe jamais).
+        const livreZ = { id: 'bz', title: 'Zeste' }; const edZ = { id: 'ez', book_id: 'bz' }; const livreA = { id: 'ba', title: 'Agrumes' }; const edA = { id: 'ea', book_id: 'ba' };
+        const ref = (id, editionId, titre, page = null) => fiche(id, { edition_id: editionId, availability: 'reference_only', original_title: titre, printed_page: page });
+        const ordre = await renderLibrary({}, { tab: 'a-importer' }, ctxDe([ref('z1', 'ez', 'Agneau', 90), ref('z2', 'ez', 'Zucchini', 12), ref('z3', 'ez', 'Tarte'), ref('z4', 'ez', 'Brioche'), ref('a1', 'ea', 'Citron', 40), ref('a2', 'ea', 'Orange', 5)],
+          { editions: [edZ, edA], books: [livreZ, livreA] }), fauxMatchMedia(false));
+        eq([[...ordre.querySelectorAll('section.plain h3')].map((h) => h.textContent), [...ordre.querySelectorAll('section.plain > .stack')].map((s) => [...s.querySelectorAll('li > a')].map((a) => a.textContent))],
+          [['Agrumes', 'Zeste'], [['Orange · p. 5 · À importer', 'Citron · p. 40 · À importer'], ['Zucchini · p. 12 · À importer', 'Agneau · p. 90 · À importer', 'Brioche · À importer', 'Tarte · À importer']]],
+          '?tab=a-importer : les livres par ordre alphabétique (Agrumes avant Zeste, insérés à rebours), puis dans chaque livre la page d’abord (12 avant 90) et le titre ensuite (Brioche avant Tarte) — jamais l’ordre de la base');
+        // Ronde 1 : une référence sans adresse NI livre (son livre a disparu) n'est pas « à importer » et n'offre pas le pied (où elle doit paraître : au chef
+        // d'orchestre, D-T2-d) ; sans aucune référence, la liste le dit en propre (D-T2-c).
+        const O = fiche('rO', { availability: 'reference_only' });
+        const avecO = await renderLibrary({}, { tab: 'a-importer' }, ctxDe([D, O], { editions: [ed], books: [livre] }), fauxMatchMedia(false));
+        const seulO = await renderLibrary({}, {}, ctxDe([A, O], { versions: [version('rA')], editions: [ed], books: [livre] }), fauxMatchMedia(false));
+        const rien = await renderLibrary({}, { tab: 'a-importer' }, ctxDe([A], { versions: [version('rA')], editions: [ed], books: [livre] }), fauxMatchMedia(false));
+        eq([[...avecO.querySelectorAll('section.plain li > a')].map((a) => a.getAttribute('href')), seulO.querySelector('a[data-role="a-importer"]'), texte(rien.querySelector('.empty p')), texte(rien.querySelector('header > a'))],
+          [['#/recipes/rD/importer'], null, 'Rien à importer pour l’instant.', '← Recettes'],
+          'une référence sans adresse ni livre n’est ni « à importer » ni une raison d’offrir le pied ; ?tab=a-importer sans référence : « Rien à importer pour l’instant. » (plus « Aucune recette »), avec son retour');
+        // Ronde 1 : le repli created_at du tri (une fiche sans updated_at se range par sa création ; sans horodatage, en dernier) ; le filtre lit display_title.
+        const R1 = fiche('rR1', { updated_at: null, created_at: '2026-10-25T00:00:00.000Z' }); const R2 = fiche('rR2', { updated_at: null, created_at: null });
+        const R3 = fiche('rR3', { display_title: 'Gâteau renommé' }); const R4 = fiche('rR4', { updated_at: '2026-10-24T00:00:00.000Z' });
+        const tri = await renderLibrary({}, {}, ctxDe([R2, R3, R1, R4]), fauxMatchMedia(false));
+        const triInitial = titres(tri);
+        const champTri = tri.querySelector('.stack input[type="search"]'); champTri.value = 'Renommé'; champTri.dispatchEvent(new Event('input', { bubbles: true }));
+        try { await attendre(() => titres(tri).length === 1, 'filtre « Renommé »'); } catch { /* lu tel quel */ }
+        eq([triInitial, titres(tri)], [['Plat rR1', 'Plat rR4', 'Gâteau renommé', 'Plat rR2'], ['Gâteau renommé']],
+          'tri de la grille : updated_at, sinon created_at (R1, créée le 25, d’abord), sans horodatage en dernier (R2) ; le filtre trouve un titre renommé (display_title), casse ignorée');
         BU.revoquerUrlsDeBlob();
       }));
 
       await run('grille bornée : 70 recettes à photo → 60 cartes et EXACTEMENT 60 lectures (getFile et getFiles comptés), « Voir plus » en lit 10 ; révocation au redessin (F-9, D-T9)', () => withRepo(async (repo, db) => {
         const jpeg = await imageTest();
-        // 70 recettes à photo, une empreinte DISTINCTE chacune, la plus récemment modifiée = la 69 ; les 70 lignes files partagent les mêmes octets (la base ne relit pas l'empreinte).
-        const recettes = Array.from({ length: 70 }, (_, i) => fiche('rp' + String(i).padStart(2, '0'), { photo_sha256: hex64(i), original_title: 'Photo ' + String(i).padStart(2, '0'), updated_at: new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString() }));
+        // 70 recettes à photo (septanteAPhoto) ; les 70 lignes files partagent les mêmes octets (la base ne relit pas l'empreinte).
+        const recettes = septanteAPhoto('rp');
         await db.mutate({ puts: { files: recettes.map((r) => ligneFichier(r.photo_sha256, jpeg)) }, origin: 'device' });
         const { lectures, rendre } = espionnerLectures(db);
         const scene = nouvelleScene();
@@ -447,18 +512,22 @@ export async function runCarnetTests({ eq, ok }) {
           await attendre(() => cartes().length === 70, '« Voir plus » rend la suite');
           eq([lectures.length, new Set(lectures).size, cartes()[69]?.querySelector('h3')?.textContent, voirPlus(), srcs().every((u) => typeof u === 'string' && u.startsWith('blob:'))], [70, 70, 'Photo 00', null, true],
             '« Voir plus » rend les 10 suivantes et en lit EXACTEMENT 10 de plus (70 au total, aucune relecture des 60 premières) ; plus rien à montrer : le bouton disparaît');
+          // Ronde 1 : une frappe REMET la grille à 60 cartes (etat.limite revient à CARTES_PAR_PAGE) — « photo » garde les 70 : sans la remise, 70 resteraient.
+          const champ = n.querySelector('.stack input[type="search"]');
+          champ.value = 'photo'; champ.dispatchEvent(new Event('input', { bubbles: true }));
+          try { await attendre(() => cartes().length === 60, 'frappe « photo » après « Voir plus »'); } catch { /* lu tel quel */ }
+          eq([cartes().length, voirPlus()?.className, lectures.length], [60, 'btn', 70], 'une frappe après « Voir plus » remet la grille à 60 cartes (« Voir plus » revient) et ne relit rien');
           // D-T9 : un redessin (le filtre) révoque EXACTEMENT les URL des vignettes précédentes, chacune APRÈS le vidage (plus sous aucun img du document) ; les lignes files
           // gardées ne sont pas relues ; les cartes neuves ont des URL vivantes. L'espion note chaque révocation et si l'URL est encore sous un <img> à cet instant.
           const dansLeDocument = (u) => [...document.querySelectorAll('img')].some((i) => i.getAttribute('src') === u);
           URL.revokeObjectURL = (u) => { revoquees.push({ u, encore: dansLeDocument(u) }); return vraiRevoke.call(URL, u); };
           const avant = srcs();
           const sentinelle = BU.urlDeBlob(new Blob(['sentinelle']));
-          const champ = n.querySelector('.stack input[type="search"]');
           champ.value = 'photo 6'; champ.dispatchEvent(new Event('input', { bubbles: true })); // « Photo 60 » à « Photo 69 »
           await attendre(() => cartes().length === 10 && revoquees.length >= avant.length, 'filtre « photo 6 » et révocations du redessin');
           eq([revoquees.map((x) => x.u).sort(), revoquees.filter((x) => x.encore).length, lectures.length, cartes().map((c) => c.querySelector('h3').textContent), srcs().every((u) => typeof u === 'string' && u.startsWith('blob:') && !revoquees.some((x) => x.u === u)), BU.revoquerUrlDeBlob(sentinelle)],
             [[...avant].sort(), 0, 70, ['Photo 69', 'Photo 68', 'Photo 67', 'Photo 66', 'Photo 65', 'Photo 64', 'Photo 63', 'Photo 62', 'Photo 61', 'Photo 60'], true, true],
-            'redessin par le filtre : les 70 URL précédentes révoquées (compte exact), chacune APRÈS le vidage ; aucune nouvelle lecture (lignes gardées) ; 10 cartes neuves aux URL vivantes ; la sentinelle d’autrui reste vivante');
+            'redessin par le filtre : les URL précédentes (60) révoquées (compte exact), chacune APRÈS le vidage ; aucune nouvelle lecture (lignes gardées) ; 10 cartes neuves aux URL vivantes ; la sentinelle d’autrui reste vivante');
         } finally { URL.revokeObjectURL = vraiRevoke; rendre(); scene.remove(); BU.revoquerUrlsDeBlob(); }
       }));
 
@@ -466,7 +535,7 @@ export async function runCarnetTests({ eq, ok }) {
       // (sa carte est déjà lue) : la grille montre la DERNIÈRE demande, jamais celle qui finit en dernier (un redessin périmé ne rend rien).
       await run('grille : un redessin périmé ne remplace jamais le plus récent', () => withRepo(async (repo, db) => {
         const jpeg = await imageTest();
-        const recettes = Array.from({ length: 70 }, (_, i) => fiche('rq' + String(i).padStart(2, '0'), { photo_sha256: hex64(i), original_title: 'Photo ' + String(i).padStart(2, '0'), updated_at: new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString() }));
+        const recettes = septanteAPhoto('rq');
         await db.mutate({ puts: { files: recettes.map((r) => ligneFichier(r.photo_sha256, jpeg)) }, origin: 'device' });
         const enVol = []; const vraiGetMany = db.getMany.bind(db);
         db.getMany = (store, keys) => { const p = vraiGetMany(store, keys); if (store === 'files') enVol.push(p); return p; };
@@ -481,10 +550,31 @@ export async function runCarnetTests({ eq, ok }) {
         } finally { delete db.getMany; BU.revoquerUrlsDeBlob(); }
       }));
 
+      // Ronde 1 : une lecture de files qui échoue pendant un redessin (base fermée, erreur IndexedDB) est journalisée par logError — jamais un rejet non géré.
+      await run('grille : une lecture de files refusée pendant un redessin est journalisée, jamais un rejet non géré (ronde 1)', () => withRepo(async (repo, db) => {
+        const jpeg = await imageTest();
+        const recettes = septanteAPhoto('rr');
+        await db.mutate({ puts: { files: recettes.map((r) => ligneFichier(r.photo_sha256, jpeg)) }, origin: 'device' });
+        const n = await renderLibrary({}, {}, ctxDe(recettes), fauxMatchMedia(false));
+        const rejets = []; const surRejet = (e) => { rejets.push(String(e.reason?.message || e.reason)); e.preventDefault(); };
+        const erreurs = []; const vraiErreur = console.error;
+        window.addEventListener('unhandledrejection', surRejet);
+        console.error = (...a) => { erreurs.push(String(a[0])); };
+        db.getMany = (store) => (store === 'files' ? Promise.reject(new Error('base fermée (test)')) : Promise.reject(new Error('magasin inattendu : ' + store)));
+        try {
+          const champ = n.querySelector('.stack input[type="search"]');
+          champ.value = 'photo 0'; champ.dispatchEvent(new Event('input', { bubbles: true })); // Photo 00 à 09 : pas encore lues — la lecture est refusée
+          try { await attendre(() => erreurs.length > 0 || rejets.length > 0, 'la lecture refusée est dite'); } catch { /* lu tel quel */ }
+          await new Promise((r) => setTimeout(r, 50));
+          eq([erreurs.filter((e) => e.includes('library.redessin')).length, rejets], [1, []], 'grille : la lecture refusée d’une frappe est journalisée (logError « library.redessin »), aucun rejet non géré');
+        } finally { console.error = vraiErreur; window.removeEventListener('unhandledrejection', surRejet); delete db.getMany; BU.revoquerUrlsDeBlob(); }
+      }));
+
       await run('en.js et filets i18n : les textes neufs de la tâche 2 (§ 5), l’interface anglaise', () => withRepo(async () => {
         const CLES = { 'Tes livres, tes trouvailles, tes recettes.': 'Your books, your finds, your recipes.', 'Recettes': 'Recipes', 'Ajouter une recette': 'Add a recipe', 'Une recette, un ingrédient…': 'A recipe, an ingredient…',
           'Toutes': 'All', 'De mes livres': 'From my books', 'Du web': 'From the web', 'Recettes de mes livres à importer': 'Recipes from my books to import', 'Voir plus': 'Show more', 'À importer': 'To import',
-          'Du web · {h}': 'From the web · {h}', 'De mon livre · {t}': 'From my book · {t}', 'Aucune recette pour l’instant.': 'No recipes yet.' };
+          'Du web · {h}': 'From the web · {h}', 'De mon livre · {t}': 'From my book · {t}', 'Aucune recette pour l’instant.': 'No recipes yet.',
+          'Rien à importer pour l’instant.': 'Nothing to import for now.' }; // ronde 1 (D-T2-c) : l'état vide de ?tab=a-importer
         eq(Object.entries(CLES).filter(([k, v]) => EN[k] !== v).map(([k]) => k), [], 'en.js : chaque texte neuf de la tâche 2 a sa traduction exacte (§ 5)');
         const { CHAINES_NEUVES_AILLEURS } = await import('./ajouter.js');
         const deComponents = ['Du web · {h}', 'De mon livre · {t}'];
@@ -501,7 +591,9 @@ export async function runCarnetTests({ eq, ok }) {
           eq([texte(enAI.querySelector('header > a')), texte(enAI.querySelector('section.plain > h2')), texte(enAI.querySelector('section.plain li > a'))], ['← Recipes', 'Recipes from my books to import', 'Plat rz · p. 3 · To import'], 'en : la liste « à importer » (retour, titre, ligne) rendue par t()');
         } finally { setUiLocale('fr'); }
       }));
-    } finally { globalThis.fetch = vraiFetch; setUiLocale(localeAvant); BU.revoquerUrlsDeBlob(); }
+      // Ronde 1 (I-UI-1) : rien dans tout le bloc n'a appelé le réseau — ni le filtre local, ni les puces (« Du web » comprise), ni « Voir plus », ni un rendu.
+      eq(appelsReseau, [], 'Carnet T2 : AUCUN appel réseau dans tout le bloc (frappes, puces — « Du web » est un filtre de données —, « Voir plus », rendus)');
+    } finally { globalThis.fetch = vraiFetch; if (location.hash !== hashT2) history.replaceState(null, '', location.pathname + location.search + hashT2); setUiLocale(localeAvant); BU.revoquerUrlsDeBlob(); }
   }
 
   // --- repère de fin : les tâches 2 à 6 ajoutent leurs blocs AU-DESSUS de cette ligne ---

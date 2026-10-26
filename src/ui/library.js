@@ -9,6 +9,7 @@ import { pageHeader, bookCover, segmented, emptyState, section, sectionPlain, re
 import { revoquerUrlDeBlob } from '../core/blob-urls.js';
 import { proposeDishesForRecipe } from '../domain/dishes.js';
 import { pointeurValide } from '../domain/photo-web.js';
+import { logError } from '../core/log.js';
 
 const TABS = ['recettes', 'books', 'dishes', 'a-importer'];
 export const CARTES_PAR_PAGE = 60; // F-9 : la grille est bornée ; « Voir plus » rend la page suivante
@@ -20,9 +21,12 @@ export const estAImporter = (r) => r.availability === 'reference_only' && !aUneA
 // Puces Toutes / De mes livres / Du web, calculées sur les DONNÉES (edition_id, source_url) : une fiche qui a les deux est dans les deux (B-M-7).
 // Un filtre de données, jamais un appel : le segment « Web » de la RECHERCHE reste l'appel payant (I-UI-1).
 export const passeLaPuce = (r, puce) => puce === 'toutes' || (puce === 'livres' ? !!r.edition_id : aUneAdresse(r));
+// « Le plus récent d'abord » sur des champs de date (le premier présent gagne), sans horodatage en dernier : UNE fabrique pour les deux ordres de la page
+// (la grille ; « Liens web gardés » et « Recettes créées avec l’IA »).
+const plusRecentDabord = (...champs) => { const quand = (r) => String(champs.map((c) => r?.[c]).find(Boolean) || ''); return (a, b) => (quand(a) < quand(b) ? 1 : quand(a) > quand(b) ? -1 : 0); };
 // Tri de la grille : dernière modification d'abord (§ 13, point 5), updated_at puis created_at en repli, sans horodatage en dernier.
-const quandModifie = (r) => String(r.updated_at || r.created_at || '');
-const derniereModificationDabord = (a, b) => (quandModifie(a.recipe) < quandModifie(b.recipe) ? 1 : quandModifie(a.recipe) > quandModifie(b.recipe) ? -1 : 0);
+const parModification = plusRecentDabord('updated_at', 'created_at');
+const derniereModificationDabord = (a, b) => parModification(a.recipe, b.recipe);
 // Le filtre local (même mécanique que celui des livres, booksTab) : titre, ingrédients de la version courante, titre du livre — calculé une fois par doc.
 const meule = (d) => [d.recipe.original_title, d.recipe.display_title, d.book?.title, ...(d.version?.ingredients || []).map((ri) => ri.name_text || ri.source_text)].filter(Boolean).join(' ').toLowerCase();
 // Ordre de la liste « à importer » (celui de la fiche du livre) : page imprimée, puis titre.
@@ -41,8 +45,8 @@ export async function renderLibrary(params, query, ctx, deps = {}) {
   if (tab === 'dishes') root.append(await dishesTab(ctx));
   else if (tab === 'books') {
     root.append(await booksTab(ctx));
-    // APRÈS booksTab, y compris quand il rend l'état vide : un signet sans livre n'a pas d'autre place, et le bouton
-    // « ← Bibliothèque » de sa fiche y ramène (confort après preuve, 17 octobre). D-UI-8 : les deux sections sont PLAIN.
+    // APRÈS booksTab, y compris quand il rend l'état vide : sous Livres, un signet sans livre n'a pas d'autre place (confort après preuve, 17 octobre).
+    // Depuis D-UI-4, il est aussi une carte de la grille Recettes, où ramène désormais le « ← Bibliothèque » de sa fiche (#/library). D-UI-8 : sections PLAIN.
     const liens = liensWebGardes(ctx);
     if (liens) root.append(liens);
     const creees = recettesCreeesIA(ctx); // N-7 : après « Liens web gardés »
@@ -87,33 +91,54 @@ async function recettesTab(ctx, { matchMedia }) {
     if (g !== generation) return;
     // D-T9 : les URL blob: des vignettes de la génération précédente sont révoquées APRÈS le remplacement des nœuds (remplacerEnRevoquant relève img.plat-vignette).
     remplacerEnRevoquant(grille, ...page.map((d) => recipeCard(d, { photoEnTete: true, fichier: pointeurValide(d.recipe) ? fichiers.get(d.recipe.photo_sha256) : null })));
-    suite.replaceChildren(...(liste.length > page.length ? [el('button', { type: 'button', class: 'btn', onClick: async () => { etat.limite += CARTES_PAR_PAGE; await redessiner(); } }, t('Voir plus'))] : []));
+    suite.replaceChildren(...(liste.length > page.length ? [el('button', { type: 'button', class: 'btn', onClick: () => { etat.limite += CARTES_PAR_PAGE; relancer(); } }, t('Voir plus'))] : []));
   };
+  // Un redessin lancé par un geste n'est attendu par personne : une lecture de files refusée (base fermée, erreur IndexedDB) est journalisée, jamais un rejet
+  // non géré (ronde 1) ; la grille garde alors ce qu'elle montrait.
+  const relancer = () => { redessiner().catch((error) => logError('library.redessin', { error })); };
   for (const [valeur, libelle] of [['toutes', t('Toutes')], ['livres', t('De mes livres')], ['web', t('Du web')]]) {
     puces.append(el('button', { type: 'button', class: 'puce', 'aria-pressed': String(valeur === etat.puce), dataset: { puce: valeur }, onClick: () => {
       etat.puce = valeur; etat.limite = CARTES_PAR_PAGE;
       for (const b of puces.children) b.setAttribute('aria-pressed', String(b.dataset.puce === valeur));
-      redessiner();
+      relancer();
     } }, libelle));
   }
-  filtre.addEventListener('input', () => { etat.limite = CARTES_PAR_PAGE; redessiner(); });
-  // Sous 760 px, l'action d'en-tête est répétée pleine largeur sous la grille (maquette mobile 01) ; au-dessus, [hidden] (T-9 ; aucun display:none neuf : T-1).
-  // La largeur est lue par matchMedia (injectable : deps.matchMedia, comme la fiche recette) et suivie sur `change` tant que le bouton est dans le document ;
-  // détaché, le prochain change retire l'écouteur (aucune fuite d'une route à l'autre).
-  const mobile = el('a', { class: 'btn primary big block', href: '#/add', dataset: { role: 'ajouter-mobile' } }, t('Ajouter une recette'));
+  filtre.addEventListener('input', () => { etat.limite = CARTES_PAR_PAGE; relancer(); });
+  await redessiner();
+  return el('div', null, el('div', { class: 'stack', style: { marginBottom: '1rem' } }, filtre, puces), grille, suite, boutonMobile(matchMedia), pied);
+}
+
+// Sous 760 px, l'action d'en-tête est répétée pleine largeur sous la grille (maquette mobile 01) ; au-dessus, [hidden] (T-9 ; aucun display:none neuf : T-1).
+// La marge est portée par le bouton lui-même : caché, il ne laisse aucune bande vide. La largeur est lue par matchMedia (injectable : deps.matchMedia) et
+// suivie sur `change` par AU PLUS UN écouteur dans toute l'app (ronde 1) : l'abonnement attend le MONTAGE (setTimeout 0 puis isConnected, motif
+// d'import-web.js ; app.js monte la route juste après son rendu) — un rendu jamais monté (navigation plus récente, rendu qui lève) ne s'abonne pas —,
+// relit la largeur à cet instant (un change reçu entre le rendu et le montage n'est pas perdu, D-T2-b) et retire l'écouteur du rendu monté précédent ;
+// celui d'un rendu détaché (route quittée) se retire aussi au premier change. Le MediaQueryList ne retient donc jamais plus d'un rendu.
+let suiviMobile = null; // { large, suivre } : l'abonnement du dernier rendu monté
+function boutonMobile(matchMedia) {
+  const mobile = el('a', { class: 'btn primary big block', href: '#/add', dataset: { role: 'ajouter-mobile' }, style: { marginTop: '1rem' } }, t('Ajouter une recette'));
   const large = matchMedia('(min-width: 760px)');
   mobile.hidden = !!large?.matches;
-  const suivre = (e) => { if (!mobile.isConnected) { large.removeEventListener?.('change', suivre); return; } mobile.hidden = !!e.matches; };
-  large?.addEventListener?.('change', suivre);
-  await redessiner();
-  return el('div', null, el('div', { class: 'stack', style: { marginBottom: '1rem' } }, filtre, puces), grille, suite, el('div', { style: { marginTop: '1rem' } }, mobile), pied);
+  setTimeout(() => {
+    if (!mobile.isConnected || typeof large?.addEventListener !== 'function') return;
+    if (suiviMobile) suiviMobile.large.removeEventListener('change', suiviMobile.suivre);
+    const suivre = (e) => {
+      if (mobile.isConnected) { mobile.hidden = !!e.matches; return; }
+      large.removeEventListener('change', suivre);
+      if (suiviMobile?.suivre === suivre) suiviMobile = null;
+    };
+    mobile.hidden = !!large.matches;
+    large.addEventListener('change', suivre);
+    suiviMobile = { large, suivre };
+  }, 0);
+  return mobile;
 }
 
 // ?tab=a-importer (§ 4.1, B-M-4) : les références sans adresse, groupées par livre (titre du livre en h3, livres par ordre alphabétique), une ligne
 // « {titre} · p. N · À importer » → l'écran d'import ciblé (#/recipes/<id>/importer, le même href que la fiche du livre). Section PLAIN (D-UI-8).
 function aImporterTab(ctx) {
   const refs = (ctx.recipes || []).filter(estAImporter);
-  if (!refs.length) return emptyState('assiette', t('Aucune recette pour l’instant.'));
+  if (!refs.length) return emptyState('assiette', t('Rien à importer pour l’instant.')); // ronde 1 (D-T2-c) : « aucune recette » serait faux ici
   const groupes = [...repo.groupBy(refs, 'edition_id').entries()]
     .map(([editionId, liste]) => ({ titre: ctx.editionLabel?.(ctx.editionsById?.get(editionId)) || t('Sans titre'), liste: [...liste].sort(parPageEtTitre) }))
     .sort((a, b) => a.titre.localeCompare(b.titre));
@@ -123,8 +148,7 @@ function aImporterTab(ctx) {
 }
 
 // Ordre commun aux deux sections : le plus récemment créé d'abord (created_at, updated_at en repli), sans horodatage en dernier.
-const quand = (r) => String(r.created_at || r.updated_at || '');
-const plusRecentesDabord = (a, b) => (quand(a) < quand(b) ? 1 : quand(a) > quand(b) ? -1 : 0);
+const plusRecentesDabord = plusRecentDabord('created_at', 'updated_at');
 const carteOuLien = (ctx, r) => {
   const doc = ctx.docsByRecipe?.get(r.id);
   return doc ? recipeCard(doc) : el('a', { class: 'btn', href: `#/recipes/${r.id}` }, r.display_title || r.original_title || t('Sans titre'));
@@ -133,7 +157,7 @@ const carteOuLien = (ctx, r) => {
 // Les signets sans livre (edition_id nul, source_url posé), le dernier GARDÉ d'abord : created_at, updated_at en repli
 // (un favori touché ne réordonne pas la liste — ronde 1) ; sans horodatage, en dernier. Aucun : rien n'est rendu.
 function liensWebGardes(ctx) {
-  const signets = (ctx.recipes || []).filter((r) => !r.edition_id && typeof r.source_url === 'string' && r.source_url).sort(plusRecentesDabord);
+  const signets = (ctx.recipes || []).filter((r) => !r.edition_id && aUneAdresse(r)).sort(plusRecentesDabord);
   if (!signets.length) return null;
   return sectionPlain(t('Liens web gardés'), ...signets.map((r) => carteOuLien(ctx, r)));
 }

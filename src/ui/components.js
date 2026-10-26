@@ -222,24 +222,28 @@ export function recipeCard(doc, { extra = null, href = null, reasons = null, pho
 // --- Lot UI-1 « Carnet » : la carte-plat et sa grille (spec D-UI-4, D-UI-5, I-UI-5, § 3.3) --------------------------------------------------------
 // dureeTotale(version) : PURE. UN nombre de minutes — total_minutes, sinon prep + cook dès que l'un des deux existe — ou null : rien sans durée (B-I-6),
 // jamais la paire « actif · total » de timeText. Une création IA n'a qu'une estimation, dite à part sur sa fiche (C-6, comme timeText). Une valeur
-// qui n'est pas un nombre fini (fiche reçue ou restaurée) vaut null.
+// qui n'est pas un nombre fini (fiche reçue ou restaurée) vaut null ; une durée nulle ou négative aussi (ronde 1 : « PT0S » d'un JSON-LD, -30 tapé dans
+// l'éditeur) — seule une valeur STRICTEMENT positive compte, la somme l'est donc toujours.
 export function dureeTotale(version) {
   if (!version || estCreationIA(version)) return null;
-  const nombre = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+  const nombre = (x) => (typeof x === 'number' && Number.isFinite(x) && x > 0 ? x : null);
   const total = nombre(version.total_minutes);
   if (total !== null) return total;
   const prep = nombre(version.prep_minutes); const cook = nombre(version.cook_minutes);
   return prep === null && cook === null ? null : (prep || 0) + (cook || 0);
 }
 
-// ligneSource(doc) : PURE. « Du web · {hôte} » quand la fiche a une adresse lisible (hôte RECALCULÉ par lienSignet, jamais source_label : S7), sinon
+// ligneSource(doc) : PURE. Une fiche créée avec l'assistant dit d'abord sa provenance (C-2, ronde 1 : ni une adresse ni un livre portés par une fiche
+// reçue ne prennent sa place, comme dans provenanceText et libelleSource). Sinon « Du web · {hôte} » quand la fiche a une adresse lisible (hôte
+// RECALCULÉ par lienSignet, jamais source_label : S7), sinon
 // « De mon livre · {titre} » quand elle vient d'un livre, sinon sa provenance d'avant (provenanceText : étiquette IA, source personnelle, adresse non
 // reconnue) ; puis « · {durée} » (formatMinutes) seulement quand dureeTotale en donne une. Une fiche qui a un livre ET une adresse est une page web rangée
 // dans un livre : son texte vient du web, la ligne dit le web (le filtre « De mes livres » la garde, lui : D-UI-4).
 export function ligneSource(doc) {
   const { recipe, book, edition, version } = doc;
   const lien = recipe?.source_url ? lienSignet(recipe.source_url) : null;
-  const source = lien?.ok ? t('Du web · {h}', { h: lien.hote }) : book ? t('De mon livre · {t}', { t: book.title || t('Sans titre') }) : provenanceText(recipe, book, edition);
+  const source = recipe?.origine === 'ia' ? provenanceText(recipe, book, edition)
+    : lien?.ok ? t('Du web · {h}', { h: lien.hote }) : book ? t('De mon livre · {t}', { t: book.title || t('Sans titre') }) : provenanceText(recipe, book, edition);
   const duree = dureeTotale(version);
   return duree === null ? source : `${source} · ${formatMinutes(duree)}`;
 }
