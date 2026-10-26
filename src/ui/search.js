@@ -33,8 +33,9 @@ export function etatWeb() { return { cle: vol?.cle ?? null, enCours: !!vol, memo
 // le mur de F, Blob typé dans la liste des couvertures) ou { raison } (échec PAR ADRESSE mémorisé : une adresse sans image n'est pas redemandée). La Map SURVIT
 // à une nouvelle issue (elle est indexée par href, pas par demande) : après chaque « trouvé » reçu, les entrées dont le href a quitté ses liens sont lâchées,
 // Blob compris ; reinitialiserWeb() seule la vide entière. L'UNIQUE vol d'aperçus de l'app : posé par une vue CONNECTÉE qui rend un « trouvé » aux adresses
-// encore absentes (ou au montage d'une vue rendue détachée, R-UI2-7) ; abandonné par lancer(), « Annuler », reinitialiserWeb() et quand plus aucune vue n'est
-// connectée ET que la route a quitté /search (un observateur du document, le temps du vol ; ronde 1 : app.js remplace l'écran par « Chargement… » AVANT de
+// encore absentes (ou au montage d'une vue rendue détachée, R-UI2-7), jamais pendant une recherche en vol (revue finale) ; abandonné par lancer(),
+// « Annuler », reinitialiserWeb() et quand plus aucune vue n'est connectée ET que la route a quitté /search (un observateur du document, le temps du
+// vol ; ronde 1 : app.js remplace l'écran par « Chargement… » AVANT de
 // rendre la nouvelle instance de /search — run(), cuisineos:refresh —, et cette instance ADOPTE le vol au lieu d'en payer un second) ; un vol abandonné est
 // MUET (rien d'écrit : ses adresses restent absentes et se redemandent au prochain « trouvé » rendu connecté). R-UI2-6 : un échec de l'appel ENTIER (reseau,
 // serveur, interne, delai, quota, un annule arrivé sans abandon) n'apprend
@@ -265,7 +266,9 @@ export async function renderSearch(params, query, ctx, deps = {}) {
       el('small', { class: 'muted', dataset: { role: 'aide-web' }, hidden: !demandeVide }, t('Écris d’abord ce que tu cherches.'))); // toujours là : la frappe la montre ou la cache
   }
   // UI-2 (D-UI-13, S-4, S-5) : le vol d'aperçus — demandé par CETTE vue si elle est connectée, pour les adresses encore absentes de la Map (0 appel quand
-  // tout est connu : « Chercher à nouveau » ne repaie que les adresses neuves), jamais pendant un autre vol d'aperçus, jamais sans deps.apercus, jamais une
+  // tout est connu : « Chercher à nouveau » ne repaie que les adresses neuves), jamais pendant un autre vol d'aperçus, jamais pendant une RECHERCHE en vol
+  // (revue finale : le « trouvé » affiché — K1, après un geste de filtre — va être remplacé ; « Annuler » et la réception remettent `vol` à null avant de
+  // redessiner), jamais sans deps.apercus, jamais une
   // seconde fois pour la MÊME issue après un échec de l'appel entier (R-UI2-6). Un abandon (lancer, « Annuler », dernière vue déconnectée, reinitialiserWeb)
   // rend le résultat MUET ; une Map reçue est écrite PAR ADRESSE (une adresse demandée absente de la Map reçue vaut `illisible`) ; un échec de l'appel ENTIER,
   // ou une réponse sans forme, est mémorisé pour l'issue (`echecApercus`), jamais écrit par adresse : jamais une boucle de demandes. Rend vrai quand un vol
@@ -273,7 +276,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   let affiche = null; // { issue, hrefs } : le « trouvé » que CETTE vue montre, relu au montage (R-UI2-7)
   const demanderApercus = (hrefs, issue) => {
     const manquants = [...new Set(hrefs.filter((h) => !apercus.has(h)))].slice(0, LIMITES_APERCU_WEB.adresses);
-    if (!apercusFn || volApercus || !manquants.length || !root.isConnected) return false;
+    if (!apercusFn || vol || volApercus || !manquants.length || !root.isConnected) return false;
     if (echecApercus && echecApercus.issue === issue) return false;
     const controller = new AbortController();
     const promesse = Promise.resolve()
@@ -284,6 +287,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
         volApercus.garde.disconnect(); volApercus = null;
         if (r?.etat === 'recus' && r.apercus instanceof Map) {
           for (const h of manquants) { const a = r.apercus.get(h); apercus.set(h, a?.blob instanceof Blob && COVER_INPUT_MIME.includes(a.blob.type) ? { blob: a.blob, type: a.blob.type } : { raison: typeof a?.raison === 'string' ? a.raison : 'illisible' }); }
+          if (memoire?.issue?.etat === 'trouve') elaguerApercus(memoire.issue); // défense en profondeur (revue finale) : jamais un Blob hors des liens du « trouvé » courant
         } else { echecApercus = { issue, raison: typeof r?.raison === 'string' ? r.raison : 'interne' }; } // R-UI2-6 : l'appel a échoué, pas les adresses
         notifier(); // les figures de TOUTE la liste en un seul redessin (B-I-12)
       });
@@ -291,7 +295,8 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     // SAUF si la route est encore /search (ronde 1) : app.js remplace `main` par « Chargement… » avant de rendre la nouvelle instance (Entrée, mode, case,
     // cuisineos:refresh après une passe qui écrit) ; abandonner là ferait un 499 compté puis une seconde demande des mêmes adresses au montage (R-UI2-7) :
     // trois appels pour une recherche annoncée « 2 appels », dont un sans geste. Le vol reste au module ; l'instance qui se monte le retrouve (« en cours »,
-    // puis notifier() pose ses figures). Quitter la recherche (la route a changé quand la vue part) abandonne toujours.
+    // puis notifier() pose ses figures). Quitter la recherche (la route a changé quand la vue part) abandonne toujours — et le retour sur /search repaie les
+    // adresses abandonnées (la réservation était faite : 499 compté, puis un appel de plus au montage) : limite nommée par la revue finale (spec § 11).
     const garde = new MutationObserver(() => { if (![...vues].some((v) => v.root.isConnected) && routeCourante() !== '/search') abandonnerApercus(); });
     garde.observe(document.body, { childList: true, subtree: true });
     volApercus = { controller, promesse, hrefs: manquants, garde };
@@ -313,7 +318,9 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     // d'un aperçu (plus basse que le mur de F ?) reste une décision du chef, à mesurer à la sonde sur l'iPhone.
     const img = el('img', { class: 'plat-vignette grande', alt: '', src: u, decoding: 'async' });
     const fig = el('figure', { class: 'apercu' }, img);
-    img.addEventListener('error', () => { fig.remove(); if (revoquerUrlDeBlob(u)) apercus.set(lien.href, { raison: 'image_refusee' }); }, { once: true });
+    // Revue finale (D-UI-13) : quand la DERNIÈRE figure de la liste tombe ainsi, un redessin (un seul : l'entrée est désormais un refus, sans figure) pose
+    // « Photos indisponibles pour cette recherche. » sans attendre un geste.
+    img.addEventListener('error', () => { fig.remove(); if (revoquerUrlDeBlob(u)) { apercus.set(lien.href, { raison: 'image_refusee' }); if (!root.querySelector('figure.apercu')) notifier(); } }, { once: true });
     return fig;
   };
   // D-UI-13 : la ligne d'état, sous « Demande envoyée » — « en cours » pendant le vol de ces adresses ; rien dès qu'une image est posée ; sinon l'échec de

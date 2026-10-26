@@ -220,6 +220,40 @@ export async function runApercuWebTests({ eq, ok }) {
       } finally { globalThis.createImageBitmap = vrai; }
     });
 
+    await run('mur sans ré-encodage : une image ANIMÉE (APNG, WebP animé) ou TRONQUÉE est refusée sans décodage (revue finale du lot UI-2)', async () => {
+      // Sans ré-encodage, plus aucun décodage canvas n'aplatit une animation ni ne refuse un fichier coupé : deux contrôles de structure, lus sans décodage.
+      const IM = await import('../src/core/image.js');
+      const A = await import('../src/domain/apercu-web.js');
+      const { SUPABASE } = await import('../src/sync/config.js');
+      const code = async (p) => { try { const r = await p; return r instanceof Blob ? 'ok' : 'autre'; } catch (e) { return e?.code ?? 'autre:' + (e?.message || ''); } };
+      const mur = (u8, type) => code(IM.preparerPhotoDistante(new Blob([u8], { type }), { reencoder: false }));
+      const ascii = (s) => [...s].map((c) => c.charCodeAt(0));
+      // Un chunk PNG (taille, nom, données, CRC nul : aucun contrôle ne lit le CRC) inséré à la position `ou`.
+      const avecChunk = (u8, ou, nom, donnees) => { const c = new Uint8Array(12 + donnees.length); new DataView(c.buffer).setUint32(0, donnees.length); c.set(ascii(nom), 4); c.set(donnees, 8); const r = new Uint8Array(u8.length + c.length); r.set(u8.subarray(0, ou)); r.set(c, ou); r.set(u8.subarray(ou), ou + c.length); return r; };
+      // Un en-tête WebP étendu (VP8X, drapeaux posés) de 320 × 240 suivi d'un chunk ANIM : 44 octets, taille RIFF exacte.
+      const webpEtendu = (drapeaux) => { const t = new Uint8Array(44); const dv = new DataView(t.buffer); t.set(ascii('RIFF'), 0); dv.setUint32(4, 36, true); t.set(ascii('WEBPVP8X'), 8); dv.setUint32(16, 10, true); t[20] = drapeaux; t.set([319 & 0xff, 319 >> 8, 0, 239, 0, 0], 24); t.set(ascii('ANIM'), 30); dv.setUint32(34, 6, true); return t; };
+      const png = await octetsDe(await imageTest('#3a7', 320, 240));
+      const jpeg = await octetsDe(await imageTest('#a52', 600, 400, 'image/jpeg'));
+      const webpBlob = await imageTest('#36a', 320, 240, 'image/webp');
+      const webp = await octetsDe(webpBlob);
+      eq(webpBlob.type, 'image/webp', 'fixture : le canvas encode bien du WebP');
+      const acTL = new Uint8Array([0, 0, 0, 2, 0, 0, 0, 0]); // num_frames 2, num_plays 0
+      const vrai = globalThis.createImageBitmap; let decodes = 0;
+      globalThis.createImageBitmap = (...a) => { decodes += 1; return vrai.call(globalThis, ...a); };
+      try {
+        eq([await mur(png, 'image/png'), await mur(jpeg, 'image/jpeg'), await mur(webp, 'image/webp'), await mur(avecChunk(png, png.length - 12, 'acTL', acTL), 'image/png'), await mur(webpEtendu(0x10), 'image/webp'), await mur(new Uint8Array([...jpeg, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), 'image/jpeg')],
+          ['ok', 'ok', 'ok', 'ok', 'ok', 'ok'], 'fixes : PNG, JPEG et WebP entiers passent ; un acTL APRÈS le premier IDAT (ignoré par les navigateurs) passe ; un VP8X sans le drapeau d’animation (0x10, alpha) passe ; un JPEG suivi de 10 octets de remplissage passe');
+        eq([await mur(avecChunk(png, 33, 'acTL', acTL), 'image/png'), await mur(webpEtendu(0x12), 'image/webp'), await mur(avecChunk(png, 33, 'tEXt', new Uint8Array(300 * 1024).fill(0x61)), 'image/png')],
+          ['animee', 'animee', 'animee'], 'animées : un APNG (acTL avant le premier IDAT) et un WebP VP8X au drapeau d’animation (0x02) → animee ; un PNG dont le premier IDAT est hors de la tranche lue (300 Kio de tEXt avant lui) → animee (l’animation ne se prouve pas)');
+        eq([await mur(png.slice(0, 60), 'image/png'), await mur(jpeg.slice(0, jpeg.length >> 1), 'image/jpeg'), await mur(webp.slice(0, webp.length >> 1), 'image/webp'), decodes],
+          ['tronquee', 'tronquee', 'tronquee', 0], 'tronquées : un PNG coupé à 60 octets (signature et IHDR valides, sans IEND), un JPEG coupé à mi-chemin (sans FF D9 final), un WebP coupé (taille RIFF au-delà du fichier) → tronquee ; aucun décodage');
+        const tetes = [U(0), U(1), U(2), U(3)];
+        const r = await A.lireApercusWeb({ urls: tetes, session: SESSION }, { fetch: async () => reponse(200, { apercus: [entreeImage(U(0), avecChunk(png, 33, 'acTL', acTL)), entreeImage(U(1), webpEtendu(0x02), 'image/webp'), entreeImage(U(2), png.slice(0, 60)), entreeImage(U(3), png)] }), config: SUPABASE.prod });
+        eq([r.apercus.get(U(0)), r.apercus.get(U(1)), r.apercus.get(U(2)), r.apercus.get(U(3)).blob instanceof Blob], [{ raison: 'image_refusee' }, { raison: 'image_refusee' }, { raison: 'image_refusee' }, true],
+          'lireApercusWeb : APNG, WebP animé et PNG tronqué → image_refusee (jamais une figure animée ni un cadre vide) ; la PNG entière passe');
+      } finally { globalThis.createImageBitmap = vrai; }
+    });
+
     await run('table serveur → client : les échecs de l’appel entier', async () => {
       const A = await import('../src/domain/apercu-web.js');
       const { SUPABASE } = await import('../src/sync/config.js');
@@ -328,9 +362,10 @@ export async function runApercuWebTests({ eq, ok }) {
       eq([S.etatWeb().enCours, p.demandes.length, p.demandes[1]?.a.urls, etat(root1)?.textContent], [false, 2, CINQ, 'Photos en cours de récupération…'], 'R-UI2-8 à UNE vue : « Annuler » redessine le « trouvé » (K1) aux adresses absentes et repose un vol — un appel de plus (limite nommée)');
       root1.remove();
       // « Annuler » : deux vues. root0 montre un « trouvé » dont les aperçus manquent (son vol a été abandonné par la tape de root2) ; root2 tient la recherche
-      // en vol et son bouton « Annuler ». Un redessin de root0 pose un nouveau vol d'aperçus ; « Annuler » dans root2 l'abandonne aussi — puis root2, redessinée
-      // sur le « trouvé » de la mémoire (K1) aux adresses toujours absentes, en pose aussitôt un troisième : c'est la règle (une vue connectée qui rend un
-      // « trouvé » demande ce qui manque), pas une fuite (R-UI2-8, limite nommée) ; le résultat tardif du vol abandonné, lui, reste muet.
+      // en vol et son bouton « Annuler ». Revue finale (K1) : PENDANT la recherche en vol, un redessin de root0 ne pose AUCUN vol d'aperçus — le « trouvé »
+      // affiché va être remplacé ; « Annuler » dans root2 remet la recherche à zéro, puis root2, redessinée sur le « trouvé » de la mémoire (K1) aux adresses
+      // toujours absentes, pose un vol : c'est la règle (une vue connectée qui rend un « trouvé » demande ce qui manque), pas une fuite (R-UI2-8, limite
+      // nommée) ; le résultat tardif du vol abandonné par la tape, lui, reste muet.
       S.reinitialiserWeb();
       p = pilotes();
       const root0 = await monter(p, { q: 'puttanesca' });
@@ -339,12 +374,11 @@ export async function runApercuWebTests({ eq, ok }) {
       bouton(root2, 'Chercher à nouveau').click(); await tick(); // lancer() dans root2 : abandonne le vol d'aperçus de root0, pose la recherche « autre plat »
       eq([p.demandes[0].d.signal.aborted, !!bouton(root2, 'Annuler'), S.etatApercus().enVol], [true, true, null], 'deux vues : la tape de la seconde abandonne le vol d’aperçus de la première et montre « Annuler »');
       redessiner(root0); await tick();
-      const d1 = p.demandes[1];
-      eq([p.demandes.length, d1?.a.urls, !!bouton(root2, 'Annuler')], [2, CINQ, true], 'deux vues : le redessin de la première (connectée, adresses absentes) pose un nouveau vol d’aperçus pendant que « Annuler » est visible dans la seconde');
+      eq([p.demandes.length, S.etatApercus().enVol, etat(root0), cartes(root0).length, !!bouton(root2, 'Annuler')], [1, null, null, 5, true], 'deux vues : pendant la recherche en vol, le redessin de la première (connectée, adresses absentes) ne pose AUCUN vol d’aperçus (revue finale : le « trouvé » affiché va être remplacé) ; ses cartes restent, sans ligne d’état');
       bouton(root2, 'Annuler').click(); await tick();
-      eq([d1.d.signal.aborted, S.etatWeb().enCours, p.demandes.length, p.demandes[2]?.d.signal.aborted, S.etatApercus().enVol], [true, false, 3, false, CINQ], '« Annuler » abandonne le vol d’aperçus avec la recherche (signal de d1 levé, plus de recherche en vol) ; le redessin de root2 sur le « trouvé » (K1, adresses absentes) pose aussitôt un nouveau vol');
-      d1.rendre(recus(CINQ, [U(0)])); await tick();
-      eq([S.etatApercus().blobs, S.etatApercus().enVol], [0, CINQ], '« Annuler » : le résultat tardif du vol abandonné est muet (le nouveau vol est intact)');
+      eq([S.etatWeb().enCours, p.demandes.length, p.demandes[1]?.a.urls, p.demandes[1]?.d.signal.aborted, S.etatApercus().enVol], [false, 2, CINQ, false, CINQ], '« Annuler » : plus de recherche en vol ; le redessin de root2 sur le « trouvé » (K1, adresses absentes) pose un vol d’aperçus (R-UI2-8)');
+      p.demandes[0].rendre(recus(CINQ, [U(0)])); await tick();
+      eq([S.etatApercus().blobs, S.etatApercus().enVol], [0, CINQ], 'le résultat tardif du vol abandonné par la tape est muet (le nouveau vol est intact)');
       root0.remove(); root2.remove();
       // La dernière vue déconnectée : avec trois vues connectées, retirer la troisième puis la POSEUSE ne fait rien (la règle est « plus AUCUNE vue
       // connectée », pas « la vue qui a posé le vol » — ronde 1, X19) ; retirer la dernière abandonne le vol (observateur du document), la route ayant quitté /search.
@@ -383,6 +417,79 @@ export async function runApercuWebTests({ eq, ok }) {
       route = '/library'; // la personne quitte la recherche : hashchange, puis app.js remplace l'écran
       rootR2.remove(); await tick();
       eq([dQ?.a.urls, dQ?.d.signal.aborted, S.etatApercus().enVol], [[U(5)], true, null], 'quitter /search (la route a changé quand la dernière vue part) : le vol est abandonné comme avant');
+    });
+
+    await run('écran : pendant une recherche en vol, l’ancien « trouvé » affiché (K1) ne pose aucun vol d’aperçus ; la réception demande les adresses de la NOUVELLE issue (revue finale)', async () => {
+      // La séquence de la revue finale, à une vue : A rend r0..r4 (vol A posé) ; « Chercher à nouveau » avant les photos (vol A abandonné, recherche B en
+      // vol) ; « + type » pendant B (la clé change : l'écran rend l'ancien trouvé A en K1) ; B arrive avec r5..r9.
+      S.reinitialiserWeb();
+      const p = pilotes();
+      const root = await monter(p);
+      await chercheEtRecoit(root, p, [0, 1, 2, 3, 4].map(lien));
+      const dA = p.demandes[0];
+      bouton(root, 'Chercher à nouveau').click(); await tick();
+      redessiner(root); await tick();
+      eq([dA.d.signal.aborted, S.etatWeb().enCours, cartes(root).length, p.demandes.length, S.etatApercus().enVol, etat(root)], [true, true, 5, 1, null, null],
+        'pendant la recherche B, le redessin (+ type) rend l’ancien trouvé A (K1, cinq cartes) SANS poser de vol d’aperçus (0 appel payé pour des résultats qui vont être remplacés), sans ligne d’état');
+      const B = [5, 6, 7, 8, 9].map(U);
+      p.recherches.at(-1).rendre(trouve([5, 6, 7, 8, 9].map(lien))); await tick();
+      const dB = p.demandes[1];
+      eq([p.demandes.length, dB?.a.urls, S.etatApercus().enVol, etat(root)?.textContent], [2, B, B, 'Photos en cours de récupération…'], 'réception de B : UN vol pour r5..r9 (les adresses de la nouvelle issue), « en cours » dit tout de suite');
+      dA.rendre(recus(CINQ, CINQ)); await tick();
+      dB.rendre(recus(B, [U(5), U(6)])); await tick();
+      eq([S.etatApercus(), figures(root).length, S.etatApercus().hrefs.every((h) => B.includes(h))], [{ hrefs: B, blobs: 2, enVol: null }, 2, true], 'le résultat tardif de A est muet ; la Map ne porte que les liens de B (aucun Blob des liens remplacés : D-UI-12)');
+      root.remove();
+    });
+
+    await run('écran : branchement par défaut — sans deps.chercher ni deps.apercus, une recherche = 2 POST (recherche-web, puis apercu-web) et deux figures (revue finale, P4)', async () => {
+      // Le seul test qui monte l'écran SANS ses gestes réseau injectés : chercherRecettesWeb et lireApercusWeb par défaut, le fetch global remplacé par un
+      // faux qui répond à la passerelle (jamais de réseau). Le mutant « apercus: apercusFn = null » (fonctionnalité éteinte en production) y rougit.
+      S.reinitialiserWeb();
+      const mur = globalThis.fetch;
+      const png = await octetsDe(PNG);
+      const res = (url, title) => ({ type: 'web_search_result', url, title, page_age: null, encrypted_content: 'x' });
+      const corpsWeb = { model: 'm', stop_reason: 'end_turn', usage: { server_tool_use: { web_search_requests: 1 } }, content: [
+        { type: 'server_tool_use', id: 'srvtoolu_1', name: 'web_search', input: { query: 'puttanesca' } },
+        { type: 'web_search_tool_result', tool_use_id: 'srvtoolu_1', content: [res(U(0), 'Recette 0'), res(U(1), 'Recette 1')] },
+        { type: 'text', text: JSON.stringify({ choix: [{ url: U(0), presentation: 'Un.' }, { url: U(1), presentation: 'Deux.' }] }) }] };
+      const posts = [];
+      let root;
+      try {
+        globalThis.fetch = async (u, o) => { const b = JSON.parse(o.body); posts.push({ url: String(u), outil: b.outil, corps: b.corps, auth: o.headers?.authorization }); return reponse(200, b.outil === 'recherche-web' ? corpsWeb : { apercus: [entreeImage(U(0), png), entreeImage(U(1), png)] }); };
+        root = await S.renderSearch({}, { mode: 'web', q: 'puttanesca' }, ctxDe(), { navigate: () => {}, remplacerAdresse: () => {} });
+        scene.append(root);
+        bouton(root, 'Chercher sur le web avec l’assistant').click();
+        await attendre(() => figures(root).length === 2, 'les deux figures posées par le chemin par défaut');
+        eq([posts.length, posts.map((x) => x.outil), posts[1].corps, posts.every((x) => x.url === posts[0].url && x.url.endsWith('/functions/v1/assistant')), posts.every((x) => x.auth === 'Bearer jeton-apercus-sentinelle')],
+          [2, ['recherche-web', 'apercu-web'], { urls: [U(0), U(1)] }, true, true], 'défaut : exactement deux POST vers la passerelle, recherche-web puis apercu-web (les deux adresses des liens), avec la session');
+        eq([cartes(root).length, srcs(root).every((s) => s.startsWith('blob:')), etat(root), S.etatApercus()], [2, true, null, { hrefs: [U(0), U(1)], blobs: 2, enVol: null }], 'défaut : deux figures blob: en tête des deux cartes, plus de ligne d’état (« Une recherche = 2 appels » de bout en bout)');
+      } finally { globalThis.fetch = mur; root?.remove(); }
+    });
+
+    await run('écran : garde du vol par la VRAIE route (défaut currentPath, sans deps.routeCourante) — reconstruction de /search adoptée, /library abandonne, le retour repaie (revue finale, R1, R1b)', async () => {
+      // La route est pilotée par history.replaceState (aucun hashchange) ; le hash de la page de tests est rendu dans le finally.
+      const hashAvant = location.hash;
+      const p = pilotes();
+      const monterSansRoute = async () => { const r = await S.renderSearch({}, { mode: 'web', q: 'puttanesca' }, ctxDe(), { chercher: p.chercher, apercus: p.apercus, navigate: () => {}, remplacerAdresse: () => {} }); scene.append(r); return r; };
+      try {
+        S.reinitialiserWeb();
+        history.replaceState(null, '', '#/search?mode=web&q=puttanesca');
+        const root = await monterSansRoute();
+        await chercheEtRecoit(root, p, [0, 1, 2, 3, 4].map(lien));
+        const d = p.demandes[0];
+        root.remove(); await tick(); // app.js remplace l'écran par « Chargement… » : la route reste /search
+        eq([d.d.signal.aborted, S.etatApercus().enVol], [false, CINQ], 'route réelle /search : la seule vue remplacée n’abandonne pas le vol (le mutant « () => \'/\' » l’abandonnerait : 499 compté puis une seconde demande)');
+        const root2 = await monterSansRoute(); await tick();
+        eq([p.demandes.length, etat(root2)?.textContent], [1, 'Photos en cours de récupération…'], 'route réelle /search : la nouvelle instance adopte le vol (une seule demande)');
+        history.replaceState(null, '', '#/library');
+        root2.remove(); await tick();
+        eq([d.d.signal.aborted, S.etatApercus().enVol], [true, null], 'route réelle /library : la dernière vue partie abandonne le vol (le mutant « () => \'/search\' » le laisserait jusqu’à 60 s)');
+        // Le retour sur /search repaie les adresses abandonnées (le vol réservé était déjà compté : 499) — re-paiement nommé (spec § 11, revue finale).
+        history.replaceState(null, '', '#/search?mode=web&q=puttanesca');
+        const root3 = await monterSansRoute(); await tick();
+        eq([p.demandes.length, p.demandes[1]?.a.urls, etat(root3)?.textContent], [2, CINQ, 'Photos en cours de récupération…'], 'retour sur /search après l’abandon : la vue montée redemande les cinq adresses — un second appel d’aperçus (re-paiement nommé)');
+        root3.remove();
+      } finally { S.reinitialiserWeb(); history.replaceState(null, '', hashAvant || (location.pathname + location.search)); }
     });
 
     await run('écran : la ligne d’état dans ses trois formes ; un échec de l’appel ENTIER est mémorisé pour l’ISSUE, pas par adresse (D-UI-13, S-15, D-UI-14, R-UI2-6)', async () => {
@@ -483,6 +590,21 @@ export async function runApercuWebTests({ eq, ok }) {
         redessiner(root); await tick();
         eq([figures(root).length, p.demandes.length, etat(root)], [1, 1, null], 'après onerror, un redessin ne recrée pas la figure et ne redemande rien (r1 est posée : pas de ligne d’état)');
       } finally { URL.revokeObjectURL = vraiRevoke; }
+      root.remove();
+    });
+
+    await run('écran : TOUTES les figures échouent (error) → « Photos indisponibles pour cette recherche. » sans autre geste (revue finale, D-UI-13)', async () => {
+      S.reinitialiserWeb();
+      const p = pilotes();
+      const root = await monter(p);
+      await chercheEtRecoit(root, p, [0, 1].map(lien));
+      const casse = () => ({ blob: new Blob([new Uint8Array(64).fill(7)], { type: 'image/png' }), type: 'image/png' });
+      p.demandes[0].rendre({ etat: 'recus', apercus: new Map([[U(0), casse()], [U(1), casse()]]) }); await tick();
+      eq(S.etatApercus().enVol, null, 'la réception est faite (plus de vol) avant d’attendre les error');
+      await attendre(() => figures(root).length === 0 && etat(root)?.textContent === 'Photos indisponibles pour cette recherche.', 'les deux figures retirées et « Photos indisponibles… » posée, sans redessin provoqué par le test');
+      eq([etat(root).textContent, S.etatApercus(), p.demandes.length, cartes(root).length], ['Photos indisponibles pour cette recherche.', { hrefs: [U(0), U(1)], blobs: 0, enVol: null }, 1, 2],
+        'toutes les images refusées par le navigateur : la dernière error redessine une fois → « Photos indisponibles pour cette recherche. » ; les deux entrées sont des refus ; rien n’est redemandé ; les cartes restent');
+      root.remove();
     });
 
     await run('écran : URL révoquées et Blob gardés au changement de route ; révocation au redessin (S-6, D-T9)', async () => {
@@ -511,7 +633,7 @@ export async function runApercuWebTests({ eq, ok }) {
         root.remove();
         const root2 = await monter(p); // une nouvelle instance de la route : la mémoire porte le « trouvé », les Blob sont là
         const neuves = srcs(root2);
-        eq([p.demandes.length, figures(root2).length, neuves.every((u) => u.startsWith('blob:') && !apres.includes(u)), etat(root2)], [1, 2, true, null], 'nouvelle instance : deux figures recréées depuis les Blob (URL neuves), ZÉRO appel d’aperçus, pas de ligne d’état');
+        eq([p.demandes.length, S.etatApercus().enVol, figures(root2).length, neuves.every((u) => u.startsWith('blob:') && !apres.includes(u)), etat(root2)], [1, null, 2, true, null], 'nouvelle instance : deux figures recréées depuis les Blob (URL neuves), ZÉRO appel d’aperçus (aucun vol posé au module, lu sans attente), pas de ligne d’état');
         root2.remove();
       } finally { URL.revokeObjectURL = vraiRevoke; }
     });
@@ -532,9 +654,9 @@ export async function runApercuWebTests({ eq, ok }) {
       await chercheEtRecoit(root, p, [0, 1].map(lien));
       root.remove(); await tick(); // dernière vue déconnectée : le vol est abandonné, les adresses restent absentes
       const root2 = await S.renderSearch({}, { mode: 'web', q: 'puttanesca' }, ctxDe(), { chercher: p.chercher, apercus: p.apercus, navigate: () => {}, remplacerAdresse: () => {} }); // PAS montée
-      eq([p.demandes.length, cartes(root2).length, etat(root2)], [1, 2, null], 'vue déconnectée : le « trouvé » est rendu (deux cartes) mais aucun aperçu n’est demandé, aucune ligne d’état');
+      eq([p.demandes.length, S.etatApercus().enVol, cartes(root2).length, etat(root2)], [1, null, 2, null], 'vue déconnectée : le « trouvé » est rendu (deux cartes) mais aucun aperçu n’est demandé (aucun vol posé au module : le vol se pose sans attente, la fonction factice n’est appelée qu’après), aucune ligne d’état');
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); // des microtâches, pas un tour de boucle : app.js monte la vue dans la microtâche qui suit son rendu (ronde 1 : borne de fuite ci-dessous)
-      eq(p.demandes.length, 1, 'vue déconnectée : quelques microtâches plus tard, toujours aucune demande (rien ne part avant le montage)');
+      eq([p.demandes.length, S.etatApercus().enVol], [1, null], 'vue déconnectée : quelques microtâches plus tard, toujours aucune demande ni aucun vol (rien ne part avant le montage)');
       scene.append(root2); await tick();
       const dVol = p.demandes[1];
       eq([p.demandes.length, dVol?.a.urls, etat(root2)?.textContent, cartes(root2).length], [2, [U(0), U(1)], 'Photos en cours de récupération…', 2], 'R-UI2-7 : le MONTAGE de la vue demande les adresses absentes (une demande, après le montage), et la ligne « en cours » paraît');
@@ -596,6 +718,14 @@ export async function runApercuWebTests({ eq, ok }) {
       d.rendre(recus([U(0), U(3), U(4)], [U(0), U(3), U(4)])); await tick();
       eq([figures(root).length, etat(root), S.etatApercus()], [3, null, { hrefs: [U(0), U(3), U(4)], blobs: 3, enVol: null }], 'les trois figures posées, aucune ligne d’état ; la Map ne porte que les adresses demandées');
       root.remove();
+      // Revue finale (P3) : un « trouvé » SANS aucune adresse demandable (http: et identifiants seulement) → 0 demande et AUCUNE ligne d'état (« rien tant
+      // que rien n'a été demandé », D-UI-13 lu par le code) ; le comportement inverse (« indisponibles ») serait une décision du chef, ce test la dirait.
+      S.reinitialiserWeb();
+      const p2 = pilotes();
+      const rootH = await monter(p2);
+      await chercheEtRecoit(rootH, p2, [{ ...lien(0), href: 'http://r0.test/recette' }, { ...lien(1), href: 'https://u:motdepasse@r1.test/recette' }]);
+      eq([cartes(rootH).length, p2.demandes.length, S.etatApercus().enVol, etat(rootH)], [2, 0, null, null], 'trouvé sans adresse https demandable : deux cartes, aucune demande, aucune ligne d’état');
+      rootH.remove();
     });
 
     await run('écran : texte de garde « 2 appels » et dictionnaire (§ 5, I-UI-1)', async () => {

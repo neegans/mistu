@@ -3,7 +3,8 @@
 // direct vers un site (I-UI-2 : l'adresse IP de l'appareil ne part jamais chez lui). La réponse est une DONNÉE HOSTILE : chaque champ lu par
 // Object.hasOwn, UNE entrée par adresse DEMANDÉE (une adresse absente de la réponse vaut `illisible` : rien n'est redemandé en boucle ; une adresse
 // non demandée est ignorée), le type dans la liste des couvertures, la taille bornée AVANT tout décodage, le base64 relu à la longueur exacte
-// (base64.js), puis LE mur de F sans ré-encodage (preparerPhotoDistante, reencoder: false). Décodage adresse par adresse : un binaire à la fois
+// (base64.js), puis LE mur de F sans ré-encodage (preparerPhotoDistante, reencoder: false : en-tête, puis structure — une image animée ou tronquée
+// est refusée sans décodage, revue finale). Décodage adresse par adresse : un binaire à la fois
 // (S-12). Aucune fonction ne lève ; le jeton n'entre dans aucun objet rendu.
 import { appelerAssistant, echecDomaine } from './passerelle.js';
 import { lireOctetsBase64 } from './base64.js';

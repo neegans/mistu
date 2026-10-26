@@ -98,7 +98,9 @@ export async function preparerPhotoLocale(blob) {
 // strict qu'une photo locale : type annoncé de la liste des couvertures (jamais HEIC), en-tête LU et du MÊME type que l'annonce, petit côté ≥ 200 px
 // (une icône, un logo carré ou un pixel de suivi n'illustre pas un plat), ≤ 16 Mpx, ≤ 5 Mio ; puis le même ré-encodage JPEG 1 200 px. N'écrit rien.
 // Lot UI-2 (spec expérience carnet § 6, H-7, I-UI-2) : `reencoder: false` rend le Blob CONTRÔLÉ tel quel, sans reduireImage — un aperçu de résultat web
-// n'est pas ré-encodé (cinq décodages canvas par recherche évités) ; les murs sont les mêmes, l'en-tête lu AVANT tout décodage reste le seul juge.
+// n'est pas ré-encodé (cinq décodages canvas par recherche évités). Les murs de l'en-tête sont les mêmes ; mais le ré-encodage tranchait aussi ce que
+// l'en-tête ne dit pas (il aplatissait une image ANIMÉE en JPEG fixe, il refusait un fichier TRONQUÉ) : sans lui, `structureRefusee` le tranche, sans
+// décodage (revue finale du lot UI-2 ; spec § 11 et § 12).
 export const COTE_MIN_DISTANT = 200;
 export async function preparerPhotoDistante(blob, { coteMin = COTE_MIN_DISTANT, reencoder = true } = {}) {
   if (!(blob instanceof Blob)) throw new ErreurImage('indecodable');
@@ -108,7 +110,33 @@ export async function preparerPhotoDistante(blob, { coteMin = COTE_MIN_DISTANT, 
   if (!dims || dims.type !== blob.type) throw new ErreurImage('indecodable');
   if (Math.min(dims.largeur, dims.hauteur) < coteMin) throw new ErreurImage('trop_petite');
   if (dims.largeur * dims.hauteur > LIMITES_COUVERTURE.pixels) throw new ErreurImage('trop_grande');
-  return reencoder ? reduireImage(blob) : blob;
+  if (reencoder) return reduireImage(blob);
+  const refus = await structureRefusee(blob, dims.type);
+  if (refus) throw new ErreurImage(refus);
+  return blob;
+}
+
+// Revue finale du lot UI-2 : la structure d'une image distante NON ré-encodée, lue sans décodage (le type est déjà prouvé par l'en-tête). ANIMÉE → 'animee' :
+// PNG dont un chunk acTL précède le premier IDAT (APNG ; un acTL après lui est ignoré des navigateurs), ou dont le premier IDAT n'est pas atteint dans la
+// tranche TETE_MAX (l'animation ne se prouve pas : refus) ; WebP VP8X au drapeau d'animation (0x02). TRONQUÉE → 'tronquee' : PNG sans le chunk IEND final ;
+// JPEG sans FF D9 dans ses 16 derniers octets ; WebP dont la taille RIFF dépasse le fichier. Sinon null. Une taille de chunk hostile saute hors de la tranche.
+async function structureRefusee(blob, type) {
+  const fin = new Uint8Array(await blob.slice(Math.max(0, blob.size - 16)).arrayBuffer());
+  const b = new Uint8Array(await blob.slice(0, TETE_MAX).arrayBuffer());
+  const u32 = (o, le) => new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(o, le);
+  if (type === 'image/png') {
+    const IEND = [0, 0, 0, 0, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82];
+    if (fin.length < 12 || IEND.some((o, i) => fin[fin.length - 12 + i] !== o)) return 'tronquee';
+    for (let o = 8; o + 8 <= b.length; o += 12 + u32(o, false)) {
+      const nom = String.fromCharCode(b[o + 4], b[o + 5], b[o + 6], b[o + 7]);
+      if (nom === 'acTL') return 'animee';
+      if (nom === 'IDAT') return null;
+    }
+    return 'animee';
+  }
+  if (type === 'image/webp') return u32(4, true) + 8 > blob.size ? 'tronquee' : (String.fromCharCode(b[12], b[13], b[14], b[15]) === 'VP8X' && (b[20] & 0x02) ? 'animee' : null);
+  if (type === 'image/jpeg') { for (let i = fin.length - 2; i >= 0; i -= 1) if (fin[i] === 0xff && fin[i + 1] === 0xd9) return null; return 'tronquee'; }
+  return null;
 }
 
 // Un refus d'image, dit du côté de la personne (I-B) : chaque cause a sa phrase, et une cause inconnue ne se déguise pas en « trop lourde ». Déplacée de
