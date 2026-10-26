@@ -1335,6 +1335,10 @@ test('preuve 0007 : rollback final, une transaction, BILAN, gardes, 1.01 a six v
   assert.ok(!p.includes('@'), 'aucun arobase'); assert.doesNotMatch(p, /A_UUID|B_UUID|A_EMAIL|B_EMAIL/, 'aucun jeton a remplacer');
   assert.doesNotMatch(code, /\bemail\b/i, 'aucune adresse lue'); assert.ok(!p.includes('sk-'), 'aucune cle');
   assert.ok(code.includes('from auth.users order by created_at limit 1'), 'compte emprunte, jamais affiche');
+  // Revue finale du lot UI-2 : sans compte, les six verdicts sautes ont `ok` NUL (jamais vrai) et le BILAN compte `ok is not true` : jamais vert sans compte.
+  assert.equal(plat.split("'aucun compte : etape sautee', null)").length - 1, 6, 'les six verdicts sautes portent ok nul');
+  assert.ok(!plat.includes("'aucun compte : etape sautee', true)"), 'aucun verdict saute compte vrai');
+  assert.equal(plat.split('(select count(*) from pg_temp.preuve where ok is not true)').length - 1, 2, 'le BILAN compte ok is not true (un nul est faux)');
 });
 test('README : etape 13 (0007, preuve a 11 verdicts, 0006 historique, ordre 0007 → redeploiement → sondes apercu-web → fusion → push, la phrase du 502 sans image) entre 12 et « Où coller les sorties »', () => {
   const r = lire('supabase/README.md');
@@ -1347,7 +1351,7 @@ test('README : etape 13 (0007, preuve a 11 verdicts, 0006 historique, ordre 0007
     'un code servi avant `0007` : chaque demande d\'aperçus répond 502 `serveur` (la réservation refuse l\'outil) ; l\'app montre les résultats sans image, rien d\'autre ne change.',
     'la preuve `0006` devient historique', 'son 1.01 rougit', 'transactionnel', 'aucune fenêtre sans contrainte', 'shasum -a 256 supabase/migrations/0007_apercu_web.sql',
     'supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api', 'S-A1', 'S-A4', 'S-A5', 'S-A7', 'puttanesca', 'cinq pages hostiles', 'zéro jeton',
-    'presse-papiers', 'jamais le jeton dans une commande', 'S1-S9 du lot 4']) assert.ok(etape.includes(m), m);
+    'presse-papiers', 'jamais le jeton dans une commande', 'S1-S9 du lot 4', 'Il faut un compte dans `auth.users`', '« aucun compte : etape sautee »', '`6 faux sur 11` : ce n\'est PAS vert']) assert.ok(etape.includes(m), m);
   const i = ['migrations/0007_apercu_web.sql', 'proofs/0007_apercu_web.sql', 'supabase functions deploy assistant', 'S-A1', 'S-A5', 'fusion', '`push`'].map((m) => etape.indexOf(m));
   assert.ok(i.every((x) => x !== -1), 'gestes presents : ' + i.join(','));
   assert.deepEqual([...i].sort((a, b) => a - b), i, 'dans l ordre : ' + i.join(','));
@@ -1364,7 +1368,7 @@ test('RESULTATS-mitsu : sections « Preuve 0007_apercu_web.sql — à jouer » e
   const section = res.slice(debut);
   for (const m of ['étape 13', 'migrations/0007_apercu_web.sql', 'shasum -a 256 supabase/migrations/0007_apercu_web.sql', 'Run without RLS', '999 BILAN', '0 faux sur 11', '| ordre | etape | attendu | obtenu | ok |',
     '2.03 ter', '`apercu-web`', 'la preuve `0006` devient historique', '## Sondes `apercu-web`', 'S-A1', 'S-A2', 'S-A3', 'S-A4', 'S-A5', 'S-A6', 'S-A7', 'sans dépense', 'zéro jeton', 'puttanesca',
-    'cinq pages hostiles', 'image_trop_lourde', 'pas_de_recette', 'presse-papiers', 'jamais le jeton dans une commande', 'S1-S9']) assert.ok(section.includes(m), m);
+    'cinq pages hostiles', 'image_trop_lourde', 'pas_de_recette', 'presse-papiers', 'jamais le jeton dans une commande', 'S1-S9', 'aucune ligne « aucun compte : etape sautee »']) assert.ok(section.includes(m), m);
   assert.ok(res.endsWith('\n') && !res.endsWith('\n\n'), 'une seule fin de ligne en fin de fichier');
   assert.doesNotMatch(section, /[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}/i, 'aucune adresse');
   assert.doesNotMatch(res, /sk-(?!…)[A-Za-z0-9_-]{4,}/, 'aucune cle');
@@ -1374,10 +1378,12 @@ test('index.ts (UI-2) : apercu-web dans le flux apres image-web et avant le mode
   assert.deepEqual(ordreDuFlux(code), { presents: true, croissants: true });
   assert.equal((code.match(/redirect: 'manual'/g) || []).length, 1, 'une seule boucle (suivreRedirections)');
   assert.equal((code.match(/await fetch\(/g) || []).length, 2, 'deux appels sortants : la page ou l image dans suivreRedirections, le fournisseur dans appelerAnthropic');
-  for (const m of ["if (outil === 'apercu-web') {", 'LIMITES_APERCU.budgetMs', 'PARALLELISME_APERCU)', 'max: LIMITES_APERCU.image', 'async function apercuDe(', 'async function enParallele<T>(', 'max = LIMITES_IMAGE.octets', 'await lireCorpsBorne(rep, max)']) assert.ok(code.includes(m), m);
+  // Revue finale du lot UI-2 : les formes de code `async function enParallele<T>(`, `await lireCorpsBorne(rep, max)` et « apercuDe sans appelerAnthropic » ne sont
+  // plus épinglées par le texte (hors de la liste admise du plan) : le comportement les tient (v4 et v5 : la borne max ; v6 à v8 : le parallélisme ; v2 à v8 :
+  // aucun appel du modèle).
+  for (const m of ["if (outil === 'apercu-web') {", 'LIMITES_APERCU.budgetMs', 'PARALLELISME_APERCU)', 'max: LIMITES_APERCU.image', 'async function apercuDe(', 'max = LIMITES_IMAGE.octets']) assert.ok(code.includes(m), m);
   assert.ok(code.indexOf("if (outil === 'image-web') {") < code.indexOf("if (outil === 'apercu-web') {") && code.indexOf("if (outil === 'apercu-web') {") < code.indexOf('if (corpsModele !== null) {'), 'le bloc apercu-web entre image-web et le modele');
   assert.ok(code.indexOf('async function traiter(') < code.indexOf('async function apercuDe(') && code.indexOf('async function apercuDe(') < code.indexOf('Deno.serve('), 'apercuDe (qui porte telechargerPage, lirePageHtml et telechargerImage) est declaree apres traiter, avant Deno.serve');
-  assert.ok(!code.slice(code.indexOf('async function apercuDe(')).includes('await appelerAnthropic('), 'apercuDe n atteint jamais le modele');
   // Mutant : apercuDe (et ses marqueurs) remontee AVANT traiter → la premiere occurrence d « await telechargerPage( » precede la reservation : l ordre casse.
   const d = code.indexOf('async function apercuDe('); const f = code.indexOf('\n}\n', d) + 3;
   const decl = code.slice(d, f); const sans = code.replace(decl, '');

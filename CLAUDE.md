@@ -2864,7 +2864,8 @@ base ; tests Node : faux `Deno`, faux supabase-js, faux `fetch`, minuteries simu
   d'erreur ; table des raisons par entrée `RAISON_PAGE` / `RAISON_IMAGE` (R-UI2-2) ; journal `apercu-web` 200 (499), jetons `null`.
   `0007_apercu_web.sql` (à la main : `drop` puis `add` de `assistant_journal_outil_check` à six valeurs, une transaction ; `shasum -a 256` =
   `70168ef8…`) et sa preuve (11 verdicts : 1.01 à six valeurs, 2.032 « 2.03 ter » `apercu-web`, 3.01 les cinq anciens ; BILAN attendu `0 faux sur 11`, avec un
-  compte dans `auth.users` : sans compte, six verdicts sont sautés et comptés vrais ; `312b9d6f…`) ; README étape 13 ; RESULTATS : « Preuve `0007_apercu_web.sql` — à jouer » et « Sondes `apercu-web` — à jouer (après `0007` et le
+  compte dans `auth.users` : sans compte, six verdicts sont sautés, `ok` NUL, et comptent comme faux depuis la vague finale — le BILAN ne peut plus être vert
+  sans compte ; `f072ccce…`, était `312b9d6f…`) ; README étape 13 ; RESULTATS : « Preuve `0007_apercu_web.sql` — à jouer » et « Sondes `apercu-web` — à jouer (après `0007` et le
   redéploiement) » (S-A1 à S-A7) ; générateur « la 0008 à venir ». Tests Node : logique (OUTILS, LIMITES_APERCU, formes, validation par adresse,
   journal), index v1 à v9 plus v4 bis, v8 bis et v8 ter de la ronde (refus avant réservation, nominal, dédoublonnage, raisons par adresse, les trois
   relais de `hotesRefuses` vers l'hôte du projet, borne 1 Mio et cinq images sous 8 Mio, parallélisme 2, budget 60 s en vol et jamais commencée, 499
@@ -2908,13 +2909,12 @@ vérifiée que par les tests de texte : le collage de Neegan est la preuve). **L
 redéployée ; S-A1 à S-A7 n'ont pas été jouées — la taille réelle de la réponse (K-5), la durée totale, le compte d'`image_trop_lourde` sur
 « puttanesca » (décide si la borne passe de 1 à 2 Mio, B-M-6, R-UI2-4), la mémoire et le CPU de l'isolat au parallélisme 2 (« cinq pages hostiles de
 2 Mio », S-A7, qui sera consignée « non jouée » à la Clôture s'il n'existe pas d'hôte public contrôlé, R-UI2-14), le 499 d'un client parti. **Aucun aperçu réel** dans l'app (preuve
-§ 10 UI-2 : geste de Neegan après le push). **Le chemin `search.js` → `lireApercusWeb` de bout en bout** : les tests de l'écran injectent
-`deps.apercus` ; le défaut n'est exercé que par le mutant m22 de S2 (il frappe le `fetch` muré) : prouvé pièce par pièce. **La garde du vol par la
-route dans l'app réelle** : les tests injectent toujours `deps.routeCourante` (`tests/apercu-web.js`, l. 61, 372, 377 et 577) ; son défaut
-`currentPath` et l'ordre d'`app.js` (le hash change avant `replace(main, « Chargement… »)`, qui déconnecte la vue) ne sont lus que dans le source :
-les mutants `routeCourante = () => '/'` (chaque reconstruction de `/search` abandonne le vol : trois appels pour « deux ») et `() => '/search'`
-(quitter `/search` n'abandonne plus le vol : jusqu'à 60 s de serveur après le départ) passent la suite (R1 et R1b, revue de la tâche 3) ; un test qui
-pilote `location.hash` par `history.replaceState` sans injecter la route les tuerait (demandé au chef d'orchestre). **Safari et l'iPhone** :
+§ 10 UI-2 : geste de Neegan après le push). **Le chemin `search.js` → `lireApercusWeb` de bout en bout** : prouvé depuis la vague finale par un
+test qui monte l'écran SANS `deps.chercher` ni `deps.apercus` (faux `fetch` global : deux POST, `recherche-web` puis `apercu-web`, deux figures ; le
+mutant « `apercus: apercusFn = null` » rougit), mais contre un faux `fetch` seulement. **La garde du vol par la route** : son défaut `currentPath` est
+éprouvé depuis la vague finale (la route pilotée par `history.replaceState`, sans `deps.routeCourante` : les mutants R1 `() => '/'` et R1b
+`() => '/search'` rougissent) ; l'ordre d'`app.js` (le hash change avant `replace(main, « Chargement… »)`, qui déconnecte la vue) reste lu dans le
+source seulement (`app.js` hors suite). **Safari et l'iPhone** :
 rien (une réponse de 7 Mio lue en texte puis décodée adresse par adresse ; cinq images décodées à leur taille pleine, jusqu'à 16 Mpx chacune :
 `decoding="async"` déplace le décodage, il ne réduit pas la mémoire de pic ; l'`OffscreenCanvas` des tests n'est pas l'appareil). Le rendu de la
 figure (4:3, pleine largeur) n'est vu par aucune preuve visuelle : seules les déclarations de la feuille sont épinglées (UI-1 habillera la carte).
@@ -2941,7 +2941,22 @@ sous charge) : un rouge se rejoue avant d'être un constat (R-B-15, R-UI2-10).
   décision du chef) : `apercuDe` dit `pas_d_image` dès que la page porte une `Recipe` lisible sans image et `jsonld.autres === 0`, alors que la garde
   « page de liste » de F compte `max(autres, Recipe − 1)` : une page de liste dont les vignettes sont des `Recipe` illisibles peut lire `pas_d_image`
   au lieu de `pas_de_recette` (remède : une ligne de `lecture-web.js`, lot F).
-- La borne de pixels d'un aperçu (`pixelsMax` sous 16 Mpx, miroir serveur) : décision ouverte (ronde 1 de S2, M-11).
+- La borne de pixels d'un aperçu (`pixelsMax` sous 16 Mpx, miroir serveur) : décision de Neegan OUVERTE (ronde 1 de S2, M-11 ; revue finale) — le
+  plafond d'1 Mio ne borne pas la mémoire décodée : un PNG uni de 4 000 × 4 000 tient en ≈ 50 Kio, cinq figures gardent ≈ 5 × 64 Mio de bitmaps tant que
+  la vue vit ; voie 1 : un `pixelsMax` propre aux aperçus (≈ 4 Mpx : une figure 4:3 pleine largeur demande ≈ 1,3 Mpx à DPR 3 sur 430 px) ; voie 2 : le
+  risque accepté, chiffre à l'appui (spec § 11).
+- Revue finale : sans ré-encodage, plus aucun décodage ne tranche avant le navigateur ; `structureRefusee` (`src/core/image.js`) refuse SANS décodage une
+  image ANIMÉE (APNG : `acTL` avant le premier `IDAT` ; WebP : VP8X au drapeau 0x02) ou TRONQUÉE (PNG sans `IEND` final, JPEG sans FF D9 dans ses 16
+  derniers octets, WebP dont la taille RIFF dépasse le fichier) → `image_refusee` ; un PNG dont le premier `IDAT` est au-delà des 256 Kio lus est refusé
+  aussi (faux refus possible : des métadonnées énormes avant l'image) ; le même refus côté serveur (`apercuDe`) n'est PAS fait : ces octets transitent
+  jusqu'au client, qui les refuse.
+- Revue finale : quitter `/search` pendant le vol d'aperçus l'abandonne (499 compté : la réservation précède les téléchargements), et le RETOUR sur
+  `/search` repaie les adresses abandonnées (un appel de plus, sans geste annoncé) ; l'abandon économise au plus 60 s de téléchargements serveur et jusqu'à
+  7 Mio de réponse sur le réseau de l'appareil. Garder le vol envoyé (l'option préférée de la revue) change S-4 (§ 4.6) : décision de spec ouverte.
+- Revue finale : aucun vol d'aperçus pendant une RECHERCHE en vol (l'ancien « trouvé » affiché en K1 après un geste de filtre va être remplacé) ; un
+  « trouvé » sans aucune adresse https demandable ne pose ni demande ni ligne d'état (« rien tant que rien n'a été demandé », épinglé ; « indisponibles »
+  serait l'autre lecture de § 4.6, à ratifier par le chef) ; quand TOUTES les figures tombent en `error`, la dernière redessine une fois et la ligne dit
+  « Photos indisponibles pour cette recherche. ».
 - Quota : 2 appels par recherche illustrée (30 par jour) ; vie privée : jusqu'à 10 téléchargements par recherche, soit au plus 40 requêtes signées
   `Mitsu/0.10 (+https://neegans.github.io/mistu/)` en comptant les redirections (3 sauts par page et par image : 4 requêtes chacune), vers des
   pages et des hôtes que la personne n'a pas choisis (§ 11, qui dit « 10 requêtes » : écart signalé au § 12 ; renversable vers une tape « Voir les
@@ -2956,7 +2971,8 @@ sous charge) : un rouge se rejoue avant d'être un constat (R-B-15, R-UI2-10).
   mur de `figureApercu`, défense en profondeur sans chemin : la Map n'est écrite que par le `.then` filtré) ; revue de la tâche 3 (copies) : N6 (la
   garde d'entrée `if (signal.aborted)` d'`apercuDe` retirée : harnais 67/67) déclaré équivalent — « jamais commencée → `delai` sans fetch » (v7 (b))
   tient par le `fetch` qui refuse un signal déjà levé (contrat du runtime, que le faux `fetch` du harnais imite), la garde est une défense en
-  profondeur ; R1 et R1b (le défaut de `deps.routeCourante` changé) survivent : voir « Ce qui n'est PAS prouvé ».
+  profondeur ; R1 et R1b (le défaut de `deps.routeCourante` changé), survivants à la revue de S3, sont tués depuis la vague finale ; vague finale : 19
+  mutants sur copies (17 navigateur, 2 Node) : 18 rouges, M2 (l'élagage de défense après l'écriture) équivalent déclaré.
 
 **Gestes, dans l'ordre (dépense dite à chaque pas).** 0) **Chef d'orchestre, d'abord** (`cloture.md` du registre) : re-revue de la ronde 1 de
 S2 (`16dd810`), revue finale de branche et ses rondes, puis `/verify` sur la tête finale (« vert conditionnel » : vert du code, rouge nommé du
@@ -2965,7 +2981,7 @@ section (à relever). 1) **Neegan, `0007` après le geste 0, AVANT le redéploie
 coller `supabase/migrations/0007_apercu_web.sql` entière (attendu `Success. No rows returned`), relever
 `shasum -a 256 supabase/migrations/0007_apercu_web.sql` (attendu `70168ef8…`), jouer `supabase/proofs/0007_apercu_web.sql` (« Run without RLS », rien à
 remplacer) : `999 BILAN` = `0 faux sur 11`, AUCUNE ligne dont l'obtenu est « aucun compte : etape sautee » (sans compte dans `auth.users`, six
-verdicts sont sautés et comptés vrais) et 2.032 qui lit `id non nul` ; tableau collé dans `RESULTATS-mitsu.md`, section « Preuve
+verdicts sont sautés, `ok` nul, et le BILAN dit `6 faux sur 11` depuis la vague finale) et 2.032 qui lit `id non nul` ; tableau collé dans `RESULTATS-mitsu.md`, section « Preuve
 `0007_apercu_web.sql` — à jouer » ; la preuve `0006` devient historique (son 1.01 rougit, voulu). Sans dépense. 2) **Chef d'orchestre, après le
 geste 1** (BILAN et 2.032 relus) : redéploiement `supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api`
 depuis le worktree, À LA TÊTE VÉRIFIÉE au geste 0 (version 5 attendue ; version et `ezbr_sha256` dans « Sondes `apercu-web` ») ; **recul** :
@@ -2975,7 +2991,7 @@ d'`image-web`, à reprouver sur la version 5, README étape 13 point 5), S-A3, S
 si un hôte public contrôlé existe ; sinon « non jouée », R-UI2-14) ; la session de Neegan par le script d'attente du presse-papiers, jamais dans une
 commande. Si S-A5 compte des `image_trop_lourde` : ronde « borne 2 Mio » (les deux constantes, le littéral `BORNE`, v5, le test du domaine) AVANT la
 fusion, puis `/verify` et redéploiement de sa tête. 3) **Neegan**, après les sondes : `! git -C ~/projects/mistu merge --ff-only apercus-web` si
-`main` est encore `05c751f` (avance rapide : suite publique `6080/6080`, épingle 6079, service worker `cuisine-os-v0.16.0-2`, ou les valeurs d'une
+`main` est encore `05c751f` (avance rapide : suite publique `6097/6097`, épingle 6096, service worker `cuisine-os-v0.16.0-3`, ou les valeurs d'une
 ronde ultérieure) ; sinon, UI-1 fusionné d'abord : un commit de fusion qui résout `sw.js` (union de `SHELL`, `VERSION` +1), `src/model/schema.js` et
 les pins, `src/i18n/en.js` (union), `styles.css` (les règles `.plat-vignette.grande` et `figure.apercu` à côté de `.plat-vignette.petite`, épingle de
 `tests/photo-plat.js` à trois sélecteurs), `tests/tests.js` (épingle remesurée) — spec § 9 — et où UI-2 est renuméroté `0.17.0` (I-UI-7 :
@@ -2993,7 +3009,7 @@ du registre dans `~/projects/mistu/.superpowers/sdd/` (serveur 8095 arrêté, wo
 UI-1).
 
 **Versions.** `APP_VERSION 0.16.0` (F : 0.15.0 ; I-UI-7 : le premier lot UI fusionné porte 0.16.0, le second 0.17.0) ; `sw.js`
-`cuisine-os-v0.16.0-1` (tâche 2), `-2` (sa ronde 1), +1 par commit qui touche `src/`, `styles.css`, `index.html` ou `sw.js` (rondes comprises, R-B-24) ; `SHELL` +
+`cuisine-os-v0.16.0-1` (tâche 2), `-2` (sa ronde 1), `-3` (vague finale), +1 par commit qui touche `src/`, `styles.css`, `index.html` ou `sw.js` (rondes comprises, R-B-24) ; `SHELL` +
 `./src/domain/apercu-web.js` ; `DB_VERSION` 4 inchangée ; la migration `0007` est côté serveur, écrite à la main (hors `NOMS` et `--check`, comme
 `0004` et `0006`) ; CSP inchangée (`img-src 'self' blob: data:` : aucune image externe chargée par le navigateur).
 
@@ -3006,7 +3022,16 @@ ronde 1 `c8b07f5` : Node 230/230 (v4 bis, v8 bis, v8 ter), 9 mutants (8 rouges, 
 trois lentilles (2 Important, 13 Minor) → ronde 1 (docs seuls : ordre des gestes, garde par la route dite non prouvée, compte d'assertions remesuré,
 N6 équivalent, une liste de décisions ; suite, Node et `--check` rejoués, inchangés). Mesure relue à la tête
 `16dd810` par la tâche 3 (26 octobre) : suite `✅ 6080/6080` (épingle `tests/tests.js:255` = 6079 ; seule erreur console le 404 de `/favicon.ico`),
-Node 230/230, `--check` 0, `tsc` 0. Revue finale de branche, vague et `/verify` : à la clôture du chef d'orchestre (`cloture.md` du registre).
+Node 230/230, `--check` 0, `tsc` 0. Revue finale de branche (4 Important, 9 Minor) → **vague finale** (26 octobre, Claude Opus 5.5, rapport
+`final-fix-report.md` ; spec § 12, VF-UI2-1 à VF-UI2-13) : garde `vol` de `demanderApercus` (aucun vol d'aperçus pendant une recherche en vol, élagage
+de défense après l'écriture), mur sans décodage des images animées ou tronquées, test du branchement par défaut (P4), test de la vraie route (R1, R1b,
+retour qui repaie), redessin quand toutes les figures tombent, assertions synchrones `enVol`, ligne d'un « trouvé » sans adresse https épinglée,
+preuve `0007` sans compte jamais verte (`ok` nul) et README / RESULTATS qui le disent, trois tests de source hors liste retirés ; refusés, dits :
+la borne de pixels (décision de Neegan), garder le vol envoyé au changement de route (décision de spec, S-4), le refus côté serveur des images animées.
+Suite `✅ 6097/6097` (épingle 6096, +17), seule erreur console le 404 de `/favicon.ico` ; Node 230/230 (sous une charge machine de 26 à 290, venue
+d'autres sessions, les bornes de temps des lots B et F — `portionsDe`, « borne temporelle (S-4) », `imageOgDe` — rougissent ; rejouées seules : vertes,
+R-B-15) ; mutants : 19 sur copies, 18 rouges, M2 équivalent ; `--check` 0 ; `sw.js cuisine-os-v0.16.0-3` ; rouge d'abord lu (`❌ 6086/6096`).
+`/verify` de clôture : au chef d'orchestre.
 
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 

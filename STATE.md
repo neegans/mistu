@@ -1,4 +1,11 @@
-# STATE.md — Cuisine OS (mistu) — état au 26 octobre 2026, 10 h 45 (chaîne A → F EN LIGNE : `main` = `05c751f`, 0.15.0, suite publique 5948/5948, migrations `0005` et `0006` collées et prouvées, fonction `assistant` version 4 ; LOT UI-2 « APERÇUS DES RÉSULTATS WEB » CONSTRUIT (tâches 1 à 3) dans le worktree `~/projects/mistu-apercus` (branche `apercus-web`, 0.16.0), clôture à faire (re-revue de la ronde 1 de S2, revue finale, `/verify`), PAS fusionné, `0007` PAS collée, fonction PAS redéployée ; lot UI-1 « Carnet » en construction sur `experience-carnet` ; reste à Neegan : `0007` et sa preuve, appareils à jour, preuves réelles sur le site public, décisions ouvertes, révocation de l'ancienne clé, « clean »)
+# STATE.md — Cuisine OS (mistu) — état au 26 octobre 2026, 12 h 45 (chaîne A → F EN LIGNE : `main` = `05c751f`, 0.15.0, suite publique 5948/5948, migrations `0005` et `0006` collées et prouvées, fonction `assistant` version 4 ; LOT UI-2 « APERÇUS DES RÉSULTATS WEB » CONSTRUIT (tâches 1 à 3) puis VAGUE FINALE de la revue de branche faite dans le worktree `~/projects/mistu-apercus` (branche `apercus-web`, 0.16.0), `/verify` de clôture à faire, PAS fusionné, `0007` PAS collée, fonction PAS redéployée ; lot UI-1 « Carnet » en construction sur `experience-carnet` ; reste à Neegan : `0007` et sa preuve, appareils à jour, preuves réelles sur le site public, décisions ouvertes, révocation de l'ancienne clé, « clean »)
+
+**26 octobre 2026, 12 h 45 — VAGUE FINALE de UI-2 faite** (revue finale de branche sur `b5a61a6` : 4 Important, 9 Minor ; rapport
+`.superpowers/sdd/2026-10-23-apercus-web/final-fix-report.md` ; spec § 12, VF-UI2-1 à VF-UI2-13) : aucun vol d'aperçus pendant une recherche en vol ;
+images animées ou tronquées refusées sans décodage ; branchement par défaut et vraie route prouvés par test ; preuve `0007` jamais verte sans compte
+(empreinte `f072ccce…`). Mesures : suite `6097/6097` (épingle 6096), Node 230/230 (bruit de temps `portionsDe` du lot B sous charge, R-B-15), `--check` 0,
+`sw.js cuisine-os-v0.16.0-3`. Restent au chef : `/verify` de clôture (« vert conditionnel »), puis la suite ci-dessous ; à Neegan, en plus : la borne de
+pixels d'un aperçu (§ 11), et la règle S-4 (garder un vol d'aperçus déjà envoyé au changement de route, ou repayer au retour).
 
 **26 octobre 2026, 10 h 45 — LOT UI-2 « APERÇUS DES RÉSULTATS WEB » : CONSTRUIT (tâches 1 à 3), clôture à faire (re-revue de la ronde 1 de S2,
 revue finale de branche, `/verify`) ; dans le worktree `~/projects/mistu-apercus` (branche `apercus-web`, base

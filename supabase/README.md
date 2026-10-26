@@ -400,7 +400,9 @@ fonction, ni privilège ; le `drop` et l'`add` tiennent dans une transaction (DD
 2. Facultatif : `notify pgrst, 'reload schema';` collée seule — aucune table ni fonction neuve, le cache de PostgREST n'a rien à apprendre.
 3. **Jouer `proofs/0007_apercu_web.sql`** (rien à remplacer, aucune adresse à ajouter ; « Run without RLS »). Lire la ligne `999 BILAN` : `0 faux sur 11`,
    c'est vert — dont 1.01 (les six outils, dans l'ordre d'`OUTILS_0007`) et 2.03 ter (`apercu-web` accepté par `assistant_reserver` ; les cinq anciens
-   passent encore, 3.01).
+   passent encore, 3.01). **Il faut un compte dans `auth.users`** : sans lui, six verdicts (2.01 à 2.032 et 3.01) sont sautés, leur obtenu dit
+   « aucun compte : etape sautee » et leur `ok` est nul — ils comptent comme faux, le BILAN dit `6 faux sur 11` : ce n'est PAS vert. Vert = aucune ligne
+   « aucun compte : etape sautee » et 2.032 qui lit `id non nul`.
 4. **Consigner** la sortie dans `proofs/RESULTATS-mitsu.md`, section « Preuve `0007_apercu_web.sql` — à jouer » déjà préparée (tableau tel quel, empreinte).
 5. **Ordre, sans exception** : `0007` → redéploiement de la fonction (geste du chef d'orchestre, la commande du point 2 de l'étape 10 :
    `supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api`) → les sondes sans dépense : S-A1 (forme refusée,

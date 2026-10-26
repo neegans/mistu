@@ -513,6 +513,17 @@ Ajouter ; l'onglet « Bibliothèque » lisible sur l'iPhone, « Agrandir l'affic
 - UI-2, écran : les figures arrivent 20 à 90 s après les résultats, en une fois ; la ligne d'état prévient ; une personne qui tape pendant
   l'insertion voit la liste descendre d'un coup (mesuré dans la preuve visuelle, assumé).
 - UI-2 : une page sans `Recipe` ni `og:image` n'a pas d'aperçu ; un 403 anti-hotlink rend `inaccessible` (D-F3 : rien n'est contourné).
+- UI-2, mur sans ré-encodage (revue finale) : sans `reduireImage`, rien ne décode l'image avant le navigateur ; une image ANIMÉE (APNG : `acTL` avant le
+  premier `IDAT` ; WebP : VP8X au drapeau d'animation) ou TRONQUÉE (PNG sans `IEND` final, JPEG sans FF D9 dans ses 16 derniers octets, WebP dont la
+  taille RIFF dépasse le fichier) est refusée sans décodage (`image_refusee`) ; un PNG dont le premier `IDAT` est au-delà des 256 Kio lus est refusé aussi
+  (faux refus possible : métadonnées énormes avant l'image) ; le serveur relaie ces octets (le refus n'est fait que côté client).
+- UI-2, mémoire décodée (revue finale ; décision de Neegan OUVERTE) : la borne de pixels d'un aperçu reste celle de F (16 Mpx) ; le plafond d'1 Mio ne la
+  remplace pas — un PNG uni de 4 000 × 4 000 tient en ≈ 50 Kio — : cinq figures gardent jusqu'à ≈ 5 × 64 Mio de bitmaps tant que la vue vit ; voie 1 :
+  un `pixelsMax` propre aux aperçus (≈ 4 Mpx ; une figure 4:3 pleine largeur demande ≈ 1,3 Mpx à DPR 3 sur 430 px) ; voie 2 : ce risque accepté.
+- UI-2, quota (revue finale) : quitter `/search` pendant le vol d'aperçus l'abandonne (499 côté serveur, appel compté : la réservation précède les
+  téléchargements) et le retour sur `/search` repaie les adresses abandonnées (un appel de plus, sans geste annoncé) ; l'abandon n'économise que les
+  téléchargements du serveur (60 s au plus) et la réponse sur le réseau de l'appareil (jusqu'à 7 Mio) ; garder un vol déjà envoyé changerait S-4
+  (§ 4.6 : « quand plus aucune vue n'est connectée ») : décision de spec ouverte.
 - La preuve visuelle vit hors git (registre) : la recomposition des fiches n'est mesurée aux quatre largeurs que là.
 
 ## 12. Amendements
@@ -629,7 +640,7 @@ Lecture à froid (H) :
 - Recette web (`2026-10-19-recette-web-design.md`) : I-B5 tenu (« Voir la page d'origine » sur toute adresse lisible) ; `telechargerImage`
   gagne un paramètre `max` ; `0007` prend le nom que le générateur réservait (la prochaine migration générée sera `0008`).
 
-### Construction de UI-2 « Aperçus » (23-26 octobre 2026 ; plan `docs/superpowers/plans/2026-10-23-apercus-web.md`, rév. 2 ; rulings de plan P-UI2-1 à P-UI2-23 ; rulings du chef R-UI2-1 à R-UI2-17 ; écarts de construction E-UI2-1 à E-UI2-22)
+### Construction de UI-2 « Aperçus » (23-26 octobre 2026 ; plan `docs/superpowers/plans/2026-10-23-apercus-web.md`, rév. 2 ; rulings de plan P-UI2-1 à P-UI2-23 ; rulings du chef R-UI2-1 à R-UI2-17 ; écarts de construction E-UI2-1 à E-UI2-22 ; vague finale VF-UI2-1 à VF-UI2-13)
 
 Branche `apercus-web` sur `f3672be` (worktree `~/projects/mistu-apercus`, serveur 8095 ; plan commis `daca8b3`, la base des tâches) ; trois tâches (S1
 serveur `654e63d` + sa ronde `c8b07f5`, S2 client `a1720bc` + sa ronde `16dd810`, S3 docs `99855cd` + sa ronde 1 : les commits qui posent ce sous-titre) ; mesures à la tête de
@@ -765,6 +776,37 @@ et sondes S-A1 à S-A7 (chef) ; preuve § 10 UI-2 sur le site public. Décisions
 `PARALLELISME_APERCU` (S-2), le mode automatique ou la tape « Voir les photos (1 appel) » (§ 13 point 2), la borne de pixels d'un aperçu, R-UI2-8. Écart de § 11 (à corriger par UI-1 ou à la
 Clôture) : « jusqu'à 10 requêtes signées » compte les téléchargements ; avec les redirections (3 sauts par page et par image : 4 requêtes chacune), une
 recherche fait partir au plus 40 requêtes signées.
+
+Vague finale (26 octobre 2026 ; revue finale de branche sur `b5a61a6` : 0 Critical, 4 Important, 9 Minor ; implémenteur Claude Opus 5.5 ; rapport
+`final-fix-report.md` du registre ; une ligne par constat, dans l'ordre de la revue ; à ratifier par le chef d'orchestre) :
+- **VF-UI2-1** (Important, correctness) `demanderApercus` ne pose aucun vol d'aperçus pendant une RECHERCHE en vol (`vol` non nul) : après un geste de
+  filtre, l'écran rend l'ancien « trouvé » (K1), qui va être remplacé ; « Annuler » et la réception remettent `vol` à null avant de redessiner (R-UI2-8
+  inchangé) ; défense en profondeur : après l'écriture d'une réponse, `elaguerApercus(memoire.issue)` quand l'issue courante est un « trouvé » (sans chemin
+  atteignable : mutant M2 équivalent) ; test de la séquence à une vue ; le test « deux vues » amendé (plus de vol pendant la recherche).
+- **VF-UI2-2** (Important, sécurité) `preparerPhotoDistante(…, { reencoder: false })` refuse sans décodage une image animée ou tronquée (`structureRefusee` :
+  'animee', 'tronquee' → `image_refusee`) ; le commentaire « les murs sont les mêmes » corrigé ; § 11 le nomme ; le même refus côté serveur (`apercuDe`,
+  facultatif dans la revue) n'est PAS fait (un `index.ts` changé = `tsc`, harnais et version 5 à reprouver ; le client tient le mur).
+- **VF-UI2-3** (Important, faux-vert) test du branchement par défaut : l'écran monté sans `deps.chercher` ni `deps.apercus`, un faux `fetch` global →
+  deux POST (`recherche-web`, `apercu-web`), deux figures ; le mutant P4 rougit.
+- **VF-UI2-4** (Important, faux-vert) test de la garde par la VRAIE route (`history.replaceState`, sans `deps.routeCourante`) : `/search` garde le vol, la
+  nouvelle instance l'adopte, `/library` l'abandonne, le retour repaie ; R1 et R1b rougissent (E-UI2-13 : le défaut est prouvé ; l'ordre d'`app.js` reste
+  lu au source).
+- **VF-UI2-5** (Minor) la dernière figure tombée en `error` (URL encore vivante) redessine une fois : « Photos indisponibles pour cette recherche. » sans geste.
+- **VF-UI2-6** (Minor) un fichier tronqué est refusé par le contrôle de structure de VF-UI2-2 (plus de cadre 4:3 vide d'un PNG coupé) ; résidu nommé :
+  ce n'est pas un décodage — un PNG corrompu AU MILIEU qui garde son `IEND` peut encore s'afficher en partie.
+- **VF-UI2-7** (Minor) la borne de pixels d'un aperçu : NON tranchée (décision de Neegan), chiffrée au § 11 (voie 1 ou voie 2).
+- **VF-UI2-8** (Minor) l'abandon au changement de route repaie au retour : comportement GARDÉ (S-4 inchangé, décision de spec ouverte), nommé au § 11 et
+  épinglé par le test de VF-UI2-4 (deux appels au total : le re-paiement est mesuré, pas caché).
+- **VF-UI2-9** (Minor) le doublon de VF-UI2-4 (même défaut `routeCourante`), fermé par le même test.
+- **VF-UI2-10** (Minor) preuve `0007` : les six verdicts sautés sans compte ont `ok` NUL (le BILAN, qui compte `ok is not true`, dit `6 faux sur 11` : jamais
+  vert sans compte) ; README étape 13 point 3 et RESULTATS le disent ; empreinte de la preuve `f072ccce…` (était `312b9d6f…`) ; `0007` elle-même inchangée
+  (`70168ef8…`) ; pglast toujours absent (R-UI2-11) : syntaxe vérifiée par les tests de texte, et le changement n'est qu'un littéral `null` dans un
+  `insert … values` vers une colonne `boolean` nullable.
+- **VF-UI2-11** (Minor) assertions synchrones `S.etatApercus().enVol === null` aux trois comptes lus avant l'appel factice (le mutant B4 rougit).
+- **VF-UI2-12** (Minor) un « trouvé » sans adresse https demandable : 0 demande, AUCUNE ligne d'état (le code d'avant, épinglé ; P3 rougit) — l'autre lecture
+  de § 4.6 (« indisponibles ») reste au chef.
+- **VF-UI2-13** (Minor) trois tests de source hors de la liste admise du plan retirés (`async function enParallele<T>(`, `await lireCorpsBorne(rep, max)`,
+  « `apercuDe` sans `appelerAnthropic` ») : v4, v5 (borne), v6 à v8 (parallélisme) et v2 à v8 (`appelsModele()` vide) tiennent le comportement.
 
 ## 13. À trancher par Neegan (sans urgence ; chaque point a son défaut, construit tel quel)
 

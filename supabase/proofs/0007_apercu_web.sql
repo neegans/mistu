@@ -2,8 +2,9 @@
 -- `migrations/0007_apercu_web.sql` (étape 13 de `supabase/README.md`).
 --
 -- AUCUN jeton à remplacer et AUCUNE adresse à ajouter. Pour les verdicts 2.01 à 2.032 et 3.01, elle EMPRUNTE le compte le plus ancien de
--- `auth.users` — sans jamais le nommer ni l'afficher ; si `auth.users` est vide, ces verdicts sont sautés (« aucun compte : etape sautee »,
--- vert). Tout est annulé à la dernière instruction : rejouable telle quelle. La preuve 0006 est historique : son 1.01 (cinq valeurs) rougit après 0007.
+-- `auth.users` — sans jamais le nommer ni l'afficher ; si `auth.users` est vide, ces verdicts sont sautés (« aucun compte : etape sautee », `ok`
+-- NUL : ils comptent comme faux au BILAN, qui ne peut donc pas être vert sans compte — revue finale du lot UI-2). Tout est annulé à la dernière
+-- instruction : rejouable telle quelle. La preuve 0006 est historique : son 1.01 (cinq valeurs) rougit après 0007.
 --
 -- Lis d'abord la ligne 999 « BILAN » (`ok = true` = aucun verdict faux). Au dialogue « Potential issue detected », choisis « Run without
 -- RLS » (README, étape 5). Si une instruction échoue, l'éditeur annule tout et le message d'erreur est la seule sortie.
@@ -59,12 +60,12 @@ begin
   select id into uid from auth.users order by created_at limit 1;
   if uid is null then
     insert into pg_temp.preuve values
-      (2.01, 'sous postgres : une ligne de journal outil apercu-web est acceptee', 'acceptee', 'aucun compte : etape sautee', true),
-      (2.02, 'un outil hors liste est toujours refuse par le check', '23514', 'aucun compte : etape sautee', true),
-      (2.03, 'assistant_reserver accepte lecture-web : un id non nul', 'id non nul', 'aucun compte : etape sautee', true),
-      (2.031, '2.03 bis : assistant_reserver(uid, ''image-web'', 1, c + 1) -> id non nul (la valeur du lot F)', 'id non nul', 'aucun compte : etape sautee', true),
-      (2.032, '2.03 ter : assistant_reserver(uid, ''apercu-web'', 1, c + 1) -> id non nul (la valeur du lot UI-2)', 'id non nul', 'aucun compte : etape sautee', true),
-      (3.01, 'les cinq anciens outils passent encore', 'acceptes', 'aucun compte : etape sautee', true);
+      (2.01, 'sous postgres : une ligne de journal outil apercu-web est acceptee', 'acceptee', 'aucun compte : etape sautee', null),
+      (2.02, 'un outil hors liste est toujours refuse par le check', '23514', 'aucun compte : etape sautee', null),
+      (2.03, 'assistant_reserver accepte lecture-web : un id non nul', 'id non nul', 'aucun compte : etape sautee', null),
+      (2.031, '2.03 bis : assistant_reserver(uid, ''image-web'', 1, c + 1) -> id non nul (la valeur du lot F)', 'id non nul', 'aucun compte : etape sautee', null),
+      (2.032, '2.03 ter : assistant_reserver(uid, ''apercu-web'', 1, c + 1) -> id non nul (la valeur du lot UI-2)', 'id non nul', 'aucun compte : etape sautee', null),
+      (3.01, 'les cinq anciens outils passent encore', 'acceptes', 'aucun compte : etape sautee', null);
     return;
   end if;
   begin

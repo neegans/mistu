@@ -1454,19 +1454,23 @@ doit être redéployée. Rien n'est écrit dans `files` ni dans aucun magasin ; 
 ```text
 src/ui/search.js  (onglet Web, issue « trouvé ») ──► deps.apercus = lireApercusWeb({ urls: hrefs ABSENTS de la Map, session }, { signal })
    │   Map(href → { blob, type } | { raison }) au niveau du module, à côté de `memoire` ; UN vol d'aperçus (volApercus : controller, promesse, hrefs, garde)
-   │   demandé par une vue CONNECTÉE qui rend un « trouvé », pour les adresses https sans identifiants (adresseApercu ; la clé reste lien.href) ; abandonné
+   │   demandé par une vue CONNECTÉE qui rend un « trouvé », jamais pendant une recherche en vol (revue finale), pour les adresses https sans identifiants
+   │   (adresseApercu ; la clé reste lien.href) ; abandonné
    │   par lancer(), annuler(), reinitialiserWeb(), et quand la dernière vue se déconnecte ALORS QUE la route a quitté /search (MutationObserver du document,
-   │   le temps du vol ; deps.routeCourante, défaut currentPath (non éprouvé : les tests injectent la route) : une reconstruction de /search laisse le vol, la nouvelle instance l'adopte) ; un résultat
+   │   le temps du vol ; deps.routeCourante, défaut currentPath (éprouvé par history.replaceState depuis la vague finale) : une reconstruction de /search
+   │   laisse le vol, la nouvelle instance l'adopte ; le retour sur /search après un abandon repaie) ; un résultat
    │   d'un vol abandonné est MUET ; à la réception : une entrée par adresse demandée, puis UN notifier() (les figures de toute la liste en un seul redessin) ;
    │   un échec de l'appel entier n'entre pas dans la Map : echecApercus = { issue, raison } (l'identité de l'issue affichée), un redessin de la même issue
    │   ne redemande rien, une nouvelle issue redemande ; elaguerApercus(issue) à chaque « trouvé » reçu lâche les href sortis des liens, Blob compris ;
-   │   au montage d'une vue rendue détachée (MutationObserver de montage, microtâche ; morte au tour de boucle suivant) : demande des adresses absentes.
+   │   au montage d'une vue rendue détachée (MutationObserver de montage, microtâche ; morte au tour de boucle suivant) : demande des adresses absentes ;
+   │   img error (URL vivante) → entrée image_refusee, et un redessin quand plus aucune figure ne reste (« Photos indisponibles… »).
    ▼
 src/domain/apercu-web.js  lireApercusWeb → appelerAssistant('apercu-web', { urls }, { fetch, session, config, signal, tentativeMs 135 000, corpsMax 8 Mio })
    │   une adresse de plus de 2 048 unités n'est jamais envoyée (interdit, posé ici ; rien d'admis → adresse, zéro fetch) ;
    │   le 200 est une donnée hostile : Object.hasOwn, UNE clé par adresse DEMANDÉE (absente → illisible ; non demandée ignorée ; la première entrée gagne),
    │   type ∈ COVER_INPUT_MIME, taille ≤ 1 Mio AVANT atob, lireOctetsBase64 à la longueur exacte, preparerPhotoDistante(blob, { coteMin, reencoder: false })
-   │   (le mur de F : en-tête lu = type annoncé, ≤ 16 Mpx, petit côté ≥ 200 px ; sans reduireImage) sinon image_refusee ; décodage adresse par adresse.
+   │   (le mur de F : en-tête lu = type annoncé, ≤ 16 Mpx, petit côté ≥ 200 px ; sans reduireImage, puis structureRefusee, sans décodage : une image
+   │   animée — APNG, WebP animé — ou tronquée est refusée, revue finale) sinon image_refusee ; décodage adresse par adresse.
    ▼
 supabase/functions/assistant  POST { outil: 'apercu-web', corps: { urls: [1..5] } }
    lireDemande → lireDemandeUrls : liste blanche { urls } (1 à 5 chaînes ≤ 2 048, sinon 400 forme) ; valideAdresse(url, { hotesRefuses }) sur CHACUNE,

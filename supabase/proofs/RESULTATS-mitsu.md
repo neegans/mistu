@@ -451,7 +451,8 @@ Section préparée le 25 octobre 2026 (lot UI-2 « Aperçus des résultats web �
 fonction et AVANT que le code du lot UI-2 n'arrive sur le site public** : coller `migrations/0007_apercu_web.sql` en entier (attendu `Success. No rows
 returned`), relever `shasum -a 256 supabase/migrations/0007_apercu_web.sql`, puis la preuve (« Run without RLS ») : lire `999 BILAN`, attendu
 `0 faux sur 11` — dont 1.01 (les six outils, dans l'ordre d'`OUTILS_0007`) et 2.03 ter (`apercu-web` accepté par `assistant_reserver` ; les cinq anciens
-passent encore, 3.01). Rien à remplacer, aucune adresse ; la preuve n'affiche aucun identifiant (compte emprunté jamais nommé) ; aucune clé en jeu.
+passent encore, 3.01) — avec un compte dans `auth.users` : sans lui, six verdicts sont sautés (« aucun compte : etape sautee », `ok` nul) et comptent
+comme faux (`6 faux sur 11` : PAS vert) ; vert = aucune ligne « aucun compte : etape sautee » et 2.032 qui lit `id non nul`. Rien à remplacer, aucune adresse ; la preuve n'affiche aucun identifiant (compte emprunté jamais nommé) ; aucune clé en jeu.
 Après `0007`, la preuve `0006` devient historique : rejouée, son 1.01 rougit (voulu).
 
 | Heure | Collage | Résultat |
@@ -459,7 +460,7 @@ Après `0007`, la preuve `0006` devient historique : rejouée, son 1.01 rougit (
 | — | `migrations/0007_apercu_web.sql` | à jouer (attendu `Success. No rows returned`) |
 | — | empreinte du `0007` collé : `shasum -a 256 supabase/migrations/0007_apercu_web.sql` | à relever (fichier du dépôt à la tête de la tâche 1) |
 | — | `notify pgrst, 'reload schema';` (collée seule ; facultative selon l'étape 13) | — |
-| — | preuve `0007` (« Run without RLS ») | à jouer : attendu `999 BILAN : 0 faux sur 11`, `ok` vrai sur les 12 lignes |
+| — | preuve `0007` (« Run without RLS ») | à jouer : attendu `999 BILAN : 0 faux sur 11`, `ok` vrai sur les 12 lignes, aucune ligne « aucun compte : etape sautee » |
 
 Tableau des verdicts (ordre, etape, attendu, obtenu, ok), à coller tel que rendu par l'éditeur SQL :
 
