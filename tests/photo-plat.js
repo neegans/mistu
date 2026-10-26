@@ -1311,7 +1311,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
       } finally { globalThis.fetch = vraiFetch; scene.remove(); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
     }));
 
-    await run('styles.css : la règle .plat-vignette (D-F9 ; T-1, T-2 ; P-21)', async () => {
+    await run('styles.css : la règle .plat-vignette (D-F9 ; T-1, T-2 ; P-21 ; UI-2 : .plat-vignette.grande, R-UI2-9)', async () => {
       // Lue SANS ses commentaires : le commentaire posé juste avant la règle (Step 4) ne la masque pas. Une règle introuvable est un rouge NOMMÉ.
       const css = (await lire('../styles.css')).replace(/\/\*[\s\S]*?\*\//g, '');
       const regle = css.match(/(?:^|\})\s*\.plat-vignette\s*\{([^}]*)\}/)?.[1] ?? '';
@@ -1320,14 +1320,15 @@ export async function runPhotoPlatTests({ eq, ok }) {
       eq([decl.width, decl.height, decl['object-fit'], decl['border-radius'], decl.border, decl.flex], ['72px', '72px', 'cover', '8px', '1px solid var(--line)', '0 0 auto'], 'styles.css : .plat-vignette 72 × 72, object-fit cover, coins 8 px, bord var(--line), flex 0 0 auto (D-F9)');
       ok(regle.trim() !== '' && !/display\s*:\s*none/.test(regle) && !/#[0-9a-f]{3,8}\b/i.test(regle), 'styles.css : la règle est lue, et elle ne porte ni display:none ni couleur en dur (T-1, T-2 : tests/theme.js inchangé)');
       // Ronde 1 : la PREMIÈRE règle seule était lue — une règle plus loin (`.card .plat-vignette { width: 160px }`) la surchargeait sans rouge.
-      eq([...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) => m[1].trim()).filter((s) => /\.plat-vignette\b/.test(s)), ['.plat-vignette'], 'styles.css : un seul sélecteur nomme .plat-vignette (aucune surcharge plus loin)');
+      // UI-2 (R-UI2-9) : exactement DEUX sélecteurs — la règle 72 px, et .plat-vignette.grande (la figure 4:3 des aperçus de l'onglet Web) ; UI-1 ajoutera .petite et passera à trois.
+      eq([...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) => m[1].trim()).filter((s) => /\.plat-vignette\b/.test(s)), ['.plat-vignette', '.plat-vignette.grande'], 'styles.css : exactement deux sélecteurs nomment .plat-vignette — la règle 72 px et .plat-vignette.grande (UI-2, R-UI2-9) ; aucune autre surcharge');
     });
 
     await run('CSP et sources (I-F3, I-F8, D-F11)', async () => {
-      const [srcPP, srcK, srcMeals, srcPW, srcB64, srcRecipe, index] = await Promise.all(['../src/ui/photo-plat.js', '../src/ui/components.js', '../src/ui/meals.js', '../src/domain/photo-web.js', '../src/domain/base64.js', '../src/ui/recipe.js', '../index.html'].map(lire));
+      const [srcPP, srcK, srcMeals, srcPW, srcB64, srcRecipe, index, srcSearch, srcLib] = await Promise.all(['../src/ui/photo-plat.js', '../src/ui/components.js', '../src/ui/meals.js', '../src/domain/photo-web.js', '../src/domain/base64.js', '../src/ui/recipe.js', '../index.html', '../src/ui/search.js', '../src/ui/library.js'].map(lire));
       const csp = /Content-Security-Policy" content="([^"]+)"/.exec(index)?.[1] || '';
       eq(/img-src ([^;]+)/.exec(csp)?.[1], "'self' blob: data:", 'CSP : img-src inchangée (aucune image externe chargée par le navigateur)');
-      eq([srcPP, srcK, srcMeals].map((s) => /(?:\bsrc\s*:|\.src\s*=)\s*['"`]https?:/.test(s)), [false, false, false], 'aucun src d’image ne reçoit une adresse http(s) écrite en dur (photo-plat.js, components.js, meals.js)');
+      eq([srcPP, srcK, srcMeals, srcSearch, srcLib].map((s) => /(?:\bsrc\s*:|\.src\s*=)\s*['"`]https?:/.test(s)), [false, false, false, false, false], 'aucun src d’image ne reçoit une adresse http(s) écrite en dur (photo-plat.js, components.js, meals.js ; UI-2 : search.js, library.js, S-16)');
       eq([srcPP, srcPW, srcB64].map((s) => /Anthropic|Supabase/.test(s)), [false, false, false], 'aucun texte ne nomme le fournisseur ni la base (photo-plat.js, photo-web.js, base64.js)');
       eq([srcPP, srcRecipe].flatMap((s) => s.split('\n').filter((l) => l.includes('photo_source_url') && /textContent|\bt\(|\bel\(/.test(l))), [], 'D-F11 : photo_source_url n’entre dans aucune ligne qui porte textContent, t( ou el( (photo-plat.js, recipe.js)');
     });

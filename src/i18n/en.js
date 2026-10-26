@@ -270,7 +270,6 @@ export const EN = {
   "Proposé par Google Books": "Suggested by Google Books",
   "Adresse reçue : vérifie-la avant d’enregistrer.": "Address received: check it before saving.",
   "Chercher sur le web avec l’assistant": "Search the web with the assistant",
-  "Une recherche = un appel à l’assistant, compté dans ton quota du jour.": "One search = one call to the assistant, counted in your daily quota.",
   "Écris d’abord ce que tu cherches.": "Type what you are looking for first.",
   "L’assistant cherche sur le web…": "The assistant is searching the web…",
   "Trouvé sur le web": "Found on the web",
@@ -752,4 +751,9 @@ export const EN = {
   "La photo du plat n’a pas pu être changée. Réessaie.": "The photo of the dish could not be changed. Try again.",
   "Retirer la photo du plat": "Remove the photo of the dish",
   "Après l’enregistrement, l’app essaiera de récupérer la photo du plat de la page : un appel de plus, compté dans ton quota du jour.": "After saving, the app will try to fetch the photo of the dish from the page: one more call, counted in your daily quota.",
+  // Lot UI-2 « Aperçus des résultats web » (spec expérience carnet § 5) : le texte de garde (deux appels) et la ligne d'état des photos (search.js).
+  "Une recherche = 2 appels à l’assistant (résultats, puis photos), comptés dans ton quota du jour.": "One search = 2 assistant calls (results, then photos), counted in your daily quota.",
+  "Photos en cours de récupération…": "Fetching photos…",
+  "Photos indisponibles pour cette recherche.": "Photos unavailable for this search.",
+  "Quota du jour atteint : photos indisponibles.": "Daily quota reached: photos unavailable.",
 };

@@ -97,8 +97,10 @@ export async function preparerPhotoLocale(blob) {
 // Lot F (spec plats-en-images § 3.4, D-F12) : une image DISTANTE (l'image d'une page web, rapatriée par la fonction de l'assistant) passe un mur plus
 // strict qu'une photo locale : type annoncé de la liste des couvertures (jamais HEIC), en-tête LU et du MÊME type que l'annonce, petit côté ≥ 200 px
 // (une icône, un logo carré ou un pixel de suivi n'illustre pas un plat), ≤ 16 Mpx, ≤ 5 Mio ; puis le même ré-encodage JPEG 1 200 px. N'écrit rien.
+// Lot UI-2 (spec expérience carnet § 6, H-7, I-UI-2) : `reencoder: false` rend le Blob CONTRÔLÉ tel quel, sans reduireImage — un aperçu de résultat web
+// n'est pas ré-encodé (cinq décodages canvas par recherche évités) ; les murs sont les mêmes, l'en-tête lu AVANT tout décodage reste le seul juge.
 export const COTE_MIN_DISTANT = 200;
-export async function preparerPhotoDistante(blob, { coteMin = COTE_MIN_DISTANT } = {}) {
+export async function preparerPhotoDistante(blob, { coteMin = COTE_MIN_DISTANT, reencoder = true } = {}) {
   if (!(blob instanceof Blob)) throw new ErreurImage('indecodable');
   if (blob.size > LIMITES_COUVERTURE.octetsDistants) throw new ErreurImage('trop_lourde');
   if (!COVER_INPUT_MIME.includes(blob.type)) throw new ErreurImage('type');
@@ -106,7 +108,7 @@ export async function preparerPhotoDistante(blob, { coteMin = COTE_MIN_DISTANT }
   if (!dims || dims.type !== blob.type) throw new ErreurImage('indecodable');
   if (Math.min(dims.largeur, dims.hauteur) < coteMin) throw new ErreurImage('trop_petite');
   if (dims.largeur * dims.hauteur > LIMITES_COUVERTURE.pixels) throw new ErreurImage('trop_grande');
-  return reduireImage(blob);
+  return reencoder ? reduireImage(blob) : blob;
 }
 
 // Un refus d'image, dit du côté de la personne (I-B) : chaque cause a sa phrase, et une cause inconnue ne se déguise pas en « trop lourde ». Déplacée de

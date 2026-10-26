@@ -511,9 +511,9 @@ export async function runSyncL4Tests({ eq, ok }) {
   await run('statique tâche 1', async () => {
     const sw = await lire('../sw.js');
     ok(sw.includes("'./src/sync/fichiers.js'"), 'SHELL : ./src/sync/fichiers.js (atteignable par pull.js dès la tâche 1, F-5)');
-    ok(/VERSION = 'cuisine-os-v0\.15\.0-\d+'/.test(sw), 'sw.js : VERSION 0.15.0');
+    ok(/VERSION = 'cuisine-os-v0\.16\.0-\d+'/.test(sw), 'sw.js : VERSION 0.16.0');
     const { APP_VERSION, DB_VERSION } = await import('../src/model/schema.js');
-    eq([APP_VERSION, DB_VERSION], ['0.15.0', 4], 'T1 (lot F, plats en images) : APP_VERSION 0.15.0, DB_VERSION inchangée (D-G11 : 0.11.0 au lot G ; 0.12.0 au lot C ; 0.13.0 au lot D ; 0.14.0 au lot E)');
+    eq([APP_VERSION, DB_VERSION], ['0.16.0', 4], 'T1 (lot UI-2, aperçus des résultats web) : APP_VERSION 0.16.0, DB_VERSION inchangée (D-G11 : 0.11.0 au lot G ; 0.12.0 au lot C ; 0.13.0 au lot D ; 0.14.0 au lot E ; 0.15.0 au lot F)');
     const { MODULES_NEUFS } = await import('./ajouter.js');
     ok(MODULES_NEUFS.includes('../src/sync/fichiers.js'), 'filet i18n : MODULES_NEUFS contient src/sync/fichiers.js');
   });
@@ -3503,8 +3503,8 @@ export async function runSyncL4Tests({ eq, ok }) {
 
   await run('statique tâche 6', async () => {
     const sw = await lire('../sw.js');
-    const v = /VERSION = 'cuisine-os-v0\.15\.0-(\d+)'/.exec(sw); // ronde 1 : le libellé dit ce que le test vérifie (le -\d+ seul acceptait -1)
-    ok(!!v && Number(v[1]) >= 1, 'sw.js : VERSION 0.15.0-N avec N ≥ 1 (lot F ; le seuil N ≥ 6 de la clôture des écrans du lot G valait sous 0.11.0)');
+    const v = /VERSION = 'cuisine-os-v0\.16\.0-(\d+)'/.exec(sw); // ronde 1 : le libellé dit ce que le test vérifie (le -\d+ seul acceptait -1)
+    ok(!!v && Number(v[1]) >= 1, 'sw.js : VERSION 0.16.0-N avec N ≥ 1 (lot UI-2 ; le seuil N ≥ 6 de la clôture des écrans du lot G valait sous 0.11.0)');
     const { EN } = await import('../src/i18n/en.js');
     const neuves = ['Page', 'Télécharger', 'Télécharger les {n} pages', 'Téléchargement…', 'Le téléchargement n’a pas abouti.', 'Pas encore sur cet appareil', 'Connecte-toi pour la télécharger', 'Pas encore envoyée par l’appareil qui l’a prise', 'Pas encore reçue', 'La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.', 'La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.', 'Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages', '{n}/{m} photos de cette séance envoyées au serveur'];
     eq(neuves.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'en.js : chaque chaîne neuve des écrans a sa traduction (dont « Page », l’alt de vignettePage)');

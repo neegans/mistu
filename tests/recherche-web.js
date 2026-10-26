@@ -63,13 +63,13 @@ export async function runRechercheWebTests({ eq, ok }) {
     ok(!(await lire('../src/domain/pairing.js')).includes('notice'), 'domaine : pairing.js ne propage plus de notice');
   }
 
-  // --- § 8 : version 0.15.0 (lot F, plats en images ; 0.14.0 au lot E, 0.13.0 au lot D, 0.12.0 au lot C, 0.11.0 au lot G, 0.10.0 au lot B, 0.9.0 au lot A, 0.8.1 à la présentation du serveur), SHELL
+  // --- § 8 : version 0.16.0 (lot UI-2, aperçus des résultats web ; 0.15.0 au lot F, 0.14.0 au lot E, 0.13.0 au lot D, 0.12.0 au lot C, 0.11.0 au lot G, 0.10.0 au lot B, 0.9.0 au lot A, 0.8.1 à la présentation du serveur), SHELL
   {
     const sw = await lire('../sw.js');
-    ok(/VERSION = 'cuisine-os-v0\.15\.0-\d+'/.test(sw), 'sw.js : VERSION 0.15.0');
+    ok(/VERSION = 'cuisine-os-v0\.16\.0-\d+'/.test(sw), 'sw.js : VERSION 0.16.0');
     ok(sw.includes("'./src/core/bornes.js'"), 'SHELL : ./src/core/bornes.js');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.15.0', 'APP_VERSION 0.15.0 (lot F, plats en images)');
+    eq(APP_VERSION, '0.16.0', 'APP_VERSION 0.16.0 (lot UI-2, aperçus des résultats web)');
   }
 
   // --- § 7.1 : supportsWebSearch lu par l'écran (F6) — seule la passerelle (une SESSION) cherche sur le web
@@ -550,7 +550,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         let appels = []; const p = pilote();
         const root = await monter({}, ctxDe(SESSION_ECRAN), { chercher: async (a, d) => { appels.push({ a, d }); return p.promesse; }, navigate: () => {} });
         const b = bouton(root, 'Chercher sur le web avec l’assistant');
-        eq([b.disabled, texte(root).includes('Écris d’abord ce que tu cherches.'), texte(root).includes('Une recherche = un appel à l’assistant, compté dans ton quota du jour.'), appels.length], [true, true, true, 0], 'bouton : champ vide → éteint, deux lignes, aucun appel au rendu (I-B)');
+        eq([b.disabled, texte(root).includes('Écris d’abord ce que tu cherches.'), texte(root).includes('Une recherche = 2 appels à l’assistant (résultats, puis photos), comptés dans ton quota du jour.'), appels.length], [true, true, true, 0], 'bouton : champ vide → éteint, deux lignes (UI-2 : « 2 appels … résultats, puis photos »), aucun appel au rendu (I-B)');
         ok(!texte(root).includes('Anthropic'), 'bouton : aucun texte de l’écran ne nomme Anthropic (l’appel passe par l’assistant et son quota du jour)');
         eq(aide(root)?.hidden, false, 'aide : champ vide au montage → la ligne « Écris d’abord… » est VISIBLE (elle est toujours rendue : le texte seul ne le prouve pas)');
         taper(root, 'saumon fenouil');
@@ -1024,6 +1024,8 @@ export async function runRechercheWebTests({ eq, ok }) {
         const lienR = (champs, i = 0) => ({ href: `https://r${i}.test/r`, hote: `r${i}.test`, titre: `Plat ${i}`, date: null, ...NUL, ...champs });
         const rendre = async (liensR) => { S.reinitialiserWeb(); const r = await monter({ q: 'saumon' }, ctx, { chercher, navigate: (p) => navs.push(p) }); await tapeEtAttend(r, { ...trouve, liens: liensR }); return r; };
         const cartes = (r) => [...titres(r)].map((n) => n.parentElement);
+        // UI-2 (§ 4.6, P-UI2-23) : la figure d'aperçu (figure.apercu, en tête de carte quand l'image est là) n'existe qu'avec deps.apercus ; ces tests ne l'injectent
+        // pas → aucune figure, et `forme` reste STRICTE : une figure parasite rougirait chaque forme ci-dessous (les aperçus se testent dans tests/apercu-web.js).
         const forme = (carte) => [...carte.children].map((n) => n.tagName + (n.className ? '.' + String(n.className).split(' ').join('.') : ''));
         const reperes = (carte) => [...carte.querySelectorAll('div.muted')].slice(1).map((n) => n.textContent); // div.muted n° 1 = hôte · date
         const P = 'Estimé par l’assistant : ';
@@ -1031,6 +1033,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         const MENTION = 'L’assistant présente les plats et estime le temps d’après les pages : il ne vérifie ni le temps, ni les ingrédients, ni les restrictions. Relis la page avant de cuisiner.';
         const ANCIENNE = 'L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.';
         let r1 = await rendre([lienR({ presentation: 'Un saumon rôti, fenouil fondant.', temps_min: 15, difficulte: 'facile', ingredients: 7 })]);
+        eq(r1.querySelectorAll('figure.apercu').length, 0, 'UI-2 : sans deps.apercus, aucune figure d’aperçu dans les cartes (0 appel) — la carte garde sa forme ; les aperçus se testent dans tests/apercu-web.js');
         { const c = cartes(r1)[0];
           eq([forme(c), c.children[2].textContent, c.children[3].textContent, c.children[3].style.fontSize], [['A.btn', 'DIV.muted', 'DIV', 'DIV.muted', 'DIV.row', 'DIV.row'], 'Un saumon rôti, fenouil fondant.', 'Estimé par l’assistant : ≈ 15 min · facile · 7 ingrédients', '0.9rem'], 'présentation : la carte = titre, hôte, présentation, ligne de repères (« Estimé par l’assistant : ≈ 15 min · facile · 7 ingrédients », .9rem), rangée de boutons, puis (lot B) la rangée « Garder et lire » — dans cet ordre');
           const rangee = [...c.children[4].children];
@@ -1224,6 +1227,7 @@ export async function runRechercheWebTests({ eq, ok }) {
         const rangees = [...carteDe(root).querySelectorAll(':scope > .row')];
         eq([rangees.length, [...rangees[0].children].map((n) => [n.tagName, n.className, n.textContent]), [...rangees[1].children].map((n) => [n.tagName, n.className, n.textContent])], [2, [['A', 'btn small', 'Voir la recette'], ['BUTTON', 'btn small', 'Garder ce lien']], [['BUTTON', 'btn primary', 'Garder et lire']]], 'carte : deux rangées — « Voir la recette » · « Garder ce lien » (.btn.small), puis « Garder et lire » (.btn.primary, pas .small)');
         eq([garderEtLire(carteDe(root, 1)), !!carteDe(root, 1).querySelector('button.btn.small')], [null, true], 'carte : un résultat en http: n’offre pas « Garder et lire » (« Garder ce lien » reste)');
+        eq(carteDe(root).querySelector(':scope > figure.apercu'), null, 'UI-2 : sans deps.apercus, la carte n’a pas de figure d’aperçu (les rangées :scope > .row sont celles d’avant)');
 
         // UNE transaction (signet + import a_lancer kind web), conditionnée ; puis UN POST lecture-web avec l'adresse du signet relu ; puis la route.
         const appels = []; const mutate = db.mutate.bind(db);
@@ -1286,9 +1290,9 @@ export async function runRechercheWebTests({ eq, ok }) {
   // --- § 8 / § 9.8 dictionnaire et statiques
   {
     const { EN } = await import('../src/i18n/en.js');
-    const CLES = ['Connecte-toi pour utiliser l’assistant.', 'Se connecter', 'Ce compte n’a pas accès à l’assistant.', 'Tu as atteint la limite du jour pour l’assistant ({n} appels).', 'Tu as atteint la limite du jour pour l’assistant.', 'La demande est trop lourde.', 'Chercher sur le web avec l’assistant', 'Une recherche = un appel à l’assistant, compté dans ton quota du jour.', 'Écris d’abord ce que tu cherches.', 'L’assistant cherche sur le web…', 'Annuler', 'Trouvé sur le web', 'Demande envoyée : {q}', 'Garder ce lien', 'L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.', 'L’assistant présente les plats et estime le temps d’après les pages : il ne vérifie ni le temps, ni les ingrédients, ni les restrictions. Relis la page avant de cuisiner.', 'Estimé par l’assistant : {r}', 'Voir la recette', '≈ {n} min', '≈ {h} h', '≈ {h} h {m}', 'facile', 'moyen', 'exigeant', '1 ingrédient', '{n} ingrédients', 'Recherches faites par l’assistant : {n}', 'Liens tels que trouvés, sans tri de l’assistant.', 'Chercher à nouveau', 'Aucune page trouvée pour cette demande. Reformule ou cherche autrement.', 'Trop de demandes pour l’instant. Réessaie dans une minute.', 'L’assistant a refusé cette demande.', 'L’assistant n’a pas cherché sur le web. Réessaie.', 'L’assistant n’a pas répondu. Réessaie.', 'Adresse reçue : vérifie-la avant d’enregistrer.', 'La demande a changé depuis cette recherche.', 'Autres pages trouvées ({n})', 'Réessayer', 'Réglages', 'Tu es hors ligne.', 'Code : {c}'];
+    const CLES = ['Connecte-toi pour utiliser l’assistant.', 'Se connecter', 'Ce compte n’a pas accès à l’assistant.', 'Tu as atteint la limite du jour pour l’assistant ({n} appels).', 'Tu as atteint la limite du jour pour l’assistant.', 'La demande est trop lourde.', 'Chercher sur le web avec l’assistant', 'Une recherche = 2 appels à l’assistant (résultats, puis photos), comptés dans ton quota du jour.', 'Photos en cours de récupération…', 'Photos indisponibles pour cette recherche.', 'Quota du jour atteint : photos indisponibles.', 'Écris d’abord ce que tu cherches.', 'L’assistant cherche sur le web…', 'Annuler', 'Trouvé sur le web', 'Demande envoyée : {q}', 'Garder ce lien', 'L’assistant ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.', 'L’assistant présente les plats et estime le temps d’après les pages : il ne vérifie ni le temps, ni les ingrédients, ni les restrictions. Relis la page avant de cuisiner.', 'Estimé par l’assistant : {r}', 'Voir la recette', '≈ {n} min', '≈ {h} h', '≈ {h} h {m}', 'facile', 'moyen', 'exigeant', '1 ingrédient', '{n} ingrédients', 'Recherches faites par l’assistant : {n}', 'Liens tels que trouvés, sans tri de l’assistant.', 'Chercher à nouveau', 'Aucune page trouvée pour cette demande. Reformule ou cherche autrement.', 'Trop de demandes pour l’instant. Réessaie dans une minute.', 'L’assistant a refusé cette demande.', 'L’assistant n’a pas cherché sur le web. Réessaie.', 'L’assistant n’a pas répondu. Réessaie.', 'Adresse reçue : vérifie-la avant d’enregistrer.', 'La demande a changé depuis cette recherche.', 'Autres pages trouvées ({n})', 'Réessayer', 'Réglages', 'Tu es hors ligne.', 'Code : {c}'];
     eq(CLES.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'en.js : chaque texte du lot a sa traduction');
-    eq(['Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.', 'Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.', 'La recherche web n’est pas activée sur ton compte Anthropic.', 'Une recherche = un appel à ton compte Anthropic.', 'Une création = un appel à ton compte Anthropic.', 'L’assistant présente les plats d’après les pages et ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.'].filter((k) => k in EN), [], 'en.js : les textes de l’ancienne clé locale (configure, fournisseur, clé refusée, recherche désactivée) sont retirés avec leurs écrans (Passerelle T4), la mention intermédiaire « présente les plats d’après les pages » (remplacée avant d’être servie)');
+    eq(['Pour chercher sur le web, configure l’assistant IA : fournisseur Anthropic, modèle et clé.', 'Ce fournisseur ne cherche pas sur le web. Choisis Anthropic dans Réglages → Assistant IA.', 'Ta clé Anthropic a été refusée, ou n’a pas ce droit. Vérifie-la dans Réglages → Assistant IA.', 'La recherche web n’est pas activée sur ton compte Anthropic.', 'Une recherche = un appel à ton compte Anthropic.', 'Une création = un appel à ton compte Anthropic.', 'L’assistant présente les plats d’après les pages et ne vérifie ni les ingrédients ni les restrictions : relis la page avant de cuisiner.', 'Une recherche = un appel à l’assistant, compté dans ton quota du jour.'].filter((k) => k in EN), [], 'en.js : les textes de l’ancienne clé locale (configure, fournisseur, clé refusée, recherche désactivée) sont retirés avec leurs écrans (Passerelle T4), la mention intermédiaire « présente les plats d’après les pages » (remplacée avant d’être servie) ; UI-2 : la garde « un appel » (remplacée par « 2 appels »)');
     ok(!('Le Web n’est pas activé : aucune source externe n’est configurée. Aucune recherche extérieure n’a été faite.' in EN), 'en.js : la clé morte du mode Web est retirée');
     ok(!(await lire('../src/ui/search.js')).includes('Le Web n’est pas activé'), 'search.js : la coquille est retirée');
     ok(!/from '\.\.\/ui\//.test(await lire('../src/core/bornes.js')) && !/from '\.\.\/ui\//.test(await lire('../src/domain/recherche-web.js')), 'couches : bornes.js et recherche-web.js n’importent rien de src/ui/');
