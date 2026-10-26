@@ -1456,7 +1456,7 @@ src/ui/search.js  (onglet Web, issue « trouvé ») ──► deps.apercus = lir
    │   Map(href → { blob, type } | { raison }) au niveau du module, à côté de `memoire` ; UN vol d'aperçus (volApercus : controller, promesse, hrefs, garde)
    │   demandé par une vue CONNECTÉE qui rend un « trouvé », pour les adresses https sans identifiants (adresseApercu ; la clé reste lien.href) ; abandonné
    │   par lancer(), annuler(), reinitialiserWeb(), et quand la dernière vue se déconnecte ALORS QUE la route a quitté /search (MutationObserver du document,
-   │   le temps du vol ; deps.routeCourante, défaut currentPath : une reconstruction de /search laisse le vol, la nouvelle instance l'adopte) ; un résultat
+   │   le temps du vol ; deps.routeCourante, défaut currentPath (non éprouvé : les tests injectent la route) : une reconstruction de /search laisse le vol, la nouvelle instance l'adopte) ; un résultat
    │   d'un vol abandonné est MUET ; à la réception : une entrée par adresse demandée, puis UN notifier() (les figures de toute la liste en un seul redessin) ;
    │   un échec de l'appel entier n'entre pas dans la Map : echecApercus = { issue, raison } (l'identité de l'issue affichée), un redessin de la même issue
    │   ne redemande rien, une nouvelle issue redemande ; elaguerApercus(issue) à chaque « trouvé » reçu lâche les href sortis des liens, Blob compris ;
@@ -1496,13 +1496,16 @@ supabase/functions/assistant  POST { outil: 'apercu-web', corps: { urls: [1..5] 
   `remplacerEnRevoquant` et au changement de route ; `img.onerror` → figure retirée, URL révoquée, entrée `image_refusee` si l'URL était encore
   vivante), `ligneEtatApercus(hrefs, issue)` (`p.muted[data-role=etat-apercus]` : « Photos en cours de récupération… » | « Photos indisponibles pour
   cette recherche. » | « Quota du jour atteint : photos indisponibles. » | rien), l'observateur de montage (R-UI2-7), `deps.apercus` (défaut
-  `lireApercusWeb` ; `null` quand `deps.chercher` est injecté seul), `deps.routeCourante` (défaut `currentPath`) ; texte de garde « Une recherche = 2 appels
+  `lireApercusWeb` ; `null` quand `deps.chercher` est injecté seul), `deps.routeCourante` (défaut `currentPath`, non éprouvé : tous les tests injectent la route) ; texte de garde « Une recherche = 2 appels
   à l’assistant (résultats, puis photos), comptés dans ton quota du jour. » ; `styles.css` — `.plat-vignette.grande` (4:3, pleine largeur, rayon 12 px,
   `display: block`) et `figure.apercu` (marge basse), jetons seuls (R-UI2-9).
-- **Limites nommées** (spec § 11, § 12) : 2 appels par recherche illustrée ; jusqu'à 10 requêtes signées Mitsu par recherche vers des pages non
-  choisies (mode automatique, § 13 point 2) ; un appel du quota achète jusqu'à 10 téléchargements (15 Mio, 60 s) ; une image au-delà de 1 Mio manque en
+- **Limites nommées** (spec § 11, § 12) : 2 appels par recherche illustrée ; jusqu'à 10 téléchargements par recherche, soit au plus 40 requêtes
+  signées Mitsu en comptant les redirections (3 sauts par page et par image : 4 requêtes chacune), vers des pages et des hôtes non choisis (mode
+  automatique, § 13 point 2 ; la spec § 11 dit « 10 requêtes ») ; la mémoire des aperçus vit par document (deux onglets ou deux appareils paient
+  chacun l'appel des mêmes liens) ; un appel du quota achète jusqu'à 10 téléchargements (15 Mio, 60 s) ; une image au-delà de 1 Mio manque en
   silence ; un échec de l'appel entier est mémorisé pour l'issue affichée, dans un seul emplacement (R-UI2-6) ; le montage d'une vue détachée doit suivre
-  son rendu dans la microtâche (R-UI2-7) ; un changement de mode sur `/search` pendant un vol le laisse finir (garde par la route, ronde 1 de S2) ; une
+  son rendu dans la microtâche (R-UI2-7) ; un changement de mode sur `/search` pendant un vol le laisse finir (garde par la route, ronde 1 de S2, éprouvée avec une route injectée seulement : le défaut `currentPath` et l'ordre d'`app.js` sont lus au
+  source) ; une
   page de liste à `Recipe` illisibles peut lire `pas_d_image` (écart diagnostique de S1, décision du chef) ; aucune borne de pixels propre aux aperçus
   (16 Mpx, celle du mur de F ; `decoding="async"` seulement).
 

@@ -629,10 +629,10 @@ Lecture à froid (H) :
 - Recette web (`2026-10-19-recette-web-design.md`) : I-B5 tenu (« Voir la page d'origine » sur toute adresse lisible) ; `telechargerImage`
   gagne un paramètre `max` ; `0007` prend le nom que le générateur réservait (la prochaine migration générée sera `0008`).
 
-### Construction de UI-2 « Aperçus » (23-26 octobre 2026 ; plan `docs/superpowers/plans/2026-10-23-apercus-web.md`, rév. 2 ; rulings de plan P-UI2-1 à P-UI2-23 ; rulings du chef R-UI2-1 à R-UI2-17 ; écarts de construction E-UI2-1 à E-UI2-20)
+### Construction de UI-2 « Aperçus » (23-26 octobre 2026 ; plan `docs/superpowers/plans/2026-10-23-apercus-web.md`, rév. 2 ; rulings de plan P-UI2-1 à P-UI2-23 ; rulings du chef R-UI2-1 à R-UI2-17 ; écarts de construction E-UI2-1 à E-UI2-22)
 
 Branche `apercus-web` sur `f3672be` (worktree `~/projects/mistu-apercus`, serveur 8095 ; plan commis `daca8b3`, la base des tâches) ; trois tâches (S1
-serveur `654e63d` + sa ronde `c8b07f5`, S2 client `a1720bc` + sa ronde `16dd810`, S3 docs : le commit qui pose ce sous-titre) ; mesures à la tête de
+serveur `654e63d` + sa ronde `c8b07f5`, S2 client `a1720bc` + sa ronde `16dd810`, S3 docs `99855cd` + sa ronde 1 : les commits qui posent ce sous-titre) ; mesures à la tête de
 code `16dd810` : suite `6080/6080` (épingle 6079, `tests/tests.js:255`), Node `230/230`, `--check` 0, `tsc` 0, `APP_VERSION 0.16.0`,
 `sw.js cuisine-os-v0.16.0-2`, `DB_VERSION` 4. Les décisions du 23 octobre (§ 13) sont construites telles quelles : aperçus AUTOMATIQUES (D-UI-13).
 `0007` ÉCRITE, pas collée ; fonction `assistant` pas redéployée ; aucune sonde S-A1 à S-A7 jouée : la Clôture du plan les porte.
@@ -692,7 +692,8 @@ Rulings du chef d'orchestre (25 octobre 2026, en tête des briefs ; ils priment 
 - **R-UI2-11** (P-UI2-13) pglast absent : le contrôle de syntaxe SQL est sauté en le disant ; le chef rejoue pglast à la clôture s'il le trouve.
 - **R-UI2-12** (P-UI2-15) les 15 lignes de pins passent à 0.16.0, relevées par leur texte.
 - **R-UI2-13** (P-UI2-16, P-UI2-17) S3 coupée en tâche 3 (docs) et Clôture ; la spec n'est amendée qu'au § 12.
-- **R-UI2-14** (P-UI2-19) S-A7 consignée « non jouée » dans RESULTATS ; le budget de 60 s n'est prouvé que par v7.
+- **R-UI2-14** (P-UI2-19) S-A7 sera consignée « non jouée » dans RESULTATS, à la Clôture, s'il n'existe pas d'hôte public contrôlé ; le budget de
+  60 s n'est prouvé que par v7.
 - **R-UI2-15** (constats 5 et 8 de la rév. 2) la liste blanche des aperçus est `COVER_INPUT_MIME`, jamais `ALLOWED_MIME` ; la révocation au changement de
   route passe par `revoquerUrlDeBlob(u)` (les images sont encore attachées quand `app.js` révoque).
 - **R-UI2-16** les totaux du plan sont des attendus de copie : la valeur lue fait foi ; une ronde qui touche `src/` fait +1 (R-B-24).
@@ -729,29 +730,41 @@ clôture ; numérotés E-UI2-n parce que R-UI2-1 à R-UI2-17 désignent déjà s
 - **E-UI2-13** (ronde 1 de S2, I-2 et I-3) garde du vol par la route : `deps.routeCourante` (défaut `currentPath` du routeur) ; le vol n'est abandonné que
   si plus aucune vue n'est connectée ET que la route a quitté `/search` ; une reconstruction de `/search` (`run()`, `cuisineos:refresh`) laisse le vol au
   module et la nouvelle instance l'adopte (deux appels, jamais trois) ; un changement de MODE sur `/search` pendant un vol le laisse finir (zéro appel de
-  plus, au plus 60 s de serveur) — à ratifier.
+  plus, au plus 60 s de serveur) — à ratifier ; NON prouvé dans l'app réelle : tous les tests injectent `routeCourante`, son défaut `currentPath` et
+  l'ordre d'`app.js` ne sont lus qu'au source (mutants R1 `() => '/'` et R1b `() => '/search'` survivants, revue de S3 ; un test par `location.hash`
+  est demandé au chef).
 - **E-UI2-14** (ronde 1 de S2, M-7) borne de fuite de R-UI2-7 : une vue encore détachée au tour de boucle suivant son rendu est morte (`setTimeout(0)`),
   son observateur et son entrée de `vues` partent ; R-UI2-7 vaut donc pour un montage dans la microtâche du rendu (le seul appelant, `app.js`) — à ratifier.
 - **E-UI2-15** (ronde 1 de S2, M-10 et M-16) `adresseApercu` : seules les adresses `https` sans `username` ni `password` sont demandées (D-T7, S-9) ; la clé
   de la Map reste `lien.href` ; le filtre `lienSignet` n'est plus appelé là.
 - **E-UI2-16** (ronde 1 de S2, M-11) `decoding="async"` posé sur l'image ; `loading="lazy"` non (une URL `blob:` n'économise rien au réseau, une scène
-  `hidden` ne chargerait jamais) ; la borne de pixels propre aux aperçus (`pixelsMax` sous 16 Mpx) reste à la décision du chef.
+  `hidden` ne chargerait jamais) ; la borne de pixels propre aux aperçus (`pixelsMax` sous 16 Mpx) reste ouverte (à trancher par Neegan, voir « Ce qui reste »).
 - **E-UI2-17** (ronde 1 de S2, M-8) la borne des adresses demandées lit `LIMITES_APERCU_WEB.adresses` (plus de copie dans l'écran) ; pas de mutant
   (une égalité de constantes).
 - **E-UI2-18** (ronde 1 de S2) `X2b-figure` (le mur de `figureApercu` seul retiré) survivant, déclaré équivalent : la Map n'est écrite que par le `.then`
-  filtré ; M-6 refusé (une `WeakMap` par issue : deux issues en échec à la fois sont inatteignables, `memoire` est un emplacement unique).
-- **E-UI2-19** (ronde 1 de S2, M-15 et M-9) R-UI2-8 vaut aussi à UNE vue (« après toute tape qui interrompt un vol d'aperçus puis « Annuler », le
-  « trouvé » redessiné repose un vol ») ; le Step 12 du plan écrit le script des insécables dans un fichier (`§` levait un `SyntaxError` en entrée standard).
+  filtré (le refus de M-6, d'abord écrit ici : E-UI2-21).
+- **E-UI2-19** (ronde 1 de S2, M-15) R-UI2-8 vaut aussi à UNE vue (« après toute tape qui interrompt un vol d'aperçus puis « Annuler », le
+  « trouvé » redessiné repose un vol ») (la retouche du Step 12, d'abord écrite ici : E-UI2-22).
 - **E-UI2-20** (S3) les documents portent les mesures LUES à la tête (Node 230, suite 6080/6080, épingle 6079 à `tests/tests.js:255`, `sw.js -2`) au lieu
   des attendus du plan, décrivent P-UI2-6, P-UI2-7 et P-UI2-10 tels qu'amendés ou renversés, disent UI-1 « en construction » (`8b5c6d2`) et les dates
   réelles ; une ligne « tâche 3 : relevés » est ajoutée en fin de `progress.md` (le brief le dit « lu » mais son Step 0 y fait noter les relevés).
+- **E-UI2-21** (ronde 1 de S2, M-6) M-6 refusé : une `WeakMap` par issue pour l'échec de l'appel entier, quand deux issues en échec à la fois sont
+  inatteignables (`memoire` est un emplacement unique) ; séparé d'E-UI2-18 par la ronde 1 de S3 (une décision par entrée).
+- **E-UI2-22** (ronde 1 de S2, M-9) le Step 12 du plan écrit le script des insécables dans un fichier (`§` levait un `SyntaxError` en entrée
+  standard) ; séparé d'E-UI2-19 par la ronde 1 de S3.
 
 Mutants : S1 21 rouges sur 21 (dont les douze rejoués par l'auteur du plan, m11 sous une forme plus faible complétée par m21), sa ronde 9 mutants en 10
-passages (8 rouges, MG équivalent) ; S2 33 rouges sur 33, sa ronde 14 passages (13 rouges, `X2b-figure` équivalent) ; équivalents déclarés : MG
-(E-UI2-3) et `X2b-figure` (E-UI2-18). Revues : S1 à trois lentilles (2 Important, 13 Minor), ronde 1, re-revue PROPRE ; S2 à trois lentilles
-(5 Important, 11 Minor), ronde 1, re-revue non faite à l'écriture de ce sous-titre. Ce qui reste (§ 10, Clôture du plan) : `0007` et sa preuve
-(Neegan), redéploiement et sondes S-A1 à S-A7 (chef), preuve § 10 UI-2 sur le site public, décisions : borne 1 ou 2 Mio (B-M-6),
-`PARALLELISME_APERCU` (S-2), mode automatique ou tape (§ 13 point 2), borne de pixels d'un aperçu (E-UI2-16), E-UI2-2, E-UI2-13, E-UI2-14, R-UI2-8.
+passages (8 rouges, MG équivalent) ; S2 33 rouges sur 33, sa ronde 14 passages (13 rouges, `X2b-figure` équivalent) ; revue de S3 (copies) : N6 — la
+garde d'entrée `if (signal.aborted)` d'`apercuDe` retirée — passe le harnais (67/67), déclaré équivalent (« jamais commencée → `delai` sans fetch »,
+v7 (b), tient par le `fetch` qui refuse un signal déjà levé ; défense en profondeur), R1 et R1b (le défaut de `deps.routeCourante`) passent la suite :
+non prouvé (E-UI2-13) ; équivalents déclarés : MG (E-UI2-3), `X2b-figure` (E-UI2-18) et N6. Revues : S1 à trois lentilles (2 Important, 13 Minor),
+ronde 1, re-revue PROPRE ; S2 à trois lentilles (5 Important, 11 Minor), ronde 1, re-revue non faite à l'écriture de ce sous-titre ; S3 à trois
+lentilles (2 Important, 13 Minor), ronde 1 (docs seuls). Ce qui reste (§ 10, Clôture du plan), dans l'ordre : re-revue de la ronde 1 de S2, revue
+finale de branche et `/verify` (chef) ; `0007` et sa preuve (Neegan) ; redéploiement depuis la tête vérifiée (recul : la version 4 depuis `0c7cbbd`)
+et sondes S-A1 à S-A7 (chef) ; preuve § 10 UI-2 sur le site public. Décisions ouvertes — à ratifier par le chef d'orchestre : E-UI2-2, E-UI2-13, E-UI2-14, E-UI2-16 ; à trancher par Neegan : la borne 1 ou 2 Mio (B-M-6),
+`PARALLELISME_APERCU` (S-2), le mode automatique ou la tape « Voir les photos (1 appel) » (§ 13 point 2), la borne de pixels d'un aperçu, R-UI2-8. Écart de § 11 (à corriger par UI-1 ou à la
+Clôture) : « jusqu'à 10 requêtes signées » compte les téléchargements ; avec les redirections (3 sauts par page et par image : 4 requêtes chacune), une
+recherche fait partir au plus 40 requêtes signées.
 
 ## 13. À trancher par Neegan (sans urgence ; chaque point a son défaut, construit tel quel)
 
