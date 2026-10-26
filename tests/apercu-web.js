@@ -56,7 +56,9 @@ export async function runApercuWebTests({ eq, ok }) {
     p.chercher = pose(p.recherches); p.apercus = pose(p.demandes);
     return p;
   };
-  const monter = async (p, query = { q: 'puttanesca' }, deps = {}, ctx = ctxDe()) => { const root = await S.renderSearch({}, { mode: 'web', ...query }, ctx, { chercher: p.chercher, apercus: p.apercus, navigate: () => {}, remplacerAdresse: () => {}, ...deps }); scene.append(root); return root; };
+  // routeCourante : '/' par défaut (hors /search) — la page de tests porte le hash qu'un test précédent a laissé ; la garde S-4 lit la route au moment où la
+  // dernière vue se déconnecte (ronde 1 : elle n'abandonne plus quand la route reste /search — reconstruction par run() ou cuisineos:refresh).
+  const monter = async (p, query = { q: 'puttanesca' }, deps = {}, ctx = ctxDe()) => { const root = await S.renderSearch({}, { mode: 'web', ...query }, ctx, { chercher: p.chercher, apercus: p.apercus, navigate: () => {}, remplacerAdresse: () => {}, routeCourante: () => '/', ...deps }); scene.append(root); return root; };
   // Tape, laisse lancer() appeler chercher, résout le « trouvé », laisse notifier() redessiner (la vue CONNECTÉE pose alors le vol d'aperçus).
   const chercheEtRecoit = async (root, p, liens, nom = 'Chercher sur le web avec l’assistant') => { bouton(root, nom).click(); await tick(); p.recherches.at(-1).rendre(trouve(liens)); await tick(); };
   // La réponse d'un vol d'aperçus : une clé par adresse demandée ; `images` = les adresses qui ont l'image ; les autres portent `raison`.
@@ -101,14 +103,18 @@ export async function runApercuWebTests({ eq, ok }) {
       AbortSignal.timeout = (ms) => { delais.push(ms); return vraiTimeout.call(AbortSignal, ms); };
       const vraiBitmap = globalThis.createImageBitmap; let decodes = 0;
       globalThis.createImageBitmap = (...a) => { decodes += 1; return vraiBitmap.call(globalThis, ...a); };
-      let r;
-      try { r = await A.lireApercusWeb({ urls: CINQ, session: SESSION }, { fetch: f(200, corps200), config: SUPABASE.prod }); }
-      finally { AbortSignal.timeout = vraiTimeout; globalThis.createImageBitmap = vraiBitmap; }
+      let r; let apresPremier;
+      try {
+        r = await A.lireApercusWeb({ urls: CINQ, session: SESSION }, { fetch: f(200, corps200), config: SUPABASE.prod });
+        apresPremier = appels.length;
+        // Ronde 1 (X6) : le défaut 135 000 est AUSSI celui de la passerelle — seul un délai distinct prouve que lireApercusWeb le transmet.
+        await A.lireApercusWeb({ urls: CINQ, session: SESSION }, { fetch: f(200, corps200), config: SUPABASE.prod, tentativeMs: 4321 });
+      } finally { AbortSignal.timeout = vraiTimeout; globalThis.createImageBitmap = vraiBitmap; }
       const a = appels[0];
-      eq([appels.length, a.url, JSON.parse(a.options.body), Object.keys(a.options.headers).sort(), a.options.redirect, a.options.credentials],
+      eq([apresPremier, a.url, JSON.parse(a.options.body), Object.keys(a.options.headers).sort(), a.options.redirect, a.options.credentials],
         [1, P.urlAssistant(SUPABASE.prod), { outil: 'apercu-web', corps: { urls: CINQ } }, ['apikey', 'authorization', 'content-type'], 'error', 'omit'],
         'lireApercusWeb : UN POST { outil: apercu-web, corps: { urls } } exact vers la fonction assistant (cinq adresses, dans l’ordre), trois en-têtes, redirect error, credentials omit');
-      eq(delais.includes(135000), true, 'lireApercusWeb : tentativeMs passé à la passerelle = 135 000');
+      eq([delais.includes(135000), delais.includes(4321)], [true, true], 'lireApercusWeb : tentativeMs transmis à la passerelle — 135 000 par défaut (LIMITES_APERCU_WEB), et un délai injecté (4 321) est celui que AbortSignal.timeout reçoit');
       eq([r.etat, r.apercus instanceof Map, [...r.apercus.keys()]], ['recus', true, CINQ], 'lireApercusWeb : { etat: recus, apercus: Map } avec UNE clé par adresse demandée, dans l’ordre de la demande');
       const a0 = r.apercus.get(U(0));
       eq([a0.type, a0.blob?.type, a0.blob?.size, [...(await octetsDe(a0.blob))].every((o, i) => o === png[i]), decodes], ['image/png', 'image/png', png.length, true, 0],
@@ -250,9 +256,9 @@ export async function runApercuWebTests({ eq, ok }) {
       await tick(); await tick(); mo.disconnect();
       eq([redessins, figures(root).length], [[3], 3], 'insertion en une fois : UN seul redessin à la réception, qui porte déjà les trois figures (jamais 1 puis 2 puis 3, jamais trois redessins)');
       const c = cartes(root);
-      eq([c.map((x) => x.firstElementChild?.matches('figure.apercu') ?? false), c.slice(0, 3).map((x) => [x.firstElementChild.firstElementChild.tagName, x.firstElementChild.firstElementChild.className, x.firstElementChild.firstElementChild.getAttribute('alt')]), c[0].children[1].tagName + '.' + c[0].children[1].className],
-        [[true, true, true, false, false], [['IMG', 'plat-vignette grande', ''], ['IMG', 'plat-vignette grande', ''], ['IMG', 'plat-vignette grande', '']], 'A.btn'],
-        'figure : figure.apercu > img.plat-vignette.grande[alt=""] en TÊTE des trois cartes qui ont l’image, puis le titre ; aucune figure sur les deux autres');
+      eq([c.map((x) => x.firstElementChild?.matches('figure.apercu') ?? false), c.slice(0, 3).map((x) => [x.firstElementChild.firstElementChild.tagName, x.firstElementChild.firstElementChild.className, x.firstElementChild.firstElementChild.getAttribute('alt'), x.firstElementChild.firstElementChild.getAttribute('decoding')]), c[0].children[1].tagName + '.' + c[0].children[1].className],
+        [[true, true, true, false, false], [['IMG', 'plat-vignette grande', '', 'async'], ['IMG', 'plat-vignette grande', '', 'async'], ['IMG', 'plat-vignette grande', '', 'async']], 'A.btn'],
+        'figure : figure.apercu > img.plat-vignette.grande[alt=""][decoding=async] en TÊTE des trois cartes qui ont l’image, puis le titre ; aucune figure sur les deux autres (decoding async : ronde 1, cinq images pleines décodées hors du fil)');
       eq([srcs(root).every((s) => typeof s === 'string' && s.startsWith('blob:')), root.querySelectorAll('img').length, etat(root), S.etatApercus()], [true, 3, null, { hrefs: CINQ, blobs: 3, enVol: null }],
         'jamais de src https : les trois images viennent d’URL blob: ; la ligne d’état a disparu (une image posée) ; la Map porte 5 entrées, 3 Blob, aucun vol');
       ok([...root.querySelectorAll('img')].every((i) => c.some((x) => x.contains(i))), 'les images sont dans les cartes (aucune ailleurs)');
@@ -265,8 +271,19 @@ export async function runApercuWebTests({ eq, ok }) {
       const root = await monter(p);
       await chercheEtRecoit(root, p, [0, 1, 2, 3, 4].map(lien));
       p.demandes[0].rendre(recus(CINQ, [U(0), U(1), U(2)])); await tick();
+      // D-UI-12 (ronde 1, X1) : une issue « rien » ou « indisponible » ne lâche RIEN — seule la RÉCEPTION d'un « trouvé » élague (et reinitialiserWeb vide) ;
+      // le « trouvé » suivant aux mêmes liens ne repaie pas un appel d'aperçus.
+      bouton(root, 'Chercher à nouveau').click(); await tick();
+      p.recherches.at(-1).rendre({ etat: 'rien', raison: null, liens: [], autres: [], repli: false, recherches: 1, modele: 'm' }); await tick();
+      eq([S.etatApercus(), cartes(root).length, !!bouton(root, 'Réessayer')], [{ hrefs: CINQ, blobs: 3, enVol: null }, 0, true], 'une issue « rien » reçue garde la Map entière (5 entrées, 3 Blob) : jamais lâchées par une simple nouvelle issue (D-UI-12)');
+      bouton(root, 'Réessayer').click(); await tick();
+      p.recherches.at(-1).rendre({ etat: 'indisponible', raison: 'serveur', liens: [], autres: [], repli: false, recherches: null, modele: null }); await tick();
+      eq([S.etatApercus(), cartes(root).length], [{ hrefs: CINQ, blobs: 3, enVol: null }, 0], 'une issue « indisponible » reçue la garde aussi');
+      bouton(root, 'Réessayer').click(); await tick();
+      p.recherches.at(-1).rendre(trouve([0, 1, 2, 3, 4].map(lien))); await tick();
+      eq([p.recherches.length, p.demandes.length, figures(root).length], [4, 1, 3], 'le « trouvé » suivant aux MÊMES cinq liens ne repaie rien : ZÉRO appel d’aperçus, les trois figures reviennent de la Map');
       await chercheEtRecoit(root, p, [0, 1, 2, 3, 4].map(lien), 'Chercher à nouveau');
-      eq([p.recherches.length, p.demandes.length, figures(root).length, etat(root)], [2, 1, 3, null], 'même demande relancée avec les mêmes cinq liens : une recherche de plus, ZÉRO appel d’aperçus, les trois figures reviennent de la Map');
+      eq([p.recherches.length, p.demandes.length, figures(root).length, etat(root)], [5, 1, 3, null], 'même demande relancée avec les mêmes cinq liens : une recherche de plus, ZÉRO appel d’aperçus, les trois figures reviennent de la Map');
       await chercheEtRecoit(root, p, [0, 1, 5, 6, 7].map(lien), 'Chercher à nouveau');
       const d = p.demandes[1];
       eq([p.demandes.length, d?.a.urls, S.etatApercus(), figures(root).length, etat(root)?.textContent], [2, [U(5), U(6), U(7)], { hrefs: [U(0), U(1)], blobs: 2, enVol: [U(5), U(6), U(7)] }, 2, 'Photos en cours de récupération…'],
@@ -275,6 +292,14 @@ export async function runApercuWebTests({ eq, ok }) {
       eq([figures(root).length, S.etatApercus(), etat(root)], [3, { hrefs: [U(0), U(1), U(5), U(6), U(7)], blobs: 3, enVol: null }, null], 'réception : r5 posée (trois figures : r0, r1, r5), r6 et r7 mémorisées sans image');
       await chercheEtRecoit(root, p, [0, 1, 5, 6, 7].map(lien), 'Chercher à nouveau');
       eq([p.demandes.length, figures(root).length], [2, 3], 'les échecs PAR ENTRÉE sont mémorisés aussi : la même liste relancée ne redemande ni r6 ni r7 (0 appel)');
+      // État MIXTE (ronde 1, X25) : deux figures d'une issue antérieure gardées, et l'appel pour les deux adresses neuves échoue en `quota` → AUCUNE ligne
+      // (§ 4.6 : la ligne est retirée dès qu'une image est posée ; « Quota… » sous des photos visibles serait une contradiction) ; « Chercher à nouveau » redemande.
+      await chercheEtRecoit(root, p, [0, 1, 8, 9].map(lien), 'Chercher à nouveau');
+      eq([p.demandes.length, p.demandes[2]?.a.urls, figures(root).length, etat(root)?.textContent], [3, [U(8), U(9)], 2, 'Photos en cours de récupération…'], 'état mixte : r0 et r1 restent, les deux neuves sont demandées, « en cours » pendant le vol');
+      p.demandes[2].rendre({ etat: 'echec', raison: 'quota', extra: { quota: 60 } }); await tick();
+      eq([figures(root).length, etat(root), S.etatApercus()], [2, null, { hrefs: [U(0), U(1)], blobs: 2, enVol: null }], 'état mixte : l’échec `quota` des adresses neuves sous deux figures visibles → AUCUNE ligne d’état (une image posée gagne sur l’échec de l’issue)');
+      await chercheEtRecoit(root, p, [0, 1, 8, 9].map(lien), 'Chercher à nouveau');
+      eq([p.demandes.length, p.demandes[3]?.a.urls], [4, [U(8), U(9)]], 'état mixte : la nouvelle issue redemande les deux adresses absentes (un appel de plus par geste)');
     });
 
     await run('écran : abandon par lancer(), par « Annuler » (deux vues) et par la dernière vue déconnectée ; un résultat tardif est muet (S-4)', async () => {
@@ -292,6 +317,16 @@ export async function runApercuWebTests({ eq, ok }) {
       eq([p.demandes.length, p.demandes[1]?.a.urls, figures(root).length], [2, CINQ, 0], 'le « trouvé » suivant, rendu par la vue connectée, redemande les cinq adresses (toujours absentes)');
       p.demandes[1].rendre(recus(CINQ, [U(0)])); await tick();
       root.remove();
+      // R-UI2-8 à UNE vue (ronde 1) : « Chercher à nouveau » pendant un vol d'aperçus l'abandonne (499 côté serveur, compté), puis « Annuler » redessine le
+      // « trouvé » K1 aux adresses toujours absentes et repose un vol — un appel de plus après la tape qui a interrompu : limite nommée (§ 11), pas une fuite.
+      S.reinitialiserWeb(); p = pilotes();
+      const root1 = await monter(p);
+      await chercheEtRecoit(root1, p, [0, 1, 2, 3, 4].map(lien));
+      bouton(root1, 'Chercher à nouveau').click(); await tick();
+      eq([p.demandes[0].d.signal.aborted, p.demandes.length, !!bouton(root1, 'Annuler')], [true, 1, true], 'une vue : la tape abandonne le vol d’aperçus et montre « Annuler »');
+      bouton(root1, 'Annuler').click(); await tick();
+      eq([S.etatWeb().enCours, p.demandes.length, p.demandes[1]?.a.urls, etat(root1)?.textContent], [false, 2, CINQ, 'Photos en cours de récupération…'], 'R-UI2-8 à UNE vue : « Annuler » redessine le « trouvé » (K1) aux adresses absentes et repose un vol — un appel de plus (limite nommée)');
+      root1.remove();
       // « Annuler » : deux vues. root0 montre un « trouvé » dont les aperçus manquent (son vol a été abandonné par la tape de root2) ; root2 tient la recherche
       // en vol et son bouton « Annuler ». Un redessin de root0 pose un nouveau vol d'aperçus ; « Annuler » dans root2 l'abandonne aussi — puis root2, redessinée
       // sur le « trouvé » de la mémoire (K1) aux adresses toujours absentes, en pose aussitôt un troisième : c'est la règle (une vue connectée qui rend un
@@ -311,19 +346,43 @@ export async function runApercuWebTests({ eq, ok }) {
       d1.rendre(recus(CINQ, [U(0)])); await tick();
       eq([S.etatApercus().blobs, S.etatApercus().enVol], [0, CINQ], '« Annuler » : le résultat tardif du vol abandonné est muet (le nouveau vol est intact)');
       root0.remove(); root2.remove();
-      // La dernière vue déconnectée : avec deux vues connectées, retirer l'une ne fait rien ; retirer la dernière abandonne le vol (observateur du document).
+      // La dernière vue déconnectée : avec trois vues connectées, retirer la troisième puis la POSEUSE ne fait rien (la règle est « plus AUCUNE vue
+      // connectée », pas « la vue qui a posé le vol » — ronde 1, X19) ; retirer la dernière abandonne le vol (observateur du document), la route ayant quitté /search.
       S.reinitialiserWeb();
       p = pilotes();
       const rootA = await monter(p);
-      await chercheEtRecoit(rootA, p, [0, 1, 2, 3, 4].map(lien));
+      await chercheEtRecoit(rootA, p, [0, 1, 2, 3, 4].map(lien)); // rootA POSE le vol
       const rootB = await monter(p); // seconde instance : la mémoire porte le « trouvé », le vol est déjà posé
+      const rootC = await monter(p);
       const d2 = p.demandes[0];
-      rootB.remove(); await tick();
-      eq([p.demandes.length, d2.d.signal.aborted, S.etatApercus().enVol], [1, false, CINQ], 'deux vues connectées : retirer la seconde ne touche pas au vol');
+      rootC.remove(); await tick();
+      eq([p.demandes.length, d2.d.signal.aborted, S.etatApercus().enVol], [1, false, CINQ], 'trois vues connectées : retirer la troisième ne touche pas au vol');
       rootA.remove(); await tick();
+      eq([d2.d.signal.aborted, S.etatApercus().enVol], [false, CINQ], 'retirer la vue POSEUSE pendant qu’une autre reste connectée ne touche pas au vol (§ 4.6 : « plus aucune vue connectée »)');
+      rootB.remove(); await tick();
       eq([d2.d.signal.aborted, S.etatApercus().enVol], [true, null], 'la DERNIÈRE vue déconnectée abandonne le vol (signal levé, plus de vol au module)');
       d2.rendre(recus(CINQ, [U(0)])); await tick();
       eq(S.etatApercus(), { hrefs: [], blobs: 0, enVol: null }, 'dernière vue déconnectée : le résultat tardif est muet, rien n’est écrit');
+      // Reconstruction de la route /search PENDANT un vol (ronde 1, I-2/I-3) : app.js remplace `main` par « Chargement… » AVANT de rendre la nouvelle
+      // instance (run() : Entrée, mode, case → navigate replace ; ou cuisineos:refresh après une passe qui écrit) — la seule vue connectée part, mais la
+      // ROUTE reste /search : le vol n'est PAS abandonné (pas de 499 compté, pas de seconde demande) ; la nouvelle instance l'adopte (« en cours », puis les
+      // figures à la réception). Quitter /search (la route a changé) abandonne toujours.
+      S.reinitialiserWeb(); p = pilotes();
+      let route = '/search';
+      const rootR = await monter(p, { q: 'puttanesca' }, { routeCourante: () => route });
+      await chercheEtRecoit(rootR, p, [0, 1, 2, 3, 4].map(lien));
+      const dR = p.demandes[0];
+      rootR.remove(); await tick(); // replace(current.main, « Chargement… »)
+      eq([dR.d.signal.aborted, S.etatApercus().enVol, p.demandes.length], [false, CINQ, 1], 'reconstruction de /search : la vue remplacée par « Chargement… » n’abandonne PAS le vol tant que la route reste /search (aucun 499, aucun appel sans geste)');
+      const rootR2 = await monter(p, { q: 'puttanesca' }, { routeCourante: () => route }); await tick();
+      eq([p.demandes.length, etat(rootR2)?.textContent, figures(rootR2).length, S.etatApercus().enVol], [1, 'Photos en cours de récupération…', 0, CINQ], 'la nouvelle instance montée ADOPTE le vol en cours : aucune seconde demande, « en cours » affiché (une recherche = 2 appels, pas 3)');
+      dR.rendre(recus(CINQ, [U(0), U(1)])); await tick();
+      eq([figures(rootR2).length, etat(rootR2), S.etatApercus()], [2, null, { hrefs: CINQ, blobs: 2, enVol: null }], 'la réponse du vol adopté est écrite et dessinée dans la nouvelle instance');
+      await chercheEtRecoit(rootR2, p, [0, 1, 2, 3, 4, 5].map(lien), 'Chercher à nouveau');
+      const dQ = p.demandes[1];
+      route = '/library'; // la personne quitte la recherche : hashchange, puis app.js remplace l'écran
+      rootR2.remove(); await tick();
+      eq([dQ?.a.urls, dQ?.d.signal.aborted, S.etatApercus().enVol], [[U(5)], true, null], 'quitter /search (la route a changé quand la dernière vue part) : le vol est abandonné comme avant');
     });
 
     await run('écran : la ligne d’état dans ses trois formes ; un échec de l’appel ENTIER est mémorisé pour l’ISSUE, pas par adresse (D-UI-13, S-15, D-UI-14, R-UI2-6)', async () => {
@@ -346,6 +405,17 @@ export async function runApercuWebTests({ eq, ok }) {
       await chercheEtRecoit(root, p, [0, 1].map(lien), 'Chercher à nouveau');
       eq(p.demandes.length, 1, 'Map incomplète : la même liste relancée ne redemande pas l’adresse remplie (0 appel, jamais une boucle)');
       root.remove();
+      // Le mur de l'ÉCRAN (I-UI-5, ronde 1, X2b) : un Blob hors COVER_INPUT_MIME reçu par deps.apercus (image/svg+xml — en production lireApercusWeb le refuse déjà,
+      // défense en profondeur) n'entre pas dans la Map comme image et n'a pas de figure ; son adresse est mémorisée (illisible), jamais redemandée.
+      S.reinitialiserWeb(); p = pilotes(); root = await monter(p);
+      await chercheEtRecoit(root, p, [0, 1].map(lien));
+      const svg = new Blob(['<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"/>'], { type: 'image/svg+xml' });
+      p.demandes[0].rendre({ etat: 'recus', apercus: new Map([[U(0), { blob: svg, type: 'image/svg+xml' }], [U(1), IMG]]) }); await tick();
+      eq([S.etatApercus(), figures(root).length, cartes(root)[0].firstElementChild.tagName, cartes(root)[1].firstElementChild.matches('figure.apercu'), root.querySelectorAll('img').length, etat(root)],
+        [{ hrefs: [U(0), U(1)], blobs: 1, enVol: null }, 1, 'A', true, 1, null], 'mur de l’écran (I-UI-5) : un Blob image/svg+xml reçu n’est pas une image — entrée de r0 sans Blob, aucune <img> pour r0, la figure de r1 seule, pas de ligne d’état');
+      await chercheEtRecoit(root, p, [0, 1].map(lien), 'Chercher à nouveau');
+      eq(p.demandes.length, 1, 'mur de l’écran : l’adresse au Blob refusé est mémorisée (illisible), la même liste relancée ne la redemande pas');
+      root.remove();
       // 429 écrit par la passerelle (quota) → forme 3. R-UI2-6 : un échec de l'appel ENTIER n'apprend rien sur les adresses — rien dans la Map ; il est mémorisé
       // pour l'ISSUE courante : un redessin de la MÊME issue ne redemande rien ; une NOUVELLE issue (« Chercher à nouveau ») redemande les adresses absentes.
       S.reinitialiserWeb(); p = pilotes(); root = await monter(p);
@@ -356,6 +426,16 @@ export async function runApercuWebTests({ eq, ok }) {
       eq([p.demandes.length, etat(root)?.textContent], [1, 'Quota du jour atteint : photos indisponibles.'], 'forme 3 : un simple redessin de la MÊME issue ne redemande rien (0 appel) et dit encore « Quota… »');
       await chercheEtRecoit(root, p, [0, 1, 2].map(lien), 'Chercher à nouveau');
       eq([p.demandes.length, p.demandes[1]?.a.urls, etat(root)?.textContent], [2, [U(0), U(1), U(2)], 'Photos en cours de récupération…'], 'forme 3 : une NOUVELLE issue (« Chercher à nouveau », mêmes liens) redemande les trois adresses absentes de la Map (R-UI2-6 : un appel de plus par geste, jamais sans geste)');
+      // Ronde 1 (M-R1) : la garde d'ISSUE de la ligne d'état — la seconde issue résolue sans image dit « indisponibles » (raisons par adresse), jamais le
+      // « Quota… » périmé de l'issue antérieure ; et, symétrique, un `quota` d'une issue antérieure ne colore pas une issue dont les entrées sont déjà connues.
+      p.demandes[1].rendre(recus([U(0), U(1), U(2)], [])); await tick();
+      eq([etat(root)?.textContent, S.etatApercus()], ['Photos indisponibles pour cette recherche.', { hrefs: [U(0), U(1), U(2)], blobs: 0, enVol: null }], 'forme 3 : la seconde issue reçoit ses raisons par adresse → « Photos indisponibles pour cette recherche. », jamais le « Quota… » de l’issue antérieure (garde d’issue de ligneEtatApercus)');
+      await chercheEtRecoit(root, p, [0, 1, 2, 3].map(lien), 'Chercher à nouveau');
+      eq([p.demandes.length, p.demandes[2]?.a.urls], [3, [U(3)]], 'forme 3 : une issue aux trois adresses connues et une neuve ne demande que la neuve');
+      p.demandes[2].rendre({ etat: 'echec', raison: 'quota', extra: { quota: 60 } }); await tick();
+      eq(etat(root)?.textContent, 'Quota du jour atteint : photos indisponibles.', 'forme 3 : quota sur la neuve → « Quota… » pour CETTE issue');
+      await chercheEtRecoit(root, p, [0, 1, 2].map(lien), 'Chercher à nouveau');
+      eq([p.demandes.length, etat(root)?.textContent], [3, 'Photos indisponibles pour cette recherche.'], 'forme 3 (symétrique) : une issue aux entrées déjà connues (rien à demander) dit « indisponibles » — le quota de l’issue antérieure ne la colore pas');
       root.remove();
       // Les deux tests nommés par R-UI2-6 : une panne réseau puis « Chercher à nouveau » avec les mêmes cinq liens → un second appel pour les cinq ;
       // une panne réseau puis un simple redessin → 0 appel. La raison écrite (reseau) n'est pas observable par etatApercus() ; la ligne dit « indisponibles ».
@@ -453,8 +533,8 @@ export async function runApercuWebTests({ eq, ok }) {
       root.remove(); await tick(); // dernière vue déconnectée : le vol est abandonné, les adresses restent absentes
       const root2 = await S.renderSearch({}, { mode: 'web', q: 'puttanesca' }, ctxDe(), { chercher: p.chercher, apercus: p.apercus, navigate: () => {}, remplacerAdresse: () => {} }); // PAS montée
       eq([p.demandes.length, cartes(root2).length, etat(root2)], [1, 2, null], 'vue déconnectée : le « trouvé » est rendu (deux cartes) mais aucun aperçu n’est demandé, aucune ligne d’état');
-      await tick();
-      eq(p.demandes.length, 1, 'vue déconnectée : un tour de boucle plus tard, toujours aucune demande (rien ne part avant le montage)');
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); // des microtâches, pas un tour de boucle : app.js monte la vue dans la microtâche qui suit son rendu (ronde 1 : borne de fuite ci-dessous)
+      eq(p.demandes.length, 1, 'vue déconnectée : quelques microtâches plus tard, toujours aucune demande (rien ne part avant le montage)');
       scene.append(root2); await tick();
       const dVol = p.demandes[1];
       eq([p.demandes.length, dVol?.a.urls, etat(root2)?.textContent, cartes(root2).length], [2, [U(0), U(1)], 'Photos en cours de récupération…', 2], 'R-UI2-7 : le MONTAGE de la vue demande les adresses absentes (une demande, après le montage), et la ligne « en cours » paraît');
@@ -488,6 +568,34 @@ export async function runApercuWebTests({ eq, ok }) {
       scene.append(root6); await tick();
       eq([p.demandes.length, figures(root6).length, etat(root6)], [1, 1, null], 'R-UI2-7 : une vue montée quand tout est connu ne demande rien (figure depuis le Blob, pas de ligne)');
       root6.remove();
+      // Borne de fuite (ronde 1) : app.js monte la vue dans la microtâche qui suit son rendu, ou JAMAIS (`seq !== renderSeq` : une navigation plus récente l'a
+      // devancée). Au tour de boucle suivant, une vue encore détachée est morte : son observateur de montage part, un montage tardif ne demande rien.
+      S.reinitialiserWeb(); p = pilotes();
+      const rootV = await monter(p);
+      await chercheEtRecoit(rootV, p, [0, 1].map(lien));
+      rootV.remove(); await tick(); // dernière vue déconnectée (route hors /search) : le vol est abandonné, les adresses restent absentes
+      const rootMort = await S.renderSearch({}, { mode: 'web', q: 'puttanesca' }, ctxDe(), { chercher: p.chercher, apercus: p.apercus, navigate: () => {}, remplacerAdresse: () => {}, routeCourante: () => '/' });
+      await tick(); // un tour de boucle sans montage : la vue est tenue pour morte
+      scene.append(rootMort); await tick();
+      eq([p.demandes.length, S.etatApercus().enVol, cartes(rootMort).length], [1, null, 2], 'borne de fuite : une vue rendue détachée et pas montée au tour suivant est morte — son observateur est retiré, un montage tardif ne demande rien (app.js ne monte jamais tard)');
+      rootMort.remove();
+    });
+
+    await run('écran : les adresses demandées sont https sans identifiants, parmi les cartes affichées (ronde 1 : D-T7, S-9, X3)', async () => {
+      // hrefsApercus : une adresse en http: (la carte la garde ; la fonction la refuserait `interdit`, une entrée gaspillée) et une adresse à identifiants
+      // (D-T7 : l'identifiant ne part ni au serveur ; la carte affiche l'href épuré) ne partent PAS ; javascript: et « pas une adresse » n'ont pas de carte.
+      S.reinitialiserWeb();
+      const p = pilotes();
+      const root = await monter(p);
+      const liens = [lien(0), { ...lien(1), href: 'http://r1.test/recette' }, { ...lien(2), href: 'https://u:motdepasse@r2.test/recette' }, lien(3), lien(4), { ...lien(5), href: 'javascript:alert(1)' }, { ...lien(6), href: 'pas une adresse' }];
+      await chercheEtRecoit(root, p, liens);
+      const d = p.demandes[0];
+      eq([cartes(root).length, p.demandes.length, d?.a.urls, root.innerHTML.includes('motdepasse'), etat(root)?.textContent],
+        [5, 1, [U(0), U(3), U(4)], false, 'Photos en cours de récupération…'],
+        'cinq cartes (javascript: et « pas une adresse » n’en ont pas) ; la demande ne porte que les TROIS adresses https sans identifiants — http: et user:pass@ ne partent pas (une entrée `interdit` gaspillée, un secret qui transite) ; le mot de passe n’est nulle part dans l’écran');
+      d.rendre(recus([U(0), U(3), U(4)], [U(0), U(3), U(4)])); await tick();
+      eq([figures(root).length, etat(root), S.etatApercus()], [3, null, { hrefs: [U(0), U(3), U(4)], blobs: 3, enVol: null }], 'les trois figures posées, aucune ligne d’état ; la Map ne porte que les adresses demandées');
+      root.remove();
     });
 
     await run('écran : texte de garde « 2 appels » et dictionnaire (§ 5, I-UI-1)', async () => {

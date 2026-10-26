@@ -2291,8 +2291,11 @@ export function reinitialiserWeb() { vol?.controller.abort(); vol = null; memoir
   hors des catégories ci-dessus ; une insécable tapée avant le « : » de « Quota du jour atteint : photos indisponibles. » — identique dans `search.js`,
   `en.js` et `tests/apercu-web.js` — laisserait la suite verte et ne serait vue qu'au `/verify` de la Clôture) :
 
+  Le script vit dans un FICHIER du `<scratchpad>` et lit le diff par le tube (ronde 1 de la tâche 2 : avec un heredoc `<<'PY'` sur `python3 -I -`, le
+  heredoc REMPLACE l'entrée standard, le `git diff | grep` est ignoré et Python lit le diff comme un script — `SyntaxError` sur « § », reproduit) :
+
   ```bash
-  git diff -U0 -- <fichiers touchés> | grep '^+' | python3 -I - <<'PY'
+  cat > <scratchpad>/insecables.py <<'PY'
   import sys
   mauvais = 0
   for i, l in enumerate(sys.stdin, 1):
@@ -2301,6 +2304,7 @@ export function reinitialiserWeb() { vol?.controller.abort(); vol = null; memoir
               print(f'ligne ajoutee {i}: U+{ord(c):04X}'); mauvais += 1
   print('insecables :', mauvais); sys.exit(1 if mauvais else 0)
   PY
+  git diff -U0 -- <fichiers touchés> | grep '^+' | python3 -I <scratchpad>/insecables.py
   ```
 
   Attendu `insecables : 0` : les quatre textes de § 5 ne portent que des espaces ordinaires (U+0020) avant « : » et « ( », et l'apostrophe U+2019 (Global

@@ -1,7 +1,7 @@
 // Recherche universelle et accompagnements (spec §4, §26) : source active visible, pastilles modifiables, groupes distincts.
 import { el, toast as toastDom } from '../core/dom.js';
 import { t, label, getUiLocale } from '../core/i18n.js';
-import { navigate, buildQuery, remplacerAdresse } from '../core/router.js';
+import { navigate, buildQuery, remplacerAdresse, currentPath } from '../core/router.js';
 import { borner } from '../core/bornes.js';
 import { lienSignet } from '../core/lien.js';
 import { logError } from '../core/log.js';
@@ -10,7 +10,7 @@ import { parseQuery, searchDocs, chipsFor } from '../domain/search.js';
 import { findAccompaniments } from '../domain/pairing.js';
 import { providerFrom } from '../domain/llm.js';
 import { chercherRecettesWeb, construireDemande, dateLisible, reperesDe } from '../domain/recherche-web.js';
-import { lireApercusWeb } from '../domain/apercu-web.js';
+import { lireApercusWeb, LIMITES_APERCU_WEB } from '../domain/apercu-web.js';
 import { RECIPE_TYPES, DIET_TAGS } from '../model/schema.js';
 import { COVER_INPUT_MIME } from '../sync/mime.js';
 import { recipeCard, filterChips, libellePuce, segmented, emptyState, section, availabilityBadge, provenanceText, select, sessionAssistant, carteConnexion, texteRefusAssistant, ligneReperes, remplacerEnRevoquant } from './components.js';
@@ -34,8 +34,10 @@ export function etatWeb() { return { cle: vol?.cle ?? null, enCours: !!vol, memo
 // à une nouvelle issue (elle est indexée par href, pas par demande) : après chaque « trouvé » reçu, les entrées dont le href a quitté ses liens sont lâchées,
 // Blob compris ; reinitialiserWeb() seule la vide entière. L'UNIQUE vol d'aperçus de l'app : posé par une vue CONNECTÉE qui rend un « trouvé » aux adresses
 // encore absentes (ou au montage d'une vue rendue détachée, R-UI2-7) ; abandonné par lancer(), « Annuler », reinitialiserWeb() et quand plus aucune vue n'est
-// connectée (un observateur du document, le temps du vol) ; un vol abandonné est MUET (rien d'écrit : ses adresses restent absentes et se redemandent au
-// prochain « trouvé » rendu connecté). R-UI2-6 : un échec de l'appel ENTIER (reseau, serveur, interne, delai, quota, un annule arrivé sans abandon) n'apprend
+// connectée ET que la route a quitté /search (un observateur du document, le temps du vol ; ronde 1 : app.js remplace l'écran par « Chargement… » AVANT de
+// rendre la nouvelle instance de /search — run(), cuisineos:refresh —, et cette instance ADOPTE le vol au lieu d'en payer un second) ; un vol abandonné est
+// MUET (rien d'écrit : ses adresses restent absentes et se redemandent au prochain « trouvé » rendu connecté). R-UI2-6 : un échec de l'appel ENTIER (reseau,
+// serveur, interne, delai, quota, un annule arrivé sans abandon) n'apprend
 // rien sur les adresses — il n'entre pas dans la Map ; il est mémorisé pour l'ISSUE courante (`echecApercus`), lu par la ligne d'état : un redessin de la même
 // issue ne redemande rien, une nouvelle issue (tape, « Chercher à nouveau ») redemande les adresses absentes. Les URL blob: sont recréées à chaque rendu depuis
 // les Blob et révoquées par remplacerEnRevoquant (img.plat-vignette) et au changement de route (app.js).
@@ -90,7 +92,8 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   const root = el('div', null);
   // UI-2 (F-10) : deps.apercus vaut lireApercusWeb par défaut, et null quand deps.chercher est injecté sans deps.apercus — les tests de route des lots web et B,
   // qui comptent leurs appels réseau, ne demandent aucun aperçu (P-UI2-11).
-  const { chercher = chercherRecettesWeb, apercus: apercusFn = (deps.chercher === undefined ? lireApercusWeb : null), enLigne, navigate: nav = navigate, remplacerAdresse: remplacer = remplacerAdresse, toast = toastDom, lecture = {} } = deps;
+  // deps.routeCourante (ronde 1) : la route lue par la garde du vol d'aperçus quand la dernière vue se déconnecte (par défaut celle du routeur ; injectée par les tests).
+  const { chercher = chercherRecettesWeb, apercus: apercusFn = (deps.chercher === undefined ? lireApercusWeb : null), enLigne, navigate: nav = navigate, remplacerAdresse: remplacer = remplacerAdresse, routeCourante = currentPath, toast = toastDom, lecture = {} } = deps;
   const state = { q: query.q || '', mode: query.mode || 'all', favorites: query.fav === '1', cooked: query.cooked === '1', requireAll: query.any !== '1', parsed: parseQuery(query.q || '') };
   // La session de l'assistant (R-T3-1) : lue ICI pour les gardes de l'écran, relue à chaque appel (un jeton expiré se rafraîchit).
   // Attendue en mode web SEULEMENT : jeton() peut rafraîchir le jeton par le réseau, et les autres modes de recherche n'en ont pas
@@ -269,7 +272,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   // vient d'être posé.
   let affiche = null; // { issue, hrefs } : le « trouvé » que CETTE vue montre, relu au montage (R-UI2-7)
   const demanderApercus = (hrefs, issue) => {
-    const manquants = [...new Set(hrefs.filter((h) => !apercus.has(h)))].slice(0, 5);
+    const manquants = [...new Set(hrefs.filter((h) => !apercus.has(h)))].slice(0, LIMITES_APERCU_WEB.adresses);
     if (!apercusFn || volApercus || !manquants.length || !root.isConnected) return false;
     if (echecApercus && echecApercus.issue === issue) return false;
     const controller = new AbortController();
@@ -284,8 +287,12 @@ export async function renderSearch(params, query, ctx, deps = {}) {
         } else { echecApercus = { issue, raison: typeof r?.raison === 'string' ? r.raison : 'interne' }; } // R-UI2-6 : l'appel a échoué, pas les adresses
         notifier(); // les figures de TOUTE la liste en un seul redessin (B-I-12)
       });
-    // La dernière vue déconnectée abandonne le vol (S-4) : un observateur du document, le temps du vol seulement (déconnecté à la fin ou à l'abandon).
-    const garde = new MutationObserver(() => { if (![...vues].some((v) => v.root.isConnected)) abandonnerApercus(); });
+    // La dernière vue déconnectée abandonne le vol (S-4) : un observateur du document, le temps du vol seulement (déconnecté à la fin ou à l'abandon) —
+    // SAUF si la route est encore /search (ronde 1) : app.js remplace `main` par « Chargement… » avant de rendre la nouvelle instance (Entrée, mode, case,
+    // cuisineos:refresh après une passe qui écrit) ; abandonner là ferait un 499 compté puis une seconde demande des mêmes adresses au montage (R-UI2-7) :
+    // trois appels pour une recherche annoncée « 2 appels », dont un sans geste. Le vol reste au module ; l'instance qui se monte le retrouve (« en cours »,
+    // puis notifier() pose ses figures). Quitter la recherche (la route a changé quand la vue part) abandonne toujours.
+    const garde = new MutationObserver(() => { if (![...vues].some((v) => v.root.isConnected) && routeCourante() !== '/search') abandonnerApercus(); });
     garde.observe(document.body, { childList: true, subtree: true });
     volApercus = { controller, promesse, hrefs: manquants, garde };
     return true;
@@ -302,7 +309,9 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     const a = apercus.get(lien.href);
     if (!(a?.blob instanceof Blob) || !COVER_INPUT_MIME.includes(a.blob.type)) return null;
     const u = urlDeBlob(a.blob);
-    const img = el('img', { class: 'plat-vignette grande', alt: '', src: u });
+    // decoding async (ronde 1) : cinq images décodées à leur taille pleine (H-7 : pas de ré-encodage) ne bloquent pas le fil au redessin ; la BORNE de pixels
+    // d'un aperçu (plus basse que le mur de F ?) reste une décision du chef, à mesurer à la sonde sur l'iPhone.
+    const img = el('img', { class: 'plat-vignette grande', alt: '', src: u, decoding: 'async' });
     const fig = el('figure', { class: 'apercu' }, img);
     img.addEventListener('error', () => { fig.remove(); if (revoquerUrlDeBlob(u)) apercus.set(lien.href, { raison: 'image_refusee' }); }, { once: true });
     return fig;
@@ -367,7 +376,11 @@ export async function renderSearch(params, query, ctx, deps = {}) {
     if (!cartes.length) return renderIssue({ ...issue, etat: 'rien' });
     // UI-2 (D-UI-13) : les adresses des cartes affichées (les liens CHOISIS, jamais « autres »), telles que l'issue les porte — la clé de la Map et l'`url` de la
     // réponse (le serveur rend la chaîne reçue, S-9) ; demandées AVANT la ligne d'état, qui dit le vol posé ici ; retenues pour le montage (R-UI2-7).
-    const hrefsApercus = (Array.isArray(issue.liens) ? issue.liens : []).filter((lien) => typeof lien?.href === 'string' && lienSignet(lien.href).ok).map((lien) => lien.href);
+    // Ronde 1 : seules partent les adresses en https SANS identifiants — une adresse en http: (la carte la garde, la fonction la refuserait `interdit` : une
+    // entrée gaspillée) ou à user:pass@ (D-T7 : l'identifiant ne part ni au serveur ; la carte affiche l'href épuré) n'est pas demandée. Toute adresse qui
+    // passe ici a sa carte (https lisible ⊂ lienSignet.ok).
+    const adresseApercu = (href) => { if (typeof href !== 'string') return false; try { const u = new URL(href); return u.protocol === 'https:' && !u.username && !u.password; } catch { return false; } };
+    const hrefsApercus = (Array.isArray(issue.liens) ? issue.liens : []).filter((lien) => adresseApercu(lien?.href)).map((lien) => lien.href);
     affiche = { issue, hrefs: hrefsApercus };
     demanderApercus(hrefsApercus, issue);
     const demande = memoire?.filtres?.length ? `${memoire.q} · ${memoire.filtres.join(' ; ')}` : (memoire?.q ?? state.q);
@@ -414,14 +427,19 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   // R-UI2-7 : une vue rendue DÉTACHÉE (nouvelle instance de la route — app.js monte le nœud après le rendu —, retour arrière, reconstruction par cuisineos:refresh)
   // vérifie UNE fois, au montage (première fois que root.isConnected devient vrai, dans la microtâche de l'observateur), si le « trouvé » qu'elle montre a des
   // adresses absentes de la Map, et les demande alors — même règle que le redessin connecté (demanderApercus) ; un vol posé redessine, pour dire « en cours ».
-  // L'observateur se retire au montage, ou quand la vue a été purgée de `vues` sans avoir été montée (jamais un observateur qui survit à sa vue).
+  // L'observateur se retire au montage, ou quand la vue a été purgée de `vues` sans avoir été montée (jamais un observateur qui survit à sa vue). Borne de fuite
+  // (ronde 1) : app.js monte la vue dans la microtâche qui suit son rendu, ou JAMAIS (`seq !== renderSeq` : une navigation plus récente l'a devancée) — au tour
+  // de boucle suivant, une vue encore détachée est morte : son observateur et son entrée de `vues` partent avec elle (plus d'observateur qui écoute le document
+  // toute la session pour une vue que personne ne montera).
   if (state.mode === 'web' && !root.isConnected) {
+    const purger = () => { montage.disconnect(); montages.delete(montage); };
     const montage = new MutationObserver(() => {
-      if (root.isConnected) { montage.disconnect(); montages.delete(montage); if (affiche && demanderApercus(affiche.hrefs, affiche.issue)) render(); return; }
-      if (![...vues].some((v) => v.root === root)) { montage.disconnect(); montages.delete(montage); }
+      if (root.isConnected) { purger(); if (affiche && demanderApercus(affiche.hrefs, affiche.issue)) render(); return; }
+      if (![...vues].some((v) => v.root === root)) purger();
     });
     montage.observe(document.body, { childList: true, subtree: true });
     montages.add(montage);
+    setTimeout(() => { if (root.isConnected || !montages.has(montage)) return; purger(); for (const v of [...vues]) if (v.root === root) vues.delete(v); }, 0);
   }
   return root;
 }
