@@ -1,7 +1,7 @@
 // Dictionnaire anglais : clé = chaîne française de référence. Une clé absente affiche le français.
 // Couverture : navigation, accueil, recherche, fiche recette, mode cuisine, réglages et libellés d'état.
 export const EN = {
-  'Aujourd’hui': 'Today', 'Mes livres': 'My books', 'Ma semaine': 'My week', 'Ma cuisine': 'My kitchen', 'Ajouter': 'Add', 'Réglages': 'Settings',
+  'Aujourd’hui': 'Today', 'Mes livres': 'My books', 'Bibliothèque': 'Library', 'Ma semaine': 'My week', 'Ma cuisine': 'My kitchen', 'Ajouter': 'Add', 'Réglages': 'Settings',
   'Recherche': 'Search', 'Qu’est-ce qu’on cuisine ?': 'What are we cooking?', 'Chercher': 'Search', 'Chargement…': 'Loading…', 'Page introuvable': 'Page not found', 'Retour à l’accueil': 'Back to home',
   'Une erreur est survenue': 'Something went wrong', 'Code : {c}': 'Code: {c}', 'Recharger': 'Reload', 'Reprendre ma recette': 'Resume my recipe', '{d}/{n} étapes': '{d}/{n} steps', 'Favoris': 'Favorites', 'Dernières cuissons': 'Recently cooked',
   'Refaire comme la dernière fois': 'Make it like last time', 'à ne pas refaire': 'not again', 'À utiliser en priorité': 'Use first', 'à consommer avant le': 'use by', 'Voir l’inventaire': 'View inventory',
@@ -229,7 +229,7 @@ export const EN = {
   "Pour que l’app connaisse les recettes du livre.": "So the app knows the book’s recipes.",
   "Photographier ou importer des pages de recettes": "Photograph or import recipe pages",
   "Seulement celles qui t’intéressent, tout de suite.": "Only the ones you care about, right now.",
-  "Aller à Mes livres.": "Go to My books.",
+  "Aller à la bibliothèque.": "Go to the library.",
   "Fermer": "Close",
   "+ Pages d’index": "+ Index pages",
   "+ Recette": "+ Recipe",

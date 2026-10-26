@@ -118,7 +118,7 @@ export async function renderBook(params, query, ctx) {
   };
   const enTete = pageHeader(book.title, {
     subtitle: [book.author, edition.publisher, edition.year, edition.isbn ? `ISBN ${edition.isbn}` : null, edition.language ? edition.language.toUpperCase() : null].filter(Boolean).join(' · '),
-    back: { href: '/library', label: t('Mes livres') },
+    back: { href: '/library', label: t('Bibliothèque') },
     actions: [
       menuSource(t('+ Pages d’index'),
         el('button', { type: 'button', class: 'btn', onClick: () => lancer('index')(ACCEPT_PHOTOS, 'environment') }, t('Photographier')),
@@ -173,7 +173,7 @@ export async function renderBook(params, query, ctx) {
     if (filterState.mode === 'available') rows = available; if (filterState.mode === 'refs') rows = refs; if (filterState.mode === 'fav') rows = recipes.filter((r) => r.favorite);
     if (filterState.q) rows = rows.filter((r) => (r.original_title + ' ' + (r.display_title || '')).toLowerCase().includes(filterState.q.toLowerCase()));
     rows = [...rows].sort((a, b) => (a.printed_page ?? 99999) - (b.printed_page ?? 99999) || a.original_title.localeCompare(b.original_title));
-    if (!rows.length) { list.append(emptyState('📖', t('Aucune recette dans cette vue. Photographie l’index ou une recette pour commencer.'))); return; }
+    if (!rows.length) { list.append(emptyState('livre-ouvert', t('Aucune recette dans cette vue. Photographie l’index ou une recette pour commencer.'))); return; }
     for (const r of rows) {
       const doc = ctx.docsByRecipe.get(r.id);
       list.append(recipeCard(doc || { recipe: r, version: null, book, edition }));

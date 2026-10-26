@@ -18,7 +18,7 @@ export async function renderShoppingList(params, query, ctx) {
   root.append(el('p', { class: 'muted' }, `${items.map((it) => `${it.title}${it.servings ? ` (${it.servings} ${t('portions')})` : ''}`).join(' · ')}`));
   // D-3 (import ciblé) : une version lue par l'assistant et non relue le dit au-dessus de la liste — ses quantités viennent d'une lecture à vérifier.
   if (items.some((it) => estExtractionNonRelue(it.version))) root.append(el('div', { class: 'status warn', style: { marginBottom: '.6rem' }, dataset: { role: 'bandeau-non-relue' } }, t('Lue par l’assistant, non relue')));
-  if (!rows.length) { root.append(emptyState('🛒', t('Aucun ingrédient structuré dans ces recettes.'))); return root; }
+  if (!rows.length) { root.append(emptyState('panier', t('Aucun ingrédient structuré dans ces recettes.'))); return root; }
   const ul = el('ul', { class: 'list' });
   for (const r of rows) {
     const cb = el('input', { type: 'checkbox', checked: !!list.checked[r.key], onChange: async (e) => { list.checked[r.key] = e.target.checked; await repo.save('shopping_lists', list); li.style.opacity = e.target.checked ? '.5' : '1'; } });

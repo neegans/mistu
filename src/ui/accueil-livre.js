@@ -11,7 +11,7 @@ export function accueilLivreModel({ nouveau = undefined } = {}) {
   return { afficher, titre: t('Le livre est dans ta bibliothèque. Et maintenant ?'), cartes: afficher ? [
     { action: 'index', ico: '📸', titre: t('Photographier l’index ou la table des matières'), texte: t('Pour que l’app connaisse les recettes du livre.') },
     { action: 'recette', ico: '📄', titre: t('Photographier ou importer des pages de recettes'), texte: t('Seulement celles qui t’intéressent, tout de suite.') },
-    { action: 'plusTard', ico: '🕒', titre: t('Plus tard'), texte: t('Aller à Mes livres.') },
+    { action: 'plusTard', ico: '🕒', titre: t('Plus tard'), texte: t('Aller à la bibliothèque.') },
   ] : [] };
 }
 

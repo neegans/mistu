@@ -63,13 +63,13 @@ export async function runRechercheWebTests({ eq, ok }) {
     ok(!(await lire('../src/domain/pairing.js')).includes('notice'), 'domaine : pairing.js ne propage plus de notice');
   }
 
-  // --- § 8 : version 0.15.0 (lot F, plats en images ; 0.14.0 au lot E, 0.13.0 au lot D, 0.12.0 au lot C, 0.11.0 au lot G, 0.10.0 au lot B, 0.9.0 au lot A, 0.8.1 à la présentation du serveur), SHELL
+  // --- § 8 : version 0.17.0 (lot UI-1 « Carnet » ; 0.15.0 au lot F, plats en images ; 0.14.0 au lot E, 0.13.0 au lot D, 0.12.0 au lot C, 0.11.0 au lot G, 0.10.0 au lot B, 0.9.0 au lot A, 0.8.1 à la présentation du serveur), SHELL
   {
     const sw = await lire('../sw.js');
-    ok(/VERSION = 'cuisine-os-v0\.15\.0-\d+'/.test(sw), 'sw.js : VERSION 0.15.0');
+    ok(/VERSION = 'cuisine-os-v0\.17\.0-\d+'/.test(sw), 'sw.js : VERSION 0.17.0');
     ok(sw.includes("'./src/core/bornes.js'"), 'SHELL : ./src/core/bornes.js');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.15.0', 'APP_VERSION 0.15.0 (lot F, plats en images)');
+    eq(APP_VERSION, '0.17.0', 'APP_VERSION 0.17.0 (lot UI-1, carnet)');
   }
 
   // --- § 7.1 : supportsWebSearch lu par l'écran (F6) — seule la passerelle (une SESSION) cherche sur le web

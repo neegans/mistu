@@ -1,4 +1,4 @@
-/* Cuisine OS — direction « magazine culinaire » : papier ivoire, encre, action tomate, accent vert (spec 2026-10-18-refonte-visuelle). */
+/* Cuisine OS — direction « magazine culinaire » : papier ivoire, encre, action olive (lot UI-1 « Carnet », D-UI-2 ; tomate jusqu'au 23 octobre), accent vert gris (specs 2026-10-18-refonte-visuelle et 2026-10-23-experience-carnet). */
 :root {
   --paper: #f8f5ef;
   --paper-2: #f1ece3;
@@ -7,9 +7,9 @@
   --muted: #636860;
   --line: #e4dfd5;
   --field-line: #8f8a80;
-  --action: #bc3026;
-  --action-2: #98231b;
-  --action-bg: #f7e3e0;
+  --action: #4f6b2e;
+  --action-2: #3e5424;
+  --action-bg: #e9eddf;
   --accent: #45604a;
   --accent-2: #55705a;
   --accent-bg: #e4ebe2;
@@ -22,7 +22,7 @@
   --ok: #3d6b4a;
   --ok-bg: #e2efe4;
   --backdrop: rgba(36,40,33,.45);
-  --tap: rgba(188,48,38,.15);
+  --tap: rgba(79,107,46,.15);
   --radius: 12px;
   --radius-pill: 999px;
   --shadow: 0 1px 2px rgba(36,40,33,.05), 0 8px 24px rgba(36,40,33,.06);
@@ -49,10 +49,14 @@ body { -webkit-text-size-adjust: 100%; font-size: 1rem; line-height: 1.5; }
 a { color: var(--action); }
 img { max-width: 100%; display: block; }
 h1, h2, h3, h4 { margin: 0 0 .4rem; line-height: 1.2; color: var(--ink); font-family: var(--serif); font-weight: 600; overflow-wrap: anywhere; -webkit-hyphens: auto; hyphens: auto; }
-h1 { font-size: 2.1rem; line-height: 1.1; }
-@media (min-width: 900px) { h1 { font-size: 2.6rem; } }
-h2 { font-size: 1.45rem; }
+/* D-UI-3 : titre de PAGE (pageHeader d'Aujourd'hui, Bibliothèque, Ajouter, Ma semaine, Ma cuisine, Réglages) : 1,8 rem à 375 et 390 px, 2,88 rem à 768, 3,2 rem à 1512. */
+h1 { font-size: clamp(1.8rem, 6vw, 3.2rem); line-height: 1.1; }
+/* D-UI-3 : titre de FICHE (recette, livre : classe posée par pageHeader({ classeTitre: 'titre-fiche' })) : 1,5 / 2,16 / 2,6 rem — un titre long tient en deux lignes à 375 px. */
+h1.titre-fiche { font-size: clamp(1.5rem, 4.5vw, 2.6rem); }
+h2 { font-size: 1.6rem; }
 h3 { font-size: 1.15rem; }
+/* § 3.2 : le sous-titre d'un pageHeader (le p.muted qui suit son h1). */
+header.stack h1 + p.muted { font-size: 1.05rem; }
 p { margin: 0 0 .6rem; }
 small, .muted { color: var(--muted); }
 hr { border: 0; border-top: 1px solid var(--line); margin: 1rem 0; }
@@ -60,7 +64,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-si
 pre { background: var(--paper-2); padding: .6rem .8rem; border-radius: 8px; overflow: auto; }
 /* T-9 : l'attribut hidden cache vraiment, même sous une règle display d'auteur (.status, .row, .btn…). */
 [hidden] { display: none !important; }
-/* T-5 : focus visible au clavier, anneau tomate décalé. */
+/* T-5 : focus visible au clavier, anneau olive (--action) décalé. */
 :focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
 /* T-6 : mouvement réduit = aucune transition ni animation. */
 @media (prefers-reduced-motion: reduce) {
@@ -136,6 +140,12 @@ aside.sidenav { display: none; }
 .card.carte .carte-ico { font-size: 1.6rem; }
 .card.carte p { margin: 0; font-size: .9rem; }
 .card h2, .card h3 { margin-top: 0; }
+/* § 3.2 : les sections (section.card et section.plain) sont espacées de 1,6 rem ; la règle .card elle-même ne change pas (R-VIS-14 : un div.card garde ses .9 rem). */
+section.card { margin-bottom: 1.6rem; }
+/* D-UI-8 : sectionPlain() — la section posée sur le papier : ni fond, ni bord, ni ombre, ni marge intérieure ; son h2 serif porte un filet fin.
+   Seule sectionPlain pose cette classe ; section() reste .card. */
+section.plain { background: transparent; border: 0; box-shadow: none; padding: 0; margin-bottom: 1.6rem; scroll-margin-top: calc(var(--topbar-h) + .5rem); }
+section.plain > h2 { margin: 0 0 .8rem; padding-bottom: .4rem; border-bottom: 1px solid var(--line); }
 /* Accueil d'un livre qui vient d'être créé (spec § 8) : un panneau au-dessus de la fiche, pas une modale. */
 .accueil-livre { border: 1px solid var(--sage); }
 /* Tant qu'aucune carte n'est touchee, la zone des sources ne laisse pas d'espace mort sous les cartes. */
@@ -149,6 +159,8 @@ aside.sidenav { display: none; }
 .col { display: flex; flex-direction: column; gap: .5rem; }
 .grid { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 .grid.wide { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+/* § 3.3 : la grille des couvertures (library.js, tâche 2) : des couvertures plus larges que la grille générale. */
+.grid.livres { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
 .stack > * + * { margin-top: .6rem; }
 
 .btn {
@@ -167,7 +179,7 @@ aside.sidenav { display: none; }
 .btn.big { font-size: 1.15rem; padding: .9rem 1.4rem; min-height: 56px; }
 .btn.block { width: 100%; justify-content: center; }
 .btn.active { outline: 2px solid var(--accent); }
-/* T-5 : un bouton actif focalisé au clavier montre l'anneau tomate, pas son contour vert d'état. */
+/* T-5 : un bouton actif focalisé au clavier montre l'anneau olive (--action), pas son contour vert gris d'état. */
 .btn.active:focus-visible { outline-color: var(--action); }
 
 .btn.link {
@@ -276,12 +288,14 @@ table.compare th, table.compare td { border-bottom: 1px solid var(--line); paddi
 table.compare th { color: var(--green); background: var(--cream-2); }
 
 .two-col { display: grid; gap: 1rem; grid-template-columns: 1fr; }
-@media (min-width: 760px) { .two-col { grid-template-columns: 1fr 1fr; } .two-col.narrow-left { grid-template-columns: 320px 1fr; } }
+@media (min-width: 760px) { .two-col { grid-template-columns: 1fr 1fr; } .two-col.narrow-left { grid-template-columns: 320px 1fr; } .two-col.livre { grid-template-columns: 1fr; } }
+/* D-UI-7 : la fiche livre (tâche 4) ne passe en deux colonnes — couverture 200 px | recettes — qu'à partir de 900 px ; de 760 à 899 px la règle ci-dessus la garde empilée. */
+@media (min-width: 900px) { .two-col.livre { grid-template-columns: 200px 1fr; } }
 
 .qty { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ink); }
 .qty .est { color: var(--warn); font-weight: 400; }
 .src-text { color: var(--muted); font-size: .85rem; }
-.step-num { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--action); color: var(--paper); font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.step-num { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--paper-2); color: var(--ink); font-weight: 700; font-size: .85rem; flex-shrink: 0; }
 .steps li { display: flex; gap: .7rem; padding: .6rem 0; }
 .status { padding: .45rem .7rem; border-radius: 10px; font-size: .9rem; display: inline-flex; gap: .4rem; align-items: center; }
 .status.info { background: var(--accent-bg); color: var(--accent); }
@@ -313,6 +327,10 @@ dialog::backdrop { background: var(--backdrop); }
 
 .empty { text-align: center; color: var(--muted); padding: 2rem 1rem; }
 .empty .ico { font-size: 2rem; }
+/* D-UI-9 : icônes au trait (src/ui/icones.js) : 24 × 24, trait currentColor — elles prennent la couleur du texte qui les porte (onglet actif,
+   pastille « Ajouter », état vide gris) ; 40 × 40 dans un état vide. Hors de tout jeton : le trait est un attribut du svg, pas une valeur CSS. */
+.icone { width: 24px; height: 24px; display: inline-block; vertical-align: middle; flex-shrink: 0; }
+.empty .ico .icone { width: 40px; height: 40px; }
 .kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 0 .3rem; font-size: .85em; background: #fff; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

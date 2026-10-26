@@ -13,6 +13,7 @@ import { createMoteur } from './sync/moteur.js';
 import { createTransport, createStockage } from './sync/transport.js';
 import { configAssistantSuitLeCompte } from './sync/config.js';
 import { pastille, majPastille } from './ui/components.js';
+import { icone } from './ui/icones.js';
 
 import { renderHome } from './ui/home.js';
 import { renderSearch } from './ui/search.js';
@@ -34,22 +35,23 @@ import { renderCreerIA } from './ui/creer-ia.js';
 import { renderImportCible } from './ui/import-cible.js';
 import { porteEntreeModel, renderPorteEntree } from './ui/porte-entree.js';
 
+// D-UI-4 : « Bibliothèque » (l'écran s'ouvre sur les plats, tâche 2) ; D-UI-9 : ico = un nom d'icones.js, plus un émoji (les émojis ne prennent pas la couleur de l'onglet actif).
 const NAV = [
-  { href: '/', label: 'Aujourd’hui', ico: '☀︎', match: (p) => p === '/' || p.startsWith('/search') },
-  { href: '/library', label: 'Mes livres', ico: '📚', match: (p) => p.startsWith('/library') || p.startsWith('/books') || p.startsWith('/dishes') || p.startsWith('/recipes') },
-  { href: '/meals', label: 'Ma semaine', ico: '🗓', match: (p) => p.startsWith('/meals') || p.startsWith('/lists') },
-  { href: '/kitchen', label: 'Ma cuisine', ico: '🍳', match: (p) => p.startsWith('/kitchen') },
-  { href: '/add', label: 'Ajouter', ico: '＋', add: true, match: (p) => p.startsWith('/add') || p.startsWith('/import') },
+  { href: '/', label: 'Aujourd’hui', ico: 'soleil', match: (p) => p === '/' || p.startsWith('/search') },
+  { href: '/library', label: 'Bibliothèque', ico: 'bibliotheque', match: (p) => p.startsWith('/library') || p.startsWith('/books') || p.startsWith('/dishes') || p.startsWith('/recipes') },
+  { href: '/meals', label: 'Ma semaine', ico: 'calendrier', match: (p) => p.startsWith('/meals') || p.startsWith('/lists') },
+  { href: '/kitchen', label: 'Ma cuisine', ico: 'toque', match: (p) => p.startsWith('/kitchen') },
+  { href: '/add', label: 'Ajouter', ico: 'plus', add: true, match: (p) => p.startsWith('/add') || p.startsWith('/import') },
 ];
 
 function navLinks(path, cls) {
-  return NAV.map((n) => el('a', { href: `#${n.href}`, class: `${cls} ${n.add ? 'add' : ''} ${n.match(path) ? 'active' : ''}` }, el('span', { class: 'ico', 'aria-hidden': 'true' }, n.ico), el('span', null, t(n.label))));
+  return NAV.map((n) => el('a', { href: `#${n.href}`, class: `${cls} ${n.add ? 'add' : ''} ${n.match(path) ? 'active' : ''}` }, el('span', { class: 'ico', 'aria-hidden': 'true' }, icone(n.ico)), el('span', null, t(n.label))));
 }
 
 function shell() {
   const path = parseHash().path;
   const main = el('main', { class: 'content', id: 'main' });
-  const side = el('aside', { class: 'sidenav' }, ...navLinks(path, ''), el('a', { href: '#/settings', class: path.startsWith('/settings') ? 'active' : '' }, el('span', { class: 'ico' }, '⚙︎'), el('span', null, t('Réglages'))));
+  const side = el('aside', { class: 'sidenav' }, ...navLinks(path, ''), el('a', { href: '#/settings', class: path.startsWith('/settings') ? 'active' : '' }, el('span', { class: 'ico', 'aria-hidden': 'true' }, icone('roue')), el('span', null, t('Réglages'))));
   const tabs = el('nav', { class: 'tabs', 'aria-label': 'Navigation' }, ...navLinks(path, ''));
   const top = el('div', { class: 'topbar' },
     el('a', { class: 'brand', href: '#/' }, 'Cuisine OS'),

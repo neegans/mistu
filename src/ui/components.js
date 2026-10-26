@@ -13,12 +13,15 @@ import { pastilleModel, invalidate } from './state.js';
 import { estCreationIA, etiquetteCreationIA } from '../domain/creation-ia.js';
 import { DIFFICULTES, LIMITES_WEB } from '../domain/recherche-web.js';
 import { pointeurValide } from '../domain/photo-web.js';
+import { icone } from './icones.js';
 
-export function pageHeader(title, { subtitle = null, actions = [], back = null } = {}) {
+// classeTitre (lot UI-1, D-UI-3, H-20) : une classe posée sur le h1 — 'titre-fiche' pour une fiche recette ou livre (tâches 3 et 4) ; sans elle, le
+// titre de PAGE. `back` reste un objet { href, label } (H-1). Rien d'autre ne change.
+export function pageHeader(title, { subtitle = null, actions = [], back = null, classeTitre = null } = {}) {
   return el('header', { class: 'stack', style: { marginBottom: '1rem' } },
     back ? el('a', { href: `#${back.href}`, class: 'muted', style: { textDecoration: 'none', fontSize: '.9rem' } }, `← ${back.label}`) : null,
     el('div', { class: 'row between top' },
-      el('div', null, el('h1', null, title), subtitle ? el('p', { class: 'muted' }, subtitle) : null),
+      el('div', null, el('h1', { class: classeTitre }, title), subtitle ? el('p', { class: 'muted' }, subtitle) : null),
       actions.length ? el('div', { class: 'row' }, ...actions) : null));
 }
 
@@ -26,8 +29,17 @@ export function section(title, ...children) {
   return el('section', { class: 'card' }, title ? el('h2', null, title) : null, ...children);
 }
 
+// D-UI-8 (H-2) : la sœur de section() — même forme, même contenu — posée sur le papier : section.plain (styles.css : ni fond, ni ombre, filet fin
+// sous le h2). Seule cette fonction pose la classe plain ; section() reste .card pour ses 54 appelants. Chaque tâche nomme les sections qu'elle bascule.
+export function sectionPlain(title, ...children) {
+  const s = section(title, ...children);
+  s.className = 'plain';
+  return s;
+}
+
+// D-UI-9 : l'icône d'un état vide est un NOM du jeu d'icones.js (icone() lève sur un nom inconnu, un émoji compris : plus aucun émoji ici).
 export function emptyState(icon, text, action = null) {
-  return el('div', { class: 'empty' }, el('div', { class: 'ico' }, icon), el('p', null, text), action);
+  return el('div', { class: 'empty' }, el('div', { class: 'ico' }, icone(icon)), el('p', null, text), action);
 }
 
 export function availabilityBadge(recipe) {

@@ -85,7 +85,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     refresh();
   } }, recipe.favorite ? '★ ' + t('Favori') : '☆ ' + t('Favori'));
   root.append(pageHeader(recipe.display_title || recipe.original_title, {
-    subtitle: provenanceText(recipe, book, edition), back: edition ? { href: `/books/${edition.id}`, label: book?.title || t('Livre') } : { href: '/library', label: t('Mes livres') },
+    subtitle: provenanceText(recipe, book, edition), back: edition ? { href: `/books/${edition.id}`, label: book?.title || t('Livre') } : { href: '/library', label: t('Bibliothèque') },
     actions: [favBtn],
   }));
 

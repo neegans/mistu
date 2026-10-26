@@ -50,7 +50,7 @@ function recettesCreeesIA(ctx) {
 }
 
 async function booksTab(ctx) {
-  if (!ctx.book_editions.length) return emptyState('📚', t('Aucun livre pour l’instant.'), el('a', { class: 'btn primary', href: '#/add' }, t('Ajouter un livre')));
+  if (!ctx.book_editions.length) return emptyState('livres', t('Aucun livre pour l’instant.'), el('a', { class: 'btn primary', href: '#/add' }, t('Ajouter un livre')));
   const recipesByEdition = repo.groupBy(ctx.recipes.filter((r) => r.edition_id), 'edition_id');
   // Les octets des couvertures sont lus UNE fois, en une transaction : la grille se redessine à chaque touche du
   // filtre et ne peut pas aller en base à chaque fois. Une empreinte sans ligne ici = couverture pas sur l'appareil.
@@ -100,7 +100,7 @@ async function dishesTab(ctx) {
   root.append(el('div', { class: 'row between', style: { marginBottom: '.8rem' } },
     el('p', { class: 'muted', style: { margin: 0 } }, t('Un plat rassemble des recettes apparentées de plusieurs livres, sans écraser leurs sources.')),
     el('button', { class: 'btn', onClick: newDish }, t('Nouveau plat'))));
-  if (!ctx.dishes.length) { root.append(emptyState('🍝', t('Aucun plat défini. Crée « Puttanesca », puis rattache-lui les recettes de tes livres.'))); return root; }
+  if (!ctx.dishes.length) { root.append(emptyState('assiette', t('Aucun plat défini. Crée « Puttanesca », puis rattache-lui les recettes de tes livres.'))); return root; }
   const list = el('ul', { class: 'list' });
   for (const dish of [...ctx.dishes].sort((a, b) => a.labels.fr.label.localeCompare(b.labels.fr.label))) {
     const confirmed = links.filter((l) => l.dish_id === dish.id && l.state === 'confirmed');

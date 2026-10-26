@@ -40,7 +40,7 @@ export async function renderDish(params, query, ctx) {
   const listBox = el('div', null);
   const drawList = () => {
     listBox.replaceChildren();
-    if (!confirmed.length) { listBox.append(emptyState('🍝', t('Aucune recette rattachée. Rattache les recettes de tes livres pour les comparer.'))); return; }
+    if (!confirmed.length) { listBox.append(emptyState('assiette', t('Aucune recette rattachée. Rattache les recettes de tes livres pour les comparer.'))); return; }
     for (const d of confirmed) {
       const check = el('input', { type: 'checkbox', checked: selected.has(d.recipe.id), onChange: (e) => { if (e.target.checked) { if (selected.size >= 3) { e.target.checked = false; toast(t('Trois recettes au maximum')); return; } selected.add(d.recipe.id); } else selected.delete(d.recipe.id); drawCompare(); } });
       const hist = ctx.cook_history.filter((h) => h.recipe_id === d.recipe.id);
