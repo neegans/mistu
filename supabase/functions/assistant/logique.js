@@ -3,12 +3,19 @@
 // Lot B (spec 2026-10-19-recette-web § 6.1) : le quatrième outil, `lecture-web`, ne reçoit qu'une adresse ; sa validation et ses bornes vivent dans
 // ./lecture-web.js (feuille, un seul sens d'import : F-1). La contrainte `check` de 0006 liste OUTILS dans cet ordre ; `image-web` (la valeur
 // du lot F, R-B-6) en est le cinquième (lot F, R-F-9 : OUTILS = OUTILS_0006), et n'atteint jamais le modèle (OUTILS_MODELE).
+// Lot UI-2 (spec 2026-10-23-experience-carnet § 6) : le sixième outil, `apercu-web`, sans modèle non plus — une liste d'adresses, chacune validée
+// AVANT la réservation (I-UI-6) ; ses bornes dans LIMITES_APERCU.
 import { valideAdresse, LIMITES_LECTURE } from './lecture-web.js';
-export const OUTILS = Object.freeze(['recherche-web', 'creation', 'extraction', 'lecture-web', 'image-web']);
-// Lot F (S-2) : la liste FERMÉE des outils qui peuvent atteindre le modèle ; image-web n'y est pas et n'y sera jamais (index.ts initialise
-// corpsModele par elle, avant tout await).
+export const OUTILS = Object.freeze(['recherche-web', 'creation', 'extraction', 'lecture-web', 'image-web', 'apercu-web']);
+// Lot F (S-2) : la liste FERMÉE des outils qui peuvent atteindre le modèle ; image-web et apercu-web n'y sont pas et n'y seront jamais (index.ts
+// initialise corpsModele par elle, avant tout await).
 export const OUTILS_MODELE = Object.freeze(['recherche-web', 'creation', 'extraction', 'lecture-web']);
 export const LIMITES = Object.freeze({ corps: 512 * 1024, corpsExtraction: 8 * 1024 * 1024, maxTokens: 16000, quotaJour: 60, attenteMs: 120000, reponse: 2 * 1024 * 1024, system: 20000, messages: 20, maxUses: 5 });
+// Lot UI-2 (spec § 6, D-UI-12, S-1, S-2, H-18) : les bornes de l'outil apercu-web — au plus 5 adresses par appel, un budget serveur de 60 s (un AbortController
+// par appel, relayé à chaque suivreRedirections, sous les 120 s de LIMITES.attenteMs), 1 Mio par image (le défaut d'image-web, LIMITES_IMAGE.octets, reste
+// 2 Mio) ; PARALLELISME_APERCU adresses à la fois (renversable à 1 ou 3 après la sonde « puttanesca », Clôture du lot).
+export const LIMITES_APERCU = Object.freeze({ adresses: 5, budgetMs: 60000, image: 1024 * 1024 });
+export const PARALLELISME_APERCU = 2;
 const TYPES_IMAGE = Object.freeze(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const OUTIL_WEB = 'web_search_20250305';
 const own = (o, k) => (o && typeof o === 'object' && !Array.isArray(o) && Object.hasOwn(o, k) ? o[k] : undefined);
@@ -43,6 +50,18 @@ function lireDemandeUrl(corps, { hotesRefuses = [] } = {}) {
   const v = valideAdresse(url, { hotesRefuses });
   return v.ok ? { ok: true, corps: { url: v.href } } : refus(422, 'interdit');
 }
+// apercu-web (lot UI-2, I-UI-6, B-I-13) : liste blanche { urls } — 1 à LIMITES_APERCU.adresses chaînes de LIMITES_LECTURE.url unités au plus, sinon 400 forme ;
+// CHAQUE adresse passe par valideAdresse AVANT toute réservation : refusée → href null (l'entrée { url, image: null, raison: 'interdit' } de la réponse) ;
+// `url` reste la chaîne reçue, telle quelle (le client indexe par lien.href) ; 422 interdit seulement si AUCUNE n'est admise (aucune réservation). Les doublons
+// restent des entrées : le dédoublonnage est celui du téléchargement (index.ts), jamais de la réponse (S-9).
+function lireDemandeUrls(corps, { hotesRefuses = [] } = {}) {
+  const urls = own(corps, 'urls');
+  if (!Array.isArray(urls) || urls.length < 1 || urls.length > LIMITES_APERCU.adresses) return refus(400, 'forme');
+  if (urls.some((u) => typeof u !== 'string' || u.length > LIMITES_LECTURE.url)) return refus(400, 'forme');
+  const entrees = urls.map((url) => { const v = valideAdresse(url, { hotesRefuses }); return { url, href: v.ok ? v.href : null }; });
+  if (entrees.every((e) => e.href === null)) return refus(422, 'interdit');
+  return { ok: true, corps: { entrees } };
+}
 // `hotesRefuses` (lecture-web, image-web) : l'hôte du projet, passé par index.ts (S-12) — la fonction ne se rappelle jamais elle-même.
 export function lireDemande(texte, { outil, modele, maxTokens = LIMITES.maxTokens, octets, hotesRefuses = [] } = {}) {
   if (!OUTILS.includes(outil)) return refus(400, 'outil');
@@ -56,6 +75,7 @@ export function lireDemande(texte, { outil, modele, maxTokens = LIMITES.maxToken
   const corps = own(enveloppe, 'corps');
   if (!objetNu(corps)) return refus(400, 'forme');
   if (outil === 'lecture-web' || outil === 'image-web') return lireDemandeUrl(corps, { hotesRefuses });
+  if (outil === 'apercu-web') return lireDemandeUrls(corps, { hotesRefuses });
   const out = { model: modele };
   const system = own(corps, 'system');
   if (system !== undefined) { if (typeof system !== 'string') return refus(400, 'forme'); if (system.length > LIMITES.system) return refus(422, 'bornes'); out.system = system; }

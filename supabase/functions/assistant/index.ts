@@ -4,8 +4,10 @@
 // Jamais : la clé dans une réponse ou un journal ; un corps de demande, de réponse ou de PAGE dans le journal ; un appel Anthropic avant la dernière garde.
 // Lot F (spec 2026-10-19-plats-en-images § 6.3) : `image-web` télécharge l'image d'une page par la MÊME boucle de redirections (suivreRedirections)
 // et la relaie en base64 ; il n'atteint jamais le modèle (corpsModele posé par OUTILS_MODELE).
+// Lot UI-2 (spec 2026-10-23-experience-carnet § 6) : apercu-web — jusqu'à cinq adresses validées AVANT une réservation unique ; pour chaque adresse admise,
+// la page (telechargerPage), l'image par LA règle de F (lirePageHtml(...).page.image_url), l'image bornée à 1 Mio (telechargerImage, max) ; jamais le modèle.
 import { createClient } from '@supabase/supabase-js';
-import { LIMITES, OUTILS, OUTILS_MODELE, corpsErreur, corpsLectureModele, entetesCors, ligneJournal, lireDemande as lireDemandeJs, origineAdmise, statutRelaye } from './logique.js';
+import { LIMITES, LIMITES_APERCU, OUTILS, OUTILS_MODELE, PARALLELISME_APERCU, corpsErreur, corpsLectureModele, entetesCors, ligneJournal, lireDemande as lireDemandeJs, origineAdmise, statutRelaye } from './logique.js';
 import { LIMITES_IMAGE, LIMITES_LECTURE, lireCharset, lirePageHtml as lirePageHtmlJs, signatureImage, typeAdmis, typeImageAdmis, valideAdresse as valideAdresseJs, versBase64 } from './lecture-web.js';
 
 // logique.js et lecture-web.js sont du JS : tsc ne lit pas la forme réelle de leurs paramètres déstructurés. On la déclare ici, une fois (aucun effet à l'exécution).
@@ -162,13 +164,14 @@ async function telechargerPage(href: string, { signal, hotesRefuses: refuses }: 
 }
 
 // L'image d'une page (lot F, D-F3) : jpeg, png ou webp annoncés ET signés par leurs premiers octets, ≤ 2 Mio (R-F-4), jamais un corps vide (un
-// corps vide, ou de moins de trois octets, n'a pas de signature : signatureImage rend null).
+// corps vide, ou de moins de trois octets, n'a pas de signature : signatureImage rend null) ; `max` (lot UI-2) borne les octets lus — LIMITES_IMAGE.octets
+// (2 Mio) par défaut pour image-web, LIMITES_APERCU.image (1 Mio) pour apercu-web.
 type ImageTelechargee = { octets: Uint8Array; type: string; urlFinale: string };
-async function telechargerImage(href: string, { signal, hotesRefuses: refuses }: { signal: AbortSignal; hotesRefuses: string[] }): Promise<ImageTelechargee | RefusPage> {
+async function telechargerImage(href: string, { signal, hotesRefuses: refuses, max = LIMITES_IMAGE.octets }: { signal: AbortSignal; hotesRefuses: string[]; max?: number }): Promise<ImageTelechargee | RefusPage> {
   const r = await suivreRedirections<{ octets: Uint8Array; type: string }>(href, { signal, hotesRefuses: refuses, accept: 'image/jpeg,image/png,image/webp;q=0.9,*/*;q=0.1', lire: async (rep) => {
     const type = typeImageAdmis(rep.headers.get('content-type'));
     if (!type) { void rep.body?.cancel().catch(() => {}); return { erreur: 'pas_une_image', statut: 422 }; }
-    const octets = await lireCorpsBorne(rep, LIMITES_IMAGE.octets);
+    const octets = await lireCorpsBorne(rep, max);
     if (octets === null) return { erreur: 'image_trop_lourde', statut: 413 };
     if (signatureImage(octets) !== type) return { erreur: 'pas_une_image', statut: 422 };
     return { ok: { octets, type } };
@@ -264,6 +267,23 @@ async function traiter(req: Request, cors: Record<string, string>, origine: stri
       if ('erreur' in image) { statut = image.statut; corpsReponse = JSON.stringify(corpsErreur(image.erreur)); }
       else { statut = 200; corpsReponse = JSON.stringify({ type: image.type, taille: image.octets.byteLength, url_finale: image.urlFinale, octets: versBase64(image.octets) }); } // usage reste null : jetons null au journal
     }
+    if (outil === 'apercu-web') {
+      // Lot UI-2 (spec § 6, I-UI-6) : la réservation est faite (UN appel du quota pour les cinq) ; lireDemande a déjà validé chaque adresse (href null = interdit)
+      // et refusé 422 sans réservation si aucune ne passait. Budget serveur : un AbortController par appel (60 s), relayé à chaque suivreRedirections par apercuDe,
+      // et levé par ctl (120 s, ou le client parti → 499). Dédoublonnage pour le TÉLÉCHARGEMENT seulement : une entrée par chaîne reçue, url = la chaîne (S-9).
+      const budget = new AbortController();
+      const minuterieBudget = setTimeout(() => budget.abort(), LIMITES_APERCU.budgetMs);
+      const relaisBudget = () => budget.abort();
+      if (ctl.signal.aborted) budget.abort(); else ctl.signal.addEventListener('abort', relaisBudget, { once: true });
+      try {
+        const entrees = (lu.corps as { entrees: Array<{ url: string; href: string | null }> }).entrees;
+        const hrefs = [...new Set(entrees.map((e) => e.href).filter((h): h is string => h !== null))];
+        const resultats = await enParallele(hrefs.map((h) => () => apercuDe(h, { signal: budget.signal, hotesRefuses: refuses })), PARALLELISME_APERCU);
+        const parHref = new Map(hrefs.map((h, i) => [h, resultats[i]]));
+        statut = 200; // usage reste null : jetons null au journal
+        corpsReponse = JSON.stringify({ apercus: entrees.map((e) => { const a = e.href === null ? null : parHref.get(e.href); return { url: e.url, image: a?.image ?? null, raison: a ? a.raison : 'interdit' }; }) });
+      } finally { clearTimeout(minuterieBudget); ctl.signal.removeEventListener('abort', relaisBudget); }
+    }
     if (corpsModele !== null) {
       const enLecture = outil === 'lecture-web';
       const envoi = enLecture ? (corpsModele as { corps: unknown }).corps : corpsModele;
@@ -284,6 +304,37 @@ async function traiter(req: Request, cors: Record<string, string>, origine: stri
   if (statut === 499) return new Response(null, { status: 499, headers: { ...cors, 'cache-control': 'no-store' } });
   if (!corpsReponse) return json(statut, corpsErreur(statut === 504 ? 'delai' : 'serveur'), cors);
   return new Response(corpsReponse, { status: statut, headers: { ...cors, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
+}
+
+// Lot UI-2 (spec § 6) : UNE adresse d'aperçu. La page par telechargerPage (bornes de lecture-web), l'adresse d'image par LA règle de F (lirePageHtml(...).page.image_url :
+// Recipe lisible retenu, sinon og:image hors page de liste — aucune seconde copie, S-10), l'image par telechargerImage bornée à LIMITES_APERCU.image, encodée en
+// base64 dès sa réception et ses octets lâchés (K-5). Ne lève jamais : une raison fermée par échec (RAISON_PAGE, RAISON_IMAGE ; `delai` quand le budget a levé
+// `signal`, en vol ou avant de commencer). Déclarée APRÈS traiter : N-1 épingle l'ordre du flux par la première occurrence de chaque point d'appel.
+type ImageApercu = { type: string; taille: number; octets: string };
+type Apercu = { image: ImageApercu | null; raison: string | null };
+const RAISON_PAGE: Record<string, string> = { inaccessible: 'inaccessible', interdit: 'interdit', pas_une_page: 'pas_de_recette', trop_lourde: 'inaccessible' };
+const RAISON_IMAGE: Record<string, string> = { inaccessible: 'inaccessible', interdit: 'interdit', pas_une_image: 'pas_d_image', image_trop_lourde: 'image_trop_lourde' };
+async function apercuDe(href: string, { signal, hotesRefuses: refuses }: { signal: AbortSignal; hotesRefuses: string[] }): Promise<Apercu> {
+  if (signal.aborted) return { image: null, raison: 'delai' };
+  try {
+    const page = await telechargerPage(href, { signal, hotesRefuses: refuses });
+    if ('erreur' in page) return { image: null, raison: RAISON_PAGE[page.erreur] ?? 'inaccessible' };
+    const lue = lirePageHtml({ html: page.html, urlFinale: page.urlFinale, contentType: page.contentType, hotesRefuses: refuses });
+    const adresse = lue.page.image_url;
+    // pas_d_image : une Recipe lisible UNIQUE sans image ni og:image ; pas_de_recette : rien de lisible, ou une page de liste (og:image écartée par F).
+    if (typeof adresse !== 'string') return { image: null, raison: lue.jsonld !== null && lue.jsonld.autres === 0 ? 'pas_d_image' : 'pas_de_recette' };
+    const image = await telechargerImage(adresse, { signal, hotesRefuses: refuses, max: LIMITES_APERCU.image });
+    if ('erreur' in image) return { image: null, raison: RAISON_IMAGE[image.erreur] ?? 'inaccessible' };
+    return { image: { type: image.type, taille: image.octets.byteLength, octets: versBase64(image.octets) }, raison: null };
+  } catch { return { image: null, raison: signal.aborted ? 'delai' : 'inaccessible' }; }
+}
+// Au plus `n` tâches à la fois (PARALLELISME_APERCU), lancées dans l'ordre ; chaque résultat garde l'index de sa tâche.
+async function enParallele<T>(taches: Array<() => Promise<T>>, n: number): Promise<T[]> {
+  const resultats: T[] = new Array(taches.length);
+  let prochaine = 0;
+  const ouvrier = async (): Promise<void> => { for (;;) { const i = prochaine; prochaine += 1; if (i >= taches.length) return; resultats[i] = await taches[i](); } };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(n, taches.length)) }, ouvrier));
+  return resultats;
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {

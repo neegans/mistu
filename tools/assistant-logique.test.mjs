@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OUTILS, OUTILS_MODELE, LIMITES, origineAdmise, entetesCors, lireDemande, decisionQuota, statutRelaye, ligneJournal, corpsErreur, CONSIGNE_LECTURE_WEB, corpsLectureModele, neutraliser } from '../supabase/functions/assistant/logique.js';
-import { LIMITES_LECTURE, textePrincipal } from '../supabase/functions/assistant/lecture-web.js';
+import { OUTILS, OUTILS_MODELE, LIMITES, LIMITES_APERCU, PARALLELISME_APERCU, origineAdmise, entetesCors, lireDemande, decisionQuota, statutRelaye, ligneJournal, corpsErreur, CONSIGNE_LECTURE_WEB, corpsLectureModele, neutraliser } from '../supabase/functions/assistant/logique.js';
+import { LIMITES_LECTURE, LIMITES_IMAGE, textePrincipal } from '../supabase/functions/assistant/lecture-web.js';
 
 const MODELE = 'claude-sonnet-5-5';
 const lire = (objet, outil = 'creation', extra = {}) => lireDemande(typeof objet === 'string' ? objet : JSON.stringify(objet), { outil, modele: MODELE, maxTokens: LIMITES.maxTokens, ...extra });
@@ -41,7 +41,7 @@ test('lireDemande : refus de forme (400) et bornes (422)', () => {
 test('lireDemande : outil', () => {
   assert.equal(lire(CREATION, 'inconnu').statut, 400);
   assert.equal(lireDemande(JSON.stringify(CREATION), { modele: MODELE }).statut, 400, 'outil absent');
-  assert.deepEqual(OUTILS, ['recherche-web', 'creation', 'extraction', 'lecture-web', 'image-web'], 'lot F : cinq outils, image-web dernier (la contrainte de 0006 suit cet ordre, R-F-1)');
+  assert.deepEqual(OUTILS, ['recherche-web', 'creation', 'extraction', 'lecture-web', 'image-web', 'apercu-web'], 'lot UI-2 : six outils, apercu-web dernier (la contrainte de 0007 suit cet ordre, D-UI-14)');
 });
 test('lireDemande : tools seulement pour recherche-web, forme fermée', () => {
   const outil = { type: 'web_search_20250305', name: 'web_search', max_uses: 3, user_location: { type: 'approximate', country: 'CA', timezone: 'America/Toronto' } };
@@ -231,7 +231,7 @@ test('LIMITES de logique.js : forme inchangee ; LIMITES_LECTURE : les six bornes
 // --- Lot F « Les plats en images » (spec § 6.2) -----------------------------------------------------------------------------------------------
 test('OUTILS_MODELE : gelee, egale a OUTILS sans image-web (image-web n atteint jamais le modele)', () => {
   assert.ok(Object.isFrozen(OUTILS_MODELE));
-  assert.deepEqual(OUTILS_MODELE, OUTILS.filter((o) => o !== 'image-web'));
+  assert.deepEqual(OUTILS_MODELE, OUTILS.filter((o) => o !== 'image-web' && o !== 'apercu-web'));
   assert.ok(!OUTILS_MODELE.includes('image-web'));
 });
 test('lireDemande image-web : liste blanche { url }, adresse revalidee, 422 interdit, rien d autre lu', () => {
@@ -253,4 +253,60 @@ test('lireDemandeUrl : une regle, deux outils (lecture-web et image-web rendent 
 test('ligneJournal : image-web admis, usage nul → jetons null', () => {
   const l = ligneJournal({ ownerId: 'u', outil: 'image-web', statut: 200, usage: null, dureeMs: 3, octets: 40, maintenant: '2026-10-19T00:00:00.000Z' });
   assert.deepEqual([l.outil, l.statut, l.jetons_entree, l.jetons_sortie, l.octets], ['image-web', 200, null, null, 40]);
+});
+
+// --- Lot UI-2 « Aperçus des résultats web » (spec 2026-10-23-experience-carnet § 6, D-UI-12, I-UI-6) : apercu-web, sans modèle --------------------
+const ap = (corps, extra = {}) => lireDemande(JSON.stringify({ outil: 'apercu-web', corps }), { outil: 'apercu-web', modele: MODELE, maxTokens: LIMITES.maxTokens, ...extra });
+test('OUTILS : six outils, apercu-web dernier, gele ; OUTILS_MODELE inchange (ni image-web ni apercu-web n atteint le modele)', () => {
+  assert.deepEqual(OUTILS, ['recherche-web', 'creation', 'extraction', 'lecture-web', 'image-web', 'apercu-web']);
+  assert.ok(Object.isFrozen(OUTILS));
+  assert.deepEqual(OUTILS_MODELE, ['recherche-web', 'creation', 'extraction', 'lecture-web']);
+  assert.ok(!OUTILS_MODELE.includes('apercu-web'));
+});
+test('LIMITES_APERCU et PARALLELISME_APERCU : forme (D-UI-12, S-1, S-2, H-18)', () => {
+  assert.ok(Object.isFrozen(LIMITES_APERCU));
+  assert.deepEqual(LIMITES_APERCU, { adresses: 5, budgetMs: 60000, image: 1024 * 1024 });
+  assert.equal(PARALLELISME_APERCU, 2);
+  assert.ok(LIMITES_APERCU.budgetMs < LIMITES.attenteMs, 'le budget des apercus (60 s) tient sous les 120 s de la fonction');
+  assert.ok(LIMITES_APERCU.image < LIMITES_IMAGE.octets, '1 Mio par apercu, distinct du defaut d image-web (2 Mio), qui ne change pas');
+  assert.equal(LIMITES_IMAGE.octets, 2 * 1024 * 1024);
+});
+test('lireDemande apercu-web : liste blanche { urls }, 1 a 5 chaines de 2 048 unites au plus, sinon 400 forme ; 413 au-dela de 512 Kio', () => {
+  const ok = ap({ urls: ['https://a.test/r'], messages: 'ignore', system: 'ignore', max_tokens: 9, model: 'autre', url: 'https://b.test/', tools: [] });
+  assert.deepEqual(ok, { ok: true, corps: { entrees: [{ url: 'https://a.test/r', href: 'https://a.test/r' }] } }, 'champs en trop ignores (le `url` au singulier compris)');
+  const cinq = Array.from({ length: 5 }, (_, i) => `https://a.test/${i}`);
+  assert.deepEqual(ap({ urls: cinq }).corps.entrees.map((e) => e.url), cinq, 'cinq adresses : admises, dans l ordre');
+  for (const [nom, corps] of [['urls absent', {}], ['urls chaine', { urls: 'https://a.test/' }], ['urls objet', { urls: { 0: 'https://a.test/' } }], ['vide', { urls: [] }],
+    ['six', { urls: [...cinq, 'https://a.test/5'] }], ['un nombre', { urls: ['https://a.test/', 7] }], ['null', { urls: [null] }], ['objet', { urls: [{ url: 'https://a.test/' }] }],
+    ['2 049 unites', { urls: ['https://a.test/' + 'x'.repeat(2049 - 15)] }]]) {
+    const r = ap(corps); assert.deepEqual([r.ok, r.statut, r.raison], [false, 400, 'forme'], nom);
+  }
+  assert.equal(ap({ urls: ['https://a.test/' + 'x'.repeat(2048 - 15)] }).ok, true, '2 048 unites : admise');
+  const gros = JSON.stringify({ outil: 'apercu-web', corps: { urls: ['https://a.test/'], bourrage: 'x'.repeat(LIMITES.corps) } });
+  assert.equal(lireDemande(gros, { outil: 'apercu-web', modele: MODELE }).statut, 413, 'corps > 512 Kio (la borne de LIMITES.corps, pas celle de l extraction)');
+  assert.equal(lireDemande(JSON.stringify({ outil: 'apercu-web', corps: { urls: ['https://a.test/'] } }), { outil: 'apercu-web', modele: '' }).statut, 502, 'modele absent : 502 comme pour les autres outils');
+});
+test('lireDemande apercu-web : chaque adresse validee AVANT la reservation (I-UI-6, B-I-13) — refusee : href null, url telle quelle ; 422 interdit seulement si aucune admise', () => {
+  const r = ap({ urls: ['https://a.test/r?x=1#frag', 'http://b.test/', 'https://127.0.0.1/', 'https://u:p@c.test/', 'https://projet.test/x'] }, { hotesRefuses: ['projet.test'] });
+  assert.deepEqual(r, { ok: true, corps: { entrees: [
+    { url: 'https://a.test/r?x=1#frag', href: 'https://a.test/r?x=1' },
+    { url: 'http://b.test/', href: null }, { url: 'https://127.0.0.1/', href: null }, { url: 'https://u:p@c.test/', href: null }, { url: 'https://projet.test/x', href: null },
+  ] } }, 'url = la chaine recue (fragment garde) ; href = l adresse normalisee (fragment retire) ou null');
+  for (const [nom, urls] of [['http', ['http://b.test/']], ['locaux', ['https://localhost/', 'https://a.test:8443/', 'https://cdn.projet.test/i']], ['invisible', ['https://a.test/\u2028x']]]) {
+    const refus = ap({ urls }, { hotesRefuses: ['projet.test'] });
+    assert.deepEqual([refus.ok, refus.statut, refus.raison], [false, 422, 'interdit'], nom + ' : aucune admise = 422 sans reservation');
+  }
+  const une = ap({ urls: ['http://b.test/', 'https://localhost/', 'https://a.test/ok', 'https://a.test:8443/'] });
+  assert.deepEqual(une.corps.entrees.map((e) => e.href), [null, null, 'https://a.test/ok', null], 'une seule admise suffit : les refusees ne privent pas les autres');
+  const doublons = ap({ urls: ['https://a.test/r', 'https://a.test/r#a', 'https://a.test/r'] });
+  assert.deepEqual(doublons.corps.entrees.map((e) => e.href), ['https://a.test/r', 'https://a.test/r', 'https://a.test/r'], 'trois entrees pour trois chaines : le dedoublonnage est celui du TELECHARGEMENT (index.ts), jamais de la reponse (S-9)');
+  assert.equal(ap({ urls: ['https://x.test/'] }).ok, true, 'sans hotesRefuses : admis');
+  assert.deepEqual(ap({ urls: ['https://x.test/'] }, { hotesRefuses: ['x.test'] }).statut, 422, 'S-12 : l hote du projet refuse');
+});
+test('ligneJournal : apercu-web admis, usage nul → jetons null ; apercu_web (souligne) refuse', () => {
+  const base = { ownerId: 'u', statut: 200, usage: null, dureeMs: 3, octets: 40, maintenant: '2026-10-23T00:00:00.000Z' };
+  const l = ligneJournal({ ...base, outil: 'apercu-web' });
+  assert.deepEqual([l.outil, l.statut, l.jetons_entree, l.jetons_sortie, l.octets, l.jour], ['apercu-web', 200, null, null, 40, '2026-10-23']);
+  assert.equal(ligneJournal({ ...base, outil: 'apercu-web', statut: 499 }).statut, 499, 'client parti : 499 journalise (appel compte)');
+  assert.equal(ligneJournal({ ...base, outil: 'apercu_web' }).outil, null);
 });

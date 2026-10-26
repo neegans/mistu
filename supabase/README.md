@@ -1,7 +1,7 @@
 # Supabase — comment appliquer et prouver le serveur de synchronisation
 
-Ce dossier contient **tout le serveur** de Cuisine OS : quatre migrations générées (`0001`, `0002`, `0003`, `0005`) et deux
-écrites à la main (`0004`, `0006`), dans `migrations/` ; les preuves à jouer après les avoir appliquées (`proofs/`) et la fonction de la passerelle de l'assistant
+Ce dossier contient **tout le serveur** de Cuisine OS : quatre migrations générées (`0001`, `0002`, `0003`, `0005`) et trois
+écrites à la main (`0004`, `0006`, `0007`), dans `migrations/` ; les preuves à jouer après les avoir appliquées (`proofs/`) et la fonction de la passerelle de l'assistant
 (`functions/`). Rien n'est appliqué automatiquement : chaque étape est un geste de
 Neegan dans l'éditeur SQL du tableau de bord Supabase. Spec de référence :
 `docs/spec-compte-et-stockage-distant.md` (§ 3 pour le serveur, § 7.2 pour les preuves).
@@ -20,6 +20,8 @@ supabase/
   proofs/0005_imports.sql                à coller après 0005 ; jetons à remplacer ; n'écrit rien (rollback final)
   migrations/0006_lecture_web.sql        écrite à la main, hors du générateur (lot B « recette web complète », étape 12)
   proofs/0006_lecture_web.sql            à coller après 0006 ; rien à remplacer ; n'écrit rien (rollback final)
+  migrations/0007_apercu_web.sql         écrite à la main, hors du générateur (lot UI-2 « aperçus des résultats web », étape 13)
+  proofs/0007_apercu_web.sql             à coller après 0007 ; rien à remplacer ; n'écrit rien (rollback final)
   functions/assistant/                   la fonction de la passerelle (index.ts, logique.js, lecture-web.js, deno.json) ; déployée par le CLI, étape 10
   proofs/0001_hook.md                    gabarit : capture du crochet « Before User Created »
   proofs/0001_providers.md               gabarit : capture des fournisseurs de connexion
@@ -380,6 +382,38 @@ aussi `image-web` (lot F, à venir), qu'aucun code de ce lot n'écrit.
    (`read -rs JETON`, jamais le jeton dans une commande, `unset JETON` à la fin) ; S16 se joue sans jeton. S17 se vérifie d'abord sans la
    fonction, avec SON `User-Agent` (un site peut rediriger selon l'agent) : `curl -sI -A 'Mitsu/0.10 (+https://neegans.github.io/mistu/)'`
    sur l'adresse pour la redirection, puis `curl -s` sur la cible pour le bloc JSON-LD.
+
+### 13. Coller `0007_apercu_web.sql`, puis jouer sa preuve
+
+Lot UI-2 « aperçus des résultats web » (spec `docs/superpowers/specs/2026-10-23-experience-carnet-design.md`, § 6 et D-UI-14) : la passerelle gagne
+un sixième outil, `apercu-web`, sans modèle — pour les adresses des liens d'une recherche (cinq au plus), la fonction télécharge chaque page, en tire
+l'adresse d'image par la règle du lot F (`Recipe` lisible, sinon `og:image`), télécharge l'image (1 Mio au plus) et rend une entrée par adresse ; un
+appel du quota pour les cinq, zéro jeton. Le `check` de colonne du journal, tel que `0006` l'a laissé, ne connaît que cinq outils : **un code servi
+avant `0007` : chaque demande d'aperçus répond 502 `serveur` (la réservation refuse l'outil) ; l'app montre les résultats sans image, rien d'autre ne
+change.** `0007` est écrite à la main, comme `0004` et `0006` (hors du générateur et de `--check`), et ne touche qu'à cette contrainte : ni table, ni
+fonction, ni privilège ; le `drop` et l'`add` tiennent dans une transaction (DDL transactionnel : aucune fenêtre sans contrainte). Après `0007`,
+**la preuve `0006` devient historique** : rejouée, son 1.01 rougit (il attend cinq valeurs) — c'est attendu, pas un défaut.
+
+1. **Coller `migrations/0007_apercu_web.sql`** en entier, sous `postgres` (un collage = une transaction). Attendu : `Success. No rows returned`. Si la
+   contrainte porte un autre nom sur ce projet, le collage échoue sans rien appliquer : la garde 0 de la preuve nomme alors les contraintes `check`
+   réelles, à relever avant de corriger. Relever l'empreinte du fichier collé : `shasum -a 256 supabase/migrations/0007_apercu_web.sql`.
+2. Facultatif : `notify pgrst, 'reload schema';` collée seule — aucune table ni fonction neuve, le cache de PostgREST n'a rien à apprendre.
+3. **Jouer `proofs/0007_apercu_web.sql`** (rien à remplacer, aucune adresse à ajouter ; « Run without RLS »). Lire la ligne `999 BILAN` : `0 faux sur 11`,
+   c'est vert — dont 1.01 (les six outils, dans l'ordre d'`OUTILS_0007`) et 2.03 ter (`apercu-web` accepté par `assistant_reserver` ; les cinq anciens
+   passent encore, 3.01).
+4. **Consigner** la sortie dans `proofs/RESULTATS-mitsu.md`, section « Preuve `0007_apercu_web.sql` — à jouer » déjà préparée (tableau tel quel, empreinte).
+5. **Ordre, sans exception** : `0007` → redéploiement de la fonction (geste du chef d'orchestre, la commande du point 2 de l'étape 10 :
+   `supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api`) → les sondes sans dépense : S-A1 (forme refusée,
+   `urls: 'x'` → 400 `requete`, aucune ligne au journal), S-A2 (cinq adresses interdites → 422 `interdit`, aucune ligne), S-A3 (une admise et quatre
+   interdites → 200 avec quatre `interdit` et UNE ligne `apercu-web` : un appel du quota, zéro jeton), S-A4 (sans jeton → 401 `non_connecte`), et les
+   sondes S1-S9 du lot 4, S13-S19 du lot B, S-F1 à S-F3 du lot F et le `GET` d'état rejoués (leurs listes : `RESULTATS-mitsu.md`, sections « Passerelle
+   `assistant` », « Sondes `lecture-web` » et « Sondes `image-web` » ; `lecture-web` et `image-web` doivent être reprouvés sur la version 5) → les sondes payantes, un appel du quota
+   chacune et zéro jeton : S-A5 (les cinq adresses des liens de la recherche « puttanesca » → cinq images ou raisons, le compte d'`image_trop_lourde`
+   — il décide si la borne passe de 1 à 2 Mio —, la durée totale et la taille réelle de la réponse), S-A6 (une page de liste → `pas_de_recette`),
+   S-A7 (« cinq pages hostiles de 2 Mio » servies par un hôte public contrôlé par le contrôleur → 200 ou `delai` en moins de 60 s, jamais un 502
+   d'isolat tué) → fusion → `push`. Les sondes se consignent dans la section « Sondes `apercu-web` » de `RESULTATS-mitsu.md`. S-A3 et S-A5 à S-A7
+   passent la session et la liste admise : la session de Neegan est lue par le script d'attente du presse-papiers (fichier d'en-tête à mode 600,
+   `curl -H @fichier`, fichier vidé dès les sondes finies) — jamais le jeton dans une commande, ni dans un fichier du dépôt ; S-A4 se joue sans jeton.
 
 ## Où coller les sorties
 

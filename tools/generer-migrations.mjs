@@ -199,7 +199,7 @@ revoke execute on function public.purge_tombstones() from public, anon, authenti
 `;
 }
 
-// Une migration À AJOUT SEUL (0003, 0005, la 0007 à venir — 0006 est écrite à la main par le lot B), d'un seul gabarit : les tables neuves (`nouvelles` : celles de `stores`
+// Une migration À AJOUT SEUL (0003, 0005, la 0008 à venir — 0006 et 0007 sont écrites à la main, lots B et UI-2), d'un seul gabarit : les tables neuves (`nouvelles` : celles de `stores`
 // absentes de la liste figée précédente), leur révocation pour anon (S4 : la révocation générale de 0001 n'a couvert que les tables
 // d'alors), puis les quatre fonctions recréées avec la liste complète `stores`. Un seul texte pour toutes : l'empreinte épinglée de 0003
 // dans le test et `--check` garantissent qu'il rend 0003 octet pour octet (ronde 1 de la tâche 2 du lot A : le bloc 0005 recopiait 0003).
@@ -319,7 +319,7 @@ revoke all on private.storage_usage from anon, authenticated;
   // 0005, à ajout seul (lot A « import ciblé », spec 2026-10-18-import-cible § 3.5) : les magasins de SYNC_STORES absents de la liste FIGÉE
   // SYNC_STORES_0003 (aujourd'hui imports, le dernier : K-9), leur révocation pour anon, puis les quatre fonctions recréées avec les 27 noms.
   // Tant que 0005 n'est pas appliquée sur mitsu, elle suit le SYNC_STORES vivant ; une fois collée, la figer comme 0003 (SYNC_STORES_0005 +
-  // empreinte épinglée) et rendre le magasin suivant dans une 0007 (README, étape 11 ; 0006 est prise par le lot B, à la main).
+  // empreinte épinglée) et rendre le magasin suivant dans une 0008 (README, étape 11 ; 0006 et 0007 sont prises à la main, lots B et UI-2).
   const imports = ajoutSeul('0005_imports.sql', 'docs/superpowers/specs/2026-10-18-import-cible-design.md (rév. 3.1, § 3.5)',
     SYNC_STORES.filter((s) => !SYNC_STORES_0003.includes(s)), SYNC_STORES, '0001, 0002 et 0003 (0004 est indépendante)');
   return { tables, storage, delta, imports };
