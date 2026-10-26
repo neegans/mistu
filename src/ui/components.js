@@ -197,7 +197,10 @@ export function remplacerEnRevoquant(conteneur, ...noeuds) {
 }
 
 // doc : { recipe, version, book, edition, cooked }
-export function recipeCard(doc, { extra = null, href = null, reasons = null } = {}) {
+// Lot UI-1 (D-UI-5) : `photoEnTete: true` rend la carte-plat VERTICALE (cartePlat, ci-dessous) à partir de `fichier`, la ligne files que l'appelant a lue
+// en une fois ; sans l'option, la carte horizontale d'avant, inchangée (épinglée par tests/photo-plat.js, « référence construite »).
+export function recipeCard(doc, { extra = null, href = null, reasons = null, photoEnTete = false, fichier = null } = {}) {
+  if (photoEnTete) return cartePlat(doc, { fichier, href, extra });
   const { recipe, version, book, edition } = doc;
   const etiquette = etiquetteIA(version, recipe); // C-2 : depuis doc.version ou recipe.origine
   return el('a', { class: 'item-link card', href: href || `#/recipes/${recipe.id}` },
@@ -215,6 +218,61 @@ export function recipeCard(doc, { extra = null, href = null, reasons = null } = 
         doc.cooked ? el('span', { class: 'badge' }, t('Cuisinée {n}×', { n: doc.cooked })) : null)),
     extra);
 }
+
+// --- Lot UI-1 « Carnet » : la carte-plat et sa grille (spec D-UI-4, D-UI-5, I-UI-5, § 3.3) --------------------------------------------------------
+// dureeTotale(version) : PURE. UN nombre de minutes — total_minutes, sinon prep + cook dès que l'un des deux existe — ou null : rien sans durée (B-I-6),
+// jamais la paire « actif · total » de timeText. Une création IA n'a qu'une estimation, dite à part sur sa fiche (C-6, comme timeText). Une valeur
+// qui n'est pas un nombre fini (fiche reçue ou restaurée) vaut null.
+export function dureeTotale(version) {
+  if (!version || estCreationIA(version)) return null;
+  const nombre = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+  const total = nombre(version.total_minutes);
+  if (total !== null) return total;
+  const prep = nombre(version.prep_minutes); const cook = nombre(version.cook_minutes);
+  return prep === null && cook === null ? null : (prep || 0) + (cook || 0);
+}
+
+// ligneSource(doc) : PURE. « Du web · {hôte} » quand la fiche a une adresse lisible (hôte RECALCULÉ par lienSignet, jamais source_label : S7), sinon
+// « De mon livre · {titre} » quand elle vient d'un livre, sinon sa provenance d'avant (provenanceText : étiquette IA, source personnelle, adresse non
+// reconnue) ; puis « · {durée} » (formatMinutes) seulement quand dureeTotale en donne une. Une fiche qui a un livre ET une adresse est une page web rangée
+// dans un livre : son texte vient du web, la ligne dit le web (le filtre « De mes livres » la garde, lui : D-UI-4).
+export function ligneSource(doc) {
+  const { recipe, book, edition, version } = doc;
+  const lien = recipe?.source_url ? lienSignet(recipe.source_url) : null;
+  const source = lien?.ok ? t('Du web · {h}', { h: lien.hote }) : book ? t('De mon livre · {t}', { t: book.title || t('Sans titre') }) : provenanceText(recipe, book, edition);
+  const duree = dureeTotale(version);
+  return duree === null ? source : `${source} · ${formatMinutes(duree)}`;
+}
+
+// cartePlat(doc, { fichier, href, extra }) : la carte-plat verticale. La décision est SYNCHRONE et ne lit rien : `fichier` (la ligne files passée par
+// l'appelant, lue en une fois par repo.getFiles) est sa seule source d'image (I-UI-5) ; quand typeAffichage en fait une image (liste blanche ; le type du
+// blob gagne : G, F-9), img.plat-vignette.grande 4:3 (alt vide : la carte porte le titre ; la classe plat-vignette la soumet à la révocation au redessin,
+// D-T9) ; sinon .sans-photo, le bloc de titre sur --paper-2 — jamais de cadre vide ni d'image générique. Des octets que le navigateur ne décode pas (HEIC
+// hors Safari, octets tronqués) lèvent error : l'img est retirée, la carte passe .sans-photo, son URL révoquée. La variante ne rend PAS vignettePlat (H-10).
+function cartePlat(doc, { fichier = null, href = null, extra = null } = {}) {
+  const { recipe, version } = doc;
+  const type = typeAffichage(fichier);
+  const affichable = !!type && type.startsWith('image/');
+  const carte = el('a', { class: `item-link carte-plat${affichable ? '' : ' sans-photo'}`, href: href || `#/recipes/${recipe.id}` });
+  if (affichable) {
+    const u = displayUrl(fichier, urlDeBlob);
+    const img = el('img', { class: 'plat-vignette grande', alt: '', loading: 'lazy', src: u });
+    img.addEventListener('error', () => { img.remove(); carte.classList.add('sans-photo'); revoquerUrlDeBlob(u); }, { once: true });
+    carte.append(img);
+  }
+  const badges = [availabilityBadge(recipe), etiquetteIA(version, recipe), recipe.favorite ? el('span', { class: 'badge' }, '★ ' + t('Favori')) : null,
+    doc.cooked ? el('span', { class: 'badge' }, t('Cuisinée {n}×', { n: doc.cooked })) : null].filter(Boolean);
+  carte.append(el('div', { class: 'carte-plat-corps' },
+    el('h3', null, recipe.display_title || recipe.original_title),
+    el('div', { class: 'muted carte-plat-source' }, ligneSource(doc)),
+    badges.length ? el('div', { class: 'row carte-plat-badges' }, ...badges) : null));
+  // `extra` seulement quand il est donné : Element.append(null) écrirait le texte « null » sous la carte (el() les écarte, append() non).
+  if (extra) carte.append(extra);
+  return carte;
+}
+
+// grilleCartes(noeuds) : div.grille-plats (2 colonnes dès 360 px, 3 dès 900 px : styles.css) ; `.grid` reste la grille des couvertures.
+export function grilleCartes(noeuds) { return el('div', { class: 'grille-plats' }, ...noeuds); }
 
 // La vignette d'un livre (spec § 6) : l'image si la LIGNE files est là, sinon le titre sur le fond — et rien de plus.
 // Un pointeur cover_sha256 sans octets (fiche reçue d'un autre appareil, avant L4) n'est pas un manque à signaler ici :

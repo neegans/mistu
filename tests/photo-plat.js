@@ -1319,8 +1319,11 @@ export async function runPhotoPlatTests({ eq, ok }) {
       const decl = Object.fromEntries(regle.split(';').map((d) => [d.slice(0, d.indexOf(':')).trim(), d.slice(d.indexOf(':') + 1).trim()]).filter(([k, v]) => k && v));
       eq([decl.width, decl.height, decl['object-fit'], decl['border-radius'], decl.border, decl.flex], ['72px', '72px', 'cover', '8px', '1px solid var(--line)', '0 0 auto'], 'styles.css : .plat-vignette 72 × 72, object-fit cover, coins 8 px, bord var(--line), flex 0 0 auto (D-F9)');
       ok(regle.trim() !== '' && !/display\s*:\s*none/.test(regle) && !/#[0-9a-f]{3,8}\b/i.test(regle), 'styles.css : la règle est lue, et elle ne porte ni display:none ni couleur en dur (T-1, T-2 : tests/theme.js inchangé)');
-      // Ronde 1 : la PREMIÈRE règle seule était lue — une règle plus loin (`.card .plat-vignette { width: 160px }`) la surchargeait sans rouge.
-      eq([...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) => m[1].trim()).filter((s) => /\.plat-vignette\b/.test(s)), ['.plat-vignette'], 'styles.css : un seul sélecteur nomme .plat-vignette (aucune surcharge plus loin)');
+      // Ronde 1 : la PREMIÈRE règle seule était lue — une règle plus loin (`.card .plat-vignette { width: 160px }`) la surchargeait sans rouge. UI-1 T2 (F-7, K-2) :
+      // deux règles neuves la complètent, `.grande` (carte-plat, 4:3 ; la MÊME règle que UI-2, au caractère près : R-UI1-1) et `.petite` (48 px, ligne compacte
+      // de la fiche livre) — EXACTEMENT trois sélecteurs, dans cet ordre (UI-2 en épingle deux : à la fusion, cette version à trois vaut).
+      eq([...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) => m[1].trim()).filter((s) => /\.plat-vignette\b/.test(s)), ['.plat-vignette', '.plat-vignette.grande', '.plat-vignette.petite'],
+        'styles.css : exactement trois sélecteurs nomment .plat-vignette — la règle 72 px, puis .grande et .petite, dans cet ordre (aucune surcharge ailleurs)');
     });
 
     await run('CSP et sources (I-F3, I-F8, D-F11)', async () => {

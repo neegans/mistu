@@ -1508,13 +1508,14 @@ export async function runCreerIaTests({ eq, ok }) {
       const ancienne = { ...fiche, id: 'rc_t6_anc', original_title: 'La plus ancienne', current_version_id: 'rv_t6_anc', created_at: '2026-10-17T00:00:00.000Z' };
       const vRecente = { ...creation, id: 'rv_t6_rec', recipe_id: recente.id };
       const vAncienne = { ...creation, id: 'rv_t6_anc', recipe_id: ancienne.id };
-      const sections = (racine) => [...racine.querySelectorAll('section.card')].map((s) => s.querySelector('h2')?.textContent);
-      const sectionIA = (racine) => [...racine.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Recettes créées avec l’IA') || null;
-      const biblio = await renderLibrary({}, {}, ctxBiblio([ancienne, fiche, signet, ficheMain, recente], [vAncienne, creation, manuelle, vRecente]));
+      // UI-1 T2 : les deux sections vivent sous Livres ({ tab: 'books' }) et sont PLAIN (D-UI-8).
+      const sections = (racine) => [...racine.querySelectorAll('section.plain')].map((s) => s.querySelector('h2')?.textContent);
+      const sectionIA = (racine) => [...racine.querySelectorAll('section.plain')].find((s) => s.querySelector('h2')?.textContent === 'Recettes créées avec l’IA') || null;
+      const biblio = await renderLibrary({}, { tab: 'books' }, ctxBiblio([ancienne, fiche, signet, ficheMain, recente], [vAncienne, creation, manuelle, vRecente]));
       eq(sections(biblio), ['Liens web gardés', 'Recettes créées avec l’IA'], 'bibliothèque : la section « Recettes créées avec l’IA » vient après « Liens web gardés » (N-7)');
       eq([textes(sectionIA(biblio), 'h3'), textes(sectionIA(biblio), '[data-role="etiquette-ia"]')], [['La plus récente', 'Saumon au fenouil', 'La plus ancienne'], ['Créée avec l’IA · non testée', 'Créée avec l’IA · non testée', 'Créée avec l’IA · non testée']], 'bibliothèque : les fiches origine ia seulement (ni le signet, ni la recette à la main), la plus récemment créée d’abord, avec leur étiquette');
-      eq(sections(await renderLibrary({}, {}, ctxBiblio([signet, ficheMain], [manuelle]))), ['Liens web gardés'], 'bibliothèque : sans fiche origine ia, aucune section');
-      const biblioC = await renderLibrary({}, {}, ctxBiblio([ficheCorrigee], [creation, correction]));
+      eq(sections(await renderLibrary({}, { tab: 'books' }, ctxBiblio([signet, ficheMain], [manuelle]))), ['Liens web gardés'], 'bibliothèque : sans fiche origine ia, aucune section');
+      const biblioC = await renderLibrary({}, { tab: 'books' }, ctxBiblio([ficheCorrigee], [creation, correction]));
       eq([sections(biblioC), textes(sectionIA(biblioC), 'h3 + div'), textes(sectionIA(biblioC), '[data-role="etiquette-ia"]')], [['Recettes créées avec l’IA'], ['Créée avec l’IA'], ['Corrigée par toi — d’après une création IA']], 'bibliothèque (N-10) : une fiche corrigée reste dans la section (origine, pas la version courante) et dit sa lignée');
 
       // --- Chaînes anglaises : chaque texte neuf de T6 a son entrée, et l'interface anglaise les rend

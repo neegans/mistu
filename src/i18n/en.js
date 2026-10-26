@@ -752,4 +752,19 @@ export const EN = {
   "La photo du plat n’a pas pu être changée. Réessaie.": "The photo of the dish could not be changed. Try again.",
   "Retirer la photo du plat": "Remove the photo of the dish",
   "Après l’enregistrement, l’app essaiera de récupérer la photo du plat de la page : un appel de plus, compté dans ton quota du jour.": "After saving, the app will try to fetch the photo of the dish from the page: one more call, counted in your daily quota.",
+  // Lot UI-1 « Carnet », tâche 2 (spec § 5) : la Bibliothèque « Recettes » et la carte-plat. « À importer » est aussi le badge court de la tâche 5 (UNE clé).
+  // « Recettes » et « Toutes » traduisent au passage les deux appels de book.js:193-195 qui n'avaient pas d'entrée (sans les changer).
+  'Tes livres, tes trouvailles, tes recettes.': 'Your books, your finds, your recipes.',
+  'Recettes': 'Recipes',
+  'Ajouter une recette': 'Add a recipe',
+  'Une recette, un ingrédient…': 'A recipe, an ingredient…',
+  'Toutes': 'All',
+  'De mes livres': 'From my books',
+  'Du web': 'From the web',
+  'Recettes de mes livres à importer': 'Recipes from my books to import',
+  'Voir plus': 'Show more',
+  'À importer': 'To import',
+  'Du web · {h}': 'From the web · {h}',
+  'De mon livre · {t}': 'From my book · {t}',
+  'Aucune recette pour l’instant.': 'No recipes yet.',
 };
