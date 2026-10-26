@@ -31,8 +31,10 @@ export async function runCarnetTests({ eq, ok }) {
 
   // --- Tâche 1 — jetons (D-UI-2, § 3.1) : les quatre valeurs de l'olive, les huit contrastes de la table, plus aucune tomate.
   await bloc('jetons', async () => {
-    eq([jetons['--action'], jetons['--action-2'], jetons['--action-bg'], jetons['--tap']], ['#4f6b2e', '#3e5424', '#e9eddf', 'rgba(79,107,46,.15)'], 'D-UI-2 : --action, --action-2, --action-bg et --tap sont l’olive (§ 3.1) ; les 25 autres jetons restent épinglés par tests/theme.js');
-    const c = (a, b) => Number(contraste(hex(a), hex(b)).toFixed(2));
+    eq([jetons['--action'], jetons['--action-2'], jetons['--action-bg'], jetons['--tap']], ['#4f6b2e', '#3e5424', '#e9eddf', 'rgba(79,107,46,.15)'], 'D-UI-2 : --action, --action-2, --action-bg et --tap sont l’olive (§ 3.1)');
+    // Ronde 1 (M11) : « les 25 autres : inchangés » (§ 3.1) — theme.js n'en épingle que sept par valeur ; les 34 autres déclarations de :root le sont ici, une à une, dans l'ordre.
+    eq(Object.fromEntries(Object.entries(jetons).filter(([k]) => !['--action', '--action-2', '--action-bg', '--tap'].includes(k))), { '--paper': '#f8f5ef', '--paper-2': '#f1ece3', '--card': '#fffdf9', '--ink': '#242821', '--muted': '#636860', '--line': '#e4dfd5', '--field-line': '#8f8a80', '--accent': '#45604a', '--accent-2': '#55705a', '--accent-bg': '#e4ebe2', '--warn': '#8b5f10', '--warn-bg': '#fbf1dc', '--warn-line': '#ead9b3', '--danger': '#9c2f22', '--danger-bg': '#f9e4df', '--danger-line': '#e9bfb6', '--ok': '#3d6b4a', '--ok-bg': '#e2efe4', '--backdrop': 'rgba(36,40,33,.45)', '--radius': '12px', '--radius-pill': '999px', '--shadow': '0 1px 2px rgba(36,40,33,.05), 0 8px 24px rgba(36,40,33,.06)', '--serif': 'Georgia, "Times New Roman", serif', '--sans': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', '--topbar-h': '64px', '--nav-h': '64px', '--safe-b': 'env(safe-area-inset-bottom, 0px)', '--safe-t': 'env(safe-area-inset-top, 0px)', '--cream': 'var(--paper)', '--cream-2': 'var(--paper-2)', '--green': 'var(--accent)', '--green-2': 'var(--accent-2)', '--sage': '#b9c8bb', '--sage-2': 'var(--accent-bg)' }, 'D-UI-2 / § 3.1 : les 34 autres déclarations de :root gardent leur valeur de la refonte, une à une (« les 25 autres : inchangés » ; aucun jeton neuf, aucun retiré)');
+    const c =(a, b) => Number(contraste(hex(a), hex(b)).toFixed(2));
     eq([c('--action', '--paper'), c('--action', '--card'), c('--action', '--accent-bg'), c('--action', '--paper-2'), c('--action-2', '--paper'), c('--muted', '--action-bg'), c('--action', '--action-bg'), c('--warn', '--action-bg')], [5.55, 5.95, 4.97, 5.14, 7.72, 4.8, 5.08, 4.71], 'D-UI-2 : les huit contrastes de § 3.1, recalculés par la formule de theme.js (olive sur papier, carte, accent-bg et paper-2 ; survol sur papier ; gris, olive et ambre sur action-bg)');
     eq([css.includes('#bc3026'), css.includes('#98231b'), css.includes('#f7e3e0'), /rgba\(188,\s*48,\s*38/.test(css)], [false, false, false, false], 'D-UI-2 : plus aucune tomate dans la feuille servie (ni #bc3026, ni #98231b, ni #f7e3e0, ni rgba(188,48,38,…))');
   });
@@ -44,7 +46,9 @@ export async function runCarnetTests({ eq, ok }) {
     eq([regle('.two-col')?.['grid-template-columns'], regle('.two-col', '@media (min-width: 760px)')?.['grid-template-columns'], regle('.two-col.narrow-left', '@media (min-width: 760px)')?.['grid-template-columns'], regle('.two-col.livre')], ['1fr', '1fr 1fr', '320px 1fr', null], 'F-17 : .two-col (760 px) et .two-col.narrow-left inchangées ; .two-col.livre n’a aucune règle hors @media');
     eq([regle('.grid.livres')?.['grid-template-columns'], regle('.grid')?.['grid-template-columns']], ['repeat(auto-fill, minmax(170px, 1fr))', 'repeat(auto-fill, minmax(150px, 1fr))'], '§ 3.3 : .grid.livres minmax(170px, 1fr) ; .grid intacte');
     const plain = regle('section.plain');
-    eq([plain?.['box-shadow'], plain?.padding, plain?.['margin-bottom'], regle('section.plain > h2')?.['border-bottom']], ['none', '0', '1.6rem', '1px solid var(--line)'], 'D-UI-8 : section.plain sans ombre ni marge intérieure, 1,6 rem sous elle ; filet fin --line sous son h2');
+    eq([plain?.['box-shadow'], plain?.padding, plain?.['margin-bottom'], regle('section.plain > h2')?.['border-bottom'], regle('section.plain > h2')?.['padding-bottom']], ['none', '0', '1.6rem', '1px solid var(--line)', '.4rem'], 'D-UI-8 : section.plain sans ombre ni marge intérieure, 1,6 rem sous elle ; filet fin --line sous son h2, à .4 rem du texte');
+    // Ronde 1 (M14) : la taille de 24 px vient aussi des attributs du svg — l'alignement et la non-compression ne tiennent qu'à la règle .icone.
+    eq([regle('.icone')?.display, regle('.icone')?.['vertical-align'], regle('.icone')?.['flex-shrink'], regle('.empty .ico .icone')?.width], ['inline-block', 'middle', '0', '40px'], 'D-UI-9 : .icone en ligne, alignée au milieu du texte, jamais compressée dans une rangée flex ; 40 px dans un état vide');
     eq([regle('h1')?.['font-size'], regle('h1.titre-fiche')?.['font-size'], R.filter((r) => r.sel === 'h1' && r.media).length, regle('h2')?.['font-size'], regle('h3')?.['font-size'], regle('header.stack h1 + p.muted')?.['font-size']], ['clamp(1.8rem, 6vw, 3.2rem)', 'clamp(1.5rem, 4.5vw, 2.6rem)', 0, '1.6rem', '1.15rem', '1.05rem'], 'D-UI-3 / § 3.2 / H-6 : UNE formule clamp() par titre, plus aucune règle h1 sous @media ; h2 1,6 rem, h3 1,15 rem, sous-titre de page 1,05 rem');
     eq([regle('.step-num')?.background, regle('.step-num')?.color], ['var(--paper-2)', 'var(--ink)'], '§ 3.2 : .step-num en --paper-2 / --ink (le cercle beige des maquettes)');
   });
@@ -73,14 +77,14 @@ export async function runCarnetTests({ eq, ok }) {
     const { icone, NOMS_ICONES } = I; // module absent : TypeError, le bloc rougit par son nom
     eq([Object.isFrozen(NOMS_ICONES), NOMS_ICONES.length, [...NOMS_ICONES].sort()], [true, 23, [...NOMS].sort()], 'D-UI-9 / K-3 : exactement vingt-trois noms, ceux de la spec § 3.3, gelés');
     const NS = 'http://www.w3.org/2000/svg';
-    const forme = (n) => { const s = icone(n); const traces = [...s.children]; return [s.namespaceURI, s.tagName.toLowerCase(), s.getAttribute('viewBox'), s.getAttribute('width'), s.getAttribute('height'), s.getAttribute('aria-hidden'), s.getAttribute('focusable'), s.getAttribute('fill'), s.getAttribute('stroke'), s.classList.contains('icone') && s.classList.contains('icone-' + n), traces.length >= 1 && traces.every((p) => p.namespaceURI === NS && p.tagName === 'path' && /^M[\d.\s,a-zA-Z-]+$/.test(p.getAttribute('d') || ''))]; };
-    const FORME = [NS, 'svg', '0 0 24 24', '24', '24', 'true', 'false', 'none', 'currentColor', true, true];
-    eq(NOMS.map((n) => [n, ...forme(n)]), NOMS.map((n) => [n, ...FORME]), 'D-UI-9 / § 3.3 : chaque icône = svg[aria-hidden=true][focusable=false] 24 × 24, viewBox 0 0 24 24, fill none, stroke currentColor, classes icone + icone-<nom>, des <path d> au trait');
+    const forme = (n) => { const s = icone(n); const traces = [...s.children]; return [s.namespaceURI, s.tagName.toLowerCase(), s.getAttribute('viewBox'), s.getAttribute('width'), s.getAttribute('height'), s.getAttribute('aria-hidden'), s.getAttribute('focusable'), s.getAttribute('fill'), s.getAttribute('stroke'), s.getAttribute('stroke-width'), s.getAttribute('stroke-linecap'), s.getAttribute('stroke-linejoin'), s.classList.contains('icone') && s.classList.contains('icone-' + n), traces.length >= 1 && traces.every((p) => p.namespaceURI === NS && p.tagName === 'path' && /^M[\d.\s,a-zA-Z-]+$/.test(p.getAttribute('d') || ''))]; };
+    const FORME = [NS, 'svg', '0 0 24 24', '24', '24', 'true', 'false', 'none', 'currentColor', '1.75', 'round', 'round', true, true];
+    eq(NOMS.map((n) => [n, ...forme(n)]), NOMS.map((n) => [n, ...FORME]), 'D-UI-9 / § 3.3 : chaque icône = svg[aria-hidden=true][focusable=false] 24 × 24, viewBox 0 0 24 24, fill none, stroke currentColor, trait 1,75 à bouts et joints ronds, classes icone + icone-<nom>, des <path d> au trait');
     eq(new Set(NOMS.map((n) => icone(n).innerHTML)).size, 23, 'D-UI-9 : vingt-trois tracés DISTINCTS (aucune icône recopiée d’une autre)');
     // La levée ATTENDUE porte son message (« icône inconnue : … ») : un `nom in TRACES` laisserait passer 'constructor' et lèverait AUTRE chose (« is not iterable »,
     // une TypeError aussi) — le message tranche (rév. 2, mutant 8).
     const leve = (f) => { try { f(); return false; } catch (e) { return e instanceof TypeError && /icône inconnue/.test(e.message); } };
-    eq([leve(() => icone('inconnue')), leve(() => icone('')), leve(() => icone('Soleil')), leve(() => icone('constructor')), leve(() => icone('toString')), leve(() => icone(undefined)), leve(() => icone(null)), leve(() => icone(7))], [true, true, true, true, true, true, true, true], 'D-UI-9 : icone(nom) lève une TypeError « icône inconnue : … » sur un nom inconnu — casse comprise ; les clés héritées du prototype (constructor, toString) ne sont pas des icônes (Object.hasOwn, pas `in`)');
+    eq([leve(() => icone('inconnue')), leve(() => icone('')), leve(() => icone('Soleil')), leve(() => icone('constructor')), leve(() => icone('toString')), leve(() => icone(undefined)), leve(() => icone(null)), leve(() => icone(7)), leve(() => icone(['plus'])), leve(() => icone({ toString: () => 'plus' }))], [true, true, true, true, true, true, true, true, true, true], 'D-UI-9 : icone(nom) lève une TypeError « icône inconnue : … » sur un nom inconnu — casse comprise ; les clés héritées du prototype (constructor, toString) ne sont pas des icônes (Object.hasOwn, pas `in`) ; un non-texte qui se convertit en un nom du jeu ([\'plus\'], un objet à toString) non plus (garde typeof, ronde 1)');
     ok(icone('plus') !== icone('plus') && icone('plus').isEqualNode(icone('plus')), 'icone() rend un nœud NEUF à chaque appel, identique au précédent (une icône par site, jamais un nœud déplacé)');
   });
 
@@ -137,18 +141,46 @@ export async function runCarnetTests({ eq, ok }) {
     // D-UI-9 : par module, l'ENSEMBLE (trié) des noms d'icône de ses emptyState, et aucun nom hors du jeu (un émoji resté y tomberait) — un ensemble, pas la
     // liste ordonnée : T2 ajoute deux emptyState('assiette', …) à library.js (recettesTab, aImporterTab) sans toucher ce filet ; onze sites à f3672be.
     const SITES = { 'library.js': ['assiette', 'livres'], 'grocery.js': ['panier'], 'meals.js': ['couverts', 'salade'], 'kitchen.js': ['flocon', 'toque'], 'dish.js': ['assiette'], 'book.js': ['livre-ouvert'], 'search.js': ['loupe'], 'import.js': ['appareil-photo'] };
+    // Ronde 1 (M9) : TOUS les modules de src/ui que SHELL sert (emptyState lève sur un nom inconnu : un appel hors des huit modules de SITES planterait son
+    // écran) ; le premier argument de chaque appel est un littéral de N'IMPORTE QUELLE forme ('…', "…", `…` sans ${}) dont le texte est un nom du jeu — un
+    // émoji, un nom hors du jeu ou une expression (constante, String.fromCodePoint…) tombent dans horsJeu. Rien n'est retiré du texte : un appel laissé
+    // en commentaire compte aussi (plus strict ; un « 'image/*' » ouvrirait un faux commentaire et cacherait du code à un retrait par expression).
+    const shell = await lire('../sw.js');
+    const modulesUi = [...shell.matchAll(/'\.\/(src\/ui\/[a-z0-9-]+\.js)'/g)].map((m) => m[1]);
     const releve = {}; const horsJeu = [];
-    for (const f of Object.keys(SITES)) { const src = await lire('../src/ui/' + f); const noms = [...src.matchAll(/\bemptyState\(\s*'([^']*)'/g)].map((m) => m[1]); releve[f] = [...new Set(noms)].sort(); horsJeu.push(...noms.filter((n) => !NOMS.includes(n)).map((n) => `${f} : ${n}`)); }
-    eq([releve, horsJeu], [SITES, []], 'D-UI-9 / § 3.3 : chaque module porte l’ENSEMBLE de noms d’icône attendu pour ses états vides (onze sites à f3672be ; T2 en ajoute deux à library.js) et aucun nom hors du jeu — plus aucun émoji');
-    const app = await lire('../src/app.js');
+    for (const f of modulesUi) {
+      const args = [...(await lire('../' + f)).matchAll(/(?<!function\s+)\bemptyState\(\s*([^,)]*)/g)].map((m) => { const a = m[1].trim(); return /^(['"`])([^'"`$]*)\1$/.exec(a)?.[2] ?? a; });
+      if (args.length) releve[f.slice(7)] = [...new Set(args)].sort();
+      horsJeu.push(...args.filter((n) => !NOMS.includes(n)).map((n) => `${f} : ${n}`));
+    }
+    eq([Object.fromEntries(Object.keys(SITES).map((f) => [f, releve[f]])), horsJeu, modulesUi.length > 20], [SITES, [], true], 'D-UI-9 / § 3.3 : chaque module porte l’ENSEMBLE de noms d’icône attendu pour ses états vides (onze sites à f3672be ; T2 en ajoute deux à library.js) et, dans TOUS les modules de src/ui que SHELL sert, chaque emptyState prend un nom du jeu (toute forme de guillemet) — plus aucun émoji');
+    // Ronde 1 (constats 2, 3 et 6 : X1, XROUE) : app.js est relu SANS ses commentaires (lecteur qui saute les chaînes '…', "…", `…` : app.js n'a ni
+    // expression régulière littérale ni commentaire /* */ à la ronde 1) ; navLinks rend icone(n.ico), jamais le nom brut, et la roue est l'icône ENFANT
+    // du lien #/settings du panneau latéral (un « icone('roue') » laissé dans un commentaire ne compte plus). Un retrait qui mangerait du code rougit.
+    const sansCommentaires = (src) => { let out = ''; let q = null; for (let i = 0; i < src.length; i++) { const c = src[i]; if (q) { out += c; if (c === '\\') out += src[++i] ?? ''; else if (c === q) q = null; } else if (c === '/' && src[i + 1] === '/') { while (i + 1 < src.length && src[i + 1] !== '\n') i++; } else if (c === '/' && src[i + 1] === '*') { const fin = src.indexOf('*/', i + 2); i = fin < 0 ? src.length : fin + 1; } else { if (c === "'" || c === '"' || c === '`') q = c; out += c; } } return out; };
+    const app = sansCommentaires(await lire('../src/app.js'));
     const nav = [...app.matchAll(/\{ href: '([^']+)', label: '([^']+)', ico: '([^']+)'/g)].map((m) => m.slice(1, 4));
-    eq([nav, app.includes("from './ui/icones.js'"), app.includes("icone('roue')"), app.includes('Mes livres'), /ico: '[^a-z]/.test(app)], [[['/', 'Aujourd’hui', 'soleil'], ['/library', 'Bibliothèque', 'bibliotheque'], ['/meals', 'Ma semaine', 'calendrier'], ['/kitchen', 'Ma cuisine', 'toque'], ['/add', 'Ajouter', 'plus']], true, true, false, false], 'D-UI-4 / D-UI-9 : NAV = cinq entrées, libellé « Bibliothèque », des noms d’icônes du jeu (plus un émoji), la roue des Réglages aussi (source relu : app.js est hors suite, § 11)');
+    const corpsNavLinks = /\nfunction navLinks\([^)]*\) \{\n([\s\S]*?)\n\}\n/.exec(app)?.[1] || '';
+    eq([nav, app.includes("from './ui/icones.js'"), corpsNavLinks.includes('icone(n.ico)'), /,\s*n\.ico\s*\)/.test(corpsNavLinks), /el\('a', \{ href: '#\/settings'[^}]*\}, el\('span', \{ class: 'ico', 'aria-hidden': 'true' \}, icone\('roue'\)\)/.test(app), app.includes('Mes livres'), /ico: '[^a-z]/.test(app)], [[['/', 'Aujourd’hui', 'soleil'], ['/library', 'Bibliothèque', 'bibliotheque'], ['/meals', 'Ma semaine', 'calendrier'], ['/kitchen', 'Ma cuisine', 'toque'], ['/add', 'Ajouter', 'plus']], true, true, false, true, false, false], 'D-UI-4 / D-UI-9 : NAV = cinq entrées, libellé « Bibliothèque », des noms d’icônes du jeu (plus un émoji) ; navLinks rend icone(n.ico), jamais le nom brut ; la roue du panneau latéral est icone(\'roue\') dans le lien #/settings (source relu sans commentaires : app.js est hors suite, § 11)');
     const [recipe, book, accueil, search] = await Promise.all(['recipe.js', 'book.js', 'accueil-livre.js', 'search.js'].map((f) => lire('../src/ui/' + f)));
     eq([(recipe.match(/label: t\('Bibliothèque'\)/g) || []).length, (book.match(/label: t\('Bibliothèque'\)/g) || []).length, recipe.includes("t('Mes livres')"), book.includes("t('Mes livres')"), accueil.includes("t('Aller à la bibliothèque.')"), accueil.includes('Aller à Mes livres.'), search.includes("['books', 'Mes livres']")], [1, 1, false, false, true, false, true], 'D-UI-4 / B-M-9 : « ← Bibliothèque » sur la fiche recette et la fiche livre, « Aller à la bibliothèque. » à l’accueil d’un livre ; le segment « Mes livres » de la RECHERCHE (une portée, pas l’écran) reste');
     const { EN } = await import('../src/i18n/en.js');
     eq([EN['Bibliothèque'], EN['Aller à la bibliothèque.'], 'Aller à Mes livres.' in EN, EN['Mes livres']], ['Library', 'Go to the library.', false, 'My books'], '§ 5 : en.js porte « Library » et « Go to the library. », a perdu « Go to My books. » (chaîne retirée du source) et garde « My books » (segment de la recherche)');
-    const sw = await lire('../sw.js');
-    eq([sw.includes("'./src/ui/icones.js'"), MODULES_NEUFS.includes('../src/ui/icones.js')], [true, true], 'I-UI-7 / § 7 T1 : ./src/ui/icones.js dans SHELL (sw.js) et dans le filet i18n MODULES_NEUFS (tests/ajouter.js:8)');
+    eq([shell.includes("'./src/ui/icones.js'"), MODULES_NEUFS.includes('../src/ui/icones.js')], [true, true], 'I-UI-7 / § 7 T1 : ./src/ui/icones.js dans SHELL (sw.js) et dans le filet i18n MODULES_NEUFS (tests/ajouter.js:8)');
+  });
+
+  // --- Tâche 1, ronde 1 (M15) — rendus : un état vide de module rendu par son écran (il lève sur un nom inconnu : l'écran planterait), et le texte de la
+  // carte « Plus tard » lu dans le modèle pur de l'accueil d'un livre. Aucune base : la liste de courses est vide, son contexte est un objet en mémoire.
+  await bloc('rendus : état vide de la liste de courses, accueil d’un livre', async () => {
+    const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
+    const avant = getUiLocale(); setUiLocale('fr');
+    try {
+      const { renderShoppingList } = await import('../src/ui/grocery.js');
+      const { accueilLivreModel } = await import('../src/ui/accueil-livre.js');
+      const vue = await renderShoppingList({ id: 'l1' }, {}, { shopping_lists: [{ id: 'l1', title: 'Courses', items: [] }], versionsById: new Map(), recipesById: new Map(), ingredientsById: new Map(), conventionFor: () => null, settings: { ui_locale: 'fr' } });
+      eq([vue.querySelectorAll('.empty').length, vue.querySelector('.empty .ico')?.children.length, !!vue.querySelector('.empty .ico > svg.icone.icone-panier'), vue.querySelector('.empty .ico')?.textContent, vue.querySelector('.empty p')?.textContent], [1, 1, true, '', 'Aucun ingrédient structuré dans ces recettes.'], 'D-UI-9 : une liste de courses vide rend SON état vide, l’icône « panier » au trait et aucun émoji (rendu par renderShoppingList, contexte en mémoire)');
+      eq(accueilLivreModel({ nouveau: 'x' }).cartes.map((c) => [c.action, c.texte]).at(-1), ['plusTard', 'Aller à la bibliothèque.'], 'D-UI-4 / B-M-9 : la carte « Plus tard » de l’accueil d’un livre dit « Aller à la bibliothèque. » (modèle pur)');
+    } finally { setUiLocale(avant); }
   });
 
   // --- repère de fin : les tâches 2 à 6 ajoutent leurs blocs AU-DESSUS de cette ligne ---
