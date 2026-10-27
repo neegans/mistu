@@ -65,6 +65,7 @@ export const vuesPhotoPlat = () => vues.size; // tests seulement (ronde 1 : l'en
 // même un cadre) ; octets d'un type que typeAffichage ne rend pas image/ : null ; sans octets : la vignette d'état de G et son « Télécharger »,
 // redessinée sur place. La légende est calculée DANS le redessin : elle suit l'image après un téléchargement. Ronde 1 : `fichier` (facultatif) =
 // la ligne files déjà lue par l'appelant (la zone la lit pour `present`) — une seule lecture par redessin ; absent (undefined), elle est lue ici.
+// UI-1 (D-UI-6) : l'image n'a plus de largeur en ligne, `.photo-plat img` la rend 4:3 dans la colonne de l'en-tête.
 export async function figurePhotoPlat(recipe, { repo = repoModule, ctxF = {}, fichier: dejaLu = undefined } = {}) {
   const sha = pointeur(recipe);
   if (!sha) return null;
@@ -84,7 +85,7 @@ export async function figurePhotoPlat(recipe, { repo = repoModule, ctxF = {}, fi
     if (f?.blob instanceof Blob) {
       const src = typeAffichage(f)?.startsWith('image/') ? displayUrl(f, urlDeBlob) : null;
       if (!src) return false;
-      figure.replaceChildren(el('img', { alt: t('Photo du plat'), src, loading: 'lazy', style: { display: 'block', width: '320px', maxWidth: '100%', borderRadius: 'var(--radius)' } }), ...[legende()].filter(Boolean));
+      figure.replaceChildren(el('img', { alt: t('Photo du plat'), src, loading: 'lazy' }), ...[legende()].filter(Boolean));
       return true;
     }
     figure.replaceChildren(vignettePage({ id: 'photo', sha256: sha }, f, { ...ctxF, telecharger }));

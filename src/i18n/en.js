@@ -248,7 +248,6 @@ export const EN = {
   "Lien gardé": "Link kept",
   "Le lien n’a pas pu être gardé. Réessaie.": "The link could not be kept. Try again.",
   "Lien web gardé.": "Web link kept.",
-  "Ouvrir le lien": "Open the link",
   "Adresse non reconnue : ": "Address not recognized: ",
   "Adresse non reconnue": "Address not recognized",
   "Lien web": "Web link",
@@ -769,4 +768,9 @@ export const EN = {
   'Aucune recette pour l’instant.': 'No recipes yet.',
   // Tâche 2, ronde 1 (D-T2-c) : l'état vide de ?tab=a-importer (« aucune recette » y était faux).
   'Rien à importer pour l’instant.': 'Nothing to import for now.',
+  // Lot UI-1 « Carnet », tâche 3 : la fiche recette (spec experience-carnet § 5). « Corriger » garde « Fix » (H-14) ; « Ingrédients » et « Préparation »
+  // gardent leurs entrées (une clé, une traduction).
+  "Voir la page d’origine": "View the original page",
+  "Portions, versions et autres gestes": "Servings, versions and more",
+  "{n} portions · {d}": "{n} servings · {d}",
 };

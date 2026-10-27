@@ -34,21 +34,25 @@ export const CHAINES_NEUVES_AILLEURS = {
     'Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages', '{n}/{m} photos de cette séance envoyées au serveur',
     // Lot C, tâche 4 : les chaînes neuves du panneau d'index.
     'Relire remplace la lecture reçue ({n} entrées non créées) et coûte un appel. Continuer ?', 'Relire', 'Les photos de cette séance ne sont pas sur cet appareil.', 'Revenir à la lecture'],
-  '../src/ui/recipe.js': ['Lien web gardé.', 'Ouvrir le lien', 'Adresse non reconnue : ', 'Importer cette recette', 'Relire les pages',
+  '../src/ui/recipe.js': ['Lien web gardé.', 'Adresse non reconnue : ', 'Importer cette recette', 'Relire les pages',
     // Lot B, tâche 5 : la fiche d'un lien gardé (blocSignet), le bandeau d'une version lue sur le web, la relecture (B-27 : l'ancienne phrase est retirée).
     'L’app n’a pas encore lu la page.', 'Lecture de la page en cours…', 'Voir', 'Lecture reçue : vérifie-la et enregistre.', 'Vérifier et enregistrer', 'Contenu non récupéré : ouvre la page.',
     'Lire la recette avec l’assistant', 'Réessayer', 'Une lecture = un appel à l’assistant, compté dans ton quota du jour.', 'Lors de la recherche, l’assistant disait : {p}', 'Estimé par l’assistant : {r}',
     'Tu es hors ligne.', 'Lue sur {h} le {d} · {m} — vérifie.', 'Lue sur {h} · {m} — vérifie.', 'données de la page', 'texte lu par l’assistant', 'Selon la page : {s}', 'Relire la page avec l’assistant',
     'Lue par l’assistant le {d}', 'Lue par l’assistant', '{n} ligne(s) incertaine(s)', 'page possiblement manquante', 'lecture incomplète', 'Incertain : {t}', 'Vérifiée', 'À vérifier', '1 ligne à vérifier', '{n} lignes à vérifier', 'Photo du plat',
     // Lot C, tâche 5 : la section d’une référence sur sa fiche (D-C6).
-    'Section : {s}'],
+    'Section : {s}',
+    // Lot UI-1, tâche 3 : les gestes repliés et les repères de l'en-tête (D-UI-6).
+    'Portions, versions et autres gestes', '{n} portions · {d}'],
   '../src/ui/components.js': ['Lien web', 'Adresse non reconnue', 'incertain', 'Ligne incertaine selon l’assistant',
     // Lot B, tâche 4 : la ligne de repères déménagée de search.js (ligneReperes, mêmes textes).
     '≈ {n} min', '≈ {h} h', '≈ {h} h {m}', 'facile', 'moyen', 'exigeant', '1 ingrédient', '{n} ingrédients',
     // Lot G, tâche 6 : vignettePage, gesteTelechargement, boutonTelechargerPages, pdfFrame (§ 4.3-4.5).
     'Page', 'Télécharger', 'Téléchargement…', 'Télécharger les {n} pages', 'Le téléchargement n’a pas abouti.', 'Pas encore sur cet appareil', 'Connecte-toi pour la télécharger', 'Pas encore envoyée par l’appareil qui l’a prise', 'Pas encore reçue', 'Fichier illisible reçu du serveur.',
     // Lot UI-1, tâche 2 : la ligne de source de la carte-plat (ligneSource).
-    'Du web · {h}', 'De mon livre · {t}'],
+    'Du web · {h}', 'De mon livre · {t}',
+    // Lot UI-1, tâche 3 : « Voir la page d’origine » (D-UI-10, I-B5), une définition pour la fiche, le bloc du signet et l'écran d'import web.
+    'Voir la page d’origine'],
   // Lot B, tâche 4 : « Garder et lire » et le doublon sur une carte de l'onglet Web.
   '../src/ui/search.js': ['Garder et lire', 'Tu as déjà gardé cette adresse.', 'Ouvrir la fiche', 'Adresse non reconnue.', 'Le lien n’a pas pu être gardé. Réessaie.'],
   // Lot UI-1, tâche 2 : la Bibliothèque — en-tête (« Bibliothèque » : clé posée par la tâche 1), segments, filtre, puces, grille bornée, pied et liste « à importer ».
@@ -1153,7 +1157,7 @@ export async function runAjouterTests({ eq, ok }) {
     const { blocSignet } = await import('../src/ui/recipe.js');
     const sain = blocSignet({ source_url: 'https://a.test/x', source_label: 'ment.test' });
     const a = sain.querySelector('a');
-    eq([a.getAttribute('href'), a.getAttribute('target'), a.getAttribute('rel'), a.textContent], ['https://a.test/x', '_blank', 'noopener noreferrer', 'Ouvrir le lien'], 'signet : lien revalidé au rendu, noopener noreferrer');
+    eq([a.getAttribute('href'), a.getAttribute('target'), a.getAttribute('rel'), a.textContent], ['https://a.test/x', '_blank', 'noopener noreferrer', 'Voir la page d’origine'], 'signet : lien revalidé au rendu, noopener noreferrer, lien texte « Voir la page d’origine »');
     ok(sain.textContent.includes('a.test') && !sain.textContent.includes('ment.test'), 'signet : l’hôte affiché vient de l’adresse, jamais du libellé stocké (S7)');
     ok(sain.textContent.includes('Lien web gardé.') && !sain.textContent.includes('Scanner cette recette'), 'signet : texte propre, aucun geste de scan');
     const hostile = blocSignet({ source_url: 'javascript:alert(1)' });

@@ -596,5 +596,204 @@ export async function runCarnetTests({ eq, ok }) {
     } finally { globalThis.fetch = vraiFetch; if (location.hash !== hashT2) history.replaceState(null, '', location.pathname + location.search + hashT2); setUiLocale(localeAvant); BU.revoquerUrlsDeBlob(); }
   }
 
+  // ===== Tâche 3 — la fiche recette (spec § 4.2, D-UI-6, D-UI-10 ; bases jetables, matchMedia FACTICE, aucun réseau, aucune navigation réelle).
+  // Trois fiches sont montées dans la même scène : avant chaque « + » (setServings lit document.getElementById), la scène est vidée.
+  // Rév. 3 : tout nœud que drawBody() REMPLACE (body.replaceChildren : le segmented, les deux sections) se lit par un ACCESSEUR (onglets(), ing(), prep()),
+  // jamais par une constante capturée — un nœud capturé avant un « + » serait détaché (vert aveugle sur actif(), rouge à tort sur hidden).
+  {
+  const { withRepo } = await import('./sync-fixture.js');
+  await bloc('fiche recette (T3) : ordre du DOM, deux largeurs, onglets, autres gestes, repères, « Voir la page d’origine »', () => withRepo(async (repo, db) => {
+    const { renderRecipe, blocSignet, texteReperes, dureeVersion } = await import('../src/ui/recipe.js');
+    const { lienOrigine } = await import('../src/ui/components.js');
+    const { lienSignet } = await import('../src/core/lien.js');
+    const { sha256Hex } = await import('../src/core/hash.js');
+    const { INGREDIENTS } = await import('../src/model/seed.js');
+    const ING = new Map(INGREDIENTS.map((i) => [i.id, i]));
+    const DATE = '2026-10-23T00:00:00.000Z';
+    const vraiFetch = globalThis.fetch; let reseau = 0;
+    globalThis.fetch = async (u) => { reseau += 1; throw new Error('aucun reseau attendu : ' + u); };
+    const scene = document.createElement('div'); scene.style.cssText = 'position:absolute;left:-10000px;top:0;width:900px'; document.body.append(scene);
+    const fiche = (id, over = {}) => ({ id, edition_id: null, original_title: 'Pâtes ' + id, original_language: 'fr', availability: 'available', verification_state: 'verified', printed_page: null, source_page_ids: [], current_version_id: 'rv_' + id, tags: [], cuisines: [], favorite: false, ingredient_ids: [], created_at: DATE, updated_at: DATE, ...over });
+    const version = (rid, over = {}) => ({ id: 'rv_' + rid, recipe_id: rid, kind: 'extraction', status: null, servings: 4, prep_minutes: null, cook_minutes: null, active_minutes: null, total_minutes: 35,
+      ingredients: [{ id: 'ri_' + rid, source_text: '1 pomme', name_text: 'pomme', quantity: { raw: '1', value: 1 }, unit_id: null, verification_state: 'verified' }], steps: [{ id: 'st_' + rid, position: 1, text: 'Cuire.' }],
+      constraints: {}, changes: '', notes: '', provenance: { source_page_ids: [], generated_by: 'manual', model: null, edition_id: null, convention_snapshot: null }, verification_state: 'verified', created_at: DATE, updated_at: DATE, ...over });
+    // Une page d'original pour rc_t3 (le motif de tests/photo-plat.js:336-337) : la section « Original » n'est rendue que si la fiche a une page (recipe.js:178-187) — sans
+    // elle, l'ordre « Photo du plat → Original → Versions » n'aurait rien à mesurer (rév. 2). Les autres fiches ont source_page_ids: [] et ne la voient pas.
+    const PAGE_T3 = { id: 'pg_t3', sha256: '1'.repeat(64), printed_page: 12 };
+    const ctxPour = async (over = {}) => {
+      const recipes = await db.getAll('recipes'); const vs = await db.getAll('recipe_versions');
+      return { recipes, recipesById: new Map(recipes.map((r) => [r.id, r])), recipe_versions: vs, versionsByRecipe: repo.groupBy(vs, 'recipe_id'), versionsById: new Map(vs.map((v) => [v.id, v])),
+        editionsById: new Map(), booksById: new Map(), books: [], book_editions: [], pagesById: new Map([[PAGE_T3.id, PAGE_T3]]), imports: await db.getAll('imports'), dishesById: new Map(), dishes: [], cook_history: [],
+        dish_recipe_links: [], recipe_translations: [], ingredients: INGREDIENTS, ingredientsById: ING, source_documents: [], source_pages: [], scan_sessions: [], rediscovery_prefs: [], docsByRecipe: new Map(),
+        meals: [], meal_feedback: [], settings: { units: 'original', reading_locale: 'original', ui_locale: 'fr', llm: { provider: 'none' } }, conventionFor: () => null, sync: {}, ...over };
+    };
+    // Le matchMedia FACTICE : une MediaQueryList à la main — matches, change écouté, bascule à la demande, abonnés et requêtes comptés.
+    const fauxMatchMedia = (large) => {
+      const abonnes = new Set(); const requetes = [];
+      const mql = { matches: large, media: '(min-width: 760px)', addEventListener: (nom, f) => { if (nom === 'change') abonnes.add(f); }, removeEventListener: (nom, f) => { abonnes.delete(f); } };
+      return { matchMedia: (q) => { requetes.push(q); return mql; }, basculer: (l) => { mql.matches = l; for (const f of [...abonnes]) f({ matches: l, media: mql.media }); }, abonnes, requetes };
+    };
+    const mettre = (...rows) => db.mutate({ puts: { recipes: rows }, origin: 'device' });
+    const versions = (...rows) => db.mutate({ puts: { recipe_versions: rows }, origin: 'device' });
+    const monter = async (id, mm, query = {}) => { const p = await renderRecipe({ id }, query, await ctxPour(), { matchMedia: mm.matchMedia }); scene.append(p); return p; };
+    const avant = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+    const q = (p, sel) => p?.querySelector(sel) ?? null;
+    const textes = (p, sel) => [...(p?.querySelectorAll(sel) ?? [])].map((n) => n.textContent);
+    const titreSection = (s) => s?.querySelector('h2')?.textContent ?? null;
+    const sectionPlain = (p, titre) => [...p.querySelectorAll('section.plain')].find((s) => (titreSection(s) ?? '').startsWith(titre)) ?? null;
+    try {
+      await mettre(fiche('rc_t3', { source_page_ids: [PAGE_T3.id] })); await versions(version('rc_t3'));
+      // --- Ordre du DOM, large
+      const mmL = fauxMatchMedia(true);
+      const pL = await monter('rc_t3', mmL);
+      eq(mmL.requetes, ['(min-width: 760px)'], 'fiche T3 : la largeur est demandée au matchMedia INJECTÉ, par la requête de D-UI-6');
+      const tete = q(pL, '[data-role="fiche-tete"]'); const details = q(pL, '[data-role="autres-gestes"]'); const corps = q(pL, '.recipe-body');
+      eq([q(pL, 'header h1')?.classList.contains('titre-fiche'), q(pL, 'header a.muted')?.textContent, q(pL, 'header a.muted')?.getAttribute('href')], [true, '← Bibliothèque', '#/library'], 'fiche T3 : h1.titre-fiche (classeTitre) ; retour « ← Bibliothèque » → #/library');
+      eq([tete?.classList.contains('two-col'), [...(tete?.children ?? [])].map((c) => c.dataset.role)], [true, ['fiche-etat', 'emplacement-photo-plat', 'fiche-gestes']], 'fiche T3 : .fiche-tete.two-col porte, dans cet ordre, l’état, l’emplacement de la photo, les gestes (en étroit, la photo passe avant les repères)');
+      eq([q(tete, '[data-role="emplacement-photo-plat"]')?.classList.contains('fiche-photo'), !!q(tete, '[data-role="fiche-etat"] .badge'), avant(q(pL, 'header'), tete), avant(tete, details), avant(details, corps), details?.tagName, details?.classList.contains('card')],
+        [true, true, true, true, true, 'DETAILS', true], 'fiche T3 : la photo porte .fiche-photo ; les badges sont dans l’état ; header → .fiche-tete → details.card → .recipe-body');
+      const zone = [...pL.querySelectorAll('section.card')].find((s) => titreSection(s) === 'Photo du plat');
+      const original = sectionPlain(pL, 'Original'); const versionsSec = sectionPlain(pL, 'Versions');
+      const exportRow = [...pL.querySelectorAll('button')].find((b) => b.textContent === 'Exporter JSON-LD')?.closest('.row') ?? null;
+      eq([avant(corps, zone), avant(zone, original), avant(original, versionsSec), avant(versionsSec, exportRow), !!exportRow, details.contains(exportRow)], [true, true, true, true, true, false], 'fiche T3 : .recipe-body → « Photo du plat » (.card) → « Original » (plain) → « Versions » (plain) → la rangée Export, hors du details (H-3)');
+      eq([sectionPlain(pL, 'Ingrédients')?.dataset.role, sectionPlain(pL, 'Préparation')?.dataset.role, q(corps, '[data-role="colonnes-corps"]')?.classList.contains('two-col'), q(corps, '[data-role="colonnes-corps"]')?.children.length, [...pL.querySelectorAll('section.card')].map(titreSection)],
+        ['section-ingredients', 'section-preparation', true, 2, ['Photo du plat']], 'fiche T3 : Ingrédients et Préparation en section.plain, seules dans un .two-col ; la seule section.card restante est « Photo du plat »');
+      // --- Large : details ouvert, onglets cachés, les deux sections visibles
+      const ongletsL = q(corps, '[data-role="onglets-corps"]');
+      eq([details.open, details.querySelector('summary')?.textContent, ongletsL?.hidden, ongletsL?.classList.contains('segmented'), textes(ongletsL, 'button'), q(corps, '[data-role="section-ingredients"]').hidden, q(corps, '[data-role="section-preparation"]').hidden],
+        [true, 'Portions, versions et autres gestes', true, true, ['Ingrédients', 'Préparation'], false, false], 'fiche T3 ≥ 760 px : details OUVERT, segmented caché, Ingrédients et Préparation toutes deux visibles');
+      // --- Autres gestes : TOUT l'ancien contenu de controls et de la rangée d'actions, sauf « Commencer à cuisiner » et « Corriger » (qui y reste aussi) ; pas l'Export
+      const boutonsDetails = textes(details, 'button, a');
+      eq(['Créer ma version', 'Corriger', '−', '+', 'Avec quoi on mange ça ?', 'Ajouter à mon repas', 'Liste d’épicerie', 'Rattacher à un plat', 'Original', 'Métrique', 'US', 'FR', 'EN'].filter((x) => !boutonsDetails.includes(x)), [], 'fiche T3 : « autres gestes » porte les anciens boutons de controls (versions, portions, unités, langue) ET de la rangée d’actions');
+      eq([boutonsDetails.includes('Commencer à cuisiner'), boutonsDetails.includes('Exporter JSON-LD'), boutonsDetails.includes('Exporter YAML (Paprika)'), !!q(details, '#servings-val'), q(details, '.chip.neutral')?.textContent, !!q(details, 'select'), details.querySelector('.row.between') !== null],
+        [false, false, false, true, 'Rapide · V1', false, true], 'fiche T3 : ni « Commencer à cuisiner » ni l’Export dans le details ; les portions et les puces V1 y sont ; une seule version → badge, pas de select ; la .row.between (épingle creer-ia) y est');
+      const gestes = q(tete, '[data-role="fiche-gestes"]'); const principal = q(gestes, '[data-role="geste-principal"]');
+      const commencer = [...(principal?.querySelectorAll('button') ?? [])].find((b) => b.textContent === 'Commencer à cuisiner');
+      eq([commencer?.className, textes(pL, 'button').filter((x) => x === 'Commencer à cuisiner').length, q(gestes, '[data-role="corriger-tete"]'), q(pL, '.card.sage')], ['btn primary big block', 1, null, null], 'fiche T3 : « Commencer à cuisiner » = button.btn.primary.big.block dans les gestes de tête, une seule fois ; fiche VÉRIFIÉE → aucun « Corriger » dans l’en-tête ; plus de .card.sage');
+      // --- « Corriger » visible tant que la version affichée n'est pas vérifiée (le seul geste que « — vérifie » réclame)
+      await mettre(fiche('rc_nv', { verification_state: 'to_verify' }));
+      await versions(version('rc_nv', { verification_state: 'to_verify', ingredients: [{ id: 'ri_nv', source_text: '1 pomme', name_text: 'pomme', quantity: { raw: '1', value: 1 }, unit_id: null, verification_state: 'to_verify' }] }));
+      const pNV = await monter('rc_nv', fauxMatchMedia(true));
+      const corriger = q(pNV, '[data-role="corriger-tete"]');
+      eq([corriger?.tagName, corriger?.className, corriger?.textContent, corriger?.getAttribute('href'), q(pNV, '[data-role="geste-principal"]')?.contains(corriger), textes(q(pNV, '[data-role="autres-gestes"]'), 'a').filter((x) => x === 'Corriger').length, avant(q(pNV, '[data-role="geste-principal"] button'), corriger)],
+        ['A', 'btn link', 'Corriger', '#/recipes/rc_nv/edit?kind=correction&v=rv_rc_nv', true, 1, true], 'fiche T3 : version NON vérifiée → a.btn.link « Corriger » à côté (après) de « Commencer à cuisiner », même href que celui du details, qui reste');
+      // --- Étroit : details fermé, onglets visibles, bascule LOCALE (la scène est vidée : un seul #servings-val dans le document)
+      scene.replaceChildren();
+      const mmE = fauxMatchMedia(false);
+      const pE = await monter('rc_t3', mmE);
+      const detailsE = q(pE, '[data-role="autres-gestes"]'); const corpsE = q(pE, '.recipe-body');
+      // Rév. 3 (Critical du vérificateur) : `onglets` est un ACCESSEUR, comme ing() et prep() — un « + » (setServings → drawBody → body.replaceChildren) remplace
+      // le segmented ; un nœud capturé ici serait DÉTACHÉ après le « + » : « change → large » rougirait avec un code correct (son hidden n'est plus touché),
+      // actif() resterait vert aveugle (l'ancien nœud garde son .active).
+      const onglets = () => q(corpsE, '[data-role="onglets-corps"]');
+      const ing = () => q(corpsE, '[data-role="section-ingredients"]'); const prep = () => q(corpsE, '[data-role="section-preparation"]');
+      const actif = () => textes(onglets(), 'button.active');
+      eq([detailsE.open, onglets().hidden, ing().hidden, prep().hidden, actif(), onglets().getAttribute('role')], [false, false, false, true, ['Ingrédients'], 'tablist'], 'fiche T3 < 760 px : details FERMÉ ; segmented visible (tablist) ; Ingrédients visible, Préparation cachée (hidden), segment actif « Ingrédients »');
+      const hashAvant = location.hash; const ingAvant = ing(); const prepAvant = prep(); const corpsAvant = corpsE.firstElementChild;
+      [...onglets().querySelectorAll('button')].find((b) => b.textContent === 'Préparation').click();
+      eq([ing().hidden, prep().hidden, actif(), location.hash === hashAvant, reseau, ing() === ingAvant && prep() === prepAvant, corpsE.firstElementChild === corpsAvant, corpsE.contains(ingAvant), ing().querySelectorAll('li').length],
+        [true, false, ['Préparation'], true, 0, true, true, true, 1], 'fiche T3 : la tape « Préparation » bascule par hidden — sans navigation, sans appel, sans redessin (mêmes nœuds) ; Ingrédients reste dans le DOM avec sa ligne');
+      // Le choix survit à drawBody() (un « + » redessine le corps : nœuds neufs, même choix)
+      [...detailsE.querySelectorAll('button')].find((b) => b.textContent === '+').click();
+      eq([q(detailsE, '#servings-val')?.textContent, ing() !== ingAvant, ing().hidden, prep().hidden, actif(), location.hash === hashAvant], ['5', true, true, false, ['Préparation'], true], 'fiche T3 : après un « + » (drawBody), les sections sont neuves mais le choix « Préparation » est gardé (mémorisé dans l’instance, jamais dans l’adresse)');
+      // change du matchMedia : large → les deux visibles, onglets cachés, details ouvert ; retour étroit → le choix tient
+      mmE.basculer(true);
+      eq([onglets().hidden, ing().hidden, prep().hidden, detailsE.open, ing() !== null && ing() === q(corpsE, '[data-role="section-ingredients"]')], [true, false, false, true, true], 'fiche T3 : change → large : segmented caché, les deux sections visibles, details ouvert (écouté sur change, sans redessin)');
+      mmE.basculer(false);
+      eq([onglets().hidden, ing().hidden, prep().hidden, detailsE.open, actif()], [false, true, false, false, ['Préparation']], 'fiche T3 : change → étroit : segmented visible, Préparation (le choix) visible, Ingrédients cachée, details fermé');
+      // L'abonné est retiré quand la fiche a quitté le document (pas de fuite à chaque visite)
+      eq(mmE.abonnes.size, 1, 'fiche T3 : un seul abonné change par fiche montée');
+      pE.remove(); mmE.basculer(true);
+      eq(mmE.abonnes.size, 0, 'fiche T3 : une fiche retirée du document se désabonne à la notification suivante');
+      // --- Repères (B-I-6) : « {n} portions · {durée} », chaque partie si connue, UN nombre, portions de la VERSION
+      const R = (over) => texteReperes({ ...version('x'), ...over });
+      eq([R({ servings: 4, total_minutes: 35 }), R({ servings: 1, total_minutes: null, prep_minutes: 20, cook_minutes: 70 }), R({ servings: 4, total_minutes: null }), R({ servings: null, total_minutes: 35 }), R({ servings: null, total_minutes: null }), R({ servings: 2, total_minutes: 80, prep_minutes: 20, cook_minutes: 60 })],
+        ['4 portions · 35 min', '1 portion · 1 h 30', '4 portions', '35 min', null, '2 portions · 1 h 20'], 'texteReperes : n ≥ 2 et durée → « {n} portions · {d} » ; « 1 portion » ; une seule partie connue ; rien → null ; total_minutes gagne sur prep + cook');
+      eq([R({ servings: '4', total_minutes: 35 }), R({ servings: 0, total_minutes: 35 }), R({ servings: 4, total_minutes: -5 }), R({ servings: 4, total_minutes: 'x' }), texteReperes(null), dureeVersion({ kind: 'synthesis', total_minutes: 30, provenance: { generated_by: 'ai', creation: { demande: 'x' } } }), dureeVersion({ kind: 'extraction', total_minutes: null, prep_minutes: 0, cook_minutes: 0 })],
+        ['35 min', '35 min', '4 portions', '4 portions', null, '', ''], 'texteReperes / dureeVersion : portions non entières ou nulles ignorées ; durée négative, illisible ou nulle ignorée ; version nulle → null ; une création IA n’a pas de durée ici (C-6)');
+      // Hors brief (EI-T3-1, survivant M18) : la fixture dictée « total 80 = 20 + 60 » ne distinguait pas « total d'abord » de « prep + cook d'abord ».
+      eq([R({ servings: 2, total_minutes: 45, prep_minutes: 20, cook_minutes: 60 }), dureeVersion({ kind: 'extraction', total_minutes: 45, prep_minutes: 20, cook_minutes: 60 })], ['2 portions · 45 min', '45 min'],
+        'texteReperes / dureeVersion : total_minutes GAGNE sur prep + cook même quand ils diffèrent (45 contre 20 + 60 = 80)');
+      await mettre(fiche('rc_r1'), fiche('rc_r2'), fiche('rc_r3'));
+      await versions(version('rc_r1', { servings: 1, total_minutes: null, prep_minutes: 20, cook_minutes: 70 }), version('rc_r2', { servings: 4, total_minutes: null }), version('rc_r3', { servings: null, total_minutes: null }));
+      scene.replaceChildren();
+      const pR0 = await monter('rc_t3', fauxMatchMedia(true)); const pR1 = await monter('rc_r1', fauxMatchMedia(true)); const pR2 = await monter('rc_r2', fauxMatchMedia(true)); const pR3 = await monter('rc_r3', fauxMatchMedia(true));
+      const reperes = (p) => q(p, '[data-role="reperes"]')?.textContent ?? null;
+      eq([reperes(pR0), reperes(pR1), reperes(pR2), reperes(pR3), /\b(actif|total)\b/.test(q(pR0, '[data-role="fiche-gestes"]').textContent), q(pR0, '[data-role="fiche-gestes"]').contains(q(pR0, '[data-role="reperes"]')), /total 35 min/.test(sectionPlain(pR0, 'Ingrédients').textContent)],
+        ['4 portions · 35 min', '1 portion · 1 h 30', '4 portions', null, false, true, true], 'fiche T3 : div.reperes dans les gestes de tête — « 4 portions · 35 min », « 1 portion · 1 h 30 », « 4 portions » seul, rien sans portions ni durée ; jamais la paire « actif · total », qui reste dans l’en-tête d’Ingrédients (timeText)');
+      scene.replaceChildren();
+      const pRq = await monter('rc_t3', fauxMatchMedia(true), { servings: '8' });
+      eq([reperes(pRq), q(pRq, '#servings-val')?.textContent, titreSection(sectionPlain(pRq, 'Ingrédients'))], ['4 portions · 35 min', '8', 'Ingrédients — recalculés pour 8 portions'], 'fiche T3 : ?servings=8 recalcule les lignes (titre d’Ingrédients, −/+) mais les repères disent la version (une donnée, jamais la valeur du −/+)');
+      // --- « Voir la page d’origine » (D-UI-10, I-B5) : lien texte, sur toute adresse lisible, http compris ; même data-role sur la fiche et le bloc du signet
+      await mettre(fiche('rc_http', { source_url: 'http://site.test/r' })); await versions(version('rc_http'));
+      const pH = await monter('rc_http', fauxMatchMedia(true));
+      const ouvrir = q(pH, '[data-role="ouvrir-lien"]');
+      eq([ouvrir?.tagName, ouvrir?.className, ouvrir?.textContent, ouvrir?.getAttribute('href'), ouvrir?.getAttribute('target'), ouvrir?.getAttribute('rel'), q(pH, '[data-role="fiche-gestes"]').contains(ouvrir), avant(ouvrir, q(pH, '[data-role="geste-principal"]')), pH.textContent.includes('Ouvrir le lien'), pH.querySelectorAll('[data-role="ouvrir-lien"]').length, q(pL, '[data-role="ouvrir-lien"]')],
+        ['A', 'btn link', 'Voir la page d’origine', 'http://site.test/r', '_blank', 'noopener noreferrer', true, true, false, 1, null], 'fiche T3 : a.btn.link[data-role=ouvrir-lien] « Voir la page d’origine » sur une fiche http (I-B5), dans les gestes de tête avant la rangée principale ; « Ouvrir le lien » n’existe plus ; aucun lien sans adresse');
+      const signetHttp = blocSignet({ id: 'rc_s', source_url: 'http://a.test/x', availability: 'reference_only' });
+      const lienS = q(signetHttp, '[data-role="ouvrir-lien"]');
+      eq([lienS?.className, lienS?.textContent, lienS?.getAttribute('href'), lienS?.getAttribute('rel'), signetHttp.textContent.includes('Ouvrir le lien'), signetHttp.querySelectorAll('a.btn.primary').length, lienOrigine(lienSignet('javascript:alert(1)')), lienOrigine(null), lienOrigine(lienSignet('https://b.test/y'))?.getAttribute('href')],
+        ['btn link', 'Voir la page d’origine', 'http://a.test/x', 'noopener noreferrer', false, 0, null, null, 'https://b.test/y'], 'blocSignet et lienOrigine : le même lien texte « Voir la page d’origine » (plus de « Ouvrir le lien » primaire) ; une adresse hostile ou absente → null');
+      // --- Le sous-titre reste provenanceText (R-UI-P2) : « Du web · » / « De mon livre · » sont les préfixes de la CARTE-PLAT (ligneSource, T2), pas de la fiche — tests/creer-ia.js:1397 épingle « Mon livre — A. B. · page 58 » en header p.
+      eq([q(pL, 'header p.muted')?.textContent, q(pH, 'header p.muted')?.textContent], ['Source personnelle', 'site.test'], 'fiche T3 : le sous-titre est provenanceText, inchangé — « Source personnelle » sans livre ni adresse, l’hôte RECALCULÉ pour une fiche web (R-UI-P2 ; § 4.2 amendé par T6)');
+      // --- La photo en tête : dans la colonne photo, sans style en ligne (la feuille rend 4:3 pleine colonne)
+      // Rév. 3 (ruling 17) : une image RÉELLE, 640 × 400 (16:10, PAS 4:3) — chargée avant la mesure du cadre, elle prouve que le 4:3 mesuré vient de la
+      // feuille (aspect-ratio) et non de l'image : un JPEG 4:3 chargé aurait masqué le mutant « aspect-ratio retirée » (Step 10).
+      const toile = new OffscreenCanvas(640, 400); toile.getContext('2d').fillRect(0, 0, 640, 400);
+      const jpeg = await toile.convertToBlob({ type: 'image/jpeg' }); const sha = await sha256Hex(jpeg);
+      await repo.putFile(sha, jpeg, { mime: 'image/jpeg', origin: 'device' });
+      await mettre(fiche('rc_ph', { photo_sha256: sha, photo_origin: 'image' })); await versions(version('rc_ph'));
+      const pPh = await monter('rc_ph', fauxMatchMedia(true));
+      const img = q(pPh, '[data-role="photo-plat"] img');
+      eq([!!img, img?.getAttribute('src')?.startsWith('blob:'), img?.getAttribute('style'), q(pPh, '.fiche-photo')?.contains(img), avant(img, q(pPh, '[data-role="fiche-gestes"]'))], [true, true, null, true, true], 'fiche T3 : la photo de tête vit dans .fiche-photo, avant les gestes, sans style en ligne (plus de 320 px : la feuille rend 4:3 pleine colonne)');
+      // --- La FEUILLE servie (D-UI-6), mesurée dans des cadres (la technique de T2 : un <iframe> about:blank par largeur, la feuille chargée DEDANS — les jetons de :root et
+      // les @media y valent, ce qu'une scène de la page de tests ou une racine fantôme ne donne pas ; rév. 2). Deux fiches : rc_ph (photo) et rc_t3 (emplacement vide → une colonne).
+      const cadre3 = async (largeur) => {
+        const f = document.createElement('iframe'); f.setAttribute('aria-hidden', 'true'); f.setAttribute('title', 'scène de mesure');
+        f.style.cssText = `position:absolute;left:-12000px;top:0;width:${largeur}px;height:1200px;border:0`;
+        document.body.append(f);
+        const d = f.contentDocument;
+        d.open(); d.write('<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head><body><main class="content"></main></body></html>'); d.close();
+        const lien = d.createElement('link'); lien.rel = 'stylesheet'; lien.href = new URL('../styles.css?v=' + Date.now(), location.href).href;
+        await new Promise((r) => { lien.onload = r; lien.onerror = r; d.head.append(lien); });
+        if (f.contentWindow.innerWidth !== largeur) throw new Error(`cadre ${largeur} : innerWidth ${f.contentWindow.innerWidth}`);
+        return f;
+      };
+      const mesureFiche = async (largeur, id) => {
+        const f = await cadre3(largeur);
+        try {
+          const w = f.contentWindow; const S = (n) => w.getComputedStyle(n);
+          const p = await renderRecipe({ id }, {}, await ctxPour(), { matchMedia: fauxMatchMedia(largeur >= 760).matchMedia });
+          f.contentDocument.querySelector('main').append(p); // adopté par le document du cadre : SA feuille s'applique
+          const tete = q(p, '[data-role="fiche-tete"]'); const ph = q(tete, '.fiche-photo'); const img = q(ph, 'img');
+          // Rév. 3 (ruling 17) : l'image RÉELLE est CHARGÉE avant la mesure — le cadre est hors écran, loading="lazy" n'y décoderait jamais : on force le
+          // chargement (eager + decode) du JPEG réel posé par repo.putFile (640 × 400, le chemin de production) ; la mesure ne dépend pas d'une boîte de
+          // remplacement (`chargee` l'affirme par naturalWidth > 0). Si la mesure restait instable, elle porterait sur la figure parente (figure.photo-plat),
+          // pas sur l'img. Rév. 4 (point 2) : l'attente est BORNÉE à 3 s — sans `eager`, une img lazy dans un cadre hors écran ne se charge jamais et
+          // `decode()` PEND : la suite se figerait au lieu de rougir ; un rejet (indécodable) est avalé, puis `chargee` lit naturalWidth > 0 et tranche.
+          if (img) { img.loading = 'eager'; await Promise.race([img.decode().catch(() => {}), new Promise((r) => setTimeout(r, 3000))]); }
+          const rE = q(tete, '[data-role="fiche-etat"]').getBoundingClientRect(); const rP = ph.getBoundingClientRect(); const rG = q(tete, '[data-role="fiche-gestes"]').getBoundingClientRect();
+          const rI = img ? img.getBoundingClientRect() : null;
+          return { pistesTete: S(tete).gridTemplateColumns.trim().split(/\s+/).length, photoADroite: rP.left >= rE.right - 1 && rP.left >= rG.right - 1, photoEntre: rE.bottom <= rP.top + 1 && rP.bottom <= rG.top + 1,
+            photoLongeGestes: rP.top <= rE.top + 1 && rP.bottom > rG.top + 1, // EI-T3-2 : la photo couvre les DEUX rangées de gauche (zones), elle ne pousse pas les gestes sous elle
+            chargee: img ? img.naturalWidth > 0 : null,
+            imgPleine: rI ? Math.abs(rI.width - rP.width) < 1 : null, ratio: rI ? Math.abs(rI.width / rI.height - 4 / 3) < 0.02 : null, objectFit: img ? S(img).objectFit : null,
+            onglets: S(q(p, '[data-role="onglets-corps"]')).display, prep: S(q(p, '[data-role="section-preparation"]')).display, pistesCorps: S(q(p, '[data-role="colonnes-corps"]')).gridTemplateColumns.trim().split(/\s+/).length };
+        } finally { f.remove(); }
+      };
+      const [ph1100, ph375, vide1100] = [await mesureFiche(1100, 'rc_ph'), await mesureFiche(375, 'rc_ph'), await mesureFiche(1100, 'rc_t3')];
+      eq([ph1100.pistesTete, ph1100.photoADroite, ph1100.chargee, ph1100.imgPleine, ph1100.ratio, ph1100.objectFit, ph1100.onglets, ph1100.prep, ph1100.pistesCorps], [2, true, true, true, true, 'cover', 'none', 'block', 2],
+        'styles.css à 1100 px (D-UI-6) : .fiche-tete en deux colonnes, la photo à droite de l’état ET des gestes (grid-template-areas), l’image RÉELLE chargée (naturalWidth > 0, 640 × 400) rendue pleine colonne en 4:3 recadrée par la feuille ; segmented caché ([hidden]), les deux sections visibles, .recipe-body en deux colonnes (mesurés dans un cadre)');
+      // Hors brief (EI-T3-2, survivant C1b) : sans les zones, l'ordre du DOM (état, photo, gestes) met déjà la photo à droite de l'état ET des gestes —
+      // mais sur la première rangée seulement : les gestes tombaient sous la photo. Les zones la font longer les deux rangées de la colonne de gauche.
+      eq(ph1100.photoLongeGestes, true, 'styles.css à 1100 px (D-UI-6) : la photo occupe la colonne de droite sur les DEUX rangées (« etat photo » / « gestes photo ») — elle commence à la hauteur de l’état et longe les gestes (mesuré)');
+      eq([ph375.pistesTete, ph375.photoEntre, ph375.chargee, ph375.imgPleine, ph375.ratio, ph375.onglets !== 'none', ph375.prep, ph375.pistesCorps], [1, true, true, true, true, true, 'none', 1],
+        'styles.css à 375 px (D-UI-6) : une colonne, la photo ENTRE l’état et les gestes (sous la provenance, maquette mobile), image réelle chargée, pleine largeur 4:3 ; segmented visible, Préparation cachée ([hidden]), une seule colonne de corps (mesurés)');
+      eq([vide1100.pistesTete, vide1100.chargee, vide1100.imgPleine, vide1100.photoADroite], [1, null, null, false], 'styles.css à 1100 px, fiche SANS photo : .fiche-tete:has(> .fiche-photo:empty) → une seule colonne (la zone photo déclarée en troisième rangée, 0 px : aucune piste implicite à droite, rév. 4), aucune image (mesuré)');
+      eq(reseau, 0, 'fiche T3 : aucun réseau');
+    } finally { globalThis.fetch = vraiFetch; scene.remove(); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
+  }));
+  }
+
   // --- repère de fin : les tâches 2 à 6 ajoutent leurs blocs AU-DESSUS de cette ligne ---
 }

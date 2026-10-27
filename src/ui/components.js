@@ -50,6 +50,14 @@ export function availabilityBadge(recipe) {
   return el('span', { class: `badge ${cls}` }, text);
 }
 
+// UI-1 (D-UI-10, I-B5) : « Voir la page d’origine » — un lien texte vers l'adresse LISIBLE d'une fiche (lienSignet : http: compris, seule la LECTURE exige
+// https), le même sur la fiche, le bloc du signet et l'écran d'import web ; la flèche « ↗ » est posée par la feuille (::after), hors du texte. null sans
+// adresse lisible. Remplace « Ouvrir le lien » (trois sites : recipe.js ×2, import-web.js).
+export function lienOrigine(lien) {
+  if (!lien?.ok) return null;
+  return el('a', { class: 'btn link', href: lien.href, target: '_blank', rel: 'noopener noreferrer', dataset: { role: 'ouvrir-lien' } }, t('Voir la page d’origine'));
+}
+
 // C-2 / R-CRE-4 : l'étiquette d'une création IA (ou d'une version d'une fiche origine 'ia'), TEXTE de etiquetteCreationIA rendu par t() ;
 // null quand les données ne disent rien d'une création — jamais lue dans source_label.
 export function etiquetteIA(version, recipe = null) {

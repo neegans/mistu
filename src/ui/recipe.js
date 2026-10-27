@@ -1,6 +1,6 @@
 // Fiche recette (spec §17) : Original / Ma version, réglages combinables, unités et langue de lecture, remplacer un ingrédient,
 // « Avec quoi on mange ça ? », autres recettes du plat, historique et « Refaire comme la dernière fois ».
-import { el, toast, chooseDialog, promptDialog, confirmDialog, formatDate, downloadBlob } from '../core/dom.js';
+import { el, toast, chooseDialog, promptDialog, confirmDialog, formatDate, formatMinutes, downloadBlob } from '../core/dom.js';
 import { t, label } from '../core/i18n.js';
 import { navigate, buildQuery, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
@@ -13,7 +13,7 @@ import { DIET_TAGS } from '../model/schema.js';
 import { reperesDe } from '../domain/recherche-web.js';
 import { lirePage, relireResultat } from '../domain/lecture-web.js';
 import { logError } from '../core/log.js';
-import { pageHeader, section, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture, sessionAssistant, carteConnexion, ligneReperes, contexteFichiers, vignettesDePages, boutonTelechargerPages } from './components.js';
+import { pageHeader, section, sectionPlain, lienOrigine, dureeTotale, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture, sessionAssistant, carteConnexion, ligneReperes, contexteFichiers, vignettesDePages, boutonTelechargerPages } from './components.js';
 import { monterPhotoPlat } from './photo-plat.js';
 import { demarrerLectureWeb, texteEchecLecture, enLigneLecture, ligneWebOuverte } from './import-web.js';
 import { demarrerConnexion } from './settings.js';
@@ -28,13 +28,33 @@ import { capitaliser } from './puces.js';
 // serveur peut en porter 100 000 caractères, qui pousseraient la fiche entière hors de l'écran.
 export const adresseInerte = (u) => { const s = String(u ?? ''); return s.length > 200 ? s.slice(0, 200) + '…' : s; };
 
+// UI-1 (D-UI-6, B-I-6) : la durée d'une version, en UN nombre par formatMinutes (jamais la paire « actif · total » de timeText, qui reste dans
+// l'en-tête d'Ingrédients). LA règle est celle de la carte-plat, dureeTotale (components.js, T2 : total_minutes ?? prep + cook ; null sans durée
+// connue, non numérique, ou pour une création IA — C-6 : son estimation est dite à part) ; ici seulement la mise en forme, '' si rien ou ≤ 0.
+export function dureeVersion(version) {
+  const total = dureeTotale(version);
+  return total !== null && total > 0 ? formatMinutes(total) : '';
+}
+// La ligne de repères de l'en-tête : « {n} portions · {durée} », chaque partie seulement si connue ; portions = celles de la VERSION affichée (une donnée,
+// entier ≥ 1 — jamais la valeur du −/+, qui recalcule les lignes sans changer la recette) ; null quand rien n'est connu (aucune ligne rendue).
+export function texteReperes(version) {
+  if (!version) return null;
+  const n = Number.isInteger(version.servings) && version.servings >= 1 ? version.servings : null;
+  const d = dureeVersion(version);
+  if (n !== null && n >= 2 && d) return t('{n} portions · {d}', { n, d });
+  const parties = [];
+  if (n === 1) parties.push(t('1 portion')); else if (n !== null) parties.push(t('{n} portions', { n }));
+  if (d) parties.push(d);
+  return parties.length ? parties.join(' · ') : null;
+}
+
 // `deps` (lot B, facultatif : le routeur n'en passe pas) : les gestes de la lecture web { repo, navigate, toast, fetch, maintenant, enLigne } — la
 // suite n'ouvre ni réseau ni navigation réelle. Lot F (§ 4.1.1) : le MÊME objet porte aussi `pickFiles` ; il est transmis tel quel à monterPhotoPlat
 // (les clés que la zone ne connaît pas sont ignorées ; sans deps, ses défauts valent la production).
 export async function renderRecipe(params, query, ctx, deps = {}) {
   const recipe = ctx.recipesById.get(params.id);
   if (!recipe) return el('div', { class: 'card' }, t('Recette introuvable.'));
-  // Lot B (§ 4.1, § 4.5) : une fiche à adresse lisible porte « Ouvrir le lien » partout (I-B5) ; la lecture par l'assistant a besoin de la session.
+  // Lot B (§ 4.1, § 4.5) : une fiche à adresse lisible porte « Voir la page d’origine » partout (I-B5, D-UI-10) ; la lecture par l'assistant a besoin de la session.
   const lienFiche = recipe.source_url ? lienSignet(recipe.source_url) : null;
   const lisibleParLAssistant = !!lienFiche?.ok && lienFiche.href.startsWith('https:');
   const sessionWeb = lisibleParLAssistant ? await sessionAssistant(ctx) : null;
@@ -69,7 +89,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // affichée ici — sa lecture, son bandeau et son import ne sont pas ceux de cette fiche ; retour à la version courante.
   const demandee = query.v ? ctx.versionsById.get(query.v) : null;
   let version = (demandee?.recipe_id === recipe.id ? demandee : null) || original || versions[0] || null;
-  const state = { servings: query.servings ? Number(query.servings) : version?.servings || null, units: ctx.settings.units, lang: query.lang || ctx.settings.reading_locale, diet: '' };
+  const state = { servings: query.servings ? Number(query.servings) : version?.servings || null, units: ctx.settings.units, lang: query.lang || ctx.settings.reading_locale, diet: '', onglet: 'ingredients' };
   const conventionId = ctx.conventionFor(recipe);
   const root = el('div', null);
 
@@ -84,9 +104,15 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     if (absente) { dire(t('Recette introuvable.')); return; }
     refresh();
   } }, recipe.favorite ? '★ ' + t('Favori') : '☆ ' + t('Favori'));
+  // UI-1 (D-UI-6, F-5) : la largeur par un matchMedia INJECTABLE (deps.matchMedia ; défaut : celui de la fenêtre, appelé SUR window — jamais la fonction
+  // nue : « Illegal invocation »). Une seule requête, celle de .two-col (760 px, le motif de dish.js) ; `large()` la relit à chaque usage.
+  const mq = (deps.matchMedia ?? ((requete) => window.matchMedia(requete)))('(min-width: 760px)');
+  const large = () => !!mq.matches;
+  // R-UI-P2 : le sous-titre reste la provenance (« {titre} — {auteur} · page N », hôte recalculé, étiquette IA) ; « Du web · » / « De mon livre · » sont les préfixes de la
+  // CARTE-PLAT (ligneSource), pas de la fiche — § 4.2 amendé par T6 ; tests/creer-ia.js:1338, 1375, 1397, 1400 lisent ce header p tel quel.
   root.append(pageHeader(recipe.display_title || recipe.original_title, {
     subtitle: provenanceText(recipe, book, edition), back: edition ? { href: `/books/${edition.id}`, label: book?.title || t('Livre') } : { href: '/library', label: t('Bibliothèque') },
-    actions: [favBtn],
+    actions: [favBtn], classeTitre: 'titre-fiche',
   }));
 
   // Conflit de version (spec § 5.5) : les deux appareils ont adapté cette recette en parallèle. AUCUNE version
@@ -105,14 +131,20 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // d'uncertain_fields qui porte une adresse est écartée ; illisible, il vaut null (la bannière retombe sur provenance.uncertain_fields).
   const ligneLue = (ctx.imports || []).find((i) => i?.id === version?.provenance?.import_id) || null;
   const lecture = banniereLecture(version, ligneLue?.kind === 'web' ? { ...ligneLue, resultat: relireResultat(ligneLue.resultat)?.recette ?? null } : ligneLue);
-  root.append(el('div', { class: 'row', style: { marginBottom: '.8rem' } }, availabilityBadge(recipe), versionBadge(version, recipe), lecture ? etatVerification(version) : null, recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, capitaliser(c)))));
+  // UI-1 (D-UI-6) : l'en-tête en deux colonnes — UN ordre de DOM : l'état (badges, bandeaux), la photo, les gestes (repères, « Voir la page d’origine »,
+  // « Commencer à cuisiner » + « Corriger »). La feuille met la photo à droite dès 760 px et, en étroit, la laisse entre l'état et les gestes (sous la
+  // provenance, avant les repères : la maquette mobile). Les gestes ne sont posés qu'avec une version (plus bas).
+  const etat = el('div', { class: 'stack fiche-etat', dataset: { role: 'fiche-etat' } },
+    el('div', { class: 'row' }, availabilityBadge(recipe), versionBadge(version, recipe), lecture ? etatVerification(version) : null, recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, capitaliser(c)))));
   const web = bandeauWeb(version);
-  if (web) root.append(web); // lot B (§ 4.5) : la source d'une version lue sur le web, d'abord — puis la bannière du lot A
-  if (lecture) root.append(bandeauLecture(lecture));
+  if (web) etat.append(web); // lot B (§ 4.5) : la source d'une version lue sur le web, d'abord — puis la bannière du lot A
+  if (lecture) etat.append(bandeauLecture(lecture));
   const ctxF = await contexteFichiers(ctx); // lot G : compte, file_error et moteur, pour les vignettes et la photo du plat (§ 4.4)
   // Lot F (§ 4.1.1) : l'emplacement de tête (un div, jamais null : aucun nœud texte direct) ; la zone est insérée plus bas, après la préparation.
   const photo = await monterPhotoPlat(recipe, ctx, { ...deps, ctxF });
-  root.append(photo.entete);
+  photo.entete.classList.add('fiche-photo');
+  const tete = el('div', { class: 'two-col fiche-tete', dataset: { role: 'fiche-tete' } }, etat, photo.entete);
+  root.append(tete);
 
   if (!version) {
     root.append(await referenceOnly());
@@ -136,50 +168,72 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   for (const a of adaptations) versionOptions.push({ value: a.id, label: libelleOption(a, { adaptation: true }) });
   const estUneCreation = estCreationIA(version);
   const selectVersion = (id) => navigate(`/recipes/${recipe.id}${buildQuery({ v: id, servings: state.servings || '' })}`, { replace: true });
-  const controls = el('div', { class: 'card sage stack' },
-    el('div', { class: 'row between' },
-      versionOptions.length > 1 ? select(versionOptions, version.id, selectVersion) : etiquetteCreationIA(version, recipe) ? versionBadge(version, recipe) : el('span', { class: 'badge original' }, t('Original')),
-      el('div', { class: 'row' },
-        el('a', { class: 'btn small', href: `#/recipes/${recipe.id}/edit?kind=adaptation&v=${version.id}` }, t('Créer ma version')),
-        el('a', { class: 'btn small', href: `#/recipes/${recipe.id}/edit?kind=correction&v=${version.id}` }, t('Corriger')),
-        // Import ciblé (spec import-cible § 4.1, D-11) : une recette partielle se relit par l'écran déjà rattaché (import à refaire) ; une recette complète n'a pas d'entrée.
-        recipe.availability === 'partial' && !recipe.source_url ? el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(recipe.id)}/importer` }, t('Relire les pages')) : null,
-        // Lot B (D-B18) : une fiche à adresse https qui a déjà une version se relit par l'assistant — absent sans session.
-        lisibleParLAssistant && sessionWeb ? el('button', { type: 'button', class: 'btn small', dataset: { role: 'relire-web' }, onClick: lireWeb }, t('Relire la page avec l’assistant')) : null)),
-    el('div', { class: 'row' },
-      el('label', { class: 'field' }, el('span', null, t('Portions')), el('div', { class: 'row' },
-        el('button', { class: 'btn small', onClick: () => setServings((state.servings || 1) - 1) }, '−'),
-        el('strong', { id: 'servings-val' }, state.servings ?? t('inconnues')),
-        el('button', { class: 'btn small', onClick: () => setServings((state.servings || 0) + 1) }, '+'))),
-      el('label', { class: 'field' }, el('span', null, t('Unités')), segmented([{ value: 'original', label: t('Original') }, { value: 'metric', label: t('Métrique') }, { value: 'us', label: 'US' }], state.units, (v) => { state.units = v; drawBody(); })),
-      el('label', { class: 'field' }, el('span', null, t('Langue de lecture')), segmented([{ value: 'original', label: t('Original') }, { value: 'fr', label: 'FR' }, { value: 'en', label: 'EN' }], state.lang, (v) => { state.lang = v; drawBody(); }))),
-    // N-5 : une création IA s'adapte par l'assistant (version enfant, original intact) ; les puces V1 s'effacent devant ce geste réel.
-    estUneCreation
-      ? el('div', { class: 'row' }, el('a', { class: 'btn small', href: `#/recipes/creer${buildQuery({ adapter: version.id })}`, dataset: { role: 'adapter-ia' } }, t('Adapter avec l’IA')))
-      : el('div', { class: 'chips' },
-        ...[t('Rapide'), t('On se gâte'), t('Meal prep')].map((n) => el('span', { class: 'chip neutral', title: t('Adaptation assistée : palier V1, non disponible dans cette version. Utilise « Créer ma version » pour décrire toi-même les changements.') }, `${n} · V1`))),
-    el('small', { class: 'muted' }, t('Changer les portions, les unités ou la langue ne crée pas de nouvelle version. Les durées ne sont pas multipliées.')));
-  root.append(controls);
+  // Les gestes de tête (D-UI-6, B-I-8) : les repères, le lien d'origine (toute adresse lisible, http compris : I-B5), puis « Commencer à cuisiner » pleine
+  // largeur et, tant que la version AFFICHÉE n'est pas vérifiée, « Corriger » en lien texte à côté — le seul geste que « — vérifie » et « {n} lignes à
+  // vérifier » réclament ; il reste aussi dans « autres gestes ».
+  const reperes = texteReperes(version);
+  tete.append(el('div', { class: 'stack fiche-gestes', dataset: { role: 'fiche-gestes' } },
+    reperes ? el('div', { class: 'reperes muted', dataset: { role: 'reperes' } }, reperes) : null,
+    lienOrigine(lienFiche),
+    el('div', { class: 'geste-principal', dataset: { role: 'geste-principal' } },
+      el('button', { class: 'btn primary big block', onClick: startCooking }, t('Commencer à cuisiner')),
+      version.verification_state !== 'verified' ? el('a', { class: 'btn link', href: `#/recipes/${recipe.id}/edit?kind=correction&v=${version.id}`, dataset: { role: 'corriger-tete' } }, t('Corriger')) : null)));
 
-  root.append(el('div', { class: 'row', style: { marginBottom: '1rem' } },
-    el('button', { class: 'btn primary big', onClick: startCooking }, t('Commencer à cuisiner')),
-    el('a', { class: 'btn', href: `#/search${buildQuery({ for: recipe.id, role: 'salade', mode: 'all' })}` }, t('Avec quoi on mange ça ?')),
-    el('button', { class: 'btn', onClick: () => addToMealFlow(ctx, { recipe, version, book, edition }, { role: recipe.type === 'salade' || recipe.type === 'soupe' || recipe.type === 'legumes' || recipe.type === 'feculent' ? 'accompagnement' : 'plat_principal' }) }, t('Ajouter à mon repas')),
-    el('button', { class: 'btn', onClick: makeList }, t('Liste d’épicerie')),
-    dish ? el('a', { class: 'btn', href: `#/dishes/${dish.id}` }, t('Autres recettes de ce plat')) : el('button', { class: 'btn', onClick: attachDish }, t('Rattacher à un plat')),
-    // I-B5 (lot B) : « Ouvrir le lien » reste sur TOUTE fiche à adresse lisible (l'audit § 1.4 notait sa perte dès qu'une version existe).
-    lienFiche?.ok ? el('a', { class: 'btn', href: lienFiche.href, target: '_blank', rel: 'noopener noreferrer', dataset: { role: 'ouvrir-lien' } }, t('Ouvrir le lien')) : null));
+  // « Portions, versions et autres gestes » (D-UI-6, § 13 point 4) : TOUT l'ancien contenu de la carte des contrôles et de la rangée d'actions, sauf
+  // « Commencer à cuisiner » et le « Corriger » de tête — replié sous 760 px, ouvert au-dessus (le matchMedia, relu sur change) ; jamais « Réglages »
+  // (l'app a déjà un écran de ce nom). L'Export reste en bas de la fiche, hors du details (H-3).
+  const autresGestes = el('details', { class: 'card', open: large(), dataset: { role: 'autres-gestes' } },
+    el('summary', null, t('Portions, versions et autres gestes')),
+    el('div', { class: 'stack' },
+      el('div', { class: 'row between' },
+        versionOptions.length > 1 ? select(versionOptions, version.id, selectVersion) : etiquetteCreationIA(version, recipe) ? versionBadge(version, recipe) : el('span', { class: 'badge original' }, t('Original')),
+        el('div', { class: 'row' },
+          el('a', { class: 'btn small', href: `#/recipes/${recipe.id}/edit?kind=adaptation&v=${version.id}` }, t('Créer ma version')),
+          el('a', { class: 'btn small', href: `#/recipes/${recipe.id}/edit?kind=correction&v=${version.id}` }, t('Corriger')),
+          // Import ciblé (spec import-cible § 4.1, D-11) : une recette partielle se relit par l'écran déjà rattaché (import à refaire) ; une recette complète n'a pas d'entrée.
+          recipe.availability === 'partial' && !recipe.source_url ? el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(recipe.id)}/importer` }, t('Relire les pages')) : null,
+          // Lot B (D-B18) : une fiche à adresse https qui a déjà une version se relit par l'assistant — absent sans session.
+          lisibleParLAssistant && sessionWeb ? el('button', { type: 'button', class: 'btn small', dataset: { role: 'relire-web' }, onClick: lireWeb }, t('Relire la page avec l’assistant')) : null)),
+      el('div', { class: 'row' },
+        el('label', { class: 'field' }, el('span', null, t('Portions')), el('div', { class: 'row' },
+          el('button', { class: 'btn small', onClick: () => setServings((state.servings || 1) - 1) }, '−'),
+          el('strong', { id: 'servings-val' }, state.servings ?? t('inconnues')),
+          el('button', { class: 'btn small', onClick: () => setServings((state.servings || 0) + 1) }, '+'))),
+        el('label', { class: 'field' }, el('span', null, t('Unités')), segmented([{ value: 'original', label: t('Original') }, { value: 'metric', label: t('Métrique') }, { value: 'us', label: 'US' }], state.units, (v) => { state.units = v; drawBody(); })),
+        el('label', { class: 'field' }, el('span', null, t('Langue de lecture')), segmented([{ value: 'original', label: t('Original') }, { value: 'fr', label: 'FR' }, { value: 'en', label: 'EN' }], state.lang, (v) => { state.lang = v; drawBody(); }))),
+      // N-5 : une création IA s'adapte par l'assistant (version enfant, original intact) ; les puces V1 s'effacent devant ce geste réel.
+      estUneCreation
+        ? el('div', { class: 'row' }, el('a', { class: 'btn small', href: `#/recipes/creer${buildQuery({ adapter: version.id })}`, dataset: { role: 'adapter-ia' } }, t('Adapter avec l’IA')))
+        : el('div', { class: 'chips' },
+          ...[t('Rapide'), t('On se gâte'), t('Meal prep')].map((n) => el('span', { class: 'chip neutral', title: t('Adaptation assistée : palier V1, non disponible dans cette version. Utilise « Créer ma version » pour décrire toi-même les changements.') }, `${n} · V1`))),
+      el('small', { class: 'muted' }, t('Changer les portions, les unités ou la langue ne crée pas de nouvelle version. Les durées ne sont pas multipliées.')),
+      el('div', { class: 'row', dataset: { role: 'autres-actions' } },
+        el('a', { class: 'btn', href: `#/search${buildQuery({ for: recipe.id, role: 'salade', mode: 'all' })}` }, t('Avec quoi on mange ça ?')),
+        el('button', { class: 'btn', onClick: () => addToMealFlow(ctx, { recipe, version, book, edition }, { role: recipe.type === 'salade' || recipe.type === 'soupe' || recipe.type === 'legumes' || recipe.type === 'feculent' ? 'accompagnement' : 'plat_principal' }) }, t('Ajouter à mon repas')),
+        el('button', { class: 'btn', onClick: makeList }, t('Liste d’épicerie')),
+        dish ? el('a', { class: 'btn', href: `#/dishes/${dish.id}` }, t('Autres recettes de ce plat')) : el('button', { class: 'btn', onClick: attachDish }, t('Rattacher à un plat')))));
+  root.append(autresGestes);
 
   const body = el('div', { class: 'recipe-body' }); // C-7 : overflow-wrap (styles.css)
   root.append(body);
   drawBody();
   root.append(photo.zone); // lot F (D-F2, D-F8) : seulement quand la fiche a une version
+  // La largeur, écoutée sur change (F-5) : le details s'ouvre ou se replie, le corps bascule entre colonnes et onglets — sans redessin. Une fiche vue
+  // dans le document puis retirée se désabonne à la notification suivante (la MediaQueryList garde ses abonnés : aucune fuite à chaque visite).
+  let inseree = false;
+  const surLargeur = () => {
+    if (root.isConnected) inseree = true;
+    else if (inseree) { mq.removeEventListener('change', surLargeur); return; }
+    autresGestes.open = large();
+    appliquerCorps();
+  };
+  mq.addEventListener('change', surLargeur);
 
   const pagesOriginal = recipe.availability === 'reference_only' ? pages : pages.filter((p) => p.id !== recipe.index_page_id); // lot D (§ 4.8.4) : une fiche lue n'a pas sa photo d'index dans « Original » ; une référence la garde (D-C5)
   // Pages originales
   if (pagesOriginal.length) {
     const vignettes = await vignettesDePages(pagesOriginal, ctxF, { alt: () => t('Page originale') }); // ronde 1 : l'alt d'avant le lot G
-    root.append(section(t('Original'), el('p', { class: 'muted' }, t('Pages du livre telles que photographiées. Une adaptation n’est jamais présentée comme le texte original.')),
+    root.append(sectionPlain(t('Original'), el('p', { class: 'muted' }, t('Pages du livre telles que photographiées. Une adaptation n’est jamais présentée comme le texte original.')),
       boutonTelechargerPages(vignettes.distantes, { connecte: ctxF.connecte, telecharger: vignettes.telecharger }),
       el('div', { class: 'thumbs' }, ...pagesOriginal.map((p) => el('figure', null, vignettes.places.get(p.id), el('figcaption', null, p.printed_page ? `${t('p.')} ${p.printed_page}` : ''))))));
   }
@@ -187,7 +241,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   else if (recipe.printed_page && recipe.origine !== 'ia') root.append(el('p', { class: 'muted' }, t('Original : page {p} du livre (pages non photographiées).', { p: recipe.printed_page })));
 
   // Versions
-  root.append(section(t('Versions'), el('ul', { class: 'list' }, ...versions.map((v) => el('li', { class: 'row between' },
+  root.append(sectionPlain(t('Versions'), el('ul', { class: 'list' }, ...versions.map((v) => el('li', { class: 'row between' },
     el('div', null, el('div', { class: 'row' }, versionBadge(v, recipe), el('span', { class: 'muted' }, `${label('version_kind', v.kind)} · ${formatDate(v.created_at, { withTime: true })}`), v.verification_state === 'to_verify' ? el('span', { class: 'chip warn' }, t('À vérifier')) : null),
       v.changes ? el('div', { style: { fontSize: '.9rem' } }, v.changes) : null,
       v.provenance?.generated_by === 'ai' && !estCreationIA(v) ? el('div', { class: 'muted', style: { fontSize: '.8rem' } }, t('Extraction IA ({m}) — vérifiée à la main ensuite ?', { m: v.provenance.model || 'IA' })) : null),
@@ -195,7 +249,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
       (v.kind === 'adaptation' || v.kind === 'synthesis') && v.status !== 'tested' ? el('button', { class: 'btn small', onClick: async () => { await repo.save('recipe_versions', { ...v, status: 'tested' }); refresh(); } }, t('Marquer testée')) : null))))));
 
   // Historique
-  if (history.length) root.append(section(t('Mémoire culinaire'), el('ul', { class: 'list' }, ...history.map((h) => el('li', { class: 'row between top' },
+  if (history.length) root.append(sectionPlain(t('Mémoire culinaire'), el('ul', { class: 'list' }, ...history.map((h) => el('li', { class: 'row between top' },
     el('div', null, el('strong', null, formatDate(h.cooked_at)), ` · ${h.servings ? t('{n} portions', { n: h.servings }) : ''}${h.rating ? ` · ${'★'.repeat(h.rating)}` : ''}${h.redo === false ? ` · ${t('à ne pas refaire')}` : h.redo ? ` · ${t('à refaire')}` : ''}${h.actual_minutes ? ` · ${h.actual_minutes} min` : ''}`,
       h.notes ? el('div', { style: { fontSize: '.9rem' } }, h.notes) : null,
       el('div', { class: 'muted', style: { fontSize: '.8rem' } }, t('Observation liée à cette cuisson ; elle ne devient pas une règle universelle.'))),
@@ -232,13 +286,17 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
       el('div', { class: 'status warn', dataset: { role: 'avertissement-ia' } }, t(AVERTISSEMENT_CREATION_IA))));
     const dietSel = select([{ value: '', label: t('Évaluer une restriction…') }, ...DIET_TAGS.map((d) => ({ value: d, label: label('diet', d) }))], state.diet, (v) => { state.diet = v; drawBody(); });
     const assessment = state.diet ? assessVersion(version, ctx.ingredientsById, state.diet) : null;
-    body.append(section(`${t('Ingrédients')}${scaled.ok && scaled.factor !== 1 ? ` — ${t('recalculés pour {n} portions', { n: state.servings })}` : version.servings ? ` — ${t('{n} portions', { n: version.servings })}` : ''}`,
+    // UI-1 (D-UI-6, D-UI-8) : Ingrédients et Préparation en sections `plain`, côte à côte dès 760 px (.two-col), en onglets au-dessous (segmented ;
+    // la section non choisie cachée par hidden, les deux toujours dans le DOM). Le segmented est reconstruit à chaque drawBody ; le choix (state.onglet)
+    // survit. La liste garde ingredientLineEl et « Remplacer » ; le select « Évaluer une restriction… » et timeText (« actif · total ») restent dans l'en-tête de la section.
+    const ingredients = sectionPlain(`${t('Ingrédients')}${scaled.ok && scaled.factor !== 1 ? ` — ${t('recalculés pour {n} portions', { n: state.servings })}` : version.servings ? ` — ${t('{n} portions', { n: version.servings })}` : ''}`,
       el('div', { class: 'row between' }, el('span', { class: 'muted' }, timeText(version)), dietSel),
       assessment ? el('div', { style: { margin: '.4rem 0' } }, dietChip(assessment), assessment.unknown.length ? el('div', { class: 'muted', style: { fontSize: '.85rem' } }, `${t('Inconnus')} : ${assessment.unknown.join(', ')}`) : null) : null,
       wantsTranslation && !translation ? el('div', { class: 'status warn' }, t('Aucune traduction {l} pour cette version.', { l: state.lang.toUpperCase() }), el('a', { class: 'btn small', href: `#/recipes/${recipe.id}/edit?kind=translation&v=${version.id}` }, t('Traduire'))) : null,
       translation ? el('div', { class: 'row' }, el('span', { class: 'badge' }, t('Traduction')), el('span', { class: 'muted' }, translation.translated_content.title || '')) : null,
       ingList, ...scaled.notes.map((n) => el('small', { class: 'muted', style: { display: 'block' } }, n)),
-      !conventionId && scaled.ingredients.some((i) => ['cup', 'tbsp', 'tsp', 'fl_oz'].includes(i.unit_id)) ? el('div', { class: 'status warn', style: { marginTop: '.5rem' } }, t('Tasses/cuillères : convention non confirmée pour cette édition — quantités d’origine affichées.'), edition ? el('a', { class: 'btn small', href: `#/books/${edition.id}` }, t('Préciser')) : null) : null));
+      !conventionId && scaled.ingredients.some((i) => ['cup', 'tbsp', 'tsp', 'fl_oz'].includes(i.unit_id)) ? el('div', { class: 'status warn', style: { marginTop: '.5rem' } }, t('Tasses/cuillères : convention non confirmée pour cette édition — quantités d’origine affichées.'), edition ? el('a', { class: 'btn small', href: `#/books/${edition.id}` }, t('Préciser')) : null) : null);
+    ingredients.dataset.role = 'section-ingredients';
     const steps = el('ol', { class: 'list steps' });
     (version.steps || []).forEach((s, i) => {
       const li = el('li', null, el('span', { class: 'step-num' }, String(i + 1)), el('div', { style: { flex: 1 } },
@@ -247,9 +305,27 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
         ...(s.timers || []).slice(0, 2).map((tm) => timerBlock(tm.seconds, { compact: true, onRequest: (channel) => repo.save('timer_launches', createTimerLaunch({ recipe_version_id: version.id, step_id: s.id, device_id: deviceId(), duration_seconds: tm.seconds, channel })) }))));
       steps.append(li);
     });
-    body.append(section(t('Préparation'), (version.steps || []).length ? steps : el('p', { class: 'muted' }, t('Étapes non numérisées.')), version.notes ? el('p', { class: 'muted' }, version.notes) : null));
+    const preparation = sectionPlain(t('Préparation'), (version.steps || []).length ? steps : el('p', { class: 'muted' }, t('Étapes non numérisées.')), version.notes ? el('p', { class: 'muted' }, version.notes) : null);
+    preparation.dataset.role = 'section-preparation';
+    const onglets = segmented([{ value: 'ingredients', label: t('Ingrédients') }, { value: 'preparation', label: t('Préparation') }], state.onglet, (v) => { state.onglet = v; appliquerCorps(); });
+    onglets.dataset.role = 'onglets-corps';
+    onglets.querySelectorAll('button').forEach((b, i) => { b.dataset.value = ['ingredients', 'preparation'][i]; }); // segmented() ne pose pas la valeur : le segment actif se retrouve par elle
+    body.append(onglets, el('div', { class: 'two-col', dataset: { role: 'colonnes-corps' } }, ingredients, preparation));
+    appliquerCorps();
     if (lc?.conseils.length) body.append(section(t('Conseils'), el('ul', { dataset: { role: 'conseils-ia' } }, ...lc.conseils.map((c) => el('li', null, t('Selon l’assistant : {texte}', { texte: c }))))));
     if (lc?.notes.length) body.append(section(t('À vérifier avant de servir'), el('ul', { dataset: { role: 'notes-ia' } }, ...lc.notes.map((n) => el('li', null, n)))));
+  }
+
+  // La bascule Ingrédients / Préparation (D-UI-6, F-5) : LOCALE — ni navigation, ni appel, ni redessin. En large : les deux sections visibles, le segmented
+  // caché ; en étroit : la section non choisie cachée ([hidden]), le segment actif suit state.onglet. Appelée par drawBody, par la tape, par le change du matchMedia.
+  function appliquerCorps() {
+    const onglets = body.querySelector('[data-role="onglets-corps"]');
+    if (!onglets) return;
+    const etroit = !large();
+    onglets.hidden = !etroit;
+    for (const b of onglets.querySelectorAll('button')) b.classList.toggle('active', b.dataset.value === state.onglet);
+    body.querySelector('[data-role="section-ingredients"]').hidden = etroit && state.onglet !== 'ingredients';
+    body.querySelector('[data-role="section-preparation"]').hidden = etroit && state.onglet !== 'preparation';
   }
 
   async function startCooking() {
@@ -329,7 +405,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
 // vient de l'adresse, jamais de source_label (S7). Aucun geste de scan (F8). Selon l'import web OUVERT de la fiche (au plus un, I-2) : « Lire la
 // recette avec l’assistant » (aucun, ou a_lancer), « Voir » (en_cours), « Vérifier et enregistrer » (a_verifier), « Réessayer » (echec, avec la
 // phrase du cas). Synchrone (F-9) : la carte « Connecte-toi » est rendue CACHÉE et le bouton de lecture ÉTEINT — basculerSessionSignet les règle
-// une fois la session lue. Une adresse en http: n'a aucun bouton de lecture (B-20). « Ouvrir le lien » est toujours là. Ronde 1 : `web_reperes` est
+// une fois la session lue. Une adresse en http: n'a aucun bouton de lecture (B-20). « Voir la page d’origine » (lien texte, D-UI-10) est toujours là, http: compris. Ronde 1 : `web_reperes` est
 // RELU au rendu par reperesDe (ficheDe : présentation bornée au mot à 400, écartée si elle porte une adresse, Cc/Cf retirés ; repères typés) — une
 // fiche reçue ou restaurée peut porter n'importe quoi ; la ligne ouverte est choisie par ligneWebOuverte (import-web.js : la même règle que l'écran,
 // R-B-18 et R-B-20 ; `moi` = l'appareil d'ici).
@@ -338,7 +414,7 @@ export function blocSignet(recipe, ctx = null, { lire = null, connecter = () => 
   const bloc = el('div', { class: 'card warn stack', dataset: { role: 'bloc-signet' } }, el('h2', null, t('Lien web gardé.')));
   if (!lien.ok) { bloc.append(el('p', { class: 'muted' }, t('Adresse non reconnue : '), adresseInerte(recipe.source_url))); return bloc; }
   const id = encodeURIComponent(recipe.id);
-  const ouvrir = (classe) => el('a', { class: classe, href: lien.href, target: '_blank', rel: 'noopener noreferrer' }, t('Ouvrir le lien'));
+  const ouvrir = () => lienOrigine(lien); // D-UI-10 (I-B5) : « Voir la page d’origine », lien texte — le même sur la fiche et l'écran d'import web
   const hote = el('span', { class: 'muted' }, lien.hote);
   const reperes = reperesDe(recipe.web_reperes);
   const presentation = reperes?.presentation ?? null;
@@ -346,7 +422,7 @@ export function blocSignet(recipe, ctx = null, { lire = null, connecter = () => 
   const extraits = [presentation ? el('p', { dataset: { role: 'presentation-web' } }, t('Lors de la recherche, l’assistant disait : {p}', { p: presentation })) : null,
     ligneR ? el('p', { class: 'muted', dataset: { role: 'reperes-web' } }, t('Estimé par l’assistant : {r}', { r: ligneR })) : null].filter(Boolean);
   if (!lien.href.startsWith('https:')) {
-    bloc.append(el('p', null, t('L’app n’a pas encore lu la page.')), el('div', { class: 'row' }, ouvrir('btn primary'), hote),
+    bloc.append(el('p', null, t('L’app n’a pas encore lu la page.')), el('div', { class: 'row' }, ouvrir(), hote),
       el('div', { class: 'status warn', dataset: { role: 'interdit' } }, texteEchecLecture({ raison: 'interdit' }).texte), ...extraits);
     return bloc;
   }
@@ -356,11 +432,11 @@ export function blocSignet(recipe, ctx = null, { lire = null, connecter = () => 
   const statut = ligne?.status ?? null;
   const carte = carteConnexion(connecter, ctx); carte.hidden = true; carte.dataset.bascule = 'carte';
   const boutonLire = (libelle, classe) => el('button', { type: 'button', class: classe, disabled: true, dataset: { role: 'lire-web', bascule: 'bouton' }, onClick: () => lire?.() }, libelle);
-  if (statut === 'en_cours') bloc.append(el('p', null, t('Lecture de la page en cours…')), el('div', { class: 'row' }, el('a', { class: 'btn', href: `#/recipes/${id}/importer` }, t('Voir')), ouvrir('btn'), hote));
-  else if (statut === 'a_verifier') bloc.append(el('p', null, t('Lecture reçue : vérifie-la et enregistre.')), el('div', { class: 'row' }, el('a', { class: 'btn primary', href: `#/recipes/${id}/importer` }, t('Vérifier et enregistrer')), ouvrir('btn'), hote));
-  else if (statut === 'echec') bloc.append(el('p', null, t('Contenu non récupéré : ouvre la page.')), el('div', { class: 'row' }, ouvrir('btn primary'), boutonLire(t('Réessayer'), 'btn'), hote),
+  if (statut === 'en_cours') bloc.append(el('p', null, t('Lecture de la page en cours…')), el('div', { class: 'row' }, el('a', { class: 'btn', href: `#/recipes/${id}/importer` }, t('Voir')), ouvrir(), hote));
+  else if (statut === 'a_verifier') bloc.append(el('p', null, t('Lecture reçue : vérifie-la et enregistre.')), el('div', { class: 'row' }, el('a', { class: 'btn primary', href: `#/recipes/${id}/importer` }, t('Vérifier et enregistrer')), ouvrir(), hote));
+  else if (statut === 'echec') bloc.append(el('p', null, t('Contenu non récupéré : ouvre la page.')), el('div', { class: 'row' }, ouvrir(), boutonLire(t('Réessayer'), 'btn'), hote),
     el('small', { class: 'muted', dataset: { role: 'raison' } }, texteEchecLecture(ligne.erreur).texte), carte, el('div', { dataset: { bascule: 'hors-ligne' } }));
-  else bloc.append(el('p', null, t('L’app n’a pas encore lu la page.')), el('div', { class: 'row' }, boutonLire(t('Lire la recette avec l’assistant'), 'btn primary'), ouvrir('btn'), hote),
+  else bloc.append(el('p', null, t('L’app n’a pas encore lu la page.')), el('div', { class: 'row' }, boutonLire(t('Lire la recette avec l’assistant'), 'btn primary'), ouvrir(), hote),
     el('small', { class: 'muted' }, t('Une lecture = un appel à l’assistant, compté dans ton quota du jour.')), carte, el('div', { dataset: { bascule: 'hors-ligne' } }));
   bloc.append(...extraits);
   return bloc;

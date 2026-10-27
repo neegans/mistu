@@ -309,6 +309,33 @@ table.compare th { color: var(--green); background: var(--cream-2); }
 @media (min-width: 760px) { .two-col { grid-template-columns: 1fr 1fr; } .two-col.narrow-left { grid-template-columns: 320px 1fr; } .two-col.livre { grid-template-columns: 1fr; } }
 /* D-UI-7 : la fiche livre (tâche 4) ne passe en deux colonnes — couverture 200 px | recettes — qu'à partir de 900 px ; de 760 à 899 px la règle ci-dessus la garde empilée. */
 @media (min-width: 900px) { .two-col.livre { grid-template-columns: 200px 1fr; } }
+/* UI-1 (D-UI-6) : l'en-tête de la fiche recette — un seul ordre de DOM (état, photo, gestes) : en étroit, la photo passe sous la provenance et avant les
+   repères (maquette mobile) ; dès 760 px, deux colonnes : l'état puis les gestes à gauche, la photo à droite sur les deux rangées ; sans photo
+   (emplacement vide), une seule colonne, rien de réservé à droite : la zone « photo » reste DÉCLARÉE, en troisième rangée (0 px : l'enfant vide y tombe).
+   Rév. 4 : sans elle, l'enfant vide `grid-area: photo` sans zone nommée prenait une piste IMPLICITE à droite (mesure Chromium : « 1068px 0px 0px »,
+   `photoADroite` vrai) ; le gap de 1 rem qui en résulte sous les gestes est ACCEPTÉ. Le segmented Ingrédients / Préparation et la section non choisie se
+   cachent par [hidden]. */
+.fiche-tete { margin-bottom: 1.2rem; }
+.photo-plat img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--radius); }
+.reperes { font-size: 1.05rem; }
+/* « Commencer à cuisiner » prend la place, « Corriger » (lien texte) se range à côté ; seul, le bouton remplit la rangée. */
+.geste-principal { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .6rem; }
+.geste-principal > .btn.block { width: auto; }
+/* D-UI-10 : la flèche de « Voir la page d’origine » vit dans la feuille, hors du texte du lien. */
+a[data-role="ouvrir-lien"]::after { content: " ↗"; }
+details[data-role="autres-gestes"] > summary { cursor: pointer; font-family: var(--serif); font-weight: 600; font-size: 1.15rem; padding: .3rem 0; min-height: 44px; }
+details[data-role="autres-gestes"][open] > summary { margin-bottom: .6rem; }
+.recipe-body > [data-role="onglets-corps"] { margin-bottom: .8rem; }
+@media (min-width: 760px) {
+  .fiche-tete { grid-template-areas: "etat photo" "gestes photo"; align-items: start; }
+  .fiche-tete > .fiche-etat { grid-area: etat; }
+  .fiche-tete > .fiche-gestes { grid-area: gestes; }
+  .fiche-tete > .fiche-photo { grid-area: photo; }
+  /* Sans photo : une colonne, et la zone photo GARDÉE en troisième rangée (0 px) — l'enfant vide `grid-area: photo` y tombe au lieu d'ouvrir une piste implicite
+     à droite (rév. 4 ; `grid-area: etat` sur l'enfant vide est REFUSÉ : étiré sur la cellule de l'état, il se peindrait au-dessus et intercepterait les tapes ;
+     `display: none` interdit, T-1). Le gap de 1 rem sous les gestes est accepté. */
+  .fiche-tete:has(> .fiche-photo:empty) { grid-template-columns: 1fr; grid-template-areas: "etat" "gestes" "photo"; }
+}
 
 .qty { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ink); }
 .qty .est { color: var(--warn); font-weight: 400; }

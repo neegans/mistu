@@ -337,9 +337,9 @@ export async function runPhotoPlatTests({ eq, ok }) {
         const pP = await monter('rc_p', { pagesById: new Map([['pg1', { id: 'pg1', sha256: H('1'), printed_page: 12 }]]) });
         const avant = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
         const zoneP = zoneDe(pP)?.closest('section');
-        const original = [...pP.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Original');
-        eq([avant(pP.querySelector('[data-role="emplacement-photo-plat"]'), pP.querySelector('.card.sage')), avant(pP.querySelector('.recipe-body'), zoneP), avant(zoneP, original), zoneP?.querySelector('h2')?.textContent],
-          [true, true, true, 'Photo du plat'], 'places : l’emplacement de tête avant la carte des contrôles ; la section « Photo du plat » après .recipe-body et avant « Original »');
+        const original = [...pP.querySelectorAll('section.plain')].find((s) => s.querySelector('h2')?.textContent === 'Original');
+        eq([avant(pP.querySelector('[data-role="emplacement-photo-plat"]'), pP.querySelector('[data-role="autres-gestes"]')), avant(pP.querySelector('.recipe-body'), zoneP), avant(zoneP, original), zoneP?.querySelector('h2')?.textContent],
+          [true, true, true, 'Photo du plat'], 'places (UI-1, D-UI-6) : l’emplacement de tête (dans .fiche-tete) avant « Portions, versions et autres gestes » ; la section « Photo du plat » (.card) après .recipe-body et avant « Original » (plain)');
         eq([zoneP.querySelectorAll('img').length, !!original?.contains(zoneP), textesDirects(pP)], [0, false, []], 'deux zones distinctes (I-6) : aucune img dans la zone, la zone hors d’« Original » ; aucun nœud texte direct sous la racine');
 
         // D-F8, D-F5 / R-F-3

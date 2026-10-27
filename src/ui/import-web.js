@@ -14,7 +14,7 @@ import * as repoModule from '../model/repo.js';
 import { LIMITES_PASSERELLE } from '../domain/passerelle.js';
 import { RAISONS_ECHEC, IMPORTS_OUVERTS, importOuvert, motsDistinctifs, cleLecture, modeleBorne } from '../domain/import-cible.js';
 import { lireRecetteWeb, fabriquerImportWeb, fabriquerLectureWeb, relireResultat, versionHumaine } from '../domain/lecture-web.js';
-import { sessionAssistant, carteConnexion, texteRefusAssistant, texteEchecAssistant, availabilityBadge, section, INCERTAIN_MAX } from './components.js';
+import { sessionAssistant, carteConnexion, texteRefusAssistant, texteEchecAssistant, availabilityBadge, section, INCERTAIN_MAX, lienOrigine } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { signetModel, fabriquerSignet, LIMITES_SIGNET } from './signet.js';
 import { DOCUMENT_ID, BATTEMENT_MS, prendreVol, libererVol, volTenu, volEnCours } from './vol.js';
@@ -387,7 +387,7 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
   // --- Dessin
   const peutLire = () => !!session && enLigne() && !volEnCours() && https && !etat.occupe;
   const retour = () => el('a', { class: 'btn', href: `#/recipes/${encodeURIComponent(recipe.id)}` }, t('Retour à la fiche'));
-  const ouvrir = (classe = 'btn') => (lien.ok ? el('a', { class: classe, href: lien.href, target: '_blank', rel: 'noopener noreferrer' }, t('Ouvrir le lien')) : null);
+  const ouvrir = () => lienOrigine(lien); // D-UI-10 : « Voir la page d’origine », lien texte (null si l'adresse ne se lit pas)
   const enTete = () => el('header', { class: 'stack', style: { marginBottom: '1rem' } },
     el('a', { href: `#/recipes/${encodeURIComponent(recipe.id)}`, class: 'muted', style: { textDecoration: 'none', fontSize: '.9rem' } }, `← ${t('Fiche recette')}`),
     el('p', { class: 'muted', style: { margin: 0 } }, t('Lire une recette web')),
@@ -447,7 +447,7 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
     if (!session) bloc.append(carteConnexion(connecter, ctx));
     // Ronde 1 : une lecture illisible restée a_verifier (dessiner(), cas non écrit) se relance comme « Relire la page » — jamais un geste refusé en silence.
     const relire = L.status === 'a_verifier';
-    bloc.append(...[horsLigne()].filter(Boolean), el('div', { class: 'row' }, ouvrir('btn primary'),
+    bloc.append(...[horsLigne()].filter(Boolean), el('div', { class: 'row' }, ouvrir(),
       el('button', { type: 'button', class: 'btn', dataset: { role: 'reessayer' }, disabled: !peutLire(), onClick: () => relancer({ relire }) }, t('Réessayer')),
       el('button', { type: 'button', class: 'btn', dataset: { role: 'ignorer' }, onClick: ignorer }, t('Ignorer')), retour()));
     return bloc;

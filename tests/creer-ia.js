@@ -1338,12 +1338,12 @@ export async function runCreerIaTests({ eq, ok }) {
         eq([texte(page.querySelector('header p')), textes(page, '.badge').includes('Original'), page.querySelectorAll('.badge.original').length, textes(page, 'option').includes('Original')],
           ['Créée avec l’IA', false, 0, false], 'fiche IA : sous-titre « Créée avec l’IA » ; aucun badge « Original » (C-2) — hors sélecteur d’unités/langue');
         eq(textes(page, '[data-role="etiquette-ia"]'), ['Créée avec l’IA · non testée', 'Créée avec l’IA · non testée', 'Créée avec l’IA · non testée'], 'fiche IA : l’étiquette en tête, dans la carte de contrôle (version unique) et dans la liste des versions');
-        const versionsSec = [...page.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Versions');
+        const versionsSec = [...page.querySelectorAll('section.plain')].find((s) => s.querySelector('h2')?.textContent === 'Versions');
         eq([textes(versionsSec, 'li .muted')[0]?.split(' · ')[0], versionsSec.textContent.includes('Extraction IA'), page.textContent.includes('Extraction IA')], ['Création', false, false], 'fiche IA : « Création » dans la liste des versions, pas de ligne « Extraction IA » (§ 3.3)');
         eq(pucesV1(page), [], 'fiche IA : les puces « Rapide · V1 » sont masquées');
         const adapter = page.querySelector('[data-role="adapter-ia"]');
         eq([adapter?.tagName, adapter?.getAttribute('href'), adapter?.textContent], ['A', `#/recipes/creer?adapter=${creation.id}`, 'Adapter avec l’IA'], 'fiche IA : « Adapter avec l’IA » → #/recipes/creer?adapter=<version> (N-5)');
-        ok(apres(page.querySelector('.card.sage .row.between'), adapter) && page.querySelector('.card.sage').contains(adapter), 'fiche IA : le bouton est dans la carte de contrôle, à la place des puces V1');
+        ok(apres(page.querySelector('[data-role="autres-gestes"] .row.between'), adapter) && page.querySelector('[data-role="autres-gestes"]').contains(adapter), 'fiche IA : le bouton est dans « Portions, versions et autres gestes », à la place des puces V1');
         eq([texte(page.querySelector('[data-role="description-ia"]')), texte(page.querySelector('[data-role="minutes-ia"]')), textes(page, '[data-role="conseils-ia"] li'), textes(page, '[data-role="notes-ia"] li'), texte(page.querySelector('[data-role="avertissement-ia"]'))],
           ['Selon l’assistant : Un plat simple.', 'environ 25 min (estimé par l’assistant)', ['Selon l’assistant : Servir chaud.'], ['Vérifie l’étiquette du bouillon.'], AVERT], 'fiche IA : « Selon l’assistant », durée estimée, « Conseils », « À vérifier avant de servir », avertissement C-9 (§ 3.3, C-6, C-9)');
         ok(['Conseils', 'À vérifier avant de servir'].every((h) => textes(page, 'h2, h3').includes(h)), 'fiche IA : les blocs portent leurs titres « Conseils » et « À vérifier avant de servir »');
@@ -1373,7 +1373,7 @@ export async function runCreerIaTests({ eq, ok }) {
         // N-10 : « Corriger » garde `origine` — la fiche corrigée montre encore la lignée IA, jamais « Original »
         const pageC = await renderRecipe({ id: fiche.id }, {}, ctxFiche([ficheCorrigee], [creation, correction]));
         eq([texte(pageC.querySelector('header p')), textes(pageC, '.badge').includes('Original'), textes(pageC, '[data-role="etiquette-ia"]')[0]], ['Créée avec l’IA', false, 'Corrigée par toi — d’après une création IA'], 'fiche corrigée (N-10) : provenance « Créée avec l’IA », en-tête « Corrigée par toi — d’après une création IA », jamais « Original »');
-        const options = textes(pageC, '.card.sage select option');
+        const options = textes(pageC, '[data-role="autres-gestes"] select option');
         eq([options.length, options[0], options[1]?.startsWith('Créée avec l’IA · non testée ')], [2, 'Corrigée par toi — d’après une création IA', true], 'fiche corrigée : le sélecteur nomme les deux versions par leur étiquette C-2');
         eq([pageC.querySelector('[data-role="adapter-ia"]') === null, pucesV1(pageC).length, pageC.querySelector('[data-role="avertissement-ia"]') === null], [true, 3, true], 'fiche corrigée : la version affichée est manuelle — ni « Adapter avec l’IA », ni blocs IA (§ 3.3 : seulement sur estCreationIA)');
         // M1 : « Corriger » affiche « Page imprimée » sans condition (recipe-edit.js:171) — un 12 tapé là ne fait pas une page d'original (C-2)
@@ -1388,7 +1388,7 @@ export async function runCreerIaTests({ eq, ok }) {
 
         // Une création et son adaptation IA (T7) : le sélecteur nomme chacune par son étiquette ; l'adaptation s'adapte à son tour (estCreationIA)
         const pageA = await renderRecipe({ id: fiche.id }, { v: adIA.id }, ctxFiche([fiche], [creation, adIA]));
-        const optionsA = textes(pageA, '.card.sage select option');
+        const optionsA = textes(pageA, '[data-role="autres-gestes"] select option');
         eq([optionsA.length, optionsA[0]?.startsWith('Créée avec l’IA · non testée '), optionsA[1]?.startsWith('Adaptée avec l’IA · non testée '), textes(pageA, '.badge').includes('Original'), pageA.querySelector('[data-role="adapter-ia"]')?.getAttribute('href')],
           [2, true, true, false, `#/recipes/creer?adapter=${adIA.id}`], 'fiche IA avec adaptation IA : deux options étiquetées C-2, aucun « Original », « Adapter avec l’IA » sur l’adaptation affichée');
 
@@ -1788,7 +1788,7 @@ export async function runCreerIaTests({ eq, ok }) {
         // affichée par défaut (current_version_id intact) ; ?v= choisit l'adaptation, étiquetée C-2, qui s'adapte à son tour
         const recettes = await repo.all('recipes'); const versions = await repo.all('recipe_versions');
         const ctxFiche = { recipesById: new Map(recettes.map((r) => [r.id, r])), versionsByRecipe: new Map(recettes.map((r) => [r.id, versions.filter((x) => x.recipe_id === r.id)])), versionsById: new Map(versions.map((x) => [x.id, x])), editionsById: new Map(), booksById: new Map(), pagesById: new Map(), dishesById: new Map(), cook_history: [], dish_recipe_links: [], recipe_translations: [], ingredients: INGREDIENTS, ingredientsById: ING, dishes: [], settings: { units: 'original', reading_locale: 'original' }, conventionFor: (r) => r?.unit_convention_id || null };
-        const sectionVersions = (p) => [...p.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Versions') || null;
+        const sectionVersions = (p) => [...p.querySelectorAll('section.plain')].find((s) => s.querySelector('h2')?.textContent === 'Versions') || null;
         const page = await renderRecipe({ id: fiche.id }, {}, ctxFiche);
         const pageV = await renderRecipe({ id: fiche.id }, { v: v.id }, ctxFiche);
         eq([textes(sectionVersions(page), 'li .row > span.muted').map((s) => s.split(' · ')[0]), sectionVersions(page)?.textContent.includes('pour 4 personnes'), textes(page, '[data-role="etiquette-ia"]')[0], page.querySelector('[data-role="adapter-ia"]')?.getAttribute('href'), textes(pageV, '[data-role="etiquette-ia"]')[0], pageV.querySelector('[data-role="adapter-ia"]')?.getAttribute('href')],
