@@ -29,8 +29,9 @@ import { capitaliser } from './puces.js';
 export const adresseInerte = (u) => { const s = String(u ?? ''); return s.length > 200 ? s.slice(0, 200) + '…' : s; };
 
 // UI-1 (D-UI-6, B-I-6) : la durée d'une version, en UN nombre par formatMinutes (jamais la paire « actif · total » de timeText, qui reste dans
-// l'en-tête d'Ingrédients). LA règle est celle de la carte-plat, dureeTotale (components.js, T2 : total_minutes ?? prep + cook ; null sans durée
-// connue, non numérique, ou pour une création IA — C-6 : son estimation est dite à part) ; ici seulement la mise en forme, '' si rien ou ≤ 0.
+// l'en-tête d'Ingrédients). LA règle est celle de la carte-plat, dureeTotale (components.js : total_minutes, sinon prep + cook quand les DEUX sont
+// connus — ronde 1 de T3, rien d'inventé ; null sans durée connue, non numérique, ou pour une création IA — C-6 : son estimation est dite à part) ;
+// ici seulement la mise en forme, '' si rien ou ≤ 0.
 export function dureeVersion(version) {
   const total = dureeTotale(version);
   return total !== null && total > 0 ? formatMinutes(total) : '';
@@ -41,11 +42,31 @@ export function texteReperes(version) {
   if (!version) return null;
   const n = Number.isInteger(version.servings) && version.servings >= 1 ? version.servings : null;
   const d = dureeVersion(version);
-  if (n !== null && n >= 2 && d) return t('{n} portions · {d}', { n, d });
-  const parties = [];
+  const parties = []; // ronde 1 : les parties sont toujours jointes par « · » (plus de clé combinée « {n} portions · {d} », doublon de « {n} portions »)
   if (n === 1) parties.push(t('1 portion')); else if (n !== null) parties.push(t('{n} portions', { n }));
   if (d) parties.push(d);
   return parties.length ? parties.join(' · ') : null;
+}
+
+// La largeur, suivie sur `change` (F-5) : le details s'ouvre ou se replie, le corps bascule entre colonnes et onglets — sans redessin. Ronde 1 (fuite
+// de la revue) : AU PLUS UN abonné de fiche dans toute l'app, le motif boutonMobile de library.js (T2-R1). L'abonnement attend le MONTAGE
+// (setTimeout 0 puis isConnected : app.js insère la route juste après son rendu, et un rendu dépassé, jamais inséré, ne s'abonne pas), RELIT la
+// largeur à cet instant (un change reçu entre le rendu et le montage n'est pas perdu) et retire celui de la fiche montée précédente ; une fiche
+// quittée se retire au premier change. La MediaQueryList ne retient donc jamais plus d'une fiche (et une liste sans addEventListener : aucune).
+let suiviFiche = null; // { mq, suivre } : l'abonnement de la dernière fiche montée
+function suivreLargeur(racine, mq, appliquer) {
+  setTimeout(() => {
+    if (!racine.isConnected || typeof mq?.addEventListener !== 'function') return;
+    if (suiviFiche) suiviFiche.mq.removeEventListener('change', suiviFiche.suivre);
+    const suivre = () => {
+      if (racine.isConnected) { appliquer(); return; }
+      mq.removeEventListener('change', suivre);
+      if (suiviFiche?.suivre === suivre) suiviFiche = null;
+    };
+    appliquer();
+    mq.addEventListener('change', suivre);
+    suiviFiche = { mq, suivre };
+  }, 0);
 }
 
 // `deps` (lot B, facultatif : le routeur n'en passe pas) : les gestes de la lecture web { repo, navigate, toast, fetch, maintenant, enLigne } — la
@@ -54,6 +75,9 @@ export function texteReperes(version) {
 export async function renderRecipe(params, query, ctx, deps = {}) {
   const recipe = ctx.recipesById.get(params.id);
   if (!recipe) return el('div', { class: 'card' }, t('Recette introuvable.'));
+  // Ronde 1 : l'identifiant d'une fiche reçue ou restaurée peut porter « & », « ? » ou « # » — les adresses l'encodent (le geste ouvert est celui annoncé).
+  const rid = encodeURIComponent(recipe.id);
+  const lienEdition = (kind, v) => `#/recipes/${rid}/edit${buildQuery({ kind, v })}`;
   // Lot B (§ 4.1, § 4.5) : une fiche à adresse lisible porte « Voir la page d’origine » partout (I-B5, D-UI-10) ; la lecture par l'assistant a besoin de la session.
   const lienFiche = recipe.source_url ? lienSignet(recipe.source_url) : null;
   const lisibleParLAssistant = !!lienFiche?.ok && lienFiche.href.startsWith('https:');
@@ -167,7 +191,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   if (original) versionOptions.push({ value: original.id, label: libelleOption(original, { adaptation: false }) });
   for (const a of adaptations) versionOptions.push({ value: a.id, label: libelleOption(a, { adaptation: true }) });
   const estUneCreation = estCreationIA(version);
-  const selectVersion = (id) => navigate(`/recipes/${recipe.id}${buildQuery({ v: id, servings: state.servings || '' })}`, { replace: true });
+  const selectVersion = (id) => navigate(`/recipes/${rid}${buildQuery({ v: id, servings: state.servings || '' })}`, { replace: true });
   // Les gestes de tête (D-UI-6, B-I-8) : les repères, le lien d'origine (toute adresse lisible, http compris : I-B5), puis « Commencer à cuisiner » pleine
   // largeur et, tant que la version AFFICHÉE n'est pas vérifiée, « Corriger » en lien texte à côté — le seul geste que « — vérifie » et « {n} lignes à
   // vérifier » réclament ; il reste aussi dans « autres gestes ».
@@ -177,7 +201,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     lienOrigine(lienFiche),
     el('div', { class: 'geste-principal', dataset: { role: 'geste-principal' } },
       el('button', { class: 'btn primary big block', onClick: startCooking }, t('Commencer à cuisiner')),
-      version.verification_state !== 'verified' ? el('a', { class: 'btn link', href: `#/recipes/${recipe.id}/edit?kind=correction&v=${version.id}`, dataset: { role: 'corriger-tete' } }, t('Corriger')) : null)));
+      version.verification_state !== 'verified' ? el('a', { class: 'btn link', href: lienEdition('correction', version.id), dataset: { role: 'corriger-tete' } }, t('Corriger')) : null)));
 
   // « Portions, versions et autres gestes » (D-UI-6, § 13 point 4) : TOUT l'ancien contenu de la carte des contrôles et de la rangée d'actions, sauf
   // « Commencer à cuisiner » et le « Corriger » de tête — replié sous 760 px, ouvert au-dessus (le matchMedia, relu sur change) ; jamais « Réglages »
@@ -188,8 +212,8 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
       el('div', { class: 'row between' },
         versionOptions.length > 1 ? select(versionOptions, version.id, selectVersion) : etiquetteCreationIA(version, recipe) ? versionBadge(version, recipe) : el('span', { class: 'badge original' }, t('Original')),
         el('div', { class: 'row' },
-          el('a', { class: 'btn small', href: `#/recipes/${recipe.id}/edit?kind=adaptation&v=${version.id}` }, t('Créer ma version')),
-          el('a', { class: 'btn small', href: `#/recipes/${recipe.id}/edit?kind=correction&v=${version.id}` }, t('Corriger')),
+          el('a', { class: 'btn small', href: lienEdition('adaptation', version.id) }, t('Créer ma version')),
+          el('a', { class: 'btn small', href: lienEdition('correction', version.id) }, t('Corriger')),
           // Import ciblé (spec import-cible § 4.1, D-11) : une recette partielle se relit par l'écran déjà rattaché (import à refaire) ; une recette complète n'a pas d'entrée.
           recipe.availability === 'partial' && !recipe.source_url ? el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(recipe.id)}/importer` }, t('Relire les pages')) : null,
           // Lot B (D-B18) : une fiche à adresse https qui a déjà une version se relit par l'assistant — absent sans session.
@@ -218,17 +242,6 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   root.append(body);
   drawBody();
   root.append(photo.zone); // lot F (D-F2, D-F8) : seulement quand la fiche a une version
-  // La largeur, écoutée sur change (F-5) : le details s'ouvre ou se replie, le corps bascule entre colonnes et onglets — sans redessin. Une fiche vue
-  // dans le document puis retirée se désabonne à la notification suivante (la MediaQueryList garde ses abonnés : aucune fuite à chaque visite).
-  let inseree = false;
-  const surLargeur = () => {
-    if (root.isConnected) inseree = true;
-    else if (inseree) { mq.removeEventListener('change', surLargeur); return; }
-    autresGestes.open = large();
-    appliquerCorps();
-  };
-  mq.addEventListener('change', surLargeur);
-
   const pagesOriginal = recipe.availability === 'reference_only' ? pages : pages.filter((p) => p.id !== recipe.index_page_id); // lot D (§ 4.8.4) : une fiche lue n'a pas sa photo d'index dans « Original » ; une référence la garde (D-C5)
   // Pages originales
   if (pagesOriginal.length) {
@@ -253,13 +266,15 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     el('div', null, el('strong', null, formatDate(h.cooked_at)), ` · ${h.servings ? t('{n} portions', { n: h.servings }) : ''}${h.rating ? ` · ${'★'.repeat(h.rating)}` : ''}${h.redo === false ? ` · ${t('à ne pas refaire')}` : h.redo ? ` · ${t('à refaire')}` : ''}${h.actual_minutes ? ` · ${h.actual_minutes} min` : ''}`,
       h.notes ? el('div', { style: { fontSize: '.9rem' } }, h.notes) : null,
       el('div', { class: 'muted', style: { fontSize: '.8rem' } }, t('Observation liée à cette cuisson ; elle ne devient pas une règle universelle.'))),
-    el('a', { class: 'btn small', href: `#/recipes/${recipe.id}${buildQuery({ v: h.recipe_version_id, servings: h.servings || '' })}` }, t('Refaire comme la dernière fois')))))));
+    el('a', { class: 'btn small', href: `#/recipes/${rid}${buildQuery({ v: h.recipe_version_id, servings: h.servings || '' })}` }, t('Refaire comme la dernière fois')))))));
 
   // Export
   root.append(el('div', { class: 'row', style: { marginTop: '.5rem' } },
     el('button', { class: 'btn small', onClick: () => downloadBlob(new Blob([JSON.stringify(toJsonLd({ recipe, version, book, edition }), null, 2)], { type: 'application/ld+json' }), `${slug(recipe.original_title)}.jsonld`) }, t('Exporter JSON-LD')),
     el('button', { class: 'btn small', onClick: () => downloadBlob(new Blob([toPaprikaYaml([{ recipe, version, book, edition }])], { type: 'text/yaml;charset=utf-8' }), `${slug(recipe.original_title)}.yml`) }, t('Exporter YAML (Paprika)')),
     el('span', { class: 'muted', style: { fontSize: '.85rem' } }, t('Version et langue affichées ; inconnues omises.'))));
+  // Ronde 1 : la largeur suivie au MONTAGE (suivreLargeur, plus haut), posé APRÈS le dernier await du rendu — le routeur insère la racine juste après.
+  suivreLargeur(root, mq, () => { autresGestes.open = large(); appliquerCorps(); });
   return root;
 
   function setServings(n) { if (n < 1) return; state.servings = n; document.getElementById('servings-val').textContent = n; drawBody(); }
@@ -292,7 +307,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     const ingredients = sectionPlain(`${t('Ingrédients')}${scaled.ok && scaled.factor !== 1 ? ` — ${t('recalculés pour {n} portions', { n: state.servings })}` : version.servings ? ` — ${t('{n} portions', { n: version.servings })}` : ''}`,
       el('div', { class: 'row between' }, el('span', { class: 'muted' }, timeText(version)), dietSel),
       assessment ? el('div', { style: { margin: '.4rem 0' } }, dietChip(assessment), assessment.unknown.length ? el('div', { class: 'muted', style: { fontSize: '.85rem' } }, `${t('Inconnus')} : ${assessment.unknown.join(', ')}`) : null) : null,
-      wantsTranslation && !translation ? el('div', { class: 'status warn' }, t('Aucune traduction {l} pour cette version.', { l: state.lang.toUpperCase() }), el('a', { class: 'btn small', href: `#/recipes/${recipe.id}/edit?kind=translation&v=${version.id}` }, t('Traduire'))) : null,
+      wantsTranslation && !translation ? el('div', { class: 'status warn' }, t('Aucune traduction {l} pour cette version.', { l: state.lang.toUpperCase() }), el('a', { class: 'btn small', href: lienEdition('translation', version.id) }, t('Traduire'))) : null,
       translation ? el('div', { class: 'row' }, el('span', { class: 'badge' }, t('Traduction')), el('span', { class: 'muted' }, translation.translated_content.title || '')) : null,
       ingList, ...scaled.notes.map((n) => el('small', { class: 'muted', style: { display: 'block' } }, n)),
       !conventionId && scaled.ingredients.some((i) => ['cup', 'tbsp', 'tsp', 'fl_oz'].includes(i.unit_id)) ? el('div', { class: 'status warn', style: { marginTop: '.5rem' } }, t('Tasses/cuillères : convention non confirmée pour cette édition — quantités d’origine affichées.'), edition ? el('a', { class: 'btn small', href: `#/books/${edition.id}` }, t('Préciser')) : null) : null);
@@ -377,7 +392,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     const sub = { id: repo.newId('sub'), recipe_version_id: newVersion.id, parent_version_id: version.id, ingredient_id: ri.ingredient_id || null, replacement_ingredient_id: newId, replacement_text: newLabel, role: ri.preparation || null, effects: effects || '', state: 'accepted', created_at: repo.nowIso() };
     await repo.saveBatch({ recipe_versions: [newVersion], substitutions: [sub] });
     toast(t('Ma version créée ; contraintes et courses à réévaluer sur cette version.'));
-    navigate(`/recipes/${recipe.id}?v=${newVersion.id}`);
+    navigate(`/recipes/${rid}${buildQuery({ v: newVersion.id })}`);
   }
 
   async function referenceOnly() {
@@ -394,7 +409,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
         el('div', { class: 'row' },
           // D-8 : la voie « Scanner cette recette » (Ajouter + clé de session) est remplacée par l'écran d'import ciblé, déjà rattaché à la référence.
           el('a', { class: 'btn primary', href: `#/recipes/${encodeURIComponent(recipe.id)}/importer` }, t('Importer cette recette')),
-          el('a', { class: 'btn', href: `#/recipes/${recipe.id}/edit?kind=extraction` }, t('Saisir à la main')),
+          el('a', { class: 'btn', href: lienEdition('extraction') }, t('Saisir à la main')),
           dish ? el('a', { class: 'btn', href: `#/dishes/${dish.id}` }, t('Autres recettes de ce plat')) : el('button', { class: 'btn', onClick: attachDish }, t('Rattacher à un plat')))),
       vignettes ? section(t('Pages d’index'), boutonTelechargerPages(vignettes.distantes, { connecte: ctxF.connecte, telecharger: vignettes.telecharger }),
         el('div', { class: 'thumbs' }, ...pages.map((p) => el('figure', null, vignettes.places.get(p.id))))) : null);

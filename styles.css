@@ -318,16 +318,22 @@ table.compare th { color: var(--green); background: var(--cream-2); }
 .fiche-tete { margin-bottom: 1.2rem; }
 .photo-plat img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--radius); }
 .reperes { font-size: 1.05rem; }
-/* « Commencer à cuisiner » prend la place, « Corriger » (lien texte) se range à côté ; seul, le bouton remplit la rangée. */
+/* « Commencer à cuisiner » prend la place, « Corriger » (lien texte) se range à côté ; seul (version vérifiée), le bouton s'étend sur les deux pistes et
+   remplit la rangée (ronde 1 : sans cela, le gap de .6rem restait vide à droite). */
 .geste-principal { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .6rem; }
 .geste-principal > .btn.block { width: auto; }
+.geste-principal > .btn.block:only-child { grid-column: 1 / -1; }
 /* D-UI-10 : la flèche de « Voir la page d’origine » vit dans la feuille, hors du texte du lien. */
 a[data-role="ouvrir-lien"]::after { content: " ↗"; }
 details[data-role="autres-gestes"] > summary { cursor: pointer; font-family: var(--serif); font-weight: 600; font-size: 1.15rem; padding: .3rem 0; min-height: 44px; }
 details[data-role="autres-gestes"][open] > summary { margin-bottom: .6rem; }
 .recipe-body > [data-role="onglets-corps"] { margin-bottom: .8rem; }
+/* Ronde 1 : un emplacement photo VIDE ne fait pas de boîte (aucune rangée, donc aucun second gap entre l'état et les gestes sous 760 px) ; ce n'est pas un
+   display:none (T-1) — il redevient une boîte dès que la photo y entre. Au-dessus de 760 px, la règle :has ci-dessous garde sa forme. */
+.fiche-tete > .fiche-photo:empty { display: contents; }
 @media (min-width: 760px) {
-  .fiche-tete { grid-template-areas: "etat photo" "gestes photo"; align-items: start; }
+  /* Ronde 1 : la hauteur en trop de la photo va à la rangée des gestes (1fr), jamais entre l'état et les gestes : la colonne de gauche reste une pile. */
+  .fiche-tete { grid-template-areas: "etat photo" "gestes photo"; grid-template-rows: auto 1fr; align-items: start; }
   .fiche-tete > .fiche-etat { grid-area: etat; }
   .fiche-tete > .fiche-gestes { grid-area: gestes; }
   .fiche-tete > .fiche-photo { grid-area: photo; }

@@ -43,7 +43,7 @@ export const CHAINES_NEUVES_AILLEURS = {
     // Lot C, tâche 5 : la section d’une référence sur sa fiche (D-C6).
     'Section : {s}',
     // Lot UI-1, tâche 3 : les gestes repliés et les repères de l'en-tête (D-UI-6).
-    'Portions, versions et autres gestes', '{n} portions · {d}'],
+    'Portions, versions et autres gestes'],
   '../src/ui/components.js': ['Lien web', 'Adresse non reconnue', 'incertain', 'Ligne incertaine selon l’assistant',
     // Lot B, tâche 4 : la ligne de repères déménagée de search.js (ligneReperes, mêmes textes).
     '≈ {n} min', '≈ {h} h', '≈ {h} h {m}', 'facile', 'moyen', 'exigeant', '1 ingrédient', '{n} ingrédients',

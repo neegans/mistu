@@ -772,5 +772,4 @@ export const EN = {
   // gardent leurs entrées (une clé, une traduction).
   "Voir la page d’origine": "View the original page",
   "Portions, versions et autres gestes": "Servings, versions and more",
-  "{n} portions · {d}": "{n} servings · {d}",
 };

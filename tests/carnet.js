@@ -290,9 +290,9 @@ export async function runCarnetTests({ eq, ok }) {
 
       await run('dureeTotale, ligneSource, badges : « {source} · {durée} », rien d’inventé (D-UI-5, B-I-6)', async () => {
         const source = (d) => texte(K.recipeCard(d, { photoEnTete: true }).querySelector('.carte-plat-source'));
-        eq([K.dureeTotale(web.version), K.dureeTotale(duLivre.version), K.dureeTotale(sansDuree.version), K.dureeTotale(null), K.dureeTotale(ia.version), K.dureeTotale(version('x', { total_minutes: 5, prep_minutes: 1, cook_minutes: 1 })), K.dureeTotale(version('x', { total_minutes: '35' })), K.dureeTotale(version('x', { cook_minutes: 25 }))],
-          [35, 40, null, null, null, 5, null, 25],
-          'dureeTotale : total_minutes d’abord, sinon prep + cook (l’un des deux suffit), sinon null ; une création IA n’a pas de durée (C-6) ; une valeur non numérique vaut null');
+        eq([K.dureeTotale(web.version), K.dureeTotale(duLivre.version), K.dureeTotale(sansDuree.version), K.dureeTotale(null), K.dureeTotale(ia.version), K.dureeTotale(version('x', { total_minutes: 5, prep_minutes: 1, cook_minutes: 1 })), K.dureeTotale(version('x', { total_minutes: '35' })), K.dureeTotale(version('x', { cook_minutes: 25 })), K.dureeTotale(version('x', { prep_minutes: 15, cook_minutes: 0 }))],
+          [35, 40, null, null, null, 5, null, null, 15],
+          'dureeTotale : total_minutes d’abord, sinon prep + cook quand les DEUX sont connus (T3-R1 : une seule partie ne fait pas une durée ; une cuisson de 0 est connue), sinon null ; une création IA n’a pas de durée (C-6) ; une valeur non numérique vaut null');
         eq([source(web), source(duLivre), source(sansDuree), source(signet), source(ia), source(main)],
           ['Du web · recettes.test · 35 min', 'De mon livre · Le livre · 40 min', 'De mon livre · Le livre', 'Du web · a.test', 'Créée avec l’IA', 'Recette de famille · 1 h 30'],
           'ligne de source : « Du web · {hôte} » (hôte RECALCULÉ) ou « De mon livre · {titre} », puis « · {durée} » en UN nombre (formatMinutes) seulement quand une durée existe ; un signet non lu n’a pas de durée ; une fiche IA ou personnelle garde sa provenance');
@@ -306,7 +306,9 @@ export async function runCarnetTests({ eq, ok }) {
         // Ronde 1 : seule une durée STRICTEMENT positive compte (« PT0S » d'un JSON-LD, une valeur négative tapée dans l'éditeur).
         eq([K.dureeTotale(version('x', { total_minutes: 0 })), K.dureeTotale(version('x', { total_minutes: 0, prep_minutes: 10 })), K.dureeTotale(version('x', { prep_minutes: -30, cook_minutes: 10 })), K.dureeTotale(version('x', { prep_minutes: -30, cook_minutes: 0 })),
           K.ligneSource(docDe(fiche('rc_0', { source_url: 'https://site.test/r' }), { version: version('rc_0', { total_minutes: 0 }) }))],
-          [null, 10, 10, null, 'Du web · site.test'], 'dureeTotale : 0 ou une valeur négative valent null (le total retombe sur prep + cook), une somme nulle aussi ; la carte ne dit jamais « · 0 min » ni une durée négative');
+          [null, null, null, null, 'Du web · site.test'], 'dureeTotale : un total nul ou négatif vaut null (il retombe sur prep + cook) ; une partie négative est inconnue, et une seule partie connue ne fait pas une durée (T3-R1) ; une somme nulle vaut null ; la carte ne dit jamais « · 0 min » ni une durée négative');
+        eq([K.dureeTotale(version('x', { total_minutes: 0, prep_minutes: 10, cook_minutes: 0 })), K.dureeTotale(version('x', { total_minutes: -5, prep_minutes: 10, cook_minutes: 20 }))], [10, 30],
+          'dureeTotale : un total nul ou négatif retombe sur prep + cook quand les deux sont connus (10 + 0, 10 + 20)');
         const badges = (d) => [...K.recipeCard(d, { photoEnTete: true }).querySelectorAll('.carte-plat-corps > .carte-plat-badges > *')].map((b) => b.textContent);
         // Le badge de disponibilité est celui d'availabilityBadge, lu par le composant lui-même (« Recette disponible » aujourd'hui, « Disponible » dès T5, D-UI-10) :
         // ce test tient la CARTE (ordre et présence des badges), jamais le libellé — qui est à T5 (rév. 2).
@@ -604,6 +606,7 @@ export async function runCarnetTests({ eq, ok }) {
   const { withRepo } = await import('./sync-fixture.js');
   await bloc('fiche recette (T3) : ordre du DOM, deux largeurs, onglets, autres gestes, repères, « Voir la page d’origine »', () => withRepo(async (repo, db) => {
     const { renderRecipe, blocSignet, texteReperes, dureeVersion } = await import('../src/ui/recipe.js');
+    const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
     const { lienOrigine } = await import('../src/ui/components.js');
     const { lienSignet } = await import('../src/core/lien.js');
     const { sha256Hex } = await import('../src/core/hash.js');
@@ -635,12 +638,16 @@ export async function runCarnetTests({ eq, ok }) {
     };
     const mettre = (...rows) => db.mutate({ puts: { recipes: rows }, origin: 'device' });
     const versions = (...rows) => db.mutate({ puts: { recipe_versions: rows }, origin: 'device' });
-    const monter = async (id, mm, query = {}) => { const p = await renderRecipe({ id }, query, await ctxPour(), { matchMedia: mm.matchMedia }); scene.append(p); return p; };
+    // Ronde 1 : l'abonnement à `change` se pose au MONTAGE (setTimeout 0 puis isConnected, le motif boutonMobile de library.js) — monter attend ce tour.
+    const macro = () => new Promise((r) => setTimeout(r, 0));
+    const monter = async (id, mm, query = {}) => { const p = await renderRecipe({ id }, query, await ctxPour(), { matchMedia: mm.matchMedia }); scene.append(p); await macro(); return p; };
     const avant = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
     const q = (p, sel) => p?.querySelector(sel) ?? null;
     const textes = (p, sel) => [...(p?.querySelectorAll(sel) ?? [])].map((n) => n.textContent);
     const titreSection = (s) => s?.querySelector('h2')?.textContent ?? null;
     const sectionPlain = (p, titre) => [...p.querySelectorAll('section.plain')].find((s) => (titreSection(s) ?? '').startsWith(titre)) ?? null;
+    // Ronde 1 : des textes français sont affirmés — la locale est posée ici et rendue dans le finally (le bloc ne dépend plus de celui qui le précède).
+    const localeAvant = getUiLocale(); setUiLocale('fr');
     try {
       await mettre(fiche('rc_t3', { source_page_ids: [PAGE_T3.id] })); await versions(version('rc_t3'));
       // --- Ordre du DOM, large
@@ -677,6 +684,18 @@ export async function runCarnetTests({ eq, ok }) {
       const corriger = q(pNV, '[data-role="corriger-tete"]');
       eq([corriger?.tagName, corriger?.className, corriger?.textContent, corriger?.getAttribute('href'), q(pNV, '[data-role="geste-principal"]')?.contains(corriger), textes(q(pNV, '[data-role="autres-gestes"]'), 'a').filter((x) => x === 'Corriger').length, avant(q(pNV, '[data-role="geste-principal"] button'), corriger)],
         ['A', 'btn link', 'Corriger', '#/recipes/rc_nv/edit?kind=correction&v=rv_rc_nv', true, 1, true], 'fiche T3 : version NON vérifiée → a.btn.link « Corriger » à côté (après) de « Commencer à cuisiner », même href que celui du details, qui reste');
+      // Ronde 1 : « Corriger » en tête pour TOUTE version non vérifiée (la règle est !== 'verified') — une version ancienne sans état, ou « unverified ».
+      const sansEtat = version('rc_u0'); delete sansEtat.verification_state;
+      await mettre(fiche('rc_u0'), fiche('rc_u1')); await versions(sansEtat, version('rc_u1', { verification_state: 'unverified' }));
+      const pU0 = await monter('rc_u0', fauxMatchMedia(true)); const pU1 = await monter('rc_u1', fauxMatchMedia(true));
+      eq([q(pU0, '[data-role="corriger-tete"]')?.getAttribute('href'), q(pU1, '[data-role="corriger-tete"]')?.getAttribute('href')], ['#/recipes/rc_u0/edit?kind=correction&v=rv_rc_u0', '#/recipes/rc_u1/edit?kind=correction&v=rv_rc_u1'],
+        'fiche T3 : « Corriger » en tête sur une version SANS état de vérification et sur une version « unverified » (pas seulement « to_verify »)');
+      // Ronde 1 : l'identifiant d'une fiche reçue (synchro, archive) peut porter « & » ou « # » — les liens d'édition l'encodent : le geste ouvert est celui annoncé.
+      await mettre(fiche('rc_&x#', { verification_state: 'to_verify' })); await versions(version('rc_&x#', { verification_state: 'to_verify' }));
+      const pEnc = await monter('rc_&x#', fauxMatchMedia(true));
+      const liensEdition = [...(q(pEnc, '[data-role="autres-gestes"]')?.querySelectorAll('a') ?? [])].filter((a) => ['Créer ma version', 'Corriger'].includes(a.textContent)).map((a) => a.getAttribute('href'));
+      eq([q(pEnc, '[data-role="corriger-tete"]')?.getAttribute('href'), liensEdition], ['#/recipes/rc_%26x%23/edit?kind=correction&v=rv_rc_%26x%23', ['#/recipes/rc_%26x%23/edit?kind=adaptation&v=rv_rc_%26x%23', '#/recipes/rc_%26x%23/edit?kind=correction&v=rv_rc_%26x%23']],
+        'fiche T3 : les liens d’édition (« Corriger » de tête, « Créer ma version » et « Corriger » du details) encodent l’identifiant de la fiche et de la version');
       // --- Étroit : details fermé, onglets visibles, bascule LOCALE (la scène est vidée : un seul #servings-val dans le document)
       scene.replaceChildren();
       const mmE = fauxMatchMedia(false);
@@ -705,6 +724,43 @@ export async function runCarnetTests({ eq, ok }) {
       eq(mmE.abonnes.size, 1, 'fiche T3 : un seul abonné change par fiche montée');
       pE.remove(); mmE.basculer(true);
       eq(mmE.abonnes.size, 0, 'fiche T3 : une fiche retirée du document se désabonne à la notification suivante');
+      // Ronde 1 (fuite de la revue : un abonné par rendu, jamais retiré sans change) : AU PLUS UN abonné de fiche dans l'app, posé au MONTAGE — le motif
+      // boutonMobile de library.js (T2-R1). Les comptes sont pris AVANT tout change : un change retire de lui-même un abonné détaché (le trou de la revue).
+      const mmV = fauxMatchMedia(true);
+      await renderRecipe({ id: 'rc_t3' }, {}, await ctxPour(), { matchMedia: mmV.matchMedia }); // jamais montée (app.js jette un rendu dépassé)
+      await macro(); await macro();
+      const nonMontee = mmV.abonnes.size;
+      scene.replaceChildren();
+      const vue1 = await monter('rc_t3', mmV); const montee = mmV.abonnes.size;
+      vue1.remove(); mmV.basculer(false); // montée puis quittée SANS notification : le change suivant la retire
+      const quittee = mmV.abonnes.size;
+      let derniere = null;
+      for (let i = 0; i < 3; i += 1) { scene.replaceChildren(); derniere = await monter('rc_t3', mmV); }
+      const troisMontees = mmV.abonnes.size;
+      mmV.basculer(true);
+      eq([nonMontee, montee, quittee, troisMontees, mmV.abonnes.size, q(derniere, '[data-role="autres-gestes"]')?.open], [0, 1, 0, 1, 1, true],
+        'fiche T3 : un rendu jamais monté ne s’abonne pas ; une fiche montée puis quittée sans notification est retirée au change suivant ; trois fiches montées tour à tour sans change → UN abonné (le montage retire celui de la fiche précédente) ; la fiche montée suit le change');
+      const mmM = fauxMatchMedia(true);
+      const pM = await renderRecipe({ id: 'rc_t3' }, {}, await ctxPour(), { matchMedia: mmM.matchMedia });
+      const ouvertAuRendu = q(pM, '[data-role="autres-gestes"]')?.open;
+      mmM.basculer(false); // un change ENTRE le rendu et le montage
+      scene.replaceChildren(pM); await macro();
+      eq([ouvertAuRendu, q(pM, '[data-role="autres-gestes"]')?.open, q(pM, '[data-role="onglets-corps"]')?.hidden, mmM.abonnes.size], [true, false, false, 1],
+        'fiche T3 : un change reçu entre le rendu et le montage n’est pas perdu — l’abonnement, posé au montage, relit la largeur (details replié, onglets visibles) ; un abonné');
+      // Le défaut de production (app.js n'injecte rien) : window.matchMedia appelé lié ; ses abonnements `change` comptés par un espion posé le temps de ces rendus.
+      const vraiMM = window.matchMedia; let actifs = 0; let leve = null;
+      window.matchMedia = function (requete) {
+        const m = vraiMM.call(window, requete); const ajouter = m.addEventListener.bind(m); const retirer = m.removeEventListener.bind(m);
+        m.addEventListener = (nom, f, o) => { if (nom === 'change') actifs += 1; return ajouter(nom, f, o); };
+        m.removeEventListener = (nom, f, o) => { if (nom === 'change') actifs -= 1; return retirer(nom, f, o); };
+        return m;
+      };
+      try {
+        for (let i = 0; i < 3; i += 1) { scene.replaceChildren(); scene.append(await renderRecipe({ id: 'rc_t3' }, {}, await ctxPour())); await macro(); }
+        await renderRecipe({ id: 'rc_t3' }, {}, await ctxPour()); await macro(); // un rendu jamais monté
+      } catch (e) { leve = `${e?.name}: ${e?.message}`; } finally { window.matchMedia = vraiMM; }
+      eq([leve, actifs], [null, 1], 'fiche T3, défaut de production (window.matchMedia) : trois fiches montées puis un rendu jamais monté → UN abonnement change actif, sans levée');
+      scene.replaceChildren();
       // --- Repères (B-I-6) : « {n} portions · {durée} », chaque partie si connue, UN nombre, portions de la VERSION
       const R = (over) => texteReperes({ ...version('x'), ...over });
       eq([R({ servings: 4, total_minutes: 35 }), R({ servings: 1, total_minutes: null, prep_minutes: 20, cook_minutes: 70 }), R({ servings: 4, total_minutes: null }), R({ servings: null, total_minutes: 35 }), R({ servings: null, total_minutes: null }), R({ servings: 2, total_minutes: 80, prep_minutes: 20, cook_minutes: 60 })],
@@ -712,6 +768,9 @@ export async function runCarnetTests({ eq, ok }) {
       eq([R({ servings: '4', total_minutes: 35 }), R({ servings: 0, total_minutes: 35 }), R({ servings: 4, total_minutes: -5 }), R({ servings: 4, total_minutes: 'x' }), texteReperes(null), dureeVersion({ kind: 'synthesis', total_minutes: 30, provenance: { generated_by: 'ai', creation: { demande: 'x' } } }), dureeVersion({ kind: 'extraction', total_minutes: null, prep_minutes: 0, cook_minutes: 0 })],
         ['35 min', '35 min', '4 portions', '4 portions', null, '', ''], 'texteReperes / dureeVersion : portions non entières ou nulles ignorées ; durée négative, illisible ou nulle ignorée ; version nulle → null ; une création IA n’a pas de durée ici (C-6)');
       // Hors brief (EI-T3-1, survivant M18) : la fixture dictée « total 80 = 20 + 60 » ne distinguait pas « total d'abord » de « prep + cook d'abord ».
+      // Ronde 1 (rien d'inventé) : une préparation connue et une cuisson INCONNUE ne font pas une durée de recette ; une cuisson nulle (0) est connue.
+      eq([R({ servings: 4, total_minutes: null, prep_minutes: 20, cook_minutes: null }), R({ servings: 4, total_minutes: null, prep_minutes: null, cook_minutes: 25 }), dureeVersion({ kind: 'extraction', total_minutes: null, prep_minutes: 15, cook_minutes: 0 })],
+        ['4 portions', '4 portions', '15 min'], 'texteReperes / dureeVersion : préparation seule ou cuisson seule → aucune durée (jamais « 4 portions · 20 min » avec une cuisson inconnue) ; préparation 15 + cuisson 0 → 15 min');
       eq([R({ servings: 2, total_minutes: 45, prep_minutes: 20, cook_minutes: 60 }), dureeVersion({ kind: 'extraction', total_minutes: 45, prep_minutes: 20, cook_minutes: 60 })], ['2 portions · 45 min', '45 min'],
         'texteReperes / dureeVersion : total_minutes GAGNE sur prep + cook même quand ils diffèrent (45 contre 20 + 60 = 80)');
       await mettre(fiche('rc_r1'), fiche('rc_r2'), fiche('rc_r3'));
@@ -734,6 +793,16 @@ export async function runCarnetTests({ eq, ok }) {
       const lienS = q(signetHttp, '[data-role="ouvrir-lien"]');
       eq([lienS?.className, lienS?.textContent, lienS?.getAttribute('href'), lienS?.getAttribute('rel'), signetHttp.textContent.includes('Ouvrir le lien'), signetHttp.querySelectorAll('a.btn.primary').length, lienOrigine(lienSignet('javascript:alert(1)')), lienOrigine(null), lienOrigine(lienSignet('https://b.test/y'))?.getAttribute('href')],
         ['btn link', 'Voir la page d’origine', 'http://a.test/x', 'noopener noreferrer', false, 0, null, null, 'https://b.test/y'], 'blocSignet et lienOrigine : le même lien texte « Voir la page d’origine » (plus de « Ouvrir le lien » primaire) ; une adresse hostile ou absente → null');
+      // --- Ronde 1 (mutants survivants de la revue) : « Mémoire culinaire » en section plain (D-UI-8) ; les bandeaux de lecture dans l'état de l'en-tête (D-UI-6, § 4.2).
+      const pMem = await renderRecipe({ id: 'rc_t3' }, {}, await ctxPour({ cook_history: [{ id: 'ch_t3', recipe_id: 'rc_t3', recipe_version_id: 'rv_rc_t3', cooked_at: DATE, servings: 4 }] }), { matchMedia: fauxMatchMedia(true).matchMedia });
+      const memoire = [...pMem.querySelectorAll('section')].find((s) => titreSection(s) === 'Mémoire culinaire') ?? null;
+      eq([!!memoire, memoire?.classList.contains('plain'), memoire?.classList.contains('card'), [...pMem.querySelectorAll('section.card')].map(titreSection)], [true, true, false, ['Photo du plat']],
+        'fiche T3 : « Mémoire culinaire » (une cuisson) est une section.plain, jamais une .card ; « Photo du plat » reste la seule .card');
+      await mettre(fiche('rc_lu'));
+      await versions(version('rc_lu', { provenance: { source_page_ids: [], generated_by: 'ai', model: null, edition_id: null, convention_snapshot: null, import_id: 'imp_lu', lu_le: DATE, source_url: 'https://site.test/lu', url_finale: 'https://site.test/lu', source_kind: 'jsonld', site: 'Le site' } }));
+      const pLu = await renderRecipe({ id: 'rc_lu' }, {}, await ctxPour(), { matchMedia: fauxMatchMedia(true).matchMedia });
+      eq([[...(q(pLu, '[data-role="fiche-etat"]')?.children ?? [])].map((c) => c.dataset.role ?? c.className), q(pLu, '[data-role="fiche-etat"]')?.firstElementChild?.querySelector('.badge') !== null],
+        [['row', 'bandeau-web', 'bandeau-lecture'], true], 'fiche T3 : le bandeau web puis le bandeau de lecture vivent dans l’état de l’en-tête (.fiche-etat), après la rangée des badges (colonne de gauche, D-UI-6)');
       // --- Le sous-titre reste provenanceText (R-UI-P2) : « Du web · » / « De mon livre · » sont les préfixes de la CARTE-PLAT (ligneSource, T2), pas de la fiche — tests/creer-ia.js:1397 épingle « Mon livre — A. B. · page 58 » en header p.
       eq([q(pL, 'header p.muted')?.textContent, q(pH, 'header p.muted')?.textContent], ['Source personnelle', 'site.test'], 'fiche T3 : le sous-titre est provenanceText, inchangé — « Source personnelle » sans livre ni adresse, l’hôte RECALCULÉ pour une fiche web (R-UI-P2 ; § 4.2 amendé par T6)');
       // --- La photo en tête : dans la colonne photo, sans style en ligne (la feuille rend 4:3 pleine colonne)
@@ -744,6 +813,11 @@ export async function runCarnetTests({ eq, ok }) {
       await repo.putFile(sha, jpeg, { mime: 'image/jpeg', origin: 'device' });
       await mettre(fiche('rc_ph', { photo_sha256: sha, photo_origin: 'image' })); await versions(version('rc_ph'));
       const pPh = await monter('rc_ph', fauxMatchMedia(true));
+      // Ronde 1 (mutant survivant : width 100 % retirée) : une image RÉELLE plus étroite que la colonne (240 × 180) — la règle globale img { max-width: 100% } ne la grandit pas.
+      const toileE = new OffscreenCanvas(240, 180); toileE.getContext('2d').fillRect(0, 0, 240, 180);
+      const jpegE = await toileE.convertToBlob({ type: 'image/jpeg' }); const shaE = await sha256Hex(jpegE);
+      await repo.putFile(shaE, jpegE, { mime: 'image/jpeg', origin: 'device' });
+      await mettre(fiche('rc_pe', { photo_sha256: shaE, photo_origin: 'image' })); await versions(version('rc_pe'));
       const img = q(pPh, '[data-role="photo-plat"] img');
       eq([!!img, img?.getAttribute('src')?.startsWith('blob:'), img?.getAttribute('style'), q(pPh, '.fiche-photo')?.contains(img), avant(img, q(pPh, '[data-role="fiche-gestes"]'))], [true, true, null, true, true], 'fiche T3 : la photo de tête vit dans .fiche-photo, avant les gestes, sans style en ligne (plus de 320 px : la feuille rend 4:3 pleine colonne)');
       // --- La FEUILLE servie (D-UI-6), mesurée dans des cadres (la technique de T2 : un <iframe> about:blank par largeur, la feuille chargée DEDANS — les jetons de :root et
@@ -752,12 +826,14 @@ export async function runCarnetTests({ eq, ok }) {
         const f = document.createElement('iframe'); f.setAttribute('aria-hidden', 'true'); f.setAttribute('title', 'scène de mesure');
         f.style.cssText = `position:absolute;left:-12000px;top:0;width:${largeur}px;height:1200px;border:0`;
         document.body.append(f);
-        const d = f.contentDocument;
-        d.open(); d.write('<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head><body><main class="content"></main></body></html>'); d.close();
-        const lien = d.createElement('link'); lien.rel = 'stylesheet'; lien.href = new URL('../styles.css?v=' + Date.now(), location.href).href;
-        await new Promise((r) => { lien.onload = r; lien.onerror = r; d.head.append(lien); });
-        if (f.contentWindow.innerWidth !== largeur) throw new Error(`cadre ${largeur} : innerWidth ${f.contentWindow.innerWidth}`);
-        return f;
+        try { // ronde 1 : le cadre est retiré aussi quand le contrôle de largeur lève (rien ne reste attaché à la page de tests)
+          const d = f.contentDocument;
+          d.open(); d.write('<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head><body><main class="content"></main></body></html>'); d.close();
+          const lien = d.createElement('link'); lien.rel = 'stylesheet'; lien.href = new URL('../styles.css?v=' + Date.now(), location.href).href;
+          await new Promise((r) => { lien.onload = r; lien.onerror = r; d.head.append(lien); });
+          if (f.contentWindow.innerWidth !== largeur) throw new Error(`cadre ${largeur} : innerWidth ${f.contentWindow.innerWidth}`);
+          return f;
+        } catch (e) { f.remove(); throw e; }
       };
       const mesureFiche = async (largeur, id) => {
         const f = await cadre3(largeur);
@@ -778,7 +854,11 @@ export async function runCarnetTests({ eq, ok }) {
             photoLongeGestes: rP.top <= rE.top + 1 && rP.bottom > rG.top + 1, // EI-T3-2 : la photo couvre les DEUX rangées de gauche (zones), elle ne pousse pas les gestes sous elle
             chargee: img ? img.naturalWidth > 0 : null,
             imgPleine: rI ? Math.abs(rI.width - rP.width) < 1 : null, ratio: rI ? Math.abs(rI.width / rI.height - 4 / 3) < 0.02 : null, objectFit: img ? S(img).objectFit : null,
-            onglets: S(q(p, '[data-role="onglets-corps"]')).display, prep: S(q(p, '[data-role="section-preparation"]')).display, pistesCorps: S(q(p, '[data-role="colonnes-corps"]')).gridTemplateColumns.trim().split(/\s+/).length };
+            onglets: S(q(p, '[data-role="onglets-corps"]')).display, prep: S(q(p, '[data-role="section-preparation"]')).display, pistesCorps: S(q(p, '[data-role="colonnes-corps"]')).gridTemplateColumns.trim().split(/\s+/).length,
+            // Ronde 1 : l'écart entre l'état et les gestes (une pile, jamais un vide), la cible du summary (I-UI-4), la flèche du lien d'origine, le bouton seul plein.
+            ecartEtatGestes: Math.round(rG.top - rE.bottom), summary: q(p, 'details[data-role="autres-gestes"] > summary').getBoundingClientRect().height,
+            fleche: q(p, '[data-role="ouvrir-lien"]') ? w.getComputedStyle(q(p, '[data-role="ouvrir-lien"]'), '::after').content : null,
+            boutonPlein: (() => { const r = q(tete, '[data-role="geste-principal"]'); const b = q(r, 'button'); return r && b && r.children.length === 1 ? Math.abs(b.getBoundingClientRect().width - r.getBoundingClientRect().width) < 1 : null; })() };
         } finally { f.remove(); }
       };
       const [ph1100, ph375, vide1100] = [await mesureFiche(1100, 'rc_ph'), await mesureFiche(375, 'rc_ph'), await mesureFiche(1100, 'rc_t3')];
@@ -789,9 +869,16 @@ export async function runCarnetTests({ eq, ok }) {
       eq(ph1100.photoLongeGestes, true, 'styles.css à 1100 px (D-UI-6) : la photo occupe la colonne de droite sur les DEUX rangées (« etat photo » / « gestes photo ») — elle commence à la hauteur de l’état et longe les gestes (mesuré)');
       eq([ph375.pistesTete, ph375.photoEntre, ph375.chargee, ph375.imgPleine, ph375.ratio, ph375.onglets !== 'none', ph375.prep, ph375.pistesCorps], [1, true, true, true, true, true, 'none', 1],
         'styles.css à 375 px (D-UI-6) : une colonne, la photo ENTRE l’état et les gestes (sous la provenance, maquette mobile), image réelle chargée, pleine largeur 4:3 ; segmented visible, Préparation cachée ([hidden]), une seule colonne de corps (mesurés)');
+      // Ronde 1 : la colonne de gauche est une PILE état → gestes (D-UI-6, § 4.2) — la hauteur en trop de la photo va à la rangée des gestes, jamais entre les deux.
+      ok(ph1100.ecartEtatGestes >= 0 && ph1100.ecartEtatGestes < 24, `styles.css à 1100 px, avec photo : l’état et les gestes restent empilés (écart ${ph1100.ecartEtatGestes} px, attendu le gap de 16 px ; jamais le vide de la photo)`);
+      const [http375, pe1100, pe375] = [await mesureFiche(375, 'rc_http'), await mesureFiche(1100, 'rc_pe'), await mesureFiche(375, 'rc_pe')];
+      eq([http375.ecartEtatGestes, http375.fleche, http375.boutonPlein, ph375.boutonPlein, ph375.summary >= 44, ph1100.summary >= 44],
+        [16, '" ↗"', true, true, true, true], 'styles.css à 375 px, fiche SANS photo : l’emplacement vide n’ajoute pas de second gap (état → gestes 16 px) ; la flèche « ↗ » du lien d’origine vient de la feuille ; seul (fiche vérifiée), « Commencer à cuisiner » remplit sa rangée ; le summary des autres gestes fait au moins 44 px (I-UI-4)');
+      eq([pe1100.chargee, pe1100.imgPleine, pe1100.ratio, pe375.chargee, pe375.imgPleine, pe375.ratio], [true, true, true, true, true, true],
+        'styles.css (D-UI-6) : une photo RÉELLE plus étroite que la colonne (240 × 180) est rendue pleine colonne en 4:3, à 1100 comme à 375 px (mesuré)');
       eq([vide1100.pistesTete, vide1100.chargee, vide1100.imgPleine, vide1100.photoADroite], [1, null, null, false], 'styles.css à 1100 px, fiche SANS photo : .fiche-tete:has(> .fiche-photo:empty) → une seule colonne (la zone photo déclarée en troisième rangée, 0 px : aucune piste implicite à droite, rév. 4), aucune image (mesuré)');
       eq(reseau, 0, 'fiche T3 : aucun réseau');
-    } finally { globalThis.fetch = vraiFetch; scene.remove(); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
+    } finally { globalThis.fetch = vraiFetch; scene.remove(); setUiLocale(localeAvant); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
   }));
   }
 

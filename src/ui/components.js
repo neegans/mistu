@@ -228,17 +228,19 @@ export function recipeCard(doc, { extra = null, href = null, reasons = null, pho
 }
 
 // --- Lot UI-1 « Carnet » : la carte-plat et sa grille (spec D-UI-4, D-UI-5, I-UI-5, § 3.3) --------------------------------------------------------
-// dureeTotale(version) : PURE. UN nombre de minutes — total_minutes, sinon prep + cook dès que l'un des deux existe — ou null : rien sans durée (B-I-6),
+// dureeTotale(version) : PURE. UN nombre de minutes — total_minutes, sinon prep + cook quand les DEUX sont connus — ou null : rien sans durée (B-I-6),
 // jamais la paire « actif · total » de timeText. Une création IA n'a qu'une estimation, dite à part sur sa fiche (C-6, comme timeText). Une valeur
-// qui n'est pas un nombre fini (fiche reçue ou restaurée) vaut null ; une durée nulle ou négative aussi (ronde 1 : « PT0S » d'un JSON-LD, -30 tapé dans
-// l'éditeur) — seule une valeur STRICTEMENT positive compte, la somme l'est donc toujours.
+// qui n'est pas un nombre fini (fiche reçue ou restaurée) vaut null. Le total ne compte que STRICTEMENT positif (T2-R1 : « PT0S » d'un JSON-LD, -30
+// tapé dans l'éditeur). T3-R1 (rien d'inventé, I-UI-1) : une préparation connue et une cuisson inconnue (lecture qui n'a vu que « Préparation : 20 min »)
+// ne font PAS une durée de recette ; une partie connue vaut ≥ 0 (une cuisson de 0 est connue : 15 + 0 = 15), une somme nulle vaut null.
 export function dureeTotale(version) {
   if (!version || estCreationIA(version)) return null;
-  const nombre = (x) => (typeof x === 'number' && Number.isFinite(x) && x > 0 ? x : null);
-  const total = nombre(version.total_minutes);
+  const positif = (x) => (typeof x === 'number' && Number.isFinite(x) && x > 0 ? x : null);
+  const connu = (x) => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? x : null);
+  const total = positif(version.total_minutes);
   if (total !== null) return total;
-  const prep = nombre(version.prep_minutes); const cook = nombre(version.cook_minutes);
-  return prep === null && cook === null ? null : (prep || 0) + (cook || 0);
+  const prep = connu(version.prep_minutes); const cook = connu(version.cook_minutes);
+  return prep === null || cook === null || prep + cook <= 0 ? null : prep + cook;
 }
 
 // ligneSource(doc) : PURE. Une fiche créée avec l'assistant dit d'abord sa provenance (C-2, ronde 1 : ni une adresse ni un livre portés par une fiche

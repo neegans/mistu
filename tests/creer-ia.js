@@ -1337,7 +1337,7 @@ export async function runCreerIaTests({ eq, ok }) {
         const page = await renderRecipe({ id: fiche.id }, {}, ctxFiche([fiche], [creation]));
         eq([texte(page.querySelector('header p')), textes(page, '.badge').includes('Original'), page.querySelectorAll('.badge.original').length, textes(page, 'option').includes('Original')],
           ['Créée avec l’IA', false, 0, false], 'fiche IA : sous-titre « Créée avec l’IA » ; aucun badge « Original » (C-2) — hors sélecteur d’unités/langue');
-        eq(textes(page, '[data-role="etiquette-ia"]'), ['Créée avec l’IA · non testée', 'Créée avec l’IA · non testée', 'Créée avec l’IA · non testée'], 'fiche IA : l’étiquette en tête, dans la carte de contrôle (version unique) et dans la liste des versions');
+        eq(textes(page, '[data-role="etiquette-ia"]'), ['Créée avec l’IA · non testée', 'Créée avec l’IA · non testée', 'Créée avec l’IA · non testée'], 'fiche IA : l’étiquette en tête, dans « Portions, versions et autres gestes » (version unique) et dans la liste des versions');
         const versionsSec = [...page.querySelectorAll('section.plain')].find((s) => s.querySelector('h2')?.textContent === 'Versions');
         eq([textes(versionsSec, 'li .muted')[0]?.split(' · ')[0], versionsSec.textContent.includes('Extraction IA'), page.textContent.includes('Extraction IA')], ['Création', false, false], 'fiche IA : « Création » dans la liste des versions, pas de ligne « Extraction IA » (§ 3.3)');
         eq(pucesV1(page), [], 'fiche IA : les puces « Rapide · V1 » sont masquées');
