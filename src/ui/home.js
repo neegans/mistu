@@ -58,7 +58,7 @@ export async function renderHome(params, query, ctx, { repo: depot = repo } = {}
     root.append(sectionPlain(t('Dernières cuissons'), grilleCartes(recent.map(({ h, doc }) => el('div', { class: 'cellule-cuisson' },
       cartePlat(doc),
       el('div', { class: 'muted cuisson-date' }, `${formatDate(h.cooked_at)}${etoiles(h.rating) ? ` · ${etoiles(h.rating)}` : ''}${h.redo === false ? ` · ${t('à ne pas refaire')}` : ''}`),
-      el('a', { class: 'btn small', href: `#/recipes/${h.recipe_id}${buildQuery({ v: h.recipe_version_id, servings: h.servings || '' })}` }, t('Refaire comme la dernière fois')))))));
+      el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(h.recipe_id)}${buildQuery({ v: h.recipe_version_id, servings: h.servings || '' })}` }, t('Refaire comme la dernière fois')))))));
   }
 
   // Ingrédients à utiliser (inventaire)

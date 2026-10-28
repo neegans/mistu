@@ -5,7 +5,7 @@ import { el, promptDialog, toast } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { navigate, buildQuery, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
-import { pageHeader, bookCover, segmented, emptyState, section, sectionPlain, recipeCard, grilleCartes, remplacerEnRevoquant, suivreLargeurAuMontage, aUneAdresse } from './components.js';
+import { pageHeader, bookCover, segmented, emptyState, section, sectionPlain, recipeCard, grilleCartes, remplacerEnRevoquant, suivreLargeurAuMontage, aUneAdresse, pageAffichable } from './components.js';
 import { revoquerUrlDeBlob } from '../core/blob-urls.js';
 import { proposeDishesForRecipe } from '../domain/dishes.js';
 import { pointeurValide } from '../domain/photo-web.js';
@@ -92,7 +92,9 @@ async function recettesTab(ctx, { matchMedia }) {
     await lire(page);
     if (g !== generation) return;
     // D-T9 : les URL blob: des vignettes de la génération précédente sont révoquées APRÈS le remplacement des nœuds (remplacerEnRevoquant relève img.plat-vignette).
-    remplacerEnRevoquant(grille, ...page.map((d) => recipeCard(d, { photoEnTete: true, fichier: pointeurValide(d.recipe) ? fichiers.get(d.recipe.photo_sha256) : null })));
+    // Vague finale (constat 4) : un filtre ou une puce qui ne retient rien le DIT, sur toute la largeur de la grille (comme « Aucun livre ne correspond. » sous Livres).
+    remplacerEnRevoquant(grille, ...(liste.length ? page.map((d) => recipeCard(d, { photoEnTete: true, fichier: pointeurValide(d.recipe) ? fichiers.get(d.recipe.photo_sha256) : null }))
+      : [el('p', { class: 'muted', dataset: { role: 'aucune-correspondance' }, style: { gridColumn: '1 / -1' } }, t('Aucune recette ne correspond.'))]));
     suite.replaceChildren(...(liste.length > page.length ? [el('button', { type: 'button', class: 'btn', onClick: () => { etat.limite += CARTES_PAR_PAGE; relancer(); } }, t('Voir plus'))] : []));
   };
   // Un redessin lancé par un geste n'est attendu par personne : une lecture de files refusée (base fermée, erreur IndexedDB) est journalisée, jamais un rejet
@@ -130,18 +132,20 @@ function aImporterTab(ctx) {
   const refs = (ctx.recipes || []).filter(estAImporter);
   if (!refs.length) return emptyState('assiette', t('Rien à importer pour l’instant.')); // ronde 1 (D-T2-c) : « aucune recette » serait faux ici
   const groupes = [...repo.groupBy(refs, 'edition_id').entries()]
-    .map(([editionId, liste]) => ({ titre: ctx.editionLabel?.(ctx.editionsById?.get(editionId)) || t('Sans titre'), liste: [...liste].sort(parPageEtTitre) }))
+    // Vague finale (constats 5, 9, 10) : un titre de livre reçu qui n'est pas une chaîne (title: 42) est dit en texte et ne fait plus lever le tri ; la page suit la
+    // règle du badge (pageAffichable : un entier de 1 à 9999), jamais une valeur reçue telle quelle.
+    .map(([editionId, liste]) => ({ titre: String(ctx.editionLabel?.(ctx.editionsById?.get(editionId)) || t('Sans titre')), liste: [...liste].sort(parPageEtTitre) }))
     .sort((a, b) => a.titre.localeCompare(b.titre));
   return sectionPlain(t('Recettes de mes livres à importer'), ...groupes.map((g) => el('div', { class: 'stack' }, el('h3', null, g.titre),
     el('ul', { class: 'list plain' }, ...g.liste.map((r) => el('li', null, el('a', { href: `#/recipes/${encodeURIComponent(r.id)}/importer` },
-      [r.display_title || r.original_title || t('Sans titre'), r.printed_page ? `p. ${r.printed_page}` : null, t('À importer')].filter(Boolean).join(' · '))))))));
+      [r.display_title || r.original_title || t('Sans titre'), pageAffichable(r.printed_page) ? `p. ${r.printed_page}` : null, t('À importer')].filter(Boolean).join(' · '))))))));
 }
 
 // Ordre commun aux deux sections : le plus récemment créé d'abord (created_at, updated_at en repli), sans horodatage en dernier.
 const plusRecentesDabord = plusRecentDabord('created_at', 'updated_at');
 const carteOuLien = (ctx, r) => {
   const doc = ctx.docsByRecipe?.get(r.id);
-  return doc ? recipeCard(doc) : el('a', { class: 'btn', href: `#/recipes/${r.id}` }, r.display_title || r.original_title || t('Sans titre'));
+  return doc ? recipeCard(doc) : el('a', { class: 'btn', href: `#/recipes/${encodeURIComponent(r.id)}` }, r.display_title || r.original_title || t('Sans titre'));
 };
 
 // Les signets sans livre (edition_id nul, source_url posé), le dernier GARDÉ d'abord : created_at, updated_at en repli
@@ -170,7 +174,7 @@ async function booksTab(ctx) {
   const grid = el('div', { class: 'grid livres' }); // § 3.3 : couvertures minmax(170px, 1fr) — la règle .grid.livres de T1
   const draw = () => {
     const q = filter.value.trim().toLowerCase();
-    const eds = [...ctx.book_editions].sort((a, b) => (ctx.editionLabel(a) || '').localeCompare(ctx.editionLabel(b) || ''));
+    const eds = [...ctx.book_editions].sort((a, b) => String(ctx.editionLabel(a) || '').localeCompare(String(ctx.editionLabel(b) || ''))); // vague finale : titre reçu non-chaîne
     const noeuds = [];
     for (const ed of eds) {
       const book = ctx.booksById.get(ed.book_id);

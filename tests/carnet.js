@@ -162,8 +162,21 @@ export async function runCarnetTests({ eq, ok }) {
     const nav = [...app.matchAll(/\{ href: '([^']+)', label: '([^']+)', ico: '([^']+)'/g)].map((m) => m.slice(1, 4));
     const corpsNavLinks = /\nfunction navLinks\([^)]*\) \{\n([\s\S]*?)\n\}\n/.exec(app)?.[1] || '';
     eq([nav, app.includes("from './ui/icones.js'"), corpsNavLinks.includes('icone(n.ico)'), /,\s*n\.ico\s*\)/.test(corpsNavLinks), /el\('a', \{ href: '#\/settings'[^}]*\}, el\('span', \{ class: 'ico', 'aria-hidden': 'true' \}, icone\('roue'\)\)/.test(app), app.includes('Mes livres'), /ico: '[^a-z]/.test(app)], [[['/', 'Aujourd’hui', 'soleil'], ['/library', 'Bibliothèque', 'bibliotheque'], ['/meals', 'Ma semaine', 'calendrier'], ['/kitchen', 'Ma cuisine', 'toque'], ['/add', 'Ajouter', 'plus']], true, true, false, true, false, false], 'D-UI-4 / D-UI-9 : NAV = cinq entrées, libellé « Bibliothèque », des noms d’icônes du jeu (plus un émoji) ; navLinks rend icone(n.ico), jamais le nom brut ; la roue du panneau latéral est icone(\'roue\') dans le lien #/settings (source relu sans commentaires : app.js est hors suite, § 11)');
-    const [recipe, book, accueil, search] = await Promise.all(['recipe.js', 'book.js', 'accueil-livre.js', 'search.js'].map((f) => lire('../src/ui/' + f)));
-    eq([(recipe.match(/label: t\('Bibliothèque'\)/g) || []).length, (book.match(/label: t\('Bibliothèque'\)/g) || []).length, recipe.includes("t('Mes livres')"), book.includes("t('Mes livres')"), accueil.includes("t('Aller à la bibliothèque.')"), accueil.includes('Aller à Mes livres.'), search.includes("['books', 'Mes livres']")], [1, 1, false, false, true, false, true], 'D-UI-4 / B-M-9 : « ← Bibliothèque » sur la fiche recette et la fiche livre, « Aller à la bibliothèque. » à l’accueil d’un livre ; le segment « Mes livres » de la RECHERCHE (une portée, pas l’écran) reste');
+    // Vague finale (constat 15) : le segment « Mes livres » de la RECHERCHE (une portée, pas l'écran) est lu dans son RENDU — renderSearch en mode « books », sans
+    // base, sans réseau (le mode web seul lit une session) —, plus dans le source ; l'état vide rendu porte l'icône « loupe » (R-UI-P1 : la ligne de UI-2,
+    // '🔍', ferait lever icone() et planter l'écran). Les retours « ← Bibliothèque » (recipe.js, book.js) et « Aller à la bibliothèque. » (accueil-livre.js)
+    // sont tenus par des rendus (T3, T4, bloc suivant) : leurs regex de source sont retirées.
+    const { renderSearch } = await import('../src/ui/search.js');
+    const { setUiLocale: localeS, getUiLocale: lireLocaleS } = await import('../src/core/i18n.js');
+    const localeAvantS = lireLocaleS(); localeS('fr');
+    let recherche = null;
+    try { recherche = await renderSearch({}, { mode: 'books' }, { docs: [], docsByRecipe: new Map(), ingredientsById: new Map(), meal_feedback: [] }, { remplacerAdresse: () => {}, navigate: () => {} }); }
+    catch (e) { recherche = e; } finally { localeS(localeAvantS); }
+    const rechercheRendue = recherche instanceof Node ? recherche : null;
+    eq([rechercheRendue ? [...rechercheRendue.querySelectorAll('.segmented button')].map((b) => b.textContent) : String(recherche), rechercheRendue?.querySelector('.segmented button.active')?.textContent ?? null,
+      !!rechercheRendue?.querySelector('.empty .ico svg.icone.icone-loupe'), rechercheRendue?.querySelector('.empty p')?.textContent ?? null],
+      [['Mes recettes', 'Mes livres', 'Web', 'Tout'], 'Mes livres', true, 'Aucune recette admissible.'],
+      'D-UI-4 / R-UI-P1 (rendu) : la recherche garde son segment « Mes livres » (une portée de recherche, pas l’écran Bibliothèque), actif en mode books ; son état vide porte l’icône « loupe » au trait');
     const { EN } = await import('../src/i18n/en.js');
     eq([EN['Bibliothèque'], EN['Aller à la bibliothèque.'], 'Aller à Mes livres.' in EN, EN['Mes livres']], ['Library', 'Go to the library.', false, 'My books'], '§ 5 : en.js porte « Library » et « Go to the library. », a perdu « Go to My books. » (chaîne retirée du source) et garde « My books » (segment de la recherche)');
     eq([shell.includes("'./src/ui/icones.js'"), MODULES_NEUFS.includes('../src/ui/icones.js')], [true, true], 'I-UI-7 / § 7 T1 : ./src/ui/icones.js dans SHELL (sw.js) et dans le filet i18n MODULES_NEUFS (tests/ajouter.js:8)');
@@ -472,6 +485,19 @@ export async function runCarnetTests({ eq, ok }) {
         eq([[...ordre.querySelectorAll('section.plain h3')].map((h) => h.textContent), [...ordre.querySelectorAll('section.plain > .stack')].map((s) => [...s.querySelectorAll('li > a')].map((a) => a.textContent))],
           [['Agrumes', 'Zeste'], [['Orange · p. 5 · À importer', 'Citron · p. 40 · À importer'], ['Zucchini · p. 12 · À importer', 'Agneau · p. 90 · À importer', 'Brioche · À importer', 'Tarte · À importer']]],
           '?tab=a-importer : les livres par ordre alphabétique (Agrumes avant Zeste, insérés à rebours), puis dans chaque livre la page d’abord (12 avant 90) et le titre ensuite (Brioche avant Tarte) — jamais l’ordre de la base');
+        // Vague finale (constats 5, 9 et 10) : un titre de livre qui n'est pas une chaîne (ligne books reçue ou restaurée : title 42) ne fait plus tomber ?tab=a-importer
+        // ni le segment Livres (tri par localeCompare) — il est dit en texte ; la page d'une ligne « à importer » suit la règle du badge (pageAffichable) : une page
+        // hostile (5 000 caractères, « 12 » en texte) est tue, jamais rendue telle quelle.
+        const livre42 = { id: 'b42', title: 42 }; const ed42 = { id: 'e42', book_id: 'b42' };
+        // Le livre au titre numérique vient en SECOND (références, éditions) : le tri par insertion de V8 le prend alors pour pivot — `42.localeCompare` est appelé
+        // (avec lui en premier, le comparateur ne l'appelait que sur la chaîne d'en face, et le défaut restait caché : mesuré au rouge de la vague).
+        const ctx42 = ctxDe([ref('n2', 'ea', 'Citron', '12'), ref('n3', 'ea', 'Orange', 5), ref('n1', 'e42', 'Nougat', 'x'.repeat(5000))], { editions: [edA, ed42], books: [livreA, livre42] });
+        const rendu42 = async (tab) => { try { return await renderLibrary({}, { tab }, ctx42, fauxMatchMedia(false)); } catch (e) { return `${e?.name}: ${e?.message}`; } };
+        const [ai42, livres42] = [await rendu42('a-importer'), await rendu42('books')];
+        eq([typeof ai42 === 'string' ? ai42 : [...ai42.querySelectorAll('section.plain h3')].map(texte), typeof ai42 === 'string' ? null : [...ai42.querySelectorAll('section.plain li > a')].map(texte),
+          typeof livres42 === 'string' ? livres42 : [...livres42.querySelectorAll('.grid.livres .cover .title')].map(texte)],
+          [['42', 'Agrumes'], ['Nougat · À importer', 'Orange · p. 5 · À importer', 'Citron · À importer'], ['42', 'Agrumes']],
+          '?tab=a-importer et Livres (vague finale) : un titre de livre numérique (42) est rendu en texte et trié sans lever ; une page hostile (5 000 caractères, « 12 » en texte) n’est pas dite, « p. 5 » l’est');
         // Ronde 1 : une référence sans adresse NI livre (son livre a disparu) n'est pas « à importer » et n'offre pas le pied (où elle doit paraître : au chef
         // d'orchestre, D-T2-d) ; sans aucune référence, la liste le dit en propre (D-T2-c).
         const O = fiche('rO', { availability: 'reference_only' });
@@ -490,6 +516,17 @@ export async function runCarnetTests({ eq, ok }) {
         try { await attendre(() => titres(tri).length === 1, 'filtre « Renommé »'); } catch { /* lu tel quel */ }
         eq([triInitial, titres(tri)], [['Plat rR1', 'Plat rR4', 'Gâteau renommé', 'Plat rR2'], ['Gâteau renommé']],
           'tri de la grille : updated_at, sinon created_at (R1, créée le 25, d’abord), sans horodatage en dernier (R2) ; le filtre trouve un titre renommé (display_title), casse ignorée');
+        // Vague finale (constat 4) : un filtre (ou une puce) qui ne retient rien le DIT — comme « Aucun livre ne correspond. » sous Livres —, jamais une grille blanche
+        // qu'on ne distingue pas d'un chargement ; le message part au filtre suivant qui retient des cartes.
+        champTri.value = 'introuvable'; champTri.dispatchEvent(new Event('input', { bubbles: true }));
+        try { await attendre(() => titres(tri).length === 0 && !!tri.querySelector('[data-role="aucune-correspondance"]'), 'filtre « introuvable »'); } catch { /* lu tel quel */ }
+        const aucune = tri.querySelector('[data-role="aucune-correspondance"]');
+        const [rienTexte, rienClasse, rienDansGrille] = [texte(aucune), aucune?.className ?? null, aucune?.parentElement === tri.querySelector('.grille-plats')];
+        champTri.value = ''; champTri.dispatchEvent(new Event('input', { bubbles: true }));
+        try { await attendre(() => titres(tri).length === 4, 'filtre vidé'); } catch { /* lu tel quel */ }
+        eq([rienTexte, rienClasse, rienDansGrille, tri.querySelector('[data-role="aucune-correspondance"]'), titres(tri).length],
+          ['Aucune recette ne correspond.', 'muted', true, null, 4],
+          'grille (vague finale) : un filtre qui ne retient rien dit « Aucune recette ne correspond. » (p.muted dans la grille), et le message part quand le filtre est vidé');
         BU.revoquerUrlsDeBlob();
       }));
 
@@ -576,7 +613,8 @@ export async function runCarnetTests({ eq, ok }) {
         const CLES = { 'Tes livres, tes trouvailles, tes recettes.': 'Your books, your finds, your recipes.', 'Recettes': 'Recipes', 'Ajouter une recette': 'Add a recipe', 'Une recette, un ingrédient…': 'A recipe, an ingredient…',
           'Toutes': 'All', 'De mes livres': 'From my books', 'Du web': 'From the web', 'Recettes de mes livres à importer': 'Recipes from my books to import', 'Voir plus': 'Show more', 'À importer': 'To import',
           'Du web · {h}': 'From the web · {h}', 'De mon livre · {t}': 'From my book · {t}', 'Aucune recette pour l’instant.': 'No recipes yet.',
-          'Rien à importer pour l’instant.': 'Nothing to import for now.' }; // ronde 1 (D-T2-c) : l'état vide de ?tab=a-importer
+          'Rien à importer pour l’instant.': 'Nothing to import for now.', // ronde 1 (D-T2-c) : l'état vide de ?tab=a-importer
+          'Aucune recette ne correspond.': 'No recipes match.' }; // vague finale (constat 4) : un filtre ou une puce qui ne retient rien
         eq(Object.entries(CLES).filter(([k, v]) => EN[k] !== v).map(([k]) => k), [], 'en.js : chaque texte neuf de la tâche 2 a sa traduction exacte (§ 5)');
         const { CHAINES_NEUVES_AILLEURS } = await import('./ajouter.js');
         const deComponents = ['Du web · {h}', 'De mon livre · {t}'];
@@ -883,7 +921,7 @@ export async function runCarnetTests({ eq, ok }) {
       eq([pe1100.chargee, pe1100.imgPleine, pe1100.ratio, pe375.chargee, pe375.imgPleine, pe375.ratio], [true, true, true, true, true, true],
         'styles.css (D-UI-6) : une photo RÉELLE plus étroite que la colonne (240 × 180) est rendue pleine colonne en 4:3, à 1100 comme à 375 px (mesuré)');
       eq([ph1100.reperesRem, ph375.reperesRem], [1.05, 1.05], 'styles.css (§ 4.2) : les repères de la fiche (div.reperes) à 1,05 rem, à 1100 comme à 375 px (mesuré ; ronde 1 de T6 : une règle .reperes renommée rougit ici)');
-      eq([vide1100.pistesTete, vide1100.chargee, vide1100.imgPleine, vide1100.photoADroite], [1, null, null, false],'styles.css à 1100 px, fiche SANS photo : .fiche-tete:has(> .fiche-photo:empty) → une seule colonne (la zone photo déclarée en troisième rangée, 0 px : aucune piste implicite à droite, rév. 4), aucune image (mesuré)');
+      eq([vide1100.pistesTete, vide1100.chargee, vide1100.imgPleine, vide1100.photoADroite], [1, null, null, false],'styles.css à 1100 px, fiche SANS photo : .fiche-tete:has(> .fiche-photo:empty) → une seule colonne (l’emplacement vide, display: contents, n’ouvre aucune piste implicite à droite ; vague finale : plus de zone « photo » morte en troisième rangée), aucune image (mesuré)');
       eq(reseau, 0, 'fiche T3 : aucun réseau');
     } finally { globalThis.fetch = vraiFetch; scene.remove(); setUiLocale(localeAvant); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
   }));
@@ -946,8 +984,8 @@ export async function runCarnetTests({ eq, ok }) {
       const h1 = fiche.querySelector('header h1');
       const menus = [...fiche.querySelectorAll('header details.menu-source')];
       eq([h1?.textContent, h1?.classList.contains('titre-fiche'), fiche.querySelector('header p.muted')?.textContent, fiche.querySelector('header a.muted')?.getAttribute('href'), fiche.querySelector('header a.muted')?.textContent],
-        ['Saisons gourmandes', true, 'A. Cuisinière · Flammarion Québec · 2004', '#/library', '← Bibliothèque'],
-        'T4 : h1.titre-fiche = le titre du livre ; sous-titre « {auteur} · {éditeur} · {année} », sans ISBN ni langue (H-21) ; retour « ← Bibliothèque » → #/library');
+        ['Saisons gourmandes', true, 'A. Cuisinière · Flammarion Québec · 2004', '#/library?tab=books', '← Bibliothèque'],
+        'T4 : h1.titre-fiche = le titre du livre ; sous-titre « {auteur} · {éditeur} · {année} », sans ISBN ni langue (H-21) ; retour « ← Bibliothèque » → #/library?tab=books (le segment Livres, d’où vient la fiche : R-UI-11, vague finale)');
       eq(menus.map((d) => [d.querySelector('summary')?.textContent, d.querySelector('summary')?.className, [...d.querySelectorAll('button, a')].map((b) => b.textContent)]),
         [['Ajouter des pages de sommaire', 'btn primary', ['Photographier', 'Choisir des photos ou un PDF']], ['Ajouter des recettes', 'btn primary', ['Photographier', 'Choisir des photos ou un PDF', 'Saisir à la main']]],
         'T4 : les deux details.menu-source gardent leur forme (summary.btn.primary, mêmes sources) et sont renommés « Ajouter des pages de sommaire », « Ajouter des recettes » (D-UI-10)');
@@ -986,15 +1024,35 @@ export async function runCarnetTests({ eq, ok }) {
         [...(sectionDe(parPosition, 'Sommaire')?.querySelectorAll('.thumbs > figure') || [])].map((f) => [f.querySelector('.num')?.textContent, f.querySelector('[data-sha256]')?.dataset.sha256])],
       [null, 2, [['1', H4('d')], ['2', H4('c')]]],
       'T4 (ronde 1) : pages d’index et document photo seuls → pas de « Pages et fichiers sources » (le Sommaire les montre) ; pages d’index sans numéro imprimé → rangées et numérotées par leur position de séance (1 puis 2), jamais par l’ordre des clés');
-      // Sans page d'index ni séance ouverte : pas de « Sommaire » ; avec une séance ouverte : « Sommaire » porte « Reprendre la séance » (vers la séance de CE livre) ; le rappel de droite reste.
+      // Vague finale (constat 1, R-UI-23) : `position` est numérotée PAR SÉANCE (repo.ajouterPages : une séance neuve repart à 1) — deux séances d'index se
+      // chevauchent (A : 1, 2 ; B : 1). Le Sommaire range d'abord par séance, la plus ancienne d'abord (started_at de la séance, sinon captured_at du document :
+      // une séance absente du contexte, fiche reçue), puis par position. Rendu 1 : A débute le 20 (son document, repris, est capturé le 25 : seul le début de
+      // la séance compte), B est absente et son document dit le 22 → A1, A2, B1. Rendu 2 : le document de B dit le 18 → B1, A1, A2 (le repli captured_at joue).
+      const docAB = (id, seance, quand, c) => ({ id, edition_id: 'ed4', source_type: 'photo', sha256: H4(c), scan_session_id: seance, captured_at: quand, created_at: DATE4, updated_at: DATE4 });
+      const pageAB = (id, doc, position, c) => ({ id, edition_id: 'ed4', document_id: doc, sha256: H4(c), printed_page: null, position, kind: 'index', created_at: DATE4, updated_at: DATE4 });
+      const seanceA = { id: 'ssA', status: 'done', edition_id: 'ed4', started_at: '2026-10-20T00:00:00.000Z', page_ids: ['pgA1', 'pgA2'], document_ids: ['docA'], created_at: DATE4, updated_at: DATE4 };
+      const pagesAB = [pageAB('pgA2', 'docA', 2, '7'), pageAB('pgB1', 'docB', 1, '8'), pageAB('pgA1', 'docA', 1, '6')];
+      const sommaireDe = async (quandB) => [...(sectionDe(await renderBook({ id: 'ed4' }, {}, await ctx4(db, { source_pages: pagesAB, scan_sessions: [seanceA],
+        source_documents: [docAB('docA', 'ssA', '2026-10-25T00:00:00.000Z', 'e'), docAB('docB', 'ssB', quandB, 'f')] }), { matchMedia: mediaFactice(true) }), 'Sommaire')?.querySelectorAll('.thumbs > figure') || [])]
+        .map((f) => [f.querySelector('.num')?.textContent, f.querySelector('[data-sha256]')?.dataset.sha256]);
+      eq([await sommaireDe('2026-10-22T00:00:00.000Z'), await sommaireDe('2026-10-18T00:00:00.000Z')],
+        [[['1', H4('6')], ['2', H4('7')], ['3', H4('8')]], [['1', H4('8')], ['2', H4('6')], ['3', H4('7')]]],
+        'T4 (vague finale, R-UI-23) : deux séances d’index aux positions qui se chevauchent → rangées par séance (started_at, sinon captured_at du document) puis par position, numérotées 1 à 3 — jamais entrelacées (A1, B1, A2)');
+      // Sans page d'index ni séance ouverte : pas de « Sommaire ». Vague finale (constat 3) : le Sommaire ne rappelle qu'une séance de SOMMAIRE — une séance ouverte
+      // qui porte une page d'index, ou une lecture d'index ouverte (l'intention d'une séance n'est pas stockée, import.js) ; une séance de RECETTES (ici : sa
+      // seule page est pg10, kind 'recette') n'y paraît pas, présentée comme une table des matières : le rappel « Reprendre » de droite reste, seul.
       await db.mutate({ deletes: { source_pages: ['pgA', 'pgB'] }, origin: 'device' });
       const sans = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: mediaFactice(true) });
       await db.mutate({ puts: { scan_sessions: [{ id: 'ss4', status: 'open', edition_id: 'ed4', started_at: DATE4, page_ids: ['pg10'], document_ids: [], created_at: DATE4, updated_at: DATE4 }] }, origin: 'device' });
       const avecSeance = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: mediaFactice(true) });
-      const reprise = [...avecSeance.querySelectorAll('a')].find((a) => a.textContent === 'Reprendre la séance');
-      eq([sectionDe(sans, 'Sommaire'), !!sectionDe(avecSeance, 'Sommaire'), reprise?.getAttribute('href'), reprise?.className, reprise?.closest('section')?.querySelector('h2')?.textContent, [...avecSeance.querySelectorAll('a')].filter((a) => a.textContent === 'Reprendre').map((a) => a.getAttribute('href'))],
-        [null, true, '#/import?session=ss4', 'btn small', 'Sommaire', ['#/import?session=ss4']],
-        'T4 : sans page d’index ni séance, pas de « Sommaire » ; une séance ouverte le fait paraître avec a.btn.small « Reprendre la séance » → #/import?session=<id> ; le rappel « Reprendre » de la colonne de droite reste');
+      const avecLecture = await renderBook({ id: 'ed4' }, {}, await ctx4(db, { imports: [{ id: 'imp6', kind: 'index', status: 'a_verifier', edition_id: 'ed4', scan_session_id: 'ss4', page_ids: ['pg10'], created_at: DATE4, updated_at: DATE4 }] }), { matchMedia: mediaFactice(true) });
+      const pgI = { id: 'pgI', edition_id: 'ed4', document_id: 'doc4', sha256: H4('9'), printed_page: null, position: 2, kind: 'index', created_at: DATE4, updated_at: DATE4 };
+      const avecPageIndex = await renderBook({ id: 'ed4' }, {}, await ctx4(db, { source_pages: [...(await db.getAll('source_pages')), pgI],
+        scan_sessions: [{ id: 'ss4', status: 'open', edition_id: 'ed4', started_at: DATE4, page_ids: ['pg10', 'pgI'], document_ids: [], created_at: DATE4, updated_at: DATE4 }] }), { matchMedia: mediaFactice(true) });
+      const repriseDe = (f) => { const a = [...f.querySelectorAll('a')].find((x) => x.textContent === 'Reprendre la séance'); return a ? [a.getAttribute('href'), a.className, a.closest('section')?.querySelector('h2')?.textContent] : null; };
+      eq([sectionDe(sans, 'Sommaire'), sectionDe(avecSeance, 'Sommaire'), repriseDe(avecSeance), [...avecSeance.querySelectorAll('a')].filter((a) => a.textContent === 'Reprendre').map((a) => a.getAttribute('href')), repriseDe(avecLecture), repriseDe(avecPageIndex)],
+        [null, null, null, ['#/import?session=ss4'], ['#/import?session=ss4', 'btn small', 'Sommaire'], ['#/import?session=ss4', 'btn small', 'Sommaire']],
+        'T4 (vague finale) : sans page d’index ni séance, pas de « Sommaire » ; une séance de recettes ouverte n’y paraît pas (le rappel « Reprendre » de droite reste, seul) ; une séance qui porte une lecture d’index ouverte ou une page d’index fait paraître « Sommaire » avec a.btn.small « Reprendre la séance » → #/import?session=<id>');
       // Ronde 1 (constat 9, spec § 4.3 « droite = rappels … puis Les recettes de ce livre ») : imports à reprendre, séance en cours et convention des tasses sont dans la
       // colonne de DROITE, avant la liste — sous 900 px, ils ne passent jamais au-dessus de la couverture ni entre elle et les métadonnées.
       const avecRappels = await renderBook({ id: 'ed4' }, {}, await ctx4(db, {
@@ -1013,6 +1071,15 @@ export async function runCarnetTests({ eq, ok }) {
       eq([!!accueil, accueil?.parentElement?.previousElementSibling?.tagName, accueil?.parentElement?.nextElementSibling?.classList.contains('livre'), sansEditeur.querySelector('header p.muted')?.textContent],
         [true, 'HEADER', true, 'A. Cuisinière'],
         'T4 : ?nouveau=1 → le panneau d’accueil entre l’en-tête et les deux colonnes (inchangé) ; sans éditeur ni année, le sous-titre ne porte que l’auteur (rien d’inventé)');
+      // Vague finale (constat 2, R-UI-11 tranché) : « Plus tard » (« Aller à la bibliothèque. ») mène au segment Livres, où le livre qu'on vient de créer se voit
+      // — #/library seul ouvre Recettes, sans trace du livre. L'adresse est rendue telle quelle après le geste (aucun routeur monté dans la suite).
+      const hashAvant4 = location.hash;
+      let apresPlusTard = null;
+      try {
+        [...(accueil?.querySelectorAll('button.carte') || [])].find((b) => b.querySelector('h3')?.textContent === 'Plus tard')?.click();
+        apresPlusTard = location.hash;
+      } finally { if (location.hash !== hashAvant4) history.replaceState(null, '', location.pathname + location.search + hashAvant4); }
+      eq(apresPlusTard, '#/library?tab=books', 'T4 (vague finale, R-UI-11) : « Plus tard » de l’accueil d’un livre neuf → #/library?tab=books (segment Livres), jamais #/library (Recettes)');
     })));
 
     // Ronde 1 (constats 2 et 6) : connecté, deux pages d'index et deux autres pages DISTANTES (copie serveur de ce compte, aucun octet ici) — chaque groupe n'offre
@@ -1071,10 +1138,11 @@ export async function runCarnetTests({ eq, ok }) {
         ['4 disponible(s) · 1 à importer', 'compte-recettes', ['Bouillon', 'Compote', 'Tarte aux pommes', 'Fenouil rôti', 'Dahl', 'Escabèche']],
         'T4 : sous le titre, « {n} disponible(s) · {m} à importer » (disponibles = available + partial ; à importer = les références SANS adresse : le signet rangé ne compte pas) ; tri par page imprimée puis titre, sans page en dernier');
       const ligne = (titre) => lignes4(fiche).find((li) => li.querySelector('a.titre')?.textContent === titre);
-      // Le portrait d'une ligne : classe, href du titre, vignette (présence, src blob:, alt), « p. N », sections, badge = availabilityBadge, gestes [texte, href], « ★ Favori ».
+      // Le portrait d'une ligne : classe, href du titre, vignette (présence, src blob:, alt), « p. N », sections, badge = availabilityBadge SANS la page (vague finale,
+      // constats 5 et 10 : la page est dite une fois, par « p. N » à côté du titre — § 4.3 veut le badge « À importer » seul), gestes [texte, href], « ★ Favori ».
       const portrait = (titre) => { const li = ligne(titre); const r = recettes.find((x) => x.original_title === titre); const img = li?.querySelector('img');
         return [li?.className, li?.querySelector('a.titre')?.getAttribute('href'), !!li?.querySelector('img.plat-vignette.petite'), img ? img.getAttribute('src')?.startsWith('blob:') : null, img ? img.getAttribute('alt') : null,
-          li?.querySelector('span.muted')?.textContent ?? null, [...(li?.querySelectorAll('.chip.neutral') || [])].map((c) => c.textContent), li?.querySelector('.badge')?.outerHTML === K.availabilityBadge(r).outerHTML,
+          li?.querySelector('span.muted')?.textContent ?? null, [...(li?.querySelectorAll('.chip.neutral') || [])].map((c) => c.textContent), li?.querySelector('.badge')?.outerHTML === K.availabilityBadge({ ...r, printed_page: null }).outerHTML,
           [...(li?.querySelectorAll('a.btn.small') || [])].map((a) => [a.textContent, a.getAttribute('href')]), [...(li?.querySelectorAll('.badge') || [])].map((b) => b.textContent).includes('★ Favori')]; };
       eq(portrait('Tarte aux pommes'), ['row between', '#/recipes/rA', true, true, '', 'p. 40', [], true, [], false],
         'T4 (I-UI-5, D-F9) : octets JPEG ici → img.plat-vignette.petite, src blob:, alt vide, DÈS le rendu (décision synchrone sur la ligne files) ; « p. 40 » ; le badge est celui d’availabilityBadge ; aucun geste');
@@ -1114,6 +1182,12 @@ export async function runCarnetTests({ eq, ok }) {
       eq([renommee.querySelector('a.titre')?.textContent, renommee.querySelector('a.titre')?.getAttribute('href'), renommee.dataset.recette, sansTitre.querySelector('a.titre')?.textContent],
         ['Nouveau titre', '#/recipes/r%20%C3%A9%2F1', 'r é/1', 'Sans titre'],
         'ligneCompacte (ronde 1) : display_title gagne sur original_title ; un titre vide devient « Sans titre » ; l’href du titre encode l’identifiant ; li[data-recette] = l’identifiant');
+      // Vague finale (constats 5 et 10) : la page imprimée de la ligne suit la règle du badge (pageAffichable : un entier de 1 à 9999 — une fiche reçue ou restaurée
+      // peut porter n'importe quoi) ; elle est dite UNE fois, par « p. N » (le badge court ne la répète pas).
+      const pageDe = (p) => { const li = B.ligneCompacte(recette4('rP', { availability: 'reference_only', printed_page: p })); return [li.querySelector('span.muted')?.textContent ?? null, li.querySelector('.badge')?.textContent]; };
+      eq([pageDe(132), pageDe('x'.repeat(100000)), pageDe('12'), pageDe(0), pageDe(10000), pageDe(12.5)],
+        [['p. 132', 'À importer'], [null, 'À importer'], [null, 'À importer'], [null, 'À importer'], [null, 'À importer'], [null, 'À importer']],
+        'ligneCompacte (vague finale) : « p. 132 » et le badge court « À importer » (page dite une fois) ; une page hostile — chaîne de 100 000 caractères, « 12 » en texte, 0, 10000, 12,5 — n’est pas affichée (la règle du badge, pageAffichable)');
       // Ronde 1 (constat 12) : « à importer » a UNE définition (estAImporter / aUneAdresse de library.js) — une adresse qui n'est pas une chaîne non vide n'est pas une
       // adresse : la fiche compte la référence, son filtre la garde, sa ligne offre « Importer » et sa section, comme l'onglet « À importer » de la bibliothèque.
       const r42 = recette4('rQ', { original_title: 'Quiche', availability: 'reference_only', source_url: 42, section: 'Tartes' });
@@ -1620,13 +1694,14 @@ export async function runCarnetTests({ eq, ok }) {
   try {
     // S4 (lot UX) : une lecture de source qui échoue est un ROUGE nommé, jamais un source vide lu comme vert (V-F13 du lot web).
     const lireT6 = async (chemin) => { const r = await fetch(new URL(chemin, import.meta.url), { cache: 'no-store' }); if (!r.ok) throw new Error(`${chemin} : HTTP ${r.status}`); const s = await r.text(); if (s.length < 300) throw new Error(`${chemin} : source trop court (${s.length})`); return s; };
-    // Ronde 1 (constat 20) : t('…') ET t("…") — un t() entre guillemets doubles n'échappe plus ni à l'inventaire ni aux chaînes retirées.
-    const clesDe = (src) => [...src.matchAll(/\bt\((['"])((?:(?!\1)[^\\]|\\.)*)\1/g)].map((m) => m[2]);
+    // Ronde 1 (constat 20) : t('…') ET t("…") — un t() entre guillemets doubles n'échappe plus ni à l'inventaire ni aux chaînes retirées. Vague finale (constat
+    // 13) : la lecture des clés est UNE définition, clesT de tests/ajouter.js (F13 la lit aussi), qui voit en plus t(`…`) sans ${…} ; son témoin est au bloc F13.
     // Ronde 1 (constats 10 et 20) : le lecteur de T1-R1 (chaînes '…', "…", `…` sautées ; commentaires // et /* */ retirés), recopié ici (bloc autonome) —
     // un t('…') laissé dans un commentaire ne compte plus comme un EMPLOI, et la NAV d'app.js se relit sans ses commentaires.
     const sansCommentairesT6 = (src) => { let out = ''; let q = null; for (let i = 0; i < src.length; i++) { const c = src[i]; if (q) { out += c; if (c === '\\') out += src[++i] ?? ''; else if (c === q) q = null; } else if (c === '/' && src[i + 1] === '/') { while (i + 1 < src.length && src[i + 1] !== '\n') i++; } else if (c === '/' && src[i + 1] === '*') { const fin = src.indexOf('*/', i + 2); i = fin < 0 ? src.length : fin + 1; } else { if (c === "'" || c === '"' || c === '`') q = c; out += c; } } return out; };
     const { EN } = await import('../src/i18n/en.js');
-    const { MODULES_NEUFS, CHAINES_NEUVES_AILLEURS } = await import('./ajouter.js');
+    const { MODULES_NEUFS, CHAINES_NEUVES_AILLEURS, clesT } = await import('./ajouter.js');
+    const clesDe = clesT;
     // La table FR → EN des textes UI-1 (spec § 5, lignes UI-1 seulement ; les quatre lignes UI-2 vivent dans tests/apercu-web.js), plus quatre textes
     // que les tâches posent hors de la table § 5 (R-UI-38) : « Disponibles » (filtre § 4.3, T4), « Reprendre la séance » (§ 4.3, T4), « {n} à importer »
     // (compteur de library.js, T5), « Page {n} · p. {p} » (légende § 4.5, T5) — les anglais sont ceux de la tâche qui les pose et se relisent ici.
@@ -1694,7 +1769,7 @@ export async function runCarnetTests({ eq, ok }) {
     // Les EMPLOIS se lisent sans commentaires (constat 20) ; l'inventaire des clés sans entrée lit le source brut (plus strict : une clé commentée y compte).
     const parModule = Object.fromEntries(MODULES_UI1.map((m) => [m, new Set(clesDe(sansCommentairesT6(sources[m])))]));
 
-    eq(Object.keys(TEXTES_UI1).length, 31, 'T6 i18n : la table elle-même compte 31 paires — 27 de la spec § 5 (UI-1), quatre hors table (garde de la TABLE contre une ligne effacée ; elle ne détecte rien dans le code)');
+    eq(Object.keys(TEXTES_UI1).length, 31, 'T6 i18n : la table elle-même compte 31 paires — 27 de la spec § 5 (UI-1), quatre hors table (garde de la TABLE contre une ligne effacée ; NON ÉPROUVÉE : aucun changement de src/ ni d’en.js ne la fait rougir, elle compte dans l’épingle comme F-4 du lot assistant)');
     eq(Object.entries(TEXTES_UI1).filter(([fr, en]) => EN[fr] !== en).map(([fr]) => fr), [], 'T6 i18n : chaque texte neuf de la table (27 de la spec § 5 UI-1, quatre hors table) a son entrée en.js, à l’anglais exact de la table');
     eq(CLES_REEMPLOYEES.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'T6 i18n : les clés réemployées (Corriger, Ingrédients, Préparation, Ajouter un livre, Favoris, Mes livres, Livres, Plats, 1 portion, {n} portions) gardent une entrée');
     eq([EN['Corriger'], EN['Mes livres'], EN['1 portion'], EN['{n} portions']], ['Fix', 'My books', '1 serving', '{n} servings'], 'T6 i18n : « Corriger » reste « Fix » (H-14), « Mes livres » reste « My books » (le segment de la recherche, D-UI-4) ; les deux clés antérieures des repères gardent « 1 serving » et « {n} servings » (R-UI-41)');
@@ -1735,6 +1810,30 @@ export async function runCarnetTests({ eq, ok }) {
     eq(SELECTEURS_UI1.filter((s) => !present(s)), [], 'T6 I-UI-4 : les treize sélecteurs neufs du lot (spec § 3.3, § 4) existent dans styles.css, chacun comme un jeton entier (ni suffixe ni préfixe)');
     eq([...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) => m[1].trim()).filter((s) => /\.plat-vignette\b/.test(s)), ['.plat-vignette', '.plat-vignette.grande', '.plat-vignette.petite'], 'T6 § 3.3 : exactement trois sélecteurs nomment .plat-vignette, dans cet ordre (72 px, grande 4:3, petite 48 px) — doublon de tests/photo-plat.js : filet de clôture');
   } catch (e) { ok(false, `T6 filets : bloc interrompu — ${e?.message || String(e)}`); } // un source illisible est UN rouge nommé, jamais une suite coupée en silence
+
+  // --- Vague finale (constat 8) : l'identifiant d'une fiche reçue ou restaurée peut porter « ? », « & », « # » ou « / » — la carte-plat (grille, Favoris,
+  // cuissons), la carte horizontale et « Refaire comme la dernière fois » l'ENCODENT, comme la fiche (rid, T3-R1) et la ligne compacte : le geste ouvert est
+  // celui annoncé (jamais #/recipes/a avec v=b, jamais l'éditeur d'une autre fiche). Aucune base : aucune fiche n'a de photo, rien n'est lu.
+  await bloc('vague finale : adresses de fiche encodées', async () => {
+    const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
+    const { buildDocs } = await import('../src/domain/search.js');
+    const { renderHome } = await import('../src/ui/home.js');
+    const avantVF = getUiLocale(); setUiLocale('fr');
+    try {
+      const D = '2026-10-23T12:00:00.000Z';
+      const ficheVF = (id, titre) => ({ id, edition_id: null, original_title: titre, original_language: 'fr', availability: 'available', verification_state: 'verified', printed_page: null, current_version_id: null, favorite: true, created_at: D, updated_at: D });
+      const recettes = [ficheVF('a?v=b', 'Ma tarte'), ficheVF('x/edit', 'Autre')];
+      const docs = buildDocs({ recipes: recettes, versions: [], editions: [], books: [], dishes: [], links: [], translations: [], history: [] });
+      const docDe = (id) => docs.find((d) => d.recipe.id === id);
+      const accueil = await renderHome({}, {}, { recipes: recettes, docs, docsByRecipe: new Map(docs.map((d) => [d.recipe.id, d])), cook_history: [{ id: 'chVF', recipe_id: 'a?v=b', recipe_version_id: 'rv_a', cooked_at: D, servings: 2 }],
+        cook_sessions: [], inventory: [], settings: { rediscover_enabled: false }, book_editions: [], books: [], library_activity: [], rediscovery_prefs: [] });
+      const refaire = [...accueil.querySelectorAll('a.btn')].find((a) => a.textContent === 'Refaire comme la dernière fois');
+      eq([C.recipeCard(docDe('a?v=b'), { photoEnTete: true }).getAttribute('href'), C.recipeCard(docDe('x/edit'), { photoEnTete: true }).getAttribute('href'), C.recipeCard(docDe('a?v=b')).getAttribute('href'),
+        [...accueil.querySelectorAll('a.carte-plat')].map((a) => a.getAttribute('href')).sort(), refaire?.getAttribute('href')],
+        ['#/recipes/a%3Fv%3Db', '#/recipes/x%2Fedit', '#/recipes/a%3Fv%3Db', ['#/recipes/a%3Fv%3Db', '#/recipes/a%3Fv%3Db', '#/recipes/x%2Fedit'], '#/recipes/a%3Fv%3Db?v=rv_a&servings=2'],
+        'vague finale : la carte-plat, la carte horizontale, les cartes d’Aujourd’hui (Favoris, cuissons) et « Refaire comme la dernière fois » encodent l’identifiant (a?v=b → a%3Fv%3Db, x/edit → x%2Fedit)');
+    } finally { setUiLocale(avantVF); }
+  });
 
   // --- repère de fin : les tâches 2 à 6 ajoutent leurs blocs AU-DESSUS de cette ligne ---
 }

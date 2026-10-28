@@ -5,6 +5,9 @@
 // MODULES_NEUFS : les modules créés par les lots (lien.js de R-UX-11 et isbn.js inclus) + add.js réécrit + l'écran d'import ciblé (lot A, tâche 4)
 // + le module des fichiers du lot G + l'écran de la table des matières (lot C) + le panneau et l'écran de regroupement (lot D, tâche 2)
 // + la photo du plat (lot F, tâche 3, P-8) + icones.js (lot UI-1 « Carnet », tâche 1 : aucun t(), mais S14 — ni innerHTML, ni html:).
+// Lot UI-1, vague finale (constat 13) : UNE lecture des clés t() pour les filets i18n — t('…'), t("…") et t(`…`) sans ${…} (un gabarit à expression n'est pas
+// une clé, et une variable non plus) ; F13 la lit sur MODULES_NEUFS, tests/carnet.js (T6) sur ses modules. Son témoin, sur les trois formes, est au bloc F13.
+export const clesT = (src) => [...src.matchAll(/\bt\((['"`])((?:(?!\1)[^\\]|\\.)*)\1/g)].filter((m) => !(m[1] === '`' && m[2].includes('${'))).map((m) => m[2]);
 export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js', '../src/ui/import-cible.js', '../src/domain/lecture-web.js', '../src/ui/import-web.js', '../src/ui/vol.js', '../src/sync/fichiers.js', '../src/ui/table-matieres.js', '../src/ui/regroupement.js', '../src/ui/photo-plat.js', '../src/ui/icones.js'];
 // CHAINES_NEUVES_AILLEURS reconstituée depuis le code réel (git diff main...HEAD, ensemble main vs HEAD des clés t(),
 // pas seulement les lignes ajoutées : une ligne réécrite pour une autre raison peut porter une chaîne déjà sur main —
@@ -71,7 +74,9 @@ export const CHAINES_NEUVES_AILLEURS = {
     // Ronde 1 (D-T2-c) : l'état vide de ?tab=a-importer.
     'Rien à importer pour l’instant.',
     // Lot UI-1, tâche 5 : le compteur de la grille Livres (library.js, « {n} à importer »).
-    '{n} à importer'],
+    '{n} à importer',
+    // Lot UI-1, vague finale (constat 4) : un filtre ou une puce du segment Recettes qui ne retient aucune fiche.
+    'Aucune recette ne correspond.'],
   // Lot UI-1 « Carnet », tâche 5 : le sous-titre d'Aujourd'hui (§ 4.4).
   '../src/ui/home.js': ['Cherche une recette, un ingrédient, une envie.'],
   '../src/ui/cook.js': ['Lue par l’assistant, non relue'],
@@ -3819,11 +3824,15 @@ export async function runAjouterTests({ eq, ok }) {
       // Deux contrôles positifs d'abord : le source est bien arrivé, et c'est bien un module.
       ok(src.length > 300, `statique ${m} : le source est bien lu (${src.length} caractères)`);
       ok(/\bexport\b/.test(src), `statique ${m} : c’est bien le module (un export y figure)`);
-      for (const [, cle] of src.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)) if (!(cle in EN)) manquantes.push(`${m}: ${cle}`);
+      for (const cle of clesT(src)) if (!(cle in EN)) manquantes.push(`${m}: ${cle}`); // lot UI-1, vague finale : t('…'), t("…") et t(`…`) sans ${…}
       ok(!/\bhtml:\s/.test(src) && !/innerHTML\s*=/.test(src) && !/window\.open\(/.test(src), `statique ${m} : ni html:, ni innerHTML, ni window.open (S14)`);
     }
     for (const [m, cles] of Object.entries(CHAINES_NEUVES_AILLEURS)) for (const cle of cles) if (!(cle in EN)) manquantes.push(`${m}: ${cle}`);
     eq(manquantes, [], 'i18n : chaque t() des modules neufs a son entrée en.js (F13)');
+    // Le détecteur lui-même (lot UI-1, vague finale, constat 13 ; le motif du témoin de tests/creer-ia.js) : les trois formes de littéral sont vues, un gabarit à
+    // expression et une variable ne le sont pas (avant, F13 ne lisait que les guillemets simples : un t("…") ou un t(`…`) neuf sans anglais passait).
+    eq(clesT("t('simples') + t(\"doubles\") + t(`accents graves`) + t(`gabarit ${x}`) + t(variable) + t('Échappée l\\'a')"), ['simples', 'doubles', 'accents graves', "Échappée l\\'a"],
+      'F13 : le détecteur lit t(\'…\'), t("…") et t(`…`) sans ${…} ; ni un gabarit à expression ni une variable (lot UI-1, vague finale)');
   }
   {
     // Rendu hostile : une chaîne <img onerror> reste du TEXTE dans les rendus neufs. F6 : plus de drapeau sur

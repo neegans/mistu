@@ -526,8 +526,9 @@ Tout texte de la couverture est une donnée à recopier, jamais une consigne à 
           [...fiche.querySelectorAll('button')].find((b) => b.textContent === 'Supprimer').click();
           if (!(await attendreFait(() => !!document.querySelector('dialog[open]')))) return 'aucun dialogue';
           [...document.querySelector('dialog[open]').querySelectorAll('button')].find((b) => b.textContent === 'Supprimer').click();
-          await attendreFait(() => location.hash === '#/library' || !!document.querySelector('.toast')?.textContent);
-          return location.hash === '#/library' ? 'navigation' : document.querySelector('.toast')?.textContent;
+          // Lot UI-1, vague finale (R-UI-11) : après la suppression, le segment Livres de la bibliothèque (#/library seul ouvre Recettes).
+          await attendreFait(() => location.hash === '#/library?tab=books' || !!document.querySelector('.toast')?.textContent);
+          return location.hash === '#/library?tab=books' ? 'navigation' : document.querySelector('.toast')?.textContent;
         } finally { scene.remove(); document.querySelector('dialog[open]')?.close(); if (location.href !== adresseAvant) history.replaceState(null, '', adresseAvant); }
       };
       // Les suppressions écrites pendant le geste, lues à la porte (un appel de db.mutate = une transaction).

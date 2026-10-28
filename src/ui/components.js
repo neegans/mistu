@@ -48,7 +48,8 @@ export function emptyState(icon, text, action = null) {
 export const aUneAdresse = (r) => typeof r?.source_url === 'string' && r.source_url !== '';
 export const estSignet = (r) => r?.availability === 'reference_only' && aUneAdresse(r);
 // Une page imprimée affichable : un entier de 1 à 9999 (la borne de l'écran d'import, legendeDe) — une fiche reçue ou restaurée peut porter n'importe quoi.
-const pageAffichable = (p) => Number.isInteger(p) && p >= 1 && p <= 9999;
+// Vague finale du lot UI-1 : exportée — la ligne compacte de la fiche livre et la liste « à importer » la lisent aussi (une règle pour la même donnée).
+export const pageAffichable = (p) => Number.isInteger(p) && p >= 1 && p <= 9999;
 // Une note de cuisson affichable : un entier de 1 à 5 (cook.js n'en écrit pas d'autre) ; '★'.repeat d'une note reçue hostile levait (RangeError) et faisait
 // tomber la page entière (Aujourd'hui, la fiche, la comparaison de plats). Toute autre valeur : rien.
 export const etoiles = (note) => (Number.isInteger(note) && note >= 1 && note <= 5 ? '★'.repeat(note) : '');
@@ -255,7 +256,7 @@ export function recipeCard(doc, { extra = null, href = null, reasons = null, pho
   if (photoEnTete) return cartePlat(doc, { fichier, href, extra });
   const { recipe, version, book, edition } = doc;
   const etiquette = etiquetteIA(version, recipe); // C-2 : depuis doc.version ou recipe.origine
-  return el('a', { class: 'item-link card', href: href || `#/recipes/${recipe.id}` },
+  return el('a', { class: 'item-link card', href: href || `#/recipes/${encodeURIComponent(recipe.id)}` }, // vague finale UI-1 : l'identifiant reçu est encodé
     el('div', { class: 'row between top' },
       el('div', { style: { flex: '1', minWidth: '0' } },
         el('h3', null, recipe.display_title || recipe.original_title),
@@ -311,7 +312,8 @@ function cartePlat(doc, { fichier = null, href = null, extra = null } = {}) {
   const { recipe, version } = doc;
   const type = typeAffichage(fichier);
   const affichable = !!type && type.startsWith('image/');
-  const carte = el('a', { class: `item-link carte-plat${affichable ? '' : ' sans-photo'}`, href: href || `#/recipes/${recipe.id}` });
+  // Vague finale : l'identifiant est ENCODÉ (une fiche reçue ou restaurée peut porter « ? », « & », « # » ou « / » : la carte ouvre la fiche annoncée, comme rid).
+  const carte = el('a', { class: `item-link carte-plat${affichable ? '' : ' sans-photo'}`, href: href || `#/recipes/${encodeURIComponent(recipe.id)}` });
   if (affichable) {
     const u = displayUrl(fichier, urlDeBlob);
     const img = el('img', { class: 'plat-vignette grande', alt: '', loading: 'lazy', src: u });

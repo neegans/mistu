@@ -6,7 +6,7 @@ import * as repo from '../model/repo.js';
 import { etatFichier } from '../sync/fichiers.js';
 import { typeAffichage, displayUrl } from '../sync/mime.js';
 import { listConventions } from '../domain/units.js';
-import { pageHeader, section, sectionPlain, field, select, availabilityBadge, emptyState, bookCover, contexteFichiers, vignettesDePages, boutonTelechargerPages, relireErreurs, texteErreurFichier, remplacerEnRevoquant, suivreLargeurAuMontage } from './components.js';
+import { pageHeader, section, sectionPlain, field, select, availabilityBadge, emptyState, bookCover, contexteFichiers, vignettesDePages, boutonTelechargerPages, relireErreurs, texteErreurFichier, remplacerEnRevoquant, suivreLargeurAuMontage, pageAffichable } from './components.js';
 import { invalidate } from './state.js';
 import { urlDeBlob, revoquerUrlDeBlob } from '../core/blob-urls.js';
 import { estAImporter, aUneAdresse } from './library.js';
@@ -17,6 +17,7 @@ import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes,
 import { tagsDe } from '../domain/search.js';
 import { sectionLisible } from '../domain/llm.js';
 import { seanceDUnImportCible, importOuvert } from '../domain/import-cible.js';
+import { ligneOuverteDeSeance } from '../domain/table-matieres.js';
 import { pointeurValide } from '../domain/photo-web.js';
 import { ACCEPT_PHOTOS, ACCEPT_FICHIERS } from './add.js';
 import { STATUTS_IMPORT } from '../model/schema.js';
@@ -94,9 +95,10 @@ export const LARGEUR_DEUX_COLONNES = '(min-width: 900px)';
 // lot G, displayUrl par urlDeBlob pour la révocation D-T9) → img.plat-vignette.petite, décorative (alt vide : le titre est à côté) ; sinon rien — jamais un cadre
 // vide, jamais une lecture en base depuis la ligne. T4-R1 : des octets admis que le navigateur ne décode pas (HEIC hors Safari, octets tronqués) lèvent error —
 // l'img est retirée et son URL révoquée (le motif de vignettePlat et de la carte-plat, I-F6). Le titre serif est le lien de la fiche (« Sans titre » à défaut,
-// comme library.js : jamais un lien vide) ; « p. N » seulement avec printed_page ; la section lue dans la table des matières (lot C, sectionLisible : une fiche
-// reçue ou restaurée peut porter autre chose qu'une chaîne) pour une référence seulement ; le badge est celui d'availabilityBadge (UNE définition des textes,
-// D-UI-10) ; « Importer » et « Saisir à la main » sur une référence ou une partielle SANS adresse (aUneAdresse de library.js, la définition de l'onglet
+// comme library.js : jamais un lien vide) ; « p. N » seulement avec une page affichable (pageAffichable, la règle du badge : un entier de 1 à 9999 — vague
+// finale) ; la section lue dans la table des matières (lot C, sectionLisible : une fiche reçue ou restaurée peut porter autre chose qu'une chaîne) pour une
+// référence seulement ; le badge est celui d'availabilityBadge (UNE définition des textes, D-UI-10), COURT : sans la page, déjà dite à côté du titre (§ 4.3,
+// vague finale — le motif de l'en-tête de l'import ciblé) ; « Importer » et « Saisir à la main » sur une référence ou une partielle SANS adresse (aUneAdresse de library.js, la définition de l'onglet
 // « À importer » ; mêmes href qu'au lot A, T4-R1 : un signet devenu partiel n'a pas d'entrée), hors du <a> du titre (jamais un lien dans un lien, m4).
 export function ligneCompacte(r, { fichier = null } = {}) {
   const type = typeAffichage(fichier);
@@ -112,10 +114,10 @@ export function ligneCompacte(r, { fichier = null } = {}) {
       el('div', { style: { flex: '1', minWidth: '0' } },
         el('a', { class: 'titre', href: `#/recipes/${id}` }, r.display_title || r.original_title || t('Sans titre')),
         el('div', { class: 'row', style: { gap: '.4rem' } },
-          r.printed_page ? el('span', { class: 'muted' }, `${t('p.')} ${r.printed_page}`) : null,
+          pageAffichable(r.printed_page) ? el('span', { class: 'muted' }, `${t('p.')} ${r.printed_page}`) : null,
           sectionLue ? el('span', { class: 'chip neutral', dataset: { role: 'section' } }, sectionLue) : null))),
     el('div', { class: 'row', dataset: { role: 'etat-recette' } },
-      availabilityBadge(r),
+      availabilityBadge({ ...r, printed_page: null }),
       importable ? el('a', { class: 'btn small', href: `#/recipes/${id}/importer` }, t('Importer')) : null,
       importable ? el('a', { class: 'btn small', href: `#/recipes/${id}/edit?kind=extraction` }, t('Saisir à la main')) : null,
       r.favorite ? el('span', { class: 'badge' }, '★ ' + t('Favori')) : null));
@@ -123,8 +125,25 @@ export function ligneCompacte(r, { fichier = null } = {}) {
 
 // L'ordre du Sommaire (D-UI-7, T4-R1) : « l'ordre se corrige dans le panneau de la séance, pas ici » — la position APPLIQUÉE dans la séance (un entier) d'abord,
 // puis le numéro imprimé ; une page sans l'un ni l'autre vient en dernier, dans l'ordre reçu (tri stable). Les autres pages : le numéro imprimé seul (inchangé).
+// Vague finale (R-UI-23 complété) : `position` est numérotée PAR SÉANCE (repo.ajouterPages : une séance neuve repart à 1) — deux séances d'index (une page
+// oubliée, photographiée plus tard) s'entrelaçaient. Les pages se rangent donc d'abord par SÉANCE, la plus ancienne d'abord : le début de la séance de leur
+// document (started_at), sinon la capture du document (captured_at : séance absente du contexte, fiche reçue) ; sans moment lisible, après les autres ; à
+// moment égal, une séance à la fois (par sa clé) ; puis la position, puis le numéro imprimé. Champs lus comme des chaînes seulement (une fiche reçue peut porter
+// autre chose) ; aucune lecture en base.
 const rangPosition = (p) => (Number.isInteger(p?.position) ? p.position : Infinity);
 const parPositionPuisPage = (a, b) => (rangPosition(a) - rangPosition(b)) || ((a.printed_page ?? 9999) - (b.printed_page ?? 9999));
+const chaine = (v) => (typeof v === 'string' ? v : '');
+const parSeancePuisPosition = (ctx) => {
+  const documents = new Map((ctx.source_documents || []).filter((d) => typeof d?.id === 'string').map((d) => [d.id, d]));
+  const seances = new Map((ctx.scan_sessions || []).filter((s) => typeof s?.id === 'string').map((s) => [s.id, s]));
+  const seanceDe = (p) => { const d = documents.get(p?.document_id); const cle = chaine(d?.scan_session_id); return { cle, quand: chaine(seances.get(cle)?.started_at) || chaine(d?.captured_at) }; };
+  return (a, b) => {
+    const [x, y] = [seanceDe(a), seanceDe(b)];
+    if (x.quand !== y.quand) return !x.quand ? 1 : !y.quand ? -1 : x.quand < y.quand ? -1 : 1;
+    if (x.cle !== y.cle) return x.cle < y.cle ? -1 : 1;
+    return parPositionPuisPage(a, b);
+  };
+};
 
 export async function renderBook(params, query, ctx, deps = {}) {
   const edition = ctx.editionsById.get(params.id);
@@ -166,9 +185,11 @@ export async function renderBook(params, query, ctx, deps = {}) {
   };
   // D-UI-7, H-21 : le sous-titre dit l'auteur, l'éditeur et l'année — ce qui est connu, dans cet ordre ; l'ISBN et la langue restent dans « Métadonnées et
   // convention ». Les deux menus d'ajout restent les ACTIONS de l'en-tête (markup inchangé, textes D-UI-10) ; le titre de fiche porte classeTitre (D-UI-3).
+  // R-UI-11 tranché (vague finale) : les retours propres à un livre (« ← Bibliothèque », « Plus tard », après la suppression) mènent au segment Livres, d'où
+  // vient la fiche et où un livre neuf se voit ; #/library (Recettes) reste celui de la NAV et de la fiche recette.
   root.append(pageHeader(book.title, {
     subtitle: [book.author, edition.publisher, edition.year].filter(Boolean).join(' · '),
-    back: { href: '/library', label: t('Bibliothèque') },
+    back: { href: '/library?tab=books', label: t('Bibliothèque') },
     classeTitre: 'titre-fiche',
     actions: [
       menuSource(t('Ajouter des pages de sommaire'),
@@ -183,7 +204,7 @@ export async function renderBook(params, query, ctx, deps = {}) {
   root.append(renderAccueilLivre(accueil, {
     photographier: (intention) => lancer(intention)(ACCEPT_PHOTOS, 'environment'),
     choisir: (intention) => lancer(intention)(ACCEPT_FICHIERS, null),
-    plusTard: () => navigate('/library'),
+    plusTard: () => navigate('/library?tab=books'),
     fermer: () => remplacerAdresse(`#/books/${encodeURIComponent(edition.id)}`),
   }));
   // D-UI-7 : deux colonnes dès 900 px (.two-col.livre, 200px 1fr), empilées en dessous — gauche puis droite. Gauche = le livre (couverture, zone « Couverture »,
@@ -352,14 +373,15 @@ export async function renderBook(params, query, ctx, deps = {}) {
             : res.refus === 'non_vide' ? t('Un livre avec des recettes ou des pages ne se supprime pas d’un geste.') : t('Un import est encore lié à ce livre : rien n’a été supprimé.'));
           return;
         }
-        navigate('/library');
+        navigate('/library?tab=books');
       } }, t('Supprimer')) : el('small', { class: 'muted' }, t('Un livre avec des recettes ou des pages ne se supprime pas d’un geste.')))));
 
-  // D-UI-7 : UNE lecture des octets des pages (vignettesDePages, le motif du lot G) ; les pages d'index font le « Sommaire » (gauche, numérotées dans l'ordre
-  // appliqué dans la séance puis celui des pages imprimées — parPositionPuisPage, T4-R1 ; l'ordre se corrige dans le panneau de la séance, pas ici), les autres
+  // D-UI-7 : UNE lecture des octets des pages (vignettesDePages, le motif du lot G) ; les pages d'index font le « Sommaire » (gauche, numérotées séance par
+  // séance, dans l'ordre appliqué dans chacune puis celui des pages imprimées — parSeancePuisPosition, T4-R1 et vague finale ; l'ordre se corrige dans le
+  // panneau de la séance, pas ici), les autres
   // restent dans « Pages et fichiers sources » (bas). Chaque groupe n'offre « Télécharger les {n} pages » que pour SES pages distantes.
   const triees = [...pages].sort((a, b) => (a.printed_page ?? 9999) - (b.printed_page ?? 9999));
-  const pagesIndex = triees.filter((p) => p.kind === 'index').sort(parPositionPuisPage);
+  const pagesIndex = triees.filter((p) => p.kind === 'index').sort(parSeancePuisPosition(ctx));
   const pagesAutres = triees.filter((p) => p.kind !== 'index');
   // T4-R1 : chaque page est montrée par l'un des deux groupes (le Sommaire pour une page d'index, les sources pour les autres) — une lecture dès qu'il y a une page.
   const vignettes = triees.length ? await vignettesDePages(triees, ctxF) : { places: new Map(), distantes: [], telecharger: null };
@@ -368,9 +390,13 @@ export async function renderBook(params, query, ctx, deps = {}) {
     numerotees ? el('span', { class: 'num' }, String(i + 1)) : null,
     vignettes.places.get(p.id),
     el('figcaption', null, p.printed_page ? `${t('p.')} ${p.printed_page}` : t('page non numérotée'), p.kind ? ` · ${p.kind === 'index' ? t('index') : t('recette')}` : ''))));
-  // « Sommaire » (plain) : seulement quand il y a quelque chose à montrer — des pages d'index, ou une séance ouverte à reprendre (rien d'inventé).
-  if (pagesIndex.length || ouvertes.length) gauche.append(sectionPlain(t('Sommaire'),
-    ouvertes.length ? el('div', { class: 'row' }, el('a', { class: 'btn small', href: `#/import?session=${encodeURIComponent(ouvertes[0].id)}` }, t('Reprendre la séance'))) : null,
+  // « Sommaire » (plain) : seulement quand il y a quelque chose à montrer — des pages d'index, ou une séance de SOMMAIRE ouverte à reprendre (rien d'inventé).
+  // Vague finale : l'intention d'une séance n'est pas stockée (import.js) — une séance ouverte n'est rappelée ICI que si elle porte une page d'index ou une
+  // lecture d'index ouverte (ligneOuverteDeSeance, la règle du panneau d'index) ; une séance de recettes reste rappelée à droite seulement (« Reprendre »).
+  const idsIndex = new Set(pagesIndex.map((p) => p.id));
+  const seanceSommaire = ouvertes.find((s) => (Array.isArray(s.page_ids) ? s.page_ids : []).some((id) => idsIndex.has(id)) || ligneOuverteDeSeance(ctx.imports, s.id));
+  if (pagesIndex.length || seanceSommaire) gauche.append(sectionPlain(t('Sommaire'),
+    seanceSommaire ? el('div', { class: 'row' }, el('a', { class: 'btn small', href: `#/import?session=${encodeURIComponent(seanceSommaire.id)}` }, t('Reprendre la séance'))) : null,
     boutonTelechargerPages(distantesDe(pagesIndex), { connecte: ctxF.connecte, telecharger: vignettes.telecharger }),
     pagesIndex.length ? vignettesDe(pagesIndex, true) : null));
 

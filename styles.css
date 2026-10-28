@@ -303,7 +303,7 @@ label.check { display: inline-flex; gap: .45rem; align-items: center; font-size:
 /* Lot UI-1 (D-UI-5, § 3.3) : les deux tailles de la vignette d'une carte — « grande » = l'image 4:3 en tête d'une carte-plat ; « petite » = 48 × 48 sur
    une ligne compacte (fiche d'un livre, tâche 4). La règle 72 px ci-dessus reste celle de la carte horizontale. R-UI1-1 : la règle .grande est ÉCRITE AU
    CARACTÈRE PRÈS comme celle du lot UI-2 (branche apercus-web, fusionné avant), posée au même endroit — la fusion la résout par union, à l'identique. */
-.plat-vignette.grande { width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 12px; display: block }
+.plat-vignette.grande { width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 12px; display: block; }
 .plat-vignette.petite { width: 48px; height: 48px; }
 /* Lot UI-1 (D-UI-4, F-9) : la grille des cartes-plat — 1 colonne sous 360 px, 2 dès 360 px, 3 dès 900 px ; les cartes d'une rangée s'étirent à la même
    hauteur. .grid reste la grille des couvertures. */
@@ -359,10 +359,10 @@ details[data-role="autres-gestes"][open] > summary { margin-bottom: .6rem; }
   .fiche-tete > .fiche-etat { grid-area: etat; }
   .fiche-tete > .fiche-gestes { grid-area: gestes; }
   .fiche-tete > .fiche-photo { grid-area: photo; }
-  /* Sans photo : une colonne, et la zone photo GARDÉE en troisième rangée (0 px) — l'enfant vide `grid-area: photo` y tombe au lieu d'ouvrir une piste implicite
-     à droite (rév. 4 ; `grid-area: etat` sur l'enfant vide est REFUSÉ : étiré sur la cellule de l'état, il se peindrait au-dessus et intercepterait les tapes ;
-     `display: none` interdit, T-1). Le gap de 1 rem sous les gestes est accepté. */
-  .fiche-tete:has(> .fiche-photo:empty) { grid-template-columns: 1fr; grid-template-areas: "etat" "gestes" "photo"; }
+  /* Sans photo : une colonne. L'emplacement vide n'a pas de boîte (`display: contents`, plus haut, R-UI-16) : il n'ouvre donc aucune piste implicite à
+     droite, et aucune troisième rangée n'est nécessaire (vague finale : la zone « photo » de la rév. 4, morte depuis R-UI-16, est retirée avec son gap de
+     1 rem sous les gestes ; `grid-area: etat` sur l'enfant vide reste REFUSÉ, `display: none` interdit, T-1). */
+  .fiche-tete:has(> .fiche-photo:empty) { grid-template-columns: 1fr; grid-template-areas: "etat" "gestes"; }
 }
 
 .qty { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ink); }

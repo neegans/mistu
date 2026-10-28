@@ -90,7 +90,11 @@ export async function runThemeTests({ eq, ok }) {
     const seg = document.createElement('div'); seg.className = 'segmented'; const sb = document.createElement('button'); sb.className = 'active'; sb.textContent = 'Web'; seg.append(sb); scene.append(seg);
     ok(contraste(rgbVersHex(getComputedStyle(sb).color), rgbVersHex(getComputedStyle(sb).backgroundColor)) >= 4.5, 'segments : l’option active se lit (calculé)');
     const badge = document.createElement('span'); badge.className = 'badge ai'; badge.textContent = 'IA'; scene.append(badge);
-    eq(rgbVersHex(getComputedStyle(badge).color), hex('--action'), 'badges : .badge.ai en olive (--action, D-UI-2)');
+    eq(rgbVersHex(getComputedStyle(badge).color), hex('--action'), 'badges : .badge.ai en olive (--action) — épinglé tel quel, PAS ratifié : R-UI-5 à trancher (un état en olive contredit la règle vérifiable de D-UI-2)');
+    // Lot UI-1, vague finale (constat 14) : la règle vérifiable de D-UI-2 — un ÉTAT n'est jamais un texte olive (badge « Original », statut ok : vert gris) —
+    // épinglée sur la couleur CALCULÉE (avant : seul le contraste ≥ 4,5 était vu, et l'olive sur accent-bg vaut 4,97). .badge.ai est exclu nommément (R-UI-5).
+    const etats = [['span', 'badge original'], ['div', 'status ok']].map(([balise, classe]) => { const n = Object.assign(document.createElement(balise), { className: classe, textContent: 'État' }); scene.append(n); return rgbVersHex(getComputedStyle(n).color); });
+    eq([...etats, etats.filter((c) => c === hex('--action')).length], [hex('--accent'), hex('--ok'), 0], 'D-UI-2 (règle vérifiable) : .badge.original = --accent, .status.ok = --ok — aucun état en olive d’action (calculés ; .badge.ai exclu : R-UI-5)');
     const inp = document.createElement('input'); inp.type = 'text'; scene.append(inp); inp.focus();
     ok(document.activeElement === inp && rgbVersHex(getComputedStyle(inp).outlineColor) === hex('--action') && parseFloat(getComputedStyle(inp).fontSize) >= 16, 'T-5/T-8 : champ focalisé = anneau olive, 16 px minimum (iOS ne zoome pas)');
     ok(rgbVersHex(getComputedStyle(inp).borderTopColor) === hex('--action') && getComputedStyle(inp).outlineOffset === '2px' && getComputedStyle(inp).outlineStyle === 'solid', 'T-5 : input:focus-visible = contour du champ olive en plus de l’anneau 2 px décalé 2 px (l’anneau global seul laisse le contour gris) (calculé)');

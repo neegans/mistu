@@ -766,6 +766,8 @@ export const EN = {
   'Aucune recette pour l’instant.': 'No recipes yet.',
   // Tâche 2, ronde 1 (D-T2-c) : l'état vide de ?tab=a-importer (« aucune recette » y était faux).
   'Rien à importer pour l’instant.': 'Nothing to import for now.',
+  // Vague finale (constat 4) : un filtre ou une puce du segment Recettes qui ne retient aucune fiche (texte neuf hors § 5, R-UI-51).
+  'Aucune recette ne correspond.': 'No recipes match.',
   // Lot UI-1 « Carnet », tâche 3 : la fiche recette (spec experience-carnet § 5). « Corriger » garde « Fix » (H-14) ; « Ingrédients » et « Préparation »
   // gardent leurs entrées (une clé, une traduction).
   "Voir la page d’origine": "View the original page",
