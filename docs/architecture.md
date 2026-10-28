@@ -1446,7 +1446,7 @@ par la fonction, sans migration ; la fonction `assistant` gagne un cinquième ou
 ## Expérience « carnet » (lot UI-1, 23-28 octobre 2026)
 
 Spec : `docs/superpowers/specs/2026-10-23-experience-carnet-design.md` (rév. 2.1 ; § 0 : D-UI-1 à D-UI-14 ; § 2 : I-UI-1 à I-UI-7 ; § 3 : jetons,
-typographie, composants ; § 4 : écrans ; § 5 : textes ; § 12 « Construction UI-1 : rulings » : R-UI-P1 à P3, R-UI1-1, R-UI1-2, R-UI-1 à R-UI-47 ; § 13 : les sept défauts
+typographie, composants ; § 4 : écrans ; § 5 : textes ; § 12 « Construction UI-1 : rulings » : R-UI-P1 à P3, R-UI1-1, R-UI1-2, R-UI-1 à R-UI-60 ; § 13 : les sept défauts
 confirmés). Livré ici (branche `experience-carnet`, construite sur `f3672be` en parallèle de UI-2 — fusionné dans `main` le 27 octobre — et non fusionnée) : la direction des maquettes
 adaptée à l'app — thème, composition des écrans, textes, icônes — sans serveur, sans migration, sans règle de produit changée (I-UI-1).
 
@@ -1501,6 +1501,13 @@ adaptée à l'app — thème, composition des écrans, textes, icônes — sans 
   (`/icons/` : depuis `about:blank`, Chrome bloque la feuille et les modules, R-UI-42) ; le 404 différé de `/favicon.ico` est compté à part (R-UI-43).
   Mesure du 28 octobre (05 h 42 UTC, après la ronde 1 de T6) : 70 lignes sur 70, 174 captures, contraste rendu minimum 4,62 sur 3 601 nœuds, M14 20 sur
   20, 0 requête hors de l'origine servie ; à 320 px, l'onglet réel actif tient en 71,8/71,8 px (une ligne, sans marge).
+- **Vague finale** (revue finale de branche ; spec § 12, R-UI-48 à R-UI-60 ; `final-fix-report.md`) : le Sommaire de `book.js` range ses pages par
+  séance (`parSeancePuisPosition(ctx)` : `started_at` de la séance du document, sinon `captured_at` du document) puis par `position` (numérotée PAR séance
+  par `repo.ajouterPages`) ; « Reprendre la séance » n'y paraît que pour une séance de sommaire (page `kind: 'index'` ou `ligneOuverteDeSeance`) ; les
+  retours propres à un livre mènent à `#/library?tab=books` (R-UI-11 tranché) ; `pageAffichable` (`components.js`) est exportée et lue par la ligne compacte
+  (badge court, sans page) et la liste « à importer » ; les liens `#/recipes/<id>` des cartes et de « Refaire » encodent l'identifiant ; un titre de livre
+  non-chaîne est trié par `String()` ; la grille Recettes dit « Aucune recette ne correspond. » ; la règle `.fiche-tete:has(> .fiche-photo:empty)` n'a plus de
+  zone « photo » morte ; `clesT` (`tests/ajouter.js`) est la lecture unique des clés i18n (trois formes de littéral).
 
 ## Modèle de données (magasins IndexedDB)
 

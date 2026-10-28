@@ -2507,7 +2507,9 @@ details[data-role="autres-gestes"][open] > summary { margin-bottom: .6rem; }
   l'aurait masqué, d'où le choix de 640 × 400) ; `:has(> .fiche-photo:empty)` retirée → `vide1100.pistesTete` 2 (une colonne vide réservée : reste tué) ;
   **la zone `photo` retirée de la règle `:has`** (rév. 4, point 1 : la forme de la rév. 3, `grid-template-areas: "etat" "gestes"` seules) → `vide1100.pistesTete` 3
   et `photoADroite` vrai (l'enfant vide `grid-area: photo` sans zone nommée prend une piste IMPLICITE à droite : mesure Chromium « 1068px 0px 0px ») — tué par
-  `vide1100.pistesTete` ; **et un mutant du TEST (rév. 3, ruling 17 ; attendu réécrit rév. 4, point 2)** : `img.loading = 'eager'` retiré du test sur une copie (la
+  `vide1100.pistesTete` [**amendé par la vague finale (R-UI-57)** : depuis R-UI-16 (`display: contents` sur l'emplacement vide), ce mutant SURVIVAIT — la
+  zone était morte ; elle est retirée de la règle (`"etat" "gestes"`), le mutant n'a plus d'objet, et le tueur de l'enfant vide est « `display: contents`
+  retiré » (`vide1100.pistesTete` 3, rouge)] ; **et un mutant du TEST (rév. 3, ruling 17 ; attendu réécrit rév. 4, point 2)** : `img.loading = 'eager'` retiré du test sur une copie (la
   mesure sans chargement forcé) → `chargee` faux à 1100 et 375, bilan ROUGE à la fin de la suite, jamais une suite figée (l'attente de `decode()` est bornée à 3 s PAR
   mesure avec image par `Promise.race` : deux mesures, ≈ 6 s d'attente au plus, 3 003 ms chacune mesurées par le vérificateur de la rév. 4) : il prouve que la mesure charge bien une image réelle et ne dépend pas d'une boîte de remplacement (joué une fois, consigné).
 - [ ] **Step 11 : invisibles** (Python `-I`, jamais `grep`) sur les fichiers touchés — `src/ui/recipe.js`, `src/ui/components.js`, `src/ui/import-web.js`,

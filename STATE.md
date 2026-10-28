@@ -2,18 +2,18 @@
 
 **28 octobre 2026, 1 h (HAE) — LOT UI-1 « EXPÉRIENCE CARNET » : FINI dans le worktree `~/projects/mistu-carnet` (branche `experience-carnet`, base `f3672be`
 = `main` `05c751f` + trois commits de docs, spec rév. 2.1 `7633675` et le « Go » de Neegan `f3672be`, plan `ec0263d`, tête de code
-`0fa52b4`, filets `1d952fe`, serveur 8096), six tâches (T1 jetons et composants, T2 bibliothèque sur les recettes, T3 fiche recette, T4 fiche livre, T5 Aujourd'hui /
+`0fa52b4`, filets `1d952fe`, vague finale `88e095a` après la revue finale de branche, serveur 8096), six tâches (T1 jetons et composants, T2 bibliothèque sur les recettes, T3 fiche recette, T4 fiche livre, T5 Aujourd'hui /
 Ajouter / import ciblé / libellés, T6 filets, preuve visuelle, docs ; rondes et re-revues : `progress.md`), `/verify` au chef
-d'orchestre ; contrôles mécaniques de T6 après sa ronde 1 (suite 6218/6218, épingle 6217, Node 208/208, `--check` 0, invisibles 0, aucune clé), preuve visuelle VERT (70 lignes,
+d'orchestre ; contrôles mécaniques après la vague finale (suite 6226/6226, épingle 6225, Node 208/208, `--check` 0, invisibles 0, aucune clé ; rapport `final-fix-report.md`), preuve visuelle VERT (70 lignes,
 174 captures, contraste minimum 4,62 sur 3 601 nœuds, 0 requête hors origine ; onglet « Bibliothèque » d'une ligne à 375-768 px, et à 320 px sur la galerie
-et dans l'app, actif, sans marge : 71,8/71,8 px), `sw.js cuisine-os-v0.17.0-9`, `APP_VERSION 0.17.0`, `DB_VERSION` 4, aucune
+et dans l'app, actif, sans marge : 71,8/71,8 px), `sw.js cuisine-os-v0.17.0-10`, `APP_VERSION 0.17.0`, `DB_VERSION` 4, aucune
 migration, aucun fichier sous `supabase/`. **PAS fusionné, PAS poussé.** Pour Neegan, dans l'ordre : le lot UI-2 est déjà fusionné et poussé (27 octobre ; ses gestes restants — `0007`, redéploiement,
 sondes — sont dans le `STATE.md` de `main`) ; la fusion de `experience-carnet` par un commit de fusion (17 fichiers en conflit, MESURÉS par `git merge-tree`
 le 28 octobre — `CLAUDE.md`, `STATE.md` et `docs/architecture.md` : garder les sections et paragraphes des DEUX lots ; `en.js` union ; `sw.js` union de
-`SHELL` + `VERSION` `-10` ; `schema.js` et les pins 0.17.0 de huit suites ; `styles.css` et `tests/photo-plat.js` par R-UI1-1 ; `tests/ajouter.js` et
+`SHELL` + `VERSION` `-11` ; `schema.js` et les pins 0.17.0 de huit suites ; `styles.css` et `tests/photo-plat.js` par R-UI1-1, et I-F3 étendu à `book.js` et `home.js` ; `tests/ajouter.js` et
 `tests/tests.js` en union, l'épingle remesurée ; `search.js` garde `'loupe'` ; chaque résolution relue à la main : `CLAUDE.md`, geste 2, et spec R-UI-47), push, suite publique, preuve réelle § 10 UI-1
 sur sa bibliothèque et sur l'iPhone (« Agrandir l'affichage » dit), les sept points de § 13 (défauts confirmés le 23 octobre, renversables), « clean »
-après la copie du registre AVEC `captures/`. Registre `.superpowers/sdd/2026-10-23-experience-carnet/` ; rulings R-UI-1 à R-UI-47 dans la spec
+après la copie du registre AVEC `captures/`. Registre `.superpowers/sdd/2026-10-23-experience-carnet/` ; rulings R-UI-1 à R-UI-60 dans la spec
 § 12 « Construction UI-1 : rulings » ; section du lot dans `CLAUDE.md` et `docs/architecture.md`.**
 
 **23 octobre 2026, 17 h 30 — CHAÎNE A → F EN LIGNE.** Points 1 à 4 du bilan `.superpowers/sdd/nuit-2026-10-18/BILAN-CHAINE-A-F.md` faits le 23 octobre
@@ -379,7 +379,7 @@ Lot UI-1 « Carnet » (le plus récent ; l'outil de preuve réécrit resultats.m
 ```
 cd ~/projects/mistu-carnet && git status --short && git log --oneline -3
 curl -sS -o /dev/null -w "8096 http=%{http_code}\n" http://127.0.0.1:8096/tests/ || (nohup python3 -m http.server 8096 --bind 127.0.0.1 > /dev/null 2>&1 &)
-node ~/projects/mistu-carnet/.superpowers/sdd/2026-10-23-experience-carnet/suite.cjs 8096   # attendu : 6218/6218 (+ 1 x 404 favicon)
+node ~/projects/mistu-carnet/.superpowers/sdd/2026-10-23-experience-carnet/suite.cjs 8096   # attendu : 6226/6226 (+ 1 x 404 favicon ; vague finale)
 node --test tools/*.test.mjs && node tools/generer-migrations.mjs --check   # attendu : 208/208, code 0
 node ~/projects/mistu-carnet/.superpowers/sdd/2026-10-23-experience-carnet/preuve-visuelle.cjs 8096   # attendu : VERT, code 0, 70 lignes, 174 captures
 ```

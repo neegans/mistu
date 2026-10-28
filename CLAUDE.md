@@ -2844,13 +2844,13 @@ lot n'arrive sur le site public avant sa fusion et ton `push`.
 127.0.0.1` (suite : `http://127.0.0.1:8096/tests/`). Base : `main` `05c751f` + trois commits de docs, tête `f3672be` (spec rév. 2.1 et le « Go » de
 Neegan sur les sept points de § 13). Spec : `docs/superpowers/specs/2026-10-23-experience-carnet-design.md` (rév. 2.1 ; § 0 : D-UI-1 à D-UI-14 ; § 2 :
 I-UI-1 à I-UI-7 ; § 3 : jetons, typographie, composants ; § 4 : écrans ; § 5 : textes ; § 7 : tests ; § 12 « Construction UI-1 : rulings » : R-UI-P1
-à P3, R-UI1-1, R-UI1-2, R-UI-1 à R-UI-47 ; § 13 : les sept défauts confirmés). Plan : `docs/superpowers/plans/2026-10-23-experience-carnet.md` (rév. 5, commis `ec0263d` ; six tâches). Registre, hors git
+à P3, R-UI1-1, R-UI1-2, R-UI-1 à R-UI-60 ; § 13 : les sept défauts confirmés). Plan : `docs/superpowers/plans/2026-10-23-experience-carnet.md` (rév. 5, commis `ec0263d` ; six tâches). Registre, hors git
 (`.superpowers/` exclu) : `.superpowers/sdd/2026-10-23-experience-carnet/` (`progress.md`, `cartographie.md`, les revues de la spec, un brief et un
 rapport par tâche, lanceur `suite.cjs`, outil `preuve-visuelle.cjs`, `galerie.html`, `resultats*.md` / `.json`, `captures/`). Commits : T1 `8b5c6d2` + ronde `52718bd`
 (jetons, `sectionPlain`, `pageHeader classeTitre`, `icones.js`, NAV « Bibliothèque », pins, `theme.js` amendé), T2 `bcb0f2a` + `a149609` (carte-plat, `grilleCartes`,
 segment Recettes), T3 `bf86095` + `5b5c20b` (fiche recette), T4 `0d4b1ca` + `9411c35` (fiche livre), T5 `4c809d8` + `0fa52b4` (Aujourd'hui, Ajouter, import ciblé,
-libellés), T6 `1d952fe` (filets, épingle) et le commit de docs qui pose ces lignes (preuve rejouée, CLAUDE.md, STATE.md, architecture, spec § 12). **FINI dans le worktree, PAS fusionné, PAS poussé** ; revue
-finale de branche, vague et `/verify` : au chef d'orchestre ; fusion par un commit de fusion sur `main`, où UI-2 est déjà (`main` = `origin/main` = `1cb5dde`, 0.16.0 ; 17 fichiers en conflit, mesurés : R-UI-47, geste 2).
+libellés), T6 `1d952fe` (filets, épingle) + `838fa41` (docs) + ronde `7c9d3f7`, vague finale `88e095a` (code et tests) et son commit de docs. **FINI dans le worktree, PAS fusionné, PAS poussé** ;
+revue finale de branche faite (2 Important, 15 Minor) et sa vague (ci-dessous) ; re-revue et `/verify` : au chef d'orchestre ; fusion par un commit de fusion sur `main`, où UI-2 est déjà (`main` = `origin/main` = `1cb5dde`, 0.16.0 ; 17 fichiers en conflit, mesurés : R-UI-47, geste 2).
 Fichiers du lot : `styles.css`, `index.html` (rien : `theme-color` inchangé), `sw.js` (`VERSION`, `SHELL` + `./src/ui/icones.js`), `src/app.js` (NAV),
 `src/ui/icones.js` (neuf), `src/ui/components.js`, `library.js`, `recipe.js`, `book.js`, `home.js`, `add.js`, `accueil-livre.js`, `import-cible.js`,
 `import-web.js`, `photo-plat.js`, `dish.js`, et par les états vides seulement `grocery.js`, `import.js`, `kitchen.js`, `meals.js`, `search.js` (un littéral,
@@ -2917,7 +2917,7 @@ trois sélecteurs (fusion par union) · **R-UI1-2** les sources du test I-F3 (`t
 rév. 3) ; **R-UI-1** `theme.js` l. 45 et 48 « olive » · **R-UI-2** seule la roue du panneau au trait (D-2) · **R-UI-3** `header.stack h1 + p.muted` aussi sur les
 en-têtes maison · **R-UI-4** (à trancher) trois `h1` de recette nus à l'échelle des pages (EI-T1-R1-a) · **R-UI-5** (à trancher) `.badge.ai` en olive, contre
 D-UI-2 · **R-UI-6** (à ratifier) `extra` seulement s'il est donné · **R-UI-7** (à ratifier) génération dans `redessiner()` · **R-UI-8** (à ratifier) tests des survivants M7, M22 · **R-UI-9** (à
-ratifier) « Rien à importer pour l’instant. » · **R-UI-10** (à ratifier) un écouteur `matchMedia` posé au montage · **R-UI-11** (ouvert) les retours de `book.js` mènent à
+ratifier) « Rien à importer pour l’instant. » · **R-UI-10** (à ratifier) un écouteur `matchMedia` posé au montage · **R-UI-11** (tranché par R-UI-49, vague finale) les retours de `book.js` mènent à
 Recettes · **R-UI-12** (ouvert) une référence sans adresse ni livre n'apparaît nulle part · **R-UI-13**, **R-UI-14** (à ratifier) tests des survivants M18, C1b ·
 **R-UI-15** (à ratifier) une durée seulement avec préparation ET cuisson connues · **R-UI-16** (à ratifier) `display: contents` sur l'emplacement photo vide · **R-UI-17** (à ratifier) clé
 « {n} portions · {d} » retirée · **R-UI-18** (à ratifier) `suiviFiche` · **R-UI-19** deux assertions dictées fausses (T4) · **R-UI-20** `suiviLivre` (remplacé par
@@ -2937,7 +2937,20 @@ pastille déborde de 21 px, connu, spec refonte § 11) · **R-UI-41** (à ratifi
 origine (EI-T6-b) · **R-UI-43** (à ratifier) le 404 différé de `/favicon.ico` compté à part dans l'outil (EI-T6-c) · **R-UI-44** le plan vit à son chemin réel ; puis ceux de la ronde 1 de
 T6 : **R-UI-45** (à ratifier) le filet i18n calculé sur tout le module (78 clés antérieures sans entrée, figées), les emplois lus sans commentaires,
 les sélecteurs comparés comme jetons, `.reperes` mesuré · **R-UI-46** (à ratifier) l'outil de preuve en liste blanche du réseau (un hôte inconnu est
-une faute nommée) · **R-UI-47** la fusion mesurée : 17 fichiers en conflit, chacun avec sa règle (geste 2).
+une faute nommée) · **R-UI-47** la fusion mesurée : 17 fichiers en conflit, chacun avec sa règle (geste 2) ; puis ceux de la vague finale, tous à
+ratifier : **R-UI-48** Sommaire rangé par séance (`started_at`, sinon `captured_at` du document) puis position · **R-UI-49** (tranche R-UI-11) les retours du
+livre mènent à `#/library?tab=books` · **R-UI-50** « Reprendre la séance » du Sommaire pour une séance de sommaire seulement · **R-UI-51** « Aucune recette ne
+correspond. » · **R-UI-52** `pageAffichable` exportée, badge court dans la ligne compacte · **R-UI-53** `;` de `.plat-vignette.grande` · **R-UI-54** identifiants
+de fiche encodés · **R-UI-55** titres de livre par `String()` · **R-UI-56** D-UI-2 épinglée sur `.badge.original` et `.status.ok` (`.badge.ai` : R-UI-5 reste à
+trancher) · **R-UI-57** zone « photo » morte retirée de la règle `:has` · **R-UI-58** `clesT`, une lecture des clés i18n (trois formes) · **R-UI-59** la
+recherche lue dans son rendu · **R-UI-60** le relevé des `emptyState` ratifié comme filet admis.
+
+**Vague finale (28 octobre 2026 ; revue finale de branche de `7c9d3f7` : 2 Important, 15 Minor ; code `88e095a` ; rapport `final-fix-report.md` du
+registre).** Les deux Important corrigés, rouge d'abord : le Sommaire rangeait par `position`, numérotée PAR SÉANCE (une page oubliée, photographiée
+dans une seconde séance, s'intercalait en deuxième) → par séance puis position (R-UI-48) ; « Plus tard », « ← Bibliothèque » et la suppression d'un livre
+menaient à Recettes, sans trace du livre → segment Livres (R-UI-49). Les Minor à moins de dix lignes aussi (R-UI-50 à R-UI-60) ; non faits, avec leur
+raison : la couleur de `.badge.ai` (R-UI-5, décision de produit), l'extension d'I-F3 à `book.js` et `home.js` (au commit de fusion, R-UI1-2 : geste 2).
+Rouge lu sur l'ancien code : `❌ 6212/6226`, 14 lignes aux sites visés. Mutants : `final-fix-report.md`.
 
 **Ce qui n'est PAS prouvé.**
 - **Safari et l'iPhone** : rien n'y a été vu (aucun WebKit ici) — Georgia et `clamp()` des titres, le `details` replié, la bascule Ingrédients /
@@ -2964,8 +2977,8 @@ une faute nommée) · **R-UI-47** la fusion mesurée : 17 fichiers en conflit, c
 - La galerie reste en partie une COPIE de balisage (onglets, 7 bis, repères, lien d'origine, rangée principale, `details`, `segmented`) : elle peut
   dériver du code sans rougir ; les vraies mesures sont les routes de l'app (R-UI-39). L'inventaire des 78 clés sans entrée ne fait qu'exempter : il
   s'amende à la main quand l'une gagne son anglais (rien ne rougit alors).
-- Liste compacte de la fiche livre : une référence montre sa page deux fois (« À importer · p. 132 » par `availabilityBadge` et « p. 132 ») ; § 4.3 demande
-  le badge « À importer » seul (capture `1512-fiche-livre.png`, constat pour le chef).
+- ~~Liste compacte de la fiche livre : une référence montre sa page deux fois~~ fermée par la vague finale (R-UI-52 ; les captures `1512-fiche-livre.png`
+  et `768-galerie-liste-compacte.png` du registre datent d'avant la vague).
 - À 320 px, « Ma semaine » passe sur deux lignes dans son onglet (non jugé) ; à 375 px, le « ? » du titre d'Aujourd'hui reste seul sur sa ligne.
 - « Ouvrir le lien » survit dans un commentaire (`components.js:77`) et des assertions négatives du bloc T3 (aucun `t()`).
 - R-VIS-8 s'applique aussi au lien d'origine de la zone d'échec de l'écran d'import web ; la légende d'une vignette de l'import ciblé reste un bouton
@@ -2982,14 +2995,16 @@ une faute nommée) · **R-UI-47** la fusion mesurée : 17 fichiers en conflit, c
    28 octobre ; R-UI-47), chacun résolu À LA MAIN et relu, jamais par script : `CLAUDE.md` et `docs/architecture.md` (les deux sections, UI-2 puis
    UI-1, au même ancrage : garder les deux) ; `STATE.md` (réécrire le titre et garder les paragraphes des deux lots) ; `src/i18n/en.js` (union des
    entrées, une clé écrite une fois) ; `src/model/schema.js` (`APP_VERSION 0.17.0`) ; `sw.js` (UNION de `SHELL` — `./src/ui/icones.js` ET
-   `./src/domain/apercu-web.js` — et `VERSION` `cuisine-os-v0.17.0-10`) ; `styles.css` (`.plat-vignette.grande` écrite une fois, `figure.apercu` ET
-   `.plat-vignette.petite` gardées : R-UI1-1) ; `tests/photo-plat.js` (la version à trois sélecteurs) ; `tests/ajouter.js` (`MODULES_NEUFS` en union —
+   `./src/domain/apercu-web.js` — et `VERSION` `cuisine-os-v0.17.0-11`, la branche étant à `-10` depuis la vague finale) ; `styles.css` (`.plat-vignette.grande`
+   écrite une fois — identique au caractère près depuis R-UI-53 —, `figure.apercu` ET `.plat-vignette.petite` gardées : R-UI1-1) ; `tests/photo-plat.js` (la
+   version à trois sélecteurs, ET `../src/ui/book.js` et `../src/ui/home.js` ajoutés à la liste des sources du test « CSP et sources (I-F3, I-F8, D-F11) »,
+   vague finale) ; `tests/ajouter.js` (`MODULES_NEUFS` en union —
    `icones.js` ET le domaine des aperçus — et les pins 0.17.0) ; `tests/tests.js` (imports et appels de `apercu-web.js` ET de `carnet.js`, l'épingle
    remesurée après la fusion, règle N−1) ; les pins 0.17.0 de `tests/assistant-compte.js`, `classement.js`, `creer-ia.js`, `passerelle.js`,
    `recherche-web.js`, `sync-l3.js` et `sync-l4.js` (13 assertions + 1 commentaire en tout, I-UI-7). La spec et `search.js` fusionnent seuls : garder
    `'loupe'` (R-UI-P1 ; `main` porte `'🔍'`). Puis la suite et Node sur l'arbre fusionné ; puis `! git -C ~/projects/mistu push origin main`. Ouvrir
    `https://neegans.github.io/mistu/tests/` et lire le BILAN (attendu : la valeur remesurée, plus le 404 de `/favicon.ico`) ; service worker
-   `cuisine-os-v0.17.0-10`.
+   `cuisine-os-v0.17.0-11`. (Liste des 17 conflits remesurée après la vague finale sur `88e095a` : inchangée.)
 3. **Preuve réelle § 10 UI-1** sur le site public : Bibliothèque → Recettes sur TA bibliothèque (dire si la grille, avec tes photos réelles,
    ressemble assez à la maquette ; sinon § 13 point 5), filtres, pied, « Ajouter une recette » ; une fiche de recette avec photo sur le Mac (deux
    colonnes) et sur l'iPhone (onglets, « Corriger » à côté) ; une fiche de livre (menus en tête, 8 lignes puis « Voir les {n} recettes ») ;
@@ -3003,16 +3018,18 @@ une faute nommée) · **R-UI-47** la fusion mesurée : 17 fichiers en conflit, c
 
 **Versions.** `APP_VERSION = '0.17.0'` (était 0.15.0 ; 0.16.0 = UI-2 ; pins `v0\.17\.0-\d+` / `'0.17.0'` : 13 assertions + 1 commentaire dans
 `tests/ajouter.js`, `tests/passerelle.js`, `tests/recherche-web.js`, `tests/sync-l3.js`, `tests/sync-l4.js`, `tests/assistant-compte.js`,
-`tests/creer-ia.js`, `tests/classement.js`), `DB_VERSION = 4` (inchangée), `sw.js VERSION = 'cuisine-os-v0.17.0-9'` (`-1` à T1, `-2` T2, `-3` sa ronde, `-4` T3,
-`-5` sa ronde, `-6` T4, `-7` sa ronde, `-8` T5, `-9` sa ronde ; la ronde de T1 ne touchait que des tests ; T6 : `en.js` intact, aucune version), `SHELL` + `./src/ui/icones.js` (seul module
+`tests/creer-ia.js`, `tests/classement.js`), `DB_VERSION = 4` (inchangée), `sw.js VERSION = 'cuisine-os-v0.17.0-10'` (`-1` à T1, `-2` T2, `-3` sa ronde, `-4` T3,
+`-5` sa ronde, `-6` T4, `-7` sa ronde, `-8` T5, `-9` sa ronde, `-10` la vague finale ; la ronde de T1 ne touchait que des tests ; T6 et sa ronde : aucun fichier de `src/`, aucune version), `SHELL` + `./src/ui/icones.js` (seul module
 neuf). Aucun schéma, aucune migration, CSP inchangée, `theme-color` inchangé.
 
-**Bilan (28 octobre 2026, tête de code `0fa52b4`, filets `1d952fe` puis ronde 1 de T6).** Suite complète **6218/6218** (épingle **6217** dans `tests/tests.js:255`,
+**Bilan (28 octobre 2026, vague finale `88e095a` ; avant elle : tête de code `0fa52b4`, filets `1d952fe`, ronde 1 de T6 `7c9d3f7`).** Suite complète **6226/6226** (épingle **6225** dans `tests/tests.js:255`,
 règle N−1 ; départ du lot sur `f3672be` :
 5948/5948, épingle 5947 ; T1 5989 puis 5993, T2 6037 puis 6049, T3 6081 puis 6093, T4 6131 puis 6151, T5 6182 puis 6204,
-T6 6216, sa ronde 1 6218 : lus dans leurs rapports), une seule erreur de console : le 404 de `/favicon.ico`
+T6 6216, sa ronde 1 6218, vague finale 6226 : lus dans leurs rapports), une seule erreur de console : le 404 de `/favicon.ico`
 (préexistant) ; `node --test tools/*.test.mjs` **208/208** (inchangé) ; `node tools/generer-migrations.mjs --check` **0** ; preuve visuelle VERT (70/70,
-174 captures, contraste minimum 4,62 sur 3 601 nœuds, 0 requête hors origine ; contre-preuves rouges ; mutants M-UI6-1 à 8 et X1 à X9 de la ronde 1 rouges) ; aucun caractère invisible (Python `-I`) ni aucune clé dans les fichiers touchés ; `git diff
+174 captures, contraste minimum 4,62 sur 3 601 nœuds, 0 requête hors origine ; contre-preuves rouges ; mutants M-UI6-1 à 8 et X1 à X9 de la ronde 1 rouges ; rejouée
+après la vague par une COPIE de l'outil, sorties dans le scratchpad — les captures du registre datent d'avant la vague — : VERT, 70/70, 174 captures, 4,62 sur 3 601 nœuds ;
+mutants de la vague : 28 sur 28 rouges, témoin vert) ; aucun caractère invisible (Python `-I`) ni aucune clé dans les fichiers touchés ; `git diff
 --stat f3672be..HEAD -- supabase/ tools/` vide.
 
 **Fusion.** Revue finale de branche puis `/verify` par le chef d'orchestre ; le registre (avec `captures/`) se copie **avant** tout `git worktree
