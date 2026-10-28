@@ -57,6 +57,13 @@ const suivreLargeur = (racine, mq, appliquer) => suivreLargeurAuMontage('fiche-r
 // `deps` (lot B, facultatif : le routeur n'en passe pas) : les gestes de la lecture web { repo, navigate, toast, fetch, maintenant, enLigne } — la
 // suite n'ouvre ni réseau ni navigation réelle. Lot F (§ 4.1.1) : le MÊME objet porte aussi `pickFiles` ; il est transmis tel quel à monterPhotoPlat
 // (les clés que la zone ne connaît pas sont ignorées ; sans deps, ses défauts valent la production).
+// Fidélité aux maquettes (28 octobre 2026) : en tête de fiche, les états ORDINAIRES (« Disponible », « Original ») ne s'affichent plus ; ceux qui disent
+// quelque chose (« À importer », « Partielle », une version à moi ou de l'assistant, le type, les cuisines) restent. Rangée vide : rien.
+function rangeeEtat(...enfants) {
+  const utiles = enfants.filter((b) => b && !(b.classList?.contains('available') || b.classList?.contains('original')));
+  return utiles.length ? el('div', { class: 'row' }, ...utiles) : null;
+}
+
 export async function renderRecipe(params, query, ctx, deps = {}) {
   const recipe = ctx.recipesById.get(params.id);
   if (!recipe) return el('div', { class: 'card' }, t('Recette introuvable.'));
@@ -105,31 +112,33 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // Lot F (D-F16) : ★ Favori n'écrit que `favorite`, sur la fiche RELUE — ronde 1 : DANS la transaction d'écriture (condition { key, fusion } par
   // saveBatch, comme photo-plat.js) : une photo du plat posée depuis le rendu (descente web, autre onglet), même pendant ce geste, survit. La valeur
   // écrite est celle que l'écran annonce (« ☆ » → favori), jamais l'inverse de la base. Le repo et le toast injectés (deps) servent ici aussi.
-  const favBtn = el('button', { class: 'btn', title: t('Favori'), onClick: async () => {
+  const favBtn = el('button', { class: 'btn discret', title: t('Favori'), onClick: async () => {
     let absente = false;
     try {
       await gestesLecture.repo.saveBatch({}, { conditions: { recipes: [{ key: recipe.id, fusion: (c) => { if (!c) { absente = true; return null; } return { ...c, favorite: !recipe.favorite }; } }] } });
     } catch (e) { logError('recipe.favori', { error: e, id: recipe.id }); return; }
     if (absente) { dire(t('Recette introuvable.')); return; }
     refresh();
-  } }, recipe.favorite ? '★ ' + t('Favori') : '☆ ' + t('Favori'));
+  } }, recipe.favorite ? '★' : '☆', el('span', { class: 'fav-libelle' }, ' ' + t('Favori'))); // maquettes : sur iPhone, l'étoile seule à côté du titre (le mot reste lu)
   // UI-1 (D-UI-6, F-5) : la largeur par un matchMedia INJECTABLE (deps.matchMedia ; défaut : celui de la fenêtre, appelé SUR window — jamais la fonction
   // nue : « Illegal invocation »). Une seule requête, celle de .two-col (760 px, le motif de dish.js) ; `large()` la relit à chaque usage.
   const mq = (deps.matchMedia ?? ((requete) => window.matchMedia(requete)))('(min-width: 760px)');
   const large = () => !!mq.matches;
   // R-UI-P2 : le sous-titre reste la provenance (« {titre} — {auteur} · page N », hôte recalculé, étiquette IA) ; « Du web · » / « De mon livre · » sont les préfixes de la
   // CARTE-PLAT (ligneSource), pas de la fiche — § 4.2 amendé par T6 ; tests/creer-ia.js:1338, 1375, 1397, 1400 lisent ce header p tel quel.
-  root.append(pageHeader(recipe.display_title || recipe.original_title, {
+  // Fidélité aux maquettes (28 octobre 2026) : le titre vit dans la colonne de gauche de l'en-tête, en face de la photo (posé plus bas, dans .fiche-etat).
+  const entete = pageHeader(recipe.display_title || recipe.original_title, {
     subtitle: provenanceText(recipe, book, edition), back: edition ? { href: `/books/${edition.id}`, label: book?.title || t('Livre') } : { href: '/library', label: t('Bibliothèque') },
     actions: [favBtn], classeTitre: 'titre-fiche',
-  }));
+  });
 
   // Conflit de version (spec § 5.5) : les deux appareils ont adapté cette recette en parallèle. AUCUNE version
   // n'est masquée — la liste des versions plus bas reste entière, et l'original n'est jamais réécrit ; seule une
   // ligne le dit, ici, là où la personne regarde la recette. La décision se prend dans Réglages, nulle part ailleurs.
   const conflit = await repo.get('sync_conflicts', 'recipes:' + params.id);
+  let avisConflit = null; // posé SOUS l'en-tête (le titre est désormais dans la colonne de gauche)
   if (conflit?.kind === 'version') {
-    root.append(el('div', { class: 'card warn stack' },
+    avisConflit = (el('div', { class: 'card warn stack' },
       el('p', null, t('Une autre version a été créée ailleurs — les deux versions sont conservées.')),
       el('a', { class: 'btn', href: '#/settings' }, t('Trancher dans Réglages'))));
   }
@@ -143,8 +152,8 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // UI-1 (D-UI-6) : l'en-tête en deux colonnes — UN ordre de DOM : l'état (badges, bandeaux), la photo, les gestes (repères, « Voir la page d’origine »,
   // « Commencer à cuisiner » + « Corriger »). La feuille met la photo à droite dès 760 px et, en étroit, la laisse entre l'état et les gestes (sous la
   // provenance, avant les repères : la maquette mobile). Les gestes ne sont posés qu'avec une version (plus bas).
-  const etat = el('div', { class: 'stack fiche-etat', dataset: { role: 'fiche-etat' } },
-    el('div', { class: 'row' }, availabilityBadge(recipe), versionBadge(version, recipe), lecture ? etatVerification(version) : null, recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, capitaliser(c)))));
+  const etat = el('div', { class: 'stack fiche-etat', dataset: { role: 'fiche-etat' } }, entete,
+    rangeeEtat(availabilityBadge(recipe), versionBadge(version, recipe), lecture ? etatVerification(version) : null, recipe.type ? el('span', { class: 'badge' }, label('recipe_type', recipe.type)) : null, ...(recipe.cuisines || []).map((c) => el('span', { class: 'chip outline' }, capitaliser(c)))));
   const web = bandeauWeb(version);
   if (web) etat.append(web); // lot B (§ 4.5) : la source d'une version lue sur le web, d'abord — puis la bannière du lot A
   if (lecture) etat.append(bandeauLecture(lecture));
@@ -154,6 +163,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   photo.entete.classList.add('fiche-photo');
   const tete = el('div', { class: 'two-col fiche-tete', dataset: { role: 'fiche-tete' } }, etat, photo.entete);
   root.append(tete);
+  if (avisConflit) root.append(avisConflit);
 
   if (!version) {
     root.append(await referenceOnly());
@@ -191,7 +201,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // « Portions, versions et autres gestes » (D-UI-6, § 13 point 4) : TOUT l'ancien contenu de la carte des contrôles et de la rangée d'actions, sauf
   // « Commencer à cuisiner » et le « Corriger » de tête — replié sous 760 px, ouvert au-dessus (le matchMedia, relu sur change) ; jamais « Réglages »
   // (l'app a déjà un écran de ce nom). L'Export reste en bas de la fiche, hors du details (H-3).
-  const autresGestes = el('details', { class: 'card', open: large(), dataset: { role: 'autres-gestes' } },
+  const autresGestes = el('details', { class: 'autres-gestes', open: false, dataset: { role: 'autres-gestes' } },
     el('summary', null, t('Portions, versions et autres gestes')),
     el('div', { class: 'stack' },
       el('div', { class: 'row between' },
@@ -259,7 +269,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     el('button', { class: 'btn small', onClick: () => downloadBlob(new Blob([toPaprikaYaml([{ recipe, version, book, edition }])], { type: 'text/yaml;charset=utf-8' }), `${slug(recipe.original_title)}.yml`) }, t('Exporter YAML (Paprika)')),
     el('span', { class: 'muted', style: { fontSize: '.85rem' } }, t('Version et langue affichées ; inconnues omises.'))));
   // Ronde 1 : la largeur suivie au MONTAGE (suivreLargeur, plus haut), posé APRÈS le dernier await du rendu — le routeur insère la racine juste après.
-  suivreLargeur(root, mq, () => { autresGestes.open = large(); appliquerCorps(); });
+  suivreLargeur(root, mq, () => { appliquerCorps(); }); // le panneau des autres gestes reste replié à toutes les largeurs (maquettes) : seule la bascule du corps suit la largeur
   return root;
 
   function setServings(n) { if (n < 1) return; state.servings = n; document.getElementById('servings-val').textContent = n; drawBody(); }
@@ -270,11 +280,13 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     const translation = state.lang !== 'original' ? ctx.recipe_translations.find((tr) => tr.recipe_version_id === version.id && tr.locale === state.lang) : null;
     const wantsTranslation = state.lang !== 'original' && state.lang !== (recipe.original_language || 'fr');
     const ctxQty = { system: state.units, locale: state.lang === 'original' ? (recipe.original_language || 'fr') : state.lang, convention_id: conventionId, readingLocale: state.lang, originalLocale: recipe.original_language || 'fr', showSource: true };
-    const ingList = el('ul', { class: 'list plain' });
+    const ingList = el('ul', { class: 'list plain coches' });
     scaled.ingredients.forEach((ri, i) => {
       const li = ingredientLineEl(ri, ctxQty, ctx.ingredientsById);
+      // Fidélité aux maquettes : une case à cocher par ingrédient, pour suivre pendant qu'on prépare. Locale à l'écran : rien n'est écrit (un redessin la décoche).
+      li.prepend(el('input', { type: 'checkbox', class: 'coche', 'aria-label': ri.source_text || ri.name_text || '' }));
       if (translation?.translated_content?.ingredients?.[i]) li.append(el('div', { class: 'muted', style: { fontSize: '.85rem' } }, `${t('Traduction')} : ${translation.translated_content.ingredients[i]}`));
-      li.append(el('button', { class: 'btn small', style: { marginLeft: '.4rem' }, onClick: () => replaceIngredient(ri) }, t('Remplacer')));
+      li.append(el('button', { class: 'btn link small remplacer', onClick: () => replaceIngredient(ri) }, t('Remplacer')));
       ingList.append(li);
     });
     // § 3.3, C-6, C-9 : sur une création, ce que l'assistant a dit (préfixé « Selon l’assistant »), sa durée ESTIMÉE (jamais dans
@@ -309,6 +321,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     preparation.dataset.role = 'section-preparation';
     const onglets = segmented([{ value: 'ingredients', label: t('Ingrédients') }, { value: 'preparation', label: t('Préparation') }], state.onglet, (v) => { state.onglet = v; appliquerCorps(); });
     onglets.dataset.role = 'onglets-corps';
+    onglets.classList.add('onglets');
     onglets.querySelectorAll('button').forEach((b, i) => { b.dataset.value = ['ingredients', 'preparation'][i]; }); // segmented() ne pose pas la valeur : le segment actif se retrouve par elle
     body.append(onglets, el('div', { class: 'two-col', dataset: { role: 'colonnes-corps' } }, ingredients, preparation));
     appliquerCorps();

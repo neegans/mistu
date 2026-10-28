@@ -61,7 +61,7 @@ export const CHAINES_NEUVES_AILLEURS = {
     // Lot G, tâche 6 : vignettePage, gesteTelechargement, boutonTelechargerPages, pdfFrame (§ 4.3-4.5).
     'Page', 'Télécharger', 'Téléchargement…', 'Télécharger les {n} pages', 'Le téléchargement n’a pas abouti.', 'Pas encore sur cet appareil', 'Connecte-toi pour la télécharger', 'Pas encore envoyée par l’appareil qui l’a prise', 'Pas encore reçue', 'Fichier illisible reçu du serveur.',
     // Lot UI-1, tâche 2 : la ligne de source de la carte-plat (ligneSource).
-    'Du web · {h}', 'De mon livre · {t}',
+    'Du web', 'De mon livre', // fidélité aux maquettes (28 octobre) : la ligne de source ne nomme plus l'hôte ni le livre
     // Lot UI-1, tâche 3 : « Voir la page d’origine » (D-UI-10, I-B5), une définition pour la fiche, le bloc du signet et l'écran d'import web.
     'Voir la page d’origine',
     // Lot UI-1 « Carnet », tâche 5 : les textes courts d'availabilityBadge (D-UI-10).

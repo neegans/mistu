@@ -51,16 +51,19 @@ function navLinks(path, cls) {
 function shell() {
   const path = parseHash().path;
   const main = el('main', { class: 'content', id: 'main' });
-  const side = el('aside', { class: 'sidenav' }, ...navLinks(path, ''), el('a', { href: '#/settings', class: path.startsWith('/settings') ? 'active' : '' }, el('span', { class: 'ico', 'aria-hidden': 'true' }, icone('roue')), el('span', null, t('Réglages'))));
+  // Fidélité aux maquettes (28 octobre 2026) : dès 900 px, la navigation est une rangée d'onglets DANS la barre du haut (plus de panneau latéral) ;
+  // les Réglages restent sur la roue de la barre. Sous 900 px, cette rangée est cachée (règle aside.sidenav d'origine) et nav.tabs sert, comme avant.
+  const side = el('aside', { class: 'sidenav', 'aria-label': 'Navigation' }, ...navLinks(path, ''));
   const tabs = el('nav', { class: 'tabs', 'aria-label': 'Navigation' }, ...navLinks(path, ''));
   const top = el('div', { class: 'topbar' },
     el('a', { class: 'brand', href: '#/' }, 'Cuisine OS'),
+    side,
     el('span', { class: 'spacer' }),
     // Pastille « N non envoyés » (spec § 4.2) : cachée tant que la file est vide — rien n'est affiché sans fait.
     pastille(),
-    el('a', { class: 'btn small', href: '#/search', title: t('Recherche') }, '⌕ ', el('span', { class: 'nowrap' }, t('Qu’est-ce qu’on cuisine ?'))),
-    el('a', { class: 'btn small', href: '#/settings', title: t('Réglages'), 'aria-label': t('Réglages') }, '⚙︎'));
-  return { root: el('div', null, top, el('div', { class: 'frame' }, side, main), tabs), main, side, tabs };
+    el('a', { class: 'btn small', href: '#/search', title: t('Recherche') }, el('span', { class: 'ico', 'aria-hidden': 'true' }, icone('loupe')), el('span', { class: 'nowrap' }, t('Qu’est-ce qu’on cuisine ?'))),
+    el('a', { href: '#/settings', class: 'btn small', title: t('Réglages'), 'aria-label': t('Réglages') }, el('span', { class: 'ico', 'aria-hidden': 'true' }, icone('roue'))));
+  return { root: el('div', null, top, el('div', { class: 'frame' }, main), tabs), main, side, tabs };
 }
 
 let current = null;

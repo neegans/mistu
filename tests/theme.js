@@ -24,7 +24,7 @@ export async function runThemeTests({ eq, ok }) {
   const jetons = Object.fromEntries([...(racine?.[1] || '').matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));
   eq(JETONS.filter((j) => !(j in jetons)), [], 'thème : tous les jetons de § 3.1 (alias compris) sont dans :root');
   const hex = (j) => { let x = jetons[j]; for (let i = 0; i < 5 && x && x.startsWith('var('); i++) x = jetons[x.slice(4, -1).trim()]; return /^#[0-9a-f]{3}$|^#[0-9a-f]{6}$/i.test(x || '') ? HEX3(x.toLowerCase()) : null; };
-  eq([hex('--paper'), hex('--action'), hex('--ink'), hex('--accent'), hex('--warn'), hex('--muted')], ['#f8f5ef', '#4f6b2e', '#242821', '#45604a', '#8b5f10', '#636860'], 'thème : jetons de la direction 01, l’action passée à l’olive (D-UI-2 : --action #4f6b2e, 5,55 sur papier, 5,95 sur carte ; --warn R-VIS-13 : ambre sur accent-bg 4,49 → 4,62)');
+  eq([hex('--paper'), hex('--action'), hex('--ink'), hex('--accent'), hex('--warn'), hex('--muted')], ['#f8f5ef', '#454e3b', '#242821', '#45604a', '#8b5f10', '#636860'], 'thème : jetons de la direction 01, l’action à l’olive sombre des maquettes (D-UI-2 amendé le 28 octobre : --action #454e3b, 8,02 sur papier, 8,59 sur carte ; --warn R-VIS-13 : ambre sur accent-bg 4,49 → 4,62)');
   eq(hex('--accent-2'), '#55705a', 'R-VIS-2 : --accent-2 = #55705a (papier sur accent-2 = 5,01 ; #5f7a64 donnait 4,33)');
   eq([hex('--cream'), hex('--green'), hex('--cream-2'), hex('--sage-2')], [hex('--paper'), hex('--accent'), hex('--paper-2'), hex('--accent-bg')], 'T-2 : anciens noms = alias');
   for (const [fg, bg, ou] of PAIRES) { const a = hex(fg), b = hex(bg); const c = a && b ? contraste(a, b) : 0; ok(c >= 4.5, `T-3 : ${fg} sur ${bg} = ${c.toFixed(2)} ≥ 4,5${ou ? ' (' + ou + ')' : ''}`); }
@@ -86,7 +86,7 @@ export async function runThemeTests({ eq, ok }) {
     const l = document.createElement('button'); l.className = 'btn link'; l.textContent = 'Lien'; scene.append(l);
     const ch = document.createElement('span'); ch.className = 'chip'; ch.textContent = 'Puce'; scene.append(ch);
     ok(b.getBoundingClientRect().height >= 44 && s.getBoundingClientRect().height >= 36 && l.getBoundingClientRect().height >= 44, 'T-4 : .btn ≥ 44, .btn.small ≥ 36, .btn.link ≥ 44 (mesurés)');
-    eq([getComputedStyle(b).borderRadius, getComputedStyle(ch).borderRadius], ['999px', '999px'], 'composants : boutons et puces en pilule');
+    eq([getComputedStyle(b).borderRadius, getComputedStyle(ch).borderRadius], ['8px', '999px'], 'composants : boutons rectangulaires à coins de 8 px (maquettes, 28 octobre), puces en pilule');
     const seg = document.createElement('div'); seg.className = 'segmented'; const sb = document.createElement('button'); sb.className = 'active'; sb.textContent = 'Web'; seg.append(sb); scene.append(seg);
     ok(contraste(rgbVersHex(getComputedStyle(sb).color), rgbVersHex(getComputedStyle(sb).backgroundColor)) >= 4.5, 'segments : l’option active se lit (calculé)');
     const badge = document.createElement('span'); badge.className = 'badge ai'; badge.textContent = 'IA'; scene.append(badge);
@@ -145,7 +145,7 @@ export async function runThemeTests({ eq, ok }) {
     // R-VIS-6 : les segments d'extrémité épousent la pilule (l'anneau de focus suit le rayon : plus de coins coupés, M14).
     const seg3 = document.createElement('div'); seg3.className = 'segmented'; const bs = ['A', 'B', 'C'].map((x) => Object.assign(document.createElement('button'), { textContent: x })); seg3.append(...bs); scene.append(seg3);
     const rd = (n, coin) => getComputedStyle(n)[coin];
-    eq([rd(bs[0], 'borderTopLeftRadius'), rd(bs[0], 'borderBottomLeftRadius'), rd(bs[0], 'borderTopRightRadius'), rd(bs[1], 'borderTopLeftRadius'), rd(bs[1], 'borderTopRightRadius'), rd(bs[2], 'borderTopRightRadius'), rd(bs[2], 'borderBottomRightRadius'), rd(bs[2], 'borderBottomLeftRadius')], ['999px', '999px', '0px', '0px', '0px', '999px', '999px', '0px'], 'R-VIS-6 : segments d’extrémité arrondis comme la pilule, segment du milieu droit (calculés)');
+    eq([rd(bs[0], 'borderTopLeftRadius'), rd(bs[0], 'borderBottomLeftRadius'), rd(bs[0], 'borderTopRightRadius'), rd(bs[1], 'borderTopLeftRadius'), rd(bs[1], 'borderTopRightRadius'), rd(bs[2], 'borderTopRightRadius'), rd(bs[2], 'borderBottomRightRadius'), rd(bs[2], 'borderBottomLeftRadius')], ['8px', '8px', '8px', '8px', '8px', '8px', '8px', '8px'], 'R-VIS-6 remplacé (maquettes, 28 octobre) : segments séparés, chacun à coins de 8 px — l’anneau de focus suit son propre rayon (calculés)');
     // R-VIS-7 : une couverture AVEC image a ses coins arrondis — l'image a .cover pour bloc conteneur (même boîte que .cover-wrap, donc même place).
     const enveloppe = document.createElement('a'); enveloppe.className = 'cover-wrap'; enveloppe.href = '#/'; const cov2 = document.createElement('div'); cov2.className = 'cover with-img';
     const image = document.createElement('div'); image.className = 'cover-img'; cov2.append(image); enveloppe.append(cov2); scene.append(enveloppe);

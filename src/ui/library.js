@@ -10,6 +10,7 @@ import { revoquerUrlDeBlob } from '../core/blob-urls.js';
 import { proposeDishesForRecipe } from '../domain/dishes.js';
 import { pointeurValide } from '../domain/photo-web.js';
 import { logError } from '../core/log.js';
+import { icone } from './icones.js';
 
 const TABS = ['recettes', 'books', 'dishes', 'a-importer'];
 export const CARTES_PAR_PAGE = 60; // F-9 : la grille est bornée ; « Voir plus » rend la page suivante
@@ -40,10 +41,10 @@ export async function renderLibrary(params, query, ctx, deps = {}) {
   const segment = tab === 'a-importer' ? 'recettes' : tab;
   // L'action d'en-tête suit le segment : « Ajouter une recette » sur Recettes, « Ajouter un livre » sur Livres (→ #/add/livre, H-15), rien sur Plats.
   const actions = segment === 'books' ? [el('a', { class: 'btn primary', href: '#/add/livre' }, t('Ajouter un livre'))]
-    : segment === 'recettes' ? [el('a', { class: 'btn primary', href: '#/add' }, t('Ajouter une recette'))] : [];
+    : segment === 'recettes' ? [el('a', { class: 'btn primary', href: '#/add' }, icone('plus'), t('Ajouter une recette'))] : [];
   const root = el('div', null,
     pageHeader(t('Bibliothèque'), { subtitle: t('Tes livres, tes trouvailles, tes recettes.'), actions, back: tab === 'a-importer' ? { href: '/library?tab=recettes', label: t('Recettes') } : null }),
-    el('div', { style: { marginBottom: '1rem' } }, segmented([{ value: 'recettes', label: t('Recettes') }, { value: 'books', label: t('Livres') }, { value: 'dishes', label: t('Plats') }], segment, (v) => navigate('/library' + buildQuery({ tab: v })))));
+    el('div', { style: { marginBottom: '1rem' } }, onglets(segmented([{ value: 'recettes', label: t('Recettes') }, { value: 'books', label: t('Livres') }, { value: 'dishes', label: t('Plats') }], segment, (v) => navigate('/library' + buildQuery({ tab: v }))))));
   if (tab === 'dishes') root.append(await dishesTab(ctx));
   else if (tab === 'books') {
     root.append(await booksTab(ctx));
@@ -109,7 +110,8 @@ async function recettesTab(ctx, { matchMedia }) {
   }
   filtre.addEventListener('input', () => { etat.limite = CARTES_PAR_PAGE; relancer(); });
   await redessiner();
-  return el('div', null, el('div', { class: 'stack', style: { marginBottom: '1rem' } }, filtre, puces), grille, suite, boutonMobile(matchMedia), pied);
+  // Fidélité aux maquettes (28 octobre 2026) : le champ (loupe au trait) et les filtres sur UNE rangée dès qu'il y a la place (flex-wrap : empilés sur l'iPhone).
+  return el('div', null, el('div', { class: 'filtre-recettes' }, el('label', { class: 'champ-recherche' }, icone('loupe'), filtre), puces), grille, suite, boutonMobile(matchMedia), pied);
 }
 
 // Sous 760 px, l'action d'en-tête est répétée pleine largeur sous la grille (maquette mobile 01) ; au-dessus, [hidden] (T-9 ; aucun display:none neuf : T-1).
@@ -118,8 +120,11 @@ async function recettesTab(ctx, { matchMedia }) {
 // rendu qui lève) ne s'abonne pas —, relit la largeur à cet instant (un change reçu entre le rendu et le montage n'est pas perdu, D-T2-b) et retire
 // l'écouteur du rendu monté précédent ; celui d'un rendu détaché (route quittée) se retire aussi au premier change. Depuis T4-R1, le motif est UNE aide
 // partagée avec la fiche recette et la fiche livre (suivreLargeurAuMontage, components.js).
+// Les segments de la Bibliothèque se lisent comme les onglets soulignés de la maquette (« Mes recettes / Mes livres ») : une classe, aucun geste changé.
+function onglets(seg) { seg.classList.add('onglets'); return seg; }
+
 function boutonMobile(matchMedia) {
-  const mobile = el('a', { class: 'btn primary big block', href: '#/add', dataset: { role: 'ajouter-mobile' }, style: { marginTop: '1rem' } }, t('Ajouter une recette'));
+  const mobile = el('a', { class: 'btn primary big block', href: '#/add', dataset: { role: 'ajouter-mobile' }, style: { marginTop: '1rem' } }, icone('plus'), t('Ajouter une recette'));
   const large = matchMedia('(min-width: 760px)');
   mobile.hidden = !!large?.matches;
   suivreLargeurAuMontage('bibliotheque', mobile, large, (e) => { mobile.hidden = !!(e ? e.matches : large.matches); });

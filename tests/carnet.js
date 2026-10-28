@@ -31,11 +31,11 @@ export async function runCarnetTests({ eq, ok }) {
 
   // --- Tâche 1 — jetons (D-UI-2, § 3.1) : les quatre valeurs de l'olive, les huit contrastes de la table, plus aucune tomate.
   await bloc('jetons', async () => {
-    eq([jetons['--action'], jetons['--action-2'], jetons['--action-bg'], jetons['--tap']], ['#4f6b2e', '#3e5424', '#e9eddf', 'rgba(79,107,46,.15)'], 'D-UI-2 : --action, --action-2, --action-bg et --tap sont l’olive (§ 3.1)');
-    // Ronde 1 (M11) : « les 25 autres : inchangés » (§ 3.1) — theme.js n'en épingle que sept par valeur ; les 34 autres déclarations de :root le sont ici, une à une, dans l'ordre.
-    eq(Object.fromEntries(Object.entries(jetons).filter(([k]) => !['--action', '--action-2', '--action-bg', '--tap'].includes(k))), { '--paper': '#f8f5ef', '--paper-2': '#f1ece3', '--card': '#fffdf9', '--ink': '#242821', '--muted': '#636860', '--line': '#e4dfd5', '--field-line': '#8f8a80', '--accent': '#45604a', '--accent-2': '#55705a', '--accent-bg': '#e4ebe2', '--warn': '#8b5f10', '--warn-bg': '#fbf1dc', '--warn-line': '#ead9b3', '--danger': '#9c2f22', '--danger-bg': '#f9e4df', '--danger-line': '#e9bfb6', '--ok': '#3d6b4a', '--ok-bg': '#e2efe4', '--backdrop': 'rgba(36,40,33,.45)', '--radius': '12px', '--radius-pill': '999px', '--shadow': '0 1px 2px rgba(36,40,33,.05), 0 8px 24px rgba(36,40,33,.06)', '--serif': 'Georgia, "Times New Roman", serif', '--sans': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', '--topbar-h': '64px', '--nav-h': '64px', '--safe-b': 'env(safe-area-inset-bottom, 0px)', '--safe-t': 'env(safe-area-inset-top, 0px)', '--cream': 'var(--paper)', '--cream-2': 'var(--paper-2)', '--green': 'var(--accent)', '--green-2': 'var(--accent-2)', '--sage': '#b9c8bb', '--sage-2': 'var(--accent-bg)' }, 'D-UI-2 / § 3.1 : les 34 autres déclarations de :root gardent leur valeur de la refonte, une à une (« les 25 autres : inchangés » ; aucun jeton neuf, aucun retiré)');
+    eq([jetons['--action'], jetons['--action-2'], jetons['--action-bg'], jetons['--tap']], ['#454e3b', '#363d2e', '#ebece4', 'rgba(69,78,59,.15)'], 'D-UI-2 amendé (fidélité aux maquettes, 28 octobre) : --action, --action-2, --action-bg et --tap sont l’olive sombre échantillonnée sur les maquettes (§ 3.1)');
+    // Ronde 1 (M11) : « les 25 autres : inchangés » (§ 3.1) — theme.js n’en épingle que sept par valeur ; les 35 autres déclarations de :root (34, puis --radius-btn des maquettes) le sont ici, une à une, dans l'ordre.
+    eq(Object.fromEntries(Object.entries(jetons).filter(([k]) => !['--action', '--action-2', '--action-bg', '--tap'].includes(k))), { '--paper': '#f8f5ef', '--paper-2': '#f1ece3', '--card': '#fffdf9', '--ink': '#242821', '--muted': '#636860', '--line': '#e4dfd5', '--field-line': '#8f8a80', '--accent': '#45604a', '--accent-2': '#55705a', '--accent-bg': '#e4ebe2', '--warn': '#8b5f10', '--warn-bg': '#fbf1dc', '--warn-line': '#ead9b3', '--danger': '#9c2f22', '--danger-bg': '#f9e4df', '--danger-line': '#e9bfb6', '--ok': '#3d6b4a', '--ok-bg': '#e2efe4', '--backdrop': 'rgba(36,40,33,.45)', '--radius': '12px', '--radius-pill': '999px', '--shadow': '0 1px 2px rgba(36,40,33,.05), 0 8px 24px rgba(36,40,33,.06)', '--serif': 'ui-serif, "New York", "Iowan Old Style", Georgia, "Times New Roman", serif', '--radius-btn': '8px', '--sans': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', '--topbar-h': '64px', '--nav-h': '64px', '--safe-b': 'env(safe-area-inset-bottom, 0px)', '--safe-t': 'env(safe-area-inset-top, 0px)', '--cream': 'var(--paper)', '--cream-2': 'var(--paper-2)', '--green': 'var(--accent)', '--green-2': 'var(--accent-2)', '--sage': '#b9c8bb', '--sage-2': 'var(--accent-bg)' }, 'D-UI-2 / § 3.1 : les 35 autres déclarations de :root, une à une (fidélité aux maquettes, 28 octobre : --serif passe aux serifs du système, New York d’abord ; --radius-btn neuf, 8 px ; le reste inchangé)');
     const c =(a, b) => Number(contraste(hex(a), hex(b)).toFixed(2));
-    eq([c('--action', '--paper'), c('--action', '--card'), c('--action', '--accent-bg'), c('--action', '--paper-2'), c('--action-2', '--paper'), c('--muted', '--action-bg'), c('--action', '--action-bg'), c('--warn', '--action-bg')], [5.55, 5.95, 4.97, 5.14, 7.72, 4.8, 5.08, 4.71], 'D-UI-2 : les huit contrastes de § 3.1, recalculés par la formule de theme.js (olive sur papier, carte, accent-bg et paper-2 ; survol sur papier ; gris, olive et ambre sur action-bg)');
+    eq([c('--action', '--paper'), c('--action', '--card'), c('--action', '--accent-bg'), c('--action', '--paper-2'), c('--action-2', '--paper'), c('--muted', '--action-bg'), c('--action', '--action-bg'), c('--warn', '--action-bg')], [8.02, 8.59, 7.18, 7.42, 10.35, 4.8, 7.34, 4.72], 'D-UI-2 amendé (olive sombre des maquettes) : les huit contrastes de § 3.1, recalculés par la formule de theme.js (olive sur papier, carte, accent-bg et paper-2 ; survol sur papier ; gris, olive et ambre sur action-bg)');
     eq([css.includes('#bc3026'), css.includes('#98231b'), css.includes('#f7e3e0'), /rgba\(188,\s*48,\s*38/.test(css)], [false, false, false, false], 'D-UI-2 : plus aucune tomate dans la feuille servie (ni #bc3026, ni #98231b, ni #f7e3e0, ni rgba(188,48,38,…))');
   });
 
@@ -49,7 +49,7 @@ export async function runCarnetTests({ eq, ok }) {
     eq([plain?.['box-shadow'], plain?.padding, plain?.['margin-bottom'], regle('section.plain > h2')?.['border-bottom'], regle('section.plain > h2')?.['padding-bottom']], ['none', '0', '1.6rem', '1px solid var(--line)', '.4rem'], 'D-UI-8 : section.plain sans ombre ni marge intérieure, 1,6 rem sous elle ; filet fin --line sous son h2, à .4 rem du texte');
     // Ronde 1 (M14) : la taille de 24 px vient aussi des attributs du svg — l'alignement et la non-compression ne tiennent qu'à la règle .icone.
     eq([regle('.icone')?.display, regle('.icone')?.['vertical-align'], regle('.icone')?.['flex-shrink'], regle('.empty .ico .icone')?.width], ['inline-block', 'middle', '0', '40px'], 'D-UI-9 : .icone en ligne, alignée au milieu du texte, jamais compressée dans une rangée flex ; 40 px dans un état vide');
-    eq([regle('h1')?.['font-size'], regle('h1.titre-fiche')?.['font-size'], R.filter((r) => r.sel === 'h1' && r.media).length, regle('h2')?.['font-size'], regle('h3')?.['font-size'], regle('header.stack h1 + p.muted')?.['font-size']], ['clamp(1.8rem, 6vw, 3.2rem)', 'clamp(1.5rem, 4.5vw, 2.6rem)', 0, '1.6rem', '1.15rem', '1.05rem'], 'D-UI-3 / § 3.2 / H-6 : UNE formule clamp() par titre, plus aucune règle h1 sous @media ; h2 1,6 rem, h3 1,15 rem, sous-titre de page 1,05 rem');
+    eq([regle('h1')?.['font-size'], regle('h1.titre-fiche')?.['font-size'], R.filter((r) => r.sel === 'h1' && r.media).length, regle('h2')?.['font-size'], regle('h3')?.['font-size'], regle('header.stack h1 + p.muted')?.['font-size']], ['clamp(2.1rem, 8.5vw, 3.2rem)', 'clamp(2.2rem, 11vw, 3.4rem)', 0, '1.6rem', '1.15rem', '1.25rem'], 'D-UI-3 / § 3.2 / H-6, amendé par la fidélité aux maquettes : UNE formule clamp() par titre (plus grands, graisse 400), plus aucune règle h1 sous @media ; h2 1,6 rem, h3 1,15 rem, sous-titre de page serif à 1,25 rem');
     eq([regle('.step-num')?.background, regle('.step-num')?.color], ['var(--paper-2)', 'var(--ink)'], '§ 3.2 : .step-num en --paper-2 / --ink (le cercle beige des maquettes)');
   });
 
@@ -100,9 +100,9 @@ export async function runCarnetTests({ eq, ok }) {
       const clamp = (min, vw, max) => Number(Math.min(max, Math.max(min, (vw / 100) * window.innerWidth)).toFixed(1));
       const tete = C.pageHeader('Bibliothèque', { subtitle: 'Tes livres, tes trouvailles, tes recettes.' });
       const fiche = C.pageHeader('The Particular Sadness of Lemon Cake', { classeTitre: 'titre-fiche' }); scene.append(tete, fiche);
-      eq([taille(tete.querySelector('h1')), taille(fiche.querySelector('h1'))], [clamp(28.8, 6, 51.2), clamp(24, 4.5, 41.6)], `D-UI-3 : h1 de page = clamp(1.8rem, 6vw, 3.2rem), h1.titre-fiche = clamp(1.5rem, 4.5vw, 2.6rem), mesurés à ${window.innerWidth} px de fenêtre (1,8 / 1,5 rem à 375 et 390 px, 2,88 / 2,16 à 768, 3,2 / 2,6 à 1512)`);
+      eq([taille(tete.querySelector('h1')), taille(fiche.querySelector('h1'))], [clamp(33.6, 8.5, 51.2), clamp(35.2, 11, 54.4)], `D-UI-3 amendé (maquettes) : h1 de page = clamp(2.1rem, 8.5vw, 3.2rem), h1.titre-fiche = clamp(2.2rem, 11vw, 3.4rem), mesurés à ${window.innerWidth} px de fenêtre`);
       const h2 = el('h2', null, 'Ingrédients'); const h3 = el('h3', null, 'Titre'); scene.append(h2, h3);
-      eq([taille(h2), taille(h3), taille(tete.querySelector('p.muted'))], [25.6, 18.4, 16.8], '§ 3.2 : h2 1,6 rem, h3 1,15 rem, sous-titre de pageHeader 1,05 rem (mesurés, racine 16 px)');
+      eq([taille(h2), taille(h3), taille(tete.querySelector('p.muted'))], [25.6, 18.4, 20], '§ 3.2 : h2 1,6 rem, h3 1,15 rem, sous-titre de pageHeader 1,25 rem (maquettes ; mesurés, racine 16 px)');
       // Les sections sont construites À LA MAIN ici : ce bloc mesure la FEUILLE (section.plain / section.card) ; la fonction sectionPlain est éprouvée au bloc « composants ».
       const sp = el('section', { class: 'plain' }, el('h2', null, 'Préparation'), el('p', null, 'x')); const sc = el('section', { class: 'card' }, el('h2', null, 'Photo du plat'), el('p', null, 'x')); const carte = el('div', { class: 'card' }, 'x'); scene.append(sp, sc, carte);
       eq([S(sp).backgroundColor, S(sp).boxShadow, S(sp).borderTopWidth, S(sp).paddingLeft, S(sp).marginBottom, S(sp).scrollMarginTop], ['rgba(0, 0, 0, 0)', 'none', '0px', '0px', '25.6px', '72px'], 'D-UI-8 : section.plain sur le papier (ni fond, ni ombre, ni bord, ni marge intérieure), 1,6 rem sous elle, même scroll-margin que .card (mesurés)');
@@ -161,7 +161,7 @@ export async function runCarnetTests({ eq, ok }) {
     const app = sansCommentaires(await lire('../src/app.js'));
     const nav = [...app.matchAll(/\{ href: '([^']+)', label: '([^']+)', ico: '([^']+)'/g)].map((m) => m.slice(1, 4));
     const corpsNavLinks = /\nfunction navLinks\([^)]*\) \{\n([\s\S]*?)\n\}\n/.exec(app)?.[1] || '';
-    eq([nav, app.includes("from './ui/icones.js'"), corpsNavLinks.includes('icone(n.ico)'), /,\s*n\.ico\s*\)/.test(corpsNavLinks), /el\('a', \{ href: '#\/settings'[^}]*\}, el\('span', \{ class: 'ico', 'aria-hidden': 'true' \}, icone\('roue'\)\)/.test(app), app.includes('Mes livres'), /ico: '[^a-z]/.test(app)], [[['/', 'Aujourd’hui', 'soleil'], ['/library', 'Bibliothèque', 'bibliotheque'], ['/meals', 'Ma semaine', 'calendrier'], ['/kitchen', 'Ma cuisine', 'toque'], ['/add', 'Ajouter', 'plus']], true, true, false, true, false, false], 'D-UI-4 / D-UI-9 : NAV = cinq entrées, libellé « Bibliothèque », des noms d’icônes du jeu (plus un émoji) ; navLinks rend icone(n.ico), jamais le nom brut ; la roue du panneau latéral est icone(\'roue\') dans le lien #/settings (source relu sans commentaires : app.js est hors suite, § 11)');
+    eq([nav, app.includes("from './ui/icones.js'"), corpsNavLinks.includes('icone(n.ico)'), /,\s*n\.ico\s*\)/.test(corpsNavLinks), /el\('a', \{ href: '#\/settings'[^}]*\}, el\('span', \{ class: 'ico', 'aria-hidden': 'true' \}, icone\('roue'\)\)/.test(app), app.includes('Mes livres'), /ico: '[^a-z]/.test(app)], [[['/', 'Aujourd’hui', 'soleil'], ['/library', 'Bibliothèque', 'bibliotheque'], ['/meals', 'Ma semaine', 'calendrier'], ['/kitchen', 'Ma cuisine', 'toque'], ['/add', 'Ajouter', 'plus']], true, true, false, true, false, false], 'D-UI-4 / D-UI-9 : NAV = cinq entrées, libellé « Bibliothèque », des noms d’icônes du jeu (plus un émoji) ; navLinks rend icone(n.ico), jamais le nom brut ; la roue est icone(\'roue\') dans le lien #/settings — de la barre haute depuis la fidélité aux maquettes : le panneau latéral est devenu une rangée d’onglets (source relu sans commentaires : app.js est hors suite, § 11)');
     // Vague finale (constat 15) : le segment « Mes livres » de la RECHERCHE (une portée, pas l'écran) est lu dans son RENDU — renderSearch en mode « books », sans
     // base, sans réseau (le mode web seul lit une session) —, plus dans le source ; l'état vide rendu porte l'icône « loupe » (R-UI-P1 : la ligne de UI-2,
     // '🔍', ferait lever icone() et planter l'écran). Les retours « ← Bibliothèque » (recipe.js, book.js) et « Aller à la bibliothèque. » (accueil-livre.js)
@@ -307,28 +307,29 @@ export async function runCarnetTests({ eq, ok }) {
           [35, 40, null, null, null, 5, null, null, 15],
           'dureeTotale : total_minutes d’abord, sinon prep + cook quand les DEUX sont connus (T3-R1 : une seule partie ne fait pas une durée ; une cuisson de 0 est connue), sinon null ; une création IA n’a pas de durée (C-6) ; une valeur non numérique vaut null');
         eq([source(web), source(duLivre), source(sansDuree), source(signet), source(ia), source(main)],
-          ['Du web · recettes.test · 35 min', 'De mon livre · Le livre · 40 min', 'De mon livre · Le livre', 'Du web · a.test', 'Créée avec l’IA', 'Recette de famille · 1 h 30'],
-          'ligne de source : « Du web · {hôte} » (hôte RECALCULÉ) ou « De mon livre · {titre} », puis « · {durée} » en UN nombre (formatMinutes) seulement quand une durée existe ; un signet non lu n’a pas de durée ; une fiche IA ou personnelle garde sa provenance');
+          ['Du web · 35 min', 'De mon livre · 40 min', 'De mon livre', 'Du web', 'Créée avec l’IA', 'Recette de famille · 1 h 30'],
+          'ligne de source (fidélité aux maquettes, 28 octobre) : « Du web » ou « De mon livre » — ni hôte ni titre de livre sur la carte —, puis « · {durée} » en UN nombre (formatMinutes) seulement quand une durée existe ; un signet non lu n’a pas de durée ; une fiche IA ou personnelle garde sa provenance');
         eq(K.ligneSource(docDe(fiche('rc_x', { source_url: 'pas une adresse' }))), 'Adresse non reconnue', 'ligneSource : une adresse illisible le dit (lienSignet), jamais le source_label stocké (S7)');
         // Ajout de l’implémenteur (T2, survivant M7 : source_label lue avant l’hôte) : une source_label stockée ne remplace ni l’hôte recalculé ni le livre.
         eq([K.ligneSource(docDe(fiche('rc_y', { source_url: 'https://vrai.test/p', source_label: 'Faux site' }))), K.ligneSource(docDe(fiche('rc_z', { edition_id: 'e1', source_label: 'Faux livre' }), { book: livre, edition: ed }))],
-          ['Du web · vrai.test', 'De mon livre · Le livre'], 'ligneSource : une source_label stockée ne prend jamais la place de l’hôte recalculé ni du livre (S7) — elle ne vaut que pour une fiche sans adresse ni livre');
+          ['Du web', 'De mon livre'], 'ligneSource : une source_label stockée ne s’affiche jamais (S7) : la carte dit « Du web » ou « De mon livre » — elle ne vaut que pour une fiche sans adresse ni livre');
         // Ronde 1 (C-2) : une fiche créée avec l'assistant le dit d'abord — une adresse ou un livre portés par une fiche reçue ou restaurée ne prennent pas sa place.
         eq([K.ligneSource(docDe(fiche('rc_ia1', { origine: 'ia', source_url: 'https://evil.test/p' }))), K.ligneSource(docDe(fiche('rc_ia2', { origine: 'ia', edition_id: 'e1' }), { book: livre, edition: ed }))],
           ['Créée avec l’IA', 'Créée avec l’IA'], 'ligneSource : une fiche IA qui porte une adresse ou un livre dit « Créée avec l’IA » (C-2, comme provenanceText), jamais l’hôte ni le livre');
         // Ronde 1 : seule une durée STRICTEMENT positive compte (« PT0S » d'un JSON-LD, une valeur négative tapée dans l'éditeur).
         eq([K.dureeTotale(version('x', { total_minutes: 0 })), K.dureeTotale(version('x', { total_minutes: 0, prep_minutes: 10 })), K.dureeTotale(version('x', { prep_minutes: -30, cook_minutes: 10 })), K.dureeTotale(version('x', { prep_minutes: -30, cook_minutes: 0 })),
           K.ligneSource(docDe(fiche('rc_0', { source_url: 'https://site.test/r' }), { version: version('rc_0', { total_minutes: 0 }) }))],
-          [null, null, null, null, 'Du web · site.test'], 'dureeTotale : un total nul ou négatif vaut null (il retombe sur prep + cook) ; une partie négative est inconnue, et une seule partie connue ne fait pas une durée (T3-R1) ; une somme nulle vaut null ; la carte ne dit jamais « · 0 min » ni une durée négative');
+          [null, null, null, null, 'Du web'], 'dureeTotale : un total nul ou négatif vaut null (il retombe sur prep + cook) ; une partie négative est inconnue, et une seule partie connue ne fait pas une durée (T3-R1) ; une somme nulle vaut null ; la carte ne dit jamais « · 0 min » ni une durée négative');
         eq([K.dureeTotale(version('x', { total_minutes: 0, prep_minutes: 10, cook_minutes: 0 })), K.dureeTotale(version('x', { total_minutes: -5, prep_minutes: 10, cook_minutes: 20 }))], [10, 30],
           'dureeTotale : un total nul ou négatif retombe sur prep + cook quand les deux sont connus (10 + 0, 10 + 20)');
         const badges = (d) => [...K.recipeCard(d, { photoEnTete: true }).querySelectorAll('.carte-plat-corps > .carte-plat-badges > *')].map((b) => b.textContent);
         // Le badge de disponibilité est celui d'availabilityBadge, lu par le composant lui-même (« Recette disponible » aujourd'hui, « Disponible » dès T5, D-UI-10) :
         // ce test tient la CARTE (ordre et présence des badges), jamais le libellé — qui est à T5 (rév. 2).
-        const dispo = K.availabilityBadge(fiche('rc_f')).textContent;
-        eq([badges(signet), badges(docDe(fiche('rc_f', { favorite: true }), { cooked: 3 })), badges(web), badges(ia)],
-          [['Lien web'], [dispo, '★ Favori', 'Cuisinée 3×'], [dispo], [dispo, 'Créée avec l’IA · non testée']],
-          'carte-plat : les badges restent dans la carte, sous la ligne de source — « Lien web » pour un signet, le badge de disponibilité (texte d’availabilityBadge, court dès T5), ★ Favori, « Cuisinée {n}× », l’étiquette IA');
+        // Fidélité aux maquettes (28 octobre) : l'état ORDINAIRE (« Disponible ») n'est plus montré sur la carte ; un état qui dit quelque chose (« Partielle ») reste.
+        const partielle = K.availabilityBadge(fiche('rc_p', { availability: 'partial' })).textContent;
+        eq([badges(signet), badges(docDe(fiche('rc_f', { favorite: true }), { cooked: 3 })), badges(web), badges(ia), badges(docDe(fiche('rc_p', { availability: 'partial' })))],
+          [['Lien web'], ['★ Favori', 'Cuisinée 3×'], [], ['Créée avec l’IA · non testée'], [partielle]],
+          'carte-plat : les badges restent dans la carte, sous la ligne de source — « Lien web » pour un signet, le badge de disponibilité SEULEMENT quand il dit quelque chose (« Partielle » ; « Disponible », l’état ordinaire, n’est plus montré : maquettes), ★ Favori, « Cuisinée {n}× », l’étiquette IA');
       });
 
       await run('styles.css : .grille-plats 1 colonne à 359 px, 2 dès 360, 2 à 899, 3 dès 900 et à 950 (D-UI-4, bornes exactes ; D-15) ; carte sans photo ≥ 7 rem sur --paper-2 ; image 4:3 ; h3 serif 1,3 rem (mesurés dans un cadre)', async () => {
@@ -365,9 +366,9 @@ export async function runCarnetTests({ eq, ok }) {
             const corps = g.querySelector('.carte-plat.sans-photo > .carte-plat-corps'); const cc = w.getComputedStyle(corps);
             const h3 = w.getComputedStyle(g.querySelector('.carte-plat h3'));
             const cartes = [...g.children].map((c) => Math.round(c.getBoundingClientRect().height));
-            eq([largeur, decodee, img.naturalWidth, img.naturalHeight, cs.display, pistes.length, cs.columnGap, cs.alignItems, Math.abs(r.width / r.height - 4 / 3) < 0.02, w.getComputedStyle(img).objectFit, w.getComputedStyle(img).borderRadius, cc.minHeight, cc.backgroundColor, cc.borderRadius, h3.fontSize, /georgia/i.test(h3.fontFamily), cartes.slice(0, colonnes).every((h) => h === cartes[0])],
-              [largeur, true, 48, 64, 'grid', colonnes, '19.2px', 'stretch', true, 'cover', '12px', '112px', 'rgb(241, 236, 227)', '12px', '20.8px', true, true],
-              `styles.css à ${largeur} px : .grille-plats = grid à ${colonnes} colonnes, gap 1.2rem, align-items stretch ; l’image 4:3 (une photo PORTRAIT 48 × 64 décodée : le ratio vient de la règle), recadrée, rayon 12 ; le bloc sans photo ≥ 7 rem (112 px) sur --paper-2 (#f1ece3), rayon 12 ; h3 serif 1,3 rem ; les cartes d’une même rangée ont la même hauteur (mesurés)`);
+            eq([largeur, decodee, img.naturalWidth, img.naturalHeight, cs.display, pistes.length, cs.columnGap, cs.alignItems, Math.abs(r.width / r.height - 8 / 5) < 0.02, w.getComputedStyle(img).objectFit, w.getComputedStyle(img).borderRadius, cc.minHeight, cc.backgroundColor, cc.borderRadius, h3.fontSize, /georgia/i.test(h3.fontFamily), cartes.slice(0, colonnes).every((h) => h === cartes[0])],
+              [largeur, true, 48, 64, 'grid', colonnes, '19.2px', 'stretch', true, 'cover', '12px', '112px', 'rgb(241, 236, 227)', '12px', '21.6px', true, true],
+              `styles.css à ${largeur} px : .grille-plats = grid à ${colonnes} colonnes, gap 1.2rem, align-items stretch ; l’image 8:5 (maquettes ; une photo PORTRAIT 48 × 64 décodée : le ratio vient de la règle), recadrée, rayon 12 ; le bloc sans photo ≥ 7 rem (112 px) sur --paper-2 (#f1ece3), rayon 12 ; h3 serif 1,35 rem ; les cartes d’une même rangée ont la même hauteur (mesurés)`);
           } finally { f.remove(); }
         }
         eq(fautes, [], 'cadres de mesure : chaque iframe a la largeur demandée (359, 360, 899, 900, 950)');
@@ -395,14 +396,14 @@ export async function runCarnetTests({ eq, ok }) {
           'renderLibrary({}) : « Bibliothèque », son sous-titre, trois segments, Recettes ACTIF par défaut, « Ajouter une recette » → #/add en tête, la grille triée par dernière modification (E, B, C, A) ; la référence D est DEHORS, le signet non lu E DEDANS (B-I-5) ; aucun retour « ← … » sur Recettes');
         const carteE = n.querySelector('.grille-plats > a.carte-plat[href="#/recipes/rE"]');
         eq([carteE?.className, texte(carteE?.querySelector('.carte-plat-source')), [...(carteE?.querySelectorAll('.carte-plat-badges > *') || [])].map((b) => b.textContent), texte(n.querySelector('a.carte-plat[href="#/recipes/rB"] .carte-plat-source')), texte(n.querySelector('a.carte-plat[href="#/recipes/rC"] .carte-plat-source'))],
-          ['item-link carte-plat sans-photo', 'Du web · web.test', ['Lien web'], 'Du web · web.test · 35 min', 'Du web · web.test'],
-          'un signet non lu : carte sans photo, « Du web · {hôte} » sans durée, badge « Lien web » ; une recette web lue porte sa durée ; C (un livre ET une adresse) dit le web, l’adresse avant le livre');
+          ['item-link carte-plat sans-photo', 'Du web', ['Lien web'], 'Du web · 35 min', 'Du web'],
+          'un signet non lu : carte sans photo, « Du web » sans durée (maquettes : plus d’hôte sur la carte), badge « Lien web » ; une recette web lue porte sa durée ; C (un livre ET une adresse) dit le web, l’adresse avant le livre');
         puce(n, 'De mes livres').click(); await attendre(() => titres(n).length === 2, 'puce « De mes livres »'); geste();
         eq([titres(n), pressees(n)], [['Plat rC', 'Plat rA'], [['Toutes', 'false'], ['De mes livres', 'true'], ['Du web', 'false']]], '« De mes livres » = edition_id non nul (C puis A) ; une seule puce pressée (aria-pressed)');
         puce(n, 'Du web').click(); await attendre(() => titres(n).length === 3, 'puce « Du web »'); geste();
         eq(titres(n), ['Plat rE', 'Plat rB', 'Plat rC'], '« Du web » = source_url non nul (E, B, C) : une fiche qui a les deux est dans les deux (B-M-7) — un filtre de DONNÉES, jamais un appel');
         puce(n, 'Toutes').click(); await attendre(() => titres(n).length === 4, 'puce « Toutes »'); geste();
-        const champ = n.querySelector('.stack input[type="search"]');
+        const champ = n.querySelector('.filtre-recettes input[type="search"]');
         // Après chaque frappe, l'attente borne le redessin (asynchrone : il relit les lignes files manquantes) ; au-delà, les titres du moment sont rendus tels quels (le diff se lit dans eq).
         const taper = async (q, attendu) => { champ.value = q; champ.dispatchEvent(new Event('input', { bubbles: true })); try { await attendre(() => JSON.stringify(titres(n)) === JSON.stringify(attendu), `filtre « ${q} »`); } catch { /* lu tel quel */ } geste(); return titres(n); };
         eq([champ.getAttribute('placeholder'), champ.getAttribute('aria-label'), await taper('rb', ['Plat rB']), await taper('Pomme', ['Plat rB', 'Plat rC', 'Plat rA']), await taper('le livre', ['Plat rC', 'Plat rA']), await taper('', ['Plat rE', 'Plat rB', 'Plat rC', 'Plat rA'])],
@@ -512,7 +513,7 @@ export async function runCarnetTests({ eq, ok }) {
         const R3 = fiche('rR3', { display_title: 'Gâteau renommé' }); const R4 = fiche('rR4', { updated_at: '2026-10-24T00:00:00.000Z' });
         const tri = await renderLibrary({}, {}, ctxDe([R2, R3, R1, R4]), fauxMatchMedia(false));
         const triInitial = titres(tri);
-        const champTri = tri.querySelector('.stack input[type="search"]'); champTri.value = 'Renommé'; champTri.dispatchEvent(new Event('input', { bubbles: true }));
+        const champTri = tri.querySelector('.filtre-recettes input[type="search"]'); champTri.value = 'Renommé'; champTri.dispatchEvent(new Event('input', { bubbles: true }));
         try { await attendre(() => titres(tri).length === 1, 'filtre « Renommé »'); } catch { /* lu tel quel */ }
         eq([triInitial, titres(tri)], [['Plat rR1', 'Plat rR4', 'Gâteau renommé', 'Plat rR2'], ['Gâteau renommé']],
           'tri de la grille : updated_at, sinon created_at (R1, créée le 25, d’abord), sans horodatage en dernier (R2) ; le filtre trouve un titre renommé (display_title), casse ignorée');
@@ -552,7 +553,7 @@ export async function runCarnetTests({ eq, ok }) {
           eq([lectures.length, new Set(lectures).size, cartes()[69]?.querySelector('h3')?.textContent, voirPlus(), srcs().every((u) => typeof u === 'string' && u.startsWith('blob:'))], [70, 70, 'Photo 00', null, true],
             '« Voir plus » rend les 10 suivantes et en lit EXACTEMENT 10 de plus (70 au total, aucune relecture des 60 premières) ; plus rien à montrer : le bouton disparaît');
           // Ronde 1 : une frappe REMET la grille à 60 cartes (etat.limite revient à CARTES_PAR_PAGE) — « photo » garde les 70 : sans la remise, 70 resteraient.
-          const champ = n.querySelector('.stack input[type="search"]');
+          const champ = n.querySelector('.filtre-recettes input[type="search"]');
           champ.value = 'photo'; champ.dispatchEvent(new Event('input', { bubbles: true }));
           try { await attendre(() => cartes().length === 60, 'frappe « photo » après « Voir plus »'); } catch { /* lu tel quel */ }
           eq([cartes().length, voirPlus()?.className, lectures.length], [60, 'btn', 70], 'une frappe après « Voir plus » remet la grille à 60 cartes (« Voir plus » revient) et ne relit rien');
@@ -581,7 +582,7 @@ export async function runCarnetTests({ eq, ok }) {
         try {
           const n = await renderLibrary({}, {}, ctxDe(recettes), fauxMatchMedia(false));
           const titres = () => [...n.querySelectorAll('.grille-plats > a.carte-plat h3')].map((h) => h.textContent);
-          const champ = n.querySelector('.stack input[type="search"]');
+          const champ = n.querySelector('.filtre-recettes input[type="search"]');
           champ.value = 'photo 0'; champ.dispatchEvent(new Event('input', { bubbles: true })); // Photo 00 à 09 : pas encore lues — une lecture part
           champ.value = 'photo 69'; champ.dispatchEvent(new Event('input', { bubbles: true })); // déjà lue : aucune lecture
           await Promise.allSettled(enVol); for (let i = 0; i < 5; i += 1) await tick();
@@ -601,7 +602,7 @@ export async function runCarnetTests({ eq, ok }) {
         console.error = (...a) => { erreurs.push(String(a[0])); };
         db.getMany = (store) => (store === 'files' ? Promise.reject(new Error('base fermée (test)')) : Promise.reject(new Error('magasin inattendu : ' + store)));
         try {
-          const champ = n.querySelector('.stack input[type="search"]');
+          const champ = n.querySelector('.filtre-recettes input[type="search"]');
           champ.value = 'photo 0'; champ.dispatchEvent(new Event('input', { bubbles: true })); // Photo 00 à 09 : pas encore lues — la lecture est refusée
           try { await attendre(() => erreurs.length > 0 || rejets.length > 0, 'la lecture refusée est dite'); } catch { /* lu tel quel */ }
           await new Promise((r) => setTimeout(r, 50));
@@ -612,20 +613,20 @@ export async function runCarnetTests({ eq, ok }) {
       await run('en.js et filets i18n : les textes neufs de la tâche 2 (§ 5), l’interface anglaise', () => withRepo(async () => {
         const CLES = { 'Tes livres, tes trouvailles, tes recettes.': 'Your books, your finds, your recipes.', 'Recettes': 'Recipes', 'Ajouter une recette': 'Add a recipe', 'Une recette, un ingrédient…': 'A recipe, an ingredient…',
           'Toutes': 'All', 'De mes livres': 'From my books', 'Du web': 'From the web', 'Recettes de mes livres à importer': 'Recipes from my books to import', 'Voir plus': 'Show more', 'À importer': 'To import',
-          'Du web · {h}': 'From the web · {h}', 'De mon livre · {t}': 'From my book · {t}', 'Aucune recette pour l’instant.': 'No recipes yet.',
+          'De mon livre': 'From my book', 'Aucune recette pour l’instant.': 'No recipes yet.',
           'Rien à importer pour l’instant.': 'Nothing to import for now.', // ronde 1 (D-T2-c) : l'état vide de ?tab=a-importer
           'Aucune recette ne correspond.': 'No recipes match.' }; // vague finale (constat 4) : un filtre ou une puce qui ne retient rien
         eq(Object.entries(CLES).filter(([k, v]) => EN[k] !== v).map(([k]) => k), [], 'en.js : chaque texte neuf de la tâche 2 a sa traduction exacte (§ 5)');
         const { CHAINES_NEUVES_AILLEURS } = await import('./ajouter.js');
-        const deComponents = ['Du web · {h}', 'De mon livre · {t}'];
+        const deComponents = ['De mon livre'];
         eq([Object.keys(CLES).filter((k) => !deComponents.includes(k) && !(CHAINES_NEUVES_AILLEURS['../src/ui/library.js'] || []).includes(k)), deComponents.filter((k) => !(CHAINES_NEUVES_AILLEURS['../src/ui/components.js'] || []).includes(k)), (CHAINES_NEUVES_AILLEURS['../src/ui/library.js'] || []).includes('Bibliothèque')],
           [[], [], true], 'filet i18n (tests/ajouter.js) : les chaînes neuves de library.js (« Bibliothèque » comprise) et de components.js sont déclarées dans CHAINES_NEUVES_AILLEURS');
         setUiLocale('en');
         try {
           // rx plus récente que ry : l'ordre attendu vient du tri, jamais de la stabilité d'Array.prototype.sort sur des dates égales (rév. 2).
           const en = await renderLibrary({}, {}, ctxDe([fiche('rx', { source_url: 'https://web.test/x', updated_at: '2026-10-24T00:00:00.000Z' }), fiche('ry', { edition_id: 'e1' }), fiche('rz', { edition_id: 'e1', availability: 'reference_only', printed_page: 3 })], { versions: [version('rx', { total_minutes: 35 }), version('ry', { prep_minutes: 5, cook_minutes: 5 })], editions: [ed], books: [livre] }), fauxMatchMedia(false));
-          eq([texte(en.querySelector('header h1')), texte(en.querySelector('header p.muted')), [...en.querySelectorAll('.segmented button')].map((b) => b.textContent), [...en.querySelectorAll('button.puce')].map((b) => b.textContent), [...en.querySelectorAll('.carte-plat-source')].map(texte), texte(en.querySelector('a[data-role="a-importer"]')), en.querySelector('.stack input[type="search"]')?.getAttribute('placeholder') ?? null],
-            ['Library', 'Your books, your finds, your recipes.', ['Recipes', 'Books', 'Dishes'], ['All', 'From my books', 'From the web'], ['From the web · web.test · 35 min', 'From my book · Le livre · 10 min'], 'Recipes from my books to import →', 'A recipe, an ingredient…'],
+          eq([texte(en.querySelector('header h1')), texte(en.querySelector('header p.muted')), [...en.querySelectorAll('.segmented button')].map((b) => b.textContent), [...en.querySelectorAll('button.puce')].map((b) => b.textContent), [...en.querySelectorAll('.carte-plat-source')].map(texte), texte(en.querySelector('a[data-role="a-importer"]')), en.querySelector('.filtre-recettes input[type="search"]')?.getAttribute('placeholder') ?? null],
+            ['Library', 'Your books, your finds, your recipes.', ['Recipes', 'Books', 'Dishes'], ['All', 'From my books', 'From the web'], ['From the web · 35 min', 'From my book · 10 min'], 'Recipes from my books to import →', 'A recipe, an ingredient…'],
             'en : en-tête, segments, puces, lignes de source, pied et champ rendus par t() (la durée reste formatMinutes)');
           const enAI = await renderLibrary({}, { tab: 'a-importer' }, ctxDe([fiche('rz', { edition_id: 'e1', availability: 'reference_only', printed_page: 3 })], { editions: [ed], books: [livre] }), fauxMatchMedia(false));
           eq([texte(enAI.querySelector('header > a')), texte(enAI.querySelector('section.plain > h2')), texte(enAI.querySelector('section.plain li > a'))], ['← Recipes', 'Recipes from my books to import', 'Plat rz · p. 3 · To import'], 'en : la liste « à importer » (retour, titre, ligne) rendue par t()');
@@ -695,8 +696,8 @@ export async function runCarnetTests({ eq, ok }) {
       const tete = q(pL, '[data-role="fiche-tete"]'); const details = q(pL, '[data-role="autres-gestes"]'); const corps = q(pL, '.recipe-body');
       eq([q(pL, 'header h1')?.classList.contains('titre-fiche'), q(pL, 'header a.muted')?.textContent, q(pL, 'header a.muted')?.getAttribute('href')], [true, '← Bibliothèque', '#/library'], 'fiche T3 : h1.titre-fiche (classeTitre) ; retour « ← Bibliothèque » → #/library');
       eq([tete?.classList.contains('two-col'), [...(tete?.children ?? [])].map((c) => c.dataset.role)], [true, ['fiche-etat', 'emplacement-photo-plat', 'fiche-gestes']], 'fiche T3 : .fiche-tete.two-col porte, dans cet ordre, l’état, l’emplacement de la photo, les gestes (en étroit, la photo passe avant les repères)');
-      eq([q(tete, '[data-role="emplacement-photo-plat"]')?.classList.contains('fiche-photo'), !!q(tete, '[data-role="fiche-etat"] .badge'), avant(q(pL, 'header'), tete), avant(tete, details), avant(details, corps), details?.tagName, details?.classList.contains('card')],
-        [true, true, true, true, true, 'DETAILS', true], 'fiche T3 : la photo porte .fiche-photo ; les badges sont dans l’état ; header → .fiche-tete → details.card → .recipe-body');
+      eq([q(tete, '[data-role="emplacement-photo-plat"]')?.classList.contains('fiche-photo'), !!q(tete, '[data-role="fiche-etat"] .badge'), q(tete, '[data-role="fiche-etat"] > header h1.titre-fiche') !== null, avant(tete, details), avant(details, corps), details?.tagName, details?.classList.contains('card')],
+        [true, false, true, true, true, 'DETAILS', false], 'fiche T3 (fidélité aux maquettes, 28 octobre) : la photo porte .fiche-photo ; une fiche ordinaire (disponible, originale) ne montre aucun badge d’état ; l’en-tête (le titre) vit dans la colonne de l’état ; .fiche-tete → details (entre deux filets, plus une carte) → .recipe-body');
       const zone = [...pL.querySelectorAll('section.card')].find((s) => titreSection(s) === 'Photo du plat');
       const original = sectionPlain(pL, 'Original'); const versionsSec = sectionPlain(pL, 'Versions');
       const exportRow = [...pL.querySelectorAll('button')].find((b) => b.textContent === 'Exporter JSON-LD')?.closest('.row') ?? null;
@@ -706,7 +707,7 @@ export async function runCarnetTests({ eq, ok }) {
       // --- Large : details ouvert, onglets cachés, les deux sections visibles
       const ongletsL = q(corps, '[data-role="onglets-corps"]');
       eq([details.open, details.querySelector('summary')?.textContent, ongletsL?.hidden, ongletsL?.classList.contains('segmented'), textes(ongletsL, 'button'), q(corps, '[data-role="section-ingredients"]').hidden, q(corps, '[data-role="section-preparation"]').hidden],
-        [true, 'Portions, versions et autres gestes', true, true, ['Ingrédients', 'Préparation'], false, false], 'fiche T3 ≥ 760 px : details OUVERT, segmented caché, Ingrédients et Préparation toutes deux visibles');
+        [false, 'Portions, versions et autres gestes', true, true, ['Ingrédients', 'Préparation'], false, false], 'fiche T3 ≥ 760 px : details REPLIÉ (fidélité aux maquettes : replié à toutes les largeurs), segmented caché, Ingrédients et Préparation toutes deux visibles');
       // --- Autres gestes : TOUT l'ancien contenu de controls et de la rangée d'actions, sauf « Commencer à cuisiner » et « Corriger » (qui y reste aussi) ; pas l'Export
       const boutonsDetails = textes(details, 'button, a');
       eq(['Créer ma version', 'Corriger', '−', '+', 'Avec quoi on mange ça ?', 'Ajouter à mon repas', 'Liste d’épicerie', 'Rattacher à un plat', 'Original', 'Métrique', 'US', 'FR', 'EN'].filter((x) => !boutonsDetails.includes(x)), [], 'fiche T3 : « autres gestes » porte les anciens boutons de controls (versions, portions, unités, langue) ET de la rangée d’actions');
@@ -755,7 +756,7 @@ export async function runCarnetTests({ eq, ok }) {
       eq([q(detailsE, '#servings-val')?.textContent, ing() !== ingAvant, ing().hidden, prep().hidden, actif(), location.hash === hashAvant], ['5', true, true, false, ['Préparation'], true], 'fiche T3 : après un « + » (drawBody), les sections sont neuves mais le choix « Préparation » est gardé (mémorisé dans l’instance, jamais dans l’adresse)');
       // change du matchMedia : large → les deux visibles, onglets cachés, details ouvert ; retour étroit → le choix tient
       mmE.basculer(true);
-      eq([onglets().hidden, ing().hidden, prep().hidden, detailsE.open, ing() !== null && ing() === q(corpsE, '[data-role="section-ingredients"]')], [true, false, false, true, true], 'fiche T3 : change → large : segmented caché, les deux sections visibles, details ouvert (écouté sur change, sans redessin)');
+      eq([onglets().hidden, ing().hidden, prep().hidden, detailsE.open, ing() !== null && ing() === q(corpsE, '[data-role="section-ingredients"]')], [true, false, false, false, true], 'fiche T3 : change → large : segmented caché, les deux sections visibles, details toujours replié (maquettes ; écouté sur change, sans redessin)');
       mmE.basculer(false);
       eq([onglets().hidden, ing().hidden, prep().hidden, detailsE.open, actif()], [false, true, false, false, ['Préparation']], 'fiche T3 : change → étroit : segmented visible, Préparation (le choix) visible, Ingrédients cachée, details fermé');
       // L'abonné est retiré quand la fiche a quitté le document (pas de fuite à chaque visite)
@@ -776,15 +777,15 @@ export async function runCarnetTests({ eq, ok }) {
       for (let i = 0; i < 3; i += 1) { scene.replaceChildren(); derniere = await monter('rc_t3', mmV); }
       const troisMontees = mmV.abonnes.size;
       mmV.basculer(true);
-      eq([nonMontee, montee, quittee, troisMontees, mmV.abonnes.size, q(derniere, '[data-role="autres-gestes"]')?.open], [0, 1, 0, 1, 1, true],
+      eq([nonMontee, montee, quittee, troisMontees, mmV.abonnes.size, q(derniere, '[data-role="onglets-corps"]')?.hidden], [0, 1, 0, 1, 1, true],
         'fiche T3 : un rendu jamais monté ne s’abonne pas ; une fiche montée puis quittée sans notification est retirée au change suivant ; trois fiches montées tour à tour sans change → UN abonné (le montage retire celui de la fiche précédente) ; la fiche montée suit le change');
       const mmM = fauxMatchMedia(true);
       const pM = await renderRecipe({ id: 'rc_t3' }, {}, await ctxPour(), { matchMedia: mmM.matchMedia });
-      const ouvertAuRendu = q(pM, '[data-role="autres-gestes"]')?.open;
+      const ongletsCachesAuRendu = q(pM, '[data-role="onglets-corps"]')?.hidden; // large au rendu : onglets cachés (le panneau des autres gestes, lui, reste replié : maquettes)
       mmM.basculer(false); // un change ENTRE le rendu et le montage
       scene.replaceChildren(pM); await macro();
-      eq([ouvertAuRendu, q(pM, '[data-role="autres-gestes"]')?.open, q(pM, '[data-role="onglets-corps"]')?.hidden, mmM.abonnes.size], [true, false, false, 1],
-        'fiche T3 : un change reçu entre le rendu et le montage n’est pas perdu — l’abonnement, posé au montage, relit la largeur (details replié, onglets visibles) ; un abonné');
+      eq([ongletsCachesAuRendu, q(pM, '[data-role="autres-gestes"]')?.open, q(pM, '[data-role="onglets-corps"]')?.hidden, mmM.abonnes.size], [true, false, false, 1],
+        'fiche T3 : un change reçu entre le rendu et le montage n’est pas perdu — l’abonnement, posé au montage, relit la largeur (onglets cachés au rendu large, puis visibles ; details replié) ; un abonné');
       // Le défaut de production (app.js n'injecte rien) : window.matchMedia appelé lié ; ses abonnements `change` comptés par un espion posé le temps de ces rendus.
       const vraiMM = window.matchMedia; let actifs = 0; let leve = null;
       window.matchMedia = function (requete) {
@@ -843,14 +844,14 @@ export async function runCarnetTests({ eq, ok }) {
       await mettre(fiche('rc_lu'));
       await versions(version('rc_lu', { provenance: { source_page_ids: [], generated_by: 'ai', model: null, edition_id: null, convention_snapshot: null, import_id: 'imp_lu', lu_le: DATE, source_url: 'https://site.test/lu', url_finale: 'https://site.test/lu', source_kind: 'jsonld', site: 'Le site' } }));
       const pLu = await renderRecipe({ id: 'rc_lu' }, {}, await ctxPour(), { matchMedia: fauxMatchMedia(true).matchMedia });
-      eq([[...(q(pLu, '[data-role="fiche-etat"]')?.children ?? [])].map((c) => c.dataset.role ?? c.className), q(pLu, '[data-role="fiche-etat"]')?.firstElementChild?.querySelector('.badge') !== null],
-        [['row', 'bandeau-web', 'bandeau-lecture'], true], 'fiche T3 : le bandeau web puis le bandeau de lecture vivent dans l’état de l’en-tête (.fiche-etat), après la rangée des badges (colonne de gauche, D-UI-6)');
+      eq([[...(q(pLu, '[data-role="fiche-etat"]')?.children ?? [])].map((c) => c.dataset.role ?? c.className), q(pLu, '[data-role="fiche-etat"]')?.children?.[1]?.querySelector('[data-role="etat-verification"]') !== null],
+        [['stack', 'row', 'bandeau-web', 'bandeau-lecture'], true], 'fiche T3 : le bandeau web puis le bandeau de lecture vivent dans l’état de l’en-tête (.fiche-etat), après l’en-tête (le titre : maquettes) et la rangée des états, qui porte l’état de vérification de la lecture (colonne de gauche, D-UI-6)');
       // --- Le sous-titre reste provenanceText (R-UI-P2) : « Du web · » / « De mon livre · » sont les préfixes de la CARTE-PLAT (ligneSource, T2), pas de la fiche — tests/creer-ia.js:1397 épingle « Mon livre — A. B. · page 58 » en header p.
       eq([q(pL, 'header p.muted')?.textContent, q(pH, 'header p.muted')?.textContent], ['Source personnelle', 'site.test'], 'fiche T3 : le sous-titre est provenanceText, inchangé — « Source personnelle » sans livre ni adresse, l’hôte RECALCULÉ pour une fiche web (R-UI-P2 ; § 4.2 amendé par T6)');
-      // --- La photo en tête : dans la colonne photo, sans style en ligne (la feuille rend 4:3 pleine colonne)
-      // Rév. 3 (ruling 17) : une image RÉELLE, 640 × 400 (16:10, PAS 4:3) — chargée avant la mesure du cadre, elle prouve que le 4:3 mesuré vient de la
-      // feuille (aspect-ratio) et non de l'image : un JPEG 4:3 chargé aurait masqué le mutant « aspect-ratio retirée » (Step 10).
-      const toile = new OffscreenCanvas(640, 400); toile.getContext('2d').fillRect(0, 0, 640, 400);
+      // --- La photo en tête : dans la colonne photo, sans style en ligne (la feuille rend 8:5 pleine colonne)
+      // Rév. 3 (ruling 17) : une image RÉELLE, 640 × 480 (4:3, PAS 8:5 ; fidélité aux maquettes du 28 octobre : la photo de tête passe de 4:3 à 8:5) — chargée avant la mesure du cadre, elle prouve que le 8:5 mesuré vient de la
+      // feuille (aspect-ratio) et non de l'image : un JPEG 8:5 chargé aurait masqué le mutant « aspect-ratio retirée » (Step 10).
+      const toile = new OffscreenCanvas(640, 480); toile.getContext('2d').fillRect(0, 0, 640, 480);
       const jpeg = await toile.convertToBlob({ type: 'image/jpeg' }); const sha = await sha256Hex(jpeg);
       await repo.putFile(sha, jpeg, { mime: 'image/jpeg', origin: 'device' });
       await mettre(fiche('rc_ph', { photo_sha256: sha, photo_origin: 'image' })); await versions(version('rc_ph'));
@@ -861,7 +862,7 @@ export async function runCarnetTests({ eq, ok }) {
       await repo.putFile(shaE, jpegE, { mime: 'image/jpeg', origin: 'device' });
       await mettre(fiche('rc_pe', { photo_sha256: shaE, photo_origin: 'image' })); await versions(version('rc_pe'));
       const img = q(pPh, '[data-role="photo-plat"] img');
-      eq([!!img, img?.getAttribute('src')?.startsWith('blob:'), img?.getAttribute('style'), q(pPh, '.fiche-photo')?.contains(img), avant(img, q(pPh, '[data-role="fiche-gestes"]'))], [true, true, null, true, true], 'fiche T3 : la photo de tête vit dans .fiche-photo, avant les gestes, sans style en ligne (plus de 320 px : la feuille rend 4:3 pleine colonne)');
+      eq([!!img, img?.getAttribute('src')?.startsWith('blob:'), img?.getAttribute('style'), q(pPh, '.fiche-photo')?.contains(img), avant(img, q(pPh, '[data-role="fiche-gestes"]'))], [true, true, null, true, true], 'fiche T3 : la photo de tête vit dans .fiche-photo, avant les gestes, sans style en ligne (plus de 320 px : la feuille rend 8:5 pleine colonne)');
       // --- La FEUILLE servie (D-UI-6), mesurée dans des cadres (la technique de T2 : un <iframe> about:blank par largeur, la feuille chargée DEDANS — les jetons de :root et
       // les @media y valent, ce qu'une scène de la page de tests ou une racine fantôme ne donne pas ; rév. 2). Deux fiches : rc_ph (photo) et rc_t3 (emplacement vide → une colonne).
       const cadre3 = async (largeur) => {
@@ -885,7 +886,7 @@ export async function runCarnetTests({ eq, ok }) {
           f.contentDocument.querySelector('main').append(p); // adopté par le document du cadre : SA feuille s'applique
           const tete = q(p, '[data-role="fiche-tete"]'); const ph = q(tete, '.fiche-photo'); const img = q(ph, 'img');
           // Rév. 3 (ruling 17) : l'image RÉELLE est CHARGÉE avant la mesure — le cadre est hors écran, loading="lazy" n'y décoderait jamais : on force le
-          // chargement (eager + decode) du JPEG réel posé par repo.putFile (640 × 400, le chemin de production) ; la mesure ne dépend pas d'une boîte de
+          // chargement (eager + decode) du JPEG réel posé par repo.putFile (640 × 480, le chemin de production) ; la mesure ne dépend pas d'une boîte de
           // remplacement (`chargee` l'affirme par naturalWidth > 0). Si la mesure restait instable, elle porterait sur la figure parente (figure.photo-plat),
           // pas sur l'img. Rév. 4 (point 2) : l'attente est BORNÉE à 3 s — sans `eager`, une img lazy dans un cadre hors écran ne se charge jamais et
           // `decode()` PEND : la suite se figerait au lieu de rougir ; un rejet (indécodable) est avalé, puis `chargee` lit naturalWidth > 0 et tranche.
@@ -895,7 +896,7 @@ export async function runCarnetTests({ eq, ok }) {
           return { pistesTete: S(tete).gridTemplateColumns.trim().split(/\s+/).length, photoADroite: rP.left >= rE.right - 1 && rP.left >= rG.right - 1, photoEntre: rE.bottom <= rP.top + 1 && rP.bottom <= rG.top + 1,
             photoLongeGestes: rP.top <= rE.top + 1 && rP.bottom > rG.top + 1, // EI-T3-2 : la photo couvre les DEUX rangées de gauche (zones), elle ne pousse pas les gestes sous elle
             chargee: img ? img.naturalWidth > 0 : null,
-            imgPleine: rI ? Math.abs(rI.width - rP.width) < 1 : null, ratio: rI ? Math.abs(rI.width / rI.height - 4 / 3) < 0.02 : null, objectFit: img ? S(img).objectFit : null,
+            imgPleine: rI ? Math.abs(rI.width - rP.width) < 1 : null, ratio: rI ? Math.abs(rI.width / rI.height - 8 / 5) < 0.02 : null, objectFit: img ? S(img).objectFit : null,
             onglets: S(q(p, '[data-role="onglets-corps"]')).display, prep: S(q(p, '[data-role="section-preparation"]')).display, pistesCorps: S(q(p, '[data-role="colonnes-corps"]')).gridTemplateColumns.trim().split(/\s+/).length,
             // Ronde 1 : l'écart entre l'état et les gestes (une pile, jamais un vide), la cible du summary (I-UI-4), la flèche du lien d'origine, le bouton seul plein.
             ecartEtatGestes: Math.round(rG.top - rE.bottom), summary: q(p, 'details[data-role="autres-gestes"] > summary').getBoundingClientRect().height,
@@ -907,19 +908,19 @@ export async function runCarnetTests({ eq, ok }) {
       };
       const [ph1100, ph375, vide1100] = [await mesureFiche(1100, 'rc_ph'), await mesureFiche(375, 'rc_ph'), await mesureFiche(1100, 'rc_t3')];
       eq([ph1100.pistesTete, ph1100.photoADroite, ph1100.chargee, ph1100.imgPleine, ph1100.ratio, ph1100.objectFit, ph1100.onglets, ph1100.prep, ph1100.pistesCorps], [2, true, true, true, true, 'cover', 'none', 'block', 2],
-        'styles.css à 1100 px (D-UI-6) : .fiche-tete en deux colonnes, la photo à droite de l’état ET des gestes (grid-template-areas), l’image RÉELLE chargée (naturalWidth > 0, 640 × 400) rendue pleine colonne en 4:3 recadrée par la feuille ; segmented caché ([hidden]), les deux sections visibles, .recipe-body en deux colonnes (mesurés dans un cadre)');
+        'styles.css à 1100 px (D-UI-6) : .fiche-tete en deux colonnes, la photo à droite de l’état ET des gestes (grid-template-areas), l’image RÉELLE chargée (naturalWidth > 0, 640 × 480) rendue pleine colonne en 8:5 recadrée par la feuille ; segmented caché ([hidden]), les deux sections visibles, .recipe-body en deux colonnes (mesurés dans un cadre)');
       // Hors brief (EI-T3-2, survivant C1b) : sans les zones, l'ordre du DOM (état, photo, gestes) met déjà la photo à droite de l'état ET des gestes —
       // mais sur la première rangée seulement : les gestes tombaient sous la photo. Les zones la font longer les deux rangées de la colonne de gauche.
       eq(ph1100.photoLongeGestes, true, 'styles.css à 1100 px (D-UI-6) : la photo occupe la colonne de droite sur les DEUX rangées (« etat photo » / « gestes photo ») — elle commence à la hauteur de l’état et longe les gestes (mesuré)');
       eq([ph375.pistesTete, ph375.photoEntre, ph375.chargee, ph375.imgPleine, ph375.ratio, ph375.onglets !== 'none', ph375.prep, ph375.pistesCorps], [1, true, true, true, true, true, 'none', 1],
-        'styles.css à 375 px (D-UI-6) : une colonne, la photo ENTRE l’état et les gestes (sous la provenance, maquette mobile), image réelle chargée, pleine largeur 4:3 ; segmented visible, Préparation cachée ([hidden]), une seule colonne de corps (mesurés)');
+        'styles.css à 375 px (D-UI-6) : une colonne, la photo ENTRE l’état et les gestes (sous la provenance, maquette mobile), image réelle chargée, pleine largeur 8:5 ; segmented visible, Préparation cachée ([hidden]), une seule colonne de corps (mesurés)');
       // Ronde 1 : la colonne de gauche est une PILE état → gestes (D-UI-6, § 4.2) — la hauteur en trop de la photo va à la rangée des gestes, jamais entre les deux.
       ok(ph1100.ecartEtatGestes >= 0 && ph1100.ecartEtatGestes < 24, `styles.css à 1100 px, avec photo : l’état et les gestes restent empilés (écart ${ph1100.ecartEtatGestes} px, attendu le gap de 16 px ; jamais le vide de la photo)`);
       const [http375, pe1100, pe375] = [await mesureFiche(375, 'rc_http'), await mesureFiche(1100, 'rc_pe'), await mesureFiche(375, 'rc_pe')];
       eq([http375.ecartEtatGestes, http375.fleche, http375.boutonPlein, ph375.boutonPlein, ph375.summary >= 44, ph1100.summary >= 44],
         [16, '" ↗"', true, true, true, true], 'styles.css à 375 px, fiche SANS photo : l’emplacement vide n’ajoute pas de second gap (état → gestes 16 px) ; la flèche « ↗ » du lien d’origine vient de la feuille ; seul (fiche vérifiée), « Commencer à cuisiner » remplit sa rangée ; le summary des autres gestes fait au moins 44 px (I-UI-4)');
       eq([pe1100.chargee, pe1100.imgPleine, pe1100.ratio, pe375.chargee, pe375.imgPleine, pe375.ratio], [true, true, true, true, true, true],
-        'styles.css (D-UI-6) : une photo RÉELLE plus étroite que la colonne (240 × 180) est rendue pleine colonne en 4:3, à 1100 comme à 375 px (mesuré)');
+        'styles.css (D-UI-6) : une photo RÉELLE plus étroite que la colonne (240 × 180) est rendue pleine colonne en 8:5, à 1100 comme à 375 px (mesuré)');
       eq([ph1100.reperesRem, ph375.reperesRem], [1.05, 1.05], 'styles.css (§ 4.2) : les repères de la fiche (div.reperes) à 1,05 rem, à 1100 comme à 375 px (mesuré ; ronde 1 de T6 : une règle .reperes renommée rougit ici)');
       eq([vide1100.pistesTete, vide1100.chargee, vide1100.imgPleine, vide1100.photoADroite], [1, null, null, false],'styles.css à 1100 px, fiche SANS photo : .fiche-tete:has(> .fiche-photo:empty) → une seule colonne (l’emplacement vide, display: contents, n’ouvre aucune piste implicite à droite ; vague finale : plus de zone « photo » morte en troisième rangée), aucune image (mesuré)');
       eq(reseau, 0, 'fiche T3 : aucun réseau');
@@ -1713,7 +1714,7 @@ export async function runCarnetTests({ eq, ok }) {
       'Recettes': 'Recipes', 'Ajouter une recette': 'Add a recipe', 'Une recette, un ingrédient…': 'A recipe, an ingredient…',
       'Toutes': 'All', 'De mes livres': 'From my books', 'Du web': 'From the web', 'Recettes de mes livres à importer': 'Recipes from my books to import', 'Voir plus': 'Show more',
       'À importer': 'To import', 'À importer · p. {p}': 'To import · p. {p}', 'Disponible': 'Available', 'Disponibles': 'Available', 'Partielle': 'Partial',
-      'Du web · {h}': 'From the web · {h}', 'De mon livre · {t}': 'From my book · {t}',
+      'De mon livre': 'From my book', // fidélité aux maquettes (28 octobre) : les deux lignes de source à hôte / titre deviennent « Du web » et « De mon livre »
       'Voir la page d’origine': 'View the original page', 'Portions, versions et autres gestes': 'Servings, versions and more',
       'Les recettes de ce livre': 'The recipes in this book', '{n} disponible(s) · {m} à importer': '{n} available · {m} to import', 'Voir les {n} recettes': 'Show all {n} recipes',
       'Ajouter des recettes': 'Add recipes', 'Ajouter des pages de sommaire': 'Add table-of-contents pages', 'Sommaire': 'Table of contents',
@@ -1769,7 +1770,7 @@ export async function runCarnetTests({ eq, ok }) {
     // Les EMPLOIS se lisent sans commentaires (constat 20) ; l'inventaire des clés sans entrée lit le source brut (plus strict : une clé commentée y compte).
     const parModule = Object.fromEntries(MODULES_UI1.map((m) => [m, new Set(clesDe(sansCommentairesT6(sources[m])))]));
 
-    eq(Object.keys(TEXTES_UI1).length, 31, 'T6 i18n : la table elle-même compte 31 paires — 27 de la spec § 5 (UI-1), quatre hors table (garde de la TABLE contre une ligne effacée ; NON ÉPROUVÉE : aucun changement de src/ ni d’en.js ne la fait rougir, elle compte dans l’épingle comme F-4 du lot assistant)');
+    eq(Object.keys(TEXTES_UI1).length, 30, 'T6 i18n : la table elle-même compte 30 paires (31 avant la fidélité aux maquettes : deux lignes de source remplacées par « De mon livre ») — 27 de la spec § 5 (UI-1), quatre hors table (garde de la TABLE contre une ligne effacée ; NON ÉPROUVÉE : aucun changement de src/ ni d’en.js ne la fait rougir, elle compte dans l’épingle comme F-4 du lot assistant)');
     eq(Object.entries(TEXTES_UI1).filter(([fr, en]) => EN[fr] !== en).map(([fr]) => fr), [], 'T6 i18n : chaque texte neuf de la table (27 de la spec § 5 UI-1, quatre hors table) a son entrée en.js, à l’anglais exact de la table');
     eq(CLES_REEMPLOYEES.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'T6 i18n : les clés réemployées (Corriger, Ingrédients, Préparation, Ajouter un livre, Favoris, Mes livres, Livres, Plats, 1 portion, {n} portions) gardent une entrée');
     eq([EN['Corriger'], EN['Mes livres'], EN['1 portion'], EN['{n} portions']], ['Fix', 'My books', '1 serving', '{n} servings'], 'T6 i18n : « Corriger » reste « Fix » (H-14), « Mes livres » reste « My books » (le segment de la recherche, D-UI-4) ; les deux clés antérieures des repères gardent « 1 serving » et « {n} servings » (R-UI-41)');

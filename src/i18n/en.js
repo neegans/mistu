@@ -765,8 +765,7 @@ export const EN = {
   'Recettes de mes livres à importer': 'Recipes from my books to import',
   'Voir plus': 'Show more',
   'À importer': 'To import',
-  'Du web · {h}': 'From the web · {h}',
-  'De mon livre · {t}': 'From my book · {t}',
+  'De mon livre': 'From my book',
   'Aucune recette pour l’instant.': 'No recipes yet.',
   // Tâche 2, ronde 1 (D-T2-c) : l'état vide de ?tab=a-importer (« aucune recette » y était faux).
   'Rien à importer pour l’instant.': 'Nothing to import for now.',

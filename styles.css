@@ -7,9 +7,9 @@
   --muted: #636860;
   --line: #e4dfd5;
   --field-line: #8f8a80;
-  --action: #4f6b2e;
-  --action-2: #3e5424;
-  --action-bg: #e9eddf;
+  --action: #454e3b;
+  --action-2: #363d2e;
+  --action-bg: #ebece4;
   --accent: #45604a;
   --accent-2: #55705a;
   --accent-bg: #e4ebe2;
@@ -22,11 +22,12 @@
   --ok: #3d6b4a;
   --ok-bg: #e2efe4;
   --backdrop: rgba(36,40,33,.45);
-  --tap: rgba(79,107,46,.15);
+  --tap: rgba(69,78,59,.15);
   --radius: 12px;
   --radius-pill: 999px;
   --shadow: 0 1px 2px rgba(36,40,33,.05), 0 8px 24px rgba(36,40,33,.06);
-  --serif: Georgia, "Times New Roman", serif;
+  --serif: ui-serif, "New York", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --radius-btn: 8px;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --topbar-h: 64px;
   --nav-h: 64px;
@@ -48,15 +49,32 @@ html, body { margin: 0; padding: 0; background: var(--paper); color: var(--ink);
 body { -webkit-text-size-adjust: 100%; font-size: 1rem; line-height: 1.5; }
 a { color: var(--action); }
 img { max-width: 100%; display: block; }
-h1, h2, h3, h4 { margin: 0 0 .4rem; line-height: 1.2; color: var(--ink); font-family: var(--serif); font-weight: 600; overflow-wrap: anywhere; -webkit-hyphens: auto; hyphens: auto; }
+h1, h2, h3, h4 { margin: 0 0 .4rem; line-height: 1.2; color: var(--ink); font-family: var(--serif); font-weight: 400; overflow-wrap: anywhere; -webkit-hyphens: auto; hyphens: auto; }
 /* D-UI-3 : titre de PAGE (pageHeader d'Aujourd'hui, Bibliothèque, Ajouter, Ma semaine, Ma cuisine, Réglages) : 1,8 rem à 375 et 390 px, 2,88 rem à 768, 3,2 rem à 1512. */
-h1 { font-size: clamp(1.8rem, 6vw, 3.2rem); line-height: 1.1; }
+h1 { font-size: clamp(2.1rem, 8.5vw, 3.2rem); line-height: 1.05; letter-spacing: -.015em; }
 /* D-UI-3 : titre de FICHE (recette, livre : classe posée par pageHeader({ classeTitre: 'titre-fiche' })) : 1,5 / 2,16 / 2,6 rem — un titre long tient en deux lignes à 375 px. */
-h1.titre-fiche { font-size: clamp(1.5rem, 4.5vw, 2.6rem); }
+h1.titre-fiche { font-size: clamp(2.2rem, 11vw, 3.4rem); line-height: 1.02; }
 h2 { font-size: 1.6rem; }
 h3 { font-size: 1.15rem; }
 /* § 3.2 : le sous-titre d'un pageHeader (le p.muted qui suit son h1). */
-header.stack h1 + p.muted { font-size: 1.05rem; }
+header.stack h1 + p.muted { font-family: var(--serif); font-size: 1.25rem; }
+/* Sur une fiche, le sous-titre est la provenance (site, livre, page) : petit, sans empattement, comme la maquette. */
+header.stack h1.titre-fiche + p.muted { font-family: var(--sans); font-size: .95rem; }
+.btn.discret { background: transparent; border-color: transparent; padding-left: .2rem; padding-right: .2rem; color: var(--muted); }
+/* Sur une fiche, l'en-tête vit dans la colonne de gauche : pas de marge propre (la pile de la colonne espace). */
+.fiche-etat > header.stack { margin-bottom: 0 !important; gap: .35rem; }
+/* Le titre et l'étoile restent sur la même rangée ; sous 760 px, l'étoile seule (le mot « Favori » reste lu par les lecteurs d'écran). */
+.fiche-etat > header.stack > .row.between { flex-wrap: nowrap; align-items: flex-start; }
+.fiche-etat > header.stack > .row.between > div:first-child { min-width: 0; }
+.fiche-etat { gap: .7rem; }
+.carte-plat h3 { -webkit-hyphens: manual; hyphens: manual; overflow-wrap: normal; }
+@media (max-width: 759px) {
+  .fav-libelle { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+.recipe-body .steps li { border-bottom: 0; }
+.coches .qty { font-weight: 400; }
+.fiche-gestes a[data-role="ouvrir-lien"] { padding-left: 0; justify-content: flex-start; }
+.recipe-body select { width: auto; max-width: 100%; }
 p { margin: 0 0 .6rem; }
 small, .muted { color: var(--muted); }
 hr { border: 0; border-top: 1px solid var(--line); margin: 1rem 0; }
@@ -79,7 +97,7 @@ pre { background: var(--paper-2); padding: .6rem .8rem; border-radius: 8px; over
   background: var(--paper); color: var(--ink); border-bottom: 1px solid var(--line); -webkit-tap-highlight-color: var(--tap);
   position: sticky; top: 0; z-index: 20;
 }
-.topbar .brand { font-family: var(--serif); font-weight: 600; letter-spacing: .01em; color: var(--ink); text-decoration: none; font-size: 1.25rem; white-space: nowrap; display: inline-flex; align-items: center; min-height: 44px; }
+.topbar .brand { font-family: var(--serif); font-weight: 400; letter-spacing: 0; color: var(--ink); text-decoration: none; font-size: 1.25rem; white-space: nowrap; display: inline-flex; align-items: center; min-height: 44px; }
 .topbar .spacer { flex: 1; }
 .topbar .btn { background: transparent; color: var(--ink); border-color: var(--line); min-width: 0; }
 /* Roue des Réglages (dernier enfant de la barre) : cible de 44 × 44 (T-4). */
@@ -128,6 +146,13 @@ aside.sidenav { display: none; }
   aside.sidenav a.active { background: var(--card); color: var(--action); font-weight: 600; box-shadow: inset 3px 0 0 var(--action); }
   aside.sidenav a.add { margin-top: .6rem; background: var(--action); color: var(--paper); justify-content: center; }
   main.content { padding-bottom: 2rem; }
+  /* Fidélité aux maquettes : la navigation du Mac est une rangée d'onglets dans la barre du haut — texte, petite icône, l'actif souligné d'olive ;
+     « Ajouter » reste le bouton plein. Les règles du panneau latéral ci-dessus sont annulées pour cet emplacement. */
+  .topbar aside.sidenav { flex-direction: row; align-items: stretch; gap: .2rem; width: auto; flex-shrink: 1; min-width: 0; padding: 0; margin-left: 1.2rem; border: 0; background: transparent; position: static; height: auto; overflow: visible; }
+  .topbar aside.sidenav a { min-height: 44px; padding: .4rem .7rem; border-radius: 0; gap: .4rem; color: var(--muted); white-space: nowrap; }
+  .topbar aside.sidenav a .icone, .topbar .btn .icone { width: 18px; height: 18px; }
+  .topbar aside.sidenav a.active { background: transparent; color: var(--ink); font-weight: 400; box-shadow: inset 0 -2px 0 var(--action); }
+  .topbar aside.sidenav a.add { margin: 0 0 0 .6rem; align-self: center; min-height: 40px; border-radius: var(--radius-btn); background: var(--action); color: var(--paper); box-shadow: none; }
 }
 
 /* Components */
@@ -167,7 +192,7 @@ section.plain > h2 { margin: 0 0 .8rem; padding-bottom: .4rem; border-bottom: 1p
 
 .btn {
   appearance: none; border: 1px solid var(--line); background: var(--card); color: var(--ink);
-  padding: .55rem 1rem; border-radius: var(--radius-pill); font: inherit; font-size: .95rem; cursor: pointer;
+  padding: .55rem 1rem; border-radius: var(--radius-btn); font: inherit; font-size: .95rem; cursor: pointer;
   display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; text-decoration: none;
 }
 /* Survol réservé aux appareils à pointeur : sur iOS, il reste collé après une tape et se lirait comme un état « choisi ». */
@@ -221,10 +246,10 @@ section.plain > h2 { margin: 0 0 .8rem; padding-bottom: .4rem; border-bottom: 1p
 .chip.neutral { background: var(--cream-2); color: var(--muted); }
 .chips { display: flex; flex-wrap: wrap; gap: .35rem; }
 .puces { display: flex; flex-wrap: wrap; gap: .35rem; }
-.puce { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: .3rem .7rem; font: inherit; font-size: .9rem; cursor: pointer; min-height: 32px; }
+.puce { border: 1px solid var(--line); background: var(--card); border-radius: var(--radius-btn); padding: .3rem .7rem; font: inherit; font-size: .9rem; cursor: pointer; min-height: 32px; }
 .puce[aria-pressed="true"] { background: var(--action); border-color: var(--action); color: var(--paper); }
 
-.badge { font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; padding: .15rem .55rem; border-radius: var(--radius-pill); background: var(--paper-2); color: var(--muted); }
+.badge { font-size: .78rem; font-weight: 500; padding: .15rem .55rem; border-radius: 6px; background: var(--paper-2); color: var(--muted); }
 .badge.available { background: var(--ok-bg); color: var(--ok); }
 .badge.reference { background: var(--warn-bg); color: var(--warn); }
 .badge.partial { background: var(--paper-2); color: var(--ink); }
@@ -251,16 +276,28 @@ label.check { display: inline-flex; gap: .45rem; align-items: center; font-size:
 .cellule-cuisson { display: flex; flex-direction: column; gap: .4rem; }
 .cellule-cuisson > .carte-plat { flex: 1; }
 .cellule-cuisson .cuisson-date { font-size: .85rem; }
-.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-pill); overflow: hidden; background: var(--card); }
+/* Fidélité aux maquettes (28 octobre 2026) : les segments sont des onglets posés sur le papier, sans cadre ; le segment actif est plein, olive sombre. */
+.segmented { display: inline-flex; flex-wrap: wrap; gap: .25rem; border: 0; border-radius: var(--radius-btn); background: transparent; }
 /* R-VIS-11 : dans un champ (colonne flex), la pilule prend la largeur de ses options, sans queue vide qui se lirait comme un champ. */
 .field > .segmented { align-self: flex-start; }
-.segmented button { border: 0; background: transparent; padding: .45rem .8rem; font: inherit; cursor: pointer; color: var(--muted); }
-.segmented button.active { background: var(--paper-2); color: var(--ink); box-shadow: inset 0 -2px 0 var(--action); }
+.segmented button { border: 0; background: transparent; padding: .45rem .9rem; font: inherit; cursor: pointer; color: var(--ink); border-radius: var(--radius-btn); min-height: 40px; }
+.segmented button.active { background: var(--action); color: var(--paper); }
+/* Les onglets soulignés (segments de la Bibliothèque, Ingrédients / Préparation de la fiche) : du texte sur un filet, l'actif en encre et souligné olive. */
+.segmented.onglets { display: flex; gap: 1.5rem; border-bottom: 1px solid var(--line); border-radius: 0; }
+.segmented.onglets button { padding: .5rem 0; border-radius: 0; background: transparent; color: var(--muted); min-height: 44px; }
+.segmented.onglets button.active { background: transparent; color: var(--ink); box-shadow: inset 0 -2px 0 var(--action); }
+/* La rangée de recherche de la Bibliothèque : le champ (loupe en tête) puis les filtres ; ils passent dessous quand la place manque. */
+.filtre-recettes { display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: center; margin-bottom: 1.2rem; }
+.filtre-recettes .champ-recherche { position: relative; display: block; flex: 1 1 300px; }
+.filtre-recettes .champ-recherche .icone { position: absolute; left: .8rem; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; color: var(--muted); pointer-events: none; }
+.filtre-recettes .champ-recherche input { padding-left: 2.6rem; border-radius: var(--radius-btn); }
+.filtre-recettes .puce { border-color: transparent; background: transparent; min-height: 44px; padding: .45rem .9rem; }
+.filtre-recettes .puce[aria-pressed="true"] { background: var(--action); border-color: var(--action); color: var(--paper); }
+/* La ligne de source d'une carte-plat porte son icône au trait (globe ou livres), à la taille du texte. */
+.carte-plat .carte-plat-source { display: flex; align-items: center; gap: .35rem; }
+.carte-plat .carte-plat-source .icone { width: 16px; height: 16px; }
 /* T-5 : l'anneau rentre dans le bouton, sinon overflow: hidden le coupe. */
 .segmented button:focus-visible { outline-offset: -3px; }
-/* R-VIS-6 : aux extrémités, le bouton épouse la courbe de la pilule ; l'anneau (qui suit le rayon) n'est plus coupé aux coins. */
-.segmented button:first-child { border-top-left-radius: var(--radius-pill); border-bottom-left-radius: var(--radius-pill); }
-.segmented button:last-child { border-top-right-radius: var(--radius-pill); border-bottom-right-radius: var(--radius-pill); }
 
 .list { list-style: none; margin: 0; padding: 0; }
 .list li { padding: .6rem 0; border-bottom: 1px solid var(--line); }
@@ -301,7 +338,7 @@ label.check { display: inline-flex; gap: .45rem; align-items: center; font-size:
 /* Lot F (D-F9) : la vignette d'une carte de recette — 72 px, recadrée, coins 8 px ; née [hidden] (aucun display:none neuf, T-1). */
 .plat-vignette { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); flex: 0 0 auto; }
 /* Lot UI-2 (spec expérience carnet § 4.6, R-UI2-9) : l'aperçu d'un résultat web, en tête de sa carte — la photo de la maquette (4:3, pleine largeur), pas la vignette carrée. */
-.plat-vignette.grande { width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 12px; display: block; }
+.plat-vignette.grande { width: 100%; height: auto; aspect-ratio: 8 / 5; object-fit: cover; border-radius: 12px; display: block; }
 figure.apercu { margin: 0 0 .6rem; }
 /* Lot UI-1 (D-UI-5, § 3.3) : les deux tailles de la vignette d'une carte — « grande » = l'image 4:3 en tête d'une carte-plat ; « petite » = 48 × 48 sur
    une ligne compacte (fiche d'un livre, tâche 4). La règle 72 px ci-dessus reste celle de la carte horizontale. R-UI1-1 : la règle .grande, IDENTIQUE
@@ -316,7 +353,7 @@ figure.apercu { margin: 0 0 .6rem; }
    sur --paper-2 (même rayon, 7 rem au moins pour aligner les rangées, titre en bas) : jamais de cadre vide ni d'image générique. */
 .carte-plat { display: flex; flex-direction: column; gap: .55rem; min-width: 0; }
 .carte-plat .carte-plat-corps { display: flex; flex-direction: column; gap: .3rem; min-width: 0; flex: 1; }
-.carte-plat h3 { font-size: 1.3rem; margin: 0; }
+.carte-plat h3 { font-size: 1.35rem; margin: 0; }
 .carte-plat .carte-plat-source { font-size: .9rem; }
 .carte-plat .carte-plat-badges { gap: .35rem; }
 .carte-plat.sans-photo .carte-plat-corps { background: var(--paper-2); border-radius: var(--radius); padding: .9rem 1rem; min-height: 7rem; justify-content: flex-end; }
@@ -340,7 +377,7 @@ table.compare th { color: var(--green); background: var(--cream-2); }
    `photoADroite` vrai) ; le gap de 1 rem qui en résulte sous les gestes est ACCEPTÉ. Le segmented Ingrédients / Préparation et la section non choisie se
    cachent par [hidden]. */
 .fiche-tete { margin-bottom: 1.2rem; }
-.photo-plat img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--radius); }
+.photo-plat img { width: 100%; aspect-ratio: 8 / 5; object-fit: cover; border-radius: var(--radius); }
 .reperes { font-size: 1.05rem; }
 /* « Commencer à cuisiner » prend la place, « Corriger » (lien texte) se range à côté ; seul (version vérifiée), le bouton s'étend sur les deux pistes et
    remplit la rangée (ronde 1 : sans cela, le gap de .6rem restait vide à droite). */
@@ -349,13 +386,30 @@ table.compare th { color: var(--green); background: var(--cream-2); }
 .geste-principal > .btn.block:only-child { grid-column: 1 / -1; }
 /* D-UI-10 : la flèche de « Voir la page d’origine » vit dans la feuille, hors du texte du lien. */
 a[data-role="ouvrir-lien"]::after { content: " ↗"; }
-details[data-role="autres-gestes"] > summary { cursor: pointer; font-family: var(--serif); font-weight: 600; font-size: 1.15rem; padding: .3rem 0; min-height: 44px; }
+details[data-role="autres-gestes"] { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: .3rem 0; margin-bottom: 1.6rem; }
+details[data-role="autres-gestes"] > summary { cursor: pointer; font-family: var(--serif); font-weight: 400; font-size: 1.15rem; padding: .3rem 0; min-height: 44px; display: flex; align-items: center; }
 details[data-role="autres-gestes"][open] > summary { margin-bottom: .6rem; }
-.recipe-body > [data-role="onglets-corps"] { margin-bottom: .8rem; }
+.recipe-body > [data-role="onglets-corps"] { margin-bottom: 1rem; }
+.recipe-body > .segmented.onglets button { font-family: var(--serif); font-size: 1.4rem; }
+/* Le corps de la fiche : sans filet sous les titres ; un filet au-dessus des deux colonnes et un filet vertical entre elles (maquette). */
+.recipe-body section.plain > h2 { border-bottom: 0; padding-bottom: 0; font-size: 2rem; }
+.recipe-body > [data-role="colonnes-corps"] { border-top: 1px solid var(--line); padding-top: 1.4rem; }
+/* Une case à cocher par ingrédient (rien n'est écrit) ; « Remplacer » devient un lien discret en bout de ligne. */
+.coches > li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: .75rem; align-items: start; }
+.coches > li > :not(.coche):not(.remplacer) { grid-column: 2; }
+.coches > li > .remplacer { grid-column: 3; grid-row: 1; color: var(--muted); text-decoration: none; min-height: 36px; padding: 0 .3rem; }
+.coches .coche { width: 20px; height: 20px; margin: .2rem 0 0; accent-color: var(--action); }
 /* Ronde 1 : un emplacement photo VIDE ne fait pas de boîte (aucune rangée, donc aucun second gap entre l'état et les gestes sous 760 px) ; ce n'est pas un
    display:none (T-1) — il redevient une boîte dès que la photo y entre. Au-dessus de 760 px, la règle :has ci-dessous garde sa forme. */
 .fiche-tete > .fiche-photo:empty { display: contents; }
 @media (min-width: 760px) {
+  /* Fidélité aux maquettes : la colonne du titre plus étroite que celle de la photo (5 / 7), un vrai blanc entre les deux ; filet vertical entre Ingrédients et
+     Préparation ; « Commencer à cuisiner » à sa largeur (plus pleine largeur). */
+  .two-col.fiche-tete { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); column-gap: 2.5rem; }
+  .recipe-body > [data-role="colonnes-corps"] { column-gap: 3rem; }
+  .recipe-body [data-role="section-ingredients"] { border-right: 1px solid var(--line); padding-right: 2rem; }
+  .geste-principal { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; }
+  .geste-principal > .btn.big { font-size: 1rem; min-height: 48px; padding: .7rem 1.6rem; }
   /* Ronde 1 : la hauteur en trop de la photo va à la rangée des gestes (1fr), jamais entre l'état et les gestes : la colonne de gauche reste une pile. */
   .fiche-tete { grid-template-areas: "etat photo" "gestes photo"; grid-template-rows: auto 1fr; align-items: start; }
   .fiche-tete > .fiche-etat { grid-area: etat; }
@@ -370,7 +424,7 @@ details[data-role="autres-gestes"][open] > summary { margin-bottom: .6rem; }
 .qty { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ink); }
 .qty .est { color: var(--warn); font-weight: 400; }
 .src-text { color: var(--muted); font-size: .85rem; }
-.step-num { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--paper-2); color: var(--ink); font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.step-num { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--paper-2); color: var(--ink); font-family: var(--serif); font-weight: 400; font-size: 1rem; flex-shrink: 0; }
 .steps li { display: flex; gap: .7rem; padding: .6rem 0; }
 .status { padding: .45rem .7rem; border-radius: 10px; font-size: .9rem; display: inline-flex; gap: .4rem; align-items: center; }
 .status.info { background: var(--accent-bg); color: var(--accent); }

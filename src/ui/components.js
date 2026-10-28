@@ -298,7 +298,7 @@ export function ligneSource(doc) {
   const { recipe, book, edition, version } = doc;
   const lien = recipe?.source_url ? lienSignet(recipe.source_url) : null;
   const source = recipe?.origine === 'ia' ? provenanceText(recipe, book, edition)
-    : lien?.ok ? t('Du web · {h}', { h: lien.hote }) : book ? t('De mon livre · {t}', { t: book.title || t('Sans titre') }) : provenanceText(recipe, book, edition);
+    : lien?.ok ? t('Du web') : book ? t('De mon livre') : provenanceText(recipe, book, edition);
   const duree = dureeTotale(version);
   return duree === null ? source : `${source} · ${formatMinutes(duree)}`;
 }
@@ -320,11 +320,14 @@ function cartePlat(doc, { fichier = null, href = null, extra = null } = {}) {
     img.addEventListener('error', () => { img.remove(); carte.classList.add('sans-photo'); revoquerUrlDeBlob(u); }, { once: true });
     carte.append(img);
   }
-  const badges = [availabilityBadge(recipe), etiquetteIA(version, recipe), recipe.favorite ? el('span', { class: 'badge' }, '★ ' + t('Favori')) : null,
+  // Fidélité aux maquettes (28 octobre 2026) : l'état ordinaire « Disponible » ne se répète pas sur chaque carte ; les états qui disent quelque chose
+  // (« À importer », « Partielle », « Lien web ») restent.
+  const dispo = availabilityBadge(recipe);
+  const badges = [dispo.classList.contains('available') ? null : dispo, etiquetteIA(version, recipe), recipe.favorite ? el('span', { class: 'badge' }, '★ ' + t('Favori')) : null,
     doc.cooked ? el('span', { class: 'badge' }, t('Cuisinée {n}×', { n: doc.cooked })) : null].filter(Boolean);
   carte.append(el('div', { class: 'carte-plat-corps' },
     el('h3', null, recipe.display_title || recipe.original_title),
-    el('div', { class: 'muted carte-plat-source' }, ligneSource(doc)),
+    el('div', { class: 'muted carte-plat-source' }, recipe?.origine === 'ia' ? null : recipe?.source_url && lienSignet(recipe.source_url)?.ok ? icone('globe') : doc.book ? icone('livres') : null, ligneSource(doc)),
     badges.length ? el('div', { class: 'row carte-plat-badges' }, ...badges) : null));
   // `extra` seulement quand il est donné : Element.append(null) écrirait le texte « null » sous la carte (el() les écarte, append() non).
   if (extra) carte.append(extra);
