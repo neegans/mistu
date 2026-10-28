@@ -2847,8 +2847,9 @@ rapport par tâche, `cloture.md`, `suite.cjs`). Les rulings du chef R-UI2-1 à R
 et P-UI2-7 sont amendés, P-UI2-10 renversé (voir « Ce qui marche »). Trois tâches : S1 serveur (`654e63d` puis sa ronde `c8b07f5`), S2 client
 (`a1720bc` puis sa ronde `16dd810`), S3 docs (`99855cd` puis sa ronde 1, docs seuls) ; implémenteur Claude Fable 5.1 pour S1, S2 et leurs rondes, Claude Opus 5.5 pour S3 (la
 limite de dépense mensuelle de Fable 5.1 a été atteinte dans la nuit du 25 au 26 octobre). Le volet UI-1 « Carnet » (thème, grille, fiches, icônes)
-est l'autre branche, `experience-carnet`, sur la même base, en construction. **PAS fusionné, PAS poussé, `0007` PAS collée, fonction `assistant` PAS
-redéployée** (la version 4 du 23 octobre sert toujours : le chemin `apercu-web` n'existe pas encore sur `mitsu`).
+est l'autre branche, `experience-carnet`, sur la même base, en construction. **`/verify` VERT le 26 octobre (`ecfc19b`) ; FUSIONNÉ dans `main` et POUSSÉ le 27 octobre, AVANT `0007` (autorisation de Neegan, R-UI2-20 :
+la version 4 refuse l'outil en 400 `requete` avant toute réservation, l'onglet Web dit « Photos indisponibles pour cette recherche. ») ; `0007` PAS collée,
+fonction `assistant` PAS redéployée** (la version 4 du 23 octobre sert toujours : le chemin `apercu-web` n'existe pas encore sur `mitsu`).
 
 **Ce qui marche, prouvé** (suite navigateur : `fetch` injecté, `chercher` et `apercus` factices, images fabriquées par canvas, aucun réseau, aucune
 base ; tests Node : faux `Deno`, faux supabase-js, faux `fetch`, minuteries simulées ; **aucun appel réel, aucune sonde, fonction non redéployée**) :
@@ -2974,10 +2975,10 @@ sous charge) : un rouge se rejoue avant d'être un constat (R-B-15, R-UI2-10).
   profondeur ; R1 et R1b (le défaut de `deps.routeCourante` changé), survivants à la revue de S3, sont tués depuis la vague finale ; vague finale : 19
   mutants sur copies (17 navigateur, 2 Node) : 18 rouges, M2 (l'élagage de défense après l'écriture) équivalent déclaré.
 
-**Gestes, dans l'ordre (dépense dite à chaque pas).** 0) **Chef d'orchestre, d'abord** (`cloture.md` du registre) : re-revue de la ronde 1 de
+**Gestes, dans l'ordre (dépense dite à chaque pas).** 0) **Chef d'orchestre, d'abord — FAIT le 26 octobre** (`cloture.md` du registre ; `/verify` VERT, `verify-UI2-ecfc19b.txt` ; spec § 12, R-UI2-18 à R-UI2-24) : re-revue de la ronde 1 de
 S2 (`16dd810`), revue finale de branche et ses rondes, puis `/verify` sur la tête finale (« vert conditionnel » : vert du code, rouge nommé du
 déploiement tant que `0007` n'est pas collée), AVANT `0007` et AVANT tout redéploiement ; une ronde qui touche le code change les mesures de cette
-section (à relever). 1) **Neegan, `0007` après le geste 0, AVANT le redéploiement et AVANT tout `push` de UI-2** (`supabase/README.md`, étape 13) :
+section (à relever). 1) **Neegan, `0007` après le geste 0, AVANT le redéploiement** (le `push` l'a précédé, R-UI2-20) (`supabase/README.md`, étape 13) :
 coller `supabase/migrations/0007_apercu_web.sql` entière (attendu `Success. No rows returned`), relever
 `shasum -a 256 supabase/migrations/0007_apercu_web.sql` (attendu `70168ef8…`), jouer `supabase/proofs/0007_apercu_web.sql` (« Run without RLS », rien à
 remplacer) : `999 BILAN` = `0 faux sur 11`, AUCUNE ligne dont l'obtenu est « aucun compte : etape sautee » (sans compte dans `auth.users`, six
@@ -2990,7 +2991,7 @@ S19, S-F1 à S-F3 et le `GET` d'état ; puis, un appel du quota chacune et zéro
 d'`image-web`, à reprouver sur la version 5, README étape 13 point 5), S-A3, S-A5 (« puttanesca »), S-A6 (page de liste), S-A7 (cinq pages hostiles,
 si un hôte public contrôlé existe ; sinon « non jouée », R-UI2-14) ; la session de Neegan par le script d'attente du presse-papiers, jamais dans une
 commande. Si S-A5 compte des `image_trop_lourde` : ronde « borne 2 Mio » (les deux constantes, le littéral `BORNE`, v5, le test du domaine) AVANT la
-fusion, puis `/verify` et redéploiement de sa tête. 3) **Neegan**, après les sondes : `! git -C ~/projects/mistu merge --ff-only apercus-web` si
+fusion, puis `/verify` et redéploiement de sa tête. 3) **FAIT le 27 octobre par le chef d'orchestre, AVANT `0007` (R-UI2-20)** : `git -C ~/projects/mistu merge --ff-only apercus-web` si
 `main` est encore `05c751f` (avance rapide : suite publique `6097/6097`, épingle 6096, service worker `cuisine-os-v0.16.0-3`, ou les valeurs d'une
 ronde ultérieure) ; sinon, UI-1 fusionné d'abord : un commit de fusion qui résout `sw.js` (union de `SHELL`, `VERSION` +1), `src/model/schema.js` et
 les pins, `src/i18n/en.js` (union), `styles.css` (les règles `.plat-vignette.grande` et `figure.apercu` à côté de `.plat-vignette.petite`, épingle de

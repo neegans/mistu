@@ -501,8 +501,8 @@ Ajouter ; l'onglet « Bibliothèque » lisible sur l'iPhone, « Agrandir l'affic
   ajoute autant ; jamais toute la bibliothèque d'un coup (F-9).
 - `app.js` reste hors suite : la coquille (NAV avec icônes, libellé « Bibliothèque ») n'est mesurée que par la preuve visuelle.
 - UI-2, quota : 2 appels par recherche illustrée (30 par jour) ; un abandon client fait 499 côté serveur, compté.
-- UI-2, vie privée : en mode automatique, jusqu'à 10 requêtes signées `Mitsu/0.10 (+https://neegans.github.io/mistu/)` partent par
-  recherche vers des pages que la personne n'a pas choisies (le modèle et le moteur les ont choisies) ; l'IP reste celle de
+- UI-2, vie privée : en mode automatique, jusqu'à 10 téléchargements (au plus 40 requêtes signées avec les redirections, R-UI2-22)
+  `Mitsu/0.10 (+https://neegans.github.io/mistu/)` partent par recherche vers des pages que la personne n'a pas choisies (le modèle et le moteur les ont choisies) ; l'IP reste celle de
   l'infrastructure (I-UI-2) ; F n'avait accepté cette exposition que pour une image, après un geste : d'où § 13, point 2.
 - UI-2, amplification : un appel du quota achète jusqu'à 10 téléchargements (15 Mio, 60 s de connexions sortantes, 30 sauts) au lieu
   d'un ; mêmes règles SSRF par adresse que B et F (résidu R-B-21 inchangé) ; le mur reste la liste admise et `ASSISTANT_QUOTA_JOUR`.
@@ -808,6 +808,37 @@ Vague finale (26 octobre 2026 ; revue finale de branche sur `b5a61a6` : 0 Critic
 - **VF-UI2-13** (Minor) trois tests de source hors de la liste admise du plan retirés (`async function enParallele<T>(`, `await lireCorpsBorne(rep, max)`,
   « `apercuDe` sans `appelerAnthropic` ») : v4, v5 (borne), v6 à v8 (parallélisme) et v2 à v8 (`appelsModele()` vide) tiennent le comportement.
 
+Clôture du chef d'orchestre (26-27 octobre 2026 ; Claude Opus 5.5 : la limite de dépense mensuelle de Fable 5.1 a été atteinte le 26 octobre au
+matin, la construction a repris sur Opus 5.5 depuis le cache des workflows ; une ligne par ruling) :
+- **R-UI2-18 (écarts de construction)** — E-UI2-1 à E-UI2-22 RATIFIÉS tels qu'écrits ; en particulier E-UI2-2 (`pas_d_image` au lieu de
+  `pas_de_recette` sur une page de liste à `Recipe` illisibles : diagnostique seulement, la sonde S-A6 dira la forme réelle), E-UI2-8 (l'échec d'un appel
+  entier est attaché à l'objet `issue` : « Chercher à nouveau » crée une nouvelle issue et redemande, ce que R-UI2-6 veut), E-UI2-13 (la garde par la
+  route, prouvée depuis VF-UI2-4), E-UI2-14 (le montage dans la microtâche du rendu, le seul appelant est `app.js`), E-UI2-16 (`decoding="async"`, pas de
+  `loading="lazy"`). Coût si faux : un aperçu de moins ou un appel de plus après un geste, jamais un appel sans geste.
+- **R-UI2-19 (vague finale)** — VF-UI2-1 à VF-UI2-13 RATIFIÉS ; VF-UI2-12 : un « trouvé » sans adresse https demandable n'affiche aucune ligne d'état
+  (rien n'a été demandé : « indisponibles » dirait une chose fausse) ; VF-UI2-8 : le re-paiement au retour sur `/search` reste (S-4), nommé ; le refus
+  des images animées côté serveur (VF-UI2-2) n'est pas fait : le client tient le mur.
+- **R-UI2-20 (fusion et push AVANT `0007`)** — Neegan a autorisé le 23 octobre au soir « la fusion et le push une fois terminée » ; mesuré sur `05c751f`
+  (le code de la version 4 déployée) : un outil inconnu est refusé en 400 `requete` (`index.ts:228`) AVANT la réservation (`index.ts:233`) : aucun appel
+  n'est compté ; l'app classe cet échec d'appel entier et dit « Photos indisponibles pour cette recherche. » ; le texte de garde annonce deux appels alors
+  qu'un seul est compté jusqu'au redéploiement (inexactitude assumée pour cet intervalle) ; l'ordre `0007` → redéploiement → sondes reste, et une ronde
+  que les sondes imposeraient (borne 2 Mio, parallélisme) part en commit de suite. README étape 13, point 5 : note ajoutée. Coût si faux : rien de payé,
+  un onglet Web sans photo jusqu'au geste de Neegan.
+- **R-UI2-21 (sondes)** — le README classe désormais S-A3, S17-S18 (lot B) et S-F4-S-F5 (lot F) parmi les sondes qui coûtent un appel du quota (zéro
+  jeton) ; S-A1 et S-A2 passent la session (la fonction lit la session avant le corps : sans elle, 401), comme les sondes S13-S15 du lot B.
+- **R-UI2-22 (§ 11 et § 13, point 2)** — « jusqu'à 10 requêtes signées » devient « jusqu'à 10 téléchargements, au plus 40 requêtes signées avec les
+  redirections » (3 sauts par page et par image).
+- **R-UI2-23 (mutants)** — rejoués par chaque tâche (S1 21, S2 33), chaque ronde (9, 14), la revue finale (lentille faux-vert, liste de § 7) et la vague
+  (19) ; le contrôleur ne les rejoue pas une sixième fois sous une charge machine de 50 à 260 venue d'autres sessions : la vérification mécanique ci-dessous
+  fait foi.
+- **R-UI2-24 (pglast)** — toujours absent de ce Mac : la syntaxe de `0007` et de sa preuve n'est vérifiée que par les tests de texte ; la preuve réelle
+  est le collage de Neegan (R-UI2-11).
+- **`/verify` de clôture** (`ecfc19b`, 26 octobre, 18 h 19 HAE ; `verify-UI2-ecfc19b.txt` du registre) : suite ✅ 6097/6097 (épingle 6096,
+  `tests/tests.js:255`), seule erreur de console le 404 de `/favicon.ico` ; Node 230/230 au second passage (le premier, sous une charge de 132, a rougi un
+  test de durée du lot B ou F, R-B-15) ; `--check` 0 ; `tsc` 5.6.3 `--strict` 0 ; `APP_VERSION 0.16.0`, `sw.js cuisine-os-v0.16.0-3`, `DB_VERSION` 4 ;
+  scan de secrets du diff vide ; invisibles 0 ; `git diff --check` muet ; écrans touchés : `search.js` seul. Vert conditionnel : `0007`, redéploiement
+  et sondes restent à faire.
+
 ## 13. À trancher par Neegan (sans urgence ; chaque point a son défaut, construit tel quel)
 
 **Tranché le 23 octobre 2026 au soir : « Go » de Neegan sur la présentation des sept points = les sept défauts sont confirmés** (olive,
@@ -817,8 +848,8 @@ d'abord). Chaque point reste renversable plus tard, au prix dit dans sa ligne.
 0. **L'olive comme couleur d'action** (renverse V-4 de la refonte visuelle, jamais confirmée) : olive (défaut, c'est la maquette) ou garder
    la tomate `#bc3026` (une ligne de `styles.css` et `theme.js:27`).
 1. **La marque** : garder « Cuisine OS » (défaut) ou passer à « Mitsu » (titre, manifeste, icône iPhone, `SHELL`).
-2. **Les aperçus** : automatiques (défaut : 2 appels par recherche, donc 30 recherches illustrées par jour, et jusqu'à 10 requêtes signées
-   Mitsu vers des pages que tu n'as pas choisies) ou sur une tape « Voir les photos (1 appel) » (quota et vie privée préservés, un geste de
+2. **Les aperçus** : automatiques (défaut : 2 appels par recherche, donc 30 recherches illustrées par jour, et jusqu'à 10 téléchargements, au plus
+   40 requêtes signées Mitsu avec les redirections, vers des pages que tu n'as pas choisies) ou sur une tape « Voir les photos (1 appel) » (quota et vie privée préservés, un geste de
    plus). C'est autant une décision de vie privée que de quota.
 3. **L'entrée de navigation** : « Bibliothèque » (défaut ; mesuré à 320 et 375 px dans la preuve visuelle, repli « Carnet » si le libellé
    coupe) ou garder « Mes livres » avec le segment Recettes dedans.

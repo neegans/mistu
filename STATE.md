@@ -1,4 +1,13 @@
-# STATE.md — Cuisine OS (mistu) — état au 26 octobre 2026, 12 h 45 (chaîne A → F EN LIGNE : `main` = `05c751f`, 0.15.0, suite publique 5948/5948, migrations `0005` et `0006` collées et prouvées, fonction `assistant` version 4 ; LOT UI-2 « APERÇUS DES RÉSULTATS WEB » CONSTRUIT (tâches 1 à 3) puis VAGUE FINALE de la revue de branche faite dans le worktree `~/projects/mistu-apercus` (branche `apercus-web`, 0.16.0), `/verify` de clôture à faire, PAS fusionné, `0007` PAS collée, fonction PAS redéployée ; lot UI-1 « Carnet » en construction sur `experience-carnet` ; reste à Neegan : `0007` et sa preuve, appareils à jour, preuves réelles sur le site public, décisions ouvertes, révocation de l'ancienne clé, « clean »)
+# STATE.md — Cuisine OS (mistu) — état au 27 octobre 2026 (LOT UI-2 « APERÇUS » CLÔTURÉ, FUSIONNÉ dans `main` et POUSSÉ AVANT `0007` (R-UI2-20) ; chaîne A → F en ligne depuis le 23 octobre ; avant ce lot : `main` = `05c751f`, 0.15.0, suite publique 5948/5948, migrations `0005` et `0006` collées et prouvées, fonction `assistant` version 4 ; LOT UI-2 « APERÇUS DES RÉSULTATS WEB » CONSTRUIT (tâches 1 à 3) puis VAGUE FINALE de la revue de branche faite dans le worktree `~/projects/mistu-apercus` (branche `apercus-web`, 0.16.0), `/verify` de clôture à faire, PAS fusionné, `0007` PAS collée, fonction PAS redéployée ; lot UI-1 « Carnet » en construction sur `experience-carnet` ; reste à Neegan : `0007` et sa preuve, appareils à jour, preuves réelles sur le site public, décisions ouvertes, révocation de l'ancienne clé, « clean »)
+
+**27 octobre 2026 — UI-2 CLÔTURÉ, FUSIONNÉ et POUSSÉ** (`main` en avance rapide depuis `05c751f` jusqu'au commit de clôture ; spec § 12, R-UI2-18 à
+R-UI2-24) : `/verify` de clôture VERT sur `ecfc19b` (suite ✅ 6097/6097, épingle 6096 ; Node 230/230 ; `--check` 0 ; `tsc --strict` 0 ; secrets et
+invisibles 0 ; `verify-UI2-ecfc19b.txt`) ; Neegan avait autorisé la fusion et le push à la fin du lot : ils précèdent `0007`, sans coût (la version 4 refuse
+l'outil `apercu-web` en 400 `requete` avant toute réservation ; l'onglet Web dit « Photos indisponibles pour cette recherche. » jusqu'au redéploiement).
+Suite, dans l'ordre : Neegan colle `0007` et sa preuve (`supabase/README.md`, étape 13 : `0 faux sur 11`) → le chef redéploie la fonction (version 5)
+et joue les sondes (S-A3, S17-S18, S-F4-S-F5, S-A5 à S-A7 avec la session de Neegan : un appel du quota chacune, zéro jeton) → preuve § 10 UI-2 sur
+le site public. Le lot UI-1 « Carnet » est en construction (`experience-carnet`, tâches 1 à 3 commises et relues) ; il fusionnera par un commit de
+fusion (0.17.0).
 
 **26 octobre 2026, 12 h 45 — VAGUE FINALE de UI-2 faite** (revue finale de branche sur `b5a61a6` : 4 Important, 9 Minor ; rapport
 `.superpowers/sdd/2026-10-23-apercus-web/final-fix-report.md` ; spec § 12, VF-UI2-1 à VF-UI2-13) : aucun vol d'aperçus pendant une recherche en vol ;

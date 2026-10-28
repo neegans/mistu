@@ -1,6 +1,6 @@
 # Lot UI-2 « Aperçus des résultats web » (outil `apercu-web`, `0007`, vignettes et ligne d'état de l'onglet Web) — plan d'implémentation (rév. 2, 25 octobre 2026 ; rév. 1 du 23 octobre revue au pré-vol : 17 constats, section « Pré-vol » en fin de plan)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** dans l'onglet Web, chaque résultat vient avec la photo de la page quand le site en publie une : après le « trouvé », l'app demande en UN
 appel (le second de la recherche, annoncé avant la tape) les aperçus des cinq adresses à un sixième outil serveur sans modèle, `apercu-web`, qui
@@ -392,7 +392,7 @@ export const PARALLELISME_APERCU = 2;
   'image-web', 'apercu-web'))` ; `commit;`) ; preuve `0007` : 11 verdicts (1.01-1.05, 2.01, 2.02, 2.03, 2.031, 2.032, 3.01), BILAN attendu `0 faux sur 11`.
 - Produces (tests, littéraux) : `OUTILS_0007 = [...OUTILS_0006, 'apercu-web']` dans `tools/generer-migrations.test.mjs` ; `OUTILS_0006` reste (préfixe, historique).
 
-- [ ] **Step 0 : relevés et constats (aucune écriture dans le dépôt).**
+- [x] **Step 0 : relevés et constats (aucune écriture dans le dépôt).**
   1. Départ, lu dans la sortie (le worktree `/Users/neeganmac/projects/mistu-apercus` est servi par `python3 -m http.server 8095 --bind 127.0.0.1`) :
      `node .superpowers/sdd/2026-10-23-apercus-web/suite.cjs 8095` (attendu `✅ 5948/5948`, épingle `tests/tests.js:250` = 5947, seule erreur de console le
      404 de `/favicon.ico`) ; `node --test tools/*.test.mjs` (attendu 208/208) ; `node tools/generer-migrations.mjs --check` (attendu 0) ;
@@ -443,7 +443,7 @@ export const PARALLELISME_APERCU = 2;
      `await telechargerPage(`, `lirePageHtml(` et `await telechargerImage(`, est déclarée APRÈS `traiter`, Step 7). Les numéros de lignes cités par cette tâche
      valent à `f3672be` ; tout écart de nom est un amendement nommé dans `progress.md`, pas un constat.
 
-- [ ] **Step 1 : tests rouges — `tools/assistant-logique.test.mjs`.** Imports (l. 3-4) : `import { OUTILS, OUTILS_MODELE, LIMITES, LIMITES_APERCU, PARALLELISME_APERCU, origineAdmise, … } from '../supabase/functions/assistant/logique.js';`
+- [x] **Step 1 : tests rouges — `tools/assistant-logique.test.mjs`.** Imports (l. 3-4) : `import { OUTILS, OUTILS_MODELE, LIMITES, LIMITES_APERCU, PARALLELISME_APERCU, origineAdmise, … } from '../supabase/functions/assistant/logique.js';`
   et `import { LIMITES_LECTURE, LIMITES_IMAGE, textePrincipal } from '../supabase/functions/assistant/lecture-web.js';`. Amender l. 44 :
   `assert.deepEqual(OUTILS, ['recherche-web', 'creation', 'extraction', 'lecture-web', 'image-web', 'apercu-web'], 'lot UI-2 : six outils, apercu-web dernier (la contrainte de 0007 suit cet ordre, D-UI-14)');`
   et l. 234 : `assert.deepEqual(OUTILS_MODELE, OUTILS.filter((o) => o !== 'image-web' && o !== 'apercu-web'));`. Ajouter en fin de fichier :
@@ -506,7 +506,7 @@ test('ligneJournal : apercu-web admis, usage nul → jetons null ; apercu_web (s
 });
 ```
 
-- [ ] **Step 2 : tests rouges — `tools/assistant-index.test.mjs`** (ajouter en fin de fichier, après u12 ; `handler`, `remise`, `requete`, `lire`, `reserves`, `page`,
+- [x] **Step 2 : tests rouges — `tools/assistant-index.test.mjs`** (ajouter en fin de fichier, après u12 ; `handler`, `remise`, `requete`, `lire`, `reserves`, `page`,
   `appelsFetch`, `appelsPage`, `appelsModele`, `htmlReponse`, `RECETTE_LD`, `TEXTE_RECETTE`, `sourde`, `vider`, `JPEG`, `imageReponse`, `faux`, `ENV`, `MIO`, `mock`
   sont ceux du fichier ; aucun import de plus : les bornes sont des LITTÉRAUX ici, épinglées par le test de `logique.js` au Step 1, pour qu'un budget ou un
   parallélisme changé dans le code rougisse). u1 à u12 ne changent pas : `telechargerImage` garde son défaut de 2 Mio (u5 reste la preuve d'`image-web`).
@@ -747,7 +747,7 @@ test('v9. D-UI-14 / K-7 : la reservation en erreur (0007 absente : 23514 sur l i
 });
 ```
 
-- [ ] **Step 3 : tests rouges — `tools/generer-migrations.test.mjs`.** (1) Sous `const OUTILS_0006 = …` (l. 1182) : `const OUTILS_0007 = [...OUTILS_0006, 'apercu-web'];`.
+- [x] **Step 3 : tests rouges — `tools/generer-migrations.test.mjs`.** (1) Sous `const OUTILS_0006 = …` (l. 1182) : `const OUTILS_0007 = [...OUTILS_0006, 'apercu-web'];`.
   (2) l. 1189-1190 (les deux assertions du test « 0006 ») remplacées par UNE :
   `assert.deepEqual(OUTILS_PASSERELLE.slice(0, OUTILS_0006.length), OUTILS_0006, 'lot UI-2 : 0006 redevient un PREFIXE d OUTILS (la 0007 ajoute apercu-web ; l egalite vit au test « lot F puis UI-2 »)');`
   et le commentaire l. 1180-1181 gagne : « Depuis UI-2, OUTILS = OUTILS_0007 et 0006 est un préfixe historique. ». (3) l. 1245 (test de l'étape 12) :
@@ -864,7 +864,7 @@ test('index.ts (UI-2) : apercu-web dans le flux apres image-web et avant le mode
 });
 ```
 
-- [ ] **Step 4 : rouge lu.** `node --test --test-timeout=10000 tools/*.test.mjs` (sans `--test-timeout`, v8 attend un `fetch` qui ne part jamais : son propre
+- [x] **Step 4 : rouge lu.** `node --test --test-timeout=10000 tools/*.test.mjs` (sans `--test-timeout`, v8 attend un `fetch` qui ne part jamais : son propre
   `{ timeout: 8000 }` le coupe, mais l'option raccourcit tout rouge lent). Attendu, lu dans la sortie : `tools/assistant-logique.test.mjs` entier en erreur de
   chargement (les exports `LIMITES_APERCU` et `PARALLELISME_APERCU` n'existent pas : « does not provide an export named ») ; v1 à v9 rouges (`apercu-web`
   inconnu d'`OUTILS` : la fonction répond 400 `requete` là où v1 attend 422 et v2-v7, v9 attendent 200 / 502 / 429 ; v8 expire) ; dans
@@ -877,7 +877,7 @@ test('index.ts (UI-2) : apercu-web dans le flux apres image-web et avant le mode
   foi, à consigner dans `progress.md`. La suite navigateur n'est pas relancée ici (aucun fichier de `src/` ni de
   `tests/` touché).
 
-- [ ] **Step 5 : implémenter `logique.js`.** En-tête (l. 1-5) : ajouter après la phrase du lot F : « Lot UI-2 (spec 2026-10-23-experience-carnet § 6) : le
+- [x] **Step 5 : implémenter `logique.js`.** En-tête (l. 1-5) : ajouter après la phrase du lot F : « Lot UI-2 (spec 2026-10-23-experience-carnet § 6) : le
   sixième outil, `apercu-web`, sans modèle non plus — une liste d'adresses, chacune validée AVANT la réservation (I-UI-6) ; ses bornes dans LIMITES_APERCU. ».
   l. 7 :
 
@@ -922,7 +922,7 @@ function lireDemandeUrls(corps, { hotesRefuses = [] } = {}) {
   Rien d'autre ne change : `ligneJournal` admet `apercu-web` par `OUTILS` ; `OUTILS_MODELE` est inchangé. Contrôle : `node --test tools/assistant-logique.test.mjs`
   → vert (les cinq tests neufs, l. 44 et l. 234 amendées).
 
-- [ ] **Step 6 : écrire `0007_apercu_web.sql` et sa preuve** (à la main, sur le gabarit de `0006`). `supabase/migrations/0007_apercu_web.sql` :
+- [x] **Step 6 : écrire `0007_apercu_web.sql` et sa preuve** (à la main, sur le gabarit de `0006`). `supabase/migrations/0007_apercu_web.sql` :
 
 ```sql
 -- 0007 — le sixième outil de la passerelle, apercu-web (lot UI-2 « Aperçus des résultats web », spec 2026-10-23-experience-carnet § 6, D-UI-14).
@@ -1070,7 +1070,7 @@ rollback;
   corps `do $$…$$` ; aucune erreur. Ce n'est PAS une exécution : la sémantique se prouve par le collage de Neegan (Clôture, gate de fusion). Contrôle Node :
   `node --test tools/generer-migrations.test.mjs` → « 0007 » et « preuve 0007 » verts (README, RESULTATS, générateur et « index.ts (UI-2) » encore rouges).
 
-- [ ] **Step 7 : implémenter `index.ts`.** En-tête : après la l. 6, deux lignes :
+- [x] **Step 7 : implémenter `index.ts`.** En-tête : après la l. 6, deux lignes :
   `// Lot UI-2 (spec 2026-10-23-experience-carnet § 6) : apercu-web — jusqu'à cinq adresses validées AVANT une réservation unique ; pour chaque adresse admise,`
   `// la page (telechargerPage), l'image par LA règle de F (lirePageHtml(...).page.image_url), l'image bornée à 1 Mio (telechargerImage, max) ; jamais le modèle.`
   Import (l. 8) : `import { LIMITES, LIMITES_APERCU, OUTILS, OUTILS_MODELE, PARALLELISME_APERCU, corpsErreur, corpsLectureModele, entetesCors, ligneJournal, lireDemande as lireDemandeJs, origineAdmise, statutRelaye } from './logique.js';`
@@ -1158,7 +1158,7 @@ async function enParallele<T>(taches: Array<() => Promise<T>>, n: number): Promi
   `tsc` (commande du Step 0) → 0 — si `tsc` refuse `resultats[i] = …` ou le prédicat `(h): h is string`, c'est un constat de forme à corriger au plus près,
   jamais en relâchant `--strict`.
 
-- [ ] **Step 8 : README (étape 13), RESULTATS-mitsu.md (deux sections « à jouer »), générateur (« la 0008 à venir »).**
+- [x] **Step 8 : README (étape 13), RESULTATS-mitsu.md (deux sections « à jouer »), générateur (« la 0008 à venir »).**
   (1) `tools/generer-migrations.mjs`, deux commentaires JS (aucun effet sur le SQL rendu : `--check` reste 0) — l. 202 :
   `// Une migration À AJOUT SEUL (0003, 0005, la 0008 à venir — 0006 et 0007 sont écrites à la main, lots B et UI-2), d'un seul gabarit : les tables neuves (\`nouvelles\` : celles de \`stores\``
   (la suite de la ligne inchangée) ; l. 322 : `  // empreinte épinglée) et rendre le magasin suivant dans une 0008 (README, étape 11 ; 0006 et 0007 sont prises à la main, lots B et UI-2).`.
@@ -1258,14 +1258,14 @@ jetons `null` ; `assistant_usage_jour` du jour : 4 appels de plus.
   Contrôle : `node --test tools/generer-migrations.test.mjs` → tout vert (« 0006 » préfixe, étape 12 « trois écrites », étape 13, RESULTATS, générateur, « lot F
   puis UI-2 », « index.ts (UI-2) ») ; `node tools/generer-migrations.mjs --check` → 0.
 
-- [ ] **Step 9 : vert.** `node --test --test-timeout=10000 tools/*.test.mjs` : tout vert, compte relevé (attendu **227/227** : 208 + 5 logique + 9 index
+- [x] **Step 9 : vert.** `node --test --test-timeout=10000 tools/*.test.mjs` : tout vert, compte relevé (attendu **227/227** : 208 + 5 logique + 9 index
   + 5 générateur ; la valeur lue fait foi) ; `node tools/generer-migrations.mjs --check` : **0** ; `tsc` (commande du Step 0) : **0** ; suite navigateur
   `node .superpowers/sdd/2026-10-23-apercus-web/suite.cjs 8095` : `✅ 5948/5948`, épingle `tests/tests.js:250` = 5947 **inchangée** (aucun fichier de `src/`
   ni de `tests/` touché : l'épingle N−1 n'est pas relevée par cette tâche), seule erreur de console le 404 de `/favicon.ico`. **SHELL/VERSION : inchangés**
   (`APP_VERSION 0.15.0`, `sw.js cuisine-os-v0.15.0-9`, `DB_VERSION 4`, `SHELL` sans module neuf) : la tâche 2 porte `0.16.0`, `-1` et `./src/domain/apercu-web.js`.
   Bilans lus dans la sortie, consignés dans `progress.md`.
 
-- [ ] **Step 10 : mutants de la tâche** (**jamais une mutation dans le worktree**. Copier l'arbre ENTIER, travail non commis compris :
+- [x] **Step 10 : mutants de la tâche** (**jamais une mutation dans le worktree**. Copier l'arbre ENTIER, travail non commis compris :
   `rsync -a --exclude .git --exclude .superpowers /Users/neeganmac/projects/mistu-apercus/ <scratchpad>/mut-UI2-S1/base/` ; pour chaque mutant, une copie de
   `base/` (`rsync -a --delete <scratchpad>/mut-UI2-S1/base/ <scratchpad>/mut-UI2-S1/m<N>/`), la mutation écrite dans `m<N>/` par un script qui refuse tout
   chemin hors du scratchpad et exige une occurrence unique, puis `node --test --test-timeout=15000 tools/*.test.mjs` lancé DEPUIS `m<N>/` — les harnais y lisent
@@ -1281,12 +1281,12 @@ jetons `null` ; `assistant_usage_jour` du jour : 4 appels de plus.
   (« lireDemande apercu-web : liste blanche », v1 « six ») · `max = LIMITES_APERCU.image` en défaut de `telechargerImage` (u5) · `telechargerImage` sans
   `max` (`LIMITES_IMAGE.octets` en dur) (v5) · réservation déplacée AVANT `lireDemande` dans `traiter` (N-1, v1 : réservation faite sur un 422).
 
-- [ ] **Step 11 : invisibles et secrets** (Python `-I`, jamais `grep -P` : ce shell est ugrep) sur les ONZE fichiers touchés (trois du serveur, deux SQL
+- [x] **Step 11 : invisibles et secrets** (Python `-I`, jamais `grep -P` : ce shell est ugrep) sur les ONZE fichiers touchés (trois du serveur, deux SQL
   neufs, README, RESULTATS, générateur, trois tests Node) : 0 caractère de Cc hors `\t` / `\n`, Cf, Cs, U+2028 / U+2029 ; 0 insécable littérale (U+00A0,
   U+202F) dans les lignes ajoutées ; aucun motif de clé (`sk-ant-`, `eyJ[A-Za-z0-9_-]{20,}`, `sb_secret_` hors `factice`, `AIza`, `service_role` hors les
   commentaires qui le nomment déjà) dans les lignes ajoutées ; `git diff --check` muet.
 
-- [ ] **Step 12 : commit** (par chemins nommés : `git add` des onze fichiers, `git commit -- <fichiers>` ; message ASCII, sans accent ; trailer
+- [x] **Step 12 : commit** (par chemins nommés : `git add` des onze fichiers, `git commit -- <fichiers>` ; message ASCII, sans accent ; trailer
   `Co-Authored-By` du modèle RÉEL de l'implémenteur, convention du dépôt — R-T1-3 —, par exemple `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`,
   plus la ligne `Claude-Session: …` quand le harnais la fournit ; jamais de réécriture d'historique) :
 
@@ -1382,7 +1382,7 @@ export function reinitialiserWeb()       // tests : abandonne aussi le vol d'ape
 // src/model/schema.js : APP_VERSION = '0.16.0' ; sw.js : VERSION = 'cuisine-os-v0.16.0-1', SHELL + './src/domain/apercu-web.js'
 ```
 
-- [ ] **Step 0 : relire le code réel** à la tête du lot (`f3672be` = `main 05c751f` + trois commits de docs ; les numéros ci-dessous y valent ; une
+- [x] **Step 0 : relire le code réel** à la tête du lot (`f3672be` = `main 05c751f` + trois commits de docs ; les numéros ci-dessous y valent ; une
   dérive n'est pas un constat, un nom absent en est un — R-C-7). `src/ui/search.js` : l. 25-30 (`memoire`, `vol`, `vues`, `etatWeb`, `reinitialiserWeb`,
   `notifier`) ; l. 66-68 (`renderSearch`, la déstructuration de `deps` : `chercher = chercherRecettesWeb`) ; l. 113-115 (`render()`,
   `remplacerEnRevoquant(results)`) ; l. 185-205 (`lancer`, `annuler`) ; l. 214-236 (`renderWeb`, texte de garde l. 234) ; l. 239-299 (`renderIssue` :
@@ -1411,7 +1411,7 @@ export function reinitialiserWeb()       // tests : abandonne aussi le vol d'ape
   ligne serait un pin que la spec n'a pas relevé : l'amender aussi et le dire au rapport. Mesure de départ (registre `progress.md`, 23 oct. 19 h 40) :
   suite `✅ 5948/5948`, épingle 5947, Node 208/208, `--check` 0, `sw.js cuisine-os-v0.15.0-9`.
 
-- [ ] **Step 1 : tests rouges — `tests/apercu-web.js` (neuf), blocs du DOMAINE** (`lireApercusWeb`, mur sans ré-encodage, table serveur → client) :
+- [x] **Step 1 : tests rouges — `tests/apercu-web.js` (neuf), blocs du DOMAINE** (`lireApercusWeb`, mur sans ré-encodage, table serveur → client) :
 
 ```js
 // Tests du lot UI-2 « Aperçus des résultats web » (spec docs/superpowers/specs/2026-10-23-experience-carnet-design.md, § 4.6, § 6, § 7 UI-2).
@@ -1646,7 +1646,7 @@ try { await runApercuWebTests({ eq, ok }); }
 catch (error) { ok(false, `Suite aperçus web interrompue : ${error?.message || String(error)}`); }
 ```
 
-- [ ] **Step 2 : tests rouges — `tests/apercu-web.js`, blocs de l'ÉCRAN** (dans le `try`, après les blocs du domaine) :
+- [x] **Step 2 : tests rouges — `tests/apercu-web.js`, blocs de l'ÉCRAN** (dans le `try`, après les blocs du domaine) :
 
 ```js
     await run('écran : demande d’aperçus — forme, un appel pour cinq, un seul vol, insertion en une fois (D-UI-13, S-4, B-I-12)', async () => {
@@ -1900,7 +1900,7 @@ catch (error) { ok(false, `Suite aperçus web interrompue : ${error?.message || 
     });
 ```
 
-- [ ] **Step 3 : tests rouges — amendements des suites existantes** (épingles amendées, jamais contournées ; § 7 UI-2) :
+- [x] **Step 3 : tests rouges — amendements des suites existantes** (épingles amendées, jamais contournées ; § 7 UI-2) :
 
   `tests/recherche-web.js` l. 553 : le texte de garde (I-UI-1 : le nombre d'appels est annoncé AVANT la tape) —
 
@@ -1950,7 +1950,7 @@ catch (error) { ok(false, `Suite aperçus web interrompue : ${error?.message || 
   résultats web (lot UI-2, tâche 2) ». `tests/library.js` n'existe pas et `src/ui/library.js` n'affiche pas d'image avant UI-1 : l'extension à `library.js`
   est verte dès maintenant et le reste quand UI-1 (T2) y posera ses vignettes par blob (le lot UI-1 n'a plus rien à écrire sur cette ligne).
 
-- [ ] **Step 4 : rouge lu.** Servir le worktree (`python3 -m http.server 8095 --bind 127.0.0.1`, déjà lancé : registre `progress.md`), puis
+- [x] **Step 4 : rouge lu.** Servir le worktree (`python3 -m http.server 8095 --bind 127.0.0.1`, déjà lancé : registre `progress.md`), puis
   `node .superpowers/sdd/2026-10-23-apercus-web/suite.cjs 8095`. **Mesuré par l'auteur du plan** (23 oct., copie légère de `f3672be` + Steps 1 à 3, servie à
   part) : `BILAN : ❌ 5949/5973`, **24 rouges**, exactement ceux-ci — `tests/ajouter.js` « statique ../src/domain/apercu-web.js : c’est bien le module (un export
   y figure) » (le `lire` d'ajouter.js, l. 3769, rend le corps du 404 du serveur Python, 335 caractères : « le source est bien lu (> 300) » reste VERT, c'est
@@ -1968,7 +1968,7 @@ catch (error) { ok(false, `Suite aperçus web interrompue : ${error?.message || 
   constat 11 ; quatre d'écran, constats 9 et 14 du pré-vol) DANS des blocs qui, au rouge, lèvent avant de les atteindre (module 404, `S.etatApercus is not
   a function`) : le bilan rouge attendu reste `❌ 5949/5973`, non remesuré — la valeur lue fait foi.
 
-- [ ] **Step 5 : implémenter — `src/core/image.js`** (l. 97-110 à `f3672be` : le commentaire et la fonction remplacés ; `COTE_MIN_DISTANT` inchangé) :
+- [x] **Step 5 : implémenter — `src/core/image.js`** (l. 97-110 à `f3672be` : le commentaire et la fonction remplacés ; `COTE_MIN_DISTANT` inchangé) :
 
 ```js
 // Lot F (spec plats-en-images § 3.4, D-F12) : une image DISTANTE (l'image d'une page web, rapatriée par la fonction de l'assistant) passe un mur plus
@@ -1989,7 +1989,7 @@ export async function preparerPhotoDistante(blob, { coteMin = COTE_MIN_DISTANT, 
 }
 ```
 
-- [ ] **Step 6 : implémenter — `src/domain/apercu-web.js` (neuf** ; aucun mot du fournisseur ni de la base, commentaires compris ; aucun `t()`) :
+- [x] **Step 6 : implémenter — `src/domain/apercu-web.js` (neuf** ; aucun mot du fournisseur ni de la base, commentaires compris ; aucun `t()`) :
 
 ```js
 // Les aperçus des résultats web (lot UI-2 « Aperçus », spec docs/superpowers/specs/2026-10-23-experience-carnet-design.md § 6, D-UI-12) : UN appel,
@@ -2056,7 +2056,7 @@ export async function lireApercusWeb(args, opts) {
 }
 ```
 
-- [ ] **Step 7 : implémenter — `src/ui/search.js`** (neuf retouches, par leur texte ; numéros à `f3672be`). Rien d'autre ne bouge : `renderWeb`, les
+- [x] **Step 7 : implémenter — `src/ui/search.js`** (neuf retouches, par leur texte ; numéros à `f3672be`). Rien d'autre ne bouge : `renderWeb`, les
   issues `rien` / `indisponible`, « Garder et lire », les rangées de la carte gardent leur forme (I-UI-3).
 
   **(a) Imports** — après la l. 7 (`import { logError } from '../core/log.js';`), après la l. 11 (`import { chercherRecettesWeb, … } from
@@ -2200,7 +2200,7 @@ export function reinitialiserWeb() { vol?.controller.abort(); vol = null; memoir
   Vérifications de forme à la fin du Step : `node --check src/ui/search.js src/domain/apercu-web.js src/core/image.js` (0) ; `git grep -n "Anthropic\|Supabase"
   -- src/domain/apercu-web.js` vide ; `grep -n "styles.css" <(git diff --stat)` vide (aucune règle CSS : UI-1).
 
-- [ ] **Step 8 : implémenter — dictionnaire, coquille, versions, pins.**
+- [x] **Step 8 : implémenter — dictionnaire, coquille, versions, pins.**
 
   `src/i18n/en.js` : la l. 273 (`"Une recherche = un appel à l’assistant, compté dans ton quota du jour.": "One search = one call to the assistant, counted in your
   daily quota.",`) est RETIRÉE (spec § 5 : les chaînes retirées quittent aussi `en.js` ; aucun autre module ne la rend — `git grep` : `src/ui/search.js:234` seul) ;
@@ -2232,7 +2232,7 @@ export function reinitialiserWeb() { vol?.controller.abort(); vol = null; memoir
   Relancer le relevé du Step 0 avec `0.15.0` : attendu VIDE (hors les mentions d'historique dans les libellés, qui contiennent « 0.15.0 au lot F ») ; avec
   `0.16.0` : les 14 lignes.
 
-- [ ] **Step 9 : vert.** `node .superpowers/sdd/2026-10-23-apercus-web/suite.cjs 8095` : tout vert **sauf l'épingle** (`eq(results.length, …)`, forcément rouge
+- [x] **Step 9 : vert.** `node .superpowers/sdd/2026-10-23-apercus-web/suite.cjs 8095` : tout vert **sauf l'épingle** (`eq(results.length, …)`, forcément rouge
   tant qu'elle n'est pas relevée : Step 10), une seule erreur de console (le 404 de `/favicon.ico`), aucune réponse ≥ 400 autre. **Mesuré par l'auteur du plan**
   (copie légère de `f3672be` + Steps 1 à 8 de la rév. 1, servie à part) : `❌ 6031/6032` (l'épingle seule : « obtenu : 6031 attendu : 5947 »), console : le 404 de
   `/favicon.ico` seul ; la rév. 1 comptait `tests/apercu-web.js` = 82 assertions (33 de domaine, 49 d'écran), `tests/recherche-web.js` + 2 : 84 de plus que le
@@ -2244,11 +2244,11 @@ export function reinitialiserWeb() { vol?.controller.abort(); vol = null; memoir
   bloc qui lève : la lire). `node --test tools/*.test.mjs` : la valeur lue à la tête (227/227 si la tâche 1 est commise, 208/208 sinon), inchangée ;
   `node tools/generer-migrations.mjs --check` : 0.
 
-- [ ] **Step 10 : épingle relevée** : `tests/tests.js` l. 250, `eq(results.length, 6037,'compte d’assertions : une assertion qui disparait est un rouge');` (règle
+- [x] **Step 10 : épingle relevée** : `tests/tests.js` l. 250, `eq(results.length, 6037,'compte d’assertions : une assertion qui disparait est un rouge');` (règle
   N−1 : l'assertion du total s'ajoute elle-même au bilan ; 6037 si la mesure du Step 9 est bien 6037/6038, sinon « obtenu ») ; relancer la suite : `✅ 6038/6038`,
   même 404 seul en console. Consigner N et l'épingle dans le rapport de tâche.
 
-- [ ] **Step 11 : mutants de la tâche** — sur une copie LÉGÈRE servie à part (`rsync -a --exclude .git --exclude .superpowers --exclude node_modules
+- [x] **Step 11 : mutants de la tâche** — sur une copie LÉGÈRE servie à part (`rsync -a --exclude .git --exclude .superpowers --exclude node_modules
   /Users/neeganmac/projects/mistu-apercus/ <scratchpad>/mutant-S2/`, `python3 -m http.server 8195 --bind 127.0.0.1` depuis la copie (8195 était occupé par un autre serveur Python le 23 octobre, PID 72905, non tué : vérifier `lsof -nP -iTCP:8195 -sTCP:LISTEN` et prendre le premier port libre de 8195, 8295, 8395 — jamais 8095), `node
   .superpowers/sdd/2026-10-23-apercus-web/suite.cjs <le port choisi>` ; jamais en place ; le serveur de la copie est tué à la fin, jamais celui du port 8095). Chacun
   doit rougir ; le bilan et la première ligne rouge de chacun vont au rapport :
@@ -2283,7 +2283,7 @@ export function reinitialiserWeb() { vol?.controller.abort(); vol = null; memoir
   `❌ 6030/6032`, 2 rouges : « vue déconnectée : le « trouvé » est rendu … mais aucun aperçu n’est demandé » (`[1,2,{}]`) et « monter la vue ne demande rien à
   lui seul » (2 au lieu de 1). Les vingt autres restent à jouer par l'implémenteur, chacun sur une copie.
 
-- [ ] **Step 12 : invisibles** sur les fichiers touchés (`src/core/image.js src/domain/apercu-web.js src/ui/search.js src/i18n/en.js sw.js src/model/schema.js
+- [x] **Step 12 : invisibles** sur les fichiers touchés (`src/core/image.js src/domain/apercu-web.js src/ui/search.js src/i18n/en.js sw.js src/model/schema.js
   tests/apercu-web.js tests/tests.js tests/recherche-web.js tests/photo-plat.js tests/ajouter.js tests/passerelle.js tests/sync-l3.js tests/sync-l4.js
   tests/assistant-compte.js tests/creer-ia.js tests/classement.js`) : **le script des Global Constraints** (« Caractères invisibles » : catégories Cc hors
   `\t` / `\n`, Cf, Cs, U+2028 / U+2029 — jamais une liste fermée de points de code : la rév. 1 de ce Step en portait une, aveugle aux insécables et au
@@ -2313,7 +2313,7 @@ export function reinitialiserWeb() { vol?.controller.abort(); vol = null; memoir
   Secrets : `git grep -nEi 'sk-ant-[0-9A-Za-z_-]{10,}|eyJ[A-Za-z0-9_-]{20,}' -- src tests` ne rend que les sentinelles déjà présentes (`…-sentinelle`,
   `sk-factice-…`) ; `jeton-apercus-sentinelle` est une sentinelle de plus, jamais une valeur.
 
-- [ ] **Step 13 : commit** (message ASCII, sans accents ; `git add` nommé fichier par fichier, jamais `-A` : deux agents partagent l'index d'un worktree) :
+- [x] **Step 13 : commit** (message ASCII, sans accents ; `git add` nommé fichier par fichier, jamais `-A` : deux agents partagent l'index d'un worktree) :
   `Apercus web, client : lireApercusWeb, mur sans re-encodage, figures et ligne d etat de l onglet Web, APP_VERSION 0.16.0 (lot UI-2, tache 2)`,
   corps en ASCII (une ligne par bloc : domaine, image.js, search.js, en.js, sw.js -1 et SHELL, pins et epingle), puis les deux trailers du dépôt :
   `Co-Authored-By: <modele reel de l implementeur> <noreply@anthropic.com>` (R-T1-3, P-UI2-18) et la ligne `Claude-Session: …` quand le harnais la fournit, comme à la tâche 1. Le commit touche `src/` : `sw.js` porte `-1` (I-UI-7, R-B-24) ; toute ronde ultérieure qui touche `src/`
@@ -2351,7 +2351,7 @@ personne autre que Neegan.
   log`, à remplacer AVANT le commit ; le Step 5 vérifie qu'aucun chevron ne reste dans les lignes ajoutées**. Les nombres écrits en clair (227, 6038,
   6037, `0.16.0`, `-1`) sont les attendus du plan : si la mesure lue diffère, la mesure gagne et l'écart est une ligne de `progress.md`.
 
-- [ ] **Step 0 : relevés (aucune écriture).** Lire, dans l'ordre : `progress.md` (mesures de départ, de la tâche 1 et de la tâche 2 : suite,
+- [x] **Step 0 : relevés (aucune écriture).** Lire, dans l'ordre : `progress.md` (mesures de départ, de la tâche 1 et de la tâche 2 : suite,
   épingle, Node, `--check`, `tsc`, `sw.js`, écarts nommés, rulings de construction) ; les rapports des tâches 1 et 2 (mutants : nombre joué, rouges,
   équivalents ; rondes : constats et correctifs) ; `git log --oneline f3672be..HEAD` (les SHA : tâche 1, sa ronde, tâche 2, sa ronde) ;
   `grep -n "APP_VERSION\|DB_VERSION" src/model/schema.js` (`0.16.0`, `4`) ; `grep -n "^const VERSION" sw.js` (`cuisine-os-v0.16.0-N`) ;
@@ -2368,7 +2368,7 @@ personne autre que Neegan.
 
   Attendu : `1` cinq fois.
 
-- [ ] **Step 1 : `CLAUDE.md` — la section du lot UI-2**, insérée AVANT la ligne `## La présentation du serveur (18 octobre 2026, lot borné après la
+- [x] **Step 1 : `CLAUDE.md` — la section du lot UI-2**, insérée AVANT la ligne `## La présentation du serveur (18 octobre 2026, lot borné après la
   passerelle)` (une ligne vide avant et après le bloc ; le motif des sections de lot : Pour toi, Où, Ce qui marche, Ce qui n'est PAS prouvé, Dettes,
   Gestes, Versions, Bilan) :
 
@@ -2490,7 +2490,7 @@ branche, vague et `/verify` : à la clôture du chef d'orchestre (plan, section 
   Aucune autre ligne de `CLAUDE.md` ne change (la section du lot F reste telle qu'elle était à sa clôture : « fonction À REDÉPLOYER » y est
   historique, le `STATE.md` du 23 octobre dit la version 4).
 
-- [ ] **Step 2 : `STATE.md`.** (a) La l. 1 (le titre, qui commence par `# STATE.md — Cuisine OS (mistu) — état au 23 octobre 2026, 17 h 30`) est
+- [x] **Step 2 : `STATE.md`.** (a) La l. 1 (le titre, qui commence par `# STATE.md — Cuisine OS (mistu) — état au 23 octobre 2026, 17 h 30`) est
   REMPLACÉE entière par :
 
 ```markdown
@@ -2519,7 +2519,7 @@ construction ; le second lot fusionné résout les quatre fichiers communs, spec
 
   Rien d'autre ne change dans `STATE.md` (les blocs des lots A à F décrivent chaque lot tel qu'il était à sa clôture).
 
-- [ ] **Step 3 : `docs/architecture.md`**, trois retouches par leur texte. (a) Carte des modules : après la ligne
+- [x] **Step 3 : `docs/architecture.md`**, trois retouches par leur texte. (a) Carte des modules : après la ligne
   `             creation-ia.js (demande, validation, fabrication et appel de « Créer une recette avec l'assistant » — voir cette section)` (l. 22,
   unique), insérer :
 
@@ -2587,7 +2587,7 @@ supabase/functions/assistant  POST { outil: 'apercu-web', corps: { urls: [1..5] 
   son premier « trouvé » déconnectée (P-UI2-7) ; la figure hérite de la règle 72 px de `.plat-vignette` tant que UI-1 ne pose pas `.grande` (P-UI2-10).
 ```
 
-- [ ] **Step 4 : spec § 12, sous-titre UI-2**, inséré AVANT la ligne `## 13. À trancher par Neegan (sans urgence ; chaque point a son défaut, construit
+- [x] **Step 4 : spec § 12, sous-titre UI-2**, inséré AVANT la ligne `## 13. À trancher par Neegan (sans urgence ; chaque point a son défaut, construit
   tel quel)` (une ligne vide avant et après ; rien d'autre dans la spec, P-UI2-17 ; les rulings de construction R-UI2-… viennent de `progress.md` et
   des rapports : une ligne par écart nommé — forme adaptée au code réel, décision d'une ronde, mutant équivalent déclaré — ; s'il n'y en a aucun,
   écrire « aucun écart de construction nommé ») :
@@ -2639,7 +2639,7 @@ et sondes S-A1 à S-A7 (chef), preuve § 10 UI-2 sur le site public, décisions 
 ou tape (§ 13 point 2), P-UI2-6, P-UI2-7, P-UI2-9.
 ```
 
-- [ ] **Step 5 : contrôles.** (1) `git status --short` ne liste que `CLAUDE.md`, `STATE.md`, `docs/architecture.md` et
+- [x] **Step 5 : contrôles.** (1) `git status --short` ne liste que `CLAUDE.md`, `STATE.md`, `docs/architecture.md` et
   `docs/superpowers/specs/2026-10-23-experience-carnet-design.md` ; `git diff --stat` ne nomme ni `src/`, ni `tests/`, ni `sw.js`, ni `supabase/`.
   (2) Aucun chevron de gabarit dans les lignes AJOUTÉES : `git diff -U0 -- CLAUDE.md STATE.md docs/architecture.md docs/superpowers/specs/2026-10-23-experience-carnet-design.md | grep '^+' | grep -c '<[^>]*>'`
   → `0` (les chevrons des flèches `→` ne comptent pas : ce sont d'autres caractères). (3) Les cinq ancres du Step 0 valent encore `1` chacune, et
@@ -2649,7 +2649,7 @@ ou tape (§ 13 point 2), P-UI2-6, P-UI2-7, P-UI2-9.
   `git diff -U0 | grep '^+' | grep -nEi 'sk-ant-|eyJ[A-Za-z0-9_-]{20,}|sb_secret_|AIza|[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}'` vide. (6) `git diff --check`
   muet. (7) Les mesures écrites (suite, épingle, Node, `sw.js`, SHA) sont celles de `progress.md` : relire côte à côte.
 
-- [ ] **Step 6 : commit** (par chemins nommés : `git add CLAUDE.md STATE.md docs/architecture.md docs/superpowers/specs/2026-10-23-experience-carnet-design.md`,
+- [x] **Step 6 : commit** (par chemins nommés : `git add CLAUDE.md STATE.md docs/architecture.md docs/superpowers/specs/2026-10-23-experience-carnet-design.md`,
   puis `git commit -- CLAUDE.md STATE.md docs/architecture.md docs/superpowers/specs/2026-10-23-experience-carnet-design.md` ; message ASCII sans accent ; trailer du modèle réel, ligne de session si le harnais la fournit ; aucune version,
   P-UI2-20) :
 

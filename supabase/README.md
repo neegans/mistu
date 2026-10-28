@@ -405,17 +405,21 @@ fonction, ni privilège ; le `drop` et l'`add` tiennent dans une transaction (DD
    « aucun compte : etape sautee » et 2.032 qui lit `id non nul`.
 4. **Consigner** la sortie dans `proofs/RESULTATS-mitsu.md`, section « Preuve `0007_apercu_web.sql` — à jouer » déjà préparée (tableau tel quel, empreinte).
 5. **Ordre, sans exception** : `0007` → redéploiement de la fonction (geste du chef d'orchestre, la commande du point 2 de l'étape 10 :
-   `supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api`) → les sondes sans dépense : S-A1 (forme refusée,
-   `urls: 'x'` → 400 `requete`, aucune ligne au journal), S-A2 (cinq adresses interdites → 422 `interdit`, aucune ligne), S-A3 (une admise et quatre
-   interdites → 200 avec quatre `interdit` et UNE ligne `apercu-web` : un appel du quota, zéro jeton), S-A4 (sans jeton → 401 `non_connecte`), et les
-   sondes S1-S9 du lot 4, S13-S19 du lot B, S-F1 à S-F3 du lot F et le `GET` d'état rejoués (leurs listes : `RESULTATS-mitsu.md`, sections « Passerelle
+   `supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api`) → les sondes sans dépense (aucune réservation) : S-A1 (forme refusée,
+   `urls: 'x'` → 400 `requete`, aucune ligne au journal), S-A2 (cinq adresses interdites → 422 `interdit`, aucune ligne), S-A4 (sans jeton → 401
+   `non_connecte`), et les sondes S1-S9 du lot 4, S13-S16 et S19 du lot B, S-F1 à S-F3 du lot F et le `GET` d'état rejoués (leurs listes : `RESULTATS-mitsu.md`, sections « Passerelle
    `assistant` », « Sondes `lecture-web` » et « Sondes `image-web` » ; `lecture-web` et `image-web` doivent être reprouvés sur la version 5) → les sondes payantes, un appel du quota
-   chacune et zéro jeton : S-A5 (les cinq adresses des liens de la recherche « puttanesca » → cinq images ou raisons, le compte d'`image_trop_lourde`
+   chacune et zéro jeton : S-A3 (une admise et quatre interdites → 200 avec quatre `interdit` et UNE ligne `apercu-web`), S17-S18 du lot B et S-F4-S-F5
+   du lot F rejouées, S-A5 (les cinq adresses des liens de la recherche « puttanesca » → cinq images ou raisons, le compte d'`image_trop_lourde`
    — il décide si la borne passe de 1 à 2 Mio —, la durée totale et la taille réelle de la réponse), S-A6 (une page de liste → `pas_de_recette`),
    S-A7 (« cinq pages hostiles de 2 Mio » servies par un hôte public contrôlé par le contrôleur → 200 ou `delai` en moins de 60 s, jamais un 502
-   d'isolat tué) → fusion → `push`. Les sondes se consignent dans la section « Sondes `apercu-web` » de `RESULTATS-mitsu.md`. S-A3 et S-A5 à S-A7
-   passent la session et la liste admise : la session de Neegan est lue par le script d'attente du presse-papiers (fichier d'en-tête à mode 600,
-   `curl -H @fichier`, fichier vidé dès les sondes finies) — jamais le jeton dans une commande, ni dans un fichier du dépôt ; S-A4 se joue sans jeton.
+   d'isolat tué) → fusion → `push`. Les sondes se consignent dans la section « Sondes `apercu-web` » de `RESULTATS-mitsu.md`. S-A1, S-A2, S-A3 et S-A5 à S-A7
+   passent la session et la liste admise (la fonction lit la session avant le corps : sans elle, S-A1 et S-A2 rendraient 401) : la session de Neegan est lue par le script d'attente du presse-papiers (fichier d'en-tête à mode 600,
+   `curl -H @fichier`, fichier vidé dès les sondes finies) — jamais le jeton dans une commande, ni dans un fichier du dépôt ; S-A4 se joue sans jeton. **Exception tranchée le 27 octobre 2026
+   (R-UI2-20, spec § 12)** : Neegan ayant autorisé la fusion et le push à la fin du lot, le code de UI-2 part sur le site public AVANT `0007` ; la
+   version 4 encore déployée refuse l'outil `apercu-web` en 400 `requete` avant toute réservation (aucun appel compté) et l'onglet Web dit « Photos
+   indisponibles pour cette recherche. » jusqu'au redéploiement ; l'ordre `0007` → redéploiement → sondes reste ; une ronde imposée par les sondes
+   (borne 2 Mio, parallélisme) part en commit de suite.
 
 ## Où coller les sorties
 
