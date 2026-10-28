@@ -59,6 +59,11 @@ const suivreLargeur = (racine, mq, appliquer) => suivreLargeurAuMontage('fiche-r
 // (les clés que la zone ne connaît pas sont ignorées ; sans deps, ses défauts valent la production).
 // Fidélité aux maquettes (28 octobre 2026) : en tête de fiche, les états ORDINAIRES (« Disponible », « Original ») ne s'affichent plus ; ceux qui disent
 // quelque chose (« À importer », « Partielle », une version à moi ou de l'assistant, le type, les cuisines) restent. Rangée vide : rien.
+// Cases à cocher des ingrédients : en mémoire seulement, par fiche (jamais écrites ; un rechargement les vide).
+const COCHES = new Map();
+let numeroCoche = 0;
+function cochesDe(id) { if (!COCHES.has(id)) COCHES.set(id, new Set()); return COCHES.get(id); }
+
 function rangeeEtat(...enfants) {
   const utiles = enfants.filter((b) => b && !(b.classList?.contains('available') || b.classList?.contains('original')));
   return utiles.length ? el('div', { class: 'row' }, ...utiles) : null;
@@ -112,7 +117,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // Lot F (D-F16) : ★ Favori n'écrit que `favorite`, sur la fiche RELUE — ronde 1 : DANS la transaction d'écriture (condition { key, fusion } par
   // saveBatch, comme photo-plat.js) : une photo du plat posée depuis le rendu (descente web, autre onglet), même pendant ce geste, survit. La valeur
   // écrite est celle que l'écran annonce (« ☆ » → favori), jamais l'inverse de la base. Le repo et le toast injectés (deps) servent ici aussi.
-  const favBtn = el('button', { class: 'btn discret', title: t('Favori'), onClick: async () => {
+  const favBtn = el('button', { class: 'btn discret', title: t('Favori'), 'aria-pressed': recipe.favorite ? 'true' : 'false', onClick: async () => {
     let absente = false;
     try {
       await gestesLecture.repo.saveBatch({}, { conditions: { recipes: [{ key: recipe.id, fusion: (c) => { if (!c) { absente = true; return null; } return { ...c, favorite: !recipe.favorite }; } }] } });
@@ -136,7 +141,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   // n'est masquée — la liste des versions plus bas reste entière, et l'original n'est jamais réécrit ; seule une
   // ligne le dit, ici, là où la personne regarde la recette. La décision se prend dans Réglages, nulle part ailleurs.
   const conflit = await repo.get('sync_conflicts', 'recipes:' + params.id);
-  let avisConflit = null; // posé SOUS l'en-tête (le titre est désormais dans la colonne de gauche)
+  let avisConflit = null; // posé dans la colonne de l'état, après sa rangée et ses bandeaux : avant la photo et « Commencer à cuisiner » en étroit (revue du 28 octobre)
   if (conflit?.kind === 'version') {
     avisConflit = (el('div', { class: 'card warn stack' },
       el('p', null, t('Une autre version a été créée ailleurs — les deux versions sont conservées.')),
@@ -157,13 +162,13 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   const web = bandeauWeb(version);
   if (web) etat.append(web); // lot B (§ 4.5) : la source d'une version lue sur le web, d'abord — puis la bannière du lot A
   if (lecture) etat.append(bandeauLecture(lecture));
+  if (avisConflit) etat.append(avisConflit);
   const ctxF = await contexteFichiers(ctx); // lot G : compte, file_error et moteur, pour les vignettes et la photo du plat (§ 4.4)
   // Lot F (§ 4.1.1) : l'emplacement de tête (un div, jamais null : aucun nœud texte direct) ; la zone est insérée plus bas, après la préparation.
   const photo = await monterPhotoPlat(recipe, ctx, { ...deps, ctxF });
   photo.entete.classList.add('fiche-photo');
   const tete = el('div', { class: 'two-col fiche-tete', dataset: { role: 'fiche-tete' } }, etat, photo.entete);
   root.append(tete);
-  if (avisConflit) root.append(avisConflit);
 
   if (!version) {
     root.append(await referenceOnly());
@@ -283,8 +288,14 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     const ingList = el('ul', { class: 'list plain coches' });
     scaled.ingredients.forEach((ri, i) => {
       const li = ingredientLineEl(ri, ctxQty, ctx.ingredientsById);
-      // Fidélité aux maquettes : une case à cocher par ingrédient, pour suivre pendant qu'on prépare. Locale à l'écran : rien n'est écrit (un redessin la décoche).
-      li.prepend(el('input', { type: 'checkbox', class: 'coche', 'aria-label': ri.source_text || ri.name_text || '' }));
+      // Fidélité aux maquettes : une case à cocher par ingrédient, pour suivre pendant qu'on prépare. Rien n'est écrit : l'état vit en mémoire
+      // (COCHES, par fiche), survit aux redessins et aux passes, se perd au rechargement. Nommée par la ligne RENDUE (quantité ajustée), pas par
+      // source_text ; l'étiquette de 44 px est la cible (revue du 28 octobre).
+      const ligne = li.firstElementChild; const idLigne = `coche-${++numeroCoche}`; ligne.id = idLigne;
+      const cles = cochesDe(recipe.id); const cle = ri.id || `#${i}`;
+      const caseL = el('input', { type: 'checkbox', class: 'coche', 'aria-labelledby': idLigne, onChange: (e) => { if (e.target.checked) cles.add(cle); else cles.delete(cle); } });
+      caseL.checked = cles.has(cle);
+      li.prepend(el('label', { class: 'coche-cible' }, caseL));
       if (translation?.translated_content?.ingredients?.[i]) li.append(el('div', { class: 'muted', style: { fontSize: '.85rem' } }, `${t('Traduction')} : ${translation.translated_content.ingredients[i]}`));
       li.append(el('button', { class: 'btn link small remplacer', onClick: () => replaceIngredient(ri) }, t('Remplacer')));
       ingList.append(li);

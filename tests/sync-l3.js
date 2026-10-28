@@ -1851,6 +1851,7 @@ export async function runSyncL3Tests({ eq, ok }) {
       await db.mutate({ puts: { sync_conflicts: [conflitPour('version')] }, origin: 'remote' });
       const avec = await renderRecipe({ id: 'rc9' }, {}, ctx);
       ok(avec.textContent.includes(PHRASE), 'vue recette : conflit de version → la ligne le dit, sans masquer aucune version');
+      ok(avec.querySelector('[data-role="fiche-etat"]')?.textContent.includes(PHRASE) === true, 'vue recette (revue du 28 octobre) : l’avis vit dans la colonne de l’état, sous le titre — avant la photo et « Commencer à cuisiner » en étroit');
       eq([...avec.querySelectorAll('a')].filter((a) => a.getAttribute('href') === '#/settings').length, 1, 'vue recette : … avec un seul lien vers Réglages pour trancher');
     });
   }

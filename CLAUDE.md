@@ -3250,6 +3250,37 @@ remove` ; UI-2 a fusionné le premier (27 octobre) ; UI-1 entre par un commit de
 rulings R-UI-61 à R-UI-65 (spec § 12) — ratifications, R-UI-4 (échelle de page ratifiée), R-UI-35 et R-UI-12 (proposition ratifiée, orpheline
 inatteignable), R-UI-5 renvoyé à Neegan (§ 13 point 7), constats visuels nommés.
 
+### Fidélité aux maquettes (28 octobre 2026, lot visuel court)
+
+**Pour toi.** L'app ressemble davantage aux maquettes, sans changer un seul geste. Olive plus sombre (`#454e3b`), titres serif plus fins et plus
+grands (New York dans Safari, sur le Mac et l'iPhone), boutons rectangulaires à coins de 8 px. Bibliothèque : onglets soulignés (Recettes · Livres ·
+Plats), recherche avec sa loupe et filtres sur une même rangée, cartes en photo 8:5 avec « Du web · 35 min » ou « De mon livre · 40 min » et une
+petite icône, sans badge « Disponible ». Fiche recette : le titre en face de la photo sur le Mac, une case à cocher par ingrédient pour suivre en
+cuisinant (rien n'est écrit ; elles tiennent tant que l'app est ouverte), étapes en pastilles, « Remplacer » en lien discret, « Portions, versions
+et autres gestes » replié à toutes les largeurs, Favori en étoile (seule sur l'iPhone, le mot reste lu par VoiceOver). Sur le Mac, la navigation
+passe en onglets texte dans la barre du haut (plus de panneau latéral) ; Réglages reste sur la roue. Sur l'iPhone, la recherche de la barre se
+réduit à sa loupe : la marque n'est plus rognée quand « N non envoyés » s'affiche (B05 de ton document du 28 octobre).
+
+**Où.** Branche `fidelite-maquettes`, worktree `~/projects/mistu-maquettes`, base `main` `92db6a2`, serveur 8097. Registre hors git
+`.superpowers/sdd/2026-10-28-fidelite-maquettes/` : banc `comparer.cjs`, `captures/` (dont `triptyque-{web,mobile}-{bibliotheque,recette}.png` =
+maquette | avant | après). Rulings R-FM-1 à R-FM-9 : spec « expérience carnet » § 12, sous-titre « Fidélité aux maquettes ». Module neuf :
+`src/ui/coquille.js` (la coquille sortie d'`app.js`, montée par la suite).
+
+**Prouvé** (suite navigateur, bases jetables, cadres mesurés ; aucun appel réel) : la barre du haut mesurée à huit largeurs avec la pastille
+visible (aucune page plus large que la fenêtre, roue entière) ; un titre sans espace reste dans sa carte à 375 px ; les cases à cocher n'écrivent
+rien et survivent au redessin ; les états utiles de la fiche restent affichés ; l'avis de conflit vit sous le titre. Revue adverse à trois
+lentilles : 6 Important et 13 Minor ; tous les Important et la plupart des Minor corrigés (R-FM-9). Mutants sur une copie servie à part : voir le
+bilan du lot (`STATE.md`).
+
+**Pas prouvé.** Safari et l'iPhone (captures sous Chrome : New York n'y est pas, Iowan Old Style le remplace) ; la preuve visuelle de UI-1 n'est pas
+rejouée ; à 320 px avec la pastille, la barre déborde encore (dette R-VIS-4, inchangée).
+
+**Écarts restants à la maquette** (à trancher, sans urgence) : la marque « Cuisine OS » et l'avatar « N » ; les repères sans icônes ; « Recette
+enregistrée ✓ » et la description courte sous le titre ; « Voir la préparation » en bas de la fiche sur l'iPhone.
+
+**Versions.** `APP_VERSION 0.17.0` (inchangée : un lot visuel sur 0.17.0), `sw.js` `cuisine-os-v0.17.0-12` → `-14` (un incrément par commit qui
+touche `src/` ou `styles.css`, R-B-24), `SHELL` + `./src/ui/coquille.js`, `DB_VERSION` 4 ; aucun schéma, aucune migration, rien sous `supabase/`.
+
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 
 **Contexte.** Lot 4 fusionné et poussé par Neegan (`main` = `3998f97`, Pages servi à 20 h 51 UTC, `cuisine-os-v0.8.0-6`) ; preuve

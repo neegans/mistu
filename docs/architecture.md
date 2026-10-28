@@ -10,7 +10,7 @@
 
 ```text
 index.html, styles.css, manifest.webmanifest, sw.js
-src/app.js                 coquille, navigation, routes
+src/app.js                 routes, démarrage (la coquille et la navigation : src/ui/coquille.js, depuis le 28 octobre 2026)
 src/core/    db.js (IndexedDB), router.js (#/…), dom.js (el, dialogues), i18n.js (FR clé, EN dictionnaire), hash.js (SHA-256 + repli), zip.js (ZIP stored), ids.js, bus.js,
              bornes.js (borner, lireBornee, signalDelai, OPTIONS_FETCH : bornes des appels distants, pur, sans import)
 src/model/   schema.js (magasins, relations, vocabulaires), seed.js (unités, conventions, ingrédients FR/EN, presets d'appareils), repo.js (accès, réglages, activité, fichiers)
@@ -1578,6 +1578,23 @@ adaptée à l'app — thème, composition des écrans, textes, icônes — sans 
   (badge court, sans page) et la liste « à importer » ; les liens `#/recipes/<id>` des cartes et de « Refaire » encodent l'identifiant ; un titre de livre
   non-chaîne est trié par `String()` ; la grille Recettes dit « Aucune recette ne correspond. » ; la règle `.fiche-tete:has(> .fiche-photo:empty)` n'a plus de
   zone « photo » morte ; `clesT` (`tests/ajouter.js`) est la lecture unique des clés i18n (trois formes de littéral).
+
+## Fidélité aux maquettes (28 octobre 2026, lot visuel court)
+
+```
+src/ui/coquille.js         NAV, navLinks(path, cls), coquille(path) → { root, main, side, tabs } : barre du haut (marque, onglets texte dès
+                           900 px dans aside.sidenav role=navigation, pastille, recherche, roue), zone principale, onglets bas sous 900 px.
+                           Sortie d'app.js (qui lance l'application à l'import) pour que la suite la monte : tests/carnet.js la mesure dans un
+                           cadre à huit largeurs, pastille visible.
+src/ui/recipe.js           rangeeEtat(...badges) tait « Disponible » et « Original » ; l'en-tête vit dans .fiche-etat ; COCHES (Map, mémoire
+                           seulement) garde les cases à cocher des ingrédients par fiche ; « autres gestes » replié à toutes les largeurs.
+src/ui/components.js       ligneSource : « Du web » / « De mon livre » (+ durée) ; la carte tait le badge ordinaire « Disponible ».
+styles.css                 jetons olive sombre (#454e3b), --serif système, --radius-btn 8 px ; .segmented.onglets ; .filtre-recettes ;
+                           .coches ; .fav-libelle ; .plat-vignette.grande 8:5 ; barre du haut (≥ 900 px) et recherche en loupe (< 600 px,
+                           900-1099 px).
+```
+
+Rulings : spec « expérience carnet » § 12, « Fidélité aux maquettes » (R-FM-1 à R-FM-9).
 
 ## Modèle de données (magasins IndexedDB)
 

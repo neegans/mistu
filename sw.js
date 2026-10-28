@@ -1,7 +1,7 @@
 // Service worker : coquille applicative en cache pour consultation hors connexion des recettes déjà chargées.
 // Les nouvelles demandes IA et les recherches de métadonnées ne fonctionnent pas hors connexion (spec §15).
 importScripts('./sw-rules.js');
-const VERSION = 'cuisine-os-v0.17.0-13';
+const VERSION = 'cuisine-os-v0.17.0-14';
 // Tous les modules de production sont inclus ; tests/ reste chargé à la demande.
 // La complétude de cette liste est vérifiée par tests/sync.js (graphe d'imports depuis src/app.js) : un chemin
 // manquant ferait répondre 404 à cache.addAll et l'installation entière échouerait.
@@ -16,7 +16,7 @@ const SHELL = [
   './src/model/repo.js', './src/model/schema.js', './src/model/seed.js',
   './src/domain/apercu-web.js', './src/domain/assistant-config.js', './src/domain/backup.js', './src/domain/base64.js', './src/domain/classement.js', './src/domain/couverture.js', './src/domain/creation-ia.js', './src/domain/diet.js', './src/domain/dishes.js', './src/domain/exporters.js', './src/domain/grocery.js', './src/domain/import-cible.js', './src/domain/lecture-web.js', './src/domain/lines.js', './src/domain/llm.js',
   './src/domain/pairing.js', './src/domain/passerelle.js', './src/domain/photo-web.js', './src/domain/quantity.js', './src/domain/recherche-web.js', './src/domain/rediscover.js', './src/domain/scaling.js', './src/domain/search.js', './src/domain/table-matieres.js', './src/domain/timers.js', './src/domain/units.js', './src/domain/vocabulaire.js',
-  './src/ui/accueil-livre.js', './src/ui/add.js', './src/ui/book.js', './src/ui/components.js', './src/ui/cook.js', './src/ui/creer-ia.js', './src/ui/dish.js', './src/ui/grocery.js', './src/ui/home.js', './src/ui/icones.js', './src/ui/import-cible.js', './src/ui/import-web.js', './src/ui/import.js', './src/ui/kitchen.js',
+  './src/ui/accueil-livre.js', './src/ui/add.js', './src/ui/book.js', './src/ui/components.js', './src/ui/cook.js', './src/ui/coquille.js', './src/ui/creer-ia.js', './src/ui/dish.js', './src/ui/grocery.js', './src/ui/home.js', './src/ui/icones.js', './src/ui/import-cible.js', './src/ui/import-web.js', './src/ui/import.js', './src/ui/kitchen.js',
   './src/ui/library.js', './src/ui/livre-ajout.js', './src/ui/meals.js', './src/ui/photo-plat.js', './src/ui/porte-entree.js', './src/ui/puces.js', './src/ui/recipe-edit.js', './src/ui/recipe.js', './src/ui/regroupement.js', './src/ui/search.js', './src/ui/settings.js', './src/ui/signet.js', './src/ui/state.js', './src/ui/table-matieres.js', './src/ui/vol.js',
 ];
 

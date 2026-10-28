@@ -111,7 +111,7 @@ export async function runThemeTests({ eq, ok }) {
     const actif = document.createElement('button'); actif.className = 'btn active'; actif.textContent = 'Actif'; scene.append(actif); actif.focus();
     ok(actif.matches(':focus-visible') && rgbVersHex(getComputedStyle(actif).outlineColor) === hex('--action'), 'T-5 : .btn.active focalisé = anneau olive (--action), pas le contour vert gris d’état (calculé)');
     sb.focus();
-    ok(sb.matches(':focus-visible') && rgbVersHex(getComputedStyle(sb).outlineColor) === hex('--action') && getComputedStyle(sb).outlineOffset === '-3px', 'T-5 : segment focalisé = anneau olive rentré de 3 px (calculé)');
+    ok(sb.matches(':focus-visible') && rgbVersHex(getComputedStyle(sb).outlineColor) === hex('--action') && getComputedStyle(sb).outlineOffset === '2px', 'T-5 (revue du 28 octobre) : segment focalisé = anneau olive posé à 2 px, sur le papier (rentré, il disparaissait sur le segment actif olive) (calculé)');
     sb.blur();
     a.focus();
     ok(a.matches(':focus-visible') && rgbVersHex(getComputedStyle(a).outlineColor) === hex('--action') && getComputedStyle(a).outlineOffset === '-3px', 'T-5 : onglet bas focalisé = anneau olive rentré de 3 px (collé au bas de l’écran, un décalage de +2 px sortait de l’écran) (calculé)');

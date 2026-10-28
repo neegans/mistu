@@ -1057,6 +1057,61 @@ matin, la construction a repris sur Opus 5.5 depuis le cache des workflows ; une
   scan de secrets du diff vide ; invisibles 0 ; `git diff --check` muet ; écrans touchés : `search.js` seul. Vert conditionnel : `0007`, redéploiement
   et sondes restent à faire.
 
+### Fidélité aux maquettes (28 octobre 2026 ; lot visuel court, « go » de Neegan le 28 octobre ; branche `fidelite-maquettes`, base `main` `92db6a2`)
+
+À la question « es-tu sûr d'avoir respecté l'esthétique des maquettes ? », la réponse était non : ce lot rapproche l'app des maquettes
+(`docs/maquettes/2026-10-18-mitsu-claude-code/maquettes/{web,mobile}`), écran par écran, capture contre maquette, sans changer un seul geste.
+Banc : `.superpowers/sdd/2026-10-28-fidelite-maquettes/comparer.cjs` (contexte jetable, six recettes semées avec les photos découpées des maquettes,
+captures 1200 × 853 et 390 × 843, composites ; `triptyque-*.png` = maquette | avant | après). Rulings (amendent D-UI-2, D-UI-3, R-VIS-6 et § 4) :
+
+- **R-FM-1 (olive sombre)** — `--action #454e3b`, `--action-2 #363d2e`, `--action-bg #ebece4`, `--tap rgba(69,78,59,.15)`, échantillonnés sur les maquettes
+  (PIL) ; contrastes recalculés : 8,02 sur papier, 8,59 sur carte, 7,18 sur accent-bg, 7,42 sur paper-2, survol 10,35, 4,8 (gris sur action-bg),
+  7,34 (olive sur action-bg), 4,72 (ambre sur action-bg). D-UI-2 amendé.
+- **R-FM-2 (typographie)** — `--serif: ui-serif, "New York", "Iowan Old Style", Georgia, "Times New Roman", serif` (New York dans Safari, Iowan Old
+  Style dans Chrome sur Mac, Georgia ailleurs), titres en graisse 400 ; `h1` `clamp(2.1rem, 8.5vw, 3.2rem)`, `h1.titre-fiche` `clamp(2.2rem, 11vw,
+  3.4rem)` et `clamp(1.9rem, 3.4vw, 2.6rem)` de 760 à 1099 px (colonne de 5/12 : la revue mesurait 4 à 8 lignes coupées) ; sous-titre de page serif
+  1,25 rem, celui d'une fiche (la provenance) sans empattement à .95 rem. D-UI-3 amendé.
+- **R-FM-3 (boutons et segments)** — rectangles à coins de 8 px (`--radius-btn`, jeton neuf : 35 déclarations dans `:root`) ; segments séparés, chacun
+  son rayon (R-VIS-6 remplacé) ; anneau de focus d'un segment posé à 2 px sur le papier (rentré, il était olive sur le segment actif olive) ; puces
+  (`.chip`) gardées en pilule.
+- **R-FM-4 (cartes-plat)** — photo 8:5 (`.plat-vignette.grande`, partagée avec les aperçus web de UI-2) ; ligne de source « Du web » / « De mon
+  livre » + icône (globe, livres), puis « · {durée} » : ni hôte ni titre du livre sur la carte (la fiche les dit ; S7 tient : `source_label` jamais
+  affichée) ; le badge « Disponible » (état ordinaire) tu, « Partielle », « Lien web », « ★ Favori », « Cuisinée {n}× », l'étiquette IA restent ;
+  titre de carte 1,35 rem sans trait d'union imposé, `overflow-wrap: anywhere` gardé (un titre sans espace reste dans sa carte).
+- **R-FM-5 (bibliothèque)** — segments en onglets soulignés (`.segmented.onglets`) ; recherche avec sa loupe et filtres sur une même rangée
+  (`.filtre-recettes`, `.champ-recherche`).
+- **R-FM-6 (fiche recette)** — l'en-tête (retour, titre, provenance, étoile) vit dans la colonne de l'état, en face de la photo (5 / 7 dès 760 px) ;
+  la rangée d'état tait l'ordinaire (« Disponible », « Original » : `rangeeEtat`) et garde le reste (« Partielle », « À importer », une version à
+  toi ou de l'assistant, l'état de vérification d'une lecture, le type, les cuisines) ; l'avis « Une autre version a été créée ailleurs » vit dans
+  cette colonne (avant la photo et « Commencer à cuisiner » en étroit) ; « Portions, versions et autres gestes » **replié à toutes les largeurs**
+  (était ouvert dès 760 px) et jamais refermé d'office, entre deux filets, son triangle gardé (`list-item`) ; une case à cocher par ingrédient
+  (étiquette de 44 px, nommée par la ligne rendue, état en mémoire par fiche — `COCHES` —, jamais écrite, perdue au rechargement) ; « Remplacer » en
+  lien discret ; étapes en pastilles serif ; onglets du corps soulignés ; étoile Favori : le mot reste lu (`span.fav-libelle`, caché à l'œil sous
+  760 px), `aria-pressed`, cible de 44 px.
+- **R-FM-7 (coquille et navigation)** — la coquille sort d'`app.js` (`src/ui/coquille.js` : `NAV`, `navLinks`, `coquille(path)` ; `SHELL` + 1 module ;
+  app.js garde les routes et le démarrage) : la suite la monte et la mesure enfin ; dès 900 px, la navigation est une rangée d'onglets **texte**
+  dans la barre du haut (`aside.sidenav`, `role="navigation"` ; « Ajouter » plein, 44 px), plus de panneau latéral ; Réglages par la roue seule ;
+  la recherche réduite à sa loupe (44 × 44, le mot lu) sous 600 px (B05 du 28 octobre : la marque était rognée quand la pastille s'affiche) et de
+  900 à 1099 px. Mesuré, pastille « 12 non envoyés » visible : aucune page plus large que la fenêtre à 375, 390, 768, 900, 960, 1099, 1100,
+  1280 px, roue entière.
+- **R-FM-8 (tests amendés)** — valeurs mises à jour, chacune avec sa raison : jetons et contrastes (`tests/carnet.js`, `tests/theme.js`), formules et
+  tailles des titres, rayon des boutons et des segments, anneau des segments (2 px), lignes de source, badges de carte (et « Partielle » gardée),
+  ratio 8:5 (grille, fiche, aperçus ; la fixture de la fiche passe à 640 × 480, 4:3, pour que le 8:5 mesuré vienne de la feuille), en-tête dans
+  l'état, panneau replié, champ de recherche sous `.filtre-recettes`, table i18n (30 paires : « De mon livre » remplace les deux lignes à hôte /
+  titre), NAV lue dans `coquille.js`. Assertions neuves : étoile, onglets, badge utile, panneau ouvert à la main, cases (nom, aucune écriture,
+  redessin), graisse 400, `summary` en `list-item`, titre sans espace à 375 px, avis dans l'état, barre mesurée à huit largeurs. Épingle 6374 → 6389.
+- **R-FM-9 (revue adverse à trois lentilles du 28 octobre)** — Important corrigés : barre qui débordait de 900 à 985 px pastille visible (onglets
+  texte), titre de carte qui sortait de sa carte, anneau invisible sur le segment actif, case nommée par `source_text`, triangle du panneau perdu,
+  deux faux-verts (état utile de la fiche ; barre sans test). Minor corrigés : avis de conflit, titre en colonne étroite, cibles de l'étoile et
+  d'« Ajouter », cases perdues au redessin, `role="navigation"`, panneau ouvert à la main, graisse. Laissés (dettes) : l'icône de la ligne de source
+  n'est pas exposée en donnée (`data-source`) et recopie la règle de `ligneSource` ; le compte des paires de la table i18n reste creux par
+  construction.
+- **Pas prouvé** — Safari et l'iPhone (New York n'est vu que dans Safari ; captures sous Chrome) ; la preuve visuelle de UI-1 (galerie, 174 captures)
+  n'est pas rejouée : ses captures datent d'avant ce lot ; la barre à 320 px avec la pastille déborde toujours (dette R-VIS-4, inchangée).
+- **Écarts restants à la maquette (non faits, à trancher)** — la marque « Cuisine OS » (§ 13 point 2) et l'avatar « N » ; les repères de la fiche sans
+  icônes (personnes, horloge) ; « Recette enregistrée ✓ » et la description courte sous le titre ; le bouton « Voir la préparation » en bas de la
+  fiche sur iPhone ; « Évaluer une restriction… » et « Ingrédients — 4 portions » gardés (des gestes de l'app que la maquette n'a pas).
+
 ## 13. À trancher par Neegan (sans urgence ; chaque point a son défaut, construit tel quel)
 
 **Tranché le 23 octobre 2026 au soir : « Go » de Neegan sur la présentation des sept points = les sept défauts sont confirmés** (olive,

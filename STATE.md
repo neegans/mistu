@@ -1,4 +1,16 @@
-# STATE.md — Cuisine OS (mistu) — état au 28 octobre 2026 (LOTS UI-2 « APERÇUS » ET UI-1 « CARNET » FUSIONNÉS DANS `main` ET POUSSÉS, 0.17.0 ; `0007` PAS encore collée, fonction `assistant` encore en version 4 ; reste à Neegan : `0007` et sa preuve, puis redéploiement et sondes par le chef, preuves réelles § 10 UI-2 et UI-1 sur le site public, appareils sur 0.17.0, décisions de la spec § 13 (dont le point 7, neuf), « clean »)
+# STATE.md — Cuisine OS (mistu) — état au 28 octobre 2026 (UI-2 et UI-1 FUSIONNÉS ET POUSSÉS, 0.17.0 ; `0007` COLLÉE ET PROUVÉE, fonction `assistant` en version 5 ; LOT « FIDÉLITÉ AUX MAQUETTES » construit sur `fidelite-maquettes` ; NEUF : le document « Correctifs ISBN, couverture, index » de Neegan → lots I1 « index fiable » et I2 « livre sans saisie » à spécifier)
+
+**28 octobre 2026 — LOT « FIDÉLITÉ AUX MAQUETTES » (go de Neegan).** Branche `fidelite-maquettes` (worktree `~/projects/mistu-maquettes`, base `main`
+`92db6a2`, serveur 8097) : thème (olive sombre `#454e3b`, serif système en 400, boutons à 8 px), cartes 8:5 sans badge ordinaire, bibliothèque en
+onglets soulignés, fiche recette (titre en face de la photo, cases à cocher, autres gestes repliés, étoile), navigation du Mac en onglets texte dans la
+barre, coquille sortie d'`app.js` (`src/ui/coquille.js`). Revue adverse à trois lentilles (6 Important, 13 Minor) corrigée ; rulings R-FM-1 à R-FM-9
+(spec « expérience carnet » § 12) ; `sw.js -14`, épingle 6389. Captures maquette | avant | après :
+`.superpowers/sdd/2026-10-28-fidelite-maquettes/captures/triptyque-*.png`. **Ensuite** : le document de Neegan « Mito — Correctifs d'import des livres
+et des index » (`~/Downloads/Mito_Correctifs_ISBN_Couverture_Index_2026-10-28.md`, cas réel Trinity, six pages d'index 310-315) : lot I1 « index
+fiable » (une lecture par photo, relance d'une page coupée, plages abrégées, consolidation par recette, tri par page, entrées non culinaires à part,
+contradictions visibles, gestes explicites, B03 rotation, B04 compteurs) puis lot I2 « livre sans saisie » (relais web de l'ISBN et de la couverture,
+mots-clés et cuisines proposés) ; diagnostic de B01 : toutes les photos partaient en UNE lecture plafonnée à 8 000 jetons (`MAX_TOKENS_INDEX`), une
+page dense d'index par ingrédients suffit à la couper.
 
 **28 octobre 2026 — UI-1 « CARNET » CLÔTURÉ, FUSIONNÉ (commit de fusion sur `1cb5dde`) et POUSSÉ.** Clôture du chef : rulings R-UI-61 à
 R-UI-65 (spec § 12 ; R-UI-5, la couleur du badge « Créée avec l’IA · non testée », renvoyée à Neegan : § 13, point 7) ; `/verify` sur `a60f8ba` :

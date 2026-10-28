@@ -50,6 +50,7 @@ export async function runCarnetTests({ eq, ok }) {
     // Ronde 1 (M14) : la taille de 24 px vient aussi des attributs du svg — l'alignement et la non-compression ne tiennent qu'à la règle .icone.
     eq([regle('.icone')?.display, regle('.icone')?.['vertical-align'], regle('.icone')?.['flex-shrink'], regle('.empty .ico .icone')?.width], ['inline-block', 'middle', '0', '40px'], 'D-UI-9 : .icone en ligne, alignée au milieu du texte, jamais compressée dans une rangée flex ; 40 px dans un état vide');
     eq([regle('h1')?.['font-size'], regle('h1.titre-fiche')?.['font-size'], R.filter((r) => r.sel === 'h1' && r.media).length, regle('h2')?.['font-size'], regle('h3')?.['font-size'], regle('header.stack h1 + p.muted')?.['font-size']], ['clamp(2.1rem, 8.5vw, 3.2rem)', 'clamp(2.2rem, 11vw, 3.4rem)', 0, '1.6rem', '1.15rem', '1.25rem'], 'D-UI-3 / § 3.2 / H-6, amendé par la fidélité aux maquettes : UNE formule clamp() par titre (plus grands, graisse 400), plus aucune règle h1 sous @media ; h2 1,6 rem, h3 1,15 rem, sous-titre de page serif à 1,25 rem');
+    eq(regle('h1, h2, h3, h4')?.['font-weight'], '400', 'fidélité aux maquettes : titres serif en graisse 400 (plus fins)');
     eq([regle('.step-num')?.background, regle('.step-num')?.color], ['var(--paper-2)', 'var(--ink)'], '§ 3.2 : .step-num en --paper-2 / --ink (le cercle beige des maquettes)');
   });
 
@@ -158,10 +159,10 @@ export async function runCarnetTests({ eq, ok }) {
     // expression régulière littérale ni commentaire /* */ à la ronde 1) ; navLinks rend icone(n.ico), jamais le nom brut, et la roue est l'icône ENFANT
     // du lien #/settings du panneau latéral (un « icone('roue') » laissé dans un commentaire ne compte plus). Un retrait qui mangerait du code rougit.
     const sansCommentaires = (src) => { let out = ''; let q = null; for (let i = 0; i < src.length; i++) { const c = src[i]; if (q) { out += c; if (c === '\\') out += src[++i] ?? ''; else if (c === q) q = null; } else if (c === '/' && src[i + 1] === '/') { while (i + 1 < src.length && src[i + 1] !== '\n') i++; } else if (c === '/' && src[i + 1] === '*') { const fin = src.indexOf('*/', i + 2); i = fin < 0 ? src.length : fin + 1; } else { if (c === "'" || c === '"' || c === '`') q = c; out += c; } } return out; };
-    const app = sansCommentaires(await lire('../src/app.js'));
+    const app = sansCommentaires(await lire('../src/ui/coquille.js')); // fidélité aux maquettes : NAV et la barre vivent dans coquille.js (montée plus bas)
     const nav = [...app.matchAll(/\{ href: '([^']+)', label: '([^']+)', ico: '([^']+)'/g)].map((m) => m.slice(1, 4));
-    const corpsNavLinks = /\nfunction navLinks\([^)]*\) \{\n([\s\S]*?)\n\}\n/.exec(app)?.[1] || '';
-    eq([nav, app.includes("from './ui/icones.js'"), corpsNavLinks.includes('icone(n.ico)'), /,\s*n\.ico\s*\)/.test(corpsNavLinks), /el\('a', \{ href: '#\/settings'[^}]*\}, el\('span', \{ class: 'ico', 'aria-hidden': 'true' \}, icone\('roue'\)\)/.test(app), app.includes('Mes livres'), /ico: '[^a-z]/.test(app)], [[['/', 'Aujourd’hui', 'soleil'], ['/library', 'Bibliothèque', 'bibliotheque'], ['/meals', 'Ma semaine', 'calendrier'], ['/kitchen', 'Ma cuisine', 'toque'], ['/add', 'Ajouter', 'plus']], true, true, false, true, false, false], 'D-UI-4 / D-UI-9 : NAV = cinq entrées, libellé « Bibliothèque », des noms d’icônes du jeu (plus un émoji) ; navLinks rend icone(n.ico), jamais le nom brut ; la roue est icone(\'roue\') dans le lien #/settings — de la barre haute depuis la fidélité aux maquettes : le panneau latéral est devenu une rangée d’onglets (source relu sans commentaires : app.js est hors suite, § 11)');
+    const corpsNavLinks = /\nexport function navLinks\([^)]*\) \{\n([\s\S]*?)\n\}\n/.exec(app)?.[1] || '';
+    eq([nav, app.includes("from './icones.js'"), corpsNavLinks.includes('icone(n.ico)'), /,\s*n\.ico\s*\)/.test(corpsNavLinks), /el\('a', \{ href: '#\/settings'[^}]*\}, el\('span', \{ class: 'ico', 'aria-hidden': 'true' \}, icone\('roue'\)\)/.test(app), app.includes('Mes livres'), /ico: '[^a-z]/.test(app)], [[['/', 'Aujourd’hui', 'soleil'], ['/library', 'Bibliothèque', 'bibliotheque'], ['/meals', 'Ma semaine', 'calendrier'], ['/kitchen', 'Ma cuisine', 'toque'], ['/add', 'Ajouter', 'plus']], true, true, false, true, false, false], 'D-UI-4 / D-UI-9 : NAV = cinq entrées, libellé « Bibliothèque », des noms d’icônes du jeu (plus un émoji) ; navLinks rend icone(n.ico), jamais le nom brut ; la roue est icone(\'roue\') dans le lien #/settings — de la barre haute depuis la fidélité aux maquettes : le panneau latéral est devenu une rangée d’onglets (source relu sans commentaires : app.js est hors suite, § 11)');
     // Vague finale (constat 15) : le segment « Mes livres » de la RECHERCHE (une portée, pas l'écran) est lu dans son RENDU — renderSearch en mode « books », sans
     // base, sans réseau (le mode web seul lit une session) —, plus dans le source ; l'état vide rendu porte l'icône « loupe » (R-UI-P1 : la ligne de UI-2,
     // '🔍', ferait lever icone() et planter l'écran). Les retours « ← Bibliothèque » (recipe.js, book.js) et « Aller à la bibliothèque. » (accueil-livre.js)
@@ -394,6 +395,8 @@ export async function runCarnetTests({ eq, ok }) {
         eq([texte(n.querySelector('header h1')), texte(n.querySelector('header p.muted')), [...n.querySelectorAll('.segmented button')].map((b) => b.textContent), segment(n), action(n), !!n.querySelector('.grille-plats'), titres(n), n.querySelector('header > a')],
           ['Bibliothèque', 'Tes livres, tes trouvailles, tes recettes.', ['Recettes', 'Livres', 'Plats'], 'Recettes', ['btn primary', '#/add', 'Ajouter une recette'], true, ['Plat rE', 'Plat rB', 'Plat rC', 'Plat rA'], null],
           'renderLibrary({}) : « Bibliothèque », son sous-titre, trois segments, Recettes ACTIF par défaut, « Ajouter une recette » → #/add en tête, la grille triée par dernière modification (E, B, C, A) ; la référence D est DEHORS, le signet non lu E DEDANS (B-I-5) ; aucun retour « ← … » sur Recettes');
+        eq([n.querySelector('.segmented')?.classList.contains('onglets'), !!n.querySelector('.filtre-recettes > label.champ-recherche > input[type="search"]'), !!n.querySelector('.filtre-recettes > label.champ-recherche > .icone')],
+          [true, true, true], 'Bibliothèque (fidélité aux maquettes) : segments en onglets soulignés (.segmented.onglets) ; recherche avec sa loupe et filtres sur une même rangée (.filtre-recettes)');
         const carteE = n.querySelector('.grille-plats > a.carte-plat[href="#/recipes/rE"]');
         eq([carteE?.className, texte(carteE?.querySelector('.carte-plat-source')), [...(carteE?.querySelectorAll('.carte-plat-badges > *') || [])].map((b) => b.textContent), texte(n.querySelector('a.carte-plat[href="#/recipes/rB"] .carte-plat-source')), texte(n.querySelector('a.carte-plat[href="#/recipes/rC"] .carte-plat-source'))],
           ['item-link carte-plat sans-photo', 'Du web', ['Lien web'], 'Du web · 35 min', 'Du web'],
@@ -708,6 +711,15 @@ export async function runCarnetTests({ eq, ok }) {
       const ongletsL = q(corps, '[data-role="onglets-corps"]');
       eq([details.open, details.querySelector('summary')?.textContent, ongletsL?.hidden, ongletsL?.classList.contains('segmented'), textes(ongletsL, 'button'), q(corps, '[data-role="section-ingredients"]').hidden, q(corps, '[data-role="section-preparation"]').hidden],
         [false, 'Portions, versions et autres gestes', true, true, ['Ingrédients', 'Préparation'], false, false], 'fiche T3 ≥ 760 px : details REPLIÉ (fidélité aux maquettes : replié à toutes les largeurs), segmented caché, Ingrédients et Préparation toutes deux visibles');
+      // Fidélité aux maquettes (revue du 28 octobre) : l'étoile Favori (le mot lu, aria-pressed), les onglets soulignés du corps, et un état UTILE (« Partielle »)
+      // gardé dans la rangée d'état — seul l'ordinaire (« Disponible », « Original ») est tu.
+      const etoile = q(pL, '[data-role="fiche-etat"] > header button.btn.discret');
+      eq([etoile?.textContent, etoile?.getAttribute('aria-pressed'), etoile?.querySelector('span.fav-libelle')?.textContent, q(corps, '[data-role="onglets-corps"]')?.classList.contains('onglets')], ['☆ Favori', 'false', ' Favori', true],
+        'fiche (maquettes) : l’étoile Favori porte le mot (span.fav-libelle, caché à l’œil sous 760 px) et aria-pressed ; les onglets du corps sont soulignés (.onglets)');
+      await mettre(fiche('rc_part', { availability: 'partial' })); await versions(version('rc_part'));
+      const pPart = await monter('rc_part', fauxMatchMedia(true));
+      eq(textes(q(pPart, '[data-role="fiche-etat"]'), '.badge'), ['Partielle'], 'fiche (maquettes) : une recette partielle garde son badge « Partielle » dans la rangée d’état (seul l’état ordinaire est tu ; « Original » aussi)');
+      pPart.remove();
       // --- Autres gestes : TOUT l'ancien contenu de controls et de la rangée d'actions, sauf « Commencer à cuisiner » et « Corriger » (qui y reste aussi) ; pas l'Export
       const boutonsDetails = textes(details, 'button, a');
       eq(['Créer ma version', 'Corriger', '−', '+', 'Avec quoi on mange ça ?', 'Ajouter à mon repas', 'Liste d’épicerie', 'Rattacher à un plat', 'Original', 'Métrique', 'US', 'FR', 'EN'].filter((x) => !boutonsDetails.includes(x)), [], 'fiche T3 : « autres gestes » porte les anciens boutons de controls (versions, portions, unités, langue) ET de la rangée d’actions');
@@ -759,6 +771,21 @@ export async function runCarnetTests({ eq, ok }) {
       eq([onglets().hidden, ing().hidden, prep().hidden, detailsE.open, ing() !== null && ing() === q(corpsE, '[data-role="section-ingredients"]')], [true, false, false, false, true], 'fiche T3 : change → large : segmented caché, les deux sections visibles, details toujours replié (maquettes ; écouté sur change, sans redessin)');
       mmE.basculer(false);
       eq([onglets().hidden, ing().hidden, prep().hidden, detailsE.open, actif()], [false, true, false, false, ['Préparation']], 'fiche T3 : change → étroit : segmented visible, Préparation (le choix) visible, Ingrédients cachée, details fermé');
+      // Revue du 28 octobre : un panneau ouvert à la main reste ouvert quand la largeur change (rien ne le replie d'office).
+      detailsE.open = true; mmE.basculer(true); mmE.basculer(false);
+      eq(detailsE.open, true, 'fiche (maquettes) : « autres gestes » ouvert à la main reste ouvert quand la largeur change (replié par défaut, jamais refermé d’office)');
+      // Cases à cocher des ingrédients : une par ligne, dans une étiquette de 44 px, nommée par la ligne RENDUE ; cochée, elle n'écrit RIEN et survit au redessin.
+      const casesE = () => [...ing().querySelectorAll('li > label.coche-cible > input.coche[type="checkbox"]')];
+      const nomCase = (cs) => document.getElementById(cs.getAttribute('aria-labelledby') || '')?.textContent ?? null;
+      const c0 = casesE();
+      eq([c0.length, ing().querySelectorAll('li').length, c0.every((cs) => nomCase(cs) !== null && nomCase(cs) === cs.closest('li').querySelector(':scope > .row')?.textContent), c0.some((cs) => cs.hasAttribute('aria-label')), c0.every((cs) => !cs.checked)],
+        [1, 1, true, false, true], 'fiche (maquettes) : une case par ligne d’ingrédient, nommée par la ligne rendue (aria-labelledby, jamais source_text), décochée au départ');
+      const mutateVrai = db.mutate; let ecritures = 0;
+      db.mutate = function (...a) { ecritures += 1; return mutateVrai.apply(this, a); };
+      try { c0[0].click(); await macro(); } finally { db.mutate = mutateVrai; }
+      [...detailsE.querySelectorAll('button')].find((b) => b.textContent === '+').click(); // drawBody : lignes et cases neuves
+      const c1 = casesE();
+      eq([ecritures, c1.length, c1[0] !== c0[0], c1[0]?.checked], [0, 1, true, true], 'fiche (maquettes) : cocher n’écrit rien (aucun db.mutate) ; la case cochée survit au redessin du corps (en mémoire, par fiche)');
       // L'abonné est retiré quand la fiche a quitté le document (pas de fuite à chaque visite)
       eq(mmE.abonnes.size, 1, 'fiche T3 : un seul abonné change par fiche montée');
       pE.remove(); mmE.basculer(true);
@@ -899,7 +926,7 @@ export async function runCarnetTests({ eq, ok }) {
             imgPleine: rI ? Math.abs(rI.width - rP.width) < 1 : null, ratio: rI ? Math.abs(rI.width / rI.height - 8 / 5) < 0.02 : null, objectFit: img ? S(img).objectFit : null,
             onglets: S(q(p, '[data-role="onglets-corps"]')).display, prep: S(q(p, '[data-role="section-preparation"]')).display, pistesCorps: S(q(p, '[data-role="colonnes-corps"]')).gridTemplateColumns.trim().split(/\s+/).length,
             // Ronde 1 : l'écart entre l'état et les gestes (une pile, jamais un vide), la cible du summary (I-UI-4), la flèche du lien d'origine, le bouton seul plein.
-            ecartEtatGestes: Math.round(rG.top - rE.bottom), summary: q(p, 'details[data-role="autres-gestes"] > summary').getBoundingClientRect().height,
+            ecartEtatGestes: Math.round(rG.top - rE.bottom), summary: q(p, 'details[data-role="autres-gestes"] > summary').getBoundingClientRect().height, summaryDisplay: S(q(p, 'details[data-role="autres-gestes"] > summary')).display,
             fleche: q(p, '[data-role="ouvrir-lien"]') ? w.getComputedStyle(q(p, '[data-role="ouvrir-lien"]'), '::after').content : null,
             boutonPlein: (() => { const r = q(tete, '[data-role="geste-principal"]'); const b = q(r, 'button'); return r && b && r.children.length === 1 ? Math.abs(b.getBoundingClientRect().width - r.getBoundingClientRect().width) < 1 : null; })(),
             // Ronde 1 de T6 (constat 3) : la taille des repères, en rem de la racine du cadre (la règle `.reperes { font-size: 1.05rem }` mesurée, pas lue).
@@ -917,6 +944,7 @@ export async function runCarnetTests({ eq, ok }) {
       // Ronde 1 : la colonne de gauche est une PILE état → gestes (D-UI-6, § 4.2) — la hauteur en trop de la photo va à la rangée des gestes, jamais entre les deux.
       ok(ph1100.ecartEtatGestes >= 0 && ph1100.ecartEtatGestes < 24, `styles.css à 1100 px, avec photo : l’état et les gestes restent empilés (écart ${ph1100.ecartEtatGestes} px, attendu le gap de 16 px ; jamais le vide de la photo)`);
       const [http375, pe1100, pe375] = [await mesureFiche(375, 'rc_http'), await mesureFiche(1100, 'rc_pe'), await mesureFiche(375, 'rc_pe')];
+      eq([ph375.summaryDisplay, ph1100.summaryDisplay], ['list-item', 'list-item'], 'fiche (revue du 28 octobre) : le summary de « autres gestes » reste un list-item — son triangle dit que le panneau replié s’ouvre (mesuré à 375 et 1100 px)');
       eq([http375.ecartEtatGestes, http375.fleche, http375.boutonPlein, ph375.boutonPlein, ph375.summary >= 44, ph1100.summary >= 44],
         [16, '" ↗"', true, true, true, true], 'styles.css à 375 px, fiche SANS photo : l’emplacement vide n’ajoute pas de second gap (état → gestes 16 px) ; la flèche « ↗ » du lien d’origine vient de la feuille ; seul (fiche vérifiée), « Commencer à cuisiner » remplit sa rangée ; le summary des autres gestes fait au moins 44 px (I-UI-4)');
       eq([pe1100.chargee, pe1100.imgPleine, pe1100.ratio, pe375.chargee, pe375.imgPleine, pe375.ratio], [true, true, true, true, true, true],
@@ -1796,9 +1824,9 @@ export async function runCarnetTests({ eq, ok }) {
       ...Object.entries(srcShell).filter(([, s]) => clesDe(s).includes(c)).map(([m]) => `${m} : ${c}`),
     ]);
     eq(restes, [], 'T6 chaînes retirées : « + Recette », « + Pages d’index », « Ouvrir le lien », « Aller à Mes livres. » ne sont plus ni dans en.js, ni dans les filets, ni en t(\'…\') ou t("…") dans aucun module de SHELL (source brut, commentaires compris)');
-    const appSans = sansCommentairesT6(srcShell['./src/app.js']); const searchSans = sansCommentairesT6(srcShell['./src/ui/search.js']);
+    const appSans = sansCommentairesT6(srcShell['./src/ui/coquille.js']); const searchSans = sansCommentairesT6(srcShell['./src/ui/search.js']);
     eq([/label: 'Bibliothèque'/.test(appSans), /label: 'Mes livres'/.test(appSans), clesDe(searchSans).includes('Mes livres') || /\['books', 'Mes livres'\]/.test(searchSans)],
-      [true, false, true], 'T6 D-UI-4 : NAV (app.js, hors suite : relu SANS commentaires, comme le test NAV de T1 dont celui-ci est le doublon de clôture) dit « Bibliothèque » et plus « Mes livres » ; le segment « Mes livres » de la recherche (search.js MODES) reste');
+      [true, false, true], 'T6 D-UI-4 : NAV (coquille.js depuis la fidélité aux maquettes ; avant, app.js, hors suite : relu SANS commentaires, comme le test NAV de T1 dont celui-ci est le doublon de clôture) dit « Bibliothèque » et plus « Mes livres » ; le segment « Mes livres » de la recherche (search.js MODES) reste');
     // I-UI-4 : les règles neuves du lot existent dans la feuille servie (garde positive ; T-1, T-2, T-11 et le survol sont tenus par tests/theme.js sur TOUTE la feuille).
     const css = (await lireT6('../styles.css')).replace(/\/\*[\s\S]*?\*\//g, '');
     const selecteurs = [...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) => m[1].replace(/\s+/g, ' ').trim());
@@ -1834,6 +1862,64 @@ export async function runCarnetTests({ eq, ok }) {
         ['#/recipes/a%3Fv%3Db', '#/recipes/x%2Fedit', '#/recipes/a%3Fv%3Db', ['#/recipes/a%3Fv%3Db', '#/recipes/a%3Fv%3Db', '#/recipes/x%2Fedit'], '#/recipes/a%3Fv%3Db?v=rv_a&servings=2'],
         'vague finale : la carte-plat, la carte horizontale, les cartes d’Aujourd’hui (Favoris, cuissons) et « Refaire comme la dernière fois » encodent l’identifiant (a?v=b → a%3Fv%3Db, x/edit → x%2Fedit)');
     } finally { setUiLocale(avantVF); }
+  });
+
+  // --- Fidélité aux maquettes (revue du 28 octobre) : la barre du haut, montée depuis coquille.js et mesurée dans un cadre où la feuille servie s'applique.
+  // La pastille « N non envoyés » VISIBLE (le cas que la première mesure manquait) : jamais de défilement de côté, la roue Réglages entière à l'écran ;
+  // dès 900 px, les cinq onglets de la barre et pas d'onglets bas ; de 900 à 1099 px et sous 600 px, la recherche réduite à sa loupe (le mot lu).
+  await bloc('fidélité aux maquettes : barre du haut', async () => {
+    const { coquille } = await import('../src/ui/coquille.js');
+    const mesures = [];
+    for (const largeur of [375, 390, 768, 900, 960, 1099, 1100, 1280]) {
+      const f = document.createElement('iframe'); f.setAttribute('aria-hidden', 'true'); f.setAttribute('title', 'scène de mesure');
+      f.style.cssText = `position:absolute;left:-12000px;top:0;width:${largeur}px;height:600px;border:0`;
+      document.body.append(f);
+      try {
+        const d = f.contentDocument;
+        d.open(); d.write('<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head><body><div id="app"></div></body></html>'); d.close();
+        const lien = d.createElement('link'); lien.rel = 'stylesheet'; lien.href = new URL('../styles.css?v=' + Date.now(), location.href).href;
+        await new Promise((r) => { lien.onload = r; lien.onerror = r; d.head.append(lien); });
+        if (f.contentWindow.innerWidth !== largeur) throw new Error(`cadre ${largeur} : innerWidth ${f.contentWindow.innerWidth}`);
+        const c = coquille('/library');
+        d.getElementById('app').append(c.root);
+        const p = c.root.querySelector('.pastille'); p.textContent = '12 non envoyés'; p.hidden = false; // ce que pose majPastille
+        await new Promise((r) => requestAnimationFrame(() => r()));
+        const w = f.contentWindow; const S = (n) => w.getComputedStyle(n); const B = (n) => n.getBoundingClientRect();
+        const roue = c.root.querySelector('.topbar a[href="#/settings"]'); const rech = c.root.querySelector('.topbar a[href="#/search"]');
+        const libelle = rech.querySelector('.nowrap');
+        const visibles = [...c.side.querySelectorAll('a')].filter((a) => B(a).width > 1 && S(c.side).display !== 'none');
+        mesures.push([largeur, d.documentElement.scrollWidth <= largeur, B(roue).left >= 0 && B(roue).right <= largeur, B(p).right <= B(rech).left,
+          largeur >= 900 ? visibles.length : S(c.tabs).display !== 'none', B(libelle).width <= 1, rech.textContent.trim(), Math.round(B(rech).width) >= 44]);
+      } finally { f.remove(); }
+    }
+    eq(mesures, [
+      [375, true, true, true, true, true, 'Qu’est-ce qu’on cuisine ?', true], [390, true, true, true, true, true, 'Qu’est-ce qu’on cuisine ?', true],
+      [768, true, true, true, true, false, 'Qu’est-ce qu’on cuisine ?', true], [900, true, true, true, 5, true, 'Qu’est-ce qu’on cuisine ?', true],
+      [960, true, true, true, 5, true, 'Qu’est-ce qu’on cuisine ?', true], [1099, true, true, true, 5, true, 'Qu’est-ce qu’on cuisine ?', true],
+      [1100, true, true, true, 5, false, 'Qu’est-ce qu’on cuisine ?', true], [1280, true, true, true, 5, false, 'Qu’est-ce qu’on cuisine ?', true]],
+      'barre du haut, pastille « 12 non envoyés » visible : aucune page plus large que la fenêtre, roue Réglages entière, pastille avant la recherche ; ≥ 900 px cinq onglets dans la barre, < 900 px les onglets bas ; recherche réduite à sa loupe sous 600 px et de 900 à 1099 px (le mot reste dans le lien) ; recherche ≥ 44 px (mesurés à 375, 390, 768, 900, 960, 1099, 1100, 1280 px)');
+    // Un titre sans espace (une adresse collée en titre de signet) reste DANS sa carte à 375 px : overflow-wrap des titres gardé (revue du 28 octobre).
+    {
+      const { buildDocs } = await import('../src/domain/search.js');
+      const D = '2026-10-28T12:00:00.000Z';
+      const fiche = (id, titre) => ({ id, edition_id: null, original_title: titre, original_language: 'fr', availability: 'available', verification_state: 'verified', printed_page: null, current_version_id: null, source_url: null, tags: [], cuisines: [], favorite: false, created_at: D, updated_at: D });
+      const docs = buildDocs({ recipes: [fiche('rL', 'ricardocuisine.com/recettes/bouillabaisse-marseillaise'), fiche('rC', 'Croquembouche')], versions: [], editions: [], books: [], dishes: [], links: [], translations: [], history: [] });
+      const f = document.createElement('iframe'); f.setAttribute('aria-hidden', 'true'); f.setAttribute('title', 'scène de mesure');
+      f.style.cssText = 'position:absolute;left:-12000px;top:0;width:375px;height:800px;border:0'; document.body.append(f);
+      try {
+        const d = f.contentDocument;
+        d.open(); d.write('<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head><body><main class="content"></main></body></html>'); d.close();
+        const lien = d.createElement('link'); lien.rel = 'stylesheet'; lien.href = new URL('../styles.css?v=' + Date.now(), location.href).href;
+        await new Promise((r) => { lien.onload = r; lien.onerror = r; d.head.append(lien); });
+        const g = C.grilleCartes(docs.map((doc) => C.recipeCard(doc, { photoEnTete: true })));
+        d.querySelector('main').append(g);
+        const h3s = [...g.querySelectorAll('.carte-plat h3')];
+        eq([d.documentElement.scrollWidth <= 375, h3s.every((h) => h.scrollWidth <= h.clientWidth + 1)], [true, true], 'grille à 375 px : un titre sans espace (adresse collée) reste dans sa carte, sans trait d’union imposé ni défilement de côté (mesuré)');
+      } finally { f.remove(); }
+    }
+    const c = coquille('/library');
+    eq([c.side.getAttribute('role'), c.side.getAttribute('aria-label'), [...c.side.querySelectorAll('a.active')].map((a) => a.getAttribute('href'))], ['navigation', 'Navigation', ['#/library']],
+      'coquille : la rangée d’onglets de la barre est un repère de navigation (role) ; l’onglet de la route est actif');
   });
 
   // --- repère de fin : les tâches 2 à 6 ajoutent leurs blocs AU-DESSUS de cette ligne ---

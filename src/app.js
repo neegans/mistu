@@ -12,8 +12,8 @@ import { createAuth } from './sync/auth.js';
 import { createMoteur } from './sync/moteur.js';
 import { createTransport, createStockage } from './sync/transport.js';
 import { configAssistantSuitLeCompte } from './sync/config.js';
-import { pastille, majPastille } from './ui/components.js';
-import { icone } from './ui/icones.js';
+import { majPastille } from './ui/components.js';
+import { NAV, coquille } from './ui/coquille.js';
 
 import { renderHome } from './ui/home.js';
 import { renderSearch } from './ui/search.js';
@@ -35,36 +35,7 @@ import { renderCreerIA } from './ui/creer-ia.js';
 import { renderImportCible } from './ui/import-cible.js';
 import { porteEntreeModel, renderPorteEntree } from './ui/porte-entree.js';
 
-// D-UI-4 : « Bibliothèque » (l'écran s'ouvre sur les plats, tâche 2) ; D-UI-9 : ico = un nom d'icones.js, plus un émoji (les émojis ne prennent pas la couleur de l'onglet actif).
-const NAV = [
-  { href: '/', label: 'Aujourd’hui', ico: 'soleil', match: (p) => p === '/' || p.startsWith('/search') },
-  { href: '/library', label: 'Bibliothèque', ico: 'bibliotheque', match: (p) => p.startsWith('/library') || p.startsWith('/books') || p.startsWith('/dishes') || p.startsWith('/recipes') },
-  { href: '/meals', label: 'Ma semaine', ico: 'calendrier', match: (p) => p.startsWith('/meals') || p.startsWith('/lists') },
-  { href: '/kitchen', label: 'Ma cuisine', ico: 'toque', match: (p) => p.startsWith('/kitchen') },
-  { href: '/add', label: 'Ajouter', ico: 'plus', add: true, match: (p) => p.startsWith('/add') || p.startsWith('/import') },
-];
-
-function navLinks(path, cls) {
-  return NAV.map((n) => el('a', { href: `#${n.href}`, class: `${cls} ${n.add ? 'add' : ''} ${n.match(path) ? 'active' : ''}` }, el('span', { class: 'ico', 'aria-hidden': 'true' }, icone(n.ico)), el('span', null, t(n.label))));
-}
-
-function shell() {
-  const path = parseHash().path;
-  const main = el('main', { class: 'content', id: 'main' });
-  // Fidélité aux maquettes (28 octobre 2026) : dès 900 px, la navigation est une rangée d'onglets DANS la barre du haut (plus de panneau latéral) ;
-  // les Réglages restent sur la roue de la barre. Sous 900 px, cette rangée est cachée (règle aside.sidenav d'origine) et nav.tabs sert, comme avant.
-  const side = el('aside', { class: 'sidenav', 'aria-label': 'Navigation' }, ...navLinks(path, ''));
-  const tabs = el('nav', { class: 'tabs', 'aria-label': 'Navigation' }, ...navLinks(path, ''));
-  const top = el('div', { class: 'topbar' },
-    el('a', { class: 'brand', href: '#/' }, 'Cuisine OS'),
-    side,
-    el('span', { class: 'spacer' }),
-    // Pastille « N non envoyés » (spec § 4.2) : cachée tant que la file est vide — rien n'est affiché sans fait.
-    pastille(),
-    el('a', { class: 'btn small', href: '#/search', title: t('Recherche') }, el('span', { class: 'ico', 'aria-hidden': 'true' }, icone('loupe')), el('span', { class: 'nowrap' }, t('Qu’est-ce qu’on cuisine ?'))),
-    el('a', { href: '#/settings', class: 'btn small', title: t('Réglages'), 'aria-label': t('Réglages') }, el('span', { class: 'ico', 'aria-hidden': 'true' }, icone('roue'))));
-  return { root: el('div', null, top, el('div', { class: 'frame' }, main), tabs), main, side, tabs };
-}
+function shell() { return coquille(parseHash().path); }
 
 let current = null;
 let renderSeq = 0;
