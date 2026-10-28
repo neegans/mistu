@@ -912,13 +912,24 @@ export async function runCarnetTests({ eq, ok }) {
     const lignes4 = (racine) => [...racine.querySelectorAll('ul.liste-compacte > li')];
     const titres4 = (racine) => lignes4(racine).map((li) => li.querySelector('a.titre')?.textContent);
     const bouton4 = (racine, texte) => [...racine.querySelectorAll('button')].find((b) => b.textContent === texte) ?? null;
+    // Ronde 1 : un tour de boucle — l'abonnement de largeur se pose au MONTAGE (setTimeout 0 puis isConnected : constats 1 et 18) ; `avant4` = l'ordre du document ;
+    // `sansReseau` (constat 21, le motif des blocs T2 et T3) : fetch remplacé par un espion le temps d'un bloc qui monte renderBook, rendu dans le finally, compte affirmé.
+    const macro4 = () => new Promise((r) => setTimeout(r, 0));
+    const avant4 = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+    const sansReseau = async (quoi, f) => {
+      const appels = []; const vraiFetch = globalThis.fetch;
+      globalThis.fetch = async (u) => { appels.push(String(u?.url ?? u)); throw new Error('aucun reseau attendu : ' + u); };
+      try { await f(); } finally { globalThis.fetch = vraiFetch; }
+      eq(appels, [], `T4 (ronde 1, ${quoi}) : AUCUN appel réseau pendant le bloc (rendus, filtres, bascules, gestes)`);
+    };
 
-    await bloc('T4 — fiche livre : en-tête, menus renommés, deux colonnes, « Sommaire », « Pages et fichiers sources » (D-UI-7, D-UI-8)', () => withRepo(async (repo, db) => {
+    await bloc('T4 — fiche livre : en-tête, menus renommés, deux colonnes, « Sommaire », « Pages et fichiers sources » (D-UI-7, D-UI-8)', () => withRepo(async (repo, db) => sansReseau('fiche livre', async () => {
       const { renderBook } = await import('../src/ui/book.js');
       const doc = { id: 'doc4', edition_id: 'ed4', source_type: 'photo', sha256: H4('a'), original_filename: 'a.jpg', created_at: DATE4, updated_at: DATE4 };
+      // Ronde 1 (constat 5) : des identifiants dont l'ordre de CLÉ contredit l'ordre imprimé (IndexedDB rend « pgA » avant « pgB ») — sans le tri, le Sommaire dirait p. 3 puis p. 2.
       const pages = [
-        { id: 'pg3', edition_id: 'ed4', document_id: 'doc4', sha256: H4('3'), printed_page: 3, kind: 'index', created_at: DATE4, updated_at: DATE4 },
-        { id: 'pg2', edition_id: 'ed4', document_id: 'doc4', sha256: H4('2'), printed_page: 2, kind: 'index', created_at: DATE4, updated_at: DATE4 },
+        { id: 'pgA', edition_id: 'ed4', document_id: 'doc4', sha256: H4('3'), printed_page: 3, kind: 'index', created_at: DATE4, updated_at: DATE4 },
+        { id: 'pgB', edition_id: 'ed4', document_id: 'doc4', sha256: H4('2'), printed_page: 2, kind: 'index', created_at: DATE4, updated_at: DATE4 },
         { id: 'pg10', edition_id: 'ed4', document_id: 'doc4', sha256: H4('5'), printed_page: 10, kind: 'recette', created_at: DATE4, updated_at: DATE4 },
       ];
       const r1 = recette4('r1', { printed_page: 10 });
@@ -933,8 +944,9 @@ export async function runCarnetTests({ eq, ok }) {
       eq(menus.map((d) => [d.querySelector('summary')?.textContent, d.querySelector('summary')?.className, [...d.querySelectorAll('button, a')].map((b) => b.textContent)]),
         [['Ajouter des pages de sommaire', 'btn primary', ['Photographier', 'Choisir des photos ou un PDF']], ['Ajouter des recettes', 'btn primary', ['Photographier', 'Choisir des photos ou un PDF', 'Saisir à la main']]],
         'T4 : les deux details.menu-source gardent leur forme (summary.btn.primary, mêmes sources) et sont renommés « Ajouter des pages de sommaire », « Ajouter des recettes » (D-UI-10)');
-      // EI-T4-a : les trois chips d'avant étaient des span.status ; la carte « Connecte-toi » du panneau d'index (div.status.warn[data-role=connexion-ia], inchangée) reste.
-      eq([fiche.querySelectorAll('span.status.ok, span.status.warn, span.status.info').length, fiche.querySelector('.row.top > header')], [0, null],
+      // EI-T4-a : la carte « Connecte-toi » du panneau d'index (div.status.warn[data-role=connexion-ia], inchangée) reste ; ronde 1 (constat 15) : toute AUTRE pastille
+      // d'état (.status.ok / .warn / .info, quelle que soit sa balise) est comptée — des chips revenus en div ne passent plus.
+      eq([[...fiche.querySelectorAll('.status.ok, .status.warn, .status.info')].filter((n) => !n.matches('[data-role="connexion-ia"]')).length, fiche.querySelector('.row.top > header')], [0, null],
         'T4 : les trois chips d’état (« disponible(s) », « repérée(s) », « page(s) source ») ont disparu ; l’en-tête n’est plus dans une rangée avec la couverture (D-UI-7)');
       // Deux colonnes : gauche = couverture, « Couverture » (.card), métadonnées (details.card), « Sommaire » (.plain), le details des entrées d'index ; droite = « Les recettes de ce livre » (.plain).
       const colonnes = fiche.querySelector('.two-col.livre');
@@ -954,8 +966,21 @@ export async function runCarnetTests({ eq, ok }) {
       eq([figures(sommaire), figures(sources), sommaire?.textContent.includes('Reprendre la séance')],
         [[['1', 'p. 2 · index', true], ['2', 'p. 3 · index', true]], [[null, 'p. 10 · recette', true]], false],
         'T4 : « Sommaire » = les pages d’index (p. 2 puis p. 3, numérotées 1 et 2, chacune par vignettesDePages) ; « Pages et fichiers sources » garde la page de recette, sans numéro ; sans séance ouverte, pas de « Reprendre la séance »');
+      // Ronde 1 (constat 13) : « Pages et fichiers sources » ne paraît que s'il a quelque chose à montrer (une page qui n'est pas d'index, un document non-photo) — un livre
+      // dont on n'a photographié que la table des matières n'a plus, en bas, une section vide. Ronde 1 (constat 19) : le Sommaire suit l'ordre APPLIQUÉ dans la séance
+      // (`position` : « l'ordre se corrige dans le panneau de la séance ») avant le numéro imprimé — des pages d'index sans numéro ne sont plus rangées par clé de base.
+      const indexSeul = await renderBook({ id: 'ed4' }, {}, await ctx4(db, { source_pages: pages.filter((p) => p.kind === 'index') }), { matchMedia: mediaFactice(true) });
+      const ordonnees = [
+        { id: 'pgC', edition_id: 'ed4', document_id: 'doc4', sha256: H4('c'), printed_page: null, position: 2, kind: 'index', created_at: DATE4, updated_at: DATE4 },
+        { id: 'pgD', edition_id: 'ed4', document_id: 'doc4', sha256: H4('d'), printed_page: null, position: 1, kind: 'index', created_at: DATE4, updated_at: DATE4 },
+      ];
+      const parPosition = await renderBook({ id: 'ed4' }, {}, await ctx4(db, { source_pages: ordonnees }), { matchMedia: mediaFactice(true) });
+      eq([sectionDe(indexSeul, 'Pages et fichiers sources'), figures(sectionDe(indexSeul, 'Sommaire')).length,
+        [...(sectionDe(parPosition, 'Sommaire')?.querySelectorAll('.thumbs > figure') || [])].map((f) => [f.querySelector('.num')?.textContent, f.querySelector('[data-sha256]')?.dataset.sha256])],
+      [null, 2, [['1', H4('d')], ['2', H4('c')]]],
+      'T4 (ronde 1) : pages d’index et document photo seuls → pas de « Pages et fichiers sources » (le Sommaire les montre) ; pages d’index sans numéro imprimé → rangées et numérotées par leur position de séance (1 puis 2), jamais par l’ordre des clés');
       // Sans page d'index ni séance ouverte : pas de « Sommaire » ; avec une séance ouverte : « Sommaire » porte « Reprendre la séance » (vers la séance de CE livre) ; le rappel de droite reste.
-      await db.mutate({ deletes: { source_pages: ['pg3', 'pg2'] }, origin: 'device' });
+      await db.mutate({ deletes: { source_pages: ['pgA', 'pgB'] }, origin: 'device' });
       const sans = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: mediaFactice(true) });
       await db.mutate({ puts: { scan_sessions: [{ id: 'ss4', status: 'open', edition_id: 'ed4', started_at: DATE4, page_ids: ['pg10'], document_ids: [], created_at: DATE4, updated_at: DATE4 }] }, origin: 'device' });
       const avecSeance = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: mediaFactice(true) });
@@ -963,6 +988,17 @@ export async function runCarnetTests({ eq, ok }) {
       eq([sectionDe(sans, 'Sommaire'), !!sectionDe(avecSeance, 'Sommaire'), reprise?.getAttribute('href'), reprise?.className, reprise?.closest('section')?.querySelector('h2')?.textContent, [...avecSeance.querySelectorAll('a')].filter((a) => a.textContent === 'Reprendre').map((a) => a.getAttribute('href'))],
         [null, true, '#/import?session=ss4', 'btn small', 'Sommaire', ['#/import?session=ss4']],
         'T4 : sans page d’index ni séance, pas de « Sommaire » ; une séance ouverte le fait paraître avec a.btn.small « Reprendre la séance » → #/import?session=<id> ; le rappel « Reprendre » de la colonne de droite reste');
+      // Ronde 1 (constat 9, spec § 4.3 « droite = rappels … puis Les recettes de ce livre ») : imports à reprendre, séance en cours et convention des tasses sont dans la
+      // colonne de DROITE, avant la liste — sous 900 px, ils ne passent jamais au-dessus de la couverture ni entre elle et les métadonnées.
+      const avecRappels = await renderBook({ id: 'ed4' }, {}, await ctx4(db, {
+        imports: [{ id: 'imp4', kind: 'index', status: 'a_verifier', edition_id: 'ed4', page_ids: [], created_at: DATE4, updated_at: DATE4 }],
+        recipe_versions: [{ ...version4('r1'), ingredients: [{ id: 'ing4', unit_id: 'cup', quantity: 1 }] }] }), { matchMedia: mediaFactice(true) });
+      const droiteR = avecRappels.querySelector('.two-col.livre > [data-role="colonne-recettes"]');
+      const listeR = sectionDe(avecRappels, 'Les recettes de ce livre');
+      const rappels = [droiteR?.querySelector('[data-role="imports-a-reprendre"]'), [...(droiteR?.querySelectorAll('a') || [])].find((a) => a.textContent === 'Reprendre')?.closest('.card') ?? null, droiteR?.querySelector('.card.warn') ?? null];
+      eq([rappels.map((n) => !!n), rappels.map((n) => avant4(n, listeR)), listeR?.parentElement === droiteR, rappels[0]?.textContent],
+        [[true, true, true], [true, true, true], true, '1 import à reprendre'],
+        'T4 (ronde 1) : « 1 import à reprendre », la carte « Séance en cours » (Reprendre) et l’avertissement de convention sont dans la colonne de droite, AVANT « Les recettes de ce livre »');
       // ?nouveau=1 : l'accueil d'un livre reste, entre l'en-tête et les colonnes (renderAccueilLivre inchangé) ; le sous-titre ne dit que ce qui est connu.
       const nouvelle = await renderBook({ id: 'ed4' }, { nouveau: '1' }, await ctx4(db), { matchMedia: mediaFactice(true) });
       const accueil = nouvelle.querySelector('.accueil-livre');
@@ -970,9 +1006,34 @@ export async function runCarnetTests({ eq, ok }) {
       eq([!!accueil, accueil?.parentElement?.previousElementSibling?.tagName, accueil?.parentElement?.nextElementSibling?.classList.contains('livre'), sansEditeur.querySelector('header p.muted')?.textContent],
         [true, 'HEADER', true, 'A. Cuisinière'],
         'T4 : ?nouveau=1 → le panneau d’accueil entre l’en-tête et les deux colonnes (inchangé) ; sans éditeur ni année, le sous-titre ne porte que l’auteur (rien d’inventé)');
-    }));
+    })));
 
-    await bloc('T4 — liste compacte : vignette 48 px sur octets (synchrone), titre, « p. N », section, badge, « Importer » / « Saisir à la main », favori, compteur, filtres', () => withRepo(async (repo, db) => {
+    // Ronde 1 (constats 2 et 6) : connecté, deux pages d'index et deux autres pages DISTANTES (copie serveur de ce compte, aucun octet ici) — chaque groupe n'offre
+    // « Télécharger les {n} pages » que pour SES pages, et ne transmet qu'elles au moteur, dans l'ordre affiché.
+    await bloc('T4 (ronde 1) — « Télécharger les {n} pages » par groupe : le Sommaire ses pages d’index, « Pages et fichiers sources » les autres', () => withRepo(async (repo, db) => sansReseau('téléchargement par groupe', async () => {
+      const { renderBook } = await import('../src/ui/book.js');
+      const doc = { id: 'doc4', edition_id: 'ed4', source_type: 'photo', sha256: H4('a'), original_filename: 'a.jpg', created_at: DATE4, updated_at: DATE4 };
+      const page = (id, c, printed_page, kind) => ({ id, edition_id: 'ed4', document_id: 'doc4', sha256: H4(c), printed_page, ...(kind ? { kind } : {}), created_at: DATE4, updated_at: DATE4 });
+      const pages = [page('pd1', 'b', 5, 'index'), page('pd2', 'c', 4, 'index'), page('pd3', 'd', 20, 'recette'), page('pd4', 'e', 21, null)];
+      const distante = (sha256) => ({ sha256, mime: 'image/jpeg', size: 5, updated_at: DATE4, remote: { sha256, size: 400, mime: 'image/jpeg', quality: 'reduite', uploaded_at: DATE4, owner: 'u4' } });
+      await db.mutate({ puts: { files: pages.map((p) => distante(p.sha256)) }, origin: 'remote' });
+      await db.mutate({ puts: { books: [LIVRE4], book_editions: [EDITION4], source_documents: [doc], source_pages: pages }, origin: 'device' });
+      const appels = [];
+      const moteur = { onEtat: () => () => {}, telecharger: async (shas) => { appels.push([...shas]); return { recus: 0, erreurs: 0, erreur: null }; } };
+      const fiche = await renderBook({ id: 'ed4' }, {}, await ctx4(db, { sync: { user: { id: 'u4' }, moteur } }), { matchMedia: mediaFactice(true) });
+      const groupe = (titre) => [...(sectionDe(fiche, titre)?.querySelectorAll('button') || [])].filter((b) => b.textContent.startsWith('Télécharger les '));
+      const [sommaire, sources] = [groupe('Sommaire'), groupe('Pages et fichiers sources')];
+      eq([sommaire.map((b) => b.textContent), sources.map((b) => b.textContent)], [['Télécharger les 2 pages'], ['Télécharger les 2 pages']],
+        'T4 (ronde 1) : le Sommaire offre « Télécharger les 2 pages » pour SES deux pages d’index ; « Pages et fichiers sources » le sien pour ses deux autres pages (jamais les quatre)');
+      sommaire[0]?.click();
+      for (let i = 0; i < 100 && appels.length < 1; i += 1) await new Promise((r) => setTimeout(r, 10));
+      sources[0]?.click();
+      for (let i = 0; i < 100 && appels.length < 2; i += 1) await new Promise((r) => setTimeout(r, 10));
+      eq(appels, [[H4('c'), H4('b')], [H4('d'), H4('e')]],
+        'T4 (ronde 1) : chaque bouton transmet au moteur SES pages, dans l’ordre affiché — le Sommaire p. 4 puis p. 5 (index), les sources p. 20 puis p. 21');
+    })));
+
+    await bloc('T4 — liste compacte : vignette 48 px sur octets (synchrone), titre, « p. N », section, badge, « Importer » / « Saisir à la main », favori, compteur, filtres', () => withRepo(async (repo, db) => sansReseau('liste compacte', async () => {
       const B = await import('../src/ui/book.js');
       const K = await import('../src/ui/components.js');
       const BU = await import('../src/core/blob-urls.js');
@@ -988,7 +1049,16 @@ export async function runCarnetTests({ eq, ok }) {
         recette4('rF', { original_title: 'Fenouil rôti', printed_page: 55, photo_sha256: H4('9') }), // pointeur sans ligne files → aucune image
       ];
       await db.mutate({ puts: { books: [LIVRE4], book_editions: [EDITION4], recipes: recettes, recipe_versions: versions4(recettes) }, origin: 'device' });
-      const fiche = await B.renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: mediaFactice(true) });
+      // Ronde 1 (constats 7 et 11, I-UI-5) : les octets des photos de plat sont lus UNE fois, en UNE transaction (repo.getFiles → db.getMany) — exactement les pointeurs
+      // valides, dans l'ordre des fiches —, jamais fiche par fiche (db.get de `files`). L'espion est posé sur l'instance de base le temps du rendu.
+      const lectures4 = { get: [], getMany: [] };
+      const vraiGet4 = db.get.bind(db); const vraiGetMany4 = db.getMany.bind(db);
+      db.get = (store, key) => { if (store === 'files') lectures4.get.push(key); return vraiGet4(store, key); };
+      db.getMany = (store, keys) => { if (store === 'files') lectures4.getMany.push([...keys]); return vraiGetMany4(store, keys); };
+      let fiche = null;
+      try { fiche = await B.renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: mediaFactice(true) }); } finally { delete db.get; delete db.getMany; }
+      eq([lectures4.getMany, lectures4.get], [[[sha, H4('1'), H4('9')]], []],
+        'T4 (ronde 1, I-UI-5) : UNE lecture groupée de files (db.getMany) portant exactement les trois pointeurs valides (rA, rB, rF), aucune lecture fiche par fiche');
       const liste = sectionDe(fiche, 'Les recettes de ce livre');
       eq([liste?.querySelector('h2 + p.muted')?.textContent, liste?.querySelector('h2 + p.muted')?.dataset.role, titres4(fiche)],
         ['4 disponible(s) · 1 à importer', 'compte-recettes', ['Bouillon', 'Compote', 'Tarte aux pommes', 'Fenouil rôti', 'Dahl', 'Escabèche']],
@@ -1012,6 +1082,7 @@ export async function runCarnetTests({ eq, ok }) {
         'T4 : un signet rangé dans le livre → badge « Lien web » (availabilityBadge), ni « Importer » ni « Saisir à la main », pas de « p. » ; aucun chip, badge ou bouton dans un <a>');
       // Filtres : chaque bouton redessine la liste ; le filtre actif est marqué ; « À importer » ne retient que les références sans adresse.
       const clic = (texte) => { bouton4(liste, texte).click(); return titres4(fiche); };
+      eq([...liste.querySelectorAll('button.btn.small.active')].map((b) => b.textContent), ['Toutes'], 'T4 (ronde 1, constat 22) : à l’ouverture de la fiche, le filtre « Toutes » est marqué actif, lui seul');
       eq([clic('À importer'), clic('Disponibles'), clic('Favoris'), clic('Toutes'), [...liste.querySelectorAll('button.btn.small.active')].map((b) => b.textContent)],
         [['Compote'], ['Bouillon', 'Tarte aux pommes', 'Fenouil rôti', 'Dahl'], ['Bouillon'], ['Bouillon', 'Compote', 'Tarte aux pommes', 'Fenouil rôti', 'Dahl', 'Escabèche'], ['Toutes']],
         'T4 : filtres Toutes / Disponibles / À importer / Favoris — « À importer » = les références sans adresse seules (le signet reste sous Toutes), « Disponibles » compte la partielle ; le filtre actif est marqué');
@@ -1029,10 +1100,45 @@ export async function runCarnetTests({ eq, ok }) {
       eq([ligneDirecte.querySelector('img.plat-vignette.petite')?.getAttribute('src')?.startsWith('blob:'), ligneDirecte.querySelector('img')?.getAttribute('loading'), ligneSansBlob.querySelector('img'), lignePdf.querySelector('img'), B.ligneCompacte(recette4('rZ')).querySelector('img')],
         [true, 'lazy', null, null, null],
         'ligneCompacte : octets d’un type d’image → img.plat-vignette.petite (loading lazy, src blob:) ; ligne sans blob, blob PDF (liste blanche, pas une image) ou fiche sans pointeur → aucune image');
+      // Ronde 1 (constats 20 et 23) : le titre affiché est display_title d'abord, « Sans titre » à défaut (jamais un lien vide, le repli de library.js) ; l'href est encodé ;
+      // data-recette porte l'identifiant tel quel.
+      const renommee = B.ligneCompacte(recette4('r é/1', { original_title: 'Ancien titre', display_title: 'Nouveau titre' }));
+      const sansTitre = B.ligneCompacte(recette4('rT', { original_title: '' }));
+      eq([renommee.querySelector('a.titre')?.textContent, renommee.querySelector('a.titre')?.getAttribute('href'), renommee.dataset.recette, sansTitre.querySelector('a.titre')?.textContent],
+        ['Nouveau titre', '#/recipes/r%20%C3%A9%2F1', 'r é/1', 'Sans titre'],
+        'ligneCompacte (ronde 1) : display_title gagne sur original_title ; un titre vide devient « Sans titre » ; l’href du titre encode l’identifiant ; li[data-recette] = l’identifiant');
+      // Ronde 1 (constat 12) : « à importer » a UNE définition (estAImporter / aUneAdresse de library.js) — une adresse qui n'est pas une chaîne non vide n'est pas une
+      // adresse : la fiche compte la référence, son filtre la garde, sa ligne offre « Importer » et sa section, comme l'onglet « À importer » de la bibliothèque.
+      const r42 = recette4('rQ', { original_title: 'Quiche', availability: 'reference_only', source_url: 42, section: 'Tartes' });
+      const fiche42 = await B.renderBook({ id: 'ed4' }, {}, await ctx4(db, { recipes: [...recettes, r42] }), { matchMedia: mediaFactice(true) });
+      const liste42 = sectionDe(fiche42, 'Les recettes de ce livre');
+      const ligne42 = () => lignes4(fiche42).find((li) => li.dataset.recette === 'rQ');
+      const gestes42 = [...(ligne42()?.querySelectorAll('a.btn.small') || [])].map((a) => a.textContent);
+      const chips42 = [...(ligne42()?.querySelectorAll('.chip.neutral') || [])].map((c) => c.textContent);
+      bouton4(liste42, 'À importer')?.click();
+      eq([liste42?.querySelector('[data-role="compte-recettes"]')?.textContent, gestes42, chips42, titres4(fiche42)],
+        ['4 disponible(s) · 2 à importer', ['Importer', 'Saisir à la main'], ['Tartes'], ['Compote', 'Quiche']],
+        'T4 (ronde 1) : une référence au source_url non-chaîne (42) est « à importer » partout dans la fiche — compteur, ligne (Importer, Saisir à la main, section), filtre « À importer »');
+      // Ronde 1 (constat 3, D-F9, I-F6) : des octets admis (image/jpeg) que le navigateur ne décode pas → error : l'img est retirée, son URL blob: révoquée — jamais un
+      // cadre de 48 px bordé avec l'icône d'image cassée (le motif de vignettePlat et de la carte-plat). « lazy » ne chargerait pas hors écran : le test passe en eager.
+      const casse = new Blob([Uint8Array.of(0xff, 0xd8, 0xff, 0x00, 1, 2, 3, 4)], { type: 'image/jpeg' });
+      const ligneCasse = B.ligneCompacte(recette4('rK', { photo_sha256: sha }), { fichier: { sha256: sha, mime: 'image/jpeg', blob: casse } });
+      const imgCasse = ligneCasse.querySelector('img.plat-vignette.petite'); const uCasse = imgCasse?.getAttribute('src');
+      const sceneK = document.createElement('ul'); sceneK.style.cssText = 'position:absolute;left:-10000px;top:0;width:375px'; document.body.append(sceneK); sceneK.append(ligneCasse);
+      try {
+        await new Promise((resoudre, rejeter) => {
+          const minuterie = setTimeout(() => rejeter(new Error('attente dépassée (3 s) : error de la vignette indécodable')), 3000);
+          imgCasse.addEventListener('error', () => { clearTimeout(minuterie); resoudre(); }, { once: true });
+          imgCasse.loading = 'eager';
+        });
+        await macro4();
+      } finally { sceneK.remove(); }
+      eq([typeof uCasse === 'string' && uCasse.startsWith('blob:'), ligneCasse.querySelectorAll('img').length, BU.revoquerUrlDeBlob(uCasse)], [true, 0, false],
+        'ligneCompacte (ronde 1) : octets image/jpeg indécodables → d’abord une img (type admis), puis, à l’erreur de décodage, plus AUCUNE img dans la ligne et son URL blob: déjà révoquée');
       BU.revoquerUrlsDeBlob();
-    }));
+    })));
 
-    await bloc('T4 — sous 900 px : 8 lignes puis « Voir les {n} recettes » (déplie sur place) ; ≥ 900 px : tout ; la bascule de largeur redessine', () => withRepo(async (repo, db) => {
+    await bloc('T4 — sous 900 px : 8 lignes puis « Voir les {n} recettes » (déplie sur place) ; ≥ 900 px : tout ; la bascule de largeur redessine', () => withRepo(async (repo, db) => sansReseau('8 lignes', async () => {
       const { renderBook, LIGNES_REPLIEES, LARGEUR_DEUX_COLONNES } = await import('../src/ui/book.js');
       const recettes = Array.from({ length: 12 }, (_, i) => recette4('r' + String(i).padStart(2, '0'), { original_title: 'Plat ' + String(i).padStart(2, '0'), printed_page: i + 1, favorite: i < 10 }));
       await db.mutate({ puts: { books: [LIVRE4], book_editions: [EDITION4], recipes: recettes, recipe_versions: versions4(recettes) }, origin: 'device' });
@@ -1041,7 +1147,7 @@ export async function runCarnetTests({ eq, ok }) {
       try {
         const media = mediaFactice(false);
         const etroite = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: media });
-        scene.append(etroite);
+        scene.append(etroite); await macro4(); // ronde 1 : l'abonnement à `change` se pose au MONTAGE (le motif de recipe.js et library.js) — monter attend ce tour
         const liste = sectionDe(etroite, 'Les recettes de ce livre');
         const voirTout = (racine = liste) => racine.querySelector('button[data-role="voir-tout"]');
         eq([LIGNES_REPLIEES, LARGEUR_DEUX_COLONNES, media.mq.requete, lignes4(etroite).length, voirTout()?.textContent, voirTout()?.tagName, voirTout()?.className, voirTout()?.getAttribute('href'), voirTout()?.previousElementSibling?.matches('ul.liste-compacte')],
@@ -1049,12 +1155,15 @@ export async function runCarnetTests({ eq, ok }) {
           'T4 : sous 900 px (matchMedia injecté, requête (min-width: 900px)), 8 lignes puis button.btn « Voir les 12 recettes » juste sous la liste (un bouton, pas un lien)');
         voirTout().click();
         eq([lignes4(etroite).length, voirTout(), location.hash === hashAvant], [12, null, true], 'T4 : « Voir les {n} recettes » déplie sur place : 12 lignes, le bouton disparaît, aucune navigation');
+        // Ronde 1 (constat 16, I-UI-4) : le bouton qui se retire ne laisse pas le focus tomber sur body — il passe au titre de la première ligne dépliée (la 9e).
+        eq([document.activeElement === lignes4(etroite)[LIGNES_REPLIEES]?.querySelector('a.titre'), media.mq.ecouteurs.length], [true, 1],
+          'T4 (ronde 1) : après « Voir les {n} recettes », le focus est sur le titre de la ligne 9 (la première montrée par le dépli) ; la fiche montée porte UN abonné change');
         bouton4(liste, 'Favoris').click();
         eq([lignes4(etroite).length, voirTout()], [10, null], 'T4 : une fois dépliée, la liste reste dépliée quand le filtre change (10 favoris, pas de bouton)');
         // Une nouvelle instance est repliée de nouveau ; le compte du bouton est celui de la VUE filtrée ; la bascule de largeur (événement change) redessine.
         const media2 = mediaFactice(false);
         const seconde = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: media2 });
-        scene.append(seconde);
+        scene.append(seconde); await macro4();
         const liste2 = sectionDe(seconde, 'Les recettes de ce livre');
         bouton4(liste2, 'Favoris').click();
         eq([lignes4(seconde).length, voirTout(liste2)?.textContent, media2.mq.ecouteurs.length], [8, 'Voir les 10 recettes', 1], 'T4 : nouvelle instance → repliée ; « Voir les 10 recettes » compte la vue filtrée ; un seul écouteur de change posé');
@@ -1064,14 +1173,36 @@ export async function runCarnetTests({ eq, ok }) {
         eq([lignes4(seconde).length, voirTout(liste2)], [10, null], 'T4 : la bascule ≥ 900 px (change) redessine : les 10 lignes, sans bouton');
         media2.mq.basculer(false);
         eq([lignes4(seconde).length, voirTout(liste2)?.textContent], [8, 'Voir les 10 recettes'], 'T4 : la bascule inverse replie de nouveau (cette instance n’avait pas déplié)');
+        // Ronde 1 (constat 18) : un rendu jamais inséré (jeté par renderSeq, app.js) ne prend pas l'abonnement de la fiche affichée.
+        const media3 = mediaFactice(true);
+        await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: media3 }); await macro4();
+        eq([media2.mq.ecouteurs.length, media3.mq.ecouteurs.length], [1, 0], 'T4 (ronde 1) : un rendu jamais monté ne s’abonne pas et ne retire pas l’abonné de la fiche affichée (qui garde le sien)');
+        // Ronde 1 (constats 1 et 24) : la fiche quittée (détachée du document) se retire au premier change, sans rien redessiner (ni lignes neuves, ni URL blob:).
+        // Une fiche à elle (montée, abonnée) : l'assertion ne dépend pas de l'étape précédente.
+        const media5 = mediaFactice(false);
+        const quittee = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: media5 });
+        scene.append(quittee); await macro4();
+        const abonneeMontee = media5.mq.ecouteurs.length;
+        const avantDetache = lignes4(quittee);
+        quittee.remove(); media5.mq.basculer(true);
+        eq([abonneeMontee, media5.mq.ecouteurs.length, lignes4(quittee).length, lignes4(quittee).every((li, i) => li === avantDetache[i])], [1, 0, 8, true],
+          'T4 (ronde 1) : montée, la fiche porte UN abonné ; détachée, elle se désabonne au premier change reçu et ne redessine rien (mêmes 8 lignes, mêmes nœuds) : la MediaQueryList ne la retient plus');
+        // Ronde 1 (constat 1) : un change reçu ENTRE le rendu et le montage n'est pas perdu — au montage, la largeur est relue et la liste redessinée si elle a changé.
+        const media4 = mediaFactice(false);
+        const tardive = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: media4 });
+        const avantMontage = lignes4(tardive).length;
+        media4.mq.basculer(true);
+        scene.append(tardive); await macro4();
+        eq([avantMontage, lignes4(tardive).length, voirTout(sectionDe(tardive, 'Les recettes de ce livre')), media4.mq.ecouteurs.length], [8, 12, null, 1],
+          'T4 (ronde 1) : rendue étroite (8 lignes), la largeur passe à ≥ 900 px avant le montage → au montage, les 12 lignes sans bouton ; un abonné');
         const large = await renderBook({ id: 'ed4' }, {}, await ctx4(db), { matchMedia: mediaFactice(true) });
         const huit = await renderBook({ id: 'ed4' }, {}, await ctx4(db, { recipes: recettes.slice(0, 8), recipesById: new Map(recettes.slice(0, 8).map((r) => [r.id, r])) }), { matchMedia: mediaFactice(false) });
         eq([lignes4(large).length, voirTout(large), lignes4(huit).length, voirTout(huit)], [12, null, 8, null],
           'T4 : ≥ 900 px, les 12 lignes d’un coup, aucun bouton ; exactement 8 recettes sous 900 px → 8 lignes, aucun bouton (la borne est « plus de 8 »)');
       } finally { scene.remove(); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
-    }));
+    })));
 
-    await bloc('T4 — styles.css servie : deux colonnes 200px 1fr ≥ 900 px, une colonne sous ; titre de ligne en serif ; vignette 48 × 48 (cadres de mesure)', () => withRepo(async (repo, db) => {
+    await bloc('T4 — styles.css servie : deux colonnes 200px 1fr ≥ 900 px, une colonne sous ; titre de ligne en serif ; vignette 48 × 48 (cadres de mesure)', () => withRepo(async (repo, db) => sansReseau('styles.css servie', async () => {
       const { renderBook } = await import('../src/ui/book.js');
       const jpeg = await jpegDe('#36c'); const sha = await sha256Hex(jpeg);
       await repo.putFile(sha, jpeg, { mime: 'image/jpeg', origin: 'device' });
@@ -1101,7 +1232,9 @@ export async function runCarnetTests({ eq, ok }) {
           return { gauche: Math.round(gauche.width), coteACote: droite.left >= gauche.right - 1 && Math.abs(droite.top - gauche.top) < 2, empilee: droite.top >= gauche.bottom - 1,
             serif: /georgia/i.test(S(titre).fontFamily), souligne: S(titre).textDecorationLine, vignette: [Math.round(img.width), Math.round(img.height)],
             grille: S(colonnes).gridTemplateColumns.trim().split(/\s+/).length, filet: S(li).borderBottomWidth, puce: S(fiche.querySelector('ul.liste-compacte')).listStyleType,
-            couverture: Math.round(fiche.querySelector('.two-col.livre > [data-role="colonne-livre"] > a.cover-wrap').getBoundingClientRect().width) }; // EI-T4-2
+            couverture: Math.round(fiche.querySelector('.two-col.livre > [data-role="colonne-livre"] > a.cover-wrap').getBoundingClientRect().width), // EI-T4-2
+            // Ronde 1 (constats 4 et 10, I-UI-4) : la cible de chaque titre (le seul geste qui ouvre la recette depuis la liste), la plus petite hauteur et largeur.
+            cible: (() => { const r = [...fiche.querySelectorAll('ul.liste-compacte a.titre')].map((a) => a.getBoundingClientRect()); return [Math.round(Math.min(...r.map((x) => x.height))), Math.round(Math.min(...r.map((x) => x.width))), r.length]; })() };
         } finally { f.remove(); }
       };
       const [l1100, l800, l375] = [await mesurer(1100), await mesurer(800), await mesurer(375)];
@@ -1111,8 +1244,10 @@ export async function runCarnetTests({ eq, ok }) {
         'T4 (styles.css, 800 et 375 px) : une seule colonne, gauche puis droite (la fiche livre ne prend pas le 1fr 1fr de .two-col à 760 px) ; la vignette reste 48 × 48');
       // EI-T4-2 : la couverture de la fiche garde ≈ 200 px (D-UI-7) quand les colonnes s'empilent — jamais la largeur de l'écran (avant T4 : 96 px à côté du titre).
       eq([l1100.couverture, l800.couverture, l375.couverture], [200, 200, 200], 'T4 (EI-T4-2, styles.css) : la couverture de la colonne de gauche mesure 200 px de large à 1100, 800 et 375 px (D-UI-7 « bookCover ≈ 200 px »)');
+      eq([l1100, l800, l375].map((l) => [l.cible[0] >= 44, l.cible[1] >= 44, l.cible[2]]), [[true, true, 2], [true, true, 2], [true, true, 2]],
+        'T4 (ronde 1, styles.css, I-UI-4) : le titre de chaque ligne — la cible qui ouvre la recette — mesure au moins 44 px de haut et de large à 1100, 800 et 375 px (« Haricots » compris)');
       (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob();
-    }));
+    })));
 
     await bloc('T4 — styles.css lue : les règles .liste-compacte (jetons seulement : T-1, T-2, T-11 ; survol sous @media (hover: hover))', async () => {
       const css = (await (await fetch(new URL('../styles.css', import.meta.url), { cache: 'no-store' })).text()).replace(/\/\*[\s\S]*?\*\//g, '');

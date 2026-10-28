@@ -1309,6 +1309,13 @@ export async function runPhotoPlatTests({ eq, ok }) {
           const bilanL = [revoquees.map((x) => x.u).sort(), revoquees.filter((x) => x.encore).length];
           eq([...bilanL, BU.revoquerUrlDeBlob(sentinelleL)], [[...avantL].sort(), 0, true],
             'book.js drawList (ligne compacte, lot UI-1 T4) : le filtre redessine et révoque EXACTEMENT les URL des vignettes précédentes, APRÈS le vidage ; la couverture et la sentinelle restent vivantes');
+          // Lot UI-1 T4, ronde 1 (constat 8) : la branche « aucune ligne » de drawList révoque aussi — un filtre qui vide la vue ne laisse vivante aucune URL de la vue d'avant.
+          const avantVide = srcs(rb);
+          revoquees.length = 0;
+          filtre.value = 'zzz'; filtre.dispatchEvent(new Event('input', { bubbles: true }));
+          await attendre(() => revoquees.length >= avantVide.length, 'révocations du vidage (livre)');
+          eq([avantVide.length, revoquees.map((x) => x.u).sort(), revoquees.filter((x) => x.encore).length, rb.querySelectorAll('img.plat-vignette').length], [1, [...avantVide].sort(), 0, 0],
+            'book.js drawList (ronde 1 de T4) : un filtre qui VIDE la vue (« zzz », l’état vide) révoque EXACTEMENT l’URL de la vignette affichée juste avant, APRÈS le vidage');
         } finally { URL.revokeObjectURL = vraiRevoke; }
       } finally { globalThis.fetch = vraiFetch; scene.remove(); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
     }));

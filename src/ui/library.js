@@ -5,7 +5,7 @@ import { el, promptDialog, toast } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { navigate, buildQuery, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
-import { pageHeader, bookCover, segmented, emptyState, section, sectionPlain, recipeCard, grilleCartes, remplacerEnRevoquant } from './components.js';
+import { pageHeader, bookCover, segmented, emptyState, section, sectionPlain, recipeCard, grilleCartes, remplacerEnRevoquant, suivreLargeurAuMontage } from './components.js';
 import { revoquerUrlDeBlob } from '../core/blob-urls.js';
 import { proposeDishesForRecipe } from '../domain/dishes.js';
 import { pointeurValide } from '../domain/photo-web.js';
@@ -13,7 +13,8 @@ import { logError } from '../core/log.js';
 
 const TABS = ['recettes', 'books', 'dishes', 'a-importer'];
 export const CARTES_PAR_PAGE = 60; // F-9 : la grille est bornée ; « Voir plus » rend la page suivante
-const aUneAdresse = (r) => typeof r?.source_url === 'string' && r.source_url !== '';
+// UNE définition de « une adresse » et de « à importer » (D-UI-10) : la fiche livre (book.js) les lit ici (T4-R1).
+export const aUneAdresse = (r) => typeof r?.source_url === 'string' && r.source_url !== '';
 // B-I-5 : la grille montre les recettes CONSERVÉES et les signets (lus ou non) ; une référence d'index sans adresse est « à importer », pas une recette.
 export const dansLaGrille = (r) => r.availability !== 'reference_only' || aUneAdresse(r);
 // La liste « à importer » et son pied : les références sans adresse d'un livre (le pied n'est offert que s'il y en a : rien d'inventé).
@@ -110,27 +111,15 @@ async function recettesTab(ctx, { matchMedia }) {
 
 // Sous 760 px, l'action d'en-tête est répétée pleine largeur sous la grille (maquette mobile 01) ; au-dessus, [hidden] (T-9 ; aucun display:none neuf : T-1).
 // La marge est portée par le bouton lui-même : caché, il ne laisse aucune bande vide. La largeur est lue par matchMedia (injectable : deps.matchMedia) et
-// suivie sur `change` par AU PLUS UN écouteur dans toute l'app (ronde 1) : l'abonnement attend le MONTAGE (setTimeout 0 puis isConnected, motif
-// d'import-web.js ; app.js monte la route juste après son rendu) — un rendu jamais monté (navigation plus récente, rendu qui lève) ne s'abonne pas —,
-// relit la largeur à cet instant (un change reçu entre le rendu et le montage n'est pas perdu, D-T2-b) et retire l'écouteur du rendu monté précédent ;
-// celui d'un rendu détaché (route quittée) se retire aussi au premier change. Le MediaQueryList ne retient donc jamais plus d'un rendu.
-let suiviMobile = null; // { large, suivre } : l'abonnement du dernier rendu monté
+// suivie sur `change` par AU PLUS UN écouteur dans toute l'app (ronde 1) : l'abonnement attend le MONTAGE — un rendu jamais monté (navigation plus récente,
+// rendu qui lève) ne s'abonne pas —, relit la largeur à cet instant (un change reçu entre le rendu et le montage n'est pas perdu, D-T2-b) et retire
+// l'écouteur du rendu monté précédent ; celui d'un rendu détaché (route quittée) se retire aussi au premier change. Depuis T4-R1, le motif est UNE aide
+// partagée avec la fiche recette et la fiche livre (suivreLargeurAuMontage, components.js).
 function boutonMobile(matchMedia) {
   const mobile = el('a', { class: 'btn primary big block', href: '#/add', dataset: { role: 'ajouter-mobile' }, style: { marginTop: '1rem' } }, t('Ajouter une recette'));
   const large = matchMedia('(min-width: 760px)');
   mobile.hidden = !!large?.matches;
-  setTimeout(() => {
-    if (!mobile.isConnected || typeof large?.addEventListener !== 'function') return;
-    if (suiviMobile) suiviMobile.large.removeEventListener('change', suiviMobile.suivre);
-    const suivre = (e) => {
-      if (mobile.isConnected) { mobile.hidden = !!e.matches; return; }
-      large.removeEventListener('change', suivre);
-      if (suiviMobile?.suivre === suivre) suiviMobile = null;
-    };
-    mobile.hidden = !!large.matches;
-    large.addEventListener('change', suivre);
-    suiviMobile = { large, suivre };
-  }, 0);
+  suivreLargeurAuMontage('bibliotheque', mobile, large, (e) => { mobile.hidden = !!(e ? e.matches : large.matches); });
   return mobile;
 }
 

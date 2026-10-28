@@ -13,7 +13,7 @@ import { DIET_TAGS } from '../model/schema.js';
 import { reperesDe } from '../domain/recherche-web.js';
 import { lirePage, relireResultat } from '../domain/lecture-web.js';
 import { logError } from '../core/log.js';
-import { pageHeader, section, sectionPlain, lienOrigine, dureeTotale, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture, sessionAssistant, carteConnexion, ligneReperes, contexteFichiers, vignettesDePages, boutonTelechargerPages } from './components.js';
+import { pageHeader, section, sectionPlain, lienOrigine, dureeTotale, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture, sessionAssistant, carteConnexion, ligneReperes, contexteFichiers, vignettesDePages, boutonTelechargerPages, suivreLargeurAuMontage } from './components.js';
 import { monterPhotoPlat } from './photo-plat.js';
 import { demarrerLectureWeb, texteEchecLecture, enLigneLecture, ligneWebOuverte } from './import-web.js';
 import { demarrerConnexion } from './settings.js';
@@ -49,25 +49,10 @@ export function texteReperes(version) {
 }
 
 // La largeur, suivie sur `change` (F-5) : le details s'ouvre ou se replie, le corps bascule entre colonnes et onglets — sans redessin. Ronde 1 (fuite
-// de la revue) : AU PLUS UN abonné de fiche dans toute l'app, le motif boutonMobile de library.js (T2-R1). L'abonnement attend le MONTAGE
-// (setTimeout 0 puis isConnected : app.js insère la route juste après son rendu, et un rendu dépassé, jamais inséré, ne s'abonne pas), RELIT la
-// largeur à cet instant (un change reçu entre le rendu et le montage n'est pas perdu) et retire celui de la fiche montée précédente ; une fiche
-// quittée se retire au premier change. La MediaQueryList ne retient donc jamais plus d'une fiche (et une liste sans addEventListener : aucune).
-let suiviFiche = null; // { mq, suivre } : l'abonnement de la dernière fiche montée
-function suivreLargeur(racine, mq, appliquer) {
-  setTimeout(() => {
-    if (!racine.isConnected || typeof mq?.addEventListener !== 'function') return;
-    if (suiviFiche) suiviFiche.mq.removeEventListener('change', suiviFiche.suivre);
-    const suivre = () => {
-      if (racine.isConnected) { appliquer(); return; }
-      mq.removeEventListener('change', suivre);
-      if (suiviFiche?.suivre === suivre) suiviFiche = null;
-    };
-    appliquer();
-    mq.addEventListener('change', suivre);
-    suiviFiche = { mq, suivre };
-  }, 0);
-}
+// de la revue) : AU PLUS UN abonné de fiche dans toute l'app. L'abonnement attend le MONTAGE (un rendu dépassé, jamais inséré, ne s'abonne pas), RELIT
+// la largeur à cet instant (un change reçu entre le rendu et le montage n'est pas perdu) et retire celui de la fiche montée précédente ; une fiche
+// quittée se retire au premier change. Depuis T4-R1, UNE aide partagée avec la bibliothèque et la fiche livre (suivreLargeurAuMontage, components.js).
+const suivreLargeur = (racine, mq, appliquer) => suivreLargeurAuMontage('fiche-recette', racine, mq, () => appliquer());
 
 // `deps` (lot B, facultatif : le routeur n'en passe pas) : les gestes de la lecture web { repo, navigate, toast, fetch, maintenant, enLigne } — la
 // suite n'ouvre ni réseau ni navigation réelle. Lot F (§ 4.1.1) : le MÊME objet porte aussi `pickFiles` ; il est transmis tel quel à monterPhotoPlat

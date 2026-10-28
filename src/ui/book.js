@@ -6,9 +6,10 @@ import * as repo from '../model/repo.js';
 import { etatFichier } from '../sync/fichiers.js';
 import { typeAffichage, displayUrl } from '../sync/mime.js';
 import { listConventions } from '../domain/units.js';
-import { pageHeader, section, sectionPlain, field, select, availabilityBadge, emptyState, bookCover, contexteFichiers, vignettesDePages, boutonTelechargerPages, relireErreurs, texteErreurFichier, remplacerEnRevoquant } from './components.js';
+import { pageHeader, section, sectionPlain, field, select, availabilityBadge, emptyState, bookCover, contexteFichiers, vignettesDePages, boutonTelechargerPages, relireErreurs, texteErreurFichier, remplacerEnRevoquant, suivreLargeurAuMontage } from './components.js';
 import { invalidate } from './state.js';
-import { urlDeBlob } from '../core/blob-urls.js';
+import { urlDeBlob, revoquerUrlDeBlob } from '../core/blob-urls.js';
+import { estAImporter, aUneAdresse } from './library.js';
 import { poserCouverture, renderZoneCouverture, messageErreurImage } from './livre-ajout.js';
 import { startScanSession, indexEntriesPanel } from './import.js';
 import { accueilLivreModel, renderAccueilLivre } from './accueil-livre.js';
@@ -91,42 +92,39 @@ export const LARGEUR_DEUX_COLONNES = '(min-width: 900px)';
 // D-UI-7, D-UI-10, I-UI-5 : une ligne de la liste compacte des recettes d'un livre. La vignette (D-F9 tenu) se décide AU RENDU, de façon synchrone, sur la ligne
 // `files` que l'appelant a lue en une fois (repo.getFiles, comme les couvertures de la bibliothèque) : octets ICI et d'un type d'image (typeAffichage, la règle du
 // lot G, displayUrl par urlDeBlob pour la révocation D-T9) → img.plat-vignette.petite, décorative (alt vide : le titre est à côté) ; sinon rien — jamais un cadre
-// vide, jamais une lecture en base depuis la ligne. Le titre serif est le lien de la fiche ; « p. N » seulement avec printed_page ; la section lue dans la table des
-// matières (lot C, sectionLisible : une fiche reçue ou restaurée peut porter autre chose qu'une chaîne) pour une référence seulement ; le badge est celui
-// d'availabilityBadge (UNE définition des textes, D-UI-10) ; « Importer » et « Saisir à la main » sur une référence ou une partielle SANS adresse (mêmes href qu'au
-// lot A, T4-R1 : un signet devenu partiel n'a pas d'entrée), hors du <a> du titre (jamais un lien dans un lien, m4).
+// vide, jamais une lecture en base depuis la ligne. T4-R1 : des octets admis que le navigateur ne décode pas (HEIC hors Safari, octets tronqués) lèvent error —
+// l'img est retirée et son URL révoquée (le motif de vignettePlat et de la carte-plat, I-F6). Le titre serif est le lien de la fiche (« Sans titre » à défaut,
+// comme library.js : jamais un lien vide) ; « p. N » seulement avec printed_page ; la section lue dans la table des matières (lot C, sectionLisible : une fiche
+// reçue ou restaurée peut porter autre chose qu'une chaîne) pour une référence seulement ; le badge est celui d'availabilityBadge (UNE définition des textes,
+// D-UI-10) ; « Importer » et « Saisir à la main » sur une référence ou une partielle SANS adresse (aUneAdresse de library.js, la définition de l'onglet
+// « À importer » ; mêmes href qu'au lot A, T4-R1 : un signet devenu partiel n'a pas d'entrée), hors du <a> du titre (jamais un lien dans un lien, m4).
 export function ligneCompacte(r, { fichier = null } = {}) {
   const type = typeAffichage(fichier);
-  const vignette = type && type.startsWith('image/') ? el('img', { class: 'plat-vignette petite', alt: '', loading: 'lazy', src: displayUrl(fichier, urlDeBlob) }) : null;
-  const aImporter = (r.availability === 'reference_only' || r.availability === 'partial') && !r.source_url;
-  const sectionLue = r.availability === 'reference_only' && !r.source_url ? sectionLisible(r.section) : null; // la règle d'avant : jamais sur un signet rangé
+  const u = type && type.startsWith('image/') ? displayUrl(fichier, urlDeBlob) : null;
+  const vignette = u ? el('img', { class: 'plat-vignette petite', alt: '', loading: 'lazy', src: u }) : null;
+  vignette?.addEventListener('error', () => { vignette.remove(); revoquerUrlDeBlob(u); }, { once: true });
+  const importable = (r.availability === 'reference_only' || r.availability === 'partial') && !aUneAdresse(r);
+  const sectionLue = r.availability === 'reference_only' && !aUneAdresse(r) ? sectionLisible(r.section) : null; // la règle d'avant : jamais sur un signet rangé
   const id = encodeURIComponent(r.id);
   return el('li', { class: 'row between', dataset: { recette: r.id } },
     el('div', { class: 'row top', style: { flex: '1', minWidth: '0' } },
       vignette,
       el('div', { style: { flex: '1', minWidth: '0' } },
-        el('a', { class: 'titre', href: `#/recipes/${id}` }, r.display_title || r.original_title),
+        el('a', { class: 'titre', href: `#/recipes/${id}` }, r.display_title || r.original_title || t('Sans titre')),
         el('div', { class: 'row', style: { gap: '.4rem' } },
           r.printed_page ? el('span', { class: 'muted' }, `${t('p.')} ${r.printed_page}`) : null,
           sectionLue ? el('span', { class: 'chip neutral', dataset: { role: 'section' } }, sectionLue) : null))),
     el('div', { class: 'row', dataset: { role: 'etat-recette' } },
       availabilityBadge(r),
-      aImporter ? el('a', { class: 'btn small', href: `#/recipes/${id}/importer` }, t('Importer')) : null,
-      aImporter ? el('a', { class: 'btn small', href: `#/recipes/${id}/edit?kind=extraction` }, t('Saisir à la main')) : null,
+      importable ? el('a', { class: 'btn small', href: `#/recipes/${id}/importer` }, t('Importer')) : null,
+      importable ? el('a', { class: 'btn small', href: `#/recipes/${id}/edit?kind=extraction` }, t('Saisir à la main')) : null,
       r.favorite ? el('span', { class: 'badge' }, '★ ' + t('Favori')) : null));
 }
 
-// EI-T4-1 (le motif suiviFiche de recipe.js, T3-R1) : AU PLUS UN abonné `change` de fiche livre dans toute l'app — chaque rendu retire celui du rendu
-// précédent avant de poser le sien (sans quoi chaque visite d'un livre laissait un écouteur, et sa fiche entière, sur une MediaQueryList de la fenêtre).
-// Le sien est posé dès le rendu : une bascule de largeur ne redessine que la fiche encore à l'écran (list.isConnected, plus bas).
-let suiviLivre = null; // { mq, suivre } : l'abonnement de la dernière fiche livre rendue
-function suivreLargeurLivre(mq, suivre) {
-  if (suiviLivre) suiviLivre.mq.removeEventListener?.('change', suiviLivre.suivre);
-  suiviLivre = null;
-  if (typeof mq?.addEventListener !== 'function') return;
-  mq.addEventListener('change', suivre);
-  suiviLivre = { mq, suivre };
-}
+// L'ordre du Sommaire (D-UI-7, T4-R1) : « l'ordre se corrige dans le panneau de la séance, pas ici » — la position APPLIQUÉE dans la séance (un entier) d'abord,
+// puis le numéro imprimé ; une page sans l'un ni l'autre vient en dernier, dans l'ordre reçu (tri stable). Les autres pages : le numéro imprimé seul (inchangé).
+const rangPosition = (p) => (Number.isInteger(p?.position) ? p.position : Infinity);
+const parPositionPuisPage = (a, b) => (rangPosition(a) - rangPosition(b)) || ((a.printed_page ?? 9999) - (b.printed_page ?? 9999));
 
 export async function renderBook(params, query, ctx, deps = {}) {
   const edition = ctx.editionsById.get(params.id);
@@ -213,15 +211,17 @@ export async function renderBook(params, query, ctx, deps = {}) {
   }
 
   // Les recettes de ce livre (D-UI-7, D-UI-10) : « disponibles » = tout ce qui n'est pas une simple référence (la partielle comprise, comme le compteur d'avant) ;
-  // « à importer » = les références SANS adresse (un signet rangé dans le livre est un lien web, pas une page à importer). Les trois chips d'état ont disparu : la
-  // phrase sous le titre les remplace.
+  // « à importer » = les références SANS adresse (un signet rangé dans le livre est un lien web, pas une page à importer) — estAImporter de library.js, la même
+  // définition que l'onglet « À importer » de la bibliothèque (T4-R1). Les trois chips d'état ont disparu : la phrase sous le titre les remplace.
   const disponibles = recipes.filter((r) => r.availability !== 'reference_only');
-  const aImporter = recipes.filter((r) => r.availability === 'reference_only' && !r.source_url);
+  const aImporter = recipes.filter(estAImporter);
   // I-UI-5 : les octets des photos de plat sont lus UNE fois, en une transaction (comme les couvertures de la bibliothèque, library.js) ; la ligne décide au rendu.
   const photos = await repo.getFiles(recipes.filter(pointeurValide).map((r) => r.photo_sha256));
   const filterState = { mode: 'all', q: '', tout: false };
   const list = el('div', { dataset: { role: 'liste-recettes' } });
+  let largeDessinee = null; // la largeur que la liste montre (relue au montage et à chaque change : on ne redessine que si elle a changé)
   const drawList = () => {
+    largeDessinee = !!large.matches;
     let rows = recipes;
     if (filterState.mode === 'available') rows = disponibles; if (filterState.mode === 'refs') rows = aImporter; if (filterState.mode === 'fav') rows = recipes.filter((r) => r.favorite);
     if (filterState.q) rows = rows.filter((r) => (r.original_title + ' ' + (r.display_title || '')).toLowerCase().includes(filterState.q.toLowerCase()));
@@ -232,11 +232,10 @@ export async function renderBook(params, query, ctx, deps = {}) {
     const repliee = !large.matches && !filterState.tout && rows.length > LIGNES_REPLIEES;
     const visibles = repliee ? rows.slice(0, LIGNES_REPLIEES) : rows;
     const noeuds = [el('ul', { class: 'liste-compacte' }, ...visibles.map((r) => ligneCompacte(r, { fichier: pointeurValide(r) ? photos.get(r.photo_sha256) ?? null : null })))];
-    if (repliee) noeuds.push(el('button', { type: 'button', class: 'btn', dataset: { role: 'voir-tout' }, onClick: () => { filterState.tout = true; drawList(); } }, t('Voir les {n} recettes', { n: rows.length })));
+    // T4-R1 (I-UI-4) : le bouton se retire en dépliant — le focus passe au titre de la première ligne montrée par le dépli, jamais à body.
+    if (repliee) noeuds.push(el('button', { type: 'button', class: 'btn', dataset: { role: 'voir-tout' }, onClick: () => { filterState.tout = true; drawList(); list.querySelectorAll('ul.liste-compacte > li')[LIGNES_REPLIEES]?.querySelector('a.titre')?.focus(); } }, t('Voir les {n} recettes', { n: rows.length })));
     remplacerEnRevoquant(list, ...noeuds);
   };
-  // Une rotation ou un redimensionnement redessine la liste tant que la fiche est à l'écran ; détachée (route quittée), elle ne fait rien (EI-T4-1).
-  suivreLargeurLivre(large, () => { if (list.isConnected) drawList(); });
   const q = el('input', { type: 'search', placeholder: t('Filtrer les recettes de ce livre'), onInput: (e) => { filterState.q = e.target.value; drawList(); } });
   droite.append(sectionPlain(t('Les recettes de ce livre'),
     el('p', { class: 'muted', dataset: { role: 'compte-recettes' } }, t('{n} disponible(s) · {m} à importer', { n: disponibles.length, m: aImporter.length })),
@@ -357,12 +356,13 @@ export async function renderBook(params, query, ctx, deps = {}) {
       } }, t('Supprimer')) : el('small', { class: 'muted' }, t('Un livre avec des recettes ou des pages ne se supprime pas d’un geste.')))));
 
   // D-UI-7 : UNE lecture des octets des pages (vignettesDePages, le motif du lot G) ; les pages d'index font le « Sommaire » (gauche, numérotées dans l'ordre
-  // des pages imprimées ; l'ordre se corrige dans le panneau de la séance, pas ici), les autres restent dans « Pages et fichiers sources » (bas). Chaque groupe
-  // n'offre « Télécharger les {n} pages » que pour SES pages distantes.
+  // appliqué dans la séance puis celui des pages imprimées — parPositionPuisPage, T4-R1 ; l'ordre se corrige dans le panneau de la séance, pas ici), les autres
+  // restent dans « Pages et fichiers sources » (bas). Chaque groupe n'offre « Télécharger les {n} pages » que pour SES pages distantes.
   const triees = [...pages].sort((a, b) => (a.printed_page ?? 9999) - (b.printed_page ?? 9999));
-  const pagesIndex = triees.filter((p) => p.kind === 'index');
+  const pagesIndex = triees.filter((p) => p.kind === 'index').sort(parPositionPuisPage);
   const pagesAutres = triees.filter((p) => p.kind !== 'index');
-  const vignettes = (pagesIndex.length || docs.length) && triees.length ? await vignettesDePages(triees, ctxF) : { places: new Map(), distantes: [], telecharger: null };
+  // T4-R1 : chaque page est montrée par l'un des deux groupes (le Sommaire pour une page d'index, les sources pour les autres) — une lecture dès qu'il y a une page.
+  const vignettes = triees.length ? await vignettesDePages(triees, ctxF) : { places: new Map(), distantes: [], telecharger: null };
   const distantesDe = (liste) => { const shas = new Set(liste.map((p) => p.sha256)); return vignettes.distantes.filter((s) => shas.has(s)); };
   const vignettesDe = (liste, numerotees) => el('div', { class: 'thumbs' }, ...liste.map((p, i) => el('figure', null,
     numerotees ? el('span', { class: 'num' }, String(i + 1)) : null,
@@ -378,14 +378,21 @@ export async function renderBook(params, query, ctx, deps = {}) {
   const indexPanel = indexEntriesPanel(null, ctx, () => [], { editionId: edition.id });
   gauche.append(el('details', null, el('summary', { class: 'btn' }, t('Ajouter des entrées d’index à la main')), indexPanel));
 
-  // Pages et documents (plain, en bas) : les pages qui ne sont pas d'index, et les documents non-photo.
-  if (docs.length) {
+  // Pages et documents (plain, en bas) : les pages qui ne sont pas d'index, et les documents non-photo (spec § 4.3). T4-R1 : la section ne paraît que s'il y a
+  // l'un ou l'autre — un livre dont on n'a photographié que la table des matières (ses pages sont dans le Sommaire) n'a pas, en bas, une section vide.
+  const docsNonPhoto = docs.filter((d) => d.source_type !== 'photo');
+  if (pagesAutres.length || docsNonPhoto.length) {
     root.append(sectionPlain(t('Pages et fichiers sources'),
-      el('p', { class: 'muted' }, t('{n} document(s). Les originaux restent consultables depuis chaque recette.', { n: docs.length })),
+      docs.length ? el('p', { class: 'muted' }, t('{n} document(s). Les originaux restent consultables depuis chaque recette.', { n: docs.length })) : null,
       boutonTelechargerPages(distantesDe(pagesAutres), { connecte: ctxF.connecte, telecharger: vignettes.telecharger }),
-      vignettesDe(pagesAutres, false),
-      ...docs.filter((d) => d.source_type !== 'photo').map((d) => el('div', { class: 'row between card flat' }, el('span', null, `${d.original_filename} (${d.source_type.toUpperCase()})`), el('a', { class: 'btn small', href: `#/recipes/new?doc=${encodeURIComponent(d.id)}&edition=${encodeURIComponent(edition.id)}` }, t('Créer une recette depuis ce fichier'))))));
+      pagesAutres.length ? vignettesDe(pagesAutres, false) : null,
+      ...docsNonPhoto.map((d) => el('div', { class: 'row between card flat' }, el('span', null, `${d.original_filename} (${d.source_type.toUpperCase()})`), el('a', { class: 'btn small', href: `#/recipes/new?doc=${encodeURIComponent(d.id)}&edition=${encodeURIComponent(edition.id)}` }, t('Créer une recette depuis ce fichier'))))));
   }
+  // EI-T4-1, T4-R1 : une rotation ou un redimensionnement redessine la liste — seulement si la largeur a changé depuis le dernier dessin. L'abonnement est posé au
+  // MONTAGE, APRÈS le dernier await du rendu (suivreLargeurAuMontage, l'aide partagée avec la bibliothèque et la fiche recette) : la largeur y est relue (un
+  // change reçu entre le rendu et le montage n'est pas perdu), un rendu jamais inséré ne prend pas l'abonnement de la fiche affichée, et une fiche quittée se
+  // retire au premier change sans rien redessiner — au plus UNE fiche livre retenue par la MediaQueryList de la fenêtre.
+  suivreLargeurAuMontage('fiche-livre', root, large, () => { if (!!large.matches !== largeDessinee) drawList(); });
   return root;
 }
 

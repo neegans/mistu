@@ -204,6 +204,28 @@ export function remplacerEnRevoquant(conteneur, ...noeuds) {
   for (const u of anciennes) revoquerUrlDeBlob(u);
 }
 
+// Lot UI-1 (T2-R1, T3-R1, T4-R1) : UNE aide pour suivre une largeur (une MediaQueryList injectable) — le bouton mobile de la bibliothèque, la fiche recette, la
+// fiche livre. AU PLUS UN abonné `change` par écran (`cle`) dans toute l'app : l'abonnement attend le MONTAGE (setTimeout 0 puis isConnected : app.js insère
+// la route juste après son rendu ; un rendu dépassé, jamais inséré, ne s'abonne pas — et ne retire pas l'abonné de l'écran affiché), APPLIQUE la largeur lue
+// à cet instant (un change reçu entre le rendu et le montage n'est pas perdu) et retire celui du rendu monté précédent ; un rendu détaché (route quittée) se
+// retire au premier change, sans rien appliquer. À appeler APRÈS le dernier await du rendu. `appliquer(e)` reçoit l'événement (rien au montage).
+const suivisDeLargeur = new Map(); // cle → { mq, suivre } : l'abonnement du dernier rendu monté de cet écran
+export function suivreLargeurAuMontage(cle, racine, mq, appliquer) {
+  setTimeout(() => {
+    if (!racine?.isConnected || typeof mq?.addEventListener !== 'function') return;
+    const avant = suivisDeLargeur.get(cle);
+    if (avant) avant.mq.removeEventListener?.('change', avant.suivre);
+    const suivre = (e) => {
+      if (racine.isConnected) { appliquer(e); return; }
+      mq.removeEventListener?.('change', suivre);
+      if (suivisDeLargeur.get(cle)?.suivre === suivre) suivisDeLargeur.delete(cle);
+    };
+    appliquer();
+    mq.addEventListener('change', suivre);
+    suivisDeLargeur.set(cle, { mq, suivre });
+  }, 0);
+}
+
 // doc : { recipe, version, book, edition, cooked }
 // Lot UI-1 (D-UI-5) : `photoEnTete: true` rend la carte-plat VERTICALE (cartePlat, ci-dessous) à partir de `fichier`, la ligne files que l'appelant a lue
 // en une fois ; sans l'option, la carte horizontale d'avant, inchangée (épinglée par tests/photo-plat.js, « référence construite »).
