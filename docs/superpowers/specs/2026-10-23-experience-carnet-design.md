@@ -830,6 +830,22 @@ Dettes et limites nommées par les tâches 1 à 6 (une ligne chacune ; aucune n'
 - (T6, preuve) à 375 px, le titre d'Aujourd'hui « Qu’est-ce qu’on cuisine ? » laisse le « ? » seul sur sa ligne (espace ordinaire avant « ? », chaîne
   antérieure) ; capture `375-accueil.png`.
 
+**Clôture du chef d'orchestre (28 octobre 2026 ; Claude Opus 5.5 ; une ligne par ruling, chacun renversable sans défaire le reste).**
+- **R-UI-61 (ratifications)** — RATIFIÉS tels qu'écrits : R-UI-6 à R-UI-10, R-UI-13 à R-UI-18, R-UI-20 à R-UI-32, R-UI-34, R-UI-41 à R-UI-43, R-UI-45,
+  R-UI-46 et R-UI-48 à R-UI-60 (tous tenus par la suite, la revue finale et sa re-revue PROPRE). Coût si l'un est faux : son propre renversement.
+- **R-UI-62 (R-UI-4 tranché)** — l'échelle des titres de PAGE est RATIFIÉE pour les trois titres de recette en `h1` nu (mode cuisine, import ciblé,
+  import web) : ce sont les titres de leur écran, lus de loin en cuisine ; aucun code. Coût si faux : `titre-fiche` sur trois `h1`, `VERSION` +1.
+- **R-UI-63 (R-UI-35 et R-UI-12 tranchés)** — la proposition de la ronde est RATIFIÉE : le badge dit « À importer » pour toute `reference_only` sans
+  adresse ; listes et compteurs (`estAImporter`) ne comptent que celles d'un livre. R-UI-12 est FERMÉ comme inatteignable par les gestes de l'app,
+  mesuré au source : un signet porte toujours son adresse (`fabriquerSignet` : `source_url` = l'adresse validée), une référence d'import ou de sommaire
+  porte toujours son livre (`import.js`, `table-matieres.js`), et un livre ne se supprime que vide (`book.js`, D-E23) ; seule une archive ou une
+  synchronisation venue d'ailleurs pourrait en apporter une. Coût si faux : une fiche que seule la recherche retrouve.
+- **R-UI-64 (R-UI-5 renvoyé à Neegan)** — la couleur de `.badge.ai` est une décision de produit : construite telle quelle (olive), épinglée « PAS
+  ratifiée » (R-UI-56) ; § 13, point 7. Coût si faux : une ligne de `styles.css` et une de `tests/theme.js`, `VERSION` +1.
+- **R-UI-65 (constats visuels de la preuve, laissés)** — « Ma semaine » sur deux lignes à 320 px et le « ? » seul à 375 px (chaîne antérieure) :
+  cosmétiques, nommés ici et à la preuve § 10 de Neegan ; aucun code dans ce lot.
+- **`/verify` de clôture** : voir `verify-UI1-<sha>.txt` du registre et la section du lot dans `CLAUDE.md` (mesures relevées à la tête vérifiée).
+
 
 ## 13. À trancher par Neegan (sans urgence ; chaque point a son défaut, construit tel quel)
 
@@ -850,3 +866,6 @@ d'abord). Chaque point reste renversable plus tard, au prix dit dans sa ligne.
 5. **Le tri de la grille Recettes** : dernière modification d'abord (défaut) ou « photos d'abord » (les cartes illustrées en tête, pour
    ressembler à la maquette tant que les photos sont rares).
 6. **L'ordre des lots** : UI-2 « Aperçus » d'abord (défaut : la première phrase, un lot court) ou UI-1 « Carnet » d'abord.
+7. **La couleur du badge « Créée avec l’IA · non testée »** (R-UI-5, R-UI-64 ; ajouté le 28 octobre 2026) : olive (défaut construit, la couleur des
+   gestes, alors que D-UI-2 la réserve à ce qui se touche), jaune « à vérifier » (`--warn`, la paire de « À importer ») ou brique (réservée aux dangers).
+   Une ligne de `styles.css` et une de `tests/theme.js`.

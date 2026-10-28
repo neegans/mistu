@@ -3033,7 +3033,9 @@ mutants de la vague : 28 sur 28 rouges, témoin vert) ; aucun caractère invisib
 --stat f3672be..HEAD -- supabase/ tools/` vide.
 
 **Fusion.** Revue finale de branche puis `/verify` par le chef d'orchestre ; le registre (avec `captures/`) se copie **avant** tout `git worktree
-remove` ; UI-2 a fusionné le premier (27 octobre) ; UI-1 entre par un commit de fusion (spec § 9).
+remove` ; UI-2 a fusionné le premier (27 octobre) ; UI-1 entre par un commit de fusion (spec § 9). **Clôture du chef (28 octobre 2026)** :
+rulings R-UI-61 à R-UI-65 (spec § 12) — ratifications, R-UI-4 (échelle de page ratifiée), R-UI-35 et R-UI-12 (proposition ratifiée, orpheline
+inatteignable), R-UI-5 renvoyé à Neegan (§ 13 point 7), constats visuels nommés.
 
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 
