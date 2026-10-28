@@ -1,5 +1,10 @@
 # STATE.md — Cuisine OS (mistu) — état au 28 octobre 2026 (LOT I1 « INDEX FIABLE » FUSIONNÉ ET POUSSÉ, 0.18.0 en ligne, `main` = `origin/main` = `7558ff2`, suite publique 6246/6246 ; preuve réelle Trinity = geste de Neegan ; lot I2 « livre sans saisie » à spécifier)
 
+**28 octobre 2026, fin de journée — PASSATION À CODEX (VibeForge).** La suite (lots I2 « livre sans saisie, photos, notes » et I3 « chef
+Thermomix ») est confiée à Codex dans VibeForge. Lire `AGENTS.md` (consignes) puis `docs/lots/2026-10-28-lot-I2-I3.md` (demandes de Neegan,
+décisions, état du code, recherche Thermomix) et le document source `docs/lots/2026-10-28-correctifs-isbn-couverture-index.md`. Rien n'est
+construit : une spec relue par Neegan avant chaque lot.
+
 **28 octobre 2026 — LOT I1 « INDEX FIABLE » FUSIONNÉ ET POUSSÉ sur go de Neegan (rectification de Neegan, `~/Downloads/Mito_Rectification_Extraction_Index.md`).**
 Branche `index-fiable`, worktree `~/projects/mistu-index`, base `main` `5388ff6`, serveur 8098 ; spec `docs/superpowers/specs/2026-10-28-index-fiable-design.md`
 (rév. 2, rulings R-I1-1 à R-I1-17). Une lecture par page d'index ou de table des matières (une page dense relue en deux moitiés), les recettes certaines
