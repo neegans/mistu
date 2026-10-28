@@ -1,6 +1,6 @@
-# STATE.md — Cuisine OS (mistu) — état au 28 octobre 2026 (0.17.0 en ligne, « fidélité aux maquettes » poussée ; LOT I1 « INDEX FIABLE » FINI sur la branche `index-fiable`, 0.18.0, PAS fusionné ni poussé : la fusion et le push attendent le go de Neegan ; lot I2 « livre sans saisie » à spécifier)
+# STATE.md — Cuisine OS (mistu) — état au 28 octobre 2026 (LOT I1 « INDEX FIABLE » FUSIONNÉ ET POUSSÉ, 0.18.0 en ligne, `main` = `origin/main` = `7558ff2`, suite publique 6246/6246 ; preuve réelle Trinity = geste de Neegan ; lot I2 « livre sans saisie » à spécifier)
 
-**28 octobre 2026 — LOT I1 « INDEX FIABLE » FINI sur la branche (rectification de Neegan, `~/Downloads/Mito_Rectification_Extraction_Index.md`).**
+**28 octobre 2026 — LOT I1 « INDEX FIABLE » FUSIONNÉ ET POUSSÉ sur go de Neegan (rectification de Neegan, `~/Downloads/Mito_Rectification_Extraction_Index.md`).**
 Branche `index-fiable`, worktree `~/projects/mistu-index`, base `main` `5388ff6`, serveur 8098 ; spec `docs/superpowers/specs/2026-10-28-index-fiable-design.md`
 (rév. 2, rulings R-I1-1 à R-I1-17). Une lecture par page d'index ou de table des matières (une page dense relue en deux moitiés), les recettes certaines
 écrites d'office dans le livre (une par titre, plages développées, rubriques réunies, triées par page), les contradictions, pages illisibles et lectures
@@ -8,7 +8,8 @@ d'un modèle hors liste (`claude-sonnet-5-5` minimum) laissées à la personne, 
 main ; « Pivoter » ; libellés B04 (« {n} modifications à envoyer », « Photos : k/n sauvegardées sur le serveur »). L'ancien panneau d'index du lot C
 est retiré. Suite 6246/6246 (épingle 6245, en baisse depuis 6389 : les blocs d'écran de l'ancien panneau partent avec lui), Node 230/230, `--check` 0 ;
 revue adverse inline (une double tape ne crée plus deux fiches, deux onglets n'enregistrent qu'une fois, une saisie démesurée ne fige plus l'écran) ;
-mutants 21 joués, 20 rouges, un équivalent. **Aucune lecture réelle.** **Suite** : go de Neegan → fusion dans `main` et push → preuve réelle sur le site
+mutants 21 joués, 20 rouges, un équivalent. **Aucune lecture réelle.** Fusion en avance rapide `5388ff6..7558ff2`, push HTTPS, Pages servi (`cuisine-os-v0.18.0-1`, `APP_VERSION 0.18.0`), suite
+publique 6246/6246 (seul le 404 de `/favicon.ico`). **Suite** : preuve réelle sur le site
 public (les six pages de Trinity : « Lire les 6 pages (6 appels) », attendu 95 titres uniques, la contradiction des choux dite ; puis trois pages
 d'abord, trois ensuite) → lot I2.
 

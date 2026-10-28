@@ -3317,7 +3317,8 @@ enregistrements simultanés n'écrivent qu'une fois ; une ligne saisie démesur�
 les jetons par page, le taux de pages coupées ; la cible de la rectification (« 95 titres uniques » sur les six pages de Trinity) ; Safari et l'iPhone
 (la forme courte de la pastille, « Pivoter ») ; deux appareils.
 
-**Gestes de Neegan.** 1) Fusion et push (après revue et `/verify`). 2) Preuve réelle sur le site public : une séance d'index avec les six pages de
+**Gestes de Neegan.** 1) ~~Fusion et push~~ FAIT le 28 octobre sur son go (`main` = `origin/main` = `7558ff2`, suite publique 6246/6246, service worker
+`cuisine-os-v0.18.0-1`). 2) Preuve réelle sur le site public : une séance d'index avec les six pages de
 Trinity → « Lire les 6 pages (6 appels) » ; compter les titres uniques (attendu 95), vérifier le tri, la contradiction des choux, les écartées ; noter
 la durée et `select outil, statut, jetons_sortie, duree_ms from public.assistant_journal order by id desc limit 8;`. 3) Trois pages d'abord, trois
 ensuite (aucun doublon).
