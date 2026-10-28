@@ -30,7 +30,10 @@ export const CHAINES_NEUVES_AILLEURS = {
     // Lot E, tâche 3a, ronde 1 : le refus quand une ligne du journal ne se détache pas de l’édition (statut illisible, ou arrivée entre les deux temps).
     'Un import est encore lié à ce livre : rien n’a été supprimé.',
     // Lot UI-1, tâche 4 : la fiche livre recomposée (D-UI-7, D-UI-10) — menus renommés, « Sommaire », la liste compacte et son compteur, « Voir les {n} recettes ».
-    'Ajouter des recettes', 'Ajouter des pages de sommaire', 'Sommaire', 'Reprendre la séance', 'Les recettes de ce livre', '{n} disponible(s) · {m} à importer', 'À importer', 'Voir les {n} recettes'],
+    'Ajouter des recettes', 'Ajouter des pages de sommaire', 'Sommaire', 'Reprendre la séance', 'Les recettes de ce livre', '{n} disponible(s) · {m} à importer', 'À importer', 'Voir les {n} recettes',
+    // Lot UI-1, tâche 6 : complément (A-9) — le retour « ← Bibliothèque » (T1) ; les filtres « Toutes » et « Disponibles », écrits par t() et portés par la
+    // table TEXTES_UI1 de tests/carnet.js (entrées en.js posées par T2 et T4) : le filet CALCULÉ du bloc T6 les exige ici.
+    'Bibliothèque', 'Toutes', 'Disponibles'],
   '../src/ui/import.js': ['Les références n’ont pas pu être créées. Réessaie.',
     // Lot G, tâche 6 : la phrase de séance (§ 4.3, F-21).
     'Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages', '{n}/{m} photos de cette séance envoyées au serveur',
@@ -45,7 +48,10 @@ export const CHAINES_NEUVES_AILLEURS = {
     // Lot C, tâche 5 : la section d’une référence sur sa fiche (D-C6).
     'Section : {s}',
     // Lot UI-1, tâche 3 : les gestes repliés et les repères de l'en-tête (D-UI-6).
-    'Portions, versions et autres gestes'],
+    'Portions, versions et autres gestes',
+    // Lot UI-1, tâche 6 : complément (A-9) — le retour « ← Bibliothèque » (T1) et les repères « 1 portion » / « {n} portions » (T3 ; clés antérieures,
+    // en.js:338-339 ; « {n} portions » remplace la clé combinée « {n} portions · {d} » retirée par T3 ronde 1, EI-T3-R1-c).
+    'Bibliothèque', '1 portion', '{n} portions'],
   '../src/ui/components.js': ['Lien web', 'Adresse non reconnue', 'incertain', 'Ligne incertaine selon l’assistant',
     // Lot B, tâche 4 : la ligne de repères déménagée de search.js (ligneReperes, mêmes textes).
     '≈ {n} min', '≈ {h} h', '≈ {h} h {m}', 'facile', 'moyen', 'exigeant', '1 ingrédient', '{n} ingrédients',
