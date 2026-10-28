@@ -148,11 +148,17 @@ aside.sidenav { display: none; }
   main.content { padding-bottom: 2rem; }
   /* Fidélité aux maquettes : la navigation du Mac est une rangée d'onglets dans la barre du haut — texte, petite icône, l'actif souligné d'olive ;
      « Ajouter » reste le bouton plein. Les règles du panneau latéral ci-dessus sont annulées pour cet emplacement. */
-  .topbar aside.sidenav { flex-direction: row; align-items: stretch; gap: .2rem; width: auto; flex-shrink: 1; min-width: 0; padding: 0; margin-left: 1.2rem; border: 0; background: transparent; position: static; height: auto; overflow: visible; }
+  .topbar aside.sidenav { flex-direction: row; align-items: stretch; gap: .2rem; width: auto; flex-shrink: 0; min-width: 0; padding: 0; margin-left: 1.2rem; border: 0; background: transparent; position: static; height: auto; overflow: visible; }
   .topbar aside.sidenav a { min-height: 44px; padding: .4rem .7rem; border-radius: 0; gap: .4rem; color: var(--muted); white-space: nowrap; }
   .topbar aside.sidenav a .icone, .topbar .btn .icone { width: 18px; height: 18px; }
   .topbar aside.sidenav a.active { background: transparent; color: var(--ink); font-weight: 400; box-shadow: inset 0 -2px 0 var(--action); }
   .topbar aside.sidenav a.add { margin: 0 0 0 .6rem; align-self: center; min-height: 40px; border-radius: var(--radius-btn); background: var(--action); color: var(--paper); box-shadow: none; }
+}
+/* Entre 900 et 1099 px, la rangée d'onglets garde sa place : onglets resserrés, la recherche réduite à sa loupe (son libellé reste lu par les lecteurs d'écran). */
+@media (min-width: 900px) and (max-width: 1099px) {
+  .topbar aside.sidenav { margin-left: .6rem; }
+  .topbar aside.sidenav a { padding: .4rem .5rem; }
+  .topbar a[href="#/search"] .nowrap { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
 
 /* Components */
