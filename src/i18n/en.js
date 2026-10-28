@@ -231,8 +231,6 @@ export const EN = {
   "Seulement celles qui t’intéressent, tout de suite.": "Only the ones you care about, right now.",
   "Aller à la bibliothèque.": "Go to the library.",
   "Fermer": "Close",
-  "+ Pages d’index": "+ Index pages",
-  "+ Recette": "+ Recipe",
   "Séance en cours : {n} page(s)": "Session in progress: {n} page(s)",
   "Reprendre": "Resume",
   "Adresse non reconnue.": "Address not recognized.",
@@ -772,4 +770,9 @@ export const EN = {
   // gardent leurs entrées (une clé, une traduction).
   "Voir la page d’origine": "View the original page",
   "Portions, versions et autres gestes": "Servings, versions and more",
+  // Lot UI-1, tâche 4 : la fiche livre (spec § 5 ; « Reprendre la séance » est le texte de § 4.3 ; « Disponibles » : filtre antérieur, entrée posée au passage ;
+  // « À importer » → « To import » est posée par T2 : UNE clé, jamais redoublée — tests/ajouter.js:21).
+  'Ajouter des recettes': 'Add recipes', 'Ajouter des pages de sommaire': 'Add table-of-contents pages', 'Sommaire': 'Table of contents', 'Reprendre la séance': 'Resume the session',
+  'Les recettes de ce livre': 'The recipes in this book', '{n} disponible(s) · {m} à importer': '{n} available · {m} to import', 'Voir les {n} recettes': 'Show all {n} recipes',
+  'Disponibles': 'Available',
 };

@@ -258,6 +258,13 @@ label.check { display: inline-flex; gap: .45rem; align-items: center; font-size:
 .list li { padding: .6rem 0; border-bottom: 1px solid var(--line); }
 .list li:last-child { border-bottom: 0; }
 .list.plain li { border: 0; padding: .25rem 0; }
+/* UI-1, T4 (D-UI-7, D-UI-8) : la liste compacte des recettes d'un livre — filets fins entre les lignes, titre serif qui est le lien de la fiche ;
+   la vignette 48 px à sa gauche est .plat-vignette.petite (T2). Jetons seulement (T-2), aucun display:none (T-1), le survol sous @media (hover: hover). */
+.liste-compacte { list-style: none; margin: 0; padding: 0; }
+.liste-compacte > li { padding: .55rem 0; border-bottom: 1px solid var(--line); }
+.liste-compacte > li:last-child { border-bottom: 0; }
+.liste-compacte .titre { font-family: var(--serif); font-size: 1.05rem; line-height: 1.3; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
+@media (hover: hover) { .liste-compacte .titre:hover { text-decoration: underline; } }
 .item-link { text-decoration: none; color: inherit; display: block; }
 .item-link:hover h3 { text-decoration: underline; }
 
@@ -309,6 +316,8 @@ table.compare th { color: var(--green); background: var(--cream-2); }
 @media (min-width: 760px) { .two-col { grid-template-columns: 1fr 1fr; } .two-col.narrow-left { grid-template-columns: 320px 1fr; } .two-col.livre { grid-template-columns: 1fr; } }
 /* D-UI-7 : la fiche livre (tâche 4) ne passe en deux colonnes — couverture 200 px | recettes — qu'à partir de 900 px ; de 760 à 899 px la règle ci-dessus la garde empilée. */
 @media (min-width: 900px) { .two-col.livre { grid-template-columns: 200px 1fr; } }
+/* UI-1, T4 (EI-T4-2) : la couverture de la fiche livre garde ≈ 200 px (D-UI-7) quand les colonnes s'empilent (< 900 px) : jamais la largeur de l'écran. */
+.two-col.livre .cover-wrap { max-width: 200px; }
 /* UI-1 (D-UI-6) : l'en-tête de la fiche recette — un seul ordre de DOM (état, photo, gestes) : en étroit, la photo passe sous la provenance et avant les
    repères (maquette mobile) ; dès 760 px, deux colonnes : l'état puis les gestes à gauche, la photo à droite sur les deux rangées ; sans photo
    (emplacement vide), une seule colonne, rien de réservé à droite : la zone « photo » reste DÉCLARÉE, en troisième rangée (0 px : l'enfant vide y tombe).

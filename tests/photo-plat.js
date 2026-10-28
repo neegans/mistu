@@ -1296,6 +1296,8 @@ export async function runPhotoPlatTests({ eq, ok }) {
           const rb = await renderBook({ id: 'ed_v' }, {}, await ctxPour(repo, db, { editionsById: new Map([['ed_v', edition]]), booksById: new Map([['b_v', livre]]), books: [livre], book_editions: [edition] }));
           scene.append(rb);
           await attendre(() => toutesPretes(rb, 2), 'chaque vignette du livre a son src');
+          eq([rb.querySelectorAll('ul.liste-compacte > li img.plat-vignette.petite').length, rb.querySelectorAll('img.plat-vignette').length], [2, 2],
+            'book.js (lot UI-1, T4) : les deux vignettes du livre sont des img.plat-vignette.petite, chacune dans une ligne de la liste compacte (D-F9 tenu)');
           const avantL = srcs(rb);
           const couvertures = [...rb.querySelectorAll('img:not(.plat-vignette)')].map((i) => i.getAttribute('src')).filter((u) => typeof u === 'string' && u.startsWith('blob:'));
           ok(couvertures.length >= 1, 'fixture : la fiche du livre affiche sa couverture sous une URL blob: suivie, encore sous un img au moment du filtre');
@@ -1306,7 +1308,7 @@ export async function runPhotoPlatTests({ eq, ok }) {
           await attendre(() => revoquees.length >= avantL.length, 'révocations du redessin (livre)');
           const bilanL = [revoquees.map((x) => x.u).sort(), revoquees.filter((x) => x.encore).length];
           eq([...bilanL, BU.revoquerUrlDeBlob(sentinelleL)], [[...avantL].sort(), 0, true],
-            'book.js drawList : le filtre redessine et révoque EXACTEMENT les URL des vignettes précédentes, APRÈS le vidage ; la couverture et la sentinelle restent vivantes');
+            'book.js drawList (ligne compacte, lot UI-1 T4) : le filtre redessine et révoque EXACTEMENT les URL des vignettes précédentes, APRÈS le vidage ; la couverture et la sentinelle restent vivantes');
         } finally { URL.revokeObjectURL = vraiRevoke; }
       } finally { globalThis.fetch = vraiFetch; scene.remove(); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
     }));

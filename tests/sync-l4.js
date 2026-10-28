@@ -3577,7 +3577,7 @@ export async function runSyncL4Tests({ eq, ok }) {
       window.addEventListener('cuisineos:refresh', compter);
       try {
         const fiche = await renderBook({ id: 'eP' }, {}, ctxLivre);
-        const sources = [...fiche.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Pages et fichiers sources');
+        const sources = [...fiche.querySelectorAll('section.plain')].find((s) => s.querySelector('h2')?.textContent === 'Pages et fichiers sources');
         const groupe = [...(sources?.querySelectorAll('button') || [])].find((b) => b.textContent === 'Télécharger les 2 pages');
         eq([[...(sources?.querySelectorAll('.thumbs .fichier-absent') || [])].map((f) => f.dataset.etat), !!groupe], [['distant', 'distant'], true], 'fiche du livre (§ 4.3) : « Pages et fichiers sources » rend chaque page par vignettePage (distante) et offre « Télécharger les 2 pages » (mutant : miniatures sans vignettePage)');
         groupe.click();

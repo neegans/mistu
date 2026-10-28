@@ -22,13 +22,15 @@ export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', 
 // livre (book.js) ; le refus « non vide » dit la phrase de main (« Un livre avec des recettes… »), sans entrée en.js jusqu’ici : l’entrée est posée, la
 // chaîne n’est pas neuve.
 export const CHAINES_NEUVES_AILLEURS = {
-  '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', '+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer', '{n} import à reprendre', '{n} imports à reprendre',
+  '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer', '{n} import à reprendre', '{n} imports à reprendre',
     // Lot G, tâche 6 : la couverture par état (§ 4.2).
     'La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.', 'La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.', 'Fichier illisible reçu du serveur.', 'Le téléchargement n’a pas abouti.',
     // Lot E, tâche 3a : le refus du geste « Supprimer » quand une lecture tient une ligne du journal de l’édition (D-E23).
     'Une lecture est déjà en cours : annule-la d’abord.',
     // Lot E, tâche 3a, ronde 1 : le refus quand une ligne du journal ne se détache pas de l’édition (statut illisible, ou arrivée entre les deux temps).
-    'Un import est encore lié à ce livre : rien n’a été supprimé.'],
+    'Un import est encore lié à ce livre : rien n’a été supprimé.',
+    // Lot UI-1, tâche 4 : la fiche livre recomposée (D-UI-7, D-UI-10) — menus renommés, « Sommaire », la liste compacte et son compteur, « Voir les {n} recettes ».
+    'Ajouter des recettes', 'Ajouter des pages de sommaire', 'Sommaire', 'Reprendre la séance', 'Les recettes de ce livre', '{n} disponible(s) · {m} à importer', 'À importer', 'Voir les {n} recettes'],
   '../src/ui/import.js': ['Les références n’ont pas pu être créées. Réessaie.',
     // Lot G, tâche 6 : la phrase de séance (§ 4.3, F-21).
     'Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages', '{n}/{m} photos de cette séance envoyées au serveur',
@@ -852,9 +854,9 @@ export async function runAjouterTests({ eq, ok }) {
       const fiche = await renderBook({ id: 'e1' }, {}, ctxDe());
       eq((await compterActivites()) - avant, 1, 'fiche : une ouverture volontaire reste journalisée (open_book)');
       const menus = [...fiche.querySelectorAll('details.menu-source')];
-      eq(menus.map((d) => d.querySelector('summary').textContent), ['+ Pages d’index', '+ Recette'], 'fiche : deux gestes nommés en en-tête (§ 9), le verbe avant l’outil');
-      eq([...menus[0].querySelectorAll('button, a')].map((b) => b.textContent), ['Photographier', 'Choisir des photos ou un PDF'], 'fiche : « + Pages d’index » dévoile les deux sources');
-      eq([...menus[1].querySelectorAll('button, a')].map((b) => b.textContent), ['Photographier', 'Choisir des photos ou un PDF', 'Saisir à la main'], 'fiche : « + Recette » offre aussi la saisie à la main');
+      eq(menus.map((d) => d.querySelector('summary').textContent), ['Ajouter des pages de sommaire', 'Ajouter des recettes'], 'fiche : deux gestes nommés en en-tête (§ 9 ; lot UI-1, D-UI-10 : le verbe avant l’outil)');
+      eq([...menus[0].querySelectorAll('button, a')].map((b) => b.textContent), ['Photographier', 'Choisir des photos ou un PDF'], 'fiche : « Ajouter des pages de sommaire » dévoile les deux sources');
+      eq([...menus[1].querySelectorAll('button, a')].map((b) => b.textContent), ['Photographier', 'Choisir des photos ou un PDF', 'Saisir à la main'], 'fiche : « Ajouter des recettes » offre aussi la saisie à la main');
       eq(menus[1].querySelector('a').getAttribute('href'), '#/recipes/new?edition=e1', 'fiche : la saisie à la main partie d’ici porte le livre (I-F)');
       ok(![...fiche.querySelectorAll('button')].some((b) => b.textContent === 'Photographier des pages'), 'fiche : l’ancien bouton unique « Photographier des pages » a disparu');
       eq(fiche.querySelector('.accueil-livre'), null, 'fiche : sans ?nouveau, aucun panneau d’accueil');
@@ -3680,9 +3682,9 @@ export async function runAjouterTests({ eq, ok }) {
       eq([blocCouverture(fichePointeur)?.querySelector('small')?.textContent, fichePointeur.querySelectorAll('img.cover-img').length],
         ['La couverture n’est pas sur cet appareil.', 0], 'fiche : un pointeur sans ligne files le DIT, et n’affiche aucune image (§ 6)');
       const ficheAvec = await renderBook({ id: 'eC' }, {}, ctx);
-      const enTete = [...ficheAvec.querySelectorAll('.row.top')].find((r) => r.querySelector('header'));
-      eq([!!enTete?.querySelector('img.cover-img'), !!blocCouverture(ficheAvec), blocCouverture(ficheAvec)?.querySelector('small')],
-        [true, true, null], 'fiche : la couverture est dans l’en-tête, le bloc « Couverture » est visible, et rien n’est signalé (§ 6)');
+      const gaucheLivre = ficheAvec.querySelector('.two-col.livre')?.firstElementChild;
+      eq([!!gaucheLivre?.querySelector(':scope > a.cover-wrap img.cover-img'), !!blocCouverture(ficheAvec), blocCouverture(ficheAvec)?.querySelector('small')],
+        [true, true, null], 'fiche : la couverture ouvre la colonne de gauche (lot UI-1, D-UI-7), le bloc « Couverture » est visible, et rien n’est signalé (§ 6)');
       const biblio = await renderLibrary({}, { tab: 'books' }, ctx); // UI-1 T2 : la bibliothèque s'ouvre sur Recettes ; ce bloc affirme la grille des couvertures
       eq([biblio.querySelectorAll('img.cover-img').length, biblio.textContent.includes('pas sur cet appareil')],
         [1, false], 'Mes livres : une image pour l’édition dont les octets sont là, et la grille reste muette pour l’autre (§ 6)');
