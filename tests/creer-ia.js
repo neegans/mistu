@@ -1086,7 +1086,7 @@ export async function runCreerIaTests({ eq, ok }) {
       // --- Porte 1 : la carte « Créer avec l'IA » de la page Ajouter
       {
         const carteIA = A.grilleModel().cartes.find((c) => c.action === 'creerIA');
-        eq([carteIA?.ico, carteIA?.titre, carteIA?.sousTitre, A.grilleModel().cartes.map((c) => c.action).indexOf('creerIA'), A.grilleModel().cartes.length], ['✨', 'Créer avec l’IA', 'Une proposition à vérifier', 4, 6], 'porte Ajouter : la carte ✨ « Créer avec l’IA » est la cinquième, juste avant le congélateur');
+        eq([carteIA?.ico, carteIA?.titre, carteIA?.sousTitre, A.grilleModel().cartes.map((c) => c.action).indexOf('creerIA'), A.grilleModel().cartes.length], ['etincelle', 'Créer avec l’IA', 'Une proposition à vérifier', 4, 6], 'porte Ajouter : la carte « étincelle » « Créer avec l’IA » est la cinquième, juste avant le congélateur (icône au trait, lot Carnet T5)');
         const page = await A.renderAdd({}, {}, { book_editions: [], booksById: new Map(), editionsById: new Map(), library_activity: [] });
         const rendue = [...page.querySelectorAll('button.carte')].find((b) => b.querySelector('h3')?.textContent === 'Créer avec l’IA');
         eq([!!rendue, rendue?.querySelector('p')?.textContent, page.querySelectorAll('button.carte').length], [true, 'Une proposition à vérifier', 6], 'porte Ajouter : la carte est rendue sur la page, avec son sous-titre — six cartes');

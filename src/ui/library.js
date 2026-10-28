@@ -176,11 +176,13 @@ async function booksTab(ctx) {
       const hay = `${book?.title || ''} ${book?.author || ''} ${(book?.cuisines || []).join(' ')} ${(book?.tags || []).join(' ')}`.toLowerCase();
       if (q && !hay.includes(q)) continue;
       const list = recipesByEdition.get(ed.id) || [];
+      // Lot UI-1 « Carnet » (D-UI-10, H-19) : « à importer » = les références SANS adresse (estAImporter, la définition de la fiche livre et de l'onglet
+      // « À importer ») ; un signet rangé dans le livre est un lien web, compté ni « disponible » ni « à importer » (EI-T5-1). Rien à compter : « Aucune recette indexée ».
       const available = list.filter((r) => r.availability !== 'reference_only').length;
-      const refs = list.length - available;
+      const refs = list.filter(estAImporter).length;
       noeuds.push(el('div', null, bookCover(ed, book, { fichier: ed.cover_sha256 ? fichiers.get(ed.cover_sha256) : null }),
         el('div', { class: 'muted', style: { fontSize: '.78rem', marginTop: '.3rem' } },
-          list.length ? `${available ? t('{n} disponible(s)', { n: available }) : ''}${available && refs ? ' · ' : ''}${refs ? t('{n} repérée(s)', { n: refs }) : ''}` : t('Aucune recette indexée'))));
+          available || refs ? `${available ? t('{n} disponible(s)', { n: available }) : ''}${available && refs ? ' · ' : ''}${refs ? t('{n} à importer', { n: refs }) : ''}` : t('Aucune recette indexée'))));
     }
     if (!noeuds.length) noeuds.push(el('p', { class: 'muted' }, t('Aucun livre ne correspond.')));
     // D-T9 : les URL blob: de la génération précédente sont révoquées APRÈS le remplacement des nœuds — avant, un

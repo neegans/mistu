@@ -43,11 +43,14 @@ export function emptyState(icon, text, action = null) {
 }
 
 export function availabilityBadge(recipe) {
-  // Un signet web n'est pas « Repérée dans ton livre » : il n'y a pas de page de livre, il y a un lien (spec § 11, F8).
+  // Un signet web n'est pas une référence de livre : il n'y a pas de page de livre, il y a un lien (spec UX § 11, F8).
   if (recipe.availability === 'reference_only' && recipe.source_url) return el('span', { class: 'badge reference' }, t('Lien web'));
-  const cls = recipe.availability === 'available' ? 'available' : recipe.availability === 'partial' ? 'partial' : 'reference';
-  const text = recipe.availability === 'reference_only' && recipe.printed_page ? t('Repérée dans ton livre — page {p}', { p: recipe.printed_page }) : label('availability', recipe.availability);
-  return el('span', { class: `badge ${cls}` }, text);
+  // Lot UI-1 « Carnet » (D-UI-10, H-19) : le badge porte ses propres textes COURTS — listes, cartes, écran d'import. « Repérée dans ton livre — page {p} »
+  // reste sur la FICHE (recipe.js), où il dit d'où la référence vient ; STATE_LABELS.availability (i18n.js) sert aux exports et à Redécouvrir.
+  if (recipe.availability === 'reference_only') return el('span', { class: 'badge reference' }, recipe.printed_page ? t('À importer · p. {p}', { p: recipe.printed_page }) : t('À importer'));
+  if (recipe.availability === 'available') return el('span', { class: 'badge available' }, t('Disponible'));
+  if (recipe.availability === 'partial') return el('span', { class: 'badge partial' }, t('Partielle'));
+  return el('span', { class: 'badge reference' }, label('availability', recipe.availability)); // availability inconnue (fiche reçue ou restaurée) : comme avant, texte vide
 }
 
 // UI-1 (D-UI-10, I-B5) : « Voir la page d’origine » — un lien texte vers l'adresse LISIBLE d'une fiche (lienSignet : http: compris, seule la LECTURE exige

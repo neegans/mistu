@@ -139,6 +139,8 @@ aside.sidenav { display: none; }
 .card.carte { text-align: left; cursor: pointer; font: inherit; width: 100%; }
 .card.carte .carte-ico { font-size: 1.6rem; }
 .card.carte p { margin: 0; font-size: .9rem; }
+/* Lot UI-1 « Carnet » (D-UI-9) : l'icône au trait d'une carte d'action — un svg 24 × 24 en currentColor (icones.js), agrandi à la taille de l'émoji d'avant. */
+.card.carte .carte-ico svg { width: 2rem; height: 2rem; }
 .card h2, .card h3 { margin-top: 0; }
 /* § 3.2 : les sections (section.card et section.plain) sont espacées de 1,6 rem ; la règle .card elle-même ne change pas (R-VIS-14 : un div.card garde ses .9 rem). */
 section.card { margin-bottom: 1.6rem; }
@@ -243,6 +245,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px
 label.check { display: inline-flex; gap: .45rem; align-items: center; font-size: .95rem; }
 .search-bar { display: flex; gap: .5rem; }
 .search-bar input { flex: 1; font-size: 1.05rem; min-height: 52px; border-radius: var(--radius-pill); padding: .55rem 1.1rem; }
+/* Lot UI-1 « Carnet » (§ 4.4) : la barre d'Aujourd'hui vit sur le papier, sous le pageHeader, ses puces d'exemple dessous (espacement de section, § 3.2) ;
+   une cuisson = sa carte-plat puis, HORS du lien, la date et « Refaire comme la dernière fois » (H-16) ; la carte s'étire pour aligner les rangées. */
+.recherche-accueil { margin-bottom: 1.6rem; }
+.cellule-cuisson { display: flex; flex-direction: column; gap: .4rem; }
+.cellule-cuisson > .carte-plat { flex: 1; }
+.cellule-cuisson .cuisson-date { font-size: .85rem; }
 .segmented { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-pill); overflow: hidden; background: var(--card); }
 /* R-VIS-11 : dans un champ (colonne flex), la pilule prend la largeur de ses options, sans queue vide qui se lirait comme un champ. */
 .field > .segmented { align-self: flex-start; }
@@ -285,6 +293,10 @@ label.check { display: inline-flex; gap: .45rem; align-items: center; font-size:
 .thumbs figcaption { font-size: .75rem; color: var(--muted); margin-top: .2rem; }
 .thumbs .num { position: absolute; top: 4px; left: 4px; background: var(--green); color: var(--cream); border-radius: 6px; font-size: .75rem; padding: .05rem .4rem; }
 .thumbs .fichier-absent { margin: 0; min-height: 140px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: .3rem; padding: .4rem; border: 1px dashed var(--line); border-radius: 8px; font-size: .75rem; color: var(--muted); }
+/* Lot UI-1 « Carnet » (§ 4.5) : sur une vignette de l'import ciblé, le × « Retirer la page n » en coin (cible 44 × 44, I-UI-4 ; la figure est relative) et la
+   légende « Page 1 · p. 76 », un bouton-lien compact qui ouvre le champ « p. imprimée » (né [hidden], T-1). */
+.thumbs .btn.retirer { position: absolute; top: .25rem; right: .25rem; width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; justify-content: center; font-size: 1.3rem; line-height: 1; background: var(--card); }
+.thumbs .legende { padding-left: 0; padding-right: 0; justify-content: flex-start; font-size: .8rem; }
 .photo-plat .fichier-absent { margin: 0; padding: .6rem; border: 1px dashed var(--line); border-radius: var(--radius); color: var(--muted); }
 /* Lot F (D-F9) : la vignette d'une carte de recette — 72 px, recadrée, coins 8 px ; née [hidden] (aucun display:none neuf, T-1). */
 .plat-vignette { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); flex: 0 0 auto; }

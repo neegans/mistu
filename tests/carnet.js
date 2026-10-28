@@ -1284,5 +1284,220 @@ export async function runCarnetTests({ eq, ok }) {
     });
   }
 
+  // ===== Tâche 5 — Aujourd'hui, Ajouter, import ciblé, libellés dérivés (spec experience-carnet § 4.4, § 4.5, D-UI-9, D-UI-10, § 5 ; § 7 T5)
+  {
+    const { withRepo } = await import('./sync-fixture.js');
+    const { sha256Hex } = await import('../src/core/hash.js');
+    const { setUiLocale, getUiLocale } = await import('../src/core/i18n.js');
+    const lire = async (chemin) => { const r = await fetch(new URL(chemin, import.meta.url), { cache: 'no-store' }); if (!r.ok) throw new Error(`${chemin} : HTTP ${r.status}`); return r.text(); };
+    const H = (c) => c.repeat(64); // une empreinte lisible : H('b') = « bbbb… » (64)
+    const DATE = '2026-10-23T12:00:00.000Z';
+    const attendre = async (cond, quoi) => { for (let i = 0; i < 300; i += 1) { if (await cond()) return true; await new Promise((r) => setTimeout(r, 10)); } throw new Error('attente dépassée (3 s) : ' + quoi); };
+    // Une image de test : un aplat et un coin clair ; un File, comme un sélecteur de fichiers.
+    const imageTest = async (nom, couleur, l = 320, h = 240) => { const toile = new OffscreenCanvas(l, h); const cx = toile.getContext('2d'); cx.fillStyle = couleur; cx.fillRect(0, 0, l, h); cx.fillStyle = '#fff'; cx.fillRect(0, 0, l >> 2, h >> 2); return new File([await toile.convertToBlob({ type: 'image/jpeg', quality: 0.9 })], nom, { type: 'image/jpeg' }); };
+    const nouvelleScene = (largeur = 900) => { const s = document.createElement('div'); s.style.cssText = `position:absolute;left:-10000px;top:0;width:${largeur}px`; document.body.append(s); return s; };
+    const bouton = (racine, texte) => [...(racine?.querySelectorAll('button') || [])].find((b) => b.textContent === texte) || null;
+    const sectionNommee = (racine, titre) => [...racine.querySelectorAll('section')].find((s) => s.querySelector(':scope > h2')?.textContent === titre) || null;
+    const avant = (a, b) => !!a && !!b && !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const fiche = (id, over = {}) => ({ id, edition_id: null, original_title: 'Plat ' + id, original_language: 'fr', availability: 'available', verification_state: 'verified', printed_page: null, source_page_ids: [], current_version_id: 'rv_' + id, tags: [], cuisines: [], favorite: false, ingredient_ids: [], created_at: DATE, updated_at: DATE, ...over });
+    const version = (rid, over = {}) => ({ id: 'rv_' + rid, recipe_id: rid, kind: 'extraction', status: null, servings: 4, prep_minutes: 10, cook_minutes: 25, active_minutes: null, total_minutes: null,
+      ingredients: [{ id: 'ri_' + rid, source_text: '1 pomme', name_text: 'pomme', quantity: { raw: '1', value: 1 }, unit_id: null, verification_state: 'verified' }], steps: [{ id: 'st_' + rid, position: 1, text: 'Cuire.' }, { id: 'st2_' + rid, position: 2, text: 'Servir.' }],
+      constraints: {}, changes: '', notes: '', provenance: { source_page_ids: [], generated_by: 'manual', model: null, edition_id: null, convention_snapshot: null }, verification_state: 'verified', created_at: DATE, updated_at: DATE, ...over });
+    const localeAvantT5 = getUiLocale(); setUiLocale('fr');
+    try {
+      await bloc('T5 — Aujourd’hui : en-tête, barre hors carte, puces, grilles de cartes-plat, UNE passe getFiles, cuissons hors du <a>, sections plain (§ 4.4)', () => withRepo(async (repo, db) => {
+        const { renderHome } = await import('../src/ui/home.js');
+        const { buildDocs } = await import('../src/domain/search.js');
+        const { formatDate } = await import('../src/core/dom.js');
+        const BU = await import('../src/core/blob-urls.js');
+        const scene = nouvelleScene();
+        const vraiFetch = globalThis.fetch; globalThis.fetch = async (u) => { throw new Error('aucun reseau attendu : ' + u); };
+        try {
+          const jpeg = await imageTest('fav.jpg', '#c63'); const sha = await sha256Hex(jpeg);
+          await repo.putFile(sha, jpeg, { mime: 'image/jpeg', origin: 'device' });
+          // Quatre fiches : deux favorites (octets ici / pointeur sans octets), une cuisinée ni favorite ni illustrée, une ni favorite ni cuisinée AVEC pointeur (jamais lue).
+          const recettes = [fiche('rc_f1', { favorite: true, photo_sha256: sha }), fiche('rc_f2', { favorite: true, photo_sha256: H('b') }), fiche('rc_c1'), fiche('rc_x', { photo_sha256: H('c') })];
+          const versions = recettes.map((r) => version(r.id));
+          const histoire = [
+            { id: 'ch1', recipe_id: 'rc_c1', recipe_version_id: 'rv_rc_c1', cooked_at: '2026-10-22T18:00:00.000Z', servings: 2, rating: 2, redo: true },
+            { id: 'ch2', recipe_id: 'rc_f1', recipe_version_id: 'rv_rc_f1', cooked_at: '2026-10-21T18:00:00.000Z', servings: 4, rating: null, redo: false },
+            { id: 'ch3', recipe_id: 'rc_absente', recipe_version_id: null, cooked_at: '2026-10-20T18:00:00.000Z' }]; // une cuisson d'une fiche inconnue : pas rendue (comme avant)
+          const docs = buildDocs({ recipes: recettes, versions, editions: [], books: [], dishes: [], links: [], translations: [], history: histoire });
+          const ctx = { recipes: recettes, docs, docsByRecipe: new Map(docs.map((d) => [d.recipe.id, d])), cook_history: histoire,
+            cook_sessions: [{ id: 'cs1', recipe_id: 'rc_c1', status: 'active', updated_at: DATE, progress: { total_steps: 2, done_step_ids: ['st_rc_c1'] } }],
+            inventory: [{ id: 'inv1', label: 'Épinards', quantity_text: '1 sac', use_by: new Date(Date.now() + 86400000).toISOString() }],
+            settings: { rediscover_enabled: false }, book_editions: [], books: [], library_activity: [], rediscovery_prefs: [] };
+          // L'espion compte les lectures de fichiers : UNE passe getFiles sur les cartes rendues, jamais un getFile par carte (D-UI-5, F-3).
+          const appels = []; const depot = { ...repo, getFiles: async (shas) => { appels.push([...shas]); return repo.getFiles(shas); }, getFile: async (s) => { appels.push(['getFile', s]); return repo.getFile(s); } };
+          const root = await renderHome({}, {}, ctx, { repo: depot });
+          scene.append(root);
+          const entete = root.querySelector(':scope > header'); const barre = root.querySelector('.search-bar'); const puces = root.querySelector('.chips');
+          eq([entete?.querySelector('h1')?.textContent, entete?.querySelector('p.muted')?.textContent, root.querySelectorAll('.card.sage').length, !!barre?.closest('.card'), !!puces?.closest('.card'), avant(entete, barre), avant(barre, puces),
+            barre?.querySelector('input[type="search"]')?.getAttribute('placeholder'), bouton(barre, 'Chercher')?.classList.contains('primary'), puces?.querySelectorAll('.chip.clickable').length],
+            ['Qu’est-ce qu’on cuisine ?', 'Cherche une recette, un ingrédient, une envie.', 0, false, false, true, true, 'Qu’est-ce qu’on cuisine ?', true, 4],
+            'Aujourd’hui : pageHeader (titre, sous-titre § 5) puis .search-bar hors de toute .card (plus de .card.sage), puis les quatre puces d’exemple hors de toute carte ; « Chercher » reste primaire, le placeholder est inchangé');
+          const favoris = sectionNommee(root, 'Favoris'); const grilleF = favoris?.querySelector('.grille-plats');
+          const cartesF = [...(grilleF?.querySelectorAll('a.item-link.carte-plat') || [])];
+          const parHref = (cartes, id) => cartes.find((c) => c.getAttribute('href') === `#/recipes/${id}`) || null;
+          const avecPhoto = parHref(cartesF, 'rc_f1'); const sansOctets = parHref(cartesF, 'rc_f2');
+          eq([favoris?.className, cartesF.length, !!avecPhoto?.querySelector('img.plat-vignette.grande'), avecPhoto?.querySelector('img.plat-vignette.grande')?.getAttribute('src')?.startsWith('blob:'), avecPhoto?.classList.contains('sans-photo'), sansOctets?.classList.contains('sans-photo'), sansOctets?.querySelectorAll('img').length, favoris?.querySelectorAll('a.item-link.card').length],
+            ['plain', 2, true, true, false, true, 0, 0],
+            'Favoris : section.plain > div.grille-plats de cartes-plat ; octets ici → img.plat-vignette.grande en blob: (décision synchrone) ; pointeur sans octets → .sans-photo sans aucune img (I-UI-5) ; aucune carte horizontale');
+          eq([appels.length, appels[0] ? [...new Set(appels[0])].sort() : null, appels.filter((a) => a[0] === 'getFile').length], [1, [H('b'), sha].sort(), 0],
+            'Aujourd’hui : UNE passe repo.getFiles, sur les empreintes des cartes RENDUES seulement (rc_f1 et rc_f2 ; rc_x, ni favorite ni cuisinée, n’est jamais lue) ; zéro getFile carte par carte (D-UI-5, F-3, I-UI-5)');
+          const cuissons = sectionNommee(root, 'Dernières cuissons');
+          const cellules = [...(cuissons?.querySelectorAll('.grille-plats .cellule-cuisson') || [])];
+          const celluleDe = (id) => cellules.find((c) => c.querySelector('a.carte-plat')?.getAttribute('href') === `#/recipes/${id}`) || null;
+          const refaire = (cell) => [...(cell?.querySelectorAll('a.btn') || [])].find((a) => a.textContent === 'Refaire comme la dernière fois') || null;
+          const c1 = celluleDe('rc_c1'); const carte1 = c1?.querySelector('a.carte-plat'); const date1 = c1?.querySelector('.cuisson-date'); const r1 = refaire(c1);
+          eq([cuissons?.className, cellules.length, !!carte1, !!date1 && !carte1.contains(date1), !!r1 && !carte1.contains(r1), date1?.textContent, r1?.getAttribute('href'), r1?.className, avant(carte1, date1), avant(date1, r1)],
+            ['plain', 2, true, true, true, `${formatDate('2026-10-22T18:00:00.000Z')} · ★★`, '#/recipes/rc_c1?v=rv_rc_c1&servings=2', 'btn small', true, true],
+            'Dernières cuissons : section.plain > grille de 2 cellules (la cuisson d’une fiche inconnue n’est pas rendue) ; la date (★★) puis « Refaire comme la dernière fois » (même href qu’avant) sont HORS du <a> de la carte, sous elle, dans la cellule (§ 4.4, H-16)');
+          const c2 = celluleDe('rc_f1');
+          eq([c2?.querySelector('.cuisson-date')?.textContent, !!c2?.querySelector('a.carte-plat img.plat-vignette.grande'), refaire(c2)?.getAttribute('href')],
+            [`${formatDate('2026-10-21T18:00:00.000Z')} · à ne pas refaire`, true, '#/recipes/rc_f1?v=rv_rc_f1&servings=4'],
+            'Dernières cuissons : « à ne pas refaire » sur la date ; la carte-plat d’une cuisson porte sa photo (la même passe getFiles sert favoris et cuissons)');
+          eq([sectionNommee(root, 'Reprendre ma recette')?.className, !!sectionNommee(root, 'Reprendre ma recette')?.querySelector('a.item-link.card.flat[href="#/cook/cs1"]'), sectionNommee(root, 'À utiliser en priorité')?.className, !!sectionNommee(root, 'À utiliser en priorité')?.querySelector('a.btn.small[href="#/kitchen?tab=inventory"]'), sectionNommee(root, 'Bienvenue')],
+            ['plain', true, 'plain', true, null],
+            'Aujourd’hui : « Reprendre ma recette » et « À utiliser en priorité » en section.plain, contenu inchangé ; pas de « Bienvenue » quand la bibliothèque a des recettes');
+          const vide = await renderHome({}, {}, { ...ctx, recipes: [], docs: [], docsByRecipe: new Map(), cook_sessions: [], cook_history: [], inventory: [] }, { repo: depot });
+          eq([sectionNommee(vide, 'Bienvenue')?.className, !!sectionNommee(vide, 'Bienvenue')?.querySelector('a.btn.primary[href="#/add"]'), appels.length, vide.querySelectorAll('.grille-plats').length], ['card', true, 1, 0],
+            'Aujourd’hui vide : « Bienvenue » reste une section.card avec « Ajouter » primaire ; sans carte rendue, aucune lecture de fichiers de plus ; aucune grille');
+          // EI-T5-2 (hors brief) : un pointeur qui n'est pas une empreinte (pointeurValide, la règle de la bibliothèque et de la fiche livre) n'est ni lu ni passé à la carte.
+          const appels2 = []; const depot2 = { ...repo, getFiles: async (shas) => { appels2.push([...shas]); return repo.getFiles(shas); } };
+          const bizarre = fiche('rc_z', { favorite: true, photo_sha256: 'pas-une-empreinte' });
+          const docsZ = buildDocs({ recipes: [bizarre], versions: [version('rc_z')], editions: [], books: [], dishes: [], links: [], translations: [], history: [] });
+          const rz = await renderHome({}, {}, { ...ctx, recipes: [bizarre], docs: docsZ, docsByRecipe: new Map(docsZ.map((d) => [d.recipe.id, d])), cook_sessions: [], cook_history: [], inventory: [] }, { repo: depot2 });
+          eq([appels2.length, rz.querySelectorAll('.grille-plats a.carte-plat.sans-photo').length, rz.querySelectorAll('img').length], [0, 1, 0],
+            'Aujourd’hui : un pointeur photo qui n’est pas une empreinte n’est pas lu (aucun getFiles) et la carte reste sans photo (pointeurValide, EI-T5-2)');
+        } finally { globalThis.fetch = vraiFetch; scene.remove(); BU.revoquerUrlsDeBlob(); }
+      }));
+
+      await bloc('T5 — libellés D-UI-10 : availabilityBadge courts, « À importer » seulement pour reference_only sans adresse, STATE_LABELS, en.js, compteurs', () => withRepo(async (repo, db) => {
+        const { availabilityBadge } = await import('../src/ui/components.js');
+        const { label } = await import('../src/core/i18n.js');
+        const { EN } = await import('../src/i18n/en.js');
+        const { renderLibrary } = await import('../src/ui/library.js');
+        const badge = (r) => { const b = availabilityBadge(r); return [b.className, b.textContent]; };
+        eq([badge({ availability: 'reference_only', printed_page: 12 }), badge({ availability: 'reference_only' }), badge({ availability: 'reference_only', printed_page: 0 }), badge({ availability: 'reference_only', source_url: 'https://a.test/' }),
+          badge({ availability: 'available' }), badge({ availability: 'available', source_url: 'https://a.test/' }), badge({ availability: 'partial' }), badge({ availability: 'partial', source_url: 'https://a.test/', printed_page: 3 }), badge({})],
+          [['badge reference', 'À importer · p. 12'], ['badge reference', 'À importer'], ['badge reference', 'À importer'], ['badge reference', 'Lien web'], ['badge available', 'Disponible'], ['badge available', 'Disponible'], ['badge partial', 'Partielle'], ['badge partial', 'Partielle'], ['badge reference', '']],
+          'availabilityBadge : textes courts — « À importer · p. {p} » (page > 0) / « À importer », « Lien web » (signet), « Disponible », « Partielle » ; classes inchangées ; availability inconnue → badge reference vide, comme avant (D-UI-10, H-19)');
+        const porteurs = [];
+        for (const availability of ['available', 'partial', 'reference_only', undefined]) for (const source_url of [null, 'https://a.test/x']) { if (availabilityBadge({ availability, source_url, printed_page: 7 }).textContent.startsWith('À importer')) porteurs.push([availability, source_url]); }
+        eq(porteurs, [['reference_only', null]], '« À importer » n’apparaît que pour reference_only SANS source_url (huit combinaisons) — mutant « posé sur une available » : rouge');
+        eq([label('availability', 'reference_only'), label('availability', 'available'), label('availability', 'partial')], ['À importer', 'Recette disponible', 'Partiellement disponible'],
+          'STATE_LABELS.availability : seule reference_only change (« À importer », suivie par les exports et Redécouvrir) ; available et partial gardent leur libellé long (D-UI-10, H-19)');
+        setUiLocale('en');
+        try {
+          eq([label('availability', 'reference_only'), availabilityBadge({ availability: 'reference_only', printed_page: 12 }).textContent, availabilityBadge({ availability: 'available' }).textContent, availabilityBadge({ availability: 'partial' }).textContent, availabilityBadge({ availability: 'reference_only' }).textContent],
+            ['To import', 'To import · p. 12', 'Available', 'Partial', 'To import'], 'interface anglaise : « To import », « To import · p. 12 », « Available », « Partial » (§ 5)');
+        } finally { setUiLocale('fr'); }
+        eq(['À importer', 'À importer · p. {p}', 'Disponible', 'Partielle', 'Cherche une recette, un ingrédient, une envie.', 'Page {n} · p. {p}', '{n} à importer'].map((k) => EN[k]),
+          ['To import', 'To import · p. {p}', 'Available', 'Partial', 'Search a recipe, an ingredient, a craving.', 'Page {n} · p. {p}', '{n} to import'], 'en.js : les sept clés de la tâche portent l’anglais de la spec § 5');
+        // Compteur library.js:73 (grille Livres) : « {n} à importer » à la place de « {n} repérée(s) » ; base jetable (renderLibrary lit repo.getFiles pour les couvertures).
+        const ed = { id: 'ed_k', book_id: 'b_k', year: 2020 }; const livre = { id: 'b_k', title: 'Mon livre', author: 'A. B.', cuisines: [], tags: [] };
+        const refs = [fiche('rc_k1', { edition_id: 'ed_k' }), fiche('rc_k2', { edition_id: 'ed_k', availability: 'reference_only', verification_state: 'unverified', current_version_id: null, printed_page: 12 }), fiche('rc_k3', { edition_id: 'ed_k', availability: 'reference_only', verification_state: 'unverified', current_version_id: null, printed_page: 40 })];
+        const ctxL = { book_editions: [ed], books: [livre], booksById: new Map([['b_k', livre]]), editionsById: new Map([['ed_k', ed]]), recipes: refs, recipe_versions: [], recipesById: new Map(refs.map((r) => [r.id, r])), docs: [], docsByRecipe: new Map(),
+          rediscovery_prefs: [], dishes: [], dish_recipe_links: [], source_documents: [], source_pages: [], scan_sessions: [], settings: {}, sync: {}, editionLabel: () => livre.title };
+        const biblio = await renderLibrary({}, { tab: 'books' }, ctxL);
+        const legende = [...biblio.querySelectorAll('.muted')].map((n) => n.textContent).find((x) => x.includes('à importer')) ?? null;
+        eq([legende, /repérée/i.test(biblio.textContent)], ['1 disponible(s) · 2 à importer', false], 'library.js (grille Livres, l. 73) : « {n} disponible(s) · {m} à importer » sous la couverture ; plus aucun « repérée(s) »');
+        // EI-T5-1 (D-UI-10, H-19 ; hors brief) : un signet rangé dans un livre (reference_only + adresse) est un lien web, jamais « à importer » — la définition
+        // d'estAImporter (library.js), celle du sous-titre de la fiche livre (T4) ; un livre qui ne porte qu'un signet dit « Aucune recette indexée ».
+        const ed2 = { id: 'ed_s', book_id: 'b_s', year: 2021 }; const livre2 = { id: 'b_s', title: 'Liens', author: 'C. D.', cuisines: [], tags: [] };
+        const signetDe = (id, edition_id) => fiche(id, { edition_id, availability: 'reference_only', verification_state: 'unverified', current_version_id: null, source_url: `https://a.test/${id}` });
+        const refs2 = [...refs, signetDe('rc_k4', 'ed_k'), signetDe('rc_s1', 'ed_s')];
+        const biblio2 = await renderLibrary({}, { tab: 'books' }, { ...ctxL, book_editions: [ed, ed2], books: [livre, livre2], booksById: new Map([['b_k', livre], ['b_s', livre2]]), editionsById: new Map([['ed_k', ed], ['ed_s', ed2]]),
+          recipes: refs2, recipesById: new Map(refs2.map((r) => [r.id, r])), editionLabel: (e) => (e?.id === 'ed_s' ? livre2.title : livre.title) });
+        eq([...biblio2.querySelectorAll('.grid.livres > div')].map((d) => d.lastElementChild?.textContent ?? null), ['Aucune recette indexée', '1 disponible(s) · 2 à importer'],
+          'library.js (grille Livres) : un signet rangé dans un livre ne compte pas « à importer » (estAImporter, comme la fiche livre) ; un livre qui n’a qu’un signet dit « Aucune recette indexée » (EI-T5-1)');
+        const [srcBook, srcLib] = await Promise.all(['../src/ui/book.js', '../src/ui/library.js'].map(lire));
+        eq([srcBook.length > 1000, srcLib.length > 1000, [srcBook, srcLib].map((s) => (s.match(/t\('[^']*epérée[^']*'/g) || []).length)], [true, true, [0, 0]],
+          'book.js (compteur et filtre) et library.js : plus aucun t(\'…repérée(s)…\') ni t(\'Repérées\') dans le source (lus, non vides) — les libellés sont « À importer / à importer » (D-UI-10 ; § 7 T5)');
+      }));
+
+      await bloc('T5 — icônes au trait : la grille Ajouter et l’accueil d’un livre (D-UI-9)', async () => {
+        const A = await import('../src/ui/add.js');
+        const AL = await import('../src/ui/accueil-livre.js');
+        eq(A.grilleModel().cartes.map((c) => c.ico), ['livres', 'appareil-photo', 'crayon', 'lien', 'etincelle', 'flocon'], 'grilleModel : ico = le NOM d’une icône d’icones.js, dans l’ordre des six cartes (plus d’émoji)');
+        const gestes = Object.fromEntries(A.GRILLE_ACTIONS.map((a) => [a, () => {}]));
+        const grille = A.renderGrille(A.grilleModel(), gestes);
+        const svgs = [...grille.querySelectorAll('button.carte .carte-ico > svg')];
+        eq([grille.querySelectorAll('button.carte').length, svgs.length, svgs.every((s) => s.getAttribute('aria-hidden') === 'true' && s.getAttribute('focusable') === 'false'), [...grille.querySelectorAll('.carte-ico')].every((n) => n.textContent.trim() === '')], [6, 6, true, true],
+          'renderGrille : chaque .carte-ico porte un svg[aria-hidden=true][focusable=false] et aucun texte (plus d’émoji) ; six cartes');
+        const m = AL.accueilLivreModel({ nouveau: '1' });
+        eq(m.cartes.map((c) => c.ico), ['appareil-photo', 'page', 'horloge'], 'accueilLivreModel : ico = appareil-photo, page, horloge (D-UI-9, § 3.3)');
+        const panneau = AL.renderAccueilLivre(m, {});
+        eq([panneau.querySelectorAll('button.carte .carte-ico > svg').length, [...panneau.querySelectorAll('.carte-ico')].every((n) => n.textContent.trim() === '')], [3, true], 'renderAccueilLivre : trois svg, aucun émoji');
+        let leve = null;
+        try { A.renderGrille({ cartes: [{ action: 'pages', ico: 'inconnue', titre: 'x', sousTitre: 'y' }] }, { pages: () => {} }); } catch (e) { leve = e?.name || String(e); }
+        eq(leve, 'TypeError', 'renderGrille : un nom d’icône inconnu lève TypeError (icone(nom), T1) — jamais une carte sans pictogramme en silence');
+      });
+
+      await bloc('T5 — import ciblé : badge « À importer » / « Partielle », × en coin de la vignette (nom accessible, ≥ 44 px), légende « Page 1 · p. 76 » et champ ouvert à la tape, Monter / Descendre inchangés (§ 4.5)', () => withRepo(async (repo, db) => {
+        const UI = await import('../src/ui/import-cible.js');
+        const BU = await import('../src/core/blob-urls.js');
+        // EI-T5-a : la feuille est lue AVANT que fetch soit remplacé par le lanceur d'erreur (le texte dicté la lisait après : « aucun reseau attendu : …/styles.css »).
+        const cssServie = (await lire('../styles.css')).replace(/\/\*[\s\S]*?\*\//g, '');
+        const scene = nouvelleScene();
+        // La feuille servie, injectée le temps du bloc (comme tests/theme.js) : la cible du × se MESURE (I-UI-4), elle ne se lit pas dans un attribut.
+        const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = '../styles.css?v=' + Date.now();
+        await new Promise((r) => { link.onload = r; link.onerror = r; document.head.append(link); });
+        const vraiFetch = globalThis.fetch; let reseau = 0; globalThis.fetch = async (u) => { reseau += 1; throw new Error('aucun reseau attendu : ' + u); };
+        const NOW = '2026-10-23T12:00:00.000Z';
+        const livre = { id: 'b5', title: 'Mon livre', author: 'A. B.', updated_at: DATE }; const edition = { id: 'ed5', book_id: 'b5', language: 'fr', updated_at: DATE };
+        const ref = (id, over = {}) => fiche(id, { edition_id: 'ed5', original_title: 'Tarte aux pommes', availability: 'reference_only', verification_state: 'unverified', printed_page: 132, current_version_id: null, ...over });
+        const manuelle = version('rc_t5p', { provenance: { source_page_ids: [], generated_by: 'manual', model: null, edition_id: 'ed5', convention_snapshot: null } });
+        await db.mutate({ puts: { books: [livre], book_editions: [edition], recipes: [ref('rc_t5'), ref('rc_t5p', { availability: 'partial', verification_state: 'verified', current_version_id: 'rv_rc_t5p' })], recipe_versions: [manuelle] }, origin: 'device' });
+        const SESSION = { access_token: 'jeton-carnet-sentinelle', user: { id: 'u1', email: 'a@exemple.invalid' } };
+        const ctxDe = async () => { const recipes = await db.getAll('recipes'); const vs = await db.getAll('recipe_versions'); return { recipes, recipesById: new Map(recipes.map((r) => [r.id, r])), recipe_versions: vs, versionsByRecipe: repo.groupBy(vs, 'recipe_id'), versionsById: new Map(vs.map((v) => [v.id, v])), editionsById: new Map([['ed5', edition]]), booksById: new Map([['b5', livre]]), books: [livre], book_editions: [edition], pagesById: new Map(), imports: await db.getAll('imports'), settings: { llm: { provider: 'none' }, units: 'original', reading_locale: 'original' }, sync: { user: SESSION.user, auth: { jeton: async () => SESSION } }, conventionFor: () => null }; };
+        const pick = { suivant: [] }; const pickFiles = async () => (pick.suivant.length ? pick.suivant.shift() : []);
+        const navs = [], dits = [];
+        const monter = async (id) => { const root = await UI.renderImportCible({ id }, {}, await ctxDe(), { repo, navigate: (p) => navs.push(p), toast: (m) => dits.push(m), fetch: async () => { reseau += 1; throw new Error('aucun appel attendu'); }, pickFiles, maintenant: () => NOW }); scene.append(root); return root; };
+        try {
+          const root = await monter('rc_t5');
+          eq([...root.querySelectorAll('.badge')].map((b) => [b.className, b.textContent]), [['badge reference', 'À importer']], 'écran d’import : badge « À importer » sur une référence — le sous-titre porte déjà « Mon livre · p. 132 » (§ 4.5, D-UI-10)');
+          pick.suivant.push([await imageTest('a.jpg', '#c33'), await imageTest('b.jpg', '#3c3')]);
+          bouton(root, 'Choisir des photos').click();
+          await attendre(() => root.etatRoute().pageIds.length === 2, 'deux pages ajoutées');
+          const [p1, p2] = root.etatRoute().pageIds;
+          const figures = [...root.querySelectorAll('.thumbs figure')]; const fig1 = figures[0];
+          const croix = fig1?.querySelector(':scope > button[data-role="retirer"]'); const legende = fig1?.querySelector('button[data-role="legende"]'); const champ = fig1?.querySelector('input[type="number"]');
+          eq([figures.length, croix?.textContent, croix?.getAttribute('aria-label'), croix?.dataset.page, croix?.classList.contains('retirer'), legende?.textContent, legende?.dataset.page, legende?.getAttribute('aria-expanded'), champ?.hidden, !!bouton(root, 'Monter la page 1'), !!bouton(root, 'Descendre la page 1'), bouton(root, 'Retirer la page 1')],
+            [2, '×', 'Retirer la page 1', p1, true, 'Page 1', p1, 'false', true, true, true, null],
+            'vignette : le × (button.btn.retirer, data-role retirer) est enfant direct de la figure, nom accessible « Retirer la page 1 » ; légende « Page 1 » (pas de numéro imprimé) ; champ « p. imprimée » né hidden ; Monter / Descendre inchangés ; plus aucun bouton au TEXTE « Retirer la page 1 »');
+          const r = croix.getBoundingClientRect(); const rf = fig1.getBoundingClientRect();
+          ok(r.width >= 44 && r.height >= 44 && r.right <= rf.right + 1 && r.top >= rf.top - 1 && r.left > rf.left, `× : cible ${Math.round(r.width)} × ${Math.round(r.height)} ≥ 44 px, dans le coin supérieur droit de la vignette (feuille servie injectée ; I-UI-4)`);
+          legende.click();
+          eq([champ.hidden, document.activeElement === champ, legende.getAttribute('aria-expanded')], [false, true, 'true'], 'légende : la tape ouvre le champ « p. imprimée » et lui donne le focus (aria-expanded true)');
+          champ.value = '76'; champ.dispatchEvent(new Event('change', { bubbles: true }));
+          await attendre(async () => (await db.get('source_pages', p1)).printed_page === 76, 'p. imprimée écrite');
+          eq([legende.textContent, legende.getAttribute('aria-expanded'), champ.hidden, (await db.get('source_pages', p1)).printed_page, root.etatRoute().pageIds, root.querySelector('button[data-role="legende"]') === legende],
+            ['Page 1 · p. 76', 'false', true, 76, [p1, p2], true],
+            'légende : après la saisie, « Page 1 · p. 76 » réécrite SUR PLACE (le même nœud : aucun redessin, page_ids intacts), le champ se referme ; source_pages.printed_page écrit');
+          eq(document.activeElement === legende, true, 'légende : le champ refermé sous le focus le rend à la légende, jamais au body (EI-T5-3, I-UI-4)');
+          legende.click(); champ.value = '0'; champ.dispatchEvent(new Event('change', { bubbles: true }));
+          await attendre(() => champ.value === '76', 'champ remis à la valeur courante');
+          eq([legende.textContent, champ.hidden, (await db.get('source_pages', p1)).printed_page], ['Page 1 · p. 76', false, 76], 'légende : une saisie illisible (« 0 ») n’écrit rien, la légende garde « p. 76 », le champ reste ouvert pour corriger (T4-R1 du lot A tenu)');
+          croix.click();
+          await attendre(() => root.etatRoute().pageIds.length === 1, 'page retirée');
+          const apres = [...root.querySelectorAll('.thumbs figure')];
+          eq([root.etatRoute().pageIds, apres.length, apres[0]?.querySelector('button[data-role="retirer"]')?.getAttribute('aria-label'), apres[0]?.querySelector('button[data-role="legende"]')?.textContent, reseau, dits],
+            [[p2], 1, 'Retirer la page 1', 'Page 1', 0, []],
+            '× : « Retirer la page 1 » détache p1 (même geste qu’avant : la ligne source_pages reste) ; la vignette restante est renumérotée « Page 1 » (× et légende) ; aucun réseau, aucun toast');
+          const partielle = await monter('rc_t5p');
+          eq([...partielle.querySelectorAll('.badge')].map((b) => [b.className, b.textContent]), [['badge partial', 'Partielle']], 'écran d’import : badge « Partielle » sur une fiche partial (§ 4.5, D-UI-10)');
+          // styles.css : les deux règles neuves de l'écran, lues sans commentaires (T-1, T-2, T-11 : ni display:none, ni couleur en dur, ni 56px, ni :hover hors @media).
+          const css = cssServie;
+          const croixCss = css.match(/(?:^|\})\s*\.thumbs \.btn\.retirer\s*\{([^}]*)\}/)?.[1] ?? null;
+          const legCss = css.match(/(?:^|\})\s*\.thumbs \.legende\s*\{([^}]*)\}/)?.[1] ?? null;
+          eq([croixCss !== null, /position:\s*absolute/.test(croixCss || ''), /min-width:\s*44px/.test(croixCss || ''), /min-height:\s*44px/.test(croixCss || ''), legCss !== null, [croixCss, legCss].some((x) => /display\s*:\s*none|#[0-9a-f]{3,8}\b|56px|:hover/i.test(x || ''))],
+            [true, true, true, true, true, false], 'styles.css : .thumbs .btn.retirer (position absolute, min-width et min-height 44px) et .thumbs .legende sont trouvées ; ni display:none, ni couleur en dur, ni 56px, ni :hover (T-1, T-2, T-11)');
+        } finally { globalThis.fetch = vraiFetch; if (UI.volEnCours()) UI.reinitialiserImportCible(); scene.remove(); link.remove(); BU.revoquerUrlsDeBlob(); }
+      }));
+    } finally { setUiLocale(localeAvantT5); }
+  }
+
   // --- repère de fin : les tâches 2 à 6 ajoutent leurs blocs AU-DESSUS de cette ligne ---
 }

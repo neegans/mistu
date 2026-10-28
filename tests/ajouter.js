@@ -54,14 +54,20 @@ export const CHAINES_NEUVES_AILLEURS = {
     // Lot UI-1, tâche 2 : la ligne de source de la carte-plat (ligneSource).
     'Du web · {h}', 'De mon livre · {t}',
     // Lot UI-1, tâche 3 : « Voir la page d’origine » (D-UI-10, I-B5), une définition pour la fiche, le bloc du signet et l'écran d'import web.
-    'Voir la page d’origine'],
+    'Voir la page d’origine',
+    // Lot UI-1 « Carnet », tâche 5 : les textes courts d'availabilityBadge (D-UI-10).
+    'À importer', 'À importer · p. {p}', 'Disponible', 'Partielle'],
   // Lot B, tâche 4 : « Garder et lire » et le doublon sur une carte de l'onglet Web.
   '../src/ui/search.js': ['Garder et lire', 'Tu as déjà gardé cette adresse.', 'Ouvrir la fiche', 'Adresse non reconnue.', 'Le lien n’a pas pu être gardé. Réessaie.'],
   // Lot UI-1, tâche 2 : la Bibliothèque — en-tête (« Bibliothèque » : clé posée par la tâche 1), segments, filtre, puces, grille bornée, pied et liste « à importer ».
   '../src/ui/library.js': ['Bibliothèque', 'Tes livres, tes trouvailles, tes recettes.', 'Recettes', 'Ajouter une recette', 'Une recette, un ingrédient…', 'Toutes', 'De mes livres', 'Du web',
     'Recettes de mes livres à importer', 'Voir plus', 'À importer', 'Aucune recette pour l’instant.',
     // Ronde 1 (D-T2-c) : l'état vide de ?tab=a-importer.
-    'Rien à importer pour l’instant.'],
+    'Rien à importer pour l’instant.',
+    // Lot UI-1, tâche 5 : le compteur de la grille Livres (library.js, « {n} à importer »).
+    '{n} à importer'],
+  // Lot UI-1 « Carnet », tâche 5 : le sous-titre d'Aujourd'hui (§ 4.4).
+  '../src/ui/home.js': ['Cherche une recette, un ingrédient, une envie.'],
   '../src/ui/cook.js': ['Lue par l’assistant, non relue'],
   '../src/ui/grocery.js': ['Lue par l’assistant, non relue'],
   '../src/ui/recipe-edit.js': ['Une étape par paragraphe (ligne vide entre deux étapes).', 'La recette n’a pas pu être enregistrée. Réessaie.', 'Une lecture est déjà en cours : annule-la d’abord.', 'page possiblement manquante', 'lecture incomplète'],
@@ -1143,7 +1149,7 @@ export async function runAjouterTests({ eq, ok }) {
     // Vue recette : pastille et branche « Lien web gardé » (F8, S6, S7)
     const { availabilityBadge, provenanceText } = await import('../src/ui/components.js');
     eq(availabilityBadge({ availability: 'reference_only', source_url: 'https://a.test/' }).textContent, 'Lien web', 'pastille : un signet n’est pas « Repérée dans ton livre »');
-    eq(availabilityBadge({ availability: 'reference_only', printed_page: 12 }).textContent, 'Repérée dans ton livre — page 12', 'pastille : les références d’index inchangées');
+    eq(availabilityBadge({ availability: 'reference_only', printed_page: 12 }).textContent, 'À importer · p. 12', 'pastille : une référence d’index dit « À importer · p. 12 » (D-UI-10, lot Carnet T5)');
     // R-UX-11 (S7) : dans les CARTES DE LISTE aussi, l'hôte vient de l'adresse — jamais du libellé stocké, qu'une
     // archive ou le serveur peut avoir rempli avec n'importe quoi. La vue recette le faisait déjà, pas les listes.
     eq(provenanceText({ source_url: 'https://a.test/x', source_label: 'ment.test' }, null, null), 'a.test', 'provenance : un signet montre l’hôte recalculé depuis l’adresse (S7)');
@@ -3818,7 +3824,7 @@ export async function runAjouterTests({ eq, ok }) {
     // `window` — un `window.__x` resté `undefined` ne prouve rien de plus que le compte d'<img>, et laisse une
     // trace globale derrière le test. Le contrôle positif est que le texte est bien là, affiché tel quel.
     const hostile = '<img src=x onerror="void 0">';
-    const n1 = renderGrille({ cartes: [{ action: 'pages', ico: 'x', titre: hostile, sousTitre: hostile }] }, { pages: () => {} });
+    const n1 = renderGrille({ cartes: [{ action: 'pages', ico: 'appareil-photo', titre: hostile, sousTitre: hostile }] }, { pages: () => {} }); // lot Carnet T5 : ico = un nom d'icône (icone(nom) lève sur un inconnu)
     const n2 = renderPuces(pucesModel({ choisies: [hostile] }), {});
     const n3 = S.renderSignet({ ...S.signetModel({ adresse: 'https://a.test/', titre: hostile }), livres: [] }, {});
     eq([n1.querySelectorAll('img').length, n2.querySelectorAll('img').length, n3.querySelectorAll('img').length], [0, 0, 0], 'statique : une chaîne hostile ne crée aucun élément (S14)');

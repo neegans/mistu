@@ -20,7 +20,7 @@ export const EN = {
   '{n} écartée(s) par une restriction alimentaire — jamais assouplie.': '{n} excluded by a dietary restriction — never relaxed.', '{n} écartée(s) par la durée.': '{n} excluded by duration.',
   'Allonger à {n} min': 'Extend to {n} min', 'Tout type de recette': 'Any recipe type', 'Inclure les références de mes livres': 'Include references from my books', 'Scanner une recette': 'Scan a recipe',
   'Avec quoi on mange ça ?': 'What goes with this?', 'Retour au plat': 'Back to the dish', 'Pourquoi cet accord ?': 'Why this pairing?', 'Ajouter à mon repas': 'Add to my meal', 'Durée inconnue': 'Unknown duration',
-  'Livres': 'Books', 'Plats': 'Dishes', 'Aucun livre pour l’instant.': 'No books yet.', 'Ajouter un livre': 'Add a book', '{n} disponible(s)': '{n} available', '{n} repérée(s)': '{n} spotted', 'Aucune recette indexée': 'No recipe indexed',
+  'Livres': 'Books', 'Plats': 'Dishes', 'Aucun livre pour l’instant.': 'No books yet.', 'Ajouter un livre': 'Add a book', '{n} disponible(s)': '{n} available', 'Aucune recette indexée': 'No recipe indexed',
   'Nouveau plat': 'New dish', '{n} recette(s) dans {m} livre(s)': '{n} recipe(s) in {m} book(s)', '{n} à confirmer': '{n} to confirm', 'Rapprochements proposés': 'Proposed matches', 'Confirmer': 'Confirm', 'Refuser': 'Refuse',
   'Photographier des pages': 'Photograph pages', 'Choisir des photos ou un PDF': 'Choose photos or a PDF', 'Saisir une recette': 'Type a recipe', 'Ajouter un lot au congélateur': 'Add a freezer batch',
   'Image très légère : possiblement floue ou trop petite': 'Very light image: possibly blurry or too small',
@@ -775,4 +775,12 @@ export const EN = {
   'Ajouter des recettes': 'Add recipes', 'Ajouter des pages de sommaire': 'Add table-of-contents pages', 'Sommaire': 'Table of contents', 'Reprendre la séance': 'Resume the session',
   'Les recettes de ce livre': 'The recipes in this book', '{n} disponible(s) · {m} à importer': '{n} available · {m} to import', 'Voir les {n} recettes': 'Show all {n} recipes',
   'Disponibles': 'Available',
+  // Lot UI-1 « Carnet » (spec experience-carnet § 5), tâche 5 : libellés courts d'availabilityBadge et de STATE_LABELS, sous-titre d'Aujourd'hui, légende d'une
+  // vignette de l'import ciblé, compteur de la grille Livres. « À importer » → « To import » est déjà là (T2) : UNE clé, jamais redoublée.
+  "À importer · p. {p}": "To import · p. {p}",
+  "Disponible": "Available",
+  "Partielle": "Partial",
+  "Cherche une recette, un ingrédient, une envie.": "Search a recipe, an ingredient, a craving.",
+  "Page {n} · p. {p}": "Page {n} · p. {p}",
+  "{n} à importer": "{n} to import",
 };

@@ -1,4 +1,8 @@
 // Aujourd'hui : recherche, reprendre ma recette, Redécouvrir, favoris, dernières cuissons, ingrédients à utiliser (spec §17).
+// Lot UI-1 « Carnet » (spec experience-carnet § 4.4, D-UI-5, D-UI-8) : pageHeader au-dessus de la barre (sur le papier, hors de toute carte), les puces
+// d'exemple sous la barre ; « Favoris » et « Dernières cuissons » en grille de cartes-plat — UNE passe repo.getFiles sur les empreintes des cartes
+// rendues, la carte ne lit rien elle-même (I-UI-5) ; la date et « Refaire comme la dernière fois » HORS du <a> de la carte (H-16) ; « Reprendre ma
+// recette » et « À utiliser en priorité » en sectionPlain ; Redécouvrir (rediscoverCard) et « Bienvenue » ne changent que par le thème.
 import { el, formatDate } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { navigate, buildQuery, refresh } from '../core/router.js';
@@ -6,23 +10,26 @@ import * as repo from '../model/repo.js';
 import { emit } from '../core/bus.js';
 import { pickSuggestion, snoozeUntil } from '../domain/rediscover.js';
 import { parseQuery } from '../domain/search.js';
-import { recipeCard, section, emptyState, availabilityBadge, provenanceText } from './components.js';
+import { pointeurValide } from '../domain/photo-web.js';
+import { recipeCard, section, sectionPlain, grilleCartes, pageHeader, emptyState, availabilityBadge, provenanceText } from './components.js';
 
-export async function renderHome(params, query, ctx) {
+// `deps.repo` : le sac injecté des routes (la suite y compte la passe getFiles) ; l'app ne passe rien (route('/', renderHome) : trois arguments) et le
+// module sert.
+export async function renderHome(params, query, ctx, { repo: depot = repo } = {}) {
   const root = el('div', null);
   const input = el('input', { type: 'search', placeholder: t('Qu’est-ce qu’on cuisine ?'), 'aria-label': t('Recherche'), enterkeyhint: 'search' });
   const go = () => { if (input.value.trim()) navigate('/search' + buildQuery({ q: input.value.trim(), mode: 'all' })); else navigate('/search'); };
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
-  root.append(el('div', { class: 'card sage' },
-    el('h1', null, t('Qu’est-ce qu’on cuisine ?')),
-    el('div', { class: 'search-bar' }, input, el('button', { class: 'btn primary', onClick: go }, t('Chercher'))),
-    el('div', { class: 'chips', style: { marginTop: '.6rem' } },
-      ...['saumon fenouil', 'salade concombre sans gluten 15 minutes', 'soupe rapide', 'puttanesca'].map((ex) => el('span', { class: 'chip clickable', onClick: () => { input.value = ex; go(); } }, ex)))));
+  root.append(pageHeader(t('Qu’est-ce qu’on cuisine ?'), { subtitle: t('Cherche une recette, un ingrédient, une envie.') }),
+    el('div', { class: 'recherche-accueil stack' },
+      el('div', { class: 'search-bar' }, input, el('button', { class: 'btn primary', onClick: go }, t('Chercher'))),
+      el('div', { class: 'chips' },
+        ...['saumon fenouil', 'salade concombre sans gluten 15 minutes', 'soupe rapide', 'puttanesca'].map((ex) => el('span', { class: 'chip clickable', onClick: () => { input.value = ex; go(); } }, ex)))));
 
   // Reprendre ma recette
   const active = ctx.cook_sessions.filter((s) => s.status === 'active').sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
   if (active.length) {
-    root.append(section(t('Reprendre ma recette'), ...active.slice(0, 3).map((s) => {
+    root.append(sectionPlain(t('Reprendre ma recette'), ...active.slice(0, 3).map((s) => {
       const doc = ctx.docsByRecipe.get(s.recipe_id);
       const total = s.progress?.total_steps || doc?.version?.steps?.length || 0;
       const done = s.progress?.done_step_ids?.length || 0;
@@ -35,27 +42,29 @@ export async function renderHome(params, query, ctx) {
   // Redécouvrir
   if (ctx.settings.rediscover_enabled) root.append(await rediscoverCard(ctx, query));
 
-  // Favoris
+  // Favoris et Dernières cuissons (D-UI-5, F-3) : les docs à rendre d'abord, puis UNE lecture groupée des lignes files de leurs photos — la carte-plat
+  // reçoit sa ligne et décide au rendu (I-UI-5) ; sans empreinte, aucune lecture. Un pointeur qui n'est pas une empreinte (pointeurValide, comme la
+  // bibliothèque et la fiche livre) n'est ni lu ni passé. Les URL blob: sont celles d'urlDeBlob : révoquées au changement de route (D-T9).
   const favs = ctx.docs.filter((d) => d.recipe.favorite).slice(0, 6);
-  if (favs.length) root.append(section(t('Favoris'), ...favs.map((d) => recipeCard(d))));
+  const recent = [...ctx.cook_history].sort((a, b) => (b.cooked_at || '').localeCompare(a.cooked_at || '')).slice(0, 4)
+    .map((h) => ({ h, doc: ctx.docsByRecipe.get(h.recipe_id) })).filter((x) => x.doc); // une cuisson d'une fiche inconnue n'est pas rendue (comme avant)
+  const empreintes = [...new Set([...favs, ...recent.map((x) => x.doc)].filter((d) => pointeurValide(d.recipe)).map((d) => d.recipe.photo_sha256))];
+  const fichiers = empreintes.length ? await depot.getFiles(empreintes) : new Map();
+  const cartePlat = (d) => recipeCard(d, { photoEnTete: true, fichier: fichiers.get(d.recipe.photo_sha256) ?? null }); // la Map ne tient que des empreintes valides
+  if (favs.length) root.append(sectionPlain(t('Favoris'), grilleCartes(favs.map(cartePlat))));
 
-  // Dernières cuissons → Refaire comme la dernière fois
-  const recent = [...ctx.cook_history].sort((a, b) => (b.cooked_at || '').localeCompare(a.cooked_at || '')).slice(0, 4);
+  // Dernières cuissons → Refaire comme la dernière fois : la date et le bouton HORS du <a> de la carte, sous elle, dans la cellule de grille (§ 4.4, H-16).
   if (recent.length) {
-    root.append(section(t('Dernières cuissons'), el('ul', { class: 'list' }, ...recent.map((h) => {
-      const doc = ctx.docsByRecipe.get(h.recipe_id);
-      if (!doc) return null;
-      return el('li', { class: 'row between' },
-        el('div', null, el('a', { href: `#/recipes/${h.recipe_id}` }, el('strong', null, doc.recipe.display_title || doc.recipe.original_title)),
-          el('div', { class: 'muted', style: { fontSize: '.85rem' } }, `${formatDate(h.cooked_at)}${h.rating ? ` · ${'★'.repeat(h.rating)}` : ''}${h.redo === false ? ` · ${t('à ne pas refaire')}` : ''}`)),
-        el('a', { class: 'btn small', href: `#/recipes/${h.recipe_id}${buildQuery({ v: h.recipe_version_id, servings: h.servings || '' })}` }, t('Refaire comme la dernière fois')));
-    }))));
+    root.append(sectionPlain(t('Dernières cuissons'), grilleCartes(recent.map(({ h, doc }) => el('div', { class: 'cellule-cuisson' },
+      cartePlat(doc),
+      el('div', { class: 'muted cuisson-date' }, `${formatDate(h.cooked_at)}${h.rating ? ` · ${'★'.repeat(h.rating)}` : ''}${h.redo === false ? ` · ${t('à ne pas refaire')}` : ''}`),
+      el('a', { class: 'btn small', href: `#/recipes/${h.recipe_id}${buildQuery({ v: h.recipe_version_id, servings: h.servings || '' })}` }, t('Refaire comme la dernière fois')))))));
   }
 
   // Ingrédients à utiliser (inventaire)
   const soon = ctx.inventory.filter((i) => i.use_by && (Date.parse(i.use_by) - Date.now()) < 4 * 86400000).sort((a, b) => a.use_by.localeCompare(b.use_by)).slice(0, 5);
   if (soon.length) {
-    root.append(section(t('À utiliser en priorité'), el('ul', { class: 'list' }, ...soon.map((i) => el('li', { class: 'row between' },
+    root.append(sectionPlain(t('À utiliser en priorité'), el('ul', { class: 'list' }, ...soon.map((i) => el('li', { class: 'row between' },
       el('span', null, `${i.label}${i.quantity_text ? ` — ${i.quantity_text}` : ''}`),
       el('span', { class: `chip ${Date.parse(i.use_by) < Date.now() ? 'danger' : 'warn'}` }, `${t('à consommer avant le')} ${formatDate(i.use_by)}`)))),
       el('a', { class: 'btn small', href: '#/kitchen?tab=inventory' }, t('Voir l’inventaire'))));

@@ -24,7 +24,7 @@ export function t(fr, vars = null) {
 // Libellés des états du schéma.
 const STATE_LABELS = {
   availability: {
-    reference_only: 'Repérée dans ton livre',
+    reference_only: 'À importer', // lot UI-1 « Carnet » (D-UI-10) : libellé d'affichage ; le badge porte ses textes courts, la fiche garde « Repérée dans ton livre — page {p} »
     partial: 'Partiellement disponible',
     available: 'Recette disponible',
   },
