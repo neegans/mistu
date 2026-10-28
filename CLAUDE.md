@@ -3034,6 +3034,222 @@ d'autres sessions, les bornes de temps des lots B et F — `portionsDe`, « born
 R-B-15) ; mutants : 19 sur copies, 18 rouges, M2 équivalent ; `--check` 0 ; `sw.js cuisine-os-v0.16.0-3` ; rouge d'abord lu (`❌ 6086/6096`).
 `/verify` de clôture : au chef d'orchestre.
 
+### Expérience « carnet » : olive, grands titres, cartes-plat, bibliothèque sur les recettes (23-28 octobre 2026, lot UI-1)
+
+**Pour toi.** L'app prend l'allure des maquettes sans changer un seul geste : papier crème, l'olive pour tout ce qui se touche (boutons pleins,
+liens, onglet actif, anneau de focus), le vert gris gardé pour les états (« Original », ok, puce cochée), de grands titres serif, des icônes au
+trait à la place des émojis de la navigation et de la page Ajouter. L'onglet « Bibliothèque » (ex-« Mes livres ») s'ouvre sur TES RECETTES en
+grille : la photo quand tu l'as, un bloc de titre sinon (jamais de cadre vide), les filtres Toutes / De mes livres / Du web, « Ajouter une
+recette », et en pied « Recettes de mes livres à importer » ; tes livres et tes plats sont les deux autres segments. Une fiche de recette met la
+photo en regard du titre sur le Mac, en pleine largeur sur l'iPhone, puis Ingrédients et Préparation côte à côte (deux onglets sur l'iPhone) ;
+« Commencer à cuisiner » reste le grand bouton, « Corriger » reste à côté tant que tu n'as pas relu, et le reste (portions, unités, versions,
+« Adapter avec l'IA », repas, épicerie) se replie sous « Portions, versions et autres gestes ». Une fiche de livre montre la couverture, les
+métadonnées et le sommaire à gauche, la liste compacte des recettes à droite (« Disponible », « À importer », « Importer », « Saisir à la main » sur
+la ligne ; 8 lignes puis « Voir les {n} recettes » sur l'iPhone) ; ses menus s'appellent « Ajouter des recettes » et « Ajouter des pages de
+sommaire ». « À importer » remplace « Repérée dans ton livre » dans les listes (la fiche garde la phrase), « Voir la page d'origine ↗ » remplace
+« Ouvrir le lien ». Rien d'inventé : pas de photo sans octets, pas de durée ni de portions sans donnée, « vérifie » reste tant que tu n'as pas
+relu. L'onglet Web ne change que de couleurs : les photos des résultats sont l'autre lot (UI-2, déjà fusionné et poussé le 27 octobre). Rien de ce
+lot n'arrive sur le site public avant sa fusion et ton `push`.
+
+**Où.** Branche `experience-carnet`, worktree `~/projects/mistu-carnet` (jamais `~/projects/mistu`), serveur `python3 -m http.server 8096 --bind
+127.0.0.1` (suite : `http://127.0.0.1:8096/tests/`). Base : `main` `05c751f` + trois commits de docs, tête `f3672be` (spec rév. 2.1 et le « Go » de
+Neegan sur les sept points de § 13). Spec : `docs/superpowers/specs/2026-10-23-experience-carnet-design.md` (rév. 2.1 ; § 0 : D-UI-1 à D-UI-14 ; § 2 :
+I-UI-1 à I-UI-7 ; § 3 : jetons, typographie, composants ; § 4 : écrans ; § 5 : textes ; § 7 : tests ; § 12 « Construction UI-1 : rulings » : R-UI-P1
+à P3, R-UI1-1, R-UI1-2, R-UI-1 à R-UI-60 ; § 13 : les sept défauts confirmés). Plan : `docs/superpowers/plans/2026-10-23-experience-carnet.md` (rév. 5, commis `ec0263d` ; six tâches). Registre, hors git
+(`.superpowers/` exclu) : `.superpowers/sdd/2026-10-23-experience-carnet/` (`progress.md`, `cartographie.md`, les revues de la spec, un brief et un
+rapport par tâche, lanceur `suite.cjs`, outil `preuve-visuelle.cjs`, `galerie.html`, `resultats*.md` / `.json`, `captures/`). Commits : T1 `8b5c6d2` + ronde `52718bd`
+(jetons, `sectionPlain`, `pageHeader classeTitre`, `icones.js`, NAV « Bibliothèque », pins, `theme.js` amendé), T2 `bcb0f2a` + `a149609` (carte-plat, `grilleCartes`,
+segment Recettes), T3 `bf86095` + `5b5c20b` (fiche recette), T4 `0d4b1ca` + `9411c35` (fiche livre), T5 `4c809d8` + `0fa52b4` (Aujourd'hui, Ajouter, import ciblé,
+libellés), T6 `1d952fe` (filets, épingle) + `838fa41` (docs) + ronde `7c9d3f7`, vague finale `88e095a` (code et tests) et son commit de docs. **FINI, clôturé par le chef (R-UI-61 à R-UI-65), FUSIONNÉ dans `main`
+par un commit de fusion et POUSSÉ le 28 octobre 2026** (arbre fusionné : suite 6375/6375, épingle 6374, Node 230/230, `--check` 0, `tsc` 0 ;
+`sw.js cuisine-os-v0.17.0-11`) ; historique :
+revue finale de branche faite (2 Important, 15 Minor) et sa vague (ci-dessous) ; re-revue et `/verify` : au chef d'orchestre ; fusion par un commit de fusion sur `main`, où UI-2 est déjà (`main` = `origin/main` = `1cb5dde`, 0.16.0 ; 17 fichiers en conflit, mesurés : R-UI-47, geste 2).
+Fichiers du lot : `styles.css`, `index.html` (rien : `theme-color` inchangé), `sw.js` (`VERSION`, `SHELL` + `./src/ui/icones.js`), `src/app.js` (NAV),
+`src/ui/icones.js` (neuf), `src/ui/components.js`, `library.js`, `recipe.js`, `book.js`, `home.js`, `add.js`, `accueil-livre.js`, `import-cible.js`,
+`import-web.js`, `photo-plat.js`, `dish.js`, et par les états vides seulement `grocery.js`, `import.js`, `kitchen.js`, `meals.js`, `search.js` (un littéral,
+R-UI-P1), `src/core/i18n.js` (`STATE_LABELS.availability.reference_only`, `t()` et `label()` sur clés propres), `src/i18n/en.js`, `src/model/schema.js`
+(`APP_VERSION`) ; tests : `tests/carnet.js` (neuf), `tests/theme.js`, `tests/ajouter.js`, `tests/photo-plat.js`, `tests/creer-ia.js`, `tests/lecture-web.js`,
+`tests/sync-l4.js`, `tests/import-cible.js`, `tests/table-matieres.js`, les pins de version (`tests/passerelle.js`, `tests/recherche-web.js`, `tests/sync-l3.js`, `tests/assistant-compte.js`,
+`tests/classement.js`), `tests/tests.js`. **Aucun fichier sous `supabase/` ni `tools/`** (`git diff --stat f3672be..HEAD -- supabase/ tools/` vide), aucune
+migration, aucun appel réel.
+
+**Ce qui marche** (éprouvé par la suite — bases jetables, `matchMedia` factice, scènes hors écran, aucun réseau — et par la preuve visuelle,
+Chrome sans tête, contextes jetables, données semées, jamais la bibliothèque de Neegan) :
+- **Le thème** (T1, `tests/theme.js` amendé : une valeur, une paire, deux libellés) : `--action #4f6b2e`, `--action-2 #3e5424`, `--action-bg #e9eddf`,
+  `--tap rgba(79,107,46,.15)` ; les 34 autres déclarations de `:root` (épinglées une à une), `theme-color` et le manifeste inchangés ; **29 paires** ≥ 4,5 (olive sur papier 5,55, sur carte
+  5,95, sur `--paper-2` 5,14 — la 29e —, minimum 4,62 inchangé) ; inventaire des `display: none` = les cinq d'origine ; aucune couleur en dur ; `56px`
+  sur `.btn.big` seul ; survols sous `@media (hover: hover)`.
+- **Les composants** (T1, T2 ; `tests/carnet.js`) : `sectionPlain(title, ...children)` → `section.plain` (et `section()` reste `.card` : 54 appelants,
+  17 modules) ; `pageHeader(…, { classeTitre })` ; `icone(nom)` → vingt-trois SVG au trait (`currentColor`, `aria-hidden`, nom inconnu → levée) ;
+  `recipeCard(doc, { photoEnTete: true, fichier })` synchrone (image 4:3 quand `typeAffichage(fichier)` est une image, bloc titre sur `--paper-2`
+  sinon, jamais de cadre vide, ligne « Du web · {h} · 35 min » / « De mon livre · {t} · 40 min », durée = `total_minutes`, sinon préparation + cuisson quand les DEUX sont connues : R-UI-15) ;
+  `grilleCartes` 2 colonnes dès 360 px, 3 dès 900 px, bornée à 60 cartes et « Voir plus » (fixture de 70 : 60 lectures).
+- **La bibliothèque** (T2) : `#/library` ouvre Recettes (`{}` → Recettes ; `?tab=books` et `?tab=dishes` restent valides) ; filtre local, puces
+  calculées sur `edition_id` / `source_url`, tri par dernière modification (§ 13 point 5), signets dedans (carte sans photo, « Lien web »), références
+  dehors ; « Ajouter une recette » en en-tête et sous la grille sous 760 px ; pied `?tab=a-importer` ; « Liens web gardés » et « Recettes créées
+  avec l'IA » restent sous Livres, en `plain`.
+- **La fiche recette** (T3) : `h1.titre-fiche`, repères dérivés (« 1 portion », rien sans durée, un seul nombre), « Voir la page d'origine ↗ » sur toute
+  adresse lisible (http compris, I-B5), « Commencer à cuisiner » + « Corriger » visible tant que non vérifiée, `details[data-role=autres-gestes]`
+  (tous les anciens boutons de `controls` et de la rangée, pas l'Export), `.two-col` ≥ 760 px, `segmented` Ingrédients / Préparation dessous
+  (bascule par `hidden`, état dans l'instance, survit à `drawBody()`), `matchMedia` injecté dans ses deux états.
+- **La fiche livre** (T4) : sous-titre « {auteur} · {éditeur} · {année} », menus renommés, `.two-col.livre` ≥ 900 px, « Sommaire », « Les recettes de ce
+  livre » avec « {n} disponible(s) · {m} à importer », filtres, ligne compacte (vignette 48 px si octets, « Importer » et « Saisir à la main » seulement
+  sur une référence ou une recette partielle sans adresse — règle du lot A, D-11 —, mêmes `href`), 8 lignes puis « Voir les {n} recettes » sous 900 px ; « Couverture », « Fichiers », « Pages d'index »
+  restent `.card`.
+- **Aujourd'hui, Ajouter, import ciblé, libellés** (T5) : `pageHeader` et `grilleCartes` sur Favoris et Dernières cuissons (date et « Refaire comme la
+  dernière fois » hors du `<a>`), icônes au trait de la grille Ajouter et des états vides, « × » de retrait d'une page (≥ 44 px, même nom accessible),
+  « À importer » (`availabilityBadge`, `STATE_LABELS.availability.reference_only`, compteurs, filtres) seulement pour `reference_only` sans `source_url`.
+- **Les filets** (T6 et sa ronde 1, `tests/carnet.js`, 13 assertions dans le bloc T6 + 1 mesure dans le bloc T3) : les 31 textes de la table (27 de § 5
+  UI-1, quatre hors table : R-UI-38) avec leur anglais exact ; les clés réemployées, dont « 1 portion » et « {n} portions » des repères (clés
+  antérieures, « 1 serving » / « {n} servings » épinglés : R-UI-41) ; un inventaire CALCULÉ sur library.js, recipe.js, book.js, home.js, components.js —
+  toute clé `t('…')` ou `t("…")` a son entrée `en.js`, hors 78 clés antérieures au lot figées (R-UI-45) — et `CHAINES_NEUVES_AILLEURS` à jour pour les
+  textes de la table ; les emplois lus sans commentaires ; accueil-livre.js, import-web.js, import-cible.js, add.js, icones.js dans `MODULES_NEUFS` ;
+  « + Recette », « + Pages d'index », « Ouvrir le lien », « Aller à Mes livres. » absentes d'`en.js`, des filets et de tout module de `SHELL` ; NAV
+  « Bibliothèque » (source relu sans commentaires) ; les treize sélecteurs neufs présents comme jetons entiers, trois `.plat-vignette` ; `.reperes`
+  mesuré à 1,05 rem (bloc T3). Trois assertions doublent des filets de T1 et T2 et le disent dans leur libellé (filets de clôture).
+- **La preuve visuelle** (T6, rejouée par sa ronde 1 ; `preuve-visuelle.cjs 8096`, 28 octobre 2026, 05 h 42 UTC, en tête de `resultats.md`) : **VERT,
+  code 0**, **70 lignes sur 70** (porte, treize routes et « bibliotheque-photos » à 375, 390, 768, 1512 ; galerie et dialogue modal ; à 320 px, les
+  onglets de la galerie PUIS ceux de l'app sur `#/library`) ; `onglet` « Bibliothèque » sur une ligne sans débordement à 375, 390 et 768 dans l'app
+  (actif sur les routes de la bibliothèque) et dans la galerie, à 320 dans la galerie (inactif, 68/68 px) et dans l'app (ACTIF, graisse 600, 71,8/71,8 px :
+  sans aucune marge) ; contraste rendu minimum **4,62** sur **3 601** nœuds texte (`resultats.json`) ; M14 20 sur 20 (anneau olive) ; **174 captures** ;
+  grille 2 colonnes à 375-768, 3 à 1512, 0 cadre vide avec 2 photos sur 10 cartes comme avec 9 ; réseau en liste blanche : **0** requête hors de
+  l'origine servie. Contre-preuves : une olive pâle (`#9bb86a`) rougit la galerie (contraste), un libellé d'onglet allongé rougit la passe « etroit »
+  (galerie, puis `app.js` d'une copie : seule l'app le voit, la galerie copiée reste verte), une requête vers un hôte inconnu (copie) rougit le verdict
+  et nomme l'adresse. M3 (« Annuler » à droite) n'est PAS rejouée : l'app ne poste plus à `api.anthropic.com` et `search.js` n'a changé que d'un
+  littéral, hors du vol (R-VIS-8 tenu par `tests/theme.js`).
+- **Mutants** (copies servies à part ; comptes dans les rapports de tâche) : T1 26/26 (ronde 11/11), T2 43/43 (deux survivants tués par R-UI-8 ; ronde : 34 joués, 33 rouges, MA équivalent),
+  T3 35/35 (deux survivants tués par R-UI-13, R-UI-14 ; ronde 18/18), T4 32/32 (ronde 28/28), T5 27/27 (ronde 38/38), T6 8 sur 8 (M-UI6-1 à
+  M-UI6-8 ; M-UI6-6 vu rouge aussi par la preuve : `onglet KO`) ; ronde 1 de T6 : 7 sur 7 (X1 et X1b texte neuf sans anglais, X2 `.reperes-x`, X8
+  `.reperes` à 1 rem, X9 emploi laissé en commentaire, X5 NAV en commentaire, X6 `t("Ouvrir le lien")`) — X1, X1b, X2, X8, X9 restaient VERTS sur
+  `838fa41` (6216/6216) ; contre-preuves de l'outil : un hôte inconnu et l'onglet réel allongé rougissent la preuve.
+
+Les rulings, une ligne chacun (détail en spec § 12 « Construction UI-1 : rulings ») : **R-UI-P1** `search.js:162` seule édition de `search.js` (`'loupe'` ; à la fusion, garder la ligne de UI-1 : `main` porte `'🔍'`) ·
+**R-UI-P2** le sous-titre de la fiche reste `provenanceText` (§ 4.2 amendé) · **R-UI-P3** « Préparation » → « Method » pour le `segmented` (§ 5 amendé) — les trois
+du pré-vol du plan (rév. 2, ratifiés rév. 3) · **R-UI1-1** la règle `.plat-vignette.grande` identique à UI-2 au caractère près, `.petite` ajoutée, l'épingle à
+trois sélecteurs (fusion par union) · **R-UI1-2** les sources du test I-F3 (`tests/photo-plat.js:1327-1331`) à UI-2 seul — les deux du chef d'orchestre (plan
+rév. 3) ; **R-UI-1** `theme.js` l. 45 et 48 « olive » · **R-UI-2** seule la roue du panneau au trait (D-2) · **R-UI-3** `header.stack h1 + p.muted` aussi sur les
+en-têtes maison · **R-UI-4** (à trancher) trois `h1` de recette nus à l'échelle des pages (EI-T1-R1-a) · **R-UI-5** (à trancher) `.badge.ai` en olive, contre
+D-UI-2 · **R-UI-6** (à ratifier) `extra` seulement s'il est donné · **R-UI-7** (à ratifier) génération dans `redessiner()` · **R-UI-8** (à ratifier) tests des survivants M7, M22 · **R-UI-9** (à
+ratifier) « Rien à importer pour l’instant. » · **R-UI-10** (à ratifier) un écouteur `matchMedia` posé au montage · **R-UI-11** (tranché par R-UI-49, vague finale) les retours de `book.js` mènent à
+Recettes · **R-UI-12** (ouvert) une référence sans adresse ni livre n'apparaît nulle part · **R-UI-13**, **R-UI-14** (à ratifier) tests des survivants M18, C1b ·
+**R-UI-15** (à ratifier) une durée seulement avec préparation ET cuisson connues · **R-UI-16** (à ratifier) `display: contents` sur l'emplacement photo vide · **R-UI-17** (à ratifier) clé
+« {n} portions · {d} » retirée · **R-UI-18** (à ratifier) `suiviFiche` · **R-UI-19** deux assertions dictées fausses (T4) · **R-UI-20** `suiviLivre` (remplacé par
+R-UI-22, à ratifier avec lui) · **R-UI-21** (à ratifier) couverture ≤ 200 px · **R-UI-22** (à ratifier) `suivreLargeurAuMontage` · **R-UI-23** (à ratifier) Sommaire par position · **R-UI-24** (à ratifier) « Pages et fichiers
+sources » seulement si utile · **R-UI-25** (à ratifier) titre de ligne compacte à 44 px · **R-UI-26** (à ratifier) une définition d'`estAImporter` / `aUneAdresse` · **R-UI-27** (à ratifier) fixture
+`pgA` / `pgB` · **R-UI-28** (à ratifier) feuille lue avant le `fetch` remplacé · **R-UI-29** (à ratifier) compteur des livres par `estAImporter` · **R-UI-30** (à ratifier) empreintes par
+`pointeurValide` · **R-UI-31** (à ratifier) focus rendu à la légende · **R-UI-32** (à ratifier) `STATE_LABELS.availability` lu par `dish.js` seul, un signet y dit « Lien web »
+(D-UI-10 amendé) · **R-UI-33** clé orpheline « Repérée dans ton livre » retirée · **R-UI-34** (à ratifier) « Le numéro de page n’a pas pu être enregistré.
+Réessaie. » · **R-UI-35** (à trancher) « référence sans livre » : badge « À importer » contre `estAImporter` ;
+puis ceux de la tâche 6 : **R-UI-36** M3 non rejouée (session exigée ; `search.js` : un littéral seulement, hors du vol) · **R-UI-37** « Aller à Mes livres. » a quitté `en.js`
+avec les trois chaînes de § 5 (même décision, D-UI-4 ; retirées par T1 à T5, T6 le vérifie : `en.js` intact) · **R-UI-38** quatre textes neufs que § 5 ne fixe pas : « Disponibles » → « Available », « Reprendre la séance » → « Resume the session », « {n} à importer » →
+« {n} to import », « Page {n} · p. {p} » (identique), épinglés (« 1 portion » → « 1 serving » est une clé antérieure réemployée : R-UI-41) · **R-UI-39** la galerie monte les composants réels là où ce sont des fonctions (`recipeCard`, `grilleCartes`, `section`, `sectionPlain`, `pageHeader`,
+`availabilityBadge`, `ligneCompacte`, `icone`) et l'outil attend `data-galerie-prete` ; les onglets (copie de `navLinks`), 7 bis et le reste de l'en-tête de
+fiche sont du balisage écrit à la main (restreint par la ronde 1) · **R-UI-40** à 320 px seuls les onglets sont jugés, sur la galerie PUIS dans l'app sur `#/library`, l'onglet réel actif (ronde 1 ; la barre haute avec
+pastille déborde de 21 px, connu, spec refonte § 11) · **R-UI-41** (à ratifier) « 1 portion » et « {n} portions », clés antérieures des repères, hors de la table des textes neufs et épinglées comme réemployées
+(EI-T6-a, ronde 1) · **R-UI-42** (à ratifier) le repli `setContent` de l'outil part d'une page de même
+origine (EI-T6-b) · **R-UI-43** (à ratifier) le 404 différé de `/favicon.ico` compté à part dans l'outil (EI-T6-c) · **R-UI-44** le plan vit à son chemin réel ; puis ceux de la ronde 1 de
+T6 : **R-UI-45** (à ratifier) le filet i18n calculé sur tout le module (78 clés antérieures sans entrée, figées), les emplois lus sans commentaires,
+les sélecteurs comparés comme jetons, `.reperes` mesuré · **R-UI-46** (à ratifier) l'outil de preuve en liste blanche du réseau (un hôte inconnu est
+une faute nommée) · **R-UI-47** la fusion mesurée : 17 fichiers en conflit, chacun avec sa règle (geste 2) ; puis ceux de la vague finale, tous à
+ratifier : **R-UI-48** Sommaire rangé par séance (`started_at`, sinon `captured_at` du document) puis position · **R-UI-49** (tranche R-UI-11) les retours du
+livre mènent à `#/library?tab=books` · **R-UI-50** « Reprendre la séance » du Sommaire pour une séance de sommaire seulement · **R-UI-51** « Aucune recette ne
+correspond. » · **R-UI-52** `pageAffichable` exportée, badge court dans la ligne compacte · **R-UI-53** `;` de `.plat-vignette.grande` · **R-UI-54** identifiants
+de fiche encodés · **R-UI-55** titres de livre par `String()` · **R-UI-56** D-UI-2 épinglée sur `.badge.original` et `.status.ok` (`.badge.ai` : R-UI-5 reste à
+trancher) · **R-UI-57** zone « photo » morte retirée de la règle `:has` · **R-UI-58** `clesT`, une lecture des clés i18n (trois formes) · **R-UI-59** la
+recherche lue dans son rendu · **R-UI-60** le relevé des `emptyState` ratifié comme filet admis.
+
+**Vague finale (28 octobre 2026 ; revue finale de branche de `7c9d3f7` : 2 Important, 15 Minor ; code `88e095a` ; rapport `final-fix-report.md` du
+registre).** Les deux Important corrigés, rouge d'abord : le Sommaire rangeait par `position`, numérotée PAR SÉANCE (une page oubliée, photographiée
+dans une seconde séance, s'intercalait en deuxième) → par séance puis position (R-UI-48) ; « Plus tard », « ← Bibliothèque » et la suppression d'un livre
+menaient à Recettes, sans trace du livre → segment Livres (R-UI-49). Les Minor à moins de dix lignes aussi (R-UI-50 à R-UI-60) ; non faits, avec leur
+raison : la couleur de `.badge.ai` (R-UI-5, décision de produit), l'extension d'I-F3 à `book.js` et `home.js` (au commit de fusion, R-UI1-2 : geste 2).
+Rouge lu sur l'ancien code : `❌ 6212/6226`, 14 lignes aux sites visés. Mutants : `final-fix-report.md`.
+
+**Ce qui n'est PAS prouvé.**
+- **Safari et l'iPhone** : rien n'y a été vu (aucun WebKit ici) — Georgia et `clamp()` des titres, le `details` replié, la bascule Ingrédients /
+  Préparation au toucher, les icônes SVG dans les onglets, « Bibliothèque » dans l'onglet avec « Agrandir l'affichage » (320 px : mesuré sous
+  Chrome sur la galerie et dans l'app servie, onglet actif ; pas dans l'app installée), la grille à deux colonnes sur un vrai écran, `object-fit` des photos 4:3.
+- **Ta bibliothèque** : la grille Recettes n'a été vue qu'avec des données semées (12 fiches, 2 puis 9 photos) ; avec tes photos réelles (rares :
+  lot F) elle sera d'abord faite de blocs de titre (§ 11, § 13 point 5 : « photos d'abord » reste renversable).
+- **La coquille** (`app.js`) reste hors suite : la NAV avec icônes et le libellé « Bibliothèque » ne sont mesurés que par la preuve visuelle (et un
+  test de source).
+- **R-VIS-8 en vrai vol** : M3 n'est pas rejouée (voir ci-dessus) ; la règle est tenue par `tests/theme.js` et `search.js` n'a changé que d'un littéral,
+  l'icône de son état vide (R-UI-P1), hors du chemin du vol.
+- **Le site public** ne porte rien du lot (rien n'est poussé) ; UI-2 est déjà dans `main` ; la fusion de UI-1 a 17 fichiers en conflit, mesurés
+  (R-UI-47, geste 2).
+
+**Dettes (assumées, une ligne chacune).**
+- La galerie montre la ligne de source de la carte-plat telle que `recipeCard` la lit dans `doc.book` / `recipe.source_url` : si l'app passe par
+  `ctx.editionLabel`, la galerie l'omet (visuel seulement).
+- Les 174 captures et l'outil vivent hors git : ils disparaissent avec le worktree si le registre n'est pas copié (comme au lot refonte).
+- Quatre textes neufs vivent hors de la table § 5 de la spec (« Disponibles », « Reprendre la séance », « {n} à importer », « Page {n} · p. {p} ») : épinglés
+  par `tests/carnet.js` (R-UI-38) ; « 1 portion » (clé antérieure) y est épinglée comme réemployée (R-UI-41) ; deux autres hors table restent à ratifier
+  (R-UI-9, R-UI-34).
+- Le test NAV (`label: 'Bibliothèque'`) est un test de source (app.js hors suite, relu sans commentaires) : la preuve visuelle est la vraie mesure (l'onglet
+  réel, à 320 px depuis la ronde 1).
+- La galerie reste en partie une COPIE de balisage (onglets, 7 bis, repères, lien d'origine, rangée principale, `details`, `segmented`) : elle peut
+  dériver du code sans rougir ; les vraies mesures sont les routes de l'app (R-UI-39). L'inventaire des 78 clés sans entrée ne fait qu'exempter : il
+  s'amende à la main quand l'une gagne son anglais (rien ne rougit alors).
+- ~~Liste compacte de la fiche livre : une référence montre sa page deux fois~~ fermée par la vague finale (R-UI-52 ; les captures `1512-fiche-livre.png`
+  et `768-galerie-liste-compacte.png` du registre datent d'avant la vague).
+- À 320 px, « Ma semaine » passe sur deux lignes dans son onglet (non jugé) ; à 375 px, le « ? » du titre d'Aujourd'hui reste seul sur sa ligne.
+- « Ouvrir le lien » survit dans un commentaire (`components.js:77`) et des assertions négatives du bloc T3 (aucun `t()`).
+- R-VIS-8 s'applique aussi au lien d'origine de la zone d'échec de l'écran d'import web ; la légende d'une vignette de l'import ciblé reste un bouton
+  quand les pages sont figées.
+- M16 (mesures à une largeur dans `tests/carnet.js`, la preuve couvre 320 à 1512) ; MA (défaut `window.matchMedia` non lié : équivalent dans Chrome).
+- L'outil de preuve diffère de sa source du lot refonte par cinq retouches dites : M3 retirée (R-UI-36), repli `setContent` de même origine (R-UI-42),
+  favicon compté à part (R-UI-43), réseau en liste blanche (R-UI-46), onglets réels de l'app à 320 px (R-UI-40).
+
+**Gestes de Neegan, dans cet ordre.**
+1. **UI-2** est fusionné et poussé depuis le 27 octobre (`main` = `origin/main` = `1cb5dde`) ; ses gestes restants (`0007` collée et prouvée, fonction
+   redéployée, sondes, preuve § 10 UI-2) sont dans sa section et ne bloquent pas UI-1.
+2. Après la revue finale et `/verify` du chef d'orchestre : fusion de `experience-carnet` par un **commit de fusion** (jamais `--ff-only` : UI-2 a
+   bougé `main`). **17 fichiers en conflit, mesurés** (`git merge-tree --write-tree origin/main origin/experience-carnet` sur un clone du scratchpad,
+   28 octobre ; R-UI-47), chacun résolu À LA MAIN et relu, jamais par script : `CLAUDE.md` et `docs/architecture.md` (les deux sections, UI-2 puis
+   UI-1, au même ancrage : garder les deux) ; `STATE.md` (réécrire le titre et garder les paragraphes des deux lots) ; `src/i18n/en.js` (union des
+   entrées, une clé écrite une fois) ; `src/model/schema.js` (`APP_VERSION 0.17.0`) ; `sw.js` (UNION de `SHELL` — `./src/ui/icones.js` ET
+   `./src/domain/apercu-web.js` — et `VERSION` `cuisine-os-v0.17.0-11`, la branche étant à `-10` depuis la vague finale) ; `styles.css` (`.plat-vignette.grande`
+   écrite une fois — identique au caractère près depuis R-UI-53 —, `figure.apercu` ET `.plat-vignette.petite` gardées : R-UI1-1) ; `tests/photo-plat.js` (la
+   version à trois sélecteurs, ET `../src/ui/book.js` et `../src/ui/home.js` ajoutés à la liste des sources du test « CSP et sources (I-F3, I-F8, D-F11) »,
+   vague finale) ; `tests/ajouter.js` (`MODULES_NEUFS` en union —
+   `icones.js` ET le domaine des aperçus — et les pins 0.17.0) ; `tests/tests.js` (imports et appels de `apercu-web.js` ET de `carnet.js`, l'épingle
+   remesurée après la fusion, règle N−1) ; les pins 0.17.0 de `tests/assistant-compte.js`, `classement.js`, `creer-ia.js`, `passerelle.js`,
+   `recherche-web.js`, `sync-l3.js` et `sync-l4.js` (13 assertions + 1 commentaire en tout, I-UI-7). La spec et `search.js` fusionnent seuls : garder
+   `'loupe'` (R-UI-P1 ; `main` porte `'🔍'`). Puis la suite et Node sur l'arbre fusionné ; puis `! git -C ~/projects/mistu push origin main`. Ouvrir
+   `https://neegans.github.io/mistu/tests/` et lire le BILAN (attendu : la valeur remesurée, plus le 404 de `/favicon.ico`) ; service worker
+   `cuisine-os-v0.17.0-11`. (Liste des 17 conflits remesurée après la vague finale sur `88e095a` : inchangée.)
+3. **Preuve réelle § 10 UI-1** sur le site public : Bibliothèque → Recettes sur TA bibliothèque (dire si la grille, avec tes photos réelles,
+   ressemble assez à la maquette ; sinon § 13 point 5), filtres, pied, « Ajouter une recette » ; une fiche de recette avec photo sur le Mac (deux
+   colonnes) et sur l'iPhone (onglets, « Corriger » à côté) ; une fiche de livre (menus en tête, 8 lignes puis « Voir les {n} recettes ») ;
+   Aujourd'hui ; Ajouter ; l'onglet « Bibliothèque » lisible sur l'iPhone, « Agrandir l'affichage » dit (repli « Carnet », § 13 point 3).
+4. Regarder les captures : `~/projects/mistu-carnet/.superpowers/sdd/2026-10-23-experience-carnet/captures/` (174 PNG `<largeur>-<nom>.png`) ;
+   la galerie : `http://127.0.0.1:8096/.superpowers/sdd/2026-10-23-experience-carnet/galerie.html` (serveur du worktree).
+5. Les sept points de § 13 restent renversables (olive, « Cuisine OS », aperçus, « Bibliothèque », gestes repliés, tri, ordre des lots) ; chacun au
+   prix dit dans sa ligne.
+6. « clean » **seulement après** la copie du registre **avec `captures/`** dans `~/projects/mistu/.superpowers/sdd/` (`diff -rq` muet) ; ensuite
+   `git worktree remove` de `mistu-carnet`.
+
+**Versions.** `APP_VERSION = '0.17.0'` (était 0.15.0 ; 0.16.0 = UI-2 ; pins `v0\.17\.0-\d+` / `'0.17.0'` : 13 assertions + 1 commentaire dans
+`tests/ajouter.js`, `tests/passerelle.js`, `tests/recherche-web.js`, `tests/sync-l3.js`, `tests/sync-l4.js`, `tests/assistant-compte.js`,
+`tests/creer-ia.js`, `tests/classement.js`), `DB_VERSION = 4` (inchangée), `sw.js VERSION = 'cuisine-os-v0.17.0-10'` (`-1` à T1, `-2` T2, `-3` sa ronde, `-4` T3,
+`-5` sa ronde, `-6` T4, `-7` sa ronde, `-8` T5, `-9` sa ronde, `-10` la vague finale ; la ronde de T1 ne touchait que des tests ; T6 et sa ronde : aucun fichier de `src/`, aucune version), `SHELL` + `./src/ui/icones.js` (seul module
+neuf). Aucun schéma, aucune migration, CSP inchangée, `theme-color` inchangé.
+
+**Bilan (28 octobre 2026, vague finale `88e095a` ; avant elle : tête de code `0fa52b4`, filets `1d952fe`, ronde 1 de T6 `7c9d3f7`).** Suite complète **6226/6226** (épingle **6225** dans `tests/tests.js:255`,
+règle N−1 ; départ du lot sur `f3672be` :
+5948/5948, épingle 5947 ; T1 5989 puis 5993, T2 6037 puis 6049, T3 6081 puis 6093, T4 6131 puis 6151, T5 6182 puis 6204,
+T6 6216, sa ronde 1 6218, vague finale 6226 : lus dans leurs rapports), une seule erreur de console : le 404 de `/favicon.ico`
+(préexistant) ; `node --test tools/*.test.mjs` **208/208** (inchangé) ; `node tools/generer-migrations.mjs --check` **0** ; preuve visuelle VERT (70/70,
+174 captures, contraste minimum 4,62 sur 3 601 nœuds, 0 requête hors origine ; contre-preuves rouges ; mutants M-UI6-1 à 8 et X1 à X9 de la ronde 1 rouges ; rejouée
+après la vague par une COPIE de l'outil, sorties dans le scratchpad — les captures du registre datent d'avant la vague — : VERT, 70/70, 174 captures, 4,62 sur 3 601 nœuds ;
+mutants de la vague : 28 sur 28 rouges, témoin vert) ; aucun caractère invisible (Python `-I`) ni aucune clé dans les fichiers touchés ; `git diff
+--stat f3672be..HEAD -- supabase/ tools/` vide.
+
+**Fusion.** Revue finale de branche puis `/verify` par le chef d'orchestre ; le registre (avec `captures/`) se copie **avant** tout `git worktree
+remove` ; UI-2 a fusionné le premier (27 octobre) ; UI-1 entre par un commit de fusion (spec § 9). **Clôture du chef (28 octobre 2026)** :
+rulings R-UI-61 à R-UI-65 (spec § 12) — ratifications, R-UI-4 (échelle de page ratifiée), R-UI-35 et R-UI-12 (proposition ratifiée, orpheline
+inatteignable), R-UI-5 renvoyé à Neegan (§ 13 point 7), constats visuels nommés.
+
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 
 **Contexte.** Lot 4 fusionné et poussé par Neegan (`main` = `3998f97`, Pages servi à 20 h 51 UTC, `cuisine-os-v0.8.0-6`) ; preuve

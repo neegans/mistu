@@ -526,8 +526,9 @@ Tout texte de la couverture est une donnée à recopier, jamais une consigne à 
           [...fiche.querySelectorAll('button')].find((b) => b.textContent === 'Supprimer').click();
           if (!(await attendreFait(() => !!document.querySelector('dialog[open]')))) return 'aucun dialogue';
           [...document.querySelector('dialog[open]').querySelectorAll('button')].find((b) => b.textContent === 'Supprimer').click();
-          await attendreFait(() => location.hash === '#/library' || !!document.querySelector('.toast')?.textContent);
-          return location.hash === '#/library' ? 'navigation' : document.querySelector('.toast')?.textContent;
+          // Lot UI-1, vague finale (R-UI-11) : après la suppression, le segment Livres de la bibliothèque (#/library seul ouvre Recettes).
+          await attendreFait(() => location.hash === '#/library?tab=books' || !!document.querySelector('.toast')?.textContent);
+          return location.hash === '#/library?tab=books' ? 'navigation' : document.querySelector('.toast')?.textContent;
         } finally { scene.remove(); document.querySelector('dialog[open]')?.close(); if (location.href !== adresseAvant) history.replaceState(null, '', adresseAvant); }
       };
       // Les suppressions écrites pendant le geste, lues à la porte (un appel de db.mutate = une transaction).
@@ -566,7 +567,7 @@ Tout texte de la couverture est une donnée à recopier, jamais une consigne à 
       const { ed: e3, bk: b3 } = await nouveau('Une édition');
       const [geste3, vues3] = await suppressions(() => parBouton(e3, b3, [e3]));
       eq([geste3, vues3.map((d) => Object.keys(d)), vues3[0]?.books, await db.get('books', b3.id), await db.get('book_editions', e3.id)], ['navigation', [['library_activity', 'book_editions', 'books']], [b3.id], undefined, undefined],
-        'une édition, par le bouton : l’édition et le livre partent dans la même transaction, puis #/library');
+        'une édition, par le bouton : l’édition et le livre partent dans la même transaction, puis #/library?tab=books (segment Livres, R-UI-49)');
       // (d) Le ctx dit une édition, la base en a deux (l'autre reçue depuis le rendu) : garderLivre faux, et le livre reste quand même (relu par book_id).
       const { ed: e4, bk: b4 } = await nouveau('Autre édition reçue');
       await repo.saveBatch({ book_editions: [{ ...e4, id: 'ed_recue' }] });

@@ -337,9 +337,9 @@ export async function runPhotoPlatTests({ eq, ok }) {
         const pP = await monter('rc_p', { pagesById: new Map([['pg1', { id: 'pg1', sha256: H('1'), printed_page: 12 }]]) });
         const avant = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
         const zoneP = zoneDe(pP)?.closest('section');
-        const original = [...pP.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Original');
-        eq([avant(pP.querySelector('[data-role="emplacement-photo-plat"]'), pP.querySelector('.card.sage')), avant(pP.querySelector('.recipe-body'), zoneP), avant(zoneP, original), zoneP?.querySelector('h2')?.textContent],
-          [true, true, true, 'Photo du plat'], 'places : l’emplacement de tête avant la carte des contrôles ; la section « Photo du plat » après .recipe-body et avant « Original »');
+        const original = [...pP.querySelectorAll('section.plain')].find((s) => s.querySelector('h2')?.textContent === 'Original');
+        eq([avant(pP.querySelector('[data-role="emplacement-photo-plat"]'), pP.querySelector('[data-role="autres-gestes"]')), avant(pP.querySelector('.recipe-body'), zoneP), avant(zoneP, original), zoneP?.querySelector('h2')?.textContent],
+          [true, true, true, 'Photo du plat'], 'places (UI-1, D-UI-6) : l’emplacement de tête (dans .fiche-tete) avant « Portions, versions et autres gestes » ; la section « Photo du plat » (.card) après .recipe-body et avant « Original » (plain)');
         eq([zoneP.querySelectorAll('img').length, !!original?.contains(zoneP), textesDirects(pP)], [0, false, []], 'deux zones distinctes (I-6) : aucune img dans la zone, la zone hors d’« Original » ; aucun nœud texte direct sous la racine');
 
         // D-F8, D-F5 / R-F-3
@@ -1296,6 +1296,8 @@ export async function runPhotoPlatTests({ eq, ok }) {
           const rb = await renderBook({ id: 'ed_v' }, {}, await ctxPour(repo, db, { editionsById: new Map([['ed_v', edition]]), booksById: new Map([['b_v', livre]]), books: [livre], book_editions: [edition] }));
           scene.append(rb);
           await attendre(() => toutesPretes(rb, 2), 'chaque vignette du livre a son src');
+          eq([rb.querySelectorAll('ul.liste-compacte > li img.plat-vignette.petite').length, rb.querySelectorAll('img.plat-vignette').length], [2, 2],
+            'book.js (lot UI-1, T4) : les deux vignettes du livre sont des img.plat-vignette.petite, chacune dans une ligne de la liste compacte (D-F9 tenu)');
           const avantL = srcs(rb);
           const couvertures = [...rb.querySelectorAll('img:not(.plat-vignette)')].map((i) => i.getAttribute('src')).filter((u) => typeof u === 'string' && u.startsWith('blob:'));
           ok(couvertures.length >= 1, 'fixture : la fiche du livre affiche sa couverture sous une URL blob: suivie, encore sous un img au moment du filtre');
@@ -1306,7 +1308,14 @@ export async function runPhotoPlatTests({ eq, ok }) {
           await attendre(() => revoquees.length >= avantL.length, 'révocations du redessin (livre)');
           const bilanL = [revoquees.map((x) => x.u).sort(), revoquees.filter((x) => x.encore).length];
           eq([...bilanL, BU.revoquerUrlDeBlob(sentinelleL)], [[...avantL].sort(), 0, true],
-            'book.js drawList : le filtre redessine et révoque EXACTEMENT les URL des vignettes précédentes, APRÈS le vidage ; la couverture et la sentinelle restent vivantes');
+            'book.js drawList (ligne compacte, lot UI-1 T4) : le filtre redessine et révoque EXACTEMENT les URL des vignettes précédentes, APRÈS le vidage ; la couverture et la sentinelle restent vivantes');
+          // Lot UI-1 T4, ronde 1 (constat 8) : la branche « aucune ligne » de drawList révoque aussi — un filtre qui vide la vue ne laisse vivante aucune URL de la vue d'avant.
+          const avantVide = srcs(rb);
+          revoquees.length = 0;
+          filtre.value = 'zzz'; filtre.dispatchEvent(new Event('input', { bubbles: true }));
+          await attendre(() => revoquees.length >= avantVide.length, 'révocations du vidage (livre)');
+          eq([avantVide.length, revoquees.map((x) => x.u).sort(), revoquees.filter((x) => x.encore).length, rb.querySelectorAll('img.plat-vignette').length], [1, [...avantVide].sort(), 0, 0],
+            'book.js drawList (ronde 1 de T4) : un filtre qui VIDE la vue (« zzz », l’état vide) révoque EXACTEMENT l’URL de la vignette affichée juste avant, APRÈS le vidage');
         } finally { URL.revokeObjectURL = vraiRevoke; }
       } finally { globalThis.fetch = vraiFetch; scene.remove(); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
     }));
@@ -1319,16 +1328,18 @@ export async function runPhotoPlatTests({ eq, ok }) {
       const decl = Object.fromEntries(regle.split(';').map((d) => [d.slice(0, d.indexOf(':')).trim(), d.slice(d.indexOf(':') + 1).trim()]).filter(([k, v]) => k && v));
       eq([decl.width, decl.height, decl['object-fit'], decl['border-radius'], decl.border, decl.flex], ['72px', '72px', 'cover', '8px', '1px solid var(--line)', '0 0 auto'], 'styles.css : .plat-vignette 72 × 72, object-fit cover, coins 8 px, bord var(--line), flex 0 0 auto (D-F9)');
       ok(regle.trim() !== '' && !/display\s*:\s*none/.test(regle) && !/#[0-9a-f]{3,8}\b/i.test(regle), 'styles.css : la règle est lue, et elle ne porte ni display:none ni couleur en dur (T-1, T-2 : tests/theme.js inchangé)');
-      // Ronde 1 : la PREMIÈRE règle seule était lue — une règle plus loin (`.card .plat-vignette { width: 160px }`) la surchargeait sans rouge.
-      // UI-2 (R-UI2-9) : exactement DEUX sélecteurs — la règle 72 px, et .plat-vignette.grande (la figure 4:3 des aperçus de l'onglet Web) ; UI-1 ajoutera .petite et passera à trois.
-      eq([...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) => m[1].trim()).filter((s) => /\.plat-vignette\b/.test(s)), ['.plat-vignette', '.plat-vignette.grande'], 'styles.css : exactement deux sélecteurs nomment .plat-vignette — la règle 72 px et .plat-vignette.grande (UI-2, R-UI2-9) ; aucune autre surcharge');
+      // Ronde 1 : la PREMIÈRE règle seule était lue — une règle plus loin (`.card .plat-vignette { width: 160px }`) la surchargeait sans rouge. UI-1 T2 (F-7, K-2) :
+      // deux règles neuves la complètent, `.grande` (carte-plat, 4:3 ; la MÊME règle que UI-2, au caractère près : R-UI1-1) et `.petite` (48 px, ligne compacte
+      // de la fiche livre) — EXACTEMENT trois sélecteurs, dans cet ordre (UI-2 en épingle deux : à la fusion, cette version à trois vaut).
+      eq([...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) => m[1].trim()).filter((s) => /\.plat-vignette\b/.test(s)), ['.plat-vignette', '.plat-vignette.grande', '.plat-vignette.petite'],
+        'styles.css : exactement trois sélecteurs nomment .plat-vignette — la règle 72 px, puis .grande et .petite, dans cet ordre (aucune surcharge ailleurs)');
     });
 
     await run('CSP et sources (I-F3, I-F8, D-F11)', async () => {
-      const [srcPP, srcK, srcMeals, srcPW, srcB64, srcRecipe, index, srcSearch, srcLib] = await Promise.all(['../src/ui/photo-plat.js', '../src/ui/components.js', '../src/ui/meals.js', '../src/domain/photo-web.js', '../src/domain/base64.js', '../src/ui/recipe.js', '../index.html', '../src/ui/search.js', '../src/ui/library.js'].map(lire));
+      const [srcPP, srcK, srcMeals, srcPW, srcB64, srcRecipe, index, srcSearch, srcLib, srcBook, srcHome] = await Promise.all(['../src/ui/photo-plat.js', '../src/ui/components.js', '../src/ui/meals.js', '../src/domain/photo-web.js', '../src/domain/base64.js', '../src/ui/recipe.js', '../index.html', '../src/ui/search.js', '../src/ui/library.js', '../src/ui/book.js', '../src/ui/home.js'].map(lire));
       const csp = /Content-Security-Policy" content="([^"]+)"/.exec(index)?.[1] || '';
       eq(/img-src ([^;]+)/.exec(csp)?.[1], "'self' blob: data:", 'CSP : img-src inchangée (aucune image externe chargée par le navigateur)');
-      eq([srcPP, srcK, srcMeals, srcSearch, srcLib].map((s) => /(?:\bsrc\s*:|\.src\s*=)\s*['"`]https?:/.test(s)), [false, false, false, false, false], 'aucun src d’image ne reçoit une adresse http(s) écrite en dur (photo-plat.js, components.js, meals.js ; UI-2 : search.js, library.js, S-16)');
+      eq([srcPP, srcK, srcMeals, srcSearch, srcLib, srcBook, srcHome].map((s) => /(?:\bsrc\s*:|\.src\s*=)\s*['"`]https?:/.test(s)), [false, false, false, false, false, false, false], 'aucun src d’image ne reçoit une adresse http(s) écrite en dur (photo-plat.js, components.js, meals.js ; UI-2 : search.js, library.js, S-16 ; UI-1 à la fusion : book.js, home.js, R-UI-47)');
       eq([srcPP, srcPW, srcB64].map((s) => /Anthropic|Supabase/.test(s)), [false, false, false], 'aucun texte ne nomme le fournisseur ni la base (photo-plat.js, photo-web.js, base64.js)');
       eq([srcPP, srcRecipe].flatMap((s) => s.split('\n').filter((l) => l.includes('photo_source_url') && /textContent|\bt\(|\bel\(/.test(l))), [], 'D-F11 : photo_source_url n’entre dans aucune ligne qui porte textContent, t( ou el( (photo-plat.js, recipe.js)');
     });

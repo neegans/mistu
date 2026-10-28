@@ -3,15 +3,17 @@
 import { el } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { carte } from './components.js';
+import { icone } from './icones.js';
 
 export const ACCUEIL_ACTIONS = ['index', 'recette', 'plusTard'];
 
+// D-UI-9 (lot UI-1 « Carnet ») : `ico` est le NOM d'une icône au trait d'icones.js ; renderAccueilLivre la rend (un nom inconnu lève).
 export function accueilLivreModel({ nouveau = undefined } = {}) {
   const afficher = nouveau !== undefined && nouveau !== null && nouveau !== '';
   return { afficher, titre: t('Le livre est dans ta bibliothèque. Et maintenant ?'), cartes: afficher ? [
-    { action: 'index', ico: '📸', titre: t('Photographier l’index ou la table des matières'), texte: t('Pour que l’app connaisse les recettes du livre.') },
-    { action: 'recette', ico: '📄', titre: t('Photographier ou importer des pages de recettes'), texte: t('Seulement celles qui t’intéressent, tout de suite.') },
-    { action: 'plusTard', ico: '🕒', titre: t('Plus tard'), texte: t('Aller à Mes livres.') },
+    { action: 'index', ico: 'appareil-photo', titre: t('Photographier l’index ou la table des matières'), texte: t('Pour que l’app connaisse les recettes du livre.') },
+    { action: 'recette', ico: 'page', titre: t('Photographier ou importer des pages de recettes'), texte: t('Seulement celles qui t’intéressent, tout de suite.') },
+    { action: 'plusTard', ico: 'horloge', titre: t('Plus tard'), texte: t('Aller à la bibliothèque.') },
   ] : [] };
 }
 
@@ -25,7 +27,7 @@ export function renderAccueilLivre(model, gestes = {}) {
   const panneau = el('section', { class: 'card accueil-livre stack' },
     el('div', { class: 'row between top' }, el('h2', null, model.titre),
       el('button', { type: 'button', class: 'btn small fermer', 'aria-label': t('Fermer'), onClick: () => { panneau.remove(); gestes.fermer && gestes.fermer(); } }, '×')),
-    el('div', { class: 'grid wide' }, ...model.cartes.map((c) => carte(c.ico, c.titre, c.texte, () => (c.action === 'plusTard' ? gestes.plusTard && gestes.plusTard() : devoiler(c.action))))),
+    el('div', { class: 'grid wide' }, ...model.cartes.map((c) => carte(icone(c.ico), c.titre, c.texte, () => (c.action === 'plusTard' ? gestes.plusTard && gestes.plusTard() : devoiler(c.action))))),
     sources);
   root.append(panneau);
   return root;

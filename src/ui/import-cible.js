@@ -22,7 +22,7 @@ import { executerIndex, revaliderResultatIndex } from '../domain/table-matieres.
 import { shaBornee } from '../domain/couverture.js';
 import { getConvention } from '../domain/units.js';
 import { currentVersion } from '../domain/search.js';
-import { section, sessionAssistant, carteConnexion, texteEchecAssistant, TEXTE_CONNEXION } from './components.js';
+import { section, sessionAssistant, carteConnexion, texteEchecAssistant, TEXTE_CONNEXION, availabilityBadge } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { messageErreurImage } from '../core/image.js';
 import { DOCUMENT_ID, BATTEMENT_MS, prendreVol, libererVol as libererTenue, volEnCours, volTenu, reinitialiserVol } from './vol.js';
@@ -37,6 +37,7 @@ export { DOCUMENT_ID, BATTEMENT_MS, volEnCours };
 const ATTENDUS_PAGES = ['a_lancer', 'a_verifier', 'echec']; // les statuts qui acceptent des pages et une photo (spec § 3.6)
 const horloge = () => new Date().toISOString();
 const vues = new Set(); // { root, redessiner, majEnLigne } : les instances de l'écran, purgées par isConnected
+let numeroChampPage = 0; // T5 ronde 1 : l'id du champ « p. imprimée » d'une vignette (aria-controls de sa légende), unique dans le document
 // En ligne / hors ligne (spec § 4.2.4) : le bouton suit les événements de la fenêtre, pas seulement navigator.onLine au rendu.
 let enLigneFlag = typeof navigator === 'undefined' ? true : navigator.onLine !== false;
 if (typeof window !== 'undefined') {
@@ -496,17 +497,30 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     await transitionSurPlace((c) => ({ page_ids: retirerPage(Array.isArray(c.page_ids) ? c.page_ids : [], id) })); // la ligne source_pages et l'octet restent (règle actuelle)
     await redessiner();
   }
+  // Lot UI-1 « Carnet » (§ 4.5) : la légende d'une vignette — « Page 1 · p. 76 » quand la page imprimée est connue, « Page 1 » sinon ; réécrite sur place.
+  const legendeDe = (rang, page) => (Number.isInteger(page) && page > 0 ? t('Page {n} · p. {p}', { n: rang, p: page }) : t('Page {n}', { n: rang }));
   // Le champ « p. imprimée » d'une vignette écrit source_pages.printed_page (relue avant d'écrire, leçon C4) ; sans redessin : la saisie garde le focus.
   // Une saisie illisible (vide — ce qu'un champ nombre rend pour « 13a » —, « 0 », hors 1..9999) n'écrit RIEN et le champ reprend la valeur courante
-  // (T4-R1 : jamais un numéro effacé sans le dire).
-  async function ecrirePageImprimee(pageId, champ) {
+  // (T4-R1 : jamais un numéro effacé sans le dire) ; il reste ouvert pour corriger. Lot UI-1 (§ 4.5) : une saisie valide réécrit la légende SUR PLACE et
+  // referme le champ (aucun redessin : page_ids et focus intacts). T5 ronde 1 : rien ne bouge à l'écran sans une écriture FAITE — un save résolu sur la
+  // ligne relue présente ; sinon (échec, ligne absente) le champ reste ouvert sur la valeur courante, la légende et la page en mémoire sont intactes, et
+  // l'échec est dit.
+  async function ecrirePageImprimee(pageId, champ, { legende = null, rang = null } = {}) {
     const s = String(champ.value ?? '').trim();
     const p = etat.pages.get(pageId);
     if (!/^[1-9]\d{0,3}$/.test(s)) { champ.value = p?.printed_page ?? ''; return; }
     const n = parseInt(s, 10);
-    try { const courante = await repo.get('source_pages', pageId); if (courante) await repo.save('source_pages', { ...courante, printed_page: n }); }
+    let ecrit = false;
+    try { const courante = await repo.get('source_pages', pageId); if (courante) { await repo.save('source_pages', { ...courante, printed_page: n }); ecrit = true; } }
     catch (e) { logError('import_cible.page_imprimee', { error: e, id: pageId }); }
+    if (!ecrit) { champ.value = p?.printed_page ?? ''; toast(t('Le numéro de page n’a pas pu être enregistré. Réessaie.')); return; }
     if (p) p.printed_page = n;
+    champ.value = n;
+    if (legende) { legende.textContent = legendeDe(rang, n); legende.setAttribute('aria-expanded', 'false'); }
+    // EI-T5-3 : le champ qui se referme sous le focus le rend à sa légende (jamais au body : la personne au clavier garde sa place, I-UI-4).
+    const avaitLeFocus = document.activeElement === champ;
+    champ.hidden = true;
+    if (avaitLeFocus && legende) legende.focus();
   }
 
   // --- Gestes : photo du plat (spec § 4.2.3, D-4, I-6) : le MÊME mur qu'une couverture (preparerPhotoLocale), octets dans files, pointeur sur la ligne.
@@ -667,7 +681,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     el('p', { class: 'muted', style: { margin: 0 } }, t('Importer une recette')),
     el('div', { class: 'row between top' },
       el('div', null, el('h1', null, recipe.original_title), sousTitre() ? el('p', { class: 'muted' }, sousTitre()) : null),
-      recipe.availability === 'partial' ? el('span', { class: 'badge partial' }, t('Partiellement disponible')) : el('span', { class: 'badge reference' }, t('Repérée dans ton livre'))));
+      availabilityBadge({ ...recipe, printed_page: null }))); // D-UI-10 : LE badge (T5 ronde 1 : plus de seconde source de ses textes) ; le sous-titre porte déjà la page
 
   function sectionPages(pageIds, figees) {
     const n = pageIds.length;
@@ -678,14 +692,24 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
       const rang = i + 1;
       const img = el('img', { alt: t('Page {n}', { n: rang }), loading: 'lazy' });
       poserImage(img, p.sha256);
-      const champ = el('input', { type: 'number', min: 1, max: 9999, placeholder: t('p. imprimée'), 'aria-label': t('p. imprimée'), value: p.printed_page ?? '', onChange: (e) => ecrirePageImprimee(p.id, e.target) });
       const bouton = (role, libelle, onClick) => el('button', { type: 'button', class: 'btn', dataset: { role, page: id }, onClick }, libelle);
-      vignettes.append(el('figure', null, el('span', { class: 'num' }, String(rang)), img,
-        el('figcaption', { class: 'stack' }, champ,
+      // Lot UI-1 « Carnet » (§ 4.5, maquette 04) : le × en coin de la vignette EST le bouton « Retirer » d'avant (même data-role, même nom accessible par
+      // aria-label, cible 44 × 44 par .thumbs .btn.retirer), absent quand les pages sont figées ; la légende « Page 1 · p. 76 » est un bouton qui OUVRE le
+      // champ « p. imprimée », né hidden (une saisie valide le referme : ecrirePageImprimee) ; Monter / Descendre restent le chemin garanti (§ 8 : pas de glisser).
+      const croix = figees ? null : el('button', { type: 'button', class: 'btn retirer', 'aria-label': t('Retirer la page {n}', { n: rang }), dataset: { role: 'retirer', page: id }, onClick: () => retirerLaPage(id) }, '×');
+      const champ = el('input', { type: 'number', id: `page-imprimee-${(numeroChampPage += 1)}`, min: 1, max: 9999, hidden: true, placeholder: t('p. imprimée'), 'aria-label': t('p. imprimée'), value: p.printed_page ?? '' });
+      // T5 ronde 1 (I-UI-4) : la légende est une VRAIE bascule — aria-controls nomme son champ ; une seconde tape ou Échap le referme sans rien écrire (la valeur
+      // courante est remise) et rend le focus à la légende.
+      const refermer = () => { champ.value = p.printed_page ?? ''; champ.hidden = true; legende.setAttribute('aria-expanded', 'false'); legende.focus(); };
+      const legende = el('button', { type: 'button', class: 'btn link small legende', 'aria-expanded': 'false', 'aria-controls': champ.id, dataset: { role: 'legende', page: id },
+        onClick: () => { if (!champ.hidden) { refermer(); return; } champ.hidden = false; legende.setAttribute('aria-expanded', 'true'); champ.focus(); } }, legendeDe(rang, p.printed_page));
+      champ.addEventListener('change', (e) => ecrirePageImprimee(p.id, e.target, { legende, rang }));
+      champ.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); refermer(); } });
+      vignettes.append(el('figure', null, el('span', { class: 'num' }, String(rang)), img, croix,
+        el('figcaption', { class: 'stack' }, legende, champ,
           figees ? null : el('div', { class: 'row' },
             bouton('monter', t('Monter la page {n}', { n: rang }), () => bougerPage(id, -1, 'monter')),
-            bouton('descendre', t('Descendre la page {n}', { n: rang }), () => bougerPage(id, 1, 'descendre')),
-            bouton('retirer', t('Retirer la page {n}', { n: rang }), () => retirerLaPage(id))))));
+            bouton('descendre', t('Descendre la page {n}', { n: rang }), () => bougerPage(id, 1, 'descendre'))))));
     });
     return section(t('Pages de la recette'),
       el('p', { class: 'muted', style: { margin: 0 } }, n <= 1 ? t('{n} photo ajoutée', { n }) : t('{n} photos ajoutées', { n })),

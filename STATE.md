@@ -1,4 +1,32 @@
-# STATE.md — Cuisine OS (mistu) — état au 27 octobre 2026 (LOT UI-2 « APERÇUS » CLÔTURÉ, FUSIONNÉ dans `main` et POUSSÉ AVANT `0007` (R-UI2-20) ; chaîne A → F en ligne depuis le 23 octobre ; avant ce lot : `main` = `05c751f`, 0.15.0, suite publique 5948/5948, migrations `0005` et `0006` collées et prouvées, fonction `assistant` version 4 ; LOT UI-2 « APERÇUS DES RÉSULTATS WEB » CONSTRUIT (tâches 1 à 3) puis VAGUE FINALE de la revue de branche faite dans le worktree `~/projects/mistu-apercus` (branche `apercus-web`, 0.16.0), `/verify` de clôture à faire, PAS fusionné, `0007` PAS collée, fonction PAS redéployée ; lot UI-1 « Carnet » en construction sur `experience-carnet` ; reste à Neegan : `0007` et sa preuve, appareils à jour, preuves réelles sur le site public, décisions ouvertes, révocation de l'ancienne clé, « clean »)
+# STATE.md — Cuisine OS (mistu) — état au 28 octobre 2026 (LOTS UI-2 « APERÇUS » ET UI-1 « CARNET » FUSIONNÉS DANS `main` ET POUSSÉS, 0.17.0 ; `0007` PAS encore collée, fonction `assistant` encore en version 4 ; reste à Neegan : `0007` et sa preuve, puis redéploiement et sondes par le chef, preuves réelles § 10 UI-2 et UI-1 sur le site public, appareils sur 0.17.0, décisions de la spec § 13 (dont le point 7, neuf), « clean »)
+
+**28 octobre 2026 — UI-1 « CARNET » CLÔTURÉ, FUSIONNÉ (commit de fusion sur `1cb5dde`) et POUSSÉ.** Clôture du chef : rulings R-UI-61 à
+R-UI-65 (spec § 12 ; R-UI-5, la couleur du badge « Créée avec l’IA · non testée », renvoyée à Neegan : § 13, point 7) ; `/verify` sur `a60f8ba` :
+suite 6226/6226, Node 208/208 (en série ; un rouge de durée sous charge, R-B-15), `--check` 0, secrets et invisibles 0. Fusion : 17 conflits résolus
+un par un selon R-UI-47 (0.17.0, `sw.js cuisine-os-v0.17.0-11`, `SHELL` avec `apercu-web.js` ET `icones.js`, `en.js` en union, `.plat-vignette.grande`
+écrite une fois avec `figure.apercu` et `.plat-vignette.petite`, I-F3 étendu à `book.js` et `home.js`, `'loupe'` gardé dans `search.js`, `CLAUDE.md` et
+`docs/architecture.md` avec les sections des deux lots) ; mesures sur l'arbre fusionné : suite 6375/6375 (épingle 6374 = 5947 + 149 de UI-2 + 278 de UI-1),
+Node 230/230 (en série), `--check` 0, `tsc --strict` 0, `supabase/` inchangé depuis `1cb5dde`. Suite, dans l'ordre : Neegan colle `0007` et
+joue sa preuve (`supabase/README.md`, étape 13 : `0 faux sur 11`) → le chef redéploie la fonction (version 5) et joue les sondes (S-A3, S17-S18,
+S-F4-S-F5, S-A5 à S-A7 avec la session de Neegan : un appel du quota chacune, zéro jeton) → preuves § 10 UI-2 (« puttanesca » dans l'onglet Web) et
+UI-1 (Bibliothèque, fiches, Aujourd'hui, l'iPhone) sur le site public, tous les appareils sur 0.17.0 → décisions (§ 13, dont le point 7 ; borne de
+pixels et règle S-4 de UI-2) → « clean » (worktrees `mistu-apercus` et `mistu-carnet`, serveurs 8095 et 8096, après la copie des deux registres).
+
+**28 octobre 2026, 1 h (HAE) — LOT UI-1 « EXPÉRIENCE CARNET » : FINI dans le worktree `~/projects/mistu-carnet` (branche `experience-carnet`, base `f3672be`
+= `main` `05c751f` + trois commits de docs, spec rév. 2.1 `7633675` et le « Go » de Neegan `f3672be`, plan `ec0263d`, tête de code
+`0fa52b4`, filets `1d952fe`, vague finale `88e095a` après la revue finale de branche, serveur 8096), six tâches (T1 jetons et composants, T2 bibliothèque sur les recettes, T3 fiche recette, T4 fiche livre, T5 Aujourd'hui /
+Ajouter / import ciblé / libellés, T6 filets, preuve visuelle, docs ; rondes et re-revues : `progress.md`), `/verify` au chef
+d'orchestre ; contrôles mécaniques après la vague finale (suite 6226/6226, épingle 6225, Node 208/208, `--check` 0, invisibles 0, aucune clé ; rapport `final-fix-report.md`), preuve visuelle VERT (70 lignes,
+174 captures, contraste minimum 4,62 sur 3 601 nœuds, 0 requête hors origine ; onglet « Bibliothèque » d'une ligne à 375-768 px, et à 320 px sur la galerie
+et dans l'app, actif, sans marge : 71,8/71,8 px), `sw.js cuisine-os-v0.17.0-10`, `APP_VERSION 0.17.0`, `DB_VERSION` 4, aucune
+migration, aucun fichier sous `supabase/`. **PAS fusionné, PAS poussé.** Pour Neegan, dans l'ordre : le lot UI-2 est déjà fusionné et poussé (27 octobre ; ses gestes restants — `0007`, redéploiement,
+sondes — sont dans le `STATE.md` de `main`) ; la fusion de `experience-carnet` par un commit de fusion (17 fichiers en conflit, MESURÉS par `git merge-tree`
+le 28 octobre — `CLAUDE.md`, `STATE.md` et `docs/architecture.md` : garder les sections et paragraphes des DEUX lots ; `en.js` union ; `sw.js` union de
+`SHELL` + `VERSION` `-11` ; `schema.js` et les pins 0.17.0 de huit suites ; `styles.css` et `tests/photo-plat.js` par R-UI1-1, et I-F3 étendu à `book.js` et `home.js` ; `tests/ajouter.js` et
+`tests/tests.js` en union, l'épingle remesurée ; `search.js` garde `'loupe'` ; chaque résolution relue à la main : `CLAUDE.md`, geste 2, et spec R-UI-47), push, suite publique, preuve réelle § 10 UI-1
+sur sa bibliothèque et sur l'iPhone (« Agrandir l'affichage » dit), les sept points de § 13 (défauts confirmés le 23 octobre, renversables), « clean »
+après la copie du registre AVEC `captures/`. Registre `.superpowers/sdd/2026-10-23-experience-carnet/` ; rulings R-UI-1 à R-UI-60 dans la spec
+§ 12 « Construction UI-1 : rulings » ; section du lot dans `CLAUDE.md` et `docs/architecture.md`.**
 
 **27 octobre 2026 — UI-2 CLÔTURÉ, FUSIONNÉ et POUSSÉ** (`main` en avance rapide depuis `05c751f` jusqu'au commit de clôture ; spec § 12, R-UI2-18 à
 R-UI2-24) : `/verify` de clôture VERT sur `ecfc19b` (suite ✅ 6097/6097, épingle 6096 ; Node 230/230 ; `--check` 0 ; `tsc --strict` 0 ; secrets et
@@ -398,7 +426,15 @@ en fichiers seulement : `supabase/migrations/0003_assistant_config.sql` et sa pr
 
 ## Reprendre
 
-Lot A, import ciblé (le plus récent) :
+Lot UI-1 « Carnet » (le plus récent ; l'outil de preuve réécrit resultats.md, resultats.json et captures/ : jamais pendant qu'une revue les lit) :
+```
+cd ~/projects/mistu-carnet && git status --short && git log --oneline -3
+curl -sS -o /dev/null -w "8096 http=%{http_code}\n" http://127.0.0.1:8096/tests/ || (nohup python3 -m http.server 8096 --bind 127.0.0.1 > /dev/null 2>&1 &)
+node ~/projects/mistu-carnet/.superpowers/sdd/2026-10-23-experience-carnet/suite.cjs 8096   # attendu : 6226/6226 (+ 1 x 404 favicon ; vague finale)
+node --test tools/*.test.mjs && node tools/generer-migrations.mjs --check   # attendu : 208/208, code 0
+node ~/projects/mistu-carnet/.superpowers/sdd/2026-10-23-experience-carnet/preuve-visuelle.cjs 8096   # attendu : VERT, code 0, 70 lignes, 174 captures
+```
+Lot A, import ciblé :
 ```
 cd ~/projects/mistu-import && git status --short && git log --oneline -3
 curl -sS -o /dev/null -w "8088 http=%{http_code}\n" http://localhost:8088/tests/ || (nohup python3 -m http.server 8088 > /dev/null 2>&1 &)

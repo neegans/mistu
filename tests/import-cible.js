@@ -665,7 +665,7 @@ export async function runImportCibleTests({ eq, ok }) {
         const root = await monter('rc_a');
         const texte = root.textContent;
         ok(texte.includes('Importer une recette') && texte.includes('Tarte aux pommes') && texte.includes('Mon livre · p. 132'), 'ouverture : sur-titre « Importer une recette », titre de la référence, « {livre} · p. 132 »');
-        eq([...root.querySelectorAll('.badge')].map((b) => b.textContent), ['Repérée dans ton livre'], 'ouverture : badge « Repérée dans ton livre »');
+        eq([...root.querySelectorAll('.badge')].map((b) => b.textContent), ['À importer'], 'ouverture : badge « À importer » (D-UI-10, lot Carnet T5)');
         ok(texte.includes('0 photo ajoutée'), 'ouverture : « 0 photo ajoutée »');
         eq(await db.count('imports'), 0, 'ouverture : aucune ligne imports écrite tant qu’aucune photo n’est ajoutée (spec § 4.1)');
         const primaire = bouton(root, 'Extraire et enregistrer');
@@ -710,7 +710,7 @@ export async function runImportCibleTests({ eq, ok }) {
         eq((await ligneDe('rc_a')).page_ids, [p1, p2], 'pages : monter la première ne change rien (bouton toujours présent, sans effet)');
         bouton(root, 'Descendre la page 1').click();
         await attendre(() => root.etatRoute().pageIds[0] === p2, 'descendue à nouveau');
-        bouton(root, 'Retirer la page 2').click();
+        root.querySelector('button[data-role="retirer"][aria-label="Retirer la page 2"]').click(); // lot Carnet T5 : le × en coin porte le nom accessible « Retirer la page 2 », son texte est « × »
         await attendre(() => root.etatRoute().pageIds.length === 1, 'page retirée');
         eq([(await ligneDe('rc_a')).page_ids, await db.count('source_pages'), (await db.get('scan_sessions', ligne.scan_session_id)).page_ids, (await ligneDe('rc_a')).status], [[p2], 2, [p1, p2], 'a_lancer'], 'pages : « Retirer la page 2 » détache p1 de l’import ([p2]) — la ligne source_pages et la séance restent (règle actuelle), même statut');
         ok(root.textContent.includes('1 photo ajoutée') && !root.textContent.includes('photos ajoutées'), 'pages : « 1 photo ajoutée » au singulier');
@@ -909,7 +909,7 @@ export async function runImportCibleTests({ eq, ok }) {
         await db.put('imports', { ...(await db.get('imports', impE)), photo_sha256: shaPhoto, photo_origin: 'photo' });
         const ff = fauxFetch([200, corpsOk()]);
         const root = await monter('rc_e', { deps: { fetch: ff.fetch } });
-        eq([...root.querySelectorAll('.badge')].map((b) => b.textContent), ['Partiellement disponible'], 'I-5 : une partial porte son badge');
+        eq([...root.querySelectorAll('.badge')].map((b) => b.textContent), ['Partielle'], 'I-5 : une partial porte son badge court « Partielle » (D-UI-10, lot Carnet T5)');
         bouton(root, 'Extraire et enregistrer').click();
         await attendre(() => !!root.querySelector('[data-role="remplacer"]'), 'question « Remplacer ? »');
         const q = root.querySelector('[data-role="remplacer"]');

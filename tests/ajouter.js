@@ -4,8 +4,11 @@
 // Filet i18n (F13) : chaque t('…') de ces modules doit avoir son entrée en.js. Exportées : tests/import-cible.js vérifie que son module y figure.
 // MODULES_NEUFS : les modules créés par les lots (lien.js de R-UX-11 et isbn.js inclus) + add.js réécrit + l'écran d'import ciblé (lot A, tâche 4)
 // + le module des fichiers du lot G + l'écran de la table des matières (lot C) + le panneau et l'écran de regroupement (lot D, tâche 2)
-// + la photo du plat (lot F, tâche 3, P-8) + le domaine des aperçus des résultats web (lot UI-2, tâche 2).
-export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js', '../src/ui/import-cible.js', '../src/domain/lecture-web.js', '../src/ui/import-web.js', '../src/ui/vol.js', '../src/sync/fichiers.js', '../src/ui/table-matieres.js', '../src/ui/regroupement.js', '../src/ui/photo-plat.js', '../src/domain/apercu-web.js'];
+// + la photo du plat (lot F, tâche 3, P-8) + le domaine des aperçus des résultats web (lot UI-2, tâche 2) + icones.js (lot UI-1 « Carnet », tâche 1 : aucun t(), mais S14 — ni innerHTML, ni html:).
+// Lot UI-1, vague finale (constat 13) : UNE lecture des clés t() pour les filets i18n — t('…'), t("…") et t(`…`) sans ${…} (un gabarit à expression n'est pas
+// une clé, et une variable non plus) ; F13 la lit sur MODULES_NEUFS, tests/carnet.js (T6) sur ses modules. Son témoin, sur les trois formes, est au bloc F13.
+export const clesT = (src) => [...src.matchAll(/\bt\((['"`])((?:(?!\1)[^\\]|\\.)*)\1/g)].filter((m) => !(m[1] === '`' && m[2].includes('${'))).map((m) => m[2]);
+export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js', '../src/ui/import-cible.js', '../src/domain/lecture-web.js', '../src/ui/import-web.js', '../src/ui/vol.js', '../src/sync/fichiers.js', '../src/ui/table-matieres.js', '../src/ui/regroupement.js', '../src/ui/photo-plat.js', '../src/domain/apercu-web.js', '../src/ui/icones.js'];
 // CHAINES_NEUVES_AILLEURS reconstituée depuis le code réel (git diff main...HEAD, ensemble main vs HEAD des clés t(),
 // pas seulement les lignes ajoutées : une ligne réécrite pour une autre raison peut porter une chaîne déjà sur main —
 // book.js:'Cuisines', recipe-edit.js:'Cuisines / régions' et import.js:'— Aucun livre (à associer plus tard) —'
@@ -22,33 +25,60 @@ export const MODULES_NEUFS = ['../src/ui/puces.js', '../src/ui/livre-ajout.js', 
 // livre (book.js) ; le refus « non vide » dit la phrase de main (« Un livre avec des recettes… »), sans entrée en.js jusqu’ici : l’entrée est posée, la
 // chaîne n’est pas neuve.
 export const CHAINES_NEUVES_AILLEURS = {
-  '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', '+ Pages d’index', '+ Recette', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer', '{n} import à reprendre', '{n} imports à reprendre',
+  '../src/ui/book.js': ['Mots-clés', 'Autre mot-clé', 'Séance en cours : {n} page(s)', 'Reprendre', 'Couverture', 'Couverture enregistrée.', 'Couverture retirée.', 'La couverture n’est pas sur cet appareil.', 'Cette image est trop lourde (25 Mo au plus).', 'Cette image ne peut pas être lue ici. Essaie une autre photo.', 'Choisir des photos ou un PDF', 'Photographier', 'Importer', '{n} import à reprendre', '{n} imports à reprendre',
     // Lot G, tâche 6 : la couverture par état (§ 4.2).
     'La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.', 'La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.', 'Fichier illisible reçu du serveur.', 'Le téléchargement n’a pas abouti.',
     // Lot E, tâche 3a : le refus du geste « Supprimer » quand une lecture tient une ligne du journal de l’édition (D-E23).
     'Une lecture est déjà en cours : annule-la d’abord.',
     // Lot E, tâche 3a, ronde 1 : le refus quand une ligne du journal ne se détache pas de l’édition (statut illisible, ou arrivée entre les deux temps).
-    'Un import est encore lié à ce livre : rien n’a été supprimé.'],
+    'Un import est encore lié à ce livre : rien n’a été supprimé.',
+    // Lot UI-1, tâche 4 : la fiche livre recomposée (D-UI-7, D-UI-10) — menus renommés, « Sommaire », la liste compacte et son compteur, « Voir les {n} recettes ».
+    'Ajouter des recettes', 'Ajouter des pages de sommaire', 'Sommaire', 'Reprendre la séance', 'Les recettes de ce livre', '{n} disponible(s) · {m} à importer', 'À importer', 'Voir les {n} recettes',
+    // Lot UI-1, tâche 6 : complément (A-9) — le retour « ← Bibliothèque » (T1). Ronde 1 : « Toutes » et « Disponibles » retirées d'ici — book.js les
+    // écrivait déjà à f3672be (règle d'en-tête : écartées) ; leurs entrées en.js (T2, T4) sont épinglées par la table de tests/carnet.js.
+    'Bibliothèque'],
   '../src/ui/import.js': ['Les références n’ont pas pu être créées. Réessaie.',
     // Lot G, tâche 6 : la phrase de séance (§ 4.3, F-21).
     'Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages', '{n}/{m} photos de cette séance envoyées au serveur',
     // Lot C, tâche 4 : les chaînes neuves du panneau d'index.
     'Relire remplace la lecture reçue ({n} entrées non créées) et coûte un appel. Continuer ?', 'Relire', 'Les photos de cette séance ne sont pas sur cet appareil.', 'Revenir à la lecture'],
-  '../src/ui/recipe.js': ['Lien web gardé.', 'Ouvrir le lien', 'Adresse non reconnue : ', 'Importer cette recette', 'Relire les pages',
+  '../src/ui/recipe.js': ['Lien web gardé.', 'Adresse non reconnue : ', 'Importer cette recette', 'Relire les pages',
     // Lot B, tâche 5 : la fiche d'un lien gardé (blocSignet), le bandeau d'une version lue sur le web, la relecture (B-27 : l'ancienne phrase est retirée).
     'L’app n’a pas encore lu la page.', 'Lecture de la page en cours…', 'Voir', 'Lecture reçue : vérifie-la et enregistre.', 'Vérifier et enregistrer', 'Contenu non récupéré : ouvre la page.',
     'Lire la recette avec l’assistant', 'Réessayer', 'Une lecture = un appel à l’assistant, compté dans ton quota du jour.', 'Lors de la recherche, l’assistant disait : {p}', 'Estimé par l’assistant : {r}',
     'Tu es hors ligne.', 'Lue sur {h} le {d} · {m} — vérifie.', 'Lue sur {h} · {m} — vérifie.', 'données de la page', 'texte lu par l’assistant', 'Selon la page : {s}', 'Relire la page avec l’assistant',
     'Lue par l’assistant le {d}', 'Lue par l’assistant', '{n} ligne(s) incertaine(s)', 'page possiblement manquante', 'lecture incomplète', 'Incertain : {t}', 'Vérifiée', 'À vérifier', '1 ligne à vérifier', '{n} lignes à vérifier', 'Photo du plat',
     // Lot C, tâche 5 : la section d’une référence sur sa fiche (D-C6).
-    'Section : {s}'],
+    'Section : {s}',
+    // Lot UI-1, tâche 3 : les gestes repliés et les repères de l'en-tête (D-UI-6).
+    'Portions, versions et autres gestes',
+    // Lot UI-1, tâche 6 : complément (A-9) — le retour « ← Bibliothèque » (T1) et « 1 portion » des repères (T3 ; clé d'en.js antérieure, neuve dans
+    // recipe.js). Ronde 1 : « {n} portions » retirée d'ici — recipe.js l'écrivait déjà à f3672be (règle d'en-tête : écartée).
+    'Bibliothèque', '1 portion'],
   '../src/ui/components.js': ['Lien web', 'Adresse non reconnue', 'incertain', 'Ligne incertaine selon l’assistant',
     // Lot B, tâche 4 : la ligne de repères déménagée de search.js (ligneReperes, mêmes textes).
     '≈ {n} min', '≈ {h} h', '≈ {h} h {m}', 'facile', 'moyen', 'exigeant', '1 ingrédient', '{n} ingrédients',
     // Lot G, tâche 6 : vignettePage, gesteTelechargement, boutonTelechargerPages, pdfFrame (§ 4.3-4.5).
-    'Page', 'Télécharger', 'Téléchargement…', 'Télécharger les {n} pages', 'Le téléchargement n’a pas abouti.', 'Pas encore sur cet appareil', 'Connecte-toi pour la télécharger', 'Pas encore envoyée par l’appareil qui l’a prise', 'Pas encore reçue', 'Fichier illisible reçu du serveur.'],
+    'Page', 'Télécharger', 'Téléchargement…', 'Télécharger les {n} pages', 'Le téléchargement n’a pas abouti.', 'Pas encore sur cet appareil', 'Connecte-toi pour la télécharger', 'Pas encore envoyée par l’appareil qui l’a prise', 'Pas encore reçue', 'Fichier illisible reçu du serveur.',
+    // Lot UI-1, tâche 2 : la ligne de source de la carte-plat (ligneSource).
+    'Du web · {h}', 'De mon livre · {t}',
+    // Lot UI-1, tâche 3 : « Voir la page d’origine » (D-UI-10, I-B5), une définition pour la fiche, le bloc du signet et l'écran d'import web.
+    'Voir la page d’origine',
+    // Lot UI-1 « Carnet », tâche 5 : les textes courts d'availabilityBadge (D-UI-10).
+    'À importer', 'À importer · p. {p}', 'Disponible', 'Partielle'],
   // Lot B, tâche 4 : « Garder et lire » et le doublon sur une carte de l'onglet Web.
   '../src/ui/search.js': ['Garder et lire', 'Tu as déjà gardé cette adresse.', 'Ouvrir la fiche', 'Adresse non reconnue.', 'Le lien n’a pas pu être gardé. Réessaie.'],
+  // Lot UI-1, tâche 2 : la Bibliothèque — en-tête (« Bibliothèque » : clé posée par la tâche 1), segments, filtre, puces, grille bornée, pied et liste « à importer ».
+  '../src/ui/library.js': ['Bibliothèque', 'Tes livres, tes trouvailles, tes recettes.', 'Recettes', 'Ajouter une recette', 'Une recette, un ingrédient…', 'Toutes', 'De mes livres', 'Du web',
+    'Recettes de mes livres à importer', 'Voir plus', 'À importer', 'Aucune recette pour l’instant.',
+    // Ronde 1 (D-T2-c) : l'état vide de ?tab=a-importer.
+    'Rien à importer pour l’instant.',
+    // Lot UI-1, tâche 5 : le compteur de la grille Livres (library.js, « {n} à importer »).
+    '{n} à importer',
+    // Lot UI-1, vague finale (constat 4) : un filtre ou une puce du segment Recettes qui ne retient aucune fiche.
+    'Aucune recette ne correspond.'],
+  // Lot UI-1 « Carnet », tâche 5 : le sous-titre d'Aujourd'hui (§ 4.4).
+  '../src/ui/home.js': ['Cherche une recette, un ingrédient, une envie.'],
   '../src/ui/cook.js': ['Lue par l’assistant, non relue'],
   '../src/ui/grocery.js': ['Lue par l’assistant, non relue'],
   '../src/ui/recipe-edit.js': ['Une étape par paragraphe (ligne vide entre deux étapes).', 'La recette n’a pas pu être enregistrée. Réessaie.', 'Une lecture est déjà en cours : annule-la d’abord.', 'page possiblement manquante', 'lecture incomplète'],
@@ -841,9 +871,9 @@ export async function runAjouterTests({ eq, ok }) {
       const fiche = await renderBook({ id: 'e1' }, {}, ctxDe());
       eq((await compterActivites()) - avant, 1, 'fiche : une ouverture volontaire reste journalisée (open_book)');
       const menus = [...fiche.querySelectorAll('details.menu-source')];
-      eq(menus.map((d) => d.querySelector('summary').textContent), ['+ Pages d’index', '+ Recette'], 'fiche : deux gestes nommés en en-tête (§ 9), le verbe avant l’outil');
-      eq([...menus[0].querySelectorAll('button, a')].map((b) => b.textContent), ['Photographier', 'Choisir des photos ou un PDF'], 'fiche : « + Pages d’index » dévoile les deux sources');
-      eq([...menus[1].querySelectorAll('button, a')].map((b) => b.textContent), ['Photographier', 'Choisir des photos ou un PDF', 'Saisir à la main'], 'fiche : « + Recette » offre aussi la saisie à la main');
+      eq(menus.map((d) => d.querySelector('summary').textContent), ['Ajouter des pages de sommaire', 'Ajouter des recettes'], 'fiche : deux gestes nommés en en-tête (§ 9 ; lot UI-1, D-UI-10 : le verbe avant l’outil)');
+      eq([...menus[0].querySelectorAll('button, a')].map((b) => b.textContent), ['Photographier', 'Choisir des photos ou un PDF'], 'fiche : « Ajouter des pages de sommaire » dévoile les deux sources');
+      eq([...menus[1].querySelectorAll('button, a')].map((b) => b.textContent), ['Photographier', 'Choisir des photos ou un PDF', 'Saisir à la main'], 'fiche : « Ajouter des recettes » offre aussi la saisie à la main');
       eq(menus[1].querySelector('a').getAttribute('href'), '#/recipes/new?edition=e1', 'fiche : la saisie à la main partie d’ici porte le livre (I-F)');
       ok(![...fiche.querySelectorAll('button')].some((b) => b.textContent === 'Photographier des pages'), 'fiche : l’ancien bouton unique « Photographier des pages » a disparu');
       eq(fiche.querySelector('.accueil-livre'), null, 'fiche : sans ?nouveau, aucun panneau d’accueil');
@@ -1130,7 +1160,7 @@ export async function runAjouterTests({ eq, ok }) {
     // Vue recette : pastille et branche « Lien web gardé » (F8, S6, S7)
     const { availabilityBadge, provenanceText } = await import('../src/ui/components.js');
     eq(availabilityBadge({ availability: 'reference_only', source_url: 'https://a.test/' }).textContent, 'Lien web', 'pastille : un signet n’est pas « Repérée dans ton livre »');
-    eq(availabilityBadge({ availability: 'reference_only', printed_page: 12 }).textContent, 'Repérée dans ton livre — page 12', 'pastille : les références d’index inchangées');
+    eq(availabilityBadge({ availability: 'reference_only', printed_page: 12 }).textContent, 'À importer · p. 12', 'pastille : une référence d’index dit « À importer · p. 12 » (D-UI-10, lot Carnet T5)');
     // R-UX-11 (S7) : dans les CARTES DE LISTE aussi, l'hôte vient de l'adresse — jamais du libellé stocké, qu'une
     // archive ou le serveur peut avoir rempli avec n'importe quoi. La vue recette le faisait déjà, pas les listes.
     eq(provenanceText({ source_url: 'https://a.test/x', source_label: 'ment.test' }, null, null), 'a.test', 'provenance : un signet montre l’hôte recalculé depuis l’adresse (S7)');
@@ -1146,7 +1176,7 @@ export async function runAjouterTests({ eq, ok }) {
     const { blocSignet } = await import('../src/ui/recipe.js');
     const sain = blocSignet({ source_url: 'https://a.test/x', source_label: 'ment.test' });
     const a = sain.querySelector('a');
-    eq([a.getAttribute('href'), a.getAttribute('target'), a.getAttribute('rel'), a.textContent], ['https://a.test/x', '_blank', 'noopener noreferrer', 'Ouvrir le lien'], 'signet : lien revalidé au rendu, noopener noreferrer');
+    eq([a.getAttribute('href'), a.getAttribute('target'), a.getAttribute('rel'), a.textContent], ['https://a.test/x', '_blank', 'noopener noreferrer', 'Voir la page d’origine'], 'signet : lien revalidé au rendu, noopener noreferrer, lien texte « Voir la page d’origine »');
     ok(sain.textContent.includes('a.test') && !sain.textContent.includes('ment.test'), 'signet : l’hôte affiché vient de l’adresse, jamais du libellé stocké (S7)');
     ok(sain.textContent.includes('Lien web gardé.') && !sain.textContent.includes('Scanner cette recette'), 'signet : texte propre, aucun geste de scan');
     const hostile = blocSignet({ source_url: 'javascript:alert(1)' });
@@ -3669,10 +3699,10 @@ export async function runAjouterTests({ eq, ok }) {
       eq([blocCouverture(fichePointeur)?.querySelector('small')?.textContent, fichePointeur.querySelectorAll('img.cover-img').length],
         ['La couverture n’est pas sur cet appareil.', 0], 'fiche : un pointeur sans ligne files le DIT, et n’affiche aucune image (§ 6)');
       const ficheAvec = await renderBook({ id: 'eC' }, {}, ctx);
-      const enTete = [...ficheAvec.querySelectorAll('.row.top')].find((r) => r.querySelector('header'));
-      eq([!!enTete?.querySelector('img.cover-img'), !!blocCouverture(ficheAvec), blocCouverture(ficheAvec)?.querySelector('small')],
-        [true, true, null], 'fiche : la couverture est dans l’en-tête, le bloc « Couverture » est visible, et rien n’est signalé (§ 6)');
-      const biblio = await renderLibrary({}, {}, ctx);
+      const gaucheLivre = ficheAvec.querySelector('.two-col.livre')?.firstElementChild;
+      eq([!!gaucheLivre?.querySelector(':scope > a.cover-wrap img.cover-img'), !!blocCouverture(ficheAvec), blocCouverture(ficheAvec)?.querySelector('small')],
+        [true, true, null], 'fiche : la couverture ouvre la colonne de gauche (lot UI-1, D-UI-7), le bloc « Couverture » est visible, et rien n’est signalé (§ 6)');
+      const biblio = await renderLibrary({}, { tab: 'books' }, ctx); // UI-1 T2 : la bibliothèque s'ouvre sur Recettes ; ce bloc affirme la grille des couvertures
       eq([biblio.querySelectorAll('img.cover-img').length, biblio.textContent.includes('pas sur cet appareil')],
         [1, false], 'Mes livres : une image pour l’édition dont les octets sont là, et la grille reste muette pour l’autre (§ 6)');
       // RF-I2 / D-T9 : la révocation au point d'appel n'était pas prouvée (seul le module blob-urls l'était). Un
@@ -3726,35 +3756,36 @@ export async function runAjouterTests({ eq, ok }) {
           editionsById: new Map(editions.map((e) => [e.id, e])), editionLabel: (e) => books.find((b) => b.id === e.book_id)?.title || '',
         };
       };
-      const bloc = (n) => [...n.querySelectorAll('section.card')].find((s) => s.querySelector('h2')?.textContent === 'Liens web gardés') || null;
+      // UI-1 T2 : « Liens web gardés » est une section PLAIN (sectionPlain, D-UI-8) sous le segment Livres, que ces appels nomment par { tab: 'books' }.
+      const bloc = (n) => [...n.querySelectorAll('section.plain')].find((s) => s.querySelector('h2')?.textContent === 'Liens web gardés') || null;
       const titres = (n) => [...(bloc(n)?.children || [])].filter((c) => c.tagName !== 'H2').map((c) => c.querySelector('h3')?.textContent ?? c.textContent);
       const apres = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
       // (a) aucun livre + un signet : l'état vide reste, ET la section suit, avec la carte du signet
       const seul = signet('rS', 'Saumon au fenouil', { created_at: '2026-10-17T10:00:00.000Z' });
-      let n = await renderLibrary({}, {}, ctxDe([seul]));
+      let n = await renderLibrary({}, { tab: 'books' }, ctxDe([seul]));
       eq([n.textContent.includes('Aucun livre pour l’instant.'), !!bloc(n), titres(n), bloc(n)?.querySelector('a.item-link.card')?.getAttribute('href'), apres(n.querySelector('.empty'), bloc(n))],
         [true, true, ['Saumon au fenouil'], '#/recipes/rS', true], 'Mes livres sans livre : l’état vide ET la section « Liens web gardés » après lui, une carte au titre du signet vers sa fiche (confort, item 1)');
       // (b) aucun signet : ni une recette tapée sans livre, ni un signet rangé dans un livre, ni une adresse vide ne font une section
-      n = await renderLibrary({}, {}, ctxDe([{ id: 'rT', original_title: 'Tapée', availability: 'available', edition_id: null }, signet('rL', 'Rangé', { edition_id: 'eX' }), signet('rV', 'Vide', { source_url: '' })]));
+      n = await renderLibrary({}, { tab: 'books' }, ctxDe([{ id: 'rT', original_title: 'Tapée', availability: 'available', edition_id: null }, signet('rL', 'Rangé', { edition_id: 'eX' }), signet('rV', 'Vide', { source_url: '' })]));
       eq([n.textContent.includes('Aucun livre pour l’instant.'), n.textContent.includes('Liens web gardés')], [true, false], 'Mes livres sans signet : aucune section « Liens web gardés » (rien n’est rendu)');
       // (c) le plus récent d'abord : created_at, sinon updated_at
       const ancien = signet('r1', 'Ancien', { created_at: '2026-10-01T10:00:00.000Z' });
       const recent = signet('r2', 'Récent', { created_at: '2026-10-15T10:00:00.000Z' });
-      eq(titres(await renderLibrary({}, {}, ctxDe([ancien, recent]))), ['Récent', 'Ancien'], 'Liens web gardés : le plus récent d’abord (created_at)');
-      eq(titres(await renderLibrary({}, {}, ctxDe([{ ...ancien, updated_at: '2026-10-16T10:00:00.000Z' }, recent]))), ['Récent', 'Ancien'], 'Liens web gardés : created_at prime — « dernier gardé », un favori touché (updated_at) ne réordonne pas la liste (ronde 1)');
-      eq(titres(await renderLibrary({}, {}, ctxDe([signet('r0', 'Sans date'), signet('r3', 'Modifié seulement', { updated_at: '2026-10-10T10:00:00.000Z' }), ancien, recent]))), ['Récent', 'Modifié seulement', 'Ancien', 'Sans date'],
+      eq(titres(await renderLibrary({}, { tab: 'books' }, ctxDe([ancien, recent]))), ['Récent', 'Ancien'], 'Liens web gardés : le plus récent d’abord (created_at)');
+      eq(titres(await renderLibrary({}, { tab: 'books' }, ctxDe([{ ...ancien, updated_at: '2026-10-16T10:00:00.000Z' }, recent]))), ['Récent', 'Ancien'], 'Liens web gardés : created_at prime — « dernier gardé », un favori touché (updated_at) ne réordonne pas la liste (ronde 1)');
+      eq(titres(await renderLibrary({}, { tab: 'books' }, ctxDe([signet('r0', 'Sans date'), signet('r3', 'Modifié seulement', { updated_at: '2026-10-10T10:00:00.000Z' }), ancien, recent]))), ['Récent', 'Modifié seulement', 'Ancien', 'Sans date'],
         'Liens web gardés : sans created_at, updated_at sert de repli ; sans aucun horodatage, aucune levée et en dernier (ronde 1)');
       // (d) l'onglet Plats n'a pas la section
       n = await renderLibrary({}, { tab: 'dishes' }, ctxDe([seul]));
       eq(n.textContent.includes('Liens web gardés'), false, 'Mes livres, onglet Plats : pas de section « Liens web gardés »');
       // Repli : un signet sans doc ne lève pas — un lien vers sa fiche, au titre du signet
-      n = await renderLibrary({}, {}, ctxDe([seul], { sansDoc: ['rS'] }));
+      n = await renderLibrary({}, { tab: 'books' }, ctxDe([seul], { sansDoc: ['rS'] }));
       { const a = bloc(n)?.querySelector('a.btn'); eq([titres(n), a?.getAttribute('href'), a?.textContent], [['Saumon au fenouil'], '#/recipes/rS', 'Saumon au fenouil'], 'Liens web gardés : sans doc, un lien a.btn vers la fiche, jamais une levée'); }
       // Avec des livres (grille sur une base jetable) : la section suit la grille, et le signet rangé dans un livre n'y est pas
       await withRepo(async () => {
         const ed = { id: 'eG', book_id: 'bG', year: 2020, cover_sha256: null };
         const livre = { id: 'bG', title: 'Grille', author: 'G.', cuisines: [] };
-        const m = await renderLibrary({}, {}, ctxDe([seul, signet('rL', 'Rangé', { edition_id: 'eG' })], { editions: [ed], books: [livre] }));
+        const m = await renderLibrary({}, { tab: 'books' }, ctxDe([seul, signet('rL', 'Rangé', { edition_id: 'eG' })], { editions: [ed], books: [livre] }));
         eq([m.textContent.includes('Aucun livre pour l’instant.'), titres(m), apres(m.querySelector('.grid'), bloc(m))], [false, ['Saumon au fenouil'], true], 'Mes livres avec un livre : la section suit la grille, le signet rangé dans un livre n’y est pas');
       });
       eq(EN['Liens web gardés'], 'Saved web links', 'en.js : « Liens web gardés »');
@@ -3793,18 +3824,22 @@ export async function runAjouterTests({ eq, ok }) {
       // Deux contrôles positifs d'abord : le source est bien arrivé, et c'est bien un module.
       ok(src.length > 300, `statique ${m} : le source est bien lu (${src.length} caractères)`);
       ok(/\bexport\b/.test(src), `statique ${m} : c’est bien le module (un export y figure)`);
-      for (const [, cle] of src.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)) if (!(cle in EN)) manquantes.push(`${m}: ${cle}`);
+      for (const cle of clesT(src)) if (!(cle in EN)) manquantes.push(`${m}: ${cle}`); // lot UI-1, vague finale : t('…'), t("…") et t(`…`) sans ${…}
       ok(!/\bhtml:\s/.test(src) && !/innerHTML\s*=/.test(src) && !/window\.open\(/.test(src), `statique ${m} : ni html:, ni innerHTML, ni window.open (S14)`);
     }
     for (const [m, cles] of Object.entries(CHAINES_NEUVES_AILLEURS)) for (const cle of cles) if (!(cle in EN)) manquantes.push(`${m}: ${cle}`);
     eq(manquantes, [], 'i18n : chaque t() des modules neufs a son entrée en.js (F13)');
+    // Le détecteur lui-même (lot UI-1, vague finale, constat 13 ; le motif du témoin de tests/creer-ia.js) : les trois formes de littéral sont vues, un gabarit à
+    // expression et une variable ne le sont pas (avant, F13 ne lisait que les guillemets simples : un t("…") ou un t(`…`) neuf sans anglais passait).
+    eq(clesT("t('simples') + t(\"doubles\") + t(`accents graves`) + t(`gabarit ${x}`) + t(variable) + t('Échappée l\\'a')"), ['simples', 'doubles', 'accents graves', "Échappée l\\'a"],
+      'F13 : le détecteur lit t(\'…\'), t("…") et t(`…`) sans ${…} ; ni un gabarit à expression ni une variable (lot UI-1, vague finale)');
   }
   {
     // Rendu hostile : une chaîne <img onerror> reste du TEXTE dans les rendus neufs. F6 : plus de drapeau sur
     // `window` — un `window.__x` resté `undefined` ne prouve rien de plus que le compte d'<img>, et laisse une
     // trace globale derrière le test. Le contrôle positif est que le texte est bien là, affiché tel quel.
     const hostile = '<img src=x onerror="void 0">';
-    const n1 = renderGrille({ cartes: [{ action: 'pages', ico: 'x', titre: hostile, sousTitre: hostile }] }, { pages: () => {} });
+    const n1 = renderGrille({ cartes: [{ action: 'pages', ico: 'appareil-photo', titre: hostile, sousTitre: hostile }] }, { pages: () => {} }); // lot Carnet T5 : ico = un nom d'icône (icone(nom) lève sur un inconnu)
     const n2 = renderPuces(pucesModel({ choisies: [hostile] }), {});
     const n3 = S.renderSignet({ ...S.signetModel({ adresse: 'https://a.test/', titre: hostile }), livres: [] }, {});
     eq([n1.querySelectorAll('img').length, n2.querySelectorAll('img').length, n3.querySelectorAll('img').length], [0, 0, 0], 'statique : une chaîne hostile ne crée aucun élément (S14)');
@@ -3814,9 +3849,9 @@ export async function runAjouterTests({ eq, ok }) {
     const sw = await lire('../sw.js');
     ok(sw.length > 300 && sw.includes('SHELL'), `statique sw.js : le source est bien lu (${sw.length} caractères, SHELL présent) — sans quoi les inclusions ci-dessous ne prouveraient rien (S4)`);
     for (const m of ['./src/ui/puces.js', './src/ui/livre-ajout.js', './src/ui/accueil-livre.js', './src/ui/signet.js', './src/core/image.js', './src/core/blob-urls.js', './src/core/lien.js', './src/core/isbn.js', './src/domain/lecture-web.js']) ok(sw.includes(`'${m}'`), `SHELL : ${m}`);
-    ok(/VERSION = 'cuisine-os-v0\.16\.0-\d+'/.test(sw), 'sw.js : VERSION 0.16.0');
+    ok(/VERSION = 'cuisine-os-v0\.17\.0-\d+'/.test(sw), 'sw.js : VERSION 0.17.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.16.0', 'APP_VERSION 0.16.0 (lot UI-2, aperçus des résultats web)');
+    eq(APP_VERSION, '0.17.0', 'APP_VERSION 0.17.0 (lot UI-1, carnet)');
     const { GOOGLE_BOOKS } = await import('../src/sync/config.js');
     ok(typeof GOOGLE_BOOKS?.key === 'string' && (GOOGLE_BOOKS.key === '' || /^AIza[0-9A-Za-z_-]{35}$/.test(GOOGLE_BOOKS.key)), 'config : la clé Google Books est vide ou au format d’une clé d’API publique — un test de forme, jamais de valeur (S2/F2)');
   }

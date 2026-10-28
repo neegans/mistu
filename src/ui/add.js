@@ -13,6 +13,7 @@ import * as repoModule from '../model/repo.js';
 import { lignesImports, dateReception } from '../domain/import-cible.js';
 import { progressionLots, blocsImports, REFUS_ARRET_LOT } from '../domain/classement.js';
 import { pageHeader, carte, libelleLivre, field, select } from './components.js';
+import { icone } from './icones.js';
 import { startScanSession } from './import.js';
 import { DOCUMENT_ID, lancerExtraction, annulerVol, phraseEchec, texteRefus, cleLecture, volEnCours } from './import-cible.js';
 import { texteEchecClassement, lotEnCours, lireLeLot } from './regroupement.js';
@@ -24,21 +25,23 @@ export const GRILLE_ACTIONS = ['ajouterLivre', 'pages', 'saisir', 'signet', 'cre
 export const ACCEPT_PHOTOS = 'image/*';
 export const ACCEPT_FICHIERS = 'image/*,application/pdf,application/epub+zip';
 
+// D-UI-9 (lot UI-1 « Carnet ») : `ico` est le NOM d'une icône au trait d'icones.js (plus un émoji : il ne prenait pas la couleur) ; renderGrille la rend.
 export function grilleModel() {
   return { cartes: [
-    { action: 'ajouterLivre', ico: '📚', titre: t('Ajouter un livre'), sousTitre: t('ISBN (scan ou saisie), ou titre à la main') },
-    { action: 'pages', ico: '📷', titre: t('Photographier ou importer des pages'), sousTitre: t('Caméra, photos ou PDF — pour une recette ou un index') },
-    { action: 'saisir', ico: '✍️', titre: t('Saisir une recette'), sousTitre: t('À la main') },
-    { action: 'signet', ico: '🔗', titre: t('Garder un lien web'), sousTitre: t('Une recette ou une page à retrouver') },
-    { action: 'creerIA', ico: '✨', titre: t('Créer avec l’IA'), sousTitre: t('Une proposition à vérifier') },
-    { action: 'congelateur', ico: '🧊', titre: t('Ajouter un lot au congélateur'), sousTitre: t('Portions, date, recette source et méthode de réchauffage.') },
+    { action: 'ajouterLivre', ico: 'livres', titre: t('Ajouter un livre'), sousTitre: t('ISBN (scan ou saisie), ou titre à la main') },
+    { action: 'pages', ico: 'appareil-photo', titre: t('Photographier ou importer des pages'), sousTitre: t('Caméra, photos ou PDF — pour une recette ou un index') },
+    { action: 'saisir', ico: 'crayon', titre: t('Saisir une recette'), sousTitre: t('À la main') },
+    { action: 'signet', ico: 'lien', titre: t('Garder un lien web'), sousTitre: t('Une recette ou une page à retrouver') },
+    { action: 'creerIA', ico: 'etincelle', titre: t('Créer avec l’IA'), sousTitre: t('Une proposition à vérifier') },
+    { action: 'congelateur', ico: 'flocon', titre: t('Ajouter un lot au congélateur'), sousTitre: t('Portions, date, recette source et méthode de réchauffage.') },
   ] };
 }
 
-// Une carte sans geste câblé n'est pas rendue (même garde que la porte d'entrée).
+// Une carte sans geste câblé n'est pas rendue (même garde que la porte d'entrée). Un nom d'icône inconnu LÈVE (icone) : jamais une carte sans pictogramme
+// en silence.
 export function renderGrille(model, gestes = {}) {
   return el('div', { class: 'grid wide' },
-    ...model.cartes.filter((c) => typeof gestes[c.action] === 'function').map((c) => carte(c.ico, c.titre, c.sousTitre, () => gestes[c.action]())));
+    ...model.cartes.filter((c) => typeof gestes[c.action] === 'function').map((c) => carte(icone(c.ico), c.titre, c.sousTitre, () => gestes[c.action]())));
 }
 
 // livres : [{ edition, book, recence }] ; editionImposee : id connu (I-F) ou null ; genre : 'recette' | 'index'.

@@ -602,13 +602,13 @@ export async function runLectureWebTests({ eq, ok }) {
 
         // --- Ouverture
         let root = await monter('rc_e1');
-        eq([root.textContent.includes('Lire une recette web'), bouton(root, 'Choisir des photos'), lien(root, 'Ouvrir le lien')?.getAttribute('href'), root.querySelector('[data-role="hote"]').textContent, root.etatRouteWeb()], [true, null, 'https://ricardocuisine.com/rc_e1', 'ricardocuisine.com', { importId: null, status: null, vol: false, remplacement: null }], 'écran : la route d’un signet ouvre la variante web — aucun « Choisir des photos », « Ouvrir le lien », sous-titre = hôte recalculé');
+        eq([root.textContent.includes('Lire une recette web'), bouton(root, 'Choisir des photos'), lien(root, 'Voir la page d’origine')?.getAttribute('href'), root.querySelector('[data-role="hote"]').textContent, root.etatRouteWeb()], [true, null, 'https://ricardocuisine.com/rc_e1', 'ricardocuisine.com', { importId: null, status: null, vol: false, remplacement: null }], 'écran : la route d’un signet ouvre la variante web — aucun « Choisir des photos », « Voir la page d’origine », sous-titre = hôte recalculé');
         eq([bouton(root, 'Lire la recette avec l’assistant').disabled, root.textContent.includes('Une lecture = un appel à l’assistant, compté dans ton quota du jour.'), await db.count('imports'), root.querySelector('[data-role="remplacement"]')], [false, true, 0, null], 'écran : « Lire la recette avec l’assistant » allumé ; la phrase du quota ; rien d’écrit à l’ouverture ; un signet jamais lu (aucune version) ne dit rien d’un remplacement (vague finale)');
         root = await monter('rc_e1', { session: null });
         eq([root.querySelector('[data-role="connexion-ia"]')?.textContent.includes('Connecte-toi pour utiliser l’assistant.'), bouton(root, 'Lire la recette avec l’assistant').disabled, reseau], [true, true, 0], 'écran : sans session → carte « Connecte-toi », bouton éteint, zéro POST');
         root = await monter('rc_http');
         eq([bouton(root, 'Lire la recette avec l’assistant').disabled, root.querySelector('[data-role="interdit"]')?.textContent, await db.count('imports')], [true, 'Cette adresse ne peut pas être lue par l’assistant : seule une page publique en https est admise. Ouvre-la toi-même.', 0], 'écran (B-20) : signet en http: → bouton éteint, texte interdit, zéro écriture');
-        eq(lien(root, 'Ouvrir le lien')?.getAttribute('rel'), 'noopener noreferrer', 'écran (I-B5, ronde 1) : « Ouvrir le lien » de l’écran porte rel="noopener noreferrer"');
+        eq(lien(root, 'Voir la page d’origine')?.getAttribute('rel'), 'noopener noreferrer', 'écran (I-B5, ronde 1) : « Voir la page d’origine » de l’écran porte rel="noopener noreferrer"');
         // Ronde 1 (I-B3) : un vol PHOTO tient le document (vol.js) → « Lire la recette avec l’assistant » éteint.
         const tenuePhoto = { importId: 'imp_photo_r1', controller: new AbortController(), repo };
         V.prendreVol(tenuePhoto);
@@ -669,17 +669,17 @@ export async function runLectureWebTests({ eq, ok }) {
         eq([e1.availability, e1.verification_state, e1.original_title, e1.source_author, e1.source_site, e1.source_fetched_at, e1.source_kind, e1.source_url], ['available', 'to_verify', 'Pâtes puttanesca', 'Ricardo', 'Ricardo Cuisine', NOW, 'jsonld', 'https://ricardocuisine.com/rc_e1'], 'Enregistrer : fiche available, to_verify, titre lu (D-B24), source_* ; source_url du signet jamais retapée depuis url_finale');
         eq([v1.kind, v1.provenance.url_finale, v1.provenance.titre_signet, i1.status, i1.reponse_brute, i1.finished_at, navs.at(-1), dits.at(-1)], ['extraction', 'https://www.ricardocuisine.com/r', 'ricardocuisine.com', 'enregistre', null, NOW, `/recipes/rc_e1?v=${v1.id}`, 'Recette enregistrée'], 'Enregistrer : version et provenance, import enregistre (reponse_brute null, finished_at), navigation vers la version, toast « Recette enregistrée »');
 
-        // --- La fiche après « Enregistrer » : bandeau web (hôte réel d'abord, S-2), « Ouvrir le lien » dans les actions, « Relire la page avec l’assistant ».
+        // --- La fiche après « Enregistrer » : bandeau web (hôte réel d'abord, S-2), « Voir la page d’origine » dans les actions, « Relire la page avec l’assistant ».
         let fiche = await renderRecipe({ id: 'rc_e1' }, { v: v1.id }, await ctxDe(), gestes()); scene.append(fiche);
         const bw = fiche.querySelector('[data-role="bandeau-web"]');
         eq([bw?.firstChild.textContent.startsWith('Lue sur www.ricardocuisine.com le '), bw?.firstChild.textContent.endsWith(' · données de la page — vérifie.'), bw?.querySelector('[data-role="selon-la-page"]')?.textContent], [true, true, 'Selon la page : Ricardo Cuisine · Ricardo'], 'fiche : « Lue sur {hôte réel} le {d} · données de la page — vérifie. » puis « Selon la page : Site · Auteur » (S-2 ; mutant « site à la place de l’hôte » : rouge)');
-        eq([fiche.querySelector('[data-role="ouvrir-lien"]')?.getAttribute('href'), fiche.querySelector('[data-role="ouvrir-lien"]')?.getAttribute('rel'), !!fiche.querySelector('[data-role="relire-web"]')], ['https://ricardocuisine.com/rc_e1', 'noopener noreferrer', true], 'fiche (I-B5, D-B18) : « Ouvrir le lien » dans les actions d’une fiche lue, et « Relire la page avec l’assistant »');
+        eq([fiche.querySelector('[data-role="ouvrir-lien"]')?.getAttribute('href'), fiche.querySelector('[data-role="ouvrir-lien"]')?.getAttribute('rel'), !!fiche.querySelector('[data-role="relire-web"]')], ['https://ricardocuisine.com/rc_e1', 'noopener noreferrer', true], 'fiche (I-B5, D-B18) : « Voir la page d’origine » dans les actions d’une fiche lue, et « Relire la page avec l’assistant »');
         fiche.remove();
         fiche = await renderRecipe({ id: 'rc_e1' }, {}, await ctxDe(null), gestes()); scene.append(fiche);
-        eq([!!fiche.querySelector('[data-role="relire-web"]'), !!fiche.querySelector('[data-role="ouvrir-lien"]')], [false, true], 'fiche : sans session, « Relire la page avec l’assistant » est absent ; « Ouvrir le lien » reste');
+        eq([!!fiche.querySelector('[data-role="relire-web"]'), !!fiche.querySelector('[data-role="ouvrir-lien"]')], [false, true], 'fiche : sans session, « Relire la page avec l’assistant » est absent ; « Voir la page d’origine » reste');
         fiche.remove();
         fiche = await renderRecipe({ id: 'rc_corr' }, {}, await ctxDe(), gestes()); scene.append(fiche);
-        eq([fiche.querySelector('[data-role="bandeau-web"]'), !!fiche.querySelector('[data-role="ouvrir-lien"]')], [null, true], 'fiche : aucun bandeau web sur une correction (la provenance de la version n’a pas d’adresse) ; « Ouvrir le lien » reste');
+        eq([fiche.querySelector('[data-role="bandeau-web"]'), !!fiche.querySelector('[data-role="ouvrir-lien"]')], [null, true], 'fiche : aucun bandeau web sur une correction (la provenance de la version n’a pas d’adresse) ; « Voir la page d’origine » reste');
         fiche.remove();
 
         // --- Relecture d'une fiche déjà lue par l'assistant (D-B8) : pas de dialogue, nouvelle version courante, l'ancienne reste, titre conservé ;
@@ -789,7 +789,7 @@ export async function runLectureWebTests({ eq, ok }) {
         await attendre(() => ff.appels.length === 1 && !!bouton(root, 'Annuler'), 'vol');
         bouton(root, 'Annuler').click();
         await attendre(async () => (await ligneDe('rc_e2'))?.status === 'echec' && root.etatRouteWeb().status === 'echec', 'echec(annule) rendu');
-        eq([ff.appels[0].options.signal.aborted, root.querySelector('[data-role="echec"]').textContent, root.querySelector('[data-role="action"] a')?.classList.contains('primary'), !!bouton(root, 'Réessayer'), !!bouton(root, 'Ignorer'), !!lien(root, 'Retour à la fiche')], [true, 'Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.', true, true, true, true], 'Annuler : fetch abandonné, echec(annule), texte I-B7 ; « Ouvrir le lien » (primaire), « Réessayer », « Ignorer », « Retour à la fiche »');
+        eq([ff.appels[0].options.signal.aborted, root.querySelector('[data-role="echec"]').textContent, root.querySelector('[data-role="action"] a')?.classList.contains('link'), !!bouton(root, 'Réessayer'), !!bouton(root, 'Ignorer'), !!lien(root, 'Retour à la fiche')], [true, 'Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.', true, true, true, true], 'Annuler : fetch abandonné, echec(annule), texte I-B7 ; « Voir la page d’origine » (lien texte), « Réessayer », « Ignorer », « Retour à la fiche »');
         bouton(root, 'Réessayer').click();
         await attendre(() => ff.appels.length === 2, 'un POST de plus');
         eq((await ligneDe('rc_e2')).status, 'en_cours', '« Réessayer » : echec → en_cours, un POST');
@@ -1048,11 +1048,11 @@ export async function runLectureWebTests({ eq, ok }) {
 
         // --- La fiche d'un signet : états, bascule de session (F-9), lire, http, hostile, repères.
         const seul = blocSignet((await ctxDe()).recipesById.get('rc_f1'), await ctxDe());
-        eq([seul.querySelector('[data-role="lire-web"]').disabled, seul.querySelector('[data-role="connexion-ia"]').hidden, seul.querySelector('a').textContent], [true, true, 'Ouvrir le lien'], 'blocSignet (F-9) : rendu synchrone — bouton éteint, carte cachée, « Ouvrir le lien »');
+        eq([seul.querySelector('[data-role="lire-web"]').disabled, seul.querySelector('[data-role="connexion-ia"]').hidden, seul.querySelector('a').textContent], [true, true, 'Voir la page d’origine'], 'blocSignet (F-9) : rendu synchrone — bouton éteint, carte cachée, « Voir la page d’origine »');
         fiche = await renderRecipe({ id: 'rc_f1' }, {}, await ctxDe(), gestes({ fetch: (ff = fauxFetch()).fetch })); scene.append(fiche);
         eq([fiche.querySelector('[data-role="lire-web"]').disabled, fiche.querySelector('[data-role="connexion-ia"]').hidden, fiche.textContent.includes('L’app n’a pas encore lu la page.')], [false, true, true], 'fiche : avec session, le bouton s’allume et la carte reste cachée (aucun flash « Connecte-toi »)');
         const sansSession = await renderRecipe({ id: 'rc_f1' }, {}, await ctxDe(null), gestes()); scene.append(sansSession);
-        eq([sansSession.querySelector('[data-role="lire-web"]').disabled, sansSession.querySelector('[data-role="connexion-ia"]').hidden, !!lien(sansSession, 'Ouvrir le lien')], [true, false, true], 'fiche : sans session, la carte est montrée, le bouton reste éteint, « Ouvrir le lien » reste');
+        eq([sansSession.querySelector('[data-role="lire-web"]').disabled, sansSession.querySelector('[data-role="connexion-ia"]').hidden, !!lien(sansSession, 'Voir la page d’origine')], [true, false, true], 'fiche : sans session, la carte est montrée, le bouton reste éteint, « Voir la page d’origine » reste');
         sansSession.remove();
         fiche.querySelector('[data-role="lire-web"]').click();
         await attendre(() => ff.appels.length === 1 && navs.at(-1) === '/recipes/rc_f1/importer', 'lu et navigué');
@@ -1068,9 +1068,9 @@ export async function runLectureWebTests({ eq, ok }) {
         await db.mutate({ puts: { imports: [importWeb('imp_ech', 'rc_f2', { status: 'echec', appels: 1, erreur: { raison: 'inaccessible', extra: {} } })] }, origin: 'device' });
         const ctxE = await ctxDe();
         const echec = blocSignet(ctxE.recipesById.get('rc_f2'), ctxE);
-        eq([echec.textContent.includes('Contenu non récupéré : ouvre la page.'), lien(echec, 'Ouvrir le lien').classList.contains('primary'), echec.querySelector('[data-role="lire-web"]')?.textContent, echec.querySelector('[data-role="raison"]').textContent], [true, true, 'Réessayer', 'La page n’a pas pu être téléchargée (site injoignable, trop lent, ou qui refuse les robots). Ouvre-la toi-même.'], 'blocSignet : echec → « Contenu non récupéré… », « Ouvrir le lien » (primaire), « Réessayer », la phrase du cas dessous');
+        eq([echec.textContent.includes('Contenu non récupéré : ouvre la page.'), lien(echec, 'Voir la page d’origine')?.classList.contains('link'), echec.querySelector('[data-role="lire-web"]')?.textContent, echec.querySelector('[data-role="raison"]').textContent], [true, true, 'Réessayer', 'La page n’a pas pu être téléchargée (site injoignable, trop lent, ou qui refuse les robots). Ouvre-la toi-même.'], 'blocSignet : echec → « Contenu non récupéré… », « Voir la page d’origine » (lien texte), « Réessayer », la phrase du cas dessous');
         const http = blocSignet((await ctxDe()).recipesById.get('rc_http'), await ctxDe());
-        eq([http.querySelector('[data-role="lire-web"]'), http.querySelector('[data-role="interdit"]')?.textContent.startsWith('Cette adresse ne peut pas être lue'), !!lien(http, 'Ouvrir le lien')], [null, true, true], 'blocSignet (B-20) : signet en http: → aucun bouton de lecture, texte interdit, « Ouvrir le lien »');
+        eq([http.querySelector('[data-role="lire-web"]'), http.querySelector('[data-role="interdit"]')?.textContent.startsWith('Cette adresse ne peut pas être lue'), !!lien(http, 'Voir la page d’origine')], [null, true, true], 'blocSignet (B-20) : signet en http: → aucun bouton de lecture, texte interdit, « Voir la page d’origine »');
         const hostile = blocSignet((await ctxDe()).recipesById.get('rc_hostile'), await ctxDe());
         eq([hostile.querySelectorAll('a').length, hostile.querySelector('[data-role="lire-web"]'), hostile.textContent.includes('javascript:alert(1)')], [0, null, true], 'blocSignet : adresse hostile → adresseInerte, aucun lien, aucun bouton de lecture');
         const rep = blocSignet((await ctxDe()).recipesById.get('rc_rep'), await ctxDe());
@@ -1106,7 +1106,7 @@ export async function runLectureWebTests({ eq, ok }) {
         const bandeauM = (id) => fichesM[id].querySelector('[data-role="bandeau-web"]');
         eq([bandeauM('rc_m4')?.firstChild?.textContent.startsWith('Lue sur www.ricardocuisine.com le '), bandeauM('rc_m4')?.querySelector('[data-role="selon-la-page"]') ?? null, bandeauM('rc_m5')?.querySelector('[data-role="selon-la-page"]')?.textContent, bandeauM('rc_m5')?.querySelectorAll('img,b,script').length, bandeauM('rc_m6')?.firstChild?.textContent],
           [true, null, 'Selon la page : <b>Site</b>' + 'z'.repeat(189) + ' · ' + BAL + 'Ricardo', 0, 'Lue sur www.ricardocuisine.com · données de la page — vérifie.'], 'fiche (I-B2, S-2, ronde 1) : la provenance relue au rendu par lirePage — site et auteur porteurs d’adresse écartés, bornés à 200, Cc/Cf retirés, balisage en TEXTE ; date illisible → « Lue sur {h} · {m} — vérifie. » (jamais un « le » orphelin)');
-        eq([fichesM.rc_m7.querySelector('[data-role="relire-web"]'), fichesM.rc_m7.querySelector('[data-role="ouvrir-lien"]')?.getAttribute('href')], [null, 'http://ricardocuisine.com/m7'], 'fiche (§ 4.1 c, I-B5, ronde 1) : une fiche http: à version n’offre pas « Relire la page avec l’assistant » ; « Ouvrir le lien » reste');
+        eq([fichesM.rc_m7.querySelector('[data-role="relire-web"]'), fichesM.rc_m7.querySelector('[data-role="ouvrir-lien"]')?.getAttribute('href')], [null, 'http://ricardocuisine.com/m7'], 'fiche (§ 4.1 c, I-B5, ronde 1) : une fiche http: à version n’offre pas « Relire la page avec l’assistant » ; « Voir la page d’origine » reste');
         for (const f of Object.values(fichesM)) f.remove();
         const horsLigneFiche = await renderRecipe({ id: 'rc_m8' }, {}, await ctxDe(), gestes({ enLigne: () => false })); scene.append(horsLigneFiche);
         const etatHL = [horsLigneFiche.querySelector('[data-role="lire-web"]')?.disabled, horsLigneFiche.textContent.includes('Tu es hors ligne.')];
@@ -1147,7 +1147,7 @@ export async function runLectureWebTests({ eq, ok }) {
         eq([ficheS7.querySelector('[data-role="incertain-lecture"]')?.textContent, ficheS7.textContent.includes('https://evil.test/promo')], ['Incertain : b', false], 'fiche (vague finale, I-B2, S-7) : « Incertain : » lu dans le résultat RELU de la ligne web — l’entrée à adresse écartée, les champs de la ligne et non ceux de la provenance');
         ficheS7.remove();
         const ficheSH = await renderRecipe({ id: 'rc_sh' }, {}, await ctxDe(), gestes()); scene.append(ficheSH);
-        eq([ficheSH.querySelector('[data-role="bandeau-web"]'), !!ficheSH.querySelector('[data-role="ouvrir-lien"]')], [null, true], 'fiche (vague finale) : une provenance web dont l’adresse ne se lit pas (« pas une adresse », sans url_finale) → aucun bandeau « Lue sur … » ; la fiche est rendue (« Ouvrir le lien »)');
+        eq([ficheSH.querySelector('[data-role="bandeau-web"]'), !!ficheSH.querySelector('[data-role="ouvrir-lien"]')], [null, true], 'fiche (vague finale) : une provenance web dont l’adresse ne se lit pas (« pas une adresse », sans url_finale) → aucun bandeau « Lue sur … » ; la fiche est rendue (« Voir la page d’origine »)');
         ficheSH.remove();
         eq([srcRecette.includes('L’app n’a pas lu la page'), srcEn.includes('L’app n’a pas lu la page'), srcEn.includes('lot suivant')], [false, false, false], 'B-27 : « L’app n’a pas lu la page » ni dans recipe.js ni dans en.js ; le toast « lot suivant » retiré du dictionnaire');
         eq([/anthropic|supabase/i.test(srcWeb), /anthropic|supabase/i.test(srcVol), /anthropic|supabase/i.test(srcDomaine), /\bconst TEXTES_/.test(srcWeb)], [false, false, false, false], 'I-B6 (test de source ; sans égard à la casse, X8, vague finale du lot C) : aucun texte ne nomme le fournisseur ni la base ; aucune table TEXTES_ dans import-web.js (F-11)');

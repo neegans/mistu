@@ -27,7 +27,7 @@ function appliancesTab(ctx) {
     }),
     el('button', { class: 'btn', onClick: async () => { const name = await promptDialog(t('Nom de l’appareil')); if (!name) return; await repo.save('appliances', { id: repo.newId('app'), name: name.trim(), brand: '', model: '', capabilities: [], notes: '' }); refresh(); } }, t('Appareil personnalisé')));
   root.append(addRow);
-  if (!ctx.appliances.length) { root.append(emptyState('🍳', t('Aucun appareil enregistré.'))); return root; }
+  if (!ctx.appliances.length) { root.append(emptyState('toque', t('Aucun appareil enregistré.'))); return root; }
   for (const a of [...ctx.appliances].sort((x, y) => x.name.localeCompare(y.name))) {
     const caps = new Set(a.capabilities || []);
     root.append(el('details', { class: 'card' },
@@ -72,7 +72,7 @@ function inventoryTab(ctx, query) {
     } }, t('Ajouter'))));
   root.append(form);
   const lots = [...ctx.inventory].sort((a, b) => (a.use_by || '9').localeCompare(b.use_by || '9'));
-  if (!lots.length) { root.append(emptyState('🧊', t('Inventaire vide. Exemple : « J’ai congelé quatre portions de bœuf braisé. »'))); return root; }
+  if (!lots.length) { root.append(emptyState('flocon', t('Inventaire vide. Exemple : « J’ai congelé quatre portions de bœuf braisé. »'))); return root; }
   for (const loc of ['congelateur', 'frigo', 'garde_manger']) {
     const rows = lots.filter((l) => l.location === loc);
     if (!rows.length) continue;

@@ -13,12 +13,15 @@ import { pastilleModel, invalidate } from './state.js';
 import { estCreationIA, etiquetteCreationIA } from '../domain/creation-ia.js';
 import { DIFFICULTES, LIMITES_WEB } from '../domain/recherche-web.js';
 import { pointeurValide } from '../domain/photo-web.js';
+import { icone } from './icones.js';
 
-export function pageHeader(title, { subtitle = null, actions = [], back = null } = {}) {
+// classeTitre (lot UI-1, D-UI-3, H-20) : une classe posée sur le h1 — 'titre-fiche' pour une fiche recette ou livre (tâches 3 et 4) ; sans elle, le
+// titre de PAGE. `back` reste un objet { href, label } (H-1). Rien d'autre ne change.
+export function pageHeader(title, { subtitle = null, actions = [], back = null, classeTitre = null } = {}) {
   return el('header', { class: 'stack', style: { marginBottom: '1rem' } },
     back ? el('a', { href: `#${back.href}`, class: 'muted', style: { textDecoration: 'none', fontSize: '.9rem' } }, `← ${back.label}`) : null,
     el('div', { class: 'row between top' },
-      el('div', null, el('h1', null, title), subtitle ? el('p', { class: 'muted' }, subtitle) : null),
+      el('div', null, el('h1', { class: classeTitre }, title), subtitle ? el('p', { class: 'muted' }, subtitle) : null),
       actions.length ? el('div', { class: 'row' }, ...actions) : null));
 }
 
@@ -26,16 +29,56 @@ export function section(title, ...children) {
   return el('section', { class: 'card' }, title ? el('h2', null, title) : null, ...children);
 }
 
-export function emptyState(icon, text, action = null) {
-  return el('div', { class: 'empty' }, el('div', { class: 'ico' }, icon), el('p', null, text), action);
+// D-UI-8 (H-2) : la sœur de section() — même forme, même contenu — posée sur le papier : section.plain (styles.css : ni fond, ni ombre, filet fin
+// sous le h2). Seule cette fonction pose la classe plain ; section() reste .card pour ses 54 appelants. Chaque tâche nomme les sections qu'elle bascule.
+export function sectionPlain(title, ...children) {
+  const s = section(title, ...children);
+  s.className = 'plain';
+  return s;
 }
 
+// D-UI-9 : l'icône d'un état vide est un NOM du jeu d'icones.js (icone() lève sur un nom inconnu, un émoji compris : plus aucun émoji ici).
+export function emptyState(icon, text, action = null) {
+  return el('div', { class: 'empty' }, el('div', { class: 'ico' }, icone(icon)), el('p', null, text), action);
+}
+
+// UNE définition d'« une adresse » (D-UI-10 ; T5 ronde 1) : une chaîne non vide. Le badge et la comparaison de plats la lisent ici ; library.js la ré-exporte
+// pour la Bibliothèque et la fiche livre (estAImporter, dansLaGrille, book.js). Un signet = une référence qui porte une adresse : il dit « Lien web » partout
+// où il paraît (I-UI-1, H-19).
+export const aUneAdresse = (r) => typeof r?.source_url === 'string' && r.source_url !== '';
+export const estSignet = (r) => r?.availability === 'reference_only' && aUneAdresse(r);
+// Une page imprimée affichable : un entier de 1 à 9999 (la borne de l'écran d'import, legendeDe) — une fiche reçue ou restaurée peut porter n'importe quoi.
+// Vague finale du lot UI-1 : exportée — la ligne compacte de la fiche livre et la liste « à importer » la lisent aussi (une règle pour la même donnée).
+export const pageAffichable = (p) => Number.isInteger(p) && p >= 1 && p <= 9999;
+// Une note de cuisson affichable : un entier de 1 à 5 (cook.js n'en écrit pas d'autre) ; '★'.repeat d'une note reçue hostile levait (RangeError) et faisait
+// tomber la page entière (Aujourd'hui, la fiche, la comparaison de plats). Toute autre valeur : rien.
+export const etoiles = (note) => (Number.isInteger(note) && note >= 1 && note <= 5 ? '★'.repeat(note) : '');
+
 export function availabilityBadge(recipe) {
-  // Un signet web n'est pas « Repérée dans ton livre » : il n'y a pas de page de livre, il y a un lien (spec § 11, F8).
-  if (recipe.availability === 'reference_only' && recipe.source_url) return el('span', { class: 'badge reference' }, t('Lien web'));
-  const cls = recipe.availability === 'available' ? 'available' : recipe.availability === 'partial' ? 'partial' : 'reference';
-  const text = recipe.availability === 'reference_only' && recipe.printed_page ? t('Repérée dans ton livre — page {p}', { p: recipe.printed_page }) : label('availability', recipe.availability);
-  return el('span', { class: `badge ${cls}` }, text);
+  // Un signet web n'est pas une référence de livre : il n'y a pas de page de livre, il y a un lien (spec UX § 11, F8).
+  if (estSignet(recipe)) return el('span', { class: 'badge reference' }, t('Lien web'));
+  // Lot UI-1 « Carnet » (D-UI-10, H-19) : le badge porte ses propres textes COURTS — listes, cartes, écran d'import. « Repérée dans ton livre — page {p} »
+  // reste sur la FICHE (recipe.js), où il dit d'où la référence vient. STATE_LABELS.availability (i18n.js) n'est lu que par la comparaison de plats
+  // (dish.js, par libelleDisponibilite ci-dessous) : ni les exports ni Redécouvrir ne le lisent.
+  if (recipe.availability === 'reference_only') return el('span', { class: 'badge reference' }, pageAffichable(recipe.printed_page) ? t('À importer · p. {p}', { p: recipe.printed_page }) : t('À importer'));
+  if (recipe.availability === 'available') return el('span', { class: 'badge available' }, t('Disponible'));
+  if (recipe.availability === 'partial') return el('span', { class: 'badge partial' }, t('Partielle'));
+  return el('span', { class: 'badge reference' }, ''); // availability hors vocabulaire (fiche reçue ou restaurée) : un badge vide — jamais la valeur reçue
+}
+
+// Le libellé d'état d'une fiche hors badge : la comparaison de plats (dish.js, provenanceComparee). Un signet dit « Lien web », comme son badge (I-UI-1,
+// H-19) ; un état hors vocabulaire ne dit rien.
+export function libelleDisponibilite(recipe) {
+  if (estSignet(recipe)) return t('Lien web');
+  return ['reference_only', 'partial', 'available'].includes(recipe?.availability) ? label('availability', recipe.availability) : '';
+}
+
+// UI-1 (D-UI-10, I-B5) : « Voir la page d’origine » — un lien texte vers l'adresse LISIBLE d'une fiche (lienSignet : http: compris, seule la LECTURE exige
+// https), le même sur la fiche, le bloc du signet et l'écran d'import web ; la flèche « ↗ » est posée par la feuille (::after), hors du texte. null sans
+// adresse lisible. Remplace « Ouvrir le lien » (trois sites : recipe.js ×2, import-web.js).
+export function lienOrigine(lien) {
+  if (!lien?.ok) return null;
+  return el('a', { class: 'btn link', href: lien.href, target: '_blank', rel: 'noopener noreferrer', dataset: { role: 'ouvrir-lien' } }, t('Voir la page d’origine'));
 }
 
 // C-2 / R-CRE-4 : l'étiquette d'une création IA (ou d'une version d'une fiche origine 'ia'), TEXTE de etiquetteCreationIA rendu par t() ;
@@ -184,11 +227,36 @@ export function remplacerEnRevoquant(conteneur, ...noeuds) {
   for (const u of anciennes) revoquerUrlDeBlob(u);
 }
 
+// Lot UI-1 (T2-R1, T3-R1, T4-R1) : UNE aide pour suivre une largeur (une MediaQueryList injectable) — le bouton mobile de la bibliothèque, la fiche recette, la
+// fiche livre. AU PLUS UN abonné `change` par écran (`cle`) dans toute l'app : l'abonnement attend le MONTAGE (setTimeout 0 puis isConnected : app.js insère
+// la route juste après son rendu ; un rendu dépassé, jamais inséré, ne s'abonne pas — et ne retire pas l'abonné de l'écran affiché), APPLIQUE la largeur lue
+// à cet instant (un change reçu entre le rendu et le montage n'est pas perdu) et retire celui du rendu monté précédent ; un rendu détaché (route quittée) se
+// retire au premier change, sans rien appliquer. À appeler APRÈS le dernier await du rendu. `appliquer(e)` reçoit l'événement (rien au montage).
+const suivisDeLargeur = new Map(); // cle → { mq, suivre } : l'abonnement du dernier rendu monté de cet écran
+export function suivreLargeurAuMontage(cle, racine, mq, appliquer) {
+  setTimeout(() => {
+    if (!racine?.isConnected || typeof mq?.addEventListener !== 'function') return;
+    const avant = suivisDeLargeur.get(cle);
+    if (avant) avant.mq.removeEventListener?.('change', avant.suivre);
+    const suivre = (e) => {
+      if (racine.isConnected) { appliquer(e); return; }
+      mq.removeEventListener?.('change', suivre);
+      if (suivisDeLargeur.get(cle)?.suivre === suivre) suivisDeLargeur.delete(cle);
+    };
+    appliquer();
+    mq.addEventListener('change', suivre);
+    suivisDeLargeur.set(cle, { mq, suivre });
+  }, 0);
+}
+
 // doc : { recipe, version, book, edition, cooked }
-export function recipeCard(doc, { extra = null, href = null, reasons = null } = {}) {
+// Lot UI-1 (D-UI-5) : `photoEnTete: true` rend la carte-plat VERTICALE (cartePlat, ci-dessous) à partir de `fichier`, la ligne files que l'appelant a lue
+// en une fois ; sans l'option, la carte horizontale d'avant, inchangée (épinglée par tests/photo-plat.js, « référence construite »).
+export function recipeCard(doc, { extra = null, href = null, reasons = null, photoEnTete = false, fichier = null } = {}) {
+  if (photoEnTete) return cartePlat(doc, { fichier, href, extra });
   const { recipe, version, book, edition } = doc;
   const etiquette = etiquetteIA(version, recipe); // C-2 : depuis doc.version ou recipe.origine
-  return el('a', { class: 'item-link card', href: href || `#/recipes/${recipe.id}` },
+  return el('a', { class: 'item-link card', href: href || `#/recipes/${encodeURIComponent(recipe.id)}` }, // vague finale UI-1 : l'identifiant reçu est encodé
     el('div', { class: 'row between top' },
       el('div', { style: { flex: '1', minWidth: '0' } },
         el('h3', null, recipe.display_title || recipe.original_title),
@@ -203,6 +271,68 @@ export function recipeCard(doc, { extra = null, href = null, reasons = null } = 
         doc.cooked ? el('span', { class: 'badge' }, t('Cuisinée {n}×', { n: doc.cooked })) : null)),
     extra);
 }
+
+// --- Lot UI-1 « Carnet » : la carte-plat et sa grille (spec D-UI-4, D-UI-5, I-UI-5, § 3.3) --------------------------------------------------------
+// dureeTotale(version) : PURE. UN nombre de minutes — total_minutes, sinon prep + cook quand les DEUX sont connus — ou null : rien sans durée (B-I-6),
+// jamais la paire « actif · total » de timeText. Une création IA n'a qu'une estimation, dite à part sur sa fiche (C-6, comme timeText). Une valeur
+// qui n'est pas un nombre fini (fiche reçue ou restaurée) vaut null. Le total ne compte que STRICTEMENT positif (T2-R1 : « PT0S » d'un JSON-LD, -30
+// tapé dans l'éditeur). T3-R1 (rien d'inventé, I-UI-1) : une préparation connue et une cuisson inconnue (lecture qui n'a vu que « Préparation : 20 min »)
+// ne font PAS une durée de recette ; une partie connue vaut ≥ 0 (une cuisson de 0 est connue : 15 + 0 = 15), une somme nulle vaut null.
+export function dureeTotale(version) {
+  if (!version || estCreationIA(version)) return null;
+  const positif = (x) => (typeof x === 'number' && Number.isFinite(x) && x > 0 ? x : null);
+  const connu = (x) => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? x : null);
+  const total = positif(version.total_minutes);
+  if (total !== null) return total;
+  const prep = connu(version.prep_minutes); const cook = connu(version.cook_minutes);
+  return prep === null || cook === null || prep + cook <= 0 ? null : prep + cook;
+}
+
+// ligneSource(doc) : PURE. Une fiche créée avec l'assistant dit d'abord sa provenance (C-2, ronde 1 : ni une adresse ni un livre portés par une fiche
+// reçue ne prennent sa place, comme dans provenanceText et libelleSource). Sinon « Du web · {hôte} » quand la fiche a une adresse lisible (hôte
+// RECALCULÉ par lienSignet, jamais source_label : S7), sinon
+// « De mon livre · {titre} » quand elle vient d'un livre, sinon sa provenance d'avant (provenanceText : étiquette IA, source personnelle, adresse non
+// reconnue) ; puis « · {durée} » (formatMinutes) seulement quand dureeTotale en donne une. Une fiche qui a un livre ET une adresse est une page web rangée
+// dans un livre : son texte vient du web, la ligne dit le web (le filtre « De mes livres » la garde, lui : D-UI-4).
+export function ligneSource(doc) {
+  const { recipe, book, edition, version } = doc;
+  const lien = recipe?.source_url ? lienSignet(recipe.source_url) : null;
+  const source = recipe?.origine === 'ia' ? provenanceText(recipe, book, edition)
+    : lien?.ok ? t('Du web · {h}', { h: lien.hote }) : book ? t('De mon livre · {t}', { t: book.title || t('Sans titre') }) : provenanceText(recipe, book, edition);
+  const duree = dureeTotale(version);
+  return duree === null ? source : `${source} · ${formatMinutes(duree)}`;
+}
+
+// cartePlat(doc, { fichier, href, extra }) : la carte-plat verticale. La décision est SYNCHRONE et ne lit rien : `fichier` (la ligne files passée par
+// l'appelant, lue en une fois par repo.getFiles) est sa seule source d'image (I-UI-5) ; quand typeAffichage en fait une image (liste blanche ; le type du
+// blob gagne : G, F-9), img.plat-vignette.grande 4:3 (alt vide : la carte porte le titre ; la classe plat-vignette la soumet à la révocation au redessin,
+// D-T9) ; sinon .sans-photo, le bloc de titre sur --paper-2 — jamais de cadre vide ni d'image générique. Des octets que le navigateur ne décode pas (HEIC
+// hors Safari, octets tronqués) lèvent error : l'img est retirée, la carte passe .sans-photo, son URL révoquée. La variante ne rend PAS vignettePlat (H-10).
+function cartePlat(doc, { fichier = null, href = null, extra = null } = {}) {
+  const { recipe, version } = doc;
+  const type = typeAffichage(fichier);
+  const affichable = !!type && type.startsWith('image/');
+  // Vague finale : l'identifiant est ENCODÉ (une fiche reçue ou restaurée peut porter « ? », « & », « # » ou « / » : la carte ouvre la fiche annoncée, comme rid).
+  const carte = el('a', { class: `item-link carte-plat${affichable ? '' : ' sans-photo'}`, href: href || `#/recipes/${encodeURIComponent(recipe.id)}` });
+  if (affichable) {
+    const u = displayUrl(fichier, urlDeBlob);
+    const img = el('img', { class: 'plat-vignette grande', alt: '', loading: 'lazy', src: u });
+    img.addEventListener('error', () => { img.remove(); carte.classList.add('sans-photo'); revoquerUrlDeBlob(u); }, { once: true });
+    carte.append(img);
+  }
+  const badges = [availabilityBadge(recipe), etiquetteIA(version, recipe), recipe.favorite ? el('span', { class: 'badge' }, '★ ' + t('Favori')) : null,
+    doc.cooked ? el('span', { class: 'badge' }, t('Cuisinée {n}×', { n: doc.cooked })) : null].filter(Boolean);
+  carte.append(el('div', { class: 'carte-plat-corps' },
+    el('h3', null, recipe.display_title || recipe.original_title),
+    el('div', { class: 'muted carte-plat-source' }, ligneSource(doc)),
+    badges.length ? el('div', { class: 'row carte-plat-badges' }, ...badges) : null));
+  // `extra` seulement quand il est donné : Element.append(null) écrirait le texte « null » sous la carte (el() les écarte, append() non).
+  if (extra) carte.append(extra);
+  return carte;
+}
+
+// grilleCartes(noeuds) : div.grille-plats (2 colonnes dès 360 px, 3 dès 900 px : styles.css) ; `.grid` reste la grille des couvertures.
+export function grilleCartes(noeuds) { return el('div', { class: 'grille-plats' }, ...noeuds); }
 
 // La vignette d'un livre (spec § 6) : l'image si la LIGNE files est là, sinon le titre sur le fond — et rien de plus.
 // Un pointeur cover_sha256 sans octets (fiche reçue d'un autre appareil, avant L4) n'est pas un manque à signaler ici :

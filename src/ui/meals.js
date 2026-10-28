@@ -15,7 +15,7 @@ export async function renderMeals(params, query, ctx) {
   const root = el('div', null, pageHeader(t('Ma semaine'), { actions: [el('button', { class: 'btn primary', onClick: () => newMeal(ctx) }, t('Nouveau repas'))] }));
   root.append(el('div', { class: 'status info', style: { marginBottom: '.8rem' } }, t('Planificateur multi-repas : palier V1.5. Ici : composer un repas, sa liste de courses et sa préparation.')));
   const meals = [...ctx.meals].sort((a, b) => (b.serve_at || b.created_at || '').localeCompare(a.serve_at || a.created_at || ''));
-  if (!meals.length) root.append(emptyState('🍽', t('Aucun repas composé. Depuis une recette : « Ajouter à mon repas » ou « Avec quoi on mange ça ? ».')));
+  if (!meals.length) root.append(emptyState('couverts', t('Aucun repas composé. Depuis une recette : « Ajouter à mon repas » ou « Avec quoi on mange ça ? ».')));
   else root.append(section(t('Repas'), ...meals.map((m) => el('a', { class: 'item-link card flat', href: `#/meals/${m.id}` },
     el('div', { class: 'row between' }, el('strong', null, m.title || t('Repas')), el('span', { class: 'muted' }, m.serve_at ? formatDate(m.serve_at, { withTime: true }) : formatDate(m.created_at))),
     el('div', { class: 'muted', style: { fontSize: '.85rem' } }, (m.items || []).map((it) => ctx.recipesById.get(it.recipe_id)?.original_title).filter(Boolean).join(' · ') || t('vide'))))));
@@ -76,7 +76,7 @@ export async function renderMeal(params, query, ctx) {
 
   // Éléments
   const list = el('div', null);
-  if (!items.length) list.append(emptyState('🥗', t('Ajoute un plat principal depuis sa fiche, puis « Avec quoi on mange ça ? ».')));
+  if (!items.length) list.append(emptyState('salade', t('Ajoute un plat principal depuis sa fiche, puis « Avec quoi on mange ça ? ».')));
   for (const it of items) {
     // Lot F (§ 4.2) : une vignette à gauche du titre quand les octets sont ici ; sans photo, le DOM de la carte est celui d'avant le lot. Ronde 1 : à côté
     // d'une vignette, le bloc prend la place qui reste (flex 1, min-width 0) — sans quoi l'enveloppe .row (flex-wrap) le renvoyait SOUS la vignette dès

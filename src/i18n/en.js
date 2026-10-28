@@ -1,14 +1,14 @@
 // Dictionnaire anglais : clé = chaîne française de référence. Une clé absente affiche le français.
 // Couverture : navigation, accueil, recherche, fiche recette, mode cuisine, réglages et libellés d'état.
 export const EN = {
-  'Aujourd’hui': 'Today', 'Mes livres': 'My books', 'Ma semaine': 'My week', 'Ma cuisine': 'My kitchen', 'Ajouter': 'Add', 'Réglages': 'Settings',
+  'Aujourd’hui': 'Today', 'Mes livres': 'My books', 'Bibliothèque': 'Library', 'Ma semaine': 'My week', 'Ma cuisine': 'My kitchen', 'Ajouter': 'Add', 'Réglages': 'Settings',
   'Recherche': 'Search', 'Qu’est-ce qu’on cuisine ?': 'What are we cooking?', 'Chercher': 'Search', 'Chargement…': 'Loading…', 'Page introuvable': 'Page not found', 'Retour à l’accueil': 'Back to home',
   'Une erreur est survenue': 'Something went wrong', 'Code : {c}': 'Code: {c}', 'Recharger': 'Reload', 'Reprendre ma recette': 'Resume my recipe', '{d}/{n} étapes': '{d}/{n} steps', 'Favoris': 'Favorites', 'Dernières cuissons': 'Recently cooked',
   'Refaire comme la dernière fois': 'Make it like last time', 'à ne pas refaire': 'not again', 'À utiliser en priorité': 'Use first', 'à consommer avant le': 'use by', 'Voir l’inventaire': 'View inventory',
   'Bienvenue': 'Welcome', 'Ta bibliothèque est vide. Commence par ajouter un livre, puis photographie sa table des matières ou une recette.': 'Your library is empty. Start by adding a book, then photograph its table of contents or a recipe.',
   'Restaurer une sauvegarde': 'Restore a backup', 'Redécouvrir': 'Rediscover', 'À redécouvrir : ce livre n’a pas été consulté dans Cuisine OS depuis {n} mois.': 'Rediscover: this book has not been opened in Cuisine OS for {n} months.',
   'À explorer dans ta bibliothèque': 'To explore in your library', 'Voir la recette': 'View recipe', 'Voir la page du livre': 'See the book page', 'Autre idée': 'Another idea', 'Plus tard': 'Later', 'Masquer ce livre': 'Hide this book',
-  'Repérée dans ton livre — page {p}': 'Spotted in your book — page {p}', 'Repérée dans ton livre': 'Spotted in your book', 'Recette disponible': 'Recipe available', 'Partiellement disponible': 'Partially available',
+  'Repérée dans ton livre — page {p}': 'Spotted in your book — page {p}', 'Recette disponible': 'Recipe available', 'Partiellement disponible': 'Partially available',
   'Original': 'Original', 'Traduction': 'Translation', 'Adaptation IA': 'AI adaptation', 'Ma version': 'My version', 'Proposée': 'Proposed', 'Testée par Neegan': 'Tested by Neegan',
   'actif': 'active', 'total': 'total', 'page': 'page', 'Source personnelle': 'Personal source', 'Favori': 'Favorite', 'Cuisinée {n}×': 'Cooked {n}×', 'Correspond à': 'Matches', 'Sans titre': 'Untitled',
   'avec': 'with', 'sans': 'without', 'prêt en': 'ready in', 'actives': 'active', 'Retirer ce filtre': 'Remove this filter',
@@ -20,7 +20,7 @@ export const EN = {
   '{n} écartée(s) par une restriction alimentaire — jamais assouplie.': '{n} excluded by a dietary restriction — never relaxed.', '{n} écartée(s) par la durée.': '{n} excluded by duration.',
   'Allonger à {n} min': 'Extend to {n} min', 'Tout type de recette': 'Any recipe type', 'Inclure les références de mes livres': 'Include references from my books', 'Scanner une recette': 'Scan a recipe',
   'Avec quoi on mange ça ?': 'What goes with this?', 'Retour au plat': 'Back to the dish', 'Pourquoi cet accord ?': 'Why this pairing?', 'Ajouter à mon repas': 'Add to my meal', 'Durée inconnue': 'Unknown duration',
-  'Livres': 'Books', 'Plats': 'Dishes', 'Aucun livre pour l’instant.': 'No books yet.', 'Ajouter un livre': 'Add a book', '{n} disponible(s)': '{n} available', '{n} repérée(s)': '{n} spotted', 'Aucune recette indexée': 'No recipe indexed',
+  'Livres': 'Books', 'Plats': 'Dishes', 'Aucun livre pour l’instant.': 'No books yet.', 'Ajouter un livre': 'Add a book', '{n} disponible(s)': '{n} available', 'Aucune recette indexée': 'No recipe indexed',
   'Nouveau plat': 'New dish', '{n} recette(s) dans {m} livre(s)': '{n} recipe(s) in {m} book(s)', '{n} à confirmer': '{n} to confirm', 'Rapprochements proposés': 'Proposed matches', 'Confirmer': 'Confirm', 'Refuser': 'Refuse',
   'Photographier des pages': 'Photograph pages', 'Choisir des photos ou un PDF': 'Choose photos or a PDF', 'Saisir une recette': 'Type a recipe', 'Ajouter un lot au congélateur': 'Add a freezer batch',
   'Image très légère : possiblement floue ou trop petite': 'Very light image: possibly blurry or too small',
@@ -229,10 +229,8 @@ export const EN = {
   "Pour que l’app connaisse les recettes du livre.": "So the app knows the book’s recipes.",
   "Photographier ou importer des pages de recettes": "Photograph or import recipe pages",
   "Seulement celles qui t’intéressent, tout de suite.": "Only the ones you care about, right now.",
-  "Aller à Mes livres.": "Go to My books.",
+  "Aller à la bibliothèque.": "Go to the library.",
   "Fermer": "Close",
-  "+ Pages d’index": "+ Index pages",
-  "+ Recette": "+ Recipe",
   "Séance en cours : {n} page(s)": "Session in progress: {n} page(s)",
   "Reprendre": "Resume",
   "Adresse non reconnue.": "Address not recognized.",
@@ -248,7 +246,6 @@ export const EN = {
   "Lien gardé": "Link kept",
   "Le lien n’a pas pu être gardé. Réessaie.": "The link could not be kept. Try again.",
   "Lien web gardé.": "Web link kept.",
-  "Ouvrir le lien": "Open the link",
   "Adresse non reconnue : ": "Address not recognized: ",
   "Adresse non reconnue": "Address not recognized",
   "Lien web": "Web link",
@@ -756,4 +753,43 @@ export const EN = {
   "Photos en cours de récupération…": "Fetching photos…",
   "Photos indisponibles pour cette recherche.": "Photos unavailable for this search.",
   "Quota du jour atteint : photos indisponibles.": "Daily quota reached: photos unavailable.",
+  // Lot UI-1 « Carnet », tâche 2 (spec § 5) : la Bibliothèque « Recettes » et la carte-plat. « À importer » est aussi le badge court de la tâche 5 (UNE clé).
+  // « Recettes » et « Toutes » traduisent au passage les deux appels de book.js:193-195 qui n'avaient pas d'entrée (sans les changer).
+  'Tes livres, tes trouvailles, tes recettes.': 'Your books, your finds, your recipes.',
+  'Recettes': 'Recipes',
+  'Ajouter une recette': 'Add a recipe',
+  'Une recette, un ingrédient…': 'A recipe, an ingredient…',
+  'Toutes': 'All',
+  'De mes livres': 'From my books',
+  'Du web': 'From the web',
+  'Recettes de mes livres à importer': 'Recipes from my books to import',
+  'Voir plus': 'Show more',
+  'À importer': 'To import',
+  'Du web · {h}': 'From the web · {h}',
+  'De mon livre · {t}': 'From my book · {t}',
+  'Aucune recette pour l’instant.': 'No recipes yet.',
+  // Tâche 2, ronde 1 (D-T2-c) : l'état vide de ?tab=a-importer (« aucune recette » y était faux).
+  'Rien à importer pour l’instant.': 'Nothing to import for now.',
+  // Vague finale (constat 4) : un filtre ou une puce du segment Recettes qui ne retient aucune fiche (texte neuf hors § 5, R-UI-51).
+  'Aucune recette ne correspond.': 'No recipes match.',
+  // Lot UI-1 « Carnet », tâche 3 : la fiche recette (spec experience-carnet § 5). « Corriger » garde « Fix » (H-14) ; « Ingrédients » et « Préparation »
+  // gardent leurs entrées (une clé, une traduction).
+  "Voir la page d’origine": "View the original page",
+  "Portions, versions et autres gestes": "Servings, versions and more",
+  // Lot UI-1, tâche 4 : la fiche livre (spec § 5 ; « Reprendre la séance » est le texte de § 4.3 ; « Disponibles » : filtre antérieur, entrée posée au passage ;
+  // « À importer » → « To import » est posée par T2 : UNE clé, jamais redoublée — tests/ajouter.js:21).
+  'Ajouter des recettes': 'Add recipes', 'Ajouter des pages de sommaire': 'Add table-of-contents pages', 'Sommaire': 'Table of contents', 'Reprendre la séance': 'Resume the session',
+  'Les recettes de ce livre': 'The recipes in this book', '{n} disponible(s) · {m} à importer': '{n} available · {m} to import', 'Voir les {n} recettes': 'Show all {n} recipes',
+  'Disponibles': 'Available',
+  // Lot UI-1 « Carnet » (spec experience-carnet § 5), tâche 5 : libellés courts d'availabilityBadge et de STATE_LABELS, sous-titre d'Aujourd'hui, légende d'une
+  // vignette de l'import ciblé, compteur de la grille Livres. « À importer » → « To import » est déjà là (T2) : UNE clé, jamais redoublée.
+  "À importer · p. {p}": "To import · p. {p}",
+  "Disponible": "Available",
+  "Partielle": "Partial",
+  "Cherche une recette, un ingrédient, une envie.": "Search a recipe, an ingredient, a craving.",
+  "Page {n} · p. {p}": "Page {n} · p. {p}",
+  "{n} à importer": "{n} to import",
+  // Tâche 5, ronde 1 : une écriture du numéro imprimé d'une vignette qui n'a pas eu lieu est dite (import-cible.js, ecrirePageImprimee) ; la clé orpheline
+  // « Repérée dans ton livre » (plus aucun t() ne la porte depuis T5) a quitté le dictionnaire (§ 5).
+  "Le numéro de page n’a pas pu être enregistré. Réessaie.": "The page number could not be saved. Try again.",
 };

@@ -189,7 +189,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
       if (parsed.filters.type) opts.push(el('button', { class: 'btn', onClick: () => { parsed.filters.type = null; render(); } }, t('Tout type de recette')));
       if (state.mode === 'recipes') opts.push(el('button', { class: 'btn', onClick: () => { state.mode = 'all'; run(); } }, t('Inclure les références de mes livres')));
       opts.push(el('a', { class: 'btn', href: '#/add' }, t('Scanner une recette')));
-      results.append(emptyState('🔍', t('Aucune recette admissible.') + (groups.incompatible ? ` ${t('{n} écartée(s) par une restriction alimentaire — jamais assouplie.', { n: groups.incompatible })}` : '') + (groups.excluded_by_time ? ` ${t('{n} écartée(s) par la durée.', { n: groups.excluded_by_time })}` : ''),
+      results.append(emptyState('loupe', t('Aucune recette admissible.') + (groups.incompatible ? ` ${t('{n} écartée(s) par une restriction alimentaire — jamais assouplie.', { n: groups.incompatible })}` : '') + (groups.excluded_by_time ? ` ${t('{n} écartée(s) par la durée.', { n: groups.excluded_by_time })}` : ''),
         el('div', { class: 'row', style: { justifyContent: 'center' } }, ...opts)));
     } else if (groups.incompatible || groups.excluded_by_time) {
       results.append(el('p', { class: 'muted' }, [groups.incompatible ? t('{n} recette(s) écartée(s) par une restriction alimentaire.', { n: groups.incompatible }) : '', groups.excluded_by_time ? t('{n} écartée(s) par la durée.', { n: groups.excluded_by_time }) : ''].filter(Boolean).join(' ')));

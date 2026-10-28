@@ -1602,10 +1602,11 @@ export async function runTableMatieresTests({ eq, ok }) {
         { original_title: 'Mayonnaise', printed_page: 180, section: '\u200B' }, { original_title: 'Pesto', printed_page: 186, section: '\u202ESauces' }, { original_title: 'Pickles de légumes', printed_page: 190, section: 'x'.repeat(250) },
         { original_title: 'Tian de courgettes', printed_page: 88, section: 'Soupes', availability: 'partial' }] });
       const ctx = await ctxDe(repo, db);
-      const fiche = await renderBook({ id: 'ed1' }, { nouveau: '1' }, ctx);
-      const rangee = (titre) => { const carte = [...fiche.querySelectorAll('a.item-link')].find((a) => a.querySelector('h3')?.textContent === titre); return carte?.nextElementSibling ?? null; };
+      const LARGE = { matchMedia: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }) };
+      const fiche = await renderBook({ id: 'ed1' }, { nouveau: '1' }, ctx, LARGE);
+      const rangee = (titre) => [...fiche.querySelectorAll('ul.liste-compacte > li')].find((li) => li.querySelector('a.titre')?.textContent === titre) ?? null;
       const puces = (titre) => { const r = rangee(titre); return r ? [...r.querySelectorAll('.chip.neutral')].map((c) => c.textContent) : 'sans rangée'; };
-      eq([puces('Soupe de courge'), puces('Gaspacho'), fiche.querySelectorAll('a [data-role="section"]').length], [['Soupes'], [], 0], 'T-C18 (M55, M-livre-sans-trim) : une référence avec section → une puce .chip.neutral « Soupes » (rognée) dans SA rangée, jamais dans un lien ; sans section → aucune');
+      eq([puces('Soupe de courge'), puces('Gaspacho'), fiche.querySelectorAll('a [data-role="section"]').length], [['Soupes'], [], 0], 'T-C18 (M55, M-livre-sans-trim ; lot UI-1 T4 : la ligne compacte) : une référence avec section → une puce .chip.neutral « Soupes » (rognée) dans SA ligne, jamais dans un lien ; sans section → aucune');
       eq(['Pot-au-feu', 'Fond de volaille', 'Vinaigrette', 'Mayonnaise', 'Tian de courgettes'].map(puces), [[], [], [], [], []], 'T-C18 (ronde 1 ; M-livre-sans-typeof, M-livre-partial) : une section tableau ou nombre ne fait pas tomber la liste et n’a pas de puce ; une section blanche ou invisible non plus ; une partial sans lien web garde sa rangée « Importer » sans puce');
       eq([puces('Pesto'), puces('Pickles de légumes')], [['Sauces'], ['x'.repeat(200)]], 'T-C18 (ronde 1 ; M-section-brute, M-section-sans-borne) : la puce d’une section reçue est nettoyée (le U+202E est retiré) et bornée comme à la fabrication (BORNES_INDEX.section, 200 points de code)');
       const ficheDe = (titre) => renderRecipe({ id: ctx.recipes.find((r) => r.original_title === titre).id }, {}, ctx);
@@ -1620,7 +1621,7 @@ export async function runTableMatieresTests({ eq, ok }) {
       const hostile = '<img src=x onerror="void 0"><a href="https://exemple.test/">Reconnecte-toi</a>';
       await db.mutate({ puts: { recipes: [{ ...rc, section: hostile }] }, origin: 'device' });
       const ctxH = await ctxDe(repo, db);
-      const ficheH = await renderBook({ id: 'ed1' }, { nouveau: '1' }, ctxH);
+      const ficheH = await renderBook({ id: 'ed1' }, { nouveau: '1' }, ctxH, LARGE);
       const pageH = await renderRecipe({ id: rc.id }, {}, ctxH);
       const elements = (racine) => [racine.querySelectorAll('img[src="x"]').length, racine.querySelectorAll('a[href="https://exemple.test/"]').length];
       eq([...elements(ficheH), ficheH.textContent.includes(hostile)], [0, 0, true], 'T-C18 (I-C2 ; M-html) : une section hostile reste du TEXTE sur la fiche livre (aucune image, aucun lien créés)');
