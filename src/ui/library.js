@@ -5,7 +5,7 @@ import { el, promptDialog, toast } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { navigate, buildQuery, refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
-import { pageHeader, bookCover, segmented, emptyState, section, sectionPlain, recipeCard, grilleCartes, remplacerEnRevoquant, suivreLargeurAuMontage } from './components.js';
+import { pageHeader, bookCover, segmented, emptyState, section, sectionPlain, recipeCard, grilleCartes, remplacerEnRevoquant, suivreLargeurAuMontage, aUneAdresse } from './components.js';
 import { revoquerUrlDeBlob } from '../core/blob-urls.js';
 import { proposeDishesForRecipe } from '../domain/dishes.js';
 import { pointeurValide } from '../domain/photo-web.js';
@@ -13,8 +13,9 @@ import { logError } from '../core/log.js';
 
 const TABS = ['recettes', 'books', 'dishes', 'a-importer'];
 export const CARTES_PAR_PAGE = 60; // F-9 : la grille est bornée ; « Voir plus » rend la page suivante
-// UNE définition de « une adresse » et de « à importer » (D-UI-10) : la fiche livre (book.js) les lit ici (T4-R1).
-export const aUneAdresse = (r) => typeof r?.source_url === 'string' && r.source_url !== '';
+// UNE définition de « une adresse » (D-UI-10) : components.js la porte depuis la ronde 1 de T5 (le badge la lit aussi) ; elle est ré-exportée ici, où la fiche
+// livre (book.js) lit aussi « à importer » (T4-R1).
+export { aUneAdresse };
 // B-I-5 : la grille montre les recettes CONSERVÉES et les signets (lus ou non) ; une référence d'index sans adresse est « à importer », pas une recette.
 export const dansLaGrille = (r) => r.availability !== 'reference_only' || aUneAdresse(r);
 // La liste « à importer » et son pied : les références sans adresse d'un livre (le pied n'est offert que s'il y en a : rien d'inventé).

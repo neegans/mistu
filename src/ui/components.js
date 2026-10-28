@@ -42,15 +42,34 @@ export function emptyState(icon, text, action = null) {
   return el('div', { class: 'empty' }, el('div', { class: 'ico' }, icone(icon)), el('p', null, text), action);
 }
 
+// UNE définition d'« une adresse » (D-UI-10 ; T5 ronde 1) : une chaîne non vide. Le badge et la comparaison de plats la lisent ici ; library.js la ré-exporte
+// pour la Bibliothèque et la fiche livre (estAImporter, dansLaGrille, book.js). Un signet = une référence qui porte une adresse : il dit « Lien web » partout
+// où il paraît (I-UI-1, H-19).
+export const aUneAdresse = (r) => typeof r?.source_url === 'string' && r.source_url !== '';
+export const estSignet = (r) => r?.availability === 'reference_only' && aUneAdresse(r);
+// Une page imprimée affichable : un entier de 1 à 9999 (la borne de l'écran d'import, legendeDe) — une fiche reçue ou restaurée peut porter n'importe quoi.
+const pageAffichable = (p) => Number.isInteger(p) && p >= 1 && p <= 9999;
+// Une note de cuisson affichable : un entier de 1 à 5 (cook.js n'en écrit pas d'autre) ; '★'.repeat d'une note reçue hostile levait (RangeError) et faisait
+// tomber la page entière (Aujourd'hui, la fiche, la comparaison de plats). Toute autre valeur : rien.
+export const etoiles = (note) => (Number.isInteger(note) && note >= 1 && note <= 5 ? '★'.repeat(note) : '');
+
 export function availabilityBadge(recipe) {
   // Un signet web n'est pas une référence de livre : il n'y a pas de page de livre, il y a un lien (spec UX § 11, F8).
-  if (recipe.availability === 'reference_only' && recipe.source_url) return el('span', { class: 'badge reference' }, t('Lien web'));
+  if (estSignet(recipe)) return el('span', { class: 'badge reference' }, t('Lien web'));
   // Lot UI-1 « Carnet » (D-UI-10, H-19) : le badge porte ses propres textes COURTS — listes, cartes, écran d'import. « Repérée dans ton livre — page {p} »
-  // reste sur la FICHE (recipe.js), où il dit d'où la référence vient ; STATE_LABELS.availability (i18n.js) sert aux exports et à Redécouvrir.
-  if (recipe.availability === 'reference_only') return el('span', { class: 'badge reference' }, recipe.printed_page ? t('À importer · p. {p}', { p: recipe.printed_page }) : t('À importer'));
+  // reste sur la FICHE (recipe.js), où il dit d'où la référence vient. STATE_LABELS.availability (i18n.js) n'est lu que par la comparaison de plats
+  // (dish.js, par libelleDisponibilite ci-dessous) : ni les exports ni Redécouvrir ne le lisent.
+  if (recipe.availability === 'reference_only') return el('span', { class: 'badge reference' }, pageAffichable(recipe.printed_page) ? t('À importer · p. {p}', { p: recipe.printed_page }) : t('À importer'));
   if (recipe.availability === 'available') return el('span', { class: 'badge available' }, t('Disponible'));
   if (recipe.availability === 'partial') return el('span', { class: 'badge partial' }, t('Partielle'));
-  return el('span', { class: 'badge reference' }, label('availability', recipe.availability)); // availability inconnue (fiche reçue ou restaurée) : comme avant, texte vide
+  return el('span', { class: 'badge reference' }, ''); // availability hors vocabulaire (fiche reçue ou restaurée) : un badge vide — jamais la valeur reçue
+}
+
+// Le libellé d'état d'une fiche hors badge : la comparaison de plats (dish.js, provenanceComparee). Un signet dit « Lien web », comme son badge (I-UI-1,
+// H-19) ; un état hors vocabulaire ne dit rien.
+export function libelleDisponibilite(recipe) {
+  if (estSignet(recipe)) return t('Lien web');
+  return ['reference_only', 'partial', 'available'].includes(recipe?.availability) ? label('availability', recipe.availability) : '';
 }
 
 // UI-1 (D-UI-10, I-B5) : « Voir la page d’origine » — un lien texte vers l'adresse LISIBLE d'une fiche (lienSignet : http: compris, seule la LECTURE exige

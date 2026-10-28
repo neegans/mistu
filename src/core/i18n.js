@@ -14,7 +14,8 @@ export function setUiLocale(locale) {
 export const getUiLocale = () => uiLocale;
 
 export function t(fr, vars = null) {
-  let s = uiLocale === 'en' ? (EN[fr] ?? fr) : fr;
+  // T5 ronde 1 : seules les clés PROPRES du dictionnaire comptent — un texte reçu « constructor » ne lit jamais une fonction du prototype.
+  let s = uiLocale === 'en' ? ((Object.hasOwn(EN, fr) ? EN[fr] : null) ?? fr) : fr;
   // Remplacement par FONCTION : une chaîne de remplacement interpréterait $&, $$, $` et $' venus d'une valeur (V-C2). En UNE passe (T4-R1) :
   // une valeur insérée n'est jamais relue comme un gabarit — un titre lu « {y} » ne devient pas le titre de la référence au tour suivant.
   if (vars) s = s.replace(/\{(\w+)\}/g, (m, k) => (Object.hasOwn(vars, k) ? String(vars[k]) : m));
@@ -24,7 +25,7 @@ export function t(fr, vars = null) {
 // Libellés des états du schéma.
 const STATE_LABELS = {
   availability: {
-    reference_only: 'À importer', // lot UI-1 « Carnet » (D-UI-10) : libellé d'affichage ; le badge porte ses textes courts, la fiche garde « Repérée dans ton livre — page {p} »
+    reference_only: 'À importer', // lot UI-1 « Carnet » (D-UI-10) : libellé d'affichage, lu par la seule comparaison de plats (dish.js, libelleDisponibilite) ; le badge porte ses textes courts, la fiche garde « Repérée dans ton livre — page {p} »
     partial: 'Partiellement disponible',
     available: 'Recette disponible',
   },
@@ -59,7 +60,9 @@ const STATE_LABELS = {
 };
 
 export function label(group, value) {
-  const fr = STATE_LABELS[group]?.[value] ?? String(value ?? '');
+  // T5 ronde 1 : seules les clés PROPRES comptent — une valeur reçue « constructor » ou « __proto__ » ne lit jamais le prototype (repli : la valeur en texte).
+  const groupe = Object.hasOwn(STATE_LABELS, group) ? STATE_LABELS[group] : null;
+  const fr = groupe && Object.hasOwn(groupe, value) ? groupe[value] : String(value ?? '');
   return t(fr);
 }
 

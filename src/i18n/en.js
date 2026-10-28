@@ -8,7 +8,7 @@ export const EN = {
   'Bienvenue': 'Welcome', 'Ta bibliothèque est vide. Commence par ajouter un livre, puis photographie sa table des matières ou une recette.': 'Your library is empty. Start by adding a book, then photograph its table of contents or a recipe.',
   'Restaurer une sauvegarde': 'Restore a backup', 'Redécouvrir': 'Rediscover', 'À redécouvrir : ce livre n’a pas été consulté dans Cuisine OS depuis {n} mois.': 'Rediscover: this book has not been opened in Cuisine OS for {n} months.',
   'À explorer dans ta bibliothèque': 'To explore in your library', 'Voir la recette': 'View recipe', 'Voir la page du livre': 'See the book page', 'Autre idée': 'Another idea', 'Plus tard': 'Later', 'Masquer ce livre': 'Hide this book',
-  'Repérée dans ton livre — page {p}': 'Spotted in your book — page {p}', 'Repérée dans ton livre': 'Spotted in your book', 'Recette disponible': 'Recipe available', 'Partiellement disponible': 'Partially available',
+  'Repérée dans ton livre — page {p}': 'Spotted in your book — page {p}', 'Recette disponible': 'Recipe available', 'Partiellement disponible': 'Partially available',
   'Original': 'Original', 'Traduction': 'Translation', 'Adaptation IA': 'AI adaptation', 'Ma version': 'My version', 'Proposée': 'Proposed', 'Testée par Neegan': 'Tested by Neegan',
   'actif': 'active', 'total': 'total', 'page': 'page', 'Source personnelle': 'Personal source', 'Favori': 'Favorite', 'Cuisinée {n}×': 'Cooked {n}×', 'Correspond à': 'Matches', 'Sans titre': 'Untitled',
   'avec': 'with', 'sans': 'without', 'prêt en': 'ready in', 'actives': 'active', 'Retirer ce filtre': 'Remove this filter',
@@ -783,4 +783,7 @@ export const EN = {
   "Cherche une recette, un ingrédient, une envie.": "Search a recipe, an ingredient, a craving.",
   "Page {n} · p. {p}": "Page {n} · p. {p}",
   "{n} à importer": "{n} to import",
+  // Tâche 5, ronde 1 : une écriture du numéro imprimé d'une vignette qui n'a pas eu lieu est dite (import-cible.js, ecrirePageImprimee) ; la clé orpheline
+  // « Repérée dans ton livre » (plus aucun t() ne la porte depuis T5) a quitté le dictionnaire (§ 5).
+  "Le numéro de page n’a pas pu être enregistré. Réessaie.": "The page number could not be saved. Try again.",
 };

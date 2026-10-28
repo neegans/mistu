@@ -1,18 +1,20 @@
 // Fiche Plat (spec §30) : recettes attribuées de plusieurs livres, rapprochements à confirmer, comparaison de 2–3 recettes.
 import { el, toast, chooseDialog, promptDialog, formatDate } from '../core/dom.js';
-import { t, label } from '../core/i18n.js';
+import { t } from '../core/i18n.js';
 import { refresh } from '../core/router.js';
 import * as repo from '../model/repo.js';
 import { proposeRecipesForDish, compareBundles } from '../domain/dishes.js';
 import { currentVersion } from '../domain/search.js';
-import { pageHeader, section, recipeCard, field, emptyState } from './components.js';
+import { pageHeader, section, recipeCard, field, emptyState, libelleDisponibilite, etoiles } from './components.js';
 import { etiquetteCreationIA } from '../domain/creation-ia.js';
 
 // C-2 (vague finale, B6) : la comparaison et les rattachements proposés disent la lignée IA d'une fiche `origine: 'ia'` — jamais un livre ni
 // « p. {page} » (une page tapée par « Corriger » reste dans la fiche, elle n'en devient pas la provenance). Textes purs, épinglés par les tests.
+// T5 ronde 1 (H-19, I-UI-1) : l'état passe par libelleDisponibilite (components.js) — un signet dit « Lien web », comme son badge, jamais « À importer » ; un
+// état hors vocabulaire ne dit rien.
 export function provenanceComparee({ recipe, version = null, book = null }) {
-  if (recipe?.origine === 'ia') return [t(etiquetteCreationIA(version, recipe)), label('availability', recipe.availability)].filter(Boolean).join(' · ');
-  return [book?.title, book?.author, recipe.printed_page ? `p. ${recipe.printed_page}` : null, label('availability', recipe.availability)].filter(Boolean).join(' · ');
+  if (recipe?.origine === 'ia') return [t(etiquetteCreationIA(version, recipe)), libelleDisponibilite(recipe)].filter(Boolean).join(' · ');
+  return [book?.title, book?.author, recipe.printed_page ? `p. ${recipe.printed_page}` : null, libelleDisponibilite(recipe)].filter(Boolean).join(' · ');
 }
 export function lieuRattachement(recipe, editionTexte) {
   if (recipe?.origine === 'ia') return t(etiquetteCreationIA(null, recipe));
@@ -73,7 +75,7 @@ export async function renderDish(params, query, ctx) {
         [t('Ingrédients propres'), c.only.map((ids) => ids.map((x) => x.label).join(', ') || '—')],
         [t('Non identifiés'), c.unresolved.map((u) => u.join(', ') || '—')],
         ...c.qtyRows.map((r) => [r.label, r.cells.map((cell) => `${cell.text}${cell.optional ? ` (${t('facultatif')})` : ''}${cell.preparation ? ` · ${cell.preparation}` : ''}`)]),
-        [t('Expérience'), c.experience.map((x) => (x.cooked ? `${t('cuisinée')} ${x.cooked}× · ${formatDate(x.last_at)}${x.rating ? ' · ' + '★'.repeat(x.rating) : ''}${x.notes ? ' · ' + x.notes : ''}` : t('jamais cuisinée')) + (x.preferred ? ` · ★ ${t('favori')}` : ''))],
+        [t('Expérience'), c.experience.map((x) => (x.cooked ? `${t('cuisinée')} ${x.cooked}× · ${formatDate(x.last_at)}${etoiles(x.rating) ? ' · ' + etoiles(x.rating) : ''}${x.notes ? ' · ' + x.notes : ''}` : t('jamais cuisinée')) + (x.preferred ? ` · ★ ${t('favori')}` : ''))],
       ];
       if (wide) {
         out.append(el('div', { style: { overflowX: 'auto' } }, el('table', { class: 'compare' },

@@ -13,7 +13,7 @@ import { DIET_TAGS } from '../model/schema.js';
 import { reperesDe } from '../domain/recherche-web.js';
 import { lirePage, relireResultat } from '../domain/lecture-web.js';
 import { logError } from '../core/log.js';
-import { pageHeader, section, sectionPlain, lienOrigine, dureeTotale, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture, sessionAssistant, carteConnexion, ligneReperes, contexteFichiers, vignettesDePages, boutonTelechargerPages, suivreLargeurAuMontage } from './components.js';
+import { pageHeader, section, sectionPlain, lienOrigine, dureeTotale, availabilityBadge, versionBadge, timeText, provenanceText, segmented, select, ingredientLineEl, timerBlock, dietChip, recipeCard, banniereLecture, sessionAssistant, carteConnexion, ligneReperes, contexteFichiers, vignettesDePages, boutonTelechargerPages, suivreLargeurAuMontage, etoiles } from './components.js';
 import { monterPhotoPlat } from './photo-plat.js';
 import { demarrerLectureWeb, texteEchecLecture, enLigneLecture, ligneWebOuverte } from './import-web.js';
 import { demarrerConnexion } from './settings.js';
@@ -248,7 +248,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
 
   // Historique
   if (history.length) root.append(sectionPlain(t('Mémoire culinaire'), el('ul', { class: 'list' }, ...history.map((h) => el('li', { class: 'row between top' },
-    el('div', null, el('strong', null, formatDate(h.cooked_at)), ` · ${h.servings ? t('{n} portions', { n: h.servings }) : ''}${h.rating ? ` · ${'★'.repeat(h.rating)}` : ''}${h.redo === false ? ` · ${t('à ne pas refaire')}` : h.redo ? ` · ${t('à refaire')}` : ''}${h.actual_minutes ? ` · ${h.actual_minutes} min` : ''}`,
+    el('div', null, el('strong', null, formatDate(h.cooked_at)), ` · ${h.servings ? t('{n} portions', { n: h.servings }) : ''}${etoiles(h.rating) ? ` · ${etoiles(h.rating)}` : ''}${h.redo === false ? ` · ${t('à ne pas refaire')}` : h.redo ? ` · ${t('à refaire')}` : ''}${h.actual_minutes ? ` · ${h.actual_minutes} min` : ''}`,
       h.notes ? el('div', { style: { fontSize: '.9rem' } }, h.notes) : null,
       el('div', { class: 'muted', style: { fontSize: '.8rem' } }, t('Observation liée à cette cuisson ; elle ne devient pas une règle universelle.'))),
     el('a', { class: 'btn small', href: `#/recipes/${rid}${buildQuery({ v: h.recipe_version_id, servings: h.servings || '' })}` }, t('Refaire comme la dernière fois')))))));

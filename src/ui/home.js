@@ -11,10 +11,10 @@ import { emit } from '../core/bus.js';
 import { pickSuggestion, snoozeUntil } from '../domain/rediscover.js';
 import { parseQuery } from '../domain/search.js';
 import { pointeurValide } from '../domain/photo-web.js';
-import { recipeCard, section, sectionPlain, grilleCartes, pageHeader, emptyState, availabilityBadge, provenanceText } from './components.js';
+import { recipeCard, section, sectionPlain, grilleCartes, pageHeader, emptyState, availabilityBadge, provenanceText, etoiles } from './components.js';
 
 // `deps.repo` : le sac injecté des routes (la suite y compte la passe getFiles) ; l'app ne passe rien (route('/', renderHome) : trois arguments) et le
-// module sert.
+// module sert. T5 ronde 1 : Redécouvrir écrit par ce MÊME sac (rediscoverCard), jamais par le module en dehors de lui.
 export async function renderHome(params, query, ctx, { repo: depot = repo } = {}) {
   const root = el('div', null);
   const input = el('input', { type: 'search', placeholder: t('Qu’est-ce qu’on cuisine ?'), 'aria-label': t('Recherche'), enterkeyhint: 'search' });
@@ -40,7 +40,7 @@ export async function renderHome(params, query, ctx, { repo: depot = repo } = {}
   }
 
   // Redécouvrir
-  if (ctx.settings.rediscover_enabled) root.append(await rediscoverCard(ctx, query));
+  if (ctx.settings.rediscover_enabled) root.append(await rediscoverCard(ctx, query, depot));
 
   // Favoris et Dernières cuissons (D-UI-5, F-3) : les docs à rendre d'abord, puis UNE lecture groupée des lignes files de leurs photos — la carte-plat
   // reçoit sa ligne et décide au rendu (I-UI-5) ; sans empreinte, aucune lecture. Un pointeur qui n'est pas une empreinte (pointeurValide, comme la
@@ -57,7 +57,7 @@ export async function renderHome(params, query, ctx, { repo: depot = repo } = {}
   if (recent.length) {
     root.append(sectionPlain(t('Dernières cuissons'), grilleCartes(recent.map(({ h, doc }) => el('div', { class: 'cellule-cuisson' },
       cartePlat(doc),
-      el('div', { class: 'muted cuisson-date' }, `${formatDate(h.cooked_at)}${h.rating ? ` · ${'★'.repeat(h.rating)}` : ''}${h.redo === false ? ` · ${t('à ne pas refaire')}` : ''}`),
+      el('div', { class: 'muted cuisson-date' }, `${formatDate(h.cooked_at)}${etoiles(h.rating) ? ` · ${etoiles(h.rating)}` : ''}${h.redo === false ? ` · ${t('à ne pas refaire')}` : ''}`),
       el('a', { class: 'btn small', href: `#/recipes/${h.recipe_id}${buildQuery({ v: h.recipe_version_id, servings: h.servings || '' })}` }, t('Refaire comme la dernière fois')))))));
   }
 
@@ -77,18 +77,18 @@ export async function renderHome(params, query, ctx, { repo: depot = repo } = {}
   return root;
 }
 
-async function rediscoverCard(ctx, query) {
+async function rediscoverCard(ctx, query, depot = repo) {
   const context = query.q ? parseQuery(query.q).filters : {};
   const s = pickSuggestion({ editions: ctx.book_editions, books: ctx.books, recipes: ctx.recipes, activity: ctx.library_activity, prefs: ctx.rediscovery_prefs, context });
   if (!s) return el('div');
   const pref = ctx.rediscovery_prefs.find((p) => p.edition_id === s.edition.id) || { edition_id: s.edition.id };
   if (!pref.last_suggested_at || Date.now() - Date.parse(pref.last_suggested_at) > 86400000) {
-    await repo.save('rediscovery_prefs', { ...pref, last_suggested_at: new Date().toISOString() });
+    await depot.save('rediscovery_prefs', { ...pref, last_suggested_at: new Date().toISOString() });
   }
   const title = s.mode === 'rediscover'
     ? t('À redécouvrir : ce livre n’a pas été consulté dans Cuisine OS depuis {n} mois.', { n: s.months_since })
     : t('À explorer dans ta bibliothèque');
-  const savePref = async (patch) => { await repo.save('rediscovery_prefs', { ...pref, ...patch }); emit('change', { store: 'rediscovery_prefs' }); refresh(); };
+  const savePref = async (patch) => { await depot.save('rediscovery_prefs', { ...pref, ...patch }); emit('change', { store: 'rediscovery_prefs' }); refresh(); };
   return el('div', { class: 'card', style: { borderLeft: '4px solid var(--sage)' } },
     el('div', { class: 'muted', style: { fontSize: '.8rem', textTransform: 'uppercase', letterSpacing: '.04em' } }, t('Redécouvrir')),
     el('h2', null, title),
