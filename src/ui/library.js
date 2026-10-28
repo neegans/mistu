@@ -11,6 +11,8 @@ import { proposeDishesForRecipe } from '../domain/dishes.js';
 import { pointeurValide } from '../domain/photo-web.js';
 import { logError } from '../core/log.js';
 import { icone } from './icones.js';
+import { photosPersonnellesParRecette } from '../domain/cuisine-personnelle.js';
+import { empreintesPhotos, fichierPhoto } from './components.js';
 
 const TABS = ['recettes', 'books', 'dishes', 'a-importer'];
 export const CARTES_PAR_PAGE = 60; // F-9 : la grille est bornée ; « Voir plus » rend la page suivante
@@ -62,6 +64,7 @@ export async function renderLibrary(params, query, ctx, deps = {}) {
 // Le segment Recettes (§ 4.1 ; D-UI-4, D-UI-5, F-9) : le filtre local, les puces de source, la grille BORNÉE de cartes-plat, « Voir plus », le bouton
 // « Ajouter une recette » répété sous 760 px, le pied « à importer ». Rien n'est écrit ; rien ne part.
 async function recettesTab(ctx, { matchMedia }) {
+  const photosPersonnelles = photosPersonnellesParRecette(ctx.cook_history);
   const docs = (ctx.docs || []).filter((d) => dansLaGrille(d.recipe)).sort(derniereModificationDabord);
   const refs = (ctx.recipes || []).filter(estAImporter);
   const pied = refs.length ? el('p', { style: { marginTop: '1rem' } }, el('a', { href: '#/library?tab=a-importer', dataset: { role: 'a-importer' } }, `${t('Recettes de mes livres à importer')} →`)) : null;
@@ -73,7 +76,7 @@ async function recettesTab(ctx, { matchMedia }) {
   // elle, ne lit rien (I-UI-5) : elle reçoit sa ligne.
   const fichiers = new Map();
   const lire = async (page) => {
-    const empreintes = [...new Set(page.filter((d) => pointeurValide(d.recipe)).map((d) => d.recipe.photo_sha256).filter((s) => !fichiers.has(s)))];
+    const empreintes = empreintesPhotos(page.map(d => d.recipe), photosPersonnelles).filter(s => !fichiers.has(s));
     if (!empreintes.length) return;
     const lues = await repo.getFiles(empreintes);
     for (const s of empreintes) fichiers.set(s, lues.get(s) || null);
@@ -94,7 +97,7 @@ async function recettesTab(ctx, { matchMedia }) {
     if (g !== generation) return;
     // D-T9 : les URL blob: des vignettes de la génération précédente sont révoquées APRÈS le remplacement des nœuds (remplacerEnRevoquant relève img.plat-vignette).
     // Vague finale (constat 4) : un filtre ou une puce qui ne retient rien le DIT, sur toute la largeur de la grille (comme « Aucun livre ne correspond. » sous Livres).
-    remplacerEnRevoquant(grille, ...(liste.length ? page.map((d) => recipeCard(d, { photoEnTete: true, fichier: pointeurValide(d.recipe) ? fichiers.get(d.recipe.photo_sha256) : null }))
+    remplacerEnRevoquant(grille, ...(liste.length ? page.map((d) => recipeCard(d, { photoEnTete: true, fichier: fichierPhoto(d.recipe, photosPersonnelles, fichiers) }))
       : [el('p', { class: 'muted', dataset: { role: 'aucune-correspondance' }, style: { gridColumn: '1 / -1' } }, t('Aucune recette ne correspond.'))]));
     suite.replaceChildren(...(liste.length > page.length ? [el('button', { type: 'button', class: 'btn', onClick: () => { etat.limite += CARTES_PAR_PAGE; relancer(); } }, t('Voir plus'))] : []));
   };

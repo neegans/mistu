@@ -8,7 +8,7 @@
 // Lot UI-1, vague finale (constat 13) : UNE lecture des clés t() pour les filets i18n — t('…'), t("…") et t(`…`) sans ${…} (un gabarit à expression n'est pas
 // une clé, et une variable non plus) ; F13 la lit sur MODULES_NEUFS, tests/carnet.js (T6) sur ses modules. Son témoin, sur les trois formes, est au bloc F13.
 export const clesT = (src) => [...src.matchAll(/\bt\((['"`])((?:(?!\1)[^\\]|\\.)*)\1/g)].filter((m) => !(m[1] === '`' && m[2].includes('${'))).map((m) => m[2]);
-export const MODULES_NEUFS = ['../src/ui/index-livre.js', '../src/domain/index-livre.js', '../src/ui/coquille.js', '../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js', '../src/ui/import-cible.js', '../src/domain/lecture-web.js', '../src/ui/import-web.js', '../src/ui/vol.js', '../src/sync/fichiers.js', '../src/ui/table-matieres.js', '../src/ui/regroupement.js', '../src/ui/photo-plat.js', '../src/domain/apercu-web.js', '../src/ui/icones.js'];
+export const MODULES_NEUFS = ['../src/ui/cuisson.js', '../src/ui/livre-sans-saisie.js', '../src/ui/photo-page.js', '../src/ui/index-livre.js', '../src/domain/index-livre.js', '../src/ui/coquille.js', '../src/ui/puces.js', '../src/ui/livre-ajout.js', '../src/ui/accueil-livre.js', '../src/ui/signet.js', '../src/core/image.js', '../src/core/blob-urls.js', '../src/core/lien.js', '../src/core/isbn.js', '../src/ui/add.js', '../src/ui/import-cible.js', '../src/domain/lecture-web.js', '../src/ui/import-web.js', '../src/ui/vol.js', '../src/sync/fichiers.js', '../src/ui/table-matieres.js', '../src/ui/regroupement.js', '../src/ui/photo-plat.js', '../src/domain/apercu-web.js', '../src/ui/icones.js'];
 // CHAINES_NEUVES_AILLEURS reconstituée depuis le code réel (git diff main...HEAD, ensemble main vs HEAD des clés t(),
 // pas seulement les lignes ajoutées : une ligne réécrite pour une autre raison peut porter une chaîne déjà sur main —
 // book.js:'Cuisines', recipe-edit.js:'Cuisines / régions' et import.js:'— Aucun livre (à associer plus tard) —'
@@ -3849,9 +3849,9 @@ export async function runAjouterTests({ eq, ok }) {
     const sw = await lire('../sw.js');
     ok(sw.length > 300 && sw.includes('SHELL'), `statique sw.js : le source est bien lu (${sw.length} caractères, SHELL présent) — sans quoi les inclusions ci-dessous ne prouveraient rien (S4)`);
     for (const m of ['./src/ui/puces.js', './src/ui/livre-ajout.js', './src/ui/accueil-livre.js', './src/ui/signet.js', './src/core/image.js', './src/core/blob-urls.js', './src/core/lien.js', './src/core/isbn.js', './src/domain/lecture-web.js']) ok(sw.includes(`'${m}'`), `SHELL : ${m}`);
-    ok(/VERSION = 'cuisine-os-v0\.18\.0-\d+'/.test(sw), 'sw.js : VERSION 0.18.0');
+    ok(/VERSION = 'cuisine-os-v0\.19\.0-\d+'/.test(sw), 'sw.js : VERSION 0.19.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.18.0', 'APP_VERSION 0.18.0 (lot UI-1, carnet)');
+    eq(APP_VERSION, '0.19.0', 'APP_VERSION 0.19.0 (lot UI-1, carnet)');
     const { GOOGLE_BOOKS } = await import('../src/sync/config.js');
     ok(typeof GOOGLE_BOOKS?.key === 'string' && (GOOGLE_BOOKS.key === '' || /^AIza[0-9A-Za-z_-]{35}$/.test(GOOGLE_BOOKS.key)), 'config : la clé Google Books est vide ou au format d’une clé d’API publique — un test de forme, jamais de valeur (S2/F2)');
   }

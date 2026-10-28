@@ -7,6 +7,7 @@ import { proposeRecipesForDish, compareBundles } from '../domain/dishes.js';
 import { currentVersion } from '../domain/search.js';
 import { pageHeader, section, recipeCard, field, emptyState, libelleDisponibilite, etoiles } from './components.js';
 import { etiquetteCreationIA } from '../domain/creation-ia.js';
+import { comparerCuissons } from '../domain/cuisine-personnelle.js';
 
 // C-2 (vague finale, B6) : la comparaison et les rattachements proposés disent la lignée IA d'une fiche `origine: 'ia'` — jamais un livre ni
 // « p. {page} » (une page tapée par « Corriger » reste dans la fiche, elle n'en devient pas la provenance). Textes purs, épinglés par les tests.
@@ -48,7 +49,7 @@ export async function renderDish(params, query, ctx) {
       const hist = ctx.cook_history.filter((h) => h.recipe_id === d.recipe.id);
       const extra = el('div', { class: 'row between', style: { marginTop: '.4rem' } },
         el('label', { class: 'check', onClick: (e) => e.stopPropagation() }, check, t('Comparer')),
-        el('span', { class: 'muted', style: { fontSize: '.85rem' } }, hist.length ? t('Cuisinée {n}× · dernière le {d}', { n: hist.length, d: formatDate(hist.sort((a, b) => b.cooked_at.localeCompare(a.cooked_at))[0].cooked_at) }) : t('Jamais cuisinée')),
+        el('span', { class: 'muted', style: { fontSize: '.85rem' } }, hist.length ? t('Cuisinée {n}× · dernière le {d}', { n: hist.length, d: formatDate(hist.sort(comparerCuissons)[0].cooked_at) }) : t('Jamais cuisinée')),
         el('button', { class: 'btn small', onClick: async (e) => { e.preventDefault(); e.stopPropagation(); const l = links.find((x) => x.recipe_id === d.recipe.id); await repo.save('dish_recipe_links', { ...l, state: 'refused', reviewed_at: repo.nowIso() }); refresh(); } }, t('Détacher')));
       listBox.append(recipeCard(d, { extra }));
     }
@@ -56,7 +57,7 @@ export async function renderDish(params, query, ctx) {
   const drawCompare = () => {
     compareBox.replaceChildren();
     if (selected.size < 2) { compareBox.append(el('p', { class: 'muted' }, t('Sélectionne deux ou trois recettes pour les comparer.'))); return; }
-    const bundles = [...selected].map((id) => { const d = ctx.docsByRecipe.get(id); return d ? { ...d, history: ctx.cook_history.filter((h) => h.recipe_id === id).sort((a, b) => b.cooked_at.localeCompare(a.cooked_at)) } : null; }).filter(Boolean);
+    const bundles = [...selected].map((id) => { const d = ctx.docsByRecipe.get(id); return d ? { ...d, history: ctx.cook_history.filter((h) => h.recipe_id === id).sort(comparerCuissons) } : null; }).filter(Boolean);
     const norm = el('input', { type: 'number', min: 1, placeholder: t('Mêmes portions ?'), style: { maxWidth: '160px' } });
     const out = el('div', null);
     const draw = () => {

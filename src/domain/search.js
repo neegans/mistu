@@ -3,6 +3,7 @@
 import { normalizeText } from './units.js';
 import { assessVersion } from './diet.js';
 import { sectionLisible } from './llm.js';
+import { photosPersonnellesParRecette, photoPrincipale } from './cuisine-personnelle.js';
 
 const STOP = new Set(['de', 'la', 'le', 'les', 'du', 'des', 'un', 'une', 'et', 'a', 'au', 'aux', 'the', 'an', 'of', 'with', 'and', 'avec', 'pour', 'en', 'dans', 'sur', 'mes', 'mon', 'ma', 'my', 'some', 'quelque', 'quelques', 'd', 'l', 'que', 'qui', 'quelque', 'chose', 'something', 'recette', 'recettes', 'recipe', 'recipes', 'trouve', 'find', 'moi', 'me', 'livres', 'books', 'in', 'to', 'pret', 'prete', 'ready', 'minutes', 'minute', 'min']);
 
@@ -108,6 +109,7 @@ export function chipsFor(filters) {
 
 // Document de recherche par recette (version courante).
 export function buildDocs({ recipes, versions, editions, books, dishes, links, translations = [], history = [] }) {
+  const photosPersonnelles = photosPersonnellesParRecette(history);
   const versionsByRecipe = new Map();
   for (const v of versions) { if (!versionsByRecipe.has(v.recipe_id)) versionsByRecipe.set(v.recipe_id, []); versionsByRecipe.get(v.recipe_id).push(v); }
   const editionsById = new Map(editions.map((e) => [e.id, e]));
@@ -135,7 +137,7 @@ export function buildDocs({ recipes, versions, editions, books, dishes, links, t
     // tout ce qu'un signet web possède pour se faire retrouver (spec § 11, F7). D12 : une référence d'index d'un livre
     // tagué remonte désormais par les mots-clés du livre — intention du brief § 12.5 ; le test F7 reste vert (`books: []`).
     const titleTokens = new Set(tokenize(`${recipe.original_title || ''} ${recipe.display_title || ''} ${tr?.translated_content?.title || ''} ${recipe.availability === 'reference_only' ? [...(recipe.cuisines || []), ...tagsDe(book?.tags), section || '', ...rubriques].join(' ') : ''}`));
-    return { recipe, version, edition, book, dish, tokens, titleTokens, ingredientIds, cooked: cooked.get(recipe.id) || 0, translation: tr };
+    return { recipe, version, edition, book, dish, tokens, titleTokens, ingredientIds, cooked: cooked.get(recipe.id) || 0, translation: tr, photo_principale: photoPrincipale(recipe, photosPersonnelles) };
   });
 }
 

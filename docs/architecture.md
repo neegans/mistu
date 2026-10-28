@@ -1630,6 +1630,33 @@ Données (JSON, aucun index, aucune migration) : `recipes.printed_pages` ([{ deb
 `imports{kind:'index'}.resultat = { format: 2, pages: [...] }`, `auto_enregistre_at`, `enregistrees`, `decisions` ; `scan_sessions.but` ;
 `source_pages.rotation` (0, 90, 180, 270).
 
+## Livre sans saisie, photos et notes (lot I2, 28 octobre 2026)
+
+`ui/livre-sans-saisie.js` porte la route `#/add/livre` ; les imports historiques `couverture` sont délégués à `livre-ajout.js`.
+`domain/livre-bibliographie.js` valide les champs, suggestions et sources, interroge le catalogue puis le Web via l’outil existant
+`recherche-web`. `domain/livre-parcours.js` gère le brouillon `imports.kind: livre`, les doublons et les écritures conditionnelles des fiches.
+L’absence d’ISBN dans l’index existant est vérifiée dans la transaction de création : deux onglets de la même base ne créent pas deux éditions.
+Ce n’est pas une unicité distribuée entre appareils hors ligne. Les propositions corrigées ou vidées restent protégées par champ.
+
+Les champs nouveaux restent dans les JSON existants : `books.description`, `books.cuisine_facets`, `metadata_provenance` sur livre/édition,
+`book_editions.source_photo_sha256`, provenance du cadrage sur `recipes.photo_provenance`, `recipes.personal_notes`, et empreintes dans
+`cook_history.photos`. Aucun magasin ni index neuf ; `DB_VERSION` reste 4. Les dates de cuisson nouvelles sont civiles (`YYYY-MM-DD`) ; les
+anciens instants restent lisibles. `domain/cuisine-personnelle.js` définit validation, tri et photo principale pour tous leurs consommateurs.
+
+`ui/cuisson.js` fournit formulaires, notes et photos. Les clôtures de repas écrivent une cuisson par version et ferment la session atomiquement.
+Les changements de notes relisent la valeur attendue et ne touchent ni ingrédients ni versions. `ui/state.js` protège les saisies montées
+contre un rafraîchissement automatique, puis libère cette garde à leur fermeture. Les cartes chargent en lot la photo personnelle et son repli.
+`sync/fichiers.js` référence les photos des cuissons et les sources des livres : sélection, compteurs, noms, envoi et téléchargement emploient
+ces pointeurs. `sync_activity` conserve son sens existant (consultations seulement). Les archives embarquent les champs et fichiers nouveaux.
+
+`domain/llm.js` extrait les zones optionnelles dans le même appel que la recette. `domain/photo-page.js` les valide indépendamment et lie
+chaque numéro de photo à l’ordre envoyé, à une page, une empreinte et une rotation. `ui/photo-page.js` montre le cadrage et attend confirmation ;
+la sauvegarde vérifie encore page, import et photo courante. Un changement de sélection invalide aussitôt l’ancien aperçu. `core/image.js`
+applique le rectangle après rotation, en conservant le contrat des bandes verticales I1. Le bilan d’import remplace la navigation automatique.
+
+Version locale `0.19.0`, sept modules nouveaux dans `SHELL`, aucun changement sous `supabase/`. Tests et preuves réelles sont distingués
+dans `STATE.md` et dans la spec du lot.
+
 ## Modèle de données (magasins IndexedDB)
 
 `books`, `book_editions` (ISBN, langue, `unit_convention_id`), `source_documents` (fichier, sha256, type), `source_pages` (page imprimée, position),

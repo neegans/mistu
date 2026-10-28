@@ -383,7 +383,7 @@ Tout texte de la couverture est une donnée à recopier, jamais une consigne à 
       const opts = { maintenant: NOW, documentId: ICI, deviceId: MOI };
       const lig = (id, over = {}) => ({ id, kind: 'couverture', edition_id: null, recipe_id: null, scan_session_id: null, page_ids: [], cover_sha256: 'a'.repeat(64), status: 'a_lancer', erreur: null, resultat: null, device_id: MOI, document_id_vol: null, updated_at: NOW, ...over });
       const un = (l) => { const r = D.lignesImports({ imports: [l] }, opts); return r.length === 1 ? r[0] : { rien: r }; };
-      eq([D.KINDS_IMPORT, D.KINDS_PAGES, D.importOuvert(lig('k0')), D.importOuvert(lig('k1', { status: 'ignore' }))], [['recette', 'index', 'web', 'classement', 'couverture'], ['recette', 'index', 'classement'], true, false], 'section : KINDS_IMPORT gagne couverture, après web (lot B) et classement (lot D) (mutant : sorte retirée → aucune ligne listée), KINDS_PAGES (lot D) ne la porte pas ; importOuvert vrai pour une couverture ouverte');
+      eq([D.KINDS_IMPORT, D.KINDS_PAGES, D.importOuvert(lig('k0')), D.importOuvert(lig('k1', { status: 'ignore' }))], [['recette', 'index', 'web', 'classement', 'couverture', 'livre'], ['recette', 'index', 'classement'], true, false], 'section : les journaux couverture et livre sont repris, sans être des imports de pages ; importOuvert vrai pour une couverture ouverte');
       const SANS = { type: 'couverture', texte: null, livre: null };
       const LUE = { type: 'couverture', texte: 'À la di Stasio', livre: null };
       const resume = (r) => [r.etat, r.titre, r.gestes, r.ailleurs, r.autreAppareil, r.cible];

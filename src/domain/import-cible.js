@@ -128,6 +128,7 @@ export function fabriquerExtraction(resultat, { reference, versions = [], pages 
     source_page_ids: [...new Set([...(reference.source_page_ids || []).filter((id) => id !== reference.index_page_id), ...presentes])], // lot D (B-7) : la photo d'index de la référence n'est pas une page de la recette
     photo_sha256: photo ? photo.sha256 : (reference.photo_sha256 ?? null),
     photo_origin: photo ? (ORIGINES_PHOTO.includes(photo.origin) ? photo.origin : null) : originePhotoAdmise(reference.photo_origin), // lot F (D-F19)
+    ...(photo ? { photo_provenance: null, photo_source_url: null } : {}),
     ...(remplacer === false ? {} : {
       printed_page: reference.printed_page ?? resultat.printed_page ?? null,
       ingredient_ids: [...new Set(ingredients.map((l) => l.ingredient_id).filter(Boolean))],
@@ -200,7 +201,7 @@ export const modeleBorne = (m) => (typeof m === 'string' && m && Array.from(m).l
 // arrive avec le lot B, spec recette-web § 4.7) et les statuts NON terminés. `importOuvert` : une ligne que la section liste (et que la fiche du
 // livre compte — un import web n'y compte jamais : son edition_id est nul, D-B17).
 // `classement` (lot D) : la ligne d'un classement de photos, reprise dans sa séance ; jamais « Relancer » depuis la section.
-export const KINDS_IMPORT = Object.freeze(['recette', 'index', 'web', 'classement', 'couverture']);
+export const KINDS_IMPORT = Object.freeze(['recette', 'index', 'web', 'classement', 'couverture', 'livre']);
 // Les sortes qui portent des PAGES (photos) : les seules que le chemin photo ouvre (repo.ouvrirImport, repo.ajouterPages). Une lecture web naît par
 // demarrerLectureWeb (src/ui/import-web.js), jamais par ce chemin (lot B, P-1).
 // `classement` (lot D) : une ligne de classement porte des photos — `repo.ouvrirImport({ kind: 'classement' })` l'ouvre ; `web` reste hors de cette liste.
@@ -228,7 +229,7 @@ export function cibleReprise(ligne) {
   if (ligne.kind === 'index') return chaine(ligne.scan_session_id) ? `/import?session=${encodeURIComponent(ligne.scan_session_id)}&import=${encodeURIComponent(id)}` : null;
   if (ligne.kind === 'web') return chaine(ligne.recipe_id) ? `/recipes/${encodeURIComponent(ligne.recipe_id)}/importer?import=${encodeURIComponent(id)}` : null;
   if (ligne.kind === 'classement') return chaine(ligne.scan_session_id) ? `/import?session=${encodeURIComponent(ligne.scan_session_id)}&import=${encodeURIComponent(id)}` : null; // lot D : la séance du classement
-  if (ligne.kind === 'couverture') return `/add/livre?import=${encodeURIComponent(id)}`; // lot E (§ 4.6) : la route d'ajout d'un livre reprend la lecture
+  if (ligne.kind === 'couverture' || ligne.kind === 'livre') return `/add/livre?import=${encodeURIComponent(id)}`;
   return null;
 }
 
@@ -267,14 +268,16 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     const ailleurs = i.status === 'en_cours' && !tenu;
     const web = i.kind === 'web';
     const couverture = i.kind === 'couverture';
+    const livre = i.kind === 'livre';
     const recetteId = i.kind === 'recette' || web ? chaine(i.recipe_id) : null;
     const recette = recetteId ? recettes.get(recetteId) ?? null : null;
     const referenceAbsente = !!recetteId && !recette;
-    const type = couverture ? 'couverture' : i.kind === 'classement' ? 'classement' : i.kind === 'index' ? 'index' : web ? 'web' : recetteId ? 'reference' : 'regrouper';
+    const type = livre ? 'livre' : couverture ? 'couverture' : i.kind === 'classement' ? 'classement' : i.kind === 'index' ? 'index' : web ? 'web' : recetteId ? 'reference' : 'regrouper';
     const cible = cibleReprise(i);
     let gestes;
     if (referenceAbsente) gestes = [];
     else if (i.status === 'en_cours') gestes = tenu ? ['annuler'] : [];
+    else if (livre) gestes = ['reprendre', 'ignorer']; // aucun appel au montage ; la route contrôle disponibilité des octets
     // Lot D (D-D14) : un classement ne se RELANCE jamais depuis Imports. Lot E (D-E14, R-E-13 ; ronde 1 : la même règle, une seule branche) : une couverture
     // non plus — « Reprendre » ouvre sa route, qui offre « Lire / Relire la couverture » (sa référence n'est jamais absente : elle n'a pas de recipe_id).
     else if (i.kind === 'classement' || couverture) gestes = autreAppareil && !(i.status === 'a_verifier' && i.resultat != null) ? ['ignorer'] : ['reprendre', 'ignorer'];
@@ -289,7 +292,7 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     // n'a aucun signet à relire : « Réessayer » ne pourrait jamais aboutir (ronde 1 ; lancerLecture la refuse `inconnu`) — « Ignorer » seul reste.
     if (web ? !recetteId : !nbPages(i)) gestes = gestes.filter((g) => g !== 'relancer');
     return {
-      id: i.id, kind: i.kind, titre: couverture ? { type, texte: titreCouverture(i.resultat), livre: null } : { type, texte: recette ? chaine(recette.original_title) : null, livre: web ? (recette ? lienSignet(recette.source_url).hote : null) : livreDe(recette?.edition_id ?? i.edition_id) },
+      id: i.id, kind: i.kind, titre: livre ? { type, texte: estTitreUneLigne(i.brouillon?.fields?.title, 300) ? i.brouillon.fields.title : null, livre: null } : couverture ? { type, texte: titreCouverture(i.resultat), livre: null } : { type, texte: recette ? chaine(recette.original_title) : null, livre: web ? (recette ? lienSignet(recette.source_url).hote : null) : livreDe(recette?.edition_id ?? i.edition_id) },
       etat: i.status, age: ageDepuis(i.updated_at, maintenant), raison: i.status === 'echec' ? chaine(i.erreur?.raison) : null,
       gestes, cible, ailleurs, autreAppareil, referenceAbsente, pages: nbPages(i), lot: lotDeRecette(i),
     };

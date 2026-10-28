@@ -11,6 +11,7 @@ import { dejaPresent, introuvable, erreurNommee } from './transport.js';
 import { nettoyerChaines } from './lots.js';
 import { syncNow, reculMs } from './clock.js'; // reculMs vit dans clock.js (feuille) depuis la ronde 1 de la tâche 3 : plus aucun cycle avec push.js
 import { logError } from '../core/log.js';
+import { photosDeCuisson } from '../domain/cuisine-personnelle.js';
 
 export { remoteValide, remoteDeCeCompte, HASH_FICHIER };
 
@@ -20,13 +21,16 @@ export const estOriginalIci = (row) => row?.blob instanceof Blob && row.blob.siz
 // Une copie dont la taille n'est plus celle que le serveur porte (renvoi en originale fait ailleurs) : `present`, comptée, jamais retéléchargée.
 export const copiePerimee = (row) => row?.blob instanceof Blob && !estOriginalIci(row) && remoteValide(row.remote) && row.blob.size !== row.remote.size;
 
-// § 3.5 : les cinq pointeurs vers `files` ; une ligne hors de cet ensemble est un orphelin (ni envoyé, ni compté, ni effacé — D-G1).
-const POINTEURS = [['source_pages', 'sha256'], ['source_documents', 'sha256'], ['book_editions', 'cover_sha256'], ['recipes', 'photo_sha256'], ['imports', 'photo_sha256']];
+// Pointeurs souples vers files ; I2 ajoute la photo source du livre et les photos des cuissons.
+// Une ligne hors de cet ensemble reste un orphelin (ni envoyé, ni compté, ni effacé — D-G1).
+const POINTEURS = [['source_pages', 'sha256'], ['source_documents', 'sha256'], ['book_editions', 'cover_sha256'], ['book_editions', 'source_photo_sha256'], ['recipes', 'photo_sha256'], ['imports', 'photo_sha256'], ['imports', 'source_photo_sha256']];
+const lignesDe = (snapshot, store) => Array.isArray(snapshot?.[store]) ? snapshot[store] : [];
 export function referencesFichiers(snapshot) {
   const refs = new Set();
   for (const [store, champ] of POINTEURS) {
-    for (const r of snapshot?.[store] || []) { const v = r?.[champ]; if (typeof v === 'string' && HASH_FICHIER.test(v)) refs.add(v); }
+    for (const r of lignesDe(snapshot, store)) { const v = r?.[champ]; if (typeof v === 'string' && HASH_FICHIER.test(v)) refs.add(v); }
   }
+  for (const row of lignesDe(snapshot, 'cook_history')) for (const sha of photosDeCuisson(row)) refs.add(sha);
   return refs;
 }
 
@@ -44,9 +48,10 @@ export function etatFichier(row, { uid = null, erreurs = new Set() } = {}) {
 const INDEX_NOMS = new WeakMap();
 function indexNoms(snapshot) {
   if (INDEX_NOMS.has(snapshot)) return INDEX_NOMS.get(snapshot);
-  const par = (store, champ) => { const m = new Map(); for (const r of snapshot[store] || []) { const v = r?.[champ]; if (v != null && !m.has(v)) m.set(v, r); } return m; };
+  const par = (store, champ) => { const m = new Map(); for (const r of lignesDe(snapshot, store)) { const v = r?.[champ]; if (v != null && !m.has(v)) m.set(v, r); } return m; };
   const ix = { documents: par('source_documents', 'id'), editions: par('book_editions', 'id'), livres: par('books', 'id'), pages: par('source_pages', 'sha256'),
-    docs: par('source_documents', 'sha256'), couvertures: par('book_editions', 'cover_sha256'), plats: par('recipes', 'photo_sha256'), imports: par('imports', 'photo_sha256') };
+    docs: par('source_documents', 'sha256'), couvertures: par('book_editions', 'cover_sha256'), sources: par('book_editions', 'source_photo_sha256'), plats: par('recipes', 'photo_sha256'), recettes: par('recipes', 'id'), imports: par('imports', 'photo_sha256'), sourcesImport: par('imports', 'source_photo_sha256'), cuissons: new Map() };
+  for (const row of lignesDe(snapshot, 'cook_history')) for (const sha of photosDeCuisson(row)) if (!ix.cuissons.has(sha)) ix.cuissons.set(sha, row);
   INDEX_NOMS.set(snapshot, ix);
   return ix;
 }
@@ -68,9 +73,13 @@ function nommerFichier(sha256, snapshot) {
   if (doc?.original_filename) return String(doc.original_filename);
   const edition = ix.couvertures.get(sha256);
   if (edition) return t('Couverture · {livre}', { livre: titreLivre(edition.id) || t('Sans titre') });
+  const source = ix.sources.get(sha256);
+  if (source) return t('Photo source · {livre}', { livre: titreLivre(source.id) || t('Sans titre') });
+  const cuisson = ix.cuissons.get(sha256);
+  if (cuisson) return t('Ma photo · {titre}', { titre: ix.recettes.get(cuisson.recipe_id)?.original_title || t('Sans titre') });
   const recette = ix.plats.get(sha256);
   if (recette) return t('Photo du plat · {titre}', { titre: recette.original_title || t('Sans titre') }); // les versions ne portent pas de titre (doute 7)
-  const imp = ix.imports.get(sha256);
+  const imp = ix.imports.get(sha256) || ix.sourcesImport.get(sha256);
   if (imp) return t('Photo importée · {date}', { date: String(imp.created_at || '').slice(0, 10) });
   return String(sha256).slice(0, 12);
 }
@@ -147,7 +156,7 @@ export const LIMITES_FICHIERS = Object.freeze({
   reduite: Object.freeze({ maxCote: 2000, qualite: 0.8, octetsTelQuel: 614400 }),
 });
 // Le snapshot de la passe : pris UNE fois (S-12) et relu par envoyer, telechargerTout et compterFichiers.
-export const MAGASINS_FICHIERS = Object.freeze(['source_pages', 'source_documents', 'book_editions', 'recipes', 'imports', 'files', 'books']);
+export const MAGASINS_FICHIERS = Object.freeze(['source_pages', 'source_documents', 'book_editions', 'recipes', 'imports', 'files', 'books', 'cook_history']);
 const PREFIXE_ERREUR = 'file_error:';
 
 export async function lireErreursFichiers(db) {

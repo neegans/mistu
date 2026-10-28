@@ -67,21 +67,30 @@ async function decoder(blob) {
 }
 
 // Lot I1 (D-I12, D-I2) : `rotation` (0, 90, 180, 270 : quart de tour dans le sens horaire) puis `recadrage` ({ debut, fin } : la bande VERTICALE
-// gardée, en fractions de la largeur APRÈS rotation — une moitié de page d'index) ; sans eux, l'image entière comme avant.
-export async function reduireImage(blob, { maxCote = LIMITES_COUVERTURE.maxCote, qualite = LIMITES_COUVERTURE.qualite, rotation = 0, recadrage = null } = {}) {
+// gardée, en fractions de la largeur APRÈS rotation — une moitié de page d'index). I2 : rectangle 2D après rotation, indépendant des bandes I1.
+export function rectangleValide(r) {
+  if (!r || typeof r !== 'object' || Array.isArray(r)) return false;
+  if (!['x', 'y', 'largeur', 'hauteur'].every((k) => Object.hasOwn(r, k) && Number.isFinite(r[k]))) return false;
+  return r.x >= 0 && r.y >= 0 && r.largeur > 0 && r.hauteur > 0 && r.x + r.largeur <= 1 && r.y + r.hauteur <= 1;
+}
+export async function reduireImage(blob, { maxCote = LIMITES_COUVERTURE.maxCote, qualite = LIMITES_COUVERTURE.qualite, rotation = 0, recadrage = null, rectangle = null } = {}) {
+  if (rectangle !== null && (!rectangleValide(rectangle) || recadrage !== null)) throw new ErreurImage('recadrage');
   const bmp = await decoder(blob);
   try {
     const q = (((Number.isInteger(rotation) ? rotation : 0) % 360) + 360) % 360;
     const tourne = q === 90 || q === 270;
     const W0 = tourne ? bmp.height : bmp.width, H0 = tourne ? bmp.width : bmp.height;
-    const x0 = recadrage ? Math.max(0, Math.min(W0 - 1, Math.round(W0 * recadrage.debut))) : 0;
-    const x1 = recadrage ? Math.max(x0 + 1, Math.min(W0, Math.round(W0 * recadrage.fin))) : W0;
-    const ratio = Math.min(1, maxCote / Math.max(x1 - x0, H0));
-    const w = Math.max(1, Math.round((x1 - x0) * ratio)), h = Math.max(1, Math.round(H0 * ratio));
+    const x0 = rectangle ? Math.round(W0 * rectangle.x) : recadrage ? Math.max(0, Math.min(W0 - 1, Math.round(W0 * recadrage.debut))) : 0;
+    const x1 = rectangle ? Math.round(W0 * (rectangle.x + rectangle.largeur)) : recadrage ? Math.max(x0 + 1, Math.min(W0, Math.round(W0 * recadrage.fin))) : W0;
+    const y0 = rectangle ? Math.round(H0 * rectangle.y) : 0;
+    const y1 = rectangle ? Math.round(H0 * (rectangle.y + rectangle.hauteur)) : H0;
+    if (rectangle && (x1 - x0 < 16 || y1 - y0 < 16)) throw new ErreurImage('trop_petite');
+    const ratio = Math.min(1, maxCote / Math.max(x1 - x0, y1 - y0));
+    const w = Math.max(1, Math.round((x1 - x0) * ratio)), h = Math.max(1, Math.round((y1 - y0) * ratio));
     const canvas = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
     const cx = canvas.getContext('2d');
     cx.scale(ratio, ratio);
-    cx.translate(-x0, 0);
+    cx.translate(-x0, -y0);
     if (q === 90) { cx.translate(W0, 0); cx.rotate(Math.PI / 2); } else if (q === 180) { cx.translate(W0, H0); cx.rotate(Math.PI); } else if (q === 270) { cx.translate(0, H0); cx.rotate(-Math.PI / 2); }
     cx.drawImage(bmp, 0, 0);
     const sortie = canvas.convertToBlob ? await canvas.convertToBlob({ type: 'image/jpeg', quality: qualite }) : await new Promise((r) => canvas.toBlob(r, 'image/jpeg', qualite));

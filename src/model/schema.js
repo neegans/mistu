@@ -3,7 +3,7 @@
 
 export const DB_NAME = 'cuisine-os';
 export const DB_VERSION = 4;
-export const APP_VERSION = '0.18.0';
+export const APP_VERSION = '0.19.0';
 
 export const ARCHIVE_FORMAT = 'cuisine-os-archive';
 export const ARCHIVE_FORMAT_VERSION = 1;
@@ -159,7 +159,7 @@ export const VERSION_STATUS = ['proposed', 'tested'];
 export const STATUTS_IMPORT = ['a_lancer', 'en_cours', 'a_verifier', 'enregistre', 'echec', 'ignore'];
 // Les sortes du journal (lot D, spec D-D12, § 3.4) : vocabulaire FERMÉ de imports.kind — les cinq sortes de l'audit § 2, `web` (lot B) et `couverture`
 // (lot E) comprises, pour qu'aucun lot ne rougisse l'autre. Les sortes qu'un chemin OUVRE ou LISTE vivent dans KINDS_IMPORT (src/domain/import-cible.js).
-export const SORTES_IMPORT = ['recette', 'index', 'web', 'couverture', 'classement'];
+export const SORTES_IMPORT = ['recette', 'index', 'web', 'couverture', 'classement', 'livre'];
 // Les deux états TERMINAUX (aucune transition n'en sort) ; les autres sont « ouverts » : un seul import ouvert par recette (I-2), et seule la
 // séance d'un import ouvert est exclue des rappels génériques (§ 4.1). Une seule définition, lue par le domaine (import-cible.js) et par repo.ajouterPages.
 export const IMPORTS_TERMINES = ['enregistre', 'ignore'];

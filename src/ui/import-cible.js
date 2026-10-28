@@ -12,6 +12,8 @@ import { navigate as naviguerDom } from '../core/router.js';
 import { logError } from '../core/log.js';
 import { urlDeBlob } from '../core/blob-urls.js';
 import { sha256Hex } from '../core/hash.js';
+import { lierZonesPhoto, sourceDepuisEnvoi } from '../domain/photo-page.js';
+import { panneauPhotoPage } from './photo-page.js';
 import { preparerPhotoLocale } from '../core/image.js';
 import { TransitionRefusee } from '../core/db.js';
 import { typeAffichage, displayUrl } from '../sync/mime.js';
@@ -20,6 +22,7 @@ import { PasserelleProvider, extraireRecette, validateParsedRecipe, ErreurExtrac
 import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception, cleLecture, modeleBorne, issueDUneSeance, statutSeanceApres } from '../domain/import-cible.js';
 import { executantIndexParPage, relireResultatIndex } from '../domain/index-livre.js';
 import { shaBornee } from '../domain/couverture.js';
+import { originePhotoAdmise } from '../domain/vocabulaire.js';
 import { getConvention } from '../domain/units.js';
 import { currentVersion } from '../domain/search.js';
 import { section, sessionAssistant, carteConnexion, texteEchecAssistant, TEXTE_CONNEXION, availabilityBadge } from './components.js';
@@ -93,15 +96,18 @@ const questionAPoser = ({ ok, rattachee, remplacement, remplacer }) => (!ok && !
 async function imagesDe(repo, pageIds) {
   const images = [];
   const envoyees = [];
+  const sources = [];
   for (const id of new Set(pageIds)) {
     const page = await repo.get('source_pages', id);
     if (!page?.sha256) continue;
     const fichier = await repo.getFile(page.sha256);
     if (!(fichier?.blob instanceof Blob)) { const e = new Error('octets_absents'); e.code = 'octets_absents'; throw e; }
-    images.push(await pagePourEnvoi(fichier.blob, { rotation: [90, 180, 270].includes(page.rotation) ? page.rotation : 0 })); // lot I1 (D-I12) : la page telle que la personne l'a pivotée
+    const image = await pagePourEnvoi(fichier.blob, { rotation: [90, 180, 270].includes(page.rotation) ? page.rotation : 0 });
+    images.push(image); // lot I1 (D-I12) : la page telle que la personne l'a pivotée
+    sources.push(await sourceDepuisEnvoi(page, image)); // I2 : photographie n → page/hash/rotation exacts au départ
     envoyees.push(id);
   }
-  return { images, pageIds: envoyees };
+  return { images, pageIds: envoyees, sources };
 }
 
 // --- Le vol (spec § 4.3.1-2, I-3, I-4, I-7 ; exporté pour la section « Imports », tâche 6) -------------------------------------------------------
@@ -232,7 +238,7 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
     const t0 = Date.now();
     let reponse;
     try {
-      reponse = await executer({ provider, images: envoi.images, pageIds: envoi.pageIds, signal: tenue.controller.signal, kind, importId, repo }); // lot C : l'appel est celui de l'exécutant ; lot I1 : importId et repo pour la progression page par page
+      reponse = await executer({ provider, images: envoi.images, pageIds: envoi.pageIds, sources: envoi.sources, signal: tenue.controller.signal, kind, importId, repo }); // lot C : l'appel est celui de l'exécutant ; lot I1 : importId et repo pour la progression page par page
     } catch (e) {
       // Échec de l'appel ou refus de la lecture : en_cours → echec(raison) ; une ErreurExtraction garde la réponse brute (diagnostic, bornée).
       // Un `annule` arrive aussi par annulerVol, qui écrit la même chose : la première écriture gagne, la seconde est refusée sans bruit.
@@ -271,7 +277,11 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
 
 // Les exécutants (lot C, D-C21). Une recette : extraireRecette, 6 000 jetons, le résultat est la recette validée. Un index (panneau, « Relancer » de la
 // section Imports) : la table des matières par photo (executerIndex, src/domain/table-matieres.js). Une seule primitive de vol pour les deux sortes.
-const executerRecette = async ({ provider, images, signal }) => { const r = await extraireRecette(provider, images, { signal, maxTokens: MAX_TOKENS_EXTRACTION }); return { resultat: r.recette, texteBrut: r.texteBrut, modele: r.modele }; };
+const executerRecette = async ({ provider, images, sources = [], signal }) => {
+  const r = await extraireRecette(provider, images, { signal, maxTokens: MAX_TOKENS_EXTRACTION });
+  const photoSources = sources.filter(Boolean);
+  return { resultat: { ...r.recette, ...(photoSources.length ? { photo_sources: photoSources, photo_propositions: lierZonesPhoto(r.zonesPhoto, sources) } : {}) }, texteBrut: r.texteBrut, modele: r.modele };
+};
 const executerExtraction = (args) => (args.kind === 'index' ? executantIndexParPage()(args) : executerRecette(args)); // lot I1 : un index se lit page par page (D-I1), relances comprises
 
 // Lot E (spec couverture § 4.2, D-E20) : LE même vol pour une couverture — lancerVol (la primitive partagée du lot C), avec la liste blanche `accepte`
@@ -400,7 +410,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
   // la lecture pour laquelle « Rattacher » a été répondu, sinon null ; verdict : la discordance calculée par decider() ; focus : le bouton à focaliser
   // après un déplacement ; occupe : une écriture est en cours (aucune double pose) ; ecriteMain : la question « Remplacer ? » vient d'une version écrite à
   // la main (I-5), et non de la seule couverture des pages (ronde finale 2) — la phrase qui le dit n'est montrée que dans ce cas.
-  const etat = { ligne: null, pages: new Map(), question: null, cleQuestion: null, rattache: null, verdict: null, focus: null, occupe: false, ecriteMain: false, seanceRefusee: null };
+  const etat = { ligne: null, pages: new Map(), question: null, cleQuestion: null, rattache: null, verdict: null, focus: null, occupe: false, ecriteMain: false, seanceRefusee: null, bilan: null };
   const oublierQuestion = () => { etat.question = null; etat.cleQuestion = null; etat.rattache = null; etat.verdict = null; etat.ecriteMain = false; };
   root.etatRoute = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, pageIds: [...(Array.isArray(etat.ligne?.page_ids) ? etat.ligne.page_ids : [])], vol: !!etat.ligne && volEnCours()?.importId === etat.ligne.id, discordance: etat.verdict });
   if (!recipe) { root.append(el('div', { class: 'card' }, t('Recette introuvable.'))); return root; }
@@ -626,7 +636,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
       etat.cleQuestion = etat.question ? cle : null; // la question posée est celle de CETTE lecture (T4-R2)
       if (etat.question) return;
       apres = 'redessiner';
-      await enregistrer(L, remplacer === false ? fabriquerExtraction(resultat, { ...options, remplacer: false }) : sonde);
+      await enregistrer(L, remplacer === false ? fabriquerExtraction(resultat, { ...options, remplacer: false }) : sonde, reference);
     } catch (e) {
       logError('import_cible.decider', { error: e });
       apres = 'redessiner';
@@ -636,28 +646,40 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     }
   }
   // L'enregistrement (§ 4.3.5) : UNE transaction conditionnée a_verifier → enregistre avec la fiche, la version, les pages et la séance. Refusée (un
-  // autre onglet a tranché juste avant, I-10) → rien n'est écrit et rien n'est dit « importé » ; réussie → toast et navigation SEULEMENT si l'écran est
-  // encore monté (T4-R1 : une lecture qui arrive après avoir quitté l'écran n'arrache pas la personne à sa saisie ; la fiche montre la version).
-  async function enregistrer(L, fab) {
+  // autre onglet a tranché juste avant, I-10) → rien n'est écrit et rien n'est dit « importé » ; réussie → bilan SEULEMENT si l'écran est encore monté.
+  async function enregistrer(L, fab, reference) {
     // Ronde 1 : une séance refusée dans la transaction (disparue, ou d'un statut hors open/done) n'est plus relue — le geste suivant écrit sans elle (§ 4.8.1 point 2).
     const seance = L.scan_session_id && etat.seanceRefusee !== L.scan_session_id ? await repo.get('scan_sessions', L.scan_session_id) : null;
-    const puts = { recipes: [fab.recipe], recipe_versions: [fab.version], source_pages: fab.pageUpdates };
+    const puts = { recipe_versions: [fab.version], source_pages: fab.pageUpdates };
+    // I2 : la lecture ne possède que les champs d'extraction. Mes notes, favori et photo sont relus dans la transaction.
+    const photo = photoBornee(L);
+    const conditions = { recipes: [{ key: recipe.id, fusion: (c) => {
+      if (!c || (c.current_version_id ?? null) !== (reference.current_version_id ?? null)) throw new TransitionRefusee('recipes', recipe.id, c?.status);
+      const photoInchangee = (c.photo_sha256 ?? null) === (reference.photo_sha256 ?? null)
+        && (c.photo_origin ?? null) === (reference.photo_origin ?? null);
+      return { ...c,
+        source_page_ids: [...new Set([...(Array.isArray(c.source_page_ids) ? c.source_page_ids : []), ...fab.version.provenance.source_page_ids])].filter((id) => id !== c.index_page_id),
+        photo_sha256: c.photo_sha256 ?? null, photo_origin: originePhotoAdmise(c.photo_origin),
+        ...(photo && photoInchangee ? { photo_sha256: fab.recipe.photo_sha256, photo_origin: fab.recipe.photo_origin, photo_provenance: null, photo_source_url: null } : {}),
+        ...(fab.recipe.current_version_id === fab.version.id ? { current_version_id: fab.version.id, availability: fab.recipe.availability,
+          verification_state: fab.recipe.verification_state, ingredient_ids: fab.recipe.ingredient_ids, printed_page: c.printed_page ?? fab.recipe.printed_page } : {}),
+      };
+    } }] };
     // Lot D (§ 4.8.1 point 2, N-1) : la séance n'est plus écrite par une copie lue hors transaction — elle entre dans LA transaction par le sac
     // `conditions`, relue dedans (deux enregistrements concurrents gardent leurs deux recipe_ids) ; done seulement quand plus aucune de ses photos n'est
     // sans rôle (statutSeanceApres, sur ses pages relues juste avant : une page arrivée entre-temps compte comme sans rôle) ; disparue → refus.
-    let conditions = null;
     if (seance) {
       const pagesSeance = new Map();
       for (const id of Array.isArray(seance.page_ids) ? seance.page_ids : []) { const p = await repo.get('source_pages', id); if (p) pagesSeance.set(id, p); }
       const ecrites = new Set(fab.pageUpdates.map((p) => p.id));
-      conditions = { scan_sessions: [{ key: seance.id, attendus: ['open', 'done'], patch: (c) => ({ recipe_ids: [...new Set([...(Array.isArray(c.recipe_ids) ? c.recipe_ids : []), recipe.id])], status: statutSeanceApres(c, pagesSeance, ecrites) }) }] };
+      conditions.scan_sessions = [{ key: seance.id, attendus: ['open', 'done'], patch: (c) => ({ recipe_ids: [...new Set([...(Array.isArray(c.recipe_ids) ? c.recipe_ids : []), recipe.id])], status: statutSeanceApres(c, pagesSeance, ecrites) }) }];
     }
     // Vague finale (T6-R1-d ici aussi) : la clôture vaut pour LA lecture dont la recette a été fabriquée — une autre lecture arrivée sur la ligne entre
     // la relecture et la transaction (autre onglet, autre appareil) n'est jamais close sans avoir été vue ; rien n'est écrit, le redessin la montre.
     const cle = cleLecture(L);
     const cloture = (c) => { if (cleLecture(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { status: 'enregistre', reponse_brute: null, finished_at: maintenant() }; };
     try {
-      await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: cloture, puts, ...(conditions ? { conditions } : {}) });
+      await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: cloture, puts, conditions });
     } catch (e) {
       if (estRefus(e) && e.store === 'scan_sessions') { etat.seanceRefusee = L.scan_session_id; toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); } // lot D : la séance a disparu (ou porte un statut inconnu) ; le geste suivant écrit sans elle
       else if (!estRefus(e)) { logError('import_cible.enregistrer', { error: e, id: L.id }); toast(t('La recette n’a pas pu être enregistrée. Réessaie.')); }
@@ -665,7 +687,13 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     }
     if (!root.isConnected) return;
     toast(t('Recette importée'));
-    navigate(`/recipes/${encodeURIComponent(recipe.id)}?v=${encodeURIComponent(fab.version.id)}`);
+    const relue = await repo.get('recipes', recipe.id);
+    const proposition = await panneauPhotoPage(relue || fab.recipe, ctx, { ...deps, repo, toast });
+    etat.bilan = el('div', { class: 'stack', dataset: { role: 'bilan-import' } },
+      el('p', { role: 'status' }, t('Recette importée')), proposition,
+      el('a', { class: 'btn primary', href: `#/recipes/${encodeURIComponent(recipe.id)}?v=${encodeURIComponent(fab.version.id)}`,
+        onClick: (e) => { e.preventDefault(); navigate(`/recipes/${encodeURIComponent(recipe.id)}?v=${encodeURIComponent(fab.version.id)}`); } }, t('Voir la recette')));
+    dessiner();
   }
 
   // --- Dessin -----------------------------------------------------------------------------------------------------------------------------------
@@ -839,6 +867,7 @@ export async function renderImportCible(params, query, ctx, deps = {}) {
     veille = setTimeout(() => { veille = null; if (root.isConnected) passe().then(() => veiller(false)); }, veilleMs);
   }
   function dessiner() {
+    if (etat.bilan) { root.replaceChildren(enTete(), etat.bilan); return; }
     const L = etat.ligne;
     const statut = L?.status ?? null;
     const pageIds = Array.isArray(L?.page_ids) ? L.page_ids : [];

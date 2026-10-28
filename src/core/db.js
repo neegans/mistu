@@ -40,6 +40,7 @@ export class TransitionRefusee extends Error {
 //   seulement vérifiée (pas réécrite) ;
 // - { key, absente: true } : la fiche N'EXISTE PAS (une création ne doit jamais écraser une ligne, quel que soit son statut) ;
 // - { index, valeur, exclus } : AUCUNE fiche de l'index `index` à cette `valeur` n'a un statut parmi `exclus` (chaînes non vides, au moins une) ;
+// - { index, valeur, absente: true } : AUCUNE fiche à cette valeur d'index (I2 : ISBN, même si la fiche n'a pas de statut) ;
 // - { key, fusion } (lot G, ronde 1 de la tâche 1) : la fiche est relue DANS la transaction et `fusion(courant)` (courant : la fiche, ou null si
 //   elle n'existe pas) rend la fiche à écrire, sous la même clé, ou null (rien d'écrit pour elle) ; aucun statut (une ligne `files` n'en a pas) :
 //   une écriture calculée sur une lecture antérieure ne perd jamais ce qui est arrivé depuis (un blob local, I-G3).
@@ -57,9 +58,10 @@ function listeConditions(conditions) {
     for (const c of items) {
       if (!c || typeof c !== 'object') throw new TypeError('Condition sans clé sur ' + store);
       if (c.index != null) {
-        if (typeof c.index !== 'string' || !c.index || c.valeur == null || c.key != null || !statutsValides(c.exclus)) throw new TypeError('Une condition d’index porte index, valeur et des statuts exclus (chaînes non vides, au moins un), sans clé (' + store + ')');
+        const absence = c.absente === true && c.exclus == null;
+        if (typeof c.index !== 'string' || !c.index || c.valeur == null || c.key != null || c.patch != null || c.fusion != null || c.attendus != null || (!absence && (!statutsValides(c.exclus) || c.absente != null))) throw new TypeError('Une condition d’index porte index, valeur et des statuts exclus ou absente: true, sans clé ni écriture (' + store + ')');
         unique(store + '/#' + c.index + '=' + String(c.valeur));
-        liste.push({ store, index: c.index, valeur: c.valeur, exclus: c.exclus });
+        liste.push({ store, index: c.index, valeur: c.valeur, exclus: c.exclus, absente: absence });
         continue;
       }
       if (c.key == null) throw new TypeError('Condition sans clé sur ' + store);
@@ -105,7 +107,7 @@ async function ecrireConditionne(db, { puts, deletes, clearStores, origin, paylo
         for (const [i, c] of liste.entries()) {
           const courant = lus[i];
           if (c.index) { // aucune fiche de l'index à cette valeur n'a un statut exclu (I-2 : un seul import ouvert par recette)
-            const fautive = (Array.isArray(courant) ? courant : []).find((r) => r && c.exclus.includes(r.status));
+            const fautive = (Array.isArray(courant) ? courant : []).find((r) => r && (c.absente || c.exclus.includes(r.status)));
             if (fautive) { refus = new TransitionRefusee(c.store, c.index + '=' + String(c.valeur), fautive.status); tx.abort(); return; }
             continue;
           }

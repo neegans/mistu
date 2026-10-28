@@ -285,7 +285,7 @@ export async function runPasserelleTests({ eq, ok }) {
       { const brut = '{"title":"Tarte","ingredients":[{"source_text":"2 oeufs"}],"steps":[{"text":"Cuire."}],"incomplete":true}';
         const p2 = avecCorps(texte(brut));
         const r = await L.extraireRecette(p2, images);
-        eq([Object.keys(r).sort(), r.stopReason, r.modele, r.texteBrut, r.recette.title, r.recette.incomplete, p2.stopReason, p2.modele], [['modele', 'recette', 'stopReason', 'texteBrut'], 'end_turn', 'claude-x', brut, 'Tarte', true, 'end_turn', 'claude-x'], 'extraireRecette : { recette, stopReason, modele, texteBrut } ; complete pose this.stopReason et this.modele');
+        eq([Object.keys(r).sort(), r.zonesPhoto, r.stopReason, r.modele, r.texteBrut, r.recette.title, r.recette.incomplete, p2.stopReason, p2.modele], [['modele', 'recette', 'stopReason', 'texteBrut', 'zonesPhoto'], [], 'end_turn', 'claude-x', brut, 'Tarte', true, 'end_turn', 'claude-x'], 'extraireRecette I2 : zonesPhoto vide sans proposition ; recette, arrêt, modèle et texte brut conservés');
         eq(await L.extractRecipeFromImages(p2, images), r.recette, 'extractRecipeFromImages(provider, images) : enveloppe compatible, la recette seule');
         const p3 = avecCorps({ model: 7, content: [{ type: 'text', text: brut }] });
         eq([(await L.extraireRecette(p3, images)).stopReason, (await L.extraireRecette(p3, images)).modele, p3.stopReason], [null, null, null], 'extraireRecette : sans stop_reason ni model lisibles → null (rien d’inventé)'); }
@@ -687,9 +687,9 @@ export async function runPasserelleTests({ eq, ok }) {
     const passerelle = lus.find(([m]) => m === 'src/domain/passerelle.js')?.[1] ?? '';
     ok(!/from '\.\.\/ui\//.test(passerelle), 'passerelle.js : n’importe rien de src/ui/ (couche domaine)');
     ok(sw.includes("'./src/domain/passerelle.js'"), 'SHELL : ./src/domain/passerelle.js');
-    ok(/VERSION = 'cuisine-os-v0\.18\.0-\d+'/.test(sw), 'sw.js : VERSION 0.18.0');
+    ok(/VERSION = 'cuisine-os-v0\.19\.0-\d+'/.test(sw), 'sw.js : VERSION 0.19.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.18.0', 'APP_VERSION 0.18.0 (lot UI-1, carnet)');
+    eq(APP_VERSION, '0.19.0', 'APP_VERSION 0.19.0 (lot UI-1, carnet)');
   }
 
   // --- Lot F (spec plats-en-images § 4.6) : deux raisons de plus, écrites par la passerelle pour image-web et relayées telles quelles

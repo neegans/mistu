@@ -872,7 +872,7 @@ export async function runCarnetTests({ eq, ok }) {
       await versions(version('rc_lu', { provenance: { source_page_ids: [], generated_by: 'ai', model: null, edition_id: null, convention_snapshot: null, import_id: 'imp_lu', lu_le: DATE, source_url: 'https://site.test/lu', url_finale: 'https://site.test/lu', source_kind: 'jsonld', site: 'Le site' } }));
       const pLu = await renderRecipe({ id: 'rc_lu' }, {}, await ctxPour(), { matchMedia: fauxMatchMedia(true).matchMedia });
       eq([[...(q(pLu, '[data-role="fiche-etat"]')?.children ?? [])].map((c) => c.dataset.role ?? c.className), q(pLu, '[data-role="fiche-etat"]')?.children?.[1]?.querySelector('[data-role="etat-verification"]') !== null],
-        [['stack', 'row', 'bandeau-web', 'bandeau-lecture'], true], 'fiche T3 : le bandeau web puis le bandeau de lecture vivent dans l’état de l’en-tête (.fiche-etat), après l’en-tête (le titre : maquettes) et la rangée des états, qui porte l’état de vérification de la lecture (colonne de gauche, D-UI-6)');
+        [['stack', 'row', 'bandeau-web', 'bandeau-lecture', 'notes-personnelles'], true], 'fiche T3 / I2 : les bandeaux restent dans l’état de l’en-tête après le titre et les états ; Mes notes les suit');
       // --- Le sous-titre reste provenanceText (R-UI-P2) : « Du web · » / « De mon livre · » sont les préfixes de la CARTE-PLAT (ligneSource, T2), pas de la fiche — tests/creer-ia.js:1397 épingle « Mon livre — A. B. · page 58 » en header p.
       eq([q(pL, 'header p.muted')?.textContent, q(pH, 'header p.muted')?.textContent], ['Source personnelle', 'site.test'], 'fiche T3 : le sous-titre est provenanceText, inchangé — « Source personnelle » sans livre ni adresse, l’hôte RECALCULÉ pour une fiche web (R-UI-P2 ; § 4.2 amendé par T6)');
       // --- La photo en tête : dans la colonne photo, sans style en ligne (la feuille rend 8:5 pleine colonne)
@@ -1027,8 +1027,9 @@ export async function runCarnetTests({ eq, ok }) {
       const [gauche, droite] = [...(colonnes?.children || [])];
       const forme = (n) => n.tagName + ':' + [...n.classList].filter((c) => ['card', 'plain', 'cover-wrap'].includes(c)).join('.');
       eq([colonnes?.parentElement === fiche, colonnes?.children.length, [...(gauche?.children || [])].map(forme), [...(gauche?.children || [])].map((n) => n.querySelector(':scope > h2, :scope > summary > strong')?.textContent ?? null)],
-        [true, 2, ['A:cover-wrap', 'SECTION:card', 'DETAILS:card', 'SECTION:plain', 'DETAILS:'], [null, 'Couverture', 'Métadonnées et convention', 'Sommaire', null]],
-        'T4 : div.two-col.livre, enfant direct de la fiche, deux colonnes ; gauche = bookCover, « Couverture » (.card), « Métadonnées et convention » (details.card), « Sommaire » (section.plain), le details des entrées d’index');
+        [true, 2, ['A:cover-wrap', 'A:', 'SECTION:card', 'DETAILS:card', 'SECTION:plain', 'DETAILS:'], [null, null, 'Couverture', 'Métadonnées et convention', 'Sommaire', null]],
+        'T4 / I2 : deux colonnes ; gauche = couverture, complément du livre, Couverture, Métadonnées et convention, Sommaire, entrées d’index');
+      eq([gauche?.children[1]?.textContent, gauche?.children[1]?.getAttribute('href')], ['Compléter les informations', '#/add/livre?edition=ed4'], 'I2 : le complément ouvre le formulaire de cette édition');
       const sources = sectionDe(fiche, 'Pages et fichiers sources');
       eq([[...(droite?.querySelectorAll('section') || [])].map((s) => [forme(s), s.querySelector('h2')?.textContent]), forme(sources), sources?.parentElement === fiche, sources?.previousElementSibling === colonnes],
         [[['SECTION:plain', 'Les recettes de ce livre']], 'SECTION:plain', true, true],

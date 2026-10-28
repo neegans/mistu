@@ -12,6 +12,7 @@ import { normaliserConfigAssistant, LIGNE_ASSISTANT } from '../domain/assistant-
 import { IMPORTS_OUVERTS, KINDS_PAGES, ligneImportNeuve } from '../domain/import-cible.js'; // une définition (lot A, tâche 6, ronde 1) : I-2 et les sortes que le chemin photo écrit (lot B : « web » exclue, P-1)
 import { sha256Hex } from '../core/hash.js';
 import { t } from '../core/i18n.js';
+import { comparerCuissons } from '../domain/cuisine-personnelle.js';
 
 // Base de l'application. Liaison vivante : bindDatabase ne sert qu'aux tests, pour travailler sur une base jetable.
 export let db = new Database(DB_NAME, DB_VERSION, STORES);
@@ -708,7 +709,7 @@ export async function loadRecipeBundle(recipeId) {
   const versionIds = new Set(versions.map((v) => v.id));
   const pageIds = new Set(recipe.source_page_ids || []);
   const pages = pageIds.size ? (await db.getMany('source_pages', [...pageIds])).filter(Boolean) : [];
-  history.sort((a, b) => (b.cooked_at || '').localeCompare(a.cooked_at || ''));
+  history.sort(comparerCuissons);
   return {
     recipe, versions, edition, book, links, history, pages,
     translations: translations.filter((t) => versionIds.has(t.recipe_version_id)),

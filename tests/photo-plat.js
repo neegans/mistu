@@ -1388,31 +1388,36 @@ export async function runPhotoPlatTests({ eq, ok }) {
         await db.mutate({ puts: { recipes: [fiche('rc_k4')], recipe_versions: [version('rc_k4')] }, origin: 'device' });
         const k4 = await corriger('rc_k4');
         eq(['photo_sha256', 'photo_origin', 'photo_source_url'].map((k) => Object.hasOwn(k4, k)), [false, false, false], '« Corriger » d’une fiche d’avant le lot : aucune clé de photo ajoutée (P-6)');
+        eq(['personal_notes', 'photo_provenance'].map((k) => Object.hasOwn(k4, k)), [false, false], 'I2 : corriger une ancienne fiche n’ajoute ni note personnelle ni provenance photo');
         // Ronde 1 — 2 bis. D-F16, chacun des TROIS champs vient de la base : « Retirer » pendant l'édition (trois champs à null en base, la copie porte une
         // photo web ET son adresse) → la fiche écrite n'en garde aucun.
-        await db.mutate({ puts: { recipes: [fiche('rc_k5', { photo_sha256: sha, photo_origin: 'web', photo_source_url: 'https://cdn.test/k5.jpg' })], recipe_versions: [version('rc_k5')] }, origin: 'device' });
-        const k5 = await corriger('rc_k5', async () => { await db.mutate({ puts: { recipes: [{ ...(await db.get('recipes', 'rc_k5')), photo_sha256: null, photo_origin: null, photo_source_url: null }] }, origin: 'device' }); });
+        await db.mutate({ puts: { recipes: [fiche('rc_k5', { photo_sha256: sha, photo_origin: 'web', photo_source_url: 'https://cdn.test/k5.jpg', personal_notes: 'Ancienne note', photo_provenance: { page_id: 'ancienne' } })], recipe_versions: [version('rc_k5')] }, origin: 'device' });
+        const k5 = await corriger('rc_k5', async () => { await db.mutate({ puts: { recipes: [{ ...(await db.get('recipes', 'rc_k5')), photo_sha256: null, photo_origin: null, photo_source_url: null, personal_notes: null, photo_provenance: null }] }, origin: 'device' }); });
         eq([k5.photo_sha256, k5.photo_origin, k5.photo_source_url], [null, null, null], 'D-F16 : « Retirer » pendant l’édition (trois champs à null en base) → la fiche écrite porte les trois nuls de la BASE, pas l’adresse de la copie');
+        eq([k5.personal_notes, k5.photo_provenance], [null, null], 'I2 : les notes et la provenance effacées pendant une correction restent nulles');
         // Ronde 1 — 4 bis. P-6, la clé absente en base l'est de l'écriture : la copie porte photo_source_url, la fiche est réécrite SANS la clé pendant l'édition
         // (un appareil plus ancien) → la fiche écrite ne la porte pas.
-        await db.mutate({ puts: { recipes: [fiche('rc_k6', { photo_source_url: 'https://cdn.test/k6.jpg' })], recipe_versions: [version('rc_k6')] }, origin: 'device' });
-        const k6 = await corriger('rc_k6', async () => { const { photo_source_url: _ancienne, ...sans } = await db.get('recipes', 'rc_k6'); await db.mutate({ puts: { recipes: [sans] }, origin: 'device' }); });
+        await db.mutate({ puts: { recipes: [fiche('rc_k6', { photo_source_url: 'https://cdn.test/k6.jpg', personal_notes: 'Ancienne note', photo_provenance: { page_id: 'ancienne' } })], recipe_versions: [version('rc_k6')] }, origin: 'device' });
+        const k6 = await corriger('rc_k6', async () => { const { photo_source_url: _ancienne, personal_notes: _note, photo_provenance: _provenance, ...sans } = await db.get('recipes', 'rc_k6'); await db.mutate({ puts: { recipes: [sans] }, origin: 'device' }); });
         eq(['photo_sha256', 'photo_origin', 'photo_source_url'].map((k) => Object.hasOwn(k6, k)), [false, false, false], 'P-6 : la copie porte photo_source_url, la base ne la porte plus → la fiche écrite ne la porte pas (aucune clé de la copie recopiée)');
+        eq(['personal_notes', 'photo_provenance'].map((k) => Object.hasOwn(k6, k)), [false, false], 'I2 : les clés note personnelle et provenance supprimées pendant une correction restent absentes');
         // Ronde 1 — 2 ter. « Créer ma version » (adaptation) écrit aussi la fiche : une photo écrite en base pendant l'édition survit de même.
         await db.mutate({ puts: { recipes: [fiche('rc_k7', { photo_source_url: 'https://cdn.test/k7.jpg' })], recipe_versions: [version('rc_k7')] }, origin: 'device' });
         const k7 = await corriger('rc_k7', async () => { await db.mutate({ puts: { recipes: [{ ...(await db.get('recipes', 'rc_k7')), photo_sha256: sha, photo_origin: 'web' }] }, origin: 'device' }); }, 'adaptation');
         eq([k7.photo_sha256, k7.photo_origin, k7.photo_source_url, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_k7')).some((v) => v.kind === 'adaptation')], [sha, 'web', 'https://cdn.test/k7.jpg', true], 'D-F16 (adaptation) : « Créer ma version » après une photo écrite en base pendant l’édition → la fiche écrite porte les trois champs de la BASE');
         // Ronde 1 — 2 quater. D-F16 DANS la transaction : une écriture de la photo qui s'engage APRÈS les lectures de save() et juste avant sa transaction
         // (la descente d'un rapatriement, ecrireChamps) n'est pas écrasée — l'espion de db.mutate la joue au premier appel qui écrit la version de rc_k8.
-        await db.mutate({ puts: { recipes: [fiche('rc_k8', { photo_source_url: 'https://cdn.test/k8.jpg' })], recipe_versions: [version('rc_k8')] }, origin: 'device' });
+        await db.mutate({ puts: { recipes: [fiche('rc_k8', { photo_source_url: 'https://cdn.test/k8.jpg', personal_notes: 'Ancienne note', photo_provenance: { page_id: 'ancienne' } })], recipe_versions: [version('rc_k8')] }, origin: 'device' });
+        const provenanceI2 = { page_id: 'pg_i2', sha256: sha, rotation: 0, largeur: 640, hauteur: 480, rectangle: { x: 0, y: 0, largeur: 0.5, hauteur: 0.5 } };
         const vraiMutate = db.mutate; let injectees = 0;
         db.mutate = async (o) => {
-          if (!injectees && (o?.puts?.recipe_versions || []).some((v) => v.recipe_id === 'rc_k8')) { injectees += 1; await vraiMutate.call(db, { puts: { recipes: [{ ...(await db.get('recipes', 'rc_k8')), photo_sha256: sha, photo_origin: 'web' }] }, origin: 'device' }); }
+          if (!injectees && (o?.puts?.recipe_versions || []).some((v) => v.recipe_id === 'rc_k8')) { injectees += 1; await vraiMutate.call(db, { puts: { recipes: [{ ...(await db.get('recipes', 'rc_k8')), photo_sha256: sha, photo_origin: 'image', photo_source_url: null, personal_notes: 'Écrite ailleurs', photo_provenance: provenanceI2 }] }, origin: 'device' }); }
           return vraiMutate.call(db, o);
         };
         let k8;
         try { k8 = await corriger('rc_k8'); } finally { db.mutate = vraiMutate; }
-        eq([injectees, k8.photo_sha256, k8.photo_origin, k8.photo_source_url], [1, sha, 'web', 'https://cdn.test/k8.jpg'], 'D-F16 dans la transaction : une photo écrite juste avant la transaction de « Corriger » (après ses lectures) survit — les trois champs relus DANS la transaction');
+        eq([injectees, k8.photo_sha256, k8.photo_origin, k8.photo_source_url], [1, sha, 'image', null], 'D-F16 dans la transaction : une photo écrite juste avant la transaction de « Corriger » (après ses lectures) survit — les trois champs relus DANS la transaction');
+        eq([k8.personal_notes, k8.photo_provenance], ['Écrite ailleurs', provenanceI2], 'I2 : note et provenance arrivées après les lectures de l’éditeur sont conservées par la transaction');
 
         // 5. Archive aller-retour (§ 3.1) : une fiche à photo web voyage intacte, ses octets aussi, zéro écart.
         await withDatabase(async (source) => {

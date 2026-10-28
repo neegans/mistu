@@ -6,6 +6,8 @@ import { appelerAssistant, echecDomaine, sessionValide, LIMITES_PASSERELLE } fro
 import { borner, porteUneAdresse, plierUneLigne, estTitreUneLigne } from '../core/bornes.js';
 import { tailleJson } from '../sync/lots.js';
 import { reduireImage, dimensionsImage, ErreurImage } from '../core/image.js';
+import { validerZonesPhoto } from './photo-page.js';
+import { validerIsbn } from '../core/isbn.js';
 
 export class LLMProvider {
   constructor(config = {}) { this.config = config; }
@@ -124,11 +126,13 @@ Réponds UNIQUEMENT par un objet JSON valide avec ce schéma :
 {"title": string|null, "servings": number|null, "prep_minutes": number|null, "cook_minutes": number|null,
  "ingredients": [{"source_text": string, "uncertain": boolean}], "steps": [{"text": string}], "printed_page": number|null,
  "sub_recipes": [{"title": string, "page_reference": string|null}], "uncertain_fields": [string], "notes": string|null,
- "incomplete": boolean, "missing_page": boolean}
+ "incomplete": boolean, "missing_page": boolean,
+ "photo_zones": [{"photo": number, "rectangle": {"x": number, "y": number, "largeur": number, "hauteur": number}, "incertain": boolean}]}
 Règles : recopie le texte exactement (source_text = ligne d'ingrédient telle qu'imprimée, avec quantité et unité d'origine).
 N'invente jamais une quantité, une durée ou une portion absente : mets null ou marque "uncertain": true.
 Si une quantité est illisible, garde le texte lisible et ajoute la ligne dans uncertain_fields.
-Si une page semble manquer (étapes qui commencent au milieu, ingrédients sans étapes, renvoi à une page absente), mets "missing_page": true ; si la recette est visiblement partielle, mets "incomplete": true ; une étape peut tenir sur plusieurs lignes : garde-la entière dans un seul "text".`;
+Si une page semble manquer (étapes qui commencent au milieu, ingrédients sans étapes, renvoi à une page absente), mets "missing_page": true ; si la recette est visiblement partielle, mets "incomplete": true ; une étape peut tenir sur plusieurs lignes : garde-la entière dans un seul "text".
+photo_zones est facultatif : au plus trois photographies du plat de CETTE recette, jamais portrait, dessin, logo ou texte. Sans image certaine, liste vide. photo est le numéro envoyé ; rectangle en fractions de largeur/hauteur de cette image déjà orientée, origine en haut à gauche, entièrement dans [0,1]. N'invente aucune image. Mets incertain à true si le rattachement du plat est douteux.`;
 
 // Ce que l'appel a donné, attaché au résultat comme à un refus : la réponse brute coupée à REPONSE_BRUTE_MAX, le stopReason et le modèle lus.
 export const contexteDe = (provider, raw) => ({ stopReason: provider.stopReason ?? null, modele: provider.modele ?? null, texteBrut: tronquer(String(raw ?? ''), REPONSE_BRUTE_MAX) });
@@ -138,13 +142,14 @@ export const contexteDe = (provider, raw) => ({ stopReason: provider.stopReason 
 export async function extraireRecette(provider, images /* [{mime, base64}] */, { signal, maxTokens = MAX_TOKENS_EXTRACTION } = {}) {
   if (!provider.configured) throw new Error('non_connecte');
   if (!provider.supportsVision) throw new Error('Ce fournisseur ne prend pas en charge la lecture d’images');
-  const content = [{ type: 'text', text: 'Extrais la recette de ces pages. JSON seulement.' }, ...images.map((im) => ({ type: 'image', mime: im.mime, base64: im.base64 }))];
+  const content = [{ type: 'text', text: 'Extrais la recette de ces pages. JSON seulement.' }];
+  images.forEach((im, i) => content.push({ type: 'text', text: `Photo ${i + 1}` }, { type: 'image', mime: im.mime, base64: im.base64 }));
   const raw = await provider.complete([{ role: 'system', content: PARSER_SYSTEM }, { role: 'user', content }], { json: true, maxTokens, signal });
   const contexte = contexteDe(provider, raw);
   if (contexte.stopReason === 'max_tokens') throw new ErreurExtraction('coupe', contexte); // une coupure n'est jamais prise pour une recette, même si le JSON est entier
   let data;
   try { data = parseJsonLoose(raw); } catch { throw new ErreurExtraction('illisible', contexte); }
-  try { return { recette: validateParsedRecipe(data), ...contexte }; }
+  try { return { recette: validateParsedRecipe(data), zonesPhoto: validerZonesPhoto(data?.photo_zones, images.length), ...contexte }; }
   catch (e) { if (e instanceof ErreurExtraction) Object.assign(e, contexte); throw e; }
 }
 
@@ -463,6 +468,42 @@ export async function extraireCouverture(provider, image /* { mime, base64 } */,
   try { data = parseJsonLoose(raw); } catch { throw new ErreurExtraction('illisible', contexte); }
   try { return { lecture: validerLectureCouverture(data), ...contexte }; }
   catch (e) { if (e instanceof ErreurExtraction) Object.assign(e, contexte); throw e; }
+}
+
+// I2 : lecture bibliographique enrichie ; le contrat du journal « couverture » antérieur reste lisible inchangé.
+export const INDICES_LIVRE_SYSTEM = `${COUVERTURE_SYSTEM}
+La photo peut être la couverture, la quatrième de couverture ou la page de titre. Ajoute isbn (chaîne imprimée ou null), summary (résumé imprimé, 1200 caractères maximum), related_titles (titres des livrets ou autres ouvrages mentionnés, 5 maximum), rotation (quart de tour horaire requis : 0, 90, 180, 270).
+Le champ title désigne le livre PRINCIPAL, jamais un livret inclus cité au dos. Un petit code-barres de prix n'est pas l'ISBN. Aucune réparation d'un chiffre illisible. Ne devine pas la langue de l'édition : language seulement si elle est établie, sinon null. Les noms isbn/summary/rotation peuvent figurer dans uncertain.`;
+export function validerIndicesLivre(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new ErreurExtraction('illisible');
+  const own = (k) => Object.hasOwn(data, k) ? data[k] : undefined;
+  const nettoyer = (v, max) => {
+    if (typeof v !== 'string' || Array.from(v).length > max) return null;
+    const s = ligneNettoyee(v); return s && !porteAdresse(v, s) ? s : null;
+  };
+  const brut = nettoyer(own('isbn'), 32);
+  const isbnLu = validerIsbn(brut); const isbn = isbnLu.ok ? isbnLu.isbn13 : null;
+  let lecture;
+  try { lecture = validerLectureCouverture(Object.fromEntries(CHAMPS_LECTURE.concat('uncertain').filter((k) => Object.hasOwn(data, k)).map((k) => [k, data[k]]))); }
+  catch (e) { if (e.raison !== 'vide' || !isbn) throw e; lecture = { title: null, subtitle: null, authors: [], publisher: null, language: null, uncertain: [] }; }
+  const summary = nettoyer(own('summary'), 1200);
+  const related_titles = (Array.isArray(own('related_titles')) ? own('related_titles').slice(0, 5) : []).map((v) => nettoyer(v, 300)).filter(Boolean);
+  const rotation = [0, 90, 180, 270].includes(own('rotation')) ? own('rotation') : 0;
+  const uncertain = [...new Set([...lecture.uncertain, ...(Array.isArray(own('uncertain')) ? own('uncertain').filter((v) => ['isbn', 'summary', 'rotation'].includes(v)) : [])])];
+  if (brut && !isbn) uncertain.push('isbn');
+  return { ...lecture, isbn, summary, related_titles, rotation, uncertain };
+}
+export async function extraireIndicesLivre(provider, image, { signal } = {}) {
+  if (!provider.configured) throw new Error('non_connecte');
+  const raw = await provider.complete([{ role: 'system', content: INDICES_LIVRE_SYSTEM }, { role: 'user', content: [
+    { type: 'text', text: 'Identifie le livre principal et recopie les indices imprimés. JSON seulement.' },
+    { type: 'image', mime: image.mime, base64: image.base64 },
+  ] }], { json: true, maxTokens: 2200, signal });
+  const contexte = contexteDe(provider, raw);
+  if (contexte.stopReason === 'max_tokens' || contexte.stopReason === 'pause_turn') throw new ErreurExtraction('coupe', contexte);
+  if (contexte.stopReason === 'refusal') throw new ErreurExtraction('illisible', contexte);
+  let parsed; try { parsed = parseJsonLoose(raw); } catch { throw new ErreurExtraction('illisible', contexte); }
+  return { lecture: validerIndicesLivre(parsed), ...contexte };
 }
 
 // La copie d'une page qui PART à l'assistant (F-3) : réduite à 1568 px de côté au plus, et toujours en JPEG (reduireImage ré-encode). Sans cela,

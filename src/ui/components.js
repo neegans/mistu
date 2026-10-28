@@ -13,6 +13,7 @@ import { pastilleModel, pastilleCourteModel, invalidate } from './state.js';
 import { estCreationIA, etiquetteCreationIA } from '../domain/creation-ia.js';
 import { DIFFICULTES, LIMITES_WEB } from '../domain/recherche-web.js';
 import { pointeurValide } from '../domain/photo-web.js';
+import { photoPrincipale } from '../domain/cuisine-personnelle.js';
 import { icone } from './icones.js';
 
 // classeTitre (lot UI-1, D-UI-3, H-20) : une classe posée sur le h1 — 'titre-fiche' pour une fiche recette ou livre (tâches 3 et 4) ; sans elle, le
@@ -203,11 +204,15 @@ export function provenanceText(recipe, book, edition) {
 // pointeur valide : null (la carte est celle d'avant le lot) ; sans octets : l'élément reste caché, sans src (I-F6). Ronde 1 : le pointeur est jugé par
 // pointeurValide (photo-web.js), la définition UNIQUE que la zone, le rapatriement et candidatPhotoWeb emploient ; des octets que le navigateur ne
 // décode pas (HEIC hors Safari, octets tronqués) lèvent error : la vignette redevient cachée, sans src, son URL révoquée — jamais un cadre vide.
-export function vignettePlat(recipe, { repo: depot = repo } = {}) {
-  if (!pointeurValide(recipe)) return null;
-  const sha = recipe.photo_sha256;
+export function vignettePlat(recipe, { repo: depot = repo, photo = null } = {}) {
+  const sha = photo?.sha256 ?? recipe?.photo_sha256;
+  if (!pointeurValide({ photo_sha256: sha })) return null;
   const img = el('img', { class: 'plat-vignette', alt: '', loading: 'lazy', hidden: true });
-  Promise.resolve().then(() => depot.getFile(sha)).then((f) => {
+  Promise.resolve().then(async () => {
+    const f = await depot.getFile(sha);
+    if (typeAffichage(f)?.startsWith('image/')) return f;
+    return sha !== recipe?.photo_sha256 && pointeurValide(recipe) ? depot.getFile(recipe.photo_sha256) : f;
+  }).then((f) => {
     if (!typeAffichage(f)?.startsWith('image/')) return;
     const u = displayUrl(f, urlDeBlob);
     if (!u) return;
@@ -265,11 +270,20 @@ export function recipeCard(doc, { extra = null, href = null, reasons = null, pho
         version ? el('div', { class: 'muted', style: { fontSize: '.85rem' } }, timeText(version)) : null,
         reasons?.length ? el('div', { class: 'muted', style: { fontSize: '.8rem' } }, `${t('Correspond à')} : ${reasons.slice(0, 4).join(', ')}`) : null),
       el('div', { class: 'col', style: { alignItems: 'flex-end', gap: '.3rem' } },
-        vignettePlat(recipe),
+        vignettePlat(recipe, { photo: doc.photo_principale }),
         availabilityBadge(recipe),
         recipe.favorite ? el('span', { class: 'badge' }, '★ ' + t('Favori')) : null,
         doc.cooked ? el('span', { class: 'badge' }, t('Cuisinée {n}×', { n: doc.cooked })) : null)),
     extra);
+}
+
+// I2 : les listes lisent en une passe la photo personnelle et son repli du livre. La sélection ne modifie jamais la recette.
+export function empreintesPhotos(recipes, index) {
+  return [...new Set(recipes.flatMap(recipe => [photoPrincipale(recipe, index)?.sha256, pointeurValide(recipe) ? recipe.photo_sha256 : null]).filter(Boolean))];
+}
+export function fichierPhoto(recipe, index, fichiers) {
+  const principal = fichiers.get(photoPrincipale(recipe, index)?.sha256);
+  return typeAffichage(principal)?.startsWith('image/') ? principal : (pointeurValide(recipe) ? fichiers.get(recipe.photo_sha256) ?? null : null);
 }
 
 // --- Lot UI-1 « Carnet » : la carte-plat et sa grille (spec D-UI-4, D-UI-5, I-UI-5, § 3.3) --------------------------------------------------------

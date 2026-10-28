@@ -121,6 +121,14 @@ export function pickFiles({ accept = '*/*', multiple = true, capture = null } = 
 
 export function formatDate(iso, { withTime = false } = {}) {
   if (!iso) return '';
+  // I2 : une date de cuisson saisie après coup n'a pas d'heure. Date.parse la lirait en UTC,
+  // donc la veille au Québec ; la construire au midi local conserve le jour, sans afficher cette heure technique.
+  if (typeof iso === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const [annee, mois, jour] = iso.split('-').map(Number);
+    const civile = new Date(0); civile.setFullYear(annee, mois - 1, jour); civile.setHours(12, 0, 0, 0);
+    if (civile.getFullYear() !== annee || civile.getMonth() !== mois - 1 || civile.getDate() !== jour) return '';
+    return new Intl.DateTimeFormat(document.documentElement.lang || 'fr-CA', { dateStyle: 'medium' }).format(civile);
+  }
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const opts = withTime ? { dateStyle: 'medium', timeStyle: 'short' } : { dateStyle: 'medium' };

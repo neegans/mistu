@@ -338,14 +338,14 @@ export async function renderRecipeEdit(params, query, ctx) {
     // Lot D (§ 4.8.2 points 3 et 4, I-D3) : role recette avec kind recipe ; le numéro de la fiche ne va qu'à la PREMIÈRE page sans numéro ; la photo
     // d'index de la fiche corrigée n'est jamais réécrite (ni kind, ni role, ni printed_page).
     const pageUpdates = pages.filter((p) => p.id !== recipe?.index_page_id).map((p, i) => ({ ...p, kind: 'recipe', role: 'recette', printed_page: p.printed_page ?? (i === 0 ? n(f.printed_page) : null) }));
-    // Lot F (D-F16, D-F19) : les trois champs de la photo du plat viennent de la fiche RELUE — l'éditeur ne les édite pas, la base fait foi : une photo
-    // posée pendant l'édition (descente web, autre onglet) survit ; une origine hors liste se lit null ; une clé absente en base reste absente (P-6).
+    // Lots F et I2 : les champs photo et Mes notes viennent de la fiche RELUE — l'éditeur ne les édite pas, la base fait foi. Une photo ou note
+    // posée pendant l'édition survit ; une origine hors liste se lit null ; une clé absente en base reste absente (P-6).
     // Ronde 1 de la tâche 5 : relus DANS la transaction d'écriture (condition { key, fusion } de saveBatch, le motif de ★ Favori) — une écriture qui
     // s'engage pendant les lectures de save() n'est plus écrasée. Une fiche supprimée pendant l'édition garde la règle d'avant (sa copie : dette C4 du
     // lot UX, hors lot). D-12 : le vocabulaire fermé est vérifié sur la fiche qui s'écrit, avant l'écriture (dans la transaction pour une fiche relue).
     const avecPhotoDe = (relue) => {
       const r = { ...rec };
-      for (const champ of ['photo_sha256', 'photo_origin', 'photo_source_url']) {
+      for (const champ of ['photo_sha256', 'photo_origin', 'photo_source_url', 'photo_provenance', 'personal_notes']) {
         if (Object.hasOwn(relue, champ)) r[champ] = champ === 'photo_origin' ? originePhotoAdmise(relue[champ]) : relue[champ];
         else delete r[champ];
       }

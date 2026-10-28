@@ -12,6 +12,7 @@ import { TransitionRefusee } from '../core/db.js';
 import * as repoModule from '../model/repo.js';
 import { lignesImports, dateReception } from '../domain/import-cible.js';
 import { progressionLots, blocsImports, REFUS_ARRET_LOT } from '../domain/classement.js';
+import { annulerIdentificationLivre } from './livre-sans-saisie.js';
 import { pageHeader, carte, libelleLivre, field, select } from './components.js';
 import { icone } from './icones.js';
 import { startScanSession } from './import.js';
@@ -86,6 +87,7 @@ export function renderSelecteurScan(model, gestes = {}) {
 const ATTENDUS_IGNORER = ['a_lancer', 'a_verifier', 'echec']; // « Ignorer » n'est jamais offert pendant un vol (§ 3.1 : en_cours → echec seulement)
 const ageTexte = (age) => (age?.unite === 'j' ? t('il y a {n} j', { n: age.n }) : age?.unite === 'h' ? t('il y a {n} h', { n: age.n }) : t('il y a {n} min', { n: age?.n ?? 0 }));
 function titreLigne(l) {
+  if (l.titre.type === 'livre') return t('Livre en préparation') + (l.titre.texte ? ` — ${l.titre.texte}` : '');
   // Lot E (§ 4.6) : « Couverture photographiée », puis le titre lu (borné par lignesImports, rendu en nœud texte).
   if (l.titre.type === 'couverture') return t('Couverture photographiée') + (l.titre.texte ? ` — ${l.titre.texte}` : '');
   const livre = l.titre.livre ?? t('Sans livre');
@@ -108,6 +110,12 @@ function rangDuLot(l) {
 // porte pas). I-4 : interrompu, annule et incertain disent la même phrase (phraseEchec, une définition avec l'écran ciblé, l'éditeur et le panneau).
 function etatLigne(l, brute) {
   if (l.kind === 'seance') return null;
+  if (l.kind === 'livre') {
+    if (l.etat === 'en_cours') return l.ailleurs ? t('En cours sur un autre écran') : t('Identification du livre en cours…');
+    if (l.etat === 'echec') return t('Identification interrompue. Ton brouillon est conservé.');
+    if (l.etat === 'a_verifier') return t('Informations du livre à vérifier.');
+    return t('Brouillon du livre conservé.');
+  }
   // Lot E (P-10) : une couverture a ses phrases (spec couverture § 5) — jamais « 0 photo ajoutée », jamais « essaie avec moins de pages ».
   if (l.kind === 'couverture' && l.etat === 'a_lancer') return t('La couverture n’a pas encore été lue.');
   if (l.kind === 'couverture' && l.etat === 'en_cours' && !l.ailleurs) return t('Lecture de la couverture par l’assistant…');
@@ -134,7 +142,7 @@ const LIBELLES = { reprendre: () => t('Reprendre'), relancer: () => t('Relancer'
 const libelle = (g, l) => (g === 'relancer' && l.kind === 'web' ? t('Réessayer') : LIBELLES[g]());
 // Le vol d'une ligne, par sorte (ronde 1) : une lecture web part et s'annule par import-web.js, une lecture de pages par import-cible.js (lot A). Les
 // deux « annuler » agissent sur LE vol partagé de vol.js (seuls l'étiquette du journal et les abonnés notifiés diffèrent : non observable ici).
-const volDe = (l) => (l.kind === 'web' ? { lancer: lancerLecture, annuler: annulerLecture } : { lancer: lancerExtraction, annuler: annulerVol });
+const volDe = (l) => (l.kind === 'livre' ? { annuler: annulerIdentificationLivre } : l.kind === 'web' ? { lancer: lancerLecture, annuler: annulerLecture } : { lancer: lancerExtraction, annuler: annulerVol });
 // Ce qu'un « Relancer » (ou « Réessayer ») refusé dit : texteRefus (src/ui/import-cible.js, une définition, le refus `interdit` d'une lecture
 // web compris) ; un refus sans phrase (ligne changée ailleurs) se voit au redessin.
 
@@ -217,7 +225,7 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
       rangDuLot(l),
       etat ? el('span', { class: l.etat === 'echec' ? 'status warn' : 'muted' }, etat) : null,
       // Lot E, ronde 1 de T5 : ni une couverture (une seule photo, que L4 peut avoir amenée ici : sa route dit elle-même si elle est sur cet appareil).
-      l.autreAppareil && l.kind !== 'seance' && l.kind !== 'web' && l.kind !== 'couverture' ? el('small', { class: 'muted' }, t('Photos sur un autre appareil')) : null,
+      l.autreAppareil && l.kind !== 'seance' && l.kind !== 'web' && l.kind !== 'couverture' && l.kind !== 'livre' ? el('small', { class: 'muted' }, t('Photos sur un autre appareil')) : null,
       l.gestes.length ? el('div', { class: 'row' }, ...l.gestes.map((g) => el('button', { type: 'button', class: g === 'reprendre' || g === 'ouvrir_seance' ? 'btn primary' : 'btn', dataset: { geste: g }, onClick: () => agir(g, l, brute) }, libelle(g, l)))) : null);
   }
   function dessiner({ imports = [], scan_sessions = [], recipesById = ctx?.recipesById } = {}) {

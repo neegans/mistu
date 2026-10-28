@@ -24,6 +24,10 @@ import { pointeurValide } from '../domain/photo-web.js';
 import { ACCEPT_PHOTOS, ACCEPT_FICHIERS } from './add.js';
 import { STATUTS_IMPORT } from '../model/schema.js';
 import { TransitionRefusee } from '../core/db.js';
+import { photosPersonnellesParRecette } from '../domain/cuisine-personnelle.js';
+import { empreintesPhotos, fichierPhoto } from './components.js';
+import { renderSourcesLivre } from './livre-sans-saisie.js';
+import { shaLivre } from '../domain/livre-bibliographie.js';
 
 // C8 : la plus RÉCENTE d'abord. La fiche ne rappelle qu'UNE séance et « Reprendre » doit mener à celle qu'on vient
 // de laisser, pas à la plus vieille restée ouverte (l'ordre de la base est celui des clés, pas du temps).
@@ -216,6 +220,20 @@ export async function renderBook(params, query, ctx, deps = {}) {
   root.append(el('div', { class: 'two-col livre' }, gauche, droite));
   // La couverture ouvre la colonne de gauche (≈ 200 px, la largeur de la colonne) : c'est le livre qu'on reconnaît, avant de lire son nom (F15).
   gauche.append(bookCover(edition, book, { fichier: fichierCouverture }));
+  gauche.append(el('a', { class: 'btn', href: `#/add/livre?edition=${encodeURIComponent(edition.id)}` }, t('Compléter les informations')));
+  if (typeof book.subtitle === 'string' && book.subtitle) gauche.append(el('p', null, book.subtitle));
+  if (typeof book.description === 'string' && book.description) gauche.append(el('p', null, book.description));
+  if (book.metadata_provenance || edition.metadata_provenance) gauche.append(el('details', null, el('summary', null, t('Sources')), renderSourcesLivre({ ...book.metadata_provenance, ...edition.metadata_provenance })));
+  const shaSource = shaLivre(edition.source_photo_sha256);
+  if (shaSource) {
+    const source = await repo.getFile(shaSource);
+    const photo = bookCover({ ...edition, cover_sha256: shaSource }, { ...book, title: t('Photo source') }, { fichier: source });
+    const bloc = el('details', null, el('summary', null, t('Photo source')), photo);
+    if (!typeAffichage(source)?.startsWith('image/') && ctxF.connecte) bloc.append(el('button', { type: 'button', class: 'btn', onClick: async () => {
+      await ctxF.moteur?.telecharger([shaSource]); invalidate(); refresh();
+    } }, t('Télécharger')));
+    gauche.append(bloc);
+  }
   // Spec import-cible § 4.5 : les imports ouverts de CE livre se reprennent dans la section « Imports » d'Ajouter (rendue en premier, avec le focus).
   const aReprendre = (ctx.imports || []).filter((i) => importOuvert(i) && i.edition_id === edition.id).length;
   if (aReprendre) droite.append(el('div', { class: 'row', dataset: { role: 'imports-a-reprendre' }, style: { marginBottom: '.8rem' } },
@@ -230,7 +248,16 @@ export async function renderBook(params, query, ctx, deps = {}) {
     droite.append(el('div', { class: 'card warn stack' },
       el('strong', null, t('Quelle convention pour les tasses et cuillères de cette édition ?')),
       el('p', { class: 'muted', style: { margin: 0 } }, t('Des recettes de ce livre utilisent des tasses ou des cuillères. Sans convention confirmée, ces quantités restent affichées telles quelles.')),
-      el('div', { class: 'row' }, select([{ value: '', label: t('Choisir…') }, ...listConventions().map((c) => ({ value: c.id, label: c.labels.fr }))], '', async (v) => { if (!v) return; await repo.save('book_editions', { ...edition, unit_convention_id: v, convention_evidence: 'confirmed_by_user' }); toast(t('Convention confirmée')); refresh(); }))));
+      el('div', { class: 'row' }, select([{ value: '', label: t('Choisir…') }, ...listConventions().map((c) => ({ value: c.id, label: c.labels.fr }))], '', async (v) => {
+        if (!v) return;
+        try {
+          await repo.saveBatch({}, { conditions: { book_editions: [{ key: edition.id, fusion: (courante) => {
+            if (!courante) throw new Error('edition_absente');
+            return { ...courante, unit_convention_id: v, convention_evidence: 'confirmed_by_user' };
+          } }] } });
+          toast(t('Convention confirmée')); refresh();
+        } catch { toast(t('Le livre n’a pas pu être enregistré. Réessaie.')); }
+      }))));
   }
 
   // Les recettes de ce livre (D-UI-7, D-UI-10) : « disponibles » = tout ce qui n'est pas une simple référence (la partielle comprise, comme le compteur d'avant) ;
@@ -239,7 +266,8 @@ export async function renderBook(params, query, ctx, deps = {}) {
   const disponibles = recipes.filter((r) => r.availability !== 'reference_only');
   const aImporter = recipes.filter(estAImporter);
   // I-UI-5 : les octets des photos de plat sont lus UNE fois, en une transaction (comme les couvertures de la bibliothèque, library.js) ; la ligne décide au rendu.
-  const photos = await repo.getFiles(recipes.filter(pointeurValide).map((r) => r.photo_sha256));
+  const photosPersonnelles = photosPersonnellesParRecette(ctx.cook_history);
+  const photos = await repo.getFiles(empreintesPhotos(recipes, photosPersonnelles));
   const filterState = { mode: 'all', q: '', tout: false };
   const list = el('div', { dataset: { role: 'liste-recettes' } });
   let largeDessinee = null; // la largeur que la liste montre (relue au montage et à chaque change : on ne redessine que si elle a changé)
@@ -254,7 +282,7 @@ export async function renderBook(params, query, ctx, deps = {}) {
     // Sous 900 px : LIGNES_REPLIEES lignes, puis « Voir les {n} recettes » déplie l'instance pour de bon (un filtre changé ensuite reste déplié) ; ≥ 900 px : tout.
     const repliee = !large.matches && !filterState.tout && rows.length > LIGNES_REPLIEES;
     const visibles = repliee ? rows.slice(0, LIGNES_REPLIEES) : rows;
-    const noeuds = [el('ul', { class: 'liste-compacte' }, ...visibles.map((r) => ligneCompacte(r, { fichier: pointeurValide(r) ? photos.get(r.photo_sha256) ?? null : null })))];
+    const noeuds = [el('ul', { class: 'liste-compacte' }, ...visibles.map((r) => ligneCompacte(r, { fichier: fichierPhoto(r, photosPersonnelles, photos) })))];
     // T4-R1 (I-UI-4) : le bouton se retire en dépliant — le focus passe au titre de la première ligne montrée par le dépli, jamais à body.
     if (repliee) noeuds.push(el('button', { type: 'button', class: 'btn', dataset: { role: 'voir-tout' }, onClick: () => { filterState.tout = true; drawList(); list.querySelectorAll('ul.liste-compacte > li')[LIGNES_REPLIEES]?.querySelector('a.titre')?.focus(); } }, t('Voir les {n} recettes', { n: rows.length })));
     remplacerEnRevoquant(list, ...noeuds);
@@ -275,13 +303,13 @@ export async function renderBook(params, query, ctx, deps = {}) {
   // et l'état réel est redessiné sur place. En cas de succès, refresh() rend la fiche entière.
   const zoneCouv = el('div', null);
   const dessinerCouv = () => zoneCouv.replaceChildren(renderZoneCouverture(etatCouv, gestesCouv));
-  // C4 : chaque geste RELIT l'édition et n'écrit que SON champ. Réécrire `{ ...edition }` — l'édition lue au RENDU —
-  // effaçait ce que l'autre geste de la même fiche venait d'écrire : enregistrer les métadonnées remettait le
-  // `cover_sha256` d'avant (couverture perdue), et poser une couverture remettait les métadonnées d'avant.
+  // C4 / I2 : la fusion relit l'édition DANS la transaction et ne change que le pointeur décoratif.
   const ecrirePointeur = async (sha256) => {
     try {
-      const courante = (await repo.get('book_editions', edition.id)) || edition;
-      await repo.save('book_editions', { ...courante, cover_sha256: sha256 });
+      await repo.saveBatch({}, { conditions: { book_editions: [{ key: edition.id, fusion: (courante) => {
+        if (!courante) throw new Error('edition_absente');
+        return { ...courante, cover_sha256: sha256 };
+      } }] } });
       return true;
     } catch { return false; }
   };
@@ -328,6 +356,10 @@ export async function renderBook(params, query, ctx, deps = {}) {
 
   // Métadonnées (le details d'avant, inchangé ; il passe dans la colonne de gauche, avant le Sommaire : D-UI-7)
   const meta = { title: book.title, author: book.author || '', isbn: edition.isbn || '', publisher: edition.publisher || '', year: edition.year || '', language: edition.language || 'fr', convention: edition.unit_convention_id || '', cuisines: [...(book.cuisines || [])], tags: tagsDe(book.tags) }; // S2 : tagsDe rend toujours un tableau neuf
+  const valeursMeta = () => ({ title: meta.title.trim() || book.title, author: meta.author.trim(), isbn: meta.isbn.trim() || null,
+    publisher: meta.publisher.trim() || null, year: meta.year ? parseInt(meta.year, 10) || null : null, language: meta.language,
+    convention: meta.convention || null, cuisines: [...meta.cuisines], tags: [...meta.tags] });
+  const metaInitiale = valeursMeta();
   const inp = (k, type = 'text') => el('input', { type, value: meta[k], onInput: (e) => { meta[k] = e.target.value; } });
   gauche.append(el('details', { class: 'card' }, el('summary', null, el('strong', null, t('Métadonnées et convention'))),
     el('div', { class: 'two-col', style: { marginTop: '.8rem' } },
@@ -356,13 +388,31 @@ export async function renderBook(params, query, ctx, deps = {}) {
       field(t('Convention de mesure'), select([{ value: '', label: t('Non confirmée') }, ...listConventions().map((c) => ({ value: c.id, label: c.labels.fr }))], meta.convention, (v) => { meta.convention = v; }), t('Ordre de décision : équivalences imprimées → convention décrite dans le livre → convention confirmée ici.'))),
     el('div', { class: 'row', style: { marginTop: '.8rem' } },
       el('button', { class: 'btn primary', onClick: async () => {
-        // C4 : livre et édition RELUS juste avant l'écriture, et seuls les champs de CE formulaire sont écrits —
-        // le `cover_sha256` posé entre le rendu et ce clic survit (il n'est pas dans ce formulaire).
-        const courantLivre = (await repo.get('books', book.id)) || book;
-        const courante = (await repo.get('book_editions', edition.id)) || edition;
-        await repo.saveBatch({ books: [{ ...courantLivre, title: meta.title.trim() || courantLivre.title, author: meta.author.trim(), cuisines: [...meta.cuisines], tags: [...meta.tags] }],
-          book_editions: [{ ...courante, isbn: meta.isbn.trim() || null, publisher: meta.publisher.trim() || null, year: meta.year ? parseInt(meta.year, 10) || null : null, language: meta.language, unit_convention_id: meta.convention || null, convention_evidence: meta.convention ? (courante.unit_convention_id === meta.convention ? courante.convention_evidence : 'confirmed_by_user') : null }] });
-        toast(t('Enregistré')); refresh();
+        // I2 : champs effectivement modifiés depuis le rendu seulement. Les autres valeurs et leurs sources
+        // sont relues dans la même transaction, y compris une source photo ou une note ajoutée entre-temps.
+        const valeurs = valeursMeta();
+        const modifies = Object.keys(valeurs).filter((k) => JSON.stringify(valeurs[k]) !== JSON.stringify(metaInitiale[k]));
+        const fusion = (champs) => (courant) => {
+          if (!courant) throw new Error('fiche_absente');
+          const patch = {}, provenance = {};
+          for (const k of champs.filter((champ) => modifies.includes(champ))) {
+            const champ = k === 'convention' ? 'unit_convention_id' : k;
+            if (JSON.stringify(courant[champ] ?? null) === JSON.stringify(valeurs[k])) continue;
+            patch[champ] = valeurs[k];
+            if (k === 'convention') patch.convention_evidence = valeurs[k] ? 'confirmed_by_user' : null;
+            provenance[k] = { origin: 'manual', retrieved_at: null, sources: [], uncertain: false, justification: '' };
+          }
+          return { ...courant, ...patch, ...(Object.keys(provenance).length ? { metadata_provenance: { ...courant.metadata_provenance, ...provenance } } : {}) };
+        };
+        const champsLivre = ['title', 'author', 'cuisines', 'tags'], champsEdition = ['isbn', 'publisher', 'year', 'language', 'convention'];
+        const conditions = {};
+        if (champsLivre.some((k) => modifies.includes(k))) conditions.books = [{ key: book.id, fusion: fusion(champsLivre) }];
+        if (champsEdition.some((k) => modifies.includes(k))) conditions.book_editions = [{ key: edition.id, fusion: fusion(champsEdition) }];
+        try {
+          if (Object.keys(conditions).length) { await repo.saveBatch({}, { conditions }); toast(t('Enregistré')); }
+          refresh();
+        }
+        catch { toast(t('Le livre n’a pas pu être enregistré. Réessaie.')); }
       } }, t('Enregistrer')),
       pref?.hidden ? el('button', { class: 'btn', onClick: async () => { await repo.save('rediscovery_prefs', { ...pref, hidden: false }); toast(t('Livre de nouveau proposé dans Redécouvrir')); refresh(); } }, t('Réafficher dans Redécouvrir')) : null,
       !recipes.length && !docs.length ? el('button', { class: 'btn danger', onClick: async () => {

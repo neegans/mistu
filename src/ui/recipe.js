@@ -23,6 +23,9 @@ import { deviceId } from './import.js';
 import { createTimerLaunch } from '../domain/timers.js';
 import { lienSignet } from '../core/lien.js';
 import { capitaliser } from './puces.js';
+import { comparerCuissons, textePersonnel } from '../domain/cuisine-personnelle.js';
+import { ouvrirCuissons, monterNotesPersonnelles, monterMesPhotos, boutonModifierObservation } from './cuisson.js';
+import { panneauPhotoPage } from './photo-page.js';
 
 // S7 : une adresse refusée s'affiche INERTE (jamais un <a>), et BORNÉE — une fiche venue d'une archive ou du
 // serveur peut en porter 100 000 caractères, qui pousseraient la fiche entière hors de l'écran.
@@ -83,6 +86,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   const naviguer = deps.navigate ?? navigate;
   const dire = deps.toast ?? toast;
   const enLigneWeb = () => (deps.enLigne ?? enLigneLecture)();
+  let cuissonOuverte = false;
   // Ronde 1 : l'état en ligne est RELU à la tape (la fiche n'écoute pas online / offline : le bouton peut être resté allumé) — hors ligne, rien
   // n'est écrit (§ 4.4 : « Journal : rien ») ; une erreur qui n'est pas un refus (base indisponible, quota) est journalisée et dite, jamais un rejet
   // sans gestionnaire depuis un onClick.
@@ -100,7 +104,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   const edition = recipe.edition_id ? ctx.editionsById.get(recipe.edition_id) : null;
   const book = edition ? ctx.booksById.get(edition.book_id) : null;
   const pages = (recipe.source_page_ids || []).map((id) => ctx.pagesById.get(id)).filter(Boolean);
-  const history = ctx.cook_history.filter((h) => h.recipe_id === recipe.id).sort((a, b) => (b.cooked_at || '').localeCompare(a.cooked_at || ''));
+  const history = ctx.cook_history.filter((h) => h.recipe_id === recipe.id).sort(comparerCuissons);
   const links = ctx.dish_recipe_links.filter((l) => l.recipe_id === recipe.id);
   const dishLink = links.find((l) => l.state === 'confirmed');
   const dish = dishLink ? ctx.dishesById.get(dishLink.dish_id) : null;
@@ -169,9 +173,11 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   photo.entete.classList.add('fiche-photo');
   const tete = el('div', { class: 'two-col fiche-tete', dataset: { role: 'fiche-tete' } }, etat, photo.entete);
   root.append(tete);
+  etat.append(await monterNotesPersonnelles(recipe, { repo: gestesLecture.repo, toast: dire }));
 
   if (!version) {
     root.append(await referenceOnly());
+    root.append(el('p', { class: 'muted', dataset: { role: 'cuisson-reference' } }, t('Importe cette recette avant d’enregistrer une cuisson. Tes notes personnelles restent disponibles.')));
     // F-9 : la carte « Connecte-toi » et le bouton de lecture sont rendus cachée / éteint ; la session (déjà lue plus haut) les bascule ici —
     // jamais de flash « Connecte-toi » pour une personne connectée, jamais de carte retirée (le motif d'import.js).
     basculerSessionSignet(root, sessionWeb, enLigneWeb());
@@ -201,7 +207,13 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
     lienOrigine(lienFiche),
     el('div', { class: 'geste-principal', dataset: { role: 'geste-principal' } },
       el('button', { class: 'btn primary big block', onClick: startCooking }, t('Commencer à cuisiner')),
-      version.verification_state !== 'verified' ? el('a', { class: 'btn link', href: lienEdition('correction', version.id), dataset: { role: 'corriger-tete' } }, t('Corriger')) : null)));
+      version.verification_state !== 'verified' ? el('a', { class: 'btn link', href: lienEdition('correction', version.id), dataset: { role: 'corriger-tete' } }, t('Corriger')) : null),
+    el('button', { type: 'button', class: 'btn', dataset: { role: 'jai-cuisine' }, onClick: async () => {
+      if (cuissonOuverte) return;
+      cuissonOuverte = true;
+      try { if (await ouvrirCuissons([{ recipe, version, servings: state.servings }], { ...deps, repo: gestesLecture.repo, toast: dire })) (deps.refresh ?? refresh)(); }
+      finally { cuissonOuverte = false; }
+    } }, t('J’ai cuisiné ce plat'))));
 
   // « Portions, versions et autres gestes » (D-UI-6, § 13 point 4) : TOUT l'ancien contenu de la carte des contrôles et de la rangée d'actions, sauf
   // « Commencer à cuisiner » et le « Corriger » de tête — replié sous 760 px, ouvert au-dessus (le matchMedia, relu sur change) ; jamais « Réglages »
@@ -242,6 +254,9 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   root.append(body);
   drawBody();
   root.append(photo.zone); // lot F (D-F2, D-F8) : seulement quand la fiche a une version
+  const photoPage = await panneauPhotoPage(recipe, ctx, { ...deps, repo: gestesLecture.repo, ctxF, onPhotoChange: () => photo.redessiner?.() });
+  if (photoPage) root.append(photoPage);
+  root.append(await monterMesPhotos(recipe, history, { ...deps, repo: gestesLecture.repo, toast: dire, ctxF, apres: () => photo.redessiner?.() }));
   const pagesOriginal = recipe.availability === 'reference_only' ? pages : pages.filter((p) => p.id !== recipe.index_page_id); // lot D (§ 4.8.4) : une fiche lue n'a pas sa photo d'index dans « Original » ; une référence la garde (D-C5)
   // Pages originales
   if (pagesOriginal.length) {
@@ -262,11 +277,14 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
       (v.kind === 'adaptation' || v.kind === 'synthesis') && v.status !== 'tested' ? el('button', { class: 'btn small', onClick: async () => { await repo.save('recipe_versions', { ...v, status: 'tested' }); refresh(); } }, t('Marquer testée')) : null))))));
 
   // Historique
-  if (history.length) root.append(sectionPlain(t('Mémoire culinaire'), el('ul', { class: 'list' }, ...history.map((h) => el('li', { class: 'row between top' },
-    el('div', null, el('strong', null, formatDate(h.cooked_at)), ` · ${h.servings ? t('{n} portions', { n: h.servings }) : ''}${etoiles(h.rating) ? ` · ${etoiles(h.rating)}` : ''}${h.redo === false ? ` · ${t('à ne pas refaire')}` : h.redo ? ` · ${t('à refaire')}` : ''}${h.actual_minutes ? ` · ${h.actual_minutes} min` : ''}`,
-      h.notes ? el('div', { style: { fontSize: '.9rem' } }, h.notes) : null,
-      el('div', { class: 'muted', style: { fontSize: '.8rem' } }, t('Observation liée à cette cuisson ; elle ne devient pas une règle universelle.'))),
-    el('a', { class: 'btn small', href: `#/recipes/${rid}${buildQuery({ v: h.recipe_version_id, servings: h.servings || '' })}` }, t('Refaire comme la dernière fois')))))));
+  if (history.length) root.append(sectionPlain(t('Mémoire culinaire'), el('ul', { class: 'list' }, ...history.map((h) => {
+    const observation = el('div', { style: { fontSize: '.9rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, textePersonnel(h.notes));
+    return el('li', { class: 'row between top' },
+      el('div', null, el('strong', null, formatDate(h.cooked_at)), ` · ${h.servings ? t('{n} portions', { n: h.servings }) : ''}${etoiles(h.rating) ? ` · ${etoiles(h.rating)}` : ''}${h.redo === false ? ` · ${t('à ne pas refaire')}` : h.redo ? ` · ${t('à refaire')}` : ''}${Number.isFinite(h.actual_minutes) && h.actual_minutes >= 0 ? ` · ${h.actual_minutes} min` : ''}`,
+        observation, el('div', { class: 'muted', style: { fontSize: '.8rem' } }, t('Observation liée à cette cuisson ; elle ne devient pas une règle universelle.'))),
+      el('div', { class: 'row' }, boutonModifierObservation(h, { repo: gestesLecture.repo, toast: dire, apres: texte => { observation.textContent = texte; } }),
+        el('a', { class: 'btn small', href: `#/recipes/${rid}${buildQuery({ v: h.recipe_version_id, servings: h.servings || '' })}` }, t('Refaire comme la dernière fois'))));
+  }))));
 
   // Export
   root.append(el('div', { class: 'row', style: { marginTop: '.5rem' } },

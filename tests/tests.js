@@ -36,6 +36,10 @@ import { runThemeTests } from './theme.js';
 import { runPhotoPlatTests } from './photo-plat.js';
 import { runApercuWebTests } from './apercu-web.js';
 import { runCarnetTests } from './carnet.js';
+import { runI2LivreTests } from './i2-livre.js';
+import { runI2CuisineTests } from './i2-cuisine.js';
+import { runI2PhotoPageTests } from './i2-photo-page.js';
+import { runI2IntegrationTests } from './i2-integration.js';
 
 const results = [];
 const eq = (a, b, msg) => { const ok = JSON.stringify(a) === JSON.stringify(b); results.push({ ok, msg, got: a, want: b }); };
@@ -258,11 +262,17 @@ catch (error) { ok(false, `Suite carnet interrompue : ${error?.message || String
 try { await runThemeTests({ eq, ok }); }
 catch (error) { ok(false, `Suite thème interrompue : ${error?.message || String(error)}`); }
 
+// --- Lot I2 : livres, cuissons personnelles, photos de pages et intégration.
+for (const [nom, suite] of [['livre', runI2LivreTests], ['cuisine', runI2CuisineTests], ['photo page', runI2PhotoPageTests], ['intégration', runI2IntegrationTests]]) {
+  try { await suite({ eq, ok, close }); }
+  catch (error) { ok(false, `Suite I2 ${nom} interrompue : ${error?.message || String(error)}`); }
+}
+
 // --- Compte total épinglé (F2). Une assertion qui DISPARAÎT — un bloc supprimé, une boucle qui ne tourne plus, une
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 6245,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 6502,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

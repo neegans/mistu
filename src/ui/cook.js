@@ -11,8 +11,9 @@ import { label } from '../core/i18n.js';
 import { qtyEl, section, field, etiquetteIA, estExtractionNonRelue } from './components.js';
 import { estCreationIA, AVERTISSEMENT_CREATION_IA } from '../domain/creation-ia.js';
 import { deviceId } from './import.js';
+import { ouvrirCuissons, noteEnCuisine } from './cuisson.js';
 
-export async function renderCook(params, query, ctx) {
+export async function renderCook(params, query, ctx, deps = {}) {
   const session = ctx.cook_sessions.find((s) => s.id === params.id);
   if (!session) return el('div', { class: 'card' }, t('Session introuvable.'));
   const items = session.selected_version_ids.map((vid) => {
@@ -60,6 +61,7 @@ export async function renderCook(params, query, ctx) {
   let planOpen = false;
   if (tabs) root.append(tabs);
   const area = el('div', null);
+  let bilanOuvert = false;
   root.append(area);
   draw();
   return root;
@@ -74,7 +76,7 @@ export async function renderCook(params, query, ctx) {
   async function persist() {
     progress.total_steps = items.reduce((n, it) => n + stepsOf(it).length, 0);
     session.progress = progress;
-    await repo.save('cook_sessions', session); // repo.save pose updated_at par l'horloge corrigée
+    await repo.saveBatch({}, { conditions: { cook_sessions: [{ key: session.id, fusion: c => c?.status === 'active' ? { ...c, progress, active_version_id: session.active_version_id } : null }] } });
   }
 
   function draw() {
@@ -97,6 +99,8 @@ export async function renderCook(params, query, ctx) {
     }
     const left = el('div', null, section(t('Ingrédients'), el('div', { class: 'muted', style: { fontSize: '.85rem' } }, it.servings ? t('{n} portions', { n: it.servings }) : ''), ingUl, ...it.scaled.notes.map((n) => el('small', { class: 'muted', style: { display: 'block' } }, n))));
     const right = el('div', { class: 'stack' });
+    const personnelle = noteEnCuisine(it.recipe);
+    if (personnelle) right.append(personnelle);
     right.append(el('div', { class: 'progress' }, el('div', { style: { width: steps.length ? `${Math.round(progress.done_step_ids.filter((id) => steps.some((s) => s.id === id)).length / steps.length * 100)}%` : '0%' } })));
     if (!step) right.append(el('div', { class: 'step-big' }, t('Aucune étape numérisée pour cette version.')));
     else {
@@ -172,27 +176,15 @@ export async function renderCook(params, query, ctx) {
       el('button', { class: 'btn', onClick: () => { planOpen = false; draw(); } }, t('Retour aux étapes')));
   }
 
-  // Après cuisson : « À refaire ? », note facultative, temps réel, portions — enregistré contre la version exacte.
+  // Un formulaire PAR recette ; la fermeture et toutes les cuissons partagent une transaction.
   async function finish() {
+    if (bilanOuvert) return;
+    bilanOuvert = true;
     const it = items[activeIdx];
-    const f = { redo: null, rating: 0, notes: '', actual: '', servings: it.servings || '' };
-    const body = el('div', { class: 'stack' },
-      el('div', { class: 'row' }, ...[[true, t('Oui, à refaire')], [false, t('Non')]].map(([v, l]) => el('button', { class: 'btn', onClick: (e) => { f.redo = v; for (const b of e.target.parentNode.children) b.classList.remove('active'); e.target.classList.add('active'); } }, l))),
-      el('div', { class: 'row' }, ...[1, 2, 3, 4, 5].map((n) => el('button', { class: 'btn small', onClick: (e) => { f.rating = n; for (const b of e.target.parentNode.children) b.classList.remove('active'); e.target.classList.add('active'); } }, '★'.repeat(n)))),
-      field(t('Observations (liées à cette cuisson)'), el('textarea', { rows: 3, placeholder: t('Excellent, mais moins de câpres ; poisson un peu trop cuit.'), onInput: (e) => { f.notes = e.target.value; } })),
-      el('div', { class: 'row' }, field(t('Temps réel (min)'), el('input', { type: 'number', min: 0, onInput: (e) => { f.actual = e.target.value; } })), field(t('Portions'), el('input', { type: 'number', min: 1, value: f.servings, onInput: (e) => { f.servings = e.target.value; } }))));
-    const ok = await confirmDialog(t('Cuisson terminée — à refaire ?'), { okLabel: t('Enregistrer'), body });
-    if (!ok) return;
-    const rows = items.map((x) => ({
-      id: repo.newId('ch'), recipe_version_id: x.version.id, recipe_id: x.recipe.id, cooked_at: repo.nowIso(), servings: f.servings ? Number(f.servings) : x.servings || null,
-      appliance_ids: [], actual_minutes: f.actual ? Number(f.actual) : null, rating: f.rating || null, redo: f.redo, notes: f.notes.trim(), photos: [],
-      quantities_snapshot: x.scaled.ingredients.map((ri) => ({ source_text: ri.source_text, quantity: ri.quantity, unit_id: ri.unit_id, ingredient_id: ri.ingredient_id })),
-      convention_snapshot: x.version.provenance?.convention_snapshot || null, cook_session_id: session.id, meal_id: session.meal_id || null,
-    }));
-    session.status = 'done'; session.ended_at = repo.nowIso();
-    await repo.saveBatch({ cook_history: rows, cook_sessions: [session] });
-    toast(t('Cuisson enregistrée'));
-    navigate(session.meal_id ? `/meals/${session.meal_id}` : `/recipes/${it.recipe.id}`);
+    try {
+      const ok = await ouvrirCuissons(items, { ...deps, repo: deps.repo ?? repo, session });
+      if (ok) (deps.navigate ?? navigate)(session.meal_id ? `/meals/${encodeURIComponent(session.meal_id)}` : `/recipes/${encodeURIComponent(it.recipe.id)}`);
+    } finally { bilanOuvert = false; }
   }
 }
 

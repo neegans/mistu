@@ -3331,6 +3331,37 @@ DESCEND parce que les 58 blocs d'écran du panneau du lot C et ses sous-blocs de
 R-I1-1 ; leurs fonctions pures restent épinglées, et les gardes de l'écran sont portées dans `tests/index-livre-ecran.js`), seule erreur console le
 404 de `/favicon.ico` ; `node --test tools/*.test.mjs` **230/230** ; `node tools/generer-migrations.mjs --check` **0**.
 
+### Livre sans saisie, photos et notes (28 octobre 2026, lot I2)
+
+**Autorisation et état.** Spec `docs/superpowers/specs/2026-10-28-livre-sans-saisie-design.md` approuvée par Neegan (« ok go enchaine »),
+plan `docs/superpowers/plans/2026-10-28-livre-sans-saisie.md`. Branche locale `livre-sans-saisie`, base `baa7822`, dossier `~/projects/mistu`,
+serveur 8102. `APP_VERSION 0.19.0`, `sw.js cuisine-os-v0.19.0-1`, `DB_VERSION` 4. Publication autorisée par le « go » suivant la question de
+Neegan sur le déploiement ; intégration et vérification publique en cours. Serveur et SQL intacts.
+
+**Comportement.** La route `#/add/livre` cherche d’abord l’ISBN dans la bibliothèque et le catalogue, puis utilise le Web si nécessaire
+(un appel assistant maximum). Une photo fournit les indices puis une recherche Web (deux appels maximum). Champs et suggestions sont bornés,
+provenance liée aux sources réellement reçues, incertitudes conservées pour relecture ; une correction, une suppression ou un champ vidé ne
+sont pas réintroduits silencieusement. Le journal `kind: livre` garde le brouillon et les résultats payés ; une reprise ne relance rien.
+L’ancien journal `couverture` reste lisible. Les compléments fusionnent les seuls champs changés, avec conflit explicite si nécessaire.
+
+L’extraction de recette peut proposer une zone d’image sans appel supplémentaire. Le bilan d’import reste affiché jusqu’au geste « Voir la
+recette », afin de permettre le cadrage ; les pages originales sont conservées. Cadrage tactile/clavier, aperçu puis confirmation, source et
+rotation vérifiées dans la transaction. « J’ai cuisiné ce plat » et la fin du mode cuisine partagent un formulaire par recette/version réelle,
+avec date civile, observations et six photos au plus. Une référence sans version garde ses notes mais demande l’import avant une cuisson.
+« Mes notes » ne touche aucune version ; les observations restent modifiables. Notes et photos en cours de saisie résistent au rafraîchissement
+de synchronisation. La dernière photo de cuisson devient la photo principale, celle du livre reste distincte et sert de repli sur les cartes.
+
+**Contrôles et limites.** Suite navigateur **6503/6503** (épingle **6502**, départ **6246/6246**, aucune assertion retirée), Node **230/230**,
+générateur de migrations `--check` **0**, diff propre. Suites I2 : livre **57**, cuisine **65**, cadrage **56**, intégration **30** assertions.
+Preuves locales dans `.superpowers/sdd/2026-10-28-livre-sans-saisie/` :
+tests ciblés, suite entière, captures à 320/390/768/1280 pixels, parcours réel d’ajout/rechargement, réseau factice pour l’assistant et le Storage.
+Les transferts de fichiers et la restauration d’archive sont vérifiés avec des octets, pas seulement des pointeurs.
+Le réglage `sync_activity` continue de concerner l’historique de **consultation** (`library_activity`) ; les cuissons et leurs photos suivent
+le contrat de synchronisation existant. La fidélité du modèle sur Trinity, Safari/iPhone physique et deux vrais appareils ne sont pas attestés.
+
+**Gestes de Neegan après publication autorisée.** Actualiser tous les appareils avant les
+essais réels (un ancien client peut perdre les champs nouveaux). Aucune migration ou fonction serveur à appliquer pour I2. I3 attend sa spec.
+
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 
 **Contexte.** Lot 4 fusionné et poussé par Neegan (`main` = `3998f97`, Pages servi à 20 h 51 UTC, `cuisine-os-v0.8.0-6`) ; preuve

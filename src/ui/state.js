@@ -84,6 +84,18 @@ export function estRouteDeSaisie(path) {
   });
 }
 
+// I2 : une fiche de lecture peut ouvrir une note, un bilan ou un cadrage. La protéger seulement pendant ce geste,
+// sans empêcher les arrivées de synchronisation de redessiner une fiche au repos. Une vue quittée libère sa garde.
+const saisiesMontees = new Set();
+export function protegerSaisie(noeud) {
+  const saisie = { noeud }; saisiesMontees.add(saisie);
+  return () => saisiesMontees.delete(saisie);
+}
+function saisieEnCours() {
+  for (const saisie of saisiesMontees) if (!saisie.noeud?.isConnected) saisiesMontees.delete(saisie);
+  return saisiesMontees.size > 0;
+}
+
 // La passe vient-elle de se terminer en ayant ÉCRIT quelque chose ? Question à part, et volontairement séparée de
 // celle du rendu : le cache de lecture doit être invalidé DÈS qu'il est périmé, même quand aucun rendu ne suit —
 // sinon le prochain rendu, quel qu'il soit, relirait un cache d'avant la passe.
@@ -103,10 +115,10 @@ export function passeAEcrit({ avant = false, etat = null } = {}) {
 //   `route` de saisie (R-L3-19) : la personne est en train d'écrire, et rien ne justifie de lui prendre sa saisie ;
 //   `route` = /settings : la section se rafraîchit déjà par son propre abonnement (suivreMoteur), avec son
 //               regroupement et sa garde d'archive — deux rendus pour une passe n'en valent pas mieux qu'un.
-// Pure : elle décide, app.js rend. Le cache, lui, est invalidé par passeAEcrit, quoi que celle-ci réponde.
-export function doitRendreApresPasse({ avant = false, etat = null, archive = false, route = '' } = {}) {
+// Elle décide, app.js rend. Le cache, lui, est invalidé par passeAEcrit, quoi que celle-ci réponde.
+export function doitRendreApresPasse({ avant = false, etat = null, archive = false, route = '', saisie = saisieEnCours() } = {}) {
   if (!passeAEcrit({ avant, etat })) return false;
-  if (archive) return false;
+  if (archive || saisie) return false;
   if (estRouteDeSaisie(route)) return false;
   return route !== '/settings';
 }

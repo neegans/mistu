@@ -17,6 +17,20 @@ const BIBLIO_MIN = {
 };
 
 export async function runImportCibleTests({ eq, ok }) {
+  // I2 : l'import terminé montre d'abord la proposition de photo. Le geste « Voir la recette » remplace la navigation automatique.
+  const voirBilan = async (scene, navs, id) => {
+    const prefixe = '/recipes/' + id + '?v=';
+    let lien = null;
+    for (let i = 0; i < 300; i += 1) {
+      lien = [...scene.querySelectorAll('[data-role="bilan-import"] a')].find((a) => a.getAttribute('href')?.startsWith('#' + prefixe));
+      if (lien) break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    if (!lien) throw new Error('bilan d’import absent : ' + id);
+    eq(navs.some((n) => n.startsWith(prefixe)), false, 'I2 : la proposition reste visible avant « Voir la recette »');
+    lien.click();
+    ok(navs.some((n) => n.startsWith(prefixe)), 'I2 : seul « Voir la recette » ouvre la fiche');
+  };
   // Ronde 1 : les suites antérieures laissent le plancher monotone de syncNow() poussé de plusieurs jours (heures serveur futures) ; ici
   // les horodatages posés sont ceux de l'instant réel, pour que toute assertion sur une durée (battement, purge) parte d'une horloge saine.
   resetClock();
@@ -387,7 +401,7 @@ export async function runImportCibleTests({ eq, ok }) {
       const non = D.fabriquerExtraction(resultat, { ...opts, reference: refCorr, versions, remplacer: false });
       eq([non.remplacement, non.recipe.current_version_id, non.recipe.availability, non.recipe.verification_state, non.recipe.ingredient_ids, non.recipe.printed_page, non.recipe.source_page_ids, non.recipe.photo_sha256, non.recipe.photo_origin, non.version.parent_version_id, non.version.kind, non.version.verification_state], [true, 'rv1', 'partial', 'verified', ['ing_x'], null, ['pg0', 'pg2', 'pg1'], 'ph', 'photo', 'rv1', 'extraction', 'to_verify'], 'fabrication (I-5, « non ») : remplacer: false → union des pages et photo du plat seulement ; current_version_id, availability, verification_state, ingredient_ids et printed_page INTACTS ; la version extraction est quand même rendue (parent = la courante)');
       eq(non.pageUpdates.map((p) => [p.id, p.kind, p.position, p.printed_page]), [['pg2', 'recipe', 1, 133], ['pg1', 'recipe', 2, null]], 'fabrication (I-5, « non ») : les pages reçoivent kind recipe et leur position ; aucun printed_page inventé depuis une fiche qui n’en a pas');
-      eq(Object.keys(non.recipe).sort(), Object.keys(refCorr).sort(), 'fabrication (I-5, « non ») : aucune clé ajoutée à la fiche (ni availability, ni current_version_id neufs)');
+      eq(Object.keys(non.recipe).sort(), Object.keys({ ...refCorr, photo_provenance: null, photo_source_url: null }).sort(), 'fabrication (I-5, « non ») : seules les métadonnées photo sont ajoutées pour effacer l’ancienne provenance');
       const oui = D.fabriquerExtraction(resultat, { ...opts, reference: refCorr, versions, remplacer: true });
       eq([oui.remplacement, oui.recipe.current_version_id === oui.version.id, oui.recipe.availability, oui.recipe.verification_state, oui.recipe.printed_page], [true, true, 'available', 'to_verify', 132], 'fabrication (I-5, « oui ») : remplacer: true (le défaut) → la nouvelle version devient courante, fiche recomposée'); }
     eq([D.fabriquerExtraction(resultat, { ...opts, versions: [{ id: 'rv0', kind: 'extraction', provenance: { generated_by: 'manual' } }] }).remplacement, D.fabriquerExtraction(resultat, { ...opts, versions: [{ id: 'rv0', kind: 'extraction', provenance: { generated_by: 'ai' } }, { id: 'rv1', kind: 'correction', parent_version_id: 'rv0', provenance: { generated_by: 'manual' } }] }).remplacement, D.fabriquerExtraction(resultat, { ...opts, versions: [{ id: 'rv0', kind: 'extraction', provenance: null }] }).remplacement], [true, true, true], 'fabrication (I-5, N4) : « Remplacer ? » dès qu’une version non produite par l’assistant existe \u2014 saisie à la main, correction, ou provenance absente');
@@ -409,6 +423,11 @@ export async function runImportCibleTests({ eq, ok }) {
     eq([D.dateReception({ started_at: '2026-10-19T10:00:00.000Z', duree_ms: 30000, updated_at: '2026-10-19T18:00:00.000Z' }), D.dateReception({ updated_at: '2026-10-19T18:00:00.000Z' }), D.dateReception({ started_at: 'pas une date', duree_ms: 5, updated_at: 'U' }), D.dateReception({ started_at: '2026-10-19T10:00:00.000Z', duree_ms: 1e300, updated_at: 'U' }), D.dateReception({ started_at: '2026-10-19T10:00:00.000Z', duree_ms: -1, updated_at: 'U' }), D.dateReception(null)],
       ['2026-10-19T10:00:30.000Z', '2026-10-19T18:00:00.000Z', 'U', 'U', 'U', null], 'dateReception (vague finale, m7) : départ + durée ; sans départ ou durée lisibles (durée hors 0..24 h comprise), updated_at comme avant ; jamais une exception');
     eq([D.fabriquerExtraction(resultat, { ...opts, photo: null }).recipe.photo_sha256,D.fabriquerExtraction(resultat, { ...opts, photo: null }).recipe.photo_origin, D.fabriquerExtraction(resultat, { ...opts, photo: null, reference: { ...reference, photo_sha256: 'ancienne', photo_origin: 'image' } }).recipe.photo_sha256, D.fabriquerExtraction(resultat, { ...opts, photo: { sha256: 'p2', origin: 'nimporte' } }).recipe.photo_origin], [null, null, 'ancienne', null], 'fabrication : sans photo, la fiche garde la sienne (ou null) ; un geste hors liste (photo | image) vaut null');
+    const anciennePhoto = { ...reference, photo_sha256: 'ancien-cadrage', photo_origin: 'image', photo_provenance: { page_id: 'pg0' }, photo_source_url: 'https://example.test/photo' };
+    const photoDirecte = D.fabriquerExtraction(resultat, { ...opts, reference: anciennePhoto }).recipe;
+    eq([photoDirecte.photo_provenance, photoDirecte.photo_source_url], [null, null], 'I2 : une photo directe remplace aussi la provenance et l’adresse de l’ancienne image');
+    const photoGardee = D.fabriquerExtraction(resultat, { ...opts, reference: anciennePhoto, photo: null }).recipe;
+    eq([photoGardee.photo_provenance, photoGardee.photo_source_url], [anciennePhoto.photo_provenance, anciennePhoto.photo_source_url], 'I2 : aucun geste photo préserve sa provenance et son adresse');
     eq(D.fabriquerExtraction(resultat, { ...opts, convention: null, edition: null, modele: null, importId: null }).version.provenance, { ...f.version.provenance, convention_snapshot: null, edition_id: 'ed1', model: null, import_id: null }, 'fabrication : sans convention ni édition ni modèle, provenance à null (edition_id retombe sur celui de la fiche)');
     eq(D.fabriquerExtraction(resultat, { ...opts, pages: new Map(pages.map((p) => [p.id, p])) }).pageUpdates.map((p) => p.id), ['pg2', 'pg1'], 'fabrication : `pages` accepte aussi une Map (ctx.pagesById)');
     eq([f.recipe.ingredient_ids, Array.isArray(f.recipe.ingredient_ids)], [[...new Set(f.version.ingredients.map((l) => l.ingredient_id).filter(Boolean))], true], 'fabrication : ingredient_ids de la fiche = ceux reconnus dans la nouvelle version (comme l’éditeur)');
@@ -794,13 +813,18 @@ export async function runImportCibleTests({ eq, ok }) {
           eq([root.querySelectorAll('[data-role="monter"], [data-role="descendre"], [data-role="retirer"]').length, bouton(root, 'Photographier'), bouton(root, 'Choisir des photos'), bouton(root, 'Remplacer')?.disabled, bouton(root, 'Retirer')?.disabled], [0, null, null, true, true], 'extraction (T4-R1, décision 5) : pendant le vol, les pages sont figées (ni Monter/Descendre/Retirer, ni ajout) et la photo du plat aussi (« Remplacer » / « Retirer » éteints)');
           eq(await UI.lancerExtraction(ligne.id, { ctx: await ctxDe(), repo, fetch: ff.fetch }), { issue: 'refuse', raison: 'vol_tenu' }, 'extraction (I-7) : lancerExtraction refuse tant qu’un vol est tenu par ce document');
           eq(UI.volEnCours(), { importId: ligne.id }, 'extraction : volEnCours() nomme l’import du vol');
-          ff.rendre[0](200, corpsOk());
-          await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_a?v=')), 'navigation vers la fiche');
+          const zonePhoto = { photo: 2, rectangle: { x: .2, y: .2, largeur: .6, hauteur: .6 }, incertain: false };
+          ff.rendre[0](200, corpsOk({ ...RECETTE, photo_zones: [zonePhoto] }));
+          await voirBilan(scene, navs, 'rc_a');
           const iVerif = vus.findIndex((v) => v[1] === 'a_verifier');
           const iEnr = vus.findIndex((v) => v[1] === 'enregistre');
           eq([iVerif >= 0, iEnr > iVerif, vus[iVerif]?.[0], vus[iEnr]?.[0]], [true, true, ['imports'], ['imports', 'recipe_versions', 'recipes', 'scan_sessions', 'source_pages']], 'extraction (I-3) : imports → a_verifier écrit SEUL, puis UNE transaction recipes + recipe_versions + source_pages + scan_sessions + imports(enregistre)');
           ok(!vus.slice(0, iVerif + 1).some((v) => v[0].includes('recipes') || v[0].includes('recipe_versions')), 'extraction (I-3) : aucune écriture recipes ni recipe_versions avant (ou avec) a_verifier');
           const fin = await db.get('imports', ligne.id);
+          eq(fin.resultat.photo_sources.map((s) => s.page_id), [p2, p3], 'I2 : sources photo figées dans l’ordre exact des pages envoyées');
+          eq([fin.resultat.photo_propositions[0].page_id, fin.resultat.photo_propositions[0].sha256], [p3, (await db.get('source_pages', p3)).sha256], 'I2 : photo 2 rattachée à la seconde page et à ses octets');
+          eq(fin.resultat.photo_propositions[0].rectangle, zonePhoto.rectangle, 'I2 : rectangle détecté persisté hors de la version');
+          ok(root.querySelector('[data-role="photo-page"]')?.textContent.includes('Utiliser cette image ?'), 'I2 : proposition proposée dans le bilan du véritable import');
           const rc = await db.get('recipes', 'rc_a');
           const vs = await db.byIndex('recipe_versions', 'recipe_id', 'rc_a');
           const pg = await db.getMany('source_pages', [p2, p3]);
@@ -813,6 +837,29 @@ export async function runImportCibleTests({ eq, ok }) {
           eq([dits.at(-1), navs.at(-1)], ['Recette importée', `/recipes/rc_a?v=${vs[0].id}`], 'extraction : toast « Recette importée » et navigation vers la fiche sur la version');
           eq([UI.volEnCours(), root.etatRoute().vol, reseau], [null, false, 0], 'extraction : le vol est libéré, aucun réseau réel');
         } finally { db.onMutate = capture; }
+      });
+
+      await bloc('I2 : notes et photo concurrentes pendant l’enregistrement', async () => {
+        await db.put('recipes', fiche('rc_i2_course', { personal_notes: 'Avant' }));
+        await preparer('rc_i2_course', 1);
+        let change = false;
+        const provenance = { page_id: 'autre-page' };
+        const espion = { ...repo, transitionner: async (store, key, opts) => {
+          if (!change && opts.puts?.recipe_versions) {
+            change = true;
+            await db.put('recipes', { ...(await db.get('recipes', 'rc_i2_course')), personal_notes: 'Écrit ailleurs', favorite: true,
+              photo_sha256: 'c'.repeat(64), photo_origin: 'image', photo_provenance: provenance, photo_source_url: null });
+          }
+          return repo.transitionner(store, key, opts);
+        } };
+        const ff = fauxFetch([200, corpsOk()]);
+        const root = await monter('rc_i2_course', { deps: { fetch: ff.fetch, repo: espion } });
+        bouton(root, 'Extraire et enregistrer').click();
+        await voirBilan(scene, navs, 'rc_i2_course');
+        const courante = await db.get('recipes', 'rc_i2_course');
+        eq([courante.personal_notes, courante.favorite], ['Écrit ailleurs', true], 'I2 : la transaction garde les notes et le favori écrits après la lecture');
+        eq([courante.photo_sha256, courante.photo_origin, courante.photo_provenance], ['c'.repeat(64), 'image', provenance], 'I2 : la photo concurrente garde ses octets et sa provenance');
+        eq([courante.availability, (await db.get('recipe_versions', courante.current_version_id))?.recipe_id], ['available', 'rc_i2_course'], 'I2 : les champs de la lecture et sa version sont néanmoins enregistrés');
       });
 
       await bloc('annuler pendant le vol (Review Focus 4)', async () => {
@@ -901,7 +948,7 @@ export async function runImportCibleTests({ eq, ok }) {
         bouton(root, 'Extraire et enregistrer').click();
         await attendre(() => !!root.querySelector('[data-role="discordance"]'), 'discordance à nouveau');
         bouton(root.querySelector('[data-role="discordance"]'), 'Rattacher').click();
-        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_b?v=')), 'enregistrée');
+        await voirBilan(scene, navs, 'rc_b');
         const rc = await db.get('recipes', 'rc_b'); const [v] = await db.byIndex('recipe_versions', 'recipe_id', 'rc_b');
         eq([rc.original_title, rc.availability, v?.provenance?.titre_lu, (await db.get('imports', impB)).status, ff.appels.length, dits.at(-1)], ['Tarte aux pommes', 'available', 'Tarte aux poires', 'enregistre', 2, 'Recette importée'], '« Rattacher » : la fiche garde SON titre, le titre lu va en provenance.titre_lu, import enregistre');
       });
@@ -918,7 +965,7 @@ export async function runImportCibleTests({ eq, ok }) {
         eq([q.textContent.includes('Remplacer par cette lecture ?'), [...q.querySelectorAll('button')].map((b) => b.textContent), (await db.get('imports', impE)).status, root.etatRoute().discordance?.ok, root.querySelector('[data-role="discordance"]')], [true, ['Garder ma version', 'Remplacer'], 'a_verifier', true, null], 'I-5 (N4) : version courante saisie à la main → « Remplacer par cette lecture ? », « Garder ma version » d’abord (défaut non), reste a_verifier ; titre concordant, pas de discordance');
         eq(q.textContent.includes('Une version écrite à la main existe.'), true, 'I-5 (ronde finale 2) : posée pour une version écrite à la main, la question le dit (la phrase n’est tue que lorsque seule la couverture des pages la pose)');
         bouton(q, 'Garder ma version').click();
-        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_e?v=')), 'enregistrée');
+        await voirBilan(scene, navs, 'rc_e');
         const rc = await db.get('recipes', 'rc_e'); const vs = await db.byIndex('recipe_versions', 'recipe_id', 'rc_e'); const neuve = vs.find((v) => v.id !== 'rv_e_main');
         const pages = await db.getMany('source_pages', (await db.get('imports', impE)).page_ids);
         eq([rc.current_version_id, rc.availability, rc.verification_state, rc.ingredient_ids, rc.source_page_ids, rc.photo_sha256, rc.photo_origin, neuve?.kind, neuve?.parent_version_id, pages.map((p) => p.kind), (await db.get('imports', impE)).status], ['rv_e_main', 'partial', 'verified', ['ing_x'], pages.map((p) => p.id), shaPhoto, 'photo', 'extraction', 'rv_e_main', ['recipe'], 'enregistre'], 'I-5 « non » : la version est ajoutée sans devenir courante ; current_version_id, availability, verification_state, ingredient_ids intacts ; source_page_ids (union), kind recipe et photo posés quand même');
@@ -929,7 +976,7 @@ export async function runImportCibleTests({ eq, ok }) {
         bouton(rootM, 'Extraire et enregistrer').click();
         await attendre(() => !!rootM.querySelector('[data-role="remplacer"]'), 'question');
         bouton(rootM.querySelector('[data-role="remplacer"]'), 'Remplacer').click();
-        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_m?v=')), 'enregistrée');
+        await voirBilan(scene, navs, 'rc_m');
         const rcM = await db.get('recipes', 'rc_m'); const neuveM = (await db.byIndex('recipe_versions', 'recipe_id', 'rc_m')).find((v) => v.id !== 'rv_m_main');
         eq([rcM.current_version_id === neuveM?.id, rcM.availability, rcM.verification_state, neuveM?.parent_version_id, (await db.get('imports', impM)).status], [true, 'available', 'to_verify', 'rv_m_main', 'enregistre'], 'I-5 « oui » : « Remplacer » → la lecture devient courante (parent = l’ancienne courante), fiche recomposée');
       });
@@ -940,7 +987,7 @@ export async function runImportCibleTests({ eq, ok }) {
         const root = await monter('rc_f', { deps: { fetch: ff.fetch } });
         await db.put('recipes', { ...(await db.get('recipes', 'rc_f')), original_title: 'Tarte de grand-mère', tags: ['neuf'] }); // modifiée entre l’ouverture et le clic
         bouton(root, 'Extraire et enregistrer').click();
-        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_f?v=')), 'enregistrée');
+        await voirBilan(scene, navs, 'rc_f');
         const rc = await db.get('recipes', 'rc_f');
         eq([rc.original_title, rc.tags, rc.availability, (await db.get('imports', impF)).status], ['Tarte de grand-mère', ['neuf'], 'available', 'enregistre'], 'relecture (C4) : la fiche écrite porte la valeur RÉCENTE de la référence (relue juste avant la transaction), pas celle du rendu');
         navs.length = 0; dits.length = 0;
@@ -969,7 +1016,7 @@ export async function runImportCibleTests({ eq, ok }) {
           const impP = await preparer('rc_p', 1);
           await db.put('imports', { ...(await db.get('imports', impP)), status: 'a_verifier', resultat: RECETTE, model: 'claude-x', reponse_brute: 'x' });
           // Vague finale : la clôture est un patch-FONCTION (liée à la lecture, m3) ; l'espion la reconnaît à ses puts (la recette part avec elle).
-          const estCloture = (opts) => Array.isArray(opts?.puts?.recipes) && opts?.attendus?.includes('a_verifier');
+          const estCloture = (opts) => Array.isArray(opts?.puts?.recipe_versions) && opts?.attendus?.includes('a_verifier');
           const espionP = { ...repo, transitionner: async (store, key, opts) => { if (estCloture(opts)) { parLAutre = true; await db.put('imports', { ...(await db.get('imports', key)), status: 'enregistre' }); parLAutre = false; } return repo.transitionner(store, key, opts); } };
           const root4 = await monter('rc_p', { deps: { fetch: interdit, repo: espionP } });
           vus.length = 0; dits.length = 0; navs.length = 0;
@@ -1022,7 +1069,7 @@ export async function runImportCibleTests({ eq, ok }) {
         await db.put('imports', { ...(await db.get('imports', impS)), status: 'a_verifier', resultat: RECETTE, model: 'm'.repeat(81), photo_sha256: '../x', photo_origin: 'image', reponse_brute: 'x' });
         const rootS = await monter('rc_s', { deps: { fetch: interdit } });
         bouton(rootS, 'Enregistrer cette lecture').click();
-        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_s?v=')), 'enregistrée');
+        await voirBilan(scene, navs, 'rc_s');
         const [vS] = await db.byIndex('recipe_versions', 'recipe_id', 'rc_s'); const rS = await db.get('recipes', 'rc_s');
         eq([vS?.provenance?.model, rS.photo_sha256, rS.photo_origin, rS.availability, (await db.get('imports', impS)).status], [null, null, null, 'available', 'enregistre'], 'T4-R1 : un model de 81 points de code et un photo_sha256 qui n’est pas une empreinte de 64 hexadécimales sont relus comme nuls — la version et la fiche n’en portent rien');
       });
@@ -1070,7 +1117,7 @@ export async function runImportCibleTests({ eq, ok }) {
         eq([!!panneau, panneau?.textContent.includes('Gratin de courgettes'), vus, [...navs], (await db.get('imports', impT)).status, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_t')).length], [true, true, [], [], 'a_verifier', 0], 'résidu D-6 (T4-R2) : « Rattacher » répondu pour « Tarte aux poires » ne vaut pas pour « Gratin de courgettes » arrivée AVANT le clic : la discordance est redemandée avec le nouveau titre, rien n’est écrit, aucune navigation');
         // La réponse à la question POSÉE pour « Gratin de courgettes », elle, vaut.
         bouton(panneau, 'Rattacher').click();
-        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_t?v=')), 'enregistrée');
+        await voirBilan(scene, navs, 'rc_t');
         const [v] = await db.byIndex('recipe_versions', 'recipe_id', 'rc_t');
         eq([v?.provenance?.titre_lu, (await db.get('imports', impT)).status, (await db.get('recipes', 'rc_t')).original_title, ff.appels.length], ['Gratin de courgettes', 'enregistre', 'Tarte aux pommes', 1], 'résidu D-6 (T4-R2) : « Rattacher » répondu à la question posée pour « Gratin de courgettes » l’enregistre (titre lu en provenance), la fiche garde son titre, aucun appel de plus');
       });
@@ -1094,7 +1141,7 @@ export async function runImportCibleTests({ eq, ok }) {
         const q = root.querySelector('[data-role="remplacer"]');
         eq([!!q && q !== ancien, root.querySelector('[data-role="discordance"]'), vus, [...navs], (await db.get('imports', impU)).status, (await db.byIndex('recipe_versions', 'recipe_id', 'rc_u')).map((x) => x.id), (await db.get('recipes', 'rc_u')).current_version_id], [true, null, [], [], 'a_verifier', ['rv_u_main'], 'rv_u_main'], 'résidu I-5 (T4-R2) : « Remplacer » répondu pour la première lecture ne s’applique pas à la seconde arrivée entre-temps : la question est reposée, rien n’est écrit, la version manuelle reste courante');
         bouton(q, 'Remplacer').click();
-        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_u?v=')), 'enregistrée');
+        await voirBilan(scene, navs, 'rc_u');
         const rcU = await db.get('recipes', 'rc_u'); const neuve = (await db.byIndex('recipe_versions', 'recipe_id', 'rc_u')).find((x) => x.id !== 'rv_u_main');
         eq([neuve?.servings, rcU.current_version_id === neuve?.id, (await db.get('imports', impU)).status, ff.appels.length], [8, true, 'enregistre', 1], 'résidu I-5 (T4-R2) : « Remplacer » répondu à la question reposée vaut pour la seconde lecture (8 portions), qui devient courante ; aucun appel de plus');
       });
@@ -1285,7 +1332,7 @@ export async function runImportCibleTests({ eq, ok }) {
         const pageIds = root.etatRoute().pageIds;
         eq([pageIds.length, pageIds[0], root.textContent.includes('2 photos ajoutées')], [2, vieille.id, true], 'relire (vague finale, Important) : la première photo d’une fiche partial ouvre une ligne qui porte EN TÊTE la page déjà liée (version courante, kind recipe), puis la page neuve');
         bouton(root, 'Extraire et enregistrer').click();
-        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_bb?v=')), 'enregistrée');
+        await voirBilan(scene, navs, 'rc_bb');
         const corps = JSON.parse(ff.appels[0].options.body);
         const rc = await db.get('recipes', 'rc_bb'); const v = await db.get('recipe_versions', rc.current_version_id);
         eq([ff.appels.length, corps.corps.messages[0].content.filter((c) => c.type === 'image').length, v.provenance.source_page_ids, v.parent_version_id, rc.source_page_ids], [1, 2, pageIds, 'rv_bb', pageIds], 'relire (vague finale, Important) : UN POST qui porte les DEUX pages (la déjà lue d’abord) ; la nouvelle version couvre les deux — jamais une version faite de la seule page neuve qui remplacerait la courante sans question');
@@ -1330,7 +1377,7 @@ export async function runImportCibleTests({ eq, ok }) {
         await attendre(() => !!reprise.querySelector('[data-role="remplacer"]') || navs.length > 0, 'question reposée');
         eq([!!reprise.querySelector('[data-role="remplacer"]'), (await db.get('recipes', 'rc_gg')).current_version_id, await idsVersions('rc_gg'), (await db.get('imports', importId)).status, ff.appels.length, [...navs]], [true, 'rv_rc_gg', ['rv_rc_gg'], 'a_verifier', 1, []], '(b) relire (ronde finale 2) : repris ailleurs, « Enregistrer cette lecture » repose la question (aucun appel de plus) ; rien n’est écrit tant qu’elle n’est pas tranchée');
         bouton(root.querySelector('[data-role="remplacer"]'), 'Remplacer').click();
-        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_gg?v=')), 'enregistrée');
+        await voirBilan(scene, navs, 'rc_gg');
         const rc = await db.get('recipes', 'rc_gg'); const neuve = await db.get('recipe_versions', rc.current_version_id);
         eq([rc.current_version_id !== 'rv_rc_gg', neuve?.kind, neuve?.parent_version_id, neuve?.provenance?.source_page_ids, rc.source_page_ids, (await idsVersions('rc_gg')).length, (await db.get('imports', importId)).status], [true, 'extraction', 'rv_rc_gg', pageIds, [vieille.id, ...pageIds], 2, 'enregistre'], '(b) « Remplacer » (ronde finale 2) : la lecture devient courante (parent = l’ancienne courante) ; la fiche garde l’union des pages ; import enregistre');
       });
@@ -1344,7 +1391,7 @@ export async function runImportCibleTests({ eq, ok }) {
         await attendre(() => !!root.querySelector('[data-role="remplacer"]') || navs.length > 0, 'question « Remplacer ? »');
         eq([!!root.querySelector('[data-role="remplacer"]'), pageIds.includes(vieille.id), ff.appels.length, (await db.get('recipes', 'rc_hh')).current_version_id], [true, false, 1, 'rv_rc_hh'], '(b) relire sans octets (ronde finale 2) : une page neuve seule, un POST, la question posée, la courante inchangée');
         bouton(root.querySelector('[data-role="remplacer"]'), 'Garder ma version').click();
-        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc_hh?v=')), 'enregistrée');
+        await voirBilan(scene, navs, 'rc_hh');
         const rc = await db.get('recipes', 'rc_hh'); const neuve = (await db.byIndex('recipe_versions', 'recipe_id', 'rc_hh')).find((v) => v.id !== 'rv_rc_hh');
         eq([rc.current_version_id, rc.availability, rc.verification_state, (await idsVersions('rc_hh')).length, neuve?.kind, neuve?.parent_version_id, neuve?.provenance?.source_page_ids, rc.source_page_ids, (await db.get('source_pages', pageIds[0]))?.kind, (await db.get('imports', importId)).status, navs.at(-1)], ['rv_rc_hh', 'partial', 'to_verify', 2, 'extraction', 'rv_rc_hh', pageIds, [vieille.id, ...pageIds], 'recipe', 'enregistre', `/recipes/rc_hh?v=${neuve?.id}`], '(b) « Garder ma version » (ronde finale 2) : la version est AJOUTÉE sans devenir courante (current_version_id, availability, verification_state intacts) ; union des pages et kind recipe posés quand même ; la fiche s’ouvre sur la version ajoutée');
       });
@@ -2112,7 +2159,7 @@ export async function runImportCibleTests({ eq, ok }) {
         scene.append(ecran);
         eq([!!bouton(ecran, 'Enregistrer cette lecture'), bouton(ecran, 'Extraire et enregistrer')], [true, null], 'Reprendre (a_verifier) : l’écran s’ouvre en mode « Enregistrer cette lecture »');
         bouton(ecran, 'Enregistrer cette lecture').click();
-        await attendre(() => navs.some((n) => n.startsWith('/recipes/rc6c?v=')), 'enregistrée');
+        await voirBilan(scene, navs, 'rc6c');
         eq([(await db.get('imports', impC)).status, (await db.get('recipes', 'rc6c')).availability, (await db.byIndex('recipe_versions', 'recipe_id', 'rc6c')).length, reseau], ['enregistre', 'available', 1, 0], 'Reprendre (a_verifier) : enregistrée SANS appel (aucun réseau)');
         bouton(ligneDe(root, impD), 'Reprendre').click();
         const hostile = await UI.renderImportCible({ id: 'rc6d' }, {}, await ctxDe(), { repo, navigate: (p) => navs.push(p), toast: (m) => dits.push(m), fetch: interdit, maintenant: () => NOW });
@@ -2476,7 +2523,7 @@ export async function runImportCibleTests({ eq, ok }) {
     const ligneDe = (root, id) => root.querySelector(`[data-role="ligne-import"][data-id="${CSS.escape(id)}"]`);
     try {
       // --- 1. Domaine PUR (§ 4.7) : une lecture web est listée, avec ses gestes ; la table entière.
-      eq(D.KINDS_IMPORT, ['recette', 'index', 'web', 'classement', 'couverture'], 'lot B : KINDS_IMPORT connaît « web » ; lot D (D-D12, I-D11) : et « classement » ; lot E (R-E-13) : et « couverture »');
+      eq(D.KINDS_IMPORT, ['recette', 'index', 'web', 'classement', 'couverture', 'livre'], 'Lots B/D/E/I2 : les sortes du journal comprennent web, classement, couverture et livre');
       eq(D.KINDS_PAGES, ['recette', 'index', 'classement'], 'lot B (P-1) : KINDS_PAGES — les sortes à pages, seules ouvertes par le chemin photo (« web » listée, jamais ouverte par lui) ; lot D (I-D11) : une ligne de classement porte des photos');
       const ICI = 'doc-ici', MOI = 'dev-ici', AUTRE = 'dev-ailleurs';
       const ilYa = (min) => new Date(Date.parse(NOW) - min * 60000).toISOString();
