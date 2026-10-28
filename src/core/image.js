@@ -66,14 +66,24 @@ async function decoder(blob) {
   }
 }
 
-export async function reduireImage(blob, { maxCote = LIMITES_COUVERTURE.maxCote, qualite = LIMITES_COUVERTURE.qualite } = {}) {
+// Lot I1 (D-I12, D-I2) : `rotation` (0, 90, 180, 270 : quart de tour dans le sens horaire) puis `recadrage` ({ debut, fin } : la bande VERTICALE
+// gardée, en fractions de la largeur APRÈS rotation — une moitié de page d'index) ; sans eux, l'image entière comme avant.
+export async function reduireImage(blob, { maxCote = LIMITES_COUVERTURE.maxCote, qualite = LIMITES_COUVERTURE.qualite, rotation = 0, recadrage = null } = {}) {
   const bmp = await decoder(blob);
   try {
-    const ratio = Math.min(1, maxCote / Math.max(bmp.width, bmp.height));
-    const w = Math.max(1, Math.round(bmp.width * ratio)), h = Math.max(1, Math.round(bmp.height * ratio));
+    const q = (((Number.isInteger(rotation) ? rotation : 0) % 360) + 360) % 360;
+    const tourne = q === 90 || q === 270;
+    const W0 = tourne ? bmp.height : bmp.width, H0 = tourne ? bmp.width : bmp.height;
+    const x0 = recadrage ? Math.max(0, Math.min(W0 - 1, Math.round(W0 * recadrage.debut))) : 0;
+    const x1 = recadrage ? Math.max(x0 + 1, Math.min(W0, Math.round(W0 * recadrage.fin))) : W0;
+    const ratio = Math.min(1, maxCote / Math.max(x1 - x0, H0));
+    const w = Math.max(1, Math.round((x1 - x0) * ratio)), h = Math.max(1, Math.round(H0 * ratio));
     const canvas = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
     const cx = canvas.getContext('2d');
-    cx.drawImage(bmp, 0, 0, w, h);
+    cx.scale(ratio, ratio);
+    cx.translate(-x0, 0);
+    if (q === 90) { cx.translate(W0, 0); cx.rotate(Math.PI / 2); } else if (q === 180) { cx.translate(W0, H0); cx.rotate(Math.PI); } else if (q === 270) { cx.translate(0, H0); cx.rotate(-Math.PI / 2); }
+    cx.drawImage(bmp, 0, 0);
     const sortie = canvas.convertToBlob ? await canvas.convertToBlob({ type: 'image/jpeg', quality: qualite }) : await new Promise((r) => canvas.toBlob(r, 'image/jpeg', qualite));
     if (!sortie || sortie.type !== 'image/jpeg') throw new ErreurImage('indecodable');
     return sortie;

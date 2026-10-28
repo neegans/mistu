@@ -18,7 +18,7 @@ import { typeAffichage, displayUrl } from '../sync/mime.js';
 import * as repoModule from '../model/repo.js';
 import { PasserelleProvider, extraireRecette, validateParsedRecipe, ErreurExtraction, pagePourEnvoi, MAX_TOKENS_EXTRACTION, extraireCouverture } from '../domain/llm.js';
 import { discordance, deplacerPage, retirerPage, fabriquerExtraction, pagesNonRelues, RAISONS_ECHEC, importOuvert, dateReception, cleLecture, modeleBorne, issueDUneSeance, statutSeanceApres } from '../domain/import-cible.js';
-import { executerIndex, revaliderResultatIndex } from '../domain/table-matieres.js';
+import { executantIndexParPage, relireResultatIndex } from '../domain/index-livre.js';
 import { shaBornee } from '../domain/couverture.js';
 import { getConvention } from '../domain/units.js';
 import { currentVersion } from '../domain/search.js';
@@ -98,7 +98,7 @@ async function imagesDe(repo, pageIds) {
     if (!page?.sha256) continue;
     const fichier = await repo.getFile(page.sha256);
     if (!(fichier?.blob instanceof Blob)) { const e = new Error('octets_absents'); e.code = 'octets_absents'; throw e; }
-    images.push(await pagePourEnvoi(fichier.blob));
+    images.push(await pagePourEnvoi(fichier.blob, { rotation: [90, 180, 270].includes(page.rotation) ? page.rotation : 0 })); // lot I1 (D-I12) : la page telle que la personne l'a pivotée
     envoyees.push(id);
   }
   return { images, pageIds: envoyees };
@@ -232,7 +232,7 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
     const t0 = Date.now();
     let reponse;
     try {
-      reponse = await executer({ provider, images: envoi.images, pageIds: envoi.pageIds, signal: tenue.controller.signal, kind }); // lot C : l'appel est celui de l'exécutant
+      reponse = await executer({ provider, images: envoi.images, pageIds: envoi.pageIds, signal: tenue.controller.signal, kind, importId, repo }); // lot C : l'appel est celui de l'exécutant ; lot I1 : importId et repo pour la progression page par page
     } catch (e) {
       // Échec de l'appel ou refus de la lecture : en_cours → echec(raison) ; une ErreurExtraction garde la réponse brute (diagnostic, bornée).
       // Un `annule` arrive aussi par annulerVol, qui écrit la même chose : la première écriture gagne, la seconde est refusée sans bruit.
@@ -272,7 +272,7 @@ async function volUnique(importId, executer, { ctx, repo = repoModule, fetch: fe
 // Les exécutants (lot C, D-C21). Une recette : extraireRecette, 6 000 jetons, le résultat est la recette validée. Un index (panneau, « Relancer » de la
 // section Imports) : la table des matières par photo (executerIndex, src/domain/table-matieres.js). Une seule primitive de vol pour les deux sortes.
 const executerRecette = async ({ provider, images, signal }) => { const r = await extraireRecette(provider, images, { signal, maxTokens: MAX_TOKENS_EXTRACTION }); return { resultat: r.recette, texteBrut: r.texteBrut, modele: r.modele }; };
-const executerExtraction = (args) => (args.kind === 'index' ? executerIndex(args) : executerRecette(args));
+const executerExtraction = (args) => (args.kind === 'index' ? executantIndexParPage()(args) : executerRecette(args)); // lot I1 : un index se lit page par page (D-I1), relances comprises
 
 // Lot E (spec couverture § 4.2, D-E20) : LE même vol pour une couverture — lancerVol (la primitive partagée du lot C), avec la liste blanche `accepte`
 // (lot D : une ligne `kind: 'couverture'`, sinon `sorte`) et `preparer` : le cover_sha256 revalidé par shaBornee (une clé reçue hostile → aucune image
@@ -341,7 +341,7 @@ export function texteRefus(r) {
 // « Extraire avec l'assistant IA » de l'éditeur (kind recette, recipe_id null : « Regrouper en recette ») et « Lire avec l'assistant IA » du panneau
 // d'index (kind index) passent par le journal, comme l'écran ciblé : la section « Imports » les montre, les reprend (?import=), les relance ou les
 // annule. Le résultat d'une ligne est REVALIDÉ avant tout usage (I-1), par sorte ; le modèle relu est borné (80 points de code).
-const VALIDEURS = { recette: (r) => validateParsedRecipe(r), index: (r, L) => revaliderResultatIndex(r, L?.page_ids) }; // lot C : un index est de forme C, relu sur les pages de SA ligne
+const VALIDEURS = { recette: (r) => validateParsedRecipe(r), index: (r, L) => relireResultatIndex(r, L?.page_ids, { modeleLigne: L?.model ?? null }) }; // lot I1 : format 2 (pages), le format 1 du lot C converti ; relu sur les pages de SA ligne
 const validerSelon = (kind, resultat, ligne = null) => { try { return Object.hasOwn(VALIDEURS, kind) ? VALIDEURS[kind](resultat, ligne) : null; } catch { return null; } };
 const sansReference = (ligne, kind) => !!ligne && ligne.kind === kind && ligne.recipe_id == null; // une ligne CIBLÉE se reprend par son écran
 

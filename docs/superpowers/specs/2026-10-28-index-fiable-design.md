@@ -68,8 +68,9 @@ contradictoire ; modèle Sonnet 5.5 au minimum, sans bascule vers un modèle inf
 
 - **D-I15 Enregistrement automatique des entrées certaines** (rév. 2). Quand la dernière page est lue, les recettes CERTAINES (titre lu, première
   page connue, aucune contradiction, sorte « recette ») deviennent des références « À importer » dans le livre, en UNE transaction, sans geste de
-  plus ; l'écran dit « {n} recettes ajoutées au livre · {m} à vérifier · {k} écartées ». Les ambiguïtés (page inconnue ou incertaine, contradiction,
-  titre incertain, rubrique inconnue sur une entrée sans rubrique ailleurs) attendent dans « À vérifier », chacune avec son geste (« Ajouter »,
+  plus ; l'écran dit « {n} recettes ajoutées au livre · {m} à vérifier · {k} écartées ». Les ambiguïtés (page inconnue ou illisible, contradiction —
+  entre pages lues ou avec une référence déjà dans le livre —, entrée que toutes ses occurrences disent incertaine) attendent dans « À vérifier » ;
+  une rubrique inconnue n'en est pas une (c'est un indice de recherche, D-I9), chacune avec son geste (« Ajouter »,
   « Garder 236–238 », « Écarter »). La ligne du journal reste `a_verifier` tant qu'il en reste, puis passe `enregistre`.
 - **D-I16 Modèle Sonnet 5.5 au minimum** (rév. 2). Le serveur ne connaît qu'un modèle (`ASSISTANT_MODELE`, défaut `claude-sonnet-5-5`, aucune
   bascule). L'app vérifie le modèle annoncé par chaque réponse contre une liste blanche validée pour les index (`claude-sonnet-5-5`,
@@ -106,7 +107,8 @@ contradictoire ; modèle Sonnet 5.5 au minimum, sans bascule vers un modèle inf
 
 `renvoisDe(texte)` (pure) → `[{ debut, fin }]` + le texte brut gardé :
 - « 94 » → 94–94 ; « 24–6 » → 24–26 ; « 116–19 » → 116–119 ; « 187–90 » → 187–190 ; « 200–2 » → 200–202 ; « 98–101 » → 98–101 ;
-  « 1998–2001 » (hors bornes) → refus ; tirets acceptés : « - », « – », « — ».
+  « 300–1 » → 300–301 ; tirets acceptés : « - », « – », « — » ; un morceau qui n'est pas un nombre ou une plage (« 41 (variante) ») rend le
+  renvoi incertain.
 - Abréviation : si `fin < debut`, la fin remplace les derniers chiffres du début (« 116–19 » : 1|16 → 1|19) ; si le résultat reste `< debut`, le
   renvoi est incertain.
 - « 114–15, 213 » → [114–115, 213–213] ; « 36–8, 98, 100 » → [36–38, 98, 100] ; virgules et points-virgules.
@@ -176,3 +178,57 @@ trois pages d'abord, trois ensuite. Avant la construction, une requête suffit �
 
 `APP_VERSION 0.18.0`, `DB_VERSION` 4 (champs JSON neufs sur `recipes` et `source_pages`, sans index), `sw.js` +1 par commit qui touche `src/` ou
 `styles.css`, aucune migration, aucun changement sous `supabase/`.
+
+## 12. Construction : rulings (28 octobre 2026)
+
+Le code fait foi ; chaque ligne dit la décision, sa raison et son coût si elle est fausse.
+
+- **R-I1-1** Le panneau d'index du lot C (`indexEntriesPanel`, « Ordre des photos », tableau à cocher, « Créer {n} références ») est RETIRÉ et remplacé
+  par `panneauIndex` (`src/ui/index-livre.js`). Ses blocs d'écran de `tests/table-matieres.js` (58 sur 77) partent avec lui ; ses fonctions pures
+  (lecture du lot C, `fabriquerReferences`, section, recherche) restent épinglées. Coût si faux : le chemin « une lecture pour toutes les pages » ne
+  revient qu'en rouvrant le lot C (il coupait sur 6 pages : B01).
+- **R-I1-2** § 6 et § 7 amendés par D-I15 (rév. 2) : rien n'attend « Créer {n} références » ; la consolidation est refaite à chaque rendu, mais les
+  recettes CERTAINES sont écrites dès qu'une ligne passe `a_verifier` (`enregistrerAuto`, UNE transaction conditionnée à la lecture montrée et à
+  `auto_enregistre_at` vide : deux onglets, un seul enregistre). Une ligne restée `a_verifier` sans enregistrement (app fermée entre la réponse et
+  l'écriture) est enregistrée au rendu suivant du panneau.
+- **R-I1-3** Une lecture neuve ouvre une ligne NEUVE pour les pages non lues ou incomplètes ; « Reprendre » après un échec garde sa ligne (la
+  progression dans `sync_state` saute les pages déjà lues). La consolidation réunit toutes les lignes `index` de la séance, la lecture la plus récente
+  de chaque page gagnant, une page en échec ne remplaçant jamais une page lue (`lectureDeSeance`).
+- **R-I1-4** Décisions « À vérifier » (« Garder {p} », « Les deux », « Ajouter au livre », « Écarter ») et « C’est une recette » écrites dans
+  `imports.decisions` de la dernière ligne lue, avec leurs fiches, en UNE transaction (`decider`) ; la ligne passe `enregistre` quand plus rien
+  n'attend. Clé d'une écartée : `ecartee:` + `cleTitre`.
+- **R-I1-5** Séance d'index (D-I11) : `scan_sessions.but = 'index'` posé quand on arrive par l'intention `index` ; une séance est aussi « d'index » si
+  elle a déjà une lecture d'index ou si toutes ses pages sont rangées en index. Une séance générique garde « Index / table des matières » sur la
+  sélection.
+- **R-I1-6** Saisie à la main : un seul composant (`saisieIndexManuelle`), dans le panneau et sur la fiche du livre ; une ligne = un titre et ses
+  renvois (« Titre — 116–19 », « Titre, p. 58 », « 212 Titre », titre seul) lus par `lireSaisieIndex` ; consolidée contre le livre (rien de recréé) ;
+  une contradiction TAPÉE donne les deux références (la personne les a écrites).
+- **R-I1-7** B04 (D-I14) : la pastille dit « {n} modifications à envoyer » et, là où la barre est serrée (sous 600 px, et de 900 à 1099 px), sa forme
+  courte « {n} à envoyer » par `data-court` et un texte généré sans alternative (le texte entier reste dans le nœud, lu par les lecteurs d'écran) ;
+  aucune règle `display: none` ajoutée. La séance dit « Photos : {k}/{n} sauvegardées sur le serveur » ; la lecture a sa ligne dans le panneau
+  (« Lecture : à faire | {m} pages à lire | {m} pages à relire | faite le {d} »), la progression la remplaçant pendant un vol. « {m} pages à lire »
+  (pages jamais lues d'une séance déjà lue) s'ajoute aux quatre formes de D-I14.
+- **R-I1-8** Formes au singulier pour les gestes et les lignes d'état (« Lire la page (1 appel) », « Relire la page incomplète (1 appel) »,
+  « 1 page d’index », « Lecture : 1 page à relire »).
+- **R-I1-9** La fiche du livre dit les plages (« p. 116–119 ») lues par `plagesLisibles` (entiers 1..9999, début ≤ fin, 20 au plus ; sinon la page
+  imprimée) ; la recherche lit `index_rubriques` comme la section (12 au plus, `sectionLisible`).
+- **R-I1-10** Le message de coupe d'un index dit ce qui s'est passé (« une page est trop dense pour une seule lecture… elle sera relue en deux
+  moitiés ») au lieu de « lis moins de photos à la fois », impossible quand on lit une page à la fois (B01).
+- **R-I1-11** Une séance « d'index » cède au classement désigné (`?import=` d'un classement de la séance, lot D § 4.1) : le panneau d'index y reste
+  fermé, comme avant le lot. Une séance qui porte déjà une lecture d'index reste une séance d'index, intention posée ou non. Coût si faux : une
+  séance mixte (index et recettes) ouvre le panneau d'index au lieu de celui du classement.
+- **R-I1-12** Contradiction contre une fiche déjà écrite (les pages lues en deux temps : les choux certains à 236–238, puis la page 311 apporte
+  40–41) : l'option déjà dans le livre porte `existanteId`, se dit « déjà dans le livre » et n'est jamais recréée, ni par « Garder », ni par « Les
+  deux » ; la saisie à la main suit la même règle. Coût si faux : une seconde fiche à la même page.
+- **R-I1-13** (revue adverse) Une décision « À vérifier » ou « C’est une recette » n'est écrite qu'une fois : `decider` refuse (`TransitionRefusee`)
+  une clé déjà décidée dans la ligne, en transaction (deux onglets, double tape) ; les boutons de la ligne s'éteignent pendant l'écriture (défense en
+  profondeur, mutant équivalent) ; un refus n'est pas dit comme un échec, l'écran se redessine. Avant : une double tape créait deux fiches.
+- **R-I1-14** (revue adverse) `enregistrerAuto` vérifie `auto_enregistre_at` DANS la transaction : deux enregistrements lancés ensemble (deux
+  onglets) n'écrivent qu'une fois, même quand la ligne reste « à vérifier ».
+- **R-I1-15** (revue adverse) La saisie à la main borne chaque ligne à 300 points de code AVANT l'analyse (la recherche du suffixe de renvois est
+  quadratique : une ligne collée de 200 000 caractères figeait l'écran) ; la liste « incertain » d'une page lue est bornée avant d'être nettoyée.
+- **R-I1-16** Une page lue `autre` (ni table ni index) ne verse rien dans la liste du livre, même si le modèle y a mis des entrées (épinglé par un
+  test du domaine ; il manquait).
+- **R-I1-17** Mutants (copies servies à part, harnais du lot : `tests/index-livre.js` et `tests/index-livre-ecran.js`, 84 assertions) : 21 joués,
+  20 rouges, M19 (bouton de décision non éteint) équivalent déclaré (R-I1-13) ; M8 et M14 survivaient au premier passage et sont tués par les tests
+  ajoutés (deux enregistrements simultanés, page `autre`). T-D9 du lot D (classement désigné) était rouge avant R-I1-11.

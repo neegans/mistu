@@ -1596,6 +1596,40 @@ styles.css                 jetons olive sombre (#454e3b), --serif système, --ra
 
 Rulings : spec « expérience carnet » § 12, « Fidélité aux maquettes » (R-FM-1 à R-FM-9).
 
+## Index fiable (lot I1, 28 octobre 2026)
+
+Spec : `docs/superpowers/specs/2026-10-28-index-fiable-design.md` (rév. 2, rulings R-I1-1 à R-I1-10 au § 12). Le cas réel : les six pages d'index de
+« Trinity: The Cookbook » (310-315), que le lot C lisait en UN appel plafonné à 8 000 jetons et coupait (B01).
+
+```
+src/domain/index-livre.js  PUR. Lecture d'UNE page (lirePageIndex : consigne CONSIGNE_PAGE_INDEX, format compact, 6 000 jetons ; la sorte de la
+                           page — table, index, chapitres, autre — est lue sur son contenu), relance d'une page coupée en deux moitiés qui se
+                           recouvrent (moitieDImage, fusionnerMoities), renvois imprimés (renvoisDe : « 116–19 » → 116–119), rubriques raccordées
+                           d'une page à l'autre (« ^ » du modèle), consolidation (consolider : une recette = une référence, plages unies, rubriques
+                           réunies, contradictions « à vérifier », entrées non culinaires écartées, chapitres à part, déjà dans le livre), écriture
+                           (fabriquerReferenceIndex, completerExistante, referenceIntacte), exécutant page par page (executantIndexParPage :
+                           progression dans sync_state, une page déjà lue n'est pas relue), relecture du journal (relireResultatIndex, format 2 ;
+                           format 1 du lot C converti), plagesLisibles (affichage).
+src/ui/index-livre.js      panneauIndex(session, ctx, getPageIds, deps) : le panneau d'une séance (séance d'index : toutes ses pages, sans cocher) ;
+                           lire (lancerVol, option lecture, une ligne neuve par lecture), enregistrerAuto (D-I15 : les certaines en UNE transaction
+                           conditionnée, `auto_enregistre_at` relu en transaction), decider (« Garder », « Les deux », « Ajouter au livre », « Écarter », « C’est une recette » ;
+                           une clé déjà décidée est refusée en transaction, R-I1-13), « Retirer
+                           ces {n} recettes » (intactes seulement), ligne « Lecture : … » (B04) ; lectureDeSeance (la lecture la plus récente de
+                           chaque page, par started_at) ; saisieIndexManuelle et lireSaisieIndex (saisie à la main, aussi sur la fiche du livre).
+src/ui/import.js           sessionView : séance d'index explicite (scan_sessions.but = 'index'), « Pivoter » (source_pages.rotation, la miniature
+                           et l'image envoyée), « Page de l’index » ; phrase « Photos : {k}/{n} sauvegardées sur le serveur ».
+src/ui/table-matieres.js   texteEchecIndex seulement (le panneau du lot C est retiré, R-I1-1).
+src/ui/book.js             la ligne compacte dit les plages (« p. 116–119 ») ; saisie à la main par saisieIndexManuelle.
+src/domain/search.js       index_rubriques lues comme la section (12 au plus).
+src/domain/llm.js          pagePourEnvoi(blob, { rotation, recadrage }) ; src/core/image.js reduireImage pivote et recadre.
+src/model/repo.js          lireProgressionIndex / ecrireProgressionIndex / oublierProgressionIndex (sync_state lecture-index:<id>, origine device).
+src/ui/state.js            pastilleModel « {n} modifications à envoyer », pastilleCourteModel « {n} à envoyer » (data-court, barre serrée).
+```
+
+Données (JSON, aucun index, aucune migration) : `recipes.printed_pages` ([{ debut, fin }]), `index_rubriques`, `index_import_id` ;
+`imports{kind:'index'}.resultat = { format: 2, pages: [...] }`, `auto_enregistre_at`, `enregistrees`, `decisions` ; `scan_sessions.but` ;
+`source_pages.rotation` (0, 90, 180, 270).
+
 ## Modèle de données (magasins IndexedDB)
 
 `books`, `book_editions` (ISBN, langue, `unit_convention_id`), `source_documents` (fichier, sha256, type), `source_pages` (page imprimée, position),

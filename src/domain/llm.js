@@ -131,7 +131,7 @@ Si une quantité est illisible, garde le texte lisible et ajoute la ligne dans u
 Si une page semble manquer (étapes qui commencent au milieu, ingrédients sans étapes, renvoi à une page absente), mets "missing_page": true ; si la recette est visiblement partielle, mets "incomplete": true ; une étape peut tenir sur plusieurs lignes : garde-la entière dans un seul "text".`;
 
 // Ce que l'appel a donné, attaché au résultat comme à un refus : la réponse brute coupée à REPONSE_BRUTE_MAX, le stopReason et le modèle lus.
-const contexteDe = (provider, raw) => ({ stopReason: provider.stopReason ?? null, modele: provider.modele ?? null, texteBrut: tronquer(String(raw ?? ''), REPONSE_BRUTE_MAX) });
+export const contexteDe = (provider, raw) => ({ stopReason: provider.stopReason ?? null, modele: provider.modele ?? null, texteBrut: tronquer(String(raw ?? ''), REPONSE_BRUTE_MAX) });
 
 // Un appel, pages dans l'ordre donné → { recette, stopReason, modele, texteBrut }. Lève Error(non_connecte) sans session (aucun appel), les Error
 // de complete (raisons de la passerelle, dont `annule` pour un signal levé), ou ErreurExtraction(coupe | illisible | hors_bornes | vide).
@@ -474,11 +474,11 @@ export const COTE_MAX_ENVOI = 1568;
 // 48 Mpx d'iPhone est un cas réel : ≤ 50 Mo et ≤ 50 Mpx lus dans l'en-tête ; au-delà, ErreurImage('trop_grande') (« Cette image est trop grande. ») :
 // une archive restaurée ou un fichier choisi de 30 000 × 30 000 ne fait plus tomber l'onglet en plein vol.
 export const LIMITES_ENVOI = Object.freeze({ octets: 50 * 1024 * 1024, pixels: 50_000_000 });
-export async function pagePourEnvoi(blob) {
+export async function pagePourEnvoi(blob, { rotation = 0, recadrage = null } = {}) {
   if (blob instanceof Blob && blob.size > LIMITES_ENVOI.octets) throw new ErreurImage('trop_grande');
   const dims = await dimensionsImage(blob);
   if (dims && dims.largeur * dims.hauteur > LIMITES_ENVOI.pixels) throw new ErreurImage('trop_grande');
-  const reduite = await reduireImage(blob, { maxCote: COTE_MAX_ENVOI });
+  const reduite = await reduireImage(blob, { maxCote: COTE_MAX_ENVOI, rotation, recadrage }); // lot I1 : rotation de la page (D-I12), moitié (D-I2)
   return { mime: reduite.type, base64: await blobToBase64(reduite) };
 }
 

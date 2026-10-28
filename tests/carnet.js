@@ -1882,22 +1882,27 @@ export async function runCarnetTests({ eq, ok }) {
         if (f.contentWindow.innerWidth !== largeur) throw new Error(`cadre ${largeur} : innerWidth ${f.contentWindow.innerWidth}`);
         const c = coquille('/library');
         d.getElementById('app').append(c.root);
-        const p = c.root.querySelector('.pastille'); p.textContent = '12 non envoyés'; p.hidden = false; // ce que pose majPastille
+        const p = c.root.querySelector('.pastille'); p.replaceChildren(Object.assign(d.createElement('span'), { className: 'long', textContent: '12 modifications à envoyer' })); p.dataset.court = '12 à envoyer'; p.hidden = false; // ce que pose majPastille (B04, lot I1)
         await new Promise((r) => requestAnimationFrame(() => r()));
         const w = f.contentWindow; const S = (n) => w.getComputedStyle(n); const B = (n) => n.getBoundingClientRect();
         const roue = c.root.querySelector('.topbar a[href="#/settings"]'); const rech = c.root.querySelector('.topbar a[href="#/search"]');
         const libelle = rech.querySelector('.nowrap');
         const visibles = [...c.side.querySelectorAll('a')].filter((a) => B(a).width > 1 && S(c.side).display !== 'none');
+        // B04 (lot I1) : là où la barre est serrée (< 600 px, 900-1099 px), le texte entier est masqué (1 px) et la forme courte se voit (la pastille garde
+        // une largeur) ; ailleurs, le texte entier se voit — jamais une pastille vide.
+        const serree = largeur < 600 || (largeur >= 900 && largeur <= 1099);
+        const longue = B(p.querySelector('.long'));
         mesures.push([largeur, d.documentElement.scrollWidth <= largeur, B(roue).left >= 0 && B(roue).right <= largeur, B(p).right <= B(rech).left,
-          largeur >= 900 ? visibles.length : S(c.tabs).display !== 'none', B(libelle).width <= 1, rech.textContent.trim(), Math.round(B(rech).width) >= 44]);
+          largeur >= 900 ? visibles.length : S(c.tabs).display !== 'none', B(libelle).width <= 1, rech.textContent.trim(), Math.round(B(rech).width) >= 44,
+          serree ? longue.width <= 1 : longue.width > 40, B(p).width >= 40]);
       } finally { f.remove(); }
     }
     eq(mesures, [
-      [375, true, true, true, true, true, 'Qu’est-ce qu’on cuisine ?', true], [390, true, true, true, true, true, 'Qu’est-ce qu’on cuisine ?', true],
-      [768, true, true, true, true, false, 'Qu’est-ce qu’on cuisine ?', true], [900, true, true, true, 5, true, 'Qu’est-ce qu’on cuisine ?', true],
-      [960, true, true, true, 5, true, 'Qu’est-ce qu’on cuisine ?', true], [1099, true, true, true, 5, true, 'Qu’est-ce qu’on cuisine ?', true],
-      [1100, true, true, true, 5, false, 'Qu’est-ce qu’on cuisine ?', true], [1280, true, true, true, 5, false, 'Qu’est-ce qu’on cuisine ?', true]],
-      'barre du haut, pastille « 12 non envoyés » visible : aucune page plus large que la fenêtre, roue Réglages entière, pastille avant la recherche ; ≥ 900 px cinq onglets dans la barre, < 900 px les onglets bas ; recherche réduite à sa loupe sous 600 px et de 900 à 1099 px (le mot reste dans le lien) ; recherche ≥ 44 px (mesurés à 375, 390, 768, 900, 960, 1099, 1100, 1280 px)');
+      [375, true, true, true, true, true, 'Qu’est-ce qu’on cuisine ?', true, true, true], [390, true, true, true, true, true, 'Qu’est-ce qu’on cuisine ?', true, true, true],
+      [768, true, true, true, true, false, 'Qu’est-ce qu’on cuisine ?', true, true, true], [900, true, true, true, 5, true, 'Qu’est-ce qu’on cuisine ?', true, true, true],
+      [960, true, true, true, 5, true, 'Qu’est-ce qu’on cuisine ?', true, true, true], [1099, true, true, true, 5, true, 'Qu’est-ce qu’on cuisine ?', true, true, true],
+      [1100, true, true, true, 5, false, 'Qu’est-ce qu’on cuisine ?', true, true, true], [1280, true, true, true, 5, false, 'Qu’est-ce qu’on cuisine ?', true, true, true]],
+      'barre du haut, pastille « 12 modifications à envoyer » visible (forme courte « 12 à envoyer » là où la barre est serrée) : aucune page plus large que la fenêtre, roue Réglages entière, pastille avant la recherche ; ≥ 900 px cinq onglets dans la barre, < 900 px les onglets bas ; recherche réduite à sa loupe sous 600 px et de 900 à 1099 px (le mot reste dans le lien) ; recherche ≥ 44 px (mesurés à 375, 390, 768, 900, 960, 1099, 1100, 1280 px)');
     // Un titre sans espace (une adresse collée en titre de signet) reste DANS sa carte à 375 px : overflow-wrap des titres gardé (revue du 28 octobre).
     {
       const { buildDocs } = await import('../src/domain/search.js');

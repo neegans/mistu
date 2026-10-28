@@ -9,7 +9,7 @@ import { navigate } from '../core/router.js';
 import { displayUrl, typeAffichage } from '../sync/mime.js';
 import { etatFichier, lireErreursFichiers } from '../sync/fichiers.js';
 import * as repo from '../model/repo.js';
-import { pastilleModel, invalidate } from './state.js';
+import { pastilleModel, pastilleCourteModel, invalidate } from './state.js';
 import { estCreationIA, etiquetteCreationIA } from '../domain/creation-ia.js';
 import { DIFFICULTES, LIMITES_WEB } from '../domain/recherche-web.js';
 import { pointeurValide } from '../domain/photo-web.js';
@@ -535,7 +535,7 @@ export function texteEchecAssistant(erreur) {
 }
 // === fin Assistant
 
-// --- Pastille « N non envoyés » de la barre du haut (spec § 4.2) ----------
+// --- Pastille « N modifications à envoyer » de la barre du haut (spec § 4.2 ; B04, lot I1) ----------
 // Un seul nœud dans toute l'application, posé par la coquille (app.js) et mis à jour par le moteur. La mise à jour
 // le RETROUVE par son identifiant à chaque appel : la coquille entière est reconstruite au changement de langue, et
 // une référence gardée en variable désignerait alors un nœud détaché — la pastille ne bougerait plus jamais.
@@ -550,7 +550,11 @@ export function majPastille(etat, connecte = false) {
   const noeud = document.getElementById(PASTILLE_ID);
   if (!noeud) return null;
   const texte = pastilleModel({ aEnvoyer: etat?.aEnvoyer || 0, connecte });
-  noeud.textContent = texte || '';
+  // B04 (lot I1) : le texte entier dans span.long (lu par les lecteurs d'écran, masqué visuellement là où la barre est serrée), la forme courte en
+  // data-court (rendue par ::after) — textContent reste le texte entier.
+  noeud.replaceChildren(...(texte ? [el('span', { class: 'long' }, texte)] : []));
+  const court = pastilleCourteModel({ aEnvoyer: etat?.aEnvoyer || 0, connecte });
+  if (court) noeud.dataset.court = court; else delete noeud.dataset.court;
   noeud.hidden = texte === null;
   return texte;
 }

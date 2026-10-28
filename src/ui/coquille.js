@@ -30,7 +30,7 @@ export function coquille(path) {
     el('a', { class: 'brand', href: '#/' }, 'Cuisine OS'),
     side,
     el('span', { class: 'spacer' }),
-    // Pastille « N non envoyés » (spec § 4.2) : cachée tant que la file est vide — rien n'est affiché sans fait.
+    // Pastille « N modifications à envoyer » (spec § 4.2 ; B04, lot I1) : cachée tant que la file est vide — rien n'est affiché sans fait.
     pastille(),
     el('a', { class: 'btn small', href: '#/search', title: t('Recherche') }, el('span', { class: 'ico', 'aria-hidden': 'true' }, icone('loupe')), el('span', { class: 'nowrap' }, t('Qu’est-ce qu’on cuisine ?'))),
     el('a', { href: '#/settings', class: 'btn small', title: t('Réglages'), 'aria-label': t('Réglages') }, el('span', { class: 'ico', 'aria-hidden': 'true' }, icone('roue'))));

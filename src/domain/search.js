@@ -125,14 +125,16 @@ export function buildDocs({ recipes, versions, editions, books, dishes, links, t
     const dish = dishByRecipe.get(recipe.id);
     const tr = version ? translationByVersion.get(version.id) : null;
     const section = sectionLisible(recipe.section); // lot C (D-C6) : la section lue, nettoyée et bornée (sectionLisible), sinon null
-    const textParts = [recipe.original_title, recipe.display_title, tr?.translated_content?.title, book?.title, book?.author, dish?.labels?.fr?.label, dish?.labels?.en?.label, ...(recipe.tags || []), ...(recipe.cuisines || []), ...tagsDe(book?.tags), section];
+    // Lot I1 (D-I9) : les rubriques d'index sous lesquelles la recette est citée (« broccoli », « hazelnuts »), relues comme la section, 12 au plus.
+    const rubriques = Array.isArray(recipe.index_rubriques) ? recipe.index_rubriques.slice(0, 12).map(sectionLisible).filter(Boolean) : [];
+    const textParts = [recipe.original_title, recipe.display_title, tr?.translated_content?.title, book?.title, book?.author, dish?.labels?.fr?.label, dish?.labels?.en?.label, ...(recipe.tags || []), ...(recipe.cuisines || []), ...tagsDe(book?.tags), section, ...rubriques];
     const ingredientIds = new Set((version?.ingredients || []).map((i) => i.ingredient_id).filter(Boolean));
     for (const ri of version?.ingredients || []) textParts.push(ri.name_text || ri.source_text);
     const tokens = new Set(textParts.filter(Boolean).flatMap((s) => tokenize(String(s))));
     // Les cuisines, les mots-clés du livre et la section lue (lot C, D-C6) comptent comme des mots du titre pour une recette-référence SEULEMENT : c'est
     // tout ce qu'un signet web possède pour se faire retrouver (spec § 11, F7). D12 : une référence d'index d'un livre
     // tagué remonte désormais par les mots-clés du livre — intention du brief § 12.5 ; le test F7 reste vert (`books: []`).
-    const titleTokens = new Set(tokenize(`${recipe.original_title || ''} ${recipe.display_title || ''} ${tr?.translated_content?.title || ''} ${recipe.availability === 'reference_only' ? [...(recipe.cuisines || []), ...tagsDe(book?.tags), section || ''].join(' ') : ''}`));
+    const titleTokens = new Set(tokenize(`${recipe.original_title || ''} ${recipe.display_title || ''} ${tr?.translated_content?.title || ''} ${recipe.availability === 'reference_only' ? [...(recipe.cuisines || []), ...tagsDe(book?.tags), section || '', ...rubriques].join(' ') : ''}`));
     return { recipe, version, edition, book, dish, tokens, titleTokens, ingredientIds, cooked: cooked.get(recipe.id) || 0, translation: tr };
   });
 }

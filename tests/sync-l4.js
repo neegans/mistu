@@ -511,9 +511,9 @@ export async function runSyncL4Tests({ eq, ok }) {
   await run('statique tâche 1', async () => {
     const sw = await lire('../sw.js');
     ok(sw.includes("'./src/sync/fichiers.js'"), 'SHELL : ./src/sync/fichiers.js (atteignable par pull.js dès la tâche 1, F-5)');
-    ok(/VERSION = 'cuisine-os-v0\.17\.0-\d+'/.test(sw), 'sw.js : VERSION 0.17.0');
+    ok(/VERSION = 'cuisine-os-v0\.18\.0-\d+'/.test(sw), 'sw.js : VERSION 0.18.0');
     const { APP_VERSION, DB_VERSION } = await import('../src/model/schema.js');
-    eq([APP_VERSION, DB_VERSION], ['0.17.0', 4], 'T1 (lot UI-1, carnet) : APP_VERSION 0.17.0, DB_VERSION inchangée (D-G11 : 0.11.0 au lot G ; 0.12.0 au lot C ; 0.13.0 au lot D ; 0.14.0 au lot E ; 0.15.0 au lot F ; 0.16.0 à UI-2)');
+    eq([APP_VERSION, DB_VERSION], ['0.18.0', 4], 'T1 (lot UI-1, carnet) : APP_VERSION 0.18.0, DB_VERSION inchangée (D-G11 : 0.11.0 au lot G ; 0.12.0 au lot C ; 0.13.0 au lot D ; 0.14.0 au lot E ; 0.15.0 au lot F ; 0.16.0 à UI-2)');
     const { MODULES_NEUFS } = await import('./ajouter.js');
     ok(MODULES_NEUFS.includes('../src/sync/fichiers.js'), 'filet i18n : MODULES_NEUFS contient src/sync/fichiers.js');
   });
@@ -3450,7 +3450,7 @@ export async function runSyncL4Tests({ eq, ok }) {
         await db.mutate({ puts: { files: [{ sha256: H('3'), mime: 'image/jpeg', size: 5, updated_at: DATE, remote: R({ sha256: H('3'), size: 5 }) }] }, origin: 'remote' });
         for (const fn of abonnes) fn({ enCours: false });
         for (let i = 0; i < 100 && phrase() === avant; i += 1) await new Promise((r) => setTimeout(r, 10));
-        eq([avant, phrase(), etats, root.querySelectorAll('.thumbs img').length], ['2/3 photos de cette séance envoyées au serveur', '3/3 photos de cette séance envoyées au serveur', ['distant', 'absent'], 1],
+        eq([avant, phrase(), etats, root.querySelectorAll('.thumbs img').length], ['Photos : 2/3 sauvegardées sur le serveur', 'Photos : 3/3 sauvegardées sur le serveur', ['distant', 'absent'], 1],
           'séance : « {n}/{m} photos … envoyées au serveur » compte les remote de CE compte — la page distante aussi, ses octets sont au serveur (I5 ; mutant : compte sur blob → 1/3) — et se redessine sur onEtat SANS re-rendu de la route (mutant : phrase non abonnée) ; vignettes : image, distante, absente');
         await finDesImages(root);
       } finally { scene.remove(); }
@@ -3503,10 +3503,10 @@ export async function runSyncL4Tests({ eq, ok }) {
 
   await run('statique tâche 6', async () => {
     const sw = await lire('../sw.js');
-    const v = /VERSION = 'cuisine-os-v0\.17\.0-(\d+)'/.exec(sw); // ronde 1 : le libellé dit ce que le test vérifie (le -\d+ seul acceptait -1)
-    ok(!!v && Number(v[1]) >= 1, 'sw.js : VERSION 0.17.0-N avec N ≥ 1 (lot UI-1 ; le seuil N ≥ 6 de la clôture des écrans du lot G valait sous 0.11.0)');
+    const v = /VERSION = 'cuisine-os-v0\.18\.0-(\d+)'/.exec(sw); // ronde 1 : le libellé dit ce que le test vérifie (le -\d+ seul acceptait -1)
+    ok(!!v && Number(v[1]) >= 1, 'sw.js : VERSION 0.18.0-N avec N ≥ 1 (lot UI-1 ; le seuil N ≥ 6 de la clôture des écrans du lot G valait sous 0.11.0)');
     const { EN } = await import('../src/i18n/en.js');
-    const neuves = ['Page', 'Télécharger', 'Télécharger les {n} pages', 'Téléchargement…', 'Le téléchargement n’a pas abouti.', 'Pas encore sur cet appareil', 'Connecte-toi pour la télécharger', 'Pas encore envoyée par l’appareil qui l’a prise', 'Pas encore reçue', 'La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.', 'La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.', 'Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages', '{n}/{m} photos de cette séance envoyées au serveur'];
+    const neuves = ['Page', 'Télécharger', 'Télécharger les {n} pages', 'Téléchargement…', 'Le téléchargement n’a pas abouti.', 'Pas encore sur cet appareil', 'Connecte-toi pour la télécharger', 'Pas encore envoyée par l’appareil qui l’a prise', 'Pas encore reçue', 'La couverture n’est pas sur cet appareil. Connecte-toi pour la télécharger.', 'La couverture n’est pas sur cet appareil : l’appareil qui l’a prise ne l’a pas encore envoyée.', 'Sans compte, ces photos restent sur cet appareil : sauvegarde via Réglages', 'Photos : {n}/{m} sauvegardées sur le serveur'];
     eq(neuves.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'en.js : chaque chaîne neuve des écrans a sa traduction (dont « Page », l’alt de vignettePage)');
     eq(neuves.filter((k) => /supabase/i.test(k) || /supabase/i.test(EN[k] || '')), [], 'I-G8 : aucune chaîne neuve des écrans ne nomme le fournisseur de stockage, ni en français ni en anglais');
   });
@@ -3766,7 +3766,7 @@ export async function runSyncL4Tests({ eq, ok }) {
         await tour();
         const groupe = [...root.querySelectorAll('button')].find((b) => /^Télécharger les \d+ pages$/.test(b.textContent));
         eq([groupe?.textContent ?? null, groupe?.closest('.row')?.nextElementSibling === root.querySelector('.thumbs'), root.querySelector('[data-role="phrase-seance"]')?.textContent, root.querySelector('.thumbs img')?.alt],
-          ['Télécharger les 2 pages', true, '3/7 photos de cette séance envoyées au serveur', 'Page 1'],
+          ['Télécharger les 2 pages', true, 'Photos : 3/7 sauvegardées sur le serveur', 'Page 1'],
           'séance (ronde 1, § 4.3) : « Télécharger les 2 pages » au-dessus de .thumbs ne compte QUE les distantes de ce compte — ni l’absente, ni celle en erreur, ni celle d’un autre compte, ni l’ancien remote: true (mutants : bouton groupé jamais posé ; filtre d’état de `distantes` retiré → 6) ; la phrase compte les remote VALIDES de CE compte, celle en erreur comprise (mutant : !!remote → 5/7) ; l’alt dit la position');
         groupe?.click();
         await jusqua(() => appels.length > 0);

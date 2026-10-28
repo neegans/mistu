@@ -60,7 +60,13 @@ export function routeApresRetour({ retour = null, memorisee = null, hashActuel =
 export function pastilleModel({ aEnvoyer = 0, connecte = false } = {}) {
   if (!connecte) return null;
   if (!(aEnvoyer > 0)) return null;
-  return aEnvoyer === 1 ? t('1 non envoyé') : t('{n} non envoyés', { n: aEnvoyer });
+  return aEnvoyer === 1 ? t('1 modification à envoyer') : t('{n} modifications à envoyer', { n: aEnvoyer });
+}
+// B04 (lot I1, D-I14) : la pastille compte des FICHES modifiées, pas des photos — « 1 non envoyé » se lisait à côté de « 1/1 photos envoyées » comme une
+// contradiction. La forme courte sert là où la barre du haut est serrée (styles.css) ; le texte entier reste celui que lisent les lecteurs d'écran.
+export function pastilleCourteModel({ aEnvoyer = 0, connecte = false } = {}) {
+  if (pastilleModel({ aEnvoyer, connecte }) === null) return null;
+  return t('{n} à envoyer', { n: aEnvoyer });
 }
 
 // --- Rendu après une passe du moteur (R-L3-16, R-L3-19) -------------------

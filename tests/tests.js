@@ -29,6 +29,8 @@ import { runCouvertureTests } from './couverture.js';
 import { runLectureWebTests } from './lecture-web.js';
 import { runSyncL4Tests } from './sync-l4.js';
 import { runTableMatieresTests } from './table-matieres.js';
+import { runIndexLivreTests } from './index-livre.js';
+import { runIndexLivreEcranTests } from './index-livre-ecran.js';
 import { runClassementTests } from './classement.js';
 import { runThemeTests } from './theme.js';
 import { runPhotoPlatTests } from './photo-plat.js';
@@ -232,6 +234,10 @@ catch (error) { ok(false, `Suite photos entre appareils interrompue : ${error?.m
 // --- Table des matières sur plusieurs pages (lot C) : contrat du modèle, domaine, vol partagé, écran, fiche livre et recherche.
 try { await runTableMatieresTests({ eq, ok }); }
 catch (error) { ok(false, `Suite table des matières interrompue : ${error?.message || String(error)}`); }
+try { await runIndexLivreTests({ eq, ok }); }
+catch (e) { ok(false, `Index livre : bloc interrompu — ${e?.message || e}`); }
+try { await runIndexLivreEcranTests({ eq, ok }); }
+catch (e) { ok(false, `Index livre (écran) : suite interrompue — ${e?.message || e}`); }
 
 // --- Un lot de recettes photographiées (lot D) : classement, regroupement, appariement, lecture du lot, enregistrement d'une lecture de séance.
 try { await runClassementTests({ eq, ok }); }
@@ -256,7 +262,7 @@ catch (error) { ok(false, `Suite thème interrompue : ${error?.message || String
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 6389,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 6245,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

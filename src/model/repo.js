@@ -114,6 +114,20 @@ export async function battre(importId, quand) {
 export async function oublierBattement(importId) {
   await db.mutate({ deletes: { sync_state: [cleBattement(importId)] }, origin: 'device' });
 }
+// Lot I1 (I-I3) : la progression d'une lecture d'index page par page — chaque page lue est gardée ICI dès sa réponse (ligne INTERNE de sync_state,
+// origine device : jamais envoyée, aucun `change`) ; une lecture interrompue (Annuler, app fermée) ne relit que les pages sans résultat.
+const cleProgression = (importId) => 'lecture-index:' + importId;
+export async function lireProgressionIndex(importId) {
+  const row = await db.get('sync_state', cleProgression(importId));
+  const v = row?.value;
+  return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+}
+export async function ecrireProgressionIndex(importId, pagesParId) {
+  await db.mutate({ puts: { sync_state: [{ key: cleProgression(importId), value: pagesParId }] }, origin: 'device' });
+}
+export async function oublierProgressionIndex(importId) {
+  await db.mutate({ deletes: { sync_state: [cleProgression(importId)] }, origin: 'device' });
+}
 export async function marquerInterrompus(maintenant = Date.now()) {
   const moi = deviceId();
   if (!moi) return 0;

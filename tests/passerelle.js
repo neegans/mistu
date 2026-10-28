@@ -529,26 +529,6 @@ export async function runPasserelleTests({ eq, ok }) {
       const nettoyerRoute = () => { try { sessionStorage.removeItem(SYNC_ROUTE_KEY); } catch { /* stockage indisponible */ } };
       const reseauInterdit = [];
       globalThis.fetch = async (u) => { reseauInterdit.push(u); throw new Error('aucun reseau attendu'); };
-      for (const [nom, session, llm, allume] of [['session, aucun réglage local', SESSION, NONE, true], ['sans session', null, NONE, false], ['jeton vide', { access_token: '' }, NONE, false], ['clé Anthropic locale, sans session', null, { provider: 'anthropic', api_key: 'cle-locale', model: 'm' }, false], ['compatible OpenAI configuré, sans session', null, { provider: 'openai_compatible', api_key: 'k', model: 'm' }, false], ['session ET compatible OpenAI', SESSION, { provider: 'openai_compatible', api_key: 'k', model: 'm' }, true]]) {
-        const panneau = I.indexEntriesPanel(null, ctxDe(session, llm), () => [], { editionId: 'ed1' });
-        const b = [...panneau.querySelectorAll('button')].find((x) => x.textContent === 'Lire avec l’assistant IA');
-        const phrase = panneau.querySelector('[data-role="connexion-ia"]');
-        const auDepart = [b.disabled, phrase?.hidden]; await tick();
-        eq([auDepart, b.disabled, phrase?.hidden], [[true, true], !allume, allume], `panneau d'index (${nom}) : bouton et phrase « Connecte-toi » cachés au départ (rien à dire avant la lecture de la session), ${allume ? 'bouton allumé, phrase cachée' : 'bouton éteint, phrase montrée'} ensuite`);
-        if (!allume) eq([phrase.textContent.includes(TEXTE_CONNEXION), !![...phrase.querySelectorAll('button')].find((x) => x.textContent === 'Se connecter'), panneau.textContent.includes('Assistant IA non configuré')], [true, true, false], `panneau d'index (${nom}) : « ${TEXTE_CONNEXION} » + « Se connecter », plus d'« Assistant IA non configuré »`);
-      }
-      { // sans ctx.sync du tout (ancien contexte) : éteint, la phrase est là, sans lever
-        const panneau = I.indexEntriesPanel(null, { settings: { llm: NONE }, pagesById: new Map(), editionsById: new Map(), recipes: [] }, () => [], { editionId: 'ed1' });
-        await tick();
-        eq([[...panneau.querySelectorAll('button')].find((x) => x.textContent === 'Lire avec l’assistant IA').disabled, panneau.querySelector('[data-role="connexion-ia"]').hidden], [true, false], 'panneau d\'index : sans ctx.sync, le bouton reste éteint et la phrase est montrée');
-      }
-      { // « Se connecter » : le geste de la section Compte (auth.signIn du contexte)
-        const signIns = [];
-        const panneau = I.indexEntriesPanel(null, ctxDe(null, NONE, { signIn: async () => { signIns.push(1); return { error: null }; } }), () => [], { editionId: 'ed1' });
-        await tick();
-        try { [...panneau.querySelectorAll('button')].find((x) => x.textContent === 'Se connecter').click(); await tick(); await tick(); } finally { nettoyerRoute(); }
-        eq(signIns.length, 1, 'panneau d\'index : « Se connecter » appelle auth.signIn() du contexte');
-      }
       eq(reseauInterdit, [], 'écrans d\'extraction : aucun appel réseau tant qu\'on ne clique pas sur l\'assistant');
 
       // Un clic sur l'assistant avec une session : UN POST à la passerelle ; le refus de la passerelle est dit en clair (texte, pas un mot de code)
@@ -564,33 +544,13 @@ export async function runPasserelleTests({ eq, ok }) {
         // Lot A, tâche 6 : la lecture de l'éditeur et du panneau d'index passe par le journal (lancerExtraction lit les pages DANS LA BASE, dans l'ordre de
         // page_ids) : les pages de ces écrans y sont donc écrites, comme une séance de scan les écrit.
         await repoTemp.saveBatch({ source_pages: [...pagesImg.values()].map((p) => ({ ...p })) }, { origin: 'device' });
-        // Lot C, tâche 4 : le panneau lit par le journal d'une SÉANCE (une lecture sans séance est refusée par la garde des pages, spec C § 4.2) — chaque
-        // cas reçoit une séance neuve de la base jetable (aucune ligne d'un cas précédent n'y est reprise) ; le bouton est trouvé par son rôle (son libellé
-        // devient « Relancer » après un échec).
-        let nSeance = 0;
-        const seanceNeuve = async (pageIds) => { const s = { id: 'ss_pass_' + (++nSeance), status: 'open', edition_id: 'ed1', page_ids: pageIds, document_ids: [] }; await repoTemp.saveBatch({ scan_sessions: [s] }, { origin: 'device' }); return s; };
-        const lireIndex = (p) => p.querySelector('button[data-role="lire-index"]');
+        // Lot I1 (28 octobre) : le panneau d'index du lot C est retiré ; ses gardes de session, de réseau et d'image sont éprouvées sur le panneau neuf
+        // (tests/index-livre-ecran.js).
         const ctxPages = (session, auth) => ({ ...ctxDe(session, NONE, auth), pagesById: pagesImg, recipesById: new Map(), versionsByRecipe: new Map(), versionsById: new Map(), booksById: new Map(), source_documents: [], ingredients: [], ingredientsById: new Map(), recipes: [], editions: [], books: [] });
         const GENERIQUE = 'L’assistant n’a pas répondu. Réessaie.';
         const CAS = [[403, { erreur: 'non_admis' }, 'Ce compte n’a pas accès à l’assistant.'], [413, { erreur: 'trop_lourd' }, 'La demande est trop lourde : choisis moins de pages.'], [413, 'pas du json', 'La demande est trop lourde : choisis moins de pages.'],
           [429, { erreur: 'quota', quota: 60 }, 'Tu as atteint la limite du jour pour l’assistant (60 appels).'], [429, { erreur: 'quota' }, 'Tu as atteint la limite du jour pour l’assistant.'], [429, {}, 'Trop de demandes pour l’instant. Réessaie dans une minute.'],
           [401, { erreur: 'non_connecte' }, TEXTE_CONNEXION], [502, { erreur: 'serveur' }, GENERIQUE + ' Code : serveur'], [504, {}, GENERIQUE + ' Code : delai']];
-        // import.js — panneau d'index
-        for (const [statut, corps, attendu] of CAS) {
-          appels.length = 0; repondre(statut, corps);
-          const panneau = I.indexEntriesPanel(await seanceNeuve(['p1']), ctxPages(SESSION), () => ['p1'], { editionId: 'ed1' });
-          await tick();
-          const b = lireIndex(panneau);
-          b.click();
-          // Lot A, tâche 6 : la lecture passe par le journal — le bouton est verrouillé pendant l'appel et la phrase est posée AVANT qu'il se rallume
-          // (après l'écriture de l'échec) ; attendre ces faits, pas deux tours de boucle. (La carte « Connecte-toi » cachée porte déjà sa phrase :
-          // attendre le texte seul serait un faux vert.)
-          for (let i = 0; i < 200 && appels.length === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
-          for (let i = 0; i < 200 && b.disabled; i += 1) await new Promise((r) => setTimeout(r, 5));
-          await tick(); await tick();
-          eq([appels.length, JSON.parse(appels[0]?.options.body ?? '{}').outil, appels[0]?.options.headers.authorization, panneau.textContent.includes(attendu)], [1, 'extraction', 'Bearer ' + JETON, true], `panneau d'index, ${statut} ${typeof corps === 'string' ? '(corps illisible)' : corps.erreur} : un POST d'extraction, « ${attendu} » à l'écran`);
-          ok(!panneau.textContent.includes(JETON) && !/trop_lourd|non_admis|non_connecte/.test(panneau.textContent) && !panneau.textContent.includes('Échec :') && (!attendu.startsWith('Trop de demandes') || !panneau.textContent.includes('limite du jour')), `panneau d'index, ${statut} : ni le jeton, ni un mot de code seul après « Échec : », ni « limite du jour » pour un 429 relayé`);
-        }
         // recipe-edit.js — éditeur de nouvelle recette (aucun rendu de la vraie base : les pages viennent de la base jetable de withRepo)
         globalThis.fetch = async (u) => { reseauInterdit.push(u); throw new Error('aucun reseau attendu'); };
         const sansSession = await R.renderRecipeEdit({}, { pages: 'p1' }, ctxPages(null));
@@ -625,16 +585,6 @@ export async function runPasserelleTests({ eq, ok }) {
         }));
         const attendu3 = [[1568, 1045, 'image/jpeg', 'base64'], [800, 600, 'image/jpeg', 'base64'], [1568, 784, 'image/jpeg', 'base64']];
         {
-          appels.length = 0; repondre(200, { model: 'm', content: [{ type: 'text', text: '{"entries":[],"uncertain":[]}' }] });
-          const panneau = I.indexEntriesPanel(await seanceNeuve(['pg', 'pp', 'pn']), ctxPages(SESSION), () => ['pg', 'pp', 'pn'], { editionId: 'ed1' });
-          await tick();
-          const lire = lireIndex(panneau);
-          lire.click();
-          for (let i = 0; i < 200 && appels.length === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
-          eq([appels.length, appels.length ? await dimsEnvoyees(appels[0]) : null], [1, attendu3], 'F-3 panneau d’index : trois pages (3000×2000 JPEG, 800×600 JPEG, 2000×1000 PNG) → envoyées en 1568×1045, 800×600 (jamais agrandie), 1568×784, toutes en image/jpeg');
-          for (let i = 0; i < 200 && lire.disabled; i += 1) await new Promise((r) => setTimeout(r, 5)); // tâche 6 : la lecture (UN vol par document) finit avant la suivante
-        }
-        {
           appels.length = 0; repondre(200, { model: 'm', content: [{ type: 'text', text: '{"title":"T","ingredients":[],"steps":[]}' }] });
           const edit = await R.renderRecipeEdit({}, { pages: 'pg,pp,pn' }, ctxPages(SESSION));
           const extraire = [...edit.querySelectorAll('button')].find((x) => x.textContent === 'Extraire avec l’assistant IA');
@@ -652,13 +602,6 @@ export async function runPasserelleTests({ eq, ok }) {
         { // une page qui ne se décode pas n'est JAMAIS envoyée telle quelle (elle contournerait la borne) : aucun POST ; le refus `image` du vol partagé se dit
           // par le toast de messageErreurImage (lot C, D-C16 : comme l'écran d'import ciblé ; était « … Code : indecodable » dans la ligne d'état)
           appels.length = 0; repondre(200, {});
-          const dits = [];
-          const panneau = I.indexEntriesPanel(await seanceNeuve(['pb']), ctxPages(SESSION), () => ['pb'], { editionId: 'ed1', toast: (m) => dits.push(m) });
-          await tick();
-          for (let i = 0; i < 200 && lireIndex(panneau).disabled; i += 1) await new Promise((r) => setTimeout(r, 5));
-          lireIndex(panneau).click();
-          for (let i = 0; i < 200 && !dits.length; i += 1) await new Promise((r) => setTimeout(r, 5));
-          eq([appels.length, dits], [0, ['Cette image ne peut pas être lue ici. Essaie une autre photo.']], 'F-3 panneau d’index : une page indécodable → aucun POST, le toast « Cette image ne peut pas être lue ici. Essaie une autre photo. » (lot C)');
           appels.length = 0;
           const edit = await R.renderRecipeEdit({}, { pages: 'pb' }, ctxPages(SESSION));
           [...edit.querySelectorAll('button')].find((x) => x.textContent === 'Extraire avec l’assistant IA').click();
@@ -667,21 +610,6 @@ export async function runPasserelleTests({ eq, ok }) {
         }
 
         // F-8 (M5) : la carte « Connecte-toi » n'est jamais retirée puis réaffichée sur un nœud détaché — elle se cache et se montre, sur le MÊME nœud.
-        {
-          const jetons = [SESSION, null]; let n = 0; // la session est là au rendu, puis disparaît (jeton expiré, autre onglet déconnecté) quand on clique
-          const ctx = ctxPages(SESSION, { jeton: async () => jetons[Math.min(n++, jetons.length - 1)] });
-          appels.length = 0; repondre(200, {});
-          const panneau = I.indexEntriesPanel(await seanceNeuve(['p1']), ctx, () => ['p1'], { editionId: 'ed1' });
-          await tick();
-          const carte = panneau.querySelector('[data-role="connexion-ia"]'); const bouton = lireIndex(panneau);
-          eq([!!carte, carte?.hidden, !!carte && panneau.contains(carte), bouton.disabled], [true, true, true, false], 'F-8 panneau d’index, session lue : la carte existe toujours (cachée, dans le panneau) ; le bouton est allumé');
-          const lignesAvant = (await repoTemp.all('imports')).length;
-          bouton.click();
-          // Tâche 6 : le bouton est verrouillé DÈS le clic (double clic → un POST) ; attendre que la carte se montre, pas que le bouton s'éteigne.
-          for (let i = 0; i < 200 && carte.hidden; i += 1) await new Promise((r) => setTimeout(r, 5));
-          await tick();
-          eq([panneau.contains(carte), carte.hidden, panneau.querySelector('[data-role="connexion-ia"]') === carte, bouton.disabled, appels.length, (await repoTemp.all('imports')).length - lignesAvant], [true, false, true, true, 0, 0], 'F-8 panneau d’index, session disparue au clic : la MÊME carte se montre (dans le panneau), le bouton s’éteint, aucun POST, et RIEN dans le journal (lot A, ronde 1 de la tâche 6 : spec § 4.4, « Session absente → rien »)');
-        }
         {
           // recipe-edit : la session disparaît au clic → le bouton reste éteint (il n'est rallumé que si le fournisseur est configuré)
           const jetons = [SESSION, null]; let n = 0;
@@ -720,9 +648,6 @@ export async function runPasserelleTests({ eq, ok }) {
           eq(lire(carteConnexion(connecter, { sync: { guard: { ok: false } } })).slice(0, 3), [false, false, 0], 'F-7 carteConnexion, garde refusée sans message : aucun bouton non plus');
           eq(carteConnexion(connecter, { sync: { guard: { ok: false } } }).textContent.trim().length > 0, true, 'F-7 carteConnexion, garde refusée sans message : une phrase de repli, jamais une carte vide');
           const ctxG = { ...ctxPages(null), sync: { user: null, guard, auth: { jeton: async () => null, signIn: async () => { connexions += 1; return { error: null }; } } } };
-          const panneau = I.indexEntriesPanel(null, ctxG, () => [], { editionId: 'ed1' });
-          await tick();
-          eq([...lire(panneau.querySelector('[data-role="connexion-ia"]')), panneau.querySelector('[data-role="connexion-ia"]').hidden], [false, true, 0, 'connexion-ia', false], 'F-7 panneau d’index (garde refusée) : le message de la garde, sans bouton « Se connecter »');
           const edit = await R.renderRecipeEdit({}, { pages: 'p1' }, ctxG);
           eq(lire(edit.querySelector('[data-role="connexion-ia"]')), [false, true, 0, 'connexion-ia'], 'F-7 recette (garde refusée) : le message de la garde, sans bouton « Se connecter »');
           eq(connexions, 0, 'F-7 : aucune connexion lancée');
@@ -762,9 +687,9 @@ export async function runPasserelleTests({ eq, ok }) {
     const passerelle = lus.find(([m]) => m === 'src/domain/passerelle.js')?.[1] ?? '';
     ok(!/from '\.\.\/ui\//.test(passerelle), 'passerelle.js : n’importe rien de src/ui/ (couche domaine)');
     ok(sw.includes("'./src/domain/passerelle.js'"), 'SHELL : ./src/domain/passerelle.js');
-    ok(/VERSION = 'cuisine-os-v0\.17\.0-\d+'/.test(sw), 'sw.js : VERSION 0.17.0');
+    ok(/VERSION = 'cuisine-os-v0\.18\.0-\d+'/.test(sw), 'sw.js : VERSION 0.18.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.17.0', 'APP_VERSION 0.17.0 (lot UI-1, carnet)');
+    eq(APP_VERSION, '0.18.0', 'APP_VERSION 0.18.0 (lot UI-1, carnet)');
   }
 
   // --- Lot F (spec plats-en-images § 4.6) : deux raisons de plus, écrites par la passerelle pour image-web et relayées telles quelles

@@ -172,6 +172,14 @@ aside.sidenav { display: none; }
   .topbar a[href="#/search"] .nowrap { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
 
+/* B04 (lot I1, D-I14) : là où la barre du haut est serrée, la pastille montre sa forme courte « {n} à envoyer » (data-court, posée par majPastille) ;
+   le texte entier, « {n} modifications à envoyer », reste dans span.long, masqué visuellement comme le libellé de la loupe, et c'est lui que lisent les
+   lecteurs d'écran (le texte généré n'a pas d'alternative). */
+@media (max-width: 599px), (min-width: 900px) and (max-width: 1099px) {
+  .topbar .pastille[data-court] .long { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .topbar .pastille[data-court]::after { content: attr(data-court); content: attr(data-court) / ""; }
+}
+
 /* Components */
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: .9rem 1rem; margin-bottom: .9rem; scroll-margin-top: calc(var(--topbar-h) + .5rem); }
 .card.flat { box-shadow: none; border: 1px solid var(--line); }
@@ -345,6 +353,10 @@ label.check { display: inline-flex; gap: .45rem; align-items: center; font-size:
 .thumbs figure { margin: 0; position: relative; }
 .thumbs img { width: 100%; height: 140px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
 .thumbs figcaption { font-size: .75rem; color: var(--muted); margin-top: .2rem; }
+/* Lot I1 (D-I12) : « Pivoter » (quart de tour) gardé sur la page ; la miniature suit (la photo envoyée à l'assistant est pivotée par pagePourEnvoi). */
+.thumbs figure[data-rotation="90"] img { transform: rotate(90deg); }
+.thumbs figure[data-rotation="180"] img { transform: rotate(180deg); }
+.thumbs figure[data-rotation="270"] img { transform: rotate(270deg); }
 .thumbs .num { position: absolute; top: 4px; left: 4px; background: var(--green); color: var(--cream); border-radius: 6px; font-size: .75rem; padding: .05rem .4rem; }
 .thumbs .fichier-absent { margin: 0; min-height: 140px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: .3rem; padding: .4rem; border: 1px dashed var(--line); border-radius: 8px; font-size: .75rem; color: var(--muted); }
 /* Lot UI-1 « Carnet » (§ 4.5) : sur une vignette de l'import ciblé, le × « Retirer la page n » en coin (cible 44 × 44, I-UI-4 ; la figure est relative) et la

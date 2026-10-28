@@ -3281,6 +3281,55 @@ enregistrée ✓ » et la description courte sous le titre ; « Voir la prépara
 **Versions.** `APP_VERSION 0.17.0` (inchangée : un lot visuel sur 0.17.0), `sw.js` `cuisine-os-v0.17.0-12` → `-14` (un incrément par commit qui
 touche `src/` ou `styles.css`, R-B-24), `SHELL` + `./src/ui/coquille.js`, `DB_VERSION` 4 ; aucun schéma, aucune migration, rien sous `supabase/`.
 
+### Index fiable : une lecture par page, la table reconstruite dans le livre (28 octobre 2026, lot I1)
+
+**Pour toi.** Tu photographies les pages d'index ou de table des matières d'un livre (« Ajouter des pages de sommaire » sur sa fiche) : la séance est une
+séance d'INDEX, toutes ses pages sont retenues sans rien cocher, et « Lire les {n} pages ({n} appels) » les lit UNE à la fois (« Lecture de la page 3
+sur 6… », « Annuler »). Une page trop dense est relue en deux moitiés (jusqu'à deux appels de plus, dit avant la tape). À la fin, sans autre geste,
+chaque recette CERTAINE devient une référence « À importer » de ton livre, avec ses pages (« 116–19 » devient 116–119) et les rubriques de l'index sous
+lesquelles elle est citée ; une recette citée sous trois ingrédients n'apparaît qu'une fois ; la liste se range par page. L'écran dit « {n} recettes
+dans le livre · {m} à vérifier · {k} écartées ». Tu ne tranches que les ambiguïtés : pages contradictoires (« Garder 236–238 », « Garder 40–41 », « Les
+deux », « Écarter »), page illisible, lecture incertaine ; les personnes, le matériel et les renvois éditoriaux sont écartés, repliés, et « C’est une
+recette » en remet une. Une page illisible se relit seule (« Relire la page incomplète (1 appel) ») ; de nouvelles photos rejoignent la même liste sans
+recréer ce qui y est. « Retirer ces {n} recettes » défait la lecture (celles que tu as modifiées restent). Chaque photo a « ↻ Pivoter » (la miniature
+et l'image envoyée suivent). La fiche du livre montre « p. 116–119 » ; la recherche trouve une référence par sa rubrique d'index. La pastille dit
+« {n} modifications à envoyer » (des fiches, pas des photos ; « {n} à envoyer » quand la barre est serrée) et la séance « Photos : {k}/{n} sauvegardées
+sur le serveur », séparé de « Lecture : … ». Aucune lecture réelle n'a encore été faite : la preuve des six pages de Trinity est ton geste.
+
+**Où.** Branche `index-fiable`, worktree `~/projects/mistu-index`, base `main` `5388ff6` (lot « fidélité aux maquettes »), serveur 8098. Spec
+`docs/superpowers/specs/2026-10-28-index-fiable-design.md` (rév. 2 ; D-I1 à D-I20, I-I1 à I-I7 ; § 12 rulings de construction R-I1-1 à R-I1-17).
+Modules neufs : `src/domain/index-livre.js` (pur), `src/ui/index-livre.js` (panneau). Le panneau du lot C (`indexEntriesPanel`, « Ordre des photos »,
+tableau à cocher, « Créer {n} références ») est retiré (R-I1-1) ; `src/ui/table-matieres.js` ne garde que `texteEchecIndex`.
+
+**Ce qui marche (suite navigateur, bases jetables, réseau factice ; aucune lecture réelle).** Domaine : renvois abrégés, réponses hostiles bornées ou
+écartées, rubriques raccordées (« ^ »), consolidation de la fixture Trinity transcrite à la main (pages 310-312 : le poulet une fois à 116–119 sous trois
+rubriques, les trois gougères de la page 41, les choux contradictoires montrés et jamais choisis, personnes et matériel écartés, tri par page). Écran
+(`tests/index-livre-ecran.js`) : trois appels d'UNE photo chacun, enregistrement d'office des certaines, « Garder 236–238 », « C’est une recette »,
+« Retirer » qui épargne une recette mise en favori, relecture d'une page illisible sans doublon, page coupée relue en deux moitiés, « Annuler »
+(rien d'écrit), modèle hors liste (rien d'office), saisie à la main (rien de recréé), séance d'index ouverte d'office, « Pivoter » gardé sur la page et
+appliqué à l'image envoyée, plages sur la fiche du livre, recherche par rubrique. Gardes portées de l'ancien panneau : sans session (carte
+« Connecte-toi », aucun appel), hors ligne, image illisible (refus avant toute écriture), double clic (un appel, une ligne), quota atteint, jeton
+jamais affiché. Revue adverse inline (R-I1-13 à R-I1-16) : une double tape ou deux onglets ne créent jamais deux fiches pour une décision ; deux
+enregistrements simultanés n'écrivent qu'une fois ; une ligne saisie démesurée ne fige plus l'écran ; une page « autre » ne verse rien. Mutants
+(copie servie à part, harnais du lot) : 21 joués, 20 rouges, un équivalent déclaré (R-I1-17).
+
+**Pas prouvé.** La lecture réelle d'une page par le modèle (`claude-sonnet-5-5`) : sa fidélité, la sorte de page reconnue, les « ^ », la durée et
+les jetons par page, le taux de pages coupées ; la cible de la rectification (« 95 titres uniques » sur les six pages de Trinity) ; Safari et l'iPhone
+(la forme courte de la pastille, « Pivoter ») ; deux appareils.
+
+**Gestes de Neegan.** 1) Fusion et push (après revue et `/verify`). 2) Preuve réelle sur le site public : une séance d'index avec les six pages de
+Trinity → « Lire les 6 pages (6 appels) » ; compter les titres uniques (attendu 95), vérifier le tri, la contradiction des choux, les écartées ; noter
+la durée et `select outil, statut, jetons_sortie, duree_ms from public.assistant_journal order by id desc limit 8;`. 3) Trois pages d'abord, trois
+ensuite (aucun doublon).
+
+**Versions.** `APP_VERSION 0.18.0`, `sw.js cuisine-os-v0.18.0-1`, `SHELL` + `./src/domain/index-livre.js` et `./src/ui/index-livre.js`, `DB_VERSION` 4 ;
+aucune migration, rien sous `supabase/`.
+
+**Bilan (28 octobre 2026).** Suite complète **6246/6246** (épingle **6245**, règle N−1 ; départ du lot sur `5388ff6` : épingle 6389 — l'épingle
+DESCEND parce que les 58 blocs d'écran du panneau du lot C et ses sous-blocs de `tests/passerelle.js` et `tests/import-cible.js` partent avec lui,
+R-I1-1 ; leurs fonctions pures restent épinglées, et les gardes de l'écran sont portées dans `tests/index-livre-ecran.js`), seule erreur console le
+404 de `/favicon.ico` ; `node --test tools/*.test.mjs` **230/230** ; `node tools/generer-migrations.mjs --check` **0**.
+
 ## La présentation du serveur (18 octobre 2026, lot borné après la passerelle)
 
 **Contexte.** Lot 4 fusionné et poussé par Neegan (`main` = `3998f97`, Pages servi à 20 h 51 UTC, `cuisine-os-v0.8.0-6`) ; preuve

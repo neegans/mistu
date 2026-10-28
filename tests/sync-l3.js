@@ -1646,7 +1646,7 @@ export async function runSyncL3Tests({ eq, ok }) {
   const etatUi = await import('../src/ui/state.js');
   const { pastilleModel: pm, doitRendreApresPasse, getSyncState: lireEtatSync } = etatUi;
   const connecte = true;
-  eq([pm({ aEnvoyer: 0, connecte }), pm({ aEnvoyer: 1, connecte }), pm({ aEnvoyer: 12, connecte })], [null, '1 non envoyé', '12 non envoyés'], 'pastille : « N non envoyés » seulement si N > 0 (singulier à part)');
+  eq([pm({ aEnvoyer: 0, connecte }), pm({ aEnvoyer: 1, connecte }), pm({ aEnvoyer: 12, connecte })], [null, '1 modification à envoyer', '12 modifications à envoyer'], 'pastille : « N non envoyés » seulement si N > 0 (singulier à part)');
   eq([pm(), pm({ aEnvoyer: null, connecte }), pm({ aEnvoyer: -1, connecte })], [null, null, null], 'pastille : rien n’est affiché sans un nombre lisible et positif');
   ok(Object.hasOwn(lireEtatSync(), 'moteur'), 'câblage : l’état de connexion porte le moteur (null tant que le démarrage ne l’a pas posé)');
 
@@ -1661,12 +1661,14 @@ export async function runSyncL3Tests({ eq, ok }) {
       const vu = () => { const n = document.getElementById(PASTILLE_ID); return [n.hidden, n.textContent]; };
       eq(vu(), [true, ''], 'pastille : au repos le nœud existe et reste caché — rien n’est affirmé sans file');
       majPastille({ aEnvoyer: 3 }, true);
-      eq(vu(), [false, '3 non envoyés'], 'pastille : trois en attente → la pastille se montre dans la barre du haut');
+      eq(vu(), [false, '3 modifications à envoyer'], 'pastille : trois en attente → la pastille se montre dans la barre du haut');
+      { const n = document.getElementById(PASTILLE_ID); eq([n.querySelector('span.long')?.textContent, n.dataset.court], ['3 modifications à envoyer', '3 à envoyer'], 'pastille (B04, lot I1) : le texte entier dans span.long, la forme courte en data-court'); }
       majPastille({ aEnvoyer: 0 }, true);
       eq(vu(), [true, ''], 'pastille : file vidée → la pastille se recache');
+      eq(document.getElementById(PASTILLE_ID).dataset.court, undefined, 'pastille (B04) : file vidée → plus de forme courte non plus');
       hote.replaceChildren(pastille()); // changement de langue : la coquille entière est refaite
       majPastille({ aEnvoyer: 1 }, true);
-      eq(vu(), [false, '1 non envoyé'], 'pastille : après une reconstruction de la coquille, le nœud NEUF est retrouvé par id');
+      eq(vu(), [false, '1 modification à envoyer'], 'pastille : après une reconstruction de la coquille, le nœud NEUF est retrouvé par id');
       majPastille({ aEnvoyer: 3 }, false);
       eq(vu(), [true, ''], 'R-L3-20 : sans compte, la pastille ne dit rien — la file ne partira pas, elle n’attend personne');
       majPastille(null, true);
@@ -1806,8 +1808,8 @@ export async function runSyncL3Tests({ eq, ok }) {
       const noeud = fabriquer();
       document.body.append(noeud);
       try {
-        eq(majPastille({ aEnvoyer: 3 }, true), '3 non envoyés', 'm1 : avec un compte, la pastille dit ce qui attend');
-        ok(!noeud.hidden && noeud.textContent === '3 non envoyés', 'm1 : … et son nœud est visible');
+        eq(majPastille({ aEnvoyer: 3 }, true), '3 modifications à envoyer', 'm1 : avec un compte, la pastille dit ce qui attend');
+        ok(!noeud.hidden && noeud.textContent === '3 modifications à envoyer', 'm1 : … et son nœud est visible');
         eq(majPastille(null), null, 'm1 : majPastille(null) — ce que pose l’arrêt du moteur — ne dit rien');
         ok(noeud.hidden && noeud.textContent === '', 'm1 : … et le nœud est caché ET vidé');
       } finally { noeud.remove(); }
@@ -1865,7 +1867,7 @@ export async function runSyncL3Tests({ eq, ok }) {
     ok(liste.length > 30, 'SHELL lu : ' + liste.length + ' entrées à relire avant de conclure');
     eq(['./src/sync/transport.js', './src/sync/lots.js', './src/sync/reponses.js', './src/sync/push.js', './src/sync/pull.js', './src/sync/conflits.js', './src/sync/backfill.js', './src/sync/moteur.js']
       .filter((c) => !liste.includes(c)), [], 'SHELL : les modules d’envoi et de réception, désormais atteignables depuis app.js, sont servis hors connexion');
-    ok(/VERSION = 'cuisine-os-v0\.17\.0-\d+'/.test(source), 'sw.js : VERSION incrémentée (format cuisine-os-vMAJOR.MINOR.PATCH-N), l’ancien cache est purgé à l’activation');
+    ok(/VERSION = 'cuisine-os-v0\.18\.0-\d+'/.test(source), 'sw.js : VERSION incrémentée (format cuisine-os-vMAJOR.MINOR.PATCH-N), l’ancien cache est purgé à l’activation');
     // Le nom du cache et la version affichée dans Réglages doivent dire la MÊME chose : deux versions qui se
     // contredisent rendent impossible de savoir ce qui est servi (un cache « 0.2.0 » pour une app qui s'annonce
     // « 0.3.0 » est exactement le genre de doute qu'un marqueur de version existe pour lever). Le contrôle porte
@@ -1937,9 +1939,9 @@ export async function runSyncL3Tests({ eq, ok }) {
 
   // 4. Important (R-L3-20) : la pastille n’apparaît qu’avec un compte. Sans compte rien ne part jamais — « 3 non
   // envoyés » serait une attente que personne ne tient, sur un appareil qui fonctionne exactement comme prévu.
-  eq([pm({ aEnvoyer: 3 }), pm({ aEnvoyer: 3, connecte: false }), pm({ aEnvoyer: 3, connecte: true })], [null, null, '3 non envoyés'],
+  eq([pm({ aEnvoyer: 3 }), pm({ aEnvoyer: 3, connecte: false }), pm({ aEnvoyer: 3, connecte: true })], [null, null, '3 modifications à envoyer'],
     'R-L3-20 : la pastille ne se montre qu’avec un compte — sans compte, la file n’attend personne');
-  eq(pm({ aEnvoyer: 1, connecte: true }), '1 non envoyé', 'R-L3-20 : … et le singulier reste une chaîne à part');
+  eq(pm({ aEnvoyer: 1, connecte: true }), '1 modification à envoyer', 'R-L3-20 : … et le singulier reste une chaîne à part');
 
   // 5. Important (R-L3-18) : en mode « remplacement » aussi, une bibliothèque restaurée avec un compte doit
   // repartir. Sans heure neuve, le serveur garderait ses versions (I7) et le remplacement ne se verrait nulle part.

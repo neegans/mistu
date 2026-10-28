@@ -11,7 +11,9 @@ import { invalidate } from './state.js';
 import { urlDeBlob, revoquerUrlDeBlob } from '../core/blob-urls.js';
 import { estAImporter, aUneAdresse } from './library.js';
 import { poserCouverture, renderZoneCouverture, messageErreurImage } from './livre-ajout.js';
-import { startScanSession, indexEntriesPanel } from './import.js';
+import { startScanSession } from './import.js';
+import { saisieIndexManuelle } from './index-livre.js';
+import { plagesLisibles, textePlages } from '../domain/index-livre.js';
 import { accueilLivreModel, renderAccueilLivre } from './accueil-livre.js';
 import { pucesModel, renderPuces, basculerPuce, ajouterPuce, cuisinesExistantes, motsClesExistants } from './puces.js';
 import { tagsDe } from '../domain/search.js';
@@ -114,7 +116,7 @@ export function ligneCompacte(r, { fichier = null } = {}) {
       el('div', { style: { flex: '1', minWidth: '0' } },
         el('a', { class: 'titre', href: `#/recipes/${id}` }, r.display_title || r.original_title || t('Sans titre')),
         el('div', { class: 'row', style: { gap: '.4rem' } },
-          pageAffichable(r.printed_page) ? el('span', { class: 'muted' }, `${t('p.')} ${r.printed_page}`) : null,
+          plagesLisibles(r).length ? el('span', { class: 'muted', dataset: { role: 'pages' } }, `${t('p.')} ${textePlages(plagesLisibles(r))}`) : null,
           sectionLue ? el('span', { class: 'chip neutral', dataset: { role: 'section' } }, sectionLue) : null))),
     el('div', { class: 'row', dataset: { role: 'etat-recette' } },
       availabilityBadge({ ...r, printed_page: null }),
@@ -400,9 +402,9 @@ export async function renderBook(params, query, ctx, deps = {}) {
     boutonTelechargerPages(distantesDe(pagesIndex), { connecte: ctxF.connecte, telecharger: vignettes.telecharger }),
     pagesIndex.length ? vignettesDe(pagesIndex, true) : null));
 
-  // Index : ajouter des entrées directement depuis la fiche du livre (inchangé) — sous le Sommaire, dont c'est la saisie à la main.
-  const indexPanel = indexEntriesPanel(null, ctx, () => [], { editionId: edition.id });
-  gauche.append(el('details', null, el('summary', { class: 'btn' }, t('Ajouter des entrées d’index à la main')), indexPanel));
+  // Index : ajouter des entrées directement depuis la fiche du livre — sous le Sommaire, dont c'est la saisie à la main (lot I1 : « Titre — 116–19 »,
+  // les recettes déjà dans le livre ne sont pas recréées ; la fiche se redessine par le bus).
+  gauche.append(el('details', null, el('summary', { class: 'btn' }, t('Ajouter des entrées d’index à la main')), saisieIndexManuelle(edition, { repo, toast, apres: () => refresh() })));
 
   // Pages et documents (plain, en bas) : les pages qui ne sont pas d'index, et les documents non-photo (spec § 4.3). T4-R1 : la section ne paraît que s'il y a
   // l'un ou l'autre — un livre dont on n'a photographié que la table des matières (ses pages sont dans le Sommaire) n'a pas, en bas, une section vide.
