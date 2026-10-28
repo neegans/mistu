@@ -862,7 +862,9 @@ export async function runCarnetTests({ eq, ok }) {
             // Ronde 1 : l'écart entre l'état et les gestes (une pile, jamais un vide), la cible du summary (I-UI-4), la flèche du lien d'origine, le bouton seul plein.
             ecartEtatGestes: Math.round(rG.top - rE.bottom), summary: q(p, 'details[data-role="autres-gestes"] > summary').getBoundingClientRect().height,
             fleche: q(p, '[data-role="ouvrir-lien"]') ? w.getComputedStyle(q(p, '[data-role="ouvrir-lien"]'), '::after').content : null,
-            boutonPlein: (() => { const r = q(tete, '[data-role="geste-principal"]'); const b = q(r, 'button'); return r && b && r.children.length === 1 ? Math.abs(b.getBoundingClientRect().width - r.getBoundingClientRect().width) < 1 : null; })() };
+            boutonPlein: (() => { const r = q(tete, '[data-role="geste-principal"]'); const b = q(r, 'button'); return r && b && r.children.length === 1 ? Math.abs(b.getBoundingClientRect().width - r.getBoundingClientRect().width) < 1 : null; })(),
+            // Ronde 1 de T6 (constat 3) : la taille des repères, en rem de la racine du cadre (la règle `.reperes { font-size: 1.05rem }` mesurée, pas lue).
+            reperesRem: (() => { const r = q(p, 'div.reperes'); return r ? Math.round((parseFloat(S(r).fontSize) / parseFloat(S(f.contentDocument.documentElement).fontSize)) * 100) / 100 : null; })() };
         } finally { f.remove(); }
       };
       const [ph1100, ph375, vide1100] = [await mesureFiche(1100, 'rc_ph'), await mesureFiche(375, 'rc_ph'), await mesureFiche(1100, 'rc_t3')];
@@ -880,7 +882,8 @@ export async function runCarnetTests({ eq, ok }) {
         [16, '" ↗"', true, true, true, true], 'styles.css à 375 px, fiche SANS photo : l’emplacement vide n’ajoute pas de second gap (état → gestes 16 px) ; la flèche « ↗ » du lien d’origine vient de la feuille ; seul (fiche vérifiée), « Commencer à cuisiner » remplit sa rangée ; le summary des autres gestes fait au moins 44 px (I-UI-4)');
       eq([pe1100.chargee, pe1100.imgPleine, pe1100.ratio, pe375.chargee, pe375.imgPleine, pe375.ratio], [true, true, true, true, true, true],
         'styles.css (D-UI-6) : une photo RÉELLE plus étroite que la colonne (240 × 180) est rendue pleine colonne en 4:3, à 1100 comme à 375 px (mesuré)');
-      eq([vide1100.pistesTete, vide1100.chargee, vide1100.imgPleine, vide1100.photoADroite], [1, null, null, false], 'styles.css à 1100 px, fiche SANS photo : .fiche-tete:has(> .fiche-photo:empty) → une seule colonne (la zone photo déclarée en troisième rangée, 0 px : aucune piste implicite à droite, rév. 4), aucune image (mesuré)');
+      eq([ph1100.reperesRem, ph375.reperesRem], [1.05, 1.05], 'styles.css (§ 4.2) : les repères de la fiche (div.reperes) à 1,05 rem, à 1100 comme à 375 px (mesuré ; ronde 1 de T6 : une règle .reperes renommée rougit ici)');
+      eq([vide1100.pistesTete, vide1100.chargee, vide1100.imgPleine, vide1100.photoADroite], [1, null, null, false],'styles.css à 1100 px, fiche SANS photo : .fiche-tete:has(> .fiche-photo:empty) → une seule colonne (la zone photo déclarée en troisième rangée, 0 px : aucune piste implicite à droite, rév. 4), aucune image (mesuré)');
       eq(reseau, 0, 'fiche T3 : aucun réseau');
     } finally { globalThis.fetch = vraiFetch; scene.remove(); setUiLocale(localeAvant); (await import('../src/core/blob-urls.js')).revoquerUrlsDeBlob(); }
   }));
@@ -1617,21 +1620,25 @@ export async function runCarnetTests({ eq, ok }) {
   try {
     // S4 (lot UX) : une lecture de source qui échoue est un ROUGE nommé, jamais un source vide lu comme vert (V-F13 du lot web).
     const lireT6 = async (chemin) => { const r = await fetch(new URL(chemin, import.meta.url), { cache: 'no-store' }); if (!r.ok) throw new Error(`${chemin} : HTTP ${r.status}`); const s = await r.text(); if (s.length < 300) throw new Error(`${chemin} : source trop court (${s.length})`); return s; };
-    const clesDe = (src) => [...src.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]);
+    // Ronde 1 (constat 20) : t('…') ET t("…") — un t() entre guillemets doubles n'échappe plus ni à l'inventaire ni aux chaînes retirées.
+    const clesDe = (src) => [...src.matchAll(/\bt\((['"])((?:(?!\1)[^\\]|\\.)*)\1/g)].map((m) => m[2]);
+    // Ronde 1 (constats 10 et 20) : le lecteur de T1-R1 (chaînes '…', "…", `…` sautées ; commentaires // et /* */ retirés), recopié ici (bloc autonome) —
+    // un t('…') laissé dans un commentaire ne compte plus comme un EMPLOI, et la NAV d'app.js se relit sans ses commentaires.
+    const sansCommentairesT6 = (src) => { let out = ''; let q = null; for (let i = 0; i < src.length; i++) { const c = src[i]; if (q) { out += c; if (c === '\\') out += src[++i] ?? ''; else if (c === q) q = null; } else if (c === '/' && src[i + 1] === '/') { while (i + 1 < src.length && src[i + 1] !== '\n') i++; } else if (c === '/' && src[i + 1] === '*') { const fin = src.indexOf('*/', i + 2); i = fin < 0 ? src.length : fin + 1; } else { if (c === "'" || c === '"' || c === '`') q = c; out += c; } } return out; };
     const { EN } = await import('../src/i18n/en.js');
     const { MODULES_NEUFS, CHAINES_NEUVES_AILLEURS } = await import('./ajouter.js');
-    // La table FR → EN des textes UI-1 (spec § 5, lignes UI-1 seulement ; les quatre lignes UI-2 vivent dans tests/apercu-web.js), plus cinq textes
-    // que les tâches posent hors de la table § 5 (R-UI-n+3) : « 1 portion » (repères, n = 1 ; clé ANTÉRIEURE, en.js:341 à f3672be, anglais relu),
-    // « Disponibles » (filtre § 4.3, T4), « Reprendre la séance » (§ 4.3, T4), « {n} à importer » (compteur library.js:73, T5), « Page {n} · p. {p} »
-    // (légende § 4.5, T5) — les anglais sont ceux de la tâche qui les pose et se relisent ici (amendement nommé si une tâche a choisi un autre mot).
-    // EI-T6-a (le code commis gagne) : la ligne « {n} portions · {d} » de § 5 n'a plus de clé combinée — T3 ronde 1 l'a retirée (EI-T3-R1-c, doublon) ;
-    // les repères joignent « {n} portions » (clé ANTÉRIEURE, en.js:339) ou « 1 portion » et la durée par « · » : la table porte donc « {n} portions ».
+    // La table FR → EN des textes UI-1 (spec § 5, lignes UI-1 seulement ; les quatre lignes UI-2 vivent dans tests/apercu-web.js), plus quatre textes
+    // que les tâches posent hors de la table § 5 (R-UI-38) : « Disponibles » (filtre § 4.3, T4), « Reprendre la séance » (§ 4.3, T4), « {n} à importer »
+    // (compteur de library.js, T5), « Page {n} · p. {p} » (légende § 4.5, T5) — les anglais sont ceux de la tâche qui les pose et se relisent ici.
+    // EI-T6-a, ronde 1 (constats 12 et 19 ; R-UI-41) : la ligne « {n} portions · {d} » de § 5 n'a plus de clé — T3 ronde 1 l'a retirée (R-UI-17) ; les
+    // repères joignent « {n} portions » ou « 1 portion » et la durée par « · ». Ces deux clés sont ANTÉRIEURES au lot (en.js à f3672be, anglais inchangé) :
+    // ce ne sont pas des textes neufs, elles rejoignent les clés réemployées ci-dessous. 31 paires : 27 de la spec § 5 (UI-1), quatre hors table.
     const TEXTES_UI1 = {
       'Bibliothèque': 'Library', 'Aller à la bibliothèque.': 'Go to the library.', 'Tes livres, tes trouvailles, tes recettes.': 'Your books, your finds, your recipes.',
       'Recettes': 'Recipes', 'Ajouter une recette': 'Add a recipe', 'Une recette, un ingrédient…': 'A recipe, an ingredient…',
       'Toutes': 'All', 'De mes livres': 'From my books', 'Du web': 'From the web', 'Recettes de mes livres à importer': 'Recipes from my books to import', 'Voir plus': 'Show more',
       'À importer': 'To import', 'À importer · p. {p}': 'To import · p. {p}', 'Disponible': 'Available', 'Disponibles': 'Available', 'Partielle': 'Partial',
-      'Du web · {h}': 'From the web · {h}', 'De mon livre · {t}': 'From my book · {t}', '{n} portions': '{n} servings', '1 portion': '1 serving',
+      'Du web · {h}': 'From the web · {h}', 'De mon livre · {t}': 'From my book · {t}',
       'Voir la page d’origine': 'View the original page', 'Portions, versions et autres gestes': 'Servings, versions and more',
       'Les recettes de ce livre': 'The recipes in this book', '{n} disponible(s) · {m} à importer': '{n} available · {m} to import', 'Voir les {n} recettes': 'Show all {n} recipes',
       'Ajouter des recettes': 'Add recipes', 'Ajouter des pages de sommaire': 'Add table-of-contents pages', 'Sommaire': 'Table of contents',
@@ -1639,49 +1646,94 @@ export async function runCarnetTests({ eq, ok }) {
       'Reprendre la séance': 'Resume the session', '{n} à importer': '{n} to import', 'Page {n} · p. {p}': 'Page {n} · p. {p}',
     };
     // Clés RÉEMPLOYÉES par le lot (existaient avant lui : leur anglais ne change pas ; « Corriger » reste « Fix », H-14 ; « Mes livres » reste le
-    // segment de la recherche, D-UI-4). Existence seulement.
-    const CLES_REEMPLOYEES = ['Corriger', 'Ingrédients', 'Préparation', 'Ajouter un livre', 'Favoris', 'Mes livres', 'Livres', 'Plats'];
+    // segment de la recherche, D-UI-4 ; « 1 portion » et « {n} portions » disent les portions des repères, R-UI-41). Existence, puis quatre anglais épinglés.
+    const CLES_REEMPLOYEES = ['Corriger', 'Ingrédients', 'Préparation', 'Ajouter un livre', 'Favoris', 'Mes livres', 'Livres', 'Plats', '1 portion', '{n} portions'];
     // Les chaînes RETIRÉES par D-UI-4 et D-UI-10 (§ 5, dernier alinéa : les trois nommées + « Aller à Mes livres. », remplacée par la même décision).
     const CHAINES_RETIREES = ['+ Recette', '+ Pages d’index', 'Ouvrir le lien', 'Aller à Mes livres.'];
     // Où chaque texte neuf doit paraître comme t('…') (§ 4 ; un texte peut vivre dans plusieurs modules). Les modules de MODULES_NEUFS sont scannés
     // en entier par tests/ajouter.js ; les autres passent par CHAINES_NEUVES_AILLEURS, dont ce bloc vérifie qu'elle est À JOUR (calcul, pas relevé).
     const MODULES_UI1 = ['../src/ui/library.js', '../src/ui/recipe.js', '../src/ui/book.js', '../src/ui/home.js', '../src/ui/components.js', '../src/ui/accueil-livre.js', '../src/ui/import-web.js', '../src/ui/import-cible.js', '../src/ui/add.js'];
     const HORS_MODULES_NEUFS = ['../src/ui/library.js', '../src/ui/recipe.js', '../src/ui/book.js', '../src/ui/home.js', '../src/ui/components.js'];
+    // Ronde 1 (constat 19) : textes de la table que CE module écrivait déjà en t() à f3672be (mesuré) — antérieurs au module, ils ne se listent pas dans
+    // CHAINES_NEUVES_AILLEURS (règle d'en-tête de tests/ajouter.js) ; leurs entrées en.js, elles, sont neuves (T2, T4) et la table les épingle.
+    const DEJA_DANS_LE_MODULE = { '../src/ui/book.js': ['Toutes', 'Disponibles'] };
+    // Ronde 1 (constat 2, faux-vert) : les clés t() SANS entrée en.js de ces cinq modules, toutes antérieures au lot (écrites dans ce module à f3672be,
+    // sans entrée alors comme aujourd'hui : la dette i18n d'avant le lot, 8 + 37 + 23 + 1 + 9 = 78, relevée par la ronde 1). Toute AUTRE clé sans entrée rougit.
+    const SANS_EN_ANTERIEURES = {
+      '../src/ui/library.js': ['Aucun livre ne correspond.', 'Aucun plat défini. Crée « Puttanesca », puis rattache-lui les recettes de tes livres.',
+        'Filtrer par titre, auteur, cuisine…', 'Nom du plat (anglais, facultatif)', 'Nom du plat (français)', 'Plat créé',
+        'Similarité de titre seulement. Confirmer ou refuser ; un refus est mémorisé et reste réversible.',
+        'Un plat rassemble des recettes apparentées de plusieurs livres, sans écraser leurs sources.'],
+      '../src/ui/recipe.js': ['+ Nouveau plat…', 'Accepter',
+        'Adaptation assistée : palier V1, non disponible dans cette version. Utilise « Créer ma version » pour décrire toi-même les changements.',
+        'Aucune traduction {l} pour cette version.', 'Autre (texte libre)…',
+        'Cette référence vient de l’index : ingrédients, durées et compatibilités alimentaires sont inconnus tant que la recette n’est pas numérisée. Ouvre le livre à cette page pour cuisiner, ou scanne la recette.',
+        'Changer les portions, les unités ou la langue ne crée pas de nouvelle version. Les durées ne sont pas multipliées.',
+        'Créer « Ma version » avec ce remplacement ? L’original reste inchangé.', 'Effets attendus (goût, texture, méthode, durée) et raison du remplacement',
+        'Extraction IA ({m}) — vérifiée à la main ensuite ?', 'Inconnus', 'Ingrédient de remplacement', 'Je n’en ai pas ; texture un peu plus ferme ; même cuisson.',
+        'Ma version créée ; contraintes et courses à réévaluer sur cette version.', 'Nom du plat (français)',
+        'Observation liée à cette cuisson ; elle ne devient pas une règle universelle.', 'Original : page {p} du livre (pages non photographiées).',
+        'Pages du livre telles que photographiées. Une adaptation n’est jamais présentée comme le texte original.', 'Pages d’index', 'Préciser', 'Rattachement manuel',
+        'Rattacher cette recette à quel plat ?', 'Recette rattachée au plat', 'Remplacement : {a} → {b}. {e}', 'Remplacer « {s} » par :', 'Repérée dans l’index de ton livre',
+        'Tasses/cuillères : convention non confirmée pour cette édition — quantités d’origine affichées.', 'Traduire', 'Version et langue affichées ; inconnues omises.',
+        'inconnues', 'proposée', 'recalculés pour {n} portions', 'remplace', 'testée', 'Étapes non numérisées.', 'Évaluer une restriction…', 'à refaire'],
+      '../src/ui/book.js': ['Ajouter des entrées d’index à la main', 'Aucune recette dans cette vue. Photographie l’index ou une recette pour commencer.', 'Choisir…',
+        'Convention confirmée', 'Convention de mesure', 'Créer une recette depuis ce fichier',
+        'Des recettes de ce livre utilisent des tasses ou des cuillères. Sans convention confirmée, ces quantités restent affichées telles quelles.', 'Enregistré',
+        'Filtrer les recettes de ce livre', 'Langue', 'Livre de nouveau proposé dans Redécouvrir', 'Livre introuvable.', 'Métadonnées et convention', 'Non confirmée',
+        'Ordre de décision : équivalences imprimées → convention décrite dans le livre → convention confirmée ici.', 'Pages et fichiers sources',
+        'Quelle convention pour les tasses et cuillères de cette édition ?', 'Réafficher dans Redécouvrir', 'Supprimer',
+        'Supprimer ce livre ? Il n’a aucune recette ni page.', 'index', 'recette', '{n} document(s). Les originaux restent consultables depuis chaque recette.'],
+      '../src/ui/home.js': ['Recette'],
+      '../src/ui/components.js': ['Le raccourci « CuisineOS-Minuterie » doit être installé une fois (voir Réglages). L’app ne peut pas confirmer qu’Horloge a bien démarré.',
+        'Ligne à vérifier', 'Original : {s}', 'Recalculé à partir de « {s} »', 'Sur Mac, utilise Horloge ou Siri directement ; le raccourci s’exécute sur iPhone et iPad.',
+        'Unité ambiguë : once de masse ou once liquide ? À confirmer.', 'inconnu(s)', 'orig.',
+        'Évaluation des ingrédients identifiés. Ne certifie ni les produits utilisés ni l’environnement de préparation.'],
+    };
     const sources = Object.fromEntries(await Promise.all(MODULES_UI1.map(async (m) => [m, await lireT6(m)])));
-    const parModule = Object.fromEntries(MODULES_UI1.map((m) => [m, new Set(clesDe(sources[m]))]));
+    // Les EMPLOIS se lisent sans commentaires (constat 20) ; l'inventaire des clés sans entrée lit le source brut (plus strict : une clé commentée y compte).
+    const parModule = Object.fromEntries(MODULES_UI1.map((m) => [m, new Set(clesDe(sansCommentairesT6(sources[m])))]));
 
-    eq(Object.keys(TEXTES_UI1).length, 33, 'T6 i18n : la table des textes UI-1 compte 33 paires — 28 de la spec § 5, cinq hors table (garde contre une ligne effacée)');
-    eq(Object.entries(TEXTES_UI1).filter(([fr, en]) => EN[fr] !== en).map(([fr]) => fr), [], 'T6 i18n : chaque texte neuf de la spec § 5 (UI-1) a son entrée en.js, à l’anglais exact de la table');
-    eq(CLES_REEMPLOYEES.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'T6 i18n : les clés réemployées (Corriger, Ingrédients, Préparation, Ajouter un livre, Favoris, Mes livres, Livres, Plats) gardent une entrée');
-    eq([EN['Corriger'], EN['Mes livres']], ['Fix', 'My books'], 'T6 i18n : « Corriger » reste « Fix » (H-14) et « Mes livres » reste « My books » (le segment de la recherche, D-UI-4)');
-    // Chaque texte neuf est bien ÉCRIT quelque part dans les modules du lot, en t('…') littéral : une table sans emploi serait un filet creux.
+    eq(Object.keys(TEXTES_UI1).length, 31, 'T6 i18n : la table elle-même compte 31 paires — 27 de la spec § 5 (UI-1), quatre hors table (garde de la TABLE contre une ligne effacée ; elle ne détecte rien dans le code)');
+    eq(Object.entries(TEXTES_UI1).filter(([fr, en]) => EN[fr] !== en).map(([fr]) => fr), [], 'T6 i18n : chaque texte neuf de la table (27 de la spec § 5 UI-1, quatre hors table) a son entrée en.js, à l’anglais exact de la table');
+    eq(CLES_REEMPLOYEES.filter((k) => typeof EN[k] !== 'string' || !EN[k]), [], 'T6 i18n : les clés réemployées (Corriger, Ingrédients, Préparation, Ajouter un livre, Favoris, Mes livres, Livres, Plats, 1 portion, {n} portions) gardent une entrée');
+    eq([EN['Corriger'], EN['Mes livres'], EN['1 portion'], EN['{n} portions']], ['Fix', 'My books', '1 serving', '{n} servings'], 'T6 i18n : « Corriger » reste « Fix » (H-14), « Mes livres » reste « My books » (le segment de la recherche, D-UI-4) ; les deux clés antérieures des repères gardent « 1 serving » et « {n} servings » (R-UI-41)');
+    // Chaque texte neuf est bien ÉCRIT quelque part dans les modules du lot, en t('…') littéral HORS commentaires : une table sans emploi serait un filet creux.
     const employes = new Set(MODULES_UI1.flatMap((m) => [...parModule[m]]));
-    eq(Object.keys(TEXTES_UI1).filter((fr) => !employes.has(fr)), [], 'T6 i18n : chaque texte neuf de la table est écrit en t(\'…\') dans au moins un module du lot (library, recipe, book, home, components, accueil-livre, import-web, import-cible, add)');
-    // Filet CALCULÉ : pour les cinq modules hors MODULES_NEUFS, tout texte neuf qu'ils écrivent figure dans CHAINES_NEUVES_AILLEURS[module].
-    const manquantes = HORS_MODULES_NEUFS.flatMap((m) => [...parModule[m]].filter((k) => k in TEXTES_UI1 && !(CHAINES_NEUVES_AILLEURS[m] || []).includes(k)).map((k) => `${m} : ${k}`));
-    eq(manquantes, [], 'T6 i18n : CHAINES_NEUVES_AILLEURS (tests/ajouter.js) est à jour pour library.js, recipe.js, book.js, home.js et components.js — chaque texte neuf qu’ils écrivent y est listé');
-    eq(['../src/ui/accueil-livre.js', '../src/ui/import-web.js', '../src/ui/import-cible.js', '../src/ui/add.js', '../src/ui/icones.js'].filter((m) => !MODULES_NEUFS.includes(m)), [], 'T6 i18n : accueil-livre.js, import-web.js, import-cible.js, add.js et icones.js sont dans MODULES_NEUFS (scannés en entier ; icones.js : S14 — ni innerHTML, ni html:)');
+    eq([...Object.keys(TEXTES_UI1), '1 portion', '{n} portions'].filter((fr) => !employes.has(fr)), [], 'T6 i18n : chaque texte de la table, et les deux clés des repères, est écrit en t(\'…\') hors commentaires dans au moins un module du lot (library, recipe, book, home, components, accueil-livre, import-web, import-cible, add)');
+    // Filet de la TABLE : pour les cinq modules hors MODULES_NEUFS, un texte de la table qu'ils écrivent et qui est neuf pour le module figure dans CHAINES_NEUVES_AILLEURS[module].
+    const manquantes = HORS_MODULES_NEUFS.flatMap((m) => [...parModule[m]].filter((k) => k in TEXTES_UI1 && !(CHAINES_NEUVES_AILLEURS[m] || []).includes(k) && !(DEJA_DANS_LE_MODULE[m] || []).includes(k)).map((k) => `${m} : ${k}`));
+    eq(manquantes, [], 'T6 i18n : CHAINES_NEUVES_AILLEURS (tests/ajouter.js) liste, pour library.js, recipe.js, book.js, home.js et components.js, chaque texte de la table qu’ils écrivent et qui est neuf pour le module (« Toutes » et « Disponibles » étaient déjà dans book.js à f3672be)');
+    // Ronde 1 (constat 2) : le filet CALCULÉ sur TOUT le module, pas sur la table (mutant X1 de la revue : un aria-label neuf sans entrée en.js passait tous les filets).
+    const sansEntree = HORS_MODULES_NEUFS.flatMap((m) => [...new Set(clesDe(sources[m]))].filter((k) => !(k in EN) && !(SANS_EN_ANTERIEURES[m] || []).includes(k)).map((k) => `${m} : ${k}`));
+    eq(sansEntree, [], 'T6 i18n (calculé) : toute clé t() de library.js, recipe.js, book.js, home.js et components.js a son entrée en.js, hors les 78 clés antérieures au lot sans entrée (inventaire figé à f3672be) — un texte neuf sans anglais rougit, listé ou non');
+    eq(['../src/ui/accueil-livre.js', '../src/ui/import-web.js', '../src/ui/import-cible.js', '../src/ui/add.js', '../src/ui/icones.js'].filter((m) => !MODULES_NEUFS.includes(m)), [], 'T6 i18n : accueil-livre.js, import-web.js, import-cible.js, add.js et icones.js sont dans MODULES_NEUFS (scannés en entier ; icones.js : S14 — ni innerHTML, ni html: ; pour icones.js, doublon du filet de T1 : filet de clôture)');
     // Les chaînes retirées ont quitté en.js, les filets ET chaque module de SHELL (sw.js lu comme un tableau, X4 du lot C).
     const sw = await lireT6('../sw.js');
     // Le TABLEAU SHELL, sans ses commentaires (la forme X4 du lot C, tests/table-matieres.js:1674) ; seuls les modules de src/ hors vendor sont relus.
     const shell = [...(sw.match(/const SHELL = \[([\s\S]*?)\];/)?.[1] ?? '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
-    ok(shell.length > 30 && shell.includes('./src/ui/icones.js'), `T6 SHELL : lu comme un tableau (${shell.length} entrées) et il porte ./src/ui/icones.js`);
+    ok(shell.length > 30 && shell.includes('./src/ui/icones.js'), `T6 SHELL : lu comme un tableau (${shell.length} entrées) et il porte ./src/ui/icones.js (doublon du filet SHELL de T1 : filet de clôture)`);
     const srcShell = Object.fromEntries(await Promise.all(shell.filter((m) => m.startsWith('./src/') && m.endsWith('.js') && !m.includes('/vendor/')).map(async (m) => [m, await lireT6('.' + m)])));
     const restes = CHAINES_RETIREES.flatMap((c) => [
       ...(c in EN ? [`en.js : ${c}`] : []),
       ...Object.values(CHAINES_NEUVES_AILLEURS).some((l) => l.includes(c)) ? [`CHAINES_NEUVES_AILLEURS : ${c}`] : [],
       ...Object.entries(srcShell).filter(([, s]) => clesDe(s).includes(c)).map(([m]) => `${m} : ${c}`),
     ]);
-    eq(restes, [], 'T6 chaînes retirées : « + Recette », « + Pages d’index », « Ouvrir le lien », « Aller à Mes livres. » ne sont plus ni dans en.js, ni dans les filets, ni en t(\'…\') dans aucun module de SHELL');
-    eq([/label: 'Bibliothèque'/.test(srcShell['./src/app.js']), /label: 'Mes livres'/.test(srcShell['./src/app.js']), clesDe(srcShell['./src/ui/search.js']).includes('Mes livres') || /\['books', 'Mes livres'\]/.test(srcShell['./src/ui/search.js'])],
-      [true, false, true], 'T6 D-UI-4 : NAV (app.js, hors suite : lu au source) dit « Bibliothèque » et plus « Mes livres » ; le segment « Mes livres » de la recherche (search.js MODES) reste');
+    eq(restes, [], 'T6 chaînes retirées : « + Recette », « + Pages d’index », « Ouvrir le lien », « Aller à Mes livres. » ne sont plus ni dans en.js, ni dans les filets, ni en t(\'…\') ou t("…") dans aucun module de SHELL (source brut, commentaires compris)');
+    const appSans = sansCommentairesT6(srcShell['./src/app.js']); const searchSans = sansCommentairesT6(srcShell['./src/ui/search.js']);
+    eq([/label: 'Bibliothèque'/.test(appSans), /label: 'Mes livres'/.test(appSans), clesDe(searchSans).includes('Mes livres') || /\['books', 'Mes livres'\]/.test(searchSans)],
+      [true, false, true], 'T6 D-UI-4 : NAV (app.js, hors suite : relu SANS commentaires, comme le test NAV de T1 dont celui-ci est le doublon de clôture) dit « Bibliothèque » et plus « Mes livres » ; le segment « Mes livres » de la recherche (search.js MODES) reste');
     // I-UI-4 : les règles neuves du lot existent dans la feuille servie (garde positive ; T-1, T-2, T-11 et le survol sont tenus par tests/theme.js sur TOUTE la feuille).
     const css = (await lireT6('../styles.css')).replace(/\/\*[\s\S]*?\*\//g, '');
     const selecteurs = [...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) => m[1].replace(/\s+/g, ' ').trim());
     const SELECTEURS_UI1 = ['.carte-plat', '.sans-photo', '.grille-plats', '.plat-vignette.grande', '.plat-vignette.petite', 'section.plain', '.two-col.livre', '.titre-fiche', '.grid.livres', '.liste-compacte', '.fiche-tete', '.reperes', '[data-role=autres-gestes]'];
-    const present = (s) => selecteurs.some((sel) => sel.split(',').some((part) => part.trim().includes(s) || part.trim().includes(s.replace('=autres-gestes]', '="autres-gestes"]'))));
-    eq(SELECTEURS_UI1.filter((s) => !present(s)), [], 'T6 I-UI-4 : les treize sélecteurs neufs du lot (spec § 3.3, § 4) existent dans styles.css');
-    eq([...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) => m[1].trim()).filter((s) => /\.plat-vignette\b/.test(s)), ['.plat-vignette', '.plat-vignette.grande', '.plat-vignette.petite'], 'T6 § 3.3 : exactement trois sélecteurs nomment .plat-vignette, dans cet ordre (72 px, grande 4:3, petite 48 px)');
+    // Ronde 1 (constat 3, faux-vert) : un sélecteur se compare comme un JETON entier — `.reperes-x`, `.sans-photos` ou `xsection.plain` ne valent plus
+    // `.reperes`, `.sans-photo` ou `section.plain` (mutant X2 de la revue : `.reperes` renommé `.reperes-x` restait vert).
+    const echapperT6 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const jetonT6 = (s) => new RegExp((/^[\w-]/.test(s) ? '(?<![\\w-])' : '') + echapperT6(s) + '(?![\\w-])');
+    const present = (s) => [s, s.replace('=autres-gestes]', '="autres-gestes"]')].some((f) => selecteurs.some((sel) => sel.split(',').some((part) => jetonT6(f).test(part.trim()))));
+    eq(SELECTEURS_UI1.filter((s) => !present(s)), [], 'T6 I-UI-4 : les treize sélecteurs neufs du lot (spec § 3.3, § 4) existent dans styles.css, chacun comme un jeton entier (ni suffixe ni préfixe)');
+    eq([...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) => m[1].trim()).filter((s) => /\.plat-vignette\b/.test(s)), ['.plat-vignette', '.plat-vignette.grande', '.plat-vignette.petite'], 'T6 § 3.3 : exactement trois sélecteurs nomment .plat-vignette, dans cet ordre (72 px, grande 4:3, petite 48 px) — doublon de tests/photo-plat.js : filet de clôture');
   } catch (e) { ok(false, `T6 filets : bloc interrompu — ${e?.message || String(e)}`); } // un source illisible est UN rouge nommé, jamais une suite coupée en silence
 
   // --- repère de fin : les tâches 2 à 6 ajoutent leurs blocs AU-DESSUS de cette ligne ---

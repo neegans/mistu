@@ -1446,7 +1446,7 @@ par la fonction, sans migration ; la fonction `assistant` gagne un cinquième ou
 ## Expérience « carnet » (lot UI-1, 23-28 octobre 2026)
 
 Spec : `docs/superpowers/specs/2026-10-23-experience-carnet-design.md` (rév. 2.1 ; § 0 : D-UI-1 à D-UI-14 ; § 2 : I-UI-1 à I-UI-7 ; § 3 : jetons,
-typographie, composants ; § 4 : écrans ; § 5 : textes ; § 12 « Construction UI-1 : rulings » : R-UI-P1 à P3, R-UI1-1, R-UI1-2, R-UI-1 à R-UI-44 ; § 13 : les sept défauts
+typographie, composants ; § 4 : écrans ; § 5 : textes ; § 12 « Construction UI-1 : rulings » : R-UI-P1 à P3, R-UI1-1, R-UI1-2, R-UI-1 à R-UI-47 ; § 13 : les sept défauts
 confirmés). Livré ici (branche `experience-carnet`, construite sur `f3672be` en parallèle de UI-2 — fusionné dans `main` le 27 octobre — et non fusionnée) : la direction des maquettes
 adaptée à l'app — thème, composition des écrans, textes, icônes — sans serveur, sans migration, sans règle de produit changée (I-UI-1).
 
@@ -1472,26 +1472,35 @@ adaptée à l'app — thème, composition des écrans, textes, icônes — sans 
   = `div.thumbs` des pages `kind === 'index'`, `ul.liste-compacte`, 8 lignes puis « Voir les {n} recettes ») ; `src/ui/home.js` (`pageHeader`,
   `grilleCartes` sur Favoris et Dernières cuissons, sa propre passe `getFiles`) ; `src/ui/add.js`, `accueil-livre.js`, `import-cible.js` (icônes, « × » de
   retrait ≥ 44 px, badge « À importer ») ; `src/app.js` (NAV `label: 'Bibliothèque'`, icônes). Les écrans hors § 4 ne changent que par les jetons et les
-  titres (§ 8). `search.js` ne change pas (la carte web garde sa forme épinglée ; UI-2 y pose les vignettes).
+  titres (§ 8). `search.js` ne change que d'un littéral, l'icône de son état vide (`'loupe'`, R-UI-P1), hors du chemin du vol (la carte web garde sa
+  forme épinglée ; UI-2 y pose les vignettes).
 - **Libellés** (D-UI-10) : `availabilityBadge` porte ses textes courts (« À importer · p. {p} », « À importer », « Disponible », « Partielle », « Lien
   web » ; un état hors vocabulaire → badge vide) ; `STATE_LABELS.availability.reference_only` → « À importer » (lue par `dish.js` seulement — comparaison de plats, rattachements —, où un signet dit
   « Lien web » par `libelleDisponibilite` : R-UI-32 ; ni les exports ni Redécouvrir ne la lisent) ; « Repérée dans ton livre — page {p} » reste
   sur la fiche ; « Voir la page d'origine » sur toute adresse lisible (`http:` compris, I-B5) ; « + Recette », « + Pages d'index », « Ouvrir le lien »,
   « Aller à Mes livres. » retirées du source ET d'`en.js` ; « Mes livres » reste le segment de la recherche.
 - **Tests** : `tests/carnet.js` (`runCarnetTests({ eq, ok })`, câblé dans `tests/tests.js` avant le bloc thème ; blocs par tâche ; le bloc T6 porte les
-  filets : table `TEXTES_UI1` de 33 paires, `CHAINES_NEUVES_AILLEURS` vérifiée par CALCUL sur les cinq modules hors `MODULES_NEUFS`, chaînes retirées
-  absentes de tout module de `SHELL`, treize sélecteurs neufs présents) ; `tests/theme.js` amendé (une valeur, une paire, deux libellés) ; épingles
+  filets : table `TEXTES_UI1` de 31 paires et deux clés antérieures des repères épinglées, un inventaire CALCULÉ sur les cinq modules hors
+  `MODULES_NEUFS` — toute clé `t('…')` / `t("…")` a son entrée `en.js`, hors 78 clés antérieures au lot figées (R-UI-45) —, les emplois lus sans
+  commentaires, chaînes retirées absentes de tout module de `SHELL`, treize sélecteurs neufs présents comme jetons entiers) ; `tests/theme.js` amendé (une valeur, une paire, deux libellés) ; épingles
   amendées tâche par tâche (spec § 7), jamais contournées.
 - **Preuve visuelle** (registre, hors git ; `preuve-visuelle.cjs`, copie adaptée de l'outil du lot refonte) : quatre largeurs (375 × 812, 390 × 844,
-  768 × 1024, 1512 × 982) plus la galerie à 320 × 568 ; `reducedMotion: 'reduce'`, service workers bloqués, réseau externe coupé, porte passée ; les
+  768 × 1024, 1512 × 982) plus 320 × 568 (la galerie, puis les onglets RÉELS de l'app sur `#/library`, « Bibliothèque » actif : R-UI-40) ;
+  `reducedMotion: 'reduce'`, service workers bloqués, réseau en liste BLANCHE (toute requête hors de l'origine servie est coupée et comptée ; hors des
+  quatre hôtes connus — supabase, anthropic, openlibrary, googleapis —, c'est une faute nommée : R-UI-46), porte passée ; les
   données sont SEMÉES dans la base jetable du contexte par les modules réels (`semer(page, 'peu' | 'beaucoup')` : un livre, douze recettes, deux
   pages de sommaire ; 2 puis 9 photos) ; colonnes : débordement, navigation, cibles, contraste par nœud texte, `[hidden]`, **onglet** (« Bibliothèque »
   exact, une ligne, sans débordement : D-UI-4, § 13 point 3), console ; M14 (focus clavier, anneau olive) ; M3 NON rejouée (l'app ne poste plus à
-  `api.anthropic.com` ; `search.js` inchangé : R-VIS-8 tenu par `tests/theme.js`). La galerie monte les composants RÉELS (`recipeCard`, `grilleCartes`,
-  `sectionPlain`, `section`, `pageHeader`, `icone`) par un `<script type="module">` et signale `data-galerie-prete`. Contre-preuves : olive pâle →
-  contraste KO ; libellé d'onglet allongé → onglet KO. Deux retouches de l'outil source : le repli `setContent` part d'une page de MÊME origine
+  `api.anthropic.com` ; `search.js` hors du chemin du vol : R-VIS-8 tenu par `tests/theme.js`). La galerie monte les composants RÉELS là où ils
+  existent comme fonctions (`recipeCard`, `grilleCartes`, `section`, `sectionPlain`, `pageHeader`, `availabilityBadge`, `ligneCompacte` de `book.js`,
+  `icone`) par un `<script type="module">` et signale `data-galerie-prete` ; le reste est du balisage écrit à la main avec les vraies classes (les
+  onglets, copie de `navLinks` ; 7 bis ; les repères, le lien d'origine, la rangée principale, le `details` et le `segmented` de la fiche) : R-UI-39.
+  Contre-preuves : olive pâle → contraste KO ; libellé d'onglet allongé (galerie, puis `app.js` d'une copie) → onglet KO ; une requête vers un hôte
+  inconnu (copie) → faute nommée, verdict ROUGE. Quatre retouches de l'outil source : la liste blanche du réseau et les onglets réels de l'app à 320 px (ronde 1 : R-UI-46, R-UI-40) ; le repli
+  `setContent` part d'une page de MÊME origine
   (`/icons/` : depuis `about:blank`, Chrome bloque la feuille et les modules, R-UI-42) ; le 404 différé de `/favicon.ico` est compté à part (R-UI-43).
-  Mesure du 28 octobre : 69 lignes sur 69, 173 captures, contraste rendu minimum 4,62 sur 3 600 nœuds, M14 20 sur 20.
+  Mesure du 28 octobre (05 h 42 UTC, après la ronde 1 de T6) : 70 lignes sur 70, 174 captures, contraste rendu minimum 4,62 sur 3 601 nœuds, M14 20 sur
+  20, 0 requête hors de l'origine servie ; à 320 px, l'onglet réel actif tient en 71,8/71,8 px (une ligne, sans marge).
 
 ## Modèle de données (magasins IndexedDB)
 

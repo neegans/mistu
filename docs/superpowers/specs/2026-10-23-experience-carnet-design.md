@@ -48,7 +48,7 @@ sans attendre l'autre (§ 9).
   (`repo.getFiles`), la carte décide au rendu, de façon synchrone, ne rend pas `vignettePlat` et ne lit rien elle-même (`fichier`
   est sa seule source d'image) ; QUAND `typeAffichage(fichier)` est une image (I-F6, I-UI-5), une image
   4:3 (`img.plat-vignette.grande`, `displayUrl(fichier, urlDeBlob)`) au-dessus du titre serif et d'une ligne « Du web · {hôte} · 35 min »
-  ou « De mon livre · {titre} · 40 min » (durée = `total_minutes ?? prep + cook`, UN nombre par `formatMinutes`, jamais la paire
+  ou « De mon livre · {titre} · 40 min » (durée = `total_minutes` > 0, sinon préparation + cuisson quand les DEUX sont connues — R-UI-15 —, UN nombre par `formatMinutes`, jamais la paire
   « actif · total » ; rien sans durée) ; SANS photo, une seule forme : `a.item-link.carte-plat.sans-photo`, un bloc de titre serif sur
   `--paper-2` (même rayon 12, hauteur minimale 7 rem pour aligner les rangées), la même ligne de source dessous ; jamais de cadre vide ni
   d'image générique. L'image garde la classe `plat-vignette` (révocation D-T9). La carte horizontale actuelle reste le défaut partout
@@ -239,7 +239,8 @@ Recettes.
 Ordre du DOM : `pageHeader` (titre `h1.titre-fiche` par `classeTitre` ; sous-titre = `provenanceText(recipe, book, edition)`, inchangé (R-UI-P2 : les préfixes « Du web · » / « De mon livre · » sont ceux de la
 carte-plat) ; `back: { href: '/library', label: t('Bibliothèque') }`) → `div.fiche-tete` à deux colonnes ≥ 760 px (`.two-col`) : colonne 1 = badges (disponibilité,
 version, vérification, type, cuisines), bandeau web / bandeau lecture (inchangés), ligne de repères `div.reperes` (« {n} portions ·
-{durée} », chaque partie seulement si connue ; durée = `total_minutes ?? prep + cook` par `formatMinutes`), lien « Voir la page d'origine ↗ »
+{durée} », chaque partie seulement si connue ; durée = `total_minutes` > 0, sinon préparation + cuisson quand les DEUX sont connues — R-UI-15, jamais
+la seule préparation —, par `formatMinutes`), lien « Voir la page d'origine ↗ »
 (`a.btn.link[data-role=ouvrir-lien]`, toute adresse lisible), rangée `button.btn.primary.big.block` « Commencer à cuisiner » + `a.btn.link`
 « Corriger » (visible tant que `verification_state !== 'verified'` ; toujours présent dans le `details` aussi) ; colonne 2 = `photo.entete`
 (figure pleine largeur de colonne, 4:3, `object-fit: cover`, légende « Image de la page {hote} » inchangée) ; sous 760 px, la colonne 2
@@ -432,7 +433,7 @@ recherche). Les chaînes retirées quittent aussi `en.js` : « + Recette », « 
   d'en-tête par segment, fiche recette (ordre du DOM, bascule Ingrédients / Préparation sans navigation dans les deux états du
   `matchMedia`, `details` ouvert/fermé selon l'état, « Corriger » visible non vérifiée / absent de l'en-tête vérifiée, « autres gestes »
   porte tous les anciens boutons de `controls` et de la rangée d'actions, pas l'Export, repères dérivés : « 1 portion », rien sans durée, un seul nombre), fiche livre (ligne compacte, vignette
-  48 px si octets, « Importer » et « Saisir à la main » seulement sur une référence sans adresse, sous-titre dérivé, 8 lignes puis « Voir les
+  48 px si octets, « Importer » et « Saisir à la main » seulement sur une référence ou une recette partielle sans adresse (règle du lot A, D-11), sous-titre dérivé, 8 lignes puis « Voir les
   {n} recettes »), libellés (« À importer » n'apparaît que pour `reference_only` sans `source_url` ; « Voir la page d'origine » sur une
   fiche http), icônes (`aria-hidden`, `currentColor`, exactement 23 noms, nom inconnu → levée), filets i18n. UI-2 : `tests/apercu-web.js` (forme exacte de la
   demande, en-têtes, un appel pour N, même demande relancée avec les mêmes cinq liens → 0 appel, trois liens neufs sur cinq → un appel pour trois adresses, les Blob des
@@ -468,7 +469,8 @@ séquentielle : UI-2 d'abord (le plus court, la première phrase de Neegan), UI-
 de `0007` et du redéploiement, gestes de Neegan et du contrôleur). Chaque lot fusionne dans `main` par un commit de fusion ; le second
 résout les quatre fichiers communs : `sw.js` (UNION de `SHELL`, les deux modules neufs, et son propre `VERSION`, +1 au commit de
 fusion), `src/model/schema.js` et les pins (règle I-UI-7), `src/i18n/en.js`
-(union), `tests/tests.js:250` (remesuré) ; le § 12 de cette spec reçoit les rulings de chaque lot sous son propre titre.
+(union), `tests/tests.js:250` (remesuré) ; le § 12 de cette spec reçoit les rulings de chaque lot sous son propre titre. (Mesuré à la construction :
+la fusion de UI-1 sur `main` met 17 fichiers en conflit, pas quatre — la liste et la règle de chacun : R-UI-47.)
 
 **UI-2 « Aperçus »** (plan 1, `0.16.0`) : S1 serveur (`lecture-web.js` / `logique.js` / `index.ts`, `telechargerImage({ max })`) + tests Node +
 `0007` + preuve + README + générateur « 0008 » ; S2 domaine client (`apercu-web.js`, `dimensionsImage`) + `search.js` (vol, Map, ligne
@@ -526,7 +528,7 @@ Lentille besoin (B) :
 - **B-I-4** « Ajouter une recette » en action d'en-tête du segment Recettes, répété pleine largeur sous 760 px (D-UI-4, § 4.1).
 - **B-I-5** condition de la grille `availability !== 'reference_only' || source_url` : signets dedans (carte sans photo, « Lien web »,
   sans durée), références dehors ; « Liens web gardés » reste sous Livres (§ 4.1).
-- **B-I-6** durée = `total_minutes ?? prep + cook`, un nombre par `formatMinutes` ; `timeText` reste dans l'en-tête d'Ingrédients.
+- **B-I-6** durée = `total_minutes` > 0, sinon préparation + cuisson quand les deux sont connues (amendé par R-UI-15), un nombre par `formatMinutes` ; `timeText` reste dans l'en-tête d'Ingrédients.
 - **B-I-7** « Texte conservé dans Mitsu » retirée (D-UI-10, § 5).
 - **B-I-8** « Corriger » en lien texte à côté de « Commencer à cuisiner » tant que non vérifiée ; `details` renommé « Portions, versions et
   autres gestes », `data-role=autres-gestes` (D-UI-6, § 4.2, § 13.4).
@@ -628,17 +630,22 @@ Lecture à froid (H) :
   forme de la carte gagne une figure optionnelle en tête.
 - Recette web (`2026-10-19-recette-web-design.md`) : I-B5 tenu (« Voir la page d'origine » sur toute adresse lisible) ; `telechargerImage`
   gagne un paramètre `max` ; `0007` prend le nom que le générateur réservait (la prochaine migration générée sera `0008`).
-- Cette spec, § 5 (UI-1) : cinq textes posés par T3 à T5 HORS de la table, chacun avec son entrée `en.js` (R-UI-38) — « Reprendre la séance » → « Resume
+- Cette spec, § 5 (UI-1) : quatre textes posés par T4 et T5 HORS de la table, chacun avec son entrée `en.js` (R-UI-38) — « Reprendre la séance » → « Resume
   the session » (§ 4.3, T4 ; le `t('Reprendre')` existant n'est pas réemployé : D-8), « Disponibles » → « Available » (filtre § 4.3, T4), « {n} à importer »
-  → « {n} to import » (compteur `library.js`, T5), « Page {n} · p. {p} » (légende § 4.5, identique, T5), « 1 portion » → « 1 serving » (repères, clé
-  antérieure relue, T3) ; deux autres hors table, à ratifier : « Rien à importer pour l’instant. » (R-UI-9) et « Le numéro de page n’a pas pu être
+  → « {n} to import » (compteur `library.js`, T5), « Page {n} · p. {p} » (légende § 4.5, identique, T5) ; « 1 portion » → « 1 serving » (repères, T3) est
+  une clé antérieure réemployée, pas un texte neuf (R-UI-41) ; deux autres hors table, à ratifier : « Rien à importer pour l’instant. » (R-UI-9) et « Le numéro de page n’a pas pu être
   enregistré. Réessaie. » (R-UI-34).
+- Cette spec, D-UI-5, § 4.2 et B-I-6 (UI-1) : la durée n'est plus `total_minutes ?? prep + cook` (R-UI-15, T3 ronde 1 ; texte amendé par la ronde 1
+  de T6) — `total_minutes` > 0, sinon préparation + cuisson quand les DEUX sont connues ; une seule préparation (cuisson inconnue) ne donne aucune durée
+  (I-UI-1 : rien d'inventé ; `dureeTotale`, `components.js`).
 
 ### Construction UI-1 : rulings (23-28 octobre 2026, branche `experience-carnet`, registre `.superpowers/sdd/2026-10-23-experience-carnet/`)
 
 Une ligne par ruling, dans l'ordre des tâches (détail : `progress.md` et le rapport de la tâche) ; chacun se renverse sans défaire le reste.
 - **R-UI-P1** (pré-vol du plan, rév. 2) `search.js:162` est la SEULE édition de `search.js` en UI-1 : le littéral `'🔍'` → `'loupe'` (§ 3.3 ; `emptyState`
-  stricte lèverait sinon) ; la forme de la carte web (`tests/recherche-web.js:1035`) ne bouge pas ; la version UI-2 de `search.js` porte `'loupe'` à la fusion.
+  stricte lèverait sinon) ; la forme de la carte web (`tests/recherche-web.js:1035`) ne bouge pas. **À la fusion** (ronde 1 de T6, mesuré) : UI-2 porte
+  `'🔍'` (`main` `1cb5dde`, `search.js:192`) ; la fusion automatique garde la ligne de UI-1, `'loupe'` — ne JAMAIS prendre la version UI-2 de cette ligne
+  (avec l'`emptyState` stricte de UI-1, `icone('🔍')` lève et `#/search` sans résultat plante ; le filet D-UI-9 de `tests/carnet.js` rougirait).
 - **R-UI-P2** (pré-vol du plan, rév. 2) le sous-titre de la fiche recette reste `provenanceText` (« {titre} — {auteur} · page N », hôte recalculé, étiquette IA) :
   « Du web · » / « De mon livre · » sont les préfixes de la carte-plat (`ligneSource`), pas de la fiche (`tests/creer-ia.js:1397` épingle « Mon livre — A. B. ·
   page 58 » ; C10, F22 : une fiche à livre ET adresse montre les deux). § 4.2, première phrase, amendée en ce sens. Coût si faux : un préfixe à poser, quatre tests.
@@ -652,7 +659,9 @@ Une ligne par ruling, dans l'ordre des tâches (détail : `progress.md` et le ra
   à UI-2 seul, qui l'étend à `search.js` et `library.js` ; UI-1 n'y touche pas. Coût si faux : un conflit textuel à la fusion.
 R-UI-1 à R-UI-35 : les amendements que les tâches 1 à 5 et leurs rondes ont consignés dans `progress.md` (sous leur nom d'origine, EI-… ou D-…, rappelé
 entre parenthèses), numérotés dans l'ordre où ils y sont écrits. Ceux marqués « à ratifier », « à trancher » ou « ouvert » restent au chef d'orchestre :
-la tâche 6 les porte ici, elle ne les tranche pas.
+la tâche 6 les porte ici, elle ne les tranche pas. Ronde 1 de T6 (constat 1) : chaque statut est celui que `progress.md` donne à l'amendement d'origine
+(« Amendements proposés (à ratifier) », « Décisions à ratifier », « Pour T6 : ratifier ») ; sans marque, `progress.md` n'en donne aucun (R-UI-1 et R-UI-2 :
+ratifiés au plan rév. 3 ; R-UI-3 : voulu ; R-UI-19 : assertions dictées fausses corrigées ; R-UI-33 : constat de revue corrigé).
 - **R-UI-1** (EI-T1-1, T1) `tests/theme.js` l. 45 et 48 relibellées « olive » comme les sept autres ; plus aucune « tomate » dans le fichier.
 - **R-UI-2** (D-2, ratifié rév. 3 ; T1) seule la roue du panneau latéral passe au trait ; la pilule « ⌕ » et le bouton « ⚙ » de la barre haute restent du texte.
 - **R-UI-3** (T1) la règle `header.stack h1 + p.muted` touche aussi les en-têtes écrits à la main hors `pageHeader` (voulu).
@@ -661,42 +670,42 @@ la tâche 6 les porte ici, elle ne les tranche pas.
 - **R-UI-5** (constat 4 de la ronde 1 de T1 ; **à trancher**) `.badge.ai` (« Créée avec l’IA · non testée », un ÉTAT) s'écrit en olive `#4f6b2e` sur `--action-bg`
   (5,08), contre la règle vérifiable de D-UI-2 ; options mesurées : `--warn` sur `--warn-bg` (5,00, mais la paire de « À importer »), brique (6,05, réservée aux
   dangers) ; coût : `styles.css:229` et `tests/theme.js:93`, une ligne chacun, `VERSION` +1.
-- **R-UI-6** (EI-T2-1, T2) la carte-plat n'ajoute `extra` que s'il est donné (le code dicté écrivait « null » sous chaque carte : `Element.append(null)`).
-- **R-UI-7** (EI-T2-2, T2) génération dans `redessiner()` de la grille : un redessin périmé (lecture `getFiles` en vol) ne remplace plus le plus récent.
-- **R-UI-8** (EI-T2-3, EI-T2-4, T2) deux assertions pour les survivants M7 (`source_label` lu avant l'hôte) et M22 (un signet rangé dans un livre dit « à importer »).
+- **R-UI-6** (EI-T2-1, T2 ; **à ratifier**) la carte-plat n'ajoute `extra` que s'il est donné (le code dicté écrivait « null » sous chaque carte : `Element.append(null)`).
+- **R-UI-7** (EI-T2-2, T2 ; **à ratifier**) génération dans `redessiner()` de la grille : un redessin périmé (lecture `getFiles` en vol) ne remplace plus le plus récent.
+- **R-UI-8** (EI-T2-3, EI-T2-4, T2 ; **à ratifier**) deux assertions pour les survivants M7 (`source_label` lu avant l'hôte) et M22 (un signet rangé dans un livre dit « à importer »).
 - **R-UI-9** (EI-T2-R1-a, T2 ronde 1 ; **à ratifier**) texte neuf hors § 5 : « Rien à importer pour l’instant. » → « Nothing to import for now. » (état vide de
   `?tab=a-importer`, à la place de « Aucune recette pour l’instant. », D-T2-c).
-- **R-UI-10** (EI-T2-R1-b, T2 ronde 1) bouton mobile de la Bibliothèque : un seul écouteur `matchMedia` dans l'app (`suiviMobile`), posé au MONTAGE (D-T2-b fermé).
+- **R-UI-10** (EI-T2-R1-b, T2 ronde 1 ; **à ratifier**) bouton mobile de la Bibliothèque : un seul écouteur `matchMedia` dans l'app (`suiviMobile`), posé au MONTAGE (D-T2-b fermé).
 - **R-UI-11** (D-T2-a, T2 ; **ouvert**) les retours de `book.js` (« ← Bibliothèque », « plus tard », suppression) et d'`import.js` mènent à `#/library`, donc au
   segment Recettes, plus à Livres.
 - **R-UI-12** (D-T2-d, T2 ronde 1 ; **ouvert**) une `reference_only` sans adresse NI livre n'apparaît nulle part (ni grille, ni liste « à importer », ni pied) ;
   à trancher avec R-UI-35.
-- **R-UI-13** (EI-T3-1, T3) assertion « 45 contre 20 + 60 » : la fixture dictée (total 80 = 20 + 60) ne distinguait pas `total_minutes` de `prep + cook` (M18).
-- **R-UI-14** (EI-T3-2, T3) champ `photoLongeGestes` et une assertion à 1100 px : la photo restait à droite par l'ordre du DOM quand les zones étaient retirées (C1b).
-- **R-UI-15** (EI-T3-R1-a, T3 ronde 1) `dureeTotale` : une durée seulement si `total_minutes`, ou si préparation ET cuisson sont connues (renverse « l'un des deux
+- **R-UI-13** (EI-T3-1, T3 ; **à ratifier**) assertion « 45 contre 20 + 60 » : la fixture dictée (total 80 = 20 + 60) ne distinguait pas `total_minutes` de `prep + cook` (M18).
+- **R-UI-14** (EI-T3-2, T3 ; **à ratifier**) champ `photoLongeGestes` et une assertion à 1100 px : la photo restait à droite par l'ordre du DOM quand les zones étaient retirées (C1b).
+- **R-UI-15** (EI-T3-R1-a, T3 ronde 1 ; **à ratifier**) `dureeTotale` : une durée seulement si `total_minutes`, ou si préparation ET cuisson sont connues (renverse « l'un des deux
   suffit » de T2 ; rien d'inventé, I-UI-1).
-- **R-UI-16** (EI-T3-R1-b, T3 ronde 1) `display: contents` sur l'emplacement photo vide de `.fiche-tete` (aucun espace vide entre l'état et les gestes).
-- **R-UI-17** (EI-T3-R1-c, T3 ronde 1) la clé combinée « {n} portions · {d} » est retirée (doublon de « {n} portions ») : les repères joignent « {n} portions »
+- **R-UI-16** (EI-T3-R1-b, T3 ronde 1 ; **à ratifier**) `display: contents` sur l'emplacement photo vide de `.fiche-tete` (aucun espace vide entre l'état et les gestes).
+- **R-UI-17** (EI-T3-R1-c, T3 ronde 1 ; **à ratifier**) la clé combinée « {n} portions · {d} » est retirée (doublon de « {n} portions ») : les repères joignent « {n} portions »
   (ou « 1 portion ») et la durée par « · » ; § 5 amendé en ce sens par la tâche 6.
-- **R-UI-18** (EI-T3-R1-d, T3 ronde 1) la fiche recette a son abonné unique (`suiviFiche`), distinct de `suiviMobile` : au plus un par écran.
+- **R-UI-18** (EI-T3-R1-d, T3 ronde 1 ; **à ratifier**) la fiche recette a son abonné unique (`suiviFiche`), distinct de `suiviMobile` : au plus un par écran.
 - **R-UI-19** (EI-T4-a, EI-T4-b, T4) deux assertions dictées fausses corrigées : la carte « Connecte-toi » du panneau d'index est un `span.status.*` ; `vignettePage`
   rend une page sans octets en `figure.fichier-absent` DANS la vignette (`.thumbs > figure`).
-- **R-UI-20** (EI-T4-1, T4 ; remplacé par R-UI-22) un seul abonné `change` de fiche livre dans l'app (`suiviLivre`).
-- **R-UI-21** (EI-T4-2, T4) `.two-col.livre .cover-wrap { max-width: 200px }` (sans elle : 768 px de couverture à 800, 343 à 375).
-- **R-UI-22** (EI-T4-R1-a, T4 ronde 1) une aide partagée `suivreLargeurAuMontage(cle, racine, mq, appliquer)` (`components.js`) pour la Bibliothèque, la fiche
+- **R-UI-20** (EI-T4-1, T4 ; remplacé par R-UI-22, **à ratifier** avec lui) un seul abonné `change` de fiche livre dans l'app (`suiviLivre`).
+- **R-UI-21** (EI-T4-2, T4 ; **à ratifier** : « ratification d’EI-T4-2, geste du chef / T6 », T4-R1) `.two-col.livre .cover-wrap { max-width: 200px }` (sans elle : 768 px de couverture à 800, 343 à 375).
+- **R-UI-22** (EI-T4-R1-a, T4 ronde 1 ; **à ratifier**) une aide partagée `suivreLargeurAuMontage(cle, racine, mq, appliquer)` (`components.js`) pour la Bibliothèque, la fiche
   recette et la fiche livre : abonnement au MONTAGE.
-- **R-UI-23** (EI-T4-R1-b, T4 ronde 1) « Sommaire » trié par `position` (séance) puis `printed_page`.
-- **R-UI-24** (EI-T4-R1-c, T4 ronde 1) « Pages et fichiers sources » seulement avec une page non-index ou un document non-photo.
-- **R-UI-25** (EI-T4-R1-d, T4 ronde 1) `.liste-compacte .titre { display: flex; align-items: center; min-height: 44px }` (cible du titre 19-22 px avant).
-- **R-UI-26** (EI-T4-R1-e, T4 ronde 1) `book.js` lit `estAImporter` / `aUneAdresse` de `library.js` (une définition ; `aUneAdresse` vit dans `components.js`
+- **R-UI-23** (EI-T4-R1-b, T4 ronde 1 ; **à ratifier**) « Sommaire » trié par `position` (séance) puis `printed_page`.
+- **R-UI-24** (EI-T4-R1-c, T4 ronde 1 ; **à ratifier**) « Pages et fichiers sources » seulement avec une page non-index ou un document non-photo.
+- **R-UI-25** (EI-T4-R1-d, T4 ronde 1 ; **à ratifier**) `.liste-compacte .titre { display: flex; align-items: center; min-height: 44px }` (cible du titre 19-22 px avant).
+- **R-UI-26** (EI-T4-R1-e, T4 ronde 1 ; **à ratifier**) `book.js` lit `estAImporter` / `aUneAdresse` de `library.js` (une définition ; `aUneAdresse` vit dans `components.js`
   depuis T5 ronde 1, `library.js` la ré-exporte).
-- **R-UI-27** (EI-T4-R1-f, T4 ronde 1) fixture du Sommaire `pgA` / `pgB` (dictée `pg3` / `pg2`, que l'ordre par clé rendait juste par hasard).
-- **R-UI-28** (EI-T5-a, T5) la feuille est lue au début du bloc « T5 — import ciblé », avant le remplacement de `fetch` (assertion dictée fausse).
-- **R-UI-29** (EI-T5-1, T5) compteur de la grille Livres par `estAImporter` : un signet rangé n'est pas « à importer » ; un livre sans rien à compter dit « Aucune
+- **R-UI-27** (EI-T4-R1-f, T4 ronde 1 ; **à ratifier**) fixture du Sommaire `pgA` / `pgB` (dictée `pg3` / `pg2`, que l'ordre par clé rendait juste par hasard).
+- **R-UI-28** (EI-T5-a, T5 ; **à ratifier**) la feuille est lue au début du bloc « T5 — import ciblé », avant le remplacement de `fetch` (assertion dictée fausse).
+- **R-UI-29** (EI-T5-1, T5 ; **à ratifier**) compteur de la grille Livres par `estAImporter` : un signet rangé n'est pas « à importer » ; un livre sans rien à compter dit « Aucune
   recette indexée ».
-- **R-UI-30** (EI-T5-2, T5) empreintes de l'accueil par `pointeurValide`, dédoublonnées (la règle de `library.js` et `book.js`).
-- **R-UI-31** (EI-T5-3, T5) le focus revient à la légende quand une saisie valide referme le champ « p. imprimée ».
-- **R-UI-32** (T5 et sa ronde 1 ; D-UI-10 amendé) `STATE_LABELS.availability` n'est lu que par `dish.js` (comparaison de plats, rattachements), ni par les exports
+- **R-UI-30** (EI-T5-2, T5 ; **à ratifier**) empreintes de l'accueil par `pointeurValide`, dédoublonnées (la règle de `library.js` et `book.js`).
+- **R-UI-31** (EI-T5-3, T5 ; **à ratifier**) le focus revient à la légende quand une saisie valide referme le champ « p. imprimée ».
+- **R-UI-32** (T5 et sa ronde 1 ; D-UI-10 amendé ; **à ratifier**) `STATE_LABELS.availability` n'est lu que par `dish.js` (comparaison de plats, rattachements), ni par les exports
   ni par Redécouvrir ; `libelleDisponibilite(recipe)` y fait dire « Lien web » à un signet.
 - **R-UI-33** (T5 ronde 1, constat 13) la clé orpheline « Repérée dans ton livre » quitte `en.js` (§ 5 prime sur le Step 4 de T5) ; « Repérée dans ton livre —
   page {p} » reste sur la fiche.
@@ -706,42 +715,71 @@ la tâche 6 les porte ici, elle ne les tranche pas.
   `estAImporter` (listes, compteurs) ne compte que celles d'un livre ; proposition de la ronde : l'écrire ainsi (badge pour toute référence sans adresse ; listes
   et compteurs : celles d'un livre). Lié à R-UI-12.
 - **R-UI-36** (T6) M3 (« Annuler » à droite pendant un vol, R-VIS-8) n'est pas rejouée par la preuve visuelle : l'app ne poste plus à
-  `api.anthropic.com` (lot passerelle) et un vrai vol exige une session ; `search.js` ne change pas en UI-1 ; la règle est tenue par `tests/theme.js`.
+  `api.anthropic.com` (lot passerelle) et un vrai vol exige une session ; `search.js` ne change en UI-1 que d'un littéral, l'icône de son état vide
+  (R-UI-P1), hors du chemin du vol ; la règle est tenue par `tests/theme.js`.
   Coût si faux : un recouvrement K1 / « Annuler » réapparu ne serait vu qu'au prochain lot qui touche `search.js` (UI-2 : sa preuve § 7 le mesure).
 - **R-UI-37** (T6) « Aller à Mes livres. » a quitté `en.js` avec les trois chaînes nommées au § 5 (même décision, D-UI-4 : « Aller à la
   bibliothèque. » la remplace ; retirées par les tâches 1 à 5, T6 le vérifie et n'a rien eu à retirer : `en.js` intact, aucune version). Coût si faux : une clé morte de plus dans le dictionnaire, rien à l'écran.
-- **R-UI-38** (T6) cinq textes que § 5 ne fixe pas : « Disponibles » (filtre § 4.3) → « Available », « 1 portion » (repères, n = 1 ; clé antérieure,
-  en.js:338) → « 1 serving », « Reprendre la séance » (§ 4.3) → « Resume the session », « {n} à importer » (compteur library.js:73) → « {n} to import »,
-  « Page {n} · p. {p} » (légende § 4.5, identique) ; épinglés par `tests/carnet.js` (table `TEXTES_UI1`, 33 paires). Coût si faux : des mots d'anglais à
-  changer, un test à relire.
-- **R-UI-39** (T6) la galerie de la preuve monte les composants RÉELS de `src/ui` (`recipeCard`, `grilleCartes`, `sectionPlain`, `section`,
-  `pageHeader`, `icone`) par un module, et l'outil attend `data-galerie-prete="1"` : un nom qui n'existe pas rougit la ligne « galerie » au lieu de
-  montrer une copie de balisage périmée. Coût si faux : la galerie dépend des noms de T1-T2 (voulu).
-- **R-UI-40** (T6) à 320 px (§ 13 point 3), seule la passe « etroit » juge l'onglet « Bibliothèque » (texte exact, une ligne, sans débordement) sur la
-  galerie ; le débordement du reste de la galerie à cette largeur (barre haute avec pastille, 341 px, spec refonte § 11) est connu et exclu de la
-  mesure. Coût si faux : un débordement neuf à 320 px hors de l'onglet ne serait pas vu ; 320 px n'est pas une largeur de T-7.
-- **R-UI-41** (T6, EI-T6-a ; le code commis gagne) la table `TEXTES_UI1` de `tests/carnet.js` porte « {n} portions » → « {n} servings » (clé antérieure,
-  en.js:339) à la place de la ligne combinée de § 5, retirée par R-UI-17 ; `CHAINES_NEUVES_AILLEURS['../src/ui/recipe.js']` gagne « Bibliothèque », « 1 portion »
-  et « {n} portions », celle de `book.js` « Bibliothèque », « Toutes » et « Disponibles » (le filet calculé les exige). Coût si faux : une ligne de la table.
-- **R-UI-42** (T6, EI-T6-b) outil de preuve : le repli `setContent` part d'une page de MÊME origine sans script (`/icons/`, la liste du dossier servie par
+- **R-UI-38** (T6 ; amendé par la ronde 1) quatre textes neufs que § 5 ne fixe pas : « Disponibles » (filtre § 4.3) → « Available », « Reprendre la séance »
+  (§ 4.3) → « Resume the session », « {n} à importer » (compteur de `library.js`) → « {n} to import », « Page {n} · p. {p} » (légende § 4.5, identique) ;
+  épinglés par `tests/carnet.js` (table `TEXTES_UI1`, 31 paires : 27 de § 5 UI-1, ces quatre). « 1 portion » → « 1 serving » n'est PAS un texte neuf : clé
+  d'`en.js` antérieure au lot, réemployée par les repères (R-UI-41). Coût si faux : des mots d'anglais à changer, un test à relire.
+- **R-UI-39** (T6 ; restreint par la ronde 1) la galerie de la preuve monte les composants RÉELS de `src/ui` là où ils existent comme fonctions —
+  `recipeCard` et `grilleCartes` (7 ter), `section` et `sectionPlain` (7 quater), `pageHeader` et `availabilityBadge` (7 quinquies), `ligneCompacte` de
+  `book.js` (7 sexies, ronde 1), `icone` (toutes les icônes) — et l'outil attend `data-galerie-prete="1"` : un nom qui n'existe pas rougit la ligne
+  « galerie ». Le reste est du balisage ÉCRIT À LA MAIN avec les vraies classes, une copie qui peut dériver : les onglets (copie de `navLinks`, `app.js`
+  n'est pas importable : l'onglet réel est mesuré dans l'app, R-UI-40), 7 bis, et dans 7 quinquies les repères, le lien d'origine, la rangée principale,
+  le `details` et le `segmented` (rendus par `renderRecipe`, pas des composants). Coût si faux : la galerie dépend des noms de T1-T2 et de `book.js` (voulu).
+- **R-UI-40** (T6 ; complété par la ronde 1) à 320 px (§ 13 point 3), la passe « etroit » juge l'onglet « Bibliothèque » (texte exact, une ligne, sans
+  débordement) sur la galerie (copie, onglet inactif) PUIS dans l'app sur `#/library` (la NAV rendue par `navLinks`, onglet ACTIF en graisse 600 —
+  exigé, sinon faute) ; 375, 390 et 768 px sont jugés dans l'app sur chaque route (actif sur les routes de la bibliothèque). Le débordement du reste de
+  la page à 320 px (barre haute avec pastille, 341 px, spec refonte § 11) est connu et exclu de la mesure. Coût si faux : un débordement neuf à 320 px
+  hors des onglets ne serait pas vu ; 320 px n'est pas une largeur de T-7.
+- **R-UI-41** (T6, EI-T6-a ; le code commis gagne ; **à ratifier** ; ronde 1, constats 12, 18 et 19) la ligne combinée « {n} portions · {d} » de § 5 n'a plus
+  de clé (R-UI-17) : les repères joignent « {n} portions » ou « 1 portion » et la durée par « · ». Ces deux clés sont antérieures au lot (`en.js` à
+  `f3672be`, anglais inchangé) : la table `TEXTES_UI1` ne les compte plus, elles rejoignent les clés réemployées (« 1 serving », « {n} servings »
+  épinglés) ; dans `CHAINES_NEUVES_AILLEURS`, `recipe.js` garde « Bibliothèque » et « 1 portion » (neuve DANS `recipe.js`), « {n} portions » en sort,
+  et `book.js` ne garde que « Bibliothèque » (« Toutes » et « Disponibles » y étaient à `f3672be` : règle d'en-tête de `tests/ajouter.js`). Coût si faux :
+  une ligne de la table.
+- **R-UI-42** (T6, EI-T6-b ; **à ratifier**) outil de preuve : le repli `setContent` part d'une page de MÊME origine sans script (`/icons/`, la liste du dossier servie par
   python), jamais d'`about:blank` : depuis l'origine `null`, Chrome bloque `/styles.css` et les modules de la galerie (mesuré le 28 octobre : galerie jamais
   prête) ; la contre-preuve de l'onglet en dépend. Coût si faux : aucun hors du registre (outil hors git).
-- **R-UI-43** (T6, EI-T6-c) outil de preuve : le 404 de `/favicon.ico` (préexistant, la seule erreur que la suite admet) arrive en différé après le
+- **R-UI-43** (T6, EI-T6-c ; **à ratifier**) outil de preuve : le 404 de `/favicon.ico` (préexistant, la seule erreur que la suite admet) arrive en différé après le
   chargement ; il est compté à part et dit au bilan, jamais une faute de ligne (sinon le minutage décidait du verdict). Coût si faux : un autre 404 nommé
   `favicon.ico` resterait muet — le dépôt n'a aucun fichier de ce nom.
 - **R-UI-44** (T6) le plan commis vit à `docs/superpowers/plans/2026-10-23-experience-carnet.md` (rév. 5, `ec0263d`), pas `…-ui-1.md` comme le dictait le
   brief : les documents citent le chemin réel.
+- **R-UI-45** (T6 ronde 1, constats 2, 3, 10 et 20 ; **à ratifier**) le filet i18n de `library.js`, `recipe.js`, `book.js`, `home.js` et `components.js` est CALCULÉ sur tout
+  le module : toute clé `t('…')` ou `t("…")` a son entrée `en.js`, hors un inventaire figé des 78 clés antérieures au lot sans entrée (écrites dans ce
+  module à `f3672be`, sans entrée alors comme aujourd'hui : 8, 37, 23, 1, 9) ; un texte neuf sans anglais rougit, listé ou non dans
+  `CHAINES_NEUVES_AILLEURS` (avant : seuls les 33 textes de la table étaient vus). Les emplois se lisent sans commentaires ; les sélecteurs neufs se
+  comparent comme des jetons entiers, et `.reperes` est mesuré (1,05 rem) par le bloc de T3. Coût si faux : l'inventaire à amender quand une clé
+  antérieure gagne son anglais (rien ne rougit alors : il ne fait qu'exempter).
+- **R-UI-46** (T6 ronde 1, constat 16 ; **à ratifier**) outil de preuve : liste BLANCHE du réseau — toute requête hors de l'origine servie est coupée et
+  comptée ; celles des quatre hôtes connus (supabase, anthropic, openlibrary, googleapis) sans faute, toute AUTRE est une faute (verdict ROUGE, adresse
+  nommée au bilan) : la preuve tient I-UI-2 pour l'app et la galerie (avant : seuls les quatre hôtes étaient coupés, et le reste passait en silence).
+  Coût si faux : aucun hors du registre (outil hors git).
+- **R-UI-47** (T6 ronde 1, constats 4 et 15) la fusion avec `main` (`1cb5dde`) est MESURÉE (`git merge-tree --write-tree`, sur un clone du scratchpad) :
+  17 fichiers en conflit, pas quatre — `CLAUDE.md` et `docs/architecture.md` (les deux sections au même ancrage : garder les DEUX), `STATE.md` (réécrire :
+  les paragraphes des deux lots), `src/i18n/en.js` (union des entrées, une clé écrite une fois), `src/model/schema.js` (`APP_VERSION 0.17.0`), `sw.js`
+  (UNION de `SHELL` et `VERSION` +1), `styles.css` (`.plat-vignette.grande` écrite une fois, `figure.apercu` ET `.plat-vignette.petite` gardées, R-UI1-1),
+  `tests/photo-plat.js` (la version à trois sélecteurs), `tests/ajouter.js` (`MODULES_NEUFS` en union, pins), `tests/tests.js` (imports et appels des deux
+  suites en union, épingle remesurée) et les pins de version de `tests/assistant-compte.js`, `classement.js`, `creer-ia.js`, `passerelle.js`,
+  `recherche-web.js`, `sync-l3.js`, `sync-l4.js` (0.17.0, I-UI-7) ; la spec et `search.js` fusionnent seuls (`'loupe'` gardé : R-UI-P1). Chaque
+  résolution se relit à la main, jamais par script (un filet i18n ou une règle de feuille perdus désarment une garde). Coût si faux : rien de faux, une
+  liste à relire.
 
 Dettes et limites nommées par les tâches 1 à 6 (une ligne chacune ; aucune n'est corrigée par T6, qui ne touche aucun module de `src/ui`) :
 - **M16** (T1 ronde 1) plusieurs mesures de `tests/carnet.js` ne tournent qu'à une largeur ; la preuve visuelle mesure 320 à 1512 px.
 - **MA** (T2 ronde 1) le défaut `window.matchMedia` non lié est équivalent dans Chrome (appelé comme fonction) ; MA2 et MA3 sont tués par le test du défaut.
 - (T3) « Ouvrir le lien » survit dans deux textes qui ne sont pas des `t()` : le commentaire de `lienOrigine` (`components.js:77`) et des assertions négatives
-  du bloc T3 ; le filet de T6 ne lit que les `t('…')`.
+  du bloc T3 ; le filet de T6 ne lit que les `t('…')` et `t("…")`.
 - (T3) R-VIS-8 (« Annuler » rangé à droite d'une `.status[role=status]` suivie d'une `.row`) s'applique aussi au lien d'origine de la zone d'échec de l'écran
   d'import web.
 - (T5) la légende d'une vignette de l'import ciblé reste un bouton qui ouvre « p. imprimée » quand les pages sont figées (la croix, elle, disparaît).
 - (T6, preuve) dans la liste compacte de la fiche livre, une référence montre sa page deux fois : `availabilityBadge` (« À importer · p. 132 ») et
-  `span.muted` « p. 132 » (`book.js`, `ligneCompacte`) ; § 4.3 demande le badge « À importer » seul. Capture `1512-fiche-livre.png`. Constat pour le chef.
+  `span.muted` « p. 132 » (`book.js`, `ligneCompacte`) ; § 4.3 demande le badge « À importer » seul. Capture `1512-fiche-livre.png` ; depuis la ronde 1, la galerie
+  (7 sexies, `ligneCompacte` réel) le montre aussi. Constat pour le chef.
 - (T6, preuve) à 320 px, « Ma semaine » passe sur deux lignes dans son onglet (non jugé : seul « Bibliothèque » l'est, § 13 point 3).
 - (T6, preuve) à 375 px, le titre d'Aujourd'hui « Qu’est-ce qu’on cuisine ? » laisse le « ? » seul sur sa ligne (espace ordinaire avant « ? », chaîne
   antérieure) ; capture `375-accueil.png`.
