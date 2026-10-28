@@ -444,7 +444,7 @@ R-F-4) ; aucun 403 anti-hotlink rencontré (D-F3 : rien à contourner).
 Attendu dans `public.assistant_journal` (à lire par Neegan dans l'éditeur SQL, non fait par le contrôleur) : deux lignes `lecture-web` (S17 en 200,
 S18 en 422) et deux lignes `image-web` (S-F4 en 200, S-F5 en 422), jetons `null` ; `assistant_usage_jour` du 23 octobre : 4 appels de plus.
 
-## Preuve `0007_apercu_web.sql` — à jouer
+## Preuve `0007_apercu_web.sql` — jouée le 28 octobre 2026 (0 faux sur 11)
 
 Section préparée le 25 octobre 2026 (lot UI-2 « Aperçus des résultats web », spec `docs/superpowers/specs/2026-10-23-experience-carnet-design.md`
 § 6, D-UI-14 ; procédure : étape 13 du README). **À jouer par Neegan après `0006` (jouée le 23 octobre, ci-dessus), AVANT le redéploiement de la
@@ -457,18 +457,42 @@ Après `0007`, la preuve `0006` devient historique : rejouée, son 1.01 rougit (
 
 | Heure | Collage | Résultat |
 | --- | --- | --- |
-| — | `migrations/0007_apercu_web.sql` | à jouer (attendu `Success. No rows returned`) |
-| — | empreinte du `0007` collé : `shasum -a 256 supabase/migrations/0007_apercu_web.sql` | à relever (fichier du dépôt à la tête de la tâche 1) |
-| — | `notify pgrst, 'reload schema';` (collée seule ; facultative selon l'étape 13) | — |
-| — | preuve `0007` (« Run without RLS ») | à jouer : attendu `999 BILAN : 0 faux sur 11`, `ok` vrai sur les 12 lignes, aucune ligne « aucun compte : etape sautee » |
+| 28 octobre 2026, avant 13 h 35 UTC | `migrations/0007_apercu_web.sql` (copiée du dépôt par `pbcopy`, à la tête `949c947`) | collée par Neegan ; la preuve qui suit la lit appliquée (1.01, 1.02) |
+| — | empreinte du `0007` collé : `shasum -a 256 supabase/migrations/0007_apercu_web.sql` | `70168ef84f16d914532aa57eddf4c9b8162234c7cff4381e54145cfd59ab3739` (le fichier du dépôt, copié tel quel) |
+| — | `notify pgrst, 'reload schema';` (collée seule ; facultative selon l'étape 13) | non jouée (facultative : aucune table ni fonction neuve) |
+| 28 octobre 2026, tableau reçu à 13 h 35 UTC | preuve `0007` (« Run without RLS » ; empreinte `f072ccce…`) | **`999 BILAN : 0 faux sur 11`**, `ok` vrai sur les 12 lignes, aucune ligne « aucun compte : etape sautee », 2.032 `id non nul` |
 
-Tableau des verdicts (ordre, etape, attendu, obtenu, ok), à coller tel que rendu par l'éditeur SQL :
+Tableau des verdicts (ordre, etape, attendu, obtenu, ok), tel que rendu par l'éditeur SQL :
 
 | ordre | etape | attendu | obtenu | ok |
 | --- | --- | --- | --- | --- |
-| à coller | | | | |
+| 1.01 | pg_get_constraintdef : les six outils, dans l ordre d OUTILS_0007 | recherche-web < creation < extraction < lecture-web < image-web < apercu-web | dans l ordre | true |
+| 1.02 | une seule contrainte check sur assistant_journal | 1 | 1 | true |
+| 1.03 | anon et authenticated : aucun privilege sur la table (inchange depuis 0004) | false / false | false / false | true |
+| 1.04 | service_role : select, insert, update sur la table | true / true / true | true / true / true | true |
+| 1.05 | vue assistant_usage_jour toujours la, en security invoker | true | true | true |
+| 2.01 | sous postgres : une ligne de journal outil apercu-web est acceptee | acceptee | acceptee | true |
+| 2.02 | un outil hors liste est toujours refuse par le check | 23514 | 23514 | true |
+| 2.03 | assistant_reserver accepte lecture-web : un id non nul | id non nul | id non nul | true |
+| 2.031 | 2.03 bis : assistant_reserver(uid, 'image-web', 1, c + 1) -> id non nul (la valeur du lot F) | id non nul | id non nul | true |
+| 2.032 | 2.03 ter : assistant_reserver(uid, 'apercu-web', 1, c + 1) -> id non nul (la valeur du lot UI-2) | id non nul | id non nul | true |
+| 3.01 | les cinq anciens outils passent encore | acceptes | acceptes | true |
+| 999 | BILAN | aucun verdict faux | 0 faux sur 11 | true |
 
-## Sondes `apercu-web` — à jouer (après `0007` et le redéploiement)
+## Sondes `apercu-web` — version 5 déployée le 28 octobre 2026 (sondes sans session jouées ; sondes avec session à jouer)
+
+**Version 5** déployée par le contrôleur le 28 octobre 2026 à 13 h 36 UTC, après la `0007` collée et prouvée ci-dessus, depuis `~/projects/mistu`
+à la tête `949c947` (le code de `supabase/functions/` y est celui de `ecfc19b`, vérifié par `/verify` : `git diff ecfc19b 949c947 -- supabase/functions`
+vide), par `~/.local/bin/supabase functions deploy assistant --project-ref ybdooerfeziiabsbfxtb --no-verify-jwt --use-api` (CLI 2.121.0 ; aucun
+`config.toml` dans le dépôt) ; `supabase functions list` : `ACTIVE`, version 5, `verify_jwt: false`, `import_map: true`, `ezbr_sha256
+d399d826f87f8ac40290bd31738aba5959b6eae6442bfc7e7a239e60d194a56a`. Recul : redéployer la version 4 depuis `0c7cbbd`. Sondes sans session, sans
+dépense (13 h 36-13 h 37 UTC ; toutes s'arrêtent avant la réservation) : S1 `OPTIONS` origine admise → 204, `access-control-allow-origin:
+https://neegans.github.io`, `allow-headers: authorization, apikey, content-type, x-client-info`, `allow-methods: POST, OPTIONS`, `max-age: 600` ; S2
+`OPTIONS` origine refusée → 204 sans `allow-origin` ; S3 `POST` sans jeton → 401 `non_connecte` ; S4 origine refusée → 403 `origine` ; S5 jeton bidon et
+clé publique → 401 `non_connecte` ; S6 `GET` jeton bidon → 401 ; S7 `PUT` → 405 `methode` ; S8 sans `Origin` → 403 `origine` ; S9 clé publique en
+Bearer → 401 `non_connecte` ; S16 (`lecture-web`), S-F3 (`image-web`) et S-A4 (`apercu-web`) sans jeton → 401 `non_connecte` : identiques aux
+versions 1 à 4. S-A1 et S-A2 passent la session (la fonction lit la session avant le corps : sans elle, 401) : à jouer avec la session de Neegan,
+comme les sondes payantes.
 
 Lot UI-2 (spec § 6, « Sondes » ; étape 13, point 5 du README) : à jouer par le chef d'orchestre sur la version redéployée (version et `ezbr_sha256` à
 consigner ici, comme pour les versions 1 à 4, section « Passerelle `assistant` »), après la `0007` collée et prouvée par Neegan, et après les tests Node
@@ -483,7 +507,7 @@ Session : jeton copié depuis la console du site connecté par le script d'atten
 | S-A1 | `{ outil: 'apercu-web', corps: { urls: 'x' } }` | 400 `requete` | à jouer | forme refusée avant toute réservation (aucune ligne au journal) |
 | S-A2 | `urls: ['http://exemple.test/', 'https://127.0.0.1/', 'https://localhost/', 'https://ybdooerfeziiabsbfxtb.supabase.co/', 'https://exemple.test:8443/']` | 422 `interdit` | à jouer | cinq adresses refusées par `valideAdresse` : 422 sans réservation, aucune ligne |
 | S-A3 | une admise (la page Ricardo de S17) et les quatre premières de S-A2 | 200, `apercus[0]` avec `image` ou une raison, `apercus[1..4]` `{ image: null, raison: 'interdit' }` | à jouer | validation par adresse AVANT une réservation unique (I-UI-6) : UNE ligne `apercu-web` au journal, jetons `null` |
-| S-A4 | sans jeton | 401 `non_connecte` | à jouer | la session d'abord |
+| S-A4 | sans jeton | 401 `non_connecte` | 401 `non_connecte` (103 ms, version 5) | la session d'abord |
 | S-A5 | les cinq adresses des liens de la recherche « puttanesca » (relevées dans l'app) | 200 : cinq images ou raisons, en ≤ 60 s | à jouer | taille réelle de la réponse (K-5), durée totale, compte d'`image_trop_lourde` (décide si la borne passe de 1 à 2 Mio, B-M-6) |
 | S-A6 | une page de liste (catégorie de recettes) | 200 : `pas_de_recette` | à jouer | la règle de F (page de liste : `og:image` écartée) vaut pour les aperçus |
 | S-A7 | « cinq pages hostiles de 2 Mio » servies par un hôte public contrôlé par le contrôleur | 200 ou `delai` en moins de 60 s | à jouer | budget de 60 s et parallélisme 2 sous le vrai runtime (mémoire ≈ 20 Mio transitoires) : jamais un 502 d'isolat tué (S-2) |
