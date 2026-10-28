@@ -1,4 +1,4 @@
-# STATE.md — Cuisine OS (mistu) — 28 octobre 2026 — lot I2 construit et vérifié localement, 0.19.0, suite 6503/6503
+# STATE.md — Cuisine OS (mistu) — 28 octobre 2026 — lot I2 EN LIGNE, 0.19.0, suite publique 6503/6503
 
 **28 octobre 2026 — LOT I2 « LIVRE SANS SAISIE, PHOTOS ET NOTES ».** Spec
 [`docs/superpowers/specs/2026-10-28-livre-sans-saisie-design.md`](docs/superpowers/specs/2026-10-28-livre-sans-saisie-design.md)
@@ -8,16 +8,21 @@ Brouillon repris sans appel automatique, corrections conservées, sources par ch
 Image du plat proposée dans la même extraction, cadrage local rectangulaire, confirmation avant écriture ; pages originales conservées.
 « J’ai cuisiné ce plat », formulaire par recette en fin de repas, photos liées à la cuisson, observations corrigeables, « Mes notes » permanentes.
 Photo personnelle prioritaire sur les cartes et la fiche, image du livre séparée ; fichiers synchronisés et conservés dans les archives.
-Version locale `0.19.0`, service worker `cuisine-os-v0.19.0-1`, `DB_VERSION` 4 ; aucun magasin, outil serveur ou SQL nouveau.
+Version publiée `0.19.0`, service worker `cuisine-os-v0.19.0-1`, `DB_VERSION` 4 ; aucun magasin, outil serveur ou SQL nouveau.
 **Vérifications :** navigateur **6503/6503** (épingle **6502**, départ 6246/6246, aucune assertion retirée), Node **230/230**, migrations
 `--check` **0**, `git diff --check` propre. Zéro erreur JavaScript et zéro requête externe dans le harnais navigateur.
 Captures 320/390/768/1280 pixels sans débordement, ajout d’un livre puis rechargement de sa fiche dans l’application réelle vérifiés.
-**Publication autorisée par Neegan (« go », après sa question sur le déploiement).** Commit, intégration à `main` et publication GitHub Pages
-en préparation ; le résultat sera consigné après vérification publique. La dernière version publique attestée reste I1 `0.18.0`.
+**Publication faite sur le « go » de Neegan, après sa question sur le déploiement.** Commit de code `455b192`, intégration en avance rapide
+de `livre-sans-saisie` dans `main`, push réussi ; GitHub Pages a construit ce commit le 28 octobre à 22 h 19 UTC.
+Sur [le site public](https://neegans.github.io/mistu/) : **6503/6503**, zéro erreur JavaScript et zéro requête hors origine dans le harnais.
+Dix fichiers servis comparés aux fichiers locaux, tous identiques (version, point d’entrée et sept modules nouveaux).
+Service worker actif, cache `cuisine-os-v0.19.0-1` installé avec les nouveaux écrans ; ajout d’un livre, rechargement puis rechargement
+hors ligne réussis dans un profil jetable sans compte. Preuves : `.superpowers/sdd/2026-10-28-livre-sans-saisie/suite-publique.resultat.json`
+et `publication.resultat.json`. Aucun déploiement de fonction ni migration SQL.
 
 **Non prouvé sur données réelles :** identification de Trinity, recadrage proposé par le modèle, Safari/iPhone physique et transfert entre deux
 appareils connectés. Les tests utilisent des bases jetables et un réseau factice ; aucun appel réel à l’assistant.
-**Suite pour Neegan après publication :** mettre tous les appareils à jour et jouer ces essais.
+**Suite pour Neegan :** recharger l’application sur tous les appareils pour passer à `0.19.0`, puis jouer ces essais.
 Le lot I3 Thermomix reste séparé, à spécifier puis à relire avant son code.
 
 **28 octobre 2026, fin de journée — PASSATION À CODEX (VibeForge).** La suite (lots I2 « livre sans saisie, photos, notes » et I3 « chef

@@ -46,5 +46,8 @@ dans la vraie application locale réussis.
 
 Le registre local de preuves est
 `.superpowers/sdd/2026-10-28-livre-sans-saisie/` (résultats JSON, lanceur navigateur, captures et preuves rouges de concurrence).
-Les ajustements de construction sont consignés dans la spec, §15. Aucun geste serveur. Après le bilan local, Neegan a autorisé la publication
-par « go » en réponse à la confirmation que le lot n’était pas encore déployé ; commit, intégration à `main` et vérification publique suivent.
+Les ajustements de construction sont consignés dans la spec, §15. Après le bilan local, Neegan a autorisé la publication par « go » en réponse
+à la confirmation que le lot n’était pas encore déployé. **Publication terminée :** commit de code `455b192`, fusion en avance rapide dans
+`main`, push et build GitHub Pages réussis. Suite publique **6503/6503**, zéro erreur JavaScript ou requête externe ; dix fichiers servis
+identiques, cache `cuisine-os-v0.19.0-1` installé. Ajout, rechargement et rechargement hors ligne d’un livre réussis dans un profil jetable.
+Preuves : `suite-publique.resultat.json` et `publication.resultat.json` dans le registre. Aucune fonction déployée ou migration appliquée.

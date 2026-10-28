@@ -3335,8 +3335,10 @@ R-I1-1 ; leurs fonctions pures restent épinglées, et les gardes de l'écran so
 
 **Autorisation et état.** Spec `docs/superpowers/specs/2026-10-28-livre-sans-saisie-design.md` approuvée par Neegan (« ok go enchaine »),
 plan `docs/superpowers/plans/2026-10-28-livre-sans-saisie.md`. Branche locale `livre-sans-saisie`, base `baa7822`, dossier `~/projects/mistu`,
-serveur 8102. `APP_VERSION 0.19.0`, `sw.js cuisine-os-v0.19.0-1`, `DB_VERSION` 4. Publication autorisée par le « go » suivant la question de
-Neegan sur le déploiement ; intégration et vérification publique en cours. Serveur et SQL intacts.
+serveur 8102. `APP_VERSION 0.19.0`, `sw.js cuisine-os-v0.19.0-1`, `DB_VERSION` 4. **PUBLIÉ** sur le « go » suivant la question de
+Neegan sur le déploiement : commit de code `455b192`, fusion en avance rapide dans `main`, push et build GitHub Pages réussis.
+Serveur et SQL intacts. Suite publique **6503/6503**, dix fichiers servis identiques, service worker installé avec les nouveaux modules ;
+ajout, rechargement et rechargement hors ligne d’un livre vérifiés dans un profil jetable sans compte.
 
 **Comportement.** La route `#/add/livre` cherche d’abord l’ISBN dans la bibliothèque et le catalogue, puis utilise le Web si nécessaire
 (un appel assistant maximum). Une photo fournit les indices puis une recherche Web (deux appels maximum). Champs et suggestions sont bornés,

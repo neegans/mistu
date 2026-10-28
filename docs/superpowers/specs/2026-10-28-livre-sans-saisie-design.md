@@ -461,3 +461,8 @@ vérifiées dans le code ; elles ne changent ni les coûts annoncés ni le péri
 Le bilan final mesuré figure dans `STATE.md` et dans le plan. Les captures locales couvrent 320, 390, 768 et 1280 pixels, sans débordement ;
 le parcours réel « Continuer sans compte → Ajouter un livre → saisir → enregistrer → recharger la fiche » est vérifié dans un profil jetable.
 Ces contrôles ne valent pas preuve de qualité du modèle sur Trinity, ni preuve Safari/iPhone physique ou de transfert sur deux appareils réels.
+
+**R-I2-7 — Publication autorisée et vérifiée.** Après le bilan local, Neegan a demandé si le lot était déployé puis donné son « go » à la
+publication. Le commit de code `455b192` a été intégré en avance rapide à `main`, poussé et construit par GitHub Pages. La suite publique
+passe **6503/6503** ; les fichiers servis vérifiés sont identiques, le cache `cuisine-os-v0.19.0-1` est installé, et un livre créé dans un
+profil jetable reste accessible après rechargement hors ligne. Aucun appel assistant réel, aucune fonction déployée ni migration appliquée.
