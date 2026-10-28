@@ -1443,6 +1443,56 @@ par la fonction, sans migration ; la fonction `assistant` gagne un cinquième ou
   (`import-web.js`) et les écrivains de la photo (`photo-plat.js`, ★ Favori, « Corriger ») écrivent par la condition `{ key, fusion }` de
   `repo.saveBatch`, la fiche relue DANS la transaction ; résidu SSRF de R-B-21 repris (R-F-19).
 
+## Expérience « carnet » (lot UI-1, 23-28 octobre 2026)
+
+Spec : `docs/superpowers/specs/2026-10-23-experience-carnet-design.md` (rév. 2.1 ; § 0 : D-UI-1 à D-UI-14 ; § 2 : I-UI-1 à I-UI-7 ; § 3 : jetons,
+typographie, composants ; § 4 : écrans ; § 5 : textes ; § 12 « Construction UI-1 : rulings » : R-UI-P1 à P3, R-UI1-1, R-UI1-2, R-UI-1 à R-UI-44 ; § 13 : les sept défauts
+confirmés). Livré ici (branche `experience-carnet`, construite sur `f3672be` en parallèle de UI-2 — fusionné dans `main` le 27 octobre — et non fusionnée) : la direction des maquettes
+adaptée à l'app — thème, composition des écrans, textes, icônes — sans serveur, sans migration, sans règle de produit changée (I-UI-1).
+
+- **Jetons** (`styles.css` `:root`, `tests/theme.js`) : quatre valeurs changent — `--action #4f6b2e` (l'olive des maquettes ; renverse V-4 de la refonte,
+  § 13 point 0), `--action-2 #3e5424`, `--action-bg #e9eddf`, `--tap rgba(79,107,46,.15)` ; 29 paires ≥ 4,5 (la 29e : olive sur `--paper-2`, 5,14). Règle
+  vérifiable (D-UI-2) : un ÉTAT (badge « Original », statut ok, puce cochée) reste vert gris (`--accent`, `--ok`) ; l'ACTION (bouton plein, lien, onglet
+  actif, anneau de focus) porte l'olive ; la galerie les met côte à côte (bloc `badges-et-action`). Inventaire T-1 et liste blanche T-2 inchangés.
+- **Typographie** : `h1` de page `clamp(1.8rem, 6vw, 3.2rem)` ; `h1.titre-fiche` (`pageHeader(…, { classeTitre: 'titre-fiche' })`) `clamp(1.5rem, 4.5vw,
+  2.6rem)` ; `h2` 1,6 rem ; titre de carte-plat serif 1,3 rem ; `--serif` Georgia (CSP : aucune police externe) ; `.step-num` sur `--paper-2`.
+- **Composants** (`src/ui/components.js`) : `sectionPlain(title, ...children)` → `section.plain` (sans fond ni ombre, filet `--line` sous le titre) ;
+  `section()` inchangé (`.card`, 54 appelants) ; `recipeCard(doc, { photoEnTete, fichier })` : la carte-plat VERTICALE (`a.item-link.carte-plat`,
+  `img.plat-vignette.grande` 4:3 quand `typeAffichage(fichier)` est une image, sinon `.sans-photo` : bloc de titre sur `--paper-2`, 7 rem) — décision
+  SYNCHRONE au rendu sur la ligne `files` passée par l'appelant (`repo.getFiles` en une fois pour les cartes rendues, I-UI-5 ; jamais `vignettePlat`,
+  jamais un cadre vide) ; la carte horizontale reste le défaut ailleurs ; `grilleCartes(noeuds)` → `div.grille-plats` (2 colonnes dès 360 px, 3 dès
+  900 px), bornée à 60 cartes + « Voir plus » (F-9) ; trois règles `.plat-vignette` (72 px, `.grande` 4:3, `.petite` 48 px).
+- **Icônes** (`src/ui/icones.js`, dans `SHELL`) : `icone(nom)` → `svg[aria-hidden][focusable=false]` 24 × 24 au trait, `stroke: currentColor`, vingt-trois
+  noms relevés du code (navigation, grille Ajouter, accueil d'un livre, états vides, repères) ; nom inconnu → levée ; les émojis restent dans les textes
+  de contenu. `tests/theme.js` ne les voit pas (hors feuille de style).
+- **Écrans** : `src/ui/library.js` (segment Recettes par défaut, filtres par données, tri par dernière modification, pied `?tab=a-importer`, actions par
+  segment : « Ajouter une recette » → `#/add`, « Ajouter un livre » → `#/add/livre`) ; `src/ui/recipe.js` (`div.fiche-tete` `.two-col` ≥ 760 px, repères
+  `div.reperes`, `a.btn.link[data-role=ouvrir-lien]` « Voir la page d'origine ↗ », `details.card[data-role=autres-gestes]`, `segmented` Ingrédients /
+  Préparation par `hidden`, `deps.matchMedia` injectable écouté sur `change`) ; `src/ui/book.js` (`div.two-col.livre` `200px 1fr` ≥ 900 px, « Sommaire »
+  = `div.thumbs` des pages `kind === 'index'`, `ul.liste-compacte`, 8 lignes puis « Voir les {n} recettes ») ; `src/ui/home.js` (`pageHeader`,
+  `grilleCartes` sur Favoris et Dernières cuissons, sa propre passe `getFiles`) ; `src/ui/add.js`, `accueil-livre.js`, `import-cible.js` (icônes, « × » de
+  retrait ≥ 44 px, badge « À importer ») ; `src/app.js` (NAV `label: 'Bibliothèque'`, icônes). Les écrans hors § 4 ne changent que par les jetons et les
+  titres (§ 8). `search.js` ne change pas (la carte web garde sa forme épinglée ; UI-2 y pose les vignettes).
+- **Libellés** (D-UI-10) : `availabilityBadge` porte ses textes courts (« À importer · p. {p} », « À importer », « Disponible », « Partielle », « Lien
+  web » ; un état hors vocabulaire → badge vide) ; `STATE_LABELS.availability.reference_only` → « À importer » (lue par `dish.js` seulement — comparaison de plats, rattachements —, où un signet dit
+  « Lien web » par `libelleDisponibilite` : R-UI-32 ; ni les exports ni Redécouvrir ne la lisent) ; « Repérée dans ton livre — page {p} » reste
+  sur la fiche ; « Voir la page d'origine » sur toute adresse lisible (`http:` compris, I-B5) ; « + Recette », « + Pages d'index », « Ouvrir le lien »,
+  « Aller à Mes livres. » retirées du source ET d'`en.js` ; « Mes livres » reste le segment de la recherche.
+- **Tests** : `tests/carnet.js` (`runCarnetTests({ eq, ok })`, câblé dans `tests/tests.js` avant le bloc thème ; blocs par tâche ; le bloc T6 porte les
+  filets : table `TEXTES_UI1` de 33 paires, `CHAINES_NEUVES_AILLEURS` vérifiée par CALCUL sur les cinq modules hors `MODULES_NEUFS`, chaînes retirées
+  absentes de tout module de `SHELL`, treize sélecteurs neufs présents) ; `tests/theme.js` amendé (une valeur, une paire, deux libellés) ; épingles
+  amendées tâche par tâche (spec § 7), jamais contournées.
+- **Preuve visuelle** (registre, hors git ; `preuve-visuelle.cjs`, copie adaptée de l'outil du lot refonte) : quatre largeurs (375 × 812, 390 × 844,
+  768 × 1024, 1512 × 982) plus la galerie à 320 × 568 ; `reducedMotion: 'reduce'`, service workers bloqués, réseau externe coupé, porte passée ; les
+  données sont SEMÉES dans la base jetable du contexte par les modules réels (`semer(page, 'peu' | 'beaucoup')` : un livre, douze recettes, deux
+  pages de sommaire ; 2 puis 9 photos) ; colonnes : débordement, navigation, cibles, contraste par nœud texte, `[hidden]`, **onglet** (« Bibliothèque »
+  exact, une ligne, sans débordement : D-UI-4, § 13 point 3), console ; M14 (focus clavier, anneau olive) ; M3 NON rejouée (l'app ne poste plus à
+  `api.anthropic.com` ; `search.js` inchangé : R-VIS-8 tenu par `tests/theme.js`). La galerie monte les composants RÉELS (`recipeCard`, `grilleCartes`,
+  `sectionPlain`, `section`, `pageHeader`, `icone`) par un `<script type="module">` et signale `data-galerie-prete`. Contre-preuves : olive pâle →
+  contraste KO ; libellé d'onglet allongé → onglet KO. Deux retouches de l'outil source : le repli `setContent` part d'une page de MÊME origine
+  (`/icons/` : depuis `about:blank`, Chrome bloque la feuille et les modules, R-UI-42) ; le 404 différé de `/favicon.ico` est compté à part (R-UI-43).
+  Mesure du 28 octobre : 69 lignes sur 69, 173 captures, contraste rendu minimum 4,62 sur 3 600 nœuds, M14 20 sur 20.
+
 ## Modèle de données (magasins IndexedDB)
 
 `books`, `book_editions` (ISBN, langue, `unit_convention_id`), `source_documents` (fichier, sha256, type), `source_pages` (page imprimée, position),

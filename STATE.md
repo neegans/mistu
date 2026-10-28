@@ -1,4 +1,17 @@
-# STATE.md — Cuisine OS (mistu) — état au 23 octobre 2026, 17 h 30 (chaîne A → B → G → C → D → E → F EN LIGNE : `main` = `origin/main` = `2f15d2e`, 0.15.0, suite publique 5948/5948 ; migrations `0005` et `0006` collées et prouvées ; fonction `assistant` version 4 ; plus aucun lot en construction ; reste à Neegan : appareils à jour, preuves réelles sur le site public, décisions ouvertes, révocation de l'ancienne clé, « clean »)
+# STATE.md — Cuisine OS (mistu) — état au 28 octobre 2026, 1 h (HAE) (`main` = `origin/main` = `1cb5dde`, 0.16.0 : chaîne A → F et lot UI-2 « Aperçus » fusionnés et poussés, `0007` pas encore collée ; lot UI-1 « Carnet » (0.17.0, branche `experience-carnet`) FINI dans son worktree, PAS fusionné, PAS poussé ; reste à Neegan : `0007`, redéploiement, fusion de UI-1 par un commit de fusion, preuves réelles, décisions ouvertes, « clean »)
+
+**28 octobre 2026, 1 h (HAE) — LOT UI-1 « EXPÉRIENCE CARNET » : FINI dans le worktree `~/projects/mistu-carnet` (branche `experience-carnet`, base `f3672be`
+= `main` `05c751f` + trois commits de docs, spec rév. 2.1 `7633675` et le « Go » de Neegan `f3672be`, plan `ec0263d`, tête de code
+`0fa52b4`, filets `1d952fe`, serveur 8096), six tâches (T1 jetons et composants, T2 bibliothèque sur les recettes, T3 fiche recette, T4 fiche livre, T5 Aujourd'hui /
+Ajouter / import ciblé / libellés, T6 filets, preuve visuelle, docs ; rondes et re-revues : `progress.md`), `/verify` au chef
+d'orchestre ; contrôles mécaniques de T6 (suite 6216/6216, épingle 6215, Node 208/208, `--check` 0, invisibles 0, aucune clé), preuve visuelle VERT (69 lignes, 173 captures,
+contraste minimum 4,62 sur 3 600 nœuds, onglet « Bibliothèque » entier à 320-768 px), `sw.js cuisine-os-v0.17.0-9`, `APP_VERSION 0.17.0`, `DB_VERSION` 4, aucune
+migration, aucun fichier sous `supabase/`. **PAS fusionné, PAS poussé.** Pour Neegan, dans l'ordre : le lot UI-2 est déjà fusionné et poussé (27 octobre ; ses gestes restants — `0007`, redéploiement,
+sondes — sont dans le `STATE.md` de `main`) ; la fusion de `experience-carnet` par un commit de fusion (quatre fichiers communs : `sw.js` union de
+`SHELL` + `VERSION` `-10`, `schema.js` et les pins 0.17.0, `en.js` union, `tests/tests.js:255` remesuré ; ce `STATE.md` aussi), push, suite publique, preuve réelle § 10 UI-1
+sur sa bibliothèque et sur l'iPhone (« Agrandir l'affichage » dit), les sept points de § 13 (défauts confirmés le 23 octobre, renversables), « clean »
+après la copie du registre AVEC `captures/`. Registre `.superpowers/sdd/2026-10-23-experience-carnet/` ; rulings R-UI-1 à R-UI-44 dans la spec
+§ 12 « Construction UI-1 : rulings » ; section du lot dans `CLAUDE.md` et `docs/architecture.md`.**
 
 **23 octobre 2026, 17 h 30 — CHAÎNE A → F EN LIGNE.** Points 1 à 4 du bilan `.superpowers/sdd/nuit-2026-10-18/BILAN-CHAINE-A-F.md` faits le 23 octobre
 : `0005` (35 verdicts, 0 faux) et `0006` (10 verdicts, 0 faux) collées et prouvées par Neegan ; fonction `assistant` redéployée en version 4 depuis
@@ -359,7 +372,15 @@ en fichiers seulement : `supabase/migrations/0003_assistant_config.sql` et sa pr
 
 ## Reprendre
 
-Lot A, import ciblé (le plus récent) :
+Lot UI-1 « Carnet » (le plus récent ; l'outil de preuve réécrit resultats.md, resultats.json et captures/ : jamais pendant qu'une revue les lit) :
+```
+cd ~/projects/mistu-carnet && git status --short && git log --oneline -3
+curl -sS -o /dev/null -w "8096 http=%{http_code}\n" http://127.0.0.1:8096/tests/ || (nohup python3 -m http.server 8096 --bind 127.0.0.1 > /dev/null 2>&1 &)
+node ~/projects/mistu-carnet/.superpowers/sdd/2026-10-23-experience-carnet/suite.cjs 8096   # attendu : 6216/6216 (+ 1 x 404 favicon)
+node --test tools/*.test.mjs && node tools/generer-migrations.mjs --check   # attendu : 208/208, code 0
+node ~/projects/mistu-carnet/.superpowers/sdd/2026-10-23-experience-carnet/preuve-visuelle.cjs 8096   # attendu : VERT, code 0, 69 lignes, 173 captures
+```
+Lot A, import ciblé :
 ```
 cd ~/projects/mistu-import && git status --short && git log --oneline -3
 curl -sS -o /dev/null -w "8088 http=%{http_code}\n" http://localhost:8088/tests/ || (nohup python3 -m http.server 8088 > /dev/null 2>&1 &)
