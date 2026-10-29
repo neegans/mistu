@@ -4,6 +4,7 @@ import { formatQuantity } from './quantity.js';
 import { unitLabel, dimensionOf, convertValue } from './units.js';
 import { EN } from '../i18n/en.js';
 import { getUiLocale, t } from '../core/i18n.js';
+import { extraireObjetJson } from './reponse-json.js';
 
 export const PROFIL_TM7 = Object.freeze({ id: 'tm7-na-120v-v1', revision: 1, modele: 'TM7', tension: 120,
   modes: Object.freeze(['manuel', 'vapeur']), temperatures: Object.freeze([null, 100]),
@@ -26,14 +27,19 @@ function liste(v, max, min = 0) {
   return v;
 }
 const codepoints = (s) => Array.from(s).length;
-function texte(v, max, { vide = false, hostile = false } = {}) {
+function texte(v, max, { vide = false, hostile = false, affiche = true } = {}) {
   if (typeof v !== 'string' || codepoints(v) > max || (!vide && !v.trim())) erreur('texte');
   if (!hostile) return v;
   const s = v.replace(/[\t\n\r\p{Zl}\p{Zp}]/gu, ' ').normalize('NFC').replace(/ +/g, ' ').trim();
   const compare = s.normalize('NFKC').toLowerCase();
-  if (/[\p{Cc}\p{Cf}]/u.test(s) || /[<>]|https?:|www\.|\b[\p{L}\d-]+\.(?:com|ca|fr|net|org|test)\b/iu.test(compare)
-    || /garanti|certifi|sans danger|sans risque|\bsafe\b|(?:gluten|dairy|nut|allergen).free|sans[\s-]*(?:gluten|lactose|noix|allerg[eè]ne)|v[eé]g[eé]ta|\bvegan\b|celiac|cœliaque/iu.test(compare)
-    || /(?:retirer|ouvrir|enlever|remove|open).{0,35}(?:couvercle|lid)|contourner.{0,25}s[eé]curit|bypass/iu.test(compare)) erreur('texte_interdit');
+  if (/[\p{Cc}\p{Cf}]/u.test(s) || /[<>]|https?:|www\.|\b[\p{L}\d-]+\.(?:com|ca|fr|net|org|test)\b/iu.test(compare)) erreur('texte_interdit');
+  if (affiche) {
+    if (/(?:retir(?:er|ez|e)|ouvr(?:ir|ez)|enlev(?:er|ez)|[oô]t(?:er|ez|e)|remove|open).{0,50}(?:couvercle|gobelet|bouchon|lid|cap)|(?:mix(?:er|ez)|blend).{0,80}(?:chaud|hot|vitesse\s*(?:[3-9]|10))|contourner.{0,25}s[eé]curit|bypass/iu.test(compare)) erreur('instruction_libre');
+    // Un refus prudent n'est pas une garantie. Ne pas confondre un nom d'aliment avec une allégation.
+    const refusGarantie = /(?:ne\b.{0,60}(?:pas|jamais|impossible)|impossible de|cannot|can['’]t|unable to).{0,30}(?:garanti|certifi|guarantee|certify)|(?:sans risque|sans danger|safe).{0,60}(?:ne peut pas|cannot|can['’]t)/iu.test(compare);
+    if (!refusGarantie && (/\b(?:garanti(?:e|es|s)?|certifi[eé](?:e|es|s)?|sans danger|sans risque|safe)\b/iu.test(compare)
+      || /(?:gluten|dairy|nut|allergen).free|sans[\s-]*(?:gluten|lactose|noix|allerg[eè]ne)|^\s*(?:vegan|v[eé]g[eé]tarien(?:ne)?|celiac|cœliaque)[.!]?\s*$/iu.test(compare))) erreur('texte_interdit');
+  }
   if (!s && !vide) erreur('texte');
   return s;
 }
@@ -92,7 +98,8 @@ function precisionsDe(value = {}, source) {
   ferme(value, ['eau_vapeur_g', 'volume_bol_l', 'volume_panier_l', 'froid_confirme', 'reponses'], []);
   const froid = liste(value.froid_confirme || [], LIMITES_THERMOMIX.etapes).map(identifiant);
   if (new Set(froid).size !== froid.length || froid.some(id => !source.steps.some(s => s.id === id))) erreur('froid_invalide');
-  return { eau_vapeur_g: nombreOuNull(value.eau_vapeur_g, 10000), volume_bol_l: nombreOuNull(value.volume_bol_l, PROFIL_TM7.bolLitres),
+  if (value.eau_vapeur_g != null && (typeof value.eau_vapeur_g !== 'number' || !Number.isFinite(value.eau_vapeur_g) || value.eau_vapeur_g < 0 || value.eau_vapeur_g > PROFIL_TM7.bolLitres * 1000)) erreur('eau_vapeur');
+  return { eau_vapeur_g: value.eau_vapeur_g ?? null, volume_bol_l: nombreOuNull(value.volume_bol_l, PROFIL_TM7.bolLitres),
     volume_panier_l: nombreOuNull(value.volume_panier_l, PROFIL_TM7.panierLitres),
     froid_confirme: source.steps.filter(s => froid.includes(s.id)).map(s => s.id),
     reponses: liste(value.reponses || [], LIMITES_THERMOMIX.questions).map(s => texte(s, LIMITES_THERMOMIX.reponse, { vide: true })) };
@@ -152,7 +159,10 @@ function refsIngredients(v, c, min = 0) {
 }
 function quantiteConnue(i) {
   const q = i?.quantity;
-  return objet(q) && ((Number.isFinite(q.value) && q.value > 0) || (Number.isFinite(q.min) && q.min > 0 && Number.isFinite(q.max) && q.max >= q.min) || q.qualitative === true);
+  if (!objet(q)) return false;
+  if (q.min != null || q.max != null) return q.value == null && Number.isFinite(q.min) && q.min > 0 && Number.isFinite(q.max) && q.max >= q.min;
+  if (q.value != null) return Number.isFinite(q.value) && q.value > 0;
+  return q.qualitative === true;
 }
 function validerAction(a, c) {
   if (!objet(a)) erreur('action');
@@ -187,7 +197,8 @@ function validerBloc(b, c) {
   ferme(b, ['source_step_id', 'raison', 'actions']);
   const id = identifiant(b.source_step_id);
   if (!c.source.steps.some(s => s.id === id)) erreur('selection');
-  return { source_step_id: id, raison: texte(b.raison, LIMITES_THERMOMIX.raison, { hostile: true }),
+  // La justification libre reste une donnée de provenance ; elle n'est jamais une consigne affichée.
+  return { source_step_id: id, raison: texte(b.raison, LIMITES_THERMOMIX.raison, { hostile: true, affiche: false }),
     actions: liste(b.actions, LIMITES_THERMOMIX.actionsParBloc, 1).map(a => validerAction(a, c)) };
 }
 const chauffeDansTexte = (text) => /cuir|cuit|cuisson|chauff|bouill|mijot|fr[eé]mi|rissol|r[oô]ti|po[eê]l|four|hot|heat|cook|boil|simmer|bake|fry/iu.test(text);
@@ -201,22 +212,27 @@ function verifierSequence(blocs, c) {
   let chaude = false, inconnue = false, vapeur = 0, fouet = 0, actions = 0;
   const ingredients = ingredientsContexteThermomix(c);
   const contenu = Object.fromEntries(CONTENANTS.map(n => [n, new Set()]));
+  const eau = Object.fromEntries(CONTENANTS.map(n => [n, 0]));
+  let eauVapeur = null;
   const connu = Object.fromEntries(CONTENANTS.map(n => [n, true]));
   let commence = false;
   const dejaPlaces = new Set();
-  const verifierVolume = (ref, cible) => {
+  const verifierVolume = (cible) => {
     const capacite = cible === 'bol' ? 2200 : cible === 'panier' ? 1400 : null;
-    const i = ingredients.find(x => x.ref === ref);
-    if (capacite === null || dimensionOf(i?.unit_id) !== 'volume') return;
-    const v = i.quantity?.max ?? i.quantity?.value;
-    const enMl = convertValue(v, i.unit_id, 'ml', { convention_id: c.source.convention_snapshot?.id });
-    // Seulement une quantité déjà mesurée en volume ; aucune masse, densité ou somme supposée.
-    if (enMl.ok && !enMl.estimate && enMl.value > capacite) erreur('capacite');
+    if (capacite === null) return;
+    let total = eau[cible];
+    for (const ref of contenu[cible]) {
+      const i = ingredients.find(x => x.ref === ref);
+      if (dimensionOf(i?.unit_id) !== 'volume') continue;
+      const enMl = convertValue(i.quantity?.max ?? i.quantity?.value, i.unit_id, 'ml', { convention_id: c.source.convention_snapshot?.id });
+      // Somme des volumes déjà mesurés, jamais de densité alimentaire supposée.
+      if (enMl.ok && !enMl.estimate) total += enMl.value;
+    }
+    if (total > capacite + 1e-9) erreur('capacite');
   };
   const placer = (refs, cible) => {
     if (!connu[cible]) erreur('contenu_non_etabli');
     for (const ref of refs) {
-      verifierVolume(ref, cible);
       const ancien = CONTENANTS.find(n => contenu[n].has(ref));
       if (ancien === cible) erreur('double_ajout');
       if (!ancien && dejaPlaces.has(ref)) erreur('double_ajout');
@@ -225,6 +241,7 @@ function verifierSequence(blocs, c) {
       contenu[cible].add(ref);
       dejaPlaces.add(ref);
     }
+    verifierVolume(cible);
   };
   for (const step of c.source.steps) {
     const b = map.get(step.id);
@@ -238,7 +255,8 @@ function verifierSequence(blocs, c) {
     if (!p) erreur('precisions');
     if (!c.selection.includes(step.id) && ancienDepartVide(step, c)) {
       // Un ancien bloc garde sa consigne littérale, même lorsqu'une adaptation est insérée avant lui.
-      for (const n of ['bol', 'panier', 'varoma']) { contenu[n].clear(); connu[n] = true; }
+      for (const n of ['bol', 'panier', 'varoma']) { contenu[n].clear(); connu[n] = true; eau[n] = 0; }
+      eauVapeur = null;
     }
     commence = true; // le premier bloc impose explicitement des contenants vides.
     for (const a of b.actions) {
@@ -251,7 +269,12 @@ function verifierSequence(blocs, c) {
         }
         if (a.operation === 'transvaser') {
           if (a.contenant === 'bol') erreur('preparation');
-          for (const ref of contenu.bol) { verifierVolume(ref, a.contenant); contenu[a.contenant].add(ref); }
+          for (const ref of contenu.bol) contenu[a.contenant].add(ref);
+          eau[a.contenant] += eau.bol; eau.bol = 0;
+          // Une eau déjà utilisée puis vidée ne réapparaît pas au prochain réglage.
+          // Le contrat ne possède pas d'action structurée de réapprovisionnement.
+          if (eauVapeur !== null) eauVapeur = 0;
+          verifierVolume(a.contenant);
           connu[a.contenant] = connu[a.contenant] && connu.bol;
           contenu.bol.clear(); connu.bol = true;
         }
@@ -273,6 +296,10 @@ function verifierSequence(blocs, c) {
       }
       if (a.mode === 'vapeur') {
         if (!(p.eau_vapeur_g >= 500)) erreur('eau_vapeur');
+        // Eau de service distincte des ingrédients. Une suite de réglages ne la rajoute pas.
+        if (eauVapeur === null) { eau.bol = p.eau_vapeur_g; eauVapeur = p.eau_vapeur_g; }
+        else if (eauVapeur !== p.eau_vapeur_g) erreur('eau_vapeur');
+        verifierVolume('bol');
         vapeur += a.secondes; if (vapeur > LIMITES_THERMOMIX.vapeurCumulee) erreur('vapeur_cumulee');
       }
       if (a.accessoire === 'fouet') { fouet += a.secondes; if (fouet > LIMITES_THERMOMIX.fouetCumule) erreur('fouet_cumule'); }
@@ -283,7 +310,7 @@ function verifierSequence(blocs, c) {
 function reponseDe(raw, c) {
   if (typeof raw === 'string') {
     if (octets(raw) > LIMITES_THERMOMIX.corps) erreur('reponse_trop_grande');
-    try { raw = JSON.parse(raw); } catch (_) { erreur('json'); }
+    try { raw = extraireObjetJson(raw, { maxOctets: LIMITES_THERMOMIX.corps }); } catch (_) { erreur('json'); }
   } else if (octets(cloneJson(raw)) > LIMITES_THERMOMIX.corps) erreur('reponse_trop_grande');
   if (!objet(raw)) erreur('structure');
   if (raw.type === 'questions') {
@@ -317,6 +344,19 @@ const tr = (fr, vars, locale) => {
   const s = locale === 'en' && own(EN, fr) ? EN[fr] : fr;
   return vars ? s.replace(/\{(\w+)\}/g, (m, k) => own(vars, k) ? String(vars[k]) : m) : s;
 };
+const EXPLICATIONS_BLOC = [
+  'Cuisson à la vapeur proposée. Vérifie l’eau et le montage indiqué avant de commencer.',
+  'Chauffe proposée à 100 °C, avec mélange lent. Vérifie le remplissage avant de commencer.',
+  'Mixage rapide proposé uniquement avec un départ à froid confirmé.',
+  'Mélange sans chauffe proposé. Les quantités restent celles de la version source.',
+  'Préparation proposée avec les ingrédients de la version source.',
+];
+export function explicationBlocThermomix(bloc, contexte, { locale = 'fr' } = {}) {
+  const reglages = validerBloc(bloc, contexte).actions.filter(a => a.type === 'reglage');
+  const choix = reglages.some(a => a.mode === 'vapeur') ? 0 : reglages.some(a => a.temperature !== null) ? 1
+    : reglages.some(a => a.vitesse > 2) ? 2 : reglages.length ? 3 : 4;
+  return tr(EXPLICATIONS_BLOC[choix], null, locale);
+}
 export function ligneIngredientThermomix(i, { locale = 'fr' } = {}) {
   if (typeof i?.source_text === 'string' && i.source_text.trim()) return i.source_text;
   return [formatQuantity(i?.quantity, { locale }), i?.unit_id ? unitLabel(i.unit_id, locale) : i?.unit_text,
@@ -327,7 +367,7 @@ const accessoireFr = { couteau: 'couteau', fouet: 'fouet', panier: 'panier', var
 const operationsFr = { ajouter: 'Ajouter {ingredients} dans {contenant}.', reserver: 'Réserver {ingredients} dans {contenant}.',
   transvaser: 'Transvaser la préparation dans {contenant}.', racler: 'À l’arrêt, racler les parois du bol avec la spatule.',
   repartir_varoma: 'Répartir {ingredients} dans le Varoma en laissant des passages de vapeur libres.', verifier_texture: 'À l’arrêt, vérifier la texture de la préparation.' };
-export const TEXTES_THERMOMIX = Object.freeze([...Object.values(contenantFr), ...Object.values(accessoireFr), ...Object.values(operationsFr),
+export const TEXTES_THERMOMIX = Object.freeze([...Object.values(contenantFr), ...Object.values(accessoireFr), ...Object.values(operationsFr), ...EXPLICATIONS_BLOC,
   DEPART_VIDE,
   AVERTISSEMENT_TM7, 'mode Vapeur', 'sans chauffe', 'sens inverse', 'sens normal', 'vitesse {v}', 'mijotage',
   'Installer {accessoire} selon le manuel ; passages de vapeur libres. Eau du bol renseignée : {eau} g.',

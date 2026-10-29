@@ -99,8 +99,9 @@ export async function runVisuelParcoursTests({ eq, ok }) {
     await P.proposerReperes({ importId: row.id, session: SESSION_REPERES, documentId: 'doc' }, { ...d, fetch: async () => reponseAssistantReperes(raw) });
     await P.garderReperes({ importId: row.id, relu: true }, d);
     const recipe = await repo.get('recipes', 'r-reperes'), { lireReperes } = await import('../src/domain/reperes.js'); const lu = lireReperes(recipe, sourceB);
-    eq(recipe.reperes.corrections.description_fr, avant, 'Repères : chaque correction conserve sa propre signature');
-    eq([lu.description_fr, lu.champs.description_fr.etat], [null, 'perime'], 'Repères : proposition B ne rend pas correction A courante');
+    eq(recipe.reperes.historiques.find(h => h.corrections.description_fr)?.corrections.description_fr, avant, 'Repères : chaque correction conservée garde sa propre signature');
+    eq([lu.description_fr, lu.champs.description_fr.etat], [raw.description_fr.texte, 'courant'], 'Repères : proposition B s’affiche sur B sans réattribuer la correction A');
+    eq(lireReperes(recipe, versionReperesTest()).description_fr, avant.valeur.texte, 'Repères : correction A toujours disponible sur sa version A');
     await P.enregistrerCorrectionsReperes({ recipeId: recipe.id, versionId: sourceB.id, corrections: { description_fr: avant.valeur } }, d);
     eq(lireReperes(await repo.get('recipes', recipe.id), sourceB).description_fr, avant.valeur.texte, 'Repères : confirmation explicite peut lier correction à B');
   });
@@ -124,8 +125,9 @@ export async function runVisuelParcoursTests({ eq, ok }) {
     await seedReperes(repo); const d = options(repo), row = await P.ouvrirReperes(entree(), d), autre = { ...repo, deviceId: () => 'autre-appareil-reperes' };
     eq((await P.lireBrouillonReperes(row.id, { repo: autre })).lecture_seule, true, 'Repères : brouillon distant en lecture seule');
     await refuse(() => P.modifierBrouillonReperes(row.id, { saisie: { description_fr: 'Ne pas écrire' } }, { repo: autre }), 'autre_appareil', 'Repères : autre appareil ne modifie pas');
-    await refuse(() => P.ignorerReperes(row.id, { repo: autre }), 'autre_appareil', 'Repères : autre appareil ne clôture pas');
     await refuse(() => P.copierBrouillonReperes(row.id, { repo: autre }), 'brouillon_ouvert', 'Repères : copie seulement après clôture');
+    eq((await P.ignorerReperes(row.id, { repo: autre })).status, 'ignore', 'Repères : autre appareil peut clôturer volontairement sans appliquer le résultat');
+    eq((await repo.all('imports')).length, 1, 'Repères : abandon ne copie pas automatiquement un brouillon terminal');
     await P.ignorerReperes(row.id, d); const copie = await P.copierBrouillonReperes(row.id, { repo: autre });
     eq([copie.copie_de, copie.device_id, copie.status], [row.id, 'autre-appareil-reperes', 'a_lancer'], 'Repères : copie distincte appartient au nouvel appareil');
   });

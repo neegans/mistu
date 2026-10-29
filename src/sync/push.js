@@ -9,6 +9,7 @@ import { appliquerHeureServeur, reculMs } from './clock.js';
 import { logError } from '../core/log.js';
 import { commandeCycle, idCycle, fusionCycle, CLE_CYCLE_CONFIRME, gardeCompteCycle } from './cycle.js';
 import { lireCycleRecette } from '../domain/cycle-recette.js';
+import { preparerFermetureImport, importConcerne, gardeImportRelu } from './imports-clos.js';
 
 // Recul exponentiel (spec § 5.3) : défini dans clock.js (module feuille, lot G tâche 3 ronde 1), réexporté ici pour ses lecteurs.
 export { reculMs };
@@ -78,14 +79,35 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     // R-L3-29 : les clés dont le conflit est « renvoyé » (§ 5.5). Le journal est lu EN UNE fois : les conflits sont
     // peu nombreux par conception (purgés à 30 jours), et une lecture par élément en ferait 500 de plus par lot.
     const conflitsRenvoyes = new Set((await db.getAll('sync_conflicts')).filter((c) => c?.renvoye).map((c) => c.id));
-    const effets = appliquerReponse({ lot, reponse, entreesParSeq, fichesLocales, conflitsRenvoyes });
+    const fermetures = new Map();
+    for (const e of lot.elements) {
+      if (e.store !== 'imports' || e.deleted) continue;
+      const locale = fichesLocales[cleDe(e)];
+      const rejet = (reponse.rejected || []).find(r => r.store === e.store && r.id === e.id && r.reason === 'conflit');
+      const ajustement = (reponse.adjusted || []).find(r => r.store === e.store && r.id === e.id);
+      const distante = rejet?.server || (ajustement ? { data: e.data, updated_at: ajustement.updated_at, deleted_at: null } : null);
+      const fermeture = distante && await preparerFermetureImport(locale, distante, owner);
+      if (fermeture) fermetures.set(cleDe(e), fermeture);
+    }
+    const reponseOrdinaire = { ...reponse,
+      rejected: (reponse.rejected || []).filter(r => !fermetures.has(cleDe(r))),
+      adjusted: (reponse.adjusted || []).filter(r => !fermetures.has(cleDe(r))) };
+    const effets = appliquerReponse({ lot, reponse: reponseOrdinaire, entreesParSeq, fichesLocales, conflitsRenvoyes });
     const puts = { ...effets.reecrire };
     // Lot G, ronde 1 (#4, I-G3) : une ligne files ajustée n'est pas écrite telle que calculée sur `fichesLocales` (lues plus haut, hors
     // transaction) mais refondue sur la ligne RELUE dans la transaction : une copie téléchargée pendant l'aller-retour reste ; une ligne qui a
     // bougé ici depuis (R-L3-7) n'est pas réécrite.
     let conditions = null;
+    const importsRelus = lot.elements.filter(e => e.store === 'imports' && (importConcerne(e.data) || importConcerne(fichesLocales[cleDe(e)])));
+    if (importsRelus.length) conditions = { imports: importsRelus.map(e => ({ key: e.id, fusion: gardeImportRelu(fichesLocales[cleDe(e)]) })) };
+    for (const [cle, fermeture] of fermetures) {
+      (puts.imports ||= []).push(fermeture.row);
+      effets.retirer.push(...lot.seqs.filter(seq => cleDe(entreesParSeq.get(seq) || {}) === cle));
+      if (!await db.get('sync_conflicts', fermeture.copie.id)) effets.conflits.push(fermeture.copie);
+      if (fermeture.entree) (puts.outbox ||= []).push(fermeture.entree);
+    }
     if (puts.files) {
-      conditions = { files: puts.files.map((ligne) => conditionFichier(ligne.sha256, fichesLocales[cleDe({ store: 'files', id: ligne.sha256 })] ?? null, ligne, ligne.updated_at)) };
+      conditions = { ...(conditions || {}), files: puts.files.map((ligne) => conditionFichier(ligne.sha256, fichesLocales[cleDe({ store: 'files', id: ligne.sha256 })] ?? null, ligne, ligne.updated_at)) };
       delete puts.files;
     }
     if(puts.recipes) {
@@ -97,7 +119,7 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     }
     if (effets.conflits.length) puts.sync_conflicts = effets.conflits;
     if (effets.quarantaine.length) {
-      puts.outbox = effets.quarantaine.map(({ seq, motif }) => ({ ...entreesParSeq.get(seq), quarantined_at: new Date(maintenant()).toISOString(), last_error: motif }));
+      (puts.outbox ||= []).push(...effets.quarantaine.map(({ seq, motif }) => ({ ...entreesParSeq.get(seq), quarantined_at: new Date(maintenant()).toISOString(), last_error: motif })));
     }
     // origin 'remote' : rien de ceci ne repart vers le serveur (réécriture d'un ajustement, journal, quarantaine).
     const deletes = {};

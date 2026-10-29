@@ -9,8 +9,8 @@ export async function runI3IntegrationTests({ eq, ok }) {
     const row = { id: 'i&3', kind: 'thermomix', recipe_id: recipe.id, status: 'a_verifier', device_id: 'ici' };
     eq(cibleReprise(row), '/recipes/i3-r/thermomix?import=i%263', 'I3 : journal sans pages ouvre le bon écran');
     const ctx = { imports: [row], recipesById: new Map([[recipe.id, recipe]]) };
-    eq(lignesImports(ctx, { deviceId: 'ici' })[0]?.gestes, ['reprendre'], 'I3 : recette disponible conserve la reprise TM7 sur son écran dédié');
-    eq(lignesImports(ctx, { deviceId: 'ailleurs' })[0]?.gestes, ['reprendre'], 'I3 : autre appareil consulte sans action générique de clôture');
+    eq(lignesImports(ctx, { deviceId: 'ici' })[0]?.gestes, ['reprendre', 'ignorer'], 'I3 : recette disponible permet reprise ou abandon explicite TM7');
+    eq(lignesImports(ctx, { deviceId: 'ailleurs' })[0]?.gestes, ['reprendre', 'ignorer'], 'I3 : autre appareil peut consulter ou abandonner explicitement');
   });
   await run('exports invalides', async () => {
     const { toJsonLd, toPaprikaYaml, toReadableSite } = await import('../src/domain/exporters.js');
@@ -157,10 +157,10 @@ export async function runI3IntegrationTests({ eq, ok }) {
         [...root.querySelectorAll('button')].find(b => b.textContent === nom).click();
         await new Promise(resolve => setTimeout(resolve, 20));
         const statut = root.querySelector('[data-role=etat-export-recettes]');
-        ok(statut?.textContent.includes('L’export est bloqué'), `I3 : ${nom} dit pourquoi l’export entier est bloqué`);
+        ok(statut?.textContent.includes('conservées comme documents'), `I3 : ${nom} annonce la conservation documentaire sans approuver les réglages`);
         ok(statut?.querySelector('a')?.getAttribute('href').includes(encodeURIComponent(version.id)), `I3 : ${nom} donne accès à la version concernée`);
       }
-      eq(telechargements, 0, 'I3 : aucun téléchargement partiel en écartant silencieusement la recette');
+      eq(telechargements, 3, 'I3 : les trois exports complets conservent le document sans bloquer toute la bibliothèque');
       eq(erreurs, [], 'I3 : aucun échec non géré dans les gestes d’export des Réglages');
     } finally {
       window.removeEventListener('error', erreur); window.removeEventListener('unhandledrejection', erreur); root.remove();
@@ -182,6 +182,8 @@ export async function runI3IntegrationTests({ eq, ok }) {
       await attendre(async () => (await repo.all('recipe_versions')).length === 3);
       const enfant = (await repo.all('recipe_versions')).find(v => v.id !== f.source.id && v.id !== f.version.id);
       eq(enfant.provenance.thermomix_invalide, true, 'I3 : correction manuelle conserve une invalidation explicite');
+      eq([enfant.kind,enfant.status],['adaptation','proposed'],'I3 : correction d’une adaptation reste une version personnelle');
+      eq((await repo.get('recipes',f.recipe.id)).current_version_id,f.source.id,'I3 : correction personnelle ne remplace pas le pointeur original');
       eq(gardeThermomix(enfant).ok, false, 'I3 : changement de quantité dans éditeur retire approbation');
       eq(enfant.constraints, f.version.constraints, 'I3 : correction manuelle ne retire pas les restrictions de la version TM7');
       ok(etiquetteThermomix(enfant).includes('d’après une adaptation TM7'), 'I3 : ascendance IA demeure visible');

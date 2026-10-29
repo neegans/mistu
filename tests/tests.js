@@ -55,6 +55,12 @@ import { runI2CuisineTests } from './i2-cuisine.js';
 import { runI2PhotoPageTests } from './i2-photo-page.js';
 import { runI2IntegrationTests } from './i2-integration.js';
 import { runI3ThermomixTests } from './i3-thermomix.js';
+import { runCorrectifsThermomixSecuriteTests } from './correctifs-thermomix-securite.js';
+import { runCorrectifsReponsesJsonTests } from './correctifs-reponses-json.js';
+import { runCorrectifsReperesTests } from './correctifs-reperes.js';
+import { runCorrectifsBrouillonsTests } from './correctifs-brouillons.js';
+import { runCorrectifsAdaptationTests } from './correctifs-adaptation.js';
+import { runCorrectifsImportsSyncTests } from './correctifs-imports-sync.js';
 import { runI3ParcoursTests } from './i3-parcours.js';
 import { runI3EcranTests } from './i3-ecran.js';
 import { runI3IntegrationTests } from './i3-integration.js';
@@ -287,7 +293,7 @@ for (const [nom, suite] of [['livre', runI2LivreTests], ['cuisine', runI2Cuisine
 }
 
 // --- Lot I3 : domaine TM7, journal, écrans et gardes transversales.
-for (const [nom, suite] of [['domaine', runI3ThermomixTests], ['journal', runI3ParcoursTests], ['écran', runI3EcranTests], ['intégration', runI3IntegrationTests]]) {
+for (const [nom, suite] of [['domaine', runI3ThermomixTests], ['sécurité corrigée', runCorrectifsThermomixSecuriteTests], ['réponses JSON', runCorrectifsReponsesJsonTests], ['journal', runI3ParcoursTests], ['écran', runI3EcranTests], ['intégration', runI3IntegrationTests]]) {
   try { await suite({ eq, ok, close }); }
   catch (error) { ok(false, `Suite I3 ${nom} interrompue : ${error?.message || String(error)}`); }
 }
@@ -296,6 +302,12 @@ for (const [nom, suite] of [['domaine', runI3ThermomixTests], ['journal', runI3P
 for (const suite of [runVisuelReperesTests, runVisuelPhotosTests, runVisuelParcoursTests, runVisuelReperesEcranTests, runVisuelIntegrationTests]) {
   try { await suite({ eq, ok, close }); }
   catch (error) { ok(false, `Suite photos et repères interrompue : ${error?.message || String(error)}`); }
+}
+
+// Correctifs prioritaires : travail payé, reprise des brouillons et documents Thermomix.
+for (const suite of [runCorrectifsReperesTests, runCorrectifsBrouillonsTests, runCorrectifsAdaptationTests, runCorrectifsImportsSyncTests]) {
+  try { await suite({ eq, ok, close }); }
+  catch (error) { ok(false, `Suite correctifs prioritaires interrompue : ${error?.message || String(error)}`); }
 }
 
 // L0 : cohérence des traductions, repas, cuisine et sorties de courses.
@@ -314,7 +326,7 @@ for (const suite of [runL1CorbeilleDomaineTests, runL1CorbeilleArchiveTests, run
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 7663,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 7951,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

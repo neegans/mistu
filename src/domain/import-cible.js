@@ -278,7 +278,7 @@ export function lignesImports(ctx, { maintenant = null, documentId = null, devic
     const cible = cibleReprise(i);
     let gestes;
     if (referenceAbsente) gestes = [];
-    else if (i.kind === 'thermomix' || i.kind === 'reperes') gestes = ['reprendre']; // son écran contrôle appareil, vol, annulation et clôture
+    else if (i.kind === 'thermomix' || i.kind === 'reperes') gestes = ['reprendre', 'ignorer']; // son écran contrôle appareil, vol, annulation et clôture
     else if (i.status === 'en_cours') gestes = tenu ? ['annuler'] : [];
     else if (livre) gestes = ['reprendre', 'ignorer']; // aucun appel au montage ; la route contrôle disponibilité des octets
     // Lot D (D-D14) : un classement ne se RELANCE jamais depuis Imports. Lot E (D-E14, R-E-13 ; ronde 1 : la même règle, une seule branche) : une couverture

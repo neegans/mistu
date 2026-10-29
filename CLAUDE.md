@@ -3615,3 +3615,21 @@ Objectif de Neegan : utiliser Cuisine OS comme application de capture installée
 - Le site n’a pas de backend : les scans et recettes restent dans IndexedDB de l’appareil. `https://neegans.github.io` est une origine distincte de `localhost:8080` : bibliothèque vide au premier lancement, à remplir par restauration d’un ZIP (AirDrop depuis le Mac). Ce transfert constitue aussi le gate V0 sur un second appareil.
 - Mise à jour de l’app installée : `git push` sur `main`, puis relancer l’app (service worker réseau d’abord ; un `VERSION` incrémenté purge l’ancien cache).
 - `https://neegans.github.io/mistu/tests/` exécute la suite complète, y compris le lot sauvegarde ; aucun résultat reçu à la date de cette note.
+
+
+### Correctifs prioritaires Thermomix et propositions payées — 29 octobre 2026
+
+À la demande de Neegan pendant L2, branche isolée `correctifs-thermomix-0.23.2` depuis public `752566d`.
+[Contrat](docs/superpowers/specs/2026-10-29-correctifs-thermomix-fiabilite-design.md), [rapport de réception](docs/superpowers/plans/2026-10-29-correctifs-thermomix-fiabilite.md).
+Capacités cumulées, eau suivie et bornée, consignes issues des seules actions validées ; huit protections mutées font rougir les tests.
+JSON habillé, fourchettes, proposition payée complète et provenance par durée ; historique de repères révision2 par version/signature.
+Brouillons étrangers/anciens abandonnables, réponses par tour, résultat précédent récupérable et relecture liée à la réponse réellement montrée.
+Correction TM en adaptation personnelle, retour explicite aux ancêtres source réels ; version originale courante concurrente préservée.
+Bibliothèque exportable avec plans invalidés conservés comme documents, cuisson et Cookidoo toujours gardés.
+Réconciliation client des clôtures connues sur pull/push, réponses tardives documentaires locales ; anciens clients et copies hors archive restent des limites explicites.
+
+APP0.23.2, cache `cuisine-os-v0.23.2-1`, DB5/archive2 inchangées, cinq modules ajoutés au cache, aucun SQL ni appel assistant réel.
+Réception locale **7952/7952** (épingle7951, +288), Node231/231, migrations check0, syntaxe45/diff propres ; deux parcours20 mesures et hors ligne verts.
+Le harnais d’attente asynchrone a été corrigé après reproduction minimale ; pas de modification applicative sans défaut confirmé.
+Aucun compte privé, appareil physique ou nouvelle preuve HTTP authentifiée. L2 conservé dans son checkout, non terminé ; suite du plan toujours à réaliser.
+Publication autorisée dans la conversation ; son résultat est consigné en tête de STATE.md après vérification publique.

@@ -3,7 +3,7 @@
 
 export const DB_NAME = 'cuisine-os';
 export const DB_VERSION = 5;
-export const APP_VERSION = '0.23.1';
+export const APP_VERSION = '0.23.2';
 
 export const ARCHIVE_FORMAT = 'cuisine-os-archive';
 export const ARCHIVE_FORMAT_VERSION = 2;

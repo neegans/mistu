@@ -1,3 +1,6 @@
+import { capturerRecette, capturerProprietaire } from './recette-garde.js';
+import { ignorerPropositionImport } from '../domain/reprise-import.js';
+import { texteConfirmationAbandon, texteErreurReprise } from './reprise-import.js';
 // Ajouter (spec UX § 4, § 10) : une grille de six cartes (dont « Créer avec l'IA », qui ouvre #/recipes/creer — spec de création § 3.1),
 // et — avant un scan parti d'ici — la question « ces pages vont où ? ». Le formulaire « Ajouter un livre » vit dans livre-ajout.js
 // (#/add/livre), le signet dans signet.js (#/add/signet). Avant la grille, la section « Imports » (lot A « Importer une recette repérée »,
@@ -156,6 +159,8 @@ const volDe = (l) => (l.kind === 'livre' ? { annuler: annulerIdentificationLivre
 function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, battementMs, confirmer }) {
   const hote = el('div', null);
   let file = Promise.resolve();
+  const operations = new Set();
+  const comptePropositions = capturerProprietaire(repo, ctx);
   // Ronde 1 : les références visées sont relues aussi — une fiche reçue (synchro) pendant que la page est montée donne son titre et ses gestes au redessin.
   const lireBase = async () => {
     const [imports, scan_sessions] = await Promise.all([repo.all('imports'), repo.all('scan_sessions')]);
@@ -168,7 +173,17 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
   async function agir(geste, l, brute) {
     if (geste === 'reprendre' || geste === 'ouvrir_seance') { if (l.cible) navigate(l.cible); return; }
     if (geste === 'annuler') await volDe(l).annuler(l.id); // rien si ce document ne tient pas ce vol : le redessin dit l'état réel
-    else if (geste === 'ignorer') {
+    else if (geste === 'ignorer' && ['thermomix','reperes'].includes(l.kind)) {
+      try {
+        const compte = await comptePropositions;
+        if (!compte.contexteValide()) throw Object.assign(new Error('compte_change'),{code:'compte_change'});
+        const capture = await capturerRecette(repo, ctx.recipesById?.get(brute.recipe_id) || await repo.get('recipes', brute.recipe_id), {ctx:{...ctx,proprietaireDonnees:compte.owner_id},historique:true});
+        const contexteRecette = {...capture,contexteValide:()=>compte.contexteValide() && (!capture.contexteValide || capture.contexteValide())};
+        if (await confirmer(texteConfirmationAbandon(), {okLabel:t('Ignorer')})) {
+          await ignorerPropositionImport(l.id, {repo,contexteRecette,attendu:brute,maintenant});
+        }
+      } catch (e) { toast(texteErreurReprise(e)); }
+    } else if (geste === 'ignorer') {
       // « Ignorer » vaut pour LA lecture affichée (T4-R2, ronde 1) : une ligne relancée ailleurs depuis le dessin (autre lecture, autre départ) n'est pas
       // ignorée sans avoir été vue — le redessin la montre, et un second « Ignorer » vaudra pour elle.
       // Lot D, ronde 1 de T2 (I-D4, D-D20) : un classement REÇU s'ignore ici comme dans le panneau — la même question (il a coûté un appel ; « non » → rien
@@ -228,7 +243,7 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
       etat ? el('span', { class: l.etat === 'echec' ? 'status warn' : 'muted' }, etat) : null,
       // Lot E, ronde 1 de T5 : ni une couverture (une seule photo, que L4 peut avoir amenée ici : sa route dit elle-même si elle est sur cet appareil).
       l.autreAppareil && l.kind !== 'seance' && l.kind !== 'web' && l.kind !== 'couverture' && l.kind !== 'livre' ? el('small', { class: 'muted' }, t('Photos sur un autre appareil')) : null,
-      l.gestes.length ? el('div', { class: 'row' }, ...l.gestes.map((g) => el('button', { type: 'button', class: g === 'reprendre' || g === 'ouvrir_seance' ? 'btn primary' : 'btn', dataset: { geste: g }, onClick: () => agir(g, l, brute) }, libelle(g, l)))) : null);
+      l.gestes.length ? el('div', { class: 'row' }, ...l.gestes.map((g) => el('button', { type: 'button', class: g === 'reprendre' || g === 'ouvrir_seance' ? 'btn primary' : 'btn', dataset: { geste: g }, onClick: () => { const p = agir(g, l, brute); operations.add(p); p.then(() => operations.delete(p), () => operations.delete(p)); } }, libelle(g, l)))) : null);
   }
   function dessiner({ imports = [], scan_sessions = [], recipesById = ctx?.recipesById } = {}) {
     const brutes = new Map((Array.isArray(imports) ? imports : []).filter((i) => i && typeof i.id === 'string').map((i) => [i.id, i]));
@@ -245,13 +260,14 @@ function sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, batteme
       || (!repere.id && repere.lot && repere.geste && section.querySelector(`[data-role="lot"][data-classement="${CSS.escape(repere.lot)}"] > button[data-geste="${CSS.escape(repere.geste)}"]`))
       || section).focus();
   }
-  return { hote, redessiner, dessiner };
+  return { hote, redessiner, dessiner, attendre: async () => { while (operations.size) await Promise.all([...operations]); await file; } };
 }
 
 export async function renderAdd(params, query, ctx, { repo = repoModule, navigate = naviguerDom, toast = toastDom, fetch = undefined, maintenant = () => new Date().toISOString(), battementMs = undefined, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000, confirmer = confirmDialog } = {}) {
   const root = el('div', null, pageHeader(t('Ajouter')));
   const zone = el('div', null);
   const imports = sectionImports(ctx, { repo, navigate, toast, fetch, maintenant, battementMs, confirmer });
+  root.attendreEcritures = imports.attendre;
   root.append(imports.hote, zone); // la section AVANT la grille (spec § 4.5)
   imports.dessiner({ imports: ctx?.imports, scan_sessions: ctx?.scan_sessions });
   // Redessin à chaque écriture du journal ou des séances, tant que la page est montée ; désabonné dès qu'elle ne l'est plus (ou ne l'a jamais été).

@@ -7,6 +7,7 @@ export const LIMITES_REPERES = Object.freeze({ description: 400, raison: 300, ex
   sourceOctets: 32 * 1024, contexteOctets: 80 * 1024, enveloppeOctets: 192 * 1024 });
 export const NIVEAUX_REPERES = Object.freeze(['facile', 'intermediaire', 'avance', 'chef']);
 const CHAMPS = ['description_fr', 'difficulte', 'temps'];
+export const CHAMPS_TEMPS_REPERES = Object.freeze(['total', 'actif', 'cuisson', 'attentes', 'attentes_incluses', 'explication']);
 const DUREES = ['prep_minutes', 'cook_minutes', 'active_minutes', 'total_minutes'];
 const own = (v, k) => !!v && Object.hasOwn(v, k);
 const objet = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && [Object.prototype, null].includes(Object.getPrototypeOf(v));
@@ -122,13 +123,16 @@ function explicite(duree, nom, refs, contexte) {
   const champ = { total: 'total_minutes', actif: 'active_minutes', cuisson: 'cook_minutes' }[nom];
   if (duree.min === duree.max && champ && contexte.source.durees[champ] === duree.min && refs.some(r => r.type === 'duree' && r.champ === champ && r.extrait === String(duree.min))) return true;
   // Une durée citée dans une étape ne prouve pas à elle seule un total ou du travail actif.
-  if (!['cuisson', 'attentes'].includes(nom) || duree.min !== duree.max) return false;
+  if (!['cuisson', 'attentes'].includes(nom)) return false;
   return refs.some(r => {
     if (r.type !== 'etape') return false;
     const indicateur = nom === 'cuisson' ? /cuire|cuisson|cook|bake|r[oô]tir/i : /repos|reposer|lev[eé]e|lever|marin|refroid|rest|rise|cool/i;
     if (!indicateur.test(r.extrait)) return false;
-    const re = /(\d+)\s*(minutes?|mins?|heures?|hours?|h|jours?|days?)\b/gi;
-    let m; while ((m = re.exec(r.extrait))) { const facteur = /^(h|heure|hour)/i.test(m[2]) ? 60 : /^(jour|day)/i.test(m[2]) ? 1440 : 1; if (+m[1] * facteur === duree.min) return true; }
+    // Une plage est consommée entière : sa borne haute ne devient pas une durée exacte.
+    const unite = '(?:minutes?|mins?|heures?|hours?|h|jours?|days?)';
+    const re = new RegExp('(?<![\\d.,])\\b(\\d+)(?:\\s*(' + unite + ')?\\s*(?:à|a|to|[-–—])\\s*(\\d+))?\\s*(' + unite + ')\\b', 'gi');
+    const facteur = u => /^(h|heure|hour)/i.test(u) ? 60 : /^(jour|day)/i.test(u) ? 1440 : 1;
+    let m; while ((m = re.exec(r.extrait))) { const min = +m[1] * facteur(m[2] || m[4]), max = m[3] == null ? min : +m[3] * facteur(m[4]); if (min === duree.min && max === duree.max) return true; }
     return false;
   });
 }
@@ -138,8 +142,9 @@ function duree(v, nom, refs, contexte, manuel) {
   const min = minute(v.min), max = minute(v.max); if (min > max) erreur('plage');
   if (!['source', 'estimation_ia', ...(manuel ? ['manuel'] : [])].includes(v.origine)) erreur('origine');
   if (nom === 'total' && typeof v.complet !== 'boolean') erreur('complet');
-  if (!manuel && ((v.origine === 'source' && !explicite(v, nom, refs, contexte)) || (min === 0 && !explicite(v, nom, refs, contexte)))) erreur('duree_non_sourcee');
-  return { min, max, origine: manuel ? 'manuel' : v.origine, ...(nom === 'total' ? { complet: v.complet } : {}) };
+  const corrigee = manuel === true || (Array.isArray(manuel) && manuel.includes(nom));
+  if (!corrigee && ((v.origine === 'source' && !explicite(v, nom, refs, contexte)) || (min === 0 && v.origine !== 'manuel' && !explicite(v, nom, refs, contexte)))) erreur('duree_non_sourcee');
+  return { min, max, origine: manuel === true || (Array.isArray(manuel) && manuel.includes(nom)) ? 'manuel' : v.origine, ...(nom === 'total' ? { complet: v.complet } : {}) };
 }
 function champValide(nom, valeur, contexte, manuel = false) {
   if (valeur === null) return null;
@@ -176,13 +181,19 @@ const liaison = (contexte) => ({ version_id: contexte.version_id, signature: con
 export function fabriquerPropositionReperes({ contexte, resultat, modele, maintenant = new Date().toISOString() } = {}) {
   return { source: liaison(verifierContexte(contexte)), ...validerReponseReperes(resultat, contexte), modele: texte(modele, 160), calcule_le: date(maintenant) };
 }
-export function fabriquerCorrectionsReperes(corrections, contexte, maintenant = new Date().toISOString()) {
+export function fabriquerCorrectionsReperes(corrections, contexte, maintenant = new Date().toISOString(), { champsTempsModifies = null, baseTemps = null } = {}) {
   verifierContexte(contexte); ferme(corrections, CHAMPS, []);
-  return Object.fromEntries(Object.keys(corrections).map(k => [k, { valeur: champValide(k, corrections[k], contexte, true), source: liaison(contexte), modifie_le: date(maintenant) }]));
+  if (champsTempsModifies !== null && (!Array.isArray(champsTempsModifies) || champsTempsModifies.some(k => !CHAMPS_TEMPS_REPERES.includes(k)) || new Set(champsTempsModifies).size !== champsTempsModifies.length)) erreur('structure');
+  return Object.fromEntries(Object.keys(corrections).map(k => {
+    let valeur = corrections[k], selection = k === 'temps' ? champsTempsModifies : null;
+    if (selection !== null) {
+      valeur = { total: null, actif: null, cuisson: null, attentes: null, attentes_incluses: null, explication: '', references: [], ...(baseTemps || {}), ...Object.fromEntries(selection.map(champ => [champ, valeur?.[champ] ?? (champ === 'explication' ? '' : null)])) };
+    }
+    return [k, { valeur: champValide(k, valeur, contexte, selection ?? true), source: liaison(contexte), modifie_le: date(maintenant), ...(selection === null ? {} : { champs_modifies: [...selection] }) }];
+  }));
 }
-function enveloppeValide(enveloppe) {
-  ferme(enveloppe, ['revision', 'proposition', 'corrections']); if (enveloppe.revision !== 1) erreur('revision');
-  borne(enveloppe, LIMITES_REPERES.enveloppeOctets);
+function entreeValide(enveloppe) {
+  ferme(enveloppe, ['proposition', 'corrections']);
   let proposition = null;
   if (enveloppe.proposition !== null) {
     const p = enveloppe.proposition; ferme(p, ['source', ...CHAMPS, 'modele', 'calcule_le']);
@@ -190,16 +201,55 @@ function enveloppeValide(enveloppe) {
   }
   ferme(enveloppe.corrections, CHAMPS, []); const corrections = {};
   for (const k of Object.keys(enveloppe.corrections)) {
-    const c = enveloppe.corrections[k]; ferme(c, ['valeur', 'source', 'modifie_le']);
-    corrections[k] = fabriquerCorrectionsReperes({ [k]: c.valeur }, contexteLiaison(c.source), c.modifie_le)[k];
+    const c = enveloppe.corrections[k]; ferme(c, ['valeur', 'source', 'modifie_le', ...(k === 'temps' ? ['champs_modifies'] : [])], ['valeur', 'source', 'modifie_le']);
+    corrections[k] = fabriquerCorrectionsReperes({ [k]: c.valeur }, contexteLiaison(c.source), c.modifie_le, { champsTempsModifies: c.champs_modifies ?? null, baseTemps: c.valeur })[k];
   }
-  return { revision: 1, proposition, corrections };
+  const temps = corrections.temps;
+  if (temps?.champs_modifies && temps.valeur && proposition?.temps && proposition.source.signature === temps.source.signature) {
+    const fusion = { ...proposition.temps, ...Object.fromEntries(temps.champs_modifies.map(k => [k, temps.valeur[k]])) };
+    champValide('temps', fusion, contexteLiaison(temps.source), temps.champs_modifies);
+  }
+  return { proposition, corrections };
+}
+function enveloppeValide(enveloppe) {
+  if (![1, 2].includes(enveloppe?.revision)) erreur('revision');
+  ferme(enveloppe, ['revision', 'proposition', 'corrections', ...(enveloppe.revision === 2 ? ['historiques'] : [])]);
+  borne(enveloppe, LIMITES_REPERES.enveloppeOctets);
+  const courant = entreeValide({ proposition: enveloppe.proposition, corrections: enveloppe.corrections });
+  const historiques = enveloppe.revision === 2 ? liste(enveloppe.historiques, 100).map(entreeValide) : [];
+  return { revision: enveloppe.revision, ...courant, historiques };
+}
+function repartirSources(enveloppe) {
+  const sources = new Map();
+  const cible = source => { const cle = source.signature; if (!sources.has(cle)) sources.set(cle, { proposition: null, corrections: {} }); return sources.get(cle); };
+  for (const e of [...enveloppe.historiques, enveloppe]) {
+    if (e.proposition) cible(e.proposition.source).proposition = e.proposition;
+    for (const [k, c] of Object.entries(e.corrections)) cible(c.source).corrections[k] = c;
+  }
+  return sources;
 }
 export function fusionnerReperes(enveloppe, changements = {}) {
   ferme(changements, ['proposition', 'corrections'], []);
-  const avant = enveloppe == null ? { revision: 1, proposition: null, corrections: {} } : enveloppeValide(enveloppe);
-  return enveloppeValide({ revision: 1, proposition: own(changements, 'proposition') ? changements.proposition : avant.proposition,
-    corrections: { ...avant.corrections, ...(changements.corrections || {}) } });
+  const avant = enveloppe == null ? { revision: 2, proposition: null, corrections: {}, historiques: [] } : enveloppeValide(enveloppe), sources = repartirSources(avant);
+  const nouveaux = entreeValide({ proposition: changements.proposition ?? null, corrections: changements.corrections || {} });
+  const signatures = new Set([nouveaux.proposition?.source.signature, ...Object.values(nouveaux.corrections).map(c => c.source.signature)].filter(Boolean));
+  if (signatures.size > 1) erreur('source_etrangere');
+  const signature = [...signatures][0] || avant.proposition?.source.signature || Object.values(avant.corrections)[0]?.source.signature;
+  const precedent = sources.get(signature) || { proposition: null, corrections: {} }, corrections = { ...precedent.corrections, ...nouveaux.corrections };
+  if (precedent.corrections.temps && nouveaux.corrections.temps?.champs_modifies) {
+    const precedents = precedent.corrections.temps.champs_modifies ?? CHAMPS_TEMPS_REPERES, nouveauxChamps = nouveaux.corrections.temps.champs_modifies;
+    corrections.temps = { ...nouveaux.corrections.temps,
+      valeur: { ...nouveaux.corrections.temps.valeur, ...Object.fromEntries(precedents.filter(k => !nouveauxChamps.includes(k)).map(k => [k, precedent.corrections.temps.valeur?.[k] ?? (k === 'explication' ? '' : null)])) },
+      champs_modifies: [...new Set([...precedents, ...nouveauxChamps])] };
+  }
+  const courant = { proposition: own(changements, 'proposition') ? nouveaux.proposition : precedent.proposition, corrections };
+  sources.delete(signature);
+  if (sources.size > 100) erreur('reperes_trop_grands');
+  return enveloppeValide(borne({ revision: 2, ...courant, historiques: [...sources.values()] }, LIMITES_REPERES.enveloppeOctets, 'reperes_trop_grands'));
+}
+export function propositionReperesPourSource(enveloppe, signature) {
+  if (enveloppe == null) return null;
+  return repartirSources(enveloppeValide(enveloppe)).get(signature)?.proposition || null;
 }
 export function lireReperes(recipe, version = null) {
   let contexte = null; try { contexte = construireContexteReperes({ recipe, version }); } catch { /* source trop longue/invalide : aucune valeur courante */ }
@@ -207,11 +257,18 @@ export function lireReperes(recipe, version = null) {
     disponible: !!(contexte && version && contexte.source.disponibilite === 'available' && !contexte.source.incomplete && contexte.source.ingredients.some(Boolean) && contexte.source.etapes.some(Boolean)) };
   let enveloppe = null, invalide = false;
   if (recipe?.reperes != null) { try { enveloppe = enveloppeValide(recipe.reperes); } catch { invalide = true; } }
+  if (enveloppe) {
+    const sources = repartirSources(enveloppe);
+    enveloppe = sources.get(contexte?.signature) || [...sources.values()].reverse().find(e => (e.proposition?.source || Object.values(e.corrections)[0]?.source)?.version_id === contexte?.version_id) || enveloppe;
+  }
   for (const k of CHAMPS) {
     const manuel = own(enveloppe?.corrections, k), p = manuel ? enveloppe.corrections[k] : enveloppe?.proposition;
-    const valeur = p ? (manuel ? p.valeur : p[k]) : null;
+    let valeur = p ? (manuel ? p.valeur : p[k]) : null;
+    if (k === 'temps' && manuel && p.champs_modifies && valeur && enveloppe.proposition?.source.signature === p.source.signature && enveloppe.proposition.temps) {
+      valeur = { ...enveloppe.proposition.temps, ...Object.fromEntries(p.champs_modifies.map(champ => [champ, valeur[champ]])) };
+    }
     const courant = !!p && !!contexte && p.source.version_id === contexte.version_id && p.source.signature === contexte.signature;
-    resultat.champs[k] = { valeur, origine: p ? (manuel ? 'manuel' : 'estimation_ia') : null, etat: invalide ? 'invalide' : !p ? 'absent' : courant ? 'courant' : 'perime' };
+    resultat.champs[k] = { valeur, origine: p ? (manuel ? 'manuel' : 'estimation_ia') : null, etat: invalide ? 'invalide' : !p ? 'absent' : courant ? 'courant' : 'perime', ...(k === 'temps' && manuel ? { champs_modifies: p.champs_modifies ?? [...CHAMPS_TEMPS_REPERES] } : {}) };
     if (courant) resultat[k] = k === 'description_fr' ? valeur?.texte ?? null : valeur;
   }
   resultat.rapide = !!(resultat.disponible && resultat.temps?.total?.complet && resultat.temps.attentes_incluses === true && resultat.temps.total.max <= 30);

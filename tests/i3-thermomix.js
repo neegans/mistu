@@ -20,7 +20,7 @@ export async function runI3ThermomixTests({ eq, ok }) {
   const T = await import('../src/domain/thermomix.js');
   const src = sourceThermomix();
   const ctx = (opts = {}) => T.construireContexteThermomix({ version: src, selection: ['s1'], ...opts });
-  const refused = (fn, message) => { let e = null; try { fn(); } catch (x) { e = x; } ok(!!e?.raison, 'I3 : ' + message); };
+  const refused = (fn, message, raison) => { let e = null; try { fn(); } catch (x) { e = x; } if (raison) eq(e?.raison, raison, 'I3 : ' + message); else ok(!!e?.raison, 'I3 : ' + message); };
   const rule = (patch, options = {}) => { const p = propositionThermomix(); Object.assign(p.blocs[0].actions[1], patch); return T.validerReponseThermomix(p, ctx(options)); };
   eq(ctx().source.servings, 4, 'I3 : portions source explicites');
   eq(ctx({ selection: [] }).selection, [], 'I3 : brouillon sans présélection');
@@ -69,18 +69,18 @@ export async function runI3ThermomixTests({ eq, ok }) {
   eq(ctx().precisions.volume_bol_l, null, 'I3 : volume inconnu reste inconnu');
   const both = ctx({ selection: ['s1', 's2'], precisions: { eau_vapeur_g: 500, froid_confirme: ['s1', 's2'] } });
   const vapeur = { ...propositionThermomix().blocs[0].actions[1], mode: 'vapeur', temperature: null, accessoire: 'varoma', secondes: 1000 };
-  const twice = { type: 'proposition', blocs: [ { source_step_id: 's1', raison: 'Vapeur.', actions: [vapeur] }, { source_step_id: 's2', raison: 'Suite.', actions: [vapeur] } ] };
-  refused(() => T.validerReponseThermomix(twice, both), 'cumul vapeur sur plusieurs blocs refusé au-delà de 30 min');
-  const hotFast = copie(twice); hotFast.blocs[0].actions = [propositionThermomix().blocs[0].actions[1]]; hotFast.blocs[1].actions = [{ ...vapeur, mode: 'manuel', accessoire: 'couteau', vitesse: 5 }];
-  refused(() => T.validerReponseThermomix(hotFast, both), 'confirmation froide ne contourne pas une chauffe précédente');
+  const twice = { type: 'proposition', blocs: [ { source_step_id: 's1', raison: 'Vapeur.', actions: [propositionThermomix().blocs[0].actions[0], vapeur] }, { source_step_id: 's2', raison: 'Suite.', actions: [vapeur] } ] };
+  refused(() => T.validerReponseThermomix(twice, both), 'cumul vapeur sur plusieurs blocs refusé au-delà de 30 min', 'vapeur_cumulee');
+  const hotFast = copie(twice); hotFast.blocs[0].actions = [...propositionThermomix().blocs[0].actions]; hotFast.blocs[1].actions = [{ ...vapeur, mode: 'manuel', accessoire: 'couteau', vitesse: 5 }];
+  refused(() => T.validerReponseThermomix(hotFast, both), 'confirmation froide ne contourne pas une chauffe précédente', 'froid_non_etabli');
   const mixed = propositionThermomix(); mixed.blocs[0].actions.push({ ...mixed.blocs[0].actions[1], temperature: null, vitesse: 5 });
-  refused(() => T.validerReponseThermomix(mixed, ctx({ precisions: { froid_confirme: ['s1'] } })), 'chauffe puis vitesse rapide dans le même bloc refusée');
+  refused(() => T.validerReponseThermomix(mixed, ctx({ precisions: { froid_confirme: ['s1'] } })), 'chauffe puis vitesse rapide dans le même bloc refusée', 'froid_non_etabli');
   const free = propositionThermomix(); free.blocs[0].actions[0] = { type: 'preparation', text: 'Ajouter deux œufs.' };
   refused(() => T.validerReponseThermomix(free, ctx()), 'préparation en prose libre refusée');
   const adding = propositionThermomix(); adding.blocs[0].actions.push(copie(adding.blocs[0].actions[0]));
   refused(() => T.validerReponseThermomix(adding, ctx()), 'double ajout en quantité complète refusé');
   const oil = sourceThermomix(); oil.ingredients = [{ id: 'ri-oil', source_text: '100 ml d’huile', name_text: 'huile', quantity: { value: 100 }, unit_id: 'ml' }];
-  refused(() => T.validerReponseThermomix(propositionThermomix('s1', [{ ...propositionThermomix().blocs[0].actions[1], ingredients: ['i1'] }]), T.construireContexteThermomix({ version: oil, selection: ['s1'] })), 'chauffe d’huile seule refusée');
+  refused(() => T.validerReponseThermomix(propositionThermomix('s1', [{ type: 'preparation', operation: 'ajouter', ingredients: ['i1'], contenant: 'bol' }, { ...propositionThermomix().blocs[0].actions[1], ingredients: ['i1'] }]), T.construireContexteThermomix({ version: oil, selection: ['s1'] })), 'chauffe d’huile seule refusée', 'huile_seule');
   const unknown = sourceThermomix(); unknown.ingredients[0].quantity = null;
   refused(() => T.validerReponseThermomix(propositionThermomix(), T.construireContexteThermomix({ version: unknown, selection: ['s1'] })), 'quantité utile absente exige une question');
   let seq = 0; const make = (source = src, contexte = ctx(), resultat = propositionThermomix()) => T.fabriquerVersionThermomix({ source, contexte, resultat, id: 'rv-adaptee-' + (++seq), newId: () => 'step-new-' + (++seq), maintenant: '2026-10-28T23:00:00Z', modele: 'fixture' });
@@ -140,7 +140,7 @@ export async function runI3ThermomixTests({ eq, ok }) {
     { source_step_id: 's2', raison: 'Remuer.', actions: [whisk, whisk] },
     { source_step_id: 's3', raison: 'Remuer.', actions: [whisk] },
   ] };
-  refused(() => T.validerReponseThermomix(longWhisk, five), 'cumul fouet >2 h refusé sur blocs distincts');
+  refused(() => T.validerReponseThermomix(longWhisk, five), 'cumul fouet >2 h refusé sur blocs distincts', 'fouet_cumule');
   longWhisk.blocs[2].actions = [{ type: 'preparation', operation: 'verifier_texture', ingredients: [], contenant: 'bol' }];
   eq(T.validerReponseThermomix(longWhisk, five).type, 'proposition', 'I3 : cumul fouet 2 h inclusif');
   const hotFat = sourceThermomix(); hotFat.ingredients[0] = { id: 'ri-oil', source_text: '100 ml d’huile chaude', name_text: 'huile chaude', quantity: { value: 100 }, unit_id: 'ml' };

@@ -395,6 +395,7 @@ table.compare th, table.compare td { border-bottom: 1px solid var(--line); paddi
 table.compare th { color: var(--green); background: var(--cream-2); }
 
 .two-col { display: grid; gap: 1rem; grid-template-columns: 1fr; }
+.two-col > * { min-width: 0; }
 @media (min-width: 760px) { .two-col { grid-template-columns: 1fr 1fr; } .two-col.narrow-left { grid-template-columns: 320px 1fr; } .two-col.livre { grid-template-columns: 1fr; } }
 /* D-UI-7 : la fiche livre (tâche 4) ne passe en deux colonnes — couverture 200 px | recettes — qu'à partir de 900 px ; de 760 à 899 px la règle ci-dessus la garde empilée. */
 @media (min-width: 900px) { .two-col.livre { grid-template-columns: 200px 1fr; } }

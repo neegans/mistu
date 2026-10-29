@@ -2,6 +2,7 @@
 // page (même transaction). Règle I7, la même qu'à l'envoi : le plus récent gagne ; égal + identique = rien ;
 // égal + différent = conflit — sauf assistant_config : K-5, la version du compte gagne, sans journal (et plus récent
 // ici = remise en file, sans journal non plus). Tout ce qui s'écrit ici porte origin 'remote' : jamais recapturé.
+import { preparerFermetureImport, importConcerne, gardeImportRelu } from './imports-clos.js';
 import { SYNC_STORES, STORES } from '../model/schema.js';
 import { logError } from '../core/log.js';
 import { projectionFichier, remoteValide } from './tables.js';
@@ -160,6 +161,17 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
       const refus = refusDeForme(table, ligne, clePrimaire);
       if (refus) return { erreur: refus };
       const locale = await db.get(table, ligne.id);
+      if (table === 'imports' && (importConcerne(locale) || importConcerne(ligne.data))) {
+        fusions.set(ligne.id, { key: ligne.id, fusion: gardeImportRelu(locale) });
+        const fermeture = await preparerFermetureImport(locale, ligne, owner);
+        if (fermeture) {
+          (puts.imports ||= []).push(fermeture.row);
+          if (!await db.get('sync_conflicts', fermeture.copie.id)) conflits.push(fermeture.copie);
+          if (fermeture.entree) refile.push(fermeture.entree);
+          recues += 1;
+          continue;
+        }
+      }
       const decision = regleDuMagasin(table, decider({ locale, distante: ligne, table }));
       if (table==='recipes' && !ligne.deleted_at && (decision==='cycle'||porteCycle(ligne.data)||porteCycle(locale))) {
         const commandes=(await db.getAll('outbox')).filter(e=>e.op==='lifecycle'&&e.id===ligne.id&&(e.user_id==null||e.user_id===getUserId()));
