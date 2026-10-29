@@ -48,6 +48,7 @@ export async function runI2IntegrationTests({eq,ok}) {
     await repo.saveBatch({recipes:[{id:'r',original_title:'Mon plat',current_version_id:'v'}],recipe_versions:[{id:'v',recipe_id:'r',kind:'extraction',ingredients:[],steps:[]}]},{conditions:{recipes:[{key:'r',absente:true}]}});
     await repo.putFile(sha,blob,{});
     await repo.save('cook_history',{id:'ch-perso',recipe_id:'r',recipe_version_id:'v',cooked_at:'2026-10-28',photos:[sha]});
+    await repo.saveBatch({books:[{id:'bk-i2',title:'Livre consulté'}],book_editions:[{id:'ed-i2',book_id:'bk-i2'}]},{conditions:{book_editions:[{key:'ed-i2',absente:true}]}});
     await repo.save('library_activity',{id:'consultation-locale-i2',edition_id:'ed-i2',viewed_at:'2026-10-28T12:00:00Z'});
     const file=await db.getAll('outbox');
     ok(file.some(row=>row.store==='cook_history' && row.id==='ch-perso'),'I2 S01: cuisson synchronisée malgré historique de consultation désactivé');

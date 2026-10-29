@@ -42,7 +42,7 @@ export async function runImportCibleTests({ eq, ok }) {
 
   // --- Schéma (spec § 3.1, § 3.7, K-9)
   const S = await import('../src/model/schema.js');
-  eq(S.DB_VERSION, 5, 'schéma : DB_VERSION 4');
+  eq(S.DB_VERSION, 6, 'schéma : DB_VERSION 6');
   const noms = Object.keys(S.STORES);
   eq([noms[noms.indexOf('assistant_config') + 1], noms[noms.indexOf('imports') + 1]], ['imports', 'settings'], 'schéma : imports juste après assistant_config, avant settings');
   eq(S.STORES.imports, { keyPath: 'id', indexes: [['edition_id', 'edition_id'], ['recipe_id', 'recipe_id'], ['status', 'status']] }, 'schéma : clé et index d’imports');
@@ -315,7 +315,7 @@ export async function runImportCibleTests({ eq, ok }) {
     eq([V.assertVocabulaire({ photo_origin: null }, 'recipes'), V.assertVocabulaire({}, 'recipes'), V.assertVocabulaire({ photo_origin: 'web' }, 'recipes')], [true, true, true], 'null et absent tolérés ; web admis');
     eq(['photo', 'image', 'web', 'appareil', '', 7, null, '__proto__', 'constructor'].map((v) => V.originePhotoAdmise(v)), ['photo', 'image', 'web', null, null, null, null, null, null], 'originePhotoAdmise : les trois origines → elles-mêmes ; tout le reste → null');
     eq(S.RELATIONS.filter(([, champ]) => /photo_(sha256|source_url)/.test(champ)), [], 'RELATIONS : aucune relation sur photo_sha256 ni photo_source_url (pointeurs souples)');
-    eq(S.DB_VERSION, 5, 'DB_VERSION 5 (index corbeille)');
+    eq(S.DB_VERSION, 6, 'DB_VERSION 6 (index corbeille des livres)');
     const reference = { id: 'rc_f', edition_id: 'ed1', original_title: 'Tarte', original_language: 'fr', availability: 'reference_only', verification_state: 'unverified', printed_page: null, source_page_ids: [], current_version_id: null, tags: [], cuisines: [], favorite: false, ingredient_ids: [] };
     const resultat = { title: 'Tarte', servings: 4, prep_minutes: null, cook_minutes: null, ingredients: [{ source_text: '1 pomme', uncertain: false }], steps: [{ text: 'Cuire.' }], printed_page: null, sub_recipes: [], uncertain_fields: [], notes: null, incomplete: false, missing_page: false };
     const opts = { reference, versions: [], pages: [], pageIds: [], edition: null, importId: 'imp_f', modele: 'claude-x', maintenant: '2026-10-19T00:00:00.000Z' };
@@ -436,8 +436,9 @@ export async function runImportCibleTests({ eq, ok }) {
 
   // --- repo.ajouterPages (spec § 3.6) : les octets par putFile avant, puis les lignes de séance \u2014 et la ligne du journal \u2014 en UNE transaction ; aucune navigation.
   await run('repo.ajouterPages', () => withRepo(async (repo, db) => {
+    await db.mutate({origin:'remote',puts:{book_editions:[{id:'ed1',book_id:'b1'}],recipes:['rc1','rc2','rc_x','rc9','rc_d','rc_mur_b','rc_seed'].map(id=>({id,edition_id:'ed1'}))}});
     const fichier = (nom, octets = 100) => new File([new Uint8Array(octets).map((_, i) => (i * 7 + nom.length) & 255)], nom, { type: 'image/jpeg' });
-    const horsFiles = (vus) => vus.filter(([k]) => !(k.length === 1 && k[0] === 'files')); // les octets passent par putFile (un mutate `files` chacun) : seuls les lots de lignes comptent ici
+    const horsFiles = (vus) => vus; // L2 : fichiers et liens sont maintenant dans la même transaction.
     const capture = db.onMutate;
     const espionner = (vus, lire = () => null) => { db.onMutate = (m) => { vus.push([Object.keys(m.puts).sort(), lire(m)]); return capture ? capture(m) : {}; }; };
     const hashAvant = location.hash;
@@ -445,7 +446,7 @@ export async function runImportCibleTests({ eq, ok }) {
     const vus1 = []; espionner(vus1, (m) => m.origin);
     let r1; try { r1 = await repo.ajouterPages([fichier('a.jpg', 100)], { edition_id: 'ed1' }); } finally { db.onMutate = capture; }
     eq([r1.session.status, r1.session.edition_id, r1.pages.length, r1.docs.length, r1.importId, r1.session.page_ids, r1.session.document_ids, r1.pages[0].position, r1.docs[0].source_type], ['open', 'ed1', 1, 1, null, [r1.pages[0].id], [r1.docs[0].id], 1, 'photo'], 'ajouterPages : séance ouverte neuve, une page et un document, importId null sans import');
-    eq(horsFiles(vus1), [[['scan_sessions', 'source_documents', 'source_pages'], 'local']], 'ajouterPages sans import : UN lot pour les trois magasins de séance (les octets par putFile avant)');
+    eq(horsFiles(vus1), [[['files', 'scan_sessions', 'source_documents', 'source_pages'], 'local']], 'ajouterPages sans import : UN lot atomique pour les trois magasins de séance ET leurs octets');
     eq([location.hash, (await db.get('scan_sessions', r1.session.id))?.page_ids, (await db.get('source_pages', r1.pages[0].id))?.sha256, (await db.get('files', r1.docs[0].sha256))?.blob instanceof Blob], [hashAvant, [r1.pages[0].id], r1.docs[0].sha256, true], 'ajouterPages : aucune navigation (adresse inchangée), séance, page et octets écrits');
     // Ronde 1 : le signalement « Image très légère » est une DONNÉE (issues) posée par ajouterPages \u2014 épinglé sous et à la borne, et par le helper que replacePage partage.
     eq([r1.pages[0].issues.length, (await db.get('source_pages', r1.pages[0].id)).issues, repo.issuesPourImage(repo.SMALL_IMAGE_BYTES - 1).length, repo.issuesPourImage(repo.SMALL_IMAGE_BYTES).length, repo.issuesPourImage(100)[0]], [1, [t('Image très légère : possiblement floue ou trop petite')], 1, 0, t('Image très légère : possiblement floue ou trop petite')], 'ajouterPages (ronde 1) : une image de 100 octets porte le signalement « Image très légère » dans issues ; à SMALL_IMAGE_BYTES, aucun ; issuesPourImage est le seul endroit qui en décide');
@@ -458,7 +459,7 @@ export async function runImportCibleTests({ eq, ok }) {
     const ligne = await db.get('imports', 'imp_n');
     eq(r2.pages.map((p) => p.issues.length), [1, 0], 'première photo (ronde 1) : 120 octets → signalée, 80 Kio → pas de signalement');
     eq([r2.importId, ligne?.status, ligne?.kind, ligne?.recipe_id, ligne?.edition_id, ligne?.device_id, ligne?.scan_session_id, ligne?.page_ids, ligne?.appels, ligne?.photo_sha256, ligne?.resultat, ligne?.erreur, typeof ligne?.created_at, typeof ligne?.updated_at], ['imp_n', 'a_lancer', 'recette', 'rc1', 'ed1', 'dev_x', r2.session.id, r2.pages.map((p) => p.id), 0, null, null, null, 'string', 'string'], 'première photo : la ligne a_lancer porte la séance, les deux pages dans l’ordre, appels 0, horodatée');
-    eq(horsFiles(vus2), [[['imports', 'scan_sessions', 'source_documents', 'source_pages'], [['a_lancer', r2.session.id, r2.pages.map((p) => p.id)]]]], 'première photo : la ligne du journal et les lignes de séance dans UN SEUL lot (même appel de mutate)');
+    eq(horsFiles(vus2), [[['files', 'imports', 'scan_sessions', 'source_documents', 'source_pages'], [['a_lancer', r2.session.id, r2.pages.map((p) => p.id)]]]], 'première photo : la ligne du journal et les lignes de séance dans UN SEUL lot (même appel de mutate)');
     eq((await db.getAll('outbox')).filter((e) => e.store === 'imports').map((e) => [e.id, e.op]), [['imp_n', 'put']], 'première photo : la ligne du journal est capturée (elle part au compte)');
     // Ronde 1 (décision 9) : sans edition_id ni device_id dans `import`, la ligne retombe sur la séance et sur l’appareil \u2014 sur une séance existante d’édition ed1.
     { const r2b = await repo.ajouterPages([fichier('r.jpg', 121)], { session_id: r1.session.id, import: { id: 'imp_r', kind: 'recette', recipe_id: 'rc2' } });
@@ -490,7 +491,7 @@ export async function runImportCibleTests({ eq, ok }) {
     const apres = await db.get('imports', 'imp_n');
     const seance = await db.get('scan_sessions', r2.session.id);
     eq([apres.page_ids, apres.status, r3.importId, r3.session.id, seance.page_ids, seance.document_ids.length, r3.pages[0].position], [[r2.pages[0].id, r3.pages[0].id], 'a_lancer', 'imp_n', r2.session.id, [...r2.pages.map((p) => p.id), r3.pages[0].id], 3, 3], 'avec import_id : les page_ids neufs s’ajoutent EN FIN de ceux de la LIGNE (lus dans la transaction : [b, d], jamais de la séance [b, c, d]), même statut, séance reprise et complétée');
-    eq(horsFiles(vus3), [[['imports', 'scan_sessions', 'source_documents', 'source_pages'], apres.page_ids]], 'avec import_id : imports, source_documents, source_pages et scan_sessions dans le MÊME appel de mutate');
+    eq(horsFiles(vus3), [[['files', 'imports', 'scan_sessions', 'source_documents', 'source_pages'], apres.page_ids]], 'avec import_id : imports, source_documents, source_pages et scan_sessions dans le MÊME appel de mutate');
     // Ronde 1 : import_id SANS session_id → la séance est celle de la ligne du journal (aucune séance orpheline) ; une séance qui diverge de celle de la ligne refuse.
     { const seancesAvant = await db.count('scan_sessions');
       const r3b = await repo.ajouterPages([fichier('e.jpg', 141)], { import_id: 'imp_n' });
@@ -550,7 +551,7 @@ export async function runImportCibleTests({ eq, ok }) {
     const navs = [], toasts = [];
     const vus5 = []; espionner(vus5);
     let s; try { s = await I.startScanSession([fichier('g.jpg', 190)], { session_id: r2.session.id, naviguer: (p) => navs.push(p), notifier: (m) => toasts.push(m) }); } finally { db.onMutate = capture; }
-    eq([s.id, s.page_ids.length, navs, toasts.length, horsFiles(vus5)], [r2.session.id, 7, [`/import?session=${encodeURIComponent(r2.session.id)}`], 1, [[['scan_sessions', 'source_documents', 'source_pages'], null]]], 'startScanSession : même lot de séance qu’ajouterPages (une transaction pour les trois magasins), puis UNE navigation vers la séance et un toast');
+    eq([s.id, s.page_ids.length, [...navs], toasts.length, horsFiles(vus5)], [r2.session.id, 7, [`/import?session=${encodeURIComponent(r2.session.id)}`], 1, [[['files', 'scan_sessions', 'source_documents', 'source_pages'], null]]], 'startScanSession : même lot de séance qu’ajouterPages (une transaction pour les trois magasins), puis UNE navigation vers la séance et un toast');
     eq([(await db.get('scan_sessions', r2.session.id)).page_ids.length, location.hash], [7, hashAvant], 'startScanSession : la séance est complétée (b, c, d, a_verifier, echec, e, g) ; la navigation injectée n’a pas touché l’adresse de la page de tests');
     const s2 = await I.startScanSession([fichier('h.jpg', 200)], { edition_id: 'ed1', intention: 'index', naviguer: (p) => navs.push(p), notifier: () => {} });
     eq([s2.edition_id, s2.page_ids.length, navs.at(-1)], ['ed1', 1, `/import?session=${encodeURIComponent(s2.id)}&intention=index`], 'startScanSession : séance neuve, l’intention voyage dans l’adresse comme avant');
@@ -1168,7 +1169,7 @@ export async function runImportCibleTests({ eq, ok }) {
         const impO = await preparer('rc_o', 1);
         await db.put('imports', { ...(await db.get('imports', impO)), status: 'a_verifier', resultat: RECETTE, model: 'claude-x', reponse_brute: 'x' });
         const root = await monter('rc_o', { deps: { fetch: interdit } });
-        await repo.remove('recipes', 'rc_o'); // supprimée sur un autre appareil (tombale synchronisée)
+        await db.mutate({origin:'remote',deletes:{recipes:['rc_o']}}); // ancienne tombale distante ; aucun effacement local désormais autorisé
         const vus = []; const capture = db.onMutate; db.onMutate = (m) => { vus.push(Object.keys(m.puts)); return capture ? capture(m) : {}; };
         try {
           bouton(root, 'Enregistrer cette lecture').click();

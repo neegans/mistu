@@ -1,4 +1,4 @@
-import { recetteActive } from '../domain/cycle-recette.js';
+import { recetteActiveDansContexte } from './state.js';
 import { mentionCycleRecette } from './corbeille.js';
 // Écran « Créer une recette avec l'assistant IA » (spec 2026-10-18-creer-avec-l-ia § 3.2, § 5 ; table de décision P7 des
 // amendements). L'état vit AU NIVEAU DU MODULE, comme la recherche web (search.js) : UN vol pour toute l'app (C-1), une mémoire de
@@ -106,7 +106,7 @@ export async function renderCreerIA(params, query, ctx, { creer = creerRecetteIA
   const versionParente = idParente ? ctx?.versionsById?.get(idParente) : null;
   const ficheParente = versionParente ? ctx?.recipesById?.get(versionParente.recipe_id) : null;
   const parente = versionParente && ficheParente && estCreationIA(versionParente) ? { ...versionParente, title: ficheParente.original_title } : null;
-  if (ficheParente && !recetteActive(ficheParente)) return mentionCycleRecette(ficheParente);
+  if (ficheParente && !recetteActiveDansContexte(ficheParente, ctx)) return mentionCycleRecette(ficheParente, ctx?.editionsById?.get(ficheParente.edition_id));
   const contexteRecette = await capturerRecette(r, parente ? ficheParente : { id: 'nouvelle-recette' }, { ctx, creation: !parente });
   const fournisseur = providerFrom(ctx?.settings, { session: await sessionAssistant(ctx) }); // la passerelle (R-T3-1) : la session décide
   const connecter = () => demarrerConnexion(ctx?.sync?.auth);

@@ -1,6 +1,6 @@
 import { panneauAbandonProposition, texteConfirmationAbandon, texteErreurReprise } from './reprise-import.js';
-import { recetteActive } from '../domain/cycle-recette.js';
-import { revoirLectureImport } from '../domain/contexte-import.js';
+import { recetteActiveDansContexte } from './state.js';
+import { revoirLectureImport, memeCaptureImport } from '../domain/contexte-import.js';
 import { mentionCycleRecette } from './corbeille.js';
 import { capturerRecette } from './recette-garde.js';
 // I3 : sélection, brouillon durable, proposition et relecture. Aucun démarrage du robot.
@@ -52,7 +52,7 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
   const enLigne = deps.enLigne || (() => navigator.onLine !== false);
   const propreRecette = await repo.get('recipes', params.id);
   if (!propreRecette) return el('p', { class: 'status warn' }, t('Recette introuvable.'));
-  if (!recetteActive(propreRecette)) return mentionCycleRecette(propreRecette);
+  if (!recetteActiveDansContexte(propreRecette, ctx)) return mentionCycleRecette(propreRecette, ctx?.editionsById?.get(propreRecette.edition_id));
   const contexteRecette = await capturerRecette(repo, propreRecette, {ctx});
   let row = null;
   if (typeof query.import === 'string' && query.import) {
@@ -99,7 +99,7 @@ export async function renderThermomixRoute(params, query = {}, ctx = {}, deps = 
   const precedentZone = el('div', {class:'stack',dataset:{role:'precedent-tm7'}});
   const questionsZone = el('div', { class: 'stack', dataset: { role: 'questions-tm7' } });
   const readonly = () => !!row && row.device_id !== repo.deviceId();
-  const cycleDivergent = () => !!row && (row.expected_cycle_id ?? null) !== contexteRecette.expected_cycle_id;
+  const cycleDivergent = () => !!row && !memeCaptureImport(row, contexteRecette);
   const perime = () => cycleDivergent() || !!row?.validation_erreur;
   const terminal = () => !!row && TERMINE.includes(row.status);
   const vivant = () => !closed && (!connectedOnce || root.isConnected);

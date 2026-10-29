@@ -1,5 +1,6 @@
 // « Ajouter un livre » en deux pas (spec UX § 5) : identifier (ISBN scanné, tapé, ou saisie à la main), puis compléter.
 // Ce qui vient d'Open Library / Google Books est ÉTIQUETÉ et borné (I-A, I-G) ; l'écriture passe par repo.saveBatch (I-D).
+import { capturerProprietaire, conditionProprietaire } from './recette-garde.js';
 import { el, toast, pickFiles } from '../core/dom.js';
 import { t } from '../core/i18n.js';
 import { logError } from '../core/log.js';
@@ -269,7 +270,7 @@ export async function recupererCouvertureParIsbn(isbn, { fetch = globalThis.fetc
 // Une couverture choisie ICI passe par preparerPhotoLocale (src/core/image.js) : le mur commun des photos locales — 25 Mo, liste blanche des
 // types, 16 Mpx lus dans l'en-tête AVANT tout décodage (S2), JPEG 1 200 px —, partagé avec la photo du plat de l'import ciblé (spec
 // import-cible § 4.2.3). Une couverture REÇUE (recupererCouvertureParIsbn a déjà posé son type et son mur de pixels) garde sa borne de 5 Mo.
-export async function poserCouverture(blob, { origine = 'locale', repo: r = repo, sha256 = sha256Hex } = {}) {
+export async function poserCouverture(blob, { origine = 'locale', repo: r = repo, sha256 = sha256Hex, prepareOnly = false, compte = null } = {}) {
   let jpeg;
   if (origine === 'locale') jpeg = await preparerPhotoLocale(blob);
   else {
@@ -277,7 +278,9 @@ export async function poserCouverture(blob, { origine = 'locale', repo: r = repo
     jpeg = await reduireImage(blob);
   }
   const empreinte = await sha256(jpeg);
-  await r.putFile(empreinte, jpeg, { mime: 'image/jpeg' });
+  if (prepareOnly) return {sha256:empreinte,taille:jpeg.size,blob:jpeg,fichier:{sha256:empreinte,blob:jpeg,meta:{mime:'image/jpeg'}}};
+  if(compte) await r.saveBatch({}, {fichiers:[{sha256:empreinte,blob:jpeg,meta:{mime:'image/jpeg'}}],conditions:{sync_state:[conditionProprietaire(compte)]}});
+  else await r.putFile(empreinte, jpeg, { mime: 'image/jpeg' });
   return { sha256: empreinte, taille: jpeg.size };
 }
 
@@ -429,12 +432,16 @@ export function fabriquerLivre({ champs, isbn, coverSha256 = null }, { newId }) 
 // (patch fonction du courant) : a_verifier → enregistre (une lecture a été reçue), echec | a_lancer → ignore ; edition_id posé dans les deux cas. Refusée :
 // la ligne est relue — en_cours → Error('lecture_en_cours'), rien d'écrit ; enregistre avec une édition présente → { dejaAjoute } (deux onglets sur le même
 // ?import= : pas de doublon) ; absente, ignore, ou édition supprimée → le livre seul (le journal n'est plus à nous).
-export async function enregistrerLivre(args, { repo: r = repo, importId = null, maintenant = () => new Date().toISOString() } = {}) {
+export async function enregistrerLivre(args, { repo: r = repo, importId = null, maintenant = () => new Date().toISOString(), compte = null } = {}) {
   const repo = r; // le dépôt injecté sous le nom littéral que le test statique du lot A exige (contrainte globale) ; le défaut ci-dessus lit le module
+  compte ||= await capturerProprietaire(repo);
   const { book, edition } = fabriquerLivre({ ...args, coverSha256: shaBornee(args?.coverSha256) }, { newId: repo.newId });
-  if (!importId) { await repo.saveBatch({ books: [book], book_editions: [edition] }); return edition; }
+  const creation={editions:[{edition_id:edition.id,expected_cycle_id:null,owner_id:compte.owner_id,creation:true,contexteValide:compte.contexteValide}],conditions:{books:[{key:book.id,absente:true}],book_editions:[{key:edition.id,absente:true}],sync_state:[conditionProprietaire(compte)]}};
+  const isbn=validerIsbn(args?.isbn);
+  if(isbn.ok){const existante=(await repo.all('book_editions')).find(e=>validerIsbn(e.isbn).isbn13===isbn.isbn13);if(existante)return {dejaAjoute:existante.id};creation.conditions.book_editions.push(...[...new Set([isbn.isbn13,isbn.isbn10].filter(Boolean))].map(valeur=>({index:'isbn',valeur,absente:true})));}
+  if (!importId) { await repo.saveBatch({ books: [book], book_editions: [edition] },creation); return edition; }
   const ATTENDUS = ['a_verifier', 'echec', 'a_lancer'];
-  const fermer = () => repo.transitionner('imports', importId, { attendus: ATTENDUS, patch: (c) => ({ status: c.status === 'a_verifier' ? 'enregistre' : 'ignore', edition_id: edition.id, reponse_brute: null, finished_at: maintenant() }), puts: { books: [book], book_editions: [edition] } });
+  const fermer = () => repo.transitionner('imports', importId, { attendus: ATTENDUS, patch: (c) => ({ status: c.status === 'a_verifier' ? 'enregistre' : 'ignore', edition_id: edition.id, reponse_brute: null, finished_at: maintenant() }), puts: { books: [book], book_editions: [edition] },...creation });
   try {
     await fermer();
     return edition;
@@ -446,7 +453,7 @@ export async function enregistrerLivre(args, { repo: r = repo, importId = null, 
     // Ronde 1 (#27) : la ligne a été ROUVERTE entre la transaction et cette relecture (deux routes sur le même ?import=, tâche 5) — la fermeture est rejouée
     // une fois, avec le livre ; jamais un livre écrit seul à côté d'une ligne ouverte (une reprise en écrirait un second). Un second refus remonte.
     if (ATTENDUS.includes(ligne?.status)) { await fermer(); return edition; }
-    await repo.saveBatch({ books: [book], book_editions: [edition] });
+    await repo.saveBatch({ books: [book], book_editions: [edition] },creation);
     return edition;
   }
 }
@@ -549,6 +556,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
   // Lot E : le dépôt injecté sous le nom littéral `repo`, pour les SEULS appels qui transitionnent (contrainte globale : le test statique du lot A
   // n'admet hors repo.js que `repo.transitionner(`) ; le reste du corps garde `r`, comme aujourd'hui. Le défaut `repo: r = repo` lit le module.
   const repo = r;
+  const compte = await capturerProprietaire(repo,ctx);
   // `touchee` (R-UX-13) : la personne a agi sur la couverture (choisi une image, ou retiré). Une réponse distante
   // tardive ne défait jamais un geste — même si l'ISBN, lui, n'a pas changé.
   const COUVERTURE_VIDE = () => ({ sha256: null, apercu: null, message: null, enCours: false, touchee: false });
@@ -705,7 +713,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
             // La ligne écrite est relue pour l'aperçu : c'est la MÊME image que celle qui est gardée, et elle n'est
             // ré-encodée qu'une fois. S12 : une couverture REÇUE puis refusée ne se dit pas « aucune couverture ».
             try {
-              const { sha256 } = await poserCouverture(blob, { origine: 'distante', repo: r });
+              const { sha256 } = await poserCouverture(blob, { origine: 'distante', repo: r,compte });
               if (!pertinent()) return; // C1 : un geste pendant le ré-encodage gagne (la ligne files reste, dette S13)
               const ligne = await r.getFile(sha256);
               if (!pertinent()) return;
@@ -734,7 +742,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     // R-UX-13 : dès que la personne a choisi une image, une réponse distante tardive n'a plus rien à dire ici. Vague finale (constat 7) : sans détacher la lecture.
     avancerCouverture();
     etat.couverture = { ...etat.couverture, touchee: true, enCours: true }; dessiner();
-    try { const { sha256 } = await poserCouverture(files[0], { origine: 'locale', repo: r }); const ligne = await r.getFile(sha256); etat.couverture = { sha256, apercu: urlDeBlob(ligne.blob), message: t('Couverture enregistrée.'), enCours: false, touchee: true }; }
+    try { const { sha256 } = await poserCouverture(files[0], { origine: 'locale', repo: r,compte }); const ligne = await r.getFile(sha256); etat.couverture = { sha256, apercu: urlDeBlob(ligne.blob), message: t('Couverture enregistrée.'), enCours: false, touchee: true }; }
     // Un refus ne RETIRE pas la couverture déjà posée : seul le message change (l'écran ne perd rien de vrai).
     catch (e) { etat.couverture = { ...etat.couverture, enCours: false, message: messageErreurImage(e) }; }
     dessiner();
@@ -885,8 +893,8 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
       etat.importId = precedent; etat.lectureAppliquee = appliqueePrecedente; etat.generationLecture = null;
       rendreFin();
     };
-    let sha256;
-    try { ({ sha256 } = await poserCouverture(files[0], { origine: 'locale', repo: r })); }
+    let sha256,preparee;
+    try { preparee=await poserCouverture(files[0], { origine: 'locale', repo: r,prepareOnly:true });sha256=preparee.sha256; }
     catch (e) {
       // Ronde 1 (#21) : seule une ErreurImage est un refus d'image ; un stockage plein (putFile) est dit comme le journal impossible, et journalisé.
       if (!(e instanceof ErreurImage)) logError('livre.couverture.pose', { error: e });
@@ -895,13 +903,13 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
     }
     let posee = null, ligne;
     try { // ronde 1 (#29) : la relecture des octets posés est dans le même filet que l'écriture du journal
-      const fichier = await r.getFile(sha256);
-      posee = { sha256, apercu: urlDeBlob(fichier.blob), message: t('Couverture enregistrée.'), enCours: false, touchee: true };
       ligne = fabriquerImportCouverture({ id: r.newId('imp'), coverSha256: sha256, deviceId: r.deviceId() });
-      await r.saveBatch({ imports: [ligne] }, { conditions: { imports: [{ key: ligne.id, absente: true }] } });
+      ligne.owner_id=compte.owner_id;
+      await r.saveBatch({ imports: [ligne] }, { fichiers:[preparee.fichier],conditions: { imports: [{ key: ligne.id, absente: true }],sync_state:[conditionProprietaire(compte)] } });
+      posee = { sha256, apercu: urlDeBlob(preparee.blob), message: t('Couverture enregistrée.'), enCours: false, touchee: true };
     } catch (e) {
       logError('livre.couverture.journal', { error: e });
-      refuser(t('Le livre n’a pas pu être enregistré. Réessaie.'), posee ?? { ...COUVERTURE_VIDE(), touchee: true }); // la couverture reste posée (ligne files écrite)
+      refuser(t('Le livre n’a pas pu être enregistré. Réessaie.'), posee ?? { ...COUVERTURE_VIDE(), touchee: true }); // le journal et ses octets sont conservés ensemble, ou refusés ensemble
       return;
     }
     etat.importId = ligne.id;
@@ -1045,7 +1053,7 @@ export async function renderLivreAjoutRoute(params, query, ctx, { repo: r = repo
       majBoutonEnregistrer(zone, modele());
       let res;
       try {
-        res = await enregistrerLivre({ champs: etat.champs, isbn: etat.isbn, coverSha256: shaBornee(etat.couverture?.sha256) }, { repo: r, importId: etat.importId, maintenant });
+        res = await enregistrerLivre({ champs: etat.champs, isbn: etat.isbn, coverSha256: shaBornee(etat.couverture?.sha256) }, { repo: r, importId: etat.importId, maintenant,compte });
       } catch (e) {
         etat.enCours = false;
         majBoutonEnregistrer(zone, modele());

@@ -3,6 +3,19 @@ import { validerIsbn } from '../core/isbn.js';
 import { ligneImportNeuve } from './import-cible.js';
 import { brouillonLivre, shaLivre, CHAMPS_LIVRE_I2 } from './livre-bibliographie.js';
 import { TransitionRefusee } from '../core/db.js';
+import { lireCycleEdition } from './cycle-edition.js';
+
+const erreurLivre = code => Object.assign(new Error(code), { code });
+export const memoireEditionLivre = contexte => contexte ? { edition_id: contexte.edition_id, expected_edition_cycle_id: contexte.expected_cycle_id, owner_id: contexte.owner_id } : {};
+async function compteLivre(repo, compte, row = null) {
+  const owner = (await repo.get('sync_state', 'user_id'))?.value ?? null;
+  const attendu = compte || { owner_id: Object.hasOwn(row || {}, 'owner_id') ? row.owner_id : owner };
+  if (attendu.owner_id !== owner || (Object.hasOwn(row || {},'owner_id') && row.owner_id!==owner) || (attendu.contexteValide && !attendu.contexteValide())) throw erreurLivre('compte_change');
+  return { key: 'user_id', fusion: current => {
+    if ((current?.value ?? null) !== attendu.owner_id || (attendu.contexteValide && !attendu.contexteValide())) throw erreurLivre('compte_change');
+    return null;
+  } };
+}
 
 export function fabriquerImportLivre({ id, deviceId, brouillon } = {}) {
   return { ...ligneImportNeuve({ id, kind: 'livre', device_id: deviceId }), phase: 'relecture', brouillon: brouillonLivre(brouillon), source_photo_sha256: shaLivre(brouillon?.source_photo_sha256) };
@@ -11,12 +24,25 @@ export async function trouverEditionsLivre(isbn, repo) {
   const v = validerIsbn(isbn); if (!v.ok) return [];
   return (await repo.all('book_editions')).filter((e) => validerIsbn(e?.isbn).isbn13 === v.isbn13);
 }
-export async function garderBrouillonLivre(id, brouillon, { repo, phase } = {}) {
+export async function garderBrouillonLivre(id, brouillon, { repo, phase, contexteEdition = null, compte = null, fichiers = [] } = {}) {
   const d = brouillonLivre(brouillon);
-  await repo.saveBatch({}, { conditions: { imports: [{ key: id, fusion: (row) => {
+  const avant = await repo.get('imports', id), gardeCompte = await compteLivre(repo, compte, avant);
+  await repo.saveBatch({}, { fichiers, editions: contexteEdition ? [{ ...contexteEdition, historique: !fichiers.length }] : [], conditions: { sync_state: [gardeCompte], imports: [{ key: id, fusion: (row) => {
     if (!row || row.kind !== 'livre' || ['enregistre', 'ignore'].includes(row.status)) throw new Error('brouillon_ferme');
+    if (row.edition_id !== avant?.edition_id || row.expected_edition_cycle_id !== avant?.expected_edition_cycle_id || row.owner_id !== avant?.owner_id) throw erreurLivre('brouillon_modifie');
     return { ...row, brouillon: d, source_photo_sha256: d.source_photo_sha256, photo_sha256: d.cover_sha256, ...(phase ? { phase } : {}) };
   } }] } });
+}
+const copieJournalLivre = row => JSON.stringify(Object.fromEntries(['id','kind','status','phase','edition_id','owner_id','expected_edition_cycle_id','brouillon','initial','resultat','reponse_brute','tentative'].map(k=>[k,row?.[k]??null])));
+// Changer la base d'un ancien brouillon est un geste de relecture, jamais un effet du rechargement.
+export async function relireBrouillonLivre(id, { repo, contexteEdition, compte = null, attendu } = {}) {
+  if (!attendu || attendu.id !== id || attendu.kind !== 'livre' || !contexteEdition || attendu.brouillon?.edition_id !== contexteEdition.edition_id) throw erreurLivre('brouillon_modifie');
+  const gardeCompte = await compteLivre(repo,compte,attendu), signature=copieJournalLivre(attendu);
+  await repo.saveBatch({}, { editions:[{...contexteEdition,historique:false}], conditions: {sync_state:[gardeCompte],imports:[{key:id,fusion:current=>{
+    if (!current || !['a_lancer','a_verifier','echec'].includes(current.status) || copieJournalLivre(current)!==signature) throw erreurLivre('brouillon_modifie');
+    return {...current,...memoireEditionLivre(contexteEdition)};
+  }}]}});
+  return repo.get('imports',id);
 }
 const CHAMPS_LIVRE = ['title', 'subtitle', 'author', 'description', 'cuisines', 'tags', 'cuisine_facets'];
 const CHAMPS_EDITION = ['isbn', 'publisher', 'year', 'language'];
@@ -32,12 +58,13 @@ export function brouillonDepuisEdition(book, edition) {
 export class ConflitLivre extends Error {
   constructor(fields, valeurs = {}) { super('conflit_livre'); this.name = 'ConflitLivre'; this.fields = fields; this.valeurs = valeurs; }
 }
-export async function enregistrerLivreI2({ importId, brouillon, base = null, resolutions = [] }, { repo, maintenant = () => new Date().toISOString() } = {}) {
+export async function enregistrerLivreI2({ importId, brouillon, base = null, resolutions = [] }, { repo, maintenant = () => new Date().toISOString(), contexteEdition = null, compte = null } = {}) {
   const d = brouillonLivre(brouillon), f = d.fields;
   if (!f.title.trim()) throw new Error('titre_requis');
   if (f.year && (!/^\d{4}$/.test(f.year) || Number(f.year) < 1000 || Number(f.year) > new Date(maintenant()).getUTCFullYear() + 2)) throw new Error('annee_invalide');
   const v = validerIsbn(f.isbn); if (f.isbn && !v.ok) throw new Error('isbn_invalide');
   const importLu = await repo.get('imports', importId);
+  const gardeCompte = await compteLivre(repo, compte, importLu);
   if (importLu?.status === 'enregistre' && importLu.edition_id) {
     const ed = await repo.get('book_editions', importLu.edition_id); if (ed) return { ...ed, dejaAjoute: true };
   }
@@ -51,10 +78,15 @@ export async function enregistrerLivreI2({ importId, brouillon, base = null, res
   const livreValues = Object.fromEntries(CHAMPS_LIVRE.map((k) => [k, f[k]]));
   const bProv = Object.fromEntries(CHAMPS_LIVRE.filter((k) => d.provenance[k]).map((k) => [k, d.provenance[k]]));
   const eProv = Object.fromEntries(CHAMPS_EDITION.filter((k) => d.provenance[k]).map((k) => [k, d.provenance[k]]));
-  const conditions = {};
+  const conditions = { sync_state: [gardeCompte] };
   const puts = {};
+  const owner = compte?.owner_id ?? contexteEdition?.owner_id ?? (Object.hasOwn(importLu || {}, 'owner_id') ? importLu.owner_id : (await repo.get('sync_state', 'user_id'))?.value ?? null);
+  const gardeEdition = d.edition_id ? contexteEdition || { edition_id: edId, expected_cycle_id: importLu?.expected_edition_cycle_id ?? null, owner_id: owner }
+    : { edition_id: edId, expected_cycle_id: null, owner_id: owner, creation: true, ...(compte?.contexteValide ? { contexteValide: compte.contexteValide } : {}) };
+  if (gardeEdition.edition_id !== edId) throw erreurLivre('edition_changee');
   if (d.edition_id) {
     const ed = await repo.get('book_editions', d.edition_id); if (!ed || ed.book_id !== bookId) throw new Error('edition_absente');
+    if (lireCycleEdition(ed).etat !== 'active') throw erreurLivre('edition_retiree');
     const initial = base ? brouillonLivre(base) : brouillonDepuisEdition(vieuxBook, ed);
     const changed = CHAMPS_LIVRE_I2.filter((k) => JSON.stringify(f[k]) !== JSON.stringify(initial.fields[k]));
     const verify = (current, keys) => {
@@ -85,9 +117,14 @@ export async function enregistrerLivreI2({ importId, brouillon, base = null, res
     if (!vieuxBook) puts.books = [{ id: bookId, ...livreValues, metadata_provenance: bProv }];
     puts.book_editions = [{ id: edId, book_id: bookId, owned: true, ...editionValues, metadata_provenance: eProv }];
     if (v.ok) conditions.book_editions = [...new Set([v.isbn13, v.isbn10].filter(Boolean))].map((isbn) => ({ index: 'isbn', valeur: isbn, absente: true }));
+    (conditions.book_editions ||= []).push({ key: edId, absente: true });
+    if (!vieuxBook) conditions.books = [{ key: bookId, absente: true }];
   }
   try {
-    await repo.transitionner('imports', importId, { attendus: ['a_lancer', 'a_verifier', 'echec'], patch: { status: 'enregistre', phase: 'relecture', edition_id: edId, brouillon: d, reponse_brute: null, finished_at: maintenant() }, puts, conditions });
+    await repo.transitionner('imports', importId, { attendus: ['a_lancer', 'a_verifier', 'echec'], patch: current => {
+      if (current.owner_id !== importLu?.owner_id || current.edition_id !== importLu?.edition_id || current.expected_edition_cycle_id !== importLu?.expected_edition_cycle_id) throw erreurLivre('brouillon_modifie');
+      return { status: 'enregistre', phase: 'relecture', edition_id: edId, brouillon: d, reponse_brute: null, finished_at: maintenant() };
+    }, puts, conditions, editions: [gardeEdition] });
     return await repo.get('book_editions', edId);
   } catch (e) {
     if (e instanceof TransitionRefusee) {

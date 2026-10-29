@@ -199,6 +199,19 @@ Une réponse reçue après changement de compte ne va jamais dans la base du nou
 métadonnées partagées depuis une autre édition active reste autorisée sous son contexte ; elle ne change aucun cycle. Les documents,
 pages, versions, activités de consultation et préférences restent stockés. Aucun changement de cycle ne détache leurs relations.
 
+### 5.1 Identification de livre, couverture et reprise payée
+
+Le formulaire d'identification capture le compte et le cycle d'édition au montage. Une image préparée reste en mémoire jusqu'à
+l'écriture atomique de ses octets avec le journal ou le pointeur de couverture : un refus de cycle ou de compte ne laisse aucun
+fichier isolé. La création d'une édition déclare explicitement une base absente ; l'ISBN examine également les éditions retirées,
+les signale et permet d'ouvrir leur fiche, sans proposer de les compléter ni les réactiver implicitement.
+
+Un résultat reçu après le retrait ou la restauration est conservé dans son journal. Il ne remplit pas automatiquement le formulaire
+au rechargement. Pour un livre restauré, « Relire ce brouillon sur le livre restauré » réattache volontairement la base au cycle
+affiché, sans appel assistant. La transaction compare aussi la copie du journal affichée : toute réponse ou saisie arrivée depuis
+exige de rouvrir le brouillon. La relecture ne modifie pas la bibliographie ; les conflits de métadonnées restent à résoudre au moment
+d'enregistrer les compléments.
+
 ## 6. Synchronisation et compatibilité
 
 ### 6.1 Commandes et capacité
@@ -235,10 +248,12 @@ vérifie aussi le mode exact. Celui d'une exception individuelle exige le cycle 
 exactes ; il accuse sans réécrire et renvoie les deux états confirmés. Si l'édition a changé entre-temps, son nouvel état est réconcilié
 et l'ancienne exception reste inopérante. Si l'association ou l'exception ne correspond plus, refuser avec les états courants.
 
-Le retrait d'édition et les écritures de ses membres verrouillent la même édition. Définir un ordre unique compatible avec le
-verrou de recette L1 : recettes concernées dans l'ordre stable, puis éditions concernées dans l'ordre stable ; une commande parent
-verrouille seulement son édition et ne recherche ensuite aucun verrou enfant. Les opérations multiples doivent préverrouiller
-leur ensemble ou utiliser une primitive équivalente démontrée, pour éviter les interblocages.
+Toutes les écritures synchronisées prennent d'abord un verrou transactionnel de propriétaire, avant tout verrou de ligne ou de
+recette. Il sérialise les mutations d'un même compte ; les comptes différents restent indépendants. Les RPC actuelles, anciennes
+et l'alias L1 suivent cet ordre dès leur entrée. Des triggers BEFORE STATEMENT l'imposent aussi au REST direct et aux suppressions,
+y compris `sync_purge_all`. Ensuite viennent les recettes concernées triées, puis les éditions concernées triées. Une commande parent
+ne recherche aucun verrou enfant après son édition. Cette sérialisation a un coût accepté pour la bibliothèque personnelle ; elle
+évite l'inversion REST (ligne puis recette) / RPC (recette puis ligne), démontrée par deux sessions PostgreSQL réelles.
 
 Un client antérieur à L2 sans contexte d'édition ne peut modifier une édition ayant connu un cycle, ses associations ni ses contenus
 gardés. Cela vaut même si l'édition a été restaurée ou si une recette est effectivement active grâce à `keep_recipes`. Les écritures
@@ -266,6 +281,35 @@ une cascade de marqueurs enfants. Le groupe ne doit pas être présenté comme i
 Comme L1, conserver le dernier cycle confirmé séparément des intentions en attente, puis les réconcilier avec le curseur dans une
 transaction. Un écho plus ancien ne gagne pas contre un cycle confirmé récent. Un refus bloque les commandes dépendantes et conserve
 le travail pour relecture. « Garder celle d'ici » ne modifie aucun cycle ni exception. Une réponse manquante ou tronquée n'est pas un accusé.
+
+Le remplissage initial capture un graphe complet en mémoire et fige chaque contenu lié avec ses bases recette/édition, son compte et
+son association. Il ne recapture ni les commandes existantes ni les lignes couvertes par un `source_batch`. Une ancienne entrée sans
+base est complétée seulement si l'état initial est démontrable (parent jamais cyclé, ou seed initial capturé avant sa première commande).
+Sinon elle reste bloquée avec une copie durable ; le cycle courant ne devient jamais sa base par supposition. Le moteur poursuit les
+phases ayant réellement progressé, jusqu'à 32 phases par passe, puis programme une reprise si nécessaire. Une réception d'archive
+précède son premier envoi. Confirmation, contenu et curseur sont atomiques ; une confirmation arrivée pendant la transaction force une
+relecture, et un `server_seq` ancien ne remplace jamais une confirmation plus récente du même compte.
+
+### 6.4 Compléments de sources atomiques
+
+Pour compléter une recette effectivement active dont le livre est retiré, conserver l'exception étroite : une séance exclusive à cette
+recette, ses nouveaux documents et leurs nouvelles pages. Les anciennes sources restent immuables, notamment leurs associations
+`edition_id`, `scan_session_id` et `document_id` (y compris absence ↔ valeur). L'ancien contenu d'une séance partagée ne peut pas être
+réaffecté à une recette. Le groupe capture l'association recette/édition et les deux bases ; aucun rebasage au moment de l'envoi.
+
+Le geste produit une intention immuable `source_batch`, avec `operation_id`, `recipe_id`, `edition_id`, `base_cycle_id`,
+`base_edition_cycle_id`, `base_session` et `rows` (séance, documents, pages). Sa borne est de **500 lignes et 524288 octets**, mesurés
+sur la représentation JSONB textuelle UTF8 du groupe (espaces de séparateurs et exposants numériques développés compris). Le contrôle
+est effectué avant toute écriture locale, même sans capture de synchronisation, puis à nouveau côté serveur. Les octets des photos
+voyagent séparément et ne font pas partie de cette charge. Aucun découpage silencieux d'un groupe trop grand n'est autorisé.
+
+Le serveur vérifie toute la séance et sa base, les identités nouvelles et les références exclusives avant d'écrire le groupe dans une
+seule sous-transaction. Le CAS de `base_session` ignore uniquement `updated_at`, car le serveur normalise cette heure ; les autres
+champs et l'ordre des références demeurent identiques. Deux ajouts hors ligne sur la même séance restent deux opérations ordonnées.
+Un accusé perdu se réessaie sans doubler les sources, y compris si la séance a déjà été complétée à nouveau : les nouveaux documents
+et pages de l'opération doivent encore être identiques et référencés par la séance exclusive. L'accusé porte l'opération exacte et
+chaque état serveur réel ; il ne remplace pas une modification locale ultérieure. Un refus n'écrit aucun fragment, conserve le groupe
+complet et bloque ses dépendants. `edition_lifecycle: 1` désigne ce contrat complet de 0009 ; un ancien serveur ne le prend pas en charge.
 
 Un appareil réellement déconnecté peut continuer d'afficher son ancien état jusqu'à sa mise à jour. La garantie porte sur le refus
 de résurrection partagée à la reconnexion ; ne pas promettre un effet instantané sur un appareil hors ligne.

@@ -62,7 +62,7 @@ export async function runI2LivreTests({ eq, ok }) {
     await withRepo(async (repo) => {
       const book = { id: repo.newId('bk'), title: 'Livre', author: 'Auteur' };
       const edition = { id: repo.newId('ed'), book_id: book.id, unit_convention_id: 'us' };
-      await repo.saveBatch({ books: [book], book_editions: [edition] });
+      await repo.saveBatch({ books: [book], book_editions: [edition] }, { conditions: { book_editions: [{key:edition.id,absente:true}] } });
       const base = P.brouillonDepuisEdition(book, edition); const d = B.modifierChampLivre(base, 'convention', 'metric');
       const row = P.fabriquerImportLivre({ id: repo.newId('imp'), deviceId: repo.deviceId(), brouillon: d }); await repo.save('imports', row);
       await repo.save('book_editions', { ...edition, unit_convention_id: 'imperial' });
@@ -232,7 +232,7 @@ export async function runI2LivreTests({ eq, ok }) {
       const p = { origin: 'web', retrieved_at: '2026-10-28T12:00:00Z', sources: [source], uncertain: false };
       const livre = { id: 'livre_anciens_gestes', title: 'Titre avant', author: 'Auteur avant', cuisines: [], tags: [], metadata_provenance: { title: p, author: p } };
       const edition = { id: 'edition_anciens_gestes', book_id: livre.id, publisher: 'Éditeur', year: 2020, language: 'fr', cover_sha256: 'a'.repeat(64), metadata_provenance: { publisher: p } };
-      await repo.saveBatch({ books: [livre], book_editions: [edition] });
+      await repo.saveBatch({ books: [livre], book_editions: [edition] }, { conditions: { book_editions: [{key:edition.id,absente:true}] } });
       const ctxDe = (book, ed, cups = false) => ({ books: [book], booksById: new Map([[book.id, book]]), book_editions: [ed], editionsById: new Map([[ed.id, ed]]),
         recipes: cups ? [{ id: 'recette_tasse', edition_id: ed.id, original_title: 'Recette', availability: 'reference_only' }] : [],
         recipe_versions: cups ? [{ id: 'version_tasse', recipe_id: 'recette_tasse', ingredients: [{ unit_id: 'cup' }] }] : [], source_documents: [], source_pages: [], rediscovery_prefs: [], docsByRecipe: new Map(), scan_sessions: [], settings: {} });

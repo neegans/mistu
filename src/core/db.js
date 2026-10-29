@@ -97,7 +97,7 @@ function listeConditions(conditions) {
 // change jamais la clé (TypeError, transaction annulée) : la fiche fusionnée s'écrirait sinon À CÔTÉ de l'originale. La portée inclut
 // `outbox` seulement si la base la possède : la capture écrit là, et les bases de test TEST_STORES n'en ont pas.
 // Rend les fiches fusionnées, par magasin ({ [store]: [fiche, …] }) : l'appelant n'a pas à relire la base dans une autre transaction.
-async function ecrireConditionne(db, { puts, deletes, clearStores, origin, payloads, liste, recettes, lifecycle, archive_import }) {
+async function ecrireConditionne(db, { puts, deletes, clearStores, origin, payloads, liste, recettes, editions, lifecycle, archive_import, source_batch }) {
   const toClear = knownStoreNames(db.stores, clearStores);
   const portee = knownStoreNames(db.stores, [...toClear, ...Object.keys(puts), ...Object.keys(deletes), ...liste.map((c) => c.store), ...(db.stores.outbox ? ['outbox'] : [])]);
   const tx = await db.tx(portee, 'readwrite');
@@ -108,6 +108,8 @@ async function ecrireConditionne(db, { puts, deletes, clearStores, origin, paylo
     let restants = liste.length;
     const ecrireTout = () => {
       try {
+        // Les gardes de parent et d'enfant voient le même instantané, indépendamment de leur ordre.
+        const lecture = (store, key) => { const i = liste.findIndex(c => c.store === store && (c.key === key || c.toutes)); return i < 0 ? undefined : liste[i].toutes ? lus[i].find(r => r[db.stores[store].keyPath] === key) : lus[i]; };
         const allPuts = { ...puts };
         for (const [i, c] of liste.entries()) {
           const courant = lus[i];
@@ -122,7 +124,7 @@ async function ecrireConditionne(db, { puts, deletes, clearStores, origin, paylo
             continue;
           }
           if (c.fusion) { // la fiche à écrire est calculée sur la fiche RELUE ici ; null : rien pour elle
-            const fiche = c.fusion(courant ?? null);
+            const fiche = c.fusion(courant ?? null, lecture);
             if (fiche == null) continue;
             const keyPath = db.stores[c.store].keyPath;
             if (fiche[keyPath] !== c.key) throw new TypeError('La fusion de ' + c.store + '/' + String(c.key) + ' change la clé ' + keyPath);
@@ -143,7 +145,7 @@ async function ecrireConditionne(db, { puts, deletes, clearStores, origin, paylo
           allPuts[c.store] = [...(allPuts[c.store] || []), fusion];
           fusionnees[c.store] = [...(fusionnees[c.store] || []), fusion];
         }
-        const extra = db.onMutate ? (db.onMutate({ puts: allPuts, deletes, clearStores, origin, payloads, recettes, lifecycle: typeof lifecycle === 'function' ? lifecycle() : lifecycle, archive_import }) || {}) : {};
+        const extra = db.onMutate ? (db.onMutate({ puts: allPuts, deletes, clearStores, origin, payloads, recettes, editions, lifecycle: typeof lifecycle === 'function' ? lifecycle() : lifecycle, archive_import, source_batch }) || {}) : {};
         for (const [name, rows] of Object.entries(extra)) allPuts[name] = [...(allPuts[name] || []), ...rows];
         ecrire(tx, toClear, allPuts, deletes);
       } catch (error) {
@@ -315,7 +317,7 @@ export class Database {
   // patch fusionné dans la MÊME transaction que tout le reste ; condition fausse → TransitionRefusee, rien d'écrit (ecrireConditionne) ;
   // ce chemin rend les fiches fusionnées par magasin. `null` ou absent : aucune condition, et le chemin ordinaire ne rend rien. Les quatre
   // formes (dont `{ key, fusion }`, lot G) sont décrites au-dessus de listeConditions.
-  async mutate({ puts = {}, deletes = {}, clearStores = [], origin = 'local', payloads = {}, conditions = null, recettes = [], lifecycle = null, archive_import = false } = {}) {
+  async mutate({ puts = {}, deletes = {}, clearStores = [], origin = 'local', payloads = {}, conditions = null, recettes = [], editions = [], lifecycle = null, archive_import = false, source_batch = null } = {}) {
     for (const [name, rows] of Object.entries(puts)) if (!Array.isArray(rows)) throw new TypeError('Les données de ' + name + ' doivent être un tableau');
     for (const [name, keys] of Object.entries(deletes)) if (!Array.isArray(keys)) throw new TypeError('Les clés de ' + name + ' doivent être un tableau');
     // K-6 / S6 : un magasin `noDelete` (assistant_config) n'accepte aucune suppression d'origine locale ou device —
@@ -328,8 +330,8 @@ export class Database {
       }
     }
     const liste = listeConditions(conditions);
-    if (liste.length) return ecrireConditionne(this, { puts, deletes, clearStores, origin, payloads, liste, recettes, lifecycle, archive_import });
-    const extra = this.onMutate ? (this.onMutate({ puts, deletes, clearStores, origin, payloads, recettes, lifecycle: typeof lifecycle === 'function' ? lifecycle() : lifecycle, archive_import }) || {}) : {};
+    if (liste.length) return ecrireConditionne(this, { puts, deletes, clearStores, origin, payloads, liste, recettes, editions, lifecycle, archive_import, source_batch });
+    const extra = this.onMutate ? (this.onMutate({ puts, deletes, clearStores, origin, payloads, recettes, editions, lifecycle: typeof lifecycle === 'function' ? lifecycle() : lifecycle, archive_import, source_batch }) || {}) : {};
     const allPuts = { ...puts };
     for (const [name, rows] of Object.entries(extra)) allPuts[name] = [...(allPuts[name] || []), ...rows];
     const toClear = knownStoreNames(this.stores, clearStores);

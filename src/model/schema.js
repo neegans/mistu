@@ -2,16 +2,16 @@
 // Chaque magasin correspond à une entité ; les libellés FR/EN des plats et ingrédients sont embarqués dans leur document.
 
 export const DB_NAME = 'cuisine-os';
-export const DB_VERSION = 5;
-export const APP_VERSION = '0.23.2';
+export const DB_VERSION = 6;
+export const APP_VERSION = '0.24.0';
 
 export const ARCHIVE_FORMAT = 'cuisine-os-archive';
-export const ARCHIVE_FORMAT_VERSION = 2;
-export const SUPPORTED_ARCHIVE_VERSIONS = [1, 2];
+export const ARCHIVE_FORMAT_VERSION = 3;
+export const SUPPORTED_ARCHIVE_VERSIONS = [1, 2, 3];
 
 export const STORES = {
   books:               { keyPath: 'id', indexes: [] },
-  book_editions:       { keyPath: 'id', indexes: [['book_id', 'book_id'], ['isbn', 'isbn']] },
+  book_editions:       { keyPath: 'id', indexes: [['book_id', 'book_id'], ['isbn', 'isbn'], ['trashed_at', 'trashed_at']] },
   source_documents:    { keyPath: 'id', indexes: [['edition_id', 'edition_id'], ['sha256', 'sha256'], ['scan_session_id', 'scan_session_id']] },
   source_pages:        { keyPath: 'id', indexes: [['document_id', 'document_id'], ['edition_id', 'edition_id']] },
   scan_sessions:       { keyPath: 'id', indexes: [] },
@@ -73,6 +73,7 @@ export const SYNC_STORES = Object.keys(STORES).filter((s) => s !== 'settings' &&
 export const RELATIONS = [
   ['book_editions', 'book_id', 'books'],
   ['book_editions', 'unit_convention_id', 'unit_conventions'],
+  ['recipes', 'restored_from_edition.edition_id', 'book_editions'],
 
   ['source_documents', 'edition_id', 'book_editions'],
   ['source_documents', 'sha256', 'files'],

@@ -14,10 +14,17 @@ import { lancerVol, annulerVol, volEnCours, ecouterVol, estEnLigne, texteRefus, 
 import { texteEchecIndex } from './table-matieres.js';
 import { executantIndexParPage, relireResultatIndex, consolider, modelesValides, MODELES_INDEX, fabriquerReferenceIndex, completerExistante, referenceIntacte, renvoisDe, textePlages, cleTitre } from '../domain/index-livre.js';
 import { importOuvert } from '../domain/import-cible.js';
-import { capturerProprietaire, conditionProprietaire } from './recette-garde.js';
+import { capturerProprietaire, conditionProprietaire, capturerEdition, capturerRecette } from './recette-garde.js';
+import { verifierCaptureEditionImport, memoireEditionImport } from '../domain/contexte-import.js';
+import { mettreALaCorbeille } from '../domain/corbeille.js';
+import { lireCycleRecette, ErreurCycleRecette } from '../domain/cycle-recette.js';
+import { lireCycleEdition } from '../domain/cycle-edition.js';
+import { conditionsSourcesImport, revoirLectureEditionImport, signaturePageImport } from '../domain/sources-import.js';
 
 const horloge = () => new Date().toISOString();
 const liste = (v) => (Array.isArray(v) ? v : []);
+const memeEdition = (ligne,capture) => {try {verifierCaptureEditionImport(ligne,capture);return ligne.edition_id===capture.edition_id;} catch {return false;}};
+const memesSources = (ligne,pages) => {try {conditionsSourcesImport(ligne.sources_attendues);return ligne.sources_attendues==null || ligne.sources_attendues.every(s=>signaturePageImport(pages?.get(s.id))===s.signature);} catch {return false;}};
 
 // Les lignes d'index d'une séance, et pour chaque page la lecture la plus RÉCENTE qui l'a lue (une page relue plus tard l'emporte ; une page en échec
 // ne remplace pas une page lue). Rend { lignes, pages (format 2, une par page_id), decisions (fusion de toutes les lignes), modeleValide }.
@@ -47,14 +54,18 @@ export function lectureDeSeance(imports, sessionId, pageIdsSeance = null) {
 // L'enregistrement automatique (D-I15) d'une ligne a_verifier pas encore enregistrée : consolider toutes les pages lues de la séance contre les fiches
 // du livre, créer les certaines et compléter les existantes « À importer », en UNE transaction conditionnée à la lecture montrée (cleLecture) et à
 // `auto_enregistre_at` encore vide (deux onglets : un seul enregistre). Rend { cree, aVerifier } ou null (rien à faire, ou refusé).
-export async function enregistrerAuto(ligneId, { ctx, session, repo = repoModule, maintenant = horloge, newId = nouvelId, compte = null } = {}) {
+export async function enregistrerAuto(ligneId, { ctx, session, repo = repoModule, maintenant = horloge, newId = nouvelId, compte = null, contexteEdition = null } = {}) {
   const proprietaire = await (compte || capturerProprietaire(repo, ctx));
   const L = await repo.get('imports', ligneId);
   if (!L || L.kind !== 'index' || L.status !== 'a_verifier' || L.auto_enregistre_at) return null;
   const edition = session?.edition_id ? (ctx?.editionsById?.get(session.edition_id) ?? await repo.get('book_editions', session.edition_id)) : null;
   if (!edition) return null;
+  const capture=contexteEdition || await capturerEdition(repo,edition,{ctx});
+  verifierCaptureEditionImport(L,capture);
+  if(lireCycleEdition(edition).etat!=='active')return null;
   const imports = await repo.all('imports');
-  const lecture = lectureDeSeance(imports, session.id, session.page_ids);
+  const lignesAdmissibles=imports.filter(row=>memeEdition(row,capture));
+  const lecture = lectureDeSeance(lignesAdmissibles, session.id, session.page_ids);
   const recettes = (await repo.all('recipes')).filter((r) => r.edition_id === edition.id);
   const c = consolider(lecture.pages, { existantes: recettes, modeleValide: lecture.modeleValide });
   const nouvelles = c.certaines.map((x) => fabriquerReferenceIndex(x, { edition, newId, importId: ligneId }));
@@ -67,15 +78,18 @@ export async function enregistrerAuto(ligneId, { ctx, session, repo = repoModule
   const restantes = c.aVerifier.filter((x) => !lecture.decisions[x.cle]);
   const cle = cleLecture(L);
   const quand = maintenant();
+  const recettesCapturees=await Promise.all([...nouvelles,...completees].map(r=>capturerRecette(repo,r,{ctx,edition,creation:nouvelles.includes(r)})));
   try {
     await repo.transitionner('imports', ligneId, {
       attendus: ['a_verifier'],
       patch: (cur) => {
+        verifierCaptureEditionImport(cur,capture);
         if (cur.auto_enregistre_at || cleLecture(cur) !== cle) throw new TransitionRefusee('imports', ligneId, cur.status);
         return { auto_enregistre_at: quand, enregistrees: nouvelles.map((r) => r.id), ...(restantes.length ? {} : { status: 'enregistre', finished_at: quand }) };
       },
       puts: { recipes: [...nouvelles, ...completees] },
-      conditions: { recipes: nouvelles.map(r => ({ key: r.id, absente: true })), sync_state: [conditionProprietaire(proprietaire)] },
+      editions:[capture], recettes:recettesCapturees,
+      conditions: { ...conditionsSourcesImport([...new Map(lecture.lignes.flatMap(row=>row.sources_attendues||[]).map(s=>[s.id,s])).values()]),recipes: nouvelles.map(r => ({ key: r.id, absente: true })), sync_state: [conditionProprietaire(proprietaire)] },
     });
   } catch (e) { if (e instanceof TransitionRefusee) return null; throw e; }
   repo.oublierProgressionIndex?.(ligneId).catch?.(() => {});
@@ -84,19 +98,26 @@ export async function enregistrerAuto(ligneId, { ctx, session, repo = repoModule
 
 // Une décision sur une entrée « À vérifier » ou écartée : `fiches` (0, 1 ou 2 références à créer) et la décision écrite dans la ligne, en UNE
 // transaction ; la ligne passe enregistre quand plus rien n'attend. `cle` : la clé de l'entrée (cleTitre), préfixée « ecartee: » pour une écartée.
-export async function decider(ligneId, cle, choix, fiches, { repo = repoModule, maintenant = horloge, resteApres = 0, compte = null, ctx = null } = {}) {
+export async function decider(ligneId, cle, choix, fiches, { repo = repoModule, maintenant = horloge, resteApres = 0, compte = null, ctx = null, contexteEdition = null, attendu = null } = {}) {
   const proprietaire = await (compte || capturerProprietaire(repo, ctx));
+  const ligne=await repo.get('imports',ligneId),editionId=ligne?.edition_id;
+  const edition=ctx?.editionsById?.get(editionId)||await repo.get('book_editions',editionId);
+  const capture=contexteEdition||await capturerEdition(repo,edition,{ctx});verifierCaptureEditionImport(ligne,capture);
+  const recettes=await Promise.all(fiches.map(r=>capturerRecette(repo,r,{ctx,edition,creation:true})));
   const quand = maintenant();
   await repo.transitionner('imports', ligneId, {
     attendus: ['a_verifier', 'enregistre'],
+    editions:[capture],recettes,
     patch: (cur) => {
+      verifierCaptureEditionImport(cur,capture);
+      if(attendu&&cleLecture(cur)!==cleLecture(attendu))throw new TransitionRefusee('imports',ligneId,cur.status);
       const avant = cur.decisions && typeof cur.decisions === 'object' ? cur.decisions : {};
       // Une entrée déjà décidée (double tape, second onglet) ne l'est jamais deux fois : ses fiches seraient créées deux fois.
       if (Object.hasOwn(avant, cle)) throw new TransitionRefusee('imports', ligneId, cur.status);
       return { decisions: { ...avant, [cle]: choix }, ...(cur.status === 'a_verifier' && resteApres === 0 ? { status: 'enregistre', finished_at: quand } : {}) };
     },
     puts: fiches.length ? { recipes: fiches } : undefined,
-    conditions: { ...(fiches.length ? { recipes: fiches.map(r => ({ key: r.id, absente: true })) } : {}), sync_state: [conditionProprietaire(proprietaire)] },
+    conditions: { ...conditionsSourcesImport(ligne.sources_attendues),...(fiches.length ? { recipes: fiches.map(r => ({ key: r.id, absente: true })) } : {}), sync_state: [conditionProprietaire(proprietaire)] },
   });
 }
 
@@ -132,6 +153,7 @@ export function lireSaisieIndex(texte) {
 // sauf celles déjà dans le livre (même titre et mêmes pages). Écrit par repo.saveBatch, en UNE fois ; `apres` est appelé après l'écriture.
 export function saisieIndexManuelle(ed, { repo = repoModule, toast = toastDom, newId = nouvelId, apres = null, ctx = null, compte = null } = {}) {
   const capture = compte || capturerProprietaire(repo, ctx);
+  const captureEdition=capturerEdition(repo,ed,{ctx});captureEdition.catch(()=>{});
   const zone = el('textarea', { rows: 5, placeholder: t('Une recette par ligne : Titre — 116–19'), 'aria-label': t('Recettes à ajouter à la main') });
   const bouton = el('button', { class: 'btn', type: 'button', dataset: { role: 'ajouter-saisie' }, onClick: async () => {
     if (bouton.disabled) return;
@@ -151,7 +173,8 @@ export function saisieIndexManuelle(ed, { repo = repoModule, toast = toastDom, n
       }
       if (!fiches.length) { toast(t('Rien de nouveau à ajouter.')); return; }
       const proprietaire = await capture;
-      await repo.saveBatch({ recipes: fiches }, { conditions: { recipes: fiches.map(r => ({ key: r.id, absente: true })), sync_state: [conditionProprietaire(proprietaire)] } });
+      const contexteEdition=await captureEdition,contextesRecettes=await Promise.all(fiches.map(r=>capturerRecette(repo,r,{ctx,edition:ed,creation:true})));
+      await repo.saveBatch({ recipes: fiches }, { editions:[contexteEdition],recettes:contextesRecettes,conditions: { recipes: fiches.map(r => ({ key: r.id, absente: true })), sync_state: [conditionProprietaire(proprietaire)] } });
       zone.value = '';
       toast(t('{n} recettes ajoutées', { n: fiches.length }));
       if (typeof apres === 'function') await apres(fiches);
@@ -166,11 +189,12 @@ const sourcesTexte = (sources) => liste(sources).map((s) => [s.rubrique, Number.
 // Le panneau. `getPageIds()` : les pages à lire (toutes les pages d'une séance d'index, sinon la sélection). `seanceIndex` : la séance est un index.
 export function panneauIndex(session, ctx, getPageIds, {
   seanceIndex = false, repo = repoModule, toast = toastDom, confirmer = confirmDialog, fetch: fetchInjecte = undefined, maintenant = horloge,
-  battementMs = BATTEMENT_MS, enLigne = estEnLigne, newId = nouvelId, executant = null, connecter = null, ajouterPage = null,
+  battementMs = BATTEMENT_MS, enLigne = estEnLigne, newId = nouvelId, executant = null, connecter = null, ajouterPage = null, contexteEdition = null,
 } = {}) {
   const compte = capturerProprietaire(repo, ctx);
+  const captureEdition=contexteEdition?Promise.resolve(contexteEdition):session.edition_id?capturerEdition(repo,ctx.editionsById?.get(session.edition_id),{ctx}):Promise.resolve(null);captureEdition.catch(()=>{});
   const racine = el('section', { class: 'card stack', dataset: { role: 'panneau-index' } });
-  const etat = { progression: null, occupe: false, abandon: null, seq: 0 };
+  const etat = { progression: null, occupe: false, retrait:false, abandon: null, seq: 0 };
   const lecture = () => lectureDeSeance(ctx.imports, session.id, session.page_ids);
   const relireImports = async () => { ctx.imports = await repo.all('imports'); ctx.recipes = await repo.all('recipes'); };
   const edition = () => (session.edition_id ? ctx.editionsById?.get(session.edition_id) ?? null : null);
@@ -182,12 +206,12 @@ export function panneauIndex(session, ctx, getPageIds, {
     const L = importId ? await repo.get('imports', importId) : null;
     const exec = executant || executantIndexParPage({ onPage: (p) => { etat.progression = p; dessiner(); } });
     try {
-      const r = await lancerVol(importId, exec, { ctx, repo, fetch: fetchInjecte, maintenant, battementMs, enLigne, signal: etat.abandon.signal,
+      const r = await lancerVol(importId, exec, { ctx, repo, fetch: fetchInjecte, maintenant, battementMs, enLigne, signal: etat.abandon.signal,contexteEdition:await captureEdition,
         lecture: { kind: 'index', importId, pageIds, editionId: session.edition_id ?? null, sessionId: session.id, cle: L ? cleLecture(L) : null } });
       if (r.issue === 'refuse') toast(texteRefus(r));
       await relireImports();
       const id = r.importId ?? importId;
-      if (r.issue === 'a_verifier' && id) { await enregistrerAuto(id, { ctx, session, repo, maintenant, newId, compte }); await relireImports(); }
+      if (r.issue === 'a_verifier' && id) { await enregistrerAuto(id, { ctx, session, repo, maintenant, newId, compte,contexteEdition:await captureEdition }); await relireImports(); }
     } catch (e) { logError('index_livre.lire', { error: e }); }
     finally { etat.occupe = false; etat.abandon = null; etat.progression = null; await dessiner(); }
   }
@@ -195,11 +219,14 @@ export function panneauIndex(session, ctx, getPageIds, {
   async function dessiner() {
     const seq = ++etat.seq;
     const pageIds = liste(getPageIds());
-    const lu = lecture();
+    const capture=await captureEdition;
+    const toutes=lecture();
+    const anciennes=toutes.lignes.filter(L=>L.status==='a_verifier'&&L.resultat&&(!memeEdition(L,capture)||!memesSources(L,ctx.pagesById)));
+    const lu=lectureDeSeance(toutes.lignes.filter(L=>memeEdition(L,capture)&&memesSources(L,ctx.pagesById)),session.id,session.page_ids);
     // Une ligne a_verifier pas encore enregistrée (app fermée entre la réponse et l'enregistrement, autre onglet) : l'enregistrement se fait au rendu.
     const enAttente = lu.lignes.find((L) => L.status === 'a_verifier' && !L.auto_enregistre_at);
     if (enAttente && !etat.occupe && edition()) {
-      try { const fait = await enregistrerAuto(enAttente.id, { ctx, session, repo, maintenant, newId, compte }); if (fait) { await relireImports(); return dessiner(); } }
+      try { const fait = await enregistrerAuto(enAttente.id, { ctx, session, repo, maintenant, newId, compte,contexteEdition:await captureEdition }); if (fait) { await relireImports(); return dessiner(); } }
       catch (e) { logError('index_livre.enregistrer', { error: e, id: enAttente.id }); }
     }
     if (seq !== etat.seq) return;
@@ -212,6 +239,16 @@ export function panneauIndex(session, ctx, getPageIds, {
     const ed = edition();
     const livre = ed ? ctx.booksById?.get(ed.book_id) : null;
     const contenu = [];
+    for(const L of anciennes) {
+      const zone=el('div',{class:'card stack',dataset:{role:'relecture-index'}},el('p',null,t('Ce résultat a été conservé. Relis-le avant de l’utiliser sur ce livre.')));
+      try { const r=relireResultatIndex(L.resultat,L.page_ids,{modeleLigne:L.model??null});
+        zone.append(el('ul',null,...r.pages.flatMap(p=>p.entrees.map(e=>el('li',null,`${e.titre} · ${e.renvois}`))))); } catch {}
+      zone.append(el('button',{class:'btn',type:'button',disabled:etat.occupe,onClick:async ev=>{
+        if(ev.currentTarget.disabled)return;ev.currentTarget.disabled=true;
+        try { await revoirLectureEditionImport(L.id,{repo,contexte:capture,attendu:L});await relireImports();await dessiner(); }
+        catch(e){logError('index_livre.relecture',{error:e});toast(t('Le livre ou ses pages ont changé. Rouvre la séance avant de continuer.'));ev.currentTarget.disabled=false;}
+      }},t('Réutiliser ce résultat après relecture')));contenu.push(zone);
+    }
     contenu.push(el('h2', null, seanceIndex ? (livre?.title ? t('Index de {t}', { t: livre.title }) : t('Index du livre')) : t('Index / table des matières')));
     contenu.push(el('p', { class: 'muted', dataset: { role: 'compte-pages' } }, seanceIndex ? (pageIds.length === 1 ? t('1 page d’index') : t('{n} pages d’index', { n: pageIds.length })) : t('{n} page(s) sélectionnée(s)', { n: pageIds.length })));
     // B04 (D-I14) : l'état de la LECTURE, séparé de la phrase des photos de la séance (« Photos : k/n sauvegardées sur le serveur »). En vol, la ligne de
@@ -287,7 +324,7 @@ export function panneauIndex(session, ctx, getPageIds, {
         const geste = (texte, choix, fiches) => el('button', { class: 'btn small', type: 'button', onClick: async (ev) => {
           if (ev.currentTarget.disabled) return;
           for (const b of row.querySelectorAll('button')) b.disabled = true; // une décision à la fois, jamais deux fiches pour une tape doublée
-          try { await decider(ligneDecision.id, x.cle, choix, fiches(), { repo, maintenant, resteApres: restantes.length - 1, compte }); }
+          try { await decider(ligneDecision.id, x.cle, choix, fiches(), { repo, maintenant, resteApres: restantes.length - 1, compte,ctx,contexteEdition:await captureEdition,attendu:ligneDecision }); }
           catch (e) { if (!(e instanceof TransitionRefusee)) { logError('index_livre.decider', { error: e }); toast(t('La décision n’a pas pu être enregistrée. Réessaie.')); } }
           await relireImports(); await dessiner();
         } }, texte);
@@ -314,20 +351,30 @@ export function panneauIndex(session, ctx, getPageIds, {
           ev.currentTarget.disabled = true;
           const { plages } = renvoisDe(x.renvois);
           const fiche = fabriquerReferenceIndex({ titre: x.titre, renvois: x.renvois, rubriques: x.rubrique ? [x.rubrique] : [], section: null, sources: [{ page_id: x.page_id, page_imprimee: x.page_imprimee, rubrique: x.rubrique }] }, { edition: ed, newId, importId: ligneDecision.id, plages });
-          try { await decider(ligneDecision.id, `ecartee:${cleTitre(x.titre)}`, 'recette', [fiche], { repo, maintenant, resteApres: restantes.length, compte }); }
+          try { await decider(ligneDecision.id, `ecartee:${cleTitre(x.titre)}`, 'recette', [fiche], { repo, maintenant, resteApres: restantes.length, compte,ctx,contexteEdition:await captureEdition,attendu:ligneDecision }); }
           catch (e) { if (!(e instanceof TransitionRefusee)) { logError('index_livre.ecartee', { error: e }); toast(t('La décision n’a pas pu être enregistrée. Réessaie.')); } }
           await relireImports(); await dessiner();
         } }, t('C’est une recette'))));
       }
       bloc.append(d);
     }
-    const intactes = ajoutees.filter((r) => referenceIntacte(r, r.index_import_id));
+    const intactes = ajoutees.filter((r) => lireCycleRecette(r).etat==='active' && referenceIntacte(r, r.index_import_id));
+    const capturesRetrait=new Map(intactes.map(r=>[r.id,capturerRecette(repo,r,{ctx,edition:ed})]));for(const p of capturesRetrait.values())p.catch(()=>{});
     if (intactes.length) {
-      bloc.append(el('button', { class: 'btn link', type: 'button', dataset: { role: 'retirer' }, onClick: async () => {
-        if (!(await confirmer(t('Retirer ces {n} recettes ajoutées par la lecture ? Celles que tu as modifiées restent.', { n: intactes.length }), { okLabel: t('Retirer') }))) return;
-        const actuelles = (await repo.all('recipes')).filter((r) => intactes.some((x) => x.id === r.id) && referenceIntacte(r, r.index_import_id));
-        try { await repo.removeBatch({ recipes: actuelles.map((r) => r.id) }); await relireImports(); toast(t('{n} recettes retirées', { n: actuelles.length })); await dessiner(); }
-        catch (e) { logError('index_livre.retirer', { error: e }); toast(t('Le retrait n’a pas pu se faire. Réessaie.')); }
+      bloc.append(el('button', { class: 'btn link', type: 'button', disabled:etat.retrait,dataset: { role: 'retirer' }, onClick: async () => {
+        if(etat.retrait)return;etat.retrait=true;let retires=0;
+        try {
+          if (!(await confirmer(t('Retirer ces {n} recettes ajoutées par la lecture ? Celles que tu as modifiées restent.', { n: intactes.length }), { okLabel: t('Retirer') }))) return;
+          for(const r of intactes) {
+            const actuelle=await repo.get('recipes',r.id);
+            if(!referenceIntacte(actuelle,r.index_import_id))continue;
+            await mettreALaCorbeille(r,{repo,edition:ed,contexte:await capturesRetrait.get(r.id),verifierCourante:current=>{
+              if(JSON.stringify(current)!==JSON.stringify(r)||!referenceIntacte(current,r.index_import_id))throw new ErreurCycleRecette('source_modifiee',r.id);
+            }});retires++;
+          }
+          toast(t('{n} recettes retirées', { n: retires }));
+        } catch (e) { logError('index_livre.retirer', { error: e }); toast(retires?t('{n} sur {total} recettes retirées. Les autres sont restées.',{n:retires,total:intactes.length}):t('Le retrait n’a pas pu se faire. Réessaie.')); }
+        finally {etat.retrait=false;await relireImports();await dessiner();}
       } }, t('Retirer ces {n} recettes', { n: intactes.length })));
     }
     return bloc;

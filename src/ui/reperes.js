@@ -1,5 +1,5 @@
-import { revoirLectureImport } from '../domain/contexte-import.js';
-import { recetteActive } from '../domain/cycle-recette.js';
+import { revoirLectureImport, memeCaptureImport } from '../domain/contexte-import.js';
+import { recetteActiveDansContexte } from './state.js';
 import { mentionCycleRecette } from './corbeille.js';
 import { capturerRecette } from './recette-garde.js';
 // Éditeur de présentation : formulaire disponible hors ligne, appel explicite et comparaison avant conservation.
@@ -79,7 +79,7 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
   const sessionDe = deps.sessionAssistant || (() => sessionAssistant(ctx)), enLigne = deps.enLigne || (() => navigator.onLine !== false);
   let recipe = await repo.get('recipes', params.id);
   if (!recipe) return el('p', { class: 'status warn' }, t('Recette introuvable.'));
-  if (!recetteActive(recipe)) return mentionCycleRecette(recipe);
+  if (!recetteActiveDansContexte(recipe, ctx)) return mentionCycleRecette(recipe, ctx?.editionsById?.get(recipe.edition_id));
   const contexteRecette = await capturerRecette(repo, recipe, { ctx });
   let row = null;
   if (query.import) {
@@ -105,7 +105,7 @@ export async function renderReperesRoute(params, query = {}, ctx = {}, deps = {}
   const resultatPrecedent = el('section', { class: 'reperes-cadre stack', dataset: { role: 'resultat-precedent' } });
   const inputs = new Map(), controls = [], confirmations = [];
   const readonly = () => !!row && row.device_id !== repo.deviceId(), terminal = () => !!row && TERMINES.includes(row.status);
-  const cycleDivergent = () => !!row && (row.expected_cycle_id ?? null) !== contexteRecette.expected_cycle_id;
+  const cycleDivergent = () => !!row && !memeCaptureImport(row, contexteRecette);
   const perime = () => conflitBrouillon || !!row?.validation_erreur || cycleDivergent(), vivant = () => !closed && (!mounted || root.isConnected);
   const d = extra => ({ ...deps, repo, enLigne, contexteRecette, documentId: DOCUMENT_ID, ...extra });
   const message = texte => { if (vivant()) status.textContent = texte; };

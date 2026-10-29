@@ -4,6 +4,8 @@ import { SYNC_STORES } from '../model/schema.js';
 import { keyOf, remoteDeCeCompte } from './tables.js';
 import { syncNow } from './clock.js';
 import { CLE_CYCLE_CONFIRME, idCycle } from './cycle.js';
+import { preparerLotSources, estLotSources } from './lot-sources.js';
+import { CLE_EDITION_CONFIRMEE, cibleCommune } from './cycle-edition.js';
 
 // L4 (D-G8) : une ligne files n'entre en file QUE quand ses octets sont confirmés — remote valide de ce compte — et jamais une
 // suppression. (R-L3-22, L3 : aucune ligne « files » n'entrait en file, faute d'octets à envoyer — « À envoyer : N » ne redescendait
@@ -17,25 +19,32 @@ function payloadFor(payloads, store, key) {
 }
 
 export function installCapture(db, { getUserId = () => null, isActivitySynced = () => false, configSuitLeCompte = () => false } = {}) {
-  db.onMutate = ({ puts = {}, deletes = {}, origin = 'local', payloads = {}, recettes = [], lifecycle = null, archive_import = false }) => {
+  db.onMutate = ({ puts = {}, deletes = {}, origin = 'local', payloads = {}, recettes = [], editions = [], lifecycle = null, archive_import = false, source_batch = null }) => {
     // Réception, ajustement du serveur et vidage d'appareil ne repartent jamais vers le serveur.
     if (origin !== 'local') return null;
     const rows = [];
     const user_id = getUserId();
+    const source = preparerLotSources({ puts, recettes, editions, source_batch });
+    const groupes = new Set(source?.rows.map(r => `${r.store}:${r.id}`) || []);
+    if (source) rows.push({ user_id, store: 'scan_sessions', id: source.id, op: 'source_batch', payload: source, recipe_id: source.recipe_id, tries: 0 });
     const contexte = (store,id) => {
       const cs=recettes.filter(c => (store==='recipes'&&c.recipe_id===id)||c.records?.some(r=>r.store===store&&r.id===id));
-      const projections=cs.map(c=>({recipe_id:c.recipe_id,expected_cycle_id:c.expected_cycle_id??null,...(c.historique?{historique:true}:{})}));
-      return projections.length>1?{recipe_contexts:projections}:projections[0]||{};
+      const projections=cs.map(c=>({recipe_id:c.recipe_id,expected_cycle_id:c.expected_cycle_id??null,...(Object.hasOwn(c,'expected_edition_id')?{expected_edition_id:c.expected_edition_id}:{}),...(c.historique?{historique:true}:{})}));
+      const es=editions.filter(c=>(store==='book_editions'&&c.edition_id===id)||c.records?.some(r=>r.store===store&&r.id===id));
+      return {...(projections.length>1?{recipe_contexts:projections}:projections[0]||{}),...(es.length?{edition_contexts:es.map(c=>({edition_id:c.edition_id,expected_cycle_id:c.expected_cycle_id??null,...(c.historique?{historique:true}:{}),...(c.recipe_id?{recipe_id:c.recipe_id}:{})}))}:{})};
     };
-    if (lifecycle) rows.push({user_id,store:'recipes',id:lifecycle.recipe_id,op:'lifecycle',updated_at:lifecycle.at,payload:structuredClone(lifecycle),recipe_id:lifecycle.recipe_id,tries:0});
+    const cible=lifecycle?.entity==='edition'?{store:'book_editions',id:lifecycle.edition_id}:{store:'recipes',id:lifecycle?.recipe_id};
+    if (lifecycle) rows.push({user_id,...cible,op:'lifecycle',updated_at:lifecycle.at,payload:structuredClone(lifecycle),...(lifecycle.recipe_id?{recipe_id:lifecycle.recipe_id}:{}),tries:0});
     const wanted = (store) => SYNC_STORES.includes(store) && (store !== 'library_activity' || isActivitySynced()) && (store !== 'assistant_config' || configSuitLeCompte());
     for (const [store, list] of Object.entries(puts)) {
       if (!wanted(store)) continue;
       if (store === 'files') { for (const r of list) if (r?.syncable !== false && remoteDeCeCompte(r?.remote, user_id)) rows.push({ user_id, store, id: keyOf(store, r), op: 'put', updated_at: r.updated_at || null, tries: 0 }); continue; }
       for (const r of list) {
         const id=keyOf(store,r);
-        if (lifecycle && store==='recipes' && id===lifecycle.recipe_id) continue;
-        rows.push({ user_id, store, id, op: 'put', updated_at: r.updated_at || null, tries: 0,...contexte(store,id),...(archive_import?{archive_import:true}:{}) });
+        if (groupes.has(`${store}:${id}`)) continue;
+        if (lifecycle && store===cible.store && id===cible.id) continue;
+        const ctx=contexte(store,id);
+        rows.push({ user_id, store, id, op: 'put', updated_at: r.updated_at || null, tries: 0,...ctx,...(ctx.edition_contexts?{snapshot:structuredClone(r)}:{}),...(archive_import?{archive_import:true}:{}) });
       }
     }
     for (const [store, keys] of Object.entries(deletes)) {
@@ -89,19 +98,29 @@ export async function reprendreEnvoi(db, entree) {
 // pas au serveur. Une écriture ultérieure de cette fiche la remettra en file, comme n'importe quelle écriture.
 export async function retirerEnvoi(db, seq) {
   const e=await db.get('outbox',seq);
+  if (estLotSources(e)) {
+    const owner = (await db.get('sync_state', 'user_id'))?.value ?? null;
+    if (!estDeCeCompte(e, owner)) return false;
+    const suite = (await db.getAll('outbox')).filter(x => x.seq > seq && estDeCeCompte(x, owner) && cibleCommune(x, e));
+    await db.mutate({ deletes: { outbox: [seq] }, puts: suite.length ? { outbox: suite.map(x => ({ ...x, lifecycle_blocked: true, last_error: 'cycle' })) } : {},
+      origin: 'remote', conditions: { outbox: [{ key: seq, fusion: row => { if (JSON.stringify(row) !== JSON.stringify(e)) throw Error('Intention de sources changée'); return null; } }],
+        sync_state: [{ key: 'user_id', fusion: row => { if ((row?.value ?? null) !== owner) throw Error('Compte du conflit changé'); return null; } }] } });
+    return true;
+  }
   if(e?.op==='lifecycle') {
     const owner=(await db.get('sync_state','user_id'))?.value??null;
     if(e.user_id!=null&&e.user_id!==owner) return false;
-    const confirmation=await db.get('sync_state',CLE_CYCLE_CONFIRME(e.id));
+    const edition=e.store==='book_editions',cle=(edition?CLE_EDITION_CONFIRMEE:CLE_CYCLE_CONFIRME)(e.id);
+    const confirmation=await db.get('sync_state',cle);
     if(confirmation&&confirmation.value?.user_id!==owner) return false;
     const confirme=confirmation?.value?.data||e.payload?.seed;
     if(!confirme) return false;
-    const locale=await db.get('recipes',e.id),suivants=(await db.getAll('outbox')).filter(x=>x.op==='lifecycle'&&x.id===e.id&&x.seq>seq&&estDeCeCompte(x,owner));
+    const locale=await db.get(e.store,e.id),suivants=(await db.getAll('outbox')).filter(x=>cibleCommune(x,e)&&x.seq>seq&&estDeCeCompte(x,owner));
     const garder=attendu=>row=>{if(JSON.stringify(row)!==JSON.stringify(attendu))throw Error('Intention de corbeille changée');return null;};
     try {await db.mutate({deletes:{outbox:[seq]},puts:suivants.length?{outbox:suivants.map(x=>({...x,lifecycle_blocked:true,last_error:'cycle'}))}:{},conditions:{
-      recipes:[{key:e.id,fusion:row=>{garder(locale)(row);return row?{...row,lifecycle_id:idCycle(confirme),trashed_at:confirme.trashed_at??null}:null;}}],
+      [e.store]:[{key:e.id,fusion:row=>{garder(locale)(row);return row?{...row,lifecycle_id:idCycle(confirme),trashed_at:confirme.trashed_at??null,...(edition?{trash_mode:confirme.trash_mode??null}:{restored_from_edition:confirme.restored_from_edition??null})}:null;}}],
       outbox:[{key:seq,fusion:garder(e)},...suivants.map(x=>({key:x.seq,fusion:garder(x)}))],
-      sync_state:[{key:'user_id',fusion:row=>{if((row?.value??null)!==owner)throw Error('Intention de corbeille changée');return null;}},{key:CLE_CYCLE_CONFIRME(e.id),fusion:garder(confirmation)}]
+      sync_state:[{key:'user_id',fusion:row=>{if((row?.value??null)!==owner)throw Error('Intention de corbeille changée');return null;}},{key:cle,fusion:garder(confirmation)}]
     },origin:'remote'});}catch(error){if(error.message==='Intention de corbeille changée')return false;throw error;}
     return true;
   }

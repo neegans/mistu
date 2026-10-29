@@ -1,5 +1,5 @@
 import { capturerRecette } from './recette-garde.js';
-import { recetteActive } from '../domain/cycle-recette.js';
+import { recetteActiveDansContexte } from './state.js';
 import { mentionCycleRecette, TEXTE_NOUVEL_USAGE_REFUSE } from './corbeille.js';
 import { documentsActifs } from './state.js';
 // Composer un repas (spec §26) : éléments avec rôle, portions et verrouillage ; remplacer cible un élément précis ;
@@ -47,7 +47,7 @@ async function newMeal(ctx, { navigateTo = true } = {}) {
 export async function addToMealFlow(ctx, doc, { role = 'accompagnement', mainDoc = null, mealId = null, repo: R = repo, toast: dire = toast, navigate: nav = navigate } = {}) {
   try {
   const cibles = [...new Map([doc, mainDoc].filter(Boolean).map(d => [d.recipe.id,d.recipe])).values()];
-  if (cibles.some(r => !recetteActive(r))) { dire(t(TEXTE_NOUVEL_USAGE_REFUSE)); return; }
+  if (cibles.some(r => !recetteActiveDansContexte(r, ctx))) { dire(t(TEXTE_NOUVEL_USAGE_REFUSE)); return; }
   const recettes = await Promise.all(cibles.map(r => capturerRecette(R, r, {ctx})));
   let choice = mealId && ctx.meals.some((m) => m.id === mealId) ? mealId : null;
   if (!choice) {
@@ -81,7 +81,7 @@ export async function renderMeal(params, query, ctx, deps = {}) {
   meal.items = meal.items || [];
   meal.constraints_snapshot = meal.constraints_snapshot || { diets: [] };
   const items = meal.items.map((it) => ({ ...it, recipe: ctx.recipesById.get(it.recipe_id), version: it.recipe_version_id ? ctx.versionsById.get(it.recipe_version_id) : null })).filter((it) => it.recipe);
-  const mentions = items.filter(it=>!recetteActive(it.recipe)).map(it=>mentionCycleRecette(it.recipe));
+  const mentions = items.filter(it=>!recetteActiveDansContexte(it.recipe, ctx)).map(it=>mentionCycleRecette(it.recipe, ctx?.editionsById?.get(it.recipe.edition_id)));
   const main = items.find((it) => it.role === 'plat_principal') || items[0];
   const root = el('div', null);
   const save = async (champs, recettes = []) => {
@@ -187,7 +187,7 @@ export async function renderMeal(params, query, ctx, deps = {}) {
     return Promise.all([...sources.values()].map(r => capturerRecette(deps.repo ?? repo, r, {ctx, historique:true})));
   }
   async function contextesActifs() {
-    if (items.some(it => !recetteActive(it.recipe))) throw new Error('recette_retiree');
+    if (items.some(it => !recetteActiveDansContexte(it.recipe, ctx))) throw new Error('recette_retiree');
     return Promise.all([...new Map(items.map(it => [it.recipe.id,it.recipe])).values()].map(r => capturerRecette(deps.repo ?? repo, r, {ctx})));
   }
   async function startCooking() {

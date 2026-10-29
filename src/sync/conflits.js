@@ -11,7 +11,9 @@ import { syncNow } from './clock.js';
 import { nettoyerChaines } from './lots.js';
 import { fusionnerFichier, memeRemote, HASH_FICHIER } from './fichiers.js';
 import { CLE_CYCLE_CONFIRME, recettesDe } from './cycle.js';
+import { CLE_EDITION_CONFIRMEE, editionsDe } from './cycle-edition.js';
 import { lireCycleRecette } from '../domain/cycle-recette.js';
+import { lireCycleEdition, lireEtatRecette, memeExceptionEdition } from '../domain/cycle-edition.js';
 
 async function protectionContenu(db,conflit,copie) {
   if (conflit.store === 'imports') {
@@ -24,6 +26,12 @@ async function protectionContenu(db,conflit,copie) {
         sync_state: [{ key: 'user_id', fusion: row => { if ((row?.value ?? null) !== owner) throw Error('Compte du conflit changé'); return null; } }] }, recettes: [] };
     }
   }
+  if(conflit.store==='book_editions') {
+    const id=conflit.record_id,cycle=lireCycleEdition(copie),owner=(await db.get('sync_state','user_id'))?.value??null;
+    const valide=row=>cycle.etat==='active'&&(row==null?cycle.id===null:lireCycleEdition(row).etat==='active'&&lireCycleEdition(row).id===cycle.id);
+    if(!valide(await db.get('book_editions',id)))return null;
+    return {conditions:{book_editions:[{key:id,fusion:row=>{if(!valide(row))throw Error('Cycle du conflit changé');return null;}}],sync_state:[{key:'user_id',fusion:row=>{if((row?.value??null)!==owner)throw Error('Compte du conflit changé');return null;}}]},editions:[{edition_id:id,expected_cycle_id:cycle.id,owner_id:owner,records:[{store:conflit.store,id}]}]};
+  }
   if(!['recipes','recipe_versions','recipe_translations','substitutions','dish_recipe_links'].includes(conflit.store)) return {conditions:{},recettes:[]};
   let id=conflit.store==='recipes'?conflit.record_id:copie?.recipe_id;
   let version=null;
@@ -32,11 +40,28 @@ async function protectionContenu(db,conflit,copie) {
   const contexte=conflit.recipe_contexts?.find(c=>c.recipe_id===id);
   const expected=contexte?.expected_cycle_id??(conflit.store==='recipes'?lireCycleRecette(copie).id:null);
   const owner=(await db.get('sync_state','user_id'))?.value??null;
-  const valide=row=>{if(row==null)return expected===null;const cycle=lireCycleRecette(row);return cycle.etat==='active'&&cycle.id===expected;};
-  if(!valide(await db.get('recipes',id))) return null;
-  const conditions={recipes:[{key:id,fusion:row=>{if(!valide(row)) throw Error('Cycle du conflit changé');return null;}}],sync_state:[{key:'user_id',fusion:row=>{if((row?.value??null)!==owner)throw Error('Compte du conflit changé');return null;}}]};
-  if(version) conditions.recipe_versions=[{key:version.id,fusion:row=>{if(row?.recipe_id!==id)throw Error('Source du conflit changée');return null;}}];
-  return {conditions,recettes:[{recipe_id:id,expected_cycle_id:expected,owner_id:owner,records:[{store:conflit.store,id:conflit.record_id}]}]};
+  const actuelle = await db.get('recipes', id), eid = actuelle?.edition_id ?? null;
+  const parent = eid ? await db.get('book_editions', eid) : null;
+  const baseEdition = conflit.edition_contexts?.find(c => c.edition_id === eid);
+  const cycleEdition = parent ? lireCycleEdition(parent) : null;
+  // Une ancienne copie sans association/base explicite ne gagne pas un cycle de livre survenu depuis.
+  if (eid && (!parent || cycleEdition.etat === 'invalide' || (cycleEdition.id !== null && (!baseEdition || baseEdition.expected_cycle_id !== cycleEdition.id || contexte?.expected_edition_id !== eid)))) return null;
+  if (conflit.store === 'recipes' && ((copie?.edition_id ?? null) !== eid || !memeExceptionEdition(copie, actuelle))) return null;
+  const valide = row => {
+    if (row == null) return expected === null && eid === null;
+    const cycle = lireCycleRecette(row);
+    return cycle.etat === 'active' && cycle.id === expected && (row.edition_id ?? null) === eid && lireEtatRecette(row, parent).etat === 'active';
+  };
+  if (!valide(actuelle)) return null;
+  const conditions = { recipes: [{ key: id, fusion: row => { if (!valide(row)) throw Error('Cycle du conflit changé'); return null; } }],
+    sync_state: [{ key: 'user_id', fusion: row => { if ((row?.value ?? null) !== owner) throw Error('Compte du conflit changé'); return null; } }] };
+  if (eid) conditions.book_editions = [{ key: eid, fusion: row => {
+    if (JSON.stringify(row) !== JSON.stringify(parent)) throw Error('Édition du conflit changée'); return null;
+  } }];
+  if (version) conditions.recipe_versions = [{ key: version.id, fusion: row => { if (row?.recipe_id !== id) throw Error('Source du conflit changée'); return null; } }];
+  const records = [{ store: conflit.store, id: conflit.record_id }];
+  return { conditions, recettes: [{ recipe_id: id, expected_cycle_id: expected, expected_edition_id: eid, owner_id: owner, records }],
+    ...(eid ? { editions: [{ edition_id: eid, expected_cycle_id: cycleEdition.id, owner_id: owner, records }] } : {}) };
 }
 
 // Rend `true` si le geste a été appliqué. `garderIci` écrit avec origin 'local' EXPRÈS : c'est la capture qui remet
@@ -151,21 +176,21 @@ export async function purgerAnciens(db, maintenantMs = Date.now(), joursMax = 30
 // Geste explicite après consultation de la copie : un état serveur confirmé est obligatoire.
 // Les enfants refusés gardent leur copie : leur réponse serveur décrit le parent, pas leur propre contenu.
 export async function abandonnerConflitCycle(db, conflit) {
-  if(conflit?.kind!=='cycle'||conflit.store!=='recipes') return false;
-  const id=conflit.record_id,owner=(await db.get('sync_state','user_id'))?.value??null;
-  const confirmation=await db.get('sync_state',CLE_CYCLE_CONFIRME(id));
+  if(conflit?.kind!=='cycle'||!['recipes','book_editions'].includes(conflit.store)) return false;
+  const store=conflit.store,id=conflit.record_id,edition=store==='book_editions',owner=(await db.get('sync_state','user_id'))?.value??null;
+  const confirmation=await db.get('sync_state',(edition?CLE_EDITION_CONFIRMEE:CLE_CYCLE_CONFIRME)(id));
   if(!confirmation?.value?.data||confirmation.value.user_id!==owner) return false;
-  const locale=await db.get('recipes',id),file=await db.getAll('outbox');
-  const concerne=file.filter(e=>(e.user_id==null||e.user_id===owner)&&recettesDe(e).includes(id));
-  const retirer=concerne.filter(e=>e.store==='recipes'&&e.id===id);
+  const locale=await db.get(store,id),file=await db.getAll('outbox');
+  const concerne=file.filter(e=>(e.user_id==null||e.user_id===owner)&&(edition?editionsDe(e):recettesDe(e)).includes(id));
+  const retirer=concerne.filter(e=>e.store===store&&e.id===id);
   const bloquer=concerne.filter(e=>!retirer.includes(e));
   const identique=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
   const garde=(attendu)=>courant=>{if(!identique(courant,attendu)) throw Error('La copie à relire a changé');return null;};
   try {
-    await db.mutate({origin:'remote',puts:{recipes:[confirmation.value.data],...(bloquer.length?{outbox:bloquer.map(e=>({...e,lifecycle_blocked:true,last_error:'cycle'}))}:{})},
+    await db.mutate({origin:'remote',puts:{[store]:[confirmation.value.data],...(bloquer.length?{outbox:bloquer.map(e=>({...e,lifecycle_blocked:true,last_error:'cycle'}))}:{})},
       deletes:{sync_conflicts:[conflit.id],outbox:retirer.map(e=>e.seq)},conditions:{
         sync_state:[{key:'user_id',fusion:row=>{if((row?.value??null)!==owner)throw Error('Compte changé');return null;}},{key:confirmation.key,fusion:garde(confirmation)}],
-        sync_conflicts:[{key:conflit.id,fusion:garde(conflit)}],recipes:[{key:id,fusion:garde(locale)}],
+        sync_conflicts:[{key:conflit.id,fusion:garde(conflit)}],[store]:[{key:id,fusion:garde(locale)}],
         outbox:concerne.map(e=>({key:e.seq,fusion:garde(e)}))
       }});
     return true;

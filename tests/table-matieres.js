@@ -373,6 +373,7 @@ export async function runTableMatieresTests({ eq, ok }) {
       eq([Array.from(f.recipes[0].raw_entry).length, f.recipes[0].raw_entry.includes('\u202E'), f.recipes[0].raw_entry.startsWith('Tartexxx'), f.recipes[1].raw_entry], [300, false, true, ''], 'T-C8 (ronde 1 de T2) : raw_entry passe le dernier mur, comme le titre — Cf retirés, borné à 300 points de code ; un titre lu absent ne s’écrit jamais « undefined »');
     });
     await run('T-C24 (ronde 1 de T2) repo : une condition de fusion est enveloppée comme un patch', () => withRepo(async (repo, db) => {
+      await db.put('book_editions',{id:'ed1',book_id:'b1'});
       const page = (id) => ({ id, document_id: null, edition_id: 'ed1', sha256: 'sha-' + id, printed_page: null, position: 1, issues: [], kind: null, created_at: DATE, updated_at: DATE });
       await db.mutate({ puts: { imports: [{ ...ligneJournal({ id: 'imp_f' }), created_at: DATE, updated_at: DATE }], source_pages: ['f1', 'f2', 'f3', 'f4'].map(page) }, origin: 'device' });
       await repo.transitionner('imports', 'imp_f', { attendus: ['a_lancer'], patch: { status: 'ignore' }, conditions: { source_pages: [{ key: 'f1', fusion: (c) => ({ ...c, kind: 'index', locator: 'a\u0007b' }) }, { key: 'f2', fusion: () => null }] } });

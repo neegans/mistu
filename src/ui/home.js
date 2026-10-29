@@ -1,6 +1,6 @@
 import { recetteActive } from '../domain/cycle-recette.js';
 import { mentionCycleRecette } from './corbeille.js';
-import { recettesActives, documentsActifs } from './state.js';
+import { recettesActives, documentsActifs, recetteActiveDansContexte, editionsActives } from './state.js';
 // Aujourd'hui : recherche, reprendre ma recette, Redécouvrir, favoris, dernières cuissons, ingrédients à utiliser (spec §17).
 // Lot UI-1 « Carnet » (spec experience-carnet § 4.4, D-UI-5, D-UI-8) : pageHeader au-dessus de la barre (sur le papier, hors de toute carte), les puces
 // d'exemple sous la barre ; « Favoris » et « Dernières cuissons » en grille de cartes-plat — UNE passe repo.getFiles sur les empreintes des cartes
@@ -57,7 +57,7 @@ export async function renderHome(params, query, ctx, { repo: depot = repo } = {}
   const ctxF = await contexteFichiers(ctx);
   const empreintes = empreintesPhotos([...favs, ...recent.map(x => x.doc)].map(d => d.recipe), photosPersonnelles);
   const fichiers = empreintes.length ? await depot.getFiles(empreintes) : new Map();
-  const cartePlat = (d) => { const carte=recipeCard(d, { photoEnTete: true, fichier: fichierPhoto(d.recipe, photosPersonnelles, fichiers), ctxF }); if (!recetteActive(d.recipe)) {carte.querySelector('.carte-plat-actions')?.remove();carte.append(mentionCycleRecette(d.recipe));} return carte; };
+  const cartePlat = (d) => { const carte=recipeCard(d, { photoEnTete: true, fichier: fichierPhoto(d.recipe, photosPersonnelles, fichiers), ctxF }); if (!recetteActiveDansContexte(d.recipe, ctx)) {carte.querySelector('.carte-plat-actions')?.remove();carte.append(mentionCycleRecette(d.recipe, ctx.editionsById?.get(d.recipe.edition_id)));} return carte; };
   if (favs.length) root.append(sectionPlain(t('Favoris'), grilleCartes(favs.map(cartePlat))));
 
   // Dernières cuissons → Refaire comme la dernière fois : la date et le bouton HORS du <a> de la carte, sous elle, dans la cellule de grille (§ 4.4, H-16).
@@ -65,7 +65,7 @@ export async function renderHome(params, query, ctx, { repo: depot = repo } = {}
     root.append(sectionPlain(t('Dernières cuissons'), grilleCartes(recent.map(({ h, doc }) => el('div', { class: 'cellule-cuisson' },
       cartePlat(doc),
       el('div', { class: 'muted cuisson-date' }, `${formatDate(h.cooked_at)}${etoiles(h.rating) ? ` · ${etoiles(h.rating)}` : ''}${h.redo === false ? ` · ${t('à ne pas refaire')}` : ''}`),
-      el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(h.recipe_id)}${buildQuery({ v: h.recipe_version_id, servings: h.servings || '' })}` }, recetteActive(doc.recipe) ? t('Refaire comme la dernière fois') : t('Consulter cette cuisson')))))));
+      el('a', { class: 'btn small', href: `#/recipes/${encodeURIComponent(h.recipe_id)}${buildQuery({ v: h.recipe_version_id, servings: h.servings || '' })}` }, recetteActiveDansContexte(doc.recipe, ctx) ? t('Refaire comme la dernière fois') : t('Consulter cette cuisson')))))));
   }
 
   // Ingrédients à utiliser (inventaire)
@@ -86,7 +86,7 @@ export async function renderHome(params, query, ctx, { repo: depot = repo } = {}
 
 async function rediscoverCard(ctx, query, depot = repo) {
   const context = query.q ? parseQuery(query.q).filters : {};
-  const s = pickSuggestion({ editions: ctx.book_editions, books: ctx.books, recipes: recettesActives(ctx), activity: ctx.library_activity, prefs: ctx.rediscovery_prefs, context });
+  const s = pickSuggestion({ editions: editionsActives(ctx), books: ctx.books, recipes: recettesActives(ctx), activity: ctx.library_activity, prefs: ctx.rediscovery_prefs, context });
   if (!s) return el('div');
   const pref = ctx.rediscovery_prefs.find((p) => p.edition_id === s.edition.id) || { edition_id: s.edition.id };
   if (!pref.last_suggested_at || Date.now() - Date.parse(pref.last_suggested_at) > 86400000) {

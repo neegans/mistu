@@ -1,6 +1,7 @@
 // Envoi d'une passe (spec § 5.3) : la file est lue, dédoublonnée, relue, envoyée par lots ; chaque réponse est
 // appliquée en UNE transaction (retraits, réécritures non capturées, conflits, quarantaine). I5 : une fiche n'est
 // « envoyée » que par l'absence d'entrée la concernant.
+import { estLotSources } from './lot-sources.js';
 import { composerLots, cleDe } from './lots.js';
 import { fileDe } from './outbox.js';
 import { appliquerReponse } from './reponses.js';
@@ -10,6 +11,8 @@ import { logError } from '../core/log.js';
 import { commandeCycle, idCycle, fusionCycle, CLE_CYCLE_CONFIRME, gardeCompteCycle } from './cycle.js';
 import { lireCycleRecette } from '../domain/cycle-recette.js';
 import { preparerFermetureImport, importConcerne, gardeImportRelu } from './imports-clos.js';
+import { commandeEdition, cibleCommune, CLE_EDITION_CONFIRMEE, fusionEdition } from './cycle-edition.js';
+import { lireCycleEdition } from '../domain/cycle-edition.js';
 
 // Recul exponentiel (spec § 5.3) : défini dans clock.js (module feuille, lot G tâche 3 ronde 1), réexporté ici pour ses lecteurs.
 export { reculMs };
@@ -70,6 +73,7 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
   }
 
   async function appliquer(lot, reponse, entreesParSeq) {
+    if (estLotSources(lot.elements[0])) return appliquerSources(lot, reponse, entreesParSeq);
     if(lot.elements[0]?.op==='lifecycle') return appliquerCommande(lot,reponse,entreesParSeq);
     const owner=getUserId();
     // Lectures AVANT la transaction : la version locale d'un conflit est celle du moment où la réponse arrive, et
@@ -110,12 +114,12 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
       conditions = { ...(conditions || {}), files: puts.files.map((ligne) => conditionFichier(ligne.sha256, fichesLocales[cleDe({ store: 'files', id: ligne.sha256 })] ?? null, ligne, ligne.updated_at)) };
       delete puts.files;
     }
-    if(puts.recipes) {
-      conditions={...(conditions||{}),recipes:puts.recipes.map(row=>({key:row.id,fusion:current=>{
-        const sent=lot.elements.find(e=>e.store==='recipes'&&e.id===row.id)?.data;
-        return idCycle(current)===idCycle(sent)&&current?.updated_at===fichesLocales[`recipes:${row.id}`]?.updated_at?row:null;
+    for(const store of ['recipes','book_editions'])if(puts[store]) {
+      conditions={...(conditions||{}),[store]:puts[store].map(row=>({key:row.id,fusion:current=>{
+        const sent=lot.elements.find(e=>e.store===store&&e.id===row.id)?.data;
+        return idCycle(current)===idCycle(sent)&&current?.updated_at===fichesLocales[`${store}:${row.id}`]?.updated_at?row:null;
       }}))};
-      delete puts.recipes;
+      delete puts[store];
     }
     if (effets.conflits.length) puts.sync_conflicts = effets.conflits;
     if (effets.quarantaine.length) {
@@ -130,7 +134,42 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     return effets;
   }
 
+  async function appliquerSources(lot, reponse, entreesParSeq) {
+    const c = lot.elements[0], owner = getUserId();
+    const entree = lot.seqs.map(seq => entreesParSeq.get(seq)).find(e => estLotSources(e) && e.payload.operation_id === c.operation_id);
+    const effets = { retirer: [], reecrire: {}, conflits: [], quarantaine: [], retirerConflits: [] };
+    if (!entree) return effets;
+    const correspond = r => r.store === c.store && r.id === c.id && r.operation_id === c.operation_id;
+    const ack = reponse.accepted?.find(correspond), refus = reponse.rejected?.find(correspond);
+    if (!ack && !refus) return effets;
+    const puts = {}, deletes = {}, conditions = { sync_state: [gardeCompteCycle(owner, getUserId)], outbox: [{ key: entree.seq, fusion: row => {
+      if (JSON.stringify(row) !== JSON.stringify(entree)) throw Error('Lot de sources modifié pendant son envoi'); return null;
+    } }] };
+    if (ack) {
+      const records = ack.server_rows;
+      if (!Array.isArray(records) || records.length !== c.rows.length || new Set(records.map(cleDe)).size !== records.length) return effets;
+      if (records.some(r => !c.rows.some(x => cleDe(x) === cleDe(r)) || r.deleted_at || r.data?.id !== r.id || !Number.isFinite(Date.parse(r.updated_at)))) return effets;
+      for (const record of records) {
+        const sent = c.rows.find(x => cleDe(x) === cleDe(record));
+        (conditions[record.store] ||= []).push({ key: record.id, fusion: row => {
+          // L'heure peut être ajustée ; une saisie postérieure conserve son propre envoi.
+          return JSON.stringify(row) === JSON.stringify(sent.data) ? { ...row, updated_at: record.updated_at } : null;
+        } });
+      }
+      effets.retirer.push(entree.seq); deletes.outbox = [entree.seq];
+    } else {
+      const file = await fileDe(db, owner);
+      puts.outbox = file.filter(e => e.seq >= entree.seq && cibleCommune(e, entree)).map(e => ({ ...e, lifecycle_blocked: true, last_error: 'cycle' }));
+      effets.conflits.push({ id: `source_batch:${c.operation_id}`, store: c.store, record_id: c.id, local: c,
+        server: refus.server || null, edition_server: refus.edition_server || null, at: reponse.server_time || new Date().toISOString(), kind: 'cycle' });
+      puts.sync_conflicts = effets.conflits;
+    }
+    await db.mutate({ puts, deletes, conditions, origin: 'remote' });
+    return effets;
+  }
+
   async function appliquerCommande(lot,reponse,entreesParSeq) {
+    if(lot.elements[0]?.entity==='edition'||lot.elements[0]?.edition_id) return appliquerCommandeLiee(lot,reponse,entreesParSeq);
     const owner=getUserId();
     const c=lot.elements[0];
     const entree=lot.seqs.map(s=>entreesParSeq.get(s)).find(e=>commandeCycle(e)&&e.payload?.operation_id===c.operation_id);
@@ -169,6 +208,44 @@ export function createPush({ db, transport, getUserId = () => null, maintenant =
     }
     conditions={...(conditions||{}),sync_state:[gardeCompteCycle(owner,getUserId)]};
     await db.mutate({puts,deletes,conditions,origin:'remote'});
+    return effets;
+  }
+
+  async function appliquerCommandeLiee(lot,reponse,entreesParSeq,tentative=0) {
+    const owner=getUserId(),c=lot.elements[0],edition=c.entity==='edition',store=edition?'book_editions':'recipes';
+    const entree=lot.seqs.map(s=>entreesParSeq.get(s)).find(e=>e?.op==='lifecycle'&&e.payload?.operation_id===c.operation_id);
+    const effets={retirer:[],reecrire:{},conflits:[],quarantaine:[],retirerConflits:[]};if(!entree)return effets;
+    const correspond=a=>a.store===store&&a.id===c.id&&a.operation_id===c.operation_id;
+    const ack=reponse.accepted?.find(correspond),refus=reponse.rejected?.find(correspond),resultat=ack||refus;
+    if(!resultat)return effets;
+    const valide=(row,s,id)=>row?.data?.id===id&&Number.isFinite(row.server_seq)&&Number.isFinite(Date.parse(row.updated_at))&&(s==='book_editions'?lireCycleEdition(row.data):lireCycleRecette(row.data)).etat!=='invalide';
+    if(ack&&(!valide(ack.server,store,c.id)||idCycle(ack.server.data)!==c.operation_id||!Number.isFinite(Date.parse(ack.server.updated_at))||(!edition&&!valide(ack.edition_server,'book_editions',c.edition_id))))return effets;
+    if(ack&&(ack.server.data.trashed_at!=null)!==(c.action==='trash'))return effets;
+    if(ack&&c.action==='trash'&&edition&&ack.server.data.trash_mode!==c.mode)return effets;
+    if(ack&&c.action==='restore_from_edition'&&(ack.server.data.restored_from_edition?.edition_id!==c.edition_id||ack.server.data.restored_from_edition?.lifecycle_id!==c.base_edition_cycle_id))return effets;
+    const file=await fileDe(db,owner),locale=await db.get(store,c.id),puts={},deletes={},conditions={sync_state:[gardeCompteCycle(owner,getUserId)]};
+    if(ack){effets.retirer.push(entree.seq);deletes.outbox=[entree.seq];}
+    else {
+      puts.outbox=file.filter(e=>e.seq>=entree.seq&&cibleCommune(e,entree)).map(e=>({...e,lifecycle_blocked:true,last_error:'cycle'}));
+      effets.conflits.push({id:`${store}:${c.id}`,store,record_id:c.id,local:locale,server:refus.server||null,edition_server:refus.edition_server||null,at:reponse.server_time||new Date().toISOString(),kind:'cycle'});
+      puts.sync_conflicts=effets.conflits;
+    }
+    const confirmer=async(s,id,serveur)=>{
+      if(!valide(serveur,s,id))return;
+      const cle=s==='book_editions'?CLE_EDITION_CONFIRMEE(id):CLE_CYCLE_CONFIRME(id),connu=await db.get('sync_state',cle);
+      const utilise=connu?.value?.user_id===owner&&Number.isFinite(connu?.value?.server_seq)&&connu.value.server_seq>serveur.server_seq?connu.value:{data:{...serveur.data,updated_at:serveur.updated_at},server_seq:serveur.server_seq,user_id:owner};
+      const avant=await db.get(s,id),commandes=file.filter(e=>e.op==='lifecycle'&&e.store===s&&e.id===id&&(!ack||e.seq!==entree.seq));
+      const fusion=s==='book_editions'?fusionEdition:fusionCycle;
+      (conditions[s]||=[]).push({key:id,fusion:row=>idCycle(row)!==idCycle(avant)?row:fusion(row,utilise.data,refus?[]:commandes).row});
+      conditions.sync_state.push({key:cle,fusion:row=>{
+        if(JSON.stringify(row??null)!==JSON.stringify(connu??null))throw Object.assign(new Error('Confirmation reçue pendant l’accusé'),{code:'SYNC_CONFIRMATION_CHANGED'});
+        return {key:cle,value:utilise};
+      }});
+    };
+    await confirmer(store,c.id,resultat.server);
+    if(!edition)await confirmer('book_editions',c.edition_id,resultat.edition_server);
+    try { await db.mutate({puts,deletes,conditions,origin:'remote'}); }
+    catch(error) { if(error.code==='SYNC_CONFIRMATION_CHANGED'&&tentative<3)return appliquerCommandeLiee(lot,reponse,entreesParSeq,tentative+1);throw error; }
     return effets;
   }
 

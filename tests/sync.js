@@ -14,7 +14,7 @@ export async function runSyncTests({ eq, ok }) {
     eq(table.key, STORES[store].keyPath, `${store} : clé = keyPath`);
     const indexNames = (STORES[store].indexes || []).map(([name]) => name).sort();
     const generated = table.generated.map((g) => g.name).filter((n) => !['size', 'mime'].includes(n) || store !== 'files').sort();
-    eq(generated, indexNames.filter(n => !(store === 'recipes' && n === 'trashed_at')), `${store} : colonnes générées = index synchronisés de STORES (corbeille locale exclue)`);
+    eq(generated, indexNames.filter(n => !(['recipes', 'book_editions'].includes(store) && n === 'trashed_at')), `${store} : colonnes générées = index synchronisés de STORES (corbeille locale exclue)`);
   }
   eq(TABLES.files.generated.map((g) => `${g.name}:${g.type}`).sort(), ['mime:text', 'size:bigint'], 'files : size bigint et mime text en plus');
   ok(TABLES.recipe_versions.required.includes('recipe_id') && TABLES.source_pages.required.includes('document_id'), 'champs de relation obligatoires déclarés');
@@ -67,7 +67,7 @@ export async function runSyncTests({ eq, ok }) {
   // --- Schéma v2 et archive (spec § 5.1, I3)
   const schema = await import('../src/model/schema.js');
   const { createArchive, inspectArchive, applyArchive, verifyRestored } = await import('../src/domain/backup.js');
-  eq(schema.DB_VERSION, 5, 'DB_VERSION 5 (L1 : index de corbeille)');
+  eq(schema.DB_VERSION, 6, 'DB_VERSION 6 (L2 : index de corbeille des livres)');
   eq(schema.STORES.outbox, { keyPath: 'seq', autoIncrement: true, indexes: [['store_id', ['store', 'id']]] }, 'outbox autoIncrement');
   ok(schema.STORES.sync_state.keyPath === 'key' && schema.STORES.sync_conflicts.keyPath === 'id', 'sync_state et sync_conflicts');
   ok(schema.SYNC_INTERNAL_STORES.every((s) => !schema.ARCHIVE_DATA_STORES.includes(s)), 'internes hors archive');
@@ -192,6 +192,7 @@ export async function runSyncTests({ eq, ok }) {
     await db.mutate({ puts: { files: [{ sha256: 'd'.repeat(64), mime: 'image/jpeg', size: 1, remote: true, updated_at: '2026-10-12T10:00:00Z' }] }, origin: 'remote' });
     const filled = await repo.putFile('d'.repeat(64), new Blob(['z']), { origin: 'remote' });
     ok(filled.blob instanceof Blob && filled.mime === 'image/jpeg' && filled.syncable === true, 'putFile remote : le blob est écrit sur une ligne qui n’en avait pas, et le type connu du serveur est gardé');
+    await db.mutate({ puts: { book_editions: [{ id: 'ed1' }] }, origin: 'remote' });
     await repo.recordActivity('ed1', 'open');
     ok((await db.getAll('library_activity'))[0].updated_at, 'recordActivity : updated_at');
     // R26 (a) : les 96 fiches de référence amorcées sont horodatées à l'insertion. Sans updated_at, elles seraient
@@ -209,6 +210,7 @@ export async function runSyncTests({ eq, ok }) {
   });
   // --- repo.removeBatch (lot E, R-E-8, R-E-12, R-E-15) : plusieurs magasins en UNE transaction ; la capture garde son filtre (l'historique de consultation
   // ne part au serveur que si « Synchroniser mon historique » est activé — coupé ici, comme le défaut de l'app et de withRepo).
+  // L2 : le témoin atomique emploie deux magasins supprimables ; éditions/livres conservés sont testés séparément contre la purge.
   await withRepo(async (repo, db) => {
     const { on } = await import('../src/core/bus.js');
     const capture = db.onMutate;
@@ -218,18 +220,18 @@ export async function runSyncTests({ eq, ok }) {
     // Ronde 1 (lot E, tâche 3) : l'abonné relit la base À l'émission — chaque `change` doit partir APRÈS l'écriture.
     const lus = [];
     let relire = false;
-    const off = on('change', (e) => { changes.push(e?.store); if (relire) lus.push(db.get(e.store, e.store === 'books' ? 'b_rb' : 'e_rb')); });
+    const off = on('change', (e) => { changes.push(e?.store); if (relire) lus.push(db.get(e.store, e.store === 'dishes' ? 'b_rb' : 'e_rb')); });
     try {
-      await repo.saveBatch({ books: [{ id: 'b_rb', title: 'Livre' }], book_editions: [{ id: 'e_rb', book_id: 'b_rb' }] });
+      await repo.saveBatch({ dishes: [{ id: 'b_rb', title: 'Livre' }], ingredients: [{ id: 'e_rb', name: 'Témoin' }] });
       const avant = (await db.getAll('outbox')).length;
       appels.length = 0; changes.length = 0;
       relire = true;
-      await repo.removeBatch({ book_editions: ['e_rb'], books: ['b_rb'] });
+      await repo.removeBatch({ ingredients: ['e_rb'], dishes: ['b_rb'] });
       relire = false;
-      eq([appels.length, appels[0]?.deletes, appels[0]?.payloads, appels[0]?.origin], [1, { book_editions: ['e_rb'], books: ['b_rb'] }, { book_editions: ['e_rb'], books: ['b_rb'] }, 'local'], 'removeBatch : UN db.mutate porte les deux suppressions et leurs copies, origine local (mutant : un db.mutate par magasin → rouge)');
-      eq([await db.get('books', 'b_rb'), await db.get('book_editions', 'e_rb')], [undefined, undefined], 'removeBatch : les deux fiches sont parties');
-      eq((await db.getAll('outbox')).slice(avant).map((o) => [o.store, o.id, o.op, o.payload?.id ?? null]), [['book_editions', 'e_rb', 'delete', 'e_rb'], ['books', 'b_rb', 'delete', 'b_rb']], 'removeBatch : DEUX entrées d’outbox delete, une par magasin, chacune avec sa copie (mutants : un magasin perdu ; payloads omis ; origine device → rouge)');
-      eq([...changes].sort(), ['book_editions', 'books'], 'removeBatch : un change par magasin');
+      eq([appels.length, appels[0]?.deletes, appels[0]?.payloads, appels[0]?.origin], [1, { ingredients: ['e_rb'], dishes: ['b_rb'] }, { ingredients: ['e_rb'], dishes: ['b_rb'] }, 'local'], 'removeBatch : UN db.mutate porte les deux suppressions et leurs copies, origine local (mutant : un db.mutate par magasin → rouge)');
+      eq([await db.get('dishes', 'b_rb'), await db.get('ingredients', 'e_rb')], [undefined, undefined], 'removeBatch : les deux fiches sont parties');
+      eq((await db.getAll('outbox')).slice(avant).map((o) => [o.store, o.id, o.op, o.payload?.id ?? null]), [['ingredients', 'e_rb', 'delete', 'e_rb'], ['dishes', 'b_rb', 'delete', 'b_rb']], 'removeBatch : DEUX entrées d’outbox delete, une par magasin, chacune avec sa copie (mutants : un magasin perdu ; payloads omis ; origine device → rouge)');
+      eq([...changes].sort(), ['dishes', 'ingredients'], 'removeBatch : un change par magasin');
       eq(await Promise.all(lus), [undefined, undefined], 'removeBatch : chaque change part APRÈS l’écriture — l’abonné qui relit la base ne voit plus la fiche (mutant : emit avant db.mutate → rouge)');
       appels.length = 0;
       await repo.removeBatch({}); await repo.removeBatch({ books: [] });
@@ -238,6 +240,7 @@ export async function runSyncTests({ eq, ok }) {
       const derniere = (await db.getAll('outbox')).at(-1);
       eq([derniere.store, derniere.id, derniere.op, derniere.payload], ['books', 'b_absent', 'delete', null], 'removeBatch : une clé absente ne lève pas, payload nul (comme removeMany)');
       // Contre-épreuve (R-E-15) : le réglage d'historique est COUPÉ (withRepo : isActivitySynced → false).
+      await db.mutate({ puts: { book_editions: [{ id: 'e_rb2' }] }, origin: 'remote' });
       await repo.recordActivity('e_rb2', 'open_book');
       const [act] = await db.getAll('library_activity');
       const n0 = (await db.getAll('outbox')).length;

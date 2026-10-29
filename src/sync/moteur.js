@@ -6,6 +6,7 @@ import { fileDe } from './outbox.js';
 import { createPush } from './push.js';
 import { createPull } from './pull.js';
 import { verifierCapaciteCycle } from './cycle.js';
+import { verifierCapaciteEdition } from './cycle-edition.js';
 import { purgerAnciens } from './conflits.js';
 import { createFichiers, compterFichiers, lireErreursFichiers, MAGASINS_FICHIERS } from './fichiers.js';
 import { setClockOffset } from './clock.js';
@@ -221,6 +222,7 @@ export function createMoteur({
   }
 
   async function passe(raison) {
+    const ownerPasse = getUserId();
     // Sans compte, rien ne part et rien n'est tenté : seuls les comptes de la file sont rafraîchis. Aucune passe
     // n'a eu lieu, donc aucun effet à annoncer — et `enCours` n'est jamais passé à vrai : personne ne rendra.
     if (!getUserId()) { poser({ derniersEffets: null, ...(await compter()) }); return instantane(); }
@@ -239,7 +241,11 @@ export function createMoteur({
     let snapshotFichiers = null;
     let tapesAuSnapshot = 0;
     try {
-      if(typeof transport.capacites==='function') await verifierCapaciteCycle({db,transport,userId:getUserId()});
+      if(typeof transport.capacites==='function') {
+        const userId=getUserId(),capacite=await transport.capacites(),memo={capacites:async()=>capacite};
+        await verifierCapaciteCycle({db,transport:memo,userId});
+        await verifierCapaciteEdition({db,transport:memo,userId,getUserId});
+      }
       if (!pause) {
         await envoiInitial({
           db,
@@ -248,9 +254,29 @@ export function createMoteur({
           configSuitLeCompte,
           surProgression: (p) => poser({ progression: { table: p.table, n: p.n, total: p.total } }),
         });
+        // Un instantané d'archive n'est jamais une commande : recevoir les bases du compte avant son premier envoi.
+        if((await fileDe(db,getUserId())).some(e=>e.archive_import&&(e.edition_contexts||e.store==='book_editions'))) {
+          bilanReception=await pull.recevoir();
+          if(bilanReception.erreur){poser({derniereErreur:{type:bilanReception.erreur.type}});return instantane();}
+        }
         poser({ phase: 'envoi', progression: null });
         heureVue = null;
         bilanEnvoi = await push.envoyer();
+        // Les barrières parent/membre imposent plusieurs accusés successifs. Chaque phase relit la file ;
+        // seules les dépendances réellement débloquées poursuivent le même déclenchement.
+        for (let phase = 0; phase < 32; phase += 1) {
+          if (arrete || getUserId() !== ownerPasse || bilanEnvoi.erreur || bilanEnvoi.pause || bilanEnvoi.attenteConnexion) break;
+          const restants = await fileDe(db, ownerPasse);
+          const lies = restants.some(e => e.edition_contexts?.length || e.payload?.edition_id || e.store === 'book_editions');
+          if (!lies || !(bilanEnvoi.envoyes + bilanEnvoi.ajustes + bilanEnvoi.abandonnees > 0)) break;
+          const suivant = await push.envoyer();
+          const avance = suivant.envoyes + suivant.ajustes + suivant.abandonnees > 0;
+          bilanEnvoi = { ...suivant, envoyes: bilanEnvoi.envoyes + suivant.envoyes, ajustes: bilanEnvoi.ajustes + suivant.ajustes,
+            conflits: bilanEnvoi.conflits + suivant.conflits, quarantaine: bilanEnvoi.quarantaine + suivant.quarantaine,
+            abandonnees: bilanEnvoi.abandonnees + suivant.abandonnees };
+          if (!avance) break;
+          if (phase === 31) planifier();
+        }
         await appliquerMesure(heureVue);
         if (bilanEnvoi.pause) poser({ pause: (await lirePause()) || { raison: 'quota', at: new Date(maintenant()).toISOString() } });
         if (bilanEnvoi.attenteConnexion) poser({ attenteConnexion: true });

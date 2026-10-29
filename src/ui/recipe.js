@@ -1,4 +1,5 @@
 import { capturerRecette } from './recette-garde.js';
+import { lireEtatRecette } from '../domain/cycle-edition.js';
 // Fiche recette (spec §17) : Original / Ma version, réglages combinables, unités et langue de lecture, remplacer un ingrédient,
 // « Avec quoi on mange ça ? », autres recettes du plat, historique et « Refaire comme la dernière fois ».
 import { el, toast, chooseDialog, promptDialog, confirmDialog, formatDate, formatMinutes, downloadBlob } from '../core/dom.js';
@@ -97,7 +98,7 @@ export async function renderRecipe(params, query, ctx, deps = {}) {
   if (!recipe) return el('div', { class: 'card' }, t('Recette introuvable.'));
   // Ronde 1 : l'identifiant d'une fiche reçue ou restaurée peut porter « & », « ? » ou « # » — les adresses l'encodent (le geste ouvert est celui annoncé).
   const rid = encodeURIComponent(recipe.id);
-  const cycle = lireCycleRecette(recipe), lectureSeule = cycle.etat !== 'active';
+  const cycle = lireEtatRecette(recipe, ctx.editionsById.get(recipe.edition_id)), lectureSeule = cycle.etat !== 'active';
   const lienEdition = (kind, v, locale) => `#/recipes/${rid}/edit${buildQuery({ kind, v, locale })}`;
   // Lot B (§ 4.1, § 4.5) : une fiche à adresse lisible porte « Voir la page d’origine » partout (I-B5, D-UI-10) ; la lecture par l'assistant a besoin de la session.
   const lienFiche = recipe.source_url ? lienSignet(recipe.source_url) : null;

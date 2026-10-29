@@ -24,7 +24,9 @@ import { lancerVol, lancerExtraction, annulerVol, volEnCours, estEnLigne, texteE
 import { sessionAssistant, carteConnexion, messageGardeRefusee, texteDesChamps, TEXTE_CONNEXION } from './components.js';
 import { demarrerConnexion } from './settings.js';
 import { messageErreurImage } from './livre-ajout.js';
-import { capturerProprietaire, conditionProprietaire } from './recette-garde.js';
+import { capturerProprietaire, conditionProprietaire, capturerEdition, capturerRecette } from './recette-garde.js';
+import { verifierCaptureEditionImport, memoireEditionImport, memoireCycleImport } from '../domain/contexte-import.js';
+import { conditionsSourcesImport, revoirLectureEditionImport } from '../domain/sources-import.js';
 
 const horloge = () => new Date().toISOString();
 const liste = (v) => (Array.isArray(v) ? v : []);
@@ -115,13 +117,17 @@ export function selecteurReferences({ candidats = [], occupees = [], exclus = ne
 // les choix effectifs (faits, à défaut les propositions cochées). Toutes les relectures AVANT la transaction ; AUCUNE écriture avant elle ; puis UNE
 // transaction : le classement a_verifier → enregistre (clé rejouée DANS la transaction), les lignes neuves (absente) et une condition d'index par
 // référence cochée. Rend { issue: 'cree', importIds } ou { issue: 'refuse', raison }.
-export async function creerLesLectures(classementId, { cle, editionId = null, etat, choix, ctx = null, repo = repoModule, maintenant = horloge, newId = repoModule.newId, deviceId = repoModule.deviceId() } = {}) {
+export async function creerLesLectures(classementId, { cle, editionId = null, etat, choix, ctx = null, repo = repoModule, maintenant = horloge, newId = repoModule.newId, deviceId = repoModule.deviceId(), contexteEdition = null, compte = null } = {}) {
+  const proprietaire=await(compte||capturerProprietaire(repo,ctx));
   const refuse = (raison) => ({ issue: 'refuse', raison });
   const ligne = await repo.get('imports', classementId);
   if (!ligne || ligne.status !== 'a_verifier' || cleClassement(ligne) !== cle) return refuse('classement');
   if (!revaliderResultatClassement(ligne.resultat, ligne.page_ids)) return refuse('classement');
   const seance = typeof ligne.scan_session_id === 'string' ? await repo.get('scan_sessions', ligne.scan_session_id) : null;
   if ((seance?.edition_id ?? null) !== (editionId ?? null)) return refuse('edition');
+  const edition=editionId?(ctx?.editionsById?.get(editionId)||await repo.get('book_editions',editionId)):null;
+  const capture=contexteEdition||(edition?await capturerEdition(repo,edition,{ctx}):null);
+  if(capture)verifierCaptureEditionImport(ligne,capture);
   const recettes = editionId ? liste(await repo.byIndex('recipes', 'edition_id', editionId)) : []; // jamais l'index interrogé avec null
   const imports = liste(await repo.all('imports'));
   const candidats = new Set(candidatsReference(recettes, { editionId, imports }).map((r) => r.id));
@@ -137,12 +143,15 @@ export async function creerLesLectures(classementId, { cle, editionId = null, et
   // photos des groupes supprimées ailleurs — → refus, rien d'écrit : le classement payé n'est jamais enregistré pour rien (D-D21) ; la fonction derrière
   // un bouton éteint a sa propre garde.
   if (!lignes.length) return refuse('classement');
+  const captures=await Promise.all(references.map(id=>capturerRecette(repo,ctx?.recipesById?.get(id)||recettes.find(r=>r.id===id),{ctx,edition})));
+  for(const l of lignes){const c=captures.find(c=>c.recipe_id===l.recipe_id);Object.assign(l,c?memoireCycleImport(c):capture?memoireEditionImport(capture):{owner_id:proprietaire.owner_id});if(ligne.sources_attendues)l.sources_attendues=ligne.sources_attendues.filter(s=>l.page_ids.includes(s.id));}
   try {
     await repo.transitionner('imports', classementId, {
       attendus: ['a_verifier'],
-      patch: (c) => { if (cleClassement(c) !== cle) throw new TransitionRefusee('imports', classementId, c.status); return { status: 'enregistre', reponse_brute: null, brouillon: null, finished_at: maintenant() }; },
+      editions:capture?[capture]:[],recettes:captures,
+      patch: (c) => { if (cleClassement(c) !== cle) throw new TransitionRefusee('imports', classementId, c.status);if(capture)verifierCaptureEditionImport(c,capture); return { status: 'enregistre', reponse_brute: null, brouillon: null, finished_at: maintenant() }; },
       puts: { imports: lignes },
-      conditions: { imports: [...lignes.map((l) => ({ key: l.id, absente: true })), ...references.map((r) => ({ index: 'recipe_id', valeur: r, exclus: IMPORTS_OUVERTS }))] },
+      conditions: { ...conditionsSourcesImport(ligne.sources_attendues),imports: [...lignes.map((l) => ({ key: l.id, absente: true })), ...references.map((r) => ({ index: 'recipe_id', valeur: r, exclus: IMPORTS_OUVERTS }))],sync_state:[conditionProprietaire(proprietaire)],recipes:references.map(id=>({key:id,fusion:r=>{if(!candidatsReference(r?[r]:[],{editionId}).length)throw new TransitionRefusee('recipes',id,null);return null;}})) },
     });
   } catch (e) { if (e instanceof TransitionRefusee) return refuse('transition'); throw e; }
   return { issue: 'cree', importIds: lignes.map((l) => l.id) };
@@ -152,7 +161,7 @@ export async function creerLesLectures(classementId, { cle, editionId = null, et
 // « imports » (la libération n'écrit rien). Liste FIGÉE au départ : les a_lancer de CET appareil du lot, par rang ; chacune tentée une fois, une à la fois,
 // par lancerExtraction avec attendus [a_lancer] (une ligne passée echec ou prise ailleurs depuis le gel est refusée AVANT tout POST) ; sur un echec, la
 // ligne est RELUE pour son erreur.extra ; suiteDuLot décide (défaut fermé). Rien n'est écrit sur une recette par le lot (I-3 du lot A).
-export async function lireLeLot(classementId, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, battementMs = BATTEMENT_MS, enLigne = estEnLigne } = {}) {
+export async function lireLeLot(classementId, { ctx, repo = repoModule, fetch: fetchInjecte = undefined, maintenant = horloge, battementMs = BATTEMENT_MS, enLigne = estEnLigne, contexteEdition = null } = {}) {
   if (lot) return { issue: 'refuse', raison: 'lot_tenu' };
   const tenue = { classementId };
   lot = tenue;
@@ -165,7 +174,7 @@ export async function lireLeLot(classementId, { ctx, repo = repoModule, fetch: f
       // Ronde 1 de la tâche 4 : la référence RELUE juste avant le lancement — complétée ou absente (referenceALire, la règle du compte de « Continuer ») →
       // sautée comme un refus de REFUS_SAUT_LOT, avant toute écriture et tout POST.
       if (!referenceALire(l, typeof l.recipe_id === 'string' && l.recipe_id ? await repo.get('recipes', l.recipe_id) : null)) { sautees += 1; continue; }
-      const retour = await lancerExtraction(l.id, { ctx, repo, fetch: fetchInjecte, maintenant, enLigne, battementMs, attendus: ['a_lancer'] });
+      const retour = await lancerExtraction(l.id, { ctx, repo, fetch: fetchInjecte, maintenant, enLigne, battementMs, attendus: ['a_lancer'],contexteEdition });
       const relue = retour?.issue === 'echec' ? await repo.get('imports', l.id) : l;
       const suite = suiteDuLot(retour, relue);
       if (retour?.issue === 'a_verifier') lues += 1;
@@ -184,7 +193,10 @@ export async function lireLeLot(classementId, { ctx, repo = repoModule, fetch: f
 // classement désignée (?import=) — sinon la plus récente ouverte de la séance. États : 1) aucun classement ouvert → panneau caché, « Classer… » dans la
 // barre (actionsSelection) ; 2) en vol ; 3) reçu : l'écran de regroupement ; 4) échec ; 5) à lancer. La ligne est lue au rendu dans ctx.imports, RELUE
 // (repo.get) avant toute écriture ; le panneau suit le bus (D-D22) et ne se redessine que si sa signature change ; `surChangement()` redessine la barre.
-export function panneauClassement(session, ctx, getSelection, { repo = repoModule, toast = toastDom, confirmer = confirmDialog, navigate = naviguerDom, fetch: fetchInjecte = undefined, maintenant = horloge, battementMs = BATTEMENT_MS, enLigne = estEnLigne, importId = null, surChangement = null, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000 } = {}) {
+export function panneauClassement(session, ctx, getSelection, { repo = repoModule, toast = toastDom, confirmer = confirmDialog, navigate = naviguerDom, fetch: fetchInjecte = undefined, maintenant = horloge, battementMs = BATTEMENT_MS, enLigne = estEnLigne, importId = null, surChangement = null, veilleMs = repoModule.BATTEMENT_MORT_MS + 1000, contexteEdition = null } = {}) {
+  const compte=capturerProprietaire(repo,ctx),captureEdition=contexteEdition?Promise.resolve(contexteEdition):session?.edition_id?capturerEdition(repo,ctx?.editionsById?.get(session.edition_id),{ctx}):Promise.resolve(null);captureEdition.catch(()=>{});
+  let editionCapturee=null;captureEdition.then(c=>{editionCapturee=c;dessiner();}).catch(()=>{});
+  const protections=async(ligne=null,historique=false)=>{const c=await captureEdition;if(c&&ligne&&!historique)verifierCaptureEditionImport(ligne,c);return {editions:c?[{...c,historique}]:[],conditions:{sync_state:[conditionProprietaire(await compte)]}};};
   const racine = el('div', { class: 'card stack', dataset: { role: 'classement' } });
   const pagesSeance = () => liste(session?.page_ids);
   const presentes = (ids) => liste(ids).filter((id) => typeof id === 'string' && ctx?.pagesById instanceof Map && ctx.pagesById.has(id));
@@ -305,7 +317,7 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
   function preparer(L) {
     const resultat = revaliderResultatClassement(L.resultat, L.page_ids);
     if (!resultat) return null;
-    const pagesParId = ctx?.pagesById instanceof Map ? ctx.pagesById : new Map();
+    const pagesParId = new Map(pagesSeance().map(id=>[id,ctx?.pagesById?.get(id)]).filter(([,p])=>p));
     const restaure = restaurerBrouillon(L.brouillon ?? null, { resultat, pageIds: L.page_ids, startedAt: L.started_at, pagesParId });
     const base = restaure ?? { etat: regroupementInitial(resultat, pagesParId), choixFaits: new Map() };
     const R = { cle: cleClassement(L), editionId: etat.edition, resultat, etat: base.etat, choix: base.choixFaits, octets: null, ouverture: new Map(), saisies: new Map(), affiches: new Map() };
@@ -476,7 +488,20 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     racine.hidden = !L;
     if (!L) { racine.replaceChildren(); return; }
     if (L.status === 'en_cours') { racine.replaceChildren(...blocEnVol(L)); veiller(); }
-    else if (L.status === 'a_verifier') racine.replaceChildren(ecranRegroupement(L));
+    else if (L.status === 'a_verifier') {
+      const ecran=ecranRegroupement(L);
+      let ancien=false;try{if(session?.edition_id){verifierCaptureEditionImport(L,editionCapturee);ancien=L.edition_id!==editionCapturee.edition_id;}}catch{ancien=true;}
+      if(ancien) {
+        ecran.querySelectorAll('button,input,select,textarea').forEach(n=>{n.disabled=true;});
+        const zone=el('div',{class:'status warn',dataset:{role:'relecture-classement'}},el('p',null,t('Ce résultat a été conservé. Relis-le avant de l’utiliser sur ce livre.')),
+          el('button',{type:'button',class:'btn',onClick:async ev=>{
+            if(ev.currentTarget.disabled)return;ev.currentTarget.disabled=true;
+            try{await revoirLectureEditionImport(L.id,{repo,contexte:await captureEdition,attendu:L});await synchroniser({forcer:true});}
+            catch(e){logError('regroupement.relecture',{error:e});toast(t('Le livre ou ses pages ont changé. Rouvre la séance avant de continuer.'));ev.currentTarget.disabled=false;}
+          }},t('Réutiliser ce résultat après relecture')));
+        racine.replaceChildren(zone,ecran);
+      } else racine.replaceChildren(ecran);
+    }
     else racine.replaceChildren(...blocALancer(L));
     if (etat.focus) { const { role, page } = etat.focus; etat.focus = null; racine.querySelector(`[data-role="${role}"][data-page="${CSS.escape(page)}"]`)?.focus(); }
   }
@@ -506,7 +531,7 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     const brouillon = brouillonDe(R.etat, R.choix, L.started_at);
     // Ronde 1 (constat 25) : un brouillon REFUSÉ (la clé ou le statut ont changé ailleurs) n'est jamais gardé en silence — le panneau relit la ligne et
     // montre l'état réel ; l'écriture en attente tombe avec lui (elle serait refusée de même).
-    etat.ecriture = repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: (c) => { if (cleClassement(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { brouillon }; } })
+    etat.ecriture = protections(L,true).then(p=>repo.transitionner('imports', L.id, { ...p,attendus: ['a_verifier'], patch: (c) => { if (cleClassement(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { brouillon }; } }))
       .then(() => false, (e) => { if (e instanceof TransitionRefusee) return true; logError('regroupement.brouillon', { error: e, id: L.id }); return false; })
       .then((refuse) => { etat.ecriture = null; if (refuse) { etat.aEcrire = false; synchroniser({ forcer: true }); } else if (etat.aEcrire) { etat.aEcrire = false; ecrireBrouillon(); } });
     return etat.ecriture;
@@ -536,7 +561,7 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     const cle = cleClassement(L);
     if (etat.illisibles.has(cle)) return;
     etat.illisibles.add(cle);
-    try { await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: (c) => { if (cleClassement(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { status: 'echec', erreur: { raison: 'illisible', extra: {} }, resultat: null, brouillon: null }; } }); }
+    try { await repo.transitionner('imports', L.id, { ...await protections(L,true),attendus: ['a_verifier'], patch: (c) => { if (cleClassement(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { status: 'echec', erreur: { raison: 'illisible', extra: {} }, resultat: null, brouillon: null }; } }); }
     catch (e) { if (!(e instanceof TransitionRefusee)) logError('regroupement.revalidation', { error: e, id: L.id }); }
     await synchroniser({ forcer: true });
   }
@@ -586,16 +611,16 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
         etat.session = await sessionAssistant(ctx);
         if (!etat.session) return;
         const cle = cleClassement(L);
-        await repo.transitionner('imports', L.id, { attendus: ['a_verifier'], patch: (c) => { if (cleClassement(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return remiseAZero(pages); } });
+        await repo.transitionner('imports', L.id, { ...await protections(L),attendus: ['a_verifier'], patch: (c) => { if (cleClassement(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return remiseAZero(pages); } });
       } else if (L && !memeListe(pages, L.page_ids)) {
-        await repo.transitionner('imports', L.id, L.status === 'echec' ? { attendus: ['echec'], patch: remiseAZero(pages) } : { attendus: ['a_lancer'], patch: { page_ids: [...pages] } });
+        await repo.transitionner('imports', L.id, { ...await protections(L),...(L.status === 'echec' ? { attendus: ['echec'], patch: remiseAZero(pages) } : { attendus: ['a_lancer'], patch: { page_ids: [...pages] } }) });
       } else if (!L) {
-        const ligne = await repo.ouvrirImport({ kind: 'classement', edition_id: session?.edition_id ?? null, scan_session_id: session?.id ?? null, page_ids: pages });
+        const ligne = await repo.ouvrirImport({ kind: 'classement', edition_id: session?.edition_id ?? null, scan_session_id: session?.id ?? null, page_ids: pages,...await protections() });
         id = ligne.id; etat.ligne = ligne;
       }
       // Vague finale (revue de branche, constat 9 ; D-D1) : le vol est lié aux pages COMPTÉES — une ligne dont page_ids a été réécrite entre ces relectures et
       // celle du vol (réception, autre onglet) est refusée (sorte) avant toute écriture et tout décodage ; le redessin montre la ligne réelle.
-      const r = await lancerVol(id, executerClassement, { ctx, repo, fetch: fetchInjecte, maintenant, enLigne, battementMs, accepte: (l) => l?.kind === 'classement' && memeListe(l.page_ids, pages) });
+      const r = await lancerVol(id, executerClassement, { ctx, repo, fetch: fetchInjecte, maintenant, enLigne, battementMs,contexteEdition:await captureEdition, accepte: (l) => l?.kind === 'classement' && memeListe(l.page_ids, pages) });
       if (r.issue === 'refuse') { if (r.raison === 'non_connecte') etat.session = null; direRefus(r); }
     } catch (e) { if (!(e instanceof TransitionRefusee)) logError('regroupement.classer', { error: e }); }
     finally { etat.occupe = false; await synchroniser({ forcer: true }); }
@@ -613,7 +638,7 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
       if (!L || L.status !== vue.status || cleClassement(L) !== cleClassement(vue) || !['a_lancer', 'a_verifier', 'echec'].includes(L.status)) return;
       if (L.status === 'a_verifier' && !(await confirmer(t('Ignorer ce classement ? Il a coûté un appel ; le refaire en coûtera un autre.'), { okLabel: t('Ignorer') }))) return;
       const cle = cleClassement(L);
-      await repo.transitionner('imports', L.id, { attendus: [L.status], patch: (c) => { if (cleClassement(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { status: 'ignore', finished_at: maintenant(), brouillon: null }; } });
+      await repo.transitionner('imports', L.id, { ...await protections(L,true),attendus: [L.status], patch: (c) => { if (cleClassement(c) !== cle) throw new TransitionRefusee('imports', L.id, c.status); return { status: 'ignore', finished_at: maintenant(), brouillon: null }; } });
     } catch (e) { if (!(e instanceof TransitionRefusee)) logError('regroupement.ignorer', { error: e, id: vue.id }); }
     finally { etat.occupe = false; await synchroniser({ forcer: true }); }
   }
@@ -634,13 +659,13 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
     let cree = null;
     try {
       if (etat.ecriture) await etat.ecriture;
-      const r = await creerLesLectures(L.id, { ...rendu, ctx, repo, maintenant, newId: repo.newId, deviceId: repo.deviceId() });
+      const r = await creerLesLectures(L.id, { ...rendu, ctx, repo, maintenant, newId: repo.newId, deviceId: repo.deviceId(),compte,contexteEdition:await captureEdition });
       if (r.issue === 'refuse') toast(texteRefusLire(r.raison)); else cree = r;
     } catch (e) { logError('regroupement.lire', { error: e }); toast(t('Une erreur est survenue')); } // ronde 1 (constat 28) : jamais un clic sans retour
     finally { etat.occupe = false; }
     if (cree) {
       // Ronde 1 (constat 28) : un lot refusé (lot_tenu : un autre lot pris pendant la création) est DIT ; les lectures restent à lancer depuis Imports.
-      lireLeLot(L.id, { ctx, repo, fetch: fetchInjecte, maintenant, battementMs, enLigne })
+      lireLeLot(L.id, { ctx, repo, fetch: fetchInjecte, maintenant, battementMs, enLigne,contexteEdition:await captureEdition })
         .then((r) => { if (r?.issue === 'refuse') toast(t('Une lecture est déjà en cours : annule-la d’abord.')); })
         .catch((e) => logError('regroupement.lot', { error: e }));
       const n = cree.importIds.length;
@@ -670,22 +695,25 @@ export function panneauClassement(session, ctx, getSelection, { repo = repoModul
 // référence, reçoit `recipeId` — la référence relue, encore candidate de l'édition de la ligne (reference_only, sans lien web, sans import ouvert) ; dans la
 // transaction, la clé, la sorte et l'absence de référence regardées, la candidature rejouée (ronde 1) et la condition d'index d'I-2. Aucun appel. Rend { issue: 'rattache' } ou
 // { issue: 'refuse', raison: 'lecture' | 'reference' | 'transition' }.
-export async function rattacherLecture(importId, recipeId, { cle, repo = repoModule, compte = null, ctx = null } = {}) {
+export async function rattacherLecture(importId, recipeId, { cle, repo = repoModule, compte = null, ctx = null, contexteRecette = null, contexteEdition = null } = {}) {
   const capture = compte || capturerProprietaire(repo, ctx);
   const refuse = (raison) => ({ issue: 'refuse', raison });
   const ligne = await repo.get('imports', importId);
   const proprietaire = await capture;
   if (!ligne || ligne.status !== 'a_verifier' || ligne.kind !== 'recette' || ligne.recipe_id != null || cleLecture(ligne) !== cle) return refuse('lecture');
   const reference = typeof recipeId === 'string' ? await repo.get('recipes', recipeId) : null;
-  const contexte = reference && repo.capturerContexteRecette ? await repo.capturerContexteRecette(reference) : null;
   const editionId = typeof ligne.edition_id === 'string' ? ligne.edition_id : null;
   if (!reference || !candidatsReference([reference], { editionId, imports: liste(await repo.all('imports')) }).length) return refuse('reference');
+  const edition=reference?.edition_id?(ctx?.editionsById?.get(reference.edition_id)||await repo.get('book_editions',reference.edition_id)):null;
+  const contexte = contexteRecette || (reference ? await capturerRecette(repo,ctx?.recipesById?.get(recipeId)||reference,{ctx,edition}) : null);
+  const captureLivre=contexteEdition||(edition?await capturerEdition(repo,edition,{ctx}):null);if(captureLivre)verifierCaptureEditionImport(ligne,captureLivre);
   try {
     await repo.transitionner('imports', importId, {
       ...(contexte ? { recettes: [contexte] } : {}),
+      editions:captureLivre?[captureLivre]:[],
       attendus: ['a_verifier'],
-      patch: (c) => { if (cleLecture(c) !== cle || c.kind !== 'recette' || c.recipe_id != null) throw new TransitionRefusee('imports', importId, c.status); return { recipe_id: recipeId }; },
-      conditions: { imports: [{ index: 'recipe_id', valeur: recipeId, exclus: IMPORTS_OUVERTS }], sync_state: [conditionProprietaire(proprietaire)] },
+      patch: (c) => { if (cleLecture(c) !== cle || c.kind !== 'recette' || c.recipe_id != null) throw new TransitionRefusee('imports', importId, c.status);if(captureLivre)verifierCaptureEditionImport(c,captureLivre); return { recipe_id: recipeId,...memoireCycleImport(contexte) }; },
+      conditions: { ...conditionsSourcesImport(ligne.sources_attendues),imports: [{ index: 'recipe_id', valeur: recipeId, exclus: IMPORTS_OUVERTS }], sync_state: [conditionProprietaire(proprietaire)] },
       // Ronde 1 : la candidature de la référence rejouée DANS la transaction (une lecture reçue a pu la rendre available entre-temps) ; vérification
       // seule, par le sac `autres` du lot A : la fusion ne rend jamais de fiche, rien n'est écrit sur `recipes`.
       autres: { recipes: [{ key: recipeId, fusion: (r) => { if (!candidatsReference(r ? [r] : [], { editionId }).length) throw new TransitionRefusee('recipes', recipeId, null); return null; } }] },
@@ -708,6 +736,9 @@ export function blocApparierLecture({ ligne, resultat, ctx, repo = repoModule, n
   const lu = { cle: 'lu', title: typeof resultat.title === 'string' ? resultat.title : null, printed_page: Number.isInteger(resultat.printed_page) ? resultat.printed_page : null, origine: 'classement' };
   const prop = proposerAppariements([lu], candidats).get('lu');
   const compte = capturerProprietaire(repo, ctx);
+  const editionAffichee = Promise.resolve(ctx.editionsById?.get(editionId) || repo.get('book_editions',editionId));
+  const captureEdition=editionAffichee.then(ed=>capturerEdition(repo,ed,{ctx}));captureEdition.catch(()=>{});
+  const capturesRecettes=new Map(candidats.map(r=>[r.id,editionAffichee.then(edition=>capturerRecette(repo,r,{ctx,edition}))]));for(const p of capturesRecettes.values())p.catch(()=>{});
   const cle = cleLecture(ligne);
   const racine = el('div', { class: 'card flat stack', dataset: { role: 'apparier-lecture' } });
   let occupe = false;
@@ -715,7 +746,7 @@ export function blocApparierLecture({ ligne, resultat, ctx, repo = repoModule, n
     if (occupe) return;
     occupe = true;
     try {
-      const r = await rattacherLecture(ligne.id, recipeId, { cle, repo, compte });
+      const r = await rattacherLecture(ligne.id, recipeId, { cle, repo, compte,ctx,contexteEdition:await captureEdition,contexteRecette:await capturesRecettes.get(recipeId) });
       if (r.issue === 'rattache') { if (racine.isConnected) navigate('/recipes/' + encodeURIComponent(recipeId) + '/importer'); return; }
       toast(t('Rien n’a été rattaché : cette lecture ou cette référence a changé entre-temps.'));
       const [L, recipes, imports] = await Promise.all([repo.get('imports', ligne.id), repo.all('recipes'), repo.all('imports')]);

@@ -1501,6 +1501,7 @@ export async function runCarnetTests({ eq, ok }) {
           // T5 ronde 1 : Redécouvrir écrit par le sac injecté (le même que getFiles), jamais par le module en dehors de lui.
           const ecrits = []; const depot3 = { ...repo, getFiles: async () => new Map(), save: async (store, row) => { ecrits.push(store); return repo.save(store, row); } };
           const edR = { id: 'ed_r', book_id: 'b_r' }; const livreR = { id: 'b_r', title: 'Vieux livre', author: 'E. F.' }; const refR = fiche('rc_r', { edition_id: 'ed_r' });
+          await repo.saveBatch({books:[livreR],book_editions:[edR]}, {conditions:{book_editions:[{key:edR.id,absente:true}]}});
           await renderHome({}, {}, { ...ctx, settings: { rediscover_enabled: true }, book_editions: [edR], books: [livreR], recipes: [refR], docs: [], docsByRecipe: new Map(), library_activity: [], rediscovery_prefs: [], cook_history: [], cook_sessions: [], inventory: [] }, { repo: depot3 });
           eq(ecrits, ['rediscovery_prefs'], 'Redécouvrir : la suggestion notée (last_suggested_at) s’écrit par le sac injecté de renderHome, jamais par le module hors du sac (T5 ronde 1)');
           // T5 ronde 1 : une note de cuisson reçue hostile (1e9, -1, 2.5) ne fait plus lever la page (RangeError de '★'.repeat) — la date seule, sans étoile.
@@ -1788,8 +1789,7 @@ export async function runCarnetTests({ eq, ok }) {
         'Des recettes de ce livre utilisent des tasses ou des cuillères. Sans convention confirmée, ces quantités restent affichées telles quelles.', 'Enregistré',
         'Filtrer les recettes de ce livre', 'Langue', 'Livre de nouveau proposé dans Redécouvrir', 'Livre introuvable.', 'Métadonnées et convention', 'Non confirmée',
         'Ordre de décision : équivalences imprimées → convention décrite dans le livre → convention confirmée ici.', 'Pages et fichiers sources',
-        'Quelle convention pour les tasses et cuillères de cette édition ?', 'Réafficher dans Redécouvrir', 'Supprimer',
-        'Supprimer ce livre ? Il n’a aucune recette ni page.', 'index', 'recette', '{n} document(s). Les originaux restent consultables depuis chaque recette.'],
+        'Quelle convention pour les tasses et cuillères de cette édition ?', 'Réafficher dans Redécouvrir', 'index', 'recette', '{n} document(s). Les originaux restent consultables depuis chaque recette.'],
       '../src/ui/home.js': ['Recette'],
       '../src/ui/components.js': ['Le raccourci « CuisineOS-Minuterie » doit être installé une fois (voir Réglages). L’app ne peut pas confirmer qu’Horloge a bien démarré.',
         'Ligne à vérifier', 'Original : {s}', 'Recalculé à partir de « {s} »', 'Sur Mac, utilise Horloge ou Siri directement ; le raccourci s’exécute sur iPhone et iPad.',

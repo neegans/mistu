@@ -17,7 +17,9 @@ import { texteEchec } from './import-cible.js';
 import { PasserelleProvider, extraireIndicesLivre, validerIndicesLivre, blobToBase64 } from '../domain/llm.js';
 import { listConventions } from '../domain/units.js';
 import { brouillonLivre, modifierChampLivre, appliquerCandidateLivre, candidateDepuisPhoto, chercherCatalogueLivre, rechercherLivreWeb, relireRechercheLivre, cleCandidateLivre, sourceLivre, listeLivre, shaLivre } from '../domain/livre-bibliographie.js';
-import { fabriquerImportLivre, garderBrouillonLivre, trouverEditionsLivre, enregistrerLivreI2, brouillonDepuisEdition, ConflitLivre } from '../domain/livre-parcours.js';
+import { fabriquerImportLivre, garderBrouillonLivre, trouverEditionsLivre, enregistrerLivreI2, brouillonDepuisEdition, ConflitLivre, memoireEditionLivre, relireBrouillonLivre } from '../domain/livre-parcours.js';
+import { capturerEdition, capturerProprietaire, conditionProprietaire } from './recette-garde.js';
+import { lireCycleEdition } from '../domain/cycle-edition.js';
 
 export function afficherProvenanceLivre(p) {
   if (p?.origin === 'manual') return t('Modifié par moi');
@@ -58,6 +60,7 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
   const maintenant = deps.maintenant || (() => new Date().toISOString()); const enLigne = deps.enLigne || (() => navigator.onLine !== false);
   const sessionDe = deps.sessionAssistant || (() => sessionAssistant(ctx));
   const cleGoogle = deps.cle ?? GOOGLE_BOOKS.key;
+  const compte = await capturerProprietaire(repo, ctx);
   let row = typeof query.import === 'string' ? await repo.get('imports', query.import) : null;
   if (row?.kind === 'couverture') return renderLivreAjoutRoute(params, query, ctx, deps);
   if (query.import && (!row || row.kind !== 'livre')) return el('div', { class: 'status warn' }, t('Import introuvable.'));
@@ -67,8 +70,26 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
   if (!row && typeof query.edition === 'string') {
     const edition = await repo.get('book_editions', query.edition); const book = edition ? await repo.get('books', edition.book_id) : null;
     if (!book || !edition) return el('p', null, t('Livre introuvable.'));
+    if (lireCycleEdition(edition).etat !== 'active') return el('div', { class:'stack' }, el('p', {class:'status warn'}, t('Livre dans la corbeille')),
+      el('a', {class:'btn',href:`#/books/${encodeURIComponent(edition.id)}`}, t('Ouvrir le livre')));
     draft = brouillonDepuisEdition(book, edition); initial = brouillonLivre(draft);
   }
+  let contexteEdition = null, contexteAffiche = null, editionAffichee = null;
+  if (draft.edition_id) {
+    const edition = ctx.editionsById?.get(draft.edition_id) || await repo.get('book_editions',draft.edition_id);
+    if (edition) {
+      contexteEdition = await capturerEdition(repo,edition,{ctx:{...ctx,proprietaireDonnees:compte.owner_id}});
+      contexteAffiche=contexteEdition;editionAffichee={...edition};
+      if (row) contexteEdition = {...contexteEdition,expected_cycle_id:row.expected_edition_cycle_id ?? null};
+    }
+  }
+  const journalOptions = (historique = true) => ({conditions:{sync_state:[conditionProprietaire(compte)]},editions:contexteEdition?[{...contexteEdition,historique}]:[]});
+  const editionValide = async () => {
+    if (!compte.contexteValide()) throw Object.assign(new Error('compte_change'),{code:'compte_change'});
+    if (!contexteEdition) return !draft.edition_id;
+    const ed=await repo.get('book_editions',contexteEdition.edition_id),cycle=lireCycleEdition(ed);
+    return cycle.etat==='active' && cycle.id===contexteEdition.expected_cycle_id;
+  };
   let importId = row?.id || null, creation = null, queue = Promise.resolve(), busy = false, preparing = false, saving = false, generation = 0, controller = null;
   let mounted = false, everConnected = false, closed = false, previewUrl = null;
   const ownId = ctx.sync?.user?.id || null;
@@ -81,7 +102,10 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
   const coverZone = el('section', { class: 'card stack' });
   const sourcesZone = el('details', null, el('summary', null, t('Sources'))); const sourceList = el('div', null); sourcesZone.append(sourceList);
   const inputs = new Map(), provenanceNodes = new Map(), listViews = [];
-  const action = (label, role, fn, primary = false) => el('button', { type: 'button', class: primary ? 'btn primary' : 'btn', dataset: { role }, onClick: () => Promise.resolve(fn()).catch(() => dire(t('L’action n’a pas pu être terminée. Réessaie.'))) }, label);
+  const operations = new Set();
+  const action = (label, role, fn, primary = false) => el('button', { type: 'button', class: primary ? 'btn primary' : 'btn', dataset: { role }, onClick: () => {
+    const p=Promise.resolve().then(fn).catch(() => dire(t('L’action n’a pas pu être terminée. Réessaie.')));operations.add(p);p.finally(()=>operations.delete(p));
+  } }, label);
   const message = (s) => { status.textContent = s; };
   const alive = () => !closed && (!mounted || !everConnected || root.isConnected);
   function dispose() { if (closed) return; closed = true; generation++; controller?.abort(); observer.disconnect(); window.removeEventListener('hashchange', dispose); unsubscribe?.(); if (previewUrl) revoquerUrlDeBlob(previewUrl); }
@@ -93,17 +117,18 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
   const ensure = async () => {
     if (importId) return importId;
     if (!creation) creation = (async () => {
-      const id = repo.newId('imp'); const fresh = { ...fabriquerImportLivre({ id, deviceId: repo.deviceId(), brouillon: draft }), ...(initial ? { initial } : {}) };
-      await repo.save('imports', fresh); importId = id; row = fresh;
+      const id = repo.newId('imp'); const fresh = { ...fabriquerImportLivre({ id, deviceId: repo.deviceId(), brouillon: draft }), owner_id:compte.owner_id, ...memoireEditionLivre(contexteEdition), ...(initial ? { initial } : {}) };
+      await repo.save('imports', fresh, journalOptions()); importId = id; row = fresh;
       if (alive() && typeof deps.remplacerAdresse === 'function') deps.remplacerAdresse(`#/add/livre?import=${encodeURIComponent(id)}`);
       else if (alive() && location.hash.startsWith('#/add/livre')) remplacerAdresse(`#/add/livre?import=${encodeURIComponent(id)}`);
       return id;
     })().catch((e) => { creation = null; throw e; });
     return creation;
   };
-  const persist = () => {
+  const persist = (fichiers = []) => {
     const snapshot = brouillonLivre(draft);
-    queue = queue.catch(() => {}).then(async () => { const id = await ensure(); await garderBrouillonLivre(id, snapshot, { repo }); });
+    const capture = contexteEdition;
+    queue = queue.catch(() => {}).then(async () => { const id = await ensure(); await garderBrouillonLivre(id, snapshot, { repo,compte,contexteEdition:capture,fichiers }); });
     queue.catch(() => { if (alive()) message(t('Le brouillon n’a pas pu être sauvegardé. Réessaie.')); });
     return queue;
   };
@@ -191,7 +216,7 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     if (!f?.blob) { message(t('La couverture n’est pas sur cet appareil.')); return; }
     draft.rotation = (draft.rotation + 90) % 360;
     const blob = await reduireImage(f.blob, { rotation: draft.rotation }); const hash = await sha256Hex(blob);
-    await repo.putFile(hash, blob, { mime: 'image/jpeg' }); draft.cover_sha256 = hash; await persist(); await showCover();
+    draft.cover_sha256 = hash; await persist([{sha256:hash,blob,meta:{mime:'image/jpeg'}}]); await showCover();
   }
   async function couvertureCatalogue() {
     const isbn = validerIsbn(draft.fields.isbn); if (!isbn.ok) { message(t('Saisis un ISBN valide d’abord.')); return; }
@@ -199,7 +224,7 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     const blob = await recupererCouvertureParIsbn(isbn.isbn13, { fetch }); if (!blob) { message(t('Aucune couverture reçue. Tu peux la photographier.')); return; }
     const u = urlDeBlob(blob); const yes = await confirmDialog(t('Utiliser la couverture du catalogue ?'), { body: el('img', { src: u, alt: t('Couverture'), style: { maxHeight: '45vh', maxWidth: '100%' } }), okLabel: t('Utiliser cette image') }); revoquerUrlDeBlob(u);
     if (!yes || !alive() || snapshot !== draft.cover_sha256) return;
-    const p = await poserCouverture(blob, { origine: 'distante', repo }); draft.cover_sha256 = p.sha256; await persist(); await showCover();
+    const p = await poserCouverture(blob, { origine: 'distante', repo,prepareOnly:true }); draft.cover_sha256 = p.sha256; await persist([p.fichier]); await showCover();
   }
   async function choisirPhoto(capture, identify) {
     if (busy || preparing) return;
@@ -207,14 +232,14 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     const g = generation;
     try {
       const files = await choisir({ accept: 'image/*', multiple: false, capture }); if (!files.length || g !== generation || !alive()) return;
-      const p = await poserCouverture(files[0], { origine: 'locale', repo }); if (!alive() || g !== generation) return;
+      const p = await poserCouverture(files[0], { origine: 'locale', repo,prepareOnly:true }); if (!alive() || g !== generation) return;
       draft.cover_sha256 = p.sha256;
       if (identify) {
         const blank = brouillonLivre();
         for (const key of Object.keys(draft.fields)) if (!draft.touched[key]) { draft.fields[key] = blank.fields[key]; delete draft.provenance[key]; delete draft.proposals[key]; }
         draft.source_photo_sha256 = p.sha256; draft.rotation = 0; draft.candidate_choisie = null; generation++; candidatesZone.replaceChildren(); syncPanels();
       }
-      fieldsZone.hidden = false; await persist(); await showCover(); preparing = false; if (identify) await photoLecture(true);
+      fieldsZone.hidden = false; await persist([p.fichier]); await showCover(); preparing = false; if (identify) await photoLecture(true);
     } catch (e) { message(messageErreurImage(e)); } finally { preparing = false; syncPanels(); }
   }
   async function scanner() {
@@ -231,13 +256,20 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     const list = await trouverEditionsLivre(draft.fields.isbn, repo);
     if (!list.length || (draft.edition_id && list.length === 1 && list[0].id === draft.edition_id)) { duplicateZone.replaceChildren(); return false; }
     duplicateZone.replaceChildren(el('p', null, t('Ce livre est déjà dans ta bibliothèque')), ...list.map((e) => el('div', { class: 'row' },
+      lireCycleEdition(e).etat!=='active'?el('p',{class:'status warn'},t('Livre dans la corbeille')):null,
       el('a', { class: 'btn', href: `#/books/${encodeURIComponent(e.id)}` }, t('Ouvrir le livre')),
-      action(t('Compléter les informations'), `completer-${e.id}`, async () => {
+      lireCycleEdition(e).etat==='active'?action(t('Compléter les informations'), `completer-${e.id}`, async () => {
+        const capture=await capturerEdition(repo,e,{ctx:{...ctx,proprietaireDonnees:compte.owner_id}});
         const b = await repo.get('books', e.book_id); if (!b) return;
-        draft = brouillonDepuisEdition(b, e); initial = brouillonLivre(draft); await persist();
-        await repo.saveBatch({}, { conditions: { imports: [{ key: importId, fusion: (c) => ({ ...c, initial }) }] } });
+        await queue;await ensure();
+        const prochain=brouillonDepuisEdition(b,e),base=brouillonLivre(prochain);
+        await repo.saveBatch({}, { editions:[capture],conditions: { sync_state:[conditionProprietaire(compte)],imports: [{ key: importId, fusion: (c) => {
+          if(!c||['enregistre','ignore','en_cours'].includes(c.status))throw new Error('brouillon_ferme');
+          return { ...c, ...memoireEditionLivre(capture), brouillon:prochain,initial:base };
+        } }] } });
+        contexteEdition=capture;draft=prochain;initial=base;
         fieldsZone.hidden = false; save.textContent = t('Enregistrer les compléments'); duplicateZone.replaceChildren(); syncPanels(); showCover();
-      }))));
+      }):null)));
     message(t('Ce livre est déjà dans ta bibliothèque')); return true;
   }
   function apply(c, explicit = false) {
@@ -268,11 +300,12 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     if (!prendreVol(tenue)) { busy = false; return null; }
     syncPanels(); let beat = null, started = false;
     try {
+      if (!(await editionValide())) { message(t('Le livre a changé. Le résultat reste conservé ; rouvre sa fiche avant de continuer.')); return null; }
       const session = await sessionDe(); if (!session) { message(t('Connecte-toi pour utiliser l’assistant.')); feedback.replaceChildren(carteConnexion(() => demarrerConnexion(ctx.sync?.auth), ctx)); return null; }
       await persist(); await queue; const id = await ensure(); tenue.importId = id;
       if (!alive() || g !== generation) return null;
       await repo.transitionner('imports', id, { attendus: ['a_lancer', 'echec', 'a_verifier'], patch: (c) => ({ status: 'en_cours', phase, erreur: null, document_id_vol: DOCUMENT_ID,
-        started_at: maintenant(), brouillon: brouillonLivre(draft) }) });
+        started_at: maintenant(), brouillon: brouillonLivre(draft) }),...journalOptions(false) });
       started = true; await repo.battre?.(id, maintenant()); beat = setInterval(() => repo.battre?.(id, maintenant()).catch(() => {}), deps.battementMs || BATTEMENT_MS);
       message(phase === 'web' ? t('Recherche sur Internet…') : t('Lecture de la photo…'));
       let compte = false;
@@ -282,7 +315,7 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
           await repo.transitionner('imports', id, { attendus: ['en_cours'], patch: (c) => {
             if (c.document_id_vol !== DOCUMENT_ID) throw new Error('vol_perdu');
             return { appels: (Number.isInteger(c.appels) ? c.appels : 0) + 1 };
-          } });
+          },...journalOptions() });
           compte = true;
         }
         return fetch(...args);
@@ -296,14 +329,15 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
       await repo.transitionner('imports', id, { attendus: ['en_cours'], patch: (c) => {
         if (c.document_id_vol !== DOCUMENT_ID) throw new Error('vol_perdu');
         return { status: 'a_verifier', phase: 'relecture', resultat: { format: 1, ...(c.resultat || {}), [phase]: { ...result, entree } }, model: result?.model || result?.modele || null, document_id_vol: null, finished_at: maintenant() };
-      } });
+      },...journalOptions() });
+      if (!(await editionValide())) { message(t('Le livre a changé. Le résultat reste conservé ; rouvre sa fiche avant de continuer.')); return null; }
       return result;
     } catch (e) {
       const reason = localController.signal.aborted || g !== generation ? 'annule' : (e.raison || e.message || 'interne');
       if (started) { try { await repo.transitionner('imports', importId, { attendus: ['en_cours'], patch: (c) => {
         if (c.document_id_vol !== DOCUMENT_ID) throw new Error('vol_perdu');
         return { status: 'echec', phase, erreur: { raison: RAISONS_LIVRE.includes(reason) ? reason : 'reseau', extra: { quota: Number.isFinite(e.quota) ? e.quota : null, trop_lourd: e.trop_lourd === true } }, document_id_vol: null, finished_at: maintenant() };
-      } }); } catch { /* la ligne a été close ailleurs : aucune réécriture */ } }
+      },...journalOptions() }); } catch { /* la ligne a été close ailleurs : aucune réécriture */ } }
       if (alive()) { message(reason === 'annule' ? t('Recherche annulée. Ton brouillon est conservé.') : texteEchecLivre({ raison: reason, extra: { quota: e.quota, trop_lourd: e.trop_lourd } }));
         feedback.replaceChildren(action(t('Réessayer (1 appel)'), 'reessayer-livre', () => phase === 'web' ? web() : photoLecture(false))); }
       return null;
@@ -330,7 +364,7 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     if (result.lecture.related_titles?.length) feedback.replaceChildren(el('p', { class: 'muted' }, t('Autres ouvrages cités : {titres}', { titres: result.lecture.related_titles.join(', ') })));
     if (result.lecture.rotation && !result.lecture.uncertain.includes('rotation')) {
       draft.rotation = (draft.rotation + result.lecture.rotation) % 360; const blob = await reduireImage(file.blob, { rotation: draft.rotation }); const hash = await sha256Hex(blob);
-      await repo.putFile(hash, blob, { mime: 'image/jpeg' }); draft.cover_sha256 = hash; await persist(); await showCover();
+      draft.cover_sha256 = hash; await persist([{sha256:hash,blob,meta:{mime:'image/jpeg'}}]); await showCover();
     }
     if (await existantes()) return;
     if (enchainement) await web(); else message(t('Photo lue — vérifie les informations.'));
@@ -342,7 +376,7 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     try {
       draft.fields.isbn = v.isbn13; await persist(); if (await existantes()) return;
       if (!enLigne()) { fieldsZone.hidden = false; message(t('Tu es hors ligne. Ton brouillon est conservé.')); return; }
-      await garderBrouillonLivre(importId, draft, { repo, phase: 'catalogue' });
+      await garderBrouillonLivre(importId, draft, { repo, phase: 'catalogue',compte,contexteEdition });
       const result = await chercherCatalogueLivre(v.isbn13, { fetch, signal: controller.signal, cleGoogle, maintenant });
       if (!alive() || generation !== g || controller.signal.aborted) return;
       if (result.etat === 'trouve') { receive(result.candidates); return; }
@@ -356,7 +390,7 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     saving = true; syncPanels();
     try {
       await persist(); await queue;
-      const ed = await enregistrerLivreI2({ importId, brouillon: draft, base: initial, resolutions }, { repo, maintenant });
+      const ed = await enregistrerLivreI2({ importId, brouillon: draft, base: initial, resolutions }, { repo, maintenant,contexteEdition,compte });
       if (ed.dejaAjoute) { message(t('Ce livre a déjà été ajouté.')); duplicateZone.replaceChildren(el('a', { class: 'btn', href: `#/books/${encodeURIComponent(ed.id)}` }, t('Ouvrir le livre'))); return; }
       dire(draft.edition_id ? t('Compléments enregistrés') : t('Livre ajouté')); nav(`/books/${encodeURIComponent(ed.id)}${draft.edition_id ? '' : '?nouveau=1'}`);
     } catch (e) {
@@ -364,11 +398,11 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
         feedback.replaceChildren(el('p', null, t('Ta saisie est conservée. Tu peux garder explicitement tes changements.')),
           ...e.fields.map((k) => el('p', null, t('Valeur enregistrée pour {champ} : {valeur}', { champ: labels[k] || (k === 'convention' ? t('Convention de mesures') : k), valeur: (typeof e.valeurs[k] === 'string' ? e.valeurs[k] : JSON.stringify(e.valeurs[k] ?? '')).slice(0, 1200) }))),
           action(t('Garder mes changements'), 'resoudre-conflit-livre', () => enregistrer(e.fields)));
-      } else message(e.message === 'isbn_invalide' ? t('Cet ISBN n’est pas valide, vérifie les chiffres.') : e.message === 'annee_invalide' ? t('Cette année n’est pas valide.') : t('Le livre n’a pas pu être enregistré. Réessaie.'));
+      } else message(['cycle_change','edition_retiree','edition_changee','compte_change','contexte_change'].includes(e.code) ? t('Le livre ou le compte a changé. Ta saisie est conservée ; rouvre le livre avant de continuer.') : e.message === 'isbn_invalide' ? t('Cet ISBN n’est pas valide, vérifie les chiffres.') : e.message === 'annee_invalide' ? t('Cette année n’est pas valide.') : t('Le livre n’a pas pu être enregistré. Réessaie.'));
     } finally { saving = false; syncPanels(); }
   }
   root.etatRoute = () => ({ importId, busy, saving, brouillon: brouillonLivre(draft) });
-  root.attendreEcritures = () => queue;
+  root.attendreEcritures = async () => { await queue; while(operations.size) await Promise.all([...operations]); await queue; };
   async function reprendreResultats(ligne) {
     const correspond = (result) => {
       if (!result?.entree) return true;
@@ -394,6 +428,21 @@ export async function renderLivreSansSaisieRoute(params, query = {}, ctx = {}, d
     }
     if (ligne && ['enregistre', 'ignore'].includes(ligne.status)) { busy = true; message(t('Cet import est terminé.')); if (ligne.edition_id) feedback.replaceChildren(el('a', { class: 'btn', href: `#/books/${encodeURIComponent(ligne.edition_id)}` }, t('Ouvrir le livre'))); return; }
     if (ligne) {
+      if (!(await editionValide())) {
+        message(t('Le livre a changé. Le résultat reste conservé ; rouvre sa fiche avant de continuer.'));
+        const attendue=structuredClone(ligne), controles=[...root.querySelectorAll('input,textarea,select,button')].map(node=>({node,disabled:node.disabled}));
+        for(const {node} of controles)node.disabled=true;
+        feedback.replaceChildren(el('a',{class:'btn',href:`#/books/${encodeURIComponent(draft.edition_id)}`},t('Ouvrir le livre')));
+        if(contexteAffiche && lireCycleEdition(editionAffichee).etat==='active')feedback.append(action(t('Relire ce brouillon sur le livre restauré'),'relire-brouillon-livre',async()=>{
+          try {
+            const relue=await relireBrouillonLivre(importId,{repo,compte,contexteEdition:contexteAffiche,attendu:attendue});
+            contexteEdition=contexteAffiche;row=relue;feedback.replaceChildren();
+            for(const {node,disabled} of controles)node.disabled=disabled;
+            await reprendreEtat(relue);syncPanels();
+          } catch { message(t('Ce brouillon ou le livre a changé. Rouvre le brouillon pour relire les informations actuelles.')); }
+        }));
+        return;
+      }
       message(t('Brouillon repris. Vérifie les informations.')); await reprendreResultats(ligne);
       if (ligne.status === 'echec') { message(texteEchecLivre(ligne.erreur)); feedback.append(action(t('Réessayer (1 appel)'), 'reessayer-livre', () => ligne.phase === 'lecture_photo' ? photoLecture(false) : web())); }
     }

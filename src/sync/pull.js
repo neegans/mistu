@@ -8,6 +8,7 @@ import { logError } from '../core/log.js';
 import { projectionFichier, remoteValide } from './tables.js';
 import { conditionFichier, memeRemote, HASH_FICHIER } from './fichiers.js';
 import { idCycle, porteCycle, fusionCycle, CLE_CYCLE_CONFIRME, gardeCompteCycle } from './cycle.js';
+import { fusionEdition, CLE_EDITION_CONFIRMEE } from './cycle-edition.js';
 
 // R-L3-12 : les versions AVANT les recettes. Le pointeur d'une recette reçue désigne presque toujours une version
 // créée par le même geste, sur l'autre appareil : lue après la recette, elle serait encore inconnue ici et chaque
@@ -46,7 +47,7 @@ const instant = (valeur) => {
 };
 
 export function decider({ locale, distante, table = null }) {
-  if (table==='recipes' && !distante.deleted_at && (porteCycle(locale)||porteCycle(distante.data)) && idCycle(locale)!==idCycle(distante.data)) return 'cycle';
+  if (['recipes','book_editions'].includes(table) && !distante.deleted_at && (porteCycle(locale)||porteCycle(distante.data)) && idCycle(locale)!==idCycle(distante.data)) return 'cycle';
   if (locale === undefined || locale === null) return distante.deleted_at ? 'ignorer' : 'ecrire';
   // Les deux heures, comparées comme des INSTANTS ; repli sur la chaîne si l'une est illisible, pour rester
   // déterministe. C'est la seule question que I7 pose — et elle se pose aussi à une tombale.
@@ -141,13 +142,13 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
     return { id: `recipes:${ligne.id}`, store: 'recipes', record_id: ligne.id, local: locale, server: { data: ligne.data, updated_at: ligne.updated_at, deleted_at: null }, at: new Date().toISOString(), kind: 'version' };
   }
 
-  async function appliquerPage(table, lignes, bilan, curseur) {
+  async function appliquerPage(table, lignes, bilan, curseur, tentative = 0) {
     const owner=getUserId();
     const puts = {}; const deletes = {}; const conflits = []; const refile = [];
     // Lot G, ronde 1 (#4, I-G3) : les lignes files ne s'écrivent pas depuis l'instantané lu plus haut (`locale`, hors transaction) mais par une
     // condition `fusion` refaite sur la ligne RELUE dans la transaction de la page (conditionFichier) : une copie téléchargée ou un original
     // importé pendant la page n'est jamais effacé. Une clé par fiche (la dernière ligne reçue d'une même clé gagne, comme un put).
-    const fusions = new Map();
+    const fusions = new Map(), confirmations = new Map();
     // F-7 (§ 3.2) : un remote qui CHANGE — ligne écrite ou tombale — lève l'erreur de réception posée sur l'ancien, dans la même transaction ;
     // une erreur d'ENVOI reste (trop_gros, type : la renvoyer échouerait encore). Remotes comparés validés (memeRemote : true, absent → aucun).
     async function leverErreurReception(id, avant, apres) {
@@ -173,16 +174,23 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
         }
       }
       const decision = regleDuMagasin(table, decider({ locale, distante: ligne, table }));
-      if (table==='recipes' && !ligne.deleted_at && (decision==='cycle'||porteCycle(ligne.data)||porteCycle(locale))) {
-        const commandes=(await db.getAll('outbox')).filter(e=>e.op==='lifecycle'&&e.id===ligne.id&&(e.user_id==null||e.user_id===getUserId()));
+      if (['recipes','book_editions'].includes(table) && !ligne.deleted_at && (decision==='cycle'||porteCycle(ligne.data)||porteCycle(locale))) {
+        const commandes=(await db.getAll('outbox')).filter(e=>e.op==='lifecycle'&&e.store===table&&e.id===ligne.id&&(e.user_id==null||e.user_id===getUserId()));
         const serveur={...ligne.data,updated_at:ligne.updated_at};
-        const resultat=fusionCycle(locale,serveur,commandes);
+        const fusion=table==='book_editions'?fusionEdition:fusionCycle,cleConfirmee=table==='book_editions'?CLE_EDITION_CONFIRMEE:CLE_CYCLE_CONFIRME;
+        const cle = cleConfirmee(ligne.id), connue = await db.get('sync_state', cle);
+        confirmations.set(cle, { key: cle, fusion: actuelle => {
+          if (JSON.stringify(actuelle ?? null) !== JSON.stringify(connue ?? null)) throw Object.assign(new Error('Confirmation reçue pendant la page'), { code: 'SYNC_CONFIRMATION_CHANGED' });
+          return null;
+        } });
+        if (connue?.value?.user_id === owner && Number.isFinite(connue.value.server_seq) && connue.value.server_seq > ligne.server_seq) continue;
+        const resultat=fusion(locale,serveur,commandes);
         fusions.set(ligne.id,{key:ligne.id,fusion:courant=>{
           if(idCycle(courant)!==idCycle(locale)) return courant; // geste local fait depuis la lecture : son overlay reste en place
-          return fusionCycle(courant,serveur,commandes).row;
+          return fusion(courant,serveur,commandes).row;
         }});
-        (puts.sync_state ||= []).push({key:CLE_CYCLE_CONFIRME(ligne.id),value:{data:serveur,server_seq:ligne.server_seq,user_id:getUserId()}});
-        if(resultat.conflit||resultat.bloquees.length) conflits.push({id:`recipes:${ligne.id}`,store:'recipes',record_id:ligne.id,local:locale,server:ligne,at:new Date().toISOString(),kind:'cycle'});
+        (puts.sync_state ||= []).push({key:cleConfirmee(ligne.id),value:{data:serveur,server_seq:ligne.server_seq,user_id:getUserId()}});
+        if(resultat.conflit||resultat.bloquees.length) conflits.push({id:`${table}:${ligne.id}`,store:table,record_id:ligne.id,local:locale,server:ligne,at:new Date().toISOString(),kind:'cycle'});
         for(const e of resultat.bloquees) (puts.outbox ||= []).push({...e,lifecycle_blocked:true,last_error:'cycle'});
         recues+=1;continue;
       }
@@ -243,7 +251,12 @@ export function createPull({ db, transport, isActivitySynced = () => false, conf
     // arrière, sinon tout ce qui est déjà reçu repartirait en boucle.
     const dernier = Math.max(...lignes.map((l) => l.server_seq));
     (puts.sync_state ||= []).push({ key: `cursor:${table}`, value: Math.max(curseur, dernier) });
-    await db.mutate({ puts, deletes, origin: 'remote', conditions: { ...(fusions.size ? { [table]: [...fusions.values()] } : {}),sync_state:[gardeCompteCycle(owner,getUserId)] } });
+    try {
+      await db.mutate({ puts, deletes, origin: 'remote', conditions: { ...(fusions.size ? { [table]: [...fusions.values()] } : {}), sync_state: [gardeCompteCycle(owner,getUserId), ...confirmations.values()] } });
+    } catch (error) {
+      if (error.code === 'SYNC_CONFIRMATION_CHANGED' && tentative < 3) return appliquerPage(table, lignes, bilan, curseur, tentative + 1);
+      throw error;
+    }
     bilan.recues += recues;
     bilan.supprimees += supprimees;
     bilan.conflits += conflits.length;

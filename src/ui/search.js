@@ -1,3 +1,4 @@
+import { recetteActiveDansContexte } from './state.js';
 import { lireCycleRecette, recetteActive } from '../domain/cycle-recette.js';
 import { TEXTE_RECETTE_RETIREE, TEXTE_CYCLE_INVALIDE } from './corbeille.js';
 import { documentsActifs } from './state.js';
@@ -108,7 +109,7 @@ export async function renderSearch(params, query, ctx, deps = {}) {
   let sessionLue = state.mode === 'web';
   const connecter = () => demarrerConnexion(ctx.sync?.auth);
   const cibleRecette = query.for ? ctx.docsByRecipe.get(query.for) : null;
-  const forRecipe = cibleRecette && recetteActive(cibleRecette.recipe) ? cibleRecette : null; // Avec quoi on mange ça ?
+  const forRecipe = cibleRecette && recetteActiveDansContexte(cibleRecette.recipe, ctx) ? cibleRecette : null; // Avec quoi on mange ça ?
   const role = query.role || (forRecipe ? 'salade' : null);
   if (forRecipe && role) state.parsed.filters.type = role;
 

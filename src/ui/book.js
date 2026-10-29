@@ -31,6 +31,9 @@ import { currentVersion } from '../domain/search.js';
 import { photoVisible } from './photos-visibles.js';
 import { resumeReperes, lienGestionPhoto } from './reperes-affichage.js';
 import { shaLivre } from '../domain/livre-bibliographie.js';
+import { lireCycleEdition, recetteActiveEffective } from '../domain/cycle-edition.js';
+import { panneauCycleLivre, mentionCycleRecette } from './corbeille.js';
+import { capturerEdition } from './recette-garde.js';
 
 // C8 : la plus RÉCENTE d'abord. La fiche ne rappelle qu'UNE séance et « Reprendre » doit mener à celle qu'on vient
 // de laisser, pas à la plus vieille restée ouverte (l'ordre de la base est celui des clés, pas du temps).
@@ -45,53 +48,9 @@ function menuSource(libelle, ...boutons) {
   return el('details', { class: 'menu-source' }, el('summary', { class: 'btn primary' }, libelle), el('div', { class: 'row', style: { marginTop: '.5rem' } }, ...boutons));
 }
 
-// D-E23 (R-E-2, R-E-8, R-E-12, R-E-15) : supprimer un livre vide sans laisser d'orphelin. Rien n'est cru du rendu (ronde 1) : AVANT toute écriture,
-// l'édition est relue VIDE (aucune recette, aucun document, aucune page par l'index edition_id ; sinon refus non_vide) et le livre relu par book_id
-// (une autre édition en base le garde, comme garderLivre ; un livre de repli sans identifiant n'est jamais listé). Temps 1 — les lignes du journal qui
-// pointent l'édition en sont DÉTACHÉES avant toute suppression : une ligne ouverte (importOuvert, R-B-18) passe ignore AVEC edition_id null, reponse_brute
-// null et finished_at, en UNE écriture ; toute autre — terminale, ou à un statut hors vocabulaire (relu tel quel : jamais une transition inventée) —
-// reçoit le seul patch edition_id null ; une ligne en_cours fait REFUSER avant toute écriture (TRANSITIONS : en_cours → ignore n'existe pas), une ligne au
-// statut illisible aussi (aucune condition ne le relit : import_lie). Seule une ligne DISPARUE entre la lecture et la transition se tait ; toute autre
-// transition refusée fait refuser avant le temps 2. Temps 2 — UNE transaction (repo.removeBatch) retire les traces de consultation de l'édition
-// (library_activity, sa préférence de Redécouvrir), listées AVANT elle, puis l'édition et, sauf garder, le livre, SOUS LA CONDITION qu'aucune ligne du
-// journal à un statut CONNU (STATUTS_IMPORT) ne la pointe plus (une telle ligne arrivée entre les deux temps fait refuser, rien n'est supprimé ; une ligne
-// glissée au statut hors vocabulaire ou non-chaîne n'est pas vue par cette condition, et la vacuité de l'édition est relue hors transaction : limites
-// nommées en spec § 11, vague finale du lot E). La capture garde son filtre : l'historique ne part
-// au serveur que sous « Synchroniser mon historique de consultation » (R27). Rend { ok: true } ou { refus: 'lecture_en_cours' | 'non_vide' | 'import_lie' }.
-export async function supprimerLivreVide({ book, edition, garderLivre = false }, { repo: r = repo } = {}) {
-  const repo = r; // le dépôt injecté sous le nom littéral que le test statique du lot A exige (contrainte globale) ; le défaut ci-dessus lit le module
-  const cle = (v) => typeof v === 'string' && v.trim().length > 0;
-  if (!cle(edition?.id)) throw new TypeError('supprimerLivreVide : une édition sans identifiant');
-  const livre = cle(book?.id) ? book.id : null;
-  const [recettes, documents, pages, editions] = await Promise.all([
-    repo.byIndex('recipes', 'edition_id', edition.id), repo.byIndex('source_documents', 'edition_id', edition.id),
-    repo.byIndex('source_pages', 'edition_id', edition.id), livre ? repo.byIndex('book_editions', 'book_id', livre) : [],
-  ]);
-  if ([recettes, documents, pages].some((fiches) => fiches.some(Boolean))) return { refus: 'non_vide' };
-  const garder = garderLivre || !livre || editions.some((e) => e && e.id !== edition.id);
-  const lignes = (await repo.byIndex('imports', 'edition_id', edition.id)).filter(Boolean);
-  if (lignes.some((l) => l.status === 'en_cours')) return { refus: 'lecture_en_cours' };
-  if (lignes.some((l) => typeof l.status !== 'string' || !l.status)) return { refus: 'import_lie' };
-  for (const l of lignes) {
-    const attendus = STATUTS_IMPORT.includes(l.status) ? STATUTS_IMPORT.filter((s) => s !== 'en_cours') : [l.status];
-    const patch = (c) => (importOuvert(c) ? { status: 'ignore', edition_id: null, reponse_brute: null, finished_at: repo.nowIso() } : { edition_id: null });
-    try { await repo.transitionner('imports', l.id, { attendus, patch }); }
-    catch (e) {
-      if (!(e instanceof TransitionRefusee)) throw e;
-      if (e.statut === 'en_cours') return { refus: 'lecture_en_cours' }; // passée en vol entre la lecture et la transition
-      if (e.statut !== undefined || (await repo.get('imports', l.id)) != null) return { refus: 'import_lie' }; // seule une ligne disparue se tait
-    }
-  }
-  const activites = (await repo.byIndex('library_activity', 'edition_id', edition.id)).filter((a) => a && typeof a.id === 'string').map((a) => a.id);
-  const preference = await repo.get('rediscovery_prefs', edition.id);
-  try {
-    await repo.removeBatch({ library_activity: activites, ...(preference ? { rediscovery_prefs: [edition.id] } : {}), book_editions: [edition.id], ...(garder ? {} : { books: [livre] }) },
-      { conditions: { imports: [{ index: 'edition_id', valeur: edition.id, exclus: STATUTS_IMPORT }] } });
-  } catch (e) {
-    if (!(e instanceof TransitionRefusee)) throw e;
-    return { refus: e.statut === 'en_cours' ? 'lecture_en_cours' : 'import_lie' };
-  }
-  return { ok: true };
+// Ancien C09 : aucun appel hérité ne peut effacer ou détacher les sources.
+export async function supprimerLivreVide() {
+  return { refus: 'corbeille_requise' };
 }
 
 // D-UI-7 : sous 900 px, la liste des recettes montre LIGNES_REPLIEES lignes puis « Voir les {n} recettes », qui déplie sur place (aucune navigation) ; la même
@@ -109,10 +68,11 @@ export const LARGEUR_DEUX_COLONNES = '(min-width: 900px)';
 // référence seulement ; le badge est celui d'availabilityBadge (UNE définition des textes, D-UI-10), COURT : sans la page, déjà dite à côté du titre (§ 4.3,
 // vague finale — le motif de l'en-tête de l'import ciblé) ; « Importer » et « Saisir à la main » sur une référence ou une partielle SANS adresse (aUneAdresse de library.js, la définition de l'onglet
 // « À importer » ; mêmes href qu'au lot A, T4-R1 : un signet devenu partiel n'a pas d'entrée), hors du <a> du titre (jamais un lien dans un lien, m4).
-export function ligneCompacte(r, { fichier = null, version = null, photo = null, ctxF = {} } = {}) {
+export function ligneCompacte(r, { fichier = null, version = null, photo = null, ctxF = {}, edition = null } = {}) {
   const sha = photo?.sha256 ?? r.photo_sha256;
   const vignette = photoVisible(sha, { fichier, ctxF, classe: 'recette-miniature', personnelle: !!photo?.personnelle });
-  const importable = (r.availability === 'reference_only' || r.availability === 'partial') && !aUneAdresse(r);
+  const active = recetteActiveEffective(r,edition);
+  const importable = active && (r.availability === 'reference_only' || r.availability === 'partial') && !aUneAdresse(r);
   const sectionLue = r.availability === 'reference_only' && !aUneAdresse(r) ? sectionLisible(r.section) : null;
   const id = encodeURIComponent(r.id);
   return el('li', { class: 'recette-ligne', dataset: { recette: r.id } },
@@ -128,8 +88,23 @@ export function ligneCompacte(r, { fichier = null, version = null, photo = null,
       availabilityBadge({ ...r, printed_page: null }),
       importable ? el('a', { class: 'btn small', href: `#/recipes/${id}/importer` }, r.availability === 'partial' ? t('Compléter') : t('Importer')) : null,
       importable ? el('a', { class: 'btn small', href: `#/recipes/${id}/edit?kind=extraction` }, t('Saisir à la main')) : null,
-      lienGestionPhoto(r, { connue: !!sha }),
-      r.favorite ? el('span', { class: 'badge' }, '★ ' + t('Favori')) : null));
+      active ? lienGestionPhoto(r, { connue: !!sha }) : null,
+      r.favorite ? el('span', { class: 'badge' }, '★ ' + t('Favori')) : null), mentionCycleRecette(r,edition));
+}
+
+async function livreConserve(edition,book,ctx,deps){
+  const root=el('div',{class:'fiche-livre'},pageHeader(book.title,{back:{href:'/library?tab=books',label:t('Bibliothèque')}}));
+  root.append(await panneauCycleLivre(edition,ctx,deps));
+  const ctxF=await contexteFichiers(ctx),fichier=edition.cover_sha256?await repo.getFile(edition.cover_sha256):null;
+  const gauche=el('div',{class:'stack'},bookCover(edition,book,{fichier,ctxF})),droite=el('div');
+  root.append(el('div',{class:'two-col livre'},gauche,droite));
+  const rs=ctx.recipes.filter(r=>r.edition_id===edition.id),photos=photosPersonnellesParRecette(ctx.cook_history),fichiers=await repo.getFiles(empreintesPhotos(rs,photos));
+  droite.append(sectionPlain(t('Recettes'),rs.length?el('ul',{class:'liste-compacte'},...rs.map(r=>ligneCompacte(r,{edition,ctxF,version:currentVersion(r,ctx.versionsByRecipe?.get(r.id)||[]),photo:photoPrincipale(r,photos),fichier:fichierPhoto(r,photos,fichiers)}))):el('p',null,t('Aucune recette liée à ce livre.'))));
+  const pages=ctx.source_pages.filter(p=>p.edition_id===edition.id);
+  if(pages.length){const v=await vignettesDePages(pages,ctxF);root.append(sectionPlain(t('Pages et fichiers sources'),boutonTelechargerPages(v.distantes,{connecte:ctxF.connecte,telecharger:v.telecharger}),el('div',{class:'thumbs'},...pages.map(p=>el('figure',null,v.places.get(p.id),el('figcaption',null,p.printed_page?`${t('p.')} ${p.printed_page}`:t('page non numérotée')))))));}
+  const documents=ctx.source_documents.filter(d=>d.edition_id===edition.id);
+  if(documents.length)root.append(sectionPlain(t('Documents conservés'),el('ul',{class:'list'},...documents.map(d=>el('li',null,d.original_filename||t('Document'))))));
+  return root;
 }
 
 // L'ordre du Sommaire (D-UI-7, T4-R1) : « l'ordre se corrige dans le panneau de la séance, pas ici » — la position APPLIQUÉE dans la séance (un entier) d'abord,
@@ -158,6 +133,7 @@ export async function renderBook(params, query, ctx, deps = {}) {
   const edition = ctx.editionsById.get(params.id);
   if (!edition) return el('div', { class: 'card' }, t('Livre introuvable.'));
   const book = ctx.booksById.get(edition.book_id) || { title: t('Sans titre') };
+  if(lireCycleEdition(edition).etat!=='active')return livreConserve(edition,book,ctx,deps);
   // R-UX-10 : un seul fait (« on arrive après création »), donc une seule condition — le MODÈLE décide, et la même
   // décision sert à poser le panneau plus bas. S16 : une arrivée après création n'est pas une ouverture volontaire.
   const accueil = accueilLivreModel({ nouveau: query.nouveau });
@@ -187,10 +163,14 @@ export async function renderBook(params, query, ctx, deps = {}) {
   const matchMedia = deps.matchMedia || ((q) => window.matchMedia(q));
   const large = matchMedia(LARGEUR_DEUX_COLONNES);
   const root = el('div', { class: 'fiche-livre' });
+  root.append(await panneauCycleLivre(edition,ctx,deps));
   // I-F : un scan parti d'ici porte le livre ET l'intention (index ou recette) ; le menu ne décide que de la SOURCE.
   const lancer = (intention) => async (accept, capture) => {
-    const f = await pickFiles({ accept, multiple: true, capture });
-    if (f.length) startScanSession(f, { edition_id: edition.id, intention });
+    try {
+      const contexteEdition=await capturerEdition(repo,edition,{ctx});
+      const f = await pickFiles({ accept, multiple: true, capture });
+      if (f.length) await startScanSession(f, { edition_id: edition.id, intention, contexteEdition, ctx });
+    }catch{toast(t('Le livre a changé. Rouvre sa fiche avant d’ajouter des pages.'));}
   };
   // D-UI-7, H-21 : le sous-titre dit l'auteur, l'éditeur et l'année — ce qui est connu, dans cet ordre ; l'ISBN et la langue restent dans « Métadonnées et
   // convention ». Les deux menus d'ajout restent les ACTIONS de l'en-tête (markup inchangé, textes D-UI-10) ; le titre de fiche porte classeTitre (D-UI-3).
@@ -254,7 +234,8 @@ export async function renderBook(params, query, ctx, deps = {}) {
       el('div', { class: 'row' }, select([{ value: '', label: t('Choisir…') }, ...listConventions().map((c) => ({ value: c.id, label: c.labels.fr }))], '', async (v) => {
         if (!v) return;
         try {
-          await repo.saveBatch({}, { conditions: { book_editions: [{ key: edition.id, fusion: (courante) => {
+          const contexte=await capturerEdition(repo,edition,{ctx});
+          await repo.saveBatch({}, { editions:[contexte], conditions: { book_editions: [{ key: edition.id, fusion: (courante) => {
             if (!courante) throw new Error('edition_absente');
             return { ...courante, unit_convention_id: v, convention_evidence: 'confirmed_by_user' };
           } }] } });
@@ -285,7 +266,7 @@ export async function renderBook(params, query, ctx, deps = {}) {
     // Sous 900 px : LIGNES_REPLIEES lignes, puis « Voir les {n} recettes » déplie l'instance pour de bon (un filtre changé ensuite reste déplié) ; ≥ 900 px : tout.
     const repliee = !large.matches && !filterState.tout && rows.length > LIGNES_REPLIEES;
     const visibles = repliee ? rows.slice(0, LIGNES_REPLIEES) : rows;
-    const noeuds = [el('ul', { class: 'liste-compacte' }, ...visibles.map((r) => ligneCompacte(r, { fichier: fichierPhoto(r, photosPersonnelles, photos), version: currentVersion(r, (ctx.versionsByRecipe?.get(r.id) || [])), photo: photoPrincipale(r, photosPersonnelles), ctxF })))];
+    const noeuds = [el('ul', { class: 'liste-compacte' }, ...visibles.map((r) => ligneCompacte(r, { edition, fichier: fichierPhoto(r, photosPersonnelles, photos), version: currentVersion(r, (ctx.versionsByRecipe?.get(r.id) || [])), photo: photoPrincipale(r, photosPersonnelles), ctxF })))];
     // T4-R1 (I-UI-4) : le bouton se retire en dépliant — le focus passe au titre de la première ligne montrée par le dépli, jamais à body.
     if (repliee) noeuds.push(el('button', { type: 'button', class: 'btn', dataset: { role: 'voir-tout' }, onClick: () => { filterState.tout = true; drawList(); list.querySelectorAll('ul.liste-compacte > li')[LIGNES_REPLIEES]?.querySelector('a.titre')?.focus(); } }, t('Voir les {n} recettes', { n: rows.length })));
     remplacerEnRevoquant(list, ...noeuds);
@@ -307,9 +288,9 @@ export async function renderBook(params, query, ctx, deps = {}) {
   const zoneCouv = el('div', null);
   const dessinerCouv = () => zoneCouv.replaceChildren(renderZoneCouverture(etatCouv, gestesCouv));
   // C4 / I2 : la fusion relit l'édition DANS la transaction et ne change que le pointeur décoratif.
-  const ecrirePointeur = async (sha256) => {
+  const ecrirePointeur = async (sha256,contexte,fichier=null) => {
     try {
-      await repo.saveBatch({}, { conditions: { book_editions: [{ key: edition.id, fusion: (courante) => {
+      await repo.saveBatch({}, { editions:[contexte], ...(fichier?{fichiers:[fichier]}:{}), conditions: { book_editions: [{ key: edition.id, fusion: (courante) => {
         if (!courante) throw new Error('edition_absente');
         return { ...courante, cover_sha256: sha256 };
       } }] } });
@@ -317,14 +298,16 @@ export async function renderBook(params, query, ctx, deps = {}) {
     } catch { return false; }
   };
   const poser = async (capture) => {
-    const files = await pickFiles({ accept: 'image/*', multiple: false, capture });
+    let contexte,files;
+    try{contexte=await capturerEdition(repo,edition,{ctx});files=await pickFiles({ accept: 'image/*', multiple: false, capture });}
+    catch{toast(t('La couverture n’a pas pu être changée. Réessaie.'));return;}
     if (!files.length) return;
     etatCouv.enCours = true; dessinerCouv();
-    let empreinte;
+    let image;
     // Deux phases, deux phrases : une image refusée n'est pas une écriture refusée (I-B).
-    try { empreinte = (await poserCouverture(files[0], { origine: 'locale' })).sha256; }
+    try { image = await poserCouverture(files[0], { origine: 'locale',prepareOnly:true }); }
     catch (e) { etatCouv.enCours = false; dessinerCouv(); toast(messageErreurImage(e)); return; }
-    if (!(await ecrirePointeur(empreinte))) { etatCouv.enCours = false; dessinerCouv(); toast(t('La couverture n’a pas pu être changée. Réessaie.')); return; }
+    if (!(await ecrirePointeur(image.sha256,contexte,image.fichier))) { etatCouv.enCours = false; dessinerCouv(); toast(t('La couverture n’a pas pu être changée. Réessaie.')); return; }
     toast(t('Couverture enregistrée.')); refresh();
   };
   const gestesCouv = {
@@ -335,7 +318,8 @@ export async function renderBook(params, query, ctx, deps = {}) {
     retirer: async () => {
       if (etatCouv.enCours) return;
       etatCouv.enCours = true; dessinerCouv();
-      if (!(await ecrirePointeur(null))) { etatCouv.enCours = false; dessinerCouv(); toast(t('La couverture n’a pas pu être changée. Réessaie.')); return; }
+      let contexte;try{contexte=await capturerEdition(repo,edition,{ctx});}catch{etatCouv.enCours=false;dessinerCouv();toast(t('La couverture n’a pas pu être changée. Réessaie.'));return;}
+      if (!(await ecrirePointeur(null,contexte))) { etatCouv.enCours = false; dessinerCouv(); toast(t('La couverture n’a pas pu être changée. Réessaie.')); return; }
       toast(t('Couverture retirée.')); refresh();
     },
     // Sur une tape seulement (R-G-1). Succès : la zone se redessine avec l'image, le cache est invalidé et la fiche se rend (bookCover de l'en-tête).
@@ -363,6 +347,7 @@ export async function renderBook(params, query, ctx, deps = {}) {
     publisher: meta.publisher.trim() || null, year: meta.year ? parseInt(meta.year, 10) || null : null, language: meta.language,
     convention: meta.convention || null, cuisines: [...meta.cuisines], tags: [...meta.tags] });
   const metaInitiale = valeursMeta();
+  const captureMeta = capturerEdition(repo,edition,{ctx}).then(contexte=>({contexte}),erreur=>({erreur}));
   const inp = (k, type = 'text') => el('input', { type, value: meta[k], onInput: (e) => { meta[k] = e.target.value; } });
   gauche.append(el('details', { class: 'card' }, el('summary', null, el('strong', null, t('Métadonnées et convention'))),
     el('div', { class: 'two-col', style: { marginTop: '.8rem' } },
@@ -412,24 +397,14 @@ export async function renderBook(params, query, ctx, deps = {}) {
         if (champsLivre.some((k) => modifies.includes(k))) conditions.books = [{ key: book.id, fusion: fusion(champsLivre) }];
         if (champsEdition.some((k) => modifies.includes(k))) conditions.book_editions = [{ key: edition.id, fusion: fusion(champsEdition) }];
         try {
-          if (Object.keys(conditions).length) { await repo.saveBatch({}, { conditions }); toast(t('Enregistré')); }
+          const capture=await captureMeta;if(capture.erreur)throw capture.erreur;
+          if (Object.keys(conditions).length) { await repo.saveBatch({}, { conditions,editions:[capture.contexte] }); toast(t('Enregistré')); }
           refresh();
         }
         catch { toast(t('Le livre n’a pas pu être enregistré. Réessaie.')); }
       } }, t('Enregistrer')),
-      pref?.hidden ? el('button', { class: 'btn', onClick: async () => { await repo.save('rediscovery_prefs', { ...pref, hidden: false }); toast(t('Livre de nouveau proposé dans Redécouvrir')); refresh(); } }, t('Réafficher dans Redécouvrir')) : null,
-      !recipes.length && !docs.length ? el('button', { class: 'btn danger', onClick: async () => {
-        if (!(await confirmDialog(t('Supprimer ce livre ? Il n’a aucune recette ni page.'), { danger: true, okLabel: t('Supprimer') }))) return;
-        // Lot E (D-E23) : sans orphelin — les lignes du journal détachées, l'historique et la préférence retirés avec l'édition, en une transaction.
-        const res = await supprimerLivreVide({ book, edition, garderLivre: ctx.book_editions.some((e) => e.book_id === book.id && e.id !== edition.id) }, { repo });
-        // Ronde 1 : chaque refus est dit ; rien n'est supprimé et la fiche reste.
-        if (res?.refus) {
-          toast(res.refus === 'lecture_en_cours' ? t('Une lecture est déjà en cours : annule-la d’abord.')
-            : res.refus === 'non_vide' ? t('Un livre avec des recettes ou des pages ne se supprime pas d’un geste.') : t('Un import est encore lié à ce livre : rien n’a été supprimé.'));
-          return;
-        }
-        navigate('/library?tab=books');
-      } }, t('Supprimer')) : el('small', { class: 'muted' }, t('Un livre avec des recettes ou des pages ne se supprime pas d’un geste.')))));
+      pref?.hidden ? el('button', { class: 'btn', onClick: async () => { const contexte=await capturerEdition(repo,edition,{ctx}); await repo.save('rediscovery_prefs', { ...pref, hidden: false }, {editions:[contexte]}); toast(t('Livre de nouveau proposé dans Redécouvrir')); refresh(); } }, t('Réafficher dans Redécouvrir')) : null)));
+
 
   // D-UI-7 : UNE lecture des octets des pages (vignettesDePages, le motif du lot G) ; les pages d'index font le « Sommaire » (gauche, numérotées séance par
   // séance, dans l'ordre appliqué dans chacune puis celui des pages imprimées — parSeancePuisPosition, T4-R1 et vague finale ; l'ordre se corrige dans le

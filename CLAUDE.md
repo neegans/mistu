@@ -3642,4 +3642,16 @@ APP0.23.2, cache `cuisine-os-v0.23.2-1`, DB5/archive2 inchangées, cinq modules 
 Réception locale **7952/7952** (épingle7951, +288), Node231/231, migrations check0, syntaxe45/diff propres ; deux parcours20 mesures et hors ligne verts.
 Le harnais d’attente asynchrone a été corrigé après reproduction minimale ; pas de modification applicative sans défaut confirmé.
 Aucun compte privé, appareil physique ou nouvelle preuve HTTP authentifiée. L2 conservé dans son checkout, non terminé ; suite du plan toujours à réaliser.
-Publication autorisée dans la conversation ; son résultat est consigné en tête de STATE.md après vérification publique.
+Publication autorisée et vérifiée : code5412745, GitHub Pages21:26:05UTC,46 fichiers identiques ; navigateur public7952/7952 et parcours public20 mesures avec cinq modules en cache/hors ligne, zéro erreur JS/requête externe. État consigné en tête de STATE.md.
+
+
+## L2 — corbeille des livres — réception locale du 29 octobre 2026
+
+Sur l’autorisation « et enchaine sur le restant des lots », après intégration du correctif urgent0.23.2 :
+application0.24.0, cache `cuisine-os-v0.24.0-1`, DB6/index éditions, archive3 (lecture1/2/3), migration additive0009.
+Retirer livre seul ou avec recettes, restauration individuelle conditionnée ; sources, notes, photos et versions conservées.
+CAS parent/membre/compte, relecture explicite de résultats payés, sources atomiques, archives sans associations hybrides et anciens clients protégés.
+Navigateur8366/8366 (épingle8365, +414), Node232/232, générateur0, syntaxe87 fichiers/diff propres.
+SQL local neuf121 assertions + deux sessions concurrentes ; trois moteurs/501 membres/archive3/photos ; vrai passageDB5→6.
+Parcours réel24 mesures et deux rechargements hors ligne, photos et notes intactes. Réception locale seulement à ce point ; aucun SQL0009 distant.
+Rapport : `docs/superpowers/plans/2026-10-29-l2-corbeille-livres.md`. L3–L10 etE1 restent à réaliser ; limites physiques et propriétaires hérités documentées.

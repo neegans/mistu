@@ -88,7 +88,7 @@ function inventoryTab(ctx, query) {
       return el('li', { class: 'row between top' },
         el('div', null, el('strong', null, l.label), l.quantity_text ? ` — ${l.quantity_text}` : '', l.portions ? ` · ${l.portions} ${t('portions')}` : '',
           el('div', { class: 'muted', style: { fontSize: '.85rem' } }, [l.prepared_at ? `${t('préparé le')} ${formatDate(l.prepared_at)}` : null, l.use_by ? `${t('avant le')} ${formatDate(l.use_by)}` : t('date limite non indiquée'), r ? `${t('source')} : ${r.original_title}` : null, l.reheat_method ? `${t('réchauffage')} : ${l.reheat_method}` : null, l.expected_quality ? `${t('qualité')} : ${l.expected_quality}` : null].filter(Boolean).join(' · ')),
-          r ? mentionCycleRecette(r) : null,
+          r ? mentionCycleRecette(r, ctx?.editionsById?.get(r.edition_id)) : null,
           late ? el('span', { class: 'chip danger' }, t('date dépassée')) : null),
         el('div', { class: 'row' },
           r ? el('a', { class: 'btn small', href: `#/recipes/${r.id}` }, t('Recette')) : null,

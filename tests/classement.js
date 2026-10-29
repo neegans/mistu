@@ -1191,18 +1191,27 @@ export async function runClassementTests({ eq, ok }) {
       await poserSeance(repo, db, { references: [], imports: [ligneClassement()] });
       const ff = fauxFetch();
       const { espion, relu } = relectureEspion(repo);
-      const p = await monterPanneau(repo, db, { over: { repo: espion, fetch: ff.fetch } });
+      let p = await monterPanneau(repo, db, { over: { repo: espion, fetch: ff.fetch } });
       await pret(p);
       const seance = await db.get('scan_sessions', 'ss1');
-      await relu(() => repo.save('scan_sessions', { ...seance, edition_id: 'ed2' }));
+      await relu(async () => {
+        await db.mutate({origin:'remote',puts:{book_editions:[{id:'ed2',book_id:'b1'}],scan_sessions:[{...seance,edition_id:'ed2'}],
+          source_pages:(await db.getAll('source_pages')).map(p=>({...p,edition_id:'ed2'})),
+          imports:[{...await db.get('imports','imp_cl'),edition_id:'ed2',expected_edition_id:'ed1'}]}});
+        emit('change',{store:'scan_sessions'});
+      });
       eq([...(await essayerLire(p, db)), ff.appels.length], [RIEN_LIRE, 0, 'a_verifier', 0], 'T-D15 (M-rendu, M-rendu-edition, vérification) : le livre de la séance changé ICI (le bus relit la séance, sans redessin) → refuse(edition) : l’édition RENDUE part, jamais celle relue ni celle d’un redessin fait au clic ; rien d’écrit, 0 POST');
-      // Ronde 1 (constat 12) : après le refus, le panneau est redessiné sur la base RELUE (§ 4.5 « puis redessin ») et l'édition relue devient l'édition
-      // RENDUE (D-D23) : un second clic crée les lectures sur le livre que la personne voit maintenant.
-      await attendre(() => boutonLire(p) && !boutonLire(p).disabled, 'redessin après le refus : « Lire » rallumé');
+      // L2 : aucun changement de base implicite au redessin. Rouvrir puis relire le résultat payé adopte le livre montré.
+      await attendre(()=>p.querySelector('[data-role=relecture-classement]'),'base ancienne signalée');
+      ok(boutonLire(p).disabled,'L2 T-D15 : ancien panneau ne se réarme pas sur une autre édition');
+      p.remove();p=await monterPanneau(repo,db,{over:{fetch:ff.fetch}});
+      await attendre(()=>p.querySelector('[data-role=relecture-classement]'),'relecture offerte après remontage');
+      [...p.querySelectorAll('button')].find(b=>b.textContent==='Réutiliser ce résultat après relecture').click();
+      await pret(p);
       dits.length = 0; boutonLire(p).click();
       await attendre(() => dits.length >= 1, 'un toast');
       const surEd2 = (await db.getAll('imports')).filter((i) => i.lot?.classement_id === 'imp_cl').sort((a, b) => a.lot.rang - b.lot.rang);
-      eq([dits[0], surEd2.map((l) => l.edition_id)], ['3 recettes à lire : suis-les dans Imports.', ['ed2', 'ed2', 'ed2']], 'T-D15 (M-redessin-refus, M-editionId-rendu, M-edition-relue, ronde 1, constat 12) : après un refus, le panneau redessiné rend l’édition RELUE — un second clic crée trois lectures sur ed2 (jamais un refus sans fin jusqu’au remontage)');
+      eq([dits[0], surEd2.map((l) => l.edition_id)], ['3 recettes à lire : suis-les dans Imports.', ['ed2', 'ed2', 'ed2']], 'T-D15 (M-redessin-refus, M-editionId-rendu, M-edition-relue, ronde 1, constat 12) : après refus puis remontage et relecture explicite, le clic crée trois lectures sur ed2 sans payer un nouveau classement');
       await attendre(() => G.lotEnCours()?.classementId === 'imp_cl' && ff.appels.length === 1, 'le lot lit la première');
       await UI.annulerVol(surEd2[0].id);
       await attendre(() => G.lotEnCours() === null, 'lot arrêté');
@@ -2090,10 +2099,11 @@ export async function runClassementTests({ eq, ok }) {
       await db.mutate({ puts: { recipe_versions: [versionDe('rvL', 'rcL', ['p2']), versionDe('rvM', 'rcM', ['p3'])] }, origin: 'device' });
       const racine = await monterSeance(repo, db);
       const toastEl = () => document.querySelector('.toast');
-      const retirer = (ids) => {
+      const retirer = async (ids) => {
         if (toastEl()) toastEl().textContent = '';
         cocher(racine, ids);
         [...racine.querySelectorAll('button.btn.danger')].find((b) => b.textContent === 'Retirer').click();
+        await attendre(()=>toastEl()?.textContent || document.querySelector('dialog[open]'),'retrait répondu');
         const vu = [toastEl()?.textContent ?? '', !!document.querySelector('dialog[open]')];
         document.querySelectorAll('dialog[open]').forEach((d) => d.close()); // « non » : rien n'est retiré
         cocher(racine, ids);
@@ -2101,7 +2111,7 @@ export async function runClassementTests({ eq, ok }) {
       };
       try {
         const LIEE = '1 page(s) déjà liée(s) à une recette : retire d’abord la recette.';
-        eq([retirer(['p1']), retirer(['p3']), retirer(['p4']), (await db.getMany('source_pages', ['p1', 'p3', 'p4'])).map((p) => !!p)], [[LIEE, false], [LIEE, false], ['', true], [true, true, true]], 'T-D18 (ronde 1) : « Retirer » la photo d’index d’une référence lue (index_page_id) ou une page citée par une version → refusé et dit, aucune question ; une page libre ouvre la question (témoin) ; rien n’est retiré');
+        eq([await retirer(['p1']), await retirer(['p3']), await retirer(['p4']), (await db.getMany('source_pages', ['p1', 'p3', 'p4'])).map((p) => !!p)], [[LIEE, false], [LIEE, false], ['', true], [true, true, true]], 'T-D18 (ronde 1) : « Retirer » la photo d’index d’une référence lue (index_page_id) ou une page citée par une version → refusé et dit, aucune question ; une page libre ouvre la question (témoin) ; rien n’est retiré');
       } finally { document.querySelectorAll('dialog[open]').forEach((d) => d.close()); }
     });
 
@@ -2412,6 +2422,7 @@ export async function runClassementTests({ eq, ok }) {
       const b8 = (await monter(await poserLecture('m8', RECETTE_LUE('Tarte aux poires', 141)), compte)).querySelector('[data-role="enregistrer-reference"]');
       lectures8 = 0;
       b8.click(); b8.click();
+      await attendre(() => lectures8 > 0, 'tentative après captures du contexte');
       const auClic = lectures8;
       await attendre(() => navs.length === 1, 'navigation vers l’écran ciblé');
       eq([auClic, navs, dits, (await db.get('imports', 'm8')).recipe_id], [1, ['/recipes/rcT/importer'], [], 'rcT'], 'T-D21 (ronde 1, R8) : double tape sur « Enregistrer dans cette référence » → une seule tentative, une navigation, aucun refus dit');
@@ -2565,7 +2576,7 @@ export async function runClassementTests({ eq, ok }) {
       eq(['Monter la page {n}', 'Descendre la page {n}', 'Retirer la page {n}', 'incertain', 'Incertain : {t}', 'Annuler', 'Ignorer', 'Reprendre', 'Relancer', 'Tu es hors ligne.', 'En cours sur un autre écran', 'Une lecture est déjà en cours : annule-la d’abord.', 'Code : {c}', 'L’assistant n’a pas répondu lisiblement. Réessaie.', 'Connecte-toi pour utiliser l’assistant.', '{n} photo ajoutée', '{n} photos ajoutées', 'p.', 'Sans livre', 'La recette n’a pas pu être enregistrée. Réessaie.', 'Une lecture = un appel à l’assistant, compté dans ton quota du jour.', 'Les photos de cette séance ne sont pas sur cet appareil.', 'Lecture annulée. L’appel a peut-être été compté ; relancer en coûtera un autre.', 'La lecture a été interrompue. L’appel a peut-être été compté ; relancer en coûtera un autre.', 'L’appel a peut-être été compté ; relancer en coûtera un autre.', 'Page {n}', 'Une erreur est survenue', 'La demande est trop lourde : choisis moins de pages.'].filter((k) => typeof EN[k] !== 'string'), [], 'T-D20 : les clés existantes que le lot réemploie sont toujours là (ronde 1 de T6 : les trois phrases I-4 du lot A et les trois clés anciennes de regroupement.js comprises)');
       const sw = await lire('../sw.js');
       ok(sw.includes("'./src/domain/classement.js'") && sw.includes("'./src/ui/regroupement.js'"), 'T-D20 : SHELL contient les deux modules neufs du lot');
-      eq([APP_VERSION, sw.includes(`VERSION = 'cuisine-os-v${APP_VERSION}-`), MODULES_NEUFS.includes('../src/ui/regroupement.js')], ['0.23.2', true, true], 'T-D20 : APP_VERSION 0.23.2 (fixée par le chef d’orchestre : R-D-12 au lot D, R-E-18 au lot E, Global Constraints au lot F, I-UI-7 au lot UI-1), VERSION du service worker sur elle, regroupement.js dans le filet i18n');
+      eq([APP_VERSION, sw.includes(`VERSION = 'cuisine-os-v${APP_VERSION}-`), MODULES_NEUFS.includes('../src/ui/regroupement.js')], ['0.24.0', true, true], 'T-D20 : APP_VERSION 0.24.0 (fixée par le chef d’orchestre : R-D-12 au lot D, R-E-18 au lot E, Global Constraints au lot F, I-UI-7 au lot UI-1), VERSION du service worker sur elle, regroupement.js dans le filet i18n');
       const sources = await Promise.all(['../src/ui/regroupement.js', '../src/domain/classement.js'].map(lire));
       ok(sources.every((x) => x.length > 1000) && /export function panneauClassement/.test(sources[0]) && /export function proposerAppariements/.test(sources[1]), 'T-D20 : les deux modules neufs sont lus (garde contre un source vide)');
       eq(sources.map((x) => /anthropic|supabase/i.test(x)), [false, false], 'T-D20 : aucun texte ne nomme le fournisseur ni la base dans les deux modules neufs (toute casse, ronde 1 de T6)');
@@ -2582,7 +2593,7 @@ export async function runClassementTests({ eq, ok }) {
       // Et (constat 7) la veille de l'état 2 rejoue repo.marquerInterrompus (lot A : la passe du démarrage, par transitionner conditionné) avec la constante
       // BATTEMENT_MORT_MS lue sur l'espace de noms.
       const lignesDe = (fin) => src.split('\n').filter((l) => l.includes(fin)).map((l) => l.trim());
-      eq([ecritures, duModule, detours, lignesDe('repo.js'), lignesDe('db.js')], [['capturerContexteRecette', 'marquerInterrompus', 'ouvrirImport', 'transitionner'], [], [], ["import * as repoModule from '../model/repo.js';"], ["import { TransitionRefusee } from '../core/db.js';"]], 'T-D20 (I-D1) : src/ui/regroupement.js n’écrit que par repo.transitionner, repo.ouvrirImport et repo.marquerInterrompus (ni save, ni saveBatch, ni put, ni remove) — par repo ou par repoModule, `?.` et espaces compris ; repoModule ne sert que newId, deviceId et BATTEMENT_MORT_MS ; ni crochets, ni alias, ni déstructuration, ni décomposition (ronde 1 de T6) ; repo.js importé une seule fois, comme l’espace de noms repoModule, et db.js pour TransitionRefusee seul — ni import nommé, ni second espace de noms (vague finale, constat 11)');
+      eq([ecritures, duModule, detours, lignesDe('repo.js'), lignesDe('db.js')], [['marquerInterrompus', 'ouvrirImport', 'transitionner'], [], [], ["import * as repoModule from '../model/repo.js';"], ["import { TransitionRefusee } from '../core/db.js';"]], 'T-D20 (I-D1) : src/ui/regroupement.js n’écrit que par repo.transitionner, repo.ouvrirImport et repo.marquerInterrompus (ni save, ni saveBatch, ni put, ni remove) — par repo ou par repoModule, `?.` et espaces compris ; repoModule ne sert que newId, deviceId et BATTEMENT_MORT_MS ; ni crochets, ni alias, ni déstructuration, ni décomposition (ronde 1 de T6) ; repo.js importé une seule fois, comme l’espace de noms repoModule, et db.js pour TransitionRefusee seul — ni import nommé, ni second espace de noms (vague finale, constat 11)');
     });
 
     // =================================================================================================================================
@@ -2600,7 +2611,8 @@ export async function runClassementTests({ eq, ok }) {
         [...r1.querySelectorAll('button.btn.danger')].find((b) => b.textContent === 'Retirer').click(); // « Retirer » de la séance : la vraie question
         await attendre(() => !!document.querySelector('dialog[open]'), 'question « Retirer »');
         [...document.querySelector('dialog[open]').querySelectorAll('button')].find((b) => b.textContent === 'Retirer').click();
-        await attendre(async () => !(await db.get('source_pages', 'p5')), 'p5 retirée de la séance');
+        await attendre(async () => !(await db.get('scan_sessions', 'ss1')).page_ids.includes('p5'), 'p5 détachée de la séance');
+        ok(!!await db.get('source_pages','p5'),'L2 classement : la page retirée de la séance reste conservée pour le journal payé');
         const r2 = await monter('remontage après « Retirer » (le refresh() de la séance)');
         const apresRetrait = groupesDe(r2);
         choisirSelect(panneau(r2), 'p4', 'nouveau'); // un geste : le brouillon est écrit SANS p5

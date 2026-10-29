@@ -1,5 +1,5 @@
 import { capturerRecette } from './recette-garde.js';
-import { recettesActives, documentsActifs } from './state.js';
+import { recettesActives, documentsActifs, editionsActives } from './state.js';
 // Bibliothèque (lot UI-1, D-UI-4) : trois segments — Recettes (la grille des cartes-plat, par défaut), Livres (grille de couvertures, « Liens web gardés »,
 // « Recettes créées avec l’IA »), Plats — et la liste « à importer » (?tab=a-importer : segment Recettes actif, retour « ← Recettes »). Les adresses
 // ?tab=books et ?tab=dishes d'avant restent valides (dish.js:35 y revient) ; un ?tab inconnu vaut Recettes. Vue Plats : spec §17, §30, §32.
@@ -178,17 +178,18 @@ function recettesCreeesIA(ctx, ctxF) {
 }
 
 async function booksTab(ctx) {
+  const editions = editionsActives(ctx);
   const ctxF = await contexteFichiers(ctx);
-  if (!ctx.book_editions.length) return emptyState('livres', t('Aucun livre pour l’instant.'), el('a', { class: 'btn primary', href: '#/add' }, t('Ajouter un livre')));
+  if (!editions.length) return emptyState('livres', t('Aucun livre pour l’instant.'), el('a', { class: 'btn primary', href: '#/add' }, t('Ajouter un livre')));
   const recipesByEdition = repo.groupBy(recettesActives(ctx).filter((r) => r.edition_id), 'edition_id');
   // Les octets des couvertures sont lus UNE fois, en une transaction : la grille se redessine à chaque touche du
   // filtre et ne peut pas aller en base à chaque fois. Une empreinte sans ligne ici = couverture pas sur l'appareil.
-  const fichiers = await repo.getFiles(ctx.book_editions.map((e) => e.cover_sha256).filter(Boolean));
+  const fichiers = await repo.getFiles(editions.map((e) => e.cover_sha256).filter(Boolean));
   const filter = el('input', { type: 'search', placeholder: t('Filtrer par titre, auteur, cuisine…') });
   const grid = el('div', { class: 'grid livres' }); // § 3.3 : couvertures minmax(170px, 1fr) — la règle .grid.livres de T1
   const draw = () => {
     const q = filter.value.trim().toLowerCase();
-    const eds = [...ctx.book_editions].sort((a, b) => String(ctx.editionLabel(a) || '').localeCompare(String(ctx.editionLabel(b) || ''))); // vague finale : titre reçu non-chaîne
+    const eds = [...editions].sort((a, b) => String(ctx.editionLabel(a) || '').localeCompare(String(ctx.editionLabel(b) || ''))); // vague finale : titre reçu non-chaîne
     const noeuds = [];
     for (const ed of eds) {
       const book = ctx.booksById.get(ed.book_id);

@@ -7,8 +7,10 @@ import { nettoyerChaines } from '../sync/lots.js';
 import { syncNow } from '../sync/clock.js';
 import { remoteValide, HASH_FICHIER } from '../sync/tables.js';
 import { estOriginalIci } from '../sync/fichiers.js';
+import { capturerContextesInitiaux } from '../sync/contexte-initial.js';
 import { isAllowed } from '../sync/mime.js';
 import { lireCycleRecette, memeCycleRecette } from './cycle-recette.js';
+import { lireCycleEdition, memeCycleEdition, exceptionEditionValide, memeExceptionEdition } from './cycle-edition.js';
 
 const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf', 'application/epub+zip': 'epub', 'text/plain': 'txt' };
 export const extFor = (mime) => MIME_EXT[mime] || 'bin';
@@ -69,6 +71,8 @@ function validateRows(stores) {
       }
       if (ids.has(row[key])) errors.push(name + ' : clé répétée ' + row[key]);
       if (name === 'recipes' && lireCycleRecette(row).etat === 'invalide') errors.push('Cycle de recette invalide : ' + row[key]);
+      if (name === 'recipes' && !exceptionEditionValide(row)) errors.push('Exception de livre invalide : ' + row[key]);
+      if (name === 'book_editions' && lireCycleEdition(row).etat === 'invalide') errors.push('Cycle de livre invalide : ' + row[key]);
       ids.add(row[key]);
     }
   }
@@ -232,6 +236,7 @@ export async function inspectArchive(arrayBuffer) {
     }
     errors.push(...validateRows(payload.stores));
     if (manifest.format_version === 1 && (payload.stores.recipes || []).some(r => lireCycleRecette(r).id !== null)) errors.push('Une archive de format 1 ne porte pas de cycle de corbeille.');
+    if (manifest.format_version < 3 && ((payload.stores.book_editions || []).some(e => lireCycleEdition(e).id !== null) || (payload.stores.recipes || []).some(r => r.restored_from_edition != null))) errors.push('Le cycle des livres exige le format 3.');
     const hashes = new Set();
     let missing = 0, hashMismatch = 0;
     for (const f of manifest.files) {
@@ -281,6 +286,7 @@ function requireInspection(inspection, mode) {
   if (!inspection?.ok || !record(payload) || !Array.isArray(payload.files) || (payload.missing != null && !Array.isArray(payload.missing))) throw new Error('Archive non validée');
   const errors = validateRows(payload.stores);
   if (inspection.manifest?.format_version === 1 && (payload.stores.recipes || []).some(r => lireCycleRecette(r).id !== null)) errors.push('Une archive de format 1 ne porte pas de cycle de corbeille.');
+  if (inspection.manifest?.format_version < 3 && ((payload.stores.book_editions || []).some(e => lireCycleEdition(e).id !== null) || (payload.stores.recipes || []).some(r => r.restored_from_edition != null))) errors.push('Le cycle des livres exige le format 3.');
   const hashes = new Set();
   // Mêmes règles qu'à l'inspection (fichierValide, manquanteValide), plus les octets : F-8, (bytes_size ?? size) === bytes.length.
   for (const file of payload.files) {
@@ -392,33 +398,57 @@ function ligneRestauree(entree, existing, d, blob, { fusion, maintenant }) {
 export class ErreurCycleArchive extends Error {
   constructor(recettes) { super('La sauvegarde et cet appareil ont des cycles de recette différents.'); this.name = 'ErreurCycleArchive'; this.code = 'cycles_divergents'; this.recettes = recettes; }
 }
-const LIENS_RECETTES_ARCHIVE = ['recipe_versions', 'recipe_translations', 'substitutions', 'dish_recipe_links'];
-function parentsDeplaces(stores, locales) {
-  const versions = new Map((locales.recipe_versions || []).map(v => [v.id, v.recipe_id])), ids = new Set();
-  for (const store of LIENS_RECETTES_ARCHIVE) {
-    const champ = store === 'recipe_versions' || store === 'dish_recipe_links' ? 'recipe_id' : 'recipe_version_id';
-    const entrees = new Map((stores[store] || []).map(row => [row.id, row]));
-    for (const row of locales[store] || []) {
-      const entree = entrees.get(row.id);
-      if (entree && entree[champ] !== row[champ]) ids.add(champ === 'recipe_id' ? row.recipe_id : versions.get(row.recipe_version_id));
+// Une collision de clé ne peut détacher une copie d'un parent protégé, y compris dans un historique ou un repas.
+const MAGASINS_GRAPHE_ARCHIVE = DATA_STORES.filter(store => store !== 'settings');
+function deplacementsGraphes(stores, locales) {
+  const avant = capturerContextesInitiaux(locales), apres = capturerContextesInitiaux(stores);
+  const cles = new Set(Object.entries(stores).flatMap(([store, rows]) => (rows || []).map(row => JSON.stringify([store, row[STORES[store].keyPath]]))));
+  const parentsSources = { source_documents:['edition_id','scan_session_id'],source_pages:['edition_id','document_id'],scan_sessions:['edition_id'] };
+  const collisionsSources = new Set();
+  for(const [store,champs] of Object.entries(parentsSources)) {
+    const entrantes=new Map((stores[store]||[]).map(row=>[row.id,row]));
+    for(const row of locales[store]||[]) {
+      const entree=entrantes.get(row.id);
+      if(entree&&champs.some(champ=>(entree[champ]??null)!==(row[champ]??null)))collisionsSources.add(JSON.stringify([store,row.id]));
     }
   }
-  return ids;
+  const deplaces = (nom, champ) => {
+    const appartenances = new Map();
+    for (const contexte of apres[nom]) for (const r of contexte.records) {
+      const cle = JSON.stringify([r.store, r.id]);
+      if (!appartenances.has(cle)) appartenances.set(cle, new Set());
+      appartenances.get(cle).add(contexte[champ]);
+    }
+    return new Set(avant[nom].filter(c => c.records.some(r => {
+      const cle = JSON.stringify([r.store, r.id]);
+      return collisionsSources.has(cle) || (cles.has(cle) && !appartenances.get(cle)?.has(c[champ]));
+    })).map(c => c[champ]));
+  };
+  return { recettes: deplaces('recettes', 'recipe_id'), editions: deplaces('editions', 'edition_id') };
 }
-function conflitsCycles(courantes, entrantes, mode, deplaces = new Set()) {
+function conflitsEditions(courantes, entrantes, mode, deplacees = new Set()) {
+  const parId = new Map(entrantes.map(e => [e.id, e]));
+  return courantes.filter(e => {
+    const entree = parId.get(e.id), cycle = lireCycleEdition(e), protege = cycle.id !== null || cycle.etat !== 'active';
+    return (protege && deplacees.has(e.id)) || (entree ? !memeCycleEdition(e, entree) || e.book_id !== entree.book_id : mode === 'replace' && protege);
+  }).map(e => ({ id: e.id, titre: e.title || e.id, entite: 'edition', cycle: lireCycleEdition(e) }));
+}
+function conflitsCycles(courantes, entrantes, mode, deplaces = new Set(), editionsProtegees = new Set()) {
   const parId = new Map(entrantes.map(r => [r.id, r]));
   return courantes.filter(r => {
     const entree = parId.get(r.id);
-    const protege = lireCycleRecette(r).id !== null || lireCycleRecette(r).etat !== 'active';
-    return (protege && deplaces.has(r.id)) || (entree ? !memeCycleRecette(r, entree) : mode === 'replace' && protege);
+    const protege = lireCycleRecette(r).id !== null || lireCycleRecette(r).etat !== 'active' || editionsProtegees.has(r.edition_id);
+    return (protege && deplaces.has(r.id)) || (entree ? !memeCycleRecette(r, entree) || !memeExceptionEdition(r, entree) || (r.edition_id ?? null) !== (entree.edition_id ?? null) : mode === 'replace' && protege);
   }).map(r => ({ id: r.id, titre: typeof r.original_title === 'string' ? r.original_title : r.id, cycle: lireCycleRecette(r) }));
 }
+const editionsAvecCycle = locales => new Set((locales.book_editions || []).filter(e => lireCycleEdition(e).id !== null || lireCycleEdition(e).etat !== 'active').map(e => e.id));
 export async function conflitsCyclesArchive(db, inspection, { mode = 'merge' } = {}) {
   requireInspection(inspection, mode);
-  const noms = ['recipes', ...LIENS_RECETTES_ARCHIVE];
+  const noms = MAGASINS_GRAPHE_ARCHIVE;
   const lignes = await Promise.all(noms.map(store => db.getAll(store)));
   const locales = Object.fromEntries(noms.map((store, i) => [store, lignes[i]]));
-  return conflitsCycles(locales.recipes, inspection.payload.stores.recipes || [], mode, parentsDeplaces(inspection.payload.stores, locales));
+  const deplaces = deplacementsGraphes(inspection.payload.stores, locales);
+  return [...conflitsCycles(locales.recipes, inspection.payload.stores.recipes || [], mode, deplaces.recettes, editionsAvecCycle(locales)), ...conflitsEditions(locales.book_editions, inspection.payload.stores.book_editions || [], mode, deplaces.editions)];
 }
 
 export async function applyArchive(db, inspection, { mode = 'merge', horodater = null } = {}) {
@@ -449,12 +479,15 @@ export async function applyArchive(db, inspection, { mode = 'merge', horodater =
   // K-7 (spec assistant-par-le-compte) : la configuration de l'assistant n'est pas de la bibliothèque — une
   // restauration en remplacement ne la vide pas (elle n'est dans aucune archive : il n'y aurait rien pour la réécrire).
   const locales = {};
-  const liensGardes = Object.fromEntries(LIENS_RECETTES_ARCHIVE.map(store => [store, [{ toutes: true, verifier: rows => { locales[store] = rows; } }]]));
-  const cycleGarde = { toutes: true, verifier: courantes => { const ecarts = conflitsCycles(courantes, batch.recipes || [], mode, parentsDeplaces(batch, locales)); if (ecarts.length) throw new ErreurCycleArchive(ecarts); } };
-  const versions = new Map((batch.recipe_versions || []).map(v => [v.id, v.recipe_id]));
-  const contextes = (batch.recipes || []).map(r => ({ recipe_id: r.id, expected_cycle_id: lireCycleRecette(r).id, owner_id: owner, archive_import: true,
-    records: Object.entries(batch).flatMap(([store, rows]) => rows.filter(row => store === 'recipes' ? row.id === r.id : row.recipe_id === r.id || (row.recipe_version_id && versions.get(row.recipe_version_id) === r.id)).map(row => ({ store, id: row[STORES[store].keyPath] }))) }));
-  await db.mutate({ puts: batch, origin: 'local', archive_import: true, recettes: contextes, conditions: { ...(conditions.length ? { files: conditions } : {}), ...liensGardes, recipes: [cycleGarde],
+  const liensGardes = Object.fromEntries(MAGASINS_GRAPHE_ARCHIVE.filter(store => store !== 'recipes').map(store => [store, [{ toutes: true, verifier: rows => { locales[store] = rows; } }]]));
+  const cycleGarde = { toutes: true, verifier: courantes => {
+    locales.recipes = courantes;
+    const deplaces = deplacementsGraphes(batch, locales);
+    const ecarts = [...conflitsCycles(courantes, batch.recipes || [], mode, deplaces.recettes, editionsAvecCycle(locales)), ...conflitsEditions(locales.book_editions, batch.book_editions || [], mode, deplaces.editions)];
+    if (ecarts.length) throw new ErreurCycleArchive(ecarts);
+  } };
+  const { recettes: contextes, editions } = capturerContextesInitiaux(batch, { owner_id: owner });
+  await db.mutate({ puts: batch, origin: 'local', archive_import: true, recettes: contextes, editions, conditions: { ...(conditions.length ? { files: conditions } : {}), ...liensGardes, recipes: [cycleGarde],
     sync_state: [{ key: 'user_id', fusion: courant => { if ((courant?.value ?? null) !== owner) throw new Error('Le compte a changé pendant la restauration.'); return null; } }] },
     clearStores: mode === 'replace' ? Object.keys(STORES).filter((s) => !SYNC_INTERNAL_STORES.includes(s) && s !== 'assistant_config') : [] });
   return { ...Object.fromEntries(Object.entries(batch).map(([name, rows]) => [name, rows.length])), files: conditions.length, originauxConserves };

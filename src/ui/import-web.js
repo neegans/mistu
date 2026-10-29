@@ -22,8 +22,8 @@ import { candidatPhotoWeb, pointeurValide } from '../domain/photo-web.js';
 import { assertVocabulaire, originePhotoAdmise } from '../domain/vocabulaire.js';
 import { ligneAnnoncePhotoWeb, rapatrierPhotoWeb } from './photo-plat.js';
 import { capturerRecette } from './recette-garde.js';
-import { recetteActive } from '../domain/cycle-recette.js';
-import { memoireCycleImport, revoirLectureImport } from '../domain/contexte-import.js';
+import { recetteActiveDansContexte } from './state.js';
+import { memoireCycleImport, revoirLectureImport, memeCaptureImport } from '../domain/contexte-import.js';
 import { mentionCycleRecette } from './corbeille.js';
 
 const horloge = () => new Date().toISOString();
@@ -80,7 +80,7 @@ export async function lancerLecture(importId, { ctx, repo = repoModule, fetch: f
     if (!session) { liberer(); return refus('non_connecte'); }
     const signet = await repo.get('recipes', ligne.recipe_id);
     if (!signet) { liberer(); return refus('inconnu'); } // ronde 1 : la fiche a été effacée entre-temps (tombale reçue) — elle n'existe plus, rien n'est « interdit »
-    if (!recetteActive(signet)) return refus('transition');
+    if (!recetteActiveDansContexte(signet, ctx)) return refus('transition');
     const contexte = await capturerRecette(repo, ctx?.recipesById?.get(signet.id) || signet, { ctx });
     const recettesHistoriques = contexte ? [{...contexte,historique:true}] : [];
     tenue.recettes = recettesHistoriques;
@@ -172,7 +172,7 @@ export async function demarrerLectureWeb({ recipe = null, adresse = null, titre 
   if (!lien.href.startsWith('https:')) return refus('interdit');
   let ligne = null; let recipeId = null;
   if (recipe) {
-    if (!recetteActive(recipe)) return refus('transition');
+    if (!recetteActiveDansContexte(recipe, ctx)) return refus('transition');
     const contexte = await capturerRecette(repo, recipe, { ctx });
     recipeId = recipe.id;
     ligne = ouvertDe(ctx?.imports, recipe.id, repo);
@@ -266,9 +266,9 @@ export async function enregistrerLecture(importId, { repo = repoModule, remplace
   const fondement = (f) => JSON.stringify([f.signet.current_version_id ?? null, versionHumaine(f.versions)]);
   let fiche = await relire();
   if (!fiche) return refus('inconnu');
-  if (!recetteActive(fiche.signet)) return refus('transition');
+  if (!recetteActiveDansContexte(fiche.signet, ctx)) return refus('transition');
   const garde = contexte || await capturerRecette(repo, fiche.signet, { ctx });
-  if ((ligne.expected_cycle_id ?? null) !== garde.expected_cycle_id || (Object.hasOwn(ligne, 'owner_id') && ligne.owner_id !== garde.owner_id)) return refus('transition');
+  if (!memeCaptureImport(ligne, garde) || (Object.hasOwn(ligne, 'owner_id') && ligne.owner_id !== garde.owner_id)) return refus('transition');
   let choix = remplacer;
   while (choix === null && versionHumaine(fiche.versions)) {
     // Défaut « non » (comme I-5 du lot A) : la première option est « Ajouter sans remplacer ».
@@ -319,7 +319,7 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
   const etat = { ligne: null, lu: null, versions: [], occupe: false, photoAnnoncee: null };
   root.etatRouteWeb = () => ({ importId: etat.ligne?.id ?? null, status: etat.ligne?.status ?? null, vol: !!etat.ligne && volEnCours()?.importId === etat.ligne.id, remplacement: etat.versions.length ? versionHumaine(etat.versions) : null });
   if (!recipe) { root.append(el('div', { class: 'card' }, t('Recette introuvable.'))); return root; }
-  if (!recetteActive(recipe)) return mentionCycleRecette(recipe);
+  if (!recetteActiveDansContexte(recipe, ctx)) return mentionCycleRecette(recipe, ctx?.editionsById?.get(recipe.edition_id));
   const contexte = await capturerRecette(repo, recipe, { ctx });
   const lien = lienSignet(recipe.source_url);
   const https = lien.ok && lien.href.startsWith('https:');
@@ -482,7 +482,7 @@ export async function renderImportWeb(params, query, ctx, { repo = repoModule, n
   function dessiner() {
     const L = etat.ligne; const statut = L?.status ?? null;
     const illisible = statut === 'a_verifier' && !etat.lu; // voir charger() : jamais rendue comme une lecture, jamais une levée
-    const autreCycle = statut === 'a_verifier' && (L.expected_cycle_id ?? null) !== contexte.expected_cycle_id;
+    const autreCycle = statut === 'a_verifier' && !memeCaptureImport(L, contexte);
     const zone = autreCycle ? el('div', { class: 'card stack', role: 'status' },
       el('p', null, t('Cette lecture a commencé avant le retrait. Relis-la avant de la conserver.')),
       el('button', { class: 'btn', disabled: etat.occupe, onClick: async () => {

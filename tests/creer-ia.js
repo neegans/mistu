@@ -8,7 +8,7 @@ import { EN } from '../src/i18n/en.js';
 export async function runCreerIaTests({ eq, ok }) {
   const C = await import('../src/domain/creation-ia.js');
   buildIngredientIndex(INGREDIENTS); // l'index des lignes est global (lines.js:6) : la suite le pose elle-même (F10)
-  eq(APP_VERSION, '0.23.2', 'T1 : APP_VERSION 0.23.2 (lot UI-1)');
+  eq(APP_VERSION, '0.24.0', 'T1 : APP_VERSION 0.24.0 (lot UI-1)');
 
   // --- estCreationIA (C-2, F6)
   const synth = { kind: 'synthesis', provenance: { generated_by: 'ai', creation: { demande: 'x' } } };
@@ -1583,6 +1583,7 @@ export async function runCreerIaTests({ eq, ok }) {
         const orpheline = { ...creation, id: 'rv_t7_orph', recipe_id: 'rc_t7_absente' };
         const informe = { ...creation, id: 'rv_t7_informe', ingredients: null }; // une ligne reçue sans liste d'ingrédients : refusée comme C-15, pas « trop longue »
         const ctx = ctxDe([creation, extraction, maVersion, orpheline, informe], [fiche, ficheLivre]);
+        ctx.editionsById = new Map([['e_t7', { id: 'e_t7' }]]); // livre actif : atteindre la garde de création IA, pas celle d’un parent absent
         for (const [nom, id] of [['version absente', 'rv_rien'], ['extraction IA de livre', extraction.id], ['version manuelle d’une fiche IA', maVersion.id], ['fiche absente', orpheline.id], ['création informe', informe.id]]) {
           const r = await monter({ adapter: id, changement: 'pour 4 personnes' }, { creer: a.creer }, ctx);
           bouton(r, 'creer-ia')?.click(); await tick();

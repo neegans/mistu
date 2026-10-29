@@ -3,6 +3,17 @@ import { runL1CorbeilleArchiveTests } from './l1-corbeille-archive.js';
 import { runL1CorbeilleSyncTests } from './l1-corbeille-sync.js';
 import { runL1CorbeilleUiTests } from './l1-corbeille-ui.js';
 import { runL1CorbeilleMutationsTests } from './l1-corbeille-mutations.js';
+import { runL2CorbeilleDomaineTests } from './l2-corbeille-domaine.js';
+import { runL2CorbeilleArchiveTests } from './l2-corbeille-archive.js';
+import { runL2CorbeilleSyncTests } from './l2-corbeille-sync.js';
+import { runL2CorbeilleUiTests } from './l2-corbeille-ui.js';
+import { runL2CorbeilleMutationsTests } from './l2-corbeille-mutations.js';
+import { runL2ContextesImportTests } from './l2-contextes-import.js';
+import { runL2LivreMutationsTests } from './l2-livre-mutations.js';
+import { runL2CorbeilleImportsTests } from './l2-corbeille-imports.js';
+import { runL2SyncRepriseTests } from './l2-sync-reprise.js';
+import { runL2SourcesSyncTests } from './l2-sources-sync.js';
+import { runL2SourcesProvenanceTests } from './l2-sources-provenance.js';
 import { runL0TraductionsTests } from './l0-traductions.js';
 import { runL0CuisineTests } from './l0-cuisine.js';
 import { runL0RepasCoursesTests } from './l0-repas-courses.js';
@@ -322,11 +333,17 @@ for (const suite of [runL1CorbeilleDomaineTests, runL1CorbeilleArchiveTests, run
   catch (error) { ok(false, `Suite L1 interrompue : ${error?.message || String(error)}`); }
 }
 
+// L2 : corbeille des livres, deux bases de cycle et sources conservées.
+for (const suite of [runL2CorbeilleDomaineTests, runL2CorbeilleArchiveTests, runL2CorbeilleSyncTests, runL2CorbeilleUiTests, runL2CorbeilleMutationsTests, runL2ContextesImportTests, runL2LivreMutationsTests, runL2CorbeilleImportsTests, runL2SyncRepriseTests, runL2SourcesSyncTests, runL2SourcesProvenanceTests]) {
+  try { await suite({ eq, ok, close }); }
+  catch (error) { ok(false, `Suite L2 interrompue : ${error?.message || String(error)}`); }
+}
+
 // --- Compte total épinglé (F2). Une assertion qui DISPARAÎT — un bloc supprimé, une boucle qui ne tourne plus, une
 // suite interrompue tôt dont le `catch` ne rend qu'une ligne rouge — ne doit pas passer pour un total un peu plus
 // petit que personne ne regarde. Le nombre est celui mesuré AVANT cette assertion même (elle s'ajoute ensuite), et
 // il se met à jour en même temps que le compte annoncé dans CLAUDE.md et dans la spec.
-eq(results.length, 7951,'compte d’assertions : une assertion qui disparait est un rouge');
+eq(results.length, 8365,'compte d’assertions : une assertion qui disparait est un rouge');
 
 // --- Sortie
 const failed = results.filter((r) => !r.ok);

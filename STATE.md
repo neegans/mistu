@@ -1,13 +1,18 @@
-# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — CORRECTIFS 0.23.2 INTÉGRÉS ; L2 EN CONSTRUCTION
+# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — 0.23.2 EN LIGNE ; L2 REÇU LOCALEMENT
 
-**29 octobre 2026 — L2 : CORBEILLE DES LIVRES, CONSTRUCTION AUTORISÉE PAR LA POURSUITE DU PLAN.**
+**29 octobre 2026 — L2 : CORBEILLE DES LIVRES, RÉCEPTION LOCALE TERMINÉE.**
 Après « deploy avant », Neegan demande « et enchaine sur le restant des lots ».
 [Spec L2](docs/superpowers/specs/2026-10-29-l2-corbeille-livres-design.md) écrite puis relue techniquement ;
 cette autorisation globale n’est pas présentée comme une relecture du nouveau texte par Neegan.
 Branche `l2-corbeille-livres`, base initiale `752566d` ; correctifs 0.23.2 `5412745` intégrés avant reprise.
 Retirer une édition en gardant ses recettes, ou retirer l’ensemble ; cycles individuels conservés,
 restauration d’un membre possible sans restaurer tout le livre. C09 devient une opération réversible.
-Cible locale 0.24.0, DB6 (index d’éditions), archive3, migration additive0009 ; rien de L2 encore publié ou annoncé validé.
+Version locale **0.24.0**, cache `cuisine-os-v0.24.0-1`, DB6 (index d’éditions), archive3, migration additive0009.
+**8366/8366** navigateur (épingle8365, +414), Node232/232, générateur0, syntaxe87 fichiers et diff propres.
+PostgreSQL neuf0001→0009 :121 assertions ; deux sessions concurrentes RPC/REST/CAS. Trois vrais moteurs et501 membres, archive3/photos.
+Parcours réel :24 mesures320/390/768/1280, rechargements livre/fiche hors ligne, photo/notes/versions intactes, six modules nouveaux en cache.
+Provenance et CAS de séances/archives, tombales après restauration et anciens échos de cycle corrigés après reproductions rouges.
+Aucun SQL0009 ni déploiement0.24.0 distant à ce point ; la publication est autorisée par la poursuite du plan.
 [Construction et réception](docs/superpowers/plans/2026-10-29-l2-corbeille-livres.md).
 
 **29 octobre 2026 — PRIORITÉ DONNÉE PAR NEEGAN : THERMOMIX, APPELS PAYÉS ET BROUILLONS.**
@@ -20,11 +25,14 @@ Abandon explicite des anciens brouillons, résultats précédents récupérables
 Corrections TM en versions personnelles avec retour explicite aux étapes source ; exports documentaires des plans invalidés.
 Clôtures connues réconciliées sur réception/envoi, copies tardives consultables localement sans réouverture ; limites des anciens clients documentées.
 
-**Réception locale terminée ; publication autorisée en cours.** Navigateur **7952/7952** (épingle7951, +288 depuis7664 ; aucune assertion retirée), zéro erreur JavaScript/requête externe. Node **231/231**, migrations `--check`0, syntaxe de45 fichiers JS et diff propres.
+**Correctif 0.23.2 publié et vérifié.** Navigateur **7952/7952** (épingle7951, +288 depuis7664 ; aucune assertion retirée), zéro erreur JavaScript/requête externe. Node **231/231**, migrations `--check`0, syntaxe de45 fichiers JS et diff propres.
 Ciblés : sécurité38, JSON10, brouillons61, repères56, adaptation46, synchronisation67 ; huit mutations de protections détectées.
 Application réelle en profil Chrome jetable : deux passages complets,20 mesures à320/390/768/1280 par passage, sans débordement ni texte parasite ; cinq modules neufs en cache et lecture hors ligne.
 L’anomalie de lecture des temps venait du harnais : son attente asynchrone se résolvait sur `false`. Reproduction minimale conservée ; attente remplacée par lectures explicitement attendues jusqu’à l’état écrit. Les deux parcours corrigés prouvent description, estimations et correction manuelle conservées.
-Preuves : `.superpowers/sdd/2026-10-29-correctifs/`. La version publique demeure **0.23.1** jusqu’à vérification de la publication ci-après.
+Code **`5412745`**, avancé dans `main` et poussé ; GitHub Pages construit le29octobre à **17 h 26 HAE (21:26:05 UTC)**.
+**46 fichiers** de production/tests modifiés identiques au commit public. Suite publique **7952/7952**, zéro erreur JavaScript/requête externe.
+Parcours public complet : **20 mesures** sans débordement ni texte parasite, deux réponses simulées conservées, ancien brouillon abandonné, cinq modules en cache et lecture hors ligne.
+Preuves : `.superpowers/sdd/2026-10-29-correctifs/`. La version publique est désormais **0.23.2** ; L2 est repris séparément, encore incomplet.
 Aucun compte privé, HTTP Supabase authentifié, appareil physique iPhone/Safari ou TM7 utilisé ; copies de conflit locales hors archive et limite des anciens clients explicitement conservées dans le rapport.
 
 **29 octobre 2026 — PUBLICATION L0 + L1 SUR « deploy avant », PUIS POURSUITE DU PLAN AUTORISÉE.**

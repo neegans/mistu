@@ -6,7 +6,7 @@ import { preparerPhotoLocale, messageErreurImage } from '../core/image.js';
 import * as depot from '../model/repo.js';
 import { photoPrincipale, photosDeCuisson } from '../domain/cuisine-personnelle.js';
 import { capturerRecette } from './recette-garde.js';
-import { lireCycleRecette } from '../domain/cycle-recette.js';
+import { lireEtatRecette } from '../domain/cycle-edition.js';
 import { mentionCycleRecette } from './corbeille.js';
 import { contexteFichiers } from './components.js';
 import { modifierPhotosCuisson } from './cuisson.js';
@@ -79,14 +79,14 @@ export async function renderPhotoGestion({ id }, query = {}, ctx = {}, deps = {}
     const suivante = await lire(repo, id); if (fermee) return;
     vue = suivante;
     if (!vue.recipe) { libererImages(); contenu.replaceChildren(el('p', null, t('Recette introuvable.'))); return; }
-    const photo = vue.photo, cycle = lireCycleRecette(vue.recipe);
+    const photo = vue.photo, edition = ctx.editionsById?.get(vue.recipe.edition_id), cycle = lireEtatRecette(vue.recipe, edition);
     const editable = cycle.etat === 'active' || (cycle.etat === 'retiree' && photo?.personnelle);
     const titre = vue.recipe.original_title || vue.recipe.display_title || t('Recette');
     const figure = photo ? await figurePhotoPlat({ ...vue.recipe, photo_sha256: photo.sha256 }, { repo, ctxF, personnelle: photo.personnelle }) : null;
     const source = photo?.personnelle && vue.recipe.photo_sha256 ? await figurePhotoPlat(vue.recipe, { repo, ctxF }) : null;
     if (fermee) { figure?.dispose(); source?.dispose(); return; }
     libererImages();
-    contenu.replaceChildren(...[mentionCycleRecette(vue.recipe), el('h2', { class: 'recipe-title' }, titre),
+    contenu.replaceChildren(...[mentionCycleRecette(vue.recipe, edition), el('h2', { class: 'recipe-title' }, titre),
       photo ? el('p', { class: 'muted' }, photo.personnelle ? t('Ma photo du plat') : t('Image de la recette')) : null,
       figure || el('div', { class: 'photo-absente' }, t('Ajouter une photo')),
       editable ? el('div', { class: 'row photo-gestion-actions' },

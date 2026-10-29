@@ -14,6 +14,15 @@ import { pageHeader, section, emptyState, select, field, pdfFrame, libelleLivre,
 import { demarrerConnexion } from './settings.js';
 import { panneauIndex } from './index-livre.js';
 import { panneauClassement, noteLotsDeSeance } from './regroupement.js';
+import { capturerEdition, capturerProprietaire, conditionProprietaire } from './recette-garde.js';
+import { lireCycleEdition } from '../domain/cycle-edition.js';
+import { ErreurCycleRecette } from '../domain/cycle-recette.js';
+import { editionsActives } from './state.js';
+
+const signatureSeance = s => JSON.stringify([s?.id,s?.edition_id??null,s?.status,s?.page_ids??[],s?.document_ids??[]]);
+const signaturePage = p => JSON.stringify([p?.id,p?.edition_id??null,p?.document_id??null,p?.sha256??null,p?.rotation??0,p?.printed_page??null,p?.position??null]);
+const conditionSeance = s => ({key:s.id,fusion:c=>{if(signatureSeance(c)!==signatureSeance(s))throw new ErreurCycleRecette('source_modifiee');return null;}});
+const conditionPage = p => ({key:p.id,fusion:c=>{if(signaturePage(c)!==signaturePage(p))throw new ErreurCycleRecette('source_modifiee');return null;}});
 
 const INTENTIONS = ['index', 'recette'];
 // L'intention (spec § 10) voyage dans l'adresse, pas dans la base : consommée au premier rendu, puis retirée.
@@ -32,8 +41,12 @@ export const peutRetirerIntention = (applique, sessionId, queryCourante) => !!ap
 
 // Les écritures vivent dans repo.ajouterPages (spec import-cible § 3.6 : octets, séance, pages, documents — et la ligne du journal pour l'écran
 // ciblé) ; ici seulement ce qui est propre à cet écran : le toast et la navigation vers la séance. `naviguer` et `notifier` sont injectables (tests).
-export async function startScanSession(files, { edition_id = null, session_id = null, intention = null, naviguer = navigate, notifier = toast } = {}) {
-  const { session } = await repo.ajouterPages(files, { edition_id, session_id });
+export async function startScanSession(files, { edition_id = null, session_id = null, intention = null, contexteEdition = null, compte = null, sessionAttendue = null, ctx = null, naviguer = navigate, notifier = toast } = {}) {
+  const proprietaire = await (compte || capturerProprietaire(repo, ctx));
+  const attendue = sessionAttendue || (session_id ? await repo.get('scan_sessions',session_id) : null);
+  edition_id = attendue?.edition_id ?? edition_id;
+  if(edition_id&&!contexteEdition){const edition=ctx?.editionsById?.get(edition_id)??await repo.get('book_editions',edition_id);contexteEdition=await capturerEdition(repo,edition,{ctx});}
+  const { session } = await repo.ajouterPages(files, { edition_id, session_id, ...(contexteEdition?{editions:[contexteEdition]}:{}), conditions:{sync_state:[conditionProprietaire(proprietaire)],...(attendue?{scan_sessions:[conditionSeance(attendue)]}:{})} });
   notifier(t('{n} fichier(s) conservé(s) sur cet appareil', { n: files.length }));
   naviguer(adresseSeance(session.id, intention));
   return session;
@@ -53,12 +66,13 @@ export async function renderImport(params, query, ctx, deps = {}) {
 }
 
 function sessionsList(ctx) {
+  const compte = capturerProprietaire(repo,ctx);
   // Import ciblé (spec § 4.1, N3) : la séance d'un import CIBLÉ non terminé se reprend par la section « Imports » (de retour après ignore).
   const open = ctx.scan_sessions.filter((s) => s.status === 'open' && !seanceDUnImportCible(s, ctx.imports)).sort((a, b) => (b.started_at || '').localeCompare(a.started_at || ''));
   const root = el('div', null, pageHeader(t('Importer'), { back: { href: '/add', label: t('Ajouter') } }));
   root.append(el('div', { class: 'row', style: { marginBottom: '1rem' } },
-    el('button', { class: 'btn primary', onClick: async () => { const f = await pickFiles({ accept: 'image/*', capture: 'environment' }); if (f.length) startScanSession(f); } }, t('Photographier des pages')),
-    el('button', { class: 'btn', onClick: async () => { const f = await pickFiles({ accept: 'image/*,application/pdf,application/epub+zip' }); if (f.length) startScanSession(f); } }, t('Choisir des fichiers'))));
+    el('button', { class: 'btn primary', onClick: async () => { const f = await pickFiles({ accept: 'image/*', capture: 'environment' }); if (f.length) await startScanSession(f,{compte,ctx}).catch(erreurImport); } }, t('Photographier des pages')),
+    el('button', { class: 'btn', onClick: async () => { const f = await pickFiles({ accept: 'image/*,application/pdf,application/epub+zip' }); if (f.length) await startScanSession(f,{compte,ctx}).catch(erreurImport); } }, t('Choisir des fichiers'))));
   if (!open.length) root.append(emptyState('appareil-photo', t('Aucune séance en cours.')));
   else root.append(section(t('Séances à reprendre'), ...open.map((s) => el('a', { class: 'item-link card flat', href: `#/import?session=${s.id}` },
     el('div', { class: 'row between' }, el('strong', null, `${t('Séance du')} ${formatDate(s.started_at, { withTime: true })}`), el('span', { class: 'muted' }, t('{n} page(s)', { n: s.page_ids.length }))),
@@ -67,10 +81,27 @@ function sessionsList(ctx) {
 }
 
 async function sessionView(session, ctx, query = {}, { historique = { remplacer: remplacerAdresse }, deps = {} } = {}) {
+  const compte = capturerProprietaire(repo,ctx), editionAffichee = session.edition_id ? ctx.editionsById.get(session.edition_id) : null;
+  const captureEdition = editionAffichee ? capturerEdition(repo,editionAffichee,{ctx}) : null;
+  const baseSeance = structuredClone(session);
+  const conditions = async (pages=[]) => ({sync_state:[conditionProprietaire(await compte)],scan_sessions:[conditionSeance(baseSeance)],...(pages.length?{source_pages:pages.map(conditionPage)}:{})});
+  const options = async (pages=[]) => ({editions:captureEdition?[await captureEdition]:[],conditions:await conditions(pages)});
+  const ajouter = async accept => {
+    try { const files=await pickFiles(accept);if(files.length)await startScanSession(files,{session_id:session.id,sessionAttendue:baseSeance,contexteEdition:await captureEdition,compte,ctx}); }
+    catch(e){erreurImport(e);}
+  };
   const ctxF = await contexteFichiers(ctx);
   const pages = session.page_ids.map((id) => ctx.pagesById.get(id)).filter(Boolean);
   const docs = session.document_ids.map((id) => ctx.source_documents.find((d) => d.id === id)).filter(Boolean);
   const fileDocs = docs.filter((d) => d.source_type !== 'photo');
+  if(session.edition_id && lireCycleEdition(editionAffichee).etat!=='active') {
+    const root=el('div',{class:'stack'},pageHeader(t('Séance de scan'),{back:{href:'/import',label:t('Séances')}}),el('p',{class:'status warn'},t('Livre dans la corbeille')),el('a',{class:'btn',href:`#/books/${encodeURIComponent(session.edition_id)}`},t('Livre')));
+    const vues=await vignettesDePages(pages,ctxF);
+    root.append(el('div',{class:'thumbs'},...pages.map(p=>el('figure',null,vues.places.get(p.id),el('figcaption',null,p.printed_page??p.position)))));
+    const telecharger=boutonTelechargerPages(vues.distantes,{connecte:ctxF.connecte,telecharger:vues.telecharger});if(telecharger)root.append(telecharger);
+    for(const d of fileDocs)root.append(el('p',null,d.original_filename),d.source_type==='pdf'?pdfFrame({sha256:d.sha256,filename:d.original_filename,connecte:ctxF.connecte,uid:ctxF.uid,telecharger:gesteTelechargement({moteur:ctxF.moteur})}):el('p',null,t('EPUB conservé. La lecture intégrée n’est pas encore disponible : indexe les recettes à la main ou exporte les pages en images.')));
+    return root;
+  }
   // L'intention (spec § 10, F6) voyage dans l'adresse : présélection des pages, panneau d'index ouvert ou non.
   // C6 : la présélection porte sur les pages RÉSOLUES — `session.page_ids` peut nommer une page que cette base n'a
   // pas (fiche reçue d'ailleurs, page retirée depuis). Cocher un identifiant sans page créait une sélection qui ne
@@ -101,7 +132,7 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   // Un ?import= qui désigne un classement l'emporte (lot D, § 4.1) : le panneau d'index reste fermé.
   const seanceIndex = !classementDesigne && (session.but === 'index' || applique.ouvrirIndex || !!ligneIndex
     || (ctx.imports || []).some((i) => i?.kind === 'index' && i.scan_session_id === session.id) || (pages.length > 0 && pages.every((p) => p.kind === 'index')));
-  if (applique.ouvrirIndex && session.but !== 'index') { session.but = 'index'; repo.save('scan_sessions', { ...session }).catch((e) => logError('import.but', { error: e })); }
+  if (applique.ouvrirIndex && session.but !== 'index') { await repo.save('scan_sessions', { ...session,but:'index' },await options()).then(()=>{session.but='index';}).catch(erreurImport); }
   const root = el('div', null);
   root.append(pageHeader(t('Séance de scan'), { subtitle: `${t('Débutée le')} ${formatDate(session.started_at, { withTime: true })}`, back: { href: '/import', label: t('Séances') } }));
   const noteLots = noteLotsDeSeance(session, ctx); if (noteLots) root.append(noteLots); // lot D (D-D18)
@@ -125,19 +156,22 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
     phraseSeance));
 
   // Livre associé
-  const editionOptions = [{ value: '', label: t('— Aucun livre (à associer plus tard) —') }, ...ctx.book_editions.map((e) => ({ value: e.id, label: libelleLivre(e, ctx.booksById.get(e.book_id)) }))];
+  const editionOptions = [{ value: '', label: t('— Aucun livre (à associer plus tard) —') }, ...editionsActives(ctx).map((e) => ({ value: e.id, label: libelleLivre(e, ctx.booksById.get(e.book_id)) }))];
   root.append(el('div', { class: 'card flat row between' },
     field(t('Livre de cette séance'), select(editionOptions, session.edition_id || '', async (v) => {
-      session.edition_id = v || null;
-      const upd = { scan_sessions: [session], source_pages: pages.map((p) => ({ ...p, edition_id: session.edition_id })), source_documents: docs.map((d) => ({ ...d, edition_id: session.edition_id })) };
-      await repo.saveBatch(upd); refresh();
+      try {
+        const cible=v?ctx.editionsById.get(v):null,captureCible=cible?await capturerEdition(repo,cible,{ctx}):null,opts=await options(pages);
+        const captures=[...opts.editions,...(captureCible&&captureCible.edition_id!==editionAffichee?.id?[captureCible]:[])];
+        const upd = { scan_sessions: [{...session,edition_id:v||null}], source_pages: pages.map((p) => ({ ...p, edition_id:v||null })), source_documents: docs.map((d) => ({ ...d, edition_id:v||null })) };
+        await repo.saveBatch(upd,{...opts,editions:captures}); refresh();
+      }catch(e){erreurImport(e);}
     })),
     el('a', { class: 'btn small', href: '#/add' }, t('Nouveau livre'))));
 
   // Ajouter des pages
   root.append(el('div', { class: 'row', style: { marginBottom: '.8rem' } },
-    el('button', { class: 'btn primary', onClick: async () => { const f = await pickFiles({ accept: 'image/*', capture: 'environment' }); if (f.length) startScanSession(f, { session_id: session.id }); } }, t('+ Photographier')),
-    el('button', { class: 'btn', onClick: async () => { const f = await pickFiles({ accept: 'image/*,application/pdf' }); if (f.length) startScanSession(f, { session_id: session.id }); } }, t('+ Fichiers'))));
+    el('button', { class: 'btn primary', onClick: () => ajouter({ accept: 'image/*', capture: 'environment' }) }, t('+ Photographier')),
+    el('button', { class: 'btn', onClick: () => ajouter({ accept: 'image/*,application/pdf' }) }, t('+ Fichiers'))));
 
   // Miniatures
   const thumbs = el('div', { class: 'thumbs' });
@@ -167,15 +201,15 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   // (secondaire dès deux cochées, D-D2) ; chaque redessin du panneau redessine la barre.
   // Créé APRÈS le dernier await du rendu (vignettesDePages, lot G) : comme l'abonné de la phrase de séance (lot G, ronde 1), il n'est monté qu'au
   // tour qui suit la fin du rendu — créé avant, il se désabonnerait du bus sans avoir été monté ; drawActions ne le lit qu'après.
-  const panneau = panneauClassement(session, ctx, () => [...selected], { ...deps, importId: ligneClassement?.id ?? null, surChangement: () => drawActions() });
+  const panneau = panneauClassement(session, ctx, () => [...selected], { ...deps,contexteEdition:await captureEdition, importId: ligneClassement?.id ?? null, surChangement: () => drawActions() });
   for (const p of pages) {
     const check = el('input', { type: 'checkbox', checked: selected.has(p.id), onChange: (e) => { if (e.target.checked) selected.add(p.id); else selected.delete(p.id); drawActions(); } });
-    const pageInput = el('input', { type: 'number', placeholder: seanceIndex ? t('Page de l’index') : t('p. imprimée'), 'aria-label': seanceIndex ? t('Page de l’index') : t('p. imprimée'), value: p.printed_page ?? '', style: { minHeight: '30px', padding: '.2rem .4rem', fontSize: '.8rem' }, onChange: async (e) => { p.printed_page = e.target.value ? parseInt(e.target.value, 10) : null; await repo.save('source_pages', p); } });
+    const pageInput = el('input', { type: 'number', placeholder: seanceIndex ? t('Page de l’index') : t('p. imprimée'), 'aria-label': seanceIndex ? t('Page de l’index') : t('p. imprimée'), value: p.printed_page ?? '', style: { minHeight: '30px', padding: '.2rem .4rem', fontSize: '.8rem' }, onChange: async (e) => { const valeur=e.target.value?parseInt(e.target.value,10):null;try{await repo.save('source_pages',{...p,printed_page:valeur},await options([p]));p.printed_page=valeur;}catch(error){erreurImport(error);} } });
     // Lot I1 (D-I12) : « Pivoter » (quart de tour), gardé sur la page (source_pages.rotation) : la miniature ET l'image envoyée à l'assistant le suivent.
     const fig = el('figure', { dataset: { page: p.id, rotation: String([90, 180, 270].includes(p.rotation) ? p.rotation : 0) } });
     const pivoter = el('button', { class: 'btn small', type: 'button', 'aria-label': t('Pivoter la page {n}', { n: p.position }), onClick: async () => {
       const r = (([90, 180, 270].includes(p.rotation) ? p.rotation : 0) + 90) % 360;
-      try { const fraiche = await repo.get('source_pages', p.id); if (!fraiche) return; await repo.save('source_pages', { ...fraiche, rotation: r }); p.rotation = r; fig.dataset.rotation = String(r); }
+      try { await repo.save('source_pages', { ...p, rotation: r },await options([p])); p.rotation = r; fig.dataset.rotation = String(r); }
       catch (e) { logError('import.pivoter', { error: e, id: p.id }); toast(t('La page n’a pas pu être pivotée. Réessaie.')); }
     } }, `↻ ${t('Pivoter')}`);
     fig.append(el('span', { class: 'num' }, String(p.position)), vignettes.places.get(p.id),
@@ -209,40 +243,45 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   // Lot I1 (D-I11) : une séance d'INDEX (ouverte par « Ajouter des pages de sommaire », ou qui a déjà une lecture d'index) lit TOUTES ses pages, sans
   // cocher ; une séance générique lit la sélection, par « Index / table des matières ». Le panneau (src/ui/index-livre.js) lit page par page et enregistre.
   const indexPanel = panneauIndex(session, ctx, () => (seanceIndex ? pages.map((p) => p.id) : [...selected]), { ...deps, seanceIndex, connecter: () => demarrerConnexion(ctx.sync?.auth),
-    ajouterPage: async () => { const f = await pickFiles({ accept: 'image/*', capture: 'environment' }); if (f.length) startScanSession(f, { session_id: session.id }); } });
+    contexteEdition:await captureEdition, ajouterPage: () => ajouter({ accept: 'image/*', capture: 'environment' }) });
   indexPanel.hidden = !seanceIndex;
   root.append(indexPanel);
   // consommée : un refresh() ne la réappliquera pas — mais seulement si l'adresse est encore celle-ci (C7).
   if (applique.consommee && peutRetirerIntention(applique, session.id, parseHash().query)) historique.remplacer(adresseSeance(session.id, null));
 
   root.append(el('div', { class: 'row', style: { marginTop: '1rem' } },
-    el('button', { class: 'btn', onClick: async () => { session.status = 'done'; await repo.save('scan_sessions', session); toast(t('Séance terminée')); navigate(session.edition_id ? `/books/${session.edition_id}` : '/library'); } }, t('Terminer la séance')),
+    el('button', { class: 'btn', onClick: async () => { try{await repo.save('scan_sessions',{...session,status:'done'},await options());toast(t('Séance terminée'));navigate(session.edition_id?`/books/${session.edition_id}`:'/library');}catch(e){erreurImport(e);} } }, t('Terminer la séance')),
     el('span', { class: 'muted' }, t('Une séance interrompue reste disponible dans Importer.'))));
 
   async function replacePage(pageId) {
+    try {
     const files = await pickFiles({ accept: 'image/*', multiple: false, capture: 'environment' });
     if (!files.length) return;
     const p = ctx.pagesById.get(pageId);
     const file = files[0];
     const sha256 = await sha256Hex(file);
-    await repo.putFile(sha256, file, { original_filename: file.name });
     const doc = { id: repo.newId('doc'), edition_id: p.edition_id, source_type: 'photo', original_filename: file.name, blob_path: `files/${sha256}`, sha256, size: file.size, mime: file.type, scan_session_id: session.id, captured_at: repo.nowIso(), replaces_document_id: p.document_id };
-    await repo.saveBatch({ source_documents: [doc], source_pages: [{ ...p, document_id: doc.id, sha256, issues: repo.issuesPourImage(file.size), replaced_at: repo.nowIso() }] }); // une seule définition du signalement (repo.issuesPourImage)
+    await repo.saveBatch({ source_documents: [doc], source_pages: [{ ...p, document_id: doc.id, sha256, issues: repo.issuesPourImage(file.size), replaced_at: repo.nowIso() }] },{...await options([p]),fichiers:[{sha256,blob:file,meta:{original_filename:file.name}}]});
     toast(t('Page remplacée')); refresh();
+    }catch(e){erreurImport(e);}
   }
   async function removePages(ids) {
+    try {
     // Lot D, ronde 1 : une page est liée dès qu'une fiche la nomme — source_page_ids, ou index_page_id (B-7 retire la photo d'index de l'union d'une fiche
     // lue) — ou qu'une version la cite (provenance.source_page_ids, relation d'archive dure) : la retirer casserait la fiche et la restauration.
     const liees = new Set();
-    for (const r of ctx.recipes) { for (const id of r.source_page_ids || []) liees.add(id); if (r.index_page_id) liees.add(r.index_page_id); }
-    for (const v of ctx.recipe_versions || []) for (const id of (Array.isArray(v?.provenance?.source_page_ids) ? v.provenance.source_page_ids : [])) liees.add(id);
+    for (const r of await repo.all('recipes')) { for (const id of r.source_page_ids || []) liees.add(id); if (r.index_page_id) liees.add(r.index_page_id); }
+    for (const v of await repo.all('recipe_versions')) for (const id of (Array.isArray(v?.provenance?.source_page_ids) ? v.provenance.source_page_ids : [])) liees.add(id);
     const used = ids.filter((id) => liees.has(id));
     if (used.length) { toast(t('{n} page(s) déjà liée(s) à une recette : retire d’abord la recette.', { n: used.length })); return; }
     if (!(await confirmDialog(t('Retirer {n} page(s) de la séance ? Les fichiers restent dans la base tant qu’une autre référence existe.', { n: ids.length }), { danger: true, okLabel: t('Retirer') }))) return;
-    session.page_ids = session.page_ids.filter((id) => !ids.includes(id));
-    await repo.removeMany('source_pages', ids);
-    await repo.save('scan_sessions', session);
+    const selection=pages.filter(p=>ids.includes(p.id)),opts=await options(selection);delete opts.conditions.scan_sessions;
+    const refuserLiens=(rows,extraire)=>{if(rows.some(r=>extraire(r).some(id=>ids.includes(id))))throw new ErreurCycleRecette('source_modifiee');};
+    opts.conditions.recipes=[{toutes:true,verifier:rows=>refuserLiens(rows,r=>[...(r.source_page_ids||[]),r.index_page_id].filter(Boolean))}];
+    opts.conditions.recipe_versions=[{toutes:true,verifier:rows=>refuserLiens(rows,r=>r.provenance?.source_page_ids||[])}];
+    await repo.transitionner('scan_sessions',session.id,{...opts,attendus:['open','done'],patch:c=>{if(signatureSeance(c)!==signatureSeance(baseSeance))throw new ErreurCycleRecette('source_modifiee');return {page_ids:c.page_ids.filter(id=>!ids.includes(id))};}});
     refresh();
+    }catch(e){erreurImport(e);}
   }
   // Lot G (§ 4.3, F-21) : la phrase SEULE suit onEtat. Ronde 1 : l'abonné ne survit jamais à l'écran. Il est pris en FIN de rendu ; au tour qui
   // suit (app.js insère le nœud dans la même suite de micro-tâches que la fin du rendu), un rendu jamais monté — dépassé par une navigation —
@@ -257,6 +296,8 @@ async function sessionView(session, ctx, query = {}, { historique = { remplacer:
   }
   return root;
 }
+
+function erreurImport(error) { logError('import.source', {error});toast(t('Le livre ou ses pages ont changé. Rouvre la séance avant de continuer.')); }
 
 
 // Une ligne tapée ou collée = une entrée. Ronde de clôture (R-C-24) : toute fin de ligne coupe (LF, CRLF compté une fois, CR seul, VT, FF, NEL U+0085,

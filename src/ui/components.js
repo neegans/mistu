@@ -1,3 +1,4 @@
+import { lireCycleEdition } from '../domain/cycle-edition.js';
 // Composants partagés : en-têtes, badges d'état, cartes, pastilles de filtres, quantités avec hypothèses, minuteries.
 import { el, formatMinutes, downloadBlob, toast } from '../core/dom.js';
 import { t, label } from '../core/i18n.js';
@@ -191,7 +192,7 @@ export function provenanceText(recipe, book, edition) {
   // C10 : un signet rattaché à un livre portait le livre et PERDAIT son hôte (alors que la spec, F22, demande les
   // deux : c'est une page web rangée dans un livre, pas une page du livre). Les deux s'affichent, dans cet ordre.
   if (book) {
-    const duLivre = `${book.title}${book.author ? ` — ${book.author}` : ''}${recipe.printed_page ? ` · ${t('page')} ${recipe.printed_page}` : ''}`;
+    const duLivre = `${book.title}${book.author ? ` — ${book.author}` : ''}${recipe.printed_page ? ` · ${t('page')} ${recipe.printed_page}` : ''}${lireCycleEdition(edition).etat === 'retiree' ? ` · ${t('Livre dans la corbeille')}` : ''}`;
     return lien ? `${duLivre} · ${lien.ok ? lien.hote : t('Adresse non reconnue')}` : duLivre;
   }
   if (lien) return lien.ok ? lien.hote : t('Adresse non reconnue');
@@ -289,7 +290,8 @@ export function ligneSource(doc) {
   const source = recipe?.origine === 'ia' ? provenanceText(recipe, book, edition)
     : lien?.ok ? t('Du web') : book ? t('De mon livre') : provenanceText(recipe, book, edition);
   const duree = dureeTotale(version, recipe);
-  return duree === null ? source : `${source} · ${formatMinutes(duree)}`;
+  const origine = lireCycleEdition(edition).etat === 'retiree' && !source.includes(t('Livre dans la corbeille')) ? `${source} · ${t('Livre dans la corbeille')}` : source;
+  return duree === null ? origine : `${origine} · ${formatMinutes(duree)}`;
 }
 
 // Les liens et boutons photo sont frères : aucun contrôle imbriqué dans un lien de carte.

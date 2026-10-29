@@ -660,7 +660,7 @@ export async function runAjouterTests({ eq, ok }) {
     // Le contrat sur lequel repose le try/catch du geste « enregistrer » de la route : une écriture refusée REMONTE,
     // elle n'est pas avalée ici. Sans ça, la route croirait avoir enregistré et naviguerait vers une fiche absente.
     let appels = 0;
-    const faux = { newId: (p) => `${p}-x`, saveBatch: async () => { appels += 1; throw new Error('quota'); } };
+    const faux = { newId: (p) => `${p}-x`, get: async () => undefined, saveBatch: async () => { appels += 1; throw new Error('quota'); } };
     let nom = null;
     try { await LA.enregistrerLivre({ champs: { title: 'T' }, isbn: '', coverSha256: null }, { repo: faux }); } catch (e) { nom = e.message; }
     eq([appels, nom], [1, 'quota'], 'livre : un saveBatch refusé remonte (c’est ce que la route attrape avant de dire quoi que ce soit)');
@@ -945,7 +945,7 @@ export async function runAjouterTests({ eq, ok }) {
     await withRepo(async (repo, db) => {
       const edition = { id: 'eZ', book_id: 'bZ', isbn: null, publisher: 'Avant', year: 2019, language: 'fr', unit_convention_id: null, convention_evidence: null, owned: true, cover_sha256: null };
       const livre = { id: 'bZ', title: 'Deux gestes', author: 'A', cuisines: [], tags: [] };
-      await repo.saveBatch({ books: [livre], book_editions: [edition] });
+      await repo.saveBatch({ books: [livre], book_editions: [edition] }, { conditions: { book_editions: [{key:edition.id,absente:true}] } });
       const ctxDeux = (ed) => ({ editionsById: new Map([['eZ', ed]]), booksById: new Map([['bZ', livre]]), books: [livre],
         recipes: [], recipe_versions: [], source_documents: [], source_pages: [], rediscovery_prefs: [],
         book_editions: [ed], docsByRecipe: new Map(), scan_sessions: [], settings: {} });
@@ -1702,7 +1702,7 @@ export async function runAjouterTests({ eq, ok }) {
         // 12. RF-I1, l’autre côté : une écriture refusée ne s’annonce pas et ne mène nulle part — le bouton se
         // rouvre, la saisie reste. console.error est remplacé (logError) et rendu dans le finally.
         const navsR = []; const ditsR = [];
-        const repoRefus = { newId: repo.newId, putFile: repo.putFile, getFile: repo.getFile, saveBatch: async () => { throw new Error('quota'); } };
+        const repoRefus = { ...repo, saveBatch: async () => { throw new Error('quota'); } };
         const r12 = await LA.renderLivreAjoutRoute({}, {}, {}, { ...depsRoute, repo: repoRefus, navigate: (p) => navsR.push(p), toast: (m) => ditsR.push(m) });
         cliquer(r12, 'Saisir à la main');
         saisirTitre(r12, 'Refusé');
@@ -2169,7 +2169,7 @@ export async function runAjouterTests({ eq, ok }) {
         const recette = (await repo.ajouterPages([await F.imageDe('pp.jpg', '#777')], { import: { id: repo.newId('imp'), kind: 'recette', recipe_id: 'rc_prep' } })).importId;
         await repo.db.put('recipes', { id: 'rc_prep', original_title: 'Recette à lire', availability: 'reference_only' }, { origin: 'device' });
         let libererPut = null;
-        const espion = { ...repo, putFile: (...a) => new Promise((r) => { libererPut = () => r(repo.putFile(...a)); }) };
+        const espion = { ...repo, saveBatch: (...a) => a[1]?.fichiers?.length ? new Promise((r) => { libererPut = () => r(repo.saveBatch(...a)); }) : repo.saveBatch(...a) };
         const { root, dits } = await monter(espion, { ff, pick: async () => [await F.imageDe('vp.jpg', '#a3a')] });
         role(root, 'choisir-couverture').click();
         await attendre(() => root.etatRoute().lecture?.statut === 'preparation' && typeof libererPut === 'function', 'préparation');
@@ -2787,7 +2787,7 @@ export async function runAjouterTests({ eq, ok }) {
         eq((await db.get('imports', premiere)).edition_id, (await db.getAll('book_editions'))[0]?.id, '« Ajouter ce livre » ferme cette ligne ENREGISTRE avec l’édition (D-E12)');
       });
 
-      await scenario('écriture du journal impossible : couverture posée, aucun appel ; la ligne précédente reste (R-E-10)', async (repo, db) => {
+      await scenario('écriture du journal impossible : aucun octet orphelin, aucun appel ; la ligne précédente reste (R-E-10)', async (repo, db) => {
         const vraiErreur = console.error;
         const erreurs = [];
         console.error = (...a) => erreurs.push(String(a[0]));
@@ -2801,7 +2801,7 @@ export async function runAjouterTests({ eq, ok }) {
           role(r1.root, 'choisir-couverture').click();
           await attendre(() => r1.root.etatRoute().lecture?.statut === 'refus_image', 'refus');
           eq([role(r1.root, 'lecture-message')?.textContent, await db.count('files'), await db.count('imports'), ff.posts().length, !!r1.root.etatRoute().couverture.sha256, erreurs.some((x) => x.includes('livre.couverture.journal'))],
-            ['Le livre n’a pas pu être enregistré. Réessaie.', 1, 0, 0, true, true], 'journal impossible : le message, la couverture POSÉE (ligne files), aucune ligne, aucun POST, journalisé');
+            ['Le livre n’a pas pu être enregistré. Réessaie.', 0, 0, 0, false, true], 'journal impossible : le message, aucun octet ou journal, aucun POST, échec journalisé');
           scene.replaceChildren();
           rejeter = false;
           const r2 = await monter(espion, { ff, pick: async () => [images.shift()] });
@@ -2818,8 +2818,8 @@ export async function runAjouterTests({ eq, ok }) {
           window.dispatchEvent(new Event('online'));
           await attendre(() => lus.length > nLus, 'online : la ligne précédente relue');
           await lus.at(-1); await tick(); await tick();
-          eq([r2.root.etatRoute().pas, r2.root.etatRoute().lecture?.statut, r2.root.etatRoute().provenance, r2.root.etatRoute().champs.title, typeof shaB, r2.root.etatRoute().couverture.sha256, ff.vers('openlibrary.org/search.json').length],
-            [1, 'refus_image', null, '', 'string', shaB, nOl], 'journal refusé à la seconde photo puis online : pas 1, la lecture de la première couverture n’est PAS posée sous la photo de la seconde, aucune requête Open Library (C1 ; avant : pas 2 « Lu sur la couverture » avec le livre A et la photo B → rouge)');
+          eq([r2.root.etatRoute().pas, r2.root.etatRoute().lecture?.statut, r2.root.etatRoute().provenance, r2.root.etatRoute().champs.title, shaB, r2.root.etatRoute().couverture.sha256, ff.vers('openlibrary.org/search.json').length],
+            [1, 'refus_image', null, '', null, null, nOl], 'journal refusé à la seconde photo puis online : pas 1, la lecture de la première couverture n’est PAS posée sous la photo de la seconde, aucune requête Open Library (C1 ; avant : pas 2 « Lu sur la couverture » avec le livre A et la photo B → rouge)');
           rejeter = false;
           bouton(r2.root, 'Saisir à la main').click();
           taper(titreDe(r2.root), 'Mon livre');
@@ -2836,21 +2836,20 @@ export async function runAjouterTests({ eq, ok }) {
         console.error = (...a) => erreurs.push(String(a[0]));
         window.addEventListener('unhandledrejection', surRejet);
         try {
-          // (a) putFile rejette (quota) : ce n'est pas une image illisible — la phrase du journal impossible, journalisée.
-          const e1 = { ...repo, putFile: () => Promise.reject(new Error('QuotaExceededError')) };
+          // (a) L'écriture atomique rejette (quota) : ce n'est pas une image illisible — la phrase du journal impossible, journalisée.
+          const e1 = { ...repo, saveBatch: () => Promise.reject(new Error('QuotaExceededError')) };
           const a = await monter(e1, { pick: async () => [await F.imageDe('q1.jpg', '#a33')] });
           role(a.root, 'choisir-couverture').click();
           await attendre(() => a.root.etatRoute().lecture?.statut === 'refus_image', 'refus dit');
-          eq([role(a.root, 'lecture-message')?.textContent, erreurs.some((x) => x.includes('livre.couverture.pose')), await db.count('imports')], ['Le livre n’a pas pu être enregistré. Réessaie.', true, 0], 'stockage plein à la pose : « Le livre n’a pas pu être enregistré. Réessaie. », journalisé, aucune ligne (ronde 1, #21 ; avant : « Cette image ne peut pas être lue ici… », sans journal)');
-          // (b) la relecture des octets posés rejette : même filet que le journal, rien de figé en « Préparation… ».
+          eq([role(a.root, 'lecture-message')?.textContent, erreurs.some((x) => x.includes('livre.couverture.journal')), await db.count('imports'), await db.count('files')], ['Le livre n’a pas pu être enregistré. Réessaie.', true, 0, 0], 'stockage plein à la pose : « Le livre n’a pas pu être enregistré. Réessaie. », journalisé, aucune ligne (ronde 1, #21 ; avant : « Cette image ne peut pas être lue ici… », sans journal)');
+          // (b) Une condition rejette pendant la transaction : journal et octets refusés ensemble, écran débloqué.
           scene.replaceChildren();
-          let rejeterGet = true;
-          const e2 = { ...repo, getFile: (...x) => (rejeterGet ? (rejeterGet = false, Promise.reject(new Error('IDB morte'))) : repo.getFile(...x)) };
+          const e2 = { ...repo, saveBatch: (b,o) => repo.saveBatch(b,{...o,conditions:{...o.conditions,imports:[{key:b.imports[0].id,fusion:()=>{throw new Error('IDB morte');}}]}}) };
           const b = await monter(e2, { pick: async () => [await F.imageDe('q2.jpg', '#33a')] });
           role(b.root, 'choisir-couverture').click();
           await attendre(() => b.root.etatRoute().lecture?.statut === 'refus_image' || rejets.length > 0, 'préparation terminée (refus dit, ou rejet non géré)');
           await tick();
-          eq([b.root.etatRoute().lecture?.statut, role(b.root, 'lecture-message')?.textContent, !!role(b.root, 'choisir-couverture'), await db.count('imports'), rejets.length], ['refus_image', 'Le livre n’a pas pu être enregistré. Réessaie.', true, 0, 0], 'relecture des octets impossible : dit, les deux boutons rendus, aucune ligne, aucun rejet non géré (ronde 1, #29)');
+          eq([b.root.etatRoute().lecture?.statut, role(b.root, 'lecture-message')?.textContent, !!role(b.root, 'choisir-couverture'), await db.count('imports'), await db.count('files'), rejets.length], ['refus_image', 'Le livre n’a pas pu être enregistré. Réessaie.', true, 0, 0, 0], 'transaction refusée : dit, les deux boutons rendus, aucun journal ou octet, aucun rejet non géré (ronde 1, #29)');
           // (c) le vol rejette (transition de départ impossible) : journalisé, l'écran suit la ligne relue (a_lancer), jamais « Lecture… » sans vol.
           scene.replaceChildren();
           const e3 = { ...repo, transitionner: (s, k, o) => (Array.isArray(o?.attendus) && o.attendus.join() === 'a_lancer,echec' ? Promise.reject(new Error('IDB morte')) : repo.transitionner(s, k, o)) };
@@ -2902,7 +2901,7 @@ export async function runAjouterTests({ eq, ok }) {
         let suspendreSha = null, libererGet = null, libererPut = null, suspendrePut = false;
         const espion = { ...repo,
           getFile: (sha) => (sha === suspendreSha ? new Promise((res) => { libererGet = () => { const p = repo.getFile(sha); res(p); return p; }; }) : repo.getFile(sha)),
-          putFile: (...a) => (suspendrePut ? new Promise((res) => { libererPut = () => res(repo.putFile(...a)); }) : repo.putFile(...a)) };
+          saveBatch: (...a) => (suspendrePut && a[1]?.fichiers?.length ? new Promise((res) => { libererPut = () => res(repo.saveBatch(...a)); }) : repo.saveBatch(...a)) };
         const images = [await F.imageDe('a20.jpg', '#a33'), await F.imageDe('b20.jpg', '#33a')];
         const { root } = await monter(espion, { pick: async () => [images.shift()] });
         role(root, 'choisir-couverture').click();
@@ -2924,7 +2923,7 @@ export async function runAjouterTests({ eq, ok }) {
         let libererT = null, libererPut = null, suspendre = false;
         const espion = { ...repo,
           transitionner: (s, k, o) => (suspendre && Array.isArray(o?.attendus) && o.attendus.join() === 'a_verifier' ? new Promise((res, rej) => { libererT = () => repo.transitionner(s, k, o).then(res, rej); }) : repo.transitionner(s, k, o)),
-          putFile: (...a) => (suspendre && libererT ? new Promise((res) => { libererPut = () => res(repo.putFile(...a)); }) : repo.putFile(...a)) };
+          saveBatch: (...a) => (suspendre && libererT && a[1]?.fichiers?.length ? new Promise((res) => { libererPut = () => res(repo.saveBatch(...a)); }) : repo.saveBatch(...a)) };
         const images = [await F.imageDe('hv1.jpg', '#a33'), await F.imageDe('hv2.jpg', '#33a')];
         const { root } = await monter(espion, { ff: F.fauxFetch({ assistant: [502, { erreur: 'serveur' }] }), pick: async () => [images.shift()] });
         role(root, 'choisir-couverture').click();
@@ -2965,7 +2964,7 @@ export async function runAjouterTests({ eq, ok }) {
         const surRejet = (e) => rejets.push(e);
         window.addEventListener('unhandledrejection', surRejet);
         try {
-          const espion = { ...repo, get: (s, k) => { if (s === 'imports') lectures += 1; return repo.get(s, k); }, putFile: (...a) => new Promise((r) => { libererPut = () => r(repo.putFile(...a)); }) };
+          const espion = { ...repo, get: (s, k) => { if (s === 'imports') lectures += 1; return repo.get(s, k); }, saveBatch: (...a) => a[1]?.fichiers?.length ? new Promise((r) => { libererPut = () => r(repo.saveBatch(...a)); }) : repo.saveBatch(...a) };
           const { root } = await monter(espion, { pick: async () => [await F.imageDe('p.jpg', '#a33')] });
           window.dispatchEvent(new Event('online')); await tick(); await tick();
           bouton(root, 'Saisir à la main').click();
@@ -2984,7 +2983,7 @@ export async function runAjouterTests({ eq, ok }) {
 
       await scenario('pendant la préparation : « Ajouter ce livre » attend, « Identifier » garde la photo et ne demande aucune couverture distante (D-E9, D-E18 ; ronde 1)', async (repo) => {
         let libererPut = null;
-        const espion = { ...repo, putFile: (...a) => new Promise((r) => { libererPut = () => r(repo.putFile(...a)); }) };
+        const espion = { ...repo, saveBatch: (...a) => a[1]?.fichiers?.length ? new Promise((r) => { libererPut = () => r(repo.saveBatch(...a)); }) : repo.saveBatch(...a) };
         const ff = F.fauxFetch({ ol: (a) => (new URL(a.url).searchParams.has('isbn') ? [200, { numFound: 1, docs: [{ title: 'Livre identifié', author_name: ['X'], language: ['fre'] }] }] : [200, { numFound: 0, docs: [] }]) });
         const { root } = await monter(espion, { ff, pick: async () => [await F.imageDe('pr.jpg', '#a33')] });
         role(root, 'choisir-couverture').click();
@@ -3428,7 +3427,7 @@ export async function runAjouterTests({ eq, ok }) {
       await scenario('vague finale : la préparation finie après « Saisir à la main » rend les blocs seuls — saisie et focus gardés (I-E4, R-UX-9)', async (repo, db) => {
         const ff = F.fauxFetch({ assistant: null });
         let libererPut = null;
-        const espion = { ...repo, putFile: (...a) => new Promise((r) => { libererPut = () => r(repo.putFile(...a)); }) };
+        const espion = { ...repo, saveBatch: (...a) => a[1]?.fichiers?.length ? new Promise((r) => { libererPut = () => r(repo.saveBatch(...a)); }) : repo.saveBatch(...a) };
         const { root } = await monter(espion, { ff, pick: async () => [await F.imageDe('fp.jpg', '#a3a')] });
         role(root, 'choisir-couverture').click();
         await attendre(() => root.etatRoute().lecture?.statut === 'preparation' && typeof libererPut === 'function', 'préparation');
@@ -3447,7 +3446,7 @@ export async function runAjouterTests({ eq, ok }) {
         console.error = () => {};
         try {
           let rejeter = null;
-          const e2 = { ...repo, putFile: () => new Promise((_, rej) => { rejeter = () => rej(new Error('QuotaExceededError')); }) };
+          const e2 = { ...repo, saveBatch: () => new Promise((_, rej) => { rejeter = () => rej(new Error('QuotaExceededError')); }) };
           const b = await monter(e2, { pick: async () => [await F.imageDe('fq.jpg', '#aa3')] });
           role(b.root, 'choisir-couverture').click();
           await attendre(() => b.root.etatRoute().lecture?.statut === 'preparation' && typeof rejeter === 'function', 'préparation (refus à venir)');
@@ -3856,9 +3855,9 @@ export async function runAjouterTests({ eq, ok }) {
     const sw = await lire('../sw.js');
     ok(sw.length > 300 && sw.includes('SHELL'), `statique sw.js : le source est bien lu (${sw.length} caractères, SHELL présent) — sans quoi les inclusions ci-dessous ne prouveraient rien (S4)`);
     for (const m of ['./src/ui/puces.js', './src/ui/livre-ajout.js', './src/ui/accueil-livre.js', './src/ui/signet.js', './src/core/image.js', './src/core/blob-urls.js', './src/core/lien.js', './src/core/isbn.js', './src/domain/lecture-web.js']) ok(sw.includes(`'${m}'`), `SHELL : ${m}`);
-    ok(/VERSION = 'cuisine-os-v0\.23\.2-\d+'/.test(sw), 'sw.js : VERSION 0.23.2');
+    ok(/VERSION = 'cuisine-os-v0\.24\.0-\d+'/.test(sw), 'sw.js : VERSION 0.24.0');
     const { APP_VERSION } = await import('../src/model/schema.js');
-    eq(APP_VERSION, '0.23.2', 'APP_VERSION 0.23.2 (lot UI-1, carnet)');
+    eq(APP_VERSION, '0.24.0', 'APP_VERSION 0.24.0 (lot UI-1, carnet)');
     const { GOOGLE_BOOKS } = await import('../src/sync/config.js');
     ok(typeof GOOGLE_BOOKS?.key === 'string' && (GOOGLE_BOOKS.key === '' || /^AIza[0-9A-Za-z_-]{35}$/.test(GOOGLE_BOOKS.key)), 'config : la clé Google Books est vide ou au format d’une clé d’API publique — un test de forme, jamais de valeur (S2/F2)');
   }

@@ -556,7 +556,7 @@ export async function abandonnerEnvoi({ db, seq, confirm, retirer = retirerEnvoi
 // justement d'écarter. Il est donc invalidé, et seulement quand quelque chose a été écrit.
 export async function abandonnerCopieConflit({db, id, confirm = confirmDialog, appliquer = abandonnerConflitCycle, invalider = invalidate}) {
   const conflit = await db.get('sync_conflicts', id);
-  if (!conflit || conflit.kind !== 'cycle' || conflit.store !== 'recipes') return false;
+  if (!conflit || conflit.kind !== 'cycle' || !['recipes','book_editions'].includes(conflit.store)) return false;
   if (!await confirm(t('Abandonner ces modifications et reprendre l’état reçu ? Consulte la copie avant de confirmer.'), {okLabel:t('Abandonner ces modifications'),danger:true})) return false;
   const applique = await appliquer(db, conflit);
   if (applique) invalider();
@@ -836,8 +836,9 @@ export function syncSectionL3(model, gestes = {}) {
           el('p', null, c.libelle),
           el('details', null, el('summary', null, t('Consulter la copie conservée')), el('pre', {style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'22rem',overflow:'auto'}}, c.copieLocale)),
           c.recipeId ? el('a', {class:'btn',href:`#/recipes/${encodeURIComponent(c.recipeId)}`}, t('Consulter la recette')) : null,
+          c.editionId ? el('a', {class:'btn',href:`#/books/${encodeURIComponent(c.editionId)}`}, t('Consulter le livre')) : null,
           c.peutAbandonnerCycle ? rangee(bouton('abandonnerConflitCycle', t('Abandonner ces modifications'), c.id, 'btn danger'))
-            : el('p', {class:'muted'}, t('Restaure la recette si nécessaire, puis reprends les modifications voulues depuis sa fiche. Cette copie reste disponible ici.'))));
+            : el('p', {class:'muted'}, c.editionId?t('Restaure le livre si nécessaire, puis reprends les modifications voulues depuis sa fiche. Cette copie reste disponible ici.'):t('Restaure la recette si nécessaire, puis reprends les modifications voulues depuis sa fiche. Cette copie reste disponible ici.'))));
         continue;
       }
       noeuds.push(el('div', { class: 'status warn', dataset: { conflit: String(c.id) } },
@@ -1087,7 +1088,7 @@ export function syncSectionModel({ available = false, reason = null, user = null
         dateIci: formatDate(c.local?.updated_at || c.at, { withTime: true }),
         dateAilleurs: formatDate(c.server?.updated_at || c.at, { withTime: true }),
         kind: c.kind,
-        ...(c.kind === 'cycle' ? {copieLocale:JSON.stringify(c.local ?? {},null,2),peutAbandonnerCycle:c.store === 'recipes',recipeId:c.store === 'recipes' ? c.record_id : c.local?.recipe_id || c.server?.data?.id || null} : {}),
+        ...(c.kind === 'cycle' ? {copieLocale:JSON.stringify(c.local ?? {},null,2),peutAbandonnerCycle:['recipes','book_editions'].includes(c.store),recipeId:c.store === 'recipes' ? c.record_id : c.local?.recipe_id || null,editionId:c.store === 'book_editions'?c.record_id:c.edition_id||c.local?.edition_id||null} : {}),
         ...(c.kind === 'import_cloture' ? { copieLocale: JSON.stringify(c.server?.data ?? {}, null, 2), recipeId: c.local?.recipe_id || null } : {}),
         // R-L3-29 : la version d'ici est DÉJÀ repartie — ce n'est pas une question posée à la personne. Jamais
         // deviné : seule la réception pose ce drapeau, et faux veut dire « il y a vraiment un choix à faire ».

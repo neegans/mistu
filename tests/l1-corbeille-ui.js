@@ -114,7 +114,8 @@ export async function runL1CorbeilleUiTests({eq,ok}) {
       bouton(casse,'Mettre à la corbeille').click();await attendre(()=>!bouton(casse,'Mettre à la corbeille').disabled);
       ok(casse.textContent.includes('n’a pas pu être mise'),'L1 panne : refus visible sans faux succès');
       eq(await repo.get('recipes',r.id),r,'L1 panne : recette inchangée');
-      eq(await panneauCycleRecette({...r,edition_id:'ed'},ctx),null,'L1 périmètre : aucune commande sur recette de livre');
+      const parentAbsent=await panneauCycleRecette({...r,edition_id:'ed'},ctx);
+      ok(parentAbsent.textContent.includes('à vérifier')&&!parentAbsent.querySelector('button'),'L2 : édition absente expliquée, aucune commande sur son membre');
     }));
     await run('capacité du propriétaire après déconnexion',()=>withRepo(async(repo,db)=>{
       const active=recette('deconnectee-active'),retireeLocale=recette('deconnectee-retiree',retiree);

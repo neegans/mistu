@@ -8,7 +8,7 @@ const EXTRA_GENERATED = {
   files: [{ name: 'size', sql: "((data->>'size')::bigint)", type: 'bigint' }, { name: 'mime', sql: "(data->>'mime')", type: 'text' }],
 };
 // L1 : l'index local sert à ouvrir la corbeille. Le serveur reçoit déjà ces champs dans data ; aucune colonne SQL nécessaire.
-export const LOCAL_ONLY_INDEXES = { recipes: ['trashed_at'] };
+export const LOCAL_ONLY_INDEXES = { recipes: ['trashed_at'], book_editions: ['trashed_at'] };
 // Champs de relation toujours posés à la création (grep -n des créations de fiches dans src/ui et src/domain).
 // timer_launches.cook_session_id est exclu : src/ui/recipe.js (minuterie d'une étape, hors séance de cuisson) appelle
 // createTimerLaunch sans cook_session_id, et src/domain/timers.js lui donne alors la valeur null (champ réellement nul).

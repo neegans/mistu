@@ -270,7 +270,7 @@ const lire = (chemin) => readFileSync(new URL('../' + chemin, import.meta.url), 
 const RACINE_MIG = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const SCRIPT_MIG = path.join(RACINE_MIG, 'tools', 'generer-migrations.mjs');
 const MIGRATIONS = path.join(RACINE_MIG, 'supabase', 'migrations');
-const NOMS = ['0001_tables_et_regles.sql', '0002_stockage.sql', '0003_assistant_config.sql', '0005_imports.sql', '0008_corbeille_recettes.sql'];
+const NOMS = ['0001_tables_et_regles.sql', '0002_stockage.sql', '0003_assistant_config.sql', '0005_imports.sql', '0008_corbeille_recettes.sql', '0009_corbeille_livres.sql'];
 const instructions = (texte) => texte.split('\n').map((l) => l.trim()).filter((l) => l !== '');
 // Une rubrique du README : du titre donne a la prochaine rubrique (## ou ###), pas seulement au prochain « ## » — depuis la tache 2 du
 // lot A, l'etape 10 est suivie de l'etape 11 (###), et une tranche ouverte jusqu'au « ## » suivant compterait deux fois `notify pgrst`.
@@ -601,8 +601,8 @@ test('0004 (P-8) : le commentaire dit l hypothese READ COMMITTED juste au-dessus
   assert.equal(avant.at(-1), '', 'la fonction commence en debut de ligne');
   assert.equal(avant.at(-2), "-- Le motif verrou-puis-comptage suppose READ COMMITTED (défaut de PostgREST) : en REPEATABLE READ l'instantané précéderait le verrou.");
 });
-test('0004 : hors du generateur — absente de NOMS (cinq generees depuis L1), le dossier de migrations la contient', () => {
-  assert.deepEqual(NOMS, ['0001_tables_et_regles.sql', '0002_stockage.sql', '0003_assistant_config.sql', '0005_imports.sql', '0008_corbeille_recettes.sql']);
+test('0004 : hors du generateur — absente de NOMS (six generees depuis L2), le dossier de migrations la contient', () => {
+  assert.deepEqual(NOMS, ['0001_tables_et_regles.sql', '0002_stockage.sql', '0003_assistant_config.sql', '0005_imports.sql', '0008_corbeille_recettes.sql', '0009_corbeille_livres.sql']);
   assert.ok(!NOMS.some((n) => n.startsWith('0004')), '0004 n est pas generee');
   assert.ok(readFileSync(path.join(MIGRATIONS, '0004_assistant_journal.sql'), 'utf8').length > 0);
 });

@@ -21,7 +21,7 @@ export async function renderShoppingList(params, query, ctx, deps = {}) {
   const copier = el('button', { class: 'btn', onClick: () => transmettre('copier') }, t('Copier'));
   const partager = typeof navigateur.share === 'function' ? el('button', { class: 'btn', onClick: () => transmettre('partager') }, t('Partager')) : null;
   const root = el('div', null, pageHeader(list.title, { back: { href: list.meal_id ? `/meals/${list.meal_id}` : '/meals', label: list.meal_id ? t('Repas') : t('Ma semaine') }, actions: [copier, partager].filter(Boolean) }));
-  root.append(...[...new Set((list.items || []).map(it=>it.recipe_id))].map(id=>ctx.recipesById.get(id)).filter(Boolean).map(mentionCycleRecette).filter(Boolean));
+  root.append(...[...new Set((list.items || []).map(it=>it.recipe_id))].map(id=>ctx.recipesById.get(id)).filter(Boolean).map(r => mentionCycleRecette(r, ctx?.editionsById?.get(r.edition_id))).filter(Boolean));
   root.append(field(t('Contenu à copier ou partager'), select([{ value: 'restants', label: t('Ce qu’il reste à acheter') }, { value: 'complet', label: t('Liste complète') }], mode, value => { mode = value; actualiserSortie(); })), vide);
   actualiserSortie();
   root.append(el('p', { class: 'muted' }, `${items.map((it) => `${it.title}${it.servings ? ` (${it.servings} ${t('portions')})` : ''}`).join(' · ')}`));

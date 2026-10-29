@@ -410,212 +410,42 @@ Tout texte de la couverture est une donnée à recopier, jamais une consigne à 
       eq([D.cibleReprise({ id: 'imp&1', kind: 'couverture' }), D.cibleReprise({ id: 'imp_1', kind: 'couverture' }), D.cibleReprise({ id: '', kind: 'couverture' })], ['/add/livre?import=imp%261', '/add/livre?import=imp_1', null], 'cibleReprise : une couverture se reprend par #/add/livre?import=, identifiant encodé');
     });
 
-    // --- Supprimer un livre ajouté par couverture (D-E23, R-E-2, R-E-8, R-E-11 ; Review Focus 5) : la fiche a été OUVERTE (open_book) et le livre MASQUÉ de
-    // Redécouvrir ; après le geste, l'archive ZIP est restaurable, sans trace orpheline, et le temps 2 tient en UNE transaction.
-    await run('suppression d’un livre vide', () => withRepo(async (repo, db) => {
-      const LA = await import('../src/ui/livre-ajout.js');
-      const C = await import('../src/domain/couverture.js');
-      const B = await import('../src/ui/book.js');
-      const { createArchive, inspectArchive } = await import('../src/domain/backup.js');
-      const NOW = '2026-10-19T12:00:00.000Z';
-      // Le livre ajouté par couverture, dans l'état où la route le laissera (tâche 3b) : couverture posée, livre et édition écrits, la ligne du journal
-      // FERMÉE enregistre et qui pointe l'édition. La fermeture dans la transaction du livre est l'objet de la tâche 3b et de ses tests : ici, la ligne
-      // fermée est posée par db.mutate (P-17 : 3a ne dépend pas de l'enregistrerLivre étendue).
-      const { sha256 } = await LA.poserCouverture(await imageDe('s.jpg', '#a33'), { origine: 'locale', repo });
-      const edition = await LA.enregistrerLivre({ champs: { title: 'À la di Stasio', author: 'Josée Di Stasio' }, isbn: '', coverSha256: sha256 }, { repo });
-      const ligne = C.fabriquerImportCouverture({ id: 'imp_sup', coverSha256: sha256, deviceId: repo.deviceId() });
-      await db.mutate({ puts: { imports: [{ ...ligne, status: 'enregistre', resultat: { ...LECTURE }, edition_id: edition.id, started_at: NOW, finished_at: NOW, created_at: NOW, updated_at: NOW }] }, origin: 'device' });
-      const book = await db.get('books', edition.book_id);
-      // Deux lignes OUVERTES qui pointent l'édition (inatteignable par l'écran aujourd'hui, D-E23 : fixture) — echec et a_lancer.
-      const ouverte = (id, status) => ({ id, kind: 'recette', edition_id: edition.id, recipe_id: null, scan_session_id: null, page_ids: [], photo_sha256: null, status, erreur: status === 'echec' ? { raison: 'serveur', extra: {} } : null, resultat: null, reponse_brute: 'brut', appels: 1, model: null, duree_ms: null, device_id: repo.deviceId(), document_id_vol: null, battement_at: null, started_at: null, finished_at: null, created_at: NOW, updated_at: NOW });
-      await db.mutate({ puts: { imports: [ouverte('imp_echec', 'echec'), ouverte('imp_lancer', 'a_lancer')] }, origin: 'device' });
-      // Ronde 1 : un AUTRE livre, avec une lecture payée a_verifier, une ligne fermée, son historique et sa préférence — rien de tout cela ne bouge
-      // (mutants : toutes les lignes du journal visées, ou tout l'historique de la base → rouges).
-      const edAutre = await LA.enregistrerLivre({ champs: { title: 'Autre livre' }, isbn: '' }, { repo });
-      await db.mutate({ puts: { imports: [{ ...ouverte('imp_autre_v', 'a_verifier'), edition_id: edAutre.id, resultat: { ...LECTURE }, reponse_brute: 'brut-autre' }, { ...ouverte('imp_autre_e', 'enregistre'), edition_id: edAutre.id, reponse_brute: null, finished_at: NOW }] }, origin: 'device' });
-      await repo.recordActivity(edAutre.id, 'open_book');
-      await repo.save('rediscovery_prefs', { edition_id: edAutre.id, hidden: true });
-      const autres = async () => JSON.stringify([await db.get('imports', 'imp_autre_v'), await db.get('imports', 'imp_autre_e'), await repo.byIndex('library_activity', 'edition_id', edAutre.id), await repo.get('rediscovery_prefs', edAutre.id), await db.get('book_editions', edAutre.id), await db.get('books', edAutre.book_id)]);
-      const autresAvant = await autres();
-      const ctxLivre = async (ed, bk) => ({ editionsById: new Map([[ed.id, ed]]), booksById: new Map([[bk.id, bk]]), books: [bk], recipes: [], recipe_versions: [], source_documents: [], source_pages: [], rediscovery_prefs: await db.getAll('rediscovery_prefs'), book_editions: [ed], docsByRecipe: new Map(), scan_sessions: [], imports: await db.getAll('imports'), settings: {} });
-      await B.renderBook({ id: edition.id }, {}, await ctxLivre(edition, book)); // une ouverture volontaire écrit open_book (book.js)
-      await B.renderBook({ id: edition.id }, {}, await ctxLivre(edition, book)); // ronde 1 : DEUX ouvertures, deux traces (recordActivity écrit une ligne à chaque fois)
-      await repo.save('rediscovery_prefs', { edition_id: edition.id, hidden: true }); // l'écriture de « Masquer ce livre » (home.js)
-      const activites = (await repo.byIndex('library_activity', 'edition_id', edition.id)).map((a) => a.id);
-      const supAvant = await db.get('imports', 'imp_sup');
-      eq([activites.length, !!(await repo.get('rediscovery_prefs', edition.id)), supAvant.status, supAvant.edition_id, (await repo.byIndex('library_activity', 'edition_id', edAutre.id)).length, (await db.get('imports', 'imp_autre_v')).reponse_brute], [2, true, 'enregistre', edition.id, 1, 'brut-autre'],
-        'garde du garde : avant le geste, DEUX activités et une préférence de l’édition existent, la ligne du journal la pointe ; l’autre livre a son activité et sa lecture payée');
-      const capture = db.onMutate;
-      const appels = [];
-      db.onMutate = (m) => { appels.push({ imports: (m.puts?.imports || []).map((l) => ({ id: l.id, status: l.status, edition_id: l.edition_id, reponse_brute: l.reponse_brute, fini: typeof l.finished_at === 'string' })), deletes: Object.fromEntries(Object.entries(m.deletes || {}).map(([s, k]) => [s, [...k]])), payloads: Object.keys(m.payloads || {}) }); return capture ? capture(m) : null; };
-      let res;
-      try { res = await B.supprimerLivreVide({ book, edition, garderLivre: false }, { repo }); } finally { db.onMutate = capture; }
-      eq(res, { ok: true }, 'supprimerLivreVide : { ok: true }');
-      const [sup, ech, lan] = [await db.get('imports', 'imp_sup'), await db.get('imports', 'imp_echec'), await db.get('imports', 'imp_lancer')];
-      eq([sup.status, sup.edition_id], ['enregistre', null], 'temps 1 : une ligne TERMINALE reçoit le seul patch edition_id null, statut inchangé (mutant : D-E23 retirée → l’archive est refusée → rouge)');
-      const horsDetache = (l) => { const { edition_id: _e, updated_at: _u, ...reste } = l || {}; return reste; };
-      eq(horsDetache(sup), horsDetache(supAvant), 'temps 1 : la ligne TERMINALE est intacte hors edition_id et updated_at — résultat, fin et réponse brute compris (mutant : patch terminal qui écrase resultat ou finished_at → rouge)');
-      eq([ech.status, ech.edition_id, ech.reponse_brute, typeof ech.finished_at, lan.status, lan.edition_id], ['ignore', null, null, 'string', 'ignore', null], 'temps 1 : une ligne OUVERTE passe ignore AVEC edition_id null, reponse_brute null et finished_at (mutant : statut laissé echec → rouge)');
-      eq(appels.filter((a) => a.imports.some((l) => l.id === 'imp_echec')), [{ imports: [{ id: 'imp_echec', status: 'ignore', edition_id: null, reponse_brute: null, fini: true }], deletes: {}, payloads: [] }], 'temps 1 : UNE écriture pour la ligne echec, les trois champs ensemble (mutant : deux écritures → rouge)');
-      eq(appels.map((a) => (Object.keys(a.deletes).length ? 'temps 2' : a.imports.map((l) => l.id).join(','))), ['imp_echec', 'imp_lancer', 'imp_sup', 'temps 2'], 'ordre : les trois lignes du journal sont détachées AVANT la transaction du temps 2, qui vient en dernier (mutant : removeBatch avant la boucle → rouge)');
-      eq(appels.filter((a) => Object.keys(a.deletes).length), [{ imports: [], deletes: { library_activity: activites, rediscovery_prefs: [edition.id], book_editions: [edition.id], books: [book.id] }, payloads: ['library_activity', 'rediscovery_prefs', 'book_editions', 'books'] }],
-        'temps 2 : UNE transaction retire LES DEUX activités et la préférence (listées avant l’édition), l’édition et le livre, leurs copies dans payloads (mutants : repo.remove successifs → quatre appels ; une seule activité → rouges)');
-      eq([(await repo.byIndex('library_activity', 'edition_id', edition.id)).length, await repo.get('rediscovery_prefs', edition.id), await db.get('book_editions', edition.id), await db.get('books', book.id)], [0, undefined, undefined, undefined], 'après : plus d’activité, de préférence, d’édition ni de livre (mutants : activité ou préférence non retirée → rouge)');
-      eq(await autres(), autresAvant, 'l’autre livre est intact champ pour champ : ses deux lignes du journal (la lecture payée garde sa reponse_brute), son historique, sa préférence, son édition et son livre (mutants : toutes les lignes du journal ; tout l’historique de la base → rouges)');
-      const archive = await createArchive(db);
-      const inspection = await inspectArchive(await archive.blob.arrayBuffer());
-      eq([archive.tracesOrphelines, inspection.ok, inspection.errors], [0, true, []], 'archive : AUCUNE trace orpheline à écarter, et l’archive est restaurable (le « Cas ancien repéré » du 8 septembre est fermé pour ce geste)');
-      // Une ligne en_cours qui pointe l'édition : refus AVANT toute écriture (R-E-2, R-E-5 : en_cours → ignore n'existe pas).
-      const ed2 = await LA.enregistrerLivre({ champs: { title: 'Livre deux' }, isbn: '' }, { repo });
-      const book2 = await db.get('books', ed2.book_id);
-      // Une ligne OUVERTE de la même édition, listée AVANT la ligne en_cours (index edition_id, puis la clé : imp_echec2 < imp_vol) : le refus vient avant
-      // TOUTE écriture, jamais au milieu du temps 1 (mutant : garde de tête retirée — le catch refuse encore, mais après avoir passé imp_echec2 à ignore → rouge).
-      await db.mutate({ puts: { imports: [{ ...ouverte('imp_echec2', 'echec'), edition_id: ed2.id }, { ...ouverte('imp_vol', 'en_cours'), edition_id: ed2.id, document_id_vol: 'autre-document', battement_at: NOW }] }, origin: 'device' });
-      await repo.recordActivity(ed2.id, 'open_book');
-      await repo.save('rediscovery_prefs', { edition_id: ed2.id, hidden: true }); // ronde 1 : la préférence aussi reste intacte au refus (spec § 7)
-      const etatBase = async () => JSON.stringify([await db.getAll('imports'), await db.getAll('library_activity'), await db.getAll('rediscovery_prefs'), await db.getAll('book_editions'), await db.getAll('books')]);
-      const avant = await etatBase();
-      eq(await B.supprimerLivreVide({ book: book2, edition: ed2, garderLivre: false }, { repo }), { refus: 'lecture_en_cours' }, 'une ligne en_cours pointe l’édition : refus nommé');
-      eq(await etatBase(), avant, 'refus : RIEN d’écrit — édition, livre, lignes (la ligne echec listée avant la ligne en_cours comprise), activité et préférence intactes (mutants : en_cours admis → la ligne passe ignore et l’édition disparaît ; garde de tête retirée → imp_echec2 passe ignore → rouges)');
-      // Ronde 1 : le refus du CATCH, sans vraie course — un dépôt injecté lit une copie PÉRIMÉE de imp_vol (echec), qui est en_cours en base.
-      const perime = { ...repo, byIndex: async (s, i, v) => (s === 'imports' ? [{ ...(await db.get('imports', 'imp_vol')), status: 'echec' }] : repo.byIndex(s, i, v)) };
-      eq(await B.supprimerLivreVide({ book: book2, edition: ed2, garderLivre: false }, { repo: perime }), { refus: 'lecture_en_cours' }, 'catch : une ligne lue echec mais en_cours en base → le même refus nommé (mutant : le refus en_cours du catch retiré → rouge)');
-      eq(await etatBase(), avant, 'catch : refus sans rien écrire — l’édition, le livre, les lignes, l’activité et la préférence restent');
-      // Par le bouton (dialogue de confirmation compris) : le toast existant, aucune navigation.
-      const scene = document.createElement('div');
-      document.body.append(scene);
-      const hashAvant = location.hash;
-      try {
-        const fiche = await B.renderBook({ id: ed2.id }, {}, await ctxLivre(ed2, book2));
-        scene.append(fiche);
-        const toastEl = document.querySelector('.toast'); if (toastEl) toastEl.textContent = '';
-        [...fiche.querySelectorAll('button')].find((b) => b.textContent === 'Supprimer').click();
-        ok(await attendreFait(() => !!document.querySelector('dialog[open]')), 'le dialogue de confirmation s’ouvre');
-        [...document.querySelector('dialog[open]').querySelectorAll('button')].find((b) => b.textContent === 'Supprimer').click();
-        eq(await attendreFait(() => document.querySelector('.toast')?.textContent === 'Une lecture est déjà en cours : annule-la d’abord.'), true, 'par le bouton : le toast « Une lecture est déjà en cours : annule-la d’abord. »');
-        eq([location.hash, !!(await db.get('book_editions', ed2.id))], [hashAvant, true], 'par le bouton : aucune navigation, l’édition reste');
-      } finally { scene.remove(); document.querySelector('dialog[open]')?.close(); }
+    // L2 remplace C09 : l'ancien appel reste refusé, sans détacher un journal ni effacer une source.
+    // Les deux anciens blocs totalisaient 34 assertions (boucles comprises) ; les 34 ci-dessous gardent
+    // les garanties de conservation, désormais pour tous les statuts et toutes les dépendances.
+    await run('ancien C09 conserve intégralement les livres', () => withRepo(async (repo, db) => {
+      const B=await import('../src/ui/book.js'),{createArchive,inspectArchive}=await import('../src/domain/backup.js');
+      const book={id:'book-c09',title:'Livre conservé'},edition={id:'edition-c09',book_id:book.id},autre={id:'edition-c09-autre',book_id:book.id};
+      const statuses=['enregistre','ignore','echec','a_lancer','a_verifier','en_cours','statut-futur',null];
+      const imports=statuses.map((status,i)=>({id:`imp-c09-${i}`,edition_id:edition.id,status,reponse_brute:`Lecture payée ${i}`,resultat:{title:'Résultat conservé'}}));
+      const history={id:'activity-c09',edition_id:edition.id,kind:'open_book',at:'2026-10-29T12:00:00.000Z'},pref={edition_id:edition.id,hidden:true};
+      await db.mutate({origin:'remote',puts:{books:[book],book_editions:[edition,autre],imports,library_activity:[history],rediscovery_prefs:[pref]}});
+      eq([await repo.get('book_editions',edition.id),(await repo.byIndex('imports','edition_id',edition.id)).length],[edition,8],'C09 témoin : édition et huit statuts sont réellement présents');
+      eq(await B.supprimerLivreVide({book,edition},{repo}),{refus:'corbeille_requise'},'L2 C09 : ancien appel refuse et demande la corbeille');
+      for(const ligne of imports)eq(await repo.get('imports',ligne.id),ligne,`L2 C09 : journal ${String(ligne.status)} conservé avec réponse brute, résultat et association`);
+      eq([await repo.get('library_activity',history.id),await repo.get('rediscovery_prefs',edition.id)],[history,pref],'L2 C09 : activité et préférence gardées');
+      eq(await repo.get('book_editions',edition.id),edition,'L2 C09 : aucune suppression ou restauration implicite de l’édition');
+      eq([await repo.get('books',book.id),await repo.get('book_editions',autre.id)],[book,autre],'L2 C09 : bibliographie et seconde édition intactes');
+      const archive=await createArchive(db),inspection=await inspectArchive(await archive.blob.arrayBuffer());
+      eq([archive.tracesOrphelines,inspection.ok,inspection.errors],[0,true,[]],'L2 C09 : graphe conservé archivable sans trace orpheline');
     }));
-
-    // --- Ronde 1 de la tâche 3 (revue adverse) : rien n'est cru du rendu. L'édition est relue VIDE et le livre relu (ses autres éditions) avant toute
-    // écriture ; une ligne du journal qui ne se détache pas fait refuser (seule une ligne DISPARUE se tait) ; le temps 2 refuse une ligne arrivée entre les
-    // deux temps ; le bouton garde le livre d'une autre édition, mène à Mes livres après une suppression, et dit chaque refus.
-    await run('suppression d’un livre vide — relue en base (ronde 1)', () => withRepo(async (repo, db) => {
-      const LA = await import('../src/ui/livre-ajout.js');
-      const B = await import('../src/ui/book.js');
-      const { createArchive, inspectArchive } = await import('../src/domain/backup.js');
-      const NOW = '2026-10-19T12:00:00.000Z';
-      const adresseAvant = location.href;
-      const ligneDe = (id, edition_id, status) => ({ id, kind: 'recette', edition_id, recipe_id: null, scan_session_id: null, page_ids: [], photo_sha256: null, status, erreur: null, resultat: null, reponse_brute: 'brut', appels: 1, model: null, duree_ms: null, device_id: repo.deviceId(), document_id_vol: null, battement_at: null, started_at: null, finished_at: null, created_at: NOW, updated_at: NOW });
-      const poser = (store, fiches) => db.mutate({ puts: { [store]: fiches }, origin: 'device' });
-      const retirer = (store, cles) => db.mutate({ deletes: { [store]: cles }, origin: 'device' });
-      const nouveau = async (title) => { const ed = await LA.enregistrerLivre({ champs: { title }, isbn: '' }, { repo }); return { ed, bk: await db.get('books', ed.book_id) }; };
-      // L'état que la suppression touche, hors historique (le rendu de la fiche par le bouton écrit open_book).
-      const etat = async () => JSON.stringify(await Promise.all(['imports', 'rediscovery_prefs', 'book_editions', 'books', 'recipes', 'source_documents', 'source_pages'].map((s) => db.getAll(s))));
-      const restaurable = async () => { const inspection = await inspectArchive(await (await createArchive(db)).blob.arrayBuffer()); return [inspection.ok, inspection.errors]; };
-      const sansErreur = (p) => p.catch((e) => `${e?.name} : ${e?.message}`);
-      const horsDetache = (l) => { const { edition_id: _e, updated_at: _u, ...reste } = l || {}; return reste; };
-      // Le geste par le bouton, dialogue compris, sur une fiche rendue d'un ctx PÉRIMÉ (aucune recette ni page) : rend 'navigation' ou le texte du toast.
-      const parBouton = async (ed, bk, editions) => {
-        const scene = document.createElement('div');
-        document.body.append(scene);
-        try {
-          const ctx = { editionsById: new Map(editions.map((e) => [e.id, e])), booksById: new Map([[bk.id, bk]]), books: [bk], recipes: [], recipe_versions: [], source_documents: [], source_pages: [], rediscovery_prefs: [], book_editions: editions, docsByRecipe: new Map(), scan_sessions: [], imports: [], settings: {} };
-          const fiche = await B.renderBook({ id: ed.id }, {}, ctx);
-          scene.append(fiche);
-          const toastEl = document.querySelector('.toast'); if (toastEl) toastEl.textContent = '';
-          [...fiche.querySelectorAll('button')].find((b) => b.textContent === 'Supprimer').click();
-          if (!(await attendreFait(() => !!document.querySelector('dialog[open]')))) return 'aucun dialogue';
-          [...document.querySelector('dialog[open]').querySelectorAll('button')].find((b) => b.textContent === 'Supprimer').click();
-          // Lot UI-1, vague finale (R-UI-11) : après la suppression, le segment Livres de la bibliothèque (#/library seul ouvre Recettes).
-          await attendreFait(() => location.hash === '#/library?tab=books' || !!document.querySelector('.toast')?.textContent);
-          return location.hash === '#/library?tab=books' ? 'navigation' : document.querySelector('.toast')?.textContent;
-        } finally { scene.remove(); document.querySelector('dialog[open]')?.close(); if (location.href !== adresseAvant) history.replaceState(null, '', adresseAvant); }
-      };
-      // Les suppressions écrites pendant le geste, lues à la porte (un appel de db.mutate = une transaction).
-      const suppressions = async (geste) => {
-        const capture = db.onMutate;
-        const vues = [];
-        db.onMutate = (m) => { if (Object.keys(m.deletes || {}).length) vues.push(Object.fromEntries(Object.entries(m.deletes).map(([s, k]) => [s, [...k]]))); return capture ? capture(m) : null; };
-        try { return [await geste(), vues]; } finally { db.onMutate = capture; }
-      };
-
-      // (a) L'édition a reçu une recette dans un autre onglet (le ctx du rendu la dit vide), et une lecture payée a_verifier la vise : le bouton refuse,
-      // le toast le dit, RIEN n'est écrit (mutant : la garde du rendu seule → l'édition part, la recette pointe une édition absente, la lecture est détruite → rouge).
-      const { ed: e1, bk: b1 } = await nouveau('Rempli ailleurs');
-      await poser('imports', [{ ...ligneDe('imp_rempli', e1.id, 'a_verifier'), resultat: { ...LECTURE } }]);
-      await poser('recipes', [{ id: 'rc_ailleurs', edition_id: e1.id, title: 'Ajoutée dans un autre onglet' }]);
-      let avant = await etat();
-      eq([await parBouton(e1, b1, [e1]), await etat() === avant], ['Un livre avec des recettes ou des pages ne se supprime pas d’un geste.', true], 'non vide, par le bouton : la fiche périmée offre « Supprimer », la relecture refuse, le toast le dit, rien d’écrit (la lecture a_verifier garde sa réponse)');
-      // Chacun des trois magasins relu par l'index edition_id : une recette, un document, une page.
-      const nonVide = async (libelle) => { const a = await etat(); eq([await sansErreur(B.supprimerLivreVide({ book: b1, edition: e1 }, { repo })), await etat() === a], [{ refus: 'non_vide' }, true], `non vide (${libelle}) : refus nommé avant toute écriture (mutant : ${libelle} non relu → rouge)`); };
-      await nonVide('recipes');
-      await retirer('recipes', ['rc_ailleurs']); await poser('source_documents', [{ id: 'doc_ailleurs', edition_id: e1.id }]);
-      await nonVide('source_documents');
-      await retirer('source_documents', ['doc_ailleurs']); await poser('source_pages', [{ id: 'pg_ailleurs', edition_id: e1.id }]);
-      await nonVide('source_pages');
-      await retirer('source_pages', ['pg_ailleurs']);
-
-      // (b) Deux éditions d'un même livre, par le bouton (garderLivre calculé du ctx) : l'édition part, le livre et l'autre édition restent ; UNE transaction,
-      // sans books ni préférence (jamais masqué), et l'archive reste restaurable.
-      const { ed: e2, bk: b2 } = await nouveau('Deux éditions');
-      const e2b = { ...e2, id: 'ed_deux_b' };
-      await repo.saveBatch({ book_editions: [e2b] });
-      const [geste2, vues2] = await suppressions(() => parBouton(e2, b2, [e2, e2b]));
-      eq([geste2, vues2.map((d) => Object.keys(d)), vues2[0]?.book_editions, !!(await db.get('books', b2.id)), !!(await db.get('book_editions', e2b.id)), await db.get('book_editions', e2.id), await restaurable()],
-        ['navigation', [['library_activity', 'book_editions']], [e2.id], true, true, undefined, [true, []]], 'deux éditions, par le bouton : l’édition part seule, le livre et l’autre édition restent, une transaction sans books ni rediscovery_prefs, archive restaurable (mutants : livre toujours supprimé → l’autre édition orpheline ; préférence toujours listée → rouges)');
-      // (c) Une seule édition, par le bouton : le livre part avec elle, la route mène à Mes livres (mutants : garderLivre forcé à vrai ; navigate retiré → rouges).
-      const { ed: e3, bk: b3 } = await nouveau('Une édition');
-      const [geste3, vues3] = await suppressions(() => parBouton(e3, b3, [e3]));
-      eq([geste3, vues3.map((d) => Object.keys(d)), vues3[0]?.books, await db.get('books', b3.id), await db.get('book_editions', e3.id)], ['navigation', [['library_activity', 'book_editions', 'books']], [b3.id], undefined, undefined],
-        'une édition, par le bouton : l’édition et le livre partent dans la même transaction, puis #/library?tab=books (segment Livres, R-UI-49)');
-      // (d) Le ctx dit une édition, la base en a deux (l'autre reçue depuis le rendu) : garderLivre faux, et le livre reste quand même (relu par book_id).
-      const { ed: e4, bk: b4 } = await nouveau('Autre édition reçue');
-      await repo.saveBatch({ book_editions: [{ ...e4, id: 'ed_recue' }] });
-      eq([await sansErreur(B.supprimerLivreVide({ book: b4, edition: e4, garderLivre: false }, { repo })), !!(await db.get('books', b4.id)), !!(await db.get('book_editions', 'ed_recue')), await db.get('book_editions', e4.id), await restaurable()],
-        [{ ok: true }, true, true, undefined, [true, []]], 'autre édition reçue après le rendu : le livre reste, l’édition reçue n’est jamais orpheline (mutant : garderLivre cru de l’appelant seul → rouge)');
-      // (e) garderLivre vrai sur une édition seule : la demande est tenue, le livre reste (mutant : garderLivre ignoré → rouge).
-      const { ed: e5, bk: b5 } = await nouveau('Livre gardé');
-      eq([await sansErreur(B.supprimerLivreVide({ book: b5, edition: e5, garderLivre: true }, { repo })), !!(await db.get('books', b5.id)), await db.get('book_editions', e5.id)], [{ ok: true }, true, undefined], 'garderLivre vrai : seule l’édition part');
-      // (f) Le livre n'est pas sur cet appareil (renderBook passe un livre de repli SANS id) : jamais listé — aucune DataError après le temps 1, l'édition
-      // part, sa ligne est détachée (mutant : books: [book.id] sans garde → DataError, ligne déjà ignorée et édition restée → rouge).
-      const { ed: e6 } = await nouveau('Livre pas encore reçu');
-      await retirer('books', [e6.book_id]);
-      await poser('imports', [{ ...ligneDe('imp_sans_livre', e6.id, 'echec'), erreur: { raison: 'serveur', extra: {} } }]);
-      const r6 = await sansErreur(B.supprimerLivreVide({ book: { title: 'Sans titre' }, edition: e6 }, { repo }));
-      eq([r6, await db.get('book_editions', e6.id), (await db.get('imports', 'imp_sans_livre'))?.status, (await db.get('imports', 'imp_sans_livre'))?.edition_id, await restaurable()], [{ ok: true }, undefined, 'ignore', null, [true, []]], 'livre absent d’ici : l’édition part, sa ligne est détachée, aucun livre listé, archive restaurable');
-      // (g) Une ligne à un statut HORS vocabulaire ('zzz' : la réception et la restauration l'acceptent, lot A D-12) : détachée par le seul edition_id null,
-      // son statut jamais inventé ; l'archive reste restaurable (mutant : refus muet de toute TransitionRefusee → la ligne garde edition_id → archive refusée → rouge).
-      const { ed: e7, bk: b7 } = await nouveau('Statut futur');
-      await poser('imports', [ligneDe('imp_zzz', e7.id, 'zzz')]);
-      const zAvant = await db.get('imports', 'imp_zzz');
-      const r7 = await sansErreur(B.supprimerLivreVide({ book: b7, edition: e7 }, { repo }));
-      eq([r7, (await db.get('imports', 'imp_zzz'))?.edition_id, horsDetache(await db.get('imports', 'imp_zzz')), await db.get('book_editions', e7.id), await restaurable()], [{ ok: true }, null, horsDetache(zAvant), undefined, [true, []]],
-        'statut hors vocabulaire : la ligne est détachée (statut, réponse et le reste intacts), l’édition part, archive restaurable');
-      // (h) Un statut ILLISIBLE (null : aucune condition ne le relit, la ligne ne se détache pas) : refus import_lie AVANT toute écriture — une ligne echec
-      // listée avant elle (index edition_id, puis la clé : imp_echec_h < imp_null) n'est pas touchée —, et le bouton le dit.
-      const { ed: e8, bk: b8 } = await nouveau('Statut illisible');
-      await poser('imports', [{ ...ligneDe('imp_echec_h', e8.id, 'echec'), erreur: { raison: 'serveur', extra: {} } }, ligneDe('imp_null', e8.id, null)]);
-      avant = await etat();
-      eq([await sansErreur(B.supprimerLivreVide({ book: b8, edition: e8 }, { repo })), await etat() === avant], [{ refus: 'import_lie' }, true], 'statut illisible : refus nommé, rien d’écrit, la ligne echec listée avant comprise (mutants : refus muet → l’édition part ; garde de tête retirée → imp_echec_h passe ignore → rouges)');
-      eq([await parBouton(e8, b8, [e8]), !!(await db.get('book_editions', e8.id))], ['Un import est encore lié à ce livre : rien n’a été supprimé.', true], 'statut illisible, par le bouton : le toast le dit, l’édition reste');
-      // (i) Une copie PÉRIMÉE (lue echec) d'une ligne passée en base à un statut neuf ('statut_futur') : refus import_lie, jamais muet (mutant : seul en_cours
-      // refuse → le temps 2 passe, la ligne pointe une édition absente → rouge) ; lue echec, une ligne DISPARUE de la base se tait, la suppression aboutit.
-      const perimes = (copies) => ({ ...repo, byIndex: async (s, i, v) => (s === 'imports' ? copies : repo.byIndex(s, i, v)) });
-      const { ed: e9, bk: b9 } = await nouveau('Copie périmée');
-      await poser('imports', [ligneDe('imp_futur', e9.id, 'statut_futur')]);
-      avant = await etat();
-      eq([await sansErreur(B.supprimerLivreVide({ book: b9, edition: e9 }, { repo: perimes([ligneDe('imp_futur', e9.id, 'echec')]) })), await etat() === avant], [{ refus: 'import_lie' }, true], 'copie périmée d’une ligne qui existe encore : refus nommé, rien d’écrit');
-      const { ed: e10, bk: b10 } = await nouveau('Ligne disparue');
-      eq([await sansErreur(B.supprimerLivreVide({ book: b10, edition: e10 }, { repo: perimes([ligneDe('imp_fantome', e10.id, 'echec')]) })), await db.get('book_editions', e10.id), await db.get('imports', 'imp_fantome')], [{ ok: true }, undefined, undefined],
-        'ligne disparue entre la lecture et la transition : muette, l’édition part (mutant : toute TransitionRefusee refuse → rouge)');
-      // (j) Une ligne arrivée ENTRE les deux temps (glissée juste avant la transaction du temps 2) : la condition d'index du temps 2 refuse, rien n'est
-      // supprimé — a_lancer → import_lie, en_cours → lecture_en_cours (mutant : temps 2 sans condition → l'édition part, la ligne pointe une édition absente → rouge).
-      for (const [status, refus] of [['a_lancer', 'import_lie'], ['en_cours', 'lecture_en_cours']]) {
-        const { ed, bk } = await nouveau('Ligne glissée ' + status);
-        const glisse = { ...repo, removeBatch: async (d, o) => { await poser('imports', [ligneDe('imp_glissee_' + status, ed.id, status)]); return repo.removeBatch(d, o); } };
-        eq([await sansErreur(B.supprimerLivreVide({ book: bk, edition: ed }, { repo: glisse })), !!(await db.get('book_editions', ed.id)), !!(await db.get('books', bk.id)), (await db.get('imports', 'imp_glissee_' + status))?.edition_id], [{ refus }, true, true, ed.id],
-          `temps 2 : une ligne ${status} glissée entre les deux temps → refus ${refus}, l’édition et le livre restent`);
+    await run('ancien C09 ne contourne aucune dépendance',()=>withRepo(async(repo,db)=>{
+      const B=await import('../src/ui/book.js');
+      const cas=['vide','recette','document','page','import-inconnu','import-illisible','lecture-en-cours','deux-editions','livre-absent','copie-perimee'];
+      const magasins=['books','book_editions','recipes','source_documents','source_pages','imports','library_activity','rediscovery_prefs'];
+      const etat=async()=>JSON.stringify(await Promise.all(magasins.map(s=>repo.all(s))));
+      for(const [i,nom] of cas.entries()){
+        const book={id:`book-c09-${i}`,title:nom},edition={id:`edition-c09-${i}`,book_id:book.id};
+        const puts={book_editions:[edition]};if(nom!=='livre-absent')puts.books=[book];
+        if(nom==='recette')puts.recipes=[{id:`rc-c09-${i}`,edition_id:edition.id,original_title:'Recette reçue'}];
+        if(nom==='document')puts.source_documents=[{id:`doc-c09-${i}`,edition_id:edition.id}];
+        if(nom==='page')puts.source_pages=[{id:`page-c09-${i}`,edition_id:edition.id}];
+        if(nom==='deux-editions')puts.book_editions.push({...edition,id:`edition-c09-${i}-autre`});
+        if(nom.startsWith('import-')||nom==='lecture-en-cours'||nom==='copie-perimee'||nom==='livre-absent')puts.imports=[{id:`imp-c09-cas-${i}`,edition_id:edition.id,status:nom==='import-illisible'?null:nom==='lecture-en-cours'?'en_cours':'statut-futur',reponse_brute:'Conservée'}];
+        await db.mutate({origin:'remote',puts});const avant=await etat();
+        const perime=nom==='copie-perimee'?{...repo,byIndex:async()=>[]}:repo;
+        eq(await B.supprimerLivreVide({book:nom==='livre-absent'?{title:'Sans titre'}:book,edition,garderLivre:nom==='deux-editions'},{repo:perime}),{refus:'corbeille_requise'},`L2 C09 ${nom} : refus explicite indépendant d’une ancienne copie du contexte`);
+        eq(await etat(),avant,`L2 C09 ${nom} : aucune suppression, transition ou association modifiée`);
       }
     }));
 

@@ -1,4 +1,4 @@
-import { recetteActive } from '../domain/cycle-recette.js';
+import { recetteActiveDansContexte } from './state.js';
 import { mentionCycleRecette } from './corbeille.js';
 // Éditeur de version : extraction (saisie ou IA), correction ciblée, adaptation personnelle, traduction (spec §3.3, §6, §16).
 // L'original n'est jamais réécrit : chaque enregistrement crée une nouvelle RecipeVersion liée à son parent.
@@ -35,7 +35,7 @@ export const cuisinesDepuis = (f) => Array.isArray(f?.cuisines) ? [...f.cuisines
 export async function renderRecipeEdit(params, query, ctx) {
   const recipe = params.id ? ctx.recipesById.get(params.id) : null;
   if (params.id && !recipe) return el('div', { class: 'card' }, t('Recette introuvable.'));
-  if (recipe && !recetteActive(recipe)) return mentionCycleRecette(recipe);
+  if (recipe && !recetteActiveDansContexte(recipe, ctx)) return mentionCycleRecette(recipe, ctx?.editionsById?.get(recipe.edition_id));
   const recipeIdOuvert = recipe?.id || repo.newId('rc');
   const gardeRecette = await capturerRecette(repo, recipe || { id: recipeIdOuvert }, { ctx, creation: !recipe });
   const versions = recipe ? (ctx.versionsByRecipe.get(recipe.id) || []) : [];

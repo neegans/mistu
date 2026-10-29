@@ -35,7 +35,7 @@ export async function renderCook(params, query, ctx, deps = {}) {
   if (!items.length) return el('div', { class: 'card' }, t('Version introuvable.'));
   if (items.some(it => lireCycleRecette(it.recipe).etat === 'invalide')) {
     return el('div', {class:'stack'}, ...items.map(it => el('section', {class:'card stack'},
-      el('h2', null, it.recipe.display_title || it.recipe.original_title), mentionCycleRecette(it.recipe), noteEnCuisine(it.recipe),
+      el('h2', null, it.recipe.display_title || it.recipe.original_title), mentionCycleRecette(it.recipe, ctx?.editionsById?.get(it.recipe.edition_id)), noteEnCuisine(it.recipe),
       el('ol', null, ...(it.version.steps || []).map(s => el('li', null, s.text))),
       el('a', {class:'btn', href:`#/recipes/${encodeURIComponent(it.recipe.id)}?v=${encodeURIComponent(it.version.id)}`}, t('Fiche')))));
   }
@@ -47,7 +47,7 @@ export async function renderCook(params, query, ctx, deps = {}) {
   progress.done_step_ids = progress.done_step_ids || [];
   progress.by_version = progress.by_version || {};
   const root = el('div', { class: 'mode-cuisine' });
-  root.append(...items.map(it=>mentionCycleRecette(it.recipe)).filter(Boolean));
+  root.append(...items.map(it=>mentionCycleRecette(it.recipe, ctx?.editionsById?.get(it.recipe.edition_id))).filter(Boolean));
   const contextesHistoriques = await Promise.all([...new Map(items.map(it => [it.recipe.id,it.recipe])).values()].map(r => capturerRecette(depot, r, {ctx, historique:true})));
   const ctxF = await contexteFichiers(ctx);
   const photos = photosPersonnellesParRecette(ctx.cook_history);

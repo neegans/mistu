@@ -31,8 +31,10 @@ export function superposerCommandes(serveur,commandes) {
     const c=e.payload;
     if (!c || e.quarantined_at || e.lifecycle_blocked) {bloquees.push(e);continue;}
     if (idCycle(row)===c.operation_id) continue;
-    if (idCycle(row)!==(c.base_cycle_id??null) || (c.action==='trash' ? !!row.trashed_at : !row.trashed_at)) {bloquees.push(e);continue;}
+    if (idCycle(row)!==(c.base_cycle_id??null) || (c.action==='trash' ? !!row.trashed_at : c.action==='restore_from_edition'?false:!row.trashed_at)) {bloquees.push(e);continue;}
     row={...row,lifecycle_id:c.operation_id,trashed_at:c.action==='trash'?c.at:null};
+    if(c.action==='restore_from_edition')row.restored_from_edition={edition_id:c.edition_id,lifecycle_id:c.base_edition_cycle_id};
+    else if(c.edition_id)row.restored_from_edition=null;
   }
   return {row,bloquees};
 }
@@ -42,6 +44,6 @@ export function fusionCycle(locale,serveur,commandes=[]) {
   const overlay=superposerCommandes(serveur,commandes);
   const meme=idCycle(locale)===idCycle(overlay.row);
   const contenuLocal=meme && Date.parse(locale?.updated_at)>Date.parse(serveur?.updated_at);
-  return {row:contenuLocal?{...locale,lifecycle_id:overlay.row.lifecycle_id??null,trashed_at:overlay.row.trashed_at??null}:overlay.row,bloquees:overlay.bloquees,
+  return {row:contenuLocal?{...locale,lifecycle_id:overlay.row.lifecycle_id??null,trashed_at:overlay.row.trashed_at??null,...(Object.hasOwn(overlay.row,'restored_from_edition')?{restored_from_edition:overlay.row.restored_from_edition}:{})}:overlay.row,bloquees:overlay.bloquees,
     conflit:!!locale && !meme && !commandes.some(e=>e.payload?.operation_id===idCycle(locale))};
 }

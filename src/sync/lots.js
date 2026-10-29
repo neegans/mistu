@@ -2,10 +2,13 @@
 // (store, id) part une fois (la version la plus récente), un put est RELU au moment de l'envoi (la file ne garde
 // pas la fiche), une suppression part avec son payload. Bornes du serveur appliquées avec une marge pour le lot ;
 // la dichotomie de l'envoi reste le filet.
+import { estLotSources } from './lot-sources.js';
 import { projectionFichier, remoteDeCeCompte } from './tables.js';
 import { commandeCycle, recettesDe } from './cycle.js';
+import { commandeEdition, editionsDe, cibleCommune } from './cycle-edition.js';
 
 export const LIMITES = { elements: 500, lot: 921600, element: 524288 };
+const evenement = e => commandeCycle(e) || estLotSources(e);
 const CONTROLE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g;
 const encodeur = new TextEncoder();
 
@@ -39,8 +42,9 @@ export const tailleJson = (valeur) => encodeur.encode(JSON.stringify(valeur)).le
 // Une clé de synchronisation, nommée ici une fois pour toutes : reponses.js et push.js la reprennent telle quelle.
 export const cleDe = (e) => `${e.store}:${e.id}`;
 const contexteCycle = entree => ({
-  ...(Object.hasOwn(entree,'expected_cycle_id')?{recipe_id:entree.recipe_id,expected_cycle_id:entree.expected_cycle_id,historique:entree.historique===true}:{}),
+  ...(Object.hasOwn(entree,'expected_cycle_id')?{recipe_id:entree.recipe_id,expected_cycle_id:entree.expected_cycle_id,historique:entree.historique===true,...(Object.hasOwn(entree,'expected_edition_id')?{expected_edition_id:entree.expected_edition_id}:{})}:{}),
   ...(entree.recipe_contexts?{recipe_contexts:entree.recipe_contexts}:{}),
+  ...(entree.edition_contexts?{edition_contexts:entree.edition_contexts}:{}),
   ...(entree.archive_import?{archive_import:true}:{})
 });
 
@@ -83,10 +87,11 @@ async function elementFichier(entree, relire) {
 }
 
 async function elementDe(entree, relire) {
-  if (commandeCycle(entree)) return {element:{store:'recipes',id:entree.id,op:'lifecycle',...nettoyerChaines(entree.payload)}};
+  if (estLotSources(entree)) return { element: nettoyerChaines(entree.payload) };
+  if (commandeCycle(entree)) return {element:{store:entree.store,id:entree.id,op:'lifecycle',...nettoyerChaines(entree.payload)}};
   if (entree.store === 'files') return elementFichier(entree, relire);
   if (entree.op === 'delete') return tombaleDe(entree);
-  const fiche = await relire(entree.store, entree.id);
+  const fiche = entree.snapshot??await relire(entree.store, entree.id);
   if (fiche === undefined || fiche === null) {
     // R-L3-28 : la fiche n'existe plus ICI, et AUCUNE entrée `delete` ne la concerne (sinon celle-là aurait gagné
     // au dédoublonnage, étant plus récente). Elle a donc disparu par un chemin que la capture ignore : une
@@ -107,24 +112,42 @@ export async function composerLots(entrees, relire) {
   const abandonnees = []; // R-L3-28 : rien à envoyer pour ces clés, et leurs entrées sont à retirer
   let courant = { elements: [], seqs: [], octets: 2 }; // « [] »
   const fermer = () => { if (courant.elements.length) lots.push({ elements: courant.elements, seqs: courant.seqs }); courant = { elements: [], seqs: [], octets: 2 }; };
-  const commandes=new Map();
-  for (const e of [...entrees].sort((a,b)=>a.seq-b.seq)) if(commandeCycle(e)&&!commandes.has(e.id)) commandes.set(e.id,e);
+  const commandes=new Map(),ordonnee=[...entrees].sort((a,b)=>a.seq-b.seq);
+  for (const e of ordonnee) if(evenement(e)&&!commandes.has(cleDe(e))) commandes.set(cleDe(e),e);
+  const editionsInitiales=new Map();
+  for(const e of ordonnee) if(commandeEdition(e)&&e.payload.seed&&e.payload.base_cycle_id===null&&!editionsInitiales.has(e.id)) editionsInitiales.set(e.id,e);
+  // La première publication conserve le parent actif capturé avant le retrait. La commande attend ensuite tous ses anciens contenus.
+  const preparer=async e=>{
+    if(e.store==='book_editions'&&e.op==='put') {
+      const command=editionsInitiales.get(e.id);
+      const snapshot=e.snapshot||(command&&e.seq<command.seq?command.payload.seed:await relire(e.store,e.id));
+      return {...e,snapshot};
+    }
+    return e;
+  };
+  const file=[];for(const e of ordonnee)file.push(await preparer(e));
   const admissibles=[];
-  for (const e of entrees) {
-    const first=recettesDe(e).map(id=>commandes.get(id)).filter(Boolean).sort((a,b)=>a.seq-b.seq)[0];
-    if (e.lifecycle_blocked || e.lifecycle_waiting || e.quarantined_at || (first && e.seq>first.seq)) {retenues.push({seq:e.seq,seqs:[e.seq],raison:'cycle en attente'});continue;}
+  for (const e of file) {
+    const first=[...commandes.values()].filter(c=>cibleCommune(c,e)).sort((a,b)=>a.seq-b.seq)[0];
+    const avant=file.filter(x=>x.seq<e.seq);
+    const attendCommande=avant.some(x=>evenement(x)&&cibleCommune(x,e));
+    const attendContenu=(commandeEdition(e)||estLotSources(e))&&avant.some(x=>!evenement(x)&&cibleCommune(x,e));
+    const attendParent=editionsDe(e).some(id=>file.some(x=>x.op==='put'&&x.store==='book_editions'&&x.id===id&&x.seq!==e.seq&&(!commandeCycle(e)||x.seq<e.seq)))&&!['book_editions','books'].includes(e.store);
+    const bookId=e.store==='book_editions'?(e.snapshot||e.payload?.seed)?.book_id:null;
+    const attendLivre=!!bookId&&file.some(x=>x.store==='books'&&x.id===bookId&&x.op==='put');
+    if (e.lifecycle_blocked || e.lifecycle_waiting || e.quarantined_at || attendCommande||attendContenu||attendParent||attendLivre) {retenues.push({seq:e.seq,seqs:[e.seq],raison:'cycle en attente'});continue;}
     // La création non encore reçue sera portée par le seed de la première commande. Ces séquences ne sont retirées qu'avec son accusé.
-    if (first?.payload?.seed && e.store==='recipes' && e.op==='put' && e.seq<first.seq && first.payload.base_cycle_id==null) continue;
+    if (!commandeEdition(first)&&first?.payload?.seed && e.store==='recipes' && e.op==='put' && e.seq<first.seq && first.payload.base_cycle_id==null) continue;
     admissibles.push(e);
   }
-  const groupes=dedoublonner(admissibles.filter(e=>!commandeCycle(e))).concat(admissibles.filter(commandeCycle).map(entree=>({entree,seqs:[entree.seq,...entrees.filter(e=>e.store==='recipes'&&e.id===entree.id&&e.op==='put'&&e.seq<entree.seq&&entree.payload?.seed&&entree.payload.base_cycle_id==null).map(e=>e.seq)]})));
-  const ordre=g=>commandeCycle(g.entree)?g.entree.seq:Math.min(...g.seqs);
+  const groupes=dedoublonner(admissibles.filter(e=>!evenement(e))).concat(admissibles.filter(evenement).map(entree=>({entree,seqs:[entree.seq,...entrees.filter(e=>!commandeEdition(entree)&&e.store==='recipes'&&e.id===entree.id&&e.op==='put'&&e.seq<entree.seq&&entree.payload?.seed&&entree.payload.base_cycle_id==null).map(e=>e.seq)]})));
+  const ordre=g=>evenement(g.entree)?g.entree.seq:Math.min(...g.seqs);
   groupes.sort((a,b)=>ordre(a)-ordre(b));
   for (const { entree, seqs } of groupes) {
     const r = await elementDe(entree, relire);
     if (r.retenue) { retenues.push({ seq: entree.seq, seqs, raison: 'fichier en attente' }); continue; }
     if (r.abandonnee) { abandonnees.push({ seq: entree.seq, seqs, raison: 'fiche disparue' }); continue; }
-    if (commandeCycle(entree)) {fermer();lots.push({elements:[r.element],seqs});continue;}
+    if (evenement(entree)) {fermer();lots.push({elements:[r.element],seqs});continue;}
     const taille = tailleJson(r.element) + 1;
     const seul = tailleJson(r.element.data ?? {}) > LIMITES.element;
     if (seul) { fermer(); lots.push({ elements: [r.element], seqs }); continue; }

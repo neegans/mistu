@@ -146,7 +146,7 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
       const entree = (titre, renvois, rubrique) => ({ titre, renvois, rubrique, sorte: 'recette', incertain: false });
       const page = { page_id: 'pg310', etat: 'lue', sorte_page: 'index', page_imprimee: 310, suite_rubrique: false, modele: MODELE, raison: null, moities: 0,
         entrees: [entree('Flan', '20', null), entree('Tarte', '12', 'pommes'), entree('Tarte', '40', 'poires')], incertain: [], ecartees: { adresse: 0, longueur: 0, forme: 0 } };
-      await db.mutate({ puts: { imports: [{ id: 'impA', kind: 'index', scan_session_id: 'ss1', status: 'a_verifier', page_ids: ['pg310'], started_at: DATE, created_at: DATE, updated_at: DATE,
+      await db.mutate({ puts: { imports: [{ id: 'impA', kind: 'index', edition_id:'ed1', scan_session_id: 'ss1', status: 'a_verifier', page_ids: ['pg310'], started_at: DATE, created_at: DATE, updated_at: DATE,
         model: MODELE, decisions: {}, resultat: { format: 2, pages: [page] } }] } });
       const session = await db.get('scan_sessions', 'ss1');
       const ctx = await ctxDe(repo, db);
@@ -172,7 +172,7 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
       const entree = (titre, renvois, rubrique) => ({ titre, renvois, rubrique, sorte: 'recette', incertain: false });
       const page = { page_id: 'pg310', etat: 'lue', sorte_page: 'index', page_imprimee: 310, suite_rubrique: false, modele: MODELE, raison: null, moities: 0,
         entrees: [entree('Flan', '20', null), entree('Tarte', '12', 'pommes'), entree('Tarte', '40', 'poires')], incertain: [], ecartees: { adresse: 0, longueur: 0, forme: 0 } };
-      await db.mutate({ puts: { imports: [{ id: 'impB', kind: 'index', scan_session_id: 'ss1', status: 'a_verifier', page_ids: ['pg310'], started_at: DATE, created_at: DATE, updated_at: DATE,
+      await db.mutate({ puts: { imports: [{ id: 'impB', kind: 'index', edition_id:'ed1', scan_session_id: 'ss1', status: 'a_verifier', page_ids: ['pg310'], started_at: DATE, created_at: DATE, updated_at: DATE,
         model: MODELE, decisions: {}, auto_enregistre_at: DATE, resultat: { format: 2, pages: [page] } }] } });
       const { racine, dits } = await monter(repo, db, {});
       try {
@@ -234,8 +234,8 @@ export async function runIndexLivreEcranTests({ eq, ok }) {
         await repo.save('recipes', { ...poulet, favorite: true });
         await attendre(() => racine.querySelector('[data-role="retirer"]'), 'bouton Retirer');
         racine.querySelector('[data-role="retirer"]').click();
-        await attendre(async () => (await db.getAll('recipes')).filter((r) => r.edition_id === 'ed1').length === 1 && dits.some((m) => /recettes retirées$/.test(m)), 'retrait dit');
-        const restent = (await db.getAll('recipes')).filter((r) => r.edition_id === 'ed1');
+        await attendre(async () => (await db.getAll('recipes')).filter((r) => r.edition_id === 'ed1' && !r.trashed_at).length === 1 && dits.some((m) => /recettes retirées$/.test(m)), 'retrait dit');
+        const restent = (await db.getAll('recipes')).filter((r) => r.edition_id === 'ed1' && !r.trashed_at);
         eq([restent.map((r) => r.original_title), dits.some((m) => /recettes retirées$/.test(m))], [['Roast chicken and pommes purée'], true],
           '« Retirer ces {n} recettes » retire celles de la lecture restées intactes — la recette mise en favori reste');
       } finally { racine.remove(); UI.reinitialiserImportCible?.(); }

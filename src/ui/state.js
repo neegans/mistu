@@ -7,7 +7,7 @@ import { t } from '../core/i18n.js';
 import { buildDocs, buildLabelIndex } from '../domain/search.js';
 import { buildIngredientIndex } from '../domain/lines.js';
 import { loadUnits } from '../domain/units.js';
-import { recetteActive } from '../domain/cycle-recette.js';
+import { lireCycleEdition, recetteActiveEffective } from '../domain/cycle-edition.js';
 
 let cache = null;
 on('change', () => { cache = null; });
@@ -259,7 +259,7 @@ export async function getData(force = false) {
   const docs = buildDocs({ recipes: d.recipes, versions: d.recipe_versions, editions: d.book_editions, books: d.books, dishes: d.dishes, links: d.dish_recipe_links, translations: d.recipe_translations, history: d.cook_history });
   const docsByRecipe = new Map(docs.map((x) => [x.recipe.id, x]));
   cache = {
-    ...d, proprietaireDonnees, recettesActives: d.recipes.filter(recetteActive), docsActifs: docs.filter(d => recetteActive(d.recipe)), settings, sync, ingredientsById, editionsById, booksById, dishesById, recipesById, versionsById, versionsByRecipe, pagesById, docs, docsByRecipe,
+    ...d, proprietaireDonnees, editionsActives: d.book_editions.filter(e => lireCycleEdition(e).etat === 'active'), recettesActives: d.recipes.filter(r => recetteActiveEffective(r, editionsById.get(r.edition_id))), docsActifs: docs.filter(d => recetteActiveEffective(d.recipe, editionsById.get(d.recipe.edition_id))), settings, sync, ingredientsById, editionsById, booksById, dishesById, recipesById, versionsById, versionsByRecipe, pagesById, docs, docsByRecipe,
     editionLabel(edition) {
       if (!edition) return '';
       const book = booksById.get(edition.book_id);
@@ -276,5 +276,7 @@ export async function getData(force = false) {
 export function invalidate() { cache = null; }
 
 // Les maps restent exhaustives pour les anciennes références ; seuls les nouveaux choix utilisent ces projections.
-export const recettesActives = ctx => (ctx.recettesActives ?? ctx.recipes ?? []).filter(recetteActive);
-export const documentsActifs = ctx => (ctx.docsActifs ?? ctx.docs ?? []).filter(d => recetteActive(d.recipe));
+export const recetteActiveDansContexte = (recipe, ctx) => !!recipe && recetteActiveEffective(recipe, ctx?.editionsById?.get(recipe.edition_id) ?? ctx?.book_editions?.find(e => e.id === recipe.edition_id));
+export const editionsActives = ctx => (ctx.editionsActives ?? ctx.book_editions ?? []).filter(e => lireCycleEdition(e).etat === 'active');
+export const recettesActives = ctx => (ctx.recettesActives ?? ctx.recipes ?? []).filter(r => recetteActiveDansContexte(r, ctx));
+export const documentsActifs = ctx => (ctx.docsActifs ?? ctx.docs ?? []).filter(d => recetteActiveDansContexte(d.recipe, ctx));
