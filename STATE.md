@@ -1,8 +1,18 @@
-# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — L0 ET L1 PUBLIÉS, CORRECTIF 0.23.1 EN LIGNE
+# STATE.md — Cuisine OS (mistu) — 29 octobre 2026 — 0.23.1 EN LIGNE ; L2 EN CONSTRUCTION
+
+**29 octobre 2026 — L2 : CORBEILLE DES LIVRES, CONSTRUCTION AUTORISÉE PAR LA POURSUITE DU PLAN.**
+Après « deploy avant », Neegan demande « et enchaine sur le restant des lots ».
+[Spec L2](docs/superpowers/specs/2026-10-29-l2-corbeille-livres-design.md) écrite puis relue techniquement ;
+cette autorisation globale n’est pas présentée comme une relecture du nouveau texte par Neegan.
+Branche `l2-corbeille-livres`, base `752566d` (code public 0.23.1 `d6b4488`).
+Retirer une édition en gardant ses recettes, ou retirer l’ensemble ; cycles individuels conservés,
+restauration d’un membre possible sans restaurer tout le livre. C09 devient une opération réversible.
+Cible locale 0.24.0, DB6 (index d’éditions), archive3, migration additive0009 ; rien de L2 encore publié ou annoncé validé.
+[Construction et réception](docs/superpowers/plans/2026-10-29-l2-corbeille-livres.md).
 
 **29 octobre 2026 — PUBLICATION L0 + L1 SUR « deploy avant », PUIS POURSUITE DU PLAN AUTORISÉE.**
 Neegan demande ensuite « et enchaine sur le restant des lots ». La suite se prépare lot par lot,
-avec contrat écrit et revue technique avant construction ; L2 est en préparation.
+avec contrat écrit et revue technique avant construction ; l’état L2 est décrit en tête.
 Migration **0008** appliquée à `mitsu` en transaction après contrôle du catalogue et d’une sauvegarde physique.
 Postflight distant en lecture seule : **7 corps exacts**, **9 triggers avec RLS**, droits attendus,
 capacité **recipe_lifecycle = 1** sous rôle `authenticated` autorisé ; RPC anonymes refusées (401/42501).

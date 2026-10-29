@@ -3331,6 +3331,16 @@ DESCEND parce que les 58 blocs d'écran du panneau du lot C et ses sous-blocs de
 R-I1-1 ; leurs fonctions pures restent épinglées, et les gardes de l'écran sont portées dans `tests/index-livre-ecran.js`), seule erreur console le
 404 de `/favicon.ico` ; `node --test tools/*.test.mjs` **230/230** ; `node tools/generer-migrations.mjs --check` **0**.
 
+### Plan directeur — L2 : livre et groupe (29 octobre 2026 — construction)
+
+Autorisation globale : « et enchaine sur le restant des lots », après publication L0/L1 demandée par « deploy avant ».
+[Spec écrite et revue techniquement](docs/superpowers/specs/2026-10-29-l2-corbeille-livres-design.md) ;
+[construction et réception](docs/superpowers/plans/2026-10-29-l2-corbeille-livres.md).
+Base `752566d`, branche `l2-corbeille-livres`, dernière publication 0.23.1 (`d6b4488`).
+Cycle d’édition unique, modes garder/retirer les recettes, exception explicite pour restaurer un membre,
+gardes d’association et d’import, remplacement du vieux C09, barrières croisées en synchronisation.
+Cible 0.24.0/DB6/archive3/migration0009. Les bilans L2 restent à produire ; aucune publication L2 annoncée.
+
 ### Plan directeur — L1 : corbeille individuelle (29 octobre 2026 — publié, correctif 0.23.1 en ligne)
 
 [Spec](docs/superpowers/specs/2026-10-29-l1-corbeille-individuelle-design.md) approuvée par Neegan sur « ok ».
